@@ -106,6 +106,7 @@ jobs:
           ./bin/godot.linuxbsd.editor.dev.x86_64 --headless --path tests/stress --script res://physics_dense.gd --check-only
           ./bin/godot.linuxbsd.editor.dev.x86_64 --headless --path tests/stress --script res://physics_pending_reuse_stress.gd --check-only
           ./bin/godot.linuxbsd.editor.dev.x86_64 --headless --path tests/stress --script res://physics_jolt_pending_index_churn.gd --check-only
+          ./bin/godot.linuxbsd.editor.dev.x86_64 --headless --path tests/stress --script res://physics_jolt_pending_broadphase_regression.gd --check-only
           ./bin/godot.linuxbsd.editor.dev.x86_64 --headless --path tests/stress --script res://physics_jolt_contact_scratch_regression.gd --check-only
           ./bin/godot.linuxbsd.editor.dev.x86_64 --headless --path tests/stress --script res://physics_jolt_layer_filter_regression.gd --check-only
           ./bin/godot.linuxbsd.editor.dev.x86_64 --headless --path tests/stress --script res://physics_jolt_process_info_regression.gd --check-only
@@ -157,6 +158,20 @@ jobs:
             --script res://physics_jolt_pending_index_churn.gd \
             2>&1 | tee physics-jolt-pending-index.log
           grep -Fq 'Jolt pending index churn regression passed.' physics-jolt-pending-index.log
+      - name: Stress Jolt pending-only removal with paused simulation
+        shell: bash
+        run: |
+          set -euo pipefail
+          # Select Jolt explicitly: other 3D backends may differ here.
+          PROJECT="$RUNNER_TEMP/cgame-jolt-pending-broadphase"
+          mkdir -p "$PROJECT"
+          cp -a tests/stress/. "$PROJECT/"
+          printf '\n[physics]\n3d/physics_engine="Jolt Physics"\n' >> "$PROJECT/project.godot"
+          timeout 180s ./bin/godot.linuxbsd.editor.dev.x86_64 \
+            --headless --path "$PROJECT" \
+            --script res://physics_jolt_pending_broadphase_regression.gd \
+            2>&1 | tee physics-jolt-pending-broadphase.log
+          grep -Fq 'Jolt pending broadphase regression passed.' physics-jolt-pending-broadphase.log
       - name: Regression-test GodotPhysics3D graph-colored islands
         shell: bash
         run: |
@@ -232,6 +247,7 @@ jobs:
             physics-native-smoke.md
             physics-pending-reuse.log
             physics-jolt-pending-index.log
+            physics-jolt-pending-broadphase.log
             physics2d-ccd-edge.log
             physics2d-ccd-relative.log
             physics3d-colored-islands.log
