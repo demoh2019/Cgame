@@ -1366,9 +1366,30 @@ void GodotPhysicsServer2D::finish() {
 }
 
 void GodotPhysicsServer2D::_update_shapes() {
+	// The shape update list already groups edits across independent bodies.
+	// Batch BVH pair generation per space and finalize before returning to the
+	// physics step or any caller that requires up-to-date contacts.
 	while (pending_shape_update_list.first()) {
-		pending_shape_update_list.first()->self()->_shape_changed();
-		pending_shape_update_list.remove(pending_shape_update_list.first());
+		HashSet<GodotSpace2D *> batch_spaces;
+		while (pending_shape_update_list.first()) {
+			auto *pending = pending_shape_update_list.first();
+			GodotCollisionObject2D *object = pending->self();
+			GodotSpace2D *space = object->get_space();
+			if (space && !batch_spaces.has(space)) {
+				batch_spaces.insert(space);
+				space->get_broadphase()->begin_batch();
+			}
+
+			object->_shape_changed();
+			// Remove the original entry: callbacks may queue additional shapes.
+			pending_shape_update_list.remove(pending);
+		}
+
+		// Pair callbacks can schedule additional shape updates. Process those
+		// in another batch before leaving _update_shapes().
+		for (GodotSpace2D *space : batch_spaces) {
+			space->get_broadphase()->end_batch();
+		}
 	}
 }
 
