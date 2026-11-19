@@ -61,45 +61,42 @@ _FORCE_INLINE_ static bool _can_collide_with(GodotCollisionObject3D *p_object, u
 }
 
 int GodotPhysicsDirectSpaceState3D::intersect_point(const PS3DT::PointParameters &p_parameters, PS3DT::ShapeResult *r_results, int p_result_max) {
-	ERR_FAIL_COND_V(space->locked, false);
-	int amount = space->broadphase->cull_point(p_parameters.position, space->intersection_query_results, GodotSpace3D::INTERSECTION_QUERY_MAX, space->intersection_query_subindex_results);
-	int cc = 0;
-
-	//Transform3D ai = p_xform.affine_inverse();
-
-	for (int i = 0; i < amount; i++) {
-		if (cc >= p_result_max) {
-			break;
-		}
-
-		if (!_can_collide_with(space->intersection_query_results[i], p_parameters.collision_mask, p_parameters.collide_with_bodies, p_parameters.collide_with_areas)) {
-			continue;
-		}
-
-		//area can't be picked by ray (default)
-
-		if (p_parameters.exclude.has(space->intersection_query_results[i]->get_self())) {
-			continue;
-		}
-
-		const GodotCollisionObject3D *col_obj = space->intersection_query_results[i];
-		int shape_idx = space->intersection_query_subindex_results[i];
-
-		Transform3D inv_xform = col_obj->get_transform() * col_obj->get_shape_transform(shape_idx);
-		inv_xform.affine_invert();
-
-		if (!col_obj->get_shape(shape_idx)->intersect_point(inv_xform.xform(p_parameters.position))) {
-			continue;
-		}
-
-		r_results[cc].collider_id = col_obj->get_instance_id();
-		r_results[cc].rid = col_obj->get_self();
-		r_results[cc].shape = shape_idx;
-
-		cc++;
+	ERR_FAIL_COND_V(space->locked, 0);
+	if (p_result_max <= 0) {
+		return 0;
 	}
 
-	return cc;
+	// The previous fixed 2048-candidate array could be filled by excluded
+	// or masked-out bodies before a matching body was ever examined.
+	struct PointQuery {
+		const PS3DT::PointParameters &params;
+		PS3DT::ShapeResult *results;
+		int max_results;
+		int count = 0;
+	};
+	PointQuery query = { p_parameters, r_results, p_result_max };
+
+	auto visitor = [](GodotCollisionObject3D *p_object, int p_shape, void *p_userdata) -> bool {
+		PointQuery &data = *static_cast<PointQuery *>(p_userdata);
+		if (!_can_collide_with(p_object, data.params.collision_mask, data.params.collide_with_bodies, data.params.collide_with_areas) ||
+				data.params.exclude.has(p_object->get_self())) {
+			return true;
+		}
+
+		const Transform3D inv_xform = (p_object->get_transform() * p_object->get_shape_transform(p_shape)).affine_inverse();
+		if (!p_object->get_shape(p_shape)->intersect_point(inv_xform.xform(data.params.position))) {
+			return true;
+		}
+
+		PS3DT::ShapeResult &result = data.results[data.count++];
+		result.collider_id = p_object->get_instance_id();
+		result.rid = p_object->get_self();
+		result.shape = p_shape;
+		return data.count < data.max_results;
+	};
+
+	space->broadphase->visit_point(p_parameters.position, visitor, &query);
+	return query.count;
 }
 
 bool GodotPhysicsDirectSpaceState3D::intersect_ray(const PS3DT::RayParameters &p_parameters, PS3DT::RayResult &r_result) {
