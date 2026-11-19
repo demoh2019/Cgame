@@ -1124,10 +1124,12 @@ system adds work per iteration and can instead improve convergence.
 
 GodotPhysics3D can now divide **one large connected rigid-body island** into
 non-conflicting constraint colors, inspired by Box2D's graph-color solver and
-Jolt's large-island scheduling. Each color contains constraints that do not
-share body pointers; static/kinematic bodies are conservatively treated as
-shared too. Colors run in sequence with a worker-pool barrier between each,
-and a bounded serial overflow batch handles highly connected bodies.
+Jolt's large-island scheduling. Each color contains constraints that never write to the
+same dynamic body. In a **contact-only island** the static/kinematic bodies
+are read-only, so multiple contacts with the same floor can share a color.
+Mixed joint/contact islands retain exclusive ownership of ALL body pointers.
+Colors run in sequence with a worker-pool barrier between each, and a bounded
+serial overflow batch handles highly connected bodies.
 
 Enable only after validating your project's behavior:
 
@@ -1175,6 +1177,48 @@ python3 tests/stress/run.py --godot ./bin/godot.macos.editor.arm64 \
 The tests check finite body states and joint spacing, not physical
 equivalence to the serial solver or measured performance improvements.
 Start with small scales and monitor CPU usage, peak RSS and frame p95.
+
+### Contact-only large-island optimization (shared static floor, 2D and 3D)
+
+Jolt's large-island splitter groups constraints by their writable bodies, and
+Box2D's constraint graph follows a similar conflict-free batching principle.
+A static floor is read-only to rigid contact solvers: including it in the
+conflict graph previously forced hundreds of unrelated floor contacts into
+separate colors or the serial overflow group.
+
+The built-in Cgame 2D/3D parallel-large-island code now excludes static and
+kinematic body pointers from conflict masks for **contact-only islands**.
+Each rigid contact class explicitly declares that its immovable bodies are
+read-only. Ordinary joints and mixed islands keep conservative body ownership,
+and 3D soft-body contacts still disable this parallel large-island path.
+There is no change in the default solver because
+`physics/2d/solver/parallel_large_islands` and
+`physics/3d/solver/parallel_large_islands` both default to `false`.
+
+The standalone regression creates 320 rigid boxes arranged along the same
+static floor, with adjacent boxes initially contacting one another, to form
+a large connected contact-only island. It runs both solvers with parallelism
+disabled and enabled, checks that collision pairs are present, and rejects
+non-finite or runaway velocities:
+
+```bash
+./bin/godot.macos.editor.arm64 --headless \
+  --path tests/stress \
+  --script res://physics_parallel_contact_floor_regression.gd
+```
+
+A separate source-contract and deterministic reference-model test checks the
+non-conflicting body coloring and mixed-joint fallback, including a 300-body
+shared-floor graph:
+
+```bash
+python3 -m unittest discover -s tests/stress \
+  -p 'test_physics_parallel_contact_colors.py' -v
+```
+
+The source test cannot detect runtime data races. Run with ThreadSanitizer
+where practical, and compare speed, RSS, collision counts and solver stability
+on a compiled engine before enabling the option in production.
 
 ## 3D contact warm-start timestep and material stability
 
@@ -1322,9 +1366,11 @@ performance tests validate the implementation. Scheduling is adaptive:
 The setting has no effect on third-party 2D physics backends.
 
 For a large island (at least 256 constraints), the step builds a 16-color
-greedy constraint graph: every body touched by a constraint reserves that
-color, including static and kinematic bodies for conservative thread safety.
-A color with at least 64 constraints can solve in parallel; a barrier
+greedy constraint graph: every dynamic body written by a constraint reserves
+that color. Static and kinematic bodies are excluded **only if every
+constraint in the island is an ordinary rigid contact pair**. As soon as a
+joint or another constraint type is present, ALL referenced bodies reserve
+colors as before. A color with at least 64 constraints can solve in parallel; a barrier
 separates colors and solver iterations. Constraints that cannot be colored
 within 16 colors go to a serial overflow batch. If there is too little
 parallelizable work, the algorithm falls back to the original sequential
