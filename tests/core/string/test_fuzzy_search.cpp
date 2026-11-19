@@ -201,7 +201,7 @@ TEST_CASE("[FuzzySearch] Boundary scoring retains all ASCII separators") {
 
 	const char *targets[] = {
 		"x/ay",
-		"x\\\\ay",
+		"x\\ay",
 		"x-ay",
 		"x_ay",
 		"x.ay",
