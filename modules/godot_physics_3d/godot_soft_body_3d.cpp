@@ -378,7 +378,20 @@ void GodotSoftBody3D::rebuild_xpbd_volume_rest_state() {
 		Vector3 grad_a, grad_b, grad_c;
 		signed_volume += physics_xpbd_triangle_volume_terms(a, b, c, grad_a, grad_b, grad_c);
 	}
-	if (!Math::is_finite(signed_volume) || Math::abs(signed_volume) <= CMP_EPSILON) {
+	// Degeneracy is relative to the mesh's own scale. A fixed world-unit
+	// threshold would reject perfectly valid closed tiny tetrahedra.
+	const Vector3 base = nodes[0].q;
+	double coordinate_scale = 0.0;
+	for (const Node &node : nodes) {
+		const double dx = Math::abs(double(node.q.x) - double(base.x));
+		const double dy = Math::abs(double(node.q.y) - double(base.y));
+		const double dz = Math::abs(double(node.q.z) - double(base.z));
+		coordinate_scale = MAX(coordinate_scale, MAX(dx, MAX(dy, dz)));
+	}
+	const double volume_scale = coordinate_scale * coordinate_scale * coordinate_scale;
+	if (!(volume_scale > 0.0) || !Math::is_finite(volume_scale) ||
+			!Math::is_finite(signed_volume) ||
+			Math::abs(double(signed_volume)) <= volume_scale * 1e-10) {
 		return;
 	}
 	xpbd_rest_volume = signed_volume;
