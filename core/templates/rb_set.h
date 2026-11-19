@@ -311,30 +311,22 @@ private:
 
 	Element *_lower_bound(const T &p_value) const {
 		Element *node = _data._root->left;
-		Element *prev = nullptr;
+		Element *result = nullptr;
 		C less;
 
+		// Track the smallest node not less than p_value. Unlike the old
+		// two-direction comparison, this uses one comparison per tree level
+		// and needs no final successor lookup.
 		while (node != _data._nil) {
-			prev = node;
-
-			if (less(p_value, node->value)) {
+			if (!less(node->value, p_value)) {
+				result = node;
 				node = node->left;
-			} else if (less(node->value, p_value)) {
-				node = node->right;
 			} else {
-				return node; // found
+				node = node->right;
 			}
 		}
 
-		if (prev == nullptr) {
-			return nullptr; // tree empty
-		}
-
-		if (less(prev->value, p_value)) {
-			prev = prev->_next;
-		}
-
-		return prev;
+		return result;
 	}
 
 	void _insert_rb_fix(Element *p_new_node) {
