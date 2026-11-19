@@ -17,10 +17,12 @@ Open `demo/survival_mmo/project.godot` in a compatible Cgame editor:
 godot --path demo/survival_mmo
 godot --headless --path demo/survival_mmo --script res://smoke_test.gd
 godot --headless --path demo/survival_mmo --script res://save_test.gd
+godot --headless --path demo/survival_mmo --script res://durability_test.gd
 ```
 
-The headless scripts cover combat and crafting, progression, collision-checked
-construction, and persistence snapshots including malformed/incompatible saves.
+The headless scripts cover combat, crafting, equipment wear and repair,
+destructible structures, collision-checked construction, and persistence
+snapshots including malformed/incompatible and legacy v1 saves.
 Successful test runs have not yet been verified on a Cgame executable.
 
 ## Gameplay
@@ -36,6 +38,14 @@ Successful test runs have not yet been verified on a Cgame executable.
   scrap, after reaching combat level 2 (base damage 40). Weapon equip state
   determines damage; no fixed character class.
 - **H** uses a bandage for 2 fiber and 1 herb (+35 health).
+- Every melee hit wears an equipped spear by 1 durability point. Spears have
+  60 condition and reinforced spears 100. Broken weapons revert to bare hands.
+- **U** repairs a damaged equipped weapon by 25 durability, costing 1 wood
+  and 1 scrap; full-condition or unarmed repairs are rejected.
+- **G** repairs a nearby damaged barricade (+35 HP) for 1 wood and 1 stone.
+- **X** dismantles a nearby barricade and returns 1 wood and 1 stone, less
+  than its original crafting cost. Infected attack barricades blocking their
+  path; destroyed barricades disappear from the physical world.
 - **F** eats a herb to restore hunger.
 - **B** builds a physical barricade for 3 wood and 2 stone. Physics-shape
   placement validation happens **before** resources are spent. Obstacles or
@@ -43,11 +53,15 @@ Successful test runs have not yet been verified on a Cgame executable.
   10 crafting XP.
 - **K** saves the character and world in `user://survival_world_v1.json`.
 - **L** restores inventory, skills, health/hunger, weapon, position, depleted
-  resource nodes, infected health/position and built barricades. Loading an
-  invalid snapshot leaves the active world unchanged.
+  resource nodes, infected health/position and built barricades, including
+  weapon durability and barricade HP. Loading an invalid snapshot leaves the
+  active world unchanged.
 - **R** restarts the prototype without overwriting the last save.
 
-The save format is JSON with an explicit schema version and bounded values;
+The save format is JSON with an explicit schema version and bounded values.
+New durability/HP fields are backward-compatible optional extensions of v1:
+saves created before this change load intact with full item/structure condition.
+
 saves are written via a temporary file and a previous-save backup. Interrupted
 saves can recover from a valid `.bak` file. Local saves are user-editable:
 **do not use them as client-authoritative data in an online MMO**. No autosave,
@@ -69,8 +83,8 @@ Cgame/Godot gameplay primitives.
 
 ## Next milestones
 
-1. Data-driven equipment inventory (durability, slots, tiers, weight).
-2. Building previews, terrain checks, destruction and structural durability.
+1. Data-driven equipment inventory (slots, tiers, weight and equipment instances).
+2. Building previews, terrain support checks and structural connections.
 3. Server-authoritative protocol and durable database persistence.
 4. Interest management, world partitioning, server-validated interactions.
 5. PvP zones, guild structures, player economy and server load tests.

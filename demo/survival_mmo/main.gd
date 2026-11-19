@@ -197,7 +197,7 @@ func _update_hud() -> void:
         state.get_level("combat"), state.get_level("crafting")]
     var condition := state.weapon_condition
     hud.text += "Weapon condition: %d / %d | Structures: %d\n" % [
-        condition, int(state.MAX_WEAPON_CONDITION[state.equipped_weapon]),
+        condition, int(StateScript.MAX_WEAPON_CONDITION[state.equipped_weapon]),
         get_tree().get_nodes_in_group("player_building").size()]
     hud.text += "Zombies left: %d\n" % get_tree().get_nodes_in_group("infected").size()
     hud.text += "WASD move | Shift sprint | E gather | Space attack\n"
