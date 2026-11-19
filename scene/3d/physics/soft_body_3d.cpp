@@ -380,6 +380,9 @@ void SoftBody3D::_bind_methods() {
 
 	ClassDB::bind_method(D_METHOD("get_point_count"), &SoftBody3D::get_point_count);
 
+	ClassDB::bind_method(D_METHOD("set_tetrahedral_indices", "indices"), &SoftBody3D::set_tetrahedral_indices);
+	ClassDB::bind_method(D_METHOD("get_tetrahedral_indices"), &SoftBody3D::get_tetrahedral_indices);
+
 	ClassDB::bind_method(D_METHOD("set_ray_pickable", "ray_pickable"), &SoftBody3D::set_ray_pickable);
 	ClassDB::bind_method(D_METHOD("is_ray_pickable"), &SoftBody3D::is_ray_pickable);
 
@@ -399,6 +402,9 @@ void SoftBody3D::_bind_methods() {
 	ADD_PROPERTY(PropertyInfo(Variant::BOOL, "ray_pickable"), "set_ray_pickable", "is_ray_pickable");
 
 	ADD_PROPERTY(PropertyInfo(Variant::INT, "point_count", PROPERTY_HINT_NONE, "", PROPERTY_USAGE_NONE), "", "get_point_count");
+
+	ADD_GROUP("Advanced FEM", "tetrahedral_");
+	ADD_PROPERTY(PropertyInfo(Variant::PACKED_INT32_ARRAY, "tetrahedral_indices"), "set_tetrahedral_indices", "get_tetrahedral_indices");
 
 	ADD_PROPERTY(PropertyInfo(Variant::INT, "disable_mode", PROPERTY_HINT_ENUM, "Remove,KeepActive"), "set_disable_mode", "get_disable_mode");
 
@@ -638,6 +644,20 @@ void SoftBody3D::remove_collision_exception_with(RequiredParam<Node> p_node) {
 
 int SoftBody3D::get_simulation_precision() {
 	return PhysicsServer3D::get_singleton()->soft_body_get_simulation_precision(physics_rid);
+}
+
+void SoftBody3D::set_tetrahedral_indices(const PackedInt32Array &p_indices) {
+	ERR_FAIL_COND_MSG(p_indices.size() % 4 != 0 || p_indices.size() > 16384,
+			"FEM tetrahedral_indices must contain at most 4096 groups of four indices.");
+	for (int index : p_indices) {
+		ERR_FAIL_COND_MSG(index < 0, "FEM tetra vertex indices must be nonnegative.");
+	}
+	tetrahedral_indices = p_indices;
+	PhysicsServer3D::get_singleton()->soft_body_set_tetrahedral_indices(physics_rid, p_indices);
+}
+
+PackedInt32Array SoftBody3D::get_tetrahedral_indices() const {
+	return tetrahedral_indices;
 }
 
 void SoftBody3D::set_simulation_precision(int p_simulation_precision) {
