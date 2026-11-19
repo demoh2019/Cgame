@@ -322,6 +322,7 @@ public:
 	virtual real_t soft_body_get_drag_coefficient(RID p_body) const override;
 
 	virtual void soft_body_set_mesh(RID p_body, RID p_mesh) override;
+	virtual void soft_body_set_tetrahedral_indices(RID p_body, const PackedInt32Array &p_indices) override;
 
 	virtual AABB soft_body_get_bounds(RID p_body) const override;
 
