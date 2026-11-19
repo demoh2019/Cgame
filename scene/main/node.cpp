@@ -1802,20 +1802,83 @@ void Node::remove_child(RequiredParam<Node> p_child) {
 }
 
 void Node::_update_children_cache_impl() const {
-	// Assign children
-	data.children_cache.resize(data.children.size());
-	int idx = 0;
-	for (const KeyValue<StringName, Node *> &K : data.children) {
-		data.children_cache[idx] = K.value;
-		idx++;
+	const int child_count = data.children.size();
+	data.children_cache.resize(child_count);
+
+	// Child indices are maintained independently for front-internal, regular,
+	// and back-internal nodes. Unless an intervening deletion left gaps, they
+	// form dense permutations and we can scatter nodes directly into their
+	// final positions, avoiding O(n log n) comparison sorting.
+	if (child_count >= 16) {
+		int front_count = 0;
+		int external_count = 0;
+		int back_count = 0;
+		for (const KeyValue<StringName, Node *> &entry : data.children) {
+			switch (entry.value->data.internal_mode) {
+				case INTERNAL_MODE_FRONT: {
+					front_count++;
+				} break;
+				case INTERNAL_MODE_DISABLED: {
+					external_count++;
+				} break;
+				case INTERNAL_MODE_BACK: {
+					back_count++;
+				} break;
+			}
+		}
+
+		Node **ordered = data.children_cache.ptrw();
+		for (int i = 0; i < child_count; i++) {
+			ordered[i] = nullptr;
+		}
+
+		bool dense_indices = true;
+		for (const KeyValue<StringName, Node *> &entry : data.children) {
+			Node *child = entry.value;
+			const int index = child->data.index;
+			int position = 0;
+			int limit = 0;
+			switch (child->data.internal_mode) {
+				case INTERNAL_MODE_FRONT: {
+					position = index;
+					limit = front_count;
+				} break;
+				case INTERNAL_MODE_DISABLED: {
+					position = front_count + index;
+					limit = external_count;
+				} break;
+				case INTERNAL_MODE_BACK: {
+					position = front_count + external_count + index;
+					limit = back_count;
+				} break;
+			}
+			// Holes, invalid indices or collisions require the original stable
+			// comparison order. Refill the buffer before that fallback.
+			if (index < 0 || index >= limit || ordered[position] != nullptr) {
+				dense_indices = false;
+				break;
+			}
+			ordered[position] = child;
+		}
+		if (dense_indices) {
+			data.internal_children_front_count_cache = front_count;
+			data.external_children_count_cache = external_count;
+			data.internal_children_back_count_cache = back_count;
+			data.children_cache_dirty = false;
+			return;
+		}
 	}
-	// Sort them
+
+	// Sparse child indices (normally caused by removing a non-last child):
+	// keep the established ordering and compact the indices afterwards.
+	int idx = 0;
+	for (const KeyValue<StringName, Node *> &entry : data.children) {
+		data.children_cache[idx++] = entry.value;
+	}
 	data.children_cache.sort_custom<ComparatorByIndex>();
-	// Update indices
 	data.external_children_count_cache = 0;
 	data.internal_children_back_count_cache = 0;
 	data.internal_children_front_count_cache = 0;
-
 	for (uint32_t i = 0; i < data.children_cache.size(); i++) {
 		switch (data.children_cache[i]->data.internal_mode) {
 			case INTERNAL_MODE_DISABLED: {
