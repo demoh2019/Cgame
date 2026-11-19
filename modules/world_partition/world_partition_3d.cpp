@@ -150,9 +150,10 @@ bool WorldPartition3D::_instantiate_cell(const Vector2i &p_cell, const Ref<Packe
 		return false;
 	}
 
-	add_child(instance);
+	// Set the final transform before _enter_tree()/ _ready() callbacks run.
 	// The root's authored local offset is preserved within its grid cell.
 	instance->set_position(instance->get_position() + cell_to_local_position(p_cell));
+	add_child(instance);
 	active_cells.insert(p_cell, instance->get_instance_id());
 	emit_signal(SNAME("cell_loaded"), p_cell);
 	return true;
