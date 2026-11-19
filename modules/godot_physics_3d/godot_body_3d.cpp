@@ -35,6 +35,8 @@
 #include "godot_constraint_3d.h"
 #include "godot_space_3d.h"
 
+#include "servers/physics_damping.h"
+
 void GodotBody3D::_mass_properties_changed() {
 	if (get_space() && !mass_properties_update_list.in_list()) {
 		get_space()->body_add_to_mass_properties_update_list(&mass_properties_update_list);
@@ -640,17 +642,12 @@ void GodotBody3D::integrate_forces(real_t p_step, bool p_defer_motion) {
 			Vector3 force = gravity * mass + applied_force + constant_force;
 			Vector3 torque = applied_torque + constant_torque;
 
-			real_t damp = 1.0 - p_step * total_linear_damp;
-
-			if (damp < 0) { // reached zero in the given time
-				damp = 0;
-			}
-
-			real_t angular_damp_new = 1.0 - p_step * total_angular_damp;
-
-			if (angular_damp_new < 0) { // reached zero in the given time
-				angular_damp_new = 0;
-			}
+			// This per-space option uses Box2D's implicit (Pade) damping
+			// for nonnegative coefficients. The default retains the legacy
+			// clamped explicit-Euler result exactly.
+			const bool implicit_damping = get_space()->is_implicit_damping_enabled();
+			const real_t damp = godot_physics_damping_factor(p_step, total_linear_damp, implicit_damping);
+			const real_t angular_damp_new = godot_physics_damping_factor(p_step, total_angular_damp, implicit_damping);
 
 			linear_velocity *= damp;
 			angular_velocity *= angular_damp_new;
