@@ -1836,25 +1836,29 @@ void Node::_update_children_cache_impl() const {
 		for (const KeyValue<StringName, Node *> &entry : data.children) {
 			Node *child = entry.value;
 			const int index = child->data.index;
-			int position = 0;
-			int limit = 0;
+			int group_offset = 0;
+			int group_size = 0;
 			switch (child->data.internal_mode) {
 				case INTERNAL_MODE_FRONT: {
-					position = index;
-					limit = front_count;
+					group_size = front_count;
 				} break;
 				case INTERNAL_MODE_DISABLED: {
-					position = front_count + index;
-					limit = external_count;
+					group_offset = front_count;
+					group_size = external_count;
 				} break;
 				case INTERNAL_MODE_BACK: {
-					position = front_count + external_count + index;
-					limit = back_count;
+					group_offset = front_count + external_count;
+					group_size = back_count;
 				} break;
 			}
-			// Holes, invalid indices or collisions require the original stable
-			// comparison order. Refill the buffer before that fallback.
-			if (index < 0 || index >= limit || ordered[position] != nullptr) {
+			// Check before adding the offset to avoid overflow on invalid
+			// indices. Holes or collisions require the legacy sorted path.
+			if (index < 0 || index >= group_size) {
+				dense_indices = false;
+				break;
+			}
+			const int position = group_offset + index;
+			if (ordered[position] != nullptr) {
 				dense_indices = false;
 				break;
 			}
