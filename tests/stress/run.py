@@ -31,7 +31,7 @@ CASES = (
     "memory_churn", "astar_grid", "tweens", "audio_buffers",
     "variant_codec", "packet_stream", "ui_layout", "render_2d", "render_3d",
     "node_paths", "regex", "compression", "hashing",
-    "resource_io", "astar_3d", "ui_layout", "thread_contention",
+    "resource_io", "astar_3d", "thread_contention",
     "geometry_2d", "mesh_build", "input_dispatch", "image_codec", "group_calls",
     "packed_arrays", "sorting", "animation_tracks", "physics_raycast_2d", "physics_raycast_3d", "render_multimesh_3d",
 )
