@@ -149,6 +149,42 @@ TEST_CASE("[GodotPhysics2D] Concave BVH searches nearest hits first on dense dis
 	CHECK_FALSE(shape.intersect_segment(Vector2(0, 8), Vector2(1400, 8), point, normal));
 }
 
+TEST_CASE("[GodotPhysics2D] Concave segment data accepts packed scalar endpoint pairs") {
+#ifdef REAL_T_IS_DOUBLE
+	PackedFloat64Array packed;
+#else
+	PackedFloat32Array packed;
+#endif
+	const real_t coords[] = {
+		real_t(12.0), real_t(-1.0), real_t(12.0), real_t(1.0),
+		real_t(3.0), real_t(-2.0), real_t(3.0), real_t(2.0)
+	};
+	for (real_t value : coords) {
+		packed.push_back(value);
+	}
+	GodotConcavePolygonShape2D concave;
+	concave.set_data(packed);
+
+	Vector2 hit, normal;
+	CHECK(concave.intersect_segment(Vector2(0.0, 0.0), Vector2(20.0, 0.0), hit, normal));
+	CHECK(hit.is_equal_approx(Vector2(3.0, 0.0)));
+	CHECK(concave.intersect_segment(Vector2(20.0, 0.0), Vector2(0.0, 0.0), hit, normal));
+	CHECK(hit.is_equal_approx(Vector2(12.0, 0.0)));
+
+	PackedVector2Array restored = concave.get_data();
+	CHECK(restored.size() == 4);
+	if (restored.size() == 4) {
+		CHECK(restored[0].is_equal_approx(Vector2(12.0, -1.0)));
+		CHECK(restored[1].is_equal_approx(Vector2(12.0, 1.0)));
+		CHECK(restored[2].is_equal_approx(Vector2(3.0, -2.0)));
+		CHECK(restored[3].is_equal_approx(Vector2(3.0, 2.0)));
+	}
+
+	packed.clear();
+	concave.set_data(packed);
+	CHECK_FALSE(concave.intersect_segment(Vector2(0.0, 0.0), Vector2(20.0, 0.0), hit, normal));
+}
+
 } // namespace TestGodotPhysics2DClosestSegment
 
 #endif // MODULE_GODOT_PHYSICS_2D_ENABLED
