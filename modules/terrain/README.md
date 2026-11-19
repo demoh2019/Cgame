@@ -40,11 +40,35 @@ scons platform=linuxbsd target=editor dev_build=yes tests=yes -j$(nproc)
 ./bin/godot.linuxbsd.editor.dev.x86_64 --headless --test --test-case='*[Terrain3D]*'
 ```
 
+
+## Native GPU foliage (stacked follow-up)
+
+The terrain exposes \`create_foliage_multimesh(mesh, count, seed, min_normal_y, min_scale, max_scale)\`:
+
+\`\`\`gdscript
+var terrain: HeightmapTerrain3D = $HeightmapTerrain3D
+var grass_mesh := BoxMesh.new()
+var foliage := MultiMeshInstance3D.new()
+terrain.add_child(foliage)
+foliage.multimesh = terrain.create_foliage_multimesh(grass_mesh, 1000, 42, 0.75)
+\`\`\`
+
+This generates a **separate** GPU-instancing resource: the node remains the
+authority for height data, while the MultiMesh instance transforms are an
+output that can be rebuilt after terrain sculpting. Scatter is deterministic
+for the same heightfield, seed and parameters. Steep slopes are filtered by
+the upward normal; it may return fewer than the requested count. The result
+includes a conservative local-space visibility AABB for correct culling.
+
+To use streamed worlds, place the terrain and its foliage child together in
+the cell's PackedScene, then give that scene to WorldPartition3D (#56).
+This feature does not load scenes or perform asynchronous streaming by itself.
+
 ## Deliberately out of scope
 
 This milestone is a **single mesh** (no tessellation, tiles, LOD or world
 partition). Each brush edit fully rebuilds it, so the current cap is 257²
-vertices. It has no automatic collision, vegetation scattering, eroded terrain
+vertices. It has no automatic collision, scene-based vegetation prefabs, eroded terrain
 generator or material-layer splatmaps. Follow-up work should add chunked
 geometry, collision/navmesh integration, multiple texture layers and asset
 streaming before pursuing kilometer-scale worlds.

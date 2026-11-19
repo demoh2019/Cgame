@@ -31,10 +31,12 @@
 #include "terrain_3d.h"
 
 #include "core/math/math_funcs.h"
+#include "core/math/random_number_generator.h"
 #include "core/object/class_db.h"
 #include "core/io/image.h"
 #include "scene/resources/material.h"
 #include "scene/resources/mesh.h"
+#include "scene/resources/multimesh.h"
 
 void HeightmapTerrain3D::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("set_grid_size", "size"), &HeightmapTerrain3D::set_grid_size);
@@ -53,6 +55,7 @@ void HeightmapTerrain3D::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("paint_color", "grid_position", "radius", "color", "opacity"), &HeightmapTerrain3D::paint_color);
 	ClassDB::bind_method(D_METHOD("erode_thermal", "iterations", "talus", "strength"), &HeightmapTerrain3D::erode_thermal);
 	ClassDB::bind_method(D_METHOD("import_heightmap", "image", "min_height", "max_height"), &HeightmapTerrain3D::import_heightmap);
+	ClassDB::bind_method(D_METHOD("create_foliage_multimesh", "mesh", "count", "seed", "min_normal_y", "min_scale", "max_scale"), &HeightmapTerrain3D::create_foliage_multimesh, DEFVAL(0.7), DEFVAL(0.8), DEFVAL(1.2));
 
 	ADD_PROPERTY(PropertyInfo(Variant::VECTOR2I, "grid_size"), "set_grid_size", "get_grid_size");
 	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "cell_size", PROPERTY_HINT_RANGE, "0.01,100,0.01,or_greater"), "set_cell_size", "get_cell_size");
@@ -353,4 +356,76 @@ HeightmapTerrain3D::HeightmapTerrain3D() {
 	default_material.instantiate();
 	default_material->set_flag(BaseMaterial3D::FLAG_ALBEDO_FROM_VERTEX_COLOR, true);
 	_rebuild_mesh();
+}
+
+Ref<MultiMesh> HeightmapTerrain3D::create_foliage_multimesh(const Ref<Mesh> &p_mesh, int p_count, int p_seed, real_t p_min_normal_y, real_t p_min_scale, real_t p_max_scale) const {
+	ERR_FAIL_COND_V_MSG(p_mesh.is_null(), Ref<MultiMesh>(), "A foliage mesh is required.");
+	ERR_FAIL_COND_V_MSG(p_count < 0 || p_count > 100000, Ref<MultiMesh>(), "Foliage instance count must be between 0 and 100000.");
+	ERR_FAIL_COND_V_MSG(!Math::is_finite(p_min_normal_y) || p_min_normal_y < 0.0 || p_min_normal_y > 1.0, Ref<MultiMesh>(), "Minimum surface normal Y must be between 0 and 1.");
+	ERR_FAIL_COND_V_MSG(!Math::is_finite(p_min_scale) || !Math::is_finite(p_max_scale) || p_min_scale <= 0.0 || p_max_scale < p_min_scale || p_max_scale > 1000.0, Ref<MultiMesh>(), "Foliage scales must be positive, finite and ordered, with maximum at most 1000.");
+	ERR_FAIL_COND_V_MSG(grid_size.x < 2 || grid_size.y < 2 || height_data.size() != grid_size.x * grid_size.y, Ref<MultiMesh>(), "Terrain grid data is invalid.");
+
+	Ref<MultiMesh> result;
+	result.instantiate();
+	result->set_transform_format(MultiMesh::TRANSFORM_3D);
+	result->set_mesh(p_mesh);
+	if (p_count == 0) {
+		return result;
+	}
+
+	RandomNumberGenerator random;
+	random.set_seed(uint64_t(int64_t(p_seed)));
+	Vector<Transform3D> instances;
+	instances.reserve(p_count);
+
+	const real_t grid_max_x = real_t(grid_size.x - 1);
+	const real_t grid_max_z = real_t(grid_size.y - 1);
+	// Rejection sampling is deliberately bounded: a steep surface may yield
+	// fewer than p_count instances instead of stalling the editor.
+	const int max_attempts = p_count * 8;
+	for (int attempt = 0; attempt < max_attempts && instances.size() < p_count; attempt++) {
+		const real_t gx = CLAMP(random.randf_range(0.0, grid_max_x), 0.0, grid_max_x);
+		const real_t gz = CLAMP(random.randf_range(0.0, grid_max_z), 0.0, grid_max_z);
+		const real_t x_minus = MAX(real_t(0.0), gx - 0.25);
+		const real_t x_plus = MIN(grid_max_x, gx + 0.25);
+		const real_t z_minus = MAX(real_t(0.0), gz - 0.25);
+		const real_t z_plus = MIN(grid_max_z, gz + 0.25);
+		const real_t slope_x = (sample_height(Vector2(x_plus, gz)) - sample_height(Vector2(x_minus, gz))) / ((x_plus - x_minus) * cell_size);
+		const real_t slope_z = (sample_height(Vector2(gx, z_plus)) - sample_height(Vector2(gx, z_minus))) / ((z_plus - z_minus) * cell_size);
+		const Vector3 normal(-slope_x, 1.0, -slope_z);
+		if (normal.normalized().y < p_min_normal_y) {
+			continue;
+		}
+
+		const real_t angle = random.randf_range(0.0, Math::TAU);
+		const real_t scale = random.randf_range(p_min_scale, p_max_scale);
+		const Basis basis = Basis(Vector3(0, 1, 0), angle).scaled(Vector3(scale, scale, scale));
+		const Vector3 origin(gx * cell_size, sample_height(Vector2(gx, gz)), gz * cell_size);
+		instances.push_back(Transform3D(basis, origin));
+	}
+
+	result->set_instance_count(instances.size());
+	for (int i = 0; i < instances.size(); i++) {
+		result->set_instance_transform(i, instances[i]);
+	}
+
+	// MultiMesh draws as one object. Provide a conservative local AABB so
+	// shifted/rotated mesh origins are not culled while terrain streaming.
+	const AABB mesh_bounds = p_mesh->get_aabb();
+	const Vector3 mesh_min = mesh_bounds.position;
+	const Vector3 mesh_max = mesh_bounds.get_end();
+	const real_t max_x = MAX(Math::abs(mesh_min.x), Math::abs(mesh_max.x));
+	const real_t max_y = MAX(Math::abs(mesh_min.y), Math::abs(mesh_max.y));
+	const real_t max_z = MAX(Math::abs(mesh_min.z), Math::abs(mesh_max.z));
+	const real_t radius = Math::sqrt(max_x * max_x + max_y * max_y + max_z * max_z) * p_max_scale;
+	float min_height = height_data[0];
+	float max_height = height_data[0];
+	for (float h : height_data) {
+		min_height = MIN(min_height, h);
+		max_height = MAX(max_height, h);
+	}
+	const Vector3 aabb_position(-radius, real_t(min_height) - radius, -radius);
+	const Vector3 aabb_size(grid_max_x * cell_size + radius * 2.0, real_t(max_height - min_height) + radius * 2.0, grid_max_z * cell_size + radius * 2.0);
+	result->set_custom_aabb(AABB(aabb_position, aabb_size));
+	return result;
 }

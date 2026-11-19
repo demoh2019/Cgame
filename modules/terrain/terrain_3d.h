@@ -33,6 +33,7 @@
 #include "scene/3d/mesh_instance_3d.h"
 
 class Image;
+class MultiMesh;
 class StandardMaterial3D;
 
 // Initial built-in heightfield terrain: one grid, one surface, no LOD/streaming.
@@ -78,6 +79,10 @@ public:
 	void paint_color(const Vector2 &p_grid_position, real_t p_radius, const Color &p_color, real_t p_opacity);
 	void erode_thermal(int p_iterations, real_t p_talus, real_t p_strength);
 	void import_heightmap(const Ref<Image> &p_image, real_t p_min_height, real_t p_max_height);
+
+	// Generates an independent, reproducible GPU-instanced foliage resource.
+	// The caller owns the MultiMesh and can attach it to MultiMeshInstance3D.
+	Ref<MultiMesh> create_foliage_multimesh(const Ref<Mesh> &p_mesh, int p_count, int p_seed, real_t p_min_normal_y = 0.7, real_t p_min_scale = 0.8, real_t p_max_scale = 1.2) const;
 
 	HeightmapTerrain3D();
 };

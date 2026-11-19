@@ -8,9 +8,22 @@
 		The terrain origin is its top-left grid corner. X and Z are horizontal, Y is height. Heightfield vertices are spaced by [member cell_size] in local units. Each grid cell has one height and one vertex color.
 		To edit in the 3D viewport, select the node and choose Raise, Lower, Smooth, or Paint Color from the terrain toolbar. The toolbar provides a brush radius in grid cells and a brush strength. Brush strokes participate in Undo/Redo.
 		Heights and vertex colors are stored with the scene; the generated mesh is not independently serialized. The default surface material displays vertex colors, and can be overridden through the inherited material override.
-		[b]Limitations:[/b] There is no LOD, chunk streaming, automatic collision, foliage system, texture splatmap, or advanced erosion in this initial implementation. Each edit currently regenerates the full mesh. For very large worlds, split the terrain into several nodes until chunked streaming is implemented.
+		[b]Limitations:[/b] There is no LOD, chunk streaming, automatic collision, texture splatmap, or advanced erosion in this initial implementation. A bounded foliage MultiMesh generator is available, but management and regeneration of instances are left to the caller. Each edit currently regenerates the full mesh. For very large worlds, split the terrain into several nodes until chunked streaming is implemented.
 	</description>
 	<methods>
+		<method name="create_foliage_multimesh" qualifiers="const">
+			<return type="MultiMesh" />
+			<param index="0" name="mesh" type="Mesh" />
+			<param index="1" name="count" type="int" />
+			<param index="2" name="seed" type="int" />
+			<param index="3" name="min_normal_y" type="float" default="0.7" />
+			<param index="4" name="min_scale" type="float" default="0.8" />
+			<param index="5" name="max_scale" type="float" default="1.2" />
+			<description>
+				Returns an independent [MultiMesh] with deterministic 3D foliage transforms scattered over the current heightfield. Instances follow interpolated heights, receive randomized Y rotations and uniform scales, and are rejected when the surface normal's Y component is less than [param min_normal_y]. A steep terrain may therefore produce fewer than [param count] instances. Random sampling is bounded to eight attempts per requested instance, and [param count] must be between 0 and 100000.
+				The result is not stored on the terrain: attach it to a [MultiMeshInstance3D] and regenerate after sculpting or loading new height data. Positions are in terrain-local coordinates, so a [MultiMeshInstance3D] child at the identity transform aligns with this terrain, including when the terrain is placed inside a streamed world cell. The returned resource uses a conservative custom AABB.
+			</description>
+		</method>
 		<method name="erode_thermal">
 			<return type="void" />
 			<param index="0" name="iterations" type="int" />
