@@ -1583,7 +1583,11 @@ void GodotSoftBody3D::apply_self_collision_ccd_rewinds() {
 }
 
 void GodotSoftBody3D::solve_self_collisions(real_t p_thickness, real_t p_alpha_tilde) {
-	if (!(p_thickness > 0.0) || nodes.is_empty() || faces.is_empty()) {
+	const real_t thickness_sq = p_thickness * p_thickness;
+	// Validate before touching the face BVH: an invalid/overflowing
+	// thickness must never leave the shared tree holding swept bounds.
+	if (!(thickness_sq > 0.0) || !Math::is_finite(thickness_sq) ||
+			nodes.is_empty() || faces.is_empty()) {
 		return;
 	}
 	if (!self_collision_adjacency_built) {
@@ -1617,10 +1621,7 @@ void GodotSoftBody3D::solve_self_collisions(real_t p_thickness, real_t p_alpha_t
 	constexpr uint32_t MAX_CCD_FACE_TESTS_PER_STEP = 8192;
 	uint32_t remaining_face_tests = MAX_NARROWPHASE_FACES_PER_STEP;
 	uint32_t remaining_ccd_tests = MAX_CCD_FACE_TESTS_PER_STEP;
-	const real_t thickness_sq = p_thickness * p_thickness;
-	if (!(thickness_sq > 0.0) || !Math::is_finite(thickness_sq)) {
-		return;
-	}
+
 	const Vector3 reach(p_thickness, p_thickness, p_thickness);
 
 	// Keep the nearest four *non-adjacent* faces. BVH iteration order can
@@ -1786,7 +1787,9 @@ void GodotSoftBody3D::solve_self_edge_contacts(real_t p_thickness, real_t p_alph
 		initialize_self_collision_adjacency(); // A world may enable edges later.
 	}
 	self_collision_edge_contacts.clear();
-	if (self_collision_edges.is_empty() || face_tree.is_empty()) {
+	const real_t thickness_sq = p_thickness * p_thickness;
+	if (self_collision_edges.is_empty() || face_tree.is_empty() ||
+			!(thickness_sq > 0.0) || !Math::is_finite(thickness_sq)) {
 		return;
 	}
 	if (p_ccd) {
@@ -1795,10 +1798,7 @@ void GodotSoftBody3D::solve_self_edge_contacts(real_t p_thickness, real_t p_alph
 			fraction = 1.0;
 		}
 	}
-	const real_t thickness_sq = p_thickness * p_thickness;
-	if (!(thickness_sq > 0.0) || !Math::is_finite(thickness_sq)) {
-		return;
-	}
+
 	constexpr uint32_t MAX_CONTACTS_PER_EDGE = 2;
 	constexpr uint32_t MAX_TOTAL_EDGE_CONTACTS = 32768;
 	constexpr uint32_t MAX_EDGE_TESTS_PER_SOURCE = 128;
