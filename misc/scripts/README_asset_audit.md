@@ -18,8 +18,8 @@ python3 misc/scripts/project_asset_audit.py /path/to/godot-project --format json
 ```
 
 Optional flags: `--exclude "vendor/*"` (repeatable), `--max-text-bytes N`,
-`--fail-on-warning`. Exit codes: 0 for success, 1 for audit violations, 2 for
-invalid configuration.
+`--fail-on-warning`, and `--no-cycles`. Exit codes: 0 for success, 1 for audit
+violations, 2 for invalid configuration.
 
 ## Checks
 
@@ -33,6 +33,10 @@ The scanner walks resources deterministically and reports:
 - **EMPTY_RESOURCE_PATH**, **RESOURCE_IS_DIRECTORY**: invalid resource targets.
 - **RESOURCE_OUTSIDE_PROJECT**: a referenced file or directory symlink resolves outside the project.
 - **UNRESOLVABLE_RESOURCE**, **UNRESOLVABLE_SYMLINK**: cycles or broken link targets cannot be used as project resources.
+- **DEPENDENCY_CYCLE**: potential circular static `res://` dependencies among scripts,
+  scenes, shaders, and text resources. Reported once per strongly connected group
+  as a **warning**, because some references may be intentional. Use
+  `--fail-on-warning` to fail CI or `--no-cycles` to suppress this diagnostic.
 - Warnings for external symlinks, invalid UTF-8 text, or files exceeding the
   configured scan-size limit.
 - Unreadable directories cause a scan failure (exit code 2), rather than a false clean report.
@@ -41,7 +45,10 @@ Checks are intentionally conservative: only quoted `res://` literals in
 `.gd`, `.tscn`, `.tres`, `.godot`, `.gdshader`, `.gdshaderinc`, `.cs`,
 `.cfg`, `.shader`, `.escn`, and `.json` are inspected. Generated
 `.godot/` and `.import/` directories, Git metadata, and common vendor
-dependencies are ignored. The command never modifies assets.
+dependencies are ignored. The command never modifies assets. JSON output also includes a deterministic
+`dependencies` map of source file to sorted static dependency paths for tools
+that need to inspect the resource graph. The cycle detector uses iterative
+strongly connected components, avoiding recursion limits on large projects.
 
 **Limitations:** This is not the Godot resource parser. It cannot resolve
 `uid://` identifiers, dynamically concatenated paths, linked external files,
@@ -68,7 +75,8 @@ python3 -m unittest discover -s misc/scripts/tests -p 'test_project_asset_audit*
 ```
 
 The regression suites cover collision/case handling, Unicode, symlink containment
-and cycles, unreadable directory failures, import exclusions, static paths,
+and cycles, circular resource dependency graphs (including very long chains),
+unreadable directory failures, import exclusions, static paths,
 invalid text, JSON output, exit codes, and deterministic findings. The
 `project-asset-audit.yml` workflow runs them on pull requests and `develop`
 pushes. Suitable for a lightweight CI job:
