@@ -149,3 +149,44 @@ PvP; it can be extended once a downed/knockout system exists.
 The zone banner and death overlay clearly show the risk, with server-authoritative
 checks and regression tests in `game/tests/test_zone_risk.gd`. Run
 `godot --headless --path game --script res://tests/run_all.gd`.
+
+## Safe-hub NPC vendor — the canonical `game/` economy
+
+A working server-authoritative NPC vendor is available at the existing
+workbench (around x=9, z=0). It links Days After-style scavenging to
+Albion-style resource progression and the existing silver currency.
+
+| Action | Server-defined cost or payout |
+| --- | --- |
+| Buy water bottle | 12 silver |
+| Buy canned food | 18 silver |
+| Buy bandage | 16 silver |
+| Sell scrap metal | +3 silver |
+| Sell T1 wood / stone / fiber | +2 silver each |
+| Sell T1 ore | +3 silver |
+| Sell T2–T4 resources | Higher fixed, tier-scaled silver payouts |
+
+In the local preview, **N** buys one water bottle and **V** sells one piece
+of scrap (or wood if no scrap is carried) at the hub. Existing **B** stash
+controls are unchanged. The online client has buy/sell buttons in the **I**
+inventory panel. All requests are sent to the same authoritative server,
+not executed locally by the client.
+
+Trades require a live player within workbench range, a listed item,
+and a quantity of 1–50. A private copy of the inventory is debited and
+credited, then committed only if both halves fit. Invalid prices, insufficient
+silver/materials, full backpack slots and remote requests change nothing.
+The successful transaction is included in the existing inventory snapshots
+and persistent Nakama character state.
+
+This is an NPC vendor, **not** a player-run auction house or a finished MMO
+economy. The mechanism uses existing Cgame network and inventory APIs;
+no engine C++ change was necessary.
+
+```sh
+godot --headless --path game --script res://tests/run_all.gd
+```
+
+The suite includes `test_vendor.gd` with capacity-rollback,
+replay-rejection and location-authority regressions. The dedicated
+`albion-after-vendor.yml` CI also runs the complete test suite.
