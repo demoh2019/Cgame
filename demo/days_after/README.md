@@ -107,3 +107,49 @@ world containers, crafting cooldowns and multiplayer state are not persisted.
 ```sh
 ./bin/godot.linuxbsd.editor.x86_64 --headless --path demo/days_after --script res://smoke_test_saves.gd
 ```
+
+
+## Survivor camp contracts (Days After × sandbox RPG)
+
+The same `demo/days_after` survival world now includes a physical contract
+board near the spawn. Aim at the wooden board and press **E** to accept or turn
+in the current contract. Contracts are completed in order, with distinct
+requirements and finite rewards:
+
+| Order | Contract | Requirement | Reward |
+| --- | --- | --- | --- |
+| 1 | Camp supplies | Deliver 2 wood T1 and 2 fiber T1 | 1 food + 2 water |
+| 2 | Smith training | Own a crafted rusty spear (it stays equipped) | 2 bandages + 1 water |
+| 3 | Infected patrol | Defeat 2 infected *after accepting* the contract | 2 fiber T2 + 2 food |
+
+This creates a complete local loop: scavenge and gather → craft and equip →
+fight infected → receive survival supplies. The journal is classless; the
+survivor can change equipment independently of the contracts.
+
+### Validation and persistence
+
+- Only one contract is active. A completed contract cannot be accepted or
+  claimed a second time. Missing delivery items or insufficient objectives do
+  not consume resources.
+- Reward overflow is rejected before any resources are removed; rewards are
+  issued after validating all required inventory stocks and kill progress.
+- Completed IDs, active objective and kill progress are saved in the existing
+  **version 1 survivor snapshot** (`save_state.gd`), including F5/F9. Existing
+  pre-contract v1 JSON saves remain compatible and load with a fresh journal.
+- Broken, duplicate, unknown or forged journal entries are rejected without
+  modifying player state. This is offline validation, **not** authoritative
+  anti-cheat for online play.
+
+Run the contract smoke in a compiled Cgame editor:
+
+```sh
+./bin/godot.linuxbsd.editor.x86_64 --headless --path demo/days_after --script res://smoke_test_contracts.gd
+```
+
+The test covers scene/board setup, contract order, resource deliveries,
+crafting, real infected kill signals, replay rejection, reward caps, backwards
+compatible saves and atomic failure on invalid journals.
+
+**Not yet implemented:** online contracts, NPC schedules, procedural quests,
+multi-user shared progress, guild objectives and faction reputation. These
+need server-authoritative objective events before launching multiplayer.
