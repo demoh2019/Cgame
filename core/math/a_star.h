@@ -48,6 +48,7 @@ class AStar3D : public RefCounted {
 		Vector3 pos;
 		real_t weight_scale = 0;
 		bool enabled = false;
+		uint32_t heap_index = 0; // Fill the padding before adjacency maps.
 
 		AHashMap<int64_t, Point *> neighbors{ 4u };
 		AHashMap<int64_t, Point *> unlinked_neighbours{ 4u };
@@ -58,10 +59,8 @@ class AStar3D : public RefCounted {
 		real_t f_score = 0;
 		uint64_t open_pass = 0;
 		uint64_t closed_pass = 0;
-		uint32_t heap_index = 0; // Index in the current A* open set; no linear lookup on decreases.
 
-		// Used for getting closest_point_of_last_pathing_call.
-		real_t abs_f_score = 0;
+
 	};
 
 	struct SortPoints {

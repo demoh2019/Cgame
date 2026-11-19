@@ -79,6 +79,7 @@ private:
 
 		Vector2 pos;
 		real_t weight_scale = 1.0;
+		uint32_t heap_index = 0; // Reuse alignment padding before the parent pointer.
 
 		// Used for pathfinding.
 		Point *prev_point = nullptr;
@@ -86,10 +87,7 @@ private:
 		real_t f_score = 0;
 		uint64_t open_pass = 0;
 		uint64_t closed_pass = 0;
-		uint32_t heap_index = 0; // Index into the open-set heap, valid for open_pass.
 
-		// Used for getting last_closest_point.
-		real_t abs_f_score = 0;
 
 		Point() {}
 

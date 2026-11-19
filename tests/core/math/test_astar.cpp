@@ -604,4 +604,49 @@ TEST_CASE("[AStarGrid2D] Reprioritizing an open grid cell retains the shortest p
 	CHECK_EQ(Vector2i(restored[1]), Vector2i(0, 1));
 }
 
+
+TEST_CASE("[AStar3D] Partial path picks closest reachable point after repeated searches") {
+	AStar3D a;
+	a.add_point(0, Vector3(0, 0, 0));
+	a.add_point(1, Vector3(1, 0, 0));
+	a.add_point(2, Vector3(2, 0, 0));
+	a.add_point(3, Vector3(0, 1, 0));
+	a.connect_points(0, 1);
+	a.connect_points(0, 3);
+
+	for (int i = 0; i < 6; ++i) {
+		const Vector<int64_t> partial = a.get_id_path(0, 2, true);
+		REQUIRE_EQ(partial.size(), 2);
+		CHECK_EQ(partial[0], 0);
+		CHECK_EQ(partial[1], 1);
+		const Vector<Vector3> partial_positions = a.get_point_path(0, 2, true);
+		REQUIRE_EQ(partial_positions.size(), 2);
+		CHECK_EQ(partial_positions[1], Vector3(1, 0, 0));
+	}
+
+	a.connect_points(1, 2);
+	const Vector<int64_t> full = a.get_id_path(0, 2);
+	REQUIRE_EQ(full.size(), 3);
+	CHECK_EQ(full[2], 2);
+}
+
+TEST_CASE("[AStarGrid2D] Partial route honors closest reachable cell with a blocked corridor") {
+	Ref<AStarGrid2D> grid;
+	grid.instantiate();
+	grid->set_region(Rect2i(0, 0, 5, 1));
+	grid->update();
+	grid->set_point_solid(Vector2i(3, 0), true);
+	for (int i = 0; i < 6; ++i) {
+		const TypedArray<Vector2i> path = grid->get_id_path(Vector2i(0, 0), Vector2i(4, 0), true);
+		REQUIRE_EQ(path.size(), 3);
+		CHECK_EQ(Vector2i(path[0]), Vector2i(0, 0));
+		CHECK_EQ(Vector2i(path[1]), Vector2i(1, 0));
+		CHECK_EQ(Vector2i(path[2]), Vector2i(2, 0));
+	}
+	grid->set_point_solid(Vector2i(3, 0), false);
+	const TypedArray<Vector2i> full = grid->get_id_path(Vector2i(0, 0), Vector2i(4, 0));
+	REQUIRE_EQ(full.size(), 5);
+	CHECK_EQ(Vector2i(full[4]), Vector2i(4, 0));
+}
+
 } // namespace TestAStar
