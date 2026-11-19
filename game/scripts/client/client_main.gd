@@ -11,6 +11,7 @@ const GameServer = preload("res://scripts/server/game_server.gd")
 const Vendor = preload("res://scripts/shared/vendor.gd")
 const SurvivalRadar = preload("res://scripts/client/survival_radar.gd")
 const Contracts = preload("res://scripts/shared/contracts.gd")
+const Weather = preload("res://scripts/shared/weather.gd")
 const LOCAL_PLAYER_ID := 2
 const TERRAIN_STEP := 8.0
 
@@ -656,12 +657,15 @@ func _update_hud() -> void:
 	var weight: float = survivor.inventory.total_weight()
 	var speed_pct: int = int(round(survivor.inventory.movement_factor() * 100.0))
 	var risk: String = "SAFE HUB" if world.is_safe(position.x, position.z) else ZoneRisk.description(zone)
-	_stats.text = "ALBION AFTER | SURVIVAL SANDBOX\n%s | World clock %.0fs\nHP %d HUNGER %d THIRST %d STAMINA %d INFECTION %d KILLS %d\nCOMBAT ENERGY %d/%d SKILL CD %.1fs DODGE CD %.1fs WEAPON %s\nZONE %s (T%d) %s POS %d,%d ZOMBIES %d\nPROFESSIONS Wood T%d Stone T%d Ore T%d Fiber T%d Craft T%d\nCARRY %.1f kg MOVEMENT %d%% SILVER %d\nCONTRACT %s\nINVENTORY %s" % [
+	var weather: Dictionary = Weather.conditions(world, position.x, position.z, sim.time)
+	_stats.text = "ALBION AFTER | SURVIVAL SANDBOX\n%s | World clock %.0fs\nHP %d HUNGER %d THIRST %d STAMINA %d INFECTION %d EXPOSURE %d KILLS %d\nCOMBAT ENERGY %d/%d SKILL CD %.1fs DODGE CD %.1fs WEAPON %s\nWEATHER %s %.0fC %s\nZONE %s (T%d) %s POS %d,%d ZOMBIES %d\nPROFESSIONS Wood T%d Stone T%d Ore T%d Fiber T%d Craft T%d\nCARRY %.1f kg MOVEMENT %d%% SILVER %d\nCONTRACT %s\nINVENTORY %s" % [
 		"NIGHT - infected notice farther" if WorldCycle.is_night(sim.time) else "DAY", sim.time,
 		int(vitals.health), int(vitals.hunger), int(vitals.thirst), int(vitals.stamina),
-		int(vitals.infection), survivor.kills,
+		int(vitals.infection), int(vitals.exposure), survivor.kills,
 		int(survivor.combat_energy), int(Defs.COMBAT_ENERGY_MAX), survivor.skill_timer, survivor.dodge_timer,
 		survivor.inventory.weapon if not survivor.inventory.weapon.is_empty() else "unarmed",
+		str(weather.get("condition", "unknown")).capitalize(), float(weather.get("temperature_c", 0.0)),
+		"SHELTERED" if bool(weather.get("sheltered", false)) else "EXPOSED",
 		Defs.ZONE_NAMES[zone], WorldGen.tier_for_zone(zone), risk, int(position.x), int(position.z), sim.zombies.size(),
 		int(levels["wood"]), int(levels["stone"]), int(levels["ore"]), int(levels["fiber"]),
 		survivor.progression.crafting_level(), weight, speed_pct, survivor.inventory.count("silver"),

@@ -7,6 +7,7 @@ var health: float = Defs.MAX_HEALTH
 var hunger: float = 100.0 # 100 is full.
 var thirst: float = 100.0
 var infection: float = 0.0
+var exposure: float = 0.0 # 0..100 cumulative weather stress.
 var stamina: float = Defs.MAX_STAMINA
 var stamina_recovery_delay: float = 0.0
 var alive: bool = true
@@ -62,6 +63,23 @@ func tick(delta: float) -> float:
 	return damage
 
 
+## Called only by the server with a computed weather severity (0..1).
+## Exposure decays while sheltered or when conditions improve. High sustained
+## cold/wet exposure deals real health damage; zero shelter never mints health.
+func weather_tick(delta: float, severity: float) -> float:
+	if not alive or not is_finite(delta) or delta <= 0.0 or not is_finite(severity):
+		return 0.0
+	var intensity: float = clampf(severity, 0.0, 1.0)
+	if intensity > 0.0:
+		exposure = minf(100.0, exposure + intensity * 0.55 * delta)
+	else:
+		exposure = maxf(0.0, exposure - 0.9 * delta)
+	if exposure <= 60.0:
+		return 0.0
+	var damage: float = (exposure - 60.0) / 40.0 * 0.8 * delta
+	return hurt(damage)
+
+
 ## Returns the damage that was applied (after clamping at 0 health).
 func hurt(amount: float) -> float:
 	if not alive or amount <= 0.0:
@@ -109,8 +127,9 @@ func reset() -> void:
 	stamina = Defs.MAX_STAMINA
 	stamina_recovery_delay = 0.0
 	infection = 0.0
+	exposure = 0.0
 	alive = true
 
 
 func to_dict() -> Dictionary:
-	return {"health": health, "hunger": hunger, "thirst": thirst, "stamina": stamina, "infection": infection, "alive": alive}
+	return {"health": health, "hunger": hunger, "thirst": thirst, "stamina": stamina, "infection": infection, "exposure": exposure, "alive": alive}

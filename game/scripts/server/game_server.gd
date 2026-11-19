@@ -19,6 +19,7 @@ const Combat = preload("res://scripts/shared/combat.gd")
 const Structures = preload("res://scripts/shared/structures.gd")
 const Zombie = preload("res://scripts/shared/zombie.gd")
 const ZoneRisk = preload("res://scripts/shared/zone_risk.gd")
+const Weather = preload("res://scripts/shared/weather.gd")
 const Progression = preload("res://scripts/shared/progression.gd")
 
 const WORKBENCH_POSITION := Vector2(9.0, 0.0)
@@ -127,6 +128,7 @@ func character_data(player: Player) -> Dictionary:
 		"version": 1,
 		"health": player.survival.health, "hunger": player.survival.hunger, "thirst": player.survival.thirst,
 		"stamina": player.survival.stamina, "infection": player.survival.infection,
+		"exposure": player.survival.exposure,
 		"alive": alive, "kills": player.kills, "deaths": player.deaths,
 		"x": player.position.x, "z": player.position.z,
 		"inventory": player.inventory.to_dict(),
@@ -165,6 +167,8 @@ func apply_character(player: Player, data: Dictionary) -> bool:
 		return false
 	if not SaveValidation.finite_number(data.get("infection", 0.0), 0.0, Defs.INFECTION_MAX):
 		return false
+	if not SaveValidation.finite_number(data.get("exposure", 0.0), 0.0, 100.0):
+		return false
 	if not SaveValidation.valid_counter(data.get("kills", 0)):
 		return false
 	if not SaveValidation.valid_counter(data.get("deaths", 0)):
@@ -180,6 +184,8 @@ func apply_character(player: Player, data: Dictionary) -> bool:
 	survival.stamina = float(data.get("stamina", Defs.MAX_STAMINA))
 	# Older version-1 saves without infection remain compatible.
 	survival.infection = float(data.get("infection", 0.0))
+	# Legacy survivors predating regional climate start with no exposure.
+	survival.exposure = float(data.get("exposure", 0.0))
 	var x: Variant = data.get("x", 0.0)
 	var z: Variant = data.get("z", 0.0)
 	# Invalid old logout coordinates can still safely fall back to the hub.
@@ -1103,6 +1109,11 @@ func _tick_players(delta: float) -> void:
 			continue
 		player.combat_energy = minf(Defs.COMBAT_ENERGY_MAX, player.combat_energy + Defs.COMBAT_ENERGY_REGEN * delta)
 		var damage: float = player.survival.tick(delta)
+		var conditions: Dictionary = Weather.conditions(world, player.position.x, player.position.z, time)
+		damage += player.survival.weather_tick(delta,
+				Weather.effective_severity(conditions, player.inventory.armor))
+		if player.survival.exposure > 0.0:
+			player.dirty_character = true
 		if player.survival.infection > 0.0:
 			player.dirty_character = true
 		if damage > 0.0 and not _alive(player):
@@ -1322,7 +1333,8 @@ func snapshot_for(peer_id: int) -> Dictionary:
 			"stamina": player.survival.stamina,
 			"alive": _alive(player), "kills": player.kills, "deaths": player.deaths, "zone": player.zone_notice,
 			"action": player.action.duplicate(),
-			"infection": player.survival.infection,
+			"infection": player.survival.infection, "exposure": player.survival.exposure,
+			"weather": Weather.conditions(world, player.position.x, player.position.z, time),
 			"combat_energy": player.combat_energy, "skill_cooldown": player.skill_timer,
 			"dodge_cooldown": player.dodge_timer, "dodge_immunity": player.dodge_immunity,
 			"weapon": player.inventory.weapon, "armor": player.inventory.armor,

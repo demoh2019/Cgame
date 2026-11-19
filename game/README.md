@@ -563,3 +563,31 @@ PvP-risk, zombie infection and save regressions.
 All mechanics use existing Cgame movement and networking capabilities.
 A native engine change is unnecessary until a reusable engine limitation
 is demonstrated.
+
+## Server-authoritative weather and cold exposure
+
+The combined survival/sandbox game now has deterministic regional weather
+computed from the **world seed**, 256-metre climate cells and dedicated-server
+time. Conditions change every four in-game minutes, with local storms,
+biome-dependent temperature and the safe settlement acting as a sheltered
+refuge. Storms in cold environments accumulate **exposure** (0–100), which
+eventually causes health damage; returning to shelter or reaching milder
+weather lowers exposure. Equipped armor reduces buildup by 35%. Existing
+zombie infection, hunger, thirst, stamina, combat and equipment rules remain
+server-owned.
+
+Both the local playable client and network HUD show the current weather,
+temperature, shelter status and exposure. The multiplayer snapshot carries
+the authoritative values rather than accepting arbitrary climate data from
+players. Character saves include exposure, while older accounts load with
+zero exposure. Invalid exposure in account storage rejects the entire saved
+character before inventory or any other live state changes.
+
+Regression: `godot --headless --path game --script res://tests/run_all.gd`
+runs `test_weather.gd`, checking deterministic storm cycles, gear
+insulation, shelter, damage, reset, server ticks, snapshot, migration and
+corrupt-save rejection.
+
+This is a gameplay weather system, not yet volumetric clouds, physically
+simulated rain, wind fluid dynamics or an actual temperature field inside
+buildings. Current Cgame/Godot scripts provide the required simulation API.

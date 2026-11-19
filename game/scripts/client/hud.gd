@@ -71,7 +71,7 @@ func _build() -> void:
 	top_left.size_flags_horizontal = Control.SIZE_SHRINK_BEGIN
 	top_left.size_flags_vertical = Control.SIZE_SHRINK_BEGIN
 	margin.add_child(top_left)
-	for entry in [["health", Color(0.85, 0.2, 0.2)], ["hunger", Color(0.9, 0.65, 0.2)], ["thirst", Color(0.25, 0.55, 0.95)], ["infection", Color(0.54, 0.28, 0.65)]]:
+	for entry in [["health", Color(0.85, 0.2, 0.2)], ["hunger", Color(0.9, 0.65, 0.2)], ["thirst", Color(0.25, 0.55, 0.95)], ["infection", Color(0.54, 0.28, 0.65)], ["exposure", Color(0.38, 0.7, 0.88)]]:
 		var bar := ProgressBar.new()
 		bar.custom_minimum_size = Vector2(240, 18)
 		bar.max_value = 100.0
@@ -397,6 +397,7 @@ func _process(_delta: float) -> void:
 	_bars["hunger"].value = client.you["hunger"]
 	_bars["thirst"].value = client.you["thirst"]
 	_bars["infection"].value = float(client.you.get("infection", 0.0))
+	_bars["exposure"].value = float(client.you.get("exposure", 0.0))
 	var zone: int = clampi(int(client.you.get("zone", 0)), 0, 3)
 	_zone_label.text = "%s zone (T%d)\n%s" % [Defs.ZONE_NAMES[zone].capitalize(), zone + 1, ZoneRisk.description(zone)]
 	_zone_label.add_theme_color_override("font_color", [Color(0.4, 0.9, 0.4), Color(0.95, 0.85, 0.3), Color(0.95, 0.45, 0.3), Color(0.8, 0.3, 0.9)][zone])
@@ -405,6 +406,14 @@ func _process(_delta: float) -> void:
 		float(client.you.get("carry_kg", 0.0)), 100.0 * float(client.you.get("cargo_factor", 1.0)),
 		int(client.you.get("stamina", Defs.MAX_STAMINA)), float(client.you.get("dodge_cooldown", 0.0))
 	]
+	var weather: Dictionary = client.you.get("weather", {})
+	if not weather.is_empty():
+		_info_label.text += "\nWeather: %s %.0fC %s | Exposure %d/100" % [
+			str(weather.get("condition", "clear")).capitalize(),
+			float(weather.get("temperature_c", 0.0)),
+			"SHELTERED" if bool(weather.get("sheltered", false)) else "EXPOSED",
+			int(client.you.get("exposure", 0.0))
+		]
 	var journal: Variant = client.you.get("contract", Contracts.empty_state())
 	_contract_label.text = Contracts.description(journal if journal is Dictionary else Contracts.empty_state())
 	var weapon: String = client.you.get("weapon", "")

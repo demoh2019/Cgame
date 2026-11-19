@@ -21,6 +21,8 @@ func _check() -> void:
 		ok = sim.players.has(2)
 		ok = ok and game.get_node_or_null("Camera3D") != null
 		ok = ok and game.get_node_or_null("HUD/Stats") != null
+		ok = ok and game.get_node("HUD/Stats").text.contains("WEATHER")
+		ok = ok and game.get_node("HUD/Stats").text.contains("EXPOSURE")
 		ok = ok and game.get_node_or_null("HUD/Instructions") != null
 		ok = ok and game.get_node_or_null("Survivor") != null
 		ok = ok and game.get_node_or_null("SafeStash") != null
