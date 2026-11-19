@@ -396,6 +396,9 @@ PhysicsServer2D::PhysicsServer2D() {
 	// Account for rotating CCD shapes in broadphase candidate generation.
 	// Conservative only: narrowphase angular time-of-impact remains separate.
 	GLOBAL_DEF(PropertyInfo(Variant::BOOL, "physics/2d/solver/ccd_rotational_bounds"), false);
+	// More accurate analytical arc envelope than isotropic chord padding.
+	// Requires rotational bounds and is off by default until benchmarked.
+	GLOBAL_DEF(PropertyInfo(Variant::BOOL, "physics/2d/solver/ccd_tight_rotational_bounds"), false);
 	GLOBAL_DEF(PropertyInfo(Variant::BOOL, "physics/2d/solver/implicit_damping"), false);
 	// Bullet-style rotational resistance for loaded rigid contacts; off by default.
 	GLOBAL_DEF(PropertyInfo(Variant::FLOAT, "physics/2d/solver/rolling_friction", PROPERTY_HINT_RANGE, "0,1,0.01,or_greater"), 0.0);
