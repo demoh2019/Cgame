@@ -297,6 +297,71 @@ finite body states both with the option disabled and enabled. It is a smoke
 regression, not a measured performance benefit or a guarantee that all
 possible overfull manifolds are exercised.
 
+## Jolt-style 3D gyroscopic free-rotation dynamics (opt-in)
+
+Asymmetric rigid bodies do not maintain a constant angular velocity in
+torque-free flight: their angular momentum and rotation axes interact.
+Bullet and Jolt implement the missing gyroscopic Euler term
+`dL/dt = -omega × L`, with `L = I omega`, in rigid-body rotation.
+
+The built-in Cgame GodotPhysics3D integrator now supports Jolt's
+allocation-free principal-inertia-frame update, renormalizing angular
+momentum after the Euler correction to avoid the momentum gain from a
+naive explicit gyroscopic force. This enables physically motivated
+precession and intermediate-axis tumbling of asymmetric objects.
+
+Enable it per GodotPhysics3D space in `project.godot`:
+
+```ini
+[physics]
+3d/solver/gyroscopic_forces=true
+```
+
+The setting defaults to **false**, retaining existing scene behavior,
+solver order, CPU cost, and all 2D physics. It is sampled once when
+creating a 3D space. The new calculation runs after ordinary damping
+and applied torque, before body rotation integration, and only on
+dynamic **rigid** bodies with no locked angular axes and without a
+custom force-integrator override. Kinematic, static, rigid-linear and
+angular-axis-locked bodies keep their existing behavior.
+
+The algorithm uses each body's already stored inverse principal
+moments and principal-axis orientation: there are no new fields in the
+body, no heap allocations and no new solver constraints. Invalid,
+nonfinite or singular inertia components safely skip gyro correction.
+Isotropic bodies and rotation around one principal axis incur no
+angular change. The normalized explicit momentum step preserves the
+*magnitude* of angular momentum; it is not an implicit energy
+conserving integrator. Use smaller physics time steps for extreme
+angular speeds and compare energy drift in demanding tumbling scenes.
+
+Source contracts plus 5,000 seeded randomized inertia/rotation cases
+and a 600-step torque-free numerical trajectory:
+
+```bash
+python3 -m unittest discover -s tests/stress \
+  -p 'test_physics_gyroscopic_3d.py' -v
+```
+
+Native C++ tests are in
+`tests/servers/test_godot_physics_gyroscopic_3d.cpp`. A runtime smoke
+regression creates a freely tumbling, inertia-asymmetric box with zero
+gravity and damping in two otherwise identical spaces (gyro enabled
+vs disabled), checks finite state, rotation change and angular
+momentum magnitude:
+
+```bash
+./bin/godot.macos.editor.arm64 --headless \
+  --path tests/stress \
+  --script res://physics_gyroscopic_3d_regression.gd
+```
+
+These source/reference tests do not confirm a native build or runtime
+performance. CPU impact is limited to gyro-enabled active asymmetric
+rigid bodies; actual stability and frame-time gains must be measured
+on the same scene and hardware. External physics backends are not
+modified.
+
 ## Bullet-style rolling and spinning resistance (opt-in 2D/3D)
 
 Bullet Physics includes rolling resistance for round shapes and torsional
