@@ -42,6 +42,9 @@ TEST_FORCE_LINK(test_gltf_document)
 
 #include "modules/gltf/extensions/gltf_document_extension_convert_importer_mesh.h"
 #include "modules/gltf/gltf_document.h"
+#include "modules/gltf/extensions/gltf_light.h"
+#include "modules/gltf/structures/gltf_accessor.h"
+#include "scene/3d/light_3d.h"
 
 namespace TestGLTFDocument {
 
@@ -248,6 +251,120 @@ TEST_CASE("[SceneTree][GLTFDocument] Load suzanne.glb") {
 	test_gltf_save(node);
 
 	// Clean up the node.
+	memdelete(node);
+}
+
+
+TEST_CASE("[SceneTree][GLTFDocument] Packed numeric glTF accessors preserve element values") {
+	Ref<GLTFState> state;
+	state.instantiate();
+	Ref<GLTFAccessor> accessor;
+	accessor.instantiate();
+	accessor->set_accessor_type(GLTFAccessor::TYPE_VEC3);
+	accessor->set_component_type(GLTFAccessor::COMPONENT_TYPE_SINGLE_FLOAT);
+
+	PackedFloat64Array input;
+	for (int i = 1; i <= 6; i++) {
+		input.push_back(i);
+	}
+	const PackedByteArray encoded = accessor->encode_floats_as_bytes(input);
+	REQUIRE(encoded.size() == 6 * sizeof(float));
+	const GLTFAccessorIndex index = accessor->store_accessor_data_into_state(state, encoded);
+	REQUIRE(index >= 0);
+
+	for (Variant::Type type : { Variant::PACKED_BYTE_ARRAY, Variant::PACKED_INT32_ARRAY, Variant::PACKED_INT64_ARRAY,
+				Variant::PACKED_FLOAT32_ARRAY, Variant::PACKED_FLOAT64_ARRAY }) {
+		const Array rows = accessor->decode_as_variants(state, type);
+		REQUIRE(rows.size() == 2);
+		CHECK(rows[0].get_type() == type);
+		CHECK(rows[1].get_type() == type);
+		switch (type) {
+			case Variant::PACKED_BYTE_ARRAY: {
+				const PackedByteArray first = rows[0];
+				const PackedByteArray second = rows[1];
+				REQUIRE(first.size() == 3);
+				REQUIRE(second.size() == 3);
+				CHECK(first[0] == 1);
+				CHECK(first[2] == 3);
+				CHECK(second[0] == 4);
+				CHECK(second[2] == 6);
+			} break;
+			case Variant::PACKED_INT32_ARRAY: {
+				const PackedInt32Array first = rows[0];
+				const PackedInt32Array second = rows[1];
+				REQUIRE(first.size() == 3);
+				REQUIRE(second.size() == 3);
+				CHECK(first[0] == 1);
+				CHECK(first[2] == 3);
+				CHECK(second[0] == 4);
+				CHECK(second[2] == 6);
+			} break;
+			case Variant::PACKED_INT64_ARRAY: {
+				const PackedInt64Array first = rows[0];
+				const PackedInt64Array second = rows[1];
+				REQUIRE(first.size() == 3);
+				REQUIRE(second.size() == 3);
+				CHECK(first[0] == 1);
+				CHECK(first[2] == 3);
+				CHECK(second[0] == 4);
+				CHECK(second[2] == 6);
+			} break;
+			case Variant::PACKED_FLOAT32_ARRAY: {
+				const PackedFloat32Array first = rows[0];
+				const PackedFloat32Array second = rows[1];
+				REQUIRE(first.size() == 3);
+				REQUIRE(second.size() == 3);
+				CHECK(first[0] == 1.0f);
+				CHECK(first[2] == 3.0f);
+				CHECK(second[0] == 4.0f);
+				CHECK(second[2] == 6.0f);
+			} break;
+			case Variant::PACKED_FLOAT64_ARRAY: {
+				const PackedFloat64Array first = rows[0];
+				const PackedFloat64Array second = rows[1];
+				REQUIRE(first.size() == 3);
+				REQUIRE(second.size() == 3);
+				CHECK(first[0] == 1.0);
+				CHECK(first[2] == 3.0);
+				CHECK(second[0] == 4.0);
+				CHECK(second[2] == 6.0);
+			} break;
+			default:
+				FAIL("Unexpected accessor variant type.");
+		}
+	}
+}
+
+TEST_CASE("[SceneTree][GLTFDocument] Spotlight attenuation conversion roundtrips") {
+	SpotLight3D *original = memnew(SpotLight3D);
+	original->set_param(SpotLight3D::PARAM_SPOT_ANGLE, 50.0f);
+	original->set_param(SpotLight3D::PARAM_SPOT_ATTENUATION, 1.2f);
+	Ref<GLTFLight> exported = GLTFLight::from_node(original);
+	REQUIRE(exported.is_valid());
+	CHECK(exported->get_inner_cone_angle() < exported->get_outer_cone_angle());
+	CHECK(Math::is_equal_approx(exported->get_outer_cone_angle(), Math::deg_to_rad(50.0f)));
+
+	Light3D *imported_light = exported->to_node();
+	REQUIRE(imported_light != nullptr);
+	SpotLight3D *imported = Object::cast_to<SpotLight3D>(imported_light);
+	REQUIRE(imported != nullptr);
+	CHECK(Math::is_equal_approx(imported->get_param(SpotLight3D::PARAM_SPOT_ANGLE), 50.0f));
+	CHECK(Math::is_equal_approx(imported->get_param(SpotLight3D::PARAM_SPOT_ATTENUATION), 1.2f));
+	memdelete(imported_light);
+	memdelete(original);
+}
+
+TEST_CASE("[SceneTree][GLTFDocument] Equal glTF spotlight cone angles avoid division by zero") {
+	Ref<GLTFLight> light;
+	light.instantiate();
+	light->set_light_type("spot");
+	light->set_outer_cone_angle(0.5f);
+	light->set_inner_cone_angle(0.5f);
+	Light3D *node = light->to_node();
+	REQUIRE(node != nullptr);
+	SpotLight3D *spot = Object::cast_to<SpotLight3D>(node);
+	REQUIRE(spot != nullptr);
+	CHECK(spot->get_param(SpotLight3D::PARAM_SPOT_ATTENUATION) == 0.0f);
 	memdelete(node);
 }
 
