@@ -3449,73 +3449,87 @@ bool String::is_lowercase() const {
 }
 
 int String::_count(const String &p_string, int p_from, int p_to, bool p_case_insensitive) const {
-	if (p_string.is_empty()) {
+	const int needle_len = p_string.length();
+	const int len = length();
+	if (needle_len == 0 || len < needle_len || p_from < 0 || p_to < 0 ||
+			(p_to != 0 && p_from >= p_to)) {
 		return 0;
 	}
-	int len = length();
-	int slen = p_string.length();
-	if (len < slen) {
+	// A bounded Span keeps counting inside [from, to) without copying the
+	// substring or searching past its end.
+	const int end = p_to == 0 ? len : MIN(p_to, len);
+	if (p_from > end - needle_len) {
 		return 0;
 	}
-	String str;
-	if (p_from >= 0 && p_to >= 0) {
-		if (p_to == 0) {
-			p_to = len;
-		} else if (p_from >= p_to) {
-			return 0;
-		}
-		if (p_from == 0 && p_to == len) {
-			str = *this;
-		} else {
-			str = substr(p_from, p_to - p_from);
+	const int range_len = end - p_from;
+	const int last_start = range_len - needle_len;
+	const Span<const char32_t> range(get_data() + p_from, range_len);
+	const char32_t *needle = p_string.get_data();
+	int count = 0;
+	if (p_case_insensitive) {
+		for (int i = 0; i <= last_start;) {
+			if (strings_equal_lower(range.ptr() + i, needle, needle_len)) {
+				++count;
+				i += needle_len;
+			} else {
+				++i;
+			}
 		}
 	} else {
-		return 0;
+		int from = 0;
+		while (from <= last_start) {
+			const int64_t found = needle_len == 1 ?
+					range.find(needle[0], from) : range.find_sequence(p_string.span(), from);
+			if (found < 0) {
+				break;
+			}
+			++count;
+			from = int(found) + needle_len;
+		}
 	}
-	int c = 0;
-	int idx = 0;
-	while ((idx = p_case_insensitive ? str.findn(p_string, idx) : str.find(p_string, idx)) != -1) {
-		// Skip the occurrence itself.
-		idx += slen;
-		++c;
-	}
-	return c;
+	return count;
 }
 
 int String::_count(const char *p_string, int p_from, int p_to, bool p_case_insensitive) const {
-	int substring_length = strlen(p_string);
-	if (substring_length == 0) {
+	const int needle_len = strlen(p_string);
+	const int len = length();
+	if (needle_len == 0 || len < needle_len || p_from < 0 || p_to < 0 ||
+			(p_to != 0 && p_from >= p_to)) {
 		return 0;
 	}
-	const int source_length = length();
-
-	if (source_length < substring_length) {
+	const int end = p_to == 0 ? len : MIN(p_to, len);
+	if (p_from > end - needle_len) {
 		return 0;
 	}
-	String str;
-	int search_limit = p_to;
-	if (p_from >= 0 && p_to >= 0) {
-		if (p_to == 0) {
-			search_limit = source_length;
-		} else if (p_from >= p_to) {
-			return 0;
-		}
-		if (p_from == 0 && search_limit == source_length) {
-			str = *this;
-		} else {
-			str = substr(p_from, search_limit - p_from);
+	const int range_len = end - p_from;
+	const int last_start = range_len - needle_len;
+	const Span<const char32_t> range(get_data() + p_from, range_len);
+	int count = 0;
+	if (p_case_insensitive) {
+		for (int i = 0; i <= last_start;) {
+			if (strings_equal_lower(range.ptr() + i, p_string, needle_len)) {
+				++count;
+				i += needle_len;
+			} else {
+				++i;
+			}
 		}
 	} else {
-		return 0;
+		int from = 0;
+		while (from <= last_start) {
+			// Match the existing find(char *) semantics: a single byte is
+			// passed as char, while multi-byte spans use unsigned bytes.
+			const int64_t found = needle_len == 1 ?
+					range.find(static_cast<char32_t>(*p_string), from) :
+					range.find_sequence(Span((const unsigned char *)p_string, needle_len), from);
+			if (found < 0) {
+				break;
+			}
+			++count;
+			from = int(found) + needle_len;
+		}
 	}
-	int c = 0;
-	int idx = 0;
-	while ((idx = p_case_insensitive ? str.findn(p_string, idx) : str.find(p_string, idx)) != -1) {
-		// Skip the occurrence itself.
-		idx += substring_length;
-		++c;
-	}
-	return c;
+	return count;
 }
 
 int String::count(const String &p_string, int p_from, int p_to) const {
