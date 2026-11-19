@@ -98,7 +98,7 @@ TEST_CASE("[LRU] Resize and clear") {
 static int replacement_eviction_count = 0;
 static int replacement_evicted_value = 0;
 
-static void on_replacement_eviction(int &p_key, int &p_value) {
+static void on_replacement_eviction(const int &p_key, int &p_value) {
 	++replacement_eviction_count;
 	replacement_evicted_value = p_value;
 	p_value = -42;
@@ -106,9 +106,9 @@ static void on_replacement_eviction(int &p_key, int &p_value) {
 
 TEST_CASE("[LRU] Repeated insert reuses the existing node and remains most recent") {
 	LRUCache<int, int> lru(2);
-	const auto *first = lru.insert(1, 10);
+	const auto first = lru.insert(1, 10);
 	lru.insert(2, 20);
-	const auto *replacement = lru.insert(1, 11);
+	const auto replacement = lru.insert(1, 11);
 	CHECK(first == replacement);
 	CHECK(lru.get_size() == 2);
 	CHECK(lru.get(1) == 11);
@@ -118,7 +118,7 @@ TEST_CASE("[LRU] Repeated insert reuses the existing node and remains most recen
 	CHECK(lru.has(3));
 
 	for (int i = 0; i < 100; i++) {
-		CHECK(lru.insert(1, i)->data == i);
+		CHECK(lru.insert(1, i)->value == i);
 	}
 	CHECK(lru.get_size() == 2);
 }
@@ -128,10 +128,10 @@ TEST_CASE("[LRU] Replacement hook observes the old value once") {
 	replacement_evicted_value = 0;
 	LRUCache<int, int, HashMapHasherDefault, HashMapComparatorDefault<int>, on_replacement_eviction> lru(2);
 	lru.insert(1, 30);
-	const auto *replacement = lru.insert(1, 50);
+	const auto replacement = lru.insert(1, 50);
 	CHECK(replacement_eviction_count == 1);
 	CHECK(replacement_evicted_value == 30);
-	CHECK(replacement->data == 50);
+	CHECK(replacement->value == 50);
 	CHECK(lru.get_size() == 1);
 }
 
@@ -140,10 +140,73 @@ TEST_CASE("[LRU] Aliased replacement survives an eviction hook") {
 	LRUCache<int, int, HashMapHasherDefault, HashMapComparatorDefault<int>, on_replacement_eviction> lru(2);
 	lru.insert(7, 77);
 	const int &value = lru.get(7);
-	const auto *replacement = lru.insert(7, value);
-	CHECK(replacement->data == 77);
+	const auto replacement = lru.insert(7, value);
+	CHECK(replacement->value == 77);
 	CHECK(replacement_eviction_count == 1);
 	CHECK(replacement_evicted_value == 77);
+}
+
+TEST_CASE("[HashMap] Renew key preserves value addresses and insertion order") {
+	HashMap<int, int> map;
+	map.insert(1, 10);
+	map.insert(2, 20);
+	map.insert(3, 30);
+
+	int *first = map.getptr(1);
+	REQUIRE(first != nullptr);
+	CHECK(map.renew_key(99) == nullptr);
+	CHECK(map.renew_key(1) == first);
+	REQUIRE_EQ(map.size(), 3);
+
+	int expected[] = { 2, 3, 1 };
+	int index = 0;
+	for (const KeyValue<int, int> &entry : map) {
+		REQUIRE(index < 3);
+		CHECK_EQ(entry.key, expected[index++]);
+	}
+	CHECK_EQ(index, 3);
+	CHECK(map.renew_key(1) == first);
+	CHECK_EQ(map.last()->key, 1);
+	CHECK(map.erase(2));
+	CHECK(map.renew_key(3) != nullptr);
+	CHECK_EQ(map.begin()->key, 1);
+	CHECK_EQ(map.last()->key, 3);
+}
+
+TEST_CASE("[LRU] Single-map cache preserves recency, pointer stability, and eviction") {
+	LRUCache<int, int> cache(16);
+	for (int i = 0; i < 256; i++) {
+		cache.insert(i, i * 7);
+	}
+	REQUIRE_EQ(cache.get_size(), 16);
+	for (int i = 0; i < 240; i++) {
+		CHECK_FALSE(cache.has(i));
+	}
+	for (int i = 240; i < 256; i++) {
+		CHECK(cache.has(i));
+		CHECK_EQ(cache.get(i), i * 7);
+	}
+
+	const int *original = cache.getptr(255);
+	REQUIRE(original != nullptr);
+	const auto first_entry = cache.insert(255, 999);
+	const auto replaced = cache.insert(255, 1000);
+	CHECK(first_entry == replaced);
+	CHECK(cache.getptr(255) == original);
+	CHECK_EQ(*original, 1000);
+	for (int i = 0; i < 1024; i++) {
+		cache.insert(255, i);
+	}
+	CHECK_EQ(cache.get_size(), 16);
+	CHECK(cache.getptr(255) == original);
+	CHECK_EQ(cache.get(255), 1023);
+
+	cache.set_capacity(4);
+	CHECK_EQ(cache.get_size(), 4);
+	CHECK(cache.has(255));
+	cache.clear();
+	CHECK_EQ(cache.get_size(), 0);
+	CHECK_FALSE(cache.has(255));
 }
 
 } // namespace TestLRU

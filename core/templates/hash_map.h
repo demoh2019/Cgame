@@ -376,6 +376,33 @@ public:
 		return true;
 	}
 
+	// Mark an existing entry as most recently used without reallocating it.
+	// The HashMap's stable node address keeps cached values and userdata pointers valid.
+	TValue *renew_key(const TKey &p_key) {
+		uint32_t idx = 0;
+		if (!_lookup_idx(p_key, idx)) {
+			return nullptr;
+		}
+
+		HashMapElement<TKey, TValue> *entry = _elements[idx];
+		if (entry == _tail_element) {
+			return &entry->data.value;
+		}
+
+		if (entry->prev != nullptr) {
+			entry->prev->next = entry->next;
+		} else {
+			_head_element = entry->next;
+		}
+		// A non-tail entry always has a successor.
+		entry->next->prev = entry->prev;
+		entry->prev = _tail_element;
+		entry->next = nullptr;
+		_tail_element->next = entry;
+		_tail_element = entry;
+		return &entry->data.value;
+	}
+
 	// Replace the key of an entry in-place, without invalidating iterators or changing the entries position during iteration.
 	// p_old_key must exist in the map and p_new_key must not, unless it is equal to p_old_key.
 	bool replace_key(const TKey &p_old_key, const TKey &p_new_key) {
