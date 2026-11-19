@@ -32,61 +32,91 @@
 #include "core/math/aabb.h"
 #include "core/math/rect2.h"
 
-// Conservative rejection for linear CCD casts: if the union of an initial
-// shape's bounds and its translated bounds misses the target, a linear sweep
-// cannot hit it. Touching bounds are intentionally treated as potentially
-// colliding. Nonfinite/invalid inputs cannot be safely rejected.
-//
-// Only use this fast path when both shapes have fixed orientations during
-// the sweep and their local bounds conservatively cover their geometry.
+#include <limits>
+
+// Conservative swept-AABB rejection for linearly moving, fixed-orientation
+// shapes. A moving box intersects a target only when their time intervals
+// overlap on EVERY axis. Touches and unknown arithmetic stay eligible.
+// World-boundary and rotating shapes must bypass this prefilter.
+
+// Use slab time intervals rather than the union of start/end AABBs.
+// A diagonal trajectory can miss an obstacle even when the union overlaps.
+// Expanding the entry/exit fractions slightly avoids rejecting a grazing
+// contact due to floating-point rounding. Indeterminate arithmetic keeps
+// the original narrowphase path (conservative fallback).
+_FORCE_INLINE_ bool physics_ccd_swept_bounds_clip_axis(double p_moving_min, double p_moving_max,
+		double p_target_min, double p_target_max, double p_motion,
+		double &r_first, double &r_last) {
+	if (p_motion == 0.0) {
+		return p_moving_min <= p_target_max && p_moving_max >= p_target_min;
+	}
+	double first = (p_target_min - p_moving_max) / p_motion;
+	double last = (p_target_max - p_moving_min) / p_motion;
+	if (!Math::is_finite(first) || !Math::is_finite(last)) {
+		// Overflowing double math must never produce a false negative.
+		return true;
+	}
+	if (first > last) {
+		SWAP(first, last);
+	}
+	const double tolerance = 32.0 * std::numeric_limits<double>::epsilon() *
+			MAX(1.0, MAX(Math::abs(first), Math::abs(last)));
+	if (!Math::is_finite(tolerance)) {
+		return true;
+	}
+	r_first = MAX(r_first, first - tolerance);
+	r_last = MIN(r_last, last + tolerance);
+	return r_first <= r_last;
+}
+
 _FORCE_INLINE_ bool physics_ccd_swept_bounds_may_overlap(const Rect2 &p_moving, const Rect2 &p_target, const Vector2 &p_relative_motion, real_t p_backtrack_fraction = 0.0) {
 	if (!p_moving.is_finite() || !p_target.is_finite() || !p_relative_motion.is_finite() ||
+			!Math::is_finite(p_backtrack_fraction) || p_backtrack_fraction < 0.0 ||
 			p_moving.size.x < 0.0 || p_moving.size.y < 0.0 ||
 			p_target.size.x < 0.0 || p_target.size.y < 0.0) {
 		return true;
 	}
-	const Rect2 translated(p_moving.position + p_relative_motion, p_moving.size);
-	if (!translated.is_finite()) {
-		return true;
-	}
-	// The legacy support rays start slightly behind the body. Include
-	// the same lead-in so the fast path cannot discard such a ray hit.
-	const Rect2 backtracked(p_moving.position - p_relative_motion * p_backtrack_fraction, p_moving.size);
-	if (!backtracked.is_finite()) {
-		return true;
-	}
-	const Rect2 swept = p_moving.merge(translated).merge(backtracked);
-	const Vector2 moving_end = swept.get_end();
+	// Mirror the support-ray interval [-backtrack, 1]. Real_t overflow
+	// means that the cast cannot be safely culled.
+	const Vector2 translated = p_moving.position + p_relative_motion;
+	const Vector2 backtracked = p_moving.position - p_relative_motion * p_backtrack_fraction;
+	const Vector2 moving_end = p_moving.get_end();
 	const Vector2 target_end = p_target.get_end();
-	if (!swept.is_finite() || !moving_end.is_finite() || !target_end.is_finite()) {
+	if (!translated.is_finite() || !backtracked.is_finite() ||
+			!moving_end.is_finite() || !target_end.is_finite()) {
 		return true;
 	}
-	return swept.position.x <= target_end.x && moving_end.x >= p_target.position.x &&
-			swept.position.y <= target_end.y && moving_end.y >= p_target.position.y;
+
+	double first = -double(p_backtrack_fraction);
+	double last = 1.0;
+	return physics_ccd_swept_bounds_clip_axis(double(p_moving.position.x), double(moving_end.x),
+					double(p_target.position.x), double(target_end.x), double(p_relative_motion.x), first, last) &&
+			physics_ccd_swept_bounds_clip_axis(double(p_moving.position.y), double(moving_end.y),
+					double(p_target.position.y), double(target_end.y), double(p_relative_motion.y), first, last);
 }
 
 _FORCE_INLINE_ bool physics_ccd_swept_bounds_may_overlap(const AABB &p_moving, const AABB &p_target, const Vector3 &p_relative_motion, real_t p_backtrack_fraction = 0.0) {
 	if (!p_moving.is_finite() || !p_target.is_finite() || !p_relative_motion.is_finite() ||
+			!Math::is_finite(p_backtrack_fraction) || p_backtrack_fraction < 0.0 ||
 			p_moving.size.x < 0.0 || p_moving.size.y < 0.0 || p_moving.size.z < 0.0 ||
 			p_target.size.x < 0.0 || p_target.size.y < 0.0 || p_target.size.z < 0.0) {
 		return true;
 	}
-	const AABB translated(p_moving.position + p_relative_motion, p_moving.size);
-	if (!translated.is_finite()) {
-		return true;
-	}
-	// Include the support ray's backward lead-in, not only [t=0, t=1].
-	const AABB backtracked(p_moving.position - p_relative_motion * p_backtrack_fraction, p_moving.size);
-	if (!backtracked.is_finite()) {
-		return true;
-	}
-	const AABB swept = p_moving.merge(translated).merge(backtracked);
-	const Vector3 moving_end = swept.get_end();
+	const Vector3 translated = p_moving.position + p_relative_motion;
+	const Vector3 backtracked = p_moving.position - p_relative_motion * p_backtrack_fraction;
+	const Vector3 moving_end = p_moving.get_end();
 	const Vector3 target_end = p_target.get_end();
-	if (!swept.is_finite() || !moving_end.is_finite() || !target_end.is_finite()) {
+	if (!translated.is_finite() || !backtracked.is_finite() ||
+			!moving_end.is_finite() || !target_end.is_finite()) {
 		return true;
 	}
-	return swept.position.x <= target_end.x && moving_end.x >= p_target.position.x &&
-			swept.position.y <= target_end.y && moving_end.y >= p_target.position.y &&
-			swept.position.z <= target_end.z && moving_end.z >= p_target.position.z;
+
+	double first = -double(p_backtrack_fraction);
+	double last = 1.0;
+	return physics_ccd_swept_bounds_clip_axis(double(p_moving.position.x), double(moving_end.x),
+					double(p_target.position.x), double(target_end.x), double(p_relative_motion.x), first, last) &&
+			physics_ccd_swept_bounds_clip_axis(double(p_moving.position.y), double(moving_end.y),
+					double(p_target.position.y), double(target_end.y), double(p_relative_motion.y), first, last) &&
+			physics_ccd_swept_bounds_clip_axis(double(p_moving.position.z), double(moving_end.z),
+					double(p_target.position.z), double(target_end.z), double(p_relative_motion.z), first, last);
 }
