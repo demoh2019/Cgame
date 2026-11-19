@@ -1209,4 +1209,89 @@ TEST_CASE("[BVH] Reciprocal pair indices fit into the 64-bit contact link") {
 	}
 }
 
+
+TEST_CASE("[BVH] 2D point and box culls reject empty roots and preserve subtree results") {
+	using Tree = BVH_Manager<Item, 2, true, 16, PairTest, CountingCullTest, Rect2, Vector2, false>;
+	Tree tree;
+	constexpr int COUNT = 96;
+	Item items[COUNT];
+	for (int i = 0; i < COUNT; ++i) {
+		items[i].value = i;
+		tree.create(&items[i], true, uint32_t(i & 1), 3, Rect2(i * 4, 0, 1, 1));
+	}
+	Item *results[COUNT] = {};
+
+	// Entirely absent queries must not yield false positives from a leaf.
+	CountingCullTest::calls = 0;
+	CHECK(tree.cull_aabb(Rect2(0, 1000, 1000, 4), results, COUNT, nullptr) == 0);
+	CHECK(tree.cull_point(Vector2(999, 999), results, COUNT, nullptr) == 0);
+	CHECK(tree.cull_segment(Vector2(-10, 1000), Vector2(500, 1000), results, COUNT, nullptr) == 0);
+	CHECK(CountingCullTest::calls == 0);
+
+	// Fully covering each root should still enumerate each proxy exactly once.
+	CountingCullTest::calls = 0;
+	CHECK(tree.cull_aabb(Rect2(-2, -2, COUNT * 4 + 4, 6), results, COUNT, nullptr) == COUNT);
+	CHECK(CountingCullTest::calls == COUNT);
+	bool seen[COUNT] = {};
+	for (int i = 0; i < COUNT; ++i) {
+		REQUIRE(results[i] != nullptr);
+		CHECK(results[i]->value >= 0);
+		CHECK(results[i]->value < COUNT);
+		seen[results[i]->value] = true;
+	}
+	for (bool found : seen) {
+		CHECK(found);
+	}
+
+	CHECK(tree.cull_aabb(Rect2(-2, -2, COUNT * 4 + 4, 6), results, COUNT, nullptr, 1) == COUNT / 2);
+	CHECK(tree.cull_aabb(Rect2(16.5, 0, 18, 1), results, COUNT, nullptr) == 5);
+	CHECK(tree.cull_point(Vector2(20.5, 0.5), results, COUNT, nullptr) == 1);
+	CHECK(results[0] == &items[5]);
+	CHECK(tree.cull_segment(Vector2(-2, 0.5), Vector2(COUNT * 4, 0.5), results, COUNT, nullptr) == COUNT);
+	CountingCullTest::calls = 0;
+	CHECK(tree.cull_aabb(Rect2(-2, -2, COUNT * 4 + 4, 6), results, 3, nullptr) == 3);
+	CHECK(CountingCullTest::calls == 3);
+}
+
+TEST_CASE("[BVH] 3D point, segment and box culls preserve exact results") {
+	using Tree = BVH_Manager<Item, 2, true, 16, PairTest, CountingCullTest, AABB, Vector3, false>;
+	Tree tree;
+	constexpr int COUNT = 96;
+	Item items[COUNT];
+	for (int i = 0; i < COUNT; ++i) {
+		items[i].value = i;
+		tree.create(&items[i], true, uint32_t(i & 1), 3,
+				AABB(Vector3(i * 4, 0, 0), Vector3(1, 1, 1)));
+	}
+	Item *results[COUNT] = {};
+
+	CountingCullTest::calls = 0;
+	CHECK(tree.cull_aabb(AABB(Vector3(0, 1000, 0), Vector3(1000, 1, 1)), results, COUNT, nullptr) == 0);
+	CHECK(tree.cull_point(Vector3(999, 999, 999), results, COUNT, nullptr) == 0);
+	CHECK(tree.cull_segment(Vector3(-10, 1000, 0.5), Vector3(500, 1000, 0.5), results, COUNT, nullptr) == 0);
+	CHECK(CountingCullTest::calls == 0);
+
+	const AABB all(Vector3(-2, -2, -2), Vector3(COUNT * 4 + 4, 6, 6));
+	CountingCullTest::calls = 0;
+	CHECK(tree.cull_aabb(all, results, COUNT, nullptr) == COUNT);
+	CHECK(CountingCullTest::calls == COUNT);
+	bool seen[COUNT] = {};
+	for (int i = 0; i < COUNT; ++i) {
+		REQUIRE(results[i] != nullptr);
+		CHECK(results[i]->value >= 0);
+		CHECK(results[i]->value < COUNT);
+		seen[results[i]->value] = true;
+	}
+	for (bool found : seen) {
+		CHECK(found);
+	}
+	CHECK(tree.cull_aabb(all, results, COUNT, nullptr, 2) == COUNT / 2);
+	CHECK(tree.cull_point(Vector3(16.5, 0.5, 0.5), results, COUNT, nullptr) == 1);
+	CHECK(results[0] == &items[4]);
+	CHECK(tree.cull_segment(Vector3(-2, 0.5, 0.5), Vector3(COUNT * 4, 0.5, 0.5), results, COUNT, nullptr) == COUNT);
+	CountingCullTest::calls = 0;
+	CHECK(tree.cull_aabb(all, results, 1, nullptr) == 1);
+	CHECK(CountingCullTest::calls == 1);
+}
+
 } // namespace TestBVH
