@@ -1482,6 +1482,19 @@ GodotSpace3D::GodotSpace3D() {
 	fluid_plane_angular_drag = MAX(real_t(0.0), (real_t)GLOBAL_GET("physics/3d/fluid_plane/angular_drag"));
 	fluid_plane_flow_velocity = GLOBAL_GET("physics/3d/fluid_plane/flow_velocity");
 	gyroscopic_forces = GLOBAL_GET("physics/3d/solver/gyroscopic_forces");
+	rotating_frame_enabled = GLOBAL_GET("physics/3d/solver/rotating_frame_enabled");
+	const Vector3 configured_frame_origin = GLOBAL_GET("physics/3d/solver/rotating_frame_origin");
+	rotating_frame_origin = configured_frame_origin.is_finite() ? configured_frame_origin : Vector3();
+	const Vector3 configured_frame_omega = GLOBAL_GET("physics/3d/solver/rotating_frame_angular_velocity");
+	rotating_frame_angular_velocity = configured_frame_omega.is_finite() ?
+			Vector3(CLAMP(configured_frame_omega.x, real_t(-100.0), real_t(100.0)),
+					CLAMP(configured_frame_omega.y, real_t(-100.0), real_t(100.0)),
+					CLAMP(configured_frame_omega.z, real_t(-100.0), real_t(100.0))) : Vector3();
+	const Vector3 configured_frame_alpha = GLOBAL_GET("physics/3d/solver/rotating_frame_angular_acceleration");
+	rotating_frame_angular_acceleration = configured_frame_alpha.is_finite() ?
+			Vector3(CLAMP(configured_frame_alpha.x, real_t(-100.0), real_t(100.0)),
+					CLAMP(configured_frame_alpha.y, real_t(-100.0), real_t(100.0)),
+					CLAMP(configured_frame_alpha.z, real_t(-100.0), real_t(100.0))) : Vector3();
 	gyroscopic_integration_mode = CLAMP((int)GLOBAL_GET("physics/3d/solver/gyroscopic_integration_mode"), 0, 1);
 	rolling_friction = MAX(real_t(0.0), (real_t)GLOBAL_GET("physics/3d/solver/rolling_friction"));
 	spinning_friction = MAX(real_t(0.0), (real_t)GLOBAL_GET("physics/3d/solver/spinning_friction"));
