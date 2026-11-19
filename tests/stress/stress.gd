@@ -6,6 +6,7 @@ signal sample_signal(value: int)
 
 const PREFIX := "STRESS_RESULT:"
 const ExtraStress := preload("res://extra_stress.gd")
+const PressureStress := preload("res://pressure_scenarios.gd")
 const CASES := [
 	"containers", "strings", "script_vm", "math", "signals",
 	"scene_tree", "packed_scene", "images", "json", "stream", "stream_bulk",
@@ -21,6 +22,7 @@ const CASES := [
 	"packed_arrays", "sorting", "animation_tracks", "physics_raycast_2d",
 	"physics_raycast_3d", "render_multimesh_3d",
 	"object_lifecycle", "scene_churn",
+	"scene_reparent", "resource_roundtrip", "audio_bus_churn",
 	"bitmap_rects", "bitmap_pipeline",
 	"curve_tessellation_2d", "curve_tessellation_3d", "curve_bake", "curve_nearest",
 ]
@@ -195,6 +197,12 @@ func _run_case(test_case: String, scale: int, frames: int, seed: int) -> Diction
 			return await _object_lifecycle(scale)
 		"scene_churn":
 			return await _scene_churn(scale)
+		"scene_reparent":
+			return PressureStress.new().scene_reparent(self, scale)
+		"resource_roundtrip":
+			return PressureStress.new().resource_roundtrip(scale)
+		"audio_bus_churn":
+			return PressureStress.new().audio_bus_churn(scale)
 		"threads":
 			return _threads(scale, seed)
 		"astar_grid":
