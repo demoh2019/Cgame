@@ -2305,6 +2305,77 @@ TEST_CASE("[String] Strip escapes") {
 	CHECK(s.strip_escapes() == "Test Test Test");
 }
 
+TEST_CASE("[String] Similarity indexed bigram branch matches quadratic reference") {
+	auto reference = [](const String &p_source, const String &p_target) -> float {
+		if (p_source == p_target) {
+			return 1.0f;
+		}
+		if (p_source.length() < 2 || p_target.length() < 2) {
+			return 0.0f;
+		}
+		const int source_size = p_source.length() - 1;
+		const int target_size = p_target.length() - 1;
+		int matched = 0;
+		for (int i = 0; i < source_size; ++i) {
+			for (int j = 0; j < target_size; ++j) {
+				if (p_source[i] == p_target[j] && p_source[i + 1] == p_target[j + 1]) {
+					++matched;
+					break;
+				}
+			}
+		}
+		return (2.0f * matched) / (source_size + target_size);
+	};
+
+	const String pool = U"abcXYZ:\u0416\u03A3\u00C4";
+	uint32_t state = 0x41234123;
+	for (int test = 0; test < 240; ++test) {
+		state = state * 1664525U + 1013904223U;
+		const int first_len = state % 185;
+		state = state * 1664525U + 1013904223U;
+		const int second_len = state % 185;
+		String first;
+		String second;
+		for (int i = 0; i < first_len; ++i) {
+			state = state * 1664525U + 1013904223U;
+			first += String::chr(pool[state % pool.length()]);
+		}
+		for (int i = 0; i < second_len; ++i) {
+			state = state * 1664525U + 1013904223U;
+			second += String::chr(pool[state % pool.length()]);
+		}
+		CHECK(first.similarity(second) == reference(first, second));
+		CHECK(second.similarity(first) == reference(second, first));
+	}
+
+	const String duplicate = String("a").repeat(160);
+	const String mixed = String("a").repeat(80) + String("b").repeat(80);
+	CHECK(duplicate.similarity(mixed) == reference(duplicate, mixed));
+	CHECK(mixed.similarity(duplicate) == reference(mixed, duplicate));
+	CHECK(String("a").repeat(1024).similarity(String("z").repeat(512)) == 0.0f);
+}
+
+TEST_CASE("[String] Case-insensitive subsequence exhaustive printable ASCII") {
+	for (char32_t a = 32; a < 127; ++a) {
+		for (char32_t b = 32; b < 127; ++b) {
+			const bool expected = String::char_lowercase(a) == String::char_lowercase(b);
+			CHECK(String::chr(a).is_subsequence_ofn(String::chr(b)) == expected);
+		}
+	}
+}
+
+TEST_CASE("[String] Case-insensitive subsequence mixed Unicode matching") {
+	CHECK(String(U"k").is_subsequence_ofn(String(U"\u212A")));
+	CHECK(String(U"\u212A").is_subsequence_ofn(String("K")));
+	CHECK(String(U"\u03C3").is_subsequence_ofn(String(U"\u03A3")));
+	CHECK(String(U"\u0436").is_subsequence_ofn(String(U"\u0416")));
+	CHECK(String(U"\u00E4").is_subsequence_ofn(String(U"\u00C4")));
+	CHECK(String(U"\u0416k\u03A3").is_subsequence_ofn(String(U"foo\u0436bar\u212Axyz\u03C3")));
+	CHECK(!String(U"\u0416\u03A3").is_subsequence_of(String(U"\u0436\u03C3")));
+	CHECK(!String("aC").is_subsequence_ofn("abbb"));
+	CHECK(String().is_subsequence_ofn(String("abc")));
+}
+
 TEST_CASE("[String] Similarity") {
 	String a = "Test";
 	String b = "West";

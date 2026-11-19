@@ -44,6 +44,7 @@ STATIC_ASSERT_INCOMPLETE_TYPE(class, Object);
 #include "core/string/string_name.h"
 #include "core/string/translation_server.h"
 #include "core/string/ucaps.h"
+#include "core/templates/hash_set.h"
 #include "core/variant/variant.h"
 #include "core/version_generated.gen.h"
 
@@ -3523,9 +3524,16 @@ bool String::_base_is_subsequence_of(const String &p_string, bool p_case_insensi
 	for (; *src && *tgt; tgt++) {
 		bool match = false;
 		if (p_case_insensitive) {
-			char32_t srcc = String::char_lowercase(*src);
-			char32_t tgtc = String::char_lowercase(*tgt);
-			match = srcc == tgtc;
+			const char32_t srcc = *src;
+			const char32_t tgtc = *tgt;
+			if (srcc == tgtc) {
+				match = true;
+			} else if (srcc < 128 && tgtc < 128) {
+				match = lower_case(srcc) == lower_case(tgtc);
+			} else {
+				// Mixed ASCII/Unicode pairs must use the full Unicode mappings.
+				match = String::char_lowercase(srcc) == String::char_lowercase(tgtc);
+			}
 		} else {
 			match = *src == *tgt;
 		}
@@ -3557,27 +3565,45 @@ Vector<String> String::bigrams() const {
 // Similarity according to Sorensen-Dice coefficient
 float String::similarity(const String &p_string) const {
 	if (operator==(p_string)) {
-		// Equal strings are totally similar
+		// Equal strings are totally similar.
 		return 1.0f;
 	}
 	if (length() < 2 || p_string.length() < 2) {
-		// No way to calculate similarity without a single bigram
 		return 0.0f;
 	}
 
 	const int src_size = length() - 1;
 	const int tgt_size = p_string.length() - 1;
-
 	const int sum = src_size + tgt_size;
 	int inter = 0;
-	for (int i = 0; i < src_size; i++) {
-		const char32_t i0 = get(i);
-		const char32_t i1 = get(i + 1);
 
-		for (int j = 0; j < tgt_size; j++) {
-			if (i0 == p_string.get(j) && i1 == p_string.get(j + 1)) {
-				inter++;
-				break;
+	// Preserve the allocation-free comparison path for short strings.
+	// Longer inputs avoid a quadratic number of bigram comparisons.
+	if (int64_t(src_size) * tgt_size >= 2048 && tgt_size >= 8) {
+		HashSet<uint64_t> target_bigrams;
+		target_bigrams.reserve(tgt_size);
+		const char32_t *tgt = p_string.ptr();
+		for (int j = 0; j < tgt_size; ++j) {
+			const uint64_t pair = (uint64_t(tgt[j]) << 32) | uint64_t(tgt[j + 1]);
+			target_bigrams.insert(pair);
+		}
+
+		const char32_t *src = ptr();
+		for (int i = 0; i < src_size; ++i) {
+			const uint64_t pair = (uint64_t(src[i]) << 32) | uint64_t(src[i + 1]);
+			if (target_bigrams.has(pair)) {
+				++inter;
+			}
+		}
+	} else {
+		for (int i = 0; i < src_size; ++i) {
+			const char32_t i0 = get(i);
+			const char32_t i1 = get(i + 1);
+			for (int j = 0; j < tgt_size; ++j) {
+				if (i0 == p_string.get(j) && i1 == p_string.get(j + 1)) {
+					++inter;
+					break;
+				}
 			}
 		}
 	}
