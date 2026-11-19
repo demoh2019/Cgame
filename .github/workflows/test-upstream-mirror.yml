@@ -24,3 +24,7 @@ jobs:
         run: python3 -m compileall -q .github/scripts
       - name: Run mirror unit tests
         run: python3 -m unittest discover -s .github/scripts/tests -v
+      - name: Dry-run against the real upstream GitHub API (no writes)
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: python3 .github/scripts/mirror_upstream.py --start-page 1 --pages 1 --max-items 5
