@@ -27,6 +27,8 @@
 #include "servers/physics_fem_convex_star.h"
 #include "tests/test_macros.h"
 
+#include <initializer_list>
+
 TEST_FORCE_LINK(test_physics_fem_convex_star)
 
 namespace TestPhysicsFEMConvexStar {
