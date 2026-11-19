@@ -308,9 +308,14 @@ bool GodotSphereShape3D::intersect_segment(const Vector3 &p_begin, const Vector3
 		return false;
 	}
 
-	const double hit_x = bx + dx * fraction;
-	const double hit_y = by + dy * fraction;
-	const double hit_z = bz + dz * fraction;
+	// Reconstruct the surface hit from the closest point. Using
+	// begin + direction * fraction would subtract two numbers of order
+	// 1e20 and erase a unit-sized entry distance, even in double.
+	const double entry_distance = Math::sqrt(radius_squared - distance_squared);
+	const double inverse_length = 1.0 / Math::sqrt(length_squared);
+	const double hit_x = cx - dx * inverse_length * entry_distance;
+	const double hit_y = cy - dy * inverse_length * entry_distance;
+	const double hit_z = cz - dz * inverse_length * entry_distance;
 	r_result = Vector3(real_t(hit_x), real_t(hit_y), real_t(hit_z));
 	r_normal = Vector3(real_t(hit_x / double(radius)), real_t(hit_y / double(radius)), real_t(hit_z / double(radius))).normalized();
 	return true;
