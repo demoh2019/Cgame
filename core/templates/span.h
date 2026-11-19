@@ -362,7 +362,7 @@ constexpr int64_t Span<T>::rfind_sequence(const Span<T1> &p_span, uint64_t p_fro
 						uint64_t remaining = p_from + 1;
 						while (remaining >= sizeof(uint64_t)) {
 							remaining -= sizeof(uint64_t);
-							uint64_t word;
+							uint64_t word = 0;
 							std::memcpy(&word, haystack + remaining + anchor, sizeof(word));
 							const uint64_t diff = word ^ anchor_pattern;
 							if (((diff - ONE_PER_BYTE) & ~diff & HIGH_BIT_PER_BYTE) == 0) {
