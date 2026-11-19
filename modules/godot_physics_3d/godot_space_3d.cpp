@@ -1340,6 +1340,7 @@ GodotSpace3D::GodotSpace3D() {
 	fluid_buoyancy = MAX(real_t(0.0), (real_t)GLOBAL_GET("physics/3d/solver/fluid_buoyancy"));
 	fluid_flow_velocity = GLOBAL_GET("physics/3d/solver/fluid_flow_velocity");
 	fluid_plane_enabled = GLOBAL_GET("physics/3d/fluid_plane/enabled");
+	soft_body_hydrostatic_buoyancy = GLOBAL_GET("physics/3d/fluid_plane/soft_body_hydrostatic_buoyancy");
 	fluid_plane_surface_height = GLOBAL_GET("physics/3d/fluid_plane/surface_height");
 	fluid_plane_density = MAX(real_t(0.0), (real_t)GLOBAL_GET("physics/3d/fluid_plane/density"));
 	fluid_plane_drag_coefficient = MAX(real_t(0.0), (real_t)GLOBAL_GET("physics/3d/fluid_plane/drag_coefficient"));
