@@ -677,9 +677,16 @@ void GodotBody3D::integrate_forces(real_t p_step, bool p_defer_motion) {
 						continue;
 					}
 					total_fluid_shape_volume += shape_volume;
-					const AABB &bounds = get_shape_aabb(i);
+					// The cached broadphase AABB can be padded or swept for
+					// CCD. Use it only to reject definitely dry shapes; then
+					// compute current transformed bounds for a valid waterline.
+					const real_t water_height = get_space()->get_fluid_plane_surface_height();
+					if (get_shape_aabb(i).position.y >= water_height) {
+						continue;
+					}
+					const AABB bounds = (get_transform() * get_shape_transform(i)).xform(get_shape(i)->get_aabb());
 					const GodotPhysicsFluidSample3D sample = godot_physics_fluid_sample_3d(
-							bounds, shape_volume, get_space()->get_fluid_plane_surface_height());
+							bounds, shape_volume, water_height);
 					if (!(sample.submerged_volume > 0.0)) {
 						continue;
 					}
