@@ -181,8 +181,8 @@ def run_once(cmd: list[str], timeout: float, rss_limit_mib: float,
         "rss_final_mib": round(rss_trace[-1][1], 3) if rss_trace else None,
         # This is allocator retention after 20% of the run, not proof of a leak.
         "rss_post_warmup_growth_mib": (
-            round(rss_trace[-1][1] - next(value for t, value in rss_trace
-                                            if t >= elapsed * 0.2), 3)
+            round(rss_trace[-1][1] - next((value for t, value in rss_trace
+                                             if t >= elapsed * 0.2), rss_trace[0][1]), 3)
             if len(rss_trace) > 1 else None
         ),
         "exit_code": process.returncode,
