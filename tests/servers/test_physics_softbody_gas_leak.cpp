@@ -135,8 +135,9 @@ TEST_CASE("[PhysicsGasLeak] Invalid rate, timestep, gamma or mass is atomic") {
 			1.0, -0.1, mass, pressure));
 	CHECK_FALSE(physics_softbody_gas_leak_step(1.0, 1.0, 100.0, 0.0,
 			1.0, 0.1, mass, pressure));
+	mass = -1.0;
 	CHECK_FALSE(physics_softbody_gas_leak_step(1.0, 1.0, 100.0, 1.4,
-			1.0, 0.1, mass = -1.0, pressure));
+			1.0, 0.1, mass, pressure));
 	CHECK(mass == -1.0);
 	CHECK(pressure == 37.0);
 }
