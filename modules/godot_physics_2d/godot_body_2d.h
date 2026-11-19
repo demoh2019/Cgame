@@ -331,10 +331,10 @@ public:
 	// With `p_defer_motion`, the broadphase is not touched and the call is safe to
 	// run concurrently for different bodies; call `apply_deferred_motion` afterwards.
 	void integrate_forces(real_t p_step, bool p_defer_motion = false);
-	_FORCE_INLINE_ void apply_deferred_motion() {
+	_FORCE_INLINE_ void apply_deferred_motion(real_t p_step) {
 		if (has_deferred_motion) {
 			has_deferred_motion = false;
-			_update_shapes_with_motion(deferred_motion);
+			_update_shapes_with_motion(deferred_motion, angular_velocity * p_step, get_transform().get_origin() + center_of_mass);
 		}
 	}
 	void integrate_velocities(real_t p_step);

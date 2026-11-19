@@ -391,6 +391,9 @@ PhysicsServer2D::PhysicsServer2D() {
 	// on each step (0 disables warm starting, 1 preserves legacy behavior).
 	GLOBAL_DEF(PropertyInfo(Variant::FLOAT, "physics/2d/solver/warm_start_coefficient", PROPERTY_HINT_RANGE, "0,1,0.01"), 1.0);
 	// Box2D-style Pade damping remains opt-in for backwards-compatible motion.
+	// Account for rotating CCD shapes in broadphase candidate generation.
+	// Conservative only: narrowphase angular time-of-impact remains separate.
+	GLOBAL_DEF(PropertyInfo(Variant::BOOL, "physics/2d/solver/ccd_rotational_bounds"), false);
 	GLOBAL_DEF(PropertyInfo(Variant::BOOL, "physics/2d/solver/implicit_damping"), false);
 	// Bullet-style rotational resistance for loaded rigid contacts; off by default.
 	GLOBAL_DEF(PropertyInfo(Variant::FLOAT, "physics/2d/solver/rolling_friction", PROPERTY_HINT_RANGE, "0,1,0.01,or_greater"), 0.0);

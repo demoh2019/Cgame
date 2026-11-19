@@ -1215,6 +1215,7 @@ GodotSpace2D::GodotSpace2D() {
 	max_linear_velocity = MAX((real_t)0.0, (real_t)GLOBAL_GET("physics/2d/solver/max_linear_velocity"));
 	max_angular_velocity = MAX((real_t)0.0, (real_t)GLOBAL_GET("physics/2d/solver/max_angular_velocity"));
 	warm_start_coefficient = CLAMP((real_t)GLOBAL_GET("physics/2d/solver/warm_start_coefficient"), real_t(0.0), real_t(1.0));
+	ccd_rotational_bounds = GLOBAL_GET("physics/2d/solver/ccd_rotational_bounds");
 	implicit_damping = GLOBAL_GET("physics/2d/solver/implicit_damping");
 	rolling_friction = MAX(real_t(0.0), (real_t)GLOBAL_GET("physics/2d/solver/rolling_friction"));
 	static_friction_multiplier = MAX(real_t(1.0), (real_t)GLOBAL_GET("physics/2d/solver/static_friction_multiplier"));
