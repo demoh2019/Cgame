@@ -648,6 +648,10 @@ PhysicsServer3D::PhysicsServer3D() {
 	// Opt-in XPBD hinge dihedral bending for adjacent cloth triangles.
 	// Zero disables setup, solver work and all persistent hinge buffers.
 	GLOBAL_DEF(PropertyInfo(Variant::FLOAT, "physics/3d/solver/soft_body_xpbd_dihedral_compliance", PROPERTY_HINT_RANGE, "0,0.01,0.000001,or_greater"), 0.0);
+	// Orthotropic hinge bending: resistance differs across warp and weft.
+	// 1 means isotropic (legacy behavior); material axis is mesh-local.
+	GLOBAL_DEF(PropertyInfo(Variant::FLOAT, "physics/3d/solver/soft_body_xpbd_bend_weft_ratio", PROPERTY_HINT_RANGE, "0.01,100,0.01,or_greater"), 1.0);
+	GLOBAL_DEF(PropertyInfo(Variant::VECTOR3, "physics/3d/solver/soft_body_xpbd_bend_warp_axis"), Vector3(1, 0, 0));
 	// Meshless shape matching fits a proper rigid rotation to the entire soft
 	// mesh and pulls movable vertices toward the fitted rest shape. Unlike
 	// volumetric FEM, this is a global visual-elasticity constraint.
