@@ -72,8 +72,12 @@ class LargeIsland3DColoringContracts(unittest.TestCase):
         self.assertIn("*mask |= bit;", block)
         self.assertIn("occupied_colors.insert(body, bit);", block)
         self.assertIn("constraint_colors[i] = color;", block)
-        # Both static and kinematic bodies are conservatively included.
-        self.assertNotIn("get_mode() == PS3DE::BODY_MODE_STATIC", block)
+        # Static and kinematic bodies are read-only only for contact-only
+        # islands. Mixed islands continue reserving every body pointer.
+        self.assertIn("bool contact_only_island = true;", block)
+        self.assertIn("!p_constraint_island[i]->permits_parallel_immovable_body_sharing()", block)
+        self.assertIn("(!contact_only_island || body->get_mode() > PS3DE::BODY_MODE_KINEMATIC)", block)
+        self.assertIn("(contact_only_island && body->get_mode() <= PS3DE::BODY_MODE_KINEMATIC)", block)
 
     def test_color_barrier_and_serial_overflow(self):
         block = self.coloring
