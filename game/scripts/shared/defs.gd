@@ -191,6 +191,16 @@ static func _build_items() -> void:
 			"reach": 3.5, "weight": 3.6, "value": 54 * t})
 		_add_recipe("spear_%d" % t, "spear_%d" % t, 1,
 			spear_inputs, "workbench", 6.0)
+		# Lightweight classless archery: affordable arrows, limited distance and noise.
+		_add_item("bow_%d" % t, {"name": "Survival Bow T%d" % t,
+			"kind": "weapon", "weapon": "ranged", "tier": t,
+			"damage": 10.0 + 7.0 * (t - 1), "cooldown": 1.05,
+			"range": 27.0, "ammo": "arrow",
+			"shot_noise_radius": 9.0, "shot_noise_seconds": 0.8,
+			"weight": 2.2, "value": 38 * t})
+		_add_recipe("bow_%d" % t, "bow_%d" % t, 1,
+			{"plank_%d" % t: 2, "fiber_%d" % t: 2,
+				"cloth_%d" % t: 1}, "workbench", 5.0)
 		# Armour: reduces incoming damage.
 		_add_item("jacket_%d" % t, {"name": "Jacket T%d" % t, "kind": "armor", "tier": t, "armor": 0.08 + 0.07 * (t - 1), "value": 35 * t})
 		_add_recipe("jacket_%d" % t, "jacket_%d" % t, 1, {"cloth_%d" % t: 4}, "workbench", 5.0)
@@ -294,6 +304,9 @@ static func _build_items() -> void:
 	_add_item("pistol", {"name": "Pistol", "kind": "weapon", "weapon": "ranged", "tier": 3, "damage": 22.0, "cooldown": 0.45, "ammo": "ammo_9mm", "value": 150})
 	# Ranged fighting can be sustained through scavenging and T2 metalworking.
 	# Recipes use the existing authoritative bench and crafting mastery rules.
+	_add_item("arrow", {"name": "Wooden Arrows", "kind": "ammo",
+		"tier": 1, "stack": 80, "value": 1, "weight": 0.06})
+	_add_recipe("arrow", "arrow", 16, {"wood_1": 2, "fiber_1": 2}, "", 2.5)
 	_add_item("ammo_9mm", {"name": "9mm Ammo", "kind": "ammo",
 		"tier": 2, "stack": 60, "value": 2})
 	_add_recipe("ammo_9mm", "ammo_9mm", 12,
