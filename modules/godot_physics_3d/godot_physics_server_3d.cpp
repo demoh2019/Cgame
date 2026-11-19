@@ -1268,6 +1268,18 @@ void GodotPhysicsServer3D::soft_body_set_tetrahedral_interior_positions(
 	soft_body->set_tetrahedral_interior_positions(p_positions);
 }
 
+int GodotPhysicsServer3D::soft_body_get_tetrahedron_count(RID p_body) const {
+	GodotSoftBody3D *soft_body = soft_body_owner.get_or_null(p_body);
+	ERR_FAIL_NULL_V(soft_body, 0);
+	return int(soft_body->get_fem_tetrahedron_count());
+}
+
+int GodotPhysicsServer3D::soft_body_get_tetrahedral_interior_node_count(RID p_body) const {
+	GodotSoftBody3D *soft_body = soft_body_owner.get_or_null(p_body);
+	ERR_FAIL_NULL_V(soft_body, 0);
+	return int(soft_body->get_fem_interior_node_count());
+}
+
 AABB GodotPhysicsServer3D::soft_body_get_bounds(RID p_body) const {
 	GodotSoftBody3D *soft_body = soft_body_owner.get_or_null(p_body);
 	ERR_FAIL_NULL_V(soft_body, AABB());
