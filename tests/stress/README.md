@@ -2,7 +2,7 @@
 
 ## Jolt broadphase work queue, manifold and large-island tuning
 
-Jolt `PhysicsSettings` exposes three controls that previously could not be
+Jolt `PhysicsSettings` exposes six controls that previously could not be
 tuned through Cgame project settings:
 
 | Project setting | Default | Effect |
@@ -10,6 +10,9 @@ tuned through Cgame project settings:
 | `physics/jolt_physics_3d/limits/max_in_flight_body_pairs` | `16384` | Pair queue between parallel broadphase discovery and narrowphase; limited to 1024–262144 entries |
 | `physics/jolt_physics_3d/simulation/use_large_island_splitter` | `true` | Jolt's parallel constraint batches in large connected islands |
 | `physics/jolt_physics_3d/simulation/use_manifold_reduction` | `true` | Group contact manifolds with similar normals, avoiding unnecessary constraints at the cost of per-subshape detail |
+| `physics/jolt_physics_3d/simulation/contact_manifold_merge_angle` | `5°` | Maximum angle between manifold normals that Jolt may merge; 0–90°, internally converted to cosine |
+| `physics/jolt_physics_3d/simulation/contact_warm_start_distance` | `0.01 m` | Maximum displacement between contact points that can reuse the previous frame's impulses; 0–0.2 m, stored squared |
+| `physics/jolt_physics_3d/simulation/max_penetration_correction_distance` | `0.2 m` | Maximum position error corrected in one constraint iteration; 0–5 m |
 
 These are the upstream Jolt defaults, preserving existing physics unless
 the user opts in. They are copied to `JPH::PhysicsSettings` **when a space is
@@ -36,8 +39,26 @@ obtain the size of each per-worker queue; 1024 is a deliberately safe
 floor. Disabling the large-island splitter can hurt performance for large
 joint/contact networks. Disabling manifold reduction increases the number
 of contacts and can improve per-subshape reporting when needed, but
-usually increases CPU/RAM. None of these settings implies a measured
-speedup; profile under the project's actual contact density and workers.
+usually increases CPU/RAM.
+
+For contacts, the `contact_manifold_merge_angle` setting matters only when
+manifold reduction is enabled. Increasing the angle can merge more contact
+normals but can hide corner detail; reducing it retains more manifolds at a
+higher potential solver cost. Increasing `contact_warm_start_distance`
+preserves impulses over greater movement but may reuse stale impulses and
+destabilize fast contacts; 0.01 m is Jolt's original setting. The
+`max_penetration_correction_distance` cap limits how aggressively already
+overlapping bodies are separated per solver iteration. It is distinct
+from Jolt's penetration slop, speculative contact distance, and CCD.
+
+All six settings retain the vendored Jolt defaults. We intentionally do
+**not** expose `mDeterministicSimulation = false`: upstream Jolt removed
+this switch in July 2026 because disabling deterministic ordering harmed
+stack stability, despite its potential to reduce sorting overhead.
+Reference: `JoltPhysics/Docs/APIChanges.md` (2026-07-28).
+
+None of these settings implies a measured speedup; profile under the
+project's actual contact density and worker count.
 
 ```bash
 # Source/API contract tests (do not require a Cgame binary).
@@ -45,7 +66,8 @@ python3 -m unittest discover -s tests/stress -p test_jolt_pipeline_tuning.py -v
 
 # Native smoke matrix with a real Jolt project and 144 colliding spheres:
 # default, low-memory queue without island splitting, and high-capacity
-# queue without manifold reduction.
+# queue without manifold reduction. Each also tests a distinct contact
+# normal merge, warm-start persistence and correction-distance profile.
 python3 tests/stress/test_jolt_pipeline_tuning.py \
   --godot ./bin/godot.linuxbsd.editor.dev.x86_64
 
