@@ -10,7 +10,7 @@ const DAY_NIGHT_SCRIPT = preload("res://day_night.gd")
 var player
 var hud_label: Label
 var prompt_label: Label
-var day_night: Node
+var day_night
 var _campfires := 0
 var _message := ""
 var _message_seconds := 0.0
