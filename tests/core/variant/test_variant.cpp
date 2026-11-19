@@ -2523,7 +2523,7 @@ TEST_CASE("[PackedParseFastPath] float64 arrays preserve exactly representable f
 TEST_CASE("[PackedParseFastPath] string arrays preserve escaped and long strings") {
 	PackedStringArray values;
 	values.push_back("");
-	values.push_back("quote: \\" and slash: \\\\");
+	values.push_back("quote: \" and slash: \\");
 	for (int i = 0; i < 128; i++) {
 		values.push_back("resource/file_" + itos(i) + ".tscn");
 	}
