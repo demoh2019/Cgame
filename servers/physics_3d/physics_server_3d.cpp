@@ -594,6 +594,11 @@ PhysicsServer3D::PhysicsServer3D() {
 	// Stiffen beyond yield; zero preserves the original linear XPBD solver.
 	GLOBAL_DEF(PropertyInfo(Variant::FLOAT, "physics/3d/solver/soft_body_xpbd_tension_hardening", PROPERTY_HINT_RANGE, "0,100,0.1,or_greater"), 0.0);
 	GLOBAL_DEF(PropertyInfo(Variant::FLOAT, "physics/3d/solver/soft_body_xpbd_tension_yield_strain", PROPERTY_HINT_RANGE, "0,3,0.01,or_greater"), 0.1);
+	// Irreversible progressive tensile damage, without mesh fracture.
+	// Zero rate preserves the legacy solver with no per-link damage storage.
+	GLOBAL_DEF(PropertyInfo(Variant::FLOAT, "physics/3d/solver/soft_body_xpbd_damage_rate", PROPERTY_HINT_RANGE, "0,1000,0.1,or_greater,suffix:1/s"), 0.0);
+	GLOBAL_DEF(PropertyInfo(Variant::FLOAT, "physics/3d/solver/soft_body_xpbd_damage_yield_strain", PROPERTY_HINT_RANGE, "0,3,0.01,or_greater"), 0.15);
+	GLOBAL_DEF(PropertyInfo(Variant::FLOAT, "physics/3d/solver/soft_body_xpbd_damage_failure_strain", PROPERTY_HINT_RANGE, "0,5,0.01,or_greater"), 0.55);
 	// Independent unilateral XPBD limits prevent excessively stretching or
 	// compressing a soft-body link while permitting normal elastic motion
 	// inside the allowed interval. Zero ratios disable the solver entirely.
