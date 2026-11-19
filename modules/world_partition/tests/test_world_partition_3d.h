@@ -309,6 +309,8 @@ TEST_CASE("[SceneTree][WorldPartition3D] Stream one authored PackedScene and unl
 	CHECK_FALSE(partition->is_cell_loaded(Vector2i(0, 0)));
 	CHECK(partition->get_loaded_cell_count() == 0);
 
+	SceneTree::get_singleton()->get_root()->remove_child(partition);
+	SceneTree::get_singleton()->get_root()->remove_child(observer);
 	memdelete(partition);
 	memdelete(observer);
 	CHECK(DirAccess::remove_absolute(path) == OK);
