@@ -31,25 +31,25 @@
 
 // Editor-visible mesh node driven by a serializable TerrainHeightmap resource.
 class HeightmapTerrain3D : public MeshInstance3D {
-    GDCLASS(HeightmapTerrain3D, MeshInstance3D);
+	GDCLASS(HeightmapTerrain3D, MeshInstance3D);
 
-    Ref<TerrainHeightmap> terrain_data;
-    float cell_size = 1.0f;
+	Ref<TerrainHeightmap> terrain_data;
+	float cell_size = 1.0f;
 
-    void _terrain_changed();
+	void _terrain_changed();
 
 protected:
-    static void _bind_methods();
+	static void _bind_methods();
 
 public:
-    void set_terrain_data(const Ref<TerrainHeightmap> &p_data);
-    Ref<TerrainHeightmap> get_terrain_data() const;
+	void set_terrain_data(const Ref<TerrainHeightmap> &p_data);
+	Ref<TerrainHeightmap> get_terrain_data() const;
 
-    void set_cell_size(float p_size);
-    float get_cell_size() const;
+	void set_cell_size(float p_size);
+	float get_cell_size() const;
 
-    void rebuild();
+	void rebuild();
 
-    HeightmapTerrain3D();
-    ~HeightmapTerrain3D();
+	HeightmapTerrain3D();
+	~HeightmapTerrain3D();
 };
