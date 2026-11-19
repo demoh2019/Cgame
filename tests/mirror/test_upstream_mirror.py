@@ -214,5 +214,168 @@ class ImportTests(unittest.TestCase):
         self.assertFalse(any(x[0] == "POST" for x in api.calls))
 
 
+class ExtendedImportTests(ImportTests):
+    def test_unlimited_batch_creates_all(self):
+        api = ApiStub(source_items=[item(17), item(18), item(19)])
+        self.m(api, max_new=0).run()
+        entries = json.loads(Path(self.path).read_text())["entries"]
+        self.assertEqual(len(entries), 3)
+
+    def test_label_copy(self):
+        api = ApiStub(source_items=[
+            item(17, labels=[{"name": "bug", "color": "f00", "description": "Bug report"}])
+        ])
+        self.m(api).run()
+        labels = [x for x in api.calls if x[0] == "POST" and x[1].endswith("/labels")]
+        self.assertEqual(len(labels), 1)
+        self.assertEqual(labels[0][2]["name"], "bug")
+        created = [x for x in api.calls if x[0] == "POST" and x[1].endswith("/issues")][0]
+        self.assertEqual(created[2]["labels"], ["bug"])
+
+    def test_copies_and_checkpoints_comments_once(self):
+        class CommentApi(ApiStub):
+            def pages(self, path):
+                if "/comments?" in path:
+                    yield {"id": 1, "body": "first",
+                           "user": {"login": "alice"}, "created_at": "2020-01-01"}
+                    yield {"id": 2, "body": "second",
+                           "user": {"login": "bob"}, "created_at": "2020-01-02"}
+                else:
+                    yield from super().pages(path)
+
+        api = CommentApi(source_items=[item(17, comments=2)])
+        self.m(api, comments=True).run()
+        self.m(api, comments=True).run()
+        comments = [x for x in api.calls if x[0] == "POST" and x[1].endswith("/comments")]
+        self.assertEqual(len(comments), 2)
+        self.assertIn("@alice", comments[0][2]["body"])
+        checkpoint = json.loads(Path(self.path).read_text())["entries"]["issue:17"]
+        self.assertEqual(checkpoint["last_comment_id"], 2)
+        self.assertTrue(checkpoint["comments_complete"])
+
+    def test_failed_item_is_recorded_not_silenced(self):
+        class FailApi(ApiStub):
+            def request(self, method, path, payload=None, with_headers=False):
+                if method == "POST" and path.endswith("/issues"):
+                    raise mirror.ApiError("test failure")
+                return super().request(method, path, payload, with_headers)
+
+        api = FailApi(source_items=[item(17)])
+        self.m(api).run()
+        state = json.loads(Path(self.path).read_text())
+        self.assertIn("issue:17", state["errors"])
+        self.assertNotIn("issue:17", state["entries"])
+
+    def test_preexisting_port_not_recreated(self):
+        class ExistingApi(ApiStub):
+            def pages(self, path):
+                if path.startswith("/repos/demoh2019/godot/pulls?"):
+                    yield {"number": 7, "html_url": "https://github.com/demoh2019/godot/pull/7",
+                           "body": "Port https://github.com/godotengine/godot/pull/17"}
+                else:
+                    yield from super().pages(path)
+        api = ExistingApi(source_items=[item(17, is_pr=True)])
+        instance = self.m(api, mode="open-prs", comments=True)
+        with patch.object(instance, "git") as git:
+            instance.run()
+        git.assert_not_called()
+        state = json.loads(Path(self.path).read_text())["entries"]["pr:17"]
+        self.assertEqual(state["number"], 7)
+        self.assertTrue(state["comments_complete"])
+
+
+class ApiTests(unittest.TestCase):
+    def test_pagination_with_lowercase_link_header(self):
+        class FakeResponse:
+            def __init__(self, payload, headers):
+                self.payload = payload
+                self.headers = headers
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *_):
+                return False
+
+            def read(self):
+                return json.dumps(self.payload).encode()
+
+        urls = []
+
+        def opener(request, timeout):
+            urls.append(request.full_url)
+            if len(urls) == 1:
+                return FakeResponse([{"number": 1}], {
+                    "link": '<https://api.github.com/items?page=2>; rel="next"'
+                })
+            return FakeResponse([{"number": 2}], {})
+
+        api = mirror.Api("test-token", pause=0, opener=opener, sleep=lambda _: None)
+        self.assertEqual([x["number"] for x in api.pages("/items")], [1, 2])
+        self.assertEqual(len(urls), 2)
+
+    def test_header_and_json_encoding_for_write(self):
+        class FakeResponse:
+            headers = {}
+            def __enter__(self):
+                return self
+            def __exit__(self, *_):
+                return False
+            def read(self):
+                return b'{"number": 1}'
+
+        def opener(request, timeout):
+            self.assertEqual(request.get_method(), "POST")
+            self.assertEqual(json.loads(request.data), {"title": "test"})
+            self.assertEqual(request.get_header("Authorization"), "Bearer test")
+            return FakeResponse()
+
+        api = mirror.Api("test", pause=0, opener=opener, sleep=lambda _: None)
+        self.assertEqual(api.request("POST", "/issues", {"title": "test"})["number"], 1)
+
+    def test_api_error_does_not_retry_404(self):
+        from urllib.error import HTTPError
+        from io import BytesIO
+
+        calls = []
+
+        def opener(request, timeout):
+            calls.append(request)
+            raise HTTPError(request.full_url, 404, "Not Found",
+                            {}, BytesIO(b'{"message":"Not Found"}'))
+
+        api = mirror.Api("token", pause=0, opener=opener, sleep=lambda _: None)
+        with self.assertRaisesRegex(mirror.ApiError, "HTTP 404"):
+            api.request("GET", "/missing")
+        self.assertEqual(len(calls), 1)
+
+    def test_api_retry_on_503(self):
+        from urllib.error import HTTPError
+        from io import BytesIO
+
+        class FakeResponse:
+            headers = {}
+            def __enter__(self):
+                return self
+            def __exit__(self, *_):
+                return False
+            def read(self):
+                return b'{"ok":true}'
+
+        calls, sleeps = [], []
+
+        def opener(request, timeout):
+            calls.append(request)
+            if len(calls) == 1:
+                raise HTTPError(request.full_url, 503, "Unavailable",
+                                {}, BytesIO(b'{"message":"retry"}'))
+            return FakeResponse()
+
+        api = mirror.Api("token", pause=0, opener=opener, sleep=sleeps.append)
+        self.assertTrue(api.request("GET", "/retry")["ok"])
+        self.assertEqual(len(calls), 2)
+        self.assertEqual(len(sleeps), 1)
+
+
 if __name__ == "__main__":
     unittest.main()
