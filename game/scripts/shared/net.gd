@@ -304,6 +304,43 @@ func c_contract(action: String) -> void:
 		s_result.rpc_id(peer, "contract", sim.cmd_contract(peer, str(action)))
 
 
+## Party identities are always the RPC sender; the client can only nominate
+## a nearby target to invite/kick, never the leader or group identifier.
+@rpc("any_peer", "reliable")
+func c_party_invite(target_id: int) -> void:
+	var peer := multiplayer.get_remote_sender_id()
+	if _allowed(peer):
+		s_result.rpc_id(peer, "party", sim.cmd_party_invite(peer, target_id))
+
+
+@rpc("any_peer", "reliable")
+func c_party_accept() -> void:
+	var peer := multiplayer.get_remote_sender_id()
+	if _allowed(peer):
+		s_result.rpc_id(peer, "party", sim.cmd_party_accept(peer))
+
+
+@rpc("any_peer", "reliable")
+func c_party_decline() -> void:
+	var peer := multiplayer.get_remote_sender_id()
+	if _allowed(peer):
+		s_result.rpc_id(peer, "party", sim.cmd_party_decline(peer))
+
+
+@rpc("any_peer", "reliable")
+func c_party_leave() -> void:
+	var peer := multiplayer.get_remote_sender_id()
+	if _allowed(peer):
+		s_result.rpc_id(peer, "party", sim.cmd_party_leave(peer))
+
+
+@rpc("any_peer", "reliable")
+func c_party_kick(target_id: int) -> void:
+	var peer := multiplayer.get_remote_sender_id()
+	if _allowed(peer):
+		s_result.rpc_id(peer, "party", sim.cmd_party_kick(peer, target_id))
+
+
 @rpc("any_peer", "reliable")
 func c_trade_invite(target_id: int) -> void:
 	var peer := multiplayer.get_remote_sender_id()
@@ -501,7 +538,7 @@ func _is_nearby(event: Dictionary, peer: int) -> bool:
 
 func _event_visible_to(event: Dictionary, peer: int) -> bool:
 	match event["type"]:
-		"spawn", "zone", "gathered", "fished", "crate":
+		"spawn", "zone", "gathered", "fished", "crate", "mastery":
 			return event.get("peer", -1) == peer
 		"trade":
 			return event.get("a", -1) == peer or event.get("b", -1) == peer
