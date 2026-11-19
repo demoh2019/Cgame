@@ -591,3 +591,41 @@ corrupt-save rejection.
 This is a gameplay weather system, not yet volumetric clouds, physically
 simulated rain, wind fluid dynamics or an actual temperature field inside
 buildings. Current Cgame/Godot scripts provide the required simulation API.
+
+## Upgradable bases: four defensive tiers
+
+The canonical `game/` server now upgrades existing barricades **T1 → T4**
+rather than spawning a separate second game. Owner-only upgrades within 3 m
+consume server-defined items crafted or gathered through the existing economy.
+
+| Upgrade | Cost | Maximum health | Incoming damage |
+| --- | --- | ---: | ---: |
+| T1 initial | 4 wood T1, 2 stone T1 | 120 | 100% |
+| T2 | 4 planks T2, 2 stone T2 | 240 | 82% |
+| T3 | 4 planks T3, 3 metal bars T3 | 400 | 66% |
+| T4 | 6 planks T4, 4 metal bars T4 | 600 | 50% |
+
+Upgrading keeps the current **health percentage**; it cannot bypass repair
+costs. Repairs require 1 wood T1, plank T2, metal bar T3 or metal bar T4
+respectively, restoring 40/60/85/110 HP up to the tier cap. Zombies use the
+same server-side damage multipliers.
+
+**Local preview controls:** U builds, H repairs, **Y upgrades**, X dismantles.
+The connected client uses U/H/Y/X with server-validated RPCs. The online
+HUD identifies the nearby wall tier, durability and next upgrade cost.
+Visual colors move from reclaimed timber through stone and reinforced metal
+to hardened alloy, based on values replicated by the authoritative server.
+
+New saves include a `tier` field in each world checkpoint. Old checkpoints
+without that field still load as T1 with their old HP, without changing the
+world schema version. Values outside T1–T4, fractional tiers and HP higher
+than the chosen tier permits are rejected. Account ownership, original
+structure IDs and collision footprints remain unchanged. Demolition returns
+only the original T1 salvage, never the expensive T2–T4 materials.
+
+The server test suite includes `test_structure_tiers.gd`: resource cost and
+failure atomicity, damaged upgrades, repairs, owner/range access, damage,
+replication, saved-world roundtrip and old-save migration. No C++ engine
+extension is needed; existing Cgame gameplay, physics and serialization
+primitives support this feature.
+
