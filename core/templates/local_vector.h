@@ -231,6 +231,22 @@ public:
 		}
 	}
 
+	// Reclaim excess capacity explicitly without changing the number or order
+	// of elements. The caller controls the threshold to avoid resize churn.
+	void shrink_to(U p_capacity) {
+		if (p_capacity < count || p_capacity >= capacity) {
+			return;
+		}
+		if (p_capacity == 0) {
+			reset();
+			return;
+		}
+		T *new_data = (T *)memrealloc(data, size_t(p_capacity) * sizeof(T));
+		CRASH_COND_MSG(!new_data, "Out of memory");
+		data = new_data;
+		capacity = p_capacity;
+	}
+
 	void reserve(U p_size) {
 		if (p_size > capacity) {
 			if (tight) {
