@@ -43,7 +43,7 @@ class RadialElasticityContracts(unittest.TestCase):
 
     def test_compliance_is_finite_and_nonnegative(self):
         self.assertIn("Math::is_finite(radial_compliance)", self.settings)
-        self.assertIn("MAX(radial_compliance, 0.0f)", self.settings)
+        self.assertIn("CLAMP(radial_compliance, 0.0f, 1.0f)", self.settings)
         self.assertIn("soft_body_volume_radial_compliance = 0.0001f", self.header)
         self.assertIn("p_radial_compliance", self.builder)
 
