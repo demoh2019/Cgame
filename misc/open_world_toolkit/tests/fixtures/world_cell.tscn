@@ -1,0 +1,6 @@
+[gd_scene format=3]
+
+[node name="TestWorldCell" type="Node3D"]
+
+[node name="Marker" type="Marker3D" parent="."]
+position = Vector3(1, 0, 2)

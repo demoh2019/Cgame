@@ -20,9 +20,10 @@ enabled in the example project. To install into another Godot project, copy
   filters and instance cap (assign a mesh and link a terrain node first).
 - `OWPCGGraph` — deterministic scalar procedural graph with Constant, Noise, Add, Multiply, Clamp, Terrace and Output nodes, graph validation (missing ports, duplicate links and cycles), batch mesh-height baking and `.tres` persistence.
 - `OWPCGGraphDock` — visual GraphEdit canvas in the editor: connect, disconnect, reposition and delete nodes; edit numeric parameters; bake into the selected heightfield via editor Undo/Redo.
-- `OWWorldPartition3D` — runtime grid-cell streaming of assigned PackedScene
-  resources around a viewer, with separate load/unload radii and support for
-  negative world coordinates.
+- `OWWorldPartition3D` — runtime grid-cell streaming of authored PackedScene
+  resources around a viewer; nearest-cell scheduling, request deduplication,
+  non-blocking threaded loading by default, bounded work per update,
+  load/unload hysteresis, status signals and negative grid coordinates.
 
 ### Editor workflow
 
@@ -39,7 +40,10 @@ enabled in the example project. To install into another Godot project, copy
 6. To build a terrain from a PCG Graph, select the Terrain node, switch to the **World PCG** dock, and press **New graph**. Add operation nodes using the type selector, connect source ports to destination ports, select nodes to edit numeric parameters, and click **Bake to Terrain (Undoable)**. The generated `OWPCGGraph` resource is kept in the terrain node. Save the scene to persist it.
 7. To stream an authored world, create `OWWorldCell` resources with coordinates
    and scene paths, assign them to an `OWWorldPartition3D` instance, and set
-   `viewer_path` to a camera/player node.
+   `viewer_path` to a camera/player node. Leave `threaded_loading` enabled to
+   request resources asynchronously; `max_cells_per_update` limits new cell
+   requests and `max_pending_requests` limits distinct in-flight asset paths.
+   The optional synchronous mode is useful for debugging and deterministic tests.
 
 ## Tests
 
@@ -47,7 +51,7 @@ enabled in the example project. To install into another Godot project, copy
 godot --headless --path misc/open_world_toolkit --script res://tests/run_tests.gd
 ```
 
-The GDScript suite exercises 66 test cases (35 baseline + 31 PCG) across graph validation, graph evaluation and resource persistence, grid storage, bilinear
+The GDScript suite exercises 83 test cases (35 baseline + 31 PCG + 17 streaming) across graph validation, graph evaluation and resource persistence, grid storage, bilinear
 sampling, normals, brush shapes, blending, conservative erosion, noise,
 undo snapshots, generated mesh geometry, ray picking, foliage and cell math.
 The workflow in `.github/workflows/open-world-toolkit.yml` uses Godot 4.8 beta4.
@@ -58,8 +62,9 @@ The workflow in `.github/workflows/open-world-toolkit.yml` uses Godot 4.8 beta4.
   Terrain3D. It only supports a **single heightfield mesh**, not clipmap LOD,
   sparse infinite terrain, physics collision, or full material splatmaps.
 - Texture blending is vertex-resolution; collision is **not generated**. The
-  runtime world streamer uses explicit scene resources and synchronous loads,
-  not background resource streaming or HLOD. Far-away assets need manual LOD.
+  runtime world streamer uses explicit scene resources with asynchronous
+  resource loading, but creates instances on the main thread; it does not
+  implement HLOD, binary world partition files, or background scene instancing. Far-away assets need manual LOD.
 - The PCG graph is a **scalar terrain-height graph**, not a universal procedural asset graph: it does not yet spawn props, support spline roads, output biomes or bake texture masks; water, vegetation authoring, cloud simulation,
   Nanite/Lumen, hardware RT, rollback or ECS is provided here yet.
 - For the core fork, first validate this editor workflow and GDScript tests;

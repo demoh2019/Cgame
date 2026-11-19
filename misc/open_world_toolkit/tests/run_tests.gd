@@ -114,6 +114,23 @@ func _run_all() -> void:
 	_test_pcg_bake_noise_consistency()
 	_test_pcg_bake_rebuilds_mesh()
 	_test_pcg_resource_serialization()
+	_test_world_plan_order()
+	_test_world_plan_deduplication()
+	_test_world_plan_radius_filter()
+	_test_world_plan_negative_coordinates()
+	_test_world_initial_state()
+	_test_world_sync_spawn()
+	_test_world_sync_budget()
+	_test_world_hysteresis()
+	_test_world_unload()
+	_test_world_shared_scene()
+	_test_world_invalid_root()
+	_test_world_no_duplicate_spawns()
+	_test_world_parent_transform()
+	_test_world_threaded_request()
+	_test_world_signals()
+	_test_world_explicit_entries_only()
+	_test_world_cell_authorization()
 	print("Open World Toolkit: ", completed_cases, " cases / ", assertions, " assertions / ", failures, " failures")
 	quit(1 if failures > 0 else 0)
 
@@ -481,7 +498,6 @@ func _test_world_cell_resource() -> void:
 	_check(resource.coordinate == Vector2i(-4, 9), "cell coordinate retained")
 	_check(resource.scene_path.ends_with(".tscn"), "resource path retained")
 
-
 func _pcg_constant_output(value: float) -> OWPCGGraph:
 	var graph := PCG.new() as OWPCGGraph
 	var number := graph.add_node("Constant")
@@ -784,3 +800,225 @@ func _test_pcg_resource_serialization() -> void:
 			_approx(loaded.evaluate_point(3.0, 4.0), 3.75, "linked expression preserved")
 			_check(loaded.get_node_data(3)["position"] == Vector2(120.0, -80.0), "editor node positions restored")
 	DirAccess.remove_absolute(ProjectSettings.globalize_path(path))
+
+
+func _cell_at(x: int, z: int, path: String = "res://tests/fixtures/world_cell.tscn") -> OWWorldCell:
+	var entry := WorldCell.new() as OWWorldCell
+	entry.coordinate = Vector2i(x, z)
+	entry.scene_path = path
+	return entry
+
+
+func _world_for_tests(threaded: bool = false) -> OWWorldPartition3D:
+	var world := WorldPartition.new() as OWWorldPartition3D
+	world.threaded_loading = threaded
+	world.cell_size = 10.0
+	world.load_radius = 1
+	world.unload_radius = 2
+	world.max_cells_per_update = 8
+	return world
+
+
+func _test_world_plan_order() -> void:
+	_case("world streaming loads closer coordinates first")
+	var world := _world_for_tests()
+	world.cells.append(_cell_at(1, 1))
+	world.cells.append(_cell_at(-1, 0))
+	world.cells.append(_cell_at(0, 0))
+	var planned := world.planned_cells(Vector2i.ZERO)
+	_check(planned.size() == 3, "three matching cells")
+	_check(planned[0].coordinate == Vector2i.ZERO, "center cell first")
+	_check(planned[1].coordinate == Vector2i(-1, 0), "cardinal before diagonal")
+	world.free()
+
+
+func _test_world_plan_deduplication() -> void:
+	_case("world streaming deduplicates conflicting authored coordinates")
+	var world := _world_for_tests()
+	world.cells.append(_cell_at(0, 0))
+	world.cells.append(_cell_at(0, 0, "res://tests/fixtures/invalid_world_cell.tscn"))
+	var planned := world.planned_cells(Vector2i.ZERO)
+	_check(planned.size() == 1, "only one cell per coordinate")
+	_check(planned[0].scene_path == "res://tests/fixtures/world_cell.tscn", "first authoring entry wins")
+	world.free()
+
+
+func _test_world_plan_radius_filter() -> void:
+	_case("world streaming ignores assets outside load radius")
+	var world := _world_for_tests()
+	world.cells.append(_cell_at(2, 0))
+	world.cells.append(_cell_at(1, 1))
+	world.cells.append(_cell_at(0, 1))
+	_check(world.planned_cells(Vector2i.ZERO).size() == 2, "square radius filter")
+	world.load_radius = 0
+	_check(world.planned_cells(Vector2i.ZERO).is_empty(), "zero radius excludes neighbors")
+	world.free()
+
+
+func _test_world_plan_negative_coordinates() -> void:
+	_case("world streaming supports negative authored grid coordinates")
+	var world := _world_for_tests()
+	world.cells.append(_cell_at(-3, -4))
+	world.cells.append(_cell_at(3, 4))
+	var planned := world.planned_cells(Vector2i(-3, -4))
+	_check(planned.size() == 1, "one matching negative cell")
+	_check(planned[0].coordinate == Vector2i(-3, -4), "negative target retained")
+	world.free()
+
+
+func _test_world_initial_state() -> void:
+	_case("world streamer begins empty")
+	var world := _world_for_tests()
+	_check(world.active_cell_count() == 0, "no active cells")
+	_check(world.pending_resource_count() == 0, "no pending requests")
+	_check(not world.is_cell_active(Vector2i.ZERO), "no active origin")
+	world.free()
+
+
+func _test_world_sync_spawn() -> void:
+	_case("world streamer instantiates a valid authored scene")
+	var world := _world_for_tests()
+	world.cells.append(_cell_at(0, 0))
+	root.add_child(world)
+	world.update_streaming(Vector3.ZERO)
+	_check(world.active_cell_count() == 1, "one cell instantiated")
+	_check(world.is_cell_active(Vector2i.ZERO), "origin cell loaded")
+	_check(world.get_child_count() == 1, "one child scene instantiated")
+	world.free()
+
+
+func _test_world_sync_budget() -> void:
+	_case("world streamer respects per-update loading budgets")
+	var world := _world_for_tests()
+	world.max_cells_per_update = 1
+	world.cells.append(_cell_at(1, 0))
+	world.cells.append(_cell_at(0, 0))
+	world.cells.append(_cell_at(0, 1))
+	root.add_child(world)
+	world.update_streaming(Vector3.ZERO)
+	_check(world.active_cell_count() == 1, "first update loads one")
+	_check(world.is_cell_active(Vector2i.ZERO), "center gets priority")
+	world.update_streaming(Vector3.ZERO)
+	_check(world.active_cell_count() == 2, "second update loads second")
+	world.update_streaming(Vector3.ZERO)
+	_check(world.active_cell_count() == 3, "third update loads third")
+	world.free()
+
+
+func _test_world_hysteresis() -> void:
+	_case("world streamer retains cells between load/unload radii")
+	var world := _world_for_tests()
+	world.cells.append(_cell_at(0, 0))
+	root.add_child(world)
+	world.update_streaming(Vector3.ZERO)
+	world.update_streaming(Vector3(20.0, 0.0, 0.0))
+	_check(world.is_cell_active(Vector2i.ZERO), "cell inside unload radius stays loaded")
+	world.free()
+
+
+func _test_world_unload() -> void:
+	_case("world streamer releases distant cells")
+	var world := _world_for_tests()
+	world.cells.append(_cell_at(0, 0))
+	root.add_child(world)
+	world.update_streaming(Vector3.ZERO)
+	world.update_streaming(Vector3(30.0, 0.0, 0.0))
+	_check(world.active_cell_count() == 0, "cell removed beyond unload radius")
+	_check(not world.is_cell_active(Vector2i.ZERO), "no active origin")
+	world.free()
+
+
+func _test_world_shared_scene() -> void:
+	_case("world cells referencing one PackedScene get separate instances")
+	var world := _world_for_tests()
+	world.cells.append(_cell_at(0, 0))
+	world.cells.append(_cell_at(1, 0))
+	root.add_child(world)
+	world.update_streaming(Vector3.ZERO)
+	_check(world.active_cell_count() == 2, "two active cells")
+	_check(world.get_child_count() == 2, "same scene instantiated twice")
+	world.free()
+
+
+func _test_world_invalid_root() -> void:
+	_case("world streamer rejects non-Node3D PackedScene root")
+	var world := _world_for_tests()
+	world.cells.append(_cell_at(0, 0, "res://tests/fixtures/invalid_world_cell.tscn"))
+	root.add_child(world)
+	world.update_streaming(Vector3.ZERO)
+	_check(world.active_cell_count() == 0, "invalid root not active")
+	world.free()
+
+
+func _test_world_no_duplicate_spawns() -> void:
+	_case("world streamer never instantiates an active cell twice")
+	var world := _world_for_tests()
+	world.cells.append(_cell_at(0, 0))
+	root.add_child(world)
+	for i in 4:
+		world.update_streaming(Vector3.ZERO)
+	_check(world.active_cell_count() == 1, "one active record")
+	_check(world.get_child_count() == 1, "one instantiated node")
+	world.free()
+
+
+func _test_world_parent_transform() -> void:
+	_case("world streamer offsets cell scenes relative to parent transform")
+	var world := _world_for_tests()
+	world.position = Vector3(100, 5, -80)
+	world.cells.append(_cell_at(-1, 2))
+	root.add_child(world)
+	world.update_streaming(Vector3(90, 5, -60))
+	_check(world.world_to_cell(Vector3(90, 5, -60)) == Vector2i(-1, 2), "global to local grid mapping")
+	_check(world.is_cell_active(Vector2i(-1, 2)), "translated cell active")
+	if world.get_child_count() > 0:
+		_check(world.get_child(0).global_position.is_equal_approx(Vector3(90, 5, -60)), "scene aligned with parent")
+	world.free()
+
+
+func _test_world_threaded_request() -> void:
+	_case("world streamer queues scene assets for threaded loading")
+	var world := _world_for_tests(true)
+	world.cells.append(_cell_at(0, 0))
+	world.cells.append(_cell_at(1, 0))
+	root.add_child(world)
+	world.update_streaming(Vector3.ZERO)
+	_check(world.pending_resource_count() == 1, "same scene path shares one pending request")
+	_check(world.active_cell_count() == 0, "no synchronous instantiation")
+	world.free()
+
+
+func _test_world_signals() -> void:
+	_case("world streamer emits load and unload notifications")
+	var world := _world_for_tests()
+	var loaded: Array[Vector2i] = []
+	var unloaded: Array[Vector2i] = []
+	world.cell_loaded.connect(func(coord: Vector2i, _instance: Node3D): loaded.append(coord))
+	world.cell_unloaded.connect(func(coord: Vector2i): unloaded.append(coord))
+	world.cells.append(_cell_at(0, 0))
+	root.add_child(world)
+	world.update_streaming(Vector3.ZERO)
+	world.update_streaming(Vector3(30, 0, 0))
+	_check(loaded == [Vector2i.ZERO], "load signal once")
+	_check(unloaded == [Vector2i.ZERO], "unload signal once")
+	world.free()
+
+
+func _test_world_explicit_entries_only() -> void:
+	_case("world streamer will not invent content without authored resources")
+	var world := _world_for_tests()
+	root.add_child(world)
+	world.update_streaming(Vector3.ZERO)
+	_check(world.active_cell_count() == 0, "no automatic child scenes")
+	world.free()
+
+
+func _test_world_cell_authorization() -> void:
+	_case("world streamer avoids obsolete pending cell definitions")
+	var world := _world_for_tests()
+	world.cells.append(_cell_at(1, 2))
+	_check(world._is_authorized(Vector2i(1, 2), "res://tests/fixtures/world_cell.tscn"), "matching path authorized")
+	_check(not world._is_authorized(Vector2i(1, 2), "res://tests/fixtures/invalid_world_cell.tscn"), "replaced path rejected")
+	world.cells.clear()
+	_check(not world._is_authorized(Vector2i(1, 2), "res://tests/fixtures/world_cell.tscn"), "removed entry rejected")
+	world.free()
