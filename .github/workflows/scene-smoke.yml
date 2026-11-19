@@ -72,7 +72,9 @@ jobs:
               command = [
                   sys.executable, str(runner), str(fixtures / name), "--godot",
                   str(godot), "--format", "json", "--timeout", "60",
-                  "--frames", "3",
+                  "--frames", "3", "--scene", "res://scenes/" +
+                  ("healthy.tscn" if expected_ok else "broken.tscn"),
+                  "--require-scenes",
               ]
               if import_first:
                   command.append("--import-first")
