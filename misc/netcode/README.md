@@ -3,6 +3,7 @@
 Part of [roadmap issue #61](https://github.com/demoh2019/Cgame/issues/61):
 - **#39 Client Prediction** — basic deterministic input-buffering and local prediction.
 - **#40 Rollback/Reconciliation** — replacing an incorrect prediction with an authoritative server snapshot, then replaying later inputs.
+- **#42 Multiplayer Debugger (foundation)** — reproducible simulated delay, packet loss, jitter and reordering for test packets (not integrated into the engine network debugger).
 
 This is a reusable **GDScript reference component**, not yet native engine integration or a drop-in multiplayer framework. No transport or authority is bundled. It is intended to be copied into projects or used as a testable reference when implementing engine-level netcode. It does not modify existing Godot RPC or MultiplayerSynchronizer APIs.
 
@@ -65,6 +66,27 @@ Copy the source file from `misc/netcode/prediction_buffer.gd` to the same path a
 
 **Physics caution:** the reference simulation avoids `move_and_slide()`, rigid-body physics, raycasts and real-time delta. If the gameplay simulation is non-deterministic or includes collisions, replay must use a deterministic simulation layer or an explicit reconciliation strategy. This code does not promise physics rewind or a rollback fighting-game engine.
 
+## Deterministic network impairment queue
+
+The independent `impairment_queue.gd` reference helper emulates the arrival timing of queued test packets without requiring real sockets.
+
+```gdscript
+const ImpairmentQueue = preload("res://impairment_queue.gd")
+var net_test_queue = ImpairmentQueue.new()
+
+func setup() -> void:
+    net_test_queue.configure(120, 50, 0.1, 1234) # latency ms, jitter ms, loss rate, seed
+
+func inject_outgoing_packet(packet: Dictionary, clock_ms: int) -> void:
+    net_test_queue.schedule(packet, clock_ms)
+
+func process_due_packets(clock_ms: int) -> void:
+    for envelope in net_test_queue.poll_due(clock_ms):
+        deliver_to_game(envelope["payload"])
+```
+
+This helper uses a caller-supplied millisecond clock, deterministic seed and stable ordering for equal deadlines. It exposes dropped/delivered/pending counts and rejects objects, nonfinite payload values and unreasonable configuration. It deliberately does **not** intercept the actual Godot MultiplayerPeer: the caller must decide how to apply simulated deliveries.
+
 ## Test
 
 From a Godot 4.x executable:
@@ -73,11 +95,11 @@ From a Godot 4.x executable:
 godot --headless --path misc/netcode --script res://tests/run_tests.gd
 ```
 
-This runs 28 regression cases (including snapshots, rollback replay, mismatches, expiry, invalid data and atomic failure) and returns a nonzero exit code on failure. CI should invoke the same script. The suite is standalone and does not require a built Godot editor.
+This runs 43 regression cases (28 prediction/reconciliation and 15 impairment simulation) (including snapshots, rollback replay, mismatches, expiry, invalid data and atomic failure) and returns a nonzero exit code on failure. CI should invoke the same script. The suite is standalone and does not require a built Godot editor.
 
 ### Limitations and next increments
 
-- No RPC transport, reliable/unreliable ordering layer or peer authorization.
+- No RPC transport, reliable/unreliable ordering layer or peer authorization. The impairment queue is a local test utility, not a real network packet interceptor.
 - No tick clock synchronization, interpolation/extrapolation renderer, snapshot compression or bandwidth budget.
 - Does not persist the buffer; all state is process-local.
 - No replay of side effects (audio, particles, animation events); only state dictionaries.
