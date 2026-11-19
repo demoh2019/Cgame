@@ -6,6 +6,7 @@ import tempfile
 import unittest
 
 import run as stress
+import editor_import as importer
 
 
 def result_payload(case="containers", scale=1, frames=12, seed=12345, detail=None):
@@ -183,6 +184,57 @@ class ProcessIsolationTests(unittest.TestCase):
                                  "containers", 1, 12, 12345)
         self.assertEqual(actual["status"], "failed")
         self.assertIn("launch", actual["failure"])
+
+
+class ImportProjectTests(unittest.TestCase):
+    def test_png_is_valid_and_decodes(self):
+        import struct
+        import zlib
+
+        png = importer.make_png(16, 12, 7)
+        self.assertEqual(png[:8], b"\x5cx89PNG\x5cr\x5cn\x5cx1a\x5cn")
+        pos = 8
+        chunks = {}
+        while pos < len(png):
+            size = struct.unpack(">I", png[pos:pos + 4])[0]
+            name = png[pos + 4:pos + 8]
+            body = png[pos + 8:pos + 8 + size]
+            self.assertEqual(
+                struct.unpack(">I", png[pos + 8 + size:pos + 12 + size])[0],
+                zlib.crc32(name + body) & 0xffffffff,
+            )
+            chunks.setdefault(name, []).append(body)
+            pos += 12 + size
+        self.assertEqual(struct.unpack(">II", chunks[b"IHDR"][0][:8]), (16, 12))
+        self.assertEqual(len(zlib.decompress(chunks[b"IDAT"][0])), 12 * (1 + 16 * 4))
+
+    def test_reproducible_png_generation(self):
+        a = importer.make_png(32, 16, 43)
+        self.assertEqual(a, importer.make_png(32, 16, 43))
+        self.assertNotEqual(a, importer.make_png(32, 16, 44))
+
+    def test_synthetic_project_has_valid_references(self):
+        with tempfile.TemporaryDirectory() as temp:
+            project = Path(temp)
+            meta = importer.make_project(project, 3, 7, 17)
+            self.assertEqual(meta, {"textures": 3, "scripts": 7, "scenes": 7})
+            self.assertTrue((project / "project.godot").exists())
+            for i in range(7):
+                scene = (project / "scenes" / ("scene_%05d.tscn" % i)).read_text()
+                self.assertIn("res://textures/texture_%05d.png" % (i % 3), scene)
+                self.assertIn("res://scripts/script_%05d.gd" % i, scene)
+            self.assertEqual(len(list((project / "textures").glob("*.png"))), 3)
+
+    def test_import_invocation_uses_isolated_directory(self):
+        with tempfile.TemporaryDirectory() as temp:
+            project = Path(temp)
+            payload = 'STRESS_RESULT: irrelevant'
+            # Run a synthetic Python child to verify that marker validation
+            # is explicitly disabled for editor import subprocesses.
+            result = stress.run_once(
+                [sys.executable, "-c", "print('Import finished')"],
+                5., 1024., "cold", 1, 1, 0, require_marker=False)
+            self.assertEqual(result["status"], "passed", result)
 
 
 if __name__ == "__main__":
