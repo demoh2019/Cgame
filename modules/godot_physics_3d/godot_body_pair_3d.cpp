@@ -258,6 +258,16 @@ bool GodotBodyPair3D::_test_ccd(real_t p_step, GodotBody3D *p_A, int p_shape_A, 
 		return false;
 	}
 	const Vector3 direction = relative_motion / motion_length;
+
+
+	real_t min_projection = 0.0;
+	real_t max_projection = 0.0;
+	shape_A_ptr->project_range(direction, p_xform_A, min_projection, max_projection);
+	const real_t extent = max_projection - min_projection;
+	if (motion_length <= extent * real_t(0.3)) {
+		return false;
+	}
+
 	// Rapier-style conservative nonlinear-motion broadphase:
 	// every point of a rotating rigid collider remains inside a sphere
 	// swept along its center of mass. When those swept spheres do not
@@ -273,15 +283,6 @@ bool GodotBodyPair3D::_test_ccd(real_t p_step, GodotBody3D *p_A, int p_shape_A, 
 				p_xform_A.xform(shape_A_ptr->get_aabb()), p_A->get_transform().origin + p_A->get_center_of_mass(),
 				p_xform_B.xform(shape_B_ptr->get_aabb()), p_B->get_transform().origin + p_B->get_center_of_mass(),
 				relative_motion)) {
-		return false;
-	}
-
-
-	real_t min_projection = 0.0;
-	real_t max_projection = 0.0;
-	shape_A_ptr->project_range(direction, p_xform_A, min_projection, max_projection);
-	const real_t extent = max_projection - min_projection;
-	if (motion_length <= extent * real_t(0.3)) {
 		return false;
 	}
 
