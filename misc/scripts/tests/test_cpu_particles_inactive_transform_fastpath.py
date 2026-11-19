@@ -38,10 +38,22 @@ class CPUParticlesInactiveTransformTests(unittest.TestCase):
         for stride in (8, 12):
             for active in (False, True):
                 values = tuple(float(i + 1) for i in range(stride))
-                transformed = tuple(v * 2.0 + 1.0 for v in values)
-                old_output = transformed if active else (0.0,) * stride
-                new_output = transformed if active else (0.0,) * stride
-                self.assertEqual(old_output, new_output)
+                multiplications = {"before": 0, "after": 0}
+
+                def transform(which):
+                    multiplications[which] += 1
+                    return tuple(v * 2.0 + 1.0 for v in values)
+
+                # Original C++ computes the matrix product even if it will
+                # immediately zero the resulting transform.
+                original_transform = transform("before")
+                original_output = original_transform if active else (0.0,) * stride
+
+                # New C++ skips that work on the inactive branch.
+                optimized_output = transform("after") if active else (0.0,) * stride
+                self.assertEqual(original_output, optimized_output)
+                self.assertEqual(multiplications["before"], 1)
+                self.assertEqual(multiplications["after"], int(active))
 
 
 if __name__ == "__main__":
