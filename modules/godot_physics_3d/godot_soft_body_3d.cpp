@@ -39,6 +39,7 @@
 #include "servers/physics_softbody_dihedral_damping.h"
 #include "servers/physics_softbody_aero_lift.h"
 #include "servers/physics_softbody_adiabatic_gas.h"
+#include "servers/physics_softbody_gas_leak.h"
 #include "servers/physics_softbody_shape_matching.h"
 #include "servers/physics_softbody_aerodynamic_drag.h"
 #include "servers/physics_softbody_plasticity.h"
@@ -386,6 +387,8 @@ static _FORCE_INLINE_ double _soft_body_signed_face_volume(const Vector3 &p_a, c
 void GodotSoftBody3D::initialize_volume_constraint() {
 	xpbd_volume_closed = false;
 	xpbd_volume_rest = 0.0;
+	// Reinitializing the closed rest shell starts a new gas charge.
+	gas_mass_fraction = 1.0;
 	if (!get_space() ||
 			(get_space()->get_soft_body_xpbd_volume_compliance() <= 0.0 &&
 					get_space()->get_soft_body_gas_pressure_gamma() <= 0.0) ||
@@ -1868,8 +1871,15 @@ void GodotSoftBody3D::apply_forces(const LocalVector<GodotArea3D *> &p_wind_area
 		for (const Face &face : faces) {
 			signed_volume += _soft_body_signed_face_volume(face.n[0]->x, face.n[1]->x, face.n[2]->x, origin);
 		}
-		physics_softbody_adiabatic_pressure(xpbd_volume_rest, signed_volume,
-				double(pressure_coefficient), double(gas_gamma), gas_pressure);
+		// Update the per-body gas charge exactly once per physics step,
+		// alongside the already-required sealed-volume traversal. At the
+		// default leak rate of zero the original gas pressure is unchanged.
+		// If the shell inverts or degenerates, neither the gas charge nor
+		// pressure is updated; the corresponding outward force stays off.
+		physics_softbody_gas_leak_step(xpbd_volume_rest, signed_volume,
+				double(pressure_coefficient), double(gas_gamma),
+				double(get_space()->get_soft_body_gas_leak_rate()), double(p_delta),
+				gas_mass_fraction, gas_pressure);
 	}
 	const bool apply_wind = !p_wind_areas.is_empty();
 	const bool apply_drag = drag_coefficient > 0.0;
@@ -2648,6 +2658,7 @@ void GodotSoftBody3D::destroy() {
 	xpbd_volume_gradients.reset();
 	xpbd_volume_closed = false;
 	xpbd_volume_rest = 0.0;
+	gas_mass_fraction = 1.0;
 	nodes.clear();
 	links.clear();
 	faces.clear();
