@@ -65,8 +65,10 @@ static func check(value: Variant) -> Dictionary:
 			checked += 1
 			if resource == null:
 				failures.append("Godot could not load %s. Check the editor/headless log for parser errors." % path)
-			elif ext == "gd" and (not (resource is Script) or not resource.can_instantiate()):
-				failures.append("Godot could not compile %s into an instantiable script." % path)
+			elif ext == "gd":
+				var script := resource as Script
+				if script == null or not script.can_instantiate():
+					failures.append("Godot could not compile %s into an instantiable script." % path)
 			elif ext == "tscn" and not (resource is PackedScene):
 				failures.append("Godot did not load a PackedScene from %s." % path)
 			if failures.size() >= MAX_DIAGNOSTICS:
@@ -80,8 +82,9 @@ static func check(value: Variant) -> Dictionary:
 			if not String(path).ends_with(".json"):
 				continue
 			checked += 1
-			if JSON.parse_string(FileAccess.get_file_as_string(path)) == null:
-				failures.append("Could not decode JSON data: %s" % path)
+			var parser := JSON.new()
+			if parser.parse(FileAccess.get_file_as_string(path)) != OK:
+				failures.append("Could not decode JSON data: %s (line %d)" % [path, parser.get_error_line()])
 				if failures.size() >= MAX_DIAGNOSTICS:
 					break
 
