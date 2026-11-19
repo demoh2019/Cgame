@@ -201,6 +201,16 @@ func _build() -> void:
 	sell_refined.text = "Sell carried refined material"
 	sell_refined.pressed.connect(_sell_one_material)
 	vendor_buttons.add_child(sell_refined)
+	var sell_fish := Button.new()
+	sell_fish.text = "Sell best raw fish"
+	sell_fish.pressed.connect(func() -> void:
+		var fish_id: String = Vendor.first_fish(client.inventory)
+		if fish_id.is_empty():
+			say("Vendor: no raw fish in backpack")
+		else:
+			client.vendor(fish_id, 1, false))
+	vendor_buttons.add_child(sell_fish)
+
 	var contract_title := Label.new()
 	contract_title.text = "Camp contracts (hub only)"
 	inventory_box.add_child(contract_title)
