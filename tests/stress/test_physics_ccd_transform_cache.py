@@ -39,5 +39,16 @@ class CCDTransformCacheContracts(unittest.TestCase):
         self.assertIn("predicted_xform_B.xform(segment_hit_local)", routine)
 
 
+    def test_ccd_stress_workload_is_registered(self):
+        import run
+
+        script = (Path(__file__).resolve().parent / "stress.gd").read_text(encoding="utf-8")
+        self.assertIn("physics_ccd_3d", run.CASES)
+        self.assertIn('"physics_ccd_3d":', script)
+        self.assertIn("func _physics_ccd_3d(", script)
+        self.assertIn("body.continuous_cd = true", script)
+        self.assertIn("await physics_frame", script)
+
+
 if __name__ == "__main__":
     unittest.main()
