@@ -1797,6 +1797,54 @@ The tests check finite body states and joint spacing, not physical
 equivalence to the serial solver or measured performance improvements.
 Start with small scales and monitor CPU usage, peak RSS and frame p95.
 
+### Shared-basis 2D rectangle SAT axis deduplication
+
+GodotPhysics2D previously checked both face directions of each rectangle
+(four SAT candidate axes), even when the two rectangles had **exactly
+identical** basis vectors. In that case the directions on B duplicate
+the two already checked on A. The narrowphase now skips these two
+redundant projections and normalizations, reducing four face-axis
+checks to two for aligned or equally rotated rectangles. Equality is
+**exact**, not approximate: even a small relative rotation still
+requires all four axes.
+
+The prior separation-axis check, motion-cast axes, extra
+collision-margin tests and contact-manifold generation are unchanged.
+The optimization is valid with identical nonuniform scales or shears
+as well, because both skipped axes are byte-for-byte identical
+directions, not a geometric approximation. No extra allocations or
+project settings are introduced. This follows the standard SAT face
+normal/collision-manifold approach used by Box2D.
+
+The Python source/numerical tests check 10,000 randomized rectangle
+pairs, including shared rotations, nonuniform scaling, shearing,
+margins and swept projection bounds. The headless 2D regression checks
+identity, equal nonzero rotation, equal nonuniform scale, and a
+different relative rotation, with boolean collision queries and
+finite contact points:
+
+```bash
+python3 -m unittest discover -s tests/stress -p 'test_physics_2d_rectangle_shared_sat_axes.py' -v
+./bin/godot.macos.editor.arm64 --headless --path tests/stress \
+  --script res://physics_rectangle_shared_axes_2d_regression.gd
+```
+
+Three stress cases create 256 static+dynamic rectangle pairs per
+scale, continuously refresh their overlapping transforms and record
+physics/frame p95 and memory via the stress runner:
+
+```bash
+python3 tests/stress/run.py --godot ./bin/godot.macos.editor.arm64 \
+  --case physics_rect_sat_axis_aligned_2d,physics_rect_sat_shared_rotation_2d,physics_rect_sat_misaligned_2d \
+  --scale 4 --frames 90 --repeats 5 --rss-limit-mib 4096 \
+  --output out/physics-rectangle-shared-sat-2d.json
+```
+
+The three cases use different orientation geometries. Only comparing
+the **same case** on the pre-change and post-change engine binaries
+isolates the optimization's contribution. These source/mathematical
+checks do not replace C++ compilation and headless tests.
+
 ### Embedded 2D circle/rectangle analytic manifolds (Box2D-style)
 
 GodotPhysics2D now handles an additional common narrowphase case without a
