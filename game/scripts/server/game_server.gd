@@ -1503,7 +1503,8 @@ func _damage_target(attacker: Player, hit: Dictionary, damage: float) -> void:
 		if damage > 0.0 and zombie.is_alive() and (zombie.contributors.size() < 16 or zombie.contributors.has(attacker.id)):
 			var equipped: String = attacker.inventory.weapon
 			if equipped != "" and attacker.inventory.count(equipped) > 0:
-				zombie.contributors[attacker.id] = {"time": time, "weapon": equipped}
+				zombie.contributors[attacker.id] = {"time": time, "weapon": equipped,
+					"group": parties.group_of(attacker.id)}
 		events.append({"type": "hit", "kind": "zombie", "id": zombie.id, "damage": damage, "x": zombie.position.x, "z": zombie.position.z})
 		if zombie.take_damage(damage, attacker.id):
 			attacker.kills += 1
@@ -1564,6 +1565,9 @@ func _party_award_assists(killer: Player, zombie) -> void:
 			continue
 		var hit: Dictionary = zombie.contributors.get(int(member_id), {})
 		if hit.is_empty() or time - float(hit.get("time", -INF)) > Party.ASSIST_WINDOW:
+			continue
+		# Only a hit that happened inside THIS party earns an assist reward.
+		if int(hit.get("group", 0)) != parties.group_of(killer.id):
 			continue
 		var used_weapon: String = str(hit.get("weapon", ""))
 		if used_weapon.is_empty() or participant.inventory.count(used_weapon) < 1:
