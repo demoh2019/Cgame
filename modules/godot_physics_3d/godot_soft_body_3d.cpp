@@ -41,6 +41,7 @@
 #include "servers/physics_xpbd_area.h"
 #include "servers/physics_xpbd_dihedral.h"
 #include "servers/physics_xpbd_self_collision.h"
+#include "servers/physics_xpbd_self_friction.h"
 #include "servers/physics_xpbd_edge_collision.h"
 #include "servers/rendering/rendering_server.h"
 
@@ -761,6 +762,24 @@ void GodotSoftBody3D::solve_self_collisions(real_t p_delta) {
 		}
 	}
 	const bool edge_contacts = solve_edge_self_collisions(p_delta);
+	// After normal vertex/face and edge/edge projection, apply optional
+	// Coulomb-limited tangential friction to vertex/face self contacts.
+	// This must act on positions: velocities are reconstructed from x-q.
+	const real_t friction = get_space()->get_soft_body_self_collision_friction();
+	if (friction > real_t(0.0) && vertex_contacts) {
+		for (const SelfCollisionContact &contact : xpbd_self_contacts) {
+			if (!(contact.lambda > real_t(0.0))) {
+				continue; // Without a normal reaction there is no friction budget.
+			}
+			Node &vertex = nodes[contact.vertex];
+			Face &face = faces[contact.face];
+			physics_xpbd_solve_self_friction(vertex.x,
+					face.n[0]->x, face.n[1]->x, face.n[2]->x,
+					vertex.q, face.n[0]->q, face.n[1]->q, face.n[2]->q,
+					vertex.im, face.n[0]->im, face.n[1]->im, face.n[2]->im,
+					friction, contact.lambda, thickness);
+		}
+	}
 	if (vertex_contacts || edge_contacts) {
 		// Refit for ray queries only if a contact stage may move nodes.
 		update_face_tree(real_t(0.0));
