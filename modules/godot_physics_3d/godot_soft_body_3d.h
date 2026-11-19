@@ -108,6 +108,23 @@ class GodotSoftBody3D : public GodotCollisionObject3D {
 	};
 	LocalVector<SelfCollisionContact> xpbd_self_contacts;
 	HashSet<uint64_t> xpbd_self_neighbor_edges;
+	// Built only with opt-in edge/edge contacts. The BVH stores pointers
+	// into the fully constructed, non-resizing array of structural edges.
+	struct SelfCollisionEdge {
+		uint32_t a = 0;
+		uint32_t b = 0;
+		uint32_t index = 0;
+		DynamicBVH::ID leaf;
+	};
+	struct SelfEdgeContact {
+		uint32_t first = 0;
+		uint32_t second = 0;
+		Vector3 normal;
+		real_t lambda = 0.0;
+	};
+	LocalVector<SelfCollisionEdge> xpbd_self_edges;
+	LocalVector<SelfEdgeContact> xpbd_self_edge_contacts;
+	DynamicBVH xpbd_self_edge_tree;
 	// Allocated only for positive volume compliance on a closed soft mesh.
 	LocalVector<Vector3> xpbd_volume_gradients;
 	double xpbd_volume_rest = 0.0;
@@ -270,6 +287,7 @@ private:
 	void initialize_dihedral_constraints();
 	void initialize_self_collision_topology();
 	void solve_self_collisions(real_t p_delta);
+	bool solve_edge_self_collisions(real_t p_delta);
 	void initialize_volume_constraint();
 	bool solve_volume_constraint(double p_alpha, double &r_lambda);
 	void reset_link_rest_lengths();
