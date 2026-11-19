@@ -392,6 +392,7 @@ bool PBFParticleFluid3D::set_particle_positions(const PackedVector3Array &p_posi
 	}
 	average_density = 0.0;
 	last_neighbor_evaluations = 0;
+	last_rigid_impulses = 0;
 	return true;
 }
 
