@@ -968,6 +968,7 @@ void GodotSoftBody3D::set_damping_coefficient(real_t p_val) {
 }
 
 void GodotSoftBody3D::set_drag_coefficient(real_t p_val) {
+	ERR_FAIL_COND_MSG(p_val < 0.0 || !Math::is_finite(p_val), "Soft body drag must be nonnegative and finite.");
 	drag_coefficient = p_val;
 }
 
@@ -986,7 +987,8 @@ void GodotSoftBody3D::apply_forces(const LocalVector<GodotArea3D *> &p_wind_area
 
 	const bool apply_pressure = pressure_coefficient > CMP_EPSILON;
 	const bool apply_wind = !p_wind_areas.is_empty();
-	if (!apply_pressure && !apply_wind) {
+	const bool apply_drag = drag_coefficient > 0.0;
+	if (!apply_pressure && !apply_wind && !apply_drag) {
 		return;
 	}
 
@@ -1000,14 +1002,30 @@ void GodotSoftBody3D::apply_forces(const LocalVector<GodotArea3D *> &p_wind_area
 			volume += vec3_dot(face.n[0]->x - org, vec3_cross(face.n[1]->x - org, face.n[2]->x - org));
 		}
 
-		if (apply_wind) {
-			Vector3 wind_force;
-			for (const GodotArea3D *area : p_wind_areas) {
-				wind_force += _compute_area_windforce(area, &face);
+		if (apply_wind || apply_drag) {
+			Vector3 node_force;
+			if (apply_wind) {
+				for (const GodotArea3D *area : p_wind_areas) {
+					node_force += _compute_area_windforce(area, &face);
+				}
+			}
+
+			if (apply_drag && face.ra > CMP_EPSILON) {
+				// Quadratic aerodynamic drag against still air, projected onto
+				// the triangle normal (two-sided cloth). Average node velocity
+				// prevents seams from receiving inconsistent drag directions.
+				// The face force -0.5 * Cd * area * vn * abs(vn) is shared by
+				// its three nodes, requiring no additional per-vertex storage.
+				const Vector3 face_velocity = (face.n[0]->v + face.n[1]->v + face.n[2]->v) * real_t(1.0 / 3.0);
+				const real_t normal_speed = face.normal.dot(face_velocity);
+				if (Math::abs(normal_speed) > CMP_EPSILON) {
+					const real_t drag_per_node = -drag_coefficient * face.ra * real_t(1.0 / 6.0) * normal_speed * Math::abs(normal_speed);
+					node_force += face.normal * drag_per_node;
+				}
 			}
 
 			for (int j = 0; j < 3; j++) {
-				face.n[j]->f += wind_force;
+				face.n[j]->f += node_force;
 			}
 		}
 	}
@@ -1108,7 +1126,7 @@ void GodotSoftBody3D::predict_motion(real_t p_delta) {
 
 	// Apply forces.
 	add_velocity(gravity * p_delta);
-	if (pressure_coefficient > CMP_EPSILON || !wind_areas.is_empty()) {
+	if (pressure_coefficient > CMP_EPSILON || !wind_areas.is_empty() || drag_coefficient > 0.0) {
 		apply_forces(wind_areas);
 	}
 
