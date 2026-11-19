@@ -40,6 +40,7 @@
 #include "servers/physics_softbody_aero_lift.h"
 #include "servers/physics_softbody_adiabatic_gas.h"
 #include "servers/physics_softbody_aerodynamic_drag.h"
+#include "servers/physics_softbody_water_drag.h"
 #include "servers/physics_softbody_plasticity.h"
 #include "servers/physics_softbody_volume_safe.h"
 #include "servers/physics_xpbd_distance.h"
@@ -1799,7 +1800,11 @@ void GodotSoftBody3D::apply_forces(const LocalVector<GodotArea3D *> &p_wind_area
 	const real_t tangential_drag_ratio = get_space() ? get_space()->get_soft_body_tangential_drag_ratio() : real_t(0.0);
 	const real_t lift_coefficient = get_space() ? get_space()->get_soft_body_lift_coefficient() : real_t(0.0);
 	const bool apply_lift = lift_coefficient > 0.0;
-	if (!apply_pressure && !apply_wind && !apply_drag && !apply_lift) {
+	const bool apply_water_drag = get_space() && get_space()->is_fluid_plane_enabled() &&
+			get_space()->is_soft_body_water_drag_enabled() &&
+			get_space()->get_fluid_plane_density() > 0.0 &&
+			get_space()->get_fluid_plane_drag_coefficient() > 0.0;
+	if (!apply_pressure && !apply_wind && !apply_drag && !apply_lift && !apply_water_drag) {
 		return;
 	}
 
@@ -1813,7 +1818,7 @@ void GodotSoftBody3D::apply_forces(const LocalVector<GodotArea3D *> &p_wind_area
 			volume += vec3_dot(face.n[0]->x - org, vec3_cross(face.n[1]->x - org, face.n[2]->x - org));
 		}
 
-		if (apply_wind || apply_drag || apply_lift || gas_pressure > 0.0) {
+		if (apply_wind || apply_drag || apply_lift || gas_pressure > 0.0 || apply_water_drag) {
 			Vector3 node_force;
 			if (apply_wind) {
 				for (const GodotArea3D *area : p_wind_areas) {
@@ -1859,6 +1864,30 @@ void GodotSoftBody3D::apply_forces(const LocalVector<GodotArea3D *> &p_wind_area
 
 			for (int j = 0; j < 3; j++) {
 				face.n[j]->f += node_force;
+			}
+			if (apply_water_drag) {
+				const Vector3 positions[3] = { face.n[0]->x, face.n[1]->x, face.n[2]->x };
+				const Vector3 velocities[3] = { face.n[0]->v, face.n[1]->v, face.n[2]->v };
+				const real_t inverse_masses[3] = { face.n[0]->im, face.n[1]->im, face.n[2]->im };
+				Vector3 water_forces[3];
+				if (physics_softbody_water_drag_face(positions, velocities, inverse_masses,
+						get_space()->get_fluid_plane_surface_height(),
+						get_space()->get_fluid_plane_density(),
+						get_space()->get_fluid_plane_drag_coefficient(),
+						get_space()->get_soft_body_water_tangential_ratio(),
+						get_space()->get_fluid_plane_flow_velocity(), p_delta, water_forces)) {
+					Vector3 next_forces[3];
+					bool valid = true;
+					for (int j = 0; j < 3; j++) {
+						next_forces[j] = face.n[j]->f + water_forces[j];
+						valid = valid && next_forces[j].is_finite();
+					}
+					if (valid) {
+						for (int j = 0; j < 3; j++) {
+							face.n[j]->f = next_forces[j];
+						}
+					}
+				}
 			}
 		}
 	}
@@ -1959,7 +1988,9 @@ void GodotSoftBody3D::predict_motion(real_t p_delta) {
 
 	// Apply forces.
 	add_velocity(gravity * p_delta);
-	if ((pressure_coefficient > CMP_EPSILON && Math::is_finite(pressure_coefficient)) || !wind_areas.is_empty() || drag_coefficient > 0.0 || get_space()->get_soft_body_lift_coefficient() > 0.0) {
+	if ((pressure_coefficient > CMP_EPSILON && Math::is_finite(pressure_coefficient)) || !wind_areas.is_empty() || drag_coefficient > 0.0 ||
+			get_space()->get_soft_body_lift_coefficient() > 0.0 ||
+			(get_space()->is_fluid_plane_enabled() && get_space()->is_soft_body_water_drag_enabled())) {
 		apply_forces(wind_areas, p_delta);
 	}
 
