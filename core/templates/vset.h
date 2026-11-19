@@ -52,7 +52,9 @@ protected:
 
 		int64_t pos = _data.span().bisect(p_val, true);
 
-		if (pos < _data.size() && !(p_val < _data[pos]) && !(_data[pos] < p_val)) {
+		// bisect(..., true) already guarantees !(_data[pos] < p_val).
+		// Only the reverse comparison is needed to detect equivalence.
+		if (pos < _data.size() && !(p_val < _data[pos])) {
 			r_exact = true;
 		}
 		return pos;
@@ -65,7 +67,9 @@ protected:
 
 		int64_t pos = _data.span().bisect(p_val, true);
 
-		if (pos < _data.size() && !(p_val < _data[pos]) && !(_data[pos] < p_val)) {
+		// bisect(..., true) already guarantees !(_data[pos] < p_val).
+		// Only the reverse comparison is needed to detect equivalence.
+		if (pos < _data.size() && !(p_val < _data[pos])) {
 			return pos;
 		}
 		return -1;
