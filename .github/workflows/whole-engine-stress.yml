@@ -27,6 +27,21 @@ on:
         type: choice
         options: [headless, display]
         default: headless
+      cases:
+        description: Comma-separated stress cases (all for everything)
+        required: true
+        type: string
+        default: all
+      ramp:
+        description: Increase pressure until a failure or resource limit is reached
+        required: true
+        type: boolean
+        default: false
+      ramp_steps:
+        description: Maximum scale levels per case when ramp is enabled
+        required: true
+        type: number
+        default: 4
 
 permissions:
   contents: read
@@ -59,6 +74,9 @@ jobs:
     env:
       PRESET: ${{ github.event_name == 'workflow_dispatch' && inputs.preset || 'smoke' }}
       RENDER_MODE: ${{ github.event_name == 'workflow_dispatch' && inputs.render_mode || 'headless' }}
+      STRESS_CASES: ${{ github.event_name == 'workflow_dispatch' && inputs.cases || 'all' }}
+      STRESS_RAMP: ${{ github.event_name == 'workflow_dispatch' && inputs.ramp || 'false' }}
+      STRESS_RAMP_STEPS: ${{ github.event_name == 'workflow_dispatch' && inputs.ramp_steps || '4' }}
     steps:
       - uses: actions/checkout@v4
       - name: Install Xvfb and software GL for optional display tests
@@ -89,11 +107,15 @@ jobs:
           set -euo pipefail
           BIN=./bin/godot.linuxbsd.editor.dev.x86_64
           "$BIN" --version
+          ARGS=(--godot "$BIN" --preset "$PRESET" --render-mode "$RENDER_MODE" --case "$STRESS_CASES" --output whole-engine-stress.json)
+          if [[ "$STRESS_RAMP" == "true" ]]; then
+            ARGS+=(--ramp --ramp-steps "$STRESS_RAMP_STEPS")
+          fi
           if [[ "$RENDER_MODE" == "display" ]]; then
             # Software GL only: results must NOT be compared with discrete-GPU measurements.
-            xvfb-run -a python3 tests/stress/run.py --godot "$BIN" --preset "$PRESET" --render-mode display --output whole-engine-stress.json
+            xvfb-run -a python3 tests/stress/run.py "${ARGS[@]}"
           else
-            python3 tests/stress/run.py --godot "$BIN" --preset "$PRESET" --render-mode headless --output whole-engine-stress.json
+            python3 tests/stress/run.py "${ARGS[@]}"
           fi
       - name: Archive per-scenario performance and failure reports
         if: always()
