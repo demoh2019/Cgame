@@ -12,6 +12,7 @@ var _detail: FastNoiseLite
 var _temperature: FastNoiseLite
 var _moisture: FastNoiseLite
 var _cache: Dictionary = {}
+var dynamic_blockers: Dictionary = {} # Server-built barriers; synchronized to client prediction.
 const CACHE_LIMIT := 256
 
 # Height range in meters. The hub is leveled to HUB_HEIGHT so the town can be built flat.
@@ -264,6 +265,15 @@ static func _pick_zombie(zone: int, rng: RandomNumberGenerator) -> String:
 
 
 ## Static things that block movement near a point, for both the server and client prediction.
+func add_dynamic_blocker(id: int, x: float, z: float, radius: float) -> void:
+	if is_finite(x) and is_finite(z) and is_finite(radius) and radius > 0.0:
+		dynamic_blockers[id] = {"id": id, "x": x, "z": z, "radius": radius, "blocks": true}
+
+
+func remove_dynamic_blocker(id: int) -> void:
+	dynamic_blockers.erase(id)
+
+
 func blockers_near(x: float, z: float, radius: float) -> Array:
 	var result: Array = []
 	var cell_a := cell_of(x - radius, z - radius)
@@ -275,4 +285,8 @@ func blockers_near(x: float, z: float, radius: float) -> Array:
 				for n in data[group]:
 					if n["blocks"] and absf(n["x"] - x) < radius + n["radius"] and absf(n["z"] - z) < radius + n["radius"]:
 						result.append(n)
+	# Keep this list spatially bounded so unrelated defenses are not queried.
+	for barrier in dynamic_blockers.values():
+		if absf(float(barrier["x"]) - x) <= radius + float(barrier["radius"]) and absf(float(barrier["z"]) - z) <= radius + float(barrier["radius"]):
+			result.append(barrier)
 	return result
