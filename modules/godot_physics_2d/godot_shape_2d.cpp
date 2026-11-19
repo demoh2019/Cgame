@@ -477,7 +477,7 @@ bool GodotCapsuleShape2D::intersect_segment(const Vector2 &p_begin, const Vector
 Vector2 GodotCapsuleShape2D::_get_second_moments() const {
 	const double r = double(radius);
 	const double straight_height = double(height) - 2.0 * r;
-	const double cap_area = Math_PI * r * r;
+	const double cap_area = Math::PI * r * r;
 	const double rect_area = 2.0 * r * straight_height;
 	const double total_area = cap_area + rect_area;
 

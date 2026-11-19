@@ -63,7 +63,7 @@ TEST_CASE("[GodotPhysics2D] Convex polygon SAT projections match transformed ver
 	for (int vertex_count : vertex_counts) {
 		PackedVector2Array vertices;
 		for (int i = 0; i < vertex_count; ++i) {
-			const real_t angle = real_t(Math_TAU) * real_t(i) / real_t(vertex_count);
+			const real_t angle = real_t(Math::TAU) * real_t(i) / real_t(vertex_count);
 			vertices.push_back(Vector2(real_t(2.0) * Math::cos(angle), real_t(3.0) * Math::sin(angle)));
 		}
 		GodotConvexPolygonShape2D polygon;

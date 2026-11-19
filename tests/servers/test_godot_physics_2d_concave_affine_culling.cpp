@@ -81,7 +81,7 @@ TEST_CASE("[GodotPhysics2D] Concave culling accounts for margins and relative mo
 	CHECK_FALSE(GodotCollisionSolver2D::solve(&circle, near_circle, Vector2(),
 			&concave, identity, Vector2(), nullptr, nullptr));
 	CHECK(GodotCollisionSolver2D::solve(&circle, near_circle, Vector2(),
-			&concave, identity, Vector2(), nullptr, nullptr, real_t(0.15), real_t(0.0)));
+			&concave, identity, Vector2(), nullptr, nullptr, nullptr, real_t(0.15), real_t(0.0)));
 
 	// A stationary circle meets a line that sweeps through it. The
 	// broadphase must use motion_A - motion_B in the concave local frame.

@@ -102,7 +102,7 @@ TEST_CASE("[GodotPhysics2D] Capsule-capsule analytic early rejection") {
 	}
 
 	SUBCASE("Rotated segments whose AABBs can overlap") {
-		transform_b = Transform2D(real_t(Math_PI / 2.0), Vector2(4.0, 3.0));
+		transform_b = Transform2D(real_t(Math::PI / 2.0), Vector2(4.0, 3.0));
 		CHECK_FALSE(sat_2d_calculate_penetration(&capsule_a, transform_a, Vector2(), &capsule_b, transform_b, Vector2(), nullptr, nullptr));
 	}
 

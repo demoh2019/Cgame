@@ -180,7 +180,7 @@ TEST_CASE("[GodotPhysics3D] Sphere-box squared-distance narrowphase") {
 	}
 
 	SUBCASE("Rotated box chooses rotated exit face") {
-		box_transform.basis = Basis(Vector3(0.0, 0.0, 1.0), real_t(Math_PI / 2.0));
+		box_transform.basis = Basis(Vector3(0.0, 0.0, 1.0), real_t(Math::PI / 2.0));
 		sphere_transform.origin = box_transform.xform(Vector3(0.5, 0.0, 0.0));
 		CHECK(sat_calculate_penetration(&sphere, sphere_transform, &box, box_transform, record_contact, &contact));
 		CHECK(contact.count == 1);
@@ -266,7 +266,7 @@ TEST_CASE("[GodotPhysics3D] Sphere-cylinder squared-distance narrowphase") {
 	}
 
 	SUBCASE("Rotated cylinder exit contact follows the cap orientation") {
-		cylinder_transform.basis = Basis(Vector3(0.0, 0.0, 1.0), real_t(Math_PI / 2.0));
+		cylinder_transform.basis = Basis(Vector3(0.0, 0.0, 1.0), real_t(Math::PI / 2.0));
 		sphere_transform.origin = cylinder_transform.xform(Vector3(0.0, 1.5, 0.0));
 		CHECK(sat_calculate_penetration(&sphere, sphere_transform, &cylinder, cylinder_transform, record_contact, &contact));
 		CHECK(contact.count == 1);

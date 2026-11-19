@@ -131,7 +131,7 @@ TEST_CASE("[GodotPhysics2D] Convex polygon inertia accounts for full affine cova
 TEST_CASE("[GodotPhysics2D] Physical shape areas ignore broadphase padding and affine shear") {
 	GodotCircleShape2D circle;
 	circle.set_data(real_t(1.0));
-	CHECK(Math::is_equal_approx(circle.get_mass_area(), real_t(Math_PI)));
+	CHECK(Math::is_equal_approx(circle.get_mass_area(), real_t(Math::PI)));
 
 	GodotRectangleShape2D rectangle;
 	rectangle.set_data(Vector2(2.0, 1.0));
@@ -139,7 +139,7 @@ TEST_CASE("[GodotPhysics2D] Physical shape areas ignore broadphase padding and a
 
 	GodotCapsuleShape2D capsule;
 	capsule.set_data(Vector2(1.0, 4.0));
-	CHECK(Math::is_equal_approx(capsule.get_mass_area(), real_t(Math_PI) + real_t(4.0)));
+	CHECK(Math::is_equal_approx(capsule.get_mass_area(), real_t(Math::PI) + real_t(4.0)));
 
 	GodotConvexPolygonShape2D polygon;
 	PackedVector2Array corners;

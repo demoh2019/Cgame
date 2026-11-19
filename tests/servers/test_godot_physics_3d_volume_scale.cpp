@@ -60,7 +60,7 @@ TEST_CASE("[GodotPhysics3D] Shape volume scale from basis determinant") {
 	}
 
 	SUBCASE("Rotation leaves nonuniform scale volume unchanged") {
-		const Basis rotation(Vector3(0.0, 0.0, 1.0), real_t(Math_PI / 3.0));
+		const Basis rotation(Vector3(0.0, 0.0, 1.0), real_t(Math::PI / 3.0));
 		const Basis scaled = rotation * Basis::from_scale(Vector3(2.0, 3.0, 4.0));
 		CHECK(godot_physics_3d_volume_scale(scaled) == doctest::Approx(24.0));
 	}

@@ -290,7 +290,7 @@ public:
 		return p_mass * radius * radius * real_t(0.25) *
 				(p_transform.columns[0].length_squared() + p_transform.columns[1].length_squared());
 	}
-	virtual real_t get_mass_area() const override { return real_t(Math_PI) * radius * radius; }
+	virtual real_t get_mass_area() const override { return real_t(Math::PI) * radius * radius; }
 
 	virtual void set_data(const Variant &p_data) override;
 	virtual Variant get_data() const override;
@@ -402,7 +402,7 @@ public:
 	virtual real_t get_moment_of_inertia(real_t p_mass, const Size2 &p_scale) const override;
 	virtual real_t get_moment_of_inertia_transformed(real_t p_mass, const Transform2D &p_transform) const override;
 	virtual real_t get_mass_area() const override {
-		return real_t(Math_PI) * radius * radius + real_t(2.0) * radius * MAX(height - real_t(2.0) * radius, real_t(0.0));
+		return real_t(Math::PI) * radius * radius + real_t(2.0) * radius * MAX(height - real_t(2.0) * radius, real_t(0.0));
 	}
 
 	virtual void set_data(const Variant &p_data) override;

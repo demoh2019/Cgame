@@ -37,6 +37,7 @@
 #include "godot_broad_phase_2d.h"
 #include "godot_collision_object_2d.h"
 
+#include "core/templates/paged_allocator.h"
 #include "core/typedefs.h"
 #include "servers/physics_2d/direct_states/physics_direct_space_state_2d.h"
 
