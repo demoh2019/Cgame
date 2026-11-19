@@ -18,7 +18,7 @@ struct ItemPairs {
 
 	BOUNDS expanded_aabb;
 
-	// maybe we can just use the number in the vector TODO
+	// The vector's size is the sole pair count, avoiding per-object duplication.
 	LocalVector<Link> extended_pairs;
 
 	void add_pair_to(BVHHandle p_handle, void *p_userdata) {
@@ -29,7 +29,7 @@ struct ItemPairs {
 	}
 
 	uint32_t find_pair_to(BVHHandle p_handle) const {
-		for (int n = 0; n < extended_pairs.size(); n++) {
+		for (uint32_t n = 0; n < extended_pairs.size(); n++) {
 			if (extended_pairs[n].handle == p_handle) {
 				return n;
 			}
@@ -45,7 +45,7 @@ struct ItemPairs {
 	void *remove_pair_to(BVHHandle p_handle) {
 		void *userdata = nullptr;
 
-		for (int n = 0; n < extended_pairs.size(); n++) {
+		for (uint32_t n = 0; n < extended_pairs.size(); n++) {
 			if (extended_pairs[n].handle == p_handle) {
 				userdata = extended_pairs[n].userdata;
 				extended_pairs.remove_at_unordered(n);
