@@ -52,6 +52,7 @@
 #ifdef TESTS_ENABLED
 #include "tests/test_gdscript.h"
 #include "tests/test_script_language_api.h"
+#include "tests/test_static_variable_debugger.h"
 #endif
 
 #include "core/io/file_access.h"
