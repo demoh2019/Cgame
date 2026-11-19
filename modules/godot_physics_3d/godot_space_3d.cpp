@@ -1312,6 +1312,12 @@ GodotSpace3D::GodotSpace3D() {
 	soft_body_tangential_drag_ratio = Math::is_finite(configured_tangential_drag) ? MAX(real_t(0.0), configured_tangential_drag) : real_t(0.0);
 	const real_t configured_area_compliance = GLOBAL_GET("physics/3d/solver/soft_body_xpbd_area_compliance");
 	soft_body_xpbd_area_compliance = Math::is_finite(configured_area_compliance) ? MAX(real_t(0.0), configured_area_compliance) : real_t(0.0);
+	const real_t configured_membrane_compliance = GLOBAL_GET("physics/3d/solver/soft_body_xpbd_membrane_compliance");
+	soft_body_xpbd_membrane_compliance = Math::is_finite(configured_membrane_compliance) ?
+			MAX(real_t(0.0), configured_membrane_compliance) : real_t(0.0);
+	const real_t configured_membrane_poisson = GLOBAL_GET("physics/3d/solver/soft_body_membrane_poisson_ratio");
+	soft_body_membrane_poisson_ratio = Math::is_finite(configured_membrane_poisson) ?
+			CLAMP(configured_membrane_poisson, real_t(-0.49), real_t(0.49)) : real_t(0.3);
 	const real_t configured_shear_compliance = GLOBAL_GET("physics/3d/solver/soft_body_xpbd_shear_compliance");
 	soft_body_xpbd_shear_compliance = Math::is_finite(configured_shear_compliance) ? MAX(real_t(0.0), configured_shear_compliance) : real_t(0.0);
 	const real_t configured_dihedral_compliance = GLOBAL_GET("physics/3d/solver/soft_body_xpbd_dihedral_compliance");
