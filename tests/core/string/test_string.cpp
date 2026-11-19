@@ -1632,6 +1632,82 @@ TEST_CASE("[String] match") {
 	CHECK(String("img1.Png").matchn("*.png"));
 }
 
+TEST_CASE("[String] iterative wildcard matching exhaustive short patterns") {
+	// Reference implementation intentionally mirrors the original recursive
+	// semantics, but is only used on tiny inputs so it cannot explode.
+	auto reference = [](auto &&self, const char32_t *pattern, const char32_t *text, bool case_sensitive) -> bool {
+		switch (*pattern) {
+			case '\0':
+				return !*text;
+			case '*':
+				return self(self, pattern + 1, text, case_sensitive) || (*text && self(self, pattern, text + 1, case_sensitive));
+			case '?':
+				return *text && *text != '.' && self(self, pattern + 1, text + 1, case_sensitive);
+			default:
+				return (case_sensitive ? *text == *pattern : String::char_uppercase(*text) == String::char_uppercase(*pattern)) &&
+						self(self, pattern + 1, text + 1, case_sensitive);
+		}
+	};
+
+	constexpr char32_t text_alphabet[] = { 'a', 'A', 'b', '.' };
+	constexpr char32_t pattern_alphabet[] = { 'a', 'b', '.', '?', '*' };
+	for (int text_length = 1, text_count = 4; text_length <= 3; ++text_length, text_count *= 4) {
+		for (int text_index = 0; text_index < text_count; ++text_index) {
+			char32_t text[4] = {};
+			int text_number = text_index;
+			for (int i = 0; i < text_length; ++i) {
+				text[i] = text_alphabet[text_number % 4];
+				text_number /= 4;
+			}
+			const String source(text);
+			for (int pattern_length = 1, pattern_count = 5; pattern_length <= 4; ++pattern_length, pattern_count *= 5) {
+				for (int pattern_index = 0; pattern_index < pattern_count; ++pattern_index) {
+					char32_t pattern[5] = {};
+					int pattern_number = pattern_index;
+					for (int i = 0; i < pattern_length; ++i) {
+						pattern[i] = pattern_alphabet[pattern_number % 5];
+						pattern_number /= 5;
+					}
+					const String wildcard(pattern);
+					CHECK(source.match(wildcard) == reference(reference, pattern, text, true));
+					CHECK(source.matchn(wildcard) == reference(reference, pattern, text, false));
+				}
+			}
+		}
+	}
+}
+
+TEST_CASE("[String] iterative wildcard matching pathological and Unicode cases") {
+	CHECK(String("a.b").match("a*b"));
+	CHECK(!String("a.b").match("a?b")); // '?' never matches period.
+	CHECK(String("a.b").match("a*?"));
+	CHECK(String("abc").match("a**c"));
+	CHECK(!String("abc").match("a**d"));
+	CHECK(String("abc").match("**?"));
+	CHECK(String("abc").match("*"));
+	CHECK(!String("").match("*")); // Preserve String::match's empty-input guard.
+	CHECK(!String("abc").match(""));
+	CHECK(String(U"ÄΩЯ.txt").matchn(U"*ä?я.TXT"));
+	CHECK(!String(U"ÄΩЯ.txt").match(U"*ä?я.TXT"));
+
+	// The recursive matcher has exponential work on this non-matching input.
+	// The iterative matcher must handle it with constant extra memory.
+	CHECK(!String("a").repeat(128).match(String("*a").repeat(24) + "b"));
+	CHECK(String("a").repeat(128).match(String("*a").repeat(24) + "*"));
+}
+
+TEST_CASE("[String] ASCII-fast case comparisons preserve ordering and Unicode") {
+	CHECK(String("AbCd").nocasecmp_to("aBcD") == 0);
+	CHECK(String("abc").nocasecmp_to("ABD") < 0);
+	CHECK(String("ABD").nocasecmp_to("abc") > 0);
+	CHECK(String(U"ÄΩЯ").nocasecmp_to(U"äωя") == 0);
+	CHECK(String(U"Яa").nocasecmp_to(U"яB") < 0);
+	CHECK(String("file2").naturalnocasecmp_to("FILE10") < 0);
+	CHECK(String(U"Ω2").naturalnocasecmp_to(U"ω10") < 0);
+	CHECK(String(U"ÄB").is_subsequence_ofn(U"äXXb"));
+	CHECK(!String(U"ÄB").is_subsequence_of(U"äXXb"));
+}
+
 TEST_CASE("[String] IPVX address to string") {
 	IPAddress ip0("2001:0db8:85a3:0000:0000:8a2e:0370:7334");
 	CHECK(ip0.is_valid());
