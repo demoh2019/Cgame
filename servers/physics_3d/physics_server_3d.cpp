@@ -570,6 +570,10 @@ PhysicsServer3D::PhysicsServer3D() {
 	// Jolt-style contact patch coverage while retaining the deepest point.
 	// Disabled by default; manifold choice affects convergence and determinism.
 	GLOBAL_DEF(PropertyInfo(Variant::BOOL, "physics/3d/solver/manifold_spread_reduction"), false);
+	// XPBD compliant stretch/bend distance links for deformable soft bodies.
+	// Zero selects the legacy Bullet-style projection; nonzero compliance
+	// enables a per-link Lagrange multiplier across iterations of each step.
+	GLOBAL_DEF(PropertyInfo(Variant::FLOAT, "physics/3d/solver/soft_body_xpbd_compliance", PROPERTY_HINT_RANGE, "0,0.01,0.000001,or_greater"), 0.0);
 	GLOBAL_DEF(PropertyInfo(Variant::FLOAT, "physics/3d/solver/contact_recycle_radius", PROPERTY_HINT_RANGE, "0,0.1,0.001,or_greater,suffix:m"), 0.01);
 	GLOBAL_DEF(PropertyInfo(Variant::FLOAT, "physics/3d/solver/contact_max_separation", PROPERTY_HINT_RANGE, "0,0.1,0.001,or_greater,suffix:m"), 0.05);
 	// Experimental sphere-only speculative contacts for existing broadphase pairs.
