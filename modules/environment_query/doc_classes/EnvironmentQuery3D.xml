@@ -1,0 +1,52 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<class name="EnvironmentQuery3D" inherits="Resource" api_type="core" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="../../../doc/class.xsd">
+	<brief_description>
+		Filters and scores candidate positions to help 3D AI choose where to move.
+	</brief_description>
+	<description>
+		A deterministic, physics-independent first stage of an Environment Query System. Provide candidate positions using [member candidates] or the sampling helpers, then call [method query] or [method query_positions].
+		Candidates outside [member min_distance] and [member max_distance] are excluded. When [member use_threat] is enabled, candidates closer than [member min_threat_distance] to [member threat_position] are also excluded.
+		Remaining points receive a distance score based on proximity to [member desired_distance] and, optionally, a safety score based on their distance to the threat. Both scores are scaled by [member distance_weight] and [member safety_weight]. Results are sorted by descending score with original input index as a deterministic tiebreaker. [member max_results] can limit the output count.
+		This resource does not perform line-of-sight, physics, occupancy or navigation queries. Validate candidate reachability with [NavigationServer3D] or [PhysicsDirectSpaceState3D] as needed.
+	</description>
+	<methods>
+		<method name="query" qualifiers="const">
+			<return type="Array" />
+			<description>Returns an array of dictionaries with keys [code]position[/code] ([Vector3]), [code]index[/code] ([int]), [code]score[/code] ([float]), [code]distance[/code] ([float]) and [code]threat_distance[/code] ([float]). The threat distance is -1 when threat filtering is disabled. Results are sorted by score, then by original index.</description>
+		</method>
+		<method name="query_positions" qualifiers="const">
+			<return type="PackedVector3Array" />
+			<description>Returns ranked points without score details.</description>
+		</method>
+		<method name="sample_ring" qualifiers="static">
+			<return type="PackedVector3Array" />
+			<param index="0" name="center" type="Vector3" />
+			<param index="1" name="radius" type="float" />
+			<param index="2" name="count" type="int" />
+			<param index="3" name="phase" type="float" default="0.0" />
+			<description>Generates [param count] evenly spaced positions in the XZ plane, starting at [param phase] radians. Counts of 1 to 4096 are supported. The input center remains unchanged.</description>
+		</method>
+		<method name="sample_grid" qualifiers="static">
+			<return type="PackedVector3Array" />
+			<param index="0" name="center" type="Vector3" />
+			<param index="1" name="half_extents" type="Vector2" />
+			<param index="2" name="spacing" type="float" />
+			<param index="3" name="max_points" type="int" default="4096" />
+			<description>Generates a rectangular grid of candidate points on the XZ plane. [param half_extents] holds the X and Z half widths. The generator rejects invalid inputs or allocations larger than [param max_points] (maximum 65536).</description>
+		</method>
+	</methods>
+	<members>
+		<member name="candidates" type="PackedVector3Array" default="PackedVector3Array()">Points to evaluate; NaN/infinite candidates are ignored.</member>
+		<member name="origin" type="Vector3" default="Vector3(0, 0, 0)">World-space origin from which distances are measured.</member>
+		<member name="min_distance" type="float" default="0.0">Minimum distance from [member origin] inclusive.</member>
+		<member name="max_distance" type="float" default="100.0">Maximum distance from [member origin] inclusive.</member>
+		<member name="desired_distance" type="float" default="0.0">Preferred travel distance from [member origin].</member>
+		<member name="horizontal_only" type="bool" default="false">Use XZ distance instead of full 3D distance, useful for ground AI.</member>
+		<member name="use_threat" type="bool" default="false">Enable filtering and scoring against [member threat_position].</member>
+		<member name="threat_position" type="Vector3" default="Vector3(0, 0, 0)">World-space location of a single threat.</member>
+		<member name="min_threat_distance" type="float" default="0.0">Exclude candidates closer to the threat than this inclusive threshold.</member>
+		<member name="distance_weight" type="float" default="1.0">Nonnegative weight for desired-distance score.</member>
+		<member name="safety_weight" type="float" default="0.0">Nonnegative weight for threat-distance score when threat filtering is enabled.</member>
+		<member name="max_results" type="int" default="0">Maximum ranked results to return; 0 means unlimited.</member>
+	</members>
+</class>
