@@ -318,11 +318,43 @@ void _cast_segment_iterative(uint32_t p_node_id, const POINT &p_from, const POIN
 
 		if (node.is_leaf()) {
 			TLeaf &leaf = _node_get_leaf(node);
-			for (int i = 0; i < leaf.num_items; i++) {
-				if (!leaf.get_aabb(i).intersects_segment(segment)) {
+
+			// The BVH can store up to MAX_ITEMS shapes in each leaf. On dense
+			// leaves, visit the closest *bounding box* first so an exact hit
+			// can clip the segment before expensive shape tests on far items.
+			// A single scan avoids sorting and allocates no additional memory.
+			// Small leaves retain their existing one-pass fast path.
+			int nearest_item = -1;
+			if (leaf.num_items >= 16) {
+				real_t nearest_entry = Math::INF;
+				for (int i = 0; i < leaf.num_items; i++) {
+					const BVHABB_CLASS &aabb = leaf.get_aabb(i);
+					if (!aabb.intersects_segment(segment)) {
+						continue;
+					}
+					const real_t entry = _segment_entry_fraction(aabb, p_from, motion);
+					if (nearest_item == -1 || entry < nearest_entry) {
+						nearest_entry = entry;
+						nearest_item = i;
+					}
+				}
+				if (nearest_item == -1) {
 					continue;
 				}
-				const ItemExtra &extra = _extra[leaf.get_item_ref_id(i)];
+			}
+
+			// Visit the selected candidate first, then the remaining items
+			// in their original order. This is a traversal *hint*, not a
+			// correctness filter: every other possible hit is still tested.
+			for (int i = nearest_item >= 0 ? -1 : 0; i < leaf.num_items; i++) {
+				const int item_index = i < 0 ? nearest_item : i;
+				if (i >= 0 && i == nearest_item) {
+					continue;
+				}
+				if (i >= 0 && !leaf.get_aabb(item_index).intersects_segment(segment)) {
+					continue;
+				}
+				const ItemExtra &extra = _extra[leaf.get_item_ref_id(item_index)];
 				if (USE_PAIRS && !USER_CULL_TEST_FUNCTION::user_cull_check(p_tester, extra.userdata)) {
 					continue;
 				}
