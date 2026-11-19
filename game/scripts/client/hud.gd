@@ -134,6 +134,10 @@ func _build() -> void:
 	sell_wood.text = "Sell wood (+%d silver)" % int(Vendor.SELL_PRICES["wood_1"])
 	sell_wood.pressed.connect(func() -> void: client.vendor("wood_1", 1, false))
 	vendor_buttons.add_child(sell_wood)
+	var sell_refined := Button.new()
+	sell_refined.text = "Sell carried refined material"
+	sell_refined.pressed.connect(_sell_one_material)
+	vendor_buttons.add_child(sell_refined)
 
 	_craft_panel = PanelContainer.new()
 	_craft_panel.set_anchors_preset(Control.PRESET_CENTER_LEFT)
@@ -203,6 +207,14 @@ func _on_event(event: Dictionary) -> void:
 				say("-%d health" % int(event["damage"]))
 		"crate":
 			say("You search the crate...")
+
+
+func _sell_one_material() -> void:
+	var item_id: String = Vendor.first_sellable(client.inventory)
+	if item_id.is_empty():
+		say("Vendor: no tradable materials")
+		return
+	client.vendor(item_id, 1, false)
 
 
 func _on_result(kind: String, data: Dictionary) -> void:

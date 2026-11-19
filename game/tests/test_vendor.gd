@@ -96,3 +96,22 @@ func run(t) -> void:
 	merchant.survival.hurt(10000.0)
 	t.eq(server.cmd_vendor(91, "water_bottle", 1, true)["reason"],
 		"dead", "dead players cannot trade")
+
+	t.current = "refined craft material market"
+	for item_id in ["plank_1", "plank_4", "bar_2", "cloth_3"]:
+		t.eq(int(Vendor.SELL_PRICES[item_id]), int(Defs.item(item_id)["value"]),
+			"NPC rewards refined value for " + item_id)
+	var smith = server.add_player(92, "Refiner")
+	smith.position = Vector3(hub.x, world.height_at(hub.x, hub.y), hub.y)
+	smith.inventory.add("plank_1", 1)
+	smith.inventory.add("bar_2", 1)
+	t.eq(Vendor.first_sellable(smith.inventory), "bar_2", "sell shortcut prioritizes refined metal")
+	t.check(server.cmd_vendor(92, "bar_2", 1, false).get("ok", false), "refined bar sold")
+	t.eq(smith.inventory.count("silver"), 16, "bar tier-2 payout is 16 silver")
+	t.eq(smith.inventory.count("bar_2"), 0, "refined input debited exactly")
+	t.eq(Vendor.first_sellable(smith.inventory), "plank_1", "falls back to carried plank")
+	t.check(server.cmd_vendor(92, "plank_1", 1, false).get("ok", false), "refined plank sold")
+	t.eq(smith.inventory.count("silver"), 21, "refined profession earnings add up")
+	t.eq(Vendor.first_sellable(smith.inventory), "", "no phantom materials")
+	t.eq(server.cmd_vendor(92, "bar_2", 1, false).get("reason"), "missing_items",
+		"repeat trade cannot mint silver")

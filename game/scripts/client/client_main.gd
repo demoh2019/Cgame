@@ -6,6 +6,7 @@ extends Node3D
 const Defs = preload("res://scripts/shared/defs.gd")
 const WorldGen = preload("res://scripts/shared/world_gen.gd")
 const GameServer = preload("res://scripts/server/game_server.gd")
+const Vendor = preload("res://scripts/shared/vendor.gd")
 const LOCAL_PLAYER_ID := 2
 const TERRAIN_STEP := 8.0
 
@@ -506,8 +507,11 @@ func _unhandled_input(event: InputEvent) -> void:
 	elif event.is_action_pressed("survive_vendor_buy"):
 		_result("Buy water (12 silver)", sim.cmd_vendor(LOCAL_PLAYER_ID, "water_bottle", 1, true))
 	elif event.is_action_pressed("survive_vendor_sell"):
-		var salvage_id := "scrap" if survivor.inventory.count("scrap") > 0 else "wood_1"
-		_result("Sell %s" % salvage_id, sim.cmd_vendor(LOCAL_PLAYER_ID, salvage_id, 1, false))
+		var salvage_id: String = Vendor.first_sellable(survivor.inventory)
+		if salvage_id.is_empty():
+			_feedback = "No materials for sale."
+		else:
+			_result("Sell %s" % salvage_id, sim.cmd_vendor(LOCAL_PLAYER_ID, salvage_id, 1, false))
 
 
 func _update_hud() -> void:

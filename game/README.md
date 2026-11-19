@@ -206,15 +206,15 @@ The suite includes `test_vendor.gd` with capacity-rollback,
 replay-rejection and location-authority regressions. The dedicated
 `albion-after-vendor.yml` CI also runs the complete test suite.
 
-## Settlement trader (server-authoritative fixed-price NPC)
+## Selling refined crafting materials
 
-At the workbench inside the safe hub, survivors can sell wood, stone,
-ore, fiber and scrap for carried silver, or buy water, canned food and
-bandages. Fixed offers are defined in `scripts/shared/market.gd`; the server
-validates position, stock, quantity limits and inventory capacity. A failed
-trade rolls back all item transfers. Carried silver is lost with full-loot
-death, unless stored in the protected stash.
+The existing authoritative hub vendor also buys player-refined **planks,
+metal bars and cloth** at tier-scaled prices. Refining two raw materials
+therefore adds a small silver premium, connecting gathering, professions and
+the settlement economy without duplicating server market systems.
 
-The test suite covers all offer rules, distance checks, buy/sell amounts,
-capacity rollback and dead-player rejection using `tests/test_market.gd`.
-This is an NPC vendor, not yet a player auction market.
+`Vendor.first_sellable(inventory)` chooses a carried refined material first,
+then falls back to raw salvage. The local preview `V` key and a new inventory
+panel button use this helper. The same server-side `cmd_vendor` validates
+each transaction; Nakama persistence and safe-bank rules remain unchanged.
+The existing `test_vendor.gd` suite also covers refined-goods payouts.

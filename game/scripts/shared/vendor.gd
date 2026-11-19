@@ -32,7 +32,28 @@ const SELL_PRICES := {
 	"stone_4": 8,
 	"ore_4": 12,
 	"fiber_4": 8,
+	"plank_1": 5, "plank_2": 10, "plank_3": 15, "plank_4": 20,
+	"bar_1": 8, "bar_2": 16, "bar_3": 24, "bar_4": 32,
+	"cloth_1": 5, "cloth_2": 10, "cloth_3": 15, "cloth_4": 20,
 }
+
+
+
+## Refining raises the NPC sale value, connecting professions with salvage.
+## Prefer a refined item when selling one carried material from a shortcut.
+const REFINED_PRIORITY := ["bar_4", "bar_3", "bar_2", "bar_1",
+	"plank_4", "plank_3", "plank_2", "plank_1",
+	"cloth_4", "cloth_3", "cloth_2", "cloth_1"]
+
+
+static func first_sellable(carried) -> String:
+	for item_id in REFINED_PRIORITY:
+		if carried.count(item_id) > 0:
+			return item_id
+	for item_id in SELL_PRICES:
+		if carried.count(item_id) > 0:
+			return item_id
+	return ""
 
 
 static func transact(carried, item_id: String, quantity: int, buy: bool) -> Dictionary:
