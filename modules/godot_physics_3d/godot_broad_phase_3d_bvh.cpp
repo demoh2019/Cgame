@@ -39,6 +39,17 @@ GodotBroadPhase3DBVH::ID GodotBroadPhase3DBVH::create(GodotCollisionObject3D *p_
 	return oid + 1;
 }
 
+GodotBroadPhase3DBVH::ID GodotBroadPhase3DBVH::create_deferred(GodotCollisionObject3D *p_object, int p_subindex, const AABB &p_aabb, bool p_static) {
+	const uint32_t tree_id = p_static ? TREE_STATIC : TREE_DYNAMIC;
+	const uint32_t tree_collision_mask = p_static ? TREE_FLAG_DYNAMIC : (TREE_FLAG_STATIC | TREE_FLAG_DYNAMIC);
+	const ID oid = bvh.create(p_object, true, tree_id, tree_collision_mask, p_aabb, p_subindex, true);
+	return oid + 1;
+}
+
+void GodotBroadPhase3DBVH::flush_pending_pairs() {
+	bvh.flush_pending_pairs();
+}
+
 void GodotBroadPhase3DBVH::move(ID p_id, const AABB &p_aabb) {
 	ERR_FAIL_COND(!p_id);
 	bvh.move(p_id - 1, p_aabb);
