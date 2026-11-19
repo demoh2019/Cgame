@@ -4807,22 +4807,54 @@ bool String::is_valid_string() const {
 	return valid;
 }
 
-String String::uri_encode() const {
-	const CharString temp = utf8();
-	String res;
+static _FORCE_INLINE_ bool _uri_is_unreserved(uint8_t p_byte) {
+	return p_byte == '.' || p_byte == '-' || p_byte == '~' || is_ascii_identifier_char(p_byte);
+}
 
-	for (int i = 0; i < temp.length(); ++i) {
-		uint8_t ord = uint8_t(temp[i]);
-		if (ord == '.' || ord == '-' || ord == '~' || is_ascii_identifier_char(ord)) {
-			res += ord;
+template <typename T>
+static String _uri_encode_bytes(const T *p_bytes, int p_length) {
+	int64_t output_length = 0;
+	for (int i = 0; i < p_length; i++) {
+		const uint8_t byte = uint8_t(p_bytes[i]);
+		output_length += _uri_is_unreserved(byte) ? 1 : 3;
+	}
+	ERR_FAIL_COND_V_MSG(output_length >= INT32_MAX, "", "URI encoded string is too large.");
+
+	String result;
+	result.resize_uninitialized(int(output_length) + 1);
+	char32_t *write = result.ptrw();
+	for (int i = 0; i < p_length; i++) {
+		const uint8_t byte = uint8_t(p_bytes[i]);
+		if (_uri_is_unreserved(byte)) {
+			*write++ = byte;
 		} else {
-			char p[4] = { '%', 0, 0, 0 };
-			p[1] = hex_char_table_upper[ord >> 4];
-			p[2] = hex_char_table_upper[ord & 0xF];
-			res += p;
+			*write++ = '%';
+			*write++ = hex_char_table_upper[byte >> 4];
+			*write++ = hex_char_table_upper[byte & 0x0F];
 		}
 	}
-	return res;
+	*write = 0;
+	return result;
+}
+
+String String::uri_encode() const {
+	// Common path: avoid even a UTF-8 temporary for ASCII paths and identifiers.
+	const char32_t *source = ptr();
+	const int len = length();
+	bool needs_escape = false;
+	for (int i = 0; i < len; i++) {
+		const char32_t c = source[i];
+		if (c >= 128) {
+			// Non-ASCII codepoints must be escaped byte by byte as UTF-8.
+			const CharString bytes = utf8();
+			return _uri_encode_bytes(bytes.ptr(), bytes.length());
+		}
+		needs_escape |= !_uri_is_unreserved(uint8_t(c));
+	}
+	if (!needs_escape) {
+		return *this; // Share the existing COW allocation.
+	}
+	return _uri_encode_bytes(source, len);
 }
 
 String String::uri_decode() const {
