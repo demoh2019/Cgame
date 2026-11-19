@@ -117,6 +117,7 @@ private:
 	real_t contact_max_allowed_penetration = 0.0;
 	real_t contact_bias = 0.0;
 	real_t max_contact_push_speed = 0.0; // 0: unlimited (legacy behavior).
+	real_t max_linear_velocity = 0.0; // 0: unlimited, cached per space.
 	real_t warm_start_coefficient = 1.0;
 	real_t constraint_bias = 0.0;
 	real_t restitution_velocity_threshold = 0.0;
@@ -181,6 +182,7 @@ public:
 	_FORCE_INLINE_ real_t get_contact_max_allowed_penetration() const { return contact_max_allowed_penetration; }
 	_FORCE_INLINE_ real_t get_contact_bias() const { return contact_bias; }
 	_FORCE_INLINE_ real_t limit_contact_bias(real_t p_bias) const { return godot_physics_limit_contact_bias(p_bias, max_contact_push_speed); }
+	_FORCE_INLINE_ real_t get_max_linear_velocity() const { return max_linear_velocity; }
 	_FORCE_INLINE_ real_t get_warm_start_coefficient() const { return warm_start_coefficient; }
 	_FORCE_INLINE_ real_t get_restitution_velocity_threshold() const { return restitution_velocity_threshold; }
 	_FORCE_INLINE_ real_t mix_restitution(real_t p_a, real_t p_b) const { return godot_physics_combine_restitution(p_a, p_b, restitution_combine_mode); }
