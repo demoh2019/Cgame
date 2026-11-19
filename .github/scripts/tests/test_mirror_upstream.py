@@ -118,7 +118,7 @@ class MirrorTests(unittest.TestCase):
     def test_existing_issue_is_skipped_and_unrelated_issue_created(self):
         api = FakeAPI(
             [issue(1), issue(2)],
-            destination=[{"body": m.marker(m.SOURCE_DEFAULT, "issues", 1)}],
+            destination=[{"number": 999, "state": "open", "body": m.marker(m.SOURCE_DEFAULT, "issues", 1)}],
         )
         mirror = m.Mirror(api, apply=True, git_mirror=FakeGit())
         stats = mirror.run(max_items=2)
@@ -126,6 +126,25 @@ class MirrorTests(unittest.TestCase):
         self.assertEqual(stats["created_issues"], 1)
         self.assertEqual(len([c for c in api.calls if c[:2] == (
             "POST", "/repos/demoh2019/godot/issues")]), 1)
+
+    def test_resume_partial_import_completes_comment_and_closure(self):
+        comment = {"id": 16, "body": "Important detail", "user": {"login": "alice"},
+                   "html_url": "https://github.com/godotengine/godot/issues/4#issuecomment-16",
+                   "created_at": "2026-11-01T00:00:00Z"}
+        api = FakeAPI(
+            [issue(4, closed=True)],
+            destination=[{"number": 999, "state": "open",
+                          "body": m.marker(m.SOURCE_DEFAULT, "issues", 4)}],
+            comments=[comment],
+        )
+        stats = m.Mirror(api, apply=True, comments=True).run(max_items=1)
+        self.assertEqual(stats["skipped"], 1)
+        self.assertEqual(stats["created_issues"], 0)
+        self.assertIn(("PATCH", "/repos/demoh2019/godot/issues/999",
+                       {"state": "closed"}), api.calls)
+        comment_posts = [a for a in api.calls if a[0] == "POST"]
+        self.assertEqual(len(comment_posts), 1)
+        self.assertIn("upstream-comment: 16", comment_posts[0][2]["body"])
 
     def test_closed_issue_is_created_then_closed(self):
         api = FakeAPI([issue(5, closed=True)])
