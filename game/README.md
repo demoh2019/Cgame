@@ -1437,3 +1437,53 @@ RPC. Red/black PvP rules and group friendly-fire safeguards remain in force.
 energy, noise, mastery, replay prevention, respawn and safe-hub PvP with
 `godot --headless --path game --script res://tests/run_all.gd`.
 Existing Cgame APIs suffice; no native engine addition was needed.
+
+
+## Frontier outpost supply caches (survival + territorial MMO economy)
+
+The canonical `game/` PvP siege outposts now hold **finite server-owned
+supply caches**, connecting Lineage-style territorial control with the
+Albion-style gathering economy and Days After survival loop.
+
+- Capture an existing **red/black-zone outpost** with at least two living
+  survivors in one real server party. This still requires uncontested
+  presence for the usual capture period. Each new successful capture
+  initializes **five shared supply parcels** at that flag.
+- Any member of the controlling party can stand **within 4 metres** of
+  the captured flag and use **Collect nearest captured outpost supplies**
+  from the **I** inventory panel. The server checks actual position,
+  current party membership, owner, expiry, and **live nearby enemies**.
+  A contested outpost cannot be looted.
+- Each successful parcel supplies **silver, scrap, one T3/T4 metal bar,
+  and a bandage**. Red zone yields 30 silver, six scrap and one T3 bar;
+  black zone yields 40 silver, eight scrap and one T4 bar.
+  These items are normal inventory resources and remain subject to
+  carry weight, trading, crafting and full-loot PvP rules.
+- **One parcel per authenticated account per capture**. Repeated commands,
+  relogging with the same Nakama identity, or changing the network peer
+  number cannot create another parcel. Guests use a session-unique
+  identity rather than their reusable network ID.
+- The reward goes into a *transactional inventory copy* first: insufficient
+  space results in **zero items added and zero stock consumed**. Successful
+  claims atomically reduce the public `supplies_left` count by one.
+- A disbanded or expired owner loses access immediately; on the next
+  territory tick the remaining cache is cleared. The server initializes a
+  new five-parcel stock only when a valid group captures the flag again.
+  Cache claimant identities are **never included in public snapshots**.
+- Supply stocks are server-session state, like the current outpost
+  ownership; this is not yet a persistent guild treasury. The permanent
+  character inventory received after a successful claim is saved by the
+  normal Nakama autosave/logout flow.
+
+This feature needs no additional C++ engine primitives: the existing
+authoritative terrain, parties, combat risk, inventory and networking APIs
+already cover safe transfer.
+
+```sh
+godot --headless --path game --script res://tests/run_all.gd
+```
+
+The `game/tests/test_outpost_supplies.gd` suite validates PvP-zone
+reward tables, real capture requirements, proximity and hostile presence,
+full-backpack rollback, once-per-account protection, finite shares, expiry
+and renewal after recapture.
