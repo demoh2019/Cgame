@@ -40,6 +40,7 @@
 #endif // PHYSICS_3D_DISABLED
 
 #include <cfloat> // FLT_EPSILON
+#include <utility> // std::move
 
 Ref<ImporterMesh> ImporterMesh::merge_importer_meshes(const TypedArray<ImporterMesh> &p_importer_meshes, const TypedArray<Transform3D> &p_relative_transforms, bool p_deduplicate_surfaces) {
 	// Setup and safety checks.
@@ -66,20 +67,25 @@ Ref<ImporterMesh> ImporterMesh::merge_importer_meshes(const TypedArray<ImporterM
 			// Transform the data of the mesh by the instance's relative transform.
 			{
 				PackedVector3Array vertices = this_surface_arrays[Mesh::ARRAY_VERTEX];
+				// Detach each packed array at most once: the old per-vertex ptrw()
+				// checks and repeated indexed reads add up on large imported meshes.
+				Vector3 *vertices_write = vertices.is_empty() ? nullptr : vertices.ptrw();
 				for (int vertex_index = 0; vertex_index < vertices.size(); vertex_index++) {
-					vertices.ptrw()[vertex_index] = relative_transform.xform(vertices[vertex_index]);
+					vertices_write[vertex_index] = relative_transform.xform(vertices_write[vertex_index]);
 				}
 				PackedVector3Array normals = this_surface_arrays[Mesh::ARRAY_NORMAL];
+				Vector3 *normals_write = normals.is_empty() ? nullptr : normals.ptrw();
 				for (int normal_index = 0; normal_index < normals.size(); normal_index++) {
-					normals.ptrw()[normal_index] = relative_transform.basis.xform(normals[normal_index]).normalized();
+					normals_write[normal_index] = relative_transform.basis.xform(normals_write[normal_index]).normalized();
 				}
 				PackedFloat32Array tangents = this_surface_arrays[Mesh::ARRAY_TANGENT];
+				float *tangents_write = tangents.is_empty() ? nullptr : tangents.ptrw();
 				for (int tangent_index = 0; tangent_index < tangents.size(); tangent_index += 4) {
-					Vector3 tangent = Vector3(tangents[tangent_index], tangents[tangent_index + 1], tangents[tangent_index + 2]);
+					Vector3 tangent(tangents_write[tangent_index], tangents_write[tangent_index + 1], tangents_write[tangent_index + 2]);
 					tangent = relative_transform.basis.xform(tangent).normalized();
-					tangents.ptrw()[tangent_index + 0] = tangent.x;
-					tangents.ptrw()[tangent_index + 1] = tangent.y;
-					tangents.ptrw()[tangent_index + 2] = tangent.z;
+					tangents_write[tangent_index + 0] = tangent.x;
+					tangents_write[tangent_index + 1] = tangent.y;
+					tangents_write[tangent_index + 2] = tangent.z;
 					// The tangent's W component is not transformed (the binormal direction sign), so we keep it as is.
 				}
 				// If the determinant is negative, we need to swap vertices to fix the winding order.
