@@ -143,6 +143,14 @@ private:
 	real_t soft_body_plastic_yield_strain = 0.1; // Relative elastic yield limit.
 	real_t soft_body_plastic_creep_rate = 0.0; // 1/second; 0 keeps elastic behavior.
 	real_t soft_body_link_damping = 0.0; // Optional longitudinal dashpot rate, 1/s.
+	real_t soft_body_thermal_conduction_rate = 0.0;
+	real_t soft_body_thermal_ambient_exchange_rate = 0.0;
+	real_t soft_body_thermal_ambient_temperature = 20.0;
+	real_t soft_body_thermal_source_rate = 0.0;
+	real_t soft_body_thermal_source_temperature = 100.0;
+	Vector3 soft_body_thermal_source_center;
+	real_t soft_body_thermal_source_radius = 0.0;
+	real_t soft_body_thermal_expansion_coefficient = 0.0;
 	real_t soft_body_strain_rate_damping = 0.0; // Optional rate-sensitive longitudinal damping.
 	real_t soft_body_strain_rate_yield = 0.0; // Minimum relative link strain rate [1/s].
 	real_t soft_body_lift_coefficient = 0.0; // Two-sided aerodynamic cloth lift, opt-in.
@@ -320,6 +328,14 @@ public:
 	_FORCE_INLINE_ real_t get_soft_body_plastic_yield_strain() const { return soft_body_plastic_yield_strain; }
 	_FORCE_INLINE_ real_t get_soft_body_plastic_creep_rate() const { return soft_body_plastic_creep_rate; }
 	_FORCE_INLINE_ real_t get_soft_body_link_damping() const { return soft_body_link_damping; }
+	_FORCE_INLINE_ real_t get_soft_body_thermal_conduction_rate() const { return soft_body_thermal_conduction_rate; }
+	_FORCE_INLINE_ real_t get_soft_body_thermal_ambient_exchange_rate() const { return soft_body_thermal_ambient_exchange_rate; }
+	_FORCE_INLINE_ real_t get_soft_body_thermal_ambient_temperature() const { return soft_body_thermal_ambient_temperature; }
+	_FORCE_INLINE_ real_t get_soft_body_thermal_source_rate() const { return soft_body_thermal_source_rate; }
+	_FORCE_INLINE_ real_t get_soft_body_thermal_source_temperature() const { return soft_body_thermal_source_temperature; }
+	_FORCE_INLINE_ const Vector3 &get_soft_body_thermal_source_center() const { return soft_body_thermal_source_center; }
+	_FORCE_INLINE_ real_t get_soft_body_thermal_source_radius() const { return soft_body_thermal_source_radius; }
+	_FORCE_INLINE_ real_t get_soft_body_thermal_expansion_coefficient() const { return soft_body_thermal_expansion_coefficient; }
 	_FORCE_INLINE_ real_t get_soft_body_strain_rate_damping() const { return soft_body_strain_rate_damping; }
 	_FORCE_INLINE_ real_t get_soft_body_strain_rate_yield() const { return soft_body_strain_rate_yield; }
 	_FORCE_INLINE_ real_t get_soft_body_lift_coefficient() const { return soft_body_lift_coefficient; }
