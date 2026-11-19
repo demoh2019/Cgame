@@ -1,4 +1,4 @@
-name: String escape single-buffer native regressions
+name: String hotpath native regressions
 
 on:
   pull_request:
@@ -18,8 +18,13 @@ on:
 permissions:
   contents: read
 
+# Skip stale expensive engine builds if another push or PR revision arrives.
+concurrency:
+  group: string-hotpath-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
-  native-string-escape:
+  native-string-hotpaths:
     runs-on: ubuntu-24.04
     timeout-minutes: 120
     steps:
@@ -27,13 +32,18 @@ jobs:
         with:
           submodules: recursive
       - uses: ./.github/actions/godot-deps
-      - name: Build editor with native regression tests
+      - name: Build editor once for all String hotpath checks
         uses: ./.github/actions/godot-build
         with:
           platform: linuxbsd
           target: editor
           scons-flags: dev_build=yes tests=yes debug_symbols=no module_mono_enabled=no accesskit=no -j2
-      - name: Run single-buffer escape regression cases
+      - name: Run C, JSON, XML, URI, and path regression tests
         run: |
           ./bin/godot.linuxbsd.editor.dev.x86_64 --headless --test --test-case="*[String] Escape*" --no-colors
           ./bin/godot.linuxbsd.editor.dev.x86_64 --headless --test --test-case="*[String] c-escape*" --no-colors
+          ./bin/godot.linuxbsd.editor.dev.x86_64 --headless --test --test-case="*[String] xml_escape*" --no-colors
+          ./bin/godot.linuxbsd.editor.dev.x86_64 --headless --test --test-case="*[String] URI decoding*" --no-colors
+          ./bin/godot.linuxbsd.editor.dev.x86_64 --headless --test --test-case="*[String] uri_encode*" --no-colors
+          ./bin/godot.linuxbsd.editor.dev.x86_64 --headless --test --test-case="*[String] Path joining*" --no-colors
+          ./bin/godot.linuxbsd.editor.dev.x86_64 --headless --test --test-case="*[String] Path extraction*" --no-colors
