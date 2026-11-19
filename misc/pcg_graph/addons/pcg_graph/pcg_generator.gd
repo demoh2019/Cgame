@@ -73,6 +73,66 @@ static func _process(kind: String, params: Dictionary, source: Array, seed: int,
 			for point in source:
 				if noise.get_noise_2d(point.x, point.z) >= threshold:
 					result.append(point)
+		"HEIGHT_NOISE":
+			if not _numeric(params, "frequency", 0.000001, 100.0):
+				return _failure("HEIGHT_NOISE frequency is invalid")
+			if not _numeric(params, "amplitude", 0.0, 100000.0):
+				return _failure("HEIGHT_NOISE amplitude is invalid")
+			var height_noise := FastNoiseLite.new()
+			height_noise.seed = seed ^ (node_id * 486187739)
+			height_noise.frequency = float(params["frequency"])
+			var amplitude: float = float(params["amplitude"])
+			for point in source:
+				var sample: Vector3 = point + Vector3(0.0,
+						height_noise.get_noise_2d(point.x, point.z) * amplitude, 0.0)
+				if not sample.is_finite():
+					return _failure("HEIGHT_NOISE generated a nonfinite position")
+				result.append(sample)
+		"HEIGHT_FILTER":
+			if not _numeric(params, "min_height", -10000000.0, 10000000.0):
+				return _failure("HEIGHT_FILTER min_height is invalid")
+			if not _numeric(params, "max_height", -10000000.0, 10000000.0):
+				return _failure("HEIGHT_FILTER max_height is invalid")
+			var minimum_height: float = float(params["min_height"])
+			var maximum_height: float = float(params["max_height"])
+			if minimum_height > maximum_height:
+				return _failure("HEIGHT_FILTER requires min_height <= max_height")
+			for point in source:
+				if point.y >= minimum_height and point.y <= maximum_height:
+					result.append(point)
+		"DISTANCE_FILTER":
+			if not _numeric(params, "minimum_distance", 0.001, 100000.0):
+				return _failure("DISTANCE_FILTER minimum_distance is invalid")
+			var minimum_distance: float = float(params["minimum_distance"])
+			var min_distance_squared: float = minimum_distance * minimum_distance
+			# Spatial hash over X/Z. Keys are strings because large worlds can
+			# exceed Vector2i's 32-bit range after division by tiny spacings.
+			var buckets := {}
+			for point in source:
+				var cell_x := floori(point.x / minimum_distance)
+				var cell_z := floori(point.z / minimum_distance)
+				var keep := true
+				for dz in range(-1, 2):
+					for dx in range(-1, 2):
+						var key := "%d:%d" % [cell_x + dx, cell_z + dz]
+						if not buckets.has(key):
+							continue
+						for other in buckets[key]:
+							var diff_x: float = point.x - other.x
+							var diff_z: float = point.z - other.z
+							if diff_x * diff_x + diff_z * diff_z < min_distance_squared:
+								keep = false
+								break
+						if not keep:
+							break
+					if not keep:
+						break
+				if keep:
+					result.append(point)
+					var own_key := "%d:%d" % [cell_x, cell_z]
+					if not buckets.has(own_key):
+						buckets[own_key] = []
+					buckets[own_key].append(point)
 		"OFFSET":
 			for axis in ["x", "y", "z"]:
 				if not _numeric(params, axis, -100000.0, 100000.0):

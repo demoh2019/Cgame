@@ -141,7 +141,12 @@ func _make_parameter(parent: GraphNode, node_id: int, key: String, value: Varian
 		spin.min_value = 0.0
 		spin.max_value = 1.0
 		spin.step = 0.01
-	elif key in ["radius", "spacing", "frequency"]:
+	elif key in ["spacing", "minimum_distance"]:
+		spin.min_value = 0.001
+	elif key == "frequency":
+		spin.min_value = 0.000001
+		spin.step = 0.0001
+	elif key in ["radius", "amplitude"]:
 		spin.min_value = 0.0
 	spin.value = float(value)
 	spin.value_changed.connect(_parameter_changed.bind(node_id, key))

@@ -4,7 +4,7 @@ class_name PCGGraph
 ## Serializable, deterministic point-processing graph.
 ## Each node has one input/output port; GRID is a source and OUTPUT is a sink.
 
-const NODE_KINDS := ["GRID", "JITTER", "RANDOM_FILTER", "NOISE_FILTER", "OFFSET", "OUTPUT"]
+const NODE_KINDS := ["GRID", "JITTER", "RANDOM_FILTER", "NOISE_FILTER", "HEIGHT_NOISE", "HEIGHT_FILTER", "DISTANCE_FILTER", "OFFSET", "OUTPUT"]
 const MAX_NODES := 256
 
 @export var seed: int = 1
@@ -22,6 +22,12 @@ static func default_parameters(kind: String) -> Dictionary:
 			return {"chance": 0.75}
 		"NOISE_FILTER":
 			return {"frequency": 0.08, "threshold": 0.0}
+		"HEIGHT_NOISE":
+			return {"frequency": 0.08, "amplitude": 10.0}
+		"HEIGHT_FILTER":
+			return {"min_height": -100.0, "max_height": 100.0}
+		"DISTANCE_FILTER":
+			return {"minimum_distance": 2.0}
 		"OFFSET":
 			return {"x": 0.0, "y": 0.0, "z": 0.0}
 		"OUTPUT":

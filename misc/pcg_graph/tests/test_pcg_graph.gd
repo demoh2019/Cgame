@@ -342,6 +342,137 @@ func _test_null_and_shared_graph_data() -> void:
 			"parameter updates keep a separate copy")
 
 
+
+func _test_height_noise_generation() -> void:
+	var graph := _grid(8, 7, 1.0)
+	var processor := _append(graph, "HEIGHT_NOISE", {"frequency": 0.1, "amplitude": 20.0})
+	var base: Array = _ok(_grid(8, 7, 1.0))["points"]
+	var first: Array = _ok(graph)["points"]
+	_check(first.size() == 56, "noise height generator keeps input count")
+	_check(first == _ok(graph)["points"], "noise height repeatability")
+	var altered := 0
+	for i in first.size():
+		var point: Vector3 = first[i]
+		_check(point.is_finite(), "height output is finite")
+		_check(point.x == base[i].x and point.z == base[i].z,
+				"height operator preserves X/Z")
+		_check(absf(point.y) <= 20.001, "height displacement within amplitude")
+		if absf(point.y) > 0.001:
+			altered += 1
+	_check(altered > 0, "height operator displaces non-origin points")
+	graph.seed = 1739
+	_check(first != _ok(graph)["points"], "noise height changes with seed")
+	graph.update_parameters(processor, {"frequency": 0.1, "amplitude": 0.0})
+	_check(_ok(graph)["points"] == base, "zero amplitude leaves geometry unchanged")
+	graph.update_parameters(processor, {"frequency": 0.0, "amplitude": 1.0})
+	_fails(graph, "zero height-noise frequency")
+	graph.update_parameters(processor, {"frequency": INF, "amplitude": 1.0})
+	_fails(graph, "infinite height-noise frequency")
+	graph.update_parameters(processor, {"frequency": 0.1, "amplitude": -1.0})
+	_fails(graph, "negative height-noise amplitude")
+	graph.update_parameters(processor, {"frequency": 0.1, "amplitude": NAN})
+	_fails(graph, "NaN height-noise amplitude")
+
+
+func _test_height_range_filter() -> void:
+	var graph := _grid(3, 2, 1.0)
+	var output_id: int = graph.nodes[1]["id"]
+	var source_id: int = graph.connections[0]["from"]
+	graph.remove_connection(source_id, output_id)
+	var offset_id := graph.add_graph_node("OFFSET")
+	var filter_id := graph.add_graph_node("HEIGHT_FILTER")
+	graph.update_parameters(offset_id, {"x": 1.0, "y": 5.0, "z": 2.0})
+	graph.update_parameters(filter_id, {"min_height": 4.0, "max_height": 6.0})
+	_check(graph.add_connection(source_id, offset_id), "connect grid to height offset")
+	_check(graph.add_connection(offset_id, filter_id), "connect offset to height filter")
+	_check(graph.add_connection(filter_id, output_id), "connect height filter to output")
+	var first: Array = _ok(graph)["points"]
+	_check(first.size() == 6, "height band includes all points")
+	_check(first[0] == Vector3(1, 5, 2), "height filter preserves matching positions")
+	graph.update_parameters(filter_id, {"min_height": 5.0, "max_height": 5.0})
+	_check(_ok(graph)["points"].size() == 6, "inclusive single-height interval")
+	graph.update_parameters(filter_id, {"min_height": 6.0, "max_height": 10.0})
+	_check(_ok(graph)["points"].is_empty(), "height band rejects other elevations")
+	graph.update_parameters(filter_id, {"min_height": 10.0, "max_height": 5.0})
+	_fails(graph, "inverted height interval")
+	graph.update_parameters(filter_id, {"min_height": NAN, "max_height": 5.0})
+	_fails(graph, "NaN height minimum")
+	graph.update_parameters(filter_id, {"min_height": -1.0, "max_height": INF})
+	_fails(graph, "infinite height maximum")
+	graph.update_parameters(filter_id, {"min_height": "bad", "max_height": 1.0})
+	_fails(graph, "nonnumeric height interval")
+
+
+func _test_distance_filter() -> void:
+	var graph := _grid(3, 3, 1.0)
+	var processor := _append(graph, "DISTANCE_FILTER", {"minimum_distance": 1.5})
+	var points: Array = _ok(graph)["points"]
+	_check(points.size() == 4, "distance filter removes adjacent grid points")
+	_check(points == _ok(graph)["points"], "distance filtering is repeatable")
+	var originals: Array = _ok(_grid(3, 3, 1.0))["points"]
+	for i in points.size():
+		_check(originals.has(points[i]), "distance filtering only removes points")
+		for j in range(i + 1, points.size()):
+			var a: Vector3 = points[i]
+			var b: Vector3 = points[j]
+			var horizontal := Vector2(a.x - b.x, a.z - b.z)
+			_check(horizontal.length() >= 1.5 - 0.00001,
+					"minimum horizontal spacing is enforced")
+	graph.update_parameters(processor, {"minimum_distance": 1.0})
+	_check(_ok(graph)["points"].size() == 9, "exactly spaced points are retained")
+	graph.update_parameters(processor, {"minimum_distance": 100.0})
+	_check(_ok(graph)["points"].size() == 1, "large separation retains one point")
+	graph.update_parameters(processor, {"minimum_distance": 0.0})
+	_fails(graph, "zero minimum distance")
+	graph.update_parameters(processor, {"minimum_distance": -1.0})
+	_fails(graph, "negative minimum distance")
+	graph.update_parameters(processor, {"minimum_distance": NAN})
+	_fails(graph, "NaN minimum distance")
+	graph.update_parameters(processor, {"minimum_distance": INF})
+	_fails(graph, "infinite minimum distance")
+	graph.update_parameters(processor, {"minimum_distance": 100001.0})
+	_fails(graph, "excessively large minimum distance")
+
+	# A tiny cell size in a large open world exceeds Vector2i's 32-bit
+	# coordinate range; the spatial hash must retain all 100 distant points.
+	var large_grid := _grid(100, 1, 100000.0)
+	_append(large_grid, "DISTANCE_FILTER", {"minimum_distance": 0.001})
+	_check(_ok(large_grid)["points"].size() == 100, "large world positions remain distinct")
+
+
+func _test_height_and_distance_spawner_pipeline() -> void:
+	var graph := _grid(7, 4, 1.0)
+	var output_id: int = graph.nodes[1]["id"]
+	graph.remove_connection(1, output_id)
+	var height_id := graph.add_graph_node("HEIGHT_NOISE")
+	var filter_id := graph.add_graph_node("HEIGHT_FILTER")
+	var distance_id := graph.add_graph_node("DISTANCE_FILTER")
+	graph.update_parameters(height_id, {"frequency": 0.15, "amplitude": 8.0})
+	graph.update_parameters(filter_id, {"min_height": -8.0, "max_height": 8.0})
+	graph.update_parameters(distance_id, {"minimum_distance": 1.01})
+	_check(graph.add_connection(1, height_id), "worldbuilding graph source")
+	_check(graph.add_connection(height_id, filter_id), "worldbuilding graph height filter")
+	_check(graph.add_connection(filter_id, distance_id), "worldbuilding graph spacing filter")
+	_check(graph.add_connection(distance_id, output_id), "worldbuilding graph output")
+
+	var expected: Array = _ok(graph)["points"]
+	_check(expected.size() > 0 and expected.size() < 28,
+			"worldbuilding graph reduces original grid count")
+	var spawner: PCGSpawner3D = Spawner.new()
+	root.add_child(spawner)
+	spawner.graph = graph
+	spawner.instance_mesh = BoxMesh.new()
+	_check(spawner.generate(), "worldbuilding MultiMesh generation")
+	_check(spawner.get_generated_count() == expected.size(), "worldbuilding instances match filtered points")
+	var node := spawner.get_node_or_null("_PCGGenerated") as MultiMeshInstance3D
+	if node != null:
+		var multimesh := node.multimesh
+		for i in expected.size():
+			_check(multimesh.get_instance_transform(i).origin == expected[i],
+					"generated transform honors procedural elevation and spacing")
+	spawner.queue_free()
+
+
 func _run_all() -> void:
 	_test_default_graph()
 	_test_grid_sampling()
@@ -352,6 +483,10 @@ func _run_all() -> void:
 	_test_random_filter()
 	_test_noise_filter()
 	_test_offset()
+	_test_height_noise_generation()
+	_test_height_range_filter()
+	_test_distance_filter()
+	_test_height_and_distance_spawner_pipeline()
 	_test_invalid_graphs()
 	_test_bad_parameters()
 	_test_raw_cycles_and_excess()
