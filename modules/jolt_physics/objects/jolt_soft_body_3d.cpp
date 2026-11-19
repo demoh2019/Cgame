@@ -426,11 +426,36 @@ JPH::SoftBodySharedSettings *JoltSoftBody3D::_create_shared_settings() {
 			tether.mMaxDistance *= multiplier;
 		}
 	}
-	// Build the optional radial springs after surface edge contraction;
-	// their true geometric rest lengths must remain independent of shrink.
+	// Build the convex volume fan after shrinking surface springs. In
+	// incompressible mode, radial springs retain their geometric rest
+	// lengths and each tetrahedron retains its original rest volume.
 	if (JoltProjectSettings::soft_body_volume_preservation) {
-		try_build_convex_volume_fan(*settings, JoltProjectSettings::soft_body_volume_compliance,
+		const uint32_t surface_edge_count = (uint32_t)settings->mEdgeConstraints.size();
+		const bool has_volume_fan = try_build_convex_volume_fan(*settings, JoltProjectSettings::soft_body_volume_compliance,
 				JoltProjectSettings::soft_body_volume_radial_springs, JoltProjectSettings::soft_body_volume_radial_compliance);
+
+		// For a compressible, isotropically contracting/expanding material
+		// lengths scale as s while signed tetrahedral volumes scale as s^3.
+		// This mode is opt-in: the default keeps an incompressible core.
+		// Clamp extreme scale products before they enter the XPBD solver.
+		if (has_volume_fan && JoltProjectSettings::soft_body_volume_follow_shrinking_factor &&
+				multiplier != 1.0f && multiplier > 0.0f) {
+			const double scale = double(multiplier);
+			const double volume_scale = scale * scale * scale;
+			if (Math::is_finite(volume_scale)) {
+				for (JPH::SoftBodySharedSettings::Volume &volume : settings->mVolumeConstraints) {
+					const double target = double(volume.mSixRestVolume) * volume_scale;
+					volume.mSixRestVolume = float(CLAMP(target, -double(FLT_MAX), double(FLT_MAX)));
+				}
+				// Radial springs are appended by the fan builder after the
+				// surface springs; include them in the isotropic contraction.
+				for (uint32_t i = surface_edge_count; i < settings->mEdgeConstraints.size(); ++i) {
+					JPH::SoftBodySharedSettings::Edge &radial = settings->mEdgeConstraints[i];
+					const double target = double(radial.mRestLength) * scale;
+					radial.mRestLength = float(MIN(target, double(FLT_MAX)));
+				}
+			}
+		}
 	}
 	settings->Optimize();
 

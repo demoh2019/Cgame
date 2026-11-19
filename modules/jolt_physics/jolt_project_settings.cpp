@@ -65,6 +65,8 @@ void JoltProjectSettings::register_settings() {
 	// small, closed, consistently wound convex soft-body surface meshes.
 	GLOBAL_DEF(PropertyInfo(Variant::BOOL, "physics/jolt_physics_3d/simulation/soft_body_volume_preservation"), false);
 	GLOBAL_DEF(PropertyInfo(Variant::FLOAT, "physics/jolt_physics_3d/simulation/soft_body_volume_compliance", PROPERTY_HINT_RANGE, "0,0.01,0.000001,or_greater"), 0.00001f);
+	// False preserves incompressible rest volume; true follows isotropic size changes.
+	GLOBAL_DEF(PropertyInfo(Variant::BOOL, "physics/jolt_physics_3d/simulation/soft_body_volume_follow_shrinking_factor"), false);
 	// Optional volumetric edge springs resist interior-to-surface stretching
 	// and add shape support to the convex tetrahedral volume fan.
 	GLOBAL_DEF(PropertyInfo(Variant::BOOL, "physics/jolt_physics_3d/simulation/soft_body_volume_radial_springs"), false);
@@ -136,6 +138,7 @@ void JoltProjectSettings::read_settings() {
 	soft_body_volume_preservation = GLOBAL_GET("physics/jolt_physics_3d/simulation/soft_body_volume_preservation");
 	const float volume_compliance = GLOBAL_GET("physics/jolt_physics_3d/simulation/soft_body_volume_compliance");
 	soft_body_volume_compliance = Math::is_finite(volume_compliance) ? MAX(volume_compliance, 0.0f) : 0.00001f;
+	soft_body_volume_follow_shrinking_factor = GLOBAL_GET("physics/jolt_physics_3d/simulation/soft_body_volume_follow_shrinking_factor");
 	soft_body_volume_radial_springs = GLOBAL_GET("physics/jolt_physics_3d/simulation/soft_body_volume_radial_springs");
 	const float radial_compliance = GLOBAL_GET("physics/jolt_physics_3d/simulation/soft_body_volume_radial_compliance");
 	soft_body_volume_radial_compliance = Math::is_finite(radial_compliance) ? CLAMP(radial_compliance, 0.0f, 1.0f) : 0.0001f;
