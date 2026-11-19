@@ -103,6 +103,15 @@ class GodotSoftBody3D : public GodotCollisionObject3D {
 	double xpbd_volume_rest = 0.0;
 	bool xpbd_volume_closed = false;
 	LocalVector<Face> faces;
+	// Optional vertex-face self collision. The persistent adjacency set
+	// removes false contacts between triangles that share mesh edges.
+	struct SelfCollisionContact {
+		uint32_t vertex = 0;
+		uint32_t face = 0;
+	};
+	bool self_collision_adjacency_built = false;
+	HashSet<uint64_t> self_collision_structural_edges;
+	LocalVector<SelfCollisionContact> self_collision_contacts;
 	// Number of particles with nonzero inverse mass. Maintained on pin,
 	// unpin and mesh rebuild for O(1) central impulse/force normalization.
 	uint32_t dynamic_node_count = 0;
@@ -257,6 +266,8 @@ private:
 	void update_bounds();
 	void update_constants();
 	void update_area();
+	void initialize_self_collision_adjacency();
+	void solve_self_collisions(real_t p_thickness, real_t p_alpha_tilde);
 	void initialize_dihedral_constraints();
 	void initialize_volume_constraint();
 	bool solve_volume_constraint(double p_alpha, double &r_lambda);
