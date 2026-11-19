@@ -174,3 +174,18 @@ nonlinear growth in this particular test workload, **not** necessarily an
 O(n²) implementation. CPU affinity, import caches, driver and memory limits
 must be controlled for trustworthy comparisons. In particular, RSS acceleration
 is not proof of a leak.
+
+## Additional coverage: tracked hot paths
+
+| Scenario | Bottleneck under pressure |
+| --- | --- |
+| `packed_arrays` | Native typed float arrays and byte conversion |
+| `sorting` | Array sort followed by many binary-search lookups |
+| `animation_tracks` | AnimationPlayer timeline seeks and Node property updates |
+| `physics_raycast_2d`, `physics_raycast_3d` | PhysicsServer direct-space queries against static colliders |
+| `render_multimesh_3d` | GPU instancing and frame sampling (display mode only) |
+
+The physics query timer isolates ray traversal; overall duration also includes
+collider construction and cleanup. Compare like-for-like workloads on the same
+hardware using `--baseline`. Use `--summary-md` to rank expensive runs, while
+remembering that raw time across different cases is not a normalized benchmark.
