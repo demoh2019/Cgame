@@ -95,6 +95,8 @@ class VehicleWheel3D : public Node3D {
 	real_t m_wheelsDampingCompression = 0.83;
 	real_t m_wheelsDampingRelaxation = 0.88;
 	real_t m_frictionSlip = 10.5;
+	real_t m_longitudinalGrip = 1.0; // Longitudinal grip multiplier relative to legacy vehicle traction.
+	real_t m_lateralGrip = 1.0; // Lateral grip multiplier relative to legacy vehicle traction.
 	real_t m_maxSuspensionForce = 6000.0;
 	bool m_bIsFrontWheel = false;
 
@@ -158,6 +160,11 @@ public:
 
 	void set_friction_slip(real_t p_value);
 	real_t get_friction_slip() const;
+
+	void set_longitudinal_grip(real_t p_value);
+	real_t get_longitudinal_grip() const;
+	void set_lateral_grip(real_t p_value);
+	real_t get_lateral_grip() const;
 
 	void set_use_as_traction(bool p_enable);
 	bool is_used_as_traction() const;
