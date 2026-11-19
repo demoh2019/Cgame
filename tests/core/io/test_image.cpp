@@ -544,4 +544,46 @@ TEST_CASE("[Image] Convert image") {
 	CHECK_MESSAGE(image2->get_data() == image_data, "Image conversion to invalid type (Image::FORMAT_MAX + 1) should not alter image.");
 }
 
+TEST_CASE("[Image] Queued upload snapshot keeps pixels when caller changes the image") {
+	const Color red(1.0, 0.0, 0.0, 1.0);
+	const Color green(0.0, 1.0, 0.0, 1.0);
+	const Color blue(0.0, 0.0, 1.0, 1.0);
+	for (Image::Format format : { Image::FORMAT_RGB8, Image::FORMAT_RGBA8 }) {
+		Ref<Image> original = memnew(Image(3, 2, false, format));
+		original->fill(red);
+		Ref<Image> snapshot = original->duplicate();
+		REQUIRE(snapshot.is_valid());
+		CHECK(snapshot.ptr() != original.ptr());
+		CHECK(snapshot->get_data() == original->get_data());
+
+		original->fill(green);
+		CHECK(snapshot->get_pixel(0, 0) == red);
+		CHECK(snapshot->get_pixel(2, 1) == red);
+		CHECK(original->get_pixel(0, 0) == green);
+
+		snapshot->set_pixel(2, 1, blue);
+		CHECK(snapshot->get_pixel(2, 1) == blue);
+		CHECK(original->get_pixel(2, 1) == green);
+	}
+}
+
+TEST_CASE("[Image] Multiple queued upload snapshots keep independent generations") {
+	Ref<Image> original = memnew(Image(2, 2, false, Image::FORMAT_RGBA8));
+	const Color red(1.0, 0.0, 0.0, 1.0);
+	const Color green(0.0, 1.0, 0.0, 1.0);
+	const Color blue(0.0, 0.0, 1.0, 1.0);
+	original->fill(red);
+	Ref<Image> first = original->duplicate();
+	original->fill(green);
+	Ref<Image> second = original->duplicate();
+	original->fill(blue);
+	REQUIRE(first.is_valid());
+	REQUIRE(second.is_valid());
+	CHECK(first->get_pixel(0, 0) == red);
+	CHECK(first->get_pixel(1, 1) == red);
+	CHECK(second->get_pixel(0, 0) == green);
+	CHECK(second->get_pixel(1, 1) == green);
+	CHECK(original->get_pixel(0, 0) == blue);
+}
+
 } // namespace TestImage
