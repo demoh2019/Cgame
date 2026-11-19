@@ -3023,7 +3023,33 @@ String String::insert(int p_at_pos, const String &p_string) const {
 String String::erase(int p_pos, int p_chars) const {
 	ERR_FAIL_COND_V_MSG(p_pos < 0, "", vformat("Invalid starting position for `String.erase()`: %d. Starting position must be positive or zero.", p_pos));
 	ERR_FAIL_COND_V_MSG(p_chars < 0, "", vformat("Invalid character count for `String.erase()`: %d. Character count must be positive or zero.", p_chars));
-	return left(p_pos) + substr(p_pos + p_chars);
+
+	const int len = length();
+	if (p_chars == 0 || p_pos >= len) {
+		return *this; // No allocation or copy-on-write detachment for no-op erases.
+	}
+
+	// Clamp before adding, avoiding overflow when callers request huge ranges.
+	const int removed = MIN(p_chars, len - p_pos);
+	const int remaining = len - removed;
+	if (remaining == 0) {
+		return "";
+	}
+
+	// Build the result directly instead of allocating two substrings and concatenating.
+	String result;
+	result.resize_uninitialized(remaining + 1);
+	char32_t *dest = result.ptrw();
+	const char32_t *source = ptr();
+	if (p_pos > 0) {
+		memcpy(dest, source, size_t(p_pos) * sizeof(char32_t));
+	}
+	const int suffix_length = len - p_pos - removed;
+	if (suffix_length > 0) {
+		memcpy(dest + p_pos, source + p_pos + removed, size_t(suffix_length) * sizeof(char32_t));
+	}
+	dest[remaining] = 0;
+	return result;
 }
 
 template <class T>
