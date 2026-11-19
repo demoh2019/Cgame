@@ -29,6 +29,7 @@
 
 #include "terrain_editor_plugin.h"
 
+#include "core/input/input_event.h"
 #include "core/math/triangle_mesh.h"
 #include "editor/editor_undo_redo_manager.h"
 #include "scene/3d/camera_3d.h"
