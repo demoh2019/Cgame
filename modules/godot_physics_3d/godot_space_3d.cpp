@@ -1368,6 +1368,12 @@ GodotSpace3D::GodotSpace3D() {
 	soft_body_tetra_fiber_compliance = Math::is_finite(configured_fem_fiber_compliance) ? MAX(real_t(0.0), configured_fem_fiber_compliance) : real_t(0.0);
 	const Vector3 configured_fem_fiber_axis = GLOBAL_GET("physics/3d/solver/soft_body_tetra_fiber_axis");
 	soft_body_tetra_fiber_axis = configured_fem_fiber_axis.is_finite() && configured_fem_fiber_axis.length_squared() > real_t(0.0) ? configured_fem_fiber_axis : Vector3(1, 0, 0);
+	const real_t fiber_plastic_yield = GLOBAL_GET("physics/3d/solver/soft_body_tetra_fiber_plastic_yield_ratio");
+	soft_body_tetra_fiber_plastic_yield_ratio = Math::is_finite(fiber_plastic_yield) ? CLAMP(fiber_plastic_yield, real_t(0.0), real_t(10.0)) : real_t(0.15);
+	const real_t fiber_plastic_creep = GLOBAL_GET("physics/3d/solver/soft_body_tetra_fiber_plastic_creep_rate");
+	soft_body_tetra_fiber_plastic_creep_rate = Math::is_finite(fiber_plastic_creep) ? MAX(real_t(0.0), fiber_plastic_creep) : real_t(0.0);
+	const real_t fiber_plastic_max_stretch = GLOBAL_GET("physics/3d/solver/soft_body_tetra_fiber_plastic_max_stretch");
+	soft_body_tetra_fiber_plastic_max_stretch = Math::is_finite(fiber_plastic_max_stretch) ? CLAMP(fiber_plastic_max_stretch, real_t(1.0), real_t(16.0)) : real_t(3.0);
 	const real_t configured_tetra_viscosity = GLOBAL_GET("physics/3d/solver/soft_body_tetra_fem_viscosity");
 	soft_body_tetra_fem_viscosity = Math::is_finite(configured_tetra_viscosity) ? MAX(real_t(0.0), configured_tetra_viscosity) : real_t(0.0);
 	const real_t configured_tetra_plastic_rate = GLOBAL_GET("physics/3d/solver/soft_body_tetra_volume_plastic_rate");
