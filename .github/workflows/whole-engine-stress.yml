@@ -114,6 +114,7 @@ jobs:
           ./bin/godot.linuxbsd.editor.dev.x86_64 --headless --path tests/stress --script res://physics_jolt_softbody_vertex_dedup_regression.gd --check-only
           ./bin/godot.linuxbsd.editor.dev.x86_64 --headless --path tests/stress --script res://physics_jolt_softbody_constraint_bounds_regression.gd --check-only
           ./bin/godot.linuxbsd.editor.dev.x86_64 --headless --path tests/stress --script res://physics_jolt_softbody_wind_fastpath_regression.gd --check-only
+          ./bin/godot.linuxbsd.editor.dev.x86_64 --headless --path tests/stress --script res://physics_jolt_softbody_lra_shrink_regression.gd --check-only
           ./bin/godot.linuxbsd.editor.dev.x86_64 --headless --path tests/stress --script res://physics_jolt_layer_filter_regression.gd --check-only
           ./bin/godot.linuxbsd.editor.dev.x86_64 --headless --path tests/stress --script res://physics_jolt_broadphase_filter_regression.gd --check-only
           ./bin/godot.linuxbsd.editor.dev.x86_64 --headless --path tests/stress --script res://physics_jolt_area_event_dedup_regression.gd --check-only
@@ -358,6 +359,26 @@ jobs:
             --script res://physics_jolt_area_event_dedup_regression.gd \
             2>&1 | tee physics-jolt-area-event-dedup.log
           grep -Fq 'Jolt rigid Area3D event dedup regression passed.' physics-jolt-area-event-dedup.log
+      - name: Regression-test shrinking/expanding Jolt XPBD cloth tethers
+        shell: bash
+        run: |
+          set -euo pipefail
+          for MODE in 1 2; do
+            PROJECT="$RUNNER_TEMP/cgame-jolt-lra-shrink-$MODE"
+            mkdir -p "$PROJECT"
+            cp -a tests/stress/. "$PROJECT/"
+            # Keep one [physics] section and explicitly select the backend.
+            sed -i 's|^3d/physics_engine="GodotPhysics3D"$|3d/physics_engine="Jolt Physics"|' "$PROJECT/project.godot"
+            sed -i "/^\[physics\]$/a jolt_physics_3d/simulation/soft_body_lra_mode=$MODE" "$PROJECT/project.godot"
+            sed -i '/^\[physics\]$/a jolt_physics_3d/simulation/soft_body_lra_max_distance_multiplier=1.05' "$PROJECT/project.godot"
+            grep -Fqx '3d/physics_engine="Jolt Physics"' "$PROJECT/project.godot"
+            grep -Fqx "jolt_physics_3d/simulation/soft_body_lra_mode=$MODE" "$PROJECT/project.godot"
+            timeout 180s ./bin/godot.linuxbsd.editor.dev.x86_64 \
+              --headless --path "$PROJECT" \
+              --script res://physics_jolt_softbody_lra_shrink_regression.gd \
+              2>&1 | tee "physics-jolt-lra-shrink-$MODE.log"
+            grep -Fq 'Jolt soft-body LRA shrink regression passed.' "physics-jolt-lra-shrink-$MODE.log"
+          done
       - name: Verify Jolt packed object-layer filtering
         shell: bash
         run: |
@@ -410,6 +431,7 @@ jobs:
             physics-jolt-softbody-vertices.log
             physics-jolt-softbody-constraint-bounds.log
             physics-jolt-softbody-wind-fastpath.log
+            physics-jolt-lra-shrink-*.log
             physics-jolt-layer-filter.log
             physics-jolt-broadphase-filter.log
             physics-jolt-area-event-dedup.log
