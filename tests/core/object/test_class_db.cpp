@@ -894,7 +894,7 @@ TEST_SUITE("[ClassDB]") {
 }
 
 TEST_CASE("[CoreBind] Class metadata array conversion retains entries and order") {
-	CoreBind::ClassDB api;
+	CoreBind::Special::ClassDB api;
 	const StringName classes[] = { "Object", "RefCounted", "Node" };
 	for (const StringName &class_name : classes) {
 		List<MethodInfo> methods;

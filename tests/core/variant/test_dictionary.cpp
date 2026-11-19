@@ -861,10 +861,10 @@ TEST_CASE("[DictionaryFastPath] untyped lookup preserves heterogeneous keys") {
 	CHECK(dict.has(Vector2(1, 2)));
 	CHECK(dict.has(false));
 	CHECK_FALSE(dict.has(43));
-	CHECK_EQ(dict.get(42), Variant("integer"));
-	CHECK_EQ(dict.get("alpha"), Variant(12));
-	CHECK_EQ(dict.get(Vector2(1, 2)), Variant(99));
-	CHECK_EQ(dict.get(false), Variant("boolean"));
+	CHECK_EQ(dict.get(42, Variant()), Variant("integer"));
+	CHECK_EQ(dict.get("alpha", Variant()), Variant(12));
+	CHECK_EQ(dict.get(Vector2(1, 2), Variant()), Variant(99));
+	CHECK_EQ(dict.get(false, Variant()), Variant("boolean"));
 }
 
 TEST_CASE("[DictionaryFastPath] untyped get returns defaults without inserting") {
@@ -906,7 +906,7 @@ TEST_CASE("[DictionaryFastPath] untyped lookup remains correct on read-only dict
 	dict.make_read_only();
 	CHECK(dict.has("present"));
 	CHECK_FALSE(dict.has("absent"));
-	CHECK_EQ(dict.get("present"), Variant(42));
+	CHECK_EQ(dict.get("present", Variant()), Variant(42));
 	CHECK_EQ(dict.get("absent", 88), Variant(88));
 	const Dictionary &view = dict;
 	const Variant *value = view.getptr("present");
@@ -918,7 +918,7 @@ TEST_CASE("[DictionaryFastPath] typed keys still validate and coerce") {
 	TypedDictionary<double, int64_t> dict;
 	dict[Variant(3)] = 12;
 	CHECK(dict.has(Variant(3.0)));
-	CHECK_EQ(dict.get(Variant(3)), Variant(12));
+	CHECK_EQ(dict.get(Variant(3), Variant()), Variant(12));
 	ERR_PRINT_OFF;
 	CHECK_FALSE(dict.has(Variant(String("not numeric"))));
 	ERR_PRINT_ON;
@@ -935,7 +935,7 @@ TEST_CASE("[DictionaryFastPath] repeat untyped reads preserve size and values") 
 	for (int round = 0; round < 32; ++round) {
 		for (int i = 0; i < 256; ++i) {
 			CHECK(view.has(i));
-			CHECK_EQ(view.get(i), Variant(i * 3));
+			CHECK_EQ(view.get(i, Variant()), Variant(i * 3));
 			const Variant *value = view.getptr(i);
 			REQUIRE(value != nullptr);
 			CHECK_EQ(*value, Variant(i * 3));
@@ -962,7 +962,7 @@ TEST_CASE("[DictionaryFastPath] untyped set, erase and get_or_add") {
 	CHECK(dict.set(Variant(StringName("key")), Variant(5)));
 	CHECK_EQ(dict.get_or_add(Variant(String("key")), Variant(99)), Variant(5));
 	CHECK_EQ(dict.get_or_add(Variant("new"), Variant(77)), Variant(77));
-	CHECK_EQ(dict.get(Variant("new")), Variant(77));
+	CHECK_EQ(dict.get(Variant("new"), Variant()), Variant(77));
 	CHECK_EQ(dict.size(), 2);
 	CHECK(dict.erase(Variant(StringName("key"))));
 	CHECK_FALSE(dict.erase(Variant(String("key"))));
@@ -972,7 +972,7 @@ TEST_CASE("[DictionaryFastPath] untyped set, erase and get_or_add") {
 TEST_CASE("[DictionaryFastPath] typed dictionary retains key coercion") {
 	TypedDictionary<double, int64_t> dict;
 	CHECK(dict.set(Variant(4), Variant(91)));
-	CHECK_EQ(dict.get(Variant(4.0)), Variant(91));
+	CHECK_EQ(dict.get(Variant(4.0), Variant()), Variant(91));
 	CHECK_EQ(dict.get_or_add(Variant(4), Variant(99)), Variant(91));
 	CHECK_EQ(dict.get_or_add(Variant(5), Variant(12)), Variant(12));
 	const Dictionary &view = dict;
@@ -989,7 +989,7 @@ TEST_CASE("[DictionaryFastPath] read-only dictionary keeps writable view isolate
 	Variant *read_only_ptr = dict.getptr(Variant("stored"));
 	REQUIRE(read_only_ptr != nullptr);
 	*read_only_ptr = 999;
-	CHECK_EQ(dict.get(Variant("stored")), Variant(11));
+	CHECK_EQ(dict.get(Variant("stored"), Variant()), Variant(11));
 	const Dictionary &view = dict;
 	CHECK_EQ(view[Variant("stored")], Variant(11));
 	ERR_PRINT_OFF;
@@ -1002,7 +1002,7 @@ TEST_CASE("[DictionaryFastPath] read-only dictionary keeps writable view isolate
 TEST_CASE("[DictionaryFastPath] untyped keys with typed values remain checked") {
 	TypedDictionary<Variant, int64_t> dict;
 	CHECK(dict.set(Variant("valid"), Variant(42)));
-	CHECK_EQ(dict.get(Variant("valid")), Variant(42));
+	CHECK_EQ(dict.get(Variant("valid"), Variant()), Variant(42));
 	ERR_PRINT_OFF;
 	CHECK_FALSE(dict.set(Variant("invalid"), Variant(Vector2(1, 2))));
 	ERR_PRINT_ON;

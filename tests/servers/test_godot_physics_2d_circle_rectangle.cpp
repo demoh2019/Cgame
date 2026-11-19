@@ -88,7 +88,7 @@ TEST_CASE("[GodotPhysics2D] Circle-rectangle contact manifold") {
 	}
 
 	SUBCASE("Rotated rectangle") {
-		rectangle_transform = Transform2D(real_t(Math_PI / 4.0), Vector2());
+		rectangle_transform = Transform2D(real_t(Math::PI / 4.0), Vector2());
 		circle_transform.set_origin(rectangle_transform.xform(Vector2(2.5, 0.0)));
 		CHECK(sat_2d_calculate_penetration(&circle, circle_transform, Vector2(), &rectangle, rectangle_transform, Vector2(), record_contact, &contact));
 		CHECK(contact.count == 1);

@@ -14,12 +14,17 @@ force_link_header = env.CommandNoCache(
 )
 env.Depends(force_link_header, "test_builders.py")
 
+# Some tests exercise module internals that include bundled third-party headers.
+env_tests = env.Clone()
+if env["module_ogg_enabled"] and env["builtin_libogg"]:
+    env_tests.Prepend(CPPPATH=["#thirdparty/libogg"])
+
 tests_obj = []
 if env["scu_build"]:
     # HACK: SCU setup doesn't support recursive/dynamic setup, so we must manually pass the files.
-    env.add_source_files(tests_obj, glob.glob(".scu/*.cpp"))
+    env_tests.add_source_files(tests_obj, glob.glob(".scu/*.cpp"))
 else:
-    env.add_source_files(tests_obj, glob.glob("*.cpp") + force_link_sources)
+    env_tests.add_source_files(tests_obj, glob.glob("*.cpp") + force_link_sources)
 
 lib = env.add_library("tests", tests_obj)
 env.Prepend(LIBS=[lib])

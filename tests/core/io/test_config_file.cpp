@@ -217,8 +217,8 @@ TEST_CASE("[ConfigFile] encode_to_text builder preserves settings and empty sect
 	ConfigFile decoded;
 	CHECK(decoded.parse(serialized) == OK);
 	CHECK(decoded.get_value("display", "name") == "Cgame");
-	CHECK(decoded.get_value("display", "quality") == 3);
-	CHECK(decoded.get_value("display", "enabled") == true);
+	CHECK(decoded.get_value("display", "quality") == Variant(3));
+	CHECK(decoded.get_value("display", "enabled") == Variant(true));
 	CHECK(decoded.get_value("paths", "resource") == "res://assets/model.glb");
 
 	ConfigFile many;
@@ -228,7 +228,7 @@ TEST_CASE("[ConfigFile] encode_to_text builder preserves settings and empty sect
 	ConfigFile restored;
 	CHECK(restored.parse(many.encode_to_text()) == OK);
 	for (int i = 0; i < 512; i++) {
-		CHECK(restored.get_value("values", "k_" + itos(i)) == i);
+		CHECK(restored.get_value("values", "k_" + itos(i)) == Variant(i));
 	}
 }
 

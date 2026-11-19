@@ -967,7 +967,7 @@ TEST_CASE("[BitMap] Generic-radius morphology matches independent disk reference
 					}
 					bitmap.grow_mask(pixels, rect);
 					const bool grow = pixels > 0;
-					const int radius = ABS(pixels);
+					const int radius = Math::abs(pixels);
 					bool all_match = true;
 					int expected_count = 0;
 					for (int y = 0; y < height; y++) {

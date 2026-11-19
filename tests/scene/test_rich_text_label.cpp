@@ -169,7 +169,7 @@ TEST_CASE("[RichTextThemeFastPath] changing only the panel theme preserves rich 
 	const int paragraphs = label->get_paragraph_count();
 
 	Ref<StyleBoxEmpty> panel = memnew(StyleBoxEmpty);
-	label->add_theme_stylebox_override("normal", panel);
+	label->add_theme_style_override("normal", panel);
 	label->notification(Control::NOTIFICATION_THEME_CHANGED);
 	SceneTree::get_singleton()->process(0);
 

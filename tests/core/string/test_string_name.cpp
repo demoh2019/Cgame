@@ -39,7 +39,7 @@ namespace TestStringName {
 // These constructors execute before register_core_types() sets up the
 // StringName table. Empty values must not require a configured table.
 static StringName early_empty_c_string("");
-static StringName early_null_c_string(nullptr);
+static StringName early_null_c_string((const char *)nullptr);
 
 TEST_CASE("[StringName] Empty names during static initialization") {
 	CHECK(early_empty_c_string.is_empty());
@@ -50,7 +50,7 @@ TEST_CASE("[StringName] Empty names during static initialization") {
 }
 
 TEST_CASE("[StringName] Empty C-string construction") {
-	const StringName from_null(nullptr);
+	const StringName from_null((const char *)nullptr);
 	const StringName from_empty("");
 	const StringName static_empty("", true);
 	CHECK(from_null.is_empty());
@@ -94,7 +94,7 @@ TEST_CASE("[StringName] Empty names stay empty after copying and assignment") {
 	CHECK(copy.is_empty());
 	CHECK(target.is_empty());
 	CHECK(copy == target);
-	CHECK(copy == StringName(nullptr));
+	CHECK(copy == StringName((const char *)nullptr));
 }
 
 } // namespace TestStringName

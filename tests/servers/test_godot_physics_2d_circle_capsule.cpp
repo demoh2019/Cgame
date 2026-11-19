@@ -97,7 +97,7 @@ TEST_CASE("[GodotPhysics2D] Circle-capsule analytic contact manifold") {
 	}
 
 	SUBCASE("Rotated capsule") {
-		capsule_transform = Transform2D(real_t(Math_PI / 2.0), Vector2());
+		capsule_transform = Transform2D(real_t(Math::PI / 2.0), Vector2());
 		circle_transform.set_origin(capsule_transform.xform(Vector2(1.5, 0.0)));
 		CHECK(sat_2d_calculate_penetration(&circle, circle_transform, Vector2(), &capsule, capsule_transform, Vector2(), record_contact, &contact));
 		CHECK(contact.count == 1);

@@ -453,8 +453,8 @@ TEST_CASE("[SceneTree][ImporterMesh] Lightmap unwrap preserves independent surfa
 		imported->add_surface(Mesh::PRIMITIVE_TRIANGLES, arrays, TypedArray<Array>(), Dictionary(), Ref<Material>(), String(), flags);
 	}
 	REQUIRE_EQ(imported->get_surface_count(), 2);
-	CHECK_FALSE(imported->get_surface_format(0) & Mesh::ARRAY_FLAG_COMPRESS_ATTRIBUTES);
-	CHECK(imported->get_surface_format(1) & Mesh::ARRAY_FLAG_COMPRESS_ATTRIBUTES);
+	CHECK_FALSE((imported->get_surface_format(0) & Mesh::ARRAY_FLAG_COMPRESS_ATTRIBUTES) != 0);
+	CHECK((imported->get_surface_format(1) & Mesh::ARRAY_FLAG_COMPRESS_ATTRIBUTES) != 0);
 
 	for (int iteration = 0; iteration < 2; iteration++) {
 		INFO("Unwrap iteration: ", iteration);
@@ -462,8 +462,8 @@ TEST_CASE("[SceneTree][ImporterMesh] Lightmap unwrap preserves independent surfa
 		Vector<uint8_t> output_cache;
 		REQUIRE_EQ(imported->lightmap_unwrap_cached(Transform3D(), 0.5f, input_cache, output_cache), OK);
 		REQUIRE_EQ(imported->get_surface_count(), 2);
-		CHECK_FALSE(imported->get_surface_format(0) & Mesh::ARRAY_FLAG_COMPRESS_ATTRIBUTES);
-		CHECK(imported->get_surface_format(1) & Mesh::ARRAY_FLAG_COMPRESS_ATTRIBUTES);
+		CHECK_FALSE((imported->get_surface_format(0) & Mesh::ARRAY_FLAG_COMPRESS_ATTRIBUTES) != 0);
+		CHECK((imported->get_surface_format(1) & Mesh::ARRAY_FLAG_COMPRESS_ATTRIBUTES) != 0);
 	}
 }
 
@@ -924,7 +924,7 @@ TEST_CASE("[SceneTree][OBJ] MTL diffuse color defaults to legacy and supports li
 		obj->close();
 	}
 
-	EditorOBJImporter *importer = memnew(EditorOBJImporter);
+	Ref<EditorOBJImporter> importer = memnew(EditorOBJImporter);
 	const Color stored_color(0.5f, 0.25f, 1.0f);
 	for (int mode = 0; mode < 3; mode++) {
 		INFO("OBJ MTL mode: ", mode); // 0 = absent, 1 = explicit legacy, 2 = linear.
@@ -947,7 +947,6 @@ TEST_CASE("[SceneTree][OBJ] MTL diffuse color defaults to legacy and supports li
 		CHECK(material->get_albedo().is_equal_approx(expected));
 		memdelete(scene);
 	}
-	memdelete(importer);
 }
 #endif // TOOLS_ENABLED
 

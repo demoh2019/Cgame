@@ -30,6 +30,8 @@
 
 #include "tests/test_macros.h"
 
+#include "core/variant/typed_array.h"
+
 TEST_FORCE_LINK(test_astar)
 
 #include "core/math/a_star.h"
@@ -788,15 +790,15 @@ TEST_CASE("[AStarGrid2D][Performance] Row-major neighbor offsets preserve all di
 				REQUIRE_FALSE(route.is_empty());
 				CHECK(Vector2i(route[0]) == starts[pair]);
 				CHECK(Vector2i(route[route.size() - 1]) == targets[pair]);
-				const int dx = ABS(targets[pair].x - starts[pair].x);
-				const int dy = ABS(targets[pair].y - starts[pair].y);
+				const int dx = Math::abs(targets[pair].x - starts[pair].x);
+				const int dy = Math::abs(targets[pair].y - starts[pair].y);
 				CHECK(route.size() == (mode == AStarGrid2D::DIAGONAL_MODE_NEVER ? dx + dy : MAX(dx, dy)) + 1);
 
 				for (int i = 1; i < route.size(); ++i) {
 					const Vector2i a = Vector2i(route[i - 1]);
 					const Vector2i b = Vector2i(route[i]);
-					const int sx = ABS(a.x - b.x);
-					const int sy = ABS(a.y - b.y);
+					const int sx = Math::abs(a.x - b.x);
+					const int sy = Math::abs(a.y - b.y);
 					CHECK(sx <= 1);
 					CHECK(sy <= 1);
 					CHECK(sx + sy >= 1);
@@ -826,17 +828,17 @@ TEST_CASE("[AStarGrid2D][Performance] Row-major neighbor offsets preserve all di
 			CHECK_FALSE(grid.is_point_solid(b));
 			const int sx = b.x - a.x;
 			const int sy = b.y - a.y;
-			CHECK(ABS(sx) <= 1);
-			CHECK(ABS(sy) <= 1);
+			CHECK(Math::abs(sx) <= 1);
+			CHECK(Math::abs(sy) <= 1);
 			if (sx && sy) {
 				const bool along_x = !grid.is_point_solid(Vector2i(a.x + sx, a.y));
 				const bool along_y = !grid.is_point_solid(Vector2i(a.x, a.y + sy));
 				if (mode == AStarGrid2D::DIAGONAL_MODE_AT_LEAST_ONE_WALKABLE) {
-					CHECK(along_x || along_y);
+					CHECK((along_x || along_y));
 				} else if (mode == AStarGrid2D::DIAGONAL_MODE_ONLY_IF_NO_OBSTACLES) {
-					CHECK(along_x && along_y);
+					CHECK((along_x && along_y));
 				} else if (mode == AStarGrid2D::DIAGONAL_MODE_NEVER) {
-					CHECK_FALSE(sx && sy);
+					CHECK_FALSE((sx != 0 && sy != 0));
 				}
 			}
 		}
