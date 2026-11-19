@@ -30,6 +30,7 @@
 #include "servers/physics_fluid_ellipsoid_3d.h"
 #include "tests/test_macros.h"
 
+#include <initializer_list>
 #include <limits>
 
 TEST_FORCE_LINK(test_physics_fluid_ellipsoid_3d)
