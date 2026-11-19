@@ -28,6 +28,7 @@
 #include "servers/physics_pbf_divergence_3d.h"
 #include "tests/test_macros.h"
 
+#include <initializer_list>
 #include <limits>
 
 TEST_FORCE_LINK(test_physics_pbf_divergence_3d)
