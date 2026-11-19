@@ -7,7 +7,7 @@ def configure(env):
 
 
 def get_doc_classes():
-    return ["TerrainHeightmap", "Terrain3D"]
+    return ["TerrainHeightmap", "HeightmapTerrain3D"]
 
 
 def get_doc_path():
