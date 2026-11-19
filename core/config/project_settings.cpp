@@ -1600,6 +1600,7 @@ void ProjectSettings::save_scene_groups_cache() {
 			continue;
 		}
 		Array list;
+		list.reserve(E.value.size());
 		for (const StringName &group : E.value) {
 			list.push_back(group);
 		}
