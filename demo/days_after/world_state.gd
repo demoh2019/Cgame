@@ -3,40 +3,57 @@ extends RefCounted
 
 const PLAYER_SAVE = preload("res://save_state.gd")
 const STASH_SCRIPT = preload("res://stash.gd")
-const VERSION := 1
+const CONSTRUCTION_SCRIPT = preload("res://construction.gd")
+const VERSION := 2
 const SAVE_PATH := "user://days_after_world.json"
 
 
 static func snapshot(game: Node) -> Dictionary:
     var survivor := game.get_node_or_null("Player") as Node3D
     var stash := game.get_node_or_null("ShelterStash") as Area3D
-    if survivor == null or stash == null:
+    var construction := game.get_node_or_null("Construction") as Node3D
+    if survivor == null or stash == null or construction == null:
         return {}
     return {
         "version": VERSION,
         "player": PLAYER_SAVE.snapshot(survivor),
-        "stash": stash.call("snapshot")
+        "stash": stash.call("snapshot"),
+        "structures": construction.call("snapshot")
     }
 
 
 static func validate_snapshot(data: Variant) -> bool:
-    return (
-        data is Dictionary
-        and data.get("version") == VERSION
-        and PLAYER_SAVE.validate_snapshot(data.get("player"))
-        and STASH_SCRIPT.validate_contents(data.get("stash"))
-    )
+    if not (data is Dictionary):
+        return false
+    var version: Variant = data.get("version")
+    if not (version is int) or (version != 1 and version != VERSION):
+        return false
+    if not PLAYER_SAVE.validate_snapshot(data.get("player")):
+        return false
+    if not STASH_SCRIPT.validate_contents(data.get("stash")):
+        return false
+    # Version 1 had no structures: migrate to an empty shelter defense layout.
+    if version == 1:
+        return true
+    return CONSTRUCTION_SCRIPT.validate_snapshot(data.get("structures"))
 
 
 static func apply_snapshot(game: Node, data: Variant) -> bool:
     var survivor := game.get_node_or_null("Player") as Node3D
     var stash := game.get_node_or_null("ShelterStash") as Area3D
-    # Validate both parts *before* applying either one.
-    if survivor == null or stash == null or not validate_snapshot(data):
+    var construction := game.get_node_or_null("Construction") as Node3D
+    # Validate the entire input before mutating any live game state.
+    if survivor == null or stash == null or construction == null:
         return false
+    if not validate_snapshot(data):
+        return false
+    var structures: Array = data.get("structures", []) if data["version"] == VERSION else []
+    # Once prevalidated, the child restorers cannot fail for valid payloads.
     if not PLAYER_SAVE.apply_snapshot(survivor, data["player"]):
         return false
-    return bool(stash.call("restore_contents", data["stash"]))
+    if not bool(stash.call("restore_contents", data["stash"])):
+        return false
+    return bool(construction.call("restore_snapshot", structures))
 
 
 static func save_world(game: Node, path: String = SAVE_PATH) -> bool:

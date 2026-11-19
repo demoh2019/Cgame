@@ -48,7 +48,17 @@ func _physics_process(delta: float) -> void:
         var to_target: Vector3 = target.global_position - global_position
         to_target.y = 0.0
         var distance: float = to_target.length()
-        if distance <= AGGRO_RADIUS and distance > STRIKE_RADIUS:
+        var blocker: Node3D = _find_blocking_barricade()
+        if blocker != null and distance <= AGGRO_RADIUS:
+            var to_barrier: Vector3 = blocker.global_position - global_position
+            to_barrier.y = 0.0
+            if to_barrier.length() <= 2.0:
+                if strike_cooldown <= 0.0:
+                    blocker.call("take_damage", 12.0)
+                    strike_cooldown = 1.3
+            else:
+                movement = to_barrier.normalized()
+        elif distance <= AGGRO_RADIUS and distance > STRIKE_RADIUS:
             movement = to_target.normalized()
         elif distance <= STRIKE_RADIUS and strike_cooldown <= 0.0:
             target.call("take_damage", 10.0)
@@ -71,3 +81,20 @@ func take_damage(amount: float) -> void:
         defeated = true
         eliminated.emit()
         queue_free()
+
+
+func _find_blocking_barricade() -> Node3D:
+    if not is_instance_valid(target):
+        return null
+    var origin: Vector3 = global_position + Vector3.UP * 0.25
+    var destination: Vector3 = target.global_position + Vector3.UP * 0.25
+    if origin.distance_squared_to(destination) < 0.01:
+        return null
+    var query := PhysicsRayQueryParameters3D.create(origin, destination)
+    query.collision_mask = 1
+    query.exclude = [get_rid()]
+    var hit: Dictionary = get_world_3d().direct_space_state.intersect_ray(query)
+    var collider: Node3D = hit.get("collider") as Node3D
+    if collider != null and collider.is_in_group("shelter_barricades"):
+        return collider
+    return null

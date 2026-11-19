@@ -9,6 +9,7 @@ const RESOURCE_SCRIPT = preload("res://resource_node.gd")
 const ZOMBIE_SCRIPT = preload("res://zombie.gd")
 const STASH_SCRIPT = preload("res://stash.gd")
 const WORLD_SAVE = preload("res://world_state.gd")
+const CONSTRUCTION_SCRIPT = preload("res://construction.gd")
 const STASH_ITEMS := [
     "wood_t1", "stone_t1", "fiber_t1", "wood_t2", "stone_t2", "fiber_t2",
     "food", "water", "field_bandage", "reinforced_bandage",
@@ -20,6 +21,7 @@ var hud_label: Label
 var prompt_label: Label
 var infected_kills: int = 0
 var infected_total: int = 0
+var construction: Node3D
 var shelter_stash: Area3D
 var stash_open := false
 var stash_selected := 0
@@ -32,6 +34,7 @@ func _ready() -> void:
     _build_pickups()
     _build_resources()
     _build_stash()
+    _build_construction()
     _build_enemies()
     _build_hud()
 
@@ -249,6 +252,12 @@ func _on_infected_eliminated() -> void:
 
 
 
+func _build_construction() -> void:
+    construction = CONSTRUCTION_SCRIPT.new() as Node3D
+    construction.name = "Construction"
+    add_child(construction)
+
+
 func _build_stash() -> void:
     shelter_stash = STASH_SCRIPT.new() as Area3D
     shelter_stash.name = "ShelterStash"
@@ -277,6 +286,14 @@ func _unhandled_input(event: InputEvent) -> void:
             player.last_message = "Убежище и герой загружены." if WORLD_SAVE.load_world(self) else "Нет корректного сохранения мира."
         KEY_ESCAPE:
             stash_open = false
+        KEY_B:
+            if not stash_open:
+                var built := bool(construction.call("build_nearest", player))
+                player.last_message = "Баррикада построена." if built else "Нужно 2 дерева T1, 1 камень T1 и свободная площадка рядом."
+        KEY_N:
+            if not stash_open:
+                var repaired := bool(construction.call("repair_nearest", player))
+                player.last_message = "Баррикада отремонтирована." if repaired else "Для ремонта нужны древесина T1 и повреждённая баррикада рядом."
         KEY_TAB:
             if stash_open:
                 stash_selected = (stash_selected + 1) % STASH_ITEMS.size()
@@ -371,7 +388,11 @@ func _process(_delta: float) -> void:
         "Заражённые: %d/%d | Боевой опыт %d\n" % [
             infected_kills, infected_total, player.combat_xp
         ] +
-        "F5/F9 герой | F6/F10 герой + убежище\n" +
+        "F5/F9 герой | F6/F10 мир | B строить | N ремонт\n" +
+        "Оборона убежища: %d/%d баррикад\n" % [
+            int(construction.call("get_built_count")),
+            CONSTRUCTION_SCRIPT.SLOT_POSITIONS.size()
+        ] +
         player.last_message
     )
     if player.health <= 0.0:
