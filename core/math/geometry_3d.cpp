@@ -140,44 +140,55 @@ real_t Geometry3D::get_closest_distance_between_segments(const Vector3 &p_p0, co
 }
 
 void Geometry3D::MeshData::optimize_vertices() {
-	HashMap<int, int> vtx_remap;
+	// Indices refer directly to the current vertex array. A dense remap uses
+	// just four bytes per original vertex and replaces multiple hash-table
+	// probes (and hash allocations) with indexed array reads and writes.
+	const uint32_t vertex_count = vertices.size();
+	LocalVector<int> remap;
+	remap.resize_uninitialized(vertex_count);
+	int *const remap_ptr = remap.ptr();
+	for (uint32_t i = 0; i < vertex_count; i++) {
+		remap_ptr[i] = -1;
+	}
 
+	uint32_t compact_count = 0;
 	for (MeshData::Face &face : faces) {
 		for (int &index : face.indices) {
-			if (!vtx_remap.has(index)) {
-				int ni = vtx_remap.size();
-				vtx_remap[index] = ni;
+			ERR_FAIL_INDEX(index, vertex_count);
+			int &mapped = remap_ptr[index];
+			if (mapped == -1) {
+				mapped = compact_count++;
 			}
-			index = vtx_remap[index];
+			index = mapped;
 		}
 	}
 
 	for (MeshData::Edge &edge : edges) {
-		int a = edge.vertex_a;
-		int b = edge.vertex_b;
-
-		if (!vtx_remap.has(a)) {
-			int ni = vtx_remap.size();
-			vtx_remap[a] = ni;
+		ERR_FAIL_INDEX(edge.vertex_a, vertex_count);
+		ERR_FAIL_INDEX(edge.vertex_b, vertex_count);
+		int &a = remap_ptr[edge.vertex_a];
+		if (a == -1) {
+			a = compact_count++;
 		}
-		if (!vtx_remap.has(b)) {
-			int ni = vtx_remap.size();
-			vtx_remap[b] = ni;
+		edge.vertex_a = a;
+		int &b = remap_ptr[edge.vertex_b];
+		if (b == -1) {
+			b = compact_count++;
 		}
-
-		edge.vertex_a = vtx_remap[a];
-		edge.vertex_b = vtx_remap[b];
+		edge.vertex_b = b;
 	}
 
+	// Build exactly the referenced vertex count, retaining the first-use
+	// ordering across faces and edge-only vertices.
 	LocalVector<Vector3> new_vertices;
-	new_vertices.resize(vtx_remap.size());
-
-	for (uint32_t i = 0; i < vertices.size(); i++) {
-		if (vtx_remap.has(i)) {
-			new_vertices[vtx_remap[i]] = vertices[i];
+	new_vertices.resize(compact_count);
+	for (uint32_t i = 0; i < vertex_count; i++) {
+		if (remap_ptr[i] != -1) {
+			new_vertices[remap_ptr[i]] = vertices[i];
 		}
 	}
-	vertices = new_vertices;
+	// Transfer ownership instead of copying every compacted Vector3 back.
+	vertices = std::move(new_vertices);
 }
 
 struct _FaceClassify {
