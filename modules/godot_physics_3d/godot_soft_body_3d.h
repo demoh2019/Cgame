@@ -31,6 +31,7 @@
 #pragma once
 
 #include "godot_area_3d.h"
+#include "servers/physics_xpbd_tether.h"
 #include "godot_collision_object_3d.h"
 
 #include "core/math/aabb.h"
@@ -78,6 +79,11 @@ class GodotSoftBody3D : public GodotCollisionObject3D {
 
 	LocalVector<Node> nodes;
 	LocalVector<Link> links;
+	// Mark the structural-edge prefix before generated bending links.
+	uint32_t xpbd_tether_structural_links = 0;
+	// Only allocated if tethers are enabled and at least one vertex is pinned.
+	LocalVector<PhysicsXPBDTether> xpbd_tethers;
+	bool xpbd_tethers_dirty = true;
 	// Only allocated when the experimental XPBD solver is enabled. The
 	// lambda for each link is retained across iterations of the same step.
 	LocalVector<real_t> xpbd_link_lambdas;
@@ -246,6 +252,7 @@ private:
 	bool solve_volume_constraint(double p_alpha, double &r_lambda);
 	void reset_link_rest_lengths();
 	void update_link_constants();
+	void rebuild_xpbd_tethers(real_t p_slack);
 
 	void apply_nodes_transform(const Transform3D &p_transform);
 
