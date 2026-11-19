@@ -271,7 +271,49 @@ void GodotSphereShape3D::get_supports(const Vector3 &p_normal, int p_max, Vector
 }
 
 bool GodotSphereShape3D::intersect_segment(const Vector3 &p_begin, const Vector3 &p_end, Vector3 &r_result, Vector3 &r_normal, int &r_face_index, bool p_hit_back_faces) const {
-	return Geometry3D::segment_intersects_sphere(p_begin, p_end, Vector3(), radius, &r_result, &r_normal);
+	// Closest approach avoids the cancellation of the quadratic discriminant.
+	// In particular, a float ray's squared length can overflow even when its
+	// endpoints are finite (common in large-world ray queries).
+	const double dx = double(p_end.x) - double(p_begin.x);
+	const double dy = double(p_end.y) - double(p_begin.y);
+	const double dz = double(p_end.z) - double(p_begin.z);
+	const double length_squared = dx * dx + dy * dy + dz * dz;
+	if (length_squared == 0.0 || radius <= 0.0) {
+		return false;
+	}
+
+	const double bx = double(p_begin.x);
+	const double by = double(p_begin.y);
+	const double bz = double(p_begin.z);
+	const double radius_squared = double(radius) * double(radius);
+	if (bx * bx + by * by + bz * bz < radius_squared) {
+		return false; // Preserve the prior entry-only behavior.
+	}
+
+	const double projection = -(bx * dx + by * dy + bz * dz) / length_squared;
+	if (projection < 0.0) {
+		return false;
+	}
+
+	const double cx = bx + dx * projection;
+	const double cy = by + dy * projection;
+	const double cz = bz + dz * projection;
+	const double distance_squared = cx * cx + cy * cy + cz * cz;
+	if (distance_squared >= radius_squared) {
+		return false; // Preserve tangent rays as misses.
+	}
+
+	const double fraction = projection - Math::sqrt((radius_squared - distance_squared) / length_squared);
+	if (fraction < 0.0 || fraction > 1.0) {
+		return false;
+	}
+
+	const double hit_x = bx + dx * fraction;
+	const double hit_y = by + dy * fraction;
+	const double hit_z = bz + dz * fraction;
+	r_result = Vector3(real_t(hit_x), real_t(hit_y), real_t(hit_z));
+	r_normal = Vector3(real_t(hit_x / double(radius)), real_t(hit_y / double(radius)), real_t(hit_z / double(radius))).normalized();
+	return true;
 }
 
 bool GodotSphereShape3D::intersect_point(const Vector3 &p_point) const {
