@@ -132,6 +132,7 @@ private:
 	real_t soft_body_self_collision_thickness = 0.0; // 0: no self-contact work or buffers.
 	real_t soft_body_self_collision_compliance = 0.000001;
 	int soft_body_self_collision_max_contacts_per_vertex = 8;
+	bool soft_body_self_collision_edge_edge = false; // Separate opt-in edge BVH.
 	real_t soft_body_xpbd_tether_compliance = 0.0; // Zero bypasses tether setup and solver.
 	real_t soft_body_xpbd_tether_slack = 0.05; // Opt-in triangle area preservation.
 	real_t soft_body_xpbd_volume_compliance = 0.0; // Opt-in enclosed volume preservation.
