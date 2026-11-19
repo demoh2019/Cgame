@@ -1322,6 +1322,8 @@ GodotSpace3D::GodotSpace3D() {
 	soft_body_xpbd_tether_slack = Math::is_finite(configured_tether_slack) ? MAX(real_t(0.0), configured_tether_slack) : real_t(0.05);
 	const real_t configured_volume_compliance = GLOBAL_GET("physics/3d/solver/soft_body_xpbd_volume_compliance");
 	soft_body_xpbd_volume_compliance = Math::is_finite(configured_volume_compliance) ? MAX(real_t(0.0), configured_volume_compliance) : real_t(0.0);
+	const real_t configured_shape_matching_rate = GLOBAL_GET("physics/3d/solver/soft_body_shape_matching_rate");
+	soft_body_shape_matching_rate = Math::is_finite(configured_shape_matching_rate) ? MAX(real_t(0.0), configured_shape_matching_rate) : real_t(0.0);
 	contact_max_allowed_penetration = GLOBAL_GET("physics/3d/solver/contact_max_allowed_penetration");
 	contact_bias = GLOBAL_GET("physics/3d/solver/default_contact_bias");
 	// Cache the per-space push speed limit; no project-setting lookup on contacts.
