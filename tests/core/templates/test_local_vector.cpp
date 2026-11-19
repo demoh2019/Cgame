@@ -34,6 +34,8 @@ TEST_FORCE_LINK(test_local_vector)
 
 #include "core/templates/local_vector.h"
 
+#include <vector>
+
 namespace TestLocalVector {
 
 TEST_CASE("[LocalVector] List Initialization.") {
@@ -259,6 +261,62 @@ TEST_CASE("[LocalVector] Size / Resize / Reserve.") {
 
 	CHECK(vector.size() == 4);
 	CHECK(vector.get_capacity() >= 4);
+}
+
+TEST_CASE("[LocalVector] Bulk trivial insert and remove match reference vector") {
+	LocalVector<int> actual;
+	std::vector<int> expected;
+	for (int i = 0; i < 512; i++) {
+		const size_t position = size_t(i * 23) % (expected.size() + 1);
+		actual.insert(uint32_t(position), i);
+		expected.insert(expected.begin() + position, i);
+	}
+	for (int i = 0; i < 256; i++) {
+		const size_t position = size_t(i * 17) % expected.size();
+		actual.remove_at(uint32_t(position));
+		expected.erase(expected.begin() + position);
+	}
+	CHECK(actual.size() == expected.size());
+	for (size_t i = 0; i < expected.size(); i++) {
+		CHECK(actual[uint32_t(i)] == expected[i]);
+	}
+	actual.remove_at(0);
+	CHECK(actual.size() == expected.size() - 1);
+	actual.remove_at(actual.size() - 1);
+	CHECK(actual.size() == expected.size() - 2);
+}
+
+TEST_CASE("[LocalVector] Byte find handles offsets and signed characters") {
+	LocalVector<uint8_t> bytes;
+	bytes.resize(4096);
+	for (uint32_t i = 0; i < bytes.size(); i++) {
+		bytes[i] = uint8_t(i & 255);
+	}
+	CHECK(bytes.find(uint8_t(201)) == 201);
+	CHECK(bytes.find(uint8_t(201), 202) == 457);
+	CHECK(bytes.find(uint8_t(255), -1) == 4095);
+	CHECK(bytes.find(uint8_t(0), 4096) == -1);
+	CHECK(bytes.find(uint8_t(0), -4097) == -1);
+
+	LocalVector<int8_t> signed_bytes{ -128, -10, 0, 10, 127 };
+	CHECK(signed_bytes.find(int8_t(-128)) == 0);
+	CHECK(signed_bytes.find(int8_t(127), 1) == 4);
+	CHECK(signed_bytes.find(int8_t(-10), 2) == -1);
+}
+
+TEST_CASE("[LocalVector] Nontrivial insert and erase preserve element order") {
+	LocalVector<String> names;
+	names.push_back("alpha");
+	names.push_back("gamma");
+	names.insert(1, String("beta"));
+	CHECK(names.size() == 3);
+	CHECK(names[0] == "alpha");
+	CHECK(names[1] == "beta");
+	CHECK(names[2] == "gamma");
+	CHECK(names.find(String("gamma")) == 2);
+	names.remove_at(0);
+	CHECK(names[0] == "beta");
+	CHECK(names[1] == "gamma");
 }
 
 } // namespace TestLocalVector
