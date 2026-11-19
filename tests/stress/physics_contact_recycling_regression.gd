@@ -57,7 +57,7 @@ func _run() -> void:
 			var pose: Transform2D = PhysicsServer2D.body_get_state(boxes[i], PhysicsServer2D.BODY_STATE_TRANSFORM)
 			var velocity: Vector2 = PhysicsServer2D.body_get_state(boxes[i], PhysicsServer2D.BODY_STATE_LINEAR_VELOCITY)
 			var angular_velocity: float = PhysicsServer2D.body_get_state(boxes[i], PhysicsServer2D.BODY_STATE_ANGULAR_VELOCITY)
-			if not pose.origin.is_finite() or not velocity.is_finite() or not is_finite(angular_velocity):
+			if not pose.origin.is_finite() or not velocity.is_finite() or is_nan(angular_velocity) or is_inf(angular_velocity):
 				printerr("FAIL: non-finite state for box %d at frame %d" % [i, frame])
 				failures += 1
 				break
