@@ -39,6 +39,10 @@
 #define ISLAND_COUNT_RESERVE 128
 #define CONSTRAINT_COUNT_RESERVE 1024
 
+// Prefer inline work for small batches; avoid thread pool wake-ups and barriers.
+static constexpr uint32_t MIN_PARALLEL_SETUP_CONSTRAINTS = 32;
+static constexpr uint32_t MIN_PARALLEL_SOLVE_ISLANDS = 16;
+
 void GodotStep2D::_populate_island(GodotBody2D *p_body, LocalVector<GodotBody2D *> &p_body_island, LocalVector<GodotConstraint2D *> &p_constraint_island) {
 	// A recursive flood fill over a long chain of joints can exhaust the
 	// physics thread's stack. Keep a reusable explicit DFS frontier instead.
@@ -251,11 +255,11 @@ void GodotStep2D::step(GodotSpace2D *p_space, real_t p_delta) {
 	/* SETUP CONSTRAINTS / PROCESS COLLISIONS */
 
 	const uint32_t total_constraint_count = all_constraints.size();
-	if (total_constraint_count == 1) {
-		// Dispatching a thread group for a single constraint costs more than
-		// running the setup inline on the already active physics thread.
-		_setup_constraint(0, nullptr);
-	} else if (total_constraint_count > 1) {
+	if (total_constraint_count < MIN_PARALLEL_SETUP_CONSTRAINTS) {
+		for (uint32_t constraint_index = 0; constraint_index < total_constraint_count; ++constraint_index) {
+			_setup_constraint(constraint_index, nullptr);
+		}
+	} else {
 		WorkerThreadPool::GroupID group_task = WorkerThreadPool::get_singleton()->add_template_group_task(this, &GodotStep2D::_setup_constraint, nullptr, total_constraint_count, -1, true, SNAME("Physics2DConstraintSetup"));
 		WorkerThreadPool::get_singleton()->wait_for_group_task_completion(group_task);
 	}
@@ -302,11 +306,11 @@ void GodotStep2D::step(GodotSpace2D *p_space, real_t p_delta) {
 
 	// WARNING: `_solve_island` modifies the constraint islands for optimization purpose,
 	// their content is not reliable after these calls and shouldn't be used anymore.
-	if (solve_island_count == 1) {
-		// A single island cannot be solved in parallel with another island.
-		// Avoid queueing workers and immediately waiting for them.
-		_solve_island(0, nullptr);
-	} else if (solve_island_count > 1) {
+	if (solve_island_count < MIN_PARALLEL_SOLVE_ISLANDS) {
+		for (uint32_t island_index = 0; island_index < solve_island_count; ++island_index) {
+			_solve_island(island_index, nullptr);
+		}
+	} else {
 		WorkerThreadPool::GroupID group_task = WorkerThreadPool::get_singleton()->add_template_group_task(this, &GodotStep2D::_solve_island, nullptr, solve_island_count, -1, true, SNAME("Physics2DConstraintSolveIslands"));
 		WorkerThreadPool::get_singleton()->wait_for_group_task_completion(group_task);
 	}
