@@ -1,0 +1,43 @@
+name: Fuzzy search bounded top-K performance regressions
+
+on:
+  pull_request:
+    branches: [develop]
+    paths:
+      - 'core/string/fuzzy_search.cpp'
+      - 'core/string/fuzzy_search.h'
+      - 'tests/core/string/test_fuzzy_search.cpp'
+      - '.github/workflows/fuzzy-search-topk-perf.yml'
+  push:
+    branches: [develop]
+    paths:
+      - 'core/string/fuzzy_search.cpp'
+      - 'core/string/fuzzy_search.h'
+      - 'tests/core/string/test_fuzzy_search.cpp'
+      - '.github/workflows/fuzzy-search-topk-perf.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: fuzzy-search-topk-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  fuzzy-search-native-regressions:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+      - uses: ./.github/actions/godot-deps
+      - name: Build Cgame editor with native tests
+        uses: ./.github/actions/godot-build
+        with:
+          platform: linuxbsd
+          target: editor
+          scons-flags: dev_build=yes tests=yes debug_symbols=no module_mono_enabled=no module_text_server_fb_enabled=yes accesskit=no -j2
+      - name: Run fuzzy search native regressions
+        run: ./bin/godot.linuxbsd.editor.dev.x86_64 --headless --test --test-case="*[FuzzySearch]*" --no-colors
