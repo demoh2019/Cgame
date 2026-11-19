@@ -157,8 +157,10 @@ func _physics_process(delta: float) -> void:
 		_handle_death()
 
 	var movement := Vector2(
-		float(Input.is_key_pressed(KEY_D)) - float(Input.is_key_pressed(KEY_A)),
-		float(Input.is_key_pressed(KEY_S)) - float(Input.is_key_pressed(KEY_W))
+		(1.0 if Input.is_key_pressed(KEY_D) else 0.0) -
+				(1.0 if Input.is_key_pressed(KEY_A) else 0.0),
+		(1.0 if Input.is_key_pressed(KEY_S) else 0.0) -
+				(1.0 if Input.is_key_pressed(KEY_W) else 0.0)
 	)
 	movement += Input.get_vector("ui_left", "ui_right", "ui_up", "ui_down")
 	movement = movement.limit_length(1.0)
@@ -434,7 +436,7 @@ func _refresh_hud() -> void:
 		int(survivor.health), int(survivor.hunger), int(survivor.thirst),
 		int(survivor.stamina), survivor.coins, 1 + int(survivor.elapsed_days), danger
 	]
-	var item_bits: Array[String] = []
+	var item_bits := PackedStringArray()
 	for item_id in survivor.inventory.keys():
 		item_bits.append("%s:%d" % [item_id, survivor.count(str(item_id))])
 	item_bits.sort()
