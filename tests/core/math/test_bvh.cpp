@@ -342,4 +342,35 @@ TEST_CASE("[BVH] Deferred 3D insertion and removal before flush") {
 	CHECK(removed == 1);
 }
 
+
+TEST_CASE("[BVH] Bulk insertion of independent 2D bodies preserves every adjacent pair") {
+	using Tree = BVH_Manager<Item, 2, true, 16, PairTest, CullTest, Rect2, Vector2, false>;
+	Tree tree;
+	constexpr int COUNT = 96;
+	Item items[COUNT];
+	BVHHandle handles[COUNT];
+	int created = 0;
+	int removed = 0;
+	tree.set_pair_callback(count_pair, &created);
+	tree.set_unpair_callback(count_unpair, &removed);
+
+	// Every adjacent pair overlaps; all more distant pairs are separated.
+	// Alternate between two trees to exercise cross-tree pair generation.
+	for (int i = 0; i < COUNT; i++) {
+		items[i].value = i;
+		handles[i] = tree.create(&items[i], true, uint32_t(i & 1), 3,
+				Rect2(real_t(i) * real_t(1.5), 0, 2, 2), 0, true);
+	}
+	CHECK(created == 0);
+	tree.flush_pending_pairs();
+	CHECK(created == COUNT - 1);
+	tree.update();
+	CHECK(created == COUNT - 1);
+
+	for (int i = 0; i < COUNT; i++) {
+		tree.erase(handles[i]);
+	}
+	CHECK(removed == COUNT - 1);
+}
+
 } // namespace TestBVH
