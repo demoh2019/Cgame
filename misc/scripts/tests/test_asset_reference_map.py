@@ -238,6 +238,40 @@ class ReferenceMapTests(unittest.TestCase):
         content += 'var asset = "res://sprites/hero.png";\n'
         self.assertEqual(arm._references(content, ".cs"), ['sprites/hero.png'])
 
+    def test_dense_shared_reference_graph_preserves_sorted_outputs(self):
+        count = 72
+        for i in range(count):
+            references = "".join(
+                f'path="res://nodes/{j:03}.tres"\n'
+                for j in range(count) if j != i
+            )
+            self.put(f"nodes/{i:03}.tres", references)
+        report = self.run_map("nodes/000.tres", "nodes/071.tres")
+        self.assertEqual([root["file_count"] for root in report["roots"]], [72, 72])
+        self.assertEqual(report["combined"]["file_count"], 72)
+        self.assertEqual(report["combined"]["total_bytes"],
+                         sum((self.project / f"nodes/{i:03}.tres").stat().st_size
+                             for i in range(count)))
+        self.assertEqual(report["references"]["res://nodes/000.tres"],
+                         [f"res://nodes/{i:03}.tres" for i in range(1, count)])
+        for incoming in report["referenced_by"].values():
+            self.assertEqual(incoming, sorted(incoming))
+            self.assertEqual(len(incoming), count - 1)
+        self.assertFalse(report["problems"])
+
+    def test_diamond_and_cycle_counted_once_for_each_root(self):
+        self.put("main.tscn", 'path="res://left.tscn" path="res://right.tscn"')
+        self.put("left.tscn", 'path="res://common.tscn"')
+        self.put("right.tscn", 'path="res://common.tscn"')
+        self.put("common.tscn", 'path="res://main.tscn"')
+        report = self.run_map("left.tscn", "main.tscn")
+        self.assertEqual([row["root"] for row in report["roots"]],
+                         ["res://left.tscn", "res://main.tscn"])
+        self.assertEqual([row["file_count"] for row in report["roots"]], [4, 4])
+        self.assertEqual(report["combined"]["file_count"], 4)
+        self.assertEqual(report["referenced_by"]["res://common.tscn"],
+                         ["res://left.tscn", "res://right.tscn"])
+
     def test_invalid_windows_name_diagnostic(self):
         self.put('a.tscn', 'path="res://COM1.png"')
         self.assertEqual(self.run_map('a.tscn')['problems'][0]['kind'], 'invalid')
