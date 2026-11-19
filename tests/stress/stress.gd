@@ -7,6 +7,7 @@ signal sample_signal(value: int)
 const PREFIX := "STRESS_RESULT:"
 const ExtraStress := preload("res://extra_stress.gd")
 const GridReflowStress := preload("res://grid_reflow.gd")
+const BitMapMorphologyStress := preload("res://bitmap_morphology.gd")
 const PressureStress := preload("res://pressure_scenarios.gd")
 const CASES := [
 	"containers", "strings", "script_vm", "math", "signals",
@@ -24,7 +25,7 @@ const CASES := [
 	"physics_raycast_3d", "render_multimesh_3d",
 	"object_lifecycle", "scene_churn",
 	"scene_reparent", "resource_roundtrip", "audio_bus_churn",
-	"bitmap_rects", "bitmap_pipeline",
+	"bitmap_rects", "bitmap_pipeline", "bitmap_morphology",
 	"curve_tessellation_2d", "curve_tessellation_3d", "curve_bake", "curve_nearest",
 ]
 
@@ -292,6 +293,8 @@ func _run_case(test_case: String, scale: int, frames: int, seed: int) -> Diction
 			return _bitmap_rects(scale)
 		"bitmap_pipeline":
 			return _bitmap_pipeline(scale)
+		"bitmap_morphology":
+			return BitMapMorphologyStress.new().run(scale)
 		"curve_tessellation_2d":
 			return _curve_tessellation_2d(scale)
 		"curve_tessellation_3d":
