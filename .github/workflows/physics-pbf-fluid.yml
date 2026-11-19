@@ -10,6 +10,10 @@ on:
       - "scene/register_scene_types.cpp"
       - "tests/servers/test_physics_pbf_3d.cpp"
       - "tests/stress/test_physics_pbf_3d.py"
+      - "tests/stress/test_physics_pbf_compiler.cpp"
+      - "tests/stress/physics_pbf_cpp_stubs/core/math/vector3.h"
+      - "doc/classes/PBFParticleFluid3D.xml"
+      - "demo/physics_lab/smoke_test.gd"
       - "tests/stress/physics_pbf_particle_fluid_3d_regression.gd"
       - "tests/stress/physics_pbf_particle_fluid_stress.gd"
       - "tests/stress/run.py"
@@ -27,5 +31,16 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+      - name: Compile real native PBF kernel header in float and double precision
+        run: |
+          for precision in float double; do
+            flags=""
+            if [ "$precision" = "double" ]; then flags="-DCGAME_USE_DOUBLE"; fi
+            g++ -std=c++17 -O2 -Wall -Wextra -Werror $flags \
+              -Itests/stress/physics_pbf_cpp_stubs -I. \
+              tests/stress/test_physics_pbf_compiler.cpp \
+              -o "/tmp/physics_pbf_kernel_$precision"
+            "/tmp/physics_pbf_kernel_$precision"
+          done
       - name: Validate independent SPH/PBF kernel, grid and projection contracts
         run: python3 -m unittest discover -s tests/stress -p 'test_physics_pbf_3d.py' -v
