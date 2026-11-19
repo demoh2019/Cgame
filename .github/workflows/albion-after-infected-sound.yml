@@ -1,0 +1,46 @@
+name: Albion After infected sound and stealth
+
+on:
+  push:
+    branches: [develop]
+    paths:
+      - 'game/**'
+      - '.github/workflows/albion-after-infected-sound.yml'
+  pull_request:
+    paths:
+      - 'game/**'
+      - '.github/workflows/albion-after-infected-sound.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  gameplay-sound:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install verified Godot 4.7.2 Linux editor
+        shell: bash
+        run: |
+          set -euo pipefail
+          curl --retry 4 --retry-delay 3 -fL -o godot.zip https://github.com/godotengine/godot-builds/releases/download/4.7.2-stable/Godot_v4.7.2-stable_linux.x86_64.zip
+          echo 'cadd3204e728a35d3f13adb7fd0d7902636b79f6b95c40c265eb73b6c35329e4  godot.zip' | sha256sum -c -
+          unzip -q godot.zip
+          chmod +x Godot_v4.7.2-stable_linux.x86_64
+          mv Godot_v4.7.2-stable_linux.x86_64 godot
+      - name: Import authoritative game project
+        shell: bash
+        run: |
+          set -euo pipefail
+          ./godot --headless --path game --editor --import --quit 2>&1 | tee import.log
+          if grep -Ei 'SCRIPT ERROR:|Parse Error:|Failed to load script|Failed loading resource' import.log; then exit 1; fi
+      - name: Run all game logic and sound tests
+        shell: bash
+        run: |
+          set -euo pipefail
+          timeout 240s ./godot --headless --path game --script res://tests/run_all.gd 2>&1 | tee tests.log
+          grep -Fq 'test_sound.gd' tests.log
+          grep -Fq '0 failures' tests.log
+          if grep -Ei 'SCRIPT ERROR:|Parse Error:|Failed to load script|FAIL ' tests.log; then exit 1; fi

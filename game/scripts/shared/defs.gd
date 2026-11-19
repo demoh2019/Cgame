@@ -25,6 +25,11 @@ const MAX_HEALTH := 100.0
 const HUNGER_PER_SECOND := 0.045
 const THIRST_PER_SECOND := 0.07
 const STARVE_DAMAGE_PER_SECOND := 1.2
+# Survival stealth: noise is determined by authoritative movement and fired ammo.
+const SPRINT_NOISE_RADIUS := 21.0
+const SPRINT_NOISE_SECONDS := 0.8
+const GUNSHOT_NOISE_RADIUS := 32.0
+const GUNSHOT_NOISE_SECONDS := 3.0
 const INVENTORY_SLOTS := 24
 # Soft-load encumbrance: past the comfortable weight, walking slows and sprint is disabled.
 # No hard pickup cap: existing saves, market trades and full-loot bags remain compatible.

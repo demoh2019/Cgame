@@ -38,7 +38,8 @@ func is_alive() -> bool:
 	return state != State.DEAD
 
 
-## Advances the brain. `players` maps peer id to {position: Vector3, alive: bool, safe: bool}.
+## Advances the brain. `players` maps peer id to {position: Vector3, alive: bool,
+## safe: bool, noise: float}. Noisy survivors may be detected farther away.
 ## Returns {"hit": peer_id, "damage": float} when the zombie lands a blow, else {}.
 func think(world, players: Dictionary, delta: float, rng: RandomNumberGenerator) -> Dictionary:
 	if state == State.DEAD:
@@ -100,7 +101,11 @@ func _select_target(players: Dictionary, here: Vector2) -> void:
 			continue
 		var p: Vector3 = info["position"]
 		var distance := here.distance_to(Vector2(p.x, p.z))
-		if distance < best_distance and (distance <= notice or peer_id == target_id):
+		# A shot or running steps reveal the survivor even outside visual notice.
+		# Bound hearing by the zombie's leash so it can actually pursue the sound.
+		var hearing := clampf(float(info.get("noise", 0.0)), 0.0, float(data["lose"]) - 1.0)
+		var detect_range := maxf(notice, hearing)
+		if distance < best_distance and (distance <= detect_range or peer_id == target_id):
 			best = peer_id
 			best_distance = distance
 	if best != -1:

@@ -5,8 +5,8 @@ const WorldGen = preload("res://scripts/shared/world_gen.gd")
 const Zombie = preload("res://scripts/shared/zombie.gd")
 
 
-func _players(position: Vector3, alive := true, safe := false) -> Dictionary:
-	return {1: {"position": position, "alive": alive, "safe": safe}}
+func _players(position: Vector3, alive := true, safe := false, noise := 0.0) -> Dictionary:
+	return {1: {"position": position, "alive": alive, "safe": safe, "noise": noise}}
 
 
 func run(t) -> void:
@@ -35,6 +35,27 @@ func run(t) -> void:
 	for i in 20:
 		z.think(world, players, 0.1, rng)
 	t.check(z.state != Zombie.State.CHASE, "a player 60 m away is not noticed")
+
+	t.current = "noise attracts infected"
+	z = Zombie.new(80, "walker", Vector3(0, ground, 0))
+	players = _players(Vector3(20, ground, 0))
+	for i in 5:
+		z.think(world, players, 0.1, rng)
+	t.check(z.state != Zombie.State.CHASE, "quiet survivor outside vision is ignored")
+	players = _players(Vector3(20, ground, 0), true, false, Defs.SPRINT_NOISE_RADIUS)
+	for i in 5:
+		z.think(world, players, 0.1, rng)
+	t.eq(z.state, Zombie.State.CHASE, "loud sprint makes survivor detectable")
+	z = Zombie.new(81, "walker", Vector3(0, ground, 0))
+	players = _players(Vector3(30, ground, 0), true, false, Defs.GUNSHOT_NOISE_RADIUS)
+	for i in 5:
+		z.think(world, players, 0.1, rng)
+	t.eq(z.state, Zombie.State.CHASE, "gunshot attracts walker beyond sprint radius")
+	z = Zombie.new(82, "walker", Vector3(0, ground, 0))
+	players = _players(Vector3(30, ground, 0), true, true, Defs.GUNSHOT_NOISE_RADIUS)
+	for i in 5:
+		z.think(world, players, 0.1, rng)
+	t.check(z.state != Zombie.State.CHASE, "safe hub prevents aggression despite gunshots")
 
 	t.current = "runner is faster"
 	var runner := Zombie.new(3, "runner", Vector3(0, ground, 0))

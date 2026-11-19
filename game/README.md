@@ -62,3 +62,22 @@ godot --headless --path game --script res://tests/run_all.gd
 
 This logic lives in the game, not in the engine, because Godot already
 provides the necessary script and serialization features.
+
+
+## Survival stealth: noise attracts infected
+
+The authoritative server computes temporary noise from **actual running
+movement** (21 m for 0.8 s) and **pistol fire with ammunition** (32 m for
+3 s). Nearby infected can notice a noisy survivor beyond their ordinary
+sight radius, but safe-zone and pursuit-distance restrictions still apply.
+Noise expires if the player stops making it, clears on respawn, and is never
+trusted as a client-provided RPC value.
+
+No network protocol, native engine API or save-schema migration is required:
+the existing player-input simulation and zombie state machine implement the
+mechanic inside `game/`. The new `test_sound.gd` exercises input budgets,
+empty ammunition, sound expiry and server-to-AI detection. Run all suites with:
+
+```sh
+godot --headless --path game --script res://tests/run_all.gd
+```

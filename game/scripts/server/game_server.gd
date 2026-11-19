@@ -38,6 +38,8 @@ class Player:
 	var input_budget: float = 0.0
 	var last_input_seq: int = 0
 	var attack_timer: float = 0.0
+	var noise_radius: float = 0.0
+	var noise_timer: float = 0.0
 	var action: Dictionary = {} # Current gathering: {"node": id, "remaining": s, "total": s}
 	var respawn_timer: float = 0.0
 	var kills: int = 0
@@ -187,6 +189,8 @@ func _spawn_player(player: Player) -> void:
 	for id in STARTER_KIT:
 		player.inventory.add(id, STARTER_KIT[id])
 	player.action = {}
+	player.noise_radius = 0.0
+	player.noise_timer = 0.0
 	player.dirty_inventory = true
 	events.append({"type": "spawn", "peer": player.id})
 
@@ -215,11 +219,15 @@ func submit_input(peer_id: int, seq: int, move_x: float, move_z: float, sprint: 
 	player.input_budget -= allowed
 	player.yaw = yaw
 	if allowed > 0.0:
-		# No client-supplied cargo_factor: overweight players cannot forge full-speed inputs.
+		# No client-supplied cargo_factor or sound radius: the server owns both.
+		var before_move: Vector3 = player.position
 		player.position = Movement.step(world, player.position, {
 			"x": move_x, "z": move_z, "sprint": sprint,
 			"cargo_factor": player.inventory.movement_factor(),
 		}, allowed)
+		if sprint and player.position.distance_to(before_move) > 0.01:
+			player.noise_radius = maxf(player.noise_radius, Defs.SPRINT_NOISE_RADIUS)
+			player.noise_timer = maxf(player.noise_timer, Defs.SPRINT_NOISE_SECONDS)
 		# Walking away cancels gathering.
 		if not player.action.is_empty():
 			var node := _find_node(int(player.action["node"]))
@@ -378,6 +386,9 @@ func cmd_attack(peer_id: int, dir_x: float, dir_z: float) -> Dictionary:
 			return {"ok": false, "reason": "no_ammo"}
 		player.inventory.remove(ammo, 1)
 		player.dirty_inventory = true
+		# Only a real shot with ammunition makes gunshot noise.
+		player.noise_radius = maxf(player.noise_radius, Defs.GUNSHOT_NOISE_RADIUS)
+		player.noise_timer = maxf(player.noise_timer, Defs.GUNSHOT_NOISE_SECONDS)
 		reach = Defs.PISTOL_RANGE
 	var hit := _find_hit(player, origin, direction, reach, kind == "ranged")
 	events.append({"type": "attack", "peer": peer_id, "dir": direction, "ranged": kind == "ranged"})
@@ -578,6 +589,9 @@ func _tick_players(delta: float) -> void:
 	for player in players.values():
 		player.input_budget = minf(player.input_budget + delta, 0.25)
 		player.attack_timer = maxf(player.attack_timer - delta, 0.0)
+		player.noise_timer = maxf(player.noise_timer - delta, 0.0)
+		if player.noise_timer <= 0.0:
+			player.noise_radius = 0.0
 		if not _alive(player):
 			player.respawn_timer -= delta
 			if player.respawn_timer <= 0.0:
@@ -620,7 +634,8 @@ func _finish_gather(player: Player, node: Dictionary) -> void:
 func _tick_zombies(delta: float) -> void:
 	var info: Dictionary = {}
 	for player in players.values():
-		info[player.id] = {"position": player.position, "alive": _alive(player), "safe": _is_safe(player.position)}
+		info[player.id] = {"position": player.position, "alive": _alive(player),
+			"safe": _is_safe(player.position), "noise": player.noise_radius if player.noise_timer > 0.0 else 0.0}
 	# Activate spawns near players and put far-away zombies to sleep.
 	if tick_count % 20 == 1:
 		_manage_zombie_population()
