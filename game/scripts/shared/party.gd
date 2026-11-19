@@ -139,7 +139,7 @@ func kick(leader_id: int, target_id: int) -> Dictionary:
 	return leave(target_id)
 
 
-func disconnect(peer_id: int) -> void:
+func disconnect_peer(peer_id: int) -> void:
 	invites.erase(peer_id)
 	if group_by_peer.has(peer_id):
 		leave(peer_id)

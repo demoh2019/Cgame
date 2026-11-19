@@ -39,8 +39,9 @@ func run(t) -> void:
 	var restored := Progression.new()
 	t.check(restored.load_dict(original), "valid combat XP loads")
 	t.eq(restored.combat_level("ranged"), 2, "ranged mastery survives saving")
+	var invalid: Dictionary = {}
 	for forged in [NAN, INF, -1, 0.5, 100000001, "80", true]:
-		var invalid: Dictionary = original.duplicate(true)
+		invalid = original.duplicate(true)
 		invalid["combat"]["ranged"] = forged
 		t.check(not restored.load_dict(invalid), "malformed saved combat XP rejected")
 		t.eq(restored.combat_level("ranged"), 2, "invalid combat XP cannot change live state")
@@ -88,6 +89,9 @@ func run(t) -> void:
 	t.check(reported, "earned weapon XP is announced to the owning survivor")
 
 	t.current = "melee and ability damage use server level"
+	# This test is about the weapon mastery multiplier alone: start the skill tree from scratch.
+	player.skills.reset()
+	server._apply_skill_bonuses(player)
 	player.progression.award_combat("club_1", 80 - earned)
 	t.eq(player.progression.combat_level("melee"), 2, "server combat XP reaches rank two")
 	var brute := Zombie.new(server.new_id(), "brute",

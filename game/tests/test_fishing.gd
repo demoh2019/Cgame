@@ -55,7 +55,7 @@ func run(t) -> void:
 	t.eq(sim.cmd_fish(541).get("reason", ""), "cooldown", "fishing cooldown is enforced")
 
 	t.current = "private network catch notification"
-	var net := Net.new()
+	var net = Net.new()
 	net.role = "server"
 	net.sim = sim
 	var catch_event: Dictionary = {}
@@ -72,7 +72,7 @@ func run(t) -> void:
 	t.current = "cancelled casts"
 	sim.time += Fishing.COOLDOWN_SECONDS + 1.0
 	t.check(bool(sim.cmd_fish(541).get("ok", false)), "can fish again after cooldown")
-	var before_cancel := player.inventory.count("raw_fish")
+	var before_cancel: int = player.inventory.count("raw_fish")
 	player.position += Vector3(5, 0, 0)
 	sim._tick_players(0.1)
 	t.check(player.action.is_empty(), "walking away cancels the cast")

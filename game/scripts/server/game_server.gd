@@ -165,7 +165,6 @@ func character_data(player: Player) -> Dictionary:
 		"health": player.survival.health, "hunger": player.survival.hunger, "thirst": player.survival.thirst,
 		"stamina": player.survival.stamina, "infection": player.survival.infection,
 		"exposure": player.survival.exposure, "warmth_seconds": player.survival.warmth_seconds,
-			"campfire_warm": FieldCampfire.has_warmth(campfires, player.position, time),
 		"alive": alive, "kills": player.kills, "deaths": player.deaths,
 		"x": player.position.x, "z": player.position.z,
 		"inventory": player.inventory.to_dict(),
@@ -297,7 +296,7 @@ func remove_player(peer_id: int) -> void:
 	market_buy_requests.erase(peer_id)
 	_cancel_market_seller(peer_id)
 	_cancel_player_trade(peer_id, "disconnected")
-	parties.disconnect(peer_id)
+	parties.disconnect_peer(peer_id)
 	var player: Player = players.get(peer_id)
 	if player != null and not player.user_id.is_empty():
 		for wall in barricades.values():
@@ -2115,6 +2114,7 @@ func snapshot_for(peer_id: int) -> Dictionary:
 			"action": player.action.duplicate(),
 			"infection": player.survival.infection, "exposure": player.survival.exposure,
 			"warmth_seconds": player.survival.warmth_seconds,
+			"campfire_warm": FieldCampfire.has_warmth(campfires, player.position, time),
 			"weather": Weather.conditions(world, player.position.x, player.position.z, time),
 			"lake_drink_cooldown": player.lake_drink_cooldown,
 			"combat_energy": player.combat_energy, "skill_cooldown": player.skill_timer,

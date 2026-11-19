@@ -48,7 +48,7 @@ static func spawn_sites(world, wall: Dictionary, survivor: Vector3, count: int,
 			if found.size() >= mini(count, MAX_PER_WAVE):
 				return found
 			var angle := TAU * float((index + offset) % SPAWN_ANGLES) / float(SPAWN_ANGLES)
-			var point := target + Vector2.from_angle(angle) * ring
+			var point: Vector2 = target + Vector2.from_angle(angle) * ring
 			if point.length() < Structures.MIN_HUB_DISTANCE:
 				continue
 			var distance_squared: float = player.distance_squared_to(point)

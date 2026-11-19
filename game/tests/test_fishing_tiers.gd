@@ -89,6 +89,9 @@ func run(t) -> void:
 		"trained survivor manufactures advanced fishing gear")
 	t.eq(survivor.inventory.count("fishing_rod_4"), 1, "rod is in the shared backpack")
 
+	# Exact material counts: no chance of a skill refund in this test.
+	survivor.skills.reset()
+	server._apply_skill_bonuses(survivor)
 	survivor.inventory.add("raw_fish_4", 3)
 	survivor.inventory.add("wood_4", 1)
 	t.check(bool(server.cmd_craft(925, "cooked_fish_4").get("ok", false)),
