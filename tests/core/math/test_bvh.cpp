@@ -112,4 +112,80 @@ TEST_CASE("[BVH] 3D queued removals preserve remaining bodies") {
 	CHECK(tree.cull_aabb(AABB(Vector3(0, 0, 0), Vector3(2000, 20, 20)), found, COUNT, nullptr) == COUNT - 1);
 }
 
+struct CountingPairTest {
+	static int calls;
+	static bool allow;
+
+	static bool user_pair_check(const Item *, const Item *) {
+		calls++;
+		return allow;
+	}
+};
+
+int CountingPairTest::calls = 0;
+bool CountingPairTest::allow = true;
+
+static void *count_pair(void *p_userdata, uint32_t, Item *, int, uint32_t, Item *, int) {
+	(*static_cast<int *>(p_userdata))++;
+	return nullptr;
+}
+
+static void count_unpair(void *p_userdata, uint32_t, Item *, int, uint32_t, Item *, int, void *) {
+	(*static_cast<int *>(p_userdata))++;
+}
+
+TEST_CASE("[BVH] Existing pairs skip redundant user filters but honor forced checks") {
+	using Tree = BVH_Manager<Item, 1, true, 16, CountingPairTest, CullTest, Rect2, Vector2, false>;
+	CountingPairTest::calls = 0;
+	CountingPairTest::allow = true;
+
+	Tree tree;
+	int created = 0;
+	int removed = 0;
+	tree.set_pair_callback(count_pair, &created);
+	// Unpair callbacks must receive their own userdata, not pair-callback userdata.
+	tree.set_unpair_callback(count_unpair, &removed);
+
+	Item a;
+	Item b;
+	BVHHandle ha = tree.create(&a, true, 0, 1, Rect2(0, 0, 2, 2));
+	BVHHandle hb = tree.create(&b, true, 0, 1, Rect2(1, 0, 2, 2));
+	CHECK(created == 1);
+	const int initial_filter_calls = CountingPairTest::calls;
+
+	// This move preserves overlap and the existing pair.
+	tree.move(ha, Rect2(0.25, 0, 2, 2));
+	tree.update();
+	CHECK(created == 1);
+	CHECK(removed == 0);
+	CHECK(CountingPairTest::calls == initial_filter_calls);
+
+	// A forced collision check is still required to re-evaluate changed masks.
+	CountingPairTest::allow = false;
+	tree.force_collision_check(ha);
+	CHECK(removed == 1);
+	CountingPairTest::allow = true;
+	tree.force_collision_check(ha);
+	CHECK(created == 2);
+
+	tree.erase(ha);
+	CHECK(removed == 2);
+	tree.erase(hb);
+}
+
+TEST_CASE("[BVH] Compound shapes avoid self-pair user filters") {
+	using Tree = BVH_Manager<Item, 1, true, 16, CountingPairTest, CullTest, AABB, Vector3, false>;
+	CountingPairTest::calls = 0;
+	CountingPairTest::allow = true;
+
+	Tree tree;
+	Item object;
+	BVHHandle a = tree.create(&object, true, 0, 1, AABB(Vector3(0, 0, 0), Vector3(2, 2, 2)), 0);
+	BVHHandle b = tree.create(&object, true, 0, 1, AABB(Vector3(1, 0, 0), Vector3(2, 2, 2)), 1);
+	tree.update();
+	CHECK(CountingPairTest::calls == 0);
+	tree.erase(a);
+	tree.erase(b);
+}
+
 } // namespace TestBVH

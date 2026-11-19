@@ -521,7 +521,7 @@ private:
 
 		// callback
 		if (unpair_callback) {
-			unpair_callback(pair_callback_userdata, p_from, exa.userdata, exa.subindex, p_to, exb.userdata, exb.subindex, ud_from);
+			unpair_callback(unpair_callback_userdata, p_from, exa.userdata, exa.subindex, p_to, exb.userdata, exb.subindex, ud_from);
 		}
 	}
 
@@ -608,12 +608,8 @@ private:
 		const typename BVHTREE_CLASS::ItemExtra &exa = _get_extra(p_ha);
 		const typename BVHTREE_CLASS::ItemExtra &exb = _get_extra(p_hb);
 
-		// user collision callback
-		if (!USER_PAIR_TEST_FUNCTION::user_pair_check(exa.userdata, exb.userdata)) {
-			return;
-		}
-
-		// if the userdata is the same, no collisions should occur
+		// Compound shapes belonging to the same object can never form a pair.
+		// Reject them before running the potentially expensive user filter.
 		if ((exa.userdata == exb.userdata) && exa.userdata) {
 			return;
 		}
@@ -631,6 +627,12 @@ private:
 			if (p_to.contains_pair_to(p_ha)) {
 				return;
 			}
+		}
+
+		// Already-existing pairs have been checked by _find_leavers().
+		// Only new pairs need the user-defined (layer / mask) filter.
+		if (!USER_PAIR_TEST_FUNCTION::user_pair_check(exa.userdata, exb.userdata)) {
+			return;
 		}
 
 		// callback
