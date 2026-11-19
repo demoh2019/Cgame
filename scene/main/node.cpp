@@ -1992,12 +1992,13 @@ Node *Node::get_node_or_null(const NodePath &p_path) const {
 		return nullptr;
 	}
 
-	ERR_FAIL_COND_V_MSG(!data.tree && p_path.is_absolute(), nullptr, "Can't use get_node() with absolute paths from outside the active scene tree.");
+	const bool absolute = p_path.is_absolute();
+	ERR_FAIL_COND_V_MSG(!data.tree && absolute, nullptr, "Can't use get_node() with absolute paths from outside the active scene tree.");
 
 	Node *current = nullptr;
 	Node *root = nullptr;
 
-	if (!p_path.is_absolute()) {
+	if (!absolute) {
 		current = const_cast<Node *>(this); //start from this
 	} else {
 		root = const_cast<Node *>(this);
@@ -2006,8 +2007,16 @@ Node *Node::get_node_or_null(const NodePath &p_path) const {
 		}
 	}
 
-	for (int i = 0; i < p_path.get_name_count(); i++) {
-		StringName name = p_path.get_name(i);
+	const int name_count = p_path.get_name_count();
+	// Single-segment paths are common: do not acquire an entire Vector COW
+	// reference for them. Multi-segment lookups can share the path array once
+	// rather than atomically copying every StringName along the traversal.
+	const StringName single_name = name_count == 1 ? p_path.get_name(0) : StringName();
+	const Vector<StringName> borrowed_names = name_count > 1 ? p_path.get_names() : Vector<StringName>();
+	const StringName *name_data = name_count > 1 ? borrowed_names.ptr() : &single_name;
+
+	for (int i = 0; i < name_count; i++) {
+		const StringName &name = name_data[i];
 		Node *next = nullptr;
 
 		if (name == SNAME(".")) {
