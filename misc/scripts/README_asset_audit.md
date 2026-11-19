@@ -31,8 +31,11 @@ The scanner walks resources deterministically and reports:
 - **INVALID_RESOURCE_PATH**: absolute path or parent traversal.
 - **INVALID_SEPARATOR**: backslash rather than forward slash.
 - **EMPTY_RESOURCE_PATH**, **RESOURCE_IS_DIRECTORY**: invalid resource targets.
+- **RESOURCE_OUTSIDE_PROJECT**: a referenced file or directory symlink resolves outside the project.
+- **UNRESOLVABLE_RESOURCE**, **UNRESOLVABLE_SYMLINK**: cycles or broken link targets cannot be used as project resources.
 - Warnings for external symlinks, invalid UTF-8 text, or files exceeding the
   configured scan-size limit.
+- Unreadable directories cause a scan failure (exit code 2), rather than a false clean report.
 
 Checks are intentionally conservative: only quoted `res://` literals in
 `.gd`, `.tscn`, `.tres`, `.godot`, `.gdshader`, `.gdshaderinc`, `.cs`,
@@ -52,12 +55,14 @@ project validation too.
 The tool uses Python's standard library and needs no engine build:
 
 ```bash
-python3 -m unittest discover -s misc/scripts/tests -p 'test_project_asset_audit.py' -v
+python3 -m unittest discover -s misc/scripts/tests -p 'test_project_asset_audit*.py' -v
 ```
 
-The 27 unit tests cover collision/case handling, Unicode, symlinks, import
-exclusions, static paths, invalid text, JSON output, exit codes, and
-deterministic findings. Suitable for a lightweight CI job:
+The regression suites cover collision/case handling, Unicode, symlink containment
+and cycles, unreadable directory failures, import exclusions, static paths,
+invalid text, JSON output, exit codes, and deterministic findings. The
+`project-asset-audit.yml` workflow runs them on pull requests and `develop`
+pushes. Suitable for a lightweight CI job:
 
 ```yaml
 - name: Audit project assets
