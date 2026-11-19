@@ -381,6 +381,17 @@ bool GodotBodyPair2D::_test_ccd(real_t p_step, GodotBody2D *p_A, int p_shape_A, 
 				return false;
 			}
 			if (result == PhysicsCCDCircleSegmentTOIResult::HIT) {
+				// The volume CCD path must honor the same one-way platform
+				// direction filter as the legacy support-ray CCD. Without
+				// this, a backface graze can incorrectly clamp velocity.
+				if (shape_A_ptr->allows_one_way_collision() && p_B->is_shape_set_as_one_way_collision(p_shape_B)) {
+					const Vector2 one_way_direction = p_xform_B.basis_xform(p_B->get_shape_one_way_collision_direction(p_shape_B)).normalized();
+					if (one_way_direction.dot(mnormal) < CMP_EPSILON) {
+						collided = false;
+						oneway_disabled = true;
+						return false;
+					}
+				}
 				const real_t allowed_distance = CLAMP(real_t(impact_fraction * double(mlen)) + (max - min) * real_t(0.01), real_t(0.0), mlen);
 				const Vector2 desired_velocity = velocity_B + mnormal * (allowed_distance / p_step);
 				const Vector2 velocity_A = p_A->get_linear_velocity();
@@ -423,6 +434,17 @@ bool GodotBodyPair2D::_test_ccd(real_t p_step, GodotBody2D *p_A, int p_shape_A, 
 				return false;
 			}
 			if (result == PhysicsCCDCapsulePairTOIResult::HIT) {
+				// The volume CCD path must honor the same one-way platform
+				// direction filter as the legacy support-ray CCD. Without
+				// this, a backface graze can incorrectly clamp velocity.
+				if (shape_A_ptr->allows_one_way_collision() && p_B->is_shape_set_as_one_way_collision(p_shape_B)) {
+					const Vector2 one_way_direction = p_xform_B.basis_xform(p_B->get_shape_one_way_collision_direction(p_shape_B)).normalized();
+					if (one_way_direction.dot(mnormal) < CMP_EPSILON) {
+						collided = false;
+						oneway_disabled = true;
+						return false;
+					}
+				}
 				const real_t allowed_distance = CLAMP(real_t(impact_fraction * double(mlen)) + (max - min) * real_t(0.01), real_t(0.0), mlen);
 				const Vector2 desired_velocity = velocity_B + mnormal * (allowed_distance / p_step);
 				const Vector2 velocity_A = p_A->get_linear_velocity();
