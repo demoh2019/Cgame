@@ -1233,10 +1233,12 @@ void GodotSoftBody3D::solve_constraints(real_t p_delta) {
 	const real_t configured_compliance = get_space() ? get_space()->get_soft_body_xpbd_compliance() : real_t(0.0);
 	const double compliance = linear_stiffness > 0.0 ? double(configured_compliance) / double(linear_stiffness) : 0.0;
 	const double alpha_double = p_delta > 0.0 ? compliance / (double(p_delta) * p_delta) : 0.0;
-	const bool use_xpbd = compliance > 0.0 && Math::is_finite(alpha_double) &&
-			alpha_double > 0.0 && alpha_double <= double(std::numeric_limits<real_t>::max());
+	const bool use_xpbd = compliance > 0.0 && Math::is_finite(alpha_double) && alpha_double > 0.0;
 	if (use_xpbd) {
-		const real_t alpha = real_t(alpha_double);
+		// A very small but finite step can make alpha exceed float32's range.
+		// Clamp it to the largest representable compliance instead of falling
+		// back to rigid legacy PBD (which would invert the intended softness).
+		const real_t alpha = real_t(MIN(alpha_double, double(std::numeric_limits<real_t>::max())));
 		// Allocate only on the first enabled step or when the mesh changes.
 		xpbd_link_lambdas.resize(links.size());
 		for (real_t &lambda : xpbd_link_lambdas) {
