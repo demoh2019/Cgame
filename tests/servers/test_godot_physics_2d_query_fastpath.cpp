@@ -64,6 +64,8 @@ TEST_CASE("[GodotPhysics2D] Circle ray casts handle zero length, entry, tangency
 TEST_CASE("[GodotPhysics2D] Capsule ray casts handle zero length and select the first surface") {
 	GodotCapsuleShape2D capsule;
 	capsule.set_data(Vector2(1, 4)); // Vector2 order is radius, height.
+	const Vector2 stored_shape_data = capsule.get_data();
+	CHECK(stored_shape_data.is_equal_approx(Vector2(1, 4)));
 	Vector2 point(99, 98);
 	Vector2 normal(97, 96);
 
@@ -113,7 +115,11 @@ TEST_CASE("[GodotPhysics2D] Convex polygon half-planes reject outside points in 
 				CHECK(polygon.contains_point(p) == expected);
 			}
 		}
-		vertices.reverse();
+		PackedVector2Array reversed;
+		for (int i = vertices.size() - 1; i >= 0; i--) {
+			reversed.push_back(vertices[i]);
+		}
+		vertices = reversed;
 	}
 }
 
