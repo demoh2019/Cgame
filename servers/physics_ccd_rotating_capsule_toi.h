@@ -139,7 +139,10 @@ _FORCE_INLINE_ static PhysicsCCDRotatingCapsuleTOIResult physics_ccd_rotating_ca
 		if (gap - epsilon > maximal_travel * remaining) {
 			return PhysicsCCDRotatingCapsuleTOIResult::MISS;
 		}
-		const double progress = (gap - epsilon) * 0.95 / maximal_travel;
+		// Advance by a fraction of the full gap, not gap-minus-epsilon:
+		// subtracting epsilon here asymptotically approaches epsilon
+		// without ever reaching the HIT condition.
+		const double progress = gap * 0.95 / maximal_travel;
 		if (!(progress > 0.0) || !Math::is_finite(progress)) {
 			return PhysicsCCDRotatingCapsuleTOIResult::FALLBACK;
 		}
