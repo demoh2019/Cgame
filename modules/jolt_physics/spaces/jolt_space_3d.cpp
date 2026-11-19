@@ -174,6 +174,192 @@ static void resolve_soft_soft_particle_contacts(JPH::Body &p_body_a, JPH::Body &
 }
 
 
+// Ericson-style closest point on a triangle. Explicit barycentric weights
+// let the impulse be distributed to the actual face vertices, rather than
+// treating the face like an infinitely massive static collider.
+// Reject degenerate or nonfinite input before evaluating divisions.
+static bool closest_soft_triangle_point(JPH::Vec3Arg p, JPH::Vec3Arg a, JPH::Vec3Arg b, JPH::Vec3Arg c,
+		JPH::Vec3 &r_closest, float &r_u, float &r_v, float &r_w) {
+	const JPH::Vec3 ab = b - a;
+	const JPH::Vec3 ac = c - a;
+	const JPH::Vec3 face_normal = ab.Cross(ac);
+	const float area4 = face_normal.LengthSq();
+	if (!Math::is_finite(area4) || area4 <= 1.0e-14f) {
+		return false;
+	}
+
+	const JPH::Vec3 ap = p - a;
+	const float d1 = ab.Dot(ap);
+	const float d2 = ac.Dot(ap);
+	if (d1 <= 0.0f && d2 <= 0.0f) {
+		r_u = 1.0f; r_v = 0.0f; r_w = 0.0f;
+	} else {
+		const JPH::Vec3 bp = p - b;
+		const float d3 = ab.Dot(bp);
+		const float d4 = ac.Dot(bp);
+		if (d3 >= 0.0f && d4 <= d3) {
+			r_u = 0.0f; r_v = 1.0f; r_w = 0.0f;
+		} else {
+			const float vc = d1 * d4 - d3 * d2;
+			if (vc <= 0.0f && d1 >= 0.0f && d3 <= 0.0f) {
+				r_v = d1 / (d1 - d3);
+				r_u = 1.0f - r_v; r_w = 0.0f;
+			} else {
+				const JPH::Vec3 cp = p - c;
+				const float d5 = ab.Dot(cp);
+				const float d6 = ac.Dot(cp);
+				if (d6 >= 0.0f && d5 <= d6) {
+					r_u = 0.0f; r_v = 0.0f; r_w = 1.0f;
+				} else {
+					const float vb = d5 * d2 - d1 * d6;
+					if (vb <= 0.0f && d2 >= 0.0f && d6 <= 0.0f) {
+						r_w = d2 / (d2 - d6);
+						r_u = 1.0f - r_w; r_v = 0.0f;
+					} else {
+						const float va = d3 * d6 - d5 * d4;
+						if (va <= 0.0f && d4 - d3 >= 0.0f && d5 - d6 >= 0.0f) {
+							r_w = (d4 - d3) / ((d4 - d3) + (d5 - d6));
+							r_u = 0.0f; r_v = 1.0f - r_w;
+						} else {
+							const float sum = va + vb + vc;
+							if (sum <= 0.0f || !Math::is_finite(sum)) {
+								return false;
+							}
+							const float inv_sum = 1.0f / sum;
+							r_v = vb * inv_sum;
+							r_w = vc * inv_sum;
+							r_u = 1.0f - r_v - r_w;
+						}
+					}
+				}
+			}
+		}
+	}
+	if (!Math::is_finite(r_u) || !Math::is_finite(r_v) || !Math::is_finite(r_w)) {
+		return false;
+	}
+	r_closest = a * r_u + b * r_v + c * r_w;
+	return true;
+}
+
+// Discrete soft node vs deformable triangle. The barycentric effective mass
+// w_node + u²*w_a + v²*w_b + w²*w_c correctly accounts for which face
+// particles are pinned and conserves the total linear impulse.
+static void resolve_soft_soft_vertex_face_direction(JPH::Body &p_point_body, JPH::Body &p_face_body,
+		const JoltSoftBody3D &p_point_object, float p_step, uint32_t &r_contact_budget) {
+	JPH::SoftBodyMotionProperties &point_props = static_cast<JPH::SoftBodyMotionProperties &>(*p_point_body.GetMotionPropertiesUnchecked());
+	JPH::SoftBodyMotionProperties &face_props = static_cast<JPH::SoftBodyMotionProperties &>(*p_face_body.GetMotionPropertiesUnchecked());
+	JPH::Array<JPH::SoftBodyVertex> &points = point_props.GetVertices();
+	JPH::Array<JPH::SoftBodyVertex> &face_vertices = face_props.GetVertices();
+	const JPH::Array<JPH::SoftBodySharedSettings::Face> &faces = face_props.GetFaces();
+	const uint32_t point_count = MIN(p_point_object.get_surface_particle_count(), uint32_t(points.size()));
+	if (point_count == 0 || faces.empty()) {
+		return;
+	}
+
+	const JPH::Quat point_rotation = p_point_body.GetRotation();
+	const JPH::Quat face_rotation = p_face_body.GetRotation();
+	const JPH::Quat inv_point_rotation = point_rotation.Conjugated();
+	const JPH::Quat inv_face_rotation = face_rotation.Conjugated();
+	const JPH::Vec3 face_relative_to_point(p_face_body.GetCenterOfMassPosition() - p_point_body.GetCenterOfMassPosition());
+	const float radius = JoltProjectSettings::soft_body_soft_contact_radius;
+	const float radius_sq = radius * radius;
+	const float bias_per_step = JoltProjectSettings::soft_body_soft_contact_recovery / p_step;
+	const float friction = JoltProjectSettings::soft_body_soft_contact_friction;
+
+	for (uint32_t i = 0; i < point_count && r_contact_budget > 0; ++i) {
+		JPH::SoftBodyVertex &point = points[i];
+		const JPH::Vec3 point_position = point_rotation * point.mPosition;
+		for (const JPH::SoftBodySharedSettings::Face &face : faces) {
+			if (r_contact_budget == 0) {
+				return;
+			}
+			--r_contact_budget; // Includes all noncontacts: bounded runtime.
+			const uint32_t id0 = face.mVertex[0], id1 = face.mVertex[1], id2 = face.mVertex[2];
+			if (id0 >= face_vertices.size() || id1 >= face_vertices.size() || id2 >= face_vertices.size() || face.IsDegenerate()) {
+				continue;
+			}
+			JPH::SoftBodyVertex &v0 = face_vertices[id0];
+			JPH::SoftBodyVertex &v1 = face_vertices[id1];
+			JPH::SoftBodyVertex &v2 = face_vertices[id2];
+			const JPH::Vec3 a = face_relative_to_point + face_rotation * v0.mPosition;
+			const JPH::Vec3 b = face_relative_to_point + face_rotation * v1.mPosition;
+			const JPH::Vec3 c = face_relative_to_point + face_rotation * v2.mPosition;
+			// Conservative per-triangle AABB rejection before the relatively
+			// expensive seven-region closest-point calculations. No heap/BVH.
+			const JPH::Vec3 tri_min = JPH::Vec3::sMin(a, JPH::Vec3::sMin(b, c));
+			const JPH::Vec3 tri_max = JPH::Vec3::sMax(a, JPH::Vec3::sMax(b, c));
+			if (point_position.GetX() < tri_min.GetX() - radius || point_position.GetX() > tri_max.GetX() + radius ||
+					point_position.GetY() < tri_min.GetY() - radius || point_position.GetY() > tri_max.GetY() + radius ||
+					point_position.GetZ() < tri_min.GetZ() - radius || point_position.GetZ() > tri_max.GetZ() + radius) {
+				continue;
+			}
+
+			JPH::Vec3 nearest = JPH::Vec3::sZero();
+			float u = 0.0f, v = 0.0f, w = 0.0f;
+			if (!closest_soft_triangle_point(point_position, a, b, c, nearest, u, v, w)) {
+				continue;
+			}
+			const JPH::Vec3 diff = point_position - nearest;
+			const float distance_sq = diff.LengthSq();
+			if (!Math::is_finite(distance_sq) || distance_sq >= radius_sq) {
+				continue;
+			}
+			const float inverse_mass_sum = point.mInvMass + u * u * v0.mInvMass + v * v * v1.mInvMass + w * w * v2.mInvMass;
+			if (!Math::is_finite(inverse_mass_sum) || inverse_mass_sum <= 0.0f) {
+				continue;
+			}
+			const JPH::Vec3 face_velocity = face_rotation * (u * v0.mVelocity + v * v1.mVelocity + w * v2.mVelocity);
+			const JPH::Vec3 relative_velocity = point_rotation * point.mVelocity - face_velocity;
+			const float distance = Math::sqrt(MAX(distance_sq, 0.0f));
+			// Both sides of a triangle can collide; at exact coincidence,
+			// choose the normal opposing the current normal approach.
+			JPH::Vec3 normal = distance > 1.0e-6f ? diff / distance : (b - a).Cross(c - a).Normalized();
+			if (distance <= 1.0e-6f && relative_velocity.Dot(normal) > 0.0f) {
+				normal = -normal;
+			}
+			const float normal_speed = relative_velocity.Dot(normal);
+			if (!Math::is_finite(normal_speed)) {
+				continue;
+			}
+			const float recovery_speed = MIN((radius - distance) * bias_per_step, MAX_SOFT_SOFT_PENETRATION_BIAS);
+			const float correction = MIN(MAX(recovery_speed - normal_speed, 0.0f), MAX_SOFT_SOFT_CONTACT_SPEED_CORRECTION);
+			if (correction <= 0.0f) {
+				continue;
+			}
+			const float normal_impulse = correction / inverse_mass_sum;
+			if (!Math::is_finite(normal_impulse) || normal_impulse <= 0.0f) {
+				continue;
+			}
+			JPH::Vec3 impulse = normal * normal_impulse;
+
+			const JPH::Vec3 tangent_velocity = relative_velocity - normal * normal_speed;
+			const float tangent_speed_sq = tangent_velocity.LengthSq();
+			if (friction > 0.0f && Math::is_finite(tangent_speed_sq) && tangent_speed_sq > 1.0e-12f) {
+				const float tangent_speed = Math::sqrt(tangent_speed_sq);
+				const float tangent_impulse = MIN(tangent_speed / inverse_mass_sum, friction * normal_impulse);
+				impulse -= tangent_velocity * (tangent_impulse / tangent_speed);
+			}
+
+			// Equal-and-opposite impulses, distributed by barycentric weights.
+			point.mVelocity += inv_point_rotation * (impulse * point.mInvMass);
+			const JPH::Vec3 local_face_impulse = inv_face_rotation * impulse;
+			v0.mVelocity -= local_face_impulse * (u * v0.mInvMass);
+			v1.mVelocity -= local_face_impulse * (v * v1.mInvMass);
+			v2.mVelocity -= local_face_impulse * (w * v2.mInvMass);
+		}
+	}
+}
+
+static void resolve_soft_soft_vertex_face_contacts(JPH::Body &p_body_a, JPH::Body &p_body_b,
+		const JoltSoftBody3D &p_object_a, const JoltSoftBody3D &p_object_b, float p_step, uint32_t &r_contact_budget) {
+	// Both directions are necessary: either body can be the sparse mesh.
+	resolve_soft_soft_vertex_face_direction(p_body_a, p_body_b, p_object_a, p_step, r_contact_budget);
+	if (r_contact_budget > 0) {
+		resolve_soft_soft_vertex_face_direction(p_body_b, p_body_a, p_object_b, p_step, r_contact_budget);
+	}
+}
+
 static void clear_pending_index(AHashMap<uint32_t, uint32_t> &r_indices) {
 	if (r_indices.get_capacity() > MAX_RETAINED_PENDING_INDEX_SLOTS) {
 		r_indices.reset();
@@ -301,7 +487,11 @@ void JoltSpace3D::_pre_step(float p_step) {
 				if (!object_a->can_interact_with(*object_b) || !bounds_a.intersects(object_b->get_bounds().grow(radius))) {
 					continue;
 				}
-				resolve_soft_soft_particle_contacts(*jolt_a, *jolt_b, *object_a, *object_b, p_step, particle_budget);
+				if (JoltProjectSettings::soft_body_soft_vertex_face_contacts) {
+					resolve_soft_soft_vertex_face_contacts(*jolt_a, *jolt_b, *object_a, *object_b, p_step, particle_budget);
+				} else {
+					resolve_soft_soft_particle_contacts(*jolt_a, *jolt_b, *object_a, *object_b, p_step, particle_budget);
+				}
 			}
 		}
 	}
