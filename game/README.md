@@ -1872,3 +1872,34 @@ Tests: `game/tests/test_blood_scent.gd` in the headless suite
 (`godot --headless --path game --script res://tests/run_all.gd`).
 Existing GDScript simulation and networking provide this mechanic;
 no native Cgame engine extension is necessary.
+
+
+## Classless archery: crafted bows T1–T4 and quiet Power Draw
+
+The canonical `game/` project now has **Survival Bows T1–T4** for
+survivors who prefer hunting infected without loud gunfire. Each bow is
+crafted at the workbench from 2 planks, 2 fibres and 1 cloth of its tier;
+higher tiers use the existing crafting mastery gates. Equip with the
+online inventory panel or the local preview's **4** weapon-cycle key.
+
+- **Normal shot:** 27 m range, 1.05-second interval, 10/17/24/31 base
+  damage by tier. A real wooden arrow is consumed for each successful shot
+  attempt (including shots that miss).
+- **Wooden Arrows:** 2 wood T1 + 2 fibre T1 craft **16 arrows** without
+  a workbench. They are ordinary consumable inventory and market goods.
+- **G — Power Draw:** 32 m range, 1.6× bow damage, 30 combat energy,
+  one arrow, 6-second skill cooldown, 1.2-second regular-attack lock.
+- **Quiet ranged combat:** a bow shot makes 9 m noise for 0.8 seconds;
+  a pistol retains its original 32 m noise for 3 seconds. Both normal
+  shots and active skills feed the existing zombie hearing AI.
+- **Ranged mastery:** bows share the existing permanent weapon mastery
+  with pistols; owned equipment, arrows, aim vectors, distance, damage,
+  cooldown, risk-zone PvP and party-friendly-fire are validated server-side.
+
+The new regression `game/tests/test_bows.gd` covers real crafting and
+inventory, authoritative damage, arrow consumption, quiet sound, mastery,
+PvP safe zones, stale equipment and saved gear. Run it with the rest of
+the game via `godot --headless --path game --script res://tests/run_all.gd`.
+
+The feature reuses existing Cgame gameplay, physics, audio signalling
+and multiplayer primitives. No native engine changes were required.
