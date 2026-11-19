@@ -5,6 +5,8 @@ extends Node3D
 
 const PLAYER_SCRIPT = preload("res://player.gd")
 const PICKUP_SCRIPT = preload("res://pickup.gd")
+const RESOURCE_SCRIPT = preload("res://resource_node.gd")
+const INFECTED_SCRIPT = preload("res://infected.gd")
 
 var player
 var hud_label: Label
@@ -16,6 +18,8 @@ func _ready() -> void:
     _build_world()
     _build_player()
     _build_pickups()
+    _build_resources()
+    _build_infected()
     _build_hud()
 
 
@@ -29,6 +33,15 @@ func _configure_controls() -> void:
     _bind_key("interact", KEY_E)
     _bind_key("consume_food", KEY_1)
     _bind_key("consume_water", KEY_2)
+    _bind_key("craft_bandage", KEY_3)
+    _bind_key("craft_tool", KEY_4)
+    _bind_key("use_bandage", KEY_5)
+    _bind_key("craft_advanced_bandage", KEY_6)
+    _bind_key("use_advanced_bandage", KEY_7)
+    _bind_key("craft_spear", KEY_8)
+    _bind_key("craft_vest", KEY_9)
+    _bind_key("craft_reinforced_spear", KEY_0)
+    _bind_mouse_button("attack", MOUSE_BUTTON_LEFT)
     _bind_key("restart", KEY_R)
 
 
@@ -40,6 +53,15 @@ func _bind_key(action_name: String, key_code: int) -> void:
     var key_event := InputEventKey.new()
     key_event.physical_keycode = key_code
     InputMap.action_add_event(action_name, key_event)
+
+
+func _bind_mouse_button(action_name: String, button_index: int) -> void:
+    if InputMap.has_action(action_name):
+        return
+    InputMap.add_action(action_name)
+    var mouse_event := InputEventMouseButton.new()
+    mouse_event.button_index = button_index
+    InputMap.action_add_event(action_name, mouse_event)
 
 
 func _build_world() -> void:
@@ -125,7 +147,7 @@ func _build_player() -> void:
     ray.name = "AimRay"
     ray.target_position = Vector3(0.0, 0.0, -3.2)
     ray.collide_with_areas = true
-    ray.collide_with_bodies = false
+    ray.collide_with_bodies = true
     camera.add_child(ray)
 
     add_child(player)
@@ -149,6 +171,44 @@ func _add_pickup(node_name: String, kind: String, title: String,
     add_child(pickup)
 
 
+
+func _build_resources() -> void:
+    # Tier 1 deposits bootstrap each profession. T2 requires gathering XP
+    # and a crafted scavenger tool. The world never generates free inventory.
+    _add_resource("WoodPileA", "wood", 1, Vector3(-2.0, 1.0, 5.0), 2)
+    _add_resource("WoodPileB", "wood", 1, Vector3(-4.0, 1.0, 5.5), 2)
+    _add_resource("ScrapStoneA", "stone", 1, Vector3(2.0, 1.0, 4.5), 2)
+    _add_resource("ScrapStoneB", "stone", 1, Vector3(4.0, 1.0, 5.5), 2)
+    _add_resource("FiberBushA", "fiber", 1, Vector3(-2.0, 1.0, 1.0), 2)
+    _add_resource("FiberBushB", "fiber", 1, Vector3(3.0, 1.0, 1.0), 2)
+    _add_resource("DenseWood", "wood", 2, Vector3(-10.0, 1.0, 4.0), 2)
+    _add_resource("HardStone", "stone", 2, Vector3(9.0, 1.0, -5.0), 2)
+    _add_resource("StrongFiber", "fiber", 2, Vector3(-11.0, 1.0, -5.0), 2)
+
+
+func _add_resource(node_name: String, kind: String, tier: int,
+        location: Vector3, count: int) -> void:
+    var deposit = RESOURCE_SCRIPT.new()
+    deposit.name = node_name
+    deposit.resource_kind = kind
+    deposit.tier = tier
+    deposit.yield_count = count
+    deposit.display_name = "%s T%d" % [kind, tier]
+    deposit.position = location
+    add_child(deposit)
+
+
+func _build_infected() -> void:
+    _add_infected("InfectedSouth", Vector3(10.0, 1.0, -12.0))
+    _add_infected("InfectedEast", Vector3(13.0, 1.0, -6.0))
+
+
+func _add_infected(node_name: String, location: Vector3) -> void:
+    var infected = INFECTED_SCRIPT.new()
+    infected.name = node_name
+    infected.position = location
+    add_child(infected)
+
 func _build_hud() -> void:
     var ui := CanvasLayer.new()
     ui.name = "HUD"
@@ -169,13 +229,14 @@ func _build_hud() -> void:
     column.add_child(hud_label)
 
     var help_label := Label.new()
-    help_label.text = "WASD — ходьба | Shift — бег | Space — прыжок\n" + \
-        "E — подобрать | 1 — съесть | 2 — выпить\n" + \
-        "Esc — освободить мышь | ЛКМ — вернуть | R — заново"
+    help_label.text = "WASD/Shift/Space — движение; E — сбор; ЛКМ — атака\n" + \
+        "1/2 — еда/вода; 3 — бинт; 4 — инструмент; 5 — лечиться\n" + \
+        "6/7 — усиленный бинт/лечение; 8/9/0 — копьё/броня/копьё T2\n" + \
+        "Esc — курсор; R — рестарт"
     column.add_child(help_label)
 
     prompt_label = Label.new()
-    prompt_label.position = Vector2(18, 170)
+    prompt_label.position = Vector2(18, 255)
     ui.add_child(prompt_label)
 
     var crosshair := Label.new()
@@ -188,18 +249,33 @@ func _build_hud() -> void:
 func _process(_delta: float) -> void:
     if player == null or hud_label == null:
         return
-    hud_label.text = "DAYS AFTER — ПРОТОТИП\n" + \
-        "Здоровье: %d   Голод: %d   Жажда: %d\n" % [
+    var stacks := PackedStringArray()
+    for item_id in player.inventory.keys():
+        var count := player.get_item_count(str(item_id))
+        if count > 0:
+            stacks.append("%s × %d" % [str(item_id), count])
+    stacks.sort()
+    var inventory_text := ", ".join(stacks) if not stacks.is_empty() else "пусто"
+    hud_label.text = "DAYS AFTER × SANDBOX — ИГРОВОЙ ПРОТОТИП\n" + \
+        "HP %d | голод %d | жажда %d\n" % [
             roundi(player.health), roundi(player.hunger), roundi(player.thirst)
-        ] + "Рюкзак: еда × %d   вода × %d" % [
-            player.food_count, player.water_count
-        ]
+        ] + "Сбор: дерево %d / камень %d / волокно %d | бой %d | ремесло %d XP\n" % [
+            player.gathering_level("wood"), player.gathering_level("stone"),
+            player.gathering_level("fiber"), player.combat_level(), player.crafting_xp
+        ] + "Снаряжение: %s / %s / %s\n" % [
+            player.equipped_tool if not player.equipped_tool.is_empty() else "нет инструмента",
+            player.equipped_weapon if not player.equipped_weapon.is_empty() else "кулаки",
+            player.equipped_armor if not player.equipped_armor.is_empty() else "нет брони"
+        ] + "Рюкзак: " + inventory_text
+
     if player.health <= 0.0:
-        prompt_label.text = "Вы погибли от истощения. Нажмите R, чтобы начать заново."
+        prompt_label.text = "Вы погибли. Нажмите R, чтобы начать заново."
     else:
         var target: Node = player.get_aimed_pickup()
-        prompt_label.text = ("[E] Подобрать: " + str(target.get("display_name"))
-            if target != null else "Исследуйте руины и найдите припасы.")
+        if target != null:
+            prompt_label.text = "[E] Собрать: " + str(target.get("display_name"))
+        else:
+            prompt_label.text = str(player.last_message)
 
     if Input.is_action_just_pressed("restart"):
         get_tree().reload_current_scene()
