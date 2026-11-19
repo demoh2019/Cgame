@@ -970,6 +970,176 @@ static void resolve_soft_soft_edge_edge_contacts(JPH::Body &p_body_a, JPH::Body 
 	}
 }
 
+// Experimental single-body self collision. No topology mutation or Jolt
+// internal solver changes: contact impulses are added to the per-particle
+// velocities before Jolt's parallel Update. Exclude immediate mesh
+// neighbors to avoid treating ordinary cloth springs as self contacts.
+constexpr uint32_t MAX_SOFT_SELF_CONTACT_FACES = 1024;
+
+struct SoftSelfContactScratch {
+	SoftFaceBVHScratch bvh;
+	JPH::Array<uint64_t> one_ring_edges;
+};
+
+static uint64_t soft_self_topology_edge_key(uint32_t p_a, uint32_t p_b) {
+	return (uint64_t(MIN(p_a, p_b)) << 32) | uint64_t(MAX(p_a, p_b));
+}
+
+static bool prepare_soft_self_topology(const JPH::Array<JPH::SoftBodySharedSettings::Face> &p_faces,
+		uint32_t p_vertex_count, JPH::Array<uint64_t> &r_edges, uint32_t &r_budget) {
+	r_edges.clear();
+	if (p_faces.empty() || p_faces.size() > MAX_SOFT_SELF_CONTACT_FACES) {
+		return false;
+	}
+	// Conservative O(F log F) charge for collecting and sorting 3*F edges.
+	const uint32_t raw_count = uint32_t(p_faces.size()) * 3;
+	uint32_t levels = 0;
+	for (uint32_t n = raw_count; n > 1; n = (n + 1) / 2) {
+		++levels;
+	}
+	const uint32_t build_cost = raw_count * (levels + 1);
+	if (r_budget <= build_cost) {
+		return false;
+	}
+	r_budget -= build_cost;
+	r_edges.reserve(raw_count);
+	for (const JPH::SoftBodySharedSettings::Face &face : p_faces) {
+		const uint32_t a = face.mVertex[0];
+		const uint32_t b = face.mVertex[1];
+		const uint32_t c = face.mVertex[2];
+		if (face.IsDegenerate() || a >= p_vertex_count || b >= p_vertex_count || c >= p_vertex_count) {
+			continue;
+		}
+		r_edges.push_back(soft_self_topology_edge_key(a, b));
+		r_edges.push_back(soft_self_topology_edge_key(b, c));
+		r_edges.push_back(soft_self_topology_edge_key(c, a));
+	}
+	std::sort(r_edges.begin(), r_edges.end());
+	r_edges.resize(size_t(std::unique(r_edges.begin(), r_edges.end()) - r_edges.begin()));
+	return !r_edges.empty();
+}
+
+static bool soft_self_is_neighbor(uint32_t p_point, const JPH::SoftBodySharedSettings::Face &p_face,
+		const JPH::Array<uint64_t> &p_topology_edges) {
+	// Reject points on the tested face, plus the direct one-ring of any
+	// face corner. This excludes adjacent faces sharing an edge or corner.
+	for (uint32_t corner = 0; corner < 3; ++corner) {
+		const uint32_t face_vertex = p_face.mVertex[corner];
+		if (p_point == face_vertex ||
+				std::binary_search(p_topology_edges.begin(), p_topology_edges.end(),
+						soft_self_topology_edge_key(p_point, face_vertex))) {
+			return true;
+		}
+	}
+	return false;
+}
+
+static void resolve_soft_body_self_contacts(JPH::Body &p_body, const JoltSoftBody3D &p_object,
+		float p_step, uint32_t &r_budget, SoftSelfContactScratch &r_scratch) {
+	JPH::SoftBodyMotionProperties &props = static_cast<JPH::SoftBodyMotionProperties &>(*p_body.GetMotionPropertiesUnchecked());
+	JPH::Array<JPH::SoftBodyVertex> &vertices = props.GetVertices();
+	const JPH::Array<JPH::SoftBodySharedSettings::Face> &faces = props.GetFaces();
+	const uint32_t particle_count = MIN(p_object.get_surface_particle_count(), uint32_t(vertices.size()));
+	if (particle_count == 0 || faces.empty() || faces.size() > MAX_SOFT_SELF_CONTACT_FACES || r_budget == 0) {
+		return;
+	}
+
+	if (!prepare_soft_self_topology(faces, uint32_t(vertices.size()), r_scratch.one_ring_edges, r_budget)) {
+		return;
+	}
+	r_scratch.bvh.clear();
+	// Use the existing bounding-volume hierarchy on the same body's
+	// *local* deforming triangles. For tiny cloths brute force is cheaper.
+	// Large bodies are skipped if the BVH would exhaust the work budget.
+	const bool needs_bvh = faces.size() >= MIN_SOFT_FACE_BVH_FACES;
+	const bool use_bvh = needs_bvh && prepare_soft_face_bvh(faces, vertices, JPH::Quat::sIdentity(),
+			JPH::Vec3::sZero(), r_scratch.bvh.entries, r_scratch.bvh.nodes, r_budget);
+	if (needs_bvh && !use_bvh) {
+		return;
+	}
+	if (use_bvh) {
+		r_scratch.bvh.candidates.reserve(r_scratch.bvh.entries.size());
+		r_scratch.bvh.stack.reserve(32);
+	}
+
+	const float radius = JoltProjectSettings::soft_body_soft_contact_radius;
+	const float radius_sq = radius * radius;
+	const float bias_per_step = JoltProjectSettings::soft_body_soft_contact_recovery / p_step;
+	const float friction = JoltProjectSettings::soft_body_soft_contact_friction;
+	for (uint32_t i = 0; i < particle_count && r_budget > 0; ++i) {
+		JPH::SoftBodyVertex &point = vertices[i];
+		const JPH::Vec3 point_position = point.mPosition;
+		if (use_bvh) {
+			query_soft_face_bvh(r_scratch.bvh.entries, r_scratch.bvh.nodes, point_position,
+					radius, r_budget, r_scratch.bvh.candidates, r_scratch.bvh.stack);
+		}
+		const uint32_t candidate_count = use_bvh ? uint32_t(r_scratch.bvh.candidates.size()) : uint32_t(faces.size());
+		for (uint32_t j = 0; j < candidate_count && r_budget > 0; ++j) {
+			--r_budget; // Count all candidate checks, including adjacent faces.
+			const JPH::SoftBodySharedSettings::Face &face = faces[use_bvh ? r_scratch.bvh.candidates[j] : j];
+			const uint32_t id0 = face.mVertex[0], id1 = face.mVertex[1], id2 = face.mVertex[2];
+			if (face.IsDegenerate() || id0 >= vertices.size() || id1 >= vertices.size() || id2 >= vertices.size() ||
+					soft_self_is_neighbor(i, face, r_scratch.one_ring_edges)) {
+				continue;
+			}
+			JPH::SoftBodyVertex &a = vertices[id0];
+			JPH::SoftBodyVertex &b = vertices[id1];
+			JPH::SoftBodyVertex &c = vertices[id2];
+			const JPH::Vec3 min_bound = JPH::Vec3::sMin(a.mPosition, JPH::Vec3::sMin(b.mPosition, c.mPosition));
+			const JPH::Vec3 max_bound = JPH::Vec3::sMax(a.mPosition, JPH::Vec3::sMax(b.mPosition, c.mPosition));
+			if (!soft_face_aabb_overlaps_point(min_bound, max_bound, point_position, radius)) {
+				continue;
+			}
+			float u = 0.0f, v = 0.0f, w = 0.0f;
+			JPH::Vec3 nearest = JPH::Vec3::sZero();
+			if (!closest_soft_triangle_point(point_position, a.mPosition, b.mPosition, c.mPosition, nearest, u, v, w)) {
+				continue;
+			}
+			const JPH::Vec3 diff = point_position - nearest;
+			const float distance_sq = diff.LengthSq();
+			if (!Math::is_finite(distance_sq) || distance_sq >= radius_sq) {
+				continue;
+			}
+			const float inverse_mass_sum = point.mInvMass + u * u * a.mInvMass + v * v * b.mInvMass + w * w * c.mInvMass;
+			if (!Math::is_finite(inverse_mass_sum) || inverse_mass_sum <= 0.0f) {
+				continue;
+			}
+			const JPH::Vec3 face_velocity = u * a.mVelocity + v * b.mVelocity + w * c.mVelocity;
+			const JPH::Vec3 relative_velocity = point.mVelocity - face_velocity;
+			const float distance = Math::sqrt(MAX(distance_sq, 0.0f));
+			JPH::Vec3 normal = distance > 1.0e-6f ? diff / distance : (b.mPosition - a.mPosition).Cross(c.mPosition - a.mPosition).Normalized();
+			if (distance <= 1.0e-6f && relative_velocity.Dot(normal) > 0.0f) {
+				normal = -normal;
+			}
+			const float normal_speed = relative_velocity.Dot(normal);
+			if (!Math::is_finite(normal_speed)) {
+				continue;
+			}
+			const float recovery_speed = MIN((radius - distance) * bias_per_step, MAX_SOFT_SOFT_PENETRATION_BIAS);
+			const float correction = MIN(MAX(recovery_speed - normal_speed, 0.0f), MAX_SOFT_SOFT_CONTACT_SPEED_CORRECTION);
+			if (correction <= 0.0f) {
+				continue;
+			}
+			const float normal_impulse = correction / inverse_mass_sum;
+			if (!Math::is_finite(normal_impulse) || normal_impulse <= 0.0f) {
+				continue;
+			}
+			JPH::Vec3 impulse = normal * normal_impulse;
+			const JPH::Vec3 tangential = relative_velocity - normal * normal_speed;
+			const float tangent_speed_sq = tangential.LengthSq();
+			if (friction > 0.0f && Math::is_finite(tangent_speed_sq) && tangent_speed_sq > 1.0e-12f) {
+				const float tangent_speed = Math::sqrt(tangent_speed_sq);
+				const float tangential_impulse = MIN(tangent_speed / inverse_mass_sum, friction * normal_impulse);
+				impulse -= tangential * (tangential_impulse / tangent_speed);
+			}
+			point.mVelocity += impulse * point.mInvMass;
+			a.mVelocity -= impulse * (u * a.mInvMass);
+			b.mVelocity -= impulse * (v * b.mInvMass);
+			c.mVelocity -= impulse * (w * c.mInvMass);
+		}
+	}
+}
+
 static void clear_pending_index(AHashMap<uint32_t, uint32_t> &r_indices) {
 	if (r_indices.get_capacity() > MAX_RETAINED_PENDING_INDEX_SLOTS) {
 		r_indices.reset();
@@ -1068,6 +1238,24 @@ void JoltSpace3D::_pre_step(float p_step) {
 		JPH::Body *jolt_body = lock_iface.TryGetBody(active_soft_bodies[i]);
 		JoltObject3D *object = reinterpret_cast<JoltObject3D *>(jolt_body->GetUserData());
 		object->pre_step(p_step);
+	}
+
+	// Optional cloth/soft-body self collision: one-ring topology exclusion
+	// prevents neighboring triangles from repelling their own mesh edges.
+	// This budget is separate from inter-body soft contacts and applies
+	// across all active soft bodies in this physics space per step.
+	if (JoltProjectSettings::soft_body_self_contacts && active_soft_body_count > 0 &&
+			JoltProjectSettings::soft_body_soft_contact_radius > 0.0f && Math::is_finite(p_step) && p_step > 0.0f) {
+		uint32_t self_budget = (uint32_t)JoltProjectSettings::soft_body_self_contact_max_checks;
+		SoftSelfContactScratch self_scratch;
+		for (JPH::uint32 i = 0; i < active_soft_body_count && self_budget > 0; ++i) {
+			JPH::Body *jolt_body = lock_iface.TryGetBody(active_soft_bodies[i]);
+			if (jolt_body == nullptr) {
+				continue;
+			}
+			const JoltSoftBody3D *object = reinterpret_cast<JoltObject3D *>(jolt_body->GetUserData())->as_soft_body();
+			resolve_soft_body_self_contacts(*jolt_body, *object, p_step, self_budget, self_scratch);
+		}
 	}
 
 	// Jolt's native soft-body collision path only handles rigid bodies. The

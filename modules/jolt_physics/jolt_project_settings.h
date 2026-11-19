@@ -70,6 +70,10 @@ public:
 	// Optional conservative-advancement CCD for deformable segment pairs;
 	// requires the existing soft-soft edge-edge collision pass.
 	inline static bool soft_body_soft_speculative_edge_ccd = false;
+	// Opt-in soft body self collision: non-neighboring vertices against the
+	// body's own deformable triangles. Uses a separate per-space CPU budget.
+	inline static bool soft_body_self_contacts = false;
+	inline static int soft_body_self_contact_max_checks = 16384;
 	inline static float soft_body_soft_ccd_max_sweep = 1.0f;
 	inline static float soft_body_soft_ccd_max_correction_speed = 128.0f;
 	inline static float soft_body_soft_contact_radius = 0.1f;
