@@ -36,6 +36,7 @@
 #include "servers/physics_xpbd_membrane.h"
 #include "servers/physics_fem_convex_star.h"
 #include "servers/physics_fem_explicit_tetra.h"
+#include "servers/physics_fem_tetra_principal_limits.h"
 #include "servers/physics_xpbd_strain_limit.h"
 #include "godot_collision_object_3d.h"
 

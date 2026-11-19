@@ -490,6 +490,80 @@ bool GodotBody3D::is_axis_locked(PS3DE::BodyAxis p_axis) const {
 	return locked_axis & p_axis;
 }
 
+// Aerodynamic drag from the wind of the areas the body is inside. Every wind area contributes an air
+// velocity (its pressure converted to the speed with the same dynamic pressure, v = sqrt(2 q / rho)),
+// and the body feels 0.5 * rho * Cd * A * |v_rel| * v_rel for the air velocity relative to it.
+Vector3 GodotBody3D::compute_wind_force() const {
+	if (wind_drag_coefficient <= 0.0 || areas.is_empty() || !get_space()) {
+		return Vector3();
+	}
+	const real_t density = get_space()->get_air_density();
+	if (density <= 0.0) {
+		return Vector3();
+	}
+	Vector3 air_velocity;
+	bool has_wind = false;
+	for (const AreaCMP &entry : areas) {
+		const real_t pressure = entry.area->get_wind_force_magnitude();
+		if (pressure <= CMP_EPSILON) {
+			continue;
+		}
+		real_t attenuation = 1.0;
+		const real_t falloff = entry.area->get_wind_attenuation_factor();
+		if (falloff != 0.0) {
+			const Vector3 distance = get_transform().origin - entry.area->get_wind_source();
+			// A minimum radius keeps the speed finite at the source.
+			attenuation = Math::pow(MAX(distance.length_squared(), real_t(1.0)), -falloff * real_t(0.5));
+		}
+		air_velocity += entry.area->get_wind_direction() * (Math::sqrt(real_t(2.0) * pressure / density) * attenuation);
+		has_wind = true;
+	}
+	if (!has_wind) {
+		return Vector3();
+	}
+	const Vector3 relative = air_velocity - linear_velocity;
+	const real_t speed = relative.length();
+	if (!(speed > CMP_EPSILON) || !Math::is_finite(speed)) {
+		return Vector3();
+	}
+	const Vector3 direction = relative / speed;
+
+	real_t area = wind_area;
+	if (area <= 0.0) {
+		// Projected area of the combined shape bounds onto the plane facing the wind.
+		AABB bounds;
+		bool first = true;
+		for (int i = 0; i < get_shape_count(); i++) {
+			if (is_shape_disabled(i)) {
+				continue;
+			}
+			const AABB shape_bounds = get_shape_aabb(i);
+			if (first) {
+				bounds = shape_bounds;
+				first = false;
+			} else {
+				bounds.merge_with(shape_bounds);
+			}
+		}
+		if (first) {
+			return Vector3();
+		}
+		const Vector3 extent = bounds.size;
+		area = extent.y * extent.z * Math::abs(direction.x) + extent.x * extent.z * Math::abs(direction.y) + extent.x * extent.y * Math::abs(direction.z);
+	}
+
+	Vector3 force = direction * (real_t(0.5) * density * wind_drag_coefficient * area * speed * speed);
+	// An explicit step must never accelerate the body past the air speed: that is where drag is zero.
+	if (mass > 0.0 && get_space()->get_last_step() > 0.0) {
+		const real_t max_force = speed * mass / get_space()->get_last_step();
+		const real_t force_length = force.length();
+		if (force_length > max_force) {
+			force *= max_force / force_length;
+		}
+	}
+	return force;
+}
+
 void GodotBody3D::integrate_forces(real_t p_step, bool p_defer_motion) {
 	if (mode == PS3DE::BODY_MODE_STATIC) {
 		return;
@@ -660,6 +734,7 @@ void GodotBody3D::integrate_forces(real_t p_step, bool p_defer_motion) {
 			//overridden by direct state query
 
 			Vector3 force = gravity * mass + applied_force + constant_force;
+			force += compute_wind_force();
 			// Uniform fully submerged buoyancy: force = -buoyancy * mass * gravity.
 			// Gravity already includes the body's gravity scale and area
 			// overrides. With buoyancy 1, gravity and buoyancy cancel.

@@ -202,6 +202,10 @@ void PhysicsServer3D::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("body_get_solver_priority", "body"), &PhysicsServer3D::body_get_solver_priority);
 	ClassDB::bind_method(D_METHOD("body_set_max_depenetration_velocity", "body", "value"), &PhysicsServer3D::body_set_max_depenetration_velocity);
 	ClassDB::bind_method(D_METHOD("body_get_max_depenetration_velocity", "body"), &PhysicsServer3D::body_get_max_depenetration_velocity);
+	ClassDB::bind_method(D_METHOD("body_set_wind_area", "body", "value"), &PhysicsServer3D::body_set_wind_area);
+	ClassDB::bind_method(D_METHOD("body_get_wind_area", "body"), &PhysicsServer3D::body_get_wind_area);
+	ClassDB::bind_method(D_METHOD("body_set_wind_drag_coefficient", "body", "value"), &PhysicsServer3D::body_set_wind_drag_coefficient);
+	ClassDB::bind_method(D_METHOD("body_get_wind_drag_coefficient", "body"), &PhysicsServer3D::body_get_wind_drag_coefficient);
 	ClassDB::bind_method(D_METHOD("body_set_max_angular_velocity", "body", "value"), &PhysicsServer3D::body_set_max_angular_velocity);
 	ClassDB::bind_method(D_METHOD("body_get_max_angular_velocity", "body"), &PhysicsServer3D::body_get_max_angular_velocity);
 	ClassDB::bind_method(D_METHOD("body_set_max_linear_velocity", "body", "value"), &PhysicsServer3D::body_set_max_linear_velocity);
@@ -789,6 +793,7 @@ PhysicsServer3D::PhysicsServer3D() {
 	GLOBAL_DEF(PropertyInfo(Variant::FLOAT, "physics/3d/solver/soft_body_volume_plastic_creep_rate", PROPERTY_HINT_RANGE, "0,100,0.1,or_greater,suffix:1/s"), 0.0);
 	GLOBAL_DEF(PropertyInfo(Variant::FLOAT, "physics/3d/solver/contact_recycle_radius", PROPERTY_HINT_RANGE, "0,0.1,0.001,or_greater,suffix:m"), 0.01);
 	GLOBAL_DEF(PropertyInfo(Variant::FLOAT, "physics/3d/solver/contact_max_separation", PROPERTY_HINT_RANGE, "0,0.1,0.001,or_greater,suffix:m"), 0.05);
+	GLOBAL_DEF(PropertyInfo(Variant::FLOAT, "physics/3d/solver/air_density", PROPERTY_HINT_RANGE, U"0,10,0.001,or_greater,suffix:kg/m³"), 1.225);
 	// Experimental sphere-only speculative contacts for existing broadphase pairs.
 	// 0 preserves legacy behavior; wider gaps can produce ghost interactions.
 	GLOBAL_DEF(PropertyInfo(Variant::FLOAT, "physics/3d/solver/speculative_sphere_distance", PROPERTY_HINT_RANGE, "0,1,0.001,or_greater,suffix:m"), 0.0);

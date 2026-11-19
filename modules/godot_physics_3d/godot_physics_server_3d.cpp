@@ -687,6 +687,30 @@ real_t GodotPhysicsServer3D::body_get_max_depenetration_velocity(RID p_body) con
 	return body->get_max_depenetration_velocity();
 }
 
+void GodotPhysicsServer3D::body_set_wind_area(RID p_body, real_t p_value) {
+	GodotBody3D *body = body_owner.get_or_null(p_body);
+	ERR_FAIL_NULL(body);
+	body->set_wind_area(p_value);
+}
+
+real_t GodotPhysicsServer3D::body_get_wind_area(RID p_body) const {
+	GodotBody3D *body = body_owner.get_or_null(p_body);
+	ERR_FAIL_NULL_V(body, 0);
+	return body->get_wind_area();
+}
+
+void GodotPhysicsServer3D::body_set_wind_drag_coefficient(RID p_body, real_t p_value) {
+	GodotBody3D *body = body_owner.get_or_null(p_body);
+	ERR_FAIL_NULL(body);
+	body->set_wind_drag_coefficient(p_value);
+}
+
+real_t GodotPhysicsServer3D::body_get_wind_drag_coefficient(RID p_body) const {
+	GodotBody3D *body = body_owner.get_or_null(p_body);
+	ERR_FAIL_NULL_V(body, 0);
+	return body->get_wind_drag_coefficient();
+}
+
 void GodotPhysicsServer3D::body_set_max_angular_velocity(RID p_body, real_t p_value) {
 	GodotBody3D *body = body_owner.get_or_null(p_body);
 	ERR_FAIL_NULL(body);

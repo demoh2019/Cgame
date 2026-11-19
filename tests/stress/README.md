@@ -3575,3 +3575,22 @@ sub-steps because every sub-step repeats broadphase update, contact generation
 and constraint setup, so enable it where stability matters more than the
 per-tick cost. Reusing one manifold across sub-steps (as Box2D v3 does) was
 tried and made stacks *less* stable without saving time, so it is not used.
+
+## Wind and air drag for rigid bodies (GodotPhysics3D)
+
+`Area3D` wind used to push only soft bodies. A `RigidBody3D` with
+`wind_drag_coefficient > 0` now feels `0.5 * rho * Cd * A * |v_rel| * v_rel` in
+the wind of the areas it is inside, where the air speed follows from the wind
+pressure (`sqrt(2 * pressure / rho)`, rho from `physics/3d/solver/air_density`).
+The force is clamped so a step never pushes the body past the air speed.
+`physics_wind_3d_regression.gd` checks the approach to the air speed from
+below, indifference at coefficient 0, mass, area and distance attenuation
+scaling, and no push outside the area:
+
+```sh
+./bin/godot.macos.editor.arm64 --headless --path tests/stress \
+  --script res://physics_wind_3d_regression.gd
+```
+
+Jolt Physics ignores the property. Torque from off-center pressure and lift are
+not modelled; a coefficient of 0 (the default) costs nothing.

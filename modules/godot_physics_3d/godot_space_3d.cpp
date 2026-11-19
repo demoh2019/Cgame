@@ -1283,6 +1283,7 @@ GodotSpace3D::GodotSpace3D() {
 	manifold_spread_reduction = GLOBAL_GET("physics/3d/solver/manifold_spread_reduction");
 	contact_recycle_radius = GLOBAL_GET("physics/3d/solver/contact_recycle_radius");
 	contact_max_separation = GLOBAL_GET("physics/3d/solver/contact_max_separation");
+	air_density = MAX(real_t(GLOBAL_GET("physics/3d/solver/air_density")), real_t(0.0));
 	speculative_sphere_distance = MAX(real_t(0.0), (real_t)GLOBAL_GET("physics/3d/solver/speculative_sphere_distance"));
 	const real_t configured_strain_max_ratio = GLOBAL_GET("physics/3d/solver/soft_body_xpbd_strain_max_stretch_ratio");
 	soft_body_xpbd_strain_max_stretch_ratio = Math::is_finite(configured_strain_max_ratio) && configured_strain_max_ratio > 0.0 ?

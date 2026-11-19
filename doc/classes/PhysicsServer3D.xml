@@ -474,6 +474,20 @@
 				Returns a body state.
 			</description>
 		</method>
+		<method name="body_get_wind_area" qualifiers="const">
+			<return type="float" />
+			<param index="0" name="body" type="RID" />
+			<description>
+				Returns the value set by [method body_set_wind_area].
+			</description>
+		</method>
+		<method name="body_get_wind_drag_coefficient" qualifiers="const">
+			<return type="float" />
+			<param index="0" name="body" type="RID" />
+			<description>
+				Returns the value set by [method body_set_wind_drag_coefficient].
+			</description>
+		</method>
 		<method name="body_is_axis_locked" qualifiers="const">
 			<return type="bool" />
 			<param index="0" name="body" type="RID" />
@@ -751,6 +765,24 @@
 				The function [param callable] will be called every physics frame, assuming that the body was active during the previous physics tick, and can be used to fetch the latest state from the physics server.
 				The function [param callable] must take the following parameters:
 				1. [code]state[/code]: a [PhysicsDirectBodyState3D], used to retrieve the body's state.
+			</description>
+		</method>
+		<method name="body_set_wind_area">
+			<return type="void" />
+			<param index="0" name="body" type="RID" />
+			<param index="1" name="value" type="float" />
+			<description>
+				Sets the cross section facing the wind, in square meters; [code]0[/code] estimates it from the shapes. See [member RigidBody3D.wind_reference_area].
+				[b]Note:[/b] Only Godot Physics implements this; other backends ignore it.
+			</description>
+		</method>
+		<method name="body_set_wind_drag_coefficient">
+			<return type="void" />
+			<param index="0" name="body" type="RID" />
+			<param index="1" name="value" type="float" />
+			<description>
+				Sets how strongly the body is moved by wind areas and slowed by air; [code]0[/code] ignores wind. See [member RigidBody3D.wind_drag_coefficient].
+				[b]Note:[/b] Only Godot Physics implements this; other backends ignore it.
 			</description>
 		</method>
 		<method name="body_test_motion">

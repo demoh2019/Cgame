@@ -208,6 +208,10 @@ public:
 	virtual int body_get_solver_priority(RID p_body) const { return 1; }
 	virtual void body_set_max_depenetration_velocity(RID p_body, real_t p_value) {}
 	virtual real_t body_get_max_depenetration_velocity(RID p_body) const { return 0.0; }
+	virtual void body_set_wind_area(RID p_body, real_t p_value) {}
+	virtual real_t body_get_wind_area(RID p_body) const { return 0.0; }
+	virtual void body_set_wind_drag_coefficient(RID p_body, real_t p_value) {}
+	virtual real_t body_get_wind_drag_coefficient(RID p_body) const { return 0.0; }
 	virtual void body_set_max_angular_velocity(RID p_body, real_t p_value) {}
 	virtual real_t body_get_max_angular_velocity(RID p_body) const { return 0.0; }
 	virtual void body_set_max_linear_velocity(RID p_body, real_t p_value) {}

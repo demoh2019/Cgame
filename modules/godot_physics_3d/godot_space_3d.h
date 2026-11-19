@@ -126,6 +126,7 @@ private:
 
 	real_t contact_recycle_radius = 0.0;
 	real_t contact_max_separation = 0.0;
+	real_t air_density = 1.225;
 	real_t speculative_sphere_distance = 0.0; // Off unless explicitly enabled.
 	real_t soft_body_xpbd_strain_max_stretch_ratio = 0.0; // 0 disables upper limit; >=1 clamps stretch.
 	real_t soft_body_xpbd_strain_min_compression_ratio = 0.0; // 0 disables lower limit; 0..1.
@@ -320,6 +321,7 @@ public:
 	_FORCE_INLINE_ bool is_manifold_spread_reduction_enabled() const { return manifold_spread_reduction; }
 	_FORCE_INLINE_ real_t get_contact_recycle_radius() const { return contact_recycle_radius; }
 	_FORCE_INLINE_ real_t get_contact_max_separation() const { return contact_max_separation; }
+	_FORCE_INLINE_ real_t get_air_density() const { return air_density; }
 	_FORCE_INLINE_ real_t get_speculative_sphere_distance() const { return speculative_sphere_distance; }
 	_FORCE_INLINE_ real_t get_soft_body_xpbd_strain_max_stretch_ratio() const { return soft_body_xpbd_strain_max_stretch_ratio; }
 	_FORCE_INLINE_ real_t get_soft_body_xpbd_strain_min_compression_ratio() const { return soft_body_xpbd_strain_min_compression_ratio; }
