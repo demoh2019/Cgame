@@ -15,6 +15,7 @@ const CASES := [
 	"node_paths", "regex", "compression", "hashing",
 	"resource_io", "astar_3d", "ui_layout", "thread_contention",
 	"geometry_2d", "mesh_build", "input_dispatch", "image_codec", "group_calls",
+	"packed_arrays", "sorting", "animation_tracks", "physics_raycast_2d", "physics_raycast_3d", "render_multimesh_3d",
 ]
 
 var signal_total: int = 0
@@ -221,6 +222,18 @@ func _run_case(test_case: String, scale: int, frames: int, seed: int) -> Diction
 			return _thread_contention(scale)
 		"geometry_2d", "mesh_build", "input_dispatch", "image_codec", "group_calls":
 			return ExtraStress.new().run(test_case, self, scale)
+		"packed_arrays":
+			return _packed_arrays(scale)
+		"sorting":
+			return _sorting(scale)
+		"animation_tracks":
+			return _animation_tracks(scale)
+		"physics_raycast_2d":
+			return await _physics_raycast_2d(scale)
+		"physics_raycast_3d":
+			return await _physics_raycast_3d(scale)
+		"render_multimesh_3d":
+			return await _render_multimesh_3d(scale, frames)
 	return {"error": "Unhandled case"}
 
 
@@ -692,3 +705,169 @@ func _thread_contention(scale: int) -> Dictionary:
 	if contention_counter != count * operations:
 		return {"error": "Mutex-protected counter mismatch"}
 	return {"workers": count, "lock_operations": contention_counter}
+
+
+# Independently validated CPU/physics/GPU pressure scenarios.
+
+func _packed_arrays(scale: int) -> Dictionary:
+	var count := 50000 * scale
+	var values := PackedFloat32Array()
+	values.resize(count)
+	for i in range(count):
+		values[i] = float(i % 1000) * 0.125
+	var raw := values.to_byte_array()
+	var restored := raw.to_float32_array()
+	if restored.size() != count:
+		return {"error": "Packed float roundtrip size mismatch"}
+	var checksum := 0.0
+	for i in range(0, count, 37):
+		if restored[i] != values[i]:
+			return {"error": "Packed float roundtrip data mismatch"}
+		checksum += restored[i]
+	return {"elements": count, "bytes": raw.size(), "checksum": checksum}
+
+
+func _sorting(scale: int) -> Dictionary:
+	var count := 10000 * scale
+	var values: Array[int] = []
+	values.resize(count)
+	for i in range(count):
+		values[i] = count - 1 - i
+	values.sort()
+	var checksum := 0
+	for i in range(count * 2):
+		var target := (i * 4099) % count
+		var found := values.bsearch(target)
+		if found >= count or values[found] != target:
+			return {"error": "Binary search mismatch"}
+		checksum = (checksum + found) & 0x7fffffff
+	return {"elements": count, "searches": count * 2, "checksum": checksum}
+
+
+func _animation_tracks(scale: int) -> Dictionary:
+	var world := Node2D.new()
+	root.add_child(world)
+	var animated := Node2D.new()
+	animated.name = "Animated"
+	world.add_child(animated)
+	var player := AnimationPlayer.new()
+	world.add_child(player)
+	player.root_node = NodePath("..")
+	var animation := Animation.new()
+	animation.length = 1.0
+	var track := animation.add_track(Animation.TYPE_VALUE)
+	animation.track_set_path(track, NodePath("Animated:position"))
+	animation.track_insert_key(track, 0.0, Vector2.ZERO)
+	animation.track_insert_key(track, 1.0, Vector2(100, 0))
+	var library := AnimationLibrary.new()
+	if library.add_animation("move", animation) != OK:
+		world.free()
+		return {"error": "AnimationLibrary registration failed"}
+	if player.add_animation_library("", library) != OK:
+		world.free()
+		return {"error": "AnimationPlayer registration failed"}
+	player.play("move")
+	var checksum := 0.0
+	for i in range(1000 * scale):
+		player.seek(float(i % 100) / 100.0, true)
+		checksum += animated.position.x
+	world.free()
+	if checksum <= 0:
+		return {"error": "AnimationPlayer did not update animated track"}
+	return {"seeks": 1000 * scale, "checksum": checksum}
+
+
+func _physics_raycast_2d(scale: int) -> Dictionary:
+	var world := Node2D.new()
+	root.add_child(world)
+	var shape := CircleShape2D.new()
+	shape.radius = 2.0
+	var bodies := 100 * scale
+	for i in range(bodies):
+		var body := StaticBody2D.new()
+		body.position = Vector2(float(i) * 8.0, 0.0)
+		var collider := CollisionShape2D.new()
+		collider.shape = shape
+		body.add_child(collider)
+		world.add_child(body)
+	await physics_frame
+	await process_frame
+	var hits := 0
+	var started := Time.get_ticks_usec()
+	for i in range(150 * scale):
+		var y := float((i % 3) - 1)
+		var query := PhysicsRayQueryParameters2D.create(Vector2(-5, y), Vector2(float(bodies) * 8.0 + 5.0, y))
+		var hit := root.get_world_2d().direct_space_state.intersect_ray(query)
+		if not hit.is_empty():
+			hits += 1
+	var query_ms := float(Time.get_ticks_usec() - started) / 1000.0
+	world.queue_free()
+	await process_frame
+	if hits == 0:
+		return {"error": "Physics2D raycasts returned no hits"}
+	return {"bodies": bodies, "queries": 150 * scale, "hits": hits, "query_ms": query_ms}
+
+
+func _physics_raycast_3d(scale: int) -> Dictionary:
+	var world := Node3D.new()
+	root.add_child(world)
+	var shape := SphereShape3D.new()
+	shape.radius = 2.0
+	var bodies := 80 * scale
+	for i in range(bodies):
+		var body := StaticBody3D.new()
+		body.position = Vector3(float(i) * 8.0, 0.0, 0.0)
+		var collider := CollisionShape3D.new()
+		collider.shape = shape
+		body.add_child(collider)
+		world.add_child(body)
+	await physics_frame
+	await process_frame
+	var hits := 0
+	var started := Time.get_ticks_usec()
+	for i in range(150 * scale):
+		var z := float((i % 3) - 1)
+		var query := PhysicsRayQueryParameters3D.create(Vector3(-5, 0, z), Vector3(float(bodies) * 8.0 + 5.0, 0, z))
+		var hit := root.get_world_3d().direct_space_state.intersect_ray(query)
+		if not hit.is_empty():
+			hits += 1
+	var query_ms := float(Time.get_ticks_usec() - started) / 1000.0
+	world.queue_free()
+	await process_frame
+	if hits == 0:
+		return {"error": "Physics3D raycasts returned no hits"}
+	return {"bodies": bodies, "queries": 150 * scale, "hits": hits, "query_ms": query_ms}
+
+
+func _render_multimesh_3d(scale: int, frames: int) -> Dictionary:
+	# Requires a real display; dummy headless RenderingServer provides no GPU data.
+	var world := Node3D.new()
+	root.add_child(world)
+	var camera := Camera3D.new()
+	camera.position = Vector3(0.0, 75.0, 120.0)
+	world.add_child(camera)
+	camera.look_at(Vector3.ZERO)
+	camera.current = true
+	var instances := 2000 * scale
+	var multimesh := MultiMesh.new()
+	multimesh.transform_format = MultiMesh.TRANSFORM_3D
+	multimesh.mesh = BoxMesh.new()
+	multimesh.instance_count = instances
+	for i in range(instances):
+		var pos := Vector3(float(i % 100) - 50.0, 0.0, float(i / 100) - float(instances / 200))
+		multimesh.set_instance_transform(i, Transform3D(Basis(), pos))
+	var node := MultiMeshInstance3D.new()
+	node.multimesh = multimesh
+	world.add_child(node)
+	var frame_ms: Array[float] = []
+	var peak_draw_calls := 0
+	for i in range(frames):
+		await process_frame
+		frame_ms.append(Performance.get_monitor(Performance.TIME_PROCESS) * 1000.0)
+		peak_draw_calls = maxi(peak_draw_calls, int(Performance.get_monitor(Performance.RENDER_TOTAL_DRAW_CALLS_IN_FRAME)))
+	frame_ms.sort()
+	var p95_frame_ms := frame_ms[maxi(0, int(ceil(float(frames) * 0.95)) - 1)]
+	var peak_frame_ms := frame_ms.back()
+	world.queue_free()
+	await process_frame
+	return {"instances": instances, "frames": frames, "p95_frame_ms": p95_frame_ms, "peak_frame_ms": peak_frame_ms, "peak_draw_calls": peak_draw_calls}
