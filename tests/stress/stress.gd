@@ -6,6 +6,7 @@ signal sample_signal(value: int)
 
 const PREFIX := "STRESS_RESULT:"
 const ExtraStress := preload("res://extra_stress.gd")
+const ExtraCases := preload("res://extra_cases.gd")
 const GridReflowStress := preload("res://grid_reflow.gd")
 const BoxReflowStress := preload("res://box_reflow.gd")
 const FlowReflowStress := preload("res://flow_reflow.gd")
@@ -66,7 +67,7 @@ const CASES := [
 	"bitmap_rects", "bitmap_pipeline", "bitmap_morphology",
 	"curve_tessellation_2d", "curve_tessellation_3d", "curve_bake", "curve_nearest",
 	"canvas_transform_2d", "process_dispatch",
-	"physics_filter_toggle_2d", "physics_filter_toggle_3d", "physics_motion_filter_overflow_2d", "physics_motion_filter_overflow_3d", "physics_motion_exclusions_3d", "physics_motion_exclusions_2d", "physics_exception_pairs_2d", "physics_exception_pairs_3d", "physics_bvh_streaming_2d", "physics_bvh_streaming_3d", "physics_compound_filter_batch_2d", "physics_compound_filter_batch_3d", "physics_soft_body_xpbd_area_3d", "physics_soft_body_xpbd_volume_3d", "physics_soft_body_xpbd_dihedral_3d", "physics_soft_body_self_collision_3d", "physics_soft_body_edge_collision_3d", "physics_soft_body_ccd_3d", "physics_contact_angular_friction_3d", "physics_one_way_overflow_2d",
+	"physics_filter_toggle_2d", "physics_filter_toggle_3d", "physics_motion_filter_overflow_2d", "physics_motion_filter_overflow_3d", "physics_motion_exclusions_3d", "physics_motion_exclusions_2d", "physics_exception_pairs_2d", "physics_exception_pairs_3d", "physics_bvh_streaming_2d", "physics_bvh_streaming_3d", "physics_compound_filter_batch_2d", "physics_compound_filter_batch_3d", "physics_soft_body_xpbd_area_3d", "physics_soft_body_xpbd_volume_3d", "physics_soft_body_xpbd_dihedral_3d", "physics_soft_body_self_collision_3d", "physics_soft_body_edge_collision_3d", "physics_soft_body_ccd_3d", "physics_contact_angular_friction_3d", "physics_one_way_overflow_2d", "small_file_io",
 ]
 
 var signal_total: int = 0
@@ -485,6 +486,8 @@ func _run_case(test_case: String, scale: int, frames: int, seed: int) -> Diction
 			return await _physics_raycast_3d(scale)
 		"render_multimesh_3d":
 			return await _render_multimesh_3d(scale, frames)
+		"small_file_io":
+			return await ExtraCases.new().run_case(test_case, scale, frames, self)
 		"bitmap_rects":
 			return _bitmap_rects(scale)
 		"bitmap_pipeline":

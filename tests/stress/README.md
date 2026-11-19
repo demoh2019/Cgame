@@ -3594,3 +3594,11 @@ scaling, and no push outside the area:
 
 Jolt Physics ignores the property. Torque from off-center pressure and lift are
 not modelled; a coefficient of 0 (the default) costs nothing.
+
+
+## Small-file I/O pressure and phase profiling
+
+`small_file_io` creates, verifies and removes many small temporary files under
+`user://stress_small_files`, recording separate write, read and cleanup timings.
+The existing `scene_churn` workload and phase-median statistics remain available;
+additional implementations already merged into `develop` are preserved.

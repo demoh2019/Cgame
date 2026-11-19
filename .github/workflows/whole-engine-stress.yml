@@ -749,7 +749,7 @@ jobs:
   native-stress:
     # Build and benchmark the actual fork, not an unrelated downloaded Godot release.
     # Never run the enormous brutal preset automatically.
-    if: github.event_name == 'workflow_dispatch' || github.event_name == 'schedule'
+    if: github.event_name == 'workflow_dispatch' || github.event_name == 'schedule' || github.event_name == 'pull_request'
     needs: harness-tests
     runs-on: ubuntu-24.04
     timeout-minutes: 360

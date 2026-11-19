@@ -385,5 +385,15 @@ class ImportProjectTests(unittest.TestCase):
             self.assertEqual(result["status"], "passed", result)
 
 
+class SmallFileIoCoverageTests(unittest.TestCase):
+    def test_small_file_io_case_registration(self):
+        project = Path(__file__).parent
+        script = (project / "stress.gd").read_text(encoding="utf-8")
+        helper = (project / "extra_cases.gd").read_text(encoding="utf-8")
+        self.assertIn("small_file_io", stress.CASES)
+        self.assertIn('"small_file_io":', script)
+        self.assertIn("func _small_file_io(", helper)
+
+
 if __name__ == "__main__":
     unittest.main()
