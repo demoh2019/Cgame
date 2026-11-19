@@ -31,6 +31,7 @@ var _held_distance := 8.0
 var _dragging := false
 var _request_pick := false
 var _request_blast := false
+var _request_push := false
 var _event_counter := 0
 
 
@@ -158,6 +159,7 @@ func _spawn_box(world_position: Vector3, mass: float, magnetic := false, radius 
     body.add_to_group("demo_dynamic")
     if magnetic:
         body.add_to_group("lab_metal")
+    body.gravity_scale = _gravity_scale
     body.set_meta("lab_volume", pow(radius * 2.0, 3))
     body.set_meta("lab_half_height", radius)
     return body
@@ -206,6 +208,10 @@ func _create_hud() -> void:
     )
     _add_slider(column, "Плотность воды", 0.1, 5.0, _fluid_density, func(v: float) -> void:
         _fluid_density = v
+        _update_status()
+    )
+    _add_slider(column, "Течение воды", -6.0, 6.0, _water_current, func(v: float) -> void:
+        _water_current = v
         _update_status()
     )
     _add_slider(column, "Масса нового куба", 0.5, 20.0, _spawn_mass, func(v: float) -> void:
@@ -294,8 +300,8 @@ func _toggle_freeze() -> void:
 func _update_status() -> void:
     if _status == null:
         return
-    _status.text = "Вода: %.1fm | плотность: %.1f | ветер: %s %.0f\nМагнит: %s (%s) | g: %.1f | волны: %s" % [
-        _water_height, _fluid_density, "ON" if _wind_on else "OFF", _wind_strength,
+    _status.text = "Вода: %.1fm | плотность: %.1f | течение: %.1f | ветер: %s %.0f\nМагнит: %s (%s) | g: %.1f | волны: %s" % [
+        _water_height, _fluid_density, _water_current, "ON" if _wind_on else "OFF", _wind_strength,
         "ON" if _magnet_on else "OFF", "отталкивание" if _magnet_repels else "притяжение",
         _gravity_scale, "ON" if _waves else "OFF"
     ]
@@ -315,7 +321,7 @@ func _unhandled_input(event: InputEvent) -> void:
     if event is InputEventKey and event.pressed and not event.echo:
         match event.keycode:
             KEY_F:
-                _push_target()
+                _request_push = true
             KEY_P:
                 _request_blast = true
             KEY_V:
@@ -398,12 +404,14 @@ func _fluid_properties(body: RigidBody3D) -> Vector2:
     var half_height := 0.5
     for child in body.get_children():
         if child is CollisionShape3D:
-            if child.shape is BoxShape3D:
-                var dimensions: Vector3 = child.shape.size
+            var box_shape := child.shape as BoxShape3D
+            var sphere_shape := child.shape as SphereShape3D
+            if box_shape != null:
+                var dimensions: Vector3 = box_shape.size
                 volume = dimensions.x * dimensions.y * dimensions.z
                 half_height = dimensions.y * 0.5
-            elif child.shape is SphereShape3D:
-                var radius: float = child.shape.radius
+            elif sphere_shape != null:
+                var radius: float = sphere_shape.radius
                 volume = (4.0 / 3.0) * PI * pow(radius, 3)
                 half_height = radius
             break
@@ -416,6 +424,9 @@ func _physics_process(delta: float) -> void:
     _wave_phase += delta
     if _request_pick and _dragging:
         _pick()
+    if _request_push:
+        _request_push = false
+        _push_target()
     if _request_blast:
         _explode()
     if _dragging and is_instance_valid(_held) and not _held.freeze:
@@ -432,9 +443,11 @@ func _physics_process(delta: float) -> void:
 
 func _apply_water() -> void:
     for node in _water.get_overlapping_bodies():
-        if not node is RigidBody3D or node.freeze:
+        if not node is RigidBody3D:
             continue
         var body := node as RigidBody3D
+        if body.freeze:
+            continue
         var properties := _fluid_properties(body)
         var surface := _water_height
         if _waves:
@@ -459,9 +472,11 @@ func _apply_wind_and_magnet() -> void:
     var direction := Vector3(cos(_wind_angle), 0, sin(_wind_angle))
     var wind_gust := 0.78 + 0.22 * sin(_wave_phase * 1.8)
     for node in get_tree().get_nodes_in_group("demo_dynamic"):
-        if not node is RigidBody3D or node.freeze:
+        if not node is RigidBody3D:
             continue
         var body := node as RigidBody3D
+        if body.freeze:
+            continue
         if _wind_on:
             body.apply_central_force(direction * _wind_strength * body.mass * wind_gust)
         if _magnet_on and body.is_in_group("lab_metal"):
