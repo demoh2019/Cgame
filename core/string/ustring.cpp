@@ -4178,23 +4178,34 @@ String String::repeat(int p_count) const {
 		return *this;
 	}
 
-	int len = length();
+	const int len = length();
 	if (len == 0) {
-		return *this; // No resize or writable COW access for an empty string.
+		return *this; // An empty string needs no allocation.
 	}
-	String new_string = *this;
-	new_string.resize_uninitialized(p_count * len + 1);
 
-	char32_t *dst = new_string.ptrw();
-	int offset = 1;
-	int stride = 1;
-	while (offset < p_count) {
-		memcpy(dst + offset * len, dst, stride * len * sizeof(char32_t));
-		offset += stride;
-		stride = MIN(stride * 2, p_count - offset);
+	// Validate before narrowing the product and adding the terminating NUL.
+	const int64_t total_length64 = int64_t(p_count) * len;
+	ERR_FAIL_COND_V_MSG(total_length64 >= INT32_MAX, "", "Repeated string is too long.");
+	const int total_length = int(total_length64);
+
+	// Do not resize a shared copy of the source String: doing so may detach its
+	// copy-on-write storage and copy the old text before the repetitions begin.
+	String repeated;
+	ERR_FAIL_COND_V_MSG(repeated.resize_uninitialized(total_length + 1) != OK, "", "Failed to allocate repeated string.");
+	char32_t *dst = repeated.ptrw();
+	memcpy(dst, ptr(), size_t(len) * sizeof(char32_t));
+
+	// Exponentially duplicate the already-written prefix. The source and
+	// destination blocks never overlap, and this avoids multiplying a count
+	// that can overflow a 32-bit integer during the final iteration.
+	int written = len;
+	while (written < total_length) {
+		const int copy_length = MIN(written, total_length - written);
+		memcpy(dst + written, dst, size_t(copy_length) * sizeof(char32_t));
+		written += copy_length;
 	}
-	dst[p_count * len] = _null;
-	return new_string;
+	dst[total_length] = _null;
+	return repeated;
 }
 
 String String::reverse() const {

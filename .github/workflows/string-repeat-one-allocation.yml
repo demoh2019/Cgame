@@ -1,0 +1,47 @@
+name: String repeat allocation and overflow regressions
+
+on:
+  pull_request:
+    branches: [develop]
+    paths:
+      - 'core/string/ustring.cpp'
+      - 'tests/core/string/test_string.cpp'
+      - 'misc/scripts/tests/test_string_repeat_compilation.py'
+      - '.github/workflows/string-repeat-one-allocation.yml'
+  push:
+    branches: [develop]
+    paths:
+      - 'core/string/ustring.cpp'
+      - 'tests/core/string/test_string.cpp'
+      - 'misc/scripts/tests/test_string_repeat_compilation.py'
+      - '.github/workflows/string-repeat-one-allocation.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  standalone-repeat-gcc-clang:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - name: Compile real production repeat algorithm under GCC and Clang
+        run: python3 misc/scripts/tests/test_string_repeat_compilation.py
+
+  native-string-repeat:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+      - uses: ./.github/actions/godot-deps
+      - name: Build engine with native doctests
+        uses: ./.github/actions/godot-build
+        with:
+          platform: linuxbsd
+          target: editor
+          scons-flags: dev_build=yes tests=yes debug_symbols=no module_mono_enabled=no module_text_server_fb_enabled=yes accesskit=no -j2
+      - name: Test repeat correctness, UTF-32 and overflow bounds
+        run: ./bin/godot.linuxbsd.editor.dev.x86_64 --headless --test --test-case="*[String] Repeat*"
