@@ -419,6 +419,12 @@ func _sell_one_material() -> void:
 
 
 func _on_result(kind: String, data: Dictionary) -> void:
+	if kind == "drink":
+		if bool(data.get("ok", false)):
+			say("Lake: clean filtered drink" if bool(data.get("filtered", false)) else "Lake: unfiltered water increased infection")
+		else:
+			say("Lake: %s" % str(data.get("reason", "denied")))
+		return
 	if kind == "rest":
 		if bool(data.get("ok", false)):
 			say("Camp rest: recovered; 90 seconds until the next rest")

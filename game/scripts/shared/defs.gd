@@ -199,6 +199,11 @@ static func _build_items() -> void:
 	_add_item("berries", {"name": "Berries", "kind": "food", "food": 12.0, "stack": 20, "value": 2})
 	_add_item("canned_food", {"name": "Canned Food", "kind": "food", "food": 42.0, "stack": 10, "value": 12})
 	_add_item("water_bottle", {"name": "Water Bottle", "kind": "drink", "drink": 45.0, "stack": 10, "value": 8})
+	# Automatically consumes one filter when drinking directly from a lake.
+	_add_item("charcoal_filter", {"name": "Field Water Filter", "kind": "material",
+		"stack": 10, "value": 14, "weight": 0.25})
+	_add_recipe("charcoal_filter", "charcoal_filter", 1,
+		{"cloth_1": 1, "wood_1": 1, "stone_1": 1}, "", 2.5)
 	_add_item("bandage", {"name": "Bandage", "kind": "medical", "heal": 28.0, "stack": 10, "value": 10})
 	_add_recipe("bandage", "bandage", 2, {"cloth_1": 2}, "", 2.0)
 	# Common crafted wound care and scarce medical loot from infected ruins.

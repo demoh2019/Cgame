@@ -24,6 +24,7 @@ const Weather = preload("res://scripts/shared/weather.gd")
 const Progression = preload("res://scripts/shared/progression.gd")
 const CampRest = preload("res://scripts/shared/camp_rest.gd")
 const Fishing = preload("res://scripts/shared/fishing.gd")
+const FieldWater = preload("res://scripts/shared/field_water.gd")
 
 const WORKBENCH_POSITION := Vector2(9.0, 0.0)
 const WORKBENCH_RANGE := 6.0
@@ -52,6 +53,7 @@ class Player:
 	var progression # Permanent skills; gear is lost on death, not experience.
 	var contract_state: Dictionary = {} # Server-owned persistent camp contract journal.
 	var rest_cooldown: float = 0.0 # Per-survivor seconds until next camp recovery.
+	var lake_drink_cooldown: float = 0.0 # Prevents lake hydration spam and relog bypass.
 	var input_budget: float = 0.0
 	var last_input_seq: int = 0
 	var attack_timer: float = 0.0
@@ -142,7 +144,7 @@ func character_data(player: Player) -> Dictionary:
 		"stash": player.stash.to_dict(),
 		"progression": player.progression.to_dict(),
 		"contracts": player.contract_state.duplicate(true),
-		"rest_cooldown": player.rest_cooldown,
+		"rest_cooldown": player.rest_cooldown, "lake_drink_cooldown": player.lake_drink_cooldown,
 	}
 
 
@@ -184,6 +186,8 @@ func apply_character(player: Player, data: Dictionary) -> bool:
 	if not SaveValidation.valid_counter(data.get("deaths", 0)):
 		return false
 	if not SaveValidation.finite_number(data.get("rest_cooldown", 0.0), 0.0, CampRest.COOLDOWN):
+		return false
+	if not SaveValidation.finite_number(data.get("lake_drink_cooldown", 0.0), 0.0, FieldWater.COOLDOWN_SECONDS):
 		return false
 	if not (data.get("alive", true) is bool):
 		return false
@@ -228,6 +232,7 @@ func apply_character(player: Player, data: Dictionary) -> bool:
 	player.progression = loaded_progression
 	player.contract_state = (loaded_contracts as Dictionary).duplicate(true)
 	player.rest_cooldown = float(data.get("rest_cooldown", 0.0))
+	player.lake_drink_cooldown = float(data.get("lake_drink_cooldown", 0.0))
 	player.inventory = parsed_bag["inventory"]
 	player.stash = parsed_stash["inventory"]
 	player.kills = int(data.get("kills", 0))
@@ -999,17 +1004,30 @@ func cmd_use(peer_id: int, item_id: String) -> Dictionary:
 	return {"ok": true}
 
 
+## Lake water hydrates but can infect: clean bottles remain a risk-free alternative.
+## Filtration is item-paid, never a free client flag; no refill or cure is forged.
 func cmd_drink_water(peer_id: int) -> Dictionary:
 	var player: Player = players.get(peer_id)
 	if player == null or not _alive(player):
 		return {"ok": false, "reason": "dead"}
-	# Drinking from a lake needs water within reach.
-	for angle in 8:
-		var spot := Vector2(player.position.x, player.position.z) + Vector2.from_angle(angle * TAU / 8.0) * 3.0
-		if world.is_water(spot.x, spot.y):
-			player.survival.drink(35.0)
-			return {"ok": true}
-	return {"ok": false, "reason": "no_water"}
+	if player.lake_drink_cooldown > 0.0:
+		return {"ok": false, "reason": "cooldown", "remaining": player.lake_drink_cooldown}
+	if not FieldWater.needs_drink(player.survival):
+		return {"ok": false, "reason": "not_thirsty"}
+	if not FieldWater.can_access_lake(world, player.position):
+		return {"ok": false, "reason": "no_water"}
+	var filtered: bool = player.inventory.count(FieldWater.FILTER_ITEM) > 0
+	if filtered:
+		if not player.inventory.remove(FieldWater.FILTER_ITEM, 1):
+			return {"ok": false, "reason": "filter_unavailable"}
+		player.dirty_inventory = true
+	player.survival.drink(FieldWater.THIRST_RESTORED)
+	if not filtered:
+		player.survival.add_infection(FieldWater.UNTREATED_INFECTION)
+	player.lake_drink_cooldown = FieldWater.COOLDOWN_SECONDS
+	player.dirty_character = true
+	return {"ok": true, "filtered": filtered, "infection": player.survival.infection,
+		"cooldown": player.lake_drink_cooldown}
 
 
 ## Attack in the direction the player is facing. Melee hits the closest enemy in range; a pistol
@@ -1345,6 +1363,7 @@ func _tick_players(delta: float) -> void:
 	for player in players.values():
 		player.input_budget = minf(player.input_budget + delta, 0.25)
 		player.rest_cooldown = maxf(0.0, player.rest_cooldown - maxf(0.0, delta))
+		player.lake_drink_cooldown = maxf(0.0, player.lake_drink_cooldown - maxf(0.0, delta))
 		player.attack_timer = maxf(player.attack_timer - delta, 0.0)
 		player.skill_timer = maxf(player.skill_timer - delta, 0.0)
 		player.dodge_timer = maxf(player.dodge_timer - delta, 0.0)
@@ -1606,6 +1625,7 @@ func snapshot_for(peer_id: int) -> Dictionary:
 			"infection": player.survival.infection, "exposure": player.survival.exposure,
 			"warmth_seconds": player.survival.warmth_seconds,
 			"weather": Weather.conditions(world, player.position.x, player.position.z, time),
+			"lake_drink_cooldown": player.lake_drink_cooldown,
 			"combat_energy": player.combat_energy, "skill_cooldown": player.skill_timer,
 			"dodge_cooldown": player.dodge_timer, "dodge_immunity": player.dodge_immunity,
 			"rest_cooldown": player.rest_cooldown,

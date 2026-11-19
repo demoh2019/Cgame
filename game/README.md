@@ -749,3 +749,23 @@ replication, saved-world roundtrip and old-save migration. No C++ engine
 extension is needed; existing Cgame gameplay, physics and serialization
 primitives support this feature.
 
+
+## River and lake water safety
+
+Survivors can drink from **actual nearby lake shores**, but untreated water
+restores 35 thirst and adds 8 fictional infection points. A crafted **Field
+Water Filter** (one cloth T1, one wood T1, one stone T1) is automatically
+consumed when drinking from a lake and prevents that exposure. Drinking
+has a **12-second server-enforced cooldown**; being fully hydrated, far from
+water or in cooldown rejects the action without spending filters. Clean
+bottled water remains available via existing trading and crafting economy.
+The server persists the cooldown so reconnecting cannot spam hydration,
+validates restored timers before mutating the account and accepts older
+version-1 save files. The owner receives the remaining cooldown in the
+network snapshot, and the online HUD reports whether a lake drink was
+filtered. In the offline game use **R** at a shoreline.
+
+Run the common suite including `test_field_water.gd` to check shore
+validation, dose, filter spending, server cooldown, atomic crafting,
+serialization and save corruption. The contamination model is a fictional
+risk/reward mechanic, not medical or water-safety advice.
