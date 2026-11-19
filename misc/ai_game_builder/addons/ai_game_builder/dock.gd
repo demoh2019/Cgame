@@ -1,5 +1,5 @@
 @tool
-extends VBoxContainer
+extends ScrollContainer
 
 const Plan = preload("res://addons/ai_game_builder/plan.gd")
 const Context = preload("res://addons/ai_game_builder/context.gd")
@@ -26,6 +26,7 @@ Rules:
 - Return at most 24 files and keep each file under 256 KiB.
 """
 
+var _content: VBoxContainer
 var _endpoint: LineEdit
 var _model: LineEdit
 var _api_key: LineEdit
@@ -54,11 +55,14 @@ func _ready() -> void:
 	custom_minimum_size = Vector2(330, 450)
 	size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	size_flags_vertical = Control.SIZE_EXPAND_FILL
+	_content = VBoxContainer.new()
+	_content.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	add_child(_content)
 
 	var header := Label.new()
 	header.text = "AI Game Builder"
 	header.add_theme_font_size_override("font_size", 17)
-	add_child(header)
+	_content.add_child(header)
 
 	_endpoint = LineEdit.new()
 	_endpoint.text = "https://api.openai.com/v1/chat/completions"
@@ -85,7 +89,7 @@ func _ready() -> void:
 
 	_context_enabled = CheckBox.new()
 	_context_enabled.text = "Include only selected project files in AI request"
-	add_child(_context_enabled)
+	_content.add_child(_context_enabled)
 
 	_context_paths = TextEdit.new()
 	_context_paths.custom_minimum_size = Vector2(0, 64)
@@ -100,17 +104,17 @@ func _ready() -> void:
 	_request_button = Button.new()
 	_request_button.text = "Generate preview"
 	_request_button.pressed.connect(_on_generate)
-	add_child(_request_button)
+	_content.add_child(_request_button)
 
 	_refine_button = Button.new()
 	_refine_button.text = "Refine previous preview with feedback"
 	_refine_button.disabled = true
 	_refine_button.pressed.connect(_on_refine)
-	add_child(_refine_button)
+	_content.add_child(_refine_button)
 
 	_summary = Label.new()
 	_summary.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
-	add_child(_summary)
+	_content.add_child(_summary)
 
 	_file_list = ItemList.new()
 	_file_list.custom_minimum_size = Vector2(0, 85)
@@ -121,33 +125,33 @@ func _ready() -> void:
 	_file_preview.editable = false
 	_file_preview.custom_minimum_size = Vector2(0, 165)
 	_file_preview.size_flags_vertical = Control.SIZE_EXPAND_FILL
-	add_child(_file_preview)
+	_content.add_child(_file_preview)
 
 	_allow_overwrite = CheckBox.new()
 	_allow_overwrite.text = "Allow overwriting existing files (backups in user://)"
-	add_child(_allow_overwrite)
+	_content.add_child(_allow_overwrite)
 
 	_make_main = CheckBox.new()
 	_make_main.text = "Set generated scene as project main scene"
 	_make_main.disabled = true
-	add_child(_make_main)
+	_content.add_child(_make_main)
 
 	_apply_button = Button.new()
 	_apply_button.text = "Apply reviewed files to project"
 	_apply_button.disabled = true
 	_apply_button.pressed.connect(_on_apply)
-	add_child(_apply_button)
+	_content.add_child(_apply_button)
 
 	_play_button = Button.new()
 	_play_button.text = "Play approved game scene (runs generated scripts)"
 	_play_button.disabled = true
 	_play_button.pressed.connect(_on_play_generated)
-	add_child(_play_button)
+	_content.add_child(_play_button)
 
 	_status = Label.new()
 	_status.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	_status.text = "Requests are sent only when you click Generate. Review generated code before applying."
-	add_child(_status)
+	_content.add_child(_status)
 
 	_http = HTTPRequest.new()
 	_http.timeout = 90.0
@@ -160,8 +164,8 @@ func _ready() -> void:
 func _add_field(caption: String, control: Control) -> void:
 	var label := Label.new()
 	label.text = caption
-	add_child(label)
-	add_child(control)
+	_content.add_child(label)
+	_content.add_child(control)
 
 
 func _on_generate() -> void:
