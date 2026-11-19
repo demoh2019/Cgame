@@ -12,7 +12,8 @@ space habitat.
 This patch adds the **non-inertial translational equations** to
 **dynamic RigidBody3D COM velocity**, without copying other engines'
 code. This is a targeted enhancement to Cgame's existing rigid-body
-integrator, using established rotating-frame mechanics and an energy-
+integrator, restricted to **COM translation only**, using established
+rotating-frame mechanics and an energy-
 preserving Boris/Cayley step for the Coriolis part.
 
 It is not a complete rotating-world transform or generalized rotating
