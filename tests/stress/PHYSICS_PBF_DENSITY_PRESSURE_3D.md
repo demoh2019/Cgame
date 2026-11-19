@@ -83,8 +83,9 @@ The new predictor reuses the existing deterministic sorted-cell
 search (27 neighboring cells, at most 128 accepted neighbors per
 particle) and adds four persistent arrays: trial velocities,
 simultaneous corrections, Lagrange multipliers and cached Jacobian
-denominators. They resize only when the particle count changes.
-There are no dynamic allocations within the new pressure iterations.
+denominators. They are **allocated only when the pressure mode is
+enabled** (or its particle count changes) and freed when the mode is
+switched off. There are no dynamic allocations within pressure iterations.
 
 Maximum accepted pairs per substep:
 (2*iterations + 2)*particles*128 (setup, two scans per iteration,
