@@ -1,5 +1,5 @@
 func test():
 	for i in 3:
 		break
-		print(i)
-		print(i + 1)
+		assert(i >= 0)
+		assert(i < 10)
