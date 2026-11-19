@@ -48,7 +48,7 @@ TEST_CASE("[PhysicsSoftSoft] Dynamic vertex and triangle exchange momentum") {
 	// Inverse mass 2 means half the mass of the vertex.
 	const real_t weighted_displacement = v.z - old_v.z +
 			real_t(0.5) * ((a.z - old_a.z) + (b.z - old_b.z) + (c.z - old_c.z));
-	CHECK(weighted_displacement == doctest::Approx(0.0).epsilon(1e-5).scale(1e-5));
+	CHECK(Math::abs(weighted_displacement) < real_t(1e-5));
 	CHECK(vv.z == doctest::Approx((v.z - old_v.z) / real_t(0.02)).epsilon(1e-5));
 	CHECK(va.z == doctest::Approx((a.z - old_a.z) / real_t(0.02)).epsilon(1e-5));
 }
