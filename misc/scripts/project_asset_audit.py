@@ -316,10 +316,31 @@ def scan_project(root: Path, max_text_bytes: int = 8 * 1024 * 1024,
     return Report(files_scanned, references_checked, findings, ordered_dependencies)
 
 
+def _escape_github_data(value: str) -> str:
+    """Escape workflow-command data to avoid injected CI annotations."""
+    return value.replace("%", "%25").replace("\r", "%0D").replace("\n", "%0A")
+
+
+def _escape_github_property(value: str) -> str:
+    return _escape_github_data(value).replace(":", "%3A").replace(",", "%2C")
+
+
+def _format_github_finding(finding: Finding) -> str:
+    level = "error" if finding.severity == "error" else "warning"
+    props = ["file=" + _escape_github_property(finding.source)]
+    if finding.line > 0:
+        props.append("line=" + str(finding.line))
+    props.append("title=" + _escape_github_property(finding.code))
+    message = finding.message
+    if finding.reference:
+        message += " [" + finding.reference + "]"
+    return f"::{level} {','.join(props)}::{_escape_github_data(message)}"
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("root", nargs="?", default=".", type=Path, help="Godot project directory (default: current directory)")
-    parser.add_argument("--format", choices=("text", "json"), default="text", help="Output format")
+    parser.add_argument("--format", choices=("text", "json", "github"), default="text", help="Output format")
     parser.add_argument("--exclude", action="append", default=[], metavar="GLOB",
                         help="Exclude matching relative project paths (repeatable)")
     parser.add_argument("--max-text-bytes", type=int, default=8 * 1024 * 1024,
@@ -337,6 +358,11 @@ def main(argv: list[str] | None = None) -> int:
 
     if args.format == "json":
         print(json.dumps(report.to_dict(), indent=2, ensure_ascii=False, sort_keys=True))
+    elif args.format == "github":
+        for finding in report.findings:
+            print(_format_github_finding(finding))
+        print(f"Asset audit: {report.errors} errors, {report.warnings} warnings "
+              f"across {report.files_scanned} files.")
     else:
         for finding in report.findings:
             location = f"{finding.source}:{finding.line}" if finding.line else finding.source
