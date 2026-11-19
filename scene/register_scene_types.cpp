@@ -359,6 +359,7 @@
 #include "scene/3d/physics/physical_bone_3d.h"
 #include "scene/3d/physics/physical_bone_simulator_3d.h"
 #include "scene/3d/physics/physics_body_3d.h"
+#include "scene/3d/physics/pbf_particle_fluid_3d.h"
 #include "scene/3d/physics/ray_cast_3d.h"
 #include "scene/3d/physics/rigid_body_3d.h"
 #include "scene/3d/physics/shape_cast_3d.h"
@@ -747,6 +748,7 @@ void register_scene_types() {
 	GDREGISTER_CLASS(PhysicalBoneSimulator3D);
 	GDREGISTER_CLASS(PhysicalBone3D);
 	GDREGISTER_CLASS(SoftBody3D);
+	GDREGISTER_CLASS(PBFParticleFluid3D);
 #endif // PHYSICS_3D_DISABLED
 
 	GDREGISTER_CLASS(BoneSpaceAdjuster3D);
