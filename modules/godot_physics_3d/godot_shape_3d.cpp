@@ -494,14 +494,23 @@ GodotBoxShape3D::GodotBoxShape3D() {}
 /********** CAPSULE *************/
 
 void GodotCapsuleShape3D::project_range(const Vector3 &p_normal, const Transform3D &p_transform, real_t &r_min, real_t &r_max) const {
-	Vector3 n = p_transform.basis.xform_inv(p_normal).normalized();
-	real_t h = height * 0.5 - radius;
+	const Vector3 local_axis = p_transform.basis.xform_inv(p_normal);
+	const real_t half_segment = height * real_t(0.5) - radius;
+	if (half_segment < 0.0 || radius < 0.0) {
+		// Preserve historical behavior for invalid/temporarily incomplete shapes.
+		Vector3 support = local_axis.normalized() * radius;
+		support.y += (support.y > 0.0) ? half_segment : -half_segment;
+		r_max = p_normal.dot(p_transform.xform(support));
+		r_min = p_normal.dot(p_transform.xform(-support));
+		return;
+	}
 
-	n *= radius;
-	n.y += (n.y > 0) ? h : -h;
-
-	r_max = p_normal.dot(p_transform.xform(n));
-	r_min = p_normal.dot(p_transform.xform(-n));
+	// A capsule is a segment swept by a sphere. The support radius of an
+	// affine-transformed capsule is exact even under nonuniform scale or shear.
+	const real_t projected_radius = radius * local_axis.length() + half_segment * Math::abs(local_axis.y);
+	const real_t center = p_normal.dot(p_transform.origin);
+	r_min = center - projected_radius;
+	r_max = center + projected_radius;
 }
 
 Vector3 GodotCapsuleShape3D::get_support(const Vector3 &p_normal) const {
@@ -655,25 +664,16 @@ GodotCapsuleShape3D::GodotCapsuleShape3D() {}
 /********** CYLINDER *************/
 
 void GodotCylinderShape3D::project_range(const Vector3 &p_normal, const Transform3D &p_transform, real_t &r_min, real_t &r_max) const {
-	Vector3 cylinder_axis = p_transform.basis.get_column(1).normalized();
-	real_t axis_dot = cylinder_axis.dot(p_normal);
+	const Vector3 local_axis = p_transform.basis.xform_inv(p_normal);
 
-	Vector3 local_normal = p_transform.basis.xform_inv(p_normal);
-	real_t scale = local_normal.length();
-	real_t scaled_radius = radius * scale;
-	real_t scaled_height = height * scale;
-
-	real_t length;
-	if (Math::abs(axis_dot) > 1.0) {
-		length = scaled_height * 0.5;
-	} else {
-		length = Math::abs(axis_dot * scaled_height * 0.5) + scaled_radius * Math::sqrt(1.0 - axis_dot * axis_dot);
-	}
-
-	real_t distance = p_normal.dot(p_transform.origin);
-
-	r_min = distance - length;
-	r_max = distance + length;
+	// A cylinder is a disk extruded along its local Y axis. Project its
+	// transformed radial disk and axial half-segment independently. Unlike
+	// the previous axial-dot approximation, this also handles affine shear.
+	const real_t radial_length = Math::sqrt(local_axis.x * local_axis.x + local_axis.z * local_axis.z);
+	const real_t projected_radius = radius * radial_length + height * real_t(0.5) * Math::abs(local_axis.y);
+	const real_t center = p_normal.dot(p_transform.origin);
+	r_min = center - projected_radius;
+	r_max = center + projected_radius;
 }
 
 Vector3 GodotCylinderShape3D::get_support(const Vector3 &p_normal) const {
