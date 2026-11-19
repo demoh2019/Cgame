@@ -44,6 +44,13 @@ class GodotStep3D {
 	LocalVector<LocalVector<GodotConstraint3D *>> constraint_islands;
 	LocalVector<GodotConstraint3D *> all_constraints;
 
+	struct IslandTask {
+		GodotBody3D *body = nullptr;
+		GodotSoftBody3D *soft_body = nullptr;
+	};
+	LocalVector<IslandTask> pending_island_tasks; // Reused across bodies and spaces.
+
+	void _populate_island_graph(GodotBody3D *p_body, GodotSoftBody3D *p_soft_body, LocalVector<GodotBody3D *> &p_body_island, LocalVector<GodotConstraint3D *> &p_constraint_island);
 	void _populate_island(GodotBody3D *p_body, LocalVector<GodotBody3D *> &p_body_island, LocalVector<GodotConstraint3D *> &p_constraint_island);
 	void _populate_island_soft_body(GodotSoftBody3D *p_soft_body, LocalVector<GodotBody3D *> &p_body_island, LocalVector<GodotConstraint3D *> &p_constraint_island);
 	void _setup_constraint(uint32_t p_constraint_index, void *p_userdata = nullptr);
