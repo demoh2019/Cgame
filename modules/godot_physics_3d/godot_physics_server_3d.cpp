@@ -863,6 +863,9 @@ void GodotPhysicsServer3D::body_add_collision_exception(RID p_body, RID p_body_b
 	ERR_FAIL_NULL(body);
 
 	body->add_exception(p_body_b);
+	// Reconcile the broadphase immediately, even if both bodies remain still.
+	// Otherwise adding/removing an exception would leave stale or missing pairs.
+	body->refresh_collision_pairs();
 	body->wakeup();
 }
 
@@ -871,6 +874,9 @@ void GodotPhysicsServer3D::body_remove_collision_exception(RID p_body, RID p_bod
 	ERR_FAIL_NULL(body);
 
 	body->remove_exception(p_body_b);
+	// Reconcile the broadphase immediately, even if both bodies remain still.
+	// Otherwise adding/removing an exception would leave stale or missing pairs.
+	body->refresh_collision_pairs();
 	body->wakeup();
 }
 
