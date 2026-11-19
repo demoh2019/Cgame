@@ -377,6 +377,10 @@ JPH::SoftBodySharedSettings *JoltSoftBody3D::_create_shared_settings() {
 		physics_faces.emplace_back((JPH::uint32)physics_face[2], (JPH::uint32)physics_face[1], (JPH::uint32)physics_face[0]);
 	}
 
+	// Only vertices created from referenced surface faces are eligible for
+	// soft-soft particle contacts: the optional tetrahedral center is internal.
+	surface_particle_count = (uint32_t)physics_vertices.size();
+
 	// Pin whatever pinned vertices we have currently. This is used during the `Optimize` call below to order the
 	// constraints. Note that it's fine if the pinned vertices change later, but that will reduce the effectiveness
 	// of the constraints a bit.

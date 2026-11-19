@@ -54,6 +54,13 @@ public:
 	inline static float contact_warm_start_distance_sq;
 	inline static float baumgarte_stabilization_factor;
 	inline static float soft_body_point_radius;
+	// Opt-in, bounded CPU soft-soft particle contacts; independent of Jolt's
+	// built-in soft-rigid contact pipeline. These settings apply per step.
+	inline static bool soft_body_soft_contacts = false;
+	inline static float soft_body_soft_contact_radius = 0.1f;
+	inline static float soft_body_soft_contact_recovery = 0.2f;
+	inline static float soft_body_soft_contact_friction = 0.2f;
+	inline static int soft_body_soft_contact_max_particle_pairs = 32768;
 	// Used when constructing a soft body; existing bodies retain their constraints.
 	inline static int soft_body_bend_mode = 0;
 	inline static float soft_body_bend_compliance = 0.001f;

@@ -36,6 +36,7 @@
 #include "../misc/jolt_stream_wrappers.h"
 #include "../objects/jolt_area_3d.h"
 #include "../objects/jolt_body_3d.h"
+#include "../objects/jolt_soft_body_3d.h"
 #include "../shapes/jolt_shape_3d.h"
 #include "jolt_body_activation_listener_3d.h"
 #include "jolt_contact_listener_3d.h"
@@ -52,6 +53,7 @@
 #include <Jolt/Physics/Collision/CollideShapeVsShapePerLeaf.h>
 #include <Jolt/Physics/Collision/CollisionCollectorImpl.h>
 #include <Jolt/Physics/PhysicsScene.h>
+#include <Jolt/Physics/SoftBody/SoftBodyMotionProperties.h>
 
 namespace {
 
@@ -83,6 +85,94 @@ constexpr uint32_t MAX_RETAINED_PENDING_BODY_IDS = 4096;
 // Retain small open-addressing tables across repeated spawn/remove waves.
 // AHashMap capacity is in slots (not entries); release oversized bursts.
 constexpr uint32_t MAX_RETAINED_PENDING_INDEX_SLOTS = 4096;
+
+// Opt-in CPU particle contacts between two Jolt soft bodies. The Jolt SDK
+// only handles soft-rigid contacts, so this is a deliberately bounded,
+// discrete vertex/vertex approximation, not triangle or CCD collision.
+constexpr uint32_t MAX_SOFT_SOFT_BODY_PAIR_CHECKS = 2048;
+constexpr float MAX_SOFT_SOFT_CONTACT_SPEED_CORRECTION = 8.0f;
+constexpr float MAX_SOFT_SOFT_PENETRATION_BIAS = 2.0f;
+
+static void resolve_soft_soft_particle_contacts(JPH::Body &p_body_a, JPH::Body &p_body_b,
+		const JoltSoftBody3D &p_object_a, const JoltSoftBody3D &p_object_b, float p_step, uint32_t &r_particle_budget) {
+	JPH::SoftBodyMotionProperties &properties_a = static_cast<JPH::SoftBodyMotionProperties &>(*p_body_a.GetMotionPropertiesUnchecked());
+	JPH::SoftBodyMotionProperties &properties_b = static_cast<JPH::SoftBodyMotionProperties &>(*p_body_b.GetMotionPropertiesUnchecked());
+	JPH::Array<JPH::SoftBodyVertex> &particles_a = properties_a.GetVertices();
+	JPH::Array<JPH::SoftBodyVertex> &particles_b = properties_b.GetVertices();
+
+	// An invisible centroid particle may have been added by the convex
+	// volume fan. Never treat it as part of the collision surface.
+	const uint32_t count_a = MIN(p_object_a.get_surface_particle_count(), uint32_t(particles_a.size()));
+	const uint32_t count_b = MIN(p_object_b.get_surface_particle_count(), uint32_t(particles_b.size()));
+	if (count_a == 0 || count_b == 0) {
+		return;
+	}
+
+	const JPH::Quat rotation_a = p_body_a.GetRotation();
+	const JPH::Quat rotation_b = p_body_b.GetRotation();
+	const JPH::Quat inverse_rotation_a = rotation_a.Conjugated();
+	const JPH::Quat inverse_rotation_b = rotation_b.Conjugated();
+
+	// Subtract double-precision world COM positions first, so large scenes
+	// do not lose contact precision when transformed to local float vectors.
+	const JPH::Vec3 center_delta(p_body_b.GetCenterOfMassPosition() - p_body_a.GetCenterOfMassPosition());
+	const float radius = JoltProjectSettings::soft_body_soft_contact_radius;
+	const float radius_sq = radius * radius;
+	const float bias_per_step = JoltProjectSettings::soft_body_soft_contact_recovery / p_step;
+	const float friction = JoltProjectSettings::soft_body_soft_contact_friction;
+
+	for (uint32_t i = 0; i < count_a && r_particle_budget > 0; ++i) {
+		JPH::SoftBodyVertex &a = particles_a[i];
+		const JPH::Vec3 offset_a = rotation_a * a.mPosition;
+		for (uint32_t j = 0; j < count_b && r_particle_budget > 0; ++j) {
+			--r_particle_budget; // Includes non-contact pairs: hard work bound.
+			JPH::SoftBodyVertex &b = particles_b[j];
+			const float inverse_mass_sum = a.mInvMass + b.mInvMass;
+			if (!Math::is_finite(inverse_mass_sum) || inverse_mass_sum <= 0.0f) {
+				continue;
+			}
+			const JPH::Vec3 separation = center_delta + rotation_b * b.mPosition - offset_a;
+			const float distance_sq = separation.LengthSq();
+			if (!Math::is_finite(distance_sq) || distance_sq >= radius_sq) {
+				continue;
+			}
+
+			const JPH::Vec3 relative_velocity = rotation_b * b.mVelocity - rotation_a * a.mVelocity;
+			const float distance = Math::sqrt(MAX(distance_sq, 0.0f));
+			// Coincident particles need a well-defined fallback normal.
+			const JPH::Vec3 normal = distance > 1.0e-6f ? separation / distance :
+					(center_delta.LengthSq() > 1.0e-12f ? center_delta.Normalized() : JPH::Vec3::sAxisY());
+			const float normal_speed = relative_velocity.Dot(normal);
+			if (!Math::is_finite(normal_speed)) {
+				continue; // Never spread a corrupt velocity to the other body.
+			}
+			const float penetration = radius - distance;
+			const float recovery_speed = MIN(penetration * bias_per_step, MAX_SOFT_SOFT_PENETRATION_BIAS);
+			const float normal_speed_correction = MIN(MAX(recovery_speed - normal_speed, 0.0f), MAX_SOFT_SOFT_CONTACT_SPEED_CORRECTION);
+			if (normal_speed_correction <= 0.0f) {
+				continue;
+			}
+
+			// Inverse-mass-weighted normal impulse conserves linear momentum.
+			// Pinned vertices have zero inverse mass and remain immovable.
+			const float normal_impulse = normal_speed_correction / inverse_mass_sum;
+			JPH::Vec3 impulse = normal * normal_impulse;
+
+			// Coulomb-limited sliding friction in the tangential plane.
+			const JPH::Vec3 tangent_velocity = relative_velocity - normal * normal_speed;
+			const float tangent_speed_sq = tangent_velocity.LengthSq();
+			if (friction > 0.0f && Math::is_finite(tangent_speed_sq) && tangent_speed_sq > 1.0e-12f) {
+				const float tangent_speed = Math::sqrt(tangent_speed_sq);
+				const float tangent_impulse = MIN(tangent_speed / inverse_mass_sum, friction * normal_impulse);
+				impulse -= tangent_velocity * (tangent_impulse / tangent_speed);
+			}
+
+			a.mVelocity -= inverse_rotation_a * (impulse * a.mInvMass);
+			b.mVelocity += inverse_rotation_b * (impulse * b.mInvMass);
+		}
+	}
+}
+
 
 static void clear_pending_index(AHashMap<uint32_t, uint32_t> &r_indices) {
 	if (r_indices.get_capacity() > MAX_RETAINED_PENDING_INDEX_SLOTS) {
@@ -182,6 +272,38 @@ void JoltSpace3D::_pre_step(float p_step) {
 		JPH::Body *jolt_body = lock_iface.TryGetBody(active_soft_bodies[i]);
 		JoltObject3D *object = reinterpret_cast<JoltObject3D *>(jolt_body->GetUserData());
 		object->pre_step(p_step);
+	}
+
+	// Jolt's native soft-body collision path only handles rigid bodies. The
+	// CPU approximation runs before Jolt's parallel physics Update(), which
+	// makes mutable particle velocities safe to access here.
+	// Zero overhead (one branch) when disabled.
+	if (JoltProjectSettings::soft_body_soft_contacts && active_soft_body_count > 1 &&
+			JoltProjectSettings::soft_body_soft_contact_radius > 0.0f && Math::is_finite(p_step) && p_step > 0.0f) {
+		uint32_t particle_budget = (uint32_t)JoltProjectSettings::soft_body_soft_contact_max_particle_pairs;
+		uint32_t checked_body_pairs = 0;
+		const float radius = JoltProjectSettings::soft_body_soft_contact_radius;
+
+		for (JPH::uint32 i = 0; i < active_soft_body_count && particle_budget > 0 && checked_body_pairs < MAX_SOFT_SOFT_BODY_PAIR_CHECKS; ++i) {
+			JPH::Body *jolt_a = lock_iface.TryGetBody(active_soft_bodies[i]);
+			if (jolt_a == nullptr) {
+				continue;
+			}
+			JoltSoftBody3D *object_a = reinterpret_cast<JoltObject3D *>(jolt_a->GetUserData())->as_soft_body();
+			const AABB bounds_a = object_a->get_bounds().grow(radius);
+			for (JPH::uint32 j = i + 1; j < active_soft_body_count && particle_budget > 0 && checked_body_pairs < MAX_SOFT_SOFT_BODY_PAIR_CHECKS; ++j) {
+				++checked_body_pairs;
+				JPH::Body *jolt_b = lock_iface.TryGetBody(active_soft_bodies[j]);
+				if (jolt_b == nullptr) {
+					continue;
+				}
+				JoltSoftBody3D *object_b = reinterpret_cast<JoltObject3D *>(jolt_b->GetUserData())->as_soft_body();
+				if (!object_a->can_interact_with(*object_b) || !bounds_a.intersects(object_b->get_bounds().grow(radius))) {
+					continue;
+				}
+				resolve_soft_soft_particle_contacts(*jolt_a, *jolt_b, *object_a, *object_b, p_step, particle_budget);
+			}
+		}
 	}
 
 	physics_system->SetBodyActivationListener(body_activation_listener);
