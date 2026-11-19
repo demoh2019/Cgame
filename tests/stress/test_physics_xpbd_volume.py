@@ -66,7 +66,7 @@ class XPBDVolumeSourceContracts(unittest.TestCase):
             "tetra_volume_and_gradients",
             "translation invariant",
             "pinned",
-            "zero",
+            "fixed_mass",
             "compliance",
         ):
             with self.subTest(text=text):
