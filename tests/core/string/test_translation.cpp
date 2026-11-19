@@ -46,6 +46,32 @@ TEST_FORCE_LINK(test_translation)
 
 namespace TestTranslation {
 
+TEST_CASE("[Translation] Bulk message property round-trip") {
+	Ref<Translation> original = memnew(Translation);
+	for (int i = 0; i < 512; i++) {
+		const StringName source = StringName(String("message_") + itos(i));
+		const StringName translated = StringName(String("translated_") + itos(i));
+		original->add_message(source, translated);
+	}
+
+	Dictionary messages = original->get("messages");
+	REQUIRE_EQ(messages.size(), 512);
+
+	Ref<Translation> restored = memnew(Translation);
+	bool valid = false;
+	restored->set("messages", messages, &valid);
+	CHECK(valid);
+	REQUIRE_EQ(restored->get_message_count(), 512);
+	for (int i = 0; i < 512; i++) {
+		const StringName source = StringName(String("message_") + itos(i));
+		const StringName translated = StringName(String("translated_") + itos(i));
+		CHECK_EQ(restored->get_message(source), translated);
+	}
+
+	original->erase_message("message_0");
+	CHECK_EQ(restored->get_message("message_0"), StringName("translated_0"));
+}
+
 TEST_CASE("[Translation] Messages") {
 	Ref<Translation> translation;
 	translation.instantiate();
