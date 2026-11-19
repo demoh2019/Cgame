@@ -22,7 +22,7 @@ from urllib.parse import urlencode, urlparse
 from urllib.request import Request, urlopen
 
 SOURCE = "godotengine/godot"
-TARGET = "demoh2019/godot"
+TARGET = "demoh2019/Cgame"
 API_ROOT = "https://api.github.com"
 ISSUE_RE = re.compile(r"(?:https://github\.com/)?godotengine/godot/issues/(\d+)")
 PR_RE = re.compile(r"(?:https://github\.com/)?godotengine/godot/pull/(\d+)")
