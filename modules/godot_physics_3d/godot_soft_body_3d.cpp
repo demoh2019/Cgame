@@ -41,6 +41,7 @@
 #include "servers/physics_xpbd_area.h"
 #include "servers/physics_xpbd_dihedral.h"
 #include "servers/physics_xpbd_self_collision.h"
+#include "servers/physics_xpbd_soft_ccd.h"
 #include "servers/physics_xpbd_self_friction.h"
 #include "servers/physics_xpbd_edge_collision.h"
 #include "servers/rendering/rendering_server.h"
@@ -511,6 +512,7 @@ void GodotSoftBody3D::initialize_dihedral_constraints() {
 // is enabled on the owning physics space.
 void GodotSoftBody3D::initialize_self_collision_topology() {
 	xpbd_self_contacts.reset();
+	xpbd_self_ccd_contacts.reset();
 	xpbd_self_edge_contacts.reset();
 	xpbd_self_edge_tree.clear();
 	xpbd_self_edges.reset();
@@ -692,17 +694,23 @@ void GodotSoftBody3D::solve_self_collisions(real_t p_delta) {
 	const uint32_t global_limit = uint32_t(MIN(uint64_t(65536),
 			uint64_t(nodes.size()) * uint64_t(per_vertex_limit)));
 	xpbd_self_contacts.clear();
+	xpbd_self_ccd_contacts.clear();
+	const bool swept_ccd = get_space()->is_soft_body_self_collision_ccd_enabled();
 	if (face_tree.is_empty()) {
 		initialize_face_tree();
+	}
+	if (swept_ccd) {
+		// Previous/current face positions bound full per-step trajectories.
+		update_swept_face_tree(thickness);
 	} else {
-		// The stretch/area/hinge solver already moved vertices after the
-		// broadphase's predict_motion(). Use current post-solve geometry.
+		// Material constraints may have moved the face after predict_motion().
 		update_face_tree(real_t(0.0));
 	}
 	const Vector3 padding(thickness, thickness, thickness);
-	for (uint32_t node_id = 0; node_id < nodes.size() && xpbd_self_contacts.size() < global_limit; ++node_id) {
+	for (uint32_t node_id = 0; node_id < nodes.size() &&
+			(xpbd_self_contacts.size() + xpbd_self_ccd_contacts.size()) < global_limit; ++node_id) {
 		const Node &node = nodes[node_id];
-		if (!node.x.is_finite()) {
+		if (!node.x.is_finite() || (swept_ccd && !node.q.is_finite())) {
 			continue;
 		}
 		uint32_t hits = 0;
@@ -745,7 +753,14 @@ void GodotSoftBody3D::solve_self_collisions(real_t p_delta) {
 			++hits;
 			return hits >= per_vertex_limit || xpbd_self_contacts.size() >= global_limit;
 		};
-		face_tree.aabb_query(AABB(node.x - padding, padding * real_t(2.0)), visit_face);
+		if (swept_ccd) {
+			AABB swept_query(node.q, Vector3());
+			swept_query.expand_to(node.x);
+			swept_query.grow_by(thickness);
+			face_tree.aabb_query(swept_query, visit_face);
+		} else {
+			face_tree.aabb_query(AABB(node.x - padding, padding * real_t(2.0)), visit_face);
+		}
 	}
 	const bool vertex_contacts = !xpbd_self_contacts.is_empty();
 	if (vertex_contacts) {
@@ -2153,6 +2168,7 @@ void GodotSoftBody3D::destroy() {
 	xpbd_dihedral_hinges.reset();
 	xpbd_dihedral_lambdas.reset();
 	xpbd_self_contacts.reset();
+	xpbd_self_ccd_contacts.reset();
 	xpbd_self_neighbor_edges.reset();
 	xpbd_self_edge_tree.clear();
 	xpbd_self_edges.reset();
