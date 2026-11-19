@@ -1051,6 +1051,8 @@ void GodotPhysicsServer3D::soft_body_add_collision_exception(RID p_body, RID p_b
 	ERR_FAIL_NULL(soft_body);
 
 	soft_body->add_exception(p_body_b);
+	// Refresh rigid/soft-body BVH pairs without altering the soft mesh.
+	soft_body->refresh_collision_pairs();
 }
 
 void GodotPhysicsServer3D::soft_body_remove_collision_exception(RID p_body, RID p_body_b) {
@@ -1058,6 +1060,8 @@ void GodotPhysicsServer3D::soft_body_remove_collision_exception(RID p_body, RID 
 	ERR_FAIL_NULL(soft_body);
 
 	soft_body->remove_exception(p_body_b);
+	// Refresh rigid/soft-body BVH pairs without altering the soft mesh.
+	soft_body->refresh_collision_pairs();
 }
 
 void GodotPhysicsServer3D::soft_body_get_collision_exceptions(RID p_body, List<RID> *p_exceptions) {
