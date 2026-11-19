@@ -274,6 +274,62 @@ constexpr int64_t Span<T>::rfind_sequence(const Span<T1> &p_span, uint64_t p_fro
 
 	const T *const haystack = ptr();
 	const T1 *const needle = p_span.ptr();
+#if defined(__GNUC__) || defined(__clang__)
+	if constexpr (std::is_same_v<T, T1> && std::is_integral_v<T> && sizeof(T) == 1 && !std::is_same_v<std::remove_cv_t<T>, bool>) {
+		if (!__builtin_is_constant_evaluated()) {
+			if (needle_size == 1) {
+				return rfind(needle[0], p_from);
+			}
+			// When the endpoints differ, check eight candidate starts at once.
+			// If both endpoints are the same, the scalar path avoids overhead
+			// for extremely frequent candidates in repeated-byte buffers.
+			if (needle[0] != needle[needle_size - 1]) {
+				constexpr uint64_t ONE_PER_BYTE = 0x0101010101010101ULL;
+				constexpr uint64_t HIGH_BIT_PER_BYTE = 0x8080808080808080ULL;
+				const uint64_t first_pattern = uint64_t(uint8_t(needle[0])) * ONE_PER_BYTE;
+				const uint64_t last_pattern = uint64_t(uint8_t(needle[needle_size - 1])) * ONE_PER_BYTE;
+				uint64_t remaining = p_from + 1;
+				while (remaining >= sizeof(uint64_t)) {
+					remaining -= sizeof(uint64_t);
+					uint64_t first_word;
+					std::memcpy(&first_word, haystack + remaining, sizeof(first_word));
+					const uint64_t first_diff = first_word ^ first_pattern;
+					const uint64_t first_candidates = (first_diff - ONE_PER_BYTE) & ~first_diff & HIGH_BIT_PER_BYTE;
+					if (first_candidates == 0) {
+						continue;
+					}
+					uint64_t last_word;
+					std::memcpy(&last_word, haystack + remaining + needle_size - 1, sizeof(last_word));
+					const uint64_t last_diff = last_word ^ last_pattern;
+					const uint64_t last_candidates = (last_diff - ONE_PER_BYTE) & ~last_diff & HIGH_BIT_PER_BYTE;
+					if ((first_candidates & last_candidates) == 0) {
+						continue;
+					}
+					// Borrow propagation can produce false candidate bits.
+					// Verify both endpoints in reverse order before comparing the interior.
+					for (uint64_t i = sizeof(uint64_t); i > 0;) {
+						--i;
+						const uint64_t pos = remaining + i;
+						if (haystack[pos] == needle[0] &&
+								haystack[pos + needle_size - 1] == needle[needle_size - 1] &&
+								(needle_size == 2 || std::memcmp(haystack + pos, needle, size_t(needle_size)) == 0)) {
+							return int64_t(pos);
+						}
+					}
+				}
+				while (remaining > 0) {
+					--remaining;
+					if (haystack[remaining] == needle[0] &&
+							haystack[remaining + needle_size - 1] == needle[needle_size - 1] &&
+							(needle_size == 2 || std::memcmp(haystack + remaining, needle, size_t(needle_size)) == 0)) {
+						return int64_t(remaining);
+					}
+				}
+				return -1;
+			}
+		}
+	}
+#endif
 	// Never truncate the unsigned range to signed before walking backwards.
 	for (uint64_t i = p_from + 1; i > 0;) {
 		--i;
