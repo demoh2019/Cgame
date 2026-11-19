@@ -1,0 +1,149 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<class name="WorldPartition3D" inherits="Node3D" api_type="core" keywords="open world,streaming,partition,cell" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="../../../doc/class.xsd">
+	<brief_description>
+		Streams 3D scene cells around a moving observer.
+	</brief_description>
+	<description>
+		[WorldPartition3D] divides its local X/Z plane into square cells and loads registered [PackedScene] resources around an observer node. The Y coordinate does not influence cell selection. Each registered scene must have a [Node3D] root; the root's local position is offset by the cell origin.
+		Each cell is described by a [Vector2i] coordinate and a scene resource path in [member cell_scenes]. Assets are requested on background threads; instantiation and deletion happen on the main thread. Request and instantiation budgets limit per-frame work.
+		The [member load_radius] and [member unload_radius] define square neighborhoods in grid-cell units. The unload radius must not be smaller than the load radius; a larger unload radius prevents repeated loading at cell boundaries.
+		[WorldPartition3D] does not generate terrain, divide an authored scene into cells, or build HLOD meshes. Those authoring stages can produce the [PackedScene] files consumed by this runtime node.
+		[codeblock]
+		var partition := WorldPartition3D.new()
+		partition.cell_size = 128.0
+		partition.load_radius = 1
+		partition.unload_radius = 2
+		add_child(partition)
+		partition.observer_path = partition.get_path_to($Player)
+		partition.set_cell_scene(Vector2i(0, 0), "res://world/cell_0_0.tscn")
+		partition.set_cell_scene(Vector2i(-1, 0), "res://world/cell_-1_0.tscn")
+		[/codeblock]
+		Streaming is disabled while editing a scene; the node processes automatically while the game runs. Call [method update_streaming] if an immediate update is required after moving the observer.
+	</description>
+	<methods>
+		<method name="cell_to_local_position" qualifiers="const">
+			<return type="Vector3" />
+			<param index="0" name="cell" type="Vector2i" />
+			<description>
+				Returns the local-space origin of [param cell]. The Y component is always zero.
+			</description>
+		</method>
+		<method name="clear_cell_scenes">
+			<return type="void" />
+			<description>
+				Removes all registered cells and unloads instantiated cells.
+			</description>
+		</method>
+		<method name="get_cell_scene" qualifiers="const">
+			<return type="String" />
+			<param index="0" name="cell" type="Vector2i" />
+			<description>
+				Returns the registered scene path or an empty string if none exists.
+			</description>
+		</method>
+		<method name="get_cells_in_radius" qualifiers="const">
+			<return type="Array" />
+			<param index="0" name="center" type="Vector2i" />
+			<param index="1" name="radius" type="int" />
+			<description>
+				Returns all coordinates in the square centered on [param center], including the boundary. The radius must be between 0 and 32 inclusive.
+			</description>
+		</method>
+		<method name="get_configured_cell_count" qualifiers="const">
+			<return type="int" />
+			<description>
+				Returns the number of registered scene paths, whether loaded or unloaded.
+			</description>
+		</method>
+		<method name="get_loaded_cell_count" qualifiers="const">
+			<return type="int" />
+			<description>
+				Returns the number of tracked instantiated cells.
+			</description>
+		</method>
+		<method name="get_loaded_cells" qualifiers="const">
+			<return type="Array" />
+			<description>
+				Returns the cell coordinates of currently instantiated scenes.
+			</description>
+		</method>
+		<method name="is_cell_loaded" qualifiers="const">
+			<return type="bool" />
+			<param index="0" name="cell" type="Vector2i" />
+			<description>
+				Returns [code]true[/code] when the cell has a living instantiated scene.
+			</description>
+		</method>
+		<method name="local_position_to_cell" qualifiers="const">
+			<return type="Vector2i" />
+			<param index="0" name="local_position" type="Vector3" />
+			<description>
+				Converts a local-space position to its grid coordinate using floor division. Negative positions belong to negative cells.
+			</description>
+		</method>
+		<method name="remove_cell_scene">
+			<return type="void" />
+			<param index="0" name="cell" type="Vector2i" />
+			<description>
+				Unregisters [param cell] and unloads its existing instance.
+			</description>
+		</method>
+		<method name="set_cell_scene">
+			<return type="void" />
+			<param index="0" name="cell" type="Vector2i" />
+			<param index="1" name="scene_path" type="String" />
+			<description>
+				Registers a resource path for a cell. An empty path removes the mapping. Replacing a path unloads the previous cell.
+			</description>
+		</method>
+		<method name="update_streaming">
+			<return type="void" />
+			<description>
+				Polls background requests and updates cells around the observer. The node calls this method every frame while streaming is enabled.
+			</description>
+		</method>
+	</methods>
+	<members>
+		<member name="cell_scenes" type="Dictionary" setter="set_cell_scenes" getter="get_cell_scenes" default="{}">
+			Dictionary mapping [Vector2i] coordinates to [String] scene resource paths. Invalid keys and values are discarded.
+		</member>
+		<member name="cell_size" type="float" setter="set_cell_size" getter="get_cell_size" default="128.0">
+			Width and depth of a single square cell in local 3D units.
+		</member>
+		<member name="load_radius" type="int" setter="set_load_radius" getter="get_load_radius" default="1">
+			Radius in cells to load around the observer, between 0 and 32.
+		</member>
+		<member name="max_concurrent_requests" type="int" setter="set_max_concurrent_requests" getter="get_max_concurrent_requests" default="8">
+			Maximum simultaneous background resource-load requests made by this node.
+		</member>
+		<member name="max_instances_per_frame" type="int" setter="set_max_instances_per_frame" getter="get_max_instances_per_frame" default="2">
+			Maximum number of loaded cell scenes instantiated per frame.
+		</member>
+		<member name="max_new_requests_per_frame" type="int" setter="set_max_new_requests_per_frame" getter="get_max_new_requests_per_frame" default="2">
+			Maximum number of new resource-load requests per frame.
+		</member>
+		<member name="observer_path" type="NodePath" setter="set_observer_path" getter="get_observer_path" default="NodePath(&quot;&quot;)">
+			Path relative to this node pointing to a [Node3D] observer, such as a player or camera.
+		</member>
+		<member name="streaming_enabled" type="bool" setter="set_streaming_enabled" getter="is_streaming_enabled" default="true">
+			Enables or disables streaming. Disabling unloads tracked instances and preserves cell registrations.
+		</member>
+		<member name="unload_radius" type="int" setter="set_unload_radius" getter="get_unload_radius" default="2">
+			Cells outside this radius are unloaded. Must be at least [member load_radius].
+		</member>
+	</members>
+	<signals>
+		<signal name="cell_loaded">
+			<param index="0" name="cell" type="Vector2i" />
+			<description>
+				Emitted after a [PackedScene] is instantiated as a child of this node.
+			</description>
+		</signal>
+		<signal name="cell_unloaded">
+			<param index="0" name="cell" type="Vector2i" />
+			<description>
+				Emitted when a previously instantiated cell is queued for deletion.
+			</description>
+		</signal>
+	</signals>
+</class>
