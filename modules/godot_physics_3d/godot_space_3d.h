@@ -186,6 +186,7 @@ private:
 	real_t spinning_friction = 0.0;
 	real_t restitution_velocity_threshold = 0.0;
 	real_t static_friction_multiplier = 1.0; // PhysX-style stiction; 1 = legacy friction.
+	real_t stribeck_transition_velocity = 0.0; // 0 = legacy, >0 enables velocity weakening (m/s).
 	int friction_combine_mode = 0; // 0: legacy, 1: geometric, 2: average, 3: maximum
 	int restitution_combine_mode = 0; // 0: legacy sum, 1: max, 2: average, 3: min, 4: multiply, 5: geometric
 
@@ -324,6 +325,7 @@ public:
 	_FORCE_INLINE_ int get_gyroscopic_integration_mode() const { return gyroscopic_integration_mode; }
 	_FORCE_INLINE_ real_t get_rolling_friction() const { return rolling_friction; }
 	_FORCE_INLINE_ real_t get_static_friction_multiplier() const { return static_friction_multiplier; }
+	_FORCE_INLINE_ real_t get_stribeck_transition_velocity() const { return stribeck_transition_velocity; }
 	_FORCE_INLINE_ real_t get_spinning_friction() const { return spinning_friction; }
 	_FORCE_INLINE_ real_t get_restitution_velocity_threshold() const { return restitution_velocity_threshold; }
 	_FORCE_INLINE_ real_t mix_restitution(real_t p_a, real_t p_b) const { return godot_physics_combine_restitution(p_a, p_b, restitution_combine_mode); }

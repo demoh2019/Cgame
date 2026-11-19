@@ -725,6 +725,10 @@ PhysicsServer3D::PhysicsServer3D() {
 	// PhysX-style static coefficient = combined material friction * multiplier;
 	// default 1.0 keeps the historic single-Coulomb-cone solver unchanged.
 	GLOBAL_DEF(PropertyInfo(Variant::FLOAT, "physics/3d/solver/static_friction_multiplier", PROPERTY_HINT_RANGE, "1,5,0.01,or_greater"), 1.0);
+	// Optional Stribeck-like smooth static-to-kinetic friction transition
+	// in rigid/rigid and rigid/soft contacts. 0 disables extra math.
+	// Uses the static friction multiplier to define low-speed friction.
+	GLOBAL_DEF(PropertyInfo(Variant::FLOAT, "physics/3d/solver/stribeck_transition_velocity", PROPERTY_HINT_RANGE, "0,10,0.01,or_greater,suffix:m/s"), 0.0);
 	GLOBAL_DEF(PropertyInfo(Variant::INT, "physics/3d/solver/friction_combine_mode", PROPERTY_HINT_ENUM, "Legacy Minimum,Geometric Mean,Average,Maximum"), 0);
 	// Default preserves the historic clamped sum. Other modes match common
 	// game-physics coefficient combination rules (Box2D / Rapier).
