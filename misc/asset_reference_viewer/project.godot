@@ -1,0 +1,16 @@
+; Minimal project for addon headless regression tests and editor smoke tests.
+config_version=5
+
+[application]
+
+config/name="Cgame Asset Reference Viewer Tests"
+config/features=PackedStringArray("4.3", "GL Compatibility")
+
+[editor_plugins]
+
+enabled=PackedStringArray("res://addons/asset_reference_viewer/plugin.cfg")
+
+[rendering]
+
+renderer/rendering_method="gl_compatibility"
+renderer/rendering_method.mobile="gl_compatibility"
