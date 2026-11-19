@@ -391,6 +391,10 @@ func _on_event(event: Dictionary) -> void:
 		"infection":
 			if event.get("peer", -1) == client.peer_id:
 				say("Infected wound: severity %d. Use antiseptic or antibiotics." % int(event.get("severity", 0)))
+		"mastery":
+			if event.get("peer", -1) == client.peer_id:
+				say("+%d %s weapon mastery XP" % [int(event.get("xp", 0)),
+					str(event.get("skill", "weapon"))])
 		"evaded":
 			if event.get("peer", -1) == client.peer_id:
 				say("Evaded an infected attack!")
@@ -513,12 +517,14 @@ func _process(_delta: float) -> void:
 	_info_label.text += "  Rest %.0fs" % float(client.you.get("rest_cooldown", 0.0))
 	var weapon: String = client.you.get("weapon", "")
 	var levels: Dictionary = client.you.get("gathering_levels", {})
-	_equipped.text = "Weapon: %s | Craft L%d (%d XP)\nWood L%d | Stone L%d | Ore L%d | Fiber L%d | Fishing L%d" % [
+	var weapon_levels: Dictionary = client.you.get("combat_levels", {})
+	_equipped.text = "Weapon: %s | Craft L%d (%d XP)\nWood L%d | Stone L%d | Ore L%d | Fiber L%d | Fishing L%d\nMastery: Melee L%d | Ranged L%d" % [
 		(Defs.item(weapon).get("name", weapon) if weapon != "" else "fists"),
 		int(client.you.get("crafting_level", 1)), int(client.you.get("crafting_xp", 0)),
 		int(levels.get("wood", 1)), int(levels.get("stone", 1)),
 		int(levels.get("ore", 1)), int(levels.get("fiber", 1)),
-		int(levels.get("fishing", 1))
+		int(levels.get("fishing", 1)),
+		int(weapon_levels.get("melee", 1)), int(weapon_levels.get("ranged", 1))
 	]
 	_death.visible = not bool(client.you.get("alive", true))
 	_death.text = "YOU DIED\n%s" % ("All carried items dropped." if bool(client.you.get("last_death_full_loot", false)) else "Carried equipment retained.")
