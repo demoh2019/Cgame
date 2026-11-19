@@ -42,6 +42,7 @@
 #include "servers/physics_softbody_aerodynamic_drag.h"
 #include "servers/physics_softbody_plasticity.h"
 #include "servers/physics_softbody_volume_safe.h"
+#include "servers/physics_softbody_hydrostatic_buoyancy.h"
 #include "servers/physics_xpbd_distance.h"
 #include "servers/physics_xpbd_area.h"
 #include "servers/physics_xpbd_dihedral.h"
@@ -307,10 +308,10 @@ static _FORCE_INLINE_ double _soft_body_signed_face_volume(const Vector3 &p_a, c
 void GodotSoftBody3D::initialize_volume_constraint() {
 	xpbd_volume_closed = false;
 	xpbd_volume_rest = 0.0;
-	if (!get_space() ||
-			(get_space()->get_soft_body_xpbd_volume_compliance() <= 0.0 &&
-					get_space()->get_soft_body_gas_pressure_gamma() <= 0.0) ||
-			nodes.size() < 4 || faces.size() < 4) {
+	const bool needs_volume = get_space() && (get_space()->get_soft_body_xpbd_volume_compliance() > 0.0 ||
+			get_space()->get_soft_body_gas_pressure_gamma() > 0.0 ||
+			(get_space()->is_fluid_plane_enabled() && get_space()->is_soft_body_hydrostatic_buoyancy_enabled()));
+	if (!needs_volume || nodes.size() < 4 || faces.size() < 4) {
 		// Neither XPBD nor gas mode needs the volume for ordinary cloth.
 		if (!xpbd_volume_gradients.is_empty()) {
 			xpbd_volume_gradients.reset();
@@ -1821,6 +1822,43 @@ void GodotSoftBody3D::predict_motion(real_t p_delta) {
 	add_velocity(gravity * p_delta);
 	if ((pressure_coefficient > CMP_EPSILON && Math::is_finite(pressure_coefficient)) || !wind_areas.is_empty() || drag_coefficient > 0.0 || get_space()->get_soft_body_lift_coefficient() > 0.0) {
 		apply_forces(wind_areas, p_delta);
+	}
+
+	// Integrate exact hydrostatic pressure over submerged triangles. Surface
+	// winding is corrected from the cached signed volume, and invalid or
+	// open meshes are excluded at initialization. Zero-cost default path.
+	if (xpbd_volume_closed && get_space()->is_fluid_plane_enabled() &&
+			get_space()->is_soft_body_hydrostatic_buoyancy_enabled() &&
+			get_space()->get_fluid_plane_density() > 0.0 &&
+			gravity.is_finite() && gravity.y < -CMP_EPSILON &&
+			Math::abs(gravity.x) <= -gravity.y * real_t(0.000001) &&
+			Math::abs(gravity.z) <= -gravity.y * real_t(0.000001)) {
+		const real_t water_height = get_space()->get_fluid_plane_surface_height();
+		const real_t density = get_space()->get_fluid_plane_density();
+		const int outward_sign = xpbd_volume_rest >= 0.0 ? 1 : -1;
+		for (const Face &face : faces) {
+			Vector3 forces[3];
+			if (!physics_softbody_hydrostatic_face_forces(face.n[0]->x, face.n[1]->x,
+						face.n[2]->x, water_height, density, -gravity.y,
+						outward_sign, forces[0], forces[1], forces[2])) {
+				continue;
+			}
+			Node *face_nodes[3] = { face.n[0], face.n[1], face.n[2] };
+			Vector3 updated[3];
+			bool valid = true;
+			for (int j = 0; j < 3; ++j) {
+				updated[j] = face_nodes[j]->im > 0.0 ? face_nodes[j]->f + forces[j] : face_nodes[j]->f;
+				if (!updated[j].is_finite()) {
+					valid = false;
+					break;
+				}
+			}
+			if (valid) {
+				for (int j = 0; j < 3; ++j) {
+					face_nodes[j]->f = updated[j];
+				}
+			}
+		}
 	}
 
 	// Avoid soft body from 'exploding' so use some upper threshold of maximum motion
