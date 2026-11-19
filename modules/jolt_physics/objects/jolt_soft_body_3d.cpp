@@ -49,6 +49,120 @@
 
 namespace {
 
+// An opt-in tetrahedral fan for CLOSED CONVEX soft meshes. The fan adds an
+// interior particle, with one Jolt XPBD volume constraint per surface face.
+// It cannot describe concave geometry; reject unclosed, inconsistent or
+// nonconvex meshes rather than silently creating inverted tetrahedra.
+static bool try_build_convex_volume_fan(JPH::SoftBodySharedSettings &r_settings, float p_compliance) {
+	JPH::Array<JPH::SoftBodySharedSettings::Vertex> &vertices = r_settings.mVertices;
+	const JPH::Array<JPH::SoftBodySharedSettings::Face> &faces = r_settings.mFaces;
+
+	// Bound the O(vertices * faces) convexity validation and fan solver cost.
+	constexpr uint32_t MAX_VERTICES = 2048;
+	constexpr uint32_t MAX_FACES = 4096;
+	if (vertices.size() < 4 || vertices.size() > MAX_VERTICES || faces.size() < 4 || faces.size() > MAX_FACES) {
+		return false;
+	}
+
+	double x_sum = 0.0;
+	double y_sum = 0.0;
+	double z_sum = 0.0;
+	for (const JPH::SoftBodySharedSettings::Vertex &vertex : vertices) {
+		const JPH::Float3 &p = vertex.mPosition;
+		if (!Math::is_finite(p.x) || !Math::is_finite(p.y) || !Math::is_finite(p.z)) {
+			return false;
+		}
+		x_sum += p.x;
+		y_sum += p.y;
+		z_sum += p.z;
+	}
+
+	const float inv_count = 1.0f / (float)vertices.size();
+	const JPH::Vec3 center((float)(x_sum * inv_count), (float)(y_sum * inv_count), (float)(z_sum * inv_count));
+	float max_radius_sq = 0.0f;
+	for (const JPH::SoftBodySharedSettings::Vertex &vertex : vertices) {
+		max_radius_sq = MAX(max_radius_sq, (JPH::Vec3(vertex.mPosition) - center).LengthSq());
+	}
+	if (!Math::is_finite(max_radius_sq) || max_radius_sq <= 0.0f) {
+		return false;
+	}
+
+	// Each undirected edge must occur exactly twice, with opposite winding.
+	// 1/-1 means an unmatched oriented edge, 0 is a completed pair.
+	AHashMap<uint64_t, int8_t> edges;
+	edges.reserve(uint32_t(faces.size()) * 3 / 2 + 1);
+	const float radius = Math::sqrt(max_radius_sq);
+	for (const JPH::SoftBodySharedSettings::Face &face : faces) {
+		const uint32_t a = face.mVertex[0];
+		const uint32_t b = face.mVertex[1];
+		const uint32_t c = face.mVertex[2];
+		if (a >= vertices.size() || b >= vertices.size() || c >= vertices.size() || face.IsDegenerate()) {
+			return false;
+		}
+		const JPH::Vec3 p0(vertices[a].mPosition);
+		const JPH::Vec3 p1(vertices[b].mPosition);
+		const JPH::Vec3 p2(vertices[c].mPosition);
+		const JPH::Vec3 normal = (p1 - p0).Cross(p2 - p0);
+		const float normal_len_sq = normal.LengthSq();
+		if (!Math::is_finite(normal_len_sq) || normal_len_sq <= max_radius_sq * max_radius_sq * 1.0e-12f) {
+			return false;
+		}
+		const float tolerance = Math::sqrt(normal_len_sq) * radius * 1.0e-5f;
+		const float center_side = normal.Dot(center - p0);
+		if (!Math::is_finite(center_side) || Math::abs(center_side) <= tolerance) {
+			return false;
+		}
+		const float side = center_side > 0.0f ? 1.0f : -1.0f;
+		// Every other vertex must lie on the center-facing side of this
+		// triangle plane. This rejects nonconvex or inverted mesh regions.
+		for (const JPH::SoftBodySharedSettings::Vertex &vertex : vertices) {
+			if (side * normal.Dot(JPH::Vec3(vertex.mPosition) - p0) < -tolerance) {
+				return false;
+			}
+		}
+
+		const uint32_t indices[3] = { a, b, c };
+		for (int i = 0; i < 3; ++i) {
+			const uint32_t v0 = indices[i];
+			const uint32_t v1 = indices[(i + 1) % 3];
+			const uint64_t key = (uint64_t(MIN(v0, v1)) << 32) | MAX(v0, v1);
+			const int8_t direction = v0 < v1 ? 1 : -1;
+			int8_t *state = edges.getptr(key);
+			if (state == nullptr) {
+				edges.insert(key, direction);
+			} else if (*state == -direction) {
+				*state = 0;
+			} else {
+				return false; // Repeated/same-direction or non-manifold edge.
+			}
+		}
+	}
+
+	for (const JPH::SoftBodySharedSettings::Face &face : faces) {
+		for (int i = 0; i < 3; ++i) {
+			const uint32_t v0 = face.mVertex[i];
+			const uint32_t v1 = face.mVertex[(i + 1) % 3];
+			const uint64_t key = (uint64_t(MIN(v0, v1)) << 32) | MAX(v0, v1);
+			const int8_t *state = edges.getptr(key);
+			if (state == nullptr || *state != 0) {
+				return false; // Boundary edge: the surface is open.
+			}
+		}
+	}
+
+	// Keep the interior vertex out of the surface face list and render map.
+	// Volume constraints are built AFTER edge/bend/LRA constraints, because
+	// the center does not belong to the cloth surface's edge graph.
+	const uint32_t center_index = (uint32_t)vertices.size();
+	vertices.emplace_back(JPH::Float3(center.GetX(), center.GetY(), center.GetZ()), JPH::Float3(0.0f, 0.0f, 0.0f), 1.0f);
+	r_settings.mVolumeConstraints.reserve(faces.size());
+	for (const JPH::SoftBodySharedSettings::Face &face : faces) {
+		r_settings.mVolumeConstraints.emplace_back(face.mVertex[0], face.mVertex[1], face.mVertex[2], center_index, p_compliance);
+	}
+	r_settings.CalculateVolumeConstraintVolumes();
+	return true;
+}
+
 template <typename TJoltVertex>
 void pin_vertices(const JoltSoftBody3D &p_body, const HashSet<int> &p_pinned_vertices, const LocalVector<int> &p_mesh_to_physics, JPH::Array<TJoltVertex> &r_physics_vertices) {
 	const int mesh_vertex_count = p_mesh_to_physics.size();
@@ -276,6 +390,9 @@ JPH::SoftBodySharedSettings *JoltSoftBody3D::_create_shared_settings() {
 	const int bend_mode = JoltProjectSettings::soft_body_bend_mode;
 	const BendType bend_type = bend_mode == 1 ? BendType::Distance : (bend_mode == 2 ? BendType::Dihedral : BendType::None);
 	settings->CreateConstraints(&vertex_attrib, 1, bend_type);
+	if (JoltProjectSettings::soft_body_volume_preservation) {
+		try_build_convex_volume_fan(*settings, JoltProjectSettings::soft_body_volume_compliance);
+	}
 	float multiplier = 1.0f - shrinking_factor;
 	for (JPH::SoftBodySharedSettings::Edge &e : settings->mEdgeConstraints) {
 		e.mRestLength *= multiplier;
