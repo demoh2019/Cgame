@@ -39,4 +39,12 @@ func interact(player: Node) -> void:
         return
     collected = true
     collected_once.emit(name)
-    queue_free()
+    set_collected_state(true)
+
+
+func set_collected_state(value: bool) -> void:
+    # Keep the named pickup in the world for reproducible save/load.
+    # Hide it and disable physics queries instead of deleting its identity.
+    collected = value
+    visible = not value
+    set_deferred("collision_layer", 0 if value else 1)
