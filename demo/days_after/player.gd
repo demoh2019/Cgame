@@ -12,6 +12,7 @@ const GRAVITY := 18.0
 const MOUSE_SENSITIVITY := 0.0025
 const XP_PER_LEVEL := 60
 const SAVE_STATE = preload("res://save_state.gd")
+const SESSION_STATE = preload("res://session_state.gd")
 
 const RECIPES := {
     "field_bandage": {"fiber_t1": 2},
@@ -53,9 +54,9 @@ func _unhandled_input(event: InputEvent) -> void:
         if event.keycode == KEY_ESCAPE:
             Input.mouse_mode = Input.MOUSE_MODE_VISIBLE
         elif event.keycode == KEY_F5:
-            last_message = "Игра сохранена." if SAVE_STATE.save_player(self) else "Не удалось сохранить игру."
+            last_message = "Мир и персонаж сохранены." if SESSION_STATE.save_session(get_parent()) else "Не удалось сохранить игру."
         elif event.keycode == KEY_F9:
-            last_message = "Сохранение загружено." if SAVE_STATE.load_player(self) else "Нет корректного сохранения."
+            last_message = "Мир и персонаж загружены." if SESSION_STATE.load_session(get_parent()) else "Нет корректного сохранения."
     elif event is InputEventMouseButton and event.pressed:
         if event.button_index == MOUSE_BUTTON_LEFT:
             Input.mouse_mode = Input.MOUSE_MODE_CAPTURED
@@ -128,13 +129,14 @@ func add_item(item_id: String, quantity: int) -> void:
     inventory[item_id] = get_item_count(item_id) + quantity
 
 
-func collect_item(item_type: String, quantity: int) -> void:
+func collect_item(item_type: String, quantity: int) -> bool:
     if health <= 0.0 or quantity <= 0:
-        return
+        return false
     if item_type != "food" and item_type != "water":
-        return
+        return false
     add_item(item_type, quantity)
     last_message = "Найдены припасы: %s × %d" % [item_type, quantity]
+    return true
 
 
 func consume_food() -> void:
