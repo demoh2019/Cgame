@@ -78,7 +78,16 @@ After merging this tooling PR into the fork's default branch, use
 `apply=false` for a dry run. For live copying set `apply=true` and use
 small increments of `start_page`, `pages` and `max_items`; open PRs are
 drafts. Each run uploads its checkpoint as an artifact. A GitHub-hosted
-runner is limited in time; restart from the checkpoint or next source page.
+runner is limited in time. To continue in GitHub Actions, copy `next_path`,
+`next_offset`, and `next_page` from the downloaded checkpoint JSON into
+the inputs `start_path`, `start_offset`, and `start_page`. A local CLI
+run can instead pass `--resume` and read its existing checkpoint file.
+
+**Important pagination detail:** GitHub no longer supports page=N requests
+past a certain point for large issue collections. This migrator follows
+opaque `Link: rel="next"` cursors instead. Starting at a large `start_page`
+will traverse preceding cursor links; passing `--start-path` from the
+previous checkpoint is considerably more efficient.
 
 **Do not run multiple batches concurrently**. The workflow uses a concurrency
 group to prevent overlapping migration writes.
