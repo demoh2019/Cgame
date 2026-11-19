@@ -443,4 +443,34 @@ TEST_CASE("[PacketPeer][Performance] Cached frames avoid redundant stream polls"
 	CHECK(stream->partial_reads == 3);
 }
 
+
+TEST_CASE("[PacketPeer][Performance] Write-only streams never poll the receiver") {
+	Ref<CountingStreamBuffer> stream;
+	stream.instantiate();
+	Ref<PacketPeerStream> packets;
+	packets.instantiate();
+	packets->set_stream_peer(stream);
+	packets->set_input_buffer_max_size(16384);
+
+	constexpr int COUNT = 512;
+	for (int i = 0; i < COUNT; ++i) {
+		const uint8_t byte = uint8_t(i);
+		REQUIRE(packets->put_packet(&byte, 1) == OK);
+	}
+	CHECK(stream->partial_reads == 0);
+	CHECK(stream->get_size() == COUNT * 5);
+
+	stream->seek(0);
+	CHECK(packets->get_available_packet_count() == COUNT);
+	CHECK(stream->partial_reads == 1);
+	const uint8_t *payload = nullptr;
+	int size = 0;
+	for (int i = 0; i < COUNT; ++i) {
+		REQUIRE(packets->get_packet(&payload, size) == OK);
+		REQUIRE(size == 1);
+		CHECK(payload[0] == uint8_t(i));
+	}
+	CHECK(stream->partial_reads == 1);
+}
+
 } // namespace TestPacketPeer

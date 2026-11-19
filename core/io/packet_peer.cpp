@@ -257,12 +257,8 @@ Error PacketPeerStream::get_packet(const uint8_t **r_buffer, int &r_buffer_size)
 
 Error PacketPeerStream::put_packet(const uint8_t *p_buffer, int p_buffer_size) {
 	ERR_FAIL_COND_V(peer.is_null(), ERR_UNCONFIGURED);
-	Error err = _poll_buffer(); //won't hurt to poll here too
-
-	if (err) {
-		return err;
-	}
-
+	// Sending a packet must not synchronously read or parse inbound frames.
+	// The receive path polls on demand via get_packet()/get_available_packet_count().
 	if (p_buffer_size == 0) {
 		return OK;
 	}
