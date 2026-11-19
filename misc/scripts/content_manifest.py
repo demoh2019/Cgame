@@ -47,6 +47,7 @@ def validate_path(value):
 
 def _check_aliases(paths):
     seen = {}
+    files = set()
     for path in paths:
         validate_path(path)
         parts = path.split("/")
@@ -56,13 +57,27 @@ def _check_aliases(paths):
             previous = seen.setdefault(folded, prefix)
             if previous != prefix:
                 raise ManifestError(f"Case-insensitive path collision: {previous!r} and {prefix!r}")
+        files.add(path.casefold())
+
+    # A manifest must never describe both a file and a directory at one path.
+    # Such a manifest cannot be installed safely on any filesystem.
+    for path in paths:
+        parts = path.split("/")
+        for i in range(1, len(parts)):
+            parent = "/".join(parts[:i])
+            if parent.casefold() in files:
+                raise ManifestError(f"File/directory path collision: {parent!r} and {path!r}")
 
 
 def _project_files(root, excluded_manifest=None):
     if root.is_symlink() or not root.is_dir():
         raise ManifestError(f"Project root must be a real directory: {root}")
+    def reject_walk_error(error):
+        # os.walk ignores unreadable directories unless onerror is provided.
+        raise ManifestError(f"Cannot traverse project tree: {error}")
+
     found = []
-    for current, dirs, files in os.walk(root, followlinks=False):
+    for current, dirs, files in os.walk(root, followlinks=False, onerror=reject_walk_error):
         location = Path(current)
         for directory in list(dirs):
             if directory in SKIP_DIRS:
