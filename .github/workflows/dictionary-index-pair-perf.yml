@@ -1,0 +1,40 @@
+name: Dictionary indexed-pair native regressions
+
+on:
+  pull_request:
+    paths:
+      - 'core/variant/dictionary.cpp'
+      - 'core/variant/dictionary.h'
+      - 'modules/mono/glue/runtime_interop.cpp'
+      - 'tests/core/variant/test_dictionary.cpp'
+      - '.github/workflows/dictionary-index-pair-perf.yml'
+  push:
+    branches: [develop]
+    paths:
+      - 'core/variant/dictionary.cpp'
+      - 'core/variant/dictionary.h'
+      - 'modules/mono/glue/runtime_interop.cpp'
+      - 'tests/core/variant/test_dictionary.cpp'
+      - '.github/workflows/dictionary-index-pair-perf.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  native-indexed-lookup:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+      - uses: ./.github/actions/godot-deps
+      - name: Compile engine with native tests
+        uses: ./.github/actions/godot-build
+        with:
+          platform: linuxbsd
+          target: editor
+          scons-flags: dev_build=yes tests=yes debug_symbols=no module_mono_enabled=no module_text_server_fb_enabled=yes accesskit=no -j2
+      - name: Check indexed key-value traversal boundaries and order
+        run: ./bin/godot.linuxbsd.editor.dev.x86_64 --headless --test --test-case="*[Dictionary] indexed pair traversal from both ends*"

@@ -67,28 +67,40 @@ LocalVector<Variant> Dictionary::get_key_list() const {
 	return keys;
 }
 
-Variant Dictionary::get_key_at_index(int p_index) const {
-	int index = 0;
-	for (const KeyValue<Variant, Variant> &E : _p->variant_map) {
-		if (index == p_index) {
-			return E.key;
-		}
-		index++;
+const KeyValue<Variant, Variant> *Dictionary::get_key_value_at_index(int p_index) const {
+	const int count = size();
+	if (p_index < -count || p_index >= count) {
+		return nullptr;
+	}
+	if (p_index < 0) {
+		p_index += count;
 	}
 
-	return Variant();
+	// HashMap preserves insertion order and supports bidirectional iteration.
+	// Start at the nearer end to avoid traversing unnecessary entries.
+	ConstIterator E;
+	if (p_index < count / 2) {
+		E = _p->variant_map.begin();
+		for (int i = 0; i < p_index; i++) {
+			++E;
+		}
+	} else {
+		E = _p->variant_map.last();
+		for (int i = count - 1; i > p_index; i--) {
+			--E;
+		}
+	}
+	return &(*E);
+}
+
+Variant Dictionary::get_key_at_index(int p_index) const {
+	const KeyValue<Variant, Variant> *entry = get_key_value_at_index(p_index);
+	return entry ? entry->key : Variant();
 }
 
 Variant Dictionary::get_value_at_index(int p_index) const {
-	int index = 0;
-	for (const KeyValue<Variant, Variant> &E : _p->variant_map) {
-		if (index == p_index) {
-			return E.value;
-		}
-		index++;
-	}
-
-	return Variant();
+	const KeyValue<Variant, Variant> *entry = get_key_value_at_index(p_index);
+	return entry ? entry->value : Variant();
 }
 
 // WARNING: This operator does not validate the value type. For scripting/extensions this is
