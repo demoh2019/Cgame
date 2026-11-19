@@ -88,6 +88,8 @@ func load_dict(data: Variant) -> bool:
 	var source: Variant = data.get("gathering", null)
 	if not (source is Dictionary) or source.size() not in [GATHER_SKILLS.size(), GATHER_SKILLS.size() - 1]:
 		return false
+	if source.size() == GATHER_SKILLS.size() and not source.has("fishing"):
+		return false # Extra foreign key must not masquerade as legacy fishing.
 	if not _valid_xp(data.get("crafting", null)):
 		return false
 	var clean: Dictionary = {}
