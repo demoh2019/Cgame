@@ -465,14 +465,18 @@ bool GodotBodyPair2D::pre_solve(real_t p_step) {
 	// Discard the cache after unusually large timestep jumps.
 	const real_t previous_step = space->get_previous_step();
 	const bool step_changed = previous_step > 0.0 && !Math::is_equal_approx(previous_step, p_step);
-	const real_t impulse_scale = step_changed ? p_step / previous_step : real_t(1.0);
-	const bool can_scale_impulses = impulse_scale >= real_t(0.5) && impulse_scale <= real_t(2.0);
+	const real_t timestep_ratio = step_changed ? p_step / previous_step : real_t(1.0);
+	const bool can_scale_impulses = timestep_ratio >= real_t(0.5) && timestep_ratio <= real_t(2.0);
+	// Configurable like Rapier; default 1.0 preserves the old fixed-step path.
+	const real_t warm_start_coefficient = space->get_warm_start_coefficient();
+	const bool rescale_impulses = step_changed || warm_start_coefficient != real_t(1.0);
+	const real_t impulse_scale = timestep_ratio * warm_start_coefficient;
 
 	for (int i = 0; i < contact_count; i++) {
 		Contact &c = contacts[i];
 		c.active = false;
 
-		if (step_changed) {
+		if (rescale_impulses) {
 			if (can_scale_impulses) {
 				c.acc_normal_impulse *= impulse_scale;
 				c.acc_tangent_impulse *= impulse_scale;
