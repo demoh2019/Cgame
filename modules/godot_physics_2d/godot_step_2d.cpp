@@ -135,11 +135,20 @@ void GodotStep2D::_solve_large_island(const LocalVector<GodotConstraint2D *> &p_
 		return;
 	}
 
-	// Greedily color constraints: two constraints of the same color never
-	// reference the same body. Conservatively include static and kinematic
-	// bodies too, since not all joint implementations are guaranteed read-only.
-	// No body or no remaining color -> serial overflow, solved after each
-	// colored pass. This is a performance optimization, not an island split.
+	// The rigid contact solver never writes to static or kinematic bodies.
+	// A contact-only island can therefore share those read-only objects
+	// between colors. Do not relax ownership for mixed islands containing
+	// joints or user constraints: their solver semantics may be different.
+	bool contact_only_island = true;
+	for (uint32_t i = 0; i < constraint_count; ++i) {
+		if (!p_constraint_island[i]->permits_parallel_immovable_body_sharing()) {
+			contact_only_island = false;
+			break;
+		}
+	}
+
+	// Greedy constraint coloring: each dynamic body may be written by at
+	// most one constraint within a color. The serial overflow handles hubs.
 	AHashMap<GodotBody2D *, uint32_t> occupied_colors;
 	LocalVector<uint8_t> constraint_colors;
 	constraint_colors.resize(constraint_count);
@@ -155,7 +164,7 @@ void GodotStep2D::_solve_large_island(const LocalVector<GodotConstraint2D *> &p_
 		if (body_count > 0 && bodies != nullptr) {
 			for (int body_idx = 0; body_idx < body_count; ++body_idx) {
 				GodotBody2D *body = bodies[body_idx];
-				if (body != nullptr) {
+				if (body != nullptr && (!contact_only_island || body->get_mode() > PS2DE::BODY_MODE_KINEMATIC)) {
 					const uint32_t *mask = occupied_colors.getptr(body);
 					if (mask != nullptr) {
 						forbidden |= *mask;
@@ -174,7 +183,7 @@ void GodotStep2D::_solve_large_island(const LocalVector<GodotConstraint2D *> &p_
 				const uint32_t bit = uint32_t(1) << color;
 				for (int body_idx = 0; body_idx < body_count; ++body_idx) {
 					GodotBody2D *body = bodies[body_idx];
-					if (body == nullptr) {
+					if (body == nullptr || (contact_only_island && body->get_mode() <= PS2DE::BODY_MODE_KINEMATIC)) {
 						continue;
 					}
 					uint32_t *mask = occupied_colors.getptr(body);
