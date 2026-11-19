@@ -87,8 +87,10 @@ class SoftSoftParticleContactTests(unittest.TestCase):
             b = (-2.0, -1.0)
             result_a, result_b = contact_response(a, b, inv_a, inv_b, 0.05, 0.15, 1 / 60)
             self.assertTrue(all(math.isfinite(x) for x in result_a + result_b))
-            if inv_a:
-                self.assertAlmostEqual((result_a[0] - a[0]) * ma, -(result_b[0] - b[0]) * mb if inv_b else -(result_a[0] - a[0]) * ma, places=5)
+            if inv_a and inv_b:
+                for axis in (0, 1):
+                    self.assertAlmostEqual((result_a[axis] - a[axis]) * ma,
+                                           -(result_b[axis] - b[axis]) * mb, places=5)
             if inv_a == 0:
                 self.assertEqual(result_a, a)
             if inv_b == 0:
