@@ -94,6 +94,7 @@ private:
 	GodotArea2D *area = nullptr;
 
 	int solver_iterations = 0;
+	bool block_solver_enabled = false;
 
 	real_t contact_recycle_radius = 0.0;
 	real_t contact_max_separation = 0.0;
@@ -160,6 +161,7 @@ public:
 	const HashSet<GodotCollisionObject2D *> &get_objects() const;
 
 	_FORCE_INLINE_ int get_solver_iterations() const { return solver_iterations; }
+	_FORCE_INLINE_ bool is_block_solver_enabled() const { return block_solver_enabled; }
 	_FORCE_INLINE_ real_t get_contact_recycle_radius() const { return contact_recycle_radius; }
 	_FORCE_INLINE_ real_t get_contact_max_separation() const { return contact_max_separation; }
 	_FORCE_INLINE_ real_t get_contact_max_allowed_penetration() const { return contact_max_allowed_penetration; }
