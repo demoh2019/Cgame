@@ -37,15 +37,21 @@ class TerrainHeightmap : public Resource {
     Size2i dimensions = Size2i(17, 17);
     PackedFloat32Array heights;
     PackedColorArray paint_weights;
+    int edit_depth = 0;
+    bool pending_change = false;
 
     bool _valid_cell(int p_x, int p_z) const;
     int _index(int p_x, int p_z) const;
+    void _notify_changed();
 
 protected:
     static void _bind_methods();
 
 public:
     TerrainHeightmap();
+
+    void begin_edit();
+    void end_edit();
 
     void set_dimensions(const Size2i &p_dimensions);
     Size2i get_dimensions() const;
@@ -67,4 +73,5 @@ public:
     void paint_layer(const Vector2 &p_center, float p_radius, int p_layer, float p_strength);
 
     Ref<ArrayMesh> build_mesh(float p_cell_size = 1.0f) const;
+    Ref<ArrayMesh> build_chunk_mesh(const Vector2i &p_origin, const Vector2i &p_cell_count, int p_stride = 1, float p_cell_size = 1.0f) const;
 };
