@@ -324,6 +324,8 @@ public:
 	virtual void soft_body_set_mesh(RID p_body, RID p_mesh) override;
 	virtual void soft_body_set_tetrahedral_indices(RID p_body, const PackedInt32Array &p_indices) override;
 	virtual void soft_body_set_tetrahedral_interior_positions(RID p_body, const PackedVector3Array &p_positions) override;
+	virtual int soft_body_get_tetrahedron_count(RID p_body) const override;
+	virtual int soft_body_get_tetrahedral_interior_node_count(RID p_body) const override;
 
 	virtual AABB soft_body_get_bounds(RID p_body) const override;
 
