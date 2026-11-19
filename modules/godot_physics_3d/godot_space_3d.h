@@ -161,6 +161,10 @@ private:
 	real_t soft_body_tetra_mooney_rivlin_fraction = 0.5;
 	real_t soft_body_tetra_fiber_compliance = 0.0; // 0: no FEM directional reinforcement.
 	Vector3 soft_body_tetra_fiber_axis = Vector3(1, 0, 0); // Undeformed material direction.
+	// One-sided plastic rest stretch, off unless creep rate >0.
+	real_t soft_body_tetra_fiber_plastic_yield_ratio = 0.15;
+	real_t soft_body_tetra_fiber_plastic_creep_rate = 0.0;
+	real_t soft_body_tetra_fiber_plastic_max_stretch = 3.0;
 	real_t soft_body_tetra_fem_viscosity = 0.0; // Objective Kelvin-Voigt material damping.
 	real_t soft_body_tetra_volume_plastic_rate = 0.0; // 1/s, opt-in per-tet isotropic plastic rest deformation.
 	real_t soft_body_tetra_volume_plastic_yield = 0.15; // Elastic volume strain window in |ln(J)|.
@@ -340,6 +344,9 @@ public:
 	_FORCE_INLINE_ real_t get_soft_body_tetra_mooney_rivlin_fraction() const { return soft_body_tetra_mooney_rivlin_fraction; }
 	_FORCE_INLINE_ real_t get_soft_body_tetra_fiber_compliance() const { return soft_body_tetra_fiber_compliance; }
 	_FORCE_INLINE_ const Vector3 &get_soft_body_tetra_fiber_axis() const { return soft_body_tetra_fiber_axis; }
+	_FORCE_INLINE_ real_t get_soft_body_tetra_fiber_plastic_yield_ratio() const { return soft_body_tetra_fiber_plastic_yield_ratio; }
+	_FORCE_INLINE_ real_t get_soft_body_tetra_fiber_plastic_creep_rate() const { return soft_body_tetra_fiber_plastic_creep_rate; }
+	_FORCE_INLINE_ real_t get_soft_body_tetra_fiber_plastic_max_stretch() const { return soft_body_tetra_fiber_plastic_max_stretch; }
 	_FORCE_INLINE_ real_t get_soft_body_tetra_fem_viscosity() const { return soft_body_tetra_fem_viscosity; }
 	_FORCE_INLINE_ real_t get_soft_body_tetra_volume_plastic_rate() const { return soft_body_tetra_volume_plastic_rate; }
 	_FORCE_INLINE_ real_t get_soft_body_tetra_volume_plastic_yield() const { return soft_body_tetra_volume_plastic_yield; }

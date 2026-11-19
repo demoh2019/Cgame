@@ -33,7 +33,8 @@
 // deformation gradient F = Ds * inverse(Dm). The stretch |F*a0| is
 // invariant under rigid world rotation of a deformed element.
 //
-// XPBD inequality: C=sqrt(rest_volume)*(1-|F*a0|) >= 0, lambda >= 0.
+// XPBD inequality: C=sqrt(rest_volume)*(rest_stretch-|F*a0|) >= 0,
+// lambda >= 0. Plastic rest stretch is optional; defaults to one.
 // Only FIBER TENSION generates resistance; it never artificially stiffens
 // buckling/compression. Four positional gradients are derived exactly
 // from the linear tetrahedral shape functions (sum of gradients = 0).
@@ -44,12 +45,14 @@ _FORCE_INLINE_ static bool physics_fem_tetra_solve_fiber(
 		Vector3 &r_a, Vector3 &r_b, Vector3 &r_c, Vector3 &r_d,
 		real_t p_inv_a, real_t p_inv_b, real_t p_inv_c, real_t p_inv_d,
 		const PhysicsFEMTetraRest &p_rest, const Vector3 &p_material_axis,
-		double p_alpha, double &r_lambda) {
+		double p_alpha, double &r_lambda, double p_plastic_rest_stretch = 1.0) {
 	if (!r_a.is_finite() || !r_b.is_finite() || !r_c.is_finite() || !r_d.is_finite() ||
 			!p_material_axis.is_finite() || !(p_rest.volume > 0.0) ||
 			!Math::is_finite(p_rest.volume) || !Math::is_finite(p_rest.signed_det) ||
 			p_rest.signed_det == 0.0 || !Math::is_finite(p_alpha) ||
-			p_alpha < 0.0 || !Math::is_finite(r_lambda) || r_lambda < 0.0) {
+			p_alpha < 0.0 || !Math::is_finite(r_lambda) || r_lambda < 0.0 ||
+			!(p_plastic_rest_stretch >= 1.0) || p_plastic_rest_stretch > 16.0 ||
+			!Math::is_finite(p_plastic_rest_stretch)) {
 		return false;
 	}
 	const double inv_mass[4] = {
@@ -109,7 +112,7 @@ _FORCE_INLINE_ static bool physics_fem_tetra_solve_fiber(
 	}
 	const double stretch = Math::sqrt(stretch_sq);
 	const double scale = Math::sqrt(p_rest.volume);
-	const double constraint = scale * (1.0 - stretch);
+	const double constraint = scale * (p_plastic_rest_stretch - stretch);
 	if (!(constraint < 0.0) && r_lambda == 0.0) {
 		return false; // Slack: no force until the material fiber is stretched.
 	}
