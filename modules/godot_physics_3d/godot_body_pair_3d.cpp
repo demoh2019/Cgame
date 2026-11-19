@@ -673,7 +673,9 @@ void GodotBodyPair3D::solve(real_t p_step) {
 		const real_t largest = MAX(k00, k11);
 
 		// Prevent a nearly singular two-point system from amplifying errors.
-		if (k00 > 0.0 && k11 > 0.0 && det > CMP_EPSILON &&
+		if (Math::is_finite(k00) && Math::is_finite(k01) &&
+				Math::is_finite(k11) && Math::is_finite(det) &&
+				k00 > 0.0 && k11 > 0.0 && det > CMP_EPSILON &&
 				largest * largest < real_t(100.0) * det) {
 			const Vector3 rel_linear = B->get_linear_velocity() - A->get_linear_velocity();
 			const Vector3 angular_A = A->get_angular_velocity();
@@ -686,17 +688,18 @@ void GodotBodyPair3D::solve(real_t p_step) {
 			const real_t b1 = vn1 + c1.bounce - k01 * old0 - k11 * old1;
 			real_t next0 = -(k11 * b0 - k01 * b1) / det;
 			real_t next1 = -(k00 * b1 - k01 * b0) / det;
-			bool valid = next0 >= 0.0 && next1 >= 0.0;
+			bool valid = Math::is_finite(next0) && Math::is_finite(next1) &&
+					next0 >= 0.0 && next1 >= 0.0;
 			// Complementarity: both loaded, one loaded, or neither loaded.
 			if (!valid) {
 				next0 = 0.0;
 				next1 = -b1 / k11;
-				valid = next1 >= 0.0 && k01 * next1 + b0 >= 0.0;
+				valid = Math::is_finite(next1) && next1 >= 0.0 && k01 * next1 + b0 >= 0.0;
 			}
 			if (!valid) {
 				next1 = 0.0;
 				next0 = -b0 / k00;
-				valid = next0 >= 0.0 && k01 * next0 + b1 >= 0.0;
+				valid = Math::is_finite(next0) && next0 >= 0.0 && k01 * next0 + b1 >= 0.0;
 			}
 			if (!valid) {
 				next0 = 0.0;
