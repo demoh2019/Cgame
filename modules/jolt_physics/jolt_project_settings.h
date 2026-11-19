@@ -41,6 +41,8 @@ class JoltProjectSettings {
 public:
 	inline static int simulation_velocity_steps;
 	inline static int simulation_position_steps;
+	inline static int simulation_collision_steps;
+	inline static float simulation_max_collision_step_seconds;
 	inline static bool use_enhanced_internal_edge_removal_for_bodies;
 	inline static bool generate_all_kinematic_contacts;
 	inline static float penetration_slop;
