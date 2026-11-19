@@ -528,7 +528,7 @@ TEST_CASE("[JSON] StringBuilder serialization keeps exact pretty-print formattin
 	outer["y"] = inner;
 	outer["a"] = true;
 	const String result = JSON::stringify(outer, "--");
-	CHECK(result == "{\\n--\\\"a\\\": true,\\n--\\\"y\\\": {\\n----\\\"numbers\\\": [\\n------1,\\n------2\\n----]\\n--}\\n}");
+	CHECK(result == "{\n--\"a\": true,\n--\"y\": {\n----\"numbers\": [\n------1,\n------2\n----]\n--}\n}");
 	const Variant parsed = JSON::parse_string(result);
 	CHECK(parsed.get_type() == Variant::DICTIONARY);
 	CHECK(JSON::stringify(parsed, "--") == result);
@@ -536,11 +536,11 @@ TEST_CASE("[JSON] StringBuilder serialization keeps exact pretty-print formattin
 
 TEST_CASE("[JSON] StringBuilder serialization preserves escaping and key sorting") {
 	Dictionary source;
-	source["z"] = String("backslash\\\\ quote\\\" newline\\n tab\\t");
+	source["z"] = String("backslash\\ quote\" newline\n tab\t");
 	source["a"] = String("first");
 	source["nested"] = Array();
 	const String compact = JSON::stringify(source);
-	CHECK(compact.begins_with("{\\\"a\\\":\\\"first\\\""));
+	CHECK(compact.begins_with("{\"a\":\"first\""));
 	const Dictionary roundtrip = JSON::parse_string(compact);
 	CHECK(roundtrip["a"] == source["a"]);
 	CHECK(roundtrip["z"] == source["z"]);
