@@ -642,9 +642,11 @@ void GodotBodyPair3D::solve(real_t p_step) {
 
 		// tangential velocity
 		Vector3 tv = dtv - c.normal * tn;
-		real_t tvl = tv.length();
-
-		if (tvl > MIN_VELOCITY) {
+		const real_t tangent_speed_squared = tv.length_squared();
+		// Most resting contacts need no friction correction. Only take the
+		// square root when the tangent speed exceeds the solver tolerance.
+		if (tangent_speed_squared > MIN_VELOCITY * MIN_VELOCITY) {
+			const real_t tvl = Math::sqrt(tangent_speed_squared);
 			tv /= tvl;
 
 			Vector3 temp1 = inv_inertia_tensor_A.xform(c.rA.cross(tv));
@@ -1068,9 +1070,11 @@ void GodotBodySoftBodyPair3D::solve(real_t p_step) {
 
 		// Tangential velocity.
 		Vector3 tv = dtv - c.normal * tn;
-		real_t tvl = tv.length();
-
-		if (tvl > MIN_VELOCITY) {
+		const real_t tangent_speed_squared = tv.length_squared();
+		// Most resting contacts need no friction correction. Only take the
+		// square root when the tangent speed exceeds the solver tolerance.
+		if (tangent_speed_squared > MIN_VELOCITY * MIN_VELOCITY) {
+			const real_t tvl = Math::sqrt(tangent_speed_squared);
 			tv /= tvl;
 
 			Vector3 temp1 = body_inv_inertia_tensor.xform(c.rA.cross(tv));
