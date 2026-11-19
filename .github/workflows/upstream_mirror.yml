@@ -1,0 +1,82 @@
+name: Mirror Godot upstream issues and pull requests
+
+on:
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: "archive = all metadata; issues = native issues; pr-records = PRs as tracking issues; prs = draft PRs with code"
+        required: true
+        type: choice
+        options:
+          - archive
+          - issues
+          - pr-records
+          - prs
+        default: archive
+      limit:
+        description: "Source records per run for issues/pr-records/prs (1..100)"
+        required: true
+        default: "20"
+        type: string
+      pages:
+        description: "Archive pages per run (1..100, each holds up to 100 records)"
+        required: true
+        default: "20"
+        type: string
+      apply_changes:
+        description: "Explicitly write to this fork (off = dry-run)"
+        required: true
+        default: false
+        type: boolean
+
+permissions:
+  contents: write
+  issues: write
+  pull-requests: write
+
+concurrency:
+  group: godot-upstream-mirror
+  cancel-in-progress: false
+
+jobs:
+  mirror:
+    if: github.repository == 'demoh2019/godot'
+    runs-on: ubuntu-latest
+    timeout-minutes: 330
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+          persist-credentials: true
+      - name: Check migration utility tests
+        run: python3 -m unittest discover -s misc/scripts/upstream_mirror_tests -v
+      - name: Archive / mirror a resumable batch
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          UPSTREAM_MODE: ${{ inputs.mode }}
+          UPSTREAM_LIMIT: ${{ inputs.limit }}
+          UPSTREAM_PAGES: ${{ inputs.pages }}
+          UPSTREAM_APPLY: ${{ inputs.apply_changes }}
+        run: |
+          set -euo pipefail
+          args=("$UPSTREAM_MODE" --source godotengine/godot --target "$GITHUB_REPOSITORY" --limit "$UPSTREAM_LIMIT" --pages "$UPSTREAM_PAGES")
+          if [[ "$UPSTREAM_APPLY" != "true" ]]; then
+            args+=(--dry-run)
+          fi
+          python3 misc/scripts/upstream_mirror.py "${args[@]}"
+      - name: Save state and archived GitHub records
+        if: ${{ inputs.apply_changes }}
+        run: |
+          set -euo pipefail
+          git config user.name "godot-upstream-mirror[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          if [[ -f .github/upstream_mirror_state.json ]]; then
+            git add .github/upstream_mirror_state.json
+          fi
+          if [[ -d misc/upstream_archive ]]; then
+            git add -A misc/upstream_archive
+          fi
+          if ! git diff --cached --quiet; then
+            git commit -m "Archive upstream GitHub records / checkpoint migration"
+            git push origin "HEAD:${GITHUB_REF_NAME}"
+          fi
