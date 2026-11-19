@@ -71,7 +71,7 @@ static func _safe_relative_path(path: String) -> bool:
 	if path.is_empty() or path.length() > 160 or path.begins_with("/") or path.contains("\\"):
 		return false
 	var safe_characters := RegEx.new()
-	if safe_characters.compile("^[A-Za-z0-9_./-]+$") != OK or safe_characters.search(path) == null:
+	if safe_characters.compile("^[A-Za-z0-9_./-]+\\z") != OK or safe_characters.search(path) == null:
 		return false
 	for part in path.split("/", true):
 		if part.is_empty() or part == "." or part == ".." or part.begins_with("."):
