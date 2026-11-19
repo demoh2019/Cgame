@@ -1,0 +1,41 @@
+name: Days After unified game smoke
+
+on:
+  push:
+    paths:
+      - 'demo/days_after/**'
+      - '.github/workflows/days-after-unified-smoke.yml'
+  pull_request:
+    paths:
+      - 'demo/days_after/**'
+      - '.github/workflows/days-after-unified-smoke.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  game-smoke:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - name: Download official Godot 4.8 beta4 script validation binary
+        shell: bash
+        run: |
+          set -euo pipefail
+          curl --fail --location --retry 3 --retry-delay 2 \
+            https://github.com/godotengine/godot-builds/releases/download/4.8-beta4/Godot_v4.8-beta4_linux.x86_64.zip \
+            -o godot.zip
+          unzip -q godot.zip
+          chmod +x Godot_v4.8-beta4_linux.x86_64
+      - name: Import GDScript and run the interactive-game regression headlessly
+        shell: bash
+        run: |
+          set -euo pipefail
+          ./Godot_v4.8-beta4_linux.x86_64 --headless --path demo/days_after --editor --import --quit 2>&1 | tee import.log
+          ./Godot_v4.8-beta4_linux.x86_64 --headless --path demo/days_after --script res://smoke_test.gd 2>&1 | tee smoke.log
+          grep -F 'PASS: unified survival' smoke.log
+          if grep -Ei 'SCRIPT ERROR:|Parse Error:|Failed to load script|Failed loading resource' import.log smoke.log; then
+            exit 1
+          fi
