@@ -58,12 +58,15 @@ def check_disjoint(topology: Topology, colors: list[int], contact_only: bool) ->
         for (_, bodies), assigned in zip(topology, colors):
             if assigned != color:
                 continue
-            for body_id, mode in bodies:
-                if contact_only and mode <= 1:
-                    continue
-                if body_id in touched:
-                    raise AssertionError(f"body {body_id} repeated in color {color}")
-                touched.add(body_id)
+            # A self-constraint can reference the same body twice. What
+            # matters is disjointness between different constraints.
+            participants = {
+                body_id for body_id, mode in bodies
+                if not contact_only or mode > 1
+            }
+            if not touched.isdisjoint(participants):
+                raise AssertionError(f"shared body in color {color}")
+            touched.update(participants)
 
 
 class PersistentGraphColoringTests(unittest.TestCase):
