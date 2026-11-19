@@ -2,6 +2,12 @@
 
 Source: `godotengine/godot`. Destination: `demoh2019/godot`.
 
+**Prerequisite:** At initial inspection the fork had `has_issues=false`. To enable
+migration, visit **Settings → General → Features → Issues** in
+`demoh2019/godot` and turn Issues on. GitHub returns HTTP 410 for every Issue
+creation while this remains disabled. The CLI now refuses an applied run
+immediately rather than partially importing objects.
+
 This is a **copy**, never a GitHub transfer. GitHub cannot transfer Issues across
 unrelated owners, nor can it reproduce original PR numbers, authorship, approvals,
 review threads and merge history in a different repository.
