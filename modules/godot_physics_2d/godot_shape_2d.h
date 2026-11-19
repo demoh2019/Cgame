@@ -444,9 +444,14 @@ public:
 			return;
 		}
 
-		r_min = r_max = p_normal.dot(p_transform.xform(points[0].pos));
+		// Transform the projection axis only once. For an affine transform,
+		// dot(axis, transform.xform(point)) == dot(local_axis, point) + offset.
+		// This also supports non-uniform scales, shears and degenerate bases.
+		const Vector2 local_axis = p_transform.basis_xform_inv(p_normal);
+		const real_t offset = p_normal.dot(p_transform.get_origin());
+		r_min = r_max = local_axis.dot(points[0].pos);
 		for (int i = 1; i < point_count; i++) {
-			real_t d = p_normal.dot(p_transform.xform(points[i].pos));
+			const real_t d = local_axis.dot(points[i].pos);
 			if (d > r_max) {
 				r_max = d;
 			}
@@ -454,6 +459,8 @@ public:
 				r_min = d;
 			}
 		}
+		r_min += offset;
+		r_max += offset;
 	}
 
 	DEFAULT_PROJECT_RANGE_CAST
