@@ -342,6 +342,13 @@ func c_party_rally() -> void:
 
 
 @rpc("any_peer", "reliable")
+func c_party_aid(target_id: int, item_id: String) -> void:
+	var peer := multiplayer.get_remote_sender_id()
+	if _allowed(peer):
+		s_result.rpc_id(peer, "party_aid", sim.cmd_party_aid(peer, target_id, item_id))
+
+
+@rpc("any_peer", "reliable")
 func c_party_kick(target_id: int) -> void:
 	var peer := multiplayer.get_remote_sender_id()
 	if _allowed(peer):
@@ -547,6 +554,8 @@ func _event_visible_to(event: Dictionary, peer: int) -> bool:
 	match event["type"]:
 		"spawn", "zone", "gathered", "fished", "crate", "mastery", "scavenging", "infection", "evaded":
 			return event.get("peer", -1) == peer
+		"party_aid":
+			return event.get("peer", -1) == peer or event.get("by", -1) == peer
 		"trade":
 			return event.get("a", -1) == peer or event.get("b", -1) == peer
 		"death":
