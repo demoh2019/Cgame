@@ -833,4 +833,37 @@ TEST_CASE("[FileAccess][Performance] Multi-block Zstandard compressed file reuse
 	DirAccess::remove_file_or_error(file_path);
 }
 
+TEST_CASE("[FileAccess][Performance] Token scanning reuses stack-first character buffer") {
+	const String expected[] = {
+		String("simple"),
+		String("small"),
+		String("x").repeat(255),
+		String("y").repeat(256),
+		String("z").repeat(257),
+		String("long").repeat(1024),
+		String::utf8("Привет"),
+		String("tail"),
+	};
+	String contents = "   \t  \n  ";
+	for (const String &token : expected) {
+		contents += token + " \t\n";
+	}
+	const CharString bytes = contents.utf8();
+	Ref<FileAccessMemory> file;
+	file.instantiate();
+	REQUIRE(file->open_custom(reinterpret_cast<const uint8_t *>(bytes.get_data()), bytes.length()) == OK);
+
+	for (const String &token : expected) {
+		CHECK(file->get_token() == token);
+	}
+	CHECK(file->get_position() <= file->get_length());
+	file->close();
+
+	// Whitespace-only files have no token and should allocate no token bytes.
+	const char whitespace[] = " \t\n\r ";
+	REQUIRE(file->open_custom(reinterpret_cast<const uint8_t *>(whitespace), sizeof(whitespace) - 1) == OK);
+	CHECK(file->get_token().is_empty());
+	file->close();
+}
+
 } // namespace TestFileAccess

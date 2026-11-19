@@ -404,25 +404,6 @@ double FileAccess::get_double() const {
 	return m.d;
 }
 
-String FileAccess::get_token() const {
-	CharString token;
-
-	uint8_t c = get_8();
-
-	while (!eof_reached()) {
-		if (c <= ' ') {
-			if (token.length()) {
-				break;
-			}
-		} else {
-			token += char(c);
-		}
-		c = get_8();
-	}
-
-	return String::utf8(token.get_data());
-}
-
 class CharBuffer {
 	Vector<char> vector;
 	char stack_buffer[256];
@@ -468,6 +449,34 @@ public:
 		return buffer;
 	}
 };
+
+String FileAccess::get_token() const {
+	// A token is usually a short identifier. Reuse the same stack-first
+	// buffer as get_line(), avoiding heap allocation and COW checks on
+	// each appended byte until the token exceeds its inline capacity.
+	CharBuffer token;
+	int token_length = 0;
+
+	uint8_t c = get_8();
+
+	while (!eof_reached()) {
+		if (c <= ' ') {
+			if (token_length) {
+				break;
+			}
+		} else {
+			token.push_back(char(c));
+			token_length++;
+		}
+		c = get_8();
+	}
+
+	if (token_length == 0) {
+		return String();
+	}
+	// CharBuffer is not NUL-terminated; pass an explicit length to UTF-8.
+	return String::utf8(token.get_data(), token_length);
+}
 
 String FileAccess::get_line() const {
 	CharBuffer line;
