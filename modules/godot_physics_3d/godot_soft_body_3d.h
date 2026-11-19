@@ -119,6 +119,9 @@ class GodotSoftBody3D : public GodotCollisionObject3D {
 	};
 	LocalVector<DihedralHinge> xpbd_dihedral_hinges;
 	LocalVector<real_t> xpbd_dihedral_lambdas;
+	// Optional one-time rest-mesh warp/weft compliance multiplier per hinge.
+	// Completely absent in the default isotropic material mode.
+	LocalVector<real_t> xpbd_dihedral_anisotropy;
 	// Optional per-particle reference offsets for meshless rigid shape fitting.
 	// Zero stiffness allocates no additional per-node data.
 	LocalVector<Vector3> xpbd_shape_rest_offsets;
