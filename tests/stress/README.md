@@ -456,9 +456,27 @@ physics solver separates them without non-finite states:
   --script res://physics_contact_separation_cache_regression.gd
 ```
 
-Performance should be measured against the same scene on the previous
-build. These source and runtime tests are not substitutes for a complete
-engine build, thread sanitizer runs, or CPU/RSS measurements.
+For representative throughput and memory measurements, the stress
+runner now includes `physics_separated_pairs_2d` and
+`physics_separated_pairs_3d`. Each scale unit creates 128 near-miss pairs
+(256 rigid bodies), capped at 16,384 pairs to bound setup costs. Both cases
+warm the negative cache for five physics frames before measuring steady-state
+physics time, frame p95 and process RSS. All bodies remain stationary with
+sleeping disabled to keep the broadphase pairs active:
+
+```bash
+python3 tests/stress/run.py \
+  --godot ./bin/godot.macos.editor.arm64 \
+  --case physics_separated_pairs_2d,physics_separated_pairs_3d \
+  --scale 4 --frames 120 --repeats 5 --timeout 600 \
+  --rss-limit-mib 4096 \
+  --output out/negative-narrowphase-cache.json
+```
+
+Compare the same case on the same host, first with an engine build from
+before the change and then with the updated build. Source and runtime tests
+do not substitute for a complete engine build, thread sanitizer runs, or
+CPU/RSS measurements, and no speedup is claimed without those measurements.
 
 ## Cached broadphase AABB: no-op update fast path (Box2D-style)
 
