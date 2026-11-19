@@ -292,6 +292,7 @@ void GodotSoftBody3D::reset_link_rest_lengths() {
 }
 
 void GodotSoftBody3D::update_link_constants() {
+	link_constants_dirty = false;
 	// Zero stiffness disables stretch constraints. Do not produce infinities
 	// (or NaNs for pairs of pinned vertices) by dividing by zero.
 	if (!(linear_stiffness > 0.0)) {
@@ -359,46 +360,72 @@ void GodotSoftBody3D::set_vertex_position(int p_index, const Vector3 &p_position
 
 	ERR_FAIL_COND(node_index >= nodes.size());
 	Node &node = nodes[node_index];
-	node.q = node.x;
+	if (node.im == 0.0) {
+		// A pinned vertex is kinematic. Explicit point movement must not
+		// create an artificial velocity or leave a stale bias/force cache.
+		node.q = p_position;
+		node.v = Vector3();
+		node.bv = Vector3();
+		node.f = Vector3();
+	} else {
+		node.q = node.x;
+	}
 	node.x = p_position;
 }
 
 void GodotSoftBody3D::pin_vertex(int p_index) {
 	ERR_FAIL_COND(p_index < 0);
 
+	uint32_t node_index = 0;
+	if (!soft_mesh.is_null()) {
+		// Validate before storing the visual index: an invalid pin must not
+		// survive in pinned_vertices and poison a later mesh rebuild.
+		ERR_FAIL_COND(p_index >= (int)map_visual_to_physics.size());
+		node_index = map_visual_to_physics[p_index];
+		ERR_FAIL_COND(node_index >= nodes.size());
+	}
 	if (is_vertex_pinned(p_index)) {
 		return;
 	}
 
 	pinned_vertices.push_back(p_index);
-
 	if (!soft_mesh.is_null()) {
-		ERR_FAIL_COND(p_index >= (int)map_visual_to_physics.size());
-		uint32_t node_index = map_visual_to_physics[p_index];
-
-		ERR_FAIL_COND(node_index >= nodes.size());
 		Node &node = nodes[node_index];
 		node.im = 0.0;
+		node.v = Vector3();
+		node.bv = Vector3();
+		node.f = Vector3();
+		node.q = node.x;
+		link_constants_dirty = true;
 	}
 }
 
 void GodotSoftBody3D::unpin_vertex(int p_index) {
 	ERR_FAIL_COND(p_index < 0);
 
-	uint32_t pinned_count = pinned_vertices.size();
+	const uint32_t pinned_count = pinned_vertices.size();
 	for (uint32_t i = 0; i < pinned_count; ++i) {
 		if (p_index == pinned_vertices[i]) {
 			pinned_vertices.remove_at(i);
 
 			if (!soft_mesh.is_null()) {
 				ERR_FAIL_COND(p_index >= (int)map_visual_to_physics.size());
-				uint32_t node_index = map_visual_to_physics[p_index];
-
+				const uint32_t node_index = map_visual_to_physics[p_index];
 				ERR_FAIL_COND(node_index >= nodes.size());
-				real_t inv_node_mass = nodes.size() * inv_total_mass;
+
+				// Imported meshes often contain duplicated visual vertices that
+				// share a single simulated node. Keep the node pinned until all
+				// visual aliases have been unpinned.
+				for (const int visual_index : pinned_vertices) {
+					if (visual_index >= 0 && visual_index < (int)map_visual_to_physics.size() &&
+							map_visual_to_physics[visual_index] == node_index) {
+						return;
+					}
+				}
 
 				Node &node = nodes[node_index];
-				node.im = inv_node_mass;
+				node.im = nodes.size() * inv_total_mass;
+				link_constants_dirty = true;
 			}
 
 			return;
@@ -407,19 +434,17 @@ void GodotSoftBody3D::unpin_vertex(int p_index) {
 }
 
 void GodotSoftBody3D::unpin_all_vertices() {
-	if (!soft_mesh.is_null()) {
-		real_t inv_node_mass = nodes.size() * inv_total_mass;
-		uint32_t pinned_count = pinned_vertices.size();
-		for (uint32_t i = 0; i < pinned_count; ++i) {
-			int pinned_vertex = pinned_vertices[i];
-
-			ERR_CONTINUE(pinned_vertex >= (int)map_visual_to_physics.size());
-			uint32_t node_index = map_visual_to_physics[pinned_vertex];
+	if (!soft_mesh.is_null() && !pinned_vertices.is_empty()) {
+		const real_t inv_node_mass = nodes.size() * inv_total_mass;
+		for (const int pinned_vertex : pinned_vertices) {
+			ERR_CONTINUE(pinned_vertex < 0 || pinned_vertex >= (int)map_visual_to_physics.size());
+			const uint32_t node_index = map_visual_to_physics[pinned_vertex];
 
 			ERR_CONTINUE(node_index >= nodes.size());
 			Node &node = nodes[node_index];
 			node.im = inv_node_mass;
 		}
+		link_constants_dirty = true;
 	}
 
 	pinned_vertices.clear();
@@ -1095,6 +1120,14 @@ void GodotSoftBody3D::predict_motion(real_t p_delta) {
 	// Integrate.
 	for (Node &node : nodes) {
 		node.q = node.x;
+		if (node.im == 0.0) {
+			// Inverse-mass-zero particles are kinematic (Jolt-style pins).
+			// Do not integrate stale pre-pin velocity or accumulated forces.
+			node.v = Vector3();
+			node.bv = Vector3();
+			node.f = Vector3();
+			continue;
+		}
 		Vector3 delta_v = node.f * node.im * p_delta;
 		for (int c = 0; c < 3; c++) {
 			delta_v[c] = CLAMP(delta_v[c], -clamp_delta_v, clamp_delta_v);
@@ -1129,10 +1162,20 @@ void GodotSoftBody3D::predict_motion(real_t p_delta) {
 void GodotSoftBody3D::solve_constraints(real_t p_delta) {
 	const real_t inv_delta = 1.0 / p_delta;
 
+	if (link_constants_dirty) {
+		update_link_constants();
+	}
+
 	// The old c2/c3 link-gradient prepass was unused by solve_links().
 	// Avoid a full O(links) traversal and its potential division by zero.
 	// Solve velocities.
 	for (Node &node : nodes) {
+		if (node.im == 0.0) {
+			// A pin may have been edited after prediction but before solving.
+			node.q = node.x;
+			node.v = Vector3();
+			continue;
+		}
 		node.x = node.q + node.v * p_delta;
 	}
 
@@ -1143,6 +1186,13 @@ void GodotSoftBody3D::solve_constraints(real_t p_delta) {
 	}
 	const real_t vc = (1.0 - damping_coefficient) * inv_delta;
 	for (Node &node : nodes) {
+		if (node.im == 0.0) {
+			// Pinned positions are controlled externally, not by bias impulses.
+			node.bv = Vector3();
+			node.v = Vector3();
+			node.q = node.x;
+			continue;
+		}
 		node.x += node.bv * p_delta;
 		node.bv = Vector3();
 
@@ -1268,6 +1318,7 @@ void GodotSoftBody3D::deinitialize_shape() {
 }
 
 void GodotSoftBody3D::destroy() {
+	link_constants_dirty = false;
 	soft_mesh = RID();
 
 	map_visual_to_physics.clear();
