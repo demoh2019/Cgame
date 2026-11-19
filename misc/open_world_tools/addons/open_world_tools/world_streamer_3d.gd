@@ -17,7 +17,7 @@ func _process(_delta: float) -> void:
 
 
 func update_streaming() -> void:
-	if focus == null:
+	if not is_instance_valid(focus) or cell_size <= 0.0:
 		clear_loaded()
 		return
 	var local_focus: Vector3 = to_local(focus.global_position)
