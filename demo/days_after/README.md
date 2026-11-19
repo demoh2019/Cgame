@@ -129,3 +129,24 @@ godot --headless --path demo/days_after --script res://smoke_test_stash.gd
 
 The old `smoke_test_inventory.gd` was also fixed to use the current
 `get_item_count()` API for food and water.
+
+
+## Craftable shelter defenses (construction slice)
+
+Three marked construction pads surround the survivor's starting shelter.
+Press **B** near an empty pad to build one barricade using **2 wood T1 +
+1 stone T1**. Press **N** near a damaged barricade to repair it with **1 wood T1**
+for up to 35 health. Barriers start with 100 health; nearby infected attack
+barriers blocking their direct line to the survivor. Defenses can be destroyed.
+
+The F6/F10 world snapshot now includes built barricades and their remaining
+health. World schema **v2** supports earlier **v1** saves, which load without
+constructed defenses. Invalid structure data, duplicate pad IDs or out-of-range
+health rejects the entire snapshot before anything is applied.
+
+```sh
+godot --headless --path demo/days_after --script res://smoke_test_construction.gd
+```
+
+This is a small offline construction prototype, not unrestricted freeform
+building, structural physics or networked ownership. Those remain future work.
