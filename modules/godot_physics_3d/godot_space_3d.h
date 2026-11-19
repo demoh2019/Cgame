@@ -276,6 +276,10 @@ private:
 	real_t fluid_plane_angular_drag = 0.1;
 	Vector3 fluid_plane_flow_velocity;
 	bool gyroscopic_forces = false; // Jolt-style asymmetric rigid-body rotation; opt-in.
+	bool rotating_frame_enabled = false; // Translational rotating reference frame, opt-in.
+	Vector3 rotating_frame_origin; // Frame rotation center in simulation/world coordinates.
+	Vector3 rotating_frame_angular_velocity; // Frame omega, rad/s.
+	Vector3 rotating_frame_angular_acceleration; // Instantaneous omega derivative, rad/s^2.
 	int gyroscopic_integration_mode = 0; // 0: normalized Euler, 1: implicit midpoint.
 	// Bullet-style resistance about and perpendicular to the contact normal.
 	real_t rolling_friction = 0.0;
@@ -513,6 +517,10 @@ public:
 	_FORCE_INLINE_ real_t get_fluid_plane_angular_drag() const { return fluid_plane_angular_drag; }
 	_FORCE_INLINE_ const Vector3 &get_fluid_plane_flow_velocity() const { return fluid_plane_flow_velocity; }
 	_FORCE_INLINE_ bool are_gyroscopic_forces_enabled() const { return gyroscopic_forces; }
+	_FORCE_INLINE_ bool is_rotating_frame_enabled() const { return rotating_frame_enabled; }
+	_FORCE_INLINE_ const Vector3 &get_rotating_frame_origin() const { return rotating_frame_origin; }
+	_FORCE_INLINE_ const Vector3 &get_rotating_frame_angular_velocity() const { return rotating_frame_angular_velocity; }
+	_FORCE_INLINE_ const Vector3 &get_rotating_frame_angular_acceleration() const { return rotating_frame_angular_acceleration; }
 	_FORCE_INLINE_ int get_gyroscopic_integration_mode() const { return gyroscopic_integration_mode; }
 	_FORCE_INLINE_ real_t get_rolling_friction() const { return rolling_friction; }
 	_FORCE_INLINE_ real_t get_static_friction_multiplier() const { return static_friction_multiplier; }

@@ -40,6 +40,7 @@
 #include "servers/physics_damping.h"
 #include "servers/physics_uniform_fluid.h"
 #include "servers/physics_gyroscopic_3d.h"
+#include "servers/physics_rotating_frame_3d.h"
 #include "servers/physics_fluid_buoyancy_3d.h"
 #include "servers/physics_fluid_convex_hull_3d.h"
 #include "servers/physics_rigid_convex_aero_facets_3d.h"
@@ -910,6 +911,19 @@ void GodotBody3D::integrate_forces(real_t p_step, bool p_defer_motion) {
 					linear_velocity, get_space()->get_fluid_flow_velocity(), get_space()->get_fluid_linear_drag(), p_step);
 			angular_velocity = godot_physics_fluid_angular_drag(
 					angular_velocity, get_space()->get_fluid_angular_drag(), p_step);
+
+			// Fictitious accelerations are expressed in the coordinates of
+			// a prescribed rotating world frame. Boris integration keeps
+			// pure Coriolis motion speed-preserving at large timesteps.
+			// The opt-in mode affects only the COM translation of dynamic
+			// rigid bodies; angular attitude dynamics are unchanged.
+			if (mode == PS3DE::BODY_MODE_RIGID && get_space()->is_rotating_frame_enabled()) {
+				const Vector3 world_com = get_transform().origin + center_of_mass;
+				godot_physics_rotating_frame_step_3d(linear_velocity, world_com,
+						get_space()->get_rotating_frame_origin(),
+						get_space()->get_rotating_frame_angular_velocity(),
+						get_space()->get_rotating_frame_angular_acceleration(), p_step);
+			}
 
 			// Optional six-face, orientation-sensitive aerodynamic impulses
 			// for rigid boxes. Pressure acts only on windward faces,

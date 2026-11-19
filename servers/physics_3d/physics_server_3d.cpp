@@ -902,6 +902,13 @@ PhysicsServer3D::PhysicsServer3D() {
 	// Reproduce free rotation of asymmetric bodies (Jolt-style gyroscopic term).
 	// Off by default because it changes angular motion and costs extra math.
 	GLOBAL_DEF(PropertyInfo(Variant::BOOL, "physics/3d/solver/gyroscopic_forces"), false);
+	// Rigid-body COM translational fictitious forces in a prescribed
+	// non-inertial rotating coordinate system (Coriolis/centrifugal/Euler).
+	// Disabled by default; no cost beyond one boolean branch.
+	GLOBAL_DEF(PropertyInfo(Variant::BOOL, "physics/3d/solver/rotating_frame_enabled"), false);
+	GLOBAL_DEF(PropertyInfo(Variant::VECTOR3, "physics/3d/solver/rotating_frame_origin"), Vector3());
+	GLOBAL_DEF(PropertyInfo(Variant::VECTOR3, "physics/3d/solver/rotating_frame_angular_velocity"), Vector3());
+	GLOBAL_DEF(PropertyInfo(Variant::VECTOR3, "physics/3d/solver/rotating_frame_angular_acceleration"), Vector3());
 	// Midpoint preserves both angular momentum magnitude and rotational energy
 	// in torque-free free rigid-body motion; normalized Euler remains default.
 	GLOBAL_DEF(PropertyInfo(Variant::INT, "physics/3d/solver/gyroscopic_integration_mode", PROPERTY_HINT_ENUM, "Normalized Euler,Implicit Midpoint"), 0);
