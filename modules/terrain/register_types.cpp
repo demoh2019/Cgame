@@ -27,11 +27,13 @@
 #include "register_types.h"
 
 #include "terrain_heightmap.h"
+#include "terrain_3d.h"
 #include "core/object/class_db.h"
 
 void initialize_terrain_module(ModuleInitializationLevel p_level) {
     if (p_level == MODULE_INITIALIZATION_LEVEL_SCENE) {
         GDREGISTER_CLASS(TerrainHeightmap);
+        GDREGISTER_CLASS(Terrain3D);
     }
 }
 
