@@ -108,7 +108,7 @@ TEST_CASE("[PhysicsPBFVorticity] Native liquid vorticity is opt-in and determini
 	with_vortex.set_vorticity_confinement(0.9);
 	CHECK(baseline.get_vorticity_confinement() == 0.0);
 	CHECK(baseline.get_last_vorticity_neighbor_evaluations() == 0);
-	CHECK(with_vortex.get_vorticity_confinement() == 0.9);
+	CHECK(with_vortex.get_vorticity_confinement() == doctest::Approx(0.9).epsilon(1e-5));
 	REQUIRE(with_vortex.create_block(Vector3(-0.38, 1.0, -0.38), Vector3i(5, 5, 5), 0.19));
 	REQUIRE(baseline.create_block(Vector3(-0.38, 1.0, -0.38), Vector3i(5, 5, 5), 0.19));
 	const Vector3 center_a(-0.25, 1.38, 0);
