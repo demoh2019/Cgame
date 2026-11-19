@@ -37,6 +37,10 @@ python3 tests/stress/run.py --godot /path/to/godot --preset standard --baseline 
 
 # Optional heuristic for post-warm-up retained allocator memory in memory_churn.
 python3 tests/stress/run.py --godot /path/to/godot --case memory_churn --max-retained-growth-mib 64 --output out/memory.json
+
+# Find the first failing or resource-limited scale. Each scale starts in a
+# NEW engine process, and escalation stops at the first failed scale.
+python3 tests/stress/run.py --godot /path/to/godot --case scene_reparent,thread_contention,compression --preset standard --scale 2 --ramp --ramp-steps 6 --ramp-factor 2 --output out/ramp.json
 ```
 
 Run `--list-cases` for supported identifiers.
@@ -47,14 +51,18 @@ Run `--list-cases` for supported identifiers.
 | GDScript | `script_vm`, `strings`, `math` | Interpreter loops, typed indexing, string operations, Vector3 math |
 | Events, scene | `signals`, `scene_tree`, `packed_scene` | Emission, Node creation/query/grouping/free, scene pack/instantiate |
 | Data and IO | `images`, `json`, `stream`, `file_io` | Image buffers, JSON roundtrip, binary StreamPeer, real filesystem writes |
-| Parallelism | `threads` | N native worker threads with independently repeatable numeric work |
-| Navigation | `astar_grid` | Repeated 64×64 A* paths around obstacles, path validity checks |
+| Parallelism | `threads`, `thread_contention` | N worker threads, plus shared-counter mutex contention and lost-update validation |
+| Navigation | `astar_grid`, `astar_3d` | Repeated 2D grid and 3D graph paths with endpoint validation |
 | Animation | `tweens` | Large numbers of repeatedly moving, node-bound Tween tracks |
 | Audio | `audio_buffers` | High-volume 16-bit WAV sample buffer construction (not live mixing) |
 | Serialization | `variant_codec` | Lossless Variant binary serialization and deserialization |
 | Physics | `physics_2d`, `physics_3d` | Rigid bodies/collision shapes and physics frames |
 | Allocator | `memory_churn` | Multiple cycles of ephemeral PackedByteArray allocations |
-| Rendering | `render_2d`, `render_3d` | Shared texture/mesh, many draw nodes, frame pumping (display only) |
+| Rendering | `render_2d`, `render_3d`, `render_multimesh` | Shared texture/mesh, high instance counts and frame pumping (display only) |
+| Dynamic scene lifetime | `scene_reparent` | Thousands of nodes moved between parents with ownership checks |
+| Storage and resource codecs | `resource_roundtrip`, `compression` | Repeated resource save/load without cache, plus Zstandard compression checks |
+| Text pattern matching | `regex` | Thousands of compiled-expression searches and result validation |
+| Direct physics queries | `physics_queries_2d` | High-volume raycasts against a known collider while physics advances |
 
 ## Presets and safety
 
@@ -79,9 +87,13 @@ Virtual displays with software rendering are valid only for software-GL baseline
 ## Reports and regression interpretation
 
 The JSON report includes per-case runs, wall time, CPU seconds, p95, maximum
-sampled child RSS, engine-reported time, physics spikes, collision pairs,
+sampled child RSS, post-warm-up RSS change, engine-reported time, p50/p95/p99
+sampled frame/physics latencies, physics spikes, collision pairs,
 draw calls, VRAM and memory, failure reason (crash/timeout/RSS/invalid
-result), platform and configuration. Use fixed workloads, hardware, build flags,
+result), platform and configuration. The `rankings` section sorts the heaviest
+passing cases by each measured metric; these are triage indicators, **not** a
+comparison of normalized workload throughput. The optional `--ramp` mode uses
+case names such as `compression@8` in the report for each tested scale. Use fixed workloads, hardware, build flags,
 GPU driver, render mode, and thermal settings for meaningful comparisons.
 Baseline checks fail when median wall time or max RSS grow beyond the configured
 percentage; transient noise warrants repeated measurements. Leak detection via
@@ -96,3 +108,22 @@ ASan/UBSan/TSan builds, Valgrind/heap profiling, long-lived multiplayer sessions
 real device GPU/mobile profiling, shader import/export projects, and fuzzing.
 No finite synthetic suite can cover every engine feature or prove absence of
 optimization bugs.
+
+
+## Interpreting limits and heavy runs
+
+- `--ramp` is opt-in and capped at a scale of 1000. The first failing scale
+  terminates escalation **for that case**, but the run continues with the next
+  selected case. A timeout, crash, invalid result or watchdog RSS limit is
+  recorded as a failure and the run exits nonzero.
+- `max_post_warmup_rss_growth_mib` measures sampled process RSS change from
+  the first sample after 20% of the run to the last sample. Positive change
+  flags a candidate for heap profiling; it is **not** definitive leak evidence.
+  Scenario startup and operating-system page retention can create false positives.
+- `frame_latency_ms` and `physics_latency_ms` contain p50, p95, p99 and
+  maximum **engine Performance-monitor samples**, not GPU profiler timestamps.
+  Use engine and GPU profilers for root cause analysis.
+- On Linux/macOS, timed-out jobs are placed in their own process group so that
+  subprocesses spawned by a test do not outlive the watchdog. Run brutal mode
+  only on a dedicated machine; all limits apply per child and heavy suites may
+  run for hours.
