@@ -64,9 +64,12 @@ func _trial(tree: SceneTree, scale: int, use_ccd: bool) -> Dictionary:
 		for j in range(3, 6):
 			var moving: Vector3 = PhysicsServer3D.soft_body_get_point_global_position(body, j)
 			finite = finite and moving.is_finite()
-			min_z = minf(min_z, moving.z)
-			mean_z += moving.z
-	mean_z /= float(count * 3)
+			# Only endpoints 3/4 form the crossing structural edge.
+			# Vertex 5 is free to deform and need not stop at impact.
+			if j < 5:
+				min_z = minf(min_z, moving.z)
+				mean_z += moving.z
+	mean_z /= float(count * 2)
 	var elapsed_ms := float(Time.get_ticks_usec() - started) / 1000.0
 	PhysicsServer3D.space_set_active(space, false)
 	for body in bodies:
