@@ -447,10 +447,6 @@ void SceneTreeEditor::_update_node_subtree(Node *p_node, TreeItem *p_parent, boo
 		return;
 	}
 
-	if (is_scene_tree_dock) {
-		EditorNode::get_singleton()->update_resource_count(p_node);
-	}
-
 	_update_node(p_node, item, part_of_subscene);
 	I->value.dirty = false;
 	I->value.can_process = is_scene_tree_dock && p_node->can_process();
