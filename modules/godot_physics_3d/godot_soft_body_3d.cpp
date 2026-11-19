@@ -229,6 +229,25 @@ void GodotSoftBody3D::set_tetrahedral_indices(const PackedInt32Array &p_indices)
 	}
 }
 
+void GodotSoftBody3D::set_tetrahedral_interior_positions(const PackedVector3Array &p_positions) {
+	ERR_FAIL_COND_MSG(p_positions.size() > 1024,
+			"Explicit tetra FEM can use at most 1024 internal simulation vertices.");
+	for (const Vector3 &point : p_positions) {
+		ERR_FAIL_COND_MSG(!point.is_finite(),
+				"Explicit tetra FEM interior vertices must be finite.");
+	}
+	if (xpbd_explicit_tetra_interior_positions == p_positions) {
+		return;
+	}
+	xpbd_explicit_tetra_interior_positions = p_positions;
+	if (!soft_mesh.is_null()) {
+		// Rebuild before any face/link pointers have been stored into the
+		// nodes array; growing it in place would invalidate those pointers.
+		const RID current_mesh = soft_mesh;
+		set_mesh(current_mesh);
+	}
+}
+
 void GodotSoftBody3D::update_rendering_server(PhysicsServer3DRenderingServerHandler *p_rendering_server_handler) {
 	if (soft_mesh.is_null()) {
 		return;
@@ -571,16 +590,28 @@ void GodotSoftBody3D::initialize_fem_tetra() {
 				tet_indices.reserve(index_count);
 				for (int i = 0; i < index_count; ++i) {
 					const int visual = xpbd_explicit_tetra_visual_indices[i];
-					if (visual < 0 || visual >= int(map_visual_to_physics.size())) {
+					if (visual < 0) {
 						valid = false;
 						break;
 					}
-					const uint32_t welded = map_visual_to_physics[visual];
-					if (welded >= nodes.size()) {
+					uint32_t physical;
+					if (visual < int(map_visual_to_physics.size())) {
+						physical = map_visual_to_physics[visual];
+					} else {
+						// Interior indices follow ALL visual vertices, not
+						// just the deduplicated physical surface vertices.
+						const int internal_index = visual - int(map_visual_to_physics.size());
+						if (internal_index >= xpbd_explicit_tetra_interior_positions.size()) {
+							valid = false;
+							break;
+						}
+						physical = xpbd_surface_node_count + uint32_t(internal_index);
+					}
+					if (physical >= nodes.size()) {
 						valid = false;
 						break;
 					}
-					tet_indices.push_back(welded);
+					tet_indices.push_back(physical);
 				}
 			}
 			if (valid) {
