@@ -404,10 +404,11 @@ public:
 	}
 
 	int cull_convex(const Vector<Plane> &p_convex, T **p_result_array, int p_result_max, const T *p_tester, uint32_t p_tree_collision_mask = 0xFFFFFFFF) {
-		BVH_LOCKED_FUNCTION
-		if (!p_convex.size()) {
+		if (p_result_max <= 0 || p_convex.is_empty()) {
+			// A zero-capacity query needs neither hull construction nor a tree traversal.
 			return 0;
 		}
+		BVH_LOCKED_FUNCTION
 
 		Vector<Vector3> convex_points = Geometry3D::compute_convex_mesh_points(&p_convex[0], p_convex.size());
 		if (convex_points.is_empty()) {
