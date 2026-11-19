@@ -36,7 +36,7 @@ static func capture(sim) -> Dictionary:
 		walls.append({
 			"id": int(id),
 			"x": float(item["x"]), "z": float(item["z"]),
-			"hp": float(item["hp"]), "owner_account": account,
+			"hp": float(item["hp"]), "tier": Structures.tier_of(item), "owner_account": account,
 		})
 	walls.sort_custom(func(a: Dictionary, b: Dictionary) -> bool:
 		return int(a["id"]) < int(b["id"]))
@@ -62,7 +62,10 @@ static func validate(data: Variant, sim) -> Dictionary:
 	var ids: Dictionary = {}
 	var owner_counts: Dictionary = {}
 	for value in source:
-		if typeof(value) != TYPE_DICTIONARY or value.size() != 5:
+		if typeof(value) != TYPE_DICTIONARY or (value.size() != 5 and value.size() != 6):
+			return {}
+		# Old world checkpoints have exactly 5 fields and imply T1.
+		if value.size() == 6 and not value.has("tier"):
 			return {}
 		if not _bounded_int(value.get("id"), MIN_ID, MAX_ID):
 			return {}
@@ -74,7 +77,10 @@ static func validate(data: Variant, sim) -> Dictionary:
 			return {}
 		if not _bounded_float(value.get("z"), -MAX_ABS_COORD, MAX_ABS_COORD):
 			return {}
-		if not _bounded_float(value.get("hp"), 0.001, Structures.MAX_HEALTH):
+		if not _bounded_int(value.get("tier", 1), 1, Structures.MAX_TIER):
+			return {}
+		var tier: int = int(value.get("tier", 1))
+		if not _bounded_float(value.get("hp"), 0.001, Structures.max_health(tier)):
 			return {}
 		if typeof(value.get("owner_account")) != TYPE_STRING:
 			return {}
@@ -99,7 +105,7 @@ static func validate(data: Variant, sim) -> Dictionary:
 		if next_count > Structures.MAX_PER_OWNER:
 			return {}
 		owner_counts[uid] = next_count
-		walls.append({"id": id, "x": x, "z": z, "hp": float(value["hp"]), "owner_account": uid})
+		walls.append({"id": id, "x": x, "z": z, "hp": float(value["hp"]), "tier": tier, "owner_account": uid})
 	return {"version": VERSION, "world_seed": int(data["world_seed"]), "barricades": walls}
 
 
@@ -116,7 +122,7 @@ static func restore(sim, data: Variant) -> bool:
 		var z: float = float(wall["z"])
 		sim.barricades[id] = {
 			"id": id, "x": x, "y": sim.world.height_at(x, z), "z": z,
-			"hp": float(wall["hp"]), "owner": -1, "owner_account": wall["owner_account"],
+			"hp": float(wall["hp"]), "tier": int(wall.get("tier", 1)), "owner": -1, "owner_account": wall["owner_account"],
 		}
 		sim.world.add_dynamic_blocker(id, x, z, Structures.RADIUS)
 		sim._next_id = maxi(sim._next_id, id)
