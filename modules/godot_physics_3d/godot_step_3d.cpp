@@ -42,7 +42,7 @@
 // Avoid worker pool task/wakeup overhead when the workload is smaller than a batch.
 static constexpr uint32_t MIN_PARALLEL_SETUP_CONSTRAINTS = 32;
 // Amortize thread-pool callback dispatch across independent constraints.
-static constexpr uint32_t PARALLEL_SETUP_BATCH_SIZE = 16;
+static constexpr uint32_t MIN_PARALLEL_SETUP_BATCH_SIZE = 16;
 static constexpr uint32_t MIN_PARALLEL_SOLVE_ISLANDS = 16;
 
 // Parallel graph coloring only pays off for large connected rigid-body groups.
@@ -150,8 +150,8 @@ void GodotStep3D::_setup_constraint(uint32_t p_constraint_index, void *p_userdat
 }
 
 void GodotStep3D::_setup_constraint_batch(uint32_t p_batch_index, void *p_userdata) {
-	const uint32_t begin = p_batch_index * PARALLEL_SETUP_BATCH_SIZE;
-	const uint32_t end = MIN(begin + PARALLEL_SETUP_BATCH_SIZE, all_constraints.size());
+	const uint32_t begin = p_batch_index * setup_batch_size;
+	const uint32_t end = begin + MIN(setup_batch_size, all_constraints.size() - begin);
 	for (uint32_t constraint_index = begin; constraint_index < end; ++constraint_index) {
 		_setup_constraint(constraint_index, nullptr);
 	}
@@ -642,16 +642,22 @@ void GodotStep3D::step(GodotSpace3D *p_space, real_t p_delta) {
 	/* SETUP CONSTRAINTS / PROCESS COLLISIONS */
 
 	const uint32_t total_constraint_count = all_constraints.size();
-	if (total_constraint_count < MIN_PARALLEL_SETUP_CONSTRAINTS) {
+	WorkerThreadPool *setup_pool = WorkerThreadPool::get_singleton();
+	const uint32_t setup_workers = static_cast<uint32_t>(MAX(1, setup_pool->get_thread_count()));
+	if (total_constraint_count < MIN_PARALLEL_SETUP_CONSTRAINTS || setup_workers == 1) {
 		for (uint32_t constraint_index = 0; constraint_index < total_constraint_count; ++constraint_index) {
 			_setup_constraint(constraint_index, nullptr);
 		}
 	} else {
-		// Each worker callback performs a contiguous run of independent
-		// constraint setups, reducing scheduling overhead in dense scenes.
-		const uint32_t batch_count = (total_constraint_count + PARALLEL_SETUP_BATCH_SIZE - 1) / PARALLEL_SETUP_BATCH_SIZE;
-		WorkerThreadPool::GroupID group_task = WorkerThreadPool::get_singleton()->add_template_group_task(this, &GodotStep3D::_setup_constraint_batch, nullptr, batch_count, -1, true, SNAME("Physics3DConstraintSetup"));
-		WorkerThreadPool::get_singleton()->wait_for_group_task_completion(group_task);
+		// Adapt contiguous setup chunks to the worker count. Keep the queue
+		// bounded to 128 tasks in large scenes without changing setup order
+		// inside a batch or the barrier before pre_solve.
+		const uint32_t target_tasks = MIN(setup_workers, uint32_t(32)) * 4;
+		const uint32_t desired_batch_size = total_constraint_count / target_tasks + uint32_t(total_constraint_count % target_tasks != 0);
+		setup_batch_size = MAX(MIN_PARALLEL_SETUP_BATCH_SIZE, desired_batch_size);
+		const uint32_t batch_count = total_constraint_count / setup_batch_size + uint32_t(total_constraint_count % setup_batch_size != 0);
+		WorkerThreadPool::GroupID group_task = setup_pool->add_template_group_task(this, &GodotStep3D::_setup_constraint_batch, nullptr, batch_count, -1, true, SNAME("Physics3DConstraintSetup"));
+		setup_pool->wait_for_group_task_completion(group_task);
 	}
 
 	{ //profile
