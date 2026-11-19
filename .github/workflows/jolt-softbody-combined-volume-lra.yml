@@ -1,0 +1,43 @@
+name: Jolt combined soft-body volume and LRA topology
+
+on:
+  pull_request:
+    branches: [develop]
+    paths:
+      - "modules/jolt_physics/objects/jolt_soft_body_3d.cpp"
+      - "modules/jolt_physics/jolt_project_settings.cpp"
+      - "modules/jolt_physics/jolt_project_settings.h"
+      - "tests/stress/test_jolt_softbody_volume.py"
+      - "tests/stress/test_jolt_softbody_radial.py"
+      - "tests/stress/test_jolt_softbody_combined.py"
+      - "tests/stress/jolt_combined/**"
+      - ".github/workflows/jolt-softbody-combined-volume-lra.yml"
+  push:
+    branches: [develop]
+    paths:
+      - "modules/jolt_physics/objects/jolt_soft_body_3d.cpp"
+      - "modules/jolt_physics/jolt_project_settings.cpp"
+      - "modules/jolt_physics/jolt_project_settings.h"
+      - "tests/stress/test_jolt_softbody_volume.py"
+      - "tests/stress/test_jolt_softbody_radial.py"
+      - "tests/stress/test_jolt_softbody_combined.py"
+      - "tests/stress/jolt_combined/**"
+      - ".github/workflows/jolt-softbody-combined-volume-lra.yml"
+  workflow_dispatch:
+
+jobs:
+  topology-source-and-math:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Run complete convex volume, radial and combined constraints tests
+        run: python3 -m unittest tests/stress/test_jolt_softbody_volume.py tests/stress/test_jolt_softbody_radial.py tests/stress/test_jolt_softbody_lra.py tests/stress/test_jolt_softbody_combined.py -v
+      - name: Check test syntax and native fixture
+        run: |
+          python3 -m py_compile tests/stress/test_jolt_softbody_combined.py
+          test -f tests/stress/jolt_combined/project.godot
+          test -f tests/stress/jolt_combined/combined_softbody_regression.gd

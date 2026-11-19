@@ -1,0 +1,29 @@
+name: GLES3 CRT compatibility regression
+
+on:
+  pull_request:
+    branches: [develop]
+    paths:
+      - "drivers/gles3/rasterizer_gles3.cpp"
+      - "misc/scripts/tests/test_gles3_strcpy_compat.py"
+      - ".github/workflows/gles3-crt-compat.yml"
+  push:
+    branches: [develop]
+    paths:
+      - "drivers/gles3/rasterizer_gles3.cpp"
+      - "misc/scripts/tests/test_gles3_strcpy_compat.py"
+      - ".github/workflows/gles3-crt-compat.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  preprocessor-regressions:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Test with GCC and Clang preprocessors
+        run: |
+          CXX=g++ python3 -m unittest discover -s misc/scripts/tests -p test_gles3_strcpy_compat.py -v
+          CXX=clang++ python3 -m unittest discover -s misc/scripts/tests -p test_gles3_strcpy_compat.py -v

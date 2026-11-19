@@ -1130,6 +1130,7 @@ Error VariantParser::parse_value(Token &r_token, Variant &r_value, Stream *p_str
 
 			static HashMap<StringName, Variant::Type> builtin_types;
 			if (builtin_types.is_empty()) {
+				builtin_types.reserve(Variant::VARIANT_MAX - 1);
 				for (int i = 1; i < Variant::VARIANT_MAX; i++) {
 					builtin_types[Variant::get_type_name((Variant::Type)i)] = (Variant::Type)i;
 				}
@@ -1270,6 +1271,7 @@ Error VariantParser::parse_value(Token &r_token, Variant &r_value, Stream *p_str
 
 			static HashMap<String, Variant::Type> builtin_types;
 			if (builtin_types.is_empty()) {
+				builtin_types.reserve(Variant::VARIANT_MAX - 1);
 				for (int i = 1; i < Variant::VARIANT_MAX; i++) {
 					builtin_types[Variant::get_type_name((Variant::Type)i)] = (Variant::Type)i;
 				}
@@ -1340,77 +1342,27 @@ Error VariantParser::parse_value(Token &r_token, Variant &r_value, Stream *p_str
 			Vector<uint8_t> args;
 			RETURN_IF_ERROR(_parse_byte_array(p_stream, args, r_line, r_err_str));
 
-			Vector<uint8_t> arr;
-			{
-				int len = args.size();
-				arr.resize(len);
-				uint8_t *w = arr.ptrw();
-				for (int i = 0; i < len; i++) {
-					w[i] = args[i];
-				}
-			}
-
-			r_value = arr;
+			r_value = Vector<uint8_t>(args.span());
 		} else if (id == "PackedInt32Array" || id == "PackedIntArray" || id == "PoolIntArray" || id == "IntArray") {
 			Vector<int32_t> args;
 			RETURN_IF_ERROR(_parse_construct<int32_t>(p_stream, args, r_line, r_err_str));
 
-			Vector<int32_t> arr;
-			{
-				int32_t len = args.size();
-				arr.resize(len);
-				int32_t *w = arr.ptrw();
-				for (int32_t i = 0; i < len; i++) {
-					w[i] = int32_t(args[i]);
-				}
-			}
-
-			r_value = arr;
+			r_value = Vector<int32_t>(args.span());
 		} else if (id == "PackedInt64Array") {
 			Vector<int64_t> args;
 			RETURN_IF_ERROR(_parse_construct<int64_t>(p_stream, args, r_line, r_err_str));
 
-			Vector<int64_t> arr;
-			{
-				int64_t len = args.size();
-				arr.resize(len);
-				int64_t *w = arr.ptrw();
-				for (int64_t i = 0; i < len; i++) {
-					w[i] = int64_t(args[i]);
-				}
-			}
-
-			r_value = arr;
+			r_value = Vector<int64_t>(args.span());
 		} else if (id == "PackedFloat32Array" || id == "PackedRealArray" || id == "PoolRealArray" || id == "FloatArray") {
 			Vector<float> args;
 			RETURN_IF_ERROR(_parse_construct<float>(p_stream, args, r_line, r_err_str));
 
-			Vector<float> arr;
-			{
-				int len = args.size();
-				arr.resize(len);
-				float *w = arr.ptrw();
-				for (int i = 0; i < len; i++) {
-					w[i] = args[i];
-				}
-			}
-
-			r_value = arr;
+			r_value = Vector<float>(args.span());
 		} else if (id == "PackedFloat64Array") {
 			Vector<double> args;
 			RETURN_IF_ERROR(_parse_construct<double>(p_stream, args, r_line, r_err_str));
 
-			Vector<double> arr;
-			{
-				int len = args.size();
-				arr.resize(len);
-				double *w = arr.ptrw();
-				for (int i = 0; i < len; i++) {
-					w[i] = args[i];
-				}
-			}
-
-			r_value = arr;
+			r_value = Vector<double>(args.span());
 		} else if (id == "PackedStringArray" || id == "PoolStringArray" || id == "StringArray") {
 			get_token(p_stream, r_token, r_line, r_err_str);
 			if (r_token.type != TK_PARENTHESIS_OPEN) {
@@ -1446,17 +1398,7 @@ Error VariantParser::parse_value(Token &r_token, Variant &r_value, Stream *p_str
 				cs.push_back(r_token.value);
 			}
 
-			Vector<String> arr;
-			{
-				int len = cs.size();
-				arr.resize(len);
-				String *w = arr.ptrw();
-				for (int i = 0; i < len; i++) {
-					w[i] = cs[i];
-				}
-			}
-
-			r_value = arr;
+			r_value = Vector<String>(cs.span());
 		} else if (id == "PackedVector2Array" || id == "PoolVector2Array" || id == "Vector2Array") {
 			Vector<real_t> args;
 			RETURN_IF_ERROR(_parse_construct<real_t>(p_stream, args, r_line, r_err_str));

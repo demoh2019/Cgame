@@ -579,128 +579,104 @@ bool EditorFileSystem::_is_test_for_reimport_needed(const String &p_path, uint64
 	return false;
 }
 
-bool EditorFileSystem::_test_for_reimport(const String &p_path, const String &p_expected_import_md5) {
-	if (p_expected_import_md5.is_empty()) {
+bool EditorFileSystem::_test_for_reimport(const String &p_path) {
+	EditorFileSystemDirectory *fs = nullptr;
+	int cpos = -1;
+	String expected_md5;
+
+	String path = p_path;
+	if (path.begins_with("uid://")) {
+		path = ResourceUID::uid_to_path(path);
+	}
+
+	if (_find_file(path, &fs, cpos)) {
+		expected_md5 = fs->files[cpos]->import_md5;
+	}
+	String new_md5 = FileAccess::get_md5(path + ".import");
+	if (new_md5.is_empty()) {
 		// Marked as reimportation needed.
 		return true;
 	}
-	String new_md5 = FileAccess::get_md5(p_path + ".import");
-	if (p_expected_import_md5 != new_md5) {
+	if (!expected_md5.is_empty() && expected_md5 != new_md5) {
 		return true;
 	}
 
-	Error err;
-	Ref<FileAccess> f = FileAccess::open(p_path + ".import", FileAccess::READ, &err);
-
-	if (f.is_null()) { // No import file, reimport.
-		return true;
+	Ref<ConfigFile> cf;
+	cf.instantiate();
+	const Error load_err = cf->load(path + ".import");
+	if (load_err == ERR_FILE_CORRUPT) {
+		// Parse error, skip and let user attempt manual reimport to avoid reimport loop.
+		return false;
+	} else if (load_err != OK) {
+		return true; // File disappeared or unreadable, reimport.
 	}
 
-	VariantParser::StreamFile stream;
-	stream.f = f;
-
-	String assign;
-	Variant value;
-	VariantParser::Tag next_tag;
-
-	int lines = 0;
-	String error_text;
-
-	Vector<String> to_check;
-
-	String importer_name;
-	String source_file = "";
-	String source_md5 = "";
-	Vector<String> dest_files;
-	String dest_md5 = "";
-	int version = 0;
-	bool found_uid = false;
-	Variant meta;
-
-	while (true) {
-		assign = Variant();
-		next_tag.fields.clear();
-		next_tag.name = String();
-
-		err = VariantParser::parse_tag_assign_eof(&stream, lines, error_text, next_tag, assign, value, nullptr, true);
-		if (err == ERR_FILE_EOF) {
-			break;
-		} else if (err != OK) {
-			ERR_PRINT("ResourceFormatImporter::load - '" + p_path + ".import:" + itos(lines) + "' error '" + error_text + "'.");
-			// Parse error, skip and let user attempt manual reimport to avoid reimport loop.
-			return false;
-		}
-
-		if (!assign.is_empty()) {
-			if (assign == "valid" && value.operator bool() == false) {
-				// Invalid import (failed previous import), skip and let user attempt manual reimport to avoid reimport loop.
-				return false;
-			}
-			if (assign.begins_with("path")) {
-				to_check.push_back(value);
-			} else if (assign == "files") {
-				Array fa = value;
-				for (const Variant &check_path : fa) {
-					to_check.push_back(check_path);
-				}
-			} else if (assign == "importer_version") {
-				version = value;
-			} else if (assign == "importer") {
-				importer_name = value;
-			} else if (assign == "uid") {
-				found_uid = true;
-			} else if (assign == "source_file") {
-				source_file = value;
-			} else if (assign == "dest_files") {
-				dest_files = value;
-			} else if (assign == "metadata") {
-				meta = value;
-			}
-
-		} else if (next_tag.name != "remap" && next_tag.name != "deps") {
-			break;
-		}
+	if (!bool(cf->get_value("remap", "valid", true))) {
+		// Invalid import (failed previous import), skip and let user attempt manual reimport to avoid reimport loop.
+		return false;
 	}
 
+	const String importer_name = cf->get_value("remap", "importer", String());
 	if (importer_name == "keep" || importer_name == "skip") {
 		return false; // Keep mode, do not reimport.
 	}
 
-	if (!found_uid) {
+	if (!cf->has_section_key("remap", "uid")) {
 		return true; // UID not found, old format, reimport.
 	}
 
-	// Imported files are gone, reimport.
-	for (const String &E : to_check) {
-		if (!FileAccess::exists(E)) {
-			return true;
+	// Check that destination files referenced in [remap] exist.
+	Vector<String> remap_keys = cf->get_section_keys("remap");
+	for (const String &key : remap_keys) {
+		if (key.begins_with("path")) {
+			if (!FileAccess::exists(cf->get_value("remap", key, String()))) {
+				return true;
+			}
 		}
 	}
 
-	Ref<ResourceImporter> importer = ResourceFormatImporter::get_singleton()->get_importer_by_name(importer_name);
+	// Check generated files listed in [deps] exist.
+	if (cf->has_section_key("deps", "files")) {
+		Array to_check = cf->get_value("deps", "files", Array());
+		for (const Variant &v : to_check) {
+			if (!FileAccess::exists(v)) {
+				return true;
+			}
+		}
+	}
 
+	const int version = cf->get_value("remap", "importer_version", 0);
+	const Variant meta = cf->get_value("remap", "metadata", Dictionary());
+
+	Ref<ResourceImporter> importer = ResourceFormatImporter::get_singleton()->get_importer_by_name(importer_name);
 	if (importer.is_null()) {
 		return true; // The importer has possibly changed, try to reimport.
 	}
-
 	if (importer->get_format_version() > version) {
 		return true; // Version changed, reimport.
 	}
-
-	if (!importer->are_import_settings_valid(p_path, meta)) {
-		// Reimport settings are out of sync with project settings, reimport.
-		return true;
+	if (!importer->are_import_settings_valid(path, meta)) {
+		return true; // Reimport settings are out of sync with project settings, reimport.
 	}
 
 	// Read the md5's from a separate file (so the import parameters aren't dependent on the file version).
-	String base_path = ResourceFormatImporter::get_singleton()->get_import_base_path(p_path);
+	Error err;
+	String base_path = ResourceFormatImporter::get_singleton()->get_import_base_path(path);
 	Ref<FileAccess> md5s = FileAccess::open(base_path + ".md5", FileAccess::READ, &err);
-	if (md5s.is_null()) { // No md5's stored for this resource.
-		return true;
+	if (md5s.is_null()) {
+		return true; // No MD5s stored for this resource.
 	}
 
 	VariantParser::StreamFile md5_stream;
 	md5_stream.f = md5s;
+
+	String assign;
+	Variant value;
+	VariantParser::Tag next_tag;
+	int lines = 0;
+	String error_text;
+	String source_md5;
+	String dest_md5;
 
 	while (true) {
 		assign = Variant();
@@ -712,7 +688,7 @@ bool EditorFileSystem::_test_for_reimport(const String &p_path, const String &p_
 		if (err == ERR_FILE_EOF) {
 			break;
 		} else if (err != OK) {
-			ERR_PRINT("ResourceFormatImporter::load - '" + p_path + ".import.md5:" + itos(lines) + "' error '" + error_text + "'.");
+			ERR_PRINT("ResourceFormatImporter::load - '" + path + ".import.md5:" + itos(lines) + "' error '" + error_text + "'.");
 			return false; // Parse error.
 		}
 		if (!assign.is_empty()) {
@@ -725,7 +701,8 @@ bool EditorFileSystem::_test_for_reimport(const String &p_path, const String &p_
 	}
 
 	// Check source md5 matching.
-	if (!source_file.is_empty() && source_file != p_path) {
+	const String source_file = cf->get_value("deps", "source_file", String());
+	if (!source_file.is_empty() && source_file != path) {
 		return true; // File was moved, reimport.
 	}
 
@@ -733,14 +710,14 @@ bool EditorFileSystem::_test_for_reimport(const String &p_path, const String &p_
 		return true; // Lacks md5, so just reimport.
 	}
 
-	String md5 = FileAccess::get_md5(p_path);
+	String md5 = FileAccess::get_md5(path);
 	if (md5 != source_md5) {
 		return true;
 	}
 
+	const Vector<String> dest_files = cf->get_value("deps", "dest_files", Array());
 	if (!dest_files.is_empty() && !dest_md5.is_empty()) {
-		md5 = FileAccess::get_multiple_md5(dest_files);
-		if (md5 != dest_md5) {
+		if (FileAccess::get_multiple_md5(dest_files) != dest_md5) {
 			return true;
 		}
 	}
@@ -988,14 +965,14 @@ bool EditorFileSystem::_update_scan_actions() {
 				ERR_CONTINUE(idx == -1);
 				String full_path = ia.dir->get_file_path(idx);
 
-				bool need_reimport = _test_for_reimport(full_path, ia.dir->files[idx]->import_md5);
+				bool need_reimport = _test_for_reimport(full_path);
 				if (need_reimport) {
 					// Must reimport.
 					reimports.push_back(full_path);
 					Vector<String> dependencies = _get_dependencies(full_path);
 					for (const String &dep : dependencies) {
 						const String &dependency_path = dep.contains("::") ? dep.get_slice("::", 0) : dep;
-						if (_can_import_file(dep)) {
+						if (_can_import_file(dep) && _test_for_reimport(dependency_path)) {
 							reimports.push_back(dependency_path);
 						}
 					}
@@ -1875,57 +1852,92 @@ void EditorFileSystem::_save_filesystem_cache(EditorFileSystemDirectory *p_dir, 
 	}
 }
 
-bool EditorFileSystem::_find_file(const String &p_file, EditorFileSystemDirectory **r_d, int &r_file_pos) const {
-	//todo make faster
+static bool _span_equals(const Span<char32_t> &p_a, const Span<char32_t> &p_b, bool p_case_sensitive) {
+	if (p_case_sensitive) {
+		return p_a == p_b;
+	}
+	if (p_a.size() != p_b.size()) {
+		return false;
+	}
+	const char32_t *a = p_a.ptr();
+	const char32_t *b = p_b.ptr();
+	for (uint64_t i = 0; i < p_a.size(); i++) {
+		if (a[i] != b[i] && String::char_lowercase(a[i]) != String::char_lowercase(b[i])) {
+			return false;
+		}
+	}
+	return true;
+}
 
+// Returns true when `simplify_path()` would return `p_path` unchanged:
+// no backslashes, no empty, "." or ".." segments, and no trailing slash.
+static bool _is_simple_res_path(const String &p_path) {
+	const char32_t *str = p_path.ptr();
+	const int len = p_path.length();
+	int seg_start = 6; // After "res://".
+	for (int i = seg_start; i <= len; i++) {
+		const char32_t c = i < len ? str[i] : '/';
+		if (c == '\\') {
+			return false;
+		}
+		if (c != '/') {
+			continue;
+		}
+		const int seg_len = i - seg_start;
+		if (seg_len == 0 && i < len) {
+			return false;
+		}
+		if (str[seg_start] == '.' && (seg_len == 1 || (seg_len == 2 && str[seg_start + 1] == '.'))) {
+			return false;
+		}
+		seg_start = i + 1;
+	}
+	return len == 6 || str[len - 1] != '/';
+}
+
+bool EditorFileSystem::_find_file(const String &p_file, EditorFileSystemDirectory **r_d, int &r_file_pos) const {
 	if (!filesystem || scanning) {
 		return false;
 	}
 
-	String f = ProjectSettings::get_singleton()->localize_path(p_file);
-	if (!f.begins_with("res://")) {
-		return false;
-	}
-	f = f.substr(6);
-	f = f.replace_char('\\', '/');
-
-	Vector<String> path = f.split("/");
-
-	if (path.is_empty()) {
-		return false;
-	}
-	const String file = path[path.size() - 1];
-	const String file_lower = file.to_lower();
-	path.resize(path.size() - 1);
-
-	Ref<DirAccess> dir = DirAccess::create(DirAccess::ACCESS_FILESYSTEM);
-	EditorFileSystemDirectory *fs = filesystem;
-
-	for (const String &path_bit : path) {
-		if (path_bit.begins_with(".")) {
+	// Skip `localize_path()` when it would return the path unchanged, as it always allocates.
+	String f = p_file;
+	if (!f.begins_with("res://") || !_is_simple_res_path(f)) {
+		f = ProjectSettings::get_singleton()->localize_path(p_file);
+		if (!f.begins_with("res://")) {
 			return false;
 		}
-		const String path_bit_lower = path_bit.to_lower();
+	}
+
+	const Span<char32_t> str = f.span();
+	uint64_t seg_start = 6; // After "res://".
+
+	EditorFileSystemDirectory *fs = filesystem;
+
+	while (true) {
+		const int64_t seg_end = str.find('/', seg_start);
+		if (seg_end == -1) {
+			break; // Last segment is the file name.
+		}
+
+		const Span<char32_t> seg(str.ptr() + seg_start, seg_end - seg_start);
+		if (!seg.is_empty() && seg.ptr()[0] == '.') {
+			return false;
+		}
 
 		int idx = -1;
-		for (int j = 0; j < fs->get_subdir_count(); j++) {
-			if (is_case_sensitive) {
-				if (fs->get_subdir(j)->get_name() == path_bit) {
-					idx = j;
-					break;
-				}
-			} else {
-				if (fs->get_subdir(j)->get_name().to_lower() == path_bit_lower) {
-					idx = j;
-					break;
-				}
+		for (int j = 0; j < fs->subdirs.size(); j++) {
+			if (_span_equals(fs->subdirs[j]->name, seg, is_case_sensitive)) {
+				idx = j;
+				break;
 			}
 		}
 
 		if (idx == -1) {
+			const String path_bit = String::utf32(seg);
 			// Only create a missing directory in memory when it exists on disk.
-			String dir_path = fs->get_path().path_join(path_bit);
-			if (!dir->dir_exists(ProjectSettings::get_singleton()->globalize_path(dir_path))) {
+			const String dir_path = fs->get_path().path_join(path_bit);
+			if (!DirAccess::dir_exists_absolute(dir_path) || _should_skip_directory(dir_path)) {
 				return false;
 			}
 			EditorFileSystemDirectory *efsd = memnew(EditorFileSystemDirectory);
@@ -1948,22 +1960,19 @@ bool EditorFileSystem::_find_file(const String &p_file, EditorFileSystemDirector
 			}
 			fs = efsd;
 		} else {
-			fs = fs->get_subdir(idx);
+			fs = fs->subdirs[idx];
 		}
+
+		seg_start = seg_end + 1;
 	}
+
+	const Span<char32_t> file(str.ptr() + seg_start, str.size() - seg_start);
 
 	int cpos = -1;
 	for (int i = 0; i < fs->files.size(); i++) {
-		if (is_case_sensitive) {
-			if (fs->files[i]->file == file) {
-				cpos = i;
-				break;
-			}
-		} else {
-			if (fs->files[i]->file.to_lower() == file_lower) {
-				cpos = i;
-				break;
-			}
+		if (_span_equals(fs->files[i]->file, file, is_case_sensitive)) {
+			cpos = i;
+			break;
 		}
 	}
 
@@ -3355,17 +3364,17 @@ void EditorFileSystem::reimport_files(const Vector<String> &p_files) {
 					WorkerThreadPool::GroupID group_task = WorkerThreadPool::get_singleton()->add_template_group_task(this, &EditorFileSystem::_reimport_thread, &tdata, item_count, -1, false, vformat(TTR("Import resources of type: %s"), reimport_files[from].importer));
 
 					int imported_count = 0;
-					while (true) {
+					while (imported_count < item_count) {
+						const String file_name = reimport_files[from + imported_count].path.get_file();
 						while (true) {
-							ep->step(reimport_files[imported_count].path.get_file(), from + imported_count, false);
+							ep->step(file_name, from + imported_count, false);
 							if (imported_sem.try_wait()) {
-								imported_count++;
 								break;
 							}
+							// Yield while import workers are busy instead of monopolizing the main thread.
+							OS::get_singleton()->delay_usec(1000);
 						}
-						if (imported_count == item_count) {
-							break;
-						}
+						imported_count++;
 					}
 
 					WorkerThreadPool::get_singleton()->wait_for_group_task_completion(group_task);
@@ -3812,4 +3821,5 @@ EditorFileSystem::~EditorFileSystem() {
 	memdelete(filesystem);
 	filesystem = nullptr;
 	ResourceSaver::set_get_resource_id_for_path(nullptr);
+	singleton = nullptr; // Deferred callbacks may run after the editor has shut down.
 }

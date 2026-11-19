@@ -1,0 +1,50 @@
+name: AStar known-size collection and grid region regressions
+
+on:
+  pull_request:
+    paths:
+      - 'core/math/a_star.cpp'
+      - 'core/math/a_star_grid_2d.cpp'
+      - 'core/object/method_bind.cpp'
+      - 'core/variant/variant_call.cpp'
+      - 'tests/core/math/test_astar.cpp'
+      - 'tests/core/math/test_astar_2d.cpp'
+      - '.github/workflows/astar-known-size-results.yml'
+  push:
+    branches: [develop]
+    paths:
+      - 'core/math/a_star.cpp'
+      - 'core/math/a_star_grid_2d.cpp'
+      - 'core/object/method_bind.cpp'
+      - 'core/variant/variant_call.cpp'
+      - 'tests/core/math/test_astar.cpp'
+      - 'tests/core/math/test_astar_2d.cpp'
+      - '.github/workflows/astar-known-size-results.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  native-astar-results:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+      - uses: ./.github/actions/godot-deps
+      - name: Compile editor and AStar native tests
+        uses: ./.github/actions/godot-build
+        with:
+          platform: linuxbsd
+          target: editor
+          scons-flags: dev_build=yes tests=yes debug_symbols=no module_mono_enabled=no module_text_server_fb_enabled=yes accesskit=no -j2
+      - name: Verify AStar result counts and region bounds
+        run: |
+          ./bin/godot.linuxbsd.editor.dev.x86_64 --headless --test --test-case="*[AStar3D] Known-size point IDs and connections preserve all entries*"
+          ./bin/godot.linuxbsd.editor.dev.x86_64 --headless --test --test-case="*[AStar3D][Performance] Direct result writes preserve large graph snapshots*"
+          ./bin/godot.linuxbsd.editor.dev.x86_64 --headless --test --test-case="*[AStarGrid2D] Pre-sized region data respects grid intersections and order*"
+          ./bin/godot.linuxbsd.editor.dev.x86_64 --headless --test --test-case="*[AStar3D] Start heuristic evaluated once per search*"
+          ./bin/godot.linuxbsd.editor.dev.x86_64 --headless --test --test-case="*[AStar2D] Start heuristic evaluated once per search*"
+          ./bin/godot.linuxbsd.editor.dev.x86_64 --headless --test --test-case="*[AStarGrid2D] Start heuristic evaluated once per search*"

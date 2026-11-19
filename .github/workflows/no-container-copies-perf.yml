@@ -1,0 +1,49 @@
+name: Read-only container no-copy hotpath checks
+
+on:
+  push:
+    branches: [develop]
+    paths:
+      - 'core/io/ip.cpp'
+      - 'modules/navigation_2d/2d/godot_navigation_server_2d.cpp'
+      - 'modules/navigation_3d/3d/godot_navigation_server_3d.cpp'
+      - 'modules/tilemap/tile_map.cpp'
+      - 'scene/2d/audio_stream_player_2d.cpp'
+      - 'scene/gui/graph_edit.cpp'
+      - 'scene/main/node.cpp'
+      - 'scene/main/scene_tree.cpp'
+      - 'misc/scripts/tests/test_no_container_copies_perf.py'
+      - '.github/workflows/no-container-copies-perf.yml'
+  pull_request:
+    branches: [develop]
+    paths:
+      - 'core/io/ip.cpp'
+      - 'modules/navigation_2d/2d/godot_navigation_server_2d.cpp'
+      - 'modules/navigation_3d/3d/godot_navigation_server_3d.cpp'
+      - 'modules/tilemap/tile_map.cpp'
+      - 'scene/2d/audio_stream_player_2d.cpp'
+      - 'scene/gui/graph_edit.cpp'
+      - 'scene/main/node.cpp'
+      - 'scene/main/scene_tree.cpp'
+      - 'misc/scripts/tests/test_no_container_copies_perf.py'
+      - '.github/workflows/no-container-copies-perf.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  contracts:
+    runs-on: ubuntu-24.04
+    strategy:
+      matrix:
+        python-version: ['3.9', '3.13']
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+      - name: Validate zero-copy read-only caller contracts
+        run: |
+          python -m py_compile misc/scripts/tests/test_no_container_copies_perf.py
+          python -m unittest discover -s misc/scripts/tests -p test_no_container_copies_perf.py -v

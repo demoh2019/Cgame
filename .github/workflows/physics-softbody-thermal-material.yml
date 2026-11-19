@@ -1,0 +1,33 @@
+name: SoftBody3D thermo-mechanical XPBD material contracts
+
+on:
+  pull_request:
+    paths:
+      - "servers/physics_softbody_thermal_material.h"
+      - "servers/physics_3d/physics_server_3d.cpp"
+      - "modules/godot_physics_3d/godot_space_3d.cpp"
+      - "modules/godot_physics_3d/godot_space_3d.h"
+      - "modules/godot_physics_3d/godot_soft_body_3d.cpp"
+      - "modules/godot_physics_3d/godot_soft_body_3d.h"
+      - "tests/servers/test_physics_softbody_thermal_material.cpp"
+      - "tests/stress/test_physics_softbody_thermal_material.py"
+      - ".github/workflows/physics-softbody-thermal-material.yml"
+  push:
+    branches: [develop]
+    paths:
+      - "servers/physics_softbody_thermal_material.h"
+      - "modules/godot_physics_3d/godot_soft_body_3d.cpp"
+      - "tests/stress/test_physics_softbody_thermal_material.py"
+      - ".github/workflows/physics-softbody-thermal-material.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  thermal-numerical-and-integration:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Check heat conservation, expansion and XPBD integration
+        run: python3 -m unittest discover -s tests/stress -p test_physics_softbody_thermal_material.py -v

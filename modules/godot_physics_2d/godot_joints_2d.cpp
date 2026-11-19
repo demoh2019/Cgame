@@ -61,6 +61,9 @@ void GodotJoint2D::copy_settings_from(GodotJoint2D *p_joint) {
 	set_bias(p_joint->get_bias());
 	set_max_bias(p_joint->get_max_bias());
 	disable_collisions_between_bodies(p_joint->is_disabled_collisions_between_bodies());
+	break_force = p_joint->break_force;
+	break_torque = p_joint->break_torque;
+	break_callback = p_joint->break_callback;
 }
 
 static inline real_t k_scalar(GodotBody2D *a, GodotBody2D *b, const Vector2 &rA, const Vector2 &rB, const Vector2 &n) {
@@ -165,7 +168,7 @@ inline Vector2 custom_cross(const Vector2 &p_vec, real_t p_other) {
 	return Vector2(p_other * p_vec.y, -p_other * p_vec.x);
 }
 
-bool GodotPinJoint2D::pre_solve(real_t p_step) {
+bool GodotPinJoint2D::_pre_solve_joint(real_t p_step) {
 	// Apply accumulated impulse.
 	if (dynamic_A) {
 		A->apply_impulse(-P, rA);
@@ -206,7 +209,7 @@ bool GodotPinJoint2D::pre_solve(real_t p_step) {
 	return true;
 }
 
-void GodotPinJoint2D::solve(real_t p_step) {
+void GodotPinJoint2D::_solve_joint(real_t p_step) {
 	// Compute relative velocity.
 	Vector2 vA = A->get_linear_velocity() - custom_cross(rA - A->get_center_of_mass(), A->get_angular_velocity());
 
@@ -438,7 +441,7 @@ bool GodotGrooveJoint2D::setup(real_t p_step) {
 	return true;
 }
 
-bool GodotGrooveJoint2D::pre_solve(real_t p_step) {
+bool GodotGrooveJoint2D::_pre_solve_joint(real_t p_step) {
 	// Apply accumulated impulse.
 	if (dynamic_A) {
 		A->apply_impulse(-jn_acc, rA);
@@ -450,7 +453,7 @@ bool GodotGrooveJoint2D::pre_solve(real_t p_step) {
 	return true;
 }
 
-void GodotGrooveJoint2D::solve(real_t p_step) {
+void GodotGrooveJoint2D::_solve_joint(real_t p_step) {
 	// compute impulse
 	Vector2 vr = relative_velocity(A, B, rA, rB);
 
@@ -521,7 +524,7 @@ bool GodotDampedSpringJoint2D::setup(real_t p_step) {
 	return true;
 }
 
-bool GodotDampedSpringJoint2D::pre_solve(real_t p_step) {
+bool GodotDampedSpringJoint2D::_pre_solve_joint(real_t p_step) {
 	// Apply spring force.
 	if (dynamic_A) {
 		A->apply_impulse(-j, rA);
@@ -533,7 +536,7 @@ bool GodotDampedSpringJoint2D::pre_solve(real_t p_step) {
 	return true;
 }
 
-void GodotDampedSpringJoint2D::solve(real_t p_step) {
+void GodotDampedSpringJoint2D::_solve_joint(real_t p_step) {
 	// compute relative velocity
 	real_t vrn = normal_relative_velocity(A, B, rA, rB, n) - target_vrn;
 

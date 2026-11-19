@@ -32,6 +32,7 @@
 
 #include "core/object/gdvirtual.gen.h"
 #include "core/object/ref_counted.h"
+#include "core/templates/fixed_vector.h"
 #include "core/templates/local_vector.h"
 
 class AStarGrid2D : public RefCounted {
@@ -78,6 +79,7 @@ private:
 
 		Vector2 pos;
 		real_t weight_scale = 1.0;
+		uint32_t heap_index = 0; // Reuse alignment padding before the parent pointer.
 
 		// Used for pathfinding.
 		Point *prev_point = nullptr;
@@ -86,9 +88,6 @@ private:
 		uint64_t open_pass = 0;
 		uint64_t closed_pass = 0;
 
-		// Used for getting last_closest_point.
-		real_t abs_g_score = 0;
-		real_t abs_f_score = 0;
 
 		Point() {}
 
@@ -108,8 +107,22 @@ private:
 		}
 	};
 
-	LocalVector<bool> solid_mask;
-	LocalVector<LocalVector<Point>> points;
+	// Indexed binary heap: reprioritize in O(log frontier), not O(frontier).
+	struct OpenList {
+		LocalVector<Point *> items;
+		void _sift_up(uint32_t p_hole, Point *p_point);
+		void push(Point *p_point);
+		void decrease_key(Point *p_point);
+		void pop();
+		_FORCE_INLINE_ bool is_empty() const { return items.is_empty(); }
+		_FORCE_INLINE_ Point *top() const { return items[0]; }
+	};
+
+	// Both buffers have a known exact size on every rebuild. Disable the
+	// default 1.5x growth factor so increasing a map does not retain unused
+	// capacity (potentially millions of Point objects worth of memory).
+	LocalVector<bool, uint32_t, false, true> solid_mask;
+	LocalVector<Point, uint32_t, false, true> points;
 	Point *end = nullptr;
 	Point *last_closest_point = nullptr;
 
@@ -124,9 +137,13 @@ private: // Internal routines.
 		return !solid_mask[_to_mask_index(p_x, p_y)];
 	}
 
+	_FORCE_INLINE_ uint32_t _to_point_index(int32_t p_x, int32_t p_y) const {
+		// A grid may contain more than INT32_MAX cells. Avoid signed overflow.
+		return uint32_t((int64_t(p_y) - region.position.y) * region.size.x + int64_t(p_x) - region.position.x);
+	}
 	_FORCE_INLINE_ Point *_get_point(int32_t p_x, int32_t p_y) {
 		if (region.has_point(Vector2i(p_x, p_y))) {
-			return &points[p_y - region.position.y][p_x - region.position.x];
+			return &points[_to_point_index(p_x, p_y)];
 		}
 		return nullptr;
 	}
@@ -144,18 +161,18 @@ private: // Internal routines.
 	}
 
 	_FORCE_INLINE_ Point *_get_point_unchecked(int32_t p_x, int32_t p_y) {
-		return &points[p_y - region.position.y][p_x - region.position.x];
+		return &points[_to_point_index(p_x, p_y)];
 	}
 
 	_FORCE_INLINE_ Point *_get_point_unchecked(const Vector2i &p_id) {
-		return &points[p_id.y - region.position.y][p_id.x - region.position.x];
+		return &points[_to_point_index(p_id.x, p_id.y)];
 	}
 
 	_FORCE_INLINE_ const Point *_get_point_unchecked(const Vector2i &p_id) const {
-		return &points[p_id.y - region.position.y][p_id.x - region.position.x];
+		return &points[_to_point_index(p_id.x, p_id.y)];
 	}
 
-	void _get_nbors(Point *p_point, LocalVector<Point *> &r_nbors);
+	void _get_nbors(Point *p_point, FixedVector<Point *, 8> &r_nbors);
 	Point *_jump(Point *p_from, Point *p_to);
 	bool _solve(Point *p_begin_point, Point *p_end_point, bool p_allow_partial_path);
 	Point *_forced_successor(int32_t p_x, int32_t p_y, int32_t p_dx, int32_t p_dy, bool p_inclusive = false);

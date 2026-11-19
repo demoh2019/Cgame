@@ -1,0 +1,61 @@
+name: AStarGrid2D bulk update capacity regressions
+
+on:
+  pull_request:
+    paths:
+      - 'core/math/a_star_grid_2d.cpp'
+      - 'core/math/a_star_grid_2d.h'
+      - 'tests/core/math/test_astar.cpp'
+      - '.github/workflows/astar-grid-bulk-update.yml'
+  push:
+    branches: [develop]
+    paths:
+      - 'core/math/a_star_grid_2d.cpp'
+      - 'core/math/a_star_grid_2d.h'
+      - 'tests/core/math/test_astar.cpp'
+      - '.github/workflows/astar-grid-bulk-update.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  native-grid-rebuild:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+      - uses: ./.github/actions/godot-deps
+      - name: Compile native tests and editor
+        uses: ./.github/actions/godot-build
+        with:
+          platform: linuxbsd
+          target: editor
+          scons-flags: dev_build=yes tests=yes debug_symbols=no module_mono_enabled=no module_text_server_fb_enabled=yes accesskit=no -j2
+      - name: Validate rectangular grid rebuilds, bounded neighbor traversal and corner policies
+        run: |
+          ./bin/godot.linuxbsd.editor.dev.x86_64 --headless --test --test-case="*[AStarGrid2D] Repeated grid rebuild preserves padded mask and point coordinates*"
+          ./bin/godot.linuxbsd.editor.dev.x86_64 --headless --test --test-case="*[AStarGrid2D] Fixed-capacity neighbors preserve corner policies and paths*"
+          ./bin/godot.linuxbsd.editor.dev.x86_64 --headless --test --test-case="*[AStarGrid2D][Performance] Row-major neighbor offsets preserve all diagonal policies*"
+          ./bin/godot.linuxbsd.editor.dev.x86_64 --headless --test --test-case="*[AStarGrid2D][Performance] JPS straight scans preserve boundary and shifted-grid routes*"
+          ./bin/godot.linuxbsd.editor.dev.x86_64 --headless --test --test-case="*[AStarGrid2D][Performance] JPS indexed mask scans preserve obstacle routing*"
+          ./bin/godot.linuxbsd.editor.dev.x86_64 --headless --test --test-case="*[AStarGrid2D][Performance] Row-wise region fills retain clipping and weights*"
+      - name: Verify cardinal/diagonal navigation stress smoke
+        run: |
+          python3 tests/stress/run.py \
+            --godot ./bin/godot.linuxbsd.editor.dev.x86_64 \
+            --case astar_grid_neighbors --scale 1 --frames 12 \
+            --repeats 1 --timeout 120 --rss-limit-mib 3072 \
+            --output /tmp/astar-grid-neighbors.json
+          python3 tests/stress/run.py \
+            --godot ./bin/godot.linuxbsd.editor.dev.x86_64 \
+            --case astar_grid_jps --scale 1 --frames 12 \
+            --repeats 1 --timeout 120 --rss-limit-mib 3072 \
+            --output /tmp/astar-grid-jps.json
+          python3 tests/stress/run.py \
+            --godot ./bin/godot.linuxbsd.editor.dev.x86_64 \
+            --case astar_grid_fill --scale 1 --frames 12 \
+            --repeats 1 --timeout 120 --rss-limit-mib 3072 \
+            --output /tmp/astar-grid-fill.json

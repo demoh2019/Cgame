@@ -43,20 +43,46 @@ IPAddress::operator String() const {
 		return "";
 	}
 
-	if (is_ipv4()) {
-		// IPv4 address mapped to IPv6.
-		return itos(field8[12]) + "." + itos(field8[13]) + "." + itos(field8[14]) + "." + itos(field8[15]);
-	}
-	String ret;
-	for (int i = 0; i < 8; i++) {
-		if (i > 0) {
-			ret = ret + ":";
-		}
-		uint16_t num = (field8[i * 2] << 8) + field8[i * 2 + 1];
-		ret = ret + String::num_int64(num, 16);
-	}
+	// IPv4 fits in 15 characters, and the uncompressed IPv6 representation
+	// fits in 39. Build directly on the stack, then allocate just one String.
+	char32_t buffer[IPV6_MAX_STRING_LENGTH];
+	int pos = 0;
 
-	return ret;
+	if (is_ipv4()) {
+		// IPv4 addresses are stored as IPv4-mapped IPv6.
+		for (int i = 12; i < 16; i++) {
+			if (i != 12) {
+				buffer[pos++] = '.';
+			}
+			unsigned int octet = field8[i];
+			if (octet >= 100) {
+				buffer[pos++] = '0' + octet / 100;
+				octet %= 100;
+				buffer[pos++] = '0' + octet / 10;
+			} else if (octet >= 10) {
+				buffer[pos++] = '0' + octet / 10;
+			}
+			buffer[pos++] = '0' + octet % 10;
+		}
+	} else {
+		static constexpr char32_t HEX_DIGITS[] = U"0123456789abcdef";
+		for (int i = 0; i < 8; i++) {
+			if (i != 0) {
+				buffer[pos++] = ':';
+			}
+			const uint16_t num = (uint16_t(field8[i * 2]) << 8) | field8[i * 2 + 1];
+			bool started = false;
+			for (int shift = 12; shift >= 0; shift -= 4) {
+				const uint32_t digit = (num >> shift) & 0xF;
+				if (digit != 0 || started || shift == 0) {
+					buffer[pos++] = HEX_DIGITS[digit];
+					started = true;
+				}
+			}
+		}
+	}
+	buffer[pos] = 0;
+	return String(buffer);
 }
 
 bool IPAddress::_parse_ipv6(const String &p_string, IPAddress &r_ip) {

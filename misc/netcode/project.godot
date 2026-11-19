@@ -1,0 +1,6 @@
+; Standalone Godot test project for netcode helpers.
+config_version=5
+
+[application]
+
+config/name="Netcode Prediction Regression Tests"

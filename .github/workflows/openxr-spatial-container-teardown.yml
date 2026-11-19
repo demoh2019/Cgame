@@ -1,0 +1,44 @@
+name: OpenXR foveation and spatial container regression tests
+
+on:
+  push:
+    branches: [develop]
+    paths:
+      - 'modules/openxr/extensions/openxr_fb_foveation_extension.cpp'
+      - 'modules/openxr/extensions/spatial_container/openxr_spatial_container_extension.cpp'
+      - 'modules/openxr/extensions/spatial_container/openxr_spatial_container_self_rendering_extension.cpp'
+      - 'misc/scripts/tests/test_openxr_spatial_container_teardown.py'
+      - 'misc/scripts/README_openxr_spatial_container_teardown.md'
+      - '.github/workflows/openxr-spatial-container-teardown.yml'
+  pull_request:
+    branches: [develop]
+    paths:
+      - 'modules/openxr/extensions/openxr_fb_foveation_extension.cpp'
+      - 'modules/openxr/extensions/spatial_container/openxr_spatial_container_extension.cpp'
+      - 'modules/openxr/extensions/spatial_container/openxr_spatial_container_self_rendering_extension.cpp'
+      - 'misc/scripts/tests/test_openxr_spatial_container_teardown.py'
+      - 'misc/scripts/README_openxr_spatial_container_teardown.md'
+      - '.github/workflows/openxr-spatial-container-teardown.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  source-regressions:
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 10
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+        python-version: ['3.10', '3.13']
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+      - name: Check regression test syntax
+        run: python -m py_compile misc/scripts/tests/test_openxr_spatial_container_teardown.py
+      - name: Verify source control-flow contracts
+        run: python -m unittest discover -s misc/scripts/tests -p 'test_openxr_spatial_container_teardown.py' -v

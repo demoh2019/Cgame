@@ -728,14 +728,18 @@ Ref<KinematicCollision3D> CharacterBody3D::_get_slide_collision(int p_bounce) {
 		slide_colliders.resize(p_bounce + 1);
 	}
 
+	// This vector is already correctly sized. Obtain the writable slot once,
+	// avoiding repeated bounds/COW checks when queried by scripts each frame.
+	Ref<KinematicCollision3D> &collision = slide_colliders.ptrw()[p_bounce];
+
 	// Create a new instance when the cached reference is invalid or still in use in script.
-	if (slide_colliders[p_bounce].is_null() || slide_colliders[p_bounce]->get_reference_count() > 1) {
-		slide_colliders.write[p_bounce].instantiate();
-		slide_colliders.write[p_bounce]->owner_id = get_instance_id();
+	if (collision.is_null() || collision->get_reference_count() > 1) {
+		collision.instantiate();
+		collision->owner_id = get_instance_id();
 	}
 
-	slide_colliders.write[p_bounce]->result = motion_results[p_bounce];
-	return slide_colliders[p_bounce];
+	collision->result = motion_results[p_bounce];
+	return collision;
 }
 
 Ref<KinematicCollision3D> CharacterBody3D::_get_last_slide_collision() {

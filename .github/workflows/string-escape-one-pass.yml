@@ -1,0 +1,49 @@
+name: String hotpath native regressions
+
+on:
+  pull_request:
+    branches: [develop]
+    paths:
+      - "core/string/ustring.cpp"
+      - "tests/core/string/test_string.cpp"
+      - ".github/workflows/string-escape-one-pass.yml"
+  push:
+    branches: [develop]
+    paths:
+      - "core/string/ustring.cpp"
+      - "tests/core/string/test_string.cpp"
+      - ".github/workflows/string-escape-one-pass.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+# Skip stale expensive engine builds if another push or PR revision arrives.
+concurrency:
+  group: string-hotpath-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  native-string-hotpaths:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+      - uses: ./.github/actions/godot-deps
+      - name: Build editor once for all String hotpath checks
+        uses: ./.github/actions/godot-build
+        with:
+          platform: linuxbsd
+          target: editor
+          scons-flags: dev_build=yes tests=yes debug_symbols=no module_mono_enabled=no accesskit=no -j2
+      - name: Run C, JSON, XML, URI, and path regression tests
+        run: |
+          ./bin/godot.linuxbsd.editor.dev.x86_64 --headless --test --test-case="*[String] Escape*" --no-colors
+          ./bin/godot.linuxbsd.editor.dev.x86_64 --headless --test --test-case="*[String] c-escape*" --no-colors
+          ./bin/godot.linuxbsd.editor.dev.x86_64 --headless --test --test-case="*[String] xml_escape*" --no-colors
+          ./bin/godot.linuxbsd.editor.dev.x86_64 --headless --test --test-case="*[String] URI decoding*" --no-colors
+          ./bin/godot.linuxbsd.editor.dev.x86_64 --headless --test --test-case="*[String] uri_encode*" --no-colors
+          ./bin/godot.linuxbsd.editor.dev.x86_64 --headless --test --test-case="*[String] Path joining*" --no-colors
+          ./bin/godot.linuxbsd.editor.dev.x86_64 --headless --test --test-case="*[String] Path extraction*" --no-colors

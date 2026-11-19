@@ -92,11 +92,15 @@ private:
 		if (_keys == nullptr || _size == 0) {
 			return false; // Failed lookups, no elements
 		}
+		return _lookup_key_idx_unchecked(p_key, _hash(p_key), r_key_idx);
+	}
 
+	// The caller has already calculated the normalized hash. Reuse it on insert
+	// rather than hashing long String / StringName keys a second time.
+	bool _lookup_key_idx_unchecked(const TKey &p_key, uint32_t p_hash, uint32_t &r_key_idx) const {
 		const uint32_t capacity = hash_table_size_primes[_capacity_idx];
 		const uint64_t capacity_inv = hash_table_size_primes_inv[_capacity_idx];
-		uint32_t hash = _hash(p_key);
-		uint32_t hash_idx = fastmod(hash, capacity_inv, capacity);
+		uint32_t hash_idx = fastmod(p_hash, capacity_inv, capacity);
 		uint32_t distance = 0;
 
 		while (true) {
@@ -104,7 +108,7 @@ private:
 				return false;
 			}
 
-			if (_hashes[hash_idx] == hash && Comparator::compare(_keys[_hash_idx_to_key_idx[hash_idx]], p_key)) {
+			if (_hashes[hash_idx] == p_hash && Comparator::compare(_keys[_hash_idx_to_key_idx[hash_idx]], p_key)) {
 				r_key_idx = _hash_idx_to_key_idx[hash_idx];
 				return true;
 			}
@@ -149,10 +153,23 @@ private:
 	}
 
 	void _resize_and_rehash(uint32_t p_new_capacity_idx) {
+		const uint32_t old_capacity = hash_table_size_primes[_capacity_idx];
 		// Capacity can't be 0.
 		_capacity_idx = MAX((uint32_t)MIN_CAPACITY_INDEX, p_new_capacity_idx);
 
 		uint32_t capacity = hash_table_size_primes[_capacity_idx];
+
+		// A previously cleared set already has an empty hash table.
+		// Reuse its four allocations rather than creating two fresh
+		// tables and copying/zeroing the old address space again.
+		if (_keys != nullptr && _size == 0 && capacity > old_capacity) {
+			_hashes = reinterpret_cast<uint32_t *>(Memory::realloc_static(_hashes, sizeof(uint32_t) * capacity));
+			_keys = reinterpret_cast<TKey *>(Memory::realloc_static(_keys, sizeof(TKey) * capacity));
+			_key_idx_to_hash_idx = reinterpret_cast<uint32_t *>(Memory::realloc_static(_key_idx_to_hash_idx, sizeof(uint32_t) * capacity));
+			_hash_idx_to_key_idx = reinterpret_cast<uint32_t *>(Memory::realloc_static(_hash_idx_to_key_idx, sizeof(uint32_t) * capacity));
+			memset(_hashes + old_capacity, EMPTY_HASH, sizeof(uint32_t) * (capacity - old_capacity));
+			return;
+		}
 
 		uint32_t *old_hashes = _hashes;
 		uint32_t *old_key_to_hash = _key_idx_to_hash_idx;
@@ -185,8 +202,9 @@ private:
 			_hash_idx_to_key_idx = reinterpret_cast<uint32_t *>(Memory::alloc_static(sizeof(uint32_t) * capacity));
 		}
 
+		const uint32_t hash = _hash(p_key);
 		uint32_t key_idx = 0;
-		bool exists = _lookup_key_idx(p_key, key_idx);
+		bool exists = _size > 0 && _lookup_key_idx_unchecked(p_key, hash, key_idx);
 
 		if (exists) {
 			return key_idx;
@@ -196,7 +214,6 @@ private:
 				_resize_and_rehash(_capacity_idx + 1);
 			}
 
-			uint32_t hash = _hash(p_key);
 			memnew_placement(&_keys[_size], TKey(p_key));
 			_insert_with_hash(hash, _size);
 			_size++;
@@ -245,8 +262,17 @@ public:
 			return;
 		}
 
-		uint32_t capacity = hash_table_size_primes[_capacity_idx];
-		memset(_hashes, EMPTY_HASH, sizeof(EMPTY_HASH) * capacity);
+		const uint32_t capacity = hash_table_size_primes[_capacity_idx];
+		// A pre-reserved set can be mostly empty. In that case, clearing
+		// only the occupied hash slots avoids touching the whole table.
+		// Keep the contiguous memset for dense sets, where it is faster.
+		if (_size <= capacity / 32) {
+			for (uint32_t i = 0; i < _size; i++) {
+				_hashes[_key_idx_to_hash_idx[i]] = EMPTY_HASH;
+			}
+		} else {
+			memset(_hashes, EMPTY_HASH, sizeof(EMPTY_HASH) * capacity);
+		}
 
 		if constexpr (!std::is_trivially_destructible_v<TKey>) {
 			for (uint32_t i = 0; i < _size; i++) {
@@ -274,7 +300,8 @@ public:
 
 		const uint32_t capacity = hash_table_size_primes[_capacity_idx];
 		const uint64_t capacity_inv = hash_table_size_primes_inv[_capacity_idx];
-		uint32_t next_hash_idx = fastmod(hash_idx + 1, capacity_inv, capacity);
+		uint32_t next_hash_idx = hash_idx;
+		_increment_mod(next_hash_idx, capacity);
 		while (_hashes[next_hash_idx] != EMPTY_HASH && _get_probe_length(next_hash_idx, _hashes[next_hash_idx], capacity, capacity_inv) != 0) {
 			uint32_t cur_key_idx = _hash_idx_to_key_idx[hash_idx];
 			uint32_t next_key_idx = _hash_idx_to_key_idx[next_hash_idx];
@@ -290,9 +317,8 @@ public:
 		_keys[key_idx].~TKey();
 		_size--;
 		if (key_idx < _size) {
-			// Not the last key, move the last one here to keep keys contiguous.
-			memnew_placement(&_keys[key_idx], TKey(_keys[_size]));
-			_keys[_size].~TKey();
+			// Not the last key, trivially relocate (see GH-100509) the last one here to keep keys contiguous.
+			memcpy((void *)&_keys[key_idx], (const void *)&_keys[_size], sizeof(TKey));
 			_key_idx_to_hash_idx[key_idx] = _key_idx_to_hash_idx[_size];
 			_hash_idx_to_key_idx[_key_idx_to_hash_idx[_size]] = key_idx;
 		}

@@ -1,0 +1,40 @@
+name: Container reservation and deep-copy regressions
+
+on:
+  push:
+    branches: [develop]
+    paths:
+      - 'core/io/resource.cpp'
+      - 'scene/main/scene_tree.cpp'
+      - 'core/extension/gdextension_interface.cpp'
+      - 'tests/core/io/test_resource.cpp'
+      - '.github/workflows/container-reservation-regressions.yml'
+  pull_request:
+    paths:
+      - 'core/io/resource.cpp'
+      - 'scene/main/scene_tree.cpp'
+      - 'core/extension/gdextension_interface.cpp'
+      - 'tests/core/io/test_resource.cpp'
+      - '.github/workflows/container-reservation-regressions.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  native-resource-regression:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+      - uses: ./.github/actions/godot-deps
+      - name: Build Godot with native tests
+        uses: ./.github/actions/godot-build
+        with:
+          platform: linuxbsd
+          target: editor
+          scons-flags: dev_build=yes tests=yes debug_symbols=no module_mono_enabled=no module_text_server_fb_enabled=yes accesskit=no -j2
+      - name: Run large-dictionary deep-duplication regression
+        run: ./bin/godot.linuxbsd.editor.dev.x86_64 --headless --test --test-case="*[Resource] Deep duplication preserves large nested dictionary values*"

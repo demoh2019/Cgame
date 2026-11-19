@@ -68,10 +68,15 @@ void Quaternion::normalize() {
 		WARN_PRINT("Quaternion cannot be normalized, the elements should be finite.");
 	}
 #endif // MATH_CHECKS
-	const real_t length_sq = length_squared();
-	// Avoid division by zero, underflow and overflow in the squared length.
-	if (likely(Math::is_finite(length_sq) && length_sq >= (real_t)CMP_EPSILON2)) {
-		*this /= Math::sqrt(length_sq);
+
+	real_t sl = length_squared();
+
+	// Epsilon helps:
+	// * prevent underflow or subnormal inputs from flushing to zero in sqrt.
+	// * avoid severe precision loss that would produce a non-normalized result.
+	if (likely(Math::is_finite(sl) && sl >= (real_t)CMP_EPSILON2)) {
+		real_t l = Math::sqrt(sl);
+		*this /= l;
 		return;
 	}
 

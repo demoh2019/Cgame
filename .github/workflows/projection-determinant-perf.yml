@@ -1,0 +1,38 @@
+name: Projection determinant cofactor regression
+
+on:
+  pull_request:
+    paths:
+      - 'core/math/projection.cpp'
+      - 'modules/mono/glue/GodotSharp/GodotSharp/Core/Projection.cs'
+      - 'tests/core/math/test_projection.cpp'
+      - '.github/workflows/projection-determinant-perf.yml'
+  push:
+    branches: [develop]
+    paths:
+      - 'core/math/projection.cpp'
+      - 'modules/mono/glue/GodotSharp/GodotSharp/Core/Projection.cs'
+      - 'tests/core/math/test_projection.cpp'
+      - '.github/workflows/projection-determinant-perf.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  native-determinant:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+      - uses: ./.github/actions/godot-deps
+      - name: Compile editor with native projection tests
+        uses: ./.github/actions/godot-build
+        with:
+          platform: linuxbsd
+          target: editor
+          scons-flags: dev_build=yes tests=yes debug_symbols=no module_mono_enabled=no module_text_server_fb_enabled=yes accesskit=no -j2
+      - name: Check determinant correctness across 512 matrices
+        run: ./bin/godot.linuxbsd.editor.dev.x86_64 --headless --test --test-case="*[Projection]*determinant*"

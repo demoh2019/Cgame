@@ -34,6 +34,8 @@
 #include "core/io/udp_server.h"
 #include "core/object/class_db.h"
 
+#include <cstring>
+
 void PacketPeerUDP::set_blocking_mode(bool p_enable) {
 	blocking = p_enable;
 }
@@ -114,13 +116,16 @@ Error PacketPeerUDP::get_packet(const uint8_t **r_buffer, int &r_buffer_size) {
 	GODOT_GCC_WARNING_PUSH
 	GODOT_GCC_PRAGMA(GCC diagnostic warning "-Wstringop-overflow=0") // Can't "ignore" this for some reason.
 
+	// Read the entire fixed-size header in one ring-buffer transfer rather
+	// than separately reading the address, port and size fields.
+	uint8_t header[24];
+	ERR_FAIL_COND_V(rb.read(header, sizeof(header)) != sizeof(header), ERR_INVALID_DATA);
+	packet_ip.set_ipv6(header);
+	memcpy(&packet_port, header + 16, sizeof(packet_port));
 	uint32_t size = 0;
-	uint8_t ipv6[16] = {};
-	rb.read(ipv6, 16, true);
-	packet_ip.set_ipv6(ipv6);
-	rb.read((uint8_t *)&packet_port, 4, true);
-	rb.read((uint8_t *)&size, 4, true);
-	rb.read(packet_buffer, size, true);
+	memcpy(&size, header + 20, sizeof(size));
+	ERR_FAIL_COND_V(size > PACKET_BUFFER_SIZE || rb.data_left() < int(size), ERR_INVALID_DATA);
+	ERR_FAIL_COND_V(rb.read(packet_buffer, int(size)) != int(size), ERR_INVALID_DATA);
 	--queue_count;
 	*r_buffer = packet_buffer;
 	r_buffer_size = size;
@@ -321,12 +326,21 @@ Error PacketPeerUDP::_poll() {
 }
 
 Error PacketPeerUDP::store_packet(IPAddress p_ip, uint32_t p_port, uint8_t *p_buf, int p_buf_size) {
+	// Validate before adding the 24-byte framing overhead. Aside from avoiding
+	// signed overflow, this guarantees received packets fit packet_buffer.
+	ERR_FAIL_COND_V(p_buf_size < 0 || p_buf_size > PACKET_BUFFER_SIZE, ERR_INVALID_PARAMETER);
+	ERR_FAIL_COND_V(p_buf_size != 0 && p_buf == nullptr, ERR_INVALID_PARAMETER);
 	if (rb.space_left() < p_buf_size + 24) {
 		return ERR_OUT_OF_MEMORY;
 	}
-	rb.write(p_ip.get_ipv6(), 16);
-	rb.write((uint8_t *)&p_port, 4);
-	rb.write((uint8_t *)&p_buf_size, 4);
+
+	// Preserve the native-endian queue format, but transfer the header in a
+	// single ring-buffer operation to reduce wrap checks and cursor writes.
+	uint8_t header[24];
+	memcpy(header, p_ip.get_ipv6(), 16);
+	memcpy(header + 16, &p_port, sizeof(p_port));
+	memcpy(header + 20, &p_buf_size, sizeof(p_buf_size));
+	rb.write(header, sizeof(header));
 	rb.write(p_buf, p_buf_size);
 	++queue_count;
 	return OK;

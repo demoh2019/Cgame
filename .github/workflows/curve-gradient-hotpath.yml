@@ -1,0 +1,78 @@
+name: Curve and Gradient CPU hotpath regressions
+
+on:
+  push:
+    branches: [develop]
+    paths:
+      - 'scene/resources/curve.cpp'
+      - 'scene/resources/curve.h'
+      - 'tests/scene/test_curve_2d.cpp'
+      - 'tests/scene/test_curve_3d.cpp'
+      - 'scene/resources/gradient.h'
+      - 'tests/scene/test_curve.cpp'
+      - 'tests/scene/test_gradient.cpp'
+      - 'misc/scripts/tests/bench_curve_index_equivalence.cpp'
+      - 'misc/scripts/tests/test_curve_gradient_hotpath.py'
+      - '.github/workflows/curve-gradient-hotpath.yml'
+  pull_request:
+    paths:
+      - 'scene/resources/curve.cpp'
+      - 'scene/resources/curve.h'
+      - 'tests/scene/test_curve_2d.cpp'
+      - 'tests/scene/test_curve_3d.cpp'
+      - 'scene/resources/gradient.h'
+      - 'tests/scene/test_curve.cpp'
+      - 'tests/scene/test_gradient.cpp'
+      - 'misc/scripts/tests/bench_curve_index_equivalence.cpp'
+      - 'misc/scripts/tests/test_curve_gradient_hotpath.py'
+      - '.github/workflows/curve-gradient-hotpath.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  equivalence:
+    runs-on: ubuntu-24.04
+    strategy:
+      fail-fast: false
+      matrix:
+        compiler: [g++, clang++]
+        python-version: ['3.10', '3.13']
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+      - name: Guard source-level invariants
+        run: python -m unittest discover -s misc/scripts/tests -p test_curve_gradient_hotpath.py -v
+      - name: Compile Curve equivalence and CPU benchmark
+        run: ${{ matrix.compiler }} -std=c++17 -O3 -Wall -Wextra -Werror -o /tmp/curve_index_bench misc/scripts/tests/bench_curve_index_equivalence.cpp
+      - name: Check Curve branch-equivalence and benchmark
+        run: /tmp/curve_index_bench
+
+  engine-native-tests:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install Linux editor dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libwayland-bin
+      - uses: ./.github/actions/godot-deps
+      - name: Build Cgame editor with engine tests
+        uses: ./.github/actions/godot-build
+        with:
+          platform: linuxbsd
+          target: editor
+          scons-flags: dev_build=yes debug_symbols=no tests=yes module_text_server_fb_enabled=yes -j2
+      - name: Run native Curve and Gradient tests
+        shell: bash
+        run: |
+          set -euo pipefail
+          BIN=./bin/godot.linuxbsd.editor.dev.x86_64
+          "$BIN" --headless --test --test-case='*[Curve]*' --no-colors
+          "$BIN" --headless --test --test-case='*[Curve2D]*' --no-colors
+          "$BIN" --headless --test --test-case='*[Curve3D]*' --no-colors
+          "$BIN" --headless --test --test-case='*[Gradient]*' --no-colors

@@ -36,6 +36,8 @@
 #include "godot_physics_server_2d.h"
 
 #include "core/config/project_settings.h"
+#include "core/templates/hash_set.h"
+#include "servers/physics_cast_motion_pruning.h"
 
 #define TEST_MOTION_MARGIN_MIN_VALUE 0.0001
 #define TEST_MOTION_MIN_CONTACT_DEPTH_FACTOR 0.05
@@ -61,142 +63,130 @@ int GodotPhysicsDirectSpaceState2D::intersect_point(const PS2DT::PointParameters
 		return 0;
 	}
 
-	Rect2 aabb;
-	aabb.position = p_parameters.position - Vector2(0.00001, 0.00001);
-	aabb.size = Vector2(0.00002, 0.00002);
+	// Query the BVH with the exact point, just as GodotPhysics 3D does.
+	// A tiny synthetic AABB also visits nearby proxies that cannot contain
+	// the point. The shape callback still applies exact containment and filters.
+	struct PointQuery {
+		const PS2DT::PointParameters &params;
+		PS2DT::ShapeResult *results;
+		int max_results;
+		int count = 0;
+	};
+	PointQuery query = { p_parameters, r_results, p_result_max };
 
-	int amount = space->broadphase->cull_aabb(aabb, space->intersection_query_results, GodotSpace2D::INTERSECTION_QUERY_MAX, space->intersection_query_subindex_results);
-
-	int cc = 0;
-
-	for (int i = 0; i < amount; i++) {
-		if (!_can_collide_with(space->intersection_query_results[i], p_parameters.collision_mask, p_parameters.collide_with_bodies, p_parameters.collide_with_areas)) {
-			continue;
+	auto visitor = [](GodotCollisionObject2D *p_object, int p_shape, void *p_userdata) -> bool {
+		PointQuery &data = *static_cast<PointQuery *>(p_userdata);
+		if (!_can_collide_with(p_object, data.params.collision_mask, data.params.collide_with_bodies, data.params.collide_with_areas) ||
+				data.params.exclude.has(p_object->get_self()) ||
+				(data.params.pick_point && !p_object->is_pickable()) ||
+				p_object->get_canvas_instance_id() != data.params.canvas_instance_id) {
+			return true;
 		}
 
-		if (p_parameters.exclude.has(space->intersection_query_results[i]->get_self())) {
-			continue;
-		}
-
-		const GodotCollisionObject2D *col_obj = space->intersection_query_results[i];
-
-		if (p_parameters.pick_point && !col_obj->is_pickable()) {
-			continue;
-		}
-
-		if (col_obj->get_canvas_instance_id() != p_parameters.canvas_instance_id) {
-			continue;
-		}
-
-		int shape_idx = space->intersection_query_subindex_results[i];
-
-		GodotShape2D *shape = col_obj->get_shape(shape_idx);
-
-		Vector2 local_point = (col_obj->get_transform() * col_obj->get_shape_transform(shape_idx)).affine_inverse().xform(p_parameters.position);
-
+		GodotShape2D *shape = p_object->get_shape(p_shape);
+		// Inverses are cached by the collision object and updated when the
+		// body/area or shape transform changes. Avoid an affine matrix inverse
+		// for every BVH candidate in this hot point-query path.
+		const Vector2 local_point = p_object->get_shape_inv_transform(p_shape).xform(p_object->get_inv_transform().xform(data.params.position));
 		if (!shape->contains_point(local_point)) {
-			continue;
+			return true;
 		}
 
-		if (cc >= p_result_max) {
-			continue;
-		}
+		PS2DT::ShapeResult &result = data.results[data.count++];
+		result.collider_id = p_object->get_instance_id();
+		result.rid = p_object->get_self();
+		result.shape = p_shape;
+		return data.count < data.max_results;
+	};
 
-		r_results[cc].collider_id = col_obj->get_instance_id();
-		r_results[cc].rid = col_obj->get_self();
-		r_results[cc].shape = shape_idx;
-
-		cc++;
-	}
-
-	return cc;
+	space->broadphase->visit_point(p_parameters.position, visitor, &query);
+	return query.count;
 }
 
 bool GodotPhysicsDirectSpaceState2D::intersect_ray(const PS2DT::RayParameters &p_parameters, PS2DT::RayResult &r_result) {
 	ERR_FAIL_COND_V(space->locked, false);
 
-	Vector2 begin, end;
-	Vector2 normal;
-	begin = p_parameters.from;
-	end = p_parameters.to;
-	normal = (end - begin).normalized();
-
-	int amount = space->broadphase->cull_segment(begin, end, space->intersection_query_results, GodotSpace2D::INTERSECTION_QUERY_MAX, space->intersection_query_subindex_results);
-
-	//todo, create another array that references results, compute AABBs and check closest point to ray origin, sort, and stop evaluating results when beyond first collision
-
-	bool collided = false;
-	Vector2 res_point, res_normal;
-	int res_shape = -1;
-	const GodotCollisionObject2D *res_obj = nullptr;
-	real_t min_d = 1e10;
-
-	for (int i = 0; i < amount; i++) {
-		if (!_can_collide_with(space->intersection_query_results[i], p_parameters.collision_mask, p_parameters.collide_with_bodies, p_parameters.collide_with_areas)) {
-			continue;
-		}
-
-		if (p_parameters.exclude.has(space->intersection_query_results[i]->get_self())) {
-			continue;
-		}
-
-		const GodotCollisionObject2D *col_obj = space->intersection_query_results[i];
-
-		int shape_idx = space->intersection_query_subindex_results[i];
-		Transform2D inv_xform = col_obj->get_shape_inv_transform(shape_idx) * col_obj->get_inv_transform();
-
-		Vector2 local_from = inv_xform.xform(begin);
-		Vector2 local_to = inv_xform.xform(end);
-
-		const GodotShape2D *shape = col_obj->get_shape(shape_idx);
-
-		Vector2 shape_point, shape_normal;
-
-		if (shape->contains_point(local_from)) {
-			if (p_parameters.hit_from_inside) {
-				// Hit shape at starting point.
-				min_d = 0;
-				res_point = begin;
-				res_normal = Vector2();
-				res_shape = shape_idx;
-				res_obj = col_obj;
-				collided = true;
-				break;
-			} else {
-				// Ignore shape when starting inside.
-				continue;
-			}
-		}
-
-		if (shape->intersect_segment(local_from, local_to, shape_point, shape_normal)) {
-			Transform2D xform = col_obj->get_transform() * col_obj->get_shape_transform(shape_idx);
-			shape_point = xform.xform(shape_point);
-
-			real_t ld = normal.dot(shape_point);
-
-			if (ld < min_d) {
-				min_d = ld;
-				res_point = shape_point;
-				res_normal = inv_xform.basis_xform_inv(shape_normal).normalized();
-				res_shape = shape_idx;
-				res_obj = col_obj;
-				collided = true;
-			}
-		}
-	}
-
-	if (!collided) {
+	const Vector2 begin = p_parameters.from;
+	const Vector2 end = p_parameters.to;
+	const Vector2 motion = end - begin;
+	const double motion_x = double(motion.x);
+	const double motion_y = double(motion.y);
+	const double length_squared = motion_x * motion_x + motion_y * motion_y;
+	if (length_squared == 0.0) {
 		return false;
 	}
-	ERR_FAIL_NULL_V(res_obj, false); // Shouldn't happen but silences warning.
 
-	r_result.collider_id = res_obj->get_instance_id();
-	r_result.normal = res_normal;
-	r_result.position = res_point;
-	r_result.rid = res_obj->get_self();
-	r_result.shape = res_shape;
+	// Box2D/Jolt-style streaming BVH traversal. The narrowphase callback
+	// clips the segment to the nearest exact hit, without a 2048-result cap.
+	struct RayCastData {
+		const PS2DT::RayParameters &params;
+		PS2DT::RayResult &result;
+		Vector2 from;
+		Vector2 motion;
+		double motion_x;
+		double motion_y;
+		double inv_motion_length_squared;
+		bool hit = false;
+	};
+	RayCastData state = { p_parameters, r_result, begin, motion, motion_x, motion_y, 1.0 / length_squared };
 
-	return true;
+	auto visitor = [] (GodotCollisionObject2D *object, int p_shape, real_t p_max_fraction, void *p_userdata) -> real_t {
+		RayCastData &data = *static_cast<RayCastData *>(p_userdata);
+		if (!_can_collide_with(object, data.params.collision_mask, data.params.collide_with_bodies, data.params.collide_with_areas)) {
+			return p_max_fraction;
+		}
+		if (data.params.exclude.has(object->get_self())) {
+			return p_max_fraction;
+		}
+
+		const Transform2D inv_xform = object->get_shape_inv_transform(p_shape) * object->get_inv_transform();
+		const Vector2 local_from = inv_xform.xform(data.from);
+		const Vector2 local_to = inv_xform.xform(data.from + data.motion * p_max_fraction);
+		const GodotShape2D *shape = object->get_shape(p_shape);
+
+		Vector2 world_point;
+		Vector2 world_normal;
+		real_t fraction = 0.0;
+		if (shape->contains_point(local_from)) {
+			if (!data.params.hit_from_inside) {
+				return p_max_fraction;
+			}
+			// Keep the hit-from-inside result and terminate traversal at 0.
+			world_point = data.from;
+			world_normal = Vector2();
+			fraction = 0.0;
+		} else {
+			Vector2 shape_point;
+			Vector2 shape_normal;
+			if (!shape->intersect_segment(local_from, local_to, shape_point, shape_normal)) {
+				return p_max_fraction;
+			}
+			const Transform2D xform = object->get_transform() * object->get_shape_transform(p_shape);
+			world_point = xform.xform(shape_point);
+			world_normal = inv_xform.basis_xform_inv(shape_normal).normalized();
+			// Calculate the ray fraction in double precision. Squaring even a
+			// finite 1e19-unit float ray overflows real_t, and a 0 * INF
+			// fraction would corrupt near-hit clipping in the BVH traversal.
+			const double hit_x = double(world_point.x) - double(data.from.x);
+			const double hit_y = double(world_point.y) - double(data.from.y);
+			fraction = real_t((data.motion_x * hit_x + data.motion_y * hit_y) * data.inv_motion_length_squared);
+		}
+
+		// The broadphase may visit objects in any order. A closer exact hit
+		// controls both the result and the clipped ray for subsequent nodes.
+		if (!(fraction >= 0.0 && fraction <= p_max_fraction) || (data.hit && fraction >= p_max_fraction)) {
+			return p_max_fraction;
+		}
+		data.hit = true;
+		data.result.collider_id = object->get_instance_id();
+		data.result.normal = world_normal;
+		data.result.position = world_point;
+		data.result.rid = object->get_self();
+		data.result.shape = p_shape;
+		return fraction;
+	};
+	space->broadphase->cast_segment(begin, end, visitor, &state);
+	return state.hit;
 }
 
 int GodotPhysicsDirectSpaceState2D::intersect_shape(const PS2DT::ShapeParameters &p_parameters, PS2DT::ShapeResult *r_results, int p_result_max) {
@@ -208,80 +198,91 @@ int GodotPhysicsDirectSpaceState2D::intersect_shape(const PS2DT::ShapeParameters
 	ERR_FAIL_NULL_V(shape, 0);
 
 	Rect2 aabb = p_parameters.transform.xform(shape->get_aabb());
-	aabb = aabb.merge(Rect2(aabb.position + p_parameters.motion, aabb.size)); //motion
+	aabb = aabb.merge(Rect2(aabb.position + p_parameters.motion, aabb.size)); // Motion.
 	aabb = aabb.grow(p_parameters.margin);
 
-	int amount = space->broadphase->cull_aabb(aabb, space->intersection_query_results, GodotSpace2D::INTERSECTION_QUERY_MAX, space->intersection_query_subindex_results);
-
-	int cc = 0;
-
-	for (int i = 0; i < amount; i++) {
-		if (cc >= p_result_max) {
-			break;
+	// Filtering must happen before a candidate consumes a result slot.
+	// Otherwise 2048 excluded proxies can hide a valid intersecting shape.
+	struct ShapeQuery {
+		const PS2DT::ShapeParameters &params;
+		PS2DT::ShapeResult *results;
+		GodotShape2D *shape;
+		int max_results;
+		int count = 0;
+	};
+	ShapeQuery query = { p_parameters, r_results, shape, p_result_max };
+	auto visitor = [](GodotCollisionObject2D *p_object, int p_shape, void *p_userdata) -> bool {
+		ShapeQuery &data = *static_cast<ShapeQuery *>(p_userdata);
+		if (!_can_collide_with(p_object, data.params.collision_mask, data.params.collide_with_bodies, data.params.collide_with_areas) ||
+				data.params.exclude.has(p_object->get_self())) {
+			return true;
 		}
 
-		if (!_can_collide_with(space->intersection_query_results[i], p_parameters.collision_mask, p_parameters.collide_with_bodies, p_parameters.collide_with_areas)) {
-			continue;
+		if (!GodotCollisionSolver2D::solve(data.shape, data.params.transform, data.params.motion,
+					p_object->get_shape(p_shape), p_object->get_transform() * p_object->get_shape_transform(p_shape),
+					Vector2(), nullptr, nullptr, nullptr, data.params.margin)) {
+			return true;
 		}
 
-		if (p_parameters.exclude.has(space->intersection_query_results[i]->get_self())) {
-			continue;
-		}
-
-		const GodotCollisionObject2D *col_obj = space->intersection_query_results[i];
-		int shape_idx = space->intersection_query_subindex_results[i];
-
-		if (!GodotCollisionSolver2D::solve(shape, p_parameters.transform, p_parameters.motion, col_obj->get_shape(shape_idx), col_obj->get_transform() * col_obj->get_shape_transform(shape_idx), Vector2(), nullptr, nullptr, nullptr, p_parameters.margin)) {
-			continue;
-		}
-
-		r_results[cc].collider_id = col_obj->get_instance_id();
-		r_results[cc].rid = col_obj->get_self();
-		r_results[cc].shape = shape_idx;
-
-		cc++;
-	}
-
-	return cc;
+		PS2DT::ShapeResult &result = data.results[data.count++];
+		result.collider_id = p_object->get_instance_id();
+		result.rid = p_object->get_self();
+		result.shape = p_shape;
+		return data.count < data.max_results;
+	};
+	space->broadphase->visit_aabb(aabb, visitor, &query);
+	return query.count;
 }
 
 bool GodotPhysicsDirectSpaceState2D::cast_motion(const PS2DT::ShapeParameters &p_parameters, real_t &p_closest_safe, real_t &p_closest_unsafe) {
 	GodotShape2D *shape = GodotPhysicsServer2D::godot_singleton->shape_owner.get_or_null(p_parameters.shape_rid);
 	ERR_FAIL_NULL_V(shape, false);
 
-	Rect2 aabb = p_parameters.transform.xform(shape->get_aabb());
-	aabb = aabb.merge(Rect2(aabb.position + p_parameters.motion, aabb.size)); //motion
+	const Rect2 start_aabb = p_parameters.transform.xform(shape->get_aabb());
+	Rect2 aabb = start_aabb.merge(Rect2(start_aabb.position + p_parameters.motion, start_aabb.size));
 	aabb = aabb.grow(p_parameters.margin);
 
-	int amount = space->broadphase->cull_aabb(aabb, space->intersection_query_results, GodotSpace2D::INTERSECTION_QUERY_MAX, space->intersection_query_subindex_results);
-
-	real_t best_safe = 1;
-	real_t best_unsafe = 1;
-
-	for (int i = 0; i < amount; i++) {
-		if (!_can_collide_with(space->intersection_query_results[i], p_parameters.collision_mask, p_parameters.collide_with_bodies, p_parameters.collide_with_areas)) {
-			continue;
+	// Stream every overlapping broadphase proxy and reject nonmatching
+	// layers/exclusions before the expensive swept-shape solver. A bounded
+	// 2048-candidate buffer could previously miss the first valid obstacle.
+	struct CastQuery {
+		const PS2DT::ShapeParameters &params;
+		GodotShape2D *shape;
+		Vector2 motion_normal;
+		const Rect2 &start_aabb;
+		Rect2 clipped_aabb;
+		real_t best_safe = 1.0;
+		real_t best_unsafe = 1.0;
+	};
+	CastQuery data = { p_parameters, shape, p_parameters.motion.normalized(), start_aabb, aabb };
+	auto visitor = [](GodotCollisionObject2D *p_object, int p_shape, void *p_userdata) -> bool {
+		CastQuery &data = *static_cast<CastQuery *>(p_userdata);
+		if (!_can_collide_with(p_object, data.params.collision_mask, data.params.collide_with_bodies, data.params.collide_with_areas) ||
+				data.params.exclude.has(p_object->get_self())) {
+			return true;
 		}
 
-		if (p_parameters.exclude.has(space->intersection_query_results[i]->get_self())) {
-			continue; //ignore excluded
+		// A previous exact hit clips the possible earlier collision region.
+		// Compare against the collision object's cached, conservatively
+		// expanded world AABB before running an expensive swept SAT test.
+		if (data.best_unsafe < 1.0 &&
+				!data.clipped_aabb.intersects(p_object->get_shape_aabb(p_shape), true)) {
+			return true;
 		}
 
-		const GodotCollisionObject2D *col_obj = space->intersection_query_results[i];
-		int shape_idx = space->intersection_query_subindex_results[i];
-
+		const GodotCollisionObject2D *col_obj = p_object;
+		const int shape_idx = p_shape;
 		Transform2D col_obj_xform = col_obj->get_transform() * col_obj->get_shape_transform(shape_idx);
 		//test initial overlap, does it collide if going all the way?
-		if (!GodotCollisionSolver2D::solve(shape, p_parameters.transform, p_parameters.motion, col_obj->get_shape(shape_idx), col_obj_xform, Vector2(), nullptr, nullptr, nullptr, p_parameters.margin)) {
-			continue;
+		if (!GodotCollisionSolver2D::solve(data.shape, data.params.transform, data.params.motion, col_obj->get_shape(shape_idx), col_obj_xform, Vector2(), nullptr, nullptr, nullptr, data.params.margin)) {
+			return true;
 		}
 
 		//test initial overlap, ignore objects it's inside of.
-		if (GodotCollisionSolver2D::solve(shape, p_parameters.transform, Vector2(), col_obj->get_shape(shape_idx), col_obj_xform, Vector2(), nullptr, nullptr, nullptr, p_parameters.margin)) {
-			continue;
+		if (GodotCollisionSolver2D::solve(data.shape, data.params.transform, Vector2(), col_obj->get_shape(shape_idx), col_obj_xform, Vector2(), nullptr, nullptr, nullptr, data.params.margin)) {
+			return true;
 		}
 
-		Vector2 mnormal = p_parameters.motion.normalized();
 
 		//just do kinematic solving
 		real_t low = 0.0;
@@ -290,8 +291,8 @@ bool GodotPhysicsDirectSpaceState2D::cast_motion(const PS2DT::ShapeParameters &p
 		for (int j = 0; j < 8; j++) { //steps should be customizable..
 			real_t fraction = low + (hi - low) * fraction_coeff;
 
-			Vector2 sep = mnormal; //important optimization for this to work fast enough
-			bool collided = GodotCollisionSolver2D::solve(shape, p_parameters.transform, p_parameters.motion * fraction, col_obj->get_shape(shape_idx), col_obj_xform, Vector2(), nullptr, nullptr, &sep, p_parameters.margin);
+			Vector2 sep = data.motion_normal; //important optimization for this to work fast enough
+			bool collided = GodotCollisionSolver2D::solve(data.shape, data.params.transform, data.params.motion * fraction, col_obj->get_shape(shape_idx), col_obj_xform, Vector2(), nullptr, nullptr, &sep, data.params.margin);
 
 			if (collided) {
 				hi = fraction;
@@ -316,15 +317,20 @@ bool GodotPhysicsDirectSpaceState2D::cast_motion(const PS2DT::ShapeParameters &p
 			}
 		}
 
-		if (low < best_safe) {
-			best_safe = low;
-			best_unsafe = hi;
+		if (low < data.best_safe) {
+			data.best_safe = low;
+			data.best_unsafe = hi;
+			data.clipped_aabb = godot_physics_cast_motion_clipped_aabb(data.start_aabb,
+					data.params.motion, data.best_unsafe, data.params.margin);
 		}
-	}
+		return true;
+	};
 
-	p_closest_safe = best_safe;
-	p_closest_unsafe = best_unsafe;
-
+	// All valid candidates must participate in the minimum time-of-impact
+	// calculation; only the BVH traversal is changed, not solver iterations.
+	space->broadphase->visit_aabb(aabb, visitor, &data);
+	p_closest_safe = data.best_safe;
+	p_closest_unsafe = data.best_unsafe;
 	return true;
 }
 
@@ -332,52 +338,45 @@ bool GodotPhysicsDirectSpaceState2D::collide_shape(const PS2DT::ShapeParameters 
 	if (p_result_max <= 0) {
 		return false;
 	}
-
 	GodotShape2D *shape = GodotPhysicsServer2D::godot_singleton->shape_owner.get_or_null(p_parameters.shape_rid);
 	ERR_FAIL_NULL_V(shape, false);
 
 	Rect2 aabb = p_parameters.transform.xform(shape->get_aabb());
-	aabb = aabb.merge(Rect2(aabb.position + p_parameters.motion, aabb.size)); //motion
+	aabb = aabb.merge(Rect2(aabb.position + p_parameters.motion, aabb.size)); // Motion.
 	aabb = aabb.grow(p_parameters.margin);
-
-	int amount = space->broadphase->cull_aabb(aabb, space->intersection_query_results, GodotSpace2D::INTERSECTION_QUERY_MAX, space->intersection_query_subindex_results);
-
-	bool collided = false;
-	r_result_count = 0;
 
 	GodotPhysicsServer2D::CollCbkData cbk;
 	cbk.max = p_result_max;
 	cbk.amount = 0;
 	cbk.passed = 0;
 	cbk.ptr = r_results;
-	GodotCollisionSolver2D::CallbackResult cbkres = GodotPhysicsServer2D::_shape_col_cbk;
-
-	GodotPhysicsServer2D::CollCbkData *cbkptr = &cbk;
-
-	for (int i = 0; i < amount; i++) {
-		if (!_can_collide_with(space->intersection_query_results[i], p_parameters.collision_mask, p_parameters.collide_with_bodies, p_parameters.collide_with_areas)) {
-			continue;
+	struct CollisionQuery {
+		const PS2DT::ShapeParameters &params;
+		GodotShape2D *shape;
+		GodotPhysicsServer2D::CollCbkData &callback;
+		bool collided = false;
+	};
+	CollisionQuery query = { p_parameters, shape, cbk };
+	auto visitor = [](GodotCollisionObject2D *p_object, int p_shape, void *p_userdata) -> bool {
+		CollisionQuery &data = *static_cast<CollisionQuery *>(p_userdata);
+		if (!_can_collide_with(p_object, data.params.collision_mask, data.params.collide_with_bodies, data.params.collide_with_areas) ||
+				data.params.exclude.has(p_object->get_self())) {
+			return true;
 		}
-
-		const GodotCollisionObject2D *col_obj = space->intersection_query_results[i];
-
-		if (p_parameters.exclude.has(col_obj->get_self())) {
-			continue;
+		data.callback.valid_dir = Vector2();
+		data.callback.valid_depth = 0;
+		if (GodotCollisionSolver2D::solve(data.shape, data.params.transform, data.params.motion,
+					p_object->get_shape(p_shape), p_object->get_transform() * p_object->get_shape_transform(p_shape),
+					Vector2(), GodotPhysicsServer2D::_shape_col_cbk, &data.callback, nullptr, data.params.margin)) {
+			data.collided = data.callback.amount > 0;
 		}
-
-		int shape_idx = space->intersection_query_subindex_results[i];
-
-		cbk.valid_dir = Vector2();
-		cbk.valid_depth = 0;
-
-		if (GodotCollisionSolver2D::solve(shape, p_parameters.transform, p_parameters.motion, col_obj->get_shape(shape_idx), col_obj->get_transform() * col_obj->get_shape_transform(shape_idx), Vector2(), cbkres, cbkptr, nullptr, p_parameters.margin)) {
-			collided = cbk.amount > 0;
-		}
-	}
-
+		// Once the requested contact positions are collected, processing
+		// further proxies cannot improve the public query result.
+		return data.callback.amount < data.callback.max;
+	};
+	space->broadphase->visit_aabb(aabb, visitor, &query);
 	r_result_count = cbk.amount;
-
-	return collided;
+	return query.collided;
 }
 
 struct _RestCallbackData2D {
@@ -433,43 +432,41 @@ bool GodotPhysicsDirectSpaceState2D::rest_info(const PS2DT::ShapeParameters &p_p
 	GodotShape2D *shape = GodotPhysicsServer2D::godot_singleton->shape_owner.get_or_null(p_parameters.shape_rid);
 	ERR_FAIL_NULL_V(shape, false);
 
-	real_t margin = MAX(p_parameters.margin, TEST_MOTION_MARGIN_MIN_VALUE);
-
+	const real_t margin = MAX(p_parameters.margin, TEST_MOTION_MARGIN_MIN_VALUE);
 	Rect2 aabb = p_parameters.transform.xform(shape->get_aabb());
-	aabb = aabb.merge(Rect2(aabb.position + p_parameters.motion, aabb.size)); //motion
+	aabb = aabb.merge(Rect2(aabb.position + p_parameters.motion, aabb.size)); // Motion.
 	aabb = aabb.grow(margin);
 
-	int amount = space->broadphase->cull_aabb(aabb, space->intersection_query_results, GodotSpace2D::INTERSECTION_QUERY_MAX, space->intersection_query_subindex_results);
-
 	_RestCallbackData2D rcd;
-
-	// Allowed depth can't be lower than motion length, in order to handle contacts at low speed.
-	real_t motion_length = p_parameters.motion.length();
-	real_t min_contact_depth = margin * TEST_MOTION_MIN_CONTACT_DEPTH_FACTOR;
+	const real_t motion_length = p_parameters.motion.length();
+	const real_t min_contact_depth = margin * TEST_MOTION_MIN_CONTACT_DEPTH_FACTOR;
 	rcd.min_allowed_depth = MIN(motion_length, min_contact_depth);
 
-	for (int i = 0; i < amount; i++) {
-		if (!_can_collide_with(space->intersection_query_results[i], p_parameters.collision_mask, p_parameters.collide_with_bodies, p_parameters.collide_with_areas)) {
-			continue;
+	struct RestQuery {
+		const PS2DT::ShapeParameters &params;
+		GodotShape2D *shape;
+		_RestCallbackData2D &callback;
+		real_t margin;
+	};
+	RestQuery query = { p_parameters, shape, rcd, margin };
+	auto visitor = [](GodotCollisionObject2D *p_object, int p_shape, void *p_userdata) -> bool {
+		RestQuery &data = *static_cast<RestQuery *>(p_userdata);
+		if (!_can_collide_with(p_object, data.params.collision_mask, data.params.collide_with_bodies, data.params.collide_with_areas) ||
+				data.params.exclude.has(p_object->get_self())) {
+			return true;
 		}
-
-		const GodotCollisionObject2D *col_obj = space->intersection_query_results[i];
-
-		if (p_parameters.exclude.has(col_obj->get_self())) {
-			continue;
-		}
-
-		int shape_idx = space->intersection_query_subindex_results[i];
-
-		rcd.valid_dir = Vector2();
-		rcd.object = col_obj;
-		rcd.shape = shape_idx;
-		rcd.local_shape = 0;
-		bool sc = GodotCollisionSolver2D::solve(shape, p_parameters.transform, p_parameters.motion, col_obj->get_shape(shape_idx), col_obj->get_transform() * col_obj->get_shape_transform(shape_idx), Vector2(), _rest_cbk_result, &rcd, nullptr, margin);
-		if (!sc) {
-			continue;
-		}
-	}
+		data.callback.valid_dir = Vector2();
+		data.callback.object = p_object;
+		data.callback.shape = p_shape;
+		data.callback.local_shape = 0;
+		// Rest info requires the deepest valid contact, so unlike intersect_shape
+		// we must traverse all matching broadphase proxies.
+		GodotCollisionSolver2D::solve(data.shape, data.params.transform, data.params.motion,
+				p_object->get_shape(p_shape), p_object->get_transform() * p_object->get_shape_transform(p_shape),
+				Vector2(), _rest_cbk_result, &data.callback, nullptr, data.margin);
+		return true;
+	};
+	space->broadphase->visit_aabb(aabb, visitor, &query);
 
 	if (rcd.best_len == 0 || !rcd.best_object) {
 		return false;
@@ -484,44 +481,42 @@ bool GodotPhysicsDirectSpaceState2D::rest_info(const PS2DT::ShapeParameters &p_p
 		const GodotBody2D *body = static_cast<const GodotBody2D *>(rcd.best_object);
 		Vector2 rel_vec = r_info->point - (body->get_transform().get_origin() + body->get_center_of_mass());
 		r_info->linear_velocity = Vector2(-body->get_angular_velocity() * rel_vec.y, body->get_angular_velocity() * rel_vec.x) + body->get_linear_velocity();
-
 	} else {
 		r_info->linear_velocity = Vector2();
 	}
-
 	return true;
 }
 
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////
 
-int GodotSpace2D::_cull_aabb_for_body(GodotBody2D *p_body, const Rect2 &p_aabb) {
-	int amount = broadphase->cull_aabb(p_aabb, intersection_query_results, INTERSECTION_QUERY_MAX, intersection_query_subindex_results);
-
-	for (int i = 0; i < amount; i++) {
-		bool keep = true;
-
-		if (intersection_query_results[i] == p_body) {
-			keep = false;
-		} else if (intersection_query_results[i]->get_type() == GodotCollisionObject2D::TYPE_AREA) {
-			keep = false;
-		} else if (!p_body->collides_with(static_cast<GodotBody2D *>(intersection_query_results[i]))) {
-			keep = false;
-		} else if (static_cast<GodotBody2D *>(intersection_query_results[i])->has_exception(p_body->get_self()) || p_body->has_exception(intersection_query_results[i]->get_self())) {
-			keep = false;
+template <typename Visitor>
+void GodotSpace2D::_visit_motion_candidates(GodotBody2D *p_body, const Rect2 &p_aabb, const PS2DT::MotionParameters &p_parameters, const Visitor &p_callback) {
+	// Stream BVH candidates directly into the narrowphase instead of
+	// retaining a vector of every potentially overlapping body.
+	struct MotionVisit {
+		GodotBody2D *body;
+		const PS2DT::MotionParameters &params;
+		const Visitor &callback;
+	};
+	MotionVisit data = { p_body, p_parameters, p_callback };
+	auto visitor = [](GodotCollisionObject2D *p_object, int p_subindex, void *p_userdata) -> bool {
+		MotionVisit &query = *static_cast<MotionVisit *>(p_userdata);
+		if (p_object == query.body || p_object->get_type() != GodotCollisionObject2D::TYPE_BODY) {
+			return true;
 		}
-
-		if (!keep) {
-			if (i < amount - 1) {
-				SWAP(intersection_query_results[i], intersection_query_results[amount - 1]);
-				SWAP(intersection_query_subindex_results[i], intersection_query_subindex_results[amount - 1]);
-			}
-
-			amount--;
-			i--;
+		if (query.params.exclude_bodies.has(p_object->get_self()) ||
+				query.params.exclude_objects.has(p_object->get_instance_id())) {
+			return true;
 		}
-	}
-
-	return amount;
+		GodotBody2D *other = static_cast<GodotBody2D *>(p_object);
+		if (!query.body->collides_with(other) ||
+				other->has_exception(query.body->get_self()) ||
+				query.body->has_exception(other->get_self())) {
+			return true;
+		}
+		return query.callback(p_object, p_subindex);
+	};
+	broadphase->visit_aabb(p_aabb, visitor, &data);
 }
 
 bool GodotSpace2D::test_body_motion(GodotBody2D *p_body, const PS2DT::MotionParameters &p_parameters, PS2DT::MotionResult *r_result) {
@@ -568,14 +563,19 @@ bool GodotSpace2D::test_body_motion(GodotBody2D *p_body, const PS2DT::MotionPara
 	body_aabb = p_parameters.from.xform(p_body->get_inv_transform().xform(body_aabb));
 	body_aabb = body_aabb.grow(margin);
 
-	static const int max_excluded_shape_pairs = 32;
-	ExcludedShapeSW excluded_shape_pairs[max_excluded_shape_pairs];
+	// Keep ordinary one-way contacts entirely on the stack. Use a hash set
+	// only for exceptional dense platform fields, so overflow lookups remain
+	// amortized O(1) instead of becoming quadratic with the shape count.
+	static constexpr int INLINE_EXCLUDED_SHAPE_PAIRS = 32;
+	ExcludedShapeSW excluded_shape_pairs[INLINE_EXCLUDED_SHAPE_PAIRS];
+	HashSet<ExcludedShapeSW> excluded_shape_overflow;
 	int excluded_shape_pair_count = 0;
 
 	real_t min_contact_depth = margin * TEST_MOTION_MIN_CONTACT_DEPTH_FACTOR;
 
-	real_t motion_length = p_parameters.motion.length();
-	Vector2 motion_normal = p_parameters.motion / motion_length;
+	const real_t motion_length = p_parameters.motion.length();
+	// A zero-displacement recovery query must not divide by zero.
+	const Vector2 motion_normal = motion_length > 0.0 ? p_parameters.motion / motion_length : Vector2();
 
 	Transform2D body_transform = p_parameters.from;
 
@@ -596,15 +596,14 @@ bool GodotSpace2D::test_body_motion(GodotBody2D *p_body, const PS2DT::MotionPara
 			cbk.passed = 0;
 			cbk.ptr = sr;
 			cbk.invalid_by_dir = 0;
-			excluded_shape_pair_count = 0; //last step is the one valid
+			excluded_shape_pair_count = 0; // The final recovery pass determines the one-way exclusions.
+			excluded_shape_overflow.clear();
 
 			GodotPhysicsServer2D::CollCbkData *cbkptr = &cbk;
 			GodotCollisionSolver2D::CallbackResult cbkres = GodotPhysicsServer2D::_shape_col_cbk;
 			int priority_amount = 0;
 
 			bool collided = false;
-
-			int amount = _cull_aabb_for_body(p_body, body_aabb);
 
 			for (int j = 0; j < p_body->get_shape_count(); j++) {
 				if (p_body->is_shape_disabled(j)) {
@@ -613,17 +612,10 @@ bool GodotSpace2D::test_body_motion(GodotBody2D *p_body, const PS2DT::MotionPara
 
 				GodotShape2D *body_shape = p_body->get_shape(j);
 				Transform2D body_shape_xform = body_transform * p_body->get_shape_transform(j);
+				// Avoid querying distant proxy groups for every shape in a compound body.
+				const Rect2 shape_query_aabb = body_shape_xform.xform(body_shape->get_aabb()).grow(margin);
 
-				for (int i = 0; i < amount; i++) {
-					const GodotCollisionObject2D *col_obj = intersection_query_results[i];
-					if (p_parameters.exclude_bodies.has(col_obj->get_self())) {
-						continue;
-					}
-					if (p_parameters.exclude_objects.has(col_obj->get_instance_id())) {
-						continue;
-					}
-
-					int shape_idx = intersection_query_subindex_results[i];
+				_visit_motion_candidates(p_body, shape_query_aabb, p_parameters, [&](const GodotCollisionObject2D *col_obj, int shape_idx) -> bool {
 
 					Transform2D col_obj_shape_xform = col_obj->get_transform() * col_obj->get_shape_transform(shape_idx);
 
@@ -665,20 +657,23 @@ bool GodotSpace2D::test_body_motion(GodotBody2D *p_body, const PS2DT::MotionPara
 					}
 
 					if (!did_collide && cbk.invalid_by_dir > 0) {
-						//this shape must be excluded
-						if (excluded_shape_pair_count < max_excluded_shape_pairs) {
-							ExcludedShapeSW esp;
-							esp.local_shape = body_shape;
-							esp.against_object = col_obj;
-							esp.against_shape_index = shape_idx;
+						ExcludedShapeSW esp;
+						esp.local_shape_index = j;
+						esp.against_object = col_obj;
+						esp.against_shape_index = shape_idx;
+						if (excluded_shape_pair_count < INLINE_EXCLUDED_SHAPE_PAIRS) {
 							excluded_shape_pairs[excluded_shape_pair_count++] = esp;
+						} else {
+							excluded_shape_overflow.insert(esp);
 						}
 					}
 
 					if (did_collide) {
 						collided = true;
 					}
-				}
+				
+				return true;
+			});
 			}
 
 			if (!collided) {
@@ -730,12 +725,6 @@ bool GodotSpace2D::test_body_motion(GodotBody2D *p_body, const PS2DT::MotionPara
 	{
 		// STEP 2 ATTEMPT MOTION
 
-		Rect2 motion_aabb = body_aabb;
-		motion_aabb.position += p_parameters.motion;
-		motion_aabb = motion_aabb.merge(body_aabb);
-
-		int amount = _cull_aabb_for_body(p_body, motion_aabb);
-
 		for (int body_shape_idx = 0; body_shape_idx < p_body->get_shape_count(); body_shape_idx++) {
 			if (p_body->is_shape_disabled(body_shape_idx)) {
 				continue;
@@ -759,35 +748,41 @@ bool GodotSpace2D::test_body_motion(GodotBody2D *p_body, const PS2DT::MotionPara
 			real_t best_safe = 1;
 			real_t best_unsafe = 1;
 
-			for (int i = 0; i < amount; i++) {
-				const GodotCollisionObject2D *col_obj = intersection_query_results[i];
-				if (p_parameters.exclude_bodies.has(col_obj->get_self())) {
-					continue;
-				}
-				if (p_parameters.exclude_objects.has(col_obj->get_instance_id())) {
-					continue;
-				}
+			// Sweep only the current shape's AABB. Distant siblings in a
+			// compound body must not enlarge this BVH traversal.
+			Rect2 shape_motion_aabb = body_shape_xform.xform(body_shape->get_aabb()).grow(margin);
+			Rect2 shape_end_aabb = shape_motion_aabb;
+			shape_end_aabb.position += p_parameters.motion;
+			shape_motion_aabb = shape_motion_aabb.merge(shape_end_aabb);
 
-				int col_shape_idx = intersection_query_subindex_results[i];
+			_visit_motion_candidates(p_body, shape_motion_aabb, p_parameters, [&](const GodotCollisionObject2D *col_obj, int col_shape_idx) -> bool {
 				GodotShape2D *against_shape = col_obj->get_shape(col_shape_idx);
 
 				bool excluded = false;
 
 				for (int k = 0; k < excluded_shape_pair_count; k++) {
-					if (excluded_shape_pairs[k].local_shape == body_shape && excluded_shape_pairs[k].against_object == col_obj && excluded_shape_pairs[k].against_shape_index == col_shape_idx) {
+					const ExcludedShapeSW &pair = excluded_shape_pairs[k];
+					if (pair.local_shape_index == body_shape_idx && pair.against_object == col_obj && pair.against_shape_index == col_shape_idx) {
 						excluded = true;
 						break;
 					}
 				}
+				if (!excluded && !excluded_shape_overflow.is_empty()) {
+					ExcludedShapeSW key;
+					key.local_shape_index = body_shape_idx;
+					key.against_object = col_obj;
+					key.against_shape_index = col_shape_idx;
+					excluded = excluded_shape_overflow.has(key);
+				}
 
 				if (excluded) {
-					continue;
+					return true;
 				}
 
 				Transform2D col_obj_shape_xform = col_obj->get_transform() * col_obj->get_shape_transform(col_shape_idx);
 				//test initial overlap, does it collide if going all the way?
 				if (!GodotCollisionSolver2D::solve(body_shape, body_shape_xform, p_parameters.motion, against_shape, col_obj_shape_xform, Vector2(), nullptr, nullptr, nullptr, 0)) {
-					continue;
+					return true;
 				}
 
 				//test initial overlap
@@ -796,12 +791,12 @@ bool GodotSpace2D::test_body_motion(GodotBody2D *p_body, const PS2DT::MotionPara
 						Vector2 direction = col_obj_shape_xform.basis_xform(col_obj->get_shape_one_way_collision_direction(col_shape_idx)).normalized();
 
 						if (motion_normal.dot(direction) < 0) {
-							continue;
+							return true;
 						}
 					}
 
 					stuck = true;
-					break;
+					return false;
 				}
 
 				//just do kinematic solving
@@ -850,7 +845,7 @@ bool GodotSpace2D::test_body_motion(GodotBody2D *p_body, const PS2DT::MotionPara
 					Vector2 sep = motion_normal; //important optimization for this to work fast enough
 					bool collided = GodotCollisionSolver2D::solve(body_shape, body_shape_xform, p_parameters.motion * (hi + contact_max_allowed_penetration), col_obj->get_shape(col_shape_idx), col_obj_shape_xform, Vector2(), GodotPhysicsServer2D::_shape_col_cbk, &cbk, &sep, 0);
 					if (!collided || cbk.amount == 0) {
-						continue;
+						return true;
 					}
 				}
 
@@ -858,7 +853,9 @@ bool GodotSpace2D::test_body_motion(GodotBody2D *p_body, const PS2DT::MotionPara
 					best_safe = low;
 					best_unsafe = hi;
 				}
-			}
+			
+				return true;
+			});
 
 			if (stuck) {
 				safe = 0;
@@ -894,8 +891,6 @@ bool GodotSpace2D::test_body_motion(GodotBody2D *p_body, const PS2DT::MotionPara
 		rcd.min_allowed_depth = MIN(motion_length, min_contact_depth);
 
 		body_aabb.position += p_parameters.motion * unsafe;
-		int amount = _cull_aabb_for_body(p_body, body_aabb);
-
 		int from_shape = best_shape != -1 ? best_shape : 0;
 		int to_shape = best_shape != -1 ? best_shape + 1 : p_body->get_shape_count();
 
@@ -906,29 +901,29 @@ bool GodotSpace2D::test_body_motion(GodotBody2D *p_body, const PS2DT::MotionPara
 
 			Transform2D body_shape_xform = ugt * p_body->get_shape_transform(j);
 			GodotShape2D *body_shape = p_body->get_shape(j);
+			const Rect2 shape_rest_aabb = body_shape_xform.xform(body_shape->get_aabb()).grow(margin);
 
-			for (int i = 0; i < amount; i++) {
-				const GodotCollisionObject2D *col_obj = intersection_query_results[i];
-				if (p_parameters.exclude_bodies.has(col_obj->get_self())) {
-					continue;
-				}
-				if (p_parameters.exclude_objects.has(col_obj->get_instance_id())) {
-					continue;
-				}
-
-				int shape_idx = intersection_query_subindex_results[i];
+			_visit_motion_candidates(p_body, shape_rest_aabb, p_parameters, [&](const GodotCollisionObject2D *col_obj, int shape_idx) -> bool {
 
 				GodotShape2D *against_shape = col_obj->get_shape(shape_idx);
 
 				bool excluded = false;
 				for (int k = 0; k < excluded_shape_pair_count; k++) {
-					if (excluded_shape_pairs[k].local_shape == body_shape && excluded_shape_pairs[k].against_object == col_obj && excluded_shape_pairs[k].against_shape_index == shape_idx) {
+					const ExcludedShapeSW &pair = excluded_shape_pairs[k];
+					if (pair.local_shape_index == j && pair.against_object == col_obj && pair.against_shape_index == shape_idx) {
 						excluded = true;
 						break;
 					}
 				}
+			if (!excluded && !excluded_shape_overflow.is_empty()) {
+				ExcludedShapeSW key;
+				key.local_shape_index = j;
+				key.against_object = col_obj;
+				key.against_shape_index = shape_idx;
+				excluded = excluded_shape_overflow.has(key);
+			}
 				if (excluded) {
-					continue;
+					return true;
 				}
 
 				Transform2D col_obj_shape_xform = col_obj->get_transform() * col_obj->get_shape_transform(shape_idx);
@@ -961,9 +956,11 @@ bool GodotSpace2D::test_body_motion(GodotBody2D *p_body, const PS2DT::MotionPara
 				rcd.local_shape = j;
 				bool sc = GodotCollisionSolver2D::solve(body_shape, body_shape_xform, Vector2(), against_shape, col_obj_shape_xform, Vector2(), _rest_cbk_result, &rcd, nullptr, margin);
 				if (!sc) {
-					continue;
+					return true;
 				}
-			}
+			
+				return true;
+			});
 		}
 
 		if (rcd.best_len != 0) {
@@ -1017,18 +1014,14 @@ void *GodotSpace2D::_broadphase_pair(GodotCollisionObject2D *A, int p_subindex_A
 		GodotArea2D *area = static_cast<GodotArea2D *>(A);
 		if (type_B == GodotCollisionObject2D::TYPE_AREA) {
 			GodotArea2D *area_b = static_cast<GodotArea2D *>(B);
-			GodotArea2Pair2D *area2_pair = memnew(GodotArea2Pair2D(area_b, p_subindex_B, area, p_subindex_A));
-			return area2_pair;
+			return self->area2_pair_pool.alloc(area_b, p_subindex_B, area, p_subindex_A);
 		} else {
 			GodotBody2D *body = static_cast<GodotBody2D *>(B);
-			GodotAreaPair2D *area_pair = memnew(GodotAreaPair2D(body, p_subindex_B, area, p_subindex_A));
-			return area_pair;
+			return self->area_pair_pool.alloc(body, p_subindex_B, area, p_subindex_A);
 		}
-
-	} else {
-		GodotBodyPair2D *b = memnew(GodotBodyPair2D(static_cast<GodotBody2D *>(A), p_subindex_A, static_cast<GodotBody2D *>(B), p_subindex_B));
-		return b;
 	}
+
+	return self->body_pair_pool.alloc(static_cast<GodotBody2D *>(A), p_subindex_A, static_cast<GodotBody2D *>(B), p_subindex_B);
 }
 
 void GodotSpace2D::_broadphase_unpair(GodotCollisionObject2D *A, int p_subindex_A, GodotCollisionObject2D *B, int p_subindex_B, void *p_data, void *p_self) {
@@ -1038,20 +1031,43 @@ void GodotSpace2D::_broadphase_unpair(GodotCollisionObject2D *A, int p_subindex_
 
 	GodotSpace2D *self = static_cast<GodotSpace2D *>(p_self);
 	self->collision_pairs--;
-	GodotConstraint2D *c = static_cast<GodotConstraint2D *>(p_data);
-	memdelete(c);
+
+	// Return the pair to the pool it came from; the pair type is fully
+	// determined by the object types, exactly as in `_broadphase_pair`.
+	const bool area_A = A->get_type() == GodotCollisionObject2D::TYPE_AREA;
+	const bool area_B = B->get_type() == GodotCollisionObject2D::TYPE_AREA;
+	if (area_A && area_B) {
+		self->area2_pair_pool.free(static_cast<GodotArea2Pair2D *>(p_data));
+	} else if (area_A || area_B) {
+		self->area_pair_pool.free(static_cast<GodotAreaPair2D *>(p_data));
+	} else {
+		self->body_pair_pool.free(static_cast<GodotBodyPair2D *>(p_data));
+	}
 }
 
 const SelfList<GodotBody2D>::List &GodotSpace2D::get_active_body_list() const {
 	return active_list;
 }
 
+const LocalVector<GodotBody2D *> &GodotSpace2D::get_active_bodies() {
+	if (active_snapshot_version != active_list_version) {
+		active_snapshot.clear();
+		for (const SelfList<GodotBody2D> *b = active_list.first(); b; b = b->next()) {
+			active_snapshot.push_back(b->self());
+		}
+		active_snapshot_version = active_list_version;
+	}
+	return active_snapshot;
+}
+
 void GodotSpace2D::body_add_to_active_list(SelfList<GodotBody2D> *p_body) {
 	active_list.add(p_body);
+	active_list_version++;
 }
 
 void GodotSpace2D::body_remove_from_active_list(SelfList<GodotBody2D> *p_body) {
 	active_list.remove(p_body);
+	active_list_version++;
 }
 
 void GodotSpace2D::body_add_to_mass_properties_update_list(SelfList<GodotBody2D> *p_body) {
@@ -1212,10 +1228,36 @@ GodotSpace2D::GodotSpace2D() {
 	body_angular_velocity_sleep_threshold = GLOBAL_GET("physics/2d/sleep_threshold_angular");
 	body_time_to_sleep = GLOBAL_GET("physics/2d/time_before_sleep");
 	solver_iterations = GLOBAL_GET("physics/2d/solver/solver_iterations");
+	block_solver_enabled = GLOBAL_GET("physics/2d/solver/block_solver_enabled");
+	parallel_large_islands = GLOBAL_GET("physics/2d/solver/parallel_large_islands");
+	manifold_spread_reduction = GLOBAL_GET("physics/2d/solver/manifold_spread_reduction");
 	contact_recycle_radius = GLOBAL_GET("physics/2d/solver/contact_recycle_radius");
 	contact_max_separation = GLOBAL_GET("physics/2d/solver/contact_max_separation");
+	speculative_sphere_distance = MAX(real_t(0.0), (real_t)GLOBAL_GET("physics/2d/solver/speculative_sphere_distance"));
 	contact_max_allowed_penetration = GLOBAL_GET("physics/2d/solver/contact_max_allowed_penetration");
 	contact_bias = GLOBAL_GET("physics/2d/solver/default_contact_bias");
+	// Cache the per-space push speed limit; no project-setting lookup on contacts.
+	max_contact_push_speed = MAX((real_t)0.0, (real_t)GLOBAL_GET("physics/2d/solver/max_contact_push_speed"));
+	const real_t configured_max_linear_velocity = GLOBAL_GET("physics/2d/solver/max_linear_velocity");
+	max_linear_velocity = Math::is_finite(configured_max_linear_velocity) ? MAX(real_t(0.0), configured_max_linear_velocity) : real_t(0.0);
+	max_linear_velocity = MAX((real_t)0.0, (real_t)GLOBAL_GET("physics/2d/solver/max_linear_velocity"));
+	max_angular_velocity = MAX((real_t)0.0, (real_t)GLOBAL_GET("physics/2d/solver/max_angular_velocity"));
+	ccd_max_angular_motion = MAX(real_t(0.0), (real_t)GLOBAL_GET("physics/2d/solver/ccd_max_angular_motion"));
+	warm_start_coefficient = CLAMP((real_t)GLOBAL_GET("physics/2d/solver/warm_start_coefficient"), real_t(0.0), real_t(1.0));
+	ccd_rotational_bounds = GLOBAL_GET("physics/2d/solver/ccd_rotational_bounds");
+	ccd_tight_rotational_bounds = GLOBAL_GET("physics/2d/solver/ccd_tight_rotational_bounds");
+	implicit_damping = GLOBAL_GET("physics/2d/solver/implicit_damping");
+	fluid_linear_drag = MAX(real_t(0.0), (real_t)GLOBAL_GET("physics/2d/solver/fluid_linear_drag"));
+	fluid_angular_drag = MAX(real_t(0.0), (real_t)GLOBAL_GET("physics/2d/solver/fluid_angular_drag"));
+	fluid_buoyancy = MAX(real_t(0.0), (real_t)GLOBAL_GET("physics/2d/solver/fluid_buoyancy"));
+	fluid_flow_velocity = GLOBAL_GET("physics/2d/solver/fluid_flow_velocity");
+	rolling_friction = MAX(real_t(0.0), (real_t)GLOBAL_GET("physics/2d/solver/rolling_friction"));
+	static_friction_multiplier = MAX(real_t(1.0), (real_t)GLOBAL_GET("physics/2d/solver/static_friction_multiplier"));
+	friction_combine_mode = CLAMP((int)GLOBAL_GET("physics/2d/solver/friction_combine_mode"), 0, 3);
+	restitution_combine_mode = CLAMP((int)GLOBAL_GET("physics/2d/solver/restitution_combine_mode"), 0, 5);
+	// Read once at space creation, avoiding ProjectSettings lookups in the hot contact loop.
+	const real_t configured_restitution_threshold = GLOBAL_GET("physics/2d/solver/restitution_velocity_threshold");
+	restitution_velocity_threshold = MAX((real_t)0.0, configured_restitution_threshold);
 	constraint_bias = GLOBAL_GET("physics/2d/solver/default_constraint_bias");
 
 	broadphase = GodotBroadPhase2D::create_func();

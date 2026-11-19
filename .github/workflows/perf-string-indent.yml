@@ -1,0 +1,54 @@
+name: String indent linear-time regressions
+
+on:
+  push:
+    branches: [develop]
+    paths:
+      - 'core/string/ustring.cpp'
+      - 'tests/core/string/test_string.cpp'
+      - 'misc/scripts/tests/test_string_indent_linear.py'
+      - 'misc/scripts/benchmarks/benchmark_string_indent.cpp'
+      - 'misc/scripts/README_perf_string_indent.md'
+      - '.github/workflows/perf-string-indent.yml'
+  pull_request:
+    paths:
+      - 'core/string/ustring.cpp'
+      - 'tests/core/string/test_string.cpp'
+      - 'misc/scripts/tests/test_string_indent_linear.py'
+      - 'misc/scripts/benchmarks/benchmark_string_indent.cpp'
+      - 'misc/scripts/README_perf_string_indent.md'
+      - '.github/workflows/perf-string-indent.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  algorithm-and-source-tests:
+    runs-on: ubuntu-24.04
+    strategy:
+      fail-fast: false
+      matrix:
+        compiler: [g++, clang++]
+    steps:
+      - uses: actions/checkout@v4
+      - run: python3 -m unittest discover -s misc/scripts/tests -p test_string_indent_linear.py -v
+      - name: Compile and run standalone differential benchmark
+        run: |
+          "${{ matrix.compiler }}" -std=c++17 -O2 -Wall -Wextra -Werror misc/scripts/benchmarks/benchmark_string_indent.cpp -o /tmp/indent_bench
+          /tmp/indent_bench
+  native-engine:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+      - uses: ./.github/actions/godot-deps
+      - uses: ./.github/actions/godot-build
+        with:
+          platform: linuxbsd
+          target: editor
+          scons-flags: dev_build=yes tests=yes debug_symbols=no module_mono_enabled=no accesskit=no
+      - name: Native String indent regressions
+        run: ./bin/godot.linuxbsd.editor.dev.x86_64 --headless --test --test-case='[String] indent*' --force-colors

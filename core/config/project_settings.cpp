@@ -1600,6 +1600,7 @@ void ProjectSettings::save_scene_groups_cache() {
 			continue;
 		}
 		Array list;
+		list.reserve(E.value.size());
 		for (const StringName &group : E.value) {
 			list.push_back(group);
 		}
@@ -1619,7 +1620,7 @@ void ProjectSettings::load_scene_groups_cache() {
 		Vector<String> scene_paths = cf->get_sections();
 		for (const String &E : scene_paths) {
 			Array scene_groups = cf->get_value(E, "groups", Array());
-			HashSet<StringName> cache;
+			HashSet<StringName> cache(scene_groups.size());
 			for (const Variant &scene_group : scene_groups) {
 				cache.insert(scene_group);
 			}
@@ -1694,10 +1695,11 @@ void ProjectSettings::_bind_methods() {
 
 void ProjectSettings::_add_builtin_input_map() {
 	if (InputMap::get_singleton()) {
-		HashMap<String, List<Ref<InputEvent>>> builtins(InputMap::get_singleton()->get_builtins());
+		const HashMap<String, List<Ref<InputEvent>>> &builtins = InputMap::get_singleton()->get_builtins();
 
-		for (KeyValue<String, List<Ref<InputEvent>>> &E : builtins) {
+		for (const KeyValue<String, List<Ref<InputEvent>>> &E : builtins) {
 			Array events;
+			events.reserve(E.value.size());
 
 			// Convert list of input events into array
 			for (const Ref<InputEvent> &event : E.value) {
@@ -1745,7 +1747,7 @@ ProjectSettings::ProjectSettings() {
 	GLOBAL_DEF("application/run/disable_stderr", false);
 	GLOBAL_DEF("application/run/print_header", true);
 	GLOBAL_DEF("application/run/enable_alt_space_menu", false);
-	GLOBAL_DEF("application/run/use_game_mode", true);
+
 	GLOBAL_DEF_RST("application/config/use_hidden_project_data_directory", true);
 	GLOBAL_DEF("application/config/use_custom_user_dir", false);
 	GLOBAL_DEF("application/config/custom_user_dir_name", "");

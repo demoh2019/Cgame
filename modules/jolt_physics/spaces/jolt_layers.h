@@ -30,7 +30,7 @@
 
 #pragma once
 
-#include "core/templates/hash_map.h"
+#include "core/templates/a_hash_map.h"
 #include "core/templates/local_vector.h"
 
 #include <Jolt/Jolt.h>
@@ -43,7 +43,8 @@ class JoltLayers final
 		  public JPH::ObjectLayerPairFilter,
 		  public JPH::ObjectVsBroadPhaseLayerFilter {
 	LocalVector<uint64_t> collisions_by_layer;
-	HashMap<uint64_t, JPH::ObjectLayer> layers_by_collision;
+	// Compact open-addressed index: lookups are frequent during layer changes.
+	AHashMap<uint64_t, JPH::ObjectLayer> layers_by_collision;
 	JPH::ObjectLayer next_object_layer = 0;
 
 	virtual uint32_t GetNumBroadPhaseLayers() const override;

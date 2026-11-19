@@ -101,6 +101,7 @@ class RID_Alloc : public RID_AllocBase {
 	uint32_t max_alloc = 0;
 	uint32_t alloc_count = 0;
 	uint32_t chunk_limit = 0;
+	uint32_t chunk_metadata_capacity = 0; // Only used by non-thread-safe owners.
 
 	const char *description = nullptr;
 
@@ -123,15 +124,22 @@ class RID_Alloc : public RID_AllocBase {
 				}
 			}
 
-			//grow chunks
+			// The non-thread-safe owner used to realloc both metadata
+			// arrays for every new chunk. Grow geometrically instead:
+			// hundreds of small RID chunks now require O(log N) resizes.
+			// Thread-safe owners keep their fixed preallocated metadata.
 			if constexpr (!THREAD_SAFE) {
-				chunks = (Chunk **)memrealloc(chunks, sizeof(Chunk *) * (chunk_count + 1));
+				if (chunk_count == chunk_metadata_capacity) {
+					uint32_t next_capacity = chunk_metadata_capacity ? chunk_metadata_capacity + (chunk_metadata_capacity >> 1) : 4;
+					if (next_capacity <= chunk_metadata_capacity) {
+						next_capacity = chunk_count + 1;
+					}
+					chunks = (Chunk **)memrealloc(chunks, sizeof(Chunk *) * next_capacity);
+					free_list_chunks = (uint32_t **)memrealloc(free_list_chunks, sizeof(uint32_t *) * next_capacity);
+					chunk_metadata_capacity = next_capacity;
+				}
 			}
 			chunks[chunk_count] = (Chunk *)memalloc(sizeof(Chunk) * elements_in_chunk); //but don't initialize
-			//grow free lists
-			if constexpr (!THREAD_SAFE) {
-				free_list_chunks = (uint32_t **)memrealloc(free_list_chunks, sizeof(uint32_t *) * (chunk_count + 1));
-			}
 			free_list_chunks[chunk_count] = (uint32_t *)memalloc(sizeof(uint32_t) * elements_in_chunk);
 
 			//initialize
@@ -376,10 +384,23 @@ public:
 		if constexpr (THREAD_SAFE) {
 			mutex.lock();
 		}
-		for (size_t i = 0; i < max_alloc; i++) {
-			uint64_t validator = chunks[i / elements_in_chunk][i % elements_in_chunk].validator;
-			if (validator != 0xFFFFFFFF) {
-				owned.push_back(_make_from_id((validator << 32) | i));
+		// The live RID count is known, so avoid repeated growth and over-allocation.
+		owned.reserve(alloc_count);
+		// Iterate contiguous chunks rather than dividing and taking the remainder
+		// for every slot (elements_in_chunk need not be a power of two).
+		const uint32_t chunk_count = max_alloc / elements_in_chunk;
+		for (uint32_t chunk_index = 0; chunk_index < chunk_count && owned.size() < alloc_count; chunk_index++) {
+			const Chunk *chunk = chunks[chunk_index];
+			const uint32_t base_index = chunk_index * elements_in_chunk;
+			for (uint32_t element_index = 0; element_index < elements_in_chunk; element_index++) {
+				const uint32_t validator = chunk[element_index].validator;
+				if (validator != 0xFFFFFFFF) {
+					const uint32_t index = base_index + element_index;
+					owned.push_back(_make_from_id((uint64_t(validator) << 32) | index));
+					if (owned.size() == alloc_count) {
+						break;
+					}
+				}
 			}
 		}
 		if constexpr (THREAD_SAFE) {
@@ -393,12 +414,20 @@ public:
 		if constexpr (THREAD_SAFE) {
 			mutex.lock();
 		}
-		uint32_t idx = 0;
-		for (size_t i = 0; i < max_alloc; i++) {
-			uint64_t validator = chunks[i / elements_in_chunk][i % elements_in_chunk].validator;
-			if (validator != 0xFFFFFFFF) {
-				p_rid_buffer[idx] = _make_from_id((validator << 32) | i);
-				idx++;
+		uint32_t output_index = 0;
+		const uint32_t chunk_count = max_alloc / elements_in_chunk;
+		for (uint32_t chunk_index = 0; chunk_index < chunk_count && output_index < alloc_count; chunk_index++) {
+			const Chunk *chunk = chunks[chunk_index];
+			const uint32_t base_index = chunk_index * elements_in_chunk;
+			for (uint32_t element_index = 0; element_index < elements_in_chunk; element_index++) {
+				const uint32_t validator = chunk[element_index].validator;
+				if (validator != 0xFFFFFFFF) {
+					const uint32_t index = base_index + element_index;
+					p_rid_buffer[output_index++] = _make_from_id((uint64_t(validator) << 32) | index);
+					if (output_index == alloc_count) {
+						break;
+					}
+				}
 			}
 		}
 

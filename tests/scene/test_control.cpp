@@ -35,12 +35,174 @@ TEST_FORCE_LINK(test_control)
 #include "core/input/input_map.h" // IWYU pragma: keep // Used by `SEND_GUI_ACTION` macro.
 #include "scene/2d/node_2d.h"
 #include "scene/gui/control.h"
+#include "scene/gui/line_edit.h"
 #include "scene/main/scene_tree.h"
 #include "scene/main/window.h"
 #include "tests/display_server_mock.h"
 #include "tests/signal_watcher.h"
 
 namespace TestControl {
+
+TEST_CASE("[SceneTree][Control] Moving preserves the size before constraints") {
+	for (bool rtl : { false, true }) {
+		for (bool keep_offsets : { false, true }) {
+			for (int direction = Control::GROW_DIRECTION_BEGIN; direction <= Control::GROW_DIRECTION_BOTH; direction++) {
+				for (bool maximum : { false, true }) {
+					INFO("RTL: ", rtl, ", keep offsets: ", keep_offsets, ", grow direction: ", direction, ", maximum: ", maximum);
+					Control *parent = memnew(Control);
+					parent->set_size(Size2(200, 200));
+					SceneTree::get_singleton()->get_root()->add_child(parent);
+					Control *child = memnew(Control);
+					parent->add_child(child);
+					child->set_layout_direction(rtl ? Control::LAYOUT_DIRECTION_RTL : Control::LAYOUT_DIRECTION_LTR);
+					child->set_h_grow_direction(Control::GrowDirection(direction));
+					child->set_v_grow_direction(Control::GrowDirection(direction));
+					child->set_size(Size2(60, 70));
+					if (maximum) {
+						child->set_custom_maximum_size(Size2(30, 40));
+					} else {
+						child->set_custom_minimum_size(Size2(90, 100));
+					}
+					SceneTree::get_singleton()->process(0);
+					child->set_position(Point2(17, 19), keep_offsets);
+					CHECK(child->get_position().is_equal_approx(Point2(17, 19)));
+					if (maximum) {
+						child->set_custom_maximum_size(Size2(-1, -1));
+					} else {
+						child->set_custom_minimum_size(Size2());
+					}
+					SceneTree::get_singleton()->process(0);
+					CHECK(child->get_size().is_equal_approx(Size2(60, 70)));
+					memdelete(parent);
+				}
+			}
+		}
+	}
+}
+
+TEST_CASE("[SceneTree][Control] Moving a stretched control preserves the size before constraints") {
+	for (bool keep_offsets : { false, true }) {
+		for (bool maximum : { false, true }) {
+			INFO("Keep offsets: ", keep_offsets, ", maximum: ", maximum);
+			Control *parent = memnew(Control);
+			parent->set_size(Size2(200, 200));
+			SceneTree::get_singleton()->get_root()->add_child(parent);
+			Control *child = memnew(Control);
+			parent->add_child(child);
+			child->set_anchors_and_offsets_preset(Control::PRESET_FULL_RECT);
+			child->set_size(Size2(60, 70));
+			CHECK(child->get_size().is_equal_approx(Size2(60, 70)));
+			if (maximum) {
+				child->set_custom_maximum_size(Size2(30, 40));
+			} else {
+				child->set_custom_minimum_size(Size2(90, 100));
+			}
+			SceneTree::get_singleton()->process(0);
+			child->set_position(Point2(17, 19), keep_offsets);
+			CHECK(child->get_position().is_equal_approx(Point2(17, 19)));
+			if (maximum) {
+				child->set_custom_maximum_size(Size2(-1, -1));
+			} else {
+				child->set_custom_minimum_size(Size2());
+			}
+			SceneTree::get_singleton()->process(0);
+			CHECK(child->get_size().is_equal_approx(Size2(60, 70)));
+			memdelete(parent);
+		}
+	}
+}
+
+TEST_CASE("[SceneTree][Control] Repeated moves do not preserve temporary size constraints") {
+	for (bool maximum : { false, true }) {
+		Control *parent = memnew(Control);
+		parent->set_size(Size2(400, 300));
+		SceneTree::get_singleton()->get_root()->add_child(parent);
+
+		Control *child = memnew(Control);
+		parent->add_child(child);
+		child->set_size(Size2(64, 48));
+
+		for (int i = 0; i < 4; i++) {
+			INFO("Maximum constraint: ", maximum, ", move iteration: ", i);
+			if (maximum) {
+				child->set_custom_maximum_size(Size2(24 + i * 2, 20 + i * 3));
+			} else {
+				child->set_custom_minimum_size(Size2(100 + i * 10, 90 + i * 10));
+			}
+			SceneTree::get_singleton()->process(0);
+
+			Point2 target_position(20 + i * 7, 30 + i * 4);
+			child->set_position(target_position, i % 2 != 0);
+			CHECK(child->get_position().is_equal_approx(target_position));
+
+			if (maximum) {
+				child->set_custom_maximum_size(Size2(-1, -1));
+			} else {
+				child->set_custom_minimum_size(Size2());
+			}
+			SceneTree::get_singleton()->process(0);
+			CHECK(child->get_size().is_equal_approx(Size2(64, 48)));
+		}
+		memdelete(parent);
+	}
+}
+
+TEST_CASE("[SceneTree][Control] Global movement preserves size after temporary constraints") {
+	for (bool maximum : { false, true }) {
+		Control *parent = memnew(Control);
+		parent->set_position(Point2(12, 18));
+		parent->set_size(Size2(200, 200));
+		SceneTree::get_singleton()->get_root()->add_child(parent);
+		Control *child = memnew(Control);
+		parent->add_child(child);
+		child->set_size(Size2(60, 70));
+		if (maximum) {
+			child->set_custom_maximum_size(Size2(30, 40));
+		} else {
+			child->set_custom_minimum_size(Size2(90, 100));
+		}
+		SceneTree::get_singleton()->process(0);
+		child->set_global_position(Point2(110, 120));
+		if (maximum) {
+			child->set_custom_maximum_size(Size2(-1, -1));
+		} else {
+			child->set_custom_minimum_size(Size2());
+		}
+		SceneTree::get_singleton()->process(0);
+		CHECK(child->get_size().is_equal_approx(Size2(60, 70)));
+		CHECK(child->get_global_position().is_equal_approx(Point2(110, 120)));
+		memdelete(parent);
+	}
+}
+
+TEST_CASE("[SceneTree][Control] Stretched anchors preserve the unconstrained size on move") {
+	for (bool keep_offsets : { false, true }) {
+		for (bool maximum : { false, true }) {
+			Control *parent = memnew(Control);
+			parent->set_size(Size2(200, 200));
+			SceneTree::get_singleton()->get_root()->add_child(parent);
+			Control *child = memnew(Control);
+			parent->add_child(child);
+			child->set_anchors_and_offsets_preset(Control::PRESET_FULL_RECT);
+			child->set_size(Size2(60, 70));
+			if (maximum) {
+				child->set_custom_maximum_size(Size2(30, 40));
+			} else {
+				child->set_custom_minimum_size(Size2(90, 100));
+			}
+			SceneTree::get_singleton()->process(0);
+			child->set_position(Point2(17, 19), keep_offsets);
+			if (maximum) {
+				child->set_custom_maximum_size(Size2(-1, -1));
+			} else {
+				child->set_custom_minimum_size(Size2());
+			}
+			SceneTree::get_singleton()->process(0);
+			CHECK(child->get_size().is_equal_approx(Size2(60, 70)));
+			memdelete(parent);
+		}
+	}
+}
 
 TEST_CASE("[SceneTree][Control] Transforms") {
 	SUBCASE("[Control][Global Transform] Global Transform should be accessible while not in SceneTree.") { // GH-79453
@@ -1283,6 +1445,51 @@ TEST_CASE("[SceneTree][Control] Grow direction") {
 	}
 
 	memdelete(test_control);
+}
+
+
+TEST_CASE("[LineEditCaretIdle] an unfocused LineEdit never schedules caret ticks") {
+	LineEdit *edit = memnew(LineEdit);
+	edit->set_caret_blink_enabled(true);
+	CHECK_FALSE(edit->is_processing_internal());
+	edit->set_caret_blink_enabled(false);
+	CHECK_FALSE(edit->is_processing_internal());
+	memdelete(edit);
+}
+
+TEST_CASE("[LineEditCaretIdle] forcing the caret enables ticks and undoing the force disables them") {
+	LineEdit *edit = memnew(LineEdit);
+	edit->set_caret_blink_enabled(true);
+	CHECK_FALSE(edit->is_processing_internal());
+	edit->set_caret_force_displayed(true);
+	CHECK(edit->is_processing_internal());
+	edit->set_caret_force_displayed(false);
+	CHECK_FALSE(edit->is_processing_internal());
+	memdelete(edit);
+}
+
+TEST_CASE("[LineEditCaretIdle] forced caret does not schedule ticks if blink is disabled") {
+	LineEdit *edit = memnew(LineEdit);
+	edit->set_caret_force_displayed(true);
+	CHECK_FALSE(edit->is_processing_internal());
+	edit->set_caret_blink_enabled(true);
+	CHECK(edit->is_processing_internal());
+	edit->set_caret_blink_enabled(false);
+	CHECK_FALSE(edit->is_processing_internal());
+	memdelete(edit);
+}
+
+TEST_CASE("[LineEditCaretIdle] many idle inputs do not register per-frame processing") {
+	Vector<LineEdit *> inputs;
+	for (int i = 0; i < 64; ++i) {
+		LineEdit *edit = memnew(LineEdit);
+		edit->set_caret_blink_enabled(true);
+		inputs.push_back(edit);
+		CHECK_FALSE(edit->is_processing_internal());
+	}
+	for (LineEdit *edit : inputs) {
+		memdelete(edit);
+	}
 }
 
 } // namespace TestControl

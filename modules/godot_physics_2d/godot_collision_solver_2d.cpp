@@ -41,22 +41,36 @@ bool GodotCollisionSolver2D::solve_static_world_boundary(const GodotShape2D *p_s
 		return false;
 	}
 
-	Vector2 n = p_transform_A.basis_xform(world_boundary->get_normal()).normalized();
-	Vector2 p = p_transform_A.xform(world_boundary->get_normal() * world_boundary->get_d());
-	real_t d = n.dot(p);
+	// A plane n_local.dot(x_local) = d transforms by the inverse transpose,
+	// not by the shape's forward basis. This also handles non-unit plane normals
+	// and affine shear without shifting the boundary to the wrong location.
+	if (p_transform_A.determinant() == 0.0) {
+		return false; // A singular transform does not define a unique plane.
+	}
+	const Transform2D inverse_A = p_transform_A.affine_inverse();
+	const Vector2 unnormalized_normal = inverse_A.basis_xform_inv(world_boundary->get_normal());
+	const real_t normal_length = unnormalized_normal.length();
+	if (normal_length == 0.0) {
+		return false;
+	}
+	const Vector2 n = unnormalized_normal / normal_length;
+	const real_t d = (world_boundary->get_d() + unnormalized_normal.dot(p_transform_A.get_origin())) / normal_length;
 
 	Vector2 supports[2];
-	int support_count;
+	int support_count = 0;
 
-	p_shape_B->get_supports(p_transform_B.affine_inverse().basis_xform(-n).normalized(), supports, support_count);
+	// For a world-space support direction, the local direction is the
+	// transpose of the shape's forward basis (not its matrix inverse).
+	p_shape_B->get_supports(p_transform_B.basis_xform_inv(-n).normalized(), supports, support_count);
 
 	bool found = false;
 
 	for (int i = 0; i < support_count; i++) {
-		supports[i] += p_margin * supports[i].normalized();
-		supports[i] = p_transform_B.xform(supports[i]);
-		supports[i] += p_motion_B;
-		real_t pd = n.dot(supports[i]);
+		// Margin is a world-space distance along the contact normal. Applying
+		// it to a local vertex position incorrectly depends on the shape's
+		// origin and changes sign for offset polygons.
+		supports[i] = p_transform_B.xform(supports[i]) - n * p_margin + p_motion_B;
+		const real_t pd = n.dot(supports[i]);
 		if (pd >= d) {
 			continue;
 		}
@@ -176,6 +190,7 @@ bool GodotCollisionSolver2D::solve_concave(const GodotShape2D *p_shape_A, const 
 	cinfo.shape_A = p_shape_A;
 	cinfo.transform_B = &p_transform_B;
 	cinfo.motion_A = p_motion_A;
+	cinfo.motion_B = p_motion_B;
 	cinfo.result_callback = p_result_callback;
 	cinfo.userdata = p_userdata;
 	cinfo.swap_result = p_swap_result;
@@ -187,28 +202,50 @@ bool GodotCollisionSolver2D::solve_concave(const GodotShape2D *p_shape_A, const 
 
 	cinfo.aabb_tests = 0;
 
-	Transform2D rel_transform = p_transform_A;
-	rel_transform.columns[2] -= p_transform_B.get_origin();
+	// Cull in the concave shape's actual local space. Projecting onto the
+	// transformed basis columns is only correct when the basis is orthogonal;
+	// it can discard real collisions under shear or non-uniform transforms.
+	const real_t determinant = p_transform_B.determinant();
+	if (determinant == 0.0) {
+		// No inverse exists: conservatively visit all concave segments.
+		// Expanding the query is necessary for zero-width segment AABBs,
+		// which Rect2::intersects() does not consider overlapping themselves.
+		Rect2 full_aabb = concave_B->get_aabb();
+		const real_t padding = MAX(MAX(Math::abs(full_aabb.size.x), Math::abs(full_aabb.size.y)) * real_t(CMP_EPSILON), real_t(0.001));
+		full_aabb.grow_by(padding);
+		concave_B->cull(full_aabb, concave_callback, &cinfo);
+		return cinfo.collided;
+	}
 
-	// Quickly compute a local Rect2.
+	const Transform2D inverse_B = p_transform_B.affine_inverse();
+	const Transform2D rel_transform = inverse_B * p_transform_A;
+	const real_t total_margin = MAX(p_margin_A, real_t(0.0)) + MAX(p_margin_B, real_t(0.0));
+
 	Rect2 local_aabb;
 	for (int i = 0; i < 2; i++) {
-		Vector2 axis(p_transform_B.columns[i]);
-		real_t axis_scale = 1.0 / axis.length();
-		axis *= axis_scale;
+		Vector2 axis;
+		axis[i] = 1.0;
 
-		real_t smin = 0.0, smax = 0.0;
-		p_shape_A->project_rangev(axis, rel_transform, smin, smax);
-		smin *= axis_scale;
-		smax *= axis_scale;
+		real_t min_projection = 0.0;
+		real_t max_projection = 0.0;
+		p_shape_A->project_rangev(axis, rel_transform, min_projection, max_projection);
 
-		local_aabb.position[i] = smin;
-		local_aabb.size[i] = smax - smin;
+		// A world-space margin becomes an ellipse under the inverse affine
+		// transform. Its support along a local axis is the corresponding
+		// inverse-basis row length times the original margin.
+		const real_t row_x = inverse_B.columns[0][i];
+		const real_t row_y = inverse_B.columns[1][i];
+		const real_t local_margin = total_margin * Math::sqrt(row_x * row_x + row_y * row_y);
+		local_aabb.position[i] = min_projection - local_margin;
+		local_aabb.size[i] = max_projection - min_projection + 2.0 * local_margin;
 	}
-	// In case of motion, expand the Rect2 in the motion direction.
-	if (p_motion_A != Vector2()) {
+
+	// Cast with relative motion. Both bodies may move; the BVH remains
+	// fixed in the concave shape's local coordinate system.
+	const Vector2 relative_motion = inverse_B.basis_xform(p_motion_A - p_motion_B);
+	if (relative_motion != Vector2()) {
 		Rect2 moved_aabb = local_aabb;
-		moved_aabb.position += p_motion_A;
+		moved_aabb.position += relative_motion;
 		local_aabb = local_aabb.merge(moved_aabb);
 	}
 

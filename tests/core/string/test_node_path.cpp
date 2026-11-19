@@ -222,4 +222,250 @@ TEST_CASE("[NodePath] Slice") {
 			"Slice of an empty absolute path should be an empty absolute path.");
 }
 
+
+TEST_CASE("[NodePath] Long component and subname joins preserve Unicode and separators") {
+	String source;
+	String expected_names;
+	String expected_subnames;
+	for (int i = 0; i < 256; i++) {
+		const String name = String(U"узел雪") + itos(i);
+		if (i > 0) {
+			source += "/";
+			expected_names += "/";
+		}
+		source += name;
+		expected_names += name;
+	}
+	for (int i = 0; i < 64; i++) {
+		const String subname = String(U"属性") + itos(i);
+		source += ":";
+		source += subname;
+		if (i > 0) {
+			expected_subnames += ":";
+		}
+		expected_subnames += subname;
+	}
+
+	const NodePath path(source);
+	CHECK_EQ(path.get_name_count(), 256);
+	CHECK_EQ(path.get_subname_count(), 64);
+	CHECK_EQ(path.get_concatenated_names().string(), expected_names);
+	CHECK_EQ(path.get_concatenated_subnames().string(), expected_subnames);
+	CHECK_EQ(String(path), source);
+	CHECK_EQ(String(path.get_as_property_path()), ":" + source);
+	// The interned name and subname strings should be reusable without recomputing.
+	const StringName cached_name = path.get_concatenated_names();
+	const StringName cached_subname = path.get_concatenated_subnames();
+	CHECK(path.get_concatenated_names() == cached_name);
+	CHECK(path.get_concatenated_subnames() == cached_subname);
+}
+
+TEST_CASE("[NodePath] Joined paths survive copy on write and invalidation") {
+	const NodePath original("root/./child:position:x");
+	NodePath modified = original;
+	CHECK_EQ(original.get_concatenated_names().string(), "root/./child");
+	CHECK_EQ(modified.get_concatenated_names().string(), "root/./child");
+
+	modified.simplify();
+	CHECK_EQ(modified.get_concatenated_names().string(), "root/child");
+	CHECK_EQ(modified.get_concatenated_subnames().string(), "position:x");
+	CHECK_EQ(original.get_concatenated_names().string(), "root/./child");
+
+	modified.prepend_period();
+	CHECK_EQ(modified.get_concatenated_names().string(), "./root/child");
+	CHECK_EQ(original.get_concatenated_names().string(), "root/./child");
+	CHECK_EQ(String(modified.get_as_property_path()), ":./root/child:position:x");
+}
+
+TEST_CASE("[NodePath] Single and empty components retain path shape") {
+	const NodePath single("Sprite2D");
+	CHECK_EQ(single.get_concatenated_names().string(), "Sprite2D");
+	CHECK_EQ(single.get_concatenated_subnames().string(), "");
+	CHECK_EQ(String(single.get_as_property_path()), ":Sprite2D");
+
+	const NodePath only_subnames(":position:x");
+	CHECK_EQ(only_subnames.get_concatenated_names().string(), "");
+	CHECK_EQ(only_subnames.get_concatenated_subnames().string(), "position:x");
+	CHECK_EQ(String(only_subnames), ":position:x");
+
+	const NodePath absolute("/root/Sprite2D:position");
+	CHECK_EQ(absolute.get_concatenated_names().string(), "root/Sprite2D");
+	CHECK_EQ(String(absolute), "/root/Sprite2D:position");
+	CHECK_EQ(String(absolute.get_as_property_path()), ":root/Sprite2D:position");
+}
+
+
+TEST_CASE("[NodePath] Linear simplify matches the legacy removal algorithm") {
+	const StringName parts[] = { ".", "..", "root", "child", "leaf" };
+	uint32_t seed = 0x91736EBD;
+	for (int run = 0; run < 2048; run++) {
+		seed ^= seed << 13;
+		seed ^= seed >> 17;
+		seed ^= seed << 5;
+		const int count = 2 + int(seed % 48);
+
+		Vector<StringName> reference;
+		for (int i = 0; i < count; i++) {
+			seed ^= seed << 13;
+			seed ^= seed >> 17;
+			seed ^= seed << 5;
+			reference.push_back(parts[seed % 5]);
+		}
+		NodePath path(reference, false);
+
+		// Independent reference implementation of the previous behavior.
+		for (int i = 0; i < reference.size(); i++) {
+			if (reference.size() == 1) {
+				break;
+			}
+			if (reference[i].string() == ".") {
+				reference.remove_at(i);
+				i--;
+			} else if (i > 0 && reference[i].string() == ".." && reference[i - 1].string() != "." && reference[i - 1].string() != "..") {
+				reference.remove_at(i - 1);
+				reference.remove_at(i - 1);
+				i -= 2;
+				if (reference.is_empty()) {
+					reference.push_back(".");
+					break;
+				}
+			}
+		}
+
+		path.simplify();
+		CHECK_EQ(path.get_name_count(), reference.size());
+		for (int i = 0; i < MIN(path.get_name_count(), reference.size()); i++) {
+			CHECK(path.get_name(i) == reference[i]);
+		}
+	}
+}
+
+TEST_CASE("[NodePath] Linear simplify handles deep cancellation and property subnames") {
+	String source;
+	for (int i = 0; i < 1024; i++) {
+		source += "segment/..";
+		if (i + 1 < 1024) {
+			source += "/";
+		}
+	}
+	const NodePath original(source + ":position:x");
+	NodePath simplified = original;
+	const StringName old_names = simplified.get_concatenated_names();
+	simplified.simplify();
+
+	CHECK_EQ(simplified.get_concatenated_names().string(), ".");
+	CHECK_EQ(simplified.get_concatenated_subnames().string(), "position:x");
+	CHECK_EQ(String(simplified), ".:position:x");
+	CHECK_EQ(String(simplified.get_as_property_path()), ":.:position:x");
+	CHECK_EQ(original.get_concatenated_names(), old_names);
+	CHECK_EQ(original.get_name_count(), 2048);
+}
+
+TEST_CASE("[NodePath] Simplify normalized shared path preserves cache and references") {
+	const NodePath original("/root/parent/child:position:x");
+	NodePath copy = original;
+	const StringName names = original.get_concatenated_names();
+	const uint32_t hash_before = original.hash();
+	for (int i = 0; i < 32; i++) {
+		copy.simplify();
+	}
+	CHECK_EQ(copy.get_concatenated_names(), names);
+	CHECK_EQ(copy.hash(), hash_before);
+	CHECK_EQ(original.get_concatenated_names(), names);
+	CHECK_EQ(String(copy), "/root/parent/child:position:x");
+}
+
+
+TEST_CASE("[NodePath] Simple relative paths stringify without a new string buffer") {
+	const NodePath path(U"Сцена/Node2D/雪");
+	const StringName cached = path.get_concatenated_names();
+	const String &canonical = cached.string();
+
+	for (int i = 0; i < 128; i++) {
+		const String value = String(path);
+		CHECK_EQ(value, canonical);
+		CHECK(value.ptr() == canonical.ptr());
+	}
+}
+
+TEST_CASE("[NodePath] Stringify absolute and property paths with one output buffer") {
+	const NodePath paths[] = {
+		NodePath("/"),
+		NodePath("/root/Node2D"),
+		NodePath("/root/Node2D:position:x"),
+		NodePath("root/Node2D:position:x"),
+		NodePath(":position:x"),
+		NodePath(U"/Сцена/雪:属性:x"),
+		NodePath("."),
+		NodePath(".."),
+	};
+	const String expected[] = {
+		"/", "/root/Node2D", "/root/Node2D:position:x",
+		"root/Node2D:position:x", ":position:x",
+		U"/Сцена/雪:属性:x", ".", "..",
+	};
+	for (int i = 0; i < 8; i++) {
+		for (int repeat = 0; repeat < 16; repeat++) {
+			CHECK_EQ(String(paths[i]), expected[i]);
+		}
+	}
+}
+
+TEST_CASE("[NodePath] Long stringified paths preserve all codepoints") {
+	String source = "/";
+	for (int i = 0; i < 400; i++) {
+		if (i > 0) {
+			source += "/";
+		}
+		source += String(U"дочерний雪") + itos(i);
+	}
+	source += ":position:属性:x";
+	NodePath path(source);
+	for (int i = 0; i < 32; i++) {
+		CHECK_EQ(String(path), source);
+	}
+	CHECK_EQ(String(path.get_as_property_path()), ":" + source.substr(1));
+}
+
+
+TEST_CASE("[NodePath] Relative conversion handles common ancestors and subnames") {
+	struct Case {
+		const char *from;
+		const char *to;
+		const char *expected;
+	};
+	const Case cases[] = {
+		{ "/root/scene", "/root/scene", "." },
+		{ "/root/scene", "/root/scene:position:x", ".:position:x" },
+		{ "/root/scene", "/root/scene/child", "child" },
+		{ "/root/scene/child", "/root/scene", ".." },
+		{ "/root/a/b", "/root/a/c", "../c" },
+		{ "/first/a", "/second/b", "../../second/b" },
+		{ "/", "/", "." },
+		{ "/", "/root", "root" },
+		{ "/root", "/", ".." },
+	};
+	for (const Case &test : cases) {
+		const NodePath from(test.from);
+		const NodePath to(test.to);
+		CHECK_EQ(String(from.rel_path_to(to)), String(test.expected));
+	}
+}
+
+TEST_CASE("[NodePath] Relative conversion avoids growing to deep common prefixes") {
+	String shared = "/root";
+	for (int i = 0; i < 768; i++) {
+		shared += "/section" + itos(i);
+	}
+	const NodePath from(shared + "/current");
+	const NodePath to(shared + "/other:position:x");
+	const NodePath relative = from.rel_path_to(to);
+	CHECK_EQ(relative.get_name_count(), 2);
+	CHECK_EQ(relative.get_name(0), "..");
+	CHECK_EQ(relative.get_name(1), "other");
+	CHECK_EQ(relative.get_subname_count(), 2);
+	CHECK_EQ(String(relative), "../other:position:x");
+	CHECK_EQ(String(to.rel_path_to(from)), "../current");
+}
+
 } // namespace TestNodePath

@@ -217,6 +217,9 @@ private:
 
 	RendererCanvasRender::Item **z_list;
 	RendererCanvasRender::Item **z_last_list;
+	// Only the used z-index interval needs scanning or clearing on the next pass.
+	int z_min_used = z_range;
+	int z_max_used = -1;
 
 	Transform2D _current_camera_transform;
 

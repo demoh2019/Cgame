@@ -1,0 +1,37 @@
+name: String case-insensitive search fast-path regressions
+
+on:
+  pull_request:
+    paths:
+      - "core/string/ustring.cpp"
+      - "tests/core/string/test_string.cpp"
+      - ".github/workflows/string-ascii-casefold.yml"
+  push:
+    branches: [develop]
+    paths:
+      - "core/string/ustring.cpp"
+      - "tests/core/string/test_string.cpp"
+      - ".github/workflows/string-ascii-casefold.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  native-string-search:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+      - uses: ./.github/actions/godot-deps
+      - name: Build Godot editor with native regression tests
+        uses: ./.github/actions/godot-build
+        with:
+          platform: linuxbsd
+          target: editor
+          scons-flags: dev_build=yes tests=yes debug_symbols=no module_mono_enabled=no accesskit=no
+      - name: Run case-insensitive String tests
+        run: |
+          ./bin/godot.linuxbsd.editor.dev.x86_64 --headless --test --tc="*[String] Find case insensitive*"

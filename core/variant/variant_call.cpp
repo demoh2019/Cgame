@@ -1286,6 +1286,7 @@ struct VariantBuiltInMethodInfo {
 			mi.flags |= METHOD_FLAG_STATIC;
 		}
 
+		mi.arguments.resize(argument_count);
 		for (int i = 0; i < argument_count; i++) {
 			PropertyInfo pi;
 #ifdef DEBUG_ENABLED
@@ -1297,7 +1298,7 @@ struct VariantBuiltInMethodInfo {
 			if (pi.type == Variant::NIL) {
 				pi.usage |= PROPERTY_USAGE_NIL_IS_VARIANT;
 			}
-			mi.arguments.push_back(pi);
+			mi.arguments.set(i, pi);
 		}
 
 		mi.default_arguments = default_arguments;

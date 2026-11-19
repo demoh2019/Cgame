@@ -1,0 +1,59 @@
+name: XR lazy render target color regressions
+
+on:
+  pull_request:
+    branches: [develop]
+    paths:
+      - "servers/rendering/renderer_rd/storage_rd/texture_storage.cpp"
+      - "servers/rendering/renderer_rd/storage_rd/texture_storage.h"
+      - "servers/rendering/renderer_viewport.cpp"
+      - "servers/rendering/storage/texture_storage.h"
+      - "misc/scripts/tests/test_xr_lazy_color_buffer.py"
+      - ".github/workflows/xr-lazy-color-buffer.yml"
+  push:
+    branches: [develop]
+    paths:
+      - "servers/rendering/renderer_rd/storage_rd/texture_storage.cpp"
+      - "servers/rendering/renderer_rd/storage_rd/texture_storage.h"
+      - "servers/rendering/renderer_viewport.cpp"
+      - "servers/rendering/storage/texture_storage.h"
+      - "misc/scripts/tests/test_xr_lazy_color_buffer.py"
+      - ".github/workflows/xr-lazy-color-buffer.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  contracts:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - name: Run production integration checks
+        run: |
+          python3 -m py_compile misc/scripts/tests/test_xr_lazy_color_buffer.py
+          python3 -m unittest discover -s misc/scripts/tests -p 'test_xr_lazy_color_buffer.py' -v
+
+  linux-renderer-smoke:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+      - uses: ./.github/actions/godot-deps
+      - name: Compile test-enabled Linux editor
+        uses: ./.github/actions/godot-build
+        with:
+          platform: linuxbsd
+          target: editor
+          scons-flags: dev_build=yes tests=yes debug_symbols=no module_mono_enabled=no accesskit=no
+      - name: Headless rendering server smoke
+        shell: bash
+        run: |
+          set -euo pipefail
+          project="$RUNNER_TEMP/xr-render-target-smoke"
+          mkdir -p "$project"
+          printf '[application]\nconfig/name="XR render target smoke"\n' > "$project/project.godot"
+          timeout 120s ./bin/godot.linuxbsd.editor.dev.x86_64 --headless --editor --path "$project" --quit

@@ -1,0 +1,31 @@
+name: FEM two-family anisotropic reinforcement regression
+
+on:
+  pull_request:
+    paths:
+      - "modules/godot_physics_3d/godot_soft_body_3d.cpp"
+      - "modules/godot_physics_3d/godot_soft_body_3d.h"
+      - "modules/godot_physics_3d/godot_space_3d.cpp"
+      - "modules/godot_physics_3d/godot_space_3d.h"
+      - "servers/physics_3d/physics_server_3d.cpp"
+      - "tests/servers/test_physics_fem_tetra_dual_fiber.cpp"
+      - "tests/stress/test_physics_fem_tetra_dual_fiber.py"
+      - ".github/workflows/physics-fem-dual-fiber.yml"
+  push:
+    branches: [develop]
+    paths:
+      - "modules/godot_physics_3d/godot_soft_body_3d.cpp"
+      - "tests/stress/test_physics_fem_tetra_dual_fiber.py"
+      - ".github/workflows/physics-fem-dual-fiber.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  numerical-contracts:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Verify independent dual-material fiber response and code wiring
+        run: python3 -m unittest discover -s tests/stress -p test_physics_fem_tetra_dual_fiber.py -v

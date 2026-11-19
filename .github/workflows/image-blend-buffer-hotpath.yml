@@ -1,0 +1,58 @@
+name: Image Color blend buffer reuse regression
+
+on:
+  push:
+    branches: [develop]
+    paths:
+      - 'core/io/image.cpp'
+      - 'tests/core/io/test_image.cpp'
+      - 'misc/scripts/tests/test_image_blend_buffer_hotpath.py'
+      - '.github/workflows/image-blend-buffer-hotpath.yml'
+  pull_request:
+    paths:
+      - 'core/io/image.cpp'
+      - 'tests/core/io/test_image.cpp'
+      - 'misc/scripts/tests/test_image_blend_buffer_hotpath.py'
+      - '.github/workflows/image-blend-buffer-hotpath.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  source-contracts:
+    runs-on: ubuntu-24.04
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ['3.10', '3.13']
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: \${{ matrix.python-version }}
+      - name: Verify buffer, alias, format and fallback contracts
+        run: python -m unittest discover -s misc/scripts/tests -p test_image_blend_buffer_hotpath.py -v
+
+  native-engine-tests:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install native editor build prerequisites
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libwayland-bin
+      - uses: ./.github/actions/godot-deps
+      - name: Build Cgame editor with native tests
+        uses: ./.github/actions/godot-build
+        with:
+          platform: linuxbsd
+          target: editor
+          scons-flags: dev_build=yes debug_symbols=no tests=yes module_text_server_fb_enabled=yes -j2
+      - name: Check Image blend correctness, COW, clipping and aliases
+        shell: bash
+        run: |
+          set -euo pipefail
+          BIN=./bin/godot.linuxbsd.editor.dev.x86_64
+          "$BIN" --headless --test --test-case='*[Image][BlendHotpath]*' --no-colors

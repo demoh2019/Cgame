@@ -528,11 +528,12 @@ RID RendererSceneCull::scenario_get_environment(RID p_scenario) {
 void RendererSceneCull::scenario_remove_viewport_visibility_mask(RID p_scenario, RID p_viewport) {
 	Scenario *scenario = scenario_owner.get_or_null(p_scenario);
 	ERR_FAIL_NULL(scenario);
-	if (!scenario->viewport_visibility_masks.has(p_viewport)) {
+	const uint64_t *viewport_mask = scenario->viewport_visibility_masks.getptr(p_viewport);
+	if (viewport_mask == nullptr) {
 		return;
 	}
 
-	uint64_t mask = scenario->viewport_visibility_masks[p_viewport];
+	const uint64_t mask = *viewport_mask;
 	scenario->used_viewport_visibility_bits &= ~mask;
 	scenario->viewport_visibility_masks.erase(p_viewport);
 }
@@ -3073,12 +3074,16 @@ void RendererSceneCull::_scene_cull(CullData &cull_data, InstanceCullResult &cul
 									}
 
 									InstanceLightData *light = static_cast<InstanceLightData *>(E->base_data);
-									// Large scores are worse, so linear with distance, inverse with energy and range.
-									Vector3 light_center = E->transformed_aabb.get_center();
-									float light_range_energy =
+									// Only the relative order of light scores is used by the
+									// per-type max heaps. Squaring a nonnegative score
+									// preserves its ordering while removing a square
+									// root for every mesh/light candidate.
+									const Vector3 light_center = E->transformed_aabb.get_center();
+									const float light_range_energy =
 											RSG::light_storage->light_get_param(E->base, RSE::LightParam::LIGHT_PARAM_RANGE) *
 											RSG::light_storage->light_get_param(E->base, RSE::LightParam::LIGHT_PARAM_ENERGY);
-									float light_inst_score = mesh_center.distance_to(light_center) / MAX(0.01f, light_range_energy);
+									const float score_scale = MAX(0.01f, light_range_energy);
+									const float light_inst_score = mesh_center.distance_squared_to(light_center) / (score_scale * score_scale);
 									// Of the N lights (on a per-light-type basis, Omni or Spot) keep only the M "best" lights.
 									// If N <= M, we can simply store the lights, but once we exceed M, we need check each new
 									// light and see if it's score is better than the worst light stored to date.  If the new
@@ -3264,19 +3269,25 @@ void RendererSceneCull::_scene_cull(CullData &cull_data, InstanceCullResult &cul
 				}
 			}
 
-			for (uint32_t j = 0; j < cull_data.cull->shadow_count; j++) {
-				for (uint32_t k = 0; k < cull_data.cull->shadows[j].cascade_count; k++) {
-					if (!light_culler->cull_directional_light(cull_data.scenario->instance_aabbs[i], j, k)) { // pass the cascade index
+			// Filter per-instance and per-light conditions before the expensive per-cascade culler.
+			const uint32_t shadow_base_type = idata.flags & InstanceData::FLAG_BASE_TYPE_MASK;
+			if (cull_data.cull->shadow_count > 0 && VIS_CHECK &&
+					((1 << shadow_base_type) & RSE::INSTANCE_GEOMETRY_MASK) &&
+					(idata.flags & InstanceData::FLAG_CAST_SHADOWS) &&
+					!(shadow_base_type == RSE::INSTANCE_PARTICLES && RSG::particles_storage->particles_is_inactive(idata.base_rid))) {
+				for (uint32_t j = 0; j < cull_data.cull->shadow_count; j++) {
+					if (!(LAYER_CHECK & cull_data.cull->shadows[j].caster_mask)) {
 						continue;
 					}
-					if (IN_FRUSTUM(cull_data.cull->shadows[j].cascades[k].frustum) && VIS_CHECK) {
-						uint32_t base_type = idata.flags & InstanceData::FLAG_BASE_TYPE_MASK;
-
-						const bool is_inactive_particle = (base_type == RSE::INSTANCE_PARTICLES) && RSG::particles_storage->particles_is_inactive(idata.base_rid);
-						if (((1 << base_type) & RSE::INSTANCE_GEOMETRY_MASK) && idata.flags & InstanceData::FLAG_CAST_SHADOWS && (LAYER_CHECK & cull_data.cull->shadows[j].caster_mask) && !is_inactive_particle) {
-							cull_result.directional_shadows[j].cascade_geometry_instances[k].push_back(idata.instance_geometry);
-							mesh_visible = true;
+					for (uint32_t k = 0; k < cull_data.cull->shadows[j].cascade_count; k++) {
+						if (!IN_FRUSTUM(cull_data.cull->shadows[j].cascades[k].frustum)) {
+							continue;
 						}
+						if (!light_culler->cull_directional_light(cull_data.scenario->instance_aabbs[i], j, k)) {
+							continue;
+						}
+						cull_result.directional_shadows[j].cascade_geometry_instances[k].push_back(idata.instance_geometry);
+						mesh_visible = true;
 					}
 				}
 			}
@@ -3344,17 +3355,23 @@ void RendererSceneCull::_render_scene(const RendererSceneRender::CameraData *p_c
 
 	RENDER_TIMESTAMP("Update Visibility Dependencies");
 
-	if (scenario->instance_visibility.get_bin_count() > 0) {
-		if (!scenario->viewport_visibility_masks.has(p_viewport)) {
-			scenario_add_viewport_visibility_mask(scenario->self, p_viewport);
-		}
+	// Use one lookup for the viewport mask throughout visibility and geometry culling.
+	// Only consult the HashMap again if this is a newly registered viewport.
+	const int visibility_bin_count = scenario->instance_visibility.get_bin_count();
+	const uint64_t *mask_ptr = scenario->viewport_visibility_masks.getptr(p_viewport);
+	if (visibility_bin_count > 0 && mask_ptr == nullptr) {
+		scenario_add_viewport_visibility_mask(scenario->self, p_viewport);
+		mask_ptr = scenario->viewport_visibility_masks.getptr(p_viewport);
+	}
+	const uint64_t visibility_viewport_mask = mask_ptr != nullptr ? *mask_ptr : 0;
 
+	if (visibility_bin_count > 0) {
 		VisibilityCullData visibility_cull_data;
 		visibility_cull_data.scenario = scenario;
-		visibility_cull_data.viewport_mask = scenario->viewport_visibility_masks[p_viewport];
+		visibility_cull_data.viewport_mask = visibility_viewport_mask;
 		visibility_cull_data.camera_position = camera_position;
 
-		for (int i = scenario->instance_visibility.get_bin_count() - 1; i > 0; i--) { // We skip bin 0
+		for (int i = visibility_bin_count - 1; i > 0; i--) { // We skip bin 0
 			visibility_cull_data.cull_offset = scenario->instance_visibility.get_bin_start(i);
 			visibility_cull_data.cull_count = scenario->instance_visibility.get_bin_size(i);
 
@@ -3380,19 +3397,19 @@ void RendererSceneCull::_render_scene(const RendererSceneRender::CameraData *p_c
 	Vector<Plane> planes = p_camera_data->main_projection.get_projection_planes(p_camera_data->main_transform);
 	cull.frustum = Frustum(planes);
 
-	Vector<RID> directional_lights;
+	directional_light_instances.clear();
+	lights_with_shadow.clear();
+
 	// directional lights
 	{
 		cull.shadow_count = 0;
-
-		Vector<Instance *> lights_with_shadow;
 
 		for (Instance *E : scenario->directional_lights) {
 			if (!E->visible || !(E->layer_mask & p_visible_layers)) {
 				continue;
 			}
 
-			if (directional_lights.size() >= RendererSceneRender::MAX_DIRECTIONAL_LIGHTS) {
+			if (directional_light_instances.size() >= RendererSceneRender::MAX_DIRECTIONAL_LIGHTS) {
 				break;
 			}
 
@@ -3405,7 +3422,7 @@ void RendererSceneCull::_render_scene(const RendererSceneRender::CameraData *p_c
 					lights_with_shadow.push_back(E);
 				}
 				//add to list
-				directional_lights.push_back(light->instance);
+				directional_light_instances.push_back(light->instance);
 			}
 		}
 
@@ -3458,7 +3475,7 @@ void RendererSceneCull::_render_scene(const RendererSceneRender::CameraData *p_c
 		cull_data.render_reflection_probe = render_reflection_probe;
 		cull_data.occlusion_buffer = RendererSceneOcclusionCull::get_singleton()->buffer_get_ptr(p_viewport);
 		cull_data.camera_matrix = &p_camera_data->main_projection;
-		cull_data.visibility_viewport_mask = scenario->viewport_visibility_masks.has(p_viewport) ? scenario->viewport_visibility_masks[p_viewport] : 0;
+		cull_data.visibility_viewport_mask = visibility_viewport_mask;
 #ifdef DEBUG_CULL_TIME
 		uint64_t time_from = OS::get_singleton()->get_ticks_usec();
 #endif
@@ -3703,15 +3720,15 @@ void RendererSceneCull::_render_scene(const RendererSceneRender::CameraData *p_c
 		}
 
 		if (p_reflection_probe.is_null()) {
-			sdfgi_update_data.directional_lights = &directional_lights;
+			sdfgi_update_data.directional_lights = &directional_light_instances;
 			sdfgi_update_data.positional_light_instances = scenario->dynamic_lights.ptr();
 			sdfgi_update_data.positional_light_count = scenario->dynamic_lights.size();
 		}
 	}
 
 	//append the directional lights to the lights culled
-	for (int i = 0; i < directional_lights.size(); i++) {
-		scene_cull_result.light_instances.push_back(directional_lights[i]);
+	for (int i = 0; i < directional_light_instances.size(); i++) {
+		scene_cull_result.light_instances.push_back(directional_light_instances[i]);
 	}
 
 	RID camera_attributes;

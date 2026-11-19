@@ -875,4 +875,49 @@ TEST_CASE("[SceneTree][BoxContainer] VBoxContainer") {
 	memdelete(vbox_container);
 }
 
+TEST_CASE("[SceneTree][BoxContainer] Dense sizing cache with hidden and non-Control children") {
+	HBoxContainer *box = memnew(HBoxContainer);
+	Window *root = SceneTree::get_singleton()->get_root();
+	root->add_child(box);
+	box->set_size(Size2(100, 32));
+	box->add_theme_constant_override("separation", 0);
+
+	Control *first = memnew(Control);
+	Control *second = memnew(Control);
+	Control *hidden = memnew(Control);
+	Control *last = memnew(Control);
+	Node *ignored = memnew(Node);
+	first->set_custom_minimum_size(Size2(10, 12));
+	second->set_custom_minimum_size(Size2(20, 12));
+	hidden->set_custom_minimum_size(Size2(30, 12));
+	last->set_custom_minimum_size(Size2(40, 12));
+	box->add_child(first);
+	box->add_child(ignored);
+	box->add_child(second);
+	box->add_child(hidden);
+	box->add_child(last);
+	hidden->hide();
+	SceneTree::get_singleton()->process(0);
+
+	CHECK(box->get_minimum_size().is_equal_approx(Size2(70, 12)));
+	CHECK(first->get_position().x == doctest::Approx(0));
+	CHECK(second->get_position().x == doctest::Approx(10));
+	CHECK(last->get_position().x == doctest::Approx(30));
+
+	// The reverse layout must still align each cached measurement with
+	// its actual Control, regardless of hidden or non-Control siblings.
+	box->set_reverse_sort(true);
+	SceneTree::get_singleton()->process(0);
+	CHECK(last->get_position().x == doctest::Approx(0));
+	CHECK(second->get_position().x == doctest::Approx(40));
+	CHECK(first->get_position().x == doctest::Approx(60));
+
+	memdelete(last);
+	memdelete(hidden);
+	memdelete(second);
+	memdelete(ignored);
+	memdelete(first);
+	memdelete(box);
+}
+
 } // namespace TestBoxContainer

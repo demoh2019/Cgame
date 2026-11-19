@@ -1,0 +1,69 @@
+name: Scene reimport and Path3D upstream regressions
+
+on:
+  push:
+    branches: [develop]
+    paths:
+      - 'editor/editor_node.cpp'
+      - 'editor/editor_node.h'
+      - 'editor/scene/3d/path_3d_editor_plugin.cpp'
+      - 'misc/scripts/tests/test_upstream_scene_reimport_path3d.py'
+      - '.github/workflows/upstream-scene-reimport-path3d.yml'
+  pull_request:
+    paths:
+      - 'editor/editor_node.cpp'
+      - 'editor/editor_node.h'
+      - 'editor/scene/3d/path_3d_editor_plugin.cpp'
+      - 'misc/scripts/tests/test_upstream_scene_reimport_path3d.py'
+      - '.github/workflows/upstream-scene-reimport-path3d.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  regression-contracts:
+    runs-on: ubuntu-24.04
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ['3.10', '3.13']
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+      - name: Check Python syntax
+        run: python -m py_compile misc/scripts/tests/test_upstream_scene_reimport_path3d.py
+      - name: Run source contracts for scene caching and selected gizmos
+        run: python -m unittest discover -s misc/scripts/tests -p test_upstream_scene_reimport_path3d.py -v
+
+  native-editor-smoke:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+      - name: System dependencies for building Godot editor
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libwayland-bin
+      - uses: ./.github/actions/godot-deps
+      - name: Compile Cgame editor
+        uses: ./.github/actions/godot-build
+        with:
+          platform: linuxbsd
+          target: editor
+          scons-flags: dev_build=yes debug_symbols=no tests=yes module_text_server_fb_enabled=yes -j2
+      - name: Smoke-test editor startup on a clean project
+        shell: bash
+        run: |
+          set -euo pipefail
+          PROJECT_DIR="$(mktemp -d)"
+          trap 'rm -rf "$PROJECT_DIR"' EXIT
+          printf 'config_version=5\n[application]\nconfig/name="Scene Backport Smoke"\n' > "$PROJECT_DIR/project.godot"
+          BIN=./bin/godot.linuxbsd.editor.dev.x86_64
+          "$BIN" --version
+          timeout 50s "$BIN" --headless --editor --path "$PROJECT_DIR" --import --quit 2>&1 | tee scene_editor_smoke.log
+          if grep -Ei 'SCRIPT ERROR:|Parse Error:|Failed to load script' scene_editor_smoke.log; then
+            exit 1
+          fi

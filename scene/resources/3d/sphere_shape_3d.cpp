@@ -35,28 +35,38 @@
 #include "servers/physics_3d/physics_server_3d.h"
 
 Vector<Vector3> SphereShape3D::get_debug_mesh_lines() const {
-	float r = get_radius();
+	const float r = get_radius();
 
+	// Every segment shares its first endpoint with the previous segment's
+	// last endpoint. Compute each sine/cosine pair once, not twice.
+	constexpr int SEGMENTS = 361;
 	Vector<Vector3> points;
+	points.resize(SEGMENTS * 6);
+	Vector3 *vertices = points.ptrw();
+	Point2 a(0.0f, r);
+	int write_idx = 0;
 
-	for (int i = 0; i <= 360; i++) {
-		float ra = Math::deg_to_rad((float)i);
-		float rb = Math::deg_to_rad((float)i + 1);
-		Point2 a = Vector2(Math::sin(ra), Math::cos(ra)) * r;
-		Point2 b = Vector2(Math::sin(rb), Math::cos(rb)) * r;
+	for (int i = 0; i < SEGMENTS; i++) {
+		const float next_angle = Math::deg_to_rad((float)i + 1);
+		const Point2 b = Vector2(Math::sin(next_angle), Math::cos(next_angle)) * r;
 
-		points.push_back(Vector3(a.x, 0, a.y));
-		points.push_back(Vector3(b.x, 0, b.y));
-		points.push_back(Vector3(0, a.x, a.y));
-		points.push_back(Vector3(0, b.x, b.y));
-		points.push_back(Vector3(a.x, a.y, 0));
-		points.push_back(Vector3(b.x, b.y, 0));
+		vertices[write_idx++] = Vector3(a.x, 0, a.y);
+		vertices[write_idx++] = Vector3(b.x, 0, b.y);
+		vertices[write_idx++] = Vector3(0, a.x, a.y);
+		vertices[write_idx++] = Vector3(0, b.x, b.y);
+		vertices[write_idx++] = Vector3(a.x, a.y, 0);
+		vertices[write_idx++] = Vector3(b.x, b.y, 0);
+		a = b;
 	}
 
 	return points;
 }
 
 Ref<ArrayMesh> SphereShape3D::get_debug_arraymesh_faces(const Color &p_modulate) const {
+	if (debug_faces_cache.is_valid() && debug_faces_cache_color == p_modulate) {
+		return debug_faces_cache;
+	}
+
 	Array sphere_array;
 	sphere_array.resize(RSE::ARRAY_MAX);
 	SphereMesh::create_mesh_array(sphere_array, radius, radius * 2, 32);
@@ -64,13 +74,14 @@ Ref<ArrayMesh> SphereShape3D::get_debug_arraymesh_faces(const Color &p_modulate)
 	Vector<Color> colors;
 	const PackedVector3Array &verts = sphere_array[RSE::ARRAY_VERTEX];
 	const int32_t verts_size = verts.size();
-	for (int i = 0; i < verts_size; i++) {
-		colors.append(p_modulate);
-	}
+	colors.resize(verts_size);
+	colors.fill(p_modulate);
 
 	Ref<ArrayMesh> sphere_mesh = memnew(ArrayMesh);
 	sphere_array[RSE::ARRAY_COLOR] = colors;
 	sphere_mesh->add_surface_from_arrays(Mesh::PRIMITIVE_TRIANGLES, sphere_array);
+	debug_faces_cache = sphere_mesh;
+	debug_faces_cache_color = p_modulate;
 	return sphere_mesh;
 }
 
@@ -79,6 +90,7 @@ real_t SphereShape3D::get_enclosing_radius() const {
 }
 
 void SphereShape3D::_update_shape() {
+	debug_faces_cache.unref();
 	PhysicsServer3D::get_singleton()->shape_set_data(get_shape(), radius);
 	Shape3D::_update_shape();
 }

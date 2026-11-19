@@ -58,6 +58,9 @@ void initialize_jolt_physics_module(ModuleInitializationLevel p_level) {
 
 	jolt_initialize();
 	PhysicsServer3DManager::get_singleton()->register_server(PhysicsServer3DManager::JOLT_PHYSICS_NAME, callable_mp_static(&create_jolt_physics_server));
+	// Prefer Jolt's multithreaded 3D solver when the project has not explicitly
+	// selected a physics engine. GodotPhysics3D remains available by name.
+	PhysicsServer3DManager::get_singleton()->set_default_server(PhysicsServer3DManager::JOLT_PHYSICS_NAME, 1);
 	JoltProjectSettings::register_settings();
 }
 
