@@ -782,22 +782,21 @@ static void analytic_sphere_collision(const Vector3 &p_origin_a, real_t p_radius
 	// Get the vector from sphere B to A
 	Vector3 b_to_a = p_origin_a - p_origin_b;
 
-	// Get the length from B to A
-	real_t b_to_a_len = b_to_a.length();
-
-	// Calculate the sphere overlap, and bail if not overlapping
-	real_t overlap = p_radius_a + p_radius_b - b_to_a_len;
-	if (overlap < 0) {
+	// Most narrow-phase pairs are separated. Compare squared distances so
+	// misses and overlap-only queries avoid the square root entirely.
+	const real_t total_radius = p_radius_a + p_radius_b;
+	const real_t separation_squared = b_to_a.length_squared();
+	if (total_radius < 0.0 || separation_squared > total_radius * total_radius) {
 		return;
 	}
 
-	// Report collision
 	p_collector->collided = true;
-
-	// Bail if there is no callback to receive the A and B collision points.
 	if (!p_collector->callback) {
 		return;
 	}
+
+	const real_t b_to_a_len = Math::sqrt(separation_squared);
+	const real_t overlap = total_radius - b_to_a_len;
 
 	// Normalize the B to A vector
 	if (b_to_a_len < CMP_EPSILON) {
@@ -855,15 +854,17 @@ static void _collision_sphere_box(const GodotShape3D *p_a, const Transform3D &p_
 	// See if it is inside the sphere.
 
 	Vector3 delta = nearest - p_transform_a.origin;
-	real_t length = delta.length();
-	real_t radius = sphere_A->get_radius() * p_transform_a.basis[0].length();
-	if (length > radius + p_margin_a + p_margin_b) {
+	const real_t radius = sphere_A->get_radius() * p_transform_a.basis[0].length();
+	const real_t combined_radius = radius + p_margin_a + p_margin_b;
+	const real_t distance_squared = delta.length_squared();
+	if (combined_radius < 0.0 || distance_squared > combined_radius * combined_radius) {
 		return;
 	}
 	p_collector->collided = true;
 	if (!p_collector->callback) {
 		return;
 	}
+	const real_t length = Math::sqrt(distance_squared);
 	Vector3 axis;
 	if (length == 0) {
 		// The box passes through the sphere center.  Select an axis based on the box's center.
@@ -922,14 +923,16 @@ static void analytic_sphere_cylinder_collision(real_t p_radius_a, real_t p_radiu
 	// See if it is inside the sphere.
 
 	Vector3 delta = nearest - p_transform_a.origin;
-	real_t length = delta.length();
-	if (length > p_radius_a * scale_A + p_margin_a + p_margin_b) {
+	const real_t combined_radius = p_radius_a * scale_A + p_margin_a + p_margin_b;
+	const real_t distance_squared = delta.length_squared();
+	if (combined_radius < 0.0 || distance_squared > combined_radius * combined_radius) {
 		return;
 	}
 	p_collector->collided = true;
 	if (!p_collector->callback) {
 		return;
 	}
+	const real_t length = Math::sqrt(distance_squared);
 	Vector3 axis;
 	if (length == 0) {
 		// The cylinder passes through the sphere center.  Select an axis based on the cylinder's center.
