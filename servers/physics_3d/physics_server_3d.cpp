@@ -593,6 +593,9 @@ PhysicsServer3D::PhysicsServer3D() {
 	// Optional per-triangle surface-area preservation for deformable cloth.
 	// Zero disables all extra area constraints and associated lambda buffers.
 	GLOBAL_DEF(PropertyInfo(Variant::FLOAT, "physics/3d/solver/soft_body_xpbd_area_compliance", PROPERTY_HINT_RANGE, "0,0.01,0.000001,or_greater"), 0.0);
+	// Opt-in XPBD triangle-angle shear preservation, independent of edge
+	// stretch and area constraints. Default off, no per-face runtime buffers.
+	GLOBAL_DEF(PropertyInfo(Variant::FLOAT, "physics/3d/solver/soft_body_xpbd_shear_compliance", PROPERTY_HINT_RANGE, "0,0.01,0.000001,or_greater"), 0.0);
 	// Opt-in XPBD hinge dihedral bending for adjacent cloth triangles.
 	// Zero disables setup, solver work and all persistent hinge buffers.
 	GLOBAL_DEF(PropertyInfo(Variant::FLOAT, "physics/3d/solver/soft_body_xpbd_dihedral_compliance", PROPERTY_HINT_RANGE, "0,0.01,0.000001,or_greater"), 0.0);

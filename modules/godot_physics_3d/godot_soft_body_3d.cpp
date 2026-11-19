@@ -41,6 +41,7 @@
 #include "servers/physics_xpbd_distance.h"
 #include "servers/physics_xpbd_area.h"
 #include "servers/physics_xpbd_dihedral.h"
+#include "servers/physics_xpbd_shear.h"
 #include "servers/physics_xpbd_self_collision.h"
 #include "servers/physics_xpbd_soft_ccd.h"
 #include "servers/physics_xpbd_self_friction.h"
@@ -141,6 +142,7 @@ void GodotSoftBody3D::set_space(GodotSpace3D *p_space) {
 	// A mesh may have been assigned before the space was created. Validate
 	// its rest volume only after space-level compliance is available.
 	initialize_volume_constraint();
+	initialize_shear_constraints();
 	initialize_dihedral_constraints();
 	initialize_self_collision_topology();
 
@@ -258,8 +260,27 @@ void GodotSoftBody3D::update_constants() {
 	update_link_constants();
 	update_area();
 	initialize_volume_constraint();
+	initialize_shear_constraints();
 	initialize_dihedral_constraints();
 	initialize_self_collision_topology();
+}
+
+// Cache undeformed triangle angles only for opt-in shear constraints.
+// No per-triangle buffers are retained with the default zero compliance.
+void GodotSoftBody3D::initialize_shear_constraints() {
+	xpbd_shear_rest_cosines.reset();
+	if (!get_space() || get_space()->get_soft_body_xpbd_shear_compliance() <= 0.0 ||
+			faces.is_empty()) {
+		return;
+	}
+	xpbd_shear_rest_cosines.resize(faces.size());
+	for (uint32_t face_index = 0; face_index < faces.size(); ++face_index) {
+		const Face &face = faces[face_index];
+		real_t cosine = real_t(2.0); // Invalid/degenerate triangle sentinel.
+		physics_xpbd_triangle_shear_rest_cosine(face.n[0]->s, face.n[1]->s,
+				face.n[2]->s, cosine);
+		xpbd_shear_rest_cosines[face_index] = cosine;
+	}
 }
 
 // The enclosed volume of an oriented triangle soup is the sum of signed
@@ -1932,6 +1953,12 @@ void GodotSoftBody3D::solve_constraints(real_t p_delta) {
 			Math::is_finite(area_alpha_double) && area_alpha_double > 0.0;
 	const real_t alpha = use_xpbd ? real_t(MIN(alpha_double, double(std::numeric_limits<real_t>::max()))) : real_t(0.0);
 	const real_t area_alpha = use_area_xpbd ? real_t(MIN(area_alpha_double, double(std::numeric_limits<real_t>::max()))) : real_t(0.0);
+	const real_t configured_shear_compliance = get_space() ? get_space()->get_soft_body_xpbd_shear_compliance() : real_t(0.0);
+	const double shear_alpha_double = p_delta > 0.0 ? double(configured_shear_compliance) / (double(p_delta) * double(p_delta)) : 0.0;
+	const bool use_shear_xpbd = configured_shear_compliance > 0.0 && !faces.is_empty() &&
+			xpbd_shear_rest_cosines.size() == faces.size() &&
+			Math::is_finite(shear_alpha_double) && shear_alpha_double > 0.0;
+	const real_t shear_alpha = use_shear_xpbd ? real_t(MIN(shear_alpha_double, double(std::numeric_limits<real_t>::max()))) : real_t(0.0);
 	const double dihedral_compliance = get_space() ? double(get_space()->get_soft_body_xpbd_dihedral_compliance()) : 0.0;
 	const double dihedral_alpha_double = p_delta > 0.0 ? dihedral_compliance / (double(p_delta) * double(p_delta)) : 0.0;
 	const bool use_dihedral_xpbd = dihedral_compliance > 0.0 && !xpbd_dihedral_hinges.is_empty() &&
@@ -2002,6 +2029,15 @@ void GodotSoftBody3D::solve_constraints(real_t p_delta) {
 		}
 	}
 
+	if (use_shear_xpbd) {
+		xpbd_shear_lambdas.resize(faces.size());
+		for (double &lambda : xpbd_shear_lambdas) {
+			lambda = 0.0;
+		}
+	} else if (!xpbd_shear_lambdas.is_empty()) {
+		xpbd_shear_lambdas.reset();
+	}
+
 	if (use_dihedral_xpbd) {
 		xpbd_dihedral_lambdas.resize(xpbd_dihedral_hinges.size());
 		for (real_t &lambda : xpbd_dihedral_lambdas) {
@@ -2040,6 +2076,18 @@ void GodotSoftBody3D::solve_constraints(real_t p_delta) {
 				physics_xpbd_solve_triangle_area(face.n[0]->x, face.n[1]->x, face.n[2]->x,
 						face.n[0]->im, face.n[1]->im, face.n[2]->im,
 						face.ra, area_alpha, xpbd_area_lambdas[face_index]);
+			}
+		}
+		if (use_shear_xpbd) {
+			for (uint32_t face_index = 0; face_index < faces.size(); ++face_index) {
+				const real_t rest_cosine = xpbd_shear_rest_cosines[face_index];
+				if (rest_cosine < -1.0 || rest_cosine > 1.0) {
+					continue;
+				}
+				Face &face = faces[face_index];
+				physics_xpbd_solve_triangle_shear(face.n[0]->x, face.n[1]->x, face.n[2]->x,
+						face.n[0]->im, face.n[1]->im, face.n[2]->im,
+						rest_cosine, shear_alpha, xpbd_shear_lambdas[face_index]);
 			}
 		}
 		if (use_dihedral_xpbd) {
@@ -2243,6 +2291,8 @@ void GodotSoftBody3D::destroy() {
 
 	xpbd_link_lambdas.reset();
 	xpbd_area_lambdas.reset();
+	xpbd_shear_rest_cosines.reset();
+	xpbd_shear_lambdas.reset();
 	xpbd_dihedral_hinges.reset();
 	xpbd_dihedral_lambdas.reset();
 	xpbd_self_contacts.reset();
