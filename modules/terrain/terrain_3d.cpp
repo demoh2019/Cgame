@@ -33,67 +33,67 @@
 #include <cmath>
 
 HeightmapTerrain3D::HeightmapTerrain3D() {
-    Ref<TerrainHeightmap> data;
-    data.instantiate();
-    set_terrain_data(data);
+	Ref<TerrainHeightmap> data;
+	data.instantiate();
+	set_terrain_data(data);
 }
 
 HeightmapTerrain3D::~HeightmapTerrain3D() {
-    if (terrain_data.is_valid()) {
-        terrain_data->disconnect_changed(callable_mp(this, &HeightmapTerrain3D::_terrain_changed));
-    }
+	if (terrain_data.is_valid()) {
+		terrain_data->disconnect_changed(callable_mp(this, &HeightmapTerrain3D::_terrain_changed));
+	}
 }
 
 void HeightmapTerrain3D::set_terrain_data(const Ref<TerrainHeightmap> &p_data) {
-    if (terrain_data == p_data) {
-        return;
-    }
-    if (terrain_data.is_valid()) {
-        terrain_data->disconnect_changed(callable_mp(this, &HeightmapTerrain3D::_terrain_changed));
-    }
-    terrain_data = p_data;
-    if (terrain_data.is_valid()) {
-        terrain_data->connect_changed(callable_mp(this, &HeightmapTerrain3D::_terrain_changed));
-    }
-    rebuild();
+	if (terrain_data == p_data) {
+		return;
+	}
+	if (terrain_data.is_valid()) {
+		terrain_data->disconnect_changed(callable_mp(this, &HeightmapTerrain3D::_terrain_changed));
+	}
+	terrain_data = p_data;
+	if (terrain_data.is_valid()) {
+		terrain_data->connect_changed(callable_mp(this, &HeightmapTerrain3D::_terrain_changed));
+	}
+	rebuild();
 }
 
 Ref<TerrainHeightmap> HeightmapTerrain3D::get_terrain_data() const {
-    return terrain_data;
+	return terrain_data;
 }
 
 void HeightmapTerrain3D::set_cell_size(float p_size) {
-    ERR_FAIL_COND_MSG(!std::isfinite(p_size) || p_size <= 0, "Terrain cell size must be finite and positive.");
-    if (cell_size == p_size) {
-        return;
-    }
-    cell_size = p_size;
-    rebuild();
+	ERR_FAIL_COND_MSG(!std::isfinite(p_size) || p_size <= 0, "Terrain cell size must be finite and positive.");
+	if (cell_size == p_size) {
+		return;
+	}
+	cell_size = p_size;
+	rebuild();
 }
 
 float HeightmapTerrain3D::get_cell_size() const {
-    return cell_size;
+	return cell_size;
 }
 
 void HeightmapTerrain3D::_terrain_changed() {
-    rebuild();
+	rebuild();
 }
 
 void HeightmapTerrain3D::rebuild() {
-    if (terrain_data.is_valid()) {
-        set_mesh(terrain_data->build_mesh(cell_size));
-    } else {
-        set_mesh(Ref<Mesh>());
-    }
+	if (terrain_data.is_valid()) {
+		set_mesh(terrain_data->build_mesh(cell_size));
+	} else {
+		set_mesh(Ref<Mesh>());
+	}
 }
 
 void HeightmapTerrain3D::_bind_methods() {
-    ClassDB::bind_method(D_METHOD("set_terrain_data", "data"), &HeightmapTerrain3D::set_terrain_data);
-    ClassDB::bind_method(D_METHOD("get_terrain_data"), &HeightmapTerrain3D::get_terrain_data);
-    ClassDB::bind_method(D_METHOD("set_cell_size", "cell_size"), &HeightmapTerrain3D::set_cell_size);
-    ClassDB::bind_method(D_METHOD("get_cell_size"), &HeightmapTerrain3D::get_cell_size);
-    ClassDB::bind_method(D_METHOD("rebuild"), &HeightmapTerrain3D::rebuild);
+	ClassDB::bind_method(D_METHOD("set_terrain_data", "data"), &HeightmapTerrain3D::set_terrain_data);
+	ClassDB::bind_method(D_METHOD("get_terrain_data"), &HeightmapTerrain3D::get_terrain_data);
+	ClassDB::bind_method(D_METHOD("set_cell_size", "cell_size"), &HeightmapTerrain3D::set_cell_size);
+	ClassDB::bind_method(D_METHOD("get_cell_size"), &HeightmapTerrain3D::get_cell_size);
+	ClassDB::bind_method(D_METHOD("rebuild"), &HeightmapTerrain3D::rebuild);
 
-    ADD_PROPERTY(PropertyInfo(Variant::OBJECT, "terrain_data", PROPERTY_HINT_RESOURCE_TYPE, "TerrainHeightmap"), "set_terrain_data", "get_terrain_data");
-    ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "cell_size", PROPERTY_HINT_RANGE, "0.01,100.0,0.01,or_greater"), "set_cell_size", "get_cell_size");
+	ADD_PROPERTY(PropertyInfo(Variant::OBJECT, "terrain_data", PROPERTY_HINT_RESOURCE_TYPE, "TerrainHeightmap"), "set_terrain_data", "get_terrain_data");
+	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "cell_size", PROPERTY_HINT_RANGE, "0.01,100.0,0.01,or_greater"), "set_cell_size", "get_cell_size");
 }
