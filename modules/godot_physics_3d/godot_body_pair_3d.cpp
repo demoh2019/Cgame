@@ -539,6 +539,10 @@ bool GodotBodyPair3D::setup(real_t p_step) {
 	// This path is optional and only runs for pairs present in the broadphase.
 	if (!collided && !report_contacts_only && space->get_speculative_sphere_distance() > 0.0 &&
 			A->get_angular_velocity() == Vector3() && B->get_angular_velocity() == Vector3() &&
+			// Skip conveyor-style static surface velocities, which the solver
+			// otherwise interprets as a fictitious approach velocity.
+			!(A->get_mode() == PS3DE::BODY_MODE_STATIC && A->get_linear_velocity() != Vector3()) &&
+			!(B->get_mode() == PS3DE::BODY_MODE_STATIC && B->get_linear_velocity() != Vector3()) &&
 			shape_A_ptr->get_type() == PS3DE::SHAPE_SPHERE && shape_B_ptr->get_type() == PS3DE::SHAPE_SPHERE) {
 		const double scale_A = physics_ccd_uniform_sphere_scale(xform_A);
 		const double scale_B = physics_ccd_uniform_sphere_scale(xform_B);
