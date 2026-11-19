@@ -703,6 +703,7 @@ PhysicsServer3D::PhysicsServer3D() {
 	// updates the FEM rest inverse matrix, but neither its volume nor mass.
 	GLOBAL_DEF(PropertyInfo(Variant::FLOAT, "physics/3d/solver/soft_body_tetra_shear_plastic_rate", PROPERTY_HINT_RANGE, "0,100,0.1,or_greater,suffix:1/s"), 0.0);
 	GLOBAL_DEF(PropertyInfo(Variant::FLOAT, "physics/3d/solver/soft_body_tetra_shear_plastic_yield", PROPERTY_HINT_RANGE, "0,2,0.01"), 0.2);
+	GLOBAL_DEF(PropertyInfo(Variant::FLOAT, "physics/3d/solver/soft_body_tetra_shear_plastic_hardening", PROPERTY_HINT_RANGE, "0,10,0.01"), 0.0);
 	GLOBAL_DEF(PropertyInfo(Variant::FLOAT, "physics/3d/solver/soft_body_tetra_shear_plastic_max_strain", PROPERTY_HINT_RANGE, "0.01,4,0.01"), 2.0);
 	// Local XPBD-style volume projection recovers inverted FEM tetrahedra
 	// before the logarithmic Neo-Hookean energy solver (which rejects J<=0).

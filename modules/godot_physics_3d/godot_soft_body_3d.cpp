@@ -3333,7 +3333,12 @@ void GodotSoftBody3D::solve_constraints(real_t p_delta) {
 	if (fem_shear_plastic_rate > real_t(0.0) && p_delta > real_t(0.0) &&
 			get_space()->get_soft_body_tetra_fem_compliance() > real_t(0.0) &&
 			!xpbd_fem_tetrahedra.is_empty()) {
-		const double fraction = 1.0 - Math::exp(-double(fem_shear_plastic_rate) * double(p_delta));
+		const double hardening = double(get_space()->get_soft_body_tetra_shear_plastic_hardening());
+		// Exact hardening-aware relaxation at constant imposed Hencky strain.
+		// H=0 reduces to the legacy 1-exp(-rate*dt) plastic fraction.
+		const double fraction = (1.0 - Math::exp(
+				-double(fem_shear_plastic_rate) * double(p_delta) * (1.0 + hardening))) /
+				(1.0 + hardening);
 		if (Math::is_finite(fraction) && fraction > 0.0) {
 			for (PhysicsFEMConvexTetra &tetra : xpbd_fem_tetrahedra) {
 				physics_fem_tetra_creep_deviatoric_rest(
@@ -3341,7 +3346,7 @@ void GodotSoftBody3D::solve_constraints(real_t p_delta) {
 						nodes[tetra.c].x, nodes[tetra.d].x,
 						get_space()->get_soft_body_tetra_shear_plastic_yield(),
 						fraction, double(get_space()->get_soft_body_tetra_shear_plastic_max_strain()),
-						tetra.rest, tetra.plastic_deviatoric_strain);
+						tetra.rest, tetra.plastic_deviatoric_strain, hardening);
 			}
 		}
 	}
