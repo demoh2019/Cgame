@@ -2,6 +2,7 @@
 extends VBoxContainer
 
 const Plan = preload("res://addons/ai_game_builder/plan.gd")
+const Validator = preload("res://addons/ai_game_builder/validator.gd")
 const SYSTEM_PROMPT := """
 You are a senior Godot 4 GDScript game developer.
 Produce a playable, minimal, coherent implementation of the user's request.
@@ -25,12 +26,15 @@ var _model: LineEdit
 var _api_key: LineEdit
 var _prompt: TextEdit
 var _preview: TextEdit
+var _diagnostic_input: TextEdit
 var _status: Label
 var _generate_button: Button
 var _apply_button: Button
+var _repair_button: Button
 var _confirmation: ConfirmationDialog
 var _http: HTTPRequest
 var _pending_plan: Dictionary = {}
+var _last_issues := ""
 
 
 func _ready() -> void:
@@ -70,6 +74,26 @@ func _ready() -> void:
 	_apply_button.pressed.connect(_request_apply)
 	actions.add_child(_apply_button)
 
+	var validate_button := Button.new()
+	validate_button.text = "Check generated files"
+	validate_button.pressed.connect(_validate_saved)
+	actions.add_child(validate_button)
+
+	_repair_button = Button.new()
+	_repair_button.text = "Ask AI to repair"
+	_repair_button.disabled = true
+	_repair_button.pressed.connect(_generate_repair)
+	actions.add_child(_repair_button)
+
+	var diagnostic_label := Label.new()
+	diagnostic_label.text = "Optional: paste error messages from Godot's Output/Debugger here:"
+	add_child(diagnostic_label)
+	_diagnostic_input = TextEdit.new()
+	_diagnostic_input.custom_minimum_size = Vector2(0, 60)
+	_diagnostic_input.placeholder_text = "Parser Error: ...\nAt: res://ai_generated/..."
+	_diagnostic_input.text_changed.connect(_update_repair_button)
+	add_child(_diagnostic_input)
+
 	_status = Label.new()
 	_status.text = "Files are not changed until you approve the plan. Generated code is untrusted: review it."
 	add_child(_status)
@@ -107,8 +131,10 @@ func _input_row(label_text: String, initial: String) -> LineEdit:
 	return field
 
 
-func _generate_plan() -> void:
+func _generate_plan(extra_context: String = "") -> void:
 	_pending_plan.clear()
+	_last_issues = ""
+	_update_repair_button()
 	_apply_button.disabled = true
 	_preview.clear()
 	var endpoint := _endpoint.text.strip_edges()
@@ -129,7 +155,7 @@ func _generate_plan() -> void:
 		"model": _model.text.strip_edges(),
 		"messages": [
 			{"role": "system", "content": SYSTEM_PROMPT},
-			{"role": "user", "content": "Project context:\n" + _get_project_context() + "\n\nTask:\n" + _prompt.text}
+			{"role": "user", "content": "Project context:\n" + _get_project_context() + "\n\nTask:\n" + _prompt.text + extra_context}
 		]
 	}
 	var error := _http.request(endpoint, headers, HTTPClient.METHOD_POST, JSON.stringify(payload))
@@ -182,11 +208,19 @@ func _on_request_completed(result: int, response_code: int, _headers: PackedStri
 
 	_pending_plan = parsed
 	var proposed_files: Array = parsed["files"]
-	_preview.text = "SUMMARY: " + str(parsed["summary"]) + "\n\n" + JSON.stringify({
+	var report := Validator.analyze_plan(parsed)
+	var report_text := Validator.format_report(report)
+	_preview.text = "SUMMARY: " + str(parsed["summary"]) + "\n\n" + report_text + "\n\n" + JSON.stringify({
 		"files": proposed_files
 	}, "\t")
-	_apply_button.disabled = false
-	_status.text = "Plan ready: %d file(s). Review all content below before applying." % proposed_files.size()
+	if not report["errors"].is_empty() or not report["warnings"].is_empty():
+		_last_issues = report_text
+	_update_repair_button()
+	_apply_button.disabled = not report["ok"]
+	if report["ok"]:
+		_status.text = "Plan ready: %d file(s). Inspect content before applying." % proposed_files.size()
+	else:
+		_status.text = "Static inspection found %d error(s): the plan cannot be applied until repaired." % report["errors"].size()
 
 
 func _request_apply() -> void:
@@ -208,6 +242,53 @@ func _apply_confirmed() -> void:
 	_status.text = "Applied %d file(s). Open res://ai_generated/main.tscn to run your game." % outcome["written"].size()
 	_pending_plan.clear()
 	_apply_button.disabled = true
+	var report := Validator.analyze_saved()
+	_last_issues = ""
+	_update_repair_button()
+	if not report["errors"].is_empty() or not report["warnings"].is_empty():
+		_last_issues = Validator.format_report(report)
+		_update_repair_button()
+		_status.text += " Static check found %d error(s), %d warning(s)." % [report["errors"].size(), report["warnings"].size()]
+
+
+func _validate_saved() -> void:
+	# Invalidate any plan so that overwrites cannot be approved without review.
+	_pending_plan.clear()
+	_apply_button.disabled = true
+	var report := Validator.analyze_saved()
+	_preview.text = Validator.format_report(report)
+	_last_issues = _preview.text if not report["errors"].is_empty() or not report["warnings"].is_empty() else ""
+	_update_repair_button()
+	_status.text = "Inspected %d generated file(s): %d error(s), %d warning(s)." % [
+		report["files"], report["errors"].size(), report["warnings"].size()
+	]
+
+
+func _update_repair_button() -> void:
+	if _repair_button != null and _diagnostic_input != null:
+		_repair_button.disabled = _last_issues.is_empty() and _diagnostic_input.text.strip_edges().is_empty()
+
+
+func _generate_repair() -> void:
+	var diagnostics := _last_issues
+	var manual_errors := _diagnostic_input.text.strip_edges()
+	if manual_errors.length() > 12000:
+		_status.text = "Pasted diagnostics exceed 12000 characters."
+		return
+	if not manual_errors.is_empty():
+		diagnostics += "\n\nGodot engine diagnostic output:\n" + manual_errors
+	if diagnostics.strip_edges().is_empty():
+		_status.text = "First inspect the files or paste an error message."
+		return
+
+	var extra := "\n\nIMPORTANT: Repair the diagnostics below. Return a COMPLETE new JSON plan with fixed file contents:\n" + diagnostics.left(14000)
+	if not _pending_plan.is_empty():
+		var previous := JSON.stringify({"files": _pending_plan["files"]})
+		if previous.length() > 24000:
+			_status.text = "Unapplied plan too large for in-memory repair; reduce the request or split it."
+			return
+		extra += "\n\nUnapplied proposed files to repair:\n" + previous
+	_generate_plan(extra)
 
 
 func _get_project_context() -> String:
