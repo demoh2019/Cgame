@@ -18,7 +18,8 @@ class SkewCapsuleTOIContracts(unittest.TestCase):
         self.assertIn("const double segment_b_squared = dot(segment_b, segment_b);", source)
         self.assertIn("const double segment_dot = dot(segment_a, segment_b);", source)
         self.assertIn("dot(nearest, nearest), dot(nearest, p_motion)", source)
-        self.assertIn("for (int i = 0; i < 48; ++i)", source)
+        self.assertIn("const int search_iterations = sizeof(real_t) == sizeof(float) ? 32 : 48;", source)
+        self.assertEqual(source.count("for (int i = 0; i < search_iterations; ++i)"), 2)
         self.assertIn("minimum.squared <= radius_sq", source)
         self.assertIn("r_fraction = high;", source)
 
