@@ -42,7 +42,7 @@ scons platform=linuxbsd target=editor tests=yes -j"$(nproc)"
 ./bin/godot.linuxbsd.editor.x86_64 --headless --test --test-case="*[WorldPartition3D]*"
 ```
 
-**Validation status:** Source changes and test cases are present, but a Godot binary/compiler toolchain capable of building this fork was not available to the authoring environment. CI build and execution are required before merging.
+**Validation status:** Source changes and test cases are present, but a Godot binary/compiler toolchain capable of building this fork was not available to the authoring environment. CI build and test execution must pass before treating the module as production-ready.
 
 ## Non-goals and limitations
 
