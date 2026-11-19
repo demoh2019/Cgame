@@ -135,10 +135,9 @@ public:
 		return h;
 	}
 
-	// Flush explicitly deferred insertions once all shapes in a batch are
-	// registered. Existing pairs need only geometric checks here: set_tree()
-	// and force_collision_check() already validate changed collision filters.
-	// New pairs are filtered by _collide() when they are created.
+	// Flush deferred insertions and filter changes after a batch. New pairs
+	// are always validated in _collide(); invalid existing pairs require the
+	// full recheck requested by deferred force_collision_check().
 	void flush_pending_pairs() {
 		BVH_LOCKED_FUNCTION
 		if (USE_PAIRS) {
@@ -167,10 +166,10 @@ public:
 		erase(h);
 	}
 
-	void force_collision_check(uint32_t p_handle) {
+	void force_collision_check(uint32_t p_handle, bool p_defer_pairing = false) {
 		BVHHandle h;
 		h.set(p_handle);
-		force_collision_check(h);
+		force_collision_check(h, p_defer_pairing);
 	}
 
 	bool activate(uint32_t p_handle, const BOUNDS &p_aabb, bool p_delay_collision_check = false) {
@@ -256,19 +255,21 @@ public:
 	// use in conjunction with activate if you have deferred the collision check, and
 	// set pairable has never been called.
 	// (deferred collision checks are a workaround for visual server for historical reasons)
-	void force_collision_check(BVHHandle p_handle) {
+	void force_collision_check(BVHHandle p_handle, bool p_defer_pairing = false) {
 		DEV_ASSERT(!p_handle.is_invalid());
 		BVH_LOCKED_FUNCTION
 		if (USE_PAIRS) {
-			// the aabb should already be up to date in the BVH
+			// Filter changes do not change the proxy bounds. Existing pairs must
+			// still be fully validated even when all AABBs are unchanged.
 			BOUNDS aabb;
 			item_get_AABB(p_handle, aabb);
-
-			// add it as changed even if aabb not different
 			_add_changed_item(p_handle, aabb, false);
 
-			// force an immediate full collision check, much like calls to set_pairable
-			_check_for_collisions(true);
+			if (p_defer_pairing) {
+				_pending_full_pair_check = true;
+			} else {
+				_check_for_collisions(true);
+			}
 		}
 	}
 
@@ -521,8 +522,13 @@ private:
 	// a second time, retaining memory proportional to the densest scene.
 	void _check_for_collisions(bool p_full_check = false) {
 		if (changed_items.is_empty()) {
+			_pending_full_pair_check = false;
 			return;
 		}
+		// A deferred layer/mask or exclusion change must survive unrelated
+		// move(), update() and flush calls until its full check is executed.
+		const bool full_check = p_full_check || _pending_full_pair_check;
+		_pending_full_pair_check = false;
 
 		struct PairVisit {
 			BVH_Manager *manager;
@@ -548,7 +554,7 @@ private:
 
 			// Remove obsolete pairs first, preserving the full filter recheck
 			// for static layer / collision exception changes.
-			_find_leavers(h, abb, p_full_check);
+			_find_leavers(h, abb, full_check);
 
 			const typename BVHTREE_CLASS::ItemExtra &extra = _get_extra(h);
 			PairVisit query = { this, h };
@@ -919,6 +925,7 @@ private:
 	// for collision pairing,
 	// maintain a list of all items moved etc on each frame / tick
 	LocalVector<BVHHandle> changed_items;
+	bool _pending_full_pair_check = false;
 	uint32_t _tick = 1; // Start from 1 so items with 0 indicate never updated.
 
 	class BVHLockedFunction {
