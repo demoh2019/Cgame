@@ -8,6 +8,7 @@ import sys
 import tempfile
 import unittest
 from unittest import mock
+from xml.etree import ElementTree as ET
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 import scene_smoke as smoke
@@ -240,6 +241,68 @@ class SmokeTests(unittest.TestCase):
         with mock.patch.object(smoke.subprocess, "run", side_effect=OSError("denied")):
             with self.assertRaisesRegex(smoke.SmokeError, "denied"):
                 smoke.run_command(["godot"], 1)
+
+    def test_junit_empty_suite(self):
+        root = ET.fromstring(smoke.junit_report({"ok": True, "results": []}))
+        self.assertEqual(root.tag, "testsuite")
+        self.assertEqual(root.get("tests"), "0")
+        self.assertEqual(root.get("failures"), "0")
+        self.assertEqual(root.findall("testcase"), [])
+
+    def test_junit_successful_scene(self):
+        self.scene("a.tscn")
+        completed = subprocess.run([sys.executable, str(TOOL), str(self.root),
+                                    "--godot", str(self.stub), "--format", "junit"],
+                                   capture_output=True, text=True)
+        self.assertEqual(completed.returncode, 0)
+        suite = ET.fromstring(completed.stdout)
+        self.assertEqual(suite.get("tests"), "1")
+        self.assertEqual(suite.get("failures"), "0")
+        self.assertEqual(suite.find("testcase").get("name"), "a.tscn")
+        self.assertIsNone(suite.find("testcase/failure"))
+
+    def test_junit_script_error_failure(self):
+        self.scene("broken.tscn")
+        completed = subprocess.run([sys.executable, str(TOOL), str(self.root),
+                                    "--godot", str(self.stub), "--format", "junit"],
+                                   capture_output=True, text=True)
+        self.assertEqual(completed.returncode, 1)
+        suite = ET.fromstring(completed.stdout)
+        self.assertEqual(suite.get("failures"), "1")
+        self.assertIn("SCRIPT ERROR", suite.find("testcase/failure").text)
+
+    def test_junit_import_failure(self):
+        self.scene("a.tscn")
+        with mock.patch.dict(os.environ, {"FAIL_IMPORT": "1"}):
+            completed = subprocess.run([sys.executable, str(TOOL), str(self.root),
+                                        "--godot", str(self.stub), "--format", "junit",
+                                        "--import-first"], capture_output=True, text=True)
+        self.assertEqual(completed.returncode, 1)
+        suite = ET.fromstring(completed.stdout)
+        self.assertEqual(suite.get("tests"), "1")
+        self.assertEqual(suite.get("failures"), "1")
+        self.assertEqual(suite.find("testcase").get("name"), "__import__")
+        self.assertIsNotNone(suite.find("testcase/failure"))
+
+    def test_junit_timeout_case(self):
+        report = {"ok": False, "results": [
+            {"scene": "slow.tscn", "status": "timeout", "exit_code": None, "log": "timeout"}]}
+        suite = ET.fromstring(smoke.junit_report(report))
+        self.assertEqual(suite.get("failures"), "1")
+        self.assertEqual(suite.find("testcase/failure").get("type"), "timeout")
+
+    def test_junit_escapes_xml_and_invalid_unicode(self):
+        report = {"ok": False, "results": [
+            {"scene": "a<&\\u0000.tscn", "status": "fail",
+             "exit_code": 1, "log": "ERROR: bad <&\\u0000"}]}
+        # Keep an actual NUL in the input; XML 1.0 forbids it.
+        report["results"][0]["scene"] = report["results"][0]["scene"].replace("\\u0000", chr(0))
+        report["results"][0]["log"] = report["results"][0]["log"].replace("\\u0000", chr(0))
+        xml = smoke.junit_report(report)
+        suite = ET.fromstring(xml)
+        self.assertNotIn(chr(0), xml)
+        self.assertIn("<&", suite.find("testcase").get("name"))
+        self.assertIn("ERROR: bad <&", suite.find("testcase/failure").text)
 
 
 if __name__ == "__main__":
