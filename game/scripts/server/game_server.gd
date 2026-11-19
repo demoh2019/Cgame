@@ -1383,9 +1383,6 @@ func cmd_attack(peer_id: int, dir_x: float, dir_z: float) -> Dictionary:
 		return {"ok": false, "reason": "no_direction"}
 	direction = direction.normalized()
 	var weapon: String = player.inventory.weapon
-	# Stale equipment IDs after losing an item must fall back to bare hands.
-	if weapon != "" and player.inventory.count(weapon) < 1:
-		weapon = ""
 	var kind: String = Defs.item(weapon).get("weapon", "melee") if weapon != "" else "melee"
 	player.attack_timer = Combat.weapon_cooldown(weapon)
 	player.action = {} # Fighting interrupts gathering.
@@ -1427,20 +1424,33 @@ func cmd_skill(peer_id: int, dir_x: float, dir_z: float) -> Dictionary:
 	if skill.is_empty() or player.inventory.count(weapon) < 1:
 		return {"ok": false, "reason": "no_skill"}
 	var direction := Vector2(dir_x, dir_z)
-	if not direction.is_finite() or direction.length_squared() < 0.0001:
+	if not direction.is_finite() or not is_finite(direction.length_squared()) or direction.length_squared() < 0.0001:
 		return {"ok": false, "reason": "no_direction"}
 	var cost: float = float(skill["energy_cost"])
 	if player.combat_energy < cost:
 		return {"ok": false, "reason": "no_energy"}
+	var ranged: bool = bool(skill.get("ranged", false))
+	var ammo: String = str(skill.get("ammo", ""))
+	# Validate and consume exactly one physical cartridge before charging energy.
+	# A failed shot must not start cooldown, change action, emit noise or cost XP.
+	if ranged and (ammo.is_empty() or player.inventory.count(ammo) < 1):
+		return {"ok": false, "reason": "no_ammo"}
+	if ranged:
+		if not player.inventory.remove(ammo, 1):
+			return {"ok": false, "reason": "no_ammo"}
+		player.dirty_inventory = true
 	direction = direction.normalized()
 	player.combat_energy -= cost
 	player.skill_timer = float(skill["cooldown"])
 	player.attack_timer = float(skill["attack_lock"])
 	player.action = {}
 	player.yaw = atan2(direction.x, direction.y)
+	if ranged:
+		player.noise_radius = maxf(player.noise_radius, Defs.GUNSHOT_NOISE_RADIUS)
+		player.noise_timer = maxf(player.noise_timer, Defs.GUNSHOT_NOISE_SECONDS)
 	var origin := Vector2(player.position.x, player.position.z)
-	var hit := _find_hit(player, origin, direction, float(skill["range"]), false)
-	events.append({"type": "attack", "peer": peer_id, "dir": direction, "ranged": false, "skill": skill["id"], "x": player.position.x, "z": player.position.z})
+	var hit := _find_hit(player, origin, direction, float(skill["range"]), ranged)
+	events.append({"type": "attack", "peer": peer_id, "dir": direction, "ranged": ranged, "skill": skill["id"], "x": player.position.x, "z": player.position.z})
 	if hit.is_empty():
 		return {"ok": true, "hit": false, "energy": player.combat_energy}
 	var skilled_damage: float = float(skill["damage"]) * player.progression.combat_damage_multiplier(weapon)
@@ -1657,11 +1667,6 @@ func _damage_target(attacker: Player, hit: Dictionary, damage: float) -> void:
 		var zombie = zombies.get(hit["id"])
 		if zombie == null:
 			return
-		# Extra damage against infected requires the real equipped weapon.
-		# Do not apply the monster-hunting trait to player-versus-player damage.
-		var equipped_weapon: String = attacker.inventory.weapon
-		var carrying_weapon: bool = equipped_weapon != "" and attacker.inventory.count(equipped_weapon) > 0
-		damage = Combat.against_infected(damage, equipped_weapon, carrying_weapon)
 		# Only real, positive, server-applied hits can qualify for group XP.
 		if damage > 0.0 and zombie.is_alive() and (zombie.contributors.size() < 16 or zombie.contributors.has(attacker.id)):
 			var equipped: String = attacker.inventory.weapon

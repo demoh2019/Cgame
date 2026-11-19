@@ -1418,23 +1418,22 @@ and persist fortification ownership transactionally before cross-server
 clan sieges. No native Cgame engine changes were necessary for this stage.
 
 
-## Raid trophy armament: Purifier Maul T3
+## Pistol active skill: Focused Shot (classless ranged equipment ability)
 
-Elite- and raid-only Infected Cores now provide a second gameplay progression
-loop beyond medicinal serum. A survivor with Crafting T3 can forge the
-**Purifier Maul T3** from four cores, three T3 bars, two T3 planks and one
-T3 cloth at the permanent workbench. The maul is a normal traded, dropped,
-equipped melee weapon, compatible with weapon mastery and full-loot combat.
+Equipping an owned **pistol** grants **Focused Shot** on **G**, replacing
+the club-only Heavy Strike. The real authoritative server charges **40 combat
+energy and one 9mm round** per use, enforces an **8-second cooldown** and
+a 0.55-second regular-attack lock, and calculates **1.75× pistol damage**
+at **4 metres beyond normal pistol range**. Existing ranged weapon
+mastery scales the shot, and the shot generates normal gunshot noise.
 
-The maul grants a dedicated **Purifying Slam** active melee ability
-(35 combat energy; 8-second cooldown) and **25% bonus damage to infected**,
-including elite enemies and raid bosses. The bonus applies only after an
-actual server-confirmed infected target is hit and the player physically
-carries the equipped maul. PvP damage, other weapons, unarmed attacks
-and ghost equipment never gain this bonus. Existing safe hub, party PvP
-protection, armor, inventory and skill cooldown checks remain in place.
+Invalid aim, insufficient energy, missing ammunition, missing weapon,
+death and cooldown reject without consuming resources or issuing a shot.
+Shots that miss still spend one real round and energy. The same `cmd_skill`
+logic works in the local playable scene and through the online `c_skill`
+RPC. Red/black PvP rules and group friendly-fire safeguards remain in force.
 
-`game/tests/test_purifier_maul.gd` validates the full boss-material
-recipe, tier gates, consumed resources, real authoritative attacks, the
-special ability, cooldowns and the PvP/PvE damage separation. The
-existing Cgame engine APIs support this without native changes.
+`game/tests/test_ranged_skills.gd` exercises real zombie damage, ammunition,
+energy, noise, mastery, replay prevention, respawn and safe-hub PvP with
+`godot --headless --path game --script res://tests/run_all.gd`.
+Existing Cgame APIs suffice; no native engine addition was needed.
