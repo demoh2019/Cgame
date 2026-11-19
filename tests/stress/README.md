@@ -182,16 +182,18 @@ Mixed friction is calculated once per rigid-body contact pair's pre-solve pass,
 not repeatedly on every solver iteration. A frictionless pair retains the
 existing fast path with tangential impulses disabled.
 
-The separate low-level regression compares two concurrent worlds (legacy vs.
-geometric) with otherwise identical sliding bodies and contact shapes:
+The separate low-level regression compares three isolated worlds (legacy,
+geometric mean, and geometric mean with one frictionless material). All worlds
+use the same sliding-body geometry:
 
 ```bash
 ./bin/godot.linuxbsd.editor.dev.x86_64 --headless \
   --path tests/stress --script res://physics_friction_mix_regression.gd
 ```
 
-It asserts that the geometric mean slows the sliding body more than legacy
-mixing under default test-project gravity. Run this with **built-in GodotPhysics**
+It asserts that the geometric mean slows sliding more than legacy mixing,
+while mixing with zero still produces a frictionless contact. Run with
+**built-in GodotPhysics**
 selected. The script restores the original ProjectSettings value and frees all
 RIDs. This regression checks one geometry and material combination; it is not
 a complete friction or determinism proof.
