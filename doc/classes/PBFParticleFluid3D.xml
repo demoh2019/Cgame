@@ -6,7 +6,7 @@
 	<description>
 		Simulates up to 2048 particles using Position Based Fluids (PBF): a compactly supported SPH kernel, iterative density constraints, deterministic sorted-cell neighbor lookup, artificial pressure and optional XSPH velocity smoothing. Unlike static fluid-plane buoyancy, particles move independently and can form a deforming free surface.
 		Particle positions, velocities, box bounds, gravity and impulses are all in this node's [b]local coordinate system[/b]. The node does not create a visible mesh: render particles yourself with [MultiMeshInstance3D], a custom shader or a fluid surface renderer. See the Cgame Physics Lab sample for GPU-instanced sphere visualization.
-		[b]Experimental:[/b] This is a bounded CPU demonstration of PBF, not a fully incompressible Navier-Stokes solver. The density constraint is one-sided (it prevents compression rather than forcing dilute free surfaces to expand). It does not implement viscosity between fluid and rigid bodies, surface reconstruction, GPU compute, solid boundary pressure or thermal/multiphase effects. A new optional vorticity confinement post-process restores small-scale vortices lost during PBF/XSPH and is disabled by default; it is a visual turbulence model, not a fully energy-conserving Navier-Stokes solver. An additional opt-in unilateral divergence velocity projection suppresses compressive density-rate after the PBF and vorticity passes. It is DFSPH-inspired but does not replace PBF with a complete two-stage pressure Poisson method. A further optional predictive SPH density-pressure stage operates before particle advection: it reduces predicted compressive density excess even for stationary particles. This remains an approximate bounded PBF extension, not a full DFSPH pressure solver or guarantee of exact incompressibility. Simple equal-and-opposite rigid-body contact impulses can be explicitly enabled through [member two_way_rigid_coupling]; this is not a continuum fluid-solid coupling solver.
+		[b]Experimental:[/b] This is a bounded CPU demonstration of PBF, not a fully incompressible Navier-Stokes solver. The density constraint is one-sided (it prevents compression rather than forcing dilute free surfaces to expand). It does not implement viscosity between fluid and rigid bodies, surface reconstruction, GPU compute, solid boundary pressure or thermal/multiphase effects. A new optional vorticity confinement post-process restores small-scale vortices lost during PBF/XSPH and is disabled by default; it is a visual turbulence model, not a fully energy-conserving Navier-Stokes solver. An additional opt-in unilateral divergence velocity projection suppresses compressive density-rate after the PBF and vorticity passes. It is DFSPH-inspired but does not replace PBF with a complete two-stage pressure Poisson method. A further optional predictive SPH density-pressure stage operates before particle advection: it reduces predicted compressive density excess even for stationary particles. This remains an approximate bounded PBF extension, not a full DFSPH pressure solver or guarantee of exact incompressibility. Opt-in surface cohesion and SPH color-field curvature add bounded, equal-and-opposite pairwise impulses for droplets and free surfaces. They are explicit visual/approximate SPH forces, not physically calibrated wall adhesion or implicit energy-conserving surface tension. Simple equal-and-opposite rigid-body contact impulses can be explicitly enabled through [member two_way_rigid_coupling]; this is not a continuum fluid-solid coupling solver.
 		[b]Note:[/b] By default [member simulation_enabled], [member collide_with_bodies] and [member two_way_rigid_coupling] are [code]false[/code], so the class does no per-frame work. For manual stepping, use [method step] while simulation is disabled. The internal simulation tick runs in the regular physics frame. Parameters are intentionally capped to protect memory, runtime cost and numerical stability.
 	</description>
 	<methods>
@@ -94,10 +94,28 @@
 				Returns the bounded number of neighbor interactions in the most recent substep. Useful for performance profiling; a particle can visit at most 128 neighbors during each solver iteration.
 			</description>
 		</method>
+		<method name="get_last_surface_tension_neighbor_evaluations" qualifiers="const">
+			<return type="int" />
+			<description>
+				Returns accepted neighbor visits across the final density, surface color normals and unique pair force passes for the latest active substep, bounded by three times the particle count times 128. Zero when both surface strengths are disabled.
+			</description>
+		</method>
+		<method name="get_last_surface_tension_pairs" qualifiers="const">
+			<return type="int" />
+			<description>
+				Returns the number of unordered particle pairs receiving equal-and-opposite surface-tension impulses in the latest substep. Each accepted pair is counted once; a numerical overflow rejects the entire impulse batch.
+			</description>
+		</method>
 		<method name="get_last_vorticity_neighbor_evaluations" qualifiers="const">
 			<return type="int" />
 			<description>
 				Returns the number of neighborhood visits across all three vorticity passes (final density, curl and curl-magnitude gradient) in the most recent substep. The process is disabled at strength zero and bounded by three times the particle count times 128.
+			</description>
+		</method>
+		<method name="get_mean_surface_normal_magnitude" qualifiers="const">
+			<return type="float" />
+			<description>
+				Mean magnitude of the SPH color-field surface normals measured after density projection, dimensionless. Zero when the cohesion and curvature stages are disabled.
 			</description>
 		</method>
 		<method name="get_particle_count" qualifiers="const">
@@ -199,6 +217,15 @@
 		</member>
 		<member name="solver_iterations" type="int" setter="set_solver_iterations" getter="get_solver_iterations" default="4">
 			Number of PBF density projection iterations per substep, clamped to 1–12.
+		</member>
+		<member name="surface_cohesion" type="float" setter="set_surface_cohesion" getter="get_surface_cohesion" default="0.0">
+			Opt-in Akinci-inspired surface cohesion strength, from 0 to 2. Pulls nearby free-surface particles together, with a repulsive short-distance core. Zero disables cohesion; both cohesion and curvature zero disable the entire surface solver, including its extra buffers and neighbor scans. This is a tuned explicit SPH coefficient rather than a calibrated SI surface tension in N/m.
+		</member>
+		<member name="surface_curvature" type="float" setter="set_surface_curvature" getter="get_surface_curvature" default="0.0">
+			Opt-in curvature smoothing coefficient, from 0 to 2. Uses differences of SPH color-field normals for paired particle impulses. The noncentral curvature force may modify angular momentum, even though each particle pair receives opposite linear impulses. Not an implicit energy-conserving surface tension or boundary adhesion solver.
+		</member>
+		<member name="surface_max_pair_velocity_change" type="float" setter="set_surface_max_pair_velocity_change" getter="get_surface_max_pair_velocity_change" default="0.005">
+			Safety cap on the magnitude of each ONE-pair surface-tension velocity correction, in m/s per substep, from 0.0001 to 0.05. The two particles receive equal-and-opposite corrections; a particle can still accumulate corrections from up to 128 neighbors.
 		</member>
 		<member name="two_way_rigid_coupling" type="bool" setter="set_two_way_rigid_coupling" getter="is_two_way_rigid_coupling_enabled" default="false">
 			Enables equal-and-opposite collision impulses between fluid particles and dynamic [RigidBody3D] surfaces. Uses contact speed, rigid mass, angular velocity and world-space inverse inertia for the normal effective mass. Requires [member collide_with_bodies]. Static and kinematic bodies retain one-way contacts. This does not model continuous pressure or buoyancy on immersed solids.
