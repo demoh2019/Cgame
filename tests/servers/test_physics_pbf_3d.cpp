@@ -19,12 +19,9 @@
 /* EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF     */
 /* MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. */
 /* IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY   */
-/* CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER OF MERCHANTABILITY,         */
-/* FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL */
-/* THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR  */
-/* OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE,  */
-/* ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR  */
-/* OTHER DEALINGS IN THE SOFTWARE.                                        */
+/* CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT,   */
+/* TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE      */
+/* SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.                 */
 /**************************************************************************/
 
 #include "scene/3d/physics/pbf_particle_fluid_3d.h"
@@ -139,6 +136,26 @@ TEST_CASE("[PhysicsPBF3D] Same particle seed produces deterministic integration"
 	for (int i = 0; i < first.size(); ++i) {
 		CHECK(first[i] == second[i]);
 	}
+}
+
+TEST_CASE("[PhysicsPBF3D] Local stirring pulse affects particles but caps velocity") {
+	PBFParticleFluid3D fluid;
+	REQUIRE(fluid.create_block(Vector3(0, 1, 0), Vector3i(3, 3, 3), 0.2));
+	CHECK(fluid.add_velocity_pulse(Vector3(0, 1, 0), 2.0, Vector3(101, 0, 0)) == 0);
+	const int affected = fluid.add_velocity_pulse(Vector3(0, 1.2, 0), 0.8, Vector3(2, 3, 0));
+	CHECK(affected > 0);
+	CHECK(affected <= fluid.get_particle_count());
+	const PackedVector3Array velocity = fluid.get_particle_velocities();
+	int moving = 0;
+	for (const Vector3 &v : velocity) {
+		CHECK(v.is_finite());
+		CHECK(v.length_squared() <= real_t(6400.0));
+		if (v.length_squared() > real_t(0.0)) {
+			++moving;
+		}
+	}
+	CHECK(moving == affected);
+	CHECK(fluid.add_velocity_pulse(Vector3(999, 999, 999), 0.1, Vector3(1, 0, 0)) == 0);
 }
 
 TEST_CASE("[PhysicsPBF3D] Invalid time and oversized seed preserve previous state") {
