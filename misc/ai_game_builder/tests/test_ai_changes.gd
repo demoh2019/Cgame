@@ -67,7 +67,8 @@ func _run_tests() -> void:
 	_assert_true(not Preflight.check(_proposal("res://asset.gdshader", "bad shader"))["ok"], "invalid shader rejected")
 	var repair_request: Variant = JSON.parse_string(Protocol.repair_request_body("model", "Make game", "Parser Error at line 3", "(no files)"))
 	_assert_true(repair_request is Dictionary and repair_request["messages"][1]["content"].contains("Parser Error"), "repair request includes diagnostics")
-	_assert_true(Repair.collect_context([]).contains("No eligible"), "empty repair context")
+	var no_paths: Array[String] = []
+	_assert_true(Repair.collect_context(no_paths).contains("No eligible"), "empty repair context")
 	var state := Changes.preview_snapshot(_proposal("res://tests/newfile_never_created_123.gd"))
 	_assert_true(state["ok"] and state["states"]["res://tests/newfile_never_created_123.gd"] == "__missing__", "snapshot records absent files")
 
