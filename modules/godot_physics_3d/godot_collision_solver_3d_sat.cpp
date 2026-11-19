@@ -696,7 +696,7 @@ public:
 		real_t depth = axis.length();
 
 		// Filter out bogus directions with a threshold and re-testing axis.
-		if (separator->best_depth - depth > 0.001) {
+		if (depth > CMP_EPSILON && separator->best_depth - depth > real_t(0.001)) {
 			separator->test_axis(axis / depth);
 		}
 	}
