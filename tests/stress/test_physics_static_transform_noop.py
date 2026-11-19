@@ -31,15 +31,15 @@ class PhysicsStaticTransformNoop(unittest.TestCase):
                 static_start = code.index(f"else if (mode == {mode})")
                 static_end = code.index("} else {", static_start)
                 static = code[static_start:static_end]
-                self.assertIn(f"const {type_name} transform = p_variant;", static)
-                self.assertIn("if (transform == get_transform()) {", static)
+                self.assertIn(f"const {type_name} new_static_transform = p_variant;", static)
+                self.assertIn("if (new_static_transform == get_transform()) {", static)
                 self.assertIn("break;", static)
-                self.assertIn("_set_transform(transform);", static)
+                self.assertIn("_set_transform(new_static_transform);", static)
                 self.assertIn("_set_inv_transform(get_transform().affine_inverse());", static)
                 self.assertIn("wakeup_neighbours();", static)
                 self.assertLess(
-                    static.index("if (transform == get_transform())"),
-                    static.index("_set_transform(transform);"),
+                    static.index("if (new_static_transform == get_transform())"),
+                    static.index("_set_transform(new_static_transform);"),
                 )
                 self.assertLess(static.index("break;"), static.index("wakeup_neighbours();"))
 
