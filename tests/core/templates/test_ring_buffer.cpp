@@ -34,6 +34,9 @@ TEST_FORCE_LINK(test_ring_buffer)
 
 #include "core/templates/ring_buffer.h"
 
+#include <climits>
+#include <cstdint>
+#include <deque>
 #include <string>
 
 namespace TestRingBuffer {
@@ -381,6 +384,127 @@ TEST_CASE("[RingBuffer] Bulk wrapped resize preserves sequence") {
 	CHECK(output[0] == 6);
 	for (int i = 1; i < 6; i++) {
 		CHECK(output[i] == second[i - 1]);
+	}
+}
+
+
+TEST_CASE("[RingBuffer] Byte find searches both spans and respects offset") {
+	RingBuffer<uint8_t> rb(6);
+	uint8_t first[45];
+	for (uint8_t &value : first) {
+		value = 0x11;
+	}
+	CHECK(rb.write(first, 45) == 45);
+	CHECK(rb.advance_read(40) == 40);
+
+	uint8_t second[40];
+	for (uint8_t &value : second) {
+		value = 0x22;
+	}
+	second[32] = 0xef; // Beyond the physical wrap, in the second span.
+	second[39] = 0xf0;
+	CHECK(rb.write(second, 40) == 40);
+	CHECK(rb.data_left() == 45);
+	CHECK(rb.find(uint8_t(0x11), 0, 45) == 0);
+	CHECK(rb.find(uint8_t(0x22), 0, 45) == 5);
+	CHECK(rb.find(uint8_t(0xef), 0, 45) == 37);
+	CHECK(rb.find(uint8_t(0xef), 10, 35) == 27);
+	CHECK(rb.find(uint8_t(0xef), 38, 7) == -1);
+	CHECK(rb.find(uint8_t(0xf0), 0, 45) == 44);
+	CHECK(rb.find(uint8_t(0xee), 0, 45) == -1);
+	CHECK(rb.data_left() == 45); // Searching must not consume bytes.
+
+	uint8_t out[45] = {};
+	CHECK(rb.read(out, 45) == 45);
+	for (int i = 0; i < 5; i++) {
+		CHECK(out[i] == 0x11);
+	}
+	for (int i = 0; i < 40; i++) {
+		CHECK(out[5 + i] == second[i]);
+	}
+}
+
+TEST_CASE("[RingBuffer] Find matches signed byte and nontrivial values") {
+	RingBuffer<int8_t> signed_rb(6);
+	int8_t signed_values[40];
+	for (int8_t &value : signed_values) {
+		value = -2;
+	}
+	signed_values[31] = -1;
+	CHECK(signed_rb.write(signed_values, 40) == 40);
+	CHECK(signed_rb.find(int8_t(-1), 0, INT_MAX) == 31);
+	CHECK(signed_rb.find(int8_t(-2), 32, INT_MAX) == 0);
+
+	RingBuffer<std::string> strings(3);
+	const std::string first[] = { "a", "b", "c", "d", "e", "f" };
+	CHECK(strings.write(first, 6) == 6);
+	CHECK(strings.advance_read(5) == 5);
+	const std::string second[] = { "g", "h", "i", "j", "k" };
+	CHECK(strings.write(second, 5) == 5);
+	CHECK(strings.find(std::string("f"), 0, 6) == 0);
+	CHECK(strings.find(std::string("k"), 0, 6) == 5);
+	CHECK(strings.find(std::string("i"), 2, 4) == 1);
+	CHECK(strings.find(std::string("none"), 0, 6) == -1);
+}
+
+TEST_CASE("[RingBuffer] Copy and find reject invalid offsets without overflow") {
+	RingBuffer<uint8_t> rb(3);
+	uint8_t input[] = { 2, 4, 6, 8 };
+	uint8_t output[] = { 99, 99, 99, 99 };
+	CHECK(rb.find(uint8_t(2), 0, INT_MAX) == -1);
+	CHECK(rb.write(input, 4) == 4);
+	CHECK(rb.find(uint8_t(2), -1, 4) == -1);
+	CHECK(rb.find(uint8_t(2), 4, 4) == -1);
+	CHECK(rb.find(uint8_t(2), INT_MAX, INT_MAX) == -1);
+	CHECK(rb.find(uint8_t(2), 0, -1) == -1);
+	CHECK(rb.copy(output, -1, 2) == 0);
+	CHECK(rb.copy(output, 4, 2) == 0);
+	CHECK(rb.copy(output, INT_MAX, INT_MAX) == 0);
+	CHECK(output[0] == 99);
+	CHECK(rb.copy(output, 2, INT_MAX) == 2);
+	CHECK(output[0] == 6);
+	CHECK(output[1] == 8);
+	CHECK(rb.data_left() == 4);
+}
+
+TEST_CASE("[RingBuffer] Deterministic two-span differential exercise") {
+	RingBuffer<uint8_t> rb(7);
+	std::deque<uint8_t> expected;
+	uint32_t seed = 0x1234abcd;
+	for (int step = 0; step < 512; step++) {
+		seed = seed * 1664525u + 1013904223u;
+		const int count = int((seed >> 8) & 63u);
+		if ((seed & 1u) != 0u) {
+			uint8_t input[64];
+			for (int i = 0; i < count; i++) {
+				input[i] = uint8_t((seed >> 16) + uint32_t(i * 17));
+			}
+			const int writable = MIN(count, 127 - int(expected.size()));
+			CHECK(rb.write(input, count) == writable);
+			for (int i = 0; i < writable; i++) {
+				expected.push_back(input[i]);
+			}
+		} else {
+			uint8_t output[64] = {};
+			const int readable = MIN(count, int(expected.size()));
+			CHECK(rb.read(output, count) == readable);
+			for (int i = 0; i < readable; i++) {
+				CHECK(output[i] == expected.front());
+				expected.pop_front();
+			}
+		}
+		CHECK(rb.data_left() == int(expected.size()));
+		const int offset = expected.empty() ? 0 : int((seed >> 20) % expected.size());
+		const int limit = int((seed >> 12) & 127u);
+		const uint8_t needle = uint8_t(seed >> 24);
+		int match = -1;
+		for (int i = offset; i < int(expected.size()) && i - offset < limit; i++) {
+			if (expected[i] == needle) {
+				match = i - offset;
+				break;
+			}
+		}
+		CHECK(rb.find(needle, offset, limit) == match);
 	}
 }
 
