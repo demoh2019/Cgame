@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<class name="BehaviorTreeComposite" inherits="BehaviorTreeTask" api_type="core" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="../../../doc/class.xsd">
+	<brief_description>Base resource for behavior tree tasks containing ordered children.</brief_description>
+	<description>The [member tasks] array holds child [BehaviorTreeTask] resources. Resources are shared between agents; [BehaviorTreeRunner] owns execution state. Cyclic references and null child tasks are rejected. Use a [BehaviorTreeSequence] or [BehaviorTreeSelector] for execution.</description>
+	<methods>
+		<method name="add_task"><return type="void" /><param index="0" name="task" type="BehaviorTreeTask" /><description>Adds a child task to the end of the list.</description></method>
+		<method name="remove_task"><return type="void" /><param index="0" name="index" type="int" /><description>Removes the child at [param index].</description></method>
+		<method name="clear_tasks"><return type="void" /><description>Removes all child tasks.</description></method>
+		<method name="get_task_count" qualifiers="const"><return type="int" /><description>Returns the number of direct child tasks.</description></method>
+		<method name="get_task" qualifiers="const"><return type="BehaviorTreeTask" /><param index="0" name="index" type="int" /><description>Returns the indexed child task.</description></method>
+		<method name="get_tasks" qualifiers="const"><return type="Array" /><description>Returns a copy of the child array. Modify it with [method set_tasks] so the tree is checked for cycles.</description></method>
+		<method name="set_tasks"><return type="void" /><param index="0" name="tasks" type="Array" /><description>Replaces the children after validating all references.</description></method>
+	</methods>
+	<members><member name="tasks" type="Array[BehaviorTreeTask]">Ordered tasks in this composite.</member></members>
+</class>
