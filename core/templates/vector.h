@@ -202,7 +202,14 @@ public:
 	}
 
 	void ordered_insert(const T &p_val) {
-		int idx = span().bisect(p_val, false);
+		// A sorted append needs no binary search. Equal values also append,
+		// matching upper-bound insertion and preserving duplicate order.
+		const Size current_size = size();
+		if (current_size == 0 || !Comparator<T>()(p_val, ptr()[current_size - 1])) {
+			push_back(p_val);
+			return;
+		}
+		const Size idx = span().bisect(p_val, false);
 		insert(idx, p_val);
 	}
 
