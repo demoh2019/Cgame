@@ -619,7 +619,10 @@ bool AStarGrid2D::_solve(Point *p_begin_point, Point *p_end_point, bool p_allow_
 					continue;
 				}
 			} else {
-				if (_get_solid_unchecked(e->id) || e->closed_pass == pass) {
+				// _get_nbors() already filters every solid cardinal and
+				// diagonal cell. Avoid checking the same obstacle mask a
+				// second time for every neighbor expanded by A*.
+				if (e->closed_pass == pass) {
 					continue;
 				}
 				weight_scale = e->weight_scale;
