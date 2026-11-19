@@ -34,6 +34,7 @@ TEST_FORCE_LINK(test_file_access)
 
 #include "core/io/dir_access.h"
 #include "core/io/file_access.h"
+#include "core/io/file_access_memory.h"
 #include "core/io/file_access_packed_byte_array.h"
 #include "tests/test_utils.h"
 
@@ -489,6 +490,127 @@ TEST_CASE("[FileAccess] PackedByteArray reads and writes never cross EOF") {
 			CHECK(value == 0xde);
 		}
 	}
+}
+
+
+TEST_CASE("[FileAccess] Memory read-only open shares backing storage and isolates writes") {
+	const String file_path = "cgame_file_access_memory_cow_regression.bin";
+	Vector<uint8_t> source;
+	REQUIRE(source.resize(4) == OK);
+	source.ptrw()[0] = 10;
+	source.ptrw()[1] = 20;
+	source.ptrw()[2] = 30;
+	source.ptrw()[3] = 40;
+	FileAccessMemory::register_file(file_path, source);
+
+	Ref<FileAccessMemory> reader;
+	reader.instantiate();
+	REQUIRE(reader->open_internal(file_path, FileAccess::READ) == OK);
+	CHECK(reader->is_open());
+	uint8_t read_data[4] = {};
+	CHECK(reader->get_buffer(read_data, 4) == 4);
+	CHECK(read_data[0] == 10);
+	CHECK(read_data[3] == 40);
+	reader->seek(0);
+	uint8_t replacement = 99;
+	ERR_PRINT_OFF;
+	CHECK_FALSE(reader->store_buffer(&replacement, 1));
+	ERR_PRINT_ON;
+	CHECK(reader->get_position() == 0);
+
+	// Writing must detach the registered Vector, not mutate the original
+	// source buffer or invalidate an already-open read-only snapshot.
+	Ref<FileAccessMemory> writer;
+	writer.instantiate();
+	REQUIRE(writer->open_internal(file_path, FileAccess::READ_WRITE) == OK);
+	writer->seek(1);
+	CHECK(writer->store_buffer(&replacement, 1));
+	CHECK(source[1] == 20);
+	CHECK(reader->get_buffer(read_data, 4) == 4);
+	CHECK(read_data[1] == 20);
+
+	Ref<FileAccessMemory> after_write;
+	after_write.instantiate();
+	REQUIRE(after_write->open_internal(file_path, FileAccess::READ) == OK);
+	CHECK(after_write->get_buffer(read_data, 4) == 4);
+	CHECK(read_data[0] == 10);
+	CHECK(read_data[1] == 99);
+	CHECK(read_data[2] == 30);
+	CHECK(read_data[3] == 40);
+
+	reader->close();
+	writer->close();
+	after_write->close();
+	CHECK_FALSE(reader->is_open());
+	CHECK_FALSE(writer->is_open());
+	CHECK_FALSE(after_write->is_open());
+	CHECK(reader->get_error() == ERR_FILE_EOF);
+}
+
+TEST_CASE("[FileAccess] Memory reader survives registration replacement") {
+	const String path = "cgame_memory_file_replacement_regression.bin";
+	Vector<uint8_t> first;
+	REQUIRE(first.resize(3) == OK);
+	first.ptrw()[0] = 1;
+	first.ptrw()[1] = 2;
+	first.ptrw()[2] = 3;
+	FileAccessMemory::register_file(path, first);
+
+	Ref<FileAccessMemory> before;
+	before.instantiate();
+	REQUIRE(before->open_internal(path, FileAccess::READ) == OK);
+
+	Vector<uint8_t> second;
+	REQUIRE(second.resize(3) == OK);
+	second.ptrw()[0] = 4;
+	second.ptrw()[1] = 5;
+	second.ptrw()[2] = 6;
+	FileAccessMemory::register_file(path, second);
+
+	// Destroying the old caller's buffer must not free the open reader's bytes.
+	first.clear();
+	uint8_t data[3] = {};
+	CHECK(before->get_buffer(data, 3) == 3);
+	CHECK(data[0] == 1);
+	CHECK(data[1] == 2);
+	CHECK(data[2] == 3);
+
+	Ref<FileAccessMemory> now;
+	now.instantiate();
+	REQUIRE(now->open_internal(path, FileAccess::READ) == OK);
+	CHECK(now->get_buffer(data, 3) == 3);
+	CHECK(data[0] == 4);
+	CHECK(data[1] == 5);
+	CHECK(data[2] == 6);
+}
+
+TEST_CASE("[FileAccess] Empty memory files and custom buffers retain correct open semantics") {
+	const String path = "cgame_file_access_memory_empty_regression.bin";
+	Vector<uint8_t> empty;
+	FileAccessMemory::register_file(path, empty);
+	Ref<FileAccessMemory> file;
+	file.instantiate();
+	REQUIRE(file->open_internal(path, FileAccess::READ) == OK);
+	CHECK(file->is_open());
+	CHECK(file->get_length() == 0);
+	CHECK(file->eof_reached());
+	uint8_t sentinel = 42;
+	CHECK(file->get_buffer(&sentinel, 0) == 0);
+	ERR_PRINT_OFF;
+	CHECK(file->get_buffer(&sentinel, 1) == 0);
+	ERR_PRINT_ON;
+	CHECK(sentinel == 42);
+	file->close();
+	CHECK_FALSE(file->is_open());
+
+	uint8_t external[3] = { 5, 6, 7 };
+	REQUIRE(file->open_custom(external, 3) == OK);
+	CHECK(file->is_open());
+	const uint8_t update = 9;
+	CHECK(file->store_buffer(&update, 1));
+	CHECK(external[0] == 9);
+	file->close();
+	CHECK_FALSE(file->is_open());
 }
 
 } // namespace TestFileAccess
