@@ -60,6 +60,15 @@ func _init() -> void:
         counts[event_id] = 0
 
 
+## JSON decoders can represent integer-valued numbers as floating point.
+## Reject non-integral, non-finite and out-of-range values regardless of type.
+static func _bounded_int(value: Variant, maximum: int) -> bool:
+    if typeof(value) != TYPE_INT and typeof(value) != TYPE_FLOAT:
+        return false
+    var number: float = float(value)
+    return not is_nan(number) and not is_inf(number) and number >= 0.0 and number <= float(maximum) and number == float(int(number))
+
+
 static func empty_snapshot() -> Dictionary:
     var progress: Dictionary = {}
     for event_id in EVENT_LIMITS:
@@ -81,14 +90,14 @@ static func validate_snapshot(data: Variant) -> Dictionary:
     if raw_counts.size() != EVENT_LIMITS.size():
         return {}
     var finished: Variant = data.get("completed")
-    if typeof(finished) != TYPE_INT or finished < 0 or finished > MISSIONS.size():
+    if not _bounded_int(finished, MISSIONS.size()):
         return {}
     var clean_counts: Dictionary = {}
     for event_id in EVENT_LIMITS:
         var count: Variant = raw_counts.get(event_id)
-        if typeof(count) != TYPE_INT or count < 0 or count > int(EVENT_LIMITS[event_id]):
+        if not _bounded_int(count, int(EVENT_LIMITS[event_id])):
             return {}
-        clean_counts[event_id] = count
+        clean_counts[event_id] = int(count)
     for index in range(int(finished)):
         var mission: Dictionary = MISSIONS[index]
         var objectives: Dictionary = mission["objectives"]
