@@ -765,4 +765,40 @@ TEST_CASE("[Resource] set_path lookup, takeover and collision") {
 	CHECK_FALSE(ResourceCache::has(cache_path));
 }
 
+TEST_CASE("[Resource] Binary NodePath arrays preserve long name and subname sequences") {
+	Ref<Resource> resource;
+	resource.instantiate();
+	Array original_paths;
+
+	for (int i = 0; i < 96; i++) {
+		String path = "/Root";
+		const int name_count = (i == 0) ? 96 : 1 + (i % 32);
+		const int subname_count = (i == 0) ? 64 : (i % 19);
+		for (int j = 0; j < name_count; j++) {
+			path += "/section_" + itos(i) + "_" + itos(j);
+		}
+		for (int j = 0; j < subname_count; j++) {
+			path += ":field_" + itos(i) + "_" + itos(j);
+		}
+		original_paths.push_back(NodePath(path));
+	}
+
+	resource->set_meta("paths", original_paths);
+	const String path = TestUtils::get_temp_path("resource_nodepaths_bulk.res");
+	REQUIRE_EQ(ResourceSaver::save(resource, path), OK);
+	const Ref<Resource> loaded = ResourceLoader::load(path);
+	REQUIRE(loaded.is_valid());
+	REQUIRE(loaded->has_meta("paths"));
+	const Array result_paths = loaded->get_meta("paths");
+	REQUIRE_EQ(result_paths.size(), original_paths.size());
+	for (int i = 0; i < original_paths.size(); i++) {
+		REQUIRE_EQ(result_paths[i].get_type(), Variant::NODE_PATH);
+		const NodePath expected = original_paths[i];
+		const NodePath actual = result_paths[i];
+		CHECK_EQ(actual, expected);
+		CHECK_EQ(actual.get_name_count(), expected.get_name_count());
+		CHECK_EQ(actual.get_subname_count(), expected.get_subname_count());
+	}
+}
+
 } // namespace TestResource
