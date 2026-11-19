@@ -279,6 +279,10 @@ public:
 
 	virtual void soft_body_set_mesh(RID p_body, RID p_mesh) = 0;
 
+	// Optional pre-cooked tetra FEM connectivity for the soft body's welded
+	// surface nodes. An unsupported physics backend may ignore the extension.
+	virtual void soft_body_set_tetrahedral_indices(RID, const PackedInt32Array &) {}
+
 	virtual AABB soft_body_get_bounds(RID p_body) const = 0;
 
 	virtual void soft_body_set_collision_layer(RID p_body, uint32_t p_layer) = 0;
