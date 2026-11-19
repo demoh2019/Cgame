@@ -2309,6 +2309,8 @@ void GodotSoftBody3D::destroy() {
 	xpbd_self_edge_tree.clear();
 	xpbd_self_edges.reset();
 	xpbd_self_edge_contacts.reset();
+	xpbd_self_edge_ccd_contacts.reset();
+	xpbd_self_edge_ccd_min_time.reset();
 	xpbd_volume_gradients.reset();
 	xpbd_volume_closed = false;
 	xpbd_volume_rest = 0.0;
