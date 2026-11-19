@@ -1180,3 +1180,19 @@ logic is in `scripts/shared/territory_control.gd`, integrated with
 `scripts/server/game_server.gd`, and regression-tested by
 `tests/test_territory_control.gd` through `tests/run_all.gd`.
 Existing Cgame physics, ENet and snapshot APIs are sufficient.
+
+## On-screen cooperative party health
+
+The multiplayer HUD now shows a **compact persistent party frame** below
+the survivor's equipment readout. It displays the server-reported party
+size, leader marker, teammates' current health, and whether anyone is
+down. The local player is labeled separately. Players fighting a night
+siege, a ruin elite or an infected pack no longer have to open their
+inventory to check allies' status.
+
+The new pure formatter in `scripts/client/party_frames.gd` uses only the
+authoritative `you.party.roster` snapshot. It limits the display to five
+members, truncates/sanitizes names and clamps malformed health values.
+The `tests/test_party_frames.gd` regression checks leader identity,
+health, death state, sanitization and empty-party behavior. No engine
+modifications are required.
