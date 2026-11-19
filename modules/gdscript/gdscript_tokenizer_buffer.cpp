@@ -44,8 +44,8 @@ int GDScriptTokenizerBuffer::_token_to_binary(const Token &p_token, Vector<uint8
 			// Add identifier to map.
 			int identifier_pos;
 			StringName id = p_token.get_identifier();
-			if (r_identifiers_map.has(id)) {
-				identifier_pos = r_identifiers_map[id];
+			if (const uint32_t *existing = r_identifiers_map.getptr(id)) {
+				identifier_pos = *existing;
 			} else {
 				identifier_pos = r_identifiers_map.size();
 				r_identifiers_map[id] = identifier_pos;
@@ -56,8 +56,8 @@ int GDScriptTokenizerBuffer::_token_to_binary(const Token &p_token, Vector<uint8
 		case GDScriptTokenizer::Token::LITERAL: {
 			// Add literal to map.
 			int constant_pos;
-			if (r_constants_map.has(p_token.literal)) {
-				constant_pos = r_constants_map[p_token.literal];
+			if (const uint32_t *existing = r_constants_map.getptr(p_token.literal)) {
+				constant_pos = *existing;
 			} else {
 				constant_pos = r_constants_map.size();
 				r_constants_map[p_token.literal] = constant_pos;
@@ -68,20 +68,18 @@ int GDScriptTokenizerBuffer::_token_to_binary(const Token &p_token, Vector<uint8
 			break;
 	}
 
-	// Encode token.
-	int token_len;
-	if (token_type & TOKEN_MASK) {
-		token_len = 8;
-		r_buffer.resize(pos + token_len);
-		encode_uint32(token_type | TOKEN_BYTE_MASK, &r_buffer.write[pos]);
-		pos += 4;
+	// Write the entire token through one writable pointer. Each write[]
+	// access performs a COW/bounds check, which dominates tiny token writes.
+	const int token_len = (token_type & TOKEN_MASK) ? 8 : 5;
+	r_buffer.resize(pos + token_len);
+	uint8_t *out = r_buffer.ptrw() + pos;
+	if (token_len == 8) {
+		encode_uint32(token_type | TOKEN_BYTE_MASK, out);
+		out += 4;
 	} else {
-		token_len = 5;
-		r_buffer.resize(pos + token_len);
-		r_buffer.write[pos] = token_type;
-		pos++;
+		*out++ = token_type;
 	}
-	encode_uint32(p_token.start_line, &r_buffer.write[pos]);
+	encode_uint32(p_token.start_line, out);
 	return token_len;
 }
 
@@ -280,13 +278,16 @@ Vector<uint8_t> GDScriptTokenizerBuffer::parse_code_string(const String &p_code,
 
 	// Remove continuation lines from map.
 	for (int line : tokenizer.get_continuation_lines()) {
-		if (rev_token_lines.has(line)) {
-			token_lines.erase(rev_token_lines[line]);
-			token_columns.erase(rev_token_lines[line]);
+		if (const uint32_t *token_index = rev_token_lines.getptr(line)) {
+			token_lines.erase(*token_index);
+			token_columns.erase(*token_index);
 		}
 	}
 
 	Vector<uint8_t> contents;
+	// Token payload and line metadata sizes are already known, so avoid
+	// repeated capacity growth as identifiers and constants are appended.
+	contents.reserve(16 + token_buffer.size() + token_lines.size() * 16 + identifier_map.size() * 4);
 	contents.resize(16);
 	encode_uint32(identifier_map.size(), &contents.write[0]);
 	encode_uint32(constant_map.size(), &contents.write[4]);
@@ -301,20 +302,17 @@ Vector<uint8_t> GDScriptTokenizerBuffer::parse_code_string(const String &p_code,
 		int len = s.length();
 
 		contents.resize(buf_pos + (len + 1) * 4);
-
-		encode_uint32(len, &contents.write[buf_pos]);
-		buf_pos += 4;
-
+		uint8_t *const identifier_bytes = contents.ptrw() + buf_pos;
+		encode_uint32(len, identifier_bytes);
 		for (int i = 0; i < len; i++) {
-			uint8_t tmp[4];
-			encode_uint32(s[i], tmp);
-
-			for (int b = 0; b < 4; b++) {
-				contents.write[buf_pos + b] = tmp[b] ^ 0xb6;
-			}
-
-			buf_pos += 4;
+			uint8_t *const out = identifier_bytes + 4 + i * 4;
+			encode_uint32(s[i], out);
+			out[0] ^= 0xb6;
+			out[1] ^= 0xb6;
+			out[2] ^= 0xb6;
+			out[3] ^= 0xb6;
 		}
+		buf_pos += (len + 1) * 4;
 	}
 
 	// Save constants.
