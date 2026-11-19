@@ -204,6 +204,11 @@ JoltSpace3D::JoltSpace3D(JPH::JobSystem *p_job_system, JPH::TempAllocator *p_tem
 	settings.mBaumgarte = JoltProjectSettings::baumgarte_stabilization_factor;
 	settings.mSpeculativeContactDistance = JoltProjectSettings::speculative_contact_distance;
 	settings.mPenetrationSlop = JoltProjectSettings::penetration_slop;
+	// Contact persistence and correction thresholds are configured once per
+	// PhysicsSystem, never fetched from ProjectSettings inside contact jobs.
+	settings.mMaxPenetrationDistance = JoltProjectSettings::max_penetration_correction_distance;
+	settings.mContactNormalCosMaxDeltaRotation = JoltProjectSettings::contact_manifold_merge_normal_cos;
+	settings.mContactPointPreserveLambdaMaxDistSq = JoltProjectSettings::contact_warm_start_distance_sq;
 	settings.mLinearCastThreshold = JoltProjectSettings::ccd_movement_threshold;
 	settings.mLinearCastMaxPenetration = JoltProjectSettings::ccd_max_penetration;
 	settings.mBodyPairCacheMaxDeltaPositionSq = JoltProjectSettings::body_pair_cache_distance_sq;
