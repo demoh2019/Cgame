@@ -71,7 +71,7 @@ func _begin_case() -> void:
 	_cases += 1
 
 
-func _new_buffer(limit: int = 128) -> RefCounted:
+func _new_buffer(limit: int = 128):
 	var result = PredictionBuffer.new()
 	_check(result.configure_history(limit), "configure valid history")
 	_check(result.initialize(0, {"x": 0.0, "tick": 0}, Callable(self, "_advance")),
