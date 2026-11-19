@@ -276,18 +276,24 @@ void GodotCollisionObject3D::_set_space(GodotSpace3D *p_space) {
 	}
 }
 
-void GodotCollisionObject3D::_collision_filter_changed() {
-	++collision_geometry_version;
-	// Layer/mask changes do not alter shape geometry or AABBs.
-	if (space) {
-		GodotBroadPhase3D *broadphase = space->get_broadphase();
-		for (int i = 0; i < shapes.size(); i++) {
-			const Shape &shape = shapes[i];
-			if (shape.bpid != 0) {
-				broadphase->force_collision_check(shape.bpid);
-			}
+void GodotCollisionObject3D::refresh_collision_pairs() {
+	if (!space) {
+		return;
+	}
+	GodotBroadPhase3D *broadphase = space->get_broadphase();
+	for (int i = 0; i < shapes.size(); i++) {
+		const Shape &shape = shapes[i];
+		if (shape.bpid != 0) {
+			broadphase->force_collision_check(shape.bpid);
 		}
 	}
+}
+
+void GodotCollisionObject3D::_collision_filter_changed() {
+	++collision_geometry_version;
+	// Layer/mask changes still invalidate cached contacts; collision
+	// exceptions only require the lighter refresh_collision_pairs() path.
+	refresh_collision_pairs();
 	// Preserve wake-up and area monitoring semantics.
 	_shapes_changed();
 }
