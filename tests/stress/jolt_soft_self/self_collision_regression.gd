@@ -48,7 +48,7 @@ func _adjacent_control() -> ArrayMesh:
 	]), PackedInt32Array([0, 2, 1, 1, 2, 3]))
 
 
-func _body(space: RID, mesh: ArrayMesh, point_count: int, pins: Array[int]) -> RID:
+func _body(space: RID, mesh: ArrayMesh, pins: Array[int]) -> RID:
 	var body := PhysicsServer3D.soft_body_create()
 	PhysicsServer3D.soft_body_set_mesh(body, mesh.get_rid())
 	PhysicsServer3D.soft_body_set_total_mass(body, 1.0)
@@ -82,8 +82,8 @@ func _run() -> void:
 	PhysicsServer3D.space_set_active(space, true)
 	var meshes: Array[ArrayMesh] = [_folded_sheet(), _adjacent_control()]
 	var bodies: Array[RID] = [
-		_body(space, meshes[0], 6, [0, 3]),
-		_body(space, meshes[1], 4, [0, 3]),
+		_body(space, meshes[0], [0, 3]),
+		_body(space, meshes[1], [0, 3]),
 	]
 	for i in range(2):
 		await physics_frame
