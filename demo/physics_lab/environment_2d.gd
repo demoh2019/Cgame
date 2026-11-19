@@ -187,6 +187,10 @@ func _make_hud() -> void:
         _fluid_density = v
         _update_status()
     )
+    _slider(col, "Течение воды", -180.0, 180.0, _flow, func(v: float) -> void:
+        _flow = v
+        _update_status()
+    )
     _slider(col, "Масса нового шара", 0.5, 25.0, _spawn_mass, func(v: float) -> void:
         _spawn_mass = v
         _update_status()
@@ -271,8 +275,8 @@ func _toggle_freeze() -> void:
 func _update_status() -> void:
     if _status == null:
         return
-    _status.text = "Вода: %.0fpx | ρ: %.4f | ветер: %s %.0f\nМагнит: %s | g: %.1f | волны: %s" % [
-        _water_depth, _fluid_density, "ON" if _wind_on else "OFF", _wind_force,
+    _status.text = "Вода: %.0fpx | ρ: %.4f | течение: %.0f | ветер: %s %.0f\nМагнит: %s | g: %.1f | волны: %s" % [
+        _water_depth, _fluid_density, _flow, "ON" if _wind_on else "OFF", _wind_force,
         "ON" if _magnet_on else "OFF", _gravity_scale, "ON" if _waves else "OFF"
     ]
 
@@ -352,9 +356,11 @@ func _physics_process(delta: float) -> void:
 func _explode() -> void:
     var center := get_global_mouse_position()
     for node in get_tree().get_nodes_in_group("demo_dynamic_2d"):
-        if not node is RigidBody2D or node.freeze:
+        if not node is RigidBody2D:
             continue
         var body := node as RigidBody2D
+        if body.freeze:
+            continue
         var offset := body.global_position - center
         var distance := offset.length()
         if distance > 0.1 and distance < 320.0:
@@ -369,12 +375,14 @@ func _body_properties(body: RigidBody2D) -> Vector2:
     var half_height := 22.0
     for node in body.get_children():
         if node is CollisionShape2D:
-            if node.shape is CircleShape2D:
-                var r: float = node.shape.radius
+            var circle_shape := node.shape as CircleShape2D
+            var rect_shape := node.shape as RectangleShape2D
+            if circle_shape != null:
+                var r: float = circle_shape.radius
                 area = PI * r * r
                 half_height = r
-            elif node.shape is RectangleShape2D:
-                var size: Vector2 = node.shape.size
+            elif rect_shape != null:
+                var size: Vector2 = rect_shape.size
                 area = size.x * size.y
                 half_height = size.y / 2.0
             break
@@ -386,9 +394,11 @@ func _body_properties(body: RigidBody2D) -> Vector2:
 func _apply_water() -> void:
     var top := POOL_BOTTOM - _water_depth
     for node in _water.get_overlapping_bodies():
-        if not node is RigidBody2D or node.freeze:
+        if not node is RigidBody2D:
             continue
         var body := node as RigidBody2D
+        if body.freeze:
+            continue
         var properties := _body_properties(body)
         var level := top
         if _waves:
@@ -409,9 +419,11 @@ func _apply_forces() -> void:
     var direction := Vector2.RIGHT.rotated(_wind_angle)
     var gust := 0.75 + 0.25 * sin(_wave_phase * 1.7)
     for node in get_tree().get_nodes_in_group("demo_dynamic_2d"):
-        if not node is RigidBody2D or node.freeze:
+        if not node is RigidBody2D:
             continue
         var body := node as RigidBody2D
+        if body.freeze:
+            continue
         if _wind_on:
             body.apply_central_force(direction * _wind_force * body.mass * gust)
         if _magnet_on and body.is_in_group("lab_metal_2d"):
