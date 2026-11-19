@@ -46,3 +46,19 @@ startup fails with a clear error rather than a broken script preload.
 Game features use existing engine APIs. Only move code into Cgame when a
 reusable feature is missing, backed by native regression tests. These scripts
 have not yet passed a headless Godot run in this environment.
+
+## Hardened server-side save loading
+
+The authoritative server now rejects malformed carried or banked item stacks,
+unknown item types, fractional/nonfinite quantities and invalid equipment
+slots before changing a live character. Survival stats and counters receive
+the same bounded validation. Existing version-1 Nakama characters without
+progression or a protected bank remain compatible. The offline regression
+suite includes `game/tests/test_save_validation.gd`:
+
+```sh
+godot --headless --path game --script res://tests/run_all.gd
+```
+
+This logic lives in the game, not in the engine, because Godot already
+provides the necessary script and serialization features.

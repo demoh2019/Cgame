@@ -6,6 +6,7 @@ extends RefCounted
 const Defs = preload("res://scripts/shared/defs.gd")
 const WorldGen = preload("res://scripts/shared/world_gen.gd")
 const Inventory = preload("res://scripts/shared/inventory.gd")
+const SaveValidation = preload("res://scripts/shared/save_validation.gd")
 const Crafting = preload("res://scripts/shared/crafting.gd")
 const Survival = preload("res://scripts/shared/survival.gd")
 const Movement = preload("res://scripts/shared/movement.gd")
@@ -104,80 +105,69 @@ func character_data(player: Player) -> Dictionary:
 
 ## Restores a saved character. Returns false (and changes nothing) if the data is not usable.
 func apply_character(player: Player, data: Dictionary) -> bool:
-	if int(data.get("version", 0)) != 1 or typeof(data.get("inventory")) != TYPE_DICTIONARY:
+	if data.get("version", 0) != 1:
 		return false
-	var inventory = Inventory.new()
-	var slots: Variant = data["inventory"].get("slots")
-	if typeof(slots) != TYPE_ARRAY or slots.size() != Defs.INVENTORY_SLOTS:
+	# Both containers use the same strict parser. Never coerce fractional, textual,
+	# unknown or oversized quantities from persisted JSON into valid stacks.
+	var parsed_bag: Dictionary = SaveValidation.parse_inventory(data.get("inventory"), Defs.INVENTORY_SLOTS)
+	if parsed_bag.is_empty():
 		return false
-	var cleaned: Array = []
-	for slot in slots:
-		# JSON turns numbers into floats and may hold anything: accept only real items with sane counts.
-		if typeof(slot) != TYPE_DICTIONARY or slot.is_empty():
-			cleaned.append({})
-			continue
-		var id := str(slot.get("id", ""))
-		var count := int(slot.get("count", 0))
-		if not Defs.is_item(id) or count < 1 or count > Defs.stack_size(id):
-			return false
-		cleaned.append({"id": id, "count": count})
-	inventory.slots = cleaned
-	var weapon := str(data["inventory"].get("weapon", ""))
-	var armor := str(data["inventory"].get("armor", ""))
-	inventory.weapon = weapon if weapon != "" and inventory.count(weapon) > 0 else ""
-	inventory.armor = armor if armor != "" and inventory.count(armor) > 0 else ""
-	# Pre-existing version-1 Nakama characters have no stash; restore an
-	# empty one without changing the save schema. Reject invalid new saves
-	# before mutating any part of the player.
-	var stash = Inventory.new(Defs.STASH_SLOTS)
+	var parsed_stash: Dictionary = {}
 	if data.has("stash"):
-		var stored: Variant = data["stash"]
-		if not (stored is Dictionary):
-			return false
-		var saved_slots: Variant = stored.get("slots")
-		if not (saved_slots is Array) or saved_slots.size() != Defs.STASH_SLOTS:
-			return false
-		var clean_stash: Array = []
-		for slot in saved_slots:
-			if not (slot is Dictionary):
-				return false
-			if slot.is_empty():
-				clean_stash.append({})
-				continue
-			var item_id: Variant = slot.get("id")
-			var raw_count: Variant = slot.get("count")
-			if not (item_id is String) or not Defs.is_item(item_id):
-				return false
-			if not (raw_count is int or raw_count is float):
-				return false
-			var quantity: float = float(raw_count)
-			if not is_finite(quantity) or quantity < 1.0 or quantity > float(Defs.stack_size(item_id)) or quantity != floor(quantity):
-				return false
-			clean_stash.append({"id": item_id, "count": int(quantity)})
-		stash.slots = clean_stash
-	# Version-1 Nakama accounts without progression start at level 1.
-	var loaded_progression = Progression.new()
-	if data.has("progression") and not loaded_progression.load_dict(data["progression"]):
+		parsed_stash = SaveValidation.parse_inventory(data["stash"], Defs.STASH_SLOTS, false)
+	else:
+		# Legacy version-1 Nakama characters did not have a protected stash.
+		parsed_stash = {"inventory": Inventory.new(Defs.STASH_SLOTS)}
+	if parsed_stash.is_empty():
 		return false
-	player.progression = loaded_progression
-	player.inventory = inventory
-	player.stash = stash
-	player.kills = maxi(int(data.get("kills", 0)), 0)
-	player.deaths = maxi(int(data.get("deaths", 0)), 0)
+
+	# Check all persisted scalar values before changing the live Player.
+	if not SaveValidation.finite_number(data.get("health", 100.0), 0.0, Defs.MAX_HEALTH):
+		return false
+	if not SaveValidation.finite_number(data.get("hunger", 80.0), 0.0, 100.0):
+		return false
+	if not SaveValidation.finite_number(data.get("thirst", 80.0), 0.0, 100.0):
+		return false
+	if not SaveValidation.valid_counter(data.get("kills", 0)):
+		return false
+	if not SaveValidation.valid_counter(data.get("deaths", 0)):
+		return false
+	if not (data.get("alive", true) is bool):
+		return false
+
 	var survival = Survival.new()
 	survival.health = clampf(float(data.get("health", 100.0)), 1.0, Defs.MAX_HEALTH)
-	survival.hunger = clampf(float(data.get("hunger", 80.0)), 0.0, 100.0)
-	survival.thirst = clampf(float(data.get("thirst", 80.0)), 0.0, 100.0)
-	player.survival = survival
-	# Where they logged out, if that is a sane place; otherwise the hub.
-	var x := float(data.get("x", 0.0))
-	var z := float(data.get("z", 0.0))
-	if is_finite(x) and is_finite(z) and absf(x) < 50000.0 and absf(z) < 50000.0 and bool(data.get("alive", true)) and not world.is_water(x, z):
-		player.position = Vector3(x, world.height_at(x, z), z)
+	survival.hunger = float(data.get("hunger", 80.0))
+	survival.thirst = float(data.get("thirst", 80.0))
+	var x: Variant = data.get("x", 0.0)
+	var z: Variant = data.get("z", 0.0)
+	# Invalid old logout coordinates can still safely fall back to the hub.
+	var restore_position := Vector3.ZERO
+	var can_restore_position := (
+		SaveValidation.finite_number(x, -50000.0, 50000.0)
+		and SaveValidation.finite_number(z, -50000.0, 50000.0)
+		and absf(float(x)) < 50000.0 and absf(float(z)) < 50000.0
+		and bool(data.get("alive", true))
+	)
+	if can_restore_position and not world.is_water(float(x), float(z)):
+		restore_position = Vector3(float(x), world.height_at(float(x), float(z)), float(z))
 	else:
 		var angle := rng.randf() * TAU
 		var spot := Vector2.from_angle(angle) * rng.randf_range(10.0, 22.0)
-		player.position = Vector3(spot.x, world.height_at(spot.x, spot.y), spot.y)
+		restore_position = Vector3(spot.x, world.height_at(spot.x, spot.y), spot.y)
+	var loaded_progression = Progression.new()
+	if data.has("progression") and not loaded_progression.load_dict(data["progression"]):
+		return false
+
+	# One commit point: a failed parse cannot partially replace the player's
+	# inventory, protected stash, progression or survival state.
+	player.progression = loaded_progression
+	player.inventory = parsed_bag["inventory"]
+	player.stash = parsed_stash["inventory"]
+	player.kills = int(data.get("kills", 0))
+	player.deaths = int(data.get("deaths", 0))
+	player.survival = survival
+	player.position = restore_position
 	player.dirty_inventory = true
 	player.dirty_stash = true
 	player.dirty_character = true
