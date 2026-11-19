@@ -565,6 +565,8 @@ PhysicsServer3D::PhysicsServer3D() {
 	GLOBAL_DEF(PropertyInfo(Variant::FLOAT, "physics/3d/solver/contact_max_separation", PROPERTY_HINT_RANGE, "0,0.1,0.001,or_greater,suffix:m"), 0.05);
 	GLOBAL_DEF(PropertyInfo(Variant::FLOAT, "physics/3d/solver/contact_max_allowed_penetration", PROPERTY_HINT_RANGE, "0.001,0.1,0.001,or_greater,suffix:m"), 0.01);
 	GLOBAL_DEF(PropertyInfo(Variant::FLOAT, "physics/3d/solver/default_contact_bias", PROPERTY_HINT_RANGE, "0,1,0.01"), 0.8);
+	// Rapier-style cached contact impulse reuse, opt-in damping (1.0 is legacy).
+	GLOBAL_DEF(PropertyInfo(Variant::FLOAT, "physics/3d/solver/warm_start_coefficient", PROPERTY_HINT_RANGE, "0,1,0.01"), 1.0);
 	// Suppress tiny bounces at contacts so stacked bodies can settle (meters per second).
 	GLOBAL_DEF(PropertyInfo(Variant::FLOAT, "physics/3d/solver/restitution_velocity_threshold", PROPERTY_HINT_RANGE, "0,10,0.01,or_greater,suffix:m/s"), 1.0);
 	// Keep historical friction mixing unless a project opts into another model.
