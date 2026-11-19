@@ -429,4 +429,30 @@ TEST_CASE("[Curve3D] Linear sampling should return exact value") {
 	}
 }
 
+
+TEST_CASE("[Curve] Hot-path index search preserves exact control values") {
+	Ref<Curve> curve = memnew(Curve);
+	// A longer curve exercises both halves of the binary search repeatedly.
+	for (int i = 0; i <= 64; ++i) {
+		const real_t value = ((i * 13) % 29) / (real_t)29;
+		curve->add_point(Vector2(i / (real_t)64, value));
+	}
+	CHECK(curve->get_point_count() == 65);
+	for (int i = 0; i <= 64; ++i) {
+		const real_t value = ((i * 13) % 29) / (real_t)29;
+		CHECK_MESSAGE(Math::is_equal_approx(curve->sample(i / (real_t)64), value),
+				"Sampling a stored control-point position must return the exact control value.");
+	}
+	CHECK(Math::is_equal_approx(curve->sample(-5), curve->sample(0)));
+	CHECK(Math::is_equal_approx(curve->sample(5), curve->sample(1)));
+}
+
+TEST_CASE("[Curve] Hot-path index search keeps single and empty curves safe") {
+	Ref<Curve> curve = memnew(Curve);
+	CHECK(curve->sample(0.5) == 0.0);
+	curve->add_point(Vector2(0.5, 0.75));
+	CHECK(Math::is_equal_approx(curve->sample(-2), (real_t)0.75));
+	CHECK(Math::is_equal_approx(curve->sample(2), (real_t)0.75));
+}
+
 } // namespace TestCurve

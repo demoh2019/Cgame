@@ -141,4 +141,27 @@ TEST_CASE("[Gradient] Custom gradient (points specified out-of-order)") {
 			"Custom out-of-order gradient should return the expected interpolated value at offset 0.1 after removing point at index 0.");
 }
 
+
+TEST_CASE("[Gradient] Constant sampling preserves endpoints and step boundaries") {
+	Ref<Gradient> gradient = memnew(Gradient);
+	gradient->set_offsets(Vector<float>({ 0.0f, 0.5f, 1.0f }));
+	gradient->set_colors(Vector<Color>({ Color(1, 0, 0), Color(0, 1, 0), Color(0, 0, 1) }));
+	gradient->set_interpolation_mode(Gradient::GRADIENT_INTERPOLATE_CONSTANT);
+	CHECK(gradient->get_color_at_offset(-2.0f).is_equal_approx(Color(1, 0, 0)));
+	CHECK(gradient->get_color_at_offset(0.25f).is_equal_approx(Color(1, 0, 0)));
+	CHECK(gradient->get_color_at_offset(0.5f).is_equal_approx(Color(0, 1, 0)));
+	CHECK(gradient->get_color_at_offset(0.75f).is_equal_approx(Color(0, 1, 0)));
+	CHECK(gradient->get_color_at_offset(1.0f).is_equal_approx(Color(0, 0, 1)));
+	CHECK(gradient->get_color_at_offset(2.0f).is_equal_approx(Color(0, 0, 1)));
+}
+
+TEST_CASE("[Gradient] Linear and cubic sampling retain interpolation weights") {
+	Ref<Gradient> gradient = memnew(Gradient);
+	gradient->set_interpolation_color_space(Gradient::GRADIENT_COLOR_SPACE_SRGB);
+	gradient->set_interpolation_mode(Gradient::GRADIENT_INTERPOLATE_LINEAR);
+	CHECK(gradient->get_color_at_offset(0.5f).is_equal_approx(Color(0.5f, 0.5f, 0.5f)));
+	gradient->set_interpolation_mode(Gradient::GRADIENT_INTERPOLATE_CUBIC);
+	CHECK(gradient->get_color_at_offset(0.5f).is_equal_approx(Color(0.5f, 0.5f, 0.5f)));
+}
+
 } // namespace TestGradient
