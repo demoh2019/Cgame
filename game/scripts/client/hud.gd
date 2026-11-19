@@ -2,6 +2,7 @@ extends CanvasLayer
 ## All of the interface, built in code: vitals, zone, inventory, crafting and a message log.
 
 const Defs = preload("res://scripts/shared/defs.gd")
+const FishingDisplay = preload("res://scripts/shared/fishing_display.gd")
 const WorldCycle = preload("res://scripts/shared/world_cycle.gd")
 const Crafting = preload("res://scripts/shared/crafting.gd")
 const Vendor = preload("res://scripts/shared/vendor.gd")
@@ -548,6 +549,9 @@ func _process(_delta: float) -> void:
 	var journal: Variant = client.you.get("contract", Contracts.empty_state())
 	_contract_label.text = Contracts.description(journal if journal is Dictionary else Contracts.empty_state())
 	_info_label.text += "  Rest %.0fs" % float(client.you.get("rest_cooldown", 0.0))
+	var fishing_status: String = FishingDisplay.progress(client.you.get("action", {}))
+	if not fishing_status.is_empty():
+		_info_label.text += "\n" + fishing_status
 	var weapon: String = client.you.get("weapon", "")
 	var levels: Dictionary = client.you.get("gathering_levels", {})
 	var weapon_levels: Dictionary = client.you.get("combat_levels", {})

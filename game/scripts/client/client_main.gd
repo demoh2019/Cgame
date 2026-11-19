@@ -4,6 +4,7 @@ extends Node3D
 ## call GameServer. Multiplayer transport will be wired to this presentation separately.
 
 const Defs = preload("res://scripts/shared/defs.gd")
+const FishingDisplay = preload("res://scripts/shared/fishing_display.gd")
 const WorldGen = preload("res://scripts/shared/world_gen.gd")
 const WorldCycle = preload("res://scripts/shared/world_cycle.gd")
 const ZoneRisk = preload("res://scripts/shared/zone_risk.gd")
@@ -742,6 +743,9 @@ func _update_hud() -> void:
 		"WORKBENCH" if near_bench else "workbench at x=9, z=0",
 		str(recipe.get("inputs", {})), _feedback
 	]
+	var fishing_status: String = FishingDisplay.progress(survivor.action)
+	if not fishing_status.is_empty():
+		_instructions.text += "\n" + fishing_status
 	_instructions.text += "\nM tactical radar: red infected, yellow resources, green loot, gold defenses"
 	_instructions.text += "\nZ rest at hub (2 wood + food + water; 90s cooldown), remaining %.0fs" % survivor.rest_cooldown
 	_update_bank_hud()
