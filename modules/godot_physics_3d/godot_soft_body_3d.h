@@ -79,8 +79,6 @@ class GodotSoftBody3D : public GodotCollisionObject3D {
 
 	LocalVector<Node> nodes;
 	LocalVector<Link> links;
-	// Mark the structural-edge prefix before generated bending links.
-	uint32_t xpbd_tether_structural_links = 0;
 	// Only allocated if tethers are enabled and at least one vertex is pinned.
 	LocalVector<PhysicsXPBDTether> xpbd_tethers;
 	bool xpbd_tethers_dirty = true;
