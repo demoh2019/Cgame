@@ -8,7 +8,7 @@ func _initialize() -> void:
 	_run.call_deferred()
 
 
-func _make_body(space: RID, shape: RID, x: float, velocity: float, ccd: bool, static_body: bool = false) -> RID:
+func _make_body(space: RID, shape: RID, x: float, velocity: float, ccd: bool, static_body: bool = false, y: float = 0.0) -> RID:
 	var body: RID = PhysicsServer3D.body_create()
 	PhysicsServer3D.body_set_mode(body, PhysicsServer3D.BODY_MODE_STATIC if static_body else PhysicsServer3D.BODY_MODE_RIGID)
 	PhysicsServer3D.body_add_shape(body, shape)
@@ -17,7 +17,7 @@ func _make_body(space: RID, shape: RID, x: float, velocity: float, ccd: bool, st
 	PhysicsServer3D.body_set_param(body, PhysicsServer3D.BODY_PARAM_ANGULAR_DAMP, 0.0)
 	PhysicsServer3D.body_set_state(body, PhysicsServer3D.BODY_STATE_CAN_SLEEP, false)
 	PhysicsServer3D.body_set_state(body, PhysicsServer3D.BODY_STATE_TRANSFORM,
-			Transform3D(Basis(), Vector3(x, 0.0, 0.0)))
+			Transform3D(Basis(), Vector3(x, y, 0.0)))
 	PhysicsServer3D.body_set_state(body, PhysicsServer3D.BODY_STATE_LINEAR_VELOCITY,
 			Vector3(velocity, 0.0, 0.0))
 	if ccd:
@@ -27,13 +27,13 @@ func _make_body(space: RID, shape: RID, x: float, velocity: float, ccd: bool, st
 
 
 func _run_case(label: String, target_x: float, velocity_a: float, velocity_b: float,
-		min_speed: float, max_speed: float, static_target: bool = false, target_ccd: bool = false) -> int:
+		min_speed: float, max_speed: float, static_target: bool = false, target_ccd: bool = false, target_y: float = 0.0) -> int:
 	var space: RID = PhysicsServer3D.space_create()
 	var sphere: RID = PhysicsServer3D.sphere_shape_create()
 	PhysicsServer3D.shape_set_data(sphere, 0.5)
 
 	var a: RID = _make_body(space, sphere, 0.0, velocity_a, true)
-	var b: RID = _make_body(space, sphere, target_x, velocity_b, target_ccd, static_target)
+	var b: RID = _make_body(space, sphere, target_x, velocity_b, target_ccd, static_target, target_y)
 	PhysicsServer3D.space_set_active(space, true)
 	await physics_frame
 	await physics_frame
@@ -75,6 +75,11 @@ func _run() -> void:
 	# A static body's surface velocity contributes to friction but must
 	# not move its collision shape during CCD.
 	failures += await _run_case("static conveyor surface", 1.02, 600.0, 600.0, 0.0, 525.0, true)
+
+	# The leading support ray runs along y=0 and misses a radius-0.5
+	# obstacle at y=0.8. A swept radius-one Minkowski sphere does hit it.
+	# Analytic circle/sphere TOI must catch this glancing collision.
+	failures += await _run_case("glancing sphere CCD", 4.0, 480.0, 0.0, 0.0, 440.0, true, false, 0.8)
 
 	if failures:
 		printerr("3D relative-motion CCD regression failed: %d" % failures)
