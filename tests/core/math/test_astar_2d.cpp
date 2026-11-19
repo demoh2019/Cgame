@@ -540,4 +540,61 @@ TEST_CASE("[AStar2D] Invalid input is rejected without modifying state") {
 	ERR_PRINT_ON;
 }
 
+
+class ReprioritizedAStar2D : public AStar2D {
+protected:
+	real_t _estimate_cost(int64_t p_from, int64_t p_to) override {
+		return 0;
+	}
+
+	real_t _compute_cost(int64_t p_from, int64_t p_to) override {
+		if (p_from == 0 && p_to == 1) {
+			return 100;
+		}
+		if (p_from == 0 && p_to == 2) {
+			return 1;
+		}
+		if (p_from == 2 && p_to == 1) {
+			return 1;
+		}
+		if (p_from == 1 && p_to == 3) {
+			return 1;
+		}
+		return 200;
+	}
+};
+
+TEST_CASE("[AStar2D] Heap index updates after repeated shorter paths") {
+	Ref<ReprioritizedAStar2D> a;
+	a.instantiate();
+	for (int i = 0; i < 128; ++i) {
+		a->add_point(i, Vector2(i, 0));
+	}
+	a->connect_points(0, 1, false);
+	a->connect_points(0, 2, false);
+	a->connect_points(2, 1, false);
+	a->connect_points(1, 3, false);
+	for (int i = 4; i < 128; ++i) {
+		a->connect_points(0, i, false);
+	}
+	for (int repeat = 0; repeat < 12; ++repeat) {
+		const Vector<int64_t> path = a->get_id_path(0, 3);
+		REQUIRE_EQ(path.size(), 4);
+		CHECK_EQ(path[0], 0);
+		CHECK_EQ(path[1], 2);
+		CHECK_EQ(path[2], 1);
+		CHECK_EQ(path[3], 3);
+	}
+	a->set_point_disabled(2, true);
+	const Vector<int64_t> detour = a->get_id_path(0, 3);
+	REQUIRE_EQ(detour.size(), 3);
+	CHECK_EQ(detour[0], 0);
+	CHECK_EQ(detour[1], 1);
+	CHECK_EQ(detour[2], 3);
+	a->set_point_disabled(2, false);
+	const Vector<int64_t> restored = a->get_id_path(0, 3);
+	REQUIRE_EQ(restored.size(), 4);
+	CHECK_EQ(restored[1], 2);
+}
+
 } // namespace TestAStar2D
