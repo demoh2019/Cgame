@@ -41,6 +41,7 @@
 #include "servers/physics_ccd_capsule_toi.h"
 #include "servers/physics_ccd_capsule_pair_toi.h"
 #include "servers/physics_ccd_swept_bounds.h"
+#include "servers/physics_ccd_rotational_sphere_cull.h"
 
 #include <cfloat> // FLT_MAX
 
@@ -257,6 +258,24 @@ bool GodotBodyPair3D::_test_ccd(real_t p_step, GodotBody3D *p_A, int p_shape_A, 
 		return false;
 	}
 	const Vector3 direction = relative_motion / motion_length;
+	// Rapier-style conservative nonlinear-motion broadphase:
+	// every point of a rotating rigid collider remains inside a sphere
+	// swept along its center of mass. When those swept spheres do not
+	// meet, even a fast rotation cannot create contact during this step.
+	// Only enable this cull with the existing opt-in rotational CCD bounds
+	// setting. Unbounded shapes retain the original narrowphase.
+	if (space->is_ccd_rotational_bounds_enabled() && (p_A->get_angular_velocity() != Vector3() || p_B->get_angular_velocity() != Vector3()) &&
+			shape_A_ptr->get_type() != PS3DE::SHAPE_WORLD_BOUNDARY &&
+			shape_B_ptr->get_type() != PS3DE::SHAPE_WORLD_BOUNDARY &&
+			shape_A_ptr->get_type() != PS3DE::SHAPE_SEPARATION_RAY &&
+			shape_B_ptr->get_type() != PS3DE::SHAPE_SEPARATION_RAY &&
+			!physics_ccd_rotational_sphere_bounds_may_overlap(
+				p_xform_A.xform(shape_A_ptr->get_aabb()), p_A->get_transform().origin + p_A->get_center_of_mass(),
+				p_xform_B.xform(shape_B_ptr->get_aabb()), p_B->get_transform().origin + p_B->get_center_of_mass(),
+				relative_motion)) {
+		return false;
+	}
+
 
 	real_t min_projection = 0.0;
 	real_t max_projection = 0.0;
