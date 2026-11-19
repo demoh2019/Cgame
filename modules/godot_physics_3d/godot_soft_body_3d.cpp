@@ -1093,6 +1093,12 @@ bool GodotSoftBody3D::solve_pair_contacts(GodotSoftBody3D &p_other, real_t p_del
 		collect(p_other, *this, false);
 	}
 	if (contacts.is_empty() && ccd_contacts.is_empty()) {
+		// Swept BVHs were refitted for candidate lookup. Avoid retaining
+		// enlarged bounds across unrelated queries when no hit was found.
+		if (swept_ccd) {
+			update_face_tree(real_t(0.0));
+			p_other.update_face_tree(real_t(0.0));
+		}
 		return false;
 	}
 
