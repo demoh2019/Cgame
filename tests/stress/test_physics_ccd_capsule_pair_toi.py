@@ -31,6 +31,11 @@ class SkewCapsuleTOIContracts(unittest.TestCase):
         self.assertIn("r_fraction = high;", source)
         self.assertIn("end.derivative_half > 0.0 && end.squared > radius_sq", source)
         self.assertIn("end.squared > radius_sq && end.derivative_half <= 0.0", source)
+        self.assertIn("!Math::is_finite(reach)", source)
+        self.assertIn("!Math::is_finite(separation_begin)", source)
+        self.assertIn("!Math::is_finite(separation_end)", source)
+        self.assertIn("!Math::is_finite(value.derivative_half)", source)
+        self.assertIn("!Math::is_finite(value.squared)", source)
 
     def test_initial_overlap_and_degenerate_inputs_preserve_fallback(self):
         source = HELPER.read_text(encoding="utf-8")
