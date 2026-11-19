@@ -7537,6 +7537,42 @@ TEST_CASE("[SceneTree][TextEdit] line wrapping") {
 	memdelete(text_edit);
 }
 
+
+TEST_CASE("[SceneTree][TextEdit] bulk line wrapping handles long lines") {
+	TextEdit *text_edit = memnew(TextEdit);
+	SceneTree::get_singleton()->get_root()->add_child(text_edit);
+	text_edit->set_size(Size2(160, 200));
+	text_edit->set_line_wrapping_mode(TextEdit::LineWrappingMode::LINE_WRAPPING_BOUNDARY);
+
+	String long_line;
+	for (int i = 0; i < 256; i++) {
+		long_line += "Repeated text segment ";
+	}
+	text_edit->set_line(0, long_line);
+	MessageQueue::get_singleton()->flush();
+
+	const int wrap_count = text_edit->get_line_wrap_count(0);
+	CHECK(wrap_count > 20);
+	CHECK_EQ(text_edit->get_line_wrapped_text(0).size(), wrap_count + 1);
+	CHECK(text_edit->is_line_wrapped(0));
+	CHECK_EQ(text_edit->get_line_wrap_index_at_column(0, 0), 0);
+	CHECK_EQ(text_edit->get_line_wrap_index_at_column(0, long_line.length() - 1), wrap_count);
+
+	ERR_PRINT_OFF;
+	CHECK(text_edit->get_line_wrapped_text(-1).is_empty());
+	CHECK(text_edit->get_line_wrapped_text(1).is_empty());
+	ERR_PRINT_ON;
+
+	// Changing layout must invalidate shaped ranges before the next read.
+	text_edit->set_size(Size2(480, 200));
+	MessageQueue::get_singleton()->flush();
+	const int fewer_wraps = text_edit->get_line_wrap_count(0);
+	CHECK(fewer_wraps < wrap_count);
+	CHECK_EQ(text_edit->get_line_wrapped_text(0).size(), fewer_wraps + 1);
+
+	memdelete(text_edit);
+}
+
 TEST_CASE("[SceneTree][TextEdit] viewport") {
 	TextEdit *text_edit = memnew(TextEdit);
 	SceneTree::get_singleton()->get_root()->add_child(text_edit);

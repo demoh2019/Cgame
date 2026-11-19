@@ -1,0 +1,50 @@
+name: TextEdit bulk line wrapping regressions
+
+on:
+  push:
+    branches: [develop]
+    paths:
+      - "scene/gui/text_edit.cpp"
+      - "scene/resources/text_paragraph.cpp"
+      - "scene/resources/text_paragraph.h"
+      - "tests/scene/test_text_edit.cpp"
+      - "misc/scripts/tests/test_text_edit_bulk_ranges.py"
+      - ".github/workflows/text-edit-bulk-ranges.yml"
+  pull_request:
+    paths:
+      - "scene/gui/text_edit.cpp"
+      - "scene/resources/text_paragraph.cpp"
+      - "scene/resources/text_paragraph.h"
+      - "tests/scene/test_text_edit.cpp"
+      - "misc/scripts/tests/test_text_edit_bulk_ranges.py"
+      - ".github/workflows/text-edit-bulk-ranges.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  source-regressions:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - run: |
+          python3 -m py_compile misc/scripts/tests/test_text_edit_bulk_ranges.py
+          python3 -m unittest discover -s misc/scripts/tests -p test_text_edit_bulk_ranges.py -v
+
+  native-textedit:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+      - uses: ./.github/actions/godot-deps
+      - uses: ./.github/actions/godot-build
+        with:
+          platform: linuxbsd
+          target: editor
+          scons-flags: dev_build=yes tests=yes debug_symbols=no module_mono_enabled=no accesskit=no -j2
+      - name: Run TextEdit native wrap regressions
+        run: ./bin/godot.linuxbsd.editor.dev.x86_64 --headless --test --test-case="*[SceneTree][TextEdit] *wrapping*"

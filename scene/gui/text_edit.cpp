@@ -179,16 +179,8 @@ int TextEdit::Text::get_line_wrap_amount(int p_line) const {
 }
 
 Vector<Vector2i> TextEdit::Text::get_line_wrap_ranges(int p_line) const {
-	Vector<Vector2i> ret;
-	ERR_FAIL_INDEX_V(p_line, (int)text.size(), ret);
-
-	Ref<TextParagraph> data_buf = text[p_line].data_buf;
-	int line_count = data_buf->get_line_count();
-	ret.reserve_exact(line_count);
-	for (int i = 0; i < line_count; i++) {
-		ret.push_back(data_buf->get_line_range(i));
-	}
-	return ret;
+	ERR_FAIL_INDEX_V(p_line, (int)text.size(), Vector<Vector2i>());
+	return text[p_line].data_buf->get_line_ranges();
 }
 
 const Ref<TextParagraph> TextEdit::Text::get_line_data(int p_line) const {
