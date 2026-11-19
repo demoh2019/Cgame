@@ -294,4 +294,99 @@ TEST_CASE("[HashMap] Clear sparse reserved table handles collision clusters") {
 	}
 }
 
+struct DescendingKeyComparisonCounter {
+	static inline uint32_t comparisons = 0;
+	bool operator()(const KeyValue<int, int> &p_a, const KeyValue<int, int> &p_b) const {
+		comparisons++;
+		return p_a.key < p_b.key;
+	}
+};
+
+TEST_CASE("[HashMap] Reverse-ordered keys sort in linear comparisons without reallocating nodes") {
+	HashMap<int, int> map;
+	for (int i = 511; i >= 0; i--) {
+		map.insert(i, i * 3);
+	}
+	int *const stable_value_ptr = map.getptr(300);
+	DescendingKeyComparisonCounter::comparisons = 0;
+	map.sort_custom<DescendingKeyComparisonCounter>();
+
+	// One comparison finds the first descent; the remaining N-2
+	// comparisons verify that every link is strictly descending.
+	CHECK(DescendingKeyComparisonCounter::comparisons <= 512);
+	CHECK(map.getptr(300) == stable_value_ptr);
+	int expected = 0;
+	for (const KeyValue<int, int> &entry : map) {
+		CHECK(entry.key == expected);
+		CHECK(entry.value == expected * 3);
+		expected++;
+	}
+	CHECK(expected == 512);
+	CHECK(map.begin()->key == 0);
+	CHECK(map.last()->key == 511);
+}
+
+TEST_CASE("[HashMap] Equal-value groups keep stable relative order") {
+	HashMap<int, int> map;
+	for (int i = 0; i < 128; i++) {
+		map.insert(i, (127 - i) / 4);
+	}
+	struct ByValue {
+		bool operator()(const KeyValue<int, int> &p_a, const KeyValue<int, int> &p_b) const {
+			return p_a.value < p_b.value;
+		}
+	};
+	map.sort_custom<ByValue>();
+	int prev_value = -1;
+	int prev_key = -1;
+	int total = 0;
+	for (const KeyValue<int, int> &entry : map) {
+		CHECK(entry.value >= prev_value);
+		if (entry.value == prev_value) {
+			CHECK(entry.key > prev_key);
+		}
+		prev_value = entry.value;
+		prev_key = entry.key;
+		total++;
+	}
+	CHECK(total == 128);
+}
+
+TEST_CASE("[SortList] Reverse a strict subrange and restore outer links") {
+	struct Item {
+		int value = 0;
+		Item *prev = nullptr;
+		Item *next = nullptr;
+	};
+	Item items[7];
+	const int values[7] = { 100, 5, 4, 3, 2, 1, -100 };
+	for (int i = 0; i < 7; i++) {
+		items[i].value = values[i];
+		items[i].prev = i > 0 ? &items[i - 1] : nullptr;
+		items[i].next = i < 6 ? &items[i + 1] : nullptr;
+	}
+	Item *head = &items[1];
+	Item *tail = &items[5];
+	SortList<Item, int, &Item::value, &Item::prev, &Item::next> sorter;
+	sorter.sort(head, tail);
+
+	CHECK(head == &items[5]);
+	CHECK(tail == &items[1]);
+	CHECK(items[0].next == head);
+	CHECK(head->prev == &items[0]);
+	CHECK(tail->next == &items[6]);
+	CHECK(items[6].prev == tail);
+	const int expected[7] = { 100, 1, 2, 3, 4, 5, -100 };
+	Item *item = &items[0];
+	for (int i = 0; i < 7; i++) {
+		REQUIRE(item != nullptr);
+		CHECK(item->value == expected[i]);
+		if (item->next) {
+			CHECK(item->next->prev == item);
+		}
+		item = item->next;
+	}
+	CHECK(item == nullptr);
+}
+
 } // namespace TestHashMap
