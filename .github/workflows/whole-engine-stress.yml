@@ -185,10 +185,29 @@ jobs:
             --script res://physics_pbf_density_pressure_3d_regression.gd \
             2>&1 | tee pbf-density-pressure-runtime.log
           grep -Fq 'Native PBF predictive density pressure passed' pbf-density-pressure-runtime.log
+      - name: Native PBF surface tension cohesion/curvature momentum doctests
+        shell: bash
+        run: |
+          set -euo pipefail
+          timeout 120s ./bin/godot.linuxbsd.editor.dev.x86_64 \
+            --headless --test --test-case="*[PhysicsPBFSurface]*" \
+            --success=true --no-colors 2>&1 | tee pbf-surface-native.log
+          grep -Fq '[PhysicsPBFSurface]' pbf-surface-native.log
+      - name: Headless native surface tension vs default-off momentum comparison
+        shell: bash
+        run: |
+          set -euo pipefail
+          timeout 120s ./bin/godot.linuxbsd.editor.dev.x86_64 \
+            --headless --path tests/stress \
+            --script res://physics_pbf_surface_tension_3d_regression.gd \
+            2>&1 | tee pbf-surface-runtime.log
+          grep -Fq 'Native PBF surface tension passed' pbf-surface-runtime.log
       - name: Syntax-check physics stress scripts
         shell: bash
         run: |
           set -euo pipefail
+          ./bin/godot.linuxbsd.editor.dev.x86_64 --headless --path tests/stress \
+            --script res://physics_pbf_surface_tension_3d_regression.gd --check-only
           ./bin/godot.linuxbsd.editor.dev.x86_64 --headless --path tests/stress \
             --script res://physics_pbf_density_pressure_3d_regression.gd --check-only
           ./bin/godot.linuxbsd.editor.dev.x86_64 --headless --path tests/stress \
