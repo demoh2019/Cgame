@@ -52,8 +52,9 @@ func _test() -> void:
     var survivor := game.get_node_or_null("Player") as CharacterBody3D
     var zones := game.get_node_or_null("RiskZoneSystem")
     var node := game.get_node_or_null("ExclusionFiber")
+    var advanced := game.get_node_or_null("ExclusionWood")
     var infected := game.get_node_or_null("InfectedWalker")
-    if survivor == null or zones == null or node == null or infected == null:
+    if survivor == null or zones == null or node == null or advanced == null or infected == null:
         _fail("Playable scene missing risk system, high-risk node or infected")
         return
 
@@ -67,6 +68,13 @@ func _test() -> void:
         return
     if not bool(node.get("depleted")):
         _fail("Danger node must obey the same resource depletion rules")
+        return
+    # An exclusion bonus must never bypass the tier-2 skill or tool gate.
+    survivor.global_position = advanced.global_position + Vector3(0.0, 0.4, 1.0)
+    var advanced_before: int = int(survivor.call("get_item_count", "wood_t2"))
+    advanced.call("interact", survivor)
+    if bool(advanced.get("depleted")) or int(survivor.call("get_item_count", "wood_t2")) != advanced_before:
+        _fail("Tier-2 harvest bypassed progression gates in exclusion zone")
         return
 
     survivor.set("health", 100.0)
@@ -83,7 +91,8 @@ func _test() -> void:
         return
     infected.global_position = home + Vector3(1.0, 0.0, 0.0)
     infected.set("strike_cooldown", 0.0)
-    infected.call("_physics_process", 0.1)
+    for frame in range(3):
+        await physics_frame
     if not is_equal_approx(float(survivor.get("health")), 100.0):
         _fail("Infected struck the survivor inside the camp")
         return
