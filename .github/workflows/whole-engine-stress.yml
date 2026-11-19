@@ -115,6 +115,7 @@ jobs:
           ./bin/godot.linuxbsd.editor.dev.x86_64 --headless --path tests/stress --script res://physics_jolt_softbody_constraint_bounds_regression.gd --check-only
           ./bin/godot.linuxbsd.editor.dev.x86_64 --headless --path tests/stress --script res://physics_jolt_softbody_wind_fastpath_regression.gd --check-only
           ./bin/godot.linuxbsd.editor.dev.x86_64 --headless --path tests/stress --script res://physics_jolt_softbody_lra_shrink_regression.gd --check-only
+          ./bin/godot.linuxbsd.editor.dev.x86_64 --headless --path tests/stress --script res://physics_jolt_softbody_volume_shrink_regression.gd --check-only
           ./bin/godot.linuxbsd.editor.dev.x86_64 --headless --path tests/stress --script res://physics_jolt_layer_filter_regression.gd --check-only
           ./bin/godot.linuxbsd.editor.dev.x86_64 --headless --path tests/stress --script res://physics_jolt_broadphase_filter_regression.gd --check-only
           ./bin/godot.linuxbsd.editor.dev.x86_64 --headless --path tests/stress --script res://physics_jolt_area_event_dedup_regression.gd --check-only
@@ -379,6 +380,28 @@ jobs:
               2>&1 | tee "physics-jolt-lra-shrink-$MODE.log"
             grep -Fq 'Jolt soft-body LRA shrink regression passed.' "physics-jolt-lra-shrink-$MODE.log"
           done
+      - name: Regression-test Jolt compressible and incompressible volume materials
+        shell: bash
+        run: |
+          set -euo pipefail
+          for FOLLOW in false true; do
+            PROJECT="$RUNNER_TEMP/cgame-jolt-volume-shrink-$FOLLOW"
+            mkdir -p "$PROJECT"
+            cp -a tests/stress/. "$PROJECT/"
+            # Explicitly enable the existing Jolt backend and volume fan.
+            # Keep the original [physics] section rather than appending one.
+            sed -i 's|^3d/physics_engine="GodotPhysics3D"$|3d/physics_engine="Jolt Physics"|' "$PROJECT/project.godot"
+            sed -i "/^\[physics\]$/a jolt_physics_3d/simulation/soft_body_volume_preservation=true" "$PROJECT/project.godot"
+            sed -i "/^\[physics\]$/a jolt_physics_3d/simulation/soft_body_volume_compliance=0.000001" "$PROJECT/project.godot"
+            sed -i "/^\[physics\]$/a jolt_physics_3d/simulation/soft_body_volume_follow_shrinking_factor=$FOLLOW" "$PROJECT/project.godot"
+            grep -Fqx '3d/physics_engine="Jolt Physics"' "$PROJECT/project.godot"
+            grep -Fqx "jolt_physics_3d/simulation/soft_body_volume_follow_shrinking_factor=$FOLLOW" "$PROJECT/project.godot"
+            timeout 180s ./bin/godot.linuxbsd.editor.dev.x86_64 \
+              --headless --path "$PROJECT" \
+              --script res://physics_jolt_softbody_volume_shrink_regression.gd \
+              2>&1 | tee "physics-jolt-volume-shrink-$FOLLOW.log"
+            grep -Fq 'Jolt soft-body volumetric shrink regression passed.' "physics-jolt-volume-shrink-$FOLLOW.log"
+          done
       - name: Verify Jolt packed object-layer filtering
         shell: bash
         run: |
@@ -432,6 +455,7 @@ jobs:
             physics-jolt-softbody-constraint-bounds.log
             physics-jolt-softbody-wind-fastpath.log
             physics-jolt-lra-shrink-*.log
+            physics-jolt-volume-shrink-*.log
             physics-jolt-layer-filter.log
             physics-jolt-broadphase-filter.log
             physics-jolt-area-event-dedup.log
