@@ -238,11 +238,15 @@ def audit_project(root: Path, exclude: Iterable[str] = (), check_cycles: bool = 
                 findings.append(Finding("error", "INVALID_URI", relative, line, error, uri))
                 continue
             destination = uri[6:]
-            resolved = (root / PurePosixPath(destination)).resolve()
+            try:
+                resolved = (root / PurePosixPath(destination)).resolve()
+            except (OSError, RuntimeError):
+                findings.append(Finding("error", "UNRESOLVABLE_RESOURCE", relative, line, "Resource reference cannot be resolved (e.g. a symlink loop).", uri))
+                continue
             if not resolved.is_relative_to(root):
                 findings.append(Finding("error", "OUTSIDE_PROJECT", relative, line, "Resource reference escapes the project root.", uri))
                 continue
-            if destination not in actual_paths:
+            if destination not in actual_paths or not resolved.is_file():
                 alternatives = casefolded.get(destination.casefold(), ())
                 if alternatives:
                     findings.append(Finding("error", "CASE_MISMATCH", relative, line, "Resource exists with different capitalization: " + ", ".join(sorted(alternatives)), uri))
