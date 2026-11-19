@@ -53,7 +53,7 @@ namespace {
 // interior particle, with one Jolt XPBD volume constraint per surface face.
 // It cannot describe concave geometry; reject unclosed, inconsistent or
 // nonconvex meshes rather than silently creating inverted tetrahedra.
-static bool try_build_convex_volume_fan(JPH::SoftBodySharedSettings &r_settings, float p_compliance) {
+static bool try_build_convex_volume_fan(JPH::SoftBodySharedSettings &r_settings, float p_compliance, bool p_radial_springs, float p_radial_compliance) {
 	JPH::Array<JPH::SoftBodySharedSettings::Vertex> &vertices = r_settings.mVertices;
 	const JPH::Array<JPH::SoftBodySharedSettings::Face> &faces = r_settings.mFaces;
 
@@ -160,6 +160,28 @@ static bool try_build_convex_volume_fan(JPH::SoftBodySharedSettings &r_settings,
 		r_settings.mVolumeConstraints.emplace_back(face.mVertex[0], face.mVertex[1], face.mVertex[2], center_index, p_compliance);
 	}
 	r_settings.CalculateVolumeConstraintVolumes();
+
+	// A volume-only star fan cannot resist every shear/stretch mode:
+	// each tetrahedron retains its rest volume, but the interior particle
+	// can move relative to the surface. Optional center-to-surface XPBD
+	// springs add a radial elastic response using Jolt's regular edge solver.
+	// Build these only after full mesh validation and after the surface
+	// shrinking factor has been applied, so shrink only affects cloth edges.
+	if (p_radial_springs) {
+		r_settings.mEdgeConstraints.reserve(r_settings.mEdgeConstraints.size() + center_index);
+		for (uint32_t i = 0; i < center_index; ++i) {
+			const float distance = (JPH::Vec3(vertices[i].mPosition) - center).Length();
+			// Convex fan center is strictly interior, but reject zero-length
+			// spokes from degenerate/imprecise vertex arrangements.
+			if (distance <= radius * 1.0e-6f) {
+				continue;
+			}
+			JPH::SoftBodySharedSettings::Edge radial(center_index, i, p_radial_compliance);
+			radial.mRestLength = distance;
+			r_settings.mEdgeConstraints.push_back(radial);
+		}
+	}
+
 	return true;
 }
 
@@ -390,9 +412,6 @@ JPH::SoftBodySharedSettings *JoltSoftBody3D::_create_shared_settings() {
 	const int bend_mode = JoltProjectSettings::soft_body_bend_mode;
 	const BendType bend_type = bend_mode == 1 ? BendType::Distance : (bend_mode == 2 ? BendType::Dihedral : BendType::None);
 	settings->CreateConstraints(&vertex_attrib, 1, bend_type);
-	if (JoltProjectSettings::soft_body_volume_preservation) {
-		try_build_convex_volume_fan(*settings, JoltProjectSettings::soft_body_volume_compliance);
-	}
 	const float multiplier = 1.0f - shrinking_factor;
 	for (JPH::SoftBodySharedSettings::Edge &e : settings->mEdgeConstraints) {
 		e.mRestLength *= multiplier;
@@ -406,6 +425,12 @@ JPH::SoftBodySharedSettings *JoltSoftBody3D::_create_shared_settings() {
 		for (JPH::SoftBodySharedSettings::LRA &tether : settings->mLRAConstraints) {
 			tether.mMaxDistance *= multiplier;
 		}
+	}
+	// Build the optional radial springs after surface edge contraction;
+	// their true geometric rest lengths must remain independent of shrink.
+	if (JoltProjectSettings::soft_body_volume_preservation) {
+		try_build_convex_volume_fan(*settings, JoltProjectSettings::soft_body_volume_compliance,
+				JoltProjectSettings::soft_body_volume_radial_springs, JoltProjectSettings::soft_body_volume_radial_compliance);
 	}
 	settings->Optimize();
 
