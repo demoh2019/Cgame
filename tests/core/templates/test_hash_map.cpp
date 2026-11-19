@@ -174,4 +174,31 @@ TEST_CASE("[HashMap] Sort") {
 	}
 }
 
+
+TEST_CASE("[AnimationAudioMapFastPath] one bracket lookup creates and reuses a track entry") {
+	HashMap<int, Vector<int>> playing;
+	Vector<int> &first = playing[42];
+	CHECK_EQ(playing.size(), 1);
+	CHECK(first.is_empty());
+	first.push_back(7);
+	Vector<int> &reused = playing[42];
+	CHECK(&first == &reused);
+	REQUIRE_EQ(reused.size(), 1);
+	CHECK_EQ(reused[0], 7);
+	CHECK_EQ(playing.size(), 1);
+}
+
+TEST_CASE("[AnimationAudioMapFastPath] missing and existing track keys preserve values after erase") {
+	HashMap<int, int> playing;
+	CHECK(playing.getptr(17) == nullptr);
+	playing[17] = 120;
+	playing[18] = 240;
+	REQUIRE(playing.getptr(17) != nullptr);
+	CHECK_EQ(*playing.getptr(17), 120);
+	playing.erase(17);
+	CHECK(playing.getptr(17) == nullptr);
+	CHECK_EQ(playing.size(), 1);
+	CHECK_EQ(playing[18], 240);
+}
+
 } // namespace TestHashMap
