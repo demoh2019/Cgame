@@ -571,8 +571,24 @@ private:
 	T *item_get_userdata(BVHHandle p_handle) const { return _get_extra(p_handle).userdata; }
 	int item_get_subindex(BVHHandle p_handle) const { return _get_extra(p_handle).subindex; }
 
-	// The caller is already iterating the adjacency list of p_from and
-	// supplies its current index, avoiding another linear search on removal.
+	// Unordered removal may move the last link into the deleted slot.
+	// Update its partner's reciprocal index before compacting the list.
+	void _remove_pair_link(BVHHandle p_owner, uint32_t p_index) {
+		typename BVHTREE_CLASS::ItemPairs &pairs = tree._pairs[p_owner.id()];
+		DEV_ASSERT(p_index < pairs.extended_pairs.size());
+		const uint32_t last = pairs.extended_pairs.size() - 1;
+		if (p_index != last) {
+			const typename BVHTREE_CLASS::ItemPairs::Link moved = pairs.extended_pairs[last];
+			typename BVHTREE_CLASS::ItemPairs &other = tree._pairs[moved.handle.id()];
+			DEV_ASSERT(moved.reverse_index < other.extended_pairs.size());
+			DEV_ASSERT(other.extended_pairs[moved.reverse_index].handle == p_owner);
+			other.extended_pairs[moved.reverse_index].reverse_index = p_index;
+		}
+		pairs.remove_pair_at(p_index);
+	}
+
+	// The caller knows its adjacency index. The reciprocal index avoids
+	// searching the partner's list to remove the corresponding link.
 	void _unpair(BVHHandle p_from, BVHHandle p_to, uint32_t p_known_index) {
 		const BVHHandle index_owner = p_from;
 		tree._handle_sort(p_from, p_to);
@@ -594,14 +610,23 @@ private:
 			dense_pair_keys.erase(_dense_pair_key(p_from, p_to));
 		}
 
-		void *ud_from;
+		uint32_t from_index;
+		uint32_t to_index;
 		if (index_owner == p_from) {
-			ud_from = pairs_from.remove_pair_at(p_known_index);
-			pairs_to.remove_pair_to(p_from);
+			from_index = p_known_index;
+			DEV_ASSERT(from_index < from_degree);
+			to_index = pairs_from.extended_pairs[from_index].reverse_index;
 		} else {
-			ud_from = pairs_from.remove_pair_to(p_to);
-			pairs_to.remove_pair_at(p_known_index);
+			to_index = p_known_index;
+			DEV_ASSERT(to_index < to_degree);
+			from_index = pairs_to.extended_pairs[to_index].reverse_index;
 		}
+		DEV_ASSERT(from_index < from_degree && to_index < to_degree);
+		DEV_ASSERT(pairs_from.extended_pairs[from_index].handle == p_to);
+		DEV_ASSERT(pairs_to.extended_pairs[to_index].handle == p_from);
+		void *ud_from = pairs_from.extended_pairs[from_index].userdata;
+		_remove_pair_link(p_from, from_index);
+		_remove_pair_link(p_to, to_index);
 		if (from_degree == DENSE_PAIR_THRESHOLD) {
 			_unindex_new_sparse_neighbors(p_from);
 		}
@@ -751,9 +776,11 @@ private:
 			callback_userdata = pair_callback(pair_callback_userdata, p_ha, exa.userdata, exa.subindex, p_hb, exb.userdata, exb.subindex);
 		}
 
-		// new pair! .. only really need to store the userdata on the lower handle, but both have storage so...
-		p_from.add_pair_to(p_hb, callback_userdata);
-		p_to.add_pair_to(p_ha, callback_userdata);
+		// Reciprocal positions enable constant-time unlink and pair-data updates.
+		const uint32_t from_index = p_from.extended_pairs.size();
+		const uint32_t to_index = p_to.extended_pairs.size();
+		p_from.add_pair_to(p_hb, callback_userdata, to_index);
+		p_to.add_pair_to(p_ha, callback_userdata, from_index);
 		if (p_from.extended_pairs.size() >= DENSE_PAIR_THRESHOLD &&
 				p_to.extended_pairs.size() >= DENSE_PAIR_THRESHOLD) {
 			dense_pair_keys.insert(_dense_pair_key(p_ha, p_hb));
@@ -787,15 +814,11 @@ private:
 			if (new_pair_data != pair.userdata) {
 				pair.userdata = new_pair_data;
 
-				// Update pair data for the second item.
+				// The reciprocal link index stays current through unordered removals.
 				typename BVHTREE_CLASS::ItemPairs &to = tree._pairs[h_to.id()];
-				for (unsigned int to_index = 0; to_index < to.extended_pairs.size(); to_index++) {
-					typename BVHTREE_CLASS::ItemPairs::Link &to_pair = to.extended_pairs[to_index];
-					if (to_pair.handle == p_handle) {
-						to_pair.userdata = new_pair_data;
-						break;
-					}
-				}
+				DEV_ASSERT(pair.reverse_index < to.extended_pairs.size());
+				DEV_ASSERT(to.extended_pairs[pair.reverse_index].handle == p_handle);
+				to.extended_pairs[pair.reverse_index].userdata = new_pair_data;
 			}
 		}
 	}
