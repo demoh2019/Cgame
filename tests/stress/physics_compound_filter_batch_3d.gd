@@ -34,7 +34,7 @@ func run(tree: SceneTree, scale: int, frames: int) -> Dictionary:
 	# shapes should create exactly one pair for each corresponding obstacle.
 	var mask_mismatches := 0
 	var mask_updates_us := 0
-	var phases := mini(maxi(frames / 20, 2), 8)
+	var phases := mini(maxi(int(frames / 20), 2), 8)
 	for phase in range(phases):
 		var mask := 0 if phase % 2 == 0 else 1
 		var tick := Time.get_ticks_usec()
