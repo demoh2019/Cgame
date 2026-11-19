@@ -455,4 +455,41 @@ TEST_CASE("[Curve] Hot-path index search keeps single and empty curves safe") {
 	CHECK(Math::is_equal_approx(curve->sample(2), (real_t)0.75));
 }
 
+
+TEST_CASE("[Curve][Performance] Rebaking reuses the cache and overwrites all sample endpoints") {
+	Ref<Curve> curve = memnew(Curve);
+	curve->add_point(Vector2(0, 0));
+	curve->add_point(Vector2(1, 1));
+	curve->set_bake_resolution(257);
+
+	for (int iteration = 0; iteration <= 100; iteration++) {
+		const real_t last = iteration / real_t(100);
+		curve->set_point_value(1, last);
+		curve->bake();
+		CHECK(Math::is_equal_approx(curve->sample_baked(0), (real_t)0));
+		CHECK(Math::is_equal_approx(curve->sample_baked(1), last));
+		CHECK(Math::is_equal_approx(curve->sample_baked(0.5), curve->sample(0.5)));
+	}
+
+	// Reusing memory must not expose old samples after all points are removed.
+	curve->clear_points();
+	curve->bake();
+	CHECK(curve->sample_baked(0) == 0);
+	CHECK(curve->sample_baked(0.5) == 0);
+	CHECK(curve->sample_baked(1) == 0);
+
+	// Resolution changes should still resize correctly, even when only one
+	// baked element is requested and both endpoints alias the same slot.
+	curve->add_point(Vector2(0, 0.25));
+	curve->add_point(Vector2(1, 0.75));
+	curve->set_bake_resolution(1);
+	curve->bake();
+	CHECK(Math::is_equal_approx(curve->sample_baked(0.5), (real_t)0.75));
+
+	curve->set_bake_resolution(512);
+	curve->bake();
+	CHECK(Math::is_equal_approx(curve->sample_baked(0), (real_t)0.25));
+	CHECK(Math::is_equal_approx(curve->sample_baked(1), (real_t)0.75));
+}
+
 } // namespace TestCurve
