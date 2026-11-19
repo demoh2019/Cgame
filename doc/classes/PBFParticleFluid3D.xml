@@ -6,7 +6,7 @@
 	<description>
 		Simulates up to 2048 particles using Position Based Fluids (PBF): a compactly supported SPH kernel, iterative density constraints, deterministic sorted-cell neighbor lookup, artificial pressure and optional XSPH velocity smoothing. Unlike static fluid-plane buoyancy, particles move independently and can form a deforming free surface.
 		Particle positions, velocities, box bounds, gravity and impulses are all in this node's [b]local coordinate system[/b]. The node does not create a visible mesh: render particles yourself with [MultiMeshInstance3D], a custom shader or a fluid surface renderer. See the Cgame Physics Lab sample for GPU-instanced sphere visualization.
-		[b]Experimental:[/b] This is a bounded CPU demonstration of PBF, not a fully incompressible Navier-Stokes solver. The density constraint is one-sided (it prevents compression rather than forcing dilute free surfaces to expand). It does not implement viscosity between fluid and rigid bodies, surface reconstruction, GPU compute, solid boundary pressure or thermal/multiphase effects. Simple equal-and-opposite rigid-body contact impulses can be explicitly enabled through [member two_way_rigid_coupling]; this is not a continuum fluid-solid coupling solver.
+		[b]Experimental:[/b] This is a bounded CPU demonstration of PBF, not a fully incompressible Navier-Stokes solver. The density constraint is one-sided (it prevents compression rather than forcing dilute free surfaces to expand). It does not implement viscosity between fluid and rigid bodies, surface reconstruction, GPU compute, solid boundary pressure or thermal/multiphase effects. A new optional vorticity confinement post-process restores small-scale vortices lost during PBF/XSPH and is disabled by default; it is a visual turbulence model, not a fully energy-conserving Navier-Stokes solver. Simple equal-and-opposite rigid-body contact impulses can be explicitly enabled through [member two_way_rigid_coupling]; this is not a continuum fluid-solid coupling solver.
 		[b]Note:[/b] By default [member simulation_enabled], [member collide_with_bodies] and [member two_way_rigid_coupling] are [code]false[/code], so the class does no per-frame work. For manual stepping, use [method step] while simulation is disabled. The internal simulation tick runs in the regular physics frame. Parameters are intentionally capped to protect memory, runtime cost and numerical stability.
 	</description>
 	<methods>
@@ -50,6 +50,18 @@
 			<return type="int" />
 			<description>
 				Returns the bounded number of neighbor interactions in the most recent substep. Useful for performance profiling; a particle can visit at most 128 neighbors during each solver iteration.
+			</description>
+		</method>
+		<method name="get_average_vorticity" qualifiers="const">
+			<return type="float" />
+			<description>
+				Returns the mean magnitude of the SPH-estimated velocity curl, in inverse seconds, from the most recent enabled vorticity post-process. Returns zero if [member vorticity_confinement] is disabled or the particle set is cleared.
+			</description>
+		</method>
+		<method name="get_last_vorticity_neighbor_evaluations" qualifiers="const">
+			<return type="int" />
+			<description>
+				Returns the number of neighborhood visits across all three vorticity passes (final density, curl and curl-magnitude gradient) in the most recent substep. The process is disabled at strength zero and bounded by three times the particle count times 128.
 			</description>
 		</method>
 		<method name="get_particle_count" qualifiers="const">
@@ -130,6 +142,12 @@
 		</member>
 		<member name="two_way_rigid_coupling" type="bool" setter="set_two_way_rigid_coupling" getter="is_two_way_rigid_coupling_enabled" default="false">
 			Enables equal-and-opposite collision impulses between fluid particles and dynamic [RigidBody3D] surfaces. Uses contact speed, rigid mass, angular velocity and world-space inverse inertia for the normal effective mass. Requires [member collide_with_bodies]. Static and kinematic bodies retain one-way contacts. This does not model continuous pressure or buoyancy on immersed solids.
+		</member>
+		<member name="vorticity_confinement" type="float" setter="set_vorticity_confinement" getter="get_vorticity_confinement" default="0.0">
+			Controls opt-in vorticity confinement, which injects a bounded velocity change perpendicular to the SPH curl and to the gradient of its magnitude. Strength 0 disables all three extra neighbor passes. Positive values (up to 5 m/s) restore rotating flow lost during density projection and XSPH smoothing, but can inject kinetic energy and should not be confused with physical viscosity.
+		</member>
+		<member name="vorticity_max_velocity_change" type="float" setter="set_vorticity_max_velocity_change" getter="get_vorticity_max_velocity_change" default="0.12">
+			Upper limit in m/s on the additional particle velocity per simulation substep from vorticity confinement. Protects against extreme density gradients and large local velocity curls, at the cost of modifying the unconstrained vorticity force.
 		</member>
 		<member name="xsph_viscosity" type="float" setter="set_xsph_viscosity" getter="get_xsph_viscosity" default="0.015">
 			Blends neighboring particle velocities using an XSPH-style smoothing filter.
