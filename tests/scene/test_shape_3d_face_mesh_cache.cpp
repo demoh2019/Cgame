@@ -101,6 +101,52 @@ TEST_CASE("[SceneTree][Shape3D] Sphere debug mesh cache reuses unchanged shape a
 	check_surface_colors(new_color, gray);
 }
 
+TEST_CASE("[SceneTree][Shape3D] Sphere outline fast path equals trigonometric reference") {
+	Ref<SphereShape3D> sphere;
+	sphere.instantiate();
+	const float radii[] = { 0.0f, 0.5f, 1.75f, 12.0f };
+	for (float radius : radii) {
+		sphere->set_radius(radius);
+		const Vector<Vector3> actual = sphere->get_debug_mesh_lines();
+		REQUIRE_EQ(actual.size(), 361 * 6);
+
+		int idx = 0;
+		for (int i = 0; i <= 360; i++) {
+			const float ra = Math::deg_to_rad((float)i);
+			const float rb = Math::deg_to_rad((float)i + 1);
+			const Vector2 a = Vector2(Math::sin(ra), Math::cos(ra)) * radius;
+			const Vector2 b = Vector2(Math::sin(rb), Math::cos(rb)) * radius;
+
+			CHECK(actual[idx++].is_equal_approx(Vector3(a.x, 0, a.y)));
+			CHECK(actual[idx++].is_equal_approx(Vector3(b.x, 0, b.y)));
+			CHECK(actual[idx++].is_equal_approx(Vector3(0, a.x, a.y)));
+			CHECK(actual[idx++].is_equal_approx(Vector3(0, b.x, b.y)));
+			CHECK(actual[idx++].is_equal_approx(Vector3(a.x, a.y, 0)));
+			CHECK(actual[idx++].is_equal_approx(Vector3(b.x, b.y, 0)));
+		}
+		REQUIRE_EQ(idx, actual.size());
+	}
+}
+
+TEST_CASE("[SceneTree][Shape3D] Box outline fixed buffer preserves all 12 edges") {
+	Ref<BoxShape3D> box;
+	box.instantiate();
+	box->set_size(Vector3(3.0f, 5.0f, 7.0f));
+	const Vector<Vector3> actual = box->get_debug_mesh_lines();
+	REQUIRE_EQ(actual.size(), 24);
+
+	AABB reference;
+	reference.size = box->get_size();
+	reference.position = -reference.size / 2;
+	for (int edge = 0; edge < 12; edge++) {
+		Vector3 a;
+		Vector3 b;
+		reference.get_edge(edge, a, b);
+		CHECK_EQ(actual[edge * 2], a);
+		CHECK_EQ(actual[edge * 2 + 1], b);
+	}
+}
+
 } // namespace TestShape3DFaceMeshCache
 
 #endif // PHYSICS_3D_DISABLED
