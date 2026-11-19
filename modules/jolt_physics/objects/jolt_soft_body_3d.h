@@ -50,7 +50,7 @@ class JoltSoftBody3D final : public JoltObject3D {
 
 	LocalVector<int> mesh_to_physics;
 	LocalVector<JoltArea3D *> areas;
-	// Reused by pre_step() only; avoids reallocation each wind-affected frame.
+	// Reused by pre_step() only; avoids allocation when wind or drag affects cloth.
 	LocalVector<JoltArea3D *> wind_areas_scratch;
 	LocalVector<Vector3> normals;
 	LocalVector<RID> exceptions;
@@ -62,6 +62,7 @@ class JoltSoftBody3D final : public JoltObject3D {
 	float mass = 1.0f;
 	float pressure = 0.0f;
 	float linear_damping = 0.01f;
+	float drag_coefficient = 0.0f;
 	float stiffness_coefficient = 0.5f;
 	float shrinking_factor = 0.0f;
 
