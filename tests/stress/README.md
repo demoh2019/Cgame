@@ -550,3 +550,34 @@ python3 tests/stress/scale_sweep.py \
 
 Use matching platforms and engine builds and compare case-specific latency
 and RSS. Workload microtimings include GDScript loop and validation overhead.
+
+## Box and Flow container layout hotpaths
+
+`BoxContainer` now computes minimum/desired sizes in one pass rather
+than creating a linked list of controls, and caches expansion metrics
+in a dense `LocalVector` instead of a new hash map per sort.
+`FlowContainer` similarly stores child measurements by index, reuses
+line and stretching buffers, and uses each child's existing stretch
+state instead of allocating a separate activity array.
+
+Both changes preserve existing alignment, visibility, maximum-size and
+reverse-order layout tests in `tests/scene/test_box_container.cpp`
+and `tests/scene/test_flow_container.cpp`. New native regression tests
+cover mixed visible/hidden Controls and unrelated Node children.
+
+```bash
+python3 tests/stress/run.py \
+  --godot ./bin/godot.macos.editor.arm64 \
+  --case box_reflow,flow_reflow,grid_reflow \
+  --scale 8 --frames 180 --repeats 5 \
+  --timeout 600 --rss-limit-mib 6144 \
+  --output out/ui-reflow.json --summary-md out/ui-hotspots.md
+```
+
+The UI workloads expose reflow scheduling latency p95/peak and engine
+process time while the shared runner tracks process-tree RSS. The
+per-frame metrics include waiting and should not be interpreted as
+pure `_resort()` C++ execution time. For actual improvement percentages,
+compare repeated runs of the same workload before and after the change
+on the same hardware. The Box/Flow GitHub Actions workflow builds the
+fork with native C++ tests and executes both targeted workloads.
