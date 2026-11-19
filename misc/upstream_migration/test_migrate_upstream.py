@@ -42,7 +42,7 @@ class FakeAPI:
         if self.raise_on_post is not None:
             raise self.raise_on_post
         self.posts.append((path, body))
-        return {"number": len(self.posts) + 900, "html_url": "https://github.com/demoh2019/godot/issues/900"}
+        return {"number": len(self.posts) + 900, "html_url": "https://github.com/demoh2019/Cgame/issues/900"}
 
     def patch(self, path, body):
         self.patches.append((path, body))
@@ -58,6 +58,19 @@ def issue(n=12, **kwargs):
 def pr(n=13, **kwargs):
     return {"number": n, "title": "Fix the bug", "body": "PR description", "state": "open",
             "user": {"login": "contributor"}, "base": {"ref": "master"}, "created_at": "2026-01-01", **kwargs}
+
+
+class RepositoryTargetTests(unittest.TestCase):
+    def test_uses_canonical_fork_repository(self):
+        self.assertEqual(m.TARGET, "demoh2019/Cgame")
+
+    def test_does_not_write_to_source_repository(self):
+        self.assertNotEqual(m.TARGET, m.SOURCE)
+
+    def test_destination_api_uses_canonical_name(self):
+        self.assertTrue(m.page_path(m.TARGET, "issues", "open").startswith(
+            "/repos/demoh2019/Cgame/issues?"
+        ))
 
 
 class ParserTests(unittest.TestCase):
