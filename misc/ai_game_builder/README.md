@@ -24,7 +24,7 @@ The API key is held only in the dock's memory. This plugin does not persist it.
 - Allowed file types: .gd, .tscn, .tres, .gdshader, .json, .md, .txt.
 - Up to 16 files, 64 KiB each, 256 KiB total, and a 1 MiB HTTP response body.
 - Only HTTPS remote providers or HTTP loopback endpoints are allowed. Redirects are disabled.
-- A non-executing static inspector blocks plans missing `main.tscn`, lacking its scene header, or using missing/external `res://` dependencies. It warns about some dangerous GDScript constructs. These are **heuristics**, not a full parser or malware sandbox, and can produce false positives or miss problems.
+- A non-executing static inspector blocks plans missing `main.tscn`, lacking its scene header, or using missing/external `res://` dependencies. It also blocks generated `@tool` scripts and basic process-spawning patterns, and warns about file I/O or network-related APIs. These are **heuristics**, not a full parser or malware sandbox, and can produce false positives or miss problems.
 - **Repair** requests one replacement plan from model diagnostics; **Refine** requests a replacement that follows your additional instructions. Neither action automatically loops or writes to disk. Each attempt has provider costs.
 - Generated GDScript may still be incorrect or unsafe; inspect before running. The MVP does not compile generated scripts or execute generated scenes, and cannot promise a functional game.
 
@@ -34,7 +34,7 @@ Run the standalone test project (this folder) from the source checkout:
 
     godot --headless --path misc/ai_game_builder --script res://tests/run.gd
 
-The suite includes up to 100 assertions for successful and rejected plans, JSON parsing, provider reply handling, path traversal prevention, size limits, duplicates, generated dependencies, repair context, script loading, creation, and overwrite prevention. The writer tests create and remove a temporary file in the standalone project. Do not execute these tests from a production Godot project.
+The suite includes up to 103 assertions for successful and rejected plans, JSON parsing, provider reply handling, path traversal prevention, size limits, duplicates, generated dependencies, repair context, script loading, creation, and overwrite prevention. The writer tests create and remove a temporary file in the standalone project. Do not execute these tests from a production Godot project.
 
 ## Suggested follow-up milestones
 
