@@ -580,4 +580,103 @@ TEST_CASE("[LocalVector] Ordered insert matches upper_bound through mixed worklo
 	CHECK(strings[3] == "zeta");
 }
 
+
+struct MoveOnlyInsertItem {
+	static inline int live = 0;
+	int value;
+
+	MoveOnlyInsertItem() = delete;
+	explicit MoveOnlyInsertItem(int p_value) :
+			value(p_value) {
+		live++;
+	}
+	MoveOnlyInsertItem(const MoveOnlyInsertItem &) = delete;
+	MoveOnlyInsertItem &operator=(const MoveOnlyInsertItem &) = delete;
+	MoveOnlyInsertItem(MoveOnlyInsertItem &&p_other) noexcept :
+			value(p_other.value) {
+		p_other.value = -1;
+		live++;
+	}
+	MoveOnlyInsertItem &operator=(MoveOnlyInsertItem &&p_other) noexcept {
+		value = p_other.value;
+		p_other.value = -1;
+		return *this;
+	}
+	~MoveOnlyInsertItem() { live--; }
+};
+
+static_assert(!std::is_default_constructible_v<MoveOnlyInsertItem>);
+static_assert(!std::is_trivially_copyable_v<MoveOnlyInsertItem>);
+
+TEST_CASE("[LocalVector] Insert move-only items without default construction") {
+	CHECK(MoveOnlyInsertItem::live == 0);
+	{
+		LocalVector<MoveOnlyInsertItem> values;
+		values.reserve(33); // Force capacity growth during the second insert.
+		for (int i = 0; i < 32; i++) {
+			values.push_back(MoveOnlyInsertItem(i));
+		}
+		// Exercise front, middle, penultimate, and append, including reallocations.
+		values.insert(0, MoveOnlyInsertItem(100));
+		values.insert(16, MoveOnlyInsertItem(200));
+		values.insert(values.size() - 1, MoveOnlyInsertItem(300));
+		values.insert(values.size(), MoveOnlyInsertItem(400));
+		CHECK(values.size() == 36);
+		CHECK(values[0].value == 100);
+		CHECK(values[16].value == 200);
+		CHECK(values[33].value == 300);
+		CHECK(values[35].value == 400);
+		CHECK(values[1].value == 0);
+		CHECK(values[17].value == 15);
+		CHECK(values[34].value == 31);
+		CHECK(MoveOnlyInsertItem::live == int(values.size()));
+
+		values.remove_at(16);
+		values.remove_at(0);
+		CHECK(values.size() == 34);
+		CHECK(values[0].value == 0);
+		CHECK(values[31].value == 300);
+		CHECK(values[32].value == 31);
+		CHECK(values[33].value == 400);
+		CHECK(MoveOnlyInsertItem::live == int(values.size()));
+	}
+	CHECK(MoveOnlyInsertItem::live == 0);
+}
+
+struct CostlyDefaultInsertItem {
+	static inline int default_constructions = 0;
+	std::string value;
+
+	CostlyDefaultInsertItem() :
+			value(512, 'x') {
+		default_constructions++;
+	}
+	explicit CostlyDefaultInsertItem(const char *p_value) :
+			value(p_value) {}
+	CostlyDefaultInsertItem(const CostlyDefaultInsertItem &) = delete;
+	CostlyDefaultInsertItem &operator=(const CostlyDefaultInsertItem &) = delete;
+	CostlyDefaultInsertItem(CostlyDefaultInsertItem &&) = default;
+	CostlyDefaultInsertItem &operator=(CostlyDefaultInsertItem &&) = default;
+	~CostlyDefaultInsertItem() {}
+};
+
+TEST_CASE("[LocalVector] Nontrivial insert does not create temporary default objects") {
+	LocalVector<CostlyDefaultInsertItem> values;
+	values.reserve(64);
+	for (int i = 0; i < 24; i++) {
+		values.push_back(CostlyDefaultInsertItem("keep"));
+	}
+	CostlyDefaultInsertItem::default_constructions = 0;
+	for (int i = 0; i < 16; i++) {
+		values.insert(values.size() - 1, CostlyDefaultInsertItem("added"));
+	}
+	CHECK(CostlyDefaultInsertItem::default_constructions == 0);
+	CHECK(values.size() == 40);
+	CHECK(values[0].value == "keep");
+	CHECK(values[22].value == "keep");
+	CHECK(values[24].value == "added");
+	CHECK(values[38].value == "added");
+	CHECK(values[39].value == "keep");
+}
+
 } // namespace TestLocalVector
