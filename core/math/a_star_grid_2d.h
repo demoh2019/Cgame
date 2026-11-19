@@ -32,6 +32,7 @@
 
 #include "core/object/gdvirtual.gen.h"
 #include "core/object/ref_counted.h"
+#include "core/templates/fixed_vector.h"
 #include "core/templates/local_vector.h"
 
 class AStarGrid2D : public RefCounted {
@@ -155,7 +156,7 @@ private: // Internal routines.
 		return &points[p_id.y - region.position.y][p_id.x - region.position.x];
 	}
 
-	void _get_nbors(Point *p_point, LocalVector<Point *> &r_nbors);
+	void _get_nbors(Point *p_point, FixedVector<Point *, 8> &r_nbors);
 	Point *_jump(Point *p_from, Point *p_to);
 	bool _solve(Point *p_begin_point, Point *p_end_point, bool p_allow_partial_path);
 	Point *_forced_successor(int32_t p_x, int32_t p_y, int32_t p_dx, int32_t p_dy, bool p_inclusive = false);
