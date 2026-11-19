@@ -141,4 +141,54 @@ TEST_CASE("[FuzzySearch] Reuse failed candidates without leaking token scores or
 	}
 }
 
+TEST_CASE("[FuzzySearch] Length prefilter preserves miss budget and start offset semantics") {
+	FuzzySearch search;
+	search.set_filter_low_scores(false);
+	search.set_max_misses(2);
+	search.set_start_offset(1);
+
+	Vector<String> targets;
+	targets.append("_");
+	targets.append("_abc");
+	targets.append("_abf");
+	targets.append("_abef");
+	targets.append("_abcf");
+	targets.append("_abcdef");
+	targets.append("_abc_def");
+	targets.append("_ABEF");
+	targets.append("_xyzxyz");
+	targets.append("_abcdef_extra");
+
+	// Four matched characters are sufficient when two of six characters are missed.
+	REQUIRE(search.search("abc def", "_abef").is_valid());
+	CHECK(search.search("abc def", "_abf").is_null());
+
+	for (bool exact : { false, true }) {
+		search.set_use_exact_tokens(exact);
+		Vector<Ref<FuzzySearchMatch>> results = search.search_all("abc def", targets);
+
+		int expected_matches = 0;
+		for (int i = 0; i < targets.size(); i++) {
+			if (search.search("abc def", targets[i]).is_valid()) {
+				expected_matches++;
+			}
+		}
+		REQUIRE(results.size() == expected_matches);
+
+		for (const Ref<FuzzySearchMatch> &result : results) {
+			const int index = result->get_original_index();
+			REQUIRE(index >= 0);
+			REQUIRE(index < targets.size());
+			Ref<FuzzySearchMatch> independent = search.search("abc def", targets[index]);
+			REQUIRE(independent.is_valid());
+			CHECK_EQ(result->get_target(), independent->get_target());
+			CHECK_EQ(result->get_score(), independent->get_score());
+			CHECK_EQ(result->get_matched_substrings().size(), independent->get_matched_substrings().size());
+		}
+	}
+
+	CHECK_EQ(search.search_all("", targets).size(), 0);
+	CHECK_EQ(search.search_all("   ", targets).size(), 0);
+}
+
 } // namespace TestFuzzySearch
