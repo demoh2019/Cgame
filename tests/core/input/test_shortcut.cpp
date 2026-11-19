@@ -214,4 +214,39 @@ TEST_CASE("[Shortcut] Equal arrays should be recognized as such.") {
 	CHECK(s.is_event_array_equal(same, different3) == false);
 }
 
+TEST_CASE("[Shortcut] Pre-sized event list preserves order when growing and shrinking") {
+	Shortcut shortcut;
+	List<Ref<InputEvent>> many;
+	for (int i = 0; i < 128; i++) {
+		Ref<InputEventKey> key;
+		key.instantiate();
+		key->set_keycode(i % 2 == 0 ? Key::ENTER : Key::BACKSPACE);
+		Ref<InputEvent> event = key;
+		many.push_back(event);
+	}
+	shortcut.set_events_list(&many);
+	Array all = shortcut.get_events();
+	REQUIRE_EQ(all.size(), 128);
+	int index = 0;
+	for (const Ref<InputEvent> &original : many) {
+		Ref<InputEvent> actual = all[index++];
+		CHECK(actual == original);
+	}
+
+	List<Ref<InputEvent>> reduced;
+	reduced.push_back(many.front()->get());
+	reduced.push_back(many.back()->get());
+	shortcut.set_events_list(&reduced);
+	Array small = shortcut.get_events();
+	REQUIRE_EQ(small.size(), 2);
+	Ref<InputEvent> first = small[0];
+	Ref<InputEvent> last = small[1];
+	CHECK(first == reduced.front()->get());
+	CHECK(last == reduced.back()->get());
+
+	List<Ref<InputEvent>> empty;
+	shortcut.set_events_list(&empty);
+	CHECK(shortcut.get_events().is_empty());
+}
+
 } // namespace TestShortcut

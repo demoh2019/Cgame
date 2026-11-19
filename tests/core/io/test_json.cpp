@@ -427,4 +427,70 @@ TEST_CASE("[JSON] Serialization") {
 	}
 }
 
+TEST_CASE("[JSON] Native serialization preserves large packed arrays and dictionaries") {
+	PackedByteArray bytes;
+	PackedInt32Array ints;
+	PackedInt64Array big_ints;
+	PackedFloat32Array floats;
+	PackedFloat64Array doubles;
+	PackedStringArray strings;
+	PackedVector2Array vector2s;
+	PackedVector3Array vector3s;
+	PackedVector4Array vector4s;
+	PackedColorArray colors;
+	for (int i = 0; i < 256; i++) {
+		bytes.push_back(uint8_t(i % 251));
+		ints.push_back(i * 7 - 83);
+		big_ints.push_back(int64_t(i) * 10000000 - 1500);
+		floats.push_back(i * 0.25f);
+		doubles.push_back(double(i) * 0.125);
+		strings.push_back(String("item_") + itos(i));
+		vector2s.push_back(Vector2(i, -i));
+		vector3s.push_back(Vector3(i, i * 2, -i));
+		vector4s.push_back(Vector4(i, i + 1, -i, 2));
+		colors.push_back(Color(i / 256.0f, 0.25f, 0.5f, 1.0f));
+	}
+
+	Array packed_inputs;
+	packed_inputs.push_back(bytes);
+	packed_inputs.push_back(ints);
+	packed_inputs.push_back(big_ints);
+	packed_inputs.push_back(floats);
+	packed_inputs.push_back(doubles);
+	packed_inputs.push_back(strings);
+	packed_inputs.push_back(vector2s);
+	packed_inputs.push_back(vector3s);
+	packed_inputs.push_back(vector4s);
+	packed_inputs.push_back(colors);
+
+	for (int i = 0; i < packed_inputs.size(); i++) {
+		const Variant source = packed_inputs[i];
+		const Variant encoded = JSON::from_native(source);
+		const Variant decoded = JSON::to_native(encoded);
+		CHECK_EQ(decoded.get_type(), source.get_type());
+		CHECK_EQ(decoded, source);
+	}
+
+	Dictionary source_dictionary;
+	Array nested_array;
+	for (int i = 0; i < 256; i++) {
+		source_dictionary[itos(i)] = i * 13;
+		nested_array.push_back(i * 5);
+	}
+	source_dictionary["nested"] = nested_array;
+	const Variant encoded_dictionary = JSON::from_native(source_dictionary);
+	const Variant decoded_dictionary = JSON::to_native(encoded_dictionary);
+	REQUIRE_EQ(decoded_dictionary.get_type(), Variant::DICTIONARY);
+	const Dictionary result = decoded_dictionary;
+	REQUIRE_EQ(result.size(), source_dictionary.size());
+	for (int i = 0; i < 256; i++) {
+		CHECK_EQ(result[itos(i)], Variant(i * 13));
+	}
+	const Array decoded_array = result["nested"];
+	REQUIRE_EQ(decoded_array.size(), 256);
+	for (int i = 0; i < 256; i++) {
+		CHECK_EQ(decoded_array[i], Variant(i * 5));
+	}
+}
+
 } // namespace TestJSON
