@@ -260,6 +260,17 @@ public:
 	virtual void joint_disable_collisions_between_bodies(RID p_joint, const bool p_disable) = 0;
 	virtual bool joint_is_disabled_collisions_between_bodies(RID p_joint) const = 0;
 
+	// Joint breaking and reaction forces. Optional: only GodotPhysics2D implements them, other
+	// backends keep these defaults (joints never break, zero reaction).
+	virtual void joint_set_break_force(RID p_joint, real_t p_force) {}
+	virtual real_t joint_get_break_force(RID p_joint) const { return 0.0; }
+	virtual void joint_set_break_torque(RID p_joint, real_t p_torque) {}
+	virtual real_t joint_get_break_torque(RID p_joint) const { return 0.0; }
+	virtual Vector2 joint_get_reaction_force(RID p_joint) const { return Vector2(); }
+	virtual real_t joint_get_reaction_torque(RID p_joint) const { return 0.0; }
+	virtual bool joint_is_broken(RID p_joint) const { return false; }
+	virtual void joint_set_break_callback(RID p_joint, const Callable &p_callable) {}
+
 	virtual void joint_make_pin(RID p_joint, const Vector2 &p_anchor, RID p_body_a, RID p_body_b = RID()) = 0;
 	virtual void joint_make_groove(RID p_joint, const Vector2 &p_a_groove1, const Vector2 &p_a_groove2, const Vector2 &p_b_anchor, RID p_body_a, RID p_body_b) = 0;
 	virtual void joint_make_damped_spring(RID p_joint, const Vector2 &p_anchor_a, const Vector2 &p_anchor_b, RID p_body_a, RID p_body_b = RID()) = 0;

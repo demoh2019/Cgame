@@ -334,6 +334,17 @@ public:
 	virtual void joint_disable_collisions_between_bodies(RID p_joint, bool p_disable) = 0;
 	virtual bool joint_is_disabled_collisions_between_bodies(RID p_joint) const = 0;
 
+	// Joint breaking and reaction forces. Optional: only GodotPhysics3D implements them, other
+	// backends keep these defaults (joints never break, zero reaction).
+	virtual void joint_set_break_force(RID p_joint, real_t p_force) {}
+	virtual real_t joint_get_break_force(RID p_joint) const { return 0.0; }
+	virtual void joint_set_break_torque(RID p_joint, real_t p_torque) {}
+	virtual real_t joint_get_break_torque(RID p_joint) const { return 0.0; }
+	virtual Vector3 joint_get_reaction_force(RID p_joint) const { return Vector3(); }
+	virtual Vector3 joint_get_reaction_torque(RID p_joint) const { return Vector3(); }
+	virtual bool joint_is_broken(RID p_joint) const { return false; }
+	virtual void joint_set_break_callback(RID p_joint, const Callable &p_callable) {}
+
 	virtual void joint_make_pin(RID p_joint, RID p_body_A, const Vector3 &p_local_A, RID p_body_B, const Vector3 &p_local_B) = 0;
 
 	virtual void pin_joint_set_param(RID p_joint, PS3DE::PinJointParam p_param, real_t p_value) = 0;

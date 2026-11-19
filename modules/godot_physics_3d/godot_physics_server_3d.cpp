@@ -1425,6 +1425,97 @@ bool GodotPhysicsServer3D::hinge_joint_get_flag(RID p_joint, PS3DE::HingeJointFl
 	return hinge_joint->get_flag(p_flag);
 }
 
+void GodotPhysicsServer3D::_update_breakable(RID p_joint, GodotJoint3D *p_joint_ptr) {
+	if (p_joint_ptr->can_break()) {
+		breakable_joints.insert(p_joint);
+	} else {
+		breakable_joints.erase(p_joint);
+	}
+}
+
+void GodotPhysicsServer3D::joint_set_break_force(RID p_joint, real_t p_force) {
+	GodotJoint3D *joint = joint_owner.get_or_null(p_joint);
+	ERR_FAIL_NULL(joint);
+	joint->set_break_force(p_force);
+	_update_breakable(p_joint, joint);
+}
+
+real_t GodotPhysicsServer3D::joint_get_break_force(RID p_joint) const {
+	GodotJoint3D *joint = joint_owner.get_or_null(p_joint);
+	ERR_FAIL_NULL_V(joint, 0);
+	return joint->get_break_force();
+}
+
+void GodotPhysicsServer3D::joint_set_break_torque(RID p_joint, real_t p_torque) {
+	GodotJoint3D *joint = joint_owner.get_or_null(p_joint);
+	ERR_FAIL_NULL(joint);
+	joint->set_break_torque(p_torque);
+	_update_breakable(p_joint, joint);
+}
+
+real_t GodotPhysicsServer3D::joint_get_break_torque(RID p_joint) const {
+	GodotJoint3D *joint = joint_owner.get_or_null(p_joint);
+	ERR_FAIL_NULL_V(joint, 0);
+	return joint->get_break_torque();
+}
+
+Vector3 GodotPhysicsServer3D::joint_get_reaction_force(RID p_joint) const {
+	GodotJoint3D *joint = joint_owner.get_or_null(p_joint);
+	ERR_FAIL_NULL_V(joint, Vector3());
+	return joint->get_reaction_force();
+}
+
+Vector3 GodotPhysicsServer3D::joint_get_reaction_torque(RID p_joint) const {
+	GodotJoint3D *joint = joint_owner.get_or_null(p_joint);
+	ERR_FAIL_NULL_V(joint, Vector3());
+	return joint->get_reaction_torque();
+}
+
+bool GodotPhysicsServer3D::joint_is_broken(RID p_joint) const {
+	GodotJoint3D *joint = joint_owner.get_or_null(p_joint);
+	ERR_FAIL_NULL_V(joint, false);
+	return joint->is_broken();
+}
+
+void GodotPhysicsServer3D::joint_set_break_callback(RID p_joint, const Callable &p_callable) {
+	GodotJoint3D *joint = joint_owner.get_or_null(p_joint);
+	ERR_FAIL_NULL(joint);
+	joint->set_break_callback(p_callable);
+}
+
+// Runs after every step: a joint whose last-step reaction exceeded its threshold is detached.
+void GodotPhysicsServer3D::_process_joint_breaks() {
+	if (breakable_joints.is_empty()) {
+		return;
+	}
+	LocalVector<RID> to_break;
+	LocalVector<RID> stale;
+	for (const RID &rid : breakable_joints) {
+		GodotJoint3D *joint = joint_owner.get_or_null(rid);
+		if (!joint) {
+			stale.push_back(rid);
+		} else if (joint->exceeds_break_threshold()) {
+			to_break.push_back(rid);
+		}
+	}
+	for (const RID &rid : stale) {
+		breakable_joints.erase(rid);
+	}
+	for (const RID &rid : to_break) {
+		GodotJoint3D *joint = joint_owner.get_or_null(rid);
+		breakable_joints.erase(rid);
+		joint->break_joint();
+		if (joint->is_disabled_collisions_between_bodies() && joint->get_body_count() == 2) {
+			// The joint no longer holds the bodies together, so they may collide again.
+			GodotBody3D *body_a = joint->get_body_ptr()[0];
+			GodotBody3D *body_b = joint->get_body_ptr()[1];
+			body_remove_collision_exception(body_a->get_self(), body_b->get_self());
+			body_remove_collision_exception(body_b->get_self(), body_a->get_self());
+		}
+		broken_joint_queue.push_back(rid);
+	}
+}
+
 void GodotPhysicsServer3D::joint_set_solver_priority(RID p_joint, int p_priority) {
 	GodotJoint3D *joint = joint_owner.get_or_null(p_joint);
 	ERR_FAIL_NULL(joint);
@@ -1684,6 +1775,7 @@ void GodotPhysicsServer3D::free_rid(RID p_rid) {
 	} else if (joint_owner.owns(p_rid)) {
 		GodotJoint3D *joint = joint_owner.get_or_null(p_rid);
 
+		breakable_joints.erase(p_rid);
 		joint_owner.free(p_rid);
 		memdelete(joint);
 
@@ -1716,6 +1808,7 @@ void GodotPhysicsServer3D::step(real_t p_step) {
 		active_objects += E->get_active_objects();
 		collision_pairs += E->get_collision_pairs();
 	}
+	_process_joint_breaks();
 }
 
 void GodotPhysicsServer3D::sync() {
@@ -1730,6 +1823,25 @@ void GodotPhysicsServer3D::flush_queries() {
 	flushing_queries = true;
 
 	uint64_t time_beg = OS::get_singleton()->get_ticks_usec();
+
+	// Break notifications run here, on the same thread and at the same point as body callbacks.
+	if (!broken_joint_queue.is_empty()) {
+		LocalVector<RID> queue;
+		for (const RID &rid : broken_joint_queue) {
+			queue.push_back(rid);
+		}
+		broken_joint_queue.clear();
+		for (const RID &rid : queue) {
+			GodotJoint3D *joint = joint_owner.get_or_null(rid);
+			if (joint && joint->get_break_callback().is_valid()) {
+				Variant arg = rid;
+				const Variant *args[1] = { &arg };
+				Variant ret;
+				Callable::CallError ce;
+				joint->get_break_callback().callp(args, 1, ret, ce);
+			}
+		}
+	}
 
 	for (GodotSpace3D *E : active_spaces) {
 		GodotSpace3D *space = E;

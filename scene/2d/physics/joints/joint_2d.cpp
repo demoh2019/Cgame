@@ -193,6 +193,45 @@ void Joint2D::_notification(int p_what) {
 	}
 }
 
+void Joint2D::_on_joint_broken(RID p_joint) {
+	// Invoked from the physics server's query flush; defer so scripts never run mid-physics.
+	callable_mp(this, &Joint2D::_emit_broken).call_deferred();
+}
+
+void Joint2D::_emit_broken() {
+	emit_signal(SNAME("broken"));
+}
+
+void Joint2D::set_break_force(real_t p_force) {
+	break_force = MAX(p_force, real_t(0.0));
+	PhysicsServer2D::get_singleton()->joint_set_break_force(joint, break_force);
+}
+
+real_t Joint2D::get_break_force() const {
+	return break_force;
+}
+
+void Joint2D::set_break_torque(real_t p_torque) {
+	break_torque = MAX(p_torque, real_t(0.0));
+	PhysicsServer2D::get_singleton()->joint_set_break_torque(joint, break_torque);
+}
+
+real_t Joint2D::get_break_torque() const {
+	return break_torque;
+}
+
+bool Joint2D::is_broken() const {
+	return PhysicsServer2D::get_singleton()->joint_is_broken(joint);
+}
+
+Vector2 Joint2D::get_reaction_force() const {
+	return PhysicsServer2D::get_singleton()->joint_get_reaction_force(joint);
+}
+
+real_t Joint2D::get_reaction_torque() const {
+	return PhysicsServer2D::get_singleton()->joint_get_reaction_torque(joint);
+}
+
 void Joint2D::set_bias(real_t p_bias) {
 	bias = p_bias;
 	if (joint.is_valid()) {
@@ -243,16 +282,31 @@ void Joint2D::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("set_exclude_nodes_from_collision", "enable"), &Joint2D::set_exclude_nodes_from_collision);
 	ClassDB::bind_method(D_METHOD("get_exclude_nodes_from_collision"), &Joint2D::get_exclude_nodes_from_collision);
 
+	ClassDB::bind_method(D_METHOD("set_break_force", "force"), &Joint2D::set_break_force);
+	ClassDB::bind_method(D_METHOD("get_break_force"), &Joint2D::get_break_force);
+	ClassDB::bind_method(D_METHOD("set_break_torque", "torque"), &Joint2D::set_break_torque);
+	ClassDB::bind_method(D_METHOD("get_break_torque"), &Joint2D::get_break_torque);
+	ClassDB::bind_method(D_METHOD("is_broken"), &Joint2D::is_broken);
+	ClassDB::bind_method(D_METHOD("get_reaction_force"), &Joint2D::get_reaction_force);
+	ClassDB::bind_method(D_METHOD("get_reaction_torque"), &Joint2D::get_reaction_torque);
+
 	ClassDB::bind_method(D_METHOD("get_rid"), &Joint2D::get_rid);
 
 	ADD_PROPERTY(PropertyInfo(Variant::NODE_PATH, "node_a", PROPERTY_HINT_NODE_PATH_VALID_TYPES, "PhysicsBody2D"), "set_node_a", "get_node_a");
 	ADD_PROPERTY(PropertyInfo(Variant::NODE_PATH, "node_b", PROPERTY_HINT_NODE_PATH_VALID_TYPES, "PhysicsBody2D"), "set_node_b", "get_node_b");
 	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "bias", PROPERTY_HINT_RANGE, "0,0.9,0.001"), "set_bias", "get_bias");
 	ADD_PROPERTY(PropertyInfo(Variant::BOOL, "disable_collision"), "set_exclude_nodes_from_collision", "get_exclude_nodes_from_collision");
+
+	ADD_GROUP("Breaking", "break_");
+	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "break_force", PROPERTY_HINT_RANGE, "0,100000,0.001,or_greater,suffix:N"), "set_break_force", "get_break_force");
+	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "break_torque", PROPERTY_HINT_RANGE, U"0,100000,0.001,or_greater,suffix:N\u22C5m"), "set_break_torque", "get_break_torque");
+
+	ADD_SIGNAL(MethodInfo("broken"));
 }
 
 Joint2D::Joint2D() {
 	joint = PhysicsServer2D::get_singleton()->joint_create();
+	PhysicsServer2D::get_singleton()->joint_set_break_callback(joint, callable_mp(this, &Joint2D::_on_joint_broken));
 	set_hide_clip_children(true);
 
 #ifdef DEBUG_ENABLED

@@ -104,7 +104,7 @@ public:
 	virtual PS3DE::JointType get_type() const override { return PS3DE::JOINT_TYPE_CONE_TWIST; }
 
 	virtual bool setup(real_t p_step) override;
-	virtual void solve(real_t p_step) override;
+	virtual void _solve_joint(real_t p_step) override;
 
 	GodotConeTwistJoint3D(GodotBody3D *rbA, GodotBody3D *rbB, const Transform3D &rbAFrame, const Transform3D &rbBFrame);
 

@@ -880,6 +880,35 @@
 				Sets whether the bodies attached to the [Joint3D] will collide with each other.
 			</description>
 		</method>
+		<method name="joint_get_break_force" qualifiers="const">
+			<return type="float" />
+			<param index="0" name="joint" type="RID" />
+			<description>
+				Returns the force threshold set by [method joint_set_break_force].
+			</description>
+		</method>
+		<method name="joint_get_break_torque" qualifiers="const">
+			<return type="float" />
+			<param index="0" name="joint" type="RID" />
+			<description>
+				Returns the torque threshold set by [method joint_set_break_torque].
+			</description>
+		</method>
+		<method name="joint_get_reaction_force" qualifiers="const">
+			<return type="Vector3" />
+			<param index="0" name="joint" type="RID" />
+			<description>
+				Returns the force (in newtons) the joint exerted on its second body during the last physics step it was solved, in world space. Falls back to the negated force on the first body when the second body is static or kinematic.
+				[b]Note:[/b] Only Godot Physics implements this; other backends return a zero vector.
+			</description>
+		</method>
+		<method name="joint_get_reaction_torque" qualifiers="const">
+			<return type="Vector3" />
+			<param index="0" name="joint" type="RID" />
+			<description>
+				Returns the torque (in newton-meters, about the body's center of mass) the joint applied to its second body during the last solved physics step. See [method joint_get_reaction_force].
+			</description>
+		</method>
 		<method name="joint_get_solver_priority" qualifiers="const">
 			<return type="int" />
 			<param index="0" name="joint" type="RID" />
@@ -893,6 +922,13 @@
 			<param index="0" name="joint" type="RID" />
 			<description>
 				Returns the type of the Joint3D.
+			</description>
+		</method>
+		<method name="joint_is_broken" qualifiers="const">
+			<return type="bool" />
+			<param index="0" name="joint" type="RID" />
+			<description>
+				Returns [code]true[/code] if the joint was torn apart after exceeding its break force or torque.
 			</description>
 		</method>
 		<method name="joint_is_disabled_collisions_between_bodies" qualifiers="const">
@@ -951,6 +987,31 @@
 			<param index="3" name="body_B" type="RID" />
 			<param index="4" name="local_ref_B" type="Transform3D" />
 			<description>
+			</description>
+		</method>
+		<method name="joint_set_break_callback">
+			<return type="void" />
+			<param index="0" name="joint" type="RID" />
+			<param index="1" name="callable" type="Callable" />
+			<description>
+				Sets a callback invoked with the joint [RID] after the joint broke. It runs when the server flushes queries, at the same point as body state callbacks.
+			</description>
+		</method>
+		<method name="joint_set_break_force">
+			<return type="void" />
+			<param index="0" name="joint" type="RID" />
+			<param index="1" name="force" type="float" />
+			<description>
+				Sets the force (in newtons) above which the joint breaks. [code]0[/code] disables force breaking. The check uses the reaction measured over the last step. Unbreakable by default.
+				[b]Note:[/b] Only Godot Physics implements joint breaking.
+			</description>
+		</method>
+		<method name="joint_set_break_torque">
+			<return type="void" />
+			<param index="0" name="joint" type="RID" />
+			<param index="1" name="torque" type="float" />
+			<description>
+				Sets the torque (in newton-meters) above which the joint breaks. [code]0[/code] disables torque breaking.
 			</description>
 		</method>
 		<method name="joint_set_solver_priority">

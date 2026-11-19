@@ -394,6 +394,15 @@ public:
 	FUNC2(joint_disable_collisions_between_bodies, RID, bool);
 	FUNC1RC(bool, joint_is_disabled_collisions_between_bodies, RID);
 
+	FUNC2(joint_set_break_force, RID, real_t);
+	FUNC1RC(real_t, joint_get_break_force, RID);
+	FUNC2(joint_set_break_torque, RID, real_t);
+	FUNC1RC(real_t, joint_get_break_torque, RID);
+	FUNC1RC(Vector3, joint_get_reaction_force, RID);
+	FUNC1RC(Vector3, joint_get_reaction_torque, RID);
+	FUNC1RC(bool, joint_is_broken, RID);
+	FUNC2(joint_set_break_callback, RID, const Callable &);
+
 	/* MISC */
 
 	FUNC1(free_rid, RID);

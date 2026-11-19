@@ -440,6 +440,14 @@ void PhysicsServer3D::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("joint_get_solver_priority", "joint"), &PhysicsServer3D::joint_get_solver_priority);
 
 	ClassDB::bind_method(D_METHOD("joint_disable_collisions_between_bodies", "joint", "disable"), &PhysicsServer3D::joint_disable_collisions_between_bodies);
+	ClassDB::bind_method(D_METHOD("joint_set_break_force", "joint", "force"), &PhysicsServer3D::joint_set_break_force);
+	ClassDB::bind_method(D_METHOD("joint_get_break_force", "joint"), &PhysicsServer3D::joint_get_break_force);
+	ClassDB::bind_method(D_METHOD("joint_set_break_torque", "joint", "torque"), &PhysicsServer3D::joint_set_break_torque);
+	ClassDB::bind_method(D_METHOD("joint_get_break_torque", "joint"), &PhysicsServer3D::joint_get_break_torque);
+	ClassDB::bind_method(D_METHOD("joint_get_reaction_force", "joint"), &PhysicsServer3D::joint_get_reaction_force);
+	ClassDB::bind_method(D_METHOD("joint_get_reaction_torque", "joint"), &PhysicsServer3D::joint_get_reaction_torque);
+	ClassDB::bind_method(D_METHOD("joint_is_broken", "joint"), &PhysicsServer3D::joint_is_broken);
+	ClassDB::bind_method(D_METHOD("joint_set_break_callback", "joint", "callable"), &PhysicsServer3D::joint_set_break_callback);
 	ClassDB::bind_method(D_METHOD("joint_is_disabled_collisions_between_bodies", "joint"), &PhysicsServer3D::joint_is_disabled_collisions_between_bodies);
 
 	ClassDB::bind_method(D_METHOD("joint_make_generic_6dof", "joint", "body_A", "local_ref_A", "body_B", "local_ref_B"), &PhysicsServer3D::joint_make_generic_6dof);
