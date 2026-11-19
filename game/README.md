@@ -1579,3 +1579,30 @@ bonuses. The armor is ordinary equippable and tradable full-loot equipment.
 The new `test_warden_jacket.gd` suite checks T3 recipe gates, trophy costs,
 actual zombie damage and wound events, stale equipment, and PvP separation.
 No Cgame core changes are necessary for this feature.
+
+
+## Survival spears T1–T4 — classless long-reach melee equipment
+
+The canonical `game/` world now offers craftable **Survival Spears** at all
+four equipment tiers. Each tier costs 2 matching planks, 1 matching metal bar
+and 2 matching fibers at the workbench. Existing crafting mastery gates higher
+tiers; spears are ordinary gear for inventory, trading, stash and full-loot PvP.
+
+- **Basic spear attacks:** 3.5 m melee reach, 0.86 s attack interval,
+  damage 12/20/28/36 by tier. Clubs remain faster and hit harder up close.
+- **Piercing Thrust (G):** 4.5 m forward reach, 1.45× base spear damage,
+  **25 combat energy**, **5.5 s cooldown**, and **0.9 s attack lock**.
+- The server derives reach, damage and the skill from actually equipped and
+  owned gear; it validates aim vectors, cooldown and combat energy. No RPC
+  accepts client-authored attack reach or damage. Misses still consume energy.
+- Spear kills advance the same persistent melee weapon mastery as clubs.
+  Infected hits, PvP safe zones, group-friendly-fire rules and bleeding remain
+  processed by the existing shared combat and survival code.
+- Online HUD identifies **Piercing Thrust (G)** when a spear is equipped;
+  the local gameplay scene already uses the same server skill command via G.
+
+`game/tests/test_spears.gd` is part of
+`godot --headless --path game --script res://tests/run_all.gd` and checks
+recipes, server-side crafting, range, mastery, cooldown, anti-spam, stale gear
+and safe-zone protection. The current Cgame engine APIs support this feature;
+no changes to the engine core were necessary.

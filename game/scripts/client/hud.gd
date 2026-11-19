@@ -884,7 +884,15 @@ func _process(_delta: float) -> void:
 	var active: Dictionary = Combat.active_skill(weapon)
 	var skill_name: String = "None"
 	if not active.is_empty():
-		skill_name = "Focused Shot (G)" if str(active["id"]) == "focused_shot" else "Heavy Strike (G)"
+		match str(active["id"]):
+			"focused_shot":
+				skill_name = "Focused Shot (G)"
+			"piercing_thrust":
+				skill_name = "Piercing Thrust (G)"
+			"purifying_slam":
+				skill_name = "Purifying Slam (G)"
+			"heavy_strike":
+				skill_name = "Heavy Strike (G)"
 	_equipped.text = "Weapon: %s | Craft L%d (%d XP)\nWood L%d | Stone L%d | Ore L%d | Fiber L%d | Fishing L%d | Scavenging L%d (%d XP)\nMastery: Melee L%d | Ranged L%d\nSkill: %s  Energy %d/%d  Cooldown %.1fs" % [
 		(Defs.item(weapon).get("name", weapon) if weapon != "" else "fists"),
 		int(client.you.get("crafting_level", 1)), int(client.you.get("crafting_xp", 0)),

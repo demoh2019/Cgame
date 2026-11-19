@@ -1477,7 +1477,7 @@ func cmd_attack(peer_id: int, dir_x: float, dir_z: float) -> Dictionary:
 	# Mastery is server-owned. Missing/ghost equipment grants no bonus.
 	if weapon != "" and player.inventory.count(weapon) > 0:
 		damage *= player.progression.combat_damage_multiplier(weapon)
-	var reach := Defs.MELEE_RANGE
+	var reach: float = Combat.weapon_reach(weapon)
 	if kind == "ranged":
 		var ammo: String = Defs.item(weapon).get("ammo", "")
 		if player.inventory.count(ammo) < 1:

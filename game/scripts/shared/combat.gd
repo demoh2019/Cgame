@@ -52,6 +52,12 @@ static func against_infected(damage: float, weapon_id: String, owned: bool) -> f
 	return damage * (1.0 + clampf(trait, 0.0, 0.5))
 
 
+## Reach is configured by the carried weapon on the server.
+static func weapon_reach(weapon_id: String) -> float:
+	return clampf(float(Defs.item(weapon_id).get("reach", Defs.MELEE_RANGE)),
+		Defs.MELEE_RANGE, Defs.MELEE_RANGE + 1.3)
+
+
 static func weapon_cooldown(weapon_id: String) -> float:
 	if weapon_id == "":
 		return 0.6
@@ -68,6 +74,11 @@ static func active_skill(weapon_id: String) -> Dictionary:
 		return {"id": "purifying_slam", "energy_cost": 35.0, "cooldown": 8.0,
 			"attack_lock": 1.1, "range": Defs.MELEE_RANGE + 0.8,
 			"damage": weapon_damage(weapon_id) * 1.5,
+			"ranged": false}
+	if weapon_id.begins_with("spear_") and str(info.get("weapon", "")) == "melee":
+		return {"id": "piercing_thrust", "energy_cost": 25.0, "cooldown": 5.5,
+			"attack_lock": 0.9, "range": weapon_reach(weapon_id) + 1.0,
+			"damage": weapon_damage(weapon_id) * 1.45,
 			"ranged": false}
 	if weapon_id.begins_with("club_") and str(info.get("weapon", "")) == "melee":
 		return {"id": "heavy_strike", "energy_cost": 30.0, "cooldown": 6.0,

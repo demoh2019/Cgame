@@ -182,6 +182,15 @@ static func _build_items() -> void:
 			club_inputs["bar_%d" % t] = 1
 		_add_item("club_%d" % t, {"name": "Club T%d" % t, "kind": "weapon", "weapon": "melee", "tier": t, "damage": 14.0 + 9.0 * (t - 1), "cooldown": 0.7, "value": 40 * t})
 		_add_recipe("club_%d" % t, "club_%d" % t, 1, club_inputs, "workbench", 5.0)
+		# Craftable reach weapon across all existing gathering/crafting tiers.
+		var spear_inputs: Dictionary = {
+			"plank_%d" % t: 2, "bar_%d" % t: 1, "fiber_%d" % t: 2}
+		_add_item("spear_%d" % t, {"name": "Survival Spear T%d" % t,
+			"kind": "weapon", "weapon": "melee", "tier": t,
+			"damage": 12.0 + 8.0 * (t - 1), "cooldown": 0.86,
+			"reach": 3.5, "weight": 3.6, "value": 54 * t})
+		_add_recipe("spear_%d" % t, "spear_%d" % t, 1,
+			spear_inputs, "workbench", 6.0)
 		# Armour: reduces incoming damage.
 		_add_item("jacket_%d" % t, {"name": "Jacket T%d" % t, "kind": "armor", "tier": t, "armor": 0.08 + 0.07 * (t - 1), "value": 35 * t})
 		_add_recipe("jacket_%d" % t, "jacket_%d" % t, 1, {"cloth_%d" % t: 4}, "workbench", 5.0)
