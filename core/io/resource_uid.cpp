@@ -383,7 +383,8 @@ Error ResourceUID::load_from_cache(bool p_reset) {
 	for (uint32_t i = 0; i < entry_count; i++) {
 		int64_t id = f->get_64();
 		int32_t len = f->get_32();
-		ERR_FAIL_COND_V_MSG(len < 0 || f->get_position() > file_length || uint64_t(len) > file_length - f->get_position(), ERR_FILE_CORRUPT, "Resource UID cache has an invalid path length.");
+		const uint64_t path_position = f->get_position();
+		ERR_FAIL_COND_V_MSG(len < 0 || path_position > file_length || uint64_t(len) > file_length - path_position, ERR_FILE_CORRUPT, "Resource UID cache has an invalid path length.");
 		Cache c;
 		c.cs.resize_uninitialized(len + 1);
 		ERR_FAIL_COND_V(c.cs.size() != len + 1, ERR_FILE_CORRUPT); // Out of memory.
