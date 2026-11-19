@@ -30,6 +30,7 @@
 
 #include "godot_collision_object_2d.h"
 #include "servers/physics_ccd_rotational_bounds.h"
+#include "servers/physics_ccd_tight_rotational_bounds.h"
 
 #include "godot_physics_server_2d.h"
 #include "godot_space_2d.h"
@@ -238,10 +239,18 @@ void GodotCollisionObject2D::_update_shapes_with_motion(const Vector2 &p_motion,
 		shape_aabb = xform.xform(shape_aabb);
 		// Every point on a rotating collider remains within this expanded
 		// translated AABB. Use its farthest starting corner from the world COM.
-		const real_t rotation_padding = godot_physics_ccd_rotational_padding(shape_aabb, p_rotation_pivot, rotation_factor);
-		shape_aabb = shape_aabb.merge(Rect2(shape_aabb.position + p_motion, shape_aabb.size));
-		if (rotation_padding > real_t(0.0)) {
-			shape_aabb = shape_aabb.grow(rotation_padding);
+		if (rotation_factor > real_t(0.0) && space->is_ccd_tight_rotational_bounds_enabled()) {
+			// Analytic extremal arcs of each world AABB corner; contains all
+			// intermediate rotations and translations without radial overgrowth.
+			shape_aabb = godot_physics_ccd_tight_rotational_bounds(
+					shape_aabb, p_rotation_pivot, p_angular_displacement, p_motion);
+		} else {
+			// Preserve the existing chord-padding path for legacy projects.
+			const real_t rotation_padding = godot_physics_ccd_rotational_padding(shape_aabb, p_rotation_pivot, rotation_factor);
+			shape_aabb = shape_aabb.merge(Rect2(shape_aabb.position + p_motion, shape_aabb.size));
+			if (rotation_padding > real_t(0.0)) {
+				shape_aabb = shape_aabb.grow(rotation_padding);
+			}
 		}
 		// Skip the BVH lookup and lock if the proxy bounds are unchanged.
 		// The swept AABB and ordinary AABB are cached independently per update.
