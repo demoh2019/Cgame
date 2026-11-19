@@ -122,4 +122,44 @@ func _run_write_tests() -> void:
 		if FileAccess.file_exists(backup):
 			_expect(FileAccess.get_file_as_string(backup) == "original", "backup retains original data")
 
+
+	# Preflight is all-or-nothing even when the last destination already exists.
+	var two := {
+		"files": [
+			{"path": "tests/_ai_builder_first.txt", "content": "first"},
+			{"path": relative, "content": "must not overwrite"}
+		]
+	}
+	_expect(not Plan.apply_plan(two, false)["ok"], "preflight rejects conflicts before writing")
+	_expect(not FileAccess.file_exists("res://tests/_ai_builder_first.txt"), "preflight created no partial new file")
+
+	# Exercise best-effort rollback with both an overwritten and a new file.
+	var added_path := "tests/_ai_builder_rollback_new.txt"
+	var old_path := "tests/_ai_builder_rollback_old.txt"
+	var old_file := FileAccess.open("res://" + old_path, FileAccess.WRITE)
+	if old_file != null:
+		old_file.store_string("before")
+		old_file.close()
+	var backup_dir := "user://ai_game_builder_test_rollback"
+	DirAccess.make_dir_recursive_absolute(backup_dir.path_join("tests"))
+	_expect(DirAccess.copy_absolute("res://" + old_path, backup_dir.path_join(old_path)) == OK, "prepare overwrite backup")
+	var replaced_file := FileAccess.open("res://" + old_path, FileAccess.WRITE)
+	if replaced_file != null:
+		replaced_file.store_string("after")
+		replaced_file.close()
+	var new_file := FileAccess.open("res://" + added_path, FileAccess.WRITE)
+	if new_file != null:
+		new_file.store_string("new")
+		new_file.close()
+	var writes: Array[String] = [old_path, added_path]
+	var overwritten: Array[String] = [old_path]
+	var recovery := Plan._write_failed("Injected test failure", writes, overwritten, backup_dir)
+	_expect(not recovery["ok"], "injected failure is reported")
+	_expect(recovery["rolled_back"], "rollback reports restored state")
+	_expect(FileAccess.get_file_as_string("res://" + old_path) == "before", "rollback restored original content")
+	_expect(not FileAccess.file_exists("res://" + added_path), "rollback removed new file")
+	DirAccess.remove_absolute("res://" + old_path)
+	DirAccess.remove_absolute(backup_dir.path_join(old_path))
+	DirAccess.remove_absolute(backup_dir.path_join("tests"))
+	DirAccess.remove_absolute(backup_dir)
 	DirAccess.remove_absolute(absolute)
