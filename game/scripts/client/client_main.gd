@@ -7,6 +7,7 @@ const Defs = preload("res://scripts/shared/defs.gd")
 const WorldGen = preload("res://scripts/shared/world_gen.gd")
 const GameServer = preload("res://scripts/server/game_server.gd")
 const Vendor = preload("res://scripts/shared/vendor.gd")
+const Contracts = preload("res://scripts/shared/contracts.gd")
 const LOCAL_PLAYER_ID := 2
 const TERRAIN_STEP := 8.0
 
@@ -80,6 +81,7 @@ func _setup_actions() -> void:
 	_bind_key("survive_bank_next", KEY_J)
 	_bind_key("survive_bank_deposit", KEY_K)
 	_bind_key("survive_bank_withdraw", KEY_L)
+	_bind_key("survive_contract", KEY_M)
 
 
 func _bind_key(action: StringName, key: Key) -> void:
@@ -571,6 +573,10 @@ func _unhandled_input(event: InputEvent) -> void:
 		else:
 			_result("Repair barricade", sim.cmd_repair(LOCAL_PLAYER_ID, wall_id))
 
+	elif event.is_action_pressed("survive_contract"):
+		var action := "claim" if Input.is_key_pressed(KEY_SHIFT) else "accept"
+		var response: Dictionary = sim.cmd_contract(LOCAL_PLAYER_ID, action)
+		_feedback = ("Contract: %s" % str(response.get("title", response.get("reason", "updated"))))
 	elif event.is_action_pressed("survive_vendor_buy"):
 		_result("Buy water (12 silver)", sim.cmd_vendor(LOCAL_PLAYER_ID, "water_bottle", 1, true))
 	elif event.is_action_pressed("survive_vendor_sell"):
@@ -595,19 +601,19 @@ func _update_hud() -> void:
 	var weight: float = survivor.inventory.total_weight()
 	var speed_pct: int = int(round(survivor.inventory.movement_factor() * 100.0))
 	var risk: String = "SAFE HUB" if world.is_safe(position.x, position.z) else "PVP + FULL LOOT"
-	_stats.text = "ALBION AFTER | SURVIVAL SANDBOX\nHP %d HUNGER %d THIRST %d STAMINA %d KILLS %d\nCOMBAT ENERGY %d/%d SKILL CD %.1fs WEAPON %s\nZONE %s (T%d) %s POS %d,%d ZOMBIES %d\nPROFESSIONS Wood T%d Stone T%d Ore T%d Fiber T%d Craft T%d\nCARRY %.1f kg MOVEMENT %d%% SILVER %d\nINVENTORY %s" % [
+	_stats.text = "ALBION AFTER | SURVIVAL SANDBOX\nHP %d HUNGER %d THIRST %d STAMINA %d KILLS %d\nCOMBAT ENERGY %d/%d SKILL CD %.1fs WEAPON %s\nZONE %s (T%d) %s POS %d,%d ZOMBIES %d\nPROFESSIONS Wood T%d Stone T%d Ore T%d Fiber T%d Craft T%d\nCARRY %.1f kg MOVEMENT %d%% SILVER %d\nCONTRACT %s\nINVENTORY %s" % [
 		int(vitals.health), int(vitals.hunger), int(vitals.thirst), int(vitals.stamina), survivor.kills,
 		int(survivor.combat_energy), int(Defs.COMBAT_ENERGY_MAX), survivor.skill_timer,
 		survivor.inventory.weapon if not survivor.inventory.weapon.is_empty() else "unarmed",
 		Defs.ZONE_NAMES[zone], WorldGen.tier_for_zone(zone), risk, int(position.x), int(position.z), sim.zombies.size(),
 		int(levels["wood"]), int(levels["stone"]), int(levels["ore"]), int(levels["fiber"]),
 		survivor.progression.crafting_level(), weight, speed_pct, survivor.inventory.count("silver"),
-		", ".join(rows)
+		Contracts.description(survivor.contract_state), ", ".join(rows)
 	]
 	var recipe_id: String = _recipes[_recipe_index] if not _recipes.is_empty() else "bandage"
 	var recipe: Dictionary = Defs.recipes().get(recipe_id, {})
 	var near_bench: bool = Vector2(position.x, position.z).distance_to(GameServer.WORKBENCH_POSITION) < GameServer.WORKBENCH_RANGE
-	_instructions.text = "WASD move | Shift sprint | E gather | Q loot | F attack | G heavy strike | U build | H repair\nTab / Shift+Tab recipes | C craft | B stash | 1 food 2 water 3 heal 4 weapon 5 armor R lake\nN buy water / V sell salvage at hub\nCRAFT %s -> %s x%d | %s | inputs %s\n%s" % [
+	_instructions.text = "WASD move | Shift sprint | E gather | Q loot | F attack | G heavy strike | U build | H repair\nTab / Shift+Tab recipes | C craft | B stash | 1 food 2 water 3 heal 4 weapon 5 armor R lake\nN buy water / V sell salvage | M accept / Shift+M turn in (hub)\nCRAFT %s -> %s x%d | %s | inputs %s\n%s" % [
 		recipe_id, str(recipe.get("output", "")), int(recipe.get("count", 0)),
 		"WORKBENCH" if near_bench else "workbench at x=9, z=0",
 		str(recipe.get("inputs", {})), _feedback
