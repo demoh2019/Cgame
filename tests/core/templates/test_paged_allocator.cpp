@@ -32,6 +32,8 @@ TEST_FORCE_LINK(test_paged_allocator)
 
 #include "core/templates/paged_allocator.h"
 
+#include <memory>
+#include <utility>
 #include <vector>
 
 namespace TestPagedAllocator {
@@ -132,6 +134,87 @@ TEST_CASE("[PagedAllocator] Reset and reconfigure clear metadata capacity") {
 		pool.free(values[i]);
 	}
 	pool.reset();
+}
+
+struct MoveOnlyPageItem {
+	std::unique_ptr<int> payload;
+
+	explicit MoveOnlyPageItem(std::unique_ptr<int> p_payload) :
+			payload(std::move(p_payload)) {}
+};
+
+struct CountingPageArgument {
+	inline static int copies = 0;
+	inline static int moves = 0;
+	int value;
+
+	explicit CountingPageArgument(int p_value) :
+			value(p_value) {}
+	CountingPageArgument(const CountingPageArgument &p_other) :
+			value(p_other.value) {
+		copies++;
+	}
+	CountingPageArgument(CountingPageArgument &&p_other) noexcept :
+			value(p_other.value) {
+		moves++;
+		p_other.value = -1;
+	}
+};
+
+struct ForwardedPageItem {
+	CountingPageArgument payload;
+
+	explicit ForwardedPageItem(CountingPageArgument p_payload) :
+			payload(std::move(p_payload)) {}
+};
+
+template <bool THREAD_SAFE>
+static void test_perfect_forwarding() {
+	PagedAllocator<MoveOnlyPageItem, THREAD_SAFE, 2> move_only_pool(2);
+
+	std::unique_ptr<int> owned = std::make_unique<int>(71);
+	MoveOnlyPageItem *first = move_only_pool.alloc(std::move(owned));
+	REQUIRE(first != nullptr);
+	REQUIRE(first->payload != nullptr);
+	CHECK(owned == nullptr);
+	CHECK(*first->payload == 71);
+
+	MoveOnlyPageItem *second = move_only_pool.new_allocation(std::make_unique<int>(42));
+	REQUIRE(second != nullptr);
+	REQUIRE(second->payload != nullptr);
+	CHECK(*second->payload == 42);
+	move_only_pool.free(first);
+	move_only_pool.delete_allocation(second);
+	move_only_pool.reset();
+
+	CountingPageArgument::copies = 0;
+	CountingPageArgument::moves = 0;
+	PagedAllocator<ForwardedPageItem, THREAD_SAFE, 2> tracked_pool(2);
+	CountingPageArgument arg(11);
+	ForwardedPageItem *copied = tracked_pool.alloc(arg);
+	CHECK(arg.value == 11);
+	CHECK(copied->payload.value == 11);
+	CHECK(CountingPageArgument::copies == 1);
+
+	ForwardedPageItem *moved = tracked_pool.new_allocation(std::move(arg));
+	CHECK(moved->payload.value == 11);
+	CHECK(arg.value == -1);
+	// The rvalue must not be copied by either allocation wrapper.
+	CHECK(CountingPageArgument::copies == 1);
+	CHECK(CountingPageArgument::moves >= 2);
+
+	tracked_pool.delete_allocation(copied);
+	tracked_pool.free(moved);
+	tracked_pool.reset();
+}
+
+TEST_CASE("[PagedAllocator] Perfect forwarding avoids copies and accepts move-only arguments") {
+	SUBCASE("Single-threaded") {
+		test_perfect_forwarding<false>();
+	}
+	SUBCASE("Thread-safe allocator") {
+		test_perfect_forwarding<true>();
+	}
 }
 
 } // namespace TestPagedAllocator

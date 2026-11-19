@@ -894,7 +894,7 @@ TEST_SUITE("[ClassDB]") {
 }
 
 TEST_CASE("[CoreBind] Class metadata array conversion retains entries and order") {
-	CoreBind::ClassDB api;
+	CoreBind::Special::ClassDB api;
 	const StringName classes[] = { "Object", "RefCounted", "Node" };
 	for (const StringName &class_name : classes) {
 		List<MethodInfo> methods;
@@ -927,6 +927,31 @@ TEST_CASE("[CoreBind] Class metadata array conversion retains entries and order"
 			CHECK_EQ(item["name"], Variant(signal.name));
 		}
 	}
+}
+
+TEST_CASE("[ClassDB] Preallocated reflection arguments match registered MethodBind signatures") {
+	const StringName class_names[] = { "Object", "RefCounted", "Node" };
+	int verified_methods = 0;
+	for (const StringName &class_name : class_names) {
+		List<MethodInfo> methods;
+		ClassDB::get_method_list(class_name, &methods, true);
+		REQUIRE(methods.size() > 0);
+		for (const MethodInfo &method : methods) {
+			const MethodBind *binding = ClassDB::get_method(class_name, method.name);
+			if (!binding) {
+				continue; // Virtual methods do not have regular MethodBinds.
+			}
+			REQUIRE_EQ(method.arguments.size(), binding->get_argument_count());
+			for (int arg_idx = 0; arg_idx < binding->get_argument_count(); arg_idx++) {
+				const PropertyInfo expected = binding->get_argument_info(arg_idx);
+				CHECK_EQ(method.arguments[arg_idx].name, expected.name);
+				CHECK_EQ(method.arguments[arg_idx].type, expected.type);
+				CHECK_EQ(method.arguments[arg_idx].hint, expected.hint);
+			}
+			verified_methods++;
+		}
+	}
+	CHECK(verified_methods > 20);
 }
 
 } // namespace TestClassDB

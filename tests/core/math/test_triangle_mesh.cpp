@@ -219,6 +219,152 @@ TEST_CASE("[SceneTree][TriangleMesh][Performance] Convex containment reuses tran
 	CHECK_FALSE(single->inside_convex_shape(planes, 6, hull, 8, Vector3(10, 10, 10)));
 }
 
+
+TEST_CASE("[TriangleMesh][Regression] Compact BVH references nodes by index and preserves surface IDs") {
+	// Each face stores the same surface ID for all three of its vertices.
+	// Verify that the ID is read at face * 3, not face, while the BVH's
+	// leaves and internal nodes reference actual compact node indices.
+	const int face_count = 37;
+	Vector<Vector3> faces;
+	Vector<int32_t> metadata;
+	REQUIRE(faces.resize_uninitialized(face_count * 3) == OK);
+	REQUIRE(metadata.resize_uninitialized(face_count * 3) == OK);
+	Vector3 *const points = faces.ptrw();
+	int32_t *const surface = metadata.ptrw();
+	for (int i = 0; i < face_count; i++) {
+		const real_t x = real_t(i * 3);
+		points[i * 3] = Vector3(x, 0, 0);
+		points[i * 3 + 1] = Vector3(x + 1, 0, 0);
+		points[i * 3 + 2] = Vector3(x, 1, 0);
+		for (int vertex = 0; vertex < 3; vertex++) {
+			surface[i * 3 + vertex] = (i * 5 + 3) % 11;
+		}
+	}
+	Ref<TriangleMesh> mesh;
+	mesh.instantiate();
+	mesh->create(faces, metadata);
+	REQUIRE(mesh->is_valid());
+	REQUIRE(mesh->get_triangles().size() == face_count);
+	REQUIRE(mesh->get_bvh().size() == 2 * face_count - 1);
+	for (int i = 0; i < face_count; i++) {
+		CHECK(mesh->get_triangles()[i].surface_index == (i * 5 + 3) % 11);
+		Vector3 hit_position;
+		Vector3 hit_normal;
+		int32_t hit_surface = -1;
+		int32_t hit_face = -1;
+		const Vector3 origin(real_t(i * 3) + real_t(0.25), real_t(0.25), 10);
+		REQUIRE(mesh->intersect_ray(origin, Vector3(0, 0, -1), hit_position, hit_normal, &hit_surface, &hit_face));
+		CHECK(hit_face == i);
+		CHECK(hit_surface == (i * 5 + 3) % 11);
+		CHECK(hit_position.is_equal_approx(Vector3(origin.x, origin.y, 0)));
+	}
+}
+
+
+TEST_CASE("[TriangleMesh][Performance] Repeated BVH builds overwrite uninitialized scratch safely") {
+	Ref<TriangleMesh> mesh;
+	mesh.instantiate();
+	// Grow, shrink and regrow all four internal buffers. Each run must
+	// initialize every referenced triangle, vertex and BVH node.
+	const int face_counts[] = { 128, 1, 37, 2, 257, 8 };
+	for (int face_count : face_counts) {
+		Vector<Vector3> input;
+		REQUIRE(input.resize_uninitialized(face_count * 3) == OK);
+		Vector3 *const positions = input.ptrw();
+		for (int i = 0; i < face_count; i++) {
+			const real_t x = real_t(i * 3);
+			positions[i * 3 + 0] = Vector3(x, 0, 0);
+			positions[i * 3 + 1] = Vector3(x + 1, 0, 0);
+			positions[i * 3 + 2] = Vector3(x, 1, 0);
+		}
+		mesh->create(input);
+		REQUIRE(mesh->is_valid());
+		REQUIRE(mesh->get_bvh().size() == face_count * 2 - 1);
+		REQUIRE(mesh->get_triangles().size() == face_count);
+		REQUIRE(mesh->get_vertices().size() == face_count * 3);
+		const Vector<Face3> output = mesh->get_faces();
+		REQUIRE(output.size() == face_count);
+		for (int i = 0; i < face_count; i++) {
+			for (int corner = 0; corner < 3; corner++) {
+				CHECK(output[i].vertex[corner] == positions[i * 3 + corner]);
+			}
+			CHECK(mesh->get_triangles()[i].surface_index == 0);
+		}
+
+		// Check that leaves from an earlier, larger BVH cannot leak into a
+		// smaller rebuilt tree and that all child references are valid.
+		const Vector<TriangleMesh::BVH> &nodes = mesh->get_bvh();
+		int leaves = 0;
+		for (int n = 0; n < nodes.size(); n++) {
+			const TriangleMesh::BVH &node = nodes[n];
+			if (node.face_index >= 0) {
+				REQUIRE(node.face_index < face_count);
+				leaves++;
+			} else {
+				CHECK(node.left >= 0);
+				CHECK(node.right >= 0);
+				CHECK(node.left < n);
+				CHECK(node.right < n);
+			}
+		}
+		CHECK(leaves == face_count);
+		for (int i : { 0, face_count / 2, face_count - 1 }) {
+			const Vector3 from(real_t(i * 3) + real_t(0.25), real_t(0.25), 2);
+			Vector3 hit;
+			Vector3 normal;
+			int32_t face_index = -1;
+			CHECK(mesh->intersect_ray(from, Vector3(0, 0, -1), hit, normal, nullptr, &face_index));
+			CHECK(face_index == i);
+			CHECK(hit.is_equal_approx(Vector3(from.x, from.y, 0)));
+		}
+	}
+}
+
+
+TEST_CASE("[TriangleMesh][Performance] Face extraction fills all uninitialized destination elements") {
+	const int triangle_count = 193;
+	Vector<Vector3> input;
+	REQUIRE(input.resize_uninitialized(triangle_count * 3) == OK);
+	Vector3 *const original = input.ptrw();
+	for (int i = 0; i < triangle_count; i++) {
+		const real_t x = real_t(i * 3);
+		original[i * 3] = Vector3(x, 0, 0);
+		original[i * 3 + 1] = Vector3(x + 1, 0, 0);
+		original[i * 3 + 2] = Vector3(x, 1, 0);
+	}
+	Ref<TriangleMesh> mesh;
+	mesh.instantiate();
+	mesh->create(input);
+	REQUIRE(mesh->is_valid());
+
+	for (int repeat = 0; repeat < 3; repeat++) {
+		const Vector<Face3> faces = mesh->get_faces();
+		const Vector<Vector3> script_faces = mesh->get_faces_scriptwrap();
+		Vector<int> indices;
+		mesh->get_indices(&indices);
+		REQUIRE(faces.size() == triangle_count);
+		REQUIRE(script_faces.size() == triangle_count * 3);
+		REQUIRE(indices.size() == triangle_count * 3);
+		const Vector<Vector3> &vertices = mesh->get_vertices();
+		for (int i = 0; i < triangle_count; i++) {
+			for (int j = 0; j < 3; j++) {
+				const int at = i * 3 + j;
+				CHECK(faces[i].vertex[j] == original[at]);
+				CHECK(script_faces[at] == original[at]);
+				REQUIRE(indices[at] >= 0);
+				REQUIRE(indices[at] < vertices.size());
+				CHECK(vertices[indices[at]] == original[at]);
+			}
+		}
+	}
+
+	// Empty mesh getters remain allocation-free and return empty arrays.
+	Ref<TriangleMesh> empty;
+	empty.instantiate();
+	CHECK(empty->get_faces().is_empty());
+	CHECK(empty->get_faces_scriptwrap().is_empty());
+}
+
 } // namespace TestTriangleMesh
 
 #endif // _3D_DISABLED

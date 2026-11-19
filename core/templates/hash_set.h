@@ -153,10 +153,23 @@ private:
 	}
 
 	void _resize_and_rehash(uint32_t p_new_capacity_idx) {
+		const uint32_t old_capacity = hash_table_size_primes[_capacity_idx];
 		// Capacity can't be 0.
 		_capacity_idx = MAX((uint32_t)MIN_CAPACITY_INDEX, p_new_capacity_idx);
 
 		uint32_t capacity = hash_table_size_primes[_capacity_idx];
+
+		// A previously cleared set already has an empty hash table.
+		// Reuse its four allocations rather than creating two fresh
+		// tables and copying/zeroing the old address space again.
+		if (_keys != nullptr && _size == 0 && capacity > old_capacity) {
+			_hashes = reinterpret_cast<uint32_t *>(Memory::realloc_static(_hashes, sizeof(uint32_t) * capacity));
+			_keys = reinterpret_cast<TKey *>(Memory::realloc_static(_keys, sizeof(TKey) * capacity));
+			_key_idx_to_hash_idx = reinterpret_cast<uint32_t *>(Memory::realloc_static(_key_idx_to_hash_idx, sizeof(uint32_t) * capacity));
+			_hash_idx_to_key_idx = reinterpret_cast<uint32_t *>(Memory::realloc_static(_hash_idx_to_key_idx, sizeof(uint32_t) * capacity));
+			memset(_hashes + old_capacity, EMPTY_HASH, sizeof(uint32_t) * (capacity - old_capacity));
+			return;
+		}
 
 		uint32_t *old_hashes = _hashes;
 		uint32_t *old_key_to_hash = _key_idx_to_hash_idx;
@@ -249,8 +262,17 @@ public:
 			return;
 		}
 
-		uint32_t capacity = hash_table_size_primes[_capacity_idx];
-		memset(_hashes, EMPTY_HASH, sizeof(EMPTY_HASH) * capacity);
+		const uint32_t capacity = hash_table_size_primes[_capacity_idx];
+		// A pre-reserved set can be mostly empty. In that case, clearing
+		// only the occupied hash slots avoids touching the whole table.
+		// Keep the contiguous memset for dense sets, where it is faster.
+		if (_size <= capacity / 32) {
+			for (uint32_t i = 0; i < _size; i++) {
+				_hashes[_key_idx_to_hash_idx[i]] = EMPTY_HASH;
+			}
+		} else {
+			memset(_hashes, EMPTY_HASH, sizeof(EMPTY_HASH) * capacity);
+		}
 
 		if constexpr (!std::is_trivially_destructible_v<TKey>) {
 			for (uint32_t i = 0; i < _size; i++) {

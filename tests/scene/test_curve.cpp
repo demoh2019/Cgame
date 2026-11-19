@@ -455,4 +455,150 @@ TEST_CASE("[Curve] Hot-path index search keeps single and empty curves safe") {
 	CHECK(Math::is_equal_approx(curve->sample(2), (real_t)0.75));
 }
 
+
+TEST_CASE("[Curve][Performance] Rebaking reuses the cache and overwrites all sample endpoints") {
+	Ref<Curve> curve = memnew(Curve);
+	curve->add_point(Vector2(0, 0));
+	curve->add_point(Vector2(1, 1));
+	curve->set_bake_resolution(257);
+
+	for (int iteration = 0; iteration <= 100; iteration++) {
+		const real_t last = iteration / real_t(100);
+		curve->set_point_value(1, last);
+		curve->bake();
+		CHECK(Math::is_equal_approx(curve->sample_baked(0), (real_t)0));
+		CHECK(Math::is_equal_approx(curve->sample_baked(1), last));
+		CHECK(Math::is_equal_approx(curve->sample_baked(0.5), curve->sample(0.5)));
+	}
+
+	// Reusing memory must not expose old samples after all points are removed.
+	curve->clear_points();
+	curve->bake();
+	CHECK(curve->sample_baked(0) == 0);
+	CHECK(curve->sample_baked(0.5) == 0);
+	CHECK(curve->sample_baked(1) == 0);
+
+	// Resolution changes should still resize correctly, even when only one
+	// baked element is requested and both endpoints alias the same slot.
+	curve->add_point(Vector2(0, 0.25));
+	curve->add_point(Vector2(1, 0.75));
+	curve->set_bake_resolution(1);
+	curve->bake();
+	CHECK(Math::is_equal_approx(curve->sample_baked(0.5), (real_t)0.75));
+
+	curve->set_bake_resolution(512);
+	curve->bake();
+	CHECK(Math::is_equal_approx(curve->sample_baked(0), (real_t)0.25));
+	CHECK(Math::is_equal_approx(curve->sample_baked(1), (real_t)0.75));
+}
+
+
+TEST_CASE("[Curve] Monotone baking matches direct sampling over hundreds of points") {
+	Ref<Curve> curve = memnew(Curve);
+	curve->set_bake_resolution(1000);
+	for (int i = 0; i <= 256; i++) {
+		const real_t x = real_t(i) / 256.0;
+		const real_t y = real_t((i * 73) % 257) / 257.0;
+		curve->add_point(Vector2(x, y), -real_t(i % 5) / 7.0, real_t(i % 7) / 11.0);
+	}
+	curve->bake();
+	for (int i = 1; i < 999; i++) {
+		const real_t x = curve->get_domain_range() * i / real_t(999) + curve->get_min_domain();
+		CHECK(curve->sample_baked(x) == doctest::Approx(curve->sample(x)).epsilon(0.0001));
+	}
+
+	// Rebaking reuses the cache and must still produce current samples.
+	curve->set_point_value(128, real_t(0.75));
+	curve->bake();
+	for (int i = 1; i < 999; i += 7) {
+		const real_t x = curve->get_domain_range() * i / real_t(999) + curve->get_min_domain();
+		CHECK(curve->sample_baked(x) == doctest::Approx(curve->sample(x)).epsilon(0.0001));
+	}
+}
+
+TEST_CASE("[Curve] Monotone baking preserves overlapping control points") {
+	Ref<Curve> curve = memnew(Curve);
+	curve->add_point(Vector2(0, 0.1));
+	curve->add_point(Vector2(0.5, 0.4));
+	curve->add_point(Vector2(0.5, 0.6));
+	curve->add_point(Vector2(1, 0.9));
+	curve->set_bake_resolution(101);
+	curve->bake();
+	for (int i = 1; i < 100; i++) {
+		const real_t x = real_t(i) / 100.0;
+		CHECK(curve->sample_baked(x) == doctest::Approx(curve->sample(x)).epsilon(0.0001));
+	}
+}
+
+TEST_CASE("[Curve][Performance] Linear tangents reuse direct segment slope") {
+	Ref<Curve> curve = memnew(Curve);
+	constexpr int COUNT = 128;
+	for (int i = 0; i < COUNT; ++i) {
+		const real_t x = real_t(i) / real_t(COUNT - 1);
+		const real_t y = real_t((i * 47) % COUNT) / real_t(COUNT);
+		curve->add_point(Vector2(x, y), 0, 0, Curve::TANGENT_LINEAR, Curve::TANGENT_LINEAR);
+	}
+	REQUIRE(curve->get_point_count() == COUNT);
+	for (int i = 1; i < COUNT; ++i) {
+		const Vector2 a = curve->get_point_position(i - 1);
+		const Vector2 b = curve->get_point_position(i);
+		const real_t expected_slope = (b.y - a.y) / (b.x - a.x);
+		CHECK(curve->get_point_right_tangent(i - 1) == doctest::Approx(expected_slope).epsilon(0.0001));
+		CHECK(curve->get_point_left_tangent(i) == doctest::Approx(expected_slope).epsilon(0.0001));
+	}
+	curve->set_point_value(63, 0.25);
+	for (int i = 63; i <= 64; ++i) {
+		const Vector2 a = curve->get_point_position(i - 1);
+		const Vector2 b = curve->get_point_position(i);
+		CHECK(curve->get_point_left_tangent(i) == doctest::Approx((b.y - a.y) / (b.x - a.x)).epsilon(0.0001));
+	}
+}
+
+
+TEST_CASE("[Curve] Cleaning duplicates retains strictly increasing points") {
+	Ref<Curve> curve = memnew(Curve);
+	for (int i = 0; i <= 128; i++) {
+		const real_t x = real_t(i) / real_t(128);
+		curve->add_point(Vector2(x, real_t(i % 7) / real_t(7)));
+	}
+
+	curve->clean_dupes();
+	REQUIRE(curve->get_point_count() == 129);
+	for (int i = 0; i <= 128; i++) {
+		CHECK(curve->get_point_position(i).x == doctest::Approx(real_t(i) / real_t(128)));
+	}
+	// Normalized clean curves should remain stable across repeated calls.
+	curve->clean_dupes();
+	CHECK(curve->get_point_count() == 129);
+}
+
+TEST_CASE("[Curve] Cleaning thousands of duplicate points preserves first values") {
+	Ref<Curve> curve = memnew(Curve);
+	const int unique_count = 2048;
+	Array packed_points;
+	packed_points.resize(unique_count * 2 * 5);
+	for (int i = 0; i < unique_count; i++) {
+		const real_t x = real_t(i) / real_t(2048);
+		for (int duplicate = 0; duplicate < 2; duplicate++) {
+			const int offset = (i * 2 + duplicate) * 5;
+			packed_points[offset] = Vector2(x, duplicate ? real_t(0.75) : real_t(0.25));
+			packed_points[offset + 1] = 0.0;
+			packed_points[offset + 2] = 0.0;
+			packed_points[offset + 3] = int(Curve::TANGENT_FREE);
+			packed_points[offset + 4] = int(Curve::TANGENT_FREE);
+		}
+	}
+	curve->set_data(packed_points);
+	REQUIRE(curve->get_point_count() == unique_count * 2);
+	curve->clean_dupes();
+	REQUIRE(curve->get_point_count() == unique_count);
+	for (int i = 0; i < unique_count; i++) {
+		const Vector2 point = curve->get_point_position(i);
+		CHECK(point.x == doctest::Approx(real_t(i) / real_t(2048)));
+		CHECK(point.y == doctest::Approx(real_t(0.25)));
+	}
+	curve->clean_dupes();
+	CHECK(curve->get_point_count() == unique_count);
+}
+
 } // namespace TestCurve

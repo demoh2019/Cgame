@@ -246,7 +246,7 @@ struct memnew_result<T, std::enable_if_t<std::is_base_of_v<RefCounted, T>>> {
 	static Ref<T> wrap(T *p_object) {
 		return Ref<T>::assume_ownership(p_object);
 	}
-}
+};
 
 // Zero-constructing Ref initializes reference to nullptr (and thus empty).
 template <typename T>

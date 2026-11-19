@@ -30,6 +30,8 @@
 
 #include "tests/test_macros.h"
 
+#include "core/variant/typed_array.h"
+
 TEST_FORCE_LINK(test_fuzzy_search)
 
 #include "core/io/file_access.h"

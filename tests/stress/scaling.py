@@ -149,6 +149,9 @@ def main(argv: list[str] | None = None) -> int:
     failed_scales = []
     for scale in scales:
         output = args.output_dir / ("scale_%d.json" % scale)
+        # Never reuse a previous run after a failed or interrupted launch.
+        if output.exists():
+            output.unlink()
         cmd = [
             sys.executable, str(Path(__file__).resolve().with_name("run.py")),
             "--godot", args.godot, "--preset", "smoke", "--scale", str(scale),

@@ -42,18 +42,22 @@ void JoltJobSystem::Job::_execute(void *p_user_data) {
 	Job *job = static_cast<Job *>(p_user_data);
 
 #ifdef DEBUG_ENABLED
-	const uint64_t time_start = Time::get_singleton()->get_ticks_usec();
+	const bool collect_timings = timings_enabled.load(std::memory_order_relaxed);
+	uint64_t time_start = 0;
+	if (collect_timings) {
+		time_start = Time::get_singleton()->get_ticks_usec();
+	}
 #endif
 
 	job->Execute();
 
 #ifdef DEBUG_ENABLED
-	const uint64_t time_end = Time::get_singleton()->get_ticks_usec();
-	const uint64_t time_elapsed = time_end - time_start;
-
-	timings_lock.lock();
-	timings_by_job[job->name] += time_elapsed;
-	timings_lock.unlock();
+	if (collect_timings) {
+		const uint64_t time_elapsed = Time::get_singleton()->get_ticks_usec() - time_start;
+		timings_lock.lock();
+		timings_by_job[job->name] += time_elapsed;
+		timings_lock.unlock();
+	}
 #endif
 
 	job->Release();
@@ -165,7 +169,10 @@ JoltJobSystem::JoltJobSystem() :
 }
 
 void JoltJobSystem::pre_step() {
-	// Nothing to do.
+#ifdef DEBUG_ENABLED
+	EngineDebugger *engine_debugger = EngineDebugger::get_singleton();
+	timings_enabled.store(engine_debugger != nullptr && engine_debugger->is_profiling(SNAME("servers")), std::memory_order_relaxed);
+#endif
 }
 
 void JoltJobSystem::post_step() {
@@ -179,7 +186,7 @@ void JoltJobSystem::flush_timings() {
 
 	EngineDebugger *engine_debugger = EngineDebugger::get_singleton();
 
-	if (engine_debugger->is_profiling(profiler_name)) {
+	if (engine_debugger != nullptr && engine_debugger->is_profiling(profiler_name)) {
 		Array timings;
 
 		for (const KeyValue<const void *, uint64_t> &E : timings_by_job) {

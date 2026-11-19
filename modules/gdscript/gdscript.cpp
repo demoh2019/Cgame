@@ -33,6 +33,7 @@
 #include "gdscript_analyzer.h"
 #include "gdscript_cache.h"
 #include "gdscript_compiler.h"
+#include "gdscript_constants.h"
 #include "gdscript_helper.h"
 #include "gdscript_linter.h"
 #include "gdscript_parser.h"
@@ -695,13 +696,13 @@ void GDScript::_static_default_init() {
 		if (type.builtin_type == Variant::ARRAY && type.has_container_element_type(0)) {
 			const GDScriptDataType element_type = type.get_container_element_type(0);
 			Array default_value;
-			default_value.set_typed(element_type.builtin_type, element_type.native_type, element_type.script_type);
+			default_value.set_typed(element_type.builtin_type, element_type.native_type, Ref<Script>(element_type.script_type));
 			static_variables.write[E.value.index] = default_value;
 		} else if (type.builtin_type == Variant::DICTIONARY && type.has_container_element_types()) {
 			const GDScriptDataType key_type = type.get_container_element_type_or_variant(0);
 			const GDScriptDataType value_type = type.get_container_element_type_or_variant(1);
 			Dictionary default_value;
-			default_value.set_typed(key_type.builtin_type, key_type.native_type, key_type.script_type, value_type.builtin_type, value_type.native_type, value_type.script_type);
+			default_value.set_typed(key_type.builtin_type, key_type.native_type, Ref<Script>(key_type.script_type), value_type.builtin_type, value_type.native_type, Ref<Script>(value_type.script_type));
 			static_variables.write[E.value.index] = default_value;
 		} else {
 			Variant default_value;
@@ -2188,10 +2189,9 @@ void GDScriptLanguage::init() {
 		_add_global(StringName(CoreConstants::get_global_constant_name(i)), CoreConstants::get_global_constant_value(i));
 	}
 
-	_add_global(StringName("PI"), Math::PI);
-	_add_global(StringName("TAU"), Math::TAU);
-	_add_global(StringName("INF"), Math::INF);
-	_add_global(StringName("NAN"), Math::NaN);
+	for (int i = 0; i < GDScriptConstants::get_constant_count(); i++) {
+		_add_global(StringName(GDScriptConstants::get_constant_name(i)), GDScriptConstants::get_constant_value(i));
+	}
 
 	// Populate native classes.
 

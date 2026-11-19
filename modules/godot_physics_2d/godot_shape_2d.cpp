@@ -92,24 +92,25 @@ bool GodotWorldBoundaryShape2D::contains_point(const Vector2 &p_point) const {
 }
 
 bool GodotWorldBoundaryShape2D::intersect_segment(const Vector2 &p_begin, const Vector2 &p_end, Vector2 &r_point, Vector2 &r_normal) const {
-	Vector2 segment = p_begin - p_end;
-	real_t den = normal.dot(segment);
+	const double dx = double(p_end.x) - double(p_begin.x);
+	const double dy = double(p_end.y) - double(p_begin.y);
+	const double nx = double(normal.x);
+	const double ny = double(normal.y);
+	const double denominator = nx * dx + ny * dy;
+	if (denominator == 0.0) {
+		return false; // Parallel rays and zero-length segments cannot cross the plane.
+	}
 
-	//printf("den is %i\n",den);
-	if (Math::abs(den) <= CMP_EPSILON) {
+	// Test the dimensionless segment fraction, not the absolute magnitude
+	// of the denominator. A short ray can cross a thin geometry feature.
+	const double fraction = (double(d) - nx * double(p_begin.x) - ny * double(p_begin.y)) / denominator;
+	if (!(fraction >= -CMP_EPSILON && fraction <= 1.0 + CMP_EPSILON)) {
 		return false;
 	}
 
-	real_t dist = (normal.dot(p_begin) - d) / den;
-	//printf("dist is %i\n",dist);
-
-	if (dist < -CMP_EPSILON || dist > (1.0 + CMP_EPSILON)) {
-		return false;
-	}
-
-	r_point = p_begin + segment * -dist;
+	r_point = Vector2(real_t(double(p_begin.x) + dx * fraction),
+			real_t(double(p_begin.y) + dy * fraction));
 	r_normal = normal;
-
 	return true;
 }
 
@@ -258,27 +259,42 @@ bool GodotCircleShape2D::contains_point(const Vector2 &p_point) const {
 }
 
 bool GodotCircleShape2D::intersect_segment(const Vector2 &p_begin, const Vector2 &p_end, Vector2 &r_point, Vector2 &r_normal) const {
-	Vector2 line_vec = p_end - p_begin;
-
-	real_t a, b, c;
-
-	a = line_vec.dot(line_vec);
-	b = 2 * p_begin.dot(line_vec);
-	c = p_begin.dot(p_begin) - radius * radius;
-
-	real_t sqrtterm = b * b - 4 * a * c;
-
-	if (sqrtterm < 0) {
-		return false;
-	}
-	sqrtterm = Math::sqrt(sqrtterm);
-	real_t res = (-b - sqrtterm) / (2 * a);
-
-	if (res < 0 || res > 1 + CMP_EPSILON) {
-		return false;
+	const Vector2 direction = p_end - p_begin;
+	const double dx = double(direction.x);
+	const double dy = double(direction.y);
+	const double length_squared = dx * dx + dy * dy;
+	if (length_squared == 0.0) {
+		return false; // A zero-length ray cannot enter a circle.
 	}
 
-	r_point = p_begin + line_vec * res;
+	const double bx = double(p_begin.x);
+	const double by = double(p_begin.y);
+	const double radius_squared = double(radius) * double(radius);
+	if (bx * bx + by * by < radius_squared) {
+		return false; // Preserve entry-only semantics for a ray starting inside.
+	}
+
+	const double projection = -(bx * dx + by * dy) / length_squared;
+	if (projection < 0.0) {
+		return false; // The ray points away from the circle.
+	}
+
+	// Use closest approach, not a difference of squared terms or roots.
+	// Those suffer catastrophic cancellation when the ray is very long.
+	const double closest_x = bx + dx * projection;
+	const double closest_y = by + dy * projection;
+	const double closest_dist_sq = closest_x * closest_x + closest_y * closest_y;
+	if (closest_dist_sq > radius_squared) {
+		return false;
+	}
+
+	const double fraction = projection - Math::sqrt((radius_squared - closest_dist_sq) / length_squared);
+	if (fraction < 0.0 || fraction > 1.0 + CMP_EPSILON) {
+		return false;
+	}
+
+	// Avoid rounding the fraction to real_t before computing a long-ray hit.
+	r_point = Vector2(real_t(bx + dx * fraction), real_t(by + dy * fraction));
 	r_normal = r_point.normalized();
 	return true;
 }
@@ -400,68 +416,98 @@ bool GodotCapsuleShape2D::contains_point(const Vector2 &p_point) const {
 }
 
 bool GodotCapsuleShape2D::intersect_segment(const Vector2 &p_begin, const Vector2 &p_end, Vector2 &r_point, Vector2 &r_normal) const {
-	real_t d = 1e10;
-	Vector2 n = (p_end - p_begin).normalized();
+	const Vector2 direction = p_end - p_begin;
+	const double dx = double(direction.x);
+	const double dy = double(direction.y);
+	const double direction_length_squared = dx * dx + dy * dy;
+	if (direction_length_squared == 0.0) {
+		return false;
+	}
+
+	const double radius_squared = double(radius) * double(radius);
+	double best_fraction = double(Math::INF);
 	bool collided = false;
 
-	//try spheres
+	// Intersect the two circular ends using closest approach. The usual
+	// quadratic discriminant loses the entry point through cancellation
+	// when a ray is very long compared to the cap's radius.
 	for (int i = 0; i < 2; i++) {
-		Vector2 begin = p_begin;
-		Vector2 end = p_end;
-		real_t ofs = (i == 0) ? -height * 0.5 + radius : height * 0.5 - radius;
-		begin.y += ofs;
-		end.y += ofs;
-
-		Vector2 line_vec = end - begin;
-
-		real_t a, b, c;
-
-		a = line_vec.dot(line_vec);
-		b = 2 * begin.dot(line_vec);
-		c = begin.dot(begin) - radius * radius;
-
-		real_t sqrtterm = b * b - 4 * a * c;
-
-		if (sqrtterm < 0) {
+		const double offset = (i == 0) ? -double(height) * 0.5 + double(radius) : double(height) * 0.5 - double(radius);
+		const double bx = double(p_begin.x);
+		const double by = double(p_begin.y) + offset;
+		const double projection = -(bx * dx + by * dy) / direction_length_squared;
+		if (projection < 0.0) {
 			continue;
 		}
 
-		sqrtterm = Math::sqrt(sqrtterm);
-		real_t res = (-b - sqrtterm) / (2 * a);
-
-		if (res < 0 || res > 1 + CMP_EPSILON) {
+		const double closest_x = bx + dx * projection;
+		const double closest_y = by + dy * projection;
+		const double gap_squared = radius_squared - (closest_x * closest_x + closest_y * closest_y);
+		if (gap_squared < 0.0) {
 			continue;
 		}
 
-		Vector2 point = begin + line_vec * res;
-		Vector2 pointf(point.x, point.y - ofs);
-		real_t pd = n.dot(pointf);
-		if (pd < d) {
-			r_point = pointf;
-			r_normal = point.normalized();
-			d = pd;
+		const double fraction = projection - Math::sqrt(gap_squared / direction_length_squared);
+		if (fraction < 0.0 || fraction > 1.0 + CMP_EPSILON || fraction >= best_fraction) {
+			continue;
+		}
+
+		const double hit_x = bx + dx * fraction;
+		const double hit_y = by + dy * fraction;
+		r_point = Vector2(real_t(hit_x), real_t(hit_y - offset));
+		r_normal = Vector2(real_t(hit_x), real_t(hit_y)).normalized();
+		best_fraction = fraction;
+		collided = true;
+	}
+
+	Vector2 rect_point, rect_normal;
+	if (Rect2(Point2(-radius, -height * 0.5 + radius), Size2(radius * 2.0, height - radius * 2)).intersects_segment(p_begin, p_end, &rect_point, &rect_normal)) {
+		const double fraction = ((double(rect_point.x) - double(p_begin.x)) * dx +
+				(double(rect_point.y) - double(p_begin.y)) * dy) / direction_length_squared;
+		if (fraction < best_fraction) {
+			r_point = rect_point;
+			r_normal = rect_normal;
 			collided = true;
 		}
 	}
 
-	Vector2 rpos, rnorm;
-	if (Rect2(Point2(-radius, -height * 0.5 + radius), Size2(radius * 2.0, height - radius * 2)).intersects_segment(p_begin, p_end, &rpos, &rnorm)) {
-		real_t pd = n.dot(rpos);
-		if (pd < d) {
-			r_point = rpos;
-			r_normal = rnorm;
-			d = pd;
-			collided = true;
-		}
-	}
+	return collided;
+}
 
-	//return get_aabb().intersects_segment(p_begin,p_end,&r_point,&r_normal);
-	return collided; //todo
+Vector2 GodotCapsuleShape2D::_get_second_moments() const {
+	const double r = double(radius);
+	const double straight_height = double(height) - 2.0 * r;
+	const double cap_area = Math::PI * r * r;
+	const double rect_area = 2.0 * r * straight_height;
+	const double total_area = cap_area + rect_area;
+
+	// Exact second moments of a vertical capsule about its centroid.
+	// Combine the central rectangle with two semicircular end caps using
+	// the parallel-axis theorem, including the semicircle centroid shift.
+	const double second_x = (rect_area * r * r / 3.0 + cap_area * r * r / 4.0) / total_area;
+	const double second_y = (rect_area * straight_height * straight_height / 12.0 +
+			cap_area * (r * r / 4.0 + straight_height * straight_height / 4.0) +
+			4.0 * straight_height * r * r * r / 3.0) / total_area;
+	return Vector2(real_t(second_x), real_t(second_y));
 }
 
 real_t GodotCapsuleShape2D::get_moment_of_inertia(real_t p_mass, const Size2 &p_scale) const {
-	Vector2 he2 = Vector2(radius * 2, height) * p_scale;
-	return p_mass * he2.dot(he2) / 12.0;
+	if (radius <= 0.0 || height < 2.0 * radius) {
+		// Preserve the previous bounded estimate for temporarily invalid shape data.
+		const Vector2 bounds = Vector2(radius * 2.0, height) * p_scale;
+		return p_mass * bounds.length_squared() / 12.0;
+	}
+	const Vector2 moments = _get_second_moments();
+	return p_mass * (moments.x * p_scale.x * p_scale.x + moments.y * p_scale.y * p_scale.y);
+}
+
+real_t GodotCapsuleShape2D::get_moment_of_inertia_transformed(real_t p_mass, const Transform2D &p_transform) const {
+	if (radius <= 0.0 || height < 2.0 * radius) {
+		return get_moment_of_inertia(p_mass, p_transform.get_scale());
+	}
+	const Vector2 moments = _get_second_moments();
+	return p_mass * (moments.x * p_transform.columns[0].length_squared() +
+			moments.y * p_transform.columns[1].length_squared());
 }
 
 void GodotCapsuleShape2D::set_data(const Variant &p_data) {
@@ -483,7 +529,8 @@ void GodotCapsuleShape2D::set_data(const Variant &p_data) {
 }
 
 Variant GodotCapsuleShape2D::get_data() const {
-	return Point2(height, radius);
+	// Match set_data(Vector2) and PhysicsServer2D's (radius, height) convention.
+	return Point2(radius, height);
 }
 
 /*********************************************************/
@@ -491,19 +538,21 @@ Variant GodotCapsuleShape2D::get_data() const {
 /*********************************************************/
 
 void GodotConvexPolygonShape2D::get_supports(const Vector2 &p_normal, Vector2 *r_supports, int &r_amount) const {
-	int support_idx = -1;
-	real_t d = -1e10;
 	r_amount = 0;
+	ERR_FAIL_COND_MSG(point_count <= 0, "Convex polygon shape support not found.");
 
+	// Initialize from a real vertex instead of a finite coordinate sentinel.
+	// This remains correct even when every projection is below -1e10.
+	int support_idx = 0;
+	real_t best_projection = p_normal.dot(points[0].pos);
 	for (int i = 0; i < point_count; i++) {
-		//test point
-		real_t ld = p_normal.dot(points[i].pos);
-		if (ld > d) {
+		const real_t projection = p_normal.dot(points[i].pos);
+		if (projection > best_projection) {
 			support_idx = i;
-			d = ld;
+			best_projection = projection;
 		}
 
-		//test segment
+		// A supporting edge produces a two-point contact manifold.
 		if (points[i].normal.dot(p_normal) > segment_is_valid_support_threshold) {
 			r_amount = 2;
 			r_supports[0] = points[i].pos;
@@ -511,62 +560,159 @@ void GodotConvexPolygonShape2D::get_supports(const Vector2 &p_normal, Vector2 *r
 			return;
 		}
 	}
-
-	ERR_FAIL_COND_MSG(support_idx == -1, "Convex polygon shape support not found.");
-
 	r_amount = 1;
 	r_supports[0] = points[support_idx].pos;
 }
 
 bool GodotConvexPolygonShape2D::contains_point(const Vector2 &p_point) const {
-	bool out = false;
-	bool in = false;
+	if (valid_mass_properties && normals_generated_from_vertices) {
+		// Normals generated from vertex edges have a known winding.
+		// An exterior point can be rejected at its first separating edge.
+		for (int i = 0; i < point_count; i++) {
+			const real_t separation = points[i].normal.dot(p_point - points[i].pos);
+			if (mass_clockwise ? (separation < 0.0) : (separation > 0.0)) {
+				return false;
+			}
+		}
+		return true;
+	}
+
+	// Preserve the sign-independent fallback for user-provided normals
+	// and zero-area polygons, whose winding cannot be trusted.
+	bool has_positive = false;
+	bool has_negative = false;
 
 	for (int i = 0; i < point_count; i++) {
-		real_t d = points[i].normal.dot(p_point) - points[i].normal.dot(points[i].pos);
-		if (d > 0) {
-			out = true;
-		} else {
-			in = true;
+		// A convex point is outside when two edges disagree on its side.
+		// Zero-distance edges are neutral, so boundary hits work with
+		// either vertex winding.
+		const real_t d = points[i].normal.dot(p_point - points[i].pos);
+		if (d > 0.0) {
+			has_positive = true;
+		} else if (d < 0.0) {
+			has_negative = true;
+		}
+		if (has_positive && has_negative) {
+			return false;
 		}
 	}
 
-	return in != out;
+	return point_count > 0;
 }
 
 bool GodotConvexPolygonShape2D::intersect_segment(const Vector2 &p_begin, const Vector2 &p_end, Vector2 &r_point, Vector2 &r_normal) const {
-	Vector2 n = (p_end - p_begin).normalized();
-	real_t d = 1e10;
-	bool inters = false;
-
-	for (int i = 0; i < point_count; i++) {
-		Vector2 res;
-
-		if (!Geometry2D::segment_intersects_segment(p_begin, p_end, points[i].pos, points[(i + 1) % point_count].pos, &res)) {
-			continue;
-		}
-
-		real_t nd = n.dot(res);
-		if (nd < d) {
-			d = nd;
-			r_point = res;
-			r_normal = points[i].normal;
-			inters = true;
-		}
+	if (p_begin == p_end) {
+		return false;
 	}
 
-	return inters;
+	if (valid_mass_properties) {
+		// Convex ray cast by clipping the segment against every edge half-plane.
+		// This avoids one generic segment/segment intersection per polygon edge.
+		// Keep the calculation in double precision to preserve the first hit
+		// when the ray is very long or the polygon is far from the origin.
+		const double dx = double(p_end.x) - double(p_begin.x);
+		const double dy = double(p_end.y) - double(p_begin.y);
+		double enter_fraction = 0.0;
+		double exit_fraction = 1.0;
+		int enter_edge = -1;
+		int exit_edge = -1;
+
+		for (int i = 0; i < point_count; i++) {
+			const Vector2 &a = points[i].pos;
+			const Vector2 &b = points[(i + 1) % point_count].pos;
+			const double edge_x = double(b.x) - double(a.x);
+			const double edge_y = double(b.y) - double(a.y);
+			// Vector2::orthogonal() is outward for counter-clockwise polygons.
+			const double outward_x = mass_clockwise ? -edge_y : edge_y;
+			const double outward_y = mass_clockwise ? edge_x : -edge_x;
+			const double distance = outward_x * (double(p_begin.x) - double(a.x)) +
+					outward_y * (double(p_begin.y) - double(a.y));
+			const double velocity = outward_x * dx + outward_y * dy;
+
+			if (velocity == 0.0) {
+				if (distance > 0.0) {
+					return false;
+				}
+				continue;
+			}
+
+			const double fraction = -distance / velocity;
+			if (velocity < 0.0) {
+				if (fraction >= enter_fraction) {
+					enter_fraction = fraction;
+					enter_edge = i;
+				}
+			} else if (fraction <= exit_fraction) {
+				exit_fraction = fraction;
+				exit_edge = i;
+			}
+			if (enter_fraction > exit_fraction) {
+				return false;
+			}
+		}
+
+		// Prefer the first entering boundary. If the ray begins inside,
+		// preserve the previous behavior by returning its first exit.
+		const int hit_edge = enter_edge >= 0 ? enter_edge : exit_edge;
+		const double fraction = enter_edge >= 0 ? enter_fraction : exit_fraction;
+		if (hit_edge < 0 || fraction < 0.0 || fraction > 1.0) {
+			return false;
+		}
+		r_point = Vector2(real_t(double(p_begin.x) + dx * fraction),
+				real_t(double(p_begin.y) + dy * fraction));
+		r_normal = points[hit_edge].normal;
+		return true;
+	}
+
+	// Preserve the segment-based behavior for zero-area/degenerate polygons.
+	const Vector2 direction = (p_end - p_begin).normalized();
+	real_t closest_distance = 0.0;
+	bool intersects = false;
+	for (int i = 0; i < point_count; i++) {
+		Vector2 hit;
+		if (!Geometry2D::segment_intersects_segment(p_begin, p_end, points[i].pos, points[(i + 1) % point_count].pos, &hit)) {
+			continue;
+		}
+		const real_t distance = direction.dot(hit);
+		if (!intersects || distance < closest_distance) {
+			closest_distance = distance;
+			r_point = hit;
+			r_normal = points[i].normal;
+			intersects = true;
+		}
+	}
+	return intersects;
 }
 
 real_t GodotConvexPolygonShape2D::get_moment_of_inertia(real_t p_mass, const Size2 &p_scale) const {
 	ERR_FAIL_COND_V_MSG(point_count == 0, 0, "Convex polygon shape has no points.");
-	Rect2 aabb_new;
-	aabb_new.position = points[0].pos * p_scale;
-	for (int i = 0; i < point_count; i++) {
-		aabb_new.expand_to(points[i].pos * p_scale);
+	if (valid_mass_properties) {
+		// Exact (for uniform density) principal second moments around the polygon centroid.
+		return p_mass * (mass_variance_x * p_scale.x * p_scale.x + mass_variance_y * p_scale.y * p_scale.y);
 	}
 
+	// Preserve the former behavior for degenerate/zero-area polygons.
+	Rect2 aabb_new;
+	aabb_new.position = points[0].pos * p_scale;
+	for (int i = 1; i < point_count; i++) {
+		aabb_new.expand_to(points[i].pos * p_scale);
+	}
 	return p_mass * aabb_new.size.dot(aabb_new.size) / 12.0;
+}
+
+real_t GodotConvexPolygonShape2D::get_moment_of_inertia_transformed(real_t p_mass, const Transform2D &p_transform) const {
+	if (!valid_mass_properties) {
+		return get_moment_of_inertia(p_mass, p_transform.get_scale());
+	}
+
+	// A linear map M transforms covariance C into M * C * M^T.
+	// In 2D, angular inertia about the center is mass * trace(M * C * M^T).
+	const Vector2 &basis_x = p_transform.columns[0];
+	const Vector2 &basis_y = p_transform.columns[1];
+	const real_t inertia_per_mass = mass_variance_x * basis_x.length_squared() +
+			mass_variance_y * basis_y.length_squared() +
+			real_t(2.0) * mass_covariance_xy * basis_x.dot(basis_y);
+	return p_mass * MAX(inertia_per_mass, real_t(0.0));
 }
 
 void GodotConvexPolygonShape2D::set_data(const Variant &p_data) {
@@ -581,12 +727,21 @@ void GodotConvexPolygonShape2D::set_data(const Variant &p_data) {
 	}
 	points = nullptr;
 	point_count = 0;
+	mass_centroid = Vector2();
+	mass_variance_x = 0.0;
+	mass_variance_y = 0.0;
+	mass_covariance_xy = 0.0;
+	mass_area = 0.0;
+	valid_mass_properties = false;
+	mass_clockwise = false;
+	normals_generated_from_vertices = false;
 
 	if (p_data.get_type() == Variant::PACKED_VECTOR2_ARRAY) {
 		Vector<Vector2> arr = p_data;
 		ERR_FAIL_COND(arr.is_empty());
 		point_count = arr.size();
 		points = memnew_arr(Point, point_count);
+		normals_generated_from_vertices = true;
 		const Vector2 *r = arr.ptr();
 
 		for (int i = 0; i < point_count; i++) {
@@ -622,6 +777,52 @@ void GodotConvexPolygonShape2D::set_data(const Variant &p_data) {
 		aabb_new.expand_to(points[i].pos);
 	}
 
+	// Cache polygon centroid and second moments once when vertices change.
+	// Using a vertex as reference reduces cancellation for distant polygons.
+	// The signed ratios also work for either winding direction.
+	if (point_count >= 3) {
+		const Vector2 reference = points[0].pos;
+		double twice_area = 0.0;
+		double first_x = 0.0;
+		double first_y = 0.0;
+		double second_x = 0.0;
+		double second_y = 0.0;
+		double mixed_xy = 0.0;
+		for (int i = 0; i < point_count; i++) {
+			const Vector2 &a = points[i].pos;
+			const Vector2 &b = points[(i + 1) % point_count].pos;
+			const double ax = double(a.x) - double(reference.x);
+			const double ay = double(a.y) - double(reference.y);
+			const double bx = double(b.x) - double(reference.x);
+			const double by = double(b.y) - double(reference.y);
+			const double cross = ax * by - ay * bx;
+			twice_area += cross;
+			first_x += (ax + bx) * cross;
+			first_y += (ay + by) * cross;
+			second_x += (ax * ax + ax * bx + bx * bx) * cross;
+			second_y += (ay * ay + ay * by + by * by) * cross;
+			mixed_xy += (2.0 * ax * ay + ax * by + bx * ay + 2.0 * bx * by) * cross;
+		}
+
+		// An absolute threshold incorrectly rejects physically valid tiny shapes.
+		// Use the local AABB area as a scale reference instead.
+		const double area_scale = double(aabb_new.size.x) * double(aabb_new.size.y);
+		if (Math::abs(twice_area) > 1.0e-12 * area_scale) {
+			mass_clockwise = twice_area < 0.0;
+			const double cx = first_x / (3.0 * twice_area);
+			const double cy = first_y / (3.0 * twice_area);
+			const double vx = second_x / (6.0 * twice_area) - cx * cx;
+			const double vy = second_y / (6.0 * twice_area) - cy * cy;
+			const double cxy = mixed_xy / (12.0 * twice_area) - cx * cy;
+			mass_centroid = reference + Vector2(real_t(cx), real_t(cy));
+			mass_variance_x = MAX(real_t(0.0), real_t(vx));
+			mass_variance_y = MAX(real_t(0.0), real_t(vy));
+			mass_covariance_xy = real_t(cxy);
+			mass_area = real_t(0.5 * Math::abs(twice_area));
+			valid_mass_properties = true;
+		}
+	}
+
 	configure(aabb_new);
 }
 
@@ -646,18 +847,20 @@ GodotConvexPolygonShape2D::~GodotConvexPolygonShape2D() {
 //////////////////////////////////////////////////
 
 void GodotConcavePolygonShape2D::get_supports(const Vector2 &p_normal, Vector2 *r_supports, int &r_amount) const {
-	real_t d = -1e10;
-	int idx = -1;
-	for (int i = 0; i < points.size(); i++) {
-		real_t ld = p_normal.dot(points[i]);
-		if (ld > d) {
-			d = ld;
+	r_amount = 0;
+	ERR_FAIL_COND(points.is_empty());
+
+	// Use the first actual point instead of a fixed projection floor.
+	int idx = 0;
+	real_t best_projection = p_normal.dot(points[0]);
+	for (int i = 1; i < points.size(); i++) {
+		const real_t projection = p_normal.dot(points[i]);
+		if (projection > best_projection) {
+			best_projection = projection;
 			idx = i;
 		}
 	}
-
 	r_amount = 1;
-	ERR_FAIL_COND(idx == -1);
 	*r_supports = points[idx];
 }
 
@@ -666,7 +869,7 @@ bool GodotConcavePolygonShape2D::contains_point(const Vector2 &p_point) const {
 }
 
 bool GodotConcavePolygonShape2D::intersect_segment(const Vector2 &p_begin, const Vector2 &p_end, Vector2 &r_point, Vector2 &r_normal) const {
-	if (segments.is_empty() || points.is_empty()) {
+	if (segments.is_empty() || points.is_empty() || bvh.is_empty()) {
 		return false;
 	}
 
@@ -677,14 +880,20 @@ bool GodotConcavePolygonShape2D::intersect_segment(const Vector2 &p_begin, const
 		VISIT_LEFT_BIT = 1,
 		VISIT_RIGHT_BIT = 2,
 		VISIT_DONE_BIT = 3,
+		VISIT_RIGHT_FIRST_BIT = 4,
+		VISIT_LEFT_SECOND_BIT = 5,
 		VISITED_BIT_SHIFT = 29,
 		NODE_IDX_MASK = (1 << VISITED_BIT_SHIFT) - 1,
 		VISITED_BIT_MASK = ~NODE_IDX_MASK,
 
 	};
 
-	Vector2 n = (p_end - p_begin).normalized();
-	real_t d = 1e10;
+	const Vector2 ray = p_end - p_begin;
+	if (ray.length_squared() == 0.0) {
+		return false;
+	}
+	const Vector2 n = ray.normalized();
+	real_t d = 0.0;
 	bool inters = false;
 
 	/*
@@ -706,7 +915,19 @@ bool GodotConcavePolygonShape2D::intersect_segment(const Vector2 &p_begin, const
 
 		switch (stack[level] >> VISITED_BIT_SHIFT) {
 			case TEST_AABB_BIT: {
-				bool valid = bvh2.aabb.intersects_segment(p_begin, p_end);
+				// Once a hit is known, skip nodes whose earliest possible point
+				// along the ray is farther away than that hit (closest-hit pruning).
+				bool valid = true;
+				if (inters) {
+					const Vector2 aabb_min = bvh2.aabb.position;
+					const Vector2 aabb_max = bvh2.aabb.get_end();
+					const real_t earliest = MIN(n.x * (aabb_min.x - p_begin.x), n.x * (aabb_max.x - p_begin.x)) +
+							MIN(n.y * (aabb_min.y - p_begin.y), n.y * (aabb_max.y - p_begin.y));
+					valid = earliest <= d;
+				}
+				if (valid) {
+					valid = bvh2.aabb.intersects_segment(p_begin, p_end);
+				}
 				if (!valid) {
 					stack[level] = (VISIT_DONE_BIT << VISITED_BIT_SHIFT) | node;
 
@@ -719,8 +940,8 @@ bool GodotConcavePolygonShape2D::intersect_segment(const Vector2 &p_begin, const
 						Vector2 res;
 
 						if (Geometry2D::segment_intersects_segment(p_begin, p_end, a, b, &res)) {
-							real_t nd = n.dot(res);
-							if (nd < d) {
+							const real_t nd = n.dot(res - p_begin);
+							if (!inters || nd < d) {
 								d = nd;
 								r_point = res;
 								r_normal = (b - a).orthogonal().normalized();
@@ -731,7 +952,14 @@ bool GodotConcavePolygonShape2D::intersect_segment(const Vector2 &p_begin, const
 						stack[level] = (VISIT_DONE_BIT << VISITED_BIT_SHIFT) | node;
 
 					} else {
-						stack[level] = (VISIT_LEFT_BIT << VISITED_BIT_SHIFT) | node;
+						// Visit the child whose AABB center is closer along the ray.
+						// This improves the chance of finding a near hit before exploring
+						// distant nodes, making the existing closest-hit pruning effective.
+						const BVH &left = bvhptr[bvh2.left];
+						const BVH &right = bvhptr[bvh2.right];
+						const Vector2 center_delta = (left.aabb.position + left.aabb.size * real_t(0.5)) -
+								(right.aabb.position + right.aabb.size * real_t(0.5));
+						stack[level] = ((n.dot(center_delta) <= 0.0 ? VISIT_LEFT_BIT : VISIT_RIGHT_FIRST_BIT) << VISITED_BIT_SHIFT) | node;
 					}
 				}
 			}
@@ -745,6 +973,18 @@ bool GodotConcavePolygonShape2D::intersect_segment(const Vector2 &p_begin, const
 			case VISIT_RIGHT_BIT: {
 				stack[level] = (VISIT_DONE_BIT << VISITED_BIT_SHIFT) | node;
 				stack[level + 1] = bvh2.right | TEST_AABB_BIT;
+				level++;
+			}
+				continue;
+			case VISIT_RIGHT_FIRST_BIT: {
+				stack[level] = (VISIT_LEFT_SECOND_BIT << VISITED_BIT_SHIFT) | node;
+				stack[level + 1] = bvh2.right | TEST_AABB_BIT;
+				level++;
+			}
+				continue;
+			case VISIT_LEFT_SECOND_BIT: {
+				stack[level] = (VISIT_DONE_BIT << VISITED_BIT_SHIFT) | node;
+				stack[level + 1] = bvh2.left | TEST_AABB_BIT;
 				level++;
 			}
 				continue;
@@ -787,16 +1027,17 @@ int GodotConcavePolygonShape2D::_generate_bvh(BVH *p_bvh, int p_len, int p_depth
 		global_aabb = global_aabb.merge(p_bvh[i].aabb);
 	}
 
+	// Only the median partition matters for BVH construction.
+	// Selecting it instead of fully sorting every level reduces expected
+	// build complexity from O(n log^2 n) to O(n log n).
+	const int median = p_len / 2;
 	if (global_aabb.size.x > global_aabb.size.y) {
-		SortArray<BVH, BVH_CompareX> sort;
-		sort.sort(p_bvh, p_len);
-
+		SortArray<BVH, BVH_CompareX> select;
+		select.nth_element(0, p_len, median, p_bvh);
 	} else {
-		SortArray<BVH, BVH_CompareY> sort;
-		sort.sort(p_bvh, p_len);
+		SortArray<BVH, BVH_CompareY> select;
+		select.nth_element(0, p_len, median, p_bvh);
 	}
-
-	int median = p_len / 2;
 
 	BVH node;
 	node.aabb = global_aabb;
@@ -820,8 +1061,23 @@ void GodotConcavePolygonShape2D::set_data(const Variant &p_data) {
 
 	Rect2 aabb_new;
 
+	Vector<Vector2> p2arr;
 	if (p_data.get_type() == Variant::PACKED_VECTOR2_ARRAY) {
-		Vector<Vector2> p2arr = p_data;
+		p2arr = p_data;
+	} else {
+		// Accept a flattened list of segment endpoints as well as Vector2 pairs.
+		// Four scalar coordinates form one segment: x0, y0, x1, y1.
+		Vector<real_t> scalars = p_data;
+		ERR_FAIL_COND_MSG(scalars.size() % 4 != 0, "Concave polygon segment data must contain four scalars per segment.");
+		p2arr.resize(scalars.size() / 2);
+		Vector2 *dest = p2arr.ptrw();
+		const real_t *values = scalars.ptr();
+		for (int i = 0; i < p2arr.size(); i++) {
+			dest[i] = Vector2(values[i * 2], values[i * 2 + 1]);
+		}
+	}
+
+	{
 		int len = p2arr.size();
 		ERR_FAIL_COND(len % 2);
 
@@ -881,8 +1137,6 @@ void GodotConcavePolygonShape2D::set_data(const Variant &p_data) {
 
 		_generate_bvh(main_vbh.ptrw(), main_vbh.size(), 1);
 
-	} else {
-		//dictionary with arrays
 	}
 
 	configure(aabb_new);

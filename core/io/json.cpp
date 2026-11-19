@@ -36,6 +36,8 @@
 #include "core/object/class_db.h"
 #include "core/object/script_language.h"
 #include "core/variant/container_type_validate.h"
+#include "core/variant/variant_internal.h"
+
 
 const char *JSON::tk_name[TK_MAX] = {
 	"'{'",
@@ -72,6 +74,31 @@ void JSON::_stringify(StringBuilder &r_result, const Variant &p_var, const Strin
 
 	const char *colon = p_indent.is_empty() ? ":" : ": ";
 	const char *end_statement = p_indent.is_empty() ? "" : "\n";
+
+	// Packed numeric and string arrays do not need a temporary Array/Variant
+	// for every element. Stream each value directly into the output builder.
+	const auto stringify_packed = [&](const auto &p_array) {
+		if (p_array.is_empty()) {
+			r_result += "[]";
+			return;
+		}
+		r_result += "[";
+		r_result += end_statement;
+		bool first = true;
+		for (const auto &element : p_array) {
+			if (first) {
+				first = false;
+			} else {
+				r_result += ",";
+				r_result += end_statement;
+			}
+			_add_indent(r_result, p_indent, p_cur_indent + 1);
+			_stringify(r_result, Variant(element), p_indent, p_cur_indent + 1, p_sort_keys, p_markers, p_full_precision);
+		}
+		r_result += end_statement;
+		_add_indent(r_result, p_indent, p_cur_indent);
+		r_result += "]";
+	};
 
 	switch (p_var.get_type()) {
 		case Variant::NIL:
@@ -120,18 +147,28 @@ void JSON::_stringify(StringBuilder &r_result, const Variant &p_var, const Strin
 			return;
 		}
 		case Variant::PACKED_INT32_ARRAY:
+			stringify_packed(*VariantInternal::get_int32_array(&p_var));
+			return;
 		case Variant::PACKED_INT64_ARRAY:
+			stringify_packed(*VariantInternal::get_int64_array(&p_var));
+			return;
 		case Variant::PACKED_FLOAT32_ARRAY:
+			stringify_packed(*VariantInternal::get_float32_array(&p_var));
+			return;
 		case Variant::PACKED_FLOAT64_ARRAY:
+			stringify_packed(*VariantInternal::get_float64_array(&p_var));
+			return;
 		case Variant::PACKED_STRING_ARRAY:
+			stringify_packed(*VariantInternal::get_string_array(&p_var));
+			return;
 		case Variant::ARRAY: {
-			Array a = p_var;
-			if (p_markers.has(a.id())) {
+			const Array *a = VariantInternal::get_array(&p_var);
+			if (p_markers.has(a->id())) {
 				r_result += "\"[...]\"";
 				ERR_FAIL_MSG("Converting circular structure to JSON.");
 			}
 
-			if (a.is_empty()) {
+			if (a->is_empty()) {
 				r_result += "[]";
 				return;
 			}
@@ -139,10 +176,10 @@ void JSON::_stringify(StringBuilder &r_result, const Variant &p_var, const Strin
 			r_result += "[";
 			r_result += end_statement;
 
-			p_markers.insert(a.id());
+			p_markers.insert(a->id());
 
 			bool first = true;
-			for (const Variant &var : a) {
+			for (const Variant &var : *a) {
 				if (first) {
 					first = false;
 				} else {
@@ -155,11 +192,13 @@ void JSON::_stringify(StringBuilder &r_result, const Variant &p_var, const Strin
 			r_result += end_statement;
 			_add_indent(r_result, p_indent, p_cur_indent);
 			r_result += "]";
-			p_markers.erase(a.id());
+			p_markers.erase(a->id());
 			return;
 		}
 		case Variant::DICTIONARY: {
-			Dictionary d = p_var;
+			// The input Variant keeps this dictionary alive for the entire call.
+			// Reuse it without another atomic COW reference increment/decrement.
+			const Dictionary &d = *VariantInternal::get_dictionary(&p_var);
 			if (p_markers.has(d.id())) {
 				r_result += "\"{...}\"";
 				ERR_FAIL_MSG("Converting circular structure to JSON.");
@@ -174,14 +213,8 @@ void JSON::_stringify(StringBuilder &r_result, const Variant &p_var, const Strin
 			r_result += end_statement;
 			p_markers.insert(d.id());
 
-			LocalVector<Variant> keys = d.get_key_list();
-
-			if (p_sort_keys) {
-				keys.sort_custom<StringLikeVariantOrder>();
-			}
-
 			bool first_key = true;
-			for (const Variant &key : keys) {
+			const auto write_entry = [&](const KeyValue<Variant, Variant> &p_entry) {
 				if (first_key) {
 					first_key = false;
 				} else {
@@ -189,9 +222,34 @@ void JSON::_stringify(StringBuilder &r_result, const Variant &p_var, const Strin
 					r_result += end_statement;
 				}
 				_add_indent(r_result, p_indent, p_cur_indent + 1);
-				_stringify(r_result, String(key), p_indent, p_cur_indent + 1, p_sort_keys, p_markers, p_full_precision);
+				_stringify(r_result, String(p_entry.key), p_indent, p_cur_indent + 1, p_sort_keys, p_markers, p_full_precision);
 				r_result += colon;
-				_stringify(r_result, d[key], p_indent, p_cur_indent + 1, p_sort_keys, p_markers, p_full_precision);
+				_stringify(r_result, p_entry.value, p_indent, p_cur_indent + 1, p_sort_keys, p_markers, p_full_precision);
+			};
+
+			if (p_sort_keys) {
+				// HashMap nodes remain stable across table growth. Sorting pointers
+				// avoids copying Variant keys and re-hashing for each value lookup.
+				struct EntryComparator {
+					bool operator()(const KeyValue<Variant, Variant> *p_a, const KeyValue<Variant, Variant> *p_b) const {
+						return StringLikeVariantOrder::compare(p_a->key, p_b->key);
+					}
+				};
+				LocalVector<const KeyValue<Variant, Variant> *> entries;
+				entries.reserve(d.size());
+				for (const KeyValue<Variant, Variant> &entry : d) {
+					entries.push_back(&entry);
+				}
+				entries.sort_custom<EntryComparator>();
+				for (const KeyValue<Variant, Variant> *entry : entries) {
+					write_entry(*entry);
+				}
+			} else {
+				// Insertion order is already the HashMap's iteration order.
+				// No temporary key vector, Variant copies, or secondary lookup.
+				for (const KeyValue<Variant, Variant> &entry : d) {
+					write_entry(entry);
+				}
 			}
 
 			r_result += end_statement;

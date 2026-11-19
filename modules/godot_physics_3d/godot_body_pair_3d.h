@@ -32,16 +32,19 @@
 
 #include "godot_body_3d.h"
 #include "godot_constraint_3d.h"
+
+#include "servers/physics_contact_recycling.h"
 #include "godot_soft_body_3d.h"
+#include "godot_soft_contact_index_3d.h"
 
 #include "core/templates/local_vector.h"
 
 class GodotBodyContact3D : public GodotConstraint3D {
 protected:
 	struct Contact {
-		Vector3 position;
+		// Local anchors and feature B are sufficient for both rigid and soft pairs.
 		Vector3 normal;
-		int index_A = 0, index_B = 0;
+		int index_B = 0;
 		Vector3 local_A, local_B;
 		Vector3 acc_impulse; // accumulated impulse - only one of the object's impulse is needed as impulse_a == -impulse_b
 		real_t acc_normal_impulse = 0.0; // accumulated normal impulse (Pn)
@@ -95,6 +98,16 @@ class GodotBodyPair3D : public GodotBodyContact3D {
 
 	Contact contacts[MAX_CONTACTS];
 	int contact_count = 0;
+	GodotPhysicsContactRecycling contact_recycling;
+	real_t mixed_friction = 0.0; // Recomputed in pre_solve, reused across solver iterations.
+	// Iterative, load-dependent rotational friction for the contact manifold.
+	// Cached only across iterations of ONE step; not recycled across frames.
+	Vector3 angular_friction_normal;
+	Vector3 accumulated_rolling_impulse;
+	real_t angular_friction_radius = 0.0;
+	real_t accumulated_spinning_impulse = 0.0;
+	uint8_t angular_friction_contact_mask = 0;
+
 
 	static void _contact_added_callback(const Vector3 &p_point_A, int p_index_A, const Vector3 &p_point_B, int p_index_B, const Vector3 &normal, void *p_userdata);
 
@@ -107,6 +120,7 @@ public:
 	virtual bool setup(real_t p_step) override;
 	virtual bool pre_solve(real_t p_step) override;
 	virtual void solve(real_t p_step) override;
+	virtual bool permits_parallel_immovable_body_sharing() const override { return true; }
 
 	GodotBodyPair3D(GodotBody3D *p_A, int p_shape_A, GodotBody3D *p_B, int p_shape_B);
 	~GodotBodyPair3D();
@@ -124,6 +138,7 @@ class GodotBodySoftBodyPair3D : public GodotBodyContact3D {
 	bool report_contacts_only = false;
 
 	LocalVector<Contact> contacts;
+	GodotSoftContactIndex3D contact_index;
 
 	static void _contact_added_callback(const Vector3 &p_point_A, int p_index_A, const Vector3 &p_point_B, int p_index_B, const Vector3 &normal, void *p_userdata);
 

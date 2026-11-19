@@ -41,6 +41,7 @@
 #include "core/object/class_db.h"
 #include "core/os/os.h"
 #include "core/os/time.h"
+#include "core/templates/local_vector.h"
 
 Ref<FileAccess> FileAccess::create(AccessType p_access) {
 	ERR_FAIL_INDEX_V(p_access, ACCESS_MAX, nullptr);
@@ -404,25 +405,6 @@ double FileAccess::get_double() const {
 	return m.d;
 }
 
-String FileAccess::get_token() const {
-	CharString token;
-
-	uint8_t c = get_8();
-
-	while (!eof_reached()) {
-		if (c <= ' ') {
-			if (token.length()) {
-				break;
-			}
-		} else {
-			token += char(c);
-		}
-		c = get_8();
-	}
-
-	return String::utf8(token.get_data());
-}
-
 class CharBuffer {
 	Vector<char> vector;
 	char stack_buffer[256];
@@ -469,6 +451,34 @@ public:
 	}
 };
 
+String FileAccess::get_token() const {
+	// A token is usually a short identifier. Reuse the same stack-first
+	// buffer as get_line(), avoiding heap allocation and COW checks on
+	// each appended byte until the token exceeds its inline capacity.
+	CharBuffer token;
+	int token_length = 0;
+
+	uint8_t c = get_8();
+
+	while (!eof_reached()) {
+		if (c <= ' ') {
+			if (token_length) {
+				break;
+			}
+		} else {
+			token.push_back(char(c));
+			token_length++;
+		}
+		c = get_8();
+	}
+
+	if (token_length == 0) {
+		return String();
+	}
+	// CharBuffer is not NUL-terminated; pass an explicit length to UTF-8.
+	return String::utf8(token.get_data(), token_length);
+}
+
 String FileAccess::get_line() const {
 	CharBuffer line;
 
@@ -500,61 +510,105 @@ String FileAccess::get_line() const {
 	return String::utf8(line.get_data());
 }
 
+// Build one CSV field in a single allocation. Most unquoted fields can use a
+// bulk copy; quoted fields need to remove quote delimiters and doubled quotes.
+static String _csv_extract_field(const char32_t *p_data, int p_begin, int p_end, int p_output_length) {
+	if (p_output_length == 0) {
+		return String();
+	}
+	String field;
+	ERR_FAIL_COND_V(field.resize_uninitialized(p_output_length + 1) != OK, String());
+	char32_t *write = field.ptrw();
+
+	if (p_output_length == p_end - p_begin) {
+		memcpy(write, p_data + p_begin, size_t(p_output_length) * sizeof(char32_t));
+	} else {
+		bool in_quote = false;
+		int written = 0;
+		for (int i = p_begin; i < p_end; i++) {
+			const char32_t c = p_data[i];
+			if (c == '"') {
+				if (in_quote && i + 1 < p_end && p_data[i + 1] == '"') {
+					write[written++] = '"';
+					i++;
+				} else {
+					in_quote = !in_quote;
+				}
+			} else {
+				write[written++] = c;
+			}
+		}
+	}
+	write[p_output_length] = 0;
+	return field;
+}
+
 Vector<String> FileAccess::get_csv_line(const String &p_delim) const {
 	ERR_FAIL_COND_V_MSG(p_delim.length() != 1, Vector<String>(), "Only single character delimiters are supported to parse CSV lines.");
 	ERR_FAIL_COND_V_MSG(p_delim[0] == '"', Vector<String>(), "The double quotation mark character (\") is not supported as a delimiter for CSV lines.");
 
-	String line;
-
-	// CSV can support entries with line breaks as long as they are enclosed
-	// in double quotes. So our "line" might be more than a single line in the
-	// text file.
-	int qc = 0;
+	// Collect multiline quoted records with amortized growth. Count only new
+	// characters so a long quoted record is not rescanned after every newline.
+	LocalVector<char32_t> line;
+	bool odd_quotes = false;
 	do {
 		if (eof_reached()) {
 			break;
 		}
-		line += get_line() + "\n";
-		qc = 0;
-		for (int i = 0; i < line.length(); i++) {
-			if (line[i] == '"') {
-				qc++;
+		const String segment = get_line();
+		const int segment_length = segment.length();
+		const uint64_t needed = uint64_t(line.size()) + uint64_t(segment_length) + 1;
+		ERR_FAIL_COND_V_MSG(needed >= INT32_MAX, Vector<String>(), "CSV record is too large.");
+
+		const uint32_t old_size = line.size();
+		line.resize_uninitialized(uint32_t(needed));
+		if (segment_length > 0) {
+			const char32_t *source = segment.ptr();
+			memcpy(line.ptr() + old_size, source, size_t(segment_length) * sizeof(char32_t));
+			for (int i = 0; i < segment_length; i++) {
+				if (source[i] == '"') {
+					odd_quotes = !odd_quotes;
+				}
 			}
 		}
-	} while (qc % 2);
+		line[uint32_t(needed - 1)] = '\n';
+	} while (odd_quotes);
 
-	// Remove the extraneous newline we've added above.
-	line = line.substr(0, line.length() - 1);
+	// The newline was only used to join physical lines of one CSV record.
+	if (!line.is_empty()) {
+		line.resize_uninitialized(line.size() - 1);
+	}
 
 	Vector<String> strings;
-
+	const char32_t *read = line.ptr();
+	const int line_length = int(line.size());
+	const char32_t delim = p_delim[0];
 	bool in_quote = false;
-	String current;
-	for (int i = 0; i < line.length(); i++) {
-		char32_t c = line[i];
-		// A delimiter ends the current entry, unless it's in a quoted string.
-		if (!in_quote && c == p_delim[0]) {
-			strings.push_back(current);
-			current = String();
+	int field_begin = 0;
+	int field_length = 0;
+	for (int i = 0; i < line_length; i++) {
+		const char32_t c = read[i];
+		if (!in_quote && c == delim) {
+			strings.push_back(_csv_extract_field(read, field_begin, i, field_length));
+			field_begin = i + 1;
+			field_length = 0;
 		} else if (c == '"') {
-			// Doubled quotes are escapes for intentional quotes in the string.
-			if (line[i + 1] == '"' && in_quote) {
-				current += '"';
+			// A pair inside quotes contributes one literal quote to the field.
+			if (in_quote && i + 1 < line_length && read[i + 1] == '"') {
+				field_length++;
 				i++;
 			} else {
 				in_quote = !in_quote;
 			}
 		} else {
-			current += c;
+			field_length++;
 		}
 	}
 
 	if (in_quote) {
 		WARN_PRINT(vformat("Reached end of file before closing '\"' in CSV file '%s'.", get_path()));
 	}
-
-	strings.push_back(current);
-
+	strings.push_back(_csv_extract_field(read, field_begin, line_length, field_length));
 	return strings;
 }
 
@@ -878,21 +932,74 @@ bool FileAccess::store_line(const String &p_line) {
 bool FileAccess::store_csv_line(const Vector<String> &p_values, const String &p_delim) {
 	ERR_FAIL_COND_V(p_delim.length() != 1, false);
 
-	String line = "";
-	int size = p_values.size();
-	for (int i = 0; i < size; ++i) {
-		String value = p_values[i];
-
-		if (value.contains_char('"') || value.contains(p_delim) || value.contains_char('\n')) {
-			value = "\"" + value.replace("\"", "\"\"") + "\"";
-		}
-		if (i < size - 1) {
-			value += p_delim;
-		}
-
-		line += value;
+	const int count = p_values.size();
+	if (count == 0) {
+		return store_line(String());
 	}
 
+	const char32_t delimiter = p_delim[0];
+	int64_t total_length = count - 1; // Delimiters between consecutive fields.
+	for (int i = 0; i < count; i++) {
+		const String &value = p_values[i];
+		const char32_t *source = value.ptr();
+		const int length = value.length();
+		bool needs_quotes = false;
+		int quotes_to_double = 0;
+		for (int j = 0; j < length; j++) {
+			const char32_t c = source[j];
+			if (c == '"') {
+				quotes_to_double++;
+				needs_quotes = true;
+			} else if (c == delimiter || c == '\n') {
+				needs_quotes = true;
+			}
+		}
+		total_length += int64_t(length) + quotes_to_double + (needs_quotes ? 2 : 0);
+	}
+	ERR_FAIL_COND_V_MSG(total_length >= INT32_MAX, false, "CSV line is too large.");
+
+	if (total_length == 0) {
+		return store_line(String());
+	}
+
+	// One UTF-32 allocation and one contiguous write instead of repeatedly
+	// concatenating fields and constructing temporary quoted strings.
+	String line;
+	ERR_FAIL_COND_V(line.resize_uninitialized(total_length + 1) != OK, false);
+	char32_t *write = line.ptrw();
+	for (int i = 0; i < count; i++) {
+		if (i != 0) {
+			*write++ = delimiter;
+		}
+		const String &value = p_values[i];
+		const char32_t *source = value.ptr();
+		const int length = value.length();
+		bool needs_quotes = false;
+		for (int j = 0; j < length; j++) {
+			const char32_t c = source[j];
+			if (c == '"' || c == delimiter || c == '\n') {
+				needs_quotes = true;
+				break;
+			}
+		}
+		if (!needs_quotes) {
+			if (length > 0) {
+				memcpy(write, source, size_t(length) * sizeof(char32_t));
+				write += length;
+			}
+			continue;
+		}
+		*write++ = '"';
+		for (int j = 0; j < length; j++) {
+			const char32_t c = source[j];
+			*write++ = c;
+			if (c == '"') {
+				*write++ = '"';
+			}
+		}
+		*write++ = '"';
+	}
+	*write = 0;
 	return store_line(line);
 }
 

@@ -39,6 +39,8 @@ TEST_FORCE_LINK(test_file_access)
 #include "core/io/file_access_packed_byte_array.h"
 #include "tests/test_utils.h"
 
+#include <cstring>
+
 namespace TestFileAccess {
 
 TEST_CASE("[FileAccess] CSV read") {
@@ -84,6 +86,168 @@ TEST_CASE("[FileAccess] CSV read") {
 	CHECK(row5[0] == "What about");
 	CHECK(row5[1] == "tab separated");
 	CHECK(row5[2] == "lines, good?");
+}
+
+TEST_CASE("[FileAccess][Performance] CSV multiline records scale linearly") {
+	// Previously, every continuation line rescanned and recopied the entire
+	// accumulated record, causing quadratic work for this common import case.
+	const String payload = String("long text with comma, and unicode Ω🌍\n").repeat(2048);
+	const String csv = "\"begin\n" + payload + "end\",right,\"say \"\"hello\"\"\"";
+	const CharString bytes = csv.utf8();
+
+	Ref<FileAccessMemory> file;
+	file.instantiate();
+	REQUIRE(file->open_custom(reinterpret_cast<const uint8_t *>(bytes.ptr()), bytes.length()) == OK);
+
+	const Vector<String> fields = file->get_csv_line();
+	REQUIRE(fields.size() == 3);
+	CHECK(fields[0] == "begin\n" + payload + "end");
+	CHECK(fields[1] == "right");
+	CHECK(fields[2] == "say \"hello\"");
+	CHECK(file->get_position() == uint64_t(bytes.length()));
+}
+
+TEST_CASE("[FileAccess][Performance] CSV fields handle delimiters and escaped quotes") {
+	const char *const input = ",first,\"comma, inside\",\"double \"\"quote\"\"\",,tail,";
+	Ref<FileAccessMemory> file;
+	file.instantiate();
+	REQUIRE(file->open_custom(reinterpret_cast<const uint8_t *>(input), strlen(input)) == OK);
+	const Vector<String> fields = file->get_csv_line();
+	REQUIRE(fields.size() == 7);
+	CHECK(fields[0] == "");
+	CHECK(fields[1] == "first");
+	CHECK(fields[2] == "comma, inside");
+	CHECK(fields[3] == "double \"quote\"");
+	CHECK(fields[4] == "");
+	CHECK(fields[5] == "tail");
+	CHECK(fields[6] == "");
+
+	const char *const simple = "1~two~3";
+	REQUIRE(file->open_custom(reinterpret_cast<const uint8_t *>(simple), strlen(simple)) == OK);
+	const Vector<String> alternate = file->get_csv_line("~");
+	REQUIRE(alternate.size() == 3);
+	CHECK(alternate[0] == "1");
+	CHECK(alternate[1] == "two");
+	CHECK(alternate[2] == "3");
+}
+
+TEST_CASE("[FileAccess][Performance] CSV randomized quoted fields round trip") {
+	uint32_t seed = 0xC54183D2;
+	static constexpr char32_t alphabet[] = U"Ab1,\"x\nΩ😀";
+	Ref<FileAccessMemory> file;
+	file.instantiate();
+	for (int trial = 0; trial < 128; trial++) {
+		seed ^= seed << 13;
+		seed ^= seed >> 17;
+		seed ^= seed << 5;
+		const int count = 1 + int(seed % 9);
+
+		Vector<String> expected;
+		String csv;
+		for (int field = 0; field < count; field++) {
+			seed ^= seed << 13;
+			seed ^= seed >> 17;
+			seed ^= seed << 5;
+			const int size = int(seed % 96);
+			String value;
+			value.resize_uninitialized(size + 1);
+			char32_t *write = value.ptrw();
+			for (int i = 0; i < size; i++) {
+				seed ^= seed << 13;
+				seed ^= seed >> 17;
+				seed ^= seed << 5;
+				write[i] = alphabet[seed % (sizeof(alphabet) / sizeof(char32_t) - 1)];
+			}
+			write[size] = 0;
+			expected.push_back(value);
+			if (field != 0) {
+				csv += ",";
+			}
+			csv += "\"" + value.replace("\"", "\"\"") + "\"";
+		}
+		const CharString bytes = csv.utf8();
+		REQUIRE(file->open_custom(reinterpret_cast<const uint8_t *>(bytes.ptr()), bytes.length()) == OK);
+		const Vector<String> fields = file->get_csv_line();
+		REQUIRE(fields.size() == count);
+		for (int i = 0; i < count; i++) {
+			CHECK(fields[i] == expected[i]);
+		}
+	}
+}
+
+TEST_CASE("[FileAccess][Performance] CSV writer matches the legacy byte representation") {
+	Ref<FileAccessMemory> file;
+	file.instantiate();
+	uint32_t seed = 0x5D21C9A7;
+	static constexpr char32_t alphabet[] = U"abcXYZ 123,\"é😀\n";
+
+	for (int trial = 0; trial < 192; trial++) {
+		seed ^= seed << 13;
+		seed ^= seed >> 17;
+		seed ^= seed << 5;
+		const int count = int(seed % 16);
+		const String delimiter = (trial & 1) ? "," : "~";
+		Vector<String> values;
+		String legacy;
+		for (int i = 0; i < count; i++) {
+			seed ^= seed << 13;
+			seed ^= seed >> 17;
+			seed ^= seed << 5;
+			const int len = int(seed % 120);
+			String value;
+			value.resize_uninitialized(len + 1);
+			char32_t *write = value.ptrw();
+			for (int j = 0; j < len; j++) {
+				seed ^= seed << 13;
+				seed ^= seed >> 17;
+				seed ^= seed << 5;
+				write[j] = alphabet[seed % (sizeof(alphabet) / sizeof(alphabet[0]) - 1)];
+			}
+			write[len] = 0;
+			values.push_back(value);
+
+			// Independent oracle: exactly the original ordered operations.
+			String old_field = value;
+			if (old_field.contains_char('"') || old_field.contains(delimiter) || old_field.contains_char('\n')) {
+				old_field = "\"" + old_field.replace("\"", "\"\"") + "\"";
+			}
+			if (i < count - 1) {
+				old_field += delimiter;
+			}
+			legacy += old_field;
+		}
+
+		const CharString expected = (legacy + "\n").utf8();
+		Vector<uint8_t> storage;
+		REQUIRE(storage.resize_uninitialized(expected.length()) == OK);
+		REQUIRE(file->open_custom(storage.ptrw(), storage.size()) == OK);
+		REQUIRE(file->store_csv_line(values, delimiter));
+		CHECK(file->get_position() == uint64_t(expected.length()));
+		CHECK(memcmp(storage.ptr(), expected.ptr(), expected.length()) == 0);
+	}
+}
+
+TEST_CASE("[FileAccess][Performance] CSV large quoted writer round trips with one buffer") {
+	Vector<String> values;
+	for (int i = 0; i < 64; i++) {
+		values.push_back(String(U"🇵🇱é,\"abc\n").repeat(64) + String::num_int64(i));
+	}
+	// A generous backing storage for this file avoids any filesystem dependency.
+	Vector<uint8_t> storage;
+	REQUIRE(storage.resize_initialized(262144) == OK);
+	Ref<FileAccessMemory> file;
+	file.instantiate();
+	REQUIRE(file->open_custom(storage.ptrw(), storage.size()) == OK);
+	REQUIRE(file->store_csv_line(values));
+
+	const uint64_t written = file->get_position();
+	CHECK(written > 50000);
+	file->seek(0);
+	const Vector<String> parsed = file->get_csv_line();
+	REQUIRE(parsed.size() == values.size());
+	for (int i = 0; i < values.size(); i++) {
+		CHECK(parsed[i] == values[i]);
+	}
 }
 
 TEST_CASE("[FileAccess] Get as UTF-8 String") {
@@ -831,6 +995,160 @@ TEST_CASE("[FileAccess][Performance] Multi-block Zstandard compressed file reuse
 	}
 	reader->close();
 	DirAccess::remove_file_or_error(file_path);
+}
+
+TEST_CASE("[FileAccess][Performance] Token scanning reuses stack-first character buffer") {
+	const String expected[] = {
+		String("simple"),
+		String("small"),
+		String("x").repeat(255),
+		String("y").repeat(256),
+		String("z").repeat(257),
+		String("long").repeat(1024),
+		String::utf8("Привет"),
+		String("tail"),
+	};
+	String contents = "   \t  \n  ";
+	for (const String &token : expected) {
+		contents += token + " \t\n";
+	}
+	const CharString bytes = contents.utf8();
+	Ref<FileAccessMemory> file;
+	file.instantiate();
+	REQUIRE(file->open_custom(reinterpret_cast<const uint8_t *>(bytes.get_data()), bytes.length()) == OK);
+
+	for (const String &token : expected) {
+		CHECK(file->get_token() == token);
+	}
+	CHECK(file->get_position() <= file->get_length());
+	file->close();
+
+	// Whitespace-only files have no token and should allocate no token bytes.
+	const char whitespace[] = " \t\n\r ";
+	REQUIRE(file->open_custom(reinterpret_cast<const uint8_t *>(whitespace), sizeof(whitespace) - 1) == OK);
+	CHECK(file->get_token().is_empty());
+	file->close();
+}
+
+TEST_CASE("[FileAccess][Performance] Batched compressed tables preserve all codec headers") {
+	const String path = TestUtils::get_temp_path("cgame_compressed_batched_table.bin");
+	const int block_size = 64;
+	const int byte_count = block_size * 311 + 13;
+	const uint32_t block_count = byte_count / block_size + 1;
+	Vector<uint8_t> payload;
+	REQUIRE(payload.resize_uninitialized(byte_count) == OK);
+	uint8_t *bytes = payload.ptrw();
+	for (int i = 0; i < byte_count; i++) {
+		bytes[i] = uint8_t((i * 29 + (i / 97) * 7) & 255);
+	}
+
+	const Compression::Mode modes[] = {
+		Compression::MODE_FASTLZ,
+		Compression::MODE_DEFLATE,
+		Compression::MODE_GZIP,
+		Compression::MODE_ZSTD,
+	};
+	for (Compression::Mode mode : modes) {
+		Ref<FileAccessCompressed> writer;
+		writer.instantiate();
+		writer->configure("GCPF", mode, block_size);
+		REQUIRE(writer->open_internal(path, FileAccess::WRITE) == OK);
+		CHECK(writer->store_buffer(payload.ptr(), payload.size()));
+		writer->close();
+
+		// Parse the file with the ordinary binary reader, rather than relying
+		// exclusively on FileAccessCompressed's new table decoder.
+		Ref<FileAccess> raw = FileAccess::open(path, FileAccess::READ);
+		REQUIRE(raw.is_valid());
+		char magic[4];
+		REQUIRE(raw->get_buffer(reinterpret_cast<uint8_t *>(magic), 4) == 4);
+		CHECK(String::utf8(magic, 4) == "GCPF");
+		CHECK(raw->get_32() == uint32_t(mode));
+		CHECK(raw->get_32() == uint32_t(block_size));
+		CHECK(raw->get_32() == uint32_t(byte_count));
+		uint64_t compressed_total = 0;
+		for (uint32_t i = 0; i < block_count; i++) {
+			const uint32_t compressed_size = raw->get_32();
+			CHECK(compressed_size > 0);
+			compressed_total += compressed_size;
+		}
+		CHECK(raw->get_position() == uint64_t(16) + uint64_t(block_count) * 4);
+		CHECK(raw->get_length() == raw->get_position() + compressed_total + 4);
+		raw->close();
+
+		Ref<FileAccessCompressed> reader;
+		reader.instantiate();
+		reader->configure("GCPF", mode, block_size);
+		REQUIRE(reader->open_internal(path, FileAccess::READ) == OK);
+		CHECK(reader->get_length() == uint64_t(byte_count));
+		Vector<uint8_t> restored;
+		REQUIRE(restored.resize_uninitialized(byte_count) == OK);
+		CHECK(reader->get_buffer(restored.ptrw(), byte_count) == uint64_t(byte_count));
+		CHECK(restored == payload);
+		reader->seek(block_size * 140 - 5);
+		uint8_t crossing[28] = {};
+		CHECK(reader->get_buffer(crossing, sizeof(crossing)) == sizeof(crossing));
+		for (int i = 0; i < int(sizeof(crossing)); i++) {
+			CHECK(crossing[i] == payload[block_size * 140 - 5 + i]);
+		}
+		reader->close();
+	}
+	DirAccess::remove_file_or_error(path);
+}
+
+
+TEST_CASE("[FileAccess][Performance] Compressed block tables preserve tiny files with large configured blocks") {
+	// The decoder used to allocate a full block for every file, even when
+	// only a few bytes of decompressed data can ever exist.
+	const String path = TestUtils::get_temp_path("compressed_small_payload_large_block.bin");
+	constexpr uint32_t block_size = 8 * 1024 * 1024;
+	const int byte_counts[] = { 17, 257, 4095, 8191 };
+	const Compression::Mode modes[] = {
+		Compression::MODE_FASTLZ,
+		Compression::MODE_DEFLATE,
+		Compression::MODE_GZIP,
+		Compression::MODE_ZSTD,
+	};
+
+	for (Compression::Mode mode : modes) {
+		for (int byte_count : byte_counts) {
+			Vector<uint8_t> source;
+			REQUIRE(source.resize_uninitialized(byte_count) == OK);
+			uint8_t *source_bytes = source.ptrw();
+			for (int i = 0; i < byte_count; i++) {
+				source_bytes[i] = uint8_t((i * 29 + (i >> 5)) & 255);
+			}
+
+			Ref<FileAccessCompressed> writer;
+			writer.instantiate();
+			writer->configure("GCPF", mode, block_size);
+			REQUIRE(writer->open_internal(path, FileAccess::WRITE) == OK);
+			REQUIRE(writer->store_buffer(source.ptr(), source.size()));
+			writer->close();
+
+			Ref<FileAccessCompressed> reader;
+			reader.instantiate();
+			reader->configure("GCPF", mode, block_size);
+			REQUIRE(reader->open_internal(path, FileAccess::READ) == OK);
+			CHECK(reader->get_length() == uint64_t(byte_count));
+
+			Vector<uint8_t> output;
+			REQUIRE(output.resize_uninitialized(byte_count) == OK);
+			CHECK(reader->get_buffer(output.ptrw(), byte_count) == uint64_t(byte_count));
+			CHECK(output == source);
+
+			const uint64_t offset = uint64_t(byte_count / 2);
+			reader->seek(offset);
+			uint8_t segment[13] = {};
+			const uint64_t segment_size = MIN(uint64_t(sizeof(segment)), uint64_t(byte_count) - offset);
+			REQUIRE(reader->get_buffer(segment, segment_size) == segment_size);
+			for (int i = 0; i < int(segment_size); i++) {
+				CHECK(segment[i] == source[int(offset) + i]);
+			}
+			reader->close();
+		}
+	}
+	DirAccess::remove_file_or_error(path);
 }
 
 } // namespace TestFileAccess

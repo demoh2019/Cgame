@@ -1182,6 +1182,48 @@ TEST_CASE("[String] String to float") {
 	ERR_PRINT_ON
 }
 
+
+TEST_CASE("[String] String to float ignores leading zeros for significant digits") {
+	struct Input {
+		const char *value;
+		double expected;
+	};
+	const Input values[] = {
+		{ "00000000000000000001.5", 1.5 },
+		{ "-00000000000000000001.5", -1.5 },
+		{ "+00000000000000000042", 42.0 },
+		{ "00000000000000000012.25", 12.25 },
+		{ "00000000000000000000.5", 0.5 },
+		{ "00000000000000000001.25e+2", 125.0 },
+		{ "-00000000000000000007.5e-1", -0.75 },
+		{ "00000000000000000000", 0.0 },
+		{ "00000000000000000000.000000", 0.0 },
+		{ "00000.25", 0.25 },
+		{ "00000.00000", 0.0 },
+	};
+	for (const Input &input : values) {
+		CHECK(String(input.value).to_float() == doctest::Approx(input.expected));
+	}
+}
+
+TEST_CASE("[String] String to float preserves very small fractional values") {
+	struct Input {
+		const char *value;
+		double expected;
+	};
+	const Input values[] = {
+		{ "0.0000000000000000271", 2.71e-17 },
+		{ "0000000000000000000.0000000000000000271", 2.71e-17 },
+		{ "0000000000.0000000000000000042", 4.2e-18 },
+		{ "0.00000000000000000001", 1e-20 },
+		{ "0.00000000000000005e3", 5e-14 },
+		{ "0000.00000000000000010e2", 1e-14 },
+	};
+	for (const Input &input : values) {
+		CHECK(String(input.value).to_float() == doctest::Approx(input.expected).scale(0));
+	}
+}
+
 TEST_CASE("[String] Slicing") {
 	String s = "Mars,Jupiter,Saturn,Uranus";
 	const char *slices[4] = { "Mars", "Jupiter", "Saturn", "Uranus" };
@@ -1391,6 +1433,66 @@ TEST_CASE("[String] Splitting") {
 			CHECK(mk[i] == slices[i]);
 		}
 	}
+}
+
+TEST_CASE("[String] split_floats parses bounded numeric tokens without an input copy") {
+	const String source = "1e3|-2.75|.5|+4e-2|7e+3|garbage| |9";
+	const Vector<double> parsed = source.split_floats("|");
+	const double expected[] = { 1000.0, -2.75, 0.5, 0.04, 7000.0, 0.0, 0.0, 9.0 };
+	REQUIRE(parsed.size() == 8);
+	for (int i = 0; i < 8; i++) {
+		CHECK(Math::abs(parsed[i] - expected[i]) < 0.0000001);
+	}
+	// Bounded parsing must never mutate the source buffer or overrun into
+	// a token that follows a delimiter.
+	CHECK(source == "1e3|-2.75|.5|+4e-2|7e+3|garbage| |9");
+
+	const String empty_tokens = "|12||-3.5|";
+	const Vector<double> all = empty_tokens.split_floats("|");
+	REQUIRE(all.size() == 5);
+	CHECK(all[0] == 0.0);
+	CHECK(all[1] == 12.0);
+	CHECK(all[2] == 0.0);
+	CHECK(all[3] == -3.5);
+	CHECK(all[4] == 0.0);
+	const Vector<double> without_empty = empty_tokens.split_floats("|", false);
+	REQUIRE(without_empty.size() == 2);
+	CHECK(without_empty[0] == 12.0);
+	CHECK(without_empty[1] == -3.5);
+
+	const Vector<String> splitters = { ";", "|", " " };
+	const Vector<float> multikey = String("1.25;2.5|-3.75 4e1").split_floats_mk(splitters);
+	REQUIRE(multikey.size() == 4);
+	CHECK(Math::abs(multikey[0] - 1.25f) < 0.000001f);
+	CHECK(Math::abs(multikey[1] - 2.5f) < 0.000001f);
+	CHECK(Math::abs(multikey[2] + 3.75f) < 0.000001f);
+	CHECK(Math::abs(multikey[3] - 40.0f) < 0.000001f);
+}
+
+TEST_CASE("[String] split_floats handles long immutable CSV input and token boundaries") {
+	String csv;
+	const int token_count = 2048;
+	for (int i = 0; i < token_count; i++) {
+		if (i > 0) {
+			csv += ",";
+		}
+		csv += itos(i % 101);
+	}
+	const String original = csv;
+	const Vector<double> values = csv.split_floats(",");
+	REQUIRE(values.size() == token_count);
+	for (int i = 0; i < token_count; i++) {
+		CHECK(values[i] == double(i % 101));
+	}
+	CHECK(csv == original);
+
+	// A truncated exponent token must not see digits in the next token.
+	const Vector<double> incomplete = String("1e-|9|2e+|3").split_floats("|");
+	REQUIRE(incomplete.size() == 4);
+	CHECK(incomplete[0] == 1.0);
+	CHECK(incomplete[1] == 9.0);
+	CHECK(incomplete[2] == 2.0);
+	CHECK(incomplete[3] == 3.0);
 }
 
 TEST_CASE("[String] format") {
@@ -1913,6 +2015,38 @@ TEST_CASE("[String] is_numeric") {
 	CHECK(!String("AF").is_numeric());
 	CHECK(String("-12").is_numeric());
 	CHECK(String("-1.2").is_numeric());
+}
+
+TEST_CASE("[String] Padding fast paths avoid intermediate buffers and preserve behavior") {
+	CHECK(String("a").rpad(3, "xy") == "axyxy");
+	const String many = String("ab").repeat(1024);
+	CHECK(String("!").rpad(1025, "ab") == String("!") + many);
+	CHECK(String("!").lpad(1025, "ab") == many + "!");
+	CHECK(String("a").lpad(3, "xy") == "xyxya");
+	CHECK(String("").rpad(3, "ab") == "ababab");
+	CHECK(String("").lpad(3, "ab") == "ababab");
+	CHECK(String("hi").lpad(3, String(U"\u00B5")) == String(U"\u00B5hi"));
+	CHECK(String("hi").rpad(3, String(U"\u00B5")) == String(U"hi\u00B5"));
+	CHECK(String("42").pad_decimals(3) == "42.000");
+	CHECK(String("42.").pad_decimals(2) == "42.00");
+	CHECK(String("42.10").pad_decimals(3) == "42.100");
+	CHECK(String("42.123").pad_decimals(1) == "42.1");
+	CHECK(String("42.123").pad_decimals(0) == "42");
+	CHECK(String("").pad_decimals(2) == ".00");
+	CHECK(String("-8").pad_zeros(3) == "-008");
+	CHECK(String("foo").pad_zeros(3) == "foo000");
+	CHECK(String("0").pad_zeros(4) == "0000");
+	CHECK(String(".5").pad_zeros(8) == ".5");
+	CHECK(String(U"\u00B5-8").pad_zeros(3) == String(U"\u00B5-008"));
+
+	const String unchanged = "value";
+	CHECK(unchanged.rpad(5, "x").ptr() == unchanged.ptr());
+	CHECK(unchanged.lpad(5, "x").ptr() == unchanged.ptr());
+	CHECK(unchanged.rpad(30, "").ptr() == unchanged.ptr());
+	CHECK(unchanged.lpad(30, "").ptr() == unchanged.ptr());
+	const String decimal = "3.140";
+	CHECK(decimal.pad_decimals(3).ptr() == decimal.ptr());
+	CHECK(unchanged.pad_zeros(0).ptr() == unchanged.ptr());
 }
 
 TEST_CASE("[String] pad") {
@@ -2583,6 +2717,81 @@ TEST_CASE("[String] Escape single-buffer algorithms match ordered replacements")
 	}
 }
 
+TEST_CASE("[String] c_unescape zero-copy no-op and ordered escape compatibility") {
+	const String plain = U"ASCII данные 😀 / path [brackets] \\unknown";
+	CHECK(plain.c_unescape() == plain);
+	CHECK(plain.c_unescape().ptr() == plain.ptr());
+	CHECK(String().c_unescape().is_empty());
+
+	// A literal backslash is folded only after all the C escape substitutions.
+	const String tricky = "\\\\n\\t\\\\\\q\\'\\\"\\a\\b\\f\\r\\v";
+	const String expected = tricky.replace("\\a", "\a")
+								   .replace("\\b", "\b")
+								   .replace("\\f", "\f")
+								   .replace("\\n", "\n")
+								   .replace("\\r", "\r")
+								   .replace("\\t", "\t")
+								   .replace("\\v", "\v")
+								   .replace("\\'", "'")
+								   .replace("\\\"", "\"")
+								   .replace("\\\\", "\\");
+	CHECK(tricky.c_unescape() == expected);
+	CHECK(tricky.c_unescape().length() < tricky.length());
+
+	const String long_plain = String(U"long/неизменённый/строка😀").repeat(4096);
+	CHECK(long_plain.c_unescape().ptr() == long_plain.ptr());
+	const String long_escaped = String("\\\\n\\t\\\\\\q\\'\\\"").repeat(4096);
+	CHECK(long_escaped.c_unescape() ==
+			long_escaped.replace("\\a", "\a")
+					.replace("\\b", "\b")
+					.replace("\\f", "\f")
+					.replace("\\n", "\n")
+					.replace("\\r", "\r")
+					.replace("\\t", "\t")
+					.replace("\\v", "\v")
+					.replace("\\'", "'")
+					.replace("\\\"", "\"")
+					.replace("\\\\", "\\"));
+}
+
+TEST_CASE("[String] c_unescape matches ten ordered substitutions on randomized inputs") {
+	uint32_t seed = 0xC0FFEE41;
+	static constexpr char32_t alphabet[] = U"xyz12ABC \\abfnrtv'\"q!ά😀-";
+
+	for (int trial = 0; trial < 2048; trial++) {
+		seed ^= seed << 13;
+		seed ^= seed >> 17;
+		seed ^= seed << 5;
+		const int len = int(seed % 192);
+		String input;
+		REQUIRE(input.resize_uninitialized(len + 1) == OK);
+		char32_t *buffer = input.ptrw();
+		for (int i = 0; i < len; i++) {
+			seed ^= seed << 13;
+			seed ^= seed >> 17;
+			seed ^= seed << 5;
+			buffer[i] = alphabet[seed % (sizeof(alphabet) / sizeof(char32_t) - 1)];
+		}
+		buffer[len] = 0;
+
+		const String expected = input.replace("\\a", "\a")
+										.replace("\\b", "\b")
+										.replace("\\f", "\f")
+										.replace("\\n", "\n")
+										.replace("\\r", "\r")
+										.replace("\\t", "\t")
+										.replace("\\v", "\v")
+										.replace("\\'", "'")
+										.replace("\\\"", "\"")
+										.replace("\\\\", "\\");
+		const String result = input.c_unescape();
+		CHECK(result == expected);
+		if (result.length() == input.length()) {
+			CHECK(result.ptr() == input.ptr());
+		}
+	}
+}
+
 TEST_CASE("[String] c-escape/unescape") {
 	String s = "\\1\a2\b\f3\n45\r6\t7\v8\'9\?0\"";
 	CHECK(s.c_escape().c_unescape() == s);
@@ -3108,6 +3317,46 @@ TEST_CASE("[String] xml_unescape no-op fast path handles long strings") {
 	CHECK(result.length() == plain.length());
 	CHECK(result.ptr() == plain.ptr());
 	CHECK(result == plain);
+}
+
+TEST_CASE("[String] Trimming long ASCII sets and mixed Unicode keeps existing behavior") {
+	const String chars = "0123456789abcdef";
+	const String long_prefix = String("012345abcdef").repeat(2048);
+	CHECK((long_prefix + "!").lstrip(chars) == "!");
+	CHECK(("!" + long_prefix).rstrip(chars) == "!");
+	CHECK(long_prefix.lstrip(chars).is_empty());
+	CHECK(long_prefix.rstrip(chars).is_empty());
+
+	CHECK(String("aaaaX").lstrip("a") == "X");
+	CHECK(String("Xbbbb").rstrip("b") == "X");
+	CHECK(String("abc").lstrip("") == "abc");
+	CHECK(String("abc").rstrip("") == "abc");
+	CHECK(String("").lstrip(chars).is_empty());
+	CHECK(String("").rstrip(chars).is_empty());
+
+	// ASCII membership uses the fast mask; non-ASCII membership retains
+	// the full Unicode comparison, even when mixed within the same set.
+	CHECK(String(U"  \u00B5\u00B5text").lstrip(String(U" \u00B5")) == "text");
+	CHECK(String(U"text\u00B5\u00B5  ").rstrip(String(U" \u00B5")) == "text");
+	CHECK(String(U"\u00BFx").lstrip(String(U"\u00B5\u00FF")) == String(U"\u00BFx"));
+	CHECK(String(U"x\u00BF").rstrip(String(U"\u00B5\u00FF")) == String(U"x\u00BF"));
+
+	// No allocation is necessary when the edge is not part of the trim set.
+	const String unchanged = U"\u00B5keep\u00B5";
+	CHECK(unchanged.lstrip(chars).ptr() == unchanged.ptr());
+	CHECK(unchanged.rstrip(chars).ptr() == unchanged.ptr());
+}
+
+TEST_CASE("[String] Basename ignores dots in parent folders and scans once") {
+	CHECK(String("res://folder/name.tar.gz").get_basename() == "res://folder/name.tar");
+	CHECK(String("dir.name/subdir/file").get_basename() == "dir.name/subdir/file");
+	CHECK(String("dir.name/subdir/file.txt").get_basename() == "dir.name/subdir/file");
+	CHECK(String("C:\\dir.name\\file.png").get_basename() == "C:\\dir.name\\file");
+	CHECK(String("C:\\dir.name\\file").get_basename() == "C:\\dir.name\\file");
+	CHECK(String(".hidden").get_basename() == "");
+	CHECK(String("file.").get_basename() == "file");
+	CHECK(String("file").get_basename() == "file");
+	CHECK(String("").get_basename().is_empty());
 }
 
 TEST_CASE("[String] Strip escapes") {
@@ -3857,6 +4106,48 @@ TEST_CASE("[String] simplify_path linear parser matches legacy algorithm") {
 	}
 	deep += "texture.png";
 	CHECK_EQ(deep.simplify_path(), reference(deep));
+}
+
+
+TEST_CASE("[String] Case-insensitive long-prefix search rejects mismatched suffixes") {
+	const String prefix = String("a").repeat(63);
+	const String text = String("a").repeat(4096) + "Q" + String("a").repeat(256);
+	const String match = prefix + "q";
+	const String missing = prefix + "z";
+
+	CHECK(text.findn(match) == 4033);
+	CHECK(text.rfindn(match) == 4033);
+	CHECK(text.countn(match) == 1);
+	CHECK(text.findn(missing) == -1);
+	CHECK(text.rfindn(missing) == -1);
+	CHECK(text.countn(missing) == 0);
+
+	const CharString match_ascii = match.ascii();
+	const CharString missing_ascii = missing.ascii();
+	CHECK(text.findn(match_ascii.get_data()) == 4033);
+	CHECK(text.rfindn(match_ascii.get_data()) == 4033);
+	CHECK(text.countn(match_ascii.get_data()) == 1);
+	CHECK(text.findn(missing_ascii.get_data()) == -1);
+	CHECK(text.rfindn(missing_ascii.get_data()) == -1);
+	CHECK(text.countn(missing_ascii.get_data()) == 0);
+}
+
+TEST_CASE("[String] Case-insensitive long-prefix tail filters retain Unicode folding") {
+	// An uppercase tail must match a lowercase needle, including when the
+	// first two codepoints match exactly and the tail prefilter is active.
+	const String source = "aa" + String("b").repeat(61) + "Z";
+	const String needle = "aa" + String("b").repeat(61) + "z";
+	CHECK(source.findn(needle) == 0);
+	CHECK(source.rfindn(needle) == 0);
+	CHECK(source.countn(needle) == 1);
+
+	// U+212A KELVIN SIGN has the same lowercase form as ASCII 'k', so the
+	// exact-prefix prefilter must fall through to the Unicode comparison.
+	const String kelvin = String::chr(0x212A) + String("x").repeat(62) + "Z";
+	const String ascii_needle = "k" + String("x").repeat(62) + "z";
+	CHECK(kelvin.findn(ascii_needle) == 0);
+	CHECK(kelvin.rfindn(ascii_needle) == 0);
+	CHECK(kelvin.countn(ascii_needle) == 1);
 }
 
 } // namespace TestString

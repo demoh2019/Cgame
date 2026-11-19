@@ -39,6 +39,8 @@
 #include "servers/rendering/rendering_server_globals.h"
 #include "servers/rendering/storage/texture_storage.h"
 
+#include <array>
+
 // Use the same antialiasing feather size as StyleBoxFlat's default
 // (but doubled, as it's specified for both sides here).
 // This value is empirically determined to provide good antialiasing quality
@@ -1477,7 +1479,35 @@ void RendererCanvasCull::canvas_item_add_ellipse(RID p_item, const Point2 &p_pos
 	Item *canvas_item = canvas_item_owner.get_or_null(p_item);
 	ERR_FAIL_NULL(canvas_item);
 
-	static const int ellipse_segments = 64;
+	static constexpr int ellipse_segments = 64;
+	// All ellipse/circle commands use the same angular subdivision. Cache
+	// unit directions once, instead of computing sin/cos for every draw
+	// command (twice for antialiased ellipses). Initialization is thread-safe.
+	static const std::array<Vector2, ellipse_segments + 1> ellipse_directions = [] {
+		std::array<Vector2, ellipse_segments + 1> directions;
+		const real_t step = Math::TAU / ellipse_segments;
+		for (int i = 0; i <= ellipse_segments; i++) {
+			const float angle = i * step;
+			directions[i].x = Math::cos(angle);
+			directions[i].y = Math::sin(angle);
+		}
+		return directions;
+	}();
+
+	// Every filled ellipse shares the same triangle-fan topology. Build the
+	// 192 indices only once, rather than allocating and filling an identical
+	// Vector<int> for every circle or ellipse command.
+	static const Vector<int> triangle_indices = [] {
+		Vector<int> indices;
+		indices.resize(ellipse_segments * 3);
+		int *write = indices.ptrw();
+		for (int i = 0; i < ellipse_segments; i++) {
+			write[i * 3 + 0] = ellipse_segments + 1;
+			write[i * 3 + 1] = i;
+			write[i * 3 + 2] = i + 1;
+		}
+		return indices;
+	}();
 
 	float major = p_major;
 	float minor = p_minor;
@@ -1493,7 +1523,6 @@ void RendererCanvasCull::canvas_item_add_ellipse(RID p_item, const Point2 &p_pos
 
 		ellipse->primitive = RSE::PRIMITIVE_TRIANGLES;
 
-		Vector<int> indices;
 		Vector<Vector2> points;
 
 		points.resize(ellipse_segments + 2);
@@ -1502,27 +1531,16 @@ void RendererCanvasCull::canvas_item_add_ellipse(RID p_item, const Point2 &p_pos
 		// Store ellipse center in the last point.
 		points_ptr[ellipse_segments + 1] = p_pos;
 
-		const real_t ellipse_point_step = Math::TAU / ellipse_segments;
-
 		for (int i = 0; i < ellipse_segments + 1; i++) {
-			float angle = i * ellipse_point_step;
-			points_ptr[i].x = Math::cos(angle) * major;
-			points_ptr[i].y = Math::sin(angle) * minor;
+			const Vector2 &direction = ellipse_directions[i];
+			points_ptr[i].x = direction.x * major;
+			points_ptr[i].y = direction.y * minor;
 			points_ptr[i] += p_pos;
-		}
-
-		indices.resize(ellipse_segments * 3);
-		int *indices_ptr = indices.ptrw();
-
-		for (int i = 0; i < ellipse_segments; i++) {
-			indices_ptr[i * 3 + 0] = ellipse_segments + 1;
-			indices_ptr[i * 3 + 1] = i;
-			indices_ptr[i * 3 + 2] = i + 1;
 		}
 
 		Vector<Color> color;
 		color.push_back(p_color);
-		ellipse->polygon.create(indices, points, color);
+		ellipse->polygon.create(triangle_indices, points, color);
 	}
 
 	if (p_antialiased) {
@@ -1546,15 +1564,14 @@ void RendererCanvasCull::canvas_item_add_ellipse(RID p_item, const Point2 &p_pos
 		points.resize(2 * ellipse_segments + 2);
 		colors.resize(2 * ellipse_segments + 2);
 
-		const real_t ellipse_point_step = Math::TAU / ellipse_segments;
-
 		Vector2 *points_ptr = points.ptrw();
 		Color *colors_ptr = colors.ptrw();
 
 		for (int i = 0; i < ellipse_segments + 1; i++) {
-			const float angle = i * ellipse_point_step;
-			const float c = Math::cos(angle);
-			const float s = Math::sin(angle);
+			// Preserve the original float coefficients used by the feather
+			// geometry even in double-precision real_t engine builds.
+			const float c = ellipse_directions[i].x;
+			const float s = ellipse_directions[i].y;
 
 			points_ptr[i * 2].x = c * major;
 			points_ptr[i * 2].y = s * minor;

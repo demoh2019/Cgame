@@ -311,30 +311,22 @@ private:
 
 	Element *_lower_bound(const T &p_value) const {
 		Element *node = _data._root->left;
-		Element *prev = nullptr;
+		Element *result = nullptr;
 		C less;
 
+		// Track the smallest node not less than p_value. Unlike the old
+		// two-direction comparison, this uses one comparison per tree level
+		// and needs no final successor lookup.
 		while (node != _data._nil) {
-			prev = node;
-
-			if (less(p_value, node->value)) {
+			if (!less(node->value, p_value)) {
+				result = node;
 				node = node->left;
-			} else if (less(node->value, p_value)) {
-				node = node->right;
 			} else {
-				return node; // found
+				node = node->right;
 			}
 		}
 
-		if (prev == nullptr) {
-			return nullptr; // tree empty
-		}
-
-		if (less(prev->value, p_value)) {
-			prev = prev->_next;
-		}
-
-		return prev;
+		return result;
 	}
 
 	void _insert_rb_fix(Element *p_new_node) {
@@ -389,13 +381,16 @@ private:
 		Element *new_parent = _data._root;
 		Element *node = _data._root->left;
 		C less;
+		bool insert_left = true;
 
 		while (node != _data._nil) {
 			new_parent = node;
 
 			if (less(p_value, node->value)) {
+				insert_left = true;
 				node = node->left;
 			} else if (less(node->value, p_value)) {
+				insert_left = false;
 				node = node->right;
 			} else {
 				return node; // Return existing node
@@ -409,14 +404,23 @@ private:
 		new_node->value = p_value;
 		//new_node->data=_data;
 
-		if (new_parent == _data._root || less(p_value, new_parent->value)) {
+		// The last search step determines both in-order neighbors of the
+		// new leaf. Reuse the maintained links instead of climbing the RB
+		// tree twice to locate its predecessor and successor.
+		if (new_parent == _data._root) {
 			new_parent->left = new_node;
+			new_node->_prev = nullptr;
+			new_node->_next = nullptr;
+		} else if (insert_left) {
+			new_parent->left = new_node;
+			new_node->_prev = new_parent->_prev;
+			new_node->_next = new_parent;
 		} else {
 			new_parent->right = new_node;
+			new_node->_prev = new_parent;
+			new_node->_next = new_parent->_next;
 		}
 
-		new_node->_next = _successor(new_node);
-		new_node->_prev = _predecessor(new_node);
 		if (new_node->_next) {
 			new_node->_next->_prev = new_node;
 		}

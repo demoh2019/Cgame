@@ -36,8 +36,75 @@ TEST_FORCE_LINK(test_paged_array)
 
 #include <algorithm>
 #include <vector>
+#include <thread>
+#include <unordered_set>
 
 namespace TestPagedArray {
+
+TEST_CASE("[PagedArray][Performance] New pages allocate concurrently without duplicate ownership") {
+	// Exercise simultaneous metadata growth and page payload allocation.
+	// Every thread owns only its local collection; the pool is the shared state.
+	constexpr int thread_count = 8;
+	constexpr int pages_per_thread = 96;
+	using Pool = PagedArrayPool<uint64_t>;
+	Pool pool(64);
+	std::vector<std::vector<Pool::PageInfo>> batches(thread_count);
+	std::vector<std::thread> workers;
+	workers.reserve(thread_count);
+
+	for (int thread_index = 0; thread_index < thread_count; thread_index++) {
+		workers.emplace_back([&pool, &batches, thread_index]() {
+			auto &pages = batches[thread_index];
+			pages.reserve(pages_per_thread);
+			for (int i = 0; i < pages_per_thread; i++) {
+				Pool::PageInfo page = pool.alloc_page();
+				page.page[0] = (uint64_t(thread_index) << 32) | uint32_t(i);
+				pages.push_back(page);
+			}
+		});
+	}
+	for (std::thread &worker : workers) {
+		worker.join();
+	}
+
+	std::unordered_set<uint32_t> allocated_ids;
+	std::unordered_set<uint64_t *> allocated_ptrs;
+	for (int thread_index = 0; thread_index < thread_count; thread_index++) {
+		const auto &pages = batches[thread_index];
+		REQUIRE(pages.size() == pages_per_thread);
+		for (int i = 0; i < pages_per_thread; i++) {
+			const auto &page = pages[i];
+			REQUIRE(page.page != nullptr);
+			CHECK(page.page[0] == ((uint64_t(thread_index) << 32) | uint32_t(i)));
+			CHECK(allocated_ids.insert(page.page_id).second);
+			CHECK(allocated_ptrs.insert(page.page).second);
+		}
+	}
+	CHECK(allocated_ids.size() == size_t(thread_count * pages_per_thread));
+
+	// Once all pages are returned, a second allocation wave must recycle
+	// precisely those pages instead of allocating new ones.
+	for (const auto &pages : batches) {
+		std::vector<uint32_t> ids;
+		ids.reserve(pages.size());
+		for (const auto &page : pages) {
+			ids.push_back(page.page_id);
+		}
+		pool.free_pages(ids.data(), uint32_t(ids.size()));
+	}
+
+	std::vector<uint32_t> recycled_ids;
+	recycled_ids.reserve(thread_count * pages_per_thread);
+	for (int i = 0; i < thread_count * pages_per_thread; i++) {
+		const Pool::PageInfo reused = pool.alloc_page();
+		REQUIRE(reused.page != nullptr);
+		CHECK(allocated_ids.erase(reused.page_id) == 1);
+		recycled_ids.push_back(reused.page_id);
+	}
+	CHECK(allocated_ids.empty());
+	pool.free_pages(recycled_ids.data(), uint32_t(recycled_ids.size()));
+	pool.reset();
+}
 
 TEST_CASE("[PagedArray] Simple fill and refill") {
 	PagedArrayPool<uint32_t> pool;
@@ -377,6 +444,137 @@ TEST_CASE("[PagedArray] Unordered removal avoids last-element self-assignment") 
 		CHECK(array[i].value == i);
 	}
 	array.reset();
+	pool.reset();
+}
+
+struct PagedLifetimeProbe {
+	inline static int alive = 0;
+	inline static int destroyed = 0;
+	inline static int copies = 0;
+	int value = 0;
+
+	explicit PagedLifetimeProbe(int p_value = 0) :
+			value(p_value) {
+		alive++;
+	}
+	PagedLifetimeProbe(const PagedLifetimeProbe &p_other) :
+			value(p_other.value) {
+		alive++;
+		copies++;
+	}
+	PagedLifetimeProbe &operator=(const PagedLifetimeProbe &p_other) {
+		value = p_other.value;
+		return *this;
+	}
+	~PagedLifetimeProbe() {
+		destroyed++;
+		alive--;
+	}
+};
+
+TEST_CASE("[PagedArray] Page-wise clear destroys exactly the live nontrivial elements") {
+	PagedLifetimeProbe::alive = 0;
+	PagedLifetimeProbe::destroyed = 0;
+	PagedLifetimeProbe::copies = 0;
+	PagedArrayPool<PagedLifetimeProbe> pool(8);
+	PagedArray<PagedLifetimeProbe> array;
+	array.set_page_pool(&pool);
+
+	for (int n : { 1, 7, 8, 9, 16, 17, 35, 64 }) {
+		for (int i = 0; i < n; i++) {
+			PagedLifetimeProbe item(i);
+			array.push_back(item);
+		}
+		CHECK(array.size() == uint64_t(n));
+		CHECK(PagedLifetimeProbe::alive == n);
+		for (int i = 0; i < n; i++) {
+			CHECK(array[i].value == i);
+		}
+		array.pop_back();
+		CHECK(PagedLifetimeProbe::alive == n - 1);
+		array.clear();
+		CHECK(PagedLifetimeProbe::alive == 0);
+		CHECK(array.size() == 0);
+		array.clear();
+	}
+	CHECK(PagedLifetimeProbe::destroyed > 0);
+	array.reset();
+	pool.reset();
+	CHECK(PagedLifetimeProbe::alive == 0);
+}
+
+TEST_CASE("[PagedArray] Merge and page-wise clear preserve nontrivial lifetimes") {
+	PagedLifetimeProbe::alive = 0;
+	PagedLifetimeProbe::destroyed = 0;
+	PagedLifetimeProbe::copies = 0;
+	PagedArrayPool<PagedLifetimeProbe> pool(8);
+	PagedArray<PagedLifetimeProbe> dst;
+	PagedArray<PagedLifetimeProbe> src;
+	dst.set_page_pool(&pool);
+	src.set_page_pool(&pool);
+
+	for (int i = 0; i < 13; i++) {
+		PagedLifetimeProbe item(i);
+		dst.push_back(item);
+	}
+	for (int i = 13; i < 39; i++) {
+		PagedLifetimeProbe item(i);
+		src.push_back(item);
+	}
+	CHECK(PagedLifetimeProbe::alive == 39);
+	dst.merge_unordered(src);
+	CHECK(dst.size() == 39);
+	CHECK(src.size() == 0);
+	CHECK(PagedLifetimeProbe::alive == 39);
+	bool seen[39] = {};
+	for (uint64_t i = 0; i < dst.size(); i++) {
+		const int value = dst[i].value;
+		REQUIRE(value >= 0);
+		REQUIRE(value < 39);
+		CHECK_FALSE(seen[value]);
+		seen[value] = true;
+	}
+	for (bool present : seen) {
+		CHECK(present);
+	}
+	dst.clear();
+	CHECK(PagedLifetimeProbe::alive == 0);
+	src.clear();
+	dst.reset();
+	src.reset();
+	pool.reset();
+}
+
+TEST_CASE("[PagedArray] Bulk trivial remainder copy preserves large partial pages") {
+	PagedArrayPool<uint64_t> pool(1024);
+	PagedArray<uint64_t> dst;
+	PagedArray<uint64_t> src;
+	dst.set_page_pool(&pool);
+	src.set_page_pool(&pool);
+	std::vector<uint64_t> expected;
+	for (uint64_t i = 0; i < 1537; i++) {
+		const uint64_t value = i + 1;
+		dst.push_back(value);
+		expected.push_back(value);
+	}
+	for (uint64_t i = 0; i < 1903; i++) {
+		const uint64_t value = i + 100000;
+		src.push_back(value);
+		expected.push_back(value);
+	}
+	dst.merge_unordered(src);
+	CHECK(dst.size() == expected.size());
+	CHECK(src.size() == 0);
+	std::vector<uint64_t> actual;
+	actual.reserve(dst.size());
+	for (uint64_t i = 0; i < dst.size(); i++) {
+		actual.push_back(dst[i]);
+	}
+	std::sort(actual.begin(), actual.end());
+	std::sort(expected.begin(), expected.end());
+	CHECK(actual == expected);
+	dst.reset();
+	src.reset();
 	pool.reset();
 }
 

@@ -25,7 +25,7 @@ def observed_spike(case: dict[str, Any]) -> float | None:
         detail = run.get("engine", {}).get("detail", {})
         if not isinstance(detail, dict):
             continue
-        for name in ("peak_frame_ms", "peak_physics_ms"):
+        for name in ("peak_frame_ms", "peak_physics_ms", "peak_process_ms"):
             value = finite(detail.get(name))
             if value is not None:
                 values.append(value)

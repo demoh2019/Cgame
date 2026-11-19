@@ -70,6 +70,25 @@ static _FORCE_INLINE_ char32_t lower_case(char32_t p_char) {
 // Case-insensitive version of are_spans_equal
 template <typename T1, typename T2>
 static bool strings_equal_lower(const T1 *p_lhs_begin, const T2 *p_rhs_begin, size_t p_len) {
+	// For long common prefixes, a different final character otherwise makes
+	// findn/rfindn/countn compare the entire candidate before rejecting it.
+	// Only probe the tail after two exact prefix matches, so typical misses
+	// continue through the original short-circuiting loop unchanged.
+	if (p_len >= 32 &&
+			static_cast<uint32_t>(p_lhs_begin[0]) == static_cast<uint32_t>(p_rhs_begin[0]) &&
+			static_cast<uint32_t>(p_lhs_begin[1]) == static_cast<uint32_t>(p_rhs_begin[1])) {
+		const auto lhs = p_lhs_begin[p_len - 1];
+		const auto rhs = p_rhs_begin[p_len - 1];
+		if (static_cast<uint32_t>(lhs) != static_cast<uint32_t>(rhs)) {
+			if (static_cast<uint32_t>(lhs) < 128 && static_cast<uint32_t>(rhs) < 128) {
+				if (lower_case(lhs) != lower_case(rhs)) {
+					return false;
+				}
+			} else if (_find_lower(lhs) != _find_lower(rhs)) {
+				return false;
+			}
+		}
+	}
 	for (size_t i = 0; i < p_len; ++i) {
 		const auto lhs = p_lhs_begin[i];
 		const auto rhs = p_rhs_begin[i];
@@ -1300,6 +1319,11 @@ Vector<String> String::rsplit(const char *p_splitter, bool p_allow_empty, int p_
 	return ret;
 }
 
+// The bounded parser reads directly from the UTF-32 input. Splitters do not
+// require temporarily writing NULs into a copy of the entire string.
+template <typename C, bool p_bounded = false>
+static double built_in_strtod(const C *p_string, C **r_end = nullptr, const C *p_limit = nullptr);
+
 Vector<double> String::split_floats(const String &p_splitter, bool p_allow_empty) const {
 	Vector<double> ret;
 	int from = 0;
@@ -1308,16 +1332,14 @@ Vector<double> String::split_floats(const String &p_splitter, bool p_allow_empty
 		return ret;
 	}
 
-	String buffer = *this;
+	const char32_t *const characters = get_data();
 	while (true) {
 		int end = find(p_splitter, from);
 		if (end < 0) {
 			end = len;
 		}
 		if (p_allow_empty || (end > from)) {
-			buffer[end] = 0;
-			ret.push_back(String::to_float(&buffer.get_data()[from]));
-			buffer[end] = _cowdata.get(end);
+			ret.push_back(built_in_strtod<char32_t, true>(characters + from, nullptr, characters + end));
 		}
 
 		if (end == len) {
@@ -1338,7 +1360,7 @@ Vector<float> String::split_floats_mk(const Vector<String> &p_splitters, bool p_
 		return ret;
 	}
 
-	String buffer = *this;
+	const char32_t *const characters = get_data();
 	while (true) {
 		int idx = 0;
 		int end = findmk(p_splitters, from, &idx);
@@ -1350,9 +1372,7 @@ Vector<float> String::split_floats_mk(const Vector<String> &p_splitters, bool p_
 		}
 
 		if (p_allow_empty || (end > from)) {
-			buffer[end] = 0;
-			ret.push_back(String::to_float(&buffer.get_data()[from]));
-			buffer[end] = _cowdata.get(end);
+			ret.push_back(built_in_strtod<char32_t, true>(characters + from, nullptr, characters + end));
 		}
 
 		if (end == len) {
@@ -2500,7 +2520,7 @@ bool String::is_numeric() const {
 	return true; // TODO: Use the parser below for this instead
 }
 
-template <typename C>
+template <typename C, bool p_bounded>
 static double built_in_strtod(
 		/* A decimal ASCII floating-point number,
 		 * optionally preceded by white space. Must
@@ -2516,7 +2536,7 @@ static double built_in_strtod(
 		const C *p_string,
 		/* If non-nullptr, store terminating Cacter's
 		 * address here. */
-		C **r_end = nullptr) {
+		C **r_end, const C *p_limit) {
 	/* Largest possible base 10 exponent. Any
 	 * exponent larger than this will already
 	 * produce underflow or overflow, so there's
@@ -2560,33 +2580,64 @@ static double built_in_strtod(
 	int decPt;
 	/* Temporarily holds location of exponent in string. */
 	const C *pExp;
+	/* Track leading zeros without counting them among significant digits. */
+	bool skippedZeros = false;
+	/* Zero digits following the decimal point before the first nonzero digit. */
+	int fracZeros = 0;
+
+	// Treat the end of a split token exactly like the terminating NUL.
+	// The common unbounded path is resolved at compile time and remains
+	// unchanged; only split_floats() uses the extra range check.
+	const auto get_char = [p_limit](const C *p_pos) -> C {
+		if constexpr (p_bounded) {
+			return p_pos < p_limit ? *p_pos : C(0);
+		}
+		return *p_pos;
+	};
 
 	/*
 	 * Strip off leading blanks and check for a sign.
 	 */
 
 	p = p_string;
-	while (*p == ' ' || *p == '\t' || *p == '\n') {
+	while (get_char(p) == ' ' || get_char(p) == '\t' || get_char(p) == '\n') {
 		p += 1;
 	}
-	if (*p == '-') {
+	if (get_char(p) == '-') {
 		sign = true;
 		p += 1;
 	} else {
-		if (*p == '+') {
+		if (get_char(p) == '+') {
 			p += 1;
 		}
 		sign = false;
 	}
 
 	/*
-	 * Count the number of digits in the mantissa (including the decimal
-	 * point), and also locate the decimal point.
+	 * Skip leading zeros to preserve the full 18 significant digit budget.
+	 * For a zero integer part, skip zeros after the decimal point as well.
+	 */
+	while (*p == '0') {
+		p += 1;
+		skippedZeros = true;
+	}
+	if (*p == '.' && *(p + 1) == '0') {
+		p += 1;
+		while (*p == '0') {
+			skippedZeros = true;
+			fracZeros += 1;
+			p += 1;
+		}
+	}
+
+	/*
+	 * Count mantissa digits and find the decimal point.
+	 * A skipped decimal point starts at index zero.
 	 */
 
-	decPt = -1;
+	decPt = fracZeros > 0 ? 0 : -1;
 	for (mantSize = 0;; mantSize += 1) {
-		c = *p;
+		c = get_char(p);
 		if (!is_digit(c)) {
 			if ((c != '.') || (decPt >= 0)) {
 				break;
@@ -2607,38 +2658,40 @@ static double built_in_strtod(
 	p -= mantSize;
 	if (decPt < 0) {
 		decPt = mantSize;
-	} else {
+	} else if (fracZeros == 0) {
 		mantSize -= 1; /* One of the digits was the point. */
 	}
 	if (mantSize > 18) {
-		fracExp = decPt - 18;
+		fracExp = decPt - 18 - fracZeros;
 		mantSize = 18;
 	} else {
-		fracExp = decPt - mantSize;
+		fracExp = decPt - mantSize - fracZeros;
 	}
 	if (mantSize == 0) {
 		fraction = 0.0;
-		p = p_string;
-		goto done;
+		if (!skippedZeros) {
+			p = p_string;
+			goto done;
+		}
 	} else {
 		int frac1, frac2;
 
 		frac1 = 0;
 		for (; mantSize > 9; mantSize -= 1) {
-			c = *p;
+			c = get_char(p);
 			p += 1;
 			if (c == '.') {
-				c = *p;
+				c = get_char(p);
 				p += 1;
 			}
 			frac1 = 10 * frac1 + (c - '0');
 		}
 		frac2 = 0;
 		for (; mantSize > 0; mantSize -= 1) {
-			c = *p;
+			c = get_char(p);
 			p += 1;
 			if (c == '.') {
-				c = *p;
+				c = get_char(p);
 				p += 1;
 			}
 			frac2 = 10 * frac2 + (c - '0');
@@ -2651,23 +2704,23 @@ static double built_in_strtod(
 	 */
 
 	p = pExp;
-	if ((*p == 'E') || (*p == 'e')) {
+	if ((get_char(p) == 'E') || (get_char(p) == 'e')) {
 		p += 1;
-		if (*p == '-') {
+		if (get_char(p) == '-') {
 			expSign = true;
 			p += 1;
 		} else {
-			if (*p == '+') {
+			if (get_char(p) == '+') {
 				p += 1;
 			}
 			expSign = false;
 		}
-		if (!is_digit(char32_t(*p))) {
+		if (!is_digit(char32_t(get_char(p)))) {
 			p = pExp;
 			goto done;
 		}
-		while (is_digit(char32_t(*p))) {
-			exp = exp * 10 + (*p - '0');
+		while (is_digit(char32_t(get_char(p)))) {
+			exp = exp * 10 + (get_char(p) - '0');
 			p += 1;
 		}
 	}
@@ -4480,37 +4533,89 @@ String String::strip_escapes() const {
 	return stripped;
 }
 
-String String::lstrip(const String &p_chars) const {
-	int len = length();
-	int beg;
+// The usual trim sets are ASCII whitespace or punctuation. A two-word stack
+// lookup table avoids searching the entire set for every stripped code point.
+// Non-ASCII code points still use the full Unicode String lookup.
+static _FORCE_INLINE_ bool _trim_char_in_set(char32_t p_char, const String &p_chars, const uint64_t p_ascii_mask[2]) {
+	// The first trim character is often repeated (e.g. leading spaces).
+	if (p_char == p_chars.ptr()[0]) {
+		return true;
+	}
+	const uint32_t codepoint = uint32_t(p_char);
+	if (codepoint < 128) {
+		return (p_ascii_mask[codepoint >> 6] & (uint64_t(1) << (codepoint & 63))) != 0;
+	}
+	return p_chars.find_char(p_char) != -1;
+}
 
-	for (beg = 0; beg < len; beg++) {
-		if (p_chars.find_char(get(beg)) == -1) {
-			break;
+static _FORCE_INLINE_ void _make_ascii_trim_mask(const String &p_chars, uint64_t r_ascii_mask[2]) {
+	r_ascii_mask[0] = 0;
+	r_ascii_mask[1] = 0;
+	const char32_t *characters = p_chars.ptr();
+	for (int i = 0; i < p_chars.length(); i++) {
+		const uint32_t codepoint = uint32_t(characters[i]);
+		if (codepoint < 128) {
+			r_ascii_mask[codepoint >> 6] |= uint64_t(1) << (codepoint & 63);
 		}
 	}
+}
 
-	if (beg == 0) {
+String String::lstrip(const String &p_chars) const {
+	const int len = length();
+	if (len == 0 || p_chars.is_empty()) {
 		return *this;
 	}
 
+	const char32_t *characters = ptr();
+	const int char_count = p_chars.length();
+	if (char_count == 1) {
+		const char32_t trim_char = p_chars.ptr()[0];
+		int beg = 0;
+		while (beg < len && characters[beg] == trim_char) {
+			beg++;
+		}
+		return beg == 0 ? *this : substr(beg, len - beg);
+	}
+
+	// Unchanged strings are common; avoid even building the lookup mask.
+	if (p_chars.find_char(characters[0]) == -1) {
+		return *this;
+	}
+	uint64_t ascii_mask[2];
+	_make_ascii_trim_mask(p_chars, ascii_mask);
+	int beg = 1;
+	while (beg < len && _trim_char_in_set(characters[beg], p_chars, ascii_mask)) {
+		beg++;
+	}
 	return substr(beg, len - beg);
 }
 
 String String::rstrip(const String &p_chars) const {
-	int len = length();
-	int end;
-
-	for (end = len - 1; end >= 0; end--) {
-		if (p_chars.find_char(get(end)) == -1) {
-			break;
-		}
-	}
-
-	if (end == len - 1) {
+	const int len = length();
+	if (len == 0 || p_chars.is_empty()) {
 		return *this;
 	}
 
+	const char32_t *characters = ptr();
+	const int char_count = p_chars.length();
+	if (char_count == 1) {
+		const char32_t trim_char = p_chars.ptr()[0];
+		int end = len - 1;
+		while (end >= 0 && characters[end] == trim_char) {
+			end--;
+		}
+		return end == len - 1 ? *this : substr(0, end + 1);
+	}
+
+	if (p_chars.find_char(characters[len - 1]) == -1) {
+		return *this;
+	}
+	uint64_t ascii_mask[2];
+	_make_ascii_trim_mask(p_chars, ascii_mask);
+	int end = len - 2;
+	while (end >= 0 && _trim_char_in_set(characters[end], p_chars, ascii_mask)) {
+		end--;
+	}
 	return substr(0, end + 1);
 }
 
@@ -4645,7 +4750,7 @@ String String::simplify_path() const {
 	}
 
 	*dst++ = 0;
-	normalized.resize(dst - dst_start);
+	normalized.resize_uninitialized(dst - dst_start);
 	return drive + normalized;
 }
 
@@ -4927,20 +5032,87 @@ String String::uri_file_decode() const {
 	return _uri_decode_single_buffer(*this, false);
 }
 
-String String::c_unescape() const {
-	String escaped = *this;
-	escaped = escaped.replace("\\a", "\a");
-	escaped = escaped.replace("\\b", "\b");
-	escaped = escaped.replace("\\f", "\f");
-	escaped = escaped.replace("\\n", "\n");
-	escaped = escaped.replace("\\r", "\r");
-	escaped = escaped.replace("\\t", "\t");
-	escaped = escaped.replace("\\v", "\v");
-	escaped = escaped.replace("\\'", "\'");
-	escaped = escaped.replace("\\\"", "\"");
-	escaped = escaped.replace("\\\\", "\\");
+// The C escape substitutions intentionally precede backslash collapsing.
+// A run of backslashes followed by a recognized escape consumes its last
+// backslash with the escape, then collapses the remaining pairs.
+static _FORCE_INLINE_ char32_t _c_unescape_suffix(char32_t p_char) {
+	switch (p_char) {
+		case 'a':
+			return '\a';
+		case 'b':
+			return '\b';
+		case 'f':
+			return '\f';
+		case 'n':
+			return '\n';
+		case 'r':
+			return '\r';
+		case 't':
+			return '\t';
+		case 'v':
+			return '\v';
+		case '\'':
+			return '\'';
+		case '"':
+			return '"';
+		default:
+			return 0;
+	}
+}
 
-	return escaped;
+static int _c_unescape_copy(const char32_t *p_source, int p_length, char32_t *p_dest) {
+	int output_length = 0;
+	for (int pos = 0; pos < p_length;) {
+		if (p_source[pos] != '\\') {
+			if (p_dest) {
+				p_dest[output_length] = p_source[pos];
+			}
+			output_length++;
+			pos++;
+			continue;
+		}
+
+		const int run_begin = pos;
+		while (pos < p_length && p_source[pos] == '\\') {
+			pos++;
+		}
+		const char32_t escaped = pos < p_length ? _c_unescape_suffix(p_source[pos]) : 0;
+		// Reproduce ordered replace("\\a"... "\\\"" then "\\\\"), including
+		// overlapping runs such as two backslashes followed by 'n'.
+		const int remaining_slashes = pos - run_begin - (escaped != 0);
+		const int output_slashes = (remaining_slashes + 1) / 2;
+		if (p_dest) {
+			for (int i = 0; i < output_slashes; i++) {
+				p_dest[output_length + i] = '\\';
+			}
+		}
+		output_length += output_slashes;
+		if (escaped != 0) {
+			if (p_dest) {
+				p_dest[output_length] = escaped;
+			}
+			output_length++;
+			pos++;
+		}
+	}
+	return output_length;
+}
+
+String String::c_unescape() const {
+	const int source_length = length();
+	const char32_t *source = ptr();
+	const int decoded_length = _c_unescape_copy(source, source_length, nullptr);
+	if (decoded_length == source_length) {
+		// No recognized escape or repeated backslash. Keep the COW buffer.
+		return *this;
+	}
+
+	String decoded;
+	ERR_FAIL_COND_V(decoded.resize_uninitialized(decoded_length + 1) != OK, String());
+	char32_t *dest = decoded.ptrw();
+	_c_unescape_copy(source, source_length, dest);
+	dest[decoded_length] = 0;
+	return decoded;
 }
 
 enum class _StringEscapeMode {
@@ -5222,54 +5394,78 @@ String String::xml_unescape() const {
 }
 
 String String::pad_decimals(int p_digits) const {
-	String s = *this;
-	int c = s.find_char('.');
-
-	if (c == -1) {
-		if (p_digits <= 0) {
-			return s;
-		}
-		s += ".";
-		c = s.length() - 1;
-	} else {
-		if (p_digits <= 0) {
-			return s.substr(0, c);
-		}
+	const int source_length = length();
+	const int dot_position = find_char('.');
+	if (p_digits <= 0) {
+		return dot_position < 0 ? *this : substr(0, dot_position);
 	}
 
-	if (s.length() - (c + 1) > p_digits) {
-		return s.substr(0, c + p_digits + 1);
-	} else {
-		int zeros_to_add = p_digits - s.length() + (c + 1);
-		return s + String("0").repeat(zeros_to_add);
+	const int decimal_count = dot_position < 0 ? 0 : source_length - dot_position - 1;
+	if (decimal_count > p_digits) {
+		return substr(0, dot_position + p_digits + 1);
 	}
+	if (dot_position >= 0 && decimal_count == p_digits) {
+		return *this;
+	}
+
+	const int missing_zeros = p_digits - decimal_count;
+	const int64_t result_length = int64_t(source_length) + missing_zeros + (dot_position < 0 ? 1 : 0);
+	ERR_FAIL_COND_V_MSG(result_length >= INT32_MAX, *this, "Padded decimal string is too long.");
+
+	String result;
+	result.resize_uninitialized(int(result_length) + 1);
+	char32_t *write = result.ptrw();
+	if (source_length > 0) {
+		memcpy(write, ptr(), size_t(source_length) * sizeof(char32_t));
+		write += source_length;
+	}
+	if (dot_position < 0) {
+		*write++ = '.';
+	}
+	for (int i = 0; i < missing_zeros; i++) {
+		*write++ = '0';
+	}
+	*write = 0;
+	return result;
 }
 
 String String::pad_zeros(int p_digits) const {
-	String s = *this;
-	int end = s.find_char('.');
-
+	const int source_length = length();
+	int end = find_char('.');
 	if (end == -1) {
-		end = s.length();
+		end = source_length;
 	}
-
 	if (end == 0) {
-		return s;
+		return *this;
 	}
 
+	const char32_t *source = ptr();
 	int begin = 0;
-
-	while (begin < end && !is_digit(s[begin])) {
+	while (begin < end && !is_digit(source[begin])) {
 		begin++;
 	}
-
-	int zeros_to_add = p_digits - (end - begin);
-
-	if (zeros_to_add <= 0) {
-		return s;
-	} else {
-		return s.insert(begin, String("0").repeat(zeros_to_add));
+	const int64_t missing_zeros = int64_t(p_digits) - (end - begin);
+	if (missing_zeros <= 0) {
+		return *this;
 	}
+
+	const int64_t result_length = int64_t(source_length) + missing_zeros;
+	ERR_FAIL_COND_V_MSG(result_length >= INT32_MAX, *this, "Padded zero string is too long.");
+
+	String result;
+	result.resize_uninitialized(int(result_length) + 1);
+	char32_t *write = result.ptrw();
+	if (begin > 0) {
+		memcpy(write, source, size_t(begin) * sizeof(char32_t));
+	}
+	for (int64_t i = 0; i < missing_zeros; i++) {
+		write[begin + i] = '0';
+	}
+	if (source_length > begin) {
+		memcpy(write + begin + missing_zeros, source + begin, size_t(source_length - begin) * sizeof(char32_t));
+	}
+	write[result_length] = 0;
+	return result;
 }
 
 String String::trim_prefix(const String &p_prefix) const {
@@ -5721,12 +5917,18 @@ String String::validate_node_name() const {
 }
 
 String String::get_basename() const {
-	int pos = rfind_char('.');
-	if (pos < 0 || pos < MAX(rfind_char('/'), rfind_char('\\'))) {
-		return *this;
+	// Stop at the last separator. A dot in a parent folder is not an
+	// extension, so one reverse scan is enough instead of three searches.
+	const char32_t *characters = ptr();
+	for (int i = length() - 1; i >= 0; i--) {
+		if (characters[i] == '.') {
+			return substr(0, i);
+		}
+		if (characters[i] == '/' || characters[i] == '\\') {
+			break;
+		}
 	}
-
-	return substr(0, pos);
+	return *this;
 }
 
 String itos(int64_t p_val) {
@@ -5746,23 +5948,56 @@ String rtoss(double p_val) {
 }
 
 // Right-pad with a character.
-String String::rpad(int p_min_length, const String &p_character) const {
-	String s = *this;
-	int padding = p_min_length - s.length();
-	if (padding > 0) {
-		s += p_character.repeat(padding);
+// Build the padded result once rather than materializing a repeated padding
+// string and then allocating a second buffer for concatenation.
+static String _pad_string(const String &p_source, int p_min_length, const String &p_character, bool p_left) {
+	const int source_length = p_source.length();
+	const int character_length = p_character.length();
+	const int64_t repetitions = int64_t(p_min_length) - source_length;
+	if (repetitions <= 0 || character_length == 0) {
+		return p_source;
 	}
-	return s;
+
+	const int64_t result_length = source_length + repetitions * character_length;
+	ERR_FAIL_COND_V_MSG(result_length >= INT32_MAX, p_source, "Padded string is too long.");
+
+	String result;
+	result.resize_uninitialized(int(result_length) + 1);
+	char32_t *write = result.ptrw();
+	const char32_t *source = p_source.ptr();
+	const char32_t *characters = p_character.ptr();
+
+	if (!p_left && source_length > 0) {
+		memcpy(write, source, size_t(source_length) * sizeof(char32_t));
+		write += source_length;
+	}
+	// Seed one repetition, then double the already-written region. Each copy
+	// has non-overlapping source and destination, even for multi-char padding.
+	const int64_t padding_length = repetitions * character_length;
+	char32_t *padding_start = write;
+	memcpy(padding_start, characters, size_t(character_length) * sizeof(char32_t));
+	int64_t copied = character_length;
+	while (copied < padding_length) {
+		const int64_t copy_length = MIN(copied, padding_length - copied);
+		memcpy(padding_start + copied, padding_start, size_t(copy_length) * sizeof(char32_t));
+		copied += copy_length;
+	}
+	write += padding_length;
+	if (p_left && source_length > 0) {
+		memcpy(write, source, size_t(source_length) * sizeof(char32_t));
+		write += source_length;
+	}
+	*write = 0;
+	return result;
+}
+
+String String::rpad(int p_min_length, const String &p_character) const {
+	return _pad_string(*this, p_min_length, p_character, false);
 }
 
 // Left-pad with a character.
 String String::lpad(int p_min_length, const String &p_character) const {
-	String s = *this;
-	int padding = p_min_length - s.length();
-	if (padding > 0) {
-		s = p_character.repeat(padding) + s;
-	}
-	return s;
+	return _pad_string(*this, p_min_length, p_character, true);
 }
 
 // sprintf is implemented in GDScript via:

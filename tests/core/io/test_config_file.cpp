@@ -203,6 +203,35 @@ ui_accept={
 }
 
 
+TEST_CASE("[ConfigFile] encode_to_text builder preserves settings and empty sections") {
+	ConfigFile single;
+	single.set_value("", "value", 42);
+	CHECK(single.encode_to_text() == "value=42\n");
+
+	ConfigFile settings;
+	settings.set_value("display", "name", "Cgame");
+	settings.set_value("display", "quality", 3);
+	settings.set_value("display", "enabled", true);
+	settings.set_value("paths", "resource", "res://assets/model.glb");
+	const String serialized = settings.encode_to_text();
+	ConfigFile decoded;
+	CHECK(decoded.parse(serialized) == OK);
+	CHECK(decoded.get_value("display", "name") == "Cgame");
+	CHECK(decoded.get_value("display", "quality") == Variant(3));
+	CHECK(decoded.get_value("display", "enabled") == Variant(true));
+	CHECK(decoded.get_value("paths", "resource") == "res://assets/model.glb");
+
+	ConfigFile many;
+	for (int i = 0; i < 512; i++) {
+		many.set_value("values", "k_" + itos(i), i);
+	}
+	ConfigFile restored;
+	CHECK(restored.parse(many.encode_to_text()) == OK);
+	for (int i = 0; i < 512; i++) {
+		CHECK(restored.get_value("values", "k_" + itos(i)) == Variant(i));
+	}
+}
+
 TEST_CASE("[ConfigFile][Performance] Hot section and key lookups retain all semantics") {
 	ConfigFile config;
 	const int sections = 11;
@@ -269,6 +298,43 @@ TEST_CASE("[ConfigFile][Performance] Hot section and key lookups retain all sema
 	CHECK(String(restored.get_value("", "global")) == "ok");
 	CHECK(restored.has_section("group_0"));
 	CHECK_FALSE(restored.has_section("group_1"));
+}
+
+TEST_CASE("[ConfigFile][Performance] Chunked large save retains exact values and encoding") {
+	ConfigFile config;
+	config.set_value("", "global", "unsectioned");
+	config.set_value("escaped]name", "bracket", 17);
+	config.set_value("unicode", String::utf8("ключ"), String::utf8("значение"));
+	const String payload = "The quick brown fox jumps over the lazy dog.";
+	for (int index = 0; index < 2300; ++index) {
+		config.set_value("bulk", "entry_" + itos(index), payload + itos(index));
+	}
+	// A single very large value must also be handled without splitting data.
+	config.set_value("bulk", "long_value", String("x").repeat(65536));
+
+#ifdef WINDOWS_ENABLED
+	const String path = OS::get_singleton()->get_environment("TEMP").path_join("config_chunked.ini");
+#else
+	const String path = "/tmp/config_chunked.ini";
+#endif
+	REQUIRE(config.save(path) == OK);
+	Ref<FileAccess> saved = FileAccess::open(path, FileAccess::READ);
+	REQUIRE(saved.is_valid());
+	const String bytes = saved->get_as_utf8_string();
+	CHECK(bytes.begins_with("global=\"unsectioned\"\n\n[escaped\\]name]\n\nbracket=17"));
+	CHECK(bytes.contains(String::utf8("ключ")));
+	CHECK(bytes.contains(String::utf8("значение")));
+	saved.unref();
+
+	ConfigFile restored;
+	REQUIRE(restored.load(path) == OK);
+	CHECK(String(restored.get_value("", "global")) == "unsectioned");
+	CHECK(int(restored.get_value("escaped]name", "bracket")) == 17);
+	CHECK(String(restored.get_value("unicode", String::utf8("ключ"))) == String::utf8("значение"));
+	CHECK(String(restored.get_value("bulk", "long_value")).length() == 65536);
+	for (int index = 0; index < 2300; ++index) {
+		CHECK(String(restored.get_value("bulk", "entry_" + itos(index))) == payload + itos(index));
+	}
 }
 
 } // namespace TestConfigFile

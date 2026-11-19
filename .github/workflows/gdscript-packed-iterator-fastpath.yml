@@ -1,0 +1,52 @@
+name: GDScript packed array iterator fastpath regressions
+
+on:
+  pull_request:
+    branches: [develop]
+    paths:
+      - 'modules/gdscript/gdscript_vm.cpp'
+      - 'modules/gdscript/tests/scripts/runtime/features/packed_array_iterator_fastpath.gd'
+      - 'modules/gdscript/tests/scripts/runtime/features/packed_array_iterator_fastpath.out'
+      - 'misc/scripts/tests/test_gdscript_packed_iterator_fastpath.py'
+      - '.github/workflows/gdscript-packed-iterator-fastpath.yml'
+  push:
+    branches: [develop]
+    paths:
+      - 'modules/gdscript/gdscript_vm.cpp'
+      - 'modules/gdscript/tests/scripts/runtime/features/packed_array_iterator_fastpath.gd'
+      - 'modules/gdscript/tests/scripts/runtime/features/packed_array_iterator_fastpath.out'
+      - 'misc/scripts/tests/test_gdscript_packed_iterator_fastpath.py'
+      - '.github/workflows/gdscript-packed-iterator-fastpath.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  source-contracts:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - name: Verify all packed types use bounded direct loads
+        run: |
+          python3 -m py_compile misc/scripts/tests/test_gdscript_packed_iterator_fastpath.py
+          python3 -m unittest discover -s misc/scripts/tests -p test_gdscript_packed_iterator_fastpath.py -v
+
+  native-gdscript:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+      - uses: ./.github/actions/godot-deps
+      - name: Build Godot with native and scripted GDScript tests
+        uses: ./.github/actions/godot-build
+        with:
+          platform: linuxbsd
+          target: editor
+          scons-flags: dev_build=yes tests=yes debug_symbols=no module_mono_enabled=no module_text_server_fb_enabled=yes accesskit=no -j2
+      - name: Run GDScript compiled bytecode and runtime regressions
+        run: |
+          timeout 600s ./bin/godot.linuxbsd.editor.dev.x86_64 --headless --test --test-suite="*GDScript*" --no-colors

@@ -45,9 +45,9 @@ int TriangleMesh::_create_bvh(BVH *p_bvh, int *p_bb, int p_from, int p_size, int
 	}
 
 	AABB aabb;
-	aabb = p_bb[p_from]->aabb;
+	aabb = p_bvh[p_bb[p_from]].aabb;
 	for (int i = 1; i < p_size; i++) {
-		aabb.merge_with(p_bb[p_from + i]->aabb);
+		aabb.merge_with(p_bvh[p_bb[p_from + i]].aabb);
 	}
 
 	int li = aabb.get_longest_axis_index();
@@ -98,7 +98,7 @@ void TriangleMesh::get_indices(Vector<int> *r_triangles_indices) const {
 	// Parse vertices indices
 	const Triangle *triangles_read = triangles.ptr();
 
-	r_triangles_indices->resize(triangles_num * 3);
+	ERR_FAIL_COND(r_triangles_indices->resize_uninitialized(triangles_num * 3) != OK);
 	int *r_indices_write = r_triangles_indices->ptrw();
 
 	for (int i = 0; i < triangles_num; ++i) {
@@ -116,11 +116,15 @@ void TriangleMesh::create(const Vector<Vector3> &p_faces, const Vector<int32_t> 
 	int fc = p_faces.size();
 	ERR_FAIL_COND(!fc || ((fc % 3) != 0));
 	fc /= 3;
-	triangles.resize(fc);
+	// Every triangle is populated before use. Skip default-initializing a
+	// potentially large temporary array when constructing mesh geometry.
+	ERR_FAIL_COND(triangles.resize_uninitialized(fc) != OK);
 
 	// A full binary tree with fc leaves has exactly 2 * fc - 1 nodes.
 	// Avoid reserving 3 * fc nodes and shrinking/copying them after construction.
-	bvh.resize(fc * 2 - 1);
+	// All leaves are written before BVH construction; each inner node is
+	// initialized by _create_bvh() before it becomes reachable.
+	ERR_FAIL_COND(bvh.resize_uninitialized(fc * 2 - 1) != OK);
 	BVH *bw = bvh.ptrw();
 
 	{
@@ -157,7 +161,9 @@ void TriangleMesh::create(const Vector<Vector3> &p_faces, const Vector<int32_t> 
 			}
 
 			f.normal = Face3(r[i * 3 + 0], r[i * 3 + 1], r[i * 3 + 2]).get_plane().get_normal();
-			f.surface_index = si ? si[i] : 0;
+			// Surface metadata is indexed per input vertex (three entries per
+			// triangle); use the first vertex of the current face.
+			f.surface_index = si ? si[i * 3] : 0;
 
 			bw[i].left = -1;
 			bw[i].right = -1;
@@ -165,7 +171,7 @@ void TriangleMesh::create(const Vector<Vector3> &p_faces, const Vector<int32_t> 
 			bw[i].center = bw[i].aabb.get_center();
 		}
 
-		vertices.resize(db.size());
+		ERR_FAIL_COND(vertices.resize_uninitialized(db.size()) != OK);
 		Vector3 *vw = vertices.ptrw();
 		for (const KeyValue<Vector3, int> &E : db) {
 			vw[E.value] = E.key;
@@ -175,7 +181,7 @@ void TriangleMesh::create(const Vector<Vector3> &p_faces, const Vector<int32_t> 
 	// Sort compact leaf indices instead of pointers. On 64-bit systems this
 	// halves the temporary sorting buffer from 8 * fc to 4 * fc bytes.
 	Vector<int> leaf_indices;
-	leaf_indices.resize(fc);
+	ERR_FAIL_COND(leaf_indices.resize_uninitialized(fc) != OK);
 	int *indices = leaf_indices.ptrw();
 	for (int i = 0; i < fc; i++) {
 		indices[i] = i;
@@ -514,8 +520,10 @@ Vector<Face3> TriangleMesh::get_faces() const {
 	}
 
 	Vector<Face3> faces;
-	int ts = triangles.size();
-	faces.resize(triangles.size());
+	const int ts = triangles.size();
+	// Every Face3 vertex is copied from the indexed mesh. Avoid the
+	// default constructor pass on this fully overwritten output array.
+	ERR_FAIL_COND_V(faces.resize_uninitialized(ts) != OK, Vector<Face3>());
 
 	Face3 *w = faces.ptrw();
 	const Triangle *r = triangles.ptr();
@@ -593,8 +601,8 @@ Vector<Vector3> TriangleMesh::get_faces_scriptwrap() const {
 	}
 
 	Vector<Vector3> faces;
-	int ts = triangles.size();
-	faces.resize(triangles.size() * 3);
+	const int ts = triangles.size();
+	ERR_FAIL_COND_V(faces.resize_uninitialized(ts * 3) != OK, Vector<Vector3>());
 
 	Vector3 *w = faces.ptrw();
 	const Triangle *r = triangles.ptr();

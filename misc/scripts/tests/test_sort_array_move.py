@@ -56,6 +56,12 @@ struct Tracked {
     bool operator<(const Tracked &o) const { return key < o.key; }
 };
 
+struct DecadeComparator {
+    bool operator()(const Tracked &a, const Tracked &b) const {
+        return a.key / 10 < b.key / 10;
+    }
+};
+
 int main() {
     SortArray<Tracked> sorter;
     for (int n = 0; n <= 160; ++n) {
@@ -83,6 +89,112 @@ int main() {
         assert(Tracked::copies == 0);
         assert(Tracked::moves > 0);
         for (int i = 0; i < 16; ++i) assert(data[i].key == i);
+    }
+    // Already ordered small arrays must not move expensive values at all.
+    // This checks the actual SortArray header in both debug and release.
+    {
+        Tracked ordered[16];
+        for (int i = 0; i < 16; ++i) ordered[i].key = i;
+        Tracked::copies = Tracked::moves = 0;
+        sorter.sort(ordered, 16);
+        assert(Tracked::copies == 0 && Tracked::moves == 0);
+        for (int i = 0; i < 16; ++i) assert(ordered[i].key == i);
+    }
+    {
+        Tracked repeated[16];
+        for (int i = 0; i < 16; ++i) repeated[i].key = i / 4;
+        Tracked::copies = Tracked::moves = 0;
+        sorter.sort(repeated, 16);
+        assert(Tracked::copies == 0 && Tracked::moves == 0);
+    }
+    {
+        Tracked ordered[32];
+        for (int i = 0; i < 32; ++i) ordered[i].key = i;
+        Tracked::copies = Tracked::moves = 0;
+        sorter.unguarded_linear_insert(31, ordered);
+        assert(Tracked::copies == 0 && Tracked::moves == 0);
+    }
+    {
+        Tracked nearly_ordered[16];
+        for (int i = 0; i < 16; ++i) nearly_ordered[i].key = i;
+        std::swap(nearly_ordered[13].key, nearly_ordered[14].key);
+        Tracked::copies = Tracked::moves = 0;
+        sorter.sort(nearly_ordered, 16);
+        assert(Tracked::copies == 0 && Tracked::moves > 0);
+        for (int i = 0; i < 16; ++i) assert(nearly_ordered[i].key == i);
+    }
+    {
+        // All-equal large arrays are a common pathological introsort input:
+        // avoid partition swaps and move-assignments completely.
+        std::vector<Tracked> equal(512);
+        for (Tracked &item : equal) item.key = 7;
+        Tracked::copies = Tracked::moves = 0;
+        sorter.sort(equal.data(), int64_t(equal.size()));
+        assert(Tracked::copies == 0 && Tracked::moves == 0);
+        for (const Tracked &item : equal) assert(item.key == 7);
+    }
+    {
+        // The comparator, not the exact key, defines equivalence.
+        std::vector<Tracked> equivalent(256);
+        for (int i = 0; i < 256; ++i) equivalent[i].key = 100 + (i % 10);
+        Tracked::copies = Tracked::moves = 0;
+        SortArray<Tracked, DecadeComparator>().sort(equivalent.data(), int64_t(equivalent.size()));
+        assert(Tracked::copies == 0 && Tracked::moves == 0);
+        for (int i = 0; i < 256; ++i) assert(equivalent[i].key == 100 + (i % 10));
+    }
+    {
+        // Matching endpoints and midpoint are not sufficient to skip sort.
+        std::vector<Tracked> mixed(256);
+        for (Tracked &item : mixed) item.key = 7;
+        mixed[50].key = 3;
+        mixed[180].key = 2;
+        Tracked::copies = Tracked::moves = 0;
+        sorter.sort(mixed.data(), int64_t(mixed.size()));
+        assert(Tracked::copies == 0 && Tracked::moves > 0);
+        for (int i = 1; i < 256; ++i) assert(mixed[i - 1].key <= mixed[i].key);
+        assert(mixed.front().key == 2 && mixed.back().key == 7);
+    }
+    {
+        // A middle subrange can skip without modifying its boundaries.
+        std::vector<Tracked> range(130);
+        for (Tracked &item : range) item.key = 7;
+        range.front().key = 300;
+        range.back().key = -200;
+        Tracked::copies = Tracked::moves = 0;
+        sorter.sort_range(1, 129, range.data());
+        assert(Tracked::copies == 0 && Tracked::moves == 0);
+        assert(range.front().key == 300 && range.back().key == -200);
+    }
+    {
+        // Repeatedly sorting an already sorted large array must not move its
+        // nontrivial elements, even when the keys are not equivalent.
+        std::vector<Tracked> ordered(512);
+        for (int i = 0; i < 512; ++i) ordered[i].key = i / 2;
+        Tracked::copies = Tracked::moves = 0;
+        sorter.sort(ordered.data(), int64_t(ordered.size()));
+        assert(Tracked::copies == 0 && Tracked::moves == 0);
+        assert(ordered.front().key == 0 && ordered.back().key == 255);
+    }
+    {
+        // The presorted scan must find a late inversion, not just accept
+        // the initial sorted prefix.
+        std::vector<Tracked> nearly_sorted(512);
+        for (int i = 0; i < 512; ++i) nearly_sorted[i].key = i;
+        std::swap(nearly_sorted[470].key, nearly_sorted[471].key);
+        Tracked::copies = Tracked::moves = 0;
+        sorter.sort(nearly_sorted.data(), int64_t(nearly_sorted.size()));
+        assert(Tracked::copies == 0 && Tracked::moves > 0);
+        for (int i = 1; i < 512; ++i) assert(nearly_sorted[i-1].key <= nearly_sorted[i].key);
+    }
+    {
+        std::vector<Tracked> range(202);
+        for (int i = 1; i <= 200; ++i) range[i].key = i;
+        range.front().key = 10000;
+        range.back().key = -10000;
+        Tracked::copies = Tracked::moves = 0;
+        sorter.sort_range(1, 201, range.data());
+        assert(Tracked::copies == 0 && Tracked::moves == 0);
+        assert(range.front().key == 10000 && range.back().key == -10000);
     }
     for (int n = 1; n <= 64; ++n) {
         for (int k : {0, n / 2, n - 1}) {

@@ -39,19 +39,24 @@ GODOT_GCC_WARNING_POP
 #define STB_RECT_PACK_IMPLEMENTATION
 #include <thirdparty/misc/stb_rect_pack.h>
 
+#include <utility>
+
 const int clipper_precision = 5; // Based on CMP_EPSILON.
 
 void Geometry2D::merge_many_polygons(const Vector<Vector<Vector2>> &p_polygons, Vector<Vector<Vector2>> &r_out_polygons, Vector<Vector<Vector2>> &r_out_holes) {
 	using namespace Clipper2Lib;
 
 	PathsD subjects;
+	subjects.reserve(p_polygons.size());
 	for (const Vector<Vector2> &polygon : p_polygons) {
 		PathD path(polygon.size());
+		const Vector2 *const source = polygon.ptr();
 		for (int i = 0; i < polygon.size(); i++) {
-			const Vector2 &point = polygon[i];
-			path[i] = PointD(point.x, point.y);
+			path[i] = PointD(source[i].x, source[i].y);
 		}
-		subjects.push_back(path);
+		// Clipper owns the path after insertion. Moving avoids a deep copy
+		// of all points in every input polygon.
+		subjects.push_back(std::move(path));
 	}
 
 	PathsD solution = Union(subjects, FillRule::NonZero);
@@ -60,17 +65,20 @@ void Geometry2D::merge_many_polygons(const Vector<Vector<Vector2>> &p_polygons, 
 	r_out_polygons.clear();
 	r_out_holes.clear();
 	for (PathsD::size_type i = 0; i < solution.size(); ++i) {
-		PathD &path = solution[i];
+		const PathD &path = solution[i];
 
 		Vector<Point2> output_polygon;
-		output_polygon.resize(path.size());
+		ERR_FAIL_COND(output_polygon.resize_uninitialized(path.size()) != OK);
+		Point2 *const output = output_polygon.ptrw();
 		for (PathsD::size_type j = 0; j < path.size(); ++j) {
-			output_polygon.set(j, Vector2(static_cast<real_t>(path[j].x), static_cast<real_t>(path[j].y)));
+			output[j] = Point2(static_cast<real_t>(path[j].x), static_cast<real_t>(path[j].y));
 		}
+		// Move the allocated output buffer to the owning list instead of
+		// copying/referencing it and repeatedly resolving writable storage.
 		if (IsPositive(path)) {
-			r_out_polygons.push_back(output_polygon);
+			r_out_polygons.push_back(std::move(output_polygon));
 		} else {
-			r_out_holes.push_back(output_polygon);
+			r_out_holes.push_back(std::move(output_polygon));
 		}
 	}
 }
@@ -104,15 +112,19 @@ Vector<Vector<Vector2>> Geometry2D::decompose_many_polygons_in_convex(const Vect
 		return decomp;
 	}
 
-	decomp.resize(out_poly.size());
+	ERR_FAIL_COND_V(decomp.resize(out_poly.size()) != OK, Vector<Vector<Vector2>>());
+	Vector<Vector2> *const output_polygons = decomp.ptrw();
 	int idx = 0;
 	for (TPPLPoly &tp : out_poly) {
-		decomp.write[idx].resize(tp.GetNumPoints());
-
-		for (int64_t i = 0; i < tp.GetNumPoints(); i++) {
-			decomp.write[idx].write[i] = tp.GetPoint(i);
+		const int point_count = tp.GetNumPoints();
+		Vector<Vector2> &polygon = output_polygons[idx];
+		ERR_FAIL_COND_V(polygon.resize(point_count) != OK, Vector<Vector<Vector2>>());
+		Vector2 *const points = polygon.ptrw();
+		// Resolve both writable COW levels once, rather than on every
+		// vertex of potentially large convex decomposition results.
+		for (int i = 0; i < point_count; i++) {
+			points[i] = tp.GetPoint(i);
 		}
-
 		idx++;
 	}
 
@@ -130,21 +142,11 @@ struct _AtlasWorkRect {
 	_FORCE_INLINE_ bool operator<(const _AtlasWorkRect &p_r) const { return s.width > p_r.s.width; }
 };
 
-struct _AtlasWorkRectResult {
-	Vector<_AtlasWorkRect> result;
-	int max_w = 0;
-	int max_h = 0;
-};
-
 void Geometry2D::make_atlas(const Vector<Size2i> &p_rects, Vector<Point2i> &r_result, Size2i &r_size) {
-	// Super simple, almost brute force scanline stacking fitter.
-	// It's pretty basic for now, but it tries to make sure that the aspect ratio of the
-	// resulting atlas is somehow square. This is necessary because video cards have limits
-	// on texture size (usually 2048 or 4096), so the squarer a texture, the more the chances
-	// that it will work in every hardware.
-	// For example, it will prioritize a 1024x1024 atlas (works everywhere) instead of a
-	// 256x8192 atlas (won't work anywhere).
-
+	// Keep the original scanline placement strategy and power-of-two
+	// aspect-ratio scoring, but retain only the best candidate's positions.
+	// The former implementation stored a complete Vector of rectangles for
+	// every candidate width (up to 13), causing repeated COW copies.
 	ERR_FAIL_COND(p_rects.is_empty());
 	for (int i = 0; i < p_rects.size(); i++) {
 		ERR_FAIL_COND(p_rects[i].width <= 0);
@@ -152,99 +154,87 @@ void Geometry2D::make_atlas(const Vector<Size2i> &p_rects, Vector<Point2i> &r_re
 	}
 
 	Vector<_AtlasWorkRect> wrects;
-	wrects.resize(p_rects.size());
+	ERR_FAIL_COND(wrects.resize(p_rects.size()) != OK);
+	_AtlasWorkRect *rects = wrects.ptrw();
 	for (int i = 0; i < p_rects.size(); i++) {
-		wrects.write[i].s = p_rects[i];
-		wrects.write[i].idx = i;
+		rects[i].s = p_rects[i];
+		rects[i].idx = i;
 	}
 	wrects.sort();
-	int widest = wrects[0].s.width;
+	rects = wrects.ptrw();
+	const int widest = rects[0].s.width;
+	ERR_FAIL_COND_MSG(widest > (1 << 12), "No atlas candidate can contain the widest rectangle.");
 
-	Vector<_AtlasWorkRectResult> results;
+	ERR_FAIL_COND(r_result.resize(p_rects.size()) != OK);
+	Point2i *const best_positions = r_result.ptrw();
+	real_t best_aspect = 1e20;
+	Size2i best_size;
 
 	for (int i = 0; i <= 12; i++) {
-		int w = 1 << i;
-		int max_h = 0;
-		int max_w = 0;
+		const int w = 1 << i;
 		if (w < widest) {
 			continue;
 		}
 
+		// A new vector starts empty; zero-initialize its entire height map
+		// once rather than repeatedly resolving a COW writable proxy.
 		Vector<int> hmax;
-		hmax.resize(w);
-		for (int j = 0; j < w; j++) {
-			hmax.write[j] = 0;
-		}
+		ERR_FAIL_COND(hmax.resize_initialized(w) != OK);
+		int *const heights = hmax.ptrw();
+		int max_h = 0;
+		int max_w = 0;
 
-		// Place them.
 		int ofs = 0;
 		int limit_h = 0;
 		for (int j = 0; j < wrects.size(); j++) {
-			if (ofs + wrects[j].s.width > w) {
+			_AtlasWorkRect &rect = rects[j];
+			if (ofs + rect.s.width > w) {
 				ofs = 0;
 			}
 
 			int from_y = 0;
-			for (int k = 0; k < wrects[j].s.width; k++) {
-				if (hmax[ofs + k] > from_y) {
-					from_y = hmax[ofs + k];
+			for (int k = 0; k < rect.s.width; k++) {
+				if (heights[ofs + k] > from_y) {
+					from_y = heights[ofs + k];
 				}
 			}
 
-			wrects.write[j].p.x = ofs;
-			wrects.write[j].p.y = from_y;
-			int end_h = from_y + wrects[j].s.height;
-			int end_w = ofs + wrects[j].s.width;
+			rect.p.x = ofs;
+			rect.p.y = from_y;
+			const int end_h = from_y + rect.s.height;
+			const int end_w = ofs + rect.s.width;
 			if (ofs == 0) {
 				limit_h = end_h;
 			}
 
-			for (int k = 0; k < wrects[j].s.width; k++) {
-				hmax.write[ofs + k] = end_h;
+			for (int k = 0; k < rect.s.width; k++) {
+				heights[ofs + k] = end_h;
 			}
 
 			if (end_h > max_h) {
 				max_h = end_h;
 			}
-
 			if (end_w > max_w) {
 				max_w = end_w;
 			}
-
-			if (ofs == 0 || end_h > limit_h) { // While h limit not reached, keep stacking.
-				ofs += wrects[j].s.width;
+			if (ofs == 0 || end_h > limit_h) {
+				ofs += rect.s.width;
 			}
 		}
 
-		_AtlasWorkRectResult result;
-		result.result = wrects;
-		result.max_h = max_h;
-		result.max_w = max_w;
-		results.push_back(result);
-	}
-
-	// Find the result with the best aspect ratio.
-
-	int best = -1;
-	real_t best_aspect = 1e20;
-
-	for (int i = 0; i < results.size(); i++) {
-		real_t h = Math::next_power_of_2((uint32_t)results[i].max_h);
-		real_t w = Math::next_power_of_2((uint32_t)results[i].max_w);
-		real_t aspect = h > w ? h / w : w / h;
+		const real_t h = Math::next_power_of_2((uint32_t)max_h);
+		const real_t candidate_w = Math::next_power_of_2((uint32_t)max_w);
+		const real_t aspect = h > candidate_w ? h / candidate_w : candidate_w / h;
 		if (aspect < best_aspect) {
-			best = i;
 			best_aspect = aspect;
+			best_size = Size2i(max_w, max_h);
+			for (int j = 0; j < wrects.size(); j++) {
+				best_positions[rects[j].idx] = rects[j].p;
+			}
 		}
 	}
 
-	r_result.resize(p_rects.size());
-
-	for (int i = 0; i < p_rects.size(); i++) {
-		r_result.write[results[best].result[i].idx] = results[best].result[i].p;
-	}
-
-	r_size = Size2(results[best].max_w, results[best].max_h);
+	r_size = best_size;
 }
 
 Vector<Vector<Point2>> Geometry2D::_polypaths_do_operation(PolyBooleanOperation p_op, const Vector<Point2> &p_polypath_a, const Vector<Point2> &p_polypath_b, bool p_is_a_open) {
@@ -295,16 +285,17 @@ Vector<Vector<Point2>> Geometry2D::_polypaths_do_operation(PolyBooleanOperation 
 	}
 
 	Vector<Vector<Point2>> polypaths;
-	polypaths.resize(paths.size());
-	for (PathsD::size_type i = 0; i < paths.size(); i++) {
-		const PathD &path = paths[i];
+	ERR_FAIL_COND_V(polypaths.resize(paths.size()) != OK, Vector<Vector<Point2>>());
+	Vector<Point2> *result_paths = polypaths.ptrw();
 
-		Vector<Vector2> polypath;
-		polypath.resize(path.size());
+	for (PathsD::size_type i = 0; i < paths.size(); ++i) {
+		const PathD &path = paths[i];
+		Vector<Point2> &destination = result_paths[i];
+		ERR_FAIL_COND_V(destination.resize(path.size()) != OK, Vector<Vector<Point2>>());
+		Point2 *destination_points = destination.ptrw();
 		for (PathsD::size_type j = 0; j < path.size(); ++j) {
-			polypath.set(j, Point2(static_cast<real_t>(path[j].x), static_cast<real_t>(path[j].y)));
+			destination_points[j] = Point2(static_cast<real_t>(path[j].x), static_cast<real_t>(path[j].y));
 		}
-		polypaths.set(i, polypath);
 	}
 	return polypaths;
 }
@@ -355,16 +346,17 @@ Vector<Vector<Point2>> Geometry2D::_polypath_offset(const Vector<Point2> &p_poly
 	PathsD paths = InflatePaths({ polypath }, p_delta, jt, et, 2.0, clipper_precision, 0.25);
 
 	Vector<Vector<Point2>> polypaths;
-	polypaths.resize(paths.size());
+	ERR_FAIL_COND_V(polypaths.resize(paths.size()) != OK, Vector<Vector<Point2>>());
+	Vector<Point2> *result_paths = polypaths.ptrw();
+
 	for (PathsD::size_type i = 0; i < paths.size(); ++i) {
 		const PathD &path = paths[i];
-
-		Vector<Vector2> polypath2;
-		polypath2.resize(path.size());
+		Vector<Point2> &destination = result_paths[i];
+		ERR_FAIL_COND_V(destination.resize(path.size()) != OK, Vector<Vector<Point2>>());
+		Point2 *destination_points = destination.ptrw();
 		for (PathsD::size_type j = 0; j < path.size(); ++j) {
-			polypath2.set(j, Point2(static_cast<real_t>(path[j].x), static_cast<real_t>(path[j].y)));
+			destination_points[j] = Point2(static_cast<real_t>(path[j].x), static_cast<real_t>(path[j].y));
 		}
-		polypaths.set(i, polypath2);
 	}
 	return polypaths;
 }

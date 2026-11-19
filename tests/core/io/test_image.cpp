@@ -983,4 +983,182 @@ TEST_CASE("[Image][BlendHotpath] Self-blend and destination-mask alias use scala
 	CHECK_MESSAGE(masked->get_data() == reference->get_data(), "Destination-mask alias must preserve the original scalar behavior.");
 }
 
+
+TEST_CASE("[Image][Performance] Roughness mipmaps keep flat normal and source intact") {
+	for (Image::Format normal_format : { Image::FORMAT_RGBA8, Image::FORMAT_RGBAF }) {
+		Ref<Image> normal_map = Image::create_empty(64, 32, false, normal_format);
+		REQUIRE(normal_map.is_valid());
+		Ref<Image> roughness = Image::create_empty(64, 32, false, Image::FORMAT_RGBAF);
+		REQUIRE(roughness.is_valid());
+		const Color source_normal(0.5, 0.5, 1.0, 1.0);
+		const Color base_roughness(0.35, 0.45, 0.55, 0.65);
+		for (int y = 0; y < 32; y++) {
+			for (int x = 0; x < 64; x++) {
+				normal_map->set_pixel(x, y, source_normal);
+				roughness->set_pixel(x, y, base_roughness);
+			}
+		}
+		const Vector<uint8_t> original_normals = normal_map->get_data();
+		REQUIRE(roughness->generate_mipmaps() == OK);
+		REQUIRE(roughness->generate_mipmap_roughness(Image::ROUGHNESS_CHANNEL_R, normal_map) == OK);
+		CHECK(normal_map->get_data() == original_normals);
+		CHECK_FALSE(normal_map->has_mipmaps());
+
+		for (int mip = 1; mip <= roughness->get_mipmap_count(); mip++) {
+			const Ref<Image> level = roughness->get_image_from_mipmap(mip);
+			REQUIRE(level.is_valid());
+			for (int y = 0; y < level->get_height(); y++) {
+				for (int x = 0; x < level->get_width(); x++) {
+					const Color color = level->get_pixel(x, y);
+					CHECK(Math::abs(color.r - base_roughness.r) < 0.01);
+					CHECK(Math::is_equal_approx(color.g, base_roughness.g));
+					CHECK(Math::is_equal_approx(color.b, base_roughness.b));
+					CHECK(Math::is_equal_approx(color.a, base_roughness.a));
+				}
+			}
+		}
+	}
+}
+
+TEST_CASE("[Image][Performance] Roughness mipmaps process nonuniform normals by rows") {
+	Ref<Image> normal_map = Image::create_empty(64, 32, false, Image::FORMAT_RGBAF);
+	Ref<Image> roughness = Image::create_empty(64, 32, false, Image::FORMAT_RGBAF);
+	REQUIRE(normal_map.is_valid());
+	REQUIRE(roughness.is_valid());
+
+	for (int y = 0; y < 32; y++) {
+		for (int x = 0; x < 64; x++) {
+			const float nx = x % 2 == 0 ? 0.35f : 0.65f;
+			const float ny = y % 2 == 0 ? 0.4f : 0.6f;
+			normal_map->set_pixel(x, y, Color(nx, ny, 1, 1));
+			roughness->set_pixel(x, y, Color(0.1, 0.2, 0.3, 0.4));
+		}
+	}
+	REQUIRE(roughness->generate_mipmaps() == OK);
+	REQUIRE(roughness->generate_mipmap_roughness(Image::ROUGHNESS_CHANNEL_G, normal_map) == OK);
+	Ref<Image> mip = roughness->get_image_from_mipmap(1);
+	REQUIRE(mip.is_valid());
+	for (int y = 0; y < mip->get_height(); y++) {
+		for (int x = 0; x < mip->get_width(); x++) {
+			const Color c = mip->get_pixel(x, y);
+			CHECK(c.g >= 0.2f);
+			CHECK(Math::is_finite(c.g));
+			CHECK(Math::is_equal_approx(c.r, (real_t)0.1));
+			CHECK(Math::is_equal_approx(c.b, (real_t)0.3));
+			CHECK(Math::is_equal_approx(c.a, (real_t)0.4));
+		}
+	}
+}
+
+
+TEST_CASE("[Image][Performance] Self-blit overlapping rectangles preserve source snapshot") {
+	struct Case {
+		Rect2i source;
+		Point2i dest;
+	};
+	const Case cases[] = {
+		{ Rect2i(0, 0, 8, 8), Point2i(0, 0) },
+		{ Rect2i(0, 0, 7, 8), Point2i(1, 0) },
+		{ Rect2i(1, 0, 7, 8), Point2i(0, 0) },
+		{ Rect2i(0, 0, 8, 7), Point2i(0, 1) },
+		{ Rect2i(0, 1, 8, 7), Point2i(0, 0) },
+		{ Rect2i(1, 1, 6, 6), Point2i(2, 2) },
+		{ Rect2i(2, 2, 6, 6), Point2i(1, 1) },
+		{ Rect2i(0, 0, 12, 12), Point2i(-2, -2) },
+	};
+
+	for (Image::Format format : { Image::FORMAT_RGBA8, Image::FORMAT_RGBAF, Image::FORMAT_L8 }) {
+		for (const Case &test_case : cases) {
+			Ref<Image> actual = Image::create_empty(8, 8, false, format);
+			REQUIRE(actual.is_valid());
+			for (int y = 0; y < 8; y++) {
+				for (int x = 0; x < 8; x++) {
+					actual->set_pixel(x, y, Color((x + 1) / 10.0f, (y + 1) / 10.0f,
+							(x + y + 1) / 20.0f, (x + 2 * y + 1) / 25.0f));
+				}
+			}
+
+			// A distinct cloned source provides snapshot semantics, even if
+			// its bytes initially share an allocation through copy-on-write.
+			Ref<Image> original = actual->duplicate();
+			Ref<Image> expected = actual->duplicate();
+			REQUIRE(original.is_valid());
+			REQUIRE(expected.is_valid());
+
+			const uint8_t *const pointer_before = actual->get_data().ptr();
+			actual->blit_rect(actual, test_case.source, test_case.dest);
+			expected->blit_rect(original, test_case.source, test_case.dest);
+			CHECK(actual->get_data() == expected->get_data());
+			if (test_case.source.position == test_case.dest &&
+					test_case.source.size == Size2i(8, 8)) {
+				// No-op self-copies must not trigger a COW allocation.
+				CHECK(actual->get_data().ptr() == pointer_before);
+			}
+		}
+	}
+}
+
+
+TEST_CASE("[Image][Performance] Masked blits batch non-RGBA8 mask formats") {
+	// Reference the original scalar get_pixel()/set_pixel() semantics,
+	// including nonzero fractional alpha and source/destination clipping.
+	const Rect2i source_rects[] = {
+		Rect2i(0, 0, 48, 32),
+		Rect2i(5, 4, 38, 25),
+		Rect2i(16, 7, 45, 40),
+	};
+	const Point2i destinations[] = {
+		Point2i(0, 0),
+		Point2i(7, 2),
+		Point2i(-9, -4),
+	};
+
+	for (Image::Format mask_format : {
+				Image::FORMAT_L8, Image::FORMAT_LA8, Image::FORMAT_RGBAF, Image::FORMAT_RGBA16 }) {
+		Ref<Image> source = Image::create_empty(48, 32, false, Image::FORMAT_RGBA8);
+		Ref<Image> mask = Image::create_empty(48, 32, false, mask_format);
+		Ref<Image> destination = Image::create_empty(48, 32, false, Image::FORMAT_RGBA8);
+		REQUIRE(source.is_valid());
+		REQUIRE(mask.is_valid());
+		REQUIRE(destination.is_valid());
+
+		for (int y = 0; y < 32; y++) {
+			for (int x = 0; x < 48; x++) {
+				source->set_pixel(x, y, Color(float(x) / 47, float(y) / 31, 0.75f, 0.6f));
+				destination->set_pixel(x, y, Color(0.2f, 0.3f, 0.4f, 0.5f));
+				const float alpha = (x + 3 * y) % 7 == 0 ? 0.0f :
+						((x + y) % 3 == 0 ? 0.5f : 1.0f);
+				mask->set_pixel(x, y, Color(0.25f, 0.5f, 0.75f, alpha));
+			}
+		}
+		const Vector<uint8_t> original_source = source->get_data();
+		const Vector<uint8_t> original_mask = mask->get_data();
+		for (int test = 0; test < 3; test++) {
+			Ref<Image> actual = destination->duplicate();
+			Ref<Image> expected = destination->duplicate();
+			REQUIRE(actual.is_valid());
+			REQUIRE(expected.is_valid());
+			actual->blit_rect_mask(source, mask, source_rects[test], destinations[test]);
+
+			const Rect2i &rect = source_rects[test];
+			for (int y = rect.position.y; y < rect.position.y + rect.size.y; y++) {
+				for (int x = rect.position.x; x < rect.position.x + rect.size.x; x++) {
+					const int dx = destinations[test].x + x - rect.position.x;
+					const int dy = destinations[test].y + y - rect.position.y;
+					if (x < 0 || x >= 48 || y < 0 || y >= 32 ||
+							dx < 0 || dx >= 48 || dy < 0 || dy >= 32) {
+						continue;
+					}
+					if (mask->get_pixel(x, y).a != 0) {
+						expected->set_pixel(dx, dy, source->get_pixel(x, y));
+					}
+				}
+			}
+			CHECK(actual->get_data() == expected->get_data());
+			CHECK(source->get_data() == original_source);
+			CHECK(mask->get_data() == original_mask);
+		}
+	}
+}
+
 } // namespace TestImage

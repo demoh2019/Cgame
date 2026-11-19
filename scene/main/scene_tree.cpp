@@ -1225,29 +1225,31 @@ void SceneTree::_process_group(ProcessGroup *p_group, bool p_physics) {
 	// Make a copy, so if nodes are added/removed from process, this does not break
 	Vector<Node *> nodes_copy = nodes;
 
-	uint32_t node_count = nodes_copy.size();
-	Node **nodes_ptr = (Node **)nodes_copy.ptr(); // Force cast, pointer will not change.
+	const uint32_t node_count = nodes_copy.size();
+	Node *const *nodes_ptr = nodes_copy.ptr();
 
-	for (uint32_t i = 0; i < node_count; i++) {
-		Node *n = nodes_ptr[i];
-		if (nodes_removed_on_group_call.has(n)) {
-			// Node may have been removed during process, skip it.
-			// Keep in mind removals can only happen on the main thread.
-			continue;
-		}
-
-		if (!n->can_process() || !n->is_inside_tree()) {
-			continue;
-		}
-
-		if (p_physics) {
+	// Hoist the processing mode outside the hot node loop. The snapshot and
+	// removed-node checks are kept so that callbacks may still change group
+	// membership and process flags during this pass.
+	if (p_physics) {
+		for (uint32_t i = 0; i < node_count; i++) {
+			Node *n = nodes_ptr[i];
+			if (nodes_removed_on_group_call.has(n) || !n->can_process()) {
+				continue;
+			}
 			if (n->is_physics_processing_internal()) {
 				n->notification(Node::NOTIFICATION_INTERNAL_PHYSICS_PROCESS);
 			}
 			if (n->is_physics_processing()) {
 				n->notification(Node::NOTIFICATION_PHYSICS_PROCESS);
 			}
-		} else {
+		}
+	} else {
+		for (uint32_t i = 0; i < node_count; i++) {
+			Node *n = nodes_ptr[i];
+			if (nodes_removed_on_group_call.has(n) || !n->can_process()) {
+				continue;
+			}
 			if (n->is_processing_internal()) {
 				n->notification(Node::NOTIFICATION_INTERNAL_PROCESS);
 			}
@@ -1598,8 +1600,12 @@ TypedArray<Node> SceneTree::_get_nodes_in_group(const StringName &p_group) {
 	ret.resize(nc);
 
 	Node *const *ptr = E->value.nodes.ptr();
-	for (int i = 0; i < nc; i++) {
-		ret[i] = ptr[i];
+	// This freshly resized typed array has writable contiguous slots.
+	// Write sequentially to avoid repeated indexed access and checks for
+	// large group snapshots requested by scripts.
+	Array::Iterator write = ret.begin();
+	for (int i = 0; i < nc; i++, ++write) {
+		*write = ptr[i];
 	}
 
 	return ret;

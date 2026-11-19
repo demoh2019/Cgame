@@ -1,0 +1,47 @@
+name: Volumetric FEM principal-stretch XPBD regression
+
+on:
+  push:
+    branches: [develop]
+    paths:
+      - "servers/physics_fem_tetra_principal_limits.h"
+      - "tests/servers/test_physics_fem_tetra_principal_limits.cpp"
+      - "tests/stress/test_physics_fem_tetra_principal_limits_compiler.cpp"
+      - "modules/godot_physics_3d/godot_soft_body_3d.cpp"
+      - "modules/godot_physics_3d/godot_soft_body_3d.h"
+      - "modules/godot_physics_3d/godot_space_3d.cpp"
+      - "modules/godot_physics_3d/godot_space_3d.h"
+      - "servers/physics_3d/physics_server_3d.cpp"
+      - ".github/workflows/physics-fem-principal-limits.yml"
+  pull_request:
+    paths:
+      - "servers/physics_fem_tetra_principal_limits.h"
+      - "tests/servers/test_physics_fem_tetra_principal_limits.cpp"
+      - "tests/stress/test_physics_fem_tetra_principal_limits_compiler.cpp"
+      - "modules/godot_physics_3d/godot_soft_body_3d.cpp"
+      - "modules/godot_physics_3d/godot_soft_body_3d.h"
+      - "modules/godot_physics_3d/godot_space_3d.cpp"
+      - "modules/godot_physics_3d/godot_space_3d.h"
+      - "servers/physics_3d/physics_server_3d.cpp"
+      - ".github/workflows/physics-fem-principal-limits.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  principal-strain:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Compile real C++ FEM principal strain header as float and double
+        run: |
+          for precision in float double; do
+            flags=""
+            if [ "$precision" = "double" ]; then flags="-DCGAME_USE_DOUBLE"; fi
+            g++ -std=c++17 -O2 -Wall -Wextra -Werror $flags \
+              -Itests/stress/physics_cpp_stubs -I. \
+              tests/stress/test_physics_fem_tetra_principal_limits_compiler.cpp \
+              -o "/tmp/principal_fem_limit_$precision"
+            "/tmp/principal_fem_limit_$precision"
+          done

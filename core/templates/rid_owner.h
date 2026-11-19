@@ -101,6 +101,7 @@ class RID_Alloc : public RID_AllocBase {
 	uint32_t max_alloc = 0;
 	uint32_t alloc_count = 0;
 	uint32_t chunk_limit = 0;
+	uint32_t chunk_metadata_capacity = 0; // Only used by non-thread-safe owners.
 
 	const char *description = nullptr;
 
@@ -123,15 +124,22 @@ class RID_Alloc : public RID_AllocBase {
 				}
 			}
 
-			//grow chunks
+			// The non-thread-safe owner used to realloc both metadata
+			// arrays for every new chunk. Grow geometrically instead:
+			// hundreds of small RID chunks now require O(log N) resizes.
+			// Thread-safe owners keep their fixed preallocated metadata.
 			if constexpr (!THREAD_SAFE) {
-				chunks = (Chunk **)memrealloc(chunks, sizeof(Chunk *) * (chunk_count + 1));
+				if (chunk_count == chunk_metadata_capacity) {
+					uint32_t next_capacity = chunk_metadata_capacity ? chunk_metadata_capacity + (chunk_metadata_capacity >> 1) : 4;
+					if (next_capacity <= chunk_metadata_capacity) {
+						next_capacity = chunk_count + 1;
+					}
+					chunks = (Chunk **)memrealloc(chunks, sizeof(Chunk *) * next_capacity);
+					free_list_chunks = (uint32_t **)memrealloc(free_list_chunks, sizeof(uint32_t *) * next_capacity);
+					chunk_metadata_capacity = next_capacity;
+				}
 			}
 			chunks[chunk_count] = (Chunk *)memalloc(sizeof(Chunk) * elements_in_chunk); //but don't initialize
-			//grow free lists
-			if constexpr (!THREAD_SAFE) {
-				free_list_chunks = (uint32_t **)memrealloc(free_list_chunks, sizeof(uint32_t *) * (chunk_count + 1));
-			}
 			free_list_chunks[chunk_count] = (uint32_t *)memalloc(sizeof(uint32_t) * elements_in_chunk);
 
 			//initialize

@@ -269,6 +269,13 @@ public:
 	}
 
 	inline void unguarded_linear_insert(int64_t p_last, T *p_array) const {
+		// Most elements in introsort's final insertion pass are already in
+		// order. Avoid two moves (and potential heap work in T) for those
+		// entries. This method is only called with a valid predecessor.
+		if (!compare(p_array[p_last], p_array[p_last - 1])) {
+			return;
+		}
+
 		T val = std::move(p_array[p_last]);
 		int64_t next = p_last - 1;
 		while (compare(val, p_array[next])) {
@@ -284,6 +291,11 @@ public:
 	}
 
 	inline void linear_insert(int64_t p_first, int64_t p_last, T *p_array) const {
+		// Already sorted (including equal neighbors): skip all object moves
+		// and the potentially more expensive comparison with the first item.
+		if (!compare(p_array[p_last], p_array[p_last - 1])) {
+			return;
+		}
 		if (compare(p_array[p_last], p_array[p_first])) {
 			T val = std::move(p_array[p_last]);
 			for (int64_t i = p_last; i > p_first; i--) {
@@ -322,6 +334,40 @@ public:
 
 	inline void sort_range(int64_t p_first, int64_t p_last, T *p_array) const {
 		if (p_first != p_last) {
+			// Sorting long runs of equivalent keys only creates useless moves.
+			// A linear check is much cheaper than partitioning an all-equal
+			// range, and leaves expensive objects completely untouched. For
+			// ordinary input, reject the fast path after a few comparisons.
+			if (p_last - p_first >= 64) {
+				const T &first = p_array[p_first];
+				const int64_t middle = p_first + (p_last - p_first) / 2;
+				if (!compare(first, p_array[middle]) && !compare(p_array[middle], first) &&
+						!compare(first, p_array[p_last - 1]) && !compare(p_array[p_last - 1], first)) {
+					bool all_equivalent = true;
+					for (int64_t i = p_first + 1; i < p_last - 1; i++) {
+						if (compare(first, p_array[i]) || compare(p_array[i], first)) {
+							all_equivalent = false;
+							break;
+						}
+					}
+					if (all_equivalent) {
+						return;
+					}
+				}
+				// Most unsorted arrays reject this check on the first few
+				// adjacent pairs. Re-sorting an unchanged ordered array,
+				// however, needs no partition swaps or object moves at all.
+				bool already_sorted = true;
+				for (int64_t i = p_first + 1; i < p_last; i++) {
+					if (compare(p_array[i], p_array[i - 1])) {
+						already_sorted = false;
+						break;
+					}
+				}
+				if (already_sorted) {
+					return;
+				}
+			}
 			introsort(p_first, p_last, p_array, bitlog(p_last - p_first) * 2);
 			final_insertion_sort(p_first, p_last, p_array);
 		}

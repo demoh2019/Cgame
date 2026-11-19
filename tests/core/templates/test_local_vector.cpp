@@ -348,6 +348,61 @@ TEST_CASE("[LocalVector] Nontrivial inserted elements retain normal move semanti
 	CHECK(values[12].value == 77);
 }
 
+struct CountedLocalAssignment {
+	int value = 0;
+	static inline int assignments = 0;
+
+	CountedLocalAssignment() = default;
+	explicit CountedLocalAssignment(int p_value) :
+			value(p_value) {}
+	CountedLocalAssignment(const CountedLocalAssignment &) = default;
+	CountedLocalAssignment(CountedLocalAssignment &&) = default;
+	CountedLocalAssignment &operator=(const CountedLocalAssignment &p_other) {
+		value = p_other.value;
+		assignments++;
+		return *this;
+	}
+	CountedLocalAssignment &operator=(CountedLocalAssignment &&p_other) {
+		value = p_other.value;
+		assignments++;
+		return *this;
+	}
+	~CountedLocalAssignment() { value = -999; }
+};
+
+TEST_CASE("[LocalVector] Self and overlapping nontrivial Span assignments avoid wasted copies") {
+	LocalVector<CountedLocalAssignment> items;
+	for (int i = 0; i < 8; i++) {
+		items.push_back(CountedLocalAssignment(i));
+	}
+	CountedLocalAssignment::assignments = 0;
+	items = items.span();
+	CHECK(CountedLocalAssignment::assignments == 0);
+	CHECK(items.size() == 8);
+
+	// The source lives in the tail that resize() would otherwise destroy.
+	items = Span<CountedLocalAssignment>(items.ptr() + 3, 5);
+	CHECK(items.size() == 5);
+	CHECK(CountedLocalAssignment::assignments == 5);
+	for (int i = 0; i < 5; i++) {
+		CHECK(items[uint32_t(i)].value == i + 3);
+	}
+
+	CountedLocalAssignment::assignments = 0;
+	items = Span<CountedLocalAssignment>(items.ptr(), 3);
+	CHECK(items.size() == 3);
+	CHECK(CountedLocalAssignment::assignments == 0);
+	CHECK(items[0].value == 3);
+	CHECK(items[1].value == 4);
+	CHECK(items[2].value == 5);
+
+	CountedLocalAssignment::assignments = 0;
+	const LocalVector<CountedLocalAssignment> &self = items;
+	items = self;
+	CHECK(CountedLocalAssignment::assignments == 0);
+	CHECK(items.size() == 3);
+}
+
 TEST_CASE("[LocalVector] Trivial edge shifts preserve zero and last slot") {
 	LocalVector<uint64_t> values;
 	values.insert(0, uint64_t(0x101));
@@ -523,6 +578,161 @@ TEST_CASE("[LocalVector] Ordered insert matches upper_bound through mixed worklo
 	CHECK(strings[1] == "alpha");
 	CHECK(strings[2] == "omega");
 	CHECK(strings[3] == "zeta");
+}
+
+
+struct MoveOnlyInsertItem {
+	static inline int live = 0;
+	int value;
+
+	MoveOnlyInsertItem() = delete;
+	explicit MoveOnlyInsertItem(int p_value) :
+			value(p_value) {
+		live++;
+	}
+	MoveOnlyInsertItem(const MoveOnlyInsertItem &) = delete;
+	MoveOnlyInsertItem &operator=(const MoveOnlyInsertItem &) = delete;
+	MoveOnlyInsertItem(MoveOnlyInsertItem &&p_other) noexcept :
+			value(p_other.value) {
+		p_other.value = -1;
+		live++;
+	}
+	MoveOnlyInsertItem &operator=(MoveOnlyInsertItem &&p_other) noexcept {
+		value = p_other.value;
+		p_other.value = -1;
+		return *this;
+	}
+	~MoveOnlyInsertItem() { live--; }
+};
+
+static_assert(!std::is_default_constructible_v<MoveOnlyInsertItem>);
+static_assert(!std::is_trivially_copyable_v<MoveOnlyInsertItem>);
+
+TEST_CASE("[LocalVector] Insert move-only items without default construction") {
+	CHECK(MoveOnlyInsertItem::live == 0);
+	{
+		LocalVector<MoveOnlyInsertItem> values;
+		values.reserve(33); // Force capacity growth during the second insert.
+		for (int i = 0; i < 32; i++) {
+			values.push_back(MoveOnlyInsertItem(i));
+		}
+		// Exercise front, middle, penultimate, and append, including reallocations.
+		values.insert(0, MoveOnlyInsertItem(100));
+		values.insert(16, MoveOnlyInsertItem(200));
+		values.insert(values.size() - 1, MoveOnlyInsertItem(300));
+		values.insert(values.size(), MoveOnlyInsertItem(400));
+		CHECK(values.size() == 36);
+		CHECK(values[0].value == 100);
+		CHECK(values[16].value == 200);
+		CHECK(values[33].value == 300);
+		CHECK(values[35].value == 400);
+		CHECK(values[1].value == 0);
+		CHECK(values[17].value == 15);
+		CHECK(values[34].value == 31);
+		CHECK(MoveOnlyInsertItem::live == int(values.size()));
+
+		values.remove_at(16);
+		values.remove_at(0);
+		CHECK(values.size() == 34);
+		CHECK(values[0].value == 0);
+		CHECK(values[31].value == 300);
+		CHECK(values[32].value == 31);
+		CHECK(values[33].value == 400);
+		CHECK(MoveOnlyInsertItem::live == int(values.size()));
+	}
+	CHECK(MoveOnlyInsertItem::live == 0);
+}
+
+struct CostlyDefaultInsertItem {
+	static inline int default_constructions = 0;
+	std::string value;
+
+	CostlyDefaultInsertItem() :
+			value(512, 'x') {
+		default_constructions++;
+	}
+	explicit CostlyDefaultInsertItem(const char *p_value) :
+			value(p_value) {}
+	CostlyDefaultInsertItem(const CostlyDefaultInsertItem &) = delete;
+	CostlyDefaultInsertItem &operator=(const CostlyDefaultInsertItem &) = delete;
+	CostlyDefaultInsertItem(CostlyDefaultInsertItem &&) = default;
+	CostlyDefaultInsertItem &operator=(CostlyDefaultInsertItem &&) = default;
+	~CostlyDefaultInsertItem() {}
+};
+
+TEST_CASE("[LocalVector] Nontrivial insert does not create temporary default objects") {
+	LocalVector<CostlyDefaultInsertItem> values;
+	values.reserve(64);
+	for (int i = 0; i < 24; i++) {
+		values.push_back(CostlyDefaultInsertItem("keep"));
+	}
+	CostlyDefaultInsertItem::default_constructions = 0;
+	for (int i = 0; i < 16; i++) {
+		values.insert(values.size() - 1, CostlyDefaultInsertItem("added"));
+	}
+	CHECK(CostlyDefaultInsertItem::default_constructions == 0);
+	CHECK(values.size() == 40);
+	CHECK(values[0].value == "keep");
+	CHECK(values[22].value == "keep");
+	CHECK(values[24].value == "added");
+	CHECK(values[38].value == "added");
+	CHECK(values[39].value == "keep");
+}
+
+TEST_CASE("[LocalVector] Exact initial reserve keeps single-entry lists compact") {
+	LocalVector<uint64_t> values;
+	CHECK(values.get_capacity() == 0);
+
+	values.reserve_exact(1);
+	CHECK(values.get_capacity() == 1);
+	values.push_back(0x12345678ULL);
+	CHECK(values.size() == 1);
+
+	// An equal or smaller reservation must not move or shrink the data.
+	const uint64_t *original = values.ptr();
+	values.reserve_exact(1);
+	CHECK(values.ptr() == original);
+	CHECK(values.get_capacity() == 1);
+
+	// A larger exact reserve retains data; subsequent growth is geometric.
+	values.reserve_exact(4);
+	CHECK(values.get_capacity() == 4);
+	CHECK(values[0] == 0x12345678ULL);
+	for (uint64_t i = 1; i < 6; i++) {
+		values.push_back(i);
+	}
+	CHECK(values.get_capacity() >= 6);
+	CHECK(values.size() == 6);
+	CHECK(values[0] == 0x12345678ULL);
+	for (uint64_t i = 1; i < 6; i++) {
+		CHECK(values[i] == i);
+	}
+}
+
+TEST_CASE("[LocalVector] Capacity trimming preserves live values and handles rejected shrinks") {
+	LocalVector<uint64_t> values;
+	values.reserve_exact(128);
+	for (uint64_t i = 0; i < 16; ++i) {
+		values.push_back(i * 17);
+	}
+	CHECK(values.get_capacity() == 128);
+	values.shrink_to(32);
+	CHECK(values.get_capacity() == 32);
+	CHECK(values.size() == 16);
+	for (uint64_t i = 0; i < 16; ++i) {
+		CHECK(values[i] == i * 17);
+	}
+
+	// The caller may not discard live elements by requesting less capacity.
+	values.shrink_to(8);
+	CHECK(values.get_capacity() == 32);
+	CHECK(values.size() == 16);
+	values.shrink_to(32);
+	CHECK(values.get_capacity() == 32);
+	values.clear();
+	values.shrink_to(0);
+	CHECK(values.is_empty());
+	CHECK(values.get_capacity() == 0);
 }
 
 } // namespace TestLocalVector

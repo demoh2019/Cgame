@@ -179,13 +179,31 @@ public:
 	template <typename Comparator, bool Validate = SORT_ARRAY_VALIDATE_ENABLED, typename... Args>
 	void sort_custom(Args &&...p_args) {
 		Size len = _cowdata.size();
-		if (len == 0) {
+		// Sorting zero or one element cannot mutate the buffer.
+		// Avoid detaching a shared, possibly heavily reserved COW allocation.
+		if (len < 2) {
 			return;
 		}
 
-		T *data = ptrw();
 		SortArray<T, Comparator, Validate> sorter{ p_args... };
-		sorter.sort(data, len);
+		// SortArray can skip already ordered large ranges, but ptrw()
+		// would detach shared COW storage *before* that early exit.
+		// Scan a shared range read-only first to avoid copying large
+		// buffers on repeated sorting of unchanged data.
+		if (len >= 64 && _cowdata.refcount() > 1) {
+			const T *const read_only_data = ptr();
+			bool already_sorted = true;
+			for (Size i = 1; i < len; i++) {
+				if (sorter.compare(read_only_data[i], read_only_data[i - 1])) {
+					already_sorted = false;
+					break;
+				}
+			}
+			if (already_sorted) {
+				return;
+			}
+		}
+		sorter.sort(ptrw(), len);
 	}
 
 	Size bsearch(const T &p_value, bool p_before) const {
@@ -248,6 +266,12 @@ public:
 		const Size result_size = end - begin;
 		if (result_size == 0) {
 			return result;
+		}
+		// A whole-vector slice can share the existing COW storage.
+		// A subsequent write still detaches, retaining value semantics.
+		// This avoids allocating and copying potentially large arrays.
+		if (begin == 0 && end == s) {
+			return *this;
 		}
 		if (result.resize(result_size) != OK) {
 			return Vector<T>();
@@ -345,6 +369,10 @@ public:
 
 template <typename T>
 void Vector<T>::reverse() {
+	const Size len = size();
+	if (len < 2) {
+		return;
+	}
 	T *p = ptrw();
 	for (Size i = 0; i < size() / 2; i++) {
 		SWAP(p[i], p[size() - i - 1]);
@@ -353,6 +381,9 @@ void Vector<T>::reverse() {
 
 template <typename T>
 void Vector<T>::fill(T p_elem) {
+	if (is_empty()) {
+		return;
+	}
 	T *p = ptrw();
 	for (Size i = 0; i < size(); i++) {
 		p[i] = p_elem;

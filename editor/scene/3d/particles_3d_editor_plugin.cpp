@@ -32,6 +32,7 @@
 
 #include "core/object/callable_mp.h"
 #include "core/os/os.h"
+#include "core/templates/rb_map.h"
 #include "editor/editor_node.h"
 #include "editor/editor_undo_redo_manager.h"
 #include "editor/scene/scene_tree_editor.h"

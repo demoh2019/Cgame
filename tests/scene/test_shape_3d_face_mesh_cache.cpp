@@ -45,7 +45,7 @@ static void check_surface_colors(const Ref<ArrayMesh> &p_mesh, const Color &p_co
 	REQUIRE(p_mesh.is_valid());
 	REQUIRE_EQ(p_mesh->get_surface_count(), 1);
 	const Array arrays = p_mesh->surface_get_arrays(0);
-	const PackedColorArray colors = arrays[RenderingServer::ARRAY_COLOR];
+	const PackedColorArray colors = arrays[Mesh::ARRAY_COLOR];
 	REQUIRE(colors.size() > 0);
 	for (int i = 0; i < colors.size(); i++) {
 		CHECK_EQ(colors[i], p_color);

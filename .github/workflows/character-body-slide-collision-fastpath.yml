@@ -1,0 +1,43 @@
+name: CharacterBody Slide Collision Fast Path
+on:
+  pull_request:
+    paths:
+      - "scene/2d/physics/character_body_2d.cpp"
+      - "scene/3d/physics/character_body_3d.cpp"
+      - "tests/scene/test_node_2d.cpp"
+      - "tests/scene/test_node_3d.cpp"
+      - "misc/tests/test_character_body_collision_fastpath.py"
+      - ".github/workflows/character-body-slide-collision-fastpath.yml"
+  workflow_dispatch:
+jobs:
+  contracts:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: python -m unittest discover -s misc/tests -p test_character_body_collision_fastpath.py -v
+  native-tests:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+      - uses: ./.github/actions/godot-cache-restore
+        with:
+          cache-name: linux-character-body-slide-fastpath
+        continue-on-error: true
+      - uses: ./.github/actions/godot-deps
+      - uses: ./.github/actions/godot-build
+        with:
+          platform: linuxbsd
+          target: editor
+          scons-flags: tests=yes module_text_server_fb_enabled=yes -j2
+      - uses: ./.github/actions/godot-cache-save
+        with:
+          cache-name: linux-character-body-slide-fastpath
+        continue-on-error: true
+      - name: Native CharacterBody2D and CharacterBody3D regression tests
+        run: ./bin/godot.linuxbsd.editor.x86_64 --headless --test --test-case="*[CharacterBodySlideFastPath]*"
