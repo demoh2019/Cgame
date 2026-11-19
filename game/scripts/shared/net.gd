@@ -263,13 +263,6 @@ func c_stash(item_id: String, count: int, deposit: bool) -> void:
 
 
 @rpc("any_peer", "reliable")
-func c_rest() -> void:
-	var peer := multiplayer.get_remote_sender_id()
-	if _allowed(peer):
-		s_result.rpc_id(peer, "rest", sim.cmd_rest(peer))
-
-
-@rpc("any_peer", "reliable")
 func c_contract(action: String) -> void:
 	var peer := multiplayer.get_remote_sender_id()
 	if _allowed(peer):
@@ -445,7 +438,7 @@ func _is_nearby(event: Dictionary, peer: int) -> bool:
 
 func _event_visible_to(event: Dictionary, peer: int) -> bool:
 	match event["type"]:
-		"spawn", "zone", "gathered", "crate":
+		"spawn", "zone", "gathered", "fished", "crate":
 			return event.get("peer", -1) == peer
 		"trade":
 			return event.get("a", -1) == peer or event.get("b", -1) == peer

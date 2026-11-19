@@ -650,3 +650,20 @@ food recovery and backward-compatible progression saves.
 **Not included yet:** multiplayer fishing parties, boats, fish shoals,
 bait, weather-dependent catches, T2–T4 rods or regional fish prices.
 These can be added through shared game rules without duplicating an engine.
+
+
+## Fishing end-to-end networking and gameplay regression
+
+Fishing is an actual interaction in `game/`: **T** in the local playable
+client, or **Cast fishing rod** from the network inventory panel. The server
+owns the shore proximity, fishing rod, five-second cast, movement cancellation,
+two-second cooldown, 1–2 fish catch, inventory limits and fishing profession XP.
+
+The authoritative `fished` completion event now passes the network filter
+**only to the player who performed the cast**. Other players are not sent the
+catch notification. Cooking raw fish uses the existing workbench recipe.
+
+Run `godot --headless --path game --script res://tests/run_all.gd` to
+exercise `test_fishing.gd`, plus
+`godot --headless --path game --script res://tests/smoke_client_scene.gd`
+to check that local fishing is accessible via the actual playable scene.
