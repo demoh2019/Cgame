@@ -332,44 +332,69 @@ void TerrainHeightmap::paint_layer(const Vector2 &p_center, float p_radius, int 
 }
 
 Ref<ArrayMesh> TerrainHeightmap::build_mesh(float p_cell_size) const {
+    return build_chunk_mesh(Vector2i(0, 0), dimensions - Vector2i(1, 1), 1, p_cell_size);
+}
+
+Ref<ArrayMesh> TerrainHeightmap::build_chunk_mesh(const Vector2i &p_origin, const Vector2i &p_cell_count, int p_stride, float p_cell_size) const {
     ERR_FAIL_COND_V_MSG(!std::isfinite(p_cell_size) || p_cell_size <= 0, Ref<ArrayMesh>(),
             "Terrain mesh cell size must be finite and positive.");
-    const int w = dimensions.x;
-    const int h = dimensions.y;
-    const int cell_count = w * h;
+    ERR_FAIL_COND_V_MSG(p_stride < 1 || p_stride > 128, Ref<ArrayMesh>(),
+            "Terrain chunk stride must be between 1 and 128.");
+    ERR_FAIL_COND_V_MSG(p_origin.x < 0 || p_origin.y < 0 ||
+                    p_cell_count.x < 1 || p_cell_count.y < 1 ||
+                    p_cell_count.x > dimensions.x - 1 || p_cell_count.y > dimensions.y - 1 ||
+                    p_origin.x > dimensions.x - 1 - p_cell_count.x ||
+                    p_origin.y > dimensions.y - 1 - p_cell_count.y,
+            Ref<ArrayMesh>(), "Terrain chunk must fit within the heightmap's cells.");
+    ERR_FAIL_COND_V_MSG(p_cell_count.x % p_stride != 0 || p_cell_count.y % p_stride != 0,
+            Ref<ArrayMesh>(), "The chunk cell counts must be divisible by the LOD stride.");
+
+    const int w = p_cell_count.x / p_stride + 1;
+    const int h = p_cell_count.y / p_stride + 1;
+    const int vertex_count = w * h;
+
     PackedVector3Array vertices;
     PackedVector3Array normals;
     PackedVector2Array uvs;
+    PackedColorArray colors;
     PackedInt32Array indices;
-    vertices.resize(cell_count);
-    normals.resize(cell_count);
-    uvs.resize(cell_count);
+    vertices.resize(vertex_count);
+    normals.resize(vertex_count);
+    uvs.resize(vertex_count);
+    colors.resize(vertex_count);
     indices.resize((w - 1) * (h - 1) * 6);
 
     for (int z = 0; z < h; z++) {
+        const int gz = p_origin.y + z * p_stride;
         for (int x = 0; x < w; x++) {
-            const int i = _index(x, z);
-            vertices.set(i, Vector3(x * p_cell_size, heights[i], z * p_cell_size));
-            uvs.set(i, Vector2(float(x) / (w - 1), float(z) / (h - 1)));
+            const int gx = p_origin.x + x * p_stride;
+            const int src_index = _index(gx, gz);
+            const int dst_index = z * w + x;
+            vertices.set(dst_index, Vector3(x * p_stride * p_cell_size, heights[src_index], z * p_stride * p_cell_size));
+            uvs.set(dst_index, Vector2(float(gx) / (dimensions.x - 1), float(gz) / (dimensions.y - 1)));
+            colors.set(dst_index, paint_weights[src_index]);
 
-            const int xl = MAX(0, x - 1);
-            const int xr = MIN(w - 1, x + 1);
-            const int zu = MAX(0, z - 1);
-            const int zd = MIN(h - 1, z + 1);
-            const float dx = (heights[_index(xl, z)] - heights[_index(xr, z)]) /
+            // Derivatives come from the full-resolution heightmap so that
+            // adjacent equal-LOD chunks share compatible boundary normals.
+            const int xl = MAX(0, gx - 1);
+            const int xr = MIN(dimensions.x - 1, gx + 1);
+            const int zu = MAX(0, gz - 1);
+            const int zd = MIN(dimensions.y - 1, gz + 1);
+            const float dx = (heights[_index(xl, gz)] - heights[_index(xr, gz)]) /
                     ((xr - xl) * p_cell_size);
-            const float dz = (heights[_index(x, zu)] - heights[_index(x, zd)]) /
+            const float dz = (heights[_index(gx, zu)] - heights[_index(gx, zd)]) /
                     ((zd - zu) * p_cell_size);
-            normals.set(i, Vector3(dx, 1.0f, dz).normalized());
+            normals.set(dst_index, Vector3(dx, 1.0f, dz).normalized());
         }
     }
+
     int cursor = 0;
     for (int z = 0; z < h - 1; z++) {
         for (int x = 0; x < w - 1; x++) {
-            const int a = _index(x, z);
-            const int b = _index(x + 1, z);
-            const int c = _index(x, z + 1);
-            const int d = _index(x + 1, z + 1);
+            const int a = z * w + x;
+            const int b = a + 1;
+            const int c = a + w;
+            const int d = c + 1;
             indices.set(cursor++, a);
             indices.set(cursor++, c);
             indices.set(cursor++, b);
@@ -384,7 +409,7 @@ Ref<ArrayMesh> TerrainHeightmap::build_mesh(float p_cell_size) const {
     arrays[Mesh::ARRAY_VERTEX] = vertices;
     arrays[Mesh::ARRAY_NORMAL] = normals;
     arrays[Mesh::ARRAY_TEX_UV] = uvs;
-    arrays[Mesh::ARRAY_COLOR] = paint_weights;
+    arrays[Mesh::ARRAY_COLOR] = colors;
     arrays[Mesh::ARRAY_INDEX] = indices;
 
     Ref<ArrayMesh> mesh;
@@ -411,6 +436,7 @@ void TerrainHeightmap::_bind_methods() {
     ClassDB::bind_method(D_METHOD("erode_talus", "iterations", "talus", "rate"), &TerrainHeightmap::erode_talus);
     ClassDB::bind_method(D_METHOD("paint_layer", "center", "radius", "layer", "strength"), &TerrainHeightmap::paint_layer);
     ClassDB::bind_method(D_METHOD("build_mesh", "cell_size"), &TerrainHeightmap::build_mesh, DEFVAL(1.0f));
+    ClassDB::bind_method(D_METHOD("build_chunk_mesh", "cell_origin", "cell_count", "lod_stride", "cell_size"), &TerrainHeightmap::build_chunk_mesh, DEFVAL(1), DEFVAL(1.0f));
 
     ADD_PROPERTY(PropertyInfo(Variant::VECTOR2I, "dimensions"), "set_dimensions", "get_dimensions");
     ADD_PROPERTY(PropertyInfo(Variant::PACKED_FLOAT32_ARRAY, "heights", PROPERTY_HINT_NONE, "", PROPERTY_USAGE_STORAGE), "set_heights", "get_heights");
