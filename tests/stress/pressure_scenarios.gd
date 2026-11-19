@@ -31,6 +31,47 @@ func scene_reparent(tree: SceneTree, scale: int) -> Dictionary:
 	return {"nodes": nodes.size(), "reparent_operations": operations}
 
 
+func scene_move(tree: SceneTree, scale: int) -> Dictionary:
+	# Repeated adjacent child moves stress the tree's index update path.
+	# Build one large parent so the historical two-tail shift dominates.
+	var parent := Node.new()
+	tree.root.add_child(parent)
+	var children: Array[Node] = []
+	var count := 600 * scale
+	for i in range(count):
+		var child := Node.new()
+		child.name = "Move%d" % i
+		parent.add_child(child)
+		children.append(child)
+
+	var operations := 0
+	for iteration in range(10):
+		for i in range(0, count - 1, 2):
+			var moving := parent.get_child(i)
+			parent.move_child(moving, i + 1)
+			if moving.get_index() != i + 1 or parent.get_child(i + 1) != moving:
+				parent.free()
+				return {"error": "Adjacent child move did not preserve indices"}
+			operations += 1
+
+	# Ten passes restore the initial ordering; also exercise long moves.
+	if parent.get_child(0) != children[0] or parent.get_child(count - 1) != children[count - 1]:
+		parent.free()
+		return {"error": "Adjacent child moves did not restore original order"}
+	for i in range(16):
+		var first := parent.get_child(0)
+		parent.move_child(first, count - 1)
+		if parent.get_child(count - 1) != first:
+			parent.free()
+			return {"error": "Distant child move failed"}
+		operations += 1
+	var correct := parent.get_child_count() == count
+	parent.free()
+	if not correct:
+		return {"error": "Child count mismatch after moves"}
+	return {"nodes": count, "moves": operations}
+
+
 func resource_roundtrip(scale: int) -> Dictionary:
 	var curve := Curve.new()
 	curve.add_point(Vector2(0.0, 0.0))
