@@ -1209,4 +1209,54 @@ TEST_CASE("[BVH] Reciprocal pair indices fit into the 64-bit contact link") {
 	}
 }
 
+
+TEST_CASE("[BVH] Speculative 2D pairing margin includes close separated shapes") {
+	using Tree = BVH_Manager<Item, 2, true, 16, PairTest, CullTest, Rect2, Vector2, false>;
+	Tree tree;
+	tree.params_set_pairing_expansion(real_t(0.5));
+	Item a, b, far;
+	int pairs = 0;
+	int unpairs = 0;
+	tree.set_pair_callback(count_pair, &pairs);
+	tree.set_unpair_callback(count_unpair, &unpairs);
+	const BVHHandle ha = tree.create(&a, true, 0, 3, Rect2(0, 0, 2, 2));
+	const BVHHandle hb = tree.create(&b, true, 1, 3, Rect2(real_t(2.3), 0, 2, 2));
+	const BVHHandle hc = tree.create(&far, true, 1, 3, Rect2(20, 0, 2, 2));
+	CHECK(pairs == 1);
+	CHECK(unpairs == 0);
+	tree.move(hb, Rect2(10, 0, 2, 2));
+	tree.update();
+	CHECK(unpairs == 1);
+	tree.erase(hc);
+	tree.erase(hb);
+	tree.erase(ha);
+	CHECK(unpairs == pairs);
+}
+
+TEST_CASE("[BVH] Speculative 3D pairing margin includes close separated shapes") {
+	using Tree = BVH_Manager<Item, 2, true, 16, PairTest, CullTest, AABB, Vector3, false>;
+	Tree tree;
+	tree.params_set_pairing_expansion(real_t(0.05));
+	Item a, b, far;
+	int pairs = 0;
+	int unpairs = 0;
+	tree.set_pair_callback(count_pair, &pairs);
+	tree.set_unpair_callback(count_unpair, &unpairs);
+	const BVHHandle ha = tree.create(&a, true, 0, 3,
+			AABB(Vector3(), Vector3(2, 2, 2)));
+	const BVHHandle hb = tree.create(&b, true, 1, 3,
+			AABB(Vector3(real_t(2.03), 0, 0), Vector3(2, 2, 2)));
+	const BVHHandle hc = tree.create(&far, true, 1, 3,
+			AABB(Vector3(20, 0, 0), Vector3(2, 2, 2)));
+	CHECK(pairs == 1);
+	CHECK(unpairs == 0);
+	tree.move(hb, AABB(Vector3(10, 0, 0), Vector3(2, 2, 2)));
+	tree.update();
+	CHECK(unpairs == 1);
+	tree.erase(hc);
+	tree.erase(hb);
+	tree.erase(ha);
+	CHECK(unpairs == pairs);
+}
+
 } // namespace TestBVH
