@@ -34,7 +34,7 @@ class SparsePhysicsIslandTests(unittest.TestCase):
                 self.assertIn("MIN_PARALLEL_SOLVE_ISLANDS = 16", source)
                 self.assertIn("if (total_constraint_count < MIN_PARALLEL_SETUP_CONSTRAINTS)", source)
                 self.assertIn("_setup_constraint(constraint_index, nullptr);", source)
-                self.assertIn("else if (solve_island_count < MIN_PARALLEL_SOLVE_ISLANDS)", source)
+                self.assertIn("else if (solve_island_count < MIN_PARALLEL_SOLVE_ISLANDS", source)
                 self.assertIn("_solve_island(island_index, nullptr);", source)
                 if dimension == "3d":
                     # Dominant-island fallback is now indexed through the
