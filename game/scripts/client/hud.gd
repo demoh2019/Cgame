@@ -31,6 +31,9 @@ var _log_lines: Array[String] = []
 var _craft_signature: String = ""
 var _inventory_signature: String = ""
 var _trade_state: Dictionary = {}
+var _party_status: Label
+var _party_target: OptionButton
+var _party_peer_signature: String = ""
 var _trade_target: OptionButton
 var _trade_item: OptionButton
 var _trade_quantity: SpinBox
@@ -253,6 +256,47 @@ func _build() -> void:
 	claim_contract.text = "Turn in mission"
 	claim_contract.pressed.connect(func() -> void: client.contract("claim"))
 	contract_actions.add_child(claim_contract)
+
+	var party_title := Label.new()
+	party_title.text = "Survivor party (nearby invites, up to 5 players)"
+	inventory_box.add_child(party_title)
+	_party_status = Label.new()
+	_party_status.text = "No party. Invite a nearby survivor to fight together."
+	inventory_box.add_child(_party_status)
+	_party_target = OptionButton.new()
+	inventory_box.add_child(_party_target)
+	var party_buttons := HBoxContainer.new()
+	inventory_box.add_child(party_buttons)
+	var invite_member := Button.new()
+	invite_member.text = "Invite"
+	invite_member.pressed.connect(func() -> void:
+		var target: int = _party_target.get_selected_id()
+		if target >= 0:
+			client.party_invite(target)
+		else:
+			say("Party: choose a visible survivor first"))
+	party_buttons.add_child(invite_member)
+	var accept_member := Button.new()
+	accept_member.text = "Join"
+	accept_member.pressed.connect(func() -> void: client.party_accept())
+	party_buttons.add_child(accept_member)
+	var decline_member := Button.new()
+	decline_member.text = "Decline"
+	decline_member.pressed.connect(func() -> void: client.party_decline())
+	party_buttons.add_child(decline_member)
+	var leave_party := Button.new()
+	leave_party.text = "Leave"
+	leave_party.pressed.connect(func() -> void: client.party_leave())
+	party_buttons.add_child(leave_party)
+	var kick_member := Button.new()
+	kick_member.text = "Kick"
+	kick_member.pressed.connect(func() -> void:
+		var target: int = _party_target.get_selected_id()
+		if target >= 0:
+			client.party_kick(target)
+		else:
+			say("Party: select the member to remove"))
+	party_buttons.add_child(kick_member)
 
 	var trade_title := Label.new()
 	trade_title.text = "Player barter (safe hub, within 6 metres)"
@@ -484,6 +528,12 @@ func _sell_one_material() -> void:
 
 
 func _on_result(kind: String, data: Dictionary) -> void:
+	if kind == "party":
+		if bool(data.get("ok", false)):
+			say("Party updated. Member lists appear in the next server snapshot.")
+		else:
+			say("Party: " + str(data.get("reason", "rejected")))
+		return
 	if kind == "extinguish":
 		if bool(data.get("ok", false)):
 			say("Your campfire was extinguished. No fuel refunded.")
@@ -629,6 +679,7 @@ func _process(_delta: float) -> void:
 	if _inventory_panel.visible:
 		_refresh_inventory()
 		_refresh_trade_controls()
+		_refresh_party_controls()
 	if _craft_panel.visible:
 		_refresh_crafting()
 
@@ -651,6 +702,35 @@ func _refresh_market_options() -> void:
 		if int(order["id"]) == selected_id:
 			_market_select.select(index)
 	_market_status.text = "%d listings | quantity & price inputs below | inventory item from barter selector" % _market_listings.size()
+
+
+func _refresh_party_controls() -> void:
+	var state: Dictionary = client.you.get("party", {})
+	var group_id: int = int(state.get("id", 0))
+	var roster: Array = state.get("roster", [])
+	if group_id == 0:
+		_party_status.text = "No party. Invite someone nearby to start one."
+	else:
+		var names: PackedStringArray = []
+		for member in roster:
+			var prefix: String = "[Leader] " if int(member["id"]) == int(state.get("leader", 0)) else ""
+			names.append("%s%s (%d HP)" % [prefix, str(member["name"]), int(member["health"])])
+		_party_status.text = "Party %d (%d/5): %s" % [group_id, roster.size(), ", ".join(names)]
+	if int(state.get("invite_from", 0)) > 0:
+		_party_status.text += "\nInvitation from " + str(state.get("invite_name", "Survivor"))
+	var nearby: Array = []
+	for peer in client.players.values():
+		nearby.append([int(peer["id"]), str(peer.get("name", "Survivor"))])
+	nearby.sort_custom(func(a, b): return a[0] < b[0])
+	var signature := str(nearby)
+	if signature != _party_peer_signature:
+		var selected: int = _party_target.get_selected_id()
+		_party_peer_signature = signature
+		_party_target.clear()
+		for peer in nearby:
+			_party_target.add_item("%s (#%d)" % [peer[1], peer[0]], peer[0])
+			if peer[0] == selected:
+				_party_target.select(_party_target.item_count - 1)
 
 
 func _refresh_trade_controls() -> void:
