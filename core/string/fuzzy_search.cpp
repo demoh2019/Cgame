@@ -33,6 +33,8 @@
 #include "core/object/class_db.h"
 #include "core/variant/typed_array.h"
 
+#include <algorithm>
+
 static bool _is_valid_interval(const Vector2i &p_interval) {
 	// Empty intervals are represented as (-1, -1).
 	return p_interval.x >= 0 && p_interval.y >= p_interval.x;
@@ -297,44 +299,33 @@ Vector<FuzzySearchToken> FuzzySearch::_get_tokens(const String &p_query) const {
 	return tokens;
 }
 
-void FuzzySearch::_sort_and_filter(Vector<Ref<FuzzySearchMatch>> &p_results) const {
+// The comparator is shared by the bounded worst-first heap and the final sort.
+// A heap whose comparator ranks better results first keeps the worst match at [0].
+struct FuzzySearchResultComparator {
+	bool operator()(const Ref<FuzzySearchMatch> &p_lhs, const Ref<FuzzySearchMatch> &p_rhs) const {
+		// Sort on (score, length, alphanumeric) to ensure consistent ordering.
+		if (p_lhs->score == p_rhs->score) {
+			if (p_lhs->target.length() == p_rhs->target.length()) {
+				return p_lhs->target < p_rhs->target;
+			}
+			return p_lhs->target.length() < p_rhs->target.length();
+		}
+		return p_lhs->score > p_rhs->score;
+	}
+};
+
+void FuzzySearch::_sort_and_filter(Vector<Ref<FuzzySearchMatch>> &p_results, float p_avg_score, float p_max_score) const {
 	if (p_results.is_empty()) {
 		return;
 	}
 
 	if (filter_low_scores) {
-		float avg_score = 0;
-		float max_score = 0;
-
-		for (const Ref<FuzzySearchMatch> &result : p_results) {
-			avg_score += result->get_score();
-			max_score = MAX(max_score, result->get_score());
-		}
-
-		avg_score /= p_results.size();
-		float cull_score = MIN(filter_cutoff, Math::lerp(avg_score, max_score, filter_factor));
+		const float cull_score = MIN(filter_cutoff, Math::lerp(p_avg_score, p_max_score, filter_factor));
 		remove_low_scores(p_results, cull_score);
 	}
 
-	struct FuzzySearchResultComparator {
-		bool operator()(const Ref<FuzzySearchMatch> &p_lhs, const Ref<FuzzySearchMatch> &p_rhs) const {
-			// Sort on (score, length, alphanumeric) to ensure consistent ordering.
-			if (p_lhs->score == p_rhs->score) {
-				if (p_lhs->target.length() == p_rhs->target.length()) {
-					return p_lhs->target < p_rhs->target;
-				}
-				return p_lhs->target.length() < p_rhs->target.length();
-			}
-			return p_lhs->score > p_rhs->score;
-		}
-	};
-
-	SortArray<Ref<FuzzySearchMatch>, FuzzySearchResultComparator> sorter;
-
-	if (p_results.size() > max_results) {
-		sorter.partial_sort(0, p_results.size(), max_results, p_results.ptrw());
-		p_results.resize(max_results);
-	} else {
+	if (!p_results.is_empty()) {
+		SortArray<Ref<FuzzySearchMatch>, FuzzySearchResultComparator> sorter;
 		sorter.sort(p_results.ptrw(), p_results.size());
 	}
 }
@@ -423,8 +414,13 @@ Vector<Ref<FuzzySearchMatch>> FuzzySearch::search_all(const String &p_query, con
 	}
 	min_matched_length = MAX(1, min_matched_length - (exact_token_matches ? 0 : max_misses));
 
-	// Most candidates do not match. Reuse the temporary match object instead of allocating
-	// a RefCounted object (and freeing it) for every rejected target.
+	// Retain only the best max_results matches. Otherwise broad searches allocate
+	// a RefCounted match for every hit and sort all hits, even if only a few are returned.
+	// Keep statistics for *all* matches so score filtering has identical semantics.
+	float total_score = 0;
+	float max_score = 0;
+	int match_count = 0;
+	const FuzzySearchResultComparator better;
 	Ref<FuzzySearchMatch> result;
 	for (int i = 0; i < p_targets.size(); i++) {
 		if (p_targets[i].length() - start_offset < min_matched_length) {
@@ -433,20 +429,39 @@ Vector<Ref<FuzzySearchMatch>> FuzzySearch::search_all(const String &p_query, con
 		if (result.is_null()) {
 			result.instantiate();
 		} else {
-			// A failed search may have added partial token matches and a nonzero score.
+			// Reuse a failed, rejected, or evicted match object without leaking state.
 			result->score = 0;
 			result->match_interval = Vector2i(-1, -1);
 			result->token_matches.clear();
 		}
 		result->original_index = i;
-		if (_search_tokens(tokens, p_targets[i], result)) {
+		if (!_search_tokens(tokens, p_targets[i], result)) {
+			continue;
+		}
+
+		if (filter_low_scores) {
+			total_score += result->score;
+			max_score = MAX(max_score, float(result->score));
+			match_count++;
+		}
+
+		if (results.size() < max_results) {
 			results.append(result);
-			// Successful results must never be mutated while processing later targets.
+			std::push_heap(results.ptrw(), results.ptrw() + results.size(), better);
+			// Successful results must never be mutated while they remain in the heap.
 			result.unref();
+		} else if (better(result, results.ptr()[0])) {
+			Ref<FuzzySearchMatch> *heap = results.ptrw();
+			std::pop_heap(heap, heap + results.size(), better);
+			// Recycle the previous worst match, avoiding an allocation on the next hit.
+			Ref<FuzzySearchMatch> evicted = heap[results.size() - 1];
+			heap[results.size() - 1] = result;
+			std::push_heap(heap, heap + results.size(), better);
+			result = evicted;
 		}
 	}
 
-	_sort_and_filter(results);
+	_sort_and_filter(results, match_count ? total_score / match_count : 0, max_score);
 	return results;
 }
 
