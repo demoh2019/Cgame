@@ -1393,6 +1393,66 @@ TEST_CASE("[String] Splitting") {
 	}
 }
 
+TEST_CASE("[String] split_floats parses bounded numeric tokens without an input copy") {
+	const String source = "1e3|-2.75|.5|+4e-2|7e+3|garbage| |9";
+	const Vector<double> parsed = source.split_floats("|");
+	const double expected[] = { 1000.0, -2.75, 0.5, 0.04, 7000.0, 0.0, 0.0, 9.0 };
+	REQUIRE(parsed.size() == 8);
+	for (int i = 0; i < 8; i++) {
+		CHECK(Math::abs(parsed[i] - expected[i]) < 0.0000001);
+	}
+	// Bounded parsing must never mutate the source buffer or overrun into
+	// a token that follows a delimiter.
+	CHECK(source == "1e3|-2.75|.5|+4e-2|7e+3|garbage| |9");
+
+	const String empty_tokens = "|12||-3.5|";
+	const Vector<double> all = empty_tokens.split_floats("|");
+	REQUIRE(all.size() == 5);
+	CHECK(all[0] == 0.0);
+	CHECK(all[1] == 12.0);
+	CHECK(all[2] == 0.0);
+	CHECK(all[3] == -3.5);
+	CHECK(all[4] == 0.0);
+	const Vector<double> without_empty = empty_tokens.split_floats("|", false);
+	REQUIRE(without_empty.size() == 2);
+	CHECK(without_empty[0] == 12.0);
+	CHECK(without_empty[1] == -3.5);
+
+	const Vector<String> splitters = { ";", "|", " " };
+	const Vector<float> multikey = String("1.25;2.5|-3.75 4e1").split_floats_mk(splitters);
+	REQUIRE(multikey.size() == 4);
+	CHECK(Math::abs(multikey[0] - 1.25f) < 0.000001f);
+	CHECK(Math::abs(multikey[1] - 2.5f) < 0.000001f);
+	CHECK(Math::abs(multikey[2] + 3.75f) < 0.000001f);
+	CHECK(Math::abs(multikey[3] - 40.0f) < 0.000001f);
+}
+
+TEST_CASE("[String] split_floats handles long immutable CSV input and token boundaries") {
+	String csv;
+	const int token_count = 2048;
+	for (int i = 0; i < token_count; i++) {
+		if (i > 0) {
+			csv += ",";
+		}
+		csv += itos(i % 101);
+	}
+	const String original = csv;
+	const Vector<double> values = csv.split_floats(",");
+	REQUIRE(values.size() == token_count);
+	for (int i = 0; i < token_count; i++) {
+		CHECK(values[i] == double(i % 101));
+	}
+	CHECK(csv == original);
+
+	// A truncated exponent token must not see digits in the next token.
+	const Vector<double> incomplete = String("1e-|9|2e+|3").split_floats("|");
+	REQUIRE(incomplete.size() == 4);
+	CHECK(incomplete[0] == 1.0);
+	CHECK(incomplete[1] == 9.0);
+	CHECK(incomplete[2] == 2.0);
+	CHECK(incomplete[3] == 3.0);
+}
+
 TEST_CASE("[String] format") {
 	const String value_format = "red=\"$red\" green=\"$green\" blue=\"$blue\" alpha=\"$alpha\"";
 
