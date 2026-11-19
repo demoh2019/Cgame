@@ -34,6 +34,7 @@
 #include "godot_shape_2d.h"
 
 #include "core/object/object_id.h"
+#include "core/templates/local_vector.h"
 #include "core/templates/self_list.h"
 
 class GodotSpace2D;
@@ -64,7 +65,7 @@ private:
 		Vector2 one_way_collision_direction = Vector2(0.0, 1.0);
 	};
 
-	Vector<Shape> shapes;
+	LocalVector<Shape> shapes;
 	GodotSpace2D *space = nullptr;
 	Transform2D transform;
 	// Invalidates contact recycling on geometry, filter or orientation changes.
@@ -121,21 +122,21 @@ public:
 	void set_shape(int p_index, GodotShape2D *p_shape);
 	void set_shape_transform(int p_index, const Transform2D &p_transform);
 
-	_FORCE_INLINE_ int get_shape_count() const { return shapes.size(); }
+	_FORCE_INLINE_ int get_shape_count() const { return (int)shapes.size(); }
 	_FORCE_INLINE_ GodotShape2D *get_shape(int p_index) const {
-		CRASH_BAD_INDEX(p_index, shapes.size());
+		CRASH_BAD_INDEX(p_index, (int)shapes.size());
 		return shapes[p_index].shape;
 	}
 	_FORCE_INLINE_ const Transform2D &get_shape_transform(int p_index) const {
-		CRASH_BAD_INDEX(p_index, shapes.size());
+		CRASH_BAD_INDEX(p_index, (int)shapes.size());
 		return shapes[p_index].xform;
 	}
 	_FORCE_INLINE_ const Transform2D &get_shape_inv_transform(int p_index) const {
-		CRASH_BAD_INDEX(p_index, shapes.size());
+		CRASH_BAD_INDEX(p_index, (int)shapes.size());
 		return shapes[p_index].xform_inv;
 	}
 	_FORCE_INLINE_ const Rect2 &get_shape_aabb(int p_index) const {
-		CRASH_BAD_INDEX(p_index, shapes.size());
+		CRASH_BAD_INDEX(p_index, (int)shapes.size());
 		return shapes[p_index].aabb_cache;
 	}
 
@@ -146,29 +147,29 @@ public:
 
 	void set_shape_disabled(int p_idx, bool p_disabled);
 	_FORCE_INLINE_ bool is_shape_disabled(int p_idx) const {
-		ERR_FAIL_INDEX_V(p_idx, shapes.size(), false);
+		ERR_FAIL_INDEX_V(p_idx, (int)shapes.size(), false);
 		return shapes[p_idx].disabled;
 	}
 
 	_FORCE_INLINE_ void set_shape_as_one_way_collision(int p_idx, bool p_one_way_collision, real_t p_margin, const Vector2 &p_direction) {
-		CRASH_BAD_INDEX(p_idx, shapes.size());
+		CRASH_BAD_INDEX(p_idx, (int)shapes.size());
 		++collision_geometry_version;
-		shapes.write[p_idx].one_way_collision = p_one_way_collision;
-		shapes.write[p_idx].one_way_collision_margin = p_margin;
-		shapes.write[p_idx].one_way_collision_direction = p_direction;
+		shapes[p_idx].one_way_collision = p_one_way_collision;
+		shapes[p_idx].one_way_collision_margin = p_margin;
+		shapes[p_idx].one_way_collision_direction = p_direction;
 	}
 	_FORCE_INLINE_ bool is_shape_set_as_one_way_collision(int p_idx) const {
-		CRASH_BAD_INDEX(p_idx, shapes.size());
+		CRASH_BAD_INDEX(p_idx, (int)shapes.size());
 		return shapes[p_idx].one_way_collision;
 	}
 
 	_FORCE_INLINE_ real_t get_shape_one_way_collision_margin(int p_idx) const {
-		CRASH_BAD_INDEX(p_idx, shapes.size());
+		CRASH_BAD_INDEX(p_idx, (int)shapes.size());
 		return shapes[p_idx].one_way_collision_margin;
 	}
 
 	Vector2 get_shape_one_way_collision_direction(int p_idx) const {
-		CRASH_BAD_INDEX(p_idx, shapes.size());
+		CRASH_BAD_INDEX(p_idx, (int)shapes.size());
 		return shapes[p_idx].one_way_collision_direction;
 	}
 
