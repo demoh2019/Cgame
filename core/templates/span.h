@@ -282,7 +282,7 @@ constexpr int64_t Span<T>::rfind(const T &p_val, uint64_t p_from) const {
 			uint64_t remaining = p_from + 1;
 			while (remaining >= sizeof(uint64_t)) {
 				remaining -= sizeof(uint64_t);
-				uint64_t block;
+				uint64_t block = 0;
 				std::memcpy(&block, ptr() + remaining, sizeof(block));
 				const uint64_t diff = block ^ repeated_value;
 				if (((diff - ONE_PER_BYTE) & ~diff & HIGH_BIT_PER_BYTE) != 0) {
@@ -342,14 +342,14 @@ constexpr int64_t Span<T>::rfind_sequence(const Span<T1> &p_span, uint64_t p_fro
 				uint64_t remaining = p_from + 1;
 				while (remaining >= sizeof(uint64_t)) {
 					remaining -= sizeof(uint64_t);
-					uint64_t first_word;
+					uint64_t first_word = 0;
 					std::memcpy(&first_word, haystack + remaining, sizeof(first_word));
 					const uint64_t first_diff = first_word ^ first_pattern;
 					const uint64_t first_candidates = (first_diff - ONE_PER_BYTE) & ~first_diff & HIGH_BIT_PER_BYTE;
 					if (first_candidates == 0) {
 						continue;
 					}
-					uint64_t last_word;
+					uint64_t last_word = 0;
 					std::memcpy(&last_word, haystack + remaining + needle_size - 1, sizeof(last_word));
 					const uint64_t last_diff = last_word ^ last_pattern;
 					const uint64_t last_candidates = (last_diff - ONE_PER_BYTE) & ~last_diff & HIGH_BIT_PER_BYTE;
@@ -413,7 +413,7 @@ constexpr uint64_t Span<T>::count(const T &p_val) const {
 			uint64_t amount = 0;
 			uint64_t i = 0;
 			for (; i < block_end; i += sizeof(uint64_t)) {
-				uint64_t word;
+				uint64_t word = 0;
 				std::memcpy(&word, ptr() + i, sizeof(word));
 				const uint64_t diff = word ^ repeated;
 				const uint64_t matches = ~(((diff & LOW_BITS) + LOW_BITS) | diff | LOW_BITS) & HIGH_BITS;
