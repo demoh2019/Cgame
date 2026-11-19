@@ -400,6 +400,41 @@ TEST_CASE("[Vector] To byte array") {
 	CHECK(byte_array[15] == 59);
 }
 
+TEST_CASE("[Vector] No-op operations do not detach shared COW storage") {
+	// An empty vector can still own a large reserved allocation.
+	Vector<int> empty;
+	REQUIRE(empty.reserve_exact(8192) == OK);
+	Vector<int> other_empty = empty;
+	const int *empty_storage = empty.ptr();
+	REQUIRE(empty_storage != nullptr);
+	other_empty.fill(42);
+	other_empty.reverse();
+	other_empty.sort();
+	CHECK(other_empty.ptr() == empty_storage);
+	CHECK(empty.ptr() == empty_storage);
+	CHECK(other_empty.capacity() == empty.capacity());
+	CHECK(other_empty.is_empty());
+
+	// Sorting and reversing a singleton cannot change its contents.
+	// These operations must not fork the large reserved backing storage.
+	Vector<String> singleton;
+	singleton.push_back("kept");
+	REQUIRE(singleton.reserve_exact(4096) == OK);
+	Vector<String> shared = singleton;
+	const String *original_ptr = singleton.ptr();
+	shared.sort();
+	shared.reverse();
+	CHECK(shared.ptr() == original_ptr);
+	CHECK(singleton.ptr() == original_ptr);
+	CHECK(shared[0] == "kept");
+
+	// An actual write must still detach and preserve independent values.
+	shared.write[0] = "changed";
+	CHECK(shared.ptr() != singleton.ptr());
+	CHECK(singleton[0] == "kept");
+	CHECK(shared[0] == "changed");
+}
+
 TEST_CASE("[Vector] Slice") {
 	Vector<int> vector;
 	vector.push_back(0);
