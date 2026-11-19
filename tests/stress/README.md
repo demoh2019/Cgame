@@ -162,6 +162,52 @@ time; use the same machine/configuration with an older commit to quantify
 the effects. These source-contract checks are not a compilation test,
 and runtime stress tests must still be executed on a built engine.
 
+## Iterative spinning and rolling contact friction (3D)
+
+GodotPhysics3D already supported configurable gyroscopic precession and
+Bullet-inspired **spinning** (around the contact normal) and **rolling**
+(around tangent axes) friction. The previous angular-friction correction
+ran in `pre_solve()` using only the previous frame's warm-started normal
+impulse, so a newly touching body with zero cached load received no
+resistance until a later step.
+
+The rotational friction rows now run inside the iterative velocity solver
+**after** the current normal impulse is computed. A manifold-level contact
+mask and representative normal/radius are computed once per step, without
+allocations or relying on cached normal load. Each solver iteration uses
+the sum of the CURRENT normal impulses and accumulated angular impulses
+clamped to the Coulomb spinning interval / rolling disk. This keeps the
+torque budget independent of iteration count, responds to contact load on
+the first frame, and projects existing impulses back toward zero if the
+normal load disappears. The existing zero-coefficient defaults preserve
+the legacy behavior and avoid extra work for projects that disable this
+feature. No changes are made to ordinary tangential Coulomb friction.
+
+The per-space settings are read at space creation:
+
+```ini
+[physics]
+3d/solver/spinning_friction=0.5
+3d/solver/rolling_friction=0.25
+```
+
+To compare live engine behavior with and without contact angular friction:
+
+```bash
+python3 -m unittest discover -s tests/stress -p 'test_physics_contact_angular_friction.py' -v
+python3 tests/stress/run.py --godot ./bin/godot.macos.editor.arm64 \
+  --case physics_contact_angular_friction_3d --scale 4 --repeats 5 \
+  --frames 90 --rss-limit-mib 6144 \
+  --output out/physics-contact-angular-friction.json
+```
+
+The runtime scenario compares free-flight spinning (which should not
+experience contact angular friction), newly loaded spheres on a floor,
+enabled/disabled coefficients, and the first few frames of velocity loss.
+It uses zero material sliding friction to isolate the angular contact
+rows. Real validation requires a compiled Cgame engine, and comparative
+CPU/RAM measurements should use matching build and hardware settings.
+
 ## Batched BVH filter updates for compound bodies
 
 GodotPhysics2D and GodotPhysics3D now aggregate full broadphase rechecks
