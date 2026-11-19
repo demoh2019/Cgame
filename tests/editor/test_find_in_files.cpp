@@ -76,7 +76,20 @@ TEST_CASE("[Editor][FindInFiles] Search panel synchronizes extension filters") {
 	panel->set_finder(finder, false);
 	CHECK(finder->get_filter()->is_empty());
 
+	// Switching between search tabs must retain each tab's independent filter.
+	FindInFilesSearch *other_finder = memnew(FindInFilesSearch);
+	other_finder->set_filter(only_gd);
+	panel->set_finder(other_finder, false);
+	CHECK(other_finder->get_filter()->has("gd"));
+	CHECK_FALSE(other_finder->get_filter()->has("tscn"));
+	panel->set_finder(finder, false);
+	CHECK(finder->get_filter()->is_empty());
+	panel->set_finder(other_finder, false);
+	CHECK_EQ(other_finder->get_filter()->size(), 1);
+	CHECK(other_finder->get_filter()->has("gd"));
+
 	memdelete(panel);
+	memdelete(other_finder);
 	memdelete(finder);
 	settings->set_setting(setting, previous_extensions);
 }
