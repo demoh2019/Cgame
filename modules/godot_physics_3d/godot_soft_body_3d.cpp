@@ -49,6 +49,7 @@
 #include "servers/physics_fem_tetra_damage.h"
 #include "servers/physics_softbody_shape_clusters.h"
 #include "servers/physics_softbody_aerodynamic_drag.h"
+#include "servers/physics_softbody_hydrostatic.h"
 #include "servers/physics_softbody_plasticity.h"
 #include "servers/physics_softbody_volume_plasticity.h"
 #include "servers/physics_softbody_volume_safe.h"
@@ -661,7 +662,9 @@ void GodotSoftBody3D::initialize_volume_constraint() {
 					get_space()->get_soft_body_tetra_fem_compliance() <= 0.0 &&
 					get_space()->get_soft_body_tetra_fem_viscosity() <= 0.0 &&
 					get_space()->get_soft_body_tetra_fiber_compliance() <= 0.0 &&
-					get_space()->get_soft_body_volume_damping_rate() <= 0.0) ||
+					get_space()->get_soft_body_volume_damping_rate() <= 0.0 &&
+					!(get_space()->is_soft_body_hydrostatic_pressure_enabled() &&
+							get_space()->is_fluid_plane_enabled())) ||
 			nodes.size() < 4 || faces.size() < 4) {
 		// Neither XPBD nor gas mode needs the volume for ordinary cloth.
 		if (!xpbd_volume_gradients.is_empty()) {
@@ -2664,6 +2667,66 @@ void GodotSoftBody3D::apply_forces(const LocalVector<GodotArea3D *> &p_wind_area
 	}
 }
 
+// Apply physically integrated hydrostatic pressure on the submerged surface
+// of CLOSED, consistently wound SoftBody3D meshes. Ordinary open cloth must
+// not be inflated by an arbitrary one-sided water pressure. The existing
+// closed-volume validator already verifies opposite oriented shared edges;
+// its signed rest volume also supplies the outward winding direction.
+void GodotSoftBody3D::apply_hydrostatic_forces(const Vector3 &p_gravity) {
+	const GodotSpace3D *space = get_space();
+	if (!space || !space->is_soft_body_hydrostatic_pressure_enabled() ||
+			!space->is_fluid_plane_enabled() || !xpbd_volume_closed ||
+			faces.is_empty() || !p_gravity.is_finite()) {
+		return;
+	}
+	// Horizontal plane y=surface requires gravity toward world -Y. Skip
+	// oblique/rotated gravity rather than claiming hydrostatic consistency.
+	const double down = -double(p_gravity.y);
+	if (!(down > 0.0) || !Math::is_finite(down) ||
+			Math::abs(double(p_gravity.x)) > down * 0.01 ||
+			Math::abs(double(p_gravity.z)) > down * 0.01) {
+		return;
+	}
+	const double surface_y = double(space->get_fluid_plane_surface_height());
+	const double density = double(space->get_fluid_plane_density());
+	const double pressure_gradient = density * down;
+	if (!Math::is_finite(surface_y) || !Math::is_finite(pressure_gradient) ||
+			!(pressure_gradient > 0.0)) {
+		return;
+	}
+
+	const int orientation = xpbd_volume_original_rest >= 0.0 ? 1 : -1;
+	for (const Face &face : faces) {
+		Vector3 nodal_force[3];
+		if (!physics_softbody_hydrostatic_face_forces(
+					face.n[0]->x, face.n[1]->x, face.n[2]->x,
+					surface_y, pressure_gradient, orientation, nodal_force)) {
+			continue;
+		}
+		// Check all three candidate force sums before updating any node,
+		// including coincident seam vertices, to avoid partial corruption.
+		Vector3 updated[3];
+		bool valid = true;
+		for (int j = 0; j < 3; ++j) {
+			updated[j] = face.n[j]->f;
+			if (face.n[j]->im > 0.0) {
+				updated[j] += nodal_force[j];
+			}
+			if (!updated[j].is_finite()) {
+				valid = false;
+				break;
+			}
+		}
+		if (valid) {
+			for (int j = 0; j < 3; ++j) {
+				if (face.n[j]->im > 0.0) {
+					face.n[j]->f = updated[j];
+				}
+			}
+		}
+	}
+}
+
 Vector3 GodotSoftBody3D::_compute_area_windforce(const GodotArea3D *p_area, const Face *p_face) {
 	const real_t magnitude = p_area->get_wind_force_magnitude();
 	const Vector3 &wind_direction = p_area->get_wind_direction();
@@ -2746,6 +2809,7 @@ void GodotSoftBody3D::predict_motion(real_t p_delta) {
 	if ((pressure_coefficient > CMP_EPSILON && Math::is_finite(pressure_coefficient)) || !wind_areas.is_empty() || drag_coefficient > 0.0 || get_space()->get_soft_body_lift_coefficient() > 0.0) {
 		apply_forces(wind_areas, p_delta);
 	}
+	apply_hydrostatic_forces(gravity);
 
 	// An objective surface dashpot damps deformation rates rather than
 	// world-space translation or rotation. Reuse the cached membrane rest
