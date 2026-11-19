@@ -579,35 +579,40 @@ GodotPhysicsDirectSpaceState3D::GodotPhysicsDirectSpaceState3D() {
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////
 
 int GodotSpace3D::_cull_aabb_for_body(GodotBody3D *p_body, const AABB &p_aabb) {
-	int amount = broadphase->cull_aabb(p_aabb, intersection_query_results, INTERSECTION_QUERY_MAX, intersection_query_subindex_results);
+	// Jolt-style early filtering: unrelated areas, soft bodies and collision
+	// exceptions must not consume the fixed-size motion candidate buffer.
+	// In dense worlds, filtering only AFTER cull_aabb() could discard the
+	// first 2048 results and miss a valid obstacle later in the BVH.
+	struct MotionCullData {
+		GodotBody3D *body;
+		GodotCollisionObject3D **results;
+		int *subindices;
+		int capacity;
+		int count = 0;
+	};
+	MotionCullData data = { p_body, intersection_query_results, intersection_query_subindex_results, INTERSECTION_QUERY_MAX };
 
-	for (int i = 0; i < amount; i++) {
-		bool keep = true;
-
-		if (intersection_query_results[i] == p_body) {
-			keep = false;
-		} else if (intersection_query_results[i]->get_type() == GodotCollisionObject3D::TYPE_AREA) {
-			keep = false;
-		} else if (intersection_query_results[i]->get_type() == GodotCollisionObject3D::TYPE_SOFT_BODY) {
-			keep = false;
-		} else if (!p_body->collides_with(static_cast<GodotBody3D *>(intersection_query_results[i]))) {
-			keep = false;
-		} else if (static_cast<GodotBody3D *>(intersection_query_results[i])->has_exception(p_body->get_self()) || p_body->has_exception(intersection_query_results[i]->get_self())) {
-			keep = false;
+	auto visitor = [](GodotCollisionObject3D *p_object, int p_subindex, void *p_userdata) -> bool {
+		MotionCullData &query = *static_cast<MotionCullData *>(p_userdata);
+		if (p_object == query.body || p_object->get_type() != GodotCollisionObject3D::TYPE_BODY) {
+			return true;
 		}
 
-		if (!keep) {
-			if (i < amount - 1) {
-				SWAP(intersection_query_results[i], intersection_query_results[amount - 1]);
-				SWAP(intersection_query_subindex_results[i], intersection_query_subindex_results[amount - 1]);
-			}
-
-			amount--;
-			i--;
+		GodotBody3D *other = static_cast<GodotBody3D *>(p_object);
+		if (!query.body->collides_with(other) ||
+				other->has_exception(query.body->get_self()) ||
+				query.body->has_exception(other->get_self())) {
+			return true;
 		}
-	}
 
-	return amount;
+		query.results[query.count] = p_object;
+		query.subindices[query.count] = p_subindex;
+		++query.count;
+		return query.count < query.capacity;
+	};
+
+	broadphase->visit_aabb(p_aabb, visitor, &data);
+	return data.count;
 }
 
 bool GodotSpace3D::test_body_motion(GodotBody3D *p_body, const PS3DT::MotionParameters &p_parameters, PS3DT::MotionResult *r_result) {
