@@ -1,0 +1,107 @@
+name: Upstream performance backport guards
+
+on:
+  push:
+    branches: [develop]
+    paths:
+      - 'servers/rendering/renderer_scene_cull.cpp'
+      - 'editor/docks/filesystem_dock.cpp'
+      - 'editor/docks/filesystem_dock.h'
+      - 'drivers/unix/dir_access_unix.cpp'
+      - 'core/object/object.h'
+      - 'core/typedefs.h'
+      - 'main/main.h'
+      - 'misc/scripts/tests/test_upstream_cold_class_init.py'
+      - 'misc/scripts/tests/bench_class_cold_init.cpp'
+      - 'misc/scripts/tests/test_upstream_hotpath_perf.py'
+      - 'misc/scripts/tests/bench_directional_shadow_cull.cpp'
+      - '.github/workflows/upstream-hotpath-perf.yml'
+  pull_request:
+    paths:
+      - 'servers/rendering/renderer_scene_cull.cpp'
+      - 'editor/docks/filesystem_dock.cpp'
+      - 'editor/docks/filesystem_dock.h'
+      - 'drivers/unix/dir_access_unix.cpp'
+      - 'core/object/object.h'
+      - 'core/typedefs.h'
+      - 'main/main.h'
+      - 'misc/scripts/tests/test_upstream_cold_class_init.py'
+      - 'misc/scripts/tests/bench_class_cold_init.cpp'
+      - 'misc/scripts/tests/test_upstream_hotpath_perf.py'
+      - 'misc/scripts/tests/bench_directional_shadow_cull.cpp'
+      - '.github/workflows/upstream-hotpath-perf.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  source-contracts:
+    runs-on: ubuntu-24.04
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ['3.10', '3.13']
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+      - name: Syntax check
+        run: python -m py_compile misc/scripts/tests/test_upstream_hotpath_perf.py misc/scripts/tests/test_upstream_cold_class_init.py
+      - name: Verify shadow and filesystem performance invariants
+        run: |
+          python -m unittest discover -s misc/scripts/tests -p test_upstream_hotpath_perf.py -v
+          python -m unittest discover -s misc/scripts/tests -p test_upstream_cold_class_init.py -v
+
+  culling-equivalence-and-synthetic-benchmark:
+    runs-on: ubuntu-24.04
+    strategy:
+      fail-fast: false
+      matrix:
+        compiler: ['g++', 'clang++']
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build C++ predicate-equivalence harness
+        run: >-
+          ${{ matrix.compiler }} -O3 -std=c++17 -Wall -Wextra -Werror -pedantic
+          misc/scripts/tests/bench_directional_shadow_cull.cpp -o /tmp/bench_directional_shadow_cull
+      - name: Check exhaustive equivalence and report synthetic call counts
+        run: /tmp/bench_directional_shadow_cull
+      - name: Compile concurrent cold class initialization harness
+        run: >-
+          ${{ matrix.compiler }} -O2 -std=c++17 -pthread -Wall -Wextra -Werror -pedantic
+          misc/scripts/tests/bench_class_cold_init.cpp -o /tmp/bench_class_cold_init
+      - name: Check once-only class initialization under contention
+        run: /tmp/bench_class_cold_init
+
+  native-cgame-editor-smoke:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install Linux build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libwayland-bin
+      - uses: ./.github/actions/godot-deps
+      - name: Compile Cgame editor from source
+        uses: ./.github/actions/godot-build
+        with:
+          platform: linuxbsd
+          target: editor
+          scons-flags: dev_build=yes debug_symbols=no tests=yes module_text_server_fb_enabled=yes -j2
+      - name: Headless editor project import smoke test
+        shell: bash
+        run: |
+          set -euo pipefail
+          PROJECT_DIR="$(mktemp -d)"
+          trap 'rm -rf "$PROJECT_DIR"' EXIT
+          printf 'config_version=5\n[application]\nconfig/name="Hotpath Performance Smoke"\n' > "$PROJECT_DIR/project.godot"
+          BIN=./bin/godot.linuxbsd.editor.dev.x86_64
+          "$BIN" --version
+          stat -c "Cgame editor binary size: %s bytes" "$BIN"
+          timeout 50s "$BIN" --headless --editor --path "$PROJECT_DIR" --import --quit 2>&1 | tee perf_editor_smoke.log
+          if grep -Ei 'SCRIPT ERROR:|Parse Error:|Failed to load script' perf_editor_smoke.log; then
+            exit 1
+          fi

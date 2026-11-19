@@ -292,7 +292,11 @@ public: \
 		if (likely(initialized.is_set())) { \
 			return; \
 		} \
+		_initialize_class_cold(initialized); \
+	} \
 \
+private: \
+	_NO_INLINE_ _COLD_ static void _initialize_class_cold(SafeFlag &initialized) { \
 		static BinaryMutex __init_mutex; \
 		MutexLock lock(__init_mutex); \
 		if (initialized.is_set()) { \
