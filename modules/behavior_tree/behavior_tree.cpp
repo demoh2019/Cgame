@@ -257,8 +257,7 @@ BehaviorTreeTask::Status BehaviorTreeBlackboardSet::execute(const Dictionary &p_
 	// Dictionary is reference counted, so this updates the runner's blackboard
 	// without allowing the task to replace the blackboard instance.
 	Dictionary writable_blackboard = p_blackboard;
-	writable_blackboard[key] = value;
-	return SUCCESS;
+	return writable_blackboard.set(key, value) ? SUCCESS : FAILURE;
 }
 
 void BehaviorTreeWait::_bind_methods() {
