@@ -12,6 +12,7 @@ on:
       - "servers/physics_xpbd_area.h"
       - "servers/physics_xpbd_dihedral.h"
       - "servers/physics_xpbd_self_collision.h"
+      - "servers/physics_xpbd_edge_collision.h"
       - "servers/physics_3d/physics_server_3d.cpp"
       - "tests/stress/physics_exception_pairs_*.gd"
       - "tests/stress/physics_bvh_streaming_*.gd"
@@ -20,6 +21,7 @@ on:
       - "tests/stress/physics_soft_body_xpbd_volume_3d.gd"
       - "tests/stress/physics_soft_body_xpbd_dihedral_3d.gd"
       - "tests/stress/physics_soft_body_self_collision_3d.gd"
+      - "tests/stress/physics_soft_body_edge_collision_3d.gd"
       - "tests/stress/physics_contact_angular_friction_3d.gd"
       - "tests/stress/physics_motion_exclusions_*.gd"
       - "tests/stress/stress.gd"
@@ -31,6 +33,7 @@ on:
       - "tests/stress/test_physics_xpbd_volume.py"
       - "tests/stress/test_physics_xpbd_dihedral.py"
       - "tests/stress/test_physics_xpbd_self_collision.py"
+      - "tests/stress/test_physics_xpbd_edge_collision.py"
       - "tests/stress/test_physics_contact_angular_friction.py"
       - "tests/stress/test_physics_early_pair_filter.py"
       - "tests/stress/test_physics_motion_shape_pruning.py"
@@ -44,6 +47,7 @@ on:
       - "servers/physics_xpbd_area.h"
       - "servers/physics_xpbd_dihedral.h"
       - "servers/physics_xpbd_self_collision.h"
+      - "servers/physics_xpbd_edge_collision.h"
       - "servers/physics_3d/physics_server_3d.cpp"
       - "tests/stress/**"
       - ".github/workflows/physics-exception-contracts.yml"
@@ -66,4 +70,5 @@ jobs:
           python3 -m unittest discover -s tests/stress -p 'test_physics_xpbd_volume.py' -v
           python3 -m unittest discover -s tests/stress -p 'test_physics_xpbd_dihedral.py' -v
           python3 -m unittest discover -s tests/stress -p 'test_physics_xpbd_self_collision.py' -v
+          python3 -m unittest discover -s tests/stress -p 'test_physics_xpbd_edge_collision.py' -v
           python3 -m unittest discover -s tests/stress -p 'test_physics_contact_angular_friction.py' -v
