@@ -59,6 +59,26 @@ def analytic(half_length, ay, level):
         return (2*half_length*disk_area(t),
                 -(ay/beta)*(4/3)*half_length**3*math.sqrt(1-t*t),
                 2*half_length*disk_moment(t))
+    if abs(ay)*half_length <= .1*beta and abs(level/beta) <= .85:
+        nodes = (.09501250983763744, .2816035507792589,
+                 .45801677765722737, .6178762444026438,
+                 .755404408355003, .8656312023878318,
+                 .9445750230732326, .9894009349916499)
+        weights = (.18945061045506864, .18260341504492364,
+                   .16915651939500265, .1495959888165767,
+                   .12462897125553407, .0951585116824926,
+                   .062253523938647456, .027152459411754176)
+        v, axial, trans = 0., 0., 0.
+        for node, weight in zip(nodes, weights):
+            t = half_length*node
+            one = (level-ay*t)/beta
+            two = (level+ay*t)/beta
+            a = disk_area(one)
+            b = disk_area(two)
+            v += half_length*weight*(a+b)
+            axial += half_length*weight*t*(a-b)
+            trans += half_length*weight*(disk_moment(one)+disk_moment(two))
+        return v, axial, trans
     cuts = [-half_length, half_length]
     for t in (-1., 1.):
         axial = (level-beta*t)/ay
@@ -172,6 +192,16 @@ class CylinderFluidHydrostatics(unittest.TestCase):
                                reference_values[1]/reference_values[0],
                                delta=2e-4)
 
+    def test_shallow_slope_requires_stable_axial_moment(self):
+        # For a long rod the analytic antiderivative subtraction can
+        # cancel, even when the geometric inclination is clearly nonzero.
+        for L, ay in ((1000., 1e-8), (10000., 1e-7), (1e6, 1e-12)):
+            exact = analytic(L, ay, .1)
+            independent = reference(L, ay, .1, intervals=512)
+            self.assertLess(exact[1], -.001)
+            for a, b in zip(exact, independent):
+                self.assertAlmostEqual(a, b, delta=1e-5*(1+abs(b)))
+
     def test_symmetry_axis_reversal_and_monotonic_volume(self):
         rng = random.Random(9182)
         for _ in range(800):
@@ -197,6 +227,8 @@ class CylinderFluidHydrostatics(unittest.TestCase):
         self.assertIn("last.axial_area - first.axial_area",header)
         self.assertIn("last.transverse_moment - first.transverse_moment",header)
         self.assertIn("double cuts[4]",header)
+        self.assertIn("static constexpr double nodes[8]",header)
+        self.assertIn("Math::abs(ay) * half_length <= 0.1 * beta",header)
         self.assertIn("const double max_wet = Math::PI * 2.0 * half_length;",header)
         self.assertIn("const Vector3 center(",header)
         self.assertIn("r_sample.center_of_buoyancy = center;",header)
