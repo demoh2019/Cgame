@@ -1499,6 +1499,8 @@ GodotSpace3D::GodotSpace3D() {
 	soft_body_shape_matching_cluster_size = configured_shape_cluster_size > 0 ? CLAMP(configured_shape_cluster_size, 3, 64) : 0;
 	const real_t configured_dihedral_damping = GLOBAL_GET("physics/3d/solver/soft_body_dihedral_damping");
 	soft_body_dihedral_damping = Math::is_finite(configured_dihedral_damping) ? MAX(real_t(0.0), configured_dihedral_damping) : real_t(0.0);
+	const real_t configured_area_damping = GLOBAL_GET("physics/3d/solver/soft_body_area_rate_damping");
+	soft_body_area_rate_damping = Math::is_finite(configured_area_damping) ? MAX(real_t(0.0), configured_area_damping) : real_t(0.0);
 	const real_t configured_bending_yield = GLOBAL_GET("physics/3d/solver/soft_body_bending_plastic_yield_angle");
 	soft_body_bending_plastic_yield_angle = Math::is_finite(configured_bending_yield) ? CLAMP(configured_bending_yield, real_t(0.0), real_t(Math::PI)) : real_t(0.2);
 	const real_t configured_bending_creep = GLOBAL_GET("physics/3d/solver/soft_body_bending_plastic_creep_rate");

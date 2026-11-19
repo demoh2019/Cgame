@@ -223,6 +223,7 @@ private:
 	real_t soft_body_shape_matching_stiffness = 0.0; // Optional global shape recovery.
 	int soft_body_shape_matching_cluster_size = 0; // 0 global; 3..64 local BFS cores.
 	real_t soft_body_dihedral_damping = 0.0; // Opt-in angular dashpot rate, 1/s.
+	real_t soft_body_area_rate_damping = 0.0; // Opt-in in-plane area strain-rate dissipation, 1/s.
 	real_t soft_body_bending_plastic_yield_angle = 0.2; // Elastic angular tolerance, radians.
 	real_t soft_body_bending_plastic_creep_rate = 0.0; // 1/s; no plastic folds by default.
 	real_t soft_body_self_collision_thickness = 0.0; // 0: no self-contact work or buffers.
@@ -460,6 +461,7 @@ public:
 	_FORCE_INLINE_ real_t get_soft_body_shape_matching_stiffness() const { return soft_body_shape_matching_stiffness; }
 	_FORCE_INLINE_ int get_soft_body_shape_matching_cluster_size() const { return soft_body_shape_matching_cluster_size; }
 	_FORCE_INLINE_ real_t get_soft_body_dihedral_damping() const { return soft_body_dihedral_damping; }
+	_FORCE_INLINE_ real_t get_soft_body_area_rate_damping() const { return soft_body_area_rate_damping; }
 	_FORCE_INLINE_ real_t get_soft_body_bending_plastic_yield_angle() const { return soft_body_bending_plastic_yield_angle; }
 	_FORCE_INLINE_ real_t get_soft_body_bending_plastic_creep_rate() const { return soft_body_bending_plastic_creep_rate; }
 	_FORCE_INLINE_ real_t get_soft_body_self_collision_thickness() const { return soft_body_self_collision_thickness; }
