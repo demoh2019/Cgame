@@ -43,6 +43,8 @@ public:
 	inline static int simulation_position_steps;
 	inline static int simulation_collision_steps;
 	inline static float simulation_max_collision_step_seconds;
+	inline static bool simulation_use_large_island_splitter;
+	inline static bool simulation_use_manifold_reduction;
 	inline static bool use_enhanced_internal_edge_removal_for_bodies;
 	inline static bool generate_all_kinematic_contacts;
 	inline static float penetration_slop;
@@ -73,6 +75,7 @@ public:
 
 	inline static int temp_memory_mib;
 	inline static int64_t temp_memory_b;
+	inline static int max_in_flight_body_pairs;
 	inline static float world_boundary_shape_size;
 	inline static float max_linear_velocity;
 	inline static float max_angular_velocity;
