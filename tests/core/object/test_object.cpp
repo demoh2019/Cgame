@@ -691,4 +691,80 @@ TEST_CASE("[Object] RequiredResult") {
 	CHECK_EQ(ref, var);
 }
 
+
+TEST_CASE("[Object] ValuePtr keeps rare metadata pointer-sized") {
+	static_assert(sizeof(ValuePtr<MethodInfo>) == sizeof(void *));
+
+	ValuePtr<MethodInfo> empty;
+	CHECK_FALSE(empty);
+	CHECK(empty == nullptr);
+	CHECK(nullptr == empty);
+
+	ValuePtr<MethodInfo> p = ValuePtr<MethodInfo>::make(MethodInfo("custom_signal"));
+	REQUIRE(p);
+	CHECK(p != nullptr);
+	CHECK_EQ(p->name, StringName("custom_signal"));
+
+	ValuePtr<MethodInfo> copy = p;
+	REQUIRE(copy);
+	CHECK(copy.ptr() != p.ptr());
+	CHECK_EQ(copy->name, p->name);
+	copy->name = "renamed_signal";
+	CHECK_EQ(p->name, StringName("custom_signal"));
+	CHECK_EQ(copy->name, StringName("renamed_signal"));
+}
+
+TEST_CASE("[Object] ValuePtr deep copy, self assignment and move") {
+	struct Tracked {
+		int *live = nullptr;
+		int value = 0;
+		Tracked(int *p_live, int p_value) : live(p_live), value(p_value) { ++*live; }
+		Tracked(const Tracked &p) : live(p.live), value(p.value) { ++*live; }
+		~Tracked() { --*live; }
+	};
+	int live = 0;
+	{
+		ValuePtr<Tracked> value = ValuePtr<Tracked>::make(&live, 7);
+		CHECK_EQ(live, 1);
+		ValuePtr<Tracked> copy = value;
+		CHECK_EQ(live, 2);
+		CHECK(copy.ptr() != value.ptr());
+		CHECK_EQ(copy->value, 7);
+		copy->value = 12;
+		CHECK_EQ(value->value, 7);
+		copy = copy;
+		CHECK_EQ(live, 2);
+		CHECK_EQ(copy->value, 12);
+
+		ValuePtr<Tracked> assigned;
+		assigned = value;
+		CHECK_EQ(live, 3);
+		CHECK_EQ(assigned->value, 7);
+		assigned = std::move(copy);
+		CHECK_EQ(live, 2);
+		CHECK_FALSE(copy);
+		CHECK_EQ(assigned->value, 12);
+		assigned = std::move(assigned);
+		CHECK_EQ(live, 2);
+		CHECK_EQ(assigned->value, 12);
+		assigned.reset();
+		CHECK_EQ(live, 1);
+		CHECK_FALSE(assigned);
+	}
+	CHECK_EQ(live, 0);
+}
+
+TEST_CASE("[Object] Rare user signal metadata survives many registrations") {
+	Object object;
+	List<MethodInfo> before;
+	object.get_signal_list(&before);
+	for (int i = 0; i < 128; i++) {
+		StringName signal_name("dynamic_signal_" + itos(i));
+		object.add_user_signal(MethodInfo(signal_name));
+		CHECK(object.has_signal(signal_name));
+	}
+	List<MethodInfo> after;
+	object.get_signal_list(&after);
+	CHECK_EQ(after.size(), before.size() + 128);
+}
 } // namespace TestObject
