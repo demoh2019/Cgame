@@ -325,6 +325,10 @@ func _update_status() -> void:
         "ON" if _magnet_on else "OFF", "отталкивание" if _magnet_repels else "притяжение",
         _gravity_scale, "ON" if _waves else "OFF"
     ]
+    if is_instance_valid(_held):
+        _status.text += "\\nВыбрано: %s | масса %.1f кг | %s" % [
+            _held.name, _held.mass, "заморожено" if _held.freeze else "активно"
+        ]
     if _wind_label != null:
         _wind_label.text = "WIND %.0f | %s" % [_wind_strength, "ON" if _wind_on else "OFF"]
 
@@ -336,7 +340,6 @@ func _unhandled_input(event: InputEvent) -> void:
             _dragging = true
         else:
             _dragging = false
-            _held = null
             _request_pick = false
     if event is InputEventKey and event.pressed and not event.echo:
         match event.keycode:
@@ -392,6 +395,7 @@ func _pick() -> void:
     _held = candidate
     _held_distance = clampf(_camera.global_position.distance_to(hit["position"]), 2.0, 40.0)
     _held.sleeping = false
+    _update_status()
 
 
 func _push_target() -> void:
