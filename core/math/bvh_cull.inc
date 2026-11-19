@@ -580,6 +580,11 @@ void _cast_segment_iterative(uint32_t p_node_id, real_t p_root_entry, const POIN
 }
 
 bool _cull_segment_iterative(uint32_t p_node_id, CullParams &r_params) {
+	// A query completely outside this tree must not allocate a traversal
+	// stack or inspect its children. The root has no parent to reject it.
+	if (!_nodes[p_node_id].aabb.intersects_segment(r_params.segment)) {
+		return true;
+	}
 	// our function parameters to keep on a stack
 	struct CullSegParams {
 		uint32_t node_id;
@@ -644,6 +649,11 @@ bool _cull_segment_iterative(uint32_t p_node_id, CullParams &r_params) {
 }
 
 bool _cull_point_iterative(uint32_t p_node_id, CullParams &r_params) {
+	// Reject a miss before allocating the traversal stack; descendants
+	// cannot contain the point if the root bounds do not contain it.
+	if (!_nodes[p_node_id].aabb.intersects_point(r_params.point)) {
+		return true;
+	}
 	// our function parameters to keep on a stack
 	struct CullPointParams {
 		uint32_t node_id;
@@ -663,11 +673,9 @@ bool _cull_point_iterative(uint32_t p_node_id, CullParams &r_params) {
 
 	// while there are still more nodes on the stack
 	while (ii.pop(cpp)) {
+		// Every enqueued node is already known to contain the point;
+		// testing children before pushing avoids needless stack work.
 		TNode &tnode = _nodes[cpp.node_id];
-		// no hit with this node?
-		if (!tnode.aabb.intersects_point(r_params.point)) {
-			continue;
-		}
 
 		if (tnode.is_leaf()) {
 			// lazy check for hits full up condition
@@ -690,13 +698,12 @@ bool _cull_point_iterative(uint32_t p_node_id, CullParams &r_params) {
 				}
 			}
 		} else {
-			// test children individually
+			// Pretest children: stack entries only contain matching subtrees.
 			for (int n = 0; n < tnode.num_children; n++) {
-				uint32_t child_id = tnode.children[n];
-
-				// add to the stack
-				CullPointParams *child = ii.request();
-				child->node_id = child_id;
+				const uint32_t child_id = tnode.children[n];
+				if (_nodes[child_id].aabb.intersects_point(r_params.point)) {
+					ii.request()->node_id = child_id;
+				}
 			}
 		}
 
@@ -708,6 +715,16 @@ bool _cull_point_iterative(uint32_t p_node_id, CullParams &r_params) {
 
 // Note: This is a very hot loop profiling wise. Take care when changing this and profile.
 bool _cull_aabb_iterative(uint32_t p_node_id, CullParams &r_params, bool p_fully_within = false) {
+	// The root is the only node whose bounds are not tested by a parent.
+	// Quickly reject outside queries, or mark an entirely covered tree so
+	// neither its branches nor its leaf proxies require overlap tests.
+	if (!p_fully_within) {
+		const BVHABB_CLASS &root_bounds = _nodes[p_node_id].aabb;
+		if (!root_bounds.intersects(r_params.abb)) {
+			return true;
+		}
+		p_fully_within = r_params.abb.is_other_within(root_bounds);
+	}
 	// our function parameters to keep on a stack
 	struct CullAABBParams {
 		uint32_t node_id;
