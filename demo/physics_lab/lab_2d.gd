@@ -5,6 +5,7 @@ extends Node2D
 const LAB_3D := "res://lab_3d.tscn"
 const WALKER = preload("res://walker_2d.gd")
 const INTERACTIVE_ENV_2D = preload("res://environment_2d.gd")
+const ADVANCED_PHYSICS_2D = preload("res://advanced_2d.gd")
 
 var _camera: Camera2D
 var _stats: Label
@@ -12,6 +13,7 @@ var _event_label: Label
 var _timer := 0.0
 var _hits := 0
 var _projectile_count := 0
+var _camera_station := -1
 var _shape_cast: ShapeCast2D
 
 
@@ -29,6 +31,10 @@ func _ready() -> void:
     interactions.name = "Environment2D"
     add_child(interactions)
     interactions.setup()
+    var advanced = ADVANCED_PHYSICS_2D.new()
+    advanced.name = "AdvancedPhysics2D"
+    add_child(advanced)
+    advanced.setup()
 
 
 func _rect_vertices(size: Vector2) -> PackedVector2Array:
@@ -310,6 +316,8 @@ func _input(event: InputEvent) -> void:
             _camera.zoom = (_camera.zoom / 1.12).clamp(Vector2.ONE * 0.3, Vector2.ONE * 2.0)
     if event is InputEventKey and event.pressed and not event.echo:
         match event.keycode:
+            KEY_TAB:
+                _cycle_camera_station()
             KEY_F1:
                 get_tree().change_scene_to_file(LAB_3D)
             KEY_R:
@@ -324,6 +332,14 @@ func _input(event: InputEvent) -> void:
                 for body in get_tree().get_nodes_in_group("demo_dynamic_2d"):
                     if body is RigidBody2D:
                         body.apply_central_impulse(Vector2(0, -body.mass * 280))
+
+
+func _cycle_camera_station() -> void:
+    var centers := [
+        Vector2(-700, 0), Vector2(-200, 0), Vector2(340, 0), Vector2(950, -210)
+    ]
+    _camera_station = (_camera_station + 1) % centers.size()
+    _camera.position = centers[_camera_station]
 
 
 func _physics_process(delta: float) -> void:

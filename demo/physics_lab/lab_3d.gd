@@ -4,6 +4,7 @@ extends Node3D
 
 const LAB_2D := "res://lab_2d.tscn"
 const INTERACTIVE_ENV_3D = preload("res://environment_3d.gd")
+const ADVANCED_PHYSICS_3D = preload("res://advanced_3d.gd")
 const ZONES_X := [-28.0, -14.0, 0.0, 14.0, 28.0]
 
 var _camera: Camera3D
@@ -17,6 +18,7 @@ var _pitch := 0.0
 var _stat_timer := 0.0
 var _projectile_index := 0
 var _sensor_hits := 0
+var _camera_station := -1
 
 
 func _ready() -> void:
@@ -36,6 +38,10 @@ func _ready() -> void:
     interactions.name = "Environment3D"
     add_child(interactions)
     interactions.setup(_camera)
+    var advanced = ADVANCED_PHYSICS_3D.new()
+    advanced.name = "AdvancedPhysics3D"
+    add_child(advanced)
+    advanced.setup()
 
 
 func _make_environment() -> void:
@@ -413,6 +419,8 @@ func _input(event: InputEvent) -> void:
         _camera.rotation = Vector3(_pitch, _yaw, 0)
     if event is InputEventKey and event.pressed and not event.echo:
         match event.keycode:
+            KEY_TAB:
+                _cycle_camera_station()
             KEY_ESCAPE:
                 Input.mouse_mode = Input.MOUSE_MODE_VISIBLE
             KEY_F1:
@@ -457,6 +465,22 @@ func _process(delta: float) -> void:
         var count := get_tree().get_nodes_in_group("demo_dynamic").size()
         var hit := str(_ray.get_collider().name) if _ray.is_colliding() else "нет"
         _hud_stats.text = "FPS: %d | Bodies: %d | Ray: %s | ShapeCast: %s" % [Engine.get_frames_per_second(), count, hit, str(_shape_cast.is_colliding())]
+
+
+func _cycle_camera_station() -> void:
+    var targets := [
+        Vector3(0, 2.0, -11.0),
+        Vector3(28, 2.0, -11.0),
+        Vector3(-21, 2.5, 24.0),
+        Vector3(4, 3.0, 24.0),
+        Vector3(28, 2.5, 11.0)
+    ]
+    _camera_station = (_camera_station + 1) % targets.size()
+    var at: Vector3 = targets[_camera_station]
+    _camera.position = at + Vector3(11, 13, 19)
+    _camera.look_at(at, Vector3.UP)
+    _yaw = _camera.rotation.y
+    _pitch = _camera.rotation.x
 
 
 func _physics_process(delta: float) -> void:
