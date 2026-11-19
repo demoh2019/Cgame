@@ -368,6 +368,38 @@ TEST_CASE("[AStarGrid2D] Fixed-capacity neighbors preserve corner policies and p
 	}
 }
 
+TEST_CASE("[AStarGrid2D][Performance] Dense obstacle search never revisits solid neighbors") {
+	AStarGrid2D grid;
+	constexpr int width = 37;
+	constexpr int height = 29;
+	grid.set_region(Rect2i(0, 0, width, height));
+	grid.update();
+
+	// Leave the border traversable so every diagonal mode has a valid path.
+	for (int y = 1; y < height - 1; y++) {
+		for (int x = 1; x < width - 1; x++) {
+			if ((x * 17 + y * 11) % 7 < 2) {
+				grid.set_point_solid(Vector2i(x, y), true);
+			}
+		}
+	}
+
+	const Vector2i start(0, 0);
+	const Vector2i goal(width - 1, height - 1);
+	for (int mode = 0; mode < AStarGrid2D::DIAGONAL_MODE_MAX; mode++) {
+		grid.set_diagonal_mode(static_cast<AStarGrid2D::DiagonalMode>(mode));
+		for (int repeat = 0; repeat < 8; repeat++) {
+			const TypedArray<Vector2i> path = grid.get_id_path(start, goal);
+			REQUIRE(path.size() >= 2);
+			CHECK_EQ(Vector2i(path[0]), start);
+			CHECK_EQ(Vector2i(path[path.size() - 1]), goal);
+			for (int i = 0; i < path.size(); i++) {
+				CHECK_FALSE(grid.is_point_solid(Vector2i(path[i])));
+			}
+		}
+	}
+}
+
 TEST_CASE("[AStarGrid2D] Pre-sized region data respects grid intersections and order") {
 	AStarGrid2D grid;
 	grid.set_region(Rect2i(Vector2i(-12, -8), Vector2i(40, 32)));
