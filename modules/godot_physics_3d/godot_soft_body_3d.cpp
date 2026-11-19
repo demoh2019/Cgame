@@ -3214,10 +3214,14 @@ void GodotSoftBody3D::solve_constraints(real_t p_delta) {
 				value = 0.0;
 			}
 		}
-		const double fraction = 1.0 - Math::exp(-double(deviatoric_plastic_rate) * double(p_delta));
-		if (Math::is_finite(fraction) && fraction > 0.0) {
+		const double hardening = double(get_space()->get_soft_body_tetra_deviatoric_plastic_hardening());
+		// For constant imposed Hencky shear, this rate factor is invariant
+		// to splitting one fixed time interval into smaller physics steps.
+		const double relaxation = (1.0 - Math::exp(
+				-double(deviatoric_plastic_rate) * double(p_delta) * (1.0 + hardening))) /
+				(1.0 + hardening);
+		if (Math::is_finite(relaxation) && relaxation > 0.0) {
 			const double yield_strain = double(get_space()->get_soft_body_tetra_deviatoric_plastic_yield());
-			const double hardening = double(get_space()->get_soft_body_tetra_deviatoric_plastic_hardening());
 			const double maximum = double(get_space()->get_soft_body_tetra_deviatoric_plastic_max_strain());
 			for (uint32_t i = 0; i < xpbd_fem_tetrahedra.size(); ++i) {
 				PhysicsFEMConvexTetra &tetra = xpbd_fem_tetrahedra[i];
@@ -3226,7 +3230,7 @@ void GodotSoftBody3D::solve_constraints(real_t p_delta) {
 					nodes[tetra.c].x, nodes[tetra.d].x
 				};
 				physics_fem_tetra_creep_deviatoric_rest(
-						positions, yield_strain, hardening, fraction, maximum,
+						positions, yield_strain, hardening, relaxation, maximum,
 						tetra.rest, xpbd_fem_deviatoric_plastic_strain[i]);
 			}
 		}
