@@ -41,6 +41,8 @@ class Player:
 	var input_budget: float = 0.0
 	var last_input_seq: int = 0
 	var attack_timer: float = 0.0
+	var skill_timer: float = 0.0
+	var combat_energy: float = 100.0
 	var noise_radius: float = 0.0
 	var noise_timer: float = 0.0
 	var action: Dictionary = {} # Current gathering: {"node": id, "remaining": s, "total": s}
@@ -212,6 +214,9 @@ func _spawn_player(player: Player) -> void:
 		for id in STARTER_KIT:
 			player.inventory.add(id, STARTER_KIT[id])
 	player.action = {}
+	player.attack_timer = 0.0
+	player.skill_timer = 0.0
+	player.combat_energy = Defs.COMBAT_ENERGY_MAX
 	player.noise_radius = 0.0
 	player.noise_timer = 0.0
 	player.dirty_inventory = true
@@ -469,6 +474,38 @@ func cmd_attack(peer_id: int, dir_x: float, dir_z: float) -> Dictionary:
 	return {"ok": true, "hit": true, "target": hit["kind"]}
 
 
+## Resolve active combat on the server; the client supplies only aim direction.
+func cmd_skill(peer_id: int, dir_x: float, dir_z: float) -> Dictionary:
+	var player: Player = players.get(peer_id)
+	if player == null or not _alive(player):
+		return {"ok": false, "reason": "dead"}
+	if player.attack_timer > 0.0 or player.skill_timer > 0.0:
+		return {"ok": false, "reason": "cooldown"}
+	var weapon: String = player.inventory.weapon
+	var skill: Dictionary = Combat.active_skill(weapon)
+	if skill.is_empty() or player.inventory.count(weapon) < 1:
+		return {"ok": false, "reason": "no_skill"}
+	var direction := Vector2(dir_x, dir_z)
+	if not direction.is_finite() or direction.length_squared() < 0.0001:
+		return {"ok": false, "reason": "no_direction"}
+	var cost: float = float(skill["energy_cost"])
+	if player.combat_energy < cost:
+		return {"ok": false, "reason": "no_energy"}
+	direction = direction.normalized()
+	player.combat_energy -= cost
+	player.skill_timer = float(skill["cooldown"])
+	player.attack_timer = float(skill["attack_lock"])
+	player.action = {}
+	player.yaw = atan2(direction.x, direction.y)
+	var origin := Vector2(player.position.x, player.position.z)
+	var hit := _find_hit(player, origin, direction, float(skill["range"]), false)
+	events.append({"type": "attack", "peer": peer_id, "dir": direction, "ranged": false, "skill": skill["id"]})
+	if hit.is_empty():
+		return {"ok": true, "hit": false, "energy": player.combat_energy}
+	_damage_target(player, hit, float(skill["damage"]))
+	return {"ok": true, "hit": true, "target": hit["kind"], "energy": player.combat_energy}
+
+
 func cmd_loot(peer_id: int, entity_id: int) -> Dictionary:
 	var player: Player = players.get(peer_id)
 	if player == null or not _alive(player):
@@ -670,6 +707,7 @@ func _tick_players(delta: float) -> void:
 	for player in players.values():
 		player.input_budget = minf(player.input_budget + delta, 0.25)
 		player.attack_timer = maxf(player.attack_timer - delta, 0.0)
+		player.skill_timer = maxf(player.skill_timer - delta, 0.0)
 		player.noise_timer = maxf(player.noise_timer - delta, 0.0)
 		if player.noise_timer <= 0.0:
 			player.noise_radius = 0.0
@@ -678,6 +716,7 @@ func _tick_players(delta: float) -> void:
 			if player.respawn_timer <= 0.0:
 				_spawn_player(player)
 			continue
+		player.combat_energy = minf(Defs.COMBAT_ENERGY_MAX, player.combat_energy + Defs.COMBAT_ENERGY_REGEN * delta)
 		var damage: float = player.survival.tick(delta)
 		if damage > 0.0 and not _alive(player):
 			_on_player_death(player, -1)
@@ -832,6 +871,7 @@ func snapshot_for(peer_id: int) -> Dictionary:
 			"stamina": player.survival.stamina,
 			"alive": _alive(player), "kills": player.kills, "deaths": player.deaths, "zone": player.zone_notice,
 			"action": player.action.duplicate(),
+			"combat_energy": player.combat_energy, "skill_cooldown": player.skill_timer,
 			"weapon": player.inventory.weapon, "armor": player.inventory.armor,
 			"last_death_full_loot": player.last_death_full_loot,
 			"gathering_levels": player.progression.levels(), "crafting_level": player.progression.crafting_level(),

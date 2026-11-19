@@ -26,6 +26,16 @@ static func weapon_cooldown(weapon_id: String) -> float:
 	return float(Defs.item(weapon_id).get("cooldown", 0.8))
 
 
+## A server-owned ability granted by a melee club, independent of character class.
+static func active_skill(weapon_id: String) -> Dictionary:
+	var info: Dictionary = Defs.item(weapon_id)
+	if info.is_empty() or str(info.get("weapon", "")) != "melee" or not weapon_id.begins_with("club_"):
+		return {}
+	return {"id": "heavy_strike", "energy_cost": 30.0, "cooldown": 6.0,
+		"attack_lock": 0.95, "range": Defs.MELEE_RANGE + 0.6,
+		"damage": weapon_damage(weapon_id) * 1.6}
+
+
 ## Loot from a ruin crate or a dead zombie: {item_id: count}. Deterministic for a given rng.
 static func crate_loot(zone: int, rng: RandomNumberGenerator) -> Dictionary:
 	var loot: Dictionary = {}
