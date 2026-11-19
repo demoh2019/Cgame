@@ -23,7 +23,7 @@ class TestArrayFilterLazy(unittest.TestCase):
     def test_element_buffer_is_allocated_only_after_a_true_predicate(self):
         code = self.section
         first_predicate = code.index("if (result.operator bool())")
-        allocation = code.index("new_arr.resize(size());")
+        allocation = code.index("new_arr.resize(size() - i);")
         self.assertLess(first_predicate, allocation)
         self.assertIn("if (write == nullptr)", code[first_predicate:allocation])
         self.assertIn("new_arr.resize(size() - i);", code)
