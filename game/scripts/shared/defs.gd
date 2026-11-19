@@ -282,6 +282,12 @@ static func _build_items() -> void:
 	_add_recipe("purified_serum", "purified_serum", 1,
 		{"infected_core": 2, "bandage": 1, "water_bottle": 1},
 		"workbench", 6.0)
+	# A single-use expedition stimulant: elite trophy + field medicine.
+	_add_item("frontier_stim", {"name": "Frontier Adrenaline Shot",
+		"kind": "stimulant", "tier": 3, "stack": 5, "value": 95, "weight": 0.25})
+	_add_recipe("frontier_stim", "frontier_stim", 1,
+		{"infected_core": 1, "field_antiseptic": 1, "water_bottle": 1},
+		"workbench", 5.0)
 	# Rare raid equipment: no loot-table bypass. Earn cores through real elite
 	# infected and raid kills, then craft it with tier 3 artisan mastery.
 	_add_item("purifier_maul_3", {"name": "Purifier Maul T3", "kind": "weapon",

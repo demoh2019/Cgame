@@ -937,6 +937,9 @@ func _process(_delta: float) -> void:
 	var blood_range: float = float(client.you.get("blood_scent_radius", 0.0))
 	if blood_range > 0.0:
 		_info_label.text += "\nBLOOD SCENT: infected can sense the wound from %d m" % ceili(blood_range)
+	var stim_remaining: float = float(client.you.get("stim_cooldown", 0.0))
+	if stim_remaining > 0.0:
+		_info_label.text += "\nFIELD STIM: recharge %.0fs" % stim_remaining
 	var weather: Dictionary = client.you.get("weather", {})
 	if not weather.is_empty():
 		_info_label.text += "\nWeather: %s %.0fC %s | Exposure %d/100 | Heat pack %ds" % [

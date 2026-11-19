@@ -2042,3 +2042,34 @@ godot --headless --path game --script res://tests/run_all.gd
 No new C++ engine feature was required: authoritative game events,
 persistent Nakama character documents, server-side UTC timestamps and
 atomic inventory transfers are already supported by Cgame.
+
+
+## Frontier adrenaline shot: elite-sourced expedition recovery
+
+The canonical `game/` adds a rare **Frontier Adrenaline Shot**, bridging
+Days After survival supplies with Albion-style classless combat energy.
+It requires T3 crafting mastery at the safe hub workbench and uses one real infected core,
+one field antiseptic, and one clean water bottle. Elites and other
+existing infected-core sources remain the only way to obtain the trophy;
+neither the vendor nor a new debug spawn grants a free shot.
+
+Using a carried dose while genuinely fatigued immediately restores
+**50 stamina and 35 combat energy**, capped by existing player maxima,
+but costs **12 thirst** and starts a **90-second personal cooldown**.
+When both resources are almost full, the dose is rejected as wasteful;
+survivors with less than 12 thirst cannot inject it. Failed use,
+cooldown/replay attempts and missing inventory do not consume a dose.
+
+The server computes the effect and deducts the actual item. The cooldown
+is serialized in the existing version-1 character save, validated before
+any live state is modified, and persists through death, respawn and
+reconnection. Old saves without `stim_cooldown` remain compatible.
+The existing `c_use` RPC and inventory action support the online client;
+its HUD shows any remaining recharge. The local playable preview has
+a dedicated **.** key and displays the same cooldown.
+
+Files: `scripts/shared/frontier_stim.gd`, existing item and recipe
+definitions, `scripts/server/game_server.gd`, and both clients.
+Headless regression suite `game/tests/test_frontier_stim.gd` is
+registered in `game/tests/run_all.gd`. Native engine changes are not
+required for a fully server-owned, inventory-paid consumable.
