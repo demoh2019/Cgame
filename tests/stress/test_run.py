@@ -145,6 +145,18 @@ class BaselineTests(unittest.TestCase):
         self.assertIn("high run-to-run variability", text)
         self.assertIn("startup/teardown dominates", text)
 
+    def test_retained_growth_covers_lifecycle_and_scene_churn(self):
+        current = self.make_report()
+        for name in ("object_lifecycle", "scene_churn"):
+            current["cases"][name] = {"status": "passed", "runs": [
+                {"status": "passed", "engine": {"detail": {
+                    "retained_growth_bytes": 3 * 1048576}}},
+            ]}
+        errors = stress.compare_baseline(current, self.make_report(), 20., 2.)
+        self.assertEqual(len(errors), 2)
+        self.assertTrue(any("object_lifecycle" in error for error in errors))
+        self.assertTrue(any("scene_churn" in error for error in errors))
+
     def test_memory_churn_threshold(self):
         current = self.make_report()
         current["cases"]["memory_churn"] = {"status": "passed", "runs": [

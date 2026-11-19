@@ -286,6 +286,7 @@ func _object_lifecycle(scale: int) -> Dictionary:
 func _scene_churn(scale: int) -> Dictionary:
 	var max_memory := 0
 	var checksum := 0
+	var readings: Array[int] = []
 	for cycle in range(30):
 		var world := Node2D.new()
 		root.add_child(world)
@@ -296,9 +297,11 @@ func _scene_churn(scale: int) -> Dictionary:
 		checksum += world.get_child_count()
 		world.free()
 		await process_frame
-		max_memory = maxi(max_memory, int(Performance.get_monitor(Performance.MEMORY_STATIC)))
+		var retained_bytes := int(Performance.get_monitor(Performance.MEMORY_STATIC))
+		readings.append(retained_bytes)
+		max_memory = maxi(max_memory, retained_bytes)
 	return {"nodes_created_and_freed": checksum, "cycles": 30,
-		"peak_engine_static_bytes": max_memory}
+		"peak_engine_static_bytes": max_memory, "retained_growth_bytes": readings.back() - readings[2]}
 
 
 func _on_sample(value: int) -> void:

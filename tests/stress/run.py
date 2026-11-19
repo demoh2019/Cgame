@@ -287,14 +287,18 @@ def compare_baseline(current: dict[str, Any], baseline: dict[str, Any],
             if new is not None and old is not None and old > 0 and new > old * (1 + percent / 100.0):
                 errors.append("%s %s: %.3f > %.3f (baseline + %.1f%%)" %
                               (name, field, new, old, percent))
-    if memory_growth_limit_mib is not None and "memory_churn" in current["cases"]:
-        for run in current["cases"]["memory_churn"]["runs"]:
-            if run["status"] != "passed":
-                continue
-            growth = run["engine"]["detail"]["retained_growth_bytes"] / 1048576.0
-            if growth > memory_growth_limit_mib:
-                errors.append("memory_churn retained growth %.3f MiB > %.3f MiB" %
-                              (growth, memory_growth_limit_mib))
+    if memory_growth_limit_mib is not None:
+        for case_name in ("memory_churn", "object_lifecycle", "scene_churn"):
+            for run in current["cases"].get(case_name, {}).get("runs", []):
+                if run["status"] != "passed":
+                    continue
+                retained_bytes = run.get("engine", {}).get("detail", {}).get("retained_growth_bytes")
+                if not isinstance(retained_bytes, (int, float)) or not math.isfinite(retained_bytes):
+                    continue
+                growth = retained_bytes / 1048576.0
+                if growth > memory_growth_limit_mib:
+                    errors.append("%s retained growth %.3f MiB > %.3f MiB" %
+                                  (case_name, growth, memory_growth_limit_mib))
     return errors
 
 
