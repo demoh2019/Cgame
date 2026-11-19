@@ -338,3 +338,28 @@ python3 tests/stress/scale_sweep.py \
 ```
 
 A headless renderer is enough. Use matching builds and hardware for comparison.
+
+## BitMap performance and image pipeline
+
+The native BitMap implementation uses masked byte-span fills for
+`set_bit_rect`, 64-bit SWAR counting for `get_true_bit_count`, and
+packed row-major paths for resize, blit and L8 image export. LA8 input
+avoids an unnecessary Image duplicate. All changes keep pixel-level
+correctness tests in `tests/scene/test_bit_map.cpp`, including odd-width
+rows, clipped rectangles, overlapping self-blits and nearest-neighbor
+up/downscaling.
+
+```bash
+python3 tests/stress/run.py \
+  --godot ./bin/godot.linuxbsd.editor.dev.x86_64 \
+  --case bitmap_rects,bitmap_pipeline \
+  --preset standard --repeats 5 \
+  --output out/bitmap.json --summary-md out/bitmap.md
+```
+
+`bitmap_rects` isolates large packed writes and population counting.
+`bitmap_pipeline` additionally reports per-run blit, resize, L8
+conversion and LA8 alpha-import time. For comparisons, use identical
+hardware and engine build settings; synthetic C++ microbenchmarks cannot
+predict whole-game FPS. A dedicated GitHub Actions workflow runs native
+BitMap correctness tests and these workloads on the actual fork.
