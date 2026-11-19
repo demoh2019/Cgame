@@ -1127,6 +1127,12 @@ bool GodotSoftBody3D::solve_pair_contacts(GodotSoftBody3D &p_other, real_t p_del
 		}
 	}
 	if (!moved) {
+		// CCD BVH entries are swept, so restore ordinary current-position
+		// bounds even when all candidates were rejected by narrowphase.
+		if (swept_ccd) {
+			update_face_tree(real_t(0.0));
+			p_other.update_face_tree(real_t(0.0));
+		}
 		return false;
 	}
 
