@@ -4,6 +4,7 @@ extends Node2D
 
 const LAB_3D := "res://lab_3d.tscn"
 const WALKER = preload("res://walker_2d.gd")
+const INTERACTIVE_ENV_2D = preload("res://environment_2d.gd")
 
 var _camera: Camera2D
 var _stats: Label
@@ -24,6 +25,10 @@ func _ready() -> void:
     _make_character()
     _make_camera()
     _make_ui()
+    var interactions = INTERACTIVE_ENV_2D.new()
+    interactions.name = "Environment2D"
+    add_child(interactions)
+    interactions.setup()
 
 
 func _rect_vertices(size: Vector2) -> PackedVector2Array:
