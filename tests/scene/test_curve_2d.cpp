@@ -384,4 +384,26 @@ TEST_CASE("[Curve2D][Performance] Recursive midpoint reuse preserves adaptive an
 	CHECK(baked[baked.size() - 1] == Vector2(25, 4));
 }
 
+
+TEST_CASE("[Curve2D] Baked interval lookup preserves every sample boundary") {
+	Ref<Curve2D> curve = memnew(Curve2D);
+	curve->set_bake_interval(1.5);
+	curve->add_point(Vector2(0, 0));
+	curve->add_point(Vector2(100, 25));
+	const PackedVector2Array points = curve->get_baked_points();
+	REQUIRE(points.size() > 16);
+
+	real_t offset = 0;
+	for (int i = 0; i < points.size(); i++) {
+		if (i != 0) {
+			offset += points[i - 1].distance_to(points[i]);
+		}
+		// Exact interval boundaries must resolve to the preceding segment
+		// and interpolation must reproduce the corresponding baked vertex.
+		CHECK((curve->sample_baked(offset) - points[i]).length() < real_t(0.002));
+	}
+	CHECK(curve->sample_baked(-100).is_equal_approx(points[0]));
+	CHECK(curve->sample_baked(offset + 100).is_equal_approx(points[points.size() - 1]));
+}
+
 } // namespace TestCurve2D
