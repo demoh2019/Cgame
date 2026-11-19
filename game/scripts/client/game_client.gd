@@ -284,6 +284,10 @@ func contract(action: String) -> void:
 	net.c_contract.rpc_id(1, action)
 
 
+func outpost_supplies(site_id: int) -> void:
+	net.c_outpost_supplies.rpc_id(1, site_id)
+
+
 func attack(direction: Vector2) -> void:
 	net.c_attack.rpc_id(1, direction.x, direction.y)
 
