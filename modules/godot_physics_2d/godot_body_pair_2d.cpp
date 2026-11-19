@@ -510,12 +510,14 @@ bool GodotBodyPair2D::pre_solve(real_t p_step) {
 		c.rA = global_A - A->get_center_of_mass();
 		c.rB = global_B - B->get_center_of_mass() - offset_B;
 
-		// Precompute normal mass, tangent mass, and bias.
-		real_t rnA = c.rA.dot(c.normal);
-		real_t rnB = c.rB.dot(c.normal);
-		real_t kNormal = inv_mass_A + inv_mass_B;
-		kNormal += inv_inertia_A * (c.rA.dot(c.rA) - rnA * rnA) + inv_inertia_B * (c.rB.dot(c.rB) - rnB * rnB);
-		c.mass_normal = 1.0f / kNormal;
+		if (!report_contacts_only) {
+			// Precompute normal mass, tangent mass, and bias.
+			real_t rnA = c.rA.dot(c.normal);
+			real_t rnB = c.rB.dot(c.normal);
+			real_t kNormal = inv_mass_A + inv_mass_B;
+			kNormal += inv_inertia_A * (c.rA.dot(c.rA) - rnA * rnA) + inv_inertia_B * (c.rB.dot(c.rB) - rnB * rnB);
+			c.mass_normal = kNormal > 0.0 ? 1.0f / kNormal : 0.0f;
+		}
 
 		Vector2 P = c.acc_normal_impulse * c.normal;
 		if (has_friction) {
@@ -524,11 +526,14 @@ bool GodotBodyPair2D::pre_solve(real_t p_step) {
 			const real_t cached_tangent_limit = mixed_friction * c.acc_normal_impulse;
 			c.acc_tangent_impulse = CLAMP(c.acc_tangent_impulse, -cached_tangent_limit, cached_tangent_limit);
 			const Vector2 tangent = c.normal.orthogonal();
-			const real_t rtA = c.rA.dot(tangent);
-			const real_t rtB = c.rB.dot(tangent);
-			real_t kTangent = inv_mass_A + inv_mass_B;
-			kTangent += inv_inertia_A * (c.rA.dot(c.rA) - rtA * rtA) + inv_inertia_B * (c.rB.dot(c.rB) - rtB * rtB);
-			c.mass_tangent = 1.0f / kTangent;
+		if (!report_contacts_only) {
+				const real_t rtA = c.rA.dot(tangent);
+				const real_t rtB = c.rB.dot(tangent);
+				real_t kTangent = inv_mass_A + inv_mass_B;
+				kTangent += inv_inertia_A * (c.rA.dot(c.rA) - rtA * rtA) + inv_inertia_B * (c.rB.dot(c.rB) - rtB * rtB);
+				c.mass_tangent = kTangent > 0.0 ? 1.0f / kTangent : 0.0f;
+		}
+
 			P += c.acc_tangent_impulse * tangent;
 		} else {
 			// Friction may have changed since the previous step. Drop cached
@@ -537,7 +542,9 @@ bool GodotBodyPair2D::pre_solve(real_t p_step) {
 			c.acc_tangent_impulse = 0.0;
 		}
 
-		c.bias = -bias * inv_dt * MIN(0.0f, -depth + max_penetration);
+		if (!report_contacts_only) {
+			c.bias = -bias * inv_dt * MIN(0.0f, -depth + max_penetration);
+		}
 		c.depth = depth;
 
 		c.acc_impulse -= P;

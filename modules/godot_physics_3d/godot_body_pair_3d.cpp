@@ -429,14 +429,17 @@ bool GodotBodyPair3D::pre_solve(real_t p_step) {
 		c.rA = global_A - A->get_center_of_mass();
 		c.rB = global_B - B->get_center_of_mass() - offset_B;
 
-		// Precompute normal mass, tangent mass, and bias.
-		Vector3 inertia_A = inv_inertia_tensor_A.xform(c.rA.cross(c.normal));
-		Vector3 inertia_B = inv_inertia_tensor_B.xform(c.rB.cross(c.normal));
-		real_t kNormal = inv_mass_A + inv_mass_B;
-		kNormal += c.normal.dot(inertia_A.cross(c.rA)) + c.normal.dot(inertia_B.cross(c.rB));
-		c.mass_normal = 1.0f / kNormal;
+		if (!report_contacts_only) {
+			// Precompute normal mass, tangent mass, and bias.
+			Vector3 inertia_A = inv_inertia_tensor_A.xform(c.rA.cross(c.normal));
+			Vector3 inertia_B = inv_inertia_tensor_B.xform(c.rB.cross(c.normal));
+			real_t kNormal = inv_mass_A + inv_mass_B;
+			kNormal += c.normal.dot(inertia_A.cross(c.rA)) + c.normal.dot(inertia_B.cross(c.rB));
+			c.mass_normal = kNormal > 0.0 ? 1.0f / kNormal : 0.0f;
 
-		c.bias = -bias * inv_dt * MIN(0.0f, -depth + max_penetration);
+			c.bias = -bias * inv_dt * MIN(0.0f, -depth + max_penetration);
+		}
+
 		c.depth = depth;
 
 		// Contacts may survive a material change. Do not warm-start stale
