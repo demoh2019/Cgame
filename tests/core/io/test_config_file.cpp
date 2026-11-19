@@ -271,4 +271,41 @@ TEST_CASE("[ConfigFile][Performance] Hot section and key lookups retain all sema
 	CHECK_FALSE(restored.has_section("group_1"));
 }
 
+TEST_CASE("[ConfigFile][Performance] Chunked large save retains exact values and encoding") {
+	ConfigFile config;
+	config.set_value("", "global", "unsectioned");
+	config.set_value("escaped]name", "bracket", 17);
+	config.set_value("unicode", String::utf8("ключ"), String::utf8("значение"));
+	const String payload = "The quick brown fox jumps over the lazy dog.";
+	for (int index = 0; index < 2300; ++index) {
+		config.set_value("bulk", "entry_" + itos(index), payload + itos(index));
+	}
+	// A single very large value must also be handled without splitting data.
+	config.set_value("bulk", "long_value", String("x").repeat(65536));
+
+#ifdef WINDOWS_ENABLED
+	const String path = OS::get_singleton()->get_environment("TEMP").path_join("config_chunked.ini");
+#else
+	const String path = "/tmp/config_chunked.ini";
+#endif
+	REQUIRE(config.save(path) == OK);
+	Ref<FileAccess> saved = FileAccess::open(path, FileAccess::READ);
+	REQUIRE(saved.is_valid());
+	const String bytes = saved->get_as_utf8_string();
+	CHECK(bytes.begins_with("global=\"unsectioned\"\n\n[escaped\\]name]\n\nbracket=17"));
+	CHECK(bytes.contains(String::utf8("ключ")));
+	CHECK(bytes.contains(String::utf8("значение")));
+	saved.unref();
+
+	ConfigFile restored;
+	REQUIRE(restored.load(path) == OK);
+	CHECK(String(restored.get_value("", "global")) == "unsectioned");
+	CHECK(int(restored.get_value("escaped]name", "bracket")) == 17);
+	CHECK(String(restored.get_value("unicode", String::utf8("ключ"))) == String::utf8("значение"));
+	CHECK(String(restored.get_value("bulk", "long_value")).length() == 65536);
+	for (int index = 0; index < 2300; ++index) {
+		CHECK(String(restored.get_value("bulk", "entry_" + itos(index))) == payload + itos(index));
+	}
+}
+
 } // namespace TestConfigFile

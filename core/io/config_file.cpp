@@ -181,27 +181,44 @@ Error ConfigFile::save_encrypted_pass(const String &p_path, const String &p_pass
 }
 
 Error ConfigFile::_internal_save(Ref<FileAccess> p_file) {
+	// Batch small entries to avoid an UTF-8 conversion and file write for every key.
+	// Keep the buffer bounded, unlike converting the whole configuration at once.
+	constexpr uint32_t FLUSH_CHARACTERS = 16 * 1024;
+	StringBuilder buffer;
+	auto flush = [&]() {
+		if (buffer.num_strings_appended() > 0) {
+			p_file->store_string(buffer.as_string());
+			buffer = StringBuilder();
+		}
+	};
+
 	bool first = true;
 	for (const KeyValue<String, HashMap<String, Variant>> &E : values) {
 		if (first) {
 			first = false;
 		} else {
-			p_file->store_string("\n");
+			buffer.append("\n");
 		}
 		if (!E.key.is_empty()) {
-			p_file->store_string("[" + E.key.replace("]", "\\]") + "]\n\n");
+			buffer.append("[").append(E.key.replace("]", "\\]")).append("]\n\n");
 		}
 
 		for (const KeyValue<String, Variant> &F : E.value) {
 			String vstr;
 			VariantWriter::write_to_string(F.value, vstr, true);
-			p_file->store_string(F.key.property_name_encode() + "=" + vstr + "\n");
+			buffer.append(F.key.property_name_encode()).append("=").append(vstr).append("\n");
+			if (buffer.get_string_length() >= FLUSH_CHARACTERS) {
+				flush();
+			}
+		}
+		// Large numbers of short sections should not accumulate indefinitely.
+		if (buffer.get_string_length() >= FLUSH_CHARACTERS) {
+			flush();
 		}
 	}
-
+	flush();
 	return OK;
 }
-
 Error ConfigFile::load(const String &p_path) {
 	Error err;
 	Ref<FileAccess> f = FileAccess::open(p_path, FileAccess::READ, &err);
