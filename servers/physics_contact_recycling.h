@@ -41,6 +41,10 @@ struct GodotPhysicsContactRecycling {
 	// Kept separately from the solver's collided flag, which can also be
 	// reset by contact-report-only and one-way filtering paths.
 	bool narrowphase_separated = false;
+	// Provenance of a predictive contact created by sphere TOI. Store in
+	// unused alignment padding beside narrowphase_separated, instead of
+	// enlarging every rigid-body pair by a standalone bool member.
+	bool speculative_contact = false;
 
 	inline bool matches_geometry(uint64_t p_current_a, uint64_t p_current_b) const {
 		return geometry_version_a != 0 && geometry_version_b != 0 &&
