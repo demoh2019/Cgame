@@ -89,6 +89,8 @@ class SoftBodyGasLeakTests(unittest.TestCase):
         self.assertIn("double gas_mass_fraction = 1.0;", header)
         self.assertIn("gas_mass_fraction = 1.0;", cpp)
         self.assertIn("physics_softbody_gas_leak_step(xpbd_volume_rest, signed_volume,", cpp)
+        self.assertIn("if (leak_rate == real_t(0.0) && gas_mass_fraction == 1.0)", cpp)
+        self.assertIn("physics_softbody_adiabatic_pressure(xpbd_volume_rest, signed_volume,", cpp)
         self.assertIn("get_soft_body_gas_leak_rate()", cpp)
         self.assertIn("soft_body_gas_leak_rate", space)
         self.assertIn("get_soft_body_gas_leak_rate()", space_h)
