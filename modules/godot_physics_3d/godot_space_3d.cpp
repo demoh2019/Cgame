@@ -1361,6 +1361,10 @@ GodotSpace3D::GodotSpace3D() {
 	soft_body_tetra_fiber_axis = configured_fem_fiber_axis.is_finite() && configured_fem_fiber_axis.length_squared() > real_t(0.0) ? configured_fem_fiber_axis : Vector3(1, 0, 0);
 	const real_t configured_tetra_viscosity = GLOBAL_GET("physics/3d/solver/soft_body_tetra_fem_viscosity");
 	soft_body_tetra_fem_viscosity = Math::is_finite(configured_tetra_viscosity) ? MAX(real_t(0.0), configured_tetra_viscosity) : real_t(0.0);
+	soft_body_tetra_inversion_recovery = GLOBAL_GET("physics/3d/solver/soft_body_tetra_inversion_recovery");
+	const real_t configured_tetra_min_j = GLOBAL_GET("physics/3d/solver/soft_body_tetra_inversion_min_j");
+	soft_body_tetra_inversion_min_j = Math::is_finite(configured_tetra_min_j) ?
+			CLAMP(configured_tetra_min_j, real_t(0.001), real_t(0.5)) : real_t(0.05);
 	const real_t damage_rate = GLOBAL_GET("physics/3d/solver/soft_body_tetra_damage_rate");
 	soft_body_tetra_damage_rate = Math::is_finite(damage_rate) ? MAX(real_t(0.0), damage_rate) : real_t(0.0);
 	const real_t damage_yield = GLOBAL_GET("physics/3d/solver/soft_body_tetra_damage_yield_strain");
