@@ -4,7 +4,7 @@ extends RefCounted
 ## Claims and stock live on the server session, not inside client snapshots.
 
 const Inventory = preload("res://scripts/shared/inventory.gd")
-const LootRights = preload("res://scripts/shared/loot_rights.gd")
+const RaidLoot = preload("res://scripts/shared/raid_loot.gd")
 
 const CACHE_STOCK := 5
 const ACCESS_RANGE := 4.0
@@ -44,7 +44,7 @@ static func claim(site: Dictionary, player, group_id: int, zone: int,
 		return {"ok": false, "reason": "contested"}
 	if int(site.get("supplies_left", 0)) <= 0:
 		return {"ok": false, "reason": "empty"}
-	var token: String = LootRights.token(player)
+	var token: String = RaidLoot.token(player)
 	var claims: Dictionary = site.get("supply_claims", {})
 	if claims.has(token):
 		return {"ok": false, "reason": "already_claimed"}
