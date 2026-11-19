@@ -1393,14 +1393,29 @@ void JoltSpace3D::_pre_step(float p_step) {
 	if (JoltProjectSettings::soft_body_self_contacts && active_soft_body_count > 0 &&
 			JoltProjectSettings::soft_body_soft_contact_radius > 0.0f && Math::is_finite(p_step) && p_step > 0.0f) {
 		uint32_t self_budget = (uint32_t)JoltProjectSettings::soft_body_self_contact_max_checks;
+		const bool self_edges = JoltProjectSettings::soft_body_self_edge_contacts;
+		// Keep the existing global self-contact cap unchanged: if the edge
+		// pass is enabled, reserve half for VF and half for EE, so a dense
+		// VF pass cannot starve edge crossings within the same cloth.
+		uint32_t self_edge_budget = self_edges ? self_budget / 2 : 0;
+		self_budget -= self_edge_budget;
 		SoftSelfContactScratch self_scratch;
-		for (JPH::uint32 i = 0; i < active_soft_body_count && self_budget > 0; ++i) {
+		for (JPH::uint32 i = 0; i < active_soft_body_count && (self_budget > 0 || self_edge_budget > 0); ++i) {
 			JPH::Body *jolt_body = lock_iface.TryGetBody(active_soft_bodies[i]);
 			if (jolt_body == nullptr) {
 				continue;
 			}
 			const JoltSoftBody3D *object = reinterpret_cast<JoltObject3D *>(jolt_body->GetUserData())->as_soft_body();
-			resolve_soft_body_self_contacts(*jolt_body, *object, p_step, self_budget, self_scratch);
+			// Never reuse the previous body's adjacency. The VF pass fills
+			// this vector when it runs; the EE pass reuses it or rebuilds
+			// under its own quota if VF has no remaining budget.
+			self_scratch.one_ring_edges.clear();
+			if (self_budget > 0) {
+				resolve_soft_body_self_contacts(*jolt_body, *object, p_step, self_budget, self_scratch);
+			}
+			if (self_edges && self_edge_budget > 0) {
+				resolve_soft_body_self_edge_contacts(*jolt_body, *object, p_step, self_edge_budget, self_scratch);
+			}
 		}
 	}
 
