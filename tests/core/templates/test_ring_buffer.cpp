@@ -32,8 +32,6 @@
 
 TEST_FORCE_LINK(test_ring_buffer)
 
-TEST_FORCE_LINK(test_ring_buffer)
-
 #include "core/templates/ring_buffer.h"
 
 namespace TestRingBuffer {
