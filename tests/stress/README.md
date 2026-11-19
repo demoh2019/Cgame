@@ -358,6 +358,62 @@ finite body states both with the option disabled and enabled. It is a smoke
 regression, not a measured performance benefit or a guarantee that all
 possible overfull manifolds are exercised.
 
+## Conservative rotating-CCD candidate culling (Rapier/Jolt-style)
+
+The existing opt-in `physics/2d/solver/ccd_rotational_bounds` and
+`physics/3d/solver/ccd_rotational_bounds` can expand broadphase AABBs
+for rotating CCD bodies. This avoids missing candidates, but a rotated
+shape's rectangular swept AABB can also overlap many distant shapes
+that the true rotating solid could never reach.
+
+The built-in GodotPhysics2D and GodotPhysics3D cast-ray CCD paths now
+use an **optional allocation-free swept bounding-sphere rejection**
+before their more expensive support-ray/narrowphase tests when both:
+
+- Rotational CCD bounds are enabled in the space; and
+- One of the two paired rigid bodies has nonzero angular velocity.
+
+A sphere centered at the body center of mass encloses every point of
+its current world-space shape AABB. Rigid rotation preserves each
+point's distance to that center. Therefore, the collider remains inside
+the sphere even if it turns between physics ticks. The closest approach
+between the *linearly moving centers of mass* is computed analytically,
+and the pair can be rejected only if the center trajectories remain
+farther apart than the summed conservative radii. A small tolerance
+is added for floating-point rounding. Unbounded world-boundary and
+separation-ray shapes, invalid transforms and degenerate data retain
+the original CCD path.
+
+This optimization **does not generate a contact, change velocity,
+change the Time of Impact, or attempt to solve nonlinear CCD**.
+It cannot introduce a deliberately approximated early contact or
+convert a real collision into a miss when the rigid-body motion
+assumptions hold. It also does not solve pure-rotation tunneling:
+the current cast-ray CCD still needs nonzero linear motion to run.
+This is a broadphase *rejection* filter, not a swept nonlinear
+collision solver. The opt-in settings remain disabled by default.
+
+Test coverage includes six native C++ cases for far pairs, approaching
+pairs, off-center orbital reach and invalid geometry, and eight Python
+source/reference tests with 10,000 seeded rotating boxes and target
+discs, checking that no sampled geometric hit is falsely rejected.
+
+```bash
+python3 -m unittest discover -s tests/stress \
+  -p 'test_physics_ccd_rotational_sphere_cull.py' -v
+
+# Compare opt-in rotating CCD scene throughput with identical binaries:
+python3 tests/stress/run.py \
+  --godot ./bin/godot.macos.editor.arm64 \
+  --case physics_ccd_rotational_radial_2d,physics_ccd_rotational_radial_3d \
+  --scale 4 --frames 120 --repeats 5 \
+  --output out/rotating-ccd-culling.json
+```
+
+No CPU or RAM benefit is claimed without compiled engine benchmarks.
+The cull deliberately declines to reject borderline cases, prioritizing
+correctness over a higher cull rate.
+
 ## Rapier-style CCD per-step angular motion cap (opt-in 2D / 3D)
 
 Fast rotation can pass a long, thin rigid shape through nearby obstacles
