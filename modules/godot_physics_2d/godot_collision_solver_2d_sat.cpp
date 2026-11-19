@@ -610,6 +610,12 @@ static void _collision_segment_convex_polygon(const GodotShape2D *p_a, const Tra
 
 /////////
 
+_FORCE_INLINE_ static bool _is_unit_orthogonal_transform(const Transform2D &p_transform) {
+	return Math::is_equal_approx(p_transform.columns[0].length_squared(), real_t(1.0)) &&
+			Math::is_equal_approx(p_transform.columns[1].length_squared(), real_t(1.0)) &&
+			Math::is_zero_approx(p_transform.columns[0].dot(p_transform.columns[1]));
+}
+
 static void _collision_circle_circle(const GodotShape2D *p_a, const Transform2D &p_transform_a, const GodotShape2D *p_b, const Transform2D &p_transform_b, _CollectorCallback2D *p_collector, const Vector2 &p_motion_a, const Vector2 &p_motion_b, bool p_cast_A, bool p_cast_B, bool p_with_margin, real_t p_margin_A, real_t p_margin_B) {
 	const GodotCircleShape2D *circle_A = static_cast<const GodotCircleShape2D *>(p_a);
 	const GodotCircleShape2D *circle_B = static_cast<const GodotCircleShape2D *>(p_b);
@@ -617,13 +623,7 @@ static void _collision_circle_circle(const GodotShape2D *p_a, const Transform2D 
 	// Like the direct circle manifold used by Box2D, avoid general SAT and
 	// support-point generation for stationary, rigidly transformed circles.
 	// Non-uniform scale, shear and swept shapes retain the original SAT path.
-	if (!p_cast_A && !p_cast_B &&
-			Math::is_equal_approx(p_transform_a.columns[0].length_squared(), real_t(1.0)) &&
-			Math::is_equal_approx(p_transform_a.columns[1].length_squared(), real_t(1.0)) &&
-			Math::is_zero_approx(p_transform_a.columns[0].dot(p_transform_a.columns[1])) &&
-			Math::is_equal_approx(p_transform_b.columns[0].length_squared(), real_t(1.0)) &&
-			Math::is_equal_approx(p_transform_b.columns[1].length_squared(), real_t(1.0)) &&
-			Math::is_zero_approx(p_transform_b.columns[0].dot(p_transform_b.columns[1]))) {
+	if (!p_cast_A && !p_cast_B && _is_unit_orthogonal_transform(p_transform_a) && _is_unit_orthogonal_transform(p_transform_b)) {
 		const real_t radius_A = circle_A->get_radius() + p_margin_A;
 		const real_t radius_B = circle_B->get_radius() + p_margin_B;
 		const real_t combined_radius = radius_A + radius_B;
@@ -674,6 +674,46 @@ static void _collision_circle_circle(const GodotShape2D *p_a, const Transform2D 
 static void _collision_circle_rectangle(const GodotShape2D *p_a, const Transform2D &p_transform_a, const GodotShape2D *p_b, const Transform2D &p_transform_b, _CollectorCallback2D *p_collector, const Vector2 &p_motion_a, const Vector2 &p_motion_b, bool p_cast_A, bool p_cast_B, bool p_with_margin, real_t p_margin_A, real_t p_margin_B) {
 	const GodotCircleShape2D *circle_A = static_cast<const GodotCircleShape2D *>(p_a);
 	const GodotRectangleShape2D *rectangle_B = static_cast<const GodotRectangleShape2D *>(p_b);
+
+// Specialized circle/rectangle manifold for rigid transforms. The generic SAT
+	// path below handles embedded centers, scaling, shearing and swept shapes.
+	if (!p_cast_A && !p_cast_B && p_margin_A >= 0.0 && p_margin_B >= 0.0 &&
+			circle_A->get_radius() >= 0.0 && _is_unit_orthogonal_transform(p_transform_a) &&
+			_is_unit_orthogonal_transform(p_transform_b)) {
+		const Vector2 center = p_transform_a.get_origin();
+		const Vector2 local_center = p_transform_b.basis_xform_inv(center - p_transform_b.get_origin());
+		const Vector2 half_extents = rectangle_B->get_half_extents();
+		const Vector2 closest_local(
+				CLAMP(local_center.x, -half_extents.x, half_extents.x),
+				CLAMP(local_center.y, -half_extents.y, half_extents.y));
+		const Vector2 closest = p_transform_b.xform(closest_local);
+		const Vector2 separation = center - closest;
+		const real_t distance_squared = separation.length_squared();
+
+		// When the center is inside (or exactly on) a box, SAT chooses the
+		// appropriate minimum-penetration face and a stable contact normal.
+		if (distance_squared > 0.0) {
+			const real_t circle_radius = circle_A->get_radius() + p_margin_A;
+			const real_t combined_radius = circle_radius + p_margin_B;
+			if (distance_squared > combined_radius * combined_radius) {
+				if (p_collector->sep_axis) {
+					*p_collector->sep_axis = separation / Math::sqrt(distance_squared);
+				}
+				return;
+			}
+
+			p_collector->collided = true;
+			if (p_collector->callback) {
+				const Vector2 normal = separation / Math::sqrt(distance_squared);
+				p_collector->normal = normal;
+				p_collector->call(center - normal * circle_radius, closest + normal * p_margin_B);
+				if (p_collector->sep_axis && *p_collector->sep_axis != Vector2()) {
+					*p_collector->sep_axis = Vector2();
+				}
+			}
+			return;
+		}
+	}
 
 	SeparatorAxisTest2D<GodotCircleShape2D, GodotRectangleShape2D> separator(circle_A, p_transform_a, rectangle_B, p_transform_b, p_collector, p_motion_a, p_motion_b, p_cast_A, p_cast_B, p_with_margin, p_margin_A, p_margin_B);
 
