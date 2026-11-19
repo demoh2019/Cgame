@@ -32,6 +32,7 @@
 
 TEST_FORCE_LINK(test_string)
 
+#include "core/string/char_utils.h"
 #include "core/string/ustring.h"
 
 namespace TestString {
@@ -3074,6 +3075,116 @@ TEST_CASE("[String] shared UTF32 buffer comparison fast paths") {
 	CHECK_EQ(original.casecmp_to(String("AbC unicode \u00e9").repeat(256)), 0);
 	CHECK(String().nocasecmp_to(String()) == 0);
 	CHECK(String().casecmp_to(String()) == 0);
+}
+
+TEST_CASE("[String] simplify_path linear parser matches legacy algorithm") {
+	// Independent pre-optimization oracle: keep the legacy splitting and
+	// repeated-collapse algorithm exclusively in this regression test.
+	auto reference = [](const String &p_input) -> String {
+		String s = p_input;
+		String drive;
+		int p = s.find("://");
+		bool found = false;
+		if (p > 0) {
+			bool only_chars = true;
+			for (int i = 0; i < p; i++) {
+				if (!is_ascii_alphanumeric_char(s[i])) {
+					only_chars = false;
+					break;
+				}
+			}
+			if (only_chars) {
+				found = true;
+				drive = s.substr(0, p + 3);
+				s = s.substr(p + 3);
+			}
+		}
+		if (!found) {
+			if (p_input.is_network_share_path()) {
+				drive = s.substr(0, 2);
+				s = s.substr(2);
+			} else if (s.begins_with("/") || s.begins_with("\\")) {
+				drive = s.substr(0, 1);
+				s = s.substr(1);
+			} else {
+				p = s.find(":/");
+				if (p == -1) {
+					p = s.find(":\\");
+				}
+				if (p != -1 && p < s.find_char('/')) {
+					drive = s.substr(0, p + 2);
+					s = s.substr(p + 2);
+				}
+			}
+		}
+		s = s.replace_char('\\', '/');
+		while (true) {
+			String compare = s.replace("//", "/");
+			if (s == compare) {
+				break;
+			}
+			s = compare;
+		}
+		Vector<String> dirs = s.split("/", false);
+		bool absolute_path = p_input.is_absolute_path() && !p_input.begins_with("res://");
+		for (int i = 0; i < dirs.size(); i++) {
+			String d = dirs[i];
+			if (d == ".") {
+				dirs.remove_at(i);
+				i--;
+			} else if (d == "..") {
+				if (i != 0 && dirs[i - 1] != "..") {
+					dirs.remove_at(i);
+					dirs.remove_at(i - 1);
+					i -= 2;
+				} else if (absolute_path && i == 0) {
+					dirs.remove_at(i);
+					i--;
+				}
+			}
+		}
+		s = "";
+		for (int i = 0; i < dirs.size(); i++) {
+			if (i > 0) {
+				s += "/";
+			}
+			s += dirs[i];
+		}
+		return drive + s;
+	};
+
+	static const char *inputs[] = {
+		"", ".", "..", "a/b/../../..", "../a/../b",
+		"res://../../texture.png", "res://a//b", "res://a/../..",
+		"/../a", "/a/../../b", "//server/share/a",
+		"C:/../b", "C:\\a\\..\\b", "http://example.com/../p",
+		"foo\\bar/../baz", "a////b/./c", "a/../..",
+	};
+	for (const char *input : inputs) {
+		CHECK_EQ(String(input).simplify_path(), reference(input));
+	}
+	static const char *pieces[] = { "a", "b", ".", "..", "...", "/", "\\", "//", "C:", "res:", "http:" };
+	uint32_t state = 0x3792ABCDu;
+	auto next_random = [&state]() {
+		state ^= state << 13;
+		state ^= state >> 17;
+		state ^= state << 5;
+		return state;
+	};
+	for (int trial = 0; trial < 1500; trial++) {
+		String path;
+		const int count = next_random() % 25;
+		for (int i = 0; i < count; i++) {
+			path += pieces[next_random() % 11];
+		}
+		CHECK_EQ(path.simplify_path(), reference(path));
+	}
+	String deep = "res://";
+	for (int i = 0; i < 256; i++) {
+		deep += "directory/./sub/../";
+	}
+	deep += "texture.png";
+	CHECK_EQ(deep.simplify_path(), reference(deep));
 }
 
 } // namespace TestString

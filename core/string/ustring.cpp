@@ -4445,70 +4445,66 @@ String String::simplify_path() const {
 		}
 	}
 
-	// split("/", false) already ignores repeated separators. Replacing "//"
-	// in a loop allocates new strings and repeatedly scans the entire path.
-	s = s.replace_char('\\', '/');
-	Vector<String> dirs = s.split("/", false);
-	const bool absolute_path = is_absolute_path() && !begins_with("res://"); // See GLTF importer compatibility note below.
-	// For res://, preserve leading ".." components as before. Some GLTF
-	// importers depend on traversing above the res:// root.
+	// The previous implementation repeatedly replaced slashes and removed
+	// elements from a Vector<String>, which allocated per path component and
+	// could become quadratic for long paths. Write the normalized path once.
+	if (s.is_empty()) {
+		return drive;
+	}
 
-	// Resolve dot components in-place. A write index avoids repeated vector
-	// element shifts (quadratic work for many ".." segments).
-	int kept = 0;
-	for (int i = 0; i < dirs.size(); i++) {
-		const String &dir = dirs[i];
-		if (dir == ".") {
+	const bool absolute_path = is_absolute_path() && !begins_with("res://");
+
+	String normalized;
+	normalized.resize_uninitialized(s.size());
+	char32_t *const dst_start = normalized.ptrw();
+	char32_t *dst = dst_start;
+	char32_t *fixed = dst_start;
+	const char32_t *src = s.ptr();
+	const char32_t *const end = src + s.length();
+
+	while (src < end) {
+		if (*src == '/' || *src == '\\') {
+			++src;
 			continue;
 		}
-		if (dir == "..") {
-			if (kept > 0 && dirs[kept - 1] != "..") {
-				--kept;
-				continue;
-			}
-			if (absolute_path && kept == 0) {
-				continue;
+
+		char32_t *const part_start = dst;
+		const char32_t *const source_start = src;
+
+		if (dst > dst_start) {
+			*dst++ = '/';
+		}
+
+		do {
+			*dst++ = *src++;
+		} while (src < end && *src != '/' && *src != '\\');
+
+		const std::ptrdiff_t part_length = src - source_start;
+		if (part_length == 1 && source_start[0] == '.') {
+			dst = part_start;
+		} else if (part_length == 2 && source_start[0] == '.' && source_start[1] == '.') {
+			if (part_start > fixed) {
+				// Discard both the just-written ".." and the preceding
+				// directory by walking back through the output buffer.
+				dst = part_start - 1;
+				while (dst > fixed && *dst != '/') {
+					--dst;
+				}
+			} else if (absolute_path) {
+				// Absolute paths cannot climb above their root. Keep the
+				// historical res:// exception for importers using "../".
+				dst = part_start;
+			} else {
+				fixed = dst;
 			}
 		}
-		if (kept != i) {
-			dirs.write[kept] = dir;
-		}
-		kept++;
 	}
 
-	// Allocate the final path once, including its drive or protocol prefix.
-	// Building the result through repeated += causes quadratic copying.
-	int result_length = drive.length();
-	for (int i = 0; i < kept; i++) {
-		result_length += dirs[i].length();
-		if (i > 0) {
-			result_length++;
-		}
-	}
-	if (result_length == 0) {
-		return String();
-	}
-
-	String result;
-	result.resize_uninitialized(result_length + 1);
-	char32_t *destination = result.ptrw();
-	if (!drive.is_empty()) {
-		memcpy(destination, drive.ptr(), drive.length() * sizeof(char32_t));
-		destination += drive.length();
-	}
-	for (int i = 0; i < kept; i++) {
-		if (i > 0) {
-			*destination++ = '/';
-		}
-		const String &dir = dirs[i];
-		if (!dir.is_empty()) {
-			memcpy(destination, dir.ptr(), dir.length() * sizeof(char32_t));
-			destination += dir.length();
-		}
-	}
-	*destination = 0;
-	return result;
+	*dst++ = 0;
+	normalized.resize(dst - dst_start);
+	return drive + normalized;
 }
+
 
 static int _humanize_digits(int p_num) {
 	if (p_num < 100) {
