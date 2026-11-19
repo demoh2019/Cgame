@@ -1217,7 +1217,7 @@ performance tests validate the implementation. Only a single large active
 island in the physics step takes this path. Small islands still use the
 existing serial/parallel island dispatcher.
 
-For a large island (at least 256 constraints), the step builds an 16-color
+For a large island (at least 256 constraints), the step builds a 16-color
 greedy constraint graph: every body touched by a constraint reserves that
 color, including static and kinematic bodies for conservative thread safety.
 A color with at least 64 constraints can solve in parallel; a barrier
