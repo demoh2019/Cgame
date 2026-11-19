@@ -7,8 +7,10 @@ const PLAYER_SCRIPT = preload("res://player.gd")
 const PICKUP_SCRIPT = preload("res://pickup.gd")
 const RESOURCE_SCRIPT = preload("res://resource_node.gd")
 const ZOMBIE_SCRIPT = preload("res://zombie.gd")
+const BUILDING_SCRIPT = preload("res://building_system.gd")
 
 var player
+var building_system: Node3D
 var hud_label: Label
 var prompt_label: Label
 var infected_kills: int = 0
@@ -19,6 +21,7 @@ func _ready() -> void:
     _configure_controls()
     _build_world()
     _build_player()
+    _build_barricades()
     _build_pickups()
     _build_resources()
     _build_enemies()
@@ -44,6 +47,7 @@ func _configure_controls() -> void:
     _bind_key("attack", KEY_F)
     _bind_key("craft_spear", KEY_8)
     _bind_key("craft_vest", KEY_9)
+    _bind_key("build_barricade", KEY_B)
 
 
 func _bind_key(action_name: String, key_code: int) -> void:
@@ -139,11 +143,18 @@ func _build_player() -> void:
     ray.name = "AimRay"
     ray.target_position = Vector3(0.0, 0.0, -3.2)
     ray.collide_with_areas = true
-    ray.collide_with_bodies = false
+    ray.collide_with_bodies = true
     camera.add_child(ray)
 
     add_child(player)
     player.attack_requested.connect(_on_player_attacked)
+
+
+func _build_barricades() -> void:
+    building_system = BUILDING_SCRIPT.new()
+    building_system.name = "BarricadeBuilder"
+    building_system.set("player", player)
+    add_child(building_system)
 
 
 func _build_pickups() -> void:
@@ -259,6 +270,7 @@ func _build_hud() -> void:
     help_label.text = "WASD движение | Shift бег | Space прыжок | F удар\n" + \
         "E сбор | 1 еда | 2 вода | 3 бинт | 4 инструмент | 5 лечение\n" + \
         "6 улучшенный бинт | 7 лечение | 8 копьё | 9 броня\n" + \
+        "B баррикада (3 дерева + 2 камня) | E ремонт\n" + \
         "Esc мышь | ЛКМ захват мыши | R перезапуск"
     column.add_child(help_label)
 
@@ -303,6 +315,9 @@ func _process(_delta: float) -> void:
         ] +
         "Заражённые: %d/%d | Боевой опыт %d\n" % [
             infected_kills, infected_total, player.combat_xp
+        ] +
+        "Укрепления: %d | [B] строить | [E] ремонт\n" % [
+            building_system.call("active_barricades")
         ] +
         player.last_message
     )
