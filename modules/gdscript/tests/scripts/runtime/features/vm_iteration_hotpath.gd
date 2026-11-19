@@ -53,3 +53,48 @@ func test():
 	for entry in large:
 		sum += entry
 	print(sum == 10000)
+
+	# A loop must reuse its own character storage without changing any
+	# previously captured value. Include non-BMP UTF-32 codepoints.
+	var unicode_text: String = "aβ🌍a\nZ"
+	var saved_characters: Array[String] = []
+	for letter in unicode_text:
+		saved_characters.append(letter)
+	print(saved_characters == ["a", "β", "🌍", "a", "\n", "Z"])
+	print(unicode_text == "aβ🌍a\nZ")
+
+	# Capture the same character more than once. COW must detach when a
+	# previous iteration's value is still retained by another container.
+	var repeats: Array[String] = []
+	for letter in "aabbccaa":
+		repeats.append(letter)
+	print(repeats == ["a", "a", "b", "b", "c", "c", "a", "a"])
+
+	var empty_count: int = 0
+	for letter in "":
+		empty_count += 1
+	print(empty_count == 0)
+
+	var single: Array[String] = []
+	for letter in "🌍":
+		single.append(letter)
+	print(single == ["🌍"])
+
+	# Every second character changes. This is the fast path where there
+	# are no long-lived aliases to the current iterator value.
+	var long_text: String = "ab".repeat(8192)
+	var a_count: int = 0
+	for letter in long_text:
+		if letter == "a":
+			a_count += 1
+	print(a_count == 8192)
+
+	# The old path constructed a new character for every iteration.
+	# Keeping an alias requires a COW detach rather than mutating it.
+	var first_alias: String = ""
+	var last_seen: String = ""
+	for letter in "xyz":
+		if first_alias.is_empty():
+			first_alias = letter
+		last_seen = letter
+	print(first_alias == "x" and last_seen == "z")
