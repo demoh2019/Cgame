@@ -124,6 +124,45 @@ TEST_CASE("[Dictionary] get_key_at_index()") {
 	CHECK(int(val) == 3);
 }
 
+TEST_CASE("[Dictionary] indexed pair traversal from both ends") {
+	Dictionary map;
+	for (int i = 0; i < 1024; i++) {
+		map[i] = i * 3;
+	}
+	REQUIRE_EQ(map.size(), 1024);
+
+	for (int i = 0; i < 1024; i++) {
+		const KeyValue<Variant, Variant> *pair = map.get_key_value_at_index(i);
+		REQUIRE(pair != nullptr);
+		CHECK_EQ(pair->key, Variant(i));
+		CHECK_EQ(pair->value, Variant(i * 3));
+		CHECK_EQ(map.get_key_at_index(i), pair->key);
+		CHECK_EQ(map.get_value_at_index(i), pair->value);
+
+		const KeyValue<Variant, Variant> *negative = map.get_key_value_at_index(i - 1024);
+		REQUIRE(negative != nullptr);
+		CHECK_EQ(negative->key, pair->key);
+		CHECK_EQ(negative->value, pair->value);
+	}
+
+	CHECK(map.get_key_value_at_index(-1025) == nullptr);
+	CHECK(map.get_key_value_at_index(1024) == nullptr);
+	CHECK_EQ(map.get_key_at_index(-1025), Variant());
+	CHECK_EQ(map.get_value_at_index(1024), Variant());
+	CHECK_EQ(map.size(), 1024);
+
+	map.erase(0);
+	map.erase(1023);
+	REQUIRE_EQ(map.size(), 1022);
+	CHECK_EQ(map.get_key_at_index(0), Variant(1));
+	CHECK_EQ(map.get_key_at_index(-1), Variant(1022));
+	CHECK_EQ(map.get_value_at_index(-1), Variant(1022 * 3));
+
+	map.clear();
+	CHECK(map.get_key_value_at_index(0) == nullptr);
+	CHECK(map.get_key_value_at_index(-1) == nullptr);
+}
+
 TEST_CASE("[Dictionary] getptr()") {
 	Dictionary map;
 	map[1] = 3;
