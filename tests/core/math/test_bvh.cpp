@@ -580,5 +580,116 @@ TEST_CASE("[BVH] Axis-aligned and reversed streaming rays retain intersection re
 	CHECK(order.count == 1);
 	CHECK(order.first == 7);
 }
+struct StreamSkipNearStats {
+	int callbacks = 0;
+	int selected = -1;
+	real_t ray_length = 0.0;
+};
+
+static real_t _stream_skip_first_candidate(Item *p_item, int, real_t p_max_fraction, void *p_userdata) {
+	StreamSkipNearStats &stats = *static_cast<StreamSkipNearStats *>(p_userdata);
+	stats.callbacks++;
+	// A bounding-box hit is not necessarily a real shape hit.
+	if (p_item->value == 0) {
+		return p_max_fraction;
+	}
+	const real_t fraction = (p_item->value * 4.0 + 2.5) / stats.ray_length;
+	if (fraction < p_max_fraction) {
+		stats.selected = p_item->value;
+		return fraction;
+	}
+	return p_max_fraction;
+}
+
+TEST_CASE("[BVH] Dense 2D leaf checks nearest AABB before earlier far insertions") {
+	// A single 128-capacity leaf with 64 proxies deliberately inserted
+	// far-to-near. No heap sorting is needed for near-first callbacks.
+	using Tree = BVH_Manager<Item, 1, false, 128, PairTest, CullTest, Rect2, Vector2, false>;
+	Tree tree;
+	constexpr int COUNT = 64;
+	Item items[COUNT];
+	for (int i = 0; i < COUNT; i++) {
+		const int position = COUNT - 1 - i;
+		items[i].value = position;
+		tree.create(&items[i], true, 0, 1, Rect2(position * 4, 0, 1, 1));
+	}
+
+	const Vector2 from(-2, 0.5);
+	const Vector2 to(COUNT * 4 + 2, 0.5);
+	RayCallbackOrder order;
+	tree.cast_segment(from, to, _record_stream_order, &order);
+	CHECK(order.count == COUNT);
+	CHECK(order.first == 0);
+
+	StreamCastStats clipped;
+	clipped.ray_length = to.x - from.x;
+	tree.cast_segment(from, to, _stream_nearest_cast, &clipped);
+	CHECK(clipped.nearest_item == 0);
+	CHECK(clipped.callbacks == 1);
+
+	// A nearer broadphase proxy may fail the exact shape test. The next
+	// candidate must still be visited, despite having selected the first.
+	StreamSkipNearStats ignored;
+	ignored.ray_length = to.x - from.x;
+	tree.cast_segment(from, to, _stream_skip_first_candidate, &ignored);
+	CHECK(ignored.selected == 1);
+	CHECK(ignored.callbacks >= 2);
+
+	order = RayCallbackOrder();
+	tree.cast_segment(to, from, _record_stream_order, &order);
+	CHECK(order.count == COUNT);
+	CHECK(order.first == COUNT - 1);
+}
+
+TEST_CASE("[BVH] Dense 3D leaf checks nearest AABB before earlier far insertions") {
+	using Tree = BVH_Manager<Item, 1, false, 128, PairTest, CullTest, AABB, Vector3, false>;
+	Tree tree;
+	constexpr int COUNT = 64;
+	Item items[COUNT];
+	for (int i = 0; i < COUNT; i++) {
+		const int position = COUNT - 1 - i;
+		items[i].value = position;
+		tree.create(&items[i], true, 0, 1, AABB(Vector3(position * 4, 0, 0), Vector3(1, 1, 1)));
+	}
+
+	const Vector3 from(-2, 0.5, 0.5);
+	const Vector3 to(COUNT * 4 + 2, 0.5, 0.5);
+	RayCallbackOrder order;
+	tree.cast_segment(from, to, _record_stream_order, &order);
+	CHECK(order.count == COUNT);
+	CHECK(order.first == 0);
+
+	StreamCastStats clipped;
+	clipped.ray_length = to.x - from.x;
+	tree.cast_segment(from, to, _stream_nearest_cast, &clipped);
+	CHECK(clipped.nearest_item == 0);
+	CHECK(clipped.callbacks == 1);
+
+	StreamSkipNearStats ignored;
+	ignored.ray_length = to.x - from.x;
+	tree.cast_segment(from, to, _stream_skip_first_candidate, &ignored);
+	CHECK(ignored.selected == 1);
+	CHECK(ignored.callbacks >= 2);
+
+	order = RayCallbackOrder();
+	tree.cast_segment(to, from, _record_stream_order, &order);
+	CHECK(order.count == COUNT);
+	CHECK(order.first == COUNT - 1);
+}
+
+TEST_CASE("[BVH] Sparse 2D leaf preserves one-pass raycast candidate order") {
+	using Tree = BVH_Manager<Item, 1, false, 128, PairTest, CullTest, Rect2, Vector2, false>;
+	Tree tree;
+	Item far_item;
+	far_item.value = 1;
+	Item near_item;
+	near_item.value = 0;
+	tree.create(&far_item, true, 0, 1, Rect2(10, 0, 1, 1));
+	tree.create(&near_item, true, 0, 1, Rect2(0, 0, 1, 1));
+	RayCallbackOrder order;
+	tree.cast_segment(Vector2(-2, 0.5), Vector2(14, 0.5), _record_stream_order, &order);
+	CHECK(order.count == 2);
+	CHECK(order.first == 1);
+}
 
 } // namespace TestBVH
