@@ -1316,3 +1316,32 @@ are necessary: the server owns access control, and the existing snapshot and
 Godot 3D rendering APIs handle the client. Test via
 `godot --headless --path game --script res://tests/run_all.gd`
 (`game/tests/test_loot_rights.gd`).
+
+
+## Team field medicine — server-authoritative party support
+
+Survivors in the same squad can help injured or infected teammates without
+choosing a fixed healing class. In the **online inventory/party panel**,
+select a nearby member, select a medical item and press **Aid**.
+
+- A healer and recipient must both be alive, in the same accepted party,
+  within **3.2 metres horizontally** and **2.5 metres vertically**.
+  Self-healing continues to use the existing personal item command.
+- Aid uses **one real carried item**: bandage, field antiseptic, antibiotics
+  or survivor serum. Healing/cure stats are read from the existing item
+  definitions; the client cannot choose or multiply effect values.
+- A successful treatment has a **five-second healer cooldown**, marks both
+  accounts for saving, and sends private UI feedback to the two participants.
+  Failed attempts never consume an item or start a cooldown.
+- Medicine cannot revive a dead character, cannot be used remotely, and
+  cannot be wasted when the target is completely healthy and uninfected.
+- Cooldown is temporary session combat state and resets on respawn; HP,
+  infection and inventory remain part of existing persistent character data.
+
+The system is in `scripts/shared/party_aid.gd`,
+`scripts/server/game_server.gd` and `scripts/shared/net.gd`.
+The server test `tests/test_party_aid.gd` runs with the rest of the
+game suite via `godot --headless --path game --script res://tests/run_all.gd`.
+
+Existing Cgame networking, UI and gameplay APIs support the feature; no
+native engine changes were necessary.
