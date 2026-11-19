@@ -221,30 +221,43 @@ bool GodotBodyPair2D::_test_ccd(real_t p_step, GodotBody2D *p_A, int p_shape_A, 
 	// Roughly predict body B's position in the next frame (ignoring collisions).
 	Transform2D predicted_xform_B = p_xform_B.translated(p_B->get_linear_velocity() * p_step);
 
-	// Cast a segment from support in motion normal, in the same direction of motion by motion length.
-	// Support point will the farthest forward collision point along the movement vector.
-	// i.e. the point that should hit B first if any collision does occur.
+	// CCD cast-ray uses the leading support feature, which may contain two
+	// vertices (a box face, capsule side, or polygon edge). Test both ends:
+	// a single support ray can miss a narrow obstacle hit by the other end.
+	GodotShape2D *shape_A_ptr = p_A->get_shape(p_shape_A);
+	GodotShape2D *shape_B_ptr = p_B->get_shape(p_shape_B);
+	Vector2 supports_A[2];
+	int support_count_A = 0;
+	shape_A_ptr->get_supports(p_xform_A.basis_xform_inv(mnormal).normalized(), supports_A, support_count_A);
+	if (support_count_A == 0) {
+		return false;
+	}
 
-	// convert mnormal into body A's local xform because get_support requires (and returns) local coordinates.
-	int a;
-	Vector2 s[2];
-	p_A->get_shape(p_shape_A)->get_supports(p_xform_A.basis_xform_inv(mnormal).normalized(), s, a);
-	Vector2 from = p_xform_A.xform(s[0]);
-	// Back up 10% of the per-frame motion behind the support point and use that as the beginning of our cast.
-	// This should ensure the calculated new velocity will really cause a bit of overlap instead of just getting us very close.
-	Vector2 to = from + motion;
+	// All rays share the same target transform and direction. Compare squared
+	// hit distances in target-local space to avoid a square root for each hit.
+	const Transform2D predicted_inv_B = predicted_xform_B.affine_inverse();
+	bool found_hit = false;
+	real_t hit_distance_squared = 0.0;
+	Vector2 hit_local;
+	Vector2 hit_support_from;
+	for (int support_idx = 0; support_idx < support_count_A; ++support_idx) {
+		const Vector2 from = p_xform_A.xform(supports_A[support_idx]);
+		const Vector2 local_from = predicted_inv_B.xform(from - motion * 0.1);
+		const Vector2 local_to = predicted_inv_B.xform(from + motion);
+		Vector2 rpos, rnorm;
+		if (!shape_B_ptr->intersect_segment(local_from, local_to, rpos, rnorm)) {
+			continue;
+		}
 
-	Transform2D from_inv = predicted_xform_B.affine_inverse();
-
-	// Back up 10% of the per-frame motion behind the support point and use that as the beginning of our cast.
-	// At high speeds, this may mean we're actually casting from well behind the body instead of inside it, which is odd. But it still works out.
-	Vector2 local_from = from_inv.xform(from - motion * 0.1);
-	Vector2 local_to = from_inv.xform(to);
-
-	Vector2 rpos, rnorm;
-	if (!p_B->get_shape(p_shape_B)->intersect_segment(local_from, local_to, rpos, rnorm)) {
-		// there was no hit. Since the segment is the length of per-frame motion, this means the bodies will not
-		// actually collide yet on next frame. We'll probably check again next frame once they're closer.
+		const real_t candidate_distance_squared = local_from.distance_squared_to(rpos);
+		if (!found_hit || candidate_distance_squared < hit_distance_squared) {
+			found_hit = true;
+			hit_distance_squared = candidate_distance_squared;
+			hit_local = rpos;
+			hit_support_from = from;
+		}
+	}
+	if (!found_hit) {
 		return false;
 	}
 
@@ -261,9 +274,9 @@ bool GodotBodyPair2D::_test_ccd(real_t p_step, GodotBody2D *p_A, int p_shape_A, 
 
 	// Shorten the linear velocity so it does not hit, but gets close enough,
 	// next frame will hit softly or soft enough.
-	Vector2 hitpos = predicted_xform_B.xform(rpos);
+	Vector2 hitpos = predicted_xform_B.xform(hit_local);
 
-	real_t newlen = hitpos.distance_to(from) + (max - min) * 0.01; // adding 1% of body length to the distance between collision and support point should cause body A's support point to arrive just within B's collider next frame.
+	real_t newlen = hitpos.distance_to(hit_support_from) + (max - min) * 0.01; // adding 1% of body length to the distance between collision and support point should cause body A's support point to arrive just within B's collider next frame.
 	p_A->set_linear_velocity(mnormal * (newlen / p_step));
 
 	return true;
