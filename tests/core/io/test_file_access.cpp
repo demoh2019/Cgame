@@ -377,7 +377,9 @@ TEST_CASE("[FileAccess] PackedByteArray shrink clamps cursor and prevents overfl
 	CHECK(f->eof_reached());
 
 	uint8_t sentinel = 0x5a;
+	ERR_PRINT_OFF;
 	CHECK(f->get_buffer(&sentinel, 1) == 0);
+	ERR_PRINT_ON;
 	CHECK(sentinel == 0x5a);
 	CHECK(f->get_position() == 8);
 
@@ -399,7 +401,9 @@ TEST_CASE("[FileAccess] PackedByteArray COW stays shared after a failed EOF writ
 	REQUIRE(f->open_custom(original) == OK);
 	f->seek(4);
 	const uint8_t value = 19;
+	ERR_PRINT_OFF;
 	CHECK_FALSE(f->store_buffer(&value, 1));
+	ERR_PRINT_ON;
 	CHECK(f->get_position() == 4);
 	CHECK(original[0] == 3);
 	CHECK(original[3] == 8);
@@ -422,12 +426,16 @@ TEST_CASE("[FileAccess] PackedByteArray partial block I/O preserves bounds") {
 	REQUIRE(f->open_custom(bytes) == OK);
 	f->seek(6);
 	const uint8_t payload[4] = { 10, 20, 30, 40 };
+	ERR_PRINT_OFF;
 	CHECK_FALSE(f->store_buffer(payload, 4));
+	ERR_PRINT_ON;
 	CHECK(f->get_position() == 8);
 
 	f->seek(5);
 	uint8_t output[5] = { 0xa5, 0xa5, 0xa5, 0xa5, 0xa5 };
+	ERR_PRINT_OFF;
 	CHECK(f->get_buffer(output, 5) == 3);
+	ERR_PRINT_ON;
 	CHECK(output[0] == 0);
 	CHECK(output[1] == 10);
 	CHECK(output[2] == 20);
@@ -443,7 +451,9 @@ TEST_CASE("[FileAccess] PackedByteArray resize failure preserves position") {
 	bytes.resize_initialized(4);
 	REQUIRE(f->open_custom(bytes) == OK);
 	f->seek(3);
+	ERR_PRINT_OFF;
 	CHECK(f->resize(-1) != OK);
+	ERR_PRINT_ON;
 	CHECK(f->get_position() == 3);
 	CHECK(f->get_length() == 4);
 }
@@ -460,8 +470,12 @@ TEST_CASE("[FileAccess] PackedByteArray reads and writes never cross EOF") {
 		CHECK(f->get_length() == uint64_t(size));
 		f->seek(size);
 		uint8_t marker = 0xde;
+		// These operations intentionally fail at EOF. Do not emit hundreds
+		// of expected warnings during the sweep.
+		ERR_PRINT_OFF;
 		CHECK(f->get_buffer(&marker, 1) == 0);
 		CHECK_FALSE(f->store_buffer(&marker, 1));
+		ERR_PRINT_ON;
 		CHECK(marker == 0xde);
 		CHECK(f->get_position() == uint64_t(size));
 
