@@ -82,6 +82,49 @@ TEST_CASE("[SceneTree][ImporterMesh] Lightmap unwrap preserves attribute compres
 		}
 	}
 }
+TEST_CASE("[SceneTree][ImporterMesh] Lightmap unwrap preserves independent surface compression flags") {
+	Ref<ImporterMesh> imported;
+	imported.instantiate();
+
+	for (int surface = 0; surface < 2; surface++) {
+		Array arrays;
+		arrays.resize(Mesh::ARRAY_MAX);
+		PackedVector3Array vertices;
+		const float x = surface * 3.0f;
+		vertices.push_back(Vector3(x - 1, -1, 0));
+		vertices.push_back(Vector3(x + 1, -1, 0));
+		vertices.push_back(Vector3(x + 1, 1, 0));
+		vertices.push_back(Vector3(x - 1, 1, 0));
+		PackedVector3Array normals;
+		for (int i = 0; i < 4; i++) {
+			normals.push_back(Vector3(0, 0, 1));
+		}
+		PackedInt32Array indices;
+		for (int index : { 0, 1, 2, 0, 2, 3 }) {
+			indices.push_back(index);
+		}
+		arrays[Mesh::ARRAY_VERTEX] = vertices;
+		arrays[Mesh::ARRAY_NORMAL] = normals;
+		arrays[Mesh::ARRAY_INDEX] = indices;
+
+		const uint64_t flags = surface == 1 ? Mesh::ARRAY_FLAG_COMPRESS_ATTRIBUTES : 0;
+		imported->add_surface(Mesh::PRIMITIVE_TRIANGLES, arrays, TypedArray<Array>(), Dictionary(), Ref<Material>(), String(), flags);
+	}
+	REQUIRE_EQ(imported->get_surface_count(), 2);
+	CHECK_FALSE(imported->get_surface_format(0) & Mesh::ARRAY_FLAG_COMPRESS_ATTRIBUTES);
+	CHECK(imported->get_surface_format(1) & Mesh::ARRAY_FLAG_COMPRESS_ATTRIBUTES);
+
+	for (int iteration = 0; iteration < 2; iteration++) {
+		INFO("Unwrap iteration: ", iteration);
+		Vector<uint8_t> input_cache;
+		Vector<uint8_t> output_cache;
+		REQUIRE_EQ(imported->lightmap_unwrap_cached(Transform3D(), 0.5f, input_cache, output_cache), OK);
+		REQUIRE_EQ(imported->get_surface_count(), 2);
+		CHECK_FALSE(imported->get_surface_format(0) & Mesh::ARRAY_FLAG_COMPRESS_ATTRIBUTES);
+		CHECK(imported->get_surface_format(1) & Mesh::ARRAY_FLAG_COMPRESS_ATTRIBUTES);
+	}
+}
+
 #endif // MODULE_XATLAS_UNWRAP_ENABLED
 
 TEST_CASE("[SceneTree][ArrayMesh] Adding and modifying blendshapes.") {
