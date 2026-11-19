@@ -30,6 +30,7 @@
 #include "core/object/class_db.h"
 
 #include <cmath>
+#include <limits>
 
 bool TerrainHeightmap::_valid_cell(int p_x, int p_z) const {
     return p_x >= 0 && p_z >= 0 && p_x < dimensions.x && p_z < dimensions.y;
@@ -360,6 +361,9 @@ PackedVector3Array TerrainHeightmap::scatter_points(int p_seed, float p_spacing,
 
     const double extent_x = double(dimensions.x - 1) * p_cell_size;
     const double extent_z = double(dimensions.y - 1) * p_cell_size;
+    ERR_FAIL_COND_V_MSG(extent_x > std::numeric_limits<float>::max() ||
+                    extent_z > std::numeric_limits<float>::max(),
+            points, "Terrain extent exceeds representable world coordinates.");
     const double cols_d = Math::ceil(extent_x / p_spacing);
     const double rows_d = Math::ceil(extent_z / p_spacing);
     // Cap the candidate grid before casting to integers to avoid overflow and
@@ -371,17 +375,17 @@ PackedVector3Array TerrainHeightmap::scatter_points(int p_seed, float p_spacing,
     const int cols = int(cols_d);
     const int rows = int(rows_d);
     const float max_slope_tangent = p_max_slope_degrees == 90.0f ?
-            INFINITY : Math::tan(p_max_slope_degrees * float(Math_PI) / 180.0f);
+            INFINITY : Math::tan(p_max_slope_degrees * float(Math::PI) / 180.0f);
 
     const uint32_t seed = uint32_t(p_seed);
     for (int z = 0; z < rows; z++) {
         for (int x = 0; x < cols; x++) {
             const float random_x = terrain_random01(seed, x, z, 1);
             const float random_z = terrain_random01(seed, x, z, 2);
-            const float world_x = float(CLAMP(((x + 0.5f) + (random_x - 0.5f) * p_jitter) *
-                            p_spacing, 0.0, extent_x));
-            const float world_z = float(CLAMP(((z + 0.5f) + (random_z - 0.5f) * p_jitter) *
-                            p_spacing, 0.0, extent_z));
+            const float world_x = float(CLAMP((double(x) + 0.5 + (double(random_x) - 0.5) * p_jitter) *
+                            double(p_spacing), 0.0, extent_x));
+            const float world_z = float(CLAMP((double(z) + 0.5 + (double(random_z) - 0.5) * p_jitter) *
+                            double(p_spacing), 0.0, extent_z));
             const Vector2 grid_pos(world_x / p_cell_size, world_z / p_cell_size);
             const float world_y = sample_height(grid_pos);
             if (world_y < p_min_height || world_y > p_max_height) {
