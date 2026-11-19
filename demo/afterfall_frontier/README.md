@@ -5,7 +5,8 @@ two complementary design philosophies without copying proprietary code,
 artwork, lore, maps, quests or characters:
 
 - **Post-apocalyptic survival:** infected enemies, scavenging, hunger/thirst,
-  field resources, gear, crafting and building/upgrading a persistent shelter
+  field resources, a 20-minute day/night cycle with tougher night infected,
+  gear, crafting and building/upgrading a persistent shelter
   with a protected stash.
 - **Sandbox MMORPG progression:** no fixed character class; equipment decides
   combat style, gathering/crafting/combat professions level independently,
