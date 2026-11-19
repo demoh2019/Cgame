@@ -34,6 +34,9 @@ or third-party plugins are required.
 | 5 | Use field bandage |
 | 6 | Craft reinforced bandage |
 | 7 | Use reinforced bandage |
+| 8 | Craft and equip a rusty spear |
+| 9 | Craft and equip a scrap vest |
+| F | Melee attack (forward hit arc) |
 | R | Restart the scene |
 
 The HUD shows health, hunger, thirst, tiered inventory, profession levels,
@@ -48,6 +51,13 @@ once the relevant skill reaches level 2. Deposits restore after 45 seconds.
 Craft field bandages from 2 fiber T1 (heal 30 HP), or reinforced bandages
 from 2 fiber T2 + 1 fiber T1 (heal 60 HP). Healing cannot be wasted at full HP.
 
+A spear made from 2 wood T1 + 2 stone T1 increases melee damage; a vest
+made from 3 fiber T1 + 2 stone T1 reduces incoming damage by 25%.
+There are four infected with proximity pursuit, contact attacks and
+combat experience rewards. Weapon damage depends on worn equipment, not a
+fixed character class. Additional wood and stone T2 nodes support future gear.
+Current enemy pursuit uses direct movement and can get stuck at obstacles.
+
 These are original classless survival/RPG mechanics, not copied assets,
 economy data or gameplay code from existing games. No MMO networking, PvP,
 save/load, durability or player economy is claimed yet.
@@ -60,7 +70,8 @@ save/load, durability or player economy is claimed yet.
 
 The test verifies scene instantiation, one-time scavenging, inventory consumption,
 stat recovery, resource depletion and respawn, skill tiers, tool requirements,
-advanced crafting, bandage healing and finite position over 10 physics frames.
+advanced crafting, bandage healing, melee combat, armor and finite position
+over 10 physics frames.
 A separate GitHub Actions smoke job exercises the game with official Godot 4.7.2
 for compatibility; use compiled Cgame for engine-specific integration testing.
 
@@ -78,7 +89,7 @@ for compatibility; use compiled Cgame for engine-specific integration testing.
 ## Next vertical slices
 
 1. Persistent inventory, equipment and saving/loading.
-2. Zombie AI using navigation and combat with damage.
+2. Replace basic zombie pursuit with navigation/obstacle avoidance and combat animation.
 3. Data-driven crafting, loot containers, durability and a persistent profession tree.
 4. A larger streaming map with optimized collision and profiling.
 

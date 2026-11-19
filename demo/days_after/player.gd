@@ -1,5 +1,7 @@
 extends CharacterBody3D
 
+signal attack_requested(damage: float, range_meters: float)
+
 ## Days After + classless progression: survival, scavenging, tiered gathering,
 ## crafting and tool-gated access to advanced resources live in the game layer.
 
@@ -14,6 +16,9 @@ const RECIPES := {
     "field_bandage": {"fiber_t1": 2},
     "scavenger_tool": {"wood_t1": 2, "stone_t1": 1},
     "reinforced_bandage": {"fiber_t2": 2, "fiber_t1": 1},
+    "rusty_spear": {"wood_t1": 2, "stone_t1": 2},
+    "scrap_vest": {"fiber_t1": 3, "stone_t1": 2},
+    "reinforced_spear": {"wood_t2": 2, "stone_t2": 2, "fiber_t1": 1},
 }
 
 var health: float = 100.0
@@ -23,6 +28,10 @@ var inventory: Dictionary = {}
 var gathering_xp: Dictionary = {"wood": 0, "stone": 0, "fiber": 0}
 var crafting_xp: int = 0
 var equipped_tool: String = ""
+var equipped_weapon: String = ""
+var equipped_armor: String = ""
+var combat_xp: int = 0
+var attack_cooldown: float = 0.0
 var last_message: String = "Ищите припасы, сырьё и создавайте снаряжение."
 
 @onready var camera: Camera3D = $Head/Camera3D
@@ -60,6 +69,7 @@ func _physics_process(delta: float) -> void:
     velocity.z = direction.z * move_speed if health > 0.0 else 0.0
     move_and_slide()
 
+    attack_cooldown = maxf(0.0, attack_cooldown - delta)
     if health <= 0.0:
         return
     hunger = maxf(0.0, hunger - 0.24 * delta)
@@ -67,6 +77,12 @@ func _physics_process(delta: float) -> void:
     if hunger <= 0.0 or thirst <= 0.0:
         health = maxf(0.0, health - 3.0 * delta)
 
+    if Input.is_action_just_pressed("attack"):
+        perform_attack()
+    if Input.is_action_just_pressed("craft_spear"):
+        craft_recipe("rusty_spear")
+    if Input.is_action_just_pressed("craft_vest"):
+        craft_recipe("scrap_vest")
     if Input.is_action_just_pressed("interact"):
         var target := get_aimed_pickup()
         if target != null:
@@ -171,8 +187,13 @@ func craft_recipe(recipe_id: String) -> bool:
         inventory[item_id] = get_item_count(str(item_id)) - int(ingredients[item_id])
     add_item(recipe_id, 1)
     crafting_xp += 20
-    if recipe_id == "scavenger_tool":
-        equipped_tool = recipe_id
+    match recipe_id:
+        "scavenger_tool":
+            equipped_tool = recipe_id
+        "rusty_spear", "reinforced_spear":
+            equipped_weapon = recipe_id
+        "scrap_vest":
+            equipped_armor = recipe_id
     last_message = "Создано: %s | опыт ремесла: %d" % [recipe_id, crafting_xp]
     return true
 
@@ -188,3 +209,57 @@ func use_bandage(item_id: String) -> bool:
     health = minf(100.0, health + (60.0 if item_id == "reinforced_bandage" else 30.0))
     last_message = "Раны обработаны: %s." % item_id
     return true
+
+
+func equip_item(slot: String, item_id: String) -> bool:
+    if get_item_count(item_id) <= 0 or health <= 0.0:
+        return false
+    match slot:
+        "tool":
+            if item_id != "scavenger_tool":
+                return false
+            equipped_tool = item_id
+        "weapon":
+            if item_id != "rusty_spear" and item_id != "reinforced_spear":
+                return false
+            equipped_weapon = item_id
+        "armor":
+            if item_id != "scrap_vest":
+                return false
+            equipped_armor = item_id
+        _:
+            return false
+    last_message = "Экипировано: %s" % item_id
+    return true
+
+
+func get_attack_damage() -> float:
+    match equipped_weapon:
+        "rusty_spear":
+            return 32.0
+        "reinforced_spear":
+            return 52.0
+        _:
+            return 12.0
+
+
+func perform_attack() -> bool:
+    if health <= 0.0 or attack_cooldown > 0.0:
+        return false
+    attack_cooldown = 0.65
+    attack_requested.emit(get_attack_damage(), 2.7)
+    return true
+
+
+func take_damage(raw_amount: float) -> void:
+    if health <= 0.0 or raw_amount <= 0.0:
+        return
+    var reduction: float = 0.25 if equipped_armor == "scrap_vest" else 0.0
+    health = maxf(0.0, health - raw_amount * (1.0 - reduction))
+    if health <= 0.0:
+        last_message = "Вы погибли. Нажмите R для перезапуска."
+
+
+func gain_combat_xp(amount: int) -> void:
+    if amount > 0:
+        combat_xp += amount
