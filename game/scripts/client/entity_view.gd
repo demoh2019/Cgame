@@ -25,6 +25,9 @@ func update_from(client) -> void:
 	for id in client.bags:
 		var e: Dictionary = client.bags[id]
 		_touch("bag:%d" % id, "bag", e, seen, client)
+	for id in client.barricades:
+		var e: Dictionary = client.barricades[id]
+		_touch("barricade:%d" % id, "barricade", e, seen, client)
 	for key in _nodes.keys():
 		if not seen.has(key):
 			_nodes[key].queue_free()
@@ -45,6 +48,10 @@ func _touch(key: String, kind: String, entity: Dictionary, seen: Dictionary, _cl
 			label.text = "%s  %d" % [entity["type"], int(entity["hp"])]
 		elif kind == "player":
 			label.text = str(entity["name"]) if entity["alive"] else "%s (dead)" % entity["name"]
+	if kind == "barricade":
+		var mesh: MeshInstance3D = _nodes[key].get_child(0)
+		var mat: StandardMaterial3D = mesh.material_override
+		mat.albedo_color = Color(0.26, 0.19, 0.16).lerp(Color(0.6, 0.45, 0.27), clampf(float(entity.get("hp", 0.0)) / 120.0, 0.0, 1.0))
 	if kind == "zombie":
 		var body: MeshInstance3D = _nodes[key].get_node("Body")
 		var material: StandardMaterial3D = body.material_override
@@ -54,6 +61,17 @@ func _touch(key: String, kind: String, entity: Dictionary, seen: Dictionary, _cl
 
 func _make(kind: String, entity: Dictionary) -> Node3D:
 	var root := Node3D.new()
+	if kind == "barricade":
+		var mesh := MeshInstance3D.new()
+		var barrier := BoxMesh.new()
+		barrier.size = Vector3(1.7, 1.6, 1.7)
+		mesh.mesh = barrier
+		mesh.position.y = 0.8
+		var material := StandardMaterial3D.new()
+		material.albedo_color = Color(0.6, 0.45, 0.27)
+		mesh.material_override = material
+		root.add_child(mesh)
+		return root
 	if kind == "bag":
 		var mesh := MeshInstance3D.new()
 		mesh.mesh = Meshes.get_mesh("bag")
