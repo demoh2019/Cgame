@@ -482,8 +482,16 @@ func cmd_party_kick(peer_id: int, target_id: int) -> Dictionary:
 	return parties.kick(peer_id, target_id)
 
 
+func cmd_party_rally(peer_id: int) -> Dictionary:
+	var player: Player = players.get(peer_id)
+	if player == null or not _alive(player):
+		return {"ok": false, "reason": "dead"}
+	# Position comes from the authoritative player model, not any RPC argument.
+	return parties.mark_rally(peer_id, player.position, time)
+
+
 func _party_state_for(peer_id: int) -> Dictionary:
-	var state: Dictionary = parties.state_for(peer_id)
+	var state: Dictionary = parties.state_for(peer_id, time)
 	var roster: Array = []
 	for id in state["members"]:
 		var member: Player = players.get(id)

@@ -335,6 +335,13 @@ func c_party_leave() -> void:
 
 
 @rpc("any_peer", "reliable")
+func c_party_rally() -> void:
+	var peer := multiplayer.get_remote_sender_id()
+	if _allowed(peer):
+		s_result.rpc_id(peer, "rally", sim.cmd_party_rally(peer))
+
+
+@rpc("any_peer", "reliable")
 func c_party_kick(target_id: int) -> void:
 	var peer := multiplayer.get_remote_sender_id()
 	if _allowed(peer):

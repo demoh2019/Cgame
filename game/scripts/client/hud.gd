@@ -288,6 +288,11 @@ func _build() -> void:
 	leave_party.text = "Leave"
 	leave_party.pressed.connect(func() -> void: client.party_leave())
 	party_buttons.add_child(leave_party)
+	var rally_button := Button.new()
+	rally_button.text = "Set rally"
+	rally_button.tooltip_text = "Leader only: signal your current server position for 45 seconds"
+	rally_button.pressed.connect(func() -> void: client.party_rally())
+	party_buttons.add_child(rally_button)
 	var kick_member := Button.new()
 	kick_member.text = "Kick"
 	kick_member.pressed.connect(func() -> void:
@@ -528,6 +533,12 @@ func _sell_one_material() -> void:
 
 
 func _on_result(kind: String, data: Dictionary) -> void:
+	if kind == "rally":
+		if bool(data.get("ok", false)):
+			say("Party rally active for 45 seconds. Only teammates see the marker.")
+		else:
+			say("Party rally: " + str(data.get("reason", "rejected")))
+		return
 	if kind == "party":
 		if bool(data.get("ok", false)):
 			say("Party updated. Member lists appear in the next server snapshot.")
@@ -659,6 +670,10 @@ func _process(_delta: float) -> void:
 	var journal: Variant = client.you.get("contract", Contracts.empty_state())
 	_contract_label.text = Contracts.description(journal if journal is Dictionary else Contracts.empty_state())
 	_info_label.text += "  Rest %.0fs" % float(client.you.get("rest_cooldown", 0.0))
+	var rally: Dictionary = client.you.get("party", {}).get("rally", {})
+	if not rally.is_empty():
+		_info_label.text += "\nPARTY RALLY x%d z%d | %ds left" % [
+			int(rally["x"]), int(rally["z"]), int(ceil(float(rally["remaining"])))]
 	var fishing_status: String = FishingDisplay.progress(client.you.get("action", {}))
 	if not fishing_status.is_empty():
 		_info_label.text += "\n" + fishing_status
@@ -718,6 +733,10 @@ func _refresh_party_controls() -> void:
 		_party_status.text = "Party %d (%d/5): %s" % [group_id, roster.size(), ", ".join(names)]
 	if int(state.get("invite_from", 0)) > 0:
 		_party_status.text += "\nInvitation from " + str(state.get("invite_name", "Survivor"))
+	var rally: Dictionary = state.get("rally", {})
+	if not rally.is_empty():
+		_party_status.text += "\nRally: x%d z%d (%d seconds)" % [
+			int(rally["x"]), int(rally["z"]), int(ceil(float(rally["remaining"])))]
 	var nearby: Array = []
 	for peer in client.players.values():
 		nearby.append([int(peer["id"]), str(peer.get("name", "Survivor"))])

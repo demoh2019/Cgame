@@ -221,6 +221,10 @@ func party_kick(target_id: int) -> void:
 	net.c_party_kick.rpc_id(1, target_id)
 
 
+func party_rally() -> void:
+	net.c_party_rally.rpc_id(1)
+
+
 func trade_invite(target_id: int) -> void:
 	net.c_trade_invite.rpc_id(1, target_id)
 

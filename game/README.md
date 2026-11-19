@@ -1088,3 +1088,19 @@ contribution cannot generate shared XP.
 roster changes, PvP hit selection, XP limits and exploit rejections.
 This is cooperative PvE progression, not an automated loot distribution
 or guild/clan replacement.
+
+## Party rally beacon (group coordination)
+
+A formed expedition party can mark a temporary **rally point** using
+**Set rally** in the online **I** inventory menu. Only its leader can place
+a marker, and the position comes from the leader's actual server-side
+character coordinates — there is no client-supplied map position to forge.
+The party sees the shared blue 3D waypoint plus its X/Z coordinates and
+remaining lifetime. It lasts 45 seconds and can be refreshed only once
+per 12 seconds. Solo players, non-leaders and outsiders cannot place or
+observe group markers, even if they stand nearby. A party disband or
+expiration hides the waypoint; markers do not survive server restarts.
+
+This is separate from guild territory claims and loot rights. Existing
+Godot/Cgame script and scene APIs are sufficient. Regression tests:
+`game/tests/test_party_rally.gd` in the canonical headless runner.
