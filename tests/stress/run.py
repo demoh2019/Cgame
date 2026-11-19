@@ -86,6 +86,11 @@ def macos_ps_rss_mib(pid: int) -> float | None:
         return None
 
 
+def sampling_interval_seconds(operating_system: str, psutil_available: bool) -> float:
+    """Reduce ps subprocess overhead on macOS without psutil."""
+    return 0.25 if operating_system == "darwin" and not psutil_available else 0.05
+
+
 def cpu_seconds(pid: int) -> float | None:
     """CPU user+system seconds, sampled while the child is alive."""
     try:
@@ -157,6 +162,12 @@ def run_once(cmd: list[str], timeout: float, rss_limit_mib: float,
              case: str, scale: int, frames: int, seed: int,
              require_marker: bool = True) -> dict[str, Any]:
     start = time.monotonic()
+    try:
+        import psutil  # type: ignore[import-not-found]
+        psutil_available = True
+    except ImportError:
+        psutil_available = False
+    sample_interval = sampling_interval_seconds(sys.platform, psutil_available)
     maximum_rss: float | None = None
     latest_cpu: float | None = None
     peak_processes = 0
@@ -187,7 +198,7 @@ def run_once(cmd: list[str], timeout: float, rss_limit_mib: float,
             if failure is not None:
                 kill_group(process)
                 break
-            time.sleep(0.05)
+            time.sleep(sample_interval)
         process.wait()
         elapsed = time.monotonic() - start
         # Avoid unbounded RAM usage when a child emits a large error log.
