@@ -30,6 +30,7 @@
 TEST_FORCE_LINK(test_physics_xpbd_cloth_fiber)
 
 #include "servers/physics_xpbd_cloth_fiber.h"
+#include "servers/physics_xpbd_distance.h"
 
 #include <limits>
 
@@ -104,6 +105,32 @@ TEST_CASE("[Physics] Orthotropic cloth rejects degenerate and nonfinite input wi
 			std::numeric_limits<real_t>::max(), alpha));
 	CHECK(Math::is_finite(alpha));
 	CHECK(alpha == std::numeric_limits<real_t>::max());
+}
+
+TEST_CASE("[Physics] Orthotropic cloth XPBD stretch actually resists warp more than weft") {
+	const Vector3 origin;
+	const Vector3 axis(1, 0, 0);
+	const real_t ratio = real_t(0.25);
+	const real_t alpha_base = real_t(1.0); // compliance / dt^2
+	real_t warp_alpha = alpha_base, weft_alpha = alpha_base;
+	REQUIRE(physics_xpbd_cloth_fiber_alpha(origin, Vector3(1, 0, 0),
+			axis, ratio, alpha_base, warp_alpha));
+	REQUIRE(physics_xpbd_cloth_fiber_alpha(origin, Vector3(0, 1, 0),
+			axis, ratio, alpha_base, weft_alpha));
+	CHECK(warp_alpha < weft_alpha);
+
+	Vector3 pinned_warp = origin, pinned_weft = origin;
+	Vector3 stretched_warp(1.2, 0, 0), stretched_weft(0, 1.2, 0);
+	real_t warp_lambda = 0.0, weft_lambda = 0.0;
+	REQUIRE(physics_xpbd_solve_distance(pinned_warp, stretched_warp,
+			0.0, 1.0, 1.0, warp_alpha, warp_lambda));
+	REQUIRE(physics_xpbd_solve_distance(pinned_weft, stretched_weft,
+			0.0, 1.0, 1.0, weft_alpha, weft_lambda));
+	CHECK(pinned_warp == origin);
+	CHECK(pinned_weft == origin);
+	CHECK(stretched_warp.length() < stretched_weft.length());
+	CHECK(stretched_warp.length() > real_t(0.99));
+	CHECK(stretched_weft.length() < real_t(1.2));
 }
 
 } // namespace TestPhysicsXPBDClothFiber
