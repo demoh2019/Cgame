@@ -54,6 +54,22 @@ class _WARN_UNUSED_ RingBuffer {
 		}
 	}
 
+	// libc's byte search is much faster on large byte spans; other T keep exact == semantics.
+	static _FORCE_INLINE_ int find_block(const T *p_data, const T &p_value, int p_count) {
+		if constexpr (std::is_integral_v<T> && sizeof(T) == 1) {
+			if (p_count >= 16) {
+				const T *found = static_cast<const T *>(std::memchr(p_data, static_cast<unsigned char>(p_value), size_t(p_count)));
+				return found ? int(found - p_data) : -1;
+			}
+		}
+		for (int i = 0; i < p_count; i++) {
+			if (p_data[i] == p_value) {
+				return i;
+			}
+		}
+		return -1;
+	}
+
 	inline int inc(int &p_var, int p_size) const {
 		int ret = p_var;
 		p_var += p_size;
@@ -68,22 +84,15 @@ public:
 	}
 
 	int read(T *p_buf, int p_size, bool p_advance = true) {
-		int left = data_left();
-		p_size = MIN(left, p_size);
+		p_size = MIN(data_left(), p_size);
 		if (p_size <= 0) {
 			return 0;
 		}
-		int pos = read_pos;
-		int to_read = p_size;
-		int dst = 0;
-		while (to_read) {
-			int end = pos + to_read;
-			end = MIN(end, size());
-			int total = end - pos;
-			copy_block(p_buf + dst, data.ptr() + pos, total);
-			dst += total;
-			to_read -= total;
-			pos = 0;
+		// A circular buffer has at most two contiguous spans. Avoid the loop in the hot path.
+		const int first = MIN(p_size, size() - read_pos);
+		copy_block(p_buf, data.ptr() + read_pos, first);
+		if (first < p_size) {
+			copy_block(p_buf + first, data.ptr(), p_size - first);
 		}
 		if (p_advance) {
 			inc(read_pos, p_size);
@@ -92,56 +101,41 @@ public:
 	}
 
 	int copy(T *p_buf, int p_offset, int p_size) const {
-		int left = data_left();
-		if ((p_offset + p_size) > left) {
-			p_size = left - p_offset;
-			if (p_size <= 0) {
-				return 0;
-			}
-		}
-		p_size = MIN(left, p_size);
-		if (p_size <= 0) {
+		const int left = data_left();
+		if (p_offset < 0 || p_offset >= left || p_size <= 0) {
 			return 0;
 		}
+		// Subtract instead of p_offset + p_size to avoid signed overflow.
+		p_size = MIN(p_size, left - p_offset);
 		int pos = read_pos;
 		inc(pos, p_offset);
-		int to_read = p_size;
-		int dst = 0;
-		while (to_read) {
-			int end = pos + to_read;
-			end = MIN(end, size());
-			int total = end - pos;
-			copy_block(p_buf + dst, data.ptr() + pos, total);
-			dst += total;
-			to_read -= total;
-			pos = 0;
+		const int first = MIN(p_size, size() - pos);
+		copy_block(p_buf, data.ptr() + pos, first);
+		if (first < p_size) {
+			copy_block(p_buf + first, data.ptr(), p_size - first);
 		}
 		return p_size;
 	}
 
 	int find(const T &p_value, int p_offset, int p_max_size) const {
-		int left = data_left();
-		if ((p_offset + p_max_size) > left) {
-			p_max_size = left - p_offset;
-			if (p_max_size <= 0) {
-				return 0;
-			}
+		const int left = data_left();
+		if (p_offset < 0 || p_offset >= left || p_max_size <= 0) {
+			return -1;
 		}
-		p_max_size = MIN(left, p_max_size);
+		// Keep offsets bounded without overflowing on large search limits.
+		p_max_size = MIN(p_max_size, left - p_offset);
 		int pos = read_pos;
 		inc(pos, p_offset);
-		int to_read = p_max_size;
-		while (to_read) {
-			int end = pos + to_read;
-			end = MIN(end, size());
-			int total = end - pos;
-			for (int i = 0; i < total; i++) {
-				if (data[pos + i] == p_value) {
-					return i + (p_max_size - to_read);
-				}
+		const int first = MIN(p_max_size, size() - pos);
+		const int first_match = find_block(data.ptr() + pos, p_value, first);
+		if (first_match >= 0) {
+			return first_match;
+		}
+		if (first < p_max_size) {
+			const int second_match = find_block(data.ptr(), p_value, p_max_size - first);
+			if (second_match >= 0) {
+				return first + second_match;
 			}
-			to_read -= total;
-			pos = 0;
 		}
 		return -1;
 	}
@@ -165,26 +159,15 @@ public:
 	}
 
 	int write(const T *p_buf, int p_size) {
-		int left = space_left();
-		p_size = MIN(left, p_size);
+		p_size = MIN(space_left(), p_size);
 		if (p_size <= 0) {
 			return 0;
 		}
-
-		int pos = write_pos;
-		int to_write = p_size;
-		int src = 0;
-		while (to_write) {
-			int end = pos + to_write;
-			end = MIN(end, size());
-			int total = end - pos;
-
-			copy_block(data.ptr() + pos, p_buf + src, total);
-			src += total;
-			to_write -= total;
-			pos = 0;
+		const int first = MIN(p_size, size() - write_pos);
+		copy_block(data.ptr() + write_pos, p_buf, first);
+		if (first < p_size) {
+			copy_block(data.ptr(), p_buf + first, p_size - first);
 		}
-
 		inc(write_pos, p_size);
 		return p_size;
 	}
