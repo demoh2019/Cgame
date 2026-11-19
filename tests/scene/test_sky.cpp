@@ -34,9 +34,30 @@ TEST_FORCE_LINK(test_sky)
 
 #ifndef _3D_DISABLED
 
+#include "core/config/project_settings.h"
 #include "scene/resources/sky.h"
 
 namespace TestSky {
+
+TEST_CASE("[SceneTree][Sky] Reflection roughness layer range") {
+	const String setting = "rendering/reflections/sky_reflections/roughness_layers";
+	ProjectSettings *settings = ProjectSettings::get_singleton();
+	REQUIRE(settings != nullptr);
+	REQUIRE(settings->has_setting(setting));
+
+	List<PropertyInfo> properties;
+	settings->get_property_list(&properties);
+	bool found = false;
+	for (const PropertyInfo &property : properties) {
+		if (property.name == setting) {
+			found = true;
+			CHECK(property.hint == PROPERTY_HINT_RANGE);
+			CHECK(property.hint_string == "2,32,1");
+		}
+	}
+	CHECK(found);
+}
+
 
 TEST_CASE("[SceneTree][Sky] Constructor") {
 	Ref<Sky> test_sky;

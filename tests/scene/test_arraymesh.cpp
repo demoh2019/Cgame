@@ -34,11 +34,83 @@ TEST_FORCE_LINK(test_arraymesh)
 
 #ifndef _3D_DISABLED
 
+#include "core/os/memory.h"
+#include "scene/resources/3d/importer_mesh.h"
 #include "scene/resources/3d/primitive_meshes.h"
 #include "scene/resources/mesh.h"
 #include "servers/rendering/rendering_server.h"
 
+// Use a deterministic unwrap callback to test ImporterMesh independently of xatlas.
+extern bool (*array_mesh_lightmap_unwrap_callback)(float, const float *, const float *, int, const int *, int, const uint8_t *, bool *, uint8_t **, int *, float **, int **, int *, int **, int *, int *, int *);
+
 namespace TestArrayMesh {
+
+static bool test_unwrap_passthrough(float, const float *, const float *, int p_vertex_count, const int *p_indices, int p_index_count, const uint8_t *, bool *r_use_cache, uint8_t **r_mesh_cache, int *r_mesh_cache_size, float **r_uv, int **r_vertex, int *r_vertex_count, int **r_index, int *r_index_count, int *r_size_hint_x, int *r_size_hint_y) {
+	*r_use_cache = false;
+	*r_mesh_cache = nullptr;
+	*r_mesh_cache_size = 0;
+	*r_vertex_count = p_vertex_count;
+	*r_index_count = p_index_count;
+	*r_size_hint_x = 4;
+	*r_size_hint_y = 4;
+	*r_uv = static_cast<float *>(memalloc(sizeof(float) * p_vertex_count * 2));
+	*r_vertex = static_cast<int *>(memalloc(sizeof(int) * p_vertex_count));
+	*r_index = static_cast<int *>(memalloc(sizeof(int) * p_index_count));
+	for (int i = 0; i < p_vertex_count; i++) {
+		(*r_vertex)[i] = i;
+		(*r_uv)[i * 2] = (i == 1) ? 1.0f : 0.0f;
+		(*r_uv)[i * 2 + 1] = (i == 2) ? 1.0f : 0.0f;
+	}
+	for (int i = 0; i < p_index_count; i++) {
+		(*r_index)[i] = p_indices[i];
+	}
+	return true;
+}
+
+TEST_CASE("[SceneTree][ImporterMesh] Lightmap unwrap preserves vertex compression") {
+	for (bool compressed : { false, true }) {
+		for (bool indexed : { false, true }) {
+			INFO("compressed: ", compressed, ", indexed: ", indexed);
+			Array arrays;
+			arrays.resize(Mesh::ARRAY_MAX);
+			PackedVector3Array vertices;
+			vertices.push_back(Vector3(0, 0, 0));
+			vertices.push_back(Vector3(1, 0, 0));
+			vertices.push_back(Vector3(0, 1, 0));
+			arrays[Mesh::ARRAY_VERTEX] = vertices;
+			PackedVector3Array normals;
+			for (int i = 0; i < 3; i++) {
+				normals.push_back(Vector3(0, 0, 1));
+			}
+			arrays[Mesh::ARRAY_NORMAL] = normals;
+			if (indexed) {
+				PackedInt32Array indices;
+				indices.push_back(0);
+				indices.push_back(1);
+				indices.push_back(2);
+				arrays[Mesh::ARRAY_INDEX] = indices;
+			}
+
+			Ref<ImporterMesh> mesh;
+			mesh.instantiate();
+			const uint64_t flags = compressed ? Mesh::ARRAY_FLAG_COMPRESS_ATTRIBUTES : 0;
+			mesh->add_surface(Mesh::PRIMITIVE_TRIANGLES, arrays, TypedArray<Array>(), Dictionary(), Ref<Material>(), "triangle", flags);
+			auto original_callback = array_mesh_lightmap_unwrap_callback;
+			array_mesh_lightmap_unwrap_callback = test_unwrap_passthrough;
+			Vector<uint8_t> cache;
+			Vector<uint8_t> result_cache;
+			const Error err = mesh->lightmap_unwrap_cached(Transform3D(), 0.05f, cache, result_cache);
+			array_mesh_lightmap_unwrap_callback = original_callback;
+
+			REQUIRE(err == OK);
+			REQUIRE(mesh->get_surface_count() == 1);
+			CHECK(((mesh->get_surface_format(0) & Mesh::ARRAY_FLAG_COMPRESS_ATTRIBUTES) != 0) == compressed);
+			CHECK(mesh->get_surface_name(0) == "triangle");
+			CHECK(mesh->get_surface_arrays(0)[Mesh::ARRAY_VERTEX].get_type() == Variant::PACKED_VECTOR3_ARRAY);
+		}
+	}
+}
+
 
 TEST_CASE("[SceneTree][ArrayMesh] Adding and modifying blendshapes.") {
 	Ref<ArrayMesh> mesh;
