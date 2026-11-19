@@ -65,6 +65,17 @@ void BitMap::create_from_image_alpha(const Ref<Image> &p_image, float p_threshol
 	uint8_t *w = bitmask.ptrw();
 	const int pixels = width * height;
 
+	// Small alpha masks avoid the cutoff setup and are often used for
+	// tiny collision and navigation resources.
+	if (pixels < 256) {
+		for (int i = 0; i < pixels; i++) {
+			if (r[i * 2 + 1] / 255.0 > p_threshold) {
+				w[i >> 3] |= uint8_t(1u << (i & 7));
+			}
+		}
+		return;
+	}
+
 	// Alpha has only 256 discrete values. Find the first value satisfying
 	// the original floating-point comparison once, rather than dividing
 	// every pixel by 255. This also preserves NaN/negative thresholds.
@@ -73,9 +84,23 @@ void BitMap::create_from_image_alpha(const Ref<Image> &p_image, float p_threshol
 		first_opaque_alpha++;
 	}
 
-	// Assemble eight destination bits at a time, using sequential reads
-	// of the LA8 image. The final partial byte was zeroed by create().
+	// All transparent and all opaque inputs can be handled in one fill.
+	// Preserve the zeroed padding bits in the final partial byte.
 	const int full_bytes = pixels >> 3;
+	const int remaining = pixels & 7;
+	if (first_opaque_alpha == 256) {
+		return;
+	}
+	if (first_opaque_alpha == 0) {
+		memset(w, 0xff, full_bytes);
+		if (remaining > 0) {
+			w[full_bytes] = uint8_t((1u << remaining) - 1);
+		}
+		return;
+	}
+
+	// Assemble eight destination bits at a time, using sequential reads
+	// of the LA8 image.
 	for (int byte_index = 0; byte_index < full_bytes; byte_index++) {
 		const uint8_t *alpha = r + (byte_index << 4) + 1;
 		uint8_t packed = 0;
@@ -84,7 +109,6 @@ void BitMap::create_from_image_alpha(const Ref<Image> &p_image, float p_threshol
 		}
 		w[byte_index] = packed;
 	}
-	const int remaining = pixels & 7;
 	if (remaining > 0) {
 		const uint8_t *alpha = r + (full_bytes << 4) + 1;
 		uint8_t packed = 0;
