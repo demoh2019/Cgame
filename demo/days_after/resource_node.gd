@@ -62,3 +62,22 @@ func _restore() -> void:
     depleted = false
     visible = true
     set_deferred("collision_layer", 1)
+
+
+func persistence_snapshot() -> Dictionary:
+    return {
+        "depleted": depleted,
+        "remaining_seconds": _respawn_timer.time_left if depleted else 0.0
+    }
+
+
+func restore_persistence_snapshot(was_depleted: bool, remaining_seconds: float) -> void:
+    # Called only after world_state.gd validates the entire save.
+    _respawn_timer.stop()
+    if was_depleted and remaining_seconds > 0.0:
+        depleted = true
+        visible = false
+        set_deferred("collision_layer", 0)
+        _respawn_timer.start(remaining_seconds)
+    else:
+        _restore()
