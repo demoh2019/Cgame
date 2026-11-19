@@ -1613,27 +1613,28 @@ The tests check finite body states and joint spacing, not physical
 equivalence to the serial solver or measured performance improvements.
 Start with small scales and monitor CPU usage, peak RSS and frame p95.
 
-### Axis-aligned 3D box-box SAT fast path
+### Shared-rotation 3D box-box SAT axis deduplication
 
-GodotPhysics3D's box-box narrow phase traditionally tests three face axes
-from each box and nine cross-edge axes (15 candidates), even when both
-boxes are exactly world-axis aligned. In that case the duplicate face axes
-and nonzero cross products are equivalent to the three world-space
-separating axes X, Y and Z.
+GodotPhysics3D checks up to **15 separating axes** when testing two
+oriented boxes: three face axes from each box and nine edge-cross
+axes. For two boxes with the **same orthonormal orientation** (including
+identity), all nonzero axes reduce to the same three independent face
+directions. The narrowphase now checks those three axes once, instead
+of redundant projections, and keeps the original manifold generator.
 
-The new `_collision_box_box` fast path tests each axis once and then uses
-the **existing contact manifold generator**. This is safe only when both
-`Transform3D.basis` values are *exactly* `Basis()` and neither shape has
-collision margins. Rotated, scaled, sheared, or margin-expanded boxes
-continue through the full generic SAT procedure. The previously cached
-separation axis is still tested first, and no allocation or new physics
-setting is introduced.
+The shortcut requires **exact equality** of the two `Basis` values,
+`Basis::is_rotation()` for the shared orientation (or exact identity),
+and **zero collision margins**. If the boxes differ in orientation,
+are scaled/sheared, or use margin-expanded geometry, the full SAT path
+remains active. The existing cached separation axis is tested first.
+This change requires no new project setting or scratch allocations.
 
-The Python reference compares three-axis and generic 15-axis overlap tests
-for more than 5,000 deterministic 3D box pairs, including touching and
-non-overlapping cases. The headless Godot test compares axis-aligned and
-equivalently rotated query boxes, using both `intersect_shape` and
-`collide_shape` to exercise the actual contact generator.
+The Python reference covers more than **10,000** box pairs: identity
+and randomized shared-rotation comparisons against the complete set
+of 15 SAT axes. The headless query regression tests three cases:
+identity, matching nonzero rotation, and two different rotations.
+`intersect_shape` and `collide_shape` additionally test that the
+contact manifold still generates finite positions:
 
 ```bash
 python3 -m unittest discover -s tests/stress -p 'test_physics_3d_axis_aligned_box_sat.py' -v
@@ -1641,22 +1642,23 @@ python3 -m unittest discover -s tests/stress -p 'test_physics_3d_axis_aligned_bo
   --script res://physics_box_box_sat_3d_regression.gd
 ```
 
-For repeatable performance measurements compare the same 256
-static+rigid box pairs per scale with identity and rotated bases. Both
-scenarios reapply a slightly changing overlap each frame to avoid only
-measuring persistent manifold caching:
+Compare the three stress cases on the **same engine build**: unrotated
+fast path, shared nonzero rotation fast path, and different relative
+rotations through the generic 15-axis SAT. They create the same 256
+static/dynamic box pairs per scale and repeatedly update their contacts:
 
 ```bash
 python3 tests/stress/run.py --godot ./bin/godot.macos.editor.arm64 \
-  --case physics_box_box_axis_aligned_3d,physics_box_box_rotated_3d \
+  --case physics_box_box_axis_aligned_3d,physics_box_box_rotated_3d,physics_box_box_misaligned_3d \
   --scale 4 --frames 90 --repeats 5 --timeout 600 \
   --rss-limit-mib 4096 --output out/physics-box-sat-3d.json
 ```
 
-This does not establish a speedup without a compiled before/after benchmark,
-and rotated scenes naturally have some additional transform overhead.
-Compare both workloads across the same two engine builds for a reliable
-estimate of the optimization's contribution.
+These workloads also differ in collision geometry, so measure each
+scenario against the corresponding *pre-change* engine build before
+attributing an observed performance difference to this shortcut.
+Only compiling and executing the tests can establish real performance
+and correctness of the implementation.
 
 ## Idempotent static-body transform updates (GodotPhysics2D / GodotPhysics3D)
 
