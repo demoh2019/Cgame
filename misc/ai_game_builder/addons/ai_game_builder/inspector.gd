@@ -72,3 +72,17 @@ static func repair_prompt(original_request: String, candidate: Dictionary, probl
 		"STATIC DIAGNOSTICS:\n" + JSON.stringify(problems) + "\n\n" +
 		"PREVIOUS PLAN:\n" + JSON.stringify(candidate)
 	)
+
+
+static func refine_prompt(original_request: String, change_request: String, candidate: Dictionary) -> String:
+	# Refinement does not touch files. A complete regenerated plan is inspected
+	# and explicitly approved before Writer.apply() can be called.
+	return (
+		"Improve the following Godot 4 game. Return a COMPLETE replacement JSON " +
+		"plan (not a patch) in the original schema. Preserve working features " +
+		"unless the new request explicitly changes them. Keep the game self-contained " +
+		"within res://ai_generated/ and obey every system constraint.\n\n" +
+		"ORIGINAL GAME DESCRIPTION:\n" + original_request + "\n\n" +
+		"NEW CHANGES:\n" + change_request + "\n\n" +
+		"CURRENT GENERATED FILES:\n" + JSON.stringify(candidate)
+	)
