@@ -1,0 +1,102 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<class name="TerrainHeightmap" inherits="Resource" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="../../../doc/class.xsd">
+    <brief_description>
+        Stores an editable height field and four terrain paint layers, and generates a mesh.
+    </brief_description>
+    <description>
+        [TerrainHeightmap] provides a serializable foundation for terrain creation. Heights are stored in row-major order (X first, then Z); each grid cell has four normalized paint weights in its RGBA channels. Use [method build_mesh] to construct an [ArrayMesh] with vertex colors containing the paint weights. The consuming material must interpret vertex colors as blend weights.
+        Brush coordinates and radii are in grid-cell units. The emitted [signal Resource.changed] signal indicates that the resource changed; an existing mesh must be regenerated explicitly.
+        This class does not implement terrain chunk streaming, a viewport brush editor, vegetation, physics collision, or GPU virtual texturing.
+    </description>
+    <tutorials>
+    </tutorials>
+    <methods>
+        <method name="build_mesh" qualifiers="const">
+            <return type="ArrayMesh" />
+            <param index="0" name="cell_size" type="float" default="1.0" />
+            <description>
+                Builds an indexed triangle mesh using the height field, central-difference normals, normalized UVs, and vertex colors containing the terrain paint weights. Grid cells have a spacing of [param cell_size] world units. Returns [code]null[/code] if [param cell_size] is not positive and finite.
+            </description>
+        </method>
+        <method name="erode_talus">
+            <return type="void" />
+            <param index="0" name="iterations" type="int" />
+            <param index="1" name="talus" type="float" />
+            <param index="2" name="rate" type="float" />
+            <description>
+                Performs deterministic, conservative thermal erosion over a four-neighbor grid. Each iteration moves a fraction of the height difference exceeding [param talus] toward the steepest lower neighbor. [param rate] must be between 0 and 1, and [param iterations] must be between 0 and 1000. This is not hydraulic erosion.
+            </description>
+        </method>
+        <method name="get_height_at" qualifiers="const">
+            <return type="float" />
+            <param index="0" name="x" type="int" />
+            <param index="1" name="z" type="int" />
+            <description>
+                Returns the height of the cell at [param x] and [param z].
+            </description>
+        </method>
+        <method name="get_paint_at" qualifiers="const">
+            <return type="Color" />
+            <param index="0" name="x" type="int" />
+            <param index="1" name="z" type="int" />
+            <description>
+                Returns the normalized RGBA weights for the four paint layers at a cell.
+            </description>
+        </method>
+        <method name="paint_layer">
+            <return type="void" />
+            <param index="0" name="center" type="Vector2" />
+            <param index="1" name="radius" type="float" />
+            <param index="2" name="layer" type="int" />
+            <param index="3" name="strength" type="float" />
+            <description>
+                Paints layer 0 through 3 with linear radial falloff, moving the existing weights toward the selected layer. [param strength] is in the range 0 to 1. Layer weights continue to sum to one.
+            </description>
+        </method>
+        <method name="sample_height" qualifiers="const">
+            <return type="float" />
+            <param index="0" name="grid_position" type="Vector2" />
+            <description>
+                Bilinearly samples the height field, clamping coordinates outside the grid.
+            </description>
+        </method>
+        <method name="sculpt">
+            <return type="void" />
+            <param index="0" name="center" type="Vector2" />
+            <param index="1" name="radius" type="float" />
+            <param index="2" name="delta" type="float" />
+            <description>
+                Raises or lowers the terrain within a positive [param radius] using linear falloff.
+            </description>
+        </method>
+        <method name="set_height_at">
+            <return type="void" />
+            <param index="0" name="x" type="int" />
+            <param index="1" name="z" type="int" />
+            <param index="2" name="height" type="float" />
+            <description>
+                Changes a single cell height. Non-finite heights and out-of-range indices are rejected.
+            </description>
+        </method>
+        <method name="smooth">
+            <return type="void" />
+            <param index="0" name="center" type="Vector2" />
+            <param index="1" name="radius" type="float" />
+            <param index="2" name="strength" type="float" />
+            <description>
+                Smooths terrain by blending original heights toward their 3x3 neighborhood average with radial falloff. [param strength] is in the range 0 to 1. Uses a snapshot so results do not depend on scan order.
+            </description>
+        </method>
+    </methods>
+    <members>
+        <member name="dimensions" type="Vector2i" setter="set_dimensions" getter="get_dimensions" default="Vector2i(17, 17)">
+            Terrain vertex-grid dimensions. Both dimensions must be at least 2, at most 2048, and their product at most 1,048,576. Resizing preserves the overlapping cells.
+        </member>
+        <member name="heights" type="PackedFloat32Array" setter="set_heights" getter="get_heights" default="PackedFloat32Array()">
+            Row-major vertex heights. All values must be finite; array length must equal [code]dimensions.x * dimensions.y[/code].
+        </member>
+        <member name="paint_weights" type="PackedColorArray" setter="set_paint_weights" getter="get_paint_weights" default="PackedColorArray()">
+            Row-major normalized RGBA layer weights. Each color must have nonnegative components in [code][0, 1][/code] whose sum is approximately 1.
+        </member>
+    </members>
+</class>
