@@ -3,6 +3,7 @@
 
 import argparse
 import json
+from itertools import islice
 import os
 from pathlib import Path
 import re
@@ -30,14 +31,27 @@ def _outline(relative, content):
     kind = KINDS[Path(relative).suffix.lower()]
     item = {"path": relative, "kind": kind}
     if kind == "scene":
+        # Avoid materializing every node in a large generated scene when the
+        # context format includes at most the first 64 nodes.
         item["nodes"] = [
             {key: attrs[key] for key in ("name", "type", "parent") if key in attrs}
-            for attrs in (_attributes(match.group(1)) for match in NODE.finditer(content))
-        ][:64]
+            for attrs in (_attributes(match.group(1)) for match in islice(NODE.finditer(content), 64))
+        ]
     elif kind == "resource":
         item["resource_types"] = sorted(set(re.findall(r'^\[sub_resource\s+type="([A-Za-z0-9_]{1,64})"', content, re.MULTILINE)))[:32]
     elif kind == "script":
-        item["functions"] = list(dict.fromkeys(FUNCTION.findall(content)))[:64]
+        # Preserve first-occurrence order, but stop after 64 distinct names
+        # instead of allocating a full match list for very large scripts.
+        functions = []
+        seen_functions = set()
+        for match in FUNCTION.finditer(content):
+            name = match.group(1)
+            if name not in seen_functions:
+                seen_functions.add(name)
+                functions.append(name)
+                if len(functions) == 64:
+                    break
+        item["functions"] = functions
         for field, pattern in (
             ("class_name", r"^\s*class_name\s+([A-Za-z_]\w*)\b"),
             ("extends", r"^\s*extends\s+([A-Za-z_]\w*)\b"),
