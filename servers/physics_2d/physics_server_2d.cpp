@@ -379,6 +379,8 @@ PhysicsServer2D::PhysicsServer2D() {
 	// Like Rapier's warmstart coefficient: scale cached contact impulses
 	// on each step (0 disables warm starting, 1 preserves legacy behavior).
 	GLOBAL_DEF(PropertyInfo(Variant::FLOAT, "physics/2d/solver/warm_start_coefficient", PROPERTY_HINT_RANGE, "0,1,0.01"), 1.0);
+	// Bullet-style rotational resistance for loaded rigid contacts; off by default.
+	GLOBAL_DEF(PropertyInfo(Variant::FLOAT, "physics/2d/solver/rolling_friction", PROPERTY_HINT_RANGE, "0,1,0.01,or_greater"), 0.0);
 	// Suppress tiny bounces at contacts so stacked bodies can settle (pixels per second).
 	GLOBAL_DEF(PropertyInfo(Variant::FLOAT, "physics/2d/solver/restitution_velocity_threshold", PROPERTY_HINT_RANGE, "0,1000,1,or_greater,suffix:px/s"), 30.0);
 	// Box2D-style material mixing is opt-in to keep existing GodotPhysics projects compatible.
