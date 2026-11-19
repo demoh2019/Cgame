@@ -33,6 +33,8 @@
 TEST_FORCE_LINK(test_astar)
 
 #include "core/math/a_star.h"
+#include "core/math/a_star_grid_2d.h"
+#include "core/templates/hash_set.h"
 
 namespace TestAStar {
 
@@ -232,6 +234,69 @@ TEST_CASE("[AStar3D] Path from disabled point is empty") {
 
 	CHECK(a.get_point_path(1, 1).is_empty());
 	CHECK(a.get_point_path(1, 2).is_empty());
+}
+
+TEST_CASE("[AStar3D] Known-size point IDs and connections preserve all entries") {
+	AStar3D astar;
+	for (int i = 0; i < 256; i++) {
+		astar.add_point(i, Vector3(i, i % 7, 0));
+		if (i > 0) {
+			astar.connect_points(0, i, false);
+		}
+	}
+
+	const PackedInt64Array ids = astar.get_point_ids();
+	REQUIRE_EQ(ids.size(), 256);
+	HashSet<int64_t> seen_ids;
+	for (int i = 0; i < ids.size(); i++) {
+		seen_ids.insert(ids[i]);
+	}
+	REQUIRE_EQ(seen_ids.size(), 256);
+	for (int64_t i = 0; i < 256; i++) {
+		CHECK(seen_ids.has(i));
+	}
+
+	const Vector<int64_t> connections = astar.get_point_connections(0);
+	REQUIRE_EQ(connections.size(), 255);
+	HashSet<int64_t> seen_connections;
+	for (int64_t id : connections) {
+		seen_connections.insert(id);
+	}
+	REQUIRE_EQ(seen_connections.size(), 255);
+	for (int64_t i = 1; i < 256; i++) {
+		CHECK(seen_connections.has(i));
+	}
+
+	astar.remove_point(255);
+	CHECK_EQ(astar.get_point_ids().size(), 255);
+	CHECK_EQ(astar.get_point_connections(0).size(), 254);
+}
+
+TEST_CASE("[AStarGrid2D] Pre-sized region data respects grid intersections and order") {
+	AStarGrid2D grid;
+	grid.set_region(Rect2i(Vector2i(-12, -8), Vector2i(40, 32)));
+	grid.update();
+	grid.set_point_solid(Vector2i(0, 0), true);
+
+	TypedArray<Dictionary> data = grid.get_point_data_in_region(Rect2i(Vector2i(-2, -2), Vector2i(16, 12)));
+	REQUIRE_EQ(data.size(), 192);
+	for (int i = 0; i < data.size(); i++) {
+		Dictionary row = data[i];
+		CHECK_EQ(row["id"], Variant(Vector2i(-2 + (i % 16), -2 + (i / 16))));
+		if (row["id"] == Variant(Vector2i(0, 0))) {
+			CHECK_EQ(row["solid"], Variant(true));
+		}
+	}
+
+	TypedArray<Dictionary> clipped = grid.get_point_data_in_region(Rect2i(Vector2i(20, 20), Vector2i(16, 16)));
+	REQUIRE_EQ(clipped.size(), 32);
+	Dictionary first = clipped[0];
+	Dictionary last = clipped[clipped.size() - 1];
+	CHECK_EQ(first["id"], Variant(Vector2i(20, 20)));
+	CHECK_EQ(last["id"], Variant(Vector2i(27, 23)));
+
+	const TypedArray<Dictionary> outside = grid.get_point_data_in_region(Rect2i(Vector2i(100, 100), Vector2i(10, 10)));
+	CHECK(outside.is_empty());
 }
 
 } // namespace TestAStar
