@@ -387,4 +387,50 @@ TEST_CASE("[SceneTree][GridContainer] RTL placement") {
 	memdelete(grid_container);
 }
 
+TEST_CASE("[SceneTree][GridContainer] Dense minimum size handles hidden and non-Control children") {
+	GridContainer *grid = memnew(GridContainer);
+	SceneTree::get_singleton()->get_root()->add_child(grid);
+	grid->add_theme_constant_override("h_separation", 0);
+	grid->add_theme_constant_override("v_separation", 0);
+	grid->set_columns(3);
+
+	const Size2 sizes[] = {
+		Size2(10, 5), Size2(20, 8), Size2(30, 3),
+		Size2(12, 13), Size2(5, 7),
+	};
+	Control *controls[5];
+	for (int i = 0; i < 5; i++) {
+		controls[i] = memnew(Control);
+		controls[i]->set_custom_minimum_size(sizes[i]);
+		grid->add_child(controls[i]);
+	}
+	Node *ignored = memnew(Node);
+	grid->add_child(ignored);
+	SceneTree::get_singleton()->process(0);
+	CHECK(grid->get_minimum_size().is_equal_approx(Size2(62, 21)));
+
+	// Hidden controls are skipped, shifting later cells to the left.
+	controls[2]->hide();
+	SceneTree::get_singleton()->process(0);
+	CHECK(grid->get_minimum_size().is_equal_approx(Size2(42, 20)));
+
+	// A large configured column count must not reserve one entry per
+	// nominal column; only actual controls contribute dimensions.
+	grid->set_columns(64);
+	SceneTree::get_singleton()->process(0);
+	CHECK(grid->get_minimum_size().is_equal_approx(Size2(47, 13)));
+
+	for (Control *control : controls) {
+		control->hide();
+	}
+	SceneTree::get_singleton()->process(0);
+	CHECK(grid->get_minimum_size() == Size2());
+
+	memdelete(ignored);
+	for (Control *control : controls) {
+		memdelete(control);
+	}
+	memdelete(grid);
+}
+
 } // namespace TestGridContainer
