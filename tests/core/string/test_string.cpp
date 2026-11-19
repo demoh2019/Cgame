@@ -2521,6 +2521,66 @@ TEST_CASE("[String] Bigrams") {
 	CHECK(bigr[2] == "cd");
 }
 
+TEST_CASE("[String] Escape fast paths preserve COW for unchanged Unicode text") {
+	const String unchanged = U"Plain ASCII_123 αβ 文 😀";
+	const char32_t *original = unchanged.ptr();
+	CHECK(unchanged.c_escape().ptr() == original);
+	CHECK(unchanged.c_escape_multiline().ptr() == original);
+	CHECK(unchanged.json_escape().ptr() == original);
+
+	CHECK(String("a\nb").c_escape() == "a\\nb");
+	CHECK(String("a\nb").json_escape() == "a\\nb");
+	CHECK(String("a\nb").c_escape_multiline() == "a\nb");
+	CHECK(String("'").c_escape() == "\\'");
+	CHECK(String("'").json_escape() == "'");
+	CHECK(String("\a").json_escape() == String("\a"));
+	CHECK(String("\v").json_escape() == "\\v");
+	CHECK(String("\\\"").c_escape_multiline() == "\\\\\\\"");
+	CHECK(String().c_escape().is_empty());
+	CHECK(String().json_escape().is_empty());
+}
+
+TEST_CASE("[String] Escape single-buffer algorithms match ordered replacements") {
+	uint32_t seed = 0x7AC99D31;
+	static constexpr char32_t alphabet[] = U"xyz123 \\\a\b\f\n\r\t\v'\"α😀[]{}-";
+
+	for (int trial = 0; trial < 512; trial++) {
+		seed ^= seed << 13;
+		seed ^= seed >> 17;
+		seed ^= seed << 5;
+		const int len = int(seed % 224);
+		String input;
+		input.resize_uninitialized(len + 1);
+		char32_t *chars = input.ptrw();
+		for (int i = 0; i < len; i++) {
+			seed ^= seed << 13;
+			seed ^= seed >> 17;
+			seed ^= seed << 5;
+			chars[i] = alphabet[seed % (sizeof(alphabet) / sizeof(alphabet[0]) - 1)];
+		}
+		chars[len] = 0;
+
+		// Keep the original ordered-substitution algorithms as an independent oracle.
+		const String expected_c = input.replace("\\", "\\\\")
+										  .replace("\a", "\\a").replace("\b", "\\b")
+										  .replace("\f", "\\f").replace("\n", "\\n")
+										  .replace("\r", "\\r").replace("\t", "\\t")
+										  .replace("\v", "\\v").replace("'", "\\'")
+										  .replace("\"", "\\\"");
+		const String expected_multiline = input.replace("\\", "\\\\").replace("\"", "\\\"");
+		const String expected_json = input.replace("\\", "\\\\")
+											 .replace("\b", "\\b").replace("\f", "\\f")
+											 .replace("\n", "\\n").replace("\r", "\\r")
+											 .replace("\t", "\\t").replace("\v", "\\v")
+											 .replace("\"", "\\\"");
+
+		CHECK(input.c_escape() == expected_c);
+		CHECK(input.c_escape_multiline() == expected_multiline);
+		CHECK(input.json_escape() == expected_json);
+		CHECK(input.length() == len);
+	}
+}
+
 TEST_CASE("[String] c-escape/unescape") {
 	String s = "\\1\a2\b\f3\n45\r6\t7\v8\'9\?0\"";
 	CHECK(s.c_escape().c_unescape() == s);
