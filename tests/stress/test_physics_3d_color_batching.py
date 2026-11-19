@@ -71,8 +71,10 @@ class LargeIslandBatchContracts(unittest.TestCase):
         self.assertIn("constraint_colors.reset();", self.source)
         self.assertIn("deferred_large_island_index = large_island_index;", self.source)
         self.assertIn("wait_for_group_task_completion(group_task);", self.source)
-        self.assertLess(self.source.index("wait_for_group_task_completion(group_task);"),
-                        self.source.index("if (!_solve_large_island("))
+        other_islands = self.source.index('SNAME("Physics3DOtherConstraintIslands")')
+        other_islands_barrier = self.source.index("wait_for_group_task_completion(group_task);", other_islands)
+        large_island_solver = self.source.index("if (!_solve_large_island(", other_islands)
+        self.assertLess(other_islands_barrier, large_island_solver)
 
     def test_small_partial_and_random_group_sizes(self):
         rng = random.Random(3847)
