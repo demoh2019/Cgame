@@ -32,7 +32,7 @@
 #include "core/math/random_number_generator.h"
 #include "core/object/class_db.h"
 
-uint32_t ProceduralWorld::_hash(int32_t p_x, int32_t p_y, uint32_t p_seed) {
+uint32_t ProceduralWorld::_hash(int64_t p_x, int64_t p_y, uint32_t p_seed) {
 	uint32_t h = uint32_t(p_x) * 0x9e3779b9U ^ uint32_t(p_y) * 0x85ebca6bU ^ p_seed;
 	h ^= h >> 16;
 	h *= 0x7feb352dU;
@@ -42,11 +42,11 @@ uint32_t ProceduralWorld::_hash(int32_t p_x, int32_t p_y, uint32_t p_seed) {
 	return h;
 }
 
-float ProceduralWorld::_noise(float p_x, float p_y, uint32_t p_seed) {
-	const int32_t x = int32_t(Math::floor(p_x));
-	const int32_t y = int32_t(Math::floor(p_y));
-	float tx = p_x - float(x);
-	float ty = p_y - float(y);
+float ProceduralWorld::_noise(double p_x, double p_y, uint32_t p_seed) {
+	const int64_t x = int64_t(Math::floor(p_x));
+	const int64_t y = int64_t(Math::floor(p_y));
+	double tx = p_x - double(x);
+	double ty = p_y - double(y);
 	tx = tx * tx * (3.0f - 2.0f * tx);
 	ty = ty * ty * (3.0f - 2.0f * ty);
 
@@ -76,7 +76,7 @@ PackedFloat32Array ProceduralWorld::generate_heightmap(int p_width, int p_height
 			float octave_amplitude = 1.0f;
 			float frequency = 1.0f / p_scale;
 			for (int octave = 0; octave < p_octaves; octave++) {
-				value += _noise(float(p_origin.x + x) * frequency, float(p_origin.y + y) * frequency, uint32_t(p_seed) + uint32_t(octave) * 0x9e3779b9U) * octave_amplitude;
+				value += _noise(double(p_origin.x + x) * double(frequency), double(p_origin.y + y) * double(frequency), uint32_t(p_seed) + uint32_t(octave) * 0x9e3779b9U) * octave_amplitude;
 				weight += octave_amplitude;
 				octave_amplitude *= 0.5f;
 				frequency *= 2.0f;

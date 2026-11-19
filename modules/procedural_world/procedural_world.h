@@ -36,8 +36,8 @@
 class ProceduralWorld : public RefCounted {
 	GDCLASS(ProceduralWorld, RefCounted);
 
-	static uint32_t _hash(int32_t p_x, int32_t p_y, uint32_t p_seed);
-	static float _noise(float p_x, float p_y, uint32_t p_seed);
+	static uint32_t _hash(int64_t p_x, int64_t p_y, uint32_t p_seed);
+	static float _noise(double p_x, double p_y, uint32_t p_seed);
 
 protected:
 	static void _bind_methods();

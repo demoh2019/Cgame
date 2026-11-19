@@ -66,6 +66,11 @@ TEST_CASE("[ProceduralWorld] Tiled heightmaps share identical overlapping sample
 		CHECK(left[y * 8 + 7] == right[y * 8]);
 	}
 	CHECK(left != right);
+	const PackedFloat32Array extreme = world->generate_heightmap(2, 2, 1024, 0.001f, 1.0f, 8, Vector2i(1000000, -1000000));
+	REQUIRE(extreme.size() == 4);
+	for (float h : extreme) {
+		CHECK(Math::is_finite(h));
+	}
 }
 
 TEST_CASE("[ProceduralWorld] Heightmap inputs are bounded") {
