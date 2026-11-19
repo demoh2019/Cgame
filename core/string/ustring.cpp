@@ -4302,48 +4302,89 @@ String String::indent(const String &p_prefix) const {
 	return new_string;
 }
 String String::dedent() const {
-	String new_string;
-	String indent;
-	bool has_indent = false;
-	bool has_text = false;
-	int line_start = 0;
-	int indent_stop = -1;
+	const int text_length = length();
+	if (text_length == 0) {
+		return *this;
+	}
 
-	for (int i = 0; i < length(); i++) {
-		char32_t c = operator[](i);
+	const char32_t *read = ptr();
+	int indent_begin = 0;
+	int indent_length = 0;
+	int line_begin = 0;
+
+	// The first line containing text defines the indentation to strip.
+	for (int i = 0; i < text_length; i++) {
+		const char32_t c = read[i];
 		if (c == '\n') {
-			if (has_text) {
-				new_string += substr(indent_stop, i - indent_stop);
-			}
-			new_string += "\n";
-			has_text = false;
-			line_start = i + 1;
-			indent_stop = -1;
-		} else if (!has_text) {
-			if (c > 32) {
-				has_text = true;
-				if (!has_indent) {
-					has_indent = true;
-					indent = substr(line_start, i - line_start);
-					indent_stop = i;
-				}
-			}
-			if (has_indent && indent_stop < 0) {
-				int j = i - line_start;
-				if (j >= indent.length() || c != indent[j]) {
-					indent_stop = i;
-				}
-			}
+			line_begin = i + 1;
+		} else if (c > 32) {
+			indent_begin = line_begin;
+			indent_length = i - line_begin;
+			break;
 		}
 	}
 
-	if (has_text) {
-		new_string += substr(indent_stop, length() - indent_stop);
+	// Return the first character to copy from a line. Whitespace-only lines
+	// are discarded, while mismatched indentation is kept from the mismatch.
+	const auto get_copy_begin = [&](int p_begin, int p_end) {
+		int first_text = p_begin;
+		while (first_text < p_end && read[first_text] <= 32) {
+			first_text++;
+		}
+		if (first_text == p_end) {
+			return p_end;
+		}
+		int copy_begin = p_begin;
+		while (copy_begin < first_text && copy_begin - p_begin < indent_length &&
+				read[copy_begin] == read[indent_begin + copy_begin - p_begin]) {
+			copy_begin++;
+		}
+		return copy_begin;
+	};
+
+	// Count exact output length before allocating, without constructing lines.
+	int result_length = 0;
+	bool changed = false;
+	line_begin = 0;
+	for (int end = 0; end <= text_length; end++) {
+		if (end < text_length && read[end] != '\n') {
+			continue;
+		}
+		const int copy_begin = get_copy_begin(line_begin, end);
+		result_length += end - copy_begin + (end < text_length ? 1 : 0);
+		changed |= copy_begin != line_begin;
+		line_begin = end + 1;
+	}
+	if (!changed) {
+		return *this;
+	}
+	if (result_length == 0) {
+		return String();
 	}
 
+	String new_string;
+	new_string.resize_uninitialized(result_length + 1);
+	char32_t *write = new_string.ptrw();
+	int written = 0;
+	line_begin = 0;
+	for (int end = 0; end <= text_length; end++) {
+		if (end < text_length && read[end] != '\n') {
+			continue;
+		}
+		const int copy_begin = get_copy_begin(line_begin, end);
+		const int copy_count = end - copy_begin;
+		if (copy_count > 0) {
+			memcpy(write + written, read + copy_begin, copy_count * sizeof(char32_t));
+			written += copy_count;
+		}
+		if (end < text_length) {
+			write[written++] = '\n';
+		}
+		line_begin = end + 1;
+	}
+	write[written] = 0;
 	return new_string;
 }
-
 Span<char32_t> String::strip_edges_span(Span<char32_t> p_span, bool p_left, bool p_right) {
 	if (p_span.is_empty()) {
 		return p_span;

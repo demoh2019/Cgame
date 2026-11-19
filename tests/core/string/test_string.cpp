@@ -2438,6 +2438,48 @@ TEST_CASE("[String] indent") {
 	}
 }
 
+TEST_CASE("[String] dedent linear-time whitespace and Unicode") {
+	CHECK(String().dedent().is_empty());
+	CHECK(String("   ").dedent().is_empty());
+	CHECK(String("  \n \n").dedent() == "\n\n");
+	CHECK(String("    first\n  second\n").dedent() == "first\nsecond\n");
+	CHECK(String("    first\n     second").dedent() == "first\n second");
+	CHECK(String(" \tfirst\n  second").dedent() == "first\n second");
+	CHECK(String("\r\n  first\n\tsecond").dedent() == "\nfirst\n\tsecond");
+	CHECK(String(U"  α\n β\n").dedent() == U"α\nβ\n");
+	CHECK(String(U"    😀\n  α").dedent() == U"😀\nα");
+	const String original = U"no indentation α\nsecond line";
+	String unchanged = original.dedent();
+	CHECK(unchanged.ptr() == original.ptr());
+	CHECK(unchanged == original);
+}
+
+TEST_CASE("[String] dedent linear-time large multiline input") {
+	String input;
+	String expected;
+	for (int i = 0; i < 2048; i++) {
+		switch (i % 4) {
+			case 0:
+				input += "    \n";
+				expected += "\n";
+				break;
+			case 1:
+				input += U"    αβ and text\n";
+				expected += U"αβ and text\n";
+				break;
+			case 2:
+				input += U"  β\n";
+				expected += U"β\n";
+				break;
+			default:
+				input += "     more text\n";
+				expected += " more text\n";
+				break;
+		}
+	}
+	CHECK(input.dedent() == expected);
+}
+
 TEST_CASE("[String] dedent") {
 	String s = "      aaa\n    bbb";
 	String t = "aaa\nbbb";
