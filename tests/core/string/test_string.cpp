@@ -2129,6 +2129,73 @@ TEST_CASE("[String] Cyrillic to_lower()") {
 	CHECK(state);
 }
 
+TEST_CASE("[String] bounded count without substring allocations") {
+	// The previous implementation copied the selected substring and called
+	// find/findn on that copy. Use it as an independent oracle for every range.
+	auto legacy_string_count = [](const String &source, const String &needle, int from, int to, bool insensitive) -> int {
+		if (needle.is_empty() || source.length() < needle.length() || from < 0 || to < 0) {
+			return 0;
+		}
+		if (to == 0) {
+			to = source.length();
+		} else if (from >= to) {
+			return 0;
+		}
+		const String section = source.substr(from, to - from);
+		int result = 0;
+		int offset = 0;
+		while ((offset = insensitive ? section.findn(needle, offset) : section.find(needle, offset)) >= 0) {
+			offset += needle.length();
+			++result;
+		}
+		return result;
+	};
+	auto legacy_cstring_count = [](const String &source, const char *needle, int from, int to, bool insensitive) -> int {
+		const int needle_len = strlen(needle);
+		if (needle_len == 0 || source.length() < needle_len || from < 0 || to < 0) {
+			return 0;
+		}
+		if (to == 0) {
+			to = source.length();
+		} else if (from >= to) {
+			return 0;
+		}
+		const String section = source.substr(from, to - from);
+		int result = 0;
+		int offset = 0;
+		while ((offset = insensitive ? section.findn(needle, offset) : section.find(needle, offset)) >= 0) {
+			offset += needle_len;
+			++result;
+		}
+		return result;
+	};
+
+	const String sources[] = { "ababA.baaABA", "TestTestTest", U"ÄbÄBbÄ", "", "aaaaaaa" };
+	const String patterns[] = { "a", "A", "aa", "aba", "bA", "Test", "xyz", U"Ä", U"ä", "" };
+	const char *byte_patterns[] = { "a", "A", "aa", "aba", "bA", "Test", "xyz", "" };
+	for (const String &source : sources) {
+		for (int from = -1; from <= source.length() + 2; ++from) {
+			for (int to = -1; to <= source.length() + 2; ++to) {
+				for (const String &pattern : patterns) {
+					CHECK(source.count(pattern, from, to) == legacy_string_count(source, pattern, from, to, false));
+					CHECK(source.countn(pattern, from, to) == legacy_string_count(source, pattern, from, to, true));
+				}
+				for (const char *pattern : byte_patterns) {
+					CHECK(source.count(pattern, from, to) == legacy_cstring_count(source, pattern, from, to, false));
+					CHECK(source.countn(pattern, from, to) == legacy_cstring_count(source, pattern, from, to, true));
+				}
+			}
+		}
+	}
+
+	const String big = String("a").repeat(4096) + "b";
+	CHECK(big.count("a", 1024, 3072) == 2048);
+	CHECK(big.count("aa", 1024, 3072) == 1024);
+	CHECK(big.count("b", 0, 4096) == 0);
+	CHECK(big.count("b", 4096, 4097) == 1);
+	CHECK(big.countn("A", 1024, 3072) == 2048);
+}
+
 TEST_CASE("[String] Count and countn functionality") {
 	String s = String("");
 	MULTICHECK_STRING_EQ(s, count, "Test", 0);

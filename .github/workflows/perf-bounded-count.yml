@@ -1,0 +1,31 @@
+name: Bounded String count performance contracts
+on:
+  push:
+    branches: [develop]
+    paths:
+      - 'core/string/ustring.cpp'
+      - 'tests/core/string/test_string.cpp'
+      - 'misc/scripts/tests/test_bounded_count_perf.py'
+      - '.github/workflows/perf-bounded-count.yml'
+  pull_request:
+    paths:
+      - 'core/string/ustring.cpp'
+      - 'tests/core/string/test_string.cpp'
+      - 'misc/scripts/tests/test_bounded_count_perf.py'
+      - '.github/workflows/perf-bounded-count.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  bounded-count-contracts:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+      - name: Validate count window and no-allocation invariants
+        run: |
+          python -m py_compile misc/scripts/tests/test_bounded_count_perf.py
+          python -m unittest discover -s misc/scripts/tests -p test_bounded_count_perf.py -v
