@@ -30,8 +30,9 @@
 
 #pragma once
 
-#include "../gdscript_constants.h"
 #include "../gdscript.h"
+#include "../gdscript_constants.h"
+
 #include "core/math/math_funcs.h"
 #include "tests/test_macros.h"
 
