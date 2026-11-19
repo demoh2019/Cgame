@@ -33,13 +33,13 @@
 #include "core/object/class_db.h"
 #include "core/templates/sort_array.h"
 
-int TriangleMesh::_create_bvh(BVH *p_bvh, BVH **p_bb, int p_from, int p_size, int p_depth, int &r_max_depth, int &r_max_alloc) {
+int TriangleMesh::_create_bvh(BVH *p_bvh, int *p_bb, int p_from, int p_size, int p_depth, int &r_max_depth, int &r_max_alloc) {
 	if (p_depth > r_max_depth) {
 		r_max_depth = p_depth;
 	}
 
 	if (p_size == 1) {
-		return p_bb[p_from] - p_bvh;
+		return p_bb[p_from];
 	} else if (p_size == 0) {
 		return -1;
 	}
@@ -54,17 +54,20 @@ int TriangleMesh::_create_bvh(BVH *p_bvh, BVH **p_bb, int p_from, int p_size, in
 
 	switch (li) {
 		case Vector3::AXIS_X: {
-			SortArray<BVH *, BVHCmpX> sort_x;
+			SortArray<int, BVHCmpX> sort_x;
+			sort_x.compare.nodes = p_bvh;
 			sort_x.nth_element(0, p_size, p_size / 2, &p_bb[p_from]);
 			//sort_x.sort(&p_bb[p_from],p_size);
 		} break;
 		case Vector3::AXIS_Y: {
-			SortArray<BVH *, BVHCmpY> sort_y;
+			SortArray<int, BVHCmpY> sort_y;
+			sort_y.compare.nodes = p_bvh;
 			sort_y.nth_element(0, p_size, p_size / 2, &p_bb[p_from]);
 			//sort_y.sort(&p_bb[p_from],p_size);
 		} break;
 		case Vector3::AXIS_Z: {
-			SortArray<BVH *, BVHCmpZ> sort_z;
+			SortArray<int, BVHCmpZ> sort_z;
+			sort_z.compare.nodes = p_bvh;
 			sort_z.nth_element(0, p_size, p_size / 2, &p_bb[p_from]);
 			//sort_z.sort(&p_bb[p_from],p_size);
 
@@ -115,7 +118,9 @@ void TriangleMesh::create(const Vector<Vector3> &p_faces, const Vector<int32_t> 
 	fc /= 3;
 	triangles.resize(fc);
 
-	bvh.resize(fc * 3); //will never be larger than this (todo make better)
+	// A full binary tree with fc leaves has exactly 2 * fc - 1 nodes.
+	// Avoid reserving 3 * fc nodes and shrinking/copying them after construction.
+	bvh.resize(fc * 2 - 1);
 	BVH *bw = bvh.ptrw();
 
 	{
@@ -167,18 +172,19 @@ void TriangleMesh::create(const Vector<Vector3> &p_faces, const Vector<int32_t> 
 		}
 	}
 
-	Vector<BVH *> bwptrs;
-	bwptrs.resize(fc);
-	BVH **bwp = bwptrs.ptrw();
+	// Sort compact leaf indices instead of pointers. On 64-bit systems this
+	// halves the temporary sorting buffer from 8 * fc to 4 * fc bytes.
+	Vector<int> leaf_indices;
+	leaf_indices.resize(fc);
+	int *indices = leaf_indices.ptrw();
 	for (int i = 0; i < fc; i++) {
-		bwp[i] = &bw[i];
+		indices[i] = i;
 	}
 
 	max_depth = 0;
 	int max_alloc = fc;
-	_create_bvh(bw, bwp, 0, fc, 1, max_depth, max_alloc);
-
-	bvh.resize(max_alloc); //resize back
+	_create_bvh(bw, indices, 0, fc, 1, max_depth, max_alloc);
+	CRASH_COND(max_alloc != bvh.size());
 
 	valid = true;
 }
