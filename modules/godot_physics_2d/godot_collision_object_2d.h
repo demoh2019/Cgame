@@ -180,9 +180,9 @@ public:
 		collision_mask = p_mask;
 		_collision_filter_changed();
 	}
-	// Collision exceptions change pair eligibility even when neither body's
-	// transform or collision layer changes. Revalidate BVH pairs immediately.
-	_FORCE_INLINE_ void refresh_collision_pairs() { _collision_filter_changed(); }
+	// Recheck broadphase eligibility after changing collision exceptions,
+	// without invalidating mass properties or contact geometry versions.
+	void refresh_collision_pairs();
 
 	_FORCE_INLINE_ uint32_t get_collision_mask() const { return collision_mask; }
 
