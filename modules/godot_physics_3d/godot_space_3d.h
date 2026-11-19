@@ -127,6 +127,8 @@ private:
 	real_t soft_body_xpbd_strain_min_compression_ratio = 0.0; // 0 disables lower limit; 0..1.
 	real_t soft_body_xpbd_strain_limit_compliance = 0.0; // 0: hard unilateral constraints.
 	real_t soft_body_xpbd_compliance = 0.0; // Legacy PBD remains the default.
+	real_t soft_body_fiber_compliance_ratio = 1.0; // 1 is isotropic, no extra work.
+	Vector3 soft_body_fiber_axis = Vector3(1, 0, 0); // Rest-mesh-space warp direction.
 	real_t soft_body_xpbd_tension_hardening = 0.0; // Opt-in nonlinear tensile response.
 	real_t soft_body_xpbd_tension_yield_strain = 0.1;
 	real_t soft_body_plastic_yield_strain = 0.1; // Relative elastic yield limit.
@@ -257,6 +259,8 @@ public:
 	_FORCE_INLINE_ real_t get_soft_body_xpbd_strain_min_compression_ratio() const { return soft_body_xpbd_strain_min_compression_ratio; }
 	_FORCE_INLINE_ real_t get_soft_body_xpbd_strain_limit_compliance() const { return soft_body_xpbd_strain_limit_compliance; }
 	_FORCE_INLINE_ real_t get_soft_body_xpbd_compliance() const { return soft_body_xpbd_compliance; }
+	_FORCE_INLINE_ real_t get_soft_body_fiber_compliance_ratio() const { return soft_body_fiber_compliance_ratio; }
+	_FORCE_INLINE_ const Vector3 &get_soft_body_fiber_axis() const { return soft_body_fiber_axis; }
 	_FORCE_INLINE_ real_t get_soft_body_xpbd_tension_hardening() const { return soft_body_xpbd_tension_hardening; }
 	_FORCE_INLINE_ real_t get_soft_body_xpbd_tension_yield_strain() const { return soft_body_xpbd_tension_yield_strain; }
 	_FORCE_INLINE_ real_t get_soft_body_plastic_yield_strain() const { return soft_body_plastic_yield_strain; }
