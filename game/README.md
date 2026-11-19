@@ -591,3 +591,19 @@ corrupt-save rejection.
 This is a gameplay weather system, not yet volumetric clouds, physically
 simulated rain, wind fluid dynamics or an actual temperature field inside
 buildings. Current Cgame/Godot scripts provide the required simulation API.
+
+## Emergency heat packs (weather survival)
+
+Survivors can handcraft a **thermal wrap** from 1 cloth T1, 2 fiber T1
+and 1 wood T1. Carry it into cold mountains or storms, then use it
+from the online inventory or press **8** in the local sandbox. A consumed
+pack reduces weather exposure intensity by **70% for 180 seconds**.
+It is not a permanent stat or class ability. The server rejects repeat use
+while insulation is active (without spending an extra item), decrements the
+remaining time, handles mid-tick expiration proportionally, and clears
+the temporary protection on death. The timer is sent only to the owning
+character's snapshot and persists in version-1 character saves with
+strict finite bounds and compatibility for older saves. Server weather
+and equipped armor still determine the underlying exposure intensity.
+The `test_thermal_wrap.gd` regression runs with `game/tests/run_all.gd`.
+This is a fictional game mechanic, not real cold-exposure advice.

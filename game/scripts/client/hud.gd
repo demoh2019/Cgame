@@ -418,11 +418,11 @@ func _process(_delta: float) -> void:
 	]
 	var weather: Dictionary = client.you.get("weather", {})
 	if not weather.is_empty():
-		_info_label.text += "\nWeather: %s %.0fC %s | Exposure %d/100" % [
+		_info_label.text += "\nWeather: %s %.0fC %s | Exposure %d/100 | Heat pack %ds" % [
 			str(weather.get("condition", "clear")).capitalize(),
 			float(weather.get("temperature_c", 0.0)),
 			"SHELTERED" if bool(weather.get("sheltered", false)) else "EXPOSED",
-			int(client.you.get("exposure", 0.0))
+			int(client.you.get("exposure", 0.0)), int(ceil(float(client.you.get("warmth_seconds", 0.0))))
 		]
 	var journal: Variant = client.you.get("contract", Contracts.empty_state())
 	_contract_label.text = Contracts.description(journal if journal is Dictionary else Contracts.empty_state())

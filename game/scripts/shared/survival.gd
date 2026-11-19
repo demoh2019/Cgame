@@ -8,6 +8,7 @@ var hunger: float = 100.0 # 100 is full.
 var thirst: float = 100.0
 var infection: float = 0.0
 var exposure: float = 0.0 # 0..100 cumulative weather stress.
+var warmth_seconds: float = 0.0 # Remaining protection from a carried heat pack.
 var stamina: float = Defs.MAX_STAMINA
 var stamina_recovery_delay: float = 0.0
 var alive: bool = true
@@ -69,7 +70,12 @@ func tick(delta: float) -> float:
 func weather_tick(delta: float, severity: float) -> float:
 	if not alive or not is_finite(delta) or delta <= 0.0 or not is_finite(severity):
 		return 0.0
-	var intensity: float = clampf(severity, 0.0, 1.0)
+	# Split protection proportionally if a large server tick crosses expiration.
+	# This also prevents a late update from granting more than its remaining time.
+	var covered: float = minf(warmth_seconds, delta)
+	warmth_seconds = maxf(0.0, warmth_seconds - delta)
+	var insulation: float = 1.0 - Defs.THERMAL_WRAP_REDUCTION * covered / delta
+	var intensity: float = clampf(severity * insulation, 0.0, 1.0)
 	if intensity > 0.0:
 		exposure = minf(100.0, exposure + intensity * 0.55 * delta)
 	else:
@@ -120,6 +126,14 @@ func treat_infection(amount: float) -> bool:
 	return true
 
 
+## The server consumes an actual heat pack only if there is no current buff.
+func apply_thermal_wrap() -> bool:
+	if not alive or warmth_seconds > 0.0:
+		return false
+	warmth_seconds = Defs.THERMAL_WRAP_SECONDS
+	return true
+
+
 func reset() -> void:
 	health = Defs.MAX_HEALTH
 	hunger = 80.0
@@ -128,8 +142,9 @@ func reset() -> void:
 	stamina_recovery_delay = 0.0
 	infection = 0.0
 	exposure = 0.0
+	warmth_seconds = 0.0
 	alive = true
 
 
 func to_dict() -> Dictionary:
-	return {"health": health, "hunger": hunger, "thirst": thirst, "stamina": stamina, "infection": infection, "exposure": exposure, "alive": alive}
+	return {"health": health, "hunger": hunger, "thirst": thirst, "stamina": stamina, "infection": infection, "exposure": exposure, "warmth_seconds": warmth_seconds, "alive": alive}

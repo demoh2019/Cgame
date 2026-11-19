@@ -55,6 +55,9 @@ const ITEM_KIND_WEIGHT := {
 }
 const STASH_SLOTS := 48 # Account-bound safe-settlement storage; never dropped on death.
 const RESPAWN_SECONDS := 4.0
+# Craftable, temporary field insulation against fictional weather hazards.
+const THERMAL_WRAP_SECONDS := 180.0
+const THERMAL_WRAP_REDUCTION := 0.70
 
 # --- Zombies ---------------------------------------------------------------------------------------
 const ZOMBIES := {
@@ -188,6 +191,11 @@ static func _build_items() -> void:
 		"stack": 10, "value": 13, "weight": 0.5})
 	_add_recipe("cooked_fish", "cooked_fish", 1, {"raw_fish": 1, "wood_1": 1},
 		"workbench", 3.0)
+	# No permanent class or spell: craft and carry insulation for expeditions.
+	_add_item("thermal_wrap", {"name": "Emergency Heat Pack", "kind": "thermal",
+		"stack": 5, "weight": 0.5, "value": 22, "warmth": THERMAL_WRAP_SECONDS})
+	_add_recipe("thermal_wrap", "thermal_wrap", 1,
+		{"cloth_1": 1, "fiber_1": 2, "wood_1": 1}, "", 2.5)
 	_add_item("berries", {"name": "Berries", "kind": "food", "food": 12.0, "stack": 20, "value": 2})
 	_add_item("canned_food", {"name": "Canned Food", "kind": "food", "food": 42.0, "stack": 10, "value": 12})
 	_add_item("water_bottle", {"name": "Water Bottle", "kind": "drink", "drink": 45.0, "stack": 10, "value": 8})

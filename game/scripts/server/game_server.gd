@@ -130,7 +130,7 @@ func character_data(player: Player) -> Dictionary:
 		"version": 1,
 		"health": player.survival.health, "hunger": player.survival.hunger, "thirst": player.survival.thirst,
 		"stamina": player.survival.stamina, "infection": player.survival.infection,
-		"exposure": player.survival.exposure,
+		"exposure": player.survival.exposure, "warmth_seconds": player.survival.warmth_seconds,
 		"alive": alive, "kills": player.kills, "deaths": player.deaths,
 		"x": player.position.x, "z": player.position.z,
 		"inventory": player.inventory.to_dict(),
@@ -171,6 +171,8 @@ func apply_character(player: Player, data: Dictionary) -> bool:
 		return false
 	if not SaveValidation.finite_number(data.get("exposure", 0.0), 0.0, 100.0):
 		return false
+	if not SaveValidation.finite_number(data.get("warmth_seconds", 0.0), 0.0, Defs.THERMAL_WRAP_SECONDS):
+		return false
 	if not SaveValidation.valid_counter(data.get("kills", 0)):
 		return false
 	if not SaveValidation.valid_counter(data.get("deaths", 0)):
@@ -188,6 +190,7 @@ func apply_character(player: Player, data: Dictionary) -> bool:
 	survival.infection = float(data.get("infection", 0.0))
 	# Legacy survivors predating regional climate start with no exposure.
 	survival.exposure = float(data.get("exposure", 0.0))
+	survival.warmth_seconds = float(data.get("warmth_seconds", 0.0))
 	var x: Variant = data.get("x", 0.0)
 	var z: Variant = data.get("z", 0.0)
 	# Invalid old logout coordinates can still safely fall back to the hub.
@@ -768,6 +771,10 @@ func cmd_use(peer_id: int, item_id: String) -> Dictionary:
 	if data.is_empty() or player.inventory.count(item_id) < 1:
 		return {"ok": false, "reason": "not_carried"}
 	match data["kind"]:
+		"thermal":
+			if not player.survival.apply_thermal_wrap():
+				return {"ok": false, "reason": "already_warm"}
+			player.inventory.remove(item_id, 1)
 		"food":
 			player.inventory.remove(item_id, 1)
 			player.survival.eat(float(data["food"]))
@@ -1138,7 +1145,7 @@ func _tick_players(delta: float) -> void:
 		var conditions: Dictionary = Weather.conditions(world, player.position.x, player.position.z, time)
 		damage += player.survival.weather_tick(delta,
 				Weather.effective_severity(conditions, player.inventory.armor))
-		if player.survival.exposure > 0.0:
+		if player.survival.exposure > 0.0 or player.survival.warmth_seconds > 0.0:
 			player.dirty_character = true
 		if player.survival.infection > 0.0:
 			player.dirty_character = true
@@ -1380,6 +1387,7 @@ func snapshot_for(peer_id: int) -> Dictionary:
 			"alive": _alive(player), "kills": player.kills, "deaths": player.deaths, "zone": player.zone_notice,
 			"action": player.action.duplicate(),
 			"infection": player.survival.infection, "exposure": player.survival.exposure,
+			"warmth_seconds": player.survival.warmth_seconds,
 			"weather": Weather.conditions(world, player.position.x, player.position.z, time),
 			"combat_energy": player.combat_energy, "skill_cooldown": player.skill_timer,
 			"dodge_cooldown": player.dodge_timer, "dodge_immunity": player.dodge_immunity,
