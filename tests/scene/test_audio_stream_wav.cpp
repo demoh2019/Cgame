@@ -197,6 +197,38 @@ TEST_CASE("[Audio][AudioStreamWAV] save_to_wav() adds '.wav' file extension auto
 	CHECK(error == OK);
 }
 
+
+TEST_CASE("[Audio][AudioStreamWAV] Chunked file and memory decoding are identical") {
+	// 8193 frames deliberately cross the 4096-byte sample buffer boundary
+	// for both mono/stereo and PCM8/PCM16.
+	const int frames = 8193;
+	for (int bits = 0; bits < 2; bits++) {
+		for (int channels = 0; channels < 2; channels++) {
+			const bool stereo = channels != 0;
+			Ref<AudioStreamWAV> original;
+			original.instantiate();
+			original->set_format(bits ? AudioStreamWAV::FORMAT_16_BITS : AudioStreamWAV::FORMAT_8_BITS);
+			original->set_stereo(stereo);
+			original->set_mix_rate(WAV_RATE);
+			original->set_data(bits ? gen_pcm16_test(WAV_RATE, frames, stereo) : gen_pcm8_test(WAV_RATE, frames, stereo));
+
+			const String path = TestUtils::get_temp_path(vformat("chunked_wav_%d_%d.wav", bits, channels));
+			REQUIRE(original->save_to_wav(path) == OK);
+			Vector<uint8_t> bytes = FileAccess::get_file_as_bytes(path);
+			REQUIRE(bytes.size() > 4096);
+			Ref<AudioStreamWAV> disk = AudioStreamWAV::load_from_file(path, Dictionary());
+			Ref<AudioStreamWAV> memory = AudioStreamWAV::load_from_buffer(bytes, Dictionary());
+			REQUIRE(disk.is_valid());
+			REQUIRE(memory.is_valid());
+			CHECK_EQ(disk->get_data(), memory->get_data());
+			CHECK_EQ(disk->get_data(), original->get_data());
+			CHECK_EQ(disk->get_mix_rate(), memory->get_mix_rate());
+			CHECK_EQ(disk->is_stereo(), memory->is_stereo());
+			CHECK_EQ(disk->get_format(), memory->get_format());
+		}
+	}
+}
+
 TEST_CASE("[Audio][AudioStreamWAV] Default values") {
 	Ref<AudioStreamWAV> stream = memnew(AudioStreamWAV);
 	CHECK(stream->get_format() == AudioStreamWAV::FORMAT_8_BITS);
