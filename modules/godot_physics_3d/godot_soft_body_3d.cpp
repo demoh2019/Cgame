@@ -2244,6 +2244,7 @@ bool GodotSoftBody3D::create_from_trimesh(const Vector<int> &p_indices, const Ve
 	const uint32_t extra_count = uint32_t(xpbd_explicit_tetra_interior_positions.size());
 	if (extra_count > 0) {
 		ERR_FAIL_COND_V_MSG(xpbd_surface_node_count != vertices.size() ||
+					xpbd_surface_node_count > 2048 ||
 					extra_count > 2048 - xpbd_surface_node_count, false,
 				"FEM interior vertex count exceeds the supported node capacity.");
 		vertices.resize(xpbd_surface_node_count + extra_count);
