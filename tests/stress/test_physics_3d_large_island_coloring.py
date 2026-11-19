@@ -60,8 +60,8 @@ class LargeIsland3DColoringContracts(unittest.TestCase):
         self.assertIn("get_body_ptr() == nullptr", block)
         self.assertIn("if (parallelizable_count < MIN_PARALLEL_LARGE_ISLAND)", block)
         code = self.source
-        self.assertIn("!_solve_large_island(constraint_islands[island_index])", code)
-        self.assertIn("_solve_island(0, nullptr);", code)
+        self.assertIn("!_solve_large_island(constraint_islands[large_island_index])", code)
+        self.assertIn("_solve_island(large_island_job_index, nullptr);", code)
         self.assertIn("get_priority() >= current_priority", code)
 
     def test_same_color_has_no_shared_rigid_bodies(self):
@@ -91,6 +91,40 @@ class LargeIsland3DColoringContracts(unittest.TestCase):
             block.index("return true;"),
         )
 
+    def test_dominant_island_runs_after_independent_jobs(self):
+        code = self.source
+        header = STEP_HEADER.read_text(encoding="utf-8")
+        self.assertIn("uint32_t deferred_large_island_index = UINT32_MAX;", header)
+        self.assertIn("void _solve_island_except_large(", header)
+        self.assertIn("void GodotStep3D::_solve_island_except_large(", code)
+        self.assertIn(
+            "solve_island_indices.is_empty() ? p_island_index : solve_island_indices[p_island_index]",
+            code,
+        )
+        self.assertIn("island_index != deferred_large_island_index", code)
+        self.assertIn("if (large_island_count == 1)", code)
+        self.assertIn("Physics3DOtherConstraintIslands", code)
+        self.assertIn("_solve_island_except_large(i, nullptr);", code)
+        self.assertIn("deferred_large_island_index = UINT32_MAX;", code)
+        # Waiting on the ordinary island group is mandatory before the
+        # colored solver can reuse its scratch and launch nested worker jobs.
+        start = code.index("if (large_island_count == 1)")
+        end = code.index("} else if (solve_island_count < MIN_PARALLEL_SOLVE_ISLANDS", start)
+        dominant = code[start:end]
+        self.assertLess(
+            dominant.index("wait_for_group_task_completion(group_task);"),
+            dominant.index("if (!_solve_large_island("),
+        )
+
+    def test_two_large_islands_use_regular_parallel_jobs(self):
+        code = self.source
+        self.assertIn("if (++large_island_count == 2)", code)
+        self.assertIn("large_island_count < 2", code)
+        self.assertIn("Physics3DConstraintSolveIslands", code)
+        self.assertIn("large_island_job_index = i;", code)
+        self.assertIn("large_island_index = index;", code)
+        self.assertIn("large_island_job_index, nullptr", code)
+
     def test_stress_comparison_has_identical_geometry(self):
         script = STRESS.read_text(encoding="utf-8")
         runner = RUNNER.read_text(encoding="utf-8")
@@ -99,6 +133,9 @@ class LargeIsland3DColoringContracts(unittest.TestCase):
             "physics_large_island_3d_serial",
             "physics_large_island_3d_parallel",
             "physics_large_island_3d_priority",
+            "physics_multi_island_3d_serial",
+            "physics_multi_island_3d_parallel",
+            "physics_multi_island_3d_two_large",
         ):
             self.assertIn(f'"{name}"', runner)
             self.assertIn(f'"{name}":', script)
@@ -109,10 +146,18 @@ class LargeIsland3DColoringContracts(unittest.TestCase):
         self.assertIn("ProjectSettings.set_setting(setting_path, saved_setting)", workload)
         self.assertIn("320 * scale", workload)
         self.assertIn("max_joint_spacing", workload)
+        self.assertIn("extra_islands: int = 0", workload)
+        self.assertIn("for island_id in range(extra_islands)", workload)
+        self.assertIn("for i in range(extra_island_size)", workload)
+        self.assertIn("PhysicsServer3D.free_rid(joint)", workload)
+        self.assertIn("LargeIsland3DStress.new().run(self, scale, frames, true, false, 20, 16)", script)
+        self.assertIn("LargeIsland3DStress.new().run(self, scale, frames, true, false, 1, 320)", script)
 
     def test_runtime_regression_runs_all_modes(self):
         script = RUNTIME.read_text(encoding="utf-8")
-        self.assertIn("[[false, false], [true, false], [true, true]]", script)
+        self.assertIn("[false, false, 20, 16]", script)
+        self.assertIn("[true, false, 20, 16]", script)
+        self.assertIn("[true, false, 1, 320]", script)
         self.assertIn("await LargeIsland3DStress.new().run(", script)
         self.assertIn("result.has(\"error\")", script)
         self.assertIn('int(result["joints"]) < 256', script)
