@@ -4,6 +4,7 @@ extends Node3D
 ## call GameServer. Multiplayer transport will be wired to this presentation separately.
 
 const Defs = preload("res://scripts/shared/defs.gd")
+const Combat = preload("res://scripts/shared/combat.gd")
 const QuickCooking = preload("res://scripts/shared/quick_cooking.gd")
 const FishingDisplay = preload("res://scripts/shared/fishing_display.gd")
 const WorldGen = preload("res://scripts/shared/world_gen.gd")
@@ -648,7 +649,9 @@ func _unhandled_input(event: InputEvent) -> void:
 	elif event.is_action_pressed("survive_attack"):
 		_result("Attack", sim.cmd_attack(LOCAL_PLAYER_ID, _facing.x, _facing.y))
 	elif event.is_action_pressed("survive_skill"):
-		_result("Weapon Skill", sim.cmd_skill(LOCAL_PLAYER_ID, _facing.x, _facing.y))
+		var skill: Dictionary = Combat.active_skill(survivor.inventory.weapon)
+		var skill_name: String = str(skill.get("id", "weapon_skill")).replace("_", " ").capitalize()
+		_result(skill_name, sim.cmd_skill(LOCAL_PLAYER_ID, _facing.x, _facing.y))
 	elif event.is_action_pressed("survive_dodge"):
 		var movement := Input.get_vector("survive_left", "survive_right", "survive_up", "survive_down")
 		var direction: Vector2 = movement.normalized() if movement.length_squared() > 0.0001 else _facing
@@ -675,7 +678,19 @@ func _unhandled_input(event: InputEvent) -> void:
 	elif event.is_action_pressed("survive_bandage"):
 		_result("Heal", sim.cmd_use(LOCAL_PLAYER_ID, "bandage"))
 	elif event.is_action_pressed("survive_weapon"):
-		_result("Equip weapon", sim.cmd_use(LOCAL_PLAYER_ID, "club_1"))
+		if Input.is_key_pressed(KEY_SHIFT):
+			var spear_id: String = ""
+			for tier in range(Defs.MAX_TIER, 0, -1):
+				var candidate: String = "spear_%d" % tier
+				if survivor.inventory.count(candidate) > 0:
+					spear_id = candidate
+					break
+			if spear_id.is_empty():
+				_feedback = "Spear: craft one at the workbench first."
+			else:
+				_result("Equip spear", sim.cmd_use(LOCAL_PLAYER_ID, spear_id))
+		else:
+			_result("Equip club", sim.cmd_use(LOCAL_PLAYER_ID, "club_1"))
 	elif event.is_action_pressed("survive_armor"):
 		_result("Equip armor", sim.cmd_use(LOCAL_PLAYER_ID, "jacket_1"))
 	elif event.is_action_pressed("survive_antiseptic"):
@@ -785,7 +800,7 @@ func _update_hud() -> void:
 	var station_status: String = "WORKBENCH" if near_bench else "workbench at x=9, z=0"
 	if recipe.get("station", "") == "campfire":
 		station_status = "FIRE READY" if nearby_fire else ("WORKBENCH" if near_bench else "need lit fire or workbench")
-	_instructions.text = "WASD move | Shift sprint | E gather | Q loot | F attack | G weapon skill | Space dodge | U build | O campfire | 9 refuel | 0 cook fish | - extinguish | H repair | Y upgrade | X dismantle\nTab / Shift+Tab recipes | C craft | B stash | 1 food 2 water 3 heal 4 weapon 5 armor 6 antiseptic 7 antibiotics 8 heat pack R lake (filter prevents infection)\nN buy water / V sell materials / Shift+V sell fish | T fish near shore | P accept / Shift+P turn in (hub)\nCRAFT %s -> %s x%d | %s | inputs %s\n%s" % [
+	_instructions.text = "WASD move | Shift sprint | E gather | Q loot | F attack | G weapon skill | Space dodge | U build | O campfire | 9 refuel | 0 cook fish | - extinguish | H repair | Y upgrade | X dismantle\nTab / Shift+Tab recipes | C craft | B stash | 1 food 2 water 3 heal 4 club Shift+4 spear 5 armor 6 antiseptic 7 antibiotics 8 heat pack R lake (filter prevents infection)\nN buy water / V sell materials / Shift+V sell fish | T fish near shore | P accept / Shift+P turn in (hub)\nCRAFT %s -> %s x%d | %s | inputs %s\n%s" % [
 		recipe_id, str(recipe.get("output", "")), int(recipe.get("count", 0)),
 		station_status,
 		str(recipe.get("inputs", {})), _feedback
@@ -793,6 +808,11 @@ func _update_hud() -> void:
 	var fishing_status: String = FishingDisplay.progress(survivor.action)
 	if not fishing_status.is_empty():
 		_instructions.text += "\n" + fishing_status
+	var ability: Dictionary = Combat.active_skill(survivor.inventory.weapon)
+	if not ability.is_empty():
+		_instructions.text += "\nABILITY %s: %.0f energy, %.1fs cooldown | G" % [
+			str(ability.get("id", "")).replace("_", " ").capitalize(),
+			float(ability["energy_cost"]), survivor.skill_timer]
 	_instructions.text += "\nM tactical radar: red infected, yellow resources, green loot, gold defenses"
 	_instructions.text += "\nZ rest at hub (2 wood + food + water; 90s cooldown), remaining %.0fs" % survivor.rest_cooldown
 	_update_bank_hud()

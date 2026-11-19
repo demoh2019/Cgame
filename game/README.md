@@ -1559,3 +1559,27 @@ single-character preview has no party to protect, so this is an online
 party-only ability. Regression coverage lives in
 `game/tests/test_guardian_taunt.gd`, registered in `run_all.gd`.
 No new C++ engine primitive was needed.
+
+## Classless spear weapons (T1-T4) and Piercing Thrust
+
+The canonical `game/` project now has a second craftable melee family:
+T1-T4 spears made at the workbench from matching planks, fiber, and stone
+(T1) or refined bars (T2-T4). Existing crafting mastery gates apply.
+
+A spear has a longer **3.2 m** ordinary melee reach than a club (2.2 m),
+with slightly lower damage per swing and a slower attack. **G** triggers
+**Piercing Thrust**: a narrow forward-facing 4.2 m line attack that can hit
+up to three distinct enemies. It costs 35 energy, with an eight-second
+cooldown even on a miss. The server computes all targets, applies weapon
+mastery bonuses and continues to enforce safe-zone, party and PvP guards.
+Clubs keep Heavy Strike, and pistols keep Focused Shot.
+
+In the local preview, **4** equips the starter club and **Shift+4** equips
+the best spear carried in the backpack. Networked players equip spears via
+the existing inventory interaction. Both clients display equipment skills.
+
+No native Cgame extension is needed for this gameplay feature; existing
+script, UI and server simulation APIs suffice. Run
+`godot --headless --path game --script res://tests/run_all.gd` and
+`godot --headless --path game --script res://tests/smoke_client_scene.gd`.
+`test_polearms.gd` covers crafting, reach, piercing, energy, PvP and saves.

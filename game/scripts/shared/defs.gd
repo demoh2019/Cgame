@@ -182,6 +182,18 @@ static func _build_items() -> void:
 			club_inputs["bar_%d" % t] = 1
 		_add_item("club_%d" % t, {"name": "Club T%d" % t, "kind": "weapon", "weapon": "melee", "tier": t, "damage": 14.0 + 9.0 * (t - 1), "cooldown": 0.7, "value": 40 * t})
 		_add_recipe("club_%d" % t, "club_%d" % t, 1, club_inputs, "workbench", 5.0)
+		# Polearms trade damage and attack speed for greater melee reach.
+		var spear_inputs: Dictionary = {"plank_%d" % t: 2, "fiber_%d" % t: 2}
+		if t == 1:
+			spear_inputs["stone_1"] = 2
+		else:
+			spear_inputs["bar_%d" % t] = 2
+		_add_item("spear_%d" % t, {"name": "Spear T%d" % t,
+			"kind": "weapon", "weapon": "melee", "tier": t,
+			"damage": 12.0 + 8.0 * (t - 1), "cooldown": 0.85,
+			"melee_range": 3.2, "weight": 3.2, "value": 45 * t})
+		_add_recipe("spear_%d" % t, "spear_%d" % t, 1,
+			spear_inputs, "workbench", 5.5)
 		# Armour: reduces incoming damage.
 		_add_item("jacket_%d" % t, {"name": "Jacket T%d" % t, "kind": "armor", "tier": t, "armor": 0.08 + 0.07 * (t - 1), "value": 35 * t})
 		_add_recipe("jacket_%d" % t, "jacket_%d" % t, 1, {"cloth_%d" % t: 4}, "workbench", 5.0)

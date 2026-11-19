@@ -37,6 +37,14 @@ static func weapon_cooldown(weapon_id: String) -> float:
 	return float(Defs.item(weapon_id).get("cooldown", 0.8))
 
 
+## Melee reach comes from server-validated weapon definitions, never client aim.
+static func weapon_range(weapon_id: String) -> float:
+	var info: Dictionary = Defs.item(weapon_id)
+	if str(info.get("weapon", "")) != "melee":
+		return Defs.MELEE_RANGE
+	return clampf(float(info.get("melee_range", Defs.MELEE_RANGE)), Defs.MELEE_RANGE, 4.0)
+
+
 ## Equipment determines the active ability. No class selection or client damage.
 ## Ranged skills consume real server-owned ammunition in GameServer.cmd_skill.
 static func active_skill(weapon_id: String) -> Dictionary:
@@ -53,6 +61,10 @@ static func active_skill(weapon_id: String) -> Dictionary:
 			"attack_lock": 0.95, "range": Defs.MELEE_RANGE + 0.6,
 			"damage": weapon_damage(weapon_id) * 1.6,
 			"ranged": false}
+	if weapon_id.begins_with("spear_") and str(info.get("weapon", "")) == "melee":
+		return {"id": "piercing_thrust", "energy_cost": 35.0, "cooldown": 8.0,
+			"attack_lock": 1.1, "range": 4.2, "pierce_targets": 3,
+			"damage": weapon_damage(weapon_id) * 1.25, "ranged": false}
 	if weapon_id == "pistol" and str(info.get("weapon", "")) == "ranged":
 		return {"id": "focused_shot", "energy_cost": 40.0, "cooldown": 8.0,
 			"attack_lock": 0.55, "range": Defs.PISTOL_RANGE + 4.0,
