@@ -79,6 +79,43 @@ class LargeIsland3DColoringContracts(unittest.TestCase):
         self.assertIn("(!contact_only_island || body->get_mode() > PS3DE::BODY_MODE_KINEMATIC)", block)
         self.assertIn("(contact_only_island && body->get_mode() <= PS3DE::BODY_MODE_KINEMATIC)", block)
 
+    def test_parallel_colors_dispatch_bounded_contiguous_batches(self):
+        source = self.source
+        header = STEP_HEADER.read_text(encoding="utf-8")
+        self.assertIn("uint32_t color_batch_count = 0;", header)
+        self.assertIn("static constexpr uint32_t PARALLEL_COLOR_BATCH_SIZE = 8;", source)
+        self.assertIn("color_batch_count = count;", self.coloring)
+
+        begin = source.index("void GodotStep3D::_solve_colored_constraint(")
+        end = source.index("\n}", begin)
+        callback = source[begin:end]
+        self.assertIn("p_constraint_index * PARALLEL_COLOR_BATCH_SIZE", callback)
+        self.assertIn("MIN(first + PARALLEL_COLOR_BATCH_SIZE, color_batch_count)", callback)
+        self.assertIn("for (uint32_t i = first; i < end; ++i)", callback)
+        self.assertIn("colored_constraints[color_batch_offset + i]->solve(delta);", callback)
+
+        self.assertIn(
+            "count / PARALLEL_COLOR_BATCH_SIZE + (count % PARALLEL_COLOR_BATCH_SIZE != 0)",
+            self.coloring,
+        )
+        self.assertIn(
+            "&GodotStep3D::_solve_colored_constraint, nullptr, task_count, -1",
+            self.coloring,
+        )
+        self.assertLess(
+            self.coloring.index("color_batch_count = count;"),
+            self.coloring.index("add_template_group_task("),
+        )
+        # Check partial tail batches are neither skipped nor read out-of-bounds.
+        for count in (1, 7, 8, 9, 63, 64, 65, 127, 255, 256, 257, 1023):
+            tasks = count // 8 + (count % 8 != 0)
+            visited = [
+                index
+                for task in range(tasks)
+                for index in range(task * 8, min((task + 1) * 8, count))
+            ]
+            self.assertEqual(visited, list(range(count)))
+
     def test_color_barrier_and_serial_overflow(self):
         block = self.coloring
         self.assertIn('SNAME("Physics3DLargeIslandColor")', block)
