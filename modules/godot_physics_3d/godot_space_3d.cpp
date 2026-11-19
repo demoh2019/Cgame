@@ -1298,6 +1298,12 @@ GodotSpace3D::GodotSpace3D() {
 	soft_body_xpbd_tension_hardening = Math::is_finite(configured_tension_hardening) ? MAX(real_t(0.0), configured_tension_hardening) : real_t(0.0);
 	const real_t configured_tension_yield = GLOBAL_GET("physics/3d/solver/soft_body_xpbd_tension_yield_strain");
 	soft_body_xpbd_tension_yield_strain = Math::is_finite(configured_tension_yield) ? MAX(real_t(0.0), configured_tension_yield) : real_t(0.1);
+	const real_t configured_buckling_ratio = GLOBAL_GET("physics/3d/solver/soft_body_xpbd_buckling_softening_ratio");
+	soft_body_xpbd_buckling_softening_ratio = Math::is_finite(configured_buckling_ratio) ? MAX(real_t(1.0), configured_buckling_ratio) : real_t(1.0);
+	const real_t configured_buckling_yield = GLOBAL_GET("physics/3d/solver/soft_body_xpbd_buckling_yield_strain");
+	soft_body_xpbd_buckling_yield_strain = Math::is_finite(configured_buckling_yield) ? CLAMP(configured_buckling_yield, real_t(0.0), real_t(1.0)) : real_t(0.05);
+	const real_t configured_buckling_transition = GLOBAL_GET("physics/3d/solver/soft_body_xpbd_buckling_transition_strain");
+	soft_body_xpbd_buckling_transition_strain = Math::is_finite(configured_buckling_transition) ? CLAMP(configured_buckling_transition, real_t(0.0), real_t(1.0)) : real_t(0.05);
 	const real_t configured_plastic_yield = GLOBAL_GET("physics/3d/solver/soft_body_plastic_yield_strain");
 	soft_body_plastic_yield_strain = Math::is_finite(configured_plastic_yield) ? CLAMP(configured_plastic_yield, real_t(0.0), real_t(1.0)) : real_t(0.1);
 	const real_t configured_plastic_creep_rate = GLOBAL_GET("physics/3d/solver/soft_body_plastic_creep_rate");
