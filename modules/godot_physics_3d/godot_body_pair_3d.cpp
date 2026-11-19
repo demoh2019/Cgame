@@ -321,6 +321,13 @@ bool GodotBodyPair3D::setup(real_t p_step) {
 	const bool ccd_enabled = A->is_continuous_collision_detection_enabled() || B->is_continuous_collision_detection_enabled();
 	const uint64_t geometry_version_a = A->get_collision_geometry_version();
 	const uint64_t geometry_version_b = B->get_collision_geometry_version();
+	// Reuse a separating narrowphase result for persistent broadphase
+	// pairs only if their *exact* relative shape pose is unchanged.
+	// Geometry revisions cover orientation and shape mutations; CCD bypasses.
+	if (relative_translation_unchanged && contact_recycling.can_reuse_separation(geometry_version_a, geometry_version_b, ccd_enabled)) {
+		collided = false;
+		return false;
+	}
 	if (relative_translation_unchanged && contact_recycling.can_reuse(geometry_version_a, geometry_version_b, collided, contact_count, ccd_enabled)) {
 		// SAT may have emitted a new manifold with fewer points, leaving
 		// old (unused) contacts to be pruned on the next frame. Never recycle
@@ -352,7 +359,7 @@ bool GodotBodyPair3D::setup(real_t p_step) {
 	GodotShape3D *shape_B_ptr = B->get_shape(shape_B);
 
 	collided = GodotCollisionSolver3D::solve_static(shape_A_ptr, xform_A, shape_B_ptr, xform_B, _contact_added_callback, this, &sep_axis);
-	contact_recycling.remember(geometry_version_a, geometry_version_b);
+	contact_recycling.remember(geometry_version_a, geometry_version_b, collided);
 
 	if (!collided) {
 		if (A->is_continuous_collision_detection_enabled() && collide_A) {
