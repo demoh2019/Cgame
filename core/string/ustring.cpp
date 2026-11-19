@@ -1382,42 +1382,62 @@ char32_t String::char_lowercase(char32_t p_char) {
 	return _find_lower(p_char);
 }
 
+// Avoid a binary search in the Unicode casing tables for the ASCII hot path.
+static _FORCE_INLINE_ char32_t _string_fast_upper(char32_t p_char) {
+	if (p_char >= 'a' && p_char <= 'z') {
+		return p_char - ('a' - 'A');
+	}
+	return p_char < 128 ? p_char : _find_upper(p_char);
+}
+
+static _FORCE_INLINE_ char32_t _string_fast_lower(char32_t p_char) {
+	if (p_char >= 'A' && p_char <= 'Z') {
+		return p_char + ('a' - 'A');
+	}
+	return p_char < 128 ? p_char : _find_lower(p_char);
+}
+
+template <char32_t (*P_MAP)(char32_t)>
+static String _string_case_convert(const String &p_string) {
+	if (p_string.is_empty()) {
+		return p_string;
+	}
+
+	const char32_t *src = p_string.ptr();
+	const int len = p_string.length();
+	int first_change = 0;
+	while (first_change < len && src[first_change] && P_MAP(src[first_change]) == src[first_change]) {
+		++first_change;
+	}
+
+	// Reuse the source allocation when its case is already correct.
+	if (first_change == len) {
+		return p_string;
+	}
+
+	String converted;
+	converted.resize_uninitialized(p_string.size());
+	char32_t *dst = converted.ptrw();
+	if (first_change > 0) {
+		memcpy(dst, src, first_change * sizeof(char32_t));
+	}
+
+	// Stop at the first embedded NUL, matching the existing conversion behavior.
+	int i = first_change;
+	while (i < len && src[i]) {
+		dst[i] = P_MAP(src[i]);
+		++i;
+	}
+	dst[i] = 0;
+	return converted;
+}
+
 String String::to_upper() const {
-	if (is_empty()) {
-		return *this;
-	}
-
-	String upper;
-	upper.resize_uninitialized(size());
-	const char32_t *old_ptr = ptr();
-	char32_t *upper_ptrw = upper.ptrw();
-
-	while (*old_ptr) {
-		*upper_ptrw++ = _find_upper(*old_ptr++);
-	}
-
-	*upper_ptrw = 0;
-
-	return upper;
+	return _string_case_convert<_string_fast_upper>(*this);
 }
 
 String String::to_lower() const {
-	if (is_empty()) {
-		return *this;
-	}
-
-	String lower;
-	lower.resize_uninitialized(size());
-	const char32_t *old_ptr = ptr();
-	char32_t *lower_ptrw = lower.ptrw();
-
-	while (*old_ptr) {
-		*lower_ptrw++ = _find_lower(*old_ptr++);
-	}
-
-	*lower_ptrw = 0;
-
-	return lower;
+	return _string_case_convert<_string_fast_lower>(*this);
 }
 
 String String::num(double p_num, int p_decimals) {
