@@ -119,10 +119,26 @@ provides an independent gravity control.
 
 ### Profiling
 
-Benchmark against the prior AABB path for 64/256/1024 partially submerged
-ellipsoids, with 60/120 Hz physics and a fixed frame budget. Report
-median/p95/p99 physics-step times, RSS and numerical error. The new
-path is a little more arithmetic than the AABB height ratio but has
-constant O(1) memory and time and avoids voxel/tetrahedral clipping.
-Do not claim production-readiness until native CI and headless runtime
-tests pass.
+A ready-to-run scale sweep is registered in `tests/stress/run.py` and
+`tests/stress/stress.gd`. It creates 64-2048 independently moving,
+rotated, nonuniformly scaled ellipsoids and compares the SAME bodies
+with the optional fluid plane disabled and enabled:
+
+```bash
+python3 tests/stress/run.py \
+  --godot ./bin/godot.linuxbsd.editor.dev.x86_64 \
+  --case physics_ellipsoid_fluid_3d_disabled,physics_ellipsoid_fluid_3d_enabled \
+  --scales 1,2,4,8,16 \
+  --frames 120 --repeats 3 --output out/ellipsoid-fluid-scale.json
+```
+
+This quantifies the overall cost of fluid-plane forces, **not** a
+head-to-head implementation baseline versus old AABB approximation.
+For that comparison, benchmark the parent commit on the same hardware
+and identical workload. Report median/p95/p99 physics-step times,
+process RSS and numerical error across matched runs. The new path is
+more arithmetic than the AABB height ratio but has constant O(1)
+memory and time and avoids voxel/tetrahedral clipping.
+
+Do not claim production readiness until native CI, the actual
+nonuniform-shape headless test and platform benchmarks pass.
