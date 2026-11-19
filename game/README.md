@@ -1133,3 +1133,18 @@ No native Cgame engine change is required for this game-layer feature.
 (minus) now extinguishes the nearest owned campfire. These actions previously
 shared key 0, causing ambiguous/unreachable behaviour. The inventory buttons
 remain available as alternative controls.
+
+## Group-combat XP integrity
+
+A group assist now remembers the **server-side party ID at the time of
+confirmed infected damage**, not merely at the moment the enemy dies.
+Joining a party after damaging an infected or leaving and reforming a
+new party cannot retroactively turn that old hit into shared weapon mastery
+XP. Fresh damage while an eligible party member continues to award the
+normal bounded assist XP.
+
+The new headless `test_party_assist_integrity.gd` regression is included
+in `tests/run_all.gd`. It verifies pre-invite hits, legitimate assists,
+corpse replay denial, regrouping and single-loot accounting. Existing
+Lineage-style invitations, rally points, contribution windows, party
+friendly-fire immunity and guild systems remain unchanged.
