@@ -55,7 +55,11 @@ msgstr ""
 		po.append("\"ab\"\n");
 	}
 
+	// Keep the ordinary one-line gettext case on the direct String path.
 	po.append(R"PO(
+msgid "short"
+msgstr "fast"
+
 msgctxt ""
 )PO");
 	for (int i = 0; i < 128; i++) {
@@ -105,6 +109,7 @@ msgstr[0] ""
 	REQUIRE(translation != nullptr);
 
 	CHECK(translation->get_locale() == "en");
+	CHECK(String(translation->get_message("short")) == "fast");
 	CHECK(String(translation->get_message("long")) == String("ab").repeat(2048));
 	CHECK(String(translation->get_message(StringName(String("id").repeat(512)))) == "converted");
 	CHECK(String(translation->get_message("action", StringName(String("menu").repeat(128)))) == String("ok").repeat(512));
