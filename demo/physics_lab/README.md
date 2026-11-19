@@ -189,5 +189,5 @@ GodotPhysics3D и Jolt Physics, **если оба встроены в текущ
 
 Файлы: `project.godot`, `lab_3d.tscn`, `lab_3d.gd`, `lab_2d.tscn`,
 `lab_2d.gd`, `environment_3d.gd`, `environment_2d.gd`,
-\`buoyant_box.gd\` (старый пример), \ `walker_2d.gd`, `smoke_test.gd`,
+`buoyant_box.gd` (старый пример), `walker_2d.gd`, `smoke_test.gd`,
 `advanced_3d.gd`, `advanced_2d.gd`, `breakable_3d.gd`, `breakable_2d.gd`.
