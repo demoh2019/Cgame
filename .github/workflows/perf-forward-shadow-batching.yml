@@ -1,0 +1,60 @@
+name: Forward+ shadow batching regressions
+
+on:
+  pull_request:
+    paths:
+      - "servers/rendering/renderer_rd/forward_clustered/render_forward_clustered.cpp"
+      - "servers/rendering/renderer_rd/forward_clustered/render_forward_clustered.h"
+      - "misc/scripts/tests/test_forward_shadow_batching.py"
+      - "misc/benchmarks/shadow_batching/**"
+      - ".github/workflows/perf-forward-shadow-batching.yml"
+  push:
+    branches: [develop]
+    paths:
+      - "servers/rendering/renderer_rd/forward_clustered/render_forward_clustered.cpp"
+      - "servers/rendering/renderer_rd/forward_clustered/render_forward_clustered.h"
+      - "misc/scripts/tests/test_forward_shadow_batching.py"
+      - "misc/benchmarks/shadow_batching/**"
+      - ".github/workflows/perf-forward-shadow-batching.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  sort-key-model:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    strategy:
+      fail-fast: false
+      matrix:
+        compiler: [g++, clang++]
+    steps:
+      - uses: actions/checkout@v4
+      - name: Compile and run production-expression batching regressions
+        env:
+          CXX: ${{ matrix.compiler }}
+        run: python3 -m unittest discover -s misc/scripts/tests -p 'test_forward_shadow_batching.py' -v
+
+  editor-build-smoke:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install native dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libwayland-bin
+      - uses: ./.github/actions/godot-deps
+      - name: Compile Cgame Linux editor
+        uses: ./.github/actions/godot-build
+        with:
+          platform: linuxbsd
+          target: editor
+          scons-flags: dev_build=yes debug_symbols=no tests=yes module_text_server_fb_enabled=yes -j2
+      - name: Smoke-run freshly compiled engine
+        shell: bash
+        run: |
+          set -euo pipefail
+          ./bin/godot.linuxbsd.editor.dev.x86_64 --version
+          timeout 60s ./bin/godot.linuxbsd.editor.dev.x86_64 --headless --path misc/benchmarks/shadow_batching --import --quit
