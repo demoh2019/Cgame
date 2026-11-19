@@ -663,7 +663,7 @@ void ProjectList::_notification(int p_what) {
 		case NOTIFICATION_PROCESS: {
 			// Load icons as a coroutine to speed up launch when you have hundreds of projects.
 			if (_icon_load_index < _projects.size()) {
-				Item &item = _projects.write[_icon_load_index];
+				const Item &item = _projects[_icon_load_index];
 				if (item.control->should_load_project_icon()) {
 					_load_project_icon(_icon_load_index);
 				}
@@ -1000,13 +1000,14 @@ void ProjectList::sort_projects() {
 		}
 	}
 
+	const bool search_full_path = search_term.contains_char('/');
 	for (int i = 0; i < _projects.size(); ++i) {
-		Item &item = _projects.write[i];
+		const Item &item = _projects[i];
 
 		bool item_visible = true;
 		if (!_search_term.is_empty()) {
 			String search_path;
-			if (search_term.contains_char('/')) {
+			if (search_full_path) {
 				// Search path will match the whole path
 				search_path = item.path;
 			} else {
@@ -1030,8 +1031,11 @@ void ProjectList::sort_projects() {
 	}
 
 	for (int i = 0; i < _projects.size(); ++i) {
-		Item &item = _projects.write[i];
-		item.control->get_parent()->move_child(item.control, i);
+		const Item &item = _projects[i];
+		// Avoid even entering Node::move_child for items already in place.
+		if (item.control->get_index() != i) {
+			item.control->get_parent()->move_child(item.control, i);
+		}
 	}
 
 	// Rewind the coroutine because order of projects changed
