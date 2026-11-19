@@ -194,6 +194,18 @@ jobs:
             --script res://physics_jolt_pending_broadphase_regression.gd \
             2>&1 | tee physics-jolt-pending-broadphase.log
           grep -Fq 'Jolt pending broadphase regression passed.' physics-jolt-pending-broadphase.log
+      - name: Validate Jolt convex soft-body volume preservation
+        shell: bash
+        run: |
+          set -euo pipefail
+          BIN=./bin/godot.linuxbsd.editor.dev.x86_64
+          PROJECT=tests/stress/jolt_volume
+          timeout 120s "$BIN" --headless --path "$PROJECT" \
+            --script res://convex_volume_regression.gd --check-only
+          timeout 180s "$BIN" --headless --path "$PROJECT" \
+            --script res://convex_volume_regression.gd \
+            2>&1 | tee jolt-convex-volume-regression.log
+          grep -Fq 'PASS: convex Jolt volume constraints and open-cloth fallback' jolt-convex-volume-regression.log
       - name: Regression-test GodotPhysics3D graph-colored islands
         shell: bash
         run: |
@@ -355,8 +367,7 @@ jobs:
             PROJECT="$RUNNER_TEMP/cgame-jolt-lra-shrink-$MODE"
             mkdir -p "$PROJECT"
             cp -a tests/stress/. "$PROJECT/"
-            # Select the backend explicitly; insert the LRA settings into
-            # the existing [physics] section, never duplicate the section.
+            # Keep one [physics] section and explicitly select the backend.
             sed -i 's|^3d/physics_engine="GodotPhysics3D"$|3d/physics_engine="Jolt Physics"|' "$PROJECT/project.godot"
             sed -i "/^\[physics\]$/a jolt_physics_3d/simulation/soft_body_lra_mode=$MODE" "$PROJECT/project.godot"
             sed -i '/^\[physics\]$/a jolt_physics_3d/simulation/soft_body_lra_max_distance_multiplier=1.05' "$PROJECT/project.godot"
