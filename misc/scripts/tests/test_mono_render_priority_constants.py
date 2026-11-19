@@ -43,7 +43,11 @@ class MonoMaterialRenderPriorityTests(unittest.TestCase):
         self.assertIn("output.append(itos(iconstant.value));", SOURCE[start:start+500])
 
     def test_int32_names_are_not_exported_as_unconditional_long(self):
-        self.assertNotIn('output.append(MEMBER_BEGIN "public const long ");', SOURCE)
+        # Another generator path intentionally emits long, so scope this to
+        # the object-constant writer, where the new type selection occurs.
+        start = SOURCE.index('output.append(iconstant.is_int32 ? "int " : "long ");')
+        writer = SOURCE[start - 150:start + 300]
+        self.assertNotIn('output.append(MEMBER_BEGIN "public const long ");', writer)
 
 
 if __name__ == "__main__":
