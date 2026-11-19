@@ -19,6 +19,10 @@ textures/default_filters/use_nearest_mipmap_filter=false
 
 [physics]
 
+# Select native Cgame GodotPhysics3D explicitly: Jolt has higher default
+# priority and does not implement experimental XPBD/FEM soft-body settings.
+3d/physics_engine="GodotPhysics3D"
+
 # The built-in GodotPhysics3D soft-body solver can cap cloth/mesh strain.
 # These limits affect only the standalone physics lab project.
 3d/solver/soft_body_xpbd_strain_max_stretch_ratio=1.5
