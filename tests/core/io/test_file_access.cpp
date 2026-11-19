@@ -584,7 +584,7 @@ TEST_CASE("[FileAccess] Memory reader survives registration replacement") {
 	CHECK(data[2] == 6);
 }
 
-TEST_CASE("[FileAccess] Empty memory files and custom buffers retain correct open semantics") {
+TEST_CASE("[FileAccess] Memory empty files and custom buffers retain correct open semantics") {
 	const String path = "cgame_file_access_memory_empty_regression.bin";
 	Vector<uint8_t> empty;
 	FileAccessMemory::register_file(path, empty);
