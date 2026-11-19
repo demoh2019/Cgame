@@ -1191,3 +1191,35 @@ python3 tests/stress/run.py --godot ./bin/godot.linuxbsd.editor.dev.x86_64 \
 
 Compare query time and process RSS to an otherwise identical baseline build.
 No specific CPU/latency speedup is claimed without measured results.
+
+## Dense-leaf nearest-hit BVH raycasts
+
+The streaming BVH visitor now performs one lightweight AABB scan on leaves
+containing **16 or more items**, to visit the closest candidate before the
+remaining leaf contents. An exact near hit immediately shortens the segment,
+avoiding many expensive narrowphase tests on farther items. Leaves with fewer
+than 16 items retain their original one-pass traversal.
+
+The near-first scan does **not** assume that AABB overlap means a real shape
+hit: if the selected candidate fails narrowphase or is excluded by collision
+filters, all remaining candidates are still visited. The change introduces
+neither sorting nor per-query heap allocations. It trades an extra broadphase
+scan on dense leaves against fewer narrowphase invocations.
+
+The `tests/core/math/test_bvh.cpp` tests cover deliberately far-to-near
+insertion into a dense 64-item leaf in **both 2D and 3D**, including a
+first-candidate narrowphase miss, reversed rays, and the unchanged
+small-leaf fast path.
+
+For direct PhysicsServer correctness checks and comparative timings, with
+2,048 static bodies per dimension across 32 tracks:
+
+```bash
+./bin/godot.linuxbsd.editor.dev.x86_64 --headless --path tests/stress \
+  --script res://physics_ray_dense_leaf_regression.gd
+```
+
+Measure `query_ms` and `creation_ms` on both the baseline and this patch,
+on the same machine and build configuration. The script checks nearest hits
+in both directions. No performance win is claimed until measured; the extra
+AABB prepass can cost more for dense leaves where few boxes intersect the ray.
