@@ -199,4 +199,63 @@ TEST_CASE("[PacketPeer][PacketPeerStream] Put packet buffer when is empty") {
 	CHECK_EQ(spb->get_size(), 0);
 }
 
+TEST_CASE("[PacketPeer][Performance] Bulk framed packet copies retain wire format") {
+	Ref<StreamPeerBuffer> stream;
+	stream.instantiate();
+	Ref<PacketPeerStream> packets;
+	packets.instantiate();
+	packets->set_stream_peer(stream);
+	packets->set_input_buffer_max_size(32768);
+	packets->set_output_buffer_max_size(32768);
+
+	const int sizes[] = { 1, 2, 3, 4, 15, 31, 32, 255, 256, 512, 1024, 4096, 16384 };
+	for (int size : sizes) {
+		Vector<uint8_t> payload;
+		REQUIRE(payload.resize_uninitialized(size) == OK);
+		uint8_t *bytes = payload.ptrw();
+		for (int i = 0; i < size; i++) {
+			bytes[i] = uint8_t((i * 31 + size) & 0xff);
+		}
+
+		stream->clear();
+		REQUIRE(packets->put_packet_buffer(payload) == OK);
+		const Vector<uint8_t> &wire = stream->get_data_array();
+		REQUIRE(wire.size() == size + 4);
+		CHECK(wire[0] == uint8_t(size & 0xff));
+		CHECK(wire[1] == uint8_t((size >> 8) & 0xff));
+		CHECK(wire[2] == uint8_t((size >> 16) & 0xff));
+		CHECK(wire[3] == uint8_t((size >> 24) & 0xff));
+		for (int i = 0; i < size; i++) {
+			CHECK(wire[4 + i] == payload[i]);
+		}
+
+		stream->seek(0);
+		Vector<uint8_t> received;
+		CHECK(packets->get_packet_buffer(received) == OK);
+		CHECK(received == payload);
+		CHECK(packets->get_available_packet_count() == 0);
+	}
+
+	// Multiple back-to-back frames preserve boundaries and their order.
+	const Vector<uint8_t> first = { 0, 1, 255, 127 };
+	const Vector<uint8_t> second = { 4, 3, 2, 1, 0 };
+	stream->clear();
+	CHECK(packets->put_packet_buffer(first) == OK);
+	CHECK(packets->put_packet_buffer(second) == OK);
+	stream->seek(0);
+	CHECK(packets->get_available_packet_count() == 2);
+	Vector<uint8_t> received;
+	CHECK(packets->get_packet_buffer(received) == OK);
+	CHECK(received == first);
+	CHECK(packets->get_packet_buffer(received) == OK);
+	CHECK(received == second);
+	CHECK(packets->get_available_packet_count() == 0);
+
+	// Invalid pointer/length pairs must fail without invoking memcpy.
+	ERR_PRINT_OFF;
+	CHECK(packets->put_packet(nullptr, 5) == ERR_INVALID_PARAMETER);
+	CHECK(packets->put_packet(first.ptr(), INT32_MAX) == ERR_INVALID_PARAMETER);
+	ERR_PRINT_ON;
+}
+
 } // namespace TestPacketPeer

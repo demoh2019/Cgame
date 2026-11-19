@@ -34,6 +34,8 @@
 #include "core/io/marshalls.h"
 #include "core/object/class_db.h"
 
+#include <cstring>
+
 /* helpers / binders */
 
 void PacketPeer::set_encode_buffer_max_size(int p_max_size) {
@@ -51,17 +53,16 @@ Error PacketPeer::get_packet_buffer(Vector<uint8_t> &r_buffer) {
 	const uint8_t *buffer;
 	int buffer_size;
 	RETURN_IF_ERROR(get_packet(&buffer, buffer_size));
+	ERR_FAIL_COND_V(buffer_size < 0, ERR_INVALID_DATA);
 
-	r_buffer.resize(buffer_size);
+	RETURN_IF_ERROR(r_buffer.resize_uninitialized(buffer_size));
 	if (buffer_size == 0) {
 		return OK;
 	}
+	ERR_FAIL_NULL_V(buffer, ERR_INVALID_DATA);
 
-	uint8_t *w = r_buffer.ptrw();
-	for (int i = 0; i < buffer_size; i++) {
-		w[i] = buffer[i];
-	}
-
+	// Copy contiguous bytes in one operation instead of a per-byte loop.
+	memcpy(r_buffer.ptrw(), buffer, buffer_size);
 	return OK;
 }
 
@@ -262,15 +263,17 @@ Error PacketPeerStream::put_packet(const uint8_t *p_buffer, int p_buffer_size) {
 	}
 
 	ERR_FAIL_COND_V(p_buffer_size < 0, ERR_INVALID_PARAMETER);
-	ERR_FAIL_COND_V(p_buffer_size + 4 > output_buffer.size(), ERR_INVALID_PARAMETER);
+	ERR_FAIL_NULL_V(p_buffer, ERR_INVALID_PARAMETER);
+	// Avoid signed overflow in p_buffer_size + 4 for malformed lengths.
+	ERR_FAIL_COND_V(output_buffer.size() < 4 || p_buffer_size > output_buffer.size() - 4, ERR_INVALID_PARAMETER);
 
-	encode_uint32(p_buffer_size, output_buffer.ptrw());
-	uint8_t *dst = &output_buffer.write[4];
-	for (int i = 0; i < p_buffer_size; i++) {
-		dst[i] = p_buffer[i];
-	}
+	// Resolve writable COW storage once, then fill the prefix and payload
+	// with an efficient bulk copy rather than repeated proxy lookups.
+	uint8_t *dst = output_buffer.ptrw();
+	encode_uint32(p_buffer_size, dst);
+	memcpy(dst + 4, p_buffer, p_buffer_size);
 
-	return peer->put_data(&output_buffer[0], p_buffer_size + 4);
+	return peer->put_data(dst, p_buffer_size + 4);
 }
 
 int PacketPeerStream::get_max_packet_size() const {
