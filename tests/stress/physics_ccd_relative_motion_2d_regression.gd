@@ -29,7 +29,7 @@ func _make_body(space: RID, shape: RID, x: float, velocity: float, ccd: bool, st
 
 
 func _run_case(label: String, target_x: float, velocity_a: float, velocity_b: float,
-		min_speed: float, max_speed: float, static_target: bool = false, target_ccd: bool = false, target_y: float = 0.0, capsule_target: bool = false, source_y: float = 0.0, capsule_source: bool = false) -> int:
+		min_speed: float, max_speed: float, static_target: bool = false, target_ccd: bool = false, target_y: float = 0.0, capsule_target: bool = false, source_y: float = 0.0, capsule_source: bool = false, reversed_target_axis: bool = false) -> int:
 	var space: RID = PhysicsServer2D.space_create()
 	var circle: RID = PhysicsServer2D.circle_shape_create()
 	PhysicsServer2D.shape_set_data(circle, 0.5)
@@ -44,6 +44,8 @@ func _run_case(label: String, target_x: float, velocity_a: float, velocity_b: fl
 		target_shape = PhysicsServer2D.capsule_shape_create()
 		PhysicsServer2D.shape_set_data(target_shape, Vector2(0.5, 4.0))
 	var b: RID = _make_body(space, target_shape, target_x, velocity_b, target_ccd, static_target, target_y)
+	if reversed_target_axis:
+		PhysicsServer2D.body_set_state(b, PhysicsServer2D.BODY_STATE_TRANSFORM, Transform2D(PI, Vector2(target_x, target_y)))
 	PhysicsServer2D.space_set_active(space, true)
 	await physics_frame
 	await physics_frame
@@ -108,6 +110,8 @@ func _run() -> void:
 	# Parallel capsule center segments combine into a longer expanded
 	# capsule. Their first grazing contact must be found by volume TOI.
 	failures += await _run_case("parallel capsules CCD", 4.0, 480.0, 0.0, 0.0, 425.0, true, false, 3.8, true, 0.0, true)
+	# Reversing a capsule axis gives the same center segment Minkowski sum.
+	failures += await _run_case("antiparallel capsules CCD", 4.0, 480.0, 0.0, 0.0, 425.0, true, false, 3.8, true, 0.0, true, true)
 
 	if failures:
 		printerr("2D relative-motion CCD regression failed: %d" % failures)
