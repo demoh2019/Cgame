@@ -1,0 +1,42 @@
+name: XR render target lazy color regression
+
+on:
+  pull_request:
+    branches: [develop]
+    paths:
+      - servers/rendering/renderer_rd/storage_rd/texture_storage.cpp
+      - servers/rendering/renderer_rd/storage_rd/texture_storage.h
+      - servers/rendering/renderer_viewport.cpp
+      - servers/rendering/storage/texture_storage.h
+      - misc/scripts/tests/test_upstream_xr_lazy_color_allocation.py
+      - .github/workflows/upstream-xr-lazy-color-allocation.yml
+  push:
+    branches: [develop]
+    paths:
+      - servers/rendering/renderer_rd/storage_rd/texture_storage.cpp
+      - servers/rendering/renderer_rd/storage_rd/texture_storage.h
+      - servers/rendering/renderer_viewport.cpp
+      - servers/rendering/storage/texture_storage.h
+      - misc/scripts/tests/test_upstream_xr_lazy_color_allocation.py
+      - .github/workflows/upstream-xr-lazy-color-allocation.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  render-contracts:
+    name: XR color fallback guards (Python ${{ matrix.python-version }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.11", "3.13"]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+      - name: Verify color allocation, MSAA and override fallbacks
+        run: python -m unittest discover -s misc/scripts/tests -p test_upstream_xr_lazy_color_allocation.py -v
