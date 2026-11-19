@@ -252,6 +252,26 @@ JPH::SoftBodySharedSettings *JoltSoftBody3D::_create_shared_settings() {
 	// Jolt supports distance- and dihedral-based XPBD bending. Keep disabled
 	// by default for backward compatibility; enable through project settings.
 	vertex_attrib.mBendCompliance = JoltProjectSettings::soft_body_bend_compliance;
+
+	// Long-range attachment constraints keep pinned cloth from stretching
+	// excessively under gravity. Generate them only when requested AND at
+	// least one *valid* pinned physics vertex exists. The default remains
+	// zero-cost; invalid or unused mesh pin indices cannot become anchors.
+	if (JoltProjectSettings::soft_body_lra_mode != 0) {
+		bool has_kinematic_vertex = false;
+		for (const JPH::SoftBodySharedSettings::Vertex &vertex : physics_vertices) {
+			if (vertex.mInvMass == 0.0f) {
+				has_kinematic_vertex = true;
+				break;
+			}
+		}
+		if (has_kinematic_vertex) {
+			using LRAType = JPH::SoftBodySharedSettings::ELRAType;
+			vertex_attrib.mLRAType = JoltProjectSettings::soft_body_lra_mode == 1 ? LRAType::EuclideanDistance : LRAType::GeodesicDistance;
+			vertex_attrib.mLRAMaxDistanceMultiplier = JoltProjectSettings::soft_body_lra_max_distance_multiplier;
+		}
+	}
+
 	using BendType = JPH::SoftBodySharedSettings::EBendType;
 	const int bend_mode = JoltProjectSettings::soft_body_bend_mode;
 	const BendType bend_type = bend_mode == 1 ? BendType::Distance : (bend_mode == 2 ? BendType::Dihedral : BendType::None);
@@ -593,12 +613,13 @@ void JoltSoftBody3D::apply_vertex_impulse(int p_index, const Vector3 &p_impulse)
 	ERR_FAIL_INDEX(p_index, (int)mesh_to_physics.size());
 	const int physics_index = mesh_to_physics[p_index];
 	ERR_FAIL_COND_MSG(physics_index < 0, vformat("Soft body vertex %d was not used by a face and has been omitted for '%s'. No impulse can be applied.", p_index, to_string()));
-	ERR_FAIL_COND_MSG(pinned_vertices.has(physics_index), vformat("Failed to apply impulse to point at index %d for '%s'. Point was found to be pinned.", static_cast<int>(physics_index), to_string()));
-
 	JPH::SoftBodyMotionProperties &motion_properties = static_cast<JPH::SoftBodyMotionProperties &>(*jolt_body->GetMotionPropertiesUnchecked());
 
 	JPH::Array<JPH::SoftBodyVertex> &physics_vertices = motion_properties.GetVertices();
 	JPH::SoftBodyVertex &physics_vertex = physics_vertices[physics_index];
+	// Visual mesh indices can alias the same physical particle. Check its
+	// actual inverse mass rather than treating a mesh index as a physics index.
+	ERR_FAIL_COND_MSG(physics_vertex.mInvMass <= 0.0f, vformat("Failed to apply impulse to pinned point %d for '%s'.", p_index, to_string()));
 
 	physics_vertex.mVelocity += to_jolt(p_impulse) * physics_vertex.mInvMass;
 
@@ -934,6 +955,10 @@ bool JoltSoftBody3D::is_vertex_pinned(int p_index) const {
 
 	ERR_FAIL_INDEX_V(p_index, (int)mesh_to_physics.size(), false);
 	const int physics_index = mesh_to_physics[p_index];
+	ERR_FAIL_COND_V_MSG(physics_index < 0, false, "Cannot query an unused soft body mesh vertex.");
 
-	return pinned_vertices.has(physics_index);
+	// Mesh vertices may be welded: every visual alias of a pinned physical
+	// particle must report the same pin status.
+	const JPH::SoftBodyMotionProperties &motion_properties = static_cast<const JPH::SoftBodyMotionProperties &>(*jolt_body->GetMotionPropertiesUnchecked());
+	return motion_properties.GetVertices()[physics_index].mInvMass == 0.0f;
 }
