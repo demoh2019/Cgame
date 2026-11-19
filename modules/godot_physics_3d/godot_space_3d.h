@@ -130,6 +130,7 @@ private:
 	real_t soft_body_self_collision_thickness = 0.0; // Off by default, in meters.
 	real_t soft_body_self_collision_compliance = 0.0;
 	bool soft_body_self_collision_edge_contacts = false; // Extra opt-in narrowphase.
+	bool soft_body_self_collision_ccd = false; // Swept conservative advancement.
 	real_t soft_body_xpbd_dihedral_compliance = 0.0; // Opt-in angle-based cloth bending.
 	real_t soft_body_xpbd_tether_compliance = 0.0; // Zero bypasses tether setup and solver.
 	real_t soft_body_xpbd_tether_slack = 0.05; // Opt-in triangle area preservation.
