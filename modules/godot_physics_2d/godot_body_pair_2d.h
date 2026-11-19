@@ -79,6 +79,13 @@ class GodotBodyPair2D : public GodotConstraint2D {
 	Contact contacts[MAX_CONTACTS];
 	int contact_count = 0;
 	real_t mixed_friction = 0.0; // Recomputed in pre_solve, reused across solver iterations.
+	// Box2D-style two-point normal block matrix, assembled once in pre_solve.
+	// Solving iterations only update the right-hand side from current velocities.
+	real_t block_k00 = 0.0;
+	real_t block_k01 = 0.0;
+	real_t block_k11 = 0.0;
+	real_t block_inv_determinant = 0.0;
+	bool block_normal_valid = false;
 	bool collided = false;
 	bool check_ccd = false;
 	bool oneway_disabled = false;
