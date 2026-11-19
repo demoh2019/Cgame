@@ -61,7 +61,65 @@ constexpr double SPACE_DEFAULT_SLEEP_THRESHOLD_LINEAR = 0.1;
 constexpr double SPACE_DEFAULT_SLEEP_THRESHOLD_ANGULAR = 8.0 * Math::PI / 180;
 constexpr double SPACE_DEFAULT_SOLVER_ITERATIONS = 8;
 
+// A hash index is unnecessary in the common case of a few queued bodies.
+// For large create/destroy bursts, linear erase_unordered() becomes O(n^2).
+static void ensure_pending_index(const LocalVector<JPH::BodyID> &p_bodies, HashMap<uint32_t, uint32_t> &r_indices) {
+	if (p_bodies.size() < 128 || !r_indices.is_empty()) {
+		return;
+	}
+	r_indices.reserve(p_bodies.size());
+	for (uint32_t i = 0; i < p_bodies.size(); ++i) {
+		r_indices.insert(p_bodies[i].GetIndexAndSequenceNumber(), i);
+	}
+}
+
 } // namespace
+
+void JoltSpace3D::_pending_add(LocalVector<JPH::BodyID> &p_bodies, HashMap<uint32_t, uint32_t> &r_indices, const JPH::BodyID &p_id) {
+	if (!r_indices.is_empty()) {
+		r_indices.insert(p_id.GetIndexAndSequenceNumber(), p_bodies.size());
+	}
+	p_bodies.push_back(p_id);
+}
+
+bool JoltSpace3D::_pending_erase(LocalVector<JPH::BodyID> &p_bodies, HashMap<uint32_t, uint32_t> &r_indices, const JPH::BodyID &p_id) {
+	if (p_bodies.is_empty()) {
+		return false;
+	}
+	ensure_pending_index(p_bodies, r_indices);
+	if (r_indices.is_empty()) {
+		return p_bodies.erase_unordered(p_id);
+	}
+	const uint32_t key = p_id.GetIndexAndSequenceNumber();
+	const uint32_t *index_ptr = r_indices.getptr(key);
+	if (index_ptr == nullptr) {
+		return false;
+	}
+	const uint32_t index = *index_ptr;
+	const uint32_t last_index = p_bodies.size() - 1;
+	if (index != last_index) {
+		const uint32_t moved_key = p_bodies[last_index].GetIndexAndSequenceNumber();
+		p_bodies.remove_at_unordered(index);
+		r_indices.insert(moved_key, index);
+	} else {
+		p_bodies.remove_at_unordered(index);
+	}
+	r_indices.erase(key);
+	if (p_bodies.is_empty()) {
+		// Do not retain a potentially huge index table after a bulk removal.
+		r_indices = HashMap<uint32_t, uint32_t>();
+	}
+	return true;
+}
+
+bool JoltSpace3D::_pending_has(const LocalVector<JPH::BodyID> &p_bodies, HashMap<uint32_t, uint32_t> &r_indices, const JPH::BodyID &p_id) {
+	if (p_bodies.is_empty()) {
+		return false;
+	}
+	ensure_pending_index(p_bodies, r_indices);
+	return r_indices.is_empty() ? p_bodies.has(p_id) : r_indices.has(p_id.GetIndexAndSequenceNumber());
+}
+
 
 void JoltSpace3D::_pre_step(float p_step) {
 	flush_pending_objects();
@@ -394,9 +452,9 @@ JPH::Body *JoltSpace3D::add_object(const JoltObject3D &p_object, const JPH::Body
 	}
 
 	if (p_sleeping) {
-		pending_objects_sleeping.push_back(jolt_body->GetID());
+		_pending_add(pending_objects_sleeping, pending_sleeping_indices, jolt_body->GetID());
 	} else {
-		pending_objects_awake.push_back(jolt_body->GetID());
+		_pending_add(pending_objects_awake, pending_awake_indices, jolt_body->GetID());
 	}
 
 	return jolt_body;
@@ -415,9 +473,9 @@ JPH::Body *JoltSpace3D::add_object(const JoltObject3D &p_object, const JPH::Soft
 	}
 
 	if (p_sleeping) {
-		pending_objects_sleeping.push_back(jolt_body->GetID());
+		_pending_add(pending_objects_sleeping, pending_sleeping_indices, jolt_body->GetID());
 	} else {
-		pending_objects_awake.push_back(jolt_body->GetID());
+		_pending_add(pending_objects_awake, pending_awake_indices, jolt_body->GetID());
 	}
 
 	return jolt_body;
@@ -426,7 +484,7 @@ JPH::Body *JoltSpace3D::add_object(const JoltObject3D &p_object, const JPH::Soft
 void JoltSpace3D::remove_object(const JPH::BodyID &p_jolt_id) {
 	JPH::BodyInterface &body_iface = get_body_iface();
 
-	if (!pending_objects_sleeping.erase_unordered(p_jolt_id) && !pending_objects_awake.erase_unordered(p_jolt_id)) {
+	if (!_pending_erase(pending_objects_sleeping, pending_sleeping_indices, p_jolt_id) && !_pending_erase(pending_objects_awake, pending_awake_indices, p_jolt_id)) {
 		body_iface.RemoveBody(p_jolt_id);
 	}
 
@@ -453,28 +511,30 @@ void JoltSpace3D::flush_pending_objects() {
 		JPH::BodyInterface::AddState add_state = body_iface.AddBodiesPrepare(pending_objects_sleeping.ptr(), pending_objects_sleeping.size());
 		body_iface.AddBodiesFinalize(pending_objects_sleeping.ptr(), pending_objects_sleeping.size(), add_state, JPH::EActivation::DontActivate);
 		pending_objects_sleeping.reset();
+		pending_sleeping_indices = HashMap<uint32_t, uint32_t>();
 	}
 
 	if (!pending_objects_awake.is_empty()) {
 		JPH::BodyInterface::AddState add_state = body_iface.AddBodiesPrepare(pending_objects_awake.ptr(), pending_objects_awake.size());
 		body_iface.AddBodiesFinalize(pending_objects_awake.ptr(), pending_objects_awake.size(), add_state, JPH::EActivation::Activate);
 		pending_objects_awake.reset();
+		pending_awake_indices = HashMap<uint32_t, uint32_t>();
 	}
 }
 
 void JoltSpace3D::set_is_object_sleeping(const JPH::BodyID &p_jolt_id, bool p_enable) {
 	if (p_enable) {
-		if (pending_objects_awake.erase_unordered(p_jolt_id)) {
-			pending_objects_sleeping.push_back(p_jolt_id);
-		} else if (pending_objects_sleeping.has(p_jolt_id)) {
+		if (_pending_erase(pending_objects_awake, pending_awake_indices, p_jolt_id)) {
+			_pending_add(pending_objects_sleeping, pending_sleeping_indices, p_jolt_id);
+		} else if (_pending_has(pending_objects_sleeping, pending_sleeping_indices, p_jolt_id)) {
 			// Do nothing.
 		} else {
 			get_body_iface().DeactivateBody(p_jolt_id);
 		}
 	} else {
-		if (pending_objects_sleeping.erase_unordered(p_jolt_id)) {
-			pending_objects_awake.push_back(p_jolt_id);
-		} else if (pending_objects_awake.has(p_jolt_id)) {
+		if (_pending_erase(pending_objects_sleeping, pending_sleeping_indices, p_jolt_id)) {
+			_pending_add(pending_objects_awake, pending_awake_indices, p_jolt_id);
+		} else if (_pending_has(pending_objects_awake, pending_awake_indices, p_jolt_id)) {
 			// Do nothing.
 		} else {
 			get_body_iface().ActivateBody(p_jolt_id);
