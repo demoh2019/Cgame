@@ -65,6 +65,11 @@ void JoltProjectSettings::register_settings() {
 	// Catch crossed deformable edges whose endpoints are all far from the
 	// opposite surface. Requires soft contacts and vertex-face mode.
 	GLOBAL_DEF(PropertyInfo(Variant::BOOL, "physics/jolt_physics_3d/simulation/soft_body_soft_edge_edge_contacts"), false);
+	// Approximate linear swept VF contact. This is not rigid-body LinearCast
+	// and not exact deforming-triangle CCD. Disabled unless explicitly opted in.
+	GLOBAL_DEF(PropertyInfo(Variant::BOOL, "physics/jolt_physics_3d/simulation/soft_body_soft_speculative_ccd"), false);
+	GLOBAL_DEF(PropertyInfo(Variant::FLOAT, "physics/jolt_physics_3d/simulation/soft_body_soft_ccd_max_sweep", PROPERTY_HINT_RANGE, "0,4,0.01,suffix:m"), 1.0f);
+	GLOBAL_DEF(PropertyInfo(Variant::FLOAT, "physics/jolt_physics_3d/simulation/soft_body_soft_ccd_max_correction_speed", PROPERTY_HINT_RANGE, "1,256,1,suffix:m/s"), 128.0f);
 	GLOBAL_DEF(PropertyInfo(Variant::FLOAT, "physics/jolt_physics_3d/simulation/soft_body_soft_contact_radius", PROPERTY_HINT_RANGE, "0,1,0.001,suffix:m"), 0.1f);
 	GLOBAL_DEF(PropertyInfo(Variant::FLOAT, "physics/jolt_physics_3d/simulation/soft_body_soft_contact_recovery", PROPERTY_HINT_RANGE, "0,1,0.01"), 0.2f);
 	GLOBAL_DEF(PropertyInfo(Variant::FLOAT, "physics/jolt_physics_3d/simulation/soft_body_soft_contact_friction", PROPERTY_HINT_RANGE, "0,1,0.01"), 0.2f);
@@ -174,6 +179,11 @@ void JoltProjectSettings::read_settings() {
 	soft_body_soft_vertex_face_contacts = GLOBAL_GET("physics/jolt_physics_3d/simulation/soft_body_soft_vertex_face_contacts");
 	soft_body_soft_vertex_face_bvh = GLOBAL_GET("physics/jolt_physics_3d/simulation/soft_body_soft_vertex_face_bvh");
 	soft_body_soft_edge_edge_contacts = GLOBAL_GET("physics/jolt_physics_3d/simulation/soft_body_soft_edge_edge_contacts");
+	soft_body_soft_speculative_ccd = GLOBAL_GET("physics/jolt_physics_3d/simulation/soft_body_soft_speculative_ccd");
+	const float ccd_sweep = GLOBAL_GET("physics/jolt_physics_3d/simulation/soft_body_soft_ccd_max_sweep");
+	soft_body_soft_ccd_max_sweep = Math::is_finite(ccd_sweep) ? CLAMP(ccd_sweep, 0.0f, 4.0f) : 1.0f;
+	const float ccd_correction = GLOBAL_GET("physics/jolt_physics_3d/simulation/soft_body_soft_ccd_max_correction_speed");
+	soft_body_soft_ccd_max_correction_speed = Math::is_finite(ccd_correction) ? CLAMP(ccd_correction, 1.0f, 256.0f) : 128.0f;
 	const float soft_contact_radius = GLOBAL_GET("physics/jolt_physics_3d/simulation/soft_body_soft_contact_radius");
 	soft_body_soft_contact_radius = Math::is_finite(soft_contact_radius) ? CLAMP(soft_contact_radius, 0.0f, 1.0f) : 0.1f;
 	const float soft_contact_recovery = GLOBAL_GET("physics/jolt_physics_3d/simulation/soft_body_soft_contact_recovery");
