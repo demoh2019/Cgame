@@ -84,9 +84,10 @@ func _run() -> void:
 						if hit != base_hit[case_index]:
 							printerr("FAIL: box radial SAT changed hit after world translation")
 							failures += 1
-						if hit and base_contact[case_index].length_squared() > 0.0001 and contact.length_squared() > 0.0001:
+						if hit and case["offset"] != Vector3.ZERO and base_contact[case_index].length_squared() > 0.0001 and contact.length_squared() > 0.0001:
 							# Contact positions are world-relative, but
-							# penetration directions should remain aligned.
+							# penetration directions should remain aligned. A
+							# perfectly centered overlap has no unique exit face.
 							if base_contact[case_index].normalized().dot(contact.normalized()) < 0.8:
 								printerr("FAIL: translated box radial contact changed direction")
 								failures += 1
