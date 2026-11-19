@@ -1,0 +1,74 @@
+name: GDScript static variable debugger regression
+
+on:
+  pull_request:
+    branches: [develop]
+    paths:
+      - "core/debugger/**"
+      - "core/object/script_backtrace.*"
+      - "core/object/script_language*"
+      - "doc/classes/ScriptBacktrace.xml"
+      - "doc/classes/ScriptLanguageExtension.xml"
+      - "editor/debugger/**"
+      - "editor/script/script_text_editor.cpp"
+      - "modules/gdscript/**"
+      - "misc/scripts/tests/test_upstream_static_debugger.py"
+      - ".github/workflows/gdscript-static-debugger.yml"
+  push:
+    branches: [develop]
+    paths:
+      - "core/debugger/**"
+      - "core/object/script_backtrace.*"
+      - "core/object/script_language*"
+      - "doc/classes/ScriptBacktrace.xml"
+      - "doc/classes/ScriptLanguageExtension.xml"
+      - "editor/debugger/**"
+      - "editor/script/script_text_editor.cpp"
+      - "modules/gdscript/**"
+      - "misc/scripts/tests/test_upstream_static_debugger.py"
+      - ".github/workflows/gdscript-static-debugger.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  source-contracts:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - name: Validate debugger scope IDs, API, XML and safe lookup
+        run: |
+          python3 -m py_compile misc/scripts/tests/test_upstream_static_debugger.py
+          python3 -m unittest discover -s misc/scripts/tests -p 'test_upstream_static_debugger.py' -v
+
+  editor-smoke:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+      - uses: ./.github/actions/godot-deps
+      - name: Compile editor and debugger APIs
+        uses: ./.github/actions/godot-build
+        with:
+          platform: linuxbsd
+          target: editor
+          scons-flags: dev_build=yes tests=yes debug_symbols=no module_mono_enabled=no accesskit=no
+      - name: Run GDScript static variable smoke test
+        shell: bash
+        run: |
+          set -euo pipefail
+          project="$RUNNER_TEMP/gdscript-static-debug-smoke"
+          mkdir -p "$project"
+          printf '[application]\nconfig/name="Static debugger regression"\n' > "$project/project.godot"
+          cat > "$project/static.gd" <<'GDSCRIPT'
+          extends SceneTree
+          static var counter = 7
+          func _initialize() -> void:
+              assert(counter == 7)
+              quit()
+          GDSCRIPT
+          ./bin/godot.linuxbsd.editor.dev.x86_64 --headless --path "$project" --script res://static.gd
