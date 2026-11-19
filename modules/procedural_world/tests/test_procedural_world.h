@@ -249,4 +249,265 @@ TEST_CASE("[ProceduralWorld] Chunk coordinate validation") {
 	ERR_PRINT_ON;
 }
 
+TEST_CASE("[ProceduralWorld] Small rectangular heightmaps and octaves") {
+	Ref<ProceduralWorld> world;
+	world.instantiate();
+	for (int octaves = 1; octaves <= 8; octaves++) {
+		const PackedFloat32Array heights = world->generate_heightmap(1, 7, 75, 12.0f, 4.0f, octaves);
+		REQUIRE(heights.size() == 7);
+		for (float height : heights) {
+			CHECK(Math::is_finite(height));
+			CHECK(Math::abs(height) <= 4.0f);
+		}
+	}
+	CHECK(world->generate_heightmap(7, 1, 3).size() == 7);
+	CHECK(world->generate_heightmap(1, 1, 3).size() == 1);
+}
+
+TEST_CASE("[ProceduralWorld] Adjacent tiles match vertically in world coordinates") {
+	Ref<ProceduralWorld> world;
+	world.instantiate();
+	const PackedFloat32Array north = world->generate_heightmap(7, 5, -50, 50.0f, 12.0f, 5, Vector2i(-4, -6));
+	const PackedFloat32Array south = world->generate_heightmap(7, 5, -50, 50.0f, 12.0f, 5, Vector2i(-4, -2));
+	REQUIRE(north.size() == 35);
+	REQUIRE(south.size() == 35);
+	for (int x = 0; x < 7; x++) {
+		CHECK(north[4 * 7 + x] == south[x]);
+	}
+}
+
+TEST_CASE("[ProceduralWorld] Heightmaps are stable across sample layouts") {
+	Ref<ProceduralWorld> world;
+	world.instantiate();
+	const PackedFloat32Array large = world->generate_heightmap(10, 10, 99, 7.0f, 8.0f, 3, Vector2i(100, -100));
+	const PackedFloat32Array slice = world->generate_heightmap(3, 3, 99, 7.0f, 8.0f, 3, Vector2i(104, -96));
+	REQUIRE(large.size() == 100);
+	REQUIRE(slice.size() == 9);
+	for (int y = 0; y < 3; y++) {
+		for (int x = 0; x < 3; x++) {
+			CHECK(slice[y * 3 + x] == large[(y + 4) * 10 + (x + 4)]);
+		}
+	}
+}
+
+TEST_CASE("[ProceduralWorld] Heightmap parameters change actual samples") {
+	Ref<ProceduralWorld> world;
+	world.instantiate();
+	const PackedFloat32Array base = world->generate_heightmap(12, 12, 5, 7.0f, 8.0f, 1);
+	REQUIRE(base.size() == 144);
+	CHECK(world->generate_heightmap(12, 12, 6, 7.0f, 8.0f, 1) != base);
+	CHECK(world->generate_heightmap(12, 12, 5, 2.0f, 8.0f, 1) != base);
+	CHECK(world->generate_heightmap(12, 12, 5, 7.0f, 16.0f, 1) != base);
+	CHECK(world->generate_heightmap(12, 12, 5, 7.0f, 8.0f, 4) != base);
+}
+
+TEST_CASE("[ProceduralWorld] Height painting leaves non-intersecting samples alone") {
+	Ref<ProceduralWorld> world;
+	world.instantiate();
+	PackedFloat32Array heights;
+	heights.resize(16);
+	heights.set(0, 7.0f);
+	const PackedFloat32Array unchanged = world->paint_heightmap(heights, 4, 4, Vector2(-20, -20), 3.0f, 15.0f);
+	CHECK(unchanged == heights);
+	const PackedFloat32Array zero_delta = world->paint_heightmap(heights, 4, 4, Vector2(1, 1), 4.0f, 0.0f);
+	CHECK(zero_delta == heights);
+	const PackedFloat32Array corner = world->paint_heightmap(heights, 4, 4, Vector2(0, 0), 0.5f, 3.0f);
+	REQUIRE(corner.size() == 16);
+	CHECK(corner[0] == 10.0f);
+	CHECK(corner[1] == 0.0f);
+	CHECK(corner[4] == 0.0f);
+}
+
+TEST_CASE("[ProceduralWorld] Sculpt brush supports constant and graded falloff") {
+	Ref<ProceduralWorld> world;
+	world.instantiate();
+	PackedFloat32Array heights;
+	heights.resize(25);
+	const PackedFloat32Array flat = world->paint_heightmap(heights, 5, 5, Vector2(2, 2), 2.5f, 2.0f, 0.0f);
+	const PackedFloat32Array smooth = world->paint_heightmap(heights, 5, 5, Vector2(2, 2), 2.5f, 2.0f, 2.0f);
+	REQUIRE(flat.size() == 25);
+	REQUIRE(smooth.size() == 25);
+	CHECK(flat[12] == 2.0f);
+	CHECK(smooth[12] == 2.0f);
+	CHECK(flat[11] == 2.0f);
+	CHECK(smooth[11] > 0.0f);
+	CHECK(smooth[11] < flat[11]);
+	CHECK(flat[0] == 0.0f);
+	CHECK(smooth[0] == 0.0f);
+}
+
+TEST_CASE("[ProceduralWorld] Sculpt brush rejects nonfinite heights and strengths") {
+	Ref<ProceduralWorld> world;
+	world.instantiate();
+	PackedFloat32Array heights;
+	heights.resize(4);
+	ERR_PRINT_OFF;
+	CHECK(world->paint_heightmap(heights, 2, 2, Vector2(0, 0), 1.0f, float(Math::NaN)).is_empty());
+	CHECK(world->paint_heightmap(heights, 2, 2, Vector2(0, 0), 1.0f, 1.0f, -1.0f).is_empty());
+	CHECK(world->paint_heightmap(heights, 2, 2, Vector2(0, 0), 1.0f, 1.0f, 9.0f).is_empty());
+	heights.set(0, float(Math::NaN));
+	CHECK(world->paint_heightmap(heights, 2, 2, Vector2(0, 0), 1.0f, 1.0f).is_empty());
+	ERR_PRINT_ON;
+}
+
+TEST_CASE("[ProceduralWorld] Erosion leaves uniform planes unchanged") {
+	Ref<ProceduralWorld> world;
+	world.instantiate();
+	PackedFloat32Array plane;
+	plane.resize(35);
+	for (int i = 0; i < plane.size(); i++) {
+		plane.set(i, -3.0f);
+	}
+	CHECK(world->erode_heightmap(plane, 7, 5, 64, 0.0f, 1.0f) == plane);
+	CHECK(world->erode_heightmap(plane, 7, 5, 3, 2.0f, 0.0f) == plane);
+	CHECK(world->erode_heightmap(plane, 7, 5, 0) == plane);
+}
+
+TEST_CASE("[ProceduralWorld] Erosion respects talus and conserves material on boundaries") {
+	Ref<ProceduralWorld> world;
+	world.instantiate();
+	PackedFloat32Array heights;
+	heights.resize(6);
+	heights.set(0, 3.0f);
+	CHECK(world->erode_heightmap(heights, 3, 2, 4, 10.0f, 1.0f) == heights);
+	const PackedFloat32Array eroded = world->erode_heightmap(heights, 3, 2, 24, 0.0f, 1.0f);
+	REQUIRE(eroded.size() == 6);
+	float total = 0.0f;
+	for (float value : eroded) {
+		CHECK(Math::is_finite(value));
+		total += value;
+	}
+	CHECK(total == doctest::Approx(3.0f).epsilon(0.0002f));
+	CHECK(heights[0] == 3.0f);
+}
+
+TEST_CASE("[ProceduralWorld] Erosion validates iterations and finite parameters") {
+	Ref<ProceduralWorld> world;
+	world.instantiate();
+	PackedFloat32Array heights;
+	heights.resize(4);
+	ERR_PRINT_OFF;
+	CHECK(world->erode_heightmap(heights, 2, 2, 257).is_empty());
+	CHECK(world->erode_heightmap(heights, 2, 2, 4, -1.0f).is_empty());
+	CHECK(world->erode_heightmap(heights, 2, 2, 4, 1.0f, -0.1f).is_empty());
+	CHECK(world->erode_heightmap(heights, 2, 2, 4, 1.0f, 1.1f).is_empty());
+	CHECK(world->erode_heightmap(heights, 2, 2, 4, float(Math::NaN)).is_empty());
+	ERR_PRINT_ON;
+}
+
+TEST_CASE("[ProceduralWorld] A flat terrain mesh has up normals and expected triangles") {
+	Ref<ProceduralWorld> world;
+	world.instantiate();
+	PackedFloat32Array plane;
+	plane.resize(4);
+	const Ref<ArrayMesh> mesh = world->create_terrain_mesh(plane, 2, 2, 3.0f);
+	REQUIRE(mesh.is_valid());
+	const Array surface = mesh->surface_get_arrays(0);
+	const PackedVector3Array vertices = surface[Mesh::ARRAY_VERTEX];
+	const PackedVector3Array normals = surface[Mesh::ARRAY_NORMAL];
+	const PackedInt32Array indices = surface[Mesh::ARRAY_INDEX];
+	REQUIRE(vertices.size() == 4);
+	REQUIRE(normals.size() == 4);
+	REQUIRE(indices.size() == 6);
+	CHECK(vertices[1] == Vector3(3, 0, 0));
+	CHECK(vertices[2] == Vector3(0, 0, 3));
+	for (const Vector3 &normal : normals) {
+		CHECK(normal == Vector3(0, 1, 0));
+	}
+	for (int index : indices) {
+		CHECK(index >= 0);
+		CHECK(index < 4);
+	}
+}
+
+TEST_CASE("[ProceduralWorld] Terrain mesh slopes and height scaling") {
+	Ref<ProceduralWorld> world;
+	world.instantiate();
+	PackedFloat32Array ramp;
+	ramp.resize(4);
+	ramp.set(1, 1.0f);
+	ramp.set(3, 1.0f);
+	const Ref<ArrayMesh> mesh = world->create_terrain_mesh(ramp, 2, 2, 1.0f, 3.0f);
+	REQUIRE(mesh.is_valid());
+	const Array arrays = mesh->surface_get_arrays(0);
+	const PackedVector3Array vertices = arrays[Mesh::ARRAY_VERTEX];
+	const PackedVector3Array normals = arrays[Mesh::ARRAY_NORMAL];
+	REQUIRE(vertices.size() == 4);
+	CHECK(vertices[1].y == 3.0f);
+	for (const Vector3 &normal : normals) {
+		CHECK(normal.x < 0.0f);
+		CHECK(normal.y > 0.0f);
+		CHECK(Math::is_equal_approx(normal.length(), 1.0f));
+	}
+}
+
+TEST_CASE("[ProceduralWorld] Scatter respects maximum count in tiny spaces") {
+	Ref<ProceduralWorld> world;
+	world.instantiate();
+	const Rect2 area(-2, -3, 4, 4);
+	const PackedVector2Array points = world->scatter_points(area, 100.0f, 234, 100);
+	REQUIRE(points.size() == 1);
+	CHECK(area.has_point(points[0]));
+	const PackedVector2Array few = world->scatter_points(Rect2(-20, -10, 30, 30), 2.0f, 234, 3);
+	CHECK(few.size() <= 3);
+	CHECK(few.size() >= 1);
+}
+
+TEST_CASE("[ProceduralWorld] Scatter handles negative coordinates and crowding") {
+	Ref<ProceduralWorld> world;
+	world.instantiate();
+	const Rect2 area(-100, -120, 48, 65);
+	const PackedVector2Array points = world->scatter_points(area, 7.0f, 44, 100);
+	REQUIRE(points.size() > 1);
+	for (int i = 0; i < points.size(); i++) {
+		CHECK(area.has_point(points[i]));
+		for (int j = 0; j < i; j++) {
+			CHECK(points[i].distance_squared_to(points[j]) >= 49.0f - 0.001f);
+		}
+	}
+}
+
+TEST_CASE("[ProceduralWorld] Scatter rejects oversized grids") {
+	Ref<ProceduralWorld> world;
+	world.instantiate();
+	ERR_PRINT_OFF;
+	CHECK(world->scatter_points(Rect2(0, 0, 100000, 100000), 0.01f, 12, 50).is_empty());
+	CHECK(world->scatter_points(Rect2(0, 0, 5, 5), 1.0f, 12, 50, 0).is_empty());
+	CHECK(world->scatter_points(Rect2(0, 0, 5, 5), 1.0f, 12, 50, 101).is_empty());
+	ERR_PRINT_ON;
+}
+
+TEST_CASE("[ProceduralWorld] Chunk boundaries are half-open for positive and negative positions") {
+	Ref<ProceduralWorld> world;
+	world.instantiate();
+	CHECK(world->get_chunk_coordinates(Rect2(0, 0, 32, 32), 32).size() == 1);
+	CHECK(world->get_chunk_coordinates(Rect2(32, 0, 32, 32), 32).size() == 1);
+	CHECK(world->get_chunk_coordinates(Rect2(-64, -64, 32, 32), 32).size() == 1);
+	const Array one = world->get_chunk_coordinates(Rect2(-64, -64, 32, 32), 32);
+	REQUIRE(one.size() == 1);
+	const Vector2i coordinate = one[0];
+	CHECK(coordinate == Vector2i(-2, -2));
+}
+
+TEST_CASE("[ProceduralWorld] Chunks support fractional world positions") {
+	Ref<ProceduralWorld> world;
+	world.instantiate();
+	const Array cells = world->get_chunk_coordinates(Rect2(0.25f, 0.25f, 32.0f, 32.0f), 32);
+	REQUIRE(cells.size() == 4);
+	const Vector2i top_left = cells[0];
+	const Vector2i bottom_right = cells[3];
+	CHECK(top_left == Vector2i(0, 0));
+	CHECK(bottom_right == Vector2i(1, 1));
+	CHECK(world->get_chunk_coordinates(Rect2(-0.1f, -0.1f, 0.2f, 0.2f), 32).size() == 4);
+}
+
+TEST_CASE("[ProceduralWorld] Chunks reject world coordinates outside supported range") {
+	Ref<ProceduralWorld> world;
+	world.instantiate();
+	ERR_PRINT_OFF;
+	CHECK(world->get_chunk_coordinates(Rect2(1000000001.0f, 0.0f, 1.0f, 1.0f), 32).is_empty());
+	CHECK(world->get_chunk_coordinates(Rect2(0, 0, 1000000, 1000000), 1).is_empty());
+	ERR_PRINT_ON;
+}
+
 } // namespace TestProceduralWorld
