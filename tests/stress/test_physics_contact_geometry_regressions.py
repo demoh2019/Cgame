@@ -29,6 +29,16 @@ class PhysicsContactGeometryRegression(unittest.TestCase):
         self.assertIn("godot_physics_2d_contact_normal(p_point_A, p_point_B, -offset_B)", routine)
         self.assertNotIn("contact.normal = (p_point_A - p_point_B).normalized()", routine)
 
+    def test_3d_soft_body_pair_uses_unit_normal_fallback(self):
+        pair = (ROOT / "modules/godot_physics_3d/godot_body_pair_3d.cpp").read_text(encoding="utf-8")
+        helper = (ROOT / "modules/godot_physics_3d/godot_contact_normal_3d.h").read_text(encoding="utf-8")
+        start = pair.index("void GodotBodySoftBodyPair3D::contact_added_callback(")
+        stop = pair.index("void GodotBodySoftBodyPair3D::validate_contacts()", start)
+        self.assertIn("godot_physics_3d_soft_contact_normal(p_point_A, p_point_B, normal)", pair[start:stop])
+        self.assertNotIn("contact.normal = (normal.dot(", pair[start:stop])
+        self.assertIn("normal_squared > min_squared", helper)
+        self.assertIn("separation_squared > min_squared", helper)
+
     def test_native_geometry_tests_registered(self):
         paths = [
             ("test_godot_physics_2d_contact_normal.cpp",
