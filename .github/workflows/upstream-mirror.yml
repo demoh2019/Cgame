@@ -12,6 +12,11 @@ on:
         required: false
         default: ""
         type: string
+      start_offset:
+        description: "Optional next_offset from previous checkpoint (0-100)"
+        required: true
+        default: "0"
+        type: string
       pages:
         description: "Number of source pages to visit; 0 means all remaining"
         required: true
@@ -58,6 +63,7 @@ jobs:
       GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       START_PAGE: ${{ inputs.start_page }}
       START_PATH: ${{ inputs.start_path }}
+      START_OFFSET: ${{ inputs.start_offset }}
       PAGES: ${{ inputs.pages }}
       MAX_ITEMS: ${{ inputs.max_items }}
       PR_MODE: ${{ inputs.pr_mode }}
@@ -74,8 +80,8 @@ jobs:
         shell: bash
         run: |
           args=(--source godotengine/godot --dest demoh2019/godot
-            --start-page "$START_PAGE" --pages "$PAGES"
-            --max-items "$MAX_ITEMS" --pr-mode "$PR_MODE"
+            --start-page "$START_PAGE" --start-offset "$START_OFFSET"
+            --pages "$PAGES" --max-items "$MAX_ITEMS" --pr-mode "$PR_MODE"
             --checkpoint mirror-checkpoint.json)
           if [ -n "$START_PATH" ]; then args+=(--start-path "$START_PATH"); fi
           if [ "$INCLUDE_COMMENTS" = "true" ]; then args+=(--include-comments); fi
