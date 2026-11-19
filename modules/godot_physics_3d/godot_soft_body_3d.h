@@ -81,6 +81,10 @@ class GodotSoftBody3D : public GodotCollisionObject3D {
 	};
 
 	LocalVector<Node> nodes;
+	// Only allocated with experimental inter-body CCD enabled. Nodes cache
+	// previous-step positions here because the solver overwrites Node::q.
+	LocalVector<Vector3> pair_ccd_previous;
+	AABB pair_ccd_swept_bounds;
 	LocalVector<Link> links;
 	// Only allocated if tethers are enabled and at least one vertex is pinned.
 	LocalVector<PhysicsXPBDTether> xpbd_tethers;
@@ -301,6 +305,9 @@ public:
 
 	void predict_motion(real_t p_delta);
 	void solve_constraints(real_t p_delta);
+	const AABB &get_pair_swept_bounds() const {
+		return !pair_ccd_previous.is_empty() && pair_ccd_previous.size() == nodes.size() ? pair_ccd_swept_bounds : bounds;
+	}
 	// Two-way discrete contacts with another SoftBody3D after both bodies
 	// finish their own constraints. Reuses each body's existing face BVH.
 	bool solve_pair_contacts(GodotSoftBody3D &p_other, real_t p_delta,
@@ -357,6 +364,8 @@ private:
 	void initialize_face_tree();
 	void update_face_tree(real_t p_delta);
 	void update_swept_face_tree(real_t p_thickness);
+	void update_pair_swept_face_tree(real_t p_thickness);
+	void refresh_pair_ccd_swept_bounds();
 
 	void initialize_shape(bool p_force_move = true);
 	void deinitialize_shape();
