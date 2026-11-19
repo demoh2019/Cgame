@@ -49,8 +49,8 @@ func _run() -> void:
 	# unchanged static transform must never reactivate them.
 	PhysicsServer2D.body_set_state(rigid_2d, PhysicsServer2D.BODY_STATE_SLEEPING, true)
 	PhysicsServer3D.body_set_state(rigid_3d, PhysicsServer3D.BODY_STATE_SLEEPING, true)
-	if not bool(PhysicsServer2D.body_get_state(rigid_2d, PhysicsServer2D.BODY_STATE_SLEEPING)) or \
-			not bool(PhysicsServer3D.body_get_state(rigid_3d, PhysicsServer3D.BODY_STATE_SLEEPING)):
+	if (not bool(PhysicsServer2D.body_get_state(rigid_2d, PhysicsServer2D.BODY_STATE_SLEEPING))
+			or not bool(PhysicsServer3D.body_get_state(rigid_3d, PhysicsServer3D.BODY_STATE_SLEEPING))):
 		printerr("FAIL: rigid bodies could not be put to sleep")
 		errors += 1
 
