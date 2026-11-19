@@ -181,12 +181,12 @@ class AIProjectPatchTests(unittest.TestCase):
         # handle a nearly full 20k-file snapshot with many deleted paths.
         paths = [f'assets/file_{i:05d}.gd' for i in range(19999)]
         deletes = [
-            {'path': paths[i], 'expected_sha256': self.hash('extends Node\\n'), 'delete': True}
+            {'path': paths[i], 'expected_sha256': self.hash('extends Node\n'), 'delete': True}
             for i in range(18)
         ]
-        edits = self.plan(*deletes, self.create('assets/new_script.gd', 'extends Node2D\\n'))
+        edits = self.plan(*deletes, self.create('assets/new_script.gd', 'extends Node2D\n'))
         with patch.object(a, '_scan_project', return_value=paths):
-            with patch.object(a, '_read_regular', return_value=b'extends Node\\n'):
+            with patch.object(a, '_read_regular', return_value=b'extends Node\n'):
                 report = a.review(self.root, edits)
         self.assertTrue(report['ok'])
         self.assertEqual(len(report['changes']), 19)
