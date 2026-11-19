@@ -586,4 +586,82 @@ TEST_CASE("[Image] Multiple queued upload snapshots keep independent generations
 	CHECK(original->get_pixel(0, 0) == blue);
 }
 
+
+TEST_CASE("[Image][NormalMipmap] RGB8 keeps a flat normal and alpha") {
+	Ref<Image> image = memnew(Image(4, 4, false, Image::FORMAT_RGBA8));
+	const Color base_normal(0.5, 0.5, 1.0, 0.75);
+	for (int y = 0; y < 4; y++) {
+		for (int x = 0; x < 4; x++) {
+			image->set_pixel(x, y, base_normal);
+		}
+	}
+	CHECK(image->generate_mipmaps(true) == OK);
+	CHECK(image->get_mipmap_count() == 2);
+	const Ref<Image> mip = image->get_image_from_mipmap(1);
+	REQUIRE(mip.is_valid());
+	for (int y = 0; y < mip->get_height(); y++) {
+		for (int x = 0; x < mip->get_width(); x++) {
+			const Color normal = mip->get_pixel(x, y);
+			CHECK(Math::abs(normal.r - 0.5f) <= 2.0f / 255.0f);
+			CHECK(Math::abs(normal.g - 0.5f) <= 2.0f / 255.0f);
+			CHECK(Math::abs(normal.b - 1.0f) <= 1.0f / 255.0f);
+			CHECK(Math::abs(normal.a - base_normal.a) <= 2.0f / 255.0f);
+		}
+	}
+}
+
+TEST_CASE("[Image][NormalMipmap] RGB16 keeps a flat normal and alpha") {
+	Ref<Image> image = memnew(Image(4, 4, false, Image::FORMAT_RGBA16));
+	const Color base_normal(0.5, 0.5, 1.0, 0.625);
+	for (int y = 0; y < 4; y++) {
+		for (int x = 0; x < 4; x++) {
+			image->set_pixel(x, y, base_normal);
+		}
+	}
+	CHECK(image->generate_mipmaps(true) == OK);
+	const Ref<Image> mip = image->get_image_from_mipmap(1);
+	REQUIRE(mip.is_valid());
+	const Color normal = mip->get_pixel(0, 0);
+	CHECK(Math::abs(normal.r - 0.5f) < 3.0f / 65535.0f);
+	CHECK(Math::abs(normal.g - 0.5f) < 3.0f / 65535.0f);
+	CHECK(Math::abs(normal.b - 1.0f) < 2.0f / 65535.0f);
+	CHECK(Math::abs(normal.a - base_normal.a) < 3.0f / 65535.0f);
+}
+
+TEST_CASE("[Image][NormalMipmap] Nonaxis normal stays unit length in RGB8 and RGB16") {
+	for (Image::Format format : { Image::FORMAT_RGBA8, Image::FORMAT_RGBA16 }) {
+		Ref<Image> image = memnew(Image(4, 4, false, format));
+		const Color sample(0.7, 0.35, 0.92, 1.0);
+		for (int y = 0; y < 4; y++) {
+			for (int x = 0; x < 4; x++) {
+				image->set_pixel(x, y, sample);
+			}
+		}
+		CHECK(image->generate_mipmaps(true) == OK);
+		const Ref<Image> mip = image->get_image_from_mipmap(1);
+		REQUIRE(mip.is_valid());
+		const Color color = mip->get_pixel(0, 0);
+		const Vector3 decoded(color.r * 2.0f - 1.0f, color.g * 2.0f - 1.0f, color.b * 2.0f - 1.0f);
+		CHECK(Math::abs(decoded.length() - 1.0f) < (format == Image::FORMAT_RGBA8 ? 0.02f : 0.0002f));
+		CHECK(Math::abs(color.a - 1.0f) < 0.001f);
+	}
+}
+
+TEST_CASE("[Image][NormalMipmap] Mipmap renormalization is deterministic for repeated sources") {
+	for (Image::Format format : { Image::FORMAT_RGBA8, Image::FORMAT_RGBA16 }) {
+		Ref<Image> first = memnew(Image(4, 4, false, format));
+		Ref<Image> second = memnew(Image(4, 4, false, format));
+		for (int y = 0; y < 4; y++) {
+			for (int x = 0; x < 4; x++) {
+				const Color sample(0.4f + 0.1f * (x % 2), 0.3f + 0.1f * (y % 2), 0.9f, 0.8f);
+				first->set_pixel(x, y, sample);
+				second->set_pixel(x, y, sample);
+			}
+		}
+		CHECK(first->generate_mipmaps(true) == OK);
+		CHECK(second->generate_mipmaps(true) == OK);
+		CHECK(first->get_data() == second->get_data());
+	}
+}
+
 } // namespace TestImage
