@@ -676,6 +676,9 @@ PhysicsServer3D::PhysicsServer3D() {
 	// Extra continuous vertex/triangle crossing detection for different soft bodies.
 	// False preserves discrete-only behavior and allocates no history buffers.
 	GLOBAL_DEF(PropertyInfo(Variant::BOOL, "physics/3d/solver/soft_body_pair_collision_ccd"), false);
+	// Opt-in contacts between structural mesh edges of DIFFERENT soft bodies.
+	// Reuses the self-edge XPBD row but has its own lazy per-body edge BVH.
+	GLOBAL_DEF(PropertyInfo(Variant::BOOL, "physics/3d/solver/soft_body_pair_collision_edge_edge"), false);
 	GLOBAL_DEF(PropertyInfo(Variant::INT, "physics/3d/solver/soft_body_pair_max_contacts", PROPERTY_HINT_RANGE, "1,2048,1"), 256);
 	GLOBAL_DEF(PropertyInfo(Variant::INT, "physics/3d/solver/soft_body_pair_max_pairs", PROPERTY_HINT_RANGE, "1,512,1"), 128);
 	// Jolt-style long-range cloth tethers limit distance from pinned
