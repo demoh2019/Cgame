@@ -84,6 +84,39 @@ int main() {
         assert(Tracked::moves > 0);
         for (int i = 0; i < 16; ++i) assert(data[i].key == i);
     }
+    // Already ordered small arrays must not move expensive values at all.
+    // This checks the actual SortArray header in both debug and release.
+    {
+        Tracked ordered[16];
+        for (int i = 0; i < 16; ++i) ordered[i].key = i;
+        Tracked::copies = Tracked::moves = 0;
+        sorter.sort(ordered, 16);
+        assert(Tracked::copies == 0 && Tracked::moves == 0);
+        for (int i = 0; i < 16; ++i) assert(ordered[i].key == i);
+    }
+    {
+        Tracked repeated[16];
+        for (int i = 0; i < 16; ++i) repeated[i].key = i / 4;
+        Tracked::copies = Tracked::moves = 0;
+        sorter.sort(repeated, 16);
+        assert(Tracked::copies == 0 && Tracked::moves == 0);
+    }
+    {
+        Tracked ordered[32];
+        for (int i = 0; i < 32; ++i) ordered[i].key = i;
+        Tracked::copies = Tracked::moves = 0;
+        sorter.unguarded_linear_insert(31, ordered);
+        assert(Tracked::copies == 0 && Tracked::moves == 0);
+    }
+    {
+        Tracked nearly_ordered[16];
+        for (int i = 0; i < 16; ++i) nearly_ordered[i].key = i;
+        std::swap(nearly_ordered[13].key, nearly_ordered[14].key);
+        Tracked::copies = Tracked::moves = 0;
+        sorter.sort(nearly_ordered, 16);
+        assert(Tracked::copies == 0 && Tracked::moves > 0);
+        for (int i = 0; i < 16; ++i) assert(nearly_ordered[i].key == i);
+    }
     for (int n = 1; n <= 64; ++n) {
         for (int k : {0, n / 2, n - 1}) {
             std::vector<Tracked> data;
