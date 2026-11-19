@@ -1374,11 +1374,11 @@ String String::join(const Vector<String> &p_parts) const {
 	return ret;
 }
 
-char32_t String::char_uppercase(char32_t p_char) {
+char32_t String::_char_uppercase_table(char32_t p_char) {
 	return _find_upper(p_char);
 }
 
-char32_t String::char_lowercase(char32_t p_char) {
+char32_t String::_char_lowercase_table(char32_t p_char) {
 	return _find_lower(p_char);
 }
 
@@ -1393,7 +1393,8 @@ String String::to_upper() const {
 	char32_t *upper_ptrw = upper.ptrw();
 
 	while (*old_ptr) {
-		*upper_ptrw++ = _find_upper(*old_ptr++);
+		const char32_t ch = *old_ptr++;
+		*upper_ptrw++ = ch < 128 ? (is_ascii_lower_case(ch) ? ch - ('a' - 'A') : ch) : _find_upper(ch);
 	}
 
 	*upper_ptrw = 0;
@@ -1412,7 +1413,8 @@ String String::to_lower() const {
 	char32_t *lower_ptrw = lower.ptrw();
 
 	while (*old_ptr) {
-		*lower_ptrw++ = _find_lower(*old_ptr++);
+		const char32_t ch = *old_ptr++;
+		*lower_ptrw++ = ch < 128 ? (is_ascii_upper_case(ch) ? ch + ('a' - 'A') : ch) : _find_lower(ch);
 	}
 
 	*lower_ptrw = 0;

@@ -375,6 +375,31 @@ TEST_CASE("[String] Case function test") {
 	CHECK(a.to_lower() == "momonga");
 }
 
+TEST_CASE("[String] ASCII case conversion fast path") {
+	// Exhaustive ASCII coverage, including control characters and punctuation.
+	for (char32_t ch = 0; ch < 128; ch++) {
+		const char32_t expected_lower = ch >= U'A' && ch <= U'Z' ? ch + (U'a' - U'A') : ch;
+		const char32_t expected_upper = ch >= U'a' && ch <= U'z' ? ch - (U'a' - U'A') : ch;
+		CHECK(String::char_lowercase(ch) == expected_lower);
+		CHECK(String::char_uppercase(ch) == expected_upper);
+	}
+}
+
+TEST_CASE("[String] Mixed Unicode and ASCII case conversion") {
+	CHECK(String::char_lowercase(U'Ä') == U'ä');
+	CHECK(String::char_uppercase(U'ä') == U'Ä');
+	CHECK(String::char_lowercase(U'Ω') == U'ω');
+	CHECK(String::char_uppercase(U'ω') == U'Ω');
+	CHECK(String::char_lowercase(U'Я') == U'я');
+	CHECK(String::char_uppercase(U'я') == U'Я');
+	CHECK(String::char_lowercase(U'😀') == U'😀');
+	CHECK(String::char_uppercase(U'😀') == U'😀');
+	CHECK(String(U"AbC-ÄΩЯ").to_lower() == U"abc-äωя");
+	CHECK(String(U"abc-äωя").to_upper() == U"ABC-ÄΩЯ");
+	CHECK(String().to_lower().is_empty());
+	CHECK(String().to_upper().is_empty());
+}
+
 TEST_CASE("[String] Case compare function test") {
 	String a = "MoMoNgA";
 
