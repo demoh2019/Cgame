@@ -247,6 +247,55 @@ TEST_CASE("[GodotPhysics3D] Sphere-cylinder squared-distance narrowphase") {
 		sphere_transform.origin = Vector3(2.25, 0.0, 0.0);
 		CHECK(sat_calculate_penetration(&sphere, sphere_transform, &cylinder, cylinder_transform, nullptr, nullptr, false, nullptr, real_t(0.2), real_t(0.1)));
 	}
+
+	SUBCASE("Sphere on the cylinder centerline has a stable side contact") {
+		CHECK(sat_calculate_penetration(&sphere, sphere_transform, &cylinder, cylinder_transform, record_contact, &contact));
+		CHECK(contact.count == 1);
+		CHECK(contact.point_a.is_equal_approx(Vector3(-1.0, 0.0, 0.0)));
+		CHECK(contact.point_b.is_equal_approx(Vector3(1.0, 0.0, 0.0)));
+		CHECK(contact.normal.is_equal_approx(Vector3(1.0, 0.0, 0.0)));
+	}
+
+	SUBCASE("Sphere inside cylinder chooses nearest end cap") {
+		sphere_transform.origin = Vector3(0.0, 1.5, 0.0);
+		CHECK(sat_calculate_penetration(&sphere, sphere_transform, &cylinder, cylinder_transform, record_contact, &contact));
+		CHECK(contact.count == 1);
+		CHECK(contact.point_a.is_equal_approx(Vector3(0.0, 0.5, 0.0)));
+		CHECK(contact.point_b.is_equal_approx(Vector3(0.0, 2.0, 0.0)));
+		CHECK(contact.normal.is_equal_approx(Vector3(0.0, 1.0, 0.0)));
+	}
+
+	SUBCASE("Rotated cylinder exit contact follows the cap orientation") {
+		cylinder_transform.basis = Basis(Vector3(0.0, 0.0, 1.0), real_t(Math_PI / 2.0));
+		sphere_transform.origin = cylinder_transform.xform(Vector3(0.0, 1.5, 0.0));
+		CHECK(sat_calculate_penetration(&sphere, sphere_transform, &cylinder, cylinder_transform, record_contact, &contact));
+		CHECK(contact.count == 1);
+		CHECK(contact.point_a.is_equal_approx(cylinder_transform.xform(Vector3(0.0, 0.5, 0.0))));
+		CHECK(contact.point_b.is_equal_approx(cylinder_transform.xform(Vector3(0.0, 2.0, 0.0))));
+		CHECK(contact.normal.is_equal_approx(Vector3(-1.0, 0.0, 0.0)));
+	}
+
+	SUBCASE("Nonuniform scaling selects the shortest world-space exit") {
+		cylinder_transform.basis.scale(Vector3(3.0, 4.0, 1.0));
+		CHECK(sat_calculate_penetration(&sphere, sphere_transform, &cylinder, cylinder_transform, record_contact, &contact));
+		CHECK(contact.count == 1);
+		CHECK(contact.point_a.is_equal_approx(Vector3(0.0, 0.0, -1.0)));
+		CHECK(contact.point_b.is_equal_approx(Vector3(0.0, 0.0, 1.0)));
+		CHECK(contact.normal.is_equal_approx(Vector3(0.0, 0.0, 1.0)));
+	}
+
+	SUBCASE("Contained sphere-cylinder margins increase exit depth") {
+		sphere_transform.origin = Vector3(0.5, 0.0, 0.0);
+		CHECK(sat_calculate_penetration(&sphere, sphere_transform, &cylinder, cylinder_transform, record_contact, &contact, false, nullptr, real_t(0.2), real_t(0.1)));
+		CHECK(contact.count == 1);
+		CHECK(contact.point_a.is_equal_approx(Vector3(-0.7, 0.0, 0.0)));
+		CHECK(contact.point_b.is_equal_approx(Vector3(1.1, 0.0, 0.0)));
+		CHECK(contact.normal.is_equal_approx(Vector3(1.0, 0.0, 0.0)));
+	}
+
+	SUBCASE("Contained overlap-only query needs no contact callback") {
+		CHECK(sat_calculate_penetration(&sphere, sphere_transform, &cylinder, cylinder_transform, nullptr, nullptr));
+	}
 }
 
 } // namespace TestGodotPhysics3DSphereNarrowphase
