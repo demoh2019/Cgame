@@ -72,6 +72,8 @@ private:
 	Vector<Shape> shapes;
 	GodotSpace3D *space = nullptr;
 	Transform3D transform;
+	// Invalidates the exact-pose manifold cache when geometry or transforms change.
+	uint64_t collision_geometry_version = 1;
 	Transform3D inv_transform;
 	bool _static = true;
 
@@ -90,6 +92,9 @@ protected:
 		ERR_FAIL_COND_MSG(p_transform.origin.length_squared() > MAX_OBJECT_DISTANCE_X2, "Object went too far away (more than '" + itos(MAX_OBJECT_DISTANCE) + "' units from origin).");
 #endif
 
+		if (transform != p_transform) {
+			++collision_geometry_version;
+		}
 		transform = p_transform;
 		if (p_update_shapes) {
 			_update_shapes();
@@ -141,6 +146,7 @@ public:
 	}
 
 	_FORCE_INLINE_ const Transform3D &get_transform() const { return transform; }
+	_FORCE_INLINE_ uint64_t get_collision_geometry_version() const { return collision_geometry_version; }
 	_FORCE_INLINE_ const Transform3D &get_inv_transform() const { return inv_transform; }
 	_FORCE_INLINE_ GodotSpace3D *get_space() const { return space; }
 

@@ -33,6 +33,8 @@
 #include "godot_body_2d.h"
 #include "godot_constraint_2d.h"
 
+#include "servers/physics_contact_recycling.h"
+
 class GodotBodyPair2D : public GodotConstraint2D {
 	enum {
 		MAX_CONTACTS = 2
@@ -78,6 +80,7 @@ class GodotBodyPair2D : public GodotConstraint2D {
 	Vector2 sep_axis;
 	Contact contacts[MAX_CONTACTS];
 	int contact_count = 0;
+	GodotPhysicsContactRecycling contact_recycling;
 	real_t mixed_friction = 0.0; // Recomputed in pre_solve, reused across solver iterations.
 	// Box2D-style two-point normal block matrix, assembled once in pre_solve.
 	// Solving iterations only update the right-hand side from current velocities.

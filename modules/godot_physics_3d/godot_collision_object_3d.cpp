@@ -43,6 +43,7 @@ void GodotCollisionObject3D::add_shape(GodotShape3D *p_shape, const Transform3D 
 	s.disabled = p_disabled;
 	shapes.push_back(s);
 	p_shape->add_owner(this);
+	++collision_geometry_version;
 
 	if (!pending_shape_update_list.in_list()) {
 		GodotPhysicsServer3D::godot_singleton->pending_shape_update_list.add(&pending_shape_update_list);
@@ -55,6 +56,7 @@ void GodotCollisionObject3D::set_shape(int p_index, GodotShape3D *p_shape) {
 	shapes.write[p_index].shape = p_shape;
 
 	p_shape->add_owner(this);
+	++collision_geometry_version;
 	if (!pending_shape_update_list.in_list()) {
 		GodotPhysicsServer3D::godot_singleton->pending_shape_update_list.add(&pending_shape_update_list);
 	}
@@ -65,6 +67,7 @@ void GodotCollisionObject3D::set_shape_transform(int p_index, const Transform3D 
 
 	shapes.write[p_index].xform = p_transform;
 	shapes.write[p_index].xform_inv = p_transform.affine_inverse();
+	++collision_geometry_version;
 	if (!pending_shape_update_list.in_list()) {
 		GodotPhysicsServer3D::godot_singleton->pending_shape_update_list.add(&pending_shape_update_list);
 	}
@@ -79,6 +82,7 @@ void GodotCollisionObject3D::set_shape_disabled(int p_idx, bool p_disabled) {
 	}
 
 	shape.disabled = p_disabled;
+	++collision_geometry_version;
 
 	if (!space) {
 		return;
@@ -120,6 +124,7 @@ void GodotCollisionObject3D::remove_shape(int p_index) {
 	}
 	shapes[p_index].shape->remove_owner(this);
 	shapes.remove_at(p_index);
+	++collision_geometry_version;
 
 	if (!pending_shape_update_list.in_list()) {
 		GodotPhysicsServer3D::godot_singleton->pending_shape_update_list.add(&pending_shape_update_list);
@@ -131,6 +136,7 @@ void GodotCollisionObject3D::_set_static(bool p_static) {
 		return;
 	}
 	_static = p_static;
+	++collision_geometry_version;
 
 	if (!space) {
 		return;
@@ -250,6 +256,7 @@ void GodotCollisionObject3D::_update_shapes_with_motion(const Vector3 &p_motion)
 void GodotCollisionObject3D::_set_space(GodotSpace3D *p_space) {
 	GodotSpace3D *old_space = space;
 	space = p_space;
+	++collision_geometry_version;
 
 	if (old_space) {
 		old_space->remove_object(this);
@@ -270,6 +277,7 @@ void GodotCollisionObject3D::_set_space(GodotSpace3D *p_space) {
 }
 
 void GodotCollisionObject3D::_collision_filter_changed() {
+	++collision_geometry_version;
 	// Layer/mask changes do not alter shape geometry or AABBs.
 	if (space) {
 		GodotBroadPhase3D *broadphase = space->get_broadphase();
@@ -285,6 +293,7 @@ void GodotCollisionObject3D::_collision_filter_changed() {
 }
 
 void GodotCollisionObject3D::_shape_changed() {
+	++collision_geometry_version;
 	_update_shapes();
 	_shapes_changed();
 }
