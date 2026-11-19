@@ -1245,6 +1245,10 @@ GodotSpace2D::GodotSpace2D() {
 	ccd_rotational_bounds = GLOBAL_GET("physics/2d/solver/ccd_rotational_bounds");
 	ccd_tight_rotational_bounds = GLOBAL_GET("physics/2d/solver/ccd_tight_rotational_bounds");
 	implicit_damping = GLOBAL_GET("physics/2d/solver/implicit_damping");
+	fluid_linear_drag = MAX(real_t(0.0), (real_t)GLOBAL_GET("physics/2d/solver/fluid_linear_drag"));
+	fluid_angular_drag = MAX(real_t(0.0), (real_t)GLOBAL_GET("physics/2d/solver/fluid_angular_drag"));
+	fluid_buoyancy = MAX(real_t(0.0), (real_t)GLOBAL_GET("physics/2d/solver/fluid_buoyancy"));
+	fluid_flow_velocity = GLOBAL_GET("physics/2d/solver/fluid_flow_velocity");
 	rolling_friction = MAX(real_t(0.0), (real_t)GLOBAL_GET("physics/2d/solver/rolling_friction"));
 	static_friction_multiplier = MAX(real_t(1.0), (real_t)GLOBAL_GET("physics/2d/solver/static_friction_multiplier"));
 	friction_combine_mode = CLAMP((int)GLOBAL_GET("physics/2d/solver/friction_combine_mode"), 0, 3);
