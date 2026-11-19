@@ -133,6 +133,22 @@ TEST_CASE("[PhysicsSoftBody] Pinned vertices stay fixed and no partial update oc
     CHECK(relative_energy(next, inv_mass, Vector3()) <= relative_energy(v, inv_mass, Vector3()));
 }
 
+TEST_CASE("[PhysicsSoftBody] Pin reaction cannot inject energy into free particles") {
+    const Vector3 p[3] = { Vector3(0, -1, 0), Vector3(1, -1, 0), Vector3(0, -1, 1) };
+    // A fixed particle with stale nonzero velocity is not a movable energy
+    // reservoir. Using its drag reaction in the kinetic limiter would move
+    // free, initially stationary particles and increase their kinetic energy.
+    const Vector3 v[3] = { Vector3(0, 100, 0), Vector3(), Vector3() };
+    const real_t inv_mass[3] = { 0, 1, 1 };
+    Vector3 delta[3];
+    CHECK(drag(p, v, inv_mass, Vector3(), 0, 1000, 5, 0.5, 0.1, delta));
+    CHECK(delta[0] == Vector3());
+    CHECK(delta[1] == Vector3());
+    CHECK(delta[2] == Vector3());
+    const Vector3 next[3] = { v[0] + delta[0], v[1] + delta[1], v[2] + delta[2] };
+    CHECK(relative_energy(next, inv_mass, Vector3()) == doctest::Approx(0));
+}
+
 TEST_CASE("[PhysicsSoftBody] Dry faces, disabled coefficients, and pins yield zero drag") {
     const Vector3 p[3] = { Vector3(0, 2, 0), Vector3(1, 2, 0), Vector3(0, 2, 1) };
     const Vector3 v[3] = { Vector3(0, 5, 0), Vector3(0, 5, 0), Vector3(0, 5, 0) };
