@@ -324,49 +324,42 @@ NodePath NodePath::rel_path_to(const NodePath &p_np) const {
 	ERR_FAIL_COND_V(!is_absolute(), NodePath());
 	ERR_FAIL_COND_V(!p_np.is_absolute(), NodePath());
 
-	Vector<StringName> src_dirs = get_names();
-	Vector<StringName> dst_dirs = p_np.get_names();
+	// Both paths must have data when absolute. Reference their segments
+	// directly instead of touching the COW vector reference counts.
+	const Vector<StringName> &src_dirs = data->path;
+	const Vector<StringName> &dst_dirs = p_np.data->path;
+	const int src_count = src_dirs.size();
+	const int dst_count = dst_dirs.size();
 
-	//find common parent
-	int common_parent = 0;
-
-	while (true) {
-		if (src_dirs.size() == common_parent) {
-			break;
-		}
-		if (dst_dirs.size() == common_parent) {
-			break;
-		}
-		if (src_dirs[common_parent] != dst_dirs[common_parent]) {
-			break;
-		}
-		common_parent++;
+	int common_prefix = 0;
+	const int shared_limit = MIN(src_count, dst_count);
+	while (common_prefix < shared_limit && src_dirs[common_prefix] == dst_dirs[common_prefix]) {
+		common_prefix++;
 	}
 
-	common_parent--;
-
+	const int up_count = src_count - common_prefix;
+	const int down_count = dst_count - common_prefix;
+	// Allocate only the segments actually emitted, not both full path
+	// lengths. Deep paths sharing a prefix can need only one or two names.
+	const int size = MAX(1, up_count + down_count);
 	Vector<StringName> relpath;
-	relpath.resize(src_dirs.size() + dst_dirs.size() + 1);
-
-	StringName *relpath_ptr = relpath.ptrw();
-
-	int path_size = 0;
-	StringName back_str("..");
-	for (int i = common_parent + 1; i < src_dirs.size(); i++) {
-		relpath_ptr[path_size++] = back_str;
+	relpath.resize(size);
+	StringName *write = relpath.ptrw();
+	int index = 0;
+	if (up_count > 0) {
+		const StringName back_str("..");
+		for (int i = 0; i < up_count; i++) {
+			write[index++] = back_str;
+		}
+	}
+	for (int i = common_prefix; i < dst_count; i++) {
+		write[index++] = dst_dirs[i];
+	}
+	if (index == 0) {
+		write[0] = ".";
 	}
 
-	for (int i = common_parent + 1; i < dst_dirs.size(); i++) {
-		relpath_ptr[path_size++] = dst_dirs[i];
-	}
-
-	if (path_size == 0) {
-		relpath_ptr[path_size++] = ".";
-	}
-
-	relpath.resize(path_size);
-
-	return NodePath(relpath, p_np.get_subnames(), false);
+	return NodePath(relpath, p_np.data->subpath, false);
 }
 
 NodePath NodePath::get_as_property_path() const {
