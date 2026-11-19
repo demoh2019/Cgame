@@ -34,19 +34,19 @@ jobs:
         shell: bash
         run: |
           mkdir -p misc/ai_game_builder/ai_generated
-          printf '[gd_scene format=3]\\n\\n[node name="Main" type="Node2D"]\\n' > misc/ai_game_builder/ai_generated/main.tscn
-          godot --headless --path misc/ai_game_builder \\
-            --script res://addons/ai_game_builder/smoke_check.gd \\
-            -- --report user://ai_game_builder/ci_good.json \\
+          printf '[gd_scene format=3]\n\n[node name="Main" type="Node2D"]\n' > misc/ai_game_builder/ai_generated/main.tscn
+          godot --headless --path misc/ai_game_builder \
+            --script res://addons/ai_game_builder/smoke_check.gd \
+            -- --report user://ai_game_builder/ci_good.json \
             --paths '["res://ai_generated/main.tscn"]'
 
       - name: Reject out-of-project paths from CLI manifest
         shell: bash
         run: |
           set +e
-          godot --headless --path misc/ai_game_builder \\
-            --script res://addons/ai_game_builder/smoke_check.gd \\
-            -- --report user://ai_game_builder/ci_reject.json \\
+          godot --headless --path misc/ai_game_builder \
+            --script res://addons/ai_game_builder/smoke_check.gd \
+            -- --report user://ai_game_builder/ci_reject.json \
             --paths '["res://project.godot"]'
           code=$?
           set -e
