@@ -45,16 +45,16 @@ TEST_CASE("[Physics] Fluid surface produces correct dry partial and full submerg
 	CHECK(dry.submerged_fraction == 0.0);
 
 	const GodotPhysicsFluidSample3D partial = godot_physics_fluid_sample_3d(bounds, volume, 0.0);
-	CHECK(Math::is_equal_approx(partial.submerged_volume, 12.0));
-	CHECK(Math::is_equal_approx(partial.submerged_fraction, 0.5));
-	CHECK(Math::is_equal_approx(partial.center_of_buoyancy.y, -1.0));
-	CHECK(Math::is_equal_approx(partial.center_of_buoyancy.x, 0.0));
-	CHECK(Math::is_equal_approx(partial.center_of_buoyancy.z, 0.0));
+	CHECK(Math::is_equal_approx(partial.submerged_volume, real_t(12.0)));
+	CHECK(Math::is_equal_approx(partial.submerged_fraction, real_t(0.5)));
+	CHECK(Math::is_equal_approx(partial.center_of_buoyancy.y, real_t(-1.0)));
+	CHECK(Math::is_equal_approx(partial.center_of_buoyancy.x, real_t(0.0)));
+	CHECK(Math::is_equal_approx(partial.center_of_buoyancy.z, real_t(0.0)));
 
 	const GodotPhysicsFluidSample3D full = godot_physics_fluid_sample_3d(bounds, volume, 3.0);
 	CHECK(Math::is_equal_approx(full.submerged_volume, volume));
-	CHECK(Math::is_equal_approx(full.submerged_fraction, 1.0));
-	CHECK(Math::is_equal_approx(full.center_of_buoyancy.y, 0.0));
+	CHECK(Math::is_equal_approx(full.submerged_fraction, real_t(1.0)));
+	CHECK(Math::is_equal_approx(full.center_of_buoyancy.y, real_t(0.0)));
 
 	CHECK(godot_physics_fluid_sample_3d(bounds, -1.0, 0.0).submerged_volume == 0.0);
 	CHECK(godot_physics_fluid_sample_3d(AABB(Vector3(), Vector3(1, 0, 1)), volume, 1.0).submerged_volume == 0.0);
@@ -63,14 +63,14 @@ TEST_CASE("[Physics] Fluid surface produces correct dry partial and full submerg
 TEST_CASE("[Physics] Partly submerged eccentric shape generates restoring buoyant torque") {
 	const GodotPhysicsFluidSample3D sample = godot_physics_fluid_sample_3d(
 			AABB(Vector3(1, -1, -1), Vector3(2, 2, 2)), 8.0, 0.0);
-	CHECK(Math::is_equal_approx(sample.submerged_volume, 4.0));
+	CHECK(Math::is_equal_approx(sample.submerged_volume, real_t(4.0)));
 	const Vector3 gravity(0.0, -9.8, 0.0);
 	const Vector3 lift = -gravity * sample.submerged_volume; // Density 1.
 	const Vector3 lever = sample.center_of_buoyancy - Vector3();
 	const Vector3 torque = lever.cross(lift);
 	CHECK(lift.y > 0.0);
 	CHECK(torque.z > 0.0);
-	CHECK(Math::is_equal_approx(torque.z, 2.0 * lift.y));
+	CHECK(Math::is_equal_approx(torque.z, real_t(2.0) * lift.y));
 }
 
 TEST_CASE("[Physics] Quadratic fluid drag opposes relative flow and increases with speed squared") {
@@ -78,20 +78,20 @@ TEST_CASE("[Physics] Quadratic fluid drag opposes relative flow and increases wi
 	const Vector3 slow = godot_physics_fluid_quadratic_drag_3d(Vector3(2, 0, 0), size, 1.0, 1.0, 1.0);
 	const Vector3 fast = godot_physics_fluid_quadratic_drag_3d(Vector3(4, 0, 0), size, 1.0, 1.0, 1.0);
 	CHECK(slow.x < 0.0);
-	CHECK(Math::is_equal_approx(fast.x, 4.0 * slow.x));
-	CHECK(Math::is_equal_approx(slow.y, 0.0));
-	CHECK(Math::is_equal_approx(slow.z, 0.0));
+	CHECK(Math::is_equal_approx(fast.x, real_t(4.0) * slow.x));
+	CHECK(Math::is_equal_approx(slow.y, real_t(0.0)));
+	CHECK(Math::is_equal_approx(slow.z, real_t(0.0)));
 
 	const Vector3 half = godot_physics_fluid_quadratic_drag_3d(Vector3(2, 0, 0), size, 0.5, 1.0, 1.0);
-	CHECK(Math::is_equal_approx(half.x, 0.5 * slow.x));
+	CHECK(Math::is_equal_approx(half.x, real_t(0.5) * slow.x));
 	CHECK(godot_physics_fluid_quadratic_drag_3d(Vector3(), size, 1.0, 1.0, 1.0) == Vector3());
 	CHECK(godot_physics_fluid_quadratic_drag_3d(Vector3(2, 0, 0), size, 0.0, 1.0, 1.0) == Vector3());
 	CHECK(godot_physics_fluid_quadratic_drag_3d(Vector3(2, 0, 0), size, 1.0, 0.0, 1.0) == Vector3());
 }
 
 TEST_CASE("[Physics] Angular water drag is stable under large timesteps") {
-	CHECK(Math::is_equal_approx(godot_physics_fluid_angular_damping_3d(0.0, 1.0, 1.0), 1.0));
-	CHECK(Math::is_equal_approx(godot_physics_fluid_angular_damping_3d(10.0, 0.0, 1.0), 1.0));
+	CHECK(Math::is_equal_approx(godot_physics_fluid_angular_damping_3d(0.0, 1.0, 1.0), real_t(1.0)));
+	CHECK(Math::is_equal_approx(godot_physics_fluid_angular_damping_3d(10.0, 0.0, 1.0), real_t(1.0)));
 	const real_t short_step = godot_physics_fluid_angular_damping_3d(2.0, 1.0, 0.1);
 	const real_t long_step = godot_physics_fluid_angular_damping_3d(2.0, 1.0, 10.0);
 	CHECK(short_step > long_step);

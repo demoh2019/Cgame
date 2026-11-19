@@ -44,7 +44,7 @@ TEST_CASE("[Physics] Analytic sphere waterline volume and buoyancy centroid") {
 
 	const GodotPhysicsFluidSample3D quarter = godot_physics_fluid_sphere_sample_3d(center, 1.0, volume, -0.5);
 	CHECK(Math::is_equal_approx(quarter.submerged_fraction, real_t(0.15625)));
-	CHECK(Math::is_equal_approx(quarter.submerged_volume, Math::PI * real_t(5.0 / 24.0)));
+	CHECK(Math::is_equal_approx(quarter.submerged_volume, real_t(Math::PI) * real_t(5.0 / 24.0)));
 	CHECK(Math::is_equal_approx(quarter.center_of_buoyancy.y, real_t(-0.675)));
 	CHECK(Math::is_equal_approx(quarter.center_of_buoyancy.x, center.x));
 	CHECK(Math::is_equal_approx(quarter.center_of_buoyancy.z, center.z));

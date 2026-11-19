@@ -123,10 +123,10 @@ _FORCE_INLINE_ bool physics_xpbd_solve_dihedral(
 	}
 
 	real_t angular_error = angle - p_rest_angle;
-	if (angular_error > Math_PI) {
-		angular_error -= real_t(2.0 * Math_PI);
-	} else if (angular_error < -Math_PI) {
-		angular_error += real_t(2.0 * Math_PI);
+	if (angular_error > Math::PI) {
+		angular_error -= real_t(2.0 * Math::PI);
+	} else if (angular_error < -Math::PI) {
+		angular_error += real_t(2.0 * Math::PI);
 	}
 	const double delta_lambda = -(double(angular_error) +
 			double(p_alpha) * double(r_lambda)) / denominator;
