@@ -1029,4 +1029,68 @@ TEST_CASE("[Geometry2D] Large polygon offset retains valid paths for both direct
 	}
 }
 
+
+TEST_CASE("[Geometry2D][Performance] Winner-only atlas packing keeps legacy coordinates") {
+	// Rectangles have unique widths so that sort ordering is deterministic.
+	// These expected positions and sizes are from the previous all-candidate
+	// implementation, including its strict first-best tie-break rule.
+	struct Case {
+		Vector<Size2i> sizes;
+		Vector<Point2i> positions;
+		Size2i size;
+	};
+	const Case cases[] = {
+		{
+			{ Size2i(1, 2), Size2i(3, 4), Size2i(5, 6), Size2i(7, 8) },
+			{ Point2i(10, 6), Point2i(7, 6), Point2i(7, 0), Point2i(0, 0) },
+			Size2i(12, 10),
+		},
+		{
+			{ Size2i(3, 2), Size2i(5, 3), Size2i(11, 7), Size2i(2, 4), Size2i(17, 9), Size2i(7, 5), Size2i(13, 8), Size2i(19, 2) },
+			{ Point2i(7, 14), Point2i(7, 11), Point2i(17, 10), Point2i(7, 16), Point2i(0, 2), Point2i(0, 11), Point2i(17, 2), Point2i(0, 0) },
+			Size2i(30, 20),
+		},
+		{
+			{ Size2i(11, 7), Size2i(4, 20), Size2i(17, 3), Size2i(9, 13), Size2i(6, 5), Size2i(13, 6), Size2i(21, 8), Size2i(3, 12), Size2i(19, 4), Size2i(15, 10) },
+			{ Point2i(13, 22), Point2i(9, 34), Point2i(0, 12), Point2i(0, 21), Point2i(9, 29), Point2i(0, 15), Point2i(0, 0), Point2i(13, 34), Point2i(0, 8), Point2i(17, 12) },
+			Size2i(32, 54),
+		},
+	};
+
+	Vector<Point2i> actual;
+	Size2i actual_size;
+	for (const Case &test : cases) {
+		// Exercise both fresh and reused output vectors; the output must
+		// reflect the best candidate and preserve the original input order.
+		Geometry2D::make_atlas(test.sizes, actual, actual_size);
+		CHECK(actual_size == test.size);
+		CHECK(actual == test.positions);
+		REQUIRE(actual.size() == test.sizes.size());
+		for (int i = 0; i < actual.size(); i++) {
+			CHECK(actual[i].x >= 0);
+			CHECK(actual[i].y >= 0);
+			CHECK(actual[i].x + test.sizes[i].width <= actual_size.width);
+			CHECK(actual[i].y + test.sizes[i].height <= actual_size.height);
+		}
+	}
+}
+
+TEST_CASE("[Geometry2D][Performance] Atlas packing scales without per-candidate rectangle snapshots") {
+	Vector<Size2i> sizes;
+	for (int i = 0; i < 768; i++) {
+		sizes.push_back(Size2i(1 + (i * 37) % 113, 1 + (i * 19) % 79));
+	}
+	Vector<Point2i> result;
+	Size2i size;
+	Geometry2D::make_atlas(sizes, result, size);
+	REQUIRE(result.size() == sizes.size());
+	REQUIRE(size.width > 0);
+	REQUIRE(size.height > 0);
+	for (int i = 0; i < result.size(); i++) {
+		CHECK(result[i].x >= 0);
+		CHECK(result[i].y >= 0);
+		CHECK(result[i].x + sizes[i].width <= size.width);
+		CHECK(result[i].y + sizes[i].height <= size.height);
+	}
+}
 } // namespace TestGeometry2D

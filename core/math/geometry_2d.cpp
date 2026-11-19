@@ -130,21 +130,11 @@ struct _AtlasWorkRect {
 	_FORCE_INLINE_ bool operator<(const _AtlasWorkRect &p_r) const { return s.width > p_r.s.width; }
 };
 
-struct _AtlasWorkRectResult {
-	Vector<_AtlasWorkRect> result;
-	int max_w = 0;
-	int max_h = 0;
-};
-
 void Geometry2D::make_atlas(const Vector<Size2i> &p_rects, Vector<Point2i> &r_result, Size2i &r_size) {
-	// Super simple, almost brute force scanline stacking fitter.
-	// It's pretty basic for now, but it tries to make sure that the aspect ratio of the
-	// resulting atlas is somehow square. This is necessary because video cards have limits
-	// on texture size (usually 2048 or 4096), so the squarer a texture, the more the chances
-	// that it will work in every hardware.
-	// For example, it will prioritize a 1024x1024 atlas (works everywhere) instead of a
-	// 256x8192 atlas (won't work anywhere).
-
+	// Keep the original scanline placement strategy and power-of-two
+	// aspect-ratio scoring, but retain only the best candidate's positions.
+	// The former implementation stored a complete Vector of rectangles for
+	// every candidate width (up to 13), causing repeated COW copies.
 	ERR_FAIL_COND(p_rects.is_empty());
 	for (int i = 0; i < p_rects.size(); i++) {
 		ERR_FAIL_COND(p_rects[i].width <= 0);
@@ -152,99 +142,87 @@ void Geometry2D::make_atlas(const Vector<Size2i> &p_rects, Vector<Point2i> &r_re
 	}
 
 	Vector<_AtlasWorkRect> wrects;
-	wrects.resize(p_rects.size());
+	ERR_FAIL_COND(wrects.resize(p_rects.size()) != OK);
+	_AtlasWorkRect *rects = wrects.ptrw();
 	for (int i = 0; i < p_rects.size(); i++) {
-		wrects.write[i].s = p_rects[i];
-		wrects.write[i].idx = i;
+		rects[i].s = p_rects[i];
+		rects[i].idx = i;
 	}
 	wrects.sort();
-	int widest = wrects[0].s.width;
+	rects = wrects.ptrw();
+	const int widest = rects[0].s.width;
+	ERR_FAIL_COND_MSG(widest > (1 << 12), "No atlas candidate can contain the widest rectangle.");
 
-	Vector<_AtlasWorkRectResult> results;
+	ERR_FAIL_COND(r_result.resize(p_rects.size()) != OK);
+	Point2i *const best_positions = r_result.ptrw();
+	real_t best_aspect = 1e20;
+	Size2i best_size;
 
 	for (int i = 0; i <= 12; i++) {
-		int w = 1 << i;
-		int max_h = 0;
-		int max_w = 0;
+		const int w = 1 << i;
 		if (w < widest) {
 			continue;
 		}
 
+		// A new vector starts empty; zero-initialize its entire height map
+		// once rather than repeatedly resolving a COW writable proxy.
 		Vector<int> hmax;
-		hmax.resize(w);
-		for (int j = 0; j < w; j++) {
-			hmax.write[j] = 0;
-		}
+		ERR_FAIL_COND(hmax.resize_initialized(w) != OK);
+		int *const heights = hmax.ptrw();
+		int max_h = 0;
+		int max_w = 0;
 
-		// Place them.
 		int ofs = 0;
 		int limit_h = 0;
 		for (int j = 0; j < wrects.size(); j++) {
-			if (ofs + wrects[j].s.width > w) {
+			_AtlasWorkRect &rect = rects[j];
+			if (ofs + rect.s.width > w) {
 				ofs = 0;
 			}
 
 			int from_y = 0;
-			for (int k = 0; k < wrects[j].s.width; k++) {
-				if (hmax[ofs + k] > from_y) {
-					from_y = hmax[ofs + k];
+			for (int k = 0; k < rect.s.width; k++) {
+				if (heights[ofs + k] > from_y) {
+					from_y = heights[ofs + k];
 				}
 			}
 
-			wrects.write[j].p.x = ofs;
-			wrects.write[j].p.y = from_y;
-			int end_h = from_y + wrects[j].s.height;
-			int end_w = ofs + wrects[j].s.width;
+			rect.p.x = ofs;
+			rect.p.y = from_y;
+			const int end_h = from_y + rect.s.height;
+			const int end_w = ofs + rect.s.width;
 			if (ofs == 0) {
 				limit_h = end_h;
 			}
 
-			for (int k = 0; k < wrects[j].s.width; k++) {
-				hmax.write[ofs + k] = end_h;
+			for (int k = 0; k < rect.s.width; k++) {
+				heights[ofs + k] = end_h;
 			}
 
 			if (end_h > max_h) {
 				max_h = end_h;
 			}
-
 			if (end_w > max_w) {
 				max_w = end_w;
 			}
-
-			if (ofs == 0 || end_h > limit_h) { // While h limit not reached, keep stacking.
-				ofs += wrects[j].s.width;
+			if (ofs == 0 || end_h > limit_h) {
+				ofs += rect.s.width;
 			}
 		}
 
-		_AtlasWorkRectResult result;
-		result.result = wrects;
-		result.max_h = max_h;
-		result.max_w = max_w;
-		results.push_back(result);
-	}
-
-	// Find the result with the best aspect ratio.
-
-	int best = -1;
-	real_t best_aspect = 1e20;
-
-	for (int i = 0; i < results.size(); i++) {
-		real_t h = Math::next_power_of_2((uint32_t)results[i].max_h);
-		real_t w = Math::next_power_of_2((uint32_t)results[i].max_w);
-		real_t aspect = h > w ? h / w : w / h;
+		const real_t h = Math::next_power_of_2((uint32_t)max_h);
+		const real_t candidate_w = Math::next_power_of_2((uint32_t)max_w);
+		const real_t aspect = h > candidate_w ? h / candidate_w : candidate_w / h;
 		if (aspect < best_aspect) {
-			best = i;
 			best_aspect = aspect;
+			best_size = Size2i(max_w, max_h);
+			for (int j = 0; j < wrects.size(); j++) {
+				best_positions[rects[j].idx] = rects[j].p;
+			}
 		}
 	}
 
-	r_result.resize(p_rects.size());
-
-	for (int i = 0; i < p_rects.size(); i++) {
-		r_result.write[results[best].result[i].idx] = results[best].result[i].p;
-	}
-
-	r_size = Size2(results[best].max_w, results[best].max_h);
+	r_size = best_size;
 }
 
 Vector<Vector<Point2>> Geometry2D::_polypaths_do_operation(PolyBooleanOperation p_op, const Vector<Point2> &p_polypath_a, const Vector<Point2> &p_polypath_b, bool p_is_a_open) {
