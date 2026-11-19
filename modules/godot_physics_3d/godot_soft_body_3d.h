@@ -107,6 +107,16 @@ class GodotSoftBody3D : public GodotCollisionObject3D {
 		real_t lambda = 0.0;
 	};
 	LocalVector<SelfCollisionContact> xpbd_self_contacts;
+	// Allocated only in the opt-in swept vertex/face CCD path; discrete
+	// self contacts retain their compact 12-byte representation.
+	struct SelfCCDContact {
+		uint32_t vertex = 0;
+		uint32_t face = 0;
+		Vector3 barycentric;
+		Vector3 separating_normal;
+		real_t lambda = 0.0;
+	};
+	LocalVector<SelfCCDContact> xpbd_self_ccd_contacts;
 	HashSet<uint64_t> xpbd_self_neighbor_edges;
 	// Built only with opt-in edge/edge contacts. The BVH stores pointers
 	// into the fully constructed, non-resizing array of structural edges.
@@ -310,6 +320,7 @@ private:
 
 	void initialize_face_tree();
 	void update_face_tree(real_t p_delta);
+	void update_swept_face_tree(real_t p_thickness);
 
 	void initialize_shape(bool p_force_move = true);
 	void deinitialize_shape();
