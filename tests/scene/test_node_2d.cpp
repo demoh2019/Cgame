@@ -33,6 +33,9 @@
 TEST_FORCE_LINK(test_node_2d)
 
 #include "scene/2d/node_2d.h"
+#ifndef PHYSICS_2D_DISABLED
+#include "scene/2d/physics/character_body_2d.h"
+#endif
 #include "scene/main/scene_tree.h"
 #include "scene/main/window.h"
 
@@ -210,5 +213,33 @@ TEST_CASE("[SceneTree][Node2D] Utility methods") {
 	memdelete(test_node2);
 	memdelete(test_node1);
 }
+
+
+#ifndef PHYSICS_2D_DISABLED
+TEST_CASE("[CharacterBodySlideFastPath] CharacterBody2D no-collision queries preserve nil semantics") {
+	CharacterBody2D *body = memnew(CharacterBody2D);
+	CHECK_EQ(body->get_slide_collision_count(), 0);
+	Variant last = body->call(SNAME("get_last_slide_collision"));
+	CHECK_EQ(last.get_type(), Variant::NIL);
+	ERR_PRINT_OFF;
+	Variant invalid = body->call(SNAME("get_slide_collision"), 0);
+	ERR_PRINT_ON;
+	CHECK_EQ(invalid.get_type(), Variant::NIL);
+	CHECK_EQ(body->get_slide_collision_count(), 0);
+	memdelete(body);
+}
+
+TEST_CASE("[CharacterBodySlideFastPath] CharacterBody2D repeated missing collision requests allocate no result") {
+	CharacterBody2D *body = memnew(CharacterBody2D);
+	ERR_PRINT_OFF;
+	for (int i = 0; i < 32; i++) {
+		const Variant result = body->call(SNAME("get_slide_collision"), 0);
+		CHECK_EQ(result.get_type(), Variant::NIL);
+	}
+	ERR_PRINT_ON;
+	CHECK_EQ(body->get_slide_collision_count(), 0);
+	memdelete(body);
+}
+#endif // PHYSICS_2D_DISABLED
 
 } // namespace TestNode2D
