@@ -63,6 +63,8 @@ public:
 	// Opt-in convex, closed-mesh tetrahedral volume constraints.
 	inline static bool soft_body_volume_preservation = false;
 	inline static float soft_body_volume_compliance = 0.00001f;
+	// Opt-in isotropic volumetric expansion/contraction; otherwise keep rest volume.
+	inline static bool soft_body_volume_follow_shrinking_factor = false;
 	inline static float bounce_velocity_threshold;
 	inline static bool sleep_allowed;
 	inline static float sleep_velocity_threshold;
