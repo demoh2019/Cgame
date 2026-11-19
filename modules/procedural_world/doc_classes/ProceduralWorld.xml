@@ -1,0 +1,46 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<class name="ProceduralWorld" inherits="RefCounted" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="https://raw.githubusercontent.com/godotengine/godot/master/doc/class.xsd">
+	<brief_description>Deterministic procedural heightmaps, terrain erosion, point scattering, and world chunk coordinates.</brief_description>
+	<description>
+		ProceduralWorld provides core algorithms for procedural terrain and world-building tools. It does not create meshes or modify scenes. Its methods are deterministic for identical inputs. Terrain editing, mesh streaming, foliage instancing, and visual PCG graphs are separate higher-level features.
+	</description>
+	<tutorials>
+	</tutorials>
+	<methods>
+		<method name="generate_heightmap" qualifiers="const">
+			<return type="PackedFloat32Array" />
+			<param index="0" name="width" type="int" />
+			<param index="1" name="height" type="int" />
+			<param index="2" name="seed" type="int" />
+			<param index="3" name="scale" type="float" default="64.0" />
+			<param index="4" name="amplitude" type="float" default="32.0" />
+			<param index="5" name="octaves" type="int" default="4" />
+			<description>Returns width × height row-major samples of multi-octave value noise. Sizes are capped to protect memory usage.</description>
+		</method>
+		<method name="erode_heightmap" qualifiers="const">
+			<return type="PackedFloat32Array" />
+			<param index="0" name="heights" type="PackedFloat32Array" />
+			<param index="1" name="width" type="int" />
+			<param index="2" name="height" type="int" />
+			<param index="3" name="iterations" type="int" default="8" />
+			<param index="4" name="talus" type="float" default="1.0" />
+			<param index="5" name="strength" type="float" default="0.5" />
+			<description>Applies conservative four-neighbor thermal erosion to a row-major heightmap without modifying the input.</description>
+		</method>
+		<method name="scatter_points" qualifiers="const">
+			<return type="PackedVector2Array" />
+			<param index="0" name="area" type="Rect2" />
+			<param index="1" name="min_distance" type="float" />
+			<param index="2" name="seed" type="int" />
+			<param index="3" name="max_points" type="int" default="1024" />
+			<param index="4" name="attempts_per_point" type="int" default="30" />
+			<description>Deterministically scatters points within area with at least min_distance separation. The number returned may be lower than max_points.</description>
+		</method>
+		<method name="get_chunk_coordinates" qualifiers="const">
+			<return type="Array" />
+			<param index="0" name="world_area" type="Rect2" />
+			<param index="1" name="chunk_size" type="int" default="64" />
+			<description>Returns Vector2i chunk coordinates intersected by the specified half-open rectangle, supporting negative world coordinates.</description>
+		</method>
+	</methods>
+</class>
