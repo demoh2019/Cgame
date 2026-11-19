@@ -3074,12 +3074,16 @@ void RendererSceneCull::_scene_cull(CullData &cull_data, InstanceCullResult &cul
 									}
 
 									InstanceLightData *light = static_cast<InstanceLightData *>(E->base_data);
-									// Large scores are worse, so linear with distance, inverse with energy and range.
-									Vector3 light_center = E->transformed_aabb.get_center();
-									float light_range_energy =
+									// Only the relative order of light scores is used by the
+									// per-type max heaps. Squaring a nonnegative score
+									// preserves its ordering while removing a square
+									// root for every mesh/light candidate.
+									const Vector3 light_center = E->transformed_aabb.get_center();
+									const float light_range_energy =
 											RSG::light_storage->light_get_param(E->base, RSE::LightParam::LIGHT_PARAM_RANGE) *
 											RSG::light_storage->light_get_param(E->base, RSE::LightParam::LIGHT_PARAM_ENERGY);
-									float light_inst_score = mesh_center.distance_to(light_center) / MAX(0.01f, light_range_energy);
+									const float score_scale = MAX(0.01f, light_range_energy);
+									const float light_inst_score = mesh_center.distance_squared_to(light_center) / (score_scale * score_scale);
 									// Of the N lights (on a per-light-type basis, Omni or Spot) keep only the M "best" lights.
 									// If N <= M, we can simply store the lights, but once we exceed M, we need check each new
 									// light and see if it's score is better than the worst light stored to date.  If the new
