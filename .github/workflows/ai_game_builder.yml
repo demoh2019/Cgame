@@ -26,6 +26,9 @@ jobs:
           sparse-checkout: |
             misc/ai_game_builder
 
+      - name: Test standalone game validator (Python)
+        run: python3 -m unittest discover -s misc/ai_game_builder/tests -p 'test_*.py' -v
+
       - name: Fetch and verify Godot 4.5.1 editor
         shell: bash
         run: |
