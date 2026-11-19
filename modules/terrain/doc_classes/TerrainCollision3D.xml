@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<class name="TerrainCollision3D" inherits="CollisionShape3D" api_type="core" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="../../../doc/class.xsd">
+	<brief_description>
+		A collision shape that stays synchronized with a TerrainMesh resource.
+	</brief_description>
+	<description>
+		[TerrainCollision3D] generates a [ConcavePolygonShape3D] from the heightfield specified by [member terrain]. It automatically rebuilds the triangle collision geometry when that resource changes, including height edits, sculpting, smoothing, erosion, grid resizing, cell spacing, and height scaling.
+		Add it as a child of a [StaticBody3D], and assign the same [TerrainMesh] resource used by a sibling [MeshInstance3D]. Both the visual mesh and the collision use identical uncentered local coordinates, so they must have matching transforms relative to their shared parent.
+		[b]Note:[/b] A concave collision mesh is intended for static bodies, not moving rigid bodies. It can be expensive to regenerate after frequent brush edits on large terrain grids. This node requires 3D physics to be enabled.
+	</description>
+	<members>
+		<member name="terrain" type="TerrainMesh" setter="set_terrain" getter="get_terrain">
+			The terrain heightfield used to generate collision triangles. Assigning a different resource disconnects the old one; clearing this property removes the generated shape.
+		</member>
+	</members>
+</class>
