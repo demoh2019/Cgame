@@ -1261,6 +1261,13 @@ void GodotPhysicsServer3D::soft_body_set_tetrahedral_indices(
 	soft_body->set_tetrahedral_indices(p_indices);
 }
 
+void GodotPhysicsServer3D::soft_body_set_tetrahedral_interior_positions(
+		RID p_body, const PackedVector3Array &p_positions) {
+	GodotSoftBody3D *soft_body = soft_body_owner.get_or_null(p_body);
+	ERR_FAIL_NULL(soft_body);
+	soft_body->set_tetrahedral_interior_positions(p_positions);
+}
+
 AABB GodotPhysicsServer3D::soft_body_get_bounds(RID p_body) const {
 	GodotSoftBody3D *soft_body = soft_body_owner.get_or_null(p_body);
 	ERR_FAIL_NULL_V(soft_body, AABB());
