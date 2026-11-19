@@ -4,6 +4,7 @@ on:
   pull_request:
     paths:
       - "servers/physics_softbody_self_collision.h"
+      - "servers/physics_softbody_ccd.h"
       - "servers/physics_3d/physics_server_3d.cpp"
       - "modules/godot_physics_3d/godot_space_3d.cpp"
       - "modules/godot_physics_3d/godot_space_3d.h"
@@ -39,5 +40,5 @@ jobs:
             -Itests/stress/mock_physics -I. \
             tests/stress/physics_softbody_edge_standalone.cpp \
             -o "$RUNNER_TEMP/physics-soft-edge-smoke"
-      - name: Exercise vertex/face and 20000 seeded edge-pair cases
+      - name: Exercise swept CCD, vertex/face and 20000 seeded edge-pair cases
         run: "$RUNNER_TEMP/physics-soft-edge-smoke"
