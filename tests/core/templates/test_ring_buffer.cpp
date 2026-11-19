@@ -306,4 +306,4 @@ TEST_CASE("[RingBuffer] Resize 2") {
 	CHECK(rb1.space_left() == 0);
 }
 
-} //namespace TestRingBuffer
+} // namespace TestRingBuffer
