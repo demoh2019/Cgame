@@ -6,9 +6,10 @@ const PlanValidator = preload("res://addons/ai_game_builder/validator.gd")
 # This is a conservative, non-executing check; it does not compile scripts.
 # Every res:// reference used by generated code/scenes must point to another
 # generated file. The model cannot rely on installed addons or project assets.
+const SCRIPT_BLOCKED := ["@tool", "OS.execute(", "OS.create_process("]
 const SCRIPT_WARNINGS := [
-	"@tool", "OS.execute(", "OS.create_process(", "FileAccess.open(",
-	"DirAccess.remove_absolute(", "JavaScriptBridge", "HTTPClient", "HTTPRequest"
+	"FileAccess.open(", "DirAccess.remove_absolute(",
+	"JavaScriptBridge", "HTTPClient", "HTTPRequest"
 ]
 
 
@@ -40,6 +41,9 @@ static func inspect(plan: Dictionary) -> Dictionary:
 		var path: String = file.path
 		var code: String = file.content
 		if path.ends_with(".gd"):
+			for indicator in SCRIPT_BLOCKED:
+				if code.contains(indicator):
+					errors.append("%s: blocked editor-executable or process-launch syntax: %s" % [path, indicator])
 			for indicator in SCRIPT_WARNINGS:
 				if code.contains(indicator):
 					warnings.append("%s: review use of %s" % [path, indicator])
