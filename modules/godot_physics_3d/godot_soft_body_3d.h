@@ -79,6 +79,9 @@ class GodotSoftBody3D : public GodotCollisionObject3D {
 	LocalVector<Node> nodes;
 	LocalVector<Link> links;
 	LocalVector<Face> faces;
+	// Number of particles with nonzero inverse mass. Maintained on pin,
+	// unpin and mesh rebuild for O(1) central impulse/force normalization.
+	uint32_t dynamic_node_count = 0;
 
 	DynamicBVH node_tree;
 	DynamicBVH face_tree;
