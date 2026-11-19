@@ -74,14 +74,14 @@ void Quaternion::normalize() {
 	// Epsilon helps:
 	// * prevent underflow or subnormal inputs from flushing to zero in sqrt.
 	// * avoid severe precision loss that would produce a non-normalized result.
-	if (likely(sl >= (real_t)CMP_EPSILON2)) {
+	if (likely(Math::is_finite(sl) && sl >= (real_t)CMP_EPSILON2)) {
 		real_t l = Math::sqrt(sl);
 		*this /= l;
 		return;
 	}
 
 #ifdef MATH_CHECKS
-	WARN_PRINT_ONCE("Quaternion length is near zero and cannot be normalized, resetting to identity.");
+	WARN_PRINT_ONCE("Quaternion length is near zero or non-finite, resetting to identity.");
 #endif
 	*this = Quaternion();
 }

@@ -473,6 +473,83 @@ TEST_CASE("[Quaternion] Normalize preserves valid rotations and guards non-finit
 	ERR_PRINT_ON;
 }
 
+TEST_CASE("[Quaternion] Normalize finite quaternions") {
+	const Quaternion quaternions[] = {
+		Quaternion(),
+		Quaternion(0, 0, 0, 2),
+		Quaternion(0, 0, 0, -3),
+		Quaternion(2, 0, 0, 0),
+		Quaternion(1, 2, 3, 4),
+		Quaternion(-2, 3, -4, 5),
+	};
+
+	for (const Quaternion &input : quaternions) {
+		Quaternion in_place = input;
+		const Quaternion normalized = input.normalized();
+		in_place.normalize();
+
+		CHECK(normalized.is_finite());
+		CHECK(normalized.is_normalized());
+		CHECK(in_place.is_equal_approx(normalized));
+		CHECK(normalized.length_squared() == doctest::Approx(1.0));
+	}
+	CHECK(Quaternion(2, 0, 0, 0).normalized() == Quaternion(1, 0, 0, 0));
+	CHECK(Quaternion(0, 0, 0, -3).normalized() == Quaternion(0, 0, 0, -1));
+}
+
+TEST_CASE("[Quaternion] Normalize zero and near-zero quaternions") {
+	ERR_PRINT_OFF;
+	const Quaternion degenerate[] = {
+		Quaternion(0, 0, 0, 0),
+		Quaternion(1e-160, 0, 0, 0),
+		Quaternion(0, -1e-160, 0, 0),
+		Quaternion(0, 0, 0, 1e-10),
+		Quaternion(1e-10, -1e-10, 1e-10, -1e-10),
+		Quaternion(Math::NaN, 0, 0, 1),
+		Quaternion(0, Math::NaN, 0, 1),
+		Quaternion(0, 0, Math::NaN, 1),
+	};
+
+	for (const Quaternion &input : degenerate) {
+		Quaternion in_place = input;
+		const Quaternion normalized = input.normalized();
+		in_place.normalize();
+
+		CHECK(normalized.is_finite());
+		CHECK(normalized.is_normalized());
+		CHECK(normalized == Quaternion());
+		CHECK(in_place == Quaternion());
+	}
+	ERR_PRINT_ON;
+}
+
+TEST_CASE("[Quaternion] Normalize non-finite and overflow-sized inputs") {
+	ERR_PRINT_OFF;
+	const Quaternion invalid[] = {
+		Quaternion(Math::INF, 0, 0, 1),
+		Quaternion(0, -Math::INF, 0, 1),
+		Quaternion(Math::INF, Math::INF, 0, 1),
+	};
+	for (const Quaternion &input : invalid) {
+		Quaternion in_place = input;
+		const Quaternion result = input.normalized();
+		in_place.normalize();
+
+		CHECK(result.is_finite());
+		CHECK(result.is_normalized());
+		CHECK(result == Quaternion());
+		CHECK(in_place == Quaternion());
+	}
+
+	// This length squared overflows in single precision, but not in double precision.
+	const Quaternion large(1e30, 0, 0, 0);
+	const Quaternion normalized = large.normalized();
+	CHECK(normalized.is_finite());
+	CHECK(normalized.is_normalized());
+	CHECK(normalized == Quaternion() || normalized.is_equal_approx(Quaternion(1, 0, 0, 0)));
+	ERR_PRINT_ON;
+}
+
 TEST_CASE("[Quaternion] Finite number checks") {
 	constexpr real_t x = Math::NaN;
 
