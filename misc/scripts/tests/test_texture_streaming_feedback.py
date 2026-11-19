@@ -42,6 +42,25 @@ int main() {
     static_assert(needs_resize(UINT32_MAX, true, (1u << 30)), "arithmetic cannot wrap");
     static_assert(MAX_MATERIAL_COUNT == (1u << 29), "maximum count must fit power-of-two rounding");
 
+    static_assert(mip_level_count(0, 0) == 1, "empty dimensions");
+    static_assert(mip_level_count(1, 1) == 1, "one texel");
+    static_assert(mip_level_count(2, 1) == 2, "power of two");
+    static_assert(mip_level_count(3, 1) == 2, "non-power of two");
+    static_assert(mip_level_count(4, 1) == 3, "two power boundaries");
+    static_assert(mip_level_count(1023, 5) == 10, "wide texture");
+    static_assert(mip_level_count(5, 1024) == 11, "tall texture");
+    static_assert(mip_level_count(65535, 65535) == 16, "max stored size");
+    for (uint32_t dim = 0; dim <= 65535; ++dim) {
+        uint32_t remaining = dim;
+        uint8_t expected = 1;
+        while (remaining > 1) {
+            remaining >>= 1;
+            ++expected;
+        }
+        assert(mip_level_count(uint16_t(dim), 1) == expected);
+        assert(mip_level_count(1, uint16_t(dim)) == expected);
+    }
+
     // Simulates repeated empty feedback frames; only first frame should allocate.
     unsigned allocations = 0;
     uint32_t capacity = 0;
@@ -97,6 +116,18 @@ int main() {
         self.assertIn("p_mb->data.ptr()", readback)
         self.assertNotIn("p_mb->data.ptrw()", readback)
         self.assertIn("const uint32_t *p_data", readback)
+
+    def test_mip_count_is_cached_after_create_and_dimension_updates(self):
+        hdr = (ROOT / "modules/texture_streaming/texture_streaming.h").read_text(encoding="utf-8")
+        src = SOURCE.read_text(encoding="utf-8")
+        state = hdr.split("struct StreamingState {", 1)[1].split("RID_Owner<StreamingState", 1)[0]
+        getter = state.split("uint8_t get_mip_count() const {", 1)[1].split("}", 1)[0]
+        self.assertIn("return mip_count;", getter)
+        self.assertNotIn("log2", getter)
+        self.assertIn("mip_count = 1;", state)
+        self.assertIn("mip_count = p_other.mip_count;", state)
+        self.assertIn("state.mip_count = TextureStreamingFeedbackPolicy::mip_level_count(state.width, state.height);", src)
+        self.assertIn("state->mip_count = TextureStreamingFeedbackPolicy::mip_level_count(state->width, state->height);", src)
 
     def test_global_lod_constraints_are_read_once_per_feedback_batch(self):
         src = SOURCE.read_text(encoding="utf-8")

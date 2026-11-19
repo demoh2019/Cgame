@@ -152,6 +152,7 @@ void TextureStreaming::_texture_configure_streaming_impl(Completion<RID> *p_comp
 	state.format = p_format;
 	state.width = p_width;
 	state.height = p_height;
+	state.mip_count = TextureStreamingFeedbackPolicy::mip_level_count(state.width, state.height);
 	state.min_lod_override = uint8_t(CLAMP(p_min_lod, int(LOD_NO_OVERRIDE), int(MAX_LOD_OVERRIDE)));
 	state.max_lod_override = uint8_t(CLAMP(p_max_lod, int(LOD_NO_OVERRIDE), int(MAX_LOD_OVERRIDE)));
 	state.reload_callable = p_reload_callable;
@@ -196,6 +197,7 @@ void TextureStreaming::_texture_update_impl(CompletionVoid *p_completion, RID p_
 	if (state) {
 		state->width = p_width;
 		state->height = p_height;
+		state->mip_count = TextureStreamingFeedbackPolicy::mip_level_count(state->width, state->height);
 		state->min_lod_override = uint8_t(CLAMP(p_min_lod, int(LOD_NO_OVERRIDE), int(MAX_LOD_OVERRIDE)));
 		state->max_lod_override = uint8_t(CLAMP(p_max_lod, int(LOD_NO_OVERRIDE), int(MAX_LOD_OVERRIDE)));
 	}

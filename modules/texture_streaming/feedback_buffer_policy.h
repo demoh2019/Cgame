@@ -39,6 +39,17 @@ namespace TextureStreamingFeedbackPolicy {
 constexpr uint32_t MIN_BUFFER_SIZE_BYTES = 4096;
 constexpr uint32_t MAX_MATERIAL_COUNT = 1u << 29;
 
+// Cache on texture creation/update instead of repeating float log2 in the feedback loop.
+constexpr uint8_t mip_level_count(uint16_t p_width, uint16_t p_height) {
+	uint32_t max_dim = p_width > p_height ? p_width : p_height;
+	uint8_t levels = 1;
+	while (max_dim > 1) {
+		max_dim >>= 1;
+		++levels;
+	}
+	return levels;
+}
+
 // Do not repeatedly recreate a valid 4 KiB buffer when no materials exist.
 // Use 64-bit arithmetic so large material counts cannot wrap the comparison.
 constexpr bool needs_resize(uint32_t p_allocated_bytes, bool p_buffer_valid, uint32_t p_material_count) {
