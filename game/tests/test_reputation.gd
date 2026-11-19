@@ -3,6 +3,7 @@ extends RefCounted
 
 const Reputation = preload("res://scripts/shared/reputation.gd")
 const Vendor = preload("res://scripts/shared/vendor.gd")
+const Inventory = preload("res://scripts/shared/inventory.gd")
 const Defs = preload("res://scripts/shared/defs.gd")
 const GameServer = preload("res://scripts/server/game_server.gd")
 const WorldGen = preload("res://scripts/shared/world_gen.gd")
@@ -119,6 +120,14 @@ func run(t) -> void:
 		"unauthorized bulk purchase cannot mint supplies")
 	t.eq(player.inventory.to_dict(), before_denied,
 		"failed discounted vendor purchase rolls back atomically")
+	# The ranked transaction also must not consume silver if the purchased
+	# item cannot enter a full backpack.
+	var roomless := Inventory.new(1)
+	roomless.add("silver", Defs.stack_size("silver"))
+	var full_before: Dictionary = roomless.to_dict()
+	var impossible: Dictionary = Vendor.transact(roomless, "canned_food", 1, true, 500)
+	t.eq(impossible["reason"], "no_space", "ranked NPC cannot partially sell into a full backpack")
+	t.eq(roomless.to_dict(), full_before, "failed ranked purchase preserves all silver")
 
 	t.current = "completed real camp contracts grant once-only renown"
 	t.eq(server.cmd_contract(player.id, "claim")["reason"], "no_active",
@@ -148,6 +157,9 @@ func run(t) -> void:
 	player.renown = 0
 	t.check(server.apply_character(player, saved), "character restore succeeds")
 	t.eq(player.renown, saved_score, "reputation survives authentic character load")
+	var returning = server.add_player(1443, "Returning Veteran", "account-veteran", saved)
+	t.eq(returning.renown, saved_score,
+		"fresh authenticated login restores the saved reputation from Nakama")
 	var legacy: Dictionary = saved.duplicate(true)
 	legacy.erase("renown")
 	t.check(server.apply_character(player, legacy), "pre-reputation v1 save still loads")
