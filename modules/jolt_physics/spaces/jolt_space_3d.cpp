@@ -56,6 +56,7 @@
 #include <Jolt/Physics/SoftBody/SoftBodyMotionProperties.h>
 
 #include <algorithm>
+#include <unordered_map>
 
 namespace {
 
@@ -980,6 +981,15 @@ struct SoftSelfContactScratch {
 	SoftFaceBVHScratch bvh;
 	SoftFaceBVHScratch edge_bvh; // Reused across active soft bodies.
 	JPH::Array<uint64_t> one_ring_edges;
+
+	// Face-array address identifies an immutable Jolt SoftBodySharedSettings
+	// topology. A body rebuild gets a new BodyID, invalidating this cache.
+	const void *topology_faces = nullptr;
+	uint32_t topology_face_count = 0;
+	uint32_t topology_vertex_count = 0;
+	uint32_t edge_bvh_edge_count = 0;
+	uint32_t edge_bvh_refits = 0;
+	bool edge_bvh_ready = false;
 };
 
 static uint64_t soft_self_topology_edge_key(uint32_t p_a, uint32_t p_b) {
