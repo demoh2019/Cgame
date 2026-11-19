@@ -379,6 +379,8 @@ PhysicsServer2D::PhysicsServer2D() {
 	// Like Rapier's warmstart coefficient: scale cached contact impulses
 	// on each step (0 disables warm starting, 1 preserves legacy behavior).
 	GLOBAL_DEF(PropertyInfo(Variant::FLOAT, "physics/2d/solver/warm_start_coefficient", PROPERTY_HINT_RANGE, "0,1,0.01"), 1.0);
+	// Box2D-style Pade damping remains opt-in for backwards-compatible motion.
+	GLOBAL_DEF(PropertyInfo(Variant::BOOL, "physics/2d/solver/implicit_damping"), false);
 	// Bullet-style rotational resistance for loaded rigid contacts; off by default.
 	GLOBAL_DEF(PropertyInfo(Variant::FLOAT, "physics/2d/solver/rolling_friction", PROPERTY_HINT_RANGE, "0,1,0.01,or_greater"), 0.0);
 	// Suppress tiny bounces at contacts so stacked bodies can settle (pixels per second).
