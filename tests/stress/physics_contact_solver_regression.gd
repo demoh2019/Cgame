@@ -10,7 +10,7 @@ func _initialize() -> void:
 func _run() -> void:
 	# Confirm the non-default warm-start coefficient is accepted by a new
 	# space. ProjectSettings are restored before the standalone test exits.
-	const warm_start_setting := "physics/2d/solver/warm_start_coefficient"
+	var warm_start_setting := "physics/2d/solver/warm_start_coefficient"
 	var original_warm_start: Variant = ProjectSettings.get_setting(warm_start_setting, 1.0)
 	ProjectSettings.set_setting(warm_start_setting, 0.65)
 
