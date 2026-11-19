@@ -34,6 +34,7 @@
 
 #include "core/math/geometry_3d.h"
 #include "servers/physics_3d/physics_server_3d_rendering_server_handler.h"
+#include "servers/physics_softbody_plasticity.h"
 #include "servers/physics_xpbd_distance.h"
 #include "servers/physics_xpbd_area.h"
 #include "servers/rendering/rendering_server.h"
@@ -1225,6 +1226,34 @@ void GodotSoftBody3D::solve_constraints(real_t p_delta) {
 			continue;
 		}
 		node.x = node.q + node.v * p_delta;
+	}
+
+	// Viscoplasticity acts on the *predicted* stretch before constraints
+	// project it away. This also works with the stiff legacy PBD solver,
+	// where post-solve links may be too close to rest to detect yielding.
+	// By default the creep rate is zero and the entire pass is skipped.
+	const real_t plastic_creep_rate = get_space()->get_soft_body_plastic_creep_rate();
+	if (plastic_creep_rate > real_t(0.0) && p_delta > real_t(0.0)) {
+		// Exponential integration makes creep independent of physics tick rate
+		// for constant strain: f = 1 - exp(-creep_rate * delta_time).
+		const double creep_fraction = 1.0 - Math::exp(-double(plastic_creep_rate) * double(p_delta));
+		if (creep_fraction > 0.0) {
+			const real_t yield_strain = get_space()->get_soft_body_plastic_yield_strain();
+			const double max_length = double(std::numeric_limits<real_t>::max());
+			for (Link &link : links) {
+				const Vector3 &a = link.n[0]->x;
+				const Vector3 &b = link.n[1]->x;
+				const double dx = double(b.x) - double(a.x);
+				const double dy = double(b.y) - double(a.y);
+				const double dz = double(b.z) - double(a.z);
+				const double length = Math::sqrt(dx * dx + dy * dy + dz * dz);
+				if (length <= max_length &&
+						physics_softbody_creep_rest_length(real_t(length), yield_strain, creep_fraction, link.rl)) {
+					// Legacy PBD uses squared rest length; XPBD reads link.rl.
+					link.c1 = link.rl * link.rl;
+				}
+			}
+		}
 	}
 
 	// Optional, independent XPBD stretch and triangle area constraints.
