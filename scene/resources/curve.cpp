@@ -530,19 +530,25 @@ void Curve::bake() {
 }
 
 void Curve::_bake() const {
-	_baked_cache.clear();
+	// Most rebakes keep the same resolution. Reuse the existing COW buffer
+	// instead of clearing it and allocating a fresh array on every edit.
+	ERR_FAIL_COND_MSG(_baked_cache.resize(_bake_resolution) != OK, "Failed to allocate the baked Curve cache.");
+	real_t *const values = _baked_cache.ptrw();
 
-	_baked_cache.resize(_bake_resolution);
-
+	const real_t domain_range = get_domain_range();
 	for (int i = 1; i < _bake_resolution - 1; ++i) {
-		real_t x = get_domain_range() * i / static_cast<real_t>(_bake_resolution - 1) + _min_domain;
-		real_t y = sample(x);
-		_baked_cache.write[i] = y;
+		const real_t x = domain_range * i / static_cast<real_t>(_bake_resolution - 1) + _min_domain;
+		values[i] = sample(x);
 	}
 
-	if (_points.size() != 0) {
-		_baked_cache.write[0] = _points[0].position.y;
-		_baked_cache.write[_baked_cache.size() - 1] = _points[_points.size() - 1].position.y;
+	// Always overwrite the endpoints: the buffer may have been reused from
+	// a previous bake with different control points, including an empty curve.
+	if (_points.is_empty()) {
+		values[0] = 0;
+		values[_bake_resolution - 1] = 0;
+	} else {
+		values[0] = _points[0].position.y;
+		values[_bake_resolution - 1] = _points[_points.size() - 1].position.y;
 	}
 
 	_baked_cache_dirty = false;
