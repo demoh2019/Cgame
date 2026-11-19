@@ -30,8 +30,11 @@ CASES = (
     "file_io", "threads", "physics_2d", "physics_3d",
     "memory_churn", "astar_grid", "tweens", "audio_buffers",
     "variant_codec", "render_2d", "render_3d",
+    "compression", "regex", "astar_3d", "scene_reparent",
+    "resource_roundtrip", "thread_contention", "physics_queries_2d",
+    "render_multimesh",
 )
-RENDER_CASES = frozenset(("render_2d", "render_3d"))
+RENDER_CASES = frozenset(("render_2d", "render_3d", "render_multimesh"))
 # Each scenario runs in a fresh process. No preset has unlimited RSS or wall time.
 PRESETS = {
     "smoke": dict(scale=1, frames=12, repeats=1, timeout=90.0, rss_mib=2048),
