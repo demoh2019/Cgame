@@ -671,6 +671,17 @@ func _physics_rid_sparse_2d(scale: int, frames: int) -> Dictionary:
 		peak_physics_ms = maxf(peak_physics_ms, Performance.get_monitor(Performance.TIME_PHYSICS_PROCESS) * 1000.0)
 		peak_pairs = maxi(peak_pairs, int(Performance.get_monitor(Performance.PHYSICS_2D_COLLISION_PAIRS)))
 
+	# Even at extreme body counts, isolated stationary bodies must not drift
+	# or accidentally enter sleeping state when sleeping is disabled.
+	var state_error := false
+	for index in [0, int(count / 2), count - 1]:
+		var probe: Transform2D = PhysicsServer2D.body_get_state(bodies[index], PhysicsServer2D.BODY_STATE_TRANSFORM)
+		var expected := Vector2(float(index % 1024) * 4.0, float(int(index / 1024)) * 4.0)
+		if not probe.origin.is_equal_approx(expected):
+			state_error = true
+		if bool(PhysicsServer2D.body_get_state(bodies[index], PhysicsServer2D.BODY_STATE_SLEEPING)):
+			state_error = true
+
 	var cleanup_started := Time.get_ticks_usec()
 	PhysicsServer2D.space_set_active(space, false)
 	for body in bodies:
@@ -681,6 +692,8 @@ func _physics_rid_sparse_2d(scale: int, frames: int) -> Dictionary:
 	var cleanup_ms := float(Time.get_ticks_usec() - cleanup_started) / 1000.0
 	if peak_pairs != 0:
 		return {"error": "Sparse 2D RID bodies unexpectedly collided", "pairs": peak_pairs}
+	if state_error:
+		return {"error": "Sparse 2D RID bodies drifted or slept unexpectedly"}
 	var frame_statistics := _frame_statistics(frame_intervals)
 	return {"bodies": count, "physics_frames": frames, "creation_ms": creation_ms, "cleanup_ms": cleanup_ms,
 			"peak_physics_ms": peak_physics_ms, "peak_collision_pairs": peak_pairs,
@@ -719,6 +732,15 @@ func _physics_rid_sparse_3d(scale: int, frames: int) -> Dictionary:
 		peak_physics_ms = maxf(peak_physics_ms, Performance.get_monitor(Performance.TIME_PHYSICS_PROCESS) * 1000.0)
 		peak_pairs = maxi(peak_pairs, int(Performance.get_monitor(Performance.PHYSICS_3D_COLLISION_PAIRS)))
 
+	var state_error := false
+	for index in [0, int(count / 2), count - 1]:
+		var probe: Transform3D = PhysicsServer3D.body_get_state(bodies[index], PhysicsServer3D.BODY_STATE_TRANSFORM)
+		var expected := Vector3(float(index % 128) * 4.0, float(int(index / 128) % 128) * 4.0, float(int(index / 16384)) * 4.0)
+		if not probe.origin.is_equal_approx(expected):
+			state_error = true
+		if bool(PhysicsServer3D.body_get_state(bodies[index], PhysicsServer3D.BODY_STATE_SLEEPING)):
+			state_error = true
+
 	var cleanup_started := Time.get_ticks_usec()
 	PhysicsServer3D.space_set_active(space, false)
 	for body in bodies:
@@ -729,6 +751,8 @@ func _physics_rid_sparse_3d(scale: int, frames: int) -> Dictionary:
 	var cleanup_ms := float(Time.get_ticks_usec() - cleanup_started) / 1000.0
 	if peak_pairs != 0:
 		return {"error": "Sparse 3D RID bodies unexpectedly collided", "pairs": peak_pairs}
+	if state_error:
+		return {"error": "Sparse 3D RID bodies drifted or slept unexpectedly"}
 	var frame_statistics := _frame_statistics(frame_intervals)
 	return {"bodies": count, "physics_frames": frames, "creation_ms": creation_ms, "cleanup_ms": cleanup_ms,
 			"peak_physics_ms": peak_physics_ms, "peak_collision_pairs": peak_pairs,
