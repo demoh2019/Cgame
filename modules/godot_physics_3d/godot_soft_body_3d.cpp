@@ -51,6 +51,7 @@
 #include "servers/physics_xpbd_shear.h"
 #include "servers/physics_xpbd_self_collision.h"
 #include "servers/physics_softbody_pair_contact.h"
+#include "servers/physics_softbody_pair_ccd.h"
 #include "servers/physics_xpbd_soft_ccd.h"
 #include "servers/physics_xpbd_self_friction.h"
 #include "servers/physics_xpbd_edge_collision.h"
@@ -2229,8 +2230,22 @@ void GodotSoftBody3D::predict_motion(real_t p_delta) {
 	const real_t max_displacement = 1000.0;
 	real_t clamp_delta_v = max_displacement * inv_delta;
 
+	// The pair stage executes after body-local constraints have rewritten
+	// Node::q. Preserve each particle's actual previous position only when
+	// continuous inter-body collisions are enabled. The disabled mode adds
+	// no extra per-node storage, passes, or BVH refits.
+	const bool pair_ccd_enabled = get_space()->is_soft_body_pair_collision_ccd_enabled() &&
+			get_space()->get_soft_body_pair_collision_thickness() > real_t(0.0);
+	if (pair_ccd_enabled) {
+		pair_ccd_previous.resize(nodes.size());
+	} else if (!pair_ccd_previous.is_empty()) {
+		pair_ccd_previous.reset();
+	}
 	// Integrate.
 	for (Node &node : nodes) {
+		if (pair_ccd_enabled) {
+			pair_ccd_previous[node.index] = node.x;
+		}
 		node.q = node.x;
 		if (node.im == 0.0) {
 			// Inverse-mass-zero particles are kinematic (Jolt-style pins).
@@ -2690,6 +2705,9 @@ void GodotSoftBody3D::solve_constraints(real_t p_delta) {
 	}
 
 	update_normals_and_centroids();
+	// Local XPBD projections have finished; cache a conservative union of
+	// the previous and the FINAL current positions for the pair broadphase.
+	refresh_pair_ccd_swept_bounds();
 }
 
 void GodotSoftBody3D::solve_links(real_t kst, real_t ti) {
@@ -2810,6 +2828,57 @@ void GodotSoftBody3D::update_swept_face_tree(real_t p_thickness) {
 		swept.grow_by(margin);
 		face_tree.update(face.leaf, swept);
 	}
+}
+
+// A swept BVH for INTER-body contacts, using the opt-in history vector
+// rather than Node::q (which the local solver has already overwritten).
+// Both endpoints of each moving face are enclosed conservatively.
+void GodotSoftBody3D::update_pair_swept_face_tree(real_t p_thickness) {
+	if (pair_ccd_previous.size() != nodes.size()) {
+		return;
+	}
+	const real_t margin = MAX(real_t(0.0), collision_margin) + p_thickness;
+	for (const Face &face : faces) {
+		const Node &a = *face.n[0];
+		const Node &b = *face.n[1];
+		const Node &c = *face.n[2];
+		const Vector3 &pa = pair_ccd_previous[a.index];
+		const Vector3 &pb = pair_ccd_previous[b.index];
+		const Vector3 &pc = pair_ccd_previous[c.index];
+		if (!pa.is_finite() || !pb.is_finite() || !pc.is_finite() ||
+				!a.x.is_finite() || !b.x.is_finite() || !c.x.is_finite()) {
+			continue;
+		}
+		AABB swept(pa, Vector3());
+		swept.expand_to(pb);
+		swept.expand_to(pc);
+		swept.expand_to(a.x);
+		swept.expand_to(b.x);
+		swept.expand_to(c.x);
+		swept.grow_by(margin);
+		face_tree.update(face.leaf, swept);
+	}
+}
+
+void GodotSoftBody3D::refresh_pair_ccd_swept_bounds() {
+	if (pair_ccd_previous.is_empty() || pair_ccd_previous.size() != nodes.size()) {
+		return;
+	}
+	if (!nodes[0].x.is_finite()) {
+		pair_ccd_previous.reset();
+		return;
+	}
+	AABB swept(nodes[0].x, Vector3());
+	for (const Node &node : nodes) {
+		const Vector3 &previous = pair_ccd_previous[node.index];
+		if (!previous.is_finite() || !node.x.is_finite()) {
+			pair_ccd_previous.reset();
+			return;
+		}
+		swept.expand_to(previous);
+		swept.expand_to(node.x);
+	}
+	pair_ccd_swept_bounds = swept;
 }
 
 void GodotSoftBody3D::initialize_shape(bool p_force_move) {
