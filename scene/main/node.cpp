@@ -558,8 +558,18 @@ void Node::_move_child(Node *p_child, int p_index, bool p_ignore_end) {
 	int motion_from = MIN(p_index, child_index);
 	int motion_to = MAX(p_index, child_index);
 
-	data.children_cache.remove_at(child_index);
-	data.children_cache.insert(p_index, p_child);
+	// Shift only the nodes between the old and new positions. A
+	// remove_at()+insert() pair shifts two tails of the child array,
+	// making even an adjacent move O(total_children) rather than O(1).
+	// Node pointers are trivially relocatable, and the array length and
+	// storage stay unchanged throughout this operation.
+	Node **const children = data.children_cache.ptr();
+	if (child_index < p_index) {
+		std::memmove(children + child_index, children + child_index + 1, (p_index - child_index) * sizeof(Node *));
+	} else {
+		std::memmove(children + p_index + 1, children + p_index, (child_index - p_index) * sizeof(Node *));
+	}
+	children[p_index] = p_child;
 
 	if (data.tree) {
 		data.tree->tree_changed();
