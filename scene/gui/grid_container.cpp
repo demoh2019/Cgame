@@ -31,6 +31,7 @@
 #include "grid_container.h"
 
 #include "core/object/class_db.h"
+#include "core/templates/local_vector.h"
 #include "core/templates/rb_map.h"
 #include "core/templates/rb_set.h"
 #include "scene/theme/theme_db.h"
@@ -415,56 +416,50 @@ void GridContainer::_bind_methods() {
 }
 
 Size2 GridContainer::_get_minimum_size(bool p_use_desired_sizes) const {
-	RBMap<int, int> col_minw;
-	RBMap<int, int> row_minh;
+	// Column and row indices are dense in [0, count). Avoid per-entry
+	// RBMap allocations and logarithmic lookups during UI minimum-size
+	// propagation, which can run repeatedly while building large scenes.
+	const int child_count = get_child_count();
+	LocalVector<int> col_minw;
+	LocalVector<int> row_minh;
+	col_minw.resize_initialized(MIN(columns, child_count));
+	row_minh.resize_initialized(child_count == 0 ? 0 : (child_count - 1) / columns + 1);
 
 	int max_row = 0;
 	int max_col = 0;
-
 	int valid_controls_index = 0;
-	for (int i = 0; i < get_child_count(); i++) {
+	for (int i = 0; i < child_count; i++) {
 		Control *c = as_sortable_control(get_child(i), SortableVisibilityMode::VISIBLE);
 		if (!c) {
 			continue;
 		}
-		int row = valid_controls_index / columns;
-		int col = valid_controls_index % columns;
+		const int row = valid_controls_index / columns;
+		const int col = valid_controls_index % columns;
 		valid_controls_index++;
 
-		Size2 min_size = p_use_desired_sizes ? c->get_bound_desired_size() : c->get_bound_minimum_size();
-		Size2 max_size = c->get_custom_maximum_size();
+		const Size2 min_size = p_use_desired_sizes ? c->get_bound_desired_size() : c->get_bound_minimum_size();
+		const Size2 max_size = c->get_custom_maximum_size();
+		const real_t col_width = (c->get_h_size_flags().has_flag(SIZE_MAXIMIZE) && max_size.width >= 0) ? max_size.width : min_size.width;
+		const real_t row_height = (c->get_v_size_flags().has_flag(SIZE_MAXIMIZE) && max_size.height >= 0) ? max_size.height : min_size.height;
 
-		real_t col_width = (c->get_h_size_flags().has_flag(SIZE_MAXIMIZE) && max_size.width >= 0) ? max_size.width : min_size.width;
-		real_t row_height = (c->get_v_size_flags().has_flag(SIZE_MAXIMIZE) && max_size.height >= 0) ? max_size.height : min_size.height;
-
-		if (col_minw.has(col)) {
-			col_minw[col] = MAX(col_minw[col], col_width);
-		} else {
-			col_minw[col] = col_width;
-		}
-
-		if (row_minh.has(row)) {
-			row_minh[row] = MAX(row_minh[row], row_height);
-		} else {
-			row_minh[row] = row_height;
-		}
+		// Preserve the old RBMap<int, int> conversion to integer pixels.
+		col_minw[col] = MAX(col_minw[col], int(col_width));
+		row_minh[row] = MAX(row_minh[row], int(row_height));
 		max_col = MAX(col, max_col);
 		max_row = MAX(row, max_row);
 	}
 
 	Size2 ms;
-
-	for (const KeyValue<int, int> &E : col_minw) {
-		ms.width += E.value;
+	const int used_columns = MIN(valid_controls_index, columns);
+	const int used_rows = valid_controls_index == 0 ? 0 : (valid_controls_index - 1) / columns + 1;
+	for (int col = 0; col < used_columns; col++) {
+		ms.width += col_minw[col];
 	}
-
-	for (const KeyValue<int, int> &E : row_minh) {
-		ms.height += E.value;
+	for (int row = 0; row < used_rows; row++) {
+		ms.height += row_minh[row];
 	}
-
 	ms.height += theme_cache.v_separation * max_row;
 	ms.width += theme_cache.h_separation * max_col;
-
 	return ms;
 }
 
