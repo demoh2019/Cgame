@@ -37,6 +37,8 @@ func run(t) -> void:
 		"infinite direction is rejected")
 	t.eq(server.cmd_dodge(91, 0.0, 0.0).get("reason", ""), "no_direction",
 		"zero direction is rejected")
+	t.eq(server.cmd_dodge(91, 1e300, 0.0).get("reason", ""), "no_direction",
+		"finite vector with overflowing magnitude is rejected")
 	t.near(player.survival.stamina, Defs.MAX_STAMINA, 0.001,
 		"invalid directions cannot spend stamina")
 	t.near(player.dodge_timer, 0.0, 0.001, "invalid input cannot set cooldown")
