@@ -117,7 +117,7 @@ func character_data(player: Player) -> Dictionary:
 	return {
 		"version": 1,
 		"health": player.survival.health, "hunger": player.survival.hunger, "thirst": player.survival.thirst,
-		"stamina": player.survival.stamina,
+		"stamina": player.survival.stamina, "infection": player.survival.infection,
 		"alive": alive, "kills": player.kills, "deaths": player.deaths,
 		"x": player.position.x, "z": player.position.z,
 		"inventory": player.inventory.to_dict(),
@@ -154,6 +154,8 @@ func apply_character(player: Player, data: Dictionary) -> bool:
 		return false
 	if not SaveValidation.finite_number(data.get("stamina", Defs.MAX_STAMINA), 0.0, Defs.MAX_STAMINA):
 		return false
+	if not SaveValidation.finite_number(data.get("infection", 0.0), 0.0, Defs.INFECTION_MAX):
+		return false
 	if not SaveValidation.valid_counter(data.get("kills", 0)):
 		return false
 	if not SaveValidation.valid_counter(data.get("deaths", 0)):
@@ -167,6 +169,8 @@ func apply_character(player: Player, data: Dictionary) -> bool:
 	survival.thirst = float(data.get("thirst", 80.0))
 	# Legacy v1 characters without stamina are restored fully rested.
 	survival.stamina = float(data.get("stamina", Defs.MAX_STAMINA))
+	# Older version-1 saves without infection remain compatible.
+	survival.infection = float(data.get("infection", 0.0))
 	var x: Variant = data.get("x", 0.0)
 	var z: Variant = data.get("z", 0.0)
 	# Invalid old logout coordinates can still safely fall back to the hub.
@@ -567,13 +571,20 @@ func cmd_use(peer_id: int, item_id: String) -> Dictionary:
 			player.inventory.remove(item_id, 1)
 			player.survival.drink(float(data["drink"]))
 		"medical":
+			var healing: float = float(data.get("heal", 0.0))
+			var curing: float = float(data.get("cure", 0.0))
+			if (healing <= 0.0 or player.survival.health >= Defs.MAX_HEALTH) and (
+					curing <= 0.0 or player.survival.infection <= 0.0):
+				return {"ok": false, "reason": "no_effect"}
 			player.inventory.remove(item_id, 1)
-			player.survival.heal(float(data["heal"]))
+			player.survival.heal(healing)
+			player.survival.treat_infection(curing)
 		"weapon", "armor":
 			player.inventory.equip(item_id)
 		_:
 			return {"ok": false, "reason": "not_usable"}
 	player.dirty_inventory = true
+	player.dirty_character = true
 	return {"ok": true}
 
 
@@ -877,6 +888,8 @@ func _tick_players(delta: float) -> void:
 			continue
 		player.combat_energy = minf(Defs.COMBAT_ENERGY_MAX, player.combat_energy + Defs.COMBAT_ENERGY_REGEN * delta)
 		var damage: float = player.survival.tick(delta)
+		if player.survival.infection > 0.0:
+			player.dirty_character = true
 		if damage > 0.0 and not _alive(player):
 			_on_player_death(player, -1)
 			continue
@@ -939,6 +952,10 @@ func _tick_zombies(delta: float) -> void:
 			if victim != null and _alive(victim):
 				var damage: float = Combat.apply_armor(float(result["damage"]), victim.inventory.armor)
 				victim.survival.hurt(damage)
+				if victim.survival.add_infection(float(Defs.ZOMBIE_INFECTION_PER_HIT.get(zombie.type, 0.0))):
+					victim.dirty_character = true
+					events.append({"type": "infection", "peer": victim.id,
+						"severity": victim.survival.infection, "source": zombie.type})
 				events.append({"type": "hit", "kind": "player", "id": victim.id, "damage": damage, "by": -zombie.id})
 				if not _alive(victim):
 					_on_player_death(victim, -zombie.id)
@@ -1085,6 +1102,7 @@ func snapshot_for(peer_id: int) -> Dictionary:
 			"stamina": player.survival.stamina,
 			"alive": _alive(player), "kills": player.kills, "deaths": player.deaths, "zone": player.zone_notice,
 			"action": player.action.duplicate(),
+			"infection": player.survival.infection,
 			"combat_energy": player.combat_energy, "skill_cooldown": player.skill_timer,
 			"weapon": player.inventory.weapon, "armor": player.inventory.armor,
 			"last_death_full_loot": player.last_death_full_loot,
