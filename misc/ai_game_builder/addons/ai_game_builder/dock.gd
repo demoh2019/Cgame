@@ -190,6 +190,8 @@ func _request_plan(prompt: String, is_repair: bool) -> void:
 	if not is_repair:
 		_pending_plan.clear()
 		_last_errors.clear()
+		_approved_paths.clear()
+		_check_button.disabled = true
 		_preview.text = ""
 	_apply_button.disabled = true
 	_refine_button.disabled = true
@@ -246,6 +248,7 @@ func _set_busy(value: bool) -> void:
 	_busy = value
 	_generate_button.disabled = value or _checking
 	_cancel_button.disabled = not value and not _checking
+	_check_button.disabled = value or _checking or _approved_paths.is_empty()
 	_repair_button.disabled = value or _checking or _last_errors.is_empty()
 	_refine_button.disabled = value or _checking or _pending_plan.is_empty()
 	_refinement.editable = not value
