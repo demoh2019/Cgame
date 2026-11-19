@@ -162,6 +162,60 @@ time; use the same machine/configuration with an older commit to quantify
 the effects. These source-contract checks are not a compilation test,
 and runtime stress tests must still be executed on a built engine.
 
+## Closed soft-body XPBD volume preservation (3D)
+
+Cgame GodotPhysics3D now supports an opt-in global **enclosed-volume
+constraint** for consistently oriented, closed soft-body surface meshes.
+This complements the existing XPBD distance and triangle area constraints.
+It is inspired by XPBD volumetric constraints in PositionBasedDynamics,
+but uses the oriented surface's signed tetrahedral volume rather than
+requiring an explicit tetrahedral volume mesh. This is a global
+compressibility constraint, **not** full volumetric FEM.
+
+```ini
+[physics]
+3d/solver/soft_body_xpbd_volume_compliance=0.00000001
+```
+
+The default `0` leaves legacy soft-body simulation unchanged and allocates
+no volume-gradient buffer. Lower positive values enforce volume more
+strongly. Each new GodotSpace3D caches the setting at creation.
+
+**Topology requirement:** each undirected mesh edge must occur exactly
+twice with opposite windings. Open cloth, malformed triangle winding,
+non-manifold edges, collapsed or near-zero signed-volume meshes safely
+skip this constraint rather than receiving artificial internal pressure.
+Mesh validation and rest-volume capture happen on mesh/space initialization
+or transform reinitialization, **not during every physics step**. The
+rest state is a signed volume relative to one mesh vertex, invariant
+under translation and compatible with either overall winding.
+
+During `GodotSoftBody3D::solve_constraints()`, the constraint accumulates
+per-vertex gradients from oriented faces, then applies a single XPBD
+Lagrange-multiplier update each iteration:
+`delta_lambda = -(current_volume - rest_volume + alpha * lambda) /
+(sum_i inverse_mass_i * |gradient_i|² + alpha)`, with
+`alpha = compliance / step²`. The one lambda resets each step, while
+gradients share an allocation reused across iterations. Zero-inverse-mass
+pinned nodes remain fixed; all proposed position updates are checked
+for finiteness before any node is changed.
+
+```bash
+python3 -m unittest discover -s tests/stress -p 'test_physics_xpbd_volume.py' -v
+python3 tests/stress/run.py --godot ./bin/godot.macos.editor.arm64 \
+  --case physics_soft_body_xpbd_volume_3d --scale 4 --repeats 5 \
+  --frames 90 --rss-limit-mib 6144 \
+  --output out/physics-xpbd-volume.json
+```
+
+The runtime test simulates multiple closed tetrahedral surface meshes.
+Three base vertices are pinned and the fourth vertex is displaced to
+reduce enclosed volume. The enabled case must recover volume; the
+disabled and **open-mesh** cases must not generate fake restoring
+forces. Numeric source-level tests separately check orientation,
+gradient finite differences and XPBD pin behavior. Runtime and memory
+performance still require a compiled engine and matching benchmark builds.
+
 ## XPBD triangle-area constraints for cloth (3D)
 
 Cgame GodotPhysics3D now supports optional **triangle surface-area preservation**
