@@ -15,7 +15,7 @@ const CASES := [
 	"scene_tree", "packed_scene", "images", "json", "stream", "stream_bulk",
 	"file_io", "threads", "physics_2d", "physics_3d", "physics_sparse_2d", "physics_sparse_3d",
 	"object_churn", "memory_churn", "astar_grid", "astar_grid_neighbors", "astar_grid_rebuild", "astar_relax_2d", "astar_relax_3d", "astar_graph", "tweens", "audio_buffers",
-	"variant_codec", "packet_stream", "packet_tx_batch", "packet_rx_batch", "packet_variant_reuse", "ui_layout", "grid_reflow", "box_reflow", "render_2d", "render_3d", "render_ellipse_2d",
+	"variant_codec", "packet_stream", "packet_tx_batch", "packet_rx_batch", "packet_variant_reuse", "ui_layout", "grid_reflow", "box_reflow", "render_2d", "render_3d", "render_ellipse_2d", "render_light_culling_3d",
 	"resource_load",
 	"input_map",
 	"transform_hierarchy",
@@ -262,6 +262,8 @@ func _run_case(test_case: String, scale: int, frames: int, seed: int) -> Diction
 			return _render_ellipse_2d(scale)
 		"render_3d":
 			return await _render_3d(scale, frames)
+		"render_light_culling_3d":
+			return await _render_light_culling_3d(scale, frames)
 		"resource_load":
 			return _resource_load(scale)
 		"input_map":
@@ -750,6 +752,59 @@ func _render_2d(scale: int, frames: int) -> Dictionary:
 	await process_frame
 	var frame_statistics := _frame_statistics(frame_intervals)
 	return {"sprites": 600 * scale, "frames": frames, "peak_frame_ms": peak_frame_ms, "peak_draw_calls": peak_draw_calls, "peak_video_memory_bytes": peak_video_memory, "frame_interval_ms": frame_statistics, "frame_p95_ms": frame_statistics["p95"]}
+
+
+func _render_light_culling_3d(scale: int, frames: int) -> Dictionary:
+	# Move overlapping omni lights every frame to repeatedly exercise the
+	# light-to-mesh ranking path, instead of only measuring initial setup.
+	var world := Node3D.new()
+	root.add_child(world)
+
+	var camera := Camera3D.new()
+	camera.position = Vector3(0.0, 35.0, 55.0)
+	world.add_child(camera)
+	camera.look_at(Vector3.ZERO)
+	camera.current = true
+
+	var mesh := BoxMesh.new()
+	var mesh_count := 24 * scale
+	for i in range(mesh_count):
+		var instance := MeshInstance3D.new()
+		instance.mesh = mesh
+		instance.position = Vector3(float(i % 24) * 2.0 - 23.0, 0.0, float(i / 24) * 2.0 - 7.0)
+		world.add_child(instance)
+
+	var lights: Array[OmniLight3D] = []
+	var light_count := 12 * scale
+	for i in range(light_count):
+		var light := OmniLight3D.new()
+		light.position = Vector3(float(i % 12) * 3.0 - 16.5, 4.0, float(i / 12) * 3.0 - 7.5)
+		light.omni_range = 35.0
+		light.light_energy = 1.0 + float(i % 5) * 0.25
+		world.add_child(light)
+		lights.append(light)
+
+	var frame_intervals: Array[float] = []
+	var peak_frame_ms := 0.0
+	var peak_draw_calls := 0
+	var last_tick := Time.get_ticks_usec()
+	for frame in range(frames):
+		# Toggle movement so lights remain inside the same influence region.
+		# This deliberately marks their mesh-light associations dirty.
+		var movement := 0.03 if (frame & 1) == 0 else -0.03
+		for light in lights:
+			light.position.x += movement
+		await process_frame
+		var now := Time.get_ticks_usec()
+		frame_intervals.append(float(now - last_tick) / 1000.0)
+		last_tick = now
+		peak_frame_ms = maxf(peak_frame_ms, Performance.get_monitor(Performance.TIME_PROCESS) * 1000.0)
+		peak_draw_calls = maxi(peak_draw_calls, int(Performance.get_monitor(Performance.RENDER_TOTAL_DRAW_CALLS_IN_FRAME)))
+
+	world.queue_free()
+	await process_frame
+	var stats := _frame_statistics(frame_intervals)
+	return {"meshes": mesh_count, "lights": light_count, "frames": frames, "peak_frame_ms": peak_frame_ms, "peak_draw_calls": peak_draw_calls, "frame_interval_ms": stats, "frame_p95_ms": stats["p95"]}
 
 
 func _render_3d(scale: int, frames: int) -> Dictionary:
