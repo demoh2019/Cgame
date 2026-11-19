@@ -87,6 +87,17 @@ class GodotSoftBody3D : public GodotCollisionObject3D {
 	LocalVector<real_t> xpbd_link_lambdas;
 	// One compliance multiplier per triangle, allocated only in area-XPBD mode.
 	LocalVector<real_t> xpbd_area_lambdas;
+	// Hinge particles are indexed, not stored as Node pointers: rebuilding
+	// the mesh cannot leave a stale pointer in the optional topology cache.
+	struct DihedralHinge {
+		uint32_t a = 0;
+		uint32_t b = 0;
+		uint32_t c = 0;
+		uint32_t d = 0;
+		real_t rest_angle = 0.0;
+	};
+	LocalVector<DihedralHinge> xpbd_dihedral_hinges;
+	LocalVector<real_t> xpbd_dihedral_lambdas;
 	// Allocated only for positive volume compliance on a closed soft mesh.
 	LocalVector<Vector3> xpbd_volume_gradients;
 	double xpbd_volume_rest = 0.0;
@@ -246,6 +257,7 @@ private:
 	void update_bounds();
 	void update_constants();
 	void update_area();
+	void initialize_dihedral_constraints();
 	void initialize_volume_constraint();
 	bool solve_volume_constraint(double p_alpha, double &r_lambda);
 	void reset_link_rest_lengths();
