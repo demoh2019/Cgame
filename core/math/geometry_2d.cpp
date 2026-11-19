@@ -104,15 +104,19 @@ Vector<Vector<Vector2>> Geometry2D::decompose_many_polygons_in_convex(const Vect
 		return decomp;
 	}
 
-	decomp.resize(out_poly.size());
+	ERR_FAIL_COND_V(decomp.resize(out_poly.size()) != OK, Vector<Vector<Vector2>>());
+	Vector<Vector2> *const output_polygons = decomp.ptrw();
 	int idx = 0;
 	for (TPPLPoly &tp : out_poly) {
-		decomp.write[idx].resize(tp.GetNumPoints());
-
-		for (int64_t i = 0; i < tp.GetNumPoints(); i++) {
-			decomp.write[idx].write[i] = tp.GetPoint(i);
+		const int point_count = tp.GetNumPoints();
+		Vector<Vector2> &polygon = output_polygons[idx];
+		ERR_FAIL_COND_V(polygon.resize(point_count) != OK, Vector<Vector<Vector2>>());
+		Vector2 *const points = polygon.ptrw();
+		// Resolve both writable COW levels once, rather than on every
+		// vertex of potentially large convex decomposition results.
+		for (int i = 0; i < point_count; i++) {
+			points[i] = tp.GetPoint(i);
 		}
-
 		idx++;
 	}
 
