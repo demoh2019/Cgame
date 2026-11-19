@@ -42,9 +42,11 @@
 //
 // Bilinear kinematic-free isotropic hardening uses a scalar equivalent
 // accumulated plastic strain, integrated once on predicted coordinates:
-// delta_p = clamp( (eq - yield - hardening*p) * fraction /
-//                  (1 + hardening*fraction), 0, eq, max_p-p).
-// fraction=1-exp(-rate*dt). This is a rate-limited approximation to a J2
+// delta_p = clamp( (eq - yield - hardening*p) * fraction,
+//                  0, eq, max_p-p).
+// fraction=(1-exp(-rate*dt*(1+hardening)))/(1+hardening).
+// This exactly integrates the equivalent-strain relaxation at a fixed
+// predicted deformation and fixed principal directions. This is a rate-limited approximation to a J2
 // radial return in LOG STRAIN space, not a calibrated finite-strain J2
 // stress return, fracture, plastic spin, or mesh remeshing.
 //
@@ -174,8 +176,7 @@ _FORCE_INLINE_ static bool physics_fem_tetra_creep_deviatoric_rest(
 			!Math::is_finite(threshold)) {
 		return false;
 	}
-	double plastic_step = (equivalent - threshold) * p_fraction /
-			(1.0 + p_hardening * p_fraction);
+	double plastic_step = (equivalent - threshold) * p_fraction;
 	plastic_step = MIN(plastic_step, MIN(equivalent, p_max_accumulated - r_accumulated));
 	if (!(plastic_step > 1.0e-12) || !Math::is_finite(plastic_step)) {
 		return false;
