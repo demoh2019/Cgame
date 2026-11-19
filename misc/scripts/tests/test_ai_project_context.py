@@ -183,6 +183,62 @@ class ProjectContextTests(unittest.TestCase):
         self.assertEqual(len(result["files"]), 90)
         self.assertLess(total_serialized_bytes, 100000)
 
+    def test_large_scene_only_scans_first_64_node_matches(self):
+        from unittest.mock import patch
+
+        class CountedPattern:
+            def __init__(self, regex):
+                self.regex = regex
+                self.visited = 0
+
+            def finditer(self, text):
+                for match in self.regex.finditer(text):
+                    self.visited += 1
+                    if self.visited > 64:
+                        raise AssertionError("Scanned nodes beyond the 64-node context budget")
+                    yield match
+
+        pattern = CountedPattern(ctx.NODE)
+        content = "[gd_scene format=3]\\n" + "".join(
+            f'[node name="N{i}" type="Node2D"]\\n' for i in range(10000)
+        )
+        with patch.object(ctx, "NODE", pattern):
+            result = ctx._outline("large.tscn", content)
+        self.assertEqual(len(result["nodes"]), 64)
+        self.assertEqual(result["nodes"][0]["name"], "N0")
+        self.assertEqual(result["nodes"][-1]["name"], "N63")
+        self.assertEqual(pattern.visited, 64)
+
+    def test_large_script_only_scans_first_64_distinct_functions(self):
+        from unittest.mock import patch
+
+        class CountedPattern:
+            def __init__(self, regex):
+                self.regex = regex
+                self.visited = 0
+
+            def finditer(self, text):
+                for match in self.regex.finditer(text):
+                    self.visited += 1
+                    if self.visited > 64:
+                        raise AssertionError("Scanned functions beyond the 64-signature budget")
+                    yield match
+
+        pattern = CountedPattern(ctx.FUNCTION)
+        content = "".join(f"func f{i}(): pass\\n" for i in range(10000))
+        with patch.object(ctx, "FUNCTION", pattern):
+            result = ctx._outline("large.gd", content)
+        self.assertEqual(result["functions"], [f"f{i}" for i in range(64)])
+        self.assertEqual(pattern.visited, 64)
+
+    def test_script_duplicate_function_names_keep_first_occurrence_order(self):
+        content = ("func repeated(): pass\\n" * 100
+                   + "".join(f"func unique_{i}(): pass\\n" for i in range(100)))
+        result = ctx._outline("duplicate.gd", content)
+        self.assertEqual(result["functions"],
+                         ["repeated"] + [f"unique_{i}" for i in range(63)])
+        self.assertEqual(len(result["functions"]), 64)
+
     def test_references_deduplicated_and_sorted(self):
         self.write("main.tscn", '\n'.join(f'[ext_resource type="Script" path="res://{x}" id="1"]' for x in ["b.gd", "a.gd", "b.gd"]))
         self.assertEqual(ctx.build_context(self.root)["files"][0]["references"], ["res://a.gd", "res://b.gd"])
