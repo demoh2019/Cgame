@@ -55,7 +55,7 @@ class GodotBodyPair2D : public GodotConstraint2D {
 	GodotSpace2D *space = nullptr;
 
 	struct Contact {
-		Vector2 position;
+		// Contact points are stored as local anchors; no unused world position.
 		Vector2 normal;
 		Vector2 local_A, local_B;
 		Vector2 acc_impulse; // accumulated impulse

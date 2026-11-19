@@ -44,7 +44,7 @@ void GodotBodyPair3D::_contact_added_callback(const Vector3 &p_point_A, int p_in
 	pair->contact_added_callback(p_point_A, p_index_A, p_point_B, p_index_B, normal);
 }
 
-void GodotBodyPair3D::contact_added_callback(const Vector3 &p_point_A, int p_index_A, const Vector3 &p_point_B, int p_index_B, const Vector3 &normal) {
+void GodotBodyPair3D::contact_added_callback(const Vector3 &p_point_A, int, const Vector3 &p_point_B, int p_index_B, const Vector3 &normal) {
 	Vector3 local_A = A->get_inv_transform().basis.xform(p_point_A);
 	Vector3 local_B = B->get_inv_transform().basis.xform(p_point_B - offset_B);
 
@@ -53,7 +53,7 @@ void GodotBodyPair3D::contact_added_callback(const Vector3 &p_point_A, int p_ind
 	ERR_FAIL_COND(new_index >= (MAX_CONTACTS + 1));
 
 	Contact contact;
-	contact.index_A = p_index_A;
+
 	contact.index_B = p_index_B;
 	contact.local_A = local_A;
 	contact.local_B = local_B;
@@ -664,12 +664,12 @@ void GodotBodySoftBodyPair3D::_contact_added_callback(const Vector3 &p_point_A, 
 	pair->contact_added_callback(p_point_A, p_index_A, p_point_B, p_index_B, normal);
 }
 
-void GodotBodySoftBodyPair3D::contact_added_callback(const Vector3 &p_point_A, int p_index_A, const Vector3 &p_point_B, int p_index_B, const Vector3 &normal) {
+void GodotBodySoftBodyPair3D::contact_added_callback(const Vector3 &p_point_A, int, const Vector3 &p_point_B, int p_index_B, const Vector3 &normal) {
 	Vector3 local_A = body->get_inv_transform().xform(p_point_A);
 	Vector3 local_B = p_point_B - soft_body->get_node_position(p_index_B);
 
 	Contact contact;
-	contact.index_A = p_index_A;
+
 	contact.index_B = p_index_B;
 	contact.local_A = local_A;
 	contact.local_B = local_B;
