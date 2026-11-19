@@ -38,6 +38,8 @@
 #include "core/variant/container_type_validate.h"
 #include "core/variant/variant_internal.h"
 
+#include <optional>
+
 const char *JSON::tk_name[TK_MAX] = {
 	"'{'",
 	"'}'",
@@ -128,13 +130,15 @@ void JSON::_stringify(StringBuilder &r_result, const Variant &p_var, const Strin
 		case Variant::ARRAY: {
 			// Borrow native Array storage from the Variant without a temporary
 			// reference count increment. Packed arrays still require conversion.
-			Array converted;
+			std::optional<Array> converted;
 			const Array *a = nullptr;
 			if (p_var.get_type() == Variant::ARRAY) {
 				a = VariantInternal::get_array(&p_var);
 			} else {
-				converted = Array(p_var);
-				a = &converted;
+				// Do not default-construct an Array for the native Array
+				// branch: its constructor allocates an ArrayPrivate.
+				converted.emplace(static_cast<Array>(p_var));
+				a = &*converted;
 			}
 			if (p_markers.has(a->id())) {
 				r_result += "\"[...]\"";
