@@ -15,7 +15,7 @@ const CanvasScenePerf := preload("res://canvas_scene_perf.gd")
 const CASES := [
 	"containers", "array_literals", "dictionary_snapshot", "strings", "script_vm", "math", "signals",
 	"scene_tree", "packed_scene", "images", "json", "stream", "stream_bulk",
-	"file_io", "threads", "physics_2d", "physics_3d", "physics_joint_chain_2d", "physics_joint_chain_3d", "physics_sparse_2d", "physics_sparse_3d",
+	"file_io", "threads", "physics_2d", "physics_3d", "physics_joint_chain_2d", "physics_joint_chain_3d", "physics_sparse_2d", "physics_sparse_3d", "physics_rid_sparse_2d", "physics_rid_sparse_3d",
 	"object_churn", "memory_churn", "astar_grid", "astar_grid_neighbors", "astar_grid_jps", "astar_grid_fill", "astar_grid_rebuild", "astar_relax_2d", "astar_relax_3d", "astar_graph", "tweens", "audio_buffers",
 	"variant_codec", "packet_stream", "packet_tx_batch", "packet_rx_batch", "packet_variant_reuse", "ui_layout", "grid_reflow", "box_reflow", "flow_reflow", "render_2d", "render_3d", "render_ellipse_2d", "render_light_culling_3d",
 	"resource_load",
@@ -267,6 +267,10 @@ func _run_case(test_case: String, scale: int, frames: int, seed: int) -> Diction
 			return await _physics_sparse_2d(scale, frames)
 		"physics_sparse_3d":
 			return await _physics_sparse_3d(scale, frames)
+		"physics_rid_sparse_2d":
+			return await _physics_rid_sparse_2d(scale, frames)
+		"physics_rid_sparse_3d":
+			return await _physics_rid_sparse_3d(scale, frames)
 		"memory_churn":
 			return await _memory_churn(scale)
 		"render_2d":
@@ -629,6 +633,107 @@ func _physics_3d(scale: int, frames: int) -> Dictionary:
 	await process_frame
 	var frame_statistics := _frame_statistics(frame_intervals)
 	return {"bodies": length, "physics_frames": frames, "peak_physics_ms": peak_physics_ms, "peak_collision_pairs": peak_pairs, "frame_interval_ms": frame_statistics, "frame_p95_ms": frame_statistics["p95"]}
+
+
+
+# Low-level sparse physics stress, without SceneTree/Node overhead.
+# Each body has a real broadphase shape, zero gravity and disabled sleeping.
+# At scale=977 there are 1,000,448 rigid bodies per workload.
+func _physics_rid_sparse_2d(scale: int, frames: int) -> Dictionary:
+	var space := PhysicsServer2D.space_create()
+	PhysicsServer2D.space_set_active(space, true)
+	var circle := PhysicsServer2D.circle_shape_create()
+	PhysicsServer2D.shape_set_data(circle, 0.5)
+	var count := 1024 * scale
+	var bodies: Array[RID] = []
+	bodies.resize(count)
+	var creation_started := Time.get_ticks_usec()
+	for i in range(count):
+		var body := PhysicsServer2D.body_create()
+		PhysicsServer2D.body_add_shape(body, circle)
+		PhysicsServer2D.body_set_state(body, PhysicsServer2D.BODY_STATE_TRANSFORM,
+				Transform2D(0.0, Vector2(float(i % 1024) * 4.0, float(int(i / 1024)) * 4.0)))
+		PhysicsServer2D.body_set_param(body, PhysicsServer2D.BODY_PARAM_GRAVITY_SCALE, 0.0)
+		PhysicsServer2D.body_set_state(body, PhysicsServer2D.BODY_STATE_CAN_SLEEP, false)
+		PhysicsServer2D.body_set_space(body, space)
+		bodies[i] = body
+	var creation_ms := float(Time.get_ticks_usec() - creation_started) / 1000.0
+
+	var peak_physics_ms := 0.0
+	var peak_pairs := 0
+	var frame_intervals: Array[float] = []
+	var last_tick := Time.get_ticks_usec()
+	for i in range(frames):
+		await physics_frame
+		var now := Time.get_ticks_usec()
+		frame_intervals.append(float(now - last_tick) / 1000.0)
+		last_tick = now
+		peak_physics_ms = maxf(peak_physics_ms, Performance.get_monitor(Performance.TIME_PHYSICS_PROCESS) * 1000.0)
+		peak_pairs = maxi(peak_pairs, int(Performance.get_monitor(Performance.PHYSICS_2D_COLLISION_PAIRS)))
+
+	var cleanup_started := Time.get_ticks_usec()
+	PhysicsServer2D.space_set_active(space, false)
+	for body in bodies:
+		PhysicsServer2D.free_rid(body)
+	bodies.clear()
+	PhysicsServer2D.free_rid(circle)
+	PhysicsServer2D.free_rid(space)
+	var cleanup_ms := float(Time.get_ticks_usec() - cleanup_started) / 1000.0
+	if peak_pairs != 0:
+		return {"error": "Sparse 2D RID bodies unexpectedly collided", "pairs": peak_pairs}
+	var frame_statistics := _frame_statistics(frame_intervals)
+	return {"bodies": count, "physics_frames": frames, "creation_ms": creation_ms, "cleanup_ms": cleanup_ms,
+			"peak_physics_ms": peak_physics_ms, "peak_collision_pairs": peak_pairs,
+			"frame_interval_ms": frame_statistics, "frame_p95_ms": frame_statistics["p95"]}
+
+
+func _physics_rid_sparse_3d(scale: int, frames: int) -> Dictionary:
+	var space := PhysicsServer3D.space_create()
+	PhysicsServer3D.space_set_active(space, true)
+	var sphere := PhysicsServer3D.sphere_shape_create()
+	PhysicsServer3D.shape_set_data(sphere, 0.5)
+	var count := 1024 * scale
+	var bodies: Array[RID] = []
+	bodies.resize(count)
+	var creation_started := Time.get_ticks_usec()
+	for i in range(count):
+		var body := PhysicsServer3D.body_create()
+		PhysicsServer3D.body_add_shape(body, sphere)
+		PhysicsServer3D.body_set_state(body, PhysicsServer3D.BODY_STATE_TRANSFORM,
+				Transform3D(Basis(), Vector3(float(i % 128) * 4.0, float(int(i / 128) % 128) * 4.0, float(int(i / 16384)) * 4.0)))
+		PhysicsServer3D.body_set_param(body, PhysicsServer3D.BODY_PARAM_GRAVITY_SCALE, 0.0)
+		PhysicsServer3D.body_set_state(body, PhysicsServer3D.BODY_STATE_CAN_SLEEP, false)
+		PhysicsServer3D.body_set_space(body, space)
+		bodies[i] = body
+	var creation_ms := float(Time.get_ticks_usec() - creation_started) / 1000.0
+
+	var peak_physics_ms := 0.0
+	var peak_pairs := 0
+	var frame_intervals: Array[float] = []
+	var last_tick := Time.get_ticks_usec()
+	for i in range(frames):
+		await physics_frame
+		var now := Time.get_ticks_usec()
+		frame_intervals.append(float(now - last_tick) / 1000.0)
+		last_tick = now
+		peak_physics_ms = maxf(peak_physics_ms, Performance.get_monitor(Performance.TIME_PHYSICS_PROCESS) * 1000.0)
+		peak_pairs = maxi(peak_pairs, int(Performance.get_monitor(Performance.PHYSICS_3D_COLLISION_PAIRS)))
+
+	var cleanup_started := Time.get_ticks_usec()
+	PhysicsServer3D.space_set_active(space, false)
+	for body in bodies:
+		PhysicsServer3D.free_rid(body)
+	bodies.clear()
+	PhysicsServer3D.free_rid(sphere)
+	PhysicsServer3D.free_rid(space)
+	var cleanup_ms := float(Time.get_ticks_usec() - cleanup_started) / 1000.0
+	if peak_pairs != 0:
+		return {"error": "Sparse 3D RID bodies unexpectedly collided", "pairs": peak_pairs}
+	var frame_statistics := _frame_statistics(frame_intervals)
+	return {"bodies": count, "physics_frames": frames, "creation_ms": creation_ms, "cleanup_ms": cleanup_ms,
+			"peak_physics_ms": peak_physics_ms, "peak_collision_pairs": peak_pairs,
+			"frame_interval_ms": frame_statistics, "frame_p95_ms": frame_statistics["p95"]}
+
 
 
 func _physics_sparse_2d(scale: int, frames: int) -> Dictionary:
