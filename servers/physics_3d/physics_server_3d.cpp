@@ -644,6 +644,9 @@ PhysicsServer3D::PhysicsServer3D() {
 	// Experimental volumetric Neo-Hookean FEM for a single closed tetrahedron.
 	GLOBAL_DEF(PropertyInfo(Variant::FLOAT, "physics/3d/solver/soft_body_tetra_fem_compliance", PROPERTY_HINT_RANGE, "0,0.01,0.000001,or_greater"), 0.0);
 	GLOBAL_DEF(PropertyInfo(Variant::FLOAT, "physics/3d/solver/soft_body_tetra_fem_poisson_ratio", PROPERTY_HINT_RANGE, "0,0.49,0.01"), 0.3);
+	// Objective Kelvin-Voigt strain-rate stress for each tetrahedral FEM element.
+	// Independent from the global breathing-mode viscosity, off by default.
+	GLOBAL_DEF(PropertyInfo(Variant::FLOAT, "physics/3d/solver/soft_body_tetra_fem_viscosity", PROPERTY_HINT_RANGE, "0,1000,0.1,or_greater"), 0.0);
 	// Intrinsic membrane viscoelastic damping of normal and shear strain rates.
 	// Zero disables the extra face pass, all other projects remain unchanged.
 	GLOBAL_DEF(PropertyInfo(Variant::FLOAT, "physics/3d/solver/soft_body_membrane_damping_rate", PROPERTY_HINT_RANGE, "0,1000,0.1,or_greater,suffix:1/s"), 0.0);

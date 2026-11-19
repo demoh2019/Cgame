@@ -43,6 +43,7 @@
 #include "servers/physics_softbody_adiabatic_gas.h"
 #include "servers/physics_softbody_shape_matching.h"
 #include "servers/physics_fem_tetra_neo_hookean.h"
+#include "servers/physics_fem_tetra_viscosity.h"
 #include "servers/physics_softbody_shape_clusters.h"
 #include "servers/physics_softbody_aerodynamic_drag.h"
 #include "servers/physics_softbody_plasticity.h"
@@ -510,7 +511,8 @@ void GodotSoftBody3D::solve_shape_matching_clusters(real_t p_strength) {
 void GodotSoftBody3D::initialize_fem_tetra() {
 	xpbd_fem_tetrahedra.reset();
 	if (!get_space() ||
-			!(get_space()->get_soft_body_tetra_fem_compliance() > 0.0) ||
+			!(get_space()->get_soft_body_tetra_fem_compliance() > 0.0 ||
+					get_space()->get_soft_body_tetra_fem_viscosity() > 0.0) ||
 			!xpbd_volume_closed || nodes.size() < 4 || nodes.size() > 2048 ||
 			faces.size() < 4 || faces.size() > 4096) {
 		return;
@@ -596,6 +598,7 @@ void GodotSoftBody3D::initialize_volume_constraint() {
 			(get_space()->get_soft_body_xpbd_volume_compliance() <= 0.0 &&
 					get_space()->get_soft_body_gas_pressure_gamma() <= 0.0 &&
 					get_space()->get_soft_body_tetra_fem_compliance() <= 0.0 &&
+					get_space()->get_soft_body_tetra_fem_viscosity() <= 0.0 &&
 					get_space()->get_soft_body_volume_damping_rate() <= 0.0) ||
 			nodes.size() < 4 || faces.size() < 4) {
 		// Neither XPBD nor gas mode needs the volume for ordinary cloth.
@@ -2860,6 +2863,33 @@ void GodotSoftBody3D::solve_constraints(real_t p_delta) {
 	if (volume_damping_rate > real_t(0.0) && p_delta > real_t(0.0) && xpbd_volume_closed) {
 		const double fraction = 1.0 - Math::exp(-double(volume_damping_rate) * double(p_delta));
 		damp_volume_rate(fraction);
+	}
+
+	// Objective Kelvin-Voigt viscosity is intrinsic to each 3D FEM element.
+	// Unlike vertex damping, it leaves translation and rotation unchanged.
+	// Apply at velocity level before the position prediction; each local
+	// impulse is bounded to avoid increasing movable kinetic energy.
+	// Zero viscosity skips all extra O(tetrahedra) work.
+	const real_t tetra_viscosity = get_space()->get_soft_body_tetra_fem_viscosity();
+	if (tetra_viscosity > real_t(0.0) && p_delta > real_t(0.0) &&
+			!xpbd_fem_tetrahedra.is_empty()) {
+		const double tetra_poisson = double(get_space()->get_soft_body_tetra_fem_poisson_ratio());
+		for (const PhysicsFEMConvexTetra &tet : xpbd_fem_tetrahedra) {
+			Node &a = nodes[tet.a];
+			Node &b = nodes[tet.b];
+			Node &c = nodes[tet.c];
+			Node &d = nodes[tet.d];
+			const Vector3 positions[4] = { a.x, b.x, c.x, d.x };
+			Vector3 velocities[4] = { a.v, b.v, c.v, d.v };
+			const real_t inv_mass[4] = { a.im, b.im, c.im, d.im };
+			if (physics_fem_tetra_viscous_damp(positions, velocities, inv_mass,
+						tet.rest, tetra_poisson, double(tetra_viscosity), double(p_delta))) {
+				a.v = velocities[0];
+				b.v = velocities[1];
+				c.v = velocities[2];
+				d.v = velocities[3];
+			}
+		}
 	}
 
 	// The old c2/c3 link-gradient prepass was unused by solve_links().
