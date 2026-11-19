@@ -797,6 +797,7 @@ void GodotStep3D::step(GodotSpace3D *p_space, real_t p_delta) {
 	if (pair_thickness > real_t(0.0) && soft_body_list->first() != nullptr &&
 			soft_body_list->first()->next() != nullptr) {
 		const real_t pair_compliance = p_space->get_soft_body_pair_collision_compliance();
+		const real_t pair_friction = p_space->get_soft_body_pair_collision_friction();
 		const uint32_t max_contacts = uint32_t(p_space->get_soft_body_pair_max_contacts());
 		const uint32_t max_pairs = uint32_t(p_space->get_soft_body_pair_max_pairs());
 		const uint32_t max_pair_checks = 16384;
@@ -827,7 +828,7 @@ void GodotStep3D::step(GodotSpace3D *p_space, real_t p_delta) {
 				}
 				++candidate_pairs;
 				a->solve_pair_contacts(*b, p_delta, pair_thickness,
-						pair_compliance, max_contacts, max_contacts_per_vertex);
+						pair_compliance, pair_friction, max_contacts, max_contacts_per_vertex);
 			}
 			first = first->next();
 		}
