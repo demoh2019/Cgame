@@ -162,6 +162,12 @@ Ref<Resource> TranslationLoaderPO::load_translation(Ref<FileAccess> r_file, Erro
 		StringBuilder str_parts;
 		StringBuilder context_parts;
 		StringBuilder plural_parts;
+		// Most PO entries have only one or two fragments. Avoid constructing
+		// builder storage on that common path; switch to it for long entries.
+		uint32_t id_chunks = 0;
+		uint32_t str_chunks = 0;
+		uint32_t context_chunks = 0;
+		uint32_t plural_chunks = 0;
 
 		if (r_error) {
 			*r_error = ERR_FILE_CORRUPT;
@@ -225,6 +231,7 @@ Ref<Resource> TranslationLoaderPO::load_translation(Ref<FileAccess> r_file, Erro
 					}
 				}
 				msg_context = "";
+				context_chunks = 0;
 				l = l.substr(7).strip_edges();
 				status = STATUS_READING_CONTEXT;
 				entered_context = true;
@@ -243,6 +250,7 @@ Ref<Resource> TranslationLoaderPO::load_translation(Ref<FileAccess> r_file, Erro
 				msgs_plural.clear();
 				msgs_plural.resize(plural_forms);
 				plural_parts = StringBuilder();
+				plural_chunks = 0;
 				status = STATUS_READING_PLURAL;
 			} else if (l.begins_with("msgid")) {
 				ERR_FAIL_COND_V_MSG(status == STATUS_READING_ID, Ref<Resource>(), vformat("Unexpected 'msgid', was expecting 'msgstr' while parsing: %s:%d.", path, line));
@@ -277,6 +285,11 @@ Ref<Resource> TranslationLoaderPO::load_translation(Ref<FileAccess> r_file, Erro
 				}
 				msg_id = "";
 				msg_str = "";
+				id_chunks = 0;
+				str_chunks = 0;
+				if (!entered_context) {
+					context_chunks = 0;
+				}
 				skip_this = skip_next;
 				skip_next = false;
 				entered_context = false;
@@ -285,6 +298,7 @@ Ref<Resource> TranslationLoaderPO::load_translation(Ref<FileAccess> r_file, Erro
 			if (l.begins_with("msgstr[")) {
 				ERR_FAIL_COND_V_MSG(status != STATUS_READING_PLURAL, Ref<Resource>(), vformat("Unexpected 'msgstr[]', was expecting 'msgid_plural' before 'msgstr[]' while parsing: %s:%d.", path, line));
 				finish_plural_text();
+				plural_chunks = 0;
 				plural_index++; // Increment to add to the next slot in vector msgs_plural.
 				l = l.substr(9).strip_edges();
 			} else if (l.begins_with("msgstr")) {
@@ -329,14 +343,30 @@ Ref<Resource> TranslationLoaderPO::load_translation(Ref<FileAccess> r_file, Erro
 			l = l.c_unescape();
 
 			if (status == STATUS_READING_ID) {
-				id_parts.append(l);
+				if (++id_chunks <= 2) {
+					msg_id += l;
+				} else {
+					id_parts.append(l);
+				}
 			} else if (status == STATUS_READING_STRING) {
-				str_parts.append(l);
+				if (++str_chunks <= 2) {
+					msg_str += l;
+				} else {
+					str_parts.append(l);
+				}
 			} else if (status == STATUS_READING_CONTEXT) {
-				context_parts.append(l);
+				if (++context_chunks <= 2) {
+					msg_context += l;
+				} else {
+					context_parts.append(l);
+				}
 			} else if (status == STATUS_READING_PLURAL && plural_index >= 0) {
 				ERR_FAIL_COND_V_MSG(plural_index >= plural_forms, Ref<Resource>(), vformat("Unexpected plural form while parsing: %s:%d.", path, line));
-				plural_parts.append(l);
+				if (++plural_chunks <= 2) {
+					msgs_plural.write[plural_index] += l;
+				} else {
+					plural_parts.append(l);
+				}
 			}
 
 			line++;
