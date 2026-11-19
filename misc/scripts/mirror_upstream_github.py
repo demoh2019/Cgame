@@ -53,7 +53,7 @@ class Api:
                 with self.opener(req, timeout=90) as response:
                     raw = response.read()
                     result = json.loads(raw) if raw else {}
-                    response_headers = dict(response.headers.items())
+                    response_headers = {name.lower(): value for name, value in response.headers.items()}
                 if method != "GET" and self.pause:
                     self.sleep(self.pause)
                 return (result, response_headers) if with_headers else result
@@ -88,7 +88,7 @@ class Api:
             if not isinstance(values, list):
                 raise ApiError("Expected a paginated GitHub list at " + path)
             yield from values
-            next_match = NEXT_LINK.search(headers.get("Link", ""))
+            next_match = NEXT_LINK.search(headers.get("link", ""))
             path = next_match.group(1) if next_match else None
 
 
