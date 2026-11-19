@@ -546,7 +546,20 @@ Variant GDScriptFunction::call(GDScriptInstance *p_instance, const Variant **p_a
 
 		const int non_vararg_arg_count = MIN(p_argcount, _argument_count);
 		for (int i = 0; i < non_vararg_arg_count; i++) {
-			if (!argument_types[i].has_type()) {
+			const GDScriptDataType &arg_type = argument_types[i];
+			if (!arg_type.has_type()) {
+				memnew_placement(&stack[i + FIXED_ADDRESSES_MAX], Variant(*p_args[i]));
+				continue;
+			}
+			// Most typed arguments are ordinary built-in values. Their Variant
+			// type tag is sufficient to accept the argument without a full type
+			// validation dispatch. Typed arrays/dictionaries must still check
+			// their element/key/value types before taking this fast path.
+			const Variant::Type supplied_type = p_args[i]->get_type();
+			if (arg_type.kind == GDScriptDataType::BUILTIN &&
+					arg_type.builtin_type == supplied_type &&
+					(supplied_type != Variant::ARRAY || !arg_type.has_container_element_type(0)) &&
+					(supplied_type != Variant::DICTIONARY || !arg_type.has_container_element_types())) {
 				memnew_placement(&stack[i + FIXED_ADDRESSES_MAX], Variant(*p_args[i]));
 				continue;
 			}
