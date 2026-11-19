@@ -29,6 +29,9 @@ func update_from(client) -> void:
 		_touch("barricade:%d" % id, "barricade", client.barricades[id], seen)
 	for id in client.campfires:
 		_touch("campfire:%d" % id, "campfire", client.campfires[id], seen)
+	if not client.raid_telegraph.is_empty():
+		_touch("raid_warning:%d" % int(client.raid_telegraph["id"]),
+			"raid_warning", client.raid_telegraph, seen)
 	for key in _nodes.keys():
 		if not seen.has(key):
 			_nodes[key].queue_free()
@@ -113,6 +116,25 @@ func _make(kind: String, entity: Dictionary) -> Node3D:
 		light.omni_range = 4.0
 		light.shadow_enabled = false
 		root.add_child(light)
+		return root
+	if kind == "raid_warning":
+		# Flat translucent danger disc. No physics body, network authority or
+		# client damage calculation; the server alone resolves the timed slam.
+		var circle := MeshInstance3D.new()
+		var shape := CylinderMesh.new()
+		shape.top_radius = float(entity.get("radius", 5.0))
+		shape.bottom_radius = shape.top_radius
+		shape.height = 0.06
+		shape.radial_segments = 48
+		circle.mesh = shape
+		circle.position.y = 0.16
+		var warning_material := StandardMaterial3D.new()
+		warning_material.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+		warning_material.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+		warning_material.albedo_color = Color(0.98, 0.12, 0.36, 0.30)
+		warning_material.cull_mode = BaseMaterial3D.CULL_DISABLED
+		circle.material_override = warning_material
+		root.add_child(circle)
 		return root
 	if kind == "bag":
 		var mesh := MeshInstance3D.new()
