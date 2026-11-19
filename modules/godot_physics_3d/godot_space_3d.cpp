@@ -477,40 +477,38 @@ bool GodotPhysicsDirectSpaceState3D::rest_info(const PS3DT::ShapeParameters &p_p
 	GodotShape3D *shape = GodotPhysicsServer3D::godot_singleton->shape_owner.get_or_null(p_parameters.shape_rid);
 	ERR_FAIL_NULL_V(shape, false);
 
-	real_t margin = MAX(p_parameters.margin, TEST_MOTION_MARGIN_MIN_VALUE);
-
+	const real_t margin = MAX(p_parameters.margin, TEST_MOTION_MARGIN_MIN_VALUE);
 	AABB aabb = p_parameters.transform.xform(shape->get_aabb());
 	aabb = aabb.grow(margin);
 
-	int amount = space->broadphase->cull_aabb(aabb, space->intersection_query_results, GodotSpace3D::INTERSECTION_QUERY_MAX, space->intersection_query_subindex_results);
-
 	_RestCallbackData rcd;
-
-	// Allowed depth can't be lower than motion length, in order to handle contacts at low speed.
-	real_t motion_length = p_parameters.motion.length();
-	real_t min_contact_depth = margin * TEST_MOTION_MIN_CONTACT_DEPTH_FACTOR;
+	const real_t motion_length = p_parameters.motion.length();
+	const real_t min_contact_depth = margin * TEST_MOTION_MIN_CONTACT_DEPTH_FACTOR;
 	rcd.min_allowed_depth = MIN(motion_length, min_contact_depth);
 
-	for (int i = 0; i < amount; i++) {
-		if (!_can_collide_with(space->intersection_query_results[i], p_parameters.collision_mask, p_parameters.collide_with_bodies, p_parameters.collide_with_areas)) {
-			continue;
+	struct RestQuery {
+		const PS3DT::ShapeParameters &params;
+		GodotShape3D *shape;
+		_RestCallbackData &callback;
+		real_t margin;
+	};
+	RestQuery query = { p_parameters, shape, rcd, margin };
+	auto visitor = [](GodotCollisionObject3D *p_object, int p_shape, void *p_userdata) -> bool {
+		RestQuery &data = *static_cast<RestQuery *>(p_userdata);
+		if (!_can_collide_with(p_object, data.params.collision_mask, data.params.collide_with_bodies, data.params.collide_with_areas) ||
+				data.params.exclude.has(p_object->get_self())) {
+			return true;
 		}
-
-		const GodotCollisionObject3D *col_obj = space->intersection_query_results[i];
-
-		if (p_parameters.exclude.has(col_obj->get_self())) {
-			continue;
-		}
-
-		int shape_idx = space->intersection_query_subindex_results[i];
-
-		rcd.object = col_obj;
-		rcd.shape = shape_idx;
-		bool sc = GodotCollisionSolver3D::solve_static(shape, p_parameters.transform, col_obj->get_shape(shape_idx), col_obj->get_transform() * col_obj->get_shape_transform(shape_idx), _rest_cbk_result, &rcd, nullptr, margin);
-		if (!sc) {
-			continue;
-		}
-	}
+		data.callback.object = p_object;
+		data.callback.shape = p_shape;
+		GodotCollisionSolver3D::solve_static(data.shape, data.params.transform,
+				p_object->get_shape(p_shape), p_object->get_transform() * p_object->get_shape_transform(p_shape),
+				_rest_cbk_result, &data.callback, nullptr, data.margin);
+		return true;
+	};
+	// A rest contact is the best of ALL exact contacts, not only the first
+	// 2048 broadphase candidates (which may all be excluded by the mask).
+	space->broadphase->visit_aabb(aabb, visitor, &query);
 
 	if (rcd.best_result.len == 0 || !rcd.best_result.object) {
 		return false;
@@ -525,11 +523,9 @@ bool GodotPhysicsDirectSpaceState3D::rest_info(const PS3DT::ShapeParameters &p_p
 		const GodotBody3D *body = static_cast<const GodotBody3D *>(rcd.best_result.object);
 		Vector3 rel_vec = rcd.best_result.contact - (body->get_transform().origin + body->get_center_of_mass());
 		r_info->linear_velocity = body->get_linear_velocity() + (body->get_angular_velocity()).cross(rel_vec);
-
 	} else {
 		r_info->linear_velocity = Vector3();
 	}
-
 	return true;
 }
 
