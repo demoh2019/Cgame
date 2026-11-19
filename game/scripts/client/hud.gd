@@ -836,6 +836,8 @@ func _process(_delta: float) -> void:
 		float(client.you.get("guardian_cooldown", 0.0)),
 		float(client.you.get("guardian_brace", 0.0))
 	]
+	if bool(client.you.get("warden_ward", false)):
+		_info_label.text += "\nWARDEN'S WARD: -15% infected wounds (nearby relic ally)"
 	_info_label.text += "\nCAMP RENOWN %s: %d / %d | NPC buy discount %d%%" % [
 		str(client.you.get("renown_rank", "Newcomer")),
 		int(client.you.get("renown", 0)), int(client.you.get("renown_next", 40)),

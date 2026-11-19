@@ -1726,3 +1726,27 @@ The canonical local preview already cycles through owned weapons with **4**;
 the online HUD names the currently equipped ability. Test coverage:
 `game/tests/test_piercing_thrust.gd` within `game/tests/run_all.gd`.
 No additional native engine APIs are required for this gameplay feature.
+
+
+## Warden two-piece set aura for party expeditions
+
+Survivors who **equip and physically carry both** the rare
+`purifier_maul_3` and `warden_jacket_3` become expedition guardians.
+Within **8 metres**, their living party allies receive **15% less
+infection and bleeding from actual infected attacks**. The ward does
+not stack with additional guardians, never activates for solo players
+or for the guardian themselves, and immediately stops when the set is
+removed, the guardian dies, party membership changes, or players
+separate into different zones. The safe settlement does not emit a ward.
+
+The server validates the complete two-piece set and party roster at each
+actual zombie hit. The existing jacket's personal wound resistance is
+calculated first; this party set bonus only mitigates secondary infected
+wounds and never alters incoming damage, PvP bleeding, dodge immunity,
+experience, attack threat or full-loot drops. The multiplayer HUD shows
+**WARDEN'S WARD** only when the server reports it active. This makes
+elite-core gear meaningful for classless Lineage-style group support.
+
+The headless `tests/test_warden_aura.gd` covers real server combat,
+multiple guardians, worn/owned equipment, movement, death, party changes
+and unchanged PvP. No native Cgame engine changes are needed.

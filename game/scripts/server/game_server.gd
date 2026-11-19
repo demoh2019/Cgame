@@ -30,6 +30,7 @@ const Structures = preload("res://scripts/shared/structures.gd")
 const SiegeWaves = preload("res://scripts/shared/siege_waves.gd")
 const RaidEncounter = preload("res://scripts/shared/raid_encounter.gd")
 const GuardianTaunt = preload("res://scripts/shared/guardian_taunt.gd")
+const WardenAura = preload("res://scripts/shared/warden_aura.gd")
 const RaidReinforcements = preload("res://scripts/shared/raid_reinforcements.gd")
 const RaidLoot = preload("res://scripts/shared/raid_loot.gd")
 const Zombie = preload("res://scripts/shared/zombie.gd")
@@ -2348,6 +2349,11 @@ func _tick_zombies(delta: float) -> void:
 				var wound_infection: float = Combat.infected_wound_amount(
 					float(Defs.ZOMBIE_INFECTION_PER_HIT.get(zombie.type, 0.0)),
 					armor_id, armor_owned, "infection")
+				# Nearby living party guardians wearing BOTH earned relic pieces
+				# provide a single nonstacking PvE wound ward. PvP is untouched.
+				var warded: bool = WardenAura.active_for(victim, players, parties, world)
+				wound_bleeding = WardenAura.mitigate_wound(wound_bleeding, warded)
+				wound_infection = WardenAura.mitigate_wound(wound_infection, warded)
 				if applied > 0.0 and _alive(victim) and victim.survival.add_bleeding(wound_bleeding):
 					victim.dirty_character = true
 					events.append({"type": "bleeding", "peer": victim.id,
@@ -2534,6 +2540,7 @@ func snapshot_for(peer_id: int) -> Dictionary:
 			"lake_drink_cooldown": player.lake_drink_cooldown,
 			"combat_energy": player.combat_energy, "skill_cooldown": player.skill_timer,
 			"guardian_cooldown": player.guardian_timer,
+			"warden_ward": WardenAura.active_for(player, players, parties, world),
 			"guardian_brace": player.guardian_brace,
 			"dodge_cooldown": player.dodge_timer, "dodge_immunity": player.dodge_immunity,
 			"rest_cooldown": player.rest_cooldown,
