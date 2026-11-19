@@ -3932,10 +3932,20 @@ static String _replace_common(const String &p_this, const char *p_key, const cha
 }
 
 String String::replace(const String &p_key, const String &p_with) const {
+	// Single-character replacement can use one pass with no match-position buffer.
+	// Keep embedded NULs on the generic path to preserve its semantics.
+	if (p_key.length() == 1 && p_with.length() == 1 && p_key.ptr()[0] != 0 && p_with.ptr()[0] != 0) {
+		return replace_char(p_key.ptr()[0], p_with.ptr()[0]);
+	}
 	return _replace_common(*this, p_key, p_with, false);
 }
 
 String String::replace(const char *p_key, const char *p_with) const {
+	// C strings use the generic path for non-ASCII bytes and longer strings.
+	if (p_key[0] != 0 && p_with[0] != 0 && p_key[1] == 0 && p_with[1] == 0 &&
+			static_cast<unsigned char>(p_key[0]) < 128 && static_cast<unsigned char>(p_with[0]) < 128) {
+		return replace_char(p_key[0], p_with[0]);
+	}
 	return _replace_common(*this, p_key, p_with, false);
 }
 
@@ -4015,6 +4025,10 @@ String String::replace_first(const char *p_key, const char *p_with) const {
 
 String String::replace_char(char32_t p_key, char32_t p_with) const {
 	ERR_FAIL_COND_V_MSG(p_with == 0, *this, "`with` must not be the NUL character.");
+
+	if (p_key == p_with) {
+		return *this; // No modification needed; keep the COW allocation.
+	}
 
 	if (p_key == 0) {
 		return *this;

@@ -1,0 +1,47 @@
+name: String replace character fastpath regression tests
+on:
+  push:
+    branches: [develop]
+    paths:
+      - 'core/string/ustring.cpp'
+      - 'tests/core/string/test_string.cpp'
+      - 'misc/scripts/tests/test_string_replace_single_char.py'
+      - 'misc/scripts/README_perf_single_char_replace.md'
+      - '.github/workflows/perf-string-single-char-replace.yml'
+  pull_request:
+    paths:
+      - 'core/string/ustring.cpp'
+      - 'tests/core/string/test_string.cpp'
+      - 'misc/scripts/tests/test_string_replace_single_char.py'
+      - 'misc/scripts/README_perf_single_char_replace.md'
+      - '.github/workflows/perf-string-single-char-replace.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  source-contracts:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ['3.9', '3.13']
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+      - run: python -m unittest discover -s misc/scripts/tests -p test_string_replace_single_char.py -v
+  native:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+      - uses: ./.github/actions/godot-deps
+      - uses: ./.github/actions/godot-build
+        with:
+          platform: linuxbsd
+          target: editor
+          scons-flags: dev_build=yes tests=yes debug_symbols=no module_mono_enabled=no accesskit=no
+      - run: ./bin/godot.linuxbsd.editor.dev.x86_64 --headless --test --test-case='[String]*'

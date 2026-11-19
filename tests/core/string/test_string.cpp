@@ -689,6 +689,42 @@ TEST_CASE("[String] Find and replace") {
 	MULTICHECK_STRING_STRING_EQ(s, replacen, "Y", "Y", "HappY BirthdaY, Anna!");
 }
 
+TEST_CASE("[String] Replace character fast path Unicode and ASCII") {
+	const String input = "banana";
+	CHECK(input.replace(String("a"), String("o")) == "bonono");
+	CHECK(input.replace("a", "o") == "bonono");
+	CHECK(input.replace(String("x"), String("o")) == input);
+	CHECK(input.replace("x", "o") == input);
+	CHECK(String(U"αβαβα").replace(String(U"α"), String(U"λ")) == U"λβλβλ");
+	CHECK(String(U"ÄÄa").replace(String(U"Ä"), String(U"ä")) == U"ääa");
+	CHECK(String(U"😀b😀").replace(String(U"😀"), String(U"★")) == U"★b★");
+}
+
+TEST_CASE("[String] Replace char fast path COW and no-op") {
+	const String input = "aAaAa";
+	const char32_t *before = input.ptr();
+	String unchanged = input.replace_char(U'a', U'a');
+	CHECK(unchanged.ptr() == before);
+	String replacement = input.replace(String("a"), String("a"));
+	CHECK(replacement.ptr() == before);
+	CHECK(input.replace("a", "a").ptr() == before);
+	CHECK(input == "aAaAa");
+	CHECK(input.replace_char(U'x', U'y').ptr() == before);
+	String changed = input.replace(String("a"), String("b"));
+	CHECK(changed == "bAbAb");
+	CHECK(input == "aAaAa");
+}
+
+TEST_CASE("[String] Replace preserves multi-character semantics") {
+	const String input = "aaaa";
+	CHECK(input.replace(String("aa"), String("b")) == "bb");
+	CHECK(input.replace("aa", "b") == "bb");
+	CHECK(input.replace(String("a"), String("")) == "");
+	CHECK(input.replace("a", "") == "");
+	CHECK(String("ABA").replacen("a", "a") == "aBa");
+	CHECK(input.replace(String(""), String("z")) == input);
+}
+
 TEST_CASE("[String] replace_char") {
 	String s = "Banana";
 	CHECK(s.replace_char('n', 'x') == "Baxaxa");
