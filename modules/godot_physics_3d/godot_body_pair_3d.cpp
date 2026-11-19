@@ -36,6 +36,7 @@
 #include "servers/physics_contact_angular_friction.h"
 #include "servers/physics_manifold_reduction_3d.h"
 #include "servers/physics_ccd_sphere_toi.h"
+#include "servers/physics_ccd_swept_bounds.h"
 
 #include <cfloat> // FLT_MAX
 
@@ -287,6 +288,17 @@ bool GodotBodyPair3D::_test_ccd(real_t p_step, GodotBody3D *p_A, int p_shape_A, 
 		}
 		// Affine shear/nonuniform scale yields an ellipsoid; retain the
 		// generic support cast rather than using an incorrect sphere TOI.
+	}
+
+	// A fast relative linear sweep cannot hit a shape outside its swept
+	// broadphase bounds. Skip this test for rotation or unbounded shapes.
+	if (p_A->get_angular_velocity() == Vector3() && p_B->get_angular_velocity() == Vector3() &&
+			shape_A_ptr->get_type() != PS3DE::SHAPE_WORLD_BOUNDARY && shape_B_ptr->get_type() != PS3DE::SHAPE_WORLD_BOUNDARY &&
+			shape_A_ptr->get_type() != PS3DE::SHAPE_SEPARATION_RAY && shape_B_ptr->get_type() != PS3DE::SHAPE_SEPARATION_RAY &&
+			!physics_ccd_swept_bounds_may_overlap(
+					p_xform_A.xform(shape_A_ptr->get_aabb()),
+					p_xform_B.xform(shape_B_ptr->get_aabb()), relative_motion)) {
+		return false;
 	}
 
 	// A leading face may have several support vertices. The target
