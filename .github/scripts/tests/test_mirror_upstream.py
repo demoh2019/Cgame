@@ -170,7 +170,7 @@ class MirrorTests(unittest.TestCase):
         self.assertEqual(len(posts), 1)
         self.assertIn("<!-- upstream-comment: 777 -->", posts[0][2]["body"])
 
-    def test_errors_are_counted_and_next_issue_processed(self):
+    def test_errors_stop_batch_without_skipping_failed_issue(self):
         api = FakeAPI([issue(1), issue(2)])
         actual = api.request
 
@@ -181,14 +181,14 @@ class MirrorTests(unittest.TestCase):
         api.request = fail_one
         result = m.Mirror(api, apply=True).run(max_items=2)
         self.assertEqual(result["errors"], 1)
-        self.assertEqual(result["created_issues"], 1)
+        self.assertEqual(result["created_issues"], 0)
 
     def test_checkpoint_written_for_processed_items(self):
         api = FakeAPI([issue(1), issue(2), issue(3)])
         with tempfile.TemporaryDirectory() as folder:
             checkpoint = Path(folder) / "state.json"
-            stats = m.Mirror(api).run(max_items=2, checkpoint=checkpoint)
-            self.assertEqual(stats["dry_run"], 2)
+            stats = m.Mirror(api, apply=True).run(max_items=2, checkpoint=checkpoint)
+            self.assertEqual(stats["created_issues"], 2)
             self.assertEqual(__import__("json").loads(checkpoint.read_text())["next_offset"], 2)
 
     def test_git_fetch_and_push_without_force(self):
