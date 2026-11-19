@@ -141,7 +141,7 @@ private:
 	int active_objects = 0;
 	int collision_pairs = 0;
 
-	int _cull_aabb_for_body(GodotBody2D *p_body, const Rect2 &p_aabb);
+	int _cull_aabb_for_body(GodotBody2D *p_body, const Rect2 &p_aabb, const PS2DT::MotionParameters &p_parameters);
 
 	Vector<Vector2> contact_debug;
 	int contact_debug_count = 0;
