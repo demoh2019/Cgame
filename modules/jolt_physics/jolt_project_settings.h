@@ -60,6 +60,9 @@ public:
 	// Opt-in long-range cloth attachments to pinned vertices; new meshes only.
 	inline static int soft_body_lra_mode = 0;
 	inline static float soft_body_lra_max_distance_multiplier = 1.05f;
+	// Opt-in convex, closed-mesh tetrahedral volume constraints.
+	inline static bool soft_body_volume_preservation = false;
+	inline static float soft_body_volume_compliance = 0.00001f;
 	inline static float bounce_velocity_threshold;
 	inline static bool sleep_allowed;
 	inline static float sleep_velocity_threshold;
