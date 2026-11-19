@@ -1006,22 +1006,25 @@ Curve2D::Interval Curve2D::_find_interval(real_t p_offset) const {
 	int pc = baked_point_cache.size();
 	ERR_FAIL_COND_V_MSG(pc < 2, interval, "Less than two points in cache");
 
+	// The distance cache is sorted and has exactly pc elements. Search the
+	// segment directly between the first and last samples; the last sample
+	// cannot be a segment start. Accessing the pointer avoids repeated
+	// bounds checks in the hot inner loop.
+	const real_t *distances = baked_dist_cache.ptr();
 	int start = 0;
-	int end = pc;
-	int idx = (end + start) / 2;
-	// Binary search to find baked points.
-	while (start < idx) {
-		real_t offset = baked_dist_cache[idx];
-		if (p_offset <= offset) {
-			end = idx;
+	int end = pc - 1;
+	while (end - start > 1) {
+		const int middle = start + (end - start) / 2;
+		if (p_offset <= distances[middle]) {
+			end = middle;
 		} else {
-			start = idx;
+			start = middle;
 		}
-		idx = (end + start) / 2;
 	}
+	const int idx = start;
 
-	real_t offset_begin = baked_dist_cache[idx];
-	real_t offset_end = baked_dist_cache[idx + 1];
+	const real_t offset_begin = distances[idx];
+	const real_t offset_end = distances[idx + 1];
 
 	real_t idx_interval = offset_end - offset_begin;
 	ERR_FAIL_COND_V_MSG(p_offset < offset_begin || p_offset > offset_end, interval, "Offset out of range.");
@@ -1840,22 +1843,25 @@ Curve3D::Interval Curve3D::_find_interval(real_t p_offset) const {
 	int pc = baked_point_cache.size();
 	ERR_FAIL_COND_V_MSG(pc < 2, interval, "Less than two points in cache");
 
+	// The distance cache is sorted and has exactly pc elements. Search the
+	// segment directly between the first and last samples; the last sample
+	// cannot be a segment start. Accessing the pointer avoids repeated
+	// bounds checks in the hot inner loop.
+	const real_t *distances = baked_dist_cache.ptr();
 	int start = 0;
-	int end = pc;
-	int idx = (end + start) / 2;
-	// Binary search to find baked points.
-	while (start < idx) {
-		real_t offset = baked_dist_cache[idx];
-		if (p_offset <= offset) {
-			end = idx;
+	int end = pc - 1;
+	while (end - start > 1) {
+		const int middle = start + (end - start) / 2;
+		if (p_offset <= distances[middle]) {
+			end = middle;
 		} else {
-			start = idx;
+			start = middle;
 		}
-		idx = (end + start) / 2;
 	}
+	const int idx = start;
 
-	real_t offset_begin = baked_dist_cache[idx];
-	real_t offset_end = baked_dist_cache[idx + 1];
+	const real_t offset_begin = distances[idx];
+	const real_t offset_end = distances[idx + 1];
 
 	real_t idx_interval = offset_end - offset_begin;
 	ERR_FAIL_COND_V_MSG(p_offset < offset_begin || p_offset > offset_end, interval, "Offset out of range.");
