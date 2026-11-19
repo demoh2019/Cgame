@@ -644,6 +644,60 @@ void BitMap::grow_mask(int p_pixels, const Rect2i &p_rect) {
 		return;
 	}
 
+	// A radius of one can only reach the four cardinal neighbors.
+	// Avoid creating a temporary BitMap, the quadratic neighborhood loop,
+	// repeated bounds checks and floating-point distance calculations.
+	if (p_pixels == 1 || p_pixels == -1) {
+		const Rect2i current = Rect2i(0, 0, width, height).intersection(p_rect);
+		if (current.size.x <= 0 || current.size.y <= 0) {
+			return;
+		}
+		const bool bit_value = p_pixels > 0;
+		const int64_t left = p_rect.position.x;
+		const int64_t top = p_rect.position.y;
+		const int64_t right = left + p_rect.size.x;
+		const int64_t bottom = top + p_rect.size.y;
+		// A shared immutable view retains the pre-operation mask; ptrw()
+		// detaches it once for the updates instead of building a BitMap.
+		const Vector<uint8_t> original = bitmask;
+		uint8_t *destination = bitmask.ptrw();
+		const uint8_t *source = original.ptr();
+
+		auto matches = [&](int64_t x, int64_t y) -> bool {
+			// Grow ignores outside-rectangle pixels. Shrink treats them as
+			// unset, exactly as the generic neighborhood implementation.
+			if (x < left || x >= right || y < top || y >= bottom) {
+				return !bit_value;
+			}
+			if (x < 0 || x >= width || y < 0 || y >= height) {
+				return !bit_value;
+			}
+			const int bit = int(y) * width + int(x);
+			const bool set = (source[bit >> 3] & (1u << (bit & 7))) != 0;
+			return set == bit_value;
+		};
+
+		for (int y = current.position.y; y < current.position.y + current.size.y; y++) {
+			for (int x = current.position.x; x < current.position.x + current.size.x; x++) {
+				const int bit = y * width + x;
+				const uint8_t mask = uint8_t(1u << (bit & 7));
+				const bool original_bit = (source[bit >> 3] & mask) != 0;
+				if (original_bit == bit_value) {
+					continue;
+				}
+				if (matches(int64_t(x) - 1, y) || matches(int64_t(x) + 1, y) ||
+						matches(x, int64_t(y) - 1) || matches(x, int64_t(y) + 1)) {
+					if (bit_value) {
+						destination[bit >> 3] |= mask;
+					} else {
+						destination[bit >> 3] &= uint8_t(~mask);
+					}
+				}
+			}
+		}
+		return;
+	}
+
 	bool bit_value = p_pixels > 0;
 	p_pixels = Math::abs(p_pixels);
 	const int pixels2 = p_pixels * p_pixels;
