@@ -191,6 +191,8 @@ class GodotSoftBody3D : public GodotCollisionObject3D {
 	// Allocated only when tension-only tetra material fibers are enabled.
 	// One XPBD multiplier per cooked tetra, reused across solver iterations.
 	LocalVector<double> xpbd_fem_fiber_lambdas;
+	// Persistent rest stretch of each material fiber, lazily allocated.
+	LocalVector<real_t> xpbd_fem_fiber_plastic_rest_stretches;
 	LocalVector<double> xpbd_fem_damage; // Irreversible per-tetra scalar damage.
 	LocalVector<Face> faces;
 	// Number of particles with nonzero inverse mass. Maintained on pin,
