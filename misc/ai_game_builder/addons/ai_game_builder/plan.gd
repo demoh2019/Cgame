@@ -61,8 +61,13 @@ static func validate_plan(raw: Variant) -> Dictionary:
 	if typeof(main_scene) != TYPE_STRING:
 		return _error("main_scene must be a path string.")
 	if not main_scene.is_empty():
-		if main_scene.get_extension().to_lower() != "tscn" or not seen.has(main_scene.to_lower()):
-			return _error("main_scene must point to a generated .tscn file.")
+		var main_found := false
+		for item in clean_files:
+			if item["path"] == main_scene:
+				main_found = true
+				break
+		if main_scene.get_extension().to_lower() != "tscn" or not main_found:
+			return _error("main_scene must point to an exact generated .tscn path.")
 
 	var summary: Variant = raw.get("summary", "")
 	if typeof(summary) != TYPE_STRING:
@@ -85,6 +90,8 @@ static func validate_path(path: String) -> String:
 		return "Newlines in paths are forbidden."
 	if path.to_lower().begins_with("addons/"):
 		return "Writing editor addons is not supported."
+	if path.get_file().to_lower() in ["override.cfg", "export_presets.cfg"]:
+		return "Overriding project or export settings is not supported."
 	for segment in path.split("/"):
 		if segment.is_empty() or segment == "." or segment == "..":
 			return "Empty, dot and parent segments are forbidden."
