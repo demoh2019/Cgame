@@ -25,7 +25,7 @@ class CanvasEllipseCacheTests(unittest.TestCase):
         self.assertEqual(ellipse.count("Math::cos(angle)"), 1)
         self.assertEqual(ellipse.count("Math::sin(angle)"), 1)
         self.assertEqual(ellipse.count("ellipse_directions[i]"), 2)
-        self.assertIn("ellipse->polygon.create(indices, points, color)", ellipse)
+        self.assertIn("ellipse->polygon.create(triangle_indices, points, color)", ellipse)
         self.assertIn("feather->polygon.create(indices, points, colors)", ellipse)
 
     def test_angle_cache_keeps_original_closed_ring_and_point_count(self):
@@ -43,6 +43,23 @@ class CanvasEllipseCacheTests(unittest.TestCase):
         self.assertEqual(len(actual), 65)
         self.assertTrue(math.isclose(actual[0][0], major))
         self.assertTrue(math.isclose(actual[-1][0], major))
+
+    def test_shared_triangle_indices_preserve_fan_winding_and_bounds(self):
+        source = SOURCE.read_text(encoding="utf-8")
+        begin = source.index("void RendererCanvasCull::canvas_item_add_ellipse(")
+        end = source.index("void RendererCanvasCull::canvas_item_add_circle(", begin)
+        ellipse = source[begin:end]
+        self.assertIn("static const Vector<int> triangle_indices = []", ellipse)
+        self.assertEqual(ellipse.count("indices.resize(ellipse_segments * 3)"), 1)
+        self.assertEqual(ellipse.count("write[i * 3 + 0] = ellipse_segments + 1"), 1)
+        self.assertIn("ellipse->polygon.create(triangle_indices, points, color)", ellipse)
+        self.assertNotIn("ellipse->polygon.create(indices, points, color)", ellipse)
+
+        triangles = [(65, i, i + 1) for i in range(64)]
+        self.assertEqual(len(triangles) * 3, 192)
+        self.assertEqual(triangles[0], (65, 0, 1))
+        self.assertEqual(triangles[-1], (65, 63, 64))
+        self.assertTrue(all(0 <= vertex <= 65 for t in triangles for vertex in t))
 
     def test_ellipse_stress_requires_a_display_and_validates_dispatch(self):
         script = STRESS.read_text(encoding="utf-8")

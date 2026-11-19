@@ -1494,6 +1494,21 @@ void RendererCanvasCull::canvas_item_add_ellipse(RID p_item, const Point2 &p_pos
 		return directions;
 	}();
 
+	// Every filled ellipse shares the same triangle-fan topology. Build the
+	// 192 indices only once, rather than allocating and filling an identical
+	// Vector<int> for every circle or ellipse command.
+	static const Vector<int> triangle_indices = [] {
+		Vector<int> indices;
+		indices.resize(ellipse_segments * 3);
+		int *write = indices.ptrw();
+		for (int i = 0; i < ellipse_segments; i++) {
+			write[i * 3 + 0] = ellipse_segments + 1;
+			write[i * 3 + 1] = i;
+			write[i * 3 + 2] = i + 1;
+		}
+		return indices;
+	}();
+
 	float major = p_major;
 	float minor = p_minor;
 	if (p_antialiased) {
@@ -1508,7 +1523,6 @@ void RendererCanvasCull::canvas_item_add_ellipse(RID p_item, const Point2 &p_pos
 
 		ellipse->primitive = RSE::PRIMITIVE_TRIANGLES;
 
-		Vector<int> indices;
 		Vector<Vector2> points;
 
 		points.resize(ellipse_segments + 2);
@@ -1524,18 +1538,9 @@ void RendererCanvasCull::canvas_item_add_ellipse(RID p_item, const Point2 &p_pos
 			points_ptr[i] += p_pos;
 		}
 
-		indices.resize(ellipse_segments * 3);
-		int *indices_ptr = indices.ptrw();
-
-		for (int i = 0; i < ellipse_segments; i++) {
-			indices_ptr[i * 3 + 0] = ellipse_segments + 1;
-			indices_ptr[i * 3 + 1] = i;
-			indices_ptr[i * 3 + 2] = i + 1;
-		}
-
 		Vector<Color> color;
 		color.push_back(p_color);
-		ellipse->polygon.create(indices, points, color);
+		ellipse->polygon.create(triangle_indices, points, color);
 	}
 
 	if (p_antialiased) {
