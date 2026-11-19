@@ -27,3 +27,8 @@ Regression tests:
 
 Benchmarks and full native runtime testing are still required before
 recommending a nonzero default in production.
+
+When a finite velocity is so large that its squared magnitude overflows
+in single-precision builds, the helper uses a scaled-vector fallback to
+still enforce the limit without producing NaNs. Normal-sized velocities
+retain the original cheap comparison path.
