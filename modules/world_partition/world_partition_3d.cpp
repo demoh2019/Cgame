@@ -337,6 +337,10 @@ Vector3 WorldPartition3D::cell_to_local_position(const Vector2i &p_cell) const {
 Array WorldPartition3D::get_cells_in_radius(const Vector2i &p_center, int p_radius) const {
 	Array result;
 	ERR_FAIL_COND_V_MSG(p_radius < 0 || p_radius > 32, result, "WorldPartition3D query radius must be between 0 and 32.");
+	// Do not overflow Vector2i arithmetic near INT32_MIN / INT32_MAX.
+	const int64_t x = p_center.x;
+	const int64_t z = p_center.y;
+	ERR_FAIL_COND_V_MSG(x - p_radius < INT32_MIN || x + p_radius > INT32_MAX || z - p_radius < INT32_MIN || z + p_radius > INT32_MAX, result, "WorldPartition3D query would overflow cell coordinates.");
 	for (int dz = -p_radius; dz <= p_radius; dz++) {
 		for (int dx = -p_radius; dx <= p_radius; dx++) {
 			result.push_back(p_center + Vector2i(dx, dz));
