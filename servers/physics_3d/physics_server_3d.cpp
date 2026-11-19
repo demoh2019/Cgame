@@ -581,6 +581,10 @@ PhysicsServer3D::PhysicsServer3D() {
 	// Optional per-triangle surface-area preservation for deformable cloth.
 	// Zero disables all extra area constraints and associated lambda buffers.
 	GLOBAL_DEF(PropertyInfo(Variant::FLOAT, "physics/3d/solver/soft_body_xpbd_area_compliance", PROPERTY_HINT_RANGE, "0,0.01,0.000001,or_greater"), 0.0);
+	// Preserve closed, consistently oriented soft-body volume using XPBD.
+	// Disabled by default: validation and O(faces) constraints cost extra CPU.
+	GLOBAL_DEF(PropertyInfo(Variant::BOOL, "physics/3d/solver/soft_body_xpbd_volume_preservation"), false);
+	GLOBAL_DEF(PropertyInfo(Variant::FLOAT, "physics/3d/solver/soft_body_xpbd_volume_compliance", PROPERTY_HINT_RANGE, "0,0.01,0.000001,or_greater"), 0.000001);
 	// Closed, consistently oriented soft meshes can preserve enclosed volume.
 	// Zero disables the extra XPBD constraint and its node-gradient buffer.
 	GLOBAL_DEF(PropertyInfo(Variant::FLOAT, "physics/3d/solver/soft_body_xpbd_volume_compliance", PROPERTY_HINT_RANGE, "0,0.01,0.000001,or_greater"), 0.0);
