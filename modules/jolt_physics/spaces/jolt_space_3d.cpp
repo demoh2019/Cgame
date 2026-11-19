@@ -840,6 +840,9 @@ static void resolve_soft_soft_edge_edge_contacts(JPH::Body &p_body_a, JPH::Body 
 	const float radius = JoltProjectSettings::soft_body_soft_contact_radius;
 	const float friction = JoltProjectSettings::soft_body_soft_contact_friction;
 	const float bias_per_step = JoltProjectSettings::soft_body_soft_contact_recovery / p_step;
+	const bool swept_edge_ccd = JoltProjectSettings::soft_body_soft_speculative_edge_ccd &&
+			JoltProjectSettings::soft_body_soft_ccd_max_sweep > 0.0f;
+	const float candidate_radius = radius + (swept_edge_ccd ? JoltProjectSettings::soft_body_soft_ccd_max_sweep : 0.0f);
 
 	for (uint64_t key_a : r_scratch.keys_a) {
 		if (r_budget == 0) {
@@ -862,9 +865,9 @@ static void resolve_soft_soft_edge_edge_contacts(JPH::Body &p_body_a, JPH::Body 
 			const JPH::Vec3 q1 = center_delta + rotation_b * b1.mPosition;
 			const JPH::Vec3 q_min = JPH::Vec3::sMin(q0, q1);
 			const JPH::Vec3 q_max = JPH::Vec3::sMax(q0, q1);
-			if (p_max.GetX() + radius < q_min.GetX() || q_max.GetX() + radius < p_min.GetX() ||
-					p_max.GetY() + radius < q_min.GetY() || q_max.GetY() + radius < p_min.GetY() ||
-					p_max.GetZ() + radius < q_min.GetZ() || q_max.GetZ() + radius < p_min.GetZ()) {
+			if (p_max.GetX() + candidate_radius < q_min.GetX() || q_max.GetX() + candidate_radius < p_min.GetX() ||
+					p_max.GetY() + candidate_radius < q_min.GetY() || q_max.GetY() + candidate_radius < p_min.GetY() ||
+					p_max.GetZ() + candidate_radius < q_min.GetZ() || q_max.GetZ() + candidate_radius < p_min.GetZ()) {
 				continue;
 			}
 
@@ -875,8 +878,20 @@ static void resolve_soft_soft_edge_edge_contacts(JPH::Body &p_body_a, JPH::Body 
 			}
 			const JPH::Vec3 separation = near_b - near_a;
 			const float distance_sq = separation.LengthSq();
-			if (!Math::is_finite(distance_sq) || distance_sq >= radius * radius) {
+			if (!Math::is_finite(distance_sq)) {
 				continue;
+			}
+			bool swept_contact = false;
+			JPH::Vec3 swept_normal = JPH::Vec3::sZero();
+			if (distance_sq >= radius * radius) {
+				if (!swept_edge_ccd || !predict_soft_edge_edge_sweep(p0, p1, q0, q1,
+						rotation_a * a0.mVelocity, rotation_a * a1.mVelocity,
+						rotation_b * b0.mVelocity, rotation_b * b1.mVelocity,
+						p_step, radius, JoltProjectSettings::soft_body_soft_ccd_max_sweep,
+						r_budget, s, t, swept_normal)) {
+					continue;
+				}
+				swept_contact = true;
 			}
 			const float wa0 = 1.0f - s, wa1 = s;
 			const float wb0 = 1.0f - t, wb1 = t;
@@ -889,9 +904,11 @@ static void resolve_soft_soft_edge_edge_contacts(JPH::Body &p_body_a, JPH::Body 
 			const JPH::Vec3 vel_a = rotation_a * (wa0 * a0.mVelocity + wa1 * a1.mVelocity);
 			const JPH::Vec3 vel_b = rotation_b * (wb0 * b0.mVelocity + wb1 * b1.mVelocity);
 			const JPH::Vec3 relative_velocity = vel_b - vel_a;
-			const float distance = Math::sqrt(MAX(distance_sq, 0.0f));
-			JPH::Vec3 normal;
-			if (distance > 1.0e-6f) {
+			const float distance = swept_contact ? radius : Math::sqrt(MAX(distance_sq, 0.0f));
+			JPH::Vec3 normal = swept_normal;
+			if (swept_contact) {
+				// The predictor has already chosen a normal at future impact.
+			} else if (distance > 1.0e-6f) {
 				normal = separation / distance;
 			} else {
 				const JPH::Vec3 crossing = (p1 - p0).Cross(q1 - q0);
@@ -920,8 +937,13 @@ static void resolve_soft_soft_edge_edge_contacts(JPH::Body &p_body_a, JPH::Body 
 			if (!Math::is_finite(normal_speed)) {
 				continue;
 			}
-			const float recovery_speed = MIN((radius - distance) * bias_per_step, MAX_SOFT_SOFT_PENETRATION_BIAS);
-			const float correction = MIN(MAX(recovery_speed - normal_speed, 0.0f), MAX_SOFT_SOFT_CONTACT_SPEED_CORRECTION);
+			// Speculative impacts only remove future normal closing speed;
+			// the discrete path retains its penetration recovery.
+			const float recovery_speed = swept_contact ? 0.0f :
+					MIN((radius - distance) * bias_per_step, MAX_SOFT_SOFT_PENETRATION_BIAS);
+			const float max_correction = swept_contact ? JoltProjectSettings::soft_body_soft_ccd_max_correction_speed :
+					MAX_SOFT_SOFT_CONTACT_SPEED_CORRECTION;
+			const float correction = MIN(MAX(recovery_speed - normal_speed, 0.0f), max_correction);
 			if (correction <= 0.0f) {
 				continue;
 			}
@@ -1068,8 +1090,9 @@ void JoltSpace3D::_pre_step(float p_step) {
 		// Expand broadphase only for the opt-in swept VF approximation:
 		// otherwise separated bodies never reach its narrowphase.
 		const float broadphase_margin = radius +
-				(JoltProjectSettings::soft_body_soft_vertex_face_contacts &&
-				 JoltProjectSettings::soft_body_soft_speculative_ccd ?
+				((JoltProjectSettings::soft_body_soft_vertex_face_contacts &&
+				  JoltProjectSettings::soft_body_soft_speculative_ccd) ||
+				 (edge_contacts && JoltProjectSettings::soft_body_soft_speculative_edge_ccd) ?
 				 JoltProjectSettings::soft_body_soft_ccd_max_sweep : 0.0f);
 
 		for (JPH::uint32 i = 0; i < active_soft_body_count && (particle_budget > 0 || edge_budget > 0) && checked_body_pairs < MAX_SOFT_SOFT_BODY_PAIR_CHECKS; ++i) {
