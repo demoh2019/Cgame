@@ -89,14 +89,14 @@ TEST_CASE("[Splatmap] Brush falloff preserves normalized weights") {
     data->set_dimensions(7, 7);
     data->paint_layer(1, Vector2(3, 3), 3, 1);
     CHECK(data->get_weights_at(3, 3) == Color(0, 1, 0, 0));
-    CHECK(data->get_weights_at(4, 3).r == doctest::Approx(1.0 / 3));
-    CHECK(data->get_weights_at(4, 3).g == doctest::Approx(2.0 / 3));
-    CHECK(data->get_weights_at(5, 3).r == doctest::Approx(2.0 / 3));
+    CHECK(data->get_weights_at(4, 3).r == doctest::Approx(1.0 / 3).epsilon(1e-5));
+    CHECK(data->get_weights_at(4, 3).g == doctest::Approx(2.0 / 3).epsilon(1e-5));
+    CHECK(data->get_weights_at(5, 3).r == doctest::Approx(2.0 / 3).epsilon(1e-5));
     CHECK(data->get_weights_at(6, 3) == Color(1, 0, 0, 0));
     for (int z = 0; z < 7; ++z) {
         for (int x = 0; x < 7; ++x) {
             const Color w = data->get_weights_at(x, z);
-            CHECK(w.r + w.g + w.b + w.a == doctest::Approx(1.0));
+            CHECK(w.r + w.g + w.b + w.a == doctest::Approx(1.0).epsilon(1e-5));
             CHECK(w.r >= 0);
             CHECK(w.g >= 0);
             CHECK(w.b >= 0);
@@ -115,7 +115,7 @@ TEST_CASE("[Splatmap] Repeated mixing preserves sum and nonnegative channels") {
     for (int z = 0; z < 5; ++z) {
         for (int x = 0; x < 5; ++x) {
             const Color w = data->get_weights_at(x, z);
-            CHECK(w.r + w.g + w.b + w.a == doctest::Approx(1.0));
+            CHECK(w.r + w.g + w.b + w.a == doctest::Approx(1.0).epsilon(1e-5));
             for (int layer = 0; layer < 4; ++layer) {
                 CHECK(w[layer] >= 0);
                 CHECK(w[layer] <= 1);
