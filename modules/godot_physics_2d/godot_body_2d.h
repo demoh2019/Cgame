@@ -245,8 +245,10 @@ public:
 		biased_linear_velocity += p_impulse * _inv_mass;
 		if (p_max_delta_av != 0.0) {
 			real_t delta_av = _inv_inertia * (p_position - center_of_mass).cross(p_impulse);
-			if (p_max_delta_av > 0 && delta_av > p_max_delta_av) {
-				delta_av = p_max_delta_av;
+			// Clamp the magnitude in both rotation directions, as in 3D. Clamping only
+			// positive values made penetration recovery rotate mirrored bodies differently.
+			if (p_max_delta_av > 0) {
+				delta_av = CLAMP(delta_av, -p_max_delta_av, p_max_delta_av);
 			}
 			biased_angular_velocity += delta_av;
 		}
