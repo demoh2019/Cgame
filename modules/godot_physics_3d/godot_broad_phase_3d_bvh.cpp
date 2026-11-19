@@ -166,4 +166,10 @@ GodotBroadPhase3D *GodotBroadPhase3DBVH::_create() {
 GodotBroadPhase3DBVH::GodotBroadPhase3DBVH() {
 	bvh.set_pair_callback(_pair_callback, this);
 	bvh.set_unpair_callback(_unpair_callback, this);
+	// Without an expanded broadphase, separated spheres would never reach
+	// the predictive-contact narrowphase. Zero preserves the legacy BVH.
+	const real_t speculative_distance = MAX(real_t(0.0), (real_t)GLOBAL_GET("physics/3d/solver/speculative_sphere_distance"));
+	if (speculative_distance > 0.0) {
+		bvh.params_set_pairing_expansion(speculative_distance);
+	}
 }
