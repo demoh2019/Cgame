@@ -76,8 +76,7 @@ TEST_CASE("[GodotPhysics3D] Invalid geometry falls back to narrowphase") {
 	malformed.size.x = Math::INF;
 	const AABB target(Vector3(), Vector3(1, 1, 1));
 	CHECK(physics_ccd_rotational_sphere_bounds_may_overlap(
-			malformed, Vector3(), target, Vector3(0, 100, 0),
-			Vector3(0, 100, 0), Vector3()));
+			malformed, Vector3(), target, Vector3(0, 100, 0), Vector3()));
 }
 
 } // namespace TestGodotPhysicsCCDRotationalSphereCull

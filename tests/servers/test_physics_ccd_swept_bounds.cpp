@@ -152,14 +152,20 @@ TEST_CASE("[PhysicsCCDSweep] Sampled 3D trajectories are never culled while over
 						real_t(0.25) + Math::abs(next()) * real_t(0.1)));
 		const Vector3 motion(next(), next(), next());
 		const bool possible = physics_ccd_swept_bounds_may_overlap(moving, target, motion, real_t(0.1));
+		// Evaluate the reference trajectory in double and keep it inside the swept
+		// interval [-backtrack, 1]; float rounding of tick * 0.1 otherwise samples
+		// slightly outside it and reports overlaps the cast never covered.
+		const double backtrack = double(real_t(0.1));
+		const Vector3 target_end = target.get_end();
 		for (int tick = 0; tick <= 11; ++tick) {
-			const real_t fraction = real_t(-0.1) + real_t(tick) * real_t(0.1);
-			const Vector3 lo = moving.position + motion * fraction;
-			const Vector3 hi = lo + moving.size;
-			const Vector3 target_hi = target.get_end();
-			if (lo.x <= target_hi.x && hi.x >= target.position.x &&
-					lo.y <= target_hi.y && hi.y >= target.position.y &&
-					lo.z <= target_hi.z && hi.z >= target.position.z) {
+			const double fraction = CLAMP(-backtrack + double(tick) * backtrack, -backtrack, 1.0);
+			bool overlaps = true;
+			for (int axis = 0; axis < 3; ++axis) {
+				const double lo = double(moving.position[axis]) + double(motion[axis]) * fraction;
+				const double hi = lo + double(moving.size[axis]);
+				overlaps = overlaps && lo <= double(target_end[axis]) && hi >= double(target.position[axis]);
+			}
+			if (overlaps) {
 				CHECK(possible);
 			}
 		}

@@ -50,7 +50,8 @@ TEST_CASE("[GodotPhysics] CCD angular broadphase padding") {
 	}
 	SUBCASE("Translation independent angle and pivot offset") {
 		const Rect2 bounds(Vector2(10, -1), Vector2(2, 2));
-		const real_t pad = godot_physics_ccd_rotational_padding(bounds, Vector2(10, 0), real_t(1.0));
+		const real_t pad = godot_physics_ccd_rotational_padding(bounds, Vector2(11, 0), real_t(1.0));
+		// The pivot sits at the box center, so every corner is sqrt(2) away.
 		CHECK(pad == doctest::Approx(Math::SQRT2));
 	}
 	SUBCASE("Angles below one half turn keep a tighter bound") {
