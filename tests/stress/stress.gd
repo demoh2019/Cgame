@@ -10,7 +10,7 @@ const CASES := [
 	"containers", "strings", "script_vm", "math", "signals",
 	"scene_tree", "packed_scene", "images", "json", "stream",
 	"file_io", "threads", "physics_2d", "physics_3d",
-	"object_churn", "memory_churn", "astar_grid", "astar_graph", "tweens", "audio_buffers",
+	"object_churn", "memory_churn", "astar_grid", "astar_relax_2d", "astar_relax_3d", "astar_graph", "tweens", "audio_buffers",
 	"variant_codec", "packet_stream", "ui_layout", "render_2d", "render_3d",
 	"resource_load",
 	"input_map",
@@ -196,6 +196,10 @@ func _run_case(test_case: String, scale: int, frames: int, seed: int) -> Diction
 			return _threads(scale, seed)
 		"astar_grid":
 			return _astar_grid(scale)
+		"astar_relax_2d":
+			return _astar_relax_2d(scale)
+		"astar_relax_3d":
+			return _astar_relax_3d(scale)
 		"astar_graph":
 			return _astar_graph(scale)
 		"audio_buffers":
@@ -1079,3 +1083,55 @@ func _bitmap_rects(scale: int) -> Dictionary:
 		return {"error": "BitMap unaligned clear corrupted other bits"}
 	return {"rectangles": rectangles, "fill_ms": fill_ms, "popcount_ms": count_ms,
 			"checksum": retained}
+
+
+# Every candidate begins with a high-cost direct route, then receives a
+# cheaper path via the same intermediate vertex, stressing the indexed heap.
+func _astar_relax_2d(scale: int) -> Dictionary:
+	var graph := AStar2D.new()
+	graph.add_point(0, Vector2.ZERO)
+	graph.add_point(1, Vector2(99, 0))
+	graph.add_point(3, Vector2(101, 0))
+	graph.connect_points(0, 1, false)
+	var count := 128 * scale
+	for i in range(count):
+		var node_id := 2 if i == 0 else i + 3
+		graph.add_point(node_id, Vector2(100.0 + float(i) * 0.0001, 0), 10.0)
+		graph.connect_points(0, node_id, false)
+		graph.connect_points(1, node_id, false)
+		if i == 0:
+			graph.connect_points(node_id, 3, false)
+
+	var started := Time.get_ticks_usec()
+	var checksum := 0
+	for repeat in range(40):
+		var path := graph.get_id_path(0, 3)
+		if path.size() != 4 or path[0] != 0 or path[1] != 1 or path[2] != 2 or path[3] != 3:
+			return {"error": "AStar2D decrease-key produced an incorrect route"}
+		checksum += path.size()
+	return {"nodes": count + 3, "queries": 40, "search_ms": float(Time.get_ticks_usec() - started) / 1000.0, "checksum": checksum}
+
+
+func _astar_relax_3d(scale: int) -> Dictionary:
+	var graph := AStar3D.new()
+	graph.add_point(0, Vector3.ZERO)
+	graph.add_point(1, Vector3(99, 0, 0))
+	graph.add_point(3, Vector3(101, 0, 0))
+	graph.connect_points(0, 1, false)
+	var count := 128 * scale
+	for i in range(count):
+		var node_id := 2 if i == 0 else i + 3
+		graph.add_point(node_id, Vector3(100.0 + float(i) * 0.0001, 0, 0), 10.0)
+		graph.connect_points(0, node_id, false)
+		graph.connect_points(1, node_id, false)
+		if i == 0:
+			graph.connect_points(node_id, 3, false)
+
+	var started := Time.get_ticks_usec()
+	var checksum := 0
+	for repeat in range(40):
+		var path := graph.get_id_path(0, 3)
+		if path.size() != 4 or path[0] != 0 or path[1] != 1 or path[2] != 2 or path[3] != 3:
+			return {"error": "AStar3D decrease-key produced an incorrect route"}
+		checksum += path.size()
+	return {"nodes": count + 3, "queries": 40, "search_ms": float(Time.get_ticks_usec() - started) / 1000.0, "checksum": checksum}

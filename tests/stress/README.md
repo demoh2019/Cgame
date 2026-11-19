@@ -320,3 +320,21 @@ Linux requires no dependencies beyond /proc. On macOS and Windows install
 `psutil` (`python3 -m pip install psutil`) for descendant-inclusive sampling.
 A timeout or RAM overrun terminates the workload's entire process group.
 Short memory spikes shorter than the sampling interval can still be missed.
+
+
+## A* frontier decrease-key pressure
+
+`astar_relax_2d` and `astar_relax_3d` build a large open set, then improve
+every candidate through a cheaper intermediate point. Each query checks the
+exact expected route. The JSON detail includes `search_ms`, measured after
+graph construction, so search costs can be isolated from setup costs.
+
+```bash
+python3 tests/stress/scale_sweep.py \
+  --godot ./bin/godot.linuxbsd.editor.dev.x86_64 \
+  --case astar_relax_2d,astar_relax_3d \
+  --scales 1,2,4,8,16 --repeats 5 --frames 12 \
+  --output out/astar-frontier.json --summary-md out/astar-frontier.md
+```
+
+A headless renderer is enough. Use matching builds and hardware for comparison.
