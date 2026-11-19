@@ -39,8 +39,7 @@ TEST_CASE("[VisualShader] Serialized node property creates a new node") {
 	Ref<VisualShader> shader;
 	shader.instantiate();
 
-	Ref<VisualShaderNode> input;
-	input.instantiate<VisualShaderNodeInput>();
+	Ref<VisualShaderNode> input = memnew(VisualShaderNodeInput);
 	CHECK(shader->set("nodes/vertex/19/node", input));
 	CHECK(shader->get_node(VisualShader::TYPE_VERTEX, 19) == input);
 }
@@ -49,12 +48,10 @@ TEST_CASE("[VisualShader] Reapplying serialized node property does not re-add an
 	Ref<VisualShader> shader;
 	shader.instantiate();
 
-	Ref<VisualShaderNode> input;
-	input.instantiate<VisualShaderNodeInput>();
+	Ref<VisualShaderNode> input = memnew(VisualShaderNodeInput);
 	shader->add_node(VisualShader::TYPE_VERTEX, input, Vector2(3, 5), 19);
 
-	Ref<VisualShaderNode> incoming;
-	incoming.instantiate<VisualShaderNodeInput>();
+	Ref<VisualShaderNode> incoming = memnew(VisualShaderNodeInput);
 
 	// A duplicate path is ignored instead of passing into add_node, which
 	// rejects an already registered ID and emits editor errors on reload.
@@ -69,16 +66,14 @@ TEST_CASE("[VisualShader] Reapplying serialized node property does not re-add an
 TEST_CASE("[VisualShader] Ignored duplicate does not prevent later node property updates") {
 	Ref<VisualShader> shader;
 	shader.instantiate();
-	Ref<VisualShaderNode> input;
-	input.instantiate<VisualShaderNodeInput>();
+	Ref<VisualShaderNode> input = memnew(VisualShaderNodeInput);
 	shader->add_node(VisualShader::TYPE_VERTEX, input, Vector2(), 21);
 
 	CHECK_FALSE(shader->set("nodes/vertex/21/node", input));
 	CHECK(shader->set("nodes/vertex/21/position", Vector2(7, 9)));
 	CHECK(shader->get_node_position(VisualShader::TYPE_VERTEX, 21) == Vector2(7, 9));
 
-	Ref<VisualShaderNode> second;
-	second.instantiate<VisualShaderNodeInput>();
+	Ref<VisualShaderNode> second = memnew(VisualShaderNodeInput);
 	CHECK(shader->set("nodes/vertex/22/node", second));
 	CHECK(shader->get_node(VisualShader::TYPE_VERTEX, 22) == second);
 }
