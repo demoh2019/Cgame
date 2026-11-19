@@ -32,6 +32,7 @@
 
 #include "http_client_tcp.h"
 
+#include "core/io/http_header_utils.h"
 #include "core/io/stream_peer_tcp.h"
 #include "core/io/stream_peer_tls.h"
 #include "core/object/class_db.h"
@@ -501,26 +502,26 @@ Error HTTPClientTCP::poll() {
 
 					for (int i = 0; i < responses.size(); i++) {
 						String header = responses[i].strip_edges();
-						String s = header.to_lower();
-						if (s.length() == 0) {
+						if (header.is_empty()) {
 							continue;
 						}
-						if (s.begins_with("content-length:")) {
-							// The UTF-32 buffer is already lowercase and remains alive here.
+						// Compare ASCII HTTP header names directly in the original buffer.
+						// Lowercasing the whole line previously allocated for every header.
+						if (HTTPHeaderUtils::matches_ascii_case_insensitive(header.span(), "content-length:")) {
 							constexpr int prefix_length = sizeof("content-length:") - 1;
-							Span<char32_t> value(s.ptr() + prefix_length, s.length() - prefix_length);
+							Span<char32_t> value(header.ptr() + prefix_length, header.length() - prefix_length);
 							value = String::strip_edges_span(value, true, true);
 							body_size = String::to_int(value.ptr(), value.size());
 							body_left = body_size;
 
-						} else if (s.begins_with("transfer-encoding:")) {
+						} else if (HTTPHeaderUtils::matches_ascii_case_insensitive(header.span(), "transfer-encoding:")) {
 							constexpr int prefix_length = sizeof("transfer-encoding:") - 1;
-							Span<char32_t> value(s.ptr() + prefix_length, s.length() - prefix_length);
+							Span<char32_t> value(header.ptr() + prefix_length, header.length() - prefix_length);
 							value = String::strip_edges_span(value, true, true);
-							if (value == Span<char32_t>(U"chunked")) {
+							if (HTTPHeaderUtils::matches_ascii_case_insensitive(value, "chunked", true)) {
 								chunked = true;
 							}
-						} else if (s.begins_with("connection: close")) {
+						} else if (HTTPHeaderUtils::matches_ascii_case_insensitive(header.span(), "connection: close")) {
 							keep_alive = false;
 						}
 
