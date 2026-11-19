@@ -9,6 +9,18 @@ small, single-grid landscapes. It is available as a mesh resource on
 Create a `MeshInstance3D`, set its **Mesh** property to a new **TerrainMesh**
 resource, then adjust `grid_size`, `cell_size`, and `height_scale`.
 
+Select that `MeshInstance3D` in the 3D editor to reveal the **Paint Terrain**
+toolbar. Toggle **Paint Terrain** on, choose **Raise**, **Lower**, or **Smooth**,
+then drag with the left mouse button over the mesh. Configure brush radius
+(in heightmap cells) and strength from the toolbar. Each drag records a single
+Undo/Redo action. Alt- and Ctrl/Command-click are left to the editor's viewport
+navigation controls. Disable the toggle to restore ordinary selection.
+
+The toolbar uses exact local-space triangle intersection to follow the rendered
+terrain, including translated, rotated, and nonuniformly scaled mesh nodes.
+Very large grids or repeated rapid brush updates may still be slow because
+the current prototype rebuilds the whole mesh and uses an unchunked raycast.
+
 Scripting the heightfield works in regular GDScript or an `@tool` script:
 
 ```gdscript
@@ -39,12 +51,13 @@ and `set_height`; `sample_height` clamps to the grid edges.
 - Raise/lower brush with linear falloff; neighborhood smoothing with a
   snapshot (order-independent per brush application).
 - Deterministic, conservative thermal erosion with configurable talus.
-- Automated test cases under `modules/terrain/tests`.
+- 24 native automated test cases under `modules/terrain/tests`, including
+  real save/load round-trips and ray picking.
 
 ### Not implemented yet
 
 This is **not** a replacement for Terrain3D or Unreal landscape tools.
-A dedicated viewport brush UI, painting layers, tiled/LOD rendering,
+Texture painting layers, tiled/LOD rendering,
 mass foliage scattering, collision updates, GPU streaming, erosion
 simulations beyond the simple thermal model, and World Partition remain
 separate features. The current mesh rebuilds the full grid after a change:
