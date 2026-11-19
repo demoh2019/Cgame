@@ -44,8 +44,11 @@ either soft body may be the sparse mesh. Only the face-index ordering changes:
 the physical impulse response is identical to the previous VF method.
 
 The tree uses Jolt arrays and a median selection; no extra memory is
-allocated when acceleration is disabled. When enabled, memory is O(F)
-per active ordered body-pair call and released after processing it.
+allocated when acceleration is disabled. When enabled, four Jolt scratch
+arrays are **reused across both query directions and all soft-body pairs**
+within one simulation pre-step, avoiding per-pair allocator churn.
+Scratch retains the peak O(F) capacity for that step and is released
+at the end of the step.
 
 ### Limits
 
