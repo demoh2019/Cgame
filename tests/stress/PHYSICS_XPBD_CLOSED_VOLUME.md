@@ -40,6 +40,8 @@ implementation.
   belong to exactly two triangles with opposite directions. Degenerate
   edges, boundary edges, non-manifold edges, inconsistent winding, zero
   or non-finite signed rest volume automatically disable this constraint.
+  Degeneracy uses a **relative scale-aware volume tolerance**, so a small
+  but nondegenerate closed tetrahedron is not incorrectly classified as open.
   **Open cloth meshes remain unaffected**.
 - Before the first volume solve after a mesh/repose update, validate mesh
   topology and capture signed rest volume from the positions *before*
@@ -56,12 +58,15 @@ implementation.
   carrying stale constraints between unrelated steps.
 - Inverse-mass-zero (pinned) vertices remain fixed. All-pinned and
   degenerate constraints are skipped, with checks for non-finite
-  correction terms.
+  correction terms. Gradient norms are accumulated in double before
+  conversion to real_t; a proposed correction is validated for **all**
+  movable vertices before any position or multiplier is committed.
 - Volume solve is interleaved with whichever existing edge solver the
   world uses: XPBD distance or Bullet-derived PBD. It can be enabled
   independently of edge compliance. Wind, gravity, pressure, collision,
   bending links, damping, shrinking and existing node velocities are
-  not removed.
+  not removed. The newer **XPBD triangle-area** constraint and opt-in
+  **viscoplasticity** are both preserved and interleaved in the same solver.
 
 Volume preservation is **not** pressure. Pressure applies outward forces
 that may change the rest volume; XPBD resists volume deviations.
@@ -88,6 +93,7 @@ is recommended before adopting in production.
 ```sh
 # Python wiring and safety contracts.
 python3 -m unittest discover -s tests/stress -p 'test_physics_xpbd_volume.py' -v
+python3 -m unittest discover -s tests/stress -p 'test_physics_xpbd_volume_numeric.py' -v
 
 # Native C++ numerical regression (requires a Cgame editor built tests=yes).
 ./bin/godot.linuxbsd.editor.dev.x86_64 --headless --test \
