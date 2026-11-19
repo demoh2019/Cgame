@@ -33,11 +33,12 @@
 
 #include "core/templates/local_vector.h"
 
+#include <algorithm>
 #include <utility>
 
 // Conservative CPU tetrahedralization for a CLOSED, consistently oriented,
-// strictly convex triangulated SoftBody3D surface. The caller must validate
-// manifold topology first (GodotSoftBody3D::initialize_volume_constraint).
+// strictly convex triangulated SoftBody3D surface. Both this cooker AND
+// GodotSoftBody3D validate oriented manifold topology independently.
 //
 // A fan from surface vertex 0 produces one tetrahedron per triangle not
 // incident to that vertex. For convex bodies, tetra interiors are disjoint,
@@ -96,6 +97,58 @@ _FORCE_INLINE_ bool physics_fem_build_convex_star_tetrahedra(
 	}
 	if (!(extent > 0.0) || !Math::is_finite(extent)) {
 		return false;
+	}
+
+	// Independently reject open edges, same-direction windings and
+	// non-manifold shared edges. Sort compact edge keys rather than using
+	// a per-face hash table; this work happens once at FEM setup.
+	struct FEMOrientedEdge {
+		uint32_t lo = 0;
+		uint32_t hi = 0;
+		uint8_t direction = 0;
+	};
+	LocalVector<FEMOrientedEdge> oriented_edges;
+	oriented_edges.reserve(p_faces.size() * 3);
+	for (const PhysicsFEMConvexFace &face : p_faces) {
+		if (face.a >= p_positions.size() || face.b >= p_positions.size() ||
+				face.c >= p_positions.size() || face.a == face.b ||
+				face.b == face.c || face.c == face.a) {
+			return false;
+		}
+		const uint32_t ids[3] = { face.a, face.b, face.c };
+		for (int j = 0; j < 3; ++j) {
+			const uint32_t a = ids[j];
+			const uint32_t b = ids[(j + 1) % 3];
+			FEMOrientedEdge edge;
+			edge.lo = a < b ? a : b;
+			edge.hi = a < b ? b : a;
+			edge.direction = a < b ? uint8_t(1) : uint8_t(2);
+			oriented_edges.push_back(edge);
+		}
+	}
+	std::sort(oriented_edges.ptr(), oriented_edges.ptr() + oriented_edges.size(),
+			[](const FEMOrientedEdge &a, const FEMOrientedEdge &b) {
+				if (a.lo != b.lo) {
+					return a.lo < b.lo;
+				}
+				if (a.hi != b.hi) {
+					return a.hi < b.hi;
+				}
+				return a.direction < b.direction;
+			});
+	for (uint32_t i = 0; i < oriented_edges.size(); i += 2) {
+		if (i + 1 >= oriented_edges.size()) {
+			return false;
+		}
+		const FEMOrientedEdge &first = oriented_edges[i];
+		const FEMOrientedEdge &second = oriented_edges[i + 1];
+		if (first.lo != second.lo || first.hi != second.hi ||
+				first.direction == second.direction ||
+				(i + 2 < oriented_edges.size() &&
+						oriented_edges[i + 2].lo == first.lo &&
+						oriented_edges[i + 2].hi == first.hi)) {
+			return false;
+		}
 	}
 
 	// Strict convexity: every other point must be inside the halfspace
