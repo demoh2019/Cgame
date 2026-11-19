@@ -13,6 +13,10 @@
 
 #include "../terrain_mesh.h"
 
+#include "core/io/resource_loader.h"
+#include "core/io/resource_saver.h"
+#include "tests/test_utils.h"
+
 #include "tests/test_macros.h"
 
 namespace TestTerrainMesh {
@@ -265,6 +269,43 @@ TEST_CASE("[TerrainMesh] Segment picking rejects rays outside or away from terra
 	CHECK_FALSE(terrain->intersect_segment(Vector3(1, 10, 1), Vector3(1, 1, 1), hit));
 	CHECK_FALSE(terrain->intersect_segment(Vector3(1, 0, 1), Vector3(1, 0, 1), hit));
 	CHECK(hit == Vector3(99, 99, 99));
+}
+
+TEST_CASE("[TerrainMesh] Resource save and reload preserves a non-square edited heightfield") {
+	Ref<TerrainMesh> terrain = make_terrain(Vector2i(5, 3));
+	terrain->set_cell_size(2.5f);
+	terrain->set_height_scale(4.0f);
+	terrain->set_height(0, 0, -3.0f);
+	terrain->set_height(4, 2, 7.0f);
+	const String path = TestUtils::get_temp_path("terrain_round_trip.tres");
+	REQUIRE(ResourceSaver::save(terrain, path) == OK);
+
+	Ref<Resource> resource = ResourceLoader::load(path, "", ResourceLoader::CACHE_MODE_IGNORE);
+	Ref<TerrainMesh> restored = resource;
+	REQUIRE(restored.is_valid());
+	CHECK(restored->get_grid_size() == Vector2i(5, 3));
+	CHECK(restored->get_cell_size() == doctest::Approx(2.5f));
+	CHECK(restored->get_height_scale() == doctest::Approx(4.0f));
+	CHECK(restored->get_heights() == terrain->get_heights());
+	CHECK(restored->get_height(4, 2) == doctest::Approx(7.0f));
+}
+
+TEST_CASE("[TerrainMesh] Picking at cell seams and corners is stable") {
+	Ref<TerrainMesh> terrain = make_terrain(Vector2i(4, 4));
+	Vector3 hit;
+	REQUIRE(terrain->intersect_segment(Vector3(1, 5, 1), Vector3(1, -5, 1), hit));
+	CHECK(hit.is_equal_approx(Vector3(1, 0, 1)));
+	REQUIRE(terrain->intersect_segment(Vector3(3, 5, 3), Vector3(3, -5, 3), hit));
+	CHECK(hit.is_equal_approx(Vector3(3, 0, 3)));
+}
+
+TEST_CASE("[TerrainMesh] Terrain samples do not change when merely ray-picking") {
+	Ref<TerrainMesh> terrain = make_terrain();
+	terrain->set_height(1, 1, 5.0f);
+	const PackedFloat32Array before = terrain->get_heights();
+	Vector3 hit;
+	terrain->intersect_segment(Vector3(1, 10, 1), Vector3(1, -10, 1), hit);
+	CHECK(terrain->get_heights() == before);
 }
 
 } // namespace TestTerrainMesh
