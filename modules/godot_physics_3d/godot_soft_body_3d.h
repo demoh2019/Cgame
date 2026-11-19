@@ -61,12 +61,10 @@ class GodotSoftBody3D : public GodotCollisionObject3D {
 	};
 
 	struct Link {
-		Vector3 c3; // gradient
 		Node *n[2] = { nullptr, nullptr }; // Node pointers
 		real_t rl = 0.0; // Rest length
 		real_t c0 = 0.0; // (ima+imb)*kLST
 		real_t c1 = 0.0; // rl^2
-		real_t c2 = 0.0; // |gradient|^2/c0
 	};
 
 	struct Face {
