@@ -70,27 +70,29 @@ def _references(text, suffix):
             continue
         if char in ("'", '"'):
             quote = char
-            index += 1
-            value = []
-            terminated = False
-            while index < length:
-                character = text[index]
-                if character == "\\" and index + 1 < length:
-                    # Keep the escape explicitly so unsafe/ambiguous paths fail validation.
-                    value.append(character)
-                    value.append(text[index + 1])
-                    index += 2
-                    continue
-                if character == quote:
-                    terminated = True
-                    index += 1
+            value_start = index + 1
+            search_from = value_start
+            # Let the C-level string search skip ordinary literal content.
+            # A quote closes only when preceded by an even number of slashes.
+            # This preserves escaped quotes and original literal backslashes,
+            # without building a character list for unrelated strings.
+            while True:
+                closing = text.find(quote, search_from)
+                if closing < 0:
+                    index = length
                     break
-                value.append(character)
-                index += 1
-            if terminated:
-                candidate = "".join(value)
-                if candidate.startswith("res://"):
-                    result.add(candidate[6:])
+                escaped = False
+                scan = closing - 1
+                while scan >= value_start and text[scan] == "\\":
+                    escaped = not escaped
+                    scan -= 1
+                if escaped:
+                    search_from = closing + 1
+                    continue
+                if text.startswith("res://", value_start):
+                    result.add(text[value_start + 6:closing])
+                index = closing + 1
+                break
             continue
         index += 1
     return sorted(result)
