@@ -263,6 +263,34 @@ func c_contract(action: String) -> void:
 
 
 @rpc("any_peer", "reliable")
+func c_trade_invite(target_id: int) -> void:
+	var peer := multiplayer.get_remote_sender_id()
+	if _allowed(peer):
+		s_result.rpc_id(peer, "trade", sim.cmd_trade_invite(peer, target_id))
+
+
+@rpc("any_peer", "reliable")
+func c_trade_offer(trade_id: int, item_id: String, quantity: int) -> void:
+	var peer := multiplayer.get_remote_sender_id()
+	if _allowed(peer):
+		s_result.rpc_id(peer, "trade", sim.cmd_trade_offer(peer, trade_id, item_id, quantity))
+
+
+@rpc("any_peer", "reliable")
+func c_trade_accept(trade_id: int, revision: int) -> void:
+	var peer := multiplayer.get_remote_sender_id()
+	if _allowed(peer):
+		s_result.rpc_id(peer, "trade", sim.cmd_trade_accept(peer, trade_id, revision))
+
+
+@rpc("any_peer", "reliable")
+func c_trade_cancel(trade_id: int) -> void:
+	var peer := multiplayer.get_remote_sender_id()
+	if _allowed(peer):
+		s_result.rpc_id(peer, "trade", sim.cmd_trade_cancel(peer, trade_id))
+
+
+@rpc("any_peer", "reliable")
 func c_vendor(item_id: String, quantity: int, buy: bool) -> void:
 	var peer := multiplayer.get_remote_sender_id()
 	if _allowed(peer):
@@ -398,6 +426,8 @@ func _event_visible_to(event: Dictionary, peer: int) -> bool:
 	match event["type"]:
 		"spawn", "zone", "gathered", "crate":
 			return event.get("peer", -1) == peer
+		"trade":
+			return event.get("a", -1) == peer or event.get("b", -1) == peer
 		"death":
 			return true # Everyone hears that somebody died (no position is shared).
 		"hit":

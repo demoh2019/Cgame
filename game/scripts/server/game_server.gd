@@ -7,6 +7,7 @@ const Defs = preload("res://scripts/shared/defs.gd")
 const WorldGen = preload("res://scripts/shared/world_gen.gd")
 const Inventory = preload("res://scripts/shared/inventory.gd")
 const Vendor = preload("res://scripts/shared/vendor.gd")
+const PlayerTrade = preload("res://scripts/shared/player_trade.gd")
 const Contracts = preload("res://scripts/shared/contracts.gd")
 const SaveValidation = preload("res://scripts/shared/save_validation.gd")
 const Crafting = preload("res://scripts/shared/crafting.gd")
@@ -20,6 +21,8 @@ const Progression = preload("res://scripts/shared/progression.gd")
 
 const WORKBENCH_POSITION := Vector2(9.0, 0.0)
 const WORKBENCH_RANGE := 6.0
+const TRADE_RANGE := 6.0
+const TRADE_TIMEOUT := 45.0
 const ZOMBIE_ACTIVE_RADIUS := 130.0 # Zombies farther than this from every player are put to sleep.
 const ZOMBIE_PACK_ALERT_RADIUS := 18.0
 const ZOMBIE_PACK_BUCKET_SIZE := 18.0
@@ -67,6 +70,8 @@ var depleted: Dictionary = {} # node id -> time it comes back
 var opened_crates: Dictionary = {} # crate id -> time it refills
 var spawn_state: Dictionary = {} # spawn id -> {"zombie": id or -1, "next": time}
 var barricades: Dictionary = {} # Server-owned structures; authenticated walls may persist.
+var trades: Dictionary = {} # trade id -> offer/accept/expiry
+var trade_by_player: Dictionary = {} # peer -> active trade
 var world_structure_revision: int = 0
 var bags: Dictionary = {} # bag id -> {"id", "x","y","z", "items": {id: n}, "expires": t}
 var events: Array = [] # Things that happened this tick, for the network layer to announce.
@@ -222,6 +227,7 @@ func valid_character_data(data: Dictionary) -> bool:
 
 
 func remove_player(peer_id: int) -> void:
+	_cancel_player_trade(peer_id, "disconnected")
 	var player: Player = players.get(peer_id)
 	if player != null and not player.user_id.is_empty():
 		for wall in barricades.values():
@@ -351,6 +357,162 @@ func cmd_craft(peer_id: int, recipe_id: String, times: int = 1) -> Dictionary:
 		player.dirty_character = true
 		return {"ok": true}
 	return {"ok": false, "reason": ["ok", "unknown_recipe", "missing_inputs", "no_station", "no_space"][status]}
+
+
+# --- Direct player trade -------------------------------------------------------------------------------
+# All operations are synchronous on the authoritative tick; no client-provided
+# price, inventory balance or confirmation flag is trusted.
+
+func _trade_available(first_id: int, second_id: int) -> bool:
+	var first: Player = players.get(first_id)
+	var second: Player = players.get(second_id)
+	if first == null or second == null or not _alive(first) or not _alive(second):
+		return false
+	var first_at := Vector2(first.position.x, first.position.z)
+	var second_at := Vector2(second.position.x, second.position.z)
+	return first_at.is_finite() and second_at.is_finite() \
+		and _is_safe(first.position) and _is_safe(second.position) \
+		and first_at.distance_to(second_at) <= TRADE_RANGE
+
+
+func _get_trade(peer_id: int, trade_id: int) -> Dictionary:
+	var trade: Dictionary = trades.get(trade_id, {})
+	if trade.is_empty() or (int(trade["a"]) != peer_id and int(trade["b"]) != peer_id):
+		return {}
+	return trade
+
+
+func _announce_trade(trade: Dictionary, phase: String, reason: String = "") -> void:
+	events.append({
+		"type": "trade", "phase": phase, "reason": reason, "id": trade["id"],
+		"a": trade["a"], "b": trade["b"], "revision": trade["revision"],
+		"offer_a": trade["offers"][trade["a"]].duplicate(),
+		"offer_b": trade["offers"][trade["b"]].duplicate(),
+		"accepted_a": trade["accepted"][trade["a"]],
+		"accepted_b": trade["accepted"][trade["b"]],
+	})
+
+
+func _close_trade(trade: Dictionary, phase: String, reason: String = "") -> void:
+	trades.erase(trade["id"])
+	trade_by_player.erase(trade["a"])
+	trade_by_player.erase(trade["b"])
+	_announce_trade(trade, phase, reason)
+
+
+func _cancel_player_trade(peer_id: int, reason: String) -> void:
+	if not trade_by_player.has(peer_id):
+		return
+	var trade_id: int = int(trade_by_player[peer_id])
+	var trade: Dictionary = trades.get(trade_id, {})
+	if not trade.is_empty():
+		_close_trade(trade, "cancelled", reason)
+	else:
+		trade_by_player.erase(peer_id)
+
+
+func cmd_trade_invite(peer_id: int, target_id: int) -> Dictionary:
+	if peer_id == target_id or not players.has(peer_id) or not players.has(target_id):
+		return {"ok": false, "reason": "invalid_target"}
+	if trade_by_player.has(peer_id) or trade_by_player.has(target_id):
+		return {"ok": false, "reason": "busy"}
+	if not _trade_available(peer_id, target_id):
+		return {"ok": false, "reason": "not_in_safe_range"}
+	var trade_id := new_id()
+	var trade := {
+		"id": trade_id, "a": peer_id, "b": target_id,
+		"offers": {peer_id: {}, target_id: {}},
+		"accepted": {peer_id: false, target_id: false},
+		"revision": 0, "expires": time + TRADE_TIMEOUT,
+	}
+	trades[trade_id] = trade
+	trade_by_player[peer_id] = trade_id
+	trade_by_player[target_id] = trade_id
+	_announce_trade(trade, "invited")
+	return {"ok": true, "trade_id": trade_id, "revision": 0}
+
+
+## A zero count removes an offer line. Every change clears BOTH confirmations.
+func cmd_trade_offer(peer_id: int, trade_id: int, item_id: String, count: int) -> Dictionary:
+	var trade := _get_trade(peer_id, trade_id)
+	if trade.is_empty():
+		return {"ok": false, "reason": "unknown_trade"}
+	if not _trade_available(int(trade["a"]), int(trade["b"])) or time >= float(trade["expires"]):
+		_close_trade(trade, "cancelled", "out_of_range")
+		return {"ok": false, "reason": "out_of_range"}
+	if not Defs.is_item(item_id) or count < 0 or count > Defs.stack_size(item_id):
+		return {"ok": false, "reason": "invalid_stack"}
+	var offer: Dictionary = trade["offers"][peer_id]
+	if count > 0 and players[peer_id].inventory.count(item_id) < count:
+		return {"ok": false, "reason": "missing_items"}
+	if count > 0 and not offer.has(item_id) and offer.size() >= PlayerTrade.MAX_OFFER_LINES:
+		return {"ok": false, "reason": "too_many_items"}
+	if count == 0:
+		offer.erase(item_id)
+	else:
+		offer[item_id] = count
+	trade["accepted"][trade["a"]] = false
+	trade["accepted"][trade["b"]] = false
+	trade["revision"] = int(trade["revision"]) + 1
+	trade["expires"] = time + TRADE_TIMEOUT
+	_announce_trade(trade, "offered")
+	return {"ok": true, "trade_id": trade_id, "revision": trade["revision"]}
+
+
+## The revision is the number from the latest trade event. Stale confirmation
+## packets cannot accept a new or changed proposal.
+func cmd_trade_accept(peer_id: int, trade_id: int, revision: int) -> Dictionary:
+	var trade := _get_trade(peer_id, trade_id)
+	if trade.is_empty():
+		return {"ok": false, "reason": "unknown_trade"}
+	if not _trade_available(int(trade["a"]), int(trade["b"])) or time >= float(trade["expires"]):
+		_close_trade(trade, "cancelled", "out_of_range")
+		return {"ok": false, "reason": "out_of_range"}
+	if revision != int(trade["revision"]):
+		return {"ok": false, "reason": "stale_revision", "revision": trade["revision"]}
+	if trade["accepted"][peer_id]:
+		return {"ok": false, "reason": "already_accepted"}
+	trade["accepted"][peer_id] = true
+	if not trade["accepted"][trade["a"]] or not trade["accepted"][trade["b"]]:
+		_announce_trade(trade, "accepted")
+		return {"ok": true, "completed": false, "revision": revision}
+	var first: Player = players[int(trade["a"])]
+	var second: Player = players[int(trade["b"])]
+	var result: Dictionary = PlayerTrade.exchange(
+		first.inventory, second.inventory,
+		trade["offers"][trade["a"]], trade["offers"][trade["b"]]
+	)
+	if not result.get("ok", false):
+		trade["accepted"][trade["a"]] = false
+		trade["accepted"][trade["b"]] = false
+		trade["revision"] = int(trade["revision"]) + 1
+		_announce_trade(trade, "rejected", str(result["reason"]))
+		return {"ok": false, "reason": result["reason"], "revision": trade["revision"]}
+	first.dirty_inventory = true
+	second.dirty_inventory = true
+	first.dirty_character = true
+	second.dirty_character = true
+	_close_trade(trade, "completed")
+	return {"ok": true, "completed": true, "trade_id": trade_id}
+
+
+func cmd_trade_cancel(peer_id: int, trade_id: int) -> Dictionary:
+	var trade := _get_trade(peer_id, trade_id)
+	if trade.is_empty():
+		return {"ok": false, "reason": "unknown_trade"}
+	_close_trade(trade, "cancelled", "by_player")
+	return {"ok": true}
+
+
+func _tick_trades() -> void:
+	for trade_id in trades.keys():
+		var trade: Dictionary = trades.get(trade_id, {})
+		if trade.is_empty():
+			continue
+		if time >= float(trade["expires"]):
+			_close_trade(trade, "cancelled", "expired")
+		elif not _trade_available(int(trade["a"]), int(trade["b"])):
+			_close_trade(trade, "cancelled", "out_of_range")
 
 
 ## The safe-hub vendor uses server position and inventory only.
@@ -845,6 +1007,7 @@ func _on_zombie_death(zombie) -> void:
 
 ## Full-loot deaths occur in red/black. Green/yellow deaths retain gear.
 func _on_player_death(victim: Player, killer: int) -> void:
+	_cancel_player_trade(victim.id, "dead")
 	victim.deaths += 1
 	victim.dirty_character = true
 	victim.action = {}
@@ -868,6 +1031,7 @@ func tick(delta: float) -> void:
 		events = events.slice(events.size() - 1000)
 	time += delta
 	tick_count += 1
+	_tick_trades()
 	_tick_players(delta)
 	_tick_zombies(delta)
 	_tick_world(delta)
