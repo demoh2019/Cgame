@@ -1153,17 +1153,18 @@ static void _collision_box_box(const GodotShape3D *p_a, const Transform3D &p_tra
 		return;
 	}
 
-	// Both boxes are exactly axis-aligned and have no rounded margins:
-	// their face normals and all nonzero edge-cross axes reduce to the
-	// three world-space axes. Test each axis only once, avoiding six
-	// redundant face projections and all nine cross-product candidates.
-	// Do not use this path for rotated, scaled or sheared boxes, or for
-	// margin-expanded geometry where additional feature axes matter.
-	if (!p_with_margin && p_transform_a.basis == Basis() && p_transform_b.basis == Basis()) {
+	// Box2D/Box3D-style SAT axis deduplication. Two boxes with exactly
+	// the same rigid rotation (including identity) have only three unique
+	// face/edge-cross axes. Reject scaled or sheared transforms: for those,
+	// non-face edge directions can still separate the boxes. The rotation
+	// check also guards numerical validity of the orthonormal basis.
+	const Basis &basis_a = p_transform_a.basis;
+	const bool shared_orthonormal_basis = !p_with_margin &&
+			basis_a == p_transform_b.basis &&
+			(basis_a == Basis() || basis_a.is_rotation());
+	if (shared_orthonormal_basis) {
 		for (int i = 0; i < 3; ++i) {
-			Vector3 axis(0, 0, 0);
-			axis[i] = 1.0;
-			if (!separator.test_axis(axis)) {
+			if (!separator.test_axis(basis_a.get_column(i))) {
 				return;
 			}
 		}
