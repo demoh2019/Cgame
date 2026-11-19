@@ -1,0 +1,22 @@
+name: XPBD SoftBody edge/edge scale contracts
+
+on:
+  pull_request:
+    paths:
+      - "servers/physics_xpbd_edge_collision.h"
+      - "servers/physics_xpbd_edge_friction.h"
+      - "tests/servers/test_physics_xpbd_edge_scale.cpp"
+      - "tests/stress/test_physics_xpbd_edge_scale.py"
+      - ".github/workflows/physics-xpbd-edge-scale.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  edge-scale-source-contracts:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Check extreme-scale edge/edge collision formulas
+        run: python3 -m unittest discover -s tests/stress -p test_physics_xpbd_edge_scale.py -v
