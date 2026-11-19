@@ -2069,6 +2069,57 @@ the **same case** on the pre-change and post-change engine binaries
 isolates the optimization's contribution. These source/mathematical
 checks do not replace C++ compilation and headless tests.
 
+### Coincident-center 2D circle analytic manifold (Box2D-style)
+
+GodotPhysics2D already used an analytic circle-circle narrowphase for
+overlapping circles with distinct centers, but when the centers were
+**exactly coincident**, it fell back to a generic SAT query and support
+generation to avoid normalizing the zero vector.
+
+The analytic path now handles coincident centers with positive effective
+combined radius. For that degenerate direction, it uses the existing
+cached separation axis (when finite/nonzero), or the legacy SAT's
+deterministic -Y manifold direction. This yields one finite contact
+without SAT projections. The separation, penetration depth, friction
+and impulse sign are preserved. Both effective radii must remain
+nonnegative; a pair of zero-radius points, non-unit/sheer transforms
+and swept contacts still use the old SAT path. Collision margins
+remain included in the circle support radii.
+
+The approach follows Box2D's specialized circle-circle contact
+manifold principle, while retaining Godot's existing contact callback.
+There are no new heap allocations or project settings.
+
+A 10,000-sample Python reference validates contact orientation and
+separation depth under randomized positive radii/cached axis choices.
+The headless regression includes coincident, offset, separated and
+nonuniformly scaled circle pairs, plus a dynamic circle starting at
+exactly the same position as a static circle:
+
+```bash
+python3 -m unittest discover -s tests/stress -p 'test_physics_2d_coincident_circle_contacts.py' -v
+./bin/godot.macos.editor.arm64 --headless --path tests/stress \
+  --script res://physics_coincident_circles_2d_regression.gd
+```
+
+Two benchmark cases create 256 static/dynamic circle pairs per scale.
+The first repeatedly re-centers each dynamic circle on its static
+partner; the second starts with a 0.4-unit relative offset.
+Both repeatedly drive fresh narrowphase work and record physics frame
+p95 and peak RSS through the stress runner:
+
+```bash
+python3 tests/stress/run.py --godot ./bin/godot.macos.editor.arm64 \
+  --case physics_circles_coincident_2d,physics_circles_offset_2d \
+  --scale 4 --frames 90 --repeats 5 --rss-limit-mib 4096 \
+  --output out/physics-circle-coincident-2d.json
+```
+
+The two workloads have different contact geometries. To establish
+the optimization's speedup, compare each workload against its *same*
+scene on a pre-change Cgame binary and run the headless test after
+compiling. Source tests alone do not demonstrate CPU or RAM gains.
+
 ### Embedded 2D circle/rectangle analytic manifolds (Box2D-style)
 
 GodotPhysics2D now handles an additional common narrowphase case without a
