@@ -260,7 +260,9 @@ struct CollidingHash {
 };
 
 TEST_CASE("[HashMap] Clear sparse reserved table handles collision clusters") {
-	for (int count : { 1, 8, 16, 17 }) {
+	// 17/32/64 entries exercise the extended sparse path; 65 checks
+	// the contiguous full-table clear fallback at the same capacity.
+	for (int count : { 1, 8, 16, 17, 32, 64, 65 }) {
 		HashMap<int, int, CollidingHash> map;
 		map.reserve(16384);
 		const uint32_t capacity = map.get_capacity();

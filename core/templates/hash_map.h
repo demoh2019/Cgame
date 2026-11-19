@@ -296,12 +296,12 @@ public:
 		}
 
 		const uint32_t capacity = get_capacity();
-		if (_size <= 16 && capacity >= 4096) {
+		if (_size <= 64 && capacity >= 4096 && _size <= capacity / 256) {
 			// For a mostly empty, highly reserved table, a full memset can
 			// touch megabytes of unused hash slots. Collect occupied indices
 			// before destroying any entries so Robin Hood lookups remain valid.
 			// This stays on the stack and does not change reserved capacity.
-			uint32_t occupied_slots[16];
+			uint32_t occupied_slots[64];
 			uint32_t occupied_count = 0;
 			for (HashMapElement<TKey, TValue> *entry = _head_element; entry != nullptr; entry = entry->next) {
 				uint32_t index = 0;
