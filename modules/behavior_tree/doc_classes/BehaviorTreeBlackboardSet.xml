@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<class name="BehaviorTreeBlackboardSet" inherits="BehaviorTreeTask" api_type="core" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="../../../doc/class.xsd">
+	<brief_description>Assigns a value to the current agent's blackboard.</brief_description>
+	<description>Writes [member value] to the dictionary entry [member key], then returns [constant BehaviorTreeTask.SUCCESS]. An empty key fails and makes no changes.</description>
+	<members>
+		<member name="key" type="StringName">Entry to assign.</member>
+		<member name="value" type="Variant">Value assigned to the entry.</member>
+	</members>
+</class>
