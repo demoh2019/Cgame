@@ -95,6 +95,10 @@ func _closed_cube_mesh() -> ArrayMesh:
     var arrays := []
     arrays.resize(Mesh.ARRAY_MAX)
     arrays[Mesh.ARRAY_VERTEX] = vertices
+    var normals := PackedVector3Array()
+    for vertex in vertices:
+        normals.append(vertex.normalized())
+    arrays[Mesh.ARRAY_NORMAL] = normals
     arrays[Mesh.ARRAY_INDEX] = indices
     var mesh := ArrayMesh.new()
     mesh.add_surface_from_arrays(Mesh.PRIMITIVE_TRIANGLES, arrays)
@@ -102,9 +106,9 @@ func _closed_cube_mesh() -> ArrayMesh:
 
 
 func _add_soft_cubes() -> void:
-    var mesh := _closed_cube_mesh()
-    _add_soft("LightFloatingSoftBody", Vector3(-3.0, 2.7, 0), mesh, 6.0, Color("#92edd2"))
-    _add_soft("HeavySinkingSoftBody", Vector3(3.0, 2.7, 0), mesh, 45.0, Color("#f3b196"))
+    # Give each independently simulated hull a distinct mesh resource.
+    _add_soft("LightFloatingSoftBody", Vector3(-3.0, 2.7, 0), _closed_cube_mesh(), 6.0, Color("#92edd2"))
+    _add_soft("HeavySinkingSoftBody", Vector3(3.0, 2.7, 0), _closed_cube_mesh(), 45.0, Color("#f3b196"))
 
 
 func _add_soft(name: String, pos: Vector3, soft_mesh: Mesh, total_mass: float, color: Color) -> void:
