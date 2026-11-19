@@ -61,8 +61,11 @@ struct PhysicsPBFDensityPressure3D {
 			return 0.0;
 		}
 		const double predicted = p_density + p_delta * p_density_rate;
-		return Math::is_finite(predicted) ?
-				real_t(MAX(predicted, 0.0)) : real_t(0.0);
+		if (!Math::is_finite(predicted)) {
+			return 0.0;
+		}
+		const real_t result = real_t(MAX(predicted, 0.0));
+		return Math::is_finite(result) ? result : real_t(0.0);
 	}
 
 	static _FORCE_INLINE_ real_t positive_density_error(
@@ -72,7 +75,8 @@ struct PhysicsPBFDensityPressure3D {
 			return 0.0;
 		}
 		const double excess = MAX(p_predicted_density / p_rest_density - 1.0, 0.0);
-		return Math::is_finite(excess) ? real_t(excess) : real_t(0.0);
+		const real_t result = real_t(excess);
+		return Math::is_finite(result) ? result : real_t(0.0);
 	}
 
 	static _FORCE_INLINE_ real_t pressure_rate_constraint(
@@ -82,6 +86,7 @@ struct PhysicsPBFDensityPressure3D {
 		}
 		const double error = positive_density_error(p_predicted_density, p_rest_density);
 		const double rate = error / p_delta;
-		return Math::is_finite(rate) ? real_t(rate) : real_t(0.0);
+		const real_t result = real_t(rate);
+		return Math::is_finite(result) ? result : real_t(0.0);
 	}
 };
