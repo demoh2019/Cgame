@@ -822,31 +822,33 @@ GodotCylinderShape3D::GodotCylinderShape3D() {}
 /********** CONVEX POLYGON *************/
 
 void GodotConvexPolygonShape3D::project_range(const Vector3 &p_normal, const Transform3D &p_transform, real_t &r_min, real_t &r_max) const {
-	uint32_t vertex_count = mesh.vertices.size();
+	const uint32_t vertex_count = mesh.vertices.size();
 	if (vertex_count == 0) {
 		return;
 	}
 
-	const Vector3 *vrts = &mesh.vertices[0];
+	// The projection of a transformed vertex is dot(B^T * n, vertex) +
+	// dot(n, origin). Reuse the local axis instead of transforming each
+	// vertex on every SAT test; this also works for shear and scale.
+	const Vector3 local_axis = p_transform.basis.xform_inv(p_normal);
+	const real_t center = p_normal.dot(p_transform.origin);
 
 	if (vertex_count > 3 * extreme_vertices.size()) {
-		// For a large mesh, two calls to get_support() is faster than a full
-		// scan over all vertices.
-
-		Vector3 n = p_transform.basis.xform_inv(p_normal).normalized();
-		r_min = p_normal.dot(p_transform.xform(get_support(-n)));
-		r_max = p_normal.dot(p_transform.xform(get_support(n)));
+		// For larger meshes, the hill-climbing support search needs only the
+		// local direction; normalizing it and transforming the supports is unnecessary.
+		r_min = center + local_axis.dot(get_support(-local_axis));
+		r_max = center + local_axis.dot(get_support(local_axis));
 	} else {
-		for (uint32_t i = 0; i < vertex_count; i++) {
-			real_t d = p_normal.dot(p_transform.xform(vrts[i]));
-
-			if (i == 0 || d > r_max) {
-				r_max = d;
-			}
-			if (i == 0 || d < r_min) {
-				r_min = d;
-			}
+		const Vector3 *const vertices = mesh.vertices.ptr();
+		real_t projected_min = local_axis.dot(vertices[0]);
+		real_t projected_max = projected_min;
+		for (uint32_t i = 1; i < vertex_count; i++) {
+			const real_t value = local_axis.dot(vertices[i]);
+			projected_min = MIN(projected_min, value);
+			projected_max = MAX(projected_max, value);
 		}
+		r_min = center + projected_min;
+		r_max = center + projected_max;
 	}
 }
 
