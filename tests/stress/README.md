@@ -1036,7 +1036,7 @@ measure both execution time and peak process RSS separately.
 ### Stationary broadphase filter toggles (2D / 3D)
 
 The `physics_filter_toggle_2d` and `physics_filter_toggle_3d` workloads create
-`16 * scale` overlapping Area/StaticBody pairs. They repeatedly switch only
+`16 * scale` overlapping Area/RigidBody pairs with zero gravity (Areas and static bodies are both in the static broadphase tree). They repeatedly switch only
 the area's collision mask while all transforms and collider shapes remain
 stationary, checking that monitoring results lose and regain the correct pairs.
 These cases catch stale BVH pair membership after mask/layer changes and measure
