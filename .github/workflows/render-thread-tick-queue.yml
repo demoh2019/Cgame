@@ -1,0 +1,51 @@
+name: RenderingServer threaded tick and pre_draw dispatch
+
+on:
+  pull_request:
+    branches: [develop]
+    paths:
+      - "servers/rendering/rendering_server_default.cpp"
+      - "servers/rendering/rendering_server_default.h"
+      - "misc/scripts/tests/test_render_thread_tick_queue.py"
+      - ".github/workflows/render-thread-tick-queue.yml"
+  push:
+    branches: [develop]
+    paths:
+      - "servers/rendering/rendering_server_default.cpp"
+      - "servers/rendering/rendering_server_default.h"
+      - "misc/scripts/tests/test_render_thread_tick_queue.py"
+      - ".github/workflows/render-thread-tick-queue.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  source-contracts:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - run: |
+          python3 -m py_compile misc/scripts/tests/test_render_thread_tick_queue.py
+          python3 -m unittest discover -s misc/scripts/tests -p test_render_thread_tick_queue.py -v
+
+  linux-render-server-build:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+      - uses: ./.github/actions/godot-deps
+      - uses: ./.github/actions/godot-build
+        with:
+          platform: linuxbsd
+          target: editor
+          scons-flags: dev_build=yes tests=yes debug_symbols=no module_mono_enabled=no accesskit=no
+      - name: Headless editor startup
+        run: |
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/render-thread-test"
+          printf '[application]\nconfig/name="Rendering thread regression"\n' > "$RUNNER_TEMP/render-thread-test/project.godot"
+          timeout 120s ./bin/godot.linuxbsd.editor.dev.x86_64 --headless --editor --path "$RUNNER_TEMP/render-thread-test" --quit
