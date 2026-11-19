@@ -1184,4 +1184,97 @@ TEST_CASE("[Node][PlaceholderUndo] Repeated toggles retain separate undo actions
 	memdelete(node);
 }
 
+TEST_CASE("[SceneTree][Node] find_children iterative traversal preserves node ordering and ownership") {
+	Node *root = memnew(Node);
+
+	Node *front = memnew(Node);
+	front->set_name("Front");
+	root->add_child(front, false, Node::INTERNAL_MODE_FRONT);
+
+	Node *branch_a = memnew(Node);
+	branch_a->set_name("BranchA");
+	root->add_child(branch_a);
+
+	Node *leaf_a = memnew(Node);
+	leaf_a->set_name("LeafA");
+	branch_a->add_child(leaf_a);
+
+	Node *deep_a = memnew(Node);
+	deep_a->set_name("DeepA");
+	leaf_a->add_child(deep_a);
+
+	Node *branch_b = memnew(Node);
+	branch_b->set_name("BranchB");
+	root->add_child(branch_b);
+
+	Node *leaf_b = memnew(Node);
+	leaf_b->set_name("LeafB");
+	branch_b->add_child(leaf_b);
+
+	Node *back = memnew(Node);
+	back->set_name("Back");
+	root->add_child(back, false, Node::INTERNAL_MODE_BACK);
+
+	TypedArray<Node> all = root->find_children("*", "", true, false);
+	REQUIRE(all.size() == 7);
+	CHECK(Object::cast_to<Node>(all[0]) == front);
+	CHECK(Object::cast_to<Node>(all[1]) == branch_a);
+	CHECK(Object::cast_to<Node>(all[2]) == leaf_a);
+	CHECK(Object::cast_to<Node>(all[3]) == deep_a);
+	CHECK(Object::cast_to<Node>(all[4]) == branch_b);
+	CHECK(Object::cast_to<Node>(all[5]) == leaf_b);
+	CHECK(Object::cast_to<Node>(all[6]) == back);
+
+	TypedArray<Node> shallow = root->find_children("*", "", false, false);
+	REQUIRE(shallow.size() == 4);
+	CHECK(Object::cast_to<Node>(shallow[0]) == front);
+	CHECK(Object::cast_to<Node>(shallow[1]) == branch_a);
+	CHECK(Object::cast_to<Node>(shallow[2]) == branch_b);
+	CHECK(Object::cast_to<Node>(shallow[3]) == back);
+
+	branch_a->set_owner(root);
+	leaf_a->set_owner(root);
+	deep_a->set_owner(root);
+	branch_b->set_owner(root);
+	// Leave internal nodes and leaf_b unowned.
+	TypedArray<Node> owned = root->find_children("*", "", true, true);
+	REQUIRE(owned.size() == 4);
+	CHECK(Object::cast_to<Node>(owned[0]) == branch_a);
+	CHECK(Object::cast_to<Node>(owned[1]) == leaf_a);
+	CHECK(Object::cast_to<Node>(owned[2]) == deep_a);
+	CHECK(Object::cast_to<Node>(owned[3]) == branch_b);
+
+	TypedArray<Node> name_filtered = root->find_children("Branch*", "", true, false);
+	REQUIRE(name_filtered.size() == 2);
+	CHECK(Object::cast_to<Node>(name_filtered[0]) == branch_a);
+	CHECK(Object::cast_to<Node>(name_filtered[1]) == branch_b);
+	CHECK(root->find_children("*", "Node3D", true, false).is_empty());
+
+	memdelete(root);
+}
+
+TEST_CASE("[SceneTree][Node] find_children iterative traversal handles deep scene trees") {
+	Node *root = memnew(Node);
+	Node *parent = root;
+	Node *last = nullptr;
+	for (int i = 0; i < 320; i++) {
+		Node *child = memnew(Node);
+		child->set_name("Nested_" + itos(i));
+		parent->add_child(child);
+		parent = child;
+		last = child;
+	}
+
+	TypedArray<Node> descendants = root->find_children("Nested_*", "", true, false);
+	REQUIRE(descendants.size() == 320);
+	CHECK(Object::cast_to<Node>(descendants[0]) == root->get_child(0));
+	CHECK(Object::cast_to<Node>(descendants[319]) == last);
+
+	TypedArray<Node> immediate = root->find_children("*", "", false, false);
+	REQUIRE(immediate.size() == 1);
+	CHECK(Object::cast_to<Node>(immediate[0]) == root->get_child(0));
+
+	memdelete(root);
+}
+
 } // namespace TestNode
