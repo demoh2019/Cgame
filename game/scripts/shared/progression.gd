@@ -7,9 +7,9 @@ const XP_PER_LEVEL := 100
 const MAX_XP := 100000000
 const GATHER_XP_PER_ITEM := 8
 const CRAFT_XP_PER_BATCH := 25
-const GATHER_SKILLS := ["wood", "stone", "ore", "fiber"]
+const GATHER_SKILLS := ["wood", "stone", "ore", "fiber", "fishing"]
 
-var gathering_xp: Dictionary = {"wood": 0, "stone": 0, "ore": 0, "fiber": 0}
+var gathering_xp: Dictionary = {"wood": 0, "stone": 0, "ore": 0, "fiber": 0, "fishing": 0}
 var crafting_xp: int = 0
 
 
@@ -19,6 +19,7 @@ static func resource_skill(kind: String) -> String:
 		"rock": return "stone"
 		"ore": return "ore"
 		"bush": return "fiber"
+		"fishing": return "fishing"
 		_: return "" # Berries are freely scavenged; unknown nodes have no skill.
 
 
@@ -85,12 +86,17 @@ func load_dict(data: Variant) -> bool:
 	if not (data is Dictionary):
 		return false
 	var source: Variant = data.get("gathering", null)
-	if not (source is Dictionary) or source.size() != GATHER_SKILLS.size():
+	if not (source is Dictionary) or source.size() not in [GATHER_SKILLS.size(), GATHER_SKILLS.size() - 1]:
 		return false
 	if not _valid_xp(data.get("crafting", null)):
 		return false
 	var clean: Dictionary = {}
 	for skill in GATHER_SKILLS:
+		# Save files made before fishing had only four gather professions.
+		# All other missing/forged fields remain invalid.
+		if skill == "fishing" and not source.has(skill):
+			clean[skill] = 0
+			continue
 		if not source.has(skill) or not _valid_xp(source[skill]):
 			return false
 		clean[skill] = int(source[skill])
