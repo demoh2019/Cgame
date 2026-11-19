@@ -52,3 +52,38 @@ game/tests/e2e/run_e2e.sh path/to/godot                                    # rea
 game/tests/e2e/run_e2e_nakama.sh path/to/godot                             # needs Nakama: sign-in, save, return
 godot --headless --path game --script res://tests/test_nakama_backend.gd   # Nakama RPC security and storage
 ```
+
+## Carrying capacity: survival scavenging + sandbox economy
+
+Carrying weight is now part of the **authoritative** online game in `game/`,
+not a separate `demo/days_after` prototype.
+
+- Every valid item has a deterministic weight based on its game category and
+  tier (e.g. water = 1 kg, T1 wood = 1.7 kg, T1 stone = 2.4 kg, T1 fiber = 0.35 kg).
+- The first **12 kg** does not slow movement. Above that, walk speed decreases
+  smoothly to **45%** at **38 kg** or more; sprint is disabled from **18 kg**.
+- Carried materials, ammunition, food and equipped gear share the same
+  inventory mass; an equipped weapon is counted **once**, not twice.
+  Silver is weightless. Protected hub stash contents are **not** carried.
+- The Godot headless world server computes load from its own inventory on
+  **every movement command**. The client cannot submit a false mass or bypass
+  the limit with sprint requests.
+- Client-side movement prediction uses the same rules and stores each input's
+  mass for accurate replay; server snapshots include `carry_grams` and
+  `can_sprint` for the HUD and reconciliation.
+- No forced hard cap: full bags and death-loot collection are still governed by
+  existing **slot/stack capacity**; excess mass slows movement instead of
+  deleting rewards or creating partial transaction failures.
+
+```sh
+godot --headless --path game --script res://tests/run_all.gd
+```
+
+`test_encumbrance.gd` is included in the default suite. It checks stack
+weight, equip/drop, tier rules, predicted movement, heavy-sprint blocking,
+the authoritative server snapshot and an attempted sprint exploit.
+
+This is **game balance**, so no generic C++ physics engine change was
+necessary. If a reusable movement or inventory engine primitive is genuinely
+missing in future features, add it to Cgame with an engine-level regression
+and exercise it in `game/`.
