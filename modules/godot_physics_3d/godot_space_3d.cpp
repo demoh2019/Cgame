@@ -251,6 +251,7 @@ bool GodotPhysicsDirectSpaceState3D::cast_motion(const PS3DT::ShapeParameters &p
 		GodotShape3D *shape;
 		AABB aabb;
 		Transform3D xform_inv;
+		Vector3 local_motion;
 		Vector3 motion_normal;
 		PS3DT::ShapeRestInfo *rest_info;
 		GodotMotionShape3D mshape;
@@ -260,9 +261,10 @@ bool GodotPhysicsDirectSpaceState3D::cast_motion(const PS3DT::ShapeParameters &p
 		Vector3 closest_A;
 		Vector3 closest_B;
 	};
-	CastQuery data = { p_parameters, shape, aabb, p_parameters.transform.affine_inverse(), p_parameters.motion.normalized(), r_info };
+	CastQuery data = { p_parameters, shape, aabb, p_parameters.transform.affine_inverse(), Vector3(), p_parameters.motion.normalized(), r_info };
+	data.local_motion = data.xform_inv.basis.xform(p_parameters.motion);
 	data.mshape.shape = shape;
-	data.mshape.motion = data.xform_inv.basis.xform(p_parameters.motion);
+	data.mshape.motion = data.local_motion;
 
 	auto visitor = [](GodotCollisionObject3D *p_object, int p_shape, void *p_userdata) -> bool {
 		CastQuery &data = *static_cast<CastQuery *>(p_userdata);
@@ -279,7 +281,7 @@ bool GodotPhysicsDirectSpaceState3D::cast_motion(const PS3DT::ShapeParameters &p
 		Transform3D col_obj_xform = col_obj->get_transform() * col_obj->get_shape_transform(shape_idx);
 		// Restore the full sweep before testing each candidate. The binary
 		// search below changes mshape.motion to partial fractions.
-		data.mshape.motion = data.xform_inv.basis.xform(data.params.motion);
+		data.mshape.motion = data.local_motion;
 		//test initial overlap, does it collide if going all the way?
 		if (GodotCollisionSolver3D::solve_distance(&data.mshape, data.params.transform, col_obj->get_shape(shape_idx), col_obj_xform, point_A, point_B, data.aabb, &sep_axis)) {
 			return true;
@@ -299,7 +301,7 @@ bool GodotPhysicsDirectSpaceState3D::cast_motion(const PS3DT::ShapeParameters &p
 		for (int j = 0; j < 8; j++) { //steps should be customizable..
 			real_t fraction = low + (hi - low) * fraction_coeff;
 
-			data.mshape.motion = data.xform_inv.basis.xform(data.params.motion * fraction);
+			data.mshape.motion = data.local_motion * fraction;
 
 			Vector3 lA, lB;
 			Vector3 sep = data.motion_normal; //important optimization for this to work fast enough
