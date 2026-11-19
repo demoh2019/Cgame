@@ -194,6 +194,18 @@ jobs:
             --script res://physics_jolt_pending_broadphase_regression.gd \
             2>&1 | tee physics-jolt-pending-broadphase.log
           grep -Fq 'Jolt pending broadphase regression passed.' physics-jolt-pending-broadphase.log
+      - name: Validate Jolt convex soft-body radial elasticity
+        shell: bash
+        run: |
+          set -euo pipefail
+          BIN=./bin/godot.linuxbsd.editor.dev.x86_64
+          PROJECT=tests/stress/jolt_radial
+          timeout 120s "$BIN" --headless --path "$PROJECT" \
+            --script res://radial_elasticity_regression.gd --check-only
+          timeout 180s "$BIN" --headless --path "$PROJECT" \
+            --script res://radial_elasticity_regression.gd \
+            2>&1 | tee jolt-radial-elasticity.log
+          grep -Fq 'PASS: radial convex soft-body elasticity stability' jolt-radial-elasticity.log
       - name: Validate Jolt convex soft-body volume preservation
         shell: bash
         run: |
