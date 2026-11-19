@@ -944,4 +944,97 @@ TEST_CASE("[DictionaryFastPath] repeat untyped reads preserve size and values") 
 	CHECK_EQ(dict.size(), 256);
 }
 
+TEST_CASE("[DictionaryFastPath] untyped lookup and mutable pointer") {
+	Dictionary dict;
+	dict[StringName("alpha")] = 10;
+	const Dictionary &read_view = dict;
+	CHECK_EQ(read_view[Variant(String("alpha"))], Variant(10));
+	Variant *stored = dict.getptr(Variant(String("alpha")));
+	REQUIRE(stored != nullptr);
+	*stored = 23;
+	CHECK_EQ(read_view[Variant(StringName("alpha"))], Variant(23));
+	CHECK(dict.getptr(Variant("missing")) == nullptr);
+	CHECK_EQ(dict.size(), 1);
+}
+
+TEST_CASE("[DictionaryFastPath] untyped set, erase and get_or_add") {
+	Dictionary dict;
+	CHECK(dict.set(Variant(StringName("key")), Variant(5)));
+	CHECK_EQ(dict.get_or_add(Variant(String("key")), Variant(99)), Variant(5));
+	CHECK_EQ(dict.get_or_add(Variant("new"), Variant(77)), Variant(77));
+	CHECK_EQ(dict.get(Variant("new")), Variant(77));
+	CHECK_EQ(dict.size(), 2);
+	CHECK(dict.erase(Variant(StringName("key"))));
+	CHECK_FALSE(dict.erase(Variant(String("key"))));
+	CHECK_EQ(dict.size(), 1);
+}
+
+TEST_CASE("[DictionaryFastPath] typed dictionary retains key coercion") {
+	TypedDictionary<double, int64_t> dict;
+	CHECK(dict.set(Variant(4), Variant(91)));
+	CHECK_EQ(dict.get(Variant(4.0)), Variant(91));
+	CHECK_EQ(dict.get_or_add(Variant(4), Variant(99)), Variant(91));
+	CHECK_EQ(dict.get_or_add(Variant(5), Variant(12)), Variant(12));
+	const Dictionary &view = dict;
+	CHECK_EQ(view[Variant(5.0)], Variant(12));
+	CHECK(dict.erase(Variant(4)));
+	CHECK_FALSE(dict.has(Variant(4.0)));
+	CHECK_EQ(dict.size(), 1);
+}
+
+TEST_CASE("[DictionaryFastPath] read-only dictionary keeps writable view isolated") {
+	Dictionary dict;
+	CHECK(dict.set(Variant("stored"), Variant(11)));
+	dict.make_read_only();
+	Variant *read_only_ptr = dict.getptr(Variant("stored"));
+	REQUIRE(read_only_ptr != nullptr);
+	*read_only_ptr = 999;
+	CHECK_EQ(dict.get(Variant("stored")), Variant(11));
+	const Dictionary &view = dict;
+	CHECK_EQ(view[Variant("stored")], Variant(11));
+	ERR_PRINT_OFF;
+	CHECK_FALSE(dict.set(Variant("second"), Variant(2)));
+	CHECK_FALSE(dict.erase(Variant("stored")));
+	ERR_PRINT_ON;
+	CHECK_EQ(dict.size(), 1);
+}
+
+TEST_CASE("[DictionaryFastPath] untyped keys with typed values remain checked") {
+	TypedDictionary<Variant, int64_t> dict;
+	CHECK(dict.set(Variant("valid"), Variant(42)));
+	CHECK_EQ(dict.get(Variant("valid")), Variant(42));
+	ERR_PRINT_OFF;
+	CHECK_FALSE(dict.set(Variant("invalid"), Variant(Vector2(1, 2))));
+	ERR_PRINT_ON;
+	CHECK_FALSE(dict.has(Variant("invalid")));
+	CHECK_EQ(dict.get_or_add(Variant("new"), Variant(2)), Variant(2));
+	CHECK_EQ(dict.size(), 2);
+}
+
+TEST_CASE("[DictionaryFastPath] randomized insertion and removal retain exact keys") {
+	Dictionary dict;
+	bool present[127] = {};
+	uint32_t state = 0x13579BDF;
+	for (int i = 0; i < 4096; i++) {
+		state = 1664525u * state + 1013904223u;
+		const int key = state % 127;
+		if (state & 256u) {
+			CHECK(dict.set(Variant(key), Variant(i)));
+			present[key] = true;
+		} else {
+			dict.erase(Variant(key));
+			present[key] = false;
+		}
+		CHECK_EQ(dict.has(Variant(key)), present[key]);
+		if (i % 127 == 0) {
+			int expected_size = 0;
+			for (int j = 0; j < 127; j++) {
+				CHECK_EQ(dict.has(Variant(j)), present[j]);
+				expected_size += present[j] ? 1 : 0;
+			}
+			CHECK_EQ(dict.size(), expected_size);
+		}
+	}
+}
+
 } // namespace TestDictionary

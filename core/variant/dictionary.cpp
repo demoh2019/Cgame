@@ -142,6 +142,16 @@ Variant &Dictionary::operator[](const Variant &p_key) {
 }
 
 const Variant &Dictionary::operator[](const Variant &p_key) const {
+	// Untyped keys cannot be converted. Avoid the validator on this read path.
+	if (likely(_p->typed_key.variant_type == Variant::NIL)) {
+		const Variant *value = _p->variant_map.getptr(p_key);
+		if (likely(value)) {
+			return *value;
+		}
+		static Variant empty;
+		ERR_FAIL_NULL_V_MSG(value, empty, vformat(R"(Bug: Dictionary::operator[] used when there was no value for the given key "%s". Please report.)", p_key));
+		return empty;
+	}
 	Variant tmpk;
 	const Variant *key = _p->typed_key.validate(p_key, tmpk, "use `operator[]`");
 
@@ -172,6 +182,14 @@ const Variant *Dictionary::getptr(const Variant &p_key) const {
 
 // WARNING: This method does not validate the value type.
 Variant *Dictionary::getptr(const Variant &p_key) {
+	if (likely(_p->typed_key.variant_type == Variant::NIL)) {
+		Variant *value = _p->variant_map.getptr(p_key);
+		if (unlikely(value && _p->read_only != nullptr)) {
+			*_p->read_only = *value;
+			return _p->read_only;
+		}
+		return value;
+	}
 	Variant tmpk;
 	const Variant *key = _p->typed_key.validate(p_key, tmpk, "getptr");
 	ERR_FAIL_NULL_V(key, nullptr);
@@ -220,6 +238,21 @@ Variant Dictionary::get(const Variant &p_key, const Variant &p_default) const {
 }
 
 Variant Dictionary::get_or_add(const Variant &p_key, const Variant &p_default) {
+	if (likely(_p->typed_key.variant_type == Variant::NIL)) {
+		const Variant *result = _p->variant_map.getptr(p_key);
+		if (result) {
+			return *result;
+		}
+		if (likely(_p->typed_value.variant_type == Variant::NIL)) {
+			operator[](p_key) = p_default;
+			return p_default;
+		}
+		Variant tmpv;
+		const Variant *value = _p->typed_value.validate(p_default, tmpv, "add");
+		ERR_FAIL_NULL_V(value, p_default);
+		operator[](p_key) = *value;
+		return *value;
+	}
 	Variant tmpk;
 	const Variant *key = _p->typed_key.validate(p_key, tmpk, "get_or_add");
 	ERR_FAIL_NULL_V(key, p_default);
@@ -238,6 +271,17 @@ Variant Dictionary::get_or_add(const Variant &p_key, const Variant &p_default) {
 
 bool Dictionary::set(const Variant &p_key, const Variant &p_value) {
 	ERR_FAIL_COND_V_MSG(_p->read_only, false, "Dictionary is in read-only state.");
+	if (likely(_p->typed_key.variant_type == Variant::NIL)) {
+		if (likely(_p->typed_value.variant_type == Variant::NIL)) {
+			_p->variant_map[p_key] = p_value;
+			return true;
+		}
+		Variant tmpv;
+		const Variant *value = _p->typed_value.validate(p_value, tmpv, "set");
+		ERR_FAIL_NULL_V(value, false);
+		_p->variant_map[p_key] = *value;
+		return true;
+	}
 	Variant tmpk;
 	const Variant *key = _p->typed_key.validate(p_key, tmpk, "set");
 	ERR_FAIL_NULL_V(key, false);
@@ -302,6 +346,11 @@ Variant Dictionary::find_key(const Variant &p_value) const {
 }
 
 bool Dictionary::erase(const Variant &p_key) {
+	// Untyped keys never need conversion, but the read-only guard still applies.
+	if (likely(_p->typed_key.variant_type == Variant::NIL)) {
+		ERR_FAIL_COND_V_MSG(_p->read_only, false, "Dictionary is in read-only state.");
+		return _p->variant_map.erase(p_key);
+	}
 	Variant tmpk;
 	const Variant *key = _p->typed_key.validate(p_key, tmpk, "erase");
 	ERR_FAIL_NULL_V(key, false);
