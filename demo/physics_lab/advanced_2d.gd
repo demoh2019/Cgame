@@ -12,6 +12,7 @@ var _belt_enabled := true
 var _belt_speed := 260.0
 var _gravity_enabled := true
 var _gravity_zone: Area2D
+var _vortex_area: Area2D
 var _belt: StaticBody2D
 var _label: Label
 var _round := 0
@@ -81,6 +82,18 @@ func _station_label(name: String, at: Vector2, words: String) -> void:
 
 
 func _create_vortex() -> void:
+    _vortex_area = Area2D.new()
+    _vortex_area.name = "VortexDetector2D"
+    _vortex_area.position = VORTEX_CENTER
+    _vortex_area.collision_layer = 0
+    _vortex_area.collision_mask = 1
+    _vortex_area.monitoring = true
+    var detector_shape := CollisionShape2D.new()
+    var circle := CircleShape2D.new()
+    circle.radius = VORTEX_RADIUS
+    detector_shape.shape = circle
+    _vortex_area.add_child(detector_shape)
+    add_child(_vortex_area)
     var ring := Polygon2D.new()
     ring.name = "VortexField2D"
     ring.position = VORTEX_CENTER
@@ -281,7 +294,7 @@ func _physics_process(delta: float) -> void:
     if not _vortex_enabled:
         return
     _time += delta
-    for node in get_tree().get_nodes_in_group("demo_dynamic_2d"):
+    for node in _vortex_area.get_overlapping_bodies():
         if not node is RigidBody2D:
             continue
         var body := node as RigidBody2D
