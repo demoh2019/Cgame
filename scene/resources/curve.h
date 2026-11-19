@@ -218,8 +218,8 @@ class Curve2D : public Resource {
 	Vector2 _sample_baked(Interval p_interval, bool p_cubic) const;
 	Transform2D _sample_posture(Interval p_interval) const;
 
-	void _bake_segment2d(LocalVector<Vector2> &r_bake, real_t p_begin, real_t p_end, const Vector2 &p_a, const Vector2 &p_out, const Vector2 &p_b, const Vector2 &p_in, const Vector2 &p_begin_pos, const Vector2 &p_end_pos, int p_depth, int p_max_depth, real_t p_cos_threshold) const;
-	void _bake_segment2d_even_length(LocalVector<Pair<real_t, Vector2>> &r_bake, real_t p_begin, real_t p_end, const Vector2 &p_a, const Vector2 &p_out, const Vector2 &p_b, const Vector2 &p_in, const Vector2 &p_begin_pos, const Vector2 &p_end_pos, int p_depth, int p_max_depth, real_t p_length) const;
+	void _bake_segment2d(LocalVector<Vector2> &r_bake, real_t p_begin, real_t p_end, const Vector2 &p_a, const Vector2 &p_control_1, const Vector2 &p_b, const Vector2 &p_control_2, const Vector2 &p_begin_pos, const Vector2 &p_end_pos, int p_depth, int p_max_depth, real_t p_cos_threshold) const;
+	void _bake_segment2d_even_length(LocalVector<Pair<real_t, Vector2>> &r_bake, real_t p_begin, real_t p_end, const Vector2 &p_a, const Vector2 &p_control_1, const Vector2 &p_b, const Vector2 &p_control_2, const Vector2 &p_begin_pos, const Vector2 &p_end_pos, int p_depth, int p_max_depth, real_t p_length) const;
 	Dictionary _get_data() const;
 	void _set_data(const Dictionary &p_data);
 
@@ -318,8 +318,8 @@ class Curve3D : public Resource {
 	real_t bake_interval = 0.2;
 	bool up_vector_enabled = true;
 
-	void _bake_segment3d(LocalVector<Vector3> &r_bake, real_t p_begin, real_t p_end, const Vector3 &p_a, const Vector3 &p_out, const Vector3 &p_b, const Vector3 &p_in, const Vector3 &p_begin_pos, const Vector3 &p_end_pos, int p_depth, int p_max_depth, real_t p_cos_threshold) const;
-	void _bake_segment3d_even_length(LocalVector<Pair<real_t, Vector3>> &r_bake, real_t p_begin, real_t p_end, const Vector3 &p_a, const Vector3 &p_out, const Vector3 &p_b, const Vector3 &p_in, const Vector3 &p_begin_pos, const Vector3 &p_end_pos, int p_depth, int p_max_depth, real_t p_length) const;
+	void _bake_segment3d(LocalVector<Vector3> &r_bake, real_t p_begin, real_t p_end, const Vector3 &p_a, const Vector3 &p_control_1, const Vector3 &p_b, const Vector3 &p_control_2, const Vector3 &p_begin_pos, const Vector3 &p_end_pos, int p_depth, int p_max_depth, real_t p_cos_threshold) const;
+	void _bake_segment3d_even_length(LocalVector<Pair<real_t, Vector3>> &r_bake, real_t p_begin, real_t p_end, const Vector3 &p_a, const Vector3 &p_control_1, const Vector3 &p_b, const Vector3 &p_control_2, const Vector3 &p_begin_pos, const Vector3 &p_end_pos, int p_depth, int p_max_depth, real_t p_length) const;
 	Dictionary _get_data() const;
 	void _set_data(const Dictionary &p_data);
 

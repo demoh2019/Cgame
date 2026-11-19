@@ -406,4 +406,14 @@ TEST_CASE("[Curve2D] Baked interval lookup preserves every sample boundary") {
 	CHECK(curve->sample_baked(offset + 100).is_equal_approx(points[points.size() - 1]));
 }
 
+
+TEST_CASE("[Curve2D] Squared chord threshold matches zero and negative segment tolerances") {
+	Ref<Curve2D> curve = memnew(Curve2D);
+	curve->add_point(Vector2(0, 0));
+	curve->add_point(Vector2(8, 0));
+	CHECK(curve->tessellate_even_length(3, 1000.0).size() == 2);
+	CHECK(curve->tessellate_even_length(3, 0.0).size() == 9);
+	CHECK(curve->tessellate_even_length(3, -1.0).size() == 9);
+}
+
 } // namespace TestCurve2D
