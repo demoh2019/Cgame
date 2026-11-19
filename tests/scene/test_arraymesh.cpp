@@ -40,6 +40,7 @@ TEST_FORCE_LINK(test_arraymesh)
 #include "scene/resources/mesh.h"
 #ifndef PHYSICS_3D_DISABLED
 #include "scene/resources/3d/concave_polygon_shape_3d.h"
+#include "scene/resources/3d/convex_polygon_shape_3d.h"
 #endif
 #include "tests/signal_watcher.h"
 
@@ -56,6 +57,68 @@ namespace TestArrayMesh {
 
 
 #ifndef PHYSICS_3D_DISABLED
+
+static Ref<ArrayMesh> _make_convex_collision_source(int p_surface_count) {
+	Ref<ArrayMesh> mesh;
+	mesh.instantiate();
+	for (int i = 0; i < p_surface_count; ++i) {
+		Array arrays;
+		arrays.resize(Mesh::ARRAY_MAX);
+		const PackedVector3Array vertices = {
+			Vector3(i * 4 + 1, 1, 0),
+			Vector3(i * 4 + 2, 1, 0),
+			Vector3(i * 4 + 1, 2, 0),
+			Vector3(i * 4 + 1, 1, 1)
+		};
+		const PackedInt32Array indices = { 0, 2, 1, 0, 1, 3, 0, 3, 2, 1, 2, 3 };
+		arrays[Mesh::ARRAY_VERTEX] = vertices;
+		arrays[Mesh::ARRAY_INDEX] = indices;
+		mesh->add_surface_from_arrays(Mesh::PRIMITIVE_TRIANGLES, arrays);
+	}
+	return mesh;
+}
+
+TEST_CASE("[ConvexShapeFastPath] one triangle preserves the source vertices without cleaning") {
+	Ref<ArrayMesh> mesh = _make_convex_collision_source(1);
+	const Ref<ConvexPolygonShape3D> shape = mesh->create_convex_shape(false, false);
+	REQUIRE(shape.is_valid());
+	const Vector<Vector3> points = shape->get_points();
+	REQUIRE_EQ(points.size(), 4);
+	CHECK_EQ(points[0], Vector3(1, 1, 0));
+	CHECK_EQ(points[1], Vector3(2, 1, 0));
+	CHECK_EQ(points[2], Vector3(1, 2, 0));
+	CHECK_EQ(points[3], Vector3(1, 1, 1));
+}
+
+TEST_CASE("[ConvexShapeFastPath] many independent surfaces preserve exact concatenation order") {
+	const int surfaces = 32;
+	Ref<ArrayMesh> mesh = _make_convex_collision_source(surfaces);
+	const Ref<ConvexPolygonShape3D> shape = mesh->create_convex_shape(false, false);
+	REQUIRE(shape.is_valid());
+	const Vector<Vector3> points = shape->get_points();
+	REQUIRE_EQ(points.size(), surfaces * 4);
+	for (int s = 0; s < surfaces; ++s) {
+		CHECK_EQ(points[s * 4 + 0], Vector3(s * 4 + 1, 1, 0));
+		CHECK_EQ(points[s * 4 + 1], Vector3(s * 4 + 2, 1, 0));
+		CHECK_EQ(points[s * 4 + 2], Vector3(s * 4 + 1, 2, 0));
+		CHECK_EQ(points[s * 4 + 3], Vector3(s * 4 + 1, 1, 1));
+	}
+}
+
+TEST_CASE("[ConvexShapeFastPath] collision shape generation never mutates imported mesh vertices") {
+	Ref<ArrayMesh> mesh = _make_convex_collision_source(2);
+	const Array original = mesh->surface_get_arrays(0);
+	const PackedVector3Array before = original[Mesh::ARRAY_VERTEX];
+	const Ref<ConvexPolygonShape3D> shape = mesh->create_convex_shape(false, false);
+	REQUIRE(shape.is_valid());
+	const Array current = mesh->surface_get_arrays(0);
+	const PackedVector3Array after = current[Mesh::ARRAY_VERTEX];
+	REQUIRE_EQ(after.size(), before.size());
+	for (int i = 0; i < before.size(); ++i) {
+		CHECK_EQ(after[i], before[i]);
+	}
+}
+
 TEST_CASE("[TrimeshShapeFastPath] empty mesh returns no concave collision shape") {
 	Ref<ArrayMesh> mesh;
 	mesh.instantiate();

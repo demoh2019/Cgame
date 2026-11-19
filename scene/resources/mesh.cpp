@@ -549,8 +549,21 @@ Ref<ConvexPolygonShape3D> Mesh::create_convex_shape(bool p_clean, bool p_simplif
 		}
 	}
 
+	// The final vertex count is known from surface metadata. Reserve exactly
+	// once instead of reallocating and relocating all prior surface vertices
+	// as many separate meshes are combined into one convex collision shape.
+	int64_t total_vertices = 0;
+	const int surface_count = get_surface_count();
+	for (int i = 0; i < surface_count; ++i) {
+		total_vertices += MAX(0, surface_get_array_len(i));
+	}
+	ERR_FAIL_COND_V(total_vertices > INT32_MAX, Ref<ConvexPolygonShape3D>());
+
 	Vector<Vector3> vertices;
-	for (int i = 0; i < get_surface_count(); i++) {
+	if (total_vertices > 0) {
+		ERR_FAIL_COND_V(vertices.reserve_exact((int)total_vertices) != OK, Ref<ConvexPolygonShape3D>());
+	}
+	for (int i = 0; i < surface_count; i++) {
 		Array a = surface_get_arrays(i);
 		ERR_FAIL_COND_V(a.is_empty(), Ref<ConvexPolygonShape3D>());
 		Vector<Vector3> v = a[ARRAY_VERTEX];
