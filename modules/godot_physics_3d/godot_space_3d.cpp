@@ -1385,6 +1385,14 @@ GodotSpace3D::GodotSpace3D() {
 	const real_t configured_tetra_plastic_yield = GLOBAL_GET("physics/3d/solver/soft_body_tetra_volume_plastic_yield");
 	soft_body_tetra_volume_plastic_yield = Math::is_finite(configured_tetra_plastic_yield) ?
 			CLAMP(configured_tetra_plastic_yield, real_t(0.0), real_t(2.0)) : real_t(0.15);
+	const real_t configured_dev_rate = GLOBAL_GET("physics/3d/solver/soft_body_tetra_deviatoric_plastic_rate");
+	soft_body_tetra_deviatoric_plastic_rate = Math::is_finite(configured_dev_rate) ? MAX(real_t(0.0), configured_dev_rate) : real_t(0.0);
+	const real_t configured_dev_yield = GLOBAL_GET("physics/3d/solver/soft_body_tetra_deviatoric_plastic_yield");
+	soft_body_tetra_deviatoric_plastic_yield = Math::is_finite(configured_dev_yield) ? CLAMP(configured_dev_yield, real_t(0.0), real_t(4.0)) : real_t(0.12);
+	const real_t configured_dev_hardening = GLOBAL_GET("physics/3d/solver/soft_body_tetra_deviatoric_plastic_hardening");
+	soft_body_tetra_deviatoric_plastic_hardening = Math::is_finite(configured_dev_hardening) ? CLAMP(configured_dev_hardening, real_t(0.0), real_t(10.0)) : real_t(0.2);
+	const real_t configured_dev_max = GLOBAL_GET("physics/3d/solver/soft_body_tetra_deviatoric_plastic_max_strain");
+	soft_body_tetra_deviatoric_plastic_max_strain = Math::is_finite(configured_dev_max) ? CLAMP(configured_dev_max, real_t(0.01), real_t(8.0)) : real_t(3.0);
 	soft_body_tetra_inversion_recovery = GLOBAL_GET("physics/3d/solver/soft_body_tetra_inversion_recovery");
 	const real_t configured_tetra_min_j = GLOBAL_GET("physics/3d/solver/soft_body_tetra_inversion_min_j");
 	soft_body_tetra_inversion_min_j = Math::is_finite(configured_tetra_min_j) ?
