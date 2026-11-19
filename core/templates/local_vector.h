@@ -37,6 +37,7 @@
 #include "core/templates/vector.h"
 
 #include <cstring>
+#include <functional>
 #include <initializer_list>
 #include <type_traits>
 
@@ -429,15 +430,38 @@ public:
 	}
 
 	void operator=(Span<T> p_from) {
+		const T *const source = p_from.ptr();
+		if (source == data) {
+			// A full self-assignment needs no work. For a prefix, only destroy
+			// the removed tail; avoid reassigning every surviving element.
+			resize(p_from.size());
+			return;
+		}
+		// A span into our tail must be copied before shrinking: for
+		// nontrivial T, resize() would destroy the source elements first.
+		// std::less provides a total pointer order even for unrelated buffers.
+		if (data != nullptr && source != nullptr &&
+				std::less<const T *>()(data, source) &&
+				std::less<const T *>()(source, data + count)) {
+			if constexpr (std::is_trivially_copyable_v<T>) {
+				std::memmove(data, source, size_t(p_from.size()) * sizeof(T));
+			} else {
+				// Copying left to right preserves still-unread source elements.
+				for (size_t i = 0; i < p_from.size(); i++) {
+					data[i] = source[i];
+				}
+			}
+			resize(p_from.size());
+			return;
+		}
 		resize(p_from.size());
 		if constexpr (std::is_trivially_copyable_v<T>) {
 			if (count > 0) {
-				// A span can refer to part of this vector; preserve overlap semantics.
-				std::memmove(data, p_from.ptr(), size_t(count) * sizeof(T));
+				std::memmove(data, source, size_t(count) * sizeof(T));
 			}
 		} else {
 			for (size_t i = 0; i < p_from.size(); i++) {
-				data[i] = p_from[i];
+				data[i] = source[i];
 			}
 		}
 	}
