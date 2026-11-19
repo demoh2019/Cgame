@@ -181,6 +181,9 @@ void GodotCollisionObject2D::_update_shapes() {
 		shape_aabb = xform.xform(shape_aabb);
 		// Base the broadphase margin on the current shape, not a stale cached bound.
 		shape_aabb.grow_by((shape_aabb.size.x + shape_aabb.size.y) * 0.5 * 0.05);
+		// Skip the BVH lookup and lock if the proxy bounds are unchanged.
+		// The swept AABB and ordinary AABB are cached independently per update.
+		const bool aabb_changed = s.aabb_cache != shape_aabb;
 		s.aabb_cache = shape_aabb;
 
 		if (s.bpid == 0) {
@@ -191,7 +194,7 @@ void GodotCollisionObject2D::_update_shapes() {
 			} else {
 				s.bpid = space->get_broadphase()->create(this, i, shape_aabb, _static);
 			}
-		} else {
+		} else if (aabb_changed) {
 			space->get_broadphase()->move(s.bpid, shape_aabb);
 		}
 	}
@@ -222,6 +225,9 @@ void GodotCollisionObject2D::_update_shapes_with_motion(const Vector2 &p_motion)
 		Transform2D xform = transform * s.xform;
 		shape_aabb = xform.xform(shape_aabb);
 		shape_aabb = shape_aabb.merge(Rect2(shape_aabb.position + p_motion, shape_aabb.size)); //use motion
+		// Skip the BVH lookup and lock if the proxy bounds are unchanged.
+		// The swept AABB and ordinary AABB are cached independently per update.
+		const bool aabb_changed = s.aabb_cache != shape_aabb;
 		s.aabb_cache = shape_aabb;
 
 		if (s.bpid == 0) {
@@ -232,7 +238,7 @@ void GodotCollisionObject2D::_update_shapes_with_motion(const Vector2 &p_motion)
 			} else {
 				s.bpid = space->get_broadphase()->create(this, i, shape_aabb, _static);
 			}
-		} else {
+		} else if (aabb_changed) {
 			space->get_broadphase()->move(s.bpid, shape_aabb);
 		}
 	}
