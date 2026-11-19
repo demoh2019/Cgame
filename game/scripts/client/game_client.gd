@@ -226,8 +226,14 @@ func market_create(item_id: String, quantity: int, price: int) -> void:
 	net.c_market_create.rpc_id(1, item_id, quantity, price)
 
 
+var _market_buy_request_id: int = 0
+
+
 func market_buy(listing_id: int, quantity: int) -> void:
-	net.c_market_buy.rpc_id(1, listing_id, quantity)
+	if _market_buy_request_id >= 2_147_483_647:
+		return # Reconnect for a new session instead of wrapping an ID.
+	_market_buy_request_id += 1
+	net.c_market_buy.rpc_id(1, listing_id, quantity, _market_buy_request_id)
 
 
 func market_cancel(listing_id: int) -> void:

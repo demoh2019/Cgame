@@ -33,6 +33,7 @@ const WORKBENCH_POSITION := Vector2(9.0, 0.0)
 const WORKBENCH_RANGE := 6.0
 const TRADE_RANGE := 6.0
 const TRADE_TIMEOUT := 45.0
+const MARKET_MAX_REQUEST_ID := 2_147_483_647
 const ZOMBIE_ACTIVE_RADIUS := 130.0 # Zombies farther than this from every player are put to sleep.
 const ZOMBIE_PACK_ALERT_RADIUS := 18.0
 const ZOMBIE_PACK_BUCKET_SIZE := 18.0
@@ -92,6 +93,7 @@ var campfires: Dictionary = {} # Temporary shared warmth, never checkpointed.
 var trades: Dictionary = {} # trade id -> offer/accept/expiry
 var market_orders: Dictionary = {} # id -> advertised online stock (not escrow).
 var market_sales: Array = [] # Bounded session-only receipts, NOT durable settlement.
+var market_buy_requests: Dictionary = {} # Peer -> last request ID, arguments and result.
 var trade_by_player: Dictionary = {} # peer -> active trade
 var world_structure_revision: int = 0
 var bags: Dictionary = {} # bag id -> {"id", "x","y","z", "items": {id: n}, "expires": t}
@@ -264,6 +266,7 @@ func valid_character_data(data: Dictionary) -> bool:
 
 
 func remove_player(peer_id: int) -> void:
+	market_buy_requests.erase(peer_id)
 	_cancel_market_seller(peer_id)
 	_cancel_player_trade(peer_id, "disconnected")
 	var player: Player = players.get(peer_id)
@@ -666,7 +669,34 @@ func cmd_market_cancel(peer_id: int, listing_id: int) -> Dictionary:
 	return {"ok": true, "action": "cancelled", "id": listing_id}
 
 
-func cmd_market_buy(peer_id: int, listing_id: int, quantity: int) -> Dictionary:
+## A market purchase must have a monotonically increasing, session-scoped request ID.
+## A retry returns the original result, never a second transfer, even after a partial fill.
+## Old IDs are refused rather than evicted and potentially executed a second time.
+func cmd_market_buy(peer_id: int, listing_id: int, quantity: int, request_id: int) -> Dictionary:
+	if not players.has(peer_id):
+		return {"ok": false, "reason": "unknown_player"}
+	if request_id < 1 or request_id > MARKET_MAX_REQUEST_ID:
+		return {"ok": false, "reason": "invalid_request_id"}
+	var last: Dictionary = market_buy_requests.get(peer_id, {})
+	if not last.is_empty():
+		var used_id: int = int(last["id"])
+		if request_id < used_id:
+			return {"ok": false, "reason": "stale_request"}
+		if request_id == used_id:
+			if int(last["listing"]) != listing_id or int(last["quantity"]) != quantity:
+				return {"ok": false, "reason": "request_conflict"}
+			var cached: Dictionary = last["result"]
+			return cached.duplicate(true)
+	var result: Dictionary = _execute_market_buy(peer_id, listing_id, quantity)
+	result["request_id"] = request_id
+	market_buy_requests[peer_id] = {
+		"id": request_id, "listing": listing_id, "quantity": quantity,
+		"result": result.duplicate(true),
+	}
+	return result
+
+
+func _execute_market_buy(peer_id: int, listing_id: int, quantity: int) -> Dictionary:
 	var buyer: Player = players.get(peer_id)
 	if not _market_at_hub(buyer):
 		return {"ok": false, "reason": "no_station"}
