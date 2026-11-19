@@ -46,6 +46,7 @@
 #include "servers/physics_fem_lumped_mass.h"
 #include "servers/physics_fem_tetra_fiber.h"
 #include "servers/physics_fem_tetra_viscosity.h"
+#include "servers/physics_fem_tetra_damage.h"
 #include "servers/physics_softbody_shape_clusters.h"
 #include "servers/physics_softbody_aerodynamic_drag.h"
 #include "servers/physics_softbody_plasticity.h"
@@ -514,6 +515,7 @@ void GodotSoftBody3D::initialize_fem_tetra() {
 	const bool previously_lumped = !xpbd_fem_mass_fractions.is_empty();
 	xpbd_fem_tetrahedra.reset();
 	xpbd_fem_fiber_lambdas.reset();
+	xpbd_fem_damage.reset();
 	xpbd_fem_mass_fractions.reset();
 
 	if (get_space() &&
@@ -538,6 +540,15 @@ void GodotSoftBody3D::initialize_fem_tetra() {
 		}
 		physics_fem_build_convex_star_tetrahedra(
 				positions, triangles, xpbd_volume_rest, xpbd_fem_tetrahedra);
+		// Element histories are allocated only if elastic FEM and damage are enabled.
+		if (!xpbd_fem_tetrahedra.is_empty() &&
+				get_space()->get_soft_body_tetra_fem_compliance() > 0.0 &&
+				get_space()->get_soft_body_tetra_damage_rate() > 0.0) {
+			xpbd_fem_damage.resize(xpbd_fem_tetrahedra.size());
+			for (double &damage : xpbd_fem_damage) {
+				damage = 0.0;
+			}
+		}
 
 		// The total mass is unchanged. Each tetra distributes rho*V/4
 		// onto its four vertices. Include pinned vertices in the fractions;
@@ -2953,6 +2964,33 @@ void GodotSoftBody3D::solve_constraints(real_t p_delta) {
 		node.x = node.q + node.v * p_delta;
 	}
 
+	// Local scalar continuum damage is evaluated on predicted positions
+	// BEFORE the elastic XPBD projection removes the over-yield strain.
+	// The strength history is updated once per fixed physics tick, not
+	// per solver iteration, and remains irreversible until the rest mesh
+	// is explicitly rebuilt. By default no damage arrays/loops exist.
+	const real_t fem_damage_rate = get_space()->get_soft_body_tetra_damage_rate();
+	if (fem_damage_rate > 0.0 && p_delta > 0.0 &&
+			xpbd_fem_damage.size() == xpbd_fem_tetrahedra.size() &&
+			!xpbd_fem_damage.is_empty()) {
+		const double yield_strain = double(get_space()->get_soft_body_tetra_damage_yield_strain());
+		const double poisson = double(get_space()->get_soft_body_tetra_fem_poisson_ratio());
+		for (uint32_t i = 0; i < xpbd_fem_tetrahedra.size(); ++i) {
+			const PhysicsFEMConvexTetra &tet = xpbd_fem_tetrahedra[i];
+			const Vector3 positions[4] = {
+				nodes[tet.a].x, nodes[tet.b].x,
+				nodes[tet.c].x, nodes[tet.d].x
+			};
+			double equivalent_strain = 0.0;
+			if (PhysicsFEMTetraDamage::equivalent_strain(
+						positions, tet.rest, poisson, equivalent_strain)) {
+				PhysicsFEMTetraDamage::evolve(equivalent_strain,
+						yield_strain, double(fem_damage_rate),
+						double(p_delta), xpbd_fem_damage[i]);
+			}
+		}
+	}
+
 	// Viscoplasticity acts on the *predicted* stretch before constraints
 	// project it away. This also works with the stiff legacy PBD solver,
 	// where post-solve links may be too close to rest to detect yielding.
@@ -3302,14 +3340,22 @@ void GodotSoftBody3D::solve_constraints(real_t p_delta) {
 			solve_shape_matching(shape_matching_iteration_strength);
 		}
 		if (use_fem) {
-			for (PhysicsFEMConvexTetra &tetra : xpbd_fem_tetrahedra) {
+			const bool has_damage = xpbd_fem_damage.size() == xpbd_fem_tetrahedra.size() &&
+					!xpbd_fem_damage.is_empty();
+			for (uint32_t i = 0; i < xpbd_fem_tetrahedra.size(); ++i) {
+				PhysicsFEMConvexTetra &tetra = xpbd_fem_tetrahedra[i];
 				Node &a = nodes[tetra.a];
 				Node &b = nodes[tetra.b];
 				Node &c = nodes[tetra.c];
 				Node &d = nodes[tetra.d];
+				double local_alpha = fem_alpha;
+				if (has_damage) {
+					PhysicsFEMTetraDamage::effective_compliance(
+							fem_alpha, xpbd_fem_damage[i], local_alpha);
+				}
 				physics_fem_tetra_solve(a.x, b.x, c.x, d.x,
 						a.im, b.im, c.im, d.im,
-						tetra.rest, fem_poisson, fem_alpha, tetra.lambda);
+						tetra.rest, fem_poisson, local_alpha, tetra.lambda);
 			}
 		}
 		if (use_fem_fiber) {
@@ -3595,6 +3641,7 @@ void GodotSoftBody3D::destroy() {
 	xpbd_volume_original_rest = 0.0;
 	xpbd_fem_tetrahedra.reset();
 	xpbd_fem_fiber_lambdas.reset();
+	xpbd_fem_damage.reset();
 	xpbd_fem_mass_fractions.reset();
 	nodes.clear();
 	links.clear();
