@@ -1,0 +1,32 @@
+name: Open World Toolkit tests
+
+on:
+  push:
+    paths:
+      - 'misc/open_world_toolkit/**'
+      - '.github/workflows/open-world-toolkit.yml'
+  pull_request:
+    paths:
+      - 'misc/open_world_toolkit/**'
+      - '.github/workflows/open-world-toolkit.yml'
+  workflow_dispatch:
+
+jobs:
+  gdscript-tests:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - name: Download matching Godot 4.8 beta4 build
+        run: |
+          curl --retry 3 -fL \
+            'https://github.com/godotengine/godot-builds/releases/download/4.8-beta4/Godot_v4.8-beta4_linux.x86_64.zip' \
+            -o godot.zip
+          unzip godot.zip -d bin
+          chmod +x bin/Godot_v4.8-beta4_linux.x86_64
+      - name: Import GDScript global classes
+        run: |
+          bin/Godot_v4.8-beta4_linux.x86_64 --headless --editor --path misc/open_world_toolkit --import --quit
+      - name: Run functional regressions
+        run: |
+          bin/Godot_v4.8-beta4_linux.x86_64 --headless --path misc/open_world_toolkit --script res://tests/run_tests.gd
