@@ -535,19 +535,21 @@ Variant GodotCapsuleShape2D::get_data() const {
 /*********************************************************/
 
 void GodotConvexPolygonShape2D::get_supports(const Vector2 &p_normal, Vector2 *r_supports, int &r_amount) const {
-	int support_idx = -1;
-	real_t d = -1e10;
 	r_amount = 0;
+	ERR_FAIL_COND_MSG(point_count <= 0, "Convex polygon shape support not found.");
 
+	// Initialize from a real vertex instead of a finite coordinate sentinel.
+	// This remains correct even when every projection is below -1e10.
+	int support_idx = 0;
+	real_t best_projection = p_normal.dot(points[0].pos);
 	for (int i = 0; i < point_count; i++) {
-		//test point
-		real_t ld = p_normal.dot(points[i].pos);
-		if (ld > d) {
+		const real_t projection = p_normal.dot(points[i].pos);
+		if (projection > best_projection) {
 			support_idx = i;
-			d = ld;
+			best_projection = projection;
 		}
 
-		//test segment
+		// A supporting edge produces a two-point contact manifold.
 		if (points[i].normal.dot(p_normal) > segment_is_valid_support_threshold) {
 			r_amount = 2;
 			r_supports[0] = points[i].pos;
@@ -555,9 +557,6 @@ void GodotConvexPolygonShape2D::get_supports(const Vector2 &p_normal, Vector2 *r
 			return;
 		}
 	}
-
-	ERR_FAIL_COND_MSG(support_idx == -1, "Convex polygon shape support not found.");
-
 	r_amount = 1;
 	r_supports[0] = points[support_idx].pos;
 }
@@ -767,18 +766,20 @@ GodotConvexPolygonShape2D::~GodotConvexPolygonShape2D() {
 //////////////////////////////////////////////////
 
 void GodotConcavePolygonShape2D::get_supports(const Vector2 &p_normal, Vector2 *r_supports, int &r_amount) const {
-	real_t d = -1e10;
-	int idx = -1;
-	for (int i = 0; i < points.size(); i++) {
-		real_t ld = p_normal.dot(points[i]);
-		if (ld > d) {
-			d = ld;
+	r_amount = 0;
+	ERR_FAIL_COND(points.is_empty());
+
+	// Use the first actual point instead of a fixed projection floor.
+	int idx = 0;
+	real_t best_projection = p_normal.dot(points[0]);
+	for (int i = 1; i < points.size(); i++) {
+		const real_t projection = p_normal.dot(points[i]);
+		if (projection > best_projection) {
+			best_projection = projection;
 			idx = i;
 		}
 	}
-
 	r_amount = 1;
-	ERR_FAIL_COND(idx == -1);
 	*r_supports = points[idx];
 }
 
