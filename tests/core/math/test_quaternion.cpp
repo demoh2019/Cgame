@@ -546,7 +546,7 @@ TEST_CASE("[Quaternion] Normalize non-finite and overflow-sized inputs") {
 	const Quaternion normalized = large.normalized();
 	CHECK(normalized.is_finite());
 	CHECK(normalized.is_normalized());
-	CHECK(normalized == Quaternion() || normalized.is_equal_approx(Quaternion(1, 0, 0, 0)));
+	CHECK((normalized == Quaternion() || normalized.is_equal_approx(Quaternion(1, 0, 0, 0))) == true);
 	ERR_PRINT_ON;
 }
 

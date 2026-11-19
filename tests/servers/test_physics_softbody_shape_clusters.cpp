@@ -28,6 +28,7 @@
 /**************************************************************************/
 
 #include "servers/physics_softbody_shape_clusters.h"
+#include "servers/physics_softbody_shape_covariance.h"
 #include "servers/physics_softbody_shape_matching.h"
 #include "tests/test_macros.h"
 

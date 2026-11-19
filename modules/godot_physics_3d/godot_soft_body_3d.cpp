@@ -44,6 +44,7 @@
 #include "servers/physics_softbody_aero_lift.h"
 #include "servers/physics_softbody_adiabatic_gas.h"
 #include "servers/physics_softbody_gas_leak.h"
+#include "servers/physics_softbody_shape_covariance.h"
 #include "servers/physics_softbody_shape_matching.h"
 #include "servers/physics_fem_tetra_neo_hookean.h"
 #include "servers/physics_fem_tetra_standard_linear_solid.h"

@@ -301,7 +301,7 @@ TEST_CASE("[GLTFDocument] Accessor rejects missing required fields") {
 	for (const String &field : required_fields) {
 		Dictionary invalid = accessor.duplicate();
 		invalid.erase(field);
-		CHECK_MESSAGE(GLTFAccessor::from_dictionary(invalid).is_null(), "Missing accessor field: " + field);
+		CHECK_MESSAGE(GLTFAccessor::from_dictionary(invalid).is_null(), (String("Missing accessor field: ") + field).utf8().get_data());
 	}
 	ERR_PRINT_ON
 }
