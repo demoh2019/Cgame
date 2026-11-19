@@ -20,6 +20,8 @@ var _wind_angle := 0.0
 var _magnet_on := false
 var _gravity_scale := 1.0
 var _spawn_mass := 2.0
+var _selected_friction := 0.6
+var _selected_bounce := 0.15
 var _wave_phase := 0.0
 var _waves := true
 var _held: RigidBody2D
@@ -119,6 +121,10 @@ func _new_body(position_2d: Vector2, radius: float, mass: float, metal := false)
     body.name = "MetalSphere2D" if metal else "WaterSphere2D"
     body.position = position_2d
     body.mass = maxf(0.1, mass)
+    var contact := PhysicsMaterial.new()
+    contact.friction = _selected_friction
+    contact.bounce = _selected_bounce
+    body.physics_material_override = contact
     body.continuous_cd = RigidBody2D.CCD_MODE_CAST_SHAPE
     var collider := CollisionShape2D.new()
     var shape := CircleShape2D.new()
@@ -190,6 +196,14 @@ func _make_hud() -> void:
     _slider(col, "Течение воды", -180.0, 180.0, _flow, func(v: float) -> void:
         _flow = v
         _update_status()
+    )
+    _slider(col, "Трение выбранного тела", 0.0, 2.0, _selected_friction, func(v: float) -> void:
+        _selected_friction = v
+        _apply_selected_material()
+    )
+    _slider(col, "Упругость выбранного тела", 0.0, 1.0, _selected_bounce, func(v: float) -> void:
+        _selected_bounce = v
+        _apply_selected_material()
     )
     _slider(col, "Масса нового шара", 0.5, 25.0, _spawn_mass, func(v: float) -> void:
         _spawn_mass = v
@@ -264,12 +278,19 @@ func _cycle_gravity() -> void:
     _update_status()
 
 
+func _apply_selected_material() -> void:
+    if not is_instance_valid(_held):
+        return
+    var material := PhysicsMaterial.new()
+    material.friction = _selected_friction
+    material.bounce = _selected_bounce
+    _held.physics_material_override = material
+
+
 func _toggle_freeze() -> void:
     if is_instance_valid(_held):
         _held.freeze = not _held.freeze
-        if _held.freeze:
-            _held = null
-            _dragging = false
+        _update_status()
 
 
 func _update_status() -> void:
@@ -288,7 +309,6 @@ func _unhandled_input(event: InputEvent) -> void:
             _request_pick = true
             _dragging = true
         else:
-            _held = null
             _dragging = false
             _request_pick = false
     if event is InputEventKey and event.pressed and not event.echo:
@@ -324,7 +344,7 @@ func _pick_body() -> RigidBody2D:
     params.collide_with_areas = false
     for hit in get_world_2d().direct_space_state.intersect_point(params):
         var body := hit["collider"] as RigidBody2D
-        if body != null and not body.freeze:
+        if body != null:
             return body
     return null
 
