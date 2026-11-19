@@ -1,0 +1,67 @@
+name: Albion After accounts, characters, chat and guilds (Nakama)
+on:
+  push:
+    branches: [develop]
+    paths:
+      - 'game/**'
+      - '.github/workflows/albion-after-nakama.yml'
+  pull_request:
+    paths:
+      - 'game/**'
+      - '.github/workflows/albion-after-nakama.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  nakama:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+      - name: Fetch verified Godot compatibility editor
+        shell: bash
+        run: |
+          set -euo pipefail
+          curl --retry 4 --retry-delay 3 -fL -o godot.zip https://github.com/godotengine/godot-builds/releases/download/4.7.2-stable/Godot_v4.7.2-stable_linux.x86_64.zip
+          echo 'cadd3204e728a35d3f13adb7fd0d7902636b79f6b95c40c265eb73b6c35329e4  godot.zip' | sha256sum -c -
+          unzip -q godot.zip
+          chmod +x Godot_v4.7.2-stable_linux.x86_64
+          mv Godot_v4.7.2-stable_linux.x86_64 godot
+      - name: Import project
+        shell: bash
+        run: |
+          set -euo pipefail
+          ./godot --headless --path game --editor --import --quit 2>&1 | tee import.log
+          if grep -Ei 'SCRIPT ERROR:|Parse Error:|Failed to load script' import.log; then exit 1; fi
+      - name: Start Nakama
+        shell: bash
+        run: |
+          set -euo pipefail
+          docker compose -f game/backend/docker-compose.yml up -d
+          for i in $(seq 1 60); do
+            if curl -fs localhost:7350/healthcheck >/dev/null; then echo "Nakama is up"; exit 0; fi
+            sleep 2
+          done
+          docker compose -f game/backend/docker-compose.yml logs
+          exit 1
+      - name: Nakama storage, token and RPC security tests
+        shell: bash
+        run: |
+          set -euo pipefail
+          timeout 120s ./godot --headless --path game --script res://tests/test_nakama_backend.gd 2>&1 | tee backend.log
+          grep -Fq 'NAKAMA TEST PASS' backend.log
+      - name: Chat and guild tests
+        shell: bash
+        run: |
+          set -euo pipefail
+          timeout 120s ./godot --headless --path game --script res://tests/test_nakama_social.gd 2>&1 | tee social.log
+          grep -Fq 'NAKAMA SOCIAL TEST PASS' social.log
+      - name: End to end with a dedicated server, bots and real accounts
+        shell: bash
+        run: |
+          set -euo pipefail
+          game/tests/e2e/run_e2e_nakama.sh ./godot 24631 2>&1 | tee e2e.log
+          grep -Fq 'E2E NAKAMA PASSED' e2e.log
+      - name: Nakama logs
+        if: failure()
+        run: docker compose -f game/backend/docker-compose.yml logs --tail 200
