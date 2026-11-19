@@ -32,6 +32,42 @@
 
 #include "core/variant/variant.h"
 
+#include <cstring>
+
+// Materialize a path's components in one allocation, instead of repeatedly
+// reallocating and copying the growing prefix for each segment.
+static String _join_node_path_names(const Vector<StringName> &p_names, char32_t p_separator) {
+	const int count = p_names.size();
+	if (count == 0) {
+		return String();
+	}
+
+	uint64_t length = count - 1; // Separators between adjacent components.
+	const StringName *names = p_names.ptr();
+	for (int i = 0; i < count; i++) {
+		length += names[i].string().length();
+	}
+	ERR_FAIL_COND_V(length >= INT_MAX, String());
+
+	String joined;
+	ERR_FAIL_COND_V(joined.resize_uninitialized(int64_t(length) + 1) != OK, String());
+	char32_t *dst = joined.ptrw();
+	uint64_t pos = 0;
+	for (int i = 0; i < count; i++) {
+		if (i > 0) {
+			dst[pos++] = p_separator;
+		}
+		const String &part = names[i].string();
+		const int part_length = part.length();
+		if (part_length > 0) {
+			memcpy(dst + pos, part.ptr(), size_t(part_length) * sizeof(char32_t));
+			pos += part_length;
+		}
+	}
+	dst[pos] = 0;
+	return joined;
+}
+
 void NodePath::_update_hash_cache() const {
 	StringName path = get_concatenated_names();
 	StringName subpath = get_concatenated_subnames();
@@ -229,16 +265,7 @@ StringName NodePath::get_concatenated_names() const {
 	ERR_FAIL_NULL_V(data, StringName());
 
 	if (!data->concatenated_path) {
-		int pc = data->path.size();
-		String concatenated;
-		const StringName *sn = data->path.ptr();
-		for (int i = 0; i < pc; i++) {
-			if (i > 0) {
-				concatenated += "/";
-			}
-			concatenated += sn[i].string();
-		}
-		data->concatenated_path = concatenated;
+		data->concatenated_path = _join_node_path_names(data->path, '/');
 	}
 	return data->concatenated_path;
 }
@@ -247,16 +274,7 @@ StringName NodePath::get_concatenated_subnames() const {
 	ERR_FAIL_NULL_V(data, StringName());
 
 	if (!data->concatenated_subpath) {
-		int spc = data->subpath.size();
-		String concatenated;
-		const StringName *ssn = data->subpath.ptr();
-		for (int i = 0; i < spc; i++) {
-			if (i > 0) {
-				concatenated += ":";
-			}
-			concatenated += ssn[i].string();
-		}
-		data->concatenated_subpath = concatenated;
+		data->concatenated_subpath = _join_node_path_names(data->subpath, ':');
 	}
 	return data->concatenated_subpath;
 }
@@ -337,11 +355,9 @@ NodePath NodePath::get_as_property_path() const {
 	} else {
 		Vector<StringName> new_path = data->subpath;
 
-		String initial_subname = data->path[0];
-
-		for (int i = 1; i < data->path.size(); i++) {
-			initial_subname += "/" + data->path[i];
-		}
+		// Share the already-joined string (or build it once) instead of
+		// constructing a second concatenation of all the path segments.
+		String initial_subname = get_concatenated_names().string();
 		new_path.insert(0, initial_subname);
 
 		return NodePath(Vector<StringName>(), new_path, false);

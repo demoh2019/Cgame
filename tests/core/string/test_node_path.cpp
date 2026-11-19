@@ -222,4 +222,76 @@ TEST_CASE("[NodePath] Slice") {
 			"Slice of an empty absolute path should be an empty absolute path.");
 }
 
+
+TEST_CASE("[NodePath] Long component and subname joins preserve Unicode and separators") {
+	String source;
+	String expected_names;
+	String expected_subnames;
+	for (int i = 0; i < 256; i++) {
+		const String name = String(U"узел雪") + itos(i);
+		if (i > 0) {
+			source += "/";
+			expected_names += "/";
+		}
+		source += name;
+		expected_names += name;
+	}
+	for (int i = 0; i < 64; i++) {
+		const String subname = String(U"属性") + itos(i);
+		source += ":";
+		source += subname;
+		if (i > 0) {
+			expected_subnames += ":";
+		}
+		expected_subnames += subname;
+	}
+
+	const NodePath path(source);
+	CHECK_EQ(path.get_name_count(), 256);
+	CHECK_EQ(path.get_subname_count(), 64);
+	CHECK_EQ(path.get_concatenated_names().string(), expected_names);
+	CHECK_EQ(path.get_concatenated_subnames().string(), expected_subnames);
+	CHECK_EQ(String(path), source);
+	CHECK_EQ(String(path.get_as_property_path()), ":" + source);
+	// The interned name and subname strings should be reusable without recomputing.
+	const StringName cached_name = path.get_concatenated_names();
+	const StringName cached_subname = path.get_concatenated_subnames();
+	CHECK(path.get_concatenated_names() == cached_name);
+	CHECK(path.get_concatenated_subnames() == cached_subname);
+}
+
+TEST_CASE("[NodePath] Joined paths survive copy on write and invalidation") {
+	const NodePath original("root/./child:position:x");
+	NodePath modified = original;
+	CHECK_EQ(original.get_concatenated_names().string(), "root/./child");
+	CHECK_EQ(modified.get_concatenated_names().string(), "root/./child");
+
+	modified.simplify();
+	CHECK_EQ(modified.get_concatenated_names().string(), "root/child");
+	CHECK_EQ(modified.get_concatenated_subnames().string(), "position:x");
+	CHECK_EQ(original.get_concatenated_names().string(), "root/./child");
+
+	modified.prepend_period();
+	CHECK_EQ(modified.get_concatenated_names().string(), "./root/child");
+	CHECK_EQ(original.get_concatenated_names().string(), "root/./child");
+	CHECK_EQ(String(modified.get_as_property_path()), ":./root/child:position:x");
+}
+
+TEST_CASE("[NodePath] Single and empty components retain path shape") {
+	const NodePath single("Sprite2D");
+	CHECK_EQ(single.get_concatenated_names().string(), "Sprite2D");
+	CHECK_EQ(single.get_concatenated_subnames().string(), "");
+	CHECK_EQ(String(single.get_as_property_path()), ":Sprite2D");
+
+	const NodePath only_subnames(":position:x");
+	CHECK_EQ(only_subnames.get_concatenated_names().string(), "");
+	CHECK_EQ(only_subnames.get_concatenated_subnames().string(), "position:x");
+	CHECK_EQ(String(only_subnames), ":position:x");
+
+	const NodePath absolute("/root/Sprite2D:position");
+	CHECK_EQ(absolute.get_concatenated_names().string(), "root/Sprite2D");
+	CHECK_EQ(String(absolute), "/root/Sprite2D:position");
+	CHECK_EQ(String(absolute.get_as_property_path()), ":root/Sprite2D:position");
+}
+
 } // namespace TestNodePath
