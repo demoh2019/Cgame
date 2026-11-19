@@ -40,6 +40,23 @@ TEST_FORCE_LINK(test_local_vector)
 
 namespace TestLocalVector {
 
+TEST_CASE("[LocalVector] Reserve known size avoids relocation for bulk append") {
+	LocalVector<uint32_t> entries;
+	entries.reserve(128);
+	CHECK(entries.get_capacity() >= 128);
+	const uint32_t *begin = entries.ptr();
+	for (uint32_t i = 0; i < 128; ++i) {
+		entries.push_back(i * 3);
+		CHECK(entries.ptr() == begin);
+	}
+	CHECK(entries.size() == 128);
+	for (uint32_t i = 0; i < entries.size(); ++i) {
+		CHECK(entries[i] == i * 3);
+	}
+}
+
+
+
 TEST_CASE("[LocalVector] List Initialization.") {
 	LocalVector<int> vector{ 0, 1, 2, 3, 4 };
 

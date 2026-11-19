@@ -1,0 +1,52 @@
+name: Known-capacity LocalVector hotpath regressions
+
+on:
+  push:
+    branches: [develop]
+    paths:
+      - 'platform/windows/display_server_windows.cpp'
+      - 'scene/3d/lightmap_gi.cpp'
+      - 'scene/3d/retarget_modifier_3d.cpp'
+      - 'scene/property_utils.cpp'
+      - 'scene/resources/mesh.cpp'
+      - 'scene/resources/surface_tool.cpp'
+      - 'servers/rendering/rendering_device.cpp'
+      - 'servers/rendering/shader_preprocessor.cpp'
+      - 'tests/core/templates/test_local_vector.cpp'
+      - 'misc/scripts/tests/test_local_vector_reserve_hotpaths.py'
+      - '.github/workflows/local-vector-reserve-hotpaths.yml'
+  pull_request:
+    branches: [develop]
+    paths:
+      - 'platform/windows/display_server_windows.cpp'
+      - 'scene/3d/lightmap_gi.cpp'
+      - 'scene/3d/retarget_modifier_3d.cpp'
+      - 'scene/property_utils.cpp'
+      - 'scene/resources/mesh.cpp'
+      - 'scene/resources/surface_tool.cpp'
+      - 'servers/rendering/rendering_device.cpp'
+      - 'servers/rendering/shader_preprocessor.cpp'
+      - 'tests/core/templates/test_local_vector.cpp'
+      - 'misc/scripts/tests/test_local_vector_reserve_hotpaths.py'
+      - '.github/workflows/local-vector-reserve-hotpaths.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  source-regression:
+    runs-on: ubuntu-24.04
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ['3.9', '3.13']
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+      - name: Source reserve regression checks
+        run: |
+          python -m py_compile misc/scripts/tests/test_local_vector_reserve_hotpaths.py
+          python -m unittest discover -s misc/scripts/tests -p test_local_vector_reserve_hotpaths.py -v

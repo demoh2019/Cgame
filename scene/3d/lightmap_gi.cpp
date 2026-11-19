@@ -1308,6 +1308,7 @@ LightmapGI::BakeError LightmapGI::bake(Node *p_from_node, String p_image_data_pa
 
 		LocalVector<Vector3> new_probe_positions;
 		HashMap<Vector3i, bool> positions_used;
+		new_probe_positions.reserve(8);
 		for (uint32_t i = 0; i < 8; i++) { //insert bounding endpoints
 			Vector3i pos;
 			if (i & 1) {
