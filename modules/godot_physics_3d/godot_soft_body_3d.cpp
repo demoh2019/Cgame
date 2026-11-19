@@ -1351,6 +1351,14 @@ void GodotSoftBody3D::solve_constraints(real_t p_delta) {
 			Math::is_finite(area_alpha_double) && area_alpha_double > 0.0;
 	const real_t alpha = use_xpbd ? real_t(MIN(alpha_double, double(std::numeric_limits<real_t>::max()))) : real_t(0.0);
 	const real_t area_alpha = use_area_xpbd ? real_t(MIN(area_alpha_double, double(std::numeric_limits<real_t>::max()))) : real_t(0.0);
+	// Dihedral XPBD models bending of adjacent triangles rather than
+	// extension of their two-hop distance links. All settings are per-space.
+	const real_t configured_dihedral = get_space() ? get_space()->get_soft_body_xpbd_dihedral_compliance() : real_t(0.0);
+	const double dihedral_alpha_double = p_delta > 0.0 ? double(configured_dihedral) / (double(p_delta) * double(p_delta)) : 0.0;
+	const bool use_dihedral_xpbd = configured_dihedral > 0.0 &&
+			Math::is_finite(dihedral_alpha_double) && dihedral_alpha_double > 0.0;
+	const real_t dihedral_alpha = use_dihedral_xpbd ?
+			real_t(MIN(dihedral_alpha_double, double(std::numeric_limits<real_t>::max()))) : real_t(0.0);
 
 	if (use_xpbd) {
 		xpbd_link_lambdas.resize(links.size());
@@ -1369,6 +1377,22 @@ void GodotSoftBody3D::solve_constraints(real_t p_delta) {
 	} else if (!xpbd_area_lambdas.is_empty()) {
 		// The default zero-compliance setting consumes no per-face scratch.
 		xpbd_area_lambdas.reset();
+	}
+
+	if (use_dihedral_xpbd) {
+		if (!xpbd_dihedral_built) {
+			build_xpbd_dihedral_bends();
+		}
+		// XPBD multipliers are persistent across solver iterations, but must
+		// restart every physics step to avoid stale forces.
+		for (DihedralBend &bend : xpbd_dihedral_bends) {
+			bend.lambda = 0.0;
+		}
+	} else if (xpbd_dihedral_built) {
+		// When switched to a space where the setting is off, free all
+		// opt-in hinge memory; regular cloth retains the legacy footprint.
+		xpbd_dihedral_bends.reset();
+		xpbd_dihedral_built = false;
 	}
 
 	for (int isolve = 0; isolve < iteration_count; ++isolve) {
@@ -1392,6 +1416,16 @@ void GodotSoftBody3D::solve_constraints(real_t p_delta) {
 				physics_xpbd_solve_triangle_area(face.n[0]->x, face.n[1]->x, face.n[2]->x,
 						face.n[0]->im, face.n[1]->im, face.n[2]->im,
 						face.ra, area_alpha, xpbd_area_lambdas[face_index]);
+			}
+		}
+		if (use_dihedral_xpbd) {
+			for (DihedralBend &bend : xpbd_dihedral_bends) {
+				Node &a = nodes[bend.vertex[0]];
+				Node &b = nodes[bend.vertex[1]];
+				Node &c = nodes[bend.vertex[2]];
+				Node &d = nodes[bend.vertex[3]];
+				physics_xpbd_solve_dihedral(a.x, b.x, c.x, d.x, a.im, b.im,
+						c.im, d.im, bend.rest_angle, dihedral_alpha, bend.lambda);
 			}
 		}
 	}
