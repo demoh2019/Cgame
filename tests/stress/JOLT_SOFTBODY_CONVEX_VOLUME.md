@@ -11,14 +11,24 @@ or independent tetrahedral import.
 
 ## How it works
 
-After the normal Jolt surface constraints are generated:
+Before Jolt generates surface/LRA constraints:
 1. Validate finite positions and reject invalid/degenerate triangles.
 2. Require every undirected edge exactly twice, with opposing orientation.
 3. Require every surface vertex to be on the same side of every triangle's
    supporting plane as the mesh centroid (convexity/centroid-inside test).
 4. Add one *interior* particle at the mean of the physics vertices.
-5. Create one tetrahedral volume constraint per surface triangle.
-6. Calculate rest volumes and run Jolt's constraint optimizer.
+5. Create one tetrahedral volume constraint per surface triangle and
+   calculate rest volumes. Orient each tetrahedron to have **positive signed
+   volume**. The Jolt solver compares absolute volume to its rest value but
+   uses gradients of signed volume, so negative rest orientation can produce
+   corrections in the wrong direction. This does not solve dynamic inversion.
+6. Generate surface/bending/LRA constraints on the complete particle list.
+   This order prevents Jolt's LRA closest-kinematic cache from becoming
+   shorter than the particle buffer when a volume fan is also enabled.
+   It also includes the interior particle in total-mass / edge-compliance
+   conversion (the complete physics particle count is used).
+7. Shrink surface edges/LRA tethers (if configured); optionally append
+   independently controlled radial springs, then optimize all constraints.
 
 This star tetrahedralization is only correct for **convex** closed surfaces.
 Concave/open/nonmanifold meshes are skipped rather than generating invalid

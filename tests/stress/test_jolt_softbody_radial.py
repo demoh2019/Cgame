@@ -38,30 +38,32 @@ class RadialElasticityContracts(unittest.TestCase):
     def test_feature_is_disabled_by_default(self):
         self.assertIn("inline static bool soft_body_volume_radial_springs = false;", self.header)
         self.assertIn('simulation/soft_body_volume_radial_springs"), false', self.settings)
-        self.assertIn("if (p_radial_springs)", self.builder)
+        self.assertIn("if (has_convex_volume && JoltProjectSettings::soft_body_volume_radial_springs)", self.cpp)
         self.assertIn("if (JoltProjectSettings::soft_body_volume_preservation)", self.cpp)
 
     def test_compliance_is_finite_and_nonnegative(self):
         self.assertIn("Math::is_finite(radial_compliance)", self.settings)
         self.assertIn("CLAMP(radial_compliance, 0.0f, 1.0f)", self.settings)
         self.assertIn("soft_body_volume_radial_compliance = 0.0001f", self.header)
-        self.assertIn("p_radial_compliance", self.builder)
+        self.assertIn("p_compliance", self.builder)
 
     def test_constraints_are_real_jolt_edge_constraints(self):
-        self.assertIn("JPH::SoftBodySharedSettings::Edge radial(center_index, i, p_radial_compliance);", self.builder)
-        self.assertIn("radial.mRestLength = distance;", self.builder)
+        self.assertIn("JPH::SoftBodySharedSettings::Edge radial(center_index, i, compliance);", self.builder)
+        self.assertIn("radial.mRestLength = Math::sqrt(distance_sq);", self.builder)
         self.assertIn("r_settings.mEdgeConstraints.push_back(radial);", self.builder)
         self.assertIn("Edge(uint32 inVertex1, uint32 inVertex2, float inCompliance", self.jolt)
 
     def test_spoke_generation_happens_after_manifold_validation(self):
-        self.assertLess(self.builder.index("state == nullptr || *state != 0"), self.builder.index("if (p_radial_springs)"))
-        self.assertLess(self.builder.index("CalculateVolumeConstraintVolumes();"), self.builder.index("if (p_radial_springs)"))
-        self.assertIn("if (distance <= radius * 1.0e-6f)", self.builder)
+        self.assertLess(self.builder.index("state == nullptr || *state != 0"), self.builder.index("vertices.emplace_back("))
+        self.assertLess(self.builder.index("CalculateVolumeConstraintVolumes();"), self.builder.index("static void append_volume_radial_springs("))
+        self.assertIn("if (distance_sq <= min_distance_sq)", self.builder)
 
     def test_keep_surface_shrink_separate_from_spoke_rest_length(self):
-        self.assertLess(self.cpp.index("e.mRestLength *= multiplier;"),
-                        self.cpp.index("try_build_convex_volume_fan(*settings"))
         self.assertLess(self.cpp.index("try_build_convex_volume_fan(*settings"),
+                        self.cpp.index("settings->CreateConstraints(&vertex_attrib, 1, bend_type)"))
+        self.assertLess(self.cpp.index("e.mRestLength *= multiplier;"),
+                        self.cpp.index("append_volume_radial_springs(*settings"))
+        self.assertLess(self.cpp.index("append_volume_radial_springs(*settings"),
                         self.cpp.index("settings->Optimize()"))
         self.assertIn("LRA &tether", self.cpp)
 
