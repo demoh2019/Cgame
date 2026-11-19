@@ -11,21 +11,27 @@ func _initialize() -> void:
 
 func _run() -> void:
 	var failures := 0
-	for parameters in [[false, false], [true, false], [true, true]]:
+	# Compare equal geometry in serial/parallel modes. The last case has
+	# two large islands and must use ordinary island-level workers.
+	for parameters in [[false, false, 0, 16], [true, false, 0, 16], [true, true, 0, 16],
+			[false, false, 20, 16], [true, false, 20, 16], [true, false, 1, 320]]:
 		var parallel: bool = parameters[0]
 		var priority_fallback: bool = parameters[1]
+		var extra_islands: int = parameters[2]
+		var extra_island_size: int = parameters[3]
 		var result: Dictionary = await LargeIsland3DStress.new().run(
-				self, 1, 24, parallel, priority_fallback)
+				self, 1, 24, parallel, priority_fallback, extra_islands, extra_island_size)
 		if result.has("error"):
 			printerr("FAIL: 3D island: parallel=%s, fallback=%s, error=%s" %
 					[parallel, priority_fallback, result["error"]])
 			failures += 1
 			continue
-		if int(result["joints"]) < 256 or float(result["max_joint_spacing"]) > 11.0:
+		if int(result["joints"]) < 256 or float(result["max_joint_spacing"]) > 11.0 \
+				or int(result["bodies"]) != 320 + extra_islands * extra_island_size:
 			printerr("FAIL: incorrect connected-island test geometry or joint drift")
 			failures += 1
-		print("3D island: parallel=%s, priority_fallback=%s, joints=%d, peak=%.3f ms" %
-				[parallel, priority_fallback, result["joints"], result["peak_physics_ms"]])
+		print("3D island: parallel=%s, priority_fallback=%s, extra=%d, joints=%d, peak=%.3f ms" %
+				[parallel, priority_fallback, extra_islands, result["joints"], result["peak_physics_ms"]])
 
 	if failures != 0:
 		printerr("3D large island regression failed (%d errors)" % failures)
