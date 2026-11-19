@@ -81,6 +81,24 @@ server: physics and object allocation remain useful, GPU performance does not.
 Use a dedicated GPU runner with a real display for rendering conclusions.
 Virtual displays with software rendering are valid only for software-GL baselines.
 
+## Absolute performance budgets
+
+When a baseline is unavailable, enforce explicit per-scenario limits:
+
+```bash
+python3 tests/stress/run.py --godot /path/to/godot \
+  --preset standard --max-frame-ms 33.3 --max-physics-ms 20 \
+  --max-vram-mib 2048 --rss-limit-mib 4096 \
+  --output out/budget-gates.json
+```
+
+The frame and physics thresholds use engine `Performance` monitors for
+scenarios that publish those metrics. They **do not** measure GPU render
+latency or total presentation latency; use GPU vendor profilers for that.
+An omitted metric is not treated as a pass against a corresponding budget:
+it is *not measured* in that scenario. Hard RSS/time watchdogs apply to
+every scenario independently, including ones without frame monitors.
+
 ## Synthetic editor import benchmark
 
 Cold/warm resource imports have a separate entrypoint, because editor asset
