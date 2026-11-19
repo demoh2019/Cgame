@@ -107,7 +107,13 @@ _FORCE_INLINE_ static bool physics_fem_tetra_accumulate_damage(
 			!Math::is_finite(p_max_damage) || p_max_damage <= 0.0 ||
 			p_max_damage > 0.95 ||
 			!Math::is_finite(r_damage) || r_damage < 0.0 ||
-			r_damage > p_max_damage || p_strain <= p_yield_strain) {
+			p_strain <= p_yield_strain) {
+		return false;
+	}
+	// Damage is stored as real_t. The rounded float32 maximum can be
+	// a few ULPs greater than its double-precision literal (e.g. 0.8).
+	const real_t bounded_max = real_t(p_max_damage);
+	if (!Math::is_finite(bounded_max) || r_damage > bounded_max) {
 		return false;
 	}
 	const double excess = p_strain - p_yield_strain;
@@ -124,7 +130,7 @@ _FORCE_INLINE_ static bool physics_fem_tetra_accumulate_damage(
 			double(r_damage) + (p_max_damage - double(r_damage)) *
 					fraction * intensity);
 	const real_t next = real_t(result);
-	if (!Math::is_finite(next) || next < r_damage || next > p_max_damage) {
+	if (!Math::is_finite(next) || next < r_damage || next > bounded_max) {
 		return false;
 	}
 	if (next == r_damage) {
