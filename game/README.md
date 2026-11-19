@@ -1750,3 +1750,38 @@ elite-core gear meaningful for classless Lineage-style group support.
 The headless `tests/test_warden_aura.gd` covers real server combat,
 multiple guardians, worn/owned equipment, movement, death, party changes
 and unchanged PvP. No native Cgame engine changes are needed.
+
+## Declared siege contracts (party war preparation and honor)
+
+A party leader can declare a **timed siege challenge** against a hostile
+player-controlled outpost from within 24 metres, provided a second living
+party member is also nearby. The declaration consumes **2 Cloth T2 and 25
+Silver** from the leader's real backpack. Players must own neither the
+outpost nor its party; objectives about to expire refuse new challenges.
+Any already-active declaration or recently resolved siege blocks repeat
+contracts for that site.
+
+The declaration announces a **20-second preparation countdown**, followed by
+an **180-second assault window**. The normal territorial capture and full-loot
+PvP rules are unchanged: another team can still seize an outpost without a
+contract, but only a genuinely completed capture *during the declared
+window* earns a siege-contract victory. Early conquest, capture by a third
+party, loss of either group or the end of the window cancel the challenge
+without rewarding honor. Site cooldown is 300 seconds after resolution;
+the non-tradable siege victory counter belongs to the current server party.
+
+The server derives leader permissions, teammate proximity, party identity,
+target ownership, deadlines and item costs. Only the actual server
+`outpost_taken` event can award a victory, once per challenge. Requests
+carry monotonic peer IDs; retries return the prior result without
+double-charging resources. Nearby players see declaration/result events,
+and everyone receives public outpost preparation/assault timers through
+the existing snapshot. The HUD adds a **Declare siege** action and displays
+the current party's siege victories.
+
+Source: `scripts/shared/siege_contracts.gd`, `game_server.gd`, network RPCs
+and HUD; regression checks: `tests/test_siege_contracts.gd`. This is
+**session-based party siege warfare**, not permanent authenticated guild
+ownership, cross-server match scheduling or Nakama-backed honor. Those
+features require an identity-checked guild persistence layer. No native
+Cgame engine change is required by this phase.

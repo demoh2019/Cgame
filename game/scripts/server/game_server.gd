@@ -14,6 +14,7 @@ const Party = preload("res://scripts/shared/party.gd")
 const LootRights = preload("res://scripts/shared/loot_rights.gd")
 const PartyAid = preload("res://scripts/shared/party_aid.gd")
 const TerritoryControl = preload("res://scripts/shared/territory_control.gd")
+const SiegeContracts = preload("res://scripts/shared/siege_contracts.gd")
 const OutpostFortification = preload("res://scripts/shared/outpost_fortification.gd")
 const OutpostBreach = preload("res://scripts/shared/outpost_breach.gd")
 const MarketBoard = preload("res://scripts/shared/market_board.gd")
@@ -50,6 +51,7 @@ const TRADE_TIMEOUT := 45.0
 const MARKET_MAX_REQUEST_ID := 2_147_483_647
 const FORTIFY_MAX_REQUEST_ID := 2_147_483_647
 const BREACH_MAX_REQUEST_ID := 2_147_483_647
+const SIEGE_DECLARE_MAX_REQUEST_ID := 2_147_483_647
 const ZOMBIE_ACTIVE_RADIUS := 130.0 # Zombies farther than this from every player are put to sleep.
 const ZOMBIE_PACK_ALERT_RADIUS := 18.0
 const ZOMBIE_PACK_BUCKET_SIZE := 18.0
@@ -125,8 +127,10 @@ var market_buy_requests: Dictionary = {} # Peer -> last request ID, arguments an
 var trade_by_player: Dictionary = {} # peer -> active trade
 var parties = Party.new() # Server-only session groups and short-lived invitations.
 var territory # Session outposts generated from this world seed.
+var siege_contracts = SiegeContracts.new() # Session-only declared siege windows and honor.
 var outpost_fortify_requests: Dictionary = {} # Peer -> last request and cached result.
 var outpost_breach_requests: Dictionary = {} # Peer -> last command and cached result.
+var siege_declare_requests: Dictionary = {} # Peer -> last declared request and cached result.
 var world_structure_revision: int = 0
 var bags: Dictionary = {} # Session loot; optional server-owned PvE reservations
 var events: Array = [] # Things that happened this tick, for the network layer to announce.
@@ -318,6 +322,7 @@ func remove_player(peer_id: int) -> void:
 	market_buy_requests.erase(peer_id)
 	outpost_fortify_requests.erase(peer_id)
 	outpost_breach_requests.erase(peer_id)
+	siege_declare_requests.erase(peer_id)
 	_cancel_market_seller(peer_id)
 	_cancel_player_trade(peer_id, "disconnected")
 	parties.disconnect(peer_id)
@@ -694,6 +699,61 @@ func _execute_outpost_breach(peer_id: int, site_id: int) -> Dictionary:
 		events.append({
 			"type": "outpost_breached", "id": site_id, "level": result["level"],
 			"x": site["x"], "z": site["z"], "by_group": attacker_group,
+		})
+	return result
+
+
+# --- Siege declarations: leadership, preparation and scored territory captures. ---
+# Parties remain session-based until authenticated Nakama clan membership exists.
+func cmd_siege_declare(peer_id: int, site_id: int, request_id: int) -> Dictionary:
+	if not players.has(peer_id):
+		return {"ok": false, "reason": "unknown_player"}
+	if request_id < 1 or request_id > SIEGE_DECLARE_MAX_REQUEST_ID:
+		return {"ok": false, "reason": "invalid_request_id"}
+	var last: Dictionary = siege_declare_requests.get(peer_id, {})
+	if not last.is_empty():
+		if request_id < int(last["id"]):
+			return {"ok": false, "reason": "stale_request"}
+		if request_id == int(last["id"]):
+			if site_id != int(last["site"]):
+				return {"ok": false, "reason": "request_conflict"}
+			return (last["result"] as Dictionary).duplicate(true)
+	var outcome: Dictionary = _execute_siege_declare(peer_id, site_id)
+	outcome["request_id"] = request_id
+	siege_declare_requests[peer_id] = {
+		"id": request_id, "site": site_id, "result": outcome.duplicate(true),
+	}
+	return outcome
+
+
+func _execute_siege_declare(peer_id: int, site_id: int) -> Dictionary:
+	var player: Player = players.get(peer_id)
+	if player == null or not _alive(player):
+		return {"ok": false, "reason": "dead"}
+	var site: Dictionary = territory.site_by_id(site_id)
+	if site.is_empty():
+		return {"ok": false, "reason": "unknown_outpost"}
+	var group_id: int = parties.group_of(peer_id)
+	var is_leader := group_id > 0 and parties.groups.has(group_id) \
+		and int(parties.groups[group_id]["leader"]) == peer_id
+	var allies_near := 0
+	if group_id > 0:
+		var point := Vector2(float(site["x"]), float(site["z"]))
+		for member_id in parties.members_of(peer_id):
+			var ally: Player = players.get(member_id)
+			if ally != null and _alive(ally) and ally.position.is_finite() and \
+					Vector2(ally.position.x, ally.position.z).distance_squared_to(point) <= \
+					SiegeContracts.DECLARE_RADIUS * SiegeContracts.DECLARE_RADIUS:
+				allies_near += 1
+	var result: Dictionary = siege_contracts.declare(
+		site, player.inventory, player.position, group_id, is_leader, allies_near, time)
+	if result.get("ok", false):
+		player.dirty_inventory = true
+		player.dirty_character = true
+		events.append({
+			"type": "siege_contract_declared", "site": site_id,
+			"x": site["x"], "z": site["z"],
+			"attacker": group_id, "defender": site["owner"],
 		})
 	return result
 
@@ -1985,7 +2045,9 @@ func tick(delta: float) -> void:
 	_tick_trades()
 	parties.expire(time)
 	_tick_players(delta)
-	events.append_array(territory.tick(delta, time, players, parties))
+	var capture_events: Array = territory.tick(delta, time, players, parties)
+	events.append_array(capture_events)
+	events.append_array(siege_contracts.tick(time, territory.sites, parties, capture_events))
 	if tick_count % SiegeWaves.CHECK_EVERY_TICKS == 0:
 		_tick_siege_waves()
 	_tick_raid_encounter()
@@ -2524,9 +2586,10 @@ func snapshot_for(peer_id: int) -> Dictionary:
 		used_crates.append(id)
 	var snapshot := {
 		"tick": tick_count, "time": time, "ack": player.last_input_seq,
-		"outposts": territory.public_state(time),
+		"outposts": siege_contracts.public_state(territory.public_state(time), time),
 		"you": {
 			"party": _party_state_for(peer_id),
+			"siege_wins": int(siege_contracts.victories.get(parties.group_of(peer_id), 0)),
 			"x": player.position.x, "y": player.position.y, "z": player.position.z, "yaw": player.yaw,
 			"health": player.survival.health, "hunger": player.survival.hunger, "thirst": player.survival.thirst,
 			"stamina": player.survival.stamina,

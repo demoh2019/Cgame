@@ -353,6 +353,27 @@ func _build() -> void:
 		else:
 			client.outpost_breach(int(nearest["id"])))
 	inventory_box.add_child(breach_button)
+	var war_button := Button.new()
+	war_button.name = "DeclareSiege"
+	war_button.text = "Declare siege (2 cloth T2 + 25 silver)"
+	war_button.tooltip_text = "Party leader only: two nearby party members, 20s preparation, 180s assault."
+	war_button.pressed.connect(func() -> void:
+		var here: Vector3 = client.display_position()
+		var nearest: Dictionary = {}
+		var distance := INF
+		for site in client.outposts:
+			var gap: float = Vector2(here.x, here.z).distance_to(
+				Vector2(float(site["x"]), float(site["z"])))
+			if gap < distance:
+				distance = gap
+				nearest = site
+		if nearest.is_empty() or distance > 24.0:
+			say("Siege: leader must be within 24m of a rival outpost")
+		else:
+			client.siege_declare(int(nearest["id"])))
+	inventory_box.add_child(war_button)
+
+
 
 	var kick_member := Button.new()
 	kick_member.text = "Kick"
@@ -690,6 +711,13 @@ func _on_result(kind: String, data: Dictionary) -> void:
 		say("Raid loot is reserved for its contributors (%ds remaining)." % [
 			int(ceil(float(data.get("remaining", 0.0))))])
 		return
+	if kind == "siege_declare":
+		if bool(data.get("ok", false)):
+			say("Siege declared! Prepare for %ds, attack within %ds." % [
+				int(data.get("preparation", 0)), int(data.get("attack_window", 0))])
+		else:
+			say("Siege declaration: " + str(data.get("reason", "rejected")))
+		return
 	if kind == "outpost_breach":
 		if bool(data.get("ok", false)):
 			say("Siege breach successful: enemy fortification now T%d." % int(data.get("level", 0)))
@@ -872,6 +900,15 @@ func _process(_delta: float) -> void:
 		elif int(closest["challenger"]) != 0:
 			status += " | Capture %d%%" % int(100.0 * float(closest["progress"]) / maxf(1.0, float(closest.get("capture_target", 30.0))))
 		status += " | Fort T%d" % int(closest.get("fortification", 0))
+		if str(closest.get("siege_phase", "")) != "":
+			var pending: bool = str(closest["siege_phase"]) == "preparing"
+			var seconds: int = int(ceil(float(closest["siege_starts_in"] if pending else closest["siege_ends_in"])))
+			status += " | WAR %s %ds (party %d)" % [
+				"prep" if pending else "active", seconds, int(closest["siege_attacker"])
+			]
+		if float(closest.get("breach_cooldown", 0.0)) > 0.0:
+			status += " | Breach CD %ds" % int(ceil(float(closest["breach_cooldown"])))
+		status += " | Supplies %d/5" % int(closest.get("supplies_left", 0))
 		if float(closest.get("breach_cooldown", 0.0)) > 0.0:
 			status += " | Breach CD %ds" % int(ceil(float(closest["breach_cooldown"])))
 		status += " | Supplies %d/5" % int(closest.get("supplies_left", 0))
@@ -879,6 +916,8 @@ func _process(_delta: float) -> void:
 			int(closest["id"]), int(closest["x"]), int(closest["z"]), best_distance, status
 		]
 
+	if int(client.you.get("siege_wins", 0)) > 0:
+		_info_label.text += " | Siege victories: %d" % int(client.you["siege_wins"])
 	var rally: Dictionary = client.you.get("party", {}).get("rally", {})
 	if not rally.is_empty():
 		_info_label.text += "\nPARTY RALLY x%d z%d | %ds left" % [

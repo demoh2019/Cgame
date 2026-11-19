@@ -381,6 +381,15 @@ func c_outpost_breach(site_id: int, request_id: int) -> void:
 			sim.cmd_outpost_breach(peer, site_id, request_id))
 
 
+## A session war declaration may only come from the acting peer.
+@rpc("any_peer", "reliable")
+func c_siege_declare(site_id: int, request_id: int) -> void:
+	var peer := multiplayer.get_remote_sender_id()
+	if _allowed(peer):
+		s_result.rpc_id(peer, "siege_declare",
+			sim.cmd_siege_declare(peer, site_id, request_id))
+
+
 @rpc("any_peer", "reliable")
 func c_trade_invite(target_id: int) -> void:
 	var peer := multiplayer.get_remote_sender_id()
@@ -593,7 +602,8 @@ func _event_visible_to(event: Dictionary, peer: int) -> bool:
 			return event.get("a", -1) == peer or event.get("b", -1) == peer
 		"guardian_taunt":
 			return _is_nearby(event, peer)
-		"outpost_taken", "outpost_lost", "outpost_fortified", "outpost_breached":
+		"outpost_taken", "outpost_lost", "outpost_fortified", "outpost_breached", \
+				"siege_contract_declared", "siege_contract_result":
 			return _is_nearby(event, peer)
 		"death":
 			return true # Everyone hears that somebody died (no position is shared).
