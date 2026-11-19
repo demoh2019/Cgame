@@ -11,6 +11,7 @@ const JUMP_VELOCITY := 5.0
 const GRAVITY := 18.0
 const MOUSE_SENSITIVITY := 0.0025
 const XP_PER_LEVEL := 60
+const TRADE_RULES = preload("res://trade_rules.gd")
 
 const RECIPES := {
     "field_bandage": {"fiber_t1": 2},
@@ -27,6 +28,7 @@ var thirst: float = 80.0
 var inventory: Dictionary = {}
 var gathering_xp: Dictionary = {"wood": 0, "stone": 0, "fiber": 0}
 var crafting_xp: int = 0
+var credits: int = 0
 var equipped_tool: String = ""
 var equipped_weapon: String = ""
 var equipped_armor: String = ""
@@ -263,3 +265,34 @@ func take_damage(raw_amount: float) -> void:
 func gain_combat_xp(amount: int) -> void:
     if amount > 0:
         combat_xp += amount
+
+
+func trade_sell(item_id: String, quantity: int) -> bool:
+    # Transaction validates both price and stock before mutating anything.
+    var unit_price := int(TRADE_RULES.SELL_PRICES.get(item_id, 0))
+    if health <= 0.0 or unit_price <= 0 or quantity <= 0 or quantity > TRADE_RULES.MAX_TRADE_QUANTITY:
+        return false
+    if get_item_count(item_id) < quantity:
+        last_message = "Недостаточно %s для продажи." % item_id
+        return false
+    var revenue := unit_price * quantity
+    if credits < 0 or credits > TRADE_RULES.MAX_CREDITS - revenue:
+        return false
+    inventory[item_id] = get_item_count(item_id) - quantity
+    credits += revenue
+    last_message = "Продано %s × %d, выручка %d кредитов." % [item_id, quantity, revenue]
+    return true
+
+
+func trade_buy(item_id: String, quantity: int) -> bool:
+    var unit_price := int(TRADE_RULES.BUY_PRICES.get(item_id, 0))
+    if health <= 0.0 or unit_price <= 0 or quantity <= 0 or quantity > TRADE_RULES.MAX_TRADE_QUANTITY:
+        return false
+    var cost := unit_price * quantity
+    if credits < cost:
+        last_message = "Для покупки %s нужно %d кредитов." % [item_id, cost]
+        return false
+    credits -= cost
+    add_item(item_id, quantity)
+    last_message = "Куплено %s × %d за %d кредитов." % [item_id, quantity, cost]
+    return true

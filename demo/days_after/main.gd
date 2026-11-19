@@ -7,6 +7,7 @@ const PLAYER_SCRIPT = preload("res://player.gd")
 const PICKUP_SCRIPT = preload("res://pickup.gd")
 const RESOURCE_SCRIPT = preload("res://resource_node.gd")
 const ZOMBIE_SCRIPT = preload("res://zombie.gd")
+const TRADER_SCRIPT = preload("res://trade_terminal.gd")
 
 var player
 var hud_label: Label
@@ -21,6 +22,7 @@ func _ready() -> void:
     _build_player()
     _build_pickups()
     _build_resources()
+    _build_trader()
     _build_enemies()
     _build_hud()
 
@@ -44,6 +46,7 @@ func _configure_controls() -> void:
     _bind_key("attack", KEY_F)
     _bind_key("craft_spear", KEY_8)
     _bind_key("craft_vest", KEY_9)
+    _bind_key("trade_buy", KEY_B)
 
 
 func _bind_key(action_name: String, key_code: int) -> void:
@@ -189,6 +192,13 @@ func _add_resource(node_name: String, kind: String, tier: int,
     add_child(resource)
 
 
+func _build_trader() -> void:
+    var trader = TRADER_SCRIPT.new()
+    trader.name = "CampTrader"
+    trader.position = Vector3(2.0, 0.75, 5.0)
+    add_child(trader)
+
+
 func _build_enemies() -> void:
     _spawn_infected("InfectedWalker", Vector3(9.0, 1.05, 7.0))
     _spawn_infected("InfectedScavenger", Vector3(-10.0, 1.05, 8.0))
@@ -233,6 +243,7 @@ func _on_player_attacked(damage: float, range_meters: float) -> void:
 func _on_infected_eliminated() -> void:
     infected_kills += 1
     player.gain_combat_xp(25)
+    player.add_item("infected_sample", 1)
     player.last_message = "Заражённый уничтожен! Опыт боя +25."
 
 
@@ -259,11 +270,12 @@ func _build_hud() -> void:
     help_label.text = "WASD движение | Shift бег | Space прыжок | F удар\n" + \
         "E сбор | 1 еда | 2 вода | 3 бинт | 4 инструмент | 5 лечение\n" + \
         "6 улучшенный бинт | 7 лечение | 8 копьё | 9 броня\n" + \
+        "E у торговца: продать ресурс | B у торговца: купить воду\n" + \
         "Esc мышь | ЛКМ захват мыши | R перезапуск"
     column.add_child(help_label)
 
     prompt_label = Label.new()
-    prompt_label.position = Vector2(18, 315)
+    prompt_label.position = Vector2(18, 335)
     ui.add_child(prompt_label)
 
     var crosshair := Label.new()
@@ -301,8 +313,8 @@ func _process(_delta: float) -> void:
             player.equipped_armor if not player.equipped_armor.is_empty() else "нет",
             player.equipped_tool if not player.equipped_tool.is_empty() else "нет"
         ] +
-        "Заражённые: %d/%d | Боевой опыт %d\n" % [
-            infected_kills, infected_total, player.combat_xp
+        "Заражённые: %d/%d | Боевой опыт %d | Кредиты %d\n" % [
+            infected_kills, infected_total, player.combat_xp, player.credits
         ] +
         player.last_message
     )
@@ -314,5 +326,9 @@ func _process(_delta: float) -> void:
             "[E] Взаимодействовать: " + str(target.get("display_name"))
             if target != null else "Исследуйте руины, собирайте T1 и осваивайте T2."
         )
+    if Input.is_action_just_pressed("trade_buy") and player.health > 0.0:
+        var trade_target: Node = player.get_aimed_pickup()
+        if trade_target != null and trade_target.has_method("buy"):
+            trade_target.call("buy", player)
     if Input.is_action_just_pressed("restart"):
         get_tree().reload_current_scene()
