@@ -536,7 +536,7 @@ bool GodotConvexPolygonShape2D::contains_point(const Vector2 &p_point) const {
 
 bool GodotConvexPolygonShape2D::intersect_segment(const Vector2 &p_begin, const Vector2 &p_end, Vector2 &r_point, Vector2 &r_normal) const {
 	Vector2 n = (p_end - p_begin).normalized();
-	real_t d = 1e10;
+	real_t d = 0.0;
 	bool inters = false;
 
 	for (int i = 0; i < point_count; i++) {
@@ -547,7 +547,7 @@ bool GodotConvexPolygonShape2D::intersect_segment(const Vector2 &p_begin, const 
 		}
 
 		real_t nd = n.dot(res);
-		if (nd < d) {
+		if (!inters || nd < d) {
 			d = nd;
 			r_point = res;
 			r_normal = points[i].normal;
@@ -666,7 +666,7 @@ bool GodotConcavePolygonShape2D::contains_point(const Vector2 &p_point) const {
 }
 
 bool GodotConcavePolygonShape2D::intersect_segment(const Vector2 &p_begin, const Vector2 &p_end, Vector2 &r_point, Vector2 &r_normal) const {
-	if (segments.is_empty() || points.is_empty()) {
+	if (segments.is_empty() || points.is_empty() || bvh.is_empty()) {
 		return false;
 	}
 
@@ -684,7 +684,7 @@ bool GodotConcavePolygonShape2D::intersect_segment(const Vector2 &p_begin, const
 	};
 
 	Vector2 n = (p_end - p_begin).normalized();
-	real_t d = 1e10;
+	real_t d = 0.0;
 	bool inters = false;
 
 	/*
@@ -706,7 +706,19 @@ bool GodotConcavePolygonShape2D::intersect_segment(const Vector2 &p_begin, const
 
 		switch (stack[level] >> VISITED_BIT_SHIFT) {
 			case TEST_AABB_BIT: {
-				bool valid = bvh2.aabb.intersects_segment(p_begin, p_end);
+				// Once a hit is known, skip nodes whose earliest possible point
+				// along the ray is farther away than that hit (closest-hit pruning).
+				bool valid = true;
+				if (inters) {
+					const Vector2 aabb_min = bvh2.aabb.position;
+					const Vector2 aabb_max = bvh2.aabb.get_end();
+					const real_t earliest = MIN(n.x * aabb_min.x, n.x * aabb_max.x) +
+							MIN(n.y * aabb_min.y, n.y * aabb_max.y);
+					valid = earliest <= d;
+				}
+				if (valid) {
+					valid = bvh2.aabb.intersects_segment(p_begin, p_end);
+				}
 				if (!valid) {
 					stack[level] = (VISIT_DONE_BIT << VISITED_BIT_SHIFT) | node;
 
@@ -720,7 +732,7 @@ bool GodotConcavePolygonShape2D::intersect_segment(const Vector2 &p_begin, const
 
 						if (Geometry2D::segment_intersects_segment(p_begin, p_end, a, b, &res)) {
 							real_t nd = n.dot(res);
-							if (nd < d) {
+							if (!inters || nd < d) {
 								d = nd;
 								r_point = res;
 								r_normal = (b - a).orthogonal().normalized();
