@@ -10,6 +10,7 @@ const Net = preload("res://scripts/shared/net.gd")
 const GameClient = preload("res://scripts/client/game_client.gd")
 const ChunkView = preload("res://scripts/client/chunk_view.gd")
 const EntityView = preload("res://scripts/client/entity_view.gd")
+const RaidTelegraph = preload("res://scripts/client/raid_telegraph.gd")
 const Hud = preload("res://scripts/client/hud.gd")
 const Meshes = preload("res://scripts/client/meshes.gd")
 const CharacterModel = preload("res://scripts/client/character_model.gd")
@@ -45,6 +46,7 @@ var status_label: Label
 var _zoom := 1.0
 var _attack_cooldown := 0.0
 var _party_rally_marker: Node3D
+var _raid_telegraph: Node3D
 var _screenshot_path := ""
 var _screenshot_frames := 0
 var _demo := ""
@@ -141,6 +143,9 @@ func _build_environment() -> void:
 	add_child(camera)
 	camera.look_at(Vector3.ZERO)
 	_make_party_rally_marker()
+	_raid_telegraph = RaidTelegraph.new()
+	_raid_telegraph.name = "RaidGroundSlamWarning"
+	add_child(_raid_telegraph)
 	camera.current = true
 	chunk_root = Node3D.new()
 	chunk_root.name = "Chunks"
@@ -315,6 +320,8 @@ func _on_welcomed() -> void:
 	audio = Audio.new()
 	add_child(audio)
 	client.event_received.connect(func(event: Dictionary) -> void: audio.on_event(event, client.peer_id, client.world.height_at))
+	_raid_telegraph.clear()
+	client.event_received.connect(func(event: Dictionary) -> void: _raid_telegraph.consume(event, client.world))
 	avatar = Node3D.new()
 	avatar_model = CharacterModel.new()
 	avatar_model.setup(Color(1.0, 0.95, 0.5), 2.0, 1.0)
