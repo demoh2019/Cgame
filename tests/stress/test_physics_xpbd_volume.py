@@ -50,16 +50,39 @@ class XPBDVolumeSourceContracts(unittest.TestCase):
     def test_solver_lambdas_and_buffers_are_reused(self):
         self.assertIn("LocalVector<Vector3> xpbd_volume_gradients;", self.body_h)
         self.assertIn("xpbd_volume_gradients.resize(nodes.size());", self.body_cpp)
-        self.assertIn("xpbd_volume_lambda = 0.0; // Only accumulate", self.body_cpp)
-        self.assertEqual(self.body_cpp.count("solve_xpbd_volume_constraint(volume_alpha);"), 2)
+        self.assertIn("xpbd_volume_lambda = real_t(0.0); // Multiplier is per physics step", self.body_cpp)
+        self.assertEqual(self.body_cpp.count("solve_xpbd_volume_constraint(volume_alpha);"), 1)
         self.assertIn("xpbd_volume_gradients.reset();", self.body_cpp)
         self.assertIn("xpbd_volume_topology_checked = false;", self.body_cpp)
         self.assertIn("physics_xpbd_volume_delta(", self.body_cpp)
         self.assertIn("physics_xpbd_triangle_volume_terms(", self.body_cpp)
-        self.assertIn("if (nodes[i].im > 0.0)", self.body_cpp)
+        self.assertIn("if (!(nodes[i].im > real_t(0.0)))", self.body_cpp)
         self.assertIn("const bool use_xpbd = compliance > 0.0", self.body_cpp)
         self.assertIn("solve_links(1.0, ti);", self.body_cpp)
         self.assertNotIn("GLOBAL_GET(", self.body_cpp)
+
+    def test_transactional_volume_correction_and_scale_aware_validation(self):
+        self.assertIn("const double volume_scale =", self.body_cpp)
+        self.assertIn("volume_scale * 1e-10", self.body_cpp)
+        self.assertIn("double(g.x) * double(g.x)", self.body_cpp)
+        self.assertIn("real_t proposed_lambda = xpbd_volume_lambda;", self.body_cpp)
+        self.assertIn("if (!next.is_finite())", self.body_cpp)
+        self.assertIn("for (int pass = 0; pass < 2; ++pass)", self.body_cpp)
+        self.assertIn("xpbd_volume_lambda = proposed_lambda;", self.body_cpp)
+        self.assertIn("const real_t next_lambda = real_t(next_lambda_double);", self.math)
+        self.assertIn("if (!Math::is_finite(next_lambda)", self.math)
+        self.assertNotIn("p_weighted_gradient_norm > CMP_EPSILON", self.math)
+
+    def test_existing_area_and_plasticity_integration_survives_rebase(self):
+        self.assertIn("use_area_xpbd", self.body_cpp)
+        self.assertIn("physics_xpbd_solve_triangle_area(", self.body_cpp)
+        self.assertIn("physics_softbody_creep_rest_length(", self.body_cpp)
+        self.assertLess(
+            self.body_cpp.index("physics_softbody_creep_rest_length("),
+            self.body_cpp.index("const bool use_volume ="),
+        )
+        self.assertIn("get_soft_body_xpbd_area_compliance()", self.body_cpp)
+        self.assertIn("get_soft_body_plastic_creep_rate()", self.body_cpp)
 
     def test_numerical_native_tests(self):
         for text in (
