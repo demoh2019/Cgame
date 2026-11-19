@@ -720,4 +720,115 @@ TEST_CASE("[Image] optimize_from_channels preserves HDR precision") {
 	CHECK(Math::abs(half->get_pixel(0, 0).g - 1.5) < 0.01);
 }
 
+
+TEST_CASE("[Image][MaskedBlit] RGBA8 runs match scalar RGBAF reference") {
+	const Image::Format formats[] = { Image::FORMAT_RGB8, Image::FORMAT_RGBA8, Image::FORMAT_RGBAF };
+	constexpr int SW = 79;
+	constexpr int SH = 31;
+	for (const Image::Format format : formats) {
+		Ref<Image> source = memnew(Image(SW, SH, false, format));
+		Ref<Image> mask8 = memnew(Image(SW, SH, false, Image::FORMAT_RGBA8));
+		Ref<Image> maskf = memnew(Image(SW, SH, false, Image::FORMAT_RGBAF));
+		Ref<Image> optimized = memnew(Image(92, 39, false, format));
+		Ref<Image> reference = memnew(Image(92, 39, false, format));
+		optimized->fill(Color(0.2f, 0.3f, 0.4f, 0.5f));
+		reference->fill(Color(0.2f, 0.3f, 0.4f, 0.5f));
+
+		for (int y = 0; y < SH; y++) {
+			for (int x = 0; x < SW; x++) {
+				source->set_pixel(x, y, Color(float(x % 37) / 36.0f, float(y % 19) / 18.0f, float((x * 7 + y) % 29) / 28.0f, float(x % 5) / 4.0f));
+				const int pattern = (x / 9 + y / 3) % 5;
+				const float alpha = pattern == 0 ? 0.0f : pattern == 1 ? (1.0f / 255.0f) : pattern == 2 ? 0.5f : 1.0f;
+				mask8->set_pixel(x, y, Color(0, 0, 0, alpha));
+				maskf->set_pixel(x, y, Color(0, 0, 0, alpha));
+			}
+		}
+		optimized->blit_rect_mask(source, mask8, Rect2i(3, 2, 71, 27), Point2i(7, 6));
+		reference->blit_rect_mask(source, maskf, Rect2i(3, 2, 71, 27), Point2i(7, 6));
+		CHECK_MESSAGE(optimized->get_data() == reference->get_data(),
+				"RGBA8 opaque runs must match the existing scalar blit byte-for-byte, for every destination pixel format.");
+	}
+}
+
+TEST_CASE("[Image][MaskedBlit] Cropped spans match scalar clipping") {
+	Ref<Image> source = memnew(Image(47, 25, false, Image::FORMAT_RGBA8));
+	Ref<Image> mask8 = memnew(Image(47, 25, false, Image::FORMAT_RGBA8));
+	Ref<Image> maskf = memnew(Image(47, 25, false, Image::FORMAT_RGBAF));
+	for (int y = 0; y < 25; y++) {
+		for (int x = 0; x < 47; x++) {
+			source->set_pixel(x, y, Color(float(x) / 46, float(y) / 24, 0.75f, 1));
+			const float alpha = (x / 4 + y / 2) % 3 == 0 ? 0.0f : 1.0f;
+			mask8->set_pixel(x, y, Color(0, 0, 0, alpha));
+			maskf->set_pixel(x, y, Color(0, 0, 0, alpha));
+		}
+	}
+	const Rect2i source_rects[] = {
+		Rect2i(-6, -4, 40, 25),
+		Rect2i(30, 12, 40, 30),
+		Rect2i(0, 0, 47, 25),
+		Rect2i(8, 3, 30, 16),
+	};
+	const Point2i dest_positions[] = {
+		Point2i(10, 5),
+		Point2i(20, 10),
+		Point2i(-8, -6),
+		Point2i(0, 0),
+	};
+	for (int i = 0; i < 4; i++) {
+		Ref<Image> optimized = memnew(Image(32, 20, false, Image::FORMAT_RGBA8));
+		Ref<Image> reference = memnew(Image(32, 20, false, Image::FORMAT_RGBA8));
+		optimized->fill(Color(0.9f, 0.5f, 0.2f, 0.8f));
+		reference->fill(Color(0.9f, 0.5f, 0.2f, 0.8f));
+		optimized->blit_rect_mask(source, mask8, source_rects[i], dest_positions[i]);
+		reference->blit_rect_mask(source, maskf, source_rects[i], dest_positions[i]);
+		CHECK_MESSAGE(optimized->get_data() == reference->get_data(), "Clipping may not alter RGBA8 mask blit results.");
+	}
+}
+
+TEST_CASE("[Image][MaskedBlit] Self alias keeps scalar semantics") {
+	Ref<Image> actual = memnew(Image(8, 8, false, Image::FORMAT_RGBA8));
+	Ref<Image> reference = memnew(Image(8, 8, false, Image::FORMAT_RGBA8));
+	Ref<Image> mask = memnew(Image(8, 8, false, Image::FORMAT_RGBA8));
+	for (int y = 0; y < 8; y++) {
+		for (int x = 0; x < 8; x++) {
+			const Color color(float(x) / 7, float(y) / 7, 0.25f, 1.0f);
+			actual->set_pixel(x, y, color);
+			reference->set_pixel(x, y, color);
+			mask->set_pixel(x, y, Color(0, 0, 0, (x + y) % 3 ? 1.0f : 0.0f));
+		}
+	}
+	for (int y = 0; y < 7; y++) {
+		for (int x = 0; x < 7; x++) {
+			if (mask->get_pixel(x, y).a != 0) {
+				reference->set_pixel(x + 1, y + 1, reference->get_pixel(x, y));
+			}
+		}
+	}
+	actual->blit_rect_mask(actual, mask, Rect2i(0, 0, 7, 7), Point2i(1, 1));
+	CHECK_MESSAGE(actual->get_data() == reference->get_data(), "Self-blits preserve the existing scalar copy order.");
+}
+
+TEST_CASE("[Image][MaskedBlit] Destination mask alias keeps scalar semantics") {
+	Ref<Image> source = memnew(Image(8, 8, false, Image::FORMAT_RGBA8));
+	Ref<Image> actual = memnew(Image(8, 8, false, Image::FORMAT_RGBA8));
+	Ref<Image> reference = memnew(Image(8, 8, false, Image::FORMAT_RGBA8));
+	for (int y = 0; y < 8; y++) {
+		for (int x = 0; x < 8; x++) {
+			source->set_pixel(x, y, Color(float(x + 1) / 9, float(y + 1) / 9, 0.3f, (x * 2 + y) % 5 ? 1.0f : 0.0f));
+			const Color color(0.1f, 0.2f, 0.3f, (x + y) % 4 ? 1.0f : 0.0f);
+			actual->set_pixel(x, y, color);
+			reference->set_pixel(x, y, color);
+		}
+	}
+	for (int y = 0; y < 7; y++) {
+		for (int x = 0; x < 7; x++) {
+			if (reference->get_pixel(x, y).a != 0) {
+				reference->set_pixel(x + 1, y + 1, source->get_pixel(x, y));
+			}
+		}
+	}
+	actual->blit_rect_mask(source, actual, Rect2i(0, 0, 7, 7), Point2i(1, 1));
+	CHECK_MESSAGE(actual->get_data() == reference->get_data(), "Destination-mask aliasing must retain scalar semantics.");
+}
+
 } // namespace TestImage
