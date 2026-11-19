@@ -1,0 +1,39 @@
+name: Godot Linux CPU Affinity Regression Tests
+
+on:
+  pull_request:
+    paths:
+      - "platform/linuxbsd/os_linuxbsd.*"
+      - "modules/basis_universal/image_compress_basisu.cpp"
+      - "modules/navigation_2d/nav_map_2d.cpp"
+      - "modules/navigation_3d/nav_map_3d.cpp"
+      - "modules/raycast/raycast_occlusion_cull.cpp"
+      - "servers/rendering/rendering_device.cpp"
+      - "tests/platform/test_linux_cpu_affinity.cpp"
+      - ".github/workflows/linux-cpu-affinity-tests.yml"
+  workflow_dispatch:
+
+jobs:
+  linux-cpu-affinity-tests:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 120
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+        with:
+          submodules: recursive
+
+      - name: Install dependencies
+        uses: ./.github/actions/godot-deps
+
+      - name: Build Linux editor with native tests
+        run: |
+          scons platform=linuxbsd target=editor tests=yes module_text_server_fb_enabled=yes -j2
+
+      - name: Run affinity regression tests (full runner affinity)
+        run: |
+          ./bin/godot.linuxbsd.editor.x86_64 --headless --test --test-case="*Affinity*"
+
+      - name: Run regression tests with the test process restricted to one CPU
+        run: |
+          taskset -c "$(taskset -pc $$ | sed 's/.*: //' | cut -d, -f1 | cut -d- -f1)" ./bin/godot.linuxbsd.editor.x86_64 --headless --test --test-case="*Affinity*"
