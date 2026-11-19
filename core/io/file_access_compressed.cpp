@@ -77,8 +77,13 @@ Error FileAccessCompressed::open_after_magic(Ref<FileAccess> p_base) {
 		i += count;
 	}
 
-	comp_buffer.resize(max_bs);
-	buffer.resize(block_size);
+	ERR_FAIL_COND_V(comp_buffer.resize(max_bs) != OK, ERR_OUT_OF_MEMORY);
+	// A file shorter than one compression block only needs its actual
+	// uncompressed size. Large configured blocks (e.g. 8 MiB) should not
+	// force that allocation for a tiny file. Retain one byte for empty
+	// streams so codecs still receive a valid output pointer.
+	const uint32_t initial_buffer_size = MAX(uint32_t(1), MIN(block_size, uint32_t(read_total)));
+	ERR_FAIL_COND_V(buffer.resize(initial_buffer_size) != OK, ERR_OUT_OF_MEMORY);
 	read_ptr = buffer.ptrw();
 	f->get_buffer(comp_buffer.ptrw(), read_blocks[0].csize);
 	at_end = false;

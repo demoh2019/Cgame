@@ -1096,4 +1096,59 @@ TEST_CASE("[FileAccess][Performance] Batched compressed tables preserve all code
 	DirAccess::remove_file_or_error(path);
 }
 
+
+TEST_CASE("[FileAccess][Performance] Compressed block tables preserve tiny files with large configured blocks") {
+	// The decoder used to allocate a full block for every file, even when
+	// only a few bytes of decompressed data can ever exist.
+	const String path = TestUtils::get_temp_path("compressed_small_payload_large_block.bin");
+	constexpr uint32_t block_size = 8 * 1024 * 1024;
+	const int byte_counts[] = { 17, 257, 4095, 8191 };
+	const Compression::Mode modes[] = {
+		Compression::MODE_FASTLZ,
+		Compression::MODE_DEFLATE,
+		Compression::MODE_GZIP,
+		Compression::MODE_ZSTD,
+	};
+
+	for (Compression::Mode mode : modes) {
+		for (int byte_count : byte_counts) {
+			Vector<uint8_t> source;
+			REQUIRE(source.resize_uninitialized(byte_count) == OK);
+			uint8_t *source_bytes = source.ptrw();
+			for (int i = 0; i < byte_count; i++) {
+				source_bytes[i] = uint8_t((i * 29 + (i >> 5)) & 255);
+			}
+
+			Ref<FileAccessCompressed> writer;
+			writer.instantiate();
+			writer->configure("GCPF", mode, block_size);
+			REQUIRE(writer->open_internal(path, FileAccess::WRITE) == OK);
+			REQUIRE(writer->store_buffer(source.ptr(), source.size()));
+			writer->close();
+
+			Ref<FileAccessCompressed> reader;
+			reader.instantiate();
+			reader->configure("GCPF", mode, block_size);
+			REQUIRE(reader->open_internal(path, FileAccess::READ) == OK);
+			CHECK(reader->get_length() == uint64_t(byte_count));
+
+			Vector<uint8_t> output;
+			REQUIRE(output.resize_uninitialized(byte_count) == OK);
+			CHECK(reader->get_buffer(output.ptrw(), byte_count) == uint64_t(byte_count));
+			CHECK(output == source);
+
+			const uint64_t offset = uint64_t(byte_count / 2);
+			reader->seek(offset);
+			uint8_t segment[13] = {};
+			const uint64_t segment_size = MIN(uint64_t(sizeof(segment)), uint64_t(byte_count) - offset);
+			REQUIRE(reader->get_buffer(segment, segment_size) == segment_size);
+			for (int i = 0; i < int(segment_size); i++) {
+				CHECK(segment[i] == source[int(offset) + i]);
+			}
+			reader->close();
+		}
+	}
+	DirAccess::remove_file_or_error(path);
+}
+
 } // namespace TestFileAccess
