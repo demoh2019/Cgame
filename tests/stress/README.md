@@ -48,6 +48,10 @@ Run `--list-cases` for supported identifiers.
 | Events, scene | `signals`, `scene_tree`, `packed_scene` | Emission, Node creation/query/grouping/free, scene pack/instantiate |
 | Data and IO | `images`, `json`, `stream`, `file_io` | Image buffers, JSON roundtrip, binary StreamPeer, real filesystem writes |
 | Parallelism | `threads` | N native worker threads with independently repeatable numeric work |
+| Navigation | `astar_grid` | Repeated 64×64 A* paths around obstacles, path validity checks |
+| Animation | `tweens` | Large numbers of repeatedly moving, node-bound Tween tracks |
+| Audio | `audio_buffers` | High-volume 16-bit WAV sample buffer construction (not live mixing) |
+| Serialization | `variant_codec` | Lossless Variant binary serialization and deserialization |
 | Physics | `physics_2d`, `physics_3d` | Rigid bodies/collision shapes and physics frames |
 | Allocator | `memory_churn` | Multiple cycles of ephemeral PackedByteArray allocations |
 | Rendering | `render_2d`, `render_3d` | Shared texture/mesh, many draw nodes, frame pumping (display only) |
@@ -74,8 +78,9 @@ Virtual displays with software rendering are valid only for software-GL baseline
 
 ## Reports and regression interpretation
 
-The JSON report includes per-case runs, wall time, p95, maximum sampled child
-RSS, engine-reported time and memory, failure reason (crash/timeout/RSS/invalid
+The JSON report includes per-case runs, wall time, CPU seconds, p95, maximum
+sampled child RSS, engine-reported time, physics spikes, collision pairs,
+draw calls, VRAM and memory, failure reason (crash/timeout/RSS/invalid
 result), platform and configuration. Use fixed workloads, hardware, build flags,
 GPU driver, render mode, and thermal settings for meaningful comparisons.
 Baseline checks fail when median wall time or max RSS grow beyond the configured
