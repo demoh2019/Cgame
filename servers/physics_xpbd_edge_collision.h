@@ -42,46 +42,81 @@ _FORCE_INLINE_ bool physics_xpbd_closest_edges(
 	if (!p_a.is_finite() || !p_b.is_finite() || !p_c.is_finite() || !p_d.is_finite()) {
 		return false;
 	}
-	const Vector3 ab = p_b - p_a;
-	const Vector3 cd = p_d - p_c;
-	const Vector3 r = p_a - p_c;
-	const double aa = double(ab.dot(ab));
-	const double bb = double(ab.dot(cd));
-	const double cc = double(cd.dot(cd));
-	const double dd = double(ab.dot(r));
-	const double ee = double(cd.dot(r));
-	const double denominator = aa * cc - bb * bb;
-	if (!(aa > double(CMP_EPSILON) * CMP_EPSILON) ||
-			!(cc > double(CMP_EPSILON) * CMP_EPSILON) ||
-			!(denominator > double(CMP_EPSILON) * aa * cc) ||
-			!Math::is_finite(denominator)) {
+
+	// Wide coordinate differences are essential BEFORE calculating any dot
+	// products. In float32 the squared length of a finite 1e20 edge overflows,
+	// while an edge shorter than CMP_EPSILON can still represent a valid
+	// piece of cloth at a smaller world scale.
+	const double ab_x = double(p_b.x) - double(p_a.x);
+	const double ab_y = double(p_b.y) - double(p_a.y);
+	const double ab_z = double(p_b.z) - double(p_a.z);
+	const double cd_x = double(p_d.x) - double(p_c.x);
+	const double cd_y = double(p_d.y) - double(p_c.y);
+	const double cd_z = double(p_d.z) - double(p_c.z);
+	const double r_x = double(p_a.x) - double(p_c.x);
+	const double r_y = double(p_a.y) - double(p_c.y);
+	const double r_z = double(p_a.z) - double(p_c.z);
+
+	const double aa = ab_x * ab_x + ab_y * ab_y + ab_z * ab_z;
+	const double bb = ab_x * cd_x + ab_y * cd_y + ab_z * cd_z;
+	const double cc = cd_x * cd_x + cd_y * cd_y + cd_z * cd_z;
+	const double dd = ab_x * r_x + ab_y * r_y + ab_z * r_z;
+	const double ee = cd_x * r_x + cd_y * r_y + cd_z * r_z;
+
+	const double cross_x = ab_y * cd_z - ab_z * cd_y;
+	const double cross_y = ab_z * cd_x - ab_x * cd_z;
+	const double cross_z = ab_x * cd_y - ab_y * cd_x;
+	const double cross_squared = cross_x * cross_x + cross_y * cross_y + cross_z * cross_z;
+	const double edge_scale = aa * cc;
+	// |ab x cd|² is the Gram determinant aa*cc-bb², but without
+	// catastrophic subtraction near parallel edges. The angular test
+	// preserves the old CMP_EPSILON parallel exclusion while allowing
+	// extremely small yet nondegenerate structural edges.
+	if (!(aa > 0.0) || !(cc > 0.0) || !Math::is_finite(edge_scale) ||
+			!Math::is_finite(cross_squared) ||
+			!(cross_squared > double(CMP_EPSILON) * edge_scale)) {
 		return false;
 	}
-	const double s = (bb * ee - cc * dd) / denominator;
-	const double t = (aa * ee - bb * dd) / denominator;
-	// Exclude endpoints: they are not genuine edge/edge interior contacts.
+
+	const double s = (bb * ee - cc * dd) / cross_squared;
+	const double t = (aa * ee - bb * dd) / cross_squared;
+	// Endpoint and parallel contacts belong to other constraint types.
 	if (!Math::is_finite(s) || !Math::is_finite(t) ||
 			s <= 0.001 || s >= 0.999 || t <= 0.001 || t >= 0.999) {
 		return false;
 	}
-	const Vector3 p = p_a + ab * real_t(s);
-	const Vector3 q = p_c + cd * real_t(t);
-	const Vector3 separation = p - q;
-	const real_t distance_squared = separation.length_squared();
+
+	// Compute the two closest points in double, not in real_t, and never
+	// square their real_t separation: that still overflows for large meshes.
+	const double dx = (double(p_a.x) + ab_x * s) - (double(p_c.x) + cd_x * t);
+	const double dy = (double(p_a.y) + ab_y * s) - (double(p_c.y) + cd_y * t);
+	const double dz = (double(p_a.z) + ab_z * s) - (double(p_c.z) + cd_z * t);
+	const double distance_squared = dx * dx + dy * dy + dz * dz;
 	if (!Math::is_finite(distance_squared)) {
 		return false;
 	}
-	r_distance = Math::sqrt(distance_squared);
-	if (r_distance > CMP_EPSILON) {
-		r_normal = separation / r_distance;
-	} else {
-		r_normal = ab.cross(cd).normalized();
-	}
-	if (!r_normal.is_finite() || !(r_normal.length_squared() > 0.0)) {
+	const double distance = Math::sqrt(distance_squared);
+	// Select the actual separating direction for close but nonzero contacts.
+	// Only use the edge cross product for a true/near intersection, with a
+	// scale-relative tolerance instead of a fixed world-unit epsilon.
+	const bool separated = distance_squared > MAX(aa, cc) * 1.0e-24;
+	const double inv_length = 1.0 / Math::sqrt(separated ? distance_squared : cross_squared);
+	const double nx = (separated ? dx : cross_x) * inv_length;
+	const double ny = (separated ? dy : cross_y) * inv_length;
+	const double nz = (separated ? dz : cross_z) * inv_length;
+	const Vector3 next_normal{ real_t(nx), real_t(ny), real_t(nz) };
+	const real_t next_distance = real_t(distance);
+	if (!next_normal.is_finite() || !(next_normal.length_squared() > real_t(0.0)) ||
+			!Math::is_finite(next_distance)) {
 		return false;
 	}
+
+	// Atomic outputs: a rejected edge pair cannot leak partial s/t or
+	// modified contact normal into the caller's candidate state.
 	r_s = real_t(s);
 	r_t = real_t(t);
+	r_normal = next_normal;
+	r_distance = next_distance;
 	return true;
 }
 
