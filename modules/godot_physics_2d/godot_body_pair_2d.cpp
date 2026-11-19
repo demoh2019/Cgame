@@ -378,6 +378,48 @@ bool GodotBodyPair2D::_test_ccd(real_t p_step, GodotBody2D *p_A, int p_shape_A, 
 		}
 	}
 
+	// Two parallel capsule center segments have a capsule Minkowski sum:
+	// radii add, and the center-segment half lengths add. Cast the center
+	// of A through that expanded capsule in B's frame instead of casting
+	// its individual support vertices. Nonparallel or rotating capsules
+	// must retain the generic shape cast; their Minkowski sum is not a capsule.
+	if (shape_A_ptr->get_type() == PS2DE::SHAPE_CAPSULE && shape_B_ptr->get_type() == PS2DE::SHAPE_CAPSULE &&
+			p_A->get_angular_velocity() == 0.0 && p_B->get_angular_velocity() == 0.0) {
+		const double scale_A = physics_ccd_uniform_sphere_scale(p_xform_A);
+		const double scale_B = physics_ccd_uniform_sphere_scale(p_xform_B);
+		if (scale_A > 0.0 && scale_B > 0.0) {
+			const Vector2 axis_A = p_xform_A.columns[1];
+			const Vector2 axis_B = p_xform_B.columns[1];
+			if (Math::abs(double(axis_A.cross(axis_B))) <= 1e-7 * scale_A * scale_B) {
+				const GodotCapsuleShape2D *capsule_A = static_cast<GodotCapsuleShape2D *>(shape_A_ptr);
+				const GodotCapsuleShape2D *capsule_B = static_cast<GodotCapsuleShape2D *>(shape_B_ptr);
+				const double radius_A = double(capsule_A->get_radius());
+				const double radius_B = double(capsule_B->get_radius());
+				const double half_A = double(capsule_A->get_height()) * 0.5 - radius_A;
+				const double half_B = double(capsule_B->get_height()) * 0.5 - radius_B;
+				if (radius_A > 0.0 && radius_B > 0.0 && half_A >= 0.0 && half_B >= 0.0) {
+					const double ratio = scale_A / scale_B;
+					const Transform2D inverse_B = p_xform_B.affine_inverse();
+					const Vector2 local_start = inverse_B.xform(p_xform_A.get_origin());
+					const Vector2 local_motion = inverse_B.basis_xform(relative_motion);
+					double impact_fraction = 0.0;
+					if (!physics_ccd_capsule_toi(local_start, local_motion,
+							radius_B + radius_A * ratio, half_B + half_A * ratio, impact_fraction)) {
+						return false;
+					}
+					const real_t allowed_distance = CLAMP(real_t(impact_fraction * double(mlen)) + (max - min) * real_t(0.01), real_t(0.0), mlen);
+					const Vector2 desired_velocity = velocity_B + mnormal * (allowed_distance / p_step);
+					const Vector2 velocity_A = p_A->get_linear_velocity();
+					const real_t initial_speed = velocity_A.length();
+					const Vector2 travel_direction = velocity_A / initial_speed;
+					const real_t clipped_speed = CLAMP(desired_velocity.dot(travel_direction), real_t(0.0), initial_speed);
+					p_A->set_linear_velocity(travel_direction * clipped_speed);
+					return true;
+				}
+			}
+		}
+	}
+
 	Vector2 supports_A[2];
 	int support_count_A = 0;
 	shape_A_ptr->get_supports(p_xform_A.basis_xform_inv(mnormal).normalized(), supports_A, support_count_A);
