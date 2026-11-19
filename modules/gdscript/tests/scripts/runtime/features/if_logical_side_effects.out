@@ -1,0 +1,7 @@
+GDTEST_OK
+and skips rhs: SUCCESS
+or skips rhs: SUCCESS
+and evaluates rhs: SUCCESS
+or evaluates rhs: SUCCESS
+nested skip: SUCCESS
+nested evaluate once: SUCCESS
