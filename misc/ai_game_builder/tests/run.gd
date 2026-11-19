@@ -426,7 +426,7 @@ func _run_headless_gate_tests() -> void:
 	_check(not SmokeGate.validate_targets([scene_path, 7]).ok, "nonstring approved path rejected")
 	_check(not SmokeGate.validate_targets([script_path]).ok, "missing main scene rejected")
 	_check(not SmokeGate.validate_targets([scene_path, scene_path]).ok, "duplicate approved path rejected")
-	_check(not SmokeGate.validate_targets([scene_path, scene_path.to_upper()]).ok, "case-insensitive duplicate rejected")
+	_check(not SmokeGate.validate_targets([scene_path, "res://ai_generated/MAIN.tscn"]).ok, "case-insensitive duplicate rejected")
 	_check(not SmokeGate.validate_targets([scene_path, "res://project.godot"]).ok, "project settings outside output rejected")
 	_check(not SmokeGate.validate_targets([scene_path, "res://addons/ai_game_builder/plugin.gd"]).ok, "plugin source outside output rejected")
 	_check(not SmokeGate.validate_targets([scene_path, "user://secret.gd"]).ok, "user data path rejected")
