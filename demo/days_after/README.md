@@ -94,3 +94,16 @@ for compatibility; use compiled Cgame for engine-specific integration testing.
 4. A larger streaming map with optimized collision and profiling.
 
 This is a foundation for iteration, **not** a complete survival game.
+
+## Survivor persistence
+
+Press **F5** to save survivor state to `user://days_after_player.json`, and
+**F9** to load it. The schema is versioned and validates health, hunger,
+thirst, item stacks, professions, equipment and the player position before
+applying any changes. Invalid or outdated saves are rejected without changing
+the live survivor. This is a **local offline snapshot** only — enemy respawn,
+world containers, crafting cooldowns and multiplayer state are not persisted.
+
+```sh
+./bin/godot.linuxbsd.editor.x86_64 --headless --path demo/days_after --script res://smoke_test_saves.gd
+```
