@@ -87,6 +87,20 @@ static _FORCE_INLINE_ void _pbf_for_neighbors(
 
 } // namespace
 
+void PBFParticleFluid3D::_sync_surface_tension_buffers() {
+	// Optional storage is allocated only when a surface model is enabled.
+	if ((surface_cohesion > 0.0 || surface_curvature > 0.0) && positions.size() > 0) {
+		const int count = positions.size();
+		surface_tension_normals.resize(count);
+		surface_tension_velocity_changes.resize(count);
+		surface_tension_densities.resize(count);
+	} else {
+		surface_tension_normals.clear();
+		surface_tension_velocity_changes.clear();
+		surface_tension_densities.clear();
+	}
+}
+
 void PBFParticleFluid3D::_resize_buffers(int p_count) {
 	positions.resize(p_count);
 	velocities.resize(p_count);
@@ -111,6 +125,7 @@ void PBFParticleFluid3D::_resize_buffers(int p_count) {
 	lambdas.resize(p_count);
 	densities.resize(p_count);
 	cells.resize(p_count);
+	_sync_surface_tension_buffers();
 }
 
 void PBFParticleFluid3D::_update_grid() {
@@ -770,6 +785,9 @@ bool PBFParticleFluid3D::set_particle_positions(const PackedVector3Array &p_posi
 	last_density_pressure_iterations = 0;
 	last_density_pressure_neighbor_evaluations = 0;
 	average_predicted_density_error = 0.0;
+	last_surface_tension_pairs = 0;
+	last_surface_tension_neighbor_evaluations = 0;
+	mean_surface_normal_magnitude = 0.0;
 	return true;
 }
 
@@ -866,6 +884,9 @@ void PBFParticleFluid3D::clear_particles() {
 	last_density_pressure_iterations = 0;
 	last_density_pressure_neighbor_evaluations = 0;
 	average_predicted_density_error = 0.0;
+	last_surface_tension_pairs = 0;
+	last_surface_tension_neighbor_evaluations = 0;
+	mean_surface_normal_magnitude = 0.0;
 }
 
 void PBFParticleFluid3D::set_simulation_enabled(bool p_enabled) {
@@ -932,6 +953,39 @@ void PBFParticleFluid3D::set_artificial_pressure(real_t p_strength) {
 void PBFParticleFluid3D::set_xsph_viscosity(real_t p_viscosity) {
 	if (Math::is_finite(p_viscosity) && p_viscosity >= 0.0 && p_viscosity <= 1.0) {
 		xsph_viscosity = p_viscosity;
+	}
+}
+
+void PBFParticleFluid3D::set_surface_cohesion(real_t p_strength) {
+	if (Math::is_finite(p_strength) && p_strength >= real_t(0.0) &&
+			p_strength <= real_t(2.0)) {
+		surface_cohesion = p_strength;
+		_sync_surface_tension_buffers();
+		if (surface_cohesion == 0.0 && surface_curvature == 0.0) {
+			last_surface_tension_pairs = 0;
+			last_surface_tension_neighbor_evaluations = 0;
+			mean_surface_normal_magnitude = 0.0;
+		}
+	}
+}
+
+void PBFParticleFluid3D::set_surface_curvature(real_t p_strength) {
+	if (Math::is_finite(p_strength) && p_strength >= real_t(0.0) &&
+			p_strength <= real_t(2.0)) {
+		surface_curvature = p_strength;
+		_sync_surface_tension_buffers();
+		if (surface_cohesion == 0.0 && surface_curvature == 0.0) {
+			last_surface_tension_pairs = 0;
+			last_surface_tension_neighbor_evaluations = 0;
+			mean_surface_normal_magnitude = 0.0;
+		}
+	}
+}
+
+void PBFParticleFluid3D::set_surface_max_pair_velocity_change(real_t p_maximum) {
+	if (Math::is_finite(p_maximum) && p_maximum >= real_t(0.0001) &&
+			p_maximum <= real_t(0.05)) {
+		surface_max_pair_velocity_change = p_maximum;
 	}
 }
 
@@ -1079,6 +1133,15 @@ void PBFParticleFluid3D::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("get_artificial_pressure"), &PBFParticleFluid3D::get_artificial_pressure);
 	ClassDB::bind_method(D_METHOD("set_xsph_viscosity", "viscosity"), &PBFParticleFluid3D::set_xsph_viscosity);
 	ClassDB::bind_method(D_METHOD("get_xsph_viscosity"), &PBFParticleFluid3D::get_xsph_viscosity);
+	ClassDB::bind_method(D_METHOD("set_surface_cohesion", "strength"), &PBFParticleFluid3D::set_surface_cohesion);
+	ClassDB::bind_method(D_METHOD("get_surface_cohesion"), &PBFParticleFluid3D::get_surface_cohesion);
+	ClassDB::bind_method(D_METHOD("set_surface_curvature", "strength"), &PBFParticleFluid3D::set_surface_curvature);
+	ClassDB::bind_method(D_METHOD("get_surface_curvature"), &PBFParticleFluid3D::get_surface_curvature);
+	ClassDB::bind_method(D_METHOD("set_surface_max_pair_velocity_change", "maximum"), &PBFParticleFluid3D::set_surface_max_pair_velocity_change);
+	ClassDB::bind_method(D_METHOD("get_surface_max_pair_velocity_change"), &PBFParticleFluid3D::get_surface_max_pair_velocity_change);
+	ClassDB::bind_method(D_METHOD("get_mean_surface_normal_magnitude"), &PBFParticleFluid3D::get_mean_surface_normal_magnitude);
+	ClassDB::bind_method(D_METHOD("get_last_surface_tension_pairs"), &PBFParticleFluid3D::get_last_surface_tension_pairs);
+	ClassDB::bind_method(D_METHOD("get_last_surface_tension_neighbor_evaluations"), &PBFParticleFluid3D::get_last_surface_tension_neighbor_evaluations);
 	ClassDB::bind_method(D_METHOD("set_vorticity_confinement", "strength"), &PBFParticleFluid3D::set_vorticity_confinement);
 	ClassDB::bind_method(D_METHOD("get_vorticity_confinement"), &PBFParticleFluid3D::get_vorticity_confinement);
 	ClassDB::bind_method(D_METHOD("set_vorticity_max_velocity_change", "maximum"), &PBFParticleFluid3D::set_vorticity_max_velocity_change);
@@ -1139,6 +1202,9 @@ void PBFParticleFluid3D::_bind_methods() {
 	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "particle_radius", PROPERTY_HINT_RANGE, "0.001,1,0.001,suffix:m"), "set_particle_radius", "get_particle_radius");
 	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "artificial_pressure", PROPERTY_HINT_RANGE, "0,0.1,0.001"), "set_artificial_pressure", "get_artificial_pressure");
 	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "xsph_viscosity", PROPERTY_HINT_RANGE, "0,1,0.001"), "set_xsph_viscosity", "get_xsph_viscosity");
+	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "surface_cohesion", PROPERTY_HINT_RANGE, "0,2,0.001"), "set_surface_cohesion", "get_surface_cohesion");
+	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "surface_curvature", PROPERTY_HINT_RANGE, "0,2,0.001"), "set_surface_curvature", "get_surface_curvature");
+	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "surface_max_pair_velocity_change", PROPERTY_HINT_RANGE, "0.0001,0.05,0.0001,suffix:m/s"), "set_surface_max_pair_velocity_change", "get_surface_max_pair_velocity_change");
 	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "vorticity_confinement", PROPERTY_HINT_RANGE, "0,5,0.01,suffix:m/s"), "set_vorticity_confinement", "get_vorticity_confinement");
 	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "vorticity_max_velocity_change", PROPERTY_HINT_RANGE, "0.001,2,0.001,suffix:m/s"), "set_vorticity_max_velocity_change", "get_vorticity_max_velocity_change");
 	ADD_PROPERTY(PropertyInfo(Variant::INT, "density_pressure_iterations", PROPERTY_HINT_RANGE, "0,12,1"), "set_density_pressure_iterations", "get_density_pressure_iterations");
