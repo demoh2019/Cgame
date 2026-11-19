@@ -182,6 +182,10 @@ func _build() -> void:
 	inventory_box.add_child(contract_title)
 	var contract_actions := HBoxContainer.new()
 	inventory_box.add_child(contract_actions)
+	var fish_button := Button.new()
+	fish_button.text = "Cast fishing rod (near shoreline; 5 seconds)"
+	fish_button.pressed.connect(func() -> void: client.fish())
+	inventory_box.add_child(fish_button)
 	var accept_contract := Button.new()
 	accept_contract.text = "Accept next mission"
 	accept_contract.pressed.connect(func() -> void: client.contract("accept"))
@@ -302,6 +306,9 @@ func _on_event(event: Dictionary) -> void:
 	match event["type"]:
 		"gathered":
 			say("+%d %s" % [event["amount"], Defs.item(event["item"]).get("name", event["item"])])
+		"fished":
+			if int(event.get("peer", -1)) == client.peer_id:
+				say("Fishing: caught %d raw fish. Cook at the hub workbench." % int(event.get("amount", 0)))
 		"zone":
 			var zone: int = clampi(int(event["zone"]), 0, 3)
 			say("Entering %s: %s" % [Defs.ZONE_NAMES[zone], ZoneRisk.description(zone)])
@@ -340,6 +347,9 @@ func _sell_one_material() -> void:
 
 
 func _on_result(kind: String, data: Dictionary) -> void:
+	if kind == "fish":
+		say("Fishing: casting..." if bool(data.get("ok", false)) else "Fishing: %s" % str(data.get("reason", "denied")))
+		return
 	if kind == "trade":
 		if not bool(data.get("ok", false)):
 			say("Trade rejected: " + str(data.get("reason", "unknown")))
@@ -418,11 +428,12 @@ func _process(_delta: float) -> void:
 	_contract_label.text = Contracts.description(journal if journal is Dictionary else Contracts.empty_state())
 	var weapon: String = client.you.get("weapon", "")
 	var levels: Dictionary = client.you.get("gathering_levels", {})
-	_equipped.text = "Weapon: %s | Craft L%d (%d XP)\nWood L%d | Stone L%d | Ore L%d | Fiber L%d" % [
+	_equipped.text = "Weapon: %s | Craft L%d (%d XP)\nWood L%d | Stone L%d | Ore L%d | Fiber L%d | Fishing L%d" % [
 		(Defs.item(weapon).get("name", weapon) if weapon != "" else "fists"),
 		int(client.you.get("crafting_level", 1)), int(client.you.get("crafting_xp", 0)),
 		int(levels.get("wood", 1)), int(levels.get("stone", 1)),
-		int(levels.get("ore", 1)), int(levels.get("fiber", 1))
+		int(levels.get("ore", 1)), int(levels.get("fiber", 1)),
+		int(levels.get("fishing", 1))
 	]
 	_death.visible = not bool(client.you.get("alive", true))
 	_death.text = "YOU DIED\n%s" % ("All carried items dropped." if bool(client.you.get("last_death_full_loot", false)) else "Carried equipment retained.")
