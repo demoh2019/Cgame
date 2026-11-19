@@ -42,7 +42,7 @@ _FORCE_INLINE_ static bool physics_softbody_creep_rest_dihedral(
 		double p_creep_fraction, real_t &r_rest_angle) {
 	if (!Math::is_finite(p_current_angle) || !Math::is_finite(r_rest_angle) ||
 			!Math::is_finite(p_yield_angle) || !Math::is_finite(p_creep_fraction) ||
-			p_yield_angle < real_t(0.0) || double(p_yield_angle) > Math_PI ||
+			p_yield_angle < real_t(0.0) || double(p_yield_angle) > Math::PI ||
 			!(p_creep_fraction > 0.0 && p_creep_fraction <= 1.0)) {
 		return false;
 	}
