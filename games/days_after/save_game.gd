@@ -2,13 +2,14 @@ extends RefCounted
 ## Versioned, validated offline checkpoints. Never deserialize arbitrary objects.
 ## The game owns its rules; Cgame's FileAccess/DirAccess already provide the needed IO.
 
-const VERSION: int = 1
+const VERSION: int = 2
 const DEFAULT_PATH: String = "user://days_after_save_v1.json"
 const MAX_BYTES: int = 65536
 const MAX_STACK: int = 100000
 const MAX_EXPERIENCE: int = 10000000
 const MAX_POSITION: float = 10000.0
 const GEAR_RULES = preload("res://survival_state.gd")
+const QUEST_RULES = preload("res://quest_journal.gd")
 
 
 static func _number(value: Variant, low: float, high: float) -> bool:
@@ -58,6 +59,7 @@ static func capture(game: Node3D) -> Dictionary:
         "pickups": {},
         "resources": {},
         "enemies": {},
+        "quests": game.get("quests").snapshot(),
     }
     for child in game.get_children():
         var entity := child as Node3D
@@ -79,9 +81,13 @@ static func capture(game: Node3D) -> Dictionary:
 ## Validate the WHOLE document before changing a single gameplay value.
 ## Return an empty dictionary on invalid, unknown, stale or untrusted saves.
 static func validate(document: Variant, game: Node3D) -> Dictionary:
-    if typeof(document) != TYPE_DICTIONARY or document.size() != 6:
+    if typeof(document) != TYPE_DICTIONARY:
         return {}
-    if not _integer(document.get("version"), VERSION, VERSION):
+    # Version-1 checkpoints predate quests. They migrate with a fresh journal.
+    if not _integer(document.get("version"), 1, VERSION):
+        return {}
+    var has_quests: bool = int(document["version"]) >= 2
+    if document.size() != (7 if has_quests else 6):
         return {}
     if not _position_valid(document.get("position")):
         return {}
@@ -177,6 +183,11 @@ static func validate(document: Variant, game: Node3D) -> Dictionary:
         return {}
     if cleaned_enemies.size() != raw_enemies.size():
         return {}
+    var normalized_quests: Dictionary = QUEST_RULES.empty_snapshot()
+    if has_quests:
+        normalized_quests = QUEST_RULES.validate_snapshot(document.get("quests"))
+        if normalized_quests.is_empty():
+            return {}
     return {
         "version": VERSION,
         "position": document["position"].duplicate(),
@@ -184,6 +195,7 @@ static func validate(document: Variant, game: Node3D) -> Dictionary:
         "pickups": cleaned_pickups,
         "resources": cleaned_resources,
         "enemies": cleaned_enemies,
+        "quests": normalized_quests,
     }
 
 
@@ -198,6 +210,7 @@ static func apply_validated(game: Node3D, valid: Dictionary) -> void:
     state.inventory = stats["inventory"].duplicate(true)
     state.experience = stats["experience"].duplicate(true)
     state.equipped = stats["equipped"].duplicate(true)
+    game.get("quests").restore_validated(valid["quests"])
 
     var survivor := game.get_node("Survivor") as CharacterBody3D
     survivor.global_position = _array_to_position(valid["position"])
