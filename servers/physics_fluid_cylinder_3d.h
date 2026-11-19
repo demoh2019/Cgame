@@ -161,11 +161,26 @@ _FORCE_INLINE_ bool godot_physics_fluid_cylinder_sample_3d(
 			wet_integral = Math::PI * (end - begin);
 			axial_integral = Math::PI * (end - begin) * (begin + end) * 0.5;
 		}
-	} else if (Math::abs(ay) <= 1e-7) {
-		// Horizontal cylinder: the submerged circular segment is constant
-		// along its length, including its first transverse moment.
+	} else if (ay == 0.0) {
+		// Exactly horizontal cylinder: constant circular segment, exact.
 		const double t = level / beta;
 		wet_integral = 2.0 * half_length * godot_physics_fluid_cylinder_disk_area_3d(t);
+		transverse_integral = 2.0 * half_length * godot_physics_fluid_cylinder_disk_moment_3d(t);
+	} else if (Math::abs(ay) * half_length <= 1e-6 * beta &&
+			Math::abs(level / beta) <= 0.95) {
+		// Near-horizontal but VERY LONG cylinders must retain their axial
+		// hydrostatic lever. Dropping a tiny tilt altogether can erase a
+		// macroscopically large torque when H/r is huge. A first-order
+		// central expansion is stable even when subtracting antiderivatives
+		// would catastrophically cancel at |a_y| << 1:
+		//   A'(u) = 2 sqrt(1-u^2),
+		//   integral(s*A(u(s))) = -(a_y/beta) * 4/3 * L^3 * sqrt(1-u0^2).
+		// The omitted volume term is O((a_y*L/beta)^2) <= 1e-12.
+		const double t = level / beta;
+		const double root = Math::sqrt(MAX(0.0, 1.0 - t * t));
+		wet_integral = 2.0 * half_length * godot_physics_fluid_cylinder_disk_area_3d(t);
+		axial_integral = -(ay / beta) * (4.0 / 3.0) *
+				half_length * half_length * half_length * root;
 		transverse_integral = 2.0 * half_length * godot_physics_fluid_cylinder_disk_moment_3d(t);
 	} else {
 		// Split at all in-range full-disk and dry-disk transitions.
