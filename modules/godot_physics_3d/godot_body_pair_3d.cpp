@@ -199,88 +199,89 @@ void GodotBodyPair3D::validate_contacts() {
 // Cast forward along motion vector to see if A is going to enter/pass B's collider next frame, only proceed if it does.
 // Adjust the velocity of A down so that it will just slightly intersect the collider instead of blowing right past it.
 bool GodotBodyPair3D::_test_ccd(real_t p_step, GodotBody3D *p_A, int p_shape_A, const Transform3D &p_xform_A, GodotBody3D *p_B, int p_shape_B, const Transform3D &p_xform_B) {
-	GodotShape3D *shape_A_ptr = p_A->get_shape(p_shape_A);
-
-	Vector3 motion = p_A->get_linear_velocity() * p_step;
-	real_t mlen = motion.length();
-	if (mlen < CMP_EPSILON) {
+	if (p_step <= 0.0) {
 		return false;
 	}
 
-	Vector3 mnormal = motion / mlen;
-
-	real_t min = 0.0, max = 0.0;
-	shape_A_ptr->project_range(mnormal, p_xform_A, min, max);
-
-	// Did it move enough in this direction to even attempt raycast?
-	// Let's say it should move more than 1/3 the size of the object in that axis.
-	bool fast_object = mlen > (max - min) * 0.3;
-	if (!fast_object) {
-		return false; // moving slow enough that there's no chance of tunneling.
-	}
-
-	// A is moving fast enough that tunneling might occur. See if it's really about to collide.
-
-	// Roughly predict body B's position in the next frame (ignoring collisions).
-	Transform3D predicted_xform_B = p_xform_B.translated(p_B->get_linear_velocity() * p_step);
-	// A CCD cast can test up to 16 support vertices against the same shape.
-	// Transform inversion is invariant across the whole cast.
-	const Transform3D predicted_inv_B = predicted_xform_B.affine_inverse();
+	GodotShape3D *shape_A_ptr = p_A->get_shape(p_shape_A);
 	GodotShape3D *shape_B_ptr = p_B->get_shape(p_shape_B);
 
-	// Support points are the farthest forward points on A in the direction of the motion vector.
-	// i.e. the candidate points of which one should hit B first if any collision does occur.
-	static const int max_supports = 16;
-	Vector3 supports_A[max_supports];
-	int support_count_A;
-	GodotShape3D::FeatureType support_type_A;
-	// Convert mnormal into body A's local xform because get_supports requires (and returns) local coordinates.
-	shape_A_ptr->get_supports(p_xform_A.basis.xform_inv(mnormal).normalized(), max_supports, supports_A, support_count_A, support_type_A);
+	const Vector3 velocity_A = p_A->get_linear_velocity();
+	const Vector3 motion_A = velocity_A * p_step;
+	if (motion_A.length_squared() == 0.0) {
+		return false;
+	}
 
-	// Cast a segment from each support point of A in the motion direction.
-	Vector3 segment_hit_local;
-	real_t segment_hit_length = FLT_MAX;
-	int segment_support_idx = -1;
-	for (int i = 0; i < support_count_A; i++) {
-		supports_A[i] = p_xform_A.xform(supports_A[i]);
+	// A static body may use a surface velocity for contact friction while
+	// its geometry remains stationary. CCD must use geometry motion.
+	const Vector3 velocity_B = p_B->get_mode() == PS3DE::BODY_MODE_STATIC ? Vector3() : p_B->get_linear_velocity();
+	const Vector3 relative_motion = motion_A - velocity_B * p_step;
+	const real_t motion_length = relative_motion.length();
+	if (motion_length < CMP_EPSILON || motion_A.dot(relative_motion) <= 0.0) {
+		// Co-moving shapes do not close. B's own CCD can handle an
+		// obstacle approaching A from behind.
+		return false;
+	}
+	const Vector3 direction = relative_motion / motion_length;
 
-		Vector3 from = supports_A[i];
-		Vector3 to = from + motion;
+	real_t min_projection = 0.0;
+	real_t max_projection = 0.0;
+	shape_A_ptr->project_range(direction, p_xform_A, min_projection, max_projection);
+	const real_t extent = max_projection - min_projection;
+	if (motion_length <= extent * real_t(0.3)) {
+		return false;
+	}
 
-		// Back up 10% of the per-frame motion behind the support point and use that as the beginning of our cast.
-		// At high speeds, this may mean we're actually casting from well behind the body instead of inside it, which is odd.
-		// But it still works out.
-		Vector3 local_from = predicted_inv_B.xform(from - motion * 0.1);
-		Vector3 local_to = predicted_inv_B.xform(to);
+	// A leading face may have several support vertices. The target
+	// transform is shared by all rays and is inverted only once.
+	if (p_xform_B.basis.determinant() == 0.0) {
+		return false;
+	}
+	const Transform3D inverse_B = p_xform_B.affine_inverse();
+	static const int MAX_CCD_SUPPORTS = 16;
+	Vector3 supports[MAX_CCD_SUPPORTS];
+	int support_count = 0;
+	GodotShape3D::FeatureType support_type = GodotShape3D::FEATURE_POINT;
+	shape_A_ptr->get_supports(p_xform_A.basis.xform_inv(direction).normalized(),
+			MAX_CCD_SUPPORTS, supports, support_count, support_type);
+	if (support_count == 0) {
+		return false;
+	}
 
-		Vector3 rpos, rnorm;
-		int fi = -1;
-		if (shape_B_ptr->intersect_segment(local_from, local_to, rpos, rnorm, fi, true)) {
-			real_t hit_length = local_from.distance_to(rpos);
-			if (hit_length < segment_hit_length) {
-				segment_support_idx = i;
-				segment_hit_length = hit_length;
-				segment_hit_local = rpos;
-			}
+	bool found_hit = false;
+	real_t best_hit_distance = 0.0;
+	for (int i = 0; i < support_count; ++i) {
+		const Vector3 from = p_xform_A.xform(supports[i]);
+		const Vector3 local_from = inverse_B.xform(from - relative_motion * real_t(0.1));
+		const Vector3 local_to = inverse_B.xform(from + relative_motion);
+		Vector3 hit_point;
+		Vector3 hit_normal;
+		int face_index = -1;
+		if (!shape_B_ptr->intersect_segment(local_from, local_to, hit_point, hit_normal, face_index, true)) {
+			continue;
+		}
+
+		// A local-space length is not comparable between supports under
+		// an affine target scale or shear. Rank by world-space progress.
+		const real_t hit_distance = direction.dot(p_xform_B.xform(hit_point) - from);
+		if (!found_hit || hit_distance < best_hit_distance) {
+			found_hit = true;
+			best_hit_distance = hit_distance;
 		}
 	}
 
-	if (segment_support_idx == -1) {
-		// There was no hit. Since the segment is the length of per-frame motion, this means the bodies will not
-		// actually collide yet on next frame. We'll probably check again next frame once they're closer.
+	if (!found_hit) {
 		return false;
 	}
 
-	Vector3 hitpos = predicted_xform_B.xform(segment_hit_local);
-
-	real_t newlen = hitpos.distance_to(supports_A[segment_support_idx]);
-	// Adding 1% of body length to the distance between collision and support point
-	// should cause body A's support point to arrive just within B's collider next frame.
-	newlen += (max - min) * 0.01;
-	// FIXME: This doesn't always work well when colliding with a triangle face of a trimesh shape.
-
-	p_A->set_linear_velocity((mnormal * newlen) / p_step);
-
+	// Legacy cast-ray CCD limits velocity, not time of impact. Preserve
+	// the original travel direction and never accelerate or reverse A.
+	const real_t allowed_distance = CLAMP(best_hit_distance + extent * real_t(0.01), real_t(0.0), motion_length);
+	const Vector3 desired_velocity = velocity_B + direction * (allowed_distance / p_step);
+	const real_t initial_speed = velocity_A.length();
+	const Vector3 travel_direction = velocity_A / initial_speed;
+	const real_t clipped_speed = CLAMP(desired_velocity.dot(travel_direction), real_t(0.0), initial_speed);
+	p_A->set_linear_velocity(travel_direction * clipped_speed);
 	return true;
 }
 
