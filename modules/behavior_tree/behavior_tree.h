@@ -32,6 +32,7 @@
 
 #include "core/io/resource.h"
 #include "core/object/gdvirtual.gen.h"
+#include "core/variant/dictionary.h"
 #include "core/variant/typed_array.h"
 #include "scene/main/node.h"
 
