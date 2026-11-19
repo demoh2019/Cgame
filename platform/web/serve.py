@@ -63,8 +63,10 @@ def generate_snakeoil():
 
 
 def ssl_wrap_socket(httpd, keyfile, certfile):
+    context = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
     if keyfile and certfile:
         print(f"Using certificate: '{certfile}', key: '{keyfile}'")
+        context.load_cert_chain(certfile=certfile, keyfile=keyfile)
     else:
         if bool(keyfile):
             print("Ignoring supplied private key since no certificate was specified.")
@@ -72,22 +74,20 @@ def ssl_wrap_socket(httpd, keyfile, certfile):
             print("Ignoring supplied certificate since no private key was specified.")
 
         print("Generating self-signed certificate")
-
-        from tempfile import NamedTemporaryFile
+        from tempfile import TemporaryDirectory
 
         key, cert = generate_snakeoil()
-        tmp_keyfile = NamedTemporaryFile(delete_on_close=False)
-        tmp_keyfile.write(key)
-        tmp_keyfile.close()
-        tmp_certfile = NamedTemporaryFile(delete_on_close=False)
-        tmp_certfile.write(cert)
-        tmp_certfile.close()
-        keyfile = tmp_keyfile.name
-        certfile = tmp_certfile.name
-    context = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
-    context.load_cert_chain(certfile=certfile, keyfile=keyfile)
-    httpd.socket = context.wrap_socket(httpd.socket, server_side=True)
+        # The temporary directory is private, and the key is removed even if
+        # loading the certificate fails. This also works on Python 3.11/3.12.
+        with TemporaryDirectory(prefix="godot-web-preview-") as temp:
+            temp_dir = Path(temp)
+            key_path = temp_dir / "key.pem"
+            cert_path = temp_dir / "cert.pem"
+            key_path.write_bytes(key)
+            cert_path.write_bytes(cert)
+            context.load_cert_chain(certfile=str(cert_path), keyfile=str(key_path))
 
+    httpd.socket = context.wrap_socket(httpd.socket, server_side=True)
 
 def serve(root, port, https, run_browser, key="", cert=""):
     os.chdir(root)
