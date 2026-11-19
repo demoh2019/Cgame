@@ -80,7 +80,8 @@ func _run() -> void:
 	var alias_start := PhysicsServer3D.soft_body_get_point_global_position(cloth, DUP_INDEX)
 	if pinned_start.distance_to(alias_start) > 0.00001:
 		errors.append("Visual aliases did not map to the same physical particle")
-	var far_index := GRID * (GRID - 1) + GRID / 2
+	var same_column_anchor := GRID >> 1
+	var far_index := GRID * (GRID - 1) + same_column_anchor
 	var far_start := PhysicsServer3D.soft_body_get_point_global_position(cloth, far_index)
 
 	var start_usec := Time.get_ticks_usec()
@@ -98,8 +99,13 @@ func _run() -> void:
 			break
 
 	var far_end := PhysicsServer3D.soft_body_get_point_global_position(cloth, far_index)
-	if far_end.distance_to(far_start) > 30.0:
-		errors.append("Cloth displacement exceeds stability limit")
+	var far_anchor := PhysicsServer3D.soft_body_get_point_global_position(cloth, same_column_anchor)
+	# The shortest mesh path from this vertex to its pinned column anchor
+	# spans GRID-1 vertical links. Geodesic LRA should approximately cap
+	# the current distance to slack * the rest length (allow solver tolerance).
+	var lra_bound := float(GRID - 1) * SPACING * slack + 0.5
+	if far_end.distance_to(far_anchor) > lra_bound:
+		errors.append("Geodesic LRA failed to limit stretch: " + str(far_end.distance_to(far_anchor)))
 
 	PhysicsServer3D.soft_body_set_space(cloth, RID())
 	PhysicsServer3D.space_set_active(space, false)
