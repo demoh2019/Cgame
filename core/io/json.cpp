@@ -253,14 +253,23 @@ Error JSON::_get_token(const char32_t *p_str, int &r_index, int p_len, Token &r_
 			case '"': {
 				r_index++;
 				String str;
+				int run_start = r_index;
 				while (true) {
 					if (p_str[r_index] == 0) {
 						r_err_str = "Unterminated string";
 						return ERR_PARSE_ERROR;
 					} else if (p_str[r_index] == '"') {
+						// Most JSON strings have no escapes; copy the entire UTF-32
+						// run once rather than growing String one codepoint at a time.
+						if (r_index > run_start) {
+							str.append_utf32_unchecked(Span<char32_t>(p_str + run_start, r_index - run_start));
+						}
 						r_index++;
 						break;
 					} else if (p_str[r_index] == '\\') {
+						if (r_index > run_start) {
+							str.append_utf32_unchecked(Span<char32_t>(p_str + run_start, r_index - run_start));
+						}
 						//escaped characters...
 						r_index++;
 						char32_t next = p_str[r_index];
@@ -376,12 +385,11 @@ Error JSON::_get_token(const char32_t *p_str, int &r_index, int p_len, Token &r_
 						}
 
 						str += res;
-
+						run_start = r_index + 1;
 					} else {
 						if (p_str[r_index] == '\n') {
 							r_line++;
 						}
-						str += p_str[r_index];
 					}
 					r_index++;
 				}
@@ -407,15 +415,13 @@ Error JSON::_get_token(const char32_t *p_str, int &r_index, int p_len, Token &r_
 					return OK;
 
 				} else if (is_ascii_alphabet_char(p_str[r_index])) {
-					String id;
-
-					while (is_ascii_alphabet_char(p_str[r_index])) {
-						id += p_str[r_index];
+					const int start = r_index;
+					while (r_index < p_len && is_ascii_alphabet_char(p_str[r_index])) {
 						r_index++;
 					}
 
 					r_token.type = TK_IDENTIFIER;
-					r_token.value = id;
+					r_token.value = String::utf32_unchecked(Span<char32_t>(p_str + start, r_index - start));
 					return OK;
 				} else {
 					r_err_str = "Unexpected character";

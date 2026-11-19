@@ -548,4 +548,45 @@ TEST_CASE("[JSON] StringBuilder serialization preserves escaping and key sorting
 	CHECK(JSON::stringify(source, "\t", true) == JSON::stringify(roundtrip, "\t", true));
 }
 
+TEST_CASE("[JSON] UTF32 batch parser accepts long plain string values and keys") {
+	const String long_string = String("abcdefgh0123456789").repeat(4096);
+	const String text = "{\"long_key_" + String("x").repeat(4096) + "\":\"" + long_string + "\"}";
+	const Variant parsed = JSON::parse_string(text);
+	REQUIRE(parsed.get_type() == Variant::DICTIONARY);
+	const Dictionary result = parsed;
+	REQUIRE(result.size() == 1);
+	CHECK(result["long_key_" + String("x").repeat(4096)] == Variant(long_string));
+	CHECK(JSON::parse_string(JSON::stringify(result)) == parsed);
+}
+
+TEST_CASE("[JSON] UTF32 batch parser keeps escape boundaries and UTF16 pairs") {
+	const String left = String("qwerty").repeat(2048);
+	const String right = String("abc123").repeat(2048);
+	const String source = "\"" + left + "\\t" + right + "\\u0041" + "\"";
+	const Variant parsed = JSON::parse_string(source);
+	REQUIRE(parsed.get_type() == Variant::STRING);
+	CHECK(parsed == Variant(left + "\t" + right + "A"));
+
+	const String unicode_source = "\"start\\uD83D\\uDE00end\"";
+	const Variant unicode = JSON::parse_string(unicode_source);
+	REQUIRE(unicode.get_type() == Variant::STRING);
+	const String unicode_text = unicode;
+	CHECK(unicode_text.length() == 9);
+	CHECK(unicode_text[5] == char32_t(0x1F600));
+	CHECK(unicode_text.substr(6) == "end");
+}
+
+TEST_CASE("[JSON] UTF32 batch parser keeps invalid escapes and identifiers rejected") {
+	JSON json;
+	CHECK(json.parse("\"abc\\xdef\"") == ERR_PARSE_ERROR);
+	CHECK(json.parse("\"unterminated\\") == ERR_PARSE_ERROR);
+	CHECK(json.parse(String("invalididentifier").repeat(512)) == ERR_PARSE_ERROR);
+	CHECK(json.parse("true") == OK);
+	CHECK(json.get_data() == Variant(true));
+	CHECK(json.parse("false") == OK);
+	CHECK(json.get_data() == Variant(false));
+	CHECK(json.parse("null") == OK);
+	CHECK(json.get_data().get_type() == Variant::NIL);
+}
+
 } // namespace TestJSON
