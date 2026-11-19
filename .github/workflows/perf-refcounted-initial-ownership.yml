@@ -1,0 +1,59 @@
+name: RefCounted initial ownership performance regression
+
+on:
+  pull_request:
+    paths:
+      - "core/object/ref_counted.h"
+      - "core/object/ref_counted.cpp"
+      - "core/object/class_db.cpp"
+      - "core/os/memory.h"
+      - "tests/core/object/test_refcounted_initial_ownership.cpp"
+      - "misc/scripts/tests/test_refcounted_initial_ownership.py"
+      - "misc/benchmarks/refcounted_creation/**"
+      - ".github/workflows/perf-refcounted-initial-ownership.yml"
+  push:
+    branches: [develop]
+    paths:
+      - "core/object/ref_counted.h"
+      - "core/object/ref_counted.cpp"
+      - "core/object/class_db.cpp"
+      - "core/os/memory.h"
+      - "tests/core/object/test_refcounted_initial_ownership.cpp"
+      - "misc/scripts/tests/test_refcounted_initial_ownership.py"
+      - "misc/benchmarks/refcounted_creation/**"
+      - ".github/workflows/perf-refcounted-initial-ownership.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  source-contracts:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - name: Check new reference ownership and legacy API invariants
+        run: python3 -m unittest discover -s misc/scripts/tests -p test_refcounted_initial_ownership.py -v
+
+  native-editor:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install native build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libwayland-bin
+      - uses: ./.github/actions/godot-deps
+      - name: Compile Cgame editor and native tests
+        uses: ./.github/actions/godot-build
+        with:
+          platform: linuxbsd
+          target: editor
+          scons-flags: dev_build=yes debug_symbols=no tests=yes module_text_server_fb_enabled=yes -j2
+      - name: Verify RefCounted initialization, legacy creation and copying
+        shell: bash
+        run: |
+          set -euo pipefail
+          timeout 240s ./bin/godot.linuxbsd.editor.dev.x86_64 --headless --test --test-suite="*[RefInitialOwnership]*" --no-colors
