@@ -3,7 +3,7 @@ extends Node3D
 ## installed into the editor or enabled in other games.
 
 const LAB_2D := "res://lab_2d.tscn"
-const BUOYANT_BOX = preload("res://buoyant_box.gd")
+const INTERACTIVE_ENV_3D = preload("res://environment_3d.gd")
 const ZONES_X := [-28.0, -14.0, 0.0, 14.0, 28.0]
 
 var _camera: Camera3D
@@ -26,13 +26,16 @@ func _ready() -> void:
     _make_ramp()
     _make_joints()
     _make_soft_body()
-    _make_water_station()
     _make_ccd_station()
     _make_material_station()
     _make_vehicle()
     _make_sensor_station()
     _make_camera()
     _make_hud()
+    var interactions = INTERACTIVE_ENV_3D.new()
+    interactions.name = "Environment3D"
+    add_child(interactions)
+    interactions.setup(_camera)
 
 
 func _make_environment() -> void:
@@ -140,9 +143,9 @@ func _make_floor_and_zones() -> void:
     _static_box("Ground", Vector3(0, -0.5, 0), Vector3(94, 1, 62), Color(0.11, 0.14, 0.18))
     var names := [
         "01  Rigid stacks", "02  Ramps / rolling", "03  Joints / pendulums",
-        "04  SoftBody3D", "05  Buoyancy approximation",
+        "04  SoftBody3D", "05  Interactive water pool",
         "06  CCD projectiles", "07  Friction / restitution", "08  Vehicle suspension",
-        "09  Area / ray query", "10  Stress test [X]"
+        "09  Area / ray query", "10  Magnet / wind / stress"
     ]
     var colors := [
         Color("#23455a"), Color("#284b45"), Color("#4b4059"), Color("#4c425e"), Color("#235166"),
@@ -230,26 +233,6 @@ func _make_soft_body() -> void:
     soft.material_override = _material(Color("#cf9aef"))
     add_child(soft)
     _static_box("SoftBodyObstacle", Vector3(14, 0.75, -11), Vector3(6, 1.5, 6), Color("#b3a9ce"))
-
-
-func _make_water_station() -> void:
-    var volume := Node3D.new()
-    volume.position = Vector3(28, 1.3, -11)
-    _visual_box(volume, Vector3(11.5, 2.6, 14.4), Color(0.17, 0.7, 0.94, 0.28))
-    add_child(volume)
-    for i in range(2):
-        var body = BUOYANT_BOX.new()
-        body.name = "LightFloater" if i == 0 else "HeavySinker"
-        body.position = Vector3(25.5 + i * 4.5, 5.3, -11)
-        body.mass = 2.5 if i == 0 else 9.0
-        body.water_surface_y = 2.6
-        body.box_height = 1.4
-        body.displaced_volume = 1.4 * 1.4 * 1.4
-        body.fluid_density = 1.5
-        _box_collision(body, Vector3.ONE * 1.4)
-        _visual_box(body, Vector3.ONE * 1.4, Color("#a1f3d2") if i == 0 else Color("#f2b192"))
-        add_child(body)
-        body.add_to_group("demo_dynamic")
 
 
 func _make_ccd_station() -> void:
@@ -369,7 +352,7 @@ func _make_hud() -> void:
     title.add_theme_font_size_override("font_size", 21)
     content.add_child(title)
     var instructions := Label.new()
-    instructions.text = "ПКМ: обзор камерой  |  WASD + Q/E: полёт  |  Shift: быстро\nB: бросить куб  |  C: две CCD-пули  |  Space: импульс\nX: +100 тел (стресс)  |  R: сброс  |  F1: физика 2D\nEsc: освободить курсор"
+    instructions.text = "ПКМ: обзор камерой  |  WASD + Q/E: полёт  |  Shift: быстро\nB: бросить куб  |  C: две CCD-пули  |  Space: импульс\nX: +100 тел | стрелки: машина | Ctrl: тормоз\nF1: 2D | R: сброс\nEsc: освободить курсор"
     content.add_child(instructions)
     _hud_stats = Label.new()
     content.add_child(_hud_stats)
@@ -474,3 +457,14 @@ func _process(delta: float) -> void:
         var count := get_tree().get_nodes_in_group("demo_dynamic").size()
         var hit := str(_ray.get_collider().name) if _ray.is_colliding() else "нет"
         _hud_stats.text = "FPS: %d | Bodies: %d | Ray: %s | ShapeCast: %s" % [Engine.get_frames_per_second(), count, hit, str(_shape_cast.is_colliding())]
+
+
+func _physics_process(delta: float) -> void:
+    # Keyboard drive only affects the demo vehicle (and does not touch camera keys).
+    if _vehicle == null:
+        return
+    var throttle := float(Input.is_key_pressed(KEY_UP)) - float(Input.is_key_pressed(KEY_DOWN))
+    var steering_target := (float(Input.is_key_pressed(KEY_LEFT)) - float(Input.is_key_pressed(KEY_RIGHT))) * 0.4
+    _vehicle.engine_force = throttle * 1100.0
+    _vehicle.steering = move_toward(_vehicle.steering, steering_target, delta * 1.7)
+    _vehicle.brake = 90.0 if Input.is_key_pressed(KEY_CTRL) else 0.0
