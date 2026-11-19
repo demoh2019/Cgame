@@ -676,7 +676,7 @@ func _unhandled_input(event: InputEvent) -> void:
 	elif event.is_action_pressed("survive_bandage"):
 		_result("Heal", sim.cmd_use(LOCAL_PLAYER_ID, "bandage"))
 	elif event.is_action_pressed("survive_weapon"):
-		_result("Equip weapon", sim.cmd_use(LOCAL_PLAYER_ID, "club_1"))
+		_cycle_owned_weapon()
 	elif event.is_action_pressed("survive_armor"):
 		_result("Equip armor", sim.cmd_use(LOCAL_PLAYER_ID, "jacket_1"))
 	elif event.is_action_pressed("survive_antiseptic"):
@@ -749,6 +749,24 @@ func _unhandled_input(event: InputEvent) -> void:
 			_result("Sell %s" % salvage_id, sim.cmd_vendor(LOCAL_PLAYER_ID, salvage_id, 1, false))
 
 
+## Cycle all physically carried weapons, including freshly crafted spears.
+## The actual equipment change still runs through GameServer.cmd_use.
+func _cycle_owned_weapon() -> void:
+	var owned: Array[String] = []
+	for item_id in Defs.items():
+		var item: Dictionary = Defs.item(str(item_id))
+		if str(item.get("kind", "")) == "weapon" and survivor.inventory.count(str(item_id)) > 0:
+			owned.append(str(item_id))
+	owned.sort()
+	if owned.is_empty():
+		_feedback = "No crafted or scavenged weapon in inventory."
+		return
+	var current_index: int = owned.find(survivor.inventory.weapon)
+	var next_weapon: String = owned[(current_index + 1) % owned.size()]
+	_result("Equip %s" % str(Defs.item(next_weapon).get("name", next_weapon)),
+		sim.cmd_use(LOCAL_PLAYER_ID, next_weapon))
+
+
 func _update_hud() -> void:
 	if survivor == null:
 		return
@@ -792,7 +810,7 @@ func _update_hud() -> void:
 	var station_status: String = "WORKBENCH" if near_bench else "workbench at x=9, z=0"
 	if recipe.get("station", "") == "campfire":
 		station_status = "FIRE READY" if nearby_fire else ("WORKBENCH" if near_bench else "need lit fire or workbench")
-	_instructions.text = "WASD move | Shift sprint | E gather | Q loot | F attack | G weapon skill | Space dodge | U build | O campfire | 9 refuel | 0 cook fish | - extinguish | H repair | Y upgrade | X dismantle\nTab / Shift+Tab recipes | C craft | B stash | 1 food 2 water 3 heal 4 weapon 5 armor 6 antiseptic 7 antibiotics 8 heat pack R lake (filter prevents infection)\nN buy water / V sell materials / Shift+V sell fish | T fish near shore | P accept / Shift+P turn in (hub)\nCRAFT %s -> %s x%d | %s | inputs %s\n%s" % [
+	_instructions.text = "WASD move | Shift sprint | E gather | Q loot | F attack | G weapon skill | Space dodge | U build | O campfire | 9 refuel | 0 cook fish | - extinguish | H repair | Y upgrade | X dismantle\nTab / Shift+Tab recipes | C craft | B stash | 1 food 2 water 3 heal 4 cycle weapon 5 armor 6 antiseptic 7 antibiotics 8 heat pack R lake (filter prevents infection)\nN buy water / V sell materials / Shift+V sell fish | T fish near shore | P accept / Shift+P turn in (hub)\nCRAFT %s -> %s x%d | %s | inputs %s\n%s" % [
 		recipe_id, str(recipe.get("output", "")), int(recipe.get("count", 0)),
 		station_status,
 		str(recipe.get("inputs", {})), _feedback
