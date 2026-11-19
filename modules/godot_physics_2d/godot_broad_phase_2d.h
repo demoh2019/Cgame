@@ -72,6 +72,10 @@ public:
 
 	virtual int cull_segment(const Vector2 &p_from, const Vector2 &p_to, GodotCollisionObject2D **p_results, int p_max_results, int *p_result_indices = nullptr) = 0;
 	using QueryVisitor = bool (*)(GodotCollisionObject2D *, int, void *);
+	// Exact point traversal avoids the artificial epsilon AABB used by
+	// historical 2D point queries. Exact shape containment is still tested
+	// by the direct space state callback.
+	virtual void visit_point(const Vector2 &p_point, QueryVisitor p_visitor, void *p_userdata) = 0;
 	virtual void visit_aabb(const Rect2 &p_aabb, QueryVisitor p_visitor, void *p_userdata) = 0;
 
 	virtual int cull_aabb(const Rect2 &p_aabb, GodotCollisionObject2D **p_results, int p_max_results, int *p_result_indices = nullptr) = 0;
