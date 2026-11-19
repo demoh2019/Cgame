@@ -1,5 +1,5 @@
 /**************************************************************************/
-/*  heightmap_terrain_3d.cpp                                             */
+/*  chunked_terrain_3d.cpp                                             */
 /**************************************************************************/
 /*                         This file is part of:                          */
 /*                             GODOT ENGINE                               */
@@ -28,7 +28,7 @@
 /* SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.                 */
 /**************************************************************************/
 
-#include "heightmap_terrain_3d.h"
+#include "chunked_terrain_3d.h"
 
 #include "core/config/engine.h"
 #include "core/object/callable_mp.h"
@@ -44,7 +44,7 @@
 
 using namespace HeightmapTerrainGeometry;
 
-HeightmapTerrainGeometry::Params HeightmapTerrain3D::_params() const {
+HeightmapTerrainGeometry::Params ChunkedTerrain3D::_params() const {
 	Params params;
 	const int width = MAX(data_width, 2);
 	const int depth = MAX(data_depth, 2);
@@ -56,7 +56,7 @@ HeightmapTerrainGeometry::Params HeightmapTerrain3D::_params() const {
 	return params;
 }
 
-HeightField HeightmapTerrain3D::_field() const {
+HeightField ChunkedTerrain3D::_field() const {
 	HeightField field;
 	field.heights = height_data.ptr();
 	field.width = data_width;
@@ -64,7 +64,7 @@ HeightField HeightmapTerrain3D::_field() const {
 	return field;
 }
 
-void HeightmapTerrain3D::_load_from_texture() {
+void ChunkedTerrain3D::_load_from_texture() {
 	if (data_from_script) {
 		return;
 	}
@@ -94,18 +94,18 @@ void HeightmapTerrain3D::_load_from_texture() {
 	}
 }
 
-void HeightmapTerrain3D::_queue_rebuild() {
+void ChunkedTerrain3D::_queue_rebuild() {
 	if (!is_inside_tree()) {
 		built = false;
 		return;
 	}
 	if (!rebuild_queued) {
 		rebuild_queued = true;
-		callable_mp(this, &HeightmapTerrain3D::force_update).call_deferred();
+		callable_mp(this, &ChunkedTerrain3D::force_update).call_deferred();
 	}
 }
 
-void HeightmapTerrain3D::_free_collision(Chunk &r_chunk) {
+void ChunkedTerrain3D::_free_collision(Chunk &r_chunk) {
 #ifndef PHYSICS_3D_DISABLED
 	PhysicsServer3D *ps = PhysicsServer3D::get_singleton();
 	if (ps) {
@@ -122,7 +122,7 @@ void HeightmapTerrain3D::_free_collision(Chunk &r_chunk) {
 	r_chunk.has_collision = false;
 }
 
-void HeightmapTerrain3D::_free_chunk_mesh_and_collision(Chunk &r_chunk) {
+void ChunkedTerrain3D::_free_chunk_mesh_and_collision(Chunk &r_chunk) {
 	RenderingServer *rs = RenderingServer::get_singleton();
 	if (rs) {
 		if (r_chunk.instance.is_valid()) {
@@ -143,7 +143,7 @@ void HeightmapTerrain3D::_free_chunk_mesh_and_collision(Chunk &r_chunk) {
 	_free_collision(r_chunk);
 }
 
-void HeightmapTerrain3D::_free_chunks() {
+void ChunkedTerrain3D::_free_chunks() {
 	for (Chunk &chunk : chunks) {
 		_free_chunk_mesh_and_collision(chunk);
 	}
@@ -152,7 +152,7 @@ void HeightmapTerrain3D::_free_chunks() {
 	chunks_z = 0;
 }
 
-void HeightmapTerrain3D::_rebuild() {
+void ChunkedTerrain3D::_rebuild() {
 	_free_chunks();
 	built = false;
 	if (!is_inside_tree() || !get_world_3d().is_valid()) {
@@ -186,7 +186,7 @@ void HeightmapTerrain3D::_rebuild() {
 	time_since_update = 1e9;
 }
 
-void HeightmapTerrain3D::_ensure_mesh(Chunk &r_chunk, int p_lod) {
+void ChunkedTerrain3D::_ensure_mesh(Chunk &r_chunk, int p_lod) {
 	RenderingServer *rs = RenderingServer::get_singleton();
 	if (!rs || r_chunk.meshes[p_lod].is_valid()) {
 		return;
@@ -209,7 +209,7 @@ void HeightmapTerrain3D::_ensure_mesh(Chunk &r_chunk, int p_lod) {
 	r_chunk.meshes[p_lod] = mesh_rid;
 }
 
-void HeightmapTerrain3D::_ensure_collision(Chunk &r_chunk) {
+void ChunkedTerrain3D::_ensure_collision(Chunk &r_chunk) {
 #ifndef PHYSICS_3D_DISABLED
 	PhysicsServer3D *ps = PhysicsServer3D::get_singleton();
 	if (!ps || r_chunk.has_collision || !get_world_3d().is_valid()) {
@@ -263,7 +263,7 @@ void HeightmapTerrain3D::_ensure_collision(Chunk &r_chunk) {
 #endif
 }
 
-void HeightmapTerrain3D::_update_transforms() {
+void ChunkedTerrain3D::_update_transforms() {
 	RenderingServer *rs = RenderingServer::get_singleton();
 	const Transform3D global = get_global_transform();
 	for (Chunk &chunk : chunks) {
@@ -280,7 +280,7 @@ void HeightmapTerrain3D::_update_transforms() {
 	}
 }
 
-bool HeightmapTerrain3D::_get_viewer_position(Vector3 &r_position) const {
+bool ChunkedTerrain3D::_get_viewer_position(Vector3 &r_position) const {
 	if (!focus.is_empty()) {
 		if (Node3D *node = Object::cast_to<Node3D>(get_node_or_null(focus))) {
 			if (node->is_inside_tree()) {
@@ -299,7 +299,7 @@ bool HeightmapTerrain3D::_get_viewer_position(Vector3 &r_position) const {
 	return false;
 }
 
-void HeightmapTerrain3D::_update_chunks() {
+void ChunkedTerrain3D::_update_chunks() {
 	RenderingServer *rs = RenderingServer::get_singleton();
 	if (!rs || !built || chunks.is_empty() || !is_inside_tree()) {
 		return;
@@ -364,7 +364,7 @@ void HeightmapTerrain3D::_update_chunks() {
 	}
 }
 
-void HeightmapTerrain3D::force_update() {
+void ChunkedTerrain3D::force_update() {
 	rebuild_queued = false;
 	if (!built) {
 		_rebuild();
@@ -373,7 +373,7 @@ void HeightmapTerrain3D::force_update() {
 	time_since_update = 0.0;
 }
 
-void HeightmapTerrain3D::_notification(int p_what) {
+void ChunkedTerrain3D::_notification(int p_what) {
 	switch (p_what) {
 		case NOTIFICATION_ENTER_WORLD: {
 			set_process_internal(true);
@@ -416,7 +416,7 @@ void HeightmapTerrain3D::_notification(int p_what) {
 	}
 }
 
-void HeightmapTerrain3D::set_heightmap(const Ref<Texture2D> &p_texture) {
+void ChunkedTerrain3D::set_heightmap(const Ref<Texture2D> &p_texture) {
 	if (heightmap == p_texture) {
 		return;
 	}
@@ -427,9 +427,9 @@ void HeightmapTerrain3D::set_heightmap(const Ref<Texture2D> &p_texture) {
 	}
 }
 
-void HeightmapTerrain3D::set_height_data(const PackedFloat32Array &p_heights, const Vector2i &p_dimensions) {
-	ERR_FAIL_COND_MSG(p_dimensions.x < 2 || p_dimensions.y < 2, "HeightmapTerrain3D needs at least 2 x 2 height samples.");
-	ERR_FAIL_COND_MSG(p_heights.size() != p_dimensions.x * p_dimensions.y, "HeightmapTerrain3D height data size does not match the dimensions.");
+void ChunkedTerrain3D::set_height_data(const PackedFloat32Array &p_heights, const Vector2i &p_dimensions) {
+	ERR_FAIL_COND_MSG(p_dimensions.x < 2 || p_dimensions.y < 2, "ChunkedTerrain3D needs at least 2 x 2 height samples.");
+	ERR_FAIL_COND_MSG(p_heights.size() != p_dimensions.x * p_dimensions.y, "ChunkedTerrain3D height data size does not match the dimensions.");
 	data_from_script = true;
 	data_width = p_dimensions.x;
 	data_depth = p_dimensions.y;
@@ -443,7 +443,7 @@ void HeightmapTerrain3D::set_height_data(const PackedFloat32Array &p_heights, co
 	_queue_rebuild();
 }
 
-PackedFloat32Array HeightmapTerrain3D::get_height_data() const {
+PackedFloat32Array ChunkedTerrain3D::get_height_data() const {
 	PackedFloat32Array result;
 	result.resize(height_data.size());
 	float *out = result.ptrw();
@@ -453,14 +453,14 @@ PackedFloat32Array HeightmapTerrain3D::get_height_data() const {
 	return result;
 }
 
-void HeightmapTerrain3D::clear_height_data() {
+void ChunkedTerrain3D::clear_height_data() {
 	data_from_script = false;
 	built = false;
 	_queue_rebuild();
 }
 
 #define TERRAIN_REBUILD_SETTER(m_setter, m_type, m_member, m_expression) \
-	void HeightmapTerrain3D::m_setter(m_type p_value) {                   \
+	void ChunkedTerrain3D::m_setter(m_type p_value) {                   \
 		const m_type value = m_expression;                                  \
 		if (m_member == value) {                                            \
 			return;                                                         \
@@ -476,8 +476,8 @@ TERRAIN_REBUILD_SETTER(set_centered, bool, centered, p_value)
 TERRAIN_REBUILD_SETTER(set_skirt_depth, real_t, skirt_depth, MAX(p_value, real_t(0.0)))
 TERRAIN_REBUILD_SETTER(set_chunk_quads, int, chunk_quads, CLAMP(p_value, 2, 256))
 
-void HeightmapTerrain3D::set_size(const Vector2 &p_size) {
-	ERR_FAIL_COND_MSG(!(p_size.x > 0.0) || !(p_size.y > 0.0) || !p_size.is_finite(), "HeightmapTerrain3D size must be positive and finite.");
+void ChunkedTerrain3D::set_size(const Vector2 &p_size) {
+	ERR_FAIL_COND_MSG(!(p_size.x > 0.0) || !(p_size.y > 0.0) || !p_size.is_finite(), "ChunkedTerrain3D size must be positive and finite.");
 	if (size == p_size) {
 		return;
 	}
@@ -486,22 +486,22 @@ void HeightmapTerrain3D::set_size(const Vector2 &p_size) {
 	_queue_rebuild();
 }
 
-void HeightmapTerrain3D::set_lod_count(int p_count) {
+void ChunkedTerrain3D::set_lod_count(int p_count) {
 	lod_count = CLAMP(p_count, 1, MAX_LOD);
 	for (Chunk &chunk : chunks) {
 		chunk.lod = -1; // Re-evaluate; the existing meshes stay cached.
 	}
 }
 
-void HeightmapTerrain3D::set_lod_distance(real_t p_distance) {
+void ChunkedTerrain3D::set_lod_distance(real_t p_distance) {
 	lod_distance = MAX(p_distance, real_t(1.0));
 }
 
-void HeightmapTerrain3D::set_view_distance(real_t p_distance) {
+void ChunkedTerrain3D::set_view_distance(real_t p_distance) {
 	view_distance = MAX(p_distance, real_t(0.0));
 }
 
-void HeightmapTerrain3D::set_material(const Ref<Material> &p_material) {
+void ChunkedTerrain3D::set_material(const Ref<Material> &p_material) {
 	material = p_material;
 	RenderingServer *rs = RenderingServer::get_singleton();
 	if (!rs) {
@@ -516,7 +516,7 @@ void HeightmapTerrain3D::set_material(const Ref<Material> &p_material) {
 	}
 }
 
-void HeightmapTerrain3D::set_cast_shadows(bool p_enabled) {
+void ChunkedTerrain3D::set_cast_shadows(bool p_enabled) {
 	cast_shadows = p_enabled;
 	RenderingServer *rs = RenderingServer::get_singleton();
 	if (!rs) {
@@ -529,7 +529,7 @@ void HeightmapTerrain3D::set_cast_shadows(bool p_enabled) {
 	}
 }
 
-void HeightmapTerrain3D::set_collision_enabled(bool p_enabled) {
+void ChunkedTerrain3D::set_collision_enabled(bool p_enabled) {
 	collision_enabled = p_enabled;
 	if (!collision_enabled) {
 		for (Chunk &chunk : chunks) {
@@ -540,11 +540,11 @@ void HeightmapTerrain3D::set_collision_enabled(bool p_enabled) {
 	}
 }
 
-void HeightmapTerrain3D::set_collision_distance(real_t p_distance) {
+void ChunkedTerrain3D::set_collision_distance(real_t p_distance) {
 	collision_distance = MAX(p_distance, real_t(0.0));
 }
 
-void HeightmapTerrain3D::set_collision_layer(uint32_t p_layer) {
+void ChunkedTerrain3D::set_collision_layer(uint32_t p_layer) {
 	collision_layer = p_layer;
 #ifndef PHYSICS_3D_DISABLED
 	for (Chunk &chunk : chunks) {
@@ -555,7 +555,7 @@ void HeightmapTerrain3D::set_collision_layer(uint32_t p_layer) {
 #endif
 }
 
-void HeightmapTerrain3D::set_collision_mask(uint32_t p_mask) {
+void ChunkedTerrain3D::set_collision_mask(uint32_t p_mask) {
 	collision_mask = p_mask;
 #ifndef PHYSICS_3D_DISABLED
 	for (Chunk &chunk : chunks) {
@@ -566,7 +566,7 @@ void HeightmapTerrain3D::set_collision_mask(uint32_t p_mask) {
 #endif
 }
 
-real_t HeightmapTerrain3D::get_height_at(const Vector3 &p_world_position) const {
+real_t ChunkedTerrain3D::get_height_at(const Vector3 &p_world_position) const {
 	const HeightField field = _field();
 	if (!field.is_valid()) {
 		return get_global_position().y;
@@ -580,7 +580,7 @@ real_t HeightmapTerrain3D::get_height_at(const Vector3 &p_world_position) const 
 	return global.xform(Vector3(local.x, height, local.z)).y;
 }
 
-Vector3 HeightmapTerrain3D::get_normal_at(const Vector3 &p_world_position) const {
+Vector3 ChunkedTerrain3D::get_normal_at(const Vector3 &p_world_position) const {
 	const HeightField field = _field();
 	if (!field.is_valid()) {
 		return Vector3(0, 1, 0);
@@ -592,7 +592,7 @@ Vector3 HeightmapTerrain3D::get_normal_at(const Vector3 &p_world_position) const
 	return global.basis.get_rotation_quaternion().xform(normal).normalized();
 }
 
-bool HeightmapTerrain3D::is_over_terrain(const Vector3 &p_world_position) const {
+bool ChunkedTerrain3D::is_over_terrain(const Vector3 &p_world_position) const {
 	if (!_field().is_valid()) {
 		return false;
 	}
@@ -601,7 +601,7 @@ bool HeightmapTerrain3D::is_over_terrain(const Vector3 &p_world_position) const 
 	return local.x >= params.origin.x && local.x <= params.origin.x + size.x && local.z >= params.origin.y && local.z <= params.origin.y + size.y;
 }
 
-void HeightmapTerrain3D::update_region(const Rect2i &p_region) {
+void ChunkedTerrain3D::update_region(const Rect2i &p_region) {
 	if (!built || chunks.is_empty()) {
 		return;
 	}
@@ -644,7 +644,7 @@ void HeightmapTerrain3D::update_region(const Rect2i &p_region) {
 	time_since_update = 1e9;
 }
 
-int HeightmapTerrain3D::get_visible_chunk_count() const {
+int ChunkedTerrain3D::get_visible_chunk_count() const {
 	int count = 0;
 	for (const Chunk &chunk : chunks) {
 		if (chunk.visible) {
@@ -654,7 +654,7 @@ int HeightmapTerrain3D::get_visible_chunk_count() const {
 	return count;
 }
 
-int HeightmapTerrain3D::get_collision_chunk_count() const {
+int ChunkedTerrain3D::get_collision_chunk_count() const {
 	int count = 0;
 	for (const Chunk &chunk : chunks) {
 		if (chunk.has_collision) {
@@ -664,63 +664,63 @@ int HeightmapTerrain3D::get_collision_chunk_count() const {
 	return count;
 }
 
-int HeightmapTerrain3D::get_chunk_lod(const Vector2i &p_chunk) const {
+int ChunkedTerrain3D::get_chunk_lod(const Vector2i &p_chunk) const {
 	ERR_FAIL_COND_V(p_chunk.x < 0 || p_chunk.y < 0 || p_chunk.x >= chunks_x || p_chunk.y >= chunks_z, -1);
 	return chunks[p_chunk.y * chunks_x + p_chunk.x].lod;
 }
 
-void HeightmapTerrain3D::_bind_methods() {
-	ClassDB::bind_method(D_METHOD("set_heightmap", "texture"), &HeightmapTerrain3D::set_heightmap);
-	ClassDB::bind_method(D_METHOD("get_heightmap"), &HeightmapTerrain3D::get_heightmap);
-	ClassDB::bind_method(D_METHOD("set_height_data", "heights", "dimensions"), &HeightmapTerrain3D::set_height_data);
-	ClassDB::bind_method(D_METHOD("get_height_data"), &HeightmapTerrain3D::get_height_data);
-	ClassDB::bind_method(D_METHOD("get_height_dimensions"), &HeightmapTerrain3D::get_height_dimensions);
-	ClassDB::bind_method(D_METHOD("clear_height_data"), &HeightmapTerrain3D::clear_height_data);
-	ClassDB::bind_method(D_METHOD("set_size", "size"), &HeightmapTerrain3D::set_size);
-	ClassDB::bind_method(D_METHOD("get_size"), &HeightmapTerrain3D::get_size);
-	ClassDB::bind_method(D_METHOD("set_height_scale", "scale"), &HeightmapTerrain3D::set_height_scale);
-	ClassDB::bind_method(D_METHOD("get_height_scale"), &HeightmapTerrain3D::get_height_scale);
-	ClassDB::bind_method(D_METHOD("set_height_offset", "offset"), &HeightmapTerrain3D::set_height_offset);
-	ClassDB::bind_method(D_METHOD("get_height_offset"), &HeightmapTerrain3D::get_height_offset);
-	ClassDB::bind_method(D_METHOD("set_centered", "centered"), &HeightmapTerrain3D::set_centered);
-	ClassDB::bind_method(D_METHOD("is_centered"), &HeightmapTerrain3D::is_centered);
-	ClassDB::bind_method(D_METHOD("set_chunk_quads", "quads"), &HeightmapTerrain3D::set_chunk_quads);
-	ClassDB::bind_method(D_METHOD("get_chunk_quads"), &HeightmapTerrain3D::get_chunk_quads);
-	ClassDB::bind_method(D_METHOD("set_lod_count", "count"), &HeightmapTerrain3D::set_lod_count);
-	ClassDB::bind_method(D_METHOD("get_lod_count"), &HeightmapTerrain3D::get_lod_count);
-	ClassDB::bind_method(D_METHOD("set_lod_distance", "distance"), &HeightmapTerrain3D::set_lod_distance);
-	ClassDB::bind_method(D_METHOD("get_lod_distance"), &HeightmapTerrain3D::get_lod_distance);
-	ClassDB::bind_method(D_METHOD("set_view_distance", "distance"), &HeightmapTerrain3D::set_view_distance);
-	ClassDB::bind_method(D_METHOD("get_view_distance"), &HeightmapTerrain3D::get_view_distance);
-	ClassDB::bind_method(D_METHOD("set_skirt_depth", "depth"), &HeightmapTerrain3D::set_skirt_depth);
-	ClassDB::bind_method(D_METHOD("get_skirt_depth"), &HeightmapTerrain3D::get_skirt_depth);
-	ClassDB::bind_method(D_METHOD("set_material", "material"), &HeightmapTerrain3D::set_material);
-	ClassDB::bind_method(D_METHOD("get_material"), &HeightmapTerrain3D::get_material);
-	ClassDB::bind_method(D_METHOD("set_cast_shadows", "enabled"), &HeightmapTerrain3D::set_cast_shadows);
-	ClassDB::bind_method(D_METHOD("get_cast_shadows"), &HeightmapTerrain3D::get_cast_shadows);
-	ClassDB::bind_method(D_METHOD("set_collision_enabled", "enabled"), &HeightmapTerrain3D::set_collision_enabled);
-	ClassDB::bind_method(D_METHOD("is_collision_enabled"), &HeightmapTerrain3D::is_collision_enabled);
-	ClassDB::bind_method(D_METHOD("set_collision_distance", "distance"), &HeightmapTerrain3D::set_collision_distance);
-	ClassDB::bind_method(D_METHOD("get_collision_distance"), &HeightmapTerrain3D::get_collision_distance);
-	ClassDB::bind_method(D_METHOD("set_collision_layer", "layer"), &HeightmapTerrain3D::set_collision_layer);
-	ClassDB::bind_method(D_METHOD("get_collision_layer"), &HeightmapTerrain3D::get_collision_layer);
-	ClassDB::bind_method(D_METHOD("set_collision_mask", "mask"), &HeightmapTerrain3D::set_collision_mask);
-	ClassDB::bind_method(D_METHOD("get_collision_mask"), &HeightmapTerrain3D::get_collision_mask);
-	ClassDB::bind_method(D_METHOD("set_focus", "focus"), &HeightmapTerrain3D::set_focus);
-	ClassDB::bind_method(D_METHOD("get_focus"), &HeightmapTerrain3D::get_focus);
-	ClassDB::bind_method(D_METHOD("set_update_interval", "seconds"), &HeightmapTerrain3D::set_update_interval);
-	ClassDB::bind_method(D_METHOD("get_update_interval"), &HeightmapTerrain3D::get_update_interval);
+void ChunkedTerrain3D::_bind_methods() {
+	ClassDB::bind_method(D_METHOD("set_heightmap", "texture"), &ChunkedTerrain3D::set_heightmap);
+	ClassDB::bind_method(D_METHOD("get_heightmap"), &ChunkedTerrain3D::get_heightmap);
+	ClassDB::bind_method(D_METHOD("set_height_data", "heights", "dimensions"), &ChunkedTerrain3D::set_height_data);
+	ClassDB::bind_method(D_METHOD("get_height_data"), &ChunkedTerrain3D::get_height_data);
+	ClassDB::bind_method(D_METHOD("get_height_dimensions"), &ChunkedTerrain3D::get_height_dimensions);
+	ClassDB::bind_method(D_METHOD("clear_height_data"), &ChunkedTerrain3D::clear_height_data);
+	ClassDB::bind_method(D_METHOD("set_size", "size"), &ChunkedTerrain3D::set_size);
+	ClassDB::bind_method(D_METHOD("get_size"), &ChunkedTerrain3D::get_size);
+	ClassDB::bind_method(D_METHOD("set_height_scale", "scale"), &ChunkedTerrain3D::set_height_scale);
+	ClassDB::bind_method(D_METHOD("get_height_scale"), &ChunkedTerrain3D::get_height_scale);
+	ClassDB::bind_method(D_METHOD("set_height_offset", "offset"), &ChunkedTerrain3D::set_height_offset);
+	ClassDB::bind_method(D_METHOD("get_height_offset"), &ChunkedTerrain3D::get_height_offset);
+	ClassDB::bind_method(D_METHOD("set_centered", "centered"), &ChunkedTerrain3D::set_centered);
+	ClassDB::bind_method(D_METHOD("is_centered"), &ChunkedTerrain3D::is_centered);
+	ClassDB::bind_method(D_METHOD("set_chunk_quads", "quads"), &ChunkedTerrain3D::set_chunk_quads);
+	ClassDB::bind_method(D_METHOD("get_chunk_quads"), &ChunkedTerrain3D::get_chunk_quads);
+	ClassDB::bind_method(D_METHOD("set_lod_count", "count"), &ChunkedTerrain3D::set_lod_count);
+	ClassDB::bind_method(D_METHOD("get_lod_count"), &ChunkedTerrain3D::get_lod_count);
+	ClassDB::bind_method(D_METHOD("set_lod_distance", "distance"), &ChunkedTerrain3D::set_lod_distance);
+	ClassDB::bind_method(D_METHOD("get_lod_distance"), &ChunkedTerrain3D::get_lod_distance);
+	ClassDB::bind_method(D_METHOD("set_view_distance", "distance"), &ChunkedTerrain3D::set_view_distance);
+	ClassDB::bind_method(D_METHOD("get_view_distance"), &ChunkedTerrain3D::get_view_distance);
+	ClassDB::bind_method(D_METHOD("set_skirt_depth", "depth"), &ChunkedTerrain3D::set_skirt_depth);
+	ClassDB::bind_method(D_METHOD("get_skirt_depth"), &ChunkedTerrain3D::get_skirt_depth);
+	ClassDB::bind_method(D_METHOD("set_material", "material"), &ChunkedTerrain3D::set_material);
+	ClassDB::bind_method(D_METHOD("get_material"), &ChunkedTerrain3D::get_material);
+	ClassDB::bind_method(D_METHOD("set_cast_shadows", "enabled"), &ChunkedTerrain3D::set_cast_shadows);
+	ClassDB::bind_method(D_METHOD("get_cast_shadows"), &ChunkedTerrain3D::get_cast_shadows);
+	ClassDB::bind_method(D_METHOD("set_collision_enabled", "enabled"), &ChunkedTerrain3D::set_collision_enabled);
+	ClassDB::bind_method(D_METHOD("is_collision_enabled"), &ChunkedTerrain3D::is_collision_enabled);
+	ClassDB::bind_method(D_METHOD("set_collision_distance", "distance"), &ChunkedTerrain3D::set_collision_distance);
+	ClassDB::bind_method(D_METHOD("get_collision_distance"), &ChunkedTerrain3D::get_collision_distance);
+	ClassDB::bind_method(D_METHOD("set_collision_layer", "layer"), &ChunkedTerrain3D::set_collision_layer);
+	ClassDB::bind_method(D_METHOD("get_collision_layer"), &ChunkedTerrain3D::get_collision_layer);
+	ClassDB::bind_method(D_METHOD("set_collision_mask", "mask"), &ChunkedTerrain3D::set_collision_mask);
+	ClassDB::bind_method(D_METHOD("get_collision_mask"), &ChunkedTerrain3D::get_collision_mask);
+	ClassDB::bind_method(D_METHOD("set_focus", "focus"), &ChunkedTerrain3D::set_focus);
+	ClassDB::bind_method(D_METHOD("get_focus"), &ChunkedTerrain3D::get_focus);
+	ClassDB::bind_method(D_METHOD("set_update_interval", "seconds"), &ChunkedTerrain3D::set_update_interval);
+	ClassDB::bind_method(D_METHOD("get_update_interval"), &ChunkedTerrain3D::get_update_interval);
 
-	ClassDB::bind_method(D_METHOD("get_height_at", "world_position"), &HeightmapTerrain3D::get_height_at);
-	ClassDB::bind_method(D_METHOD("get_normal_at", "world_position"), &HeightmapTerrain3D::get_normal_at);
-	ClassDB::bind_method(D_METHOD("is_over_terrain", "world_position"), &HeightmapTerrain3D::is_over_terrain);
-	ClassDB::bind_method(D_METHOD("update_region", "region"), &HeightmapTerrain3D::update_region);
-	ClassDB::bind_method(D_METHOD("get_chunk_count"), &HeightmapTerrain3D::get_chunk_count);
-	ClassDB::bind_method(D_METHOD("get_chunk_grid_size"), &HeightmapTerrain3D::get_chunk_grid_size);
-	ClassDB::bind_method(D_METHOD("get_visible_chunk_count"), &HeightmapTerrain3D::get_visible_chunk_count);
-	ClassDB::bind_method(D_METHOD("get_collision_chunk_count"), &HeightmapTerrain3D::get_collision_chunk_count);
-	ClassDB::bind_method(D_METHOD("get_chunk_lod", "chunk"), &HeightmapTerrain3D::get_chunk_lod);
-	ClassDB::bind_method(D_METHOD("force_update"), &HeightmapTerrain3D::force_update);
+	ClassDB::bind_method(D_METHOD("get_height_at", "world_position"), &ChunkedTerrain3D::get_height_at);
+	ClassDB::bind_method(D_METHOD("get_normal_at", "world_position"), &ChunkedTerrain3D::get_normal_at);
+	ClassDB::bind_method(D_METHOD("is_over_terrain", "world_position"), &ChunkedTerrain3D::is_over_terrain);
+	ClassDB::bind_method(D_METHOD("update_region", "region"), &ChunkedTerrain3D::update_region);
+	ClassDB::bind_method(D_METHOD("get_chunk_count"), &ChunkedTerrain3D::get_chunk_count);
+	ClassDB::bind_method(D_METHOD("get_chunk_grid_size"), &ChunkedTerrain3D::get_chunk_grid_size);
+	ClassDB::bind_method(D_METHOD("get_visible_chunk_count"), &ChunkedTerrain3D::get_visible_chunk_count);
+	ClassDB::bind_method(D_METHOD("get_collision_chunk_count"), &ChunkedTerrain3D::get_collision_chunk_count);
+	ClassDB::bind_method(D_METHOD("get_chunk_lod", "chunk"), &ChunkedTerrain3D::get_chunk_lod);
+	ClassDB::bind_method(D_METHOD("force_update"), &ChunkedTerrain3D::force_update);
 
 	ADD_PROPERTY(PropertyInfo(Variant::OBJECT, "heightmap", PROPERTY_HINT_RESOURCE_TYPE, "Texture2D"), "set_heightmap", "get_heightmap");
 	ADD_PROPERTY(PropertyInfo(Variant::VECTOR2, "size", PROPERTY_HINT_NONE, "suffix:m"), "set_size", "get_size");
@@ -744,10 +744,10 @@ void HeightmapTerrain3D::_bind_methods() {
 	ADD_PROPERTY(PropertyInfo(Variant::INT, "collision_mask", PROPERTY_HINT_LAYERS_3D_PHYSICS), "set_collision_mask", "get_collision_mask");
 }
 
-HeightmapTerrain3D::HeightmapTerrain3D() {
+ChunkedTerrain3D::ChunkedTerrain3D() {
 	set_notify_transform(true);
 }
 
-HeightmapTerrain3D::~HeightmapTerrain3D() {
+ChunkedTerrain3D::~ChunkedTerrain3D() {
 	_free_chunks();
 }

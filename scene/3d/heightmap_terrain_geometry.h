@@ -35,7 +35,7 @@
 #include "core/math/vector3.h"
 #include "core/variant/variant.h"
 
-// Mesh and sampling math of HeightmapTerrain3D, free of any scene or rendering code so it can be
+// Mesh and sampling math of ChunkedTerrain3D, free of any scene or rendering code so it can be
 // unit tested. A height field is a row-major grid of `width` x `depth` samples (index = z * width + x).
 namespace HeightmapTerrainGeometry {
 

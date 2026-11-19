@@ -1,5 +1,5 @@
 /**************************************************************************/
-/*  heightmap_terrain_3d.h                                             */
+/*  chunked_terrain_3d.h                                             */
 /**************************************************************************/
 /*                         This file is part of:                          */
 /*                             GODOT ENGINE                               */
@@ -39,8 +39,8 @@
 // has several levels of detail and the level is chosen by the distance to the viewer, so the
 // triangle count stays roughly constant however large the terrain is. Chunks near the focus get a
 // heightmap collision shape, far ones have none.
-class HeightmapTerrain3D : public Node3D {
-	GDCLASS(HeightmapTerrain3D, Node3D);
+class ChunkedTerrain3D : public Node3D {
+	GDCLASS(ChunkedTerrain3D, Node3D);
 
 public:
 	static constexpr int MAX_LOD = 8;
@@ -172,6 +172,6 @@ public:
 	// Applies pending changes and the distance based detail selection now, instead of at the next update.
 	void force_update();
 
-	HeightmapTerrain3D();
-	~HeightmapTerrain3D();
+	ChunkedTerrain3D();
+	~ChunkedTerrain3D();
 };

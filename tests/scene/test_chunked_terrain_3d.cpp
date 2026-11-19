@@ -1,5 +1,5 @@
 /**************************************************************************/
-/*  test_heightmap_terrain_3d.cpp                                         */
+/*  test_chunked_terrain_3d.cpp                                         */
 /**************************************************************************/
 /*                         This file is part of:                          */
 /*                             GODOT ENGINE                               */
@@ -30,16 +30,16 @@
 
 #include "tests/test_macros.h"
 
-TEST_FORCE_LINK(test_heightmap_terrain_3d)
+TEST_FORCE_LINK(test_chunked_terrain_3d)
 
-#include "scene/3d/heightmap_terrain_3d.h"
+#include "scene/3d/chunked_terrain_3d.h"
 #include "scene/3d/node_3d.h"
 #include "scene/main/scene_tree.h"
 #include "scene/main/window.h"
 #include "scene/resources/3d/world_3d.h"
 #include "servers/physics_3d/physics_server_3d.h"
 
-namespace TestHeightmapTerrain3D {
+namespace TestChunkedTerrain3D {
 
 // A sloped terrain: height 0 at the west edge rising to 1 at the east edge, so the world height at
 // x is simply (x / width + 0.5) * height_scale for a centered terrain.
@@ -55,8 +55,8 @@ static PackedFloat32Array make_ramp(int p_width, int p_depth) {
 	return heights;
 }
 
-static HeightmapTerrain3D *make_terrain(int p_samples, real_t p_size, real_t p_height_scale) {
-	HeightmapTerrain3D *terrain = memnew(HeightmapTerrain3D);
+static ChunkedTerrain3D *make_terrain(int p_samples, real_t p_size, real_t p_height_scale) {
+	ChunkedTerrain3D *terrain = memnew(ChunkedTerrain3D);
 	terrain->set_height_data(make_ramp(p_samples, p_samples), Vector2i(p_samples, p_samples));
 	terrain->set_size(Vector2(p_size, p_size));
 	terrain->set_height_scale(p_height_scale);
@@ -65,8 +65,8 @@ static HeightmapTerrain3D *make_terrain(int p_samples, real_t p_size, real_t p_h
 	return terrain;
 }
 
-TEST_CASE("[SceneTree][HeightmapTerrain3D] Heights and normals follow the field") {
-	HeightmapTerrain3D *terrain = make_terrain(65, 64.0, 10.0);
+TEST_CASE("[SceneTree][ChunkedTerrain3D] Heights and normals follow the field") {
+	ChunkedTerrain3D *terrain = make_terrain(65, 64.0, 10.0);
 	SceneTree::get_singleton()->get_root()->add_child(terrain);
 	terrain->force_update();
 
@@ -94,8 +94,8 @@ TEST_CASE("[SceneTree][HeightmapTerrain3D] Heights and normals follow the field"
 	memdelete(terrain);
 }
 
-TEST_CASE("[SceneTree][HeightmapTerrain3D] The node's transform moves the terrain") {
-	HeightmapTerrain3D *terrain = make_terrain(65, 64.0, 10.0);
+TEST_CASE("[SceneTree][ChunkedTerrain3D] The node's transform moves the terrain") {
+	ChunkedTerrain3D *terrain = make_terrain(65, 64.0, 10.0);
 	SceneTree::get_singleton()->get_root()->add_child(terrain);
 	terrain->set_global_position(Vector3(1000, 20, -500));
 	terrain->force_update();
@@ -109,8 +109,8 @@ TEST_CASE("[SceneTree][HeightmapTerrain3D] The node's transform moves the terrai
 	memdelete(terrain);
 }
 
-TEST_CASE("[SceneTree][HeightmapTerrain3D] Detail drops with distance and collision stays near the focus") {
-	HeightmapTerrain3D *terrain = make_terrain(257, 256.0, 20.0);
+TEST_CASE("[SceneTree][ChunkedTerrain3D] Detail drops with distance and collision stays near the focus") {
+	ChunkedTerrain3D *terrain = make_terrain(257, 256.0, 20.0);
 	Node3D *focus = memnew(Node3D);
 	SceneTree::get_singleton()->get_root()->add_child(terrain);
 	SceneTree::get_singleton()->get_root()->add_child(focus);
@@ -154,8 +154,8 @@ TEST_CASE("[SceneTree][HeightmapTerrain3D] Detail drops with distance and collis
 	memdelete(terrain);
 }
 
-TEST_CASE("[SceneTree][HeightmapTerrain3D] Collision shape matches the rendered ground") {
-	HeightmapTerrain3D *terrain = make_terrain(65, 64.0, 10.0);
+TEST_CASE("[SceneTree][ChunkedTerrain3D] Collision shape matches the rendered ground") {
+	ChunkedTerrain3D *terrain = make_terrain(65, 64.0, 10.0);
 	Node3D *focus = memnew(Node3D);
 	SceneTree::get_singleton()->get_root()->add_child(terrain);
 	SceneTree::get_singleton()->get_root()->add_child(focus);
@@ -198,8 +198,8 @@ TEST_CASE("[SceneTree][HeightmapTerrain3D] Collision shape matches the rendered 
 	memdelete(terrain);
 }
 
-TEST_CASE("[SceneTree][HeightmapTerrain3D] Editing heights and invalid input") {
-	HeightmapTerrain3D *terrain = make_terrain(65, 64.0, 10.0);
+TEST_CASE("[SceneTree][ChunkedTerrain3D] Editing heights and invalid input") {
+	ChunkedTerrain3D *terrain = make_terrain(65, 64.0, 10.0);
 	SceneTree::get_singleton()->get_root()->add_child(terrain);
 	terrain->force_update();
 	const real_t before = terrain->get_height_at(Vector3(0, 0, 0));
@@ -244,9 +244,9 @@ TEST_CASE("[SceneTree][HeightmapTerrain3D] Editing heights and invalid input") {
 	memdelete(terrain);
 }
 
-TEST_CASE("[SceneTree][HeightmapTerrain3D] Terrains whose size is not a multiple of the chunk") {
+TEST_CASE("[SceneTree][ChunkedTerrain3D] Terrains whose size is not a multiple of the chunk") {
 	// 50 samples: 49 quads, chunks of 32 -> 2 chunks per side; the last one is partial.
-	HeightmapTerrain3D *terrain = make_terrain(50, 49.0, 10.0);
+	ChunkedTerrain3D *terrain = make_terrain(50, 49.0, 10.0);
 	Node3D *focus = memnew(Node3D);
 	SceneTree::get_singleton()->get_root()->add_child(terrain);
 	SceneTree::get_singleton()->get_root()->add_child(focus);
@@ -263,4 +263,4 @@ TEST_CASE("[SceneTree][HeightmapTerrain3D] Terrains whose size is not a multiple
 	memdelete(terrain);
 }
 
-} // namespace TestHeightmapTerrain3D
+} // namespace TestChunkedTerrain3D
