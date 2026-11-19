@@ -581,6 +581,9 @@ PhysicsServer3D::PhysicsServer3D() {
 	// Optional per-triangle surface-area preservation for deformable cloth.
 	// Zero disables all extra area constraints and associated lambda buffers.
 	GLOBAL_DEF(PropertyInfo(Variant::FLOAT, "physics/3d/solver/soft_body_xpbd_area_compliance", PROPERTY_HINT_RANGE, "0,0.01,0.000001,or_greater"), 0.0);
+	// Jolt-style dihedral angle bending for shared triangle edges. This is
+	// independent of 2-hop spring bending and area/volume XPBD. Zero off.
+	GLOBAL_DEF(PropertyInfo(Variant::FLOAT, "physics/3d/solver/soft_body_xpbd_dihedral_compliance", PROPERTY_HINT_RANGE, "0,0.01,0.000001,or_greater"), 0.0);
 	// Closed, consistently oriented soft meshes can preserve enclosed volume.
 	// Zero disables the extra XPBD constraint and its node-gradient buffer.
 	GLOBAL_DEF(PropertyInfo(Variant::FLOAT, "physics/3d/solver/soft_body_xpbd_volume_compliance", PROPERTY_HINT_RANGE, "0,0.01,0.000001,or_greater"), 0.0);
