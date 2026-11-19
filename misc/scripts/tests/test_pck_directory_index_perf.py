@@ -31,8 +31,8 @@ class PackedDataIndexContracts(unittest.TestCase):
     def test_native_index_regressions(self):
         self.assertIn("PackedData index shares directories", self.native)
         self.assertIn("PackedData index of many files", self.native)
-        self.assertIn("packed.get_file_paths().size() == 512", self.native)
-        self.assertIn("packed.get_file_paths().size() == 256", self.native)
+        self.assertIn("packed->get_file_paths().size() == previous_count + 512", self.native)
+        self.assertIn("packed->get_file_paths().size() == previous_count + 256", self.native)
         self.assertIn("PackedData::get_singleton()", self.native)
         self.assertIn("const uint32_t previous_count", self.native)
         self.assertIn("packed->get_file_paths().size() == previous_count", self.native)
