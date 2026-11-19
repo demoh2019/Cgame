@@ -40,6 +40,12 @@ The tests cover path traversal, unsafe names, extensions, duplicate files, malfo
 
 
 
+## Pre-apply quality gate and bounded AI repair
+
+The addon now reviews generated scene (.tscn) and resource (.tres) headers, looks for scene nodes, validates .json, checks basic SVG and shader structure, and requires a main scene for game prompts. This is **static inspection only**, not a Godot compiler or runtime test; do not run untrusted code without review. Validation errors block applying a draft.
+
+**Auto-repair invalid AI output** is enabled by default and may make up to **two extra paid API requests** per Generate/Improve operation. Uncheck the option to disable retries. Each retry starts from the original task and includes a bounded fragment of the rejected model reply plus the validation error. Failed replies do not replace a previously valid draft.
+
 ## Iterative improvement and optional project context
 
 Before applying a generated draft, type feedback in **What should AI improve?** and click **Improve current draft**. The model receives the entire proposed draft and returns an updated full file list. You can repeat this until you are satisfied, then inspect individual files and apply once. If the request fails, the last valid draft remains available.
@@ -51,6 +57,7 @@ Project context sharing is **disabled by default**. Enable the checkbox and expl
 ```sh
 godot --headless --path misc/ai_game_builder --script res://tests/test_validator.gd
 godot --headless --path misc/ai_game_builder --script res://tests/test_context.gd
+godot --headless --path misc/ai_game_builder --script res://tests/test_quality.gd
 godot --headless --editor --path misc/ai_game_builder --quit
 ```
 

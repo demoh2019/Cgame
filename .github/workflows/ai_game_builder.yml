@@ -41,6 +41,7 @@ jobs:
           GODOT=/tmp/Godot_v4.8-beta4_linux.x86_64
           $GODOT --headless --path misc/ai_game_builder --script res://tests/test_validator.gd
           $GODOT --headless --path misc/ai_game_builder --script res://tests/test_context.gd
+          $GODOT --headless --path misc/ai_game_builder --script res://tests/test_quality.gd
       - name: Import addon and inspect editor startup errors
         shell: bash
         run: |

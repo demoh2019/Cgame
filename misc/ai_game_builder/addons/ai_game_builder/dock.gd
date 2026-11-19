@@ -3,6 +3,8 @@ extends VBoxContainer
 
 const Validator = preload("res://addons/ai_game_builder/validator.gd")
 const Context = preload("res://addons/ai_game_builder/context.gd")
+const Quality = preload("res://addons/ai_game_builder/quality.gd")
+const RepairPolicy = preload("res://addons/ai_game_builder/repair_policy.gd")
 const ENDPOINT := "https://api.openai.com/v1/chat/completions"
 const GENERATED_ROOT := "res://ai_generated/"
 
@@ -17,6 +19,7 @@ var _refine: Button
 var _feedback: LineEdit
 var _include_context: CheckBox
 var _context_paths: TextEdit
+var _auto_repair: CheckBox
 var _file_picker: OptionButton
 var _preview: TextEdit
 var _status: Label
@@ -28,6 +31,8 @@ var _submitted_task := ""
 var _submitted_mode := ""
 var _request_is_refinement := false
 var _draft_version := 0
+var _repair_attempts := 0
+var _initial_request_data: Dictionary = {}
 
 
 func _ready() -> void:
@@ -75,6 +80,11 @@ func _ready() -> void:
 	_context_paths.editable = false
 	add_child(_context_paths)
 	_include_context.toggled.connect(func(enabled: bool) -> void: _context_paths.editable = enabled)
+
+	_auto_repair = CheckBox.new()
+	_auto_repair.text = "Auto-repair invalid AI output (up to 2 paid retries)"
+	_auto_repair.button_pressed = true
+	add_child(_auto_repair)
 
 	_generate = Button.new()
 	_generate.text = "Generate new draft"
@@ -196,6 +206,8 @@ func _submit_request(refining: bool) -> void:
 		"Content-Type: application/json",
 		"Authorization: Bearer " + key,
 	])
+	_initial_request_data = request_data.duplicate(true)
+	_repair_attempts = 0
 	# Keep a previously reviewed candidate intact if a refinement fails.
 	_generate.disabled = true
 	_refine.disabled = true
@@ -226,9 +238,19 @@ func _on_request_completed(result: int, response_code: int, _headers: PackedStri
 		_status.text = "HTTP %d: %s; existing draft kept." % [response_code, failure.get("error", "Request rejected.")]
 		return
 
-	var parsed := Validator.parse_model_response(body.get_string_from_utf8())
+	var response_text := body.get_string_from_utf8()
+	var parsed := Validator.parse_model_response(response_text)
 	if not parsed["ok"]:
+		if _retry_invalid_draft(parsed["error"], response_text):
+			return
 		_status.text = "%s; existing draft kept." % parsed["error"]
+		return
+	var review := Quality.review_payload(parsed, _submitted_mode)
+	if not review["ok"]:
+		var problem: String = "\n".join(PackedStringArray(review["errors"]))
+		if _retry_invalid_draft(problem, response_text):
+			return
+		_status.text = "Draft rejected: %s; existing draft kept." % problem
 		return
 	_pending_files = parsed["files"]
 	_pending_summary = parsed["summary"]
@@ -242,7 +264,38 @@ func _on_request_completed(result: int, response_code: int, _headers: PackedStri
 	_file_picker.select(0)
 	_show_file(0)
 	_restore_controls()
-	_status.text = "Draft v%d: %d file(s). %s" % [_draft_version, _pending_files.size(), _pending_summary]
+	_status.text = "Draft v%d: %d file(s), %d warning(s). %s" % [_draft_version, _pending_files.size(), review["warnings"].size(), _pending_summary]
+
+
+
+func _retry_invalid_draft(problem: String, raw_reply: String) -> bool:
+	if not RepairPolicy.can_retry(_auto_repair.button_pressed, _repair_attempts):
+		return false
+	_repair_attempts += 1
+	# Start from the ORIGINAL task so malformed output cannot compound across retries.
+	var data := _initial_request_data.duplicate(true)
+	var messages: Array = data["messages"]
+	messages.append({
+		"role": "user",
+		"content": RepairPolicy.make_repair_message(problem, raw_reply),
+	})
+	var key := _api_key.text.strip_edges()
+	if key.is_empty():
+		_status.text = "Auto-repair cancelled: API key no longer available."
+		return false
+	var headers := PackedStringArray([
+		"Content-Type: application/json",
+		"Authorization: Bearer " + key,
+	])
+	var error := _request.request(ENDPOINT, headers, HTTPClient.METHOD_POST, JSON.stringify(data))
+	if error != OK:
+		_status.text = "Auto-repair could not start (error %d)." % error
+		return false
+	_generate.disabled = true
+	_refine.disabled = true
+	_apply.disabled = true
+	_status.text = "Validation failed: %s. AI repairing (attempt %d/%d)…" % [problem, _repair_attempts, RepairPolicy.MAX_REPAIRS]
+	return true
 
 
 func _show_file(index: int) -> void:
@@ -254,6 +307,10 @@ func _apply_files() -> void:
 	var validation := Validator.validate_payload({"summary": _pending_summary, "files": _pending_files})
 	if not validation["ok"]:
 		_status.text = validation["error"]
+		return
+	var review := Quality.review_payload(validation, _draft_mode)
+	if not review["ok"]:
+		_status.text = "Draft rejected: %s" % "; ".join(PackedStringArray(review["errors"]))
 		return
 	var files: Array = validation["files"]
 	# Prevent destination symlinks (including directory components).
@@ -292,6 +349,8 @@ func _apply_files() -> void:
 	_draft_task = ""
 	_draft_mode = ""
 	_draft_version = 0
+	_repair_attempts = 0
+	_initial_request_data.clear()
 	_refine.disabled = true
 	_apply.disabled = true
 	_file_picker.clear()
