@@ -50,6 +50,7 @@ const FieldCampfire = preload("res://scripts/shared/field_campfire.gd")
 const NoiseDecoy = preload("res://scripts/shared/noise_decoy.gd")
 const Fishing = preload("res://scripts/shared/fishing.gd")
 const FieldWater = preload("res://scripts/shared/field_water.gd")
+const FrontierStim = preload("res://scripts/shared/frontier_stim.gd")
 
 const WORKBENCH_POSITION := Vector2(9.0, 0.0)
 const WORKBENCH_RANGE := 6.0
@@ -88,6 +89,7 @@ class Player:
 	var guardian_timer: float = 0.0 # Session-only PvE frontline cooldown.
 	var guardian_brace: float = 0.0 # Short PvE-only defensive brace after a valid taunt.
 	var lake_drink_cooldown: float = 0.0 # Prevents lake hydration spam and relog bypass.
+	var stim_cooldown: float = 0.0 # Persistent server-authorized injection cooldown.
 	var input_budget: float = 0.0
 	var last_input_seq: int = 0
 	var attack_timer: float = 0.0
@@ -233,6 +235,7 @@ func character_data(player: Player) -> Dictionary:
 		"daily_bounty": player.daily_bounty.duplicate(true),
 		"renown": player.renown,
 		"rest_cooldown": player.rest_cooldown, "lake_drink_cooldown": player.lake_drink_cooldown,
+		"stim_cooldown": player.stim_cooldown,
 	}
 
 
@@ -284,6 +287,8 @@ func apply_character(player: Player, data: Dictionary) -> bool:
 	if not SaveValidation.finite_number(data.get("rest_cooldown", 0.0), 0.0, CampRest.COOLDOWN):
 		return false
 	if not SaveValidation.finite_number(data.get("lake_drink_cooldown", 0.0), 0.0, FieldWater.COOLDOWN_SECONDS):
+		return false
+	if not SaveValidation.finite_number(data.get("stim_cooldown", 0.0), 0.0, FrontierStim.COOLDOWN):
 		return false
 	if not (data.get("alive", true) is bool):
 		return false
@@ -344,6 +349,7 @@ func apply_character(player: Player, data: Dictionary) -> bool:
 	player.pvp_honor = int(data.get("pvp_honor", 0))
 	player.rest_cooldown = float(data.get("rest_cooldown", 0.0))
 	player.lake_drink_cooldown = float(data.get("lake_drink_cooldown", 0.0))
+	player.stim_cooldown = float(data.get("stim_cooldown", 0.0))
 	player.inventory = parsed_bag["inventory"]
 	player.stash = parsed_stash["inventory"]
 	player.kills = int(data.get("kills", 0))
@@ -1594,6 +1600,18 @@ func cmd_use(peer_id: int, item_id: String) -> Dictionary:
 	if data.is_empty() or player.inventory.count(item_id) < 1:
 		return {"ok": false, "reason": "not_carried"}
 	match data["kind"]:
+		"stimulant":
+			if item_id != FrontierStim.ITEM_ID:
+				return {"ok": false, "reason": "not_usable"}
+			var reason: String = FrontierStim.ready(player.survival,
+				player.combat_energy, player.stim_cooldown)
+			if reason != "":
+				return {"ok": false, "reason": reason,
+					"remaining": player.stim_cooldown}
+			if not player.inventory.remove(item_id, 1):
+				return {"ok": false, "reason": "not_carried"}
+			player.combat_energy = FrontierStim.apply(player.survival, player.combat_energy)
+			player.stim_cooldown = FrontierStim.COOLDOWN
 		"thermal":
 			if not player.survival.apply_thermal_wrap():
 				return {"ok": false, "reason": "already_warm"}
@@ -2244,6 +2262,7 @@ func _tick_players(delta: float) -> void:
 				not GuardianTaunt.melee_equipped(player.inventory)):
 			player.guardian_brace = 0.0
 		player.lake_drink_cooldown = maxf(0.0, player.lake_drink_cooldown - maxf(0.0, delta))
+		player.stim_cooldown = maxf(0.0, player.stim_cooldown - maxf(0.0, delta))
 		player.decoy_timer = maxf(0.0, player.decoy_timer - maxf(0.0, delta))
 		player.attack_timer = maxf(player.attack_timer - delta, 0.0)
 		player.skill_timer = maxf(player.skill_timer - delta, 0.0)
@@ -2828,7 +2847,7 @@ func snapshot_for(peer_id: int) -> Dictionary:
 			"guardian_brace": player.guardian_brace,
 			"dodge_cooldown": player.dodge_timer, "dodge_immunity": player.dodge_immunity,
 			"rest_cooldown": player.rest_cooldown,
-			"party_aid_cooldown": player.party_aid_timer,
+			"party_aid_cooldown": player.party_aid_timer, "stim_cooldown": player.stim_cooldown,
 			"weapon": player.inventory.weapon, "armor": player.inventory.armor,
 			"last_death_full_loot": player.last_death_full_loot,
 			"is_night": WorldCycle.is_night(time),
