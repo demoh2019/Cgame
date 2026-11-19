@@ -225,6 +225,11 @@ func skill(direction: Vector2) -> void:
 	net.c_skill.rpc_id(1, direction.x, direction.y)
 
 
+func dodge(direction: Vector2) -> void:
+	# Server owns the travel distance and cooldown; reconciliation handles positioning.
+	net.c_dodge.rpc_id(1, direction.x, direction.y)
+
+
 func loot(entity_id: int) -> void:
 	net.c_loot.rpc_id(1, entity_id)
 
