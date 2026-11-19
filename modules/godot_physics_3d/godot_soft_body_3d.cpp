@@ -37,6 +37,7 @@
 #include "servers/physics_softbody_bending_plasticity.h"
 #include "servers/physics_softbody_link_damping.h"
 #include "servers/physics_softbody_aero_lift.h"
+#include "servers/physics_softbody_aerodynamic_drag.h"
 #include "servers/physics_softbody_plasticity.h"
 #include "servers/physics_softbody_volume_safe.h"
 #include "servers/physics_xpbd_distance.h"
@@ -1629,7 +1630,7 @@ void GodotSoftBody3D::add_velocity(const Vector3 &p_velocity) {
 	}
 }
 
-void GodotSoftBody3D::apply_forces(const LocalVector<GodotArea3D *> &p_wind_areas) {
+void GodotSoftBody3D::apply_forces(const LocalVector<GodotArea3D *> &p_wind_areas, real_t p_delta) {
 	if (nodes.is_empty()) {
 		return;
 	}
@@ -1637,6 +1638,7 @@ void GodotSoftBody3D::apply_forces(const LocalVector<GodotArea3D *> &p_wind_area
 	const bool apply_pressure = pressure_coefficient > CMP_EPSILON;
 	const bool apply_wind = !p_wind_areas.is_empty();
 	const bool apply_drag = drag_coefficient > 0.0;
+	const real_t tangential_drag_ratio = get_space() ? get_space()->get_soft_body_tangential_drag_ratio() : real_t(0.0);
 	const real_t lift_coefficient = get_space() ? get_space()->get_soft_body_lift_coefficient() : real_t(0.0);
 	const bool apply_lift = lift_coefficient > 0.0;
 	if (!apply_pressure && !apply_wind && !apply_drag && !apply_lift) {
@@ -1666,12 +1668,12 @@ void GodotSoftBody3D::apply_forces(const LocalVector<GodotArea3D *> &p_wind_area
 				// Drag dissipates normal motion; lift is orthogonal to the flow.
 				const Vector3 face_velocity = (face.n[0]->v + face.n[1]->v + face.n[2]->v) * real_t(1.0 / 3.0);
 				if (apply_drag) {
-					// The -0.5 * Cd * area * vn * abs(vn) drag is shared by
-					// all three triangle nodes (rest area convention).
-					const real_t normal_speed = face.normal.dot(face_velocity);
-					if (Math::abs(normal_speed) > CMP_EPSILON) {
-						const real_t drag_per_node = -drag_coefficient * face.ra * real_t(1.0 / 6.0) * normal_speed * Math::abs(normal_speed);
-						node_force += face.normal * drag_per_node;
+					Vector3 drag_per_node;
+					const real_t inverse_mass_sum = face.n[0]->im + face.n[1]->im + face.n[2]->im;
+					if (physics_softbody_quadratic_aerodynamic_force(
+								face.normal, face_velocity, drag_coefficient, tangential_drag_ratio,
+								face.ra, p_delta, inverse_mass_sum, drag_per_node)) {
+						node_force += drag_per_node;
 					}
 				}
 				if (apply_lift) {
@@ -1786,7 +1788,7 @@ void GodotSoftBody3D::predict_motion(real_t p_delta) {
 	// Apply forces.
 	add_velocity(gravity * p_delta);
 	if (pressure_coefficient > CMP_EPSILON || !wind_areas.is_empty() || drag_coefficient > 0.0 || get_space()->get_soft_body_lift_coefficient() > 0.0) {
-		apply_forces(wind_areas);
+		apply_forces(wind_areas, p_delta);
 	}
 
 	// Avoid soft body from 'exploding' so use some upper threshold of maximum motion
