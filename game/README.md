@@ -953,3 +953,21 @@ profession alongside gathering, fishing, crafting and weapon mastery:
 
 Run `godot --headless --path game --script res://tests/run_all.gd` to
 execute `tests/test_scavenging.gd` along with the existing server suites.
+
+## Extinguishing a field campfire
+
+A survivor can now extinguish a **fire they own** by pressing **0** near it,
+or by choosing **Extinguish my nearby campfire** from the online inventory.
+The command is validated by the dedicated server: the fire must still be
+burning, the owner must be alive and within 3.2 metres, and account ownership
+must match. Authenticated owners retain this permission after reconnecting
+with a different network peer ID; another account reusing that peer ID cannot
+steal it. Guests may manage their fires in the same session.
+
+Extinguishing removes the shared warmth immediately and frees the temporary
+campfire slot. It **does not refund fuel**, making repeated build/extinguish
+cycles a resource sink rather than a duplication strategy. Owner account IDs
+remain server-only and are never replicated to nearby players. A separate
+`tests/test_campfire_extinguish.gd` suite covers authorization, distance,
+reconnect ownership, no refunds and replay resistance. No engine C++ change
+was necessary for these game rules.

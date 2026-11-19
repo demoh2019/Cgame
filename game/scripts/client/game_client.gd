@@ -308,6 +308,11 @@ func refuel_campfire(id: int) -> void:
 		net.c_refuel_campfire.rpc_id(1, id)
 
 
+func extinguish_campfire(id: int) -> void:
+	if id >= 0:
+		net.c_extinguish_campfire.rpc_id(1, id)
+
+
 func nearest_barricade(point: Vector3, radius: float = 3.0) -> int:
 	var nearest := -1
 	var best := radius

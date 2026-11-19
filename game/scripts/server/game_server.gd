@@ -849,7 +849,7 @@ func cmd_light_campfire(peer_id: int, x: float, z: float) -> Dictionary:
 		return {"ok": false, "reason": "world_limit"}
 	var owned := 0
 	for fire in campfires.values():
-		if int(fire["owner"]) == peer_id:
+		if Structures.can_manage(fire, peer_id, player.user_id):
 			owned += 1
 	if owned >= FieldCampfire.MAX_PER_OWNER:
 		return {"ok": false, "reason": "owner_limit"}
@@ -872,7 +872,8 @@ func cmd_light_campfire(peer_id: int, x: float, z: float) -> Dictionary:
 		player.inventory.remove(str(item_id), int(FieldCampfire.COST[item_id]))
 	var id := new_id()
 	campfires[id] = {"id": id, "x": x, "y": world.height_at(x, z), "z": z,
-		"owner": peer_id, "expires": time + FieldCampfire.DURATION}
+		"owner": peer_id, "owner_account": player.user_id,
+		"expires": time + FieldCampfire.DURATION}
 	player.dirty_inventory = true
 	player.dirty_character = true
 	return {"ok": true, "id": id, "seconds": FieldCampfire.DURATION}
@@ -880,6 +881,26 @@ func cmd_light_campfire(peer_id: int, x: float, z: float) -> Dictionary:
 
 ## Nearby survivors may cooperatively fuel an existing fire. The server
 ## validates its deadline and charges the correct backpack before extending it.
+## The account/session owner can extinguish an ephemeral campfire early.
+## Fuel is already burned and never refunded; strangers cannot delete the
+## group's heating by guessing a network entity ID.
+func cmd_extinguish_campfire(peer_id: int, id: int) -> Dictionary:
+	var player: Player = players.get(peer_id)
+	if player == null or not _alive(player):
+		return {"ok": false, "reason": "dead"}
+	var camp: Dictionary = campfires.get(id, {})
+	if camp.is_empty() or float(camp["expires"]) <= time:
+		return {"ok": false, "reason": "no_fire"}
+	if not Structures.can_manage(camp, peer_id, player.user_id):
+		return {"ok": false, "reason": "not_owner"}
+	if not Structures.within_range(Vector2(player.position.x, player.position.z),
+			Vector2(float(camp["x"]), float(camp["z"])), FieldCampfire.REFUEL_RANGE):
+		return {"ok": false, "reason": "out_of_range"}
+	campfires.erase(id)
+	events.append({"type": "campfire_extinguished", "id": id, "peer": peer_id})
+	return {"ok": true, "id": id}
+
+
 func cmd_refuel_campfire(peer_id: int, id: int) -> Dictionary:
 	var player: Player = players.get(peer_id)
 	if player == null or not _alive(player):

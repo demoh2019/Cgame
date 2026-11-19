@@ -166,6 +166,16 @@ func _build() -> void:
 		else:
 			client.refuel_campfire(fire_id))
 	inventory_box.add_child(refuel_button)
+	var extinguish_button := Button.new()
+	extinguish_button.name = "ExtinguishCampfire"
+	extinguish_button.text = "Extinguish my nearby campfire (no refund; 0)"
+	extinguish_button.pressed.connect(func() -> void:
+		var fire_id: int = client.nearest_campfire(client.display_position())
+		if fire_id == -1:
+			say("No campfire nearby.")
+		else:
+			client.extinguish_campfire(fire_id))
+	inventory_box.add_child(extinguish_button)
 	_inventory_grid = GridContainer.new()
 	_inventory_grid.columns = 4
 	inventory_box.add_child(_inventory_grid)
@@ -459,6 +469,12 @@ func _sell_one_material() -> void:
 
 
 func _on_result(kind: String, data: Dictionary) -> void:
+	if kind == "extinguish":
+		if bool(data.get("ok", false)):
+			say("Your campfire was extinguished. No fuel refunded.")
+		else:
+			say("Extinguish denied: " + str(data.get("reason", "rejected")))
+		return
 	if kind == "refuel":
 		if bool(data.get("ok", false)):
 			say("Campfire fueled: %d seconds of warmth remain." % int(ceil(float(data.get("remaining", 0.0)))))

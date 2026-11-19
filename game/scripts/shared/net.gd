@@ -255,6 +255,13 @@ func c_refuel_campfire(fire_id: int) -> void:
 
 
 @rpc("any_peer", "reliable")
+func c_extinguish_campfire(fire_id: int) -> void:
+	var peer := multiplayer.get_remote_sender_id()
+	if _allowed(peer):
+		s_result.rpc_id(peer, "extinguish", sim.cmd_extinguish_campfire(peer, fire_id))
+
+
+@rpc("any_peer", "reliable")
 func c_repair(structure_id: int) -> void:
 	var peer := multiplayer.get_remote_sender_id()
 	if _allowed(peer):
