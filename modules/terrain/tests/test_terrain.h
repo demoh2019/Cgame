@@ -34,6 +34,7 @@
 
 #include "core/io/image.h"
 #include "scene/resources/mesh.h"
+#include "scene/resources/packed_scene.h"
 #include "tests/test_macros.h"
 
 namespace TestTerrain3D {
@@ -120,7 +121,7 @@ TEST_CASE("[Terrain3D] Cell size scales vertices without modifying heights") {
 TEST_CASE("[Terrain3D] Invalid cell size and height data do not corrupt terrain") {
 	HeightmapTerrain3D *terrain = memnew(HeightmapTerrain3D);
 	const PackedFloat32Array initial_heights = terrain->get_height_data();
-	const float invalid_sizes[] = { 0.0f, -1.0f, Math::INF, -Math::INF };
+	const float invalid_sizes[] = { 0.0f, -1.0f, INF, -INF };
 	ERR_PRINT_OFF
 	for (float size : invalid_sizes) {
 		terrain->set_cell_size(size);
@@ -131,7 +132,7 @@ TEST_CASE("[Terrain3D] Invalid cell size and height data do not corrupt terrain"
 	terrain->set_height_data(wrong_size);
 	CHECK(terrain->get_height_data() == initial_heights);
 	PackedFloat32Array invalid_heights = initial_heights;
-	invalid_heights.set(0, Math::INF);
+	invalid_heights.set(0, INF);
 	terrain->set_height_data(invalid_heights);
 	CHECK(terrain->get_height_data() == initial_heights);
 	ERR_PRINT_ON
@@ -345,9 +346,205 @@ TEST_CASE("[Terrain3D] Invalid erosion parameters never alter the heightfield") 
 	terrain->erode_thermal(1, -1, 1);
 	terrain->erode_thermal(1, 0, -1);
 	terrain->erode_thermal(1, 0, 2);
-	terrain->erode_thermal(1, Math::INF, 1);
+	terrain->erode_thermal(1, INF, 1);
 	ERR_PRINT_ON
 	CHECK(terrain->get_height_data() == original);
+	memdelete(terrain);
+}
+
+
+TEST_CASE("[Terrain3D] Scripting API exposes all terrain editing methods") {
+	HeightmapTerrain3D *terrain = memnew(HeightmapTerrain3D);
+	CHECK(terrain->has_method("sculpt"));
+	CHECK(terrain->has_method("smooth"));
+	CHECK(terrain->has_method("erode_thermal"));
+	CHECK(terrain->has_method("paint_color"));
+	CHECK(terrain->has_method("import_heightmap"));
+	CHECK(terrain->has_method("sample_height"));
+	memdelete(terrain);
+}
+
+TEST_CASE("[Terrain3D] Invalid coordinate edits do not modify vertex heights") {
+	HeightmapTerrain3D *terrain = memnew(HeightmapTerrain3D);
+	terrain->set_grid_size(Vector2i(2, 3));
+	const PackedFloat32Array before = terrain->get_height_data();
+	ERR_PRINT_OFF
+	terrain->set_height_at(-1, 0, 10);
+	terrain->set_height_at(2, 0, 10);
+	terrain->set_height_at(0, 3, 10);
+	terrain->set_height_at(0, -1, 10);
+	terrain->set_height_at(1, 2, INF);
+	ERR_PRINT_ON
+	CHECK(terrain->get_height_data() == before);
+	memdelete(terrain);
+}
+
+TEST_CASE("[Terrain3D] Bilinear sampling is correct at non-square grid borders") {
+	HeightmapTerrain3D *terrain = memnew(HeightmapTerrain3D);
+	terrain->set_grid_size(Vector2i(4, 2));
+	terrain->set_height_at(3, 0, 12);
+	terrain->set_height_at(3, 1, 24);
+	CHECK(terrain->sample_height(Vector2(3, 0)) == 12);
+	CHECK(terrain->sample_height(Vector2(3, 1)) == 24);
+	CHECK(Math::abs(terrain->sample_height(Vector2(3, 0.5)) - 18) < 0.001);
+	CHECK(terrain->sample_height(Vector2(0, 0)) == 0);
+	memdelete(terrain);
+}
+
+TEST_CASE("[Terrain3D] Invalid height sample coordinates are rejected") {
+	HeightmapTerrain3D *terrain = memnew(HeightmapTerrain3D);
+	const PackedFloat32Array before = terrain->get_height_data();
+	ERR_PRINT_OFF
+	CHECK(terrain->sample_height(Vector2(-1, 2)) == 0);
+	CHECK(terrain->sample_height(Vector2(33, 0)) == 0);
+	CHECK(terrain->sample_height(Vector2(INF, 0)) == 0);
+	CHECK(terrain->sample_height(Vector2(0, INF)) == 0);
+	ERR_PRINT_ON
+	CHECK(terrain->get_height_data() == before);
+	memdelete(terrain);
+}
+
+TEST_CASE("[Terrain3D] Terrain mesh UVs cover corners and indices stay in bounds") {
+	HeightmapTerrain3D *terrain = memnew(HeightmapTerrain3D);
+	terrain->set_grid_size(Vector2i(7, 3));
+	const Array arrays = terrain->get_mesh()->surface_get_arrays(0);
+	PackedVector2Array uvs = arrays[Mesh::ARRAY_TEX_UV];
+	PackedInt32Array indices = arrays[Mesh::ARRAY_INDEX];
+	CHECK(uvs.size() == 21);
+	CHECK(uvs[0] == Vector2());
+	CHECK(uvs[6].is_equal_approx(Vector2(1, 0)));
+	CHECK(uvs[14].is_equal_approx(Vector2(0, 1)));
+	CHECK(uvs[20].is_equal_approx(Vector2(1, 1)));
+	CHECK(indices.size() == 6 * 2 * 6);
+	for (int index : indices) {
+		CHECK(index >= 0);
+		CHECK(index < 21);
+	}
+	memdelete(terrain);
+}
+
+TEST_CASE("[Terrain3D] Color painting respects opacity limits") {
+	HeightmapTerrain3D *terrain = memnew(HeightmapTerrain3D);
+	terrain->set_grid_size(Vector2i(3, 3));
+	const PackedColorArray original = terrain->get_color_data();
+	terrain->paint_color(Vector2(1, 1), 2, Color(0, 0, 0), 0);
+	CHECK(terrain->get_color_data() == original);
+	terrain->paint_color(Vector2(1, 1), 2, Color(0, 0, 0), 2);
+	CHECK(terrain->get_color_data()[4] == Color(0, 0, 0));
+	CHECK(terrain->get_color_data()[0] != Color(0, 0, 0));
+	memdelete(terrain);
+}
+
+TEST_CASE("[Terrain3D] Vertex painting does not change height samples") {
+	HeightmapTerrain3D *terrain = memnew(HeightmapTerrain3D);
+	terrain->set_grid_size(Vector2i(3, 3));
+	terrain->set_height_at(1, 1, 8);
+	const PackedFloat32Array original_heights = terrain->get_height_data();
+	terrain->paint_color(Vector2(1, 1), 3, Color(0.1, 0.2, 0.3), 1);
+	CHECK(terrain->get_height_data() == original_heights);
+	memdelete(terrain);
+}
+
+TEST_CASE("[Terrain3D] Nonfinite brush centers do not mutate terrain arrays") {
+	HeightmapTerrain3D *terrain = memnew(HeightmapTerrain3D);
+	const PackedFloat32Array heights = terrain->get_height_data();
+	const PackedColorArray colors = terrain->get_color_data();
+	ERR_PRINT_OFF
+	terrain->sculpt(Vector2(INF, 1), 2, 4);
+	terrain->smooth(Vector2(1, INF), 2, 1);
+	terrain->paint_color(Vector2(INF, INF), 2, Color(0, 0, 0), 1);
+	ERR_PRINT_ON
+	CHECK(terrain->get_height_data() == heights);
+	CHECK(terrain->get_color_data() == colors);
+	memdelete(terrain);
+}
+
+TEST_CASE("[Terrain3D] Heightmap import preserves vertex colors when dimensions match") {
+	HeightmapTerrain3D *terrain = memnew(HeightmapTerrain3D);
+	terrain->set_grid_size(Vector2i(2, 3));
+	terrain->paint_color(Vector2(0, 0), 1, Color(1, 0, 0), 1);
+	const PackedColorArray before = terrain->get_color_data();
+	Ref<Image> image = Image::create_empty(2, 3, false, Image::FORMAT_RGBA8);
+	REQUIRE(image.is_valid());
+	image->fill(Color(0.5, 0.5, 0.5));
+	terrain->import_heightmap(image, -5, 5);
+	CHECK(terrain->get_grid_size() == Vector2i(2, 3));
+	CHECK(terrain->get_color_data() == before);
+	CHECK(Math::abs(terrain->get_height_at(1, 2)) < 0.2);
+	memdelete(terrain);
+}
+
+TEST_CASE("[Terrain3D] Image resize discards old paint but retains image heights") {
+	HeightmapTerrain3D *terrain = memnew(HeightmapTerrain3D);
+	terrain->set_grid_size(Vector2i(2, 2));
+	terrain->paint_color(Vector2(0, 0), 1, Color(0, 0, 0), 1);
+	Ref<Image> image = Image::create_empty(3, 4, false, Image::FORMAT_RGBA8);
+	REQUIRE(image.is_valid());
+	image->fill(Color(1, 1, 1));
+	terrain->import_heightmap(image, 0, 8);
+	CHECK(terrain->get_grid_size() == Vector2i(3, 4));
+	CHECK(terrain->get_height_data().size() == 12);
+	CHECK(terrain->get_color_data().size() == 12);
+	CHECK(terrain->get_height_at(2, 3) == 8);
+	for (Color color : terrain->get_color_data()) {
+		CHECK(color == Color(1, 1, 1));
+	}
+	memdelete(terrain);
+}
+
+TEST_CASE("[Terrain3D] Malformed heightmap import does not change dimensions or heights") {
+	HeightmapTerrain3D *terrain = memnew(HeightmapTerrain3D);
+	terrain->set_grid_size(Vector2i(2, 2));
+	terrain->set_height_at(0, 1, 3);
+	const PackedFloat32Array before = terrain->get_height_data();
+	const Vector2i size_before = terrain->get_grid_size();
+	Ref<Image> tiny = Image::create_empty(1, 2, false, Image::FORMAT_RGBA8);
+	Ref<Image> huge = Image::create_empty(258, 2, false, Image::FORMAT_RGBA8);
+	Ref<Image> valid = Image::create_empty(2, 2, false, Image::FORMAT_RGBA8);
+	ERR_PRINT_OFF
+	terrain->import_heightmap(tiny, 0, 1);
+	terrain->import_heightmap(huge, 0, 1);
+	terrain->import_heightmap(valid, 9, 2);
+	terrain->import_heightmap(valid, -INF, 2);
+	ERR_PRINT_ON
+	CHECK(terrain->get_grid_size() == size_before);
+	CHECK(terrain->get_height_data() == before);
+	memdelete(terrain);
+}
+
+TEST_CASE("[Terrain3D] PackedScene retains height and paint data after instantiation") {
+	HeightmapTerrain3D *terrain = memnew(HeightmapTerrain3D);
+	terrain->set_grid_size(Vector2i(4, 2));
+	terrain->set_cell_size(3);
+	terrain->set_height_at(3, 1, 8);
+	terrain->paint_color(Vector2(1, 0), 0.6, Color(0, 0, 1), 1);
+	PackedScene packed;
+	CHECK(packed.pack(terrain) == OK);
+	Node *node = packed.instantiate();
+	REQUIRE(node != nullptr);
+	HeightmapTerrain3D *restored = Object::cast_to<HeightmapTerrain3D>(node);
+	REQUIRE(restored != nullptr);
+	CHECK(restored->get_grid_size() == Vector2i(4, 2));
+	CHECK(restored->get_cell_size() == 3);
+	CHECK(restored->get_height_data() == terrain->get_height_data());
+	CHECK(restored->get_color_data() == terrain->get_color_data());
+	CHECK(restored->get_mesh().is_valid());
+	CHECK(restored->get_mesh()->get_surface_count() == 1);
+	memdelete(restored);
+	memdelete(terrain);
+}
+
+TEST_CASE("[Terrain3D] Multiple erosion iterations preserve total height") {
+	HeightmapTerrain3D *terrain = memnew(HeightmapTerrain3D);
+	terrain->set_grid_size(Vector2i(7, 5));
+	terrain->set_height_at(3, 2, 20);
+	terrain->set_height_at(1, 1, 7);
+	terrain->erode_thermal(32, 0.2, 0.35);
+	real_t total = 0;
+	for (float height : terrain->get_height_data()) {
+		total += height;
+	}
+	CHECK(Math::abs(total - 27.0) < 0.01);
 	memdelete(terrain);
 }
 
