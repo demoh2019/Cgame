@@ -1349,13 +1349,16 @@ void FindInFilesResultsPanel::_apply_replaces_in_file(const String &p_fpath, con
 	int placeholder;
 	int repl_line_number = 0;
 
+	// The Vector is never resized while applying matches. Acquire its writable
+	// pointer once rather than checking copy-on-write for every replacement.
+	String *lines_write = lines.ptrw();
 	// Iterate backwards so changes don't affect the location of the next change in the same line.
 	for (int i = p_locations.size() - 1; i >= 0; i--) {
 		const Result &location = p_locations[i];
 		repl_line_number = location.line_number - 1;
 
 		if (repl_line_number >= 0 && repl_line_number < lines.size()) {
-			String &line = lines.write[repl_line_number];
+			String &line = lines_write[repl_line_number];
 			if (find_next(line, search_text, location.begin, finder->is_match_case(), finder->is_whole_words(), placeholder, placeholder)) {
 				line = line.left(location.begin) + p_new_text + line.substr(location.end);
 			} else {
