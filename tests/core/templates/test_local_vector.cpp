@@ -274,7 +274,7 @@ TEST_CASE("[LocalVector] Trivial inserts and erases match std::vector through ra
 		seed ^= seed << 13;
 		seed ^= seed >> 17;
 		seed ^= seed << 5;
-		if ((seed & 3) != 0 && reference.size() < 256 || reference.empty()) {
+		if (((seed & 3) != 0 && reference.size() < 256) || reference.empty()) {
 			const size_t at = (seed >> 8) % (reference.size() + 1);
 			const int value = int(seed >> 10);
 			actual.insert(uint32_t(at), value);
