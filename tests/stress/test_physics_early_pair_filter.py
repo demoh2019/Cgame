@@ -57,6 +57,17 @@ class PhysicsEarlyPairFilterContracts(unittest.TestCase):
                 self.assertIn("body->add_exception(p_body_b);", server)
                 self.assertIn("body->remove_exception(p_body_b);", server)
 
+    def test_3d_rigid_soft_exception_pairs_are_filtered_early(self):
+        broadphase = self.files["3d", "godot_broad_phase"]
+        server = self.files["3d", "godot_physics_server"]
+        self.assertIn('#include "godot_soft_body_3d.h"', broadphase)
+        self.assertIn("GodotCollisionObject3D::TYPE_SOFT_BODY", broadphase)
+        self.assertIn("!body->has_exception(soft_body->get_self())", broadphase)
+        self.assertIn("!soft_body->has_exception(body->get_self())", broadphase)
+        self.assertEqual(server.count("soft_body->refresh_collision_pairs();"), 2)
+        self.assertIn("soft_body->add_exception(p_body_b);", server)
+        self.assertIn("soft_body->remove_exception(p_body_b);", server)
+
     def test_stress_cases_check_both_directions_without_motion(self):
         runner = (STRESS / "run.py").read_text(encoding="utf-8")
         dispatcher = (STRESS / "stress.gd").read_text(encoding="utf-8")
