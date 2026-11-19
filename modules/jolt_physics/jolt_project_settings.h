@@ -49,6 +49,9 @@ public:
 	inline static bool generate_all_kinematic_contacts;
 	inline static float penetration_slop;
 	inline static float speculative_contact_distance;
+	inline static float max_penetration_correction_distance;
+	inline static float contact_manifold_merge_normal_cos;
+	inline static float contact_warm_start_distance_sq;
 	inline static float baumgarte_stabilization_factor;
 	inline static float soft_body_point_radius;
 	inline static float bounce_velocity_threshold;
