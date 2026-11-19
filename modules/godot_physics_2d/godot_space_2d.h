@@ -133,6 +133,7 @@ private:
 	real_t contact_bias = 0.0;
 	real_t max_contact_push_speed = 0.0; // 0: unlimited (legacy behavior).
 	real_t max_linear_velocity = 0.0; // Opt-in rigid speed limit, 0 disables.
+	real_t max_angular_velocity = 0.0; // Opt-in angular speed limit, rad/s; 0 disables.
 	real_t warm_start_coefficient = 1.0;
 	bool implicit_damping = false; // Box2D-style time-step-stable damping; disabled by default.
 	// Bullet-style angular rolling resistance; zero leaves the classic solver unchanged.
@@ -203,6 +204,7 @@ public:
 	_FORCE_INLINE_ real_t limit_contact_bias(real_t p_bias) const { return godot_physics_limit_contact_bias(p_bias, max_contact_push_speed); }
 	_FORCE_INLINE_ real_t get_warm_start_coefficient() const { return warm_start_coefficient; }
 	_FORCE_INLINE_ real_t get_max_linear_velocity() const { return max_linear_velocity; }
+	_FORCE_INLINE_ real_t get_max_angular_velocity() const { return max_angular_velocity; }
 	_FORCE_INLINE_ bool is_implicit_damping_enabled() const { return implicit_damping; }
 	_FORCE_INLINE_ real_t get_rolling_friction() const { return rolling_friction; }
 	_FORCE_INLINE_ real_t get_restitution_velocity_threshold() const { return restitution_velocity_threshold; }

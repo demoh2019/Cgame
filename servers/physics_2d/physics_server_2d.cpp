@@ -378,6 +378,8 @@ PhysicsServer2D::PhysicsServer2D() {
 	GLOBAL_DEF(PropertyInfo(Variant::FLOAT, "physics/2d/solver/max_contact_push_speed", PROPERTY_HINT_RANGE, "0,1000,1,or_greater,suffix:px/s"), 0.0);
 	// Rapier-style bounded dynamic linear speed; legacy behavior is unlimited.
 	GLOBAL_DEF(PropertyInfo(Variant::FLOAT, "physics/2d/solver/max_linear_velocity", PROPERTY_HINT_RANGE, "0,10000,1,or_greater,suffix:px/s"), 0.0);
+	// Jolt-style maximum dynamic angular velocity, 0 means unlimited.
+	GLOBAL_DEF(PropertyInfo(Variant::FLOAT, "physics/2d/solver/max_angular_velocity", PROPERTY_HINT_RANGE, U"0,3600,1,radians_as_degrees,or_greater,suffix:°/s"), 0.0);
 	// Like Rapier's warmstart coefficient: scale cached contact impulses
 	// on each step (0 disables warm starting, 1 preserves legacy behavior).
 	GLOBAL_DEF(PropertyInfo(Variant::FLOAT, "physics/2d/solver/warm_start_coefficient", PROPERTY_HINT_RANGE, "0,1,0.01"), 1.0);
