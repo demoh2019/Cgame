@@ -53,6 +53,17 @@ public:
 	int get_count() const { return notifications; }
 };
 
+static bool has_property(Object *p_owner, const StringName &p_property) {
+	List<PropertyInfo> properties;
+	p_owner->get_property_list(&properties);
+	for (const PropertyInfo &property : properties) {
+		if (property.name == p_property) {
+			return true;
+		}
+	}
+	return false;
+}
+
 static String get_property_hint(Object *p_owner, const StringName &p_property) {
 	List<PropertyInfo> properties;
 	p_owner->get_property_list(&properties);
@@ -132,7 +143,7 @@ TEST_CASE("[Editor][GDScriptReload] Remains safe after an owner is destroyed") {
 	script->set_source_code("@tool\nextends Node\n@export var item: String = \"B\"\n@export var count: int = 1\n");
 	CHECK_EQ(script->reload(true), OK);
 	CHECK(probe->get_count() >= 1);
-	CHECK(get_property_hint(remaining, SNAME("count")).is_empty() == false);
+	CHECK(has_property(remaining, SNAME("count")));
 
 	memdelete(remaining);
 	memdelete(probe);
