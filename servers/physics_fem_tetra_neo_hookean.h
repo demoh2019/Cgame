@@ -179,10 +179,10 @@ _FORCE_INLINE_ bool physics_fem_tetra_energy_gradient(
 			}
 		}
 	}
-	const Vector3 g0(real_t(grad[0][0]), real_t(grad[0][1]), real_t(grad[0][2]));
-	const Vector3 g1(real_t(grad[1][0]), real_t(grad[1][1]), real_t(grad[1][2]));
-	const Vector3 g2(real_t(grad[2][0]), real_t(grad[2][1]), real_t(grad[2][2]));
-	const Vector3 g3(real_t(grad[3][0]), real_t(grad[3][1]), real_t(grad[3][2]));
+	const Vector3 g0 = Vector3(real_t(grad[0][0]), real_t(grad[0][1]), real_t(grad[0][2]));
+	const Vector3 g1 = Vector3(real_t(grad[1][0]), real_t(grad[1][1]), real_t(grad[1][2]));
+	const Vector3 g2 = Vector3(real_t(grad[2][0]), real_t(grad[2][1]), real_t(grad[2][2]));
+	const Vector3 g3 = Vector3(real_t(grad[3][0]), real_t(grad[3][1]), real_t(grad[3][2]));
 	if (!g0.is_finite() || !g1.is_finite() || !g2.is_finite() || !g3.is_finite()) {
 		return false;
 	}

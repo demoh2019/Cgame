@@ -138,9 +138,9 @@ _FORCE_INLINE_ bool physics_softbody_damp_membrane(
 		return false;
 	}
 
-	const Vector3 next_a(real_t(v[0][0]), real_t(v[0][1]), real_t(v[0][2]));
-	const Vector3 next_b(real_t(v[1][0]), real_t(v[1][1]), real_t(v[1][2]));
-	const Vector3 next_c(real_t(v[2][0]), real_t(v[2][1]), real_t(v[2][2]));
+	const Vector3 next_a = Vector3(real_t(v[0][0]), real_t(v[0][1]), real_t(v[0][2]));
+	const Vector3 next_b = Vector3(real_t(v[1][0]), real_t(v[1][1]), real_t(v[1][2]));
+	const Vector3 next_c = Vector3(real_t(v[2][0]), real_t(v[2][1]), real_t(v[2][2]));
 	if (!next_a.is_finite() || !next_b.is_finite() || !next_c.is_finite()) {
 		return false;
 	}
