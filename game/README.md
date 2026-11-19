@@ -276,3 +276,27 @@ testing is still required after any upstream physics API changes.
 
 
 
+
+## Reclaiming and rebuilding a safe outpost
+
+The server supports **owner-only dismantling** of a nearby barricade: press **X**
+while facing a wall within 3 metres in the local preview, or use the
+"Dismantle nearby barricade" button inside the online client's inventory.
+An intact or mostly intact structure returns 2 wood T1 + 1 stone T1;
+a severely damaged wall returns 1 wood T1. You can never recover the full
+original construction cost, so repeated build/salvage cannot create materials.
+
+`GameServer.cmd_dismantle` checks that the survivor is alive, owns the wall
+and is physically near it, then simulates the entire refund in a copy of their
+backpack. If even one recovered item cannot fit, **nothing changes**. On success,
+the wall and its movement blocker are removed together; network snapshots
+stop exposing it, and the inventory is marked for server persistence.
+
+Authenticated account ownership is now independent of ephemeral network peer
+IDs for *new* barricades: reconnecting to the same account restores repair and
+dismantle permissions, and a different account cannot hijack an old peer ID.
+Guest walls remain peer/session-owned. Account identities are never included in
+public structure snapshots. This does not yet make barricades durable across
+world-server restarts; server-side world persistence is a separate milestone.
+
+Tests: `game/tests/test_dismantle.gd` in the existing headless suite.

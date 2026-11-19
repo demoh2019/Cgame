@@ -221,6 +221,21 @@ func repair(id: int) -> void:
 	net.c_repair.rpc_id(1, id)
 
 
+func dismantle(id: int) -> void:
+	net.c_dismantle.rpc_id(1, id)
+
+
+func nearest_barricade(point: Vector3, radius: float = 3.0) -> int:
+	var nearest := -1
+	var best := radius
+	for structure in barricades.values():
+		var d := Vector2(point.x - float(structure["x"]), point.z - float(structure["z"])).length()
+		if d < best:
+			best = d
+			nearest = int(structure["id"])
+	return nearest
+
+
 func drink() -> void:
 	net.c_drink.rpc_id(1)
 

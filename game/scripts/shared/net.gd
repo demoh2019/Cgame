@@ -241,6 +241,13 @@ func c_repair(structure_id: int) -> void:
 
 
 @rpc("any_peer", "reliable")
+func c_dismantle(structure_id: int) -> void:
+	var peer := multiplayer.get_remote_sender_id()
+	if _allowed(peer):
+		s_result.rpc_id(peer, "dismantle", sim.cmd_dismantle(peer, structure_id))
+
+
+@rpc("any_peer", "reliable")
 func c_stash(item_id: String, count: int, deposit: bool) -> void:
 	var peer := multiplayer.get_remote_sender_id()
 	if _allowed(peer):

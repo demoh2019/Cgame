@@ -428,7 +428,7 @@ func cmd_build(peer_id: int, x: float, z: float) -> Dictionary:
 		return {"ok": false, "reason": "world_limit"}
 	var owned := 0
 	for item in barricades.values():
-		if int(item["owner"]) == peer_id:
+		if Structures.can_manage(item, peer_id, player.user_id):
 			owned += 1
 	if owned >= Structures.MAX_PER_OWNER:
 		return {"ok": false, "reason": "owner_limit"}
@@ -451,7 +451,8 @@ func cmd_build(peer_id: int, x: float, z: float) -> Dictionary:
 		player.inventory.remove(item_id, int(Structures.COST[item_id]))
 	var id := new_id()
 	var item := {"id": id, "x": x, "y": world.height_at(x, z), "z": z,
-		"hp": Structures.MAX_HEALTH, "owner": peer_id}
+		"hp": Structures.MAX_HEALTH, "owner": peer_id,
+		"owner_account": player.user_id}
 	barricades[id] = item
 	world.add_dynamic_blocker(id, x, z, Structures.RADIUS)
 	player.dirty_inventory = true
@@ -467,7 +468,7 @@ func cmd_repair(peer_id: int, id: int) -> Dictionary:
 	var item: Dictionary = barricades.get(id, {})
 	if item.is_empty():
 		return {"ok": false, "reason": "no_structure"}
-	if int(item["owner"]) != peer_id:
+	if not Structures.can_manage(item, peer_id, player.user_id):
 		return {"ok": false, "reason": "not_owner"}
 	var origin := Vector2(player.position.x, player.position.z)
 	var target := Vector2(float(item["x"]), float(item["z"]))
@@ -484,6 +485,37 @@ func cmd_repair(peer_id: int, id: int) -> Dictionary:
 	player.dirty_inventory = true
 	player.dirty_character = true
 	return {"ok": true, "id": id, "hp": float(item["hp"])}
+
+
+## Owner-only, local, all-or-nothing structure salvage.
+## Never remove a world collider until the inventory accepts the full refund.
+func cmd_dismantle(peer_id: int, id: int) -> Dictionary:
+	var player: Player = players.get(peer_id)
+	if player == null or not _alive(player):
+		return {"ok": false, "reason": "dead"}
+	var structure: Dictionary = barricades.get(id, {})
+	if structure.is_empty():
+		return {"ok": false, "reason": "no_structure"}
+	if not Structures.can_manage(structure, peer_id, player.user_id):
+		return {"ok": false, "reason": "not_owner"}
+	var origin := Vector2(player.position.x, player.position.z)
+	var target := Vector2(float(structure["x"]), float(structure["z"]))
+	if not Structures.within_range(origin, target, Structures.DISMANTLE_RANGE):
+		return {"ok": false, "reason": "out_of_range"}
+	var salvage: Dictionary = Structures.salvage_for_health(float(structure["hp"]))
+	var trial = Inventory.new(player.inventory.slots.size())
+	trial.load_dict(player.inventory.to_dict())
+	for item_id in salvage:
+		if trial.add(str(item_id), int(salvage[item_id])) != 0:
+			return {"ok": false, "reason": "no_space"}
+	# Atomic gameplay commit: a failed attempt cannot erase a barricade or mint loot.
+	player.inventory.load_dict(trial.to_dict())
+	barricades.erase(id)
+	world.remove_dynamic_blocker(id)
+	player.dirty_inventory = true
+	player.dirty_character = true
+	events.append({"type": "barricade_dismantled", "id": id, "peer": peer_id})
+	return {"ok": true, "id": id, "salvage": salvage}
 
 
 func damage_barricade(id: int, damage: float) -> bool:

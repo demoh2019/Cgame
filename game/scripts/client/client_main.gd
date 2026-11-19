@@ -75,6 +75,7 @@ func _setup_actions() -> void:
 	_bind_key("survive_lake", KEY_R)
 	_bind_key("survive_build", KEY_U)
 	_bind_key("survive_repair", KEY_H)
+	_bind_key("survive_dismantle", KEY_X)
 	_bind_key("survive_vendor_buy", KEY_N)
 	_bind_key("survive_vendor_sell", KEY_V)
 	_bind_key("survive_bank", KEY_B)
@@ -572,6 +573,12 @@ func _unhandled_input(event: InputEvent) -> void:
 			_feedback = "Repair: aim toward a nearby barricade"
 		else:
 			_result("Repair barricade", sim.cmd_repair(LOCAL_PLAYER_ID, wall_id))
+	elif event.is_action_pressed("survive_dismantle"):
+		var wall_id := _nearest_barricade()
+		if wall_id == -1:
+			_feedback = "Dismantle: aim toward your nearby barricade"
+		else:
+			_result("Dismantle barricade", sim.cmd_dismantle(LOCAL_PLAYER_ID, wall_id))
 
 	elif event.is_action_pressed("survive_contract"):
 		var action := "claim" if Input.is_key_pressed(KEY_SHIFT) else "accept"
@@ -613,7 +620,7 @@ func _update_hud() -> void:
 	var recipe_id: String = _recipes[_recipe_index] if not _recipes.is_empty() else "bandage"
 	var recipe: Dictionary = Defs.recipes().get(recipe_id, {})
 	var near_bench: bool = Vector2(position.x, position.z).distance_to(GameServer.WORKBENCH_POSITION) < GameServer.WORKBENCH_RANGE
-	_instructions.text = "WASD move | Shift sprint | E gather | Q loot | F attack | G heavy strike | U build | H repair\nTab / Shift+Tab recipes | C craft | B stash | 1 food 2 water 3 heal 4 weapon 5 armor R lake\nN buy water / V sell salvage | M accept / Shift+M turn in (hub)\nCRAFT %s -> %s x%d | %s | inputs %s\n%s" % [
+	_instructions.text = "WASD move | Shift sprint | E gather | Q loot | F attack | G heavy strike | U build | H repair | X dismantle\nTab / Shift+Tab recipes | C craft | B stash | 1 food 2 water 3 heal 4 weapon 5 armor R lake\nN buy water / V sell salvage | M accept / Shift+M turn in (hub)\nCRAFT %s -> %s x%d | %s | inputs %s\n%s" % [
 		recipe_id, str(recipe.get("output", "")), int(recipe.get("count", 0)),
 		"WORKBENCH" if near_bench else "workbench at x=9, z=0",
 		str(recipe.get("inputs", {})), _feedback

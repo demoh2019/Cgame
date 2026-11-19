@@ -104,6 +104,15 @@ func _build() -> void:
 	var inventory_title := Label.new()
 	inventory_title.text = "Inventory: click = use/equip, right-click = bank one (at hub workbench)"
 	inventory_box.add_child(inventory_title)
+	var dismantle_button := Button.new()
+	dismantle_button.text = "Dismantle nearby barricade (partial salvage)"
+	dismantle_button.pressed.connect(func() -> void:
+		var id: int = client.nearest_barricade(client.display_position())
+		if id == -1:
+			say("No barricade within 3 metres.")
+		else:
+			client.dismantle(id))
+	inventory_box.add_child(dismantle_button)
 	_inventory_grid = GridContainer.new()
 	_inventory_grid.columns = 4
 	inventory_box.add_child(_inventory_grid)
@@ -236,6 +245,12 @@ func _sell_one_material() -> void:
 
 
 func _on_result(kind: String, data: Dictionary) -> void:
+	if kind == "dismantle":
+		if bool(data.get("ok", false)):
+			say("Barricade dismantled; recovered %s" % str(data.get("salvage", {})))
+		else:
+			say("Dismantle denied: %s" % str(data.get("reason", "rejected")))
+		return
 	if kind == "contract":
 		if bool(data.get("ok", false)):
 			say("Camp mission: " + str(data.get("title", data.get("active", "updated"))))
