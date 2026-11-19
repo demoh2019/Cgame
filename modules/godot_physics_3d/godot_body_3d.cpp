@@ -42,6 +42,7 @@
 #include "servers/physics_gyroscopic_3d.h"
 #include "servers/physics_fluid_buoyancy_3d.h"
 #include "servers/physics_fluid_convex_hull_3d.h"
+#include "servers/physics_fluid_box_3d.h"
 
 void GodotBody3D::_mass_properties_changed() {
 	if (get_space() && !mass_properties_update_list.in_list()) {
@@ -714,6 +715,20 @@ void GodotBody3D::integrate_forces(real_t p_step, bool p_defer_motion) {
 							}
 						} else {
 							// A tilted capsule has noncircular horizontal slices.
+							sample = godot_physics_fluid_sample_3d(bounds, shape_volume, water_height);
+						}
+					} else if (shape_type == PS3DE::SHAPE_BOX) {
+						// The world AABB overstates the immersed volume of a tilted
+						// box. Clip its six fixed tetrahedra instead, without
+						// constructing a hull mesh or allocating scratch buffers.
+						const GodotBoxShape3D *box = static_cast<const GodotBoxShape3D *>(shape);
+						real_t exact_box_volume = 0.0;
+						if (godot_physics_fluid_box_sample_3d(box->get_half_extents(),
+									shape_world, water_height, sample, exact_box_volume)) {
+							// Use the true volume for the immersed-fraction drag
+							// denominator, consistent with exact convex hulls.
+							total_fluid_shape_volume += exact_box_volume - shape_volume;
+						} else {
 							sample = godot_physics_fluid_sample_3d(bounds, shape_volume, water_height);
 						}
 					} else if (shape_type == PS3DE::SHAPE_CONVEX_POLYGON) {
