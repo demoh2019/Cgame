@@ -633,8 +633,8 @@ void GodotSoftBody3D::generate_bending_constraints(int p_distance) {
 	neighbors.resize(node_count);
 	HashSet<uint64_t> registered_edges;
 	for (const Link &link : links) {
-		const uint32_t a = link.n[0] - &nodes[0];
-		const uint32_t b = link.n[1] - &nodes[0];
+		const uint32_t a = uint32_t(link.n[0] - &nodes[0]);
+		const uint32_t b = uint32_t(link.n[1] - &nodes[0]);
 		if (a == b) {
 			continue;
 		}
