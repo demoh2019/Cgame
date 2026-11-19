@@ -595,6 +595,13 @@ PhysicsServer3D::PhysicsServer3D() {
 	// Opt-in for scenes where fewer broadphase pairs amortize extra math.
 	GLOBAL_DEF(PropertyInfo(Variant::BOOL, "physics/3d/solver/ccd_tight_rotational_bounds"), false);
 	GLOBAL_DEF(PropertyInfo(Variant::BOOL, "physics/3d/solver/implicit_damping"), false);
+	// Optional uniform fully submerged fluid approximation, inspired by
+	// Jolt's buoyancy/drag: 1 = neutral buoyancy, >1 floats. All effects
+	// are off by default. Drag coefficients are mass/inertia normalized.
+	GLOBAL_DEF(PropertyInfo(Variant::FLOAT, "physics/3d/solver/fluid_linear_drag", PROPERTY_HINT_RANGE, "0,100,0.01,or_greater"), 0.0);
+	GLOBAL_DEF(PropertyInfo(Variant::FLOAT, "physics/3d/solver/fluid_angular_drag", PROPERTY_HINT_RANGE, "0,100,0.01,or_greater"), 0.0);
+	GLOBAL_DEF(PropertyInfo(Variant::FLOAT, "physics/3d/solver/fluid_buoyancy", PROPERTY_HINT_RANGE, "0,2,0.01,or_greater"), 0.0);
+	GLOBAL_DEF(PropertyInfo(Variant::VECTOR3, "physics/3d/solver/fluid_flow_velocity"), Vector3());
 	// Reproduce free rotation of asymmetric bodies (Jolt-style gyroscopic term).
 	// Off by default because it changes angular motion and costs extra math.
 	GLOBAL_DEF(PropertyInfo(Variant::BOOL, "physics/3d/solver/gyroscopic_forces"), false);
