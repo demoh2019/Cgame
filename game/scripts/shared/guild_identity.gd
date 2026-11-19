@@ -12,8 +12,16 @@ static func normalize(info: Variant) -> Dictionary:
 	var guild_id: Variant = info.get("guild_id")
 	var guild_name: Variant = info.get("guild_name")
 	var rank: Variant = info.get("rank")
-	if typeof(guild_id) != TYPE_STRING or typeof(guild_name) != TYPE_STRING or typeof(rank) != TYPE_INT:
+	if typeof(guild_id) != TYPE_STRING or typeof(guild_name) != TYPE_STRING:
 		return {}
+	# Godot's JSON parser may decode an integral Nakama role as float.
+	# Accept only finite whole numbers; never coerce fractional ranks.
+	if typeof(rank) != TYPE_INT and typeof(rank) != TYPE_FLOAT:
+		return {}
+	var rank_number: float = float(rank)
+	if not is_finite(rank_number) or rank_number != floor(rank_number):
+		return {}
+	rank = int(rank_number)
 	if guild_id == "" and guild_name == "" and rank == -1:
 		return {"guild_id": "", "guild_name": "", "rank": -1}
 	var matcher := RegEx.new()
