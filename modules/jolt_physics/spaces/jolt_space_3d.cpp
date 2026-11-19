@@ -517,15 +517,22 @@ JPH::Body *JoltSpace3D::add_object(const JoltObject3D &p_object, const JPH::Soft
 void JoltSpace3D::remove_object(const JPH::BodyID &p_jolt_id) {
 	JPH::BodyInterface &body_iface = get_body_iface();
 
-	if (!_pending_erase(pending_objects_sleeping, pending_sleeping_indices, p_jolt_id) && !_pending_erase(pending_objects_awake, pending_awake_indices, p_jolt_id)) {
+	// A body queued by CreateBody/CreateSoftBody has not been inserted in
+	// Jolt's broadphase. Its destruction cannot leave stale broadphase nodes.
+	const bool was_pending = _pending_erase(pending_objects_sleeping, pending_sleeping_indices, p_jolt_id) ||
+			_pending_erase(pending_objects_awake, pending_awake_indices, p_jolt_id);
+	if (!was_pending) {
 		body_iface.RemoveBody(p_jolt_id);
 	}
 
 	body_iface.DestroyBody(p_jolt_id);
 
-	// If we're never going to step this space, like in the editor viewport, we need to manually clean up Jolt's broad phase instead, otherwise performance can degrade when doing things like switching scenes.
-	// We'll never actually have zero bodies in any space though, since we always have the default area, so we check if there's one or fewer left instead.
-	if (!JoltPhysicsServer3D::get_singleton()->is_active() && physics_system->GetNumBodies() <= 1) {
+	// Unstepped editor spaces still need a rebuild after the last *inserted*
+	// body is removed. A pending-only deletion needs no rebuild and can
+	// otherwise trigger thousands of expensive, redundant rebuilds while
+	// streaming or canceling large scene loads.
+	// A space normally retains the default area, hence the <= 1 check.
+	if (!was_pending && !JoltPhysicsServer3D::get_singleton()->is_active() && physics_system->GetNumBodies() <= 1) {
 		physics_system->OptimizeBroadPhase();
 	}
 }
