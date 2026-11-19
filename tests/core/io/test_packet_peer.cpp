@@ -258,4 +258,94 @@ TEST_CASE("[PacketPeer][Performance] Bulk framed packet copies retain wire forma
 	ERR_PRINT_ON;
 }
 
+
+TEST_CASE("[PacketPeer][PacketPeerStream] Incremental packet counting survives repeated polls") {
+	Ref<StreamPeerBuffer> stream;
+	stream.instantiate();
+	Ref<PacketPeerStream> peer;
+	peer.instantiate();
+	peer->set_stream_peer(stream);
+	peer->set_input_buffer_max_size(16384);
+
+	Vector<uint8_t> wire;
+	for (int i = 0; i < 512; i++) {
+		const uint8_t frame[] = { 1, 0, 0, 0, uint8_t(i) };
+		wire.append_array(Span<uint8_t>(frame, 5));
+	}
+	REQUIRE_EQ(wire.size(), 512 * 5);
+	stream->set_data_array(wire);
+	for (int i = 0; i < 128; i++) {
+		CHECK_EQ(peer->get_available_packet_count(), 512);
+	}
+
+	for (int i = 0; i < 512; i++) {
+		const uint8_t *data = nullptr;
+		int length = -1;
+		CHECK_EQ(peer->get_packet(&data, length), OK);
+		REQUIRE_EQ(length, 1);
+		CHECK(data != nullptr);
+		CHECK_EQ(data[0], uint8_t(i));
+		CHECK_EQ(peer->get_available_packet_count(), 511 - i);
+	}
+	CHECK_EQ(peer->get_available_packet_count(), 0);
+}
+
+TEST_CASE("[PacketPeer][PacketPeerStream] Counting resumes across split headers and payloads") {
+	Ref<StreamPeerBuffer> stream;
+	stream.instantiate();
+	Ref<PacketPeerStream> peer;
+	peer.instantiate();
+	peer->set_stream_peer(stream);
+	peer->set_input_buffer_max_size(128);
+	const uint8_t wire[] = { 3, 0, 0, 0, 10, 20, 30, 0, 0, 0, 0 };
+
+	// The writer and reader share one cursor; restore the reader cursor
+	// after appending each piece to simulate incremental network delivery.
+	int offset = 0;
+	for (int chunk : { 2, 2, 1, 2, 1, 3 }) {
+		const int old_end = stream->get_size();
+		stream->seek(old_end);
+		REQUIRE_EQ(stream->put_data(wire + offset, chunk), OK);
+		stream->seek(old_end);
+		offset += chunk;
+		const int expected = offset < 7 ? 0 : offset < 11 ? 1 : 2;
+		CHECK_EQ(peer->get_available_packet_count(), expected);
+		CHECK_EQ(peer->get_available_packet_count(), expected);
+	}
+	const uint8_t *data = nullptr;
+	int length = -1;
+	CHECK_EQ(peer->get_packet(&data, length), OK);
+	REQUIRE_EQ(length, 3);
+	CHECK_EQ(data[0], 10);
+	CHECK_EQ(data[1], 20);
+	CHECK_EQ(data[2], 30);
+	CHECK_EQ(peer->get_available_packet_count(), 1);
+	CHECK_EQ(peer->get_packet(&data, length), OK);
+	CHECK_EQ(length, 0);
+	CHECK_EQ(peer->get_available_packet_count(), 0);
+}
+
+TEST_CASE("[PacketPeer][PacketPeerStream] Switching streams drops cached parsed frames") {
+	Ref<StreamPeerBuffer> first;
+	first.instantiate();
+	const uint8_t wire[] = { 1, 0, 0, 0, 42, 1, 0, 0, 0, 43 };
+	REQUIRE_EQ(first->put_data(wire, 10), OK);
+	first->seek(0);
+
+	Ref<PacketPeerStream> packets;
+	packets.instantiate();
+	packets->set_stream_peer(first);
+	CHECK_EQ(packets->get_available_packet_count(), 2);
+
+	Ref<StreamPeerBuffer> replacement;
+	replacement.instantiate();
+	packets->set_stream_peer(replacement);
+	CHECK_EQ(packets->get_available_packet_count(), 0);
+	packets->set_input_buffer_max_size(1024);
+	CHECK_EQ(packets->get_available_packet_count(), 0);
+	replacement->put_data(wire, 5);
+	replacement->seek(0);
+	CHECK_EQ(packets->get_available_packet_count(), 1);
+}
+
 } // namespace TestPacketPeer

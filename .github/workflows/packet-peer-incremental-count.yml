@@ -1,0 +1,43 @@
+name: PacketPeerStream incremental framing regressions
+
+on:
+  pull_request:
+    branches: [develop]
+    paths:
+      - 'core/io/packet_peer.cpp'
+      - 'core/io/packet_peer.h'
+      - 'tests/core/io/test_packet_peer.cpp'
+      - '.github/workflows/packet-peer-incremental-count.yml'
+  push:
+    branches: [develop]
+    paths:
+      - 'core/io/packet_peer.cpp'
+      - 'core/io/packet_peer.h'
+      - 'tests/core/io/test_packet_peer.cpp'
+      - '.github/workflows/packet-peer-incremental-count.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: packet-peer-framing-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  packet-peer-native-regressions:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+      - uses: ./.github/actions/godot-deps
+      - name: Build Cgame editor with native C++ tests
+        uses: ./.github/actions/godot-build
+        with:
+          platform: linuxbsd
+          target: editor
+          scons-flags: dev_build=yes tests=yes debug_symbols=no module_mono_enabled=no module_text_server_fb_enabled=yes accesskit=no -j2
+      - name: Execute PacketPeer native regressions
+        run: ./bin/godot.linuxbsd.editor.dev.x86_64 --headless --test --test-case="*[PacketPeer]*" --no-colors

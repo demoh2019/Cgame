@@ -98,6 +98,11 @@ class PacketPeerStream : public PacketPeer {
 	mutable Vector<uint8_t> input_buffer;
 	mutable Vector<uint8_t> output_buffer;
 
+	// Bytes of complete frames already scanned from the ring buffer front.
+	// Partial headers and partial payloads remain outside this prefix.
+	mutable int parsed_frame_bytes = 0;
+	mutable int complete_packet_count = 0;
+
 	Error _poll_buffer() const;
 
 protected:
