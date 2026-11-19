@@ -367,6 +367,8 @@ PhysicsServer2D::PhysicsServer2D() {
 	GLOBAL_DEF(PropertyInfo(Variant::FLOAT, "physics/2d/solver/default_contact_bias", PROPERTY_HINT_RANGE, "0,1,0.01"), 0.8);
 	// Suppress tiny bounces at contacts so stacked bodies can settle (pixels per second).
 	GLOBAL_DEF(PropertyInfo(Variant::FLOAT, "physics/2d/solver/restitution_velocity_threshold", PROPERTY_HINT_RANGE, "0,1000,1,or_greater,suffix:px/s"), 30.0);
+	// Box2D-style material mixing is opt-in to keep existing GodotPhysics projects compatible.
+	GLOBAL_DEF(PropertyInfo(Variant::INT, "physics/2d/solver/friction_combine_mode", PROPERTY_HINT_ENUM, "Legacy Minimum,Geometric Mean,Average,Maximum"), 0);
 	GLOBAL_DEF(PropertyInfo(Variant::FLOAT, "physics/2d/solver/default_constraint_bias", PROPERTY_HINT_RANGE, "0,1,0.01"), 0.2);
 }
 
