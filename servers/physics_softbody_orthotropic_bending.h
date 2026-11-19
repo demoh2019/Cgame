@@ -135,6 +135,10 @@ _FORCE_INLINE_ static bool physics_softbody_orthotropic_bending_ratio(
 	if (!(ratio > 0.0) || !Math::is_finite(ratio)) {
 		return false;
 	}
-	r_ratio = real_t(ratio);
-	return Math::is_finite(r_ratio);
+	const real_t candidate = real_t(ratio);
+	if (!Math::is_finite(candidate) || !(candidate > 0.0)) {
+		return false;
+	}
+	r_ratio = candidate;
+	return true;
 }
