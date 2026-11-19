@@ -71,7 +71,9 @@ void GodotBodyPair3D::contact_added_callback(const Vector3 &p_point_A, int, cons
 
 	for (int i = 0; i < contact_count; i++) {
 		const Contact &previous = contacts[i];
-		if (previous.used) {
+		if (previous.used || previous.normal.dot(contact.normal) < real_t(0.98)) {
+			// Face/edge transitions can produce geometrically close anchors
+			// with incompatible normals. Keep searching for a valid contact.
 			continue;
 		}
 
