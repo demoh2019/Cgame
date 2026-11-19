@@ -62,3 +62,43 @@ godot --headless --path game --script res://tests/run_all.gd
 
 This logic lives in the game, not in the engine, because Godot already
 provides the necessary script and serialization features.
+
+## Safe-hub vendor: loot, gather, trade, survive
+
+The **canonical** `game/` online game now has a simple NPC trade service at
+the existing **workbench** (near `x=9, z=0`). The trusted Godot simulation
+verifies the actual player location before applying any trade. This is not a
+player-driven marketplace yet.
+
+- **Sell to vendor:** scavenged `scrap` (3 silver per unit), T1 wood/stone/fiber
+  (2 silver), T1 ore (3 silver); sale prices for T2–T4 resources scale by tier.
+- **Buy supplies:** water bottle (12 silver), canned food (18 silver),
+  bandage (16 silver).
+- The **offline local preview** supports **B** (buy one water bottle) and
+  **V** (sell one scrap, otherwise one T1 wood) near the hub workbench.
+- The **networked client** exposes buy/sell buttons on its **I** inventory
+  panel (water, food, scrap and wood). The same server RPC handles both clients.
+- Server rules require a living player near the hub, a listed item and
+  an amount between 1 and 50. Prices are chosen server-side, never supplied
+  by clients. There is no arbitrage loop between the buy and sell catalogs.
+- Trades are **all-or-nothing**: a copy of the backpack is debited, checked
+  for enough silver, items and free stack/slot capacity, then committed.
+  Rejected operations cannot mint silver or consume the input items.
+- Successful trades flag both inventory synchronization and persistent
+  Nakama character state. Silver lives in the existing inventory, and the
+  existing full-loot danger rules still apply outside protected storage.
+
+The vendor is game logic, not a missing Cgame engine API; no C++ engine
+modification was necessary. Later, extend this into player-created market
+orders, regional fees and server-authoritative guild supply lines.
+
+### Regression
+
+```sh
+godot --headless --path game --script res://tests/run_all.gd
+```
+
+`test_vendor.gd` covers price tables, invalid inputs, wallet and stack
+rollback, repeat sales, location restrictions, death restrictions and
+server-side inventory dirtiness. Run the dedicated GitHub Actions vendor
+workflow plus the game build before considering the feature production-ready.
