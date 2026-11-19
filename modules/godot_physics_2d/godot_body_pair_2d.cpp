@@ -38,6 +38,7 @@
 #include "servers/physics_manifold_reduction_2d.h"
 #include "servers/physics_ccd_sphere_toi.h"
 #include "servers/physics_ccd_rotating_capsule_toi.h"
+#include "servers/physics_ccd_rotating_capsule_segment_toi.h"
 #include "servers/physics_speculative_sphere_contact.h"
 #include "servers/physics_speculative_capsule_contact.h"
 #include "servers/physics_speculative_capsule_pair_contact.h"
@@ -268,6 +269,36 @@ bool GodotBodyPair2D::_test_ccd(real_t p_step, GodotBody2D *p_A, int p_shape_A, 
 					// The existing CCD response also clips velocity instead of
 					// applying an impulse. Preserve angular direction and allow
 					// a tiny overlap for the following discrete contact step.
+					const real_t fraction = CLAMP(real_t(impact_fraction) + real_t(0.005), real_t(0.0), real_t(1.0));
+					p_A->set_angular_velocity(p_A->get_angular_velocity() * fraction);
+					return true;
+				}
+			}
+		}
+		// The end of a spinning capsule follows an arc even when its
+		// body has zero linear velocity. Cast the whole axial segment
+		// against a fixed finite segment by conservative advancement.
+		// One-way platforms need a contact-point direction test, so
+		// leave those to the legacy path rather than braking from behind.
+		if (space->is_ccd_rotational_bounds_enabled() &&
+				p_A->get_angular_velocity() != 0.0 &&
+				p_B->get_mode() == PS2DE::BODY_MODE_STATIC &&
+				p_A->get_shape(p_shape_A)->get_type() == PS2DE::SHAPE_CAPSULE &&
+				p_B->get_shape(p_shape_B)->get_type() == PS2DE::SHAPE_SEGMENT &&
+				!p_B->is_shape_set_as_one_way_collision(p_shape_B)) {
+			const double scale_A = physics_ccd_uniform_sphere_scale(p_xform_A);
+			if (scale_A > 0.0) {
+				const GodotCapsuleShape2D *capsule = static_cast<GodotCapsuleShape2D *>(p_A->get_shape(p_shape_A));
+				const GodotSegmentShape2D *segment = static_cast<GodotSegmentShape2D *>(p_B->get_shape(p_shape_B));
+				const double half_segment = double(capsule->get_height()) * 0.5 - double(capsule->get_radius());
+				const double radius = double(capsule->get_radius()) * scale_A;
+				double impact_fraction = 0.0;
+				const PhysicsCCDRotatingCapsuleTOIResult result = physics_ccd_rotating_capsule_segment_toi(
+						p_xform_A.get_origin(), p_xform_A.columns[1],
+						p_A->get_transform().get_origin() + p_A->get_center_of_mass(),
+						p_xform_B.xform(segment->get_a()), p_xform_B.xform(segment->get_b()),
+						p_A->get_angular_velocity(), p_step, half_segment * scale_A, radius, impact_fraction);
+				if (result == PhysicsCCDRotatingCapsuleTOIResult::HIT) {
 					const real_t fraction = CLAMP(real_t(impact_fraction) + real_t(0.005), real_t(0.0), real_t(1.0));
 					p_A->set_angular_velocity(p_A->get_angular_velocity() * fraction);
 					return true;
