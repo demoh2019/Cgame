@@ -83,11 +83,31 @@ _FORCE_INLINE_ bool godot_physics_fluid_box_sample_3d(const Vector3 &p_half_exte
 		return false;
 	}
 	real_t distances[8];
+	real_t min_distance = Math::INF;
+	real_t max_distance = -Math::INF;
 	for (int i = 0; i < 8; ++i) {
 		distances[i] = local_surface - world_vertical.dot(corners[i]);
 		if (!Math::is_finite(distances[i])) {
 			return false;
 		}
+		min_distance = MIN(min_distance, distances[i]);
+		max_distance = MAX(max_distance, distances[i]);
+	}
+
+	// Most submerged-body frames are either completely wet or dry.
+	// Test the eight corners once, and skip all tetrahedron clipping in
+	// those cases. The center of a fully wet box is its world origin.
+	if (max_distance <= 0.0 || min_distance >= 0.0) {
+		r_total_volume = real_t(world_volume);
+		if (!(r_total_volume > 0.0) || !Math::is_finite(r_total_volume)) {
+			return false;
+		}
+		if (min_distance >= 0.0) {
+			r_sample.submerged_volume = r_total_volume;
+			r_sample.submerged_fraction = 1.0;
+			r_sample.center_of_buoyancy = p_transform.origin;
+		}
+		return true;
 	}
 
 	GodotPhysicsFluidTetraSum3D submerged;
