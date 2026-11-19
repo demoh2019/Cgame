@@ -32,6 +32,10 @@
 
 #include "../terrain_mesh.h"
 
+#ifndef PHYSICS_3D_DISABLED
+#include "../terrain_collision_3d.h"
+#endif
+
 #include "core/io/resource_loader.h"
 #include "core/io/resource_saver.h"
 #include "tests/test_utils.h"
@@ -326,5 +330,173 @@ TEST_CASE("[TerrainMesh] Terrain samples do not change when merely ray-picking")
 	terrain->intersect_segment(Vector3(1, 10, 1), Vector3(1, -10, 1), hit);
 	CHECK(terrain->get_heights() == before);
 }
+
+#ifndef PHYSICS_3D_DISABLED
+
+TEST_CASE("[TerrainCollision3D] Empty collision node has no terrain or shape") {
+	TerrainCollision3D *node = memnew(TerrainCollision3D);
+	CHECK(node->get_terrain().is_null());
+	CHECK(node->get_shape().is_null());
+	memdelete(node);
+}
+
+TEST_CASE("[TerrainCollision3D] Linking a terrain generates two collision triangles per cell") {
+	TerrainCollision3D *node = memnew(TerrainCollision3D);
+	Ref<TerrainMesh> terrain = make_terrain(Vector2i(4, 3));
+	node->set_terrain(terrain);
+	Ref<ConcavePolygonShape3D> shape = node->get_shape();
+	REQUIRE(shape.is_valid());
+	CHECK(node->get_terrain() == terrain);
+	CHECK(shape->get_faces().size() == 36);
+	memdelete(node);
+}
+
+TEST_CASE("[TerrainCollision3D] Collision vertices use terrain X Z spacing and Y scaling") {
+	TerrainCollision3D *node = memnew(TerrainCollision3D);
+	Ref<TerrainMesh> terrain = make_terrain(Vector2i(2, 2));
+	terrain->set_cell_size(2.0f);
+	terrain->set_height_scale(3.0f);
+	terrain->set_height(1, 1, 4.0f);
+	node->set_terrain(terrain);
+	Ref<ConcavePolygonShape3D> shape = node->get_shape();
+	REQUIRE(shape.is_valid());
+	bool found_far_corner = false;
+	bool found_origin = false;
+	for (const Vector3 &point : shape->get_faces()) {
+		found_far_corner |= point.is_equal_approx(Vector3(2, 12, 2));
+		found_origin |= point.is_equal_approx(Vector3(0, 0, 0));
+	}
+	CHECK(found_far_corner);
+	CHECK(found_origin);
+	CHECK(node->get_scale().is_equal_approx(Vector3(1, 1, 1)));
+	memdelete(node);
+}
+
+TEST_CASE("[TerrainCollision3D] Editing heights updates the same collision shape") {
+	TerrainCollision3D *node = memnew(TerrainCollision3D);
+	Ref<TerrainMesh> terrain = make_terrain();
+	node->set_terrain(terrain);
+	Ref<Shape3D> original = node->get_shape();
+	terrain->set_height(1, 1, 7.0f);
+	CHECK(node->get_shape() == original);
+	Ref<ConcavePolygonShape3D> shape = node->get_shape();
+	bool found_peak = false;
+	for (const Vector3 &point : shape->get_faces()) {
+		found_peak |= point.is_equal_approx(Vector3(1, 7, 1));
+	}
+	CHECK(found_peak);
+	memdelete(node);
+}
+
+TEST_CASE("[TerrainCollision3D] Sculpt and erosion refresh the collision geometry") {
+	TerrainCollision3D *node = memnew(TerrainCollision3D);
+	Ref<TerrainMesh> terrain = make_terrain(Vector2i(5, 5));
+	node->set_terrain(terrain);
+	terrain->sculpt(Vector2(2, 2), 1.0f, 8.0f);
+	Ref<ConcavePolygonShape3D> shape = node->get_shape();
+	bool peak = false;
+	for (const Vector3 &v : shape->get_faces()) {
+		peak |= Math::is_equal_approx(v.y, 8.0f);
+	}
+	CHECK(peak);
+	terrain->erode(5, 0.0f, 0.5f);
+	peak = false;
+	for (const Vector3 &v : shape->get_faces()) {
+		peak |= Math::is_equal_approx(v.y, 8.0f);
+	}
+	CHECK_FALSE(peak);
+	memdelete(node);
+}
+
+TEST_CASE("[TerrainCollision3D] Grid resize changes triangle count without changing shape identity") {
+	TerrainCollision3D *node = memnew(TerrainCollision3D);
+	Ref<TerrainMesh> terrain = make_terrain(Vector2i(2, 2));
+	node->set_terrain(terrain);
+	Ref<ConcavePolygonShape3D> shape = node->get_shape();
+	REQUIRE(shape.is_valid());
+	CHECK(shape->get_faces().size() == 6);
+	terrain->set_grid_size(Vector2i(3, 4));
+	CHECK(node->get_shape().ptr() == shape.ptr());
+	CHECK(shape->get_faces().size() == 36);
+	terrain->set_grid_size(Vector2i(2, 2));
+	CHECK(shape->get_faces().size() == 6);
+	memdelete(node);
+}
+
+TEST_CASE("[TerrainCollision3D] Changing cell size updates collision position without nonuniform node scaling") {
+	TerrainCollision3D *node = memnew(TerrainCollision3D);
+	Ref<TerrainMesh> terrain = make_terrain(Vector2i(2, 2));
+	node->set_terrain(terrain);
+	terrain->set_cell_size(5.0f);
+	Ref<ConcavePolygonShape3D> shape = node->get_shape();
+	bool found = false;
+	for (const Vector3 &point : shape->get_faces()) {
+		found |= point.is_equal_approx(Vector3(5, 0, 5));
+	}
+	CHECK(found);
+	CHECK(node->get_scale().is_equal_approx(Vector3(1, 1, 1)));
+	memdelete(node);
+}
+
+TEST_CASE("[TerrainCollision3D] Changing the reference disconnects the previous resource") {
+	TerrainCollision3D *node = memnew(TerrainCollision3D);
+	Ref<TerrainMesh> old_terrain = make_terrain(Vector2i(2, 2));
+	Ref<TerrainMesh> new_terrain = make_terrain(Vector2i(4, 3));
+	node->set_terrain(old_terrain);
+	node->set_terrain(new_terrain);
+	Ref<ConcavePolygonShape3D> shape = node->get_shape();
+	CHECK(shape->get_faces().size() == 36);
+	old_terrain->set_height(0, 0, 100.0f);
+	CHECK(shape->get_faces().size() == 36);
+	new_terrain->set_height(1, 1, 10.0f);
+	bool found = false;
+	for (const Vector3 &point : shape->get_faces()) {
+		found |= Math::is_equal_approx(point.y, 10.0f);
+	}
+	CHECK(found);
+	memdelete(node);
+}
+
+TEST_CASE("[TerrainCollision3D] Clearing a terrain removes the generated collision shape") {
+	TerrainCollision3D *node = memnew(TerrainCollision3D);
+	Ref<TerrainMesh> terrain = make_terrain();
+	node->set_terrain(terrain);
+	CHECK(node->get_shape().is_valid());
+	node->set_terrain(Ref<TerrainMesh>());
+	CHECK(node->get_terrain().is_null());
+	CHECK(node->get_shape().is_null());
+	terrain->set_height(0, 0, 3.0f);
+	CHECK(node->get_shape().is_null());
+	memdelete(node);
+}
+
+TEST_CASE("[TerrainCollision3D] Two colliders share source data but do not share their shapes") {
+	TerrainCollision3D *a = memnew(TerrainCollision3D);
+	TerrainCollision3D *b = memnew(TerrainCollision3D);
+	Ref<TerrainMesh> terrain = make_terrain();
+	a->set_terrain(terrain);
+	b->set_terrain(terrain);
+	CHECK(a->get_shape().ptr() != b->get_shape().ptr());
+	terrain->set_height(1, 1, 9.0f);
+	Ref<ConcavePolygonShape3D> shape_a = a->get_shape();
+	Ref<ConcavePolygonShape3D> shape_b = b->get_shape();
+	CHECK(shape_a->get_faces() == shape_b->get_faces());
+	memdelete(a);
+	terrain->set_height(1, 1, 4.0f);
+	CHECK(shape_a->get_faces() != shape_b->get_faces());
+	memdelete(b);
+}
+
+TEST_CASE("[TerrainCollision3D] Reassigning the same terrain is idempotent") {
+	TerrainCollision3D *node = memnew(TerrainCollision3D);
+	Ref<TerrainMesh> terrain = make_terrain();
+	node->set_terrain(terrain);
+	Ref<Shape3D> shape = node->get_shape();
+	node->set_terrain(terrain);
+	CHECK(node->get_shape() == shape);
+	memdelete(node);
+}
+
+#endif // PHYSICS_3D_DISABLED
 
 } // namespace TestTerrainMesh
