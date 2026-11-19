@@ -787,4 +787,23 @@ TEST_CASE("[BitMap] Packed LA8 alpha thresholds agree with all 256 alpha levels"
 	}
 }
 
+TEST_CASE("[BitMap] Full-map byte fill preserves partial-byte padding") {
+	const Size2i dimensions[] = { Size2i(1, 1), Size2i(7, 3),
+		Size2i(9, 7), Size2i(17, 11), Size2i(64, 9) };
+	for (const Size2i &size : dimensions) {
+		BitMap map;
+		map.create(size);
+		const Rect2i full(Point2i(), size);
+		map.set_bit_rect(full, true);
+		CHECK(map.get_true_bit_count() == size.width * size.height);
+		for (int y = 0; y < size.height; y++) {
+			for (int x = 0; x < size.width; x++) {
+				CHECK(map.get_bit(x, y));
+			}
+		}
+		map.set_bit_rect(full, false);
+		CHECK(map.get_true_bit_count() == 0);
+	}
+}
+
 } // namespace TestBitMap
