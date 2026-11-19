@@ -9,13 +9,14 @@ The upstream issue and PR history is very large (over 120,000 records at the tim
 1. In [fork settings](https://github.com/demoh2019/godot/settings), open **General → Features → Issues**, and enable **Issues**. GitHub reports `has_issues: false` for this fork at the time of implementation. All modes except `open-prs` fail fast until this is enabled.
 2. Review and merge the mirror tooling PR into the fork's default branch.
 3. In **Actions** enable workflows for this fork if prompted. For the workflow, grant **read/write** permissions and allow Actions to create pull requests, or configure a fine-grained PAT secret named `MIRROR_TOKEN` with target **Contents**, **Issues**, and **Pull requests** write permissions. This token must be kept in GitHub Secrets, **never** committed.
-4. Open **Actions → Upstream Issue and PR Mirror → Run workflow**. Start with `all` and `max_new=25`; repeat runs after checking logs and the state file. `max_new=0` means unlimited and may run into rate limits or job time limits.
+4. Open **Actions → Upstream Issue and PR Mirror → Run workflow**. Start with `issues` and `max_new=25`; repeat runs after checking logs and the state file. `max_new=0` means unlimited and may run into rate limits or job time limits. To use `all` or `open-prs`, explicitly enable `allow_untrusted_pr_import` only after auditing Actions workflows and fork secrets: upstream PR code may be untrusted and can trigger CI on same-repository branches.
 
 Alternatively, with Python 3.9+, Git and a checkout of the fork:
 
 ```sh
 export GH_TOKEN="$(gh auth token)"
-python3 misc/scripts/mirror_upstream_github.py --mode all --max-new 25
+python3 misc/scripts/mirror_upstream_github.py --mode issues --max-new 25
+# After auditing Actions security, include --allow-untrusted-pr-import for --mode all or open-prs.
 python3 -m unittest discover -s tests/mirror -p 'test_*.py' -v
 ```
 
