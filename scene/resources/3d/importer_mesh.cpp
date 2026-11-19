@@ -284,8 +284,9 @@ Ref<ImporterMesh> ImporterMesh::merge_importer_meshes(const TypedArray<ImporterM
 							PackedInt32Array existing_indices = merged_surface_arrays[Mesh::ARRAY_INDEX];
 							PackedInt32Array incoming_indices = this_surface_arrays[Mesh::ARRAY_INDEX];
 							if (!existing_indices.is_empty() || !incoming_indices.is_empty()) {
+								int32_t *indices_write = incoming_indices.ptrw();
 								for (int i = 0; i < incoming_indices.size(); i++) {
-									incoming_indices.ptrw()[i] = incoming_indices[i] + existing_vertex_count;
+									indices_write[i] += existing_vertex_count;
 								}
 								existing_indices.append_array(incoming_indices);
 								merged_surface_arrays[Mesh::ARRAY_INDEX] = existing_indices;
