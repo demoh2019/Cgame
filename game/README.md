@@ -427,3 +427,9 @@ plus the current authoritative server simulation (local) or server snapshots
 Projection and live state tests are included in `tests/test_survival_radar.gd`
 under the standard headless regression runner. Full visual verification
 still requires an engine/editor playtest.
+
+## Voxel base building (opt-in engine module)
+
+Destructible terrain and base building will use Zylann's Godot Voxel. It is not part of the default engine build:
+`misc/third_party/fetch_voxel_module.sh` fetches it and `custom_modules=out/custom_modules` builds it in.
+Verified here: it compiles on this fork unchanged and its classes register. No game feature uses it yet.
