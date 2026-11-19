@@ -33,7 +33,6 @@
 #include "godot_constraint_3d.h"
 
 #include "core/object/worker_thread_pool.h"
-#include "core/templates/hash_map.h"
 #include "core/os/os.h"
 
 #define BODY_ISLAND_COUNT_RESERVE 128
@@ -241,7 +240,7 @@ bool GodotStep3D::_solve_large_island(const LocalVector<GodotConstraint3D *> &p_
 	// Reuse the previous step's allocation for dense contact workloads.
 	// Release exceptionally oversized hash buffers when the island shrinks.
 	if (occupied_colors.get_capacity() > MAX(uint32_t(1024), constraint_count * uint32_t(4))) {
-		occupied_colors = HashMap<GodotBody3D *, uint32_t>();
+		occupied_colors.reset();
 	} else {
 		occupied_colors.clear();
 	}
@@ -626,7 +625,7 @@ void GodotStep3D::step(GodotSpace3D *p_space, real_t p_delta) {
 		// island's scratch to keep peak memory from lingering in light scenes.
 		colored_constraints.reset();
 		constraint_colors.reset();
-		occupied_colors = HashMap<GodotBody3D *, uint32_t>();
+		occupied_colors.reset();
 	}
 
 	if (large_island_count == 1) {
