@@ -497,4 +497,112 @@ TEST_CASE("[HashMap] Growing an empty allocated table preserves empty bucket inv
 	}
 }
 
+
+struct WraparoundClusterHash {
+	static inline uint32_t start = 1;
+	static uint32_t hash(int) {
+		return start;
+	}
+};
+
+TEST_CASE("[HashMap] Backward shift handles wrapped collision clusters and stable nodes") {
+	HashMap<int, int, WraparoundClusterHash> map;
+	map.reserve(256);
+	WraparoundClusterHash::start = map.get_capacity() - 2;
+	int *addresses[72];
+	for (int i = 0; i < 72; i++) {
+		map.insert(i, i * 17);
+		addresses[i] = map.getptr(i);
+		REQUIRE(addresses[i] != nullptr);
+	}
+	CHECK(map.size() == 72);
+	for (int i = 0; i < 72; i++) {
+		if (i % 3 == 0) {
+			CHECK(map.erase(i));
+			CHECK(!map.erase(i));
+		} else if (i % 7 == 0) {
+			CHECK(map.replace_key(i, i + 1000));
+		}
+	}
+	CHECK(map.size() == 48);
+	int expected_key = 0;
+	int visited = 0;
+	for (const KeyValue<int, int> &entry : map) {
+		while (expected_key < 72 && expected_key % 3 == 0) {
+			expected_key++;
+		}
+		REQUIRE(expected_key < 72);
+		CHECK(entry.key == (expected_key % 7 == 0 ? expected_key + 1000 : expected_key));
+		CHECK(entry.value == expected_key * 17);
+		expected_key++;
+		visited++;
+	}
+	CHECK(visited == 48);
+	for (int i = 0; i < 72; i++) {
+		const int updated_key = (i % 7 == 0 && i % 3 != 0) ? i + 1000 : i;
+		if (i % 3 == 0) {
+			CHECK(map.getptr(i) == nullptr);
+		} else {
+			CHECK(map.getptr(updated_key) == addresses[i]);
+			CHECK(*map.getptr(updated_key) == i * 17);
+			if (updated_key != i) {
+				CHECK(!map.has(i));
+			}
+		}
+	}
+	for (int i = 0; i < 72; i++) {
+		if (i % 3 != 0) {
+			const int key = (i % 7 == 0) ? i + 1000 : i;
+			CHECK(map.erase(key));
+		}
+	}
+	CHECK(map.is_empty());
+	map.insert(2000, 42);
+	CHECK(map.get(2000) == 42);
+}
+
+TEST_CASE("[HashMap] Backward shift preserves addresses under distributed erase and rekey") {
+	HashMap<int, int, DistributedHash> map;
+	map.reserve(2048);
+	int *addresses[511];
+	for (int i = 0; i < 511; i++) {
+		map.insert(i, i + 900);
+		addresses[i] = map.getptr(i);
+		REQUIRE(addresses[i] != nullptr);
+	}
+	int expected_count = 511;
+	for (int i = 0; i < 511; i++) {
+		if (i % 4 == 0) {
+			CHECK(map.erase(i));
+			expected_count--;
+		} else if (i % 6 == 1) {
+			CHECK(map.replace_key(i, i + 10000));
+		}
+	}
+	CHECK(map.size() == uint32_t(expected_count));
+	int next_original = 0;
+	int visited = 0;
+	for (const KeyValue<int, int> &entry : map) {
+		while (next_original < 511 && next_original % 4 == 0) {
+			next_original++;
+		}
+		REQUIRE(next_original < 511);
+		const int key = next_original % 6 == 1 ? next_original + 10000 : next_original;
+		CHECK(entry.key == key);
+		CHECK(entry.value == next_original + 900);
+		CHECK(map.getptr(key) == addresses[next_original]);
+		if (key != next_original) {
+			CHECK(map.getptr(next_original) == nullptr);
+		}
+		next_original++;
+		visited++;
+	}
+	CHECK(visited == expected_count);
+	for (int i = 0; i < 511; i += 4) {
+		map.insert(i, -i);
+		CHECK(map.get(i) == -i);
+	}
+	CHECK(map.size() == 511);
+}
+
 } // namespace TestHashMap
