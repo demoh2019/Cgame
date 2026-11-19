@@ -320,6 +320,12 @@ static void _generate_contacts_face_face(const Vector3 *p_points_A, int p_point_
 
 	// go through all of B points
 	for (int i = 0; i < p_point_count_B; i++) {
+		// Sutherland-Hodgman clipping can never recover vertices once
+		// the source polygon is empty. Avoid constructing the remaining
+		// edge planes (and normalizing their normals) in this case.
+		if (clipbuf_len == 0) {
+			return;
+		}
 		int i_n = (i + 1) % p_point_count_B;
 
 		Vector3 edge0_B = p_points_B[i];
@@ -332,14 +338,18 @@ static void _generate_contacts_face_face(const Vector3 *p_points_A, int p_point_
 		// avoid double clip if A is edge
 		int dst_idx = 0;
 		bool edge = clipbuf_len == 2;
+		// An edge's end vertex is the next edge's start vertex. Cache its
+		// signed clip distance instead of evaluating the plane twice for
+		// every vertex. Reuse the first distance to close the polygon.
+		const real_t first_clip_distance = clip.distance_to(clipbuf_src[0]);
+		real_t dist0 = first_clip_distance;
 		for (int j = 0; j < clipbuf_len; j++) {
 			int j_n = (j + 1) % clipbuf_len;
 
 			Vector3 edge0_A = clipbuf_src[j];
 			Vector3 edge1_A = clipbuf_src[j_n];
 
-			real_t dist0 = clip.distance_to(edge0_A);
-			real_t dist1 = clip.distance_to(edge1_A);
+			const real_t dist1 = j_n == 0 ? first_clip_distance : clip.distance_to(edge1_A);
 
 			if (dist0 <= 0) { // behind plane
 
@@ -360,6 +370,8 @@ static void _generate_contacts_face_face(const Vector3 *p_points_A, int p_point_
 				clipbuf_dst[dst_idx] = inters;
 				dst_idx++;
 			}
+			// The next edge begins at the current edge's end point.
+			dist0 = dist1;
 		}
 
 		clipbuf_len = dst_idx;
