@@ -100,10 +100,29 @@ jobs:
           platform: linuxbsd
           target: editor
           scons-flags: dev_build=yes tests=yes debug_symbols=no module_text_server_fb_enabled=yes -j2
+      - name: Native exact affine ellipsoid hydrostatics regressions
+        shell: bash
+        run: |
+          set -euo pipefail
+          timeout 120s ./bin/godot.linuxbsd.editor.dev.x86_64 \
+            --headless --test --test-case="*[PhysicsEllipsoid]*" \
+            --success=true --no-colors 2>&1 | tee physics-fluid-ellipsoid-native.log
+          grep -Fq '[PhysicsEllipsoid]' physics-fluid-ellipsoid-native.log
+      - name: Runtime ellipsoid buoyancy versus matched sphere control
+        shell: bash
+        run: |
+          set -euo pipefail
+          timeout 120s ./bin/godot.linuxbsd.editor.dev.x86_64 \
+            --headless --path tests/stress \
+            --script res://physics_ellipsoid_buoyancy_3d_regression.gd \
+            2>&1 | tee physics-fluid-ellipsoid-runtime.log
+          grep -Fq 'Affine ellipsoid buoyancy passed' physics-fluid-ellipsoid-runtime.log
       - name: Syntax-check physics stress scripts
         shell: bash
         run: |
           set -euo pipefail
+          ./bin/godot.linuxbsd.editor.dev.x86_64 --headless --path tests/stress \
+            --script res://physics_ellipsoid_buoyancy_3d_regression.gd --check-only
           ./bin/godot.linuxbsd.editor.dev.x86_64 --headless --path tests/stress --script res://stress.gd --check-only
           ./bin/godot.linuxbsd.editor.dev.x86_64 --headless --path tests/stress --script res://physics_dense.gd --check-only
           ./bin/godot.linuxbsd.editor.dev.x86_64 --headless --path tests/stress --script res://physics_pending_reuse_stress.gd --check-only
