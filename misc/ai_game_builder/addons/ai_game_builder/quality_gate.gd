@@ -7,7 +7,7 @@ const OUTPUT_ROOT = "res://ai_generated/"
 const RESOURCE_FIELD = "path=\""
 
 
-static func inspect_files(files: Array[Dictionary]) -> String:
+static func inspect_files(files: Array) -> String:
 	var paths := {}
 	for entry in files:
 		paths[str(entry["path"])] = true
