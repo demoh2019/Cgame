@@ -8,7 +8,7 @@ const PREFIX := "STRESS_RESULT:"
 const ExtraStress := preload("res://extra_stress.gd")
 const CASES := [
 	"containers", "strings", "script_vm", "math", "signals",
-	"scene_tree", "packed_scene", "images", "json", "stream",
+	"scene_tree", "packed_scene", "images", "json", "stream", "stream_bulk",
 	"file_io", "threads", "physics_2d", "physics_3d",
 	"object_churn", "memory_churn", "astar_grid", "astar_relax_2d", "astar_relax_3d", "astar_graph", "tweens", "audio_buffers",
 	"variant_codec", "packet_stream", "ui_layout", "render_2d", "render_3d",
@@ -186,6 +186,8 @@ func _run_case(test_case: String, scale: int, frames: int, seed: int) -> Diction
 					return {"error": "Stream corruption at %d" % i}
 				checksum = (checksum + received) & 0x7fffffff
 			return {"messages": length, "checksum": checksum}
+		"stream_bulk":
+			return _stream_bulk(scale)
 		"file_io":
 			return _file_io(scale)
 		"object_lifecycle":
@@ -1176,3 +1178,46 @@ func _bitmap_pipeline(scale: int) -> Dictionary:
 		return {"error": "BitMap clipped blit produced no pixels"}
 	return {"iterations": iterations, "blit_ms": blit_ms, "resize_ms": resize_ms,
 			"convert_ms": image_ms, "alpha_import_ms": alpha_ms, "checksum": checksum}
+
+
+func _stream_bulk(scale: int) -> Dictionary:
+	# Measure bulk reads and writes independently of small primitive calls.
+	var peer := StreamPeerBuffer.new()
+	var payload := PackedByteArray()
+	payload.resize(8192)
+	for i in range(payload.size()):
+		payload[i] = i & 255
+	if peer.put_data(payload) != OK:
+		return {"error": "Initial bulk stream write failed"}
+
+	var checksum := 0
+	var bytes_read := 0
+	var started := Time.get_ticks_usec()
+	for repeat in range(300 * scale):
+		peer.seek(0)
+		if peer.put_data(payload) != OK:
+			return {"error": "Bulk stream write failed"}
+		peer.seek(0)
+		var response: Array = peer.get_data(payload.size())
+		if response[0] != OK:
+			return {"error": "Bulk stream read failed"}
+		var received: PackedByteArray = response[1]
+		if received.size() != payload.size() or received[0] != 0 or received[8191] != 255:
+			return {"error": "Bulk stream data mismatch"}
+		checksum += received[repeat % received.size()]
+		bytes_read += received.size()
+		if repeat % 16 == 0:
+			peer.seek(0)
+			var partial: Array = peer.get_partial_data(payload.size() + 1024)
+			if partial[0] != OK:
+				return {"error": "Partial bulk read returned error"}
+			var partial_data: PackedByteArray = partial[1]
+			if partial_data.size() != payload.size() or partial_data[8191] != 255:
+				return {"error": "Partial bulk read length/data mismatch"}
+			checksum += partial_data[repeat % partial_data.size()]
+	return {
+		"operations": 300 * scale,
+		"bytes_read": bytes_read,
+		"read_write_ms": float(Time.get_ticks_usec() - started) / 1000.0,
+		"checksum": checksum,
+	}
