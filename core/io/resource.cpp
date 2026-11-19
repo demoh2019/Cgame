@@ -347,6 +347,7 @@ Variant Resource::_duplicate_recursive(const Variant &p_variant, const Duplicate
 			if (src.is_typed()) {
 				dst.set_typed(src.get_key_type(), src.get_value_type());
 			}
+			dst.reserve(src.size());
 			for (const Variant &k : src.get_key_list()) {
 				const Variant &v = src[k];
 				dst.set(
