@@ -18,10 +18,11 @@ class SphereTimeOfImpactContracts(unittest.TestCase):
         source = HELPER.read_text(encoding="utf-8")
         self.assertIn("const double a =", source)
         self.assertIn("const double b =", source)
-        self.assertIn("const double c =", source)
-        self.assertIn("const double fraction = c / denominator;", source)
-        self.assertIn("const double discriminant = b * b - a * c;", source)
+        self.assertIn("const double closest_fraction = -b / a;", source)
+        self.assertIn("const double gap_squared = radius_squared -", source)
+        self.assertIn("const double fraction = closest_fraction - Math::sqrt(gap_squared / a);", source)
         self.assertIn("fraction >= 0.0 && fraction <= 1.0", source)
+        self.assertNotIn("const double discriminant = ", source)
 
     def test_2d_uses_analytic_toi_with_affine_and_rotation_fallback(self):
         source = CCD_2D.read_text(encoding="utf-8")
