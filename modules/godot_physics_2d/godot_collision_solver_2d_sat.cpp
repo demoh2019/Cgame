@@ -430,9 +430,53 @@ static void _collision_segment_segment(const GodotShape2D *p_a, const Transform2
 	separator.generate_contacts();
 }
 
+// Shared by the analytic narrow-phase paths below.
+_FORCE_INLINE_ static bool _is_unit_orthogonal_transform(const Transform2D &p_transform);
+
 static void _collision_segment_circle(const GodotShape2D *p_a, const Transform2D &p_transform_a, const GodotShape2D *p_b, const Transform2D &p_transform_b, _CollectorCallback2D *p_collector, const Vector2 &p_motion_a, const Vector2 &p_motion_b, bool p_cast_A, bool p_cast_B, bool p_with_margin, real_t p_margin_A, real_t p_margin_B) {
 	const GodotSegmentShape2D *segment_A = static_cast<const GodotSegmentShape2D *>(p_a);
 	const GodotCircleShape2D *circle_B = static_cast<const GodotCircleShape2D *>(p_b);
+
+	// Like Box2D's specialized segment/circle manifold, use the closest point
+	// on the segment instead of projecting both shapes onto multiple SAT axes.
+	// Swept shapes, non-rigid transforms, and degenerate cases retain SAT.
+	if (!p_cast_A && !p_cast_B && p_margin_A >= 0.0 && p_margin_B >= 0.0 &&
+			circle_B->get_radius() >= 0.0 && _is_unit_orthogonal_transform(p_transform_a) &&
+			_is_unit_orthogonal_transform(p_transform_b)) {
+		const Vector2 segment_start = p_transform_a.xform(segment_A->get_a());
+		const Vector2 segment_direction = p_transform_a.xform(segment_A->get_b()) - segment_start;
+		const real_t segment_length_squared = segment_direction.length_squared();
+		if (segment_length_squared > CMP_EPSILON * CMP_EPSILON) {
+			const Vector2 center = p_transform_b.get_origin();
+			const real_t fraction = CLAMP((center - segment_start).dot(segment_direction) / segment_length_squared, real_t(0.0), real_t(1.0));
+			const Vector2 closest = segment_start + segment_direction * fraction;
+			const Vector2 separation = closest - center;
+			const real_t distance_squared = separation.length_squared();
+
+			// The SAT fallback provides a stable axis for coincident points.
+			if (distance_squared > 0.0) {
+				const real_t radius = circle_B->get_radius() + p_margin_B;
+				const real_t combined_radius = radius + p_margin_A;
+				if (distance_squared > combined_radius * combined_radius) {
+					if (p_collector->sep_axis) {
+						*p_collector->sep_axis = separation / Math::sqrt(distance_squared);
+					}
+					return;
+				}
+
+				p_collector->collided = true;
+				if (p_collector->callback) {
+					const Vector2 normal = separation / Math::sqrt(distance_squared);
+					p_collector->normal = normal;
+					p_collector->call(closest - normal * p_margin_A, center + normal * radius);
+				}
+				if (p_collector->sep_axis) {
+					*p_collector->sep_axis = Vector2();
+				}
+				return;
+			}
+		}
+	}
 
 	SeparatorAxisTest2D<GodotSegmentShape2D, GodotCircleShape2D> separator(segment_A, p_transform_a, circle_B, p_transform_b, p_collector, p_motion_a, p_motion_b, p_cast_A, p_cast_B, p_with_margin, p_margin_A, p_margin_B);
 
