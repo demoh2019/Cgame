@@ -548,6 +548,216 @@ static void resolve_soft_soft_vertex_face_contacts(JPH::Body &p_body_a, JPH::Bod
 	}
 }
 
+// Experimental deformable edge/edge collisions supplement vertex/face
+// contacts when two thin triangle edges cross but all vertices are far
+// from the opposite surface. Like the VF path, this is a pre-step velocity
+// correction (not CCD). No persistent topology or new Jolt SDK APIs.
+constexpr uint32_t MAX_SOFT_SOFT_EDGE_FACES = 512;
+constexpr float SOFT_EDGE_EPSILON = 1.0e-12f;
+
+struct SoftEdgeContactScratch {
+	JPH::Array<uint64_t> keys_a;
+	JPH::Array<uint64_t> keys_b;
+};
+
+static bool collect_soft_surface_edges(const JPH::Array<JPH::SoftBodySharedSettings::Face> &p_faces,
+		uint32_t p_vertex_count, JPH::Array<uint64_t> &r_keys, uint32_t &r_budget) {
+	r_keys.clear();
+	if (p_faces.empty() || p_faces.size() > MAX_SOFT_SOFT_EDGE_FACES) {
+		return false;
+	}
+
+	// Charge the upper-bound cost of collecting and sorting 3*F edge keys.
+	const uint32_t raw_count = uint32_t(p_faces.size()) * 3;
+	uint32_t levels = 0;
+	for (uint32_t count = raw_count; count > 1; count = (count + 1) / 2) {
+		++levels;
+	}
+	const uint32_t construction_cost = raw_count * (levels + 1);
+	if (r_budget <= construction_cost) {
+		return false;
+	}
+	r_budget -= construction_cost;
+	r_keys.reserve(raw_count);
+	for (const JPH::SoftBodySharedSettings::Face &face : p_faces) {
+		if (face.IsDegenerate() || face.mVertex[0] >= p_vertex_count ||
+				face.mVertex[1] >= p_vertex_count || face.mVertex[2] >= p_vertex_count) {
+			continue;
+		}
+		for (uint32_t k = 0; k < 3; ++k) {
+			const uint32_t i = face.mVertex[k];
+			const uint32_t j = face.mVertex[(k + 1) % 3];
+			const uint64_t key = (uint64_t(MIN(i, j)) << 32) | uint64_t(MAX(i, j));
+			r_keys.push_back(key);
+		}
+	}
+	if (r_keys.empty()) {
+		return false;
+	}
+	// Adjacent triangles share edges. Test each geometric edge only once,
+	// otherwise contact stiffness depends on triangle tessellation.
+	std::sort(r_keys.begin(), r_keys.end());
+	const size_t unique_count = std::unique(r_keys.begin(), r_keys.end()) - r_keys.begin();
+	r_keys.resize(unique_count);
+	return true;
+}
+
+// Closest parameters s,t of segments [p0,p1] and [q0,q1] (Ericson).
+// Endpoints and parallel configurations are explicitly clamped. Degenerate
+// segments are rejected: VV/VF already cover zero-length edge endpoints.
+static bool closest_soft_edge_edge(JPH::Vec3Arg p0, JPH::Vec3Arg p1,
+		JPH::Vec3Arg q0, JPH::Vec3Arg q1, float &r_s, float &r_t,
+		JPH::Vec3 &r_p, JPH::Vec3 &r_q) {
+	const JPH::Vec3 d1 = p1 - p0;
+	const JPH::Vec3 d2 = q1 - q0;
+	const JPH::Vec3 r = p0 - q0;
+	const float a = d1.Dot(d1);
+	const float e = d2.Dot(d2);
+	if (!Math::is_finite(a) || !Math::is_finite(e) || a <= SOFT_EDGE_EPSILON || e <= SOFT_EDGE_EPSILON) {
+		return false;
+	}
+	const float b = d1.Dot(d2);
+	const float c = d1.Dot(r);
+	const float f = d2.Dot(r);
+	const float denominator = a * e - b * b;
+	if (!Math::is_finite(denominator) || !Math::is_finite(c) || !Math::is_finite(f)) {
+		return false;
+	}
+	r_s = denominator > SOFT_EDGE_EPSILON ? CLAMP((b * f - c * e) / denominator, 0.0f, 1.0f) : 0.0f;
+	r_t = (b * r_s + f) / e;
+	if (r_t < 0.0f) {
+		r_t = 0.0f;
+		r_s = CLAMP(-c / a, 0.0f, 1.0f);
+	} else if (r_t > 1.0f) {
+		r_t = 1.0f;
+		r_s = CLAMP((b - c) / a, 0.0f, 1.0f);
+	}
+	if (!Math::is_finite(r_s) || !Math::is_finite(r_t)) {
+		return false;
+	}
+	r_p = p0 + d1 * r_s;
+	r_q = q0 + d2 * r_t;
+	return true;
+}
+
+static void resolve_soft_soft_edge_edge_contacts(JPH::Body &p_body_a, JPH::Body &p_body_b,
+		float p_step, uint32_t &r_budget, SoftEdgeContactScratch &r_scratch) {
+	JPH::SoftBodyMotionProperties &props_a = static_cast<JPH::SoftBodyMotionProperties &>(*p_body_a.GetMotionPropertiesUnchecked());
+	JPH::SoftBodyMotionProperties &props_b = static_cast<JPH::SoftBodyMotionProperties &>(*p_body_b.GetMotionPropertiesUnchecked());
+	JPH::Array<JPH::SoftBodyVertex> &vertices_a = props_a.GetVertices();
+	JPH::Array<JPH::SoftBodyVertex> &vertices_b = props_b.GetVertices();
+	if (!collect_soft_surface_edges(props_a.GetFaces(), uint32_t(vertices_a.size()), r_scratch.keys_a, r_budget) ||
+			!collect_soft_surface_edges(props_b.GetFaces(), uint32_t(vertices_b.size()), r_scratch.keys_b, r_budget)) {
+		return;
+	}
+
+	const JPH::Quat rotation_a = p_body_a.GetRotation();
+	const JPH::Quat rotation_b = p_body_b.GetRotation();
+	const JPH::Quat inverse_a = rotation_a.Conjugated();
+	const JPH::Quat inverse_b = rotation_b.Conjugated();
+	const JPH::Vec3 center_delta(p_body_b.GetCenterOfMassPosition() - p_body_a.GetCenterOfMassPosition());
+	const float radius = JoltProjectSettings::soft_body_soft_contact_radius;
+	const float friction = JoltProjectSettings::soft_body_soft_contact_friction;
+	const float bias_per_step = JoltProjectSettings::soft_body_soft_contact_recovery / p_step;
+
+	for (uint64_t key_a : r_scratch.keys_a) {
+		if (r_budget == 0) {
+			return;
+		}
+		JPH::SoftBodyVertex &a0 = vertices_a[uint32_t(key_a >> 32)];
+		JPH::SoftBodyVertex &a1 = vertices_a[uint32_t(key_a)];
+		const JPH::Vec3 p0 = rotation_a * a0.mPosition;
+		const JPH::Vec3 p1 = rotation_a * a1.mPosition;
+		const JPH::Vec3 p_min = JPH::Vec3::sMin(p0, p1);
+		const JPH::Vec3 p_max = JPH::Vec3::sMax(p0, p1);
+		for (uint64_t key_b : r_scratch.keys_b) {
+			if (r_budget == 0) {
+				return;
+			}
+			--r_budget; // Includes rejected candidates: hard per-step work cap.
+			JPH::SoftBodyVertex &b0 = vertices_b[uint32_t(key_b >> 32)];
+			JPH::SoftBodyVertex &b1 = vertices_b[uint32_t(key_b)];
+			const JPH::Vec3 q0 = center_delta + rotation_b * b0.mPosition;
+			const JPH::Vec3 q1 = center_delta + rotation_b * b1.mPosition;
+			const JPH::Vec3 q_min = JPH::Vec3::sMin(q0, q1);
+			const JPH::Vec3 q_max = JPH::Vec3::sMax(q0, q1);
+			if (p_max.GetX() + radius < q_min.GetX() || q_max.GetX() + radius < p_min.GetX() ||
+					p_max.GetY() + radius < q_min.GetY() || q_max.GetY() + radius < p_min.GetY() ||
+					p_max.GetZ() + radius < q_min.GetZ() || q_max.GetZ() + radius < p_min.GetZ()) {
+				continue;
+			}
+
+			float s = 0.0f, t = 0.0f;
+			JPH::Vec3 near_a = JPH::Vec3::sZero(), near_b = JPH::Vec3::sZero();
+			if (!closest_soft_edge_edge(p0, p1, q0, q1, s, t, near_a, near_b)) {
+				continue;
+			}
+			const JPH::Vec3 separation = near_b - near_a;
+			const float distance_sq = separation.LengthSq();
+			if (!Math::is_finite(distance_sq) || distance_sq >= radius * radius) {
+				continue;
+			}
+			const float wa0 = 1.0f - s, wa1 = s;
+			const float wb0 = 1.0f - t, wb1 = t;
+			const float inverse_mass_sum = wa0 * wa0 * a0.mInvMass + wa1 * wa1 * a1.mInvMass +
+					wb0 * wb0 * b0.mInvMass + wb1 * wb1 * b1.mInvMass;
+			if (!Math::is_finite(inverse_mass_sum) || inverse_mass_sum <= 0.0f) {
+				continue;
+			}
+
+			const JPH::Vec3 vel_a = rotation_a * (wa0 * a0.mVelocity + wa1 * a1.mVelocity);
+			const JPH::Vec3 vel_b = rotation_b * (wb0 * b0.mVelocity + wb1 * b1.mVelocity);
+			const JPH::Vec3 relative_velocity = vel_b - vel_a;
+			const float distance = Math::sqrt(MAX(distance_sq, 0.0f));
+			JPH::Vec3 normal;
+			if (distance > 1.0e-6f) {
+				normal = separation / distance;
+			} else {
+				const JPH::Vec3 crossing = (p1 - p0).Cross(q1 - q0);
+				if (crossing.LengthSq() > SOFT_EDGE_EPSILON) {
+					normal = crossing.Normalized();
+					if (normal.Dot(center_delta) < 0.0f) {
+						normal = -normal;
+					}
+				} else {
+					normal = center_delta.LengthSq() > SOFT_EDGE_EPSILON ? center_delta.Normalized() : JPH::Vec3::sAxisY();
+				}
+				if (normal.Dot(relative_velocity) > 0.0f) {
+					normal = -normal;
+				}
+			}
+			const float normal_speed = relative_velocity.Dot(normal);
+			if (!Math::is_finite(normal_speed)) {
+				continue;
+			}
+			const float recovery_speed = MIN((radius - distance) * bias_per_step, MAX_SOFT_SOFT_PENETRATION_BIAS);
+			const float correction = MIN(MAX(recovery_speed - normal_speed, 0.0f), MAX_SOFT_SOFT_CONTACT_SPEED_CORRECTION);
+			if (correction <= 0.0f) {
+				continue;
+			}
+			const float normal_impulse = correction / inverse_mass_sum;
+			if (!Math::is_finite(normal_impulse)) {
+				continue;
+			}
+			JPH::Vec3 impulse = normal * normal_impulse;
+			const JPH::Vec3 tangent_velocity = relative_velocity - normal * normal_speed;
+			const float tangent_speed_sq = tangent_velocity.LengthSq();
+			if (friction > 0.0f && Math::is_finite(tangent_speed_sq) && tangent_speed_sq > SOFT_EDGE_EPSILON) {
+				const float tangent_speed = Math::sqrt(tangent_speed_sq);
+				const float tangent_impulse = MIN(tangent_speed / inverse_mass_sum, friction * normal_impulse);
+				impulse -= tangent_velocity * (tangent_impulse / tangent_speed);
+			}
+
+			const JPH::Vec3 local_impulse_a = inverse_a * impulse;
+			const JPH::Vec3 local_impulse_b = inverse_b * impulse;
+			a0.mVelocity -= local_impulse_a * (wa0 * a0.mInvMass);
+			a1.mVelocity -= local_impulse_a * (wa1 * a1.mInvMass);
+			b0.mVelocity += local_impulse_b * (wb0 * b0.mInvMass);
+			b1.mVelocity += local_impulse_b * (wb1 * b1.mInvMass);
+		}
+	}
+}
+
 static void clear_pending_index(AHashMap<uint32_t, uint32_t> &r_indices) {
 	if (r_indices.get_capacity() > MAX_RETAINED_PENDING_INDEX_SLOTS) {
 		r_indices.reset();
