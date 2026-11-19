@@ -520,7 +520,10 @@ private:
 	T *item_get_userdata(BVHHandle p_handle) const { return _get_extra(p_handle).userdata; }
 	int item_get_subindex(BVHHandle p_handle) const { return _get_extra(p_handle).subindex; }
 
-	void _unpair(BVHHandle p_from, BVHHandle p_to) {
+	// The caller is already iterating the adjacency list of p_from and
+	// supplies its current index, avoiding another linear search on removal.
+	void _unpair(BVHHandle p_from, BVHHandle p_to, uint32_t p_known_index) {
+		const BVHHandle index_owner = p_from;
 		tree._handle_sort(p_from, p_to);
 
 		typename BVHTREE_CLASS::ItemExtra &exa = tree._extra[p_from.id()];
@@ -534,8 +537,14 @@ private:
 		typename BVHTREE_CLASS::ItemPairs &pairs_from = tree._pairs[p_from.id()];
 		typename BVHTREE_CLASS::ItemPairs &pairs_to = tree._pairs[p_to.id()];
 
-		void *ud_from = pairs_from.remove_pair_to(p_to);
-		pairs_to.remove_pair_to(p_from);
+		void *ud_from;
+		if (index_owner == p_from) {
+			ud_from = pairs_from.remove_pair_at(p_known_index);
+			pairs_to.remove_pair_to(p_from);
+		} else {
+			ud_from = pairs_from.remove_pair_to(p_to);
+			pairs_to.remove_pair_at(p_known_index);
+		}
 
 #ifdef BVH_VERBOSE_PAIRING
 		print_line("_unpair " + itos(p_from.id()) + " from " + itos(p_to.id()));
@@ -567,7 +576,7 @@ private:
 	}
 
 	// returns true if unpair
-	bool _find_leavers_process_pair(typename BVHTREE_CLASS::ItemPairs &p_pairs_from, const BVHABB_CLASS &p_abb_from, BVHHandle p_from, BVHHandle p_to, bool p_full_check) {
+	bool _find_leavers_process_pair(typename BVHTREE_CLASS::ItemPairs &p_pairs_from, const BVHABB_CLASS &p_abb_from, BVHHandle p_from, BVHHandle p_to, bool p_full_check, uint32_t p_pair_index) {
 		BVHABB_CLASS abb_to;
 		tree.item_get_ABB(p_to, abb_to);
 
@@ -594,7 +603,7 @@ private:
 			}
 		}
 
-		_unpair(p_from, p_to);
+		_unpair(p_from, p_to, p_pair_index);
 		return true;
 	}
 
@@ -608,7 +617,7 @@ private:
 		// remove from pairing list for every partner
 		for (uint32_t n = 0; n < p_from.extended_pairs.size(); n++) {
 			BVHHandle h_to = p_from.extended_pairs[n].handle;
-			if (_find_leavers_process_pair(p_from, abb_from, p_handle, h_to, p_full_check)) {
+			if (_find_leavers_process_pair(p_from, abb_from, p_handle, h_to, p_full_check, n)) {
 				// we need to keep the counter n up to date if we deleted a pair
 				// as the number of items in p_from.extended_pairs will have decreased by 1
 				// and we don't want to miss an item
@@ -681,7 +690,7 @@ private:
 		// can't easily use a for loop here, because removing changes the size of the list
 		while (p_from.extended_pairs.size()) {
 			BVHHandle h_to = p_from.extended_pairs[0].handle;
-			_unpair(p_handle, h_to);
+			_unpair(p_handle, h_to, 0);
 		}
 	}
 
