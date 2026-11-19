@@ -296,4 +296,60 @@ TEST_CASE("[PhysicsSpeculative] Negative circle-pair cache still bypasses stale 
 	CHECK_FALSE(recycling.can_reuse_separation(111, 222, true, false));
 }
 
+
+TEST_CASE("[PhysicsSpeculative] Radial early rejection agrees with exact 2D TOI") {
+	uint32_t state = 0x5A17C123U;
+	auto random = [&]() -> real_t {
+		state = state * 1664525U + 1013904223U;
+		return real_t((state >> 8) % 10001U) / real_t(10000.0);
+	};
+	const Vector2 center_a;
+	Vector2 point_a, point_b, normal;
+	for (int i = 0; i < 4096; ++i) {
+		const Vector2 center_b(real_t(2.05) + random(), random() - real_t(0.5));
+		const Vector2 velocity_a(real_t(12.0) * random() - real_t(3.0),
+				real_t(16.0) * random() - real_t(8.0));
+		const Vector2 velocity_b(real_t(4.0) * random() - real_t(2.0),
+				real_t(4.0) * random() - real_t(2.0));
+		const real_t step = real_t(0.2);
+		const double initial_gap = double(center_b.length()) - 2.0;
+		CHECK(initial_gap > 0.0);
+		CHECK(initial_gap <= 2.0);
+		double toi = 0.0;
+		const bool expected = physics_ccd_sphere_toi(-center_b, (velocity_a - velocity_b) * step, 2.0, toi);
+		const bool actual = physics_speculative_sphere_contact(center_a, real_t(1), center_b, real_t(1),
+				velocity_a, velocity_b, step, real_t(2), point_a, point_b, normal);
+		CHECK(actual == expected);
+	}
+}
+
+TEST_CASE("[PhysicsSpeculative] Radial early rejection agrees with exact 3D TOI") {
+	uint32_t state = 0x4DE7B123U;
+	auto random = [&]() -> real_t {
+		state = state * 1103515245U + 12345U;
+		return real_t((state >> 8) % 10001U) / real_t(10000.0);
+	};
+	const Vector3 center_a;
+	Vector3 point_a, point_b, normal;
+	for (int i = 0; i < 4096; ++i) {
+		const Vector3 center_b(real_t(2.05) + random(),
+				random() - real_t(0.5), random() - real_t(0.5));
+		const Vector3 velocity_a(real_t(12.0) * random() - real_t(3.0),
+				real_t(16.0) * random() - real_t(8.0),
+				real_t(16.0) * random() - real_t(8.0));
+		const Vector3 velocity_b(real_t(4.0) * random() - real_t(2.0),
+				real_t(4.0) * random() - real_t(2.0),
+				real_t(4.0) * random() - real_t(2.0));
+		const real_t step = real_t(0.2);
+		const double initial_gap = double(center_b.length()) - 2.0;
+		CHECK(initial_gap > 0.0);
+		CHECK(initial_gap <= 2.0);
+		double toi = 0.0;
+		const bool expected = physics_ccd_sphere_toi(-center_b, (velocity_a - velocity_b) * step, 2.0, toi);
+		const bool actual = physics_speculative_sphere_contact(center_a, real_t(1), center_b, real_t(1),
+				velocity_a, velocity_b, step, real_t(2), point_a, point_b, normal);
+		CHECK(actual == expected);
+	}
+}
+
 } // namespace TestPhysicsSpeculativeSphereContact
