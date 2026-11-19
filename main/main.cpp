@@ -3439,8 +3439,13 @@ Error Main::setup2(bool p_show_boot_logo) {
 		if (err != OK || display_server == nullptr) {
 			ERR_PRINT("Unable to create DisplayServer, all display drivers failed.\nUse \"--headless\" command line argument to run the engine in headless mode if this is desired (e.g. for continuous integration).");
 
-			memdelete(display_server);
-			display_server = nullptr;
+			finalize_display();
+#ifndef NAVIGATION_2D_DISABLED
+			NavigationServer2DManager::finalize_server_manager();
+#endif // NAVIGATION_2D_DISABLED
+#ifndef NAVIGATION_3D_DISABLED
+			NavigationServer3DManager::finalize_server_manager();
+#endif // NAVIGATION_3D_DISABLED
 
 			GDExtensionManager::get_singleton()->deinitialize_extensions(GDExtension::INITIALIZATION_LEVEL_SERVERS);
 			uninitialize_modules(MODULE_INITIALIZATION_LEVEL_SERVERS);
@@ -4400,6 +4405,22 @@ int Main::start() {
 		OS::get_singleton()->alert("Couldn't detect whether to run the editor, the project manager or a specific project. Aborting.");
 		ERR_FAIL_V_MSG(EXIT_FAILURE, "Couldn't detect whether to run the editor, the project manager or a specific project. Aborting.");
 	}
+
+	if (!script.is_empty()) {
+		// Register autoload names before the script loads so it can reference them.
+		// A SceneTree main loop replaces these with the real nodes later.
+		if (ProjectSettings::get_singleton()->is_project_loaded()) {
+			const HashMap<StringName, ProjectSettings::AutoloadInfo> &autoloads = ProjectSettings::get_singleton()->get_autoload_list();
+			for (const KeyValue<StringName, ProjectSettings::AutoloadInfo> &E : autoloads) {
+				const ProjectSettings::AutoloadInfo &info = E.value;
+				if (info.is_singleton) {
+					for (int i = 0; i < ScriptServer::get_language_count(); i++) {
+						ScriptServer::get_language(i)->add_global_constant(info.name, Variant());
+					}
+				}
+			}
+		}
+	}
 #endif
 
 	MainLoop *main_loop = nullptr;
@@ -4544,7 +4565,7 @@ int Main::start() {
 			if (!game_path.is_empty() || !script.is_empty()) {
 				//autoload
 				OS::get_singleton()->benchmark_begin_measure("Startup", "Load Autoloads");
-				HashMap<StringName, ProjectSettings::AutoloadInfo> autoloads(ProjectSettings::get_singleton()->get_autoload_list());
+				const HashMap<StringName, ProjectSettings::AutoloadInfo> &autoloads = ProjectSettings::get_singleton()->get_autoload_list();
 
 				//first pass, add the constants so they exist before any script is loaded
 				for (const KeyValue<StringName, ProjectSettings::AutoloadInfo> &E : autoloads) {

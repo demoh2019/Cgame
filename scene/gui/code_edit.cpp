@@ -45,6 +45,8 @@
 #include "servers/display/accessibility_server.h"
 #include "servers/rendering/rendering_server.h"
 
+#include <utility>
+
 void CodeEdit::_apply_project_settings() {
 	symbol_tooltip_timer->set_wait_time(GLOBAL_GET_CACHED(double, "gui/timers/tooltip_delay_sec"));
 }
@@ -3903,6 +3905,8 @@ void CodeEdit::_filter_code_completion_candidates_impl() {
 		}
 
 		/* Convert back into options. */
+		// The result size is known: reserve once instead of reallocating per candidate.
+		code_completion_options_new.reserve(completion_options.size());
 		int max_width = 0;
 		for (i = 0; i < completion_options.size(); i++) {
 			CodeCompletionOption option;
@@ -3935,7 +3939,7 @@ void CodeEdit::_filter_code_completion_candidates_impl() {
 			}
 		}
 		code_completion_ac_items.clear();
-		code_completion_options = code_completion_options_new;
+		code_completion_options = std::move(code_completion_options_new);
 		code_completion_ac_items.resize_initialized(code_completion_options.size());
 
 		code_completion_caret_column = caret_column;
@@ -4012,6 +4016,7 @@ void CodeEdit::_filter_code_completion_candidates_impl() {
 	bool single_quote = in_string != -1 && first_quote_col > 0 && delimiters[in_string].start_key == "'";
 
 	Vector<CodeCompletionOption> code_completion_options_new;
+	code_completion_options_new.reserve(code_completion_option_sources.size());
 	code_completion_base = string_to_complete;
 
 	/* Don't autocomplete setting numerical values. */
@@ -4106,19 +4111,20 @@ void CodeEdit::_filter_code_completion_candidates_impl() {
 					}
 				}
 			}
-			all_possible_subsequence_matches = next_subsequence_matches;
+			all_possible_subsequence_matches = std::move(next_subsequence_matches);
 		}
 		// go through all possible matches to get the best one as defined by CodeCompletionOptionCompare
 		if (all_possible_subsequence_matches.size() > 0) {
 			option.matches = all_possible_subsequence_matches[0];
 			option.matches_dirty = true;
 			option.get_option_characteristics(string_to_complete);
-			all_possible_subsequence_matches = all_possible_subsequence_matches.slice(1);
-			if (all_possible_subsequence_matches.size() > 0) {
+			// Avoid allocating another vector just to exclude the first match.
+			if (all_possible_subsequence_matches.size() > 1) {
 				CodeCompletionOptionCompare compare;
 				CodeCompletionOption compared_option = option;
 				compared_option.clear_characteristics();
-				for (Vector<Pair<int, int>> &matches : all_possible_subsequence_matches) {
+				for (int match_idx = 1; match_idx < all_possible_subsequence_matches.size(); match_idx++) {
+					const Vector<Pair<int, int>> &matches = all_possible_subsequence_matches[match_idx];
 					compared_option.matches = matches;
 					compared_option.matches_dirty = true;
 					compared_option.get_option_characteristics(string_to_complete);
@@ -4159,7 +4165,7 @@ void CodeEdit::_filter_code_completion_candidates_impl() {
 		}
 	}
 	code_completion_ac_items.clear();
-	code_completion_options = code_completion_options_new;
+	code_completion_options = std::move(code_completion_options_new);
 	code_completion_ac_items.resize_initialized(code_completion_options.size());
 
 	code_completion_caret_column = caret_column;

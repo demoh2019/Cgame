@@ -1,0 +1,50 @@
+name: Dictionary assignment memory and conversion regressions
+
+on:
+  push:
+    branches: [develop]
+    paths:
+      - 'core/variant/dictionary.cpp'
+      - 'core/variant/container_type_validate.h'
+      - 'tests/core/variant/test_dictionary.cpp'
+      - 'misc/scripts/tests/test_dictionary_assign_hotpath.py'
+      - '.github/workflows/dictionary-assign-hotpath.yml'
+  pull_request:
+    paths:
+      - 'core/variant/dictionary.cpp'
+      - 'core/variant/container_type_validate.h'
+      - 'tests/core/variant/test_dictionary.cpp'
+      - 'misc/scripts/tests/test_dictionary_assign_hotpath.py'
+      - '.github/workflows/dictionary-assign-hotpath.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  contracts:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - name: Check conversion and atomicity source contracts
+        run: |
+          python3 -m py_compile misc/scripts/tests/test_dictionary_assign_hotpath.py
+          python3 -m unittest discover -s misc/scripts/tests -p test_dictionary_assign_hotpath.py -v
+
+  native:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+      - uses: ./.github/actions/godot-deps
+      - name: Compile C++ native test-enabled editor
+        uses: ./.github/actions/godot-build
+        with:
+          platform: linuxbsd
+          target: editor
+          scons-flags: dev_build=yes tests=yes debug_symbols=no module_mono_enabled=no module_text_server_fb_enabled=yes accesskit=no -j2
+      - name: Run Dictionary assign regression suite
+        run: ./bin/godot.linuxbsd.editor.dev.x86_64 --headless --test --test-case="*[Dictionary] assign*"

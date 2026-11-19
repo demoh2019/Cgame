@@ -1,0 +1,79 @@
+name: Physics broadphase source contracts
+
+on:
+  push:
+    branches: [develop]
+    paths:
+      - ".github/workflows/physics-exception-contracts.yml"
+      - "core/math/bvh.h"
+      - "core/math/bvh_cull.inc"
+      - "modules/godot_physics_2d/**"
+      - "modules/godot_physics_3d/**"
+      - "servers/physics_xpbd_area.h"
+      - "servers/physics_xpbd_dihedral.h"
+      - "servers/physics_xpbd_self_collision.h"
+      - "servers/physics_xpbd_edge_collision.h"
+      - "servers/physics_xpbd_soft_ccd.h"
+      - "servers/physics_3d/physics_server_3d.cpp"
+      - "tests/stress/physics_exception_pairs_*.gd"
+      - "tests/stress/physics_bvh_streaming_*.gd"
+      - "tests/stress/physics_compound_filter_batch_*.gd"
+      - "tests/stress/physics_soft_body_xpbd_area_3d.gd"
+      - "tests/stress/physics_soft_body_xpbd_volume_3d.gd"
+      - "tests/stress/physics_soft_body_xpbd_dihedral_3d.gd"
+      - "tests/stress/physics_soft_body_self_collision_3d.gd"
+      - "tests/stress/physics_soft_body_edge_collision_3d.gd"
+      - "tests/stress/physics_soft_body_ccd_3d.gd"
+      - "tests/stress/physics_contact_angular_friction_3d.gd"
+      - "tests/stress/physics_motion_exclusions_*.gd"
+      - "tests/stress/stress.gd"
+      - "tests/stress/run.py"
+      - "tests/stress/project.godot"
+      - "tests/stress/test_physics_bvh_streaming.py"
+      - "tests/stress/test_physics_compound_filter_batch.py"
+      - "tests/stress/test_physics_xpbd_area.py"
+      - "tests/stress/test_physics_xpbd_volume.py"
+      - "tests/stress/test_physics_xpbd_dihedral.py"
+      - "tests/stress/test_physics_xpbd_self_collision.py"
+      - "tests/stress/test_physics_xpbd_edge_collision.py"
+      - "tests/stress/test_physics_xpbd_soft_ccd.py"
+      - "tests/stress/test_physics_contact_angular_friction.py"
+      - "tests/stress/test_physics_early_pair_filter.py"
+      - "tests/stress/test_physics_motion_shape_pruning.py"
+  pull_request:
+    branches: [develop]
+    paths:
+      - "core/math/bvh.h"
+      - "core/math/bvh_cull.inc"
+      - "modules/godot_physics_2d/**"
+      - "modules/godot_physics_3d/**"
+      - "servers/physics_xpbd_area.h"
+      - "servers/physics_xpbd_dihedral.h"
+      - "servers/physics_xpbd_self_collision.h"
+      - "servers/physics_xpbd_edge_collision.h"
+      - "servers/physics_xpbd_soft_ccd.h"
+      - "servers/physics_3d/physics_server_3d.cpp"
+      - "tests/stress/**"
+      - ".github/workflows/physics-exception-contracts.yml"
+  workflow_dispatch:
+
+jobs:
+  source-contracts:
+    name: Python physics source contracts
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - name: Check early pair filtering and shape-level BVH query contracts
+        run: |
+          python3 -m unittest discover -s tests/stress -p 'test_physics_early_pair_filter.py' -v
+          python3 -m unittest discover -s tests/stress -p 'test_physics_motion_shape_pruning.py' -v
+          python3 -m unittest discover -s tests/stress -p 'test_physics_bvh_streaming.py' -v
+          python3 -m unittest discover -s tests/stress -p 'test_physics_compound_filter_batch.py' -v
+          python3 -m unittest discover -s tests/stress -p 'test_physics_xpbd_area.py' -v
+          python3 -m unittest discover -s tests/stress -p 'test_physics_xpbd_volume.py' -v
+          python3 -m unittest discover -s tests/stress -p 'test_physics_xpbd_dihedral.py' -v
+          python3 -m unittest discover -s tests/stress -p 'test_physics_xpbd_self_collision.py' -v
+          python3 -m unittest discover -s tests/stress -p 'test_physics_xpbd_edge_collision.py' -v
+          python3 -m unittest discover -s tests/stress -p 'test_physics_xpbd_soft_ccd.py' -v
+          python3 -m unittest discover -s tests/stress -p 'test_physics_contact_angular_friction.py' -v

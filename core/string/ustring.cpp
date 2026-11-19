@@ -44,6 +44,7 @@ STATIC_ASSERT_INCOMPLETE_TYPE(class, Object);
 #include "core/string/string_name.h"
 #include "core/string/translation_server.h"
 #include "core/string/ucaps.h"
+#include "core/templates/hash_set.h"
 #include "core/variant/variant.h"
 #include "core/version_generated.gen.h"
 
@@ -69,8 +70,39 @@ static _FORCE_INLINE_ char32_t lower_case(char32_t p_char) {
 // Case-insensitive version of are_spans_equal
 template <typename T1, typename T2>
 static bool strings_equal_lower(const T1 *p_lhs_begin, const T2 *p_rhs_begin, size_t p_len) {
+	// For long common prefixes, a different final character otherwise makes
+	// findn/rfindn/countn compare the entire candidate before rejecting it.
+	// Only probe the tail after two exact prefix matches, so typical misses
+	// continue through the original short-circuiting loop unchanged.
+	if (p_len >= 32 &&
+			static_cast<uint32_t>(p_lhs_begin[0]) == static_cast<uint32_t>(p_rhs_begin[0]) &&
+			static_cast<uint32_t>(p_lhs_begin[1]) == static_cast<uint32_t>(p_rhs_begin[1])) {
+		const auto lhs = p_lhs_begin[p_len - 1];
+		const auto rhs = p_rhs_begin[p_len - 1];
+		if (static_cast<uint32_t>(lhs) != static_cast<uint32_t>(rhs)) {
+			if (static_cast<uint32_t>(lhs) < 128 && static_cast<uint32_t>(rhs) < 128) {
+				if (lower_case(lhs) != lower_case(rhs)) {
+					return false;
+				}
+			} else if (_find_lower(lhs) != _find_lower(rhs)) {
+				return false;
+			}
+		}
+	}
 	for (size_t i = 0; i < p_len; ++i) {
-		if (_find_lower(p_lhs_begin[i]) != _find_lower(p_rhs_begin[i])) {
+		const auto lhs = p_lhs_begin[i];
+		const auto rhs = p_rhs_begin[i];
+		if (static_cast<uint32_t>(lhs) == static_cast<uint32_t>(rhs)) {
+			continue;
+		}
+		// Avoid Unicode table lookups for the common ASCII search path.
+		// Mixed ASCII/Unicode comparisons still need Unicode case mapping
+		// (e.g. U+212A KELVIN SIGN matches ASCII 'k').
+		if (static_cast<uint32_t>(lhs) < 128 && static_cast<uint32_t>(rhs) < 128) {
+			if (lower_case(lhs) != lower_case(rhs)) {
+				return false;
+			}
+		} else if (_find_lower(lhs) != _find_lower(rhs)) {
 			return false;
 		}
 	}
@@ -341,7 +373,7 @@ bool String::operator==(const char32_t *p_str) const {
 }
 
 bool String::operator==(const String &p_str) const {
-	return span() == p_str.span();
+	return _cowdata.ptr() == p_str._cowdata.ptr() || span() == p_str.span();
 }
 
 bool String::operator==(const Span<char32_t> &p_str_range) const {
@@ -447,7 +479,8 @@ bool String::operator<(const String &p_str) const {
 }
 
 signed char String::nocasecmp_to(const String &p_str) const {
-	if (is_empty() && p_str.is_empty()) {
+	if (unlikely(p_str.ptr() == ptr())) {
+		// We have the same buffer (or are both null).
 		return 0;
 	}
 	if (is_empty()) {
@@ -467,10 +500,16 @@ signed char String::nocasecmp_to(const String &p_str) const {
 			return -1;
 		} else if (*that_str == 0) { // If at end of other, and not of this, we are greater.
 			return 1;
-		} else if (_find_upper(*this_str) < _find_upper(*that_str)) { // If current character in this is less, we are less.
-			return -1;
-		} else if (_find_upper(*this_str) > _find_upper(*that_str)) { // If current character in this is greater, we are greater.
-			return 1;
+		} else {
+			// Case fold each character once; ASCII skips the Unicode table lookup.
+			const char32_t this_upper = String::char_uppercase(*this_str);
+			const char32_t that_upper = String::char_uppercase(*that_str);
+			if (this_upper < that_upper) {
+				return -1;
+			}
+			if (this_upper > that_upper) {
+				return 1;
+			}
 		}
 
 		this_str++;
@@ -479,7 +518,8 @@ signed char String::nocasecmp_to(const String &p_str) const {
 }
 
 signed char String::casecmp_to(const String &p_str) const {
-	if (is_empty() && p_str.is_empty()) {
+	if (unlikely(p_str.ptr() == ptr())) {
+		// We have the same buffer (or are both null).
 		return 0;
 	}
 	if (is_empty()) {
@@ -640,9 +680,12 @@ static _FORCE_INLINE_ signed char naturalnocasecmp_to_base(const char32_t *p_thi
 			} else if (is_digit(*p_that_str)) {
 				return 1;
 			} else {
-				if (_find_upper(*p_this_str) < _find_upper(*p_that_str)) { // If current character in this is less, we are less.
+				const char32_t this_upper = String::char_uppercase(*p_this_str);
+				const char32_t that_upper = String::char_uppercase(*p_that_str);
+				if (this_upper < that_upper) {
 					return -1;
-				} else if (_find_upper(*p_this_str) > _find_upper(*p_that_str)) { // If current character in this is greater, we are greater.
+				}
+				if (this_upper > that_upper) {
 					return 1;
 				}
 
@@ -705,103 +748,130 @@ signed char String::filenocasecmp_to(const String &p_str) const {
 	return naturalnocasecmp_to_base(this_str, that_str);
 }
 
+// Split only at the original compound-word boundaries. Both conversion passes
+// use this predicate to avoid allocating a temporary list of word offsets.
+static _FORCE_INLINE_ bool _compound_word_boundary(const char32_t *p_chars, int p_length, int p_index) {
+	const char32_t previous = p_chars[p_index - 1];
+	const char32_t current = p_chars[p_index];
+	const bool prev_upper = is_unicode_upper_case(previous);
+	const bool prev_lower = is_unicode_lower_case(previous);
+	const bool prev_digit = is_digit(previous);
+	const bool curr_upper = is_unicode_upper_case(current);
+	const bool curr_lower = is_unicode_lower_case(current);
+	const bool curr_digit = is_digit(current);
+	const bool next_lower = p_index + 1 < p_length && is_unicode_lower_case(p_chars[p_index + 1]);
+
+	return (prev_lower && curr_upper) ||
+			((prev_upper || prev_digit) && curr_upper && next_lower) ||
+			(prev_digit && curr_lower && next_lower) ||
+			((prev_upper || prev_lower) && curr_digit);
+}
+
 String String::_separate_compound_words() const {
-	if (length() == 0) {
+	const int len = length();
+	if (len == 0) {
 		return *this;
 	}
+	const char32_t *src = get_data();
 
-	const char32_t *cstr = get_data();
-	int start_index = 0;
-	String new_string;
-
-	bool is_prev_upper = is_unicode_upper_case(cstr[0]);
-	bool is_prev_lower = is_unicode_lower_case(cstr[0]);
-	bool is_prev_digit = is_digit(cstr[0]);
-
-	for (int i = 1; i < length(); i++) {
-		const bool is_curr_upper = is_unicode_upper_case(cstr[i]);
-		const bool is_curr_lower = is_unicode_lower_case(cstr[i]);
-		const bool is_curr_digit = is_digit(cstr[i]);
-
-		bool is_next_lower = false;
-		if (i + 1 < length()) {
-			is_next_lower = is_unicode_lower_case(cstr[i + 1]);
-		}
-
-		const bool cond_a = is_prev_lower && is_curr_upper; // aA
-		const bool cond_b = (is_prev_upper || is_prev_digit) && is_curr_upper && is_next_lower; // AAa, 2Aa
-		const bool cond_c = is_prev_digit && is_curr_lower && is_next_lower; // 2aa
-		const bool cond_d = (is_prev_upper || is_prev_lower) && is_curr_digit; // A2, a2
-
-		if (cond_a || cond_b || cond_c || cond_d) {
-			new_string += substr(start_index, i - start_index) + " ";
-			start_index = i;
-		}
-
-		is_prev_upper = is_curr_upper;
-		is_prev_lower = is_curr_lower;
-		is_prev_digit = is_curr_digit;
+	// Count inserted spaces once, then allocate exactly one output buffer.
+	int separators = 0;
+	for (int i = 1; i < len; ++i) {
+		separators += _compound_word_boundary(src, len, i);
 	}
+	ERR_FAIL_COND_V_MSG(separators >= INT32_MAX - len, String(), "Compound word conversion result is too large.");
 
-	new_string += substr(start_index, size() - start_index);
-
-	for (int i = 0; i < new_string.size(); i++) {
-		const bool whitespace = is_whitespace(new_string[i]);
-		const bool underscore = is_underscore(new_string[i]);
-		const bool hyphen = is_hyphen(new_string[i]);
-
-		if (whitespace || underscore || hyphen) {
-			new_string[i] = ' ';
+	String result;
+	result.resize_uninitialized(len + separators + 1);
+	char32_t *dst = result.ptrw();
+	int written = 0;
+	for (int i = 0; i < len; ++i) {
+		if (i > 0 && _compound_word_boundary(src, len, i)) {
+			dst[written++] = ' ';
+		}
+		const char32_t ch = src[i];
+		if (is_whitespace(ch) || is_underscore(ch) || is_hyphen(ch)) {
+			dst[written++] = ' ';
+		} else {
+			dst[written++] = String::char_lowercase(ch);
 		}
 	}
+	dst[written] = 0;
+	return result;
+}
 
-	return new_string.to_lower();
+enum class _CompoundWordCase {
+	CAPITALIZE,
+	CAMEL,
+	PASCAL,
+};
+
+// The normalized words contain only space delimiters; scan them twice to
+// determine output size and then write each codepoint exactly once. This avoids
+// get_slice_count/get_slicec's repeated scans, per-slice String allocations and
+// repeated concatenation of growing output.
+static String _convert_compound_words(const String &p_words, _CompoundWordCase p_style) {
+	const int len = p_words.length();
+	const char32_t *src = p_words.get_data();
+	int output_len = 0;
+	int word_count = 0;
+	bool at_word_start = true;
+	for (int i = 0; i < len; ++i) {
+		if (src[i] == ' ') {
+			at_word_start = true;
+		} else {
+			if (at_word_start) {
+				if (p_style == _CompoundWordCase::CAPITALIZE && word_count > 0) {
+					output_len++;
+				}
+				++word_count;
+			}
+			++output_len;
+			at_word_start = false;
+		}
+	}
+	if (output_len == 0) {
+		return String();
+	}
+
+	String result;
+	result.resize_uninitialized(output_len + 1);
+	char32_t *dst = result.ptrw();
+	int written = 0;
+	at_word_start = true;
+	bool has_word = false;
+	for (int i = 0; i < len; ++i) {
+		const char32_t ch = src[i];
+		if (ch == ' ') {
+			at_word_start = true;
+			continue;
+		}
+		if (at_word_start) {
+			if (p_style == _CompoundWordCase::CAPITALIZE && has_word) {
+				dst[written++] = ' ';
+			}
+			dst[written++] = (p_style == _CompoundWordCase::CAMEL && !has_word) ?
+					String::char_lowercase(ch) : String::char_uppercase(ch);
+			has_word = true;
+			at_word_start = false;
+		} else {
+			dst[written++] = ch;
+		}
+	}
+	dst[written] = 0;
+	return result;
 }
 
 String String::capitalize() const {
-	String words = _separate_compound_words().strip_edges();
-	String ret;
-	for (int i = 0; i < words.get_slice_count(" "); i++) {
-		String slice = words.get_slicec(' ', i);
-		if (slice.length() > 0) {
-			slice[0] = _find_upper(slice[0]);
-			if (i > 0) {
-				ret += " ";
-			}
-			ret += slice;
-		}
-	}
-	return ret;
+	return _convert_compound_words(_separate_compound_words().strip_edges(), _CompoundWordCase::CAPITALIZE);
 }
 
 String String::to_camel_case() const {
-	String words = _separate_compound_words().strip_edges();
-	String ret;
-	for (int i = 0; i < words.get_slice_count(" "); i++) {
-		String slice = words.get_slicec(' ', i);
-		if (slice.length() > 0) {
-			if (i == 0) {
-				slice[0] = _find_lower(slice[0]);
-			} else {
-				slice[0] = _find_upper(slice[0]);
-			}
-			ret += slice;
-		}
-	}
-	return ret;
+	return _convert_compound_words(_separate_compound_words().strip_edges(), _CompoundWordCase::CAMEL);
 }
 
 String String::to_pascal_case() const {
-	String words = _separate_compound_words().strip_edges();
-	String ret;
-	for (int i = 0; i < words.get_slice_count(" "); i++) {
-		String slice = words.get_slicec(' ', i);
-		if (slice.length() > 0) {
-			slice[0] = _find_upper(slice[0]);
-			ret += slice;
-		}
-	}
-	return ret;
+	return _convert_compound_words(_separate_compound_words().strip_edges(), _CompoundWordCase::PASCAL);
 }
 
 String String::to_snake_case() const {
@@ -813,15 +883,70 @@ String String::to_kebab_case() const {
 }
 
 String String::get_with_code_lines() const {
-	const Vector<String> lines = split("\n");
-	String ret;
-	for (int i = 0; i < lines.size(); i++) {
-		if (i > 0) {
-			ret += "\n";
+	// Preserve the exact formatting of "%4d | " without allocating an array
+	// of lines, intermediate formatted Strings or concatenation buffers.
+	const Span<char32_t> source = span();
+	const uint64_t source_length = source.size();
+	uint64_t line_count = 1;
+	for (const char32_t c : source) {
+		if (c == '\n') {
+			line_count++;
 		}
-		ret += vformat("%4d | %s", i + 1, lines[i]);
 	}
-	return ret;
+
+	// Most line numbers use four columns plus " | ". Once the line number
+	// reaches five digits, each larger line number adds another column.
+	uint64_t result_length = source_length + line_count * 7;
+	for (uint64_t threshold = 10000; threshold <= line_count; threshold *= 10) {
+		result_length += line_count - threshold + 1;
+	}
+	ERR_FAIL_COND_V_MSG(result_length > INT32_MAX, String(), "Code with line numbers is too large.");
+
+	String result;
+	result.resize_uninitialized(result_length);
+	char32_t *output = result.ptrw();
+	uint64_t write_pos = 0;
+	uint64_t segment_start = 0;
+	uint64_t line_number = 1;
+
+	// Emit each prefix directly into one result buffer, then bulk-copy the
+	// original UTF-32 code units. Include the final empty line after '\n'.
+	for (uint64_t pos = 0; pos <= source_length; pos++) {
+		if (pos < source_length && source[pos] != '\n') {
+			continue;
+		}
+
+		char32_t number_buffer[20];
+		int digits = 0;
+		uint64_t number = line_number;
+		do {
+			number_buffer[digits++] = char32_t(U'0' + number % 10);
+			number /= 10;
+		} while (number != 0);
+		for (int i = digits; i < 4; i++) {
+			output[write_pos++] = U' ';
+		}
+		for (int i = digits - 1; i >= 0; i--) {
+			output[write_pos++] = number_buffer[i];
+		}
+		output[write_pos++] = U' ';
+		output[write_pos++] = U'|';
+		output[write_pos++] = U' ';
+
+		const uint64_t line_length = pos - segment_start;
+		if (line_length > 0) {
+			memcpy(output + write_pos, &source[segment_start], line_length * sizeof(char32_t));
+			write_pos += line_length;
+		}
+		if (pos < source_length) {
+			output[write_pos++] = U'\n';
+		}
+		segment_start = pos + 1;
+		line_number++;
+	}
+	DEV_ASSERT(write_pos == result_length);
+	output[write_pos] = 0;
+	return result;
 }
 
 int String::get_slice_count(const String &p_splitter) const {
@@ -864,84 +989,68 @@ int String::get_slice_count(const char *p_splitter) const {
 }
 
 String String::get_slice(const String &p_splitter, int p_slice) const {
-	if (is_empty() || p_splitter.is_empty()) {
+	if (is_empty() || p_splitter.is_empty() || p_slice < 0) {
 		return "";
 	}
 
-	int pos = 0;
-	int prev_pos = 0;
-	//int slices=1;
-	if (p_slice < 0) {
-		return "";
-	}
-	if (find(p_splitter) == -1) {
+	// Reuse the first search result rather than searching the first slice twice.
+	int pos = find(p_splitter);
+	if (pos == -1) {
 		return *this;
 	}
 
+	const int len = length();
+	const int splitter_length = p_splitter.length();
+	int prev_pos = 0;
 	int i = 0;
 	while (true) {
-		pos = find(p_splitter, pos);
-		if (pos == -1) {
-			pos = length(); //reached end
-		}
-
-		int from = prev_pos;
-		//int to=pos;
-
 		if (p_slice == i) {
-			return substr(from, pos - from);
+			return substr(prev_pos, pos - prev_pos);
 		}
-
-		if (pos == length()) { //reached end and no find
+		if (pos == len) {
 			break;
 		}
-		pos += p_splitter.length();
-		prev_pos = pos;
-		i++;
+		prev_pos = pos + splitter_length;
+		++i;
+		pos = find(p_splitter, prev_pos);
+		if (pos == -1) {
+			pos = len;
+		}
 	}
 
-	return ""; //no find!
+	return "";
 }
 
 String String::get_slice(const char *p_splitter, int p_slice) const {
-	if (is_empty() || p_splitter == nullptr || *p_splitter == '\0') {
+	if (is_empty() || p_splitter == nullptr || *p_splitter == '\0' || p_slice < 0) {
 		return "";
 	}
 
-	int pos = 0;
-	int prev_pos = 0;
-	//int slices=1;
-	if (p_slice < 0) {
-		return "";
-	}
-	if (find(p_splitter) == -1) {
+	int pos = find(p_splitter);
+	if (pos == -1) {
 		return *this;
 	}
 
-	int i = 0;
+	const int len = length();
 	const int splitter_length = strlen(p_splitter);
+	int prev_pos = 0;
+	int i = 0;
 	while (true) {
-		pos = find(p_splitter, pos);
-		if (pos == -1) {
-			pos = length(); //reached end
-		}
-
-		int from = prev_pos;
-		//int to=pos;
-
 		if (p_slice == i) {
-			return substr(from, pos - from);
+			return substr(prev_pos, pos - prev_pos);
 		}
-
-		if (pos == length()) { //reached end and no find
+		if (pos == len) {
 			break;
 		}
-		pos += splitter_length;
-		prev_pos = pos;
-		i++;
+		prev_pos = pos + splitter_length;
+		++i;
+		pos = find(p_splitter, prev_pos);
+		if (pos == -1) {
+			pos = len;
+		}
 	}
 
-	return ""; //no find!
+	return "";
 }
 
 String String::get_slicec(char32_t p_splitter, int p_slice) const {
@@ -982,10 +1091,12 @@ Vector<String> String::split_spaces(int p_maxsplit) const {
 		return ret;
 	}
 
+	// Include the terminating NUL, which ends the last token.
+	const char32_t *characters = ptr();
 	bool inside = false;
 
 	while (true) {
-		bool empty = operator[](i) < 33;
+		bool empty = characters[i] < 33;
 
 		if (i == 0) {
 			inside = !empty;
@@ -1026,11 +1137,18 @@ Vector<String> String::split(const String &p_splitter, bool p_allow_empty, int p
 	}
 
 	int from = 0;
-	int len = length();
+	const int len = length();
+	const int splitter_length = p_splitter.length();
 
 	while (true) {
+		// With empty tokens allowed, the split limit always applies at the
+		// current offset. Avoid searching the (possibly huge) remaining tail.
+		if (p_allow_empty && p_maxsplit > 0 && ret.size() == p_maxsplit) {
+			ret.push_back(substr(from));
+			break;
+		}
 		int end;
-		if (p_splitter.is_empty()) {
+		if (splitter_length == 0) {
 			end = from + 1;
 		} else {
 			end = find(p_splitter, from);
@@ -1057,7 +1175,7 @@ Vector<String> String::split(const String &p_splitter, bool p_allow_empty, int p
 			break;
 		}
 
-		from = end + p_splitter.length();
+		from = end + splitter_length;
 	}
 
 	return ret;
@@ -1074,10 +1192,14 @@ Vector<String> String::split(const char *p_splitter, bool p_allow_empty, int p_m
 	}
 
 	int from = 0;
-	int len = length();
+	const int len = length();
 	const int splitter_length = strlen(p_splitter);
 
 	while (true) {
+		if (p_allow_empty && p_maxsplit > 0 && ret.size() == p_maxsplit) {
+			ret.push_back(substr(from));
+			break;
+		}
 		int end;
 		if (p_splitter == nullptr || *p_splitter == '\0') {
 			end = from + 1;
@@ -1197,6 +1319,11 @@ Vector<String> String::rsplit(const char *p_splitter, bool p_allow_empty, int p_
 	return ret;
 }
 
+// The bounded parser reads directly from the UTF-32 input. Splitters do not
+// require temporarily writing NULs into a copy of the entire string.
+template <typename C, bool p_bounded = false>
+static double built_in_strtod(const C *p_string, C **r_end = nullptr, const C *p_limit = nullptr);
+
 Vector<double> String::split_floats(const String &p_splitter, bool p_allow_empty) const {
 	Vector<double> ret;
 	int from = 0;
@@ -1205,16 +1332,14 @@ Vector<double> String::split_floats(const String &p_splitter, bool p_allow_empty
 		return ret;
 	}
 
-	String buffer = *this;
+	const char32_t *const characters = get_data();
 	while (true) {
 		int end = find(p_splitter, from);
 		if (end < 0) {
 			end = len;
 		}
 		if (p_allow_empty || (end > from)) {
-			buffer[end] = 0;
-			ret.push_back(String::to_float(&buffer.get_data()[from]));
-			buffer[end] = _cowdata.get(end);
+			ret.push_back(built_in_strtod<char32_t, true>(characters + from, nullptr, characters + end));
 		}
 
 		if (end == len) {
@@ -1235,7 +1360,7 @@ Vector<float> String::split_floats_mk(const Vector<String> &p_splitters, bool p_
 		return ret;
 	}
 
-	String buffer = *this;
+	const char32_t *const characters = get_data();
 	while (true) {
 		int idx = 0;
 		int end = findmk(p_splitters, from, &idx);
@@ -1247,9 +1372,7 @@ Vector<float> String::split_floats_mk(const Vector<String> &p_splitters, bool p_
 		}
 
 		if (p_allow_empty || (end > from)) {
-			buffer[end] = 0;
-			ret.push_back(String::to_float(&buffer.get_data()[from]));
-			buffer[end] = _cowdata.get(end);
+			ret.push_back(built_in_strtod<char32_t, true>(characters + from, nullptr, characters + end));
 		}
 
 		if (end == len) {
@@ -1362,11 +1485,11 @@ String String::join(const Vector<String> &p_parts) const {
 	return ret;
 }
 
-char32_t String::char_uppercase(char32_t p_char) {
+char32_t String::_char_uppercase_table(char32_t p_char) {
 	return _find_upper(p_char);
 }
 
-char32_t String::char_lowercase(char32_t p_char) {
+char32_t String::_char_lowercase_table(char32_t p_char) {
 	return _find_lower(p_char);
 }
 
@@ -1375,17 +1498,35 @@ String String::to_upper() const {
 		return *this;
 	}
 
-	String upper;
-	upper.resize_uninitialized(size());
 	const char32_t *old_ptr = ptr();
-	char32_t *upper_ptrw = upper.ptrw();
-
-	while (*old_ptr) {
-		*upper_ptrw++ = _find_upper(*old_ptr++);
+	const int len = length();
+	int first_change = 0;
+	for (; first_change < len && old_ptr[first_change]; ++first_change) {
+		const char32_t ch = old_ptr[first_change];
+		const char32_t mapped = ch < 128 ? (is_ascii_lower_case(ch) ? ch - ('a' - 'A') : ch) : _find_upper(ch);
+		if (mapped != ch) {
+			break;
+		}
 	}
 
-	*upper_ptrw = 0;
+	// Already uppercase: share the existing copy-on-write buffer.
+	if (first_change == len) {
+		return *this;
+	}
 
+	String upper;
+	upper.resize_uninitialized(size());
+	char32_t *upper_ptrw = upper.ptrw();
+	if (first_change > 0) {
+		memcpy(upper_ptrw, old_ptr, first_change * sizeof(char32_t));
+	}
+
+	int i = first_change;
+	for (; i < len && old_ptr[i]; ++i) {
+		const char32_t ch = old_ptr[i];
+		upper_ptrw[i] = ch < 128 ? (is_ascii_lower_case(ch) ? ch - ('a' - 'A') : ch) : _find_upper(ch);
+	}
+	upper_ptrw[i] = 0;
 	return upper;
 }
 
@@ -1394,17 +1535,35 @@ String String::to_lower() const {
 		return *this;
 	}
 
-	String lower;
-	lower.resize_uninitialized(size());
 	const char32_t *old_ptr = ptr();
-	char32_t *lower_ptrw = lower.ptrw();
-
-	while (*old_ptr) {
-		*lower_ptrw++ = _find_lower(*old_ptr++);
+	const int len = length();
+	int first_change = 0;
+	for (; first_change < len && old_ptr[first_change]; ++first_change) {
+		const char32_t ch = old_ptr[first_change];
+		const char32_t mapped = ch < 128 ? (is_ascii_upper_case(ch) ? ch + ('a' - 'A') : ch) : _find_lower(ch);
+		if (mapped != ch) {
+			break;
+		}
 	}
 
-	*lower_ptrw = 0;
+	// Already lowercase: share the existing copy-on-write buffer.
+	if (first_change == len) {
+		return *this;
+	}
 
+	String lower;
+	lower.resize_uninitialized(size());
+	char32_t *lower_ptrw = lower.ptrw();
+	if (first_change > 0) {
+		memcpy(lower_ptrw, old_ptr, first_change * sizeof(char32_t));
+	}
+
+	int i = first_change;
+	for (; i < len && old_ptr[i]; ++i) {
+		const char32_t ch = old_ptr[i];
+		lower_ptrw[i] = ch < 128 ? (is_ascii_upper_case(ch) ? ch + ('a' - 'A') : ch) : _find_lower(ch);
+	}
+	lower_ptrw[i] = 0;
 	return lower;
 }
 
@@ -2361,7 +2520,7 @@ bool String::is_numeric() const {
 	return true; // TODO: Use the parser below for this instead
 }
 
-template <typename C>
+template <typename C, bool p_bounded>
 static double built_in_strtod(
 		/* A decimal ASCII floating-point number,
 		 * optionally preceded by white space. Must
@@ -2377,7 +2536,7 @@ static double built_in_strtod(
 		const C *p_string,
 		/* If non-nullptr, store terminating Cacter's
 		 * address here. */
-		C **r_end = nullptr) {
+		C **r_end, const C *p_limit) {
 	/* Largest possible base 10 exponent. Any
 	 * exponent larger than this will already
 	 * produce underflow or overflow, so there's
@@ -2421,33 +2580,64 @@ static double built_in_strtod(
 	int decPt;
 	/* Temporarily holds location of exponent in string. */
 	const C *pExp;
+	/* Track leading zeros without counting them among significant digits. */
+	bool skippedZeros = false;
+	/* Zero digits following the decimal point before the first nonzero digit. */
+	int fracZeros = 0;
+
+	// Treat the end of a split token exactly like the terminating NUL.
+	// The common unbounded path is resolved at compile time and remains
+	// unchanged; only split_floats() uses the extra range check.
+	const auto get_char = [p_limit](const C *p_pos) -> C {
+		if constexpr (p_bounded) {
+			return p_pos < p_limit ? *p_pos : C(0);
+		}
+		return *p_pos;
+	};
 
 	/*
 	 * Strip off leading blanks and check for a sign.
 	 */
 
 	p = p_string;
-	while (*p == ' ' || *p == '\t' || *p == '\n') {
+	while (get_char(p) == ' ' || get_char(p) == '\t' || get_char(p) == '\n') {
 		p += 1;
 	}
-	if (*p == '-') {
+	if (get_char(p) == '-') {
 		sign = true;
 		p += 1;
 	} else {
-		if (*p == '+') {
+		if (get_char(p) == '+') {
 			p += 1;
 		}
 		sign = false;
 	}
 
 	/*
-	 * Count the number of digits in the mantissa (including the decimal
-	 * point), and also locate the decimal point.
+	 * Skip leading zeros to preserve the full 18 significant digit budget.
+	 * For a zero integer part, skip zeros after the decimal point as well.
+	 */
+	while (*p == '0') {
+		p += 1;
+		skippedZeros = true;
+	}
+	if (*p == '.' && *(p + 1) == '0') {
+		p += 1;
+		while (*p == '0') {
+			skippedZeros = true;
+			fracZeros += 1;
+			p += 1;
+		}
+	}
+
+	/*
+	 * Count mantissa digits and find the decimal point.
+	 * A skipped decimal point starts at index zero.
 	 */
 
-	decPt = -1;
+	decPt = fracZeros > 0 ? 0 : -1;
 	for (mantSize = 0;; mantSize += 1) {
-		c = *p;
+		c = get_char(p);
 		if (!is_digit(c)) {
 			if ((c != '.') || (decPt >= 0)) {
 				break;
@@ -2468,38 +2658,40 @@ static double built_in_strtod(
 	p -= mantSize;
 	if (decPt < 0) {
 		decPt = mantSize;
-	} else {
+	} else if (fracZeros == 0) {
 		mantSize -= 1; /* One of the digits was the point. */
 	}
 	if (mantSize > 18) {
-		fracExp = decPt - 18;
+		fracExp = decPt - 18 - fracZeros;
 		mantSize = 18;
 	} else {
-		fracExp = decPt - mantSize;
+		fracExp = decPt - mantSize - fracZeros;
 	}
 	if (mantSize == 0) {
 		fraction = 0.0;
-		p = p_string;
-		goto done;
+		if (!skippedZeros) {
+			p = p_string;
+			goto done;
+		}
 	} else {
 		int frac1, frac2;
 
 		frac1 = 0;
 		for (; mantSize > 9; mantSize -= 1) {
-			c = *p;
+			c = get_char(p);
 			p += 1;
 			if (c == '.') {
-				c = *p;
+				c = get_char(p);
 				p += 1;
 			}
 			frac1 = 10 * frac1 + (c - '0');
 		}
 		frac2 = 0;
 		for (; mantSize > 0; mantSize -= 1) {
-			c = *p;
+			c = get_char(p);
 			p += 1;
 			if (c == '.') {
-				c = *p;
+				c = get_char(p);
 				p += 1;
 			}
 			frac2 = 10 * frac2 + (c - '0');
@@ -2512,23 +2704,23 @@ static double built_in_strtod(
 	 */
 
 	p = pExp;
-	if ((*p == 'E') || (*p == 'e')) {
+	if ((get_char(p) == 'E') || (get_char(p) == 'e')) {
 		p += 1;
-		if (*p == '-') {
+		if (get_char(p) == '-') {
 			expSign = true;
 			p += 1;
 		} else {
-			if (*p == '+') {
+			if (get_char(p) == '+') {
 				p += 1;
 			}
 			expSign = false;
 		}
-		if (!is_digit(char32_t(*p))) {
+		if (!is_digit(char32_t(get_char(p)))) {
 			p = pExp;
 			goto done;
 		}
-		while (is_digit(char32_t(*p))) {
-			exp = exp * 10 + (*p - '0');
+		while (is_digit(char32_t(get_char(p)))) {
+			exp = exp * 10 + (get_char(p) - '0');
 			p += 1;
 		}
 	}
@@ -2884,7 +3076,33 @@ String String::insert(int p_at_pos, const String &p_string) const {
 String String::erase(int p_pos, int p_chars) const {
 	ERR_FAIL_COND_V_MSG(p_pos < 0, "", vformat("Invalid starting position for `String.erase()`: %d. Starting position must be positive or zero.", p_pos));
 	ERR_FAIL_COND_V_MSG(p_chars < 0, "", vformat("Invalid character count for `String.erase()`: %d. Character count must be positive or zero.", p_chars));
-	return left(p_pos) + substr(p_pos + p_chars);
+
+	const int len = length();
+	if (p_chars == 0 || p_pos >= len) {
+		return *this; // No allocation or copy-on-write detachment for no-op erases.
+	}
+
+	// Clamp before adding, avoiding overflow when callers request huge ranges.
+	const int removed = MIN(p_chars, len - p_pos);
+	const int remaining = len - removed;
+	if (remaining == 0) {
+		return "";
+	}
+
+	// Build the result directly instead of allocating two substrings and concatenating.
+	String result;
+	result.resize_uninitialized(remaining + 1);
+	char32_t *dest = result.ptrw();
+	const char32_t *source = ptr();
+	if (p_pos > 0) {
+		memcpy(dest, source, size_t(p_pos) * sizeof(char32_t));
+	}
+	const int suffix_length = len - p_pos - removed;
+	if (suffix_length > 0) {
+		memcpy(dest + p_pos, source + p_pos + removed, size_t(suffix_length) * sizeof(char32_t));
+	}
+	dest[remaining] = 0;
+	return result;
 }
 
 template <class T>
@@ -2948,59 +3166,82 @@ String String::remove_char(char32_t p_char) const {
 	return new_string;
 }
 
-template <class T>
-static String _remove_chars_common(const String &p_this, const T *p_chars, int p_chars_len) {
-	// Delegate if p_chars has a single element.
-	if (p_chars_len == 1) {
-		return p_this.remove_char(*p_chars);
-	} else if (p_chars_len == 0) {
-		return p_this;
-	}
-
-	int len = p_this.length();
-
-	if (len == 0) {
-		return p_this;
-	}
-
+template <class Predicate>
+static String _remove_chars_if(const String &p_this, Predicate p_contains) {
+	const int len = p_this.length();
 	int index = 0;
 	const char32_t *old_ptr = p_this.ptr();
 	for (; index < len; ++index) {
-		if (_contains_char(old_ptr[index], p_chars, p_chars_len)) {
+		if (p_contains(old_ptr[index])) {
 			break;
 		}
 	}
 
-	// If no occurrence of `chars` was found, return this.
+	// If no occurrence was found, return the original string.
 	if (index == len) {
 		return p_this;
 	}
 
-	// If we found at least one occurrence of `chars`, create new string, allocating enough space for the current length minus one.
 	String new_string;
 	new_string.resize_uninitialized(len);
 	char32_t *new_ptr = new_string.ptrw();
 
-	// Copy part of input before `char`.
 	memcpy(new_ptr, old_ptr, index * sizeof(char32_t));
-
 	int new_size = index;
-
-	// Copy rest, skipping `chars`.
 	for (++index; index < len; ++index) {
 		const char32_t old_char = old_ptr[index];
-		if (!_contains_char(old_char, p_chars, p_chars_len)) {
-			new_ptr[new_size] = old_char;
-			++new_size;
+		if (!p_contains(old_char)) {
+			new_ptr[new_size++] = old_char;
 		}
 	}
 
 	new_ptr[new_size] = 0;
-
-	// Shrink new string to fit.
 	new_string.resize_uninitialized(new_size + 1);
-
 	return new_string;
+}
+
+template <class T>
+static String _remove_chars_common(const String &p_this, const T *p_chars, int p_chars_len) {
+	if (p_chars_len == 1) {
+		return p_this.remove_char(*p_chars);
+	} else if (p_chars_len == 0 || p_this.is_empty()) {
+		return p_this;
+	}
+
+	// Large ASCII removal sets benefit from constant-time character tests.
+	// Keep the original Unicode/Latin-1 fallback for all other inputs.
+	if (p_this.length() >= 64 && p_chars_len >= 4) {
+		uint64_t lower_mask = 0;
+		uint64_t upper_mask = 0;
+		bool ascii_only = true;
+		for (int i = 0; i < p_chars_len; ++i) {
+			const uint32_t c = static_cast<uint32_t>(p_chars[i]);
+			if (c >= 128) {
+				ascii_only = false;
+				break;
+			}
+			if (c < 64) {
+				lower_mask |= uint64_t(1) << c;
+			} else {
+				upper_mask |= uint64_t(1) << (c - 64);
+			}
+		}
+		if (ascii_only) {
+			return _remove_chars_if(p_this, [lower_mask, upper_mask](char32_t p_char) {
+				if (p_char >= 128) {
+					return false;
+				}
+				if (p_char < 64) {
+					return (lower_mask & (uint64_t(1) << p_char)) != 0;
+				}
+				return (upper_mask & (uint64_t(1) << (p_char - 64))) != 0;
+			});
+		}
+	}
+
+	return _remove_chars_if(p_this, [p_chars, p_chars_len](char32_t p_char) {
+		return _contains_char(p_char, p_chars, p_chars_len);
+	});
 }
 
 String String::remove_chars(const String &p_chars) const {
@@ -3081,42 +3322,42 @@ int String::find_char(char32_t p_char, int p_from) const {
 }
 
 int String::findmk(const Vector<String> &p_keys, int p_from, int *r_key) const {
-	if (p_from < 0) {
+	const int len = length();
+	if (p_from < 0 || p_from >= len || p_keys.is_empty()) {
 		return -1;
 	}
-	if (p_keys.is_empty()) {
-		return -1;
-	}
 
-	//int str_len=p_str.length();
-	const String *keys = &p_keys[0];
-	int key_count = p_keys.size();
-	int len = length();
-
-	if (len == 0) {
-		return -1; // won't find anything!
-	}
-
+	// Preserve the first matching position, then the caller's key order.
+	// Filter the overwhelmingly common misses before calling memcmp.
+	const String *keys = p_keys.ptr();
+	const int key_count = p_keys.size();
 	const char32_t *src = get_data();
 
 	for (int i = p_from; i < len; i++) {
+		const int remaining = len - i;
 		for (int k = 0; k < key_count; k++) {
 			const int str_len = keys[k].length();
-
-			if (i + str_len > len) {
-				continue; // Can't find this key here.
+			if (str_len > remaining) {
+				continue;
 			}
-
-			const char32_t *str = keys[k].get_data();
-			if (are_spans_equal(src + i, str, str_len)) {
-				if (r_key) {
-					*r_key = k;
+			// Empty needles match the current position as in the old implementation.
+			if (str_len != 0) {
+				const char32_t *str = keys[k].get_data();
+				if (src[i] != str[0] ||
+						(str_len > 1 && src[i + str_len - 1] != str[str_len - 1])) {
+					continue;
 				}
-				return i;
+				// Endpoints have already matched. Two-char keys need no memcmp.
+				if (str_len > 2 && !are_spans_equal(src + i + 1, str + 1, str_len - 2)) {
+					continue;
+				}
 			}
+			if (r_key) {
+				*r_key = k;
+			}
+			return i;
 		}
 	}
-
 	return -1;
 }
 
@@ -3343,10 +3584,6 @@ bool String::is_subsequence_ofn(const String &p_string) const {
 	return _base_is_subsequence_of(p_string, true);
 }
 
-bool String::is_quoted() const {
-	return is_enclosed_in("\"") || is_enclosed_in("'");
-}
-
 bool String::is_lowercase() const {
 	for (const char32_t *str = &operator[](0); *str; str++) {
 		if (is_unicode_upper_case(*str)) {
@@ -3357,73 +3594,87 @@ bool String::is_lowercase() const {
 }
 
 int String::_count(const String &p_string, int p_from, int p_to, bool p_case_insensitive) const {
-	if (p_string.is_empty()) {
+	const int needle_len = p_string.length();
+	const int len = length();
+	if (needle_len == 0 || len < needle_len || p_from < 0 || p_to < 0 ||
+			(p_to != 0 && p_from >= p_to)) {
 		return 0;
 	}
-	int len = length();
-	int slen = p_string.length();
-	if (len < slen) {
+	// A bounded Span keeps counting inside [from, to) without copying the
+	// substring or searching past its end.
+	const int end = p_to == 0 ? len : MIN(p_to, len);
+	if (p_from > end - needle_len) {
 		return 0;
 	}
-	String str;
-	if (p_from >= 0 && p_to >= 0) {
-		if (p_to == 0) {
-			p_to = len;
-		} else if (p_from >= p_to) {
-			return 0;
-		}
-		if (p_from == 0 && p_to == len) {
-			str = *this;
-		} else {
-			str = substr(p_from, p_to - p_from);
+	const int range_len = end - p_from;
+	const int last_start = range_len - needle_len;
+	const Span<const char32_t> range(get_data() + p_from, range_len);
+	const char32_t *needle = p_string.get_data();
+	int count = 0;
+	if (p_case_insensitive) {
+		for (int i = 0; i <= last_start;) {
+			if (strings_equal_lower(range.ptr() + i, needle, needle_len)) {
+				++count;
+				i += needle_len;
+			} else {
+				++i;
+			}
 		}
 	} else {
-		return 0;
+		int from = 0;
+		while (from <= last_start) {
+			const int64_t found = needle_len == 1 ?
+					range.find(needle[0], from) : range.find_sequence(p_string.span(), from);
+			if (found < 0) {
+				break;
+			}
+			++count;
+			from = int(found) + needle_len;
+		}
 	}
-	int c = 0;
-	int idx = 0;
-	while ((idx = p_case_insensitive ? str.findn(p_string, idx) : str.find(p_string, idx)) != -1) {
-		// Skip the occurrence itself.
-		idx += slen;
-		++c;
-	}
-	return c;
+	return count;
 }
 
 int String::_count(const char *p_string, int p_from, int p_to, bool p_case_insensitive) const {
-	int substring_length = strlen(p_string);
-	if (substring_length == 0) {
+	const int needle_len = strlen(p_string);
+	const int len = length();
+	if (needle_len == 0 || len < needle_len || p_from < 0 || p_to < 0 ||
+			(p_to != 0 && p_from >= p_to)) {
 		return 0;
 	}
-	const int source_length = length();
-
-	if (source_length < substring_length) {
+	const int end = p_to == 0 ? len : MIN(p_to, len);
+	if (p_from > end - needle_len) {
 		return 0;
 	}
-	String str;
-	int search_limit = p_to;
-	if (p_from >= 0 && p_to >= 0) {
-		if (p_to == 0) {
-			search_limit = source_length;
-		} else if (p_from >= p_to) {
-			return 0;
-		}
-		if (p_from == 0 && search_limit == source_length) {
-			str = *this;
-		} else {
-			str = substr(p_from, search_limit - p_from);
+	const int range_len = end - p_from;
+	const int last_start = range_len - needle_len;
+	const Span<const char32_t> range(get_data() + p_from, range_len);
+	int count = 0;
+	if (p_case_insensitive) {
+		for (int i = 0; i <= last_start;) {
+			if (strings_equal_lower(range.ptr() + i, p_string, needle_len)) {
+				++count;
+				i += needle_len;
+			} else {
+				++i;
+			}
 		}
 	} else {
-		return 0;
+		int from = 0;
+		while (from <= last_start) {
+			// Match the existing find(char *) semantics: a single byte is
+			// passed as char, while multi-byte spans use unsigned bytes.
+			const int64_t found = needle_len == 1 ?
+					range.find(static_cast<char32_t>(*p_string), from) :
+					range.find_sequence(Span((const unsigned char *)p_string, needle_len), from);
+			if (found < 0) {
+				break;
+			}
+			++count;
+			from = int(found) + needle_len;
+		}
 	}
-	int c = 0;
-	int idx = 0;
-	while ((idx = p_case_insensitive ? str.findn(p_string, idx) : str.find(p_string, idx)) != -1) {
-		// Skip the occurrence itself.
-		idx += substring_length;
-		++c;
-	}
-	return c;
+	return count;
 }
 
 int String::count(const String &p_string, int p_from, int p_to) const {
@@ -3459,9 +3710,16 @@ bool String::_base_is_subsequence_of(const String &p_string, bool p_case_insensi
 	for (; *src && *tgt; tgt++) {
 		bool match = false;
 		if (p_case_insensitive) {
-			char32_t srcc = _find_lower(*src);
-			char32_t tgtc = _find_lower(*tgt);
-			match = srcc == tgtc;
+			const char32_t srcc = *src;
+			const char32_t tgtc = *tgt;
+			if (srcc == tgtc) {
+				match = true;
+			} else if (srcc < 128 && tgtc < 128) {
+				match = lower_case(srcc) == lower_case(tgtc);
+			} else {
+				// Mixed ASCII/Unicode pairs must use the full Unicode mappings.
+				match = String::char_lowercase(srcc) == String::char_lowercase(tgtc);
+			}
 		} else {
 			match = *src == *tgt;
 		}
@@ -3493,27 +3751,45 @@ Vector<String> String::bigrams() const {
 // Similarity according to Sorensen-Dice coefficient
 float String::similarity(const String &p_string) const {
 	if (operator==(p_string)) {
-		// Equal strings are totally similar
+		// Equal strings are totally similar.
 		return 1.0f;
 	}
 	if (length() < 2 || p_string.length() < 2) {
-		// No way to calculate similarity without a single bigram
 		return 0.0f;
 	}
 
 	const int src_size = length() - 1;
 	const int tgt_size = p_string.length() - 1;
-
 	const int sum = src_size + tgt_size;
 	int inter = 0;
-	for (int i = 0; i < src_size; i++) {
-		const char32_t i0 = get(i);
-		const char32_t i1 = get(i + 1);
 
-		for (int j = 0; j < tgt_size; j++) {
-			if (i0 == p_string.get(j) && i1 == p_string.get(j + 1)) {
-				inter++;
-				break;
+	// Preserve the allocation-free comparison path for short strings.
+	// Longer inputs avoid a quadratic number of bigram comparisons.
+	if (int64_t(src_size) * tgt_size >= 2048 && tgt_size >= 8) {
+		HashSet<uint64_t> target_bigrams;
+		target_bigrams.reserve(tgt_size);
+		const char32_t *tgt = p_string.ptr();
+		for (int j = 0; j < tgt_size; ++j) {
+			const uint64_t pair = (uint64_t(tgt[j]) << 32) | uint64_t(tgt[j + 1]);
+			target_bigrams.insert(pair);
+		}
+
+		const char32_t *src = ptr();
+		for (int i = 0; i < src_size; ++i) {
+			const uint64_t pair = (uint64_t(src[i]) << 32) | uint64_t(src[i + 1]);
+			if (target_bigrams.has(pair)) {
+				++inter;
+			}
+		}
+	} else {
+		for (int i = 0; i < src_size; ++i) {
+			const char32_t i0 = get(i);
+			const char32_t i1 = get(i + 1);
+			for (int j = 0; j < tgt_size; ++j) {
+				if (i0 == p_string.get(j) && i1 == p_string.get(j + 1)) {
+					++inter;
+					break;
+				}
 			}
 		}
 	}
@@ -3522,17 +3798,35 @@ float String::similarity(const String &p_string) const {
 }
 
 static bool _wildcard_match(const char32_t *p_pattern, const char32_t *p_string, bool p_case_sensitive) {
-	switch (*p_pattern) {
-		case '\0':
-			return !*p_string;
-		case '*':
-			return _wildcard_match(p_pattern + 1, p_string, p_case_sensitive) || (*p_string && _wildcard_match(p_pattern, p_string + 1, p_case_sensitive));
-		case '?':
-			return *p_string && (*p_string != '.') && _wildcard_match(p_pattern + 1, p_string + 1, p_case_sensitive);
-		default:
+	// Iterative wildcard matching avoids exponential recursive exploration of
+	// overlapping '*' branches and keeps stack/heap usage constant.
+	const char32_t *star_pattern = nullptr;
+	const char32_t *star_string = nullptr;
 
-			return (p_case_sensitive ? (*p_string == *p_pattern) : (_find_upper(*p_string) == _find_upper(*p_pattern))) && _wildcard_match(p_pattern + 1, p_string + 1, p_case_sensitive);
+	while (*p_string) {
+		if (*p_pattern == '*') {
+			star_pattern = ++p_pattern;
+			star_string = p_string;
+			continue;
+		}
+		if ((*p_pattern == '?' && *p_string != '.') ||
+				(*p_pattern != '\0' && *p_pattern != '?' &&
+						(p_case_sensitive ? *p_string == *p_pattern : String::char_uppercase(*p_string) == String::char_uppercase(*p_pattern)))) {
+			++p_pattern;
+			++p_string;
+			continue;
+		}
+		if (!star_pattern) {
+			return false;
+		}
+		// Retry the pattern after the latest '*' one codepoint later.
+		p_pattern = star_pattern;
+		p_string = ++star_string;
 	}
+	while (*p_pattern == '*') {
+		++p_pattern;
+	}
+	return *p_pattern == '\0';
 }
 
 bool String::match(const String &p_wildcard) const {
@@ -3730,10 +4024,28 @@ static String _replace_common(const String &p_this, const char *p_key, const cha
 }
 
 String String::replace(const String &p_key, const String &p_with) const {
+	// Deleting one Unicode scalar value does not need match-position storage.
+	if (p_key.length() == 1 && p_with.is_empty() && p_key.ptr()[0] != 0) {
+		return remove_char(p_key.ptr()[0]);
+	}
+	// Single-character replacement can use one pass with no match-position buffer.
+	// Keep embedded NULs on the generic path to preserve its semantics.
+	if (p_key.length() == 1 && p_with.length() == 1 && p_key.ptr()[0] != 0 && p_with.ptr()[0] != 0) {
+		return replace_char(p_key.ptr()[0], p_with.ptr()[0]);
+	}
 	return _replace_common(*this, p_key, p_with, false);
 }
 
 String String::replace(const char *p_key, const char *p_with) const {
+	// ASCII single-character deletion uses the streaming remove_char path.
+	if (p_key[0] != 0 && p_key[1] == 0 && p_with[0] == 0 && static_cast<unsigned char>(p_key[0]) < 128) {
+		return remove_char(p_key[0]);
+	}
+	// C strings use the generic path for non-ASCII bytes and longer strings.
+	if (p_key[0] != 0 && p_with[0] != 0 && p_key[1] == 0 && p_with[1] == 0 &&
+			static_cast<unsigned char>(p_key[0]) < 128 && static_cast<unsigned char>(p_with[0]) < 128) {
+		return replace_char(p_key[0], p_with[0]);
+	}
 	return _replace_common(*this, p_key, p_with, false);
 }
 
@@ -3813,6 +4125,10 @@ String String::replace_first(const char *p_key, const char *p_with) const {
 
 String String::replace_char(char32_t p_key, char32_t p_with) const {
 	ERR_FAIL_COND_V_MSG(p_with == 0, *this, "`with` must not be the NUL character.");
+
+	if (p_key == p_with) {
+		return *this; // No modification needed; keep the COW allocation.
+	}
 
 	if (p_key == 0) {
 		return *this;
@@ -3941,20 +4257,34 @@ String String::repeat(int p_count) const {
 		return *this;
 	}
 
-	int len = length();
-	String new_string = *this;
-	new_string.resize_uninitialized(p_count * len + 1);
-
-	char32_t *dst = new_string.ptrw();
-	int offset = 1;
-	int stride = 1;
-	while (offset < p_count) {
-		memcpy(dst + offset * len, dst, stride * len * sizeof(char32_t));
-		offset += stride;
-		stride = MIN(stride * 2, p_count - offset);
+	const int len = length();
+	if (len == 0) {
+		return *this; // An empty string needs no allocation.
 	}
-	dst[p_count * len] = _null;
-	return new_string;
+
+	// Validate before narrowing the product and adding the terminating NUL.
+	const int64_t total_length64 = int64_t(p_count) * len;
+	ERR_FAIL_COND_V_MSG(total_length64 >= INT32_MAX, "", "Repeated string is too long.");
+	const int total_length = int(total_length64);
+
+	// Do not resize a shared copy of the source String: doing so may detach its
+	// copy-on-write storage and copy the old text before the repetitions begin.
+	String repeated;
+	ERR_FAIL_COND_V_MSG(repeated.resize_uninitialized(total_length + 1) != OK, "", "Failed to allocate repeated string.");
+	char32_t *dst = repeated.ptrw();
+	memcpy(dst, ptr(), size_t(len) * sizeof(char32_t));
+
+	// Exponentially duplicate the already-written prefix. The source and
+	// destination blocks never overlap, and this avoids multiplying a count
+	// that can overflow a 32-bit integer during the final iteration.
+	int written = len;
+	while (written < total_length) {
+		const int copy_length = MIN(written, total_length - written);
+		memcpy(dst + written, dst, size_t(copy_length) * sizeof(char32_t));
+		written += copy_length;
+	}
+	dst[total_length] = _null;
+	return repeated;
 }
 
 String String::reverse() const {
@@ -4016,144 +4346,276 @@ char32_t String::unicode_at(int p_idx) const {
 }
 
 String String::indent(const String &p_prefix) const {
-	String new_string;
-	int line_start = 0;
-
-	for (int i = 0; i < length(); i++) {
-		const char32_t c = operator[](i);
-		if (c == '\n') {
-			if (i == line_start) {
-				new_string += c; // Leave empty lines empty.
-			} else {
-				new_string += p_prefix + substr(line_start, i - line_start + 1);
-			}
-			line_start = i + 1;
-		}
-	}
-	if (line_start != length()) {
-		new_string += p_prefix + substr(line_start);
-	}
-	return new_string;
-}
-
-String String::dedent() const {
-	String new_string;
-	String indent;
-	bool has_indent = false;
-	bool has_text = false;
-	int line_start = 0;
-	int indent_stop = -1;
-
-	for (int i = 0; i < length(); i++) {
-		char32_t c = operator[](i);
-		if (c == '\n') {
-			if (has_text) {
-				new_string += substr(indent_stop, i - indent_stop);
-			}
-			new_string += "\n";
-			has_text = false;
-			line_start = i + 1;
-			indent_stop = -1;
-		} else if (!has_text) {
-			if (c > 32) {
-				has_text = true;
-				if (!has_indent) {
-					has_indent = true;
-					indent = substr(line_start, i - line_start);
-					indent_stop = i;
-				}
-			}
-			if (has_indent && indent_stop < 0) {
-				int j = i - line_start;
-				if (j >= indent.length() || c != indent[j]) {
-					indent_stop = i;
-				}
-			}
-		}
-	}
-
-	if (has_text) {
-		new_string += substr(indent_stop, length() - indent_stop);
-	}
-
-	return new_string;
-}
-
-String String::strip_edges(bool p_left, bool p_right) const {
-	int len = length();
-	int beg = 0, end = len;
-
-	if (p_left) {
-		for (int i = 0; i < len; i++) {
-			if (operator[](i) <= 32) {
-				beg++;
-			} else {
-				break;
-			}
-		}
-	}
-
-	if (p_right) {
-		for (int i = len - 1; i >= 0; i--) {
-			if (operator[](i) <= 32) {
-				end--;
-			} else {
-				break;
-			}
-		}
-	}
-
-	if (beg == 0 && end == len) {
+	// Calculate the result size before writing, so large script blocks need one
+	// allocation rather than allocating and copying on every line.
+	if (is_empty() || p_prefix.is_empty()) {
 		return *this;
 	}
 
-	return substr(beg, end - beg);
-}
+	const char32_t *read = ptr();
+	const char32_t *prefix = p_prefix.ptr();
+	const int text_length = length();
+	const int prefix_length = p_prefix.length();
 
-String String::strip_escapes() const {
-	String new_string;
-	for (int i = 0; i < length(); i++) {
-		// Escape characters on first page of the ASCII table, before 32 (Space).
-		if (operator[](i) < 32) {
-			continue;
+	int nonempty_lines = 0;
+	bool at_line_start = true;
+	for (int i = 0; i < text_length; i++) {
+		const char32_t c = read[i];
+		if (at_line_start && c != '\n') {
+			nonempty_lines++;
 		}
-		new_string += operator[](i);
+		at_line_start = c == '\n';
+	}
+	if (nonempty_lines == 0) {
+		return *this; // Only empty lines: no prefix is written.
 	}
 
+	const int64_t result_length = int64_t(text_length) + int64_t(nonempty_lines) * prefix_length;
+	ERR_FAIL_COND_V_MSG(result_length >= INT32_MAX, *this, "Indented string is too long.");
+
+	String new_string;
+	new_string.resize_uninitialized(int(result_length) + 1);
+	char32_t *write = new_string.ptrw();
+	int written = 0;
+	at_line_start = true;
+
+	for (int i = 0; i < text_length; i++) {
+		const char32_t c = read[i];
+		if (at_line_start && c != '\n') {
+			memcpy(write + written, prefix, prefix_length * sizeof(char32_t));
+			written += prefix_length;
+		}
+		write[written++] = c;
+		at_line_start = c == '\n';
+	}
+	write[written] = 0;
 	return new_string;
 }
+String String::dedent() const {
+	const int text_length = length();
+	if (text_length == 0) {
+		return *this;
+	}
 
-String String::lstrip(const String &p_chars) const {
-	int len = length();
-	int beg;
+	const char32_t *read = ptr();
+	int indent_begin = 0;
+	int indent_length = 0;
+	int line_begin = 0;
 
-	for (beg = 0; beg < len; beg++) {
-		if (p_chars.find_char(get(beg)) == -1) {
+	// The first line containing text defines the indentation to strip.
+	for (int i = 0; i < text_length; i++) {
+		const char32_t c = read[i];
+		if (c == '\n') {
+			line_begin = i + 1;
+		} else if (c > 32) {
+			indent_begin = line_begin;
+			indent_length = i - line_begin;
 			break;
 		}
 	}
 
-	if (beg == 0) {
+	// Return the first character to copy from a line. Whitespace-only lines
+	// are discarded, while mismatched indentation is kept from the mismatch.
+	const auto get_copy_begin = [&](int p_begin, int p_end) {
+		int first_text = p_begin;
+		while (first_text < p_end && read[first_text] <= 32) {
+			first_text++;
+		}
+		if (first_text == p_end) {
+			return p_end;
+		}
+		int copy_begin = p_begin;
+		while (copy_begin < first_text && copy_begin - p_begin < indent_length &&
+				read[copy_begin] == read[indent_begin + copy_begin - p_begin]) {
+			copy_begin++;
+		}
+		return copy_begin;
+	};
+
+	// Count exact output length before allocating, without constructing lines.
+	int result_length = 0;
+	bool changed = false;
+	line_begin = 0;
+	for (int end = 0; end <= text_length; end++) {
+		if (end < text_length && read[end] != '\n') {
+			continue;
+		}
+		const int copy_begin = get_copy_begin(line_begin, end);
+		result_length += end - copy_begin + (end < text_length ? 1 : 0);
+		changed |= copy_begin != line_begin;
+		line_begin = end + 1;
+	}
+	if (!changed) {
+		return *this;
+	}
+	if (result_length == 0) {
+		return String();
+	}
+
+	String new_string;
+	new_string.resize_uninitialized(result_length + 1);
+	char32_t *write = new_string.ptrw();
+	int written = 0;
+	line_begin = 0;
+	for (int end = 0; end <= text_length; end++) {
+		if (end < text_length && read[end] != '\n') {
+			continue;
+		}
+		const int copy_begin = get_copy_begin(line_begin, end);
+		const int copy_count = end - copy_begin;
+		if (copy_count > 0) {
+			memcpy(write + written, read + copy_begin, copy_count * sizeof(char32_t));
+			written += copy_count;
+		}
+		if (end < text_length) {
+			write[written++] = '\n';
+		}
+		line_begin = end + 1;
+	}
+	write[written] = 0;
+	return new_string;
+}
+Span<char32_t> String::strip_edges_span(Span<char32_t> p_span, bool p_left, bool p_right) {
+	if (p_span.is_empty()) {
+		return p_span;
+	}
+	uint64_t begin = 0;
+	uint64_t end = p_span.size();
+	if (p_left) {
+		while (begin < end && p_span[begin] <= 32) {
+			begin++;
+		}
+	}
+	if (p_right) {
+		// Scan from the *exclusive* end to handle even a single whitespace
+		// character when only trailing whitespace is requested.
+		while (end > begin && p_span[end - 1] <= 32) {
+			end--;
+		}
+	}
+	return Span<char32_t>(p_span.ptr() + begin, end - begin);
+}
+
+String String::strip_edges(bool p_left, bool p_right) const {
+	const Span<char32_t> original = span();
+	const Span<char32_t> trimmed = strip_edges_span(original, p_left, p_right);
+	if (trimmed.size() == original.size()) {
+		return *this;
+	}
+	return substr(trimmed.ptr() - original.ptr(), trimmed.size());
+}
+
+String String::strip_escapes() const {
+	const char32_t *source = ptr();
+	const int source_length = length();
+	int kept_length = 0;
+
+	// Count first to allocate exactly one buffer of the required size.
+	for (int i = 0; i < source_length; i++) {
+		kept_length += source[i] >= 32;
+	}
+	if (kept_length == source_length) {
+		return *this; // Nothing to strip; keep the existing COW allocation.
+	}
+	if (kept_length == 0) {
+		return String();
+	}
+
+	String stripped;
+	stripped.resize_uninitialized(kept_length + 1);
+	char32_t *destination = stripped.ptrw();
+	for (int i = 0; i < source_length; i++) {
+		if (source[i] >= 32) {
+			*destination++ = source[i];
+		}
+	}
+	*destination = 0;
+	return stripped;
+}
+
+// The usual trim sets are ASCII whitespace or punctuation. A two-word stack
+// lookup table avoids searching the entire set for every stripped code point.
+// Non-ASCII code points still use the full Unicode String lookup.
+static _FORCE_INLINE_ bool _trim_char_in_set(char32_t p_char, const String &p_chars, const uint64_t p_ascii_mask[2]) {
+	// The first trim character is often repeated (e.g. leading spaces).
+	if (p_char == p_chars.ptr()[0]) {
+		return true;
+	}
+	const uint32_t codepoint = uint32_t(p_char);
+	if (codepoint < 128) {
+		return (p_ascii_mask[codepoint >> 6] & (uint64_t(1) << (codepoint & 63))) != 0;
+	}
+	return p_chars.find_char(p_char) != -1;
+}
+
+static _FORCE_INLINE_ void _make_ascii_trim_mask(const String &p_chars, uint64_t r_ascii_mask[2]) {
+	r_ascii_mask[0] = 0;
+	r_ascii_mask[1] = 0;
+	const char32_t *characters = p_chars.ptr();
+	for (int i = 0; i < p_chars.length(); i++) {
+		const uint32_t codepoint = uint32_t(characters[i]);
+		if (codepoint < 128) {
+			r_ascii_mask[codepoint >> 6] |= uint64_t(1) << (codepoint & 63);
+		}
+	}
+}
+
+String String::lstrip(const String &p_chars) const {
+	const int len = length();
+	if (len == 0 || p_chars.is_empty()) {
 		return *this;
 	}
 
+	const char32_t *characters = ptr();
+	const int char_count = p_chars.length();
+	if (char_count == 1) {
+		const char32_t trim_char = p_chars.ptr()[0];
+		int beg = 0;
+		while (beg < len && characters[beg] == trim_char) {
+			beg++;
+		}
+		return beg == 0 ? *this : substr(beg, len - beg);
+	}
+
+	// Unchanged strings are common; avoid even building the lookup mask.
+	if (p_chars.find_char(characters[0]) == -1) {
+		return *this;
+	}
+	uint64_t ascii_mask[2];
+	_make_ascii_trim_mask(p_chars, ascii_mask);
+	int beg = 1;
+	while (beg < len && _trim_char_in_set(characters[beg], p_chars, ascii_mask)) {
+		beg++;
+	}
 	return substr(beg, len - beg);
 }
 
 String String::rstrip(const String &p_chars) const {
-	int len = length();
-	int end;
-
-	for (end = len - 1; end >= 0; end--) {
-		if (p_chars.find_char(get(end)) == -1) {
-			break;
-		}
-	}
-
-	if (end == len - 1) {
+	const int len = length();
+	if (len == 0 || p_chars.is_empty()) {
 		return *this;
 	}
 
+	const char32_t *characters = ptr();
+	const int char_count = p_chars.length();
+	if (char_count == 1) {
+		const char32_t trim_char = p_chars.ptr()[0];
+		int end = len - 1;
+		while (end >= 0 && characters[end] == trim_char) {
+			end--;
+		}
+		return end == len - 1 ? *this : substr(0, end + 1);
+	}
+
+	if (p_chars.find_char(characters[len - 1]) == -1) {
+		return *this;
+	}
+	uint64_t ascii_mask[2];
+	_make_ascii_trim_mask(p_chars, ascii_mask);
+	int end = len - 2;
+	while (end >= 0 && _trim_char_in_set(characters[end], p_chars, ascii_mask)) {
+		end--;
+	}
 	return substr(0, end + 1);
 }
 
@@ -4204,48 +4666,94 @@ String String::simplify_path() const {
 		}
 	}
 
-	s = s.replace_char('\\', '/');
-	while (true) { // in case of using 2 or more slash
-		String compare = s.replace("//", "/");
-		if (s == compare) {
-			break;
-		} else {
-			s = compare;
-		}
+	// The previous implementation repeatedly replaced slashes and removed
+	// elements from a Vector<String>, which allocated per path component and
+	// could become quadratic for long paths. Write the normalized path once.
+	if (s.is_empty()) {
+		return drive;
 	}
-	Vector<String> dirs = s.split("/", false);
-	bool absolute_path = is_absolute_path();
 
-	absolute_path = absolute_path && !begins_with("res://"); // FIXME: Some code (GLTF importer) rely on accessing files up from `res://`, this probably should be disabled in the future.
+	const bool absolute_path = is_absolute_path() && !begins_with("res://");
 
-	for (int i = 0; i < dirs.size(); i++) {
-		String d = dirs[i];
-		if (d == ".") {
-			dirs.remove_at(i);
-			i--;
-		} else if (d == "..") {
-			if (i != 0 && dirs[i - 1] != "..") {
-				dirs.remove_at(i);
-				dirs.remove_at(i - 1);
-				i -= 2;
-			} else if (absolute_path && i == 0) {
-				dirs.remove_at(i);
-				i--;
+	// Most imported resource and project paths are already canonical. Avoid
+	// allocating and copying an output buffer when there is nothing to change.
+	// Parent components use the general path below, even when preserved.
+	const char32_t *const input = s.ptr();
+	const int input_length = s.length();
+	int component_start = 0;
+	bool needs_normalization = false;
+	for (int i = 0; i <= input_length; i++) {
+		if (i < input_length && input[i] == '\\') {
+			needs_normalization = true;
+			break;
+		}
+		if (i < input_length && input[i] != '/') {
+			continue;
+		}
+		const int component_length = i - component_start;
+		if (component_length == 0 ||
+				(component_length == 1 && input[component_start] == '.') ||
+				(component_length == 2 && input[component_start] == '.' && input[component_start + 1] == '.')) {
+			needs_normalization = true;
+			break;
+		}
+		component_start = i + 1;
+	}
+	if (!needs_normalization) {
+		return *this;
+	}
+
+	String normalized;
+	normalized.resize_uninitialized(s.size());
+	char32_t *const dst_start = normalized.ptrw();
+	char32_t *dst = dst_start;
+	char32_t *fixed = dst_start;
+	const char32_t *src = s.ptr();
+	const char32_t *const end = src + s.length();
+
+	while (src < end) {
+		if (*src == '/' || *src == '\\') {
+			++src;
+			continue;
+		}
+
+		char32_t *const part_start = dst;
+		const char32_t *const source_start = src;
+
+		if (dst > dst_start) {
+			*dst++ = '/';
+		}
+
+		do {
+			*dst++ = *src++;
+		} while (src < end && *src != '/' && *src != '\\');
+
+		const std::ptrdiff_t part_length = src - source_start;
+		if (part_length == 1 && source_start[0] == '.') {
+			dst = part_start;
+		} else if (part_length == 2 && source_start[0] == '.' && source_start[1] == '.') {
+			if (part_start > fixed) {
+				// Discard both the just-written ".." and the preceding
+				// directory by walking back through the output buffer.
+				dst = part_start - 1;
+				while (dst > fixed && *dst != '/') {
+					--dst;
+				}
+			} else if (absolute_path) {
+				// Absolute paths cannot climb above their root. Keep the
+				// historical res:// exception for importers using "../".
+				dst = part_start;
+			} else {
+				fixed = dst;
 			}
 		}
 	}
 
-	s = "";
-
-	for (int i = 0; i < dirs.size(); i++) {
-		if (i > 0) {
-			s += "/";
-		}
-		s += dirs[i];
-	}
-
-	return drive + s;
+	*dst++ = 0;
+	normalized.resize_uninitialized(dst - dst_start);
+	return drive + normalized;
 }
+
 
 static int _humanize_digits(int p_num) {
 	if (p_num < 100) {
@@ -4404,141 +4912,351 @@ bool String::is_valid_string() const {
 	return valid;
 }
 
-String String::uri_encode() const {
-	const CharString temp = utf8();
-	String res;
+static _FORCE_INLINE_ bool _uri_is_unreserved(uint8_t p_byte) {
+	return p_byte == '.' || p_byte == '-' || p_byte == '~' || is_ascii_identifier_char(p_byte);
+}
 
-	for (int i = 0; i < temp.length(); ++i) {
-		uint8_t ord = uint8_t(temp[i]);
-		if (ord == '.' || ord == '-' || ord == '~' || is_ascii_identifier_char(ord)) {
-			res += ord;
+template <typename T>
+static String _uri_encode_bytes(const T *p_bytes, int p_length) {
+	int64_t output_length = 0;
+	for (int i = 0; i < p_length; i++) {
+		const uint8_t byte = uint8_t(p_bytes[i]);
+		output_length += _uri_is_unreserved(byte) ? 1 : 3;
+	}
+	ERR_FAIL_COND_V_MSG(output_length >= INT32_MAX, "", "URI encoded string is too large.");
+
+	String result;
+	result.resize_uninitialized(int(output_length) + 1);
+	char32_t *write = result.ptrw();
+	for (int i = 0; i < p_length; i++) {
+		const uint8_t byte = uint8_t(p_bytes[i]);
+		if (_uri_is_unreserved(byte)) {
+			*write++ = byte;
 		} else {
-			char p[4] = { '%', 0, 0, 0 };
-			p[1] = hex_char_table_upper[ord >> 4];
-			p[2] = hex_char_table_upper[ord & 0xF];
-			res += p;
+			*write++ = '%';
+			*write++ = hex_char_table_upper[byte >> 4];
+			*write++ = hex_char_table_upper[byte & 0x0F];
 		}
 	}
-	return res;
+	*write = 0;
+	return result;
+}
+
+String String::uri_encode() const {
+	// Common path: avoid even a UTF-8 temporary for ASCII paths and identifiers.
+	const char32_t *source = ptr();
+	const int len = length();
+	bool needs_escape = false;
+	for (int i = 0; i < len; i++) {
+		const char32_t c = source[i];
+		if (c >= 128) {
+			// Non-ASCII codepoints must be escaped byte by byte as UTF-8.
+			const CharString bytes = utf8();
+			return _uri_encode_bytes(bytes.ptr(), bytes.length());
+		}
+		needs_escape |= !_uri_is_unreserved(uint8_t(c));
+	}
+	if (!needs_escape) {
+		return *this; // Share the existing COW allocation.
+	}
+	return _uri_encode_bytes(source, len);
+}
+
+static _FORCE_INLINE_ int _uri_hex_nibble(char p_char) {
+	if (p_char >= '0' && p_char <= '9') {
+		return p_char - '0';
+	}
+	if (p_char >= 'a' && p_char <= 'f') {
+		return p_char - 'a' + 10;
+	}
+	if (p_char >= 'A' && p_char <= 'F') {
+		return p_char - 'A' + 10;
+	}
+	return -1;
+}
+
+static String _uri_decode_single_buffer(const String &p_source, bool p_decode_plus) {
+	const int input_length = p_source.length();
+	const char32_t *source = p_source.ptr();
+
+	// Leave already-decoded ASCII paths in their existing COW allocation.
+	bool is_plain_ascii = true;
+	for (int i = 0; i < input_length; i++) {
+		const char32_t c = source[i];
+		if (c >= 128 || c == '%' || (p_decode_plus && c == '+')) {
+			is_plain_ascii = false;
+			break;
+		}
+	}
+	if (is_plain_ascii) {
+		return p_source;
+	}
+
+	// Percent decoding cannot increase the byte count; allocate its maximum once.
+	const CharString src = p_source.utf8();
+	const int length = src.length();
+	const char *read = src.ptr();
+	CharString decoded;
+	decoded.resize_uninitialized(int64_t(length) + 1);
+	char *dest = decoded.ptrw();
+	int written = 0;
+	for (int i = 0; i < length; i++) {
+		if (read[i] == '%' && i + 2 < length) {
+			const int hi = _uri_hex_nibble(read[i + 1]);
+			if (hi >= 0) {
+				const int lo = _uri_hex_nibble(read[i + 2]);
+				if (lo >= 0) {
+					dest[written++] = char((hi << 4) | lo);
+					i += 2;
+				}
+				// Preserve legacy semantics: a valid first nibble followed by
+				// an invalid second nibble drops only the leading percent sign.
+			} else {
+				dest[written++] = '%';
+			}
+		} else if (p_decode_plus && read[i] == '+') {
+			dest[written++] = ' ';
+		} else {
+			dest[written++] = read[i];
+		}
+	}
+	dest[written] = 0;
+	return String::utf8(Span<char>(decoded.ptr(), written));
 }
 
 String String::uri_decode() const {
-	CharString src = utf8();
-	CharString res;
-	for (int i = 0; i < src.length(); ++i) {
-		if (src[i] == '%' && i + 2 < src.length()) {
-			char ord1 = src[i + 1];
-			if (is_hex_digit(ord1)) {
-				char ord2 = src[i + 2];
-				if (is_hex_digit(ord2)) {
-					char bytes[3] = { (char)ord1, (char)ord2, 0 };
-					res += (char)strtol(bytes, nullptr, 16);
-					i += 2;
-				}
-			} else {
-				res += src[i];
-			}
-		} else if (src[i] == '+') {
-			res += ' ';
-		} else {
-			res += src[i];
-		}
-	}
-	return String::utf8(res);
+	return _uri_decode_single_buffer(*this, true);
 }
 
 String String::uri_file_decode() const {
-	CharString src = utf8();
-	CharString res;
-	for (int i = 0; i < src.length(); ++i) {
-		if (src[i] == '%' && i + 2 < src.length()) {
-			char ord1 = src[i + 1];
-			if (is_hex_digit(ord1)) {
-				char ord2 = src[i + 2];
-				if (is_hex_digit(ord2)) {
-					char bytes[3] = { (char)ord1, (char)ord2, 0 };
-					res += (char)strtol(bytes, nullptr, 16);
-					i += 2;
-				}
-			} else {
-				res += src[i];
+	return _uri_decode_single_buffer(*this, false);
+}
+
+// The C escape substitutions intentionally precede backslash collapsing.
+// A run of backslashes followed by a recognized escape consumes its last
+// backslash with the escape, then collapses the remaining pairs.
+static _FORCE_INLINE_ char32_t _c_unescape_suffix(char32_t p_char) {
+	switch (p_char) {
+		case 'a':
+			return '\a';
+		case 'b':
+			return '\b';
+		case 'f':
+			return '\f';
+		case 'n':
+			return '\n';
+		case 'r':
+			return '\r';
+		case 't':
+			return '\t';
+		case 'v':
+			return '\v';
+		case '\'':
+			return '\'';
+		case '"':
+			return '"';
+		default:
+			return 0;
+	}
+}
+
+static int _c_unescape_copy(const char32_t *p_source, int p_length, char32_t *p_dest) {
+	int output_length = 0;
+	for (int pos = 0; pos < p_length;) {
+		if (p_source[pos] != '\\') {
+			if (p_dest) {
+				p_dest[output_length] = p_source[pos];
 			}
-		} else {
-			res += src[i];
+			output_length++;
+			pos++;
+			continue;
+		}
+
+		const int run_begin = pos;
+		while (pos < p_length && p_source[pos] == '\\') {
+			pos++;
+		}
+		const char32_t escaped = pos < p_length ? _c_unescape_suffix(p_source[pos]) : 0;
+		// Reproduce ordered replace("\\a"... "\\\"" then "\\\\"), including
+		// overlapping runs such as two backslashes followed by 'n'.
+		const int remaining_slashes = pos - run_begin - (escaped != 0);
+		const int output_slashes = (remaining_slashes + 1) / 2;
+		if (p_dest) {
+			for (int i = 0; i < output_slashes; i++) {
+				p_dest[output_length + i] = '\\';
+			}
+		}
+		output_length += output_slashes;
+		if (escaped != 0) {
+			if (p_dest) {
+				p_dest[output_length] = escaped;
+			}
+			output_length++;
+			pos++;
 		}
 	}
-	return String::utf8(res);
+	return output_length;
 }
 
 String String::c_unescape() const {
-	String escaped = *this;
-	escaped = escaped.replace("\\a", "\a");
-	escaped = escaped.replace("\\b", "\b");
-	escaped = escaped.replace("\\f", "\f");
-	escaped = escaped.replace("\\n", "\n");
-	escaped = escaped.replace("\\r", "\r");
-	escaped = escaped.replace("\\t", "\t");
-	escaped = escaped.replace("\\v", "\v");
-	escaped = escaped.replace("\\'", "\'");
-	escaped = escaped.replace("\\\"", "\"");
-	escaped = escaped.replace("\\\\", "\\");
+	const int source_length = length();
+	const char32_t *source = ptr();
+	const int decoded_length = _c_unescape_copy(source, source_length, nullptr);
+	if (decoded_length == source_length) {
+		// No recognized escape or repeated backslash. Keep the COW buffer.
+		return *this;
+	}
 
-	return escaped;
+	String decoded;
+	ERR_FAIL_COND_V(decoded.resize_uninitialized(decoded_length + 1) != OK, String());
+	char32_t *dest = decoded.ptrw();
+	_c_unescape_copy(source, source_length, dest);
+	dest[decoded_length] = 0;
+	return decoded;
+}
+
+enum class _StringEscapeMode {
+	C,
+	C_MULTILINE,
+	JSON,
+};
+
+static _FORCE_INLINE_ char32_t _escape_sequence_suffix(char32_t p_char, _StringEscapeMode p_mode) {
+	switch (p_char) {
+		case '\\':
+			return '\\';
+		case '"':
+			return '"';
+		case '\'':
+			return p_mode == _StringEscapeMode::C ? '\'' : 0;
+		case '\a':
+			return p_mode == _StringEscapeMode::C ? 'a' : 0;
+		case '\b':
+			return p_mode != _StringEscapeMode::C_MULTILINE ? 'b' : 0;
+		case '\f':
+			return p_mode != _StringEscapeMode::C_MULTILINE ? 'f' : 0;
+		case '\n':
+			return p_mode != _StringEscapeMode::C_MULTILINE ? 'n' : 0;
+		case '\r':
+			return p_mode != _StringEscapeMode::C_MULTILINE ? 'r' : 0;
+		case '\t':
+			return p_mode != _StringEscapeMode::C_MULTILINE ? 't' : 0;
+		case '\v':
+			return p_mode != _StringEscapeMode::C_MULTILINE ? 'v' : 0;
+		default:
+			return 0;
+	}
+}
+
+static String _escape_string_single_buffer(const String &p_source, _StringEscapeMode p_mode) {
+	const int length = p_source.length();
+	const char32_t *source = p_source.ptr();
+	int64_t escaped_length = length;
+
+	for (int i = 0; i < length; i++) {
+		escaped_length += _escape_sequence_suffix(source[i], p_mode) != 0;
+	}
+	if (escaped_length == length) {
+		return p_source; // Keep COW sharing for strings requiring no escaping.
+	}
+	ERR_FAIL_COND_V_MSG(escaped_length >= INT32_MAX, "", "Escaped string is too large.");
+
+	String result;
+	result.resize_uninitialized(int(escaped_length) + 1);
+	char32_t *dest = result.ptrw();
+	for (int i = 0; i < length; i++) {
+		const char32_t suffix = _escape_sequence_suffix(source[i], p_mode);
+		if (suffix != 0) {
+			*dest++ = '\\';
+			*dest++ = suffix;
+		} else {
+			*dest++ = source[i];
+		}
+	}
+	*dest = 0;
+	return result;
 }
 
 String String::c_escape() const {
-	String escaped = *this;
-	escaped = escaped.replace("\\", "\\\\");
-	escaped = escaped.replace("\a", "\\a");
-	escaped = escaped.replace("\b", "\\b");
-	escaped = escaped.replace("\f", "\\f");
-	escaped = escaped.replace("\n", "\\n");
-	escaped = escaped.replace("\r", "\\r");
-	escaped = escaped.replace("\t", "\\t");
-	escaped = escaped.replace("\v", "\\v");
-	escaped = escaped.replace("\'", "\\'");
-	escaped = escaped.replace("\"", "\\\"");
-
-	return escaped;
+	return _escape_string_single_buffer(*this, _StringEscapeMode::C);
 }
 
 String String::c_escape_multiline() const {
-	String escaped = *this;
-	escaped = escaped.replace("\\", "\\\\");
-	escaped = escaped.replace("\"", "\\\"");
-
-	return escaped;
+	return _escape_string_single_buffer(*this, _StringEscapeMode::C_MULTILINE);
 }
 
 String String::json_escape() const {
-	String escaped = *this;
-	escaped = escaped.replace("\\", "\\\\");
-	escaped = escaped.replace("\b", "\\b");
-	escaped = escaped.replace("\f", "\\f");
-	escaped = escaped.replace("\n", "\\n");
-	escaped = escaped.replace("\r", "\\r");
-	escaped = escaped.replace("\t", "\\t");
-	escaped = escaped.replace("\v", "\\v");
-	escaped = escaped.replace("\"", "\\\"");
-
-	return escaped;
+	return _escape_string_single_buffer(*this, _StringEscapeMode::JSON);
 }
 
 String String::xml_escape(bool p_escape_quotes) const {
-	String str = *this;
-	str = str.replace("&", "&amp;");
-	str = str.replace("<", "&lt;");
-	str = str.replace(">", "&gt;");
-	if (p_escape_quotes) {
-		str = str.replace("'", "&apos;");
-		str = str.replace("\"", "&quot;");
+	const char32_t *source = ptr();
+	const int len = length();
+	int64_t result_length = len;
+
+	// Count the extra characters needed for XML entities before allocating.
+	for (int i = 0; i < len; i++) {
+		switch (source[i]) {
+			case '&':
+				result_length += 4; // &amp;
+				break;
+			case '<':
+			case '>':
+				result_length += 3; // &lt; / &gt;
+				break;
+			case '\'':
+			case '"':
+				result_length += p_escape_quotes ? 5 : 0;
+				break;
+		}
 	}
-	/*
-for (int i=1;i<32;i++) {
-	char chr[2]={i,0};
-	str=str.replace(chr,"&#"+String::num(i)+";");
-}*/
-	return str;
+	if (result_length == len) {
+		return *this; // No entities: keep the existing COW buffer.
+	}
+	ERR_FAIL_COND_V_MSG(result_length >= INT32_MAX, "", "XML escaped string is too large.");
+
+	String result;
+	result.resize_uninitialized(int(result_length) + 1);
+	char32_t *write = result.ptrw();
+	for (int i = 0; i < len; i++) {
+		const char32_t c = source[i];
+		const char32_t *entity = nullptr;
+		int entity_length = 0;
+		switch (c) {
+			case '&':
+				entity = U"&amp;";
+				entity_length = 5;
+				break;
+			case '<':
+				entity = U"&lt;";
+				entity_length = 4;
+				break;
+			case '>':
+				entity = U"&gt;";
+				entity_length = 4;
+				break;
+			case '\'':
+				if (p_escape_quotes) {
+					entity = U"&apos;";
+					entity_length = 6;
+				}
+				break;
+			case '"':
+				if (p_escape_quotes) {
+					entity = U"&quot;";
+					entity_length = 6;
+				}
+				break;
+		}
+		if (entity != nullptr) {
+			memcpy(write, entity, size_t(entity_length) * sizeof(char32_t));
+			write += entity_length;
+		} else {
+			*write++ = c;
+		}
+	}
+	*write = 0;
+	return result;
 }
 
 static _FORCE_INLINE_ int _xml_unescape(const char32_t *p_src, int p_src_len, char32_t *p_dst) {
@@ -4659,6 +5377,12 @@ String String::xml_unescape() const {
 	String str;
 	int l = length();
 	int len = _xml_unescape(get_data(), l, nullptr);
+	// Every recognized XML entity contracts multiple source characters into
+	// one code point. If the length is unchanged, no replacement occurred:
+	// reuse the original COW buffer without another scan or allocation.
+	if (len == l) {
+		return *this;
+	}
 	if (len == 0) {
 		return String();
 	}
@@ -4670,54 +5394,78 @@ String String::xml_unescape() const {
 }
 
 String String::pad_decimals(int p_digits) const {
-	String s = *this;
-	int c = s.find_char('.');
-
-	if (c == -1) {
-		if (p_digits <= 0) {
-			return s;
-		}
-		s += ".";
-		c = s.length() - 1;
-	} else {
-		if (p_digits <= 0) {
-			return s.substr(0, c);
-		}
+	const int source_length = length();
+	const int dot_position = find_char('.');
+	if (p_digits <= 0) {
+		return dot_position < 0 ? *this : substr(0, dot_position);
 	}
 
-	if (s.length() - (c + 1) > p_digits) {
-		return s.substr(0, c + p_digits + 1);
-	} else {
-		int zeros_to_add = p_digits - s.length() + (c + 1);
-		return s + String("0").repeat(zeros_to_add);
+	const int decimal_count = dot_position < 0 ? 0 : source_length - dot_position - 1;
+	if (decimal_count > p_digits) {
+		return substr(0, dot_position + p_digits + 1);
 	}
+	if (dot_position >= 0 && decimal_count == p_digits) {
+		return *this;
+	}
+
+	const int missing_zeros = p_digits - decimal_count;
+	const int64_t result_length = int64_t(source_length) + missing_zeros + (dot_position < 0 ? 1 : 0);
+	ERR_FAIL_COND_V_MSG(result_length >= INT32_MAX, *this, "Padded decimal string is too long.");
+
+	String result;
+	result.resize_uninitialized(int(result_length) + 1);
+	char32_t *write = result.ptrw();
+	if (source_length > 0) {
+		memcpy(write, ptr(), size_t(source_length) * sizeof(char32_t));
+		write += source_length;
+	}
+	if (dot_position < 0) {
+		*write++ = '.';
+	}
+	for (int i = 0; i < missing_zeros; i++) {
+		*write++ = '0';
+	}
+	*write = 0;
+	return result;
 }
 
 String String::pad_zeros(int p_digits) const {
-	String s = *this;
-	int end = s.find_char('.');
-
+	const int source_length = length();
+	int end = find_char('.');
 	if (end == -1) {
-		end = s.length();
+		end = source_length;
 	}
-
 	if (end == 0) {
-		return s;
+		return *this;
 	}
 
+	const char32_t *source = ptr();
 	int begin = 0;
-
-	while (begin < end && !is_digit(s[begin])) {
+	while (begin < end && !is_digit(source[begin])) {
 		begin++;
 	}
-
-	int zeros_to_add = p_digits - (end - begin);
-
-	if (zeros_to_add <= 0) {
-		return s;
-	} else {
-		return s.insert(begin, String("0").repeat(zeros_to_add));
+	const int64_t missing_zeros = int64_t(p_digits) - (end - begin);
+	if (missing_zeros <= 0) {
+		return *this;
 	}
+
+	const int64_t result_length = int64_t(source_length) + missing_zeros;
+	ERR_FAIL_COND_V_MSG(result_length >= INT32_MAX, *this, "Padded zero string is too long.");
+
+	String result;
+	result.resize_uninitialized(int(result_length) + 1);
+	char32_t *write = result.ptrw();
+	if (begin > 0) {
+		memcpy(write, source, size_t(begin) * sizeof(char32_t));
+	}
+	for (int64_t i = 0; i < missing_zeros; i++) {
+		write[begin + i] = '0';
+	}
+	if (source_length > begin) {
+		memcpy(write + begin + missing_zeros, source + begin, size_t(source_length - begin) * sizeof(char32_t));
+	}
+	write[result_length] = 0;
+	return result;
 }
 
 String String::trim_prefix(const String &p_prefix) const {
@@ -5020,49 +5768,72 @@ String String::get_base_dir() const {
 		}
 	}
 
-	String rs;
-	String base;
-	if (end != 0) {
-		rs = substr(end, length());
-		base = substr(0, end);
-	} else {
-		rs = *this;
+	// Search the original buffer directly instead of allocating temporary
+	// prefix and suffix strings, then concatenating them again.
+	const char32_t *characters = ptr();
+	for (int i = length() - 1; i >= end; --i) {
+		if (characters[i] == '/' || characters[i] == '\\') {
+			return substr(0, i);
+		}
 	}
 
-	int sep = MAX(rs.rfind_char('/'), rs.rfind_char('\\'));
-	if (sep == -1) {
-		return base;
-	}
-
-	return base + rs.substr(0, sep);
+	return end > 0 ? substr(0, end) : String();
 }
 
 String String::get_file() const {
-	int sep = MAX(rfind_char('/'), rfind_char('\\'));
-	if (sep == -1) {
-		return *this;
+	const char32_t *characters = ptr();
+	for (int i = length() - 1; i >= 0; --i) {
+		if (characters[i] == '/' || characters[i] == '\\') {
+			return substr(i + 1);
+		}
 	}
-
-	return substr(sep + 1, length());
+	return *this;
 }
 
 String String::get_extension() const {
-	int pos = rfind_char('.');
-	if (pos < 0 || pos < MAX(rfind_char('/'), rfind_char('\\'))) {
-		return "";
+	// Stop at the first directory separator: earlier dots are not extensions.
+	const char32_t *characters = ptr();
+	for (int i = length() - 1; i >= 0; --i) {
+		if (characters[i] == '/' || characters[i] == '\\') {
+			break;
+		}
+		if (characters[i] == '.') {
+			return substr(i + 1);
+		}
 	}
-
-	return substr(pos + 1, length());
+	return "";
 }
 
 String String::path_join(const String &p_file) const {
-	if (is_empty()) {
+	const int base_length = length();
+	if (base_length == 0) {
 		return p_file;
 	}
-	if (operator[](length() - 1) == '/' || (p_file.size() > 0 && p_file.operator[](0) == '/')) {
-		return *this + p_file;
+	const int file_length = p_file.length();
+	const bool already_separated = ptr()[base_length - 1] == '/' ||
+			(file_length > 0 && p_file.ptr()[0] == '/');
+	if (file_length == 0 && already_separated) {
+		return *this; // Joining an empty segment needs no additional allocation.
 	}
-	return *this + "/" + p_file;
+
+	const int separator_length = already_separated ? 0 : 1;
+	const int64_t result_length = int64_t(base_length) + file_length + separator_length;
+	ERR_FAIL_COND_V_MSG(result_length >= INT32_MAX, "", "Joined path is too long.");
+
+	String result;
+	result.resize_uninitialized(int(result_length) + 1);
+	char32_t *write = result.ptrw();
+	memcpy(write, ptr(), size_t(base_length) * sizeof(char32_t));
+	write += base_length;
+	if (separator_length) {
+		*write++ = '/';
+	}
+	if (file_length > 0) {
+		memcpy(write, p_file.ptr(), size_t(file_length) * sizeof(char32_t));
+		write += file_length;
+	}
+	*write = 0;
+	return result;
 }
 
 String String::property_name_encode() const {
@@ -5146,12 +5917,18 @@ String String::validate_node_name() const {
 }
 
 String String::get_basename() const {
-	int pos = rfind_char('.');
-	if (pos < 0 || pos < MAX(rfind_char('/'), rfind_char('\\'))) {
-		return *this;
+	// Stop at the last separator. A dot in a parent folder is not an
+	// extension, so one reverse scan is enough instead of three searches.
+	const char32_t *characters = ptr();
+	for (int i = length() - 1; i >= 0; i--) {
+		if (characters[i] == '.') {
+			return substr(0, i);
+		}
+		if (characters[i] == '/' || characters[i] == '\\') {
+			break;
+		}
 	}
-
-	return substr(0, pos);
+	return *this;
 }
 
 String itos(int64_t p_val) {
@@ -5171,23 +5948,56 @@ String rtoss(double p_val) {
 }
 
 // Right-pad with a character.
-String String::rpad(int p_min_length, const String &p_character) const {
-	String s = *this;
-	int padding = p_min_length - s.length();
-	if (padding > 0) {
-		s += p_character.repeat(padding);
+// Build the padded result once rather than materializing a repeated padding
+// string and then allocating a second buffer for concatenation.
+static String _pad_string(const String &p_source, int p_min_length, const String &p_character, bool p_left) {
+	const int source_length = p_source.length();
+	const int character_length = p_character.length();
+	const int64_t repetitions = int64_t(p_min_length) - source_length;
+	if (repetitions <= 0 || character_length == 0) {
+		return p_source;
 	}
-	return s;
+
+	const int64_t result_length = source_length + repetitions * character_length;
+	ERR_FAIL_COND_V_MSG(result_length >= INT32_MAX, p_source, "Padded string is too long.");
+
+	String result;
+	result.resize_uninitialized(int(result_length) + 1);
+	char32_t *write = result.ptrw();
+	const char32_t *source = p_source.ptr();
+	const char32_t *characters = p_character.ptr();
+
+	if (!p_left && source_length > 0) {
+		memcpy(write, source, size_t(source_length) * sizeof(char32_t));
+		write += source_length;
+	}
+	// Seed one repetition, then double the already-written region. Each copy
+	// has non-overlapping source and destination, even for multi-char padding.
+	const int64_t padding_length = repetitions * character_length;
+	char32_t *padding_start = write;
+	memcpy(padding_start, characters, size_t(character_length) * sizeof(char32_t));
+	int64_t copied = character_length;
+	while (copied < padding_length) {
+		const int64_t copy_length = MIN(copied, padding_length - copied);
+		memcpy(padding_start + copied, padding_start, size_t(copy_length) * sizeof(char32_t));
+		copied += copy_length;
+	}
+	write += padding_length;
+	if (p_left && source_length > 0) {
+		memcpy(write, source, size_t(source_length) * sizeof(char32_t));
+		write += source_length;
+	}
+	*write = 0;
+	return result;
+}
+
+String String::rpad(int p_min_length, const String &p_character) const {
+	return _pad_string(*this, p_min_length, p_character, false);
 }
 
 // Left-pad with a character.
 String String::lpad(int p_min_length, const String &p_character) const {
-	String s = *this;
-	int padding = p_min_length - s.length();
-	if (padding > 0) {
-		s = p_character.repeat(padding) + s;
-	}
-	return s;
+	return _pad_string(*this, p_min_length, p_character, true);
 }
 
 // sprintf is implemented in GDScript via:

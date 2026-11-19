@@ -1,0 +1,28 @@
+name: Physics exact affine ellipsoid buoyancy contracts
+
+on:
+  pull_request:
+    branches: [develop]
+    paths:
+      - "servers/physics_fluid_ellipsoid_3d.h"
+      - "servers/physics_fluid_buoyancy_3d.h"
+      - "modules/godot_physics_3d/godot_body_3d.cpp"
+      - "tests/servers/test_physics_fluid_ellipsoid_3d.cpp"
+      - "tests/stress/test_physics_fluid_ellipsoid_3d.py"
+      - "tests/stress/physics_ellipsoid_buoyancy_3d_regression.gd"
+      - "tests/stress/physics_ellipsoid_fluid_stress.gd"
+      - "tests/stress/run.py"
+      - "tests/stress/stress.gd"
+      - ".github/workflows/physics-fluid-ellipsoid.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  numerical-contracts:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Check 1250 independent quadrature and symmetry reference cases
+        run: python3 -m unittest discover -s tests/stress -p 'test_physics_fluid_ellipsoid_3d.py' -v

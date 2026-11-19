@@ -285,4 +285,41 @@ TEST_CASE("[IPAddress] IPv6 Parsing") {
 	CHECK(test_ip("0:0:0:0:0:ffff:127.0.0.1", { 0, 0, 0, 0, 0, 0xFFFF, 0x7F00, 1 }));
 }
 
+TEST_CASE("[IPAddress] String formatter preserves legacy IPv4 and IPv6 spelling") {
+	CHECK(static_cast<String>(IPAddress()) == "");
+	CHECK(static_cast<String>(IPAddress("*")) == "*");
+	CHECK(static_cast<String>(IPAddress(0, 0, 0, 0)) == "0.0.0.0");
+	CHECK(static_cast<String>(IPAddress(255, 255, 255, 255)) == "255.255.255.255");
+	CHECK(static_cast<String>(IPAddress(127, 0, 0, 1)) == "127.0.0.1");
+	CHECK(static_cast<String>(IPAddress("::ffff:127.0.0.1")) == "127.0.0.1");
+
+	// The established IPv6 format is uncompressed lowercase hex, not RFC 5952 compression.
+	CHECK(static_cast<String>(IPAddress("::")) == "0:0:0:0:0:0:0:0");
+	CHECK(static_cast<String>(IPAddress("::1")) == "0:0:0:0:0:0:0:1");
+	CHECK(static_cast<String>(IPAddress("2001:DB8::ABCD")) == "2001:db8:0:0:0:0:0:abcd");
+	CHECK(static_cast<String>(IPAddress("FFFF:FFFF:FFFF:FFFF:FFFF:FFFF:FFFF:FFFF")) == "ffff:ffff:ffff:ffff:ffff:ffff:ffff:ffff");
+	CHECK(static_cast<String>(IPAddress(0x20010DB8, 0, 0, 0xABCDEF12, true)) == "2001:db8:0:0:0:0:abcd:ef12");
+}
+
+TEST_CASE("[IPAddress] String formatter roundtrips every IPv4 octet value") {
+	for (uint32_t value = 0; value < 256; value++) {
+		const IPAddress address(value, 255 - value, value / 2, (value * 13) % 256);
+		const String formatted = static_cast<String>(address);
+		CHECK(formatted.length() <= 15);
+		CHECK(IPAddress::is_valid_ip_address(formatted));
+		CHECK(IPAddress(formatted) == address);
+	}
+}
+
+TEST_CASE("[IPAddress] String formatter roundtrips diverse IPv6 bit patterns") {
+	const uint32_t samples[] = { 0, 1, 0xF, 0x10, 0xFF, 0x100, 0xFFFF, 0x10000, 0x12345678, 0xABCDEF01, 0xFFFFFFFF };
+	for (uint32_t i = 0; i < sizeof(samples) / sizeof(samples[0]); i++) {
+		const IPAddress address(samples[i], samples[(i + 3) % 11], samples[(i + 7) % 11], samples[(i + 9) % 11], true);
+		const String formatted = static_cast<String>(address);
+		CHECK(formatted.length() <= 39);
+		CHECK(IPAddress::is_valid_ip_address(formatted));
+		CHECK(IPAddress(formatted) == address);
+	}
+}
+
 } // namespace TestIPAddress

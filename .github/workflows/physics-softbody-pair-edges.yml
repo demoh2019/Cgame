@@ -1,0 +1,33 @@
+name: SoftBody3D pair edge-edge contact contracts
+
+on:
+  pull_request:
+    paths:
+      - "servers/physics_softbody_pair_edge_contact.h"
+      - "modules/godot_physics_3d/godot_soft_body_3d.cpp"
+      - "modules/godot_physics_3d/godot_soft_body_3d.h"
+      - "modules/godot_physics_3d/godot_space_3d.cpp"
+      - "modules/godot_physics_3d/godot_space_3d.h"
+      - "servers/physics_3d/physics_server_3d.cpp"
+      - "tests/servers/test_physics_softbody_pair_edge_contact.cpp"
+      - "tests/stress/test_physics_softbody_pair_edge_contact.py"
+      - ".github/workflows/physics-softbody-pair-edges.yml"
+  push:
+    branches: [develop]
+    paths:
+      - "servers/physics_softbody_pair_edge_contact.h"
+      - "modules/godot_physics_3d/godot_soft_body_3d.cpp"
+      - "tests/stress/test_physics_softbody_pair_edge_contact.py"
+      - ".github/workflows/physics-softbody-pair-edges.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  numerical-contracts:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Verify structural edge collision physical invariants and code wiring
+        run: python3 -m unittest discover -s tests/stress -p test_physics_softbody_pair_edge_contact.py -v

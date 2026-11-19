@@ -33,11 +33,14 @@
 #include "core/object/object.h"
 #include "core/templates/safe_refcount.h"
 
+// New RefCounted instances begin with one owned reference. Creation through
+// memnew() hands that reference directly to the returned Ref<T>.
 class RefCounted : public Object {
 	GDCLASS(RefCounted, Object);
 	SafeRefCount refcount;
-	SafeRefCount refcount_init;
-	SafeNumeric<uint32_t> dereference_count;
+	// Effective refcount offset for legacy APIs which expect initial zero.
+	SafeNumeric<uint32_t> negative_refcount{ 0 };
+	SafeNumeric<uint32_t> dereference_count{ 0 };
 
 protected:
 	static void _bind_methods();
@@ -45,9 +48,8 @@ protected:
 public:
 	static constexpr AncestralClass static_ancestral_class = AncestralClass::REF_COUNTED;
 
-	_FORCE_INLINE_ bool is_referenced() const { return refcount_init.get() != 1; }
 	bool init_ref();
-	void deinit_ref(); // Effectively decrements refcount by increasing refcount_init by one.
+	void deinit_ref(); // Adds one effective negative reference for legacy callers.
 	bool reference(); // returns false if refcount is at zero and didn't get increased
 	bool unreference();
 	int get_reference_count() const;
@@ -172,6 +174,14 @@ public:
 		ref_pointer<true>(Object::cast_to<T>(p_ptr));
 	}
 
+	// Takes over an already-owned reference without incrementing its count.
+	// Only use when the caller owns one existing reference to p_object.
+	static Ref assume_ownership(T *p_object) {
+		Ref result;
+		result.reference = p_object;
+		return result;
+	}
+
 	Ref(const Ref &p_from) {
 		this->operator=(p_from);
 	}
@@ -232,12 +242,11 @@ public:
 template <typename T>
 struct memnew_result<T, std::enable_if_t<std::is_base_of_v<RefCounted, T>>> {
 	using class_name = Ref<T>;
-};
 
-template <typename T>
-void postinitialize_handler(Ref<T> &p_object) {
-	postinitialize_handler(p_object.ptr());
-}
+	static Ref<T> wrap(T *p_object) {
+		return Ref<T>::assume_ownership(p_object);
+	}
+};
 
 // Zero-constructing Ref initializes reference to nullptr (and thus empty).
 template <typename T>

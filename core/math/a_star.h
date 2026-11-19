@@ -33,6 +33,7 @@
 #include "core/object/gdvirtual.gen.h"
 #include "core/object/ref_counted.h"
 #include "core/templates/a_hash_map.h"
+#include "core/templates/local_vector.h"
 
 /**
 	A* pathfinding algorithm.
@@ -47,6 +48,7 @@ class AStar3D : public RefCounted {
 		Vector3 pos;
 		real_t weight_scale = 0;
 		bool enabled = false;
+		uint32_t heap_index = 0; // Fill the padding before adjacency maps.
 
 		AHashMap<int64_t, Point *> neighbors{ 4u };
 		AHashMap<int64_t, Point *> unlinked_neighbours{ 4u };
@@ -58,9 +60,7 @@ class AStar3D : public RefCounted {
 		uint64_t open_pass = 0;
 		uint64_t closed_pass = 0;
 
-		// Used for getting closest_point_of_last_pathing_call.
-		real_t abs_g_score = 0;
-		real_t abs_f_score = 0;
+
 	};
 
 	struct SortPoints {
@@ -73,6 +73,20 @@ class AStar3D : public RefCounted {
 				return p_left->g_score < p_right->g_score; // If the f_costs are the same then prioritize the points that are further away from the start.
 			}
 		}
+	};
+
+	// Indexed binary heap: when a shorter route is discovered, finding the
+	// existing open point no longer takes linear time in the frontier size.
+	// Use the same ordering and sift-down rules as SortArray's heap helpers.
+	struct OpenList {
+		LocalVector<Point *> items;
+
+		void _sift_up(uint32_t p_hole, Point *p_point);
+		void push(Point *p_point);
+		void decrease_key(Point *p_point);
+		void pop();
+		_FORCE_INLINE_ Point *top() const { return items[0]; }
+		_FORCE_INLINE_ bool is_empty() const { return items.is_empty(); }
 	};
 
 	struct Segment {

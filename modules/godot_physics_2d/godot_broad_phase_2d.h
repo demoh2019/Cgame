@@ -47,6 +47,18 @@ public:
 
 	// 0 is an invalid ID
 	virtual ID create(GodotCollisionObject2D *p_object_, int p_subindex = 0, const Rect2 &p_aabb = Rect2(), bool p_static = false) = 0;
+	// Optional batch insertion; other broadphases keep synchronous semantics.
+	virtual ID create_deferred(GodotCollisionObject2D *p_object, int p_subindex, const Rect2 &p_aabb, bool p_static) {
+		return create(p_object, p_subindex, p_aabb, p_static);
+	}
+	virtual void flush_pending_pairs() {}
+	// A mask/layer update needs a full pair check even for unchanged bounds.
+	virtual void force_collision_check(ID p_id) = 0;
+
+	// Group insertions for many independent bodies belonging to one physics
+	// space. Implementations without batching may keep their normal behavior.
+	virtual void begin_batch() {}
+	virtual void end_batch() {}
 	virtual void move(ID p_id, const Rect2 &p_aabb) = 0;
 	virtual void set_static(ID p_id, bool p_static) = 0;
 	virtual void remove(ID p_id) = 0;
@@ -55,7 +67,17 @@ public:
 	virtual bool is_static(ID p_id) const = 0;
 	virtual int get_subindex(ID p_id) const = 0;
 
+	using SegmentCastCallback = real_t (*)(GodotCollisionObject2D *, int, real_t, void *);
+	virtual void cast_segment(const Vector2 &p_from, const Vector2 &p_to, SegmentCastCallback p_callback, void *p_userdata) = 0;
+
 	virtual int cull_segment(const Vector2 &p_from, const Vector2 &p_to, GodotCollisionObject2D **p_results, int p_max_results, int *p_result_indices = nullptr) = 0;
+	using QueryVisitor = bool (*)(GodotCollisionObject2D *, int, void *);
+	// Exact point traversal avoids the artificial epsilon AABB used by
+	// historical 2D point queries. Exact shape containment is still tested
+	// by the direct space state callback.
+	virtual void visit_point(const Vector2 &p_point, QueryVisitor p_visitor, void *p_userdata) = 0;
+	virtual void visit_aabb(const Rect2 &p_aabb, QueryVisitor p_visitor, void *p_userdata) = 0;
+
 	virtual int cull_aabb(const Rect2 &p_aabb, GodotCollisionObject2D **p_results, int p_max_results, int *p_result_indices = nullptr) = 0;
 
 	virtual void set_pair_callback(PairCallback p_pair_callback, void *p_userdata) = 0;

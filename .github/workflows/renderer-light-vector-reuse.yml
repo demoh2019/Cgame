@@ -1,0 +1,50 @@
+name: 3D renderer light vector reuse regressions
+
+on:
+  push:
+    branches: [develop]
+    paths:
+      - "servers/rendering/renderer_scene_cull.cpp"
+      - "servers/rendering/renderer_scene_cull.h"
+      - "misc/scripts/tests/test_renderer_light_vector_reuse.py"
+      - ".github/workflows/renderer-light-vector-reuse.yml"
+  pull_request:
+    paths:
+      - "servers/rendering/renderer_scene_cull.cpp"
+      - "servers/rendering/renderer_scene_cull.h"
+      - "misc/scripts/tests/test_renderer_light_vector_reuse.py"
+      - ".github/workflows/renderer-light-vector-reuse.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  source-regressions:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - name: Check renderer list lifetime and shadow invariants
+        run: |
+          python3 -m py_compile misc/scripts/tests/test_renderer_light_vector_reuse.py
+          python3 -m unittest discover -s misc/scripts/tests -p test_renderer_light_vector_reuse.py -v
+
+  native-editor-smoke:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+      - uses: ./.github/actions/godot-deps
+      - name: Build 3D renderer
+        uses: ./.github/actions/godot-build
+        with:
+          platform: linuxbsd
+          target: editor
+          scons-flags: dev_build=yes tests=yes debug_symbols=no module_mono_enabled=no module_text_server_fb_enabled=yes accesskit=no -j2
+      - name: Launch headless renderer smoke
+        run: |
+          ./bin/godot.linuxbsd.editor.dev.x86_64 --version
+          ./bin/godot.linuxbsd.editor.dev.x86_64 --headless --test --test-case="*[SceneTree][Node] get_path_to*"

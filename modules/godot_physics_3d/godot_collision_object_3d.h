@@ -72,15 +72,19 @@ private:
 	Vector<Shape> shapes;
 	GodotSpace3D *space = nullptr;
 	Transform3D transform;
+	// Invalidates contact recycling on geometry, filter or orientation changes.
+	// Translation is checked separately using the pair's relative offset.
+	uint64_t collision_geometry_version = 1;
 	Transform3D inv_transform;
 	bool _static = true;
 
 	SelfList<GodotCollisionObject3D> pending_shape_update_list;
 
 	void _update_shapes();
+	void _collision_filter_changed();
 
 protected:
-	void _update_shapes_with_motion(const Vector3 &p_motion);
+	void _update_shapes_with_motion(const Vector3 &p_motion, const Vector3 &p_angular_velocity, real_t p_step, const Vector3 &p_rotation_pivot);
 	void _unregister_shapes();
 
 	_FORCE_INLINE_ void _set_transform(const Transform3D &p_transform, bool p_update_shapes = true) {
@@ -89,6 +93,11 @@ protected:
 		ERR_FAIL_COND_MSG(p_transform.origin.length_squared() > MAX_OBJECT_DISTANCE_X2, "Object went too far away (more than '" + itos(MAX_OBJECT_DISTANCE) + "' units from origin).");
 #endif
 
+		// Pure translation preserves shape orientations. A contact pair also
+		// checks the exact relative center offset before recycling its manifold.
+		if (transform.basis != p_transform.basis) {
+			++collision_geometry_version;
+		}
 		transform = p_transform;
 		if (p_update_shapes) {
 			_update_shapes();
@@ -140,6 +149,7 @@ public:
 	}
 
 	_FORCE_INLINE_ const Transform3D &get_transform() const { return transform; }
+	_FORCE_INLINE_ uint64_t get_collision_geometry_version() const { return collision_geometry_version; }
 	_FORCE_INLINE_ const Transform3D &get_inv_transform() const { return inv_transform; }
 	_FORCE_INLINE_ GodotSpace3D *get_space() const { return space; }
 
@@ -153,15 +163,25 @@ public:
 	}
 
 	_FORCE_INLINE_ void set_collision_layer(uint32_t p_layer) {
+		if (collision_layer == p_layer) {
+			return;
+		}
 		collision_layer = p_layer;
-		_shape_changed();
+		_collision_filter_changed();
 	}
 	_FORCE_INLINE_ uint32_t get_collision_layer() const { return collision_layer; }
 
 	_FORCE_INLINE_ void set_collision_mask(uint32_t p_mask) {
+		if (collision_mask == p_mask) {
+			return;
+		}
 		collision_mask = p_mask;
-		_shape_changed();
+		_collision_filter_changed();
 	}
+	// Recheck broadphase eligibility after changing collision exceptions,
+	// without invalidating mass properties or contact geometry versions.
+	void refresh_collision_pairs();
+
 	_FORCE_INLINE_ uint32_t get_collision_mask() const { return collision_mask; }
 
 	_FORCE_INLINE_ void set_collision_priority(real_t p_priority) {

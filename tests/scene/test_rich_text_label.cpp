@@ -35,6 +35,7 @@ TEST_FORCE_LINK(test_rich_text_label)
 #ifndef ADVANCED_GUI_DISABLED
 
 #include "scene/gui/rich_text_label.h"
+#include "scene/resources/style_box.h"
 #include "scene/main/scene_tree.h"
 #include "scene/main/window.h"
 
@@ -155,6 +156,41 @@ TEST_CASE("[SceneTree][RichTextLabel] Font size wrapping paragraph does not add 
 	CHECK(test_label->get_character_line(0) == 0);
 
 	memdelete(test_label);
+}
+
+
+TEST_CASE("[RichTextThemeFastPath] changing only the panel theme preserves rich text") {
+	RichTextLabel *label = memnew(RichTextLabel);
+	SceneTree::get_singleton()->get_root()->add_child(label);
+	label->set_use_bbcode(true);
+	label->set_text("[b]Bold[/b] line\n[i]Italic[/i] line");
+	SceneTree::get_singleton()->process(0);
+	const String expected = label->get_parsed_text();
+	const int paragraphs = label->get_paragraph_count();
+
+	Ref<StyleBoxEmpty> panel = memnew(StyleBoxEmpty);
+	label->add_theme_style_override("normal", panel);
+	label->notification(Control::NOTIFICATION_THEME_CHANGED);
+	SceneTree::get_singleton()->process(0);
+
+	CHECK_EQ(label->get_parsed_text(), expected);
+	CHECK_EQ(label->get_paragraph_count(), paragraphs);
+	memdelete(label);
+}
+
+TEST_CASE("[RichTextThemeFastPath] changing font-size theme preserves content") {
+	RichTextLabel *label = memnew(RichTextLabel);
+	SceneTree::get_singleton()->get_root()->add_child(label);
+	label->set_text("Cgame performance regression\nSecond paragraph.");
+	SceneTree::get_singleton()->process(0);
+	const String expected = label->get_parsed_text();
+	const int count = label->get_paragraph_count();
+
+	label->add_theme_font_size_override("normal_font_size", 20);
+	SceneTree::get_singleton()->process(0);
+	CHECK_EQ(label->get_parsed_text(), expected);
+	CHECK_EQ(label->get_paragraph_count(), count);
+	memdelete(label);
 }
 
 } // namespace TestRichTextLabel

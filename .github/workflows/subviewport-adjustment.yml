@@ -1,0 +1,46 @@
+name: SubViewport optional adjustment regression tests
+
+on:
+  push:
+    branches: [develop]
+    paths:
+      - 'scene/gui/subviewport_container.cpp'
+      - 'scene/gui/subviewport_container.h'
+      - 'scene/main/viewport.cpp'
+      - 'doc/classes/SubViewport.xml'
+      - 'doc/classes/SubViewportContainer.xml'
+      - 'tests/scene/test_viewport.cpp'
+      - 'misc/scripts/tests/test_subviewport_adjustment.py'
+      - '.github/workflows/subviewport-adjustment.yml'
+  pull_request:
+    branches: [develop]
+    paths:
+      - 'scene/gui/subviewport_container.cpp'
+      - 'scene/gui/subviewport_container.h'
+      - 'scene/main/viewport.cpp'
+      - 'doc/classes/SubViewport.xml'
+      - 'doc/classes/SubViewportContainer.xml'
+      - 'tests/scene/test_viewport.cpp'
+      - 'misc/scripts/tests/test_subviewport_adjustment.py'
+      - '.github/workflows/subviewport-adjustment.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  tests:
+    runs-on: ubuntu-24.04
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ['3.9', '3.13']
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+      - name: Verify implementation and compile extracted C++ accessors
+        run: |
+          python -m py_compile misc/scripts/tests/test_subviewport_adjustment.py
+          python -m unittest discover -s misc/scripts/tests -p test_subviewport_adjustment.py -v

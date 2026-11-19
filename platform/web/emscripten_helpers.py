@@ -1,6 +1,8 @@
 import json
 import os
+import subprocess
 
+from SCons.Errors import UserError
 from SCons.Util import WhereIs
 
 from platform_methods import get_build_version
@@ -156,3 +158,20 @@ def add_js_post(env, js_post):
 
 def add_js_externs(env, externs):
     env.Append(JS_EXTERNS=env.File(externs))
+
+
+def run_optimize_wasm(target, source, env):
+    """Optimize one linked .wasm, preserving the original binary for incremental builds."""
+    tool = WhereIs("wasm-opt")
+    if tool is None:
+        raise UserError("optimize_wasm=yes requires Binaryen wasm-opt in PATH")
+
+    if len(target) != 1 or len(source) != 1:
+        raise UserError("OptimizeWASM requires exactly one input and one output")
+
+    # -Oz prioritizes transfer size; this is an opt-in post-link pass since
+    # the smallest binary is not always the fastest at runtime.
+    subprocess.run(
+        [tool, str(source[0]), "--post-emscripten", "-Oz", "-o", str(target[0])],
+        check=True,
+    )

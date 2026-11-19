@@ -1,0 +1,33 @@
+name: SoftBody3D swept edge-edge pair contracts
+
+on:
+  pull_request:
+    paths:
+      - "servers/physics_softbody_pair_edge_sweep.h"
+      - "modules/godot_physics_3d/godot_soft_body_3d.cpp"
+      - "modules/godot_physics_3d/godot_soft_body_3d.h"
+      - "modules/godot_physics_3d/godot_space_3d.cpp"
+      - "modules/godot_physics_3d/godot_space_3d.h"
+      - "servers/physics_3d/physics_server_3d.cpp"
+      - "tests/servers/test_physics_softbody_pair_edge_sweep.cpp"
+      - "tests/stress/test_physics_softbody_pair_edge_sweep.py"
+      - ".github/workflows/physics-softbody-pair-edge-sweep.yml"
+  push:
+    branches: [develop]
+    paths:
+      - "servers/physics_softbody_pair_edge_sweep.h"
+      - "modules/godot_physics_3d/godot_soft_body_3d.cpp"
+      - "tests/stress/test_physics_softbody_pair_edge_sweep.py"
+      - ".github/workflows/physics-softbody-pair-edge-sweep.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  physical-invariants:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Verify moving edge CCD TOI, invariant and source contracts
+        run: python3 -m unittest discover -s tests/stress -p test_physics_softbody_pair_edge_sweep.py -v

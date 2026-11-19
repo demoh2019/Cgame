@@ -1,0 +1,28 @@
+name: Upstream StatusIndicator documentation tests
+
+on:
+  push:
+    branches: [develop]
+    paths:
+      - 'doc/classes/StatusIndicator.xml'
+      - 'misc/scripts/tests/test_upstream_status_indicator_docs.py'
+      - '.github/workflows/upstream-status-indicator-docs.yml'
+  pull_request:
+    paths:
+      - 'doc/classes/StatusIndicator.xml'
+      - 'misc/scripts/tests/test_upstream_status_indicator_docs.py'
+      - '.github/workflows/upstream-status-indicator-docs.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  xml-doc-regressions:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - name: Validate XML and regression tests
+        run: |
+          python3 -m py_compile misc/scripts/tests/test_upstream_status_indicator_docs.py
+          python3 -m unittest discover -s misc/scripts/tests -p test_upstream_status_indicator_docs.py -v

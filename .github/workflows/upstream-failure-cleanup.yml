@@ -1,0 +1,44 @@
+name: Upstream display and OpenXR failure cleanup regressions
+
+on:
+  pull_request:
+    branches: [develop]
+    paths:
+      - "main/main.cpp"
+      - "modules/openxr/extensions/spatial_container/openxr_spatial_container_extension.cpp"
+      - "modules/openxr/extensions/spatial_container/openxr_spatial_container_self_rendering_extension.cpp"
+      - "misc/scripts/tests/test_upstream_failure_cleanup.py"
+      - "misc/scripts/README_upstream_failure_cleanup.md"
+      - ".github/workflows/upstream-failure-cleanup.yml"
+  push:
+    branches: [develop]
+    paths:
+      - "main/main.cpp"
+      - "modules/openxr/extensions/spatial_container/openxr_spatial_container_extension.cpp"
+      - "modules/openxr/extensions/spatial_container/openxr_spatial_container_self_rendering_extension.cpp"
+      - "misc/scripts/tests/test_upstream_failure_cleanup.py"
+      - "misc/scripts/README_upstream_failure_cleanup.md"
+      - ".github/workflows/upstream-failure-cleanup.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  backport-source-contracts:
+    name: Python ${{ matrix.python-version }} cleanup source regressions
+    runs-on: ubuntu-24.04
+    timeout-minutes: 8
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.10", "3.13"]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+      - name: Validate and run cleanup tests
+        run: |
+          python -m py_compile misc/scripts/tests/test_upstream_failure_cleanup.py
+          python -m unittest discover -s misc/scripts/tests -p 'test_upstream_failure_cleanup.py' -v

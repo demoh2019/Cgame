@@ -1,0 +1,47 @@
+name: Native SoftBody3D hydrostatic fluid pressure contracts
+
+on:
+  pull_request:
+    paths:
+      - 'servers/physics_softbody_hydrostatic.h'
+      - 'modules/godot_physics_3d/godot_soft_body_3d.cpp'
+      - 'modules/godot_physics_3d/godot_soft_body_3d.h'
+      - 'modules/godot_physics_3d/godot_space_3d.cpp'
+      - 'modules/godot_physics_3d/godot_space_3d.h'
+      - 'servers/physics_3d/physics_server_3d.cpp'
+      - 'tests/servers/test_physics_softbody_hydrostatic.cpp'
+      - 'tests/stress/test_physics_softbody_hydrostatic.py'
+      - '.github/workflows/physics-softbody-hydrostatic.yml'
+      - 'demo/softbody_hydrostatic_lab/**'
+  push:
+    branches: [develop]
+    paths:
+      - 'servers/physics_softbody_hydrostatic.h'
+      - 'modules/godot_physics_3d/godot_soft_body_3d.cpp'
+      - 'modules/godot_physics_3d/godot_soft_body_3d.h'
+      - 'modules/godot_physics_3d/godot_space_3d.cpp'
+      - 'modules/godot_physics_3d/godot_space_3d.h'
+      - 'servers/physics_3d/physics_server_3d.cpp'
+      - 'tests/servers/test_physics_softbody_hydrostatic.cpp'
+      - 'tests/stress/test_physics_softbody_hydrostatic.py'
+      - '.github/workflows/physics-softbody-hydrostatic.yml'
+      - 'demo/softbody_hydrostatic_lab/**'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: softbody-hydrostatic-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  mathematical-contracts:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - name: Validate source test syntax
+        run: python3 -m py_compile tests/stress/test_physics_softbody_hydrostatic.py
+      - name: Test displaced volume, hydrostatic pressure and C++ source wiring
+        run: python3 -m unittest discover -s tests/stress -p 'test_physics_softbody_hydrostatic.py' -v

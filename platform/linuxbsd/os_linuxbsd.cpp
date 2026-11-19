@@ -88,6 +88,12 @@
 #include <sys/sysctl.h>
 #endif
 
+#ifdef __linux__
+#include "platform/linuxbsd/cgroup_cpu_quota.h"
+
+#include <sched.h>
+#endif
+
 #ifdef FONTCONFIG_ENABLED
 #ifdef SOWRAP_ENABLED
 #include "fontconfig-so_wrap.h"
@@ -189,6 +195,23 @@ void OS_LinuxBSD::initialize_joypads() {
 	}
 #endif
 }
+
+#ifdef __linux__
+int OS_LinuxBSD::get_default_thread_pool_size() const {
+	int available = get_processor_count();
+	cpu_set_t set;
+	if (sched_getaffinity(0, sizeof(cpu_set_t), &set) == 0) {
+		const int count = CPU_COUNT(&set);
+		if (count > 0) {
+			available = count;
+		}
+	}
+	// Affinity alone may overestimate CPU capacity inside cgroup v2 containers.
+	// Respect both constraints, but always retain at least one worker.
+	const int quota = CgroupCPUQuota::read_cpu_max_file();
+	return CgroupCPUQuota::effective_thread_count(available, quota);
+}
+#endif
 
 String OS_LinuxBSD::get_unique_id() const {
 	static String machine_id;
@@ -988,6 +1011,7 @@ void OS_LinuxBSD::run() {
 	//int frames=0;
 	//uint64_t frame=0;
 
+
 	while (true) {
 		GodotProfileFrameMark;
 		GodotProfileZone("OS_LinuxBSD::run");
@@ -1003,6 +1027,7 @@ void OS_LinuxBSD::run() {
 	}
 
 	main_loop->finalize();
+
 }
 
 void OS_LinuxBSD::disable_crash_handler() {

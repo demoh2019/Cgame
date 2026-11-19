@@ -1,0 +1,37 @@
+name: Animation key-range binary-search regression
+
+on:
+  pull_request:
+    branches: [develop]
+    paths:
+      - "scene/resources/animation.cpp"
+      - "tests/scene/test_animation.cpp"
+      - ".github/workflows/animation-key-range-binary-search.yml"
+  push:
+    branches: [develop]
+    paths:
+      - "scene/resources/animation.cpp"
+      - "tests/scene/test_animation.cpp"
+      - ".github/workflows/animation-key-range-binary-search.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  native-animation-keys:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+      - uses: ./.github/actions/godot-deps
+      - uses: ./.github/actions/godot-build
+        with:
+          platform: linuxbsd
+          target: editor
+          scons-flags: dev_build=yes tests=yes debug_symbols=no module_mono_enabled=no accesskit=no
+      - name: Compare linear reference against binary key range lookup
+        run: |
+          timeout 300s ./bin/godot.linuxbsd.editor.dev.x86_64 --headless --test --test-case="*[Animation]*" --no-colors

@@ -436,7 +436,7 @@ void Path3DGizmo::redraw() {
 	}
 
 	// 2. Draw handles when selected.
-	if (Path3DEditorPlugin::singleton->get_edited_path() == path) {
+	if (is_selected()) {
 		PackedVector3Array handle_lines;
 		PackedVector3Array tilt_handle_lines;
 		PackedVector3Array primary_handle_points;
@@ -574,11 +574,23 @@ void Path3DGizmo::redraw() {
 }
 
 void Path3DGizmo::_update_transform_gizmo() {
+	Ref<Curve3D> curve = path->get_curve();
+	const int point_count = curve.is_valid() ? curve->get_point_count() : 0;
+
+	// Clear stale subgizmo selection after a curve is cleared or its handle count changes.
+	if (curve.is_null() || point_count != cached_point_count) {
+		cached_point_count = point_count;
+		Node3DEditor::get_singleton()->clear_subgizmo_selection(path);
+		return;
+	}
+
 	Node3DEditor::get_singleton()->update_transform_gizmo();
 }
 
 Path3DGizmo::Path3DGizmo(Path3D *p_path) {
 	path = p_path;
+	Ref<Curve3D> curve = path->get_curve();
+	cached_point_count = curve.is_valid() ? curve->get_point_count() : 0;
 	set_node_3d(p_path);
 	orig_in_length = 0;
 	orig_out_length = 0;

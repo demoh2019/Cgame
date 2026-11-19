@@ -1,0 +1,50 @@
+name: Typed container Ref Script conversion fast-path regressions
+
+on:
+  pull_request:
+    paths:
+      - 'core/variant/array.cpp'
+      - 'core/variant/array.h'
+      - 'core/variant/dictionary.cpp'
+      - 'core/variant/dictionary.h'
+      - 'core/variant/typed_array.h'
+      - 'core/variant/typed_dictionary.h'
+      - 'tests/core/variant/test_array.cpp'
+      - 'tests/core/variant/test_dictionary.cpp'
+      - '.github/workflows/typed-container-ref-script-fastpath.yml'
+  push:
+    branches: [develop]
+    paths:
+      - 'core/variant/array.cpp'
+      - 'core/variant/array.h'
+      - 'core/variant/dictionary.cpp'
+      - 'core/variant/dictionary.h'
+      - 'core/variant/typed_array.h'
+      - 'core/variant/typed_dictionary.h'
+      - 'tests/core/variant/test_array.cpp'
+      - 'tests/core/variant/test_dictionary.cpp'
+      - '.github/workflows/typed-container-ref-script-fastpath.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  native-typed-container-build:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+      - uses: ./.github/actions/godot-deps
+      - name: Build native typed container tests
+        uses: ./.github/actions/godot-build
+        with:
+          platform: linuxbsd
+          target: editor
+          scons-flags: dev_build=yes tests=yes debug_symbols=no module_mono_enabled=no module_text_server_fb_enabled=yes accesskit=no -j2
+      - name: Verify typed Array legacy API and Ref Script overloads
+        run: ./bin/godot.linuxbsd.editor.dev.x86_64 --headless --test --test-case="*[TypedContainer] Array Ref<Script> fast path retains Variant compatibility*"
+      - name: Verify typed Dictionary legacy API and Ref Script overloads
+        run: ./bin/godot.linuxbsd.editor.dev.x86_64 --headless --test --test-case="*[TypedContainer] Dictionary Ref<Script> fast path retains Variant compatibility*"

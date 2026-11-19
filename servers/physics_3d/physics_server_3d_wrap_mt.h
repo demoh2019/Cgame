@@ -219,6 +219,19 @@ public:
 	FUNC3(body_set_param, RID, PS3DE::BodyParameter, const Variant &);
 	FUNC2RC(Variant, body_get_param, RID, PS3DE::BodyParameter);
 
+	FUNC2(body_set_solver_priority, RID, int);
+	FUNC1RC(int, body_get_solver_priority, RID);
+	FUNC2(body_set_max_depenetration_velocity, RID, real_t);
+	FUNC1RC(real_t, body_get_max_depenetration_velocity, RID);
+	FUNC2(body_set_wind_area, RID, real_t);
+	FUNC1RC(real_t, body_get_wind_area, RID);
+	FUNC2(body_set_wind_drag_coefficient, RID, real_t);
+	FUNC1RC(real_t, body_get_wind_drag_coefficient, RID);
+	FUNC2(body_set_max_angular_velocity, RID, real_t);
+	FUNC1RC(real_t, body_get_max_angular_velocity, RID);
+	FUNC2(body_set_max_linear_velocity, RID, real_t);
+	FUNC1RC(real_t, body_get_max_linear_velocity, RID);
+
 	FUNC1(body_reset_mass_properties, RID);
 
 	FUNC3(body_set_state, RID, PS3DE::BodyState, const Variant &);
@@ -393,6 +406,15 @@ public:
 
 	FUNC2(joint_disable_collisions_between_bodies, RID, bool);
 	FUNC1RC(bool, joint_is_disabled_collisions_between_bodies, RID);
+
+	FUNC2(joint_set_break_force, RID, real_t);
+	FUNC1RC(real_t, joint_get_break_force, RID);
+	FUNC2(joint_set_break_torque, RID, real_t);
+	FUNC1RC(real_t, joint_get_break_torque, RID);
+	FUNC1RC(Vector3, joint_get_reaction_force, RID);
+	FUNC1RC(Vector3, joint_get_reaction_torque, RID);
+	FUNC1RC(bool, joint_is_broken, RID);
+	FUNC2(joint_set_break_callback, RID, const Callable &);
 
 	/* MISC */
 

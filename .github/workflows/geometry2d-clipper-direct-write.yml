@@ -1,0 +1,36 @@
+name: Geometry2D Clipper direct-write regressions
+
+on:
+  pull_request:
+    paths:
+      - 'core/math/geometry_2d.cpp'
+      - 'tests/core/math/test_geometry_2d.cpp'
+      - '.github/workflows/geometry2d-clipper-direct-write.yml'
+  push:
+    branches: [develop]
+    paths:
+      - 'core/math/geometry_2d.cpp'
+      - 'tests/core/math/test_geometry_2d.cpp'
+      - '.github/workflows/geometry2d-clipper-direct-write.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  native-geometry2d:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+      - uses: ./.github/actions/godot-deps
+      - name: Compile native clipping tests
+        uses: ./.github/actions/godot-build
+        with:
+          platform: linuxbsd
+          target: editor
+          scons-flags: dev_build=yes tests=yes debug_symbols=no module_mono_enabled=no module_text_server_fb_enabled=yes accesskit=no -j2
+      - name: Verify Geometry2D polygon operations and offsets
+        run: ./bin/godot.linuxbsd.editor.dev.x86_64 --headless --test --test-case="*[Geometry2D]*"

@@ -386,6 +386,9 @@ void SceneTree::call_group_flagsp(uint32_t p_call_flags, const StringName &p_gro
 			}
 
 			Vector<Variant> args;
+			if (p_argcount > 0) {
+				args.reserve(p_argcount);
+			}
 			for (int i = 0; i < p_argcount; i++) {
 				args.push_back(*p_args[i]);
 			}
@@ -398,7 +401,7 @@ void SceneTree::call_group_flagsp(uint32_t p_call_flags, const StringName &p_gro
 		nodes_copy = g.nodes;
 	}
 
-	Node **gr_nodes = nodes_copy.ptrw();
+	Node *const *gr_nodes = nodes_copy.ptr();
 	int gr_node_count = nodes_copy.size();
 
 	{
@@ -470,7 +473,7 @@ void SceneTree::notify_group_flags(uint32_t p_call_flags, const StringName &p_gr
 		nodes_copy = g.nodes;
 	}
 
-	Node **gr_nodes = nodes_copy.ptrw();
+	Node *const *gr_nodes = nodes_copy.ptr();
 	int gr_node_count = nodes_copy.size();
 
 	{
@@ -532,7 +535,7 @@ void SceneTree::set_group_flags(uint32_t p_call_flags, const StringName &p_group
 
 		nodes_copy = g.nodes;
 	}
-	Node **gr_nodes = nodes_copy.ptrw();
+	Node *const *gr_nodes = nodes_copy.ptr();
 	int gr_node_count = nodes_copy.size();
 
 	{
@@ -798,7 +801,10 @@ void SceneTree::process_timers(double p_delta, bool p_physics_frame) {
 
 	for (List<Ref<SceneTreeTimer>>::Element *E = timers.front(); E;) {
 		List<Ref<SceneTreeTimer>>::Element *N = E->next();
-		Ref<SceneTreeTimer> timer = E->get();
+		// Borrow the list's Ref during ordinary ticks; copying it here
+		// increments/decrements the atomic refcount for every live timer
+		// on every frame, even when its timeout is far in the future.
+		const Ref<SceneTreeTimer> &timer = E->get();
 
 		if ((paused && !timer->is_process_always()) || (timer->is_process_in_physics() != p_physics_frame)) {
 			if (E == L) {
@@ -813,7 +819,10 @@ void SceneTree::process_timers(double p_delta, bool p_physics_frame) {
 		timer->set_time_left(time_left);
 
 		if (time_left <= 0) {
-			E->get()->emit_signal(SNAME("timeout"));
+			// Keep the timer alive across callbacks and removal. Only the
+			// expired-timer path needs to acquire an additional strong Ref.
+			Ref<SceneTreeTimer> timeout_timer = timer;
+			timeout_timer->emit_signal(SNAME("timeout"));
 			timers.erase(E);
 		}
 		if (E == L) {
@@ -1216,29 +1225,31 @@ void SceneTree::_process_group(ProcessGroup *p_group, bool p_physics) {
 	// Make a copy, so if nodes are added/removed from process, this does not break
 	Vector<Node *> nodes_copy = nodes;
 
-	uint32_t node_count = nodes_copy.size();
-	Node **nodes_ptr = (Node **)nodes_copy.ptr(); // Force cast, pointer will not change.
+	const uint32_t node_count = nodes_copy.size();
+	Node *const *nodes_ptr = nodes_copy.ptr();
 
-	for (uint32_t i = 0; i < node_count; i++) {
-		Node *n = nodes_ptr[i];
-		if (nodes_removed_on_group_call.has(n)) {
-			// Node may have been removed during process, skip it.
-			// Keep in mind removals can only happen on the main thread.
-			continue;
-		}
-
-		if (!n->can_process() || !n->is_inside_tree()) {
-			continue;
-		}
-
-		if (p_physics) {
+	// Hoist the processing mode outside the hot node loop. The snapshot and
+	// removed-node checks are kept so that callbacks may still change group
+	// membership and process flags during this pass.
+	if (p_physics) {
+		for (uint32_t i = 0; i < node_count; i++) {
+			Node *n = nodes_ptr[i];
+			if (nodes_removed_on_group_call.has(n) || !n->can_process()) {
+				continue;
+			}
 			if (n->is_physics_processing_internal()) {
 				n->notification(Node::NOTIFICATION_INTERNAL_PHYSICS_PROCESS);
 			}
 			if (n->is_physics_processing()) {
 				n->notification(Node::NOTIFICATION_PHYSICS_PROCESS);
 			}
-		} else {
+		}
+	} else {
+		for (uint32_t i = 0; i < node_count; i++) {
+			Node *n = nodes_ptr[i];
+			if (nodes_removed_on_group_call.has(n) || !n->can_process()) {
+				continue;
+			}
 			if (n->is_processing_internal()) {
 				n->notification(Node::NOTIFICATION_INTERNAL_PROCESS);
 			}
@@ -1459,13 +1470,13 @@ void SceneTree::_call_input_pause(const StringName &p_group, CallInputType p_cal
 
 		_update_group_order(g);
 
-		//copy, so copy on write happens in case something is removed from process while being called
-		//performance is not lost because only if something is added/removed the vector is copied.
+		// Keep a shared COW snapshot: callbacks can add/remove group members safely.
+		// Only a mutation of the group forks its buffer, not every input event.
 		nodes_copy = g.nodes;
 	}
 
 	int gr_node_count = nodes_copy.size();
-	Node **gr_nodes = nodes_copy.ptrw();
+	Node *const *gr_nodes = nodes_copy.ptr();
 
 	{
 		_THREAD_SAFE_METHOD_
@@ -1588,9 +1599,13 @@ TypedArray<Node> SceneTree::_get_nodes_in_group(const StringName &p_group) {
 
 	ret.resize(nc);
 
-	Node **ptr = E->value.nodes.ptrw();
-	for (int i = 0; i < nc; i++) {
-		ret[i] = ptr[i];
+	Node *const *ptr = E->value.nodes.ptr();
+	// This freshly resized typed array has writable contiguous slots.
+	// Write sequentially to avoid repeated indexed access and checks for
+	// large group snapshots requested by scripts.
+	Array::Iterator write = ret.begin();
+	for (int i = 0; i < nc; i++, ++write) {
+		*write = ptr[i];
 	}
 
 	return ret;
@@ -2061,7 +2076,7 @@ void SceneTree::get_argument_options(const StringName &p_function, int p_idx, Li
 		add_options = names.has(p_function);
 	}
 	if (add_options) {
-		HashMap<StringName, String> global_groups(ProjectSettings::get_singleton()->get_global_groups_list());
+		const HashMap<StringName, String> &global_groups = ProjectSettings::get_singleton()->get_global_groups_list();
 		for (const KeyValue<StringName, String> &E : global_groups) {
 			r_options->push_back(E.key.string().quote());
 		}

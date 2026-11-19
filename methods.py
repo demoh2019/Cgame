@@ -7,7 +7,7 @@ import re
 import subprocess
 import sys
 import zlib
-from collections import OrderedDict
+from collections import OrderedDict, UserList
 from collections.abc import Generator
 from io import StringIO
 from pathlib import Path
@@ -41,13 +41,21 @@ def add_source_files_orig(self, sources, files, allow_gen=False):
         if skip_gen_cpp and not allow_gen:
             files = [f for f in files if not str(f).endswith(".gen.cpp")]
 
-    # Add each path as compiled Object following environment (self) configuration
+    # Object builders can return unhashable SCons NodeList objects. Use their
+    # component Nodes as a key, but keep the original builder result in sources.
+    # This avoids a quadratic scan when adding many objects to a build section.
+    def object_key(obj):
+        return tuple(obj) if isinstance(obj, (list, UserList)) else obj
+
+    existing_objects = {object_key(obj) for obj in sources}
     for file in files:
         obj = self.Object(file)
-        if obj in sources:
+        key = object_key(obj)
+        if key in existing_objects:
             print_warning(f'Object "{obj}" already included in environment sources.')
             continue
         sources.append(obj)
+        existing_objects.add(key)
 
 
 def add_source_files_scu(self, sources, files, allow_gen=False):

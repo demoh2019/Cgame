@@ -1,0 +1,15 @@
+config_version=5
+
+[application]
+
+config/name="HLOD Builder Demo"
+config/features=PackedStringArray("4.7", "GL Compatibility")
+
+[editor_plugins]
+
+enabled=PackedStringArray("res://addons/hlod_builder/plugin.cfg")
+
+[rendering]
+
+renderer/rendering_method="gl_compatibility"
+renderer/rendering_method.mobile="gl_compatibility"

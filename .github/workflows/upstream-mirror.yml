@@ -1,0 +1,96 @@
+name: Upstream issue and PR mirror
+on:
+  workflow_dispatch:
+    inputs:
+      start_page:
+        description: "Upstream issue-list page, 100 items per page (1-based)"
+        required: true
+        default: "1"
+        type: string
+      start_path:
+        description: "Optional next_path from previous checkpoint; overrides start_page pagination"
+        required: false
+        default: ""
+        type: string
+      start_offset:
+        description: "Optional next_offset from previous checkpoint (0-100)"
+        required: true
+        default: "0"
+        type: string
+      pages:
+        description: "Number of source pages to visit; 0 means all remaining"
+        required: true
+        default: "1"
+        type: string
+      max_items:
+        description: "Maximum items processed (20 recommended; 0 = unlimited)"
+        required: true
+        default: "20"
+        type: string
+      pr_mode:
+        description: "Open upstream PRs: mirror git commits, or archive as issues"
+        required: true
+        default: git
+        type: choice
+        options:
+          - git
+          - archive
+      include_comments:
+        description: "Copy issue/PR conversation comments as attributed comments"
+        required: true
+        default: false
+        type: boolean
+      apply:
+        description: "Actually write to GitHub (unchecked = dry run)"
+        required: true
+        default: false
+        type: boolean
+
+permissions:
+  contents: write
+  issues: write
+  pull-requests: write
+
+concurrency:
+  group: upstream-mirror
+  cancel-in-progress: false
+
+jobs:
+  mirror:
+    runs-on: ubuntu-latest
+    timeout-minutes: 300
+    env:
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      START_PAGE: ${{ inputs.start_page }}
+      START_PATH: ${{ inputs.start_path }}
+      START_OFFSET: ${{ inputs.start_offset }}
+      PAGES: ${{ inputs.pages }}
+      MAX_ITEMS: ${{ inputs.max_items }}
+      PR_MODE: ${{ inputs.pr_mode }}
+      INCLUDE_COMMENTS: ${{ inputs.include_comments }}
+      APPLY: ${{ inputs.apply }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: true
+      - name: Test mirror script
+        run: python3 -m unittest discover -s .github/scripts/tests -v
+      - name: Mirror a bounded batch of upstream records
+        shell: bash
+        run: |
+          args=(--source godotengine/godot --dest demoh2019/godot
+            --start-page "$START_PAGE" --start-offset "$START_OFFSET"
+            --pages "$PAGES" --max-items "$MAX_ITEMS" --pr-mode "$PR_MODE"
+            --checkpoint mirror-checkpoint.json)
+          if [ -n "$START_PATH" ]; then args+=(--start-path "$START_PATH"); fi
+          if [ "$INCLUDE_COMMENTS" = "true" ]; then args+=(--include-comments); fi
+          if [ "$APPLY" = "true" ]; then args+=(--apply); fi
+          python3 .github/scripts/mirror_upstream.py "${args[@]}"
+      - name: Save checkpoint and report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: upstream-mirror-checkpoint
+          path: mirror-checkpoint.json
+          if-no-files-found: ignore

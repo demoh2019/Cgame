@@ -34,6 +34,8 @@ TEST_FORCE_LINK(test_gradient)
 
 #include "scene/resources/gradient.h"
 
+#include <limits>
+
 namespace TestGradient {
 
 TEST_CASE("[Gradient] Default gradient") {
@@ -139,6 +141,98 @@ TEST_CASE("[Gradient] Custom gradient (points specified out-of-order)") {
 	CHECK_MESSAGE(
 			gradient->get_color_at_offset(0.1).is_equal_approx(Color(1, 0, 0)),
 			"Custom out-of-order gradient should return the expected interpolated value at offset 0.1 after removing point at index 0.");
+}
+
+
+TEST_CASE("[Gradient] Constant sampling preserves endpoints and step boundaries") {
+	Ref<Gradient> gradient = memnew(Gradient);
+	gradient->set_offsets(Vector<float>({ 0.0f, 0.5f, 1.0f }));
+	gradient->set_colors(Vector<Color>({ Color(1, 0, 0), Color(0, 1, 0), Color(0, 0, 1) }));
+	gradient->set_interpolation_mode(Gradient::GRADIENT_INTERPOLATE_CONSTANT);
+	CHECK(gradient->get_color_at_offset(-2.0f).is_equal_approx(Color(1, 0, 0)));
+	CHECK(gradient->get_color_at_offset(0.25f).is_equal_approx(Color(1, 0, 0)));
+	CHECK(gradient->get_color_at_offset(0.5f).is_equal_approx(Color(0, 1, 0)));
+	CHECK(gradient->get_color_at_offset(0.75f).is_equal_approx(Color(0, 1, 0)));
+	CHECK(gradient->get_color_at_offset(1.0f).is_equal_approx(Color(0, 0, 1)));
+	CHECK(gradient->get_color_at_offset(2.0f).is_equal_approx(Color(0, 0, 1)));
+}
+
+TEST_CASE("[Gradient] Linear and cubic sampling retain interpolation weights") {
+	Ref<Gradient> gradient = memnew(Gradient);
+	gradient->set_interpolation_color_space(Gradient::GRADIENT_COLOR_SPACE_SRGB);
+	gradient->set_interpolation_mode(Gradient::GRADIENT_INTERPOLATE_LINEAR);
+	CHECK(gradient->get_color_at_offset(0.5f).is_equal_approx(Color(0.5f, 0.5f, 0.5f)));
+	gradient->set_interpolation_mode(Gradient::GRADIENT_INTERPOLATE_CUBIC);
+	CHECK(gradient->get_color_at_offset(0.5f).is_equal_approx(Color(0.5f, 0.5f, 0.5f)));
+}
+
+
+TEST_CASE("[Gradient][Performance] Two-point hotpath retains boundaries and color spaces") {
+	Ref<Gradient> gradient = memnew(Gradient);
+	const Color first(0.1f, 0.3f, 0.6f, 0.25f);
+	const Color last(0.9f, 0.7f, 0.2f, 0.75f);
+	gradient->set_offsets(Vector<float>({ 0.2f, 0.8f }));
+	gradient->set_colors(Vector<Color>({ first, last }));
+
+	const Gradient::InterpolationMode modes[] = {
+		Gradient::GRADIENT_INTERPOLATE_CONSTANT,
+		Gradient::GRADIENT_INTERPOLATE_LINEAR,
+		Gradient::GRADIENT_INTERPOLATE_CUBIC,
+	};
+	const Gradient::ColorSpace spaces[] = {
+		Gradient::GRADIENT_COLOR_SPACE_SRGB,
+		Gradient::GRADIENT_COLOR_SPACE_LINEAR_SRGB,
+		Gradient::GRADIENT_COLOR_SPACE_OKLAB,
+	};
+
+	for (Gradient::ColorSpace space : spaces) {
+		gradient->set_interpolation_color_space(space);
+		for (Gradient::InterpolationMode mode : modes) {
+			gradient->set_interpolation_mode(mode);
+			CHECK(gradient->get_color_at_offset(-10).is_equal_approx(first));
+			CHECK(gradient->get_color_at_offset(0.2f).is_equal_approx(first));
+			CHECK(gradient->get_color_at_offset(0.8f).is_equal_approx(last));
+			CHECK(gradient->get_color_at_offset(10).is_equal_approx(last));
+
+			// A constant two-point gradient uses the first stop until the
+			// right boundary, including for non-sRGB interpolation spaces.
+			if (mode == Gradient::GRADIENT_INTERPOLATE_CONSTANT) {
+				CHECK(gradient->get_color_at_offset(0.5f).is_equal_approx(first));
+			} else {
+				const Color midpoint = gradient->get_color_at_offset(0.5f);
+				CHECK(Math::is_finite(midpoint.r));
+				CHECK(Math::is_finite(midpoint.g));
+				CHECK(Math::is_finite(midpoint.b));
+				CHECK(midpoint.a == doctest::Approx(0.5f));
+			}
+		}
+	}
+
+	// NaN was previously treated as equality at the first binary-search
+	// midpoint. Preserve the same result for two-point gradients.
+	const float nan = std::numeric_limits<float>::quiet_NaN();
+	CHECK(gradient->get_color_at_offset(nan).is_equal_approx(first));
+
+	// Identical offsets have a sharp right boundary, not a divide-by-zero.
+	gradient->set_offsets(Vector<float>({ 0.5f, 0.5f }));
+	CHECK(gradient->get_color_at_offset(0.5f).is_equal_approx(first));
+	CHECK(gradient->get_color_at_offset(0.6f).is_equal_approx(last));
+
+	// Reordering two stops should still reorder their associated colors.
+	gradient->set_offsets(Vector<float>({ 1.0f, 0.0f }));
+	CHECK(gradient->get_color_at_offset(0.0f).is_equal_approx(last));
+	CHECK(gradient->get_color_at_offset(1.0f).is_equal_approx(first));
+
+	// The getter buffers must be independent of later mutations.
+	Vector<float> offsets = gradient->get_offsets();
+	Vector<Color> colors = gradient->get_colors();
+	REQUIRE(offsets.size() == 2);
+	REQUIRE(colors.size() == 2);
+	CHECK(offsets[0] == 0.0f);
+	CHECK(offsets[1] == 1.0f);
+	gradient->set_color(0, Color(0.4f, 0.5f, 0.6f));
+	CHECK(colors[0].is_equal_approx(last));
+	CHECK(colors[1].is_equal_approx(first));
 }
 
 } // namespace TestGradient

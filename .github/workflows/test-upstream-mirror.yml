@@ -1,0 +1,30 @@
+name: Test upstream mirror
+on:
+  push:
+    paths:
+      - '.github/scripts/mirror_upstream.py'
+      - '.github/scripts/tests/**'
+      - '.github/workflows/test-upstream-mirror.yml'
+  pull_request:
+    paths:
+      - '.github/scripts/mirror_upstream.py'
+      - '.github/scripts/tests/**'
+      - '.github/workflows/test-upstream-mirror.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  unit-tests:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - name: Check Python syntax
+        run: python3 -m compileall -q .github/scripts
+      - name: Run mirror unit tests
+        run: python3 -m unittest discover -s .github/scripts/tests -v
+      - name: Dry-run against the real upstream GitHub API (no writes)
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: python3 .github/scripts/mirror_upstream.py --start-page 1 --pages 1 --max-items 5

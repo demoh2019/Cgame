@@ -36,6 +36,9 @@ TEST_FORCE_LINK(test_audio_stream_wav)
 #include "core/io/marshalls.h"
 #include "core/math/math_defs.h"
 #include "core/math/math_funcs.h"
+#include "scene/audio/audio_stream_player.h"
+#include "scene/2d/audio_stream_player_2d.h"
+#include "scene/3d/audio_stream_player_3d.h"
 #include "scene/resources/audio/audio_stream_wav.h"
 #include "tests/test_utils.h"
 
@@ -194,6 +197,38 @@ TEST_CASE("[Audio][AudioStreamWAV] save_to_wav() adds '.wav' file extension auto
 	CHECK(error == OK);
 }
 
+
+TEST_CASE("[Audio][AudioStreamWAV] Chunked file and memory decoding are identical") {
+	// 8193 frames deliberately cross the 4096-byte sample buffer boundary
+	// for both mono/stereo and PCM8/PCM16.
+	const int frames = 8193;
+	for (int bits = 0; bits < 2; bits++) {
+		for (int channels = 0; channels < 2; channels++) {
+			const bool stereo = channels != 0;
+			Ref<AudioStreamWAV> original;
+			original.instantiate();
+			original->set_format(bits ? AudioStreamWAV::FORMAT_16_BITS : AudioStreamWAV::FORMAT_8_BITS);
+			original->set_stereo(stereo);
+			original->set_mix_rate(WAV_RATE);
+			original->set_data(bits ? gen_pcm16_test(WAV_RATE, frames, stereo) : gen_pcm8_test(WAV_RATE, frames, stereo));
+
+			const String path = TestUtils::get_temp_path(vformat("chunked_wav_%d_%d.wav", bits, channels));
+			REQUIRE(original->save_to_wav(path) == OK);
+			Vector<uint8_t> bytes = FileAccess::get_file_as_bytes(path);
+			REQUIRE(bytes.size() > 4096);
+			Ref<AudioStreamWAV> disk = AudioStreamWAV::load_from_file(path, Dictionary());
+			Ref<AudioStreamWAV> memory = AudioStreamWAV::load_from_buffer(bytes, Dictionary());
+			REQUIRE(disk.is_valid());
+			REQUIRE(memory.is_valid());
+			CHECK_EQ(disk->get_data(), memory->get_data());
+			CHECK_EQ(disk->get_data(), original->get_data());
+			CHECK_EQ(disk->get_mix_rate(), memory->get_mix_rate());
+			CHECK_EQ(disk->is_stereo(), memory->is_stereo());
+			CHECK_EQ(disk->get_format(), memory->get_format());
+		}
+	}
+}
+
 TEST_CASE("[Audio][AudioStreamWAV] Default values") {
 	Ref<AudioStreamWAV> stream = memnew(AudioStreamWAV);
 	CHECK(stream->get_format() == AudioStreamWAV::FORMAT_8_BITS);
@@ -218,6 +253,200 @@ TEST_CASE("[Audio][AudioStreamWAV] Saving IMA ADPCM is not supported") {
 	ERR_PRINT_OFF;
 	CHECK(stream->save_to_wav(save_path) == ERR_UNAVAILABLE);
 	ERR_PRINT_ON;
+}
+
+TEST_CASE("[Audio][AudioStreamWAV] WAV loop negative offsets are end-relative") {
+	const String path = TestUtils::get_temp_path("upstream_wav_loop_negative.wav");
+	Ref<AudioStreamWAV> original;
+	original.instantiate();
+	original->set_format(AudioStreamWAV::FORMAT_16_BITS);
+	original->set_mix_rate(44100);
+	original->set_data(gen_pcm16_test(44100, 64, false));
+	REQUIRE(original->save_to_wav(path) == OK);
+
+	struct LoopCase {
+		int64_t begin;
+		int64_t end;
+		int64_t expected_begin;
+		int64_t expected_end;
+	};
+	const LoopCase cases[] = {
+		{ -1, -1, 64, 64 },
+		{ -2, -1, 63, 64 },
+		{ -64, -3, 1, 62 },
+		{ -65, -66, 0, 0 },
+		{ 0, -1, 0, 64 },
+		{ 8, 1000, 8, 64 },
+	};
+	for (const LoopCase &test : cases) {
+		INFO("Begin: ", test.begin, ", end: ", test.end);
+		Dictionary options;
+		options["edit/loop_mode"] = 2; // Loop forward (import enum).
+		options["edit/loop_begin"] = test.begin;
+		options["edit/loop_end"] = test.end;
+		Ref<AudioStreamWAV> imported = AudioStreamWAV::load_from_file(path, options);
+		REQUIRE(imported.is_valid());
+		CHECK(imported->get_loop_mode() == AudioStreamWAV::LOOP_FORWARD);
+		CHECK(imported->get_loop_begin() == test.expected_begin);
+		CHECK(imported->get_loop_end() == test.expected_end);
+	}
+}
+
+TEST_CASE("[Audio][AudioStreamWAV] WAV explicit loop endpoints preserve last-frame boundary") {
+	const String path = TestUtils::get_temp_path("upstream_wav_loop_boundary.wav");
+	Ref<AudioStreamWAV> original;
+	original.instantiate();
+	original->set_format(AudioStreamWAV::FORMAT_8_BITS);
+	original->set_mix_rate(22050);
+	original->set_data(gen_pcm8_test(22050, 32, false));
+	REQUIRE(original->save_to_wav(path) == OK);
+
+	for (int loop_mode : { 2, 3, 4 }) {
+		INFO("Loop import mode: ", loop_mode);
+		Dictionary options;
+		options["edit/loop_mode"] = loop_mode;
+		options["edit/loop_begin"] = 2;
+		options["edit/loop_end"] = -1;
+		Ref<AudioStreamWAV> imported = AudioStreamWAV::load_from_file(path, options);
+		REQUIRE(imported.is_valid());
+		CHECK(imported->get_loop_mode() == AudioStreamWAV::LoopMode(loop_mode - 1));
+		CHECK(imported->get_loop_begin() == 2);
+		CHECK(imported->get_loop_end() == 32);
+		CHECK(imported->get_length() == doctest::Approx(32.0 / 22050.0));
+	}
+}
+
+
+TEST_CASE("[Audio][AudioStreamWAV] copy-on-write get_data shares the original large buffer") {
+	Ref<AudioStreamWAV> stream = memnew(AudioStreamWAV);
+	Vector<uint8_t> original;
+	original.resize(256 * 1024);
+	uint8_t *original_write = original.ptrw();
+	for (int i = 0; i < original.size(); i++) {
+		original_write[i] = uint8_t(i % 251);
+	}
+	stream->set_data(original);
+
+	// No additional 256 KiB allocation is required to read this buffer.
+	const Vector<uint8_t> snapshot = stream->get_data();
+	REQUIRE_EQ(snapshot.size(), original.size());
+	CHECK(snapshot.ptr() == original.ptr());
+	CHECK_EQ(snapshot[0], uint8_t(0));
+	CHECK_EQ(snapshot[snapshot.size() - 1], uint8_t((snapshot.size() - 1) % 251));
+}
+
+TEST_CASE("[Audio][AudioStreamWAV] mutating a returned buffer detaches without changing stream samples") {
+	Ref<AudioStreamWAV> stream = memnew(AudioStreamWAV);
+	Vector<uint8_t> raw;
+	raw.resize(64 * 1024);
+	uint8_t *raw_write = raw.ptrw();
+	for (int i = 0; i < raw.size(); i++) {
+		raw_write[i] = uint8_t(i % 239);
+	}
+	stream->set_data(raw);
+
+	Vector<uint8_t> snapshot = stream->get_data();
+	REQUIRE(snapshot.ptr() == raw.ptr());
+	snapshot.ptrw()[0] = 253;
+	snapshot.ptrw()[1024] = 254;
+	CHECK(snapshot.ptr() != raw.ptr());
+	CHECK_EQ(raw[0], uint8_t(0));
+	CHECK_EQ(raw[1024], uint8_t(1024 % 239));
+	const Vector<uint8_t> streamed = stream->get_data();
+	CHECK_EQ(streamed[0], uint8_t(0));
+	CHECK_EQ(streamed[1024], uint8_t(1024 % 239));
+	CHECK_EQ(snapshot[0], uint8_t(253));
+	CHECK_EQ(snapshot[1024], uint8_t(254));
+}
+
+TEST_CASE("[Audio][AudioStreamWAV] replacing data preserves previous snapshots") {
+	Ref<AudioStreamWAV> stream = memnew(AudioStreamWAV);
+	Vector<uint8_t> first = { 12, 34, 56, 78 };
+	stream->set_data(first);
+	const Vector<uint8_t> old_snapshot = stream->get_data();
+	const Vector<uint8_t> next = { 1, 2, 3 };
+	stream->set_data(next);
+	CHECK_EQ(old_snapshot.size(), 4);
+	CHECK_EQ(old_snapshot[0], uint8_t(12));
+	CHECK_EQ(old_snapshot[3], uint8_t(78));
+	const Vector<uint8_t> current = stream->get_data();
+	REQUIRE_EQ(current.size(), 3);
+	CHECK_EQ(current[0], uint8_t(1));
+	CHECK_EQ(current[2], uint8_t(3));
+}
+
+TEST_CASE("[Audio][AudioStreamWAV] empty sample buffers remain valid") {
+	Ref<AudioStreamWAV> stream = memnew(AudioStreamWAV);
+	const Vector<uint8_t> empty = stream->get_data();
+	CHECK(empty.is_empty());
+	stream->set_data(Vector<uint8_t>());
+	CHECK(stream->get_data().is_empty());
+}
+
+
+TEST_CASE("[AudioSetterFastPath] AudioStreamPlayer avoids redundant volume and pitch updates") {
+	AudioStreamPlayer *player = memnew(AudioStreamPlayer);
+	CHECK_EQ(player->get_volume_db(), 0.0f);
+	player->set_volume_db(-12.5f);
+	CHECK_EQ(player->get_volume_db(), -12.5f);
+	for (int i = 0; i < 128; i++) {
+		player->set_volume_db(-12.5f);
+		CHECK_EQ(player->get_volume_db(), -12.5f);
+	}
+	player->set_pitch_scale(1.75f);
+	CHECK_EQ(player->get_pitch_scale(), 1.75f);
+	for (int i = 0; i < 128; i++) {
+		player->set_pitch_scale(1.75f);
+		CHECK_EQ(player->get_pitch_scale(), 1.75f);
+	}
+	memdelete(player);
+}
+
+TEST_CASE("[AudioSetterFastPath] exact small volume changes remain observable") {
+	AudioStreamPlayer *player = memnew(AudioStreamPlayer);
+	player->set_volume_db(-6.0f);
+	player->set_volume_db(-6.0001f);
+	CHECK_EQ(player->get_volume_db(), -6.0001f);
+	player->set_volume_db(-6.0f);
+	CHECK_EQ(player->get_volume_db(), -6.0f);
+	memdelete(player);
+}
+
+TEST_CASE("[AudioSetterFastPath] pitch changes still apply after repeated identical values") {
+	AudioStreamPlayer *player = memnew(AudioStreamPlayer);
+	player->set_pitch_scale(1.25f);
+	player->set_pitch_scale(1.25f);
+	player->set_pitch_scale(0.75f);
+	CHECK_EQ(player->get_pitch_scale(), 0.75f);
+	ERR_PRINT_OFF;
+	player->set_pitch_scale(0.0f);
+	ERR_PRINT_ON;
+	CHECK_EQ(player->get_pitch_scale(), 0.75f);
+	memdelete(player);
+}
+
+TEST_CASE("[AudioSetterFastPath] AudioStreamPlayer2D shares the guarded pitch update path") {
+	AudioStreamPlayer2D *player = memnew(AudioStreamPlayer2D);
+	player->set_pitch_scale(1.5f);
+	for (int i = 0; i < 128; i++) {
+		player->set_pitch_scale(1.5f);
+	}
+	CHECK_EQ(player->get_pitch_scale(), 1.5f);
+	player->set_pitch_scale(0.5f);
+	CHECK_EQ(player->get_pitch_scale(), 0.5f);
+	memdelete(player);
+}
+
+TEST_CASE("[AudioSetterFastPath] AudioStreamPlayer3D shares the guarded pitch update path") {
+	AudioStreamPlayer3D *player = memnew(AudioStreamPlayer3D);
+	player->set_pitch_scale(1.5f);
+	for (int i = 0; i < 128; i++) {
+		player->set_pitch_scale(1.5f);
+	}
+	CHECK_EQ(player->get_pitch_scale(), 1.5f);
+	player->set_pitch_scale(0.5f);
+	CHECK_EQ(player->get_pitch_scale(), 0.5f);
+	memdelete(player);
 }
 
 } // namespace TestAudioStreamWAV

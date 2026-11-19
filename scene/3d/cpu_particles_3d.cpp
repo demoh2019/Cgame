@@ -1315,13 +1315,13 @@ void CPUParticles3D::_update_particle_data_buffer() {
 	for (int i = 0; i < pc; i++) {
 		int idx = order ? order[i] : i;
 
-		Transform3D t = r[idx].transform;
-
-		if (!local_coords) {
-			t = inv_emission_transform * t;
-		}
-
 		if (r[idx].active) {
+			// Inactive particles write a zero transform; don't transform data
+			// which will be discarded immediately below.
+			Transform3D t = r[idx].transform;
+			if (!local_coords) {
+				t = inv_emission_transform * t;
+			}
 			ptr[0] = t.basis.rows[0][0];
 			ptr[1] = t.basis.rows[0][1];
 			ptr[2] = t.basis.rows[0][2];
