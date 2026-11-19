@@ -1,0 +1,42 @@
+name: Upstream game, GDExtension and OpenXR regression contracts
+
+on:
+  pull_request:
+    branches: [develop]
+    paths:
+      - "editor/run/game_view_plugin.cpp"
+      - "core/extension/gdextension_manager.cpp"
+      - "modules/openxr/extensions/openxr_composition_layer_extension.cpp"
+      - "modules/openxr/scene/openxr_composition_layer.cpp"
+      - "misc/scripts/tests/test_upstream_game_extensions_20261119.py"
+      - ".github/workflows/upstream-game-extensions-regression.yml"
+  push:
+    branches: [develop]
+    paths:
+      - "editor/run/game_view_plugin.cpp"
+      - "core/extension/gdextension_manager.cpp"
+      - "modules/openxr/extensions/openxr_composition_layer_extension.cpp"
+      - "modules/openxr/scene/openxr_composition_layer.cpp"
+      - "misc/scripts/tests/test_upstream_game_extensions_20261119.py"
+      - ".github/workflows/upstream-game-extensions-regression.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  source-contracts:
+    name: Check upstream contracts (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 10
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Run source-level regression contracts
+        run: python -m unittest discover -s misc/scripts/tests -p test_upstream_game_extensions_20261119.py -v
