@@ -252,7 +252,8 @@ TEST_CASE("[SceneTreeTimerRefFastPath] Timeout emitted exactly once with retaine
 	CHECK_EQ(timer->get_reference_count(), 2);
 
 	tree->process(0.2);
-	SIGNAL_CHECK(SNAME("timeout"), Array{ {} });
+	Array signal_args = { {} };
+	SIGNAL_CHECK(SNAME("timeout"), signal_args);
 	CHECK_EQ(timer->get_reference_count(), 1);
 	tree->process(0.2);
 	SIGNAL_CHECK_FALSE(SNAME("timeout"));
