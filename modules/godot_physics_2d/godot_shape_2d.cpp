@@ -524,27 +524,25 @@ void GodotConvexPolygonShape2D::get_supports(const Vector2 &p_normal, Vector2 *r
 }
 
 bool GodotConvexPolygonShape2D::contains_point(const Vector2 &p_point) const {
-	bool out = false;
-	bool in = false;
+	bool has_positive = false;
+	bool has_negative = false;
 
 	for (int i = 0; i < point_count; i++) {
-		// Subtract the vertex once before projecting, then stop immediately
-		// if the point lies on opposite sides of two polygon edges.
+		// A convex point is outside when two edges disagree on its side.
+		// Zero-distance edges are neutral, so boundary hits work with
+		// either vertex winding.
 		const real_t d = points[i].normal.dot(p_point - points[i].pos);
 		if (d > 0.0) {
-			if (in) {
-				return false;
-			}
-			out = true;
-		} else {
-			if (out) {
-				return false;
-			}
-			in = true;
+			has_positive = true;
+		} else if (d < 0.0) {
+			has_negative = true;
+		}
+		if (has_positive && has_negative) {
+			return false;
 		}
 	}
 
-	return in != out;
+	return point_count > 0;
 }
 
 bool GodotConvexPolygonShape2D::intersect_segment(const Vector2 &p_begin, const Vector2 &p_end, Vector2 &r_point, Vector2 &r_normal) const {
