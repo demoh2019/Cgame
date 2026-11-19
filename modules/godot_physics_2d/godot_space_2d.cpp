@@ -472,34 +472,45 @@ bool GodotPhysicsDirectSpaceState2D::rest_info(const PS2DT::ShapeParameters &p_p
 
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////
 
-int GodotSpace2D::_cull_aabb_for_body(GodotBody2D *p_body, const Rect2 &p_aabb) {
-	int amount = broadphase->cull_aabb(p_aabb, intersection_query_results, INTERSECTION_QUERY_MAX, intersection_query_subindex_results);
+int GodotSpace2D::_cull_aabb_for_body(GodotBody2D *p_body, const Rect2 &p_aabb, const PS2DT::MotionParameters &p_parameters) {
+	// Jolt-style filtering before storing candidates: overlapping areas,
+	// collision-layer mismatches, excluded bodies and exceptions must not
+	// consume any of the fixed-size motion-candidate slots.
+	struct MotionCullData {
+		GodotBody2D *body;
+		const PS2DT::MotionParameters &params;
+		GodotCollisionObject2D **results;
+		int *subindices;
+		int capacity;
+		int count = 0;
+	};
+	MotionCullData data = { p_body, p_parameters, intersection_query_results, intersection_query_subindex_results, INTERSECTION_QUERY_MAX };
 
-	for (int i = 0; i < amount; i++) {
-		bool keep = true;
-
-		if (intersection_query_results[i] == p_body) {
-			keep = false;
-		} else if (intersection_query_results[i]->get_type() == GodotCollisionObject2D::TYPE_AREA) {
-			keep = false;
-		} else if (!p_body->collides_with(static_cast<GodotBody2D *>(intersection_query_results[i]))) {
-			keep = false;
-		} else if (static_cast<GodotBody2D *>(intersection_query_results[i])->has_exception(p_body->get_self()) || p_body->has_exception(intersection_query_results[i]->get_self())) {
-			keep = false;
+	auto visitor = [](GodotCollisionObject2D *p_object, int p_subindex, void *p_userdata) -> bool {
+		MotionCullData &query = *static_cast<MotionCullData *>(p_userdata);
+		if (p_object == query.body || p_object->get_type() != GodotCollisionObject2D::TYPE_BODY) {
+			return true;
+		}
+		if (query.params.exclude_bodies.has(p_object->get_self()) ||
+				query.params.exclude_objects.has(p_object->get_instance_id())) {
+			return true;
 		}
 
-		if (!keep) {
-			if (i < amount - 1) {
-				SWAP(intersection_query_results[i], intersection_query_results[amount - 1]);
-				SWAP(intersection_query_subindex_results[i], intersection_query_subindex_results[amount - 1]);
-			}
-
-			amount--;
-			i--;
+		GodotBody2D *other = static_cast<GodotBody2D *>(p_object);
+		if (!query.body->collides_with(other) ||
+				other->has_exception(query.body->get_self()) ||
+				query.body->has_exception(other->get_self())) {
+			return true;
 		}
-	}
 
-	return amount;
+		query.results[query.count] = p_object;
+		query.subindices[query.count] = p_subindex;
+		query.count++;
+		return query.count < query.capacity;
+	};
+
+	broadphase->visit_aabb(p_aabb, visitor, &data);
+	return data.count;
 }
 
 bool GodotSpace2D::test_body_motion(GodotBody2D *p_body, const PS2DT::MotionParameters &p_parameters, PS2DT::MotionResult *r_result) {
@@ -553,7 +564,8 @@ bool GodotSpace2D::test_body_motion(GodotBody2D *p_body, const PS2DT::MotionPara
 	real_t min_contact_depth = margin * TEST_MOTION_MIN_CONTACT_DEPTH_FACTOR;
 
 	real_t motion_length = p_parameters.motion.length();
-	Vector2 motion_normal = p_parameters.motion / motion_length;
+	// Stationary recovery must not normalize a zero displacement.
+	Vector2 motion_normal = motion_length > 0.0 ? p_parameters.motion / motion_length : Vector2();
 
 	Transform2D body_transform = p_parameters.from;
 
@@ -582,7 +594,7 @@ bool GodotSpace2D::test_body_motion(GodotBody2D *p_body, const PS2DT::MotionPara
 
 			bool collided = false;
 
-			int amount = _cull_aabb_for_body(p_body, body_aabb);
+			int amount = _cull_aabb_for_body(p_body, body_aabb, p_parameters);
 
 			for (int j = 0; j < p_body->get_shape_count(); j++) {
 				if (p_body->is_shape_disabled(j)) {
@@ -712,7 +724,7 @@ bool GodotSpace2D::test_body_motion(GodotBody2D *p_body, const PS2DT::MotionPara
 		motion_aabb.position += p_parameters.motion;
 		motion_aabb = motion_aabb.merge(body_aabb);
 
-		int amount = _cull_aabb_for_body(p_body, motion_aabb);
+		int amount = _cull_aabb_for_body(p_body, motion_aabb, p_parameters);
 
 		for (int body_shape_idx = 0; body_shape_idx < p_body->get_shape_count(); body_shape_idx++) {
 			if (p_body->is_shape_disabled(body_shape_idx)) {
@@ -872,7 +884,7 @@ bool GodotSpace2D::test_body_motion(GodotBody2D *p_body, const PS2DT::MotionPara
 		rcd.min_allowed_depth = MIN(motion_length, min_contact_depth);
 
 		body_aabb.position += p_parameters.motion * unsafe;
-		int amount = _cull_aabb_for_body(p_body, body_aabb);
+		int amount = _cull_aabb_for_body(p_body, body_aabb, p_parameters);
 
 		int from_shape = best_shape != -1 ? best_shape : 0;
 		int to_shape = best_shape != -1 ? best_shape + 1 : p_body->get_shape_count();
