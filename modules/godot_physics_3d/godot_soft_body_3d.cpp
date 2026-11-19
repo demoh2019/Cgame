@@ -39,6 +39,7 @@
 #include "servers/physics_softbody_plasticity.h"
 #include "servers/physics_softbody_volume_safe.h"
 #include "servers/physics_xpbd_distance.h"
+#include "servers/physics_xpbd_fiber.h"
 #include "servers/physics_xpbd_area.h"
 #include "servers/physics_xpbd_dihedral.h"
 #include "servers/physics_xpbd_shear.h"
@@ -1952,6 +1953,8 @@ void GodotSoftBody3D::solve_constraints(real_t p_delta) {
 	const bool use_area_xpbd = configured_area_compliance > 0.0 && !faces.is_empty() &&
 			Math::is_finite(area_alpha_double) && area_alpha_double > 0.0;
 	const real_t alpha = use_xpbd ? real_t(MIN(alpha_double, double(std::numeric_limits<real_t>::max()))) : real_t(0.0);
+	const bool use_fiber_xpbd = use_xpbd && get_space()->get_soft_body_xpbd_fiber_axis() != 0 &&
+			get_space()->get_soft_body_xpbd_fiber_compliance_ratio() != real_t(1.0);
 	const real_t area_alpha = use_area_xpbd ? real_t(MIN(area_alpha_double, double(std::numeric_limits<real_t>::max()))) : real_t(0.0);
 	const real_t configured_shear_compliance = get_space() ? get_space()->get_soft_body_xpbd_shear_compliance() : real_t(0.0);
 	const double shear_alpha_double = p_delta > 0.0 ? double(configured_shear_compliance) / (double(p_delta) * double(p_delta)) : 0.0;
@@ -1998,6 +2001,20 @@ void GodotSoftBody3D::solve_constraints(real_t p_delta) {
 		}
 	} else if (!xpbd_link_lambdas.is_empty()) {
 		xpbd_link_lambdas.reset();
+	}
+	// Compute directional compliance once per step (not per iteration).
+	// The default isotropic path has no extra link traversal or allocation.
+	if (use_fiber_xpbd) {
+		xpbd_fiber_alphas.resize(links.size());
+		const int fiber_axis = get_space()->get_soft_body_xpbd_fiber_axis() - 1;
+		const real_t fiber_ratio = get_space()->get_soft_body_xpbd_fiber_compliance_ratio();
+		for (uint32_t link_index = 0; link_index < links.size(); ++link_index) {
+			const Link &link = links[link_index];
+			xpbd_fiber_alphas[link_index] = physics_xpbd_fiber_alpha(
+					link.n[0]->s, link.n[1]->s, alpha, fiber_axis, fiber_ratio);
+		}
+	} else if (!xpbd_fiber_alphas.is_empty()) {
+		xpbd_fiber_alphas.reset();
 	}
 
 	if (use_area_xpbd) {
@@ -2062,7 +2079,8 @@ void GodotSoftBody3D::solve_constraints(real_t p_delta) {
 				if (link.c0 > 0.0) {
 					physics_xpbd_solve_distance(link.n[0]->x, link.n[1]->x,
 							link.n[0]->im, link.n[1]->im, link.rl,
-							alpha, xpbd_link_lambdas[link_index]);
+							use_fiber_xpbd ? xpbd_fiber_alphas[link_index] : alpha,
+							xpbd_link_lambdas[link_index]);
 				}
 			}
 		} else {
@@ -2290,6 +2308,7 @@ void GodotSoftBody3D::destroy() {
 	face_tree.clear();
 
 	xpbd_link_lambdas.reset();
+	xpbd_fiber_alphas.reset();
 	xpbd_area_lambdas.reset();
 	xpbd_shear_rest_cosines.reset();
 	xpbd_shear_lambdas.reset();
