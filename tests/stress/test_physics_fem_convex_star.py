@@ -59,6 +59,16 @@ def cook(vertices, faces, volume):
         return None
     if not math.isfinite(volume) or volume == 0:
         return None
+    # Mirror the C++ deterministic sorted undirected-edge topology check.
+    edges = {}
+    for a, b, c in faces:
+        if len({a, b, c}) != 3 or not all(0 <= i < len(vertices) for i in (a, b, c)):
+            return None
+        for u, v in ((a, b), (b, c), (c, a)):
+            key = (min(u, v), max(u, v))
+            edges.setdefault(key, []).append(1 if u < v else 2)
+    if any(sorted(directions) != [1, 2] for directions in edges.values()):
+        return None
     origin = vertices[0]
     extent = max(abs(v - o) for p in vertices for v, o in zip(p, origin))
     if not extent:
@@ -152,6 +162,14 @@ class ConvexStarContracts(unittest.TestCase):
         self.assertIsNone(cook(cube, FACES, signed_volume(cube, FACES)))
         self.assertIsNone(cook(CUBE, FACES, .5))
         self.assertIsNone(cook(CUBE, FACES, 0))
+
+    def test_open_and_nonmanifold_surface_rejected(self):
+        self.assertIsNone(cook(CUBE, FACES[:-1], 1.0))
+        self.assertIsNone(cook(CUBE, FACES + (FACES[0],), 1.0))
+        bad_winding = list(FACES)
+        a, b, c = bad_winding[0]
+        bad_winding[0] = (a, c, b)
+        self.assertIsNone(cook(CUBE, bad_winding, 1.0))
 
     def test_bad_topology_is_rejected_by_engine_precondition(self):
         body = (ROOT / "modules/godot_physics_3d/godot_soft_body_3d.cpp").read_text()
