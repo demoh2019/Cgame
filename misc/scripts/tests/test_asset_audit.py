@@ -9,6 +9,7 @@ import subprocess
 import sys
 import tempfile
 import unittest
+from unittest.mock import patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 import asset_audit as audit
@@ -49,6 +50,28 @@ class AssetAuditTest(unittest.TestCase):
     def test_missing_directory(self):
         with self.assertRaisesRegex(ValueError, "does not exist"):
             audit.audit_project(self.root / "absent")
+
+    def test_unreadable_directory_fails_instead_of_silently_skipping(self):
+        def broken_walk(root, *, followlinks, onerror):
+            self.assertFalse(followlinks)
+            self.assertTrue(callable(onerror))
+            yield str(root), [], ["project.godot", "main.tscn"]
+            onerror(PermissionError("cannot read nested directory"))
+
+        with patch.object(audit.os, "walk", side_effect=broken_walk):
+            with self.assertRaisesRegex(ValueError, "Cannot enumerate all project files"):
+                self.report()
+
+    def test_cli_rejects_incomplete_scan(self):
+        def broken_walk(root, *, followlinks, onerror):
+            onerror(PermissionError("incomplete file tree"))
+            yield str(root), [], []
+
+        with patch.object(audit.os, "walk", side_effect=broken_walk):
+            with contextlib.redirect_stderr(io.StringIO()):
+                with self.assertRaises(SystemExit) as result:
+                    audit.main([str(self.root)])
+        self.assertEqual(result.exception.code, 2)
 
     def test_missing_resource(self):
         self.put("main.tscn", '[ext_resource type="Script" path="res://missing.gd" id="1"]')
