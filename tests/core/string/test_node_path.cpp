@@ -294,4 +294,85 @@ TEST_CASE("[NodePath] Single and empty components retain path shape") {
 	CHECK_EQ(String(absolute.get_as_property_path()), ":root/Sprite2D:position");
 }
 
+
+TEST_CASE("[NodePath] Linear simplify matches the legacy removal algorithm") {
+	const StringName parts[] = { ".", "..", "root", "child", "leaf" };
+	uint32_t seed = 0x91736EBD;
+	for (int run = 0; run < 2048; run++) {
+		seed ^= seed << 13;
+		seed ^= seed >> 17;
+		seed ^= seed << 5;
+		const int count = 2 + int(seed % 48);
+
+		Vector<StringName> reference;
+		for (int i = 0; i < count; i++) {
+			seed ^= seed << 13;
+			seed ^= seed >> 17;
+			seed ^= seed << 5;
+			reference.push_back(parts[seed % 5]);
+		}
+		NodePath path(reference, false);
+
+		// Independent reference implementation of the previous behavior.
+		for (int i = 0; i < reference.size(); i++) {
+			if (reference.size() == 1) {
+				break;
+			}
+			if (reference[i].string() == ".") {
+				reference.remove_at(i);
+				i--;
+			} else if (i > 0 && reference[i].string() == ".." && reference[i - 1].string() != "." && reference[i - 1].string() != "..") {
+				reference.remove_at(i - 1);
+				reference.remove_at(i - 1);
+				i -= 2;
+				if (reference.is_empty()) {
+					reference.push_back(".");
+					break;
+				}
+			}
+		}
+
+		path.simplify();
+		CHECK_EQ(path.get_name_count(), reference.size());
+		for (int i = 0; i < MIN(path.get_name_count(), reference.size()); i++) {
+			CHECK(path.get_name(i) == reference[i]);
+		}
+	}
+}
+
+TEST_CASE("[NodePath] Linear simplify handles deep cancellation and property subnames") {
+	String source;
+	for (int i = 0; i < 1024; i++) {
+		source += "segment/..";
+		if (i + 1 < 1024) {
+			source += "/";
+		}
+	}
+	const NodePath original(source + ":position:x");
+	NodePath simplified = original;
+	const StringName old_names = simplified.get_concatenated_names();
+	simplified.simplify();
+
+	CHECK_EQ(simplified.get_concatenated_names().string(), ".");
+	CHECK_EQ(simplified.get_concatenated_subnames().string(), "position:x");
+	CHECK_EQ(String(simplified), ".:position:x");
+	CHECK_EQ(String(simplified.get_as_property_path()), ":.:position:x");
+	CHECK_EQ(original.get_concatenated_names(), old_names);
+	CHECK_EQ(original.get_name_count(), 2048);
+}
+
+TEST_CASE("[NodePath] Simplify normalized shared path preserves cache and references") {
+	const NodePath original("/root/parent/child:position:x");
+	NodePath copy = original;
+	const StringName names = original.get_concatenated_names();
+	const uint32_t hash_before = original.hash();
+	for (int i = 0; i < 32; i++) {
+		copy.simplify();
+	}
+	CHECK_EQ(copy.get_concatenated_names(), names);
+	CHECK_EQ(copy.hash(), hash_before);
+	CHECK_EQ(original.get_concatenated_names(), names);
+	CHECK_EQ(String(copy), "/root/parent/child:position:x");
+}
+
 } // namespace TestNodePath
