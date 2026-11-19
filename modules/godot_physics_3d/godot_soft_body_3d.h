@@ -151,6 +151,8 @@ class GodotSoftBody3D : public GodotCollisionObject3D {
 	// Allocated only for positive volume compliance on a closed soft mesh.
 	LocalVector<Vector3> xpbd_volume_gradients;
 	double xpbd_volume_rest = 0.0;
+	// Remaining enclosed gas mass; a scalar per body, no particle buffers.
+	double gas_mass_fraction = 1.0;
 	bool xpbd_volume_closed = false;
 	LocalVector<Face> faces;
 	// Number of particles with nonzero inverse mass. Maintained on pin,
