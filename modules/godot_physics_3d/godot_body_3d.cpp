@@ -42,6 +42,7 @@
 #include "servers/physics_gyroscopic_3d.h"
 #include "servers/physics_fluid_buoyancy_3d.h"
 #include "servers/physics_fluid_convex_hull_3d.h"
+#include "servers/physics_rigid_convex_aero_facets_3d.h"
 #include "servers/physics_fluid_box_3d.h"
 
 void GodotBody3D::_mass_properties_changed() {
@@ -903,6 +904,36 @@ void GodotBody3D::integrate_forces(real_t p_step, bool p_defer_motion) {
 					linear_velocity, get_space()->get_fluid_flow_velocity(), get_space()->get_fluid_linear_drag(), p_step);
 			angular_velocity = godot_physics_fluid_angular_drag(
 					angular_velocity, get_space()->get_fluid_angular_drag(), p_step);
+
+			// Apply point-impulse pressure and skin drag on the TRUE
+			// polygon faces of a transformed convex collision shape.
+			// Real face area/centroid and the body's world inertia make
+			// this sensitive to shape orientation, spinning and offset COM.
+			// Default coefficients zero: no hull traversal or scratch.
+			if (mode == PS3DE::BODY_MODE_RIGID && p_step > 0.0 &&
+					get_space()->get_rigid_convex_aero_density() > 0.0 &&
+					(get_space()->get_rigid_convex_aero_pressure_coefficient() > 0.0 ||
+							get_space()->get_rigid_convex_aero_skin_coefficient() > 0.0)) {
+				const Vector3 world_com = get_transform().origin + center_of_mass;
+				for (int i = 0; i < get_shape_count(); ++i) {
+					if (is_shape_disabled(i)) {
+						continue;
+					}
+					const GodotShape3D *shape = get_shape(i);
+					if (shape->get_type() != PS3DE::SHAPE_CONVEX_POLYGON) {
+						continue;
+					}
+					const GodotConvexPolygonShape3D *convex = static_cast<const GodotConvexPolygonShape3D *>(shape);
+					const Transform3D hull_world = get_transform() * get_shape_transform(i);
+					godot_physics_rigid_convex_aero_step_3d(linear_velocity, angular_velocity,
+							convex->get_mesh(), hull_world, world_com,
+							get_space()->get_rigid_convex_aero_wind_velocity(),
+							get_space()->get_rigid_convex_aero_density(),
+							get_space()->get_rigid_convex_aero_pressure_coefficient(),
+							get_space()->get_rigid_convex_aero_skin_coefficient(),
+							_inv_mass, _inv_inertia_tensor, p_step);
+				}
+			}
 		}
 
 		// Limit dynamic angular speed after damping, torque and optional gyro
