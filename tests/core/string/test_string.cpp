@@ -501,6 +501,63 @@ TEST_CASE("[String] Substr") {
 	CHECK(s.substr(3) == "ler Baby");
 }
 
+TEST_CASE("[String] get_slice reuses first delimiter search") {
+	const String input = "alpha::beta::gamma::";
+	CHECK(input.get_slice(String("::"), 0) == "alpha");
+	CHECK(input.get_slice("::", 0) == "alpha");
+	CHECK(input.get_slice(String("::"), 1) == "beta");
+	CHECK(input.get_slice("::", 1) == "beta");
+	CHECK(input.get_slice(String("::"), 2) == "gamma");
+	CHECK(input.get_slice("::", 2) == "gamma");
+	CHECK(input.get_slice(String("::"), 3) == "");
+	CHECK(input.get_slice("::", 3) == "");
+	CHECK(input.get_slice(String("::"), 4) == "");
+	CHECK(input.get_slice("::", 4) == "");
+}
+
+TEST_CASE("[String] get_slice preserves edge cases for both overloads") {
+	const String no_delimiter = "unsplit";
+	CHECK(no_delimiter.get_slice(String(":"), 0) == no_delimiter);
+	CHECK(no_delimiter.get_slice(":", 0) == no_delimiter);
+	CHECK(no_delimiter.get_slice(String(":"), 42) == no_delimiter);
+	CHECK(no_delimiter.get_slice(":", 42) == no_delimiter);
+	CHECK(no_delimiter.get_slice(String(":"), -1) == "");
+	CHECK(no_delimiter.get_slice(":", -1) == "");
+	CHECK(no_delimiter.get_slice(String(), 0) == "");
+	CHECK(no_delimiter.get_slice("", 0) == "");
+	CHECK(no_delimiter.get_slice(nullptr, 0) == "");
+	CHECK(String().get_slice(String(":"), 0) == "");
+	CHECK(String().get_slice(":", 0) == "");
+	const String adjacent = ":a::b:";
+	CHECK(adjacent.get_slice(String(":"), 0) == "");
+	CHECK(adjacent.get_slice(":", 0) == "");
+	CHECK(adjacent.get_slice(String(":"), 1) == "a");
+	CHECK(adjacent.get_slice(":", 2) == "");
+	CHECK(adjacent.get_slice(String(":"), 3) == "b");
+	CHECK(adjacent.get_slice(":", 4) == "");
+	CHECK(adjacent.get_slice(":", 5) == "");
+}
+
+TEST_CASE("[String] get_slice long and multilingual inputs") {
+	String prefix;
+	for (int i = 0; i < 256; ++i) {
+		prefix += "abcdefghijklmnopqrstuvwxyz012345";
+	}
+	const String input = prefix + String("::") + String(U"\u0416\u03A3\u00C4") + "::tail";
+	CHECK(input.get_slice(String("::"), 0) == prefix);
+	CHECK(input.get_slice("::", 0) == prefix);
+	CHECK(input.get_slice(String("::"), 1) == String(U"\u0416\u03A3\u00C4"));
+	CHECK(input.get_slice("::", 1) == String(U"\u0416\u03A3\u00C4"));
+	CHECK(input.get_slice(String("::"), 2) == "tail");
+	CHECK(input.get_slice("::", 2) == "tail");
+	CHECK(input.get_slice(String("::"), 100) == "");
+	CHECK(input.get_slice("::", 100) == "");
+	const String unicode_sep = String(U"\u0416\u00A7\u03A3\u00A7\u00C4");
+	CHECK(unicode_sep.get_slice(String(U"\u00A7"), 0) == String(U"\u0416"));
+	CHECK(unicode_sep.get_slice(String(U"\u00A7"), 1) == String(U"\u03A3"));
+	CHECK(unicode_sep.get_slice(String(U"\u00A7"), 2) == String(U"\u00C4"));
+}
+
 TEST_CASE("[String] Find") {
 	String s = "Pretty Woman Woman";
 	MULTICHECK_STRING_EQ(s, find, "tty", 3);
