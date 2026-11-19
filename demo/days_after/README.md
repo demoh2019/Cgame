@@ -38,6 +38,7 @@ or third-party plugins are required.
 | 9 | Craft and equip a scrap vest |
 | F | Melee attack (forward hit arc) |
 | R | Restart the scene |
+| B | Build a physical barricade (3 wood T1 + 2 stone T1) |
 
 The HUD shows health, hunger, thirst, tiered inventory, profession levels,
 crafting experience and interaction hints. Food restores 35 hunger points;
@@ -62,6 +63,26 @@ These are original classless survival/RPG mechanics, not copied assets,
 economy data or gameplay code from existing games. No MMO networking, PvP,
 save/load, durability or player economy is claimed yet.
 
+## Player-built defenses
+
+Press **B** to place a barricade 3 meters in front of the survivor. A native
+3D ray/shape query checks support, steep surfaces and overlaps **before**
+resources are consumed. Construction requires 3 wood T1 and 2 stone T1.
+Built defenses are native `StaticBody3D` collision obstacles that physically
+block infected; enemies damage them when they run into the barrier. Each
+starts with 120 HP and can be repaired by aiming at it and pressing **E**:
+1 wood T1 restores up to 40 HP. Repairs are refused at full health or without
+materials; all spending validates the complete transaction before mutation.
+The defense becomes darker as it takes damage and disappears when destroyed.
+
+Barricades are **session-only** in this milestone; survivor F5/F9 snapshots
+keep progression and inventory but **do not** save built structures or zombie
+positions. This is a small defensive-building feature, not yet a persistent
+base system with ownership, decay, server authority or construction preview.
+
+Existing physics APIs (`PhysicsDirectSpaceState3D`, `StaticBody3D`,
+`CollisionShape3D`) support this feature. No new C++ engine API is needed.
+
 ## Smoke test
 
 ```sh
@@ -72,6 +93,18 @@ The test verifies scene instantiation, one-time scavenging, inventory consumptio
 stat recovery, resource depletion and respawn, skill tiers, tool requirements,
 advanced crafting, bandage healing, melee combat, armor and finite position
 over 10 physics frames.
+The additional physics-building regression runs with:
+
+```sh
+./bin/godot.linuxbsd.editor.x86_64 --headless --path demo/days_after --script res://smoke_test_building.gd
+```
+
+It checks payment atomicity, valid and blocked placement, full/partial repair,
+real StaticBody3D collision and infected attacks across physics frames. The
+`.github/workflows/days-after-barricades.yml` job runs it on the checked-in
+scene using a SHA-256-verified official Godot editor. Successful CI still
+needs confirmation, and final integration must run on the built Cgame editor.
+
 A separate GitHub Actions smoke job exercises the game with official Godot 4.7.2
 for compatibility; use compiled Cgame for engine-specific integration testing.
 
