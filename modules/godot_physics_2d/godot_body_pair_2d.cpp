@@ -41,6 +41,7 @@
 #include "servers/physics_ccd_capsule_toi.h"
 #include "servers/physics_ccd_capsule_pair_toi.h"
 #include "servers/physics_ccd_swept_bounds.h"
+#include "servers/physics_ccd_rotational_sphere_cull.h"
 
 #define ACCUMULATE_IMPULSES
 
@@ -271,6 +272,24 @@ bool GodotBodyPair2D::_test_ccd(real_t p_step, GodotBody2D *p_A, int p_shape_A, 
 	// a single support ray can miss a narrow obstacle hit by the other end.
 	GodotShape2D *shape_A_ptr = p_A->get_shape(p_shape_A);
 	GodotShape2D *shape_B_ptr = p_B->get_shape(p_shape_B);
+	// Rapier-style conservative nonlinear-motion broadphase:
+	// every point of a rotating rigid collider remains inside a sphere
+	// swept along its center of mass. When those swept spheres do not
+	// meet, even a fast rotation cannot create contact during this step.
+	// Only enable this cull with the existing opt-in rotational CCD bounds
+	// setting. Unbounded shapes retain the original narrowphase.
+	if (space->is_ccd_rotational_bounds_enabled() && (p_A->get_angular_velocity() != 0.0 || p_B->get_angular_velocity() != 0.0) &&
+			shape_A_ptr->get_type() != PS2DE::SHAPE_WORLD_BOUNDARY &&
+			shape_B_ptr->get_type() != PS2DE::SHAPE_WORLD_BOUNDARY &&
+			shape_A_ptr->get_type() != PS2DE::SHAPE_SEPARATION_RAY &&
+			shape_B_ptr->get_type() != PS2DE::SHAPE_SEPARATION_RAY &&
+			!physics_ccd_rotational_sphere_bounds_may_overlap(
+				p_xform_A.xform(shape_A_ptr->get_aabb()), p_A->get_transform().get_origin() + p_A->get_center_of_mass(),
+				p_xform_B.xform(shape_B_ptr->get_aabb()), p_B->get_transform().get_origin() + p_B->get_center_of_mass(),
+				relative_motion)) {
+		return false;
+	}
+
 
 	// A single support ray can miss a glancing circle/circle impact.
 	// With uniform-scale transforms the Minkowski sum is another circle,
