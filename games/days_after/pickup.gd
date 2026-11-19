@@ -10,5 +10,12 @@ func collect() -> Dictionary:
     if _collected:
         return {}
     _collected = true
-    queue_free()
+    visible = false
+    collision_layer = 0
     return {"type": resource_type, "amount": amount}
+
+
+func restore_collected(collected: bool) -> void:
+    _collected = collected
+    visible = not collected
+    collision_layer = 0 if collected else 2
