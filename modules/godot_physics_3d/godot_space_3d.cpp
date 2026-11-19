@@ -1296,7 +1296,7 @@ GodotSpace3D::GodotSpace3D() {
 	const real_t configured_dihedral_compliance = GLOBAL_GET("physics/3d/solver/soft_body_xpbd_dihedral_compliance");
 	soft_body_xpbd_dihedral_compliance = Math::is_finite(configured_dihedral_compliance) ? MAX(real_t(0.0), configured_dihedral_compliance) : real_t(0.0);
 	const real_t configured_bending_yield = GLOBAL_GET("physics/3d/solver/soft_body_bending_plastic_yield_angle");
-	soft_body_bending_plastic_yield_angle = Math::is_finite(configured_bending_yield) ? CLAMP(configured_bending_yield, real_t(0.0), real_t(Math_PI)) : real_t(0.2);
+	soft_body_bending_plastic_yield_angle = Math::is_finite(configured_bending_yield) ? CLAMP(configured_bending_yield, real_t(0.0), real_t(Math::PI)) : real_t(0.2);
 	const real_t configured_bending_creep = GLOBAL_GET("physics/3d/solver/soft_body_bending_plastic_creep_rate");
 	soft_body_bending_plastic_creep_rate = Math::is_finite(configured_bending_creep) ? MAX(real_t(0.0), configured_bending_creep) : real_t(0.0);
 	const real_t configured_self_thickness = GLOBAL_GET("physics/3d/solver/soft_body_self_collision_thickness");
