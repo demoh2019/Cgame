@@ -1202,7 +1202,7 @@ static void _collision_capsule_capsule(const GodotShape2D *p_a, const Transform2
 		if (denominator > length_squared_A * length_squared_B * real_t(0.0001)) {
 			// Closest points on two finite center segments.
 			real_t fraction_A = CLAMP((dot_AB * dot_B_between - dot_A_between * length_squared_B) / denominator, real_t(0.0), real_t(1.0));
-				real_t fraction_B = (dot_AB * fraction_A + dot_B_between) / length_squared_B;
+			real_t fraction_B = (dot_AB * fraction_A + dot_B_between) / length_squared_B;
 			if (fraction_B < 0.0) {
 				fraction_B = 0.0;
 				fraction_A = CLAMP(-dot_A_between / length_squared_A, real_t(0.0), real_t(1.0));
