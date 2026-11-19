@@ -61,6 +61,9 @@ func _simulate_stacks() -> Dictionary:
 			PhysicsServer2D.body_add_shape(body, box_shape)
 			PhysicsServer2D.body_set_param(body, PhysicsServer2D.BODY_PARAM_FRICTION, 0.7)
 			PhysicsServer2D.body_set_state(body, PhysicsServer2D.BODY_STATE_CAN_SLEEP, false)
+			# Default low-level space gravity points toward -Y. Reverse it so
+			# test bodies above the platform actually settle onto it.
+			PhysicsServer2D.body_set_param(body, PhysicsServer2D.BODY_PARAM_GRAVITY_SCALE, -1.0)
 			var tilt: float = (0.02 if column % 2 == 0 else -0.02) if level == 3 else 0.0
 			PhysicsServer2D.body_set_state(body, PhysicsServer2D.BODY_STATE_TRANSFORM,
 					Transform2D(tilt, Vector2(x, -1.2 - float(level) * 0.99)))
