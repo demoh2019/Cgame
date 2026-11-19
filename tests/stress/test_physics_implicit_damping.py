@@ -4,7 +4,6 @@ These tests do not replace compiling the engine and running
 physics_implicit_damping_regression.gd on the GodotPhysics backend.
 """
 from pathlib import Path
-import math
 import random
 import re
 import unittest
@@ -99,7 +98,7 @@ class ImplicitDampingContracts(unittest.TestCase):
         runner = RUNNER.read_text(encoding="utf-8")
         self.assertIn("func run_2d(", workload)
         self.assertIn("func run_3d(", workload)
-        self.assertIn("min\u0069(256 * scale, 4096)", workload)
+        self.assertIn("mini(256 * scale, 4096)", workload)
         self.assertIn("BODY_STATE_CAN_SLEEP, false", workload)
         self.assertIn('"frame_p95_ms": stats["p95"]', workload)
         for dim in ("2d", "3d"):
