@@ -151,6 +151,8 @@ private:
 	real_t soft_body_tetra_fem_compliance = 0.0; // Disabled by default.
 	bool soft_body_tetra_fem_lumped_mass = false; // Opt-in volume-weighted vertex masses.
 	real_t soft_body_tetra_fem_poisson_ratio = 0.3;
+	int soft_body_tetra_fem_material_model = 0; // Neo-Hookean default, Mooney-Rivlin opt-in.
+	real_t soft_body_tetra_mooney_rivlin_fraction = 0.5;
 	real_t soft_body_tetra_fiber_compliance = 0.0; // 0: no FEM directional reinforcement.
 	Vector3 soft_body_tetra_fiber_axis = Vector3(1, 0, 0); // Undeformed material direction.
 	real_t soft_body_tetra_fem_viscosity = 0.0; // Objective Kelvin-Voigt material damping.
@@ -314,6 +316,8 @@ public:
 	_FORCE_INLINE_ real_t get_soft_body_tetra_fem_compliance() const { return soft_body_tetra_fem_compliance; }
 	_FORCE_INLINE_ bool get_soft_body_tetra_fem_lumped_mass() const { return soft_body_tetra_fem_lumped_mass; }
 	_FORCE_INLINE_ real_t get_soft_body_tetra_fem_poisson_ratio() const { return soft_body_tetra_fem_poisson_ratio; }
+	_FORCE_INLINE_ int get_soft_body_tetra_fem_material_model() const { return soft_body_tetra_fem_material_model; }
+	_FORCE_INLINE_ real_t get_soft_body_tetra_mooney_rivlin_fraction() const { return soft_body_tetra_mooney_rivlin_fraction; }
 	_FORCE_INLINE_ real_t get_soft_body_tetra_fiber_compliance() const { return soft_body_tetra_fiber_compliance; }
 	_FORCE_INLINE_ const Vector3 &get_soft_body_tetra_fiber_axis() const { return soft_body_tetra_fiber_axis; }
 	_FORCE_INLINE_ real_t get_soft_body_tetra_fem_viscosity() const { return soft_body_tetra_fem_viscosity; }

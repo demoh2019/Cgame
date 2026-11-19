@@ -43,6 +43,7 @@
 #include "servers/physics_softbody_adiabatic_gas.h"
 #include "servers/physics_softbody_shape_matching.h"
 #include "servers/physics_fem_tetra_neo_hookean.h"
+#include "servers/physics_fem_tetra_mooney_rivlin.h"
 #include "servers/physics_fem_lumped_mass.h"
 #include "servers/physics_fem_tetra_fiber.h"
 #include "servers/physics_fem_tetra_viscosity.h"
@@ -3009,8 +3010,28 @@ void GodotSoftBody3D::solve_constraints(real_t p_delta) {
 				nodes[tet.c].x, nodes[tet.d].x
 			};
 			double equivalent_strain = 0.0;
-			if (PhysicsFEMTetraDamage::equivalent_strain(
-						positions, tet.rest, poisson, equivalent_strain)) {
+			bool valid = false;
+			if (get_space()->get_soft_body_tetra_fem_material_model() == 1) {
+				// Drive the SAME irreversible damage model from the selected
+				// undamaged hyperelastic energy, not an unrelated material.
+				double energy = 0.0;
+				Vector3 ga, gb, gc, gd;
+				if (physics_fem_tetra_mooney_rivlin_energy_gradient(
+							positions[0], positions[1], positions[2], positions[3],
+							tet.rest, poisson,
+							double(get_space()->get_soft_body_tetra_mooney_rivlin_fraction()),
+							energy, ga, gb, gc, gd)) {
+					const double square = 2.0 * energy / tet.rest.volume;
+					if (square >= 0.0 && Math::is_finite(square)) {
+						equivalent_strain = Math::sqrt(square);
+						valid = Math::is_finite(equivalent_strain);
+					}
+				}
+			} else {
+				valid = PhysicsFEMTetraDamage::equivalent_strain(
+						positions, tet.rest, poisson, equivalent_strain);
+			}
+			if (valid) {
 				PhysicsFEMTetraDamage::evolve(equivalent_strain,
 						yield_strain, double(fem_damage_rate),
 						double(p_delta), xpbd_fem_damage[i]);
@@ -3122,6 +3143,8 @@ void GodotSoftBody3D::solve_constraints(real_t p_delta) {
 	const bool use_fem = !xpbd_fem_tetrahedra.is_empty() && fem_compliance > 0.0 && p_delta > 0.0 &&
 			Math::is_finite(fem_alpha) && fem_alpha > 0.0;
 	const double fem_poisson = get_space() ? double(get_space()->get_soft_body_tetra_fem_poisson_ratio()) : 0.3;
+	const bool fem_mooney_rivlin = get_space() && get_space()->get_soft_body_tetra_fem_material_model() == 1;
+	const double fem_mooney_fraction = get_space() ? double(get_space()->get_soft_body_tetra_mooney_rivlin_fraction()) : 0.5;
 	const double fem_fiber_compliance = get_space() ? double(get_space()->get_soft_body_tetra_fiber_compliance()) : 0.0;
 	const double fem_fiber_alpha = p_delta > 0.0 ? fem_fiber_compliance / (double(p_delta) * double(p_delta)) : 0.0;
 	const bool use_fem_fiber = use_fem && fem_fiber_compliance > 0.0 &&
@@ -3417,9 +3440,15 @@ void GodotSoftBody3D::solve_constraints(real_t p_delta) {
 					PhysicsFEMTetraDamage::effective_compliance(
 							fem_alpha, xpbd_fem_damage[i], local_alpha);
 				}
-				physics_fem_tetra_solve(a.x, b.x, c.x, d.x,
-						a.im, b.im, c.im, d.im,
-						tetra.rest, fem_poisson, local_alpha, tetra.lambda);
+				if (fem_mooney_rivlin) {
+					physics_fem_tetra_mooney_rivlin_solve(a.x, b.x, c.x, d.x,
+							a.im, b.im, c.im, d.im, tetra.rest, fem_poisson,
+							fem_mooney_fraction, local_alpha, tetra.lambda);
+				} else {
+					physics_fem_tetra_solve(a.x, b.x, c.x, d.x,
+							a.im, b.im, c.im, d.im,
+							tetra.rest, fem_poisson, local_alpha, tetra.lambda);
+				}
 			}
 		}
 		if (use_fem_fiber) {

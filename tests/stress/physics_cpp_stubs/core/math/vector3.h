@@ -23,6 +23,7 @@ namespace Math {
 inline bool is_finite(double p_x) { return std::isfinite(p_x); }
 inline double sqrt(double p_x) { return std::sqrt(p_x); }
 inline double log(double p_x) { return std::log(p_x); }
+inline double pow(double p_x, double p_y) { return std::pow(p_x, p_y); }
 inline double abs(double p_x) { return std::abs(p_x); }
 } // namespace Math
 
