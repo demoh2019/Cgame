@@ -9,6 +9,8 @@ on:
       - 'modules/godot_physics_3d/godot_step_3d.cpp'
       - 'modules/godot_physics_3d/godot_step_3d.h'
       - 'modules/jolt_physics/spaces/jolt_space_3d.cpp'
+      - 'modules/jolt_physics/spaces/jolt_contact_listener_3d.cpp'
+      - 'modules/jolt_physics/spaces/jolt_contact_listener_3d.h'
       - 'modules/jolt_physics/spaces/jolt_job_system.cpp'
       - 'modules/jolt_physics/spaces/jolt_job_system.h'
       - 'modules/jolt_physics/spaces/jolt_space_3d.h'
@@ -23,6 +25,8 @@ on:
       - 'modules/godot_physics_3d/godot_step_3d.cpp'
       - 'modules/godot_physics_3d/godot_step_3d.h'
       - 'modules/jolt_physics/spaces/jolt_space_3d.cpp'
+      - 'modules/jolt_physics/spaces/jolt_contact_listener_3d.cpp'
+      - 'modules/jolt_physics/spaces/jolt_contact_listener_3d.h'
       - 'modules/jolt_physics/spaces/jolt_job_system.cpp'
       - 'modules/jolt_physics/spaces/jolt_job_system.h'
       - 'modules/jolt_physics/spaces/jolt_space_3d.h'
@@ -93,6 +97,7 @@ jobs:
           ./bin/godot.linuxbsd.editor.dev.x86_64 --headless --path tests/stress --script res://stress.gd --check-only
           ./bin/godot.linuxbsd.editor.dev.x86_64 --headless --path tests/stress --script res://physics_dense.gd --check-only
           ./bin/godot.linuxbsd.editor.dev.x86_64 --headless --path tests/stress --script res://physics_pending_reuse_stress.gd --check-only
+          ./bin/godot.linuxbsd.editor.dev.x86_64 --headless --path tests/stress --script res://physics_jolt_contact_scratch_regression.gd --check-only
       - name: Verify dense contacts, pending cleanup and fast CCD
         shell: bash
         run: |
@@ -122,6 +127,15 @@ jobs:
             --script res://physics_large_island_3d_regression.gd \
             2>&1 | tee physics3d-colored-islands.log
           grep -Fq '3D large island regression passed.' physics3d-colored-islands.log
+      - name: Stress Jolt reported-contact buffers after dense bursts
+        shell: bash
+        run: |
+          set -euo pipefail
+          timeout 240s ./bin/godot.linuxbsd.editor.dev.x86_64 \
+            --headless --path tests/stress \
+            --script res://physics_jolt_contact_scratch_regression.gd \
+            2>&1 | tee physics-jolt-contact-scratch.log
+          grep -q '^JOLT_CONTACT_SCRATCH_RESULT:' physics-jolt-contact-scratch.log
       - name: Save physics smoke results
         if: always()
         uses: actions/upload-artifact@v4
@@ -132,6 +146,7 @@ jobs:
             physics-native-smoke.md
             physics-pending-reuse.log
             physics3d-colored-islands.log
+            physics-jolt-contact-scratch.log
           if-no-files-found: warn
           retention-days: 30
 
