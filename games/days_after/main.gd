@@ -8,13 +8,16 @@ const STATE_SCRIPT = preload("res://survival_state.gd")
 const RESOURCE_SCRIPT = preload("res://resource_node.gd")
 const ENEMY_SCRIPT = preload("res://enemy.gd")
 const SAVE_SCRIPT = preload("res://save_game.gd")
+const QUEST_SCRIPT = preload("res://quest_journal.gd")
 
 var state = STATE_SCRIPT.new()
+var quests = QUEST_SCRIPT.new()
 var player
 var stats_label: Label
 var prompt_label: Label
 var status_label: Label
 var progression_label: Label
+var quest_label: Label
 var _save_notice: String = ""
 var _save_notice_time: float = 0.0
 
@@ -48,6 +51,8 @@ func _process(delta: float) -> void:
             weapon if not weapon.is_empty() else "none", armor if not armor.is_empty() else "none",
             int(state.inventory["makeshift_spear"]), int(state.inventory["padded_coat"]), int(state.inventory["bandage"])
         ]
+    if quest_label != null:
+        quest_label.text = quests.summary()
     if prompt_label != null:
         var focus = player.get_focused_pickup()
         prompt_label.text = "[E] Gather %s" % str(focus.get("resource_type")).capitalize() if focus != null else ""
@@ -64,15 +69,15 @@ func _unhandled_input(event: InputEvent) -> void:
     elif event.is_action_pressed("use_water"):
         state.use_resource("water")
     elif event.is_action_pressed("craft_spear"):
-        state.craft("makeshift_spear")
+        craft_item("makeshift_spear")
     elif event.is_action_pressed("craft_coat"):
-        state.craft("padded_coat")
+        craft_item("padded_coat")
     elif event.is_action_pressed("craft_bandage"):
-        state.craft("bandage")
+        craft_item("bandage")
     elif event.is_action_pressed("equip_spear"):
-        state.equip("makeshift_spear")
+        equip_item("makeshift_spear")
     elif event.is_action_pressed("equip_coat"):
-        state.equip("padded_coat")
+        equip_item("padded_coat")
     elif event.is_action_pressed("use_bandage"):
         state.use_resource("bandage")
     elif event.is_action_pressed("save_game"):
@@ -87,19 +92,42 @@ func _unhandled_input(event: InputEvent) -> void:
 
 
 func _on_interact(target: Node) -> void:
-    if target == null or not target.has_method("collect") or target.is_queued_for_deletion():
+    if state.dead or target == null or not target.has_method("collect") or target.is_queued_for_deletion():
         return
     var result: Dictionary = target.call("collect")
-    if result.has("type") and result.has("amount"):
-        if bool(result.get("gathering", false)):
-            state.gather(str(result["type"]), int(result["amount"]))
-        else:
-            state.add_resource(str(result["type"]), int(result["amount"]))
+    if not result.has("type") or not result.has("amount"):
+        return
+    var kind: String = str(result["type"])
+    var amount: int = int(result["amount"])
+    if bool(result.get("gathering", false)):
+        if state.gather(kind, amount):
+            quests.record_event("gather." + kind, state, amount)
+    elif state.add_resource(kind, amount):
+        quests.record_event("pickup." + kind, state, amount)
+
+
+func craft_item(item_id: String) -> bool:
+    if not state.craft(item_id):
+        return false
+    quests.record_event("craft." + item_id, state)
+    return true
+
+
+func equip_item(item_id: String) -> bool:
+    if not state.equip(item_id):
+        return false
+    quests.record_event("equip." + item_id, state)
+    return true
 
 
 func _on_attack(target: Node) -> void:
-    if target != null and not target.is_queued_for_deletion() and target.has_method("take_damage"):
-        target.call("take_damage", state.get_attack_damage())
+    if state.dead or target == null or target.is_queued_for_deletion() or not target.has_method("take_damage"):
+        return
+    var is_infected: bool = target.is_in_group("days_after_enemy")
+    var old_health: float = float(target.get("health")) if is_infected else 0.0
+    target.call("take_damage", state.get_attack_damage())
+    if is_infected and old_health > 0.0 and float(target.get("health")) <= 0.0:
+        quests.record_event("kill.infected", state)
 
 
 func _on_enemy_attack(raw_damage: float) -> void:
@@ -344,6 +372,11 @@ func _build_hud() -> void:
     progression_label.position = Vector2(22, 94)
     progression_label.add_theme_font_size_override("font_size", 16)
     canvas.add_child(progression_label)
+    quest_label = Label.new()
+    quest_label.name = "QuestTracker"
+    quest_label.position = Vector2(22, 256)
+    quest_label.add_theme_font_size_override("font_size", 15)
+    canvas.add_child(quest_label)
     status_label.position = Vector2(22, 163)
     status_label.add_theme_font_size_override("font_size", 16)
     canvas.add_child(status_label)
