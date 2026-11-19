@@ -58,7 +58,9 @@ TEST_CASE("[Translation] Bulk message property round-trip") {
 	REQUIRE_EQ(messages.size(), 512);
 
 	Ref<Translation> restored = memnew(Translation);
-	CHECK(restored->set("messages", messages));
+	bool valid = false;
+	restored->set("messages", messages, &valid);
+	CHECK(valid);
 	REQUIRE_EQ(restored->get_message_count(), 512);
 	for (int i = 0; i < 512; i++) {
 		const StringName source = StringName(String("message_") + itos(i));
