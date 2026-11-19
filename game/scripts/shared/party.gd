@@ -89,7 +89,8 @@ func leave(peer_id: int) -> Dictionary:
 	if group_id == 0 or not groups.has(group_id):
 		return {"ok": false, "reason": "not_in_party"}
 	var group: Dictionary = groups[group_id]
-	(group["members"] as Array).erase(peer_id)
+	var members: Array = group["members"]
+	members.erase(peer_id)
 	group_by_peer.erase(peer_id)
 	# Invitations to disconnected leaders and disbanded parties are invalid.
 	for target in invites.keys():
