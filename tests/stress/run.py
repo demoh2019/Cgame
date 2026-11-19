@@ -241,6 +241,23 @@ def summarize(runs: list[dict[str, Any]]) -> dict[str, Any]:
     engine_times = sorted(r["engine"]["duration_ms"] for r in passed if r.get("engine"))
     engine_memory = [r["engine"]["engine_memory_after_bytes"] for r in passed
                      if isinstance(r.get("engine"), dict) and isinstance(r["engine"].get("engine_memory_after_bytes"), (int, float))]
+    phase_values: dict[str, list[float]] = {}
+    for run in passed:
+        engine = run.get("engine")
+        detail = engine.get("detail", {}) if isinstance(engine, dict) else {}
+        if not isinstance(detail, dict):
+            continue
+        for metric, value in detail.items():
+            if (metric.endswith("_ms") and isinstance(value, (int, float))
+                    and not isinstance(value, bool) and math.isfinite(value) and value >= 0):
+                phase_values.setdefault(metric, []).append(float(value))
+    # Incomplete or intermittently missing metrics would mislead a baseline.
+    phase_medians = {
+        key: round(statistics.median(values), 6)
+        for key, values in sorted(phase_values.items())
+        if len(values) == len(passed)
+    }
+
     return {
         "status": "passed" if len(passed) == len(runs) else "failed",
         "median_wall_seconds": round(statistics.median(wall), 6) if wall else None,
@@ -252,6 +269,7 @@ def summarize(runs: list[dict[str, Any]]) -> dict[str, Any]:
         "median_engine_ms": round(statistics.median(engine_times), 6) if engine_times else None,
         "p95_engine_ms": round(engine_times[math.ceil(0.95 * len(engine_times)) - 1], 6) if engine_times else None,
         "max_engine_memory_bytes": max(engine_memory) if engine_memory else None,
+        "phase_median_ms": phase_medians,
         "runs": runs,
     }
 
@@ -301,6 +319,14 @@ def compare_baseline(current: dict[str, Any], baseline: dict[str, Any],
             if new is not None and old is not None and old > 0 and new > old * (1 + percent / 100.0):
                 errors.append("%s %s: %.3f > %.3f (baseline + %.1f%%)" %
                               (name, field, new, old, percent))
+        current_phases = data.get("phase_median_ms", {})
+        previous_phases = previous.get("phase_median_ms", {})
+        for metric in sorted(current_phases.keys() & previous_phases.keys()):
+            new = current_phases[metric]
+            old = previous_phases[metric]
+            if old > 0 and new > old * (1 + percent / 100.0):
+                errors.append("%s %s: %.3f ms > %.3f ms (baseline + %.1f%%)" %
+                              (name, metric, new, old, percent))
     if memory_growth_limit_mib is not None:
         for case_name in ("memory_churn", "object_lifecycle", "scene_churn"):
             for run in current["cases"].get(case_name, {}).get("runs", []):
@@ -357,6 +383,23 @@ def markdown_hotspots(report: dict[str, Any]) -> str:
     for case, wall, p95, rss, engine, note in rows:
         lines.append("| %s | %s | %s | %s | %s | %s |" % (
             case, number(wall), number(p95), number(rss), number(engine), note or "—"))
+    phase_rows = [
+        (case, metric, value)
+        for case, stats in report["cases"].items()
+        for metric, value in stats.get("phase_median_ms", {}).items()
+    ]
+    if phase_rows:
+        lines += [
+            "", "## In-engine phase metrics",
+            "",
+            "Phase medians are comparable only within the same case and fixed "
+            "workload; frame measurements can include scheduling and waiting.",
+            "",
+            "| Scenario | Detail metric | Median (ms) |",
+            "| --- | --- | ---: |",
+        ]
+        for case, metric, value in sorted(phase_rows, key=lambda row: row[2], reverse=True):
+            lines.append("| %s | %s | %s |" % (case, metric, number(value)))
     lines += ["", "Failures: %d" % len(report["failures"])]
     lines.extend("- %s" % str(message).replace("\n", " ") for message in report["failures"])
     lines.append("")
