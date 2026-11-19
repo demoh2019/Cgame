@@ -1,0 +1,38 @@
+name: XPBD SoftBody StVK membrane contracts
+
+on:
+  push:
+    branches: [develop]
+    paths:
+      - "servers/physics_xpbd_membrane.h"
+      - "modules/godot_physics_3d/godot_soft_body_3d.cpp"
+      - "modules/godot_physics_3d/godot_soft_body_3d.h"
+      - "modules/godot_physics_3d/godot_space_3d.cpp"
+      - "modules/godot_physics_3d/godot_space_3d.h"
+      - "servers/physics_3d/physics_server_3d.cpp"
+      - "tests/stress/test_physics_xpbd_membrane.py"
+      - "tests/servers/test_physics_xpbd_membrane.cpp"
+      - ".github/workflows/physics-xpbd-membrane.yml"
+  pull_request:
+    paths:
+      - "servers/physics_xpbd_membrane.h"
+      - "modules/godot_physics_3d/godot_soft_body_3d.cpp"
+      - "modules/godot_physics_3d/godot_soft_body_3d.h"
+      - "modules/godot_physics_3d/godot_space_3d.cpp"
+      - "modules/godot_physics_3d/godot_space_3d.h"
+      - "servers/physics_3d/physics_server_3d.cpp"
+      - "tests/stress/test_physics_xpbd_membrane.py"
+      - "tests/servers/test_physics_xpbd_membrane.cpp"
+      - ".github/workflows/physics-xpbd-membrane.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  membrane-reference:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Reference StVK energy, analytic gradients, scale stress and wiring
+        run: python3 -m unittest discover -s tests/stress -p test_physics_xpbd_membrane.py -v
