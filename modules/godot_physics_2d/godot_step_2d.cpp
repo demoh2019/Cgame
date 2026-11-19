@@ -47,6 +47,9 @@ static constexpr uint32_t MIN_PARALLEL_SOLVE_ISLANDS = 16;
 // inline to avoid a thread-pool barrier per color and solver iteration.
 static constexpr uint32_t MIN_PARALLEL_LARGE_ISLAND = 256;
 static constexpr uint32_t MIN_PARALLEL_COLOR_CONSTRAINTS = 64;
+// Each worker processes a short contiguous run within one color. All
+// constraints in a color have disjoint bodies, so batching is race-free.
+static constexpr uint32_t PARALLEL_COLOR_BATCH_SIZE = 8;
 static constexpr uint32_t MAX_LARGE_ISLAND_COLORS = 16;
 
 void GodotStep2D::_populate_island(GodotBody2D *p_body, LocalVector<GodotBody2D *> &p_body_island, LocalVector<GodotConstraint2D *> &p_constraint_island) {
@@ -130,7 +133,11 @@ void GodotStep2D::_solve_island_except_large(uint32_t p_island_index, void *p_us
 }
 
 void GodotStep2D::_solve_colored_constraint(uint32_t p_constraint_index, void *p_userdata) const {
-	colored_constraints[color_batch_offset + p_constraint_index]->solve(delta);
+	const uint32_t first = p_constraint_index * PARALLEL_COLOR_BATCH_SIZE;
+	const uint32_t end = MIN(first + PARALLEL_COLOR_BATCH_SIZE, color_batch_count);
+	for (uint32_t i = first; i < end; ++i) {
+		colored_constraints[color_batch_offset + i]->solve(delta);
+	}
 }
 
 void GodotStep2D::_solve_large_island(const LocalVector<GodotConstraint2D *> &p_constraint_island) {
@@ -250,8 +257,13 @@ void GodotStep2D::_solve_large_island(const LocalVector<GodotConstraint2D *> &p_
 			const uint32_t start = starts[color];
 			if (color != MAX_LARGE_ISLAND_COLORS && count >= MIN_PARALLEL_COLOR_CONSTRAINTS) {
 				color_batch_offset = start;
+				color_batch_count = count;
+				// Reduce per-constraint scheduling overhead by giving each worker
+				// eight independent constraints per callback. A color barrier
+				// still completes before any other color can touch these bodies.
+				const uint32_t task_count = (count + PARALLEL_COLOR_BATCH_SIZE - 1) / PARALLEL_COLOR_BATCH_SIZE;
 				WorkerThreadPool::GroupID group = WorkerThreadPool::get_singleton()->add_template_group_task(
-						this, &GodotStep2D::_solve_colored_constraint, nullptr, count, -1, true, SNAME("Physics2DLargeIslandColor"));
+						this, &GodotStep2D::_solve_colored_constraint, nullptr, task_count, -1, true, SNAME("Physics2DLargeIslandColor"));
 				// Barrier: no group may update bodies touched by another color
 				// until all jobs from the previous color have completed.
 				WorkerThreadPool::get_singleton()->wait_for_group_task_completion(group);
