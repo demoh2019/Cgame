@@ -72,7 +72,7 @@ class CCDRotationalSphereCullContracts(unittest.TestCase):
             source = self.sections[dim]
             marker = "physics_ccd_rotational_sphere_bounds_may_overlap("
             guard = source[source.index("if (space->is_ccd_rotational_bounds_enabled()"):source.index(marker)]
-            enum = f"PS{dim.upper()}E" if False else ("PS2DE" if dim == "2d" else "PS3DE")
+            enum = "PS2DE" if dim == "2d" else "PS3DE"
             self.assertIn(f"{enum}::SHAPE_WORLD_BOUNDARY", guard)
             self.assertIn(f"{enum}::SHAPE_SEPARATION_RAY", guard)
             self.assertIn("p_A->get_angular_velocity()", guard)
