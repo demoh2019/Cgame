@@ -32,15 +32,15 @@ class PhysicsContactGeometryRegression(unittest.TestCase):
     def test_native_geometry_tests_registered(self):
         paths = [
             ("test_godot_physics_2d_contact_normal.cpp",
-             "TEST_FORCE_LINK(test_godot_physics_2d_contact_normal)", 5),
+             "TEST_FORCE_LINK(test_godot_physics_2d_contact_normal)", "SUBCASE(", 5),
             ("test_godot_physics_3d_world_boundary_margin.cpp",
-             "TEST_FORCE_LINK(test_godot_physics_3d_world_boundary_margin)", 2),
+             "TEST_FORCE_LINK(test_godot_physics_3d_world_boundary_margin)", "TEST_CASE(", 2),
         ]
-        for filename, registration, minimum_subcases in paths:
+        for filename, registration, case_marker, minimum_cases in paths:
             with self.subTest(filename=filename):
                 source = (ROOT / "tests/servers" / filename).read_text(encoding="utf-8")
                 self.assertIn(registration, source)
-                self.assertGreaterEqual(source.count("SUBCASE("), minimum_subcases)
+                self.assertGreaterEqual(source.count(case_marker), minimum_cases)
 
 
 if __name__ == "__main__":
