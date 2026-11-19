@@ -34,6 +34,7 @@
 
 #include "core/math/geometry_3d.h"
 #include "servers/physics_3d/physics_server_3d_rendering_server_handler.h"
+#include "servers/physics_softbody_bending_plasticity.h"
 #include "servers/physics_softbody_link_damping.h"
 #include "servers/physics_softbody_plasticity.h"
 #include "servers/physics_softbody_volume_safe.h"
@@ -1979,6 +1980,25 @@ void GodotSoftBody3D::solve_constraints(real_t p_delta) {
 	} else if (!xpbd_area_lambdas.is_empty()) {
 		// The default zero-compliance setting consumes no per-face scratch.
 		xpbd_area_lambdas.reset();
+	}
+
+	// A separate viscoplastic pass permanently changes the rest angle of
+	// bent cloth hinges after exceeding their angular yield. Update at most
+	// once per timestep (not once per solver iteration), before the XPBD
+	// multipliers are reset; no extra per-hinge storage is necessary.
+	const real_t bending_creep_rate = get_space() ? get_space()->get_soft_body_bending_plastic_creep_rate() : real_t(0.0);
+	if (use_dihedral_xpbd && bending_creep_rate > real_t(0.0) && p_delta > real_t(0.0)) {
+		const double creep_fraction = 1.0 - Math::exp(-double(bending_creep_rate) * double(p_delta));
+		if (Math::is_finite(creep_fraction) && creep_fraction > 0.0) {
+			const real_t yield = get_space()->get_soft_body_bending_plastic_yield_angle();
+			for (DihedralHinge &hinge : xpbd_dihedral_hinges) {
+				real_t angle = 0.0;
+				if (physics_xpbd_dihedral_angle(nodes[hinge.a].x, nodes[hinge.b].x,
+							nodes[hinge.c].x, nodes[hinge.d].x, angle)) {
+					physics_softbody_creep_rest_dihedral(angle, yield, creep_fraction, hinge.rest_angle);
+				}
+			}
+		}
 	}
 
 	if (use_dihedral_xpbd) {
