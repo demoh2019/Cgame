@@ -88,7 +88,7 @@ func _run_validation_tests() -> void:
 	wrong_summary["summary"] = 50
 	_expect(not Plan.validate_plan(wrong_summary)["ok"], "reject non-string summary")
 	_expect(not Plan.validate_plan(_sample("data/nul.txt", "a\u0000b"))["ok"], "reject embedded NUL")
-	_expect(not Plan.validate_plan(_sample("scripts/unsafe.gd", "@tool\\nextends EditorPlugin\\n"))["ok"], "reject @tool editor scripts")
+	_expect(not Plan.validate_plan(_sample("scripts/unsafe.gd", "@tool\nextends EditorPlugin\n"))["ok"], "reject @tool editor scripts")
 
 	var valid_json := JSON.stringify(_sample())
 	_expect(Plan.parse_response(valid_json)["ok"], "parse plain JSON")
