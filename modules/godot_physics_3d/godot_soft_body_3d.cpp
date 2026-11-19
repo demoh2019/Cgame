@@ -554,6 +554,117 @@ void GodotSoftBody3D::initialize_self_collision_topology() {
 	}
 }
 
+// BVH-pruned structural edge/edge cloth contacts. Kept separate from the
+// vertex/triangle solver so the default configuration has no edge BVH,
+// contact buffer, refit, or narrowphase work.
+bool GodotSoftBody3D::solve_edge_self_collisions(real_t p_delta) {
+	if (!get_space() || !get_space()->is_soft_body_self_collision_edge_edge_enabled() ||
+			xpbd_self_edges.size() < 2 || !(p_delta > 0.0)) {
+		return false;
+	}
+	const real_t thickness = get_space()->get_soft_body_self_collision_thickness();
+	if (!(thickness > 0.0)) {
+		return false;
+	}
+	const double alpha_double = double(get_space()->get_soft_body_self_collision_compliance()) /
+			(double(p_delta) * double(p_delta));
+	if (!Math::is_finite(alpha_double) || alpha_double < 0.0) {
+		return false;
+	}
+	const real_t alpha = real_t(MIN(alpha_double, double(std::numeric_limits<real_t>::max())));
+	const uint32_t per_edge_limit = uint32_t(get_space()->get_soft_body_self_collision_max_contacts_per_vertex());
+	const uint32_t global_limit = uint32_t(MIN(uint64_t(65536),
+			uint64_t(xpbd_self_edges.size()) * uint64_t(per_edge_limit)));
+	xpbd_self_edge_contacts.clear();
+
+	// All material and vertex/face corrections have completed. Refit once
+	// BEFORE queries; do not mutate the tree inside any callback.
+	for (const SelfCollisionEdge &edge : xpbd_self_edges) {
+		AABB edge_bounds(nodes[edge.a].x, Vector3());
+		edge_bounds.expand_to(nodes[edge.b].x);
+		edge_bounds.grow_by(thickness);
+		xpbd_self_edge_tree.update(edge.leaf, edge_bounds);
+	}
+	xpbd_self_edge_tree.optimize_incremental(1);
+
+	for (const SelfCollisionEdge &edge : xpbd_self_edges) {
+		if (xpbd_self_edge_contacts.size() >= global_limit) {
+			break;
+		}
+		const Node &a = nodes[edge.a];
+		const Node &b = nodes[edge.b];
+		if (!a.x.is_finite() || !b.x.is_finite()) {
+			continue;
+		}
+		AABB query(a.x, Vector3());
+		query.expand_to(b.x);
+		query.grow_by(thickness);
+		uint32_t hits = 0;
+		auto visit_edge = [&](void *p_userdata) -> bool {
+			const SelfCollisionEdge &other = *static_cast<const SelfCollisionEdge *>(p_userdata);
+			if (other.index <= edge.index) {
+				return false;
+			}
+			// Same/one-ring topology is handled by the cloth material rows;
+			// its edges must not produce fictitious self-collision resistance.
+			if (edge.a == other.a || edge.a == other.b ||
+					edge.b == other.a || edge.b == other.b ||
+					xpbd_self_neighbor_edges.has(_soft_body_edge_key(edge.a, other.a)) ||
+					xpbd_self_neighbor_edges.has(_soft_body_edge_key(edge.a, other.b)) ||
+					xpbd_self_neighbor_edges.has(_soft_body_edge_key(edge.b, other.a)) ||
+					xpbd_self_neighbor_edges.has(_soft_body_edge_key(edge.b, other.b))) {
+				return false;
+			}
+			const Node &c = nodes[other.a];
+			const Node &d = nodes[other.b];
+			if ((a.im + b.im + c.im + d.im) <= 0.0) {
+				return false;
+			}
+			real_t s, t, distance;
+			Vector3 normal;
+			if (!physics_xpbd_closest_edges(a.x, b.x, c.x, d.x, s, t, normal, distance) ||
+					distance >= thickness) {
+				return false;
+			}
+			// Maintain the normal's side from last frame, even if the
+			// current edges crossed through each other this frame.
+			const Vector3 previous_a = a.q + (b.q - a.q) * s;
+			const Vector3 previous_b = c.q + (d.q - c.q) * t;
+			const Vector3 previous_separation = previous_a - previous_b;
+			if (previous_separation.is_finite() && previous_separation.length_squared() > CMP_EPSILON * CMP_EPSILON &&
+					previous_separation.dot(normal) < 0.0) {
+				normal = -normal;
+			}
+			SelfEdgeContact contact;
+			contact.first = edge.index;
+			contact.second = other.index;
+			contact.normal = normal;
+			contact.lambda = 0.0;
+			xpbd_self_edge_contacts.push_back(contact);
+			++hits;
+			return hits >= per_edge_limit || xpbd_self_edge_contacts.size() >= global_limit;
+		};
+		xpbd_self_edge_tree.aabb_query(query, visit_edge);
+	}
+	if (xpbd_self_edge_contacts.is_empty()) {
+		return false;
+	}
+	const int contact_iterations = MIN(MAX(iteration_count, 1), 4);
+	for (int iteration = 0; iteration < contact_iterations; ++iteration) {
+		for (SelfEdgeContact &contact : xpbd_self_edge_contacts) {
+			const SelfCollisionEdge &first = xpbd_self_edges[contact.first];
+			const SelfCollisionEdge &second = xpbd_self_edges[contact.second];
+			Node &a = nodes[first.a];
+			Node &b = nodes[first.b];
+			Node &c = nodes[second.a];
+			Node &d = nodes[second.b];
+			physics_xpbd_solve_edge_collision(a.x, b.x, c.x, d.x,
+					a.im, b.im, c.im, d.im, thickness, alpha, contact.normal, contact.lambda);
+		}
+	}
+	return true;
+}
+
 // Discrete vertex-vs-triangle self contacts for different cloth folds.
 // A current-position face BVH avoids all-pairs vertex/face scans. Candidate
 // enumeration and XPBD corrections are separate: the tree is never mutated
@@ -635,23 +746,25 @@ void GodotSoftBody3D::solve_self_collisions(real_t p_delta) {
 		};
 		face_tree.aabb_query(AABB(node.x - padding, padding * real_t(2.0)), visit_face);
 	}
-	if (xpbd_self_contacts.is_empty()) {
-		return;
-	}
-	const int contact_iterations = MIN(MAX(iteration_count, 1), 4);
-	for (int iteration = 0; iteration < contact_iterations; ++iteration) {
-		for (SelfCollisionContact &contact : xpbd_self_contacts) {
-			Node &node = nodes[contact.vertex];
-			Face &face = faces[contact.face];
-			physics_xpbd_solve_self_collision(node.x,
-					face.n[0]->x, face.n[1]->x, face.n[2]->x,
-					node.im, face.n[0]->im, face.n[1]->im, face.n[2]->im,
-					thickness, alpha, contact.side, contact.lambda);
+	const bool vertex_contacts = !xpbd_self_contacts.is_empty();
+	if (vertex_contacts) {
+		const int contact_iterations = MIN(MAX(iteration_count, 1), 4);
+		for (int iteration = 0; iteration < contact_iterations; ++iteration) {
+			for (SelfCollisionContact &contact : xpbd_self_contacts) {
+				Node &node = nodes[contact.vertex];
+				Face &face = faces[contact.face];
+				physics_xpbd_solve_self_collision(node.x,
+						face.n[0]->x, face.n[1]->x, face.n[2]->x,
+						node.im, face.n[0]->im, face.n[1]->im, face.n[2]->im,
+						thickness, alpha, contact.side, contact.lambda);
+			}
 		}
 	}
-	// Refit face queries after the correction so subsequent raycasts don't
-	// inherit stale pre-solve triangle bounds. This is opt-in O(faces).
-	update_face_tree(real_t(0.0));
+	const bool edge_contacts = solve_edge_self_collisions(p_delta);
+	if (vertex_contacts || edge_contacts) {
+		// Refit for ray queries only if a contact stage may move nodes.
+		update_face_tree(real_t(0.0));
+	}
 }
 
 void GodotSoftBody3D::update_area() {
@@ -2022,6 +2135,9 @@ void GodotSoftBody3D::destroy() {
 	xpbd_dihedral_lambdas.reset();
 	xpbd_self_contacts.reset();
 	xpbd_self_neighbor_edges.reset();
+	xpbd_self_edge_tree.clear();
+	xpbd_self_edges.reset();
+	xpbd_self_edge_contacts.reset();
 	xpbd_volume_gradients.reset();
 	xpbd_volume_closed = false;
 	xpbd_volume_rest = 0.0;
