@@ -61,3 +61,23 @@ game/tests/e2e/run_e2e.sh path/to/godot                                    # rea
 game/tests/e2e/run_e2e_nakama.sh path/to/godot                             # needs Nakama: sign-in, save, return
 godot --headless --path game --script res://tests/test_nakama_backend.gd   # Nakama RPC security and storage
 ```
+
+## Classless profession progression (server-authoritative)
+
+The dedicated server now tracks independent **wood / stone / ore / fiber**
+gathering XP and crafting XP. Players begin at profession tier 1; every 100 XP
+unlocks the next tier up to T4. Successfully harvested *received* resources
+grant 8 XP per item times the resource tier; crafting grants 25 XP per
+successful batch times the output tier. Harvests that cannot fit in the bag
+do not grant XP. Higher-tier resources require **both** the appropriate tool
+and the gathering skill; high-tier recipes require a corresponding crafting
+skill, even if the player traded for all ingredients.
+
+Skills are character-bound and survive full-loot deaths. The authoritative
+server saves progression as an optional field in version-1 account snapshots:
+older Nakama characters start at level 1; malformed or non-finite XP rejects
+a load without partial application. Snapshot data contains each skill level
+and the HUD displays the unlocks and craft requirement.
+
+Tests: `godot --headless --path game --script res://tests/run_all.gd` (suite
+`test_progression.gd` plus the updated server tests).

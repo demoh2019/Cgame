@@ -210,7 +210,13 @@ func _process(_delta: float) -> void:
 		float(client.you.get("carry_kg", 0.0)), 100.0 * float(client.you.get("cargo_factor", 1.0))
 	]
 	var weapon: String = client.you.get("weapon", "")
-	_equipped.text = "Weapon: %s" % (Defs.item(weapon).get("name", weapon) if weapon != "" else "fists")
+	var levels: Dictionary = client.you.get("gathering_levels", {})
+	_equipped.text = "Weapon: %s | Craft L%d (%d XP)\nWood L%d | Stone L%d | Ore L%d | Fiber L%d" % [
+		(Defs.item(weapon).get("name", weapon) if weapon != "" else "fists"),
+		int(client.you.get("crafting_level", 1)), int(client.you.get("crafting_xp", 0)),
+		int(levels.get("wood", 1)), int(levels.get("stone", 1)),
+		int(levels.get("ore", 1)), int(levels.get("fiber", 1))
+	]
 	_death.visible = not bool(client.you.get("alive", true))
 	if _inventory_panel.visible:
 		_refresh_inventory()
@@ -258,7 +264,7 @@ func _refresh_inventory() -> void:
 
 func _refresh_crafting() -> void:
 	var craftable: Array = Crafting.craftable(client.inventory)
-	var signature := str(craftable) + str(client.inventory.count("wood_1"))
+	var signature := str(craftable) + str(client.inventory.count("wood_1")) + str(client.you.get("crafting_level", 1))
 	if signature == _craft_signature:
 		return
 	_craft_signature = signature
@@ -277,6 +283,10 @@ func _refresh_crafting() -> void:
 		var button := Button.new()
 		button.text = "%s  <-  %s%s" % [Defs.item(recipe["output"]).get("name", recipe["output"]), ", ".join(needs), "  [bench]" if recipe["station"] == "workbench" else ""]
 		button.alignment = HORIZONTAL_ALIGNMENT_LEFT
-		button.disabled = not craftable.has(id)
+		var required_tier: int = maxi(1, Defs.tier_of(String(recipe["output"])))
+		var skill_locked: bool = required_tier > int(client.you.get("crafting_level", 1))
+		button.disabled = not craftable.has(id) or skill_locked
+		if skill_locked:
+			button.text += "  [Craft Lv%d]" % required_tier
 		button.pressed.connect(func() -> void: client.craft(id, 1))
 		_craft_list.add_child(button)

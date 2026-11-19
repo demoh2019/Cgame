@@ -11,6 +11,7 @@ const Survival = preload("res://scripts/shared/survival.gd")
 const Movement = preload("res://scripts/shared/movement.gd")
 const Combat = preload("res://scripts/shared/combat.gd")
 const Zombie = preload("res://scripts/shared/zombie.gd")
+const Progression = preload("res://scripts/shared/progression.gd")
 
 const WORKBENCH_POSITION := Vector2(9.0, 0.0)
 const WORKBENCH_RANGE := 6.0
@@ -32,6 +33,7 @@ class Player:
 	var inventory
 	var stash # Account-bound safe storage; isolated from full-loot death drops.
 	var survival
+	var progression # Permanent skills; gear is lost on death, not experience.
 	var input_budget: float = 0.0
 	var last_input_seq: int = 0
 	var attack_timer: float = 0.0
@@ -77,6 +79,7 @@ func add_player(peer_id: int, p_name: String, p_user_id: String = "", saved: Dic
 	player.inventory = Inventory.new()
 	player.stash = Inventory.new(Defs.STASH_SLOTS)
 	player.survival = Survival.new()
+	player.progression = Progression.new()
 	players[peer_id] = player
 	if saved.is_empty() or not apply_character(player, saved):
 		_spawn_player(player)
@@ -95,6 +98,7 @@ func character_data(player: Player) -> Dictionary:
 		"x": player.position.x, "z": player.position.z,
 		"inventory": player.inventory.to_dict(),
 		"stash": player.stash.to_dict(),
+		"progression": player.progression.to_dict(),
 	}
 
 
@@ -151,6 +155,11 @@ func apply_character(player: Player, data: Dictionary) -> bool:
 				return false
 			clean_stash.append({"id": item_id, "count": int(quantity)})
 		stash.slots = clean_stash
+	# Version-1 Nakama accounts without progression start at level 1.
+	var loaded_progression = Progression.new()
+	if data.has("progression") and not loaded_progression.load_dict(data["progression"]):
+		return false
+	player.progression = loaded_progression
 	player.inventory = inventory
 	player.stash = stash
 	player.kills = maxi(int(data.get("kills", 0)), 0)
@@ -250,6 +259,9 @@ func cmd_gather(peer_id: int, node_id: int) -> Dictionary:
 		if tool_tier < int(node["tier"]) and not (tool_tier == 0 and int(node["tier"]) == 1):
 			return {"ok": false, "reason": "need_tool", "tier": node["tier"], "tool": required_tool}
 		speed = 0.45 if tool_tier == 0 else 1.0 + 0.6 * (tool_tier - 1) + 0.5
+	# Tool tier and profession tier are independent: a bought tool is not enough.
+	if not player.progression.can_gather(String(node["kind"]), int(node["tier"])):
+		return {"ok": false, "reason": "need_skill", "skill": Progression.resource_skill(String(node["kind"])), "tier": node["tier"]}
 	var total := float(info["seconds"]) / speed
 	player.action = {"node": node_id, "remaining": total, "total": total}
 	return {"ok": true, "seconds": total}
@@ -260,9 +272,16 @@ func cmd_craft(peer_id: int, recipe_id: String, times: int = 1) -> Dictionary:
 	if player == null or not _alive(player):
 		return {"ok": false, "reason": "dead"}
 	times = clampi(times, 1, 50)
+	var recipe: Dictionary = Defs.recipes().get(recipe_id, {})
+	if recipe.is_empty():
+		return {"ok": false, "reason": "unknown_recipe"}
+	var recipe_tier: int = maxi(1, Defs.tier_of(String(recipe["output"])))
+	if not player.progression.can_craft_tier(recipe_tier):
+		return {"ok": false, "reason": "need_skill", "skill": "crafting", "tier": recipe_tier}
 	var at_bench: bool = Vector2(player.position.x, player.position.z).distance_to(WORKBENCH_POSITION) <= WORKBENCH_RANGE
 	var status: int = Crafting.craft(player.inventory, recipe_id, at_bench, times)
 	if status == Crafting.Result.OK:
+		player.progression.award_craft(recipe_tier, times)
 		player.dirty_inventory = true
 		player.dirty_character = true
 		return {"ok": true}
@@ -599,6 +618,8 @@ func _finish_gather(player: Player, node: Dictionary) -> void:
 		item_id = "%s_%d" % [item_id, int(node["tier"])]
 	var amount: int = int(info["amount"]) + (1 if rng.randf() < 0.3 else 0)
 	var left: int = player.inventory.add(item_id, amount)
+	# No XP for items that did not fit, nor for repeat attempts on depleted nodes.
+	player.progression.award_gather(String(node["kind"]), int(node["tier"]), amount - left)
 	player.dirty_inventory = true
 	player.dirty_character = true
 	player.action = {}
@@ -725,6 +746,8 @@ func snapshot_for(peer_id: int) -> Dictionary:
 			"alive": _alive(player), "kills": player.kills, "deaths": player.deaths, "zone": player.zone_notice,
 			"action": player.action.duplicate(),
 			"weapon": player.inventory.weapon, "armor": player.inventory.armor,
+			"gathering_levels": player.progression.levels(), "crafting_level": player.progression.crafting_level(),
+			"crafting_xp": player.progression.crafting_xp,
 			"carry_kg": player.inventory.total_weight(),
 			"cargo_factor": player.inventory.movement_factor(),
 		},
