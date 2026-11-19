@@ -772,6 +772,48 @@ static void _collision_circle_capsule(const GodotShape2D *p_a, const Transform2D
 	const GodotCircleShape2D *circle_A = static_cast<const GodotCircleShape2D *>(p_a);
 	const GodotCapsuleShape2D *capsule_B = static_cast<const GodotCapsuleShape2D *>(p_b);
 
+	// Like the specialized capsule/circle manifold in Box2D, find the nearest
+	// point on the capsule's center segment instead of testing multiple SAT axes.
+	// Preserve the SAT path for moving, scaled, degenerate or coincident shapes.
+	const real_t half_segment = capsule_B->get_height() * real_t(0.5) - capsule_B->get_radius();
+	if (!p_cast_A && !p_cast_B && p_margin_A >= 0.0 && p_margin_B >= 0.0 &&
+			circle_A->get_radius() >= 0.0 && capsule_B->get_radius() >= 0.0 &&
+			half_segment >= 0.0 && _is_unit_orthogonal_transform(p_transform_a) &&
+			_is_unit_orthogonal_transform(p_transform_b)) {
+		const Vector2 center_A = p_transform_a.get_origin();
+		const Vector2 center_B = p_transform_b.get_origin();
+		const Vector2 capsule_axis = p_transform_b.columns[1];
+		const real_t position = CLAMP((center_A - center_B).dot(capsule_axis), -half_segment, half_segment);
+		const Vector2 closest_B = center_B + capsule_axis * position;
+		const Vector2 difference = center_A - closest_B;
+		const real_t distance_squared = difference.length_squared();
+
+		// At an exact centerline coincidence the SAT solver determines a stable
+		// contact direction from the capsule axis (or its cached separating axis).
+		if (distance_squared > 0.0) {
+			const real_t radius_A = circle_A->get_radius() + p_margin_A;
+			const real_t radius_B = capsule_B->get_radius() + p_margin_B;
+			const real_t total_radius = radius_A + radius_B;
+			if (distance_squared > total_radius * total_radius) {
+				if (p_collector->sep_axis) {
+					*p_collector->sep_axis = difference / Math::sqrt(distance_squared);
+				}
+				return;
+			}
+
+			p_collector->collided = true;
+			if (p_collector->callback) {
+				const Vector2 normal = difference / Math::sqrt(distance_squared);
+				p_collector->normal = normal;
+				p_collector->call(center_A - normal * radius_A, closest_B + normal * radius_B);
+				if (p_collector->sep_axis && *p_collector->sep_axis != Vector2()) {
+					*p_collector->sep_axis = Vector2();
+				}
+			}
+			return;
+		}
+	}
+
 	SeparatorAxisTest2D<GodotCircleShape2D, GodotCapsuleShape2D> separator(circle_A, p_transform_a, capsule_B, p_transform_b, p_collector, p_motion_a, p_motion_b, p_cast_A, p_cast_B, p_with_margin, p_margin_A, p_margin_B);
 
 	if (!separator.test_previous_axis()) {
