@@ -183,6 +183,57 @@ constexpr int64_t Span<T>::find_sequence(const Span<T1> &p_span, uint64_t p_from
 #if defined(__GNUC__) || defined(__clang__)
 	if constexpr (std::is_same_v<T, T1> && std::is_integral_v<T> && sizeof(T) == 1 && !std::is_same_v<std::remove_cv_t<T>, bool>) {
 		if (!__builtin_is_constant_evaluated()) {
+			// On large buffers dominated by one byte, searching for the first
+			// pattern byte can trigger a full comparison at nearly every offset.
+			// Sample a small prefix to switch to a rarer anchor only when the
+			// frequency gap is large. This uses no extra allocation and leaves
+			// the usual vectorized memchr path unchanged for other inputs.
+			if (needle_size >= 8 && size() - p_from >= 8192) {
+				if (haystack[p_from] == needle[0] &&
+						haystack[p_from + needle_size - 1] == needle[needle_size - 1] &&
+						std::memcmp(haystack + p_from, needle, size_t(needle_size)) == 0) {
+					return int64_t(p_from);
+				}
+
+				uint64_t alternate_offset = needle_size - 1;
+				if (needle[alternate_offset] == needle[0]) {
+					alternate_offset = 0;
+					// Bound the preprocessing cost even for extremely long needles.
+					const uint64_t limit = needle_size > 33 ? needle_size - 33 : 0;
+					for (uint64_t i = needle_size - 1; i > limit;) {
+						--i;
+						if (needle[i] != needle[0]) {
+							alternate_offset = i;
+							break;
+						}
+					}
+				}
+				if (alternate_offset != 0) {
+					uint32_t first_hits = 0;
+					uint32_t alternate_hits = 0;
+					for (uint64_t i = p_from; i < p_from + 128; i++) {
+						first_hits += haystack[i] == needle[0];
+						alternate_hits += haystack[i] == needle[alternate_offset];
+					}
+					if (first_hits >= 16 && alternate_hits * 4 < first_hits) {
+						const T *candidate = haystack + p_from + alternate_offset;
+						const T *const end = haystack + last_start + alternate_offset + 1;
+						while (candidate < end) {
+							candidate = static_cast<const T *>(std::memchr(candidate, static_cast<unsigned char>(needle[alternate_offset]), size_t(end - candidate)));
+							if (!candidate) {
+								return -1;
+							}
+							const T *const start = candidate - alternate_offset;
+							if (start[0] == needle[0] && start[needle_size - 1] == needle[needle_size - 1] &&
+								std::memcmp(start, needle, size_t(needle_size)) == 0) {
+								return int64_t(start - haystack);
+							}
+							candidate++;
+						}
+						return -1;
+					}
+				}
+			}
 			// Skip directly to byte candidates instead of scanning each offset.
 			const T *candidate = haystack + p_from;
 			const T *const end = haystack + last_start + 1;
