@@ -202,4 +202,73 @@ ui_accept={
 	CHECK_MESSAGE(config_file.encode_to_text() == expected, "Object properties should be on new lines.");
 }
 
+
+TEST_CASE("[ConfigFile][Performance] Hot section and key lookups retain all semantics") {
+	ConfigFile config;
+	const int sections = 11;
+	const int keys = 128;
+	for (int section_index = 0; section_index < sections; section_index++) {
+		const String section = "group_" + itos(section_index);
+		for (int key_index = 0; key_index < keys; key_index++) {
+			config.set_value(section, "entry_" + itos(key_index), section_index * keys + key_index);
+		}
+	}
+	REQUIRE(config.get_sections().size() == sections);
+
+	for (int section_index = 0; section_index < sections; section_index++) {
+		const String section = "group_" + itos(section_index);
+		CHECK(config.has_section(section));
+		CHECK(config.get_section_keys(section).size() == keys);
+		for (int key_index = 0; key_index < keys; key_index++) {
+			const String key = "entry_" + itos(key_index);
+			CHECK(config.has_section_key(section, key));
+			CHECK(int(config.get_value(section, key)) == section_index * keys + key_index);
+		}
+	}
+
+	// Lookups for nonexistent keys must not create sections or values.
+	CHECK_FALSE(config.has_section_key("missing", "entry_1"));
+	CHECK_FALSE(config.has_section_key("group_1", "missing"));
+	CHECK(int(config.get_value("missing", "entry_1", -7)) == -7);
+	CHECK(int(config.get_value("group_1", "missing", 42)) == 42);
+	CHECK(config.get_sections().size() == sections);
+
+	// Updating existing values keeps insertion order; nil removes a key.
+	config.set_value("group_3", "entry_4", 1337);
+	CHECK(int(config.get_value("group_3", "entry_4")) == 1337);
+	config.set_value("group_3", "entry_4", Variant());
+	CHECK_FALSE(config.has_section_key("group_3", "entry_4"));
+	CHECK(config.get_section_keys("group_3").size() == keys - 1);
+	config.set_value("group_3", "entry_4", 4);
+	CHECK(int(config.get_value("group_3", "entry_4")) == 4);
+
+	// Clearing the last key removes its parent section automatically.
+	config.set_value("temporary", "only", 99);
+	config.erase_section_key("temporary", "only");
+	CHECK_FALSE(config.has_section("temporary"));
+
+	config.set_value("temporary", "only", 99);
+	config.set_value("temporary", "only", Variant());
+	CHECK_FALSE(config.has_section("temporary"));
+
+	config.erase_section("group_1");
+	CHECK_FALSE(config.has_section("group_1"));
+	CHECK(config.get_sections().size() == sections - 1);
+
+	// Section-less keys are inserted before named sections, even if late.
+	config.set_value("", "global", "ok");
+	const Vector<String> section_names = config.get_sections();
+	REQUIRE(section_names.size() == sections);
+	CHECK(section_names[0] == "");
+	CHECK(String(config.get_value("", "global")) == "ok");
+
+	const String serialized = config.encode_to_text();
+	ConfigFile restored;
+	CHECK(restored.parse(serialized) == OK);
+	CHECK(int(restored.get_value("group_3", "entry_4")) == 4);
+	CHECK(String(restored.get_value("", "global")) == "ok");
+	CHECK(restored.has_section("group_0"));
+	CHECK_FALSE(restored.has_section("group_1"));
+}
+
 } // namespace TestConfigFile

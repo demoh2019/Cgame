@@ -36,46 +36,41 @@
 #include "core/variant/variant_parser.h"
 
 void ConfigFile::set_value(const String &p_section, const String &p_key, const Variant &p_value) {
+	HashMap<String, Variant> *section = values.getptr(p_section);
 	if (p_value.get_type() == Variant::NIL) { // Erase key.
-		if (!values.has(p_section)) {
+		if (!section) {
 			return;
 		}
-
-		values[p_section].erase(p_key);
-		if (values[p_section].is_empty()) {
+		section->erase(p_key);
+		if (section->is_empty()) {
 			values.erase(p_section);
 		}
 	} else {
-		if (!values.has(p_section)) {
-			// Insert section-less keys at the beginning.
-			values.insert(p_section, HashMap<String, Variant>(), p_section.is_empty());
+		if (!section) {
+			// Insert section-less keys at the beginning, preserving file order.
+			section = &values.insert(p_section, HashMap<String, Variant>(), p_section.is_empty())->value;
 		}
-
-		values[p_section][p_key] = p_value;
+		(*section)[p_key] = p_value;
 	}
 }
-
 Variant ConfigFile::get_value(const String &p_section, const String &p_key, const Variant &p_default) const {
-	if (!values.has(p_section) || !values[p_section].has(p_key)) {
+	const HashMap<String, Variant> *section = values.getptr(p_section);
+	const Variant *value = section ? section->getptr(p_key) : nullptr;
+	if (!value) {
 		ERR_FAIL_COND_V_MSG(p_default.get_type() == Variant::NIL, Variant(),
 				vformat("Couldn't find the given section \"%s\" and key \"%s\", and no default was given.", p_section, p_key));
 		return p_default;
 	}
-
-	return values[p_section][p_key];
+	return *value;
 }
-
 bool ConfigFile::has_section(const String &p_section) const {
 	return values.has(p_section);
 }
 
 bool ConfigFile::has_section_key(const String &p_section, const String &p_key) const {
-	if (!values.has(p_section)) {
-		return false;
-	}
-	return values[p_section].has(p_key);
+	const HashMap<String, Variant> *section = values.getptr(p_section);
+	return section && section->has(p_key);
 }
-
 Vector<String> ConfigFile::get_sections() const {
 	Vector<String> sections;
 	sections.resize(values.size());
@@ -91,35 +86,32 @@ Vector<String> ConfigFile::get_sections() const {
 
 Vector<String> ConfigFile::get_section_keys(const String &p_section) const {
 	Vector<String> keys;
-	ERR_FAIL_COND_V_MSG(!values.has(p_section), keys, vformat("Cannot get keys from nonexistent section \"%s\".", p_section));
+	const HashMap<String, Variant> *section = values.getptr(p_section);
+	ERR_FAIL_COND_V_MSG(!section, keys, vformat("Cannot get keys from nonexistent section \"%s\".", p_section));
 
-	const HashMap<String, Variant> &keys_map = values[p_section];
-	keys.resize(keys_map.size());
-
+	keys.resize(section->size());
 	int i = 0;
 	String *keys_write = keys.ptrw();
-	for (const KeyValue<String, Variant> &E : keys_map) {
+	for (const KeyValue<String, Variant> &E : *section) {
 		keys_write[i++] = E.key;
 	}
-
 	return keys;
 }
-
 void ConfigFile::erase_section(const String &p_section) {
-	ERR_FAIL_COND_MSG(!values.has(p_section), vformat("Cannot erase nonexistent section \"%s\".", p_section));
-	values.erase(p_section);
+	if (!values.erase(p_section)) {
+		ERR_FAIL_MSG(vformat("Cannot erase nonexistent section \"%s\".", p_section));
+	}
 }
-
 void ConfigFile::erase_section_key(const String &p_section, const String &p_key) {
-	ERR_FAIL_COND_MSG(!values.has(p_section), vformat("Cannot erase key \"%s\" from nonexistent section \"%s\".", p_key, p_section));
-	ERR_FAIL_COND_MSG(!values[p_section].has(p_key), vformat("Cannot erase nonexistent key \"%s\" from section \"%s\".", p_key, p_section));
-
-	values[p_section].erase(p_key);
-	if (values[p_section].is_empty()) {
+	HashMap<String, Variant> *section = values.getptr(p_section);
+	ERR_FAIL_COND_MSG(!section, vformat("Cannot erase key \"%s\" from nonexistent section \"%s\".", p_key, p_section));
+	if (!section->erase(p_key)) {
+		ERR_FAIL_MSG(vformat("Cannot erase nonexistent key \"%s\" from section \"%s\".", p_key, p_section));
+	}
+	if (section->is_empty()) {
 		values.erase(p_section);
 	}
 }
-
 String ConfigFile::encode_to_text() const {
 	StringBuilder sb;
 	bool first = true;
