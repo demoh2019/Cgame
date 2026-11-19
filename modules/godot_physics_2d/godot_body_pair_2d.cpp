@@ -592,9 +592,12 @@ bool GodotBodyPair2D::setup(real_t p_step) {
 			Vector2 point_A, point_B, normal;
 			const real_t radius_A = real_t(double(static_cast<GodotCircleShape2D *>(shape_A_ptr)->get_radius()) * scale_A);
 			const real_t radius_B = real_t(double(static_cast<GodotCircleShape2D *>(shape_B_ptr)->get_radius()) * scale_B);
+			// Static-body surface velocities affect friction but do not move
+			// collision geometry. Avoid treating them as predictive motion.
+			const Vector2 velocity_A = A->get_mode() == PS2DE::BODY_MODE_STATIC ? Vector2() : A->get_linear_velocity();
 			const Vector2 velocity_B = B->get_mode() == PS2DE::BODY_MODE_STATIC ? Vector2() : B->get_linear_velocity();
 			if (physics_speculative_sphere_contact(xform_A.get_origin(), radius_A, xform_B.get_origin(), radius_B,
-					A->get_linear_velocity(), velocity_B, p_step, space->get_speculative_sphere_distance(), point_A, point_B, normal)) {
+					velocity_A, velocity_B, p_step, space->get_speculative_sphere_distance(), point_A, point_B, normal)) {
 				Contact speculative;
 				speculative.local_A = A->get_inv_transform().basis_xform(point_A);
 				speculative.local_B = B->get_inv_transform().basis_xform(point_B - offset_B);
