@@ -3412,15 +3412,26 @@ void GodotSoftBody3D::solve_constraints(real_t p_delta) {
 			}
 		}
 		if (use_fem_fiber) {
+			// A damaged tetrahedron must also lose reinforcement strength:
+			// leaving its fiber stiffness untouched makes the apparent
+			// fracture yield anisotropically inconsistent. The per-tetra
+			// scalar is already cached for Neo-Hookean softening.
+			const bool fibers_have_damage = xpbd_fem_damage.size() == xpbd_fem_tetrahedra.size() &&
+					!xpbd_fem_damage.is_empty();
 			for (uint32_t tet_index = 0; tet_index < xpbd_fem_tetrahedra.size(); ++tet_index) {
 				const PhysicsFEMConvexTetra &tetra = xpbd_fem_tetrahedra[tet_index];
 				Node &a = nodes[tetra.a];
 				Node &b = nodes[tetra.b];
 				Node &c = nodes[tetra.c];
 				Node &d = nodes[tetra.d];
+				double local_fiber_alpha = fem_fiber_alpha;
+				if (fibers_have_damage) {
+					PhysicsFEMTetraDamage::effective_compliance(
+							fem_fiber_alpha, xpbd_fem_damage[tet_index], local_fiber_alpha);
+				}
 				physics_fem_tetra_solve_fiber(a.x, b.x, c.x, d.x,
 						a.im, b.im, c.im, d.im, tetra.rest,
-						fem_fiber_axis, fem_fiber_alpha, xpbd_fem_fiber_lambdas[tet_index]);
+						fem_fiber_axis, local_fiber_alpha, xpbd_fem_fiber_lambdas[tet_index]);
 			}
 		}
 		if (use_volume_xpbd) {
