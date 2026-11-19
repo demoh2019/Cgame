@@ -120,6 +120,15 @@ void GodotStep2D::_solve_island(uint32_t p_island_index, void *p_userdata) const
 	}
 }
 
+void GodotStep2D::_solve_island_except_large(uint32_t p_island_index, void *p_userdata) const {
+	// Preserve ordinary island-level parallelism while one large island
+	// is deferred to the graph-colored solver on the physics step thread.
+	const uint32_t island_index = solve_island_indices.is_empty() ? p_island_index : solve_island_indices[p_island_index];
+	if (island_index != deferred_large_island_index) {
+		_solve_island(p_island_index, p_userdata);
+	}
+}
+
 void GodotStep2D::_solve_colored_constraint(uint32_t p_constraint_index, void *p_userdata) const {
 	colored_constraints[color_batch_offset + p_constraint_index]->solve(delta);
 }
@@ -446,16 +455,51 @@ void GodotStep2D::step(GodotSpace2D *p_space, real_t p_delta) {
 
 	/* SOLVE CONSTRAINT ISLANDS */
 
-	// WARNING: `_solve_island` modifies the constraint islands for optimization purpose,
-	// their content is not reliable after these calls and shouldn't be used anymore.
-	if (solve_island_count == 1 && p_space->is_parallel_large_islands_enabled()) {
-		const uint32_t island_index = solve_island_indices.is_empty() ? 0 : solve_island_indices[0];
-		_solve_large_island(constraint_islands[island_index]);
-	} else if (solve_island_count < MIN_PARALLEL_SOLVE_ISLANDS) {
+	// Preserve regular scheduling when the experimental option is disabled.
+	// With multiple large *independent* islands, schedule islands in parallel
+	// instead of paying a thread-pool barrier for every color/iteration in
+	// each island. This follows Jolt's island-first scheduling strategy.
+	// Graph coloring is useful when one large island would monopolize a
+	// worker, even if there are other small islands in the space.
+	uint32_t large_island_count = 0;
+	uint32_t large_island_index = UINT32_MAX;
+	if (p_space->is_parallel_large_islands_enabled()) {
+		for (uint32_t i = 0; i < solve_island_count; ++i) {
+			const uint32_t index = solve_island_indices.is_empty() ? i : solve_island_indices[i];
+			if (constraint_islands[index].size() >= MIN_PARALLEL_LARGE_ISLAND) {
+				large_island_index = index;
+				++large_island_count;
+				if (large_island_count == 2) {
+					break; // Only need to distinguish zero, one or multiple.
+				}
+			}
+		}
+	}
+
+	if (large_island_count == 1) {
+		// Keep small islands on the existing scheduler, then solve the large
+		// island by colors. No worker group overlaps the color solver, so
+		// its shared scratch state is never accessed concurrently.
+		deferred_large_island_index = large_island_index;
+		if (solve_island_count >= MIN_PARALLEL_SOLVE_ISLANDS) {
+			WorkerThreadPool::GroupID group_task = WorkerThreadPool::get_singleton()->add_template_group_task(this, &GodotStep2D::_solve_island_except_large, nullptr, solve_island_count, -1, true, SNAME("Physics2DOtherConstraintIslands"));
+			WorkerThreadPool::get_singleton()->wait_for_group_task_completion(group_task);
+		} else {
+			for (uint32_t island_index = 0; island_index < solve_island_count; ++island_index) {
+				_solve_island_except_large(island_index, nullptr);
+			}
+		}
+		_solve_large_island(constraint_islands[large_island_index]);
+		deferred_large_island_index = UINT32_MAX;
+	} else if (solve_island_count < MIN_PARALLEL_SOLVE_ISLANDS && large_island_count < 2) {
+		// Few ordinary islands: retain the low-overhead sequential path.
 		for (uint32_t island_index = 0; island_index < solve_island_count; ++island_index) {
 			_solve_island(island_index, nullptr);
 		}
 	} else {
+		// With at least two large islands, use one worker group for the full
+		// solve, even if there are fewer than 16 islands. Each worker iterates
+		// its island locally without color barriers or nested worker jobs.
 		WorkerThreadPool::GroupID group_task = WorkerThreadPool::get_singleton()->add_template_group_task(this, &GodotStep2D::_solve_island, nullptr, solve_island_count, -1, true, SNAME("Physics2DConstraintSolveIslands"));
 		WorkerThreadPool::get_singleton()->wait_for_group_task_completion(group_task);
 	}
