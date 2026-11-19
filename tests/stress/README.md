@@ -722,3 +722,24 @@ python3 tests/stress/run.py --godot ./bin/godot.linuxbsd.editor.dev.x86_64 \\
 
 Use `scale=1` first; `scale=1000` creates 64,000 dynamic and 64,000 static
 bodies and should only be attempted on an isolated high-memory machine.
+
+### 2D contact warm-start and friction regression
+
+The standalone `physics_contact_solver_regression.gd` script uses three
+independent dynamic circles sliding against static floors. It checks that
+frictionless contact travels farther than frictional contact, that body
+positions/velocities remain finite for 150 physics frames, and that changing
+contact friction from 1 to 0 to 1 does not cause unstable velocities.
+
+This specifically exercises contact persistence, warm-start impulse reuse
+and the zero-friction tangent-solver shortcut. It does not establish a speedup;
+use matched builds and hardware with the dense `physics_2d` stress scenario
+for performance measurements.
+
+```bash
+# Build an engine before running (arm64 macOS example):
+scons platform=macos target=editor arch=arm64 -j$(sysctl -n hw.ncpu)
+
+./bin/godot.macos.editor.arm64 --headless \
+  --path tests/stress --script res://physics_contact_solver_regression.gd
+```
