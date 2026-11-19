@@ -1345,3 +1345,22 @@ game suite via `godot --headless --path game --script res://tests/run_all.gd`.
 
 Existing Cgame networking, UI and gameplay APIs support the feature; no
 native engine changes were necessary.
+
+## Group first aid now stops bleeding
+
+The existing **Party Aid** feature supports injured survivors with bandages,
+field antiseptics and antibiotics at close range, using real carried items
+and a server-owned cooldown. It now also treats the game's persistent
+**bleeding wounds**: bandages and antiseptics can stop active bleeding even
+if the teammate is at full health and has no infection. Antibiotics still
+treat infection only. No-effect, cooldown, distance, unaffiliated-player
+and deceased-patient attempts consume **no items**.
+
+The server's `PartyAid.has_effect` now considers the patient's wound
+severity. `GameServer.cmd_party_aid` calls the same
+`Survival.stop_bleeding` action used for self-treatment and returns the
+actual stopped severity to the medic and patient. The network HUD includes
+bleeding treatment in feedback, while existing privacy protections remain.
+`test_party_aid.gd` checks bleeding-only treatment at full health,
+repeated no-effect calls, correct payment and antiseptic treating bleeding
+and infection together. This uses existing Cgame medical/survival APIs.

@@ -526,14 +526,17 @@ func cmd_party_aid(peer_id: int, target_id: int, item_id: String) -> Dictionary:
 		return {"ok": false, "reason": "not_medical"}
 	if source.inventory.count(item_id) < 1:
 		return {"ok": false, "reason": "not_carried"}
-	if not PartyAid.has_effect(data, recipient.survival.health, recipient.survival.infection):
+	if not PartyAid.has_effect(data, recipient.survival.health, recipient.survival.infection, recipient.survival.bleeding):
 		return {"ok": false, "reason": "no_effect"}
 	var hp_before: float = recipient.survival.health
 	var infection_before: float = recipient.survival.infection
+	var bleeding_before: float = recipient.survival.bleeding
 	if not source.inventory.remove(item_id, 1):
 		return {"ok": false, "reason": "not_carried"}
 	recipient.survival.heal(float(data.get("heal", 0.0)))
 	recipient.survival.treat_infection(float(data.get("cure", 0.0)))
+	if bool(data.get("stop_bleeding", false)):
+		recipient.survival.stop_bleeding()
 	source.party_aid_timer = PartyAid.COOLDOWN
 	source.action = {}
 	source.dirty_inventory = true
@@ -541,10 +544,12 @@ func cmd_party_aid(peer_id: int, target_id: int, item_id: String) -> Dictionary:
 	recipient.dirty_character = true
 	var healed: float = recipient.survival.health - hp_before
 	var cured: float = infection_before - recipient.survival.infection
+	var staunched: float = bleeding_before - recipient.survival.bleeding
 	events.append({"type": "party_aid", "peer": target_id, "by": peer_id,
-		"item": item_id, "heal": healed, "cure": cured})
+		"item": item_id, "heal": healed, "cure": cured,
+		"bleeding_stopped": staunched})
 	return {"ok": true, "peer": target_id, "item": item_id,
-		"heal": healed, "cure": cured}
+		"heal": healed, "cure": cured, "bleeding_stopped": staunched}
 
 
 func cmd_party_rally(peer_id: int) -> Dictionary:

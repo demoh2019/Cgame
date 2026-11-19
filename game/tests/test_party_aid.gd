@@ -20,6 +20,12 @@ func run(t) -> void:
 	t.check(not PartyAid.has_effect(Defs.item("canned_food"), 50.0, 20.0), "only medicine qualifies")
 	t.check(not PartyAid.has_effect(Defs.item("bandage"), 100.0, 0.0), "no-effect heal rejected")
 	t.check(PartyAid.has_effect(Defs.item("antibiotics"), 100.0, 20.0), "curing infection has value")
+	t.check(PartyAid.has_effect(Defs.item("bandage"), 100.0, 0.0, 25.0),
+			"bandaging a wound has value even at full health")
+	t.check(not PartyAid.has_effect(Defs.item("antibiotics"), 100.0, 0.0, 25.0),
+			"antibiotics do not pretend to stop bleeding")
+	t.check(not PartyAid.has_effect(Defs.item("bandage"), 100.0, 0.0, NAN),
+			"invalid wound severity is refused")
 
 	var world := WorldGen.new(733)
 	var server := GameServer.new(world, 733)
@@ -58,12 +64,30 @@ func run(t) -> void:
 	t.eq(server.cmd_party_aid(11, 12, "bandage").get("reason", ""), "no_effect", "cannot waste medicine on healthy ally")
 	t.eq(medic.inventory.count("bandage"), before_count - 1, "no-effect rejection leaves inventory unchanged")
 
+	t.current = "full-health allied wounds are safely staunched"
+	t.check(target.survival.add_bleeding(37.0), "wounded teammate has active bleeding")
+	var bandage_result: Dictionary = server.cmd_party_aid(11, 12, "bandage")
+	t.check(bool(bandage_result.get("ok", false)), "bandage treats bleeding without missing HP")
+	t.near(target.survival.bleeding, 0.0, 0.001, "party first aid stops the bleeding")
+	t.near(target.survival.health, Defs.MAX_HEALTH, 0.001, "treatment does not over-heal")
+	t.near(float(bandage_result.get("bleeding_stopped", 0.0)), 37.0, 0.001,
+			"medic is told how much bleeding was stopped")
+	t.eq(medic.inventory.count("bandage"), before_count - 2,
+			"healing another player with a wound spends exactly one bandage")
+	medic.party_aid_timer = 0.0
+	t.eq(server.cmd_party_aid(11, 12, "bandage").get("reason"), "no_effect",
+			"already staunched wound does not waste another bandage")
+	t.eq(medic.inventory.count("bandage"), before_count - 2,
+			"refused repeat treatment does not duplicate supply consumption")
+
 	t.current = "server permits field antiseptic and antibiotics for another player"
 	target.survival.add_infection(60.0)
+	t.check(target.survival.add_bleeding(16.0), "antiseptic target has infected bleeding wound")
 	medic.inventory.add("field_antiseptic", 1)
 	t.check(server.cmd_party_aid(11, 12, "field_antiseptic").get("ok", false),
 		"field antiseptic treats an infected teammate")
 	t.near(target.survival.infection, 20.0, 0.001, "field antiseptic removes 40 infection")
+	t.near(target.survival.bleeding, 0.0, 0.001, "antiseptic also stops active bleeding")
 	t.eq(medic.inventory.count("field_antiseptic"), 0, "one field antiseptic used")
 	medic.party_aid_timer = 0.0
 	medic.inventory.add("antibiotics", 1)

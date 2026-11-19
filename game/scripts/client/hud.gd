@@ -504,9 +504,10 @@ func _on_event(event: Dictionary) -> void:
 	match event["type"]:
 		"party_aid":
 			if int(event.get("peer", -1)) == client.peer_id:
-				say("Teammate treated you: +%d HP, -%d infection." % [
+				say("Teammate treated you: +%d HP, -%d infection, -%d bleeding." % [
 					roundi(float(event.get("heal", 0.0))),
-					roundi(float(event.get("cure", 0.0)))])
+					roundi(float(event.get("cure", 0.0))),
+					roundi(float(event.get("bleeding_stopped", 0.0)))])
 		"gathered":
 			say("+%d %s" % [event["amount"], Defs.item(event["item"]).get("name", event["item"])])
 		"campfire_refueled":
@@ -581,9 +582,10 @@ func _sell_one_material() -> void:
 func _on_result(kind: String, data: Dictionary) -> void:
 	if kind == "party_aid":
 		if bool(data.get("ok", false)):
-			say("Field aid: +%d HP, -%d infection." % [
+			say("Field aid: +%d HP, -%d infection, -%d bleeding." % [
 				roundi(float(data.get("heal", 0.0))),
-				roundi(float(data.get("cure", 0.0)))])
+				roundi(float(data.get("cure", 0.0))),
+				roundi(float(data.get("bleeding_stopped", 0.0)))])
 		else:
 			say("Field aid denied: " + str(data.get("reason", "rejected")))
 		return
