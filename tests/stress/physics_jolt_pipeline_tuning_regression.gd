@@ -74,5 +74,11 @@ func _run() -> void:
 				"physics/jolt_physics_3d/simulation/use_large_island_splitter"),
 		"manifold_reduction": ProjectSettings.get_setting(
 				"physics/jolt_physics_3d/simulation/use_manifold_reduction"),
+		"max_penetration_correction_distance": ProjectSettings.get_setting(
+				"physics/jolt_physics_3d/simulation/max_penetration_correction_distance"),
+		"contact_manifold_merge_angle": ProjectSettings.get_setting(
+				"physics/jolt_physics_3d/simulation/contact_manifold_merge_angle"),
+		"contact_warm_start_distance": ProjectSettings.get_setting(
+				"physics/jolt_physics_3d/simulation/contact_warm_start_distance"),
 	}))
 	quit(0 if passed else 1)
