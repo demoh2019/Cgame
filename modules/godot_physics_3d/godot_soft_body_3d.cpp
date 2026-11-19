@@ -43,6 +43,7 @@
 #include "servers/physics_softbody_shape_clusters.h"
 #include "servers/physics_softbody_aerodynamic_drag.h"
 #include "servers/physics_softbody_plasticity.h"
+#include "servers/physics_softbody_volume_plasticity.h"
 #include "servers/physics_softbody_volume_safe.h"
 #include "servers/physics_xpbd_distance.h"
 #include "servers/physics_xpbd_tension_hardening.h"
@@ -549,6 +550,7 @@ static _FORCE_INLINE_ double _soft_body_signed_face_volume(const Vector3 &p_a, c
 void GodotSoftBody3D::initialize_volume_constraint() {
 	xpbd_volume_closed = false;
 	xpbd_volume_rest = 0.0;
+	xpbd_volume_original_rest = 0.0;
 	if (!get_space() ||
 			(get_space()->get_soft_body_xpbd_volume_compliance() <= 0.0 &&
 					get_space()->get_soft_body_gas_pressure_gamma() <= 0.0) ||
@@ -615,6 +617,9 @@ void GodotSoftBody3D::initialize_volume_constraint() {
 		return;
 	}
 	xpbd_volume_rest = volume;
+	// Gas reference volume must NEVER plastically creep: the gas mass remains
+	// fixed even after permanent crushing of its enclosing soft-body shell.
+	xpbd_volume_original_rest = volume;
 	xpbd_volume_closed = true;
 }
 
@@ -2052,7 +2057,7 @@ void GodotSoftBody3D::apply_forces(const LocalVector<GodotArea3D *> &p_wind_area
 		for (const Face &face : faces) {
 			signed_volume += _soft_body_signed_face_volume(face.n[0]->x, face.n[1]->x, face.n[2]->x, origin);
 		}
-		physics_softbody_adiabatic_pressure(xpbd_volume_rest, signed_volume,
+		physics_softbody_adiabatic_pressure(xpbd_volume_original_rest, signed_volume,
 				double(pressure_coefficient), double(gas_gamma), gas_pressure);
 	}
 	const bool apply_wind = !p_wind_areas.is_empty();
@@ -2084,7 +2089,7 @@ void GodotSoftBody3D::apply_forces(const LocalVector<GodotArea3D *> &p_wind_area
 
 			if (gas_pressure > 0.0) {
 				Vector3 gas_face_force;
-				const int orientation = xpbd_volume_rest >= 0.0 ? 1 : -1;
+				const int orientation = xpbd_volume_original_rest >= 0.0 ? 1 : -1;
 				if (physics_softbody_adiabatic_face_force(face.n[0]->x, face.n[1]->x, face.n[2]->x,
 						gas_pressure, orientation, gas_face_force)) {
 					// Only movable nodes receive gas forces; pinned vertices remain fixed.
@@ -2403,6 +2408,28 @@ void GodotSoftBody3D::solve_constraints(real_t p_delta) {
 					xpbd_tethers_dirty = true;
 				}
 			}
+		}
+	}
+
+	// Optional volumetric viscoplasticity, evaluated ONCE on predicted
+	// positions before XPBD projects volume. This is separate from elastic
+	// link creep and requires a validated closed shell and volume compliance.
+	// No additional mesh storage or per-step face scan at the default rate=0.
+	const real_t volume_creep_rate = get_space()->get_soft_body_volume_plastic_creep_rate();
+	if (xpbd_volume_closed && get_space()->get_soft_body_xpbd_volume_compliance() > 0.0 &&
+			volume_creep_rate > 0.0 && p_delta > 0.0) {
+		const double creep_fraction = 1.0 - Math::exp(-double(volume_creep_rate) * double(p_delta));
+		if (creep_fraction > 0.0 && Math::is_finite(creep_fraction)) {
+			const Vector3 &origin = nodes[0].x;
+			double current_volume = 0.0;
+			for (const Face &face : faces) {
+				current_volume += _soft_body_signed_face_volume(face.n[0]->x,
+						face.n[1]->x, face.n[2]->x, origin);
+			}
+			physics_softbody_creep_rest_volume(current_volume,
+					xpbd_volume_original_rest,
+					get_space()->get_soft_body_volume_plastic_yield_strain(),
+					creep_fraction, xpbd_volume_rest);
 		}
 	}
 
@@ -2867,6 +2894,7 @@ void GodotSoftBody3D::destroy() {
 	xpbd_volume_gradients.reset();
 	xpbd_volume_closed = false;
 	xpbd_volume_rest = 0.0;
+	xpbd_volume_original_rest = 0.0;
 	nodes.clear();
 	links.clear();
 	faces.clear();
