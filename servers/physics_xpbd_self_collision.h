@@ -125,6 +125,9 @@ _FORCE_INLINE_ bool physics_xpbd_solve_self_collision(
 		return false;
 	}
 	const double delta_lambda = (-double(c) - double(p_alpha) * double(r_lambda)) / denominator;
+	if (!Math::is_finite(delta_lambda)) {
+		return false;
+	}
 	const double next_lambda_double = MAX(0.0, double(r_lambda) + delta_lambda);
 	if (!Math::is_finite(next_lambda_double)) {
 		return false;
