@@ -36,6 +36,7 @@
 #include "core/templates/sort_array.h"
 #include "core/templates/vector.h"
 
+#include <cstring>
 #include <initializer_list>
 #include <type_traits>
 
@@ -126,8 +127,15 @@ public:
 	void remove_at(U p_index) {
 		ERR_FAIL_UNSIGNED_INDEX(p_index, count);
 		count--;
-		for (U i = p_index; i < count; i++) {
-			data[i] = std::move(data[i + 1]);
+		if constexpr (std::is_trivially_copyable_v<T>) {
+			if (p_index < count) {
+				// Shift the surviving POD values in one optimized bulk move.
+				std::memmove(data + p_index, data + p_index + 1, size_t(count - p_index) * sizeof(T));
+			}
+		} else {
+			for (U i = p_index; i < count; i++) {
+				data[i] = std::move(data[i + 1]);
+			}
 		}
 		data[count].~T();
 	}
@@ -313,8 +321,13 @@ public:
 			push_back(std::move(p_val));
 		} else {
 			resize(count + 1);
-			for (U i = count - 1; i > p_pos; i--) {
-				data[i] = std::move(data[i - 1]);
+			if constexpr (std::is_trivially_copyable_v<T>) {
+				// The last slot already exists; shift in place without per-element assignments.
+				std::memmove(data + p_pos + 1, data + p_pos, size_t(count - p_pos - 1) * sizeof(T));
+			} else {
+				for (U i = count - 1; i > p_pos; i--) {
+					data[i] = std::move(data[i - 1]);
+				}
 			}
 			data[p_pos] = std::move(p_val);
 		}
@@ -327,7 +340,12 @@ public:
 		if (p_from < 0 || p_from >= size()) {
 			return -1;
 		}
-		return span().find(p_val, p_from);
+		if constexpr (std::is_integral_v<T> && sizeof(T) == 1 && !std::is_same_v<T, bool>) {
+			const T *const found = static_cast<const T *>(std::memchr(data + p_from, static_cast<unsigned char>(p_val), size_t(size() - p_from)));
+			return found ? int64_t(found - data) : -1;
+		} else {
+			return span().find(p_val, p_from);
+		}
 	}
 
 	bool has(const T &p_val) const {
