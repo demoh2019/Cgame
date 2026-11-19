@@ -264,6 +264,7 @@
 #include "scene/3d/path_3d.h"
 #include "scene/3d/reflection_probe.h"
 #include "scene/3d/remote_transform_3d.h"
+#include "scene/3d/world_partition_3d.h"
 #include "scene/3d/retarget_modifier_3d.h"
 #include "scene/3d/skeleton_3d.h"
 #include "scene/3d/skeleton_modifier_3d.h"
@@ -774,6 +775,7 @@ void register_scene_types() {
 	GDREGISTER_CLASS(FogVolume);
 	GDREGISTER_CLASS(FogMaterial);
 	GDREGISTER_CLASS(RemoteTransform3D);
+	GDREGISTER_CLASS(WorldPartition3D);
 
 #ifndef PHYSICS_3D_DISABLED
 	GDREGISTER_ABSTRACT_CLASS(Joint3D);

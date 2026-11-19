@@ -1,0 +1,113 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<class name="WorldPartition3D" inherits="Node3D" api_type="core" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="../class.xsd">
+	<brief_description>
+		Streams 3D scene instances in a grid around a viewer.
+	</brief_description>
+	<description>
+		[WorldPartition3D] divides its local X/Z plane into square cells and instantiates nearby [PackedScene]s at runtime. Each cell is identified by a [Vector2i] coordinate and can reference either a [PackedScene] resource or a [String] scene path (such as [code]res://world/0_0.tscn[/code]). Scene roots must inherit [Node3D], and their authored local position is preserved relative to the cell origin.
+		Assign [member cells], [member cell_size], [member load_radius], and [member viewer_path]. The viewer position is evaluated every frame, but scene instances change only on crossing cell boundaries. Alternatively, call [method update_streaming] manually. Negative world coordinates and transformed partition nodes are supported. Only children instantiated by this node are unloaded; children manually added in the editor remain untouched.
+		This is an initial synchronous instance-streaming implementation. Loading scene paths may block the main thread. It does not yet include an editor cell painter, asynchronous resource streaming, HLOD generation, or world-origin rebasing. If using scene paths rather than explicit [PackedScene] references, ensure that those scene files are included in exports.
+	</description>
+	<tutorials>
+	</tutorials>
+	<methods>
+		<method name="get_cell_source" qualifiers="const">
+			<return type="Variant" />
+			<param index="0" name="coords" type="Vector2i" />
+			<description>
+				Returns the scene path or [PackedScene] assigned to [param coords], or [code]null[/code] if none exists.
+			</description>
+		</method>
+		<method name="get_loaded_cell" qualifiers="const">
+			<return type="Node3D" />
+			<param index="0" name="coords" type="Vector2i" />
+			<description>
+				Returns the live instance root for [param coords], or [code]null[/code] if this cell is not loaded.
+			</description>
+		</method>
+		<method name="get_loaded_cell_count" qualifiers="const">
+			<return type="int" />
+			<description>
+				Returns the number of instantiated cells.
+			</description>
+		</method>
+		<method name="remove_cell">
+			<return type="void" />
+			<param index="0" name="coords" type="Vector2i" />
+			<description>
+				Removes the cell entry and invalidates the current streaming state.
+			</description>
+		</method>
+		<method name="set_cell_path">
+			<return type="void" />
+			<param index="0" name="coords" type="Vector2i" />
+			<param index="1" name="path" type="String" />
+			<description>
+				Registers a scene path for a cell. The resource is loaded when that cell is needed. This is suitable for very large registries.
+			</description>
+		</method>
+		<method name="set_cell_scene">
+			<return type="void" />
+			<param index="0" name="coords" type="Vector2i" />
+			<param index="1" name="scene" type="PackedScene" />
+			<description>
+				Registers a [PackedScene] resource for a cell. The resource is retained, while its node hierarchy is only instantiated when needed.
+			</description>
+		</method>
+		<method name="unload_all_cells">
+			<return type="void" />
+			<description>
+				Removes all streamed cell instances without clearing their registrations. The next update can reload them.
+			</description>
+		</method>
+		<method name="update_streaming">
+			<return type="void" />
+			<param index="0" name="world_position" type="Vector3" />
+			<description>
+				Updates loaded cells around [param world_position], using global coordinates. The node must be in the active [SceneTree].
+			</description>
+		</method>
+		<method name="world_to_cell" qualifiers="const">
+			<return type="Vector2i" />
+			<param index="0" name="world_position" type="Vector3" />
+			<description>
+				Returns the cell containing [param world_position]. Calculations use the partition node's local coordinates.
+			</description>
+		</method>
+	</methods>
+	<members>
+		<member name="cell_size" type="float" setter="set_cell_size" getter="get_cell_size" default="64.0">
+			Horizontal dimensions of one cell, in the local space of the partition. Must be positive and finite.
+		</member>
+		<member name="cells" type="Dictionary" setter="set_cells" getter="get_cells" default="{}">
+			Maps [Vector2i] coordinates to scene paths ([String]) or [PackedScene] resources. This dictionary is copied on assignment and retrieval.
+		</member>
+		<member name="load_radius" type="int" setter="set_load_radius" getter="get_load_radius" default="1">
+			Chebyshev radius in cells around the viewer, from 0 to 16. For example, 1 loads up to 3 by 3 cells.
+		</member>
+		<member name="viewer_path" type="NodePath" setter="set_viewer_path" getter="get_viewer_path" default="NodePath(&quot;&quot;)">
+			Path to a [Node3D] used for automatic streaming. If empty, use [method update_streaming] manually.
+		</member>
+	</members>
+	<signals>
+		<signal name="cell_load_failed">
+			<param index="0" name="coords" type="Vector2i" />
+			<description>
+				Emitted when a registered cell scene could not be loaded or instantiated.
+			</description>
+		</signal>
+		<signal name="cell_loaded">
+			<param index="0" name="coords" type="Vector2i" />
+			<param index="1" name="instance" type="Node3D" />
+			<description>
+				Emitted after a new cell is instantiated.
+			</description>
+		</signal>
+		<signal name="cell_unloaded">
+			<param index="0" name="coords" type="Vector2i" />
+			<description>
+				Emitted before a cell instance is destroyed.
+			</description>
+		</signal>
+	</signals>
+</class>
