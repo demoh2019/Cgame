@@ -9,7 +9,8 @@ const CASES := [
 	"containers", "strings", "script_vm", "math", "signals",
 	"scene_tree", "packed_scene", "images", "json", "stream",
 	"file_io", "threads", "physics_2d", "physics_3d",
-	"memory_churn", "render_2d", "render_3d",
+	"memory_churn", "astar_grid", "tweens", "audio_buffers",
+	"variant_codec", "render_2d", "render_3d",
 ]
 
 var signal_total: int = 0
@@ -176,6 +177,14 @@ func _run_case(test_case: String, scale: int, frames: int, seed: int) -> Diction
 			return _file_io(scale)
 		"threads":
 			return _threads(scale, seed)
+		"astar_grid":
+			return _astar_grid(scale)
+		"audio_buffers":
+			return _audio_buffers(scale)
+		"variant_codec":
+			return _variant_codec(scale)
+		"tweens":
+			return await _tweens(scale, frames)
 		"physics_2d":
 			return await _physics_2d(scale, frames)
 		"physics_3d":
@@ -239,6 +248,81 @@ func _threads(scale: int, seed: int) -> Dictionary:
 	for worker in workers:
 		checksum = (checksum + int(worker.wait_to_finish())) & 0x7fffffff
 	return {"workers": count, "operations": count * 100000 * scale, "checksum": checksum}
+
+
+func _astar_grid(scale: int) -> Dictionary:
+	var astar := AStarGrid2D.new()
+	astar.region = Rect2i(0, 0, 64, 64)
+	astar.cell_size = Vector2.ONE
+	astar.update()
+	for y in range(64):
+		if y != 32:
+			astar.set_point_solid(Vector2i(32, y))
+	var checksum := 0
+	for i in range(100 * scale):
+		var origin := Vector2i(i % 20, (i * 7) % 64)
+		var destination := Vector2i(63 - (i % 20), 63 - ((i * 11) % 64))
+		var path := astar.get_id_path(origin, destination)
+		if path.is_empty() or path[0] != origin or path.back() != destination:
+			return {"error": "AStar path missing or incorrect"}
+		checksum += path.size()
+	return {"searches": 100 * scale, "checksum": checksum}
+
+
+func _audio_buffers(scale: int) -> Dictionary:
+	var checksum := 0
+	for k in range(50 * scale):
+		var wave := PackedByteArray()
+		wave.resize(16384)
+		for i in range(8192):
+			wave[i * 2] = (i + k) & 255
+			wave[i * 2 + 1] = (i >> 8) & 255
+		var audio := AudioStreamWAV.new()
+		audio.format = AudioStreamWAV.FORMAT_16_BITS
+		audio.mix_rate = 44100
+		audio.stereo = false
+		audio.data = wave
+		if audio.get_length() <= 0.0:
+			return {"error": "Invalid audio buffer length"}
+		checksum += audio.data.size()
+	return {"buffers": 50 * scale, "checksum": checksum}
+
+
+func _variant_codec(scale: int) -> Dictionary:
+	var value := {
+		"names": PackedStringArray(["scene", "physics", "render"]),
+		"positions": PackedVector3Array([Vector3(1, 2, 3), Vector3(4, 5, 6)]),
+		"payload": PackedByteArray([1, 2, 3, 4, 5]),
+		"nested": {"flag": true, "count": 42},
+	}
+	var checksum := 0
+	for i in range(2000 * scale):
+		var encoded := var_to_bytes(value)
+		var decoded = bytes_to_var(encoded)
+		if not (decoded is Dictionary) or decoded["nested"]["count"] != 42:
+			return {"error": "Variant roundtrip mismatch"}
+		checksum += encoded.size()
+	return {"roundtrips": 2000 * scale, "checksum": checksum}
+
+
+func _tweens(scale: int, frames: int) -> Dictionary:
+	var world := Node2D.new()
+	root.add_child(world)
+	var count := 300 * scale
+	for i in range(count):
+		var node := Node2D.new()
+		world.add_child(node)
+		var tween := node.create_tween()
+		tween.set_loops()
+		tween.tween_property(node, "position", Vector2(float(i & 31), 20.0), 0.1)
+		tween.tween_property(node, "position", Vector2.ZERO, 0.1)
+	var peak_frame_ms := 0.0
+	for i in range(frames):
+		await process_frame
+		peak_frame_ms = maxf(peak_frame_ms, Performance.get_monitor(Performance.TIME_PROCESS) * 1000.0)
+	world.queue_free()
+	await process_frame
+	return {"active_tweens": count, "frames": frames, "peak_frame_ms": peak_frame_ms}
 
 
 func _physics_2d(scale: int, frames: int) -> Dictionary:
