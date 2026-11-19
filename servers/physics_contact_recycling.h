@@ -47,8 +47,13 @@ struct GodotPhysicsContactRecycling {
 				geometry_version_a == p_current_a && geometry_version_b == p_current_b;
 	}
 
-	inline bool can_reuse(uint64_t p_current_a, uint64_t p_current_b, bool p_collided, int p_contact_count, bool p_ccd) const {
-		return p_collided && p_contact_count > 0 && !p_ccd && !narrowphase_separated &&
+	// Speculative contacts depend on relative velocity, not just geometry.
+	// A positive or negative manifold may become invalid when velocity changes
+	// without a transform change (e.g. an impulse immediately before stepping).
+	// Keep all existing callers source-compatible; only eligible predictive
+	// pairs request the velocity-sensitive bypass.
+	inline bool can_reuse(uint64_t p_current_a, uint64_t p_current_b, bool p_collided, int p_contact_count, bool p_ccd, bool p_velocity_sensitive = false) const {
+		return p_collided && p_contact_count > 0 && !p_ccd && !p_velocity_sensitive && !narrowphase_separated &&
 				matches_geometry(p_current_a, p_current_b);
 	}
 
@@ -56,8 +61,8 @@ struct GodotPhysicsContactRecycling {
 	// body orientation/shape revisions, verified by the calling body pair.
 	// A coarse-phase overlap is not evidence of an actual shape collision:
 	// such persistent near-miss pairs would otherwise rerun SAT/GJK every step.
-	inline bool can_reuse_separation(uint64_t p_current_a, uint64_t p_current_b, bool p_ccd) const {
-		return narrowphase_separated && !p_ccd && matches_geometry(p_current_a, p_current_b);
+	inline bool can_reuse_separation(uint64_t p_current_a, uint64_t p_current_b, bool p_ccd, bool p_velocity_sensitive = false) const {
+		return narrowphase_separated && !p_ccd && !p_velocity_sensitive && matches_geometry(p_current_a, p_current_b);
 	}
 
 	inline void remember(uint64_t p_current_a, uint64_t p_current_b, bool p_narrowphase_collided = true) {
