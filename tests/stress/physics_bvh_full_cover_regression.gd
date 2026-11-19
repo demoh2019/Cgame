@@ -38,7 +38,7 @@ func _test_2d() -> Dictionary:
 		PhysicsServer2D.body_set_mode(body, PhysicsServer2D.BODY_MODE_STATIC)
 		PhysicsServer2D.body_add_shape(body, sphere)
 		PhysicsServer2D.body_set_state(body, PhysicsServer2D.BODY_STATE_TRANSFORM,
-				Transform2D(0.0, Vector2((i % SIDE) * 2 - 63, (i / SIDE) * 2 - 63)))
+				Transform2D(0.0, Vector2((i % SIDE) * 2 - 63, floori(float(i) / float(SIDE)) * 2 - 63)))
 		PhysicsServer2D.body_set_space(body, space)
 		bodies.append(body)
 	PhysicsServer2D.space_set_active(space, true)
@@ -91,7 +91,7 @@ func _test_3d() -> Dictionary:
 		PhysicsServer3D.body_set_mode(body, PhysicsServer3D.BODY_MODE_STATIC)
 		PhysicsServer3D.body_add_shape(body, sphere)
 		PhysicsServer3D.body_set_state(body, PhysicsServer3D.BODY_STATE_TRANSFORM,
-				Transform3D(Basis(), Vector3((i % SIDE) * 2 - 63, (i / SIDE) * 2 - 63, 0)))
+				Transform3D(Basis(), Vector3((i % SIDE) * 2 - 63, floori(float(i) / float(SIDE)) * 2 - 63, 0)))
 		PhysicsServer3D.body_set_space(body, space)
 		bodies.append(body)
 	PhysicsServer3D.space_set_active(space, true)
