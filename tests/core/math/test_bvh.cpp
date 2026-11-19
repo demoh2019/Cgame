@@ -737,4 +737,82 @@ TEST_CASE("[BVH] Empty tree masks and zero-capacity queries skip all candidates"
 	CHECK(hits[0] == &item);
 }
 
+
+TEST_CASE("[BVH] Dense 2D contact churn removes known adjacency links without double callbacks") {
+	using Tree = BVH_Manager<Item, 2, true, 16, PairTest, CullTest, Rect2, Vector2, false>;
+	constexpr int COUNT = 24;
+	Item items[COUNT];
+	BVHHandle handles[COUNT];
+	DensePairCounts counts;
+	Tree tree;
+	tree.set_pair_callback(dense_pair_created, &counts);
+	tree.set_unpair_callback(dense_pair_removed, &counts);
+
+	for (int i = 0; i < COUNT; ++i) {
+		items[i].value = i;
+		handles[i] = tree.create(&items[i], true, uint32_t(i & 1), 3, Rect2(0, 0, 4, 4), 0, true);
+	}
+	tree.flush_pending_pairs();
+	constexpr int TOTAL_PAIRS = COUNT * (COUNT - 1) / 2;
+	CHECK(counts.created == TOTAL_PAIRS);
+
+	// A low, high and middle handle exercise both branches of _unpair
+	// after its handles have been sorted.
+	const int moved_ids[] = { 0, COUNT - 1, COUNT / 2 };
+	for (int iteration = 0; iteration < 3; ++iteration) {
+		const int index = moved_ids[iteration];
+		tree.move(handles[index], Rect2(100 + iteration * 10, 0, 4, 4));
+		tree.update();
+		CHECK(counts.removed == (iteration + 1) * (COUNT - 1));
+		CHECK(counts.created == TOTAL_PAIRS + iteration * (COUNT - 1));
+
+		tree.move(handles[index], Rect2(0, 0, 4, 4));
+		tree.update();
+		CHECK(counts.created == TOTAL_PAIRS + (iteration + 1) * (COUNT - 1));
+		CHECK(counts.removed == (iteration + 1) * (COUNT - 1));
+		tree.update();
+		CHECK(counts.created == TOTAL_PAIRS + (iteration + 1) * (COUNT - 1));
+	}
+
+	for (const BVHHandle &handle : handles) {
+		tree.erase(handle);
+	}
+	CHECK(counts.removed == counts.created);
+	CHECK(counts.invalid_userdata == 0);
+}
+
+TEST_CASE("[BVH] Dense 3D contact churn preserves pair userdata") {
+	using Tree = BVH_Manager<Item, 2, true, 16, PairTest, CullTest, AABB, Vector3, false>;
+	constexpr int COUNT = 12;
+	Item items[COUNT];
+	BVHHandle handles[COUNT];
+	DensePairCounts counts;
+	Tree tree;
+	tree.set_pair_callback(dense_pair_created, &counts);
+	tree.set_unpair_callback(dense_pair_removed, &counts);
+
+	for (int i = 0; i < COUNT; ++i) {
+		items[i].value = i;
+		handles[i] = tree.create(&items[i], true, uint32_t(i & 1), 3,
+				AABB(Vector3(0, 0, 0), Vector3(4, 4, 4)), 0, true);
+	}
+	tree.flush_pending_pairs();
+	constexpr int TOTAL_PAIRS = COUNT * (COUNT - 1) / 2;
+	CHECK(counts.created == TOTAL_PAIRS);
+	for (int iteration = 0; iteration < 2; ++iteration) {
+		const int index = iteration == 0 ? 0 : COUNT - 1;
+		tree.move(handles[index], AABB(Vector3(100, 0, 0), Vector3(4, 4, 4)));
+		tree.update();
+		CHECK(counts.removed == (iteration + 1) * (COUNT - 1));
+		tree.move(handles[index], AABB(Vector3(0, 0, 0), Vector3(4, 4, 4)));
+		tree.update();
+		CHECK(counts.created == TOTAL_PAIRS + (iteration + 1) * (COUNT - 1));
+	}
+	for (const BVHHandle &handle : handles) {
+		tree.erase(handle);
+	}
+	CHECK(counts.removed == counts.created);
+	CHECK(counts.invalid_userdata == 0);
+}
+
 } // namespace TestBVH
