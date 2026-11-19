@@ -1298,6 +1298,12 @@ GodotSpace3D::GodotSpace3D() {
 	soft_body_xpbd_tension_hardening = Math::is_finite(configured_tension_hardening) ? MAX(real_t(0.0), configured_tension_hardening) : real_t(0.0);
 	const real_t configured_tension_yield = GLOBAL_GET("physics/3d/solver/soft_body_xpbd_tension_yield_strain");
 	soft_body_xpbd_tension_yield_strain = Math::is_finite(configured_tension_yield) ? MAX(real_t(0.0), configured_tension_yield) : real_t(0.1);
+	const real_t configured_damage_rate = GLOBAL_GET("physics/3d/solver/soft_body_xpbd_damage_rate");
+	soft_body_xpbd_damage_rate = Math::is_finite(configured_damage_rate) ? MAX(real_t(0.0), configured_damage_rate) : real_t(0.0);
+	const real_t configured_damage_yield = GLOBAL_GET("physics/3d/solver/soft_body_xpbd_damage_yield_strain");
+	soft_body_xpbd_damage_yield_strain = Math::is_finite(configured_damage_yield) ? MAX(real_t(0.0), configured_damage_yield) : real_t(0.15);
+	const real_t configured_damage_failure = GLOBAL_GET("physics/3d/solver/soft_body_xpbd_damage_failure_strain");
+	soft_body_xpbd_damage_failure_strain = Math::is_finite(configured_damage_failure) ? MAX(real_t(0.0), configured_damage_failure) : real_t(0.55);
 	const real_t configured_plastic_yield = GLOBAL_GET("physics/3d/solver/soft_body_plastic_yield_strain");
 	soft_body_plastic_yield_strain = Math::is_finite(configured_plastic_yield) ? CLAMP(configured_plastic_yield, real_t(0.0), real_t(1.0)) : real_t(0.1);
 	const real_t configured_plastic_creep_rate = GLOBAL_GET("physics/3d/solver/soft_body_plastic_creep_rate");
