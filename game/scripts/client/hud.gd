@@ -978,6 +978,8 @@ func _process(_delta: float) -> void:
 		match str(active["id"]):
 			"focused_shot":
 				skill_name = "Focused Shot (G)"
+			"power_draw":
+				skill_name = "Power Draw (G)"
 			"piercing_thrust":
 				skill_name = "Piercing Thrust (G)"
 			"purifying_slam":
