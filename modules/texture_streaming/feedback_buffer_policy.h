@@ -32,6 +32,8 @@
 #define TEXTURE_STREAMING_FEEDBACK_BUFFER_POLICY_H
 
 #include <cstdint>
+#include <cstring>
+#include <limits>
 
 // Plain C++ policy: keeping it independent of the renderer lets us run
 // deterministic boundary tests without allocating GPU resources.
@@ -48,6 +50,23 @@ constexpr uint8_t mip_level_count(uint16_t p_width, uint16_t p_height) {
 		++levels;
 	}
 	return levels;
+}
+
+// Convert a positive texel footprint to its required mip without float log2.
+// For IEEE-754 binary32 values >= 1, exponent - 127 is exactly floor(log2).
+// Values below 1 (including zero, negatives and NaNs) request mip 0.
+// Positive infinity saturates at the coarsest allowed mip.
+inline uint8_t mip_from_coverage(float p_coverage, uint8_t p_mip_count) {
+	static_assert(sizeof(float) == sizeof(uint32_t) && std::numeric_limits<float>::is_iec559,
+			"Fast mip selection requires IEEE 754 binary32 floats.");
+	if (p_mip_count == 0 || !(p_coverage >= 1.0f)) {
+		return 0;
+	}
+	uint32_t bits;
+	memcpy(&bits, &p_coverage, sizeof(bits));
+	const uint32_t exponent = ((bits >> 23) & 0xffu) - 127u;
+	const uint32_t max_mip = uint32_t(p_mip_count - 1);
+	return uint8_t(exponent < max_mip ? exponent : max_mip);
 }
 
 // Do not repeatedly recreate a valid 4 KiB buffer when no materials exist.
