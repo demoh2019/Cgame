@@ -32,13 +32,27 @@ class IncrementalProjectScanTests(unittest.TestCase):
         self.assertRegex(BODY, r"for \(const String &path : scan_data->found_projects\)")
 
     def test_deduplicates_against_existing_project_paths(self):
+        self.assertIn("HashSet<String> known_paths;", BODY)
         self.assertIn("for (const Item &project : _projects)", BODY)
-        self.assertIn("project.path == path", BODY)
-        self.assertRegex(BODY, r"if \(already_exists\)\s*\{\s*continue;")
+        self.assertIn("known_paths.insert(project.path);", BODY)
+        self.assertRegex(BODY, r"if \(known_paths.size\(\) == previous_count\)\s*\{\s*continue;")
 
     def test_deduplication_precedes_allocation_and_writes(self):
-        self.assertLess(BODY.index("if (already_exists)"), BODY.index("add_project(path, false)"))
-        self.assertLess(BODY.index("if (already_exists)"), BODY.index("load_project_data(path, false)"))
+        self.assertLess(BODY.index("known_paths.insert(path);"), BODY.index("add_project(path, false)"))
+        self.assertLess(BODY.index("if (known_paths.size() == previous_count)"), BODY.index("load_project_data(path, false)"))
+
+    def test_existing_paths_are_indexed_once_before_scanning_discovered_paths(self):
+        self.assertLess(BODY.index("for (const Item &project : _projects)"), BODY.index("for (const String &path : scan_data->found_projects)"))
+        self.assertNotRegex(BODY, r"for \(const String &path : scan_data->found_projects\)[\s\S]*for \(const Item &project : _projects\)")
+
+    def test_hash_set_is_reserved_at_known_upper_bound(self):
+        self.assertIn("known_paths.reserve(_projects.size() + scan_data->found_projects.size());", BODY)
+        self.assertIn("if (!scan_data->found_projects.is_empty())", BODY)
+
+    def test_duplicates_in_single_scan_do_not_create_two_controls(self):
+        self.assertLess(BODY.index("const uint32_t previous_count = known_paths.size();"), BODY.index("known_paths.insert(path);"))
+        self.assertLess(BODY.index("known_paths.insert(path);"), BODY.index("if (known_paths.size() == previous_count)"))
+        self.assertLess(BODY.index("if (known_paths.size() == previous_count)"), BODY.index("_create_project_item_control(_projects.size() - 1);")))
 
     def test_only_creates_new_controls(self):
         self.assertIn("_projects.push_back(load_project_data(path, false));", BODY)
