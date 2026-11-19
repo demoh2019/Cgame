@@ -606,6 +606,14 @@ PhysicsServer3D::PhysicsServer3D() {
 	GLOBAL_DEF(PropertyInfo(Variant::FLOAT, "physics/3d/solver/fluid_angular_drag", PROPERTY_HINT_RANGE, "0,100,0.01,or_greater"), 0.0);
 	GLOBAL_DEF(PropertyInfo(Variant::FLOAT, "physics/3d/solver/fluid_buoyancy", PROPERTY_HINT_RANGE, "0,2,0.01,or_greater"), 0.0);
 	GLOBAL_DEF(PropertyInfo(Variant::VECTOR3, "physics/3d/solver/fluid_flow_velocity"), Vector3());
+	// Jolt-style per-shape buoyancy: approximate partial immersion below a
+	// horizontal liquid surface; opt-in and independent from legacy damping.
+	GLOBAL_DEF(PropertyInfo(Variant::BOOL, "physics/3d/fluid_plane/enabled"), false);
+	GLOBAL_DEF(PropertyInfo(Variant::FLOAT, "physics/3d/fluid_plane/surface_height", PROPERTY_HINT_RANGE, "-100000,100000,0.01,or_less,or_greater,suffix:m"), 0.0);
+	GLOBAL_DEF(PropertyInfo(Variant::FLOAT, "physics/3d/fluid_plane/density", PROPERTY_HINT_RANGE, "0,2000,1,or_greater,suffix:kg/m³"), 1000.0);
+	GLOBAL_DEF(PropertyInfo(Variant::FLOAT, "physics/3d/fluid_plane/drag_coefficient", PROPERTY_HINT_RANGE, "0,5,0.01,or_greater"), 0.8);
+	GLOBAL_DEF(PropertyInfo(Variant::FLOAT, "physics/3d/fluid_plane/angular_drag", PROPERTY_HINT_RANGE, "0,20,0.01,or_greater"), 0.1);
+	GLOBAL_DEF(PropertyInfo(Variant::VECTOR3, "physics/3d/fluid_plane/flow_velocity"), Vector3());
 	// Reproduce free rotation of asymmetric bodies (Jolt-style gyroscopic term).
 	// Off by default because it changes angular motion and costs extra math.
 	GLOBAL_DEF(PropertyInfo(Variant::BOOL, "physics/3d/solver/gyroscopic_forces"), false);
