@@ -49,6 +49,16 @@ func _check_both_labs() -> void:
         controller.call("_cycle_gravity")
         var advanced_name := "AdvancedPhysics3D" if check["group"] == "demo_dynamic" else "AdvancedPhysics2D"
         var advanced: Node = lab.get_node(advanced_name)
+        var detector_name := "VortexDetector" if advanced_name == "AdvancedPhysics3D" else "VortexDetector2D"
+        var detector := advanced.get_node(detector_name)
+        var overlap_count := 0
+        if detector is Area3D:
+            overlap_count = (detector as Area3D).get_overlapping_bodies().size()
+        elif detector is Area2D:
+            overlap_count = (detector as Area2D).get_overlapping_bodies().size()
+        if overlap_count == 0:
+            push_error("%s vortex has no physical overlap candidates" % check["scene"])
+            successful = false
         advanced.call("_toggle_vortex")
         advanced.call("_toggle_gravity")
         advanced.call("_reverse_belt")
