@@ -3999,6 +3999,10 @@ void DisplayServerX11::_get_key_modifier_state(unsigned int p_x11_state, Ref<Inp
 
 // Match Windows: Ctrl, Alt, and Meta shortcuts do not insert text. AltGr
 // (Ctrl+Alt without Meta on X11) must still produce international characters.
+bool DisplayServerX11::_tracks_double_click(MouseButton p_button) {
+	return p_button < MouseButton::WHEEL_UP || p_button > MouseButton::WHEEL_RIGHT;
+}
+
 bool DisplayServerX11::_is_text_suppressed(unsigned int p_x11_state) {
 	const bool ctrl = p_x11_state & ControlMask;
 	const bool alt = p_x11_state & Mod1Mask;
@@ -5448,7 +5452,7 @@ void DisplayServerX11::process_events() {
 						_set_input_focus(wd.x11_window, RevertToPointerRoot);
 					}
 
-					if (mb->get_button_index() < MouseButton::WHEEL_UP || mb->get_button_index() > MouseButton::WHEEL_RIGHT) {
+					if (_tracks_double_click(mb->get_button_index())) {
 						uint64_t diff = OS::get_singleton()->get_ticks_usec() / 1000 - last_click_ms;
 
 						if (mb->get_button_index() == last_click_button_index) {
