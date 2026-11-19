@@ -33,9 +33,36 @@ godot --headless --path games/days_after --script res://smoke_test.gd
 - Gain crafting and gathering XP and see levels and equipment in the HUD.
 - Crafting first checks all ingredients. Failed crafting does not consume anything.
 
+## The survivor journal: a coherent early-game campaign
+
+Three original missions introduce the combined survival/sandbox mechanics:
+
+1. **First Supplies:** scavenge food and clean water; reward 1 scrap.
+2. **Fieldcraft:** gather 2 wood, 2 fiber and 1 stone; reward 1 food.
+3. **First Defense:** craft and equip a makeshift spear, then defeat an infected; reward 1 water.
+
+The journal appears in the HUD and uses real pickup, gathering, crafting,
+equipping and combat events (not a timer or fake objective progression).
+Activities performed before a later mission unlock still count, so crafting
+a spear early cannot soft-lock the campaign. Each objective is bounded and
+rewards are granted at most once; full inventory defers rewards until room
+exists. This is a single-player introductory quest line, **not** a completed
+MMO campaign or quest editor.
+
+Mission progress is stored in **save schema v2** in the existing checkpoint
+file. Version-1 saves migrate with a fresh quest journal while preserving
+their survivor inventory and world state. Invalid journal progress rejects
+the whole load before any gameplay data is changed.
+
+Run the additional headless mission regression (requires compiled Cgame):
+
+```bash
+godot --headless --path games/days_after --script res://smoke_test_quests.gd
+```
+
 ## Persistent local world checkpoints
 
-**F5** saves and **F9** restores a versioned offline JSON checkpoint in
+**F5** saves and **F9** restores a versioned offline JSON checkpoint (current schema v2) in
 `user://days_after_save_v1.json` (the engine's per-user application data
 directory). The checkpoint includes health, hunger, thirst, stamina, inventory,
 crafted gear, equipped combat style, gathering/crafting experience, player
