@@ -474,6 +474,20 @@
 				Returns a body state.
 			</description>
 		</method>
+		<method name="body_get_wind_area" qualifiers="const">
+			<return type="float" />
+			<param index="0" name="body" type="RID" />
+			<description>
+				Returns the value set by [method body_set_wind_area].
+			</description>
+		</method>
+		<method name="body_get_wind_drag_coefficient" qualifiers="const">
+			<return type="float" />
+			<param index="0" name="body" type="RID" />
+			<description>
+				Returns the value set by [method body_set_wind_drag_coefficient].
+			</description>
+		</method>
 		<method name="body_is_axis_locked" qualifiers="const">
 			<return type="bool" />
 			<param index="0" name="body" type="RID" />
@@ -753,6 +767,24 @@
 				1. [code]state[/code]: a [PhysicsDirectBodyState3D], used to retrieve the body's state.
 			</description>
 		</method>
+		<method name="body_set_wind_area">
+			<return type="void" />
+			<param index="0" name="body" type="RID" />
+			<param index="1" name="value" type="float" />
+			<description>
+				Sets the cross section facing the wind, in square meters; [code]0[/code] estimates it from the shapes. See [member RigidBody3D.wind_reference_area].
+				[b]Note:[/b] Only Godot Physics implements this; other backends ignore it.
+			</description>
+		</method>
+		<method name="body_set_wind_drag_coefficient">
+			<return type="void" />
+			<param index="0" name="body" type="RID" />
+			<param index="1" name="value" type="float" />
+			<description>
+				Sets how strongly the body is moved by wind areas and slowed by air; [code]0[/code] ignores wind. See [member RigidBody3D.wind_drag_coefficient].
+				[b]Note:[/b] Only Godot Physics implements this; other backends ignore it.
+			</description>
+		</method>
 		<method name="body_test_motion">
 			<return type="bool" />
 			<param index="0" name="body" type="RID" />
@@ -958,6 +990,27 @@
 				Returns the torque threshold set by [method joint_set_break_torque].
 			</description>
 		</method>
+		<method name="joint_get_fatigue_damage" qualifiers="const">
+			<return type="float" />
+			<param index="0" name="joint" type="RID" />
+			<description>
+				Returns accumulated progressive damage of a joint in the range [code]0.0[/code] to [code]1.0[/code]. Damage reaches [code]1.0[/code] when the joint fails. Available in Godot Physics only; other backends return [code]0.0[/code]. See [member Joint3D.fatigue_rate].
+			</description>
+		</method>
+		<method name="joint_get_fatigue_rate" qualifiers="const">
+			<return type="float" />
+			<param index="0" name="joint" type="RID" />
+			<description>
+				Returns the joint progressive-fatigue damage coefficient per second. See [method joint_set_fatigue_rate].
+			</description>
+		</method>
+		<method name="joint_get_fatigue_yield_ratio" qualifiers="const">
+			<return type="float" />
+			<param index="0" name="joint" type="RID" />
+			<description>
+				Returns the normalized load threshold below which the joint does not accumulate fatigue damage. See [method joint_set_fatigue_yield_ratio].
+			</description>
+		</method>
 		<method name="joint_get_reaction_force" qualifiers="const">
 			<return type="Vector3" />
 			<param index="0" name="joint" type="RID" />
@@ -1076,6 +1129,22 @@
 			<param index="1" name="torque" type="float" />
 			<description>
 				Sets the torque (in newton-meters) above which the joint breaks. [code]0[/code] disables torque breaking.
+			</description>
+		</method>
+		<method name="joint_set_fatigue_rate">
+			<return type="void" />
+			<param index="0" name="joint" type="RID" />
+			<param index="1" name="rate" type="float" />
+			<description>
+				Enables progressive fatigue failure under sustained reaction loads. A value of [code]0.0[/code] disables fatigue. Requires at least one nonzero break threshold and is supported by Godot Physics only.
+			</description>
+		</method>
+		<method name="joint_set_fatigue_yield_ratio">
+			<return type="void" />
+			<param index="0" name="joint" type="RID" />
+			<param index="1" name="ratio" type="float" />
+			<description>
+				Sets the fatigue accumulation yield as a fraction of the joint reaction break force/torque limits, clamped to [code]0.0[/code]..[code]0.99[/code]. Default [code]0.5[/code].
 			</description>
 		</method>
 		<method name="joint_set_solver_priority">
@@ -1351,6 +1420,20 @@
 				[b]Note:[/b] Godot's default physics implementation does not support [constant BODY_STATE_LINEAR_VELOCITY], [constant BODY_STATE_ANGULAR_VELOCITY], [constant BODY_STATE_SLEEPING], or [constant BODY_STATE_CAN_SLEEP].
 			</description>
 		</method>
+		<method name="soft_body_get_tetrahedral_interior_node_count" qualifiers="const">
+			<return type="int" />
+			<param index="0" name="body" type="RID" />
+			<description>
+				Returns the number of successfully created internal FEM-only simulation particles, excluding the rendered triangle surface. This can be zero even if interior positions were authored, when mesh validation failed.
+			</description>
+		</method>
+		<method name="soft_body_get_tetrahedron_count" qualifiers="const">
+			<return type="int" />
+			<param index="0" name="body" type="RID" />
+			<description>
+				Returns the number of validated FEM tetrahedral constraints in the native Cgame GodotPhysics3D backend. Returns zero when FEM is disabled, the input connectivity is invalid, or the backend has no FEM extension.
+			</description>
+		</method>
 		<method name="soft_body_get_total_mass" qualifiers="const">
 			<return type="float" />
 			<param index="0" name="body" type="RID" />
@@ -1497,6 +1580,22 @@
 			<description>
 				Sets the given body state for the given body.
 				[b]Note:[/b] Godot's default physics implementation does not support [constant BODY_STATE_LINEAR_VELOCITY], [constant BODY_STATE_ANGULAR_VELOCITY], [constant BODY_STATE_SLEEPING], or [constant BODY_STATE_CAN_SLEEP].
+			</description>
+		</method>
+		<method name="soft_body_set_tetrahedral_indices">
+			<return type="void" />
+			<param index="0" name="body" type="RID" />
+			<param index="1" name="tetrahedral_indices" type="PackedInt32Array" />
+			<description>
+				Assigns explicit tetrahedral connectivity for the experimental Cgame GodotPhysics3D volumetric soft-body solver. Every four indices reference visual mesh vertices, followed by any additional FEM interior vertices specified by [method soft_body_set_tetrahedral_interior_positions]. Invalid topology disables only the FEM extension; other physics backends may ignore this method.
+			</description>
+		</method>
+		<method name="soft_body_set_tetrahedral_interior_positions">
+			<return type="void" />
+			<param index="0" name="body" type="RID" />
+			<param index="1" name="positions" type="PackedVector3Array" />
+			<description>
+				Sets additional local-space internal simulation particles for an experimental volumetric soft body. They receive physical mass and FEM forces, but do not become render vertices or separate collision particles. Recreating the simulation topology is required if the physical mesh has already been constructed.
 			</description>
 		</method>
 		<method name="soft_body_set_total_mass">

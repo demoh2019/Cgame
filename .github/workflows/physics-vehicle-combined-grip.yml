@@ -1,0 +1,42 @@
+name: VehicleWheel3D combined-slip tire grip C++ and numerical contracts
+
+on:
+  push:
+    branches: [develop]
+    paths:
+      - "servers/physics_vehicle_combined_tire_grip.h"
+      - "scene/3d/physics/vehicle_body_3d.cpp"
+      - "scene/3d/physics/vehicle_body_3d.h"
+      - "doc/classes/VehicleWheel3D.xml"
+      - "tests/servers/test_physics_vehicle_combined_tire_grip.cpp"
+      - "tests/stress/test_physics_vehicle_combined_tire_grip_compiler.cpp"
+      - "tests/stress/test_physics_vehicle_combined_tire_grip.py"
+      - ".github/workflows/physics-vehicle-combined-grip.yml"
+  pull_request:
+    paths:
+      - "servers/physics_vehicle_combined_tire_grip.h"
+      - "scene/3d/physics/vehicle_body_3d.cpp"
+      - "scene/3d/physics/vehicle_body_3d.h"
+      - "doc/classes/VehicleWheel3D.xml"
+      - "tests/servers/test_physics_vehicle_combined_tire_grip.cpp"
+      - "tests/stress/test_physics_vehicle_combined_tire_grip_compiler.cpp"
+      - "tests/stress/test_physics_vehicle_combined_tire_grip.py"
+      - ".github/workflows/physics-vehicle-combined-grip.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  combined-slip-numerical-and-compiler:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Wheel ellipse numerical randomized tests and source wiring
+        run: python3 -m unittest discover -s tests/stress -p 'test_physics_vehicle_combined_tire_grip.py' -v
+      - name: Compile actual combined tire grip C++ helper
+        run: |
+          g++ -std=c++17 -O2 -Wall -Wextra -Werror -I. \
+            tests/stress/test_physics_vehicle_combined_tire_grip_compiler.cpp \
+            -o /tmp/physics_vehicle_combined_tire_grip
+          /tmp/physics_vehicle_combined_tire_grip

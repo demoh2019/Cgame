@@ -73,7 +73,30 @@ public:
 	// Opt-in soft body self collision: non-neighboring vertices against the
 	// body's own deformable triangles. Uses a separate per-space CPU budget.
 	inline static bool soft_body_self_contacts = false;
+	// Opt-in conservative-advancement point/face CCD *inside* one soft
+	// body; independent of inter-body speculative CCD and self edge CCD.
+	inline static bool soft_body_self_speculative_vertex_face_ccd = false;
+	// Optional nonlocal self edge/edge collisions, separate quota within
+	// the existing global self-contact budget. Requires self_contacts=true.
+	inline static bool soft_body_self_edge_contacts = false;
+	// Experimental time-swept nonlocal self edge-edge contact prediction.
+	// Requires self_contacts and self_edge_contacts; off by default.
+	inline static bool soft_body_self_speculative_edge_ccd = false;
+	// Rebuild a bounded local-space BVH of deformed edges when self EE is on.
+	// Disabled by default, preserving the original linear edge-pair scan.
+	inline static bool soft_body_self_edge_bvh = false;
+	// Opt-in persistent per-body adjacency and incremental edge-BVH refits.
+	// Requires self and self-edge collisions + the edge BVH. Default false.
+	inline static bool soft_body_self_persistent_bvh = false;
+	// Independently cache and refit the self vertex-face triangle BVH;
+	// works without enabling edge collision or persistent edge BVH.
+	inline static bool soft_body_self_face_bvh_refit = false;
 	inline static int soft_body_self_contact_max_checks = 16384;
+	// Opt-in Jacobi XPBD-style position projection of nonadjacent
+	// vertex-face and edge-edge self contacts. Velocity impulses remain.
+	inline static bool soft_body_self_position_projection = false;
+	inline static float soft_body_self_position_compliance = 0.000001f;
+	inline static float soft_body_self_position_max_correction = 0.02f;
 	inline static float soft_body_soft_ccd_max_sweep = 1.0f;
 	inline static float soft_body_soft_ccd_max_correction_speed = 128.0f;
 	inline static float soft_body_soft_contact_radius = 0.1f;

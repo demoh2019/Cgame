@@ -1,0 +1,31 @@
+name: AI Game Builder Native Tests
+
+on:
+  pull_request:
+    paths:
+      - "editor/plugins/ai_game_builder_plugin.*"
+      - "editor/editor_node.cpp"
+      - "tests/editor/test_ai_game_builder.cpp"
+      - ".github/workflows/ai-game-builder-native.yml"
+  workflow_dispatch:
+
+jobs:
+  editor-build-and-tests:
+    name: Compile Godot editor and exercise AI plan safety tests
+    runs-on: ubuntu-24.04
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          submodules: recursive
+
+      - name: Set up SCons
+        uses: ./.github/actions/godot-deps
+
+      - name: Build editor with tests
+        run: |
+          scons platform=linuxbsd target=editor tests=yes module_text_server_fb_enabled=yes -j2
+
+      - name: Validate AI Game Builder parser and file validation
+        run: |
+          ./bin/godot.linuxbsd.editor.x86_64 --headless --test --test-case="*[AIGameBuilder]*"

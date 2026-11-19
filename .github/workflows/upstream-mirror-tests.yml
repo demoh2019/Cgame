@@ -1,0 +1,24 @@
+name: Upstream Mirror Tests
+
+on:
+  push:
+    paths:
+      - "misc/scripts/mirror_upstream_github.py"
+      - "tests/mirror/**"
+      - ".github/workflows/upstream-mirror-tests.yml"
+  pull_request:
+    paths:
+      - "misc/scripts/mirror_upstream_github.py"
+      - "tests/mirror/**"
+      - ".github/workflows/upstream-mirror-tests.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  unittest:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Test mirror importer without external GitHub calls
+        run: python3 -m unittest discover -s tests/mirror -p 'test_*.py' -v
