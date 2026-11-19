@@ -55,6 +55,8 @@
 #include <Jolt/Physics/PhysicsScene.h>
 #include <Jolt/Physics/SoftBody/SoftBodyMotionProperties.h>
 
+#include <algorithm>
+
 namespace {
 
 constexpr double SPACE_DEFAULT_CONTACT_RECYCLE_RADIUS = 0.01;
@@ -245,6 +247,150 @@ static bool closest_soft_triangle_point(JPH::Vec3Arg p, JPH::Vec3Arg a, JPH::Vec
 // Discrete soft node vs deformable triangle. The barycentric effective mass
 // w_node + u²*w_a + v²*w_b + w²*w_c correctly accounts for which face
 // particles are pinned and conserves the total linear impulse.
+// Lightweight, per-overlapping-body-pair BVH over *deformed* soft-body
+// faces. Jolt's soft vertices move every step, so these bounds are rebuilt
+// from the current positions. Use at most 4096 faces and debit the global
+// contact-work budget for construction and traversal, not just leaf tests.
+constexpr uint32_t MAX_SOFT_FACE_BVH_FACES = 4096;
+constexpr uint32_t MIN_SOFT_FACE_BVH_FACES = 32;
+constexpr uint32_t SOFT_FACE_BVH_LEAF_SIZE = 4;
+
+struct SoftFaceBVHEntry {
+	JPH::Vec3 min;
+	JPH::Vec3 max;
+	uint32_t face_index = 0;
+};
+
+struct SoftFaceBVHNode {
+	JPH::Vec3 min;
+	JPH::Vec3 max;
+	uint32_t begin = 0;
+	uint32_t end = 0;
+	uint32_t left = 0;
+	uint32_t right = 0;
+};
+
+static bool soft_face_aabb_overlaps_point(JPH::Vec3Arg p_min, JPH::Vec3Arg p_max, JPH::Vec3Arg p_point, float p_radius) {
+	return p_point.GetX() >= p_min.GetX() - p_radius && p_point.GetX() <= p_max.GetX() + p_radius &&
+			p_point.GetY() >= p_min.GetY() - p_radius && p_point.GetY() <= p_max.GetY() + p_radius &&
+			p_point.GetZ() >= p_min.GetZ() - p_radius && p_point.GetZ() <= p_max.GetZ() + p_radius;
+}
+
+static float soft_face_bvh_midpoint(const SoftFaceBVHEntry &p_face, uint32_t p_axis) {
+	if (p_axis == 0) {
+		return 0.5f * p_face.min.GetX() + 0.5f * p_face.max.GetX();
+	}
+	if (p_axis == 1) {
+		return 0.5f * p_face.min.GetY() + 0.5f * p_face.max.GetY();
+	}
+	return 0.5f * p_face.min.GetZ() + 0.5f * p_face.max.GetZ();
+}
+
+// Median split gives a bounded recursion depth (<= 10 for 4096 faces) and
+// avoids pathological unbalanced trees even when faces occupy one plane.
+static uint32_t build_soft_face_bvh(JPH::Array<SoftFaceBVHEntry> &r_entries, JPH::Array<SoftFaceBVHNode> &r_nodes, uint32_t p_begin, uint32_t p_end) {
+	JPH::Vec3 min_bound = r_entries[p_begin].min;
+	JPH::Vec3 max_bound = r_entries[p_begin].max;
+	for (uint32_t i = p_begin + 1; i < p_end; ++i) {
+		min_bound = JPH::Vec3::sMin(min_bound, r_entries[i].min);
+		max_bound = JPH::Vec3::sMax(max_bound, r_entries[i].max);
+	}
+
+	const uint32_t node_id = (uint32_t)r_nodes.size();
+	r_nodes.emplace_back();
+	r_nodes[node_id].min = min_bound;
+	r_nodes[node_id].max = max_bound;
+	r_nodes[node_id].begin = p_begin;
+	r_nodes[node_id].end = p_end;
+	if (p_end - p_begin <= SOFT_FACE_BVH_LEAF_SIZE) {
+		return node_id;
+	}
+
+	const JPH::Vec3 extent = max_bound - min_bound;
+	const uint32_t axis = extent.GetX() >= extent.GetY() && extent.GetX() >= extent.GetZ() ? 0 :
+			(extent.GetY() >= extent.GetZ() ? 1 : 2);
+	const uint32_t mid = p_begin + (p_end - p_begin) / 2;
+	std::nth_element(r_entries.begin() + p_begin, r_entries.begin() + mid, r_entries.begin() + p_end,
+			[axis](const SoftFaceBVHEntry &a, const SoftFaceBVHEntry &b) {
+				const float ca = soft_face_bvh_midpoint(a, axis);
+				const float cb = soft_face_bvh_midpoint(b, axis);
+				return ca == cb ? a.face_index < b.face_index : ca < cb;
+			});
+	const uint32_t left = build_soft_face_bvh(r_entries, r_nodes, p_begin, mid);
+	const uint32_t right = build_soft_face_bvh(r_entries, r_nodes, mid, p_end);
+	r_nodes[node_id].left = left;
+	r_nodes[node_id].right = right;
+	return node_id;
+}
+
+static bool prepare_soft_face_bvh(const JPH::Array<JPH::SoftBodySharedSettings::Face> &p_faces,
+		const JPH::Array<JPH::SoftBodyVertex> &p_vertices, JPH::QuatArg p_rotation, JPH::Vec3Arg p_offset,
+		JPH::Array<SoftFaceBVHEntry> &r_entries, JPH::Array<SoftFaceBVHNode> &r_nodes, uint32_t &r_budget) {
+	if (p_faces.size() < MIN_SOFT_FACE_BVH_FACES || p_faces.size() > MAX_SOFT_FACE_BVH_FACES ||
+			r_budget < p_faces.size()) {
+		return false; // Small/oversized/exhausted workloads retain brute force.
+	}
+	// Account for O(face_count) triangle-bound construction up front.
+	r_budget -= (uint32_t)p_faces.size();
+	r_entries.reserve(p_faces.size());
+	for (uint32_t i = 0; i < p_faces.size(); ++i) {
+		const JPH::SoftBodySharedSettings::Face &face = p_faces[i];
+		if (face.IsDegenerate() || face.mVertex[0] >= p_vertices.size() || face.mVertex[1] >= p_vertices.size() || face.mVertex[2] >= p_vertices.size()) {
+			continue;
+		}
+		const JPH::Vec3 a = p_offset + p_rotation * p_vertices[face.mVertex[0]].mPosition;
+		const JPH::Vec3 b = p_offset + p_rotation * p_vertices[face.mVertex[1]].mPosition;
+		const JPH::Vec3 c = p_offset + p_rotation * p_vertices[face.mVertex[2]].mPosition;
+		const JPH::Vec3 min_bound = JPH::Vec3::sMin(a, JPH::Vec3::sMin(b, c));
+		const JPH::Vec3 max_bound = JPH::Vec3::sMax(a, JPH::Vec3::sMax(b, c));
+		if (!Math::is_finite(min_bound.GetX()) || !Math::is_finite(min_bound.GetY()) || !Math::is_finite(min_bound.GetZ()) ||
+				!Math::is_finite(max_bound.GetX()) || !Math::is_finite(max_bound.GetY()) || !Math::is_finite(max_bound.GetZ())) {
+			continue;
+		}
+		SoftFaceBVHEntry entry;
+		entry.min = min_bound;
+		entry.max = max_bound;
+		entry.face_index = i;
+		r_entries.push_back(entry);
+	}
+	if (r_entries.empty()) {
+		return false;
+	}
+	r_nodes.reserve(2 * r_entries.size());
+	build_soft_face_bvh(r_entries, r_nodes, 0, (uint32_t)r_entries.size());
+	return true;
+}
+
+// Node visits also consume budget, and query returns only conservative
+// candidates: no eligible triangle can be culled by the hierarchy.
+static void query_soft_face_bvh(const JPH::Array<SoftFaceBVHEntry> &p_entries,
+		const JPH::Array<SoftFaceBVHNode> &p_nodes, JPH::Vec3Arg p_point,
+		float p_radius, uint32_t &r_budget, JPH::Array<uint32_t> &r_hits, JPH::Array<uint32_t> &r_stack) {
+	r_hits.clear();
+	r_stack.clear();
+	r_stack.push_back(0);
+	while (!r_stack.empty() && r_budget > 0) {
+		const uint32_t node_id = r_stack.back();
+		r_stack.pop_back();
+		--r_budget;
+		const SoftFaceBVHNode &node = p_nodes[node_id];
+		if (!soft_face_aabb_overlaps_point(node.min, node.max, p_point, p_radius)) {
+			continue;
+		}
+		if (node.end - node.begin <= SOFT_FACE_BVH_LEAF_SIZE) {
+			for (uint32_t i = node.begin; i < node.end; ++i) {
+				const SoftFaceBVHEntry &entry = p_entries[i];
+				if (soft_face_aabb_overlaps_point(entry.min, entry.max, p_point, p_radius)) {
+					r_hits.push_back(entry.face_index);
+				}
+			}
+		} else {
+			r_stack.push_back(node.right);
+			r_stack.push_back(node.left);
+		}
+	}
+}
+
 static void resolve_soft_soft_vertex_face_direction(JPH::Body &p_point_body, JPH::Body &p_face_body,
 		const JoltSoftBody3D &p_point_object, float p_step, uint32_t &r_contact_budget) {
 	JPH::SoftBodyMotionProperties &point_props = static_cast<JPH::SoftBodyMotionProperties &>(*p_point_body.GetMotionPropertiesUnchecked());
