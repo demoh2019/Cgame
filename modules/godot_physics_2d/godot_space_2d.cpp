@@ -590,8 +590,10 @@ bool GodotSpace2D::test_body_motion(GodotBody2D *p_body, const PS2DT::MotionPara
 
 				GodotShape2D *body_shape = p_body->get_shape(j);
 				Transform2D body_shape_xform = body_transform * p_body->get_shape_transform(j);
+				// Avoid querying distant proxy groups for every shape in a compound body.
+				const Rect2 shape_query_aabb = body_shape_xform.xform(body_shape->get_aabb()).grow(margin);
 
-				_visit_motion_candidates(p_body, body_aabb, p_parameters, [&](const GodotCollisionObject2D *col_obj, int shape_idx) -> bool {
+				_visit_motion_candidates(p_body, shape_query_aabb, p_parameters, [&](const GodotCollisionObject2D *col_obj, int shape_idx) -> bool {
 
 					Transform2D col_obj_shape_xform = col_obj->get_transform() * col_obj->get_shape_transform(shape_idx);
 
@@ -727,7 +729,14 @@ bool GodotSpace2D::test_body_motion(GodotBody2D *p_body, const PS2DT::MotionPara
 			real_t best_safe = 1;
 			real_t best_unsafe = 1;
 
-			_visit_motion_candidates(p_body, motion_aabb, p_parameters, [&](const GodotCollisionObject2D *col_obj, int col_shape_idx) -> bool {
+			// Sweep the current shape's tight AABB; keep the original whole-body
+			// motion_aabb for the distance solver's conservative auxiliary bound.
+			Rect2 shape_motion_aabb = body_shape_xform.xform(body_shape->get_aabb()).grow(margin);
+			Rect2 shape_end_aabb = shape_motion_aabb;
+			shape_end_aabb.position += p_parameters.motion;
+			shape_motion_aabb = shape_motion_aabb.merge(shape_end_aabb);
+
+			_visit_motion_candidates(p_body, shape_motion_aabb, p_parameters, [&](const GodotCollisionObject2D *col_obj, int col_shape_idx) -> bool {
 				GodotShape2D *against_shape = col_obj->get_shape(col_shape_idx);
 
 				bool excluded = false;
@@ -865,8 +874,9 @@ bool GodotSpace2D::test_body_motion(GodotBody2D *p_body, const PS2DT::MotionPara
 
 			Transform2D body_shape_xform = ugt * p_body->get_shape_transform(j);
 			GodotShape2D *body_shape = p_body->get_shape(j);
+			const Rect2 shape_rest_aabb = body_shape_xform.xform(body_shape->get_aabb()).grow(margin);
 
-			_visit_motion_candidates(p_body, body_aabb, p_parameters, [&](const GodotCollisionObject2D *col_obj, int shape_idx) -> bool {
+			_visit_motion_candidates(p_body, shape_rest_aabb, p_parameters, [&](const GodotCollisionObject2D *col_obj, int shape_idx) -> bool {
 
 				GodotShape2D *against_shape = col_obj->get_shape(shape_idx);
 
