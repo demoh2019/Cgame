@@ -196,6 +196,13 @@ private:
 	real_t soft_body_tetra_inversion_min_j = 0.05; // Minimum positive det(F) after recovery.
 	real_t soft_body_tetra_damage_yield_strain = 0.25;
 	real_t soft_body_tetra_damage_rate = 0.0;
+	// Signed principal-log-strain cycle fatigue (Miner-like), disabled unless
+	// fatigue_reference_cycles > 0.0. Uses the shared FEM scalar damage D.
+	real_t soft_body_tetra_fatigue_endurance_amplitude = 0.05;
+	real_t soft_body_tetra_fatigue_reference_amplitude = 0.3;
+	real_t soft_body_tetra_fatigue_reference_cycles = 0.0;
+	real_t soft_body_tetra_fatigue_exponent = 3.0;
+	real_t soft_body_tetra_fatigue_reversal_deadband = 0.002;
 	real_t soft_body_xpbd_shear_compliance = 0.0; // Opt-in angular shear preservation.
 	real_t soft_body_xpbd_dihedral_compliance = 0.0; // Opt-in angle-based cloth bending.
 	// Optional 3-particle discrete rod centerline curvature on nearly aligned
@@ -405,6 +412,11 @@ public:
 	_FORCE_INLINE_ bool is_soft_body_tetra_inversion_recovery_enabled() const { return soft_body_tetra_inversion_recovery; }
 	_FORCE_INLINE_ real_t get_soft_body_tetra_inversion_min_j() const { return soft_body_tetra_inversion_min_j; }
 	_FORCE_INLINE_ real_t get_soft_body_tetra_damage_rate() const { return soft_body_tetra_damage_rate; }
+	_FORCE_INLINE_ real_t get_soft_body_tetra_fatigue_endurance_amplitude() const { return soft_body_tetra_fatigue_endurance_amplitude; }
+	_FORCE_INLINE_ real_t get_soft_body_tetra_fatigue_reference_amplitude() const { return soft_body_tetra_fatigue_reference_amplitude; }
+	_FORCE_INLINE_ real_t get_soft_body_tetra_fatigue_reference_cycles() const { return soft_body_tetra_fatigue_reference_cycles; }
+	_FORCE_INLINE_ real_t get_soft_body_tetra_fatigue_exponent() const { return soft_body_tetra_fatigue_exponent; }
+	_FORCE_INLINE_ real_t get_soft_body_tetra_fatigue_reversal_deadband() const { return soft_body_tetra_fatigue_reversal_deadband; }
 	_FORCE_INLINE_ real_t get_soft_body_tetra_damage_yield_strain() const { return soft_body_tetra_damage_yield_strain; }
 	_FORCE_INLINE_ real_t get_soft_body_membrane_damping_rate() const { return soft_body_membrane_damping_rate; }
 	_FORCE_INLINE_ real_t get_soft_body_xpbd_shear_compliance() const { return soft_body_xpbd_shear_compliance; }

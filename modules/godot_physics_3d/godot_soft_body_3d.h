@@ -232,6 +232,7 @@ class GodotSoftBody3D : public GodotCollisionObject3D {
 	LocalVector<real_t> xpbd_fem_fiber_plastic_rest_stretches;
 	LocalVector<real_t> xpbd_fem_fiber_secondary_plastic_rest_stretches;
 	LocalVector<double> xpbd_fem_damage; // Irreversible per-tetra scalar damage.
+	LocalVector<PhysicsFEMTetraCycleFatigueState> xpbd_fem_cycle_fatigue_states; // Optional per-tet reversal history.
 	LocalVector<Face> faces;
 	// Number of particles with nonzero inverse mass. Maintained on pin,
 	// unpin and mesh rebuild for O(1) central impulse/force normalization.

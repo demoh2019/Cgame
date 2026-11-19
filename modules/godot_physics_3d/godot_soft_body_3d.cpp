@@ -55,6 +55,7 @@
 #include "servers/physics_fem_tetra_volume_plasticity.h"
 #include "servers/physics_fem_tetra_deviatoric_plasticity.h"
 #include "servers/physics_fem_tetra_damage.h"
+#include "servers/physics_fem_tetra_cycle_fatigue.h"
 #include "servers/physics_fem_tetra_inversion_recovery.h"
 #include "servers/physics_softbody_shape_clusters.h"
 #include "servers/physics_softbody_aerodynamic_drag.h"
@@ -582,6 +583,7 @@ void GodotSoftBody3D::initialize_fem_tetra() {
 	xpbd_fem_fiber_plastic_rest_stretches.reset();
 	xpbd_fem_fiber_secondary_plastic_rest_stretches.reset();
 	xpbd_fem_damage.reset();
+	xpbd_fem_cycle_fatigue_states.reset();
 	xpbd_fem_mass_fractions.reset();
 
 	if (get_space() &&
@@ -661,13 +663,23 @@ void GodotSoftBody3D::initialize_fem_tetra() {
 				}
 			}
 		}
-		// Element histories are allocated only if elastic FEM and damage are enabled.
+		// Element scalar damage is shared between instantaneous overload and
+		// cyclic fatigue. Enable it if EITHER degradation process is active.
+		const bool fatigue_enabled = get_space()->get_soft_body_tetra_fatigue_reference_cycles() > 0.0 &&
+				get_space()->get_soft_body_tetra_fatigue_reference_amplitude() >
+						get_space()->get_soft_body_tetra_fatigue_endurance_amplitude();
 		if (!xpbd_fem_tetrahedra.is_empty() &&
 				get_space()->get_soft_body_tetra_fem_compliance() > 0.0 &&
-				get_space()->get_soft_body_tetra_damage_rate() > 0.0) {
+				(get_space()->get_soft_body_tetra_damage_rate() > 0.0 || fatigue_enabled)) {
 			xpbd_fem_damage.resize(xpbd_fem_tetrahedra.size());
 			for (double &damage : xpbd_fem_damage) {
 				damage = 0.0;
+			}
+			if (fatigue_enabled) {
+				xpbd_fem_cycle_fatigue_states.resize(xpbd_fem_tetrahedra.size());
+				for (PhysicsFEMTetraCycleFatigueState &state : xpbd_fem_cycle_fatigue_states) {
+					state = PhysicsFEMTetraCycleFatigueState();
+				}
 			}
 		}
 
@@ -3713,6 +3725,33 @@ void GodotSoftBody3D::solve_constraints(real_t p_delta) {
 		}
 	}
 
+	// Tetrahedral cyclic fatigue: detect a peak-valley-peak strain cycle
+	// on PREDICTED positions once per tick, never per solver iteration.
+	// Unloaded or statically held elements do not accrue cycle damage.
+	// The same D state as overload damage softens FEM, fiber and SLS/Prony.
+	if (!xpbd_fem_cycle_fatigue_states.is_empty() &&
+			xpbd_fem_cycle_fatigue_states.size() == xpbd_fem_tetrahedra.size() &&
+			xpbd_fem_damage.size() == xpbd_fem_tetrahedra.size() && p_delta > 0.0) {
+		const double endurance = double(get_space()->get_soft_body_tetra_fatigue_endurance_amplitude());
+		const double reference = double(get_space()->get_soft_body_tetra_fatigue_reference_amplitude());
+		const double reference_cycles = double(get_space()->get_soft_body_tetra_fatigue_reference_cycles());
+		const double exponent = double(get_space()->get_soft_body_tetra_fatigue_exponent());
+		const double noise = double(get_space()->get_soft_body_tetra_fatigue_reversal_deadband());
+		for (uint32_t i = 0; i < xpbd_fem_tetrahedra.size(); ++i) {
+			const PhysicsFEMConvexTetra &tet = xpbd_fem_tetrahedra[i];
+			const Vector3 x[4] = {
+				nodes[tet.a].x, nodes[tet.b].x,
+				nodes[tet.c].x, nodes[tet.d].x
+			};
+			double signed_strain = 0.0;
+			if (PhysicsFEMTetraCycleFatigue::measure_strain(x, tet.rest, signed_strain)) {
+				PhysicsFEMTetraCycleFatigue::evolve(signed_strain,
+						endurance, reference, reference_cycles, exponent, noise,
+						xpbd_fem_cycle_fatigue_states[i], xpbd_fem_damage[i]);
+			}
+		}
+	}
+
 	// Local scalar continuum damage is evaluated on predicted positions
 	// BEFORE the elastic XPBD projection removes the over-yield strain.
 	// The strength history is updated once per fixed physics tick, not
@@ -4690,6 +4729,7 @@ void GodotSoftBody3D::destroy() {
 	xpbd_fem_fiber_plastic_rest_stretches.reset();
 	xpbd_fem_fiber_secondary_plastic_rest_stretches.reset();
 	xpbd_fem_damage.reset();
+	xpbd_fem_cycle_fatigue_states.reset();
 	xpbd_fem_mass_fractions.reset();
 	xpbd_surface_node_count = 0;
 	nodes.clear();
