@@ -167,6 +167,62 @@ TEST_CASE("[Span] Runtime byte search respects offsets and signed values") {
 	CHECK(signed_hay.find(int8_t(127)) == 4);
 }
 
+TEST_CASE("[Span] Reverse byte search handles long spans, offsets and unaligned input") {
+	uint8_t bytes[257];
+	for (int i = 0; i < 257; i++) {
+		bytes[i] = 0x31;
+	}
+	bytes[0] = 0xFF;
+	bytes[8] = 0xFF;
+	bytes[64] = 0xFF;
+	bytes[255] = 0xFF;
+
+	const Span<uint8_t> hay(bytes);
+	CHECK_EQ(hay.rfind(uint8_t(0xFF)), 255);
+	CHECK_EQ(hay.rfind(uint8_t(0xFF), 254), 64);
+	CHECK_EQ(hay.rfind(uint8_t(0xFF), 63), 8);
+	CHECK_EQ(hay.rfind(uint8_t(0xFF), 7), 0);
+	CHECK_EQ(hay.rfind(uint8_t(0xFF), 0), 0);
+	CHECK_EQ(hay.rfind(uint8_t(0xFE)), -1);
+
+	// A one-byte offset must not require aligned 64-bit memory accesses.
+	const Span<uint8_t> unaligned(bytes + 1, 256);
+	CHECK_EQ(unaligned.rfind(uint8_t(0xFF)), 254);
+	CHECK_EQ(unaligned.rfind(uint8_t(0xFF), 253), 63);
+	CHECK_EQ(unaligned.rfind(uint8_t(0xFF), 6), -1);
+
+	// The word-at-a-time zero-byte filter may report false candidates due
+	// to a borrow, but the result must always be the last actual match.
+	uint8_t borrow_bytes[24];
+	for (uint8_t &byte : borrow_bytes) {
+		byte = 1;
+	}
+	borrow_bytes[0] = 0;
+	borrow_bytes[8] = 0;
+	borrow_bytes[16] = 0;
+	const Span<uint8_t> borrow_span(borrow_bytes);
+	CHECK_EQ(borrow_span.rfind(uint8_t(0)), 16);
+	CHECK_EQ(borrow_span.rfind(uint8_t(0), 15), 8);
+	CHECK_EQ(borrow_span.rfind(uint8_t(0), 7), 0);
+
+	const int8_t signed_bytes[] = { -128, -7, 0, -7, 127, -128 };
+	const Span<int8_t> signed_span(signed_bytes);
+	CHECK_EQ(signed_span.rfind(int8_t(-128)), 5);
+	CHECK_EQ(signed_span.rfind(int8_t(-128), 4), 0);
+	CHECK_EQ(signed_span.rfind(int8_t(-7)), 3);
+}
+
+TEST_CASE("[Span] Constexpr reverse byte search retains compile-time evaluation") {
+	static constexpr uint8_t values[] = { 12, 99, 1, 99, 12, 5 };
+	static constexpr Span<uint8_t> hay(values);
+	static_assert(hay.rfind(uint8_t(12)) == 4);
+	static_assert(hay.rfind(uint8_t(12), 3) == 0);
+	static_assert(hay.rfind(uint8_t(99)) == 3);
+	static_assert(hay.rfind(uint8_t(99), 2) == 1);
+	static_assert(hay.rfind(uint8_t(3)) == -1);
+	CHECK_EQ(hay.rfind(uint8_t(12)), 4);
+}
+
 TEST_CASE("[Span] Constexpr byte search retains compile-time evaluation") {
 	static constexpr uint8_t values[] = { 0, 1, 2, 3, 4, 5 };
 	static constexpr Span<uint8_t> span(values);
