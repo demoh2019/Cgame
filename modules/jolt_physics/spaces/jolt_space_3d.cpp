@@ -1624,6 +1624,13 @@ static void resolve_soft_body_self_edge_contacts(JPH::Body &p_body, const JoltSo
 			if (!Math::is_finite(normal_speed)) {
 				continue;
 			}
+			if (r_scratch.position_projection_ready) {
+				const uint32_t indices[4] = { uint32_t(key_a >> 32), uint32_t(key_a),
+					uint32_t(key_b >> 32), uint32_t(key_b) };
+				const float gradients[4] = { -wa0, -wa1, wb0, wb1 };
+				accumulate_soft_self_position_projection(r_scratch, vertices, indices, gradients,
+						normal, radius - distance, p_step);
+			}
 			const float recovery_speed = MIN((radius - distance) * recovery, MAX_SOFT_SOFT_PENETRATION_BIAS);
 			const float correction = MIN(MAX(recovery_speed - normal_speed, 0.0f), MAX_SOFT_SOFT_CONTACT_SPEED_CORRECTION);
 			if (correction <= 0.0f) {
