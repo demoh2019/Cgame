@@ -1,0 +1,95 @@
+name: PBF 3D vorticity and finite-energy restoration
+
+on:
+  pull_request:
+    paths:
+      - "servers/physics_pbf_vorticity_3d.h"
+      - "scene/3d/physics/pbf_particle_fluid_3d.h"
+      - "scene/3d/physics/pbf_particle_fluid_3d.cpp"
+      - "tests/servers/test_physics_pbf_vorticity_3d.cpp"
+      - "tests/stress/test_physics_pbf_vorticity_3d.py"
+      - "tests/stress/test_physics_pbf_vorticity_compiler.cpp"
+      - "tests/stress/physics_pbf_vorticity_3d_regression.gd"
+      - "tests/stress/physics_pbf_particle_fluid_stress.gd"
+      - "tests/stress/run.py"
+      - "tests/stress/stress.gd"
+      - "doc/classes/PBFParticleFluid3D.xml"
+      - "demo/physics_lab/pbf_water_3d.gd"
+      - ".github/workflows/physics-pbf-vorticity.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  vorticity-reference:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Compile actual PBF vorticity header in float32 and float64
+        run: |
+          for precision in float double; do
+            flags=""
+            if [ "$precision" = "double" ]; then flags="-DCGAME_USE_DOUBLE"; fi
+            g++ -std=c++17 -O2 -Wall -Wextra -Werror $flags \
+              -Itests/stress/physics_pbf_cpp_stubs -I. \
+              tests/stress/test_physics_pbf_vorticity_compiler.cpp \
+              -o "/tmp/physics_pbf_vorticity_$precision"
+            "/tmp/physics_pbf_vorticity_$precision"
+          done
+      - name: Independent randomized curl sign, shear and bounded-vorticity reference
+        run: python3 -m unittest discover -s tests/stress -p test_physics_pbf_vorticity_3d.py -v
+
+  native-fluid-and-vorticity:
+    # Runs on stacked PRs too; the shared whole-engine workflow normally
+    # only runs automatically for PRs targeting develop.
+    runs-on: ubuntu-24.04
+    timeout-minutes: 120
+    needs: vorticity-reference
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ./.github/actions/godot-deps
+      - name: Build native Godot physics engine with PBF enabled
+        uses: ./.github/actions/godot-build
+        with:
+          platform: linuxbsd
+          target: editor
+          scons-flags: dev_build=yes tests=yes debug_symbols=no module_text_server_fb_enabled=yes -j2
+      - name: Native 7-case PBF vorticity core + full native liquid integration tests
+        shell: bash
+        run: |
+          set -euo pipefail
+          timeout 120s ./bin/godot.linuxbsd.editor.dev.x86_64 \
+            --headless --test --test-case="*[PhysicsPBFVorticity]*" \
+            --success=true --no-colors 2>&1 | tee native-pbf-vorticity.log
+          grep -Fq '[PhysicsPBFVorticity]' native-pbf-vorticity.log
+      - name: Headless PBF fluid vorticity off/on deterministic comparison
+        shell: bash
+        run: |
+          set -euo pipefail
+          timeout 120s ./bin/godot.linuxbsd.editor.dev.x86_64 \
+            --headless --path tests/stress \
+            --script res://physics_pbf_vorticity_3d_regression.gd \
+            2>&1 | tee pbf-vorticity-headless.log
+          grep -Fq 'Native PBF vorticity passed' pbf-vorticity-headless.log
+      - name: Check PBF test and demo script syntax
+        shell: bash
+        run: |
+          set -euo pipefail
+          ./bin/godot.linuxbsd.editor.dev.x86_64 --headless --path tests/stress \
+            --script res://physics_pbf_vorticity_3d_regression.gd --check-only
+          ./bin/godot.linuxbsd.editor.dev.x86_64 --headless --path tests/stress \
+            --script res://physics_pbf_particle_fluid_stress.gd --check-only
+          ./bin/godot.linuxbsd.editor.dev.x86_64 --headless --path demo/physics_lab \
+            --script res://smoke_test.gd --check-only
+      - name: Small vorticity on/off CPU and RSS smoke benchmark
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 tests/stress/run.py \
+            --godot ./bin/godot.linuxbsd.editor.dev.x86_64 \
+            --preset smoke --render-mode headless \
+            --case physics_pbf_vorticity_3d_disabled,physics_pbf_vorticity_3d_enabled \
+            --scale 1 --frames 30 --repeats 1 \
+            --output pbf-vorticity-physics-stress.json
+

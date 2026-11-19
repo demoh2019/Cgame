@@ -93,6 +93,21 @@ void PBFParticleFluid3D::_resize_buffers(int p_count) {
 	predicted.resize(p_count);
 	corrections.resize(p_count);
 	smoothed_velocities.resize(p_count);
+	vorticities.resize(p_count);
+	confinement_updates.resize(p_count);
+	divergence_velocity_changes.resize(p_count);
+	divergence_multipliers.resize(p_count);
+	if (density_pressure_iterations > 0) {
+		density_pressure_velocities.resize(p_count);
+		density_pressure_corrections.resize(p_count);
+		density_pressure_multipliers.resize(p_count);
+		density_pressure_denominators.resize(p_count);
+	} else {
+		density_pressure_velocities.clear();
+		density_pressure_corrections.clear();
+		density_pressure_multipliers.clear();
+		density_pressure_denominators.clear();
+	}
 	lambdas.resize(p_count);
 	densities.resize(p_count);
 	cells.resize(p_count);
@@ -209,6 +224,354 @@ void PBFParticleFluid3D::_apply_xsph_viscosity() {
 	}
 }
 
+real_t PBFParticleFluid3D::_measure_positive_density_rate() {
+	// Final residual is measured on the UPDATED velocity field, not on
+	// the velocities before the last Jacobi correction.
+	const int count = positions.size();
+	if (count < 2) {
+		return 0.0;
+	}
+	const PhysicsPBFCell3D *grid = cells.ptr();
+	const Vector3 *points = positions.ptr();
+	const Vector3 *velocity = velocities.ptr();
+	double sum = 0.0;
+	for (int i = 0; i < count; ++i) {
+		double density_rate = 0.0;
+		_pbf_for_neighbors(grid, points, count, i, smoothing_radius, MAX_NEIGHBORS,
+				[&](int p_j, const Vector3 &p_displacement, double) {
+					const Vector3 gradient =
+							PhysicsPBFKernel3D::gradient(p_displacement, smoothing_radius);
+					density_rate += double(PhysicsPBFDivergence3D::density_rate_pair(
+							velocity[i], velocity[p_j], gradient, particle_mass));
+					++last_divergence_neighbor_evaluations;
+				});
+		sum += PhysicsPBFDivergence3D::compressive_rate_fraction(
+				density_rate, double(rest_density));
+	}
+	const double result = sum / double(count);
+	return Math::is_finite(result) ? real_t(result) : real_t(0.0);
+}
+
+real_t PBFParticleFluid3D::_measure_predicted_density_error(real_t p_delta) {
+	// All positions, densities and neighbors are unchanged across the
+	// pressure Jacobi iterations; only velocities are corrected.
+	const int count = predicted.size();
+	if (count < 2) {
+		return real_t(0.0);
+	}
+	const PhysicsPBFCell3D *grid = cells.ptr();
+	const Vector3 *points = predicted.ptr();
+	const Vector3 *vel = density_pressure_velocities.ptr();
+	const real_t *rho = densities.ptr();
+	double total = 0.0;
+	for (int i = 0; i < count; ++i) {
+		double density_rate = 0.0;
+		_pbf_for_neighbors(grid, points, count, i, smoothing_radius, MAX_NEIGHBORS,
+				[&](int p_j, const Vector3 &p_displacement, double) {
+					const Vector3 gradient = PhysicsPBFKernel3D::gradient(
+							p_displacement, smoothing_radius);
+					density_rate += double(PhysicsPBFDivergence3D::density_rate_pair(
+							vel[i], vel[p_j], gradient, particle_mass));
+					++last_density_pressure_neighbor_evaluations;
+				});
+		const real_t predicted_rho = PhysicsPBFDensityPressure3D::predicted_density(
+				rho[i], density_rate, p_delta);
+		total += double(PhysicsPBFDensityPressure3D::positive_density_error(
+				predicted_rho, rest_density));
+	}
+	const double average = total / double(count);
+	return Math::is_finite(average) ? real_t(average) : real_t(0.0);
+}
+
+void PBFParticleFluid3D::_project_predictive_density_pressure(real_t p_delta) {
+	last_density_pressure_iterations = 0;
+	last_density_pressure_neighbor_evaluations = 0;
+	average_predicted_density_error = 0.0;
+	// Do nothing at all in the default mode. Existing PBF projects and
+	// advances positions with unchanged arithmetic and no grid rebuild.
+	if (density_pressure_iterations <= 0 || positions.size() < 2) {
+		return;
+	}
+
+	// Pressure acts on trial velocity BEFORE particle advection/PBF.
+	// Reuse the existing grid and persistent buffers: there are no
+	// allocations inside this solver's hotpath.
+	const int count = positions.size();
+	const Vector3 *points_now = positions.ptr();
+	const Vector3 *vel_now = velocities.ptr();
+	Vector3 *trial_points = predicted.ptrw();
+	Vector3 *trial_vel = density_pressure_velocities.ptrw();
+	for (int i = 0; i < count; ++i) {
+		trial_points[i] = points_now[i];
+		const Vector3 candidate = vel_now[i] + gravity * p_delta;
+		trial_vel[i] = candidate.is_finite() ? candidate : vel_now[i];
+	}
+	_update_grid();
+
+	const PhysicsPBFCell3D *grid = cells.ptr();
+	const Vector3 *points = predicted.ptr();
+	const real_t factor = particle_mass / rest_density;
+	const double h = double(smoothing_radius);
+	const double self_density = double(particle_mass) *
+			double(PhysicsPBFKernel3D::poly6(0.0, h));
+	real_t *rho = densities.ptrw();
+	real_t *denominator = density_pressure_denominators.ptrw();
+	real_t *lambda = density_pressure_multipliers.ptrw();
+	Vector3 *correction = density_pressure_corrections.ptrw();
+
+	// Fixed-position density and Jacobian factor computed once. These
+	// values are intentionally independent of changing trial velocities.
+	for (int i = 0; i < count; ++i) {
+		double density = self_density;
+		Vector3 self_gradient;
+		double denominator_squares = 0.0;
+		_pbf_for_neighbors(grid, points, count, i, smoothing_radius, MAX_NEIGHBORS,
+				[&](int, const Vector3 &p_displacement, double p_d2) {
+					density += double(particle_mass) *
+							double(PhysicsPBFKernel3D::poly6(p_d2, h));
+					const Vector3 grad = PhysicsPBFKernel3D::gradient(p_displacement, h) * factor;
+					self_gradient += grad;
+					denominator_squares += double(grad.length_squared());
+					++last_density_pressure_neighbor_evaluations;
+				});
+		denominator_squares += double(self_gradient.length_squared());
+		rho[i] = Math::is_finite(density) && density >= 0.0 ?
+				real_t(density) : real_t(self_density);
+		denominator[i] = Math::is_finite(denominator_squares) ?
+				real_t(denominator_squares) : real_t(0.0);
+	}
+
+	for (int iteration = 0; iteration < density_pressure_iterations; ++iteration) {
+		const Vector3 *vel = density_pressure_velocities.ptr();
+		double error_sum = 0.0;
+
+		// First Jacobi pass: predict density AFTER dt from continuity.
+		// This includes current *density excess*, unlike the separate
+		// velocity-divergence projector which only sees rho_dot.
+		for (int i = 0; i < count; ++i) {
+			double density_rate = 0.0;
+			_pbf_for_neighbors(grid, points, count, i, smoothing_radius, MAX_NEIGHBORS,
+					[&](int p_j, const Vector3 &p_displacement, double) {
+						const Vector3 gradient = PhysicsPBFKernel3D::gradient(
+								p_displacement, smoothing_radius);
+						density_rate += double(PhysicsPBFDivergence3D::density_rate_pair(
+								vel[i], vel[p_j], gradient, particle_mass));
+						++last_density_pressure_neighbor_evaluations;
+					});
+			const real_t predicted_rho = PhysicsPBFDensityPressure3D::predicted_density(
+					rho[i], density_rate, p_delta);
+			const real_t error = PhysicsPBFDensityPressure3D::positive_density_error(
+					predicted_rho, rest_density);
+			error_sum += double(error);
+			const real_t pressure_rate = PhysicsPBFDensityPressure3D::pressure_rate_constraint(
+					predicted_rho, rest_density, p_delta);
+			lambda[i] = PhysicsPBFDivergence3D::lagrange_multiplier(
+					double(pressure_rate), double(denominator[i]));
+		}
+		average_predicted_density_error = real_t(error_sum / double(count));
+		if (average_predicted_density_error <= density_pressure_tolerance) {
+			break;
+		}
+
+		// Second Jacobi pass: simultaneous, bounded velocity impulses.
+		for (int i = 0; i < count; ++i) {
+			Vector3 sum;
+			_pbf_for_neighbors(grid, points, count, i, smoothing_radius, MAX_NEIGHBORS,
+					[&](int p_j, const Vector3 &p_displacement, double) {
+						const Vector3 gradient = PhysicsPBFKernel3D::gradient(
+								p_displacement, smoothing_radius);
+						sum += PhysicsPBFDivergence3D::pair_velocity_correction(
+								gradient, lambda[i], lambda[p_j], factor);
+						++last_density_pressure_neighbor_evaluations;
+					});
+			correction[i] = PhysicsPBFDivergence3D::bounded_correction(
+					sum, density_pressure_relaxation, density_pressure_max_velocity_change);
+		}
+		trial_vel = density_pressure_velocities.ptrw();
+		for (int i = 0; i < count; ++i) {
+			const Vector3 candidate = trial_vel[i] + correction[i];
+			if (candidate.is_finite()) {
+				trial_vel[i] = candidate;
+			}
+		}
+		++last_density_pressure_iterations;
+	}
+
+	// Measure the error after the LAST applied update; no stale
+	// 'before projection' metrics are exposed in GDScript.
+	average_predicted_density_error = _measure_predicted_density_error(p_delta);
+}
+
+void PBFParticleFluid3D::_project_velocity_divergence() {
+	last_divergence_iterations = 0;
+	last_divergence_neighbor_evaluations = 0;
+	average_positive_density_rate = 0.0;
+	if (divergence_iterations <= 0 || positions.size() < 2) {
+		return;
+	}
+	// Fixed positions for this velocity-only projection. The shared
+	// sorted grid queries exactly the same compact-support neighbors
+	// as density PBF, bounded by MAX_NEIGHBORS and 27 cells.
+	_update_grid();
+	const int count = positions.size();
+	const PhysicsPBFCell3D *grid = cells.ptr();
+	const Vector3 *points = positions.ptr();
+	const real_t mass_over_rho = particle_mass / rest_density;
+	real_t *lambda = divergence_multipliers.ptrw();
+	Vector3 *correction = divergence_velocity_changes.ptrw();
+
+	for (int iteration = 0; iteration < divergence_iterations; ++iteration) {
+		const Vector3 *velocity = velocities.ptr();
+		double positive_rate_sum = 0.0;
+
+		// Linearized density-rate velocity constraint. Lambda is
+		// unilateral: a dilute/free-surface particle is NOT forced
+		// to expand, while compressing neighborhoods are projected.
+		for (int i = 0; i < count; ++i) {
+			double density_rate = 0.0;
+			double gradient_squares = 0.0;
+			Vector3 self_gradient;
+			_pbf_for_neighbors(grid, points, count, i, smoothing_radius, MAX_NEIGHBORS,
+					[&](int p_j, const Vector3 &p_displacement, double) {
+						const Vector3 gradient = PhysicsPBFKernel3D::gradient(
+								p_displacement, smoothing_radius);
+						density_rate += double(PhysicsPBFDivergence3D::density_rate_pair(
+								velocity[i], velocity[p_j], gradient, particle_mass));
+						const Vector3 constraint_gradient = gradient * mass_over_rho;
+						self_gradient += constraint_gradient;
+						gradient_squares += double(constraint_gradient.length_squared());
+						++last_divergence_neighbor_evaluations;
+					});
+			gradient_squares += double(self_gradient.length_squared());
+			const real_t positive_rate = PhysicsPBFDivergence3D::compressive_rate_fraction(
+					density_rate, double(rest_density));
+			lambda[i] = PhysicsPBFDivergence3D::lagrange_multiplier(
+					double(positive_rate), gradient_squares);
+			positive_rate_sum += double(positive_rate);
+		}
+		average_positive_density_rate = real_t(positive_rate_sum / double(count));
+		// Stop without paying for another Jacobi sweep when the
+		// average compressive residual is already below tolerance.
+		if (average_positive_density_rate <= divergence_tolerance) {
+			break;
+		}
+
+		// Jacobi: build ALL changes using the old velocities/lambdas;
+		// commit only after every particle correction is complete.
+		for (int i = 0; i < count; ++i) {
+			Vector3 sum;
+			_pbf_for_neighbors(grid, points, count, i, smoothing_radius, MAX_NEIGHBORS,
+					[&](int p_j, const Vector3 &p_displacement, double) {
+						const Vector3 gradient = PhysicsPBFKernel3D::gradient(
+								p_displacement, smoothing_radius);
+						sum += PhysicsPBFDivergence3D::pair_velocity_correction(
+								gradient, lambda[i], lambda[p_j], mass_over_rho);
+						++last_divergence_neighbor_evaluations;
+					});
+			correction[i] = PhysicsPBFDivergence3D::bounded_correction(
+					sum, divergence_relaxation, divergence_max_velocity_change);
+		}
+
+		Vector3 *updated = velocities.ptrw();
+		for (int i = 0; i < count; ++i) {
+			const Vector3 candidate = updated[i] + correction[i];
+			if (candidate.is_finite()) {
+				updated[i] = candidate;
+			}
+		}
+		++last_divergence_iterations;
+	}
+	average_positive_density_rate = _measure_positive_density_rate();
+}
+
+void PBFParticleFluid3D::_apply_vorticity_confinement(real_t p_delta) {
+	// Explicit opt-in: no grid rebuild or additional neighbor traversals
+	// in projects that do not request vorticity restoration.
+	last_vorticity_neighbor_evaluations = 0;
+	average_vorticity = 0.0;
+	if (!(vorticity_confinement > 0.0)) {
+		return;
+	}
+	const int count = predicted.size();
+	if (count < 2) {
+		return;
+	}
+	// Rebuild AFTER density projection, rigid collisions, and XSPH:
+	// those operations change particle positions or velocities.
+	_update_grid();
+	const PhysicsPBFCell3D *grid = cells.ptr();
+	const Vector3 *points = predicted.ptr();
+	const Vector3 *vel = velocities.ptr();
+	real_t *rho = densities.ptrw();
+	const real_t self_density = particle_mass *
+			PhysicsPBFKernel3D::poly6(0.0, smoothing_radius);
+
+	// First pass: update density at the FINAL projected positions.
+	// A stale density from the preceding projection would distort
+	// mass/volume weights close to dynamically moving boundaries.
+	for (int i = 0; i < count; ++i) {
+		double density = double(self_density);
+		_pbf_for_neighbors(grid, points, count, i, smoothing_radius, MAX_NEIGHBORS,
+				[&](int, const Vector3 &, double p_d2) {
+					density += double(particle_mass) *
+							double(PhysicsPBFKernel3D::poly6(p_d2, smoothing_radius));
+					++last_vorticity_neighbor_evaluations;
+				});
+		rho[i] = Math::is_finite(density) && density > 0.0 ?
+				real_t(density) : MAX(self_density, real_t(1.0));
+	}
+
+	// Second pass: velocity curl. Use grad_i(W) CROSS (v_j-v_i), not
+	// the reverse order: a +Z rigid rotation must give +Z curl.
+	Vector3 *omega = vorticities.ptrw();
+	double curl_sum = 0.0;
+	for (int i = 0; i < count; ++i) {
+		Vector3 curl;
+		_pbf_for_neighbors(grid, points, count, i, smoothing_radius, MAX_NEIGHBORS,
+				[&](int p_j, const Vector3 &p_displacement, double p_d2) {
+					const Vector3 gradient =
+							PhysicsPBFKernel3D::gradient(p_displacement, smoothing_radius);
+					const real_t neighbor_density = MAX(rho[p_j], rest_density * real_t(0.1));
+					curl += PhysicsPBFVorticity3D::curl_pair(
+							vel[p_j] - vel[i], gradient, particle_mass / neighbor_density);
+					++last_vorticity_neighbor_evaluations;
+				});
+		omega[i] = curl.is_finite() ? curl : Vector3();
+		curl_sum += double(omega[i].length());
+	}
+	average_vorticity = real_t(curl_sum / double(count));
+
+	// Third pass: gradient of |omega|, then perpendicular restoring
+	// acceleration (curl -> ETA -> delta velocity). Apply updates
+	// simultaneously; an in-place update is iteration-order dependent.
+	Vector3 *deltas = confinement_updates.ptrw();
+	for (int i = 0; i < count; ++i) {
+		const real_t self_magnitude = omega[i].length();
+		Vector3 eta;
+		_pbf_for_neighbors(grid, points, count, i, smoothing_radius, MAX_NEIGHBORS,
+				[&](int p_j, const Vector3 &p_displacement, double p_d2) {
+					const Vector3 gradient =
+							PhysicsPBFKernel3D::gradient(p_displacement, smoothing_radius);
+					const real_t neighbor_density = MAX(rho[p_j], rest_density * real_t(0.1));
+					eta += PhysicsPBFVorticity3D::magnitude_gradient_pair(
+							omega[p_j].length(), self_magnitude,
+							gradient, particle_mass / neighbor_density);
+					++last_vorticity_neighbor_evaluations;
+				});
+		deltas[i] = PhysicsPBFVorticity3D::velocity_increment(
+				eta, omega[i], vorticity_confinement, p_delta,
+				vorticity_max_velocity_change);
+	}
+
+	Vector3 *updated = velocities.ptrw();
+	for (int i = 0; i < count; ++i) {
+		const Vector3 next = updated[i] + deltas[i];
+		if (next.is_finite()) {
+			updated[i] = next;
+		}
+	}
+}
+
 void PBFParticleFluid3D::_resolve_world_collisions(const Vector3 &p_old, Vector3 &r_position, Vector3 &r_velocity) {
 	if (!collide_with_bodies || !is_inside_tree() || collision_mask == 0) {
 		return;
@@ -296,8 +659,12 @@ void PBFParticleFluid3D::_step_once(real_t p_delta) {
 	Vector3 *w = predicted.ptrw();
 	last_neighbor_evaluations = 0;
 	last_rigid_impulses = 0;
+	_project_predictive_density_pressure(p_delta);
+	const Vector3 *pressure_velocity = density_pressure_iterations > 0 && count >= 2 ?
+			density_pressure_velocities.ptr() : nullptr;
 	for (int i = 0; i < count; ++i) {
-		const Vector3 new_velocity = v[i] + gravity * p_delta;
+		const Vector3 new_velocity = pressure_velocity ?
+				pressure_velocity[i] : (v[i] + gravity * p_delta);
 		Vector3 new_position = p[i] + new_velocity * p_delta;
 		if (!new_position.is_finite()) {
 			new_position = p[i];
@@ -350,6 +717,8 @@ void PBFParticleFluid3D::_step_once(real_t p_delta) {
 		w[i] = next;
 	}
 	_apply_xsph_viscosity();
+	_apply_vorticity_confinement(p_delta);
+	_project_velocity_divergence();
 }
 
 bool PBFParticleFluid3D::step(real_t p_delta) {
@@ -393,6 +762,14 @@ bool PBFParticleFluid3D::set_particle_positions(const PackedVector3Array &p_posi
 	average_density = 0.0;
 	last_neighbor_evaluations = 0;
 	last_rigid_impulses = 0;
+	last_vorticity_neighbor_evaluations = 0;
+	average_vorticity = 0.0;
+	average_positive_density_rate = 0.0;
+	last_divergence_iterations = 0;
+	last_divergence_neighbor_evaluations = 0;
+	last_density_pressure_iterations = 0;
+	last_density_pressure_neighbor_evaluations = 0;
+	average_predicted_density_error = 0.0;
 	return true;
 }
 
@@ -481,6 +858,14 @@ void PBFParticleFluid3D::clear_particles() {
 	average_density = 0.0;
 	last_neighbor_evaluations = 0;
 	last_rigid_impulses = 0;
+	last_vorticity_neighbor_evaluations = 0;
+	average_vorticity = 0.0;
+	average_positive_density_rate = 0.0;
+	last_divergence_iterations = 0;
+	last_divergence_neighbor_evaluations = 0;
+	last_density_pressure_iterations = 0;
+	last_density_pressure_neighbor_evaluations = 0;
+	average_predicted_density_error = 0.0;
 }
 
 void PBFParticleFluid3D::set_simulation_enabled(bool p_enabled) {
@@ -550,6 +935,92 @@ void PBFParticleFluid3D::set_xsph_viscosity(real_t p_viscosity) {
 	}
 }
 
+void PBFParticleFluid3D::set_density_pressure_iterations(int p_iterations) {
+	if (p_iterations >= 0 && p_iterations <= 12 && p_iterations != density_pressure_iterations) {
+		density_pressure_iterations = p_iterations;
+		// In contrast to preexisting PBF scratch buffers, optional
+		// pressure arrays are allocated ONLY while the mode is enabled.
+		// Turning it off releases them and clears stale telemetry.
+		if (p_iterations == 0) {
+			density_pressure_velocities.clear();
+			density_pressure_corrections.clear();
+			density_pressure_multipliers.clear();
+			density_pressure_denominators.clear();
+			last_density_pressure_iterations = 0;
+			last_density_pressure_neighbor_evaluations = 0;
+			average_predicted_density_error = 0.0;
+		} else {
+			const int count = positions.size();
+			density_pressure_velocities.resize(count);
+			density_pressure_corrections.resize(count);
+			density_pressure_multipliers.resize(count);
+			density_pressure_denominators.resize(count);
+		}
+	}
+}
+
+void PBFParticleFluid3D::set_density_pressure_tolerance(real_t p_tolerance) {
+	if (Math::is_finite(p_tolerance) && p_tolerance >= real_t(0.0) &&
+			p_tolerance <= real_t(1.0)) {
+		density_pressure_tolerance = p_tolerance;
+	}
+}
+
+void PBFParticleFluid3D::set_density_pressure_relaxation(real_t p_relaxation) {
+	if (Math::is_finite(p_relaxation) && p_relaxation > real_t(0.0) &&
+			p_relaxation <= real_t(1.0)) {
+		density_pressure_relaxation = p_relaxation;
+	}
+}
+
+void PBFParticleFluid3D::set_density_pressure_max_velocity_change(real_t p_maximum) {
+	if (Math::is_finite(p_maximum) && p_maximum > real_t(0.0) &&
+			p_maximum <= real_t(2.0)) {
+		density_pressure_max_velocity_change = p_maximum;
+	}
+}
+
+void PBFParticleFluid3D::set_divergence_iterations(int p_iterations) {
+	if (p_iterations >= 0 && p_iterations <= 12) {
+		divergence_iterations = p_iterations;
+	}
+}
+
+void PBFParticleFluid3D::set_divergence_tolerance(real_t p_tolerance) {
+	if (Math::is_finite(p_tolerance) && p_tolerance >= real_t(0.0) &&
+			p_tolerance <= real_t(10.0)) {
+		divergence_tolerance = p_tolerance;
+	}
+}
+
+void PBFParticleFluid3D::set_divergence_relaxation(real_t p_relaxation) {
+	if (Math::is_finite(p_relaxation) && p_relaxation > real_t(0.0) &&
+			p_relaxation <= real_t(1.0)) {
+		divergence_relaxation = p_relaxation;
+	}
+}
+
+void PBFParticleFluid3D::set_divergence_max_velocity_change(real_t p_maximum) {
+	if (Math::is_finite(p_maximum) && p_maximum > real_t(0.0) &&
+			p_maximum <= real_t(2.0)) {
+		divergence_max_velocity_change = p_maximum;
+	}
+}
+
+void PBFParticleFluid3D::set_vorticity_confinement(real_t p_strength) {
+	if (Math::is_finite(p_strength) && p_strength >= real_t(0.0) &&
+			p_strength <= real_t(5.0)) {
+		vorticity_confinement = p_strength;
+	}
+}
+
+void PBFParticleFluid3D::set_vorticity_max_velocity_change(real_t p_maximum) {
+	if (Math::is_finite(p_maximum) && p_maximum > real_t(0.0) &&
+			p_maximum <= real_t(2.0)) {
+		vorticity_max_velocity_change = p_maximum;
+	}
+}
+
 void PBFParticleFluid3D::set_boundary_restitution(real_t p_restitution) {
 	if (Math::is_finite(p_restitution) && p_restitution >= 0.0 && p_restitution <= 1.0) {
 		boundary_restitution = p_restitution;
@@ -608,6 +1079,32 @@ void PBFParticleFluid3D::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("get_artificial_pressure"), &PBFParticleFluid3D::get_artificial_pressure);
 	ClassDB::bind_method(D_METHOD("set_xsph_viscosity", "viscosity"), &PBFParticleFluid3D::set_xsph_viscosity);
 	ClassDB::bind_method(D_METHOD("get_xsph_viscosity"), &PBFParticleFluid3D::get_xsph_viscosity);
+	ClassDB::bind_method(D_METHOD("set_vorticity_confinement", "strength"), &PBFParticleFluid3D::set_vorticity_confinement);
+	ClassDB::bind_method(D_METHOD("get_vorticity_confinement"), &PBFParticleFluid3D::get_vorticity_confinement);
+	ClassDB::bind_method(D_METHOD("set_vorticity_max_velocity_change", "maximum"), &PBFParticleFluid3D::set_vorticity_max_velocity_change);
+	ClassDB::bind_method(D_METHOD("get_vorticity_max_velocity_change"), &PBFParticleFluid3D::get_vorticity_max_velocity_change);
+	ClassDB::bind_method(D_METHOD("set_divergence_iterations", "iterations"), &PBFParticleFluid3D::set_divergence_iterations);
+	ClassDB::bind_method(D_METHOD("get_divergence_iterations"), &PBFParticleFluid3D::get_divergence_iterations);
+	ClassDB::bind_method(D_METHOD("set_density_pressure_iterations", "iterations"), &PBFParticleFluid3D::set_density_pressure_iterations);
+	ClassDB::bind_method(D_METHOD("get_density_pressure_iterations"), &PBFParticleFluid3D::get_density_pressure_iterations);
+	ClassDB::bind_method(D_METHOD("set_density_pressure_tolerance", "tolerance"), &PBFParticleFluid3D::set_density_pressure_tolerance);
+	ClassDB::bind_method(D_METHOD("get_density_pressure_tolerance"), &PBFParticleFluid3D::get_density_pressure_tolerance);
+	ClassDB::bind_method(D_METHOD("set_density_pressure_relaxation", "relaxation"), &PBFParticleFluid3D::set_density_pressure_relaxation);
+	ClassDB::bind_method(D_METHOD("get_density_pressure_relaxation"), &PBFParticleFluid3D::get_density_pressure_relaxation);
+	ClassDB::bind_method(D_METHOD("set_density_pressure_max_velocity_change", "maximum"), &PBFParticleFluid3D::set_density_pressure_max_velocity_change);
+	ClassDB::bind_method(D_METHOD("get_density_pressure_max_velocity_change"), &PBFParticleFluid3D::get_density_pressure_max_velocity_change);
+	ClassDB::bind_method(D_METHOD("get_average_predicted_density_error"), &PBFParticleFluid3D::get_average_predicted_density_error);
+	ClassDB::bind_method(D_METHOD("get_last_density_pressure_iterations"), &PBFParticleFluid3D::get_last_density_pressure_iterations);
+	ClassDB::bind_method(D_METHOD("get_last_density_pressure_neighbor_evaluations"), &PBFParticleFluid3D::get_last_density_pressure_neighbor_evaluations);
+	ClassDB::bind_method(D_METHOD("set_divergence_tolerance", "tolerance"), &PBFParticleFluid3D::set_divergence_tolerance);
+	ClassDB::bind_method(D_METHOD("get_divergence_tolerance"), &PBFParticleFluid3D::get_divergence_tolerance);
+	ClassDB::bind_method(D_METHOD("set_divergence_relaxation", "relaxation"), &PBFParticleFluid3D::set_divergence_relaxation);
+	ClassDB::bind_method(D_METHOD("get_divergence_relaxation"), &PBFParticleFluid3D::get_divergence_relaxation);
+	ClassDB::bind_method(D_METHOD("set_divergence_max_velocity_change", "maximum"), &PBFParticleFluid3D::set_divergence_max_velocity_change);
+	ClassDB::bind_method(D_METHOD("get_divergence_max_velocity_change"), &PBFParticleFluid3D::get_divergence_max_velocity_change);
+	ClassDB::bind_method(D_METHOD("get_average_positive_density_rate"), &PBFParticleFluid3D::get_average_positive_density_rate);
+	ClassDB::bind_method(D_METHOD("get_last_divergence_iterations"), &PBFParticleFluid3D::get_last_divergence_iterations);
+	ClassDB::bind_method(D_METHOD("get_last_divergence_neighbor_evaluations"), &PBFParticleFluid3D::get_last_divergence_neighbor_evaluations);
 	ClassDB::bind_method(D_METHOD("set_boundary_restitution", "restitution"), &PBFParticleFluid3D::set_boundary_restitution);
 	ClassDB::bind_method(D_METHOD("get_boundary_restitution"), &PBFParticleFluid3D::get_boundary_restitution);
 	ClassDB::bind_method(D_METHOD("set_gravity", "gravity"), &PBFParticleFluid3D::set_gravity);
@@ -625,6 +1122,8 @@ void PBFParticleFluid3D::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("add_velocity_pulse", "local_center", "radius", "delta_velocity"), &PBFParticleFluid3D::add_velocity_pulse);
 	ClassDB::bind_method(D_METHOD("get_particle_count"), &PBFParticleFluid3D::get_particle_count);
 	ClassDB::bind_method(D_METHOD("get_average_density"), &PBFParticleFluid3D::get_average_density);
+	ClassDB::bind_method(D_METHOD("get_average_vorticity"), &PBFParticleFluid3D::get_average_vorticity);
+	ClassDB::bind_method(D_METHOD("get_last_vorticity_neighbor_evaluations"), &PBFParticleFluid3D::get_last_vorticity_neighbor_evaluations);
 	ClassDB::bind_method(D_METHOD("get_last_neighbor_evaluations"), &PBFParticleFluid3D::get_last_neighbor_evaluations);
 	ClassDB::bind_method(D_METHOD("step", "delta"), &PBFParticleFluid3D::step);
 
@@ -640,6 +1139,16 @@ void PBFParticleFluid3D::_bind_methods() {
 	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "particle_radius", PROPERTY_HINT_RANGE, "0.001,1,0.001,suffix:m"), "set_particle_radius", "get_particle_radius");
 	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "artificial_pressure", PROPERTY_HINT_RANGE, "0,0.1,0.001"), "set_artificial_pressure", "get_artificial_pressure");
 	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "xsph_viscosity", PROPERTY_HINT_RANGE, "0,1,0.001"), "set_xsph_viscosity", "get_xsph_viscosity");
+	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "vorticity_confinement", PROPERTY_HINT_RANGE, "0,5,0.01,suffix:m/s"), "set_vorticity_confinement", "get_vorticity_confinement");
+	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "vorticity_max_velocity_change", PROPERTY_HINT_RANGE, "0.001,2,0.001,suffix:m/s"), "set_vorticity_max_velocity_change", "get_vorticity_max_velocity_change");
+	ADD_PROPERTY(PropertyInfo(Variant::INT, "density_pressure_iterations", PROPERTY_HINT_RANGE, "0,12,1"), "set_density_pressure_iterations", "get_density_pressure_iterations");
+	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "density_pressure_tolerance", PROPERTY_HINT_RANGE, "0,1,0.001"), "set_density_pressure_tolerance", "get_density_pressure_tolerance");
+	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "density_pressure_relaxation", PROPERTY_HINT_RANGE, "0.01,1,0.01"), "set_density_pressure_relaxation", "get_density_pressure_relaxation");
+	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "density_pressure_max_velocity_change", PROPERTY_HINT_RANGE, "0.001,2,0.001,suffix:m/s"), "set_density_pressure_max_velocity_change", "get_density_pressure_max_velocity_change");
+	ADD_PROPERTY(PropertyInfo(Variant::INT, "divergence_iterations", PROPERTY_HINT_RANGE, "0,12,1"), "set_divergence_iterations", "get_divergence_iterations");
+	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "divergence_tolerance", PROPERTY_HINT_RANGE, "0,10,0.001,suffix:1/s"), "set_divergence_tolerance", "get_divergence_tolerance");
+	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "divergence_relaxation", PROPERTY_HINT_RANGE, "0.01,1,0.01"), "set_divergence_relaxation", "get_divergence_relaxation");
+	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "divergence_max_velocity_change", PROPERTY_HINT_RANGE, "0.001,2,0.001,suffix:m/s"), "set_divergence_max_velocity_change", "get_divergence_max_velocity_change");
 	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "boundary_restitution", PROPERTY_HINT_RANGE, "0,1,0.01"), "set_boundary_restitution", "get_boundary_restitution");
 	ADD_PROPERTY(PropertyInfo(Variant::VECTOR3, "gravity"), "set_gravity", "get_gravity");
 	ADD_PROPERTY(PropertyInfo(Variant::VECTOR3, "box_min"), "set_box_min", "get_box_min");

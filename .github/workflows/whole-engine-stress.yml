@@ -134,10 +134,67 @@ jobs:
             --script res://physics_pbf_rigid_coupling_3d_regression.gd \
             2>&1 | tee physics-pbf-rigid-runtime.log
           grep -Fq 'Native PBF two-way rigid contact passed' physics-pbf-rigid-runtime.log
+      - name: Native PBF vorticity curl, caps and rotating liquid doctests
+        shell: bash
+        run: |
+          set -euo pipefail
+          timeout 120s ./bin/godot.linuxbsd.editor.dev.x86_64 \
+            --headless --test --test-case="*[PhysicsPBFVorticity]*" \
+            --success=true --no-colors 2>&1 | tee physics-pbf-vorticity-native.log
+          grep -Fq '[PhysicsPBFVorticity]' physics-pbf-vorticity-native.log
+      - name: Headless PBF vortex restoration vs opt-out and deterministic replica
+        shell: bash
+        run: |
+          set -euo pipefail
+          timeout 120s ./bin/godot.linuxbsd.editor.dev.x86_64 \
+            --headless --path tests/stress \
+            --script res://physics_pbf_vorticity_3d_regression.gd \
+            2>&1 | tee physics-pbf-vorticity-runtime.log
+          grep -Fq 'Native PBF vorticity passed' physics-pbf-vorticity-runtime.log
+      - name: Native PBF divergence velocity-projection solver doctests
+        shell: bash
+        run: |
+          set -euo pipefail
+          timeout 120s ./bin/godot.linuxbsd.editor.dev.x86_64 \
+            --headless --test --test-case="*[PhysicsPBFDivergence]*" \
+            --success=true --no-colors 2>&1 | tee pbf-divergence-native.log
+          grep -Fq '[PhysicsPBFDivergence]' pbf-divergence-native.log
+      - name: Headless independent compression residual versus PBF velocity correction
+        shell: bash
+        run: |
+          set -euo pipefail
+          timeout 120s ./bin/godot.linuxbsd.editor.dev.x86_64 \
+            --headless --path tests/stress \
+            --script res://physics_pbf_divergence_3d_regression.gd \
+            2>&1 | tee pbf-divergence-runtime.log
+          grep -Fq 'Native PBF divergence passed' pbf-divergence-runtime.log
+      - name: Native PBF predictive-density pressure doctests
+        shell: bash
+        run: |
+          set -euo pipefail
+          timeout 120s ./bin/godot.linuxbsd.editor.dev.x86_64 \
+            --headless --test --test-case="*[PhysicsPBFDensityPressure]*" \
+            --success=true --no-colors 2>&1 | tee pbf-density-pressure-native.log
+          grep -Fq '[PhysicsPBFDensityPressure]' pbf-density-pressure-native.log
+      - name: Headless native predictive density error and deterministic soak regression
+        shell: bash
+        run: |
+          set -euo pipefail
+          timeout 120s ./bin/godot.linuxbsd.editor.dev.x86_64 \
+            --headless --path tests/stress \
+            --script res://physics_pbf_density_pressure_3d_regression.gd \
+            2>&1 | tee pbf-density-pressure-runtime.log
+          grep -Fq 'Native PBF predictive density pressure passed' pbf-density-pressure-runtime.log
       - name: Syntax-check physics stress scripts
         shell: bash
         run: |
           set -euo pipefail
+          ./bin/godot.linuxbsd.editor.dev.x86_64 --headless --path tests/stress \
+            --script res://physics_pbf_density_pressure_3d_regression.gd --check-only
+          ./bin/godot.linuxbsd.editor.dev.x86_64 --headless --path tests/stress \
+            --script res://physics_pbf_divergence_3d_regression.gd --check-only
+          ./bin/godot.linuxbsd.editor.dev.x86_64 --headless --path tests/stress \
+            --script res://physics_pbf_vorticity_3d_regression.gd --check-only
           ./bin/godot.linuxbsd.editor.dev.x86_64 --headless --path tests/stress \
             --script res://physics_pbf_rigid_coupling_3d_regression.gd --check-only
           ./bin/godot.linuxbsd.editor.dev.x86_64 --headless --path tests/stress \

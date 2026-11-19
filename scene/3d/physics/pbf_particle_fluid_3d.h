@@ -31,7 +31,10 @@
 #include "core/variant/variant.h"
 #include "scene/3d/node_3d.h"
 #include "servers/physics_pbf_3d.h"
+#include "servers/physics_pbf_density_pressure_3d.h"
+#include "servers/physics_pbf_divergence_3d.h"
 #include "servers/physics_pbf_rigid_coupling_3d.h"
+#include "servers/physics_pbf_vorticity_3d.h"
 
 // Experimental CPU PBF fluid: a scene node (not a PhysicsServer3D backend
 // replacement) using density constraints, finite-support SPH kernels and
@@ -51,6 +54,14 @@ class PBFParticleFluid3D : public Node3D {
 	Vector<Vector3> predicted;
 	Vector<Vector3> corrections;
 	Vector<Vector3> smoothed_velocities;
+	Vector<Vector3> vorticities;
+	Vector<Vector3> confinement_updates;
+	Vector<Vector3> divergence_velocity_changes;
+	Vector<real_t> divergence_multipliers;
+	Vector<Vector3> density_pressure_velocities;
+	Vector<Vector3> density_pressure_corrections;
+	Vector<real_t> density_pressure_multipliers;
+	Vector<real_t> density_pressure_denominators;
 	Vector<real_t> lambdas;
 	Vector<real_t> densities;
 	Vector<PhysicsPBFCell3D> cells;
@@ -68,6 +79,24 @@ class PBFParticleFluid3D : public Node3D {
 	real_t particle_radius = 0.055;
 	real_t artificial_pressure = 0.002;
 	real_t xsph_viscosity = 0.015;
+	real_t vorticity_confinement = 0.0;
+	real_t vorticity_max_velocity_change = 0.12;
+	real_t average_vorticity = 0.0;
+	int density_pressure_iterations = 0;
+	real_t density_pressure_tolerance = 0.002;
+	real_t density_pressure_relaxation = 0.8;
+	real_t density_pressure_max_velocity_change = 0.15;
+	real_t average_predicted_density_error = 0.0;
+	int last_density_pressure_iterations = 0;
+	uint64_t last_density_pressure_neighbor_evaluations = 0;
+	int divergence_iterations = 0;
+	real_t divergence_tolerance = 0.01;
+	real_t divergence_relaxation = 0.8;
+	real_t divergence_max_velocity_change = 0.12;
+	real_t average_positive_density_rate = 0.0;
+	int last_divergence_iterations = 0;
+	uint64_t last_divergence_neighbor_evaluations = 0;
+	uint64_t last_vorticity_neighbor_evaluations = 0;
 	real_t boundary_restitution = 0.1;
 	Vector3 gravity = Vector3(0, -9.8, 0);
 	Vector3 box_min = Vector3(-2, 0, -2);
@@ -81,6 +110,11 @@ class PBFParticleFluid3D : public Node3D {
 	void _solve_density_constraints();
 	void _apply_density_corrections();
 	void _apply_xsph_viscosity();
+	void _apply_vorticity_confinement(real_t p_delta);
+	void _project_predictive_density_pressure(real_t p_delta);
+	real_t _measure_predicted_density_error(real_t p_delta);
+	void _project_velocity_divergence();
+	real_t _measure_positive_density_rate();
 	void _resolve_world_collisions(const Vector3 &p_old, Vector3 &r_predicted, Vector3 &r_velocity);
 	void _step_once(real_t p_delta);
 protected:
@@ -115,6 +149,32 @@ public:
 	real_t get_artificial_pressure() const { return artificial_pressure; }
 	void set_xsph_viscosity(real_t p_viscosity);
 	real_t get_xsph_viscosity() const { return xsph_viscosity; }
+	void set_density_pressure_iterations(int p_iterations);
+	int get_density_pressure_iterations() const { return density_pressure_iterations; }
+	void set_density_pressure_tolerance(real_t p_tolerance);
+	real_t get_density_pressure_tolerance() const { return density_pressure_tolerance; }
+	void set_density_pressure_relaxation(real_t p_relaxation);
+	real_t get_density_pressure_relaxation() const { return density_pressure_relaxation; }
+	void set_density_pressure_max_velocity_change(real_t p_maximum);
+	real_t get_density_pressure_max_velocity_change() const { return density_pressure_max_velocity_change; }
+	real_t get_average_predicted_density_error() const { return average_predicted_density_error; }
+	int get_last_density_pressure_iterations() const { return last_density_pressure_iterations; }
+	int get_last_density_pressure_neighbor_evaluations() const { return int(MIN(last_density_pressure_neighbor_evaluations, uint64_t(2147483647))); }
+	void set_divergence_iterations(int p_iterations);
+	int get_divergence_iterations() const { return divergence_iterations; }
+	void set_divergence_tolerance(real_t p_tolerance);
+	real_t get_divergence_tolerance() const { return divergence_tolerance; }
+	void set_divergence_relaxation(real_t p_relaxation);
+	real_t get_divergence_relaxation() const { return divergence_relaxation; }
+	void set_divergence_max_velocity_change(real_t p_maximum);
+	real_t get_divergence_max_velocity_change() const { return divergence_max_velocity_change; }
+	real_t get_average_positive_density_rate() const { return average_positive_density_rate; }
+	int get_last_divergence_iterations() const { return last_divergence_iterations; }
+	int get_last_divergence_neighbor_evaluations() const { return int(MIN(last_divergence_neighbor_evaluations, uint64_t(2147483647))); }
+	void set_vorticity_confinement(real_t p_strength);
+	real_t get_vorticity_confinement() const { return vorticity_confinement; }
+	void set_vorticity_max_velocity_change(real_t p_maximum);
+	real_t get_vorticity_max_velocity_change() const { return vorticity_max_velocity_change; }
 	void set_boundary_restitution(real_t p_restitution);
 	real_t get_boundary_restitution() const { return boundary_restitution; }
 	void set_gravity(const Vector3 &p_gravity);
@@ -132,6 +192,8 @@ public:
 	int add_velocity_pulse(const Vector3 &p_center, real_t p_radius, const Vector3 &p_delta_velocity);
 	int get_particle_count() const { return positions.size(); }
 	real_t get_average_density() const { return average_density; }
+	real_t get_average_vorticity() const { return average_vorticity; }
+	int get_last_vorticity_neighbor_evaluations() const { return int(MIN(last_vorticity_neighbor_evaluations, uint64_t(2147483647))); }
 	int get_last_neighbor_evaluations() const { return int(MIN(last_neighbor_evaluations, uint64_t(2147483647))); }
 
 	bool step(real_t p_delta);

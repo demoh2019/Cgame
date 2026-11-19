@@ -23,6 +23,14 @@ func _ready() -> void:
 	fluid.particle_radius = 0.075
 	fluid.solver_iterations = 5
 	fluid.xsph_viscosity = 0.03
+	fluid.vorticity_confinement = 0.0
+	fluid.vorticity_max_velocity_change = 0.12
+	fluid.divergence_iterations = 0
+	fluid.divergence_tolerance = 0.01
+	fluid.divergence_max_velocity_change = 0.12
+	fluid.density_pressure_iterations = 0
+	fluid.density_pressure_tolerance = 0.002
+	fluid.density_pressure_max_velocity_change = 0.15
 	fluid.artificial_pressure = 0.002
 	fluid.boundary_restitution = 0.15
 	fluid.box_min = Vector3(-1.7, 0.0, -1.7)
@@ -55,7 +63,7 @@ func _ready() -> void:
 
 	label = Label3D.new()
 	label.name = "StationLabel"
-	label.text = "NATIVE CPU PBF FLUID | %d particles | U: reset | I: pause | O: stir | P: rigid coupling" % fluid.get_particle_count()
+	label.text = "NATIVE CPU PBF FLUID | %d particles | U: reset | I: pause | O: stir | P: rigid coupling | V: vortices | G: compression guard | H: predictive pressure" % fluid.get_particle_count()
 	label.position = Vector3(0, 3.65, 0)
 	label.font_size = 40
 	label.pixel_size = 0.006
@@ -121,6 +129,33 @@ func _unhandled_key_input(event: InputEvent) -> void:
 			# Stir the free surface with an upward/lateral velocity pulse.
 			# This is a native kernel call; no per-particle GDScript loop.
 			fluid.add_velocity_pulse(Vector3(0, 1.0, 0), 1.8, Vector3(3.0, 4.5, 0))
+		KEY_V:
+			# Restores rotating flow damped by XSPH/PBF projection.
+			# Completely disabled by default to keep the lab lightweight.
+			fluid.vorticity_confinement = (
+					0.0 if fluid.vorticity_confinement > 0.0 else 0.9)
+			label.text = "NATIVE CPU PBF | Vortices: %s | Mean curl: %.2f" % [
+				"ON" if fluid.vorticity_confinement > 0.0 else "OFF",
+				fluid.get_average_vorticity()
+			]
+		KEY_G:
+			# DFSPH-inspired velocity projection removes positive SPH
+			# compression rates without modifying the PBF position solver.
+			fluid.divergence_iterations = (
+					0 if fluid.divergence_iterations > 0 else 8)
+			label.text = "NATIVE CPU PBF | Divergence: %s | Density rate: %.3f 1/s" % [
+				"ON" if fluid.divergence_iterations > 0 else "OFF",
+				fluid.get_average_positive_density_rate()
+			]
+		KEY_H:
+			# Predicts next-step density before particle advection,
+			# providing pressure response even in a static dense cloud.
+			fluid.density_pressure_iterations = (
+					0 if fluid.density_pressure_iterations > 0 else 8)
+			label.text = "NATIVE CPU PBF | Predictive pressure: %s | Error: %.4f" % [
+				"ON" if fluid.density_pressure_iterations > 0 else "OFF",
+				fluid.get_average_predicted_density_error()
+			]
 		KEY_P:
 			# Expensive ray sweeps and rigid-body momentum exchange are
 			# only enabled when the player explicitly opts in.
