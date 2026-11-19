@@ -5,6 +5,11 @@ on:
     paths:
       - 'misc/ai_game_builder/**'
       - '.github/workflows/ai-game-builder.yml'
+  push:
+    branches: [develop]
+    paths:
+      - 'misc/ai_game_builder/**'
+      - '.github/workflows/ai-game-builder.yml'
   workflow_dispatch:
 
 permissions:
@@ -26,5 +31,7 @@ jobs:
         run: godot --version
       - name: Plan validation and filesystem regression tests
         run: godot --headless --path misc/ai_game_builder --script res://tests/test_plan.gd
+      - name: Opt-in context and credential-leak regression tests
+        run: godot --headless --path misc/ai_game_builder --script res://tests/test_context.gd
       - name: Editor plugin smoke test
         run: godot --headless --editor --path misc/ai_game_builder --quit
