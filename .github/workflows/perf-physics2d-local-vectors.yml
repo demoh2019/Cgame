@@ -1,0 +1,53 @@
+name: Physics2D LocalVector regression
+
+on:
+  pull_request:
+    paths:
+      - "modules/godot_physics_2d/godot_body_2d.h"
+      - "modules/godot_physics_2d/godot_body_2d.cpp"
+      - "tests/core/templates/test_physics2d_local_vectors.cpp"
+      - "misc/scripts/tests/test_physics2d_local_vectors.py"
+      - ".github/workflows/perf-physics2d-local-vectors.yml"
+  push:
+    branches: [develop]
+    paths:
+      - "modules/godot_physics_2d/godot_body_2d.h"
+      - "modules/godot_physics_2d/godot_body_2d.cpp"
+      - "tests/core/templates/test_physics2d_local_vectors.cpp"
+      - "misc/scripts/tests/test_physics2d_local_vectors.py"
+      - ".github/workflows/perf-physics2d-local-vectors.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  source-contracts:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - name: Check Physics2D LocalVector contracts
+        run: python3 -m unittest discover -s misc/scripts/tests -p 'test_physics2d_local_vectors.py' -v
+
+  native-editor:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libwayland-bin
+      - uses: ./.github/actions/godot-deps
+      - name: Compile Cgame editor with tests
+        uses: ./.github/actions/godot-build
+        with:
+          platform: linuxbsd
+          target: editor
+          scons-flags: dev_build=yes debug_symbols=no tests=yes module_text_server_fb_enabled=yes -j2
+      - name: Execute LocalVector physics working-set tests
+        shell: bash
+        run: |
+          set -euo pipefail
+          timeout 240s ./bin/godot.linuxbsd.editor.dev.x86_64 --headless --test --test-suite="*[Physics2DLocalVector]*" --no-colors
