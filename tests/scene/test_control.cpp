@@ -42,6 +42,78 @@ TEST_FORCE_LINK(test_control)
 
 namespace TestControl {
 
+TEST_CASE("[SceneTree][Control] Moving preserves the size before constraints") {
+	for (bool rtl : { false, true }) {
+		for (bool keep_offsets : { false, true }) {
+			for (int direction = Control::GROW_DIRECTION_BEGIN; direction <= Control::GROW_DIRECTION_BOTH; direction++) {
+				for (bool maximum : { false, true }) {
+					INFO("RTL: ", rtl, ", keep offsets: ", keep_offsets, ", grow direction: ", direction, ", maximum: ", maximum);
+					Control *parent = memnew(Control);
+					parent->set_size(Size2(200, 200));
+					SceneTree::get_singleton()->get_root()->add_child(parent);
+					Control *child = memnew(Control);
+					parent->add_child(child);
+					child->set_layout_direction(rtl ? Control::LAYOUT_DIRECTION_RTL : Control::LAYOUT_DIRECTION_LTR);
+					child->set_h_grow_direction(Control::GrowDirection(direction));
+					child->set_v_grow_direction(Control::GrowDirection(direction));
+					child->set_size(Size2(60, 70));
+					if (maximum) {
+						child->set_custom_maximum_size(Size2(30, 40));
+					} else {
+						child->set_custom_minimum_size(Size2(90, 100));
+					}
+					SceneTree::get_singleton()->process(0);
+					child->set_position(Point2(17, 19), keep_offsets);
+					CHECK(child->get_position().is_equal_approx(Point2(17, 19)));
+					if (maximum) {
+						child->set_custom_maximum_size(Size2(-1, -1));
+					} else {
+						child->set_custom_minimum_size(Size2());
+					}
+					SceneTree::get_singleton()->process(0);
+					CHECK(child->get_size().is_equal_approx(Size2(60, 70)));
+					memdelete(parent);
+				}
+			}
+		}
+	}
+}
+
+TEST_CASE("[SceneTree][Control] Repeated moves do not preserve temporary size constraints") {
+	for (bool maximum : { false, true }) {
+		Control *parent = memnew(Control);
+		parent->set_size(Size2(400, 300));
+		SceneTree::get_singleton()->get_root()->add_child(parent);
+
+		Control *child = memnew(Control);
+		parent->add_child(child);
+		child->set_size(Size2(64, 48));
+
+		for (int i = 0; i < 4; i++) {
+			INFO("Maximum constraint: ", maximum, ", move iteration: ", i);
+			if (maximum) {
+				child->set_custom_maximum_size(Size2(24 + i * 2, 20 + i * 3));
+			} else {
+				child->set_custom_minimum_size(Size2(100 + i * 10, 90 + i * 10));
+			}
+			SceneTree::get_singleton()->process(0);
+
+			Point2 target_position(20 + i * 7, 30 + i * 4);
+			child->set_position(target_position, i % 2 != 0);
+			CHECK(child->get_position().is_equal_approx(target_position));
+
+			if (maximum) {
+				child->set_custom_maximum_size(Size2(-1, -1));
+			} else {
+				child->set_custom_minimum_size(Size2());
+			}
+			SceneTree::get_singleton()->process(0);
+			CHECK(child->get_size().is_equal_approx(Size2(64, 48)));
+		}
+		memdelete(parent);
+	}
+}
+
 TEST_CASE("[SceneTree][Control] Transforms") {
 	SUBCASE("[Control][Global Transform] Global Transform should be accessible while not in SceneTree.") { // GH-79453
 		Control *test_node = memnew(Control);
