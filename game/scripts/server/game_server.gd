@@ -21,6 +21,7 @@ const Zombie = preload("res://scripts/shared/zombie.gd")
 const ZoneRisk = preload("res://scripts/shared/zone_risk.gd")
 const Weather = preload("res://scripts/shared/weather.gd")
 const Progression = preload("res://scripts/shared/progression.gd")
+const Fishing = preload("res://scripts/shared/fishing.gd")
 
 const WORKBENCH_POSITION := Vector2(9.0, 0.0)
 const WORKBENCH_RANGE := 6.0
@@ -57,7 +58,8 @@ class Player:
 	var combat_energy: float = 100.0
 	var noise_radius: float = 0.0
 	var noise_timer: float = 0.0
-	var action: Dictionary = {} # Current gathering: {"node": id, "remaining": s, "total": s}
+	var action: Dictionary = {} # Current gathering or fishing: {"remaining": s, "total": s, ...}
+	var fish_next_at: float = 0.0
 	var respawn_timer: float = 0.0
 	var keep_inventory_on_respawn: bool = false
 	var last_death_full_loot: bool = false
@@ -313,11 +315,35 @@ func submit_input(peer_id: int, seq: int, move_x: float, move_z: float, sprint: 
 		if sprint_allowed and player.position.distance_to(before_move) > 0.01:
 			player.noise_radius = maxf(player.noise_radius, Defs.SPRINT_NOISE_RADIUS)
 			player.noise_timer = maxf(player.noise_timer, Defs.SPRINT_NOISE_SECONDS)
-		# Walking away cancels gathering.
+		# Walking away cancels gathering and shoreline fishing.
 		if not player.action.is_empty():
-			var node := _find_node(int(player.action["node"]))
-			if node.is_empty() or _distance_xz(player.position, node) > Defs.REACH + 0.8:
-				player.action = {}
+			if player.action.has("fish"):
+				var cast_at := Vector2(float(player.action["cast_x"]), float(player.action["cast_z"]))
+				if Vector2(player.position.x, player.position.z).distance_to(cast_at) > 0.45:
+					player.action = {}
+			else:
+				var node := _find_node(int(player.action["node"]))
+				if node.is_empty() or _distance_xz(player.position, node) > Defs.REACH + 0.8:
+					player.action = {}
+
+
+## Fishing is a delayed, cancelable server action; no catch count is supplied
+## by clients. Distinct from lake drinking and free berry scavenging.
+func cmd_fish(peer_id: int) -> Dictionary:
+	var player: Player = players.get(peer_id)
+	if player == null or not _alive(player):
+		return {"ok": false, "reason": "dead"}
+	if not player.action.is_empty():
+		return {"ok": false, "reason": "busy"}
+	if time < player.fish_next_at:
+		return {"ok": false, "reason": "cooldown"}
+	var eligibility: Dictionary = Fishing.validate_start(world, player.position, player.inventory)
+	if not bool(eligibility.get("ok", false)):
+		return eligibility
+	player.action = {"fish": true, "cast_x": player.position.x, "cast_z": player.position.z,
+		"remaining": Fishing.CAST_SECONDS, "total": Fishing.CAST_SECONDS}
+	player.fish_next_at = time + Fishing.CAST_SECONDS + Fishing.COOLDOWN_SECONDS
+	return {"ok": true, "seconds": Fishing.CAST_SECONDS}
 
 
 func cmd_gather(peer_id: int, node_id: int) -> Dictionary:
@@ -1124,13 +1150,33 @@ func _tick_players(delta: float) -> void:
 			player.zone_notice = zone
 			events.append({"type": "zone", "peer": player.id, "zone": zone})
 		if not player.action.is_empty():
-			var node := _find_node(int(player.action["node"]))
-			if node.is_empty() or depleted.has(int(player.action["node"])):
-				player.action = {}
-				continue
-			player.action["remaining"] = float(player.action["remaining"]) - delta
-			if float(player.action["remaining"]) <= 0.0:
-				_finish_gather(player, node)
+			if player.action.has("fish"):
+				var cast_at := Vector2(float(player.action["cast_x"]), float(player.action["cast_z"]))
+				if player.inventory.best_tool("fishing") == "" or Fishing.water_near(world, player.position) == Vector2.INF or Vector2(player.position.x, player.position.z).distance_to(cast_at) > 0.45:
+					player.action = {}
+					continue
+				player.action["remaining"] = float(player.action["remaining"]) - delta
+				if float(player.action["remaining"]) <= 0.0:
+					_finish_fishing(player)
+			else:
+				var node := _find_node(int(player.action["node"]))
+				if node.is_empty() or depleted.has(int(player.action["node"])):
+					player.action = {}
+					continue
+				player.action["remaining"] = float(player.action["remaining"]) - delta
+				if float(player.action["remaining"]) <= 0.0:
+					_finish_gather(player, node)
+
+
+func _finish_fishing(player: Player) -> void:
+	player.action = {}
+	var amount: int = 1 + (1 if rng.randf() < 0.35 else 0)
+	var added: int = amount - player.inventory.add(Fishing.CATCH_ID, amount)
+	if added > 0:
+		player.progression.award_gather("fishing", 1, added)
+		player.dirty_inventory = true
+		player.dirty_character = true
+	events.append({"type": "fished", "peer": player.id, "item": Fishing.CATCH_ID, "amount": added})
 
 
 func _finish_gather(player: Player, node: Dictionary) -> void:
@@ -1342,6 +1388,7 @@ func snapshot_for(peer_id: int) -> Dictionary:
 			"is_night": WorldCycle.is_night(time),
 			"gathering_levels": player.progression.levels(), "crafting_level": player.progression.crafting_level(),
 			"crafting_xp": player.progression.crafting_xp,
+			"fishing_level": player.progression.gathering_level("fishing"),
 			"contract": player.contract_state.duplicate(true),
 			"carry_kg": player.inventory.total_weight(),
 			"cargo_factor": player.inventory.movement_factor(),
