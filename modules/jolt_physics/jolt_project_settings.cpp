@@ -68,7 +68,7 @@ void JoltProjectSettings::register_settings() {
 	// Optional volumetric edge springs resist interior-to-surface stretching
 	// and add shape support to the convex tetrahedral volume fan.
 	GLOBAL_DEF(PropertyInfo(Variant::BOOL, "physics/jolt_physics_3d/simulation/soft_body_volume_radial_springs"), false);
-	GLOBAL_DEF(PropertyInfo(Variant::FLOAT, "physics/jolt_physics_3d/simulation/soft_body_volume_radial_compliance", PROPERTY_HINT_RANGE, "0,0.1,0.000001,or_greater"), 0.0001f);
+	GLOBAL_DEF(PropertyInfo(Variant::FLOAT, "physics/jolt_physics_3d/simulation/soft_body_volume_radial_compliance", PROPERTY_HINT_RANGE, "0,1,0.000001"), 0.0001f);
 	GLOBAL_DEF(PropertyInfo(Variant::FLOAT, "physics/jolt_physics_3d/simulation/bounce_velocity_threshold", PROPERTY_HINT_RANGE, U"0,1,0.001,or_greater,suffix:m/s"), 1.0f);
 	GLOBAL_DEF(PropertyInfo(Variant::BOOL, "physics/jolt_physics_3d/simulation/allow_sleep"), true);
 	GLOBAL_DEF(PropertyInfo(Variant::FLOAT, "physics/jolt_physics_3d/simulation/sleep_velocity_threshold", PROPERTY_HINT_RANGE, U"0,1,0.001,or_greater,suffix:m/s"), 0.03f);
