@@ -21,7 +21,7 @@ import subprocess
 import sys
 import time
 from urllib.error import HTTPError
-from urllib.parse import quote
+from urllib.parse import quote, urlsplit
 from urllib.request import Request, urlopen
 
 SOURCE_DEFAULT = "godotengine/godot"
@@ -37,6 +37,21 @@ class ApiError(RuntimeError):
         super().__init__(f"HTTP {status}: {text[:600]}")
 
 
+def parse_next_link(header: str):
+    """Follow GitHub's opaque cursor from the Link header, never increment page."""
+    for entry in header.split(","):
+        if 'rel="next"' not in entry:
+            continue
+        matched = re.search(r"<([^>]+)>", entry)
+        if not matched:
+            continue
+        target = urlsplit(matched.group(1))
+        if target.scheme != "https" or target.netloc != "api.github.com":
+            raise ValueError("Unexpected pagination host")
+        return target.path + ("?" + target.query if target.query else "")
+    return None
+
+
 class GitHub:
     def __init__(self, token: str = "", write_delay: float = 10.0, sleep=time.sleep):
         self.token = token
@@ -44,7 +59,9 @@ class GitHub:
         self.sleep = sleep
         self.last_write = 0.0
 
-    def request(self, method: str, path: str, payload=None):
+    def request(self, method: str, path: str, payload=None, with_links=False):
+        if not path.startswith("/repos/"):
+            raise ValueError("Only repository API paths are accepted")
         url = "https://api.github.com" + path
         headers = {
             "Accept": "application/vnd.github+json",
@@ -67,9 +84,11 @@ class GitHub:
             try:
                 with urlopen(req, timeout=45) as response:
                     raw = response.read()
+                    link_header = response.headers.get("Link", "")
                 if method in WRITE_METHODS:
                     self.last_write = time.monotonic()
-                return json.loads(raw) if raw else {}
+                result = json.loads(raw) if raw else {}
+                return (result, parse_next_link(link_header)) if with_links else result
             except HTTPError as exc:
                 message = exc.read().decode("utf-8", "replace")
                 limited = exc.code == 429 or (
@@ -92,16 +111,14 @@ class GitHub:
         raise AssertionError("unreachable")
 
     def pages(self, path: str):
-        page = 1
-        while True:
+        if "per_page=" not in path:
             separator = "&" if "?" in path else "?"
-            batch = self.request("GET", f"{path}{separator}per_page=100&page={page}")
+            path += f"{separator}per_page=100"
+        while path:
+            batch, path = self.request("GET", path, with_links=True)
+            yield from batch
             if not batch:
                 break
-            yield from batch
-            if len(batch) < 100:
-                break
-            page += 1
 
 
 def source_key(kind: str, number: int):
@@ -304,16 +321,26 @@ class Mirror:
         else:
             self.create_archive(item, kind)
 
-    def run(self, start_page=1, pages=1, max_items=20, checkpoint=None, start_offset=0):
+    def run(self, start_page=1, pages=1, max_items=20, checkpoint=None,
+            start_offset=0, start_cursor=None):
         self.check_destination()
         self.build_index()
+        path = (start_cursor or
+                f"/repos/{self.source}/issues"
+                "?state=all&sort=created&direction=asc&per_page=100")
+        if not path.startswith(f"/repos/{self.source}/issues?"):
+            raise ValueError("Checkpoint cursor must target the source issue list")
+        # Starting by page number is supported, but walking GitHub's cursor
+        # links is mandatory. Random page=N access fails on large repositories.
+        if start_page > 1 and not start_cursor:
+            for skipped in range(1, start_page):
+                _, path = self.api.request("GET", path, with_links=True)
+                if not path:
+                    return self.stats
         page = start_page
         processed = 0
-        while pages == 0 or page < start_page + pages:
-            batch = self.api.request(
-                "GET", f"/repos/{self.source}/issues"
-                f"?state=all&sort=created&direction=asc&per_page=100&page={page}"
-            )
+        while path and (pages == 0 or page < start_page + pages):
+            batch, next_path = self.api.request("GET", path, with_links=True)
             if not batch:
                 break
             for offset, item in enumerate(batch):
@@ -328,19 +355,19 @@ class Mirror:
                     self.stats["errors"] += 1
                     print(f"Failed upstream #{item.get('number')}: {exc}",
                           file=sys.stderr)
-                    # Do not advance the checkpoint past a failed migration.
                     return self.stats
                 if checkpoint and self.apply:
                     checkpoint.write_text(json.dumps(
-                        {"next_page": page, "next_offset": offset + 1, "processed": processed},
+                        {"next_page": page, "next_path": path,
+                         "next_offset": offset + 1, "processed": processed},
                         indent=2) + "\n")
             page += 1
+            path = next_path
             if checkpoint and self.apply:
                 checkpoint.write_text(json.dumps(
-                    {"next_page": page, "next_offset": 0, "processed": processed},
+                    {"next_page": page, "next_path": path,
+                     "next_offset": 0, "processed": processed},
                     indent=2) + "\n")
-            if len(batch) < 100:
-                break
         return self.stats
 
 
@@ -378,8 +405,9 @@ def main(argv=None):
         state = json.loads(args.checkpoint.read_text())
         start_page = int(state["next_page"])
         start_offset = int(state["next_offset"])
+    start_cursor = state.get("next_path") if args.resume else None
     stats = mirror.run(start_page, args.pages, args.max_items, args.checkpoint,
-                       start_offset=start_offset)
+                       start_offset=start_offset, start_cursor=start_cursor)
     print("Summary:", json.dumps(stats, sort_keys=True))
     return 1 if stats["errors"] else 0
 
