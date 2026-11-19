@@ -1550,6 +1550,14 @@ GodotSpace3D::GodotSpace3D() {
 	fluid_angular_drag = MAX(real_t(0.0), (real_t)GLOBAL_GET("physics/3d/solver/fluid_angular_drag"));
 	fluid_buoyancy = MAX(real_t(0.0), (real_t)GLOBAL_GET("physics/3d/solver/fluid_buoyancy"));
 	fluid_flow_velocity = GLOBAL_GET("physics/3d/solver/fluid_flow_velocity");
+	const real_t configured_magnus_spin = GLOBAL_GET("physics/3d/solver/sphere_magnus_spin_coefficient");
+	sphere_magnus_spin_coefficient = Math::is_finite(configured_magnus_spin) ? CLAMP(configured_magnus_spin, real_t(0.0), real_t(10.0)) : real_t(0.0);
+	const real_t configured_magnus_density = GLOBAL_GET("physics/3d/solver/sphere_magnus_medium_density");
+	sphere_magnus_medium_density = Math::is_finite(configured_magnus_density) ? CLAMP(configured_magnus_density, real_t(0.0), real_t(2000.0)) : real_t(1.225);
+	const real_t configured_magnus_max_lift = GLOBAL_GET("physics/3d/solver/sphere_magnus_max_lift_coefficient");
+	sphere_magnus_max_lift_coefficient = Math::is_finite(configured_magnus_max_lift) ? CLAMP(configured_magnus_max_lift, real_t(0.0), real_t(5.0)) : real_t(1.5);
+	const Vector3 configured_magnus_flow = GLOBAL_GET("physics/3d/solver/sphere_magnus_flow_velocity");
+	sphere_magnus_flow_velocity = configured_magnus_flow.is_finite() ? configured_magnus_flow : Vector3();
 	const real_t configured_box_pressure = GLOBAL_GET("physics/3d/solver/rigid_box_aero_pressure_coefficient");
 	rigid_box_aero_pressure_coefficient = Math::is_finite(configured_box_pressure) ? CLAMP(configured_box_pressure, real_t(0.0), real_t(10.0)) : real_t(0.0);
 	const real_t configured_box_skin = GLOBAL_GET("physics/3d/solver/rigid_box_aero_skin_coefficient");

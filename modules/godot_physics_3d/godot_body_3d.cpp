@@ -42,6 +42,7 @@
 #include "servers/physics_gyroscopic_3d.h"
 #include "servers/physics_rotating_frame_3d.h"
 #include "servers/physics_fluid_buoyancy_3d.h"
+#include "servers/physics_sphere_magnus_3d.h"
 #include "servers/physics_fluid_convex_hull_3d.h"
 #include "servers/physics_rigid_convex_aero_facets_3d.h"
 #include "servers/physics_fluid_box_3d.h"
@@ -866,6 +867,77 @@ void GodotBody3D::integrate_forces(real_t p_step, bool p_defer_motion) {
 					if (mode == PS3DE::BODY_MODE_RIGID) {
 						torque += lever.cross(lift + drag);
 					}
+				}
+			}
+
+			// Spinning spheres curve because the medium generates a lift force
+			// perpendicular to local relative flow (Magnus effect). The
+			// exact sphere radius is used only for uniformly scaled
+			// SphereShape3D; sheared/nonuniform spheres are deliberately
+			// skipped instead of applying a physically incorrect area.
+			// A compound rigid body also receives the correct lever-arm
+			// torque. With zero spin coefficient, this branch adds NO
+			// shape traversal, memory, or force to legacy integration.
+			if (mode == PS3DE::BODY_MODE_RIGID &&
+					get_space()->get_sphere_magnus_spin_coefficient() > 0.0 &&
+					get_space()->get_sphere_magnus_medium_density() > 0.0 &&
+					get_space()->get_sphere_magnus_max_lift_coefficient() > 0.0 &&
+					p_step > 0.0 && angular_velocity != Vector3()) {
+				const Vector3 world_com = get_transform().origin + center_of_mass;
+				const Vector3 &flow = get_space()->get_sphere_magnus_flow_velocity();
+				const int sphere_shape_count = get_shape_count();
+				for (int i = 0; i < sphere_shape_count; ++i) {
+					if (is_shape_disabled(i)) {
+						continue;
+					}
+					const GodotShape3D *shape = get_shape(i);
+					if (shape->get_type() != PS3DE::SHAPE_SPHERE) {
+						continue;
+					}
+					const Transform3D sphere_transform = get_transform() * get_shape_transform(i);
+					real_t uniform_scale = 0.0;
+					if (!godot_physics_fluid_uniform_scale_3d(sphere_transform.basis, uniform_scale)) {
+						continue;
+					}
+					const real_t radius =
+							static_cast<const GodotSphereShape3D *>(shape)->get_radius() * uniform_scale;
+					const Vector3 lever = sphere_transform.origin - world_com;
+					const Vector3 center_velocity = linear_velocity + angular_velocity.cross(lever);
+					const Vector3 relative_velocity = center_velocity - flow;
+					Vector3 lift;
+					if (!godot_physics_sphere_magnus_force_3d(center_velocity, angular_velocity,
+								flow, radius, get_space()->get_sphere_magnus_medium_density(),
+								get_space()->get_sphere_magnus_spin_coefficient(),
+								get_space()->get_sphere_magnus_max_lift_coefficient(), lift) ||
+							!relative_velocity.is_finite()) {
+						continue;
+					}
+					// Guard a very light sphere against an enormous lateral
+					// impulse in one large timestep. Unlike a clamped force,
+					// the cap is mass- and flow-relative-speed aware.
+					const real_t lift_speed = lift.length();
+					const real_t local_speed = relative_velocity.length();
+					if (!(lift_speed > 0.0) || !Math::is_finite(lift_speed) ||
+							!(local_speed > 0.0) || !Math::is_finite(local_speed)) {
+						continue;
+					}
+					const double requested_impulse = double(lift_speed) * double(p_step);
+					const double max_impulse = double(mass) * double(local_speed) /
+							double(MAX(1, sphere_shape_count));
+					if (!(max_impulse > 0.0) || !Math::is_finite(max_impulse) ||
+							!Math::is_finite(requested_impulse)) {
+						continue;
+					}
+					if (requested_impulse > max_impulse) {
+						lift *= real_t(max_impulse / requested_impulse);
+					}
+					const Vector3 candidate_force = force + lift;
+					const Vector3 candidate_torque = torque + lever.cross(lift);
+					if (!candidate_force.is_finite() || !candidate_torque.is_finite()) {
+						continue;
+					}
+					force = candidate_force;
+					torque = candidate_torque;
 				}
 			}
 

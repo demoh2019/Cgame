@@ -878,6 +878,14 @@ PhysicsServer3D::PhysicsServer3D() {
 	GLOBAL_DEF(PropertyInfo(Variant::FLOAT, "physics/3d/solver/fluid_angular_drag", PROPERTY_HINT_RANGE, "0,100,0.01,or_greater"), 0.0);
 	GLOBAL_DEF(PropertyInfo(Variant::FLOAT, "physics/3d/solver/fluid_buoyancy", PROPERTY_HINT_RANGE, "0,2,0.01,or_greater"), 0.0);
 	GLOBAL_DEF(PropertyInfo(Variant::VECTOR3, "physics/3d/solver/fluid_flow_velocity"), Vector3());
+	// Opt-in aerodynamic/hydrodynamic Magnus lift for actual SphereShape3D
+	// rigid bodies. The force is perpendicular to local relative flow,
+	// bounded by a maximum lift coefficient, with density scaling.
+	// Disabled by default; no extra shape traversals or force changes.
+	GLOBAL_DEF(PropertyInfo(Variant::FLOAT, "physics/3d/solver/sphere_magnus_spin_coefficient", PROPERTY_HINT_RANGE, "0,10,0.01,or_greater"), 0.0);
+	GLOBAL_DEF(PropertyInfo(Variant::FLOAT, "physics/3d/solver/sphere_magnus_medium_density", PROPERTY_HINT_RANGE, "0,2000,0.1,or_greater,suffix:kg/m³"), 1.225);
+	GLOBAL_DEF(PropertyInfo(Variant::FLOAT, "physics/3d/solver/sphere_magnus_max_lift_coefficient", PROPERTY_HINT_RANGE, "0,5,0.01,or_greater"), 1.5);
+	GLOBAL_DEF(PropertyInfo(Variant::VECTOR3, "physics/3d/solver/sphere_magnus_flow_velocity"), Vector3());
 	// Rigid BoxShape3D: oriented six-face pressure + tangential drag, with
 	// inertia-aware impulses at each face center. 0+0 disables all work.
 	GLOBAL_DEF(PropertyInfo(Variant::FLOAT, "physics/3d/solver/rigid_box_aero_pressure_coefficient", PROPERTY_HINT_RANGE, "0,10,0.01,or_greater"), 0.0);

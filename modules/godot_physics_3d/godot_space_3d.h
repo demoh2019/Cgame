@@ -260,6 +260,10 @@ private:
 	real_t fluid_angular_drag = 0.0; // Uniform-medium quadratic angular resistance.
 	real_t fluid_buoyancy = 0.0; // 0 = off; 1 = neutral in the fully submerged model.
 	Vector3 fluid_flow_velocity; // Constant ambient current or wind, in world space.
+	real_t sphere_magnus_spin_coefficient = 0.0; // Off by default.
+	real_t sphere_magnus_medium_density = 1.225; // Air density kg/m^3.
+	real_t sphere_magnus_max_lift_coefficient = 1.5;
+	Vector3 sphere_magnus_flow_velocity; // Magnus medium velocity, world space.
 	real_t rigid_box_aero_pressure_coefficient = 0.0; // 0: off, pressure on windward faces.
 	real_t rigid_box_aero_skin_coefficient = 0.0; // 0: off, tangential quadratic drag.
 	real_t rigid_box_aero_density = 1.225; // Air density, kg/m^3.
@@ -502,6 +506,10 @@ public:
 	_FORCE_INLINE_ real_t get_fluid_angular_drag() const { return fluid_angular_drag; }
 	_FORCE_INLINE_ real_t get_fluid_buoyancy() const { return fluid_buoyancy; }
 	_FORCE_INLINE_ const Vector3 &get_fluid_flow_velocity() const { return fluid_flow_velocity; }
+	_FORCE_INLINE_ real_t get_sphere_magnus_spin_coefficient() const { return sphere_magnus_spin_coefficient; }
+	_FORCE_INLINE_ real_t get_sphere_magnus_medium_density() const { return sphere_magnus_medium_density; }
+	_FORCE_INLINE_ real_t get_sphere_magnus_max_lift_coefficient() const { return sphere_magnus_max_lift_coefficient; }
+	_FORCE_INLINE_ const Vector3 &get_sphere_magnus_flow_velocity() const { return sphere_magnus_flow_velocity; }
 	_FORCE_INLINE_ real_t get_rigid_box_aero_pressure_coefficient() const { return rigid_box_aero_pressure_coefficient; }
 	_FORCE_INLINE_ real_t get_rigid_box_aero_skin_coefficient() const { return rigid_box_aero_skin_coefficient; }
 	_FORCE_INLINE_ real_t get_rigid_box_aero_density() const { return rigid_box_aero_density; }
