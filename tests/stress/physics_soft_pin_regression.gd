@@ -45,29 +45,28 @@ func _run() -> void:
 	for frame in range(4):
 		await physics_frame
 
-	var server := PhysicsServer3D
 	var rid: RID = body.get_physics_rid()
 	# Create nonzero velocity before pinning, to check that the pin discards it.
-	server.soft_body_apply_central_impulse(rid, Vector3(0.0, 15.0, 0.0))
+	PhysicsServer3D.soft_body_apply_central_impulse(rid, Vector3(0.0, 15.0, 0.0))
 	await physics_frame
-	server.soft_body_pin_point(rid, first, true)
-	server.soft_body_pin_point(rid, second, true)
-	var anchor: Vector3 = server.soft_body_get_point_global_position(rid, second)
+	PhysicsServer3D.soft_body_pin_point(rid, first, true)
+	PhysicsServer3D.soft_body_pin_point(rid, second, true)
+	var anchor: Vector3 = PhysicsServer3D.soft_body_get_point_global_position(rid, second)
 	var failed := false
 	for frame in range(20):
 		await physics_frame
-		var position: Vector3 = server.soft_body_get_point_global_position(rid, second)
+		var position: Vector3 = PhysicsServer3D.soft_body_get_point_global_position(rid, second)
 		if not position.is_finite() or position.distance_squared_to(anchor) > 0.0001:
 			printerr("FAIL: pinned particle drifted in frame ", frame)
 			failed = true
 			break
 
 	if not failed:
-		server.soft_body_pin_point(rid, first, false)
+		PhysicsServer3D.soft_body_pin_point(rid, first, false)
 		# The other visual alias still pins the same physical node.
 		for frame in range(15):
 			await physics_frame
-			var position: Vector3 = server.soft_body_get_point_global_position(rid, second)
+			var position: Vector3 = PhysicsServer3D.soft_body_get_point_global_position(rid, second)
 			if not position.is_finite() or position.distance_squared_to(anchor) > 0.0001:
 				printerr("FAIL: unpinning one alias released a shared pinned particle.")
 				failed = true
@@ -75,16 +74,16 @@ func _run() -> void:
 
 	if not failed:
 		var moved_anchor := anchor + Vector3(0.0, 0.3, 0.0)
-		server.soft_body_move_point(rid, second, moved_anchor)
+		PhysicsServer3D.soft_body_move_point(rid, second, moved_anchor)
 		for frame in range(10):
 			await physics_frame
-			var position: Vector3 = server.soft_body_get_point_global_position(rid, second)
+			var position: Vector3 = PhysicsServer3D.soft_body_get_point_global_position(rid, second)
 			if not position.is_finite() or position.distance_squared_to(moved_anchor) > 0.0001:
 				printerr("FAIL: explicitly moved pinned particle did not remain stationary.")
 				failed = true
 				break
 
-	server.soft_body_remove_all_pinned_points(rid)
+	PhysicsServer3D.soft_body_remove_all_pinned_points(rid)
 	world.queue_free()
 	await process_frame
 	if failed:
