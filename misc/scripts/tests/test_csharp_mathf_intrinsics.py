@@ -32,7 +32,7 @@ class MathfIntrinsicsPerformance(unittest.TestCase):
     def test_has_all_six_float_and_double_intrinsics(self):
         for signature, implementation in MAP.items():
             with self.subTest(signature=signature):
-                self.assertIn("public static " + signature, SOURCE)
+                self.assertIn("public static " + ("float " if "(float " in signature else "double ") + signature, SOURCE)
                 self.assertIn(implementation, SOURCE)
 
     def test_no_legacy_angle_constants_in_mathf(self):
