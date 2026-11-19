@@ -1736,11 +1736,9 @@ void AnimationMixer::_blend_process(double p_delta, bool p_update_only) {
 						t->playing_streams.clear();
 						continue;
 					}
-					ObjectID oid = a->get_instance_id();
-					if (!t->playing_streams.has(oid)) {
-						t->playing_streams[oid] = PlayingAudioTrackInfo();
-					}
-
+					const ObjectID oid = a->get_instance_id();
+					// HashMap::operator[] default-constructs absent entries on its own.
+					// Avoid a separate has() probe, redundant assignment and final lookup.
 					PlayingAudioTrackInfo &track_info = t->playing_streams[oid];
 					track_info.length = a_length;
 					track_info.time = time;
@@ -1761,8 +1759,8 @@ void AnimationMixer::_blend_process(double p_delta, bool p_update_only) {
 						// Then, check the current playing stream to prevent to playback doubly.
 						idx = a->track_find_key(i, time, Animation::FIND_MODE_NEAREST, true);
 						// Discard previous stream when seeking.
-						if (map.has(idx)) {
-							t->audio_stream_playback->stop_stream(map[idx].index);
+						if (const PlayingAudioStreamInfo *previous = map.getptr(idx)) {
+							t->audio_stream_playback->stop_stream(previous->index);
 							map.erase(idx);
 						}
 					} else {
