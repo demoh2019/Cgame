@@ -21,6 +21,7 @@ var you: Dictionary = {}
 var players: Dictionary = {} # id -> entity from the latest snapshot
 var zombies: Dictionary = {}
 var barricades: Dictionary = {} # Nearby defenses from the server.
+var campfires: Dictionary = {} # Nearby temporary warmth sources, server-provided.
 var bags: Dictionary = {}
 var depleted: Dictionary = {}
 var crates_used: Dictionary = {}
@@ -81,6 +82,9 @@ func on_snapshot(snapshot: Dictionary) -> void:
 	zombies.clear()
 	for entity in snapshot["zombies"]:
 		zombies[entity["id"]] = entity
+	campfires.clear()
+	for entity in snapshot.get("campfires", []):
+		campfires[int(entity["id"])] = entity
 	bags.clear()
 	for entity in snapshot["bags"]:
 		bags[entity["id"]] = entity
@@ -266,6 +270,11 @@ func build(point: Vector2) -> void:
 
 func repair(id: int) -> void:
 	net.c_repair.rpc_id(1, id)
+
+
+func light_campfire(point: Vector2) -> void:
+	if point.is_finite():
+		net.c_light_campfire.rpc_id(1, point.x, point.y)
 
 
 func upgrade(id: int) -> void:

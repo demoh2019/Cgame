@@ -14,6 +14,7 @@ const SurvivalRadar = preload("res://scripts/client/survival_radar.gd")
 const Contracts = preload("res://scripts/shared/contracts.gd")
 const CampRest = preload("res://scripts/shared/camp_rest.gd")
 const Weather = preload("res://scripts/shared/weather.gd")
+const FieldCampfire = preload("res://scripts/shared/field_campfire.gd")
 const LOCAL_PLAYER_ID := 2
 const TERRAIN_STEP := 8.0
 
@@ -41,6 +42,7 @@ var _resource_meshes: Dictionary = {}
 var _crate_meshes: Dictionary = {}
 var _zombie_meshes: Dictionary = {}
 var _barricade_bodies: Dictionary = {}
+var _campfire_visuals: Dictionary = {}
 var _materials: Dictionary = {}
 var _last_center: Vector2i = Vector2i(999999, 999999)
 var _hud_clock: float = 0.0
@@ -88,6 +90,7 @@ func _setup_actions() -> void:
 	_bind_key("survive_warmth", KEY_8)
 	_bind_key("survive_lake", KEY_R)
 	_bind_key("survive_build", KEY_U)
+	_bind_key("survive_campfire", KEY_O)
 	_bind_key("survive_repair", KEY_H)
 	_bind_key("survive_upgrade", KEY_Y)
 	_bind_key("survive_dismantle", KEY_X)
@@ -381,6 +384,36 @@ func _sync_barricades() -> void:
 			_barricade_bodies.erase(id)
 
 
+func _sync_campfires() -> void:
+	var visible: Dictionary = {}
+	for id in sim.campfires:
+		var fire: Dictionary = sim.campfires[id]
+		var point := Vector3(float(fire["x"]), float(fire["y"]), float(fire["z"]))
+		if survivor.position.distance_to(point) > 95.0:
+			continue
+		visible[id] = true
+		if not _campfire_visuals.has(id):
+			var node := Node3D.new()
+			node.name = "Campfire_%d" % int(id)
+			node.add_child(_mesh(Vector3(0.9, 0.28, 0.9), Color(0.4, 0.19, 0.08)))
+			var flame := _mesh(Vector3(0.48, 0.65, 0.48), Color(1.0, 0.42, 0.05))
+			flame.position.y = 0.4
+			node.add_child(flame)
+			var light := OmniLight3D.new()
+			light.position.y = 0.8
+			light.light_color = Color(1.0, 0.48, 0.17)
+			light.omni_range = 4.0
+			light.light_energy = 0.8
+			node.add_child(light)
+			add_child(node)
+			_campfire_visuals[id] = node
+		_campfire_visuals[id].position = point
+	for id in _campfire_visuals.keys():
+		if not visible.has(id):
+			_campfire_visuals[id].queue_free()
+			_campfire_visuals.erase(id)
+
+
 func _nearest_barricade() -> int:
 	var nearest := -1
 	var distance := 3.0
@@ -419,6 +452,7 @@ func _physics_process(delta: float) -> void:
 		_crate_meshes[item_id].visible = not sim.opened_crates.has(item_id)
 	_sync_zombies()
 	_sync_barricades()
+	_sync_campfires()
 	_hud_clock += delta
 	if _hud_clock > 0.15:
 		_hud_clock = 0.0
@@ -622,6 +656,9 @@ func _unhandled_input(event: InputEvent) -> void:
 	elif event.is_action_pressed("survive_lake"):
 		var drink_result: Dictionary = sim.cmd_drink_water(LOCAL_PLAYER_ID)
 		_result("Filtered lake water" if bool(drink_result.get("filtered", false)) else "Lake water (infection risk)", drink_result)
+	elif event.is_action_pressed("survive_campfire"):
+		var point := Vector2(survivor.position.x, survivor.position.z) + _facing * 2.8
+		_result("Light campfire", sim.cmd_light_campfire(LOCAL_PLAYER_ID, point.x, point.y))
 	elif event.is_action_pressed("survive_build"):
 		var point := Vector2(survivor.position.x, survivor.position.z) + _facing * 2.8
 		_result("Build barricade", sim.cmd_build(LOCAL_PLAYER_ID, point.x, point.y))
@@ -687,7 +724,7 @@ func _update_hud() -> void:
 		int(survivor.combat_energy), int(Defs.COMBAT_ENERGY_MAX), survivor.skill_timer, survivor.dodge_timer,
 		survivor.inventory.weapon if not survivor.inventory.weapon.is_empty() else "unarmed",
 		str(weather.get("condition", "unknown")).capitalize(), float(weather.get("temperature_c", 0.0)),
-		"SHELTERED" if bool(weather.get("sheltered", false)) else "EXPOSED",
+		"CAMPFIRE WARMTH" if sim.campfires.size() > 0 and FieldCampfire.has_warmth(sim.campfires, position, sim.time) else ("SHELTERED" if bool(weather.get("sheltered", false)) else "EXPOSED"),
 		int(ceil(vitals.warmth_seconds)),
 		Defs.ZONE_NAMES[zone], WorldGen.tier_for_zone(zone), risk, int(position.x), int(position.z), sim.zombies.size(),
 		int(levels["wood"]), int(levels["stone"]), int(levels["ore"]), int(levels["fiber"]),
@@ -700,7 +737,7 @@ func _update_hud() -> void:
 	var recipe_id: String = _recipes[_recipe_index] if not _recipes.is_empty() else "bandage"
 	var recipe: Dictionary = Defs.recipes().get(recipe_id, {})
 	var near_bench: bool = Vector2(position.x, position.z).distance_to(GameServer.WORKBENCH_POSITION) < GameServer.WORKBENCH_RANGE
-	_instructions.text = "WASD move | Shift sprint | E gather | Q loot | F attack | G heavy strike | Space dodge | U build | H repair | Y upgrade | X dismantle\nTab / Shift+Tab recipes | C craft | B stash | 1 food 2 water 3 heal 4 weapon 5 armor 6 antiseptic 7 antibiotics 8 heat pack R lake (filter prevents infection)\nN buy water / V sell salvage | T fish near shore | P accept / Shift+P turn in (hub)\nCRAFT %s -> %s x%d | %s | inputs %s\n%s" % [
+	_instructions.text = "WASD move | Shift sprint | E gather | Q loot | F attack | G heavy strike | Space dodge | U build | O campfire | H repair | Y upgrade | X dismantle\nTab / Shift+Tab recipes | C craft | B stash | 1 food 2 water 3 heal 4 weapon 5 armor 6 antiseptic 7 antibiotics 8 heat pack R lake (filter prevents infection)\nN buy water / V sell salvage | T fish near shore | P accept / Shift+P turn in (hub)\nCRAFT %s -> %s x%d | %s | inputs %s\n%s" % [
 		recipe_id, str(recipe.get("output", "")), int(recipe.get("count", 0)),
 		"WORKBENCH" if near_bench else "workbench at x=9, z=0",
 		str(recipe.get("inputs", {})), _feedback

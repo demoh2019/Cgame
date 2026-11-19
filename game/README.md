@@ -800,3 +800,23 @@ anti-exploit regression coverage.
 
 No Cgame native engine change was needed; this extends the existing
 server-authoritative game progression and combat APIs.
+
+## Temporary field campfires for hostile weather
+
+Place a temporary **field campfire** outside the protected settlement using
+**O** in the local or online game, or the online **I** inventory-menu button.
+Each fire costs 3 T1 wood + 1 T1 stone, burns for 300 seconds, and warms all
+survivors within a 5-metre radius. The authoritative server validates dry,
+non-steep terrain, range, proximity to obstacles, fuel, and ownership limits
+(2 active fires per player, 96 per world). Invalid placements cost nothing.
+
+Proximity to an active fire makes weather exposure decay, without healing
+existing injuries or curing infection. Existing hunger, thirst, infection,
+combat, PvP and weather systems remain active. Flames are visible to nearby
+players through interest-filtered server snapshots; IDs and positions come
+from the server, not clients. Campfires are **session-only** and intentionally
+not part of durable account-owned barricade checkpoints.
+
+The regression suite includes `tests/test_field_campfire.gd` for fuel,
+placement validation, shared warmth, snapshot privacy, and expiry. No native
+Cgame API changes were required for this vertical slice.

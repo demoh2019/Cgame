@@ -463,6 +463,13 @@ func _unhandled_input(event: InputEvent) -> void:
 				hud.toggle_inventory()
 			KEY_C:
 				hud.toggle_crafting()
+			KEY_O:
+				if not hud.is_menu_open() and bool(client.you.get("alive", false)):
+					var direction: Vector2 = _aim_direction()
+					if direction == Vector2.ZERO:
+						direction = Vector2(sin(client.yaw), cos(client.yaw))
+					var target := Vector2(client.predicted.x, client.predicted.z) + direction * 2.8
+					client.light_campfire(target)
 			KEY_U:
 				var direction: Vector2 = _aim_direction()
 				if direction.length_squared() > 0.001:

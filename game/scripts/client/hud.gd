@@ -147,6 +147,14 @@ func _build() -> void:
 		else:
 			client.dismantle(id))
 	inventory_box.add_child(dismantle_button)
+	var campfire_button := Button.new()
+	campfire_button.text = "Light field campfire (3 wood T1, 1 stone T1)"
+	campfire_button.tooltip_text = "Shared warmth for 5 minutes, outside the safe settlement"
+	campfire_button.pressed.connect(func() -> void:
+		var pos: Vector3 = client.display_position()
+		var direction := Vector2(sin(client.yaw), cos(client.yaw))
+		client.light_campfire(Vector2(pos.x, pos.z) + direction * 2.8))
+	inventory_box.add_child(campfire_button)
 	_inventory_grid = GridContainer.new()
 	_inventory_grid.columns = 4
 	inventory_box.add_child(_inventory_grid)
@@ -419,6 +427,12 @@ func _sell_one_material() -> void:
 
 
 func _on_result(kind: String, data: Dictionary) -> void:
+	if kind == "campfire":
+		if bool(data.get("ok", false)):
+			say("Campfire lit: shared warmth for 5 minutes.")
+		else:
+			say("Campfire: " + str(data.get("reason", "rejected")))
+		return
 	if kind == "drink":
 		if bool(data.get("ok", false)):
 			say("Lake: clean filtered drink" if bool(data.get("filtered", false)) else "Lake: unfiltered water increased infection")
@@ -515,7 +529,7 @@ func _process(_delta: float) -> void:
 		_info_label.text += "\nWeather: %s %.0fC %s | Exposure %d/100 | Heat pack %ds" % [
 			str(weather.get("condition", "clear")).capitalize(),
 			float(weather.get("temperature_c", 0.0)),
-			"SHELTERED" if bool(weather.get("sheltered", false)) else "EXPOSED",
+			"CAMPFIRE WARMTH" if bool(client.you.get("campfire_warm", false)) else ("SHELTERED" if bool(weather.get("sheltered", false)) else "EXPOSED"),
 			int(client.you.get("exposure", 0.0)), int(ceil(float(client.you.get("warmth_seconds", 0.0))))
 		]
 	var journal: Variant = client.you.get("contract", Contracts.empty_state())

@@ -27,6 +27,8 @@ func update_from(client) -> void:
 		_touch("bag:%d" % id, "bag", client.bags[id], seen)
 	for id in client.barricades:
 		_touch("barricade:%d" % id, "barricade", client.barricades[id], seen)
+	for id in client.campfires:
+		_touch("campfire:%d" % id, "campfire", client.campfires[id], seen)
 	for key in _nodes.keys():
 		if not seen.has(key):
 			_nodes[key].queue_free()
@@ -75,6 +77,37 @@ func _make(kind: String, entity: Dictionary) -> Node3D:
 		barricade.material_override = material
 		root.add_child(barricade)
 		return root
+	if kind == "campfire":
+		var wood := MeshInstance3D.new()
+		var wood_mesh := CylinderMesh.new()
+		wood_mesh.top_radius = 0.42
+		wood_mesh.bottom_radius = 0.5
+		wood_mesh.height = 0.22
+		wood.mesh = wood_mesh
+		wood.position.y = 0.13
+		var wood_material := StandardMaterial3D.new()
+		wood_material.albedo_color = Color(0.32, 0.18, 0.09)
+		wood.material_override = wood_material
+		root.add_child(wood)
+		var flame := MeshInstance3D.new()
+		var fire_mesh := SphereMesh.new()
+		fire_mesh.radius = 0.34
+		fire_mesh.height = 0.7
+		flame.mesh = fire_mesh
+		flame.position.y = 0.57
+		var fire_material := StandardMaterial3D.new()
+		fire_material.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+		fire_material.albedo_color = Color(1.0, 0.42, 0.08)
+		flame.material_override = fire_material
+		root.add_child(flame)
+		var light := OmniLight3D.new()
+		light.position.y = 0.8
+		light.light_color = Color(1.0, 0.48, 0.18)
+		light.light_energy = 0.8
+		light.omni_range = 4.0
+		light.shadow_enabled = false
+		root.add_child(light)
+		return root
 	if kind == "bag":
 		var mesh := MeshInstance3D.new()
 		mesh.mesh = Meshes.get_mesh("bag")
@@ -109,6 +142,6 @@ func _process(delta: float) -> void:
 		var node: Node3D = _nodes[key]
 		var target: Dictionary = _targets[key]
 		node.position = node.position.lerp(target["position"], blend)
-		if not (key.begins_with("bag") or key.begins_with("barricade")):
+		if not (key.begins_with("bag") or key.begins_with("barricade") or key.begins_with("campfire")):
 			node.rotation.y = lerp_angle(node.rotation.y, target["yaw"], blend)
 			node.get_node("Model").update_motion(delta)
