@@ -1,0 +1,34 @@
+name: Animation Blend Tree Single Probe
+on:
+  pull_request:
+    paths:
+      - "scene/animation/animation_blend_tree.cpp"
+      - "tests/scene/test_animation_blend_tree.cpp"
+      - ".github/workflows/animation-blendtree-single-probe.yml"
+  workflow_dispatch:
+
+jobs:
+  native-tests:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          submodules: recursive
+      - uses: ./.github/actions/godot-cache-restore
+        with:
+          cache-name: linux-blendtree-single-probe
+        continue-on-error: true
+      - uses: ./.github/actions/godot-deps
+      - name: Build editor with native tests
+        uses: ./.github/actions/godot-build
+        with:
+          platform: linuxbsd
+          target: editor
+          scons-flags: tests=yes module_text_server_fb_enabled=yes -j2
+      - uses: ./.github/actions/godot-cache-save
+        with:
+          cache-name: linux-blendtree-single-probe
+        continue-on-error: true
+      - name: Verify blendtree fast paths
+        run: ./bin/godot.linuxbsd.editor.x86_64 --headless --test --test-case="*[AnimationBlendTreeFastPath]*"
