@@ -166,6 +166,10 @@ class GodotSoftBody3D : public GodotCollisionObject3D {
 	LocalVector<SelfCollisionEdge> xpbd_self_edges;
 	LocalVector<SelfEdgeContact> xpbd_self_edge_contacts;
 	DynamicBVH xpbd_self_edge_tree;
+	// Separate lazy BVH for contacts with OTHER soft bodies. Mesh edits reset
+	// both the topology and leaves; default-off scenes allocate no edge nodes.
+	LocalVector<SelfCollisionEdge> xpbd_pair_edges;
+	DynamicBVH xpbd_pair_edge_tree;
 	// Allocated only for positive volume compliance on a closed soft mesh.
 	LocalVector<Vector3> xpbd_volume_gradients;
 	double xpbd_volume_rest = 0.0; // May change via plastic creep.
@@ -346,6 +350,10 @@ private:
 	void initialize_self_collision_topology();
 	void solve_self_collisions(real_t p_delta);
 	bool solve_edge_self_collisions(real_t p_delta);
+	void initialize_pair_edge_topology(real_t p_thickness);
+	void update_pair_edge_tree(real_t p_thickness);
+	bool solve_pair_edge_contacts(GodotSoftBody3D &p_other, real_t p_delta,
+			real_t p_thickness, real_t p_alpha, uint32_t p_contact_budget);
 	void initialize_volume_constraint();
 	bool solve_volume_constraint(double p_alpha, double &r_lambda);
 	void reset_link_rest_lengths();
