@@ -1,0 +1,37 @@
+name: FileAccess stack-first token scanning regression
+
+on:
+  pull_request:
+    branches: [develop]
+    paths:
+      - 'core/io/file_access.cpp'
+      - 'tests/core/io/test_file_access.cpp'
+      - '.github/workflows/file-access-token-stack.yml'
+  push:
+    branches: [develop]
+    paths:
+      - 'core/io/file_access.cpp'
+      - 'tests/core/io/test_file_access.cpp'
+      - '.github/workflows/file-access-token-stack.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  native-token:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+      - uses: ./.github/actions/godot-deps
+      - uses: ./.github/actions/godot-build
+        with:
+          platform: linuxbsd
+          target: editor
+          scons-flags: dev_build=yes tests=yes debug_symbols=no module_mono_enabled=no accesskit=no
+      - name: Check short and long token scanning
+        run: |
+          timeout 300s ./bin/godot.linuxbsd.editor.dev.x86_64 --headless --test --test-case='*Token scanning reuses stack-first*' --no-colors
