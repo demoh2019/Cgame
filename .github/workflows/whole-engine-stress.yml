@@ -236,6 +236,18 @@ jobs:
             --script res://physics_jolt_pending_broadphase_regression.gd \
             2>&1 | tee physics-jolt-pending-broadphase.log
           grep -Fq 'Jolt pending broadphase regression passed.' physics-jolt-pending-broadphase.log
+      - name: Regression-test Jolt folded soft-body self collision
+        shell: bash
+        run: |
+          set -euo pipefail
+          BIN=./bin/godot.linuxbsd.editor.dev.x86_64
+          PROJECT=tests/stress/jolt_soft_self
+          timeout 120s "$BIN" --headless --path "$PROJECT" \
+            --script res://self_collision_regression.gd --check-only
+          timeout 180s "$BIN" --headless --path "$PROJECT" \
+            --script res://self_collision_regression.gd \
+            2>&1 | tee jolt-soft-self-collision.log
+          grep -Fq 'PASS: Jolt nonlocal soft self collision and one-ring suppression' jolt-soft-self-collision.log
       - name: Regression-test conservative swept soft-body edge-edge contacts
         shell: bash
         run: |
