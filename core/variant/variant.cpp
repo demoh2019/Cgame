@@ -201,6 +201,7 @@ String Variant::get_type_name(Variant::Type p_type) {
 
 static HashMap<String, Variant::Type> _init_type_name_map() {
 	HashMap<String, Variant::Type> type_names;
+	type_names.reserve(Variant::VARIANT_MAX);
 	for (int i = 0; i < Variant::VARIANT_MAX; i++) {
 		type_names[Variant::get_type_name((Variant::Type)i)] = (Variant::Type)i;
 	}
