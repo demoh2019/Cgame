@@ -123,47 +123,56 @@ TEST_CASE("[PCKPacker] Pack a PCK file with some files and directories") {
 
 
 TEST_CASE("[PCKPacker] PackedData index shares directories and removes paths") {
-	PackedData packed;
+	// Main::test_setup() already owns the PackedData singleton. Do not
+	// replace it with a temporary object or reset unrelated pack entries.
+	PackedData *packed = PackedData::get_singleton();
+	REQUIRE(packed != nullptr);
+	const uint32_t previous_count = packed->get_file_paths().size();
 	uint8_t md5[16] = {};
 	md5[0] = 0x6e;
 
-	packed.add_path("sample.pck", "res://levels/one/alpha.tscn", 0, 32, md5, nullptr, false);
-	packed.add_path("sample.pck", "res://levels/one/beta.tscn", 32, 16, md5, nullptr, false);
-	packed.add_path("sample.pck", "res://levels/two/gamma.tscn", 48, 64, md5, nullptr, false);
-	CHECK(packed.has_path("res://levels/one/alpha.tscn"));
-	CHECK(packed.has_path("res://levels/one/beta.tscn"));
-	CHECK(packed.has_path("res://levels/two/gamma.tscn"));
-	CHECK(packed.get_file_paths().size() == 3);
+	packed->add_path("sample.pck", "res://__pck_lookup_perf_tests__/levels/one/alpha.tscn", 0, 32, md5, nullptr, false);
+	packed->add_path("sample.pck", "res://__pck_lookup_perf_tests__/levels/one/beta.tscn", 32, 16, md5, nullptr, false);
+	packed->add_path("sample.pck", "res://__pck_lookup_perf_tests__/levels/two/gamma.tscn", 48, 64, md5, nullptr, false);
+	CHECK(packed->has_path("res://__pck_lookup_perf_tests__/levels/one/alpha.tscn"));
+	CHECK(packed->has_path("res://__pck_lookup_perf_tests__/levels/one/beta.tscn"));
+	CHECK(packed->has_path("res://__pck_lookup_perf_tests__/levels/two/gamma.tscn"));
+	CHECK(packed->get_file_paths().size() == previous_count + 3);
 
-	packed.remove_path("res://levels/one/alpha.tscn");
-	CHECK_FALSE(packed.has_path("res://levels/one/alpha.tscn"));
-	CHECK(packed.has_path("res://levels/one/beta.tscn"));
-	CHECK(packed.has_path("res://levels/two/gamma.tscn"));
-	CHECK(packed.get_file_paths().size() == 2);
+	packed->remove_path("res://__pck_lookup_perf_tests__/levels/one/alpha.tscn");
+	CHECK_FALSE(packed->has_path("res://__pck_lookup_perf_tests__/levels/one/alpha.tscn"));
+	CHECK(packed->has_path("res://__pck_lookup_perf_tests__/levels/one/beta.tscn"));
+	CHECK(packed->has_path("res://__pck_lookup_perf_tests__/levels/two/gamma.tscn"));
+	CHECK(packed->get_file_paths().size() == previous_count + 2);
 
-	packed.remove_path("res://levels/two/gamma.tscn");
-	CHECK(packed.get_file_paths().size() == 1);
-	packed.clear();
-	CHECK(packed.get_file_paths().is_empty());
+	packed->remove_path("res://__pck_lookup_perf_tests__/levels/one/beta.tscn");
+	packed->remove_path("res://__pck_lookup_perf_tests__/levels/two/gamma.tscn");
+	CHECK(packed->get_file_paths().size() == previous_count);
 }
 
 TEST_CASE("[PCKPacker] PackedData index of many files in existing directories") {
-	PackedData packed;
+	PackedData *packed = PackedData::get_singleton();
+	REQUIRE(packed != nullptr);
+	const uint32_t previous_count = packed->get_file_paths().size();
 	uint8_t md5[16] = {};
 	for (int i = 0; i < 512; i++) {
-		String path = "res://assets/shared/textures/texture_" + itos(i) + ".png";
-		packed.add_path("assets.pck", path, uint64_t(i) * 64, 64, md5, nullptr, false);
+		String path = "res://__pck_lookup_batch_tests__/assets/shared/textures/texture_" + itos(i) + ".png";
+		packed->add_path("assets.pck", path, uint64_t(i) * 64, 64, md5, nullptr, false);
 	}
-	CHECK(packed.get_file_paths().size() == 512);
-	CHECK(packed.has_path("res://assets/shared/textures/texture_0.png"));
-	CHECK(packed.has_path("res://assets/shared/textures/texture_511.png"));
+	CHECK(packed->get_file_paths().size() == previous_count + 512);
+	CHECK(packed->has_path("res://__pck_lookup_batch_tests__/assets/shared/textures/texture_0.png"));
+	CHECK(packed->has_path("res://__pck_lookup_batch_tests__/assets/shared/textures/texture_511.png"));
 
 	for (int i = 0; i < 512; i += 2) {
-		packed.remove_path("res://assets/shared/textures/texture_" + itos(i) + ".png");
+		packed->remove_path("res://__pck_lookup_batch_tests__/assets/shared/textures/texture_" + itos(i) + ".png");
 	}
-	CHECK(packed.get_file_paths().size() == 256);
-	CHECK_FALSE(packed.has_path("res://assets/shared/textures/texture_0.png"));
-	CHECK(packed.has_path("res://assets/shared/textures/texture_1.png"));
+	CHECK(packed->get_file_paths().size() == previous_count + 256);
+	CHECK_FALSE(packed->has_path("res://__pck_lookup_batch_tests__/assets/shared/textures/texture_0.png"));
+	CHECK(packed->has_path("res://__pck_lookup_batch_tests__/assets/shared/textures/texture_1.png"));
+	for (int i = 1; i < 512; i += 2) {
+		packed->remove_path("res://__pck_lookup_batch_tests__/assets/shared/textures/texture_" + itos(i) + ".png");
+	}
+	CHECK(packed->get_file_paths().size() == previous_count);
 }
 
 } // namespace TestPCKPacker
