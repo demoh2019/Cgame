@@ -126,4 +126,111 @@ TEST_CASE("[Physics] Self-collision rejects invalid and degenerate triangles wit
 	CHECK(p == original_p);
 }
 
+TEST_CASE("[Physics] Self-collision edge pairs detect crossed segments with distant endpoints") {
+	// The four endpoints are 1m from the crossing point, so a 5cm
+	// vertex/triangle proximity check alone cannot detect the overlap.
+	const Vector3 a(-1, 0, 0), b(1, 0, 0);
+	const Vector3 c(0, -1, 0), d(0, 1, 0);
+	Vector3 closest_ab, closest_cd;
+	real_t s = -1, t = -1;
+	REQUIRE(physics_softbody_closest_segment_points(a, b, c, d,
+			closest_ab, closest_cd, s, t));
+	CHECK(closest_ab.distance_to(closest_cd) < real_t(1e-5));
+	CHECK(Math::abs(s - real_t(0.5)) < real_t(1e-5));
+	CHECK(Math::abs(t - real_t(0.5)) < real_t(1e-5));
+
+	// Both endpoints of AB are pinned. The crossing CD edge must separate
+	// by the requested thickness, using the previous CD side.
+	Vector3 pa = a, pb = b, pc = c, pd = d;
+	const Vector3 old_c = c + Vector3(0, 0, -0.2);
+	const Vector3 old_d = d + Vector3(0, 0, -0.2);
+	REQUIRE(physics_softbody_project_edge_contact(pa, pb, pc, pd,
+			0.0, 0.0, 1.0, 1.0, real_t(0.1), 0.0,
+			a, b, old_c, old_d));
+	CHECK(pa == a);
+	CHECK(pb == b);
+	REQUIRE(physics_softbody_closest_segment_points(pa, pb, pc, pd,
+			closest_ab, closest_cd, s, t));
+	CHECK(Math::abs(closest_ab.distance_to(closest_cd) - real_t(0.1)) < real_t(1e-5));
+	CHECK(pc.z < 0.0);
+	CHECK(pd.z < 0.0);
+}
+
+TEST_CASE("[Physics] Self-collision finite segments handle skew and parallel edges") {
+	const Vector3 a(-1, 0, 0), b(1, 0, 0);
+	Vector3 closest_ab, closest_cd;
+	real_t s, t;
+
+	// Interior closest points of two skew edges.
+	REQUIRE(physics_softbody_closest_segment_points(a, b,
+			Vector3(0, -1, 0.04), Vector3(0, 1, 0.04),
+			closest_ab, closest_cd, s, t));
+	CHECK(Math::abs(s - real_t(0.5)) < real_t(1e-5));
+	CHECK(Math::abs(t - real_t(0.5)) < real_t(1e-5));
+	CHECK(Math::abs(closest_ab.distance_to(closest_cd) - real_t(0.04)) < real_t(1e-5));
+
+	// Clamped endpoints are required; infinite-line proximity would be wrong.
+	REQUIRE(physics_softbody_closest_segment_points(a, b,
+			Vector3(2, -1, 0), Vector3(2, 1, 0),
+			closest_ab, closest_cd, s, t));
+	CHECK(Math::abs(s - real_t(1.0)) < real_t(1e-5));
+	CHECK(Math::abs(t - real_t(0.5)) < real_t(1e-5));
+	CHECK(Math::abs(closest_ab.distance_to(closest_cd) - real_t(1.0)) < real_t(1e-5));
+
+	// Parallel overlapping projected edges should not divide by zero.
+	REQUIRE(physics_softbody_closest_segment_points(a, b,
+			Vector3(-1, 0.04, 0), Vector3(1, 0.04, 0),
+			closest_ab, closest_cd, s, t));
+	CHECK(Math::abs(closest_ab.distance_to(closest_cd) - real_t(0.04)) < real_t(1e-5));
+}
+
+TEST_CASE("[Physics] Self-collision edge contact compliance and pinned particles") {
+	const Vector3 a(-1, 0, 0), b(1, 0, 0);
+	const Vector3 c(0, -1, 0.02), d(0, 1, 0.02);
+	Vector3 stiff_a = a, stiff_b = b, stiff_c = c, stiff_d = d;
+	Vector3 soft_a = a, soft_b = b, soft_c = c, soft_d = d;
+	REQUIRE(physics_softbody_project_edge_contact(stiff_a, stiff_b, stiff_c, stiff_d,
+			0, 0, 1, 1, real_t(0.1), 0, a, b, c, d));
+	REQUIRE(physics_softbody_project_edge_contact(soft_a, soft_b, soft_c, soft_d,
+			0, 0, 1, 1, real_t(0.1), 5, a, b, c, d));
+	CHECK(stiff_a == a);
+	CHECK(stiff_b == b);
+	CHECK(soft_a == a);
+	CHECK(soft_b == b);
+	CHECK(stiff_c.z > soft_c.z);
+	CHECK(stiff_d.z > soft_d.z);
+	CHECK(stiff_c.is_finite());
+	CHECK(stiff_d.is_finite());
+
+	// Pinned endpoints on both edges: no contact impulse can be applied.
+	Vector3 p_a = a, p_b = b, p_c = c, p_d = d;
+	CHECK_FALSE(physics_softbody_project_edge_contact(p_a, p_b, p_c, p_d,
+			0, 0, 0, 0, real_t(0.1), 0, a, b, c, d));
+	CHECK(p_a == a);
+	CHECK(p_c == c);
+}
+
+TEST_CASE("[Physics] Self-collision edge contact ignores degeneracy and invalid inputs") {
+	Vector3 a(0, 0, 0), b(0, 0, 0), c(0, -1, 0), d(0, 1, 0);
+	const Vector3 old_a = a, old_b = b;
+	Vector3 on_ab, on_cd;
+	real_t s, t;
+	CHECK_FALSE(physics_softbody_closest_segment_points(a, b, c, d, on_ab, on_cd, s, t));
+	CHECK_FALSE(physics_softbody_project_edge_contact(a, b, c, d,
+			1, 1, 1, 1, 0.1, 0, a, b, c, d));
+	CHECK(a == old_a);
+	CHECK(b == old_b);
+
+	b = Vector3(1, 0, 0);
+	CHECK_FALSE(physics_softbody_project_edge_contact(a, b, c, d,
+			1, 1, 1, 1, real_t(0.1), -1, a, b, c, d));
+	CHECK_FALSE(physics_softbody_project_edge_contact(a, b, c, d,
+			-1, 1, 1, 1, real_t(0.1), 0, a, b, c, d));
+	CHECK_FALSE(physics_softbody_project_edge_contact(a, b, c, d,
+			1, 1, 1, 1, real_t(0.1),
+			std::numeric_limits<real_t>::infinity(), a, b, c, d));
+	CHECK(a == old_a);
+	CHECK(c == Vector3(0, -1, 0));
+}
+
 } // namespace TestPhysicsSoftBodySelfCollision
