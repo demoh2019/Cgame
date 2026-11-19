@@ -180,6 +180,10 @@ func gather(node_id: int) -> void:
 	net.c_gather.rpc_id(1, node_id)
 
 
+func fish() -> void:
+	net.c_fish.rpc_id(1)
+
+
 func craft(recipe: String, times: int = 1) -> void:
 	net.c_craft.rpc_id(1, recipe, times)
 
