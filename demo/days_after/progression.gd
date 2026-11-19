@@ -7,7 +7,7 @@ const RECIPES := {
     "bandage": {
         "cost": {"fiber": 2},
         "output": {"bandage": 1},
-        "level": 1, "xp": 14
+        "level": 1, "xp": 20
     },
     "hatchet": {
         "cost": {"wood": 2, "scrap": 2},

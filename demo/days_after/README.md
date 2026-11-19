@@ -16,7 +16,7 @@ Open `demo/days_after/project.godot` using a Cgame editor build, or execute:
 - E — collect supplies or gather from resource nodes within 3 m
 - 1 / 2 — eat / drink supplies
 - 3 / 7 — use bandage / medkit to restore health
-- 4 — craft bandage (2 fiber), grants 14 crafting XP
+- 4 — craft bandage (2 fiber), grants 20 crafting XP
 - 5 — craft hatchet (2 wood + 2 scrap), grants 25 crafting XP
 - 6 — craft medkit (3 fiber + 1 scrap), requires crafting level 2
 

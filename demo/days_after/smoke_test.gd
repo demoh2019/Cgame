@@ -52,6 +52,16 @@ func _run() -> void:
     if crafting.skill_level("crafting") < 2:
         _fail("Crafting must award level progression.")
         return
+    # A bandage plus a hatchet reaches level 2; a medkit is then attainable
+    # with the six fiber/scrap node charges available on the starter map.
+    backpack["fiber"] = 3
+    backpack["scrap"] = 1
+    if not crafting.craft(backpack, "medkit"):
+        _fail("Level-2 medkit must be craftable with sufficient materials.")
+        return
+    if int(backpack["fiber"]) != 0 or int(backpack["scrap"]) != 0 or int(backpack["medkit"]) != 1:
+        _fail("Medkit must consume all inputs and create one item.")
+        return
 
     var packed := load("res://main.tscn") as PackedScene
     if packed == null:
