@@ -1016,4 +1016,84 @@ TEST_CASE("[BVH] Batch flush filters only new 3D contact pairs") {
 	CHECK(removed == created);
 }
 
+
+template <typename Bounds, typename Point>
+static void _exercise_dense_pair_index(const Bounds &p_overlap, const Bounds &p_far) {
+	using Tree = BVH_Manager<Item, 2, true, 16, PairTest, CullTest, Bounds, Point, false>;
+	Tree tree;
+	constexpr int COUNT = 40;
+	constexpr int REMOVED = 11; // Drop all remaining degrees below the dense threshold.
+	Item items[COUNT + REMOVED];
+	BVHHandle handles[COUNT];
+	DensePairCounts counts;
+	tree.set_pair_callback(dense_pair_created, &counts);
+	tree.set_unpair_callback(dense_pair_removed, &counts);
+
+	for (int i = 0; i < COUNT; ++i) {
+		items[i].value = i;
+		handles[i] = tree.create(&items[i], true, uint32_t(i & 1), 3, p_overlap, 0, true);
+	}
+	CHECK(counts.created == 0);
+	tree.flush_pending_pairs();
+	constexpr int INITIAL_PAIRS = COUNT * (COUNT - 1) / 2;
+	CHECK(counts.created == INITIAL_PAIRS);
+	CHECK(counts.removed == 0);
+
+	// All pairs must be recognized as already present, even if both
+	// participants have crossed the hash-index threshold.
+	for (int i = 0; i < COUNT; ++i) {
+		tree.force_collision_check(handles[i]);
+	}
+	tree.update();
+	CHECK(counts.created == INITIAL_PAIRS);
+	CHECK(counts.removed == 0);
+
+	// Replacing handles tests dense-to-sparse index removal and stale-key
+	// cleanup when freed IDs become available for reuse.
+	for (int i = 0; i < REMOVED; ++i) {
+		tree.erase(handles[i]);
+	}
+	constexpr int REMAINING = COUNT - REMOVED;
+	constexpr int SURVIVING_PAIRS = REMAINING * (REMAINING - 1) / 2;
+	CHECK(counts.removed == INITIAL_PAIRS - SURVIVING_PAIRS);
+	for (int i = REMOVED; i < COUNT; ++i) {
+		tree.force_collision_check(handles[i]);
+	}
+	CHECK(counts.created == INITIAL_PAIRS);
+
+	for (int i = 0; i < REMOVED; ++i) {
+		items[COUNT + i].value = COUNT + i;
+		handles[i] = tree.create(&items[COUNT + i], true, uint32_t(i & 1), 3, p_overlap, 0, true);
+	}
+	tree.flush_pending_pairs();
+	CHECK(counts.created == INITIAL_PAIRS + (INITIAL_PAIRS - SURVIVING_PAIRS));
+	for (int i = 0; i < COUNT; ++i) {
+		tree.force_collision_check(handles[i]);
+	}
+	CHECK(counts.created == INITIAL_PAIRS + (INITIAL_PAIRS - SURVIVING_PAIRS));
+
+	// Move one dense body away and back through the index threshold.
+	tree.move(handles[0], p_far);
+	tree.update();
+	CHECK(counts.removed == (INITIAL_PAIRS - SURVIVING_PAIRS) + (COUNT - 1));
+	tree.move(handles[0], p_overlap);
+	tree.update();
+	CHECK(counts.created == INITIAL_PAIRS + (INITIAL_PAIRS - SURVIVING_PAIRS) + (COUNT - 1));
+
+	for (const BVHHandle &handle : handles) {
+		tree.erase(handle);
+	}
+	CHECK(counts.removed == counts.created);
+	CHECK(counts.invalid_userdata == 0);
+}
+
+TEST_CASE("[BVH] Dense pair hash index preserves 2D contacts across threshold and handle reuse") {
+	_exercise_dense_pair_index<Rect2, Vector2>(Rect2(0, 0, 4, 4), Rect2(100, 0, 4, 4));
+}
+
+TEST_CASE("[BVH] Dense pair hash index preserves 3D contacts across threshold and handle reuse") {
+	_exercise_dense_pair_index<AABB, Vector3>(
+			AABB(Vector3(0, 0, 0), Vector3(4, 4, 4)),
+			AABB(Vector3(100, 0, 0), Vector3(4, 4, 4)));
+}
 } // namespace TestBVH
