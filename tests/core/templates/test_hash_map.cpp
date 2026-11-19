@@ -449,4 +449,50 @@ TEST_CASE("[HashMap] Dense rehash retains original cached hashes") {
 	}
 }
 
+struct DistributedHash {
+	static uint32_t hash(int p_key) {
+		return uint32_t(p_key) * 2654435761u;
+	}
+};
+
+TEST_CASE("[HashMap] Growing an empty allocated table preserves empty bucket invariants") {
+	HashMap<int, int, DistributedHash> map;
+	for (int i = 0; i < 32; i++) {
+		map.insert(i, i * 7);
+	}
+	map.clear();
+	CHECK(map.size() == 0);
+	const uint32_t first_capacity = map.get_capacity();
+	map.reserve(8192);
+	CHECK(map.get_capacity() > first_capacity);
+	CHECK(map.is_empty());
+	map.reserve(32768);
+	CHECK(map.is_empty());
+	const uint32_t large_capacity = map.get_capacity();
+	CHECK(large_capacity >= 32768);
+
+	// Hashes cover different buckets, including newly allocated regions;
+	// nonzero garbage after realloc would break lookup and insertion.
+	for (int i = 0; i < 512; i++) {
+		map.insert(i + 300, (i + 300) * 11);
+	}
+	CHECK(map.size() == 512);
+	for (int i = 0; i < 512; i++) {
+		CHECK(map.get(i + 300) == (i + 300) * 11);
+	}
+	map.clear();
+	CHECK(map.is_empty());
+	map.reserve(65536);
+	CHECK(map.get_capacity() > large_capacity);
+	for (int i = 0; i < 512; i++) {
+		CHECK(!map.has(i + 300));
+	}
+	for (int i = 0; i < 128; i++) {
+		map.insert(i + 2000, i + 17);
+	}
+	for (int i = 0; i < 128; i++) {
+		CHECK(map.get(i + 2000) == i + 17);
+	}
+}
+
 } // namespace TestHashMap
