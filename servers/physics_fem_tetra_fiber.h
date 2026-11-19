@@ -93,6 +93,15 @@ _FORCE_INLINE_ static bool physics_fem_tetra_solve_fiber(
 			fiber[axis_index] += edge[axis_index][v - 1] * fiber_coeff[v];
 		}
 	}
+	// A pre-existing inverted FEM element must not be repaired by a fiber
+	// projection. Neo-Hookean elasticity owns inversion recovery.
+	const double initial_det =
+			edge[0][0] * (edge[1][1] * edge[2][2] - edge[1][2] * edge[2][1]) +
+			edge[1][0] * (edge[2][1] * edge[0][2] - edge[0][1] * edge[2][2]) +
+			edge[2][0] * (edge[0][1] * edge[1][2] - edge[1][1] * edge[0][2]);
+	if (!(initial_det / p_rest.signed_det > 1e-9) || !Math::is_finite(initial_det)) {
+		return false;
+	}
 	const double stretch_sq =
 			fiber[0] * fiber[0] + fiber[1] * fiber[1] + fiber[2] * fiber[2];
 	if (!(stretch_sq > 0.0) || !Math::is_finite(stretch_sq)) {
