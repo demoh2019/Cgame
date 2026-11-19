@@ -44,9 +44,8 @@ func run(t) -> void:
 	t.current = "hub authorization and resource delivery"
 	var server := GameServer.new(WorldGen.new(42), 9)
 	var player = server.add_player(91, "Quest Survivor")
-	t.eq(server.cmd_contract(91, "accept")["reason"], "no_station" if (
-		Vector2(player.position.x, player.position.z).distance_to(GameServer.WORKBENCH_POSITION)
-		> GameServer.WORKBENCH_RANGE) else "already_active",
+	player.position = Vector3(120.0, world.height_at(120.0, 120.0), 120.0)
+	t.eq(server.cmd_contract(91, "accept")["reason"], "no_station",
 		"contract requests require a real hub location")
 	_at_hub(server, player)
 	t.eq(server.cmd_contract(91, "unknown")["reason"], "unknown_action", "invalid command rejected")
