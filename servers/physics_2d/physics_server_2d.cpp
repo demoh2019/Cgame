@@ -394,6 +394,9 @@ PhysicsServer2D::PhysicsServer2D() {
 	// Suppress tiny bounces at contacts so stacked bodies can settle (pixels per second).
 	GLOBAL_DEF(PropertyInfo(Variant::FLOAT, "physics/2d/solver/restitution_velocity_threshold", PROPERTY_HINT_RANGE, "0,1000,1,or_greater,suffix:px/s"), 30.0);
 	// Box2D-style material mixing is opt-in to keep existing GodotPhysics projects compatible.
+	// PhysX-style static coefficient = combined material friction * multiplier;
+	// default 1.0 keeps the historic single-Coulomb-cone solver unchanged.
+	GLOBAL_DEF(PropertyInfo(Variant::FLOAT, "physics/2d/solver/static_friction_multiplier", PROPERTY_HINT_RANGE, "1,5,0.01,or_greater"), 1.0);
 	GLOBAL_DEF(PropertyInfo(Variant::INT, "physics/2d/solver/friction_combine_mode", PROPERTY_HINT_ENUM, "Legacy Minimum,Geometric Mean,Average,Maximum"), 0);
 	// Default preserves the historic clamped sum. Other modes match common
 	// game-physics coefficient combination rules (Box2D / Rapier).

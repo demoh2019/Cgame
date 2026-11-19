@@ -1268,6 +1268,7 @@ GodotSpace3D::GodotSpace3D() {
 	gyroscopic_integration_mode = CLAMP((int)GLOBAL_GET("physics/3d/solver/gyroscopic_integration_mode"), 0, 1);
 	rolling_friction = MAX(real_t(0.0), (real_t)GLOBAL_GET("physics/3d/solver/rolling_friction"));
 	spinning_friction = MAX(real_t(0.0), (real_t)GLOBAL_GET("physics/3d/solver/spinning_friction"));
+	static_friction_multiplier = MAX(real_t(1.0), (real_t)GLOBAL_GET("physics/3d/solver/static_friction_multiplier"));
 	friction_combine_mode = CLAMP((int)GLOBAL_GET("physics/3d/solver/friction_combine_mode"), 0, 3);
 	restitution_combine_mode = CLAMP((int)GLOBAL_GET("physics/3d/solver/restitution_combine_mode"), 0, 5);
 	// Read once at space creation, avoiding ProjectSettings lookups in the hot contact loop.

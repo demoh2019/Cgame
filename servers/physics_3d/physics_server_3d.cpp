@@ -596,6 +596,9 @@ PhysicsServer3D::PhysicsServer3D() {
 	// Suppress tiny bounces at contacts so stacked bodies can settle (meters per second).
 	GLOBAL_DEF(PropertyInfo(Variant::FLOAT, "physics/3d/solver/restitution_velocity_threshold", PROPERTY_HINT_RANGE, "0,10,0.01,or_greater,suffix:m/s"), 1.0);
 	// Keep historical friction mixing unless a project opts into another model.
+	// PhysX-style static coefficient = combined material friction * multiplier;
+	// default 1.0 keeps the historic single-Coulomb-cone solver unchanged.
+	GLOBAL_DEF(PropertyInfo(Variant::FLOAT, "physics/3d/solver/static_friction_multiplier", PROPERTY_HINT_RANGE, "1,5,0.01,or_greater"), 1.0);
 	GLOBAL_DEF(PropertyInfo(Variant::INT, "physics/3d/solver/friction_combine_mode", PROPERTY_HINT_ENUM, "Legacy Minimum,Geometric Mean,Average,Maximum"), 0);
 	// Default preserves the historic clamped sum. Other modes match common
 	// game-physics coefficient combination rules (Box2D / Rapier).

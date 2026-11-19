@@ -33,6 +33,7 @@
 #include "godot_collision_solver_2d.h"
 #include "godot_contact_normal_2d.h"
 #include "godot_space_2d.h"
+#include "servers/physics_contact_static_friction.h"
 #include "servers/physics_contact_angular_friction.h"
 #include "servers/physics_manifold_reduction_2d.h"
 #include "servers/physics_ccd_sphere_toi.h"
@@ -765,7 +766,7 @@ bool GodotBodyPair2D::pre_solve(real_t p_step) {
 		if (has_friction) {
 			// Friction can change between frames. Restrict the cached total
 			// tangent impulse to the *current* Coulomb cone before applying it.
-			const real_t cached_tangent_limit = mixed_friction * c.acc_normal_impulse;
+			const real_t cached_tangent_limit = mixed_friction * space->get_static_friction_multiplier() * c.acc_normal_impulse;
 			c.acc_tangent_impulse = CLAMP(c.acc_tangent_impulse, -cached_tangent_limit, cached_tangent_limit);
 			const Vector2 tangent = c.normal.orthogonal();
 			if (!report_contacts_only) {
@@ -919,6 +920,7 @@ void GodotBodyPair2D::solve(real_t p_step) {
 	real_t inv_mass_B = collide_B ? B->get_inv_mass() : 0.0;
 	// Material properties are constant during this constraint solve.
 	const real_t friction = mixed_friction;
+	const real_t static_friction_multiplier = space->get_static_friction_multiplier();
 
 	// Solve the two-point LCP with the conditioned matrix cached in pre_solve.
 	// Only relative contact velocities need updating on every iteration.
@@ -1069,7 +1071,12 @@ void GodotBodyPair2D::solve(real_t p_step) {
 			const real_t jt_max = friction * c.acc_normal_impulse;
 			const real_t jt = -vt * c.mass_tangent;
 			const real_t jt_old = c.acc_tangent_impulse;
-			c.acc_tangent_impulse = CLAMP(jt_old + jt, -jt_max, jt_max);
+			const real_t candidate_tangent_impulse = jt_old + jt;
+			// If static friction can fully stop lateral movement, retain its
+			// larger sticking cone. Otherwise use the dynamic Coulomb limit.
+			c.acc_tangent_impulse = static_friction_multiplier > real_t(1.0) ?
+					godot_physics_clamp_static_friction_2d(candidate_tangent_impulse, jt_max, static_friction_multiplier) :
+					CLAMP(candidate_tangent_impulse, -jt_max, jt_max);
 			j += tangent * (c.acc_tangent_impulse - jt_old);
 		} else {
 			c.acc_tangent_impulse = 0.0;
