@@ -1347,3 +1347,26 @@ Run `python3 -m unittest tests/stress/test_jolt_collision_substeps.py -v`
 for the source-wiring contracts; also build and execute the native physics
 tests to confirm actual runtime behavior. No performance improvement should
 be inferred merely from the presence of this configuration option.
+
+## Jolt pending-body buffer reuse (CPU and allocation churn)
+
+Jolt recommends batch-adding bodies with `AddBodiesPrepare` / `AddBodiesFinalize`.
+Cgame already does that, but previously freed its temporary BodyID lists
+after every physics step, requiring fresh allocations for subsequent spawn waves.
+The Jolt backend now retains temporary BodyID list capacity up to 4,096
+entries per awake/sleeping queue (~16 KiB each for 32-bit BodyIDs), while
+larger one-off batches continue to release their backing allocation.
+The optional hash indexes for queued deletions are still released after flush.
+
+This changes only allocation reuse, not collision behavior, body sleeping or
+activation logic. The associated `test_jolt_pending_buffer_reuse.py` verifies
+batch calls and allocation caps; the runtime script performs 32 cycles of
+512 real 3D RigidBody RIDs with a physics step between batches.
+
+```sh
+./bin/godot.linuxbsd.editor.dev.x86_64 --headless --path tests/stress \
+  --script res://physics_pending_reuse_stress.gd
+```
+
+Compare native runtime timing, allocator counts and RSS with the same Jolt
+backend before/after the change. A source-only check does not prove a speedup.
