@@ -39,6 +39,7 @@
 #include "servers/physics_ccd_sphere_toi.h"
 #include "servers/physics_ccd_rotating_capsule_toi.h"
 #include "servers/physics_speculative_sphere_contact.h"
+#include "servers/physics_speculative_capsule_contact.h"
 #include "servers/physics_ccd_capsule_toi.h"
 #include "servers/physics_ccd_capsule_pair_toi.h"
 #include "servers/physics_ccd_swept_bounds.h"
@@ -588,9 +589,11 @@ bool GodotBodyPair3D::setup(real_t p_step) {
 	// Positive, non-speculative manifolds remain geometry-dependent and can
 	// still be reused. Only a *previous speculative* positive result requires
 	// a fresh TOI check each frame.
+	const PS3DE::ShapeType type_A = A->get_shape(shape_A)->get_type();
+	const PS3DE::ShapeType type_B = B->get_shape(shape_B)->get_type();
 	const bool velocity_sensitive_pair = space->get_speculative_sphere_distance() > 0.0 &&
-			A->get_shape(shape_A)->get_type() == PS3DE::SHAPE_SPHERE &&
-			B->get_shape(shape_B)->get_type() == PS3DE::SHAPE_SPHERE;
+			((type_A == PS3DE::SHAPE_SPHERE && (type_B == PS3DE::SHAPE_SPHERE || type_B == PS3DE::SHAPE_CAPSULE)) ||
+					(type_A == PS3DE::SHAPE_CAPSULE && type_B == PS3DE::SHAPE_SPHERE));
 	const uint64_t geometry_version_a = A->get_collision_geometry_version();
 	const uint64_t geometry_version_b = B->get_collision_geometry_version();
 	// Reuse a separating narrowphase result for persistent broadphase
@@ -663,6 +666,58 @@ bool GodotBodyPair3D::setup(real_t p_step) {
 				contact_count = 1;
 				collided = true;
 				contact_recycling.speculative_contact = true;
+			}
+		}
+	}
+
+	// Predictive sphere/capsule contacts reuse the exact CCD capsule TOI.
+	// The local anchors lie on the true surfaces; the solver recognizes
+	// negative depth and limits normal closure without friction or bias.
+	const bool sphere_capsule_pair =
+			(shape_A_ptr->get_type() == PS3DE::SHAPE_SPHERE && shape_B_ptr->get_type() == PS3DE::SHAPE_CAPSULE) ||
+			(shape_A_ptr->get_type() == PS3DE::SHAPE_CAPSULE && shape_B_ptr->get_type() == PS3DE::SHAPE_SPHERE);
+	if (!collided && !report_contacts_only && sphere_capsule_pair &&
+			space->get_speculative_sphere_distance() > 0.0 &&
+			A->get_angular_velocity() == Vector3() && B->get_angular_velocity() == Vector3() &&
+			!(A->get_mode() == PS3DE::BODY_MODE_STATIC && A->get_linear_velocity() != Vector3()) &&
+			!(B->get_mode() == PS3DE::BODY_MODE_STATIC && B->get_linear_velocity() != Vector3())) {
+		const bool sphere_first = shape_A_ptr->get_type() == PS3DE::SHAPE_SPHERE;
+		const Transform3D &sphere_transform = sphere_first ? xform_A : xform_B;
+		const Transform3D &capsule_transform = sphere_first ? xform_B : xform_A;
+		const GodotSphereShape3D *sphere = static_cast<GodotSphereShape3D *>(sphere_first ? shape_A_ptr : shape_B_ptr);
+		const GodotCapsuleShape3D *capsule = static_cast<GodotCapsuleShape3D *>(sphere_first ? shape_B_ptr : shape_A_ptr);
+		const double sphere_scale = physics_ccd_uniform_sphere_scale(sphere_transform);
+		const double capsule_scale = physics_ccd_uniform_sphere_scale(capsule_transform);
+		if (sphere_scale > 0.0 && capsule_scale > 0.0) {
+			const real_t capsule_radius = capsule->get_radius();
+			const real_t half_segment = capsule->get_height() * real_t(0.5) - capsule_radius;
+			const real_t sphere_radius = real_t(double(sphere->get_radius()) * sphere_scale / capsule_scale);
+			const Vector3 velocity_A = A->get_mode() == PS3DE::BODY_MODE_STATIC ? Vector3() : A->get_linear_velocity();
+			const Vector3 velocity_B = B->get_mode() == PS3DE::BODY_MODE_STATIC ? Vector3() : B->get_linear_velocity();
+			const Vector3 relative_motion = (sphere_first ? velocity_A - velocity_B : velocity_B - velocity_A) * p_step;
+			const Transform3D inverse_capsule = capsule_transform.affine_inverse();
+			Vector3 point_sphere, point_capsule, normal;
+			if (physics_speculative_sphere_capsule_contact(
+					inverse_capsule.xform(sphere_transform.origin), sphere_radius,
+					capsule_radius, half_segment, inverse_capsule.basis.xform(relative_motion),
+					real_t(double(space->get_speculative_sphere_distance()) / capsule_scale),
+					point_sphere, point_capsule, normal)) {
+				const Vector3 global_sphere = capsule_transform.xform(point_sphere);
+				const Vector3 global_capsule = capsule_transform.xform(point_capsule);
+				const Vector3 global_normal = capsule_transform.basis.xform(normal).normalized();
+				if (global_sphere.is_finite() && global_capsule.is_finite() && global_normal.is_finite()) {
+					const Vector3 point_A = sphere_first ? global_sphere : global_capsule;
+					const Vector3 point_B = sphere_first ? global_capsule : global_sphere;
+					Contact speculative;
+					speculative.local_A = A->get_inv_transform().basis.xform(point_A);
+					speculative.local_B = B->get_inv_transform().basis.xform(point_B - offset_B);
+					speculative.normal = sphere_first ? global_normal : -global_normal;
+					speculative.used = true;
+					contacts[0] = speculative;
+					contact_count = 1;
+					collided = true;
+					contact_recycling.speculative_contact = true;
+				}
 			}
 		}
 	}
