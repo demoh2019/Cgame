@@ -3184,7 +3184,7 @@ Variant GDScriptFunction::call(GDScriptInstance *p_instance, const Variant **p_a
 
 				Vector2i *bounds = VariantInternal::get_vector2i(container);
 
-				VariantInternal::initialize(counter, Variant::FLOAT);
+				VariantInternal::initialize(counter, Variant::INT);
 				*VariantInternal::get_int(counter) = bounds->x;
 
 				if (bounds->x < bounds->y) {
@@ -3303,7 +3303,8 @@ Variant GDScriptFunction::call(GDScriptInstance *p_instance, const Variant **p_a
 				Dictionary *dict = VariantInternal::get_dictionary(container);
 				const Variant *next = dict->next(nullptr);
 
-				if (!dict->is_empty()) {
+				// next(nullptr) already tests emptiness; do not probe the hash map twice.
+				if (next) {
 					GET_VARIANT_PTR(iterator, 2);
 					*counter = *next;
 					*iterator = *next;
@@ -3718,7 +3719,8 @@ Variant GDScriptFunction::call(GDScriptInstance *p_instance, const Variant **p_a
 		const Vector<m_elem_type> *array = VariantInternal::m_get_func((const Variant *)container); \
 		int64_t *idx = VariantInternal::get_int(counter); \
 		(*idx)++; \
-		if (*idx >= array->size()) { \
+		/* Unsigned comparison also rejects negative or overflowed indices. */ \
+		if (uint64_t(*idx) >= uint64_t(array->size())) { \
 			int jumpto = _code_ptr[ip + 4]; \
 			GD_ERR_BREAK(jumpto < 0 || jumpto > _code_size); \
 			ip = jumpto; \
