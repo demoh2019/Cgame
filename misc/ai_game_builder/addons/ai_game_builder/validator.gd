@@ -74,8 +74,17 @@ static func _safe_relative_path(path: String) -> bool:
 	if safe_characters.compile("^[A-Za-z0-9_./-]+\\z") != OK or safe_characters.search(path) == null:
 		return false
 	for part in path.split("/", true):
-		if part.is_empty() or part == "." or part == ".." or part.begins_with("."):
+		if part.is_empty() or part == "." or part == ".." or part.begins_with(".") or part.ends_with("."):
 			return false
+		# Windows interprets reserved device names before their extension, even
+		# when additional extensions are appended (e.g. CON.backup.gd).
+		var stem: String = part.get_slice(".", 0).to_upper()
+		if ["CON", "PRN", "AUX", "NUL"].has(stem):
+			return false
+		if stem.length() == 4 and (stem.begins_with("COM") or stem.begins_with("LPT")):
+			var digit := stem.unicode_at(3)
+			if digit >= 49 and digit <= 57:
+				return false
 	return true
 
 
