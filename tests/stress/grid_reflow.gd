@@ -2,6 +2,8 @@ extends RefCounted
 ## Deterministic dense and sparse GridContainer reflow pressure.
 ## The million-column check catches allocation storms in sparse grids.
 
+const COLUMN_COUNTS = [8, 16, 32, 64]
+
 
 func run(tree: SceneTree, scale: int, frames: int) -> Dictionary:
 	var grid := GridContainer.new()
@@ -25,7 +27,7 @@ func run(tree: SceneTree, scale: int, frames: int) -> Dictionary:
 	var samples: Array[float] = []
 	var peak_process_ms := 0.0
 	for frame in range(frames):
-		grid.columns = [8, 16, 32, 64][frame % 4]
+		grid.columns = COLUMN_COUNTS[frame % 4]
 		var started := Time.get_ticks_usec()
 		await tree.process_frame
 		samples.append(float(Time.get_ticks_usec() - started) / 1000.0)
