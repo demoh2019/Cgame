@@ -34,6 +34,8 @@
 
 #ifdef MODULE_TEXTURE_STREAMING_ENABLED
 
+#include "feedback_buffer_policy.h"
+
 #include "core/io/image.h"
 #include "core/os/condition_variable.h"
 #include "core/os/thread.h"
@@ -314,6 +316,7 @@ private:
 		RID texture;
 		uint16_t width = 0;
 		uint16_t height = 0;
+		uint8_t mip_count = 1; // Updated with dimensions; reused for material feedback.
 		Image::Format format = Image::FORMAT_MAX;
 
 		// Settings & Constraints (mip levels)
@@ -335,8 +338,7 @@ private:
 
 		// Helper to get the number of mip levels for this texture
 		_FORCE_INLINE_ uint8_t get_mip_count() const {
-			const uint32_t max_dim = MAX(width, height);
-			return max_dim > 0 ? uint8_t(Math::floor(Math::log2(float(max_dim)))) + 1 : 1;
+			return mip_count;
 		}
 
 		// Helper to get memory size at a specific mip level
@@ -352,6 +354,7 @@ private:
 			texture = p_other.texture;
 			width = p_other.width;
 			height = p_other.height;
+			mip_count = p_other.mip_count;
 			format = p_other.format;
 			reload_callable = p_other.reload_callable;
 			min_lod_override = p_other.min_lod_override;

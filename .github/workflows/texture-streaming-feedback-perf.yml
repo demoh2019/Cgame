@@ -5,14 +5,18 @@ on:
     branches: [develop]
     paths:
       - "modules/texture_streaming/texture_streaming.cpp"
+      - "modules/texture_streaming/texture_streaming.h"
       - "modules/texture_streaming/feedback_buffer_policy.h"
+      - "tests/core/io/test_texture_streaming_feedback_policy.cpp"
       - "misc/scripts/tests/test_texture_streaming_feedback.py"
       - ".github/workflows/texture-streaming-feedback-perf.yml"
   push:
     branches: [develop]
     paths:
       - "modules/texture_streaming/texture_streaming.cpp"
+      - "modules/texture_streaming/texture_streaming.h"
       - "modules/texture_streaming/feedback_buffer_policy.h"
+      - "tests/core/io/test_texture_streaming_feedback_policy.cpp"
       - "misc/scripts/tests/test_texture_streaming_feedback.py"
       - ".github/workflows/texture-streaming-feedback-perf.yml"
   workflow_dispatch:
