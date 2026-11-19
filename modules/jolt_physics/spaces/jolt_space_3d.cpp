@@ -326,12 +326,21 @@ static uint32_t build_soft_face_bvh(JPH::Array<SoftFaceBVHEntry> &r_entries, JPH
 static bool prepare_soft_face_bvh(const JPH::Array<JPH::SoftBodySharedSettings::Face> &p_faces,
 		const JPH::Array<JPH::SoftBodyVertex> &p_vertices, JPH::QuatArg p_rotation, JPH::Vec3Arg p_offset,
 		JPH::Array<SoftFaceBVHEntry> &r_entries, JPH::Array<SoftFaceBVHNode> &r_nodes, uint32_t &r_budget) {
-	if (p_faces.size() < MIN_SOFT_FACE_BVH_FACES || p_faces.size() > MAX_SOFT_FACE_BVH_FACES ||
-			r_budget < p_faces.size()) {
-		return false; // Small/oversized/exhausted workloads retain brute force.
+	if (p_faces.size() < MIN_SOFT_FACE_BVH_FACES || p_faces.size() > MAX_SOFT_FACE_BVH_FACES) {
+		return false; // Small/oversized workloads retain brute force.
 	}
-	// Account for O(face_count) triangle-bound construction up front.
-	r_budget -= (uint32_t)p_faces.size();
+	// Median selection scans each face at every tree level. Debit a
+	// conservative O(F log F) build charge, so many overlapping pairs
+	// cannot bypass the same fixed global work budget as the linear path.
+	uint32_t split_levels = 0;
+	for (uint32_t count = (uint32_t)p_faces.size(); count > 1; count = (count + 1) / 2) {
+		++split_levels;
+	}
+	const uint32_t build_cost = (uint32_t)p_faces.size() * (split_levels + 1);
+	if (r_budget <= build_cost) {
+		return false; // Preserve budget for at least one contact query.
+	}
+	r_budget -= build_cost;
 	r_entries.reserve(p_faces.size());
 	for (uint32_t i = 0; i < p_faces.size(); ++i) {
 		const JPH::SoftBodySharedSettings::Face &face = p_faces[i];
