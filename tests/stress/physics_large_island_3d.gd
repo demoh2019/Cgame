@@ -3,7 +3,7 @@ extends RefCounted
 ## Both modes run the identical workload in separate physics spaces.
 
 
-func run(tree: SceneTree, scale: int, frames: int, parallel: bool, high_priority: bool = false, extra_islands: int = 0, extra_island_size: int = 16) -> Dictionary:
+func run(tree: SceneTree, scale: int, frames: int, parallel: bool, high_priority: bool = false, extra_islands: int = 0, extra_island_size: int = 16, topology_churn: bool = false) -> Dictionary:
 	var setting_path := "physics/3d/solver/parallel_large_islands"
 	var saved_setting: Variant = ProjectSettings.get_setting(setting_path)
 	ProjectSettings.set_setting(setting_path, parallel)
@@ -74,6 +74,20 @@ func run(tree: SceneTree, scale: int, frames: int, parallel: bool, high_priority
 	var last_tick := Time.get_ticks_usec()
 	var error := ""
 	for frame in range(frames):
+		if topology_churn:
+			# Replace an existing joint RID with new endpoints. The native
+			# joint object may be reallocated at the same address, so cache
+			# invalidation must compare body pointers as well as constraint IDs.
+			if frame == 8:
+				PhysicsServer3D.joint_make_pin(joints[100], bodies[100], Vector3(3.0, 0.0, 0.0),
+						bodies[102], Vector3(-3.0, 0.0, 0.0))
+			elif frame == 18:
+				PhysicsServer3D.joint_make_pin(joints[100], bodies[100], Vector3(1.5, 0.0, 0.0),
+						bodies[101], Vector3(-1.5, 0.0, 0.0))
+			elif frame == 28:
+				PhysicsServer3D.joint_set_solver_priority(joints[10], 2)
+			elif frame == 34:
+				PhysicsServer3D.joint_set_solver_priority(joints[10], 1)
 		await tree.physics_frame
 		var now := Time.get_ticks_usec()
 		frame_intervals.append(float(now - last_tick) / 1000.0)
@@ -134,7 +148,7 @@ func run(tree: SceneTree, scale: int, frames: int, parallel: bool, high_priority
 	var stats: Dictionary = tree.call("_frame_statistics", frame_intervals)
 	return {"bodies": total_bodies, "joints": total_joints, "parallel_large_islands": parallel,
 			"extra_islands": extra_islands, "extra_island_size": extra_island_size,
-			"high_priority_fallback": high_priority, "physics_frames": frames,
+			"high_priority_fallback": high_priority, "topology_churn": topology_churn, "physics_frames": frames,
 			"creation_ms": creation_ms, "peak_physics_ms": peak_physics_ms,
 			"max_joint_spacing": max_joint_spacing,
 			"frame_interval_ms": stats, "frame_p95_ms": stats["p95"]}
