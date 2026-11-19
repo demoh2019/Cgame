@@ -3355,17 +3355,17 @@ void EditorFileSystem::reimport_files(const Vector<String> &p_files) {
 					WorkerThreadPool::GroupID group_task = WorkerThreadPool::get_singleton()->add_template_group_task(this, &EditorFileSystem::_reimport_thread, &tdata, item_count, -1, false, vformat(TTR("Import resources of type: %s"), reimport_files[from].importer));
 
 					int imported_count = 0;
-					while (true) {
+					while (imported_count < item_count) {
+						const String file_name = reimport_files[from + imported_count].path.get_file();
 						while (true) {
-							ep->step(reimport_files[imported_count].path.get_file(), from + imported_count, false);
+							ep->step(file_name, from + imported_count, false);
 							if (imported_sem.try_wait()) {
-								imported_count++;
 								break;
 							}
+							// Yield while import workers are busy instead of monopolizing the main thread.
+							OS::get_singleton()->delay_usec(1000);
 						}
-						if (imported_count == item_count) {
-							break;
-						}
+						imported_count++;
 					}
 
 					WorkerThreadPool::get_singleton()->wait_for_group_task_completion(group_task);
@@ -3812,4 +3812,5 @@ EditorFileSystem::~EditorFileSystem() {
 	memdelete(filesystem);
 	filesystem = nullptr;
 	ResourceSaver::set_get_resource_id_for_path(nullptr);
+	singleton = nullptr; // Deferred callbacks may run after the editor has shut down.
 }

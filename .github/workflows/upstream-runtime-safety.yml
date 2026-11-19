@@ -1,0 +1,39 @@
+name: Upstream runtime safety regression tests
+
+on:
+  pull_request:
+    paths:
+      - "core/profiling/profiling.h"
+      - "platform/web/audio_driver_web.cpp"
+      - "modules/tilemap/editor/tiles_editor_plugin.cpp"
+      - "misc/scripts/tests/test_upstream_runtime_safety.py"
+      - ".github/workflows/upstream-runtime-safety.yml"
+  push:
+    branches: [develop]
+    paths:
+      - "core/profiling/profiling.h"
+      - "platform/web/audio_driver_web.cpp"
+      - "modules/tilemap/editor/tiles_editor_plugin.cpp"
+      - "misc/scripts/tests/test_upstream_runtime_safety.py"
+      - ".github/workflows/upstream-runtime-safety.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  regression-tests:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    strategy:
+      fail-fast: false
+      matrix:
+        compiler: [g++, clang++]
+    steps:
+      - uses: actions/checkout@v4
+      - name: Validate regression Python syntax
+        run: python3 -m py_compile misc/scripts/tests/test_upstream_runtime_safety.py
+      - name: Run isolated native C++ and source regressions
+        env:
+          CXX: ${{ matrix.compiler }}
+        run: python3 -m unittest discover -s misc/scripts/tests -p 'test_upstream_runtime_safety.py' -v

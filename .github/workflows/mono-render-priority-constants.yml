@@ -1,0 +1,32 @@
+name: C# Material render priority constant regressions
+
+on:
+  pull_request:
+    branches: [develop]
+    paths:
+      - "modules/mono/editor/bindings_generator.cpp"
+      - "modules/mono/editor/bindings_generator.h"
+      - "misc/scripts/tests/test_mono_render_priority_constants.py"
+      - ".github/workflows/mono-render-priority-constants.yml"
+  push:
+    branches: [develop]
+    paths:
+      - "modules/mono/editor/bindings_generator.cpp"
+      - "modules/mono/editor/bindings_generator.h"
+      - "misc/scripts/tests/test_mono_render_priority_constants.py"
+      - ".github/workflows/mono-render-priority-constants.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  contracts:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - name: Run C# binding generator contracts
+        run: |
+          python3 -m py_compile misc/scripts/tests/test_mono_render_priority_constants.py
+          python3 -m unittest discover -s misc/scripts/tests -p test_mono_render_priority_constants.py -v

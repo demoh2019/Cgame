@@ -114,6 +114,16 @@ class EditorHelp : public VBoxContainer {
 	inline static DocTools *doc = nullptr;
 	inline static DocTools *ext_doc = nullptr;
 
+	class EditorHelpDocOwner : public Object {
+	public:
+		void generate_doc(bool p_use_cache, bool p_use_script_cache) { EditorHelp::generate_doc(p_use_cache, p_use_script_cache); }
+		void _gen_extensions_docs() { EditorHelp::_gen_extensions_docs(); }
+		void load_script_doc_cache() { EditorHelp::load_script_doc_cache(); }
+		void regenerate_script_doc_cache() { EditorHelp::regenerate_script_doc_cache(); }
+	};
+	// Invalidate deferred document callbacks before freeing DocTools.
+	inline static EditorHelpDocOwner *doc_owner = nullptr;
+
 	LineEdit *search = nullptr;
 	FindBar *find_bar = nullptr;
 
@@ -190,6 +200,8 @@ class EditorHelp : public VBoxContainer {
 	inline static Thread worker_thread;
 	inline static Thread loader_thread; // Only load scripts here to avoid deadlocking with main thread.
 
+	// Latch raised during cleanup_doc(): queued documentation callbacks must not use freed state.
+	inline static SafeFlag _doc_torn_down = SafeFlag(false);
 	inline static SafeFlag _script_docs_loaded = SafeFlag(false);
 	inline static LocalVector<DocData::ClassDoc> _docs_to_add;
 	inline static LocalVector<String> _docs_to_remove;

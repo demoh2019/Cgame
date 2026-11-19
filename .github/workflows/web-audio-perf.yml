@@ -1,0 +1,39 @@
+name: WebAudio mixer hotpath regression
+
+on:
+  push:
+    branches: [develop]
+    paths:
+      - 'platform/web/js/libs/library_godot_audio.js'
+      - 'misc/scripts/tests/test_web_audio_volume.cjs'
+      - 'misc/scripts/tests/test_web_audio_perf.py'
+      - '.github/workflows/web-audio-perf.yml'
+  pull_request:
+    branches: [develop]
+    paths:
+      - 'platform/web/js/libs/library_godot_audio.js'
+      - 'misc/scripts/tests/test_web_audio_volume.cjs'
+      - 'misc/scripts/tests/test_web_audio_perf.py'
+      - '.github/workflows/web-audio-perf.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  regression:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Python source contracts
+        run: |
+          python -m py_compile misc/scripts/tests/test_web_audio_perf.py
+          python -m unittest discover -s misc/scripts/tests -p test_web_audio_perf.py -v
+      - name: Production mixer functional regression
+        run: node misc/scripts/tests/test_web_audio_volume.cjs

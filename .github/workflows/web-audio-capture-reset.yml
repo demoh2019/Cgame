@@ -1,0 +1,33 @@
+name: Web audio capture reset regression
+
+on:
+  pull_request:
+    branches: [develop]
+    paths:
+      - "platform/web/audio_driver_web.cpp"
+      - "misc/scripts/tests/test_web_audio_capture_reset.py"
+      - ".github/workflows/web-audio-capture-reset.yml"
+  push:
+    branches: [develop]
+    paths:
+      - "platform/web/audio_driver_web.cpp"
+      - "misc/scripts/tests/test_web_audio_capture_reset.py"
+      - ".github/workflows/web-audio-capture-reset.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  native-web-audio-reset:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        cxx: [g++, clang++]
+    steps:
+      - uses: actions/checkout@v4
+      - name: Compile real Web audio input_stop method with state assertions
+        env:
+          CXX: ${{ matrix.cxx }}
+        run: python3 -m unittest discover -s misc/scripts/tests -p test_web_audio_capture_reset.py -v

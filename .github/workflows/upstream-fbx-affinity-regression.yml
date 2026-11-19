@@ -1,0 +1,50 @@
+name: Upstream FBX and Linux affinity regressions
+
+on:
+  push:
+    branches: [develop]
+    paths:
+      - 'modules/fbx/fbx_document.cpp'
+      - 'modules/fbx/fbx_document.h'
+      - 'modules/navigation_2d/nav_map_2d.cpp'
+      - 'modules/navigation_3d/nav_map_3d.cpp'
+      - 'modules/basis_universal/image_compress_basisu.cpp'
+      - 'modules/raycast/raycast_occlusion_cull.cpp'
+      - 'platform/linuxbsd/os_linuxbsd.cpp'
+      - 'platform/linuxbsd/os_linuxbsd.h'
+      - 'servers/rendering/rendering_device.cpp'
+      - 'doc/classes/ProjectSettings.xml'
+      - 'tests/core/os/test_os.cpp'
+      - 'misc/scripts/tests/test_upstream_fbx_affinity_20261119.py'
+      - '.github/workflows/upstream-fbx-affinity-regression.yml'
+  pull_request:
+    paths:
+      - 'modules/fbx/**'
+      - 'platform/linuxbsd/**'
+      - 'modules/navigation_2d/nav_map_2d.cpp'
+      - 'modules/navigation_3d/nav_map_3d.cpp'
+      - 'modules/basis_universal/image_compress_basisu.cpp'
+      - 'modules/raycast/raycast_occlusion_cull.cpp'
+      - 'servers/rendering/rendering_device.cpp'
+      - 'tests/core/os/test_os.cpp'
+      - 'misc/scripts/tests/test_upstream_fbx_affinity_20261119.py'
+      - '.github/workflows/upstream-fbx-affinity-regression.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  source-guards:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ['3.10', '3.13']
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+      - name: Validate upstream FBX and Linux affinity backports
+        run: python -m unittest discover -s misc/scripts/tests -p test_upstream_fbx_affinity_20261119.py -v

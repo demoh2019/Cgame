@@ -602,6 +602,8 @@ Error RenderingDeviceDriverVulkan::_initialize_device_extensions() {
 	// We don't actually use this extension, but some runtime components on some platforms
 	// can and will fill the validation layers with useless info otherwise if not enabled.
 	_register_requested_device_extension(VK_KHR_EXTERNAL_MEMORY_FD_EXTENSION_NAME, false);
+	// SteamVR's vrclient renders through this VkDevice and can use the extension.
+	_register_requested_device_extension(VK_EXT_SHADER_VIEWPORT_INDEX_LAYER_EXTENSION_NAME, false);
 
 	if (Engine::get_singleton()->is_generate_spirv_debug_info_enabled()) {
 		_register_requested_device_extension(VK_KHR_SHADER_NON_SEMANTIC_INFO_EXTENSION_NAME, true);
@@ -754,6 +756,11 @@ void RenderingDeviceDriverVulkan::_check_driver_workarounds(const VkPhysicalDevi
 		driver_workarounds.disable_ubershaders =
 				p_device_properties.vendorID == RenderingContextDriver::Vendor::VENDOR_QUALCOMM &&
 				strstr(p_driver_properties->driverInfo, "Compiler Version: EV031.32.02.") != nullptr;
+	}
+
+	// Workaround for Adreno 740, where every ubershader pipeline holds about 24 MB of driver memory (GH-101635).
+	if (p_device_properties.vendorID == RenderingContextDriver::Vendor::VENDOR_QUALCOMM && p_device_properties.deviceID == 0x43050a01) {
+		driver_workarounds.disable_ubershaders = true;
 	}
 
 	// Workaround for a bug in NVIDIA drivers where submitting a render pass with no bound pipeline and an attachment using the "Don't Care" store operation causes a crash.
@@ -2059,6 +2066,8 @@ RDD::BufferID RenderingDeviceDriverVulkan::buffer_create(uint64_t p_size, BitFie
 			}
 			if (p_usage.has_flag(BUFFER_USAGE_DYNAMIC_PERSISTENT_BIT)) {
 				alloc_create_info.flags = VMA_ALLOCATION_CREATE_HOST_ACCESS_SEQUENTIAL_WRITE_BIT;
+				// Persistent buffers stay mapped, so their memory must be host-visible.
+				alloc_create_info.requiredFlags |= VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT;
 			}
 			alloc_create_info.preferredFlags = VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT;
 			if (p_size <= SMALL_ALLOCATION_MAX_SIZE) {

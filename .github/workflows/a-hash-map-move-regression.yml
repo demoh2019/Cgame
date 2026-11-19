@@ -1,0 +1,30 @@
+name: AHashMap move assignment performance regressions
+
+on:
+  pull_request:
+    branches: [develop]
+    paths:
+      - 'core/templates/a_hash_map.h'
+      - 'tests/core/templates/test_a_hash_map.cpp'
+      - 'misc/scripts/tests/test_a_hash_map_move.py'
+      - '.github/workflows/a-hash-map-move-regression.yml'
+  push:
+    branches: [develop]
+    paths:
+      - 'core/templates/a_hash_map.h'
+      - 'tests/core/templates/test_a_hash_map.cpp'
+      - 'misc/scripts/tests/test_a_hash_map_move.py'
+      - '.github/workflows/a-hash-map-move-regression.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  compile-extracted-production-overload:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - name: Verify real move-assignment code under GCC and Clang
+        run: python3 -m unittest discover -s misc/scripts/tests -p test_a_hash_map_move.py -v

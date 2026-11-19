@@ -1,0 +1,30 @@
+name: Apple touch pressure division regression
+
+on:
+  pull_request:
+    branches: [develop]
+    paths:
+      - "drivers/apple_embedded/godot_view_apple_embedded.mm"
+      - "misc/scripts/tests/test_apple_touch_pressure.py"
+      - ".github/workflows/apple-touch-pressure-regression.yml"
+  push:
+    branches: [develop]
+    paths:
+      - "drivers/apple_embedded/godot_view_apple_embedded.mm"
+      - "misc/scripts/tests/test_apple_touch_pressure.py"
+      - ".github/workflows/apple-touch-pressure-regression.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  source-contracts:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - name: Verify pressure fallback and unchanged touch coordinates
+        run: |
+          python3 -m py_compile misc/scripts/tests/test_apple_touch_pressure.py
+          python3 -m unittest discover -s misc/scripts/tests -p 'test_apple_touch_pressure.py' -v

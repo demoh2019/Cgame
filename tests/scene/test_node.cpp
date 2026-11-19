@@ -35,6 +35,8 @@ TEST_FORCE_LINK(test_node)
 #include "core/io/file_access.h"
 #include "core/io/resource_saver.h"
 #include "core/object/class_db.h"
+#include "core/object/callable_mp.h"
+#include "core/object/undo_redo.h"
 #include "scene/main/node.h"
 #include "scene/main/scene_tree.h"
 #include "scene/main/window.h"
@@ -925,6 +927,87 @@ TEST_CASE("[SceneTree][Node] Test the process priority") {
 	memdelete(node2);
 	memdelete(node3);
 	memdelete(node4);
+}
+
+
+static void commit_placeholder_action(UndoRedo *p_history, Node *p_node, bool p_enabled) {
+	p_history->create_action("Toggle Load as Placeholder");
+	p_history->add_do_method(callable_mp(p_node, &Node::set_scene_instance_load_placeholder).bind(p_enabled));
+	p_history->add_undo_method(callable_mp(p_node, &Node::set_scene_instance_load_placeholder).bind(!p_enabled));
+	p_history->commit_action();
+}
+
+TEST_CASE("[Node][PlaceholderUndo] Enable placeholder can be undone and redone") {
+	Node *node = memnew(Node);
+	UndoRedo *history = memnew(UndoRedo);
+	CHECK_FALSE(node->get_scene_instance_load_placeholder());
+	commit_placeholder_action(history, node, true);
+	CHECK(node->get_scene_instance_load_placeholder());
+	CHECK(history->get_history_count() == 1);
+	history->undo();
+	CHECK_FALSE(node->get_scene_instance_load_placeholder());
+	history->redo();
+	CHECK(node->get_scene_instance_load_placeholder());
+	memdelete(history);
+	memdelete(node);
+}
+
+TEST_CASE("[Node][PlaceholderUndo] Disable placeholder restores previous state on undo") {
+	Node *node = memnew(Node);
+	node->set_scene_instance_load_placeholder(true);
+	UndoRedo *history = memnew(UndoRedo);
+	commit_placeholder_action(history, node, false);
+	CHECK_FALSE(node->get_scene_instance_load_placeholder());
+	history->undo();
+	CHECK(node->get_scene_instance_load_placeholder());
+	history->redo();
+	CHECK_FALSE(node->get_scene_instance_load_placeholder());
+	memdelete(history);
+	memdelete(node);
+}
+
+TEST_CASE("[Node][PlaceholderUndo] Multi-selection toggles atomically") {
+	Node *first = memnew(Node);
+	Node *second = memnew(Node);
+	UndoRedo *history = memnew(UndoRedo);
+	history->create_action("Toggle Load as Placeholder", UndoRedo::MERGE_DISABLE);
+	Node *nodes[] = { first, second };
+	for (Node *node : nodes) {
+		history->add_do_method(callable_mp(node, &Node::set_scene_instance_load_placeholder).bind(true));
+		history->add_undo_method(callable_mp(node, &Node::set_scene_instance_load_placeholder).bind(false));
+	}
+	history->commit_action();
+	CHECK(first->get_scene_instance_load_placeholder());
+	CHECK(second->get_scene_instance_load_placeholder());
+	CHECK(history->get_history_count() == 1);
+	history->undo();
+	CHECK_FALSE(first->get_scene_instance_load_placeholder());
+	CHECK_FALSE(second->get_scene_instance_load_placeholder());
+	history->redo();
+	CHECK(first->get_scene_instance_load_placeholder());
+	CHECK(second->get_scene_instance_load_placeholder());
+	memdelete(history);
+	memdelete(first);
+	memdelete(second);
+}
+
+TEST_CASE("[Node][PlaceholderUndo] Repeated toggles retain separate undo actions") {
+	Node *node = memnew(Node);
+	UndoRedo *history = memnew(UndoRedo);
+	const uint64_t initial_version = history->get_version();
+	commit_placeholder_action(history, node, true);
+	commit_placeholder_action(history, node, false);
+	CHECK_FALSE(node->get_scene_instance_load_placeholder());
+	CHECK(history->get_history_count() == 2);
+	CHECK(history->get_version() == initial_version + 2);
+	history->undo();
+	CHECK(node->get_scene_instance_load_placeholder());
+	history->undo();
+	CHECK_FALSE(node->get_scene_instance_load_placeholder());
+	history->redo();
+	CHECK(node->get_scene_instance_load_placeholder());
+	memdelete(history);
+	memdelete(node);
 }
 
 } // namespace TestNode

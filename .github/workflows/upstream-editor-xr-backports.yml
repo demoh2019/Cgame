@@ -1,0 +1,67 @@
+name: Upstream editor and XR regressions
+
+on:
+  push:
+    branches: [develop]
+    paths:
+      - 'modules/openxr/openxr_api.cpp'
+      - 'modules/openxr/openxr_api.h'
+      - 'modules/gdscript/gdscript.cpp'
+      - 'misc/scripts/tests/test_upstream_editor_xr_regressions.py'
+      - 'misc/scripts/README_upstream_editor_xr_backports.md'
+      - '.github/workflows/upstream-editor-xr-backports.yml'
+  pull_request:
+    paths:
+      - 'modules/openxr/openxr_api.cpp'
+      - 'modules/openxr/openxr_api.h'
+      - 'modules/gdscript/gdscript.cpp'
+      - 'misc/scripts/tests/test_upstream_editor_xr_regressions.py'
+      - 'misc/scripts/README_upstream_editor_xr_backports.md'
+      - '.github/workflows/upstream-editor-xr-backports.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  source-regressions:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ['3.9', '3.13']
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+      - name: Check syntax and source regressions
+        run: |
+          python -m py_compile misc/scripts/tests/test_upstream_editor_xr_regressions.py
+          python -m unittest discover -s misc/scripts/tests -p 'test_upstream_editor_xr_regressions.py' -v
+
+  editor-build-and-native-regressions:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+      - uses: ./.github/actions/godot-deps
+      - name: Build with GDScript, OpenXR and native tests
+        uses: ./.github/actions/godot-build
+        with:
+          platform: linuxbsd
+          target: editor
+          scons-flags: dev_build=yes tests=yes debug_symbols=no module_mono_enabled=no module_openxr_enabled=yes accesskit=no
+      - name: Native unit tests and GDScript parser smoke
+        shell: bash
+        run: |
+          set -euo pipefail
+          engine=./bin/godot.linuxbsd.editor.dev.x86_64
+          "$engine" --headless --test
+          project="$RUNNER_TEMP/cgame-editor-xr-test"
+          mkdir -p "$project"
+          printf '[application]\nconfig/name="Cgame XR Backport Check"\n' > "$project/project.godot"
+          printf '[gd_scene load_steps=2 format=3]\n[node name="Test" type="Node"]\n' > "$project/main.tscn"
+          "$engine" --headless --path "$project" --import

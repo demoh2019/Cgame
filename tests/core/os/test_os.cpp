@@ -34,6 +34,10 @@ TEST_FORCE_LINK(test_os)
 
 #include "core/os/os.h"
 
+#ifdef __linux__
+#include <sched.h>
+#endif
+
 namespace TestOS {
 
 TEST_CASE("[OS] Environment variables") {
@@ -199,5 +203,21 @@ TEST_CASE("[OS] Execute") {
 			"Running the command `sh -c \"ls > /dev/null\"` returns a zero (successful) exit code.");
 #endif
 }
+
+TEST_CASE("[OS] Default worker pool thread count is positive") {
+	CHECK(OS::get_singleton()->get_default_thread_pool_size() >= 1);
+}
+
+#ifdef __linux__
+TEST_CASE("[OS] Thread pool respects Linux affinity mask") {
+	cpu_set_t allowed_cores;
+	if (sched_getaffinity(0, sizeof(cpu_set_t), &allowed_cores) == 0) {
+		const int allowed_count = CPU_COUNT(&allowed_cores);
+		if (allowed_count > 0) {
+			CHECK(OS::get_singleton()->get_default_thread_pool_size() == allowed_count);
+		}
+	}
+}
+#endif // __linux__
 
 } // namespace TestOS

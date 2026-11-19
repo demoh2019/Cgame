@@ -213,6 +213,15 @@ function GodotSampleDriver(audioContext, positionWorkletPath) {
 		});
 		merger.connect(getBus(bus).getInputNode());
 
+		// Avoid redundant AudioParam writes on unchanged mixer channels.
+		const cachedGain = new Array(NUMBER_OF_WEB_CHANNELS).fill(NaN);
+		function updateChannelGain(channel, gain) {
+			if (cachedGain[channel] !== gain) {
+				cachedGain[channel] = gain;
+				channels[channel].gain.value = gain;
+			}
+		}
+
 		const node = {};
 		/** @return {!AudioNode} */ node.getInputNode = () => splitter;
 		/** @return {!AudioNode} */ node.getOutputNode = () => merger;
@@ -222,12 +231,12 @@ function GodotSampleDriver(audioContext, positionWorkletPath) {
 				GodotRuntime.error(`Volume length isn't "${MAX_VOLUME_CHANNELS}", is ${volume.length} instead`);
 				return;
 			}
-			channels[WebChannel.CHANNEL_L].gain.value = volume[GodotChannel.CHANNEL_L] ?? 0;
-			channels[WebChannel.CHANNEL_R].gain.value = volume[GodotChannel.CHANNEL_R] ?? 0;
-			channels[WebChannel.CHANNEL_SL].gain.value = volume[GodotChannel.CHANNEL_SL] ?? 0;
-			channels[WebChannel.CHANNEL_SR].gain.value = volume[GodotChannel.CHANNEL_SR] ?? 0;
-			channels[WebChannel.CHANNEL_C].gain.value = volume[GodotChannel.CHANNEL_C] ?? 0;
-			channels[WebChannel.CHANNEL_LFE].gain.value = volume[GodotChannel.CHANNEL_LFE] ?? 0;
+			updateChannelGain(WebChannel.CHANNEL_L, volume[GodotChannel.CHANNEL_L] ?? 0);
+			updateChannelGain(WebChannel.CHANNEL_R, volume[GodotChannel.CHANNEL_R] ?? 0);
+			updateChannelGain(WebChannel.CHANNEL_SL, volume[GodotChannel.CHANNEL_SL] ?? 0);
+			updateChannelGain(WebChannel.CHANNEL_SR, volume[GodotChannel.CHANNEL_SR] ?? 0);
+			updateChannelGain(WebChannel.CHANNEL_C, volume[GodotChannel.CHANNEL_C] ?? 0);
+			updateChannelGain(WebChannel.CHANNEL_LFE, volume[GodotChannel.CHANNEL_LFE] ?? 0);
 		};
 		node.clear = function () {
 			splitter.disconnect();
@@ -369,7 +378,7 @@ function GodotSampleDriver(audioContext, positionWorkletPath) {
 					output.mixers.set(bus, mixer);
 				}
 				const size = MAX_VOLUME_CHANNELS;
-				mixer.setVolume(volumes.slice(idx * size, (idx * size) + size));
+				mixer.setVolume(volumes.subarray(idx * size, (idx * size) + size));
 			}
 		}
 		function clearSource() {

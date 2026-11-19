@@ -1,0 +1,53 @@
+name: Upstream editor documentation callback regressions
+on:
+  push:
+    branches: [develop]
+    paths:
+      - 'editor/doc/editor_help.cpp'
+      - 'editor/doc/editor_help.h'
+      - 'misc/scripts/tests/test_upstream_editor_doc_callbacks.py'
+      - 'misc/scripts/README_upstream_editor_doc_callbacks.md'
+      - '.github/workflows/upstream-editor-doc-callbacks.yml'
+  pull_request:
+    paths:
+      - 'editor/doc/editor_help.cpp'
+      - 'editor/doc/editor_help.h'
+      - 'misc/scripts/tests/test_upstream_editor_doc_callbacks.py'
+      - 'misc/scripts/README_upstream_editor_doc_callbacks.md'
+      - '.github/workflows/upstream-editor-doc-callbacks.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  source-contracts:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ['3.9', '3.13']
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+      - name: Verify source contracts
+        run: |
+          python -m py_compile misc/scripts/tests/test_upstream_editor_doc_callbacks.py
+          python -m unittest discover -s misc/scripts/tests -p test_upstream_editor_doc_callbacks.py -v
+  native-editor:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+      - uses: ./.github/actions/godot-deps
+      - name: Compile native editor with tests
+        uses: ./.github/actions/godot-build
+        with:
+          platform: linuxbsd
+          target: editor
+          scons-flags: dev_build=yes tests=yes debug_symbols=no module_mono_enabled=no accesskit=no
+      - name: Run native unit tests
+        run: |
+          ./bin/godot.linuxbsd.editor.dev.x86_64 --headless --test --force-colors
