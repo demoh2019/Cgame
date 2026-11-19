@@ -580,14 +580,14 @@ TEST_CASE("[SceneTree][OBJ] MTL diffuse color is converted from linear to sRGB")
 		Ref<FileAccess> mtl = FileAccess::open(mtl_path, FileAccess::WRITE, &err);
 		REQUIRE(err == OK);
 		REQUIRE(mtl.is_valid());
-		mtl->store_string("newmtl ImportedMaterial\\nKd 0.5 0.25 1.0\\n");
+		mtl->store_string("newmtl ImportedMaterial\nKd 0.5 0.25 1.0\n");
 		mtl->close();
 	}
 	{
 		Ref<FileAccess> obj = FileAccess::open(obj_path, FileAccess::WRITE, &err);
 		REQUIRE(err == OK);
 		REQUIRE(obj.is_valid());
-		obj->store_string("mtllib upstream_obj_diffuse_color.mtl\\no Triangle\\nusemtl ImportedMaterial\\nv 0 0 0\\nv 1 0 0\\nv 0 1 0\\nf 1 2 3\\n");
+		obj->store_string("mtllib upstream_obj_diffuse_color.mtl\no Triangle\nusemtl ImportedMaterial\nv 0 0 0\nv 1 0 0\nv 0 1 0\nf 1 2 3\n");
 		obj->close();
 	}
 
