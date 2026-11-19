@@ -1,0 +1,135 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<class name="Rope3D" inherits="Node3D" api_type="core" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="../class.xsd">
+	<brief_description>
+		A rope, chain or cable made of rigid bodies and joints.
+	</brief_description>
+	<description>
+		Rope3D builds a rope out of [member segments] capsule shaped [RigidBody3D] nodes connected with [PinJoint3D] ball joints. The rope starts at the position of this node and ends at [member end_point], laid out as a sagging curve if [member length] is longer than the distance. Because it is made of ordinary bodies and joints, the rope collides with the world, can be pulled and pushed by other bodies, carries loads and works with every 3D physics engine. A tube mesh that follows the segments is drawn automatically.
+		[codeblock]
+		var rope = Rope3D.new()
+		rope.end_point = Vector3(0, -4, 0)   # Hangs 4 m below this node.
+		rope.pin_start = true                # Fixed to the world at the start.
+		add_child(rope)
+		rope.node_b = rope.get_path_to($Crate)  # Carries a crate at the end.
+		[/codeblock]
+		An end is attached to the body in [member node_a] or [member node_b] if one is given; otherwise it is pinned to the world if [member pin_start] or [member pin_end] is [code]true[/code], and hangs free if not. Set [member break_force] for ropes that snap under load; [signal broken] reports which joint tore. With Godot Physics, [method get_start_tension] and [method get_end_tension] tell how hard the rope is pulled.
+		[b]Note:[/b] The rope is rebuilt, losing its current shape, whenever one of its settings changes or [method rebuild] is called. Changing [member node_a] or [member node_b] requires the node to be inside the tree, as it is a path. Joints between many light segments and a heavy body are soft: use a high [member solver_priority], more segments, or the 3D [member ProjectSettings.physics/3d/solver/substeps] for heavy loads.
+	</description>
+	<tutorials>
+	</tutorials>
+	<methods>
+		<method name="get_current_length" qualifiers="const">
+			<return type="float" />
+			<description>
+				Returns the length of the rope as the physics currently lays it out. It is longer than [member length] when the rope stretches under load.
+			</description>
+		</method>
+		<method name="get_end_tension" qualifiers="const">
+			<return type="float" />
+			<description>
+				Returns the size of the force of the joint at the end of the rope, in newtons. Only Godot Physics reports it; other engines return [code]0[/code].
+			</description>
+		</method>
+		<method name="get_points" qualifiers="const">
+			<return type="PackedVector3Array" />
+			<description>
+				Returns [code]segments + 1[/code] world positions along the rope from the start to the end.
+			</description>
+		</method>
+		<method name="get_segment" qualifiers="const">
+			<return type="RigidBody3D" />
+			<param index="0" name="index" type="int" />
+			<description>
+				Returns the body of the segment with the given index, to apply forces to it or to read its state.
+			</description>
+		</method>
+		<method name="get_segment_count" qualifiers="const">
+			<return type="int" />
+			<description>
+				Returns the number of segments that are currently built.
+			</description>
+		</method>
+		<method name="get_start_tension" qualifiers="const">
+			<return type="float" />
+			<description>
+				Returns the size of the force of the joint at the start of the rope, in newtons. Only Godot Physics reports it; other engines return [code]0[/code].
+			</description>
+		</method>
+		<method name="is_broken" qualifiers="const">
+			<return type="bool" />
+			<description>
+				Returns [code]true[/code] if any joint of the rope was torn by [member break_force].
+			</description>
+		</method>
+		<method name="rebuild">
+			<return type="void" />
+			<description>
+				Destroys the segments and joints and builds them again from the current settings and the current position of this node.
+			</description>
+		</method>
+	</methods>
+	<members>
+		<member name="break_force" type="float" setter="set_break_force" getter="get_break_force" default="0.0">
+			Force in newtons above which a joint of the rope tears. [code]0[/code] makes the rope unbreakable. Only supported by Godot Physics.
+		</member>
+		<member name="collision_layer" type="int" setter="set_collision_layer" getter="get_collision_layer" default="1">
+			The physics layers the segments are in.
+		</member>
+		<member name="collision_mask" type="int" setter="set_collision_mask" getter="get_collision_mask" default="1">
+			The physics layers the segments collide with.
+		</member>
+		<member name="damping" type="float" setter="set_damping" getter="get_damping" default="0.5">
+			Linear and angular damping of every segment. Higher values make the rope settle faster and swing less.
+		</member>
+		<member name="end_point" type="Vector3" setter="set_end_point" getter="get_end_point" default="Vector3(0, -5, 0)">
+			End of the rope, in the local space of this node.
+		</member>
+		<member name="length" type="float" setter="set_length" getter="get_length" default="0.0">
+			Length of the rope in meters. [code]0[/code] uses the distance between the start and [member end_point], which makes a taut rope. A longer value lets the rope sag.
+		</member>
+		<member name="mass" type="float" setter="set_mass" getter="get_mass" default="1.0">
+			Total mass of the rope in kilograms, shared by all segments.
+		</member>
+		<member name="material" type="Material" setter="set_material" getter="get_material">
+			Material of the visible rope.
+		</member>
+		<member name="node_a" type="NodePath" setter="set_node_a" getter="get_node_a" default="NodePath(&quot;&quot;)">
+			Body the start of the rope is attached to. Must be inside the tree to be resolved.
+		</member>
+		<member name="node_b" type="NodePath" setter="set_node_b" getter="get_node_b" default="NodePath(&quot;&quot;)">
+			Body the end of the rope is attached to.
+		</member>
+		<member name="pin_end" type="bool" setter="set_pin_end" getter="is_pin_end" default="false">
+			If [code]true[/code] and [member node_b] is not set, the end of the rope is fixed to the world.
+		</member>
+		<member name="pin_start" type="bool" setter="set_pin_start" getter="is_pin_start" default="true">
+			If [code]true[/code] and [member node_a] is not set, the start of the rope is fixed to the world.
+		</member>
+		<member name="radial_segments" type="int" setter="set_radial_segments" getter="get_radial_segments" default="6">
+			Number of sides of the visible tube.
+		</member>
+		<member name="radius" type="float" setter="set_radius" getter="get_radius" default="0.05">
+			Radius of the rope in meters, for both the collision shape and the visible tube.
+		</member>
+		<member name="rope_visible" type="bool" setter="set_rope_visible" getter="is_rope_visible" default="true">
+			If [code]true[/code], a tube mesh is drawn along the segments.
+		</member>
+		<member name="segments" type="int" setter="set_segments" getter="get_segments" default="12">
+			Number of rigid bodies the rope is made of. More segments bend more smoothly but cost more.
+		</member>
+		<member name="self_collision" type="bool" setter="set_self_collision" getter="is_self_collision" default="false">
+			If [code]true[/code], segments of the rope also collide with each other (neighbouring segments never do).
+		</member>
+		<member name="solver_priority" type="int" setter="set_solver_priority" getter="get_solver_priority" default="4">
+			The [member Joint3D.solver_priority] of every joint. Higher values keep the rope from stretching, at some cost.
+		</member>
+	</members>
+	<signals>
+		<signal name="broken">
+			<param index="0" name="joint_index" type="int" />
+			<description>
+				Emitted when a joint of the rope tears under [member break_force]. [param joint_index] counts the joints from the start of the rope.
+			</description>
+		</signal>
+	</signals>
+</class>
