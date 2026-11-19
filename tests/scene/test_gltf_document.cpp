@@ -372,6 +372,7 @@ TEST_CASE("[SceneTree][GLTFDocument] Equal glTF spotlight cone angles avoid divi
 
 
 TEST_CASE("[GLTFAttributeFastPath] mesh tangent and normal buffers preserve geometry across export") {
+	register_gltf_extension();
 	Node3D *root = memnew(Node3D);
 	root->set_name("GLTFAttributeRoot");
 	MeshInstance3D *mesh_node = memnew(MeshInstance3D);
