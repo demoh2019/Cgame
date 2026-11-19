@@ -65,6 +65,34 @@ public:
 	}
 };
 
+class CountingHeuristic2D : public AStar2D {
+public:
+	int start_heuristic_calls = 0;
+
+protected:
+	real_t _estimate_cost(int64_t p_from, int64_t p_to) override {
+		if (p_from == 1 && p_to == 2) {
+			++start_heuristic_calls;
+		}
+		return AStar2D::_estimate_cost(p_from, p_to);
+	}
+};
+
+TEST_CASE("[AStar2D] Start heuristic evaluated once per search") {
+	Ref<CountingHeuristic2D> graph;
+	graph.instantiate();
+	graph->add_point(1, Vector2(0, 0));
+	graph->add_point(2, Vector2(1, 0));
+	graph->connect_points(1, 2);
+
+	const Vector<int64_t> path = graph->get_id_path(1, 2);
+	REQUIRE(path.size() == 2);
+	CHECK(graph->start_heuristic_calls == 1);
+
+	graph->get_id_path(1, 2);
+	CHECK(graph->start_heuristic_calls == 2);
+}
+
 TEST_CASE("[AStar2D] ABC path") {
 	Ref<ABCX> abcx;
 	abcx.instantiate();

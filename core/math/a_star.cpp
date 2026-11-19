@@ -333,7 +333,7 @@ bool AStar3D::_solve(Point *p_begin_point, Point *p_end_point, bool p_allow_part
 	p_begin_point->g_score = 0;
 	p_begin_point->f_score = _estimate_cost(p_begin_point->id, p_end_point->id);
 	p_begin_point->abs_g_score = 0;
-	p_begin_point->abs_f_score = _estimate_cost(p_begin_point->id, p_end_point->id);
+	p_begin_point->abs_f_score = p_begin_point->f_score;
 	open_list.push_back(p_begin_point);
 
 	while (!open_list.is_empty()) {
@@ -842,7 +842,7 @@ bool AStar2D::_solve(AStar3D::Point *p_begin_point, AStar3D::Point *p_end_point,
 	p_begin_point->g_score = 0;
 	p_begin_point->f_score = _estimate_cost(p_begin_point->id, p_end_point->id);
 	p_begin_point->abs_g_score = 0;
-	p_begin_point->abs_f_score = _estimate_cost(p_begin_point->id, p_end_point->id);
+	p_begin_point->abs_f_score = p_begin_point->f_score;
 	open_list.push_back(p_begin_point);
 
 	while (!open_list.is_empty()) {
