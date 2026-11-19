@@ -35,6 +35,7 @@ TEST_FORCE_LINK(test_rich_text_label)
 #ifndef ADVANCED_GUI_DISABLED
 
 #include "scene/gui/rich_text_label.h"
+#include "scene/resources/style_box.h"
 #include "scene/main/scene_tree.h"
 #include "scene/main/window.h"
 
@@ -167,7 +168,8 @@ TEST_CASE("[RichTextThemeFastPath] changing only the panel theme preserves rich 
 	const String expected = label->get_parsed_text();
 	const int paragraphs = label->get_paragraph_count();
 
-	label->add_theme_stylebox_override("normal", Ref<StyleBox>());
+	Ref<StyleBoxEmpty> panel = memnew(StyleBoxEmpty);
+	label->add_theme_stylebox_override("normal", panel);
 	label->notification(Control::NOTIFICATION_THEME_CHANGED);
 	SceneTree::get_singleton()->process(0);
 
