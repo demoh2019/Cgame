@@ -35,6 +35,7 @@
 #include "core/object/worker_thread_pool.h"
 #include "core/templates/a_hash_map.h"
 #include "core/os/os.h"
+#include "servers/physics_constraint_color.h"
 
 #define BODY_ISLAND_COUNT_RESERVE 128
 #define ISLAND_COUNT_RESERVE 128
@@ -289,12 +290,9 @@ void GodotStep2D::_solve_large_island(const LocalVector<GodotConstraint2D *> &p_
 				}
 			}
 
-			for (uint32_t candidate = 0; candidate < MAX_LARGE_ISLAND_COLORS; ++candidate) {
-				if ((forbidden & (uint32_t(1) << candidate)) == 0) {
-					color = candidate;
-					break;
-				}
-			}
+			// Bit-scan the first unoccupied color; preserve greedy order and
+			// the serial overflow group if all 16 colors are forbidden.
+			color = godot_physics_first_available_constraint_color<MAX_LARGE_ISLAND_COLORS>(forbidden);
 
 			if (color < MAX_LARGE_ISLAND_COLORS) {
 				const uint32_t bit = uint32_t(1) << color;
