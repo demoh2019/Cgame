@@ -668,3 +668,22 @@ python3 tests/stress/scale_sweep.py \
   --output out/astar-jps-bulk.json \
   --summary-md out/astar-jps-bulk.md
 ```
+
+### 3D CCD hot-path regression
+
+The `physics_ccd_3d` scenario keeps small box-shaped dynamic bodies in CCD mode and
+repeatedly fires them at thin static targets, resetting their positions each
+physics frame. The repeated casts exercise the 3D body-pair CCD support loop;
+plain `physics_3d` does not guarantee this path is exercised. Reported frame
+p95, peak physics time and resident memory are suitable for same-hardware,
+same-build before/after comparisons. This is a performance workload, not a
+proof of missed-collision prevention.
+
+```bash
+python3 tests/stress/run.py --godot ./bin/godot.linuxbsd.editor.dev.x86_64 \\
+  --case physics_ccd_3d --scale 4 --frames 90 --repeats 5 \\
+  --rss-limit-mib 4096 --output out/physics-ccd-3d.json
+```
+
+Use `scale=1` first; `scale=1000` creates 64,000 dynamic and 64,000 static
+bodies and should only be attempted on an isolated high-memory machine.
