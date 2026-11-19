@@ -1099,13 +1099,23 @@ static void _collision_rectangle_rectangle(const GodotShape2D *p_a, const Transf
 		return;
 	}
 
-	//box faces B
-	if (!separator.test_axis(p_transform_b.columns[0].normalized())) {
-		return;
-	}
+	// Box2D-style SAT axis deduplication: rectangles with exactly equal
+	// basis vectors have identical face directions. The two axes of B
+	// would repeat the same support projections already tested for A.
+	// Exact comparison is important: even a small relative rotation can
+	// introduce new separating axes. The cast, margin and manifold paths
+	// remain unchanged for all configurations.
+	const bool identical_rectangle_axes = p_transform_a.columns[0] == p_transform_b.columns[0] &&
+			p_transform_a.columns[1] == p_transform_b.columns[1];
+	if (!identical_rectangle_axes) {
+		// box faces B
+		if (!separator.test_axis(p_transform_b.columns[0].normalized())) {
+			return;
+		}
 
-	if (!separator.test_axis(p_transform_b.columns[1].normalized())) {
-		return;
+		if (!separator.test_axis(p_transform_b.columns[1].normalized())) {
+			return;
+		}
 	}
 
 	if (p_with_margin) {
