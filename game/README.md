@@ -607,3 +607,46 @@ strict finite bounds and compatibility for older saves. Server weather
 and equipped armor still determine the underlying exposure intensity.
 The `test_thermal_wrap.gd` regression runs with `game/tests/run_all.gd`.
 This is a fictional game mechanic, not real cold-exposure advice.
+
+## Fishing, cooking and classless gathering mastery
+
+The canonical survival MMORPG in `game/` now supports **shore fishing** as
+another independent profession alongside woodcutting, stone, ore and fiber.
+This extends both the offline local preview and the authoritative network
+server, not a standalone prototype.
+
+- Craft a **Fishing Rod** at the camp workbench from 2 T1 planks and
+  3 T1 fiber. Carry it in the normal inventory.
+- Stand on dry ground within approximately 4 m of water, then press **T**
+  in the local preview, or use **Cast fishing rod** in the online **I**
+  inventory panel. The server checks shoreline, life state, the carried
+  rod, free inventory capacity and the cooldown.
+- A catch takes **5 seconds** without moving away. The authoritative
+  server awards 1–2 raw fish, followed by a **2-second** recast cooldown.
+  Interrupting a cast, losing the rod or leaving the shore awards nothing.
+- Fishing awards **fishing profession XP**, independently of crafting or
+  other resource-gathering skills. XP is based on the fish that actually
+  entered the inventory; a full pack grants no phantom XP.
+- Cook **1 raw fish + 1 T1 wood** at the camp workbench to make
+  **1 cooked fish** restoring 35 hunger. Raw fish is a material, not
+  immediately edible; cooking uses the existing authoritative crafting
+  and item-consumption systems.
+- Progression persists through ordinary character saves, including Nakama.
+  Previous version-1 characters with only four gathering professions are
+  loaded with fishing XP = 0; malformed or infinite XP values are rejected.
+- Fishing, casting and cooking do not accept client-provided fish amounts,
+  paid currency, elapsed times or XP.
+
+Run the canonical smoke suite:
+
+```sh
+godot --headless --path game --script res://tests/run_all.gd
+```
+
+`test_fishing.gd` covers generated-shore water access, crafting, delayed
+reward, anti-spam cooldowns, casting interruption, inventory capacity,
+food recovery and backward-compatible progression saves.
+
+**Not included yet:** multiplayer fishing parties, boats, fish shoals,
+bait, weather-dependent catches, T2–T4 rods or regional fish prices.
+These can be added through shared game rules without duplicating an engine.
