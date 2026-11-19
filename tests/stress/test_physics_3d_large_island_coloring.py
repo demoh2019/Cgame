@@ -160,6 +160,7 @@ class LargeIsland3DColoringContracts(unittest.TestCase):
         script = RUNTIME.read_text(encoding="utf-8")
         self.assertIn("[false, false, 20, 16]", script)
         self.assertIn("[true, false, 20, 16]", script)
+        self.assertIn("[true, true, 20, 16]", script)
         self.assertIn("[true, false, 1, 320]", script)
         self.assertIn("await LargeIsland3DStress.new().run(", script)
         self.assertIn("result.has(\"error\")", script)
