@@ -32,6 +32,8 @@
 
 #include "core/object/class_db.h"
 
+#include <utility> // std::move
+
 #ifdef DEBUG_ENABLED
 #include "servers/navigation_3d/navigation_server_3d.h"
 #endif // DEBUG_ENABLED
@@ -58,18 +60,24 @@ void NavigationMesh::create_from_mesh(const Ref<Mesh> &p_mesh) {
 			continue;
 		}
 
-		int from = vertices.size();
-		vertices.append_array(varr);
-		int rlen = iarr.size();
-		const int *r = iarr.ptr();
+		const int rlen = iarr.size();
+		ERR_CONTINUE_MSG(rlen % 3 != 0, vformat("A mesh surface was skipped when creating a NavigationMesh due to an invalid triangle index count: %d.", rlen));
 
-		Vector<int> polygon;
+		const int from = vertices.size();
+		vertices.append_array(varr);
+		const int *indices = iarr.ptr();
+		// Reserve once per valid surface, rather than growing the outer vector
+		// for every triangle (and repeatedly detaching its shared payload).
+		polygons.reserve_exact(polygons.size() + rlen / 3);
+
 		for (int j = 0; j < rlen; j += 3) {
+			Vector<int> polygon;
 			polygon.resize(3);
-			polygon.write[0] = r[j + 0] + from;
-			polygon.write[1] = r[j + 1] + from;
-			polygon.write[2] = r[j + 2] + from;
-			polygons.push_back(polygon);
+			int *triangle = polygon.ptrw();
+			triangle[0] = indices[j + 0] + from;
+			triangle[1] = indices[j + 1] + from;
+			triangle[2] = indices[j + 2] + from;
+			polygons.push_back(std::move(polygon));
 		}
 	}
 }
