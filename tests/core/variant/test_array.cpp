@@ -140,6 +140,58 @@ TEST_CASE("[Array] append_array()") {
 	CHECK(int(arr1[1]) == 2);
 }
 
+TEST_CASE("[Array] typed append_array avoids conversion for compatible elements") {
+	TypedArray<double> target;
+	Array source = { 1.25, 2.5, 3.75 };
+	target.append_array(source);
+
+	CHECK_EQ(target.size(), 3);
+	for (int i = 0; i < 3; i++) {
+		CHECK_EQ(double(target[i]), double(source[i]));
+	}
+	// The source remains intact and later changes must not affect the destination.
+	source[0] = 11.5;
+	CHECK_EQ(double(target[0]), 1.25);
+
+	// Nothing should change when the source is empty.
+	Array empty;
+	target.append_array(empty);
+	CHECK_EQ(target.size(), 3);
+}
+
+TEST_CASE("[Array] typed append_array converts only incompatible elements") {
+	TypedArray<double> target;
+	Array mixed = { 1.5, 2, 3.25, 4, 5.5 };
+	target.append_array(mixed);
+
+	CHECK_EQ(target.size(), 5);
+	CHECK_EQ(double(target[0]), 1.5);
+	CHECK_EQ(double(target[1]), 2.0);
+	CHECK_EQ(double(target[2]), 3.25);
+	CHECK_EQ(double(target[3]), 4.0);
+	CHECK_EQ(double(target[4]), 5.5);
+
+	// Repeated appends preserve ordering and do not modify the source.
+	target.append_array(mixed);
+	CHECK_EQ(target.size(), 10);
+	for (int i = 0; i < mixed.size(); i++) {
+		CHECK_EQ(double(target[i]), double(target[5 + i]));
+	}
+	CHECK_EQ(mixed[1], Variant(2));
+}
+
+TEST_CASE("[Array] typed append_array rejects invalid elements atomically") {
+	TypedArray<double> target = { 7.0 };
+	Array invalid = { 1.25, "invalid", 3.25 };
+
+	ERR_PRINT_OFF;
+	target.append_array(invalid);
+	ERR_PRINT_ON;
+
+	CHECK_EQ(target.size(), 1);
+	CHECK_EQ(double(target[0]), 7.0);
+}
+
 TEST_CASE("[Array] resize(), insert(), and erase()") {
 	Array arr;
 	arr.resize(2);
