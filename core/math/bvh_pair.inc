@@ -41,19 +41,18 @@ struct ItemPairs {
 		return find_pair_to(p_handle) != BVHCommon::INVALID;
 	}
 
-	// return success
-	void *remove_pair_to(BVHHandle p_handle) {
-		void *userdata = nullptr;
-
-		for (uint32_t n = 0; n < extended_pairs.size(); n++) {
-			if (extended_pairs[n].handle == p_handle) {
-				userdata = extended_pairs[n].userdata;
-				extended_pairs.remove_at_unordered(n);
-				break;
-			}
-		}
-
+	// Remove a link at a position already found by the caller. This avoids
+	// scanning the same adjacency list again when processing lost contacts.
+	void *remove_pair_at(uint32_t p_index) {
+		DEV_ASSERT(p_index < extended_pairs.size());
+		void *userdata = extended_pairs[p_index].userdata;
+		extended_pairs.remove_at_unordered(p_index);
 		return userdata;
+	}
+
+	void *remove_pair_to(BVHHandle p_handle) {
+		const uint32_t index = find_pair_to(p_handle);
+		return index != BVHCommon::INVALID ? remove_pair_at(index) : nullptr;
 	}
 
 	// experiment : scale the pairing expansion by the number of pairs.
