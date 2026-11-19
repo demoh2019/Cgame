@@ -53,7 +53,7 @@ class JoltBroadPhaseMatrix {
 	typedef LayerType::Type UnderlyingType;
 
 public:
-	JoltBroadPhaseMatrix() {
+	constexpr JoltBroadPhaseMatrix() {
 		using namespace JoltBroadPhaseLayer;
 
 		allow_collision(BODY_STATIC, BODY_DYNAMIC);
@@ -78,11 +78,11 @@ public:
 		allow_collision(AREA_UNDETECTABLE, AREA_DETECTABLE);
 	}
 
-	void allow_collision(UnderlyingType p_layer1, UnderlyingType p_layer2) { masks[p_layer1] |= uint8_t(1U << p_layer2); }
-	void allow_collision(LayerType p_layer1, LayerType p_layer2) { allow_collision((UnderlyingType)p_layer1, (UnderlyingType)p_layer2); }
+	constexpr void allow_collision(UnderlyingType p_layer1, UnderlyingType p_layer2) { masks[p_layer1] |= uint8_t(1U << p_layer2); }
+	constexpr void allow_collision(LayerType p_layer1, LayerType p_layer2) { allow_collision((UnderlyingType)p_layer1, (UnderlyingType)p_layer2); }
 
-	bool should_collide(UnderlyingType p_layer1, UnderlyingType p_layer2) const { return (masks[p_layer1] & uint8_t(1U << p_layer2)) != 0; }
-	bool should_collide(LayerType p_layer1, LayerType p_layer2) const { return should_collide((UnderlyingType)p_layer1, (UnderlyingType)p_layer2); }
+	constexpr bool should_collide(UnderlyingType p_layer1, UnderlyingType p_layer2) const { return (masks[p_layer1] & uint8_t(1U << p_layer2)) != 0; }
+	constexpr bool should_collide(LayerType p_layer1, LayerType p_layer2) const { return should_collide((UnderlyingType)p_layer1, (UnderlyingType)p_layer2); }
 
 private:
 	uint8_t masks[TSize] = {};
@@ -117,11 +117,9 @@ uint32_t JoltLayers::GetNumBroadPhaseLayers() const {
 }
 
 JPH::BroadPhaseLayer JoltLayers::GetBroadPhaseLayer(JPH::ObjectLayer p_layer) const {
-	JPH::BroadPhaseLayer broad_phase_layer = JoltBroadPhaseLayer::BODY_STATIC;
-	JPH::ObjectLayer object_layer = 0;
-	decode_layers(p_layer, broad_phase_layer, object_layer);
-
-	return broad_phase_layer;
+	// ObjectLayer stores broadphase classification in the high three bits.
+	// Decoding the low object-layer index is unnecessary in this hot callback.
+	return JPH::BroadPhaseLayer(uint8_t(uint32_t(p_layer) >> OBJECT_LAYER_INDEX_BITS));
 }
 
 #if defined(JPH_EXTERNAL_PROFILE) || defined(JPH_PROFILE_ENABLED)
@@ -168,12 +166,11 @@ bool JoltLayers::ShouldCollide(JPH::ObjectLayer p_encoded_layer1, JPH::ObjectLay
 }
 
 bool JoltLayers::ShouldCollide(JPH::ObjectLayer p_encoded_layer1, JPH::BroadPhaseLayer p_broad_phase_layer2) const {
-	static const JoltBroadPhaseMatrix matrix;
+	// The matrix contains only compile-time layer rules: no first-use
+	// initialization guard is needed on this per-pair broadphase filter.
+	static constexpr JoltBroadPhaseMatrix matrix;
 
-	JPH::BroadPhaseLayer broad_phase_layer1 = JoltBroadPhaseLayer::BODY_STATIC;
-	JPH::ObjectLayer object_layer1 = 0;
-	decode_layers(p_encoded_layer1, broad_phase_layer1, object_layer1);
-
+	const JPH::BroadPhaseLayer broad_phase_layer1(uint8_t(uint32_t(p_encoded_layer1) >> OBJECT_LAYER_INDEX_BITS));
 	return matrix.should_collide(broad_phase_layer1, p_broad_phase_layer2);
 }
 
