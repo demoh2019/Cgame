@@ -95,25 +95,28 @@ def serve(root, port, https, run_browser, key="", cert=""):
     address = ("", port)
     httpd = DualStackServer(address, CORSRequestHandler)
 
-    if https:
-        ssl_wrap_socket(httpd, key, cert)
-        url = f"https://127.0.0.1:{port}"
-    else:
-        url = f"http://127.0.0.1:{port}"
-
-    if run_browser:
-        # Open the served page in the user's default browser.
-        print(f"Opening the served URL in the default browser (use `--no-browser` or `-n` to disable this): {url}")
-        shell_open(url)
-    else:
-        print(f"Serving at: {url}")
-
     try:
-        httpd.serve_forever()
-    except KeyboardInterrupt:
-        print("\nKeyboard interrupt received, stopping server.")
+        # For port 0, advertise the ephemeral port selected by the OS.
+        bound_port = httpd.server_port
+        if https:
+            ssl_wrap_socket(httpd, key, cert)
+            url = f"https://127.0.0.1:{bound_port}"
+        else:
+            url = f"http://127.0.0.1:{bound_port}"
+
+        if run_browser:
+            # Open the served page in the user's default browser.
+            print(f"Opening the served URL in the default browser (use `--no-browser` or `-n` to disable this): {url}")
+            shell_open(url)
+        else:
+            print(f"Serving at: {url}")
+
+        try:
+            httpd.serve_forever()
+        except KeyboardInterrupt:
+            print("\nKeyboard interrupt received, stopping server.")
     finally:
-        # Clean-up server
+        # Also close the listener if TLS setup or opening a browser fails.
         httpd.server_close()
 
 
