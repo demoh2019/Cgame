@@ -1606,3 +1606,55 @@ tiers; spears are ordinary gear for inventory, trading, stash and full-loot PvP.
 recipes, server-side crafting, range, mastery, cooldown, anti-spam, stale gear
 and safe-zone protection. The current Cgame engine APIs support this feature;
 no changes to the engine core were necessary.
+
+
+## Persistent survivor renown and supply discounts (Days After × Albion × Lineage)
+
+Camp renown is a **per-character progression** that rewards verified survival
+and PvE without permanent classes, extra PvP damage or free loot. It lives in
+the canonical `game/` game server and is saved with the existing Nakama
+version-1 character record.
+
+The server, never a client request, grants renown **once per actual infected
+death** (walker 1, runner 2, brute 4, elite +5, raid boss +35) or **once
+per successful camp-contract turn-in** (+8). A failed claim, unaccepted
+contract, duplicate hit on a corpse or idle party observer yields nothing.
+The lifetime score is bounded at **10,000**. Rank milestones are:
+
+| Renown | Title | Discount on NPC purchases |
+|---:|---|---:|
+| 0–39 | Newcomer | 0% |
+| 40–159 | Settler | 10% |
+| 160–499 | Ranger | 15% |
+| 500+ | Warden | 20% |
+
+Only the **hub NPC's water, food and bandages** use the ranked purchase
+price. The server rounds each discounted unit price **up to at least one
+silver**, and then multiplies by quantity. The original NPC sale payouts,
+player-to-player barter and market orders are unaffected. This avoids a
+buy/sell currency loop while giving established survivors modest relief
+on necessities.
+
+The online HUD shows the survivor's title, accumulated renown,
+next milestone and current NPC discount, and displays recipient-only
+renown notifications. The local preview shows the same values and actual
+discounted water price when pressing **N** near the camp workbench.
+
+Renown is restored transactionally alongside the survivor's inventory,
+bank, contracts and professions. Legacy version-1 Nakama characters
+missing the field start at zero; fractional, negative, infinite, string,
+boolean or over-cap scores invalidate a corrupt save **without partially
+mutating the live character**. A network client cannot send rank or points.
+
+Test the shared server and world:
+
+```bash
+godot --headless --path game --script res://tests/run_all.gd
+```
+
+`game/tests/test_reputation.gd` covers rank boundaries, capped awards,
+once-only walker/elite/raid kills and contract rewards, private network
+notifications, discount pricing, atomic purchases, save migration and
+invalid-save rejection. This is persistent **individual reputation**,
+not yet a persistent guild ranking or shared clan treasury; those will
+require an account-owned group domain to prevent cross-account fraud.
