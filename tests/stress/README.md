@@ -1707,6 +1707,50 @@ The tests check finite body states and joint spacing, not physical
 equivalence to the serial solver or measured performance improvements.
 Start with small scales and monitor CPU usage, peak RSS and frame p95.
 
+### Optimized 3D sphere-box closest-point detection
+
+Cgame now specializes GodotPhysics3D's sphere-versus-box narrow phase
+for boxes whose **world-space Basis is exactly identity** (no rotation,
+scale or shear). A box's inverse transform is then pure translation:
+the sphere's local center is simply `sphere_origin - box_origin`. The
+collision routine skips `affine_inverse()` and the unnecessary matrix
+transforms of the closest box point, while keeping the original
+contact normal/penetration handling for fully contained spheres and
+nonzero collision margins.
+
+For arbitrary rotated, scaled or sheared boxes, the existing
+`affine_inverse()` path is left unchanged. This follows the usual
+specialized primitive-collision principle used by engines such as
+Jolt and Box2D; it is not a replacement for GJK/EPA.
+
+Validation includes 10,000 random pure-translation sphere/box
+configurations and a headless GodotPhysics regression for inside,
+outside, corner contacts and nonuniformly scaled/rotated fallback:
+
+```bash
+python3 -m unittest discover -s tests/stress -p 'test_physics_sphere_box_inverse_bypass.py' -v
+./bin/godot.macos.editor.arm64 --headless --path tests/stress \
+  --script res://physics_sphere_box_fast_path_regression.gd
+```
+
+Compare identity and rotated box workloads with otherwise identical
+sphere geometry, simulation steps and dynamic-body counts (256 pairs
+per scale). The workload repositions moving spheres every physics
+frame and records frame p95, collision pair count and peak RSS via
+the Python runner:
+
+```bash
+python3 tests/stress/run.py --godot ./bin/godot.macos.editor.arm64 \
+  --case physics_sphere_box_identity_3d,physics_sphere_box_rotated_3d \
+  --scale 4 --frames 90 --repeats 5 --rss-limit-mib 4096 \
+  --output out/physics-sphere-box-3d.json
+```
+
+Measure the *same scene* on an older and the updated engine binary
+before attributing changes to the fast path: rotated scenes have
+different geometric costs. Compile and run the native/headless
+tests before enabling production workloads.
+
 ### Shared-rotation 3D box-box SAT axis deduplication
 
 GodotPhysics3D checks up to **15 separating axes** when testing two
