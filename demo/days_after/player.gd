@@ -2,6 +2,7 @@ extends CharacterBody3D
 ## Minimal first-person survival controller; gameplay logic is in survival_state.gd.
 
 const SurvivalState = preload("res://survival_state.gd")
+const Progression = preload("res://progression.gd")
 const WALK_SPEED := 4.5
 const SPRINT_SPEED := 7.2
 const JUMP_VELOCITY := 4.6
@@ -9,7 +10,11 @@ const MOUSE_SENSITIVITY := 0.0025
 const INTERACTION_RANGE := 3.0
 
 var state = SurvivalState.new()
-var inventory: Dictionary = {"food": 0, "water": 0}
+var inventory: Dictionary = {
+    "food": 0, "water": 0, "wood": 0, "fiber": 0, "scrap": 0,
+    "bandage": 0, "hatchet": 0, "medkit": 0
+}
+var progression = Progression.new()
 var _camera: Camera3D
 var _target: Node
 var _gravity := 9.8
@@ -50,6 +55,16 @@ func _unhandled_input(event: InputEvent) -> void:
                 consume("food")
             KEY_2:
                 consume("water")
+            KEY_3:
+                use_medical("bandage")
+            KEY_4:
+                craft_item("bandage")
+            KEY_5:
+                craft_item("hatchet")
+            KEY_6:
+                craft_item("medkit")
+            KEY_7:
+                use_medical("medkit")
             KEY_SPACE:
                 if is_on_floor():
                     velocity.y = JUMP_VELOCITY
@@ -121,3 +136,32 @@ func consume(kind: String) -> bool:
     if restored:
         inventory[kind] = int(inventory[kind]) - 1
     return restored
+
+
+func award_gathering(points: int) -> void:
+    progression.gain_experience("gathering", points)
+
+
+func gathering_yield(kind: String, base_amount: int) -> int:
+    if kind == "wood" and int(inventory.get("hatchet", 0)) > 0:
+        return base_amount + 1
+    return base_amount
+
+
+func craft_item(recipe_id: String) -> bool:
+    return progression.craft(inventory, recipe_id)
+
+
+func use_medical(kind: String) -> bool:
+    if state.health >= SurvivalState.MAX_VALUE or int(inventory.get(kind, 0)) <= 0:
+        return false
+    var restored := 0.0
+    if kind == "bandage":
+        restored = 25.0
+    elif kind == "medkit":
+        restored = 65.0
+    if restored <= 0.0:
+        return false
+    inventory[kind] = int(inventory[kind]) - 1
+    state.health = minf(SurvivalState.MAX_VALUE, state.health + restored)
+    return true

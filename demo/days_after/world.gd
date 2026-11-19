@@ -3,6 +3,7 @@ extends Node3D
 
 const Player = preload("res://player.gd")
 const LootPickup = preload("res://loot_pickup.gd")
+const ResourceNode = preload("res://resource_node.gd")
 const DAY_DURATION_SECONDS := 600.0
 
 var _player
@@ -18,6 +19,7 @@ func _ready() -> void:
     _static_block("Ground", Vector3(0, -0.5, 0), Vector3(70, 1, 70), Color(0.22, 0.29, 0.2))
     _build_ruins()
     _build_supplies()
+    _build_resources()
     _player = Player.new()
     _player.position = Vector3(0.0, 1.3, 5.0)
     add_child(_player)
@@ -103,6 +105,22 @@ func _supply(kind: String, amount: int, at: Vector3) -> void:
     add_child(pickup)
 
 
+func _build_resources() -> void:
+    _resource("wood", 3, Vector3(6.0, 0.6, -2.0))
+    _resource("wood", 3, Vector3(8.0, 0.6, -7.0))
+    _resource("fiber", 3, Vector3(-3.0, 0.6, 3.0))
+    _resource("fiber", 3, Vector3(-11.0, 0.6, 3.0))
+    _resource("scrap", 3, Vector3(3.0, 0.6, -6.0))
+    _resource("scrap", 3, Vector3(-3.0, 0.6, -10.0))
+
+
+func _resource(kind: String, units: int, at: Vector3) -> void:
+    var node := ResourceNode.new()
+    node.setup(kind, units)
+    node.position = at
+    add_child(node)
+
+
 func _create_hud() -> void:
     var canvas := CanvasLayer.new()
     add_child(canvas)
@@ -114,12 +132,12 @@ func _create_hud() -> void:
     var layout := VBoxContainer.new()
     panel.add_child(layout)
     var title := Label.new()
-    title.text = "DAYS AFTER  |  Cgame prototype"
+    title.text = "DAYS AFTER × ALBION  |  Cgame prototype"
     layout.add_child(title)
     _readout = Label.new()
     layout.add_child(_readout)
     var controls := Label.new()
-    controls.text = "WASD move  |  Shift run  |  Space jump\nE pick up  |  1 eat  |  2 drink  |  Esc cursor"
+    controls.text = "WASD move | Shift sprint | E loot/gather | Esc cursor\n1 eat | 2 drink | 3 bandage | 7 medkit\n4 craft bandage | 5 craft hatchet | 6 craft medkit (Lv 2)"
     layout.add_child(controls)
     _prompt = Label.new()
     layout.add_child(_prompt)
@@ -136,10 +154,14 @@ func _process(delta: float) -> void:
     _environment.ambient_light_energy = 0.18 + daylight * 0.72
     _environment.background_color = Color(0.015, 0.02, 0.05).lerp(Color(0.23, 0.36, 0.49), daylight)
     var stats = _player.state
-    _readout.text = "Day %d  %02d:%02d\nHealth: %d   Hunger: %d   Water: %d   Stamina: %d\nBackpack: food x%d   water x%d" % [
+    _readout.text = "Day %d  %02d:%02d\nHP %d | Hunger %d | Water %d | Stamina %d\nFood %d | Water %d | Wood %d | Fiber %d | Scrap %d\nBandage %d | Hatchet %d | Medkit %d\nGathering Lv %d (%d XP) | Crafting Lv %d (%d XP)" % [
         day, int(hour), int((hour - floor(hour)) * 60.0),
         int(stats.health), int(stats.hunger), int(stats.thirst), int(stats.stamina),
-        int(_player.inventory["food"]), int(_player.inventory["water"])
+        int(_player.inventory["food"]), int(_player.inventory["water"]),
+        int(_player.inventory["wood"]), int(_player.inventory["fiber"]), int(_player.inventory["scrap"]),
+        int(_player.inventory["bandage"]), int(_player.inventory["hatchet"]), int(_player.inventory["medkit"]),
+        _player.progression.skill_level("gathering"), int(_player.progression.experience["gathering"]),
+        _player.progression.skill_level("crafting"), int(_player.progression.experience["crafting"])
     ]
     var caption := _player.target_caption()
-    _prompt.text = "E: pick up " + caption if not caption.is_empty() else "Explore the ruins and look for supplies."
+    _prompt.text = "E: gather / collect " + caption if not caption.is_empty() else "Explore, scavenge, craft, survive."

@@ -1,43 +1,52 @@
-# Days After — Cgame playable prototype
+# Days After × Albion — Cgame survival sandbox prototype
 
-A small **first-person survival vertical slice** developed alongside the Cgame
-engine. This is a *new prototype*, not a complete version of the planned game.
+A standalone **first-person post-apocalyptic sandbox** combining survival
+mechanics with classless gathering/crafting progression. This is an original
+prototype, not a reproduction of either game's content or assets.
 
-## Play
+## Run
 
-Open `demo/days_after/project.godot` with a compiled Cgame editor, or run
-`<path-to-cgame-binary> --path demo/days_after` from the Cgame repository root.
+Open `demo/days_after/project.godot` using a Cgame editor build, or execute:
 
-- WASD — move
-- Mouse — look around
-- Shift — sprint (drains stamina)
-- Space — jump
-- E — collect a supply box while looking at it from within 3 m
-- 1 — eat food from the backpack
-- 2 — drink water from the backpack
-- Esc — release the mouse cursor; click to recapture
+```sh
+<cgame-editor> --path demo/days_after
+```
 
-Food and water drain over time; starvation/dehydration reduces health. Use
-pickups to replenish supplies. A 10-minute real-time day cycle changes the
-lighting. The map includes static ruins and dynamic physics crates.
+- WASD / mouse — move and look, Shift sprint, Space jump, Esc release cursor
+- E — collect supplies or gather from resource nodes within 3 m
+- 1 / 2 — eat / drink supplies
+- 3 / 7 — use bandage / medkit to restore health
+- 4 — craft bandage (2 fiber), grants 14 crafting XP
+- 5 — craft hatchet (2 wood + 2 scrap), grants 25 crafting XP
+- 6 — craft medkit (3 fiber + 1 scrap), requires crafting level 2
+
+Gather wood, fiber and scrap in the ruins. Each node has three charges and
+awards 12 gathering XP per charge. A crafted hatchet increases **wood** yield,
+making equipment affect what you can do instead of locking you to a class.
+Each 40 skill XP grants a new level. Crafting validates all requirements before
+consuming any materials; failed crafts never cost resources.
+
+Survival drains food/water and sprint stamina. Starvation or dehydration harms
+health. Ten real-world minutes represent an in-game day. Environmental ruins
+include rigid-body crates affected by the native Cgame physics engine.
 
 ## Automated smoke test
 
-With a compiled editor binary:
-
 ```sh
-<path-to-cgame-binary> --headless --path demo/days_after --script res://smoke_test.gd
+<cgame-editor> --headless --path demo/days_after --script res://smoke_test.gd
 ```
 
-The smoke test checks survival resource draining, clamping, starvation damage,
-scene loading, pickups and food consumption.
+The test covers needs, starvation, recipe gating/atomicity, XP levels, scene
+startup, one-time supply pickup, finite resource nodes, equipment gathering
+bonuses, healing and food consumption.
 
-## Engine vs. game boundary
+## Engine / game ownership
 
-This version uses existing Cgame / Godot 4.8-compatible APIs:
-`CharacterBody3D`, `RigidBody3D`, `PhysicsRayQueryParameters3D`, light
-and environment nodes. No engine-level change is necessary for these mechanics.
+Currently all mechanics use stable Godot/Cgame engine APIs. Game-specific
+state lives in `survival_state.gd` and `progression.gd`; interactive
+resources are in `resource_node.gd`. No speculative engine modification
+is required. Move capabilities into Cgame's engine layer only when an actual
+reusable gap is demonstrated and covered by regression tests.
 
-Future Cgame changes should be driven by reproducible gaps found when building
-Days After (for example, world streaming or large-scale destructible structures)
-and should receive standalone regression tests in the engine.
+Next steps: server-authoritative inventory, crafting stations, durability,
+territories, zombies, cooperative networking and persistence.
