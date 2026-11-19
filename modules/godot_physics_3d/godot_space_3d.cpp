@@ -1318,6 +1318,9 @@ GodotSpace3D::GodotSpace3D() {
 	const real_t configured_membrane_poisson = GLOBAL_GET("physics/3d/solver/soft_body_membrane_poisson_ratio");
 	soft_body_membrane_poisson_ratio = Math::is_finite(configured_membrane_poisson) ?
 			CLAMP(configured_membrane_poisson, real_t(-0.49), real_t(0.49)) : real_t(0.3);
+	const real_t configured_membrane_damping = GLOBAL_GET("physics/3d/solver/soft_body_membrane_damping_rate");
+	soft_body_membrane_damping_rate = Math::is_finite(configured_membrane_damping) ?
+			MAX(real_t(0.0), configured_membrane_damping) : real_t(0.0);
 	const real_t configured_shear_compliance = GLOBAL_GET("physics/3d/solver/soft_body_xpbd_shear_compliance");
 	soft_body_xpbd_shear_compliance = Math::is_finite(configured_shear_compliance) ? MAX(real_t(0.0), configured_shear_compliance) : real_t(0.0);
 	const real_t configured_dihedral_compliance = GLOBAL_GET("physics/3d/solver/soft_body_xpbd_dihedral_compliance");
