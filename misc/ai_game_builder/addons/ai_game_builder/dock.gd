@@ -176,7 +176,7 @@ func _on_request_completed(result: int, response_code: int, _headers: PackedStri
 		return
 	var parsed := Plan.parse_message(message["content"])
 	if not parsed["ok"]:
-		_status.text = "Rejected proposed plan: " + "; ".join(parsed["errors"])
+		_status.text = "Rejected proposed plan: " + "; ".join(PackedStringArray(parsed["errors"]))
 		_preview.text = str(message["content"]).left(20000)
 		return
 
@@ -195,7 +195,7 @@ func _request_apply() -> void:
 	var names: Array[String] = []
 	for item in _pending_plan["files"]:
 		names.append(str(item["operation"]).to_upper() + " " + str(item["path"]))
-	_confirmation.dialog_text = "Apply these changes to your project?\n\n" + "\n".join(names) + "\n\nGenerated scripts may execute when your game runs. Only approve reviewed code."
+	_confirmation.dialog_text = "Apply these changes to your project?\n\n" + "\n".join(PackedStringArray(names)) + "\n\nGenerated scripts may execute when your game runs. Only approve reviewed code."
 	_confirmation.popup_centered()
 
 
