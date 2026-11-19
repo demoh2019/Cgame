@@ -1,5 +1,50 @@
 # Cgame whole-engine stress and performance regression suite
 
+## Jolt: configurable friction and restitution material combining
+
+Jolt's native `PhysicsSystem::SetCombineFriction` and
+`PhysicsSystem::SetCombineRestitution` hooks now support the same
+coefficient-combination modes as the built-in GodotPhysics2D/3D solvers.
+The settings are **Jolt-specific** and do not silently change existing
+GodotPhysics projects:
+
+- `physics/jolt_physics_3d/collisions/friction_combine_mode`:
+  0 = legacy minimum (default), 1 = Box2D geometric mean, 2 = average,
+  3 = maximum.
+- `physics/jolt_physics_3d/collisions/restitution_combine_mode`:
+  0 = legacy clamped sum (default), 1 = maximum, 2 = average,
+  3 = minimum, 4 = multiply, 5 = geometric mean.
+
+Mode 0 retains Cgame's existing Jolt material-response formulas, including
+the historical treatment of negative friction. Other friction modes use
+nonnegative absolute coefficients; other restitution modes clamp material
+coefficients to [0, 1] before mixing. The Jolt callbacks are chosen **once
+per physics-space construction**, with no contact-time settings query or
+mode switch. Changing a project setting does not reconfigure already-created
+spaces: recreate/reload the world to pick up a new mode. Matching
+GodotPhysics2D/3D mode numbers are independent project settings.
+
+```bash
+# Source contracts: can run without an engine binary.
+python3 -m unittest discover -s tests/stress -p test_jolt_material_mix.py -v
+
+# Native C++ test suite: build with tests=yes before running.
+./bin/godot.linuxbsd.editor.dev.x86_64 --headless --test \
+  --test-case="[Physics] Friction combine modes match across 2D 3D and Jolt"
+
+# Real simulation: creates isolated Jolt Physics projects per combine mode
+# (tests/stress/project.godot itself selects GodotPhysics3D).
+python3 tests/stress/test_jolt_material_mix.py \
+  --godot ./bin/godot.linuxbsd.editor.dev.x86_64
+```
+
+The native fixture checks sliding and restitution response for all 4/6
+modes with separately configured world initialization. Exact trajectories
+may differ between Jolt and GodotPhysics even when the material rules
+match. These modes target authoring flexibility and backend parity; they
+do **not** constitute a measured CPU, RAM, or simulation-speed improvement.
+
+
 Independent, reproducible workloads for CPU, script execution, object lifetime,
 allocation churn, scene-tree mutations, physics, IO, data codecs, threads and
 render-node throughput. A Python watchdog samples *process resident RAM* and
