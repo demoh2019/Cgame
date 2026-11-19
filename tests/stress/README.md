@@ -1370,17 +1370,22 @@ greedy constraint graph: every dynamic body written by a constraint reserves
 that color. Static and kinematic bodies are excluded **only if every
 constraint in the island is an ordinary rigid contact pair**. As soon as a
 joint or another constraint type is present, ALL referenced bodies reserve
-colors as before. A color with at least 64 constraints can solve in parallel; a barrier
-separates colors and solver iterations. Constraints that cannot be colored
-within 16 colors go to a serial overflow batch. If there is too little
-parallelizable work, the algorithm falls back to the original sequential
-solver. No additional fields are stored on bodies or contacts.
+colors as before. A color with at least 64 constraints can solve in parallel; each worker
+callback processes a contiguous batch of up to eight disjoint constraints,
+reducing task dispatch overhead. A barrier separates colors and solver
+iterations. Constraints that cannot be colored within 16 colors go to a
+serial overflow batch. If there is too little parallelizable work, the
+algorithm falls back to the original sequential solver. Scratch vectors
+and the body-color map are reused across frames; oversized allocations
+are released when the workload shrinks or island-level scheduling resumes.
+No additional fields are stored on bodies or contacts.
 
 The standalone regression runs matching sequential and experimental solves
 for three scenarios: one chain of 384 bodies; one 384-body chain alongside a
 48-body chain; and two independent 384-body chains alongside a 48-body chain.
-Each scenario checks chain topology, representative finite states and joint
-separation (90-120 frames per mode):
+Each scenario checks chain topology, the engine's reported physics island
+count, representative finite states and joint separation (90-120 frames per
+mode):
 
 ```bash
 ./bin/godot.macos.editor.arm64 --headless \
