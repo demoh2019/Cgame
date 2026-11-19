@@ -926,3 +926,30 @@ Tests in `test_field_campfire.gd` cover resource conservation, shared
 contributions, denial of remote/unknown/expired attempts, duration caps
 and replication. This uses the existing Cgame inventory, network and
 rendering APIs; no engine source change is necessary.
+
+
+## Scavenging profession: dangerous ruins and valuable salvage
+
+The canonical `game/` survival world now includes a permanent **Scavenging**
+profession alongside gathering, fishing, crafting and weapon mastery:
+
+- Searching a **real, nearby, unopened ruin crate** awards 15 / 20 / 30 / 45 XP
+  in the green / yellow / red / black territories respectively. Risky zones
+  reward more exploration, but red/black zones retain their full-loot PvP risks.
+- Every **75 XP** increases scavenging level, up to level **5**. From level 2,
+  a red/black crate awards extra ordinary scrap (+1 to +4 depending on rank).
+  Medicine, rare weapons and other RNG drops are **not** multiplied.
+- The server determines crate proximity, depleted state, zone, deterministic
+  base drops, bonus scrap and earned XP. A crate can reward exploration only
+  once until it respawns. Searching corpse bags or missed/duplicate crates
+  does not award XP. Overflow loot still goes to the normal ground bag.
+- XP persists across logouts and full-loot deaths, and appears in the local
+  and multiplayer HUDs with the owner's current rank. Old characters without
+  scavenging XP load as novices; invalid or nonfinite XP is rejected before any
+  saved character state is changed.
+- Implemented in `scripts/shared/scavenging.gd`, authoritative
+  `scripts/server/game_server.gd` and persistent
+  `scripts/shared/progression.gd`. No new engine primitive was required.
+
+Run `godot --headless --path game --script res://tests/run_all.gd` to
+execute `tests/test_scavenging.gd` along with the existing server suites.
