@@ -668,4 +668,34 @@ TEST_CASE("[RingBuffer] Deterministic two-span differential exercise") {
 	}
 }
 
+
+TEST_CASE("[RingBuffer] Direct contiguous writes preserve FIFO and wrap safety") {
+	RingBuffer<uint8_t> rb(3);
+	CHECK_EQ(rb.contiguous_space_left(), 7);
+	for (int i = 0; i < 6; ++i) {
+		rb.write_ptr()[i] = uint8_t(i + 1);
+	}
+	CHECK_EQ(rb.advance_write(6), 6);
+	CHECK_EQ(rb.data_left(), 6);
+	CHECK_EQ(rb.contiguous_space_left(), 1);
+	CHECK_EQ(rb.advance_read(5), 5);
+	CHECK_EQ(rb.contiguous_space_left(), 2);
+	rb.write_ptr()[0] = 7;
+	rb.write_ptr()[1] = 8;
+	CHECK_EQ(rb.advance_write(2), 2);
+	CHECK_EQ(rb.contiguous_space_left(), 4);
+	for (int i = 0; i < 4; ++i) {
+		rb.write_ptr()[i] = uint8_t(i + 9);
+	}
+	CHECK_EQ(rb.advance_write(4), 4);
+	CHECK_EQ(rb.space_left(), 0);
+	CHECK_EQ(rb.advance_write(1), 0);
+	CHECK_EQ(rb.advance_write(-10), 0);
+	for (int i = 6; i <= 12; ++i) {
+		CHECK_EQ(rb.read(), uint8_t(i));
+	}
+	CHECK_EQ(rb.data_left(), 0);
+	CHECK_EQ(rb.space_left(), 7);
+}
+
 } //namespace TestRingBuffer

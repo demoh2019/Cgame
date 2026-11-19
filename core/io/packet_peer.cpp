@@ -195,13 +195,22 @@ Error PacketPeerStream::_poll_buffer() const {
 
 	const int space = ring_buffer.space_left();
 	ERR_FAIL_COND_V(input_buffer.size() < space, ERR_UNAVAILABLE);
-	int read = 0;
 	if (space > 0) {
-		RETURN_IF_ERROR(peer->get_partial_data(input_buffer.ptrw(), space, read));
-	}
-	if (read > 0) {
-		const int written = ring_buffer.write(input_buffer.ptr(), read);
-		ERR_FAIL_COND_V(written != read, ERR_BUG);
+		int read = 0;
+		if (ring_buffer.contiguous_space_left() == space) {
+			// Receive directly into the ring on the common unwrapped path.
+			RETURN_IF_ERROR(peer->get_partial_data(ring_buffer.write_ptr(), space, read));
+			ERR_FAIL_COND_V(read < 0 || read > space, ERR_BUG);
+			ERR_FAIL_COND_V(ring_buffer.advance_write(read) != read, ERR_BUG);
+		} else {
+			// Wrapped free space: preserve the existing single stream read,
+			// then copy its two spans using the optimized bulk ring writer.
+			RETURN_IF_ERROR(peer->get_partial_data(input_buffer.ptrw(), space, read));
+			ERR_FAIL_COND_V(read < 0 || read > space, ERR_BUG);
+			if (read > 0) {
+				ERR_FAIL_COND_V(ring_buffer.write(input_buffer.ptr(), read) != read, ERR_BUG);
+			}
+		}
 	}
 
 	// Resume at the first unparsed byte, not at the beginning of the

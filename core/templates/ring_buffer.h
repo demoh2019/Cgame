@@ -157,6 +157,28 @@ public:
 		return p_n;
 	}
 
+	// Direct I/O into the contiguous writable span avoids a second copy.
+	// Only valid for trivially-copyable elements. Call advance_write() after
+	// writing at most contiguous_space_left() elements into write_ptr().
+	_FORCE_INLINE_ int contiguous_space_left() const {
+		return MIN(space_left(), size() - write_pos);
+	}
+
+	_FORCE_INLINE_ T *write_ptr() _LIFETIME_BOUND_ {
+		static_assert(std::is_trivially_copyable_v<T>, "Direct ring writes require trivially copyable elements.");
+		return data.ptr() + write_pos;
+	}
+
+	_FORCE_INLINE_ int advance_write(int p_n) {
+		static_assert(std::is_trivially_copyable_v<T>, "Direct ring writes require trivially copyable elements.");
+		if (p_n <= 0) {
+			return 0;
+		}
+		p_n = MIN(p_n, space_left());
+		inc(write_pos, p_n);
+		return p_n;
+	}
+
 	Error write(const T &p_v) {
 		ERR_FAIL_COND_V(space_left() < 1, FAILED);
 		data[inc(write_pos, 1)] = p_v;
