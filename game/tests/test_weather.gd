@@ -43,7 +43,7 @@ func run(t) -> void:
 
 	t.current = "cumulative survival exposure and recovery"
 	var person = Survival.new()
-	var weather_damage: float = person.weather_tick(180.0, Weather.effective_severity(storm, ""))
+	var weather_damage: float = person.weather_tick(120.0, Weather.effective_severity(storm, ""))
 	t.check(person.exposure > 60.0, "prolonged unprotected storm builds exposure")
 	t.check(weather_damage > 0.0 and person.health < 100.0, "severe exposure causes actual health damage")
 	var previously: float = person.exposure
