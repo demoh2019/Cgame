@@ -642,12 +642,10 @@ Array Array::slice(int p_begin, int p_end, int p_step, bool p_deep) const {
 
 Array Array::filter(const Callable &p_callable) const {
 	Array new_arr;
-	new_arr.resize(size());
-	new_arr._p->typed = _p->typed;
 	int accepted_count = 0;
+	Variant *write = nullptr;
 
 	const Variant *argptrs[1];
-	Variant *write = new_arr._p->array.ptrw();
 	for (int i = 0; i < size(); i++) {
 		argptrs[0] = &get(i);
 
@@ -659,13 +657,29 @@ Array Array::filter(const Callable &p_callable) const {
 		}
 
 		if (result.operator bool()) {
-			write[accepted_count] = get(i);
-			accepted_count++;
+			if (write == nullptr) {
+				// Most filtering to an empty result needs no element buffer at all.
+				// Allocate only after the first accepted item, preserving one allocation
+				// for common nonempty results and the original callback order.
+				new_arr.resize(size());
+				write = new_arr._p->array.ptrw();
+			}
+			// Callbacks may mutate the source, so fetch the value after the call.
+			// Grow if callbacks extended the source after the initial allocation.
+			if (accepted_count == new_arr.size()) {
+				new_arr.resize(accepted_count + 1);
+				write = new_arr._p->array.ptrw();
+			}
+			write[accepted_count++] = get(i);
 		}
 	}
 
-	new_arr.resize(accepted_count);
-
+	if (write != nullptr) {
+		new_arr.resize(accepted_count);
+	}
+	// Apply the source's type after resizing to avoid initializing every
+	// temporary slot as a typed Variant.
+	new_arr._p->typed = _p->typed;
 	return new_arr;
 }
 
