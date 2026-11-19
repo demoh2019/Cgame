@@ -283,6 +283,34 @@ this solver. Benchmark identical builds on the same machine, and separate
 sparse-body tests from expensive soft contact workloads. These new cases do
 not constitute a completed performance measurement until run.
 
+## SoftBody3D aerodynamic air drag (Bullet-style)
+
+Cgame's built-in GodotPhysics3D now implements `SoftBody3D.drag_coefficient`,
+which upstream GodotPhysics documents as unused. At the default value of
+`0.0` the drag path is skipped. For positive values, each triangle computes
+normal-direction, two-sided **quadratic air resistance** from the mean of its
+three vertex velocities and its area; equal thirds of the force go to the
+three vertices. The calculation shares the existing wind/pressure face pass
+and does not allocate per-frame contact or drag arrays. This is an
+approximate still-air surface drag model, not full fluid dynamics or wind
+velocity coupling. It changes only the built-in GodotPhysics3D backend.
+
+For a source / mathematical contract check and an end-to-end comparison of
+two matching soft spheres (one with air drag, one without):
+
+```bash
+python3 -m unittest discover -s tests/stress -p test_physics_soft_drag.py -v
+
+./bin/godot.macos.editor.arm64 --headless --path tests/stress \
+  --script res://physics_soft_drag_regression.gd
+```
+
+The runtime test verifies finite positions and greater horizontal
+displacement without drag. To measure CPU and RAM, benchmark identical
+scenes and binaries with drag both enabled and disabled. This test and the
+source contracts do not constitute a completed native build or measured
+performance improvement unless run.
+
 ## Contact restitution stability (Jolt / Box2D-style threshold)
 
 Built-in GodotPhysics now suppresses contact restitution when the approaching
