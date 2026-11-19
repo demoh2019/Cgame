@@ -53,7 +53,7 @@ class PhysicsEarlyPairFilterContracts(unittest.TestCase):
                 self.assertIn("++collision_geometry_version;", filter_body)
                 self.assertIn("refresh_collision_pairs();", filter_body)
                 self.assertIn("_shapes_changed();", filter_body)
-                self.assertEqual(server.count("body->refresh_collision_pairs();"), 2)
+                self.assertEqual(server.count("\tbody->refresh_collision_pairs();"), 2)
                 self.assertIn("body->add_exception(p_body_b);", server)
                 self.assertIn("body->remove_exception(p_body_b);", server)
 
