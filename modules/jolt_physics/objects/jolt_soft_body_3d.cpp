@@ -252,6 +252,19 @@ JPH::SoftBodySharedSettings *JoltSoftBody3D::_create_shared_settings() {
 	// Jolt supports distance- and dihedral-based XPBD bending. Keep disabled
 	// by default for backward compatibility; enable through project settings.
 	vertex_attrib.mBendCompliance = JoltProjectSettings::soft_body_bend_compliance;
+
+	// Jolt's long-range attachments (tethers) link movable cloth vertices
+	// to their nearest pinned vertices. These constraints resist large-scale
+	// stretching without increasing the per-step solver iteration count.
+	// The default mode is None, preserving all existing soft-body scenes.
+	// Avoid Jolt's closest-kinematic-vertex construction if nothing is pinned.
+	if (!pinned_vertices.is_empty()) {
+		using LRAType = JPH::SoftBodySharedSettings::ELRAType;
+		const int lra_mode = JoltProjectSettings::soft_body_lra_mode;
+		vertex_attrib.mLRAType = lra_mode == 1 ? LRAType::EuclideanDistance : (lra_mode == 2 ? LRAType::GeodesicDistance : LRAType::None);
+		vertex_attrib.mLRAMaxDistanceMultiplier = JoltProjectSettings::soft_body_lra_max_distance_multiplier;
+	}
+
 	using BendType = JPH::SoftBodySharedSettings::EBendType;
 	const int bend_mode = JoltProjectSettings::soft_body_bend_mode;
 	const BendType bend_type = bend_mode == 1 ? BendType::Distance : (bend_mode == 2 ? BendType::Dihedral : BendType::None);
