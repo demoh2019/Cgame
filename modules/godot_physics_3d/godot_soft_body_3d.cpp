@@ -149,6 +149,7 @@ void GodotSoftBody3D::set_space(GodotSpace3D *p_space) {
 	// A mesh may have been assigned before the space was created. Validate
 	// its closed rest volume after volume compliance or gas mode is available.
 	initialize_volume_constraint();
+	initialize_membrane_constraints();
 	initialize_shear_constraints();
 	initialize_dihedral_constraints();
 	initialize_shape_matching();
@@ -268,6 +269,7 @@ void GodotSoftBody3D::update_constants() {
 	update_link_constants();
 	update_area();
 	initialize_volume_constraint();
+	initialize_membrane_constraints();
 	initialize_shear_constraints();
 	initialize_dihedral_constraints();
 	initialize_shape_matching();
@@ -350,6 +352,26 @@ void GodotSoftBody3D::solve_shape_matching(real_t p_strength) {
 
 // Cache undeformed triangle angles only for opt-in shear constraints.
 // No per-triangle buffers are retained with the default zero compliance.
+// Cache a 2D rest metric for each triangle; no work or buffers are needed
+// for the legacy solver. Invalid/near-collinear faces remain marked by
+// rest.area == 0 and are skipped during the solve.
+void GodotSoftBody3D::initialize_membrane_constraints() {
+	xpbd_membrane_rest.reset();
+	xpbd_membrane_lambdas.reset();
+	if (!get_space() || get_space()->get_soft_body_xpbd_membrane_compliance() <= 0.0 ||
+			faces.is_empty()) {
+		return;
+	}
+	xpbd_membrane_rest.resize(faces.size());
+	for (uint32_t face_index = 0; face_index < faces.size(); ++face_index) {
+		const Face &face = faces[face_index];
+		PhysicsXPBDMembraneRest rest;
+		physics_xpbd_membrane_make_rest(face.n[0]->s, face.n[1]->s,
+				face.n[2]->s, rest);
+		xpbd_membrane_rest[face_index] = rest;
+	}
+}
+
 void GodotSoftBody3D::initialize_shear_constraints() {
 	xpbd_shear_rest_cosines.reset();
 	if (!get_space() || get_space()->get_soft_body_xpbd_shear_compliance() <= 0.0 ||
@@ -2266,6 +2288,12 @@ void GodotSoftBody3D::solve_constraints(real_t p_delta) {
 			Math::is_finite(area_alpha_double) && area_alpha_double > 0.0;
 	const real_t alpha = use_xpbd ? real_t(MIN(alpha_double, double(std::numeric_limits<real_t>::max()))) : real_t(0.0);
 	const real_t area_alpha = use_area_xpbd ? real_t(MIN(area_alpha_double, double(std::numeric_limits<real_t>::max()))) : real_t(0.0);
+	const double membrane_compliance = get_space() ? double(get_space()->get_soft_body_xpbd_membrane_compliance()) : 0.0;
+	const double membrane_alpha = p_delta > 0.0 ? membrane_compliance / (double(p_delta) * double(p_delta)) : 0.0;
+	const bool use_membrane_xpbd = membrane_compliance > 0.0 && p_delta > 0.0 &&
+			xpbd_membrane_rest.size() == faces.size() && !faces.is_empty() &&
+			Math::is_finite(membrane_alpha) && membrane_alpha > 0.0;
+	const double membrane_poisson = get_space() ? double(get_space()->get_soft_body_membrane_poisson_ratio()) : 0.3;
 	const real_t configured_shear_compliance = get_space() ? get_space()->get_soft_body_xpbd_shear_compliance() : real_t(0.0);
 	const double shear_alpha_double = p_delta > 0.0 ? double(configured_shear_compliance) / (double(p_delta) * double(p_delta)) : 0.0;
 	const bool use_shear_xpbd = configured_shear_compliance > 0.0 && !faces.is_empty() &&
@@ -2368,6 +2396,15 @@ void GodotSoftBody3D::solve_constraints(real_t p_delta) {
 		}
 	}
 
+	if (use_membrane_xpbd) {
+		xpbd_membrane_lambdas.resize(faces.size());
+		for (double &lambda : xpbd_membrane_lambdas) {
+			lambda = 0.0;
+		}
+	} else if (!xpbd_membrane_lambdas.is_empty()) {
+		xpbd_membrane_lambdas.reset();
+	}
+
 	if (use_shear_xpbd) {
 		xpbd_shear_lambdas.resize(faces.size());
 		for (double &lambda : xpbd_shear_lambdas) {
@@ -2435,6 +2472,18 @@ void GodotSoftBody3D::solve_constraints(real_t p_delta) {
 				physics_xpbd_solve_triangle_area(face.n[0]->x, face.n[1]->x, face.n[2]->x,
 						face.n[0]->im, face.n[1]->im, face.n[2]->im,
 						face.ra, area_alpha, xpbd_area_lambdas[face_index]);
+			}
+		}
+		if (use_membrane_xpbd) {
+			for (uint32_t face_index = 0; face_index < faces.size(); ++face_index) {
+				const PhysicsXPBDMembraneRest &rest = xpbd_membrane_rest[face_index];
+				if (!(rest.area > 0.0)) {
+					continue;
+				}
+				Face &face = faces[face_index];
+				physics_xpbd_membrane_solve(face.n[0]->x, face.n[1]->x, face.n[2]->x,
+						face.n[0]->im, face.n[1]->im, face.n[2]->im,
+						rest, membrane_poisson, membrane_alpha, xpbd_membrane_lambdas[face_index]);
 			}
 		}
 		if (use_shear_xpbd) {
@@ -2657,6 +2706,8 @@ void GodotSoftBody3D::destroy() {
 	xpbd_area_lambdas.reset();
 	xpbd_shear_rest_cosines.reset();
 	xpbd_shear_lambdas.reset();
+	xpbd_membrane_rest.reset();
+	xpbd_membrane_lambdas.reset();
 	xpbd_dihedral_hinges.reset();
 	xpbd_dihedral_lambdas.reset();
 	xpbd_shape_rest_offsets.reset();
