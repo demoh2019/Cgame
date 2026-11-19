@@ -33,6 +33,7 @@
 #include "godot_collision_solver_2d.h"
 #include "godot_contact_normal_2d.h"
 #include "godot_space_2d.h"
+#include "servers/physics_contact_angular_friction.h"
 #include "servers/physics_manifold_reduction_2d.h"
 #include "servers/physics_ccd_sphere_toi.h"
 
@@ -741,6 +742,44 @@ bool GodotBodyPair2D::pre_solve(real_t p_step) {
 			block_k11 = k11;
 			block_inv_determinant = real_t(1.0) / determinant;
 			block_normal_valid = true;
+		}
+	}
+
+	// Bullet-inspired rolling resistance on loaded contact manifolds.
+	// Run once per time step after normal warm-start, not once per PGS
+	// iteration: this prevents multiplying the torque budget by iteration
+	// count and requires no persistent per-contact rolling impulse.
+	const real_t rolling_coefficient = space->get_rolling_friction();
+	const real_t total_inv_inertia = inv_inertia_A + inv_inertia_B;
+	if (do_process && rolling_coefficient > 0.0 && total_inv_inertia > 0.0) {
+		real_t normal_load_impulse = 0.0;
+		real_t contact_radius = 0.0;
+		bool have_radius = false;
+		for (int i = 0; i < contact_count; i++) {
+			const Contact &c = contacts[i];
+			if (!c.active || c.acc_normal_impulse <= 0.0) {
+				continue;
+			}
+			const real_t radius = collide_A && collide_B ? MIN(c.rA.length(), c.rB.length()) :
+					(collide_A ? c.rA.length() : c.rB.length());
+			normal_load_impulse += c.acc_normal_impulse;
+			if (!have_radius || radius < contact_radius) {
+				contact_radius = radius;
+				have_radius = true;
+			}
+		}
+		if (have_radius) {
+			const real_t torque_impulse = GodotPhysicsContactAngularFriction::clamped_impulse(
+					B->get_angular_velocity() - A->get_angular_velocity(), total_inv_inertia,
+					normal_load_impulse, rolling_coefficient, contact_radius);
+			if (torque_impulse != 0.0) {
+				if (collide_A) {
+					A->apply_torque_impulse(-torque_impulse);
+				}
+				if (collide_B) {
+					B->apply_torque_impulse(torque_impulse);
+				}
+			}
 		}
 	}
 
