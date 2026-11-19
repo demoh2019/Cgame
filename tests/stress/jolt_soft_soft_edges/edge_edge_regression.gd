@@ -81,10 +81,6 @@ func _run() -> void:
 	for frame in range(2):
 		await physics_frame
 
-	var initial_allowed_a := PhysicsServer3D.soft_body_get_point_global_position(bodies[0], 0)
-	var initial_allowed_b := PhysicsServer3D.soft_body_get_point_global_position(bodies[1], 0)
-	var initial_masked_a := PhysicsServer3D.soft_body_get_point_global_position(bodies[2], 0)
-	var initial_masked_b := PhysicsServer3D.soft_body_get_point_global_position(bodies[3], 0)
 	var started_usec := Time.get_ticks_usec()
 
 	for frame in range(FRAMES):
