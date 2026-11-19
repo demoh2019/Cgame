@@ -83,7 +83,7 @@ TEST_CASE("[PhysicsSoftSoft] Pinned vertex transfers penetration to movable face
 }
 
 TEST_CASE("[PhysicsSoftSoft] Separate layers do not attract") {
-	Vector3 v(0.25, 0.25, 0.2), a(0, 0, 0), b(1, 0, 0), c(0, 1, 0);
+	Vector3 v(0.25, 0.25, 0.4), a(0, 0, 0), b(1, 0, 0), c(0, 1, 0);
 	Vector3 vv, va, vb, vc;
 	real_t lambda = 0.0;
 	const Vector3 original = v;
