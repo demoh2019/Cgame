@@ -41,6 +41,7 @@ jobs:
           ./bin/godot.linuxbsd.editor.dev.x86_64 --headless --test --test-case="*[AStarGrid2D][Performance] Row-major neighbor offsets preserve all diagonal policies*"
           ./bin/godot.linuxbsd.editor.dev.x86_64 --headless --test --test-case="*[AStarGrid2D][Performance] JPS straight scans preserve boundary and shifted-grid routes*"
           ./bin/godot.linuxbsd.editor.dev.x86_64 --headless --test --test-case="*[AStarGrid2D][Performance] JPS indexed mask scans preserve obstacle routing*"
+          ./bin/godot.linuxbsd.editor.dev.x86_64 --headless --test --test-case="*[AStarGrid2D][Performance] Row-wise region fills retain clipping and weights*"
       - name: Verify cardinal/diagonal navigation stress smoke
         run: |
           python3 tests/stress/run.py \
