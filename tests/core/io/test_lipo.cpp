@@ -42,7 +42,7 @@ TEST_FORCE_LINK(test_lipo)
 namespace TestLipO {
 
 TEST_CASE("[LipO] Page-aligned and unaligned archive round-trip") {
-	const int input_sizes[] = { 4095, 4096, 4097, 8192 };
+	const int input_sizes[] = { 1, 1024, 4094, 4095, 4096, 4097, 8191, 8192, 8193, 12288, 16384 };
 
 	for (int size : input_sizes) {
 		PackedByteArray source;
