@@ -394,7 +394,6 @@ bool AStar3D::_solve(Point *p_begin_point, Point *p_end_point, bool p_allow_part
 
 	p_begin_point->g_score = 0;
 	p_begin_point->f_score = _estimate_cost(p_begin_point->id, p_end_point->id);
-	p_begin_point->abs_g_score = 0;
 	p_begin_point->abs_f_score = p_begin_point->f_score;
 	open_list.push(p_begin_point);
 
@@ -402,7 +401,7 @@ bool AStar3D::_solve(Point *p_begin_point, Point *p_end_point, bool p_allow_part
 		Point *p = open_list.top(); // The currently processed point.
 
 		// Find point closer to end_point, or same distance to end_point but closer to begin_point.
-		if (last_closest_point == nullptr || last_closest_point->abs_f_score > p->abs_f_score || (last_closest_point->abs_f_score >= p->abs_f_score && last_closest_point->abs_g_score > p->abs_g_score)) {
+		if (last_closest_point == nullptr || last_closest_point->abs_f_score > p->abs_f_score || (last_closest_point->abs_f_score >= p->abs_f_score && last_closest_point->g_score > p->g_score)) {
 			last_closest_point = p;
 		}
 
@@ -442,7 +441,6 @@ bool AStar3D::_solve(Point *p_begin_point, Point *p_end_point, bool p_allow_part
 			e->prev_point = p;
 			e->g_score = tentative_g_score;
 			e->f_score = e->g_score + _estimate_cost(e->id, p_end_point->id);
-			e->abs_g_score = tentative_g_score;
 			e->abs_f_score = e->f_score - e->g_score;
 
 			if (new_point) {
@@ -900,7 +898,6 @@ bool AStar2D::_solve(AStar3D::Point *p_begin_point, AStar3D::Point *p_end_point,
 
 	p_begin_point->g_score = 0;
 	p_begin_point->f_score = _estimate_cost(p_begin_point->id, p_end_point->id);
-	p_begin_point->abs_g_score = 0;
 	p_begin_point->abs_f_score = p_begin_point->f_score;
 	open_list.push(p_begin_point);
 
@@ -908,7 +905,7 @@ bool AStar2D::_solve(AStar3D::Point *p_begin_point, AStar3D::Point *p_end_point,
 		AStar3D::Point *p = open_list.top(); // The currently processed point.
 
 		// Find point closer to end_point, or same distance to end_point but closer to begin_point.
-		if (astar.last_closest_point == nullptr || astar.last_closest_point->abs_f_score > p->abs_f_score || (astar.last_closest_point->abs_f_score >= p->abs_f_score && astar.last_closest_point->abs_g_score > p->abs_g_score)) {
+		if (astar.last_closest_point == nullptr || astar.last_closest_point->abs_f_score > p->abs_f_score || (astar.last_closest_point->abs_f_score >= p->abs_f_score && astar.last_closest_point->g_score > p->g_score)) {
 			astar.last_closest_point = p;
 		}
 
@@ -948,7 +945,6 @@ bool AStar2D::_solve(AStar3D::Point *p_begin_point, AStar3D::Point *p_end_point,
 			e->prev_point = p;
 			e->g_score = tentative_g_score;
 			e->f_score = e->g_score + _estimate_cost(e->id, p_end_point->id);
-			e->abs_g_score = tentative_g_score;
 			e->abs_f_score = e->f_score - e->g_score;
 
 			if (new_point) {

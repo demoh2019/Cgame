@@ -34,6 +34,66 @@
 #include "core/object/class_db.h"
 #include "core/variant/typed_array.h"
 
+void AStarGrid2D::OpenList::_sift_up(uint32_t p_hole, Point *p_point) {
+	SortPoints worse;
+	while (p_hole > 0) {
+		const uint32_t parent = (p_hole - 1) / 2;
+		Point *above = items[parent];
+		if (!worse(above, p_point)) {
+			break;
+		}
+		items[p_hole] = above;
+		above->heap_index = p_hole;
+		p_hole = parent;
+	}
+	items[p_hole] = p_point;
+	p_point->heap_index = p_hole;
+}
+
+void AStarGrid2D::OpenList::push(Point *p_point) {
+	const uint32_t index = items.size();
+	items.push_back(p_point);
+	_sift_up(index, p_point);
+}
+
+void AStarGrid2D::OpenList::decrease_key(Point *p_point) {
+	_sift_up(p_point->heap_index, p_point);
+}
+
+void AStarGrid2D::OpenList::pop() {
+	const uint32_t count = items.size();
+	if (count == 1) {
+		items.remove_at(0);
+		return;
+	}
+	Point *last = items[count - 1];
+	items.remove_at(count - 1);
+	const uint32_t length = count - 1;
+	uint32_t hole = 0;
+	uint32_t second_child = 2;
+	SortPoints worse;
+
+	// Preserve SortArray::adjust_heap's child selection and tie ordering.
+	while (second_child < length) {
+		if (worse(items[second_child], items[second_child - 1])) {
+			second_child--;
+		}
+		Point *child = items[second_child];
+		items[hole] = child;
+		child->heap_index = hole;
+		hole = second_child;
+		second_child = 2 * (second_child + 1);
+	}
+	if (second_child == length) {
+		Point *child = items[second_child - 1];
+		items[hole] = child;
+		child->heap_index = hole;
+		hole = second_child - 1;
+	}
+	_sift_up(hole, last);
+}
+
+
 static real_t heuristic_euclidean(const Vector2i &p_from, const Vector2i &p_to) {
 	real_t dx = (real_t)Math::abs(p_to.x - p_from.x);
 	real_t dy = (real_t)Math::abs(p_to.y - p_from.y);
@@ -519,24 +579,22 @@ bool AStarGrid2D::_solve(Point *p_begin_point, Point *p_end_point, bool p_allow_
 
 	bool found_route = false;
 
-	LocalVector<Point *> open_list;
-	SortArray<Point *, SortPoints> sorter;
+	OpenList open_list;
 	// A grid cell has at most four cardinal and four diagonal neighbors.
 	// Keep the scratch list on the stack instead of allocating a heap buffer.
 	FixedVector<Point *, 8> nbors;
 
 	p_begin_point->g_score = 0;
 	p_begin_point->f_score = _estimate_cost(p_begin_point->id, p_end_point->id);
-	p_begin_point->abs_g_score = 0;
 	p_begin_point->abs_f_score = p_begin_point->f_score;
-	open_list.push_back(p_begin_point);
+	open_list.push(p_begin_point);
 	end = p_end_point;
 
 	while (!open_list.is_empty()) {
-		Point *p = open_list[0]; // The currently processed point.
+		Point *p = open_list.top(); // The currently processed point.
 
 		// Find point closer to end_point, or same distance to end_point but closer to begin_point.
-		if (last_closest_point == nullptr || last_closest_point->abs_f_score > p->abs_f_score || (last_closest_point->abs_f_score >= p->abs_f_score && last_closest_point->abs_g_score > p->abs_g_score)) {
+		if (last_closest_point == nullptr || last_closest_point->abs_f_score > p->abs_f_score || (last_closest_point->abs_f_score >= p->abs_f_score && last_closest_point->g_score > p->g_score)) {
 			last_closest_point = p;
 		}
 
@@ -545,8 +603,7 @@ bool AStarGrid2D::_solve(Point *p_begin_point, Point *p_end_point, bool p_allow_
 			break;
 		}
 
-		sorter.pop_heap(0, open_list.size(), open_list.ptr()); // Remove the current point from the open list.
-		open_list.remove_at(open_list.size() - 1);
+		open_list.pop(); // Heap removal is logarithmic in frontier size.
 		p->closed_pass = pass; // Mark the point as closed.
 
 		nbors.clear();
@@ -573,7 +630,6 @@ bool AStarGrid2D::_solve(Point *p_begin_point, Point *p_end_point, bool p_allow_
 
 			if (e->open_pass != pass) { // The point wasn't inside the open list.
 				e->open_pass = pass;
-				open_list.push_back(e);
 				new_point = true;
 			} else if (tentative_g_score >= e->g_score) { // The new path is worse than the previous.
 				continue;
@@ -583,13 +639,12 @@ bool AStarGrid2D::_solve(Point *p_begin_point, Point *p_end_point, bool p_allow_
 			e->g_score = tentative_g_score;
 			e->f_score = e->g_score + _estimate_cost(e->id, p_end_point->id);
 
-			e->abs_g_score = tentative_g_score;
 			e->abs_f_score = e->f_score - e->g_score;
 
-			if (new_point) { // The position of the new points is already known.
-				sorter.push_heap(0, open_list.size() - 1, 0, e, open_list.ptr());
+			if (new_point) {
+				open_list.push(e); // Only insert after computing the new priority.
 			} else {
-				sorter.push_heap(0, open_list.find(e), 0, e, open_list.ptr());
+				open_list.decrease_key(e);
 			}
 		}
 	}

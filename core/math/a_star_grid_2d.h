@@ -86,9 +86,9 @@ private:
 		real_t f_score = 0;
 		uint64_t open_pass = 0;
 		uint64_t closed_pass = 0;
+		uint32_t heap_index = 0; // Index into the open-set heap, valid for open_pass.
 
 		// Used for getting last_closest_point.
-		real_t abs_g_score = 0;
 		real_t abs_f_score = 0;
 
 		Point() {}
@@ -107,6 +107,17 @@ private:
 				return p_left->g_score < p_right->g_score; // If the f_costs are the same then prioritize the points that are further away from the start.
 			}
 		}
+	};
+
+	// Indexed binary heap: reprioritize in O(log frontier), not O(frontier).
+	struct OpenList {
+		LocalVector<Point *> items;
+		void _sift_up(uint32_t p_hole, Point *p_point);
+		void push(Point *p_point);
+		void decrease_key(Point *p_point);
+		void pop();
+		_FORCE_INLINE_ bool is_empty() const { return items.is_empty(); }
+		_FORCE_INLINE_ Point *top() const { return items[0]; }
 	};
 
 	LocalVector<bool> solid_mask;

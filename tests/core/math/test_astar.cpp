@@ -486,4 +486,52 @@ TEST_CASE("[AStar3D] Reprioritizing an open vertex retains shortest paths") {
 	CHECK_EQ(restored[1], 2);
 }
 
+
+class ReprioritizedAStarGrid2D : public AStarGrid2D {
+protected:
+	real_t _estimate_cost(const Vector2i &, const Vector2i &) override {
+		return 0;
+	}
+
+	real_t _compute_cost(const Vector2i &p_from, const Vector2i &p_to) override {
+		if (p_from == Vector2i(0, 0) && p_to == Vector2i(1, 0)) {
+			return 100;
+		}
+		if (p_from == Vector2i(0, 0) && p_to == Vector2i(0, 1)) {
+			return 1;
+		}
+		if (p_from == Vector2i(0, 1) && p_to == Vector2i(1, 0)) {
+			return 1;
+		}
+		if (p_from == Vector2i(1, 0) && p_to == Vector2i(2, 0)) {
+			return 1;
+		}
+		return 200;
+	}
+};
+
+TEST_CASE("[AStarGrid2D] Reprioritizing an open grid cell retains the shortest path") {
+	Ref<ReprioritizedAStarGrid2D> grid;
+	grid.instantiate();
+	grid->set_region(Rect2i(0, 0, 8, 8));
+	grid->set_diagonal_mode(AStarGrid2D::DIAGONAL_MODE_ALWAYS);
+	grid->update();
+	for (int repeat = 0; repeat < 12; ++repeat) {
+		const TypedArray<Vector2i> path = grid->get_id_path(Vector2i(0, 0), Vector2i(2, 0));
+		REQUIRE_EQ(path.size(), 4);
+		CHECK_EQ(Vector2i(path[0]), Vector2i(0, 0));
+		CHECK_EQ(Vector2i(path[1]), Vector2i(0, 1));
+		CHECK_EQ(Vector2i(path[2]), Vector2i(1, 0));
+		CHECK_EQ(Vector2i(path[3]), Vector2i(2, 0));
+	}
+	grid->set_point_solid(Vector2i(0, 1), true);
+	const TypedArray<Vector2i> detour = grid->get_id_path(Vector2i(0, 0), Vector2i(2, 0));
+	REQUIRE_EQ(detour.size(), 3);
+	CHECK_EQ(Vector2i(detour[1]), Vector2i(1, 0));
+	grid->set_point_solid(Vector2i(0, 1), false);
+	const TypedArray<Vector2i> restored = grid->get_id_path(Vector2i(0, 0), Vector2i(2, 0));
+	REQUIRE_EQ(restored.size(), 4);
+	CHECK_EQ(Vector2i(restored[1]), Vector2i(0, 1));
+}
+
 } // namespace TestAStar

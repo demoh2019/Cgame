@@ -61,7 +61,6 @@ class AStar3D : public RefCounted {
 		uint32_t heap_index = 0; // Index in the current A* open set; no linear lookup on decreases.
 
 		// Used for getting closest_point_of_last_pathing_call.
-		real_t abs_g_score = 0;
 		real_t abs_f_score = 0;
 	};
 
