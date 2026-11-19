@@ -35,6 +35,9 @@
 #include "core/io/image.h"
 #include "scene/resources/material.h"
 #include "scene/resources/mesh.h"
+#ifndef PHYSICS_3D_DISABLED
+#include "scene/resources/3d/concave_polygon_shape_3d.h"
+#endif
 
 void HeightmapTerrain3D::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("set_grid_size", "size"), &HeightmapTerrain3D::set_grid_size);
@@ -53,6 +56,9 @@ void HeightmapTerrain3D::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("paint_color", "grid_position", "radius", "color", "opacity"), &HeightmapTerrain3D::paint_color);
 	ClassDB::bind_method(D_METHOD("erode_thermal", "iterations", "talus", "strength"), &HeightmapTerrain3D::erode_thermal);
 	ClassDB::bind_method(D_METHOD("import_heightmap", "image", "min_height", "max_height"), &HeightmapTerrain3D::import_heightmap);
+#ifndef PHYSICS_3D_DISABLED
+	ClassDB::bind_method(D_METHOD("create_collision_shape"), &HeightmapTerrain3D::create_collision_shape);
+#endif
 
 	ADD_PROPERTY(PropertyInfo(Variant::VECTOR2I, "grid_size"), "set_grid_size", "get_grid_size");
 	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "cell_size", PROPERTY_HINT_RANGE, "0.01,100,0.01,or_greater"), "set_cell_size", "get_cell_size");
@@ -354,3 +360,14 @@ HeightmapTerrain3D::HeightmapTerrain3D() {
 	default_material->set_flag(BaseMaterial3D::FLAG_ALBEDO_FROM_VERTEX_COLOR, true);
 	_rebuild_mesh();
 }
+
+#ifndef PHYSICS_3D_DISABLED
+Ref<ConcavePolygonShape3D> HeightmapTerrain3D::create_collision_shape() const {
+	Ref<Mesh> terrain_mesh = get_mesh();
+	ERR_FAIL_COND_V_MSG(terrain_mesh.is_null(), Ref<ConcavePolygonShape3D>(), "Terrain geometry is unavailable.");
+	// Mesh::create_trimesh_shape shares the same triangle winding and vertices
+	// as the render mesh, so physics follows heightfield edits exactly.
+	// The caller is responsible for regenerating this snapshot after edits.
+	return terrain_mesh->create_trimesh_shape();
+}
+#endif // PHYSICS_3D_DISABLED

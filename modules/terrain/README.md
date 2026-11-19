@@ -40,11 +40,30 @@ scons platform=linuxbsd target=editor dev_build=yes tests=yes -j$(nproc)
 ./bin/godot.linuxbsd.editor.dev.x86_64 --headless --test --test-case='*[Terrain3D]*'
 ```
 
+## Physics collision snapshot
+
+When 3D physics is compiled in, \`create_collision_shape()\` returns a
+\`ConcavePolygonShape3D\` matching the current render-mesh triangles.
+
+\`\`\`gdscript
+var terrain: HeightmapTerrain3D = $HeightmapTerrain3D
+var body := StaticBody3D.new()
+terrain.add_child(body)
+var collision := CollisionShape3D.new()
+body.add_child(collision)
+collision.shape = terrain.create_collision_shape()
+\`\`\`
+
+This is a **snapshot**, not a persistent physics proxy. After modifying the
+terrain heightfield, update \`collision.shape = terrain.create_collision_shape()\`.
+Prefer static scene geometry: concave triangle meshes are not appropriate for
+dynamic rigid bodies. The method is unavailable when \`disable_physics_3d=yes\`.
+
 ## Deliberately out of scope
 
 This milestone is a **single mesh** (no tessellation, tiles, LOD or world
 partition). Each brush edit fully rebuilds it, so the current cap is 257²
-vertices. It has no automatic collision, vegetation scattering, eroded terrain
+vertices. It has no automatic collision node, vegetation scattering, eroded terrain
 generator or material-layer splatmaps. Follow-up work should add chunked
 geometry, collision/navmesh integration, multiple texture layers and asset
 streaming before pursuing kilometer-scale worlds.

@@ -34,6 +34,9 @@
 
 #include "core/io/image.h"
 #include "scene/resources/mesh.h"
+#ifndef PHYSICS_3D_DISABLED
+#include "scene/resources/3d/concave_polygon_shape_3d.h"
+#endif
 #include "tests/test_macros.h"
 
 namespace TestTerrain3D {
@@ -350,5 +353,81 @@ TEST_CASE("[Terrain3D] Invalid erosion parameters never alter the heightfield") 
 	CHECK(terrain->get_height_data() == original);
 	memdelete(terrain);
 }
+
+#ifndef PHYSICS_3D_DISABLED
+
+TEST_CASE("[Terrain3D][Collision] Default collision follows the render triangle count") {
+	HeightmapTerrain3D *terrain = memnew(HeightmapTerrain3D);
+	Ref<ConcavePolygonShape3D> shape = terrain->create_collision_shape();
+	REQUIRE(shape.is_valid());
+	const Vector<Vector3> faces = shape->get_faces();
+	CHECK(faces.size() == 32 * 32 * 6);
+	CHECK(faces[0].y == 0);
+	CHECK(faces[1].y == 0);
+	CHECK(faces[2].y == 0);
+	CHECK((faces[1] - faces[0]).cross(faces[2] - faces[0]).y > 0);
+	memdelete(terrain);
+}
+
+TEST_CASE("[Terrain3D][Collision] Rectangular grids produce exactly two triangles per cell") {
+	HeightmapTerrain3D *terrain = memnew(HeightmapTerrain3D);
+	terrain->set_grid_size(Vector2i(4, 6));
+	Ref<ConcavePolygonShape3D> shape = terrain->create_collision_shape();
+	REQUIRE(shape.is_valid());
+	CHECK(shape->get_faces().size() == (4 - 1) * (6 - 1) * 6);
+	memdelete(terrain);
+}
+
+TEST_CASE("[Terrain3D][Collision] Collision height is refreshed after height changes") {
+	HeightmapTerrain3D *terrain = memnew(HeightmapTerrain3D);
+	terrain->set_grid_size(Vector2i(3, 3));
+	Ref<ConcavePolygonShape3D> old = terrain->create_collision_shape();
+	REQUIRE(old.is_valid());
+	terrain->set_height_at(1, 1, 7);
+	Ref<ConcavePolygonShape3D> changed = terrain->create_collision_shape();
+	REQUIRE(changed.is_valid());
+	bool found_peak = false;
+	for (const Vector3 &vertex : changed->get_faces()) {
+		if (Math::is_equal_approx(vertex.y, (real_t)7.0)) {
+			found_peak = true;
+		}
+	}
+	CHECK(found_peak);
+	for (const Vector3 &vertex : old->get_faces()) {
+		CHECK(Math::is_zero_approx(vertex.y));
+	}
+	CHECK(old.ptr() != changed.ptr());
+	memdelete(terrain);
+}
+
+TEST_CASE("[Terrain3D][Collision] Cell spacing scales collision coordinates") {
+	HeightmapTerrain3D *terrain = memnew(HeightmapTerrain3D);
+	terrain->set_grid_size(Vector2i(2, 2));
+	terrain->set_cell_size(2.5);
+	Ref<ConcavePolygonShape3D> shape = terrain->create_collision_shape();
+	REQUIRE(shape.is_valid());
+	bool contains_opposite_corner = false;
+	for (const Vector3 &vertex : shape->get_faces()) {
+		if (vertex.is_equal_approx(Vector3(2.5, 0, 2.5))) {
+			contains_opposite_corner = true;
+		}
+	}
+	CHECK(contains_opposite_corner);
+	memdelete(terrain);
+}
+
+TEST_CASE("[Terrain3D][Collision] Painting colors cannot change the physics geometry") {
+	HeightmapTerrain3D *terrain = memnew(HeightmapTerrain3D);
+	terrain->set_grid_size(Vector2i(5, 5));
+	Ref<ConcavePolygonShape3D> original = terrain->create_collision_shape();
+	REQUIRE(original.is_valid());
+	terrain->paint_color(Vector2(2, 2), 2, Color(1, 0, 0), 1);
+	Ref<ConcavePolygonShape3D> changed = terrain->create_collision_shape();
+	REQUIRE(changed.is_valid());
+	CHECK(changed->get_faces() == original->get_faces());
+	memdelete(terrain);
+}
+
+#endif // PHYSICS_3D_DISABLED
 
 } // namespace TestTerrain3D

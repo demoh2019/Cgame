@@ -8,9 +8,15 @@
 		The terrain origin is its top-left grid corner. X and Z are horizontal, Y is height. Heightfield vertices are spaced by [member cell_size] in local units. Each grid cell has one height and one vertex color.
 		To edit in the 3D viewport, select the node and choose Raise, Lower, Smooth, or Paint Color from the terrain toolbar. The toolbar provides a brush radius in grid cells and a brush strength. Brush strokes participate in Undo/Redo.
 		Heights and vertex colors are stored with the scene; the generated mesh is not independently serialized. The default surface material displays vertex colors, and can be overridden through the inherited material override.
-		[b]Limitations:[/b] There is no LOD, chunk streaming, automatic collision, foliage system, texture splatmap, or advanced erosion in this initial implementation. Each edit currently regenerates the full mesh. For very large worlds, split the terrain into several nodes until chunked streaming is implemented.
+		[b]Limitations:[/b] There is no LOD, chunk streaming, automatically managed collision body, foliage system, texture splatmap, or advanced erosion in this initial implementation. Each edit currently regenerates the full mesh. For very large worlds, split the terrain into several nodes until chunked streaming is implemented.
 	</description>
 	<methods>
+		<method name="create_collision_shape" qualifiers="const">
+			<return type="ConcavePolygonShape3D" />
+			<description>
+				Creates a snapshot [ConcavePolygonShape3D] from the currently generated terrain mesh. Assign it to a [CollisionShape3D] child of a [StaticBody3D]. Recreate the shape after changing height data; the previous snapshot is not automatically updated. The method is unavailable in builds with 3D physics disabled.
+			</description>
+		</method>
 		<method name="erode_thermal">
 			<return type="void" />
 			<param index="0" name="iterations" type="int" />
