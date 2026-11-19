@@ -11,6 +11,7 @@ const GameServer = preload("res://scripts/server/game_server.gd")
 const Vendor = preload("res://scripts/shared/vendor.gd")
 const SurvivalRadar = preload("res://scripts/client/survival_radar.gd")
 const Contracts = preload("res://scripts/shared/contracts.gd")
+const CampRest = preload("res://scripts/shared/camp_rest.gd")
 const Weather = preload("res://scripts/shared/weather.gd")
 const LOCAL_PLAYER_ID := 2
 const TERRAIN_STEP := 8.0
@@ -96,6 +97,7 @@ func _setup_actions() -> void:
 	_bind_key("survive_bank_deposit", KEY_K)
 	_bind_key("survive_bank_withdraw", KEY_L)
 	_bind_key("survive_contract", KEY_P)
+	_bind_key("survive_rest", KEY_Z)
 
 
 func _bind_key(action: StringName, key: Key) -> void:
@@ -639,6 +641,8 @@ func _unhandled_input(event: InputEvent) -> void:
 		_feedback = ("Contract: %s" % str(response.get("title", response.get("reason", "updated"))))
 	elif event.is_action_pressed("survive_radar"):
 		_radar.visible = not _radar.visible
+	elif event.is_action_pressed("survive_rest"):
+		_result("Camp rest", sim.cmd_rest(LOCAL_PLAYER_ID))
 	elif event.is_action_pressed("survive_vendor_buy"):
 		_result("Buy water (12 silver)", sim.cmd_vendor(LOCAL_PLAYER_ID, "water_bottle", 1, true))
 	elif event.is_action_pressed("survive_vendor_sell"):
@@ -688,4 +692,5 @@ func _update_hud() -> void:
 		str(recipe.get("inputs", {})), _feedback
 	]
 	_instructions.text += "\nM tactical radar: red infected, yellow resources, green loot, gold defenses"
+	_instructions.text += "\nZ rest at hub (2 wood + food + water; 90s cooldown), remaining %.0fs" % survivor.rest_cooldown
 	_update_bank_hud()

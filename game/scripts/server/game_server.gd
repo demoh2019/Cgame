@@ -21,6 +21,7 @@ const Zombie = preload("res://scripts/shared/zombie.gd")
 const ZoneRisk = preload("res://scripts/shared/zone_risk.gd")
 const Weather = preload("res://scripts/shared/weather.gd")
 const Progression = preload("res://scripts/shared/progression.gd")
+const CampRest = preload("res://scripts/shared/camp_rest.gd")
 const Fishing = preload("res://scripts/shared/fishing.gd")
 
 const WORKBENCH_POSITION := Vector2(9.0, 0.0)
@@ -49,6 +50,7 @@ class Player:
 	var survival
 	var progression # Permanent skills; gear is lost on death, not experience.
 	var contract_state: Dictionary = {} # Server-owned persistent camp contract journal.
+	var rest_cooldown: float = 0.0 # Per-survivor seconds until next camp recovery.
 	var input_budget: float = 0.0
 	var last_input_seq: int = 0
 	var attack_timer: float = 0.0
@@ -137,6 +139,7 @@ func character_data(player: Player) -> Dictionary:
 		"stash": player.stash.to_dict(),
 		"progression": player.progression.to_dict(),
 		"contracts": player.contract_state.duplicate(true),
+		"rest_cooldown": player.rest_cooldown,
 	}
 
 
@@ -176,6 +179,8 @@ func apply_character(player: Player, data: Dictionary) -> bool:
 	if not SaveValidation.valid_counter(data.get("kills", 0)):
 		return false
 	if not SaveValidation.valid_counter(data.get("deaths", 0)):
+		return false
+	if not SaveValidation.finite_number(data.get("rest_cooldown", 0.0), 0.0, CampRest.COOLDOWN):
 		return false
 	if not (data.get("alive", true) is bool):
 		return false
@@ -219,6 +224,7 @@ func apply_character(player: Player, data: Dictionary) -> bool:
 	# inventory, protected stash, progression or survival state.
 	player.progression = loaded_progression
 	player.contract_state = (loaded_contracts as Dictionary).duplicate(true)
+	player.rest_cooldown = float(data.get("rest_cooldown", 0.0))
 	player.inventory = parsed_bag["inventory"]
 	player.stash = parsed_stash["inventory"]
 	player.kills = int(data.get("kills", 0))
@@ -578,6 +584,33 @@ func cmd_vendor(peer_id: int, item_id: String, quantity: int, buy: bool) -> Dict
 
 ## Camp contracts use the same real hub distance check as the vendor and bank.
 ## The only client input is accept/claim, never rewards, progress or prices.
+## Camp recovery is an authoritative, resource-paid sanctuary action.
+## Recent combat and noise lockouts prevent instant healing during danger.
+func cmd_rest(peer_id: int) -> Dictionary:
+	var player: Player = players.get(peer_id)
+	if player == null or not _alive(player):
+		return {"ok": false, "reason": "dead"}
+	var point := Vector2(player.position.x, player.position.z)
+	if not point.is_finite() or not _is_safe(player.position) or point.distance_to(WORKBENCH_POSITION) > WORKBENCH_RANGE:
+		return {"ok": false, "reason": "no_station"}
+	if player.rest_cooldown > 0.0:
+		return {"ok": false, "reason": "cooldown", "remaining": player.rest_cooldown}
+	if player.attack_timer > 0.0 or player.skill_timer > 0.0 or player.noise_timer > 0.0:
+		return {"ok": false, "reason": "in_combat"}
+	if not CampRest.needs_recovery(player.survival):
+		return {"ok": false, "reason": "fully_rested"}
+	if not CampRest.has_supplies(player.inventory):
+		return {"ok": false, "reason": "missing_items"}
+	if not CampRest.recover(player.inventory, player.survival):
+		return {"ok": false, "reason": "transaction_failed"}
+	player.rest_cooldown = CampRest.COOLDOWN
+	player.action = {}
+	player.dirty_inventory = true
+	player.dirty_character = true
+	return {"ok": true, "rested": true, "cooldown": player.rest_cooldown,
+		"health": player.survival.health, "stamina": player.survival.stamina}
+
+
 func cmd_contract(peer_id: int, action: String) -> Dictionary:
 	var player: Player = players.get(peer_id)
 	if player == null or not _alive(player):
@@ -1128,6 +1161,7 @@ func tick(delta: float) -> void:
 func _tick_players(delta: float) -> void:
 	for player in players.values():
 		player.input_budget = minf(player.input_budget + delta, 0.25)
+		player.rest_cooldown = maxf(0.0, player.rest_cooldown - maxf(0.0, delta))
 		player.attack_timer = maxf(player.attack_timer - delta, 0.0)
 		player.skill_timer = maxf(player.skill_timer - delta, 0.0)
 		player.dodge_timer = maxf(player.dodge_timer - delta, 0.0)
@@ -1391,6 +1425,7 @@ func snapshot_for(peer_id: int) -> Dictionary:
 			"weather": Weather.conditions(world, player.position.x, player.position.z, time),
 			"combat_energy": player.combat_energy, "skill_cooldown": player.skill_timer,
 			"dodge_cooldown": player.dodge_timer, "dodge_immunity": player.dodge_immunity,
+			"rest_cooldown": player.rest_cooldown,
 			"weapon": player.inventory.weapon, "armor": player.inventory.armor,
 			"last_death_full_loot": player.last_death_full_loot,
 			"is_night": WorldCycle.is_night(time),

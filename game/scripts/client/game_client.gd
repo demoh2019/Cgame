@@ -217,6 +217,10 @@ func vendor(item_id: String, quantity: int, buy: bool) -> void:
 	net.c_vendor.rpc_id(1, item_id, quantity, buy)
 
 
+func rest() -> void:
+	net.c_rest.rpc_id(1)
+
+
 func contract(action: String) -> void:
 	net.c_contract.rpc_id(1, action)
 

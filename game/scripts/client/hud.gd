@@ -6,6 +6,7 @@ const WorldCycle = preload("res://scripts/shared/world_cycle.gd")
 const Crafting = preload("res://scripts/shared/crafting.gd")
 const Vendor = preload("res://scripts/shared/vendor.gd")
 const Contracts = preload("res://scripts/shared/contracts.gd")
+const CampRest = preload("res://scripts/shared/camp_rest.gd")
 const ZoneRisk = preload("res://scripts/shared/zone_risk.gd")
 const SurvivalRadar = preload("res://scripts/client/survival_radar.gd")
 
@@ -150,6 +151,12 @@ func _build() -> void:
 	_stash_grid = GridContainer.new()
 	_stash_grid.columns = 4
 	stash_scroll.add_child(_stash_grid)
+
+	var rest_button := Button.new()
+	rest_button.text = "Rest at camp (2 wood, 1 water, 1 food)"
+	rest_button.tooltip_text = "Recover health and stamina in the safe settlement; 90s cooldown"
+	rest_button.pressed.connect(Callable(client, "rest"))
+	inventory_box.add_child(rest_button)
 
 	var vendor_title := Label.new()
 	vendor_title.text = "NPC vendor (hub workbench only)"
@@ -347,6 +354,12 @@ func _sell_one_material() -> void:
 
 
 func _on_result(kind: String, data: Dictionary) -> void:
+	if kind == "rest":
+		if bool(data.get("ok", false)):
+			say("Camp rest: recovered; 90 seconds until the next rest")
+		else:
+			say("Camp rest: " + str(data.get("reason", "rejected")))
+		return
 	if kind == "fish":
 		say("Fishing: casting..." if bool(data.get("ok", false)) else "Fishing: %s" % str(data.get("reason", "denied")))
 		return
@@ -426,6 +439,7 @@ func _process(_delta: float) -> void:
 		]
 	var journal: Variant = client.you.get("contract", Contracts.empty_state())
 	_contract_label.text = Contracts.description(journal if journal is Dictionary else Contracts.empty_state())
+	_info_label.text += "  Rest %.0fs" % float(client.you.get("rest_cooldown", 0.0))
 	var weapon: String = client.you.get("weapon", "")
 	var levels: Dictionary = client.you.get("gathering_levels", {})
 	_equipped.text = "Weapon: %s | Craft L%d (%d XP)\nWood L%d | Stone L%d | Ore L%d | Fiber L%d | Fishing L%d" % [
