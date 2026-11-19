@@ -51,6 +51,22 @@ class GodotStep3D {
 	LocalVector<GodotConstraint3D *> colored_constraints;
 	LocalVector<uint8_t> constraint_colors;
 	AHashMap<GodotBody3D *, uint32_t> occupied_colors;
+	// Cache a color schedule only when the exact constraint/body topology is
+	// unchanged. Endpoint modes matter because contact-only islands can share
+	// static/kinematic bodies while mixed islands cannot.
+	struct ColorCacheEntry {
+		GodotConstraint3D *constraint = nullptr;
+		GodotBody3D *body_A = nullptr;
+		GodotBody3D *body_B = nullptr;
+		uint8_t body_count = 0;
+		uint8_t mode_A = 0;
+		uint8_t mode_B = 0;
+	};
+	LocalVector<ColorCacheEntry> cached_color_topology;
+	uint32_t cached_color_sizes[17] = {};
+	uint32_t cached_color_starts[17] = {};
+	bool cached_color_contact_only = false;
+	bool cached_color_valid = false;
 	uint32_t color_batch_offset = 0;
 	uint32_t color_batch_count = 0;
 	// Read only while other islands run in worker jobs. The colored solver
@@ -81,6 +97,8 @@ class GodotStep3D {
 	void _solve_island(uint32_t p_island_index, void *p_userdata = nullptr);
 	void _solve_island_except_large(uint32_t p_island_index, void *p_userdata = nullptr);
 	void _solve_colored_constraint(uint32_t p_constraint_index, void *p_userdata = nullptr) const;
+	bool _can_reuse_color_cache(const LocalVector<GodotConstraint3D *> &p_constraint_island, bool p_contact_only) const;
+	void _run_colored_batches(const uint32_t *p_sizes, const uint32_t *p_starts);
 	// Returns false when graph coloring is not profitable or safe for this island.
 	bool _solve_large_island(const LocalVector<GodotConstraint3D *> &p_constraint_island);
 	void _check_suspend(const LocalVector<GodotBody3D *> &p_body_island) const;
