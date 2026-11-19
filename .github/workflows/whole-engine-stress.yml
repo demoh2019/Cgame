@@ -64,6 +64,26 @@ on:
         required: false
         type: boolean
         default: false
+      cases:
+        description: Comma-separated stress cases or all
+        required: false
+        type: string
+        default: all
+      ramp:
+        description: Bounded ramp to failure (manual only)
+        required: false
+        type: boolean
+        default: false
+      ramp_steps:
+        description: Maximum scale levels
+        required: false
+        type: number
+        default: 4
+      ramp_factor:
+        description: Geometric scale factor
+        required: false
+        type: number
+        default: 2
 
 permissions:
   contents: read
@@ -781,6 +801,10 @@ jobs:
     env:
       PRESET: ${{ github.event_name == 'workflow_dispatch' && inputs.preset || 'smoke' }}
       RENDER_MODE: ${{ github.event_name == 'workflow_dispatch' && inputs.render_mode || 'headless' }}
+      RUN_CASES: ${{ github.event_name == 'workflow_dispatch' && inputs.cases || 'all' }}
+      RUN_RAMP: ${{ github.event_name == 'workflow_dispatch' && inputs.ramp || false }}
+      RUN_RAMP_STEPS: ${{ github.event_name == 'workflow_dispatch' && inputs.ramp_steps || 4 }}
+      RUN_RAMP_FACTOR: ${{ github.event_name == 'workflow_dispatch' && inputs.ramp_factor || 2 }}
     steps:
       - uses: actions/checkout@v4
       - name: Install Xvfb and software GL for optional display tests
@@ -812,11 +836,15 @@ jobs:
           set -euo pipefail
           BIN=./bin/godot.linuxbsd.editor.dev.x86_64
           "$BIN" --version
+          RUN_ARGS=(--case "$RUN_CASES")
+          if [[ "$RUN_RAMP" == "true" ]]; then
+            RUN_ARGS+=(--ramp --ramp-steps "$RUN_RAMP_STEPS" --ramp-factor "$RUN_RAMP_FACTOR")
+          fi
           if [[ "$RENDER_MODE" == "display" ]]; then
             # Software GL only: results must NOT be compared with discrete-GPU measurements.
-            xvfb-run -a python3 tests/stress/run.py --godot "$BIN" --preset "$PRESET" --render-mode display --output whole-engine-stress.json --summary-md whole-engine-stress.md
+            xvfb-run -a python3 tests/stress/run.py --godot "$BIN" --preset "$PRESET" --render-mode display "${RUN_ARGS[@]}" --output whole-engine-stress.json --summary-md whole-engine-stress.md
           else
-            python3 tests/stress/run.py --godot "$BIN" --preset "$PRESET" --render-mode headless --output whole-engine-stress.json --summary-md whole-engine-stress.md
+            python3 tests/stress/run.py --godot "$BIN" --preset "$PRESET" --render-mode headless "${RUN_ARGS[@]}" --output whole-engine-stress.json --summary-md whole-engine-stress.md
           fi
       - name: Benchmark cold and warm asset import, script scanning and scene indexing
         if: success() || failure()

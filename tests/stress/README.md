@@ -3602,3 +3602,13 @@ not modelled; a coefficient of 0 (the default) costs nothing.
 `user://stress_small_files`, recording separate write, read and cleanup timings.
 The existing `scene_churn` workload and phase-median statistics remain available;
 additional implementations already merged into `develop` are preserved.
+
+
+## Bounded ramp-to-failure
+
+The \`run.py --ramp --ramp-steps 4 --ramp-factor 2\` options run each case in
+fresh, supervised processes at geometrically increasing scale levels (never
+exceeding scale 1000). Each stage enforces its own timeout and process-tree RSS
+limit; the first failure stops that case's ramp. The non-ramp default remains
+unchanged. JSON adds per-scale case names and a ranked bottleneck summary.
+For consistency, compare baselines collected with the same ramp mode.
