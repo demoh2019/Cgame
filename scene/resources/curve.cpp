@@ -1138,6 +1138,16 @@ PackedVector2Array Curve2D::get_points() const {
 	return _get_data()["points"];
 }
 
+// Compute the nearest point without first normalizing the segment by its
+// length. This uses one scalar division, and coincident points remain valid.
+template <typename T>
+_FORCE_INLINE_ T _curve_closest_segment_point(const T &p_point, const T &p_begin, const T &p_end, real_t &r_fraction) {
+	const T displacement = p_end - p_begin;
+	const real_t length_squared = displacement.length_squared();
+	r_fraction = length_squared > 0 ? CLAMP((p_point - p_begin).dot(displacement) / length_squared, (real_t)0, (real_t)1) : (real_t)0;
+	return p_begin + displacement * r_fraction;
+}
+
 Vector2 Curve2D::get_closest_point(const Vector2 &p_to_point) const {
 	// Brute force method.
 
@@ -1159,12 +1169,8 @@ Vector2 Curve2D::get_closest_point(const Vector2 &p_to_point) const {
 	real_t nearest_dist = -1.0f;
 
 	for (int i = 0; i < pc - 1; i++) {
-		const real_t interval = baked_dist_cache[i + 1] - baked_dist_cache[i];
-		Vector2 origin = r[i];
-		Vector2 direction = (r[i + 1] - origin) / interval;
-
-		real_t d = CLAMP((p_to_point - origin).dot(direction), 0.0f, interval);
-		Vector2 proj = origin + direction * d;
+		real_t fraction;
+		const Vector2 proj = _curve_closest_segment_point(p_to_point, r[i], r[i + 1], fraction);
 
 		real_t dist = proj.distance_squared_to(p_to_point);
 
@@ -1201,17 +1207,13 @@ real_t Curve2D::get_closest_offset(const Vector2 &p_to_point) const {
 	for (int i = 0; i < pc - 1; i++) {
 		offset = baked_dist_cache[i];
 
-		const real_t interval = baked_dist_cache[i + 1] - baked_dist_cache[i];
-		Vector2 origin = r[i];
-		Vector2 direction = (r[i + 1] - origin) / interval;
-
-		real_t d = CLAMP((p_to_point - origin).dot(direction), 0.0f, interval);
-		Vector2 proj = origin + direction * d;
+		real_t fraction;
+		const Vector2 proj = _curve_closest_segment_point(p_to_point, r[i], r[i + 1], fraction);
 
 		real_t dist = proj.distance_squared_to(p_to_point);
 
 		if (nearest_dist < 0.0f || dist < nearest_dist) {
-			nearest = offset + d;
+			nearest = offset + (baked_dist_cache[i + 1] - offset) * fraction;
 			nearest_dist = dist;
 		}
 	}
@@ -2113,12 +2115,8 @@ Vector3 Curve3D::get_closest_point(const Vector3 &p_to_point) const {
 	real_t nearest_dist = -1.0f;
 
 	for (int i = 0; i < pc - 1; i++) {
-		const real_t interval = baked_dist_cache[i + 1] - baked_dist_cache[i];
-		Vector3 origin = r[i];
-		Vector3 direction = (r[i + 1] - origin) / interval;
-
-		real_t d = CLAMP((p_to_point - origin).dot(direction), 0.0f, interval);
-		Vector3 proj = origin + direction * d;
+		real_t fraction;
+		const Vector3 proj = _curve_closest_segment_point(p_to_point, r[i], r[i + 1], fraction);
 
 		real_t dist = proj.distance_squared_to(p_to_point);
 
@@ -2159,17 +2157,13 @@ real_t Curve3D::get_closest_offset(const Vector3 &p_to_point) const {
 	for (int i = 0; i < pc - 1; i++) {
 		offset = baked_dist_cache[i];
 
-		const real_t interval = baked_dist_cache[i + 1] - baked_dist_cache[i];
-		Vector3 origin = r[i];
-		Vector3 direction = (r[i + 1] - origin) / interval;
-
-		real_t d = CLAMP((p_to_point - origin).dot(direction), 0.0f, interval);
-		Vector3 proj = origin + direction * d;
+		real_t fraction;
+		const Vector3 proj = _curve_closest_segment_point(p_to_point, r[i], r[i + 1], fraction);
 
 		real_t dist = proj.distance_squared_to(p_to_point);
 
 		if (nearest_dist < 0.0f || dist < nearest_dist) {
-			nearest = offset + d;
+			nearest = offset + (baked_dist_cache[i + 1] - offset) * fraction;
 			nearest_dist = dist;
 		}
 	}

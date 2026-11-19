@@ -331,4 +331,28 @@ TEST_CASE("[Curve3D][Performance] Even length tessellation and baked cache retai
 	CHECK(baked[baked.size() - 1] == Vector3(100, 0, 0));
 }
 
+
+TEST_CASE("[Curve3D] Closest segment projection uses squared length") {
+	Ref<Curve3D> curve = memnew(Curve3D);
+	curve->add_point(Vector3(0, 0, 0));
+	curve->add_point(Vector3(100, 0, 0));
+
+	for (int i = -25; i <= 125; i += 5) {
+		const Vector3 point(i, 19, -7);
+		const real_t clamped = CLAMP((real_t)i, (real_t)0, (real_t)100);
+		CHECK(curve->get_closest_point(point).is_equal_approx(Vector3(clamped, 0, 0)));
+		CHECK(curve->get_closest_offset(point) == doctest::Approx(clamped).epsilon(0.0001));
+	}
+
+	Ref<Curve3D> repeated = memnew(Curve3D);
+	repeated->add_point(Vector3(0, 0, 0));
+	repeated->add_point(Vector3(0, 0, 0));
+	repeated->add_point(Vector3(20, 0, 0));
+	const Vector3 closest = repeated->get_closest_point(Vector3(5, 2, 3));
+	CHECK(Math::is_finite(closest.x));
+	CHECK(Math::is_finite(closest.y));
+	CHECK(Math::is_finite(closest.z));
+	CHECK(Math::is_finite(repeated->get_closest_offset(Vector3(5, 2, 3))));
+}
+
 } // namespace TestCurve3D

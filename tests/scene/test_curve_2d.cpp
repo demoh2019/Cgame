@@ -334,4 +334,27 @@ TEST_CASE("[Curve2D][Performance] Even length tessellation and baked cache prese
 	CHECK(baked[baked.size() - 1] == Vector2(100, 0));
 }
 
+
+TEST_CASE("[Curve2D] Closest segment projection uses squared length") {
+	Ref<Curve2D> curve = memnew(Curve2D);
+	curve->add_point(Vector2(0, 0));
+	curve->add_point(Vector2(100, 0));
+
+	for (int i = -25; i <= 125; i += 5) {
+		const Vector2 point(i, 19);
+		const real_t clamped = CLAMP((real_t)i, (real_t)0, (real_t)100);
+		CHECK(curve->get_closest_point(point).is_equal_approx(Vector2(clamped, 0)));
+		CHECK(curve->get_closest_offset(point) == doctest::Approx(clamped).epsilon(0.0001));
+	}
+
+	Ref<Curve2D> repeated = memnew(Curve2D);
+	repeated->add_point(Vector2(0, 0));
+	repeated->add_point(Vector2(0, 0));
+	repeated->add_point(Vector2(20, 0));
+	const Vector2 closest = repeated->get_closest_point(Vector2(5, 2));
+	CHECK(Math::is_finite(closest.x));
+	CHECK(Math::is_finite(closest.y));
+	CHECK(Math::is_finite(repeated->get_closest_offset(Vector2(5, 2))));
+}
+
 } // namespace TestCurve2D
