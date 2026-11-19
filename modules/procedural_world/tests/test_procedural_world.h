@@ -47,7 +47,11 @@ TEST_CASE("[ProceduralWorld] Seeded heightmaps are deterministic") {
 		CHECK(height >= -32.0f);
 		CHECK(height <= 32.0f);
 	}
-	CHECK(world->generate_heightmap(2, 2, 1, 20.0f, 0.0f) == PackedFloat32Array::make(0.0f, 0.0f, 0.0f, 0.0f));
+	const PackedFloat32Array flat = world->generate_heightmap(2, 2, 1, 20.0f, 0.0f);
+	REQUIRE(flat.size() == 4);
+	for (float h : flat) {
+		CHECK(h == 0.0f);
+	}
 }
 
 TEST_CASE("[ProceduralWorld] Heightmap inputs are bounded") {
@@ -94,6 +98,8 @@ TEST_CASE("[ProceduralWorld] Thermal erosion rejects wrong sample counts") {
 	CHECK(world->erode_heightmap(values, 2, 2).is_empty());
 	CHECK(world->erode_heightmap(values, 3, 1, -1).is_empty());
 	CHECK(world->erode_heightmap(values, 3, 1, 1, 1, 2).is_empty());
+	values.set(0, Math::NaN);
+	CHECK(world->erode_heightmap(values, 3, 1, 1).is_empty());
 	ERR_PRINT_ON;
 }
 
@@ -131,10 +137,14 @@ TEST_CASE("[ProceduralWorld] Chunk coordinates handle negative and half-open bou
 	world.instantiate();
 	Array cells = world->get_chunk_coordinates(Rect2(-32, -32, 64, 64), 32);
 	REQUIRE(cells.size() == 4);
-	CHECK(Vector2i(cells[0]) == Vector2i(-1, -1));
-	CHECK(Vector2i(cells[1]) == Vector2i(0, -1));
-	CHECK(Vector2i(cells[2]) == Vector2i(-1, 0));
-	CHECK(Vector2i(cells[3]) == Vector2i(0, 0));
+	const Vector2i cell0 = cells[0];
+	const Vector2i cell1 = cells[1];
+	const Vector2i cell2 = cells[2];
+	const Vector2i cell3 = cells[3];
+	CHECK(cell0 == Vector2i(-1, -1));
+	CHECK(cell1 == Vector2i(0, -1));
+	CHECK(cell2 == Vector2i(-1, 0));
+	CHECK(cell3 == Vector2i(0, 0));
 	CHECK(world->get_chunk_coordinates(Rect2(0, 0, 64, 32), 32).size() == 2);
 	CHECK(world->get_chunk_coordinates(Rect2(0, 0, 0, 32), 32).is_empty());
 }

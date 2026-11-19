@@ -62,7 +62,7 @@ float ProceduralWorld::_noise(float p_x, float p_y, uint32_t p_seed) {
 
 PackedFloat32Array ProceduralWorld::generate_heightmap(int p_width, int p_height, int p_seed, float p_scale, float p_amplitude, int p_octaves) const {
 	ERR_FAIL_COND_V_MSG(p_width <= 0 || p_height <= 0 || p_width > 2048 || p_height > 2048 || int64_t(p_width) * p_height > 4194304, PackedFloat32Array(), "Heightmap dimensions must be positive and contain at most 4194304 samples.");
-	ERR_FAIL_COND_V_MSG(!Math::is_finite(p_scale) || p_scale <= 0.0f || !Math::is_finite(p_amplitude) || p_amplitude < 0.0f, PackedFloat32Array(), "Scale and amplitude must be finite; scale must be positive.");
+	ERR_FAIL_COND_V_MSG(!Math::is_finite(p_scale) || p_scale < 0.001f || !Math::is_finite(p_amplitude) || p_amplitude < 0.0f, PackedFloat32Array(), "Scale must be finite and >= 0.001, and amplitude must be finite and nonnegative.");
 	ERR_FAIL_COND_V_MSG(p_octaves < 1 || p_octaves > 8, PackedFloat32Array(), "Octaves must be in range 1..8.");
 
 	PackedFloat32Array heights;
@@ -89,6 +89,10 @@ PackedFloat32Array ProceduralWorld::generate_heightmap(int p_width, int p_height
 PackedFloat32Array ProceduralWorld::erode_heightmap(const PackedFloat32Array &p_heights, int p_width, int p_height, int p_iterations, float p_talus, float p_strength) const {
 	ERR_FAIL_COND_V_MSG(p_width <= 0 || p_height <= 0 || p_width > 2048 || p_height > 2048 || int64_t(p_width) * p_height != p_heights.size(), PackedFloat32Array(), "The heightmap must have exactly width * height samples.");
 	ERR_FAIL_COND_V_MSG(p_iterations < 0 || p_iterations > 256 || !Math::is_finite(p_talus) || p_talus < 0 || !Math::is_finite(p_strength) || p_strength < 0 || p_strength > 1, PackedFloat32Array(), "Invalid erosion parameters.");
+
+	for (float value : p_heights) {
+		ERR_FAIL_COND_V_MSG(!Math::is_finite(value), PackedFloat32Array(), "Heightmap samples must be finite.");
+	}
 
 	PackedFloat32Array current = p_heights;
 	const int dx[] = { 0, 0, -1, 1 };
@@ -125,15 +129,18 @@ PackedFloat32Array ProceduralWorld::erode_heightmap(const PackedFloat32Array &p_
 
 PackedVector2Array ProceduralWorld::scatter_points(const Rect2 &p_area, float p_min_distance, int p_seed, int p_max_points, int p_attempts_per_point) const {
 	PackedVector2Array points;
-	ERR_FAIL_COND_V_MSG(!p_area.position.is_finite() || !p_area.size.is_finite() || p_area.size.x <= 0 || p_area.size.y <= 0, points, "Area must be finite with positive size.");
+	ERR_FAIL_COND_V_MSG(!p_area.position.is_finite() || !p_area.size.is_finite() || !p_area.get_end().is_finite() || p_area.size.x <= 0 || p_area.size.y <= 0, points, "Area must be finite with positive size.");
 	ERR_FAIL_COND_V_MSG(!Math::is_finite(p_min_distance) || p_min_distance <= 0 || p_max_points < 0 || p_max_points > 4096 || p_attempts_per_point < 1 || p_attempts_per_point > 100, points, "Invalid scatter parameters.");
 	if (p_max_points == 0) {
 		return points;
 	}
 
 	const float cell_size = p_min_distance / Math::SQRT2;
-	const int64_t columns = int64_t(Math::ceil(p_area.size.x / cell_size));
-	const int64_t rows = int64_t(Math::ceil(p_area.size.y / cell_size));
+	const double col_count = Math::ceil(double(p_area.size.x) / double(cell_size));
+	const double row_count = Math::ceil(double(p_area.size.y) / double(cell_size));
+	ERR_FAIL_COND_V_MSG(!Math::is_finite(col_count) || !Math::is_finite(row_count) || col_count > 2048.0 || row_count > 2048.0, points, "Scatter grid dimensions exceed limits.");
+	const int64_t columns = int64_t(col_count);
+	const int64_t rows = int64_t(row_count);
 	ERR_FAIL_COND_V_MSG(columns <= 0 || rows <= 0 || columns * rows > 4194304, points, "Scatter grid would exceed 4194304 cells.");
 
 	Vector<int> grid;
@@ -143,11 +150,12 @@ PackedVector2Array ProceduralWorld::scatter_points(const Rect2 &p_area, float p_
 		cell_data[i] = -1;
 	}
 
-	RandomNumberGenerator rng;
-	rng.set_seed(uint64_t(uint32_t(p_seed)));
+	Ref<RandomNumberGenerator> rng;
+	rng.instantiate();
+	rng->set_seed(uint64_t(uint32_t(p_seed)));
 	const float min_distance_squared = p_min_distance * p_min_distance;
 	for (int attempt = 0; attempt < p_max_points * p_attempts_per_point && points.size() < p_max_points; attempt++) {
-		const Vector2 candidate = p_area.position + Vector2(rng.randf() * p_area.size.x, rng.randf() * p_area.size.y);
+		const Vector2 candidate = p_area.position + Vector2(rng->randf() * p_area.size.x, rng->randf() * p_area.size.y);
 		const int cx = MIN(int((candidate.x - p_area.position.x) / cell_size), int(columns) - 1);
 		const int cy = MIN(int((candidate.y - p_area.position.y) / cell_size), int(rows) - 1);
 		bool valid = true;
@@ -170,10 +178,12 @@ PackedVector2Array ProceduralWorld::scatter_points(const Rect2 &p_area, float p_
 
 Array ProceduralWorld::get_chunk_coordinates(const Rect2 &p_world_area, int p_chunk_size) const {
 	Array result;
-	ERR_FAIL_COND_V_MSG(!p_world_area.position.is_finite() || !p_world_area.size.is_finite() || p_world_area.size.x < 0 || p_world_area.size.y < 0 || p_chunk_size <= 0, result, "Invalid chunk area or size.");
+	ERR_FAIL_COND_V_MSG(!p_world_area.position.is_finite() || !p_world_area.size.is_finite() || !p_world_area.get_end().is_finite() || p_world_area.size.x < 0 || p_world_area.size.y < 0 || p_chunk_size <= 0, result, "Invalid chunk area or size.");
 	if (p_world_area.size.x == 0 || p_world_area.size.y == 0) {
 		return result;
 	}
+
+	ERR_FAIL_COND_V_MSG(Math::abs(p_world_area.position.x) > 1000000000.0f || Math::abs(p_world_area.position.y) > 1000000000.0f || Math::abs(p_world_area.get_end().x) > 1000000000.0f || Math::abs(p_world_area.get_end().y) > 1000000000.0f, result, "World coordinates exceed supported range.");
 
 	const int64_t x0 = int64_t(Math::floor(p_world_area.position.x / p_chunk_size));
 	const int64_t y0 = int64_t(Math::floor(p_world_area.position.y / p_chunk_size));
