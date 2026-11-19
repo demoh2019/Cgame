@@ -54,6 +54,10 @@ func _placement_transform() -> Dictionary:
         return {}
 
     var ground: Vector3 = hit["position"]
+    # Do not treat the roof of a wall or tall prop as a valid building pad.
+    # Player origin is the capsule center; its feet are approximately 0.9 m lower.
+    if absf(ground.y - (player.global_position.y - 0.9)) > 0.6:
+        return {}
     var center := Vector3(
         intended.x,
         ground.y + Barricade.SIZE.y * 0.5 + GROUND_CLEARANCE,
