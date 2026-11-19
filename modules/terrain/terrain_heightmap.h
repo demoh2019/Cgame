@@ -72,6 +72,11 @@ public:
     void erode_talus(int p_iterations, float p_talus, float p_rate);
     void paint_layer(const Vector2 &p_center, float p_radius, int p_layer, float p_strength);
 
+    // Deterministic grid-jitter foliage candidates, optionally constrained by slope and elevation.
+    PackedVector3Array scatter_points(int p_seed, float p_spacing, float p_jitter = 0.75f,
+            float p_max_slope_degrees = 45.0f, float p_min_height = -100000.0f,
+            float p_max_height = 100000.0f, float p_cell_size = 1.0f) const;
+
     Ref<ArrayMesh> build_mesh(float p_cell_size = 1.0f) const;
     Ref<ArrayMesh> build_chunk_mesh(const Vector2i &p_origin, const Vector2i &p_cell_count, int p_stride = 1, float p_cell_size = 1.0f) const;
 };
