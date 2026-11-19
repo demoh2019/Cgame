@@ -380,4 +380,135 @@ TEST_CASE("[PagedArray] Unordered removal avoids last-element self-assignment") 
 	pool.reset();
 }
 
+struct PagedLifetimeProbe {
+	inline static int alive = 0;
+	inline static int destroyed = 0;
+	inline static int copies = 0;
+	int value = 0;
+
+	explicit PagedLifetimeProbe(int p_value = 0) :
+			value(p_value) {
+		alive++;
+	}
+	PagedLifetimeProbe(const PagedLifetimeProbe &p_other) :
+			value(p_other.value) {
+		alive++;
+		copies++;
+	}
+	PagedLifetimeProbe &operator=(const PagedLifetimeProbe &p_other) {
+		value = p_other.value;
+		return *this;
+	}
+	~PagedLifetimeProbe() {
+		destroyed++;
+		alive--;
+	}
+};
+
+TEST_CASE("[PagedArray] Page-wise clear destroys exactly the live nontrivial elements") {
+	PagedLifetimeProbe::alive = 0;
+	PagedLifetimeProbe::destroyed = 0;
+	PagedLifetimeProbe::copies = 0;
+	PagedArrayPool<PagedLifetimeProbe> pool(8);
+	PagedArray<PagedLifetimeProbe> array;
+	array.set_page_pool(&pool);
+
+	for (int n : { 1, 7, 8, 9, 16, 17, 35, 64 }) {
+		for (int i = 0; i < n; i++) {
+			PagedLifetimeProbe item(i);
+			array.push_back(item);
+		}
+		CHECK(array.size() == uint64_t(n));
+		CHECK(PagedLifetimeProbe::alive == n);
+		for (int i = 0; i < n; i++) {
+			CHECK(array[i].value == i);
+		}
+		array.pop_back();
+		CHECK(PagedLifetimeProbe::alive == n - 1);
+		array.clear();
+		CHECK(PagedLifetimeProbe::alive == 0);
+		CHECK(array.size() == 0);
+		array.clear();
+	}
+	CHECK(PagedLifetimeProbe::destroyed > 0);
+	array.reset();
+	pool.reset();
+	CHECK(PagedLifetimeProbe::alive == 0);
+}
+
+TEST_CASE("[PagedArray] Merge and page-wise clear preserve nontrivial lifetimes") {
+	PagedLifetimeProbe::alive = 0;
+	PagedLifetimeProbe::destroyed = 0;
+	PagedLifetimeProbe::copies = 0;
+	PagedArrayPool<PagedLifetimeProbe> pool(8);
+	PagedArray<PagedLifetimeProbe> dst;
+	PagedArray<PagedLifetimeProbe> src;
+	dst.set_page_pool(&pool);
+	src.set_page_pool(&pool);
+
+	for (int i = 0; i < 13; i++) {
+		PagedLifetimeProbe item(i);
+		dst.push_back(item);
+	}
+	for (int i = 13; i < 39; i++) {
+		PagedLifetimeProbe item(i);
+		src.push_back(item);
+	}
+	CHECK(PagedLifetimeProbe::alive == 39);
+	dst.merge_unordered(src);
+	CHECK(dst.size() == 39);
+	CHECK(src.size() == 0);
+	CHECK(PagedLifetimeProbe::alive == 39);
+	bool seen[39] = {};
+	for (uint64_t i = 0; i < dst.size(); i++) {
+		const int value = dst[i].value;
+		REQUIRE(value >= 0);
+		REQUIRE(value < 39);
+		CHECK_FALSE(seen[value]);
+		seen[value] = true;
+	}
+	for (bool present : seen) {
+		CHECK(present);
+	}
+	dst.clear();
+	CHECK(PagedLifetimeProbe::alive == 0);
+	src.clear();
+	dst.reset();
+	src.reset();
+	pool.reset();
+}
+
+TEST_CASE("[PagedArray] Bulk trivial remainder copy preserves large partial pages") {
+	PagedArrayPool<uint64_t> pool(1024);
+	PagedArray<uint64_t> dst;
+	PagedArray<uint64_t> src;
+	dst.set_page_pool(&pool);
+	src.set_page_pool(&pool);
+	std::vector<uint64_t> expected;
+	for (uint64_t i = 0; i < 1537; i++) {
+		const uint64_t value = i + 1;
+		dst.push_back(value);
+		expected.push_back(value);
+	}
+	for (uint64_t i = 0; i < 1903; i++) {
+		const uint64_t value = i + 100000;
+		src.push_back(value);
+		expected.push_back(value);
+	}
+	dst.merge_unordered(src);
+	CHECK(dst.size() == expected.size());
+	CHECK(src.size() == 0);
+	std::vector<uint64_t> actual;
+	actual.reserve(dst.size());
+	for (uint64_t i = 0; i < dst.size(); i++) {
+		actual.push_back(dst[i]);
+	}
+	std::sort(actual.begin(), actual.end());
+	std::sort(expected.begin(), expected.end());
+	CHECK(actual == expected);
+	dst.reset();
+	src.reset();
+	pool.reset();
+}
+
 } // namespace TestPagedArray
