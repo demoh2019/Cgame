@@ -158,6 +158,9 @@ private:
 	real_t soft_body_tetra_fem_compliance = 0.0; // Disabled by default.
 	bool soft_body_tetra_fem_lumped_mass = false; // Opt-in volume-weighted vertex masses.
 	real_t soft_body_tetra_fem_poisson_ratio = 0.3;
+	real_t soft_body_tetra_principal_min_stretch = 0.0; // 0: no min singular cap.
+	real_t soft_body_tetra_principal_max_stretch = 0.0; // 0: no max singular cap.
+	real_t soft_body_tetra_principal_limit_compliance = 0.0; // 0: hard cap.
 	int soft_body_tetra_fem_material_model = 0; // 0 Neo-Hookean, 1 Mooney-Rivlin, 2 Ogden.
 	real_t soft_body_tetra_ogden_exponent = 3.0; // 1..8, nonlinear principal stretch power.
 	real_t soft_body_tetra_mooney_rivlin_fraction = 0.5;
@@ -346,6 +349,9 @@ public:
 	_FORCE_INLINE_ real_t get_soft_body_tetra_fem_compliance() const { return soft_body_tetra_fem_compliance; }
 	_FORCE_INLINE_ bool get_soft_body_tetra_fem_lumped_mass() const { return soft_body_tetra_fem_lumped_mass; }
 	_FORCE_INLINE_ real_t get_soft_body_tetra_fem_poisson_ratio() const { return soft_body_tetra_fem_poisson_ratio; }
+	_FORCE_INLINE_ real_t get_soft_body_tetra_principal_min_stretch() const { return soft_body_tetra_principal_min_stretch; }
+	_FORCE_INLINE_ real_t get_soft_body_tetra_principal_max_stretch() const { return soft_body_tetra_principal_max_stretch; }
+	_FORCE_INLINE_ real_t get_soft_body_tetra_principal_limit_compliance() const { return soft_body_tetra_principal_limit_compliance; }
 	_FORCE_INLINE_ int get_soft_body_tetra_fem_material_model() const { return soft_body_tetra_fem_material_model; }
 	_FORCE_INLINE_ real_t get_soft_body_tetra_ogden_exponent() const { return soft_body_tetra_ogden_exponent; }
 	_FORCE_INLINE_ real_t get_soft_body_tetra_mooney_rivlin_fraction() const { return soft_body_tetra_mooney_rivlin_fraction; }

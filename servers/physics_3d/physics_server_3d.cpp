@@ -667,6 +667,11 @@ PhysicsServer3D::PhysicsServer3D() {
 	// the legacy equal-per-vertex soft-body mass. Disabled for compatibility.
 	GLOBAL_DEF(PropertyInfo(Variant::BOOL, "physics/3d/solver/soft_body_tetra_fem_lumped_mass"), false);
 	GLOBAL_DEF(PropertyInfo(Variant::FLOAT, "physics/3d/solver/soft_body_tetra_fem_poisson_ratio", PROPERTY_HINT_RANGE, "0,0.49,0.01"), 0.3);
+	// Optional volumetric FEM unilateral caps on principal singular stretches.
+	// Distinct from XPBD edge strain limits and off without positive bounds.
+	GLOBAL_DEF(PropertyInfo(Variant::FLOAT, "physics/3d/solver/soft_body_tetra_principal_min_stretch", PROPERTY_HINT_RANGE, "0,1,0.01"), 0.0);
+	GLOBAL_DEF(PropertyInfo(Variant::FLOAT, "physics/3d/solver/soft_body_tetra_principal_max_stretch", PROPERTY_HINT_RANGE, "0,16,0.01"), 0.0);
+	GLOBAL_DEF(PropertyInfo(Variant::FLOAT, "physics/3d/solver/soft_body_tetra_principal_limit_compliance", PROPERTY_HINT_RANGE, "0,0.01,0.000001,or_greater"), 0.0);
 	// Optional large-deformation Mooney-Rivlin rubber-like material, with
 	// two isochoric invariants and separate volumetric compression response.
 	GLOBAL_DEF(PropertyInfo(Variant::INT, "physics/3d/solver/soft_body_tetra_fem_material_model", PROPERTY_HINT_ENUM, "Neo-Hookean,Mooney-Rivlin,Ogden"), 0);
