@@ -25,6 +25,11 @@ jobs:
       - name: Run safe file-apply tests
         run: |
           /tmp/godot/Godot_v4.6-stable_linux.x86_64 --headless --path misc/ai_game_builder --script res://tests/test_apply.gd
+      - name: Smoke-test headless diagnostic import
+        run: |
+          /tmp/godot/Godot_v4.6-stable_linux.x86_64 --headless --recovery-mode \
+            --path misc/ai_game_builder --log-file /tmp/ai-builder-diagnostic.log --import
+          test -f /tmp/ai-builder-diagnostic.log
       - name: Parse editor plugin in editor mode
         run: |
           /tmp/godot/Godot_v4.6-stable_linux.x86_64 --headless --editor --path misc/ai_game_builder --import --quit
