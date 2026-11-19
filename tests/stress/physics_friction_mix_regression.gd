@@ -26,7 +26,9 @@ func _compare_friction_2d() -> Dictionary:
 
 	# Surface coefficients 1 and 0.25 mix to 0.25 (legacy) or 0.5
 	# (geometric). Geometry is identical across the isolated spaces.
-	for mode in [0, 1]:
+	for scenario in [0, 1, 2]:
+		# Third space tests geometric mixing when one material has zero friction.
+		var mode := mini(scenario, 1)
 		ProjectSettings.set_setting(SETTING, mode)
 		var space := PhysicsServer2D.space_create()
 		ProjectSettings.set_setting(SETTING, original)
@@ -49,7 +51,7 @@ func _compare_friction_2d() -> Dictionary:
 		var body := PhysicsServer2D.body_create()
 		PhysicsServer2D.body_add_shape(body, circle_shape)
 		PhysicsServer2D.body_set_mode(body, PhysicsServer2D.BODY_MODE_RIGID_LINEAR)
-		PhysicsServer2D.body_set_param(body, PhysicsServer2D.BODY_PARAM_FRICTION, 0.25)
+		PhysicsServer2D.body_set_param(body, PhysicsServer2D.BODY_PARAM_FRICTION, 0.0 if scenario == 2 else 0.25)
 		PhysicsServer2D.body_set_param(body, PhysicsServer2D.BODY_PARAM_BOUNCE, 0.0)
 		PhysicsServer2D.body_set_state(body, PhysicsServer2D.BODY_STATE_CAN_SLEEP, false)
 		PhysicsServer2D.body_set_state(body, PhysicsServer2D.BODY_STATE_TRANSFORM,
@@ -67,6 +69,7 @@ func _compare_friction_2d() -> Dictionary:
 
 	var legacy_velocity: Vector2 = PhysicsServer2D.body_get_state(movers[0], PhysicsServer2D.BODY_STATE_LINEAR_VELOCITY)
 	var geometric_velocity: Vector2 = PhysicsServer2D.body_get_state(movers[1], PhysicsServer2D.BODY_STATE_LINEAR_VELOCITY)
+	var frictionless_velocity: Vector2 = PhysicsServer2D.body_get_state(movers[2], PhysicsServer2D.BODY_STATE_LINEAR_VELOCITY)
 
 	for space in spaces:
 		PhysicsServer2D.space_set_active(space, false)
@@ -79,8 +82,9 @@ func _compare_friction_2d() -> Dictionary:
 	ProjectSettings.set_setting(SETTING, original)
 
 	var difference: float = legacy_velocity.x - geometric_velocity.x
-	return {"passed": legacy_velocity.is_finite() and geometric_velocity.is_finite() and difference > 3.0,
-			"legacy_x": legacy_velocity.x, "geometric_x": geometric_velocity.x, "difference": difference}
+	return {"passed": legacy_velocity.is_finite() and geometric_velocity.is_finite() and frictionless_velocity.is_finite() and difference > 3.0 and frictionless_velocity.x > legacy_velocity.x + 5.0,
+			"legacy_x": legacy_velocity.x, "geometric_x": geometric_velocity.x,
+			"frictionless_x": frictionless_velocity.x, "difference": difference}
 
 
 func _compare_friction_3d() -> Dictionary:
@@ -91,7 +95,9 @@ func _compare_friction_3d() -> Dictionary:
 	var shapes: Array[RID] = []
 	var movers: Array[RID] = []
 
-	for mode in [0, 1]:
+	for scenario in [0, 1, 2]:
+		# Third space tests geometric mixing when one material has zero friction.
+		var mode := mini(scenario, 1)
 		ProjectSettings.set_setting(SETTING, mode)
 		var space := PhysicsServer3D.space_create()
 		ProjectSettings.set_setting(SETTING, original)
@@ -114,7 +120,7 @@ func _compare_friction_3d() -> Dictionary:
 		var body := PhysicsServer3D.body_create()
 		PhysicsServer3D.body_add_shape(body, sphere_shape)
 		PhysicsServer3D.body_set_mode(body, PhysicsServer3D.BODY_MODE_RIGID_LINEAR)
-		PhysicsServer3D.body_set_param(body, PhysicsServer3D.BODY_PARAM_FRICTION, 0.25)
+		PhysicsServer3D.body_set_param(body, PhysicsServer3D.BODY_PARAM_FRICTION, 0.0 if scenario == 2 else 0.25)
 		PhysicsServer3D.body_set_param(body, PhysicsServer3D.BODY_PARAM_BOUNCE, 0.0)
 		PhysicsServer3D.body_set_state(body, PhysicsServer3D.BODY_STATE_CAN_SLEEP, false)
 		PhysicsServer3D.body_set_state(body, PhysicsServer3D.BODY_STATE_TRANSFORM,
@@ -130,6 +136,7 @@ func _compare_friction_3d() -> Dictionary:
 
 	var legacy_velocity: Vector3 = PhysicsServer3D.body_get_state(movers[0], PhysicsServer3D.BODY_STATE_LINEAR_VELOCITY)
 	var geometric_velocity: Vector3 = PhysicsServer3D.body_get_state(movers[1], PhysicsServer3D.BODY_STATE_LINEAR_VELOCITY)
+	var frictionless_velocity: Vector3 = PhysicsServer3D.body_get_state(movers[2], PhysicsServer3D.BODY_STATE_LINEAR_VELOCITY)
 
 	for space in spaces:
 		PhysicsServer3D.space_set_active(space, false)
@@ -142,5 +149,6 @@ func _compare_friction_3d() -> Dictionary:
 	ProjectSettings.set_setting(SETTING, original)
 
 	var difference: float = legacy_velocity.x - geometric_velocity.x
-	return {"passed": legacy_velocity.is_finite() and geometric_velocity.is_finite() and difference > 0.2,
-			"legacy_x": legacy_velocity.x, "geometric_x": geometric_velocity.x, "difference": difference}
+	return {"passed": legacy_velocity.is_finite() and geometric_velocity.is_finite() and frictionless_velocity.is_finite() and difference > 0.2 and frictionless_velocity.x > legacy_velocity.x + 0.5,
+			"legacy_x": legacy_velocity.x, "geometric_x": geometric_velocity.x,
+			"frictionless_x": frictionless_velocity.x, "difference": difference}
