@@ -174,14 +174,8 @@ void JSON::_stringify(StringBuilder &r_result, const Variant &p_var, const Strin
 			r_result += end_statement;
 			p_markers.insert(d.id());
 
-			LocalVector<Variant> keys = d.get_key_list();
-
-			if (p_sort_keys) {
-				keys.sort_custom<StringLikeVariantOrder>();
-			}
-
 			bool first_key = true;
-			for (const Variant &key : keys) {
+			const auto write_entry = [&](const KeyValue<Variant, Variant> &p_entry) {
 				if (first_key) {
 					first_key = false;
 				} else {
@@ -189,9 +183,34 @@ void JSON::_stringify(StringBuilder &r_result, const Variant &p_var, const Strin
 					r_result += end_statement;
 				}
 				_add_indent(r_result, p_indent, p_cur_indent + 1);
-				_stringify(r_result, String(key), p_indent, p_cur_indent + 1, p_sort_keys, p_markers, p_full_precision);
+				_stringify(r_result, String(p_entry.key), p_indent, p_cur_indent + 1, p_sort_keys, p_markers, p_full_precision);
 				r_result += colon;
-				_stringify(r_result, d[key], p_indent, p_cur_indent + 1, p_sort_keys, p_markers, p_full_precision);
+				_stringify(r_result, p_entry.value, p_indent, p_cur_indent + 1, p_sort_keys, p_markers, p_full_precision);
+			};
+
+			if (p_sort_keys) {
+				// HashMap nodes remain stable across table growth. Sorting pointers
+				// avoids copying Variant keys and re-hashing for each value lookup.
+				struct EntryComparator {
+					bool operator()(const KeyValue<Variant, Variant> *p_a, const KeyValue<Variant, Variant> *p_b) const {
+						return StringLikeVariantOrder::compare(p_a->key, p_b->key);
+					}
+				};
+				LocalVector<const KeyValue<Variant, Variant> *> entries;
+				entries.reserve(d.size());
+				for (const KeyValue<Variant, Variant> &entry : d) {
+					entries.push_back(&entry);
+				}
+				entries.sort_custom<EntryComparator>();
+				for (const KeyValue<Variant, Variant> *entry : entries) {
+					write_entry(*entry);
+				}
+			} else {
+				// Insertion order is already the HashMap's iteration order.
+				// No temporary key vector, Variant copies, or secondary lookup.
+				for (const KeyValue<Variant, Variant> &entry : d) {
+					write_entry(entry);
+				}
 			}
 
 			r_result += end_statement;
