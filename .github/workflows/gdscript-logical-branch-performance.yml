@@ -1,0 +1,58 @@
+name: GDScript logical branch bytecode performance
+
+on:
+  pull_request:
+    branches: [develop]
+    paths:
+      - "modules/gdscript/gdscript_byte_codegen.cpp"
+      - "modules/gdscript/gdscript_byte_codegen.h"
+      - "modules/gdscript/gdscript_codegen.h"
+      - "modules/gdscript/gdscript_compiler.cpp"
+      - "modules/gdscript/gdscript_compiler.h"
+      - "modules/gdscript/tests/scripts/runtime/features/if_logical_*.gd"
+      - "modules/gdscript/tests/scripts/runtime/features/if_logical_*.out"
+      - "misc/scripts/tests/test_gdscript_logical_branch_codegen.py"
+      - ".github/workflows/gdscript-logical-branch-performance.yml"
+  push:
+    branches: [develop]
+    paths:
+      - "modules/gdscript/gdscript_byte_codegen.cpp"
+      - "modules/gdscript/gdscript_byte_codegen.h"
+      - "modules/gdscript/gdscript_codegen.h"
+      - "modules/gdscript/gdscript_compiler.cpp"
+      - "modules/gdscript/gdscript_compiler.h"
+      - "modules/gdscript/tests/scripts/runtime/features/if_logical_*.gd"
+      - "modules/gdscript/tests/scripts/runtime/features/if_logical_*.out"
+      - "misc/scripts/tests/test_gdscript_logical_branch_codegen.py"
+      - ".github/workflows/gdscript-logical-branch-performance.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  contracts:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - run: |
+          python3 -m py_compile misc/scripts/tests/test_gdscript_logical_branch_codegen.py
+          python3 -m unittest discover -s misc/scripts/tests -p test_gdscript_logical_branch_codegen.py -v
+
+  gdscript-runtime:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+      - uses: ./.github/actions/godot-deps
+      - uses: ./.github/actions/godot-build
+        with:
+          platform: linuxbsd
+          target: editor
+          scons-flags: dev_build=yes tests=yes debug_symbols=no module_mono_enabled=no accesskit=no
+      - name: Run full GDScript native and scripted regression suite
+        run: |
+          timeout 300s ./bin/godot.linuxbsd.editor.dev.x86_64 --headless --test --test-suite="*GDScript*" --no-colors
