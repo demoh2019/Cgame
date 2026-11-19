@@ -46,6 +46,9 @@ class GodotStep3D {
 	// Filled only when pre_solve removes constraints from some islands.
 	// Dense frames use direct island indices with no extra allocation.
 	LocalVector<uint32_t> solve_island_indices;
+	// Reused only by the opt-in large rigid-body island coloring path.
+	LocalVector<GodotConstraint3D *> colored_constraints;
+	uint32_t color_batch_offset = 0;
 
 	struct IslandTask {
 		GodotBody3D *body = nullptr;
@@ -59,6 +62,9 @@ class GodotStep3D {
 	void _setup_constraint(uint32_t p_constraint_index, void *p_userdata = nullptr);
 	void _pre_solve_island(LocalVector<GodotConstraint3D *> &p_constraint_island) const;
 	void _solve_island(uint32_t p_island_index, void *p_userdata = nullptr);
+	void _solve_colored_constraint(uint32_t p_constraint_index, void *p_userdata = nullptr) const;
+	// Returns false when graph coloring is not profitable or safe for this island.
+	bool _solve_large_island(const LocalVector<GodotConstraint3D *> &p_constraint_island);
 	void _check_suspend(const LocalVector<GodotBody3D *> &p_body_island) const;
 
 public:
