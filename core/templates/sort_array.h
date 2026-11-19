@@ -354,6 +354,19 @@ public:
 						return;
 					}
 				}
+				// Most unsorted arrays reject this check on the first few
+				// adjacent pairs. Re-sorting an unchanged ordered array,
+				// however, needs no partition swaps or object moves at all.
+				bool already_sorted = true;
+				for (int64_t i = p_first + 1; i < p_last; i++) {
+					if (compare(p_array[i], p_array[i - 1])) {
+						already_sorted = false;
+						break;
+					}
+				}
+				if (already_sorted) {
+					return;
+				}
 			}
 			introsort(p_first, p_last, p_array, bitlog(p_last - p_first) * 2);
 			final_insertion_sort(p_first, p_last, p_array);

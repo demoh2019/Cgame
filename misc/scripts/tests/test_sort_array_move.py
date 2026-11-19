@@ -165,6 +165,37 @@ int main() {
         assert(Tracked::copies == 0 && Tracked::moves == 0);
         assert(range.front().key == 300 && range.back().key == -200);
     }
+    {
+        // Repeatedly sorting an already sorted large array must not move its
+        // nontrivial elements, even when the keys are not equivalent.
+        std::vector<Tracked> ordered(512);
+        for (int i = 0; i < 512; ++i) ordered[i].key = i / 2;
+        Tracked::copies = Tracked::moves = 0;
+        sorter.sort(ordered.data(), int64_t(ordered.size()));
+        assert(Tracked::copies == 0 && Tracked::moves == 0);
+        assert(ordered.front().key == 0 && ordered.back().key == 255);
+    }
+    {
+        // The presorted scan must find a late inversion, not just accept
+        // the initial sorted prefix.
+        std::vector<Tracked> nearly_sorted(512);
+        for (int i = 0; i < 512; ++i) nearly_sorted[i].key = i;
+        std::swap(nearly_sorted[470].key, nearly_sorted[471].key);
+        Tracked::copies = Tracked::moves = 0;
+        sorter.sort(nearly_sorted.data(), int64_t(nearly_sorted.size()));
+        assert(Tracked::copies == 0 && Tracked::moves > 0);
+        for (int i = 1; i < 512; ++i) assert(nearly_sorted[i-1].key <= nearly_sorted[i].key);
+    }
+    {
+        std::vector<Tracked> range(202);
+        for (int i = 1; i <= 200; ++i) range[i].key = i;
+        range.front().key = 10000;
+        range.back().key = -10000;
+        Tracked::copies = Tracked::moves = 0;
+        sorter.sort_range(1, 201, range.data());
+        assert(Tracked::copies == 0 && Tracked::moves == 0);
+        assert(range.front().key == 10000 && range.back().key == -10000);
+    }
     for (int n = 1; n <= 64; ++n) {
         for (int k : {0, n / 2, n - 1}) {
             std::vector<Tracked> data;
