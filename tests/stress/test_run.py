@@ -247,5 +247,75 @@ class ImportProjectTests(unittest.TestCase):
             self.assertEqual(result["status"], "passed", result)
 
 
+class EscalationTests(unittest.TestCase):
+    def test_bounded_ramp_and_overflow(self):
+        self.assertEqual(stress.ramp_scales(2, 4, 3), [2, 6, 18, 54])
+        self.assertEqual(stress.ramp_scales(900, 10, 2), [900])
+        self.assertEqual(stress.ramp_scales(100, 5, 3), [100, 300, 900])
+        for args in ((0, 2, 2), (1, 0, 2), (1, 2, 1)):
+            with self.assertRaises(ValueError):
+                stress.ramp_scales(*args)
+
+    def test_hotspot_ranking_excludes_failed_workloads(self):
+        report = {"cases": {
+            "fast": {"status": "passed", "median_wall_seconds": 1.,
+                     "max_rss_mib": 20., "max_p95_frame_ms": 2.0},
+            "slow": {"status": "passed", "median_wall_seconds": 4.,
+                     "max_rss_mib": 10., "max_p95_frame_ms": 8.0},
+            "broken": {"status": "failed", "median_wall_seconds": 1000.,
+                       "max_rss_mib": 1000.},
+        }}
+        ranked = stress.ranking(report)
+        self.assertEqual([x["case"] for x in ranked["median_wall_seconds"]],
+                         ["slow", "fast"])
+        self.assertEqual([x["case"] for x in ranked["max_rss_mib"]],
+                         ["fast", "slow"])
+        self.assertEqual([x["case"] for x in ranked["max_p95_frame_ms"]],
+                         ["slow", "fast"])
+
+    def test_summary_records_engine_frame_tail(self):
+        runs = [{"status": "passed", "wall_seconds": 0.4, "peak_rss_mib": 13.0,
+                 "rss_post_warmup_growth_mib": 2.5,
+                 "engine": {"detail": {
+                     "frame_latency_ms": {"p95": 12.0},
+                     "physics_latency_ms": {"p95": 4.0},
+                 }}}]
+        summary = stress.summarize(runs)
+        self.assertEqual(summary["max_p95_frame_ms"], 12.0)
+        self.assertEqual(summary["max_p95_physics_ms"], 4.0)
+        self.assertEqual(summary["max_post_warmup_rss_growth_mib"], 2.5)
+
+    def test_cli_escalates_and_stops_at_first_failure(self):
+        from unittest import mock
+
+        observed = []
+
+        def fake_run(command, timeout, rss, case, scale, frames, seed):
+            observed.append(scale)
+            if scale >= 4:
+                return {"status": "failed", "wall_seconds": 0.05,
+                        "peak_rss_mib": 5.0, "failure": "synthetic limit"}
+            return {"status": "passed", "wall_seconds": 0.05,
+                    "peak_rss_mib": 5.0, "cpu_seconds": 0.04,
+                    "engine": result_payload(case=case, scale=scale, frames=frames, seed=seed)}
+
+        with tempfile.TemporaryDirectory() as directory:
+            output = Path(directory) / "report.json"
+            with mock.patch.object(stress, "run_once", side_effect=fake_run):
+                rc = stress.main(["--godot", "fake-godot",
+                                  "--project", str(Path(__file__).resolve().parent),
+                                  "--case", "math", "--scale", "2",
+                                  "--ramp", "--ramp-steps", "4",
+                                  "--repeats", "2", "--output", str(output)])
+            data = json.loads(output.read_text(encoding="utf-8"))
+            self.assertEqual(rc, 1)
+            self.assertEqual(observed, [2, 2, 4])
+            self.assertIn("math@2", data["cases"])
+            self.assertIn("math@4", data["cases"])
+            self.assertNotIn("math@8", data["cases"])
+            self.assertTrue(data["configuration"]["ramp"])
+            self.assertEqual(data["status"], "failed")
+
+
 if __name__ == "__main__":
     unittest.main()
