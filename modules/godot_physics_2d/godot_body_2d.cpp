@@ -38,6 +38,7 @@
 #include "godot_space_2d.h"
 
 #include "servers/physics_damping.h"
+#include "servers/physics_uniform_fluid.h"
 
 void GodotBody2D::add_constraint(GodotConstraint2D *p_constraint, int p_pos) {
 	p_constraint->set_body_slot(p_pos, constraint_list.size());
@@ -605,6 +606,13 @@ void GodotBody2D::integrate_forces(real_t p_step, bool p_defer_motion) {
 			//overridden by direct state query
 
 			Vector2 force = gravity * mass + applied_force + constant_force;
+			// Uniform fully submerged buoyancy: force = -buoyancy * mass * gravity.
+			// Gravity already includes the body's gravity scale and area
+			// overrides. With buoyancy 1, gravity and buoyancy cancel.
+			// Zero (the default) preserves the old force calculation.
+			if (get_space()->get_fluid_buoyancy() > real_t(0.0)) {
+				force -= gravity * (mass * get_space()->get_fluid_buoyancy());
+			}
 			real_t torque = applied_torque + constant_torque;
 
 			// This per-space option uses Box2D's implicit (Pade) damping
@@ -619,6 +627,13 @@ void GodotBody2D::integrate_forces(real_t p_step, bool p_defer_motion) {
 
 			linear_velocity += _inv_mass * force * p_step;
 			angular_velocity += _inv_inertia * torque * p_step;
+			// Apply nonlinear drag after external forces. The stable exact
+			// solution slows motion relative to the fluid current and never
+			// reverses it, even for large physics timesteps.
+			linear_velocity = godot_physics_fluid_linear_drag(
+					linear_velocity, get_space()->get_fluid_flow_velocity(), get_space()->get_fluid_linear_drag(), p_step);
+			angular_velocity = godot_physics_fluid_angular_drag(
+					angular_velocity, get_space()->get_fluid_angular_drag(), p_step);
 		}
 
 		// Limit dynamic angular speed after damping, torque and optional gyro
