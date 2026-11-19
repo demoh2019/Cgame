@@ -32,6 +32,7 @@
 
 #include "godot_area_3d.h"
 #include "servers/physics_xpbd_tether.h"
+#include "servers/physics_softbody_shape_clusters.h"
 #include "servers/physics_xpbd_membrane.h"
 #include "servers/physics_xpbd_strain_limit.h"
 #include "godot_collision_object_3d.h"
@@ -116,6 +117,13 @@ class GodotSoftBody3D : public GodotCollisionObject3D {
 	// Optional per-particle reference offsets for meshless rigid shape fitting.
 	// Zero stiffness allocates no additional per-node data.
 	LocalVector<Vector3> xpbd_shape_rest_offsets;
+	// Optional overlapping BFS clusters on original face edges; each node
+	// can participate in multiple local rotations for non-rigid deformation.
+	LocalVector<PhysicsSoftBodyShapeCluster> xpbd_shape_clusters;
+	LocalVector<uint32_t> xpbd_shape_cluster_members;
+	LocalVector<Vector3> xpbd_shape_cluster_rest_offsets;
+	LocalVector<Vector3> xpbd_shape_cluster_displacements;
+	LocalVector<uint32_t> xpbd_shape_cluster_counts;
 	// Optional vertex/non-adjacent-face self contacts. Never allocate when
 	// the space's self-collision thickness is zero.
 	struct SelfCollisionContact {
@@ -322,6 +330,7 @@ private:
 	void initialize_dihedral_constraints();
 	void initialize_shape_matching();
 	void solve_shape_matching(real_t p_strength);
+	void solve_shape_matching_clusters(real_t p_strength);
 	void initialize_self_collision_topology();
 	void solve_self_collisions(real_t p_delta);
 	bool solve_edge_self_collisions(real_t p_delta);

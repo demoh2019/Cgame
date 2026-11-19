@@ -40,6 +40,7 @@
 #include "servers/physics_softbody_aero_lift.h"
 #include "servers/physics_softbody_adiabatic_gas.h"
 #include "servers/physics_softbody_shape_matching.h"
+#include "servers/physics_softbody_shape_clusters.h"
 #include "servers/physics_softbody_aerodynamic_drag.h"
 #include "servers/physics_softbody_plasticity.h"
 #include "servers/physics_softbody_volume_safe.h"
@@ -280,8 +281,69 @@ void GodotSoftBody3D::update_constants() {
 // reassignment. Other solver steps must never redefine this rest shape.
 void GodotSoftBody3D::initialize_shape_matching() {
 	xpbd_shape_rest_offsets.reset();
+	xpbd_shape_clusters.reset();
+	xpbd_shape_cluster_members.reset();
+	xpbd_shape_cluster_rest_offsets.reset();
+	xpbd_shape_cluster_displacements.reset();
+	xpbd_shape_cluster_counts.reset();
 	if (!get_space() || !(get_space()->get_soft_body_shape_matching_stiffness() > 0.0) ||
 			nodes.size() < 4) {
+		return;
+	}
+
+	const int core_size = get_space()->get_soft_body_shape_matching_cluster_size();
+	if (core_size >= 3) {
+		// Only the original triangle mesh defines locality. Generated bending
+		// links can span two hops and must not silently merge distinct clusters.
+		LocalVector<PhysicsSoftBodyShapeEdge> graph;
+		for (const Face &face : faces) {
+			for (int j = 0; j < 3; ++j) {
+				graph.push_back({ face.n[j]->index, face.n[(j + 1) % 3]->index });
+			}
+		}
+		if (!physics_softbody_build_shape_clusters(nodes.size(), graph, core_size,
+					xpbd_shape_clusters, xpbd_shape_cluster_members)) {
+			return;
+		}
+
+		// Store one rest offset per cluster membership, not per solver step.
+		// Overlap intentionally duplicates shared vertices and provides smooth
+		// rotation fitting across neighboring regions of deformable material.
+		xpbd_shape_cluster_rest_offsets.resize(xpbd_shape_cluster_members.size());
+		for (const PhysicsSoftBodyShapeCluster &cluster : xpbd_shape_clusters) {
+			double sx = 0.0, sy = 0.0, sz = 0.0;
+			for (uint32_t j = cluster.first; j < cluster.first + cluster.count; ++j) {
+				const Vector3 &p = nodes[xpbd_shape_cluster_members[j]].x;
+				if (!p.is_finite()) {
+					xpbd_shape_clusters.reset();
+					xpbd_shape_cluster_members.reset();
+					xpbd_shape_cluster_rest_offsets.reset();
+					return;
+				}
+				sx += double(p.x);
+				sy += double(p.y);
+				sz += double(p.z);
+			}
+			const double inv = 1.0 / double(cluster.count);
+			const Vector3 center(real_t(sx * inv), real_t(sy * inv), real_t(sz * inv));
+			if (!center.is_finite()) {
+				xpbd_shape_clusters.reset();
+				xpbd_shape_cluster_members.reset();
+				xpbd_shape_cluster_rest_offsets.reset();
+				return;
+			}
+			for (uint32_t j = cluster.first; j < cluster.first + cluster.count; ++j) {
+				xpbd_shape_cluster_rest_offsets[j] = nodes[xpbd_shape_cluster_members[j]].x - center;
+				if (!xpbd_shape_cluster_rest_offsets[j].is_finite()) {
+					xpbd_shape_clusters.reset();
+					xpbd_shape_cluster_members.reset();
+					xpbd_shape_cluster_rest_offsets.reset();
+					return;
+				}
+			}
+		}
+		xpbd_shape_cluster_displacements.resize(nodes.size());
+		xpbd_shape_cluster_counts.resize(nodes.size());
 		return;
 	}
 
@@ -313,8 +375,14 @@ void GodotSoftBody3D::initialize_shape_matching() {
 }
 
 void GodotSoftBody3D::solve_shape_matching(real_t p_strength) {
-	if (!(p_strength > 0.0) || dynamic_node_count == 0 ||
-			xpbd_shape_rest_offsets.size() != nodes.size() || nodes.size() < 4) {
+	if (!(p_strength > 0.0) || dynamic_node_count == 0 || nodes.size() < 4) {
+		return;
+	}
+	if (!xpbd_shape_clusters.is_empty()) {
+		solve_shape_matching_clusters(p_strength);
+		return;
+	}
+	if (xpbd_shape_rest_offsets.size() != nodes.size()) {
 		return;
 	}
 
@@ -346,6 +414,79 @@ void GodotSoftBody3D::solve_shape_matching(real_t p_strength) {
 		if (node.im > 0.0) {
 			physics_softbody_shape_matching_project(node.x,
 					xpbd_shape_rest_offsets[i], center, rotation, p_strength, node.im);
+		}
+	}
+}
+
+// Local shape matching evaluates all cluster targets against the SAME
+// positions, then averages correction directions over shared nodes. In
+// contrast, applying each cluster immediately would bias the result by BFS
+// order and create artificial seams. O(overlap memberships) work only when
+// local clusters are enabled.
+void GodotSoftBody3D::solve_shape_matching_clusters(real_t p_strength) {
+	if (xpbd_shape_cluster_displacements.size() != nodes.size() ||
+			xpbd_shape_cluster_counts.size() != nodes.size() ||
+			xpbd_shape_cluster_rest_offsets.size() != xpbd_shape_cluster_members.size()) {
+		return;
+	}
+	for (uint32_t i = 0; i < nodes.size(); ++i) {
+		xpbd_shape_cluster_displacements[i] = Vector3();
+		xpbd_shape_cluster_counts[i] = 0;
+	}
+
+	for (const PhysicsSoftBodyShapeCluster &cluster : xpbd_shape_clusters) {
+		double sx = 0.0, sy = 0.0, sz = 0.0;
+		bool valid = true;
+		for (uint32_t j = cluster.first; j < cluster.first + cluster.count; ++j) {
+			const Vector3 &p = nodes[xpbd_shape_cluster_members[j]].x;
+			if (!p.is_finite()) {
+				valid = false;
+				break;
+			}
+			sx += double(p.x);
+			sy += double(p.y);
+			sz += double(p.z);
+		}
+		if (!valid) {
+			continue;
+		}
+		const double inv_count = 1.0 / double(cluster.count);
+		const Vector3 center(real_t(sx * inv_count), real_t(sy * inv_count), real_t(sz * inv_count));
+		if (!center.is_finite()) {
+			continue;
+		}
+
+		PhysicsSoftBodyShapeMatchingCovariance covariance;
+		for (uint32_t j = cluster.first; j < cluster.first + cluster.count; ++j) {
+			const uint32_t node_index = xpbd_shape_cluster_members[j];
+			covariance.add(xpbd_shape_cluster_rest_offsets[j], nodes[node_index].x - center);
+		}
+		Quaternion rotation;
+		if (!covariance.solve_rotation(rotation)) {
+			continue;
+		}
+		for (uint32_t j = cluster.first; j < cluster.first + cluster.count; ++j) {
+			const uint32_t node_index = xpbd_shape_cluster_members[j];
+			const Node &node = nodes[node_index];
+			if (node.im > 0.0) {
+				physics_softbody_shape_cluster_accumulate(node.x,
+						xpbd_shape_cluster_rest_offsets[j], center, rotation,
+						xpbd_shape_cluster_displacements[node_index],
+						xpbd_shape_cluster_counts[node_index]);
+			}
+		}
+	}
+
+	for (uint32_t i = 0; i < nodes.size(); ++i) {
+		Node &node = nodes[i];
+		const uint32_t count = xpbd_shape_cluster_counts[i];
+		if (node.im == 0.0 || count == 0) {
+			continue;
+		}
+		const Vector3 corrected = node.x +
+				xpbd_shape_cluster_displacements[i] * (p_strength / real_t(count));
+		if (corrected.is_finite()) {
+			node.x = corrected;
 		}
 	}
 }
@@ -2436,7 +2577,8 @@ void GodotSoftBody3D::solve_constraints(real_t p_delta) {
 	// the corrective strength by that many times.
 	const real_t shape_matching_stiffness = get_space()->get_soft_body_shape_matching_stiffness();
 	const real_t shape_matching_iteration_strength =
-			shape_matching_stiffness > 0.0 && iteration_count > 0 && !xpbd_shape_rest_offsets.is_empty() ?
+			shape_matching_stiffness > 0.0 && iteration_count > 0 &&
+					(!xpbd_shape_rest_offsets.is_empty() || !xpbd_shape_clusters.is_empty()) ?
 			real_t(1.0 - Math::pow(1.0 - double(shape_matching_stiffness),
 					1.0 / double(iteration_count))) :
 			real_t(0.0);
@@ -2711,6 +2853,11 @@ void GodotSoftBody3D::destroy() {
 	xpbd_dihedral_hinges.reset();
 	xpbd_dihedral_lambdas.reset();
 	xpbd_shape_rest_offsets.reset();
+	xpbd_shape_clusters.reset();
+	xpbd_shape_cluster_members.reset();
+	xpbd_shape_cluster_rest_offsets.reset();
+	xpbd_shape_cluster_displacements.reset();
+	xpbd_shape_cluster_counts.reset();
 	xpbd_self_contacts.reset();
 	xpbd_self_ccd_contacts.reset();
 	xpbd_self_neighbor_edges.reset();
