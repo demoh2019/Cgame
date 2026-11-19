@@ -75,4 +75,33 @@ TEST_CASE("[Physics][CapsuleTOI] Capsule TOI keeps first entry on extreme-length
 	CHECK(Math::abs(fraction - 0.5) < 1e-12);
 }
 
+
+TEST_CASE("[Physics][CapsuleTOI] Parallel capsule pair reduces to expanded capsule") {
+	// Both capsules have radius 0.5 and centerline half-length 1.5.
+	// Their Minkowski sum has radius 1 and half-length 3.
+	// A glancing sweep at Y=3.8 intersects the upper hemispherical end.
+	double fraction = -1.0;
+	const double expected = (4.0 - Math::sqrt(0.36)) / 8.0;
+	CHECK(physics_ccd_capsule_toi(Vector2(-4.0, 3.8), Vector2(8.0, 0.0), 1.0, 3.0, fraction));
+	CHECK(Math::abs(fraction - expected) < 1e-6);
+	CHECK(physics_ccd_capsule_toi(Vector2(4.0, 3.8), Vector2(-8.0, 0.0), 1.0, 3.0, fraction));
+	CHECK(Math::abs(fraction - expected) < 1e-6);
+
+	// With the B capsule centerline at Y=3, two parallel center segments
+	// overlap across Y=0, so the radial side is the first hit.
+	CHECK(physics_ccd_capsule_toi(Vector3(-4.0, 0.0, 0.0), Vector3(8.0, 0.0, 0.0), 1.0, 3.0, fraction));
+	CHECK(Math::abs(fraction - 0.375) < 1e-10);
+
+	// World scale A=2, B=1. Radii and half-segments must be added
+	// after converting A into B's local coordinate system.
+	const double radius = 0.5 + 0.5 * 2.0;
+	const double half_segment = 1.5 + 1.5 * 2.0;
+	CHECK(physics_ccd_capsule_toi(Vector3(-7.0, 5.7, 0.0), Vector3(14.0, 0.0, 0.0),
+			radius, half_segment, fraction));
+	CHECK(Math::abs(fraction - (7.0 - 0.9) / 14.0) < 1e-6);
+
+	CHECK_FALSE(physics_ccd_capsule_toi(Vector2(-4.0, 4.01), Vector2(8.0, 0.0), 1.0, 3.0, fraction));
+	CHECK_FALSE(physics_ccd_capsule_toi(Vector3(-4.0, 0.0, 0.0), Vector3(), 1.0, 3.0, fraction));
+}
+
 } // namespace TestPhysicsCCDCapsuleTOI
