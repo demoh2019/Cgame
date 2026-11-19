@@ -97,4 +97,34 @@ TEST_CASE("[Physics][CapsulePairTOI] Different radii and lengths remain accurate
 	CHECK(Math::abs(fraction - expected) < 0.00001);
 }
 
+
+TEST_CASE("[Physics][CapsulePairTOI] Almost parallel axes still find the first thin impact") {
+	double fraction = -1.0;
+	// The axes differ by only 0.000001 radians, but this is outside
+	// the dedicated parallel-capsule fast path. Their center segments
+	// still overlap axially. A support-point-only cast can miss this.
+	const Vector3 near_parallel(0.000001, 1.0, 0.0);
+	CHECK(physics_ccd_capsule_pair_toi(
+			Vector3(-5.0, -5.0, 0.0), Vector3(10.0, 0.0, 0.0),
+			Vector3(0.0, 1.0, 0.0), near_parallel,
+			10.0, 10.0, 1.0, fraction) == PhysicsCCDCapsulePairTOIResult::HIT);
+	CHECK(Math::abs(fraction - 0.4) < 0.0001);
+
+	// With an axial offset larger than both half lengths, the same
+	// trajectory has no contact. Do not invent a near-parallel hit.
+	CHECK(physics_ccd_capsule_pair_toi(
+			Vector3(-5.0, -25.0, 0.0), Vector3(10.0, 0.0, 0.0),
+			Vector3(0.0, 1.0, 0.0), near_parallel,
+			10.0, 10.0, 1.0, fraction) == PhysicsCCDCapsulePairTOIResult::MISS);
+}
+
+TEST_CASE("[Physics][CapsulePairTOI] Large linear sweeps maintain first contact fraction") {
+	double fraction = -1.0;
+	CHECK(physics_ccd_capsule_pair_toi(
+			Vector3(-100000000.0, -5.0, 0.0), Vector3(200000000.0, 0.0, 0.0),
+			Vector3(0.0, 1.0, 0.0), Vector3(0.000001, 1.0, 0.0),
+			10.0, 10.0, 1.0, fraction) == PhysicsCCDCapsulePairTOIResult::HIT);
+	CHECK(Math::abs(fraction - 0.5) < 0.00000002);
+}
+
 } // namespace TestPhysicsCCDSkewCapsuleTOI
