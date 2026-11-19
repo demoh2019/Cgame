@@ -10,6 +10,7 @@ var _camera: Camera3D
 var _hud_stats: Label
 var _hud_event: Label
 var _ray: RayCast3D
+var _shape_cast: ShapeCast3D
 var _vehicle: VehicleBody3D
 var _yaw := 0.0
 var _pitch := 0.0
@@ -198,6 +199,20 @@ func _make_joints() -> void:
         var link := _rigid_box(Vector3(2.2, 5.8 - i * 1.12, -11), Vector3(0.58, 0.95, 0.58), Color("#9fcaef"))
         _pin(last, link, Vector3(2.2, 6.55 - i * 1.12, -11))
         last = link
+    var hinge_base := _static_box("HingeBase", Vector3(-3, 6, -17), Vector3(0.8, 0.8, 0.8), Color("#e2e5f0"))
+    var hinge_bar := _rigid_box(Vector3(-3, 4.6, -17), Vector3(2.4, 0.42, 0.8), Color("#f2ac97"))
+    var hinge := HingeJoint3D.new()
+    hinge.position = hinge_base.position
+    add_child(hinge)
+    hinge.node_a = hinge.get_path_to(hinge_base)
+    hinge.node_b = hinge.get_path_to(hinge_bar)
+    var slider_base := _static_box("SliderBase", Vector3(2.3, 3, -5), Vector3(0.7, 0.7, 0.7), Color("#e2e5f0"))
+    var sliding_weight := _rigid_box(Vector3(4.0, 3, -5), Vector3(0.9, 0.9, 0.9), Color("#a6d3a2"))
+    var slider := SliderJoint3D.new()
+    slider.position = slider_base.position
+    add_child(slider)
+    slider.node_a = slider.get_path_to(slider_base)
+    slider.node_b = slider.get_path_to(sliding_weight)
 
 
 func _make_soft_body() -> void:
@@ -315,6 +330,15 @@ func _make_sensor_station() -> void:
     _ray.target_position = Vector3(0, -14, 0)
     _ray.enabled = true
     add_child(_ray)
+    _shape_cast = ShapeCast3D.new()
+    _shape_cast.name = "DownwardShapeCast"
+    _shape_cast.position = Vector3(16.5, 10, 11)
+    var cast_shape := SphereShape3D.new()
+    cast_shape.radius = 0.55
+    _shape_cast.shape = cast_shape
+    _shape_cast.target_position = Vector3(0, -14, 0)
+    _shape_cast.enabled = true
+    add_child(_shape_cast)
 
 
 func _make_camera() -> void:
@@ -449,4 +473,4 @@ func _process(delta: float) -> void:
         _stat_timer = 0
         var count := get_tree().get_nodes_in_group("demo_dynamic").size()
         var hit := str(_ray.get_collider().name) if _ray.is_colliding() else "нет"
-        _hud_stats.text = "FPS: %d  |  Dynamic bodies: %d  |  RayCast3D: %s" % [Engine.get_frames_per_second(), count, hit]
+        _hud_stats.text = "FPS: %d | Bodies: %d | Ray: %s | ShapeCast: %s" % [Engine.get_frames_per_second(), count, hit, str(_shape_cast.is_colliding())]
