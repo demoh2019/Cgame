@@ -441,13 +441,15 @@ bool TriangleMesh::inside_convex_shape(const Plane *p_planes, int p_plane_count,
 
 		switch (stack[level] >> VISITED_BIT_SHIFT) {
 			case TEST_AABB_BIT: {
-				bool intersects = scale.xform(b.aabb).intersects_convex_shape(p_planes, p_plane_count, p_points, p_point_count);
-				if (!intersects) {
+				// Transform the node bounds once for both convex-shape queries.
+				// AABB transforms are substantially more expensive than tests
+				// against a single plane and dominate broad-phase traversal.
+				const AABB scaled_aabb = scale.xform(b.aabb);
+				if (!scaled_aabb.intersects_convex_shape(p_planes, p_plane_count, p_points, p_point_count)) {
 					return false;
 				}
 
-				bool inside = scale.xform(b.aabb).inside_convex_shape(p_planes, p_plane_count);
-				if (inside) {
+				if (scaled_aabb.inside_convex_shape(p_planes, p_plane_count)) {
 					stack[level] = (VISIT_DONE_BIT << VISITED_BIT_SHIFT) | node;
 
 				} else {

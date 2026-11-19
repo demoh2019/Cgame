@@ -157,6 +157,68 @@ TEST_CASE("[TriangleMesh][Performance] Compact BVH allocation and topology") {
 	}
 }
 
+
+TEST_CASE("[SceneTree][TriangleMesh][Performance] Convex containment reuses transformed BVH bounds") {
+	Ref<BoxMesh> box_mesh;
+	box_mesh.instantiate();
+	const Vector<Face3> faces = box_mesh->get_faces();
+	Ref<TriangleMesh> mesh;
+	mesh.instantiate();
+	REQUIRE(mesh->create_from_faces(Variant(faces)));
+	REQUIRE(mesh->get_bvh().size() > 1);
+
+	// The planes enclose a 2x2x2 axis-aligned box with outward normals.
+	// All eight points are supplied because the convex-intersection test
+	// also uses the actual hull vertices.
+	const Plane planes[] = {
+		Plane(Vector3(1, 0, 0), 1),
+		Plane(Vector3(-1, 0, 0), 1),
+		Plane(Vector3(0, 1, 0), 1),
+		Plane(Vector3(0, -1, 0), 1),
+		Plane(Vector3(0, 0, 1), 1),
+		Plane(Vector3(0, 0, -1), 1),
+	};
+	Vector3 hull[8];
+	for (int i = 0; i < 8; i++) {
+		hull[i] = Vector3((i & 1) ? 1 : -1, (i & 2) ? 1 : -1, (i & 4) ? 1 : -1);
+	}
+
+	const Vector3 inside_scales[] = {
+		Vector3(1, 1, 1),
+		Vector3(0.5, 0.5, 0.5),
+		Vector3(0.1, 0.5, 1.5),
+		Vector3(-1, 1, 1),
+		Vector3(-0.3, -0.5, -1.5),
+	};
+	for (const Vector3 &scale : inside_scales) {
+		CHECK(mesh->inside_convex_shape(planes, 6, hull, 8, scale));
+	}
+
+	const Vector3 outside_scales[] = {
+		Vector3(3, 3, 3),
+		Vector3(1, 3, 1),
+		Vector3(-3, 1, 1),
+		Vector3(1, 1, -3),
+	};
+	for (const Vector3 &scale : outside_scales) {
+		CHECK_FALSE(mesh->inside_convex_shape(planes, 6, hull, 8, scale));
+	}
+
+	// Test a one-face mesh as well: this visits only the BVH root and
+	// should behave identically to a full multi-level tree.
+	Vector<Vector3> triangle = {
+		Vector3(-0.2, -0.2, 0),
+		Vector3(0.2, -0.2, 0),
+		Vector3(0, 0.2, 0),
+	};
+	Ref<TriangleMesh> single;
+	single.instantiate();
+	single->create(triangle);
+	REQUIRE(single->is_valid());
+	CHECK(single->inside_convex_shape(planes, 6, hull, 8));
+	CHECK_FALSE(single->inside_convex_shape(planes, 6, hull, 8, Vector3(10, 10, 10)));
+}
+
 } // namespace TestTriangleMesh
 
 #endif // _3D_DISABLED
