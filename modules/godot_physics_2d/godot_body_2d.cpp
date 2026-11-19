@@ -68,8 +68,9 @@ void GodotBody2D::update_mass_properties() {
 
 						real_t mass_new = area * mass / total_area;
 
-						// NOTE: we assume that the shape origin is also its center of mass.
-						center_of_mass_local += mass_new * get_shape_transform(i).get_origin();
+						// Use each shape's actual centroid when available (e.g. convex polygons).
+						const GodotShape2D *shape = get_shape(i);
+						center_of_mass_local += mass_new * get_shape_transform(i).xform(shape->get_center_of_mass());
 					}
 
 					center_of_mass_local /= mass;
@@ -95,8 +96,8 @@ void GodotBody2D::update_mass_properties() {
 
 					Transform2D mtx = get_shape_transform(i);
 					Vector2 scale = mtx.get_scale();
-					Vector2 shape_origin = mtx.get_origin() - center_of_mass_local;
-					inertia += shape->get_moment_of_inertia(mass_new, scale) + mass_new * shape_origin.length_squared();
+					Vector2 shape_centroid = mtx.xform(shape->get_center_of_mass()) - center_of_mass_local;
+					inertia += shape->get_moment_of_inertia(mass_new, scale) + mass_new * shape_centroid.length_squared();
 				}
 			}
 

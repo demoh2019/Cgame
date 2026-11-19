@@ -560,12 +560,17 @@ bool GodotConvexPolygonShape2D::intersect_segment(const Vector2 &p_begin, const 
 
 real_t GodotConvexPolygonShape2D::get_moment_of_inertia(real_t p_mass, const Size2 &p_scale) const {
 	ERR_FAIL_COND_V_MSG(point_count == 0, 0, "Convex polygon shape has no points.");
-	Rect2 aabb_new;
-	aabb_new.position = points[0].pos * p_scale;
-	for (int i = 0; i < point_count; i++) {
-		aabb_new.expand_to(points[i].pos * p_scale);
+	if (valid_mass_properties) {
+		// Exact (for uniform density) principal second moments around the polygon centroid.
+		return p_mass * (mass_variance_x * p_scale.x * p_scale.x + mass_variance_y * p_scale.y * p_scale.y);
 	}
 
+	// Preserve the former behavior for degenerate/zero-area polygons.
+	Rect2 aabb_new;
+	aabb_new.position = points[0].pos * p_scale;
+	for (int i = 1; i < point_count; i++) {
+		aabb_new.expand_to(points[i].pos * p_scale);
+	}
 	return p_mass * aabb_new.size.dot(aabb_new.size) / 12.0;
 }
 
@@ -581,6 +586,10 @@ void GodotConvexPolygonShape2D::set_data(const Variant &p_data) {
 	}
 	points = nullptr;
 	point_count = 0;
+	mass_centroid = Vector2();
+	mass_variance_x = 0.0;
+	mass_variance_y = 0.0;
+	valid_mass_properties = false;
 
 	if (p_data.get_type() == Variant::PACKED_VECTOR2_ARRAY) {
 		Vector<Vector2> arr = p_data;
@@ -620,6 +629,43 @@ void GodotConvexPolygonShape2D::set_data(const Variant &p_data) {
 	aabb_new.position = points[0].pos;
 	for (int i = 1; i < point_count; i++) {
 		aabb_new.expand_to(points[i].pos);
+	}
+
+	// Cache polygon centroid and second moments once when vertices change.
+	// Using a vertex as reference reduces cancellation for distant polygons.
+	// The signed ratios also work for either winding direction.
+	if (point_count >= 3) {
+		const Vector2 reference = points[0].pos;
+		double twice_area = 0.0;
+		double first_x = 0.0;
+		double first_y = 0.0;
+		double second_x = 0.0;
+		double second_y = 0.0;
+		for (int i = 0; i < point_count; i++) {
+			const Vector2 &a = points[i].pos;
+			const Vector2 &b = points[(i + 1) % point_count].pos;
+			const double ax = double(a.x) - double(reference.x);
+			const double ay = double(a.y) - double(reference.y);
+			const double bx = double(b.x) - double(reference.x);
+			const double by = double(b.y) - double(reference.y);
+			const double cross = ax * by - ay * bx;
+			twice_area += cross;
+			first_x += (ax + bx) * cross;
+			first_y += (ay + by) * cross;
+			second_x += (ax * ax + ax * bx + bx * bx) * cross;
+			second_y += (ay * ay + ay * by + by * by) * cross;
+		}
+
+		if (Math::abs(twice_area) > 1.0e-14) {
+			const double cx = first_x / (3.0 * twice_area);
+			const double cy = first_y / (3.0 * twice_area);
+			const double vx = second_x / (6.0 * twice_area) - cx * cx;
+			const double vy = second_y / (6.0 * twice_area) - cy * cy;
+			mass_centroid = reference + Vector2(real_t(cx), real_t(cy));
+			mass_variance_x = MAX(real_t(0.0), real_t(vx));
+			mass_variance_y = MAX(real_t(0.0), real_t(vy));
+			valid_mass_properties = true;
+		}
 	}
 
 	configure(aabb_new);

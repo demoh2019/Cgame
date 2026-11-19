@@ -83,6 +83,7 @@ public:
 
 	virtual bool intersect_segment(const Vector2 &p_begin, const Vector2 &p_end, Vector2 &r_point, Vector2 &r_normal) const = 0;
 	virtual real_t get_moment_of_inertia(real_t p_mass, const Size2 &p_scale) const = 0;
+	virtual Vector2 get_center_of_mass() const { return Vector2(); }
 	virtual void set_data(const Variant &p_data) = 0;
 	virtual Variant get_data() const = 0;
 
@@ -414,6 +415,10 @@ class GodotConvexPolygonShape2D : public GodotShape2D {
 
 	Point *points = nullptr;
 	int point_count = 0;
+	Vector2 mass_centroid;
+	real_t mass_variance_x = 0.0;
+	real_t mass_variance_y = 0.0;
+	bool valid_mass_properties = false;
 
 public:
 	_FORCE_INLINE_ int get_point_count() const { return point_count; }
@@ -434,6 +439,7 @@ public:
 	virtual bool contains_point(const Vector2 &p_point) const override;
 	virtual bool intersect_segment(const Vector2 &p_begin, const Vector2 &p_end, Vector2 &r_point, Vector2 &r_normal) const override;
 	virtual real_t get_moment_of_inertia(real_t p_mass, const Size2 &p_scale) const override;
+	virtual Vector2 get_center_of_mass() const override { return mass_centroid; }
 
 	virtual void set_data(const Variant &p_data) override;
 	virtual Variant get_data() const override;
