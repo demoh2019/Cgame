@@ -49,6 +49,8 @@ class FakeAPI:
         self.calls.append((method, path, payload))
         if method == "GET" and path == "/repos/demoh2019/godot":
             return {"has_issues": self.issues_enabled}
+        if method == "GET" and path == "/repos/godotengine/godot":
+            return {"id": 15634981}
         if method == "GET" and path.startswith("/repos/godotengine/godot/issues?"):
             return (self.source, None) if with_links else self.source
         if method == "GET" and "/pulls/" in path:
