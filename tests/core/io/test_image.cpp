@@ -831,4 +831,156 @@ TEST_CASE("[Image][MaskedBlit] Destination mask alias keeps scalar semantics") {
 	CHECK_MESSAGE(actual->get_data() == reference->get_data(), "Destination-mask aliasing must retain scalar semantics.");
 }
 
+
+TEST_CASE("[Image][BlendHotpath] Unmasked blend matches per-pixel reference for several formats") {
+	const Image::Format formats[] = { Image::FORMAT_RGBA8, Image::FORMAT_RGB8, Image::FORMAT_LA8, Image::FORMAT_RGBAF };
+	for (Image::Format format : formats) {
+		Ref<Image> source = memnew(Image(32, 21, false, format));
+		Ref<Image> actual = memnew(Image(39, 26, false, format));
+		Ref<Image> expected = memnew(Image(39, 26, false, format));
+		actual->fill(Color(0.15f, 0.25f, 0.35f, 0.55f));
+		expected->fill(Color(0.15f, 0.25f, 0.35f, 0.55f));
+		for (int y = 0; y < 21; y++) {
+			for (int x = 0; x < 32; x++) {
+				source->set_pixel(x, y, Color((x % 13) / 12.0f, (y % 11) / 10.0f, ((x + y) % 17) / 16.0f, (x + y) % 5 == 0 ? 0.0f : (x % 7) / 6.0f));
+			}
+		}
+		// Source [4, 3, 29, 18) maps to destination [6, 5, 31, 20).
+		for (int y = 0; y < 15; y++) {
+			for (int x = 0; x < 25; x++) {
+				const Color sc = source->get_pixel(x + 4, y + 3);
+				if (sc.a != 0) {
+					expected->set_pixel(x + 6, y + 5, expected->get_pixel(x + 6, y + 5).blend(sc));
+				}
+			}
+		}
+		actual->blend_rect(source, Rect2i(4, 3, 25, 15), Point2i(6, 5));
+		CHECK_MESSAGE(actual->get_data() == expected->get_data(), "Blend fast path must match the scalar Color.blend reference for every format.");
+	}
+}
+
+TEST_CASE("[Image][BlendHotpath] RGBA8 mask direct-alpha blend matches scalar reference") {
+	const Image::Format formats[] = { Image::FORMAT_RGBA8, Image::FORMAT_RGB8, Image::FORMAT_LA8, Image::FORMAT_RGBAF };
+	for (Image::Format format : formats) {
+		Ref<Image> source = memnew(Image(34, 23, false, format));
+		Ref<Image> mask = memnew(Image(34, 23, false, Image::FORMAT_RGBA8));
+		Ref<Image> actual = memnew(Image(37, 26, false, format));
+		Ref<Image> expected = memnew(Image(37, 26, false, format));
+		actual->fill(Color(0.4f, 0.2f, 0.3f, 0.7f));
+		expected->fill(Color(0.4f, 0.2f, 0.3f, 0.7f));
+		for (int y = 0; y < 23; y++) {
+			for (int x = 0; x < 34; x++) {
+				source->set_pixel(x, y, Color((x % 23) / 22.0f, (y % 17) / 16.0f, 0.33f, (x + y) % 5 ? 0.75f : 0.0f));
+				const float alpha = (x / 5 + y / 4) % 3 == 0 ? 0.0f : ((x + y) % 7 == 0 ? 0.5f : 1.0f);
+				mask->set_pixel(x, y, Color(0.2f, 0.3f, 0.4f, alpha));
+			}
+		}
+		for (int y = 0; y < 19; y++) {
+			for (int x = 0; x < 28; x++) {
+				if (mask->get_pixel(x + 3, y + 2).a != 0) {
+					const Color sc = source->get_pixel(x + 3, y + 2);
+					if (sc.a != 0) {
+						expected->set_pixel(x + 6, y + 4, expected->get_pixel(x + 6, y + 4).blend(sc));
+					}
+				}
+			}
+		}
+		actual->blend_rect_mask(source, mask, Rect2i(3, 2, 28, 19), Point2i(6, 4));
+		CHECK_MESSAGE(actual->get_data() == expected->get_data(), "RGBA8 masks must match per-pixel composition exactly.");
+	}
+}
+
+TEST_CASE("[Image][BlendHotpath] Masked blend clipping and no-op regions preserve destination") {
+	Ref<Image> source = memnew(Image(17, 15, false, Image::FORMAT_RGBA8));
+	Ref<Image> mask = memnew(Image(17, 15, false, Image::FORMAT_RGBA8));
+	source->fill(Color(0.1f, 0.9f, 0.2f, 0.5f));
+	for (int y = 0; y < 15; y++) {
+		for (int x = 0; x < 17; x++) {
+			mask->set_pixel(x, y, Color(0, 0, 0, (x + y) % 4 ? 1.0f : 0.0f));
+		}
+	}
+	Ref<Image> actual = memnew(Image(12, 11, false, Image::FORMAT_RGBA8));
+	Ref<Image> expected = memnew(Image(12, 11, false, Image::FORMAT_RGBA8));
+	actual->fill(Color(0.2f, 0.3f, 0.4f, 1.0f));
+	expected->fill(Color(0.2f, 0.3f, 0.4f, 1.0f));
+	// Negative source and destination clipping: source (0, 0) -> destination (3, 2).
+	for (int y = 0; y < 9; y++) {
+		for (int x = 0; x < 9; x++) {
+			if (mask->get_pixel(x, y).a != 0) {
+				const Color sc = source->get_pixel(x, y);
+				expected->set_pixel(x + 3, y + 2, expected->get_pixel(x + 3, y + 2).blend(sc));
+			}
+		}
+	}
+	actual->blend_rect_mask(source, mask, Rect2i(-5, -3, 18, 15), Point2i(-2, -1));
+	CHECK_MESSAGE(actual->get_data() == expected->get_data(), "Clipped blending must preserve pixel positions and exact output.");
+	const PackedByteArray before = actual->get_data();
+	actual->blend_rect_mask(source, mask, Rect2i(100, 100, 4, 4), Point2i(0, 0));
+	CHECK(actual->get_data() == before);
+}
+
+TEST_CASE("[Image][BlendHotpath] Copy-on-write source sharing survives blend") {
+	Ref<Image> source = memnew(Image(19, 13, false, Image::FORMAT_RGBA8));
+	source->fill(Color(0.9f, 0.5f, 0.4f, 0.75f));
+	Ref<Image> actual = memnew(Image(19, 13, false, Image::FORMAT_RGBA8));
+	actual->fill(Color(0.1f, 0.2f, 0.3f, 0.5f));
+	Ref<Image> expected = memnew(Image(19, 13, false, Image::FORMAT_RGBA8));
+	expected->copy_internals_from(actual);
+	const PackedByteArray held_source = source->get_data();
+	const PackedByteArray held_destination = actual->get_data();
+	for (int y = 0; y < 13; y++) {
+		for (int x = 0; x < 19; x++) {
+			const Color sc = source->get_pixel(x, y);
+			expected->set_pixel(x, y, expected->get_pixel(x, y).blend(sc));
+		}
+	}
+	actual->blend_rect(source, Rect2i(0, 0, 19, 13), Point2i(0, 0));
+	CHECK(actual->get_data() == expected->get_data());
+	CHECK(source->get_data() == held_source);
+	CHECK(actual->get_data() != held_destination);
+}
+
+TEST_CASE("[Image][BlendHotpath] Self-blend and destination-mask alias use scalar fallback") {
+	Ref<Image> source = memnew(Image(8, 8, false, Image::FORMAT_RGBA8));
+	Ref<Image> mask = memnew(Image(8, 8, false, Image::FORMAT_RGBA8));
+	Ref<Image> actual = memnew(Image(8, 8, false, Image::FORMAT_RGBA8));
+	Ref<Image> expected = memnew(Image(8, 8, false, Image::FORMAT_RGBA8));
+	for (int y = 0; y < 8; y++) {
+		for (int x = 0; x < 8; x++) {
+			const Color color(x / 7.0f, y / 7.0f, 0.4f, (x + y) % 4 ? 0.8f : 0.0f);
+			source->set_pixel(x, y, color);
+			mask->set_pixel(x, y, Color(0, 0, 0, (x + 2 * y) % 3 ? 1.0f : 0.0f));
+			actual->set_pixel(x, y, color);
+			expected->set_pixel(x, y, color);
+		}
+	}
+	for (int y = 0; y < 7; y++) {
+		for (int x = 0; x < 7; x++) {
+			const Color sc = expected->get_pixel(x, y);
+			if (sc.a != 0) {
+				expected->set_pixel(x + 1, y + 1, expected->get_pixel(x + 1, y + 1).blend(sc));
+			}
+		}
+	}
+	actual->blend_rect(actual, Rect2i(0, 0, 7, 7), Point2i(1, 1));
+	CHECK_MESSAGE(actual->get_data() == expected->get_data(), "Self-blend must preserve sequential read/write semantics.");
+
+	Ref<Image> masked = memnew(Image(8, 8, false, Image::FORMAT_RGBA8));
+	Ref<Image> reference = memnew(Image(8, 8, false, Image::FORMAT_RGBA8));
+	masked->copy_internals_from(mask);
+	reference->copy_internals_from(mask);
+	for (int y = 0; y < 7; y++) {
+		for (int x = 0; x < 7; x++) {
+			if (reference->get_pixel(x, y).a != 0) {
+				const Color sc = source->get_pixel(x, y);
+				if (sc.a != 0) {
+					reference->set_pixel(x + 1, y + 1, reference->get_pixel(x + 1, y + 1).blend(sc));
+				}
+			}
+		}
+	}
+	masked->blend_rect_mask(source, masked, Rect2i(0, 0, 7, 7), Point2i(1, 1));
+	CHECK_MESSAGE(masked->get_data() == reference->get_data(), "Destination-mask alias must preserve the original scalar behavior.");
+}
+
 } // namespace TestImage
