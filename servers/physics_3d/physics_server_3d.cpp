@@ -694,11 +694,20 @@ PhysicsServer3D::PhysicsServer3D() {
 	// undeformed material frame. Independent of isotropic Neo-Hookean FEM.
 	GLOBAL_DEF(PropertyInfo(Variant::FLOAT, "physics/3d/solver/soft_body_tetra_fiber_compliance", PROPERTY_HINT_RANGE, "0,0.01,0.000001,or_greater"), 0.0);
 	GLOBAL_DEF(PropertyInfo(Variant::VECTOR3, "physics/3d/solver/soft_body_tetra_fiber_axis"), Vector3(1, 0, 0));
+	// Independently oriented second family of tensile reinforcement.
+	// Useful for biaxial soft composites, woven elastomers and tissues.
+	GLOBAL_DEF(PropertyInfo(Variant::FLOAT, "physics/3d/solver/soft_body_tetra_fiber_secondary_compliance", PROPERTY_HINT_RANGE, "0,0.01,0.000001,or_greater"), 0.0);
+	GLOBAL_DEF(PropertyInfo(Variant::VECTOR3, "physics/3d/solver/soft_body_tetra_fiber_secondary_axis"), Vector3(0, 1, 0));
 	// Experimental irreversible tensile creep of the FEM material fiber.
 	// Plastic rest stretch is allocated only while creep rate is positive.
 	GLOBAL_DEF(PropertyInfo(Variant::FLOAT, "physics/3d/solver/soft_body_tetra_fiber_plastic_yield_ratio", PROPERTY_HINT_RANGE, "0,2,0.01,or_greater"), 0.15);
 	GLOBAL_DEF(PropertyInfo(Variant::FLOAT, "physics/3d/solver/soft_body_tetra_fiber_plastic_creep_rate", PROPERTY_HINT_RANGE, "0,100,0.1,or_greater,suffix:1/s"), 0.0);
 	GLOBAL_DEF(PropertyInfo(Variant::FLOAT, "physics/3d/solver/soft_body_tetra_fiber_plastic_max_stretch", PROPERTY_HINT_RANGE, "1,16,0.1"), 3.0);
+	// Optional family-2 permanent tensile stretch history, independent
+	// of family 1. Both fiber strengths follow existing FEM damage.
+	GLOBAL_DEF(PropertyInfo(Variant::FLOAT, "physics/3d/solver/soft_body_tetra_fiber_secondary_plastic_yield_ratio", PROPERTY_HINT_RANGE, "0,2,0.01,or_greater"), 0.15);
+	GLOBAL_DEF(PropertyInfo(Variant::FLOAT, "physics/3d/solver/soft_body_tetra_fiber_secondary_plastic_creep_rate", PROPERTY_HINT_RANGE, "0,100,0.1,or_greater,suffix:1/s"), 0.0);
+	GLOBAL_DEF(PropertyInfo(Variant::FLOAT, "physics/3d/solver/soft_body_tetra_fiber_secondary_plastic_max_stretch", PROPERTY_HINT_RANGE, "1,16,0.1"), 3.0);
 	// Objective Kelvin-Voigt strain-rate stress for each tetrahedral FEM element.
 	// Independent from the global breathing-mode viscosity, off by default.
 	GLOBAL_DEF(PropertyInfo(Variant::FLOAT, "physics/3d/solver/soft_body_tetra_fem_viscosity", PROPERTY_HINT_RANGE, "0,1000,0.1,or_greater"), 0.0);
