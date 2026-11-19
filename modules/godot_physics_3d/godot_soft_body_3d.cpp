@@ -2257,22 +2257,73 @@ bool GodotSoftBody3D::create_from_trimesh(const Vector<int> &p_indices, const Ve
 
 	++node_count;
 	xpbd_surface_node_count = node_count;
-	// Extra FEM vertices are integrated with the physical solver, but have
-	// no visual vertices, triangle faces or collision point BVH leaves.
-	// Importing them BEFORE append_face()/append_link() prevents vector
-	// reallocations from invalidating stored Node* references.
+	// Extra FEM particles are not surface point colliders or visible vertices.
+	// Before allocating ANY internal physical nodes, validate their entire
+	// authored tetra mesh, including its exact boundary and signed volume.
+	// On failure, keep the normal surface soft body, not orphan free masses.
+	// This also prevents pointer invalidation: append faces/links only AFTER
+	// the final physical node count is known.
 	const uint32_t extra_count = xpbd_explicit_tetra_visual_indices.is_empty() ? 0 :
 			uint32_t(xpbd_explicit_tetra_interior_positions.size());
-	if (extra_count > 0) {
-		ERR_FAIL_COND_V_MSG(xpbd_surface_node_count != vertices.size() ||
-					xpbd_surface_node_count > 2048 ||
-					extra_count > 2048 - xpbd_surface_node_count, false,
-				"FEM interior vertex count exceeds the supported node capacity.");
+	if (extra_count > 0 && xpbd_surface_node_count == vertices.size() &&
+			xpbd_surface_node_count <= 2048 &&
+			extra_count <= 2048 - xpbd_surface_node_count) {
 		vertices.resize(xpbd_surface_node_count + extra_count);
 		for (uint32_t i = 0; i < extra_count; ++i) {
 			vertices[xpbd_surface_node_count + i] = xpbd_explicit_tetra_interior_positions[i];
 		}
-		node_count += extra_count;
+
+		LocalVector<PhysicsFEMConvexFace> shell;
+		shell.reserve(triangle_count);
+		double rest_signed_volume = 0.0;
+		bool valid_indices = true;
+		for (uint32_t i = 0; i < triangle_count; ++i) {
+			const int a = triangles[3 * i];
+			const int b = triangles[3 * i + 1];
+			const int c = triangles[3 * i + 2];
+			if (a < 0 || b < 0 || c < 0 ||
+					uint32_t(a) >= xpbd_surface_node_count ||
+					uint32_t(b) >= xpbd_surface_node_count ||
+					uint32_t(c) >= xpbd_surface_node_count) {
+				valid_indices = false;
+				break;
+			}
+			PhysicsFEMConvexFace face;
+			face.a = uint32_t(a);
+			face.b = uint32_t(b);
+			face.c = uint32_t(c);
+			shell.push_back(face);
+			rest_signed_volume += _soft_body_signed_face_volume(
+					vertices[face.a], vertices[face.b], vertices[face.c], vertices[0]);
+		}
+		LocalVector<uint32_t> mapped_indices;
+		if (valid_indices) {
+			const int index_count = xpbd_explicit_tetra_visual_indices.size();
+			valid_indices = index_count % 4 == 0 && index_count <= 16384;
+			mapped_indices.reserve(index_count);
+			for (int i = 0; valid_indices && i < index_count; ++i) {
+				const int authored = xpbd_explicit_tetra_visual_indices[i];
+				if (authored < 0) {
+					valid_indices = false;
+				} else if (authored < visual_vertex_count) {
+					mapped_indices.push_back(map_visual_to_physics[authored]);
+				} else if (authored - visual_vertex_count < int(extra_count)) {
+					mapped_indices.push_back(xpbd_surface_node_count +
+							uint32_t(authored - visual_vertex_count));
+				} else {
+					valid_indices = false;
+				}
+			}
+		}
+		LocalVector<PhysicsFEMConvexTetra> checked;
+		if (valid_indices && physics_fem_build_explicit_tetrahedra(
+					vertices, shell, mapped_indices, rest_signed_volume, checked)) {
+			node_count += extra_count;
+		} else {
+			// Invalid geometry must not change total mass, dynamics, point
+			// broadphase or ordinary surface mesh simulation.
+			vertices.resize(xpbd_surface_node_count);
+		}
 	}
 
 	// Create surface and internal simulation nodes in the same stable array.
