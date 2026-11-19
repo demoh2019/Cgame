@@ -162,6 +162,52 @@ time; use the same machine/configuration with an older commit to quantify
 the effects. These source-contract checks are not a compilation test,
 and runtime stress tests must still be executed on a built engine.
 
+## XPBD triangle-area constraints for cloth (3D)
+
+Cgame GodotPhysics3D now supports optional **triangle surface-area preservation**
+as an additional XPBD constraint, inspired by PositionBasedDynamics cloth
+simulation. Unlike existing structural edges and two-hop bending links, it
+resists a triangle losing or gaining area under shear, compression, or
+gravity. This is an area constraint, **not** volumetric FEM, cloth tearing,
+or full material strain tensors.
+
+The new per-space project setting defaults to zero (disabled):
+
+```ini
+[physics]
+3d/solver/soft_body_xpbd_area_compliance=0.000001
+```
+
+Positive compliance enables a separate accumulated Lagrange multiplier per
+triangle. A lower value makes area preservation stiffer. The multipliers
+are reset once per physics step and reused across iterations, with the
+standard XPBD regularizer `alpha = compliance / dt^2`. Area constraints
+can run with either the legacy link solver or optional XPBD link compliance,
+including with zero link stiffness. Pinned particles remain fixed; all
+edges and faces share the existing simulated mesh topology. Collapsed,
+non-finite, or fully pinned triangles are skipped safely. The per-face
+scratch array is allocated only when enabled and freed when the mesh is
+destroyed or the solver feature becomes inactive.
+
+This is implemented in `servers/physics_xpbd_area.h` and integrated in
+`GodotSoftBody3D::solve_constraints()`. The invariant uses current triangle
+area and the rest area `Face::ra`, which is captured on mesh setup.
+
+```bash
+python3 -m unittest discover -s tests/stress -p 'test_physics_xpbd_area.py' -v
+python3 tests/stress/run.py --godot ./bin/godot.macos.editor.arm64 \
+  --case physics_soft_body_xpbd_area_3d --scale 4 --repeats 5 \
+  --frames 90 --rss-limit-mib 6144 \
+  --output out/physics-xpbd-cloth-area.json
+```
+
+The runtime case creates a triangle soft mesh with its base pinned and its
+third vertex falling under gravity. Structural link stiffness is disabled
+so area XPBD is the only source of elastic support. It compares the mean
+area error against a zero-compliance baseline and verifies pinned vertices
+remain stationary. It also detects non-finite positions. The regression
+must be run on a compiled engine for a meaningful physics result.
+
 ## Iterative spinning and rolling contact friction (3D)
 
 GodotPhysics3D already supported configurable gyroscopic precession and
