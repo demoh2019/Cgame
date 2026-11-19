@@ -1,0 +1,38 @@
+name: URI decode buffer fast-path regressions
+
+on:
+  pull_request:
+    branches: [develop]
+    paths:
+      - "core/string/ustring.cpp"
+      - "tests/core/string/test_string.cpp"
+      - ".github/workflows/string-uri-decode-buffer.yml"
+  push:
+    branches: [develop]
+    paths:
+      - "core/string/ustring.cpp"
+      - "tests/core/string/test_string.cpp"
+      - ".github/workflows/string-uri-decode-buffer.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  native-uri-decoding:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+      - uses: ./.github/actions/godot-deps
+      - uses: ./.github/actions/godot-build
+        with:
+          platform: linuxbsd
+          target: editor
+          scons-flags: dev_build=yes tests=yes debug_symbols=no module_mono_enabled=no accesskit=no -j2
+      - name: Check URL encoding and decoding against legacy behavior
+        run: |
+          ./bin/godot.linuxbsd.editor.dev.x86_64 --headless --test --test-case="*[String] URI decoding*" --no-colors
+          ./bin/godot.linuxbsd.editor.dev.x86_64 --headless --test --test-case="*[String] uri_encode*" --no-colors
