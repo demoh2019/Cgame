@@ -68,6 +68,7 @@ public:
 
 	float sample_height(const Vector2 &p_grid_position) const;
 	void sculpt(const Vector2 &p_center, float p_radius, float p_delta);
+	void flatten(const Vector2 &p_center, float p_radius, float p_height, float p_strength);
 	void smooth(const Vector2 &p_center, float p_radius, float p_strength);
 	void erode_talus(int p_iterations, float p_talus, float p_rate);
 	void paint_layer(const Vector2 &p_center, float p_radius, int p_layer, float p_strength);

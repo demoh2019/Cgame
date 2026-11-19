@@ -209,6 +209,39 @@ void TerrainHeightmap::sculpt(const Vector2 &p_center, float p_radius, float p_d
 	}
 }
 
+void TerrainHeightmap::flatten(const Vector2 &p_center, float p_radius, float p_height, float p_strength) {
+	ERR_FAIL_COND_MSG(!std::isfinite(p_center.x) || !std::isfinite(p_center.y) ||
+					!std::isfinite(p_radius) || !std::isfinite(p_height) || !std::isfinite(p_strength) ||
+					p_radius <= 0 || p_strength < 0 || p_strength > 1,
+			"Invalid flatten brush arguments.");
+	if (p_strength == 0) {
+		return;
+	}
+	bool modified = false;
+	const int min_x = int(CLAMP(Math::floor(p_center.x - p_radius), 0.0f, float(dimensions.x - 1)));
+	const int max_x = int(CLAMP(Math::ceil(p_center.x + p_radius), 0.0f, float(dimensions.x - 1)));
+	const int min_z = int(CLAMP(Math::floor(p_center.y - p_radius), 0.0f, float(dimensions.y - 1)));
+	const int max_z = int(CLAMP(Math::ceil(p_center.y + p_radius), 0.0f, float(dimensions.y - 1)));
+	for (int z = min_z; z <= max_z; z++) {
+		for (int x = min_x; x <= max_x; x++) {
+			const float dist = Vector2(x, z).distance_to(p_center);
+			if (dist >= p_radius) {
+				continue;
+			}
+			const float weight = p_strength * (1.0f - dist / p_radius);
+			const int i = _index(x, z);
+			const float value = Math::lerp(heights[i], p_height, weight);
+			if (std::isfinite(value) && value != heights[i]) {
+				heights.set(i, value);
+				modified = true;
+			}
+		}
+	}
+	if (modified) {
+		_notify_changed();
+	}
+}
+
 void TerrainHeightmap::smooth(const Vector2 &p_center, float p_radius, float p_strength) {
 	ERR_FAIL_COND_MSG(!std::isfinite(p_center.x) || !std::isfinite(p_center.y) ||
 					!std::isfinite(p_radius) || !std::isfinite(p_strength) ||
@@ -523,6 +556,7 @@ void TerrainHeightmap::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("get_paint_at", "x", "z"), &TerrainHeightmap::get_paint_at);
 	ClassDB::bind_method(D_METHOD("sample_height", "grid_position"), &TerrainHeightmap::sample_height);
 	ClassDB::bind_method(D_METHOD("sculpt", "center", "radius", "delta"), &TerrainHeightmap::sculpt);
+	ClassDB::bind_method(D_METHOD("flatten", "center", "radius", "height", "strength"), &TerrainHeightmap::flatten);
 	ClassDB::bind_method(D_METHOD("smooth", "center", "radius", "strength"), &TerrainHeightmap::smooth);
 	ClassDB::bind_method(D_METHOD("erode_talus", "iterations", "talus", "rate"), &TerrainHeightmap::erode_talus);
 	ClassDB::bind_method(D_METHOD("paint_layer", "center", "radius", "layer", "strength"), &TerrainHeightmap::paint_layer);
