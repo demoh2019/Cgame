@@ -38,6 +38,7 @@ var _bank_label: Label
 var _bank_open: bool = false
 var _selected_bank_item: String = ""
 var _feedback: String = "Leave the safe hub to gather. Return to the workbench to craft."
+var _last_siege_notification: int = 0
 var _chunks: Dictionary = {}
 var _resource_meshes: Dictionary = {}
 var _crate_meshes: Dictionary = {}
@@ -433,6 +434,9 @@ func _physics_process(delta: float) -> void:
 	if sim == null:
 		return
 	sim.tick(delta)
+	if sim.siege_waves_started > _last_siege_notification:
+		_last_siege_notification = sim.siege_waves_started
+		_feedback = "Night siege! Infected are approaching a nearby barricade."
 	_update_world_light()
 	var movement := Input.get_vector("survive_left", "survive_right", "survive_up", "survive_down")
 	if movement.length_squared() > 0.001:
