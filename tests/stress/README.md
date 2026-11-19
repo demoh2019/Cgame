@@ -1318,8 +1318,8 @@ that upstream Jolt capability without increasing the default CPU cost:
 | `physics/jolt_physics_3d/simulation/max_collision_step_seconds` | `0.0` | Disabled when zero; otherwise request enough passes so each subdivision is at most this many seconds, subject to the eight-step cap |
 
 For example, use `collision_steps = 2` to increase contact stability at the
-expense of more CPU per tick. Or set `max_collision_step_seconds = 0.0083333`
-to use additional passes when a physics tick is longer than ~1/120 second.
+expense of more CPU per tick. Or set `max_collision_step_seconds = 0.01`
+to request additional passes whenever a physics tick is longer than 10 ms.
 The effective count is the greater of the configured minimum and the
 time-based requirement, capped at eight.
 
