@@ -485,18 +485,18 @@ void Mesh::generate_debug_mesh_lines(Vector<Vector3> &r_lines) {
 
 	const int *ind_r = triangle_indices.ptr();
 	const Vector3 *ver_r = vertices.ptr();
+	// This buffer is newly resized and unshared; acquire writable storage once.
+	Vector3 *lines_write = debug_lines.ptrw();
 	for (int j = 0, x = 0, i = 0; i < triangles_num; j += 6, x += 3, ++i) {
-		// Triangle line 1
-		debug_lines.write[j + 0] = ver_r[ind_r[x + 0]];
-		debug_lines.write[j + 1] = ver_r[ind_r[x + 1]];
-
-		// Triangle line 2
-		debug_lines.write[j + 2] = ver_r[ind_r[x + 1]];
-		debug_lines.write[j + 3] = ver_r[ind_r[x + 2]];
-
-		// Triangle line 3
-		debug_lines.write[j + 4] = ver_r[ind_r[x + 2]];
-		debug_lines.write[j + 5] = ver_r[ind_r[x + 0]];
+		const Vector3 &v0 = ver_r[ind_r[x + 0]];
+		const Vector3 &v1 = ver_r[ind_r[x + 1]];
+		const Vector3 &v2 = ver_r[ind_r[x + 2]];
+		lines_write[j + 0] = v0;
+		lines_write[j + 1] = v1;
+		lines_write[j + 2] = v1;
+		lines_write[j + 3] = v2;
+		lines_write[j + 4] = v2;
+		lines_write[j + 5] = v0;
 	}
 
 	r_lines = debug_lines;
@@ -508,13 +508,10 @@ void Mesh::generate_debug_mesh_indices(Vector<Vector3> &r_points) {
 		return;
 	}
 
-	Vector<Vector3> vertices = tm->get_vertices();
-
-	int vertices_size = vertices.size();
-	r_points.resize(vertices_size);
-	for (int i = 0; i < vertices_size; ++i) {
-		r_points.write[i] = vertices[i];
-	}
+	// Vector uses copy-on-write: returning the vertices shares their storage,
+	// while edits to the result or triangle mesh still detach independently.
+	// Avoid reallocation and an O(vertex_count) element-by-element copy.
+	r_points = tm->get_vertices();
 }
 
 Vector<Vector3> Mesh::_get_faces() const {
