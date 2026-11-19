@@ -91,5 +91,23 @@ jobs:
               if not expected_ok and not any(
                       marker in result["log"] for marker in ("SCRIPT ERROR:", "ERROR:")):
                   raise AssertionError("Missing Godot parser diagnostic")
+              junit_command = ["junit" if arg == "json" else arg for arg in command]
+              junit = subprocess.run(junit_command, capture_output=True, text=True,
+                                     check=False, timeout=180)
+              if junit.returncode != completed.returncode:
+                  raise AssertionError("JUnit and JSON status mismatch for " + name)
+              from xml.etree import ElementTree as ET
+              suite = ET.fromstring(junit.stdout)
+              if suite.get("tests") != "1" or suite.get("failures") != ("0" if expected_ok else "1"):
+                  raise AssertionError("Incorrect JUnit XML results for " + name)
+              (root / ("scene-smoke-" + name + ".xml")).write_text(
+                  junit.stdout, encoding="utf-8")
           print("REAL GODOT SMOKE: valid and deliberately invalid scenes confirmed")
           PY
+      - name: Upload JUnit XML results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: scene-smoke-junit
+          path: scene-smoke-*.xml
+          if-no-files-found: ignore
