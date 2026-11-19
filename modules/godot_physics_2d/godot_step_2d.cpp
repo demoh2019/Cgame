@@ -165,8 +165,14 @@ void GodotStep2D::_solve_large_island(const LocalVector<GodotConstraint2D *> &p_
 
 	// Greedy constraint coloring: each dynamic body may be written by at
 	// most one constraint within a color. The serial overflow handles hubs.
-	AHashMap<GodotBody2D *, uint32_t> occupied_colors;
-	LocalVector<uint8_t> constraint_colors;
+	// Reuse scratch allocations in persistent high-contact scenes.
+	// Shrink after a drastic drop in size to avoid retaining the peak hash
+	// table capacity when a million-body scene is replaced by a small one.
+	if (occupied_colors.get_capacity() > MAX(uint32_t(1024), constraint_count * uint32_t(4))) {
+		occupied_colors.reset();
+	} else {
+		occupied_colors.clear();
+	}
 	constraint_colors.resize(constraint_count);
 	uint32_t group_sizes[MAX_LARGE_ISLAND_COLORS + 1] = {};
 
