@@ -131,6 +131,7 @@ private:
 	real_t soft_body_xpbd_dihedral_compliance = 0.0; // Opt-in angle-based cloth bending.
 	real_t soft_body_self_collision_thickness = 0.0; // 0: no self-contact work or buffers.
 	real_t soft_body_self_collision_compliance = 0.000001;
+	real_t soft_body_self_collision_friction = 0.0; // Optional mass-weighted face slip resistance.
 	int soft_body_self_collision_max_contacts_per_vertex = 8;
 	bool soft_body_self_collision_edge_edge = false; // Separate opt-in edge BVH.
 	real_t soft_body_xpbd_tether_compliance = 0.0; // Zero bypasses tether setup and solver.
@@ -242,6 +243,7 @@ public:
 	_FORCE_INLINE_ real_t get_soft_body_xpbd_dihedral_compliance() const { return soft_body_xpbd_dihedral_compliance; }
 	_FORCE_INLINE_ real_t get_soft_body_self_collision_thickness() const { return soft_body_self_collision_thickness; }
 	_FORCE_INLINE_ real_t get_soft_body_self_collision_compliance() const { return soft_body_self_collision_compliance; }
+	_FORCE_INLINE_ real_t get_soft_body_self_collision_friction() const { return soft_body_self_collision_friction; }
 	_FORCE_INLINE_ int get_soft_body_self_collision_max_contacts_per_vertex() const { return soft_body_self_collision_max_contacts_per_vertex; }
 	_FORCE_INLINE_ bool is_soft_body_self_collision_edge_edge_enabled() const { return soft_body_self_collision_edge_edge; }
 	_FORCE_INLINE_ real_t get_soft_body_xpbd_tether_compliance() const { return soft_body_xpbd_tether_compliance; }
