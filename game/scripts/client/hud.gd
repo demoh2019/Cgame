@@ -214,8 +214,8 @@ func _build() -> void:
 	stash_scroll.add_child(_stash_grid)
 
 	var rest_button := Button.new()
-	rest_button.text = "Rest at camp (2 wood, 1 water, 1 food)"
-	rest_button.tooltip_text = "Recover health and stamina in the safe settlement; 90s cooldown"
+	rest_button.text = "Rest: safe hub or a lit field campfire"
+	rest_button.tooltip_text = "Hub: 2 wood + canned food + water. Fire: cooked fish/canned ration + water, no nearby threats; 90s cooldown."
 	rest_button.pressed.connect(Callable(client, "rest"))
 	inventory_box.add_child(rest_button)
 
@@ -800,7 +800,7 @@ func _on_result(kind: String, data: Dictionary) -> void:
 		return
 	if kind == "rest":
 		if bool(data.get("ok", false)):
-			say("Camp rest: recovered; 90 seconds until the next rest")
+			say("Field respite: recovered by a safe campfire (90s cooldown)" if bool(data.get("field", false)) else "Hub rest: recovered (90s cooldown)")
 		else:
 			say("Camp rest: " + str(data.get("reason", "rejected")))
 		return

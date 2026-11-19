@@ -1970,3 +1970,24 @@ guild tags and same-guild combat rules are a safe prerequisite for
 introducing persistent Nakama guild claims and a durable war ledger.
 All functionality uses existing Nakama and Cgame network APIs; no native
 engine modification was necessary.
+
+
+## Expedition field respite (live fire, food and nearby danger)
+
+The existing **Z** rest action in the local game and multiplayer **Rest**
+button also support field respite near an existing active campfire (5m).
+This consumes **one clean water bottle** plus **one cooked fish T1–T4**
+(lowest tier first), or **one canned ration** when no fish is available.
+Field respite heals 12 HP and restores 30 stamina, 8 hunger and 10 thirst.
+The safe hub keeps its more generous recovery and resource requirements.
+
+Both actions share the persisted **90-second cooldown**. The server rejects
+field rest if a fire has expired, a survivor is fighting, an infected is
+within 13m, or a potential nonparty PvP opponent is within 10m in red/black
+zones. Refused requests consume nothing. Infection and bleeding still
+require real medical supplies; field resting cannot be used for immunity or
+instant recovery during combat.
+
+`tests/test_field_rest.gd` covers a real server-built fire, ingredient
+transactions, T2 fish fallback, cooldown, nearby infected and PvP threats,
+and expired fires. Existing Cgame APIs and RPCs support this game feature.

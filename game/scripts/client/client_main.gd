@@ -873,7 +873,7 @@ func _update_hud() -> void:
 		survivor.survival.alive, world.is_safe(survivor.position.x, survivor.position.z))
 	if scent_radius > 0.0:
 		_instructions.text += "\nBLOOD SCENT: infected may track you from %d m; use first aid" % ceili(scent_radius)
-	_instructions.text += "\nZ rest at hub (2 wood + food + water; 90s cooldown), remaining %.0fs" % survivor.rest_cooldown
+	_instructions.text += "\nZ rest at hub (2 wood + canned food + water), or by a lit field fire (cooked fish/ration + water; no nearby enemies); 90s cooldown, remaining %.0fs" % survivor.rest_cooldown
 	_instructions.text += "\nPvP infamy: %d/100 | %s" % [
 		ceili(survivor.pvp_infamy), "OUTLAW" if PvpInfamy.is_outlaw(survivor.pvp_infamy) else "neutral"]
 	_update_bank_hud()

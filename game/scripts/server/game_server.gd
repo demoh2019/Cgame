@@ -45,6 +45,7 @@ const Weather = preload("res://scripts/shared/weather.gd")
 const BloodScent = preload("res://scripts/shared/blood_scent.gd")
 const Progression = preload("res://scripts/shared/progression.gd")
 const CampRest = preload("res://scripts/shared/camp_rest.gd")
+const FieldRest = preload("res://scripts/shared/field_rest.gd")
 const FieldCampfire = preload("res://scripts/shared/field_campfire.gd")
 const NoiseDecoy = preload("res://scripts/shared/noise_decoy.gd")
 const Fishing = preload("res://scripts/shared/fishing.gd")
@@ -1197,7 +1198,11 @@ func cmd_rest(peer_id: int) -> Dictionary:
 	if player == null or not _alive(player):
 		return {"ok": false, "reason": "dead"}
 	var point := Vector2(player.position.x, player.position.z)
-	if not point.is_finite() or not _is_safe(player.position) or point.distance_to(WORKBENCH_POSITION) > WORKBENCH_RANGE:
+	if not point.is_finite():
+		return {"ok": false, "reason": "no_station"}
+	var at_hub: bool = _is_safe(player.position) and point.distance_to(WORKBENCH_POSITION) <= WORKBENCH_RANGE
+	var at_fire: bool = not at_hub and FieldCampfire.has_warmth(campfires, player.position, time)
+	if not at_hub and not at_fire:
 		return {"ok": false, "reason": "no_station"}
 	if player.rest_cooldown > 0.0:
 		return {"ok": false, "reason": "cooldown", "remaining": player.rest_cooldown}
@@ -1205,26 +1210,26 @@ func cmd_rest(peer_id: int) -> Dictionary:
 		return {"ok": false, "reason": "in_combat"}
 	if not CampRest.needs_recovery(player.survival):
 		return {"ok": false, "reason": "fully_rested"}
-	if not CampRest.has_supplies(player.inventory):
-		return {"ok": false, "reason": "missing_items"}
-	if not CampRest.recover(player.inventory, player.survival):
-		return {"ok": false, "reason": "transaction_failed"}
+	if at_fire:
+		var threat: String = FieldRest.danger(world, player, players, parties, zombies)
+		if not threat.is_empty():
+			return {"ok": false, "reason": threat}
+		if not FieldRest.has_supplies(player.inventory):
+			return {"ok": false, "reason": "missing_items"}
+		if not FieldRest.recover(player.inventory, player.survival):
+			return {"ok": false, "reason": "transaction_failed"}
+	else:
+		if not CampRest.has_supplies(player.inventory):
+			return {"ok": false, "reason": "missing_items"}
+		if not CampRest.recover(player.inventory, player.survival):
+			return {"ok": false, "reason": "transaction_failed"}
 	player.rest_cooldown = CampRest.COOLDOWN
 	player.action = {}
 	player.dirty_inventory = true
 	player.dirty_character = true
-	return {"ok": true, "rested": true, "cooldown": player.rest_cooldown,
+	return {"ok": true, "rested": true, "field": at_fire,
+		"cooldown": player.rest_cooldown,
 		"health": player.survival.health, "stamina": player.survival.stamina}
-
-
-## UTC day changes happen inside the server before any bounty contribution
-## or claim; refreshing updates persistent state, including on reconnect.
-func _refresh_daily(player: Player) -> int:
-	var today: int = DailyBounties.utc_day()
-	if DailyBounties.refresh(player.daily_bounty, today):
-		player.dirty_character = true
-	return today
-
 
 func cmd_contract(peer_id: int, action: String) -> Dictionary:
 	var player: Player = players.get(peer_id)
