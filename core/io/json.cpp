@@ -38,7 +38,6 @@
 #include "core/variant/container_type_validate.h"
 #include "core/variant/variant_internal.h"
 
-#include <optional>
 
 const char *JSON::tk_name[TK_MAX] = {
 	"'{'",
@@ -75,6 +74,31 @@ void JSON::_stringify(StringBuilder &r_result, const Variant &p_var, const Strin
 
 	const char *colon = p_indent.is_empty() ? ":" : ": ";
 	const char *end_statement = p_indent.is_empty() ? "" : "\n";
+
+	// Packed numeric and string arrays do not need a temporary Array/Variant
+	// for every element. Stream each value directly into the output builder.
+	const auto stringify_packed = [&](const auto &p_array) {
+		if (p_array.is_empty()) {
+			r_result += "[]";
+			return;
+		}
+		r_result += "[";
+		r_result += end_statement;
+		bool first = true;
+		for (const auto &element : p_array) {
+			if (first) {
+				first = false;
+			} else {
+				r_result += ",";
+				r_result += end_statement;
+			}
+			_add_indent(r_result, p_indent, p_cur_indent + 1);
+			_stringify(r_result, Variant(element), p_indent, p_cur_indent + 1, p_sort_keys, p_markers, p_full_precision);
+		}
+		r_result += end_statement;
+		_add_indent(r_result, p_indent, p_cur_indent);
+		r_result += "]";
+	};
 
 	switch (p_var.get_type()) {
 		case Variant::NIL:
@@ -123,23 +147,22 @@ void JSON::_stringify(StringBuilder &r_result, const Variant &p_var, const Strin
 			return;
 		}
 		case Variant::PACKED_INT32_ARRAY:
+			stringify_packed(*VariantInternal::get_int32_array(&p_var));
+			return;
 		case Variant::PACKED_INT64_ARRAY:
+			stringify_packed(*VariantInternal::get_int64_array(&p_var));
+			return;
 		case Variant::PACKED_FLOAT32_ARRAY:
+			stringify_packed(*VariantInternal::get_float32_array(&p_var));
+			return;
 		case Variant::PACKED_FLOAT64_ARRAY:
+			stringify_packed(*VariantInternal::get_float64_array(&p_var));
+			return;
 		case Variant::PACKED_STRING_ARRAY:
+			stringify_packed(*VariantInternal::get_string_array(&p_var));
+			return;
 		case Variant::ARRAY: {
-			// Borrow native Array storage from the Variant without a temporary
-			// reference count increment. Packed arrays still require conversion.
-			std::optional<Array> converted;
-			const Array *a = nullptr;
-			if (p_var.get_type() == Variant::ARRAY) {
-				a = VariantInternal::get_array(&p_var);
-			} else {
-				// Do not default-construct an Array for the native Array
-				// branch: its constructor allocates an ArrayPrivate.
-				converted.emplace(static_cast<Array>(p_var));
-				a = &*converted;
-			}
+			const Array *a = VariantInternal::get_array(&p_var);
 			if (p_markers.has(a->id())) {
 				r_result += "\"[...]\"";
 				ERR_FAIL_MSG("Converting circular structure to JSON.");
