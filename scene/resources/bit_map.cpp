@@ -729,23 +729,47 @@ Ref<Image> BitMap::convert_to_image() const {
 void BitMap::blit(const Vector2i &p_pos, const Ref<BitMap> &p_bitmap) {
 	ERR_FAIL_COND_MSG(p_bitmap.is_null(), "It's not a reference to a valid BitMap object.");
 
-	int x = p_pos.x;
-	int y = p_pos.y;
-	int w = p_bitmap->get_size().width;
-	int h = p_bitmap->get_size().height;
+	const int source_width = p_bitmap->width;
+	const int source_height = p_bitmap->height;
 
-	for (int i = 0; i < w; i++) {
-		for (int j = 0; j < h; j++) {
-			int px = x + i;
-			int py = y + j;
-			if (px < 0 || px >= width) {
-				continue;
+	if (p_bitmap.ptr() == this) {
+		// Preserve the existing column-major behavior for overlapping
+		// self-blits, where writes can affect subsequent source reads.
+		for (int x = 0; x < source_width; x++) {
+			for (int y = 0; y < source_height; y++) {
+				const int px = p_pos.x + x;
+				const int py = p_pos.y + y;
+				if (px >= 0 && px < width && py >= 0 && py < height && get_bit(x, y)) {
+					set_bit(px, py, true);
+				}
 			}
-			if (py < 0 || py >= height) {
-				continue;
-			}
-			if (p_bitmap->get_bit(i, j)) {
-				set_bit(px, py, true);
+		}
+		return;
+	}
+
+	// Clip before copying. Using 64-bit coordinates prevents addition
+	// overflow if the caller passes a position near the integer limits.
+	const int64_t x_begin = MAX(int64_t(0), int64_t(p_pos.x));
+	const int64_t y_begin = MAX(int64_t(0), int64_t(p_pos.y));
+	const int64_t x_end = MIN(int64_t(width), int64_t(p_pos.x) + source_width);
+	const int64_t y_end = MIN(int64_t(height), int64_t(p_pos.y) + source_height);
+	if (x_begin >= x_end || y_begin >= y_end) {
+		return;
+	}
+
+	// Separate BitMaps have independent writable storage. Work directly
+	// with their packed bytes instead of validating every source and
+	// destination pixel through get_bit()/set_bit().
+	uint8_t *destination = bitmask.ptrw();
+	const uint8_t *source = p_bitmap->bitmask.ptr();
+	for (int64_t y = y_begin; y < y_end; y++) {
+		const int source_row = int(y - p_pos.y) * source_width;
+		const int dest_row = int(y) * width;
+		for (int64_t x = x_begin; x < x_end; x++) {
+			const int source_bit = source_row + int(x - p_pos.x);
+			if (source[source_bit >> 3] & (1u << (source_bit & 7))) {
+				const int dest_bit = dest_row + int(x);
+				destination[dest_bit >> 3] |= uint8_t(1u << (dest_bit & 7));
 			}
 		}
 	}
