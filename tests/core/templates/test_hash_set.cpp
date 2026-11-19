@@ -99,6 +99,90 @@ TEST_CASE("[HashSet] Colliding keys survive wraparound and repeated erases") {
 	}
 }
 
+TEST_CASE("[HashSet] Sparse clear reuses reserved table without stale keys") {
+	HashSet<int> set;
+	set.reserve(49157);
+	const uint32_t reserved_capacity = set.get_capacity();
+
+	for (int cycle = 0; cycle < 8; cycle++) {
+		const int first = cycle * 10000;
+		for (int i = 0; i < 96; i++) {
+			set.insert(first + i);
+		}
+		for (int i = 0; i < 96; i += 3) {
+			CHECK(set.erase(first + i));
+		}
+		CHECK_EQ(set.size(), 64);
+
+		// Deleting keys also relocates the last key. Clearing must follow
+		// the current index mappings, not the original insertion order.
+		set.clear();
+		CHECK(set.is_empty());
+		CHECK_EQ(set.get_capacity(), reserved_capacity);
+		for (int i = 0; i < 96; i++) {
+			CHECK_FALSE(set.has(first + i));
+		}
+	}
+
+	// This crosses the sparse-clear threshold and exercises the memset path.
+	for (int i = 0; i < 2048; i++) {
+		set.insert(i);
+	}
+	CHECK_EQ(set.size(), 2048);
+	set.clear();
+	CHECK(set.is_empty());
+	CHECK_EQ(set.get_capacity(), reserved_capacity);
+	for (int i = 0; i < 2048; i++) {
+		CHECK_FALSE(set.has(i));
+		set.insert(i + 50000);
+	}
+	CHECK_EQ(set.size(), 2048);
+	for (int i = 0; i < 2048; i++) {
+		CHECK(set.has(i + 50000));
+	}
+}
+
+TEST_CASE("[HashSet] Sparse clear handles collided and relocated hash slots") {
+	HashSet<int, ClusteredHasher> set;
+	set.reserve(3079);
+	const uint32_t original_capacity = set.get_capacity();
+	for (int i = 0; i < 40; i++) {
+		set.insert(i);
+	}
+	for (int i = 0; i < 40; i += 4) {
+		CHECK(set.erase(i));
+	}
+	CHECK_EQ(set.size(), 30);
+	set.clear();
+	CHECK(set.is_empty());
+	CHECK_EQ(set.get_capacity(), original_capacity);
+	for (int i = 0; i < 40; i++) {
+		CHECK_FALSE(set.has(i));
+	}
+	for (int i = 40; i < 80; i++) {
+		set.insert(i);
+	}
+	CHECK_EQ(set.size(), 40);
+	for (int i = 40; i < 80; i++) {
+		CHECK(set.has(i));
+	}
+}
+
+TEST_CASE("[HashSet] Sparse clear releases String keys without leaks") {
+	const uint64_t before = Memory::get_mem_usage();
+	{
+		HashSet<String> set;
+		set.reserve(12289);
+		for (int cycle = 0; cycle < 3; cycle++) {
+			for (int i = 0; i < 32; i++) {
+				set.insert("long_key_" + itos(i) + String("xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"));
+			}
+			set.clear();
+		}
+	}
+	CHECK_EQ(Memory::get_mem_usage(), before);
+}
+
 TEST_CASE("[HashSet] List initialization") {
 	HashSet<int> set{ 0, 1, 2, 3, 4 };
 
