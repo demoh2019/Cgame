@@ -404,4 +404,62 @@ TEST_CASE("[Terrain] Invalid cell size keeps the last valid mesh scaling") {
     memdelete(terrain);
 }
 
+TEST_CASE("[Terrain] Import R8 grayscale Image uses the red channel") {
+    Ref<Image> image = Image::create_empty(2, 2, false, Image::FORMAT_R8);
+    image->set_pixel(0, 0, Color(0, 0, 0));
+    image->set_pixel(1, 0, Color(1, 0, 0));
+    image->set_pixel(0, 1, Color(0.5, 0, 0));
+    image->set_pixel(1, 1, Color(0.75, 0, 0));
+    Ref<TerrainHeightmap> data;
+    data.instantiate();
+    data->import_height_image(image, 0, 100);
+    CHECK(data->get_height(0, 0) == doctest::Approx(0));
+    CHECK(data->get_height(1, 0) == doctest::Approx(100));
+    CHECK(data->get_height(0, 1) == doctest::Approx(50).epsilon(0.02));
+    CHECK(data->get_height(1, 1) == doctest::Approx(75).epsilon(0.02));
+}
+
+TEST_CASE("[Terrain] Import RGB Image uses luminance for colored pixels") {
+    Ref<Image> image = Image::create_empty(2, 2, false, Image::FORMAT_RGBF);
+    image->set_pixel(0, 0, Color(1, 0, 0));
+    image->set_pixel(1, 0, Color(0, 1, 0));
+    image->set_pixel(0, 1, Color(0, 0, 1));
+    image->set_pixel(1, 1, Color(1, 1, 1));
+    Ref<TerrainHeightmap> data;
+    data.instantiate();
+    data->import_height_image(image, 0, 1);
+    CHECK(data->get_height(0, 0) == doctest::Approx(Color(1, 0, 0).get_luminance()));
+    CHECK(data->get_height(1, 0) == doctest::Approx(Color(0, 1, 0).get_luminance()));
+    CHECK(data->get_height(0, 1) == doctest::Approx(Color(0, 0, 1).get_luminance()));
+    CHECK(data->get_height(1, 1) == doctest::Approx(1));
+}
+
+TEST_CASE("[Terrain] Import clamps out-of-range float samples") {
+    Ref<Image> image = Image::create_empty(2, 2, false, Image::FORMAT_RF);
+    image->set_pixel(0, 0, Color(-2, 0, 0));
+    image->set_pixel(1, 0, Color(2, 0, 0));
+    image->set_pixel(0, 1, Color(0.5, 0, 0));
+    image->set_pixel(1, 1, Color(1, 0, 0));
+    Ref<TerrainHeightmap> data;
+    data.instantiate();
+    data->import_height_image(image, 10, 20);
+    CHECK(data->get_height(0, 0) == doctest::Approx(10));
+    CHECK(data->get_height(1, 0) == doctest::Approx(20));
+    CHECK(data->get_height(0, 1) == doctest::Approx(15));
+    CHECK(data->get_height(1, 1) == doctest::Approx(20));
+}
+
+TEST_CASE("[Terrain] Import accepts constant height range") {
+    Ref<Image> image = Image::create_empty(2, 2, false, Image::FORMAT_RF);
+    image->set_pixel(0, 0, Color(0, 0, 0));
+    image->set_pixel(1, 1, Color(1, 0, 0));
+    Ref<TerrainHeightmap> data;
+    data.instantiate();
+    data->import_height_image(image, 7, 7);
+    CHECK(data->get_height(0, 0) == doctest::Approx(7));
+    CHECK(data->get_height(1, 0) == doctest::Approx(7));
+    CHECK(data->get_height(0, 1) == doctest::Approx(7));
+    CHECK(data->get_height(1, 1) == doctest::Approx(7));
+}
+
 } // namespace TestHeightmapTerrain
