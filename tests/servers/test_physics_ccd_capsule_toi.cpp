@@ -34,7 +34,7 @@ TEST_FORCE_LINK(test_physics_ccd_capsule_toi)
 
 namespace TestPhysicsCCDCapsuleTOI {
 
-TEST_CASE("[Physics] Circle-capsule TOI catches glancing end-cap impact") {
+TEST_CASE("[Physics][CapsuleTOI] Circle-capsule TOI catches glancing end-cap impact") {
 	double fraction = -1.0;
 	// A circle's leading point at y=-2.2 misses a capsule of radius 0.5
 	// whose bottom end is y=-2.0. Their Minkowski sum has radius 1.0:
@@ -49,7 +49,7 @@ TEST_CASE("[Physics] Circle-capsule TOI catches glancing end-cap impact") {
 	CHECK_FALSE(physics_ccd_capsule_toi(Vector2(0.0, 0.0), Vector2(8.0, 0.0), 1.0, 1.5, fraction));
 }
 
-TEST_CASE("[Physics] Capsule TOI ranks first side entry under both directions") {
+TEST_CASE("[Physics][CapsuleTOI] Capsule TOI ranks first side entry under both directions") {
 	double fraction = -1.0;
 	CHECK(physics_ccd_capsule_toi(Vector3(-4.0, 0.0, 0.3), Vector3(8.0, 0.0, 0.0), 1.0, 1.5, fraction));
 	CHECK(Math::abs(fraction - (4.0 - Math::sqrt(0.91)) / 8.0) < 1e-6);
@@ -64,7 +64,7 @@ TEST_CASE("[Physics] Capsule TOI ranks first side entry under both directions") 
 	CHECK_FALSE(physics_ccd_capsule_toi(Vector3(-4.0, 0.0, 0.0), Vector3(8.0, 0.0, 0.0), 1.0, -1.0, fraction));
 }
 
-TEST_CASE("[Physics] Capsule TOI keeps first entry on extreme-length rays") {
+TEST_CASE("[Physics][CapsuleTOI] Capsule TOI keeps first entry on extreme-length rays") {
 	double fraction = -1.0;
 	const double begin = 1e20;
 	CHECK(physics_ccd_capsule_toi(Vector3(-begin, 0.0, 0.0),
