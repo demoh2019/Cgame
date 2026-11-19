@@ -2308,9 +2308,13 @@ Error Image::generate_mipmap_roughness(RoughnessChannel p_roughness_channel, con
 
 	ERR_FAIL_COND_V_MSG(p_normal_map.is_null() || p_normal_map->is_empty(), ERR_INVALID_PARAMETER, "Must provide a valid normal map for roughness mipmaps");
 
-	Ref<Image> nm = p_normal_map->duplicate();
+	// Uncompressed normal maps are read-only here: avoid duplicating their
+	// Image object. Compressed maps still need an isolated decompressed copy.
+	Ref<Image> nm = p_normal_map;
 	if (nm->is_compressed()) {
-		nm->decompress();
+		nm = p_normal_map->duplicate();
+		const Error result = nm->decompress();
+		ERR_FAIL_COND_V(result != OK, result);
 	}
 
 	normal_w = nm->get_width();
@@ -2318,13 +2322,16 @@ Error Image::generate_mipmap_roughness(RoughnessChannel p_roughness_channel, con
 
 	normal_sat_vec.resize(normal_w * normal_h * 3);
 	double *normal_sat = normal_sat_vec.ptr();
+	const uint8_t *const normal_pixels = nm->data.ptr();
 
-	// Create summed area table.
+	// Create the summed area table in row order, resolving the normal
+	// map's byte pointer once instead of calling get_pixel for every pixel.
 	for (int y = 0; y < normal_h; y++) {
+		const uint32_t row_ofs = uint32_t(y) * normal_w;
 		double line_sum[3] = { 0, 0, 0 };
 		for (int x = 0; x < normal_w; x++) {
 			double normal[3];
-			Color color = nm->get_pixel(x, y);
+			const Color color = nm->_get_color_at_ofs(normal_pixels, row_ofs + x);
 			normal[0] = color.r * 2.0 - 1.0;
 			normal[1] = color.g * 2.0 - 1.0;
 			normal[2] = Math::sqrt(MAX(0.0, 1.0 - (normal[0] * normal[0] + normal[1] * normal[1]))); //reconstruct if missing
@@ -2333,7 +2340,7 @@ Error Image::generate_mipmap_roughness(RoughnessChannel p_roughness_channel, con
 			line_sum[1] += normal[1];
 			line_sum[2] += normal[2];
 
-			uint32_t ofs = (y * normal_w + x) * 3;
+			uint32_t ofs = (row_ofs + x) * 3;
 
 			normal_sat[ofs + 0] = line_sum[0];
 			normal_sat[ofs + 1] = line_sum[1];
@@ -2360,17 +2367,17 @@ Error Image::generate_mipmap_roughness(RoughnessChannel p_roughness_channel, con
 		_get_mipmap_offset_and_size(i, ofs, w, h);
 		uint8_t *ptr = &base_ptr[ofs];
 
-		for (int x = 0; x < w; x++) {
-			for (int y = 0; y < h; y++) {
-				int from_x = x * normal_w / w;
-				int from_y = y * normal_h / h;
-				int to_x = (x + 1) * normal_w / w;
-				int to_y = (y + 1) * normal_h / h;
-				to_x = MIN(to_x - 1, normal_w);
-				to_y = MIN(to_y - 1, normal_h);
-
-				int size_x = (to_x - from_x) + 1;
-				int size_y = (to_y - from_y) + 1;
+		// Use row-major stores for contiguous destination writes and better
+		// summed-area-table cache locality. Vertical source bounds are
+		// shared by every output pixel of a given row.
+		for (int y = 0; y < h; y++) {
+			const int from_y = y * normal_h / h;
+			const int to_y = MIN((y + 1) * normal_h / h - 1, normal_h);
+			const int size_y = (to_y - from_y) + 1;
+			for (int x = 0; x < w; x++) {
+				const int from_x = x * normal_w / w;
+				const int to_x = MIN((x + 1) * normal_w / w - 1, normal_w);
+				const int size_x = (to_x - from_x) + 1;
 
 				//summed area table version (much faster)
 
