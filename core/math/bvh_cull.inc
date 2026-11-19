@@ -60,13 +60,8 @@ int cull_convex(CullParams &r_params, bool p_translate_hits = true) {
 	_cull_hits.clear();
 	r_params.result_count = 0;
 
-	uint32_t tree_test_mask = 0;
-
 	for (int n = 0; n < NUM_TREES; n++) {
-		tree_test_mask <<= 1;
-		if (!tree_test_mask) {
-			tree_test_mask = 1;
-		}
+		const uint32_t tree_test_mask = uint32_t(1) << n;
 
 		if (_root_node_id[n] == BVHCommon::INVALID) {
 			continue;
@@ -93,13 +88,8 @@ int cull_segment(CullParams &r_params, bool p_translate_hits = true) {
 	_cull_hits.clear();
 	r_params.result_count = 0;
 
-	uint32_t tree_test_mask = 0;
-
 	for (int n = 0; n < NUM_TREES; n++) {
-		tree_test_mask <<= 1;
-		if (!tree_test_mask) {
-			tree_test_mask = 1;
-		}
+		const uint32_t tree_test_mask = uint32_t(1) << n;
 
 		if (_root_node_id[n] == BVHCommon::INVALID) {
 			continue;
@@ -141,12 +131,8 @@ void cast_segment(const POINT &p_from, const POINT &p_to, SegmentCastCallback p_
 	uint32_t roots[NUM_TREES];
 	real_t entry_fractions[NUM_TREES];
 	int root_count = 0;
-	uint32_t tree_test_mask = 0;
 	for (int n = 0; n < NUM_TREES; n++) {
-		tree_test_mask <<= 1;
-		if (!tree_test_mask) {
-			tree_test_mask = 1;
-		}
+		const uint32_t tree_test_mask = uint32_t(1) << n;
 		const uint32_t root_id = _root_node_id[n];
 		if (root_id == BVHCommon::INVALID || !(p_tree_collision_mask & tree_test_mask) || !_nodes[root_id].aabb.intersects_segment(segment)) {
 			continue;
@@ -178,13 +164,8 @@ int cull_point(CullParams &r_params, bool p_translate_hits = true) {
 	_cull_hits.clear();
 	r_params.result_count = 0;
 
-	uint32_t tree_test_mask = 0;
-
 	for (int n = 0; n < NUM_TREES; n++) {
-		tree_test_mask <<= 1;
-		if (!tree_test_mask) {
-			tree_test_mask = 1;
-		}
+		const uint32_t tree_test_mask = uint32_t(1) << n;
 
 		if (_root_node_id[n] == BVHCommon::INVALID) {
 			continue;
@@ -211,13 +192,8 @@ int cull_aabb(CullParams &r_params, bool p_translate_hits = true) {
 	_cull_hits.clear();
 	r_params.result_count = 0;
 
-	uint32_t tree_test_mask = 0;
-
 	for (int n = 0; n < NUM_TREES; n++) {
-		tree_test_mask <<= 1;
-		if (!tree_test_mask) {
-			tree_test_mask = 1;
-		}
+		const uint32_t tree_test_mask = uint32_t(1) << n;
 
 		if (_root_node_id[n] == BVHCommon::INVALID) {
 			continue;
