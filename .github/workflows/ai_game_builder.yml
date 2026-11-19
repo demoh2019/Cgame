@@ -43,6 +43,7 @@ jobs:
           $GODOT --headless --path misc/ai_game_builder --script res://tests/test_context.gd
           $GODOT --headless --path misc/ai_game_builder --script res://tests/test_quality.gd
           $GODOT --headless --path misc/ai_game_builder --script res://tests/test_starter.gd
+          $GODOT --headless --path misc/ai_game_builder --script res://tests/test_starter_3d.gd
       - name: Import addon and inspect editor startup errors
         shell: bash
         run: |
@@ -66,5 +67,20 @@ jobs:
           $GODOT --headless --editor --path "$STAGING" --quit 2>&1 | tee /tmp/ai-starter-import.log
           $GODOT --headless --path "$STAGING" --quit-after 5 res://ai_generated/scenes/main.tscn 2>&1 | tee /tmp/ai-starter-run.log
           if grep -Ei 'SCRIPT ERROR:|Parse Error:|Failed to load script|Failed loading resource' /tmp/ai-starter-{import,run}.log; then
+            exit 1
+          fi
+
+          # A separate, clean project verifies the 3D starter's actual scene,
+          # script parse, object creation, win condition and timeout behavior.
+          STAGING_3D="$(mktemp -d)"
+          mkdir -p "$STAGING_3D/ai_generated/scenes" "$STAGING_3D/ai_generated/scripts" "$STAGING_3D/tests"
+          printf '%s\n' 'config_version=5' '[application]' 'config/name="AI 3D Starter Smoke Test"' '[rendering]' 'renderer/rendering_method="gl_compatibility"' > "$STAGING_3D/project.godot"
+          cp misc/ai_game_builder/addons/ai_game_builder/templates/arena_3d/scenes/main.tscn "$STAGING_3D/ai_generated/scenes/main.tscn"
+          cp misc/ai_game_builder/addons/ai_game_builder/templates/arena_3d/scripts/arena_3d.gd "$STAGING_3D/ai_generated/scripts/arena_3d.gd"
+          cp misc/ai_game_builder/tests/test_runtime_3d.gd "$STAGING_3D/tests/test_runtime_3d.gd"
+          $GODOT --headless --editor --path "$STAGING_3D" --quit 2>&1 | tee /tmp/ai-3d-starter-import.log
+          $GODOT --headless --path "$STAGING_3D" --script res://tests/test_runtime_3d.gd 2>&1 | tee /tmp/ai-3d-starter-logic.log
+          $GODOT --headless --path "$STAGING_3D" --quit-after 8 res://ai_generated/scenes/main.tscn 2>&1 | tee /tmp/ai-3d-starter-run.log
+          if grep -Ei 'SCRIPT ERROR:|Parse Error:|Failed to load script|Failed loading resource' /tmp/ai-3d-starter-{import,logic,run}.log; then
             exit 1
           fi
