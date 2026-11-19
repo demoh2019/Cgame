@@ -661,4 +661,95 @@ TEST_CASE("[BitMap] Packed nearest-neighbor resize matches original sampling") {
 	}
 }
 
+TEST_CASE("[BitMap] Packed blit matches independent clipped OR overlay") {
+	const int widths[] = { 3, 8, 17, 33 };
+	const int heights[] = { 2, 9 };
+	for (int width : widths) {
+		for (int height : heights) {
+			Ref<BitMap> source;
+			source.instantiate();
+			source->create(Size2i(width, height));
+			for (int y = 0; y < height; y++) {
+				for (int x = 0; x < width; x++) {
+					if ((x * 5 + y * 11) % 3 == 0) {
+						source->set_bit(x, y, true);
+					}
+				}
+			}
+			const Vector2i offsets[] = {
+				Vector2i(-width, -height), Vector2i(-3, 1),
+				Vector2i(0, 0), Vector2i(1, 2),
+				Vector2i(width - 1, height - 1),
+				Vector2i(width + 4, height + 4),
+			};
+			for (const Vector2i &offset : offsets) {
+				BitMap destination;
+				destination.create(Size2i(width, height));
+				for (int y = 0; y < height; y++) {
+					for (int x = 0; x < width; x++) {
+						if ((x * 7 + y * 2) % 11 == 0) {
+							destination.set_bit(x, y, true);
+						}
+					}
+				}
+				destination.blit(offset, source);
+				int expected_count = 0;
+				bool all_match = true;
+				for (int y = 0; y < height; y++) {
+					for (int x = 0; x < width; x++) {
+						const int sx = x - offset.x;
+						const int sy = y - offset.y;
+						const bool original = (x * 7 + y * 2) % 11 == 0;
+						const bool copied = sx >= 0 && sx < width && sy >= 0 && sy < height &&
+								((sx * 5 + sy * 11) % 3 == 0);
+						const bool expected = original || copied;
+						expected_count += expected;
+						if (destination.get_bit(x, y) != expected) {
+							all_match = false;
+						}
+					}
+				}
+				CHECK(all_match);
+				CHECK(destination.get_true_bit_count() == expected_count);
+			}
+		}
+	}
+}
+
+TEST_CASE("[BitMap] Overlapping self-blit preserves original copy order") {
+	Ref<BitMap> bitmap;
+	bitmap.instantiate();
+	const int width = 7;
+	const int height = 5;
+	bitmap->create(Size2i(width, height));
+	Vector<uint8_t> reference;
+	reference.resize(width * height);
+	uint8_t *bits = reference.ptrw();
+	for (int y = 0; y < height; y++) {
+		for (int x = 0; x < width; x++) {
+			const bool value = (x * 3 + y * 7) % 5 == 0;
+			bits[y * width + x] = value ? 1 : 0;
+			if (value) {
+				bitmap->set_bit(x, y, true);
+			}
+		}
+	}
+	// The previous implementation iterated source columns before rows.
+	for (int x = 0; x < width; x++) {
+		for (int y = 0; y < height; y++) {
+			const int dx = x + 1;
+			const int dy = y + 1;
+			if (dx < width && dy < height && bits[y * width + x]) {
+				bits[dy * width + dx] = 1;
+			}
+		}
+	}
+	bitmap->blit(Vector2i(1, 1), bitmap);
+	for (int y = 0; y < height; y++) {
+		for (int x = 0; x < width; x++) {
+			CHECK(bitmap->get_bit(x, y) == (bits[y * width + x] != 0));
+		}
+	}
+}
+
 } // namespace TestBitMap
