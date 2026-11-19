@@ -33,6 +33,7 @@
 TEST_FORCE_LINK(test_class_db)
 
 #include "core/config/engine.h"
+#include "core/core_bind.h"
 #include "core/core_constants.h"
 #include "core/object/class_db.h"
 
@@ -888,6 +889,42 @@ TEST_SUITE("[ClassDB]") {
 			for (const KeyValue<StringName, ExposedClass> &E : context.exposed_classes) {
 				validate_class(context, E.value);
 			}
+		}
+	}
+}
+
+TEST_CASE("[CoreBind] Class metadata array conversion retains entries and order") {
+	CoreBind::ClassDB api;
+	const StringName classes[] = { "Object", "RefCounted", "Node" };
+	for (const StringName &class_name : classes) {
+		List<MethodInfo> methods;
+		::ClassDB::get_method_list(class_name, &methods, false);
+		const TypedArray<Dictionary> method_results = api.class_get_method_list(class_name, false);
+		REQUIRE_EQ(method_results.size(), methods.size());
+		int index = 0;
+		for (const MethodInfo &method : methods) {
+			Dictionary item = method_results[index++];
+			CHECK_EQ(item["name"], Variant(method.name));
+		}
+
+		List<PropertyInfo> properties;
+		::ClassDB::get_property_list(class_name, &properties, false);
+		const TypedArray<Dictionary> property_results = api.class_get_property_list(class_name, false);
+		REQUIRE_EQ(property_results.size(), properties.size());
+		index = 0;
+		for (const PropertyInfo &property : properties) {
+			Dictionary item = property_results[index++];
+			CHECK_EQ(item["name"], Variant(property.name));
+		}
+
+		List<MethodInfo> signals;
+		::ClassDB::get_signal_list(class_name, &signals, false);
+		const TypedArray<Dictionary> signal_results = api.class_get_signal_list(class_name, false);
+		REQUIRE_EQ(signal_results.size(), signals.size());
+		index = 0;
+		for (const MethodInfo &signal : signals) {
+			Dictionary item = signal_results[index++];
+			CHECK_EQ(item["name"], Variant(signal.name));
 		}
 	}
 }
