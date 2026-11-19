@@ -76,7 +76,14 @@ public:
 			}
 
 			const uint32_t page_id = pages_allocated++;
+			// Claim a unique slot under the lock, but allocate the payload
+			// outside it. Multiple producers can now allocate their new
+			// pages in parallel without serializing the system allocator.
+			spin_lock.unlock();
 			T *page = (T *)memalloc(sizeof(T) * page_size);
+			spin_lock.lock();
+			// Other threads may have reallocated the metadata array while
+			// this thread was allocating the payload, so use the current one.
 			page_pool[page_id] = page;
 			spin_lock.unlock();
 			return PageInfo{ page, page_id };
