@@ -13,6 +13,7 @@ import math
 import os
 from pathlib import Path
 import platform
+import signal
 import re
 import statistics
 import subprocess
@@ -140,11 +141,13 @@ def run_once(cmd: list[str], timeout: float, rss_limit_mib: float,
     start = time.monotonic()
     maximum_rss: float | None = None
     latest_cpu: float | None = None
+    rss_trace: list[tuple[float, float]] = []
     failure = None
     # A file, rather than a PIPE, avoids deadlock if the engine emits megabytes of errors.
     with tempfile.TemporaryFile(mode="w+t", encoding="utf-8", errors="replace") as output:
         try:
-            process = subprocess.Popen(cmd, stdout=output, stderr=subprocess.STDOUT)
+            process = subprocess.Popen(cmd, stdout=output, stderr=subprocess.STDOUT,
+                                       start_new_session=(os.name == "posix"))
         except OSError as exc:
             return {"status": "failed", "failure": "launch: %s" % exc,
                     "wall_seconds": 0.0, "peak_rss_mib": None, "exit_code": None}
@@ -156,12 +159,19 @@ def run_once(cmd: list[str], timeout: float, rss_limit_mib: float,
                 latest_cpu = current_cpu
             if current_rss is not None:
                 maximum_rss = max(maximum_rss or 0.0, current_rss)
+                rss_trace.append((elapsed, current_rss))
                 if current_rss > rss_limit_mib:
                     failure = "rss_limit_exceeded"
             if elapsed > timeout:
                 failure = "timeout"
             if failure is not None:
-                process.kill()
+                if os.name == "posix":
+                    try:
+                        os.killpg(process.pid, signal.SIGKILL)
+                    except ProcessLookupError:
+                        pass
+                else:
+                    process.kill()
                 break
             time.sleep(0.05)
         process.wait()
@@ -173,6 +183,14 @@ def run_once(cmd: list[str], timeout: float, rss_limit_mib: float,
         "wall_seconds": round(elapsed, 6),
         "peak_rss_mib": round(maximum_rss, 3) if maximum_rss is not None else None,
         "cpu_seconds": round(latest_cpu, 6) if latest_cpu is not None else None,
+        "rss_samples": len(rss_trace),
+        "rss_final_mib": round(rss_trace[-1][1], 3) if rss_trace else None,
+        # Allocator retention proxy, not a proof of a memory leak.
+        "rss_post_warmup_growth_mib": (
+            round(rss_trace[-1][1] - next((rss for t, rss in rss_trace
+                                            if t >= elapsed * 0.2), rss_trace[0][1]), 3)
+            if len(rss_trace) > 1 else None
+        ),
         "exit_code": process.returncode,
     }
     if failure is None and process.returncode != 0:
@@ -196,6 +214,12 @@ def summarize(runs: list[dict[str, Any]]) -> dict[str, Any]:
     wall = sorted(r["wall_seconds"] for r in passed)
     memories = [r["peak_rss_mib"] for r in runs if r["peak_rss_mib"] is not None]
     cpu_times = [r["cpu_seconds"] for r in passed if r.get("cpu_seconds") is not None]
+    rss_growth = [r["rss_post_warmup_growth_mib"] for r in passed
+                  if r.get("rss_post_warmup_growth_mib") is not None]
+    frame_p95 = [r["engine"]["detail"].get("frame_latency_ms", {}).get("p95")
+                 for r in passed if "engine" in r]
+    physics_p95 = [r["engine"]["detail"].get("physics_latency_ms", {}).get("p95")
+                   for r in passed if "engine" in r]
     engine_times = sorted(r["engine"]["duration_ms"] for r in passed if r.get("engine"))
     engine_memory = [r["engine"]["engine_memory_after_bytes"] for r in passed
                      if isinstance(r.get("engine"), dict) and isinstance(r["engine"].get("engine_memory_after_bytes"), (int, float))]
@@ -205,6 +229,9 @@ def summarize(runs: list[dict[str, Any]]) -> dict[str, Any]:
         "p95_wall_seconds": round(wall[math.ceil(0.95 * len(wall)) - 1], 6) if wall else None,
         "max_rss_mib": round(max(memories), 3) if memories else None,
         "median_cpu_seconds": round(statistics.median(cpu_times), 6) if cpu_times else None,
+        "max_post_warmup_rss_growth_mib": round(max(rss_growth), 3) if rss_growth else None,
+        "max_p95_frame_ms": max((v for v in frame_p95 if v is not None), default=None),
+        "max_p95_physics_ms": max((v for v in physics_p95 if v is not None), default=None),
         "median_engine_ms": round(statistics.median(engine_times), 6) if engine_times else None,
         "p95_engine_ms": round(engine_times[math.ceil(0.95 * len(engine_times)) - 1], 6) if engine_times else None,
         "max_engine_memory_bytes": max(engine_memory) if engine_memory else None,
@@ -215,7 +242,7 @@ def summarize(runs: list[dict[str, Any]]) -> dict[str, Any]:
 def compare_baseline(current: dict[str, Any], baseline: dict[str, Any],
                      percent: float, memory_growth_limit_mib: float | None) -> list[str]:
     errors: list[str] = []
-    keys = ("preset", "scale", "frames", "render_mode", "seed")
+    keys = ("preset", "scale", "frames", "render_mode", "seed", "ramp", "ramp_steps", "ramp_factor")
     for key in keys:
         if current.get("configuration", {}).get(key) != baseline.get("configuration", {}).get(key):
             raise ValueError("Baseline configuration mismatch: %s" % key)
@@ -228,14 +255,17 @@ def compare_baseline(current: dict[str, Any], baseline: dict[str, Any],
             if new is not None and old is not None and old > 0 and new > old * (1 + percent / 100.0):
                 errors.append("%s %s: %.3f > %.3f (baseline + %.1f%%)" %
                               (name, field, new, old, percent))
-    if memory_growth_limit_mib is not None and "memory_churn" in current["cases"]:
-        for run in current["cases"]["memory_churn"]["runs"]:
-            if run["status"] != "passed":
+    if memory_growth_limit_mib is not None:
+        for name, case in current["cases"].items():
+            if name.split("@", 1)[0] != "memory_churn":
                 continue
-            growth = run["engine"]["detail"]["retained_growth_bytes"] / 1048576.0
-            if growth > memory_growth_limit_mib:
-                errors.append("memory_churn retained growth %.3f MiB > %.3f MiB" %
-                              (growth, memory_growth_limit_mib))
+            for run in case["runs"]:
+                if run["status"] != "passed":
+                    continue
+                growth = run["engine"]["detail"]["retained_growth_bytes"] / 1048576.0
+                if growth > memory_growth_limit_mib:
+                    errors.append("%s retained growth %.3f MiB > %.3f MiB" %
+                                  (name, growth, memory_growth_limit_mib))
     return errors
 
 
