@@ -174,6 +174,13 @@ func _run() -> void:
 	_check(repair_text.contains("main.tscn"), "repair includes previous scene")
 	_check(repair_text.contains("COMPLETE replacement JSON"), "repair asks for complete plan")
 
+	var refinement := Inspector.refine_prompt("Make a runner", "Add a boss", clean_scene)
+	_check(refinement.contains("Make a runner"), "refinement retains original goal")
+	_check(refinement.contains("Add a boss"), "refinement includes new requested feature")
+	_check(refinement.contains("main.tscn"), "refinement includes existing scene")
+	_check(refinement.contains("COMPLETE replacement JSON"), "refinement requests complete plan")
+	_check(refinement.contains("Preserve working features"), "refinement asks to preserve existing mechanics")
+
 
 	# Writer integration runs only in the disposable test project.
 	var output := "res://ai_generated/tests/generated.txt"
