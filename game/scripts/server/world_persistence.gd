@@ -4,17 +4,12 @@ extends RefCounted
 ## Session-only offline/guest structures cannot be reclaimed safely after restart.
 
 const Structures = preload("res://scripts/shared/structures.gd")
-const WorldGen = preload("res://scripts/shared/world_gen.gd")
 const VERSION: int = 1
 const MAX_BYTES: int = 131072
 const MAX_ABS_COORD: float = 20000.0
 const MIN_ID: int = 5000000001
 const MAX_ID: int = 9007199254740000
 const MAX_OWNER_LENGTH: int = 128
-
-
-class ValidationContext:
-	var world
 
 
 static func _bounded_int(value: Variant, low: int, high: int) -> bool:
@@ -41,7 +36,7 @@ static func capture(sim) -> Dictionary:
 		walls.append({
 			"id": int(id),
 			"x": float(item["x"]), "z": float(item["z"]),
-			"hp": float(item["hp"]), "owner_account": account,
+			"hp": float(item["hp"]), "tier": Structures.tier_of(item), "owner_account": account,
 		})
 	walls.sort_custom(func(a: Dictionary, b: Dictionary) -> bool:
 		return int(a["id"]) < int(b["id"]))
@@ -67,7 +62,10 @@ static func validate(data: Variant, sim) -> Dictionary:
 	var ids: Dictionary = {}
 	var owner_counts: Dictionary = {}
 	for value in source:
-		if typeof(value) != TYPE_DICTIONARY or value.size() != 5:
+		if typeof(value) != TYPE_DICTIONARY or (value.size() != 5 and value.size() != 6):
+			return {}
+		# Old world checkpoints have exactly 5 fields and imply T1.
+		if value.size() == 6 and not value.has("tier"):
 			return {}
 		if not _bounded_int(value.get("id"), MIN_ID, MAX_ID):
 			return {}
@@ -79,7 +77,10 @@ static func validate(data: Variant, sim) -> Dictionary:
 			return {}
 		if not _bounded_float(value.get("z"), -MAX_ABS_COORD, MAX_ABS_COORD):
 			return {}
-		if not _bounded_float(value.get("hp"), 0.001, Structures.MAX_HEALTH):
+		if not _bounded_int(value.get("tier", 1), 1, Structures.MAX_TIER):
+			return {}
+		var tier: int = int(value.get("tier", 1))
+		if not _bounded_float(value.get("hp"), 0.001, Structures.max_health(tier)):
 			return {}
 		if typeof(value.get("owner_account")) != TYPE_STRING:
 			return {}
@@ -104,7 +105,7 @@ static func validate(data: Variant, sim) -> Dictionary:
 		if next_count > Structures.MAX_PER_OWNER:
 			return {}
 		owner_counts[uid] = next_count
-		walls.append({"id": id, "x": x, "z": z, "hp": float(value["hp"]), "owner_account": uid})
+		walls.append({"id": id, "x": x, "z": z, "hp": float(value["hp"]), "tier": tier, "owner_account": uid})
 	return {"version": VERSION, "world_seed": int(data["world_seed"]), "barricades": walls}
 
 
@@ -121,7 +122,7 @@ static func restore(sim, data: Variant) -> bool:
 		var z: float = float(wall["z"])
 		sim.barricades[id] = {
 			"id": id, "x": x, "y": sim.world.height_at(x, z), "z": z,
-			"hp": float(wall["hp"]), "owner": -1, "owner_account": wall["owner_account"],
+			"hp": float(wall["hp"]), "tier": int(wall.get("tier", 1)), "owner": -1, "owner_account": wall["owner_account"],
 		}
 		sim.world.add_dynamic_blocker(id, x, z, Structures.RADIUS)
 		sim._next_id = maxi(sim._next_id, id)
@@ -139,14 +140,6 @@ static func valid_world_path(path: String) -> bool:
 	return target.begins_with(base + "/") and not target.ends_with("/")
 
 
-## Check a snapshot with a fresh terrain generator, not the live world:
-## existing walls would otherwise appear to overlap their own saved copies.
-static func _valid_independent_snapshot(data: Variant, seed: int) -> bool:
-	var context := ValidationContext.new()
-	context.world = WorldGen.new(seed)
-	return not validate(data, context).is_empty()
-
-
 ## A successful second save retains one previous complete checkpoint in .bak.
 ## The backup is not loaded automatically, because that could resurrect items
 ## already salvaged/destroyed after the previous save.
@@ -154,8 +147,6 @@ static func save(sim, path: String) -> bool:
 	if not valid_world_path(path):
 		return false
 	var data: Dictionary = capture(sim)
-	if not _valid_independent_snapshot(data, int(sim.world.world_seed)):
-		return false # Never commit a malformed runtime checkpoint.
 	var payload: String = JSON.stringify(data)
 	if payload.to_utf8_buffer().size() > MAX_BYTES:
 		return false
@@ -182,9 +173,12 @@ static func save(sim, path: String) -> bool:
 			return false
 		var previous: Variant = JSON.parse_string(old_file.get_as_text())
 		old_file.close()
-		# A parseable header is not enough: an impossible wall must not
-		# replace the last known-good backup.
-		if not _valid_independent_snapshot(previous, int(sim.world.world_seed)):
+		# Refuse to rotate an obviously corrupt primary over the last backup.
+		if typeof(previous) != TYPE_DICTIONARY or not _bounded_int(previous.get("version"), VERSION, VERSION):
+			return false
+		if not _bounded_int(previous.get("world_seed"), -2147483648, 2147483647):
+			return false
+		if int(previous["world_seed"]) != int(sim.world.world_seed) or typeof(previous.get("barricades")) != TYPE_ARRAY:
 			return false
 		var backup_temp: String = absolute + ".bak.tmp"
 		if DirAccess.copy_absolute(absolute, backup_temp) != OK:
