@@ -836,6 +836,11 @@ func _update_hud() -> void:
 		weight, speed_pct, survivor.inventory.count("silver"),
 		Contracts.description(survivor.contract_state), ", ".join(rows)
 	]
+	var equipped_ammo: String = str(Defs.item(survivor.inventory.weapon).get("ammo", ""))
+	if not equipped_ammo.is_empty():
+		_stats.text += "\nARROWS / AMMO: %s ×%d" % [
+			str(Defs.item(equipped_ammo).get("name", equipped_ammo)),
+			survivor.inventory.count(equipped_ammo)]
 	var local_armor: String = survivor.inventory.armor
 	if local_armor != "" and survivor.inventory.count(local_armor) <= 0:
 		local_armor = ""
