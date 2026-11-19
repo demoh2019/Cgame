@@ -216,6 +216,10 @@ private:
 	real_t fluid_angular_drag = 0.0; // Uniform-medium quadratic angular resistance.
 	real_t fluid_buoyancy = 0.0; // 0 = off; 1 = neutral in the fully submerged model.
 	Vector3 fluid_flow_velocity; // Constant ambient current or wind, in world space.
+	real_t sphere_magnus_spin_coefficient = 0.0; // Off by default.
+	real_t sphere_magnus_medium_density = 1.225; // Air density kg/m^3.
+	real_t sphere_magnus_max_lift_coefficient = 1.5;
+	Vector3 sphere_magnus_flow_velocity; // Magnus medium velocity, world space.
 	// Advanced, opt-in flat water plane: displacement per partly submerged shape.
 	bool fluid_plane_enabled = false;
 	real_t fluid_plane_surface_height = 0.0;
@@ -410,6 +414,10 @@ public:
 	_FORCE_INLINE_ real_t get_fluid_angular_drag() const { return fluid_angular_drag; }
 	_FORCE_INLINE_ real_t get_fluid_buoyancy() const { return fluid_buoyancy; }
 	_FORCE_INLINE_ const Vector3 &get_fluid_flow_velocity() const { return fluid_flow_velocity; }
+	_FORCE_INLINE_ real_t get_sphere_magnus_spin_coefficient() const { return sphere_magnus_spin_coefficient; }
+	_FORCE_INLINE_ real_t get_sphere_magnus_medium_density() const { return sphere_magnus_medium_density; }
+	_FORCE_INLINE_ real_t get_sphere_magnus_max_lift_coefficient() const { return sphere_magnus_max_lift_coefficient; }
+	_FORCE_INLINE_ const Vector3 &get_sphere_magnus_flow_velocity() const { return sphere_magnus_flow_velocity; }
 	_FORCE_INLINE_ bool is_fluid_plane_enabled() const { return fluid_plane_enabled; }
 	_FORCE_INLINE_ real_t get_fluid_plane_surface_height() const { return fluid_plane_surface_height; }
 	_FORCE_INLINE_ real_t get_fluid_plane_density() const { return fluid_plane_density; }
