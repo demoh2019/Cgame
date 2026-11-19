@@ -35,7 +35,10 @@ TEST_FORCE_LINK(test_sort_array)
 #include "core/templates/sort_array.h"
 #include "core/templates/vector.h"
 
+#include <algorithm>
+#include <cstdint>
 #include <memory>
+#include <vector>
 
 namespace TestSortArray {
 
@@ -569,6 +572,54 @@ TEST_CASE("[SortArray] Partial heap sort avoids copies and preserves all values"
 	}
 	for (int key = 0; key < 17; key++) {
 		CHECK(before[key] == after[key]);
+	}
+}
+
+TEST_CASE("[SortArray] Large unbalanced and duplicate partitions match std::sort") {
+	SortArray<int> sorter;
+	CHECK(sorter.bitlog(0) == 0);
+	CHECK(sorter.bitlog(1) == 0);
+	CHECK(sorter.bitlog(2) == 1);
+	CHECK(sorter.bitlog(3) == 1);
+	CHECK(sorter.bitlog(256) == 8);
+	CHECK(sorter.bitlog(INT64_C(1) << 40) == 40);
+
+	for (int pattern = 0; pattern < 6; pattern++) {
+		std::vector<int> values(8192);
+		for (int i = 0; i < int(values.size()); i++) {
+			switch (pattern) {
+				case 0: values[i] = i; break;
+				case 1: values[i] = int(values.size()) - i; break;
+				case 2: values[i] = i & 3; break;
+				case 3: values[i] = (i < int(values.size()) / 2) ? i : int(values.size()) - i; break;
+				case 4: values[i] = (i * 37) % 257; break;
+				default: values[i] = (i & 1) ? -1000 : 1000; break;
+			}
+		}
+		std::vector<int> expected = values;
+		std::sort(expected.begin(), expected.end());
+		sorter.sort(values.data(), values.size());
+		CHECK(values == expected);
+	}
+}
+
+TEST_CASE("[SortArray] Small and large partition boundaries preserve guard values") {
+	SortArray<int> sorter;
+	for (int length : { 0, 1, 2, 15, 16, 17, 18, 31, 32, 33, 1024, 4096 }) {
+		std::vector<int> storage(length + 2);
+		storage.front() = -54321;
+		storage.back() = 54321;
+		for (int i = 0; i < length; i++) {
+			storage[i + 1] = ((i * 73) ^ (length * 11)) & 511;
+		}
+		std::vector<int> expected(storage.begin() + 1, storage.end() - 1);
+		std::sort(expected.begin(), expected.end());
+		sorter.sort_range(1, length + 1, storage.data());
+		CHECK(storage.front() == -54321);
+		CHECK(storage.back() == 54321);
+		for (int i = 0; i < length; i++) {
+			CHECK(storage[i + 1] == expected[i]);
+		}
 	}
 }
 
