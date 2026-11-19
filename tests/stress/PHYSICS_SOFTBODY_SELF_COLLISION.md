@@ -127,7 +127,7 @@ The CCD evaluation budget is **8,192 moving vertex/face pairs and
 discrete BVH visit limits. This is intentionally a CPU/quality tradeoff:
 heavy folds may exceed the budget, while this solver may miss very
 brief, degenerate or extreme-speed contacts because it is a bounded,
-approximate conservative advancement, **not** exact interval/root-based
+approximate conservative advancement, not exact interval/root-based
 CCD. Once a particle is rewound by an earlier collision, subsequent
 contacts are resolved against its corrected trajectory and may not be
 symmetric or energy conserving. Global CCD for separate soft bodies,
