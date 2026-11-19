@@ -182,6 +182,10 @@ func move_stash(item_id: String, count: int, deposit: bool) -> void:
 	net.c_stash.rpc_id(1, item_id, count, deposit)
 
 
+func vendor(item_id: String, quantity: int, buy: bool) -> void:
+	net.c_vendor.rpc_id(1, item_id, quantity, buy)
+
+
 func attack(direction: Vector2) -> void:
 	net.c_attack.rpc_id(1, direction.x, direction.y)
 
