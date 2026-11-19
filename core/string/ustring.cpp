@@ -5246,39 +5246,40 @@ String String::get_base_dir() const {
 		}
 	}
 
-	String rs;
-	String base;
-	if (end != 0) {
-		rs = substr(end, length());
-		base = substr(0, end);
-	} else {
-		rs = *this;
+	// Search the original buffer directly instead of allocating temporary
+	// prefix and suffix strings, then concatenating them again.
+	const char32_t *characters = ptr();
+	for (int i = length() - 1; i >= end; --i) {
+		if (characters[i] == '/' || characters[i] == '\\') {
+			return substr(0, i);
+		}
 	}
 
-	int sep = MAX(rs.rfind_char('/'), rs.rfind_char('\\'));
-	if (sep == -1) {
-		return base;
-	}
-
-	return base + rs.substr(0, sep);
+	return end > 0 ? substr(0, end) : String();
 }
 
 String String::get_file() const {
-	int sep = MAX(rfind_char('/'), rfind_char('\\'));
-	if (sep == -1) {
-		return *this;
+	const char32_t *characters = ptr();
+	for (int i = length() - 1; i >= 0; --i) {
+		if (characters[i] == '/' || characters[i] == '\\') {
+			return substr(i + 1);
+		}
 	}
-
-	return substr(sep + 1, length());
+	return *this;
 }
 
 String String::get_extension() const {
-	int pos = rfind_char('.');
-	if (pos < 0 || pos < MAX(rfind_char('/'), rfind_char('\\'))) {
-		return "";
+	// Stop at the first directory separator: earlier dots are not extensions.
+	const char32_t *characters = ptr();
+	for (int i = length() - 1; i >= 0; --i) {
+		if (characters[i] == '/' || characters[i] == '\\') {
+			break;
+		}
+		if (characters[i] == '.') {
+			return substr(i + 1);
+		}
 	}
-
-	return substr(pos + 1, length());
+	return "";
 }
 
 String String::path_join(const String &p_file) const {
