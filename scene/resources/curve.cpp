@@ -416,8 +416,8 @@ real_t Curve::sample(real_t p_offset) const {
 }
 
 real_t Curve::sample_local_nocheck(int p_index, real_t p_local_offset) const {
-	const Point a = _points[p_index];
-	const Point b = _points[p_index + 1];
+	const Point &a = _points[p_index];
+	const Point &b = _points[p_index + 1];
 
 	/* Cubic bézier
 	 *
@@ -536,9 +536,39 @@ void Curve::_bake() const {
 	real_t *const values = _baked_cache.ptrw();
 
 	const real_t domain_range = get_domain_range();
+	const int count = _points.size();
+	const Point *points = _points.ptr();
+
+	// Baking visits increasing x coordinates. For ordinary strictly ordered
+	// control points, a single forward cursor replaces one binary search per
+	// sample: O(resolution + points) rather than O(resolution * log(points)).
+	// Duplicate or non-finite control offsets retain the old search path.
+	bool strictly_ordered = Math::is_finite(domain_range);
+	for (int i = 1; strictly_ordered && i < count; i++) {
+		if (!Math::is_finite(points[i - 1].position.x) || !Math::is_finite(points[i].position.x) || points[i].position.x <= points[i - 1].position.x) {
+			strictly_ordered = false;
+		}
+	}
+
+	int segment = 0;
 	for (int i = 1; i < _bake_resolution - 1; ++i) {
 		const real_t x = domain_range * i / static_cast<real_t>(_bake_resolution - 1) + _min_domain;
-		values[i] = sample(x);
+		if (!strictly_ordered || count < 2) {
+			values[i] = sample(x);
+			continue;
+		}
+
+		while (segment + 1 < count && points[segment + 1].position.x < x) {
+			segment++;
+		}
+
+		if (x <= points[0].position.x) {
+			values[i] = points[0].position.y;
+		} else if (segment == count - 1 || x >= points[count - 1].position.x) {
+			values[i] = points[count - 1].position.y;
+		} else {
+			values[i] = sample_local_nocheck(segment, x - points[segment].position.x);
+		}
 	}
 
 	// Always overwrite the endpoints: the buffer may have been reused from
