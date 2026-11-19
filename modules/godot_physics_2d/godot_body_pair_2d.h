@@ -82,6 +82,7 @@ class GodotBodyPair2D : public GodotConstraint2D {
 	bool check_ccd = false;
 	bool oneway_disabled = false;
 	bool report_contacts_only = false;
+	real_t friction = 0.0;
 
 	bool _test_ccd(real_t p_step, GodotBody2D *p_A, int p_shape_A, const Transform2D &p_xform_A, GodotBody2D *p_B, int p_shape_B, const Transform2D &p_xform_B);
 	void _validate_contacts();
