@@ -78,10 +78,11 @@ _FORCE_INLINE_ double physics_ccd_uniform_sphere_scale(const Transform3D &p_tran
 // displacement of A relative to B during one step. The fraction lies in [0,1].
 // This avoids the support-ray false negatives of a glancing sphere/sphere hit.
 //
-// Use the stable root c / (-b + sqrt(b*b - a*c)) of
-// a*t*t + 2*b*t + c = 0, with a=motion^2 and c=distance^2-radius^2.
-// The direct quadratic root loses precision for distant starting positions.
-// All intermediates are double so a finite float32 sweep does not overflow.
+// Compute the closest point on the relative trajectory, then step back
+// sqrt(radius^2 - closest_distance^2) along its direction. Avoid the usual
+// quadratic discriminant: even in double, subtracting squared coordinates
+// of order 1e16 can erase a unit-radius hit. Double intermediates keep
+// finite float32 sweeps from overflowing their squared lengths.
 _FORCE_INLINE_ bool physics_ccd_sphere_toi(double p_x, double p_y, double p_z,
 		double p_dx, double p_dy, double p_dz, double p_radius, double &r_fraction) {
 	if (!(p_radius > 0.0)) {
@@ -89,20 +90,23 @@ _FORCE_INLINE_ bool physics_ccd_sphere_toi(double p_x, double p_y, double p_z,
 	}
 	const double radius_squared = p_radius * p_radius;
 	const double a = p_dx * p_dx + p_dy * p_dy + p_dz * p_dz;
-	const double c = p_x * p_x + p_y * p_y + p_z * p_z - radius_squared;
+	const double initial_distance_squared = p_x * p_x + p_y * p_y + p_z * p_z;
 	const double b = p_x * p_dx + p_y * p_dy + p_z * p_dz;
-	if (!(a > 0.0 && c > 0.0 && b < 0.0)) {
+	if (!(a > 0.0 && initial_distance_squared > radius_squared && b < 0.0)) {
 		return false; // Stationary, initially touching/overlapping, or receding.
 	}
-	const double discriminant = b * b - a * c;
-	if (!(discriminant >= 0.0)) {
+
+	const double closest_fraction = -b / a;
+	const double closest_x = p_x + p_dx * closest_fraction;
+	const double closest_y = p_y + p_dy * closest_fraction;
+	const double closest_z = p_z + p_dz * closest_fraction;
+	const double gap_squared = radius_squared -
+			(closest_x * closest_x + closest_y * closest_y + closest_z * closest_z);
+	if (!(gap_squared >= 0.0)) {
 		return false;
 	}
-	const double denominator = -b + Math::sqrt(discriminant);
-	if (!(denominator > 0.0)) {
-		return false;
-	}
-	const double fraction = c / denominator;
+
+	const double fraction = closest_fraction - Math::sqrt(gap_squared / a);
 	if (!(fraction >= 0.0 && fraction <= 1.0)) {
 		return false;
 	}
