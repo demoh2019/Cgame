@@ -98,6 +98,10 @@ class XPBDSelfCollisionScale(unittest.TestCase):
         source = (ROOT / "servers/physics_xpbd_self_collision.h").read_text()
         self.assertIn("double(p_b.x) - double(p_a.x)", source)
         self.assertIn("const double normal_squared =", source)
+        # Brace initialization avoids C++'s most-vexing-parse, where
+        # Vector3(real_t(nx), real_t(ny), real_t(nz)) declares a function.
+        self.assertIn("const Vector3 normal{ real_t(nx), real_t(ny), real_t(nz) };", source)
+        self.assertIn("const Vector3 barycentric{ real_t(u), real_t(v), real_t(w) };", source)
         self.assertIn("normal_squared > scale_squared * 1.0e-20", source)
         self.assertIn("const double v = (d11 * d20 - d01 * d21) / normal_squared;", source)
         self.assertNotIn("const Vector3 normal = ab.cross(ac);", source)
