@@ -36,6 +36,7 @@
 #include "servers/physics_3d/physics_server_3d_rendering_server_handler.h"
 #include "servers/physics_softbody_bending_plasticity.h"
 #include "servers/physics_softbody_link_damping.h"
+#include "servers/physics_softbody_strain_rate_damping.h"
 #include "servers/physics_softbody_membrane_damping.h"
 #include "servers/physics_softbody_dihedral_damping.h"
 #include "servers/physics_softbody_aero_lift.h"
@@ -49,6 +50,7 @@
 #include "servers/physics_softbody_volume_safe.h"
 #include "servers/physics_xpbd_distance.h"
 #include "servers/physics_xpbd_tension_hardening.h"
+#include "servers/physics_xpbd_compression_hardening.h"
 #include "servers/physics_xpbd_area.h"
 #include "servers/physics_xpbd_dihedral.h"
 #include "servers/physics_xpbd_shear.h"
@@ -2642,6 +2644,21 @@ void GodotSoftBody3D::solve_constraints(real_t p_delta) {
 		}
 	}
 
+	// Rate-sensitive dashpots model viscoelastic shock absorption: only link
+	// strain rates above the yield threshold are damped. Mass-weighted impulses
+	// conserve momentum and leave pinned vertices untouched. With the default
+	// coefficient=0, this entire O(links) pass is skipped.
+	const real_t strain_rate_damping = get_space()->get_soft_body_strain_rate_damping();
+	if (strain_rate_damping > real_t(0.0) && p_delta > real_t(0.0)) {
+		const real_t strain_rate_yield = get_space()->get_soft_body_strain_rate_yield();
+		for (Link &link : links) {
+			Node &a = *link.n[0];
+			Node &b = *link.n[1];
+			physics_softbody_damp_strain_rate(a.x, b.x, a.v, b.v,
+					a.im, b.im, link.rl, strain_rate_damping, strain_rate_yield, double(p_delta));
+		}
+	}
+
 	// Angular dashpots remove relative hinge folding velocity (the mode that
 	// longitudinal link damping does not damp). This belongs before the
 	// velocity-to-position prediction below: after positional projections,
@@ -2735,6 +2752,8 @@ void GodotSoftBody3D::solve_constraints(real_t p_delta) {
 	const bool use_xpbd = compliance > 0.0 && Math::is_finite(alpha_double) && alpha_double > 0.0;
 	const real_t tension_hardening = get_space() ? get_space()->get_soft_body_xpbd_tension_hardening() : real_t(0.0);
 	const bool use_tension_hardening = use_xpbd && tension_hardening > real_t(0.0);
+	const real_t compression_hardening = get_space() ? get_space()->get_soft_body_xpbd_compression_hardening() : real_t(0.0);
+	const bool use_compression_hardening = use_xpbd && compression_hardening > real_t(0.0);
 	// Unilateral strain limits supplement (rather than replace) the elastic
 	// stretch solver. No extra per-link scratch or work with both ratios 0.
 	const real_t strain_max_ratio = get_space() ? get_space()->get_soft_body_xpbd_strain_max_stretch_ratio() : real_t(0.0);
@@ -2809,14 +2828,23 @@ void GodotSoftBody3D::solve_constraints(real_t p_delta) {
 
 	// Freeze nonlinear compliance for the whole physics step. Recomputing
 	// alpha within iterations while retaining lambda causes oscillation.
-	if (use_tension_hardening) {
+	if (use_tension_hardening || use_compression_hardening) {
 		xpbd_link_hardening_alphas.resize(links.size());
 		const real_t yield_strain = get_space()->get_soft_body_xpbd_tension_yield_strain();
+		const real_t compression_yield = get_space()->get_soft_body_xpbd_compression_yield_strain();
 		for (uint32_t link_index = 0; link_index < links.size(); ++link_index) {
 			const Link &link = links[link_index];
 			real_t link_alpha = alpha;
-			physics_xpbd_tension_hardening_alpha(link.n[0]->x, link.n[1]->x,
-					link.rl, alpha, yield_strain, tension_hardening, link_alpha);
+			if (use_tension_hardening) {
+				physics_xpbd_tension_hardening_alpha(link.n[0]->x, link.n[1]->x,
+						link.rl, alpha, yield_strain, tension_hardening, link_alpha);
+			}
+			if (use_compression_hardening) {
+				// Tension and compression are disjoint. Preserve the alpha set
+				// above if this link happens to be in tension.
+				physics_xpbd_compression_hardening_alpha(link.n[0]->x, link.n[1]->x,
+						link.rl, link_alpha, compression_yield, compression_hardening, link_alpha);
+			}
 			xpbd_link_hardening_alphas[link_index] = link_alpha;
 		}
 	} else if (!xpbd_link_hardening_alphas.is_empty()) {
@@ -2916,7 +2944,7 @@ void GodotSoftBody3D::solve_constraints(real_t p_delta) {
 				if (link.c0 > 0.0) {
 					physics_xpbd_solve_distance(link.n[0]->x, link.n[1]->x,
 							link.n[0]->im, link.n[1]->im, link.rl,
-							use_tension_hardening ? xpbd_link_hardening_alphas[link_index] : alpha,
+							(use_tension_hardening || use_compression_hardening) ? xpbd_link_hardening_alphas[link_index] : alpha,
 							xpbd_link_lambdas[link_index]);
 				}
 			}

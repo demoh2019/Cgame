@@ -128,10 +128,14 @@ private:
 	real_t soft_body_xpbd_strain_limit_compliance = 0.0; // 0: hard unilateral constraints.
 	real_t soft_body_xpbd_compliance = 0.0; // Legacy PBD remains the default.
 	real_t soft_body_xpbd_tension_hardening = 0.0; // Opt-in nonlinear tensile response.
+	real_t soft_body_xpbd_compression_hardening = 0.0; // Opt-in compression stiffening for foams.
 	real_t soft_body_xpbd_tension_yield_strain = 0.1;
+	real_t soft_body_xpbd_compression_yield_strain = 0.1;
 	real_t soft_body_plastic_yield_strain = 0.1; // Relative elastic yield limit.
 	real_t soft_body_plastic_creep_rate = 0.0; // 1/second; 0 keeps elastic behavior.
 	real_t soft_body_link_damping = 0.0; // Optional longitudinal dashpot rate, 1/s.
+	real_t soft_body_strain_rate_damping = 0.0; // Optional rate-sensitive longitudinal damping.
+	real_t soft_body_strain_rate_yield = 0.0; // Minimum relative link strain rate [1/s].
 	real_t soft_body_lift_coefficient = 0.0; // Two-sided aerodynamic cloth lift, opt-in.
 	real_t soft_body_gas_pressure_gamma = 0.0; // 0: legacy pressure, >0: sealed gas EOS.
 	real_t soft_body_tangential_drag_ratio = 0.0; // Optional skin friction on cloth faces.
@@ -273,10 +277,14 @@ public:
 	_FORCE_INLINE_ real_t get_soft_body_xpbd_strain_limit_compliance() const { return soft_body_xpbd_strain_limit_compliance; }
 	_FORCE_INLINE_ real_t get_soft_body_xpbd_compliance() const { return soft_body_xpbd_compliance; }
 	_FORCE_INLINE_ real_t get_soft_body_xpbd_tension_hardening() const { return soft_body_xpbd_tension_hardening; }
+	_FORCE_INLINE_ real_t get_soft_body_xpbd_compression_hardening() const { return soft_body_xpbd_compression_hardening; }
 	_FORCE_INLINE_ real_t get_soft_body_xpbd_tension_yield_strain() const { return soft_body_xpbd_tension_yield_strain; }
+	_FORCE_INLINE_ real_t get_soft_body_xpbd_compression_yield_strain() const { return soft_body_xpbd_compression_yield_strain; }
 	_FORCE_INLINE_ real_t get_soft_body_plastic_yield_strain() const { return soft_body_plastic_yield_strain; }
 	_FORCE_INLINE_ real_t get_soft_body_plastic_creep_rate() const { return soft_body_plastic_creep_rate; }
 	_FORCE_INLINE_ real_t get_soft_body_link_damping() const { return soft_body_link_damping; }
+	_FORCE_INLINE_ real_t get_soft_body_strain_rate_damping() const { return soft_body_strain_rate_damping; }
+	_FORCE_INLINE_ real_t get_soft_body_strain_rate_yield() const { return soft_body_strain_rate_yield; }
 	_FORCE_INLINE_ real_t get_soft_body_lift_coefficient() const { return soft_body_lift_coefficient; }
 	_FORCE_INLINE_ real_t get_soft_body_gas_pressure_gamma() const { return soft_body_gas_pressure_gamma; }
 	_FORCE_INLINE_ real_t get_soft_body_tangential_drag_ratio() const { return soft_body_tangential_drag_ratio; }
