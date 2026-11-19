@@ -34,5 +34,7 @@ jobs:
           platform: linuxbsd
           target: editor
           scons-flags: dev_build=yes tests=yes debug_symbols=no module_mono_enabled=no module_text_server_fb_enabled=yes accesskit=no -j2
-      - name: Validate rectangular grid rebuilds and occupancy
-        run: ./bin/godot.linuxbsd.editor.dev.x86_64 --headless --test --test-case="*[AStarGrid2D] Repeated grid rebuild preserves padded mask and point coordinates*"
+      - name: Validate rectangular grid rebuilds, bounded neighbor traversal and corner policies
+        run: |
+          ./bin/godot.linuxbsd.editor.dev.x86_64 --headless --test --test-case="*[AStarGrid2D] Repeated grid rebuild preserves padded mask and point coordinates*"
+          ./bin/godot.linuxbsd.editor.dev.x86_64 --headless --test --test-case="*[AStarGrid2D] Fixed-capacity neighbors preserve corner policies and paths*"
