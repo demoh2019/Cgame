@@ -1340,6 +1340,12 @@ GodotSpace3D::GodotSpace3D() {
 	soft_body_xpbd_shear_compliance = Math::is_finite(configured_shear_compliance) ? MAX(real_t(0.0), configured_shear_compliance) : real_t(0.0);
 	const real_t configured_dihedral_compliance = GLOBAL_GET("physics/3d/solver/soft_body_xpbd_dihedral_compliance");
 	soft_body_xpbd_dihedral_compliance = Math::is_finite(configured_dihedral_compliance) ? MAX(real_t(0.0), configured_dihedral_compliance) : real_t(0.0);
+	const real_t configured_bend_weft_ratio = GLOBAL_GET("physics/3d/solver/soft_body_xpbd_bend_weft_ratio");
+	soft_body_xpbd_bend_weft_ratio = Math::is_finite(configured_bend_weft_ratio) && configured_bend_weft_ratio > 0.0 ?
+			CLAMP(configured_bend_weft_ratio, real_t(0.01), real_t(100.0)) : real_t(1.0);
+	const Vector3 configured_bend_warp_axis = GLOBAL_GET("physics/3d/solver/soft_body_xpbd_bend_warp_axis");
+	soft_body_xpbd_bend_warp_axis = configured_bend_warp_axis.is_finite() && configured_bend_warp_axis.length_squared() > 0.0 &&
+			Math::is_finite(configured_bend_warp_axis.length_squared()) ? configured_bend_warp_axis : Vector3(1, 0, 0);
 	const real_t configured_shape_stiffness = GLOBAL_GET("physics/3d/solver/soft_body_shape_matching_stiffness");
 	soft_body_shape_matching_stiffness = Math::is_finite(configured_shape_stiffness) ? CLAMP(configured_shape_stiffness, real_t(0.0), real_t(1.0)) : real_t(0.0);
 	const int configured_shape_cluster_size = GLOBAL_GET("physics/3d/solver/soft_body_shape_matching_cluster_size");
