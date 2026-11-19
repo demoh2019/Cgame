@@ -1250,6 +1250,60 @@ static void _collision_capsule_capsule(const GodotShape2D *p_a, const Transform2
 		return;
 	}
 
+	// Capsule center segments give an exact distance test for rigid, stationary
+	// capsules. Reject noncontacts before the SAT support projections, and
+	// answer overlap-only queries without constructing a contact manifold.
+	// Contact-producing queries still use SAT to retain side-side manifolds.
+	if (!p_cast_A && !p_cast_B && p_margin_A >= 0.0 && p_margin_B >= 0.0 &&
+			capsule_A->get_radius() > 0.0 && capsule_B->get_radius() > 0.0 &&
+			_is_unit_orthogonal_transform(p_transform_a) && _is_unit_orthogonal_transform(p_transform_b)) {
+		const real_t half_segment_A = capsule_A->get_height() * real_t(0.5) - capsule_A->get_radius();
+		const real_t half_segment_B = capsule_B->get_height() * real_t(0.5) - capsule_B->get_radius();
+		if (half_segment_A >= 0.0 && half_segment_B >= 0.0) {
+			const real_t combined_radius = capsule_A->get_radius() + capsule_B->get_radius() + p_margin_A + p_margin_B;
+			const Vector2 center_delta = p_transform_a.get_origin() - p_transform_b.get_origin();
+			const real_t center_distance_squared = center_delta.length_squared();
+			const real_t enclosing_radius = half_segment_A + half_segment_B + combined_radius;
+
+			// A quick conservative enclosing-circle test avoids segment work for
+			// widely separated capsules, including rotated broad-phase false hits.
+			if (center_distance_squared > enclosing_radius * enclosing_radius) {
+				if (p_collector->sep_axis) {
+					*p_collector->sep_axis = center_delta / Math::sqrt(center_distance_squared);
+				}
+				return;
+			}
+
+			// Most dense contacts have nearby centers; retain the old SAT path
+			// there unless the caller needs only a boolean overlap result.
+			if (!p_collector->callback || center_distance_squared > combined_radius * combined_radius) {
+				const Vector2 segment_A = p_transform_a.columns[1] * half_segment_A;
+				const Vector2 segment_B = p_transform_b.columns[1] * half_segment_B;
+				Vector2 closest_A;
+				Vector2 closest_B;
+				const real_t segment_distance = Geometry2D::get_closest_points_between_segments(
+						p_transform_a.get_origin() - segment_A, p_transform_a.get_origin() + segment_A,
+						p_transform_b.get_origin() - segment_B, p_transform_b.get_origin() + segment_B,
+						closest_A, closest_B);
+
+				if (segment_distance > combined_radius) {
+					if (p_collector->sep_axis) {
+						*p_collector->sep_axis = (closest_A - closest_B) / segment_distance;
+					}
+					return;
+				}
+
+				if (!p_collector->callback) {
+					p_collector->collided = true;
+					if (p_collector->sep_axis) {
+						*p_collector->sep_axis = Vector2();
+					}
+					return;
+				}
+			}
+		}
+	}
+
 	if (!separator.test_cast()) {
 		return;
 	}
