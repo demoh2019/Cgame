@@ -680,14 +680,18 @@ void GodotBodyPair3D::solve(real_t p_step) {
 			const Vector3 rel_linear = B->get_linear_velocity() - A->get_linear_velocity();
 			const Vector3 angular_A = A->get_angular_velocity();
 			const Vector3 angular_B = B->get_angular_velocity();
-			const real_t vn0 = (rel_linear + angular_B.cross(c0.rB) - angular_A.cross(c0.rA)).dot(normal);
-			const real_t vn1 = (rel_linear + angular_B.cross(c1.rB) - angular_A.cross(c1.rA)).dot(normal);
+			// (omega x r) dot n = omega dot (r x n); reuse lever arms
+			// from the 2x2 mass matrix instead of recomputing cross products.
+			const real_t normal_linear_velocity = rel_linear.dot(normal);
+			const real_t vn0 = normal_linear_velocity + angular_B.dot(rb0) - angular_A.dot(ra0);
+			const real_t vn1 = normal_linear_velocity + angular_B.dot(rb1) - angular_A.dot(ra1);
 			const real_t old0 = c0.acc_normal_impulse;
 			const real_t old1 = c1.acc_normal_impulse;
 			const real_t b0 = vn0 + c0.bounce - k00 * old0 - k01 * old1;
 			const real_t b1 = vn1 + c1.bounce - k01 * old0 - k11 * old1;
-			real_t next0 = -(k11 * b0 - k01 * b1) / det;
-			real_t next1 = -(k00 * b1 - k01 * b0) / det;
+			const real_t inv_det = real_t(1.0) / det;
+			real_t next0 = -(k11 * b0 - k01 * b1) * inv_det;
+			real_t next1 = -(k00 * b1 - k01 * b0) * inv_det;
 			bool valid = Math::is_finite(next0) && Math::is_finite(next1) &&
 					next0 >= 0.0 && next1 >= 0.0;
 			// Complementarity: both loaded, one loaded, or neither loaded.
