@@ -1,0 +1,94 @@
+name: Whole-engine extreme stress and resource regression
+
+on:
+  push:
+    branches: [develop]
+    paths:
+      - 'tests/stress/**'
+      - '.github/workflows/whole-engine-stress.yml'
+  pull_request:
+    branches: [develop]
+    paths:
+      - 'tests/stress/**'
+      - '.github/workflows/whole-engine-stress.yml'
+  schedule:
+    - cron: '0 3 * * 0'
+  workflow_dispatch:
+    inputs:
+      preset:
+        description: Stress intensity (brutal is manual only)
+        required: true
+        type: choice
+        options: [smoke, standard, soak, brutal]
+        default: smoke
+      render_mode:
+        description: Headless CPU/physics, or virtual display software OpenGL
+        required: true
+        type: choice
+        options: [headless, display]
+        default: headless
+
+permissions:
+  contents: read
+
+concurrency:
+  group: whole-engine-stress-${{ github.ref }}-${{ github.event_name }}
+  cancel-in-progress: false
+
+jobs:
+  harness-tests:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Syntax-check runner and tests
+        run: python3 -m py_compile tests/stress/run.py tests/stress/test_run.py
+      - name: Run harness unit tests
+        run: python3 -m unittest discover -s tests/stress -p 'test_*.py' -v
+
+  native-stress:
+    # Build and benchmark the actual fork, not an unrelated downloaded Godot release.
+    # Never run the enormous brutal preset automatically.
+    if: github.event_name == 'workflow_dispatch' || github.event_name == 'schedule'
+    needs: harness-tests
+    runs-on: ubuntu-24.04
+    timeout-minutes: 360
+    env:
+      PRESET: ${{ github.event_name == 'workflow_dispatch' && inputs.preset || 'smoke' }}
+      RENDER_MODE: ${{ github.event_name == 'workflow_dispatch' && inputs.render_mode || 'headless' }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install Xvfb and software GL for optional display tests
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y xvfb xauth libgl1-mesa-dri
+      - uses: ./.github/actions/godot-deps
+      - name: Build native Cgame with tests
+        uses: ./.github/actions/godot-build
+        with:
+          platform: linuxbsd
+          target: editor
+          scons-flags: dev_build=yes tests=yes debug_symbols=no module_text_server_fb_enabled=yes -j2
+      - name: Run actual engine workloads under memory and timeout watchdogs
+        shell: bash
+        run: |
+          set -euo pipefail
+          BIN=./bin/godot.linuxbsd.editor.dev.x86_64
+          "$BIN" --version
+          if [[ "$RENDER_MODE" == "display" ]]; then
+            # Software GL only: results must NOT be compared with discrete-GPU measurements.
+            xvfb-run -a python3 tests/stress/run.py --godot "$BIN" --preset "$PRESET" --render-mode display --output whole-engine-stress.json
+          else
+            python3 tests/stress/run.py --godot "$BIN" --preset "$PRESET" --render-mode headless --output whole-engine-stress.json
+          fi
+      - name: Archive per-scenario performance and failure reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: cgame-stress-${{ env.PRESET }}-${{ env.RENDER_MODE }}
+          path: whole-engine-stress.json
+          if-no-files-found: warn
+          retention-days: 30
