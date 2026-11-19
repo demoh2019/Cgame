@@ -221,6 +221,12 @@ public:
 
 	FUNC2(body_set_solver_priority, RID, int);
 	FUNC1RC(int, body_get_solver_priority, RID);
+	FUNC2(body_set_max_depenetration_velocity, RID, real_t);
+	FUNC1RC(real_t, body_get_max_depenetration_velocity, RID);
+	FUNC2(body_set_max_angular_velocity, RID, real_t);
+	FUNC1RC(real_t, body_get_max_angular_velocity, RID);
+	FUNC2(body_set_max_linear_velocity, RID, real_t);
+	FUNC1RC(real_t, body_get_max_linear_velocity, RID);
 
 	FUNC1(body_reset_mass_properties, RID);
 

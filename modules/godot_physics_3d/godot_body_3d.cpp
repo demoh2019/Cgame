@@ -819,7 +819,7 @@ void GodotBody3D::integrate_forces(real_t p_step, bool p_defer_motion) {
 
 		// Limit dynamic angular speed after damping, torque and optional gyro
 		// integration. Kinematic bodies retain their requested target rotation.
-		angular_velocity = godot_physics_clamp_angular_velocity(angular_velocity, get_space()->get_max_angular_velocity());
+		angular_velocity = godot_physics_clamp_angular_velocity(angular_velocity, get_effective_max_angular_velocity(get_space()->get_max_angular_velocity()));
 		// Rapier-style CCD safeguard: limit the *physical* rotation across
 		// one step, not the penetration-correction bias. A joint/contact may
 		// change angular velocity after force integration, so apply at both
@@ -831,7 +831,7 @@ void GodotBody3D::integrate_forces(real_t p_step, bool p_defer_motion) {
 
 		// Bound physical velocity before calculating the broadphase CCD sweep.
 		// This is skipped by static and kinematic bodies.
-		linear_velocity = godot_physics_clamp_linear_velocity(linear_velocity, get_space()->get_max_linear_velocity());
+		linear_velocity = godot_physics_clamp_linear_velocity(linear_velocity, get_effective_max_linear_velocity(get_space()->get_max_linear_velocity()));
 
 		if (continuous_cd) {
 			motion = linear_velocity * p_step;
@@ -896,10 +896,10 @@ void GodotBody3D::integrate_velocities(real_t p_step) {
 
 	// Contact and joint impulses can add speed after force integration.
 	// Cap the physical component before position integration too.
-	linear_velocity = godot_physics_clamp_linear_velocity(linear_velocity, get_space()->get_max_linear_velocity());
+	linear_velocity = godot_physics_clamp_linear_velocity(linear_velocity, get_effective_max_linear_velocity(get_space()->get_max_linear_velocity()));
 	// Contacts and joints can increase angular velocity after force integration.
 	// Limit physical rotation, leaving penetration-correction bias untouched.
-	angular_velocity = godot_physics_clamp_angular_velocity(angular_velocity, get_space()->get_max_angular_velocity());
+	angular_velocity = godot_physics_clamp_angular_velocity(angular_velocity, get_effective_max_angular_velocity(get_space()->get_max_angular_velocity()));
 	// Reapply the CCD-only per-step cap after contact/joint impulses.
 	if (continuous_cd) {
 		angular_velocity = godot_physics_clamp_ccd_angular_velocity(

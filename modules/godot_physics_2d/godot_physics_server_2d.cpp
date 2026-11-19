@@ -764,6 +764,42 @@ int GodotPhysicsServer2D::body_get_solver_priority(RID p_body) const {
 	return body->get_solver_priority();
 }
 
+void GodotPhysicsServer2D::body_set_max_depenetration_velocity(RID p_body, real_t p_value) {
+	GodotBody2D *body = body_owner.get_or_null(p_body);
+	ERR_FAIL_NULL(body);
+	body->set_max_depenetration_velocity(p_value);
+}
+
+real_t GodotPhysicsServer2D::body_get_max_depenetration_velocity(RID p_body) const {
+	GodotBody2D *body = body_owner.get_or_null(p_body);
+	ERR_FAIL_NULL_V(body, 0);
+	return body->get_max_depenetration_velocity();
+}
+
+void GodotPhysicsServer2D::body_set_max_angular_velocity(RID p_body, real_t p_value) {
+	GodotBody2D *body = body_owner.get_or_null(p_body);
+	ERR_FAIL_NULL(body);
+	body->set_max_angular_velocity(p_value);
+}
+
+real_t GodotPhysicsServer2D::body_get_max_angular_velocity(RID p_body) const {
+	GodotBody2D *body = body_owner.get_or_null(p_body);
+	ERR_FAIL_NULL_V(body, 0);
+	return body->get_max_angular_velocity();
+}
+
+void GodotPhysicsServer2D::body_set_max_linear_velocity(RID p_body, real_t p_value) {
+	GodotBody2D *body = body_owner.get_or_null(p_body);
+	ERR_FAIL_NULL(body);
+	body->set_max_linear_velocity(p_value);
+}
+
+real_t GodotPhysicsServer2D::body_get_max_linear_velocity(RID p_body) const {
+	GodotBody2D *body = body_owner.get_or_null(p_body);
+	ERR_FAIL_NULL_V(body, 0);
+	return body->get_max_linear_velocity();
+}
+
 Variant GodotPhysicsServer2D::body_get_param(RID p_body, PS2DE::BodyParameter p_param) const {
 	GodotBody2D *body = body_owner.get_or_null(p_body);
 	ERR_FAIL_NULL_V(body, 0);

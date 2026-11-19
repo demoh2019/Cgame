@@ -206,6 +206,12 @@ public:
 	// GodotPhysics3D implements it; other backends ignore it.
 	virtual void body_set_solver_priority(RID p_body, int p_priority) {}
 	virtual int body_get_solver_priority(RID p_body) const { return 1; }
+	virtual void body_set_max_depenetration_velocity(RID p_body, real_t p_value) {}
+	virtual real_t body_get_max_depenetration_velocity(RID p_body) const { return 0.0; }
+	virtual void body_set_max_angular_velocity(RID p_body, real_t p_value) {}
+	virtual real_t body_get_max_angular_velocity(RID p_body) const { return 0.0; }
+	virtual void body_set_max_linear_velocity(RID p_body, real_t p_value) {}
+	virtual real_t body_get_max_linear_velocity(RID p_body) const { return 0.0; }
 
 	virtual void body_reset_mass_properties(RID p_body) = 0;
 

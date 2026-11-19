@@ -211,6 +211,12 @@ public:
 
 	virtual void body_set_solver_priority(RID p_body, int p_priority) override;
 	virtual int body_get_solver_priority(RID p_body) const override;
+	virtual void body_set_max_depenetration_velocity(RID p_body, real_t p_value) override;
+	virtual real_t body_get_max_depenetration_velocity(RID p_body) const override;
+	virtual void body_set_max_angular_velocity(RID p_body, real_t p_value) override;
+	virtual real_t body_get_max_angular_velocity(RID p_body) const override;
+	virtual void body_set_max_linear_velocity(RID p_body, real_t p_value) override;
+	virtual real_t body_get_max_linear_velocity(RID p_body) const override;
 
 	virtual void body_reset_mass_properties(RID p_body) override;
 

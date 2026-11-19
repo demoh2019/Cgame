@@ -223,6 +223,16 @@ public:
 	_FORCE_INLINE_ real_t get_contact_max_allowed_penetration() const { return contact_max_allowed_penetration; }
 	_FORCE_INLINE_ real_t get_contact_bias() const { return contact_bias; }
 	_FORCE_INLINE_ real_t limit_contact_bias(real_t p_bias) const { return godot_physics_limit_contact_bias(p_bias, max_contact_push_speed); }
+	// Pair override: the smaller of the bodies' own limits, else the space default.
+	_FORCE_INLINE_ real_t limit_contact_bias(real_t p_bias, real_t p_speed_a, real_t p_speed_b) const {
+		real_t limit = max_contact_push_speed;
+		if (p_speed_a > 0.0) {
+			limit = p_speed_b > 0.0 ? MIN(p_speed_a, p_speed_b) : p_speed_a;
+		} else if (p_speed_b > 0.0) {
+			limit = p_speed_b;
+		}
+		return godot_physics_limit_contact_bias(p_bias, limit);
+	}
 	_FORCE_INLINE_ real_t get_warm_start_coefficient() const { return warm_start_coefficient; }
 	_FORCE_INLINE_ real_t get_max_linear_velocity() const { return max_linear_velocity; }
 	_FORCE_INLINE_ real_t get_max_angular_velocity() const { return max_angular_velocity; }

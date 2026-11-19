@@ -200,6 +200,12 @@ void PhysicsServer3D::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("body_get_param", "body", "param"), &PhysicsServer3D::body_get_param);
 	ClassDB::bind_method(D_METHOD("body_set_solver_priority", "body", "priority"), &PhysicsServer3D::body_set_solver_priority);
 	ClassDB::bind_method(D_METHOD("body_get_solver_priority", "body"), &PhysicsServer3D::body_get_solver_priority);
+	ClassDB::bind_method(D_METHOD("body_set_max_depenetration_velocity", "body", "value"), &PhysicsServer3D::body_set_max_depenetration_velocity);
+	ClassDB::bind_method(D_METHOD("body_get_max_depenetration_velocity", "body"), &PhysicsServer3D::body_get_max_depenetration_velocity);
+	ClassDB::bind_method(D_METHOD("body_set_max_angular_velocity", "body", "value"), &PhysicsServer3D::body_set_max_angular_velocity);
+	ClassDB::bind_method(D_METHOD("body_get_max_angular_velocity", "body"), &PhysicsServer3D::body_get_max_angular_velocity);
+	ClassDB::bind_method(D_METHOD("body_set_max_linear_velocity", "body", "value"), &PhysicsServer3D::body_set_max_linear_velocity);
+	ClassDB::bind_method(D_METHOD("body_get_max_linear_velocity", "body"), &PhysicsServer3D::body_get_max_linear_velocity);
 
 	ClassDB::bind_method(D_METHOD("body_reset_mass_properties", "body"), &PhysicsServer3D::body_reset_mass_properties);
 

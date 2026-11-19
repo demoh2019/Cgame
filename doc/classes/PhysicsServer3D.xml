@@ -668,6 +668,54 @@
 				Sets the transform matrix for a body shape.
 			</description>
 		</method>
+		<method name="body_get_max_linear_velocity" qualifiers="const">
+			<return type="float" />
+			<param index="0" name="body" type="RID" />
+			<description>
+				Returns the value set by [method body_set_max_linear_velocity] ([code]0[/code] means the project setting is used).
+			</description>
+		</method>
+		<method name="body_set_max_linear_velocity">
+			<return type="void" />
+			<param index="0" name="body" type="RID" />
+			<param index="1" name="value" type="float" />
+			<description>
+				Sets a per-body limit that overrides the matching project setting; [code]0[/code] restores the project setting. See the corresponding [RigidBody3D] property.
+				[b]Note:[/b] Only Godot Physics implements this; other backends ignore it.
+			</description>
+		</method>
+		<method name="body_get_max_angular_velocity" qualifiers="const">
+			<return type="float" />
+			<param index="0" name="body" type="RID" />
+			<description>
+				Returns the value set by [method body_set_max_angular_velocity] ([code]0[/code] means the project setting is used).
+			</description>
+		</method>
+		<method name="body_set_max_angular_velocity">
+			<return type="void" />
+			<param index="0" name="body" type="RID" />
+			<param index="1" name="value" type="float" />
+			<description>
+				Sets a per-body limit that overrides the matching project setting; [code]0[/code] restores the project setting. See the corresponding [RigidBody3D] property.
+				[b]Note:[/b] Only Godot Physics implements this; other backends ignore it.
+			</description>
+		</method>
+		<method name="body_get_max_depenetration_velocity" qualifiers="const">
+			<return type="float" />
+			<param index="0" name="body" type="RID" />
+			<description>
+				Returns the value set by [method body_set_max_depenetration_velocity] ([code]0[/code] means the project setting is used).
+			</description>
+		</method>
+		<method name="body_set_max_depenetration_velocity">
+			<return type="void" />
+			<param index="0" name="body" type="RID" />
+			<param index="1" name="value" type="float" />
+			<description>
+				Sets a per-body limit that overrides the matching project setting; [code]0[/code] restores the project setting. See the corresponding [RigidBody3D] property.
+				[b]Note:[/b] Only Godot Physics implements this; other backends ignore it.
+			</description>
+		</method>
 		<method name="body_set_solver_priority">
 			<return type="void" />
 			<param index="0" name="body" type="RID" />

@@ -72,6 +72,9 @@ private:
 	Basis inverse_inertia_tensor;
 	real_t gravity_scale = 1.0;
 	int solver_priority = 1;
+	real_t max_linear_velocity = 0.0;
+	real_t max_angular_velocity = 0.0;
+	real_t max_depenetration_velocity = 0.0;
 
 	DampMode linear_damp_mode = DAMP_MODE_COMBINE;
 	DampMode angular_damp_mode = DAMP_MODE_COMBINE;
@@ -194,6 +197,13 @@ public:
 
 	void set_solver_priority(int p_priority);
 	int get_solver_priority() const;
+
+	void set_max_linear_velocity(real_t p_value);
+	real_t get_max_linear_velocity() const;
+	void set_max_angular_velocity(real_t p_value);
+	real_t get_max_angular_velocity() const;
+	void set_max_depenetration_velocity(real_t p_value);
+	real_t get_max_depenetration_velocity() const;
 
 	void set_linear_damp_mode(DampMode p_mode);
 	DampMode get_linear_damp_mode() const;
