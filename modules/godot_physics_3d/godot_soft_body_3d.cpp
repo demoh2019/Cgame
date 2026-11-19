@@ -1871,15 +1871,22 @@ void GodotSoftBody3D::apply_forces(const LocalVector<GodotArea3D *> &p_wind_area
 		for (const Face &face : faces) {
 			signed_volume += _soft_body_signed_face_volume(face.n[0]->x, face.n[1]->x, face.n[2]->x, origin);
 		}
-		// Update the per-body gas charge exactly once per physics step,
-		// alongside the already-required sealed-volume traversal. At the
-		// default leak rate of zero the original gas pressure is unchanged.
-		// If the shell inverts or degenerates, neither the gas charge nor
-		// pressure is updated; the corresponding outward force stays off.
-		physics_softbody_gas_leak_step(xpbd_volume_rest, signed_volume,
-				double(pressure_coefficient), double(gas_gamma),
-				double(get_space()->get_soft_body_gas_leak_rate()), double(p_delta),
-				gas_mass_fraction, gas_pressure);
+		// At the default zero leak rate, preserve the *original*
+		// adiabatic path and its arithmetic cost (no extra power/exponential).
+		// The persistent per-body charge changes only in explicitly vented
+		// closed shells, once per predict_motion() physics step.
+		const real_t leak_rate = get_space()->get_soft_body_gas_leak_rate();
+		if (leak_rate == real_t(0.0) && gas_mass_fraction == 1.0) {
+			physics_softbody_adiabatic_pressure(xpbd_volume_rest, signed_volume,
+					double(pressure_coefficient), double(gas_gamma), gas_pressure);
+		} else {
+			// If geometry inverts, the helper rejects it and neither gas
+			// charge nor applied gas pressure is mutated.
+			physics_softbody_gas_leak_step(xpbd_volume_rest, signed_volume,
+					double(pressure_coefficient), double(gas_gamma),
+					double(leak_rate), double(p_delta),
+					gas_mass_fraction, gas_pressure);
+		}
 	}
 	const bool apply_wind = !p_wind_areas.is_empty();
 	const bool apply_drag = drag_coefficient > 0.0;
