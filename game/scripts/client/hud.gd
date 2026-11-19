@@ -1009,6 +1009,11 @@ func _process(_delta: float) -> void:
 		skill_name, int(client.you.get("combat_energy", 0)), int(Defs.COMBAT_ENERGY_MAX),
 		float(client.you.get("skill_cooldown", 0.0))
 	]
+	var ranged_ammo: String = str(Defs.item(weapon).get("ammo", ""))
+	if not ranged_ammo.is_empty():
+		_equipped.text += "\nAmmo: %s ×%d" % [
+			str(Defs.item(ranged_ammo).get("name", ranged_ammo)),
+			client.inventory.count(ranged_ammo)]
 	_party_frames.text = PartyFrames.describe(client.you.get("party", {}), client.peer_id)
 	_party_frames.visible = not _party_frames.text.is_empty()
 	_death.visible = not bool(client.you.get("alive", true))
