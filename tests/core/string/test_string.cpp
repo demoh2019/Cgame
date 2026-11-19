@@ -32,7 +32,10 @@
 
 TEST_FORCE_LINK(test_string)
 
+#include "core/string/char_utils.h"
 #include "core/string/ustring.h"
+
+#include <cstdlib>
 
 namespace TestString {
 
@@ -375,6 +378,96 @@ TEST_CASE("[String] Case function test") {
 	CHECK(a.to_lower() == "momonga");
 }
 
+TEST_CASE("[String] ASCII case conversion fast path") {
+	// Exhaustive ASCII coverage, including control characters and punctuation.
+	for (char32_t ch = 0; ch < 128; ch++) {
+		const char32_t expected_lower = ch >= U'A' && ch <= U'Z' ? ch + (U'a' - U'A') : ch;
+		const char32_t expected_upper = ch >= U'a' && ch <= U'z' ? ch - (U'a' - U'A') : ch;
+		CHECK(String::char_lowercase(ch) == expected_lower);
+		CHECK(String::char_uppercase(ch) == expected_upper);
+	}
+}
+
+TEST_CASE("[String] Mixed Unicode and ASCII case conversion") {
+	CHECK(String::char_lowercase(U'Ä') == U'ä');
+	CHECK(String::char_uppercase(U'ä') == U'Ä');
+	CHECK(String::char_lowercase(U'Ω') == U'ω');
+	CHECK(String::char_uppercase(U'ω') == U'Ω');
+	CHECK(String::char_lowercase(U'Я') == U'я');
+	CHECK(String::char_uppercase(U'я') == U'Я');
+	CHECK(String::char_lowercase(U'😀') == U'😀');
+	CHECK(String::char_uppercase(U'😀') == U'😀');
+	CHECK(String(U"AbC-ÄΩЯ").to_lower() == U"abc-äωя");
+	CHECK(String(U"abc-äωя").to_upper() == U"ABC-ÄΩЯ");
+	CHECK(String().to_lower().is_empty());
+	CHECK(String().to_upper().is_empty());
+}
+
+TEST_CASE("[String] ASCII case conversion matches character mapping") {
+	for (char32_t c = 1; c < 128; ++c) {
+		const String source = String::chr(c);
+		const String uppercase = source.to_upper();
+		const String lowercase = source.to_lower();
+		CHECK(uppercase.length() == 1);
+		CHECK(lowercase.length() == 1);
+		CHECK(uppercase[0] == String::char_uppercase(c));
+		CHECK(lowercase[0] == String::char_lowercase(c));
+	}
+}
+
+TEST_CASE("[String] Case conversion preserves Unicode mapping") {
+	const String source = U"\u0416\u03A3\u00C4\u212A";
+	CHECK(source.to_lower() == String(U"\u0436\u03C3\u00E4k"));
+	CHECK(source.to_upper() == source);
+	CHECK(String(U"\u0436\u03C3\u00E4k").to_upper() == String(U"\u0416\u03A3\u00C4K"));
+
+	String mixed = "hello WORLD ";
+	mixed += String(U"\u0416\u03A3");
+	CHECK(mixed.to_lower() == String(U"hello world \u0436\u03C3"));
+	CHECK(mixed.to_upper() == String(U"HELLO WORLD \u0416\u03A3"));
+}
+
+TEST_CASE("[String] Already normalized case conversion shares original allocation") {
+	String lowercase;
+	String uppercase;
+	for (int i = 0; i < 1024; ++i) {
+		lowercase += "the quick brown fox 123 ";
+		uppercase += "THE QUICK BROWN FOX 123 ";
+	}
+	lowercase += String(U"\u0436\u03C3\u00E4");
+	uppercase += String(U"\u0416\u03A3\u00C4");
+
+	const char32_t *lower_ptr = lowercase.ptr();
+	const char32_t *upper_ptr = uppercase.ptr();
+	const String same_lower = lowercase.to_lower();
+	const String same_upper = uppercase.to_upper();
+	CHECK(same_lower == lowercase);
+	CHECK(same_upper == uppercase);
+	CHECK(same_lower.ptr() == lower_ptr);
+	CHECK(same_upper.ptr() == upper_ptr);
+	CHECK(lowercase.ptr() == lower_ptr);
+	CHECK(uppercase.ptr() == upper_ptr);
+}
+
+TEST_CASE("[String] Case conversion works at start middle end and with embedded NUL") {
+	CHECK(String("abcdefgh").to_upper() == "ABCDEFGH");
+	CHECK(String("ABCDEFGH").to_lower() == "abcdefgh");
+	CHECK(String("111X111").to_lower() == "111x111");
+	CHECK(String("111x111").to_upper() == "111X111");
+	CHECK(String("111111X").to_lower() == "111111x");
+	CHECK(String("111111x").to_upper() == "111111X");
+
+	String embedded = "xQ";
+	embedded.resize_uninitialized(5);
+	embedded[2] = 0;
+	embedded[3] = 'Z';
+	embedded[4] = 0;
+	CHECK(embedded.to_lower()[1] == 'q');
+	CHECK(embedded.to_lower()[2] == 0);
+	CHECK(embedded.to_upper()[1] == 'Q');
+	CHECK(embedded.to_upper()[2] == 0);
+}
+
 TEST_CASE("[String] Case compare function test") {
 	String a = "MoMoNgA";
 
@@ -409,6 +502,63 @@ TEST_CASE("[String] Substr") {
 	String s = "Killer Baby";
 	CHECK(s.substr(3, 4) == "ler ");
 	CHECK(s.substr(3) == "ler Baby");
+}
+
+TEST_CASE("[String] get_slice reuses first delimiter search") {
+	const String input = "alpha::beta::gamma::";
+	CHECK(input.get_slice(String("::"), 0) == "alpha");
+	CHECK(input.get_slice("::", 0) == "alpha");
+	CHECK(input.get_slice(String("::"), 1) == "beta");
+	CHECK(input.get_slice("::", 1) == "beta");
+	CHECK(input.get_slice(String("::"), 2) == "gamma");
+	CHECK(input.get_slice("::", 2) == "gamma");
+	CHECK(input.get_slice(String("::"), 3) == "");
+	CHECK(input.get_slice("::", 3) == "");
+	CHECK(input.get_slice(String("::"), 4) == "");
+	CHECK(input.get_slice("::", 4) == "");
+}
+
+TEST_CASE("[String] get_slice preserves edge cases for both overloads") {
+	const String no_delimiter = "unsplit";
+	CHECK(no_delimiter.get_slice(String(":"), 0) == no_delimiter);
+	CHECK(no_delimiter.get_slice(":", 0) == no_delimiter);
+	CHECK(no_delimiter.get_slice(String(":"), 42) == no_delimiter);
+	CHECK(no_delimiter.get_slice(":", 42) == no_delimiter);
+	CHECK(no_delimiter.get_slice(String(":"), -1) == "");
+	CHECK(no_delimiter.get_slice(":", -1) == "");
+	CHECK(no_delimiter.get_slice(String(), 0) == "");
+	CHECK(no_delimiter.get_slice("", 0) == "");
+	CHECK(no_delimiter.get_slice(nullptr, 0) == "");
+	CHECK(String().get_slice(String(":"), 0) == "");
+	CHECK(String().get_slice(":", 0) == "");
+	const String adjacent = ":a::b:";
+	CHECK(adjacent.get_slice(String(":"), 0) == "");
+	CHECK(adjacent.get_slice(":", 0) == "");
+	CHECK(adjacent.get_slice(String(":"), 1) == "a");
+	CHECK(adjacent.get_slice(":", 2) == "");
+	CHECK(adjacent.get_slice(String(":"), 3) == "b");
+	CHECK(adjacent.get_slice(":", 4) == "");
+	CHECK(adjacent.get_slice(":", 5) == "");
+}
+
+TEST_CASE("[String] get_slice long and multilingual inputs") {
+	String prefix;
+	for (int i = 0; i < 256; ++i) {
+		prefix += "abcdefghijklmnopqrstuvwxyz012345";
+	}
+	const String input = prefix + String("::") + String(U"\u0416\u03A3\u00C4") + "::tail";
+	CHECK(input.get_slice(String("::"), 0) == prefix);
+	CHECK(input.get_slice("::", 0) == prefix);
+	CHECK(input.get_slice(String("::"), 1) == String(U"\u0416\u03A3\u00C4"));
+	CHECK(input.get_slice("::", 1) == String(U"\u0416\u03A3\u00C4"));
+	CHECK(input.get_slice(String("::"), 2) == "tail");
+	CHECK(input.get_slice("::", 2) == "tail");
+	CHECK(input.get_slice(String("::"), 100) == "");
+	CHECK(input.get_slice("::", 100) == "");
+	const String unicode_sep = String(U"\u0416\u00A7\u03A3\u00A7\u00C4");
+	CHECK(unicode_sep.get_slice(String(U"\u00A7"), 0) == String(U"\u0416"));
+	CHECK(unicode_sep.get_slice(String(U"\u00A7"), 1) == String(U"\u03A3"));
+	CHECK(unicode_sep.get_slice(String(U"\u00A7"), 2) == String(U"\u00C4"));
 }
 
 TEST_CASE("[String] Find") {
@@ -467,6 +617,55 @@ TEST_CASE("[String] Find case insensitive") {
 	MULTICHECK_STRING_INT_EQ(s, rfindn, "WHA", -1, 13);
 }
 
+TEST_CASE("[String] Find case insensitive ASCII fast path") {
+	const String s = "xxaBcDyyABCDzz";
+	CHECK(s.findn(String("abcd")) == 2);
+	CHECK(s.findn("ABcd") == 2);
+	CHECK(s.findn(String("abCd"), 3) == 8);
+	CHECK(s.findn("aBcD", 3) == 8);
+	CHECK(s.rfindn(String("ABcD")) == 8);
+	CHECK(s.rfindn("aBcD") == 8);
+	CHECK(s.rfindn(String("aBcD"), 7) == 2);
+	CHECK(s.rfindn("abCd", 7) == 2);
+	CHECK(s.findn("abCe") == -1);
+	CHECK(s.findn(String("abCe")) == -1);
+	CHECK(s.findn("ABCDz", 9) == -1);
+
+	String repeated;
+	for (int i = 0; i < 128; ++i) {
+		repeated += "aBcD";
+	}
+	CHECK(repeated.findn("ABCD") == 0);
+	CHECK(repeated.rfindn("abcd") == 127 * 4);
+	CHECK(repeated.findn("abce") == -1);
+}
+
+TEST_CASE("[String] Find case insensitive ASCII exhaustive pairs") {
+	for (char32_t a = 32; a < 127; ++a) {
+		for (char32_t b = 32; b < 127; ++b) {
+			const char32_t folded_a = (a >= 'A' && a <= 'Z') ? a + ('a' - 'A') : a;
+			const char32_t folded_b = (b >= 'A' && b <= 'Z') ? b + ('a' - 'A') : b;
+			const int expected = folded_a == folded_b ? 0 : -1;
+			const String source = String::chr(a);
+			const String needle = String::chr(b);
+			CHECK(source.findn(needle) == expected);
+			CHECK(source.rfindn(needle) == expected);
+		}
+	}
+}
+
+TEST_CASE("[String] Find case insensitive Unicode fallback") {
+	const String s = U"xx\u212A\u03A3\u00C4yy\u0416\u0423\u041A";
+	CHECK(s.findn(String(U"k\u03C3\u00E4")) == 2);
+	CHECK(s.rfindn(String(U"k\u03C3\u00E4")) == 2);
+	CHECK(s.findn(String(U"\u0436\u0443\u043A")) == 7);
+	CHECK(s.rfindn(String(U"\u0436\u0443\u043A")) == 7);
+	CHECK(s.findn("k") == 2);
+	CHECK(s.rfindn("K") == 2);
+	CHECK(s.findn(String(U"k\u03C3\u00E5")) == -1);
+	CHECK(s.findn(String(U"\u0436\u0443\u043A"), 8) == -1);
+}
+
 TEST_CASE("[String] Find MK") {
 	Vector<String> keys;
 	keys.push_back("sty");
@@ -486,11 +685,156 @@ TEST_CASE("[String] Find MK") {
 	CHECK(s.findmk(keys, 1000, &key) == -1);
 }
 
+TEST_CASE("[String] Find MK filters middle mismatches and preserves key order") {
+	Vector<String> keys;
+	keys.push_back("aXYZz");
+	keys.push_back("a123z");
+	keys.push_back("a12");
+	keys.push_back("zz");
+	keys.push_back("a123z");
+	const String haystack = "qqqa12zzzzza123z";
+	int matched_key = -7;
+	CHECK(haystack.findmk(keys, 0, &matched_key) == 3);
+	CHECK(matched_key == 2);
+	CHECK(haystack.findmk(keys, 5, &matched_key) == 6);
+	CHECK(matched_key == 3);
+	CHECK(haystack.findmk(keys, 11, &matched_key) == 11);
+	CHECK(matched_key == 1); // Earlier identical key wins.
+	CHECK(haystack.findmk(keys, 99, &matched_key) == -1);
+	CHECK(matched_key == 1); // A miss does not alter output metadata.
+}
+
+TEST_CASE("[String] Find MK preserves empty keys and UTF32 matching") {
+	Vector<String> keys;
+	keys.push_back(U"🚀Ω");
+	keys.push_back(U"Ω🚀");
+	keys.push_back("");
+	keys.push_back(U"🚀");
+	const String haystack = U"αβΩ🚀γ";
+	int matched = -1;
+	CHECK(haystack.findmk(keys, 0, &matched) == 0);
+	CHECK(matched == 2);
+	CHECK(haystack.findmk(keys, 3, &matched) == 3);
+	CHECK(matched == 2);
+
+	Vector<String> without_empty;
+	without_empty.push_back(U"🚀Ω");
+	without_empty.push_back(U"Ω🚀");
+	CHECK(haystack.findmk(without_empty, 0, &matched) == 2);
+	CHECK(matched == 1);
+	CHECK(haystack.findmk(without_empty, 3, &matched) == -1);
+	CHECK(matched == 1);
+	CHECK(String().findmk(without_empty, 0, &matched) == -1);
+	CHECK(matched == 1);
+}
+
+TEST_CASE("[String] Find MK deterministic differential search") {
+	uint32_t seed = 0x9e3779b9;
+	auto next = [&seed]() {
+		seed ^= seed << 13;
+		seed ^= seed >> 17;
+		seed ^= seed << 5;
+		return seed;
+	};
+	for (int trial = 0; trial < 180; trial++) {
+		String haystack;
+		const int haystack_len = 20 + int(next() % 120);
+		for (int i = 0; i < haystack_len; i++) {
+			haystack += String::chr(U'a' + (next() % 5));
+		}
+		Vector<String> patterns;
+		const int count = 1 + int(next() % 24);
+		for (int k = 0; k < count; k++) {
+			String token;
+			const int n = int(next() % 9);
+			for (int j = 0; j < n; j++) {
+				token += String::chr(U'a' + (next() % 5));
+			}
+			patterns.push_back(token);
+		}
+		for (int j = 0; j < 15; j++) {
+			const int from = int(next() % (haystack_len + 8)) - 3;
+			int expected_index = -1;
+			int expected_key = -1;
+			for (int pos = MAX(0, from); pos < haystack.length() && from >= 0 && expected_index < 0; pos++) {
+				for (int k = 0; k < patterns.size(); k++) {
+					if (patterns[k].length() <= haystack.length() - pos &&
+							haystack.substr(pos, patterns[k].length()) == patterns[k]) {
+						expected_index = pos;
+						expected_key = k;
+						break;
+					}
+				}
+			}
+			int actual_key = -99;
+			CHECK(haystack.findmk(patterns, from, &actual_key) == expected_index);
+			if (expected_index >= 0) {
+				CHECK(actual_key == expected_key);
+			} else {
+				CHECK(actual_key == -99);
+			}
+		}
+	}
+}
+
 TEST_CASE("[String] Find and replace") {
 	String s = "Happy Birthday, Anna!";
 	MULTICHECK_STRING_STRING_EQ(s, replace, "Birthday", "Halloween", "Happy Halloween, Anna!");
 	MULTICHECK_STRING_STRING_EQ(s, replace_first, "y", "Y", "HappY Birthday, Anna!");
 	MULTICHECK_STRING_STRING_EQ(s, replacen, "Y", "Y", "HappY BirthdaY, Anna!");
+}
+
+TEST_CASE("[String] Replace character fast path Unicode and ASCII") {
+	const String input = "banana";
+	CHECK(input.replace(String("a"), String("o")) == "bonono");
+	CHECK(input.replace("a", "o") == "bonono");
+	CHECK(input.replace(String("x"), String("o")) == input);
+	CHECK(input.replace("x", "o") == input);
+	CHECK(String(U"αβαβα").replace(String(U"α"), String(U"λ")) == U"λβλβλ");
+	CHECK(String(U"ÄÄa").replace(String(U"Ä"), String(U"ä")) == U"ääa");
+	CHECK(String(U"😀b😀").replace(String(U"😀"), String(U"★")) == U"★b★");
+}
+
+TEST_CASE("[String] Replace char fast path COW and no-op") {
+	const String input = "aAaAa";
+	const char32_t *before = input.ptr();
+	String unchanged = input.replace_char(U'a', U'a');
+	CHECK(unchanged.ptr() == before);
+	String replacement = input.replace(String("a"), String("a"));
+	CHECK(replacement.ptr() == before);
+	CHECK(input.replace("a", "a").ptr() == before);
+	CHECK(input == "aAaAa");
+	CHECK(input.replace_char(U'x', U'y').ptr() == before);
+	String changed = input.replace(String("a"), String("b"));
+	CHECK(changed == "bAbAb");
+	CHECK(input == "aAaAa");
+}
+
+TEST_CASE("[String] Replace preserves multi-character semantics") {
+	const String input = "aaaa";
+	CHECK(input.replace(String("aa"), String("b")) == "bb");
+	CHECK(input.replace("aa", "b") == "bb");
+	CHECK(input.replace(String("a"), String("")) == "");
+	CHECK(input.replace("a", "") == "");
+	CHECK(String("ABA").replacen("a", "a") == "aBa");
+	CHECK(input.replace(String(""), String("z")) == input);
+}
+
+TEST_CASE("[String] Replace deletion fast path and empty repeat") {
+	const String ascii = "bananas";
+	CHECK(ascii.replace(String("a"), String()) == "bnns");
+	CHECK(ascii.replace("a", "") == "bnns");
+	CHECK(ascii.replace("as", "") == "banan");
+	CHECK(ascii == "bananas");
+	const String unicode = U"αβαα";
+	CHECK(unicode.replace(String(U"α"), String()) == U"β");
+	CHECK(unicode == U"αβαα");
+	const String empty = "";
+	const char32_t *original = empty.ptr();
+	CHECK(empty.repeat(1).ptr() == original);
+	CHECK(empty.repeat(500).ptr() == original);
+	CHECK(empty.repeat(500).is_empty());
+	CHECK(String("ab").repeat(3) == "ababab");
 }
 
 TEST_CASE("[String] replace_char") {
@@ -539,6 +883,53 @@ TEST_CASE("[String] Erasing") {
 	CHECK(s == "Josephine is such a girl!");
 }
 
+TEST_CASE("[String] Erase preserves Unicode and shares storage on no-op") {
+	const String source = U"αβ😀γδ";
+	const char32_t *original = source.ptr();
+
+	CHECK(source.erase(0, 2) == U"😀γδ");
+	CHECK(source.erase(2, 1) == U"αβγδ");
+	CHECK(source.erase(4, 1) == U"αβ😀γ");
+	CHECK(source.erase(1, 100) == U"α");
+	CHECK(source.erase(0, 100) == "");
+	CHECK(source.erase(0, 0).ptr() == original);
+	CHECK(source.erase(source.length(), 3).ptr() == original);
+	CHECK(source.erase(100000, 3).ptr() == original);
+	CHECK(source.erase(3, 0).ptr() == original);
+	CHECK(source.erase(2, 0x7fffffff) == U"αβ");
+	CHECK(source == U"αβ😀γδ");
+	CHECK(source.ptr() == original);
+
+	const String empty;
+	CHECK(empty.erase(0, 0).is_empty());
+	CHECK(empty.erase(0, 100).is_empty());
+}
+
+TEST_CASE("[String] Erase randomized equivalence with substring semantics") {
+	uint32_t seed = 0xA1C3B529;
+	for (int trial = 0; trial < 512; trial++) {
+		seed ^= seed << 13;
+		seed ^= seed >> 17;
+		seed ^= seed << 5;
+		const int len = int(seed % 256);
+
+		String input;
+		input.resize_uninitialized(len + 1);
+		char32_t *chars = input.ptrw();
+		for (int i = 0; i < len; i++) {
+			chars[i] = (i % 11 == 0) ? U'λ' : char32_t('a' + ((seed + uint32_t(i)) % 26));
+		}
+		chars[len] = 0;
+
+		const int pos = int((seed >> 8) % uint32_t(len + 17));
+		const int count = (trial % 7 == 0) ? 0x7fffffff : int((seed >> 16) % 330);
+		const int clamped_count = pos < len ? MIN(count, len - pos) : 0;
+		const String expected = input.left(pos) + input.substr(pos + clamped_count);
+		CHECK(input.erase(pos, count) == expected);
+		CHECK(input.length() == len);
+	}
+}
+
 TEST_CASE("[String] remove_char") {
 	String s = "Banana";
 	CHECK(s.remove_char('a') == "Bnn");
@@ -554,6 +945,65 @@ TEST_CASE("[String] remove_chars") {
 	CHECK(s.remove_chars(String()) == "Banana");
 	CHECK(s.remove_chars("xy") == "Banana");
 	CHECK(s.remove_chars(String("xy")) == "Banana");
+}
+
+TEST_CASE("[String] remove_chars long ASCII membership mask") {
+	String input;
+	String expected;
+	for (int i = 0; i < 256; ++i) {
+		input += "A\tB\nC D\rE-F_";
+		expected += "ABCDEF";
+	}
+	const String original = input;
+	CHECK(input.remove_chars(" \t\n\r-_") == expected);
+	CHECK(input.remove_chars(String(" \t\n\r-_")) == expected);
+	CHECK(input == original);
+	CHECK(input.remove_chars("xyz~") == original);
+
+	String only_removed;
+	for (int i = 0; i < 100; ++i) {
+		only_removed += "@_~ ";
+	}
+	CHECK(only_removed.remove_chars("@_~ ") == "");
+}
+
+TEST_CASE("[String] remove_chars ASCII bit boundary and exhaustive printable input") {
+	const String remove_set = String("@_~") + String::chr(127);
+	String input;
+	String expected;
+	for (int repeat = 0; repeat < 4; ++repeat) {
+		for (char32_t c = 32; c < 128; ++c) {
+			input += String::chr(c);
+			if (c != '@' && c != '_' && c != '~' && c != 127) {
+				expected += String::chr(c);
+			}
+		}
+	}
+	CHECK(input.remove_chars(remove_set) == expected);
+
+	String repeated;
+	String kept;
+	for (int i = 0; i < 128; ++i) {
+		repeated += "@a_b~c";
+		repeated += String::chr(127);
+		kept += "abc";
+	}
+	CHECK(repeated.remove_chars(remove_set) == kept);
+}
+
+TEST_CASE("[String] remove_chars preserves Unicode with ASCII set and Unicode fallback") {
+	String input;
+	String ascii_expected;
+	String unicode_expected;
+	for (int i = 0; i < 32; ++i) {
+		input += String(U"\u0416 \u03A3\t\u212A \u00C4");
+		ascii_expected += String(U"\u0416\u03A3\u212A\u00C4");
+		unicode_expected += String(U"\u212A\u00C4");
+	}
+	CHECK(input.remove_chars(" \t\r\n") == ascii_expected);
+	CHECK(input.remove_chars(String(" \t\r\n")) == ascii_expected);
+	CHECK(input.remove_chars(String(U" \u0416\u03A3\t")) == unicode_expected);
+	CHECK(String("A B").remove_chars(" \t-_") == "AB");
 }
 
 TEST_CASE("[String] Number to string") {
@@ -784,6 +1234,69 @@ TEST_CASE("[String] Ends with") {
 	CHECK_MESSAGE(state, "nullptr check with empty string failed");
 }
 
+TEST_CASE("[String] Split maxsplit tail hotpath regressions") {
+	{
+		const String s = "one::two::three";
+		const char *expected[] = { "one", "two::three" };
+		MULTICHECK_SPLIT(s, split, "::", true, 1, expected, 2);
+	}
+	{
+		const String s = ",,tail";
+		const char *expected[] = { "", ",tail" };
+		MULTICHECK_SPLIT(s, split, ",", true, 1, expected, 2);
+	}
+	{
+		const String s = "head::";
+		const char *expected[] = { "head", "" };
+		MULTICHECK_SPLIT(s, split, "::", true, 1, expected, 2);
+	}
+	{
+		const String s = "head::";
+		const char *expected[] = { "head" };
+		MULTICHECK_SPLIT(s, split, "::", false, 1, expected, 1);
+	}
+	{
+		const String s = "a,,,b";
+		const char *expected[] = { "a", "b" };
+		MULTICHECK_SPLIT(s, split, ",", false, 1, expected, 2);
+	}
+	{
+		const String s = "a,b,c";
+		const char *expected[] = { "a", "b,c" };
+		MULTICHECK_SPLIT(s, split, ",", false, 1, expected, 2);
+	}
+	{
+		const String s = "abcd";
+		const char *expected[] = { "a", "bcd" };
+		MULTICHECK_SPLIT(s, split, "", true, 1, expected, 2);
+		MULTICHECK_SPLIT(s, split, "", false, 1, expected, 2);
+	}
+	{
+		const String s = "a,b,c";
+		const char *expected[] = { "a", "b", "c" };
+		MULTICHECK_SPLIT(s, split, ",", true, 0, expected, 3);
+	}
+	{
+		const String s = String(U"Ä|Ω|Я");
+		const Vector<String> output = s.split(String("|"), true, 1);
+		REQUIRE(output.size() == 2);
+		CHECK(output[0] == String(U"Ä"));
+		CHECK(output[1] == String(U"Ω|Я"));
+	}
+	{
+		const String tail = String("abcdefghijklmnopqrstuvwxyz").repeat(400);
+		const String input = "header:" + tail;
+		const Vector<String> output = input.split(String(":"), true, 1);
+		const Vector<String> output_cstr = input.split(":", true, 1);
+		REQUIRE(output.size() == 2);
+		REQUIRE(output_cstr.size() == 2);
+		CHECK(output[0] == "header");
+		CHECK(output[1] == tail);
+		CHECK(output_cstr[0] == "header");
+		CHECK(output_cstr[1] == tail);
+	}
+}
+
 TEST_CASE("[String] Splitting") {
 	{
 		const String s = "Mars,Jupiter,Saturn,Uranus";
@@ -878,6 +1391,66 @@ TEST_CASE("[String] Splitting") {
 			CHECK(mk[i] == slices[i]);
 		}
 	}
+}
+
+TEST_CASE("[String] split_floats parses bounded numeric tokens without an input copy") {
+	const String source = "1e3|-2.75|.5|+4e-2|7e+3|garbage| |9";
+	const Vector<double> parsed = source.split_floats("|");
+	const double expected[] = { 1000.0, -2.75, 0.5, 0.04, 7000.0, 0.0, 0.0, 9.0 };
+	REQUIRE(parsed.size() == 8);
+	for (int i = 0; i < 8; i++) {
+		CHECK(Math::abs(parsed[i] - expected[i]) < 0.0000001);
+	}
+	// Bounded parsing must never mutate the source buffer or overrun into
+	// a token that follows a delimiter.
+	CHECK(source == "1e3|-2.75|.5|+4e-2|7e+3|garbage| |9");
+
+	const String empty_tokens = "|12||-3.5|";
+	const Vector<double> all = empty_tokens.split_floats("|");
+	REQUIRE(all.size() == 5);
+	CHECK(all[0] == 0.0);
+	CHECK(all[1] == 12.0);
+	CHECK(all[2] == 0.0);
+	CHECK(all[3] == -3.5);
+	CHECK(all[4] == 0.0);
+	const Vector<double> without_empty = empty_tokens.split_floats("|", false);
+	REQUIRE(without_empty.size() == 2);
+	CHECK(without_empty[0] == 12.0);
+	CHECK(without_empty[1] == -3.5);
+
+	const Vector<String> splitters = { ";", "|", " " };
+	const Vector<float> multikey = String("1.25;2.5|-3.75 4e1").split_floats_mk(splitters);
+	REQUIRE(multikey.size() == 4);
+	CHECK(Math::abs(multikey[0] - 1.25f) < 0.000001f);
+	CHECK(Math::abs(multikey[1] - 2.5f) < 0.000001f);
+	CHECK(Math::abs(multikey[2] + 3.75f) < 0.000001f);
+	CHECK(Math::abs(multikey[3] - 40.0f) < 0.000001f);
+}
+
+TEST_CASE("[String] split_floats handles long immutable CSV input and token boundaries") {
+	String csv;
+	const int token_count = 2048;
+	for (int i = 0; i < token_count; i++) {
+		if (i > 0) {
+			csv += ",";
+		}
+		csv += itos(i % 101);
+	}
+	const String original = csv;
+	const Vector<double> values = csv.split_floats(",");
+	REQUIRE(values.size() == token_count);
+	for (int i = 0; i < token_count; i++) {
+		CHECK(values[i] == double(i % 101));
+	}
+	CHECK(csv == original);
+
+	// A truncated exponent token must not see digits in the next token.
+	const Vector<double> incomplete = String("1e-|9|2e+|3").split_floats("|");
+	REQUIRE(incomplete.size() == 4);
+	CHECK(incomplete[0] == 1.0);
+	CHECK(incomplete[1] == 9.0);
+	CHECK(incomplete[2] == 2.0);
+	CHECK(incomplete[3] == 3.0);
 }
 
 TEST_CASE("[String] format") {
@@ -1402,6 +1975,38 @@ TEST_CASE("[String] is_numeric") {
 	CHECK(String("-1.2").is_numeric());
 }
 
+TEST_CASE("[String] Padding fast paths avoid intermediate buffers and preserve behavior") {
+	CHECK(String("a").rpad(3, "xy") == "axyxy");
+	const String many = String("ab").repeat(1024);
+	CHECK(String("!").rpad(1025, "ab") == String("!") + many);
+	CHECK(String("!").lpad(1025, "ab") == many + "!");
+	CHECK(String("a").lpad(3, "xy") == "xyxya");
+	CHECK(String("").rpad(3, "ab") == "ababab");
+	CHECK(String("").lpad(3, "ab") == "ababab");
+	CHECK(String("hi").lpad(3, String(U"\u00B5")) == String(U"\u00B5hi"));
+	CHECK(String("hi").rpad(3, String(U"\u00B5")) == String(U"hi\u00B5"));
+	CHECK(String("42").pad_decimals(3) == "42.000");
+	CHECK(String("42.").pad_decimals(2) == "42.00");
+	CHECK(String("42.10").pad_decimals(3) == "42.100");
+	CHECK(String("42.123").pad_decimals(1) == "42.1");
+	CHECK(String("42.123").pad_decimals(0) == "42");
+	CHECK(String("").pad_decimals(2) == ".00");
+	CHECK(String("-8").pad_zeros(3) == "-008");
+	CHECK(String("foo").pad_zeros(3) == "foo000");
+	CHECK(String("0").pad_zeros(4) == "0000");
+	CHECK(String(".5").pad_zeros(8) == ".5");
+	CHECK(String(U"\u00B5-8").pad_zeros(3) == String(U"\u00B5-008"));
+
+	const String unchanged = "value";
+	CHECK(unchanged.rpad(5, "x").ptr() == unchanged.ptr());
+	CHECK(unchanged.lpad(5, "x").ptr() == unchanged.ptr());
+	CHECK(unchanged.rpad(30, "").ptr() == unchanged.ptr());
+	CHECK(unchanged.lpad(30, "").ptr() == unchanged.ptr());
+	const String decimal = "3.140";
+	CHECK(decimal.pad_decimals(3).ptr() == decimal.ptr());
+	CHECK(unchanged.pad_zeros(0).ptr() == unchanged.ptr());
+}
+
 TEST_CASE("[String] pad") {
 	String s = String("test");
 	CHECK(s.lpad(10, "x") == U"xxxxxxtest");
@@ -1427,11 +2032,141 @@ TEST_CASE("[String] is_lowercase") {
 	CHECK(!String("abc_ABC").is_lowercase());
 }
 
+TEST_CASE("[String] compound word case conversion linear-path regression") {
+	const String inputs[] = {
+		String(""),
+		String("   "),
+		String("a___b"),
+		String("a--b"),
+		String("HTTPServer2D"),
+		String("  hi---there__WORLD  "),
+		String("abCD123Digits"),
+		String(U"Über_name"),
+		String(U"Äpfel_Öl"),
+		String(U"Язык_Программирования"),
+	};
+	// Reconstruct the previous slice-by-slice assembly as a reference using
+	// the normalized snake-case output, including its collapsed-space behavior.
+	for (const String &input : inputs) {
+		const String normalized = input.to_snake_case().replace_char('_', ' ').strip_edges();
+		String reference_title;
+		String reference_camel;
+		String reference_pascal;
+		for (int i = 0; i < normalized.get_slice_count(" "); ++i) {
+			String slice = normalized.get_slicec(' ', i);
+			if (slice.is_empty()) {
+				continue;
+			}
+			String upper = slice;
+			upper[0] = String::char_uppercase(upper[0]);
+			if (i > 0) {
+				reference_title += " ";
+			}
+			reference_title += upper;
+			reference_pascal += upper;
+			slice[0] = i == 0 ? String::char_lowercase(slice[0]) : String::char_uppercase(slice[0]);
+			reference_camel += slice;
+		}
+		CHECK(input.capitalize() == reference_title);
+		CHECK(input.to_camel_case() == reference_camel);
+		CHECK(input.to_pascal_case() == reference_pascal);
+	}
+
+	CHECK(String("HTTPRequest2D").to_snake_case() == "http_request_2d");
+	CHECK(String(U"Über_name").to_snake_case() == U"über_name");
+	CHECK(String(U"Über_name").capitalize() == U"Über Name");
+	CHECK(String(U"Über_name").to_camel_case() == U"überName");
+	CHECK(String(U"Über_name").to_pascal_case() == U"ÜberName");
+
+	// Large separator-heavy input exercised without intermediate slice allocations.
+	const String many = String("a_").repeat(256) + "end";
+	CHECK(many.capitalize() == String("A ").repeat(256) + "End");
+	CHECK(many.to_camel_case() == "a" + String("A").repeat(255) + "End");
+	CHECK(many.to_pascal_case() == String("A").repeat(256) + "End");
+	CHECK(many.to_snake_case() == String("a_").repeat(256) + "end");
+}
+
 TEST_CASE("[String] match") {
 	CHECK(String("img1.png").match("*.png"));
 	CHECK(!String("img1.jpeg").match("*.png"));
 	CHECK(!String("img1.Png").match("*.png"));
 	CHECK(String("img1.Png").matchn("*.png"));
+}
+
+TEST_CASE("[String] iterative wildcard matching exhaustive short patterns") {
+	// Reference implementation intentionally mirrors the original recursive
+	// semantics, but is only used on tiny inputs so it cannot explode.
+	auto reference = [](auto &&self, const char32_t *pattern, const char32_t *text, bool case_sensitive) -> bool {
+		switch (*pattern) {
+			case '\0':
+				return !*text;
+			case '*':
+				return self(self, pattern + 1, text, case_sensitive) || (*text && self(self, pattern, text + 1, case_sensitive));
+			case '?':
+				return *text && *text != '.' && self(self, pattern + 1, text + 1, case_sensitive);
+			default:
+				return (case_sensitive ? *text == *pattern : String::char_uppercase(*text) == String::char_uppercase(*pattern)) &&
+						self(self, pattern + 1, text + 1, case_sensitive);
+		}
+	};
+
+	constexpr char32_t text_alphabet[] = { 'a', 'A', 'b', '.' };
+	constexpr char32_t pattern_alphabet[] = { 'a', 'b', '.', '?', '*' };
+	for (int text_length = 1, text_count = 4; text_length <= 3; ++text_length, text_count *= 4) {
+		for (int text_index = 0; text_index < text_count; ++text_index) {
+			char32_t text[4] = {};
+			int text_number = text_index;
+			for (int i = 0; i < text_length; ++i) {
+				text[i] = text_alphabet[text_number % 4];
+				text_number /= 4;
+			}
+			const String source(text);
+			for (int pattern_length = 1, pattern_count = 5; pattern_length <= 4; ++pattern_length, pattern_count *= 5) {
+				for (int pattern_index = 0; pattern_index < pattern_count; ++pattern_index) {
+					char32_t pattern[5] = {};
+					int pattern_number = pattern_index;
+					for (int i = 0; i < pattern_length; ++i) {
+						pattern[i] = pattern_alphabet[pattern_number % 5];
+						pattern_number /= 5;
+					}
+					const String wildcard(pattern);
+					CHECK(source.match(wildcard) == reference(reference, pattern, text, true));
+					CHECK(source.matchn(wildcard) == reference(reference, pattern, text, false));
+				}
+			}
+		}
+	}
+}
+
+TEST_CASE("[String] iterative wildcard matching pathological and Unicode cases") {
+	CHECK(String("a.b").match("a*b"));
+	CHECK(!String("a.b").match("a?b")); // '?' never matches period.
+	CHECK(String("a.b").match("a*?"));
+	CHECK(String("abc").match("a**c"));
+	CHECK(!String("abc").match("a**d"));
+	CHECK(String("abc").match("**?"));
+	CHECK(String("abc").match("*"));
+	CHECK(!String("").match("*")); // Preserve String::match's empty-input guard.
+	CHECK(!String("abc").match(""));
+	CHECK(String(U"ÄΩЯ.txt").matchn(U"*ä?я.TXT"));
+	CHECK(!String(U"ÄΩЯ.txt").match(U"*ä?я.TXT"));
+
+	// The recursive matcher has exponential work on this non-matching input.
+	// The iterative matcher must handle it with constant extra memory.
+	CHECK(!String("a").repeat(128).match(String("*a").repeat(24) + "b"));
+	CHECK(String("a").repeat(128).match(String("*a").repeat(24) + "*"));
+}
+
+TEST_CASE("[String] ASCII-fast case comparisons preserve ordering and Unicode") {
+	CHECK(String("AbCd").nocasecmp_to("aBcD") == 0);
+	CHECK(String("abc").nocasecmp_to("ABD") < 0);
+	CHECK(String("ABD").nocasecmp_to("abc") > 0);
+	CHECK(String(U"ÄΩЯ").nocasecmp_to(U"äωя") == 0);
+	CHECK(String(U"Яa").nocasecmp_to(U"яB") < 0);
+	CHECK(String("file2").naturalnocasecmp_to("FILE10") < 0);
+	CHECK(String(U"Ω2").naturalnocasecmp_to(U"ω10") < 0);
+	CHECK(String(U"ÄB").is_subsequence_ofn(U"äXXb"));
+	CHECK(!String(U"ÄB").is_subsequence_of(U"äXXb"));
 }
 
 TEST_CASE("[String] IPVX address to string") {
@@ -1744,6 +2479,73 @@ TEST_CASE("[String] Cyrillic to_lower()") {
 	CHECK(state);
 }
 
+TEST_CASE("[String] bounded count without substring allocations") {
+	// The previous implementation copied the selected substring and called
+	// find/findn on that copy. Use it as an independent oracle for every range.
+	auto legacy_string_count = [](const String &source, const String &needle, int from, int to, bool insensitive) -> int {
+		if (needle.is_empty() || source.length() < needle.length() || from < 0 || to < 0) {
+			return 0;
+		}
+		if (to == 0) {
+			to = source.length();
+		} else if (from >= to) {
+			return 0;
+		}
+		const String section = source.substr(from, to - from);
+		int result = 0;
+		int offset = 0;
+		while ((offset = insensitive ? section.findn(needle, offset) : section.find(needle, offset)) >= 0) {
+			offset += needle.length();
+			++result;
+		}
+		return result;
+	};
+	auto legacy_cstring_count = [](const String &source, const char *needle, int from, int to, bool insensitive) -> int {
+		const int needle_len = strlen(needle);
+		if (needle_len == 0 || source.length() < needle_len || from < 0 || to < 0) {
+			return 0;
+		}
+		if (to == 0) {
+			to = source.length();
+		} else if (from >= to) {
+			return 0;
+		}
+		const String section = source.substr(from, to - from);
+		int result = 0;
+		int offset = 0;
+		while ((offset = insensitive ? section.findn(needle, offset) : section.find(needle, offset)) >= 0) {
+			offset += needle_len;
+			++result;
+		}
+		return result;
+	};
+
+	const String sources[] = { "ababA.baaABA", "TestTestTest", U"ÄbÄBbÄ", "", "aaaaaaa" };
+	const String patterns[] = { "a", "A", "aa", "aba", "bA", "Test", "xyz", U"Ä", U"ä", "" };
+	const char *byte_patterns[] = { "a", "A", "aa", "aba", "bA", "Test", "xyz", "" };
+	for (const String &source : sources) {
+		for (int from = -1; from <= source.length() + 2; ++from) {
+			for (int to = -1; to <= source.length() + 2; ++to) {
+				for (const String &pattern : patterns) {
+					CHECK(source.count(pattern, from, to) == legacy_string_count(source, pattern, from, to, false));
+					CHECK(source.countn(pattern, from, to) == legacy_string_count(source, pattern, from, to, true));
+				}
+				for (const char *pattern : byte_patterns) {
+					CHECK(source.count(pattern, from, to) == legacy_cstring_count(source, pattern, from, to, false));
+					CHECK(source.countn(pattern, from, to) == legacy_cstring_count(source, pattern, from, to, true));
+				}
+			}
+		}
+	}
+
+	const String big = String("a").repeat(4096) + "b";
+	CHECK(big.count("a", 1024, 3072) == 2048);
+	CHECK(big.count("aa", 1024, 3072) == 1024);
+	CHECK(big.count("b", 0, 4096) == 0);
+	CHECK(big.count("b", 4096, 4097) == 1);
+	CHECK(big.countn("A", 1024, 3072) == 2048);
+}
+
 TEST_CASE("[String] Count and countn functionality") {
 	String s = String("");
 	MULTICHECK_STRING_EQ(s, count, "Test", 0);
@@ -1813,9 +2615,176 @@ TEST_CASE("[String] Bigrams") {
 	CHECK(bigr[2] == "cd");
 }
 
+TEST_CASE("[String] Escape fast paths preserve COW for unchanged Unicode text") {
+	const String unchanged = U"Plain ASCII_123 αβ 文 😀";
+	const char32_t *original = unchanged.ptr();
+	CHECK(unchanged.c_escape().ptr() == original);
+	CHECK(unchanged.c_escape_multiline().ptr() == original);
+	CHECK(unchanged.json_escape().ptr() == original);
+
+	CHECK(String("a\nb").c_escape() == "a\\nb");
+	CHECK(String("a\nb").json_escape() == "a\\nb");
+	CHECK(String("a\nb").c_escape_multiline() == "a\nb");
+	CHECK(String("'").c_escape() == "\\'");
+	CHECK(String("'").json_escape() == "'");
+	CHECK(String("\a").json_escape() == String("\a"));
+	CHECK(String("\v").json_escape() == "\\v");
+	CHECK(String("\\\"").c_escape_multiline() == "\\\\\\\"");
+	CHECK(String().c_escape().is_empty());
+	CHECK(String().json_escape().is_empty());
+}
+
+TEST_CASE("[String] Escape single-buffer algorithms match ordered replacements") {
+	uint32_t seed = 0x7AC99D31;
+	static constexpr char32_t alphabet[] = U"xyz123 \\\a\b\f\n\r\t\v'\"α😀[]{}-";
+
+	for (int trial = 0; trial < 512; trial++) {
+		seed ^= seed << 13;
+		seed ^= seed >> 17;
+		seed ^= seed << 5;
+		const int len = int(seed % 224);
+		String input;
+		input.resize_uninitialized(len + 1);
+		char32_t *chars = input.ptrw();
+		for (int i = 0; i < len; i++) {
+			seed ^= seed << 13;
+			seed ^= seed >> 17;
+			seed ^= seed << 5;
+			chars[i] = alphabet[seed % (sizeof(alphabet) / sizeof(alphabet[0]) - 1)];
+		}
+		chars[len] = 0;
+
+		// Keep the original ordered-substitution algorithms as an independent oracle.
+		const String expected_c = input.replace("\\", "\\\\")
+										  .replace("\a", "\\a").replace("\b", "\\b")
+										  .replace("\f", "\\f").replace("\n", "\\n")
+										  .replace("\r", "\\r").replace("\t", "\\t")
+										  .replace("\v", "\\v").replace("'", "\\'")
+										  .replace("\"", "\\\"");
+		const String expected_multiline = input.replace("\\", "\\\\").replace("\"", "\\\"");
+		const String expected_json = input.replace("\\", "\\\\")
+											 .replace("\b", "\\b").replace("\f", "\\f")
+											 .replace("\n", "\\n").replace("\r", "\\r")
+											 .replace("\t", "\\t").replace("\v", "\\v")
+											 .replace("\"", "\\\"");
+
+		CHECK(input.c_escape() == expected_c);
+		CHECK(input.c_escape_multiline() == expected_multiline);
+		CHECK(input.json_escape() == expected_json);
+		CHECK(input.length() == len);
+	}
+}
+
+TEST_CASE("[String] c_unescape zero-copy no-op and ordered escape compatibility") {
+	const String plain = U"ASCII данные 😀 / path [brackets] \\unknown";
+	CHECK(plain.c_unescape() == plain);
+	CHECK(plain.c_unescape().ptr() == plain.ptr());
+	CHECK(String().c_unescape().is_empty());
+
+	// A literal backslash is folded only after all the C escape substitutions.
+	const String tricky = "\\\\n\\t\\\\\\q\\'\\\"\\a\\b\\f\\r\\v";
+	const String expected = tricky.replace("\\a", "\a")
+								   .replace("\\b", "\b")
+								   .replace("\\f", "\f")
+								   .replace("\\n", "\n")
+								   .replace("\\r", "\r")
+								   .replace("\\t", "\t")
+								   .replace("\\v", "\v")
+								   .replace("\\'", "'")
+								   .replace("\\\"", "\"")
+								   .replace("\\\\", "\\");
+	CHECK(tricky.c_unescape() == expected);
+	CHECK(tricky.c_unescape().length() < tricky.length());
+
+	const String long_plain = String(U"long/неизменённый/строка😀").repeat(4096);
+	CHECK(long_plain.c_unescape().ptr() == long_plain.ptr());
+	const String long_escaped = String("\\\\n\\t\\\\\\q\\'\\\"").repeat(4096);
+	CHECK(long_escaped.c_unescape() ==
+			long_escaped.replace("\\a", "\a")
+					.replace("\\b", "\b")
+					.replace("\\f", "\f")
+					.replace("\\n", "\n")
+					.replace("\\r", "\r")
+					.replace("\\t", "\t")
+					.replace("\\v", "\v")
+					.replace("\\'", "'")
+					.replace("\\\"", "\"")
+					.replace("\\\\", "\\"));
+}
+
+TEST_CASE("[String] c_unescape matches ten ordered substitutions on randomized inputs") {
+	uint32_t seed = 0xC0FFEE41;
+	static constexpr char32_t alphabet[] = U"xyz12ABC \\abfnrtv'\"q!ά😀-";
+
+	for (int trial = 0; trial < 2048; trial++) {
+		seed ^= seed << 13;
+		seed ^= seed >> 17;
+		seed ^= seed << 5;
+		const int len = int(seed % 192);
+		String input;
+		REQUIRE(input.resize_uninitialized(len + 1) == OK);
+		char32_t *buffer = input.ptrw();
+		for (int i = 0; i < len; i++) {
+			seed ^= seed << 13;
+			seed ^= seed >> 17;
+			seed ^= seed << 5;
+			buffer[i] = alphabet[seed % (sizeof(alphabet) / sizeof(char32_t) - 1)];
+		}
+		buffer[len] = 0;
+
+		const String expected = input.replace("\\a", "\a")
+										.replace("\\b", "\b")
+										.replace("\\f", "\f")
+										.replace("\\n", "\n")
+										.replace("\\r", "\r")
+										.replace("\\t", "\t")
+										.replace("\\v", "\v")
+										.replace("\\'", "'")
+										.replace("\\\"", "\"")
+										.replace("\\\\", "\\");
+		const String result = input.c_unescape();
+		CHECK(result == expected);
+		if (result.length() == input.length()) {
+			CHECK(result.ptr() == input.ptr());
+		}
+	}
+}
+
 TEST_CASE("[String] c-escape/unescape") {
 	String s = "\\1\a2\b\f3\n45\r6\t7\v8\'9\?0\"";
 	CHECK(s.c_escape().c_unescape() == s);
+}
+
+TEST_CASE("[String] indent linear-time empty lines and Unicode") {
+	CHECK(String().indent("  ").is_empty());
+	CHECK(String("\n\n").indent("  ") == "\n\n");
+	CHECK(String("a\n\nb\n").indent("  ") == "  a\n\n  b\n");
+	CHECK(String("a\n\nb").indent("  ") == "  a\n\n  b");
+	CHECK(String("\r\n\n").indent("\t") == "\t\r\n\n");
+	CHECK(String(U"α\nβ\n").indent(U"▸") == U"▸α\n▸β\n");
+	CHECK(String(U"α\nβ").indent(U"\n") == U"\nα\n\nβ");
+	const String original = U"α\n\nβ";
+	const String same = original.indent("");
+	CHECK(same.ptr() == original.ptr());
+	CHECK(same == original);
+	const String blank = "\n\n";
+	CHECK(blank.indent("\t").ptr() == blank.ptr());
+}
+
+TEST_CASE("[String] indent linear-time large multiline input") {
+	String input;
+	String expected;
+	for (int i = 0; i < 4096; i++) {
+		if (i % 3 == 0) {
+			input += "\n";
+			expected += "\n";
+		} else {
+			input += U"script α\n";
+			expected += U"  script α\n";
+		}
+	}
+	CHECK(input.indent("  ") == expected);
+	CHECK(input.indent("") == input);
 }
 
 TEST_CASE("[String] indent") {
@@ -1835,6 +2804,48 @@ TEST_CASE("[String] indent") {
 	for (int i = 0; i < 3; i++) {
 		CHECK(String(input[i]).indent("\t") == expected[i]);
 	}
+}
+
+TEST_CASE("[String] dedent linear-time whitespace and Unicode") {
+	CHECK(String().dedent().is_empty());
+	CHECK(String("   ").dedent().is_empty());
+	CHECK(String("  \n \n").dedent() == "\n\n");
+	CHECK(String("    first\n  second\n").dedent() == "first\nsecond\n");
+	CHECK(String("    first\n     second").dedent() == "first\n second");
+	CHECK(String(" \tfirst\n  second").dedent() == "first\n second");
+	CHECK(String("\r\n  first\n\tsecond").dedent() == "\nfirst\n\tsecond");
+	CHECK(String(U"  α\n β\n").dedent() == U"α\nβ\n");
+	CHECK(String(U"    😀\n  α").dedent() == U"😀\nα");
+	const String original = U"no indentation α\nsecond line";
+	String unchanged = original.dedent();
+	CHECK(unchanged.ptr() == original.ptr());
+	CHECK(unchanged == original);
+}
+
+TEST_CASE("[String] dedent linear-time large multiline input") {
+	String input;
+	String expected;
+	for (int i = 0; i < 2048; i++) {
+		switch (i % 4) {
+			case 0:
+				input += "    \n";
+				expected += "\n";
+				break;
+			case 1:
+				input += U"    αβ and text\n";
+				expected += U"αβ and text\n";
+				break;
+			case 2:
+				input += U"  β\n";
+				expected += U"β\n";
+				break;
+			default:
+				input += "     more text\n";
+				expected += " more text\n";
+				break;
+		}
+	}
+	CHECK(input.dedent() == expected);
 }
 
 TEST_CASE("[String] dedent") {
@@ -1881,6 +2892,105 @@ TEST_CASE("[String] Path functions") {
 	CHECK(String("res://../../texture.png") == String("res://../../texture.png").simplify_path());
 }
 
+TEST_CASE("[String] Path joining keeps delimiters and avoids no-op allocations") {
+	CHECK(String("").path_join("file.txt") == "file.txt");
+	CHECK(String("base").path_join("") == "base/");
+	CHECK(String("base/").path_join("") == "base/");
+	CHECK(String("base").path_join("file") == "base/file");
+	CHECK(String("base/").path_join("file") == "base/file");
+	CHECK(String("base").path_join("/file") == "base/file");
+	CHECK(String("base/").path_join("/file") == "base//file");
+	CHECK(String(U"res://θ/").path_join(U"🍀.png") == U"res://θ/🍀.png");
+
+	const String empty;
+	const String source = U"res://données/";
+	CHECK(empty.path_join(source).ptr() == source.ptr());
+	CHECK(source.path_join(empty).ptr() == source.ptr());
+	CHECK(source == U"res://données/");
+	CHECK(source.path_join(source) == U"res://données/res://données/");
+}
+
+TEST_CASE("[String] Path joining randomized equivalence to concatenation") {
+	uint32_t seed = 0xA91D5482;
+	static constexpr char32_t alphabet[] = U"abcXYZ/_\\- .é🍀";
+	for (int trial = 0; trial < 512; trial++) {
+		seed ^= seed << 13;
+		seed ^= seed >> 17;
+		seed ^= seed << 5;
+		const int base_length = int(seed % 76);
+		const int file_length = int((seed >> 9) % 76);
+
+		String base;
+		base.resize_uninitialized(base_length + 1);
+		char32_t *base_data = base.ptrw();
+		for (int i = 0; i < base_length; i++) {
+			seed ^= seed << 13;
+			seed ^= seed >> 17;
+			seed ^= seed << 5;
+			base_data[i] = alphabet[seed % (sizeof(alphabet) / sizeof(char32_t) - 1)];
+		}
+		base_data[base_length] = 0;
+
+		String file;
+		file.resize_uninitialized(file_length + 1);
+		char32_t *file_data = file.ptrw();
+		for (int i = 0; i < file_length; i++) {
+			seed ^= seed << 13;
+			seed ^= seed >> 17;
+			seed ^= seed << 5;
+			file_data[i] = alphabet[seed % (sizeof(alphabet) / sizeof(char32_t) - 1)];
+		}
+		file_data[file_length] = 0;
+
+		const String expected = base.is_empty() ? file :
+				(base[base.length() - 1] == '/' || (!file.is_empty() && file[0] == '/')
+								? base + file
+								: base + "/" + file);
+		CHECK(base.path_join(file) == expected);
+		CHECK(base.length() == base_length);
+		CHECK(file.length() == file_length);
+	}
+}
+
+TEST_CASE("[String] Path extraction single-pass regressions") {
+	struct PathCase {
+		const char *path;
+		const char *base_dir;
+		const char *file;
+		const char *extension;
+	};
+
+	static const PathCase cases[] = {
+		{ "", "", "", "" },
+		{ "file", "", "file", "" },
+		{ "file.tar.gz", "", "file.tar.gz", "gz" },
+		{ "file.", "", "file.", "" },
+		{ ".hidden", "", ".hidden", "hidden" },
+		{ "folder/file.ext", "folder", "file.ext", "ext" },
+		{ "folder/", "folder", "", "" },
+		{ "folder\\sub/file.ext", "folder\\sub", "file.ext", "ext" },
+		{ "file.txt/folder", "file.txt", "folder", "" },
+		{ "/file", "/", "file", "" },
+		{ "/", "/", "", "" },
+		{ "res://", "res://", "", "" },
+		{ "res://file", "res://", "file", "" },
+		{ "res://folder/sub/", "res://folder/sub", "", "" },
+		{ "user://addons\\script.gd", "user://addons", "script.gd", "gd" },
+		{ "C:\\file", "C:\\", "file", "" },
+		{ "C:\\folder\\file.txt", "C:\\folder", "file.txt", "txt" },
+		{ "//server/share/file.txt", "//server/share/", "file.txt", "txt" },
+		{ "//server/share/dir/file.txt", "//server/share/dir", "file.txt", "txt" },
+		{ "\\\\server\\share\\file.txt", "\\\\server\\share\\", "file.txt", "txt" },
+	};
+
+	for (const PathCase &test : cases) {
+		const String path(test.path);
+		CHECK(path.get_base_dir() == test.base_dir);
+		CHECK(path.get_file() == test.file);
+		CHECK(path.get_extension() == test.extension);
+	}
+}
+
 TEST_CASE("[String] hash") {
 	String a = "Test";
 	String b = "Test";
@@ -1890,6 +3000,131 @@ TEST_CASE("[String] hash") {
 
 	CHECK(a.hash64() == b.hash64());
 	CHECK(a.hash64() != c.hash64());
+}
+
+TEST_CASE("[String] uri_encode fast path preserves UTF-8 bytes and COW storage") {
+	const String safe = "AbcXYZ_0123456789-._~";
+	const char32_t *original = safe.ptr();
+	CHECK(safe.uri_encode() == safe);
+	CHECK(safe.uri_encode().ptr() == original);
+
+	CHECK(String("").uri_encode() == "");
+	CHECK(String(" /?#&+=:%").uri_encode() == "%20%2F%3F%23%26%2B%3D%3A%25");
+	CHECK(String(U"é").uri_encode() == "%C3%A9");
+	CHECK(String(U"😊").uri_encode() == "%F0%9F%98%8A");
+	CHECK(String(U"Aé B").uri_encode() == "A%C3%A9%20B");
+
+	const String unicode = U"żółć 😀/茶";
+	CHECK(unicode.uri_encode().uri_decode() == unicode);
+	CHECK(unicode == U"żółć 😀/茶");
+}
+
+TEST_CASE("[String] uri_encode randomized byte-for-byte equivalence") {
+	static constexpr char HEX[] = "0123456789ABCDEF";
+	uint32_t seed = 0x1E52C7AB;
+	for (int trial = 0; trial < 384; trial++) {
+		seed ^= seed << 13;
+		seed ^= seed >> 17;
+		seed ^= seed << 5;
+		const int len = int(seed % 150);
+		String input;
+		input.resize_uninitialized(len + 1);
+		char32_t *input_data = input.ptrw();
+		for (int i = 0; i < len; i++) {
+			const uint32_t n = (seed + uint32_t(i) * 11) % 37;
+			input_data[i] = n == 0 ? U'😀' : (n == 1 ? U'β' : char32_t(32 + (n * 29) % 95));
+		}
+		input_data[len] = 0;
+
+		// Independent reference implementation matching the original byte-wise loop.
+		String expected;
+		const CharString utf8 = input.utf8();
+		for (int i = 0; i < utf8.length(); i++) {
+			const uint8_t byte = uint8_t(utf8[i]);
+			const bool unreserved = (byte >= 'a' && byte <= 'z') ||
+					(byte >= 'A' && byte <= 'Z') || (byte >= '0' && byte <= '9') ||
+					byte == '-' || byte == '_' || byte == '.' || byte == '~';
+			if (unreserved) {
+				expected += byte;
+			} else {
+				expected += '%';
+				expected += HEX[byte >> 4];
+				expected += HEX[byte & 0xF];
+			}
+		}
+		CHECK(input.uri_encode() == expected);
+		CHECK(input.length() == len);
+	}
+}
+
+TEST_CASE("[String] URI decoding preserves ASCII COW and legacy edge cases") {
+	const String unchanged = "res://folder/file_name.123~";
+	const char32_t *original = unchanged.ptr();
+	CHECK(unchanged.uri_decode().ptr() == original);
+	CHECK(unchanged.uri_file_decode().ptr() == original);
+
+	const String with_plus = "one+two+three";
+	CHECK(with_plus.uri_decode() == "one two three");
+	CHECK(with_plus.uri_file_decode().ptr() == with_plus.ptr());
+	CHECK(String("%2F%20%41%7a").uri_decode() == "/ Az");
+	CHECK(String("foo%2fbar").uri_file_decode() == "foo/bar");
+	CHECK(String("%GG").uri_decode() == "%GG");
+	CHECK(String("%A!").uri_decode() == "A!");
+	CHECK(String("%%41").uri_decode() == "%A");
+	CHECK(String("trailing%").uri_decode() == "trailing%");
+	CHECK(String("short%F").uri_decode() == "short%F");
+	CHECK(String("x%00y").uri_decode().length() == 3);
+	CHECK(String("x%00y").uri_decode()[1] == 0);
+	CHECK(String(U"路徑%20😄").uri_decode() == U"路徑 😄");
+}
+
+TEST_CASE("[String] URI decoding matches the original strtol implementation") {
+	const auto legacy = [](const String &p_input, bool p_decode_plus) {
+		const CharString src = p_input.utf8();
+		CharString result;
+		for (int i = 0; i < src.length(); i++) {
+			if (src[i] == '%' && i + 2 < src.length()) {
+				const char hex1 = src[i + 1];
+				if (is_hex_digit(hex1)) {
+					const char hex2 = src[i + 2];
+					if (is_hex_digit(hex2)) {
+						char bytes[3] = { hex1, hex2, 0 };
+						result += char(strtol(bytes, nullptr, 16));
+						i += 2;
+					}
+				} else {
+					result += src[i];
+				}
+			} else if (p_decode_plus && src[i] == '+') {
+				result += ' ';
+			} else {
+				result += src[i];
+			}
+		}
+		return String::utf8(result);
+	};
+
+	uint32_t seed = 0x7308AC99;
+	static constexpr char32_t alphabet[] = U"abCDEF0123456789%+ !?/_-α😀";
+	for (int trial = 0; trial < 512; trial++) {
+		seed ^= seed << 13;
+		seed ^= seed >> 17;
+		seed ^= seed << 5;
+		const int len = int(seed % 192);
+		String input;
+		input.resize_uninitialized(len + 1);
+		char32_t *chars = input.ptrw();
+		for (int i = 0; i < len; i++) {
+			seed ^= seed << 13;
+			seed ^= seed >> 17;
+			seed ^= seed << 5;
+			chars[i] = alphabet[seed % (sizeof(alphabet) / sizeof(alphabet[0]) - 1)];
+		}
+		chars[len] = 0;
+		CHECK(input.uri_decode() == legacy(input, true));
+		CHECK(input.uri_file_decode() == legacy(input, false));
+		CHECK(input.length() == len);
+	}
 }
 
 TEST_CASE("[String] uri_encode/unescape") {
@@ -1915,6 +3150,47 @@ TEST_CASE("[String] uri_encode/unescape") {
 	CHECK(x4.uri_decode() == U"file name");
 	CHECK(x5.uri_file_decode() == U"[[+]]");
 	CHECK(x5.uri_decode() == U"[[ ]]");
+}
+
+TEST_CASE("[String] xml_escape single-buffer entities and COW no-op") {
+	const String safe = U"unchanged σαβ text";
+	const char32_t *safe_ptr = safe.ptr();
+	CHECK(safe.xml_escape().ptr() == safe_ptr);
+	CHECK(safe.xml_escape(false).ptr() == safe_ptr);
+
+	const String special = "&<>'\"";
+	CHECK(special.xml_escape(true) == "&amp;&lt;&gt;&apos;&quot;");
+	CHECK(special.xml_escape(false) == "&amp;&lt;&gt;'\"");
+	CHECK(String("&amp;").xml_escape() == "&amp;amp;");
+	CHECK(String(U"🌍<&'\">").xml_escape() == U"🌍&lt;&amp;&apos;&quot;&gt;");
+	CHECK(String("&&&&&&").xml_escape() == "&amp;&amp;&amp;&amp;&amp;&amp;");
+	CHECK(special == "&<>'\"");
+}
+
+TEST_CASE("[String] xml_escape randomized equivalence to ordered substitutions") {
+	uint32_t seed = 0x9812D45B;
+	for (int trial = 0; trial < 384; trial++) {
+		seed ^= seed << 13;
+		seed ^= seed >> 17;
+		seed ^= seed << 5;
+		const int len = int(seed % 150);
+		String input;
+		input.resize_uninitialized(len + 1);
+		char32_t *data = input.ptrw();
+		for (int i = 0; i < len; i++) {
+			static constexpr char32_t alphabet[] = U"A&B<'\">γ😀 -_";
+			data[i] = alphabet[(seed + uint32_t(i) * 23) % (sizeof(alphabet) / sizeof(char32_t) - 1)];
+		}
+		data[len] = 0;
+		const bool escape_quotes = trial % 2 == 0;
+
+		String expected = input.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;");
+		if (escape_quotes) {
+			expected = expected.replace("'", "&apos;").replace("\"", "&quot;");
+		}
+		CHECK(input.xml_escape(escape_quotes) == expected);
+		CHECK(input.length() == len);
+	}
 }
 
 TEST_CASE("[String] xml_escape/unescape") {
@@ -1969,9 +3245,247 @@ TEST_CASE("[String] xml_unescape") {
 	CHECK(input.xml_unescape() == input);
 }
 
+TEST_CASE("[String] xml_unescape keeps COW storage when no entity changes") {
+	const String plain = U"plain text: Привет 世界 😀 — <tag> 'quotes' and symbols";
+	const String unchanged = plain.xml_unescape();
+	CHECK(unchanged == plain);
+	CHECK(unchanged.ptr() == plain.ptr());
+	CHECK(plain.xml_unescape().ptr() == plain.ptr());
+
+	// Unknown and malformed entities must not spuriously allocate or disappear.
+	const String unknown = "&unknown; &#66 &#x41SomeIrrelevantText; &#xFFFFFFFFF;";
+	const String ignored = unknown.xml_unescape();
+	CHECK(ignored == unknown);
+	CHECK(ignored.ptr() == unknown.ptr());
+
+	String empty;
+	CHECK(empty.xml_unescape().ptr() == empty.ptr());
+
+	// Actual entities must still be decoded into newly allocated storage.
+	const String encoded = U"Привет &amp; 世界 &lt;tag&gt; &#x1F600;";
+	const String decoded = encoded.xml_unescape();
+	CHECK(decoded == U"Привет & 世界 <tag> 😀");
+	CHECK(decoded.ptr() != encoded.ptr());
+	CHECK(encoded.xml_unescape() == decoded);
+}
+
+TEST_CASE("[String] xml_unescape no-op fast path handles long strings") {
+	const String plain = String(U"данные/plain/abcdef1234567890").repeat(4096);
+	const String result = plain.xml_unescape();
+	CHECK(result.length() == plain.length());
+	CHECK(result.ptr() == plain.ptr());
+	CHECK(result == plain);
+}
+
+TEST_CASE("[String] Trimming long ASCII sets and mixed Unicode keeps existing behavior") {
+	const String chars = "0123456789abcdef";
+	const String long_prefix = String("012345abcdef").repeat(2048);
+	CHECK((long_prefix + "!").lstrip(chars) == "!");
+	CHECK(("!" + long_prefix).rstrip(chars) == "!");
+	CHECK(long_prefix.lstrip(chars).is_empty());
+	CHECK(long_prefix.rstrip(chars).is_empty());
+
+	CHECK(String("aaaaX").lstrip("a") == "X");
+	CHECK(String("Xbbbb").rstrip("b") == "X");
+	CHECK(String("abc").lstrip("") == "abc");
+	CHECK(String("abc").rstrip("") == "abc");
+	CHECK(String("").lstrip(chars).is_empty());
+	CHECK(String("").rstrip(chars).is_empty());
+
+	// ASCII membership uses the fast mask; non-ASCII membership retains
+	// the full Unicode comparison, even when mixed within the same set.
+	CHECK(String(U"  \u00B5\u00B5text").lstrip(String(U" \u00B5")) == "text");
+	CHECK(String(U"text\u00B5\u00B5  ").rstrip(String(U" \u00B5")) == "text");
+	CHECK(String(U"\u00BFx").lstrip(String(U"\u00B5\u00FF")) == String(U"\u00BFx"));
+	CHECK(String(U"x\u00BF").rstrip(String(U"\u00B5\u00FF")) == String(U"x\u00BF"));
+
+	// No allocation is necessary when the edge is not part of the trim set.
+	const String unchanged = U"\u00B5keep\u00B5";
+	CHECK(unchanged.lstrip(chars).ptr() == unchanged.ptr());
+	CHECK(unchanged.rstrip(chars).ptr() == unchanged.ptr());
+}
+
+TEST_CASE("[String] Basename ignores dots in parent folders and scans once") {
+	CHECK(String("res://folder/name.tar.gz").get_basename() == "res://folder/name.tar");
+	CHECK(String("dir.name/subdir/file").get_basename() == "dir.name/subdir/file");
+	CHECK(String("dir.name/subdir/file.txt").get_basename() == "dir.name/subdir/file");
+	CHECK(String("C:\\dir.name\\file.png").get_basename() == "C:\\dir.name\\file");
+	CHECK(String("C:\\dir.name\\file").get_basename() == "C:\\dir.name\\file");
+	CHECK(String(".hidden").get_basename() == "");
+	CHECK(String("file.").get_basename() == "file");
+	CHECK(String("file").get_basename() == "file");
+	CHECK(String("").get_basename().is_empty());
+}
+
 TEST_CASE("[String] Strip escapes") {
 	String s = "\t\tTest Test\r\n Test";
 	CHECK(s.strip_escapes() == "Test Test Test");
+}
+
+TEST_CASE("[String] Strip escapes single allocation and unchanged COW") {
+	const String plain = U"ASCII \u041f\u0440\u0438\u0432\u0435\u0442 \U0001F600";
+	const String unchanged = plain.strip_escapes();
+	CHECK(unchanged == plain);
+	CHECK(unchanged.ptr() == plain.ptr());
+
+	CHECK(String("").strip_escapes() == "");
+	CHECK(String("\r\n\t").strip_escapes() == "");
+	CHECK(String("A\x01""B\tC\r\nD").strip_escapes() == "ABCD");
+	CHECK(String(U"\u041f\t\u0440\n\u0438").strip_escapes() == U"\u041f\u0440\u0438");
+	CHECK(String("\x7f").strip_escapes() == "\x7f"); // DEL is not a C0 control character.
+
+	const String input = String("a\t").repeat(8192) + "z";
+	CHECK(input.strip_escapes() == String("a").repeat(8192) + "z");
+	CHECK(input.length() == 16385); // The original COW source remains intact.
+}
+
+TEST_CASE("[String] Linear path normalization preserves prefixes and parent traversal") {
+	static const char *const paths[] = {
+		"a////b/./c/../d",
+		"a/../../b",
+		"res://a/../../b",
+		"user://a/../../b",
+		"/../../a///b",
+		"a/..",
+		"a/../..",
+		"./a/./b/",
+		"a\\b\\\\c\\..\\end",
+		"a///b///c",
+		"res://folder/../file",
+		"",
+		".",
+		"..",
+		"../..",
+		"//server///share/../file",
+	};
+	static const char *const expected[] = {
+		"a/b/d",
+		"../b",
+		"res://../b",
+		"user://b",
+		"/a/b",
+		"",
+		"..",
+		"a/b",
+		"a/b/end",
+		"a/b/c",
+		"res://file",
+		"",
+		"",
+		"..",
+		"../..",
+		"//server/file",
+	};
+	static_assert(sizeof(paths) / sizeof(paths[0]) == sizeof(expected) / sizeof(expected[0]));
+	for (unsigned int i = 0; i < sizeof(paths) / sizeof(paths[0]); i++) {
+		CHECK(String(paths[i]).simplify_path() == expected[i]);
+	}
+
+	// Long runs of separators and parent-directory components previously
+	// performed multiple full-string replacements and O(n^2) vector shifts.
+	const String separators = String("dir////").repeat(2048) + "file.tscn";
+	CHECK(separators.simplify_path() == String("dir/").repeat(2048) + "file.tscn");
+
+	const String parents = String("dir/").repeat(2048) + String("../").repeat(2048) + "file.tscn";
+	CHECK(parents.simplify_path() == "file.tscn");
+	CHECK((String("/") + parents).simplify_path() == "/file.tscn");
+	CHECK((String("res://") + parents).simplify_path() == "res://file.tscn");
+}
+
+TEST_CASE("[String] Canonical paths reuse the original COW allocation") {
+	const String relative = "folder/assets/scene.tscn";
+	const String resource = U"res://\u041f\u0430\u043f\u043a\u0430/\u0444\u0430\u0439\u043b_\U0001F600.tscn";
+	const String user = "user://saves/slot1.dat";
+	const String unix_absolute = "/var/data/level.tscn";
+	const String unc = "//server/share/file.tscn";
+	for (const String &path : { relative, resource, user, unix_absolute, unc }) {
+		const String normalized = path.simplify_path();
+		CHECK(normalized == path);
+		CHECK(normalized.ptr() == path.ptr());
+	}
+
+	// Non-canonical paths must still use the normalizer rather than the shortcut.
+	CHECK(String("dir//file").simplify_path() == "dir/file");
+	CHECK(String("dir\\file").simplify_path() == "dir/file");
+	CHECK(String("dir/./file").simplify_path() == "dir/file");
+	CHECK(String("dir/../file").simplify_path() == "file");
+	CHECK(String("res://../file").simplify_path() == "res://../file");
+
+	const String long_canonical = String("folder/").repeat(4096) + "file.tscn";
+	const String long_result = long_canonical.simplify_path();
+	CHECK(long_result == long_canonical);
+	CHECK(long_result.ptr() == long_canonical.ptr());
+}
+
+TEST_CASE("[String] Similarity indexed bigram branch matches quadratic reference") {
+	auto reference = [](const String &p_source, const String &p_target) -> float {
+		if (p_source == p_target) {
+			return 1.0f;
+		}
+		if (p_source.length() < 2 || p_target.length() < 2) {
+			return 0.0f;
+		}
+		const int source_size = p_source.length() - 1;
+		const int target_size = p_target.length() - 1;
+		int matched = 0;
+		for (int i = 0; i < source_size; ++i) {
+			for (int j = 0; j < target_size; ++j) {
+				if (p_source[i] == p_target[j] && p_source[i + 1] == p_target[j + 1]) {
+					++matched;
+					break;
+				}
+			}
+		}
+		return (2.0f * matched) / (source_size + target_size);
+	};
+
+	const String pool = U"abcXYZ:\u0416\u03A3\u00C4";
+	uint32_t state = 0x41234123;
+	for (int test = 0; test < 240; ++test) {
+		state = state * 1664525U + 1013904223U;
+		const int first_len = state % 185;
+		state = state * 1664525U + 1013904223U;
+		const int second_len = state % 185;
+		String first;
+		String second;
+		for (int i = 0; i < first_len; ++i) {
+			state = state * 1664525U + 1013904223U;
+			first += String::chr(pool[state % pool.length()]);
+		}
+		for (int i = 0; i < second_len; ++i) {
+			state = state * 1664525U + 1013904223U;
+			second += String::chr(pool[state % pool.length()]);
+		}
+		CHECK(first.similarity(second) == reference(first, second));
+		CHECK(second.similarity(first) == reference(second, first));
+	}
+
+	const String duplicate = String("a").repeat(160);
+	const String mixed = String("a").repeat(80) + String("b").repeat(80);
+	CHECK(duplicate.similarity(mixed) == reference(duplicate, mixed));
+	CHECK(mixed.similarity(duplicate) == reference(mixed, duplicate));
+	CHECK(String("a").repeat(1024).similarity(String("z").repeat(512)) == 0.0f);
+}
+
+TEST_CASE("[String] Case-insensitive subsequence exhaustive printable ASCII") {
+	for (char32_t a = 32; a < 127; ++a) {
+		for (char32_t b = 32; b < 127; ++b) {
+			const bool expected = String::char_lowercase(a) == String::char_lowercase(b);
+			CHECK(String::chr(a).is_subsequence_ofn(String::chr(b)) == expected);
+		}
+	}
+}
+
+TEST_CASE("[String] Case-insensitive subsequence mixed Unicode matching") {
+	CHECK(String(U"k").is_subsequence_ofn(String(U"\u212A")));
+	CHECK(String(U"\u212A").is_subsequence_ofn(String("K")));
+	CHECK(String(U"\u03C3").is_subsequence_ofn(String(U"\u03A3")));
+	CHECK(String(U"\u0436").is_subsequence_ofn(String(U"\u0416")));
+	CHECK(String(U"\u00E4").is_subsequence_ofn(String(U"\u00C4")));
+	CHECK(String(U"\u0416k\u03A3").is_subsequence_ofn(String(U"foo\u0436bar\u212Axyz\u03C3")));
+	CHECK(!String(U"\u0416\u03A3").is_subsequence_of(String(U"\u0436\u03C3")));
+	CHECK(!String("aC").is_subsequence_ofn("abbb"));
+	CHECK(String().is_subsequence_ofn(String("abc")));
 }
 
 TEST_CASE("[String] Similarity") {
@@ -2019,6 +3533,57 @@ TEST_CASE("[String] Repeat") {
 	String x = "ab";
 	String t = x.repeat(4);
 	CHECK(t == s);
+}
+
+TEST_CASE("[String] Repeat creates one independent output and preserves shared source") {
+	const String original = U"тест🙂";
+	const String shared = original;
+	const char32_t *original_ptr = original.ptr();
+	const String repeated = original.repeat(73);
+	REQUIRE_EQ(repeated.length(), original.length() * 73);
+	CHECK(original.ptr() == original_ptr);
+	CHECK(shared.ptr() == original_ptr);
+	CHECK(repeated.ptr() != original_ptr);
+	for (int i = 0; i < 73; i++) {
+		CHECK_EQ(repeated.substr(i * original.length(), original.length()), original);
+	}
+	CHECK_EQ(repeated[repeated.length()], char32_t(0));
+}
+
+TEST_CASE("[String] Repeat handles non power-of-two boundaries and long output") {
+	const String token = "abcdEFGH";
+	const String result = token.repeat(10001);
+	REQUIRE_EQ(result.length(), token.length() * 10001);
+	for (int i = 0; i < 10001; i += 137) {
+		CHECK_EQ(result.substr(i * token.length(), token.length()), token);
+	}
+	CHECK_EQ(result.substr(result.length() - token.length()), token);
+	CHECK_EQ(result[result.length()], char32_t(0));
+}
+
+TEST_CASE("[String] Repeat rejects signed overflow without allocating") {
+	const String original = "abcdef";
+	ERR_PRINT_OFF;
+	CHECK(original.repeat(0x7fffffff).is_empty());
+	CHECK(original.repeat(-1).is_empty());
+	ERR_PRINT_ON;
+	CHECK(original == "abcdef");
+	CHECK(original.repeat(0).is_empty());
+	CHECK(original.repeat(1).ptr() == original.ptr());
+	CHECK(String().repeat(100000).is_empty());
+}
+
+TEST_CASE("[String] Repeat matches incremental concatenation over varied inputs") {
+	const String cases[] = { "x", "hello", U"Ω", "a\nb", "0123456789ABCDEF" };
+	for (const String &input : cases) {
+		for (int count = 0; count < 81; count++) {
+			String expected;
+			for (int i = 0; i < count; i++) {
+				expected += input;
+			}
+			CHECK(input.repeat(count) == expected);
+		}
+	}
 }
 
 TEST_CASE("[String] Reverse") {
@@ -2274,6 +3839,273 @@ TEST_CASE("[String][URL] Parse URL") {
 	CHECK_URL("https://godotengine.org:88888", "https://", "godotengine.org", 88888, "", "", Error::ERR_INVALID_PARAMETER);
 
 #undef CHECK_URL
+}
+
+static String get_with_code_lines_reference(const String &p_source) {
+	const Vector<String> lines = p_source.split("\n");
+	String result;
+	for (int i = 0; i < lines.size(); i++) {
+		if (i > 0) {
+			result += "\n";
+		}
+		result += vformat("%4d | %s", i + 1, lines[i]);
+	}
+	return result;
+}
+
+TEST_CASE("[String] get_with_code_lines matches original formatting without per-line allocations") {
+	const String samples[] = {
+		String(),
+		"one",
+		"one\ntwo",
+		"\n",
+		"one\n",
+		"\none",
+		"one\n\ntwo\n",
+		"one\r\ntwo",
+		String::utf8("Привет\n🎮 Unicode"),
+		String("x").repeat(1200),
+	};
+	for (const String &sample : samples) {
+		CHECK(sample.get_with_code_lines() == get_with_code_lines_reference(sample));
+	}
+
+	// Above 9,999 lines, prefixes grow as needed. The legacy formatting
+	// uses four spaces of minimum width, not one global widened column.
+	const String large_source = String("x\n").repeat(10001);
+	const String expected = get_with_code_lines_reference(large_source);
+	const String actual = large_source.get_with_code_lines();
+	CHECK(actual == expected);
+	CHECK(actual.contains("10000 | x"));
+	CHECK(actual.contains("10002 | "));
+}
+
+TEST_CASE("[String] strip_edges_span matches String::strip_edges for empty, Unicode, and whitespace") {
+	const String inputs[] = {
+		String(),
+		" ",
+		"  \t\r\n",
+		" a ",
+		" \tHello world\t ",
+		String::utf8(" \tПривет 🌎 \t"),
+		"\ttrailing\n",
+		String("x").repeat(1000),
+	};
+	for (const String &value : inputs) {
+		for (bool left : { false, true }) {
+			for (bool right : { false, true }) {
+				const Span<char32_t> span = String::strip_edges_span(value.span(), left, right);
+				const String expected = value.strip_edges(left, right);
+				CHECK(span == expected.span());
+			}
+		}
+	}
+}
+
+TEST_CASE("[String] strip_edges_span trims a single trailing whitespace character") {
+	const String lone = " ";
+	CHECK(String::strip_edges_span(lone.span(), false, true).is_empty());
+	CHECK(String::strip_edges_span(lone.span(), true, false).is_empty());
+	const String spaces = " \t\n";
+	CHECK(String::strip_edges_span(spaces.span(), false, true).is_empty());
+	CHECK(String::strip_edges_span(spaces.span(), true, true).is_empty());
+	const String leading = " text ";
+	CHECK(String::strip_edges_span(leading.span(), false, true) == Span<char32_t>(U" text"));
+	CHECK(String::strip_edges_span(leading.span(), true, false) == Span<char32_t>(U"text "));
+	CHECK(String::strip_edges_span(leading.span(), true, true) == Span<char32_t>(U"text"));
+}
+
+
+TEST_CASE("[String] Quoted strings use zero-temporary fast path") {
+	CHECK_FALSE(String().is_quoted());
+	CHECK_FALSE(String("\"").is_quoted());
+	CHECK_FALSE(String("'").is_quoted());
+	CHECK(String("\"\"").is_quoted());
+	CHECK(String("''").is_quoted());
+	CHECK(String("\"hello\"").is_quoted());
+	CHECK(String("'hello'").is_quoted());
+	CHECK_FALSE(String("\"hello'").is_quoted());
+	CHECK_FALSE(String("'hello\"").is_quoted());
+	CHECK_FALSE(String("hello").is_quoted());
+	CHECK(String("abba").is_enclosed_in("a"));
+	CHECK(String("ababab").is_enclosed_in("ab"));
+	CHECK(String("abba").is_enclosed_in(""));
+	CHECK_FALSE(String("abax").is_enclosed_in("ab"));
+	CHECK(String("abba").is_enclosed_in('a', 'a'));
+	CHECK_FALSE(String("a").is_enclosed_in('a', 'a'));
+}
+
+TEST_CASE("[String] shared UTF32 buffer comparison fast paths") {
+	const String original = String("AbC unicode \u00e9").repeat(256);
+	String copy = original;
+	CHECK(original == copy);
+	CHECK_EQ(original.casecmp_to(copy), 0);
+	CHECK_EQ(original.nocasecmp_to(copy), 0);
+	CHECK_FALSE(original != copy);
+
+	const String separate = String("AbC unicode \u00e9").repeat(256);
+	CHECK(original == separate);
+	CHECK_EQ(original.casecmp_to(separate), 0);
+	CHECK_EQ(original.nocasecmp_to(separate), 0);
+
+	copy += "!";
+	CHECK_FALSE(original == copy);
+	CHECK(original != copy);
+	CHECK_EQ(original.casecmp_to(String("AbC unicode \u00e9").repeat(256)), 0);
+	CHECK(String().nocasecmp_to(String()) == 0);
+	CHECK(String().casecmp_to(String()) == 0);
+}
+
+TEST_CASE("[String] simplify_path linear parser matches legacy algorithm") {
+	// Independent pre-optimization oracle: keep the legacy splitting and
+	// repeated-collapse algorithm exclusively in this regression test.
+	auto reference = [](const String &p_input) -> String {
+		String s = p_input;
+		String drive;
+		int p = s.find("://");
+		bool found = false;
+		if (p > 0) {
+			bool only_chars = true;
+			for (int i = 0; i < p; i++) {
+				if (!is_ascii_alphanumeric_char(s[i])) {
+					only_chars = false;
+					break;
+				}
+			}
+			if (only_chars) {
+				found = true;
+				drive = s.substr(0, p + 3);
+				s = s.substr(p + 3);
+			}
+		}
+		if (!found) {
+			if (p_input.is_network_share_path()) {
+				drive = s.substr(0, 2);
+				s = s.substr(2);
+			} else if (s.begins_with("/") || s.begins_with("\\")) {
+				drive = s.substr(0, 1);
+				s = s.substr(1);
+			} else {
+				p = s.find(":/");
+				if (p == -1) {
+					p = s.find(":\\");
+				}
+				if (p != -1 && p < s.find_char('/')) {
+					drive = s.substr(0, p + 2);
+					s = s.substr(p + 2);
+				}
+			}
+		}
+		s = s.replace_char('\\', '/');
+		while (true) {
+			String compare = s.replace("//", "/");
+			if (s == compare) {
+				break;
+			}
+			s = compare;
+		}
+		Vector<String> dirs = s.split("/", false);
+		bool absolute_path = p_input.is_absolute_path() && !p_input.begins_with("res://");
+		for (int i = 0; i < dirs.size(); i++) {
+			String d = dirs[i];
+			if (d == ".") {
+				dirs.remove_at(i);
+				i--;
+			} else if (d == "..") {
+				if (i != 0 && dirs[i - 1] != "..") {
+					dirs.remove_at(i);
+					dirs.remove_at(i - 1);
+					i -= 2;
+				} else if (absolute_path && i == 0) {
+					dirs.remove_at(i);
+					i--;
+				}
+			}
+		}
+		s = "";
+		for (int i = 0; i < dirs.size(); i++) {
+			if (i > 0) {
+				s += "/";
+			}
+			s += dirs[i];
+		}
+		return drive + s;
+	};
+
+	static const char *inputs[] = {
+		"", ".", "..", "a/b/../../..", "../a/../b",
+		"res://../../texture.png", "res://a//b", "res://a/../..",
+		"/../a", "/a/../../b", "//server/share/a",
+		"C:/../b", "C:\\a\\..\\b", "http://example.com/../p",
+		"foo\\bar/../baz", "a////b/./c", "a/../..",
+	};
+	for (const char *input : inputs) {
+		CHECK_EQ(String(input).simplify_path(), reference(input));
+	}
+	static const char *pieces[] = { "a", "b", ".", "..", "...", "/", "\\", "//", "C:", "res:", "http:" };
+	uint32_t state = 0x3792ABCDu;
+	auto next_random = [&state]() {
+		state ^= state << 13;
+		state ^= state >> 17;
+		state ^= state << 5;
+		return state;
+	};
+	for (int trial = 0; trial < 1500; trial++) {
+		String path;
+		const int count = next_random() % 25;
+		for (int i = 0; i < count; i++) {
+			path += pieces[next_random() % 11];
+		}
+		CHECK_EQ(path.simplify_path(), reference(path));
+	}
+	String deep = "res://";
+	for (int i = 0; i < 256; i++) {
+		deep += "directory/./sub/../";
+	}
+	deep += "texture.png";
+	CHECK_EQ(deep.simplify_path(), reference(deep));
+}
+
+
+TEST_CASE("[String] Case-insensitive long-prefix search rejects mismatched suffixes") {
+	const String prefix = String("a").repeat(63);
+	const String text = String("a").repeat(4096) + "Q" + String("a").repeat(256);
+	const String match = prefix + "q";
+	const String missing = prefix + "z";
+
+	CHECK(text.findn(match) == 4033);
+	CHECK(text.rfindn(match) == 4033);
+	CHECK(text.countn(match) == 1);
+	CHECK(text.findn(missing) == -1);
+	CHECK(text.rfindn(missing) == -1);
+	CHECK(text.countn(missing) == 0);
+
+	const CharString match_ascii = match.ascii();
+	const CharString missing_ascii = missing.ascii();
+	CHECK(text.findn(match_ascii.get_data()) == 4033);
+	CHECK(text.rfindn(match_ascii.get_data()) == 4033);
+	CHECK(text.countn(match_ascii.get_data()) == 1);
+	CHECK(text.findn(missing_ascii.get_data()) == -1);
+	CHECK(text.rfindn(missing_ascii.get_data()) == -1);
+	CHECK(text.countn(missing_ascii.get_data()) == 0);
+}
+
+TEST_CASE("[String] Case-insensitive long-prefix tail filters retain Unicode folding") {
+	// An uppercase tail must match a lowercase needle, including when the
+	// first two codepoints match exactly and the tail prefilter is active.
+	const String source = "aa" + String("b").repeat(61) + "Z";
+	const String needle = "aa" + String("b").repeat(61) + "z";
+	CHECK(source.findn(needle) == 0);
+	CHECK(source.rfindn(needle) == 0);
+	CHECK(source.countn(needle) == 1);
+
+	// U+212A KELVIN SIGN has the same lowercase form as ASCII 'k', so the
+	// exact-prefix prefilter must fall through to the Unicode comparison.
+	const String kelvin = String::chr(0x212A) + String("x").repeat(62) + "Z";
+	const String ascii_needle = "k" + String("x").repeat(62) + "z";
+	CHECK(kelvin.findn(ascii_needle) == 0);
+	CHECK(kelvin.rfindn(ascii_needle) == 0);
+	CHECK(kelvin.countn(ascii_needle) == 1);
 }
 
 } // namespace TestString

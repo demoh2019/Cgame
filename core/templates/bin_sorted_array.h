@@ -62,9 +62,31 @@ public:
 	uint64_t move(uint64_t p_idx, uint64_t p_bin) {
 		ERR_FAIL_UNSIGNED_INDEX_V(p_idx, array.size(), -1);
 
-		uint64_t current_bin = bin_limits.size() - 1;
-		while (p_idx > bin_limits[current_bin]) {
-			current_bin--;
+		const uint64_t bin_count = bin_limits.size();
+		const uint64_t *const limits = bin_limits.ptr();
+		uint64_t current_bin;
+		if (bin_count > 16) {
+			// Boundaries are stored in descending order. Locate the final bin
+			// whose upper boundary contains p_idx in O(log bin_count).
+			// A large number of bins is common in highly bucketed workloads.
+			uint64_t low = 0;
+			uint64_t high = bin_count;
+			while (low < high) {
+				const uint64_t mid = low + ((high - low) >> 1);
+				if (limits[mid] >= p_idx) {
+					low = mid + 1;
+				} else {
+					high = mid;
+				}
+			}
+			// bin_limits[0] always covers the last array element, so low >= 1.
+			current_bin = low - 1;
+		} else {
+			// Linear scan wins for the typical few-bin case.
+			current_bin = bin_count - 1;
+			while (p_idx > limits[current_bin]) {
+				current_bin--;
+			}
 		}
 
 		if (p_bin == current_bin) {

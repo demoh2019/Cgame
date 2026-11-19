@@ -1,0 +1,36 @@
+name: HTTP query string builder regression
+
+on:
+  pull_request:
+    branches: [develop]
+    paths:
+      - 'core/io/http_client.cpp'
+      - 'tests/core/io/test_http_client.cpp'
+      - '.github/workflows/http-query-builder.yml'
+  push:
+    branches: [develop]
+    paths:
+      - 'core/io/http_client.cpp'
+      - 'tests/core/io/test_http_client.cpp'
+      - '.github/workflows/http-query-builder.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  native-http-client:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+      - uses: ./.github/actions/godot-deps
+      - uses: ./.github/actions/godot-build
+        with:
+          platform: linuxbsd
+          target: editor
+          scons-flags: dev_build=yes tests=yes debug_symbols=no module_mono_enabled=no accesskit=no -j2
+      - name: Exercise native HTTP query encoding regressions
+        run: timeout 300s ./bin/godot.linuxbsd.editor.dev.x86_64 --headless --test --test-case="*[HTTPClient] query_string_from_dict*,*[HTTPClient] Query string preserves*" --no-colors

@@ -194,6 +194,17 @@ public:
 	virtual void body_set_param(RID p_body, PS2DE::BodyParameter p_param, const Variant &p_value) = 0;
 	virtual Variant body_get_param(RID p_body, PS2DE::BodyParameter p_param) const = 0;
 
+	// Extra solver iterations for the contacts of one body (1 = default, up to 8). Optional: only
+	// GodotPhysics2D implements it; other backends ignore it.
+	virtual void body_set_solver_priority(RID p_body, int p_priority) {}
+	virtual int body_get_solver_priority(RID p_body) const { return 1; }
+	virtual void body_set_max_depenetration_velocity(RID p_body, real_t p_value) {}
+	virtual real_t body_get_max_depenetration_velocity(RID p_body) const { return 0.0; }
+	virtual void body_set_max_angular_velocity(RID p_body, real_t p_value) {}
+	virtual real_t body_get_max_angular_velocity(RID p_body) const { return 0.0; }
+	virtual void body_set_max_linear_velocity(RID p_body, real_t p_value) {}
+	virtual real_t body_get_max_linear_velocity(RID p_body) const { return 0.0; }
+
 	virtual void body_reset_mass_properties(RID p_body) = 0;
 
 	//state
@@ -259,6 +270,17 @@ public:
 
 	virtual void joint_disable_collisions_between_bodies(RID p_joint, const bool p_disable) = 0;
 	virtual bool joint_is_disabled_collisions_between_bodies(RID p_joint) const = 0;
+
+	// Joint breaking and reaction forces. Optional: only GodotPhysics2D implements them, other
+	// backends keep these defaults (joints never break, zero reaction).
+	virtual void joint_set_break_force(RID p_joint, real_t p_force) {}
+	virtual real_t joint_get_break_force(RID p_joint) const { return 0.0; }
+	virtual void joint_set_break_torque(RID p_joint, real_t p_torque) {}
+	virtual real_t joint_get_break_torque(RID p_joint) const { return 0.0; }
+	virtual Vector2 joint_get_reaction_force(RID p_joint) const { return Vector2(); }
+	virtual real_t joint_get_reaction_torque(RID p_joint) const { return 0.0; }
+	virtual bool joint_is_broken(RID p_joint) const { return false; }
+	virtual void joint_set_break_callback(RID p_joint, const Callable &p_callable) {}
 
 	virtual void joint_make_pin(RID p_joint, const Vector2 &p_anchor, RID p_body_a, RID p_body_b = RID()) = 0;
 	virtual void joint_make_groove(RID p_joint, const Vector2 &p_a_groove1, const Vector2 &p_a_groove2, const Vector2 &p_b_anchor, RID p_body_a, RID p_body_b) = 0;

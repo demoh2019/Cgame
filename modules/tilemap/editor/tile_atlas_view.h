@@ -124,6 +124,11 @@ public:
 	// Global.
 	void set_atlas_source(TileSet *p_tile_set, TileSetAtlasSource *p_tile_set_atlas_source, int p_source_id);
 
+	// Pure geometry helpers shared by RTL layout and native regression tests.
+	static Vector2 layout_pan_delta(const Vector2 &p_scroll, bool p_is_rtl);
+	static Vector2 layout_zoom_origin(const Vector2 &p_mouse_pos, const Vector2 &p_view_size, bool p_is_rtl);
+	static Vector2 layout_content_offsets(float p_content_width, float p_zoom, bool p_is_rtl);
+
 	float get_zoom() const;
 	void set_transform(float p_zoom, Vector2i p_panning);
 

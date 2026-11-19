@@ -1,0 +1,214 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<class name="DebugDraw" inherits="Object" api_type="core" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="../class.xsd">
+	<brief_description>
+		Immediate-mode debug drawing of lines, shapes and gizmos in a running game.
+	</brief_description>
+	<description>
+		DebugDraw draws temporary wireframe shapes into the main viewport from any script, without creating nodes or meshes. It is the equivalent of Unity's [code]Debug.DrawLine[/code], [code]Debug.DrawRay[/code] and [code]Gizmos.Draw*[/code]. Use it to visualize raycast results, velocities, paths, trigger volumes and AI state.
+		Each shape has a [code]duration[/code] in seconds. With the default of [code]0[/code] a shape is shown for one rendered frame, so draw it every frame from [method Node._process] or [method Node._physics_process]:
+		[codeblocks]
+		[gdscript]
+		func _physics_process(delta):
+		    var hit = get_world_3d().direct_space_state.intersect_ray(query)
+		    if hit:
+		        DebugDraw.sphere(hit.position, 0.1, Color.RED)
+		        DebugDraw.arrow(hit.position, hit.position + hit.normal, Color.YELLOW)
+		[/gdscript]
+		[/codeblocks]
+		Shapes are drawn on top of the 3D scene (depth tested, see [member depth_test]) and of the 2D canvas.
+		[b]Note:[/b] Debug drawing is enabled by default only in debug builds. Set [member enabled] explicitly to use it in a release build.
+	</description>
+	<tutorials>
+	</tutorials>
+	<methods>
+		<method name="aabb">
+			<return type="void" />
+			<param index="0" name="aabb" type="AABB" />
+			<param index="1" name="color" type="Color" default="Color(1, 1, 1, 1)" />
+			<param index="2" name="duration" type="float" default="0.0" />
+			<description>
+				Draws the edges of an axis-aligned box in world space.
+			</description>
+		</method>
+		<method name="arrow">
+			<return type="void" />
+			<param index="0" name="from" type="Vector3" />
+			<param index="1" name="to" type="Vector3" />
+			<param index="2" name="color" type="Color" default="Color(1, 1, 1, 1)" />
+			<param index="3" name="duration" type="float" default="0.0" />
+			<param index="4" name="head_size" type="float" default="0.25" />
+			<description>
+				Draws a line from [param from] to [param to] with an arrowhead of length [param head_size] at [param to].
+			</description>
+		</method>
+		<method name="arrow_2d">
+			<return type="void" />
+			<param index="0" name="from" type="Vector2" />
+			<param index="1" name="to" type="Vector2" />
+			<param index="2" name="color" type="Color" default="Color(1, 1, 1, 1)" />
+			<param index="3" name="duration" type="float" default="0.0" />
+			<param index="4" name="head_size" type="float" default="12.0" />
+			<description>
+				2D version of [method arrow], in world pixels.
+			</description>
+		</method>
+		<method name="axes">
+			<return type="void" />
+			<param index="0" name="transform" type="Transform3D" />
+			<param index="1" name="size" type="float" default="1.0" />
+			<param index="2" name="duration" type="float" default="0.0" />
+			<description>
+				Draws the X (red), Y (green) and Z (blue) axes of [param transform], each [param size] long. Useful to see the orientation of a node or a bone.
+			</description>
+		</method>
+		<method name="box">
+			<return type="void" />
+			<param index="0" name="transform" type="Transform3D" />
+			<param index="1" name="size" type="Vector3" />
+			<param index="2" name="color" type="Color" default="Color(1, 1, 1, 1)" />
+			<param index="3" name="duration" type="float" default="0.0" />
+			<description>
+				Draws the edges of a box with the given total [param size], centered on and oriented by [param transform].
+			</description>
+		</method>
+		<method name="circle">
+			<return type="void" />
+			<param index="0" name="center" type="Vector3" />
+			<param index="1" name="normal" type="Vector3" />
+			<param index="2" name="radius" type="float" default="0.5" />
+			<param index="3" name="color" type="Color" default="Color(1, 1, 1, 1)" />
+			<param index="4" name="duration" type="float" default="0.0" />
+			<param index="5" name="segments" type="int" default="32" />
+			<description>
+				Draws a circle lying in the plane perpendicular to [param normal].
+			</description>
+		</method>
+		<method name="circle_2d">
+			<return type="void" />
+			<param index="0" name="center" type="Vector2" />
+			<param index="1" name="radius" type="float" default="16.0" />
+			<param index="2" name="color" type="Color" default="Color(1, 1, 1, 1)" />
+			<param index="3" name="duration" type="float" default="0.0" />
+			<param index="4" name="segments" type="int" default="32" />
+			<description>
+				2D version of [method circle].
+			</description>
+		</method>
+		<method name="clear">
+			<return type="void" />
+			<description>
+				Removes every shape that is currently queued, including shapes with a long [param duration].
+			</description>
+		</method>
+		<method name="get_segment_count_2d" qualifiers="const">
+			<return type="int" />
+			<description>
+				Returns the number of 2D line segments currently queued. Mostly useful to check that debug output does not grow without bound.
+			</description>
+		</method>
+		<method name="get_segment_count_3d" qualifiers="const">
+			<return type="int" />
+			<description>
+				Returns the number of 3D line segments currently queued.
+			</description>
+		</method>
+		<method name="line">
+			<return type="void" />
+			<param index="0" name="from" type="Vector3" />
+			<param index="1" name="to" type="Vector3" />
+			<param index="2" name="color" type="Color" default="Color(1, 1, 1, 1)" />
+			<param index="3" name="duration" type="float" default="0.0" />
+			<description>
+				Draws a line between two world-space points. A [param duration] of [code]0[/code] shows the line for exactly one rendered frame, so call this every frame from [method Node._process] or [method Node._physics_process] to keep it visible. A positive duration keeps it for that many seconds.
+			</description>
+		</method>
+		<method name="line_2d">
+			<return type="void" />
+			<param index="0" name="from" type="Vector2" />
+			<param index="1" name="to" type="Vector2" />
+			<param index="2" name="color" type="Color" default="Color(1, 1, 1, 1)" />
+			<param index="3" name="duration" type="float" default="0.0" />
+			<description>
+				2D version of [method line]. Positions are in world coordinates, so the drawing follows the active [Camera2D].
+			</description>
+		</method>
+		<method name="path">
+			<return type="void" />
+			<param index="0" name="points" type="PackedVector3Array" />
+			<param index="1" name="color" type="Color" default="Color(1, 1, 1, 1)" />
+			<param index="2" name="duration" type="float" default="0.0" />
+			<param index="3" name="closed" type="bool" default="false" />
+			<description>
+				Draws connected line segments through [param points]. If [param closed] is [code]true[/code] the last point connects back to the first.
+			</description>
+		</method>
+		<method name="path_2d">
+			<return type="void" />
+			<param index="0" name="points" type="PackedVector2Array" />
+			<param index="1" name="color" type="Color" default="Color(1, 1, 1, 1)" />
+			<param index="2" name="duration" type="float" default="0.0" />
+			<param index="3" name="closed" type="bool" default="false" />
+			<description>
+				2D version of [method path].
+			</description>
+		</method>
+		<method name="point">
+			<return type="void" />
+			<param index="0" name="position" type="Vector3" />
+			<param index="1" name="color" type="Color" default="Color(1, 1, 1, 1)" />
+			<param index="2" name="duration" type="float" default="0.0" />
+			<param index="3" name="size" type="float" default="0.2" />
+			<description>
+				Marks a position with a three-axis cross that is [param size] wide.
+			</description>
+		</method>
+		<method name="point_2d">
+			<return type="void" />
+			<param index="0" name="position" type="Vector2" />
+			<param index="1" name="color" type="Color" default="Color(1, 1, 1, 1)" />
+			<param index="2" name="duration" type="float" default="0.0" />
+			<param index="3" name="size" type="float" default="8.0" />
+			<description>
+				2D version of [method point].
+			</description>
+		</method>
+		<method name="ray">
+			<return type="void" />
+			<param index="0" name="origin" type="Vector3" />
+			<param index="1" name="direction" type="Vector3" />
+			<param index="2" name="color" type="Color" default="Color(1, 1, 1, 1)" />
+			<param index="3" name="duration" type="float" default="0.0" />
+			<description>
+				Draws a line from [param origin] along [param direction]. The length of [param direction] is the length of the line, as with Unity's [code]Debug.DrawRay[/code].
+			</description>
+		</method>
+		<method name="rect_2d">
+			<return type="void" />
+			<param index="0" name="rect" type="Rect2" />
+			<param index="1" name="color" type="Color" default="Color(1, 1, 1, 1)" />
+			<param index="2" name="duration" type="float" default="0.0" />
+			<description>
+				Draws the outline of a rectangle in 2D world coordinates.
+			</description>
+		</method>
+		<method name="sphere">
+			<return type="void" />
+			<param index="0" name="center" type="Vector3" />
+			<param index="1" name="radius" type="float" default="0.5" />
+			<param index="2" name="color" type="Color" default="Color(1, 1, 1, 1)" />
+			<param index="3" name="duration" type="float" default="0.0" />
+			<param index="4" name="segments" type="int" default="24" />
+			<description>
+				Draws a wire sphere made of three orthogonal circles, each with [param segments] segments.
+			</description>
+		</method>
+	</methods>
+	<members>
+		<member name="depth_test" type="bool" setter="set_depth_test" getter="is_depth_test_enabled" default="true">
+			If [code]true[/code], 3D shapes are hidden behind scene geometry. If [code]false[/code] they are always drawn on top.
+		</member>
+		<member name="enabled" type="bool" setter="set_enabled" getter="is_enabled">
+			If [code]false[/code], every drawing call does nothing and queued shapes are removed. The default is [code]true[/code] in debug builds and [code]false[/code] in release builds.
+		</member>
+	</members>
+</class>

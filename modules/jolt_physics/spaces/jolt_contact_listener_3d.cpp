@@ -42,7 +42,30 @@
 #include <Jolt/Physics/Collision/EstimateCollisionResponse.h>
 #include <Jolt/Physics/SoftBody/SoftBodyManifold.h>
 
+namespace {
+
+// Retain allocations for a steady workload, but release huge transient buffers
+// after the scene becomes quiet. The 4x slack avoids allocator churn while the
+// number of contacts fluctuates moderately between physics frames.
+constexpr uint32_t MAX_CACHED_CONTACT_MANIFOLDS = 2048;
+constexpr uint32_t MAX_CACHED_CONTACT_PAIR_SLOTS = 4096;
+constexpr uint32_t MAX_CACHED_AREA_EVENTS = 2048;
+
+template <typename T>
+static void clear_contact_scratch(LocalVector<T> &r_buffer, uint32_t p_min_cached_capacity) {
+	const uint32_t used = r_buffer.size();
+	const uint32_t allowed_capacity = MAX(p_min_cached_capacity, used > UINT32_MAX / 4 ? UINT32_MAX : used * 4);
+	if (r_buffer.get_capacity() > allowed_capacity) {
+		r_buffer.reset();
+	} else {
+		r_buffer.clear();
+	}
+}
+
+} // namespace
+
 void JoltContactListener3D::OnContactAdded(const JPH::Body &p_body1, const JPH::Body &p_body2, const JPH::ContactManifold &p_manifold, JPH::ContactSettings &p_settings) {
+	++_get_thread_locals().contact_manifold_callbacks;
 	_try_override_collision_response(p_body1, p_body2, p_settings);
 	_try_apply_surface_velocities(p_body1, p_body2, p_settings);
 	_try_add_contacts(p_body1, p_body2, p_manifold, p_settings);
@@ -54,6 +77,7 @@ void JoltContactListener3D::OnContactAdded(const JPH::Body &p_body1, const JPH::
 }
 
 void JoltContactListener3D::OnContactPersisted(const JPH::Body &p_body1, const JPH::Body &p_body2, const JPH::ContactManifold &p_manifold, JPH::ContactSettings &p_settings) {
+	++_get_thread_locals().contact_manifold_callbacks;
 	_try_override_collision_response(p_body1, p_body2, p_settings);
 	_try_apply_surface_velocities(p_body1, p_body2, p_settings);
 	_try_add_contacts(p_body1, p_body2, p_manifold, p_settings);
@@ -440,83 +464,136 @@ void JoltContactListener3D::_flush_contacts() {
 		}
 	}
 
-	deepest_manifolds.clear();
+	// A large contact burst should not permanently pin that much scratch RAM.
+	// Keep the cache for sustained dense scenes, trimming only after a drop.
+	const uint32_t used_manifold_pairs = deepest_manifolds.size();
+	const uint32_t allowed_pair_capacity = MAX(MAX_CACHED_CONTACT_PAIR_SLOTS,
+			used_manifold_pairs > UINT32_MAX / 4 ? UINT32_MAX : used_manifold_pairs * 4);
+	if (deepest_manifolds.get_capacity() > allowed_pair_capacity) {
+		deepest_manifolds.reset();
+	} else {
+		deepest_manifolds.clear();
+	}
 
 	for (ThreadLocals &tl : ThreadLocals::instances) {
-		tl.manifolds.clear();
+		clear_contact_scratch(tl.manifolds, MAX_CACHED_CONTACT_MANIFOLDS);
 	}
 }
 
 void JoltContactListener3D::_flush_area_body_events() {
-	uint32_t new_overlap_count = area_overlaps.size();
+	// Event callbacks can be duplicated during shape shifts. An unsigned
+	// subtraction would wrap on more exits than current overlaps and request
+	// an enormous, unnecessary allocation from HashSet::reserve().
+	int64_t estimated_overlap_count = area_overlaps.size();
 	for (const ThreadLocals &tl : ThreadLocals::instances) {
-		new_overlap_count -= tl.area_exits.size();
-		new_overlap_count += tl.area_enters.size();
+		estimated_overlap_count += int64_t(tl.area_enters.size()) - int64_t(tl.area_exits.size());
 	}
 
 	// Exits must be dispatched before enters, as shape-shifting relies on it.
 
 	for (ThreadLocals &tl : ThreadLocals::instances) {
 		for (const JPH::SubShapeIDPair &shape_pair : tl.area_exits) {
-			area_overlaps.erase(shape_pair);
-			_dispatch_area_exit(shape_pair);
-		}
-
-		tl.area_exits.clear();
-	}
-
-	area_overlaps.reserve(new_overlap_count);
-
-	for (ThreadLocals &tl : ThreadLocals::instances) {
-		for (const JPH::SubShapeIDPair &shape_pair : tl.area_enters) {
-			area_overlaps.insert(shape_pair);
-			_dispatch_area_enter(shape_pair);
-		}
-
-		tl.area_enters.clear();
-	}
-}
-
-void JoltContactListener3D::_flush_area_soft_body_events() {
-	int current_count = area_soft_body_overlaps.size();
-	int persisting_count = 0;
-	int entered_count = 0;
-	for (const ThreadLocals &tl : ThreadLocals::instances) {
-		for (const JPH::SubShapeIDPair &shape_pair : tl.area_soft_body_overlaps) {
-			if (area_soft_body_overlaps.has(shape_pair)) {
-				persisting_count += 1;
-			} else {
-				area_soft_body_overlaps.insert(shape_pair);
-				_dispatch_area_enter(shape_pair);
-				entered_count += 1;
-			}
-		}
-	}
-
-	int exited_count = current_count - persisting_count;
-	if (exited_count > 0) {
-		HashSet<JPH::SubShapeIDPair, ShapePairHasher> new_overlaps;
-		new_overlaps.reserve(persisting_count + entered_count);
-
-		for (const ThreadLocals &tl : ThreadLocals::instances) {
-			for (const JPH::SubShapeIDPair &shape_pair : tl.area_soft_body_overlaps) {
-				new_overlaps.insert(shape_pair);
-			}
-		}
-
-		for (const JPH::SubShapeIDPair &shape_pair : area_soft_body_overlaps) {
-			if (!new_overlaps.has(shape_pair)) {
+			// Multiple callbacks can enqueue the same exit. Dispatch only
+			// when this pair was actually present in the persistent set.
+			if (area_overlaps.erase(shape_pair)) {
 				_dispatch_area_exit(shape_pair);
 			}
 		}
 
-		area_soft_body_overlaps = std::move(new_overlaps);
-	} else if (unlikely(exited_count < 0)) {
-		ERR_PRINT_ONCE("Duplicate area soft body overlaps found. This should not happen. Please report this.");
+		clear_contact_scratch(tl.area_exits, MAX_CACHED_AREA_EVENTS);
+	}
+
+	if (estimated_overlap_count > int64_t(area_overlaps.size())) {
+		// Reserve is only an optimization: leave the container to grow on
+		// demand if duplicate exits made the estimate too small.
+		area_overlaps.reserve(uint32_t(MIN(estimated_overlap_count, int64_t(UINT32_MAX))));
 	}
 
 	for (ThreadLocals &tl : ThreadLocals::instances) {
-		tl.area_soft_body_overlaps.clear();
+		for (const JPH::SubShapeIDPair &shape_pair : tl.area_enters) {
+			// A pair may have been reported by more than one Jolt worker.
+			// Preserve exit-before-enter for changed subshapes, but never
+			// notify the area twice about one persistent pair.
+			if (!area_overlaps.has(shape_pair)) {
+				area_overlaps.insert(shape_pair);
+				_dispatch_area_enter(shape_pair);
+			}
+		}
+
+		clear_contact_scratch(tl.area_enters, MAX_CACHED_AREA_EVENTS);
+	}
+}
+
+void JoltContactListener3D::_flush_area_soft_body_events() {
+	// Jolt can report the same area/soft-body shape pair multiple times in one
+	// physics step (for example via multiple sensor contacts). Stamp the pair
+	// once per step so duplicate callbacks neither emit duplicate enters nor
+	// make the old persisting_count exceed the number of stored overlaps.
+	if (++area_soft_body_overlap_epoch == 0) {
+		// Correct even after the unsigned frame counter wraps: invalidate every
+		// old stamp so none can coincide with the new generation.
+		for (KeyValue<JPH::SubShapeIDPair, uint32_t> &overlap : area_soft_body_overlaps) {
+			overlap.value = 0;
+		}
+		area_soft_body_overlap_epoch = 1;
+	}
+
+	const uint32_t previous_count = area_soft_body_overlaps.size();
+	uint32_t persisting_count = 0;
+
+	for (const ThreadLocals &tl : ThreadLocals::instances) {
+		for (const JPH::SubShapeIDPair &shape_pair : tl.area_soft_body_overlaps) {
+			uint32_t *last_seen = area_soft_body_overlaps.getptr(shape_pair);
+			if (last_seen != nullptr) {
+				if (*last_seen != area_soft_body_overlap_epoch) {
+					*last_seen = area_soft_body_overlap_epoch;
+					++persisting_count;
+				}
+			} else {
+				area_soft_body_overlaps.insert(shape_pair, area_soft_body_overlap_epoch);
+				_dispatch_area_enter(shape_pair);
+			}
+		}
+	}
+
+	// Do not scan/rebuild the persistent overlap map while all old pairs
+	// persist. When some pairs disappear, delete only those entries in place.
+	// AHashMap compacts by moving the last entry into the erased slot, so
+	// keep the same index after an erase to inspect the moved entry as well.
+	if (persisting_count < previous_count) {
+		for (uint32_t index = 0; index < area_soft_body_overlaps.size();) {
+			const KeyValue<JPH::SubShapeIDPair, uint32_t> &entry = area_soft_body_overlaps.get_by_index(index);
+			if (entry.value != area_soft_body_overlap_epoch) {
+				const JPH::SubShapeIDPair exited_pair = entry.key;
+				area_soft_body_overlaps.erase_by_index(index);
+				_dispatch_area_exit(exited_pair);
+			} else {
+				++index;
+			}
+		}
+	}
+
+	// Retain capacity under steady load, but don't pin a scene's peak
+	// sensor-overlap memory forever after the majority of bodies disappear.
+	constexpr uint32_t MIN_CACHED_SOFT_BODY_OVERLAP_SLOTS = 4096;
+	const uint32_t live_count = area_soft_body_overlaps.size();
+	const uint32_t target_capacity = MAX(MIN_CACHED_SOFT_BODY_OVERLAP_SLOTS,
+			live_count > UINT32_MAX / 4 ? UINT32_MAX : live_count * 4);
+	if (area_soft_body_overlaps.get_capacity() > target_capacity) {
+		if (live_count == 0) {
+			area_soft_body_overlaps.reset();
+		} else {
+			AHashMap<JPH::SubShapeIDPair, uint32_t, ShapePairHasher> compacted;
+			compacted.reserve(live_count + live_count / 2 + 1);
+			for (const KeyValue<JPH::SubShapeIDPair, uint32_t> &entry : area_soft_body_overlaps) {
+				compacted.insert(entry.key, entry.value);
+			}
+			area_soft_body_overlaps = std::move(compacted);
+		}
+	}
+
+	for (ThreadLocals &tl : ThreadLocals::instances) {
+		clear_contact_scratch(tl.area_soft_body_overlaps, MAX_CACHED_AREA_EVENTS);
 	}
 }
 
@@ -573,6 +650,7 @@ void JoltContactListener3D::_dispatch_area_exit(const JPH::SubShapeIDPair &p_sha
 }
 
 void JoltContactListener3D::pre_step() {
+	contact_manifold_count = 0;
 #ifdef DEBUG_ENABLED
 	debug_contact_count = 0;
 #endif
@@ -584,4 +662,15 @@ void JoltContactListener3D::post_step() {
 	_flush_contacts();
 	_flush_area_soft_body_events();
 	_flush_area_body_events();
+
+	// Jolt invokes contact callbacks concurrently. Fold per-thread counters
+	// after the step, reusing the lock already held to flush contact events.
+	// This counts callbacks/manifolds, not necessarily unique body pairs:
+	// compound subshapes and CCD substeps can generate multiple callbacks.
+	uint64_t total_callbacks = 0;
+	for (ThreadLocals &tl : ThreadLocals::instances) {
+		total_callbacks += tl.contact_manifold_callbacks;
+		tl.contact_manifold_callbacks = 0;
+	}
+	contact_manifold_count = int(MIN(total_callbacks, uint64_t(INT32_MAX)));
 }

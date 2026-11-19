@@ -1,0 +1,44 @@
+name: Mobile clearcoat shader approximation regressions
+
+on:
+  push:
+    branches: [develop]
+    paths:
+      - "servers/rendering/renderer_rd/shaders/scene_forward_lights_inc.glsl"
+      - "servers/rendering/renderer_rd/shaders/forward_mobile/scene_forward_mobile.glsl"
+      - "misc/scripts/tests/test_mobile_clearcoat_approximation.py"
+      - ".github/workflows/mobile-clearcoat-approximation.yml"
+  pull_request:
+    paths:
+      - "servers/rendering/renderer_rd/shaders/scene_forward_lights_inc.glsl"
+      - "servers/rendering/renderer_rd/shaders/forward_mobile/scene_forward_mobile.glsl"
+      - "misc/scripts/tests/test_mobile_clearcoat_approximation.py"
+      - ".github/workflows/mobile-clearcoat-approximation.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  approximation-contracts:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - run: |
+          python3 -m py_compile misc/scripts/tests/test_mobile_clearcoat_approximation.py
+          python3 -m unittest discover -s misc/scripts/tests -p test_mobile_clearcoat_approximation.py -v
+  native-shader-headers:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+      - uses: ./.github/actions/godot-deps
+      - uses: ./.github/actions/godot-build
+        with:
+          platform: linuxbsd
+          target: editor
+          scons-flags: dev_build=yes debug_symbols=no module_mono_enabled=no accesskit=no -j2
+      - run: ./bin/godot.linuxbsd.editor.dev.x86_64 --headless --version

@@ -102,8 +102,10 @@ void Gradient::_validate_property(PropertyInfo &p_property) const {
 Vector<float> Gradient::get_offsets() const {
 	Vector<float> offsets;
 	offsets.resize(points.size());
+	float *const dst = offsets.ptrw();
+	const Point *const src = points.ptr();
 	for (uint32_t i = 0; i < points.size(); i++) {
-		offsets.write[i] = points[i].offset;
+		dst[i] = src[i].offset;
 	}
 	return offsets;
 }
@@ -111,8 +113,10 @@ Vector<float> Gradient::get_offsets() const {
 Vector<Color> Gradient::get_colors() const {
 	Vector<Color> colors;
 	colors.resize(points.size());
+	Color *const dst = colors.ptrw();
+	const Point *const src = points.ptr();
 	for (uint32_t i = 0; i < points.size(); i++) {
-		colors.write[i] = points[i].color;
+		dst[i] = src[i].color;
 	}
 	return colors;
 }

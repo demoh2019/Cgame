@@ -17,6 +17,54 @@
 		<link title="Random number generation">$DOCS_URL/tutorials/math/random_number_generation.html</link>
 	</tutorials>
 	<methods>
+		<method name="rand_color_hsv">
+			<return type="Color" />
+			<param index="0" name="hue_min" type="float" default="0.0" />
+			<param index="1" name="hue_max" type="float" default="1.0" />
+			<param index="2" name="saturation_min" type="float" default="0.0" />
+			<param index="3" name="saturation_max" type="float" default="1.0" />
+			<param index="4" name="value_min" type="float" default="0.0" />
+			<param index="5" name="value_max" type="float" default="1.0" />
+			<param index="6" name="alpha_min" type="float" default="1.0" />
+			<param index="7" name="alpha_max" type="float" default="1.0" />
+			<description>
+				Returns a random color whose hue, saturation, value and alpha are each drawn uniformly from the given ranges (similar to Unity's [code]Random.ColorHSV[/code]). The defaults produce any fully opaque color.
+			</description>
+		</method>
+		<method name="rand_in_circle">
+			<return type="Vector2" />
+			<param index="0" name="radius" type="float" default="1.0" />
+			<description>
+				Returns a point uniformly distributed over the disk of the given [param radius] centered at the origin (like Unity's [code]Random.insideUnitCircle[/code]). The distribution is uniform in area, so points do not cluster in the center.
+			</description>
+		</method>
+		<method name="rand_in_sphere">
+			<return type="Vector3" />
+			<param index="0" name="radius" type="float" default="1.0" />
+			<description>
+				Returns a point uniformly distributed inside the ball of the given [param radius] centered at the origin (like Unity's [code]Random.insideUnitSphere[/code]).
+			</description>
+		</method>
+		<method name="rand_on_circle">
+			<return type="Vector2" />
+			<param index="0" name="radius" type="float" default="1.0" />
+			<description>
+				Returns a point uniformly distributed on the circle of the given [param radius] centered at the origin (like Unity's [code]Random.onUnitCircle[/code]).
+			</description>
+		</method>
+		<method name="rand_on_sphere">
+			<return type="Vector3" />
+			<param index="0" name="radius" type="float" default="1.0" />
+			<description>
+				Returns a point uniformly distributed on the surface of the sphere of the given [param radius] centered at the origin (like Unity's [code]Random.onUnitSphere[/code]). Multiply a unit result to get a random direction.
+			</description>
+		</method>
+		<method name="rand_rotation">
+			<return type="Quaternion" />
+			<description>
+				Returns a uniformly distributed random orientation as a unit [Quaternion] (like Unity's [code]Random.rotationUniform[/code]). Every orientation is equally likely, which is not true of picking three random Euler angles.
+			</description>
+		</method>
 		<method name="rand_weighted">
 			<return type="int" />
 			<param index="0" name="weights" type="PackedFloat32Array" />

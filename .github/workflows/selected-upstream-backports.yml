@@ -1,0 +1,50 @@
+name: Selected upstream backports regressions
+
+on:
+  pull_request:
+    paths:
+      - "scene/resources/3d/importer_mesh.cpp"
+      - "scene/resources/surface_tool.h"
+      - "servers/rendering/renderer_viewport.cpp"
+      - "scene/main/canvas_item.cpp"
+      - "scene/3d/visual_instance_3d.cpp"
+      - "servers/rendering/instance_uniforms.cpp"
+      - "tests/scene/test_instance_shader_parameters.cpp"
+      - "misc/scripts/tests/test_selected_upstream_backports.py"
+      - ".github/workflows/selected-upstream-backports.yml"
+  push:
+    branches: [develop]
+    paths:
+      - "scene/resources/3d/importer_mesh.cpp"
+      - "scene/resources/surface_tool.h"
+      - "servers/rendering/renderer_viewport.cpp"
+      - "scene/main/canvas_item.cpp"
+      - "scene/3d/visual_instance_3d.cpp"
+      - "servers/rendering/instance_uniforms.cpp"
+      - "tests/scene/test_instance_shader_parameters.cpp"
+      - "misc/scripts/tests/test_selected_upstream_backports.py"
+      - ".github/workflows/selected-upstream-backports.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  fast-contracts:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - name: Check test syntax
+        run: python3 -m py_compile misc/scripts/tests/test_selected_upstream_backports.py
+      - name: Run 19 source-contract regressions
+        run: python3 -m unittest discover -s misc/scripts/tests -p "test_selected_upstream_backports.py" -v
+      - name: Verify native regression source formatting
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          source = Path("tests/scene/test_instance_shader_parameters.cpp").read_bytes()
+          assert source.endswith(b"\n"), "Native test must end with a newline"
+          assert b"\r" not in source, "Native test must use LF line endings"
+          assert not any(line.endswith((b" ", b"\t")) for line in source.splitlines()), "Trailing whitespace in native test"
+          PY

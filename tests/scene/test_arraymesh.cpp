@@ -34,11 +34,440 @@ TEST_FORCE_LINK(test_arraymesh)
 
 #ifndef _3D_DISABLED
 
+#include "modules/modules_enabled.gen.h" // IWYU pragma: keep. Needed for MODULE_XATLAS_UNWRAP_ENABLED.
+#include "scene/resources/3d/importer_mesh.h"
 #include "scene/resources/3d/primitive_meshes.h"
 #include "scene/resources/mesh.h"
+#ifndef PHYSICS_3D_DISABLED
+#include "scene/resources/3d/concave_polygon_shape_3d.h"
+#include "scene/resources/3d/convex_polygon_shape_3d.h"
+#endif
+#include "tests/signal_watcher.h"
+
+#ifdef TOOLS_ENABLED
+#include "core/io/file_access.h"
+#include "editor/import/3d/resource_importer_obj.h"
+#include "scene/3d/importer_mesh_instance_3d.h"
+#include "scene/resources/material.h"
+#include "tests/test_utils.h"
+#endif
 #include "servers/rendering/rendering_server.h"
 
 namespace TestArrayMesh {
+
+
+#ifndef PHYSICS_3D_DISABLED
+
+static Ref<ArrayMesh> _make_convex_collision_source(int p_surface_count) {
+	Ref<ArrayMesh> mesh;
+	mesh.instantiate();
+	for (int i = 0; i < p_surface_count; ++i) {
+		Array arrays;
+		arrays.resize(Mesh::ARRAY_MAX);
+		const PackedVector3Array vertices = {
+			Vector3(i * 4 + 1, 1, 0),
+			Vector3(i * 4 + 2, 1, 0),
+			Vector3(i * 4 + 1, 2, 0),
+			Vector3(i * 4 + 1, 1, 1)
+		};
+		const PackedInt32Array indices = { 0, 2, 1, 0, 1, 3, 0, 3, 2, 1, 2, 3 };
+		arrays[Mesh::ARRAY_VERTEX] = vertices;
+		arrays[Mesh::ARRAY_INDEX] = indices;
+		mesh->add_surface_from_arrays(Mesh::PRIMITIVE_TRIANGLES, arrays);
+	}
+	return mesh;
+}
+
+TEST_CASE("[ConvexShapeFastPath] one triangle preserves the source vertices without cleaning") {
+	Ref<ArrayMesh> mesh = _make_convex_collision_source(1);
+	const Ref<ConvexPolygonShape3D> shape = mesh->create_convex_shape(false, false);
+	REQUIRE(shape.is_valid());
+	const Vector<Vector3> points = shape->get_points();
+	REQUIRE_EQ(points.size(), 4);
+	CHECK_EQ(points[0], Vector3(1, 1, 0));
+	CHECK_EQ(points[1], Vector3(2, 1, 0));
+	CHECK_EQ(points[2], Vector3(1, 2, 0));
+	CHECK_EQ(points[3], Vector3(1, 1, 1));
+}
+
+TEST_CASE("[ConvexShapeFastPath] many independent surfaces preserve exact concatenation order") {
+	const int surfaces = 32;
+	Ref<ArrayMesh> mesh = _make_convex_collision_source(surfaces);
+	const Ref<ConvexPolygonShape3D> shape = mesh->create_convex_shape(false, false);
+	REQUIRE(shape.is_valid());
+	const Vector<Vector3> points = shape->get_points();
+	REQUIRE_EQ(points.size(), surfaces * 4);
+	for (int s = 0; s < surfaces; ++s) {
+		CHECK_EQ(points[s * 4 + 0], Vector3(s * 4 + 1, 1, 0));
+		CHECK_EQ(points[s * 4 + 1], Vector3(s * 4 + 2, 1, 0));
+		CHECK_EQ(points[s * 4 + 2], Vector3(s * 4 + 1, 2, 0));
+		CHECK_EQ(points[s * 4 + 3], Vector3(s * 4 + 1, 1, 1));
+	}
+}
+
+TEST_CASE("[ConvexShapeFastPath] collision shape generation never mutates imported mesh vertices") {
+	Ref<ArrayMesh> mesh = _make_convex_collision_source(2);
+	const Array original = mesh->surface_get_arrays(0);
+	const PackedVector3Array before = original[Mesh::ARRAY_VERTEX];
+	const Ref<ConvexPolygonShape3D> shape = mesh->create_convex_shape(false, false);
+	REQUIRE(shape.is_valid());
+	const Array current = mesh->surface_get_arrays(0);
+	const PackedVector3Array after = current[Mesh::ARRAY_VERTEX];
+	REQUIRE_EQ(after.size(), before.size());
+	for (int i = 0; i < before.size(); ++i) {
+		CHECK_EQ(after[i], before[i]);
+	}
+}
+
+TEST_CASE("[TrimeshShapeFastPath] empty mesh returns no concave collision shape") {
+	Ref<ArrayMesh> mesh;
+	mesh.instantiate();
+	CHECK(mesh->create_trimesh_shape().is_null());
+}
+
+TEST_CASE("[TrimeshShapeFastPath] one indexed triangle preserves all collision vertices") {
+	Ref<ArrayMesh> mesh;
+	mesh.instantiate();
+	Array arrays;
+	arrays.resize(Mesh::ARRAY_MAX);
+	const PackedVector3Array verts = {
+		Vector3(1, 2, 3), Vector3(4, 5, 6), Vector3(7, 8, 9)
+	};
+	const PackedInt32Array indices = { 0, 1, 2 };
+	arrays[Mesh::ARRAY_VERTEX] = verts;
+	arrays[Mesh::ARRAY_INDEX] = indices;
+	mesh->add_surface_from_arrays(Mesh::PRIMITIVE_TRIANGLES, arrays);
+	const Ref<ConcavePolygonShape3D> shape = mesh->create_trimesh_shape();
+	REQUIRE(shape.is_valid());
+	const Vector<Vector3> points = shape->get_faces();
+	REQUIRE_EQ(points.size(), 3);
+	for (int i = 0; i < 3; ++i) {
+		CHECK_EQ(points[i], verts[i]);
+	}
+}
+
+TEST_CASE("[TrimeshShapeFastPath] indexed quad collision faces match source face order") {
+	Ref<ArrayMesh> mesh;
+	mesh.instantiate();
+	Array arrays;
+	arrays.resize(Mesh::ARRAY_MAX);
+	const PackedVector3Array verts = {
+		Vector3(1, 0, 0), Vector3(2, 0, 0),
+		Vector3(2, 1, 0), Vector3(1, 1, 0)
+	};
+	const PackedInt32Array indices = { 0, 1, 2, 0, 2, 3 };
+	arrays[Mesh::ARRAY_VERTEX] = verts;
+	arrays[Mesh::ARRAY_INDEX] = indices;
+	mesh->add_surface_from_arrays(Mesh::PRIMITIVE_TRIANGLES, arrays);
+	const Vector<Face3> faces = mesh->get_faces();
+	REQUIRE_EQ(faces.size(), 2);
+	const Ref<ConcavePolygonShape3D> shape = mesh->create_trimesh_shape();
+	REQUIRE(shape.is_valid());
+	const Vector<Vector3> points = shape->get_faces();
+	REQUIRE_EQ(points.size(), faces.size() * 3);
+	for (int f = 0; f < faces.size(); ++f) {
+		for (int v = 0; v < 3; ++v) {
+			CHECK_EQ(points[f * 3 + v], faces[f].vertex[v]);
+		}
+	}
+}
+
+TEST_CASE("[TrimeshShapeFastPath] large triangle sequence contains no unwritten positions") {
+	Ref<ArrayMesh> mesh;
+	mesh.instantiate();
+	Array arrays;
+	arrays.resize(Mesh::ARRAY_MAX);
+	PackedVector3Array verts;
+	for (int i = 0; i < 256; ++i) {
+		verts.push_back(Vector3(i + 1, 0, 0));
+		verts.push_back(Vector3(i + 1, 1, 0));
+		verts.push_back(Vector3(i + 1, 0, 1));
+	}
+	arrays[Mesh::ARRAY_VERTEX] = verts;
+	mesh->add_surface_from_arrays(Mesh::PRIMITIVE_TRIANGLES, arrays);
+	const Ref<ConcavePolygonShape3D> shape = mesh->create_trimesh_shape();
+	REQUIRE(shape.is_valid());
+	const Vector<Vector3> points = shape->get_faces();
+	REQUIRE_EQ(points.size(), 256 * 3);
+	for (int i = 0; i < verts.size(); ++i) {
+		CHECK_EQ(points[i], verts[i]);
+	}
+}
+#endif // PHYSICS_3D_DISABLED
+
+static Ref<ArrayMesh> _make_mesh_for_debug_fastpath() {
+	Ref<ArrayMesh> mesh;
+	mesh.instantiate();
+	Array arrays;
+	arrays.resize(Mesh::ARRAY_MAX);
+	PackedVector3Array vertices = {
+		Vector3(0, 0, 0), Vector3(1, 0, 0), Vector3(0, 1, 0)
+	};
+	PackedInt32Array indices = { 0, 1, 2 };
+	arrays[Mesh::ARRAY_VERTEX] = vertices;
+	arrays[Mesh::ARRAY_INDEX] = indices;
+	mesh->add_surface_from_arrays(Mesh::PRIMITIVE_TRIANGLES, arrays);
+	return mesh;
+}
+
+TEST_CASE("[MeshDebugFastPath] debug line endpoints match input triangle") {
+	Ref<ArrayMesh> mesh = _make_mesh_for_debug_fastpath();
+	Vector<Vector3> lines;
+	mesh->generate_debug_mesh_lines(lines);
+	REQUIRE_EQ(lines.size(), 6);
+	CHECK_EQ(lines[0], Vector3(0, 0, 0));
+	CHECK_EQ(lines[1], Vector3(1, 0, 0));
+	CHECK_EQ(lines[2], Vector3(1, 0, 0));
+	CHECK_EQ(lines[3], Vector3(0, 1, 0));
+	CHECK_EQ(lines[4], Vector3(0, 1, 0));
+	CHECK_EQ(lines[5], Vector3(0, 0, 0));
+}
+
+TEST_CASE("[MeshDebugFastPath] cached debug lines are equivalent") {
+	Ref<ArrayMesh> mesh = _make_mesh_for_debug_fastpath();
+	Vector<Vector3> first;
+	Vector<Vector3> second;
+	mesh->generate_debug_mesh_lines(first);
+	mesh->generate_debug_mesh_lines(second);
+	REQUIRE_EQ(first.size(), second.size());
+	for (int i = 0; i < first.size(); ++i) {
+		CHECK_EQ(first[i], second[i]);
+	}
+}
+
+TEST_CASE("[MeshDebugFastPath] returned point buffer uses copy-on-write") {
+	Ref<ArrayMesh> mesh = _make_mesh_for_debug_fastpath();
+	Vector<Vector3> first;
+	mesh->generate_debug_mesh_indices(first);
+	REQUIRE_EQ(first.size(), 3);
+	Vector<Vector3> original = first;
+	first.write[0] = Vector3(123, 456, 789);
+	Vector<Vector3> second;
+	mesh->generate_debug_mesh_indices(second);
+	REQUIRE_EQ(second.size(), original.size());
+	for (int i = 0; i < second.size(); ++i) {
+		CHECK_EQ(second[i], original[i]);
+	}
+	CHECK_NE(first[0], second[0]);
+}
+
+TEST_CASE("[MeshDebugFastPath] output vector is replaced not appended") {
+	Ref<ArrayMesh> mesh = _make_mesh_for_debug_fastpath();
+	Vector<Vector3> points;
+	points.resize(24);
+	points.fill(Vector3(123, 456, 789));
+	mesh->generate_debug_mesh_indices(points);
+	CHECK_EQ(points.size(), 3);
+	CHECK_EQ(points[0], Vector3(0, 0, 0));
+}
+
+
+static Ref<ImporterMesh> _make_mesh_for_navigation_fastpath(const PackedVector3Array &p_vertices, const PackedInt32Array &p_indices) {
+	Ref<ImporterMesh> imported;
+	imported.instantiate();
+	Array arrays;
+	arrays.resize(Mesh::ARRAY_MAX);
+	arrays[Mesh::ARRAY_VERTEX] = p_vertices;
+	arrays[Mesh::ARRAY_INDEX] = p_indices;
+	PackedVector3Array normals;
+	for (int i = 0; i < p_vertices.size(); ++i) {
+		normals.push_back(Vector3(0, 0, 1));
+	}
+	arrays[Mesh::ARRAY_NORMAL] = normals;
+	imported->add_surface(Mesh::PRIMITIVE_TRIANGLES, arrays, TypedArray<Array>(), Dictionary(), Ref<Material>(), String());
+	return imported;
+}
+
+TEST_CASE("[ImporterMeshFastPath] indexed quad yields exactly two faces and four navigation vertices") {
+	const PackedVector3Array positions = { Vector3(0, 0, 0), Vector3(1, 0, 0), Vector3(1, 1, 0), Vector3(0, 1, 0) };
+	const PackedInt32Array indices = { 0, 1, 2, 0, 2, 3 };
+	Ref<ImporterMesh> mesh = _make_mesh_for_navigation_fastpath(positions, indices);
+	const Vector<Face3> faces = mesh->get_faces();
+	REQUIRE_EQ(faces.size(), 2);
+	CHECK(faces[0].vertex[0].is_equal_approx(positions[0]));
+	CHECK(faces[0].vertex[2].is_equal_approx(positions[2]));
+	CHECK(faces[1].vertex[2].is_equal_approx(positions[3]));
+	Ref<NavigationMesh> navmesh = mesh->create_navigation_mesh();
+	REQUIRE(navmesh.is_valid());
+	CHECK_EQ(navmesh->get_polygon_count(), 2);
+	const Vector<Vector3> unique_vertices = navmesh->get_vertices();
+	REQUIRE_EQ(unique_vertices.size(), 4);
+	for (int i = 0; i < unique_vertices.size(); ++i) {
+		CHECK(unique_vertices[i].is_equal_approx(positions[i]));
+	}
+}
+
+TEST_CASE("[ImporterMeshFastPath] nonindexed faces still deduplicate positions") {
+	const PackedVector3Array positions = {
+		Vector3(0, 0, 0), Vector3(1, 0, 0), Vector3(1, 1, 0),
+		Vector3(0, 0, 0), Vector3(1, 1, 0), Vector3(0, 1, 0)
+	};
+	Ref<ImporterMesh> mesh = _make_mesh_for_navigation_fastpath(positions, PackedInt32Array());
+	const Vector<Face3> faces = mesh->get_faces();
+	REQUIRE_EQ(faces.size(), 2);
+	Ref<NavigationMesh> navmesh = mesh->create_navigation_mesh();
+	REQUIRE(navmesh.is_valid());
+	CHECK_EQ(navmesh->get_polygon_count(), 2);
+	CHECK_EQ(navmesh->get_vertices().size(), 4);
+	for (int p = 0; p < navmesh->get_polygon_count(); ++p) {
+		CHECK_EQ(navmesh->get_polygon(p).size(), 3);
+	}
+}
+
+TEST_CASE("[ImporterMeshFastPath] multiple surfaces share vertices without dropping triangles") {
+	const PackedVector3Array positions = { Vector3(0, 0, 0), Vector3(1, 0, 0), Vector3(0, 1, 0) };
+	const PackedInt32Array triangle = { 0, 1, 2 };
+	Ref<ImporterMesh> mesh = _make_mesh_for_navigation_fastpath(positions, triangle);
+	Array arrays = mesh->get_surface_arrays(0);
+	mesh->add_surface(Mesh::PRIMITIVE_TRIANGLES, arrays, TypedArray<Array>(), Dictionary(), Ref<Material>(), String());
+	const Vector<Face3> faces = mesh->get_faces();
+	CHECK_EQ(faces.size(), 2);
+	Ref<NavigationMesh> navmesh = mesh->create_navigation_mesh();
+	REQUIRE(navmesh.is_valid());
+	CHECK_EQ(navmesh->get_polygon_count(), 2);
+	CHECK_EQ(navmesh->get_vertices().size(), 3);
+}
+
+
+TEST_CASE("[ImporterMeshFastPath] merging a translated mesh does not mutate the source buffers") {
+	const PackedVector3Array positions = { Vector3(0, 0, 0), Vector3(1, 0, 0), Vector3(0, 1, 0) };
+	const PackedInt32Array triangle = { 0, 1, 2 };
+	Ref<ImporterMesh> original = _make_mesh_for_navigation_fastpath(positions, triangle);
+	TypedArray<ImporterMesh> input_meshes;
+	input_meshes.push_back(original);
+	TypedArray<Transform3D> transforms;
+	transforms.push_back(Transform3D(Basis(), Vector3(5, -2, 3)));
+	Ref<ImporterMesh> merged = ImporterMesh::merge_importer_meshes(input_meshes, transforms, false);
+	REQUIRE(merged.is_valid());
+	REQUIRE_EQ(merged->get_surface_count(), 1);
+	const Array merged_arrays = merged->get_surface_arrays(0);
+	const PackedVector3Array translated = merged_arrays[Mesh::ARRAY_VERTEX];
+	REQUIRE_EQ(translated.size(), 3);
+	CHECK(translated[0].is_equal_approx(Vector3(5, -2, 3)));
+	CHECK(translated[1].is_equal_approx(Vector3(6, -2, 3)));
+	CHECK(translated[2].is_equal_approx(Vector3(5, -1, 3)));
+	const Array original_arrays = original->get_surface_arrays(0);
+	const PackedVector3Array unchanged = original_arrays[Mesh::ARRAY_VERTEX];
+	REQUIRE_EQ(unchanged.size(), 3);
+	CHECK(unchanged[0].is_equal_approx(Vector3(0, 0, 0)));
+	CHECK(unchanged[1].is_equal_approx(Vector3(1, 0, 0)));
+	CHECK(unchanged[2].is_equal_approx(Vector3(0, 1, 0)));
+}
+
+TEST_CASE("[ImporterMeshFastPath] merging matching surfaces remaps indices and keeps original") {
+	const PackedVector3Array positions = { Vector3(0, 0, 0), Vector3(1, 0, 0), Vector3(0, 1, 0) };
+	const PackedInt32Array triangle = { 0, 1, 2 };
+	Ref<ImporterMesh> source = _make_mesh_for_navigation_fastpath(positions, triangle);
+	TypedArray<ImporterMesh> inputs;
+	inputs.push_back(source);
+	inputs.push_back(source);
+	TypedArray<Transform3D> transforms;
+	transforms.push_back(Transform3D());
+	transforms.push_back(Transform3D(Basis(), Vector3(3, 0, 0)));
+	Ref<ImporterMesh> merged = ImporterMesh::merge_importer_meshes(inputs, transforms, true);
+	REQUIRE(merged.is_valid());
+	REQUIRE_EQ(merged->get_surface_count(), 1);
+	const Array arrays = merged->get_surface_arrays(0);
+	const PackedInt32Array indices = arrays[Mesh::ARRAY_INDEX];
+	const PackedVector3Array vertices = arrays[Mesh::ARRAY_VERTEX];
+	REQUIRE_EQ(indices.size(), 6);
+	REQUIRE_EQ(vertices.size(), 6);
+	for (int i = 0; i < 6; ++i) {
+		CHECK_EQ(indices[i], i);
+	}
+	CHECK(vertices[3].is_equal_approx(Vector3(3, 0, 0)));
+	CHECK(vertices[4].is_equal_approx(Vector3(4, 0, 0)));
+	const PackedInt32Array source_indices = source->get_surface_arrays(0)[Mesh::ARRAY_INDEX];
+	REQUIRE_EQ(source_indices.size(), 3);
+	CHECK_EQ(source_indices[0], 0);
+	CHECK_EQ(source_indices[1], 1);
+	CHECK_EQ(source_indices[2], 2);
+}
+
+#ifdef MODULE_XATLAS_UNWRAP_ENABLED
+TEST_CASE("[SceneTree][ImporterMesh] Lightmap unwrap preserves attribute compression") {
+	for (bool compressed : { false, true }) {
+		INFO("Compressed: ", compressed);
+		Ref<ImporterMesh> imported;
+		imported.instantiate();
+
+		Array arrays;
+		arrays.resize(Mesh::ARRAY_MAX);
+		PackedVector3Array vertices;
+		vertices.push_back(Vector3(-1, -1, 0));
+		vertices.push_back(Vector3(1, -1, 0));
+		vertices.push_back(Vector3(1, 1, 0));
+		vertices.push_back(Vector3(-1, 1, 0));
+		PackedVector3Array normals;
+		for (int i = 0; i < vertices.size(); i++) {
+			normals.push_back(Vector3(0, 0, 1));
+		}
+		PackedInt32Array indices;
+		for (int index : { 0, 1, 2, 0, 2, 3 }) {
+			indices.push_back(index);
+		}
+		arrays[Mesh::ARRAY_VERTEX] = vertices;
+		arrays[Mesh::ARRAY_NORMAL] = normals;
+		arrays[Mesh::ARRAY_INDEX] = indices;
+
+		uint64_t flags = compressed ? Mesh::ARRAY_FLAG_COMPRESS_ATTRIBUTES : 0;
+		imported->add_surface(Mesh::PRIMITIVE_TRIANGLES, arrays, TypedArray<Array>(), Dictionary(), Ref<Material>(), String(), flags);
+		REQUIRE_EQ(imported->get_surface_count(), 1);
+
+		for (int iteration = 0; iteration < 2; iteration++) {
+			INFO("Unwrap iteration: ", iteration);
+			Vector<uint8_t> input_cache;
+			Vector<uint8_t> output_cache;
+			REQUIRE_EQ(imported->lightmap_unwrap_cached(Transform3D(), 0.5f, input_cache, output_cache), OK);
+			REQUIRE_EQ(imported->get_surface_count(), 1);
+			CHECK_EQ(bool(imported->get_surface_format(0) & Mesh::ARRAY_FLAG_COMPRESS_ATTRIBUTES), compressed);
+		}
+	}
+}
+TEST_CASE("[SceneTree][ImporterMesh] Lightmap unwrap preserves independent surface compression flags") {
+	Ref<ImporterMesh> imported;
+	imported.instantiate();
+
+	for (int surface = 0; surface < 2; surface++) {
+		Array arrays;
+		arrays.resize(Mesh::ARRAY_MAX);
+		PackedVector3Array vertices;
+		const float x = surface * 3.0f;
+		vertices.push_back(Vector3(x - 1, -1, 0));
+		vertices.push_back(Vector3(x + 1, -1, 0));
+		vertices.push_back(Vector3(x + 1, 1, 0));
+		vertices.push_back(Vector3(x - 1, 1, 0));
+		PackedVector3Array normals;
+		for (int i = 0; i < 4; i++) {
+			normals.push_back(Vector3(0, 0, 1));
+		}
+		PackedInt32Array indices;
+		for (int index : { 0, 1, 2, 0, 2, 3 }) {
+			indices.push_back(index);
+		}
+		arrays[Mesh::ARRAY_VERTEX] = vertices;
+		arrays[Mesh::ARRAY_NORMAL] = normals;
+		arrays[Mesh::ARRAY_INDEX] = indices;
+
+		const uint64_t flags = surface == 1 ? Mesh::ARRAY_FLAG_COMPRESS_ATTRIBUTES : 0;
+		imported->add_surface(Mesh::PRIMITIVE_TRIANGLES, arrays, TypedArray<Array>(), Dictionary(), Ref<Material>(), String(), flags);
+	}
+	REQUIRE_EQ(imported->get_surface_count(), 2);
+	CHECK_FALSE((imported->get_surface_format(0) & Mesh::ARRAY_FLAG_COMPRESS_ATTRIBUTES) != 0);
+	CHECK((imported->get_surface_format(1) & Mesh::ARRAY_FLAG_COMPRESS_ATTRIBUTES) != 0);
+
+	for (int iteration = 0; iteration < 2; iteration++) {
+		INFO("Unwrap iteration: ", iteration);
+		Vector<uint8_t> input_cache;
+		Vector<uint8_t> output_cache;
+		REQUIRE_EQ(imported->lightmap_unwrap_cached(Transform3D(), 0.5f, input_cache, output_cache), OK);
+		REQUIRE_EQ(imported->get_surface_count(), 2);
+		CHECK_FALSE((imported->get_surface_format(0) & Mesh::ARRAY_FLAG_COMPRESS_ATTRIBUTES) != 0);
+		CHECK((imported->get_surface_format(1) & Mesh::ARRAY_FLAG_COMPRESS_ATTRIBUTES) != 0);
+	}
+}
+
+#endif // MODULE_XATLAS_UNWRAP_ENABLED
 
 TEST_CASE("[SceneTree][ArrayMesh] Adding and modifying blendshapes.") {
 	Ref<ArrayMesh> mesh;
@@ -444,6 +873,152 @@ TEST_CASE("[SceneTree][ArrayMesh] Get/Set mesh metadata and actions") {
 		ERR_PRINT_ON
 		CHECK(mesh->get_surface_count() == 2);
 	}
+}
+
+
+TEST_CASE("[SceneTree][ImporterMesh] Imported ArrayMesh emits changed once after all surfaces") {
+	for (int surface_count : { 1, 2, 4 }) {
+		INFO("Surfaces: ", surface_count);
+		Ref<ImporterMesh> imported;
+		imported.instantiate();
+		for (int surface = 0; surface < surface_count; surface++) {
+			Array arrays;
+			arrays.resize(Mesh::ARRAY_MAX);
+			PackedVector3Array vertices;
+			vertices.push_back(Vector3(surface * 3.0f, 0.0f, 0.0f));
+			vertices.push_back(Vector3(surface * 3.0f + 1.0f, 0.0f, 0.0f));
+			vertices.push_back(Vector3(surface * 3.0f, 1.0f, 0.0f));
+			arrays[Mesh::ARRAY_VERTEX] = vertices;
+			imported->add_surface(Mesh::PRIMITIVE_TRIANGLES, arrays);
+		}
+
+		Ref<ArrayMesh> base;
+		base.instantiate();
+		SIGNAL_WATCH(base.ptr(), "changed");
+		Ref<ArrayMesh> result = imported->get_mesh(base);
+		REQUIRE(result == base);
+		CHECK(result->get_surface_count() == surface_count);
+		const Array expected_signal_args = { {} };
+		SIGNAL_CHECK("changed", expected_signal_args);
+		SIGNAL_UNWATCH(base.ptr(), "changed");
+	}
+}
+
+#ifdef TOOLS_ENABLED
+TEST_CASE("[SceneTree][OBJ] MTL diffuse color defaults to legacy and supports linear opt-in") {
+	const String obj_path = TestUtils::get_temp_path("upstream_obj_diffuse_color.obj");
+	const String mtl_path = TestUtils::get_temp_path("upstream_obj_diffuse_color.mtl");
+	Error err = OK;
+	{
+		Ref<FileAccess> mtl = FileAccess::open(mtl_path, FileAccess::WRITE, &err);
+		REQUIRE(err == OK);
+		REQUIRE(mtl.is_valid());
+		mtl->store_string("newmtl ImportedMaterial\nKd 0.5 0.25 1.0\n");
+		mtl->close();
+	}
+	{
+		Ref<FileAccess> obj = FileAccess::open(obj_path, FileAccess::WRITE, &err);
+		REQUIRE(err == OK);
+		REQUIRE(obj.is_valid());
+		obj->store_string("mtllib upstream_obj_diffuse_color.mtl\no Triangle\nusemtl ImportedMaterial\nv 0 0 0\nv 1 0 0\nv 0 1 0\nf 1 2 3\n");
+		obj->close();
+	}
+
+	Ref<EditorOBJImporter> importer = memnew(EditorOBJImporter);
+	const Color stored_color(0.5f, 0.25f, 1.0f);
+	for (int mode = 0; mode < 3; mode++) {
+		INFO("OBJ MTL mode: ", mode); // 0 = absent, 1 = explicit legacy, 2 = linear.
+		HashMap<StringName, Variant> options;
+		if (mode != 0) {
+			options[StringName("materials/mtl_diffuse_is_linear")] = (mode == 2);
+		}
+		Node *scene = importer->import_scene(obj_path, 0, options, nullptr, &err);
+		REQUIRE(err == OK);
+		REQUIRE(scene != nullptr);
+		REQUIRE(scene->get_child_count() > 0);
+		ImporterMeshInstance3D *mesh_node = Object::cast_to<ImporterMeshInstance3D>(scene->get_child(0));
+		REQUIRE(mesh_node != nullptr);
+		Ref<ImporterMesh> imported_mesh = mesh_node->get_mesh();
+		REQUIRE(imported_mesh.is_valid());
+		REQUIRE(imported_mesh->get_surface_count() > 0);
+		Ref<StandardMaterial3D> material = imported_mesh->get_surface_material(0);
+		REQUIRE(material.is_valid());
+		const Color expected = mode == 2 ? stored_color.linear_to_srgb() : stored_color;
+		CHECK(material->get_albedo().is_equal_approx(expected));
+		memdelete(scene);
+	}
+}
+#endif // TOOLS_ENABLED
+
+TEST_CASE("[Mesh][Performance] Triangle mesh generation avoids unused surface metadata") {
+	Ref<ArrayMesh> mesh;
+	mesh.instantiate();
+
+	// Many unindexed faces exercise the bulk contiguous Vector3 copy.
+	PackedVector3Array original;
+	REQUIRE(original.resize_uninitialized(384) == OK);
+	Vector3 *const original_write = original.ptrw();
+	for (int i = 0; i < original.size(); i++) {
+		original_write[i] = Vector3(real_t(i * 2), real_t(i % 5), real_t(i % 17));
+	}
+	Array unindexed;
+	unindexed.resize(Mesh::ARRAY_MAX);
+	unindexed[Mesh::ARRAY_VERTEX] = original;
+	mesh->add_surface_from_arrays(Mesh::PRIMITIVE_TRIANGLES, unindexed);
+
+	// A second indexed surface verifies that face ordering and expansion
+	// remain unchanged when sources have different index representations.
+	const PackedVector3Array quad = {
+		Vector3(1000, 0, 0), Vector3(1001, 0, 0),
+		Vector3(1001, 1, 0), Vector3(1000, 1, 0)
+	};
+	const PackedInt32Array quad_indices = { 0, 1, 2, 0, 2, 3 };
+	Array indexed;
+	indexed.resize(Mesh::ARRAY_MAX);
+	indexed[Mesh::ARRAY_VERTEX] = quad;
+	indexed[Mesh::ARRAY_INDEX] = quad_indices;
+	mesh->add_surface_from_arrays(Mesh::PRIMITIVE_TRIANGLES, indexed);
+
+	const PackedVector3Array strip = {
+		Vector3(2000, 0, 0), Vector3(2001, 0, 0),
+		Vector3(2000, 1, 0), Vector3(2001, 1, 0)
+	};
+	Array strip_arrays;
+	strip_arrays.resize(Mesh::ARRAY_MAX);
+	strip_arrays[Mesh::ARRAY_VERTEX] = strip;
+	mesh->add_surface_from_arrays(Mesh::PRIMITIVE_TRIANGLE_STRIP, strip_arrays);
+
+	Ref<TriangleMesh> all = mesh->generate_triangle_mesh();
+	REQUIRE(all.is_valid());
+	const Vector<Face3> faces = all->get_faces();
+	REQUIRE(faces.size() == 132);
+	for (int i = 0; i < 128; i++) {
+		for (int j = 0; j < 3; j++) {
+			CHECK(faces[i].vertex[j] == original[i * 3 + j]);
+		}
+	}
+	const int expected_quad[] = { 0, 1, 2, 0, 2, 3 };
+	for (int i = 0; i < 6; i++) {
+		CHECK(faces[128 + i / 3].vertex[i % 3] == quad[expected_quad[i]]);
+	}
+	CHECK(faces[130].vertex[0] == strip[0]);
+	CHECK(faces[130].vertex[1] == strip[1]);
+	CHECK(faces[130].vertex[2] == strip[2]);
+	CHECK(faces[131].vertex[0] == strip[1]);
+	CHECK(faces[131].vertex[1] == strip[3]);
+	CHECK(faces[131].vertex[2] == strip[2]);
+
+	// The single-surface routine uses the same zero-init-free bulk transfer.
+	Ref<TriangleMesh> only_first = mesh->generate_surface_triangle_mesh(0);
+	REQUIRE(only_first.is_valid());
+	const Vector<Face3> first_faces = only_first->get_faces();
+	REQUIRE(first_faces.size() == 128);
+	for (int i = 0; i < 128; i++) {
+		for (int j = 0; j < 3; j++) {
+			CHECK(first_faces[i].vertex[j] == original[i * 3 + j]);
+		}
+	}
+	CHECK(mesh->generate_triangle_mesh() == all); // Cached geometry is preserved.
 }
 
 } // namespace TestArrayMesh

@@ -37,6 +37,10 @@ class GodotConstraint2D {
 	int _body_count;
 	uint64_t island_step = 0;
 	bool disabled_collisions_between_bodies = true;
+	// A priority of N makes the constraint take part in N times the solver iterations.
+	int priority = 1;
+	// Index of this constraint in the constraint list of each body it touches.
+	uint32_t _body_slots[2] = { 0, 0 };
 
 	RID self;
 
@@ -51,10 +55,18 @@ public:
 	_FORCE_INLINE_ RID get_self() const { return self; }
 
 	_FORCE_INLINE_ uint64_t get_island_step() const { return island_step; }
+	_FORCE_INLINE_ int get_priority() const { return priority; }
+	_FORCE_INLINE_ void set_priority(int p_priority) { priority = p_priority; }
 	_FORCE_INLINE_ void set_island_step(uint64_t p_step) { island_step = p_step; }
 
 	_FORCE_INLINE_ GodotBody2D **get_body_ptr() const { return _body_ptr; }
 	_FORCE_INLINE_ int get_body_count() const { return _body_count; }
+	_FORCE_INLINE_ uint32_t get_body_slot(int p_pos) const { return _body_slots[p_pos]; }
+	_FORCE_INLINE_ void set_body_slot(int p_pos, uint32_t p_slot) { _body_slots[p_pos] = p_slot; }
+
+	// Only rigid-rigid contact pairs can safely share immovable bodies across
+	// parallel constraint jobs. Joints and other constraints remain conservative.
+	virtual bool permits_parallel_immovable_body_sharing() const { return false; }
 
 	_FORCE_INLINE_ void disable_collisions_between_bodies(const bool p_disabled) { disabled_collisions_between_bodies = p_disabled; }
 	_FORCE_INLINE_ bool is_disabled_collisions_between_bodies() const { return disabled_collisions_between_bodies; }

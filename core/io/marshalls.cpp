@@ -37,7 +37,9 @@
 #include "core/variant/container_type_validate.h"
 
 #include <climits>
+#include <cstdint>
 #include <cstdio>
+#include <utility>
 
 void EncodedObjectAsID::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("set_object_id", "id"), &EncodedObjectAsID::set_object_id);
@@ -633,9 +635,6 @@ Error decode_variant(Variant &r_variant, const uint8_t *p_buffer, int p_len, int
 			if (strlen & 0x80000000) {
 				// New format.
 				ERR_FAIL_COND_V(len < 12, ERR_INVALID_DATA);
-				Vector<StringName> names;
-				Vector<StringName> subnames;
-
 				uint32_t namecount = strlen &= 0x7FFFFFFF;
 				uint32_t subnamecount = decode_uint32(buf + 4);
 				uint32_t np_flags = decode_uint32(buf + 8);
@@ -644,24 +643,35 @@ Error decode_variant(Variant &r_variant, const uint8_t *p_buffer, int p_len, int
 				buf += 12;
 
 				if (np_flags & 2) { // Obsolete format with property separate from subpath.
+					ERR_FAIL_COND_V(subnamecount == UINT32_MAX, ERR_INVALID_DATA);
 					subnamecount++;
 				}
 
-				uint32_t total = namecount + subnamecount;
+				// Each string requires at least a 4-byte length field. Reject
+				// impossible counts before allocating from untrusted packet data.
+				const uint64_t total = uint64_t(namecount) + subnamecount;
+				ERR_FAIL_COND_V(total > uint64_t(len) / 4, ERR_INVALID_DATA);
 
 				if (r_len) {
 					(*r_len) += 12;
 				}
 
-				for (uint32_t i = 0; i < total; i++) {
+				Vector<StringName> names;
+				ERR_FAIL_COND_V(names.resize(namecount) != OK, ERR_OUT_OF_MEMORY);
+				StringName *name_data = names.ptrw();
+				for (uint32_t i = 0; i < namecount; i++) {
 					String str;
 					RETURN_IF_ERROR(_decode_string(buf, len, r_len, str));
+					name_data[i] = str;
+				}
 
-					if (i < namecount) {
-						names.push_back(str);
-					} else {
-						subnames.push_back(str);
-					}
+				Vector<StringName> subnames;
+				ERR_FAIL_COND_V(subnames.resize(subnamecount) != OK, ERR_OUT_OF_MEMORY);
+				StringName *subname_data = subnames.ptrw();
+				for (uint32_t i = 0; i < subnamecount; i++) {
+					String str;
+					RETURN_IF_ERROR(_decode_string(buf, len, r_len, str));
+					subname_data[i] = str;
 				}
 
 				r_variant = NodePath(names, subnames, np_flags & 1);
@@ -810,6 +820,8 @@ Error decode_variant(Variant &r_variant, const uint8_t *p_buffer, int p_len, int
 				dict.set_typed(key_type, value_type);
 			}
 
+			// Bound speculative allocation when the encoded count comes from untrusted data.
+			dict.reserve(MIN(count, 65536));
 			for (int i = 0; i < count; i++) {
 				Variant key, value;
 
@@ -859,10 +871,15 @@ Error decode_variant(Variant &r_variant, const uint8_t *p_buffer, int p_len, int
 				(*r_len) += 4; // Size of count number.
 			}
 
+			// A Variant contains at least its 4-byte type header.
+			// Never reserve more entries than can exist in the remaining packet.
+			ERR_FAIL_COND_V(count > len / 4, ERR_INVALID_DATA);
+
 			Array array;
 			if (type.variant_type != Variant::NIL) {
 				array.set_typed(type);
 			}
+			ERR_FAIL_COND_V(array.reserve(count) != OK, ERR_OUT_OF_MEMORY);
 
 			for (int i = 0; i < count; i++) {
 				int used = 0;
@@ -1010,19 +1027,22 @@ Error decode_variant(Variant &r_variant, const uint8_t *p_buffer, int p_len, int
 			ERR_FAIL_COND_V(len < 4, ERR_INVALID_DATA);
 			int32_t count = decode_uint32(buf);
 
-			Vector<String> strings;
 			buf += 4;
 			len -= 4;
+			// Each string occupies at least its 4-byte length header.
+			ERR_FAIL_COND_V(count < 0 || count > len / 4, ERR_INVALID_DATA);
 
 			if (r_len) {
 				(*r_len) += 4; // Size of count number.
 			}
 
+			Vector<String> strings;
+			ERR_FAIL_COND_V(strings.resize(count) != OK, ERR_OUT_OF_MEMORY);
+			String *string_data = strings.ptrw();
 			for (int32_t i = 0; i < count; i++) {
 				String str;
 				RETURN_IF_ERROR(_decode_string(buf, len, r_len, str));
-
-				strings.push_back(str);
+				string_data[i] = std::move(str);
 			}
 
 			r_variant = strings;
@@ -1743,8 +1763,9 @@ Error encode_variant(const Variant &p_variant, uint8_t *p_buffer, int &r_len, bo
 						Variant value;
 
 						if (E.name == CoreStringName(script)) {
-							Ref<Script> script = obj->get_script();
-							if (script.is_valid()) {
+							const ScriptInstance *instance = obj->get_script_instance();
+							const Script *script = instance != nullptr ? instance->get_script() : nullptr;
+							if (script != nullptr) {
 								String path = script->get_path();
 								ERR_FAIL_COND_V_MSG(path.is_empty() || !path.begins_with("res://"), ERR_UNAVAILABLE, "Failed to encode a path to a custom script.");
 								value = path;
@@ -1949,7 +1970,8 @@ Error encode_variant(const Variant &p_variant, uint8_t *p_buffer, int &r_len, bo
 		} break;
 		case Variant::PACKED_STRING_ARRAY: {
 			Vector<String> data = p_variant;
-			int len = data.size();
+			const int len = data.size();
+			const String *const strings = data.ptr();
 
 			if (buf) {
 				encode_uint32(len, buf);
@@ -1959,7 +1981,9 @@ Error encode_variant(const Variant &p_variant, uint8_t *p_buffer, int &r_len, bo
 			r_len += 4;
 
 			for (int i = 0; i < len; i++) {
-				CharString utf8 = data.get(i).utf8();
+				// Non-const Vector::get(i) copies String and touches its refcount.
+				// Borrow from the immutable source array instead.
+				CharString utf8 = strings[i].utf8();
 
 				if (buf) {
 					encode_uint32(utf8.length() + 1, buf);

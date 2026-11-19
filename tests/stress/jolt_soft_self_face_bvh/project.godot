@@ -1,0 +1,25 @@
+config_version=5
+
+[application]
+
+config/name="Cgame Jolt Persistent Self Face BVH"
+
+[physics]
+
+3d/physics_engine="Jolt Physics"
+3d/default_gravity=0.0
+jolt_physics_3d/simulation/soft_body_self_contacts=true
+jolt_physics_3d/simulation/soft_body_self_face_bvh_refit=true
+jolt_physics_3d/simulation/soft_body_self_edge_contacts=false
+jolt_physics_3d/simulation/soft_body_self_edge_bvh=false
+jolt_physics_3d/simulation/soft_body_self_persistent_bvh=false
+jolt_physics_3d/simulation/soft_body_self_contact_max_checks=65536
+jolt_physics_3d/simulation/soft_body_soft_contacts=false
+jolt_physics_3d/simulation/soft_body_soft_contact_radius=0.13
+jolt_physics_3d/simulation/soft_body_soft_contact_recovery=0.3
+jolt_physics_3d/simulation/soft_body_soft_contact_friction=0.2
+
+[rendering]
+
+renderer/rendering_method="gl_compatibility"
+renderer/rendering_method.mobile="gl_compatibility"

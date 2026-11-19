@@ -1,0 +1,58 @@
+name: ASCII case hot path microbenchmarks and tests
+on:
+  push:
+    branches: [develop]
+    paths:
+      - 'core/string/ustring.h'
+      - 'core/string/ustring.cpp'
+      - 'tests/core/string/test_string.cpp'
+      - 'misc/scripts/benchmarks/benchmark_unicode_ascii.cpp'
+      - 'misc/scripts/tests/test_ascii_case_hotpath.py'
+      - 'misc/scripts/README_perf_ascii_case.md'
+      - '.github/workflows/perf-ascii-case.yml'
+  pull_request:
+    paths:
+      - 'core/string/ustring.h'
+      - 'core/string/ustring.cpp'
+      - 'tests/core/string/test_string.cpp'
+      - 'misc/scripts/benchmarks/benchmark_unicode_ascii.cpp'
+      - 'misc/scripts/tests/test_ascii_case_hotpath.py'
+      - 'misc/scripts/README_perf_ascii_case.md'
+      - '.github/workflows/perf-ascii-case.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  ascii-regression-benchmark:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+      - name: Verify source contracts
+        run: |
+          python -m py_compile misc/scripts/tests/test_ascii_case_hotpath.py
+          python -m unittest discover -s misc/scripts/tests -p test_ascii_case_hotpath.py -v
+      - name: Compile microbenchmark against actual Godot Unicode tables
+        run: |
+          c++ -std=c++17 -O3 -I. misc/scripts/benchmarks/benchmark_unicode_ascii.cpp -o /tmp/cgame-ascii-case-bench
+      - name: Measure baseline vs fast scalar conversion
+        run: /tmp/cgame-ascii-case-bench
+  linux-editor-tests:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+      - uses: ./.github/actions/godot-deps
+      - name: Compile Godot editor and native tests
+        uses: ./.github/actions/godot-build
+        with:
+          platform: linuxbsd
+          target: editor
+          scons-flags: dev_build=yes tests=yes debug_symbols=no module_mono_enabled=no accesskit=no
+      - name: Run native string regressions
+        run: |
+          ./bin/godot.linuxbsd.editor.dev.x86_64 --headless --test --force-colors

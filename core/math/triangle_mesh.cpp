@@ -33,38 +33,41 @@
 #include "core/object/class_db.h"
 #include "core/templates/sort_array.h"
 
-int TriangleMesh::_create_bvh(BVH *p_bvh, BVH **p_bb, int p_from, int p_size, int p_depth, int &r_max_depth, int &r_max_alloc) {
+int TriangleMesh::_create_bvh(BVH *p_bvh, int *p_bb, int p_from, int p_size, int p_depth, int &r_max_depth, int &r_max_alloc) {
 	if (p_depth > r_max_depth) {
 		r_max_depth = p_depth;
 	}
 
 	if (p_size == 1) {
-		return p_bb[p_from] - p_bvh;
+		return p_bb[p_from];
 	} else if (p_size == 0) {
 		return -1;
 	}
 
 	AABB aabb;
-	aabb = p_bb[p_from]->aabb;
+	aabb = p_bvh[p_bb[p_from]].aabb;
 	for (int i = 1; i < p_size; i++) {
-		aabb.merge_with(p_bb[p_from + i]->aabb);
+		aabb.merge_with(p_bvh[p_bb[p_from + i]].aabb);
 	}
 
 	int li = aabb.get_longest_axis_index();
 
 	switch (li) {
 		case Vector3::AXIS_X: {
-			SortArray<BVH *, BVHCmpX> sort_x;
+			SortArray<int, BVHCmpX> sort_x;
+			sort_x.compare.nodes = p_bvh;
 			sort_x.nth_element(0, p_size, p_size / 2, &p_bb[p_from]);
 			//sort_x.sort(&p_bb[p_from],p_size);
 		} break;
 		case Vector3::AXIS_Y: {
-			SortArray<BVH *, BVHCmpY> sort_y;
+			SortArray<int, BVHCmpY> sort_y;
+			sort_y.compare.nodes = p_bvh;
 			sort_y.nth_element(0, p_size, p_size / 2, &p_bb[p_from]);
 			//sort_y.sort(&p_bb[p_from],p_size);
 		} break;
 		case Vector3::AXIS_Z: {
-			SortArray<BVH *, BVHCmpZ> sort_z;
+			SortArray<int, BVHCmpZ> sort_z;
+			sort_z.compare.nodes = p_bvh;
 			sort_z.nth_element(0, p_size, p_size / 2, &p_bb[p_from]);
 			//sort_z.sort(&p_bb[p_from],p_size);
 
@@ -95,7 +98,7 @@ void TriangleMesh::get_indices(Vector<int> *r_triangles_indices) const {
 	// Parse vertices indices
 	const Triangle *triangles_read = triangles.ptr();
 
-	r_triangles_indices->resize(triangles_num * 3);
+	ERR_FAIL_COND(r_triangles_indices->resize_uninitialized(triangles_num * 3) != OK);
 	int *r_indices_write = r_triangles_indices->ptrw();
 
 	for (int i = 0; i < triangles_num; ++i) {
@@ -113,9 +116,15 @@ void TriangleMesh::create(const Vector<Vector3> &p_faces, const Vector<int32_t> 
 	int fc = p_faces.size();
 	ERR_FAIL_COND(!fc || ((fc % 3) != 0));
 	fc /= 3;
-	triangles.resize(fc);
+	// Every triangle is populated before use. Skip default-initializing a
+	// potentially large temporary array when constructing mesh geometry.
+	ERR_FAIL_COND(triangles.resize_uninitialized(fc) != OK);
 
-	bvh.resize(fc * 3); //will never be larger than this (todo make better)
+	// A full binary tree with fc leaves has exactly 2 * fc - 1 nodes.
+	// Avoid reserving 3 * fc nodes and shrinking/copying them after construction.
+	// All leaves are written before BVH construction; each inner node is
+	// initialized by _create_bvh() before it becomes reachable.
+	ERR_FAIL_COND(bvh.resize_uninitialized(fc * 2 - 1) != OK);
 	BVH *bw = bvh.ptrw();
 
 	{
@@ -152,7 +161,9 @@ void TriangleMesh::create(const Vector<Vector3> &p_faces, const Vector<int32_t> 
 			}
 
 			f.normal = Face3(r[i * 3 + 0], r[i * 3 + 1], r[i * 3 + 2]).get_plane().get_normal();
-			f.surface_index = si ? si[i] : 0;
+			// Surface metadata is indexed per input vertex (three entries per
+			// triangle); use the first vertex of the current face.
+			f.surface_index = si ? si[i * 3] : 0;
 
 			bw[i].left = -1;
 			bw[i].right = -1;
@@ -160,25 +171,26 @@ void TriangleMesh::create(const Vector<Vector3> &p_faces, const Vector<int32_t> 
 			bw[i].center = bw[i].aabb.get_center();
 		}
 
-		vertices.resize(db.size());
+		ERR_FAIL_COND(vertices.resize_uninitialized(db.size()) != OK);
 		Vector3 *vw = vertices.ptrw();
 		for (const KeyValue<Vector3, int> &E : db) {
 			vw[E.value] = E.key;
 		}
 	}
 
-	Vector<BVH *> bwptrs;
-	bwptrs.resize(fc);
-	BVH **bwp = bwptrs.ptrw();
+	// Sort compact leaf indices instead of pointers. On 64-bit systems this
+	// halves the temporary sorting buffer from 8 * fc to 4 * fc bytes.
+	Vector<int> leaf_indices;
+	ERR_FAIL_COND(leaf_indices.resize_uninitialized(fc) != OK);
+	int *indices = leaf_indices.ptrw();
 	for (int i = 0; i < fc; i++) {
-		bwp[i] = &bw[i];
+		indices[i] = i;
 	}
 
 	max_depth = 0;
 	int max_alloc = fc;
-	_create_bvh(bw, bwp, 0, fc, 1, max_depth, max_alloc);
-
-	bvh.resize(max_alloc); //resize back
+	_create_bvh(bw, indices, 0, fc, 1, max_depth, max_alloc);
+	CRASH_COND(max_alloc != bvh.size());
 
 	valid = true;
 }
@@ -435,13 +447,15 @@ bool TriangleMesh::inside_convex_shape(const Plane *p_planes, int p_plane_count,
 
 		switch (stack[level] >> VISITED_BIT_SHIFT) {
 			case TEST_AABB_BIT: {
-				bool intersects = scale.xform(b.aabb).intersects_convex_shape(p_planes, p_plane_count, p_points, p_point_count);
-				if (!intersects) {
+				// Transform the node bounds once for both convex-shape queries.
+				// AABB transforms are substantially more expensive than tests
+				// against a single plane and dominate broad-phase traversal.
+				const AABB scaled_aabb = scale.xform(b.aabb);
+				if (!scaled_aabb.intersects_convex_shape(p_planes, p_plane_count, p_points, p_point_count)) {
 					return false;
 				}
 
-				bool inside = scale.xform(b.aabb).inside_convex_shape(p_planes, p_plane_count);
-				if (inside) {
+				if (scaled_aabb.inside_convex_shape(p_planes, p_plane_count)) {
 					stack[level] = (VISIT_DONE_BIT << VISITED_BIT_SHIFT) | node;
 
 				} else {
@@ -506,8 +520,10 @@ Vector<Face3> TriangleMesh::get_faces() const {
 	}
 
 	Vector<Face3> faces;
-	int ts = triangles.size();
-	faces.resize(triangles.size());
+	const int ts = triangles.size();
+	// Every Face3 vertex is copied from the indexed mesh. Avoid the
+	// default constructor pass on this fully overwritten output array.
+	ERR_FAIL_COND_V(faces.resize_uninitialized(ts) != OK, Vector<Face3>());
 
 	Face3 *w = faces.ptrw();
 	const Triangle *r = triangles.ptr();
@@ -585,8 +601,8 @@ Vector<Vector3> TriangleMesh::get_faces_scriptwrap() const {
 	}
 
 	Vector<Vector3> faces;
-	int ts = triangles.size();
-	faces.resize(triangles.size() * 3);
+	const int ts = triangles.size();
+	ERR_FAIL_COND_V(faces.resize_uninitialized(ts * 3) != OK, Vector<Vector3>());
 
 	Vector3 *w = faces.ptrw();
 	const Triangle *r = triangles.ptr();

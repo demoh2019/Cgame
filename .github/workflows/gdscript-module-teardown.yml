@@ -1,0 +1,33 @@
+name: GDScript module teardown regression
+
+on:
+  pull_request:
+    branches: [develop]
+    paths:
+      - "modules/gdscript/register_types.cpp"
+      - "misc/scripts/tests/test_gdscript_module_teardown.py"
+      - ".github/workflows/gdscript-module-teardown.yml"
+  push:
+    branches: [develop]
+    paths:
+      - "modules/gdscript/register_types.cpp"
+      - "misc/scripts/tests/test_gdscript_module_teardown.py"
+      - ".github/workflows/gdscript-module-teardown.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  module-teardown:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        cxx: [g++, clang++]
+    steps:
+      - uses: actions/checkout@v4
+      - name: Compile actual module cleanup function in three configurations
+        env:
+          CXX: ${{ matrix.cxx }}
+        run: python3 -m unittest discover -s misc/scripts/tests -p test_gdscript_module_teardown.py -v

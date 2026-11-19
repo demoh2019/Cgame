@@ -225,31 +225,34 @@ void RenderingDevice::_remove_dependency(RID p_id, RID p_depends_on) {
 void RenderingDevice::_free_dependencies(RID p_id) {
 	_THREAD_SAFE_METHOD_
 
-	// Direct dependencies must be freed.
-
-	HashMap<RID, HashSet<RID>>::Iterator E = dependency_map.find(p_id);
-	if (E) {
-		while (E->value.size()) {
-			free_rid(*E->value.begin());
+	// Direct dependencies are freed recursively. Unlike HashMap, AHashMap
+	// relocates entries when removing an element, so an iterator cannot survive
+	// any recursive free_rid() that may remove other dependency map entries.
+	while (true) {
+		AHashMap<RID, HashSet<RID>>::Iterator E = dependency_map.find(p_id);
+		if (!E) {
+			break;
 		}
-		dependency_map.remove(E);
+		if (E->value.is_empty()) {
+			dependency_map.erase(p_id);
+			break;
+		}
+		const RID dependent = *E->value.begin();
+		free_rid(dependent);
 	}
 
 	// Reverse dependencies must be unreferenced.
-	E = reverse_dependency_map.find(p_id);
-
+	AHashMap<RID, HashSet<RID>>::Iterator E = reverse_dependency_map.find(p_id);
 	if (E) {
 		for (const RID &F : E->value) {
-			HashMap<RID, HashSet<RID>>::Iterator G = dependency_map.find(F);
+			AHashMap<RID, HashSet<RID>>::Iterator G = dependency_map.find(F);
 			ERR_CONTINUE(!G);
 			ERR_CONTINUE(!G->value.has(p_id));
 			G->value.erase(p_id);
 		}
-
 		reverse_dependency_map.remove(E);
 	}
 }
-
 void RenderingDevice::_replace_dependency(RID p_dependent, RID p_old_dependency, RID p_new_dependency) {
 	// Remove the edge: p_old_dependency -> p_dependent.
 	{
@@ -3243,6 +3246,7 @@ RDD::RenderPassID RenderingDevice::_render_pass_create(RenderingDeviceDriver *p_
 
 	LocalVector<RDD::Attachment> attachments;
 	LocalVector<uint32_t> attachment_remap;
+	attachment_remap.reserve(p_attachments.size());
 
 	for (int i = 0; i < p_attachments.size(); i++) {
 		if (p_attachments[i].usage_flags == AttachmentFormat::UNUSED_ATTACHMENT) {
@@ -3314,6 +3318,9 @@ RDD::RenderPassID RenderingDevice::_render_pass_create(RenderingDeviceDriver *p_
 	for (int i = 0; i < p_passes.size(); i++) {
 		const FramebufferPass *pass = &p_passes[i];
 		RDD::Subpass &subpass = subpasses[i];
+		subpass.color_references.reserve(pass->color_attachments.size());
+		subpass.input_references.reserve(pass->input_attachments.size());
+		subpass.resolve_references.reserve(pass->resolve_attachments.size());
 
 		TextureSamples texture_samples = TEXTURE_SAMPLES_1;
 		bool is_multisample_first = true;
@@ -3614,6 +3621,8 @@ RenderingDevice::FramebufferFormatID RenderingDevice::framebuffer_format_create_
 	Vector<TextureSamples> samples;
 	LocalVector<RDD::AttachmentLoadOp> load_ops;
 	LocalVector<RDD::AttachmentStoreOp> store_ops;
+	load_ops.reserve(p_attachments.size());
+	store_ops.reserve(p_attachments.size());
 	for (int64_t i = 0; i < p_attachments.size(); i++) {
 		load_ops.push_back(RDD::ATTACHMENT_LOAD_OP_CLEAR);
 		store_ops.push_back(RDD::ATTACHMENT_STORE_OP_STORE);
@@ -4525,6 +4534,7 @@ RID RenderingDevice::uniform_set_create(const VectorView<RD::Uniform> &p_uniform
 		RDD::BoundUniform &driver_uniform = driver_uniforms[i];
 		driver_uniform.type = uniform.uniform_type;
 		driver_uniform.binding = uniform.binding;
+		driver_uniform.ids.reserve(uniform.get_id_count());
 
 		// Mark immutable samplers to be skipped when creating uniform set.
 		driver_uniform.immutable_sampler = uniform.immutable_sampler;
@@ -7722,7 +7732,7 @@ bool RenderingDevice::_dependency_make_mutable(RID p_id, RID p_resource_id, RDG:
 
 bool RenderingDevice::_dependencies_make_mutable_recursive(RID p_id, RDG::ResourceTracker *p_resource_tracker) {
 	bool made_mutable = false;
-	HashMap<RID, HashSet<RID>>::Iterator E = dependency_map.find(p_id);
+	AHashMap<RID, HashSet<RID>>::Iterator E = dependency_map.find(p_id);
 	if (E) {
 		for (RID rid : E->value) {
 			made_mutable = _dependency_make_mutable(rid, p_id, p_resource_tracker) || made_mutable;
@@ -7988,7 +7998,7 @@ void RenderingDevice::texture_replace_rid(RID p_old_texture, RID p_new_texture) 
 		new_us->driver_id = RDD::UniformSetID();
 
 		// Remove its dependency entries and free the temporary RID.
-		HashMap<RID, HashSet<RID>>::Iterator rev_it = reverse_dependency_map.find(new_us_rid);
+		AHashMap<RID, HashSet<RID>>::Iterator rev_it = reverse_dependency_map.find(new_us_rid);
 		if (rev_it) {
 			for (const RID &dep_on : rev_it->value) {
 				HashSet<RID> *fwd = dependency_map.getptr(dep_on);
@@ -7998,7 +8008,7 @@ void RenderingDevice::texture_replace_rid(RID p_old_texture, RID p_new_texture) 
 			}
 			reverse_dependency_map.remove(rev_it);
 		}
-		HashMap<RID, HashSet<RID>>::Iterator fwd_it = dependency_map.find(new_us_rid);
+		AHashMap<RID, HashSet<RID>>::Iterator fwd_it = dependency_map.find(new_us_rid);
 		if (fwd_it) {
 			dependency_map.remove(fwd_it);
 		}
@@ -8698,8 +8708,8 @@ Error RenderingDevice::initialize(RenderingContextDriver *p_context, DisplayServ
 		present_queue_family = main_queue_family;
 	}
 
-	// Use the processor count as the max amount of transfer workers that can be created.
-	transfer_worker_pool_max_size = OS::get_singleton()->get_processor_count();
+	// Use the default thread pool size as the max amount of transfer workers that can be created.
+	transfer_worker_pool_max_size = OS::get_singleton()->get_default_thread_pool_size();
 
 	// Pre-allocate to avoid locking a mutex when indexing into them.
 	transfer_worker_pool.resize(transfer_worker_pool_max_size);

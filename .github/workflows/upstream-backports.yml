@@ -1,0 +1,31 @@
+name: Upstream backport regression checks
+
+on:
+  pull_request:
+    branches: [develop]
+    paths:
+      - "drivers/gles3/rasterizer_gles3.cpp"
+      - "platform/macos/display_server_macos.mm"
+      - "platform/macos/gl_manager_macos_legacy.h"
+      - "editor/script/find_in_files.cpp"
+      - "misc/scripts/tests/test_upstream_backports.py"
+      - ".github/workflows/upstream-backports.yml"
+  push:
+    branches: [develop]
+    paths:
+      - "drivers/gles3/rasterizer_gles3.cpp"
+      - "platform/macos/display_server_macos.mm"
+      - "platform/macos/gl_manager_macos_legacy.h"
+      - "editor/script/find_in_files.cpp"
+      - "misc/scripts/tests/test_upstream_backports.py"
+      - ".github/workflows/upstream-backports.yml"
+  workflow_dispatch:
+
+jobs:
+  regression-contracts:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - name: Run compiler-preprocessor and source regression tests
+        run: python3 -m unittest discover -s misc/scripts/tests -p "test_upstream_backports.py" -v

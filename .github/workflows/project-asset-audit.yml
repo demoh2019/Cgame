@@ -1,11 +1,24 @@
 name: Project asset audit tests
 
 on:
+  push:
+    branches: [develop]
+    paths:
+      - "misc/scripts/project_asset_audit.py"
+      - "misc/scripts/asset_reference_graph.py"
+      - "misc/scripts/tests/test_project_asset_audit*.py"
+      - "misc/scripts/tests/test_asset_reference_graph.py"
+      - "misc/scripts/README_asset_audit.md"
+      - "misc/scripts/README_asset_reference_graph.md"
+      - ".github/workflows/project-asset-audit.yml"
   pull_request:
     paths:
       - "misc/scripts/project_asset_audit.py"
+      - "misc/scripts/asset_reference_graph.py"
       - "misc/scripts/tests/test_project_asset_audit*.py"
+      - "misc/scripts/tests/test_asset_reference_graph.py"
       - "misc/scripts/README_asset_audit.md"
+      - "misc/scripts/README_asset_reference_graph.md"
       - ".github/workflows/project-asset-audit.yml"
   workflow_dispatch:
 
@@ -15,9 +28,18 @@ permissions:
 jobs:
   python-audit-tests:
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.10", "3.12"]
     steps:
       - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
       - name: Check Python syntax
-        run: python3 -m py_compile misc/scripts/project_asset_audit.py misc/scripts/tests/test_project_asset_audit*.py
+        run: python3 -m py_compile misc/scripts/project_asset_audit.py misc/scripts/asset_reference_graph.py misc/scripts/tests/test_project_asset_audit*.py misc/scripts/tests/test_asset_reference_graph.py
       - name: Run asset auditor regression tests
         run: python3 -m unittest discover -s misc/scripts/tests -p 'test_project_asset_audit*.py' -v
+      - name: Run reference graph regression tests
+        run: python3 -m unittest discover -s misc/scripts/tests -p 'test_asset_reference_graph.py' -v

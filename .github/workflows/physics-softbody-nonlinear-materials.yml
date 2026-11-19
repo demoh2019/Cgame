@@ -1,0 +1,53 @@
+name: SoftBody3D nonlinear compression and viscoelastic contracts
+
+on:
+  pull_request:
+    paths:
+      - 'servers/physics_xpbd_compression_hardening.h'
+      - 'servers/physics_softbody_strain_rate_damping.h'
+      - 'modules/godot_physics_3d/godot_soft_body_3d.cpp'
+      - 'modules/godot_physics_3d/godot_space_3d.cpp'
+      - 'modules/godot_physics_3d/godot_space_3d.h'
+      - 'servers/physics_3d/physics_server_3d.cpp'
+      - 'tests/servers/test_physics_xpbd_compression_hardening.cpp'
+      - 'tests/servers/test_physics_softbody_strain_rate_damping.cpp'
+      - 'tests/stress/test_physics_softbody_nonlinear_materials.py'
+      - 'tests/stress/test_physics_xpbd_tension_hardening.py'
+      - '.github/workflows/physics-softbody-nonlinear-materials.yml'
+  push:
+    branches: [develop]
+    paths:
+      - 'servers/physics_xpbd_compression_hardening.h'
+      - 'servers/physics_softbody_strain_rate_damping.h'
+      - 'modules/godot_physics_3d/godot_soft_body_3d.cpp'
+      - 'modules/godot_physics_3d/godot_space_3d.cpp'
+      - 'modules/godot_physics_3d/godot_space_3d.h'
+      - 'servers/physics_3d/physics_server_3d.cpp'
+      - 'tests/servers/test_physics_xpbd_compression_hardening.cpp'
+      - 'tests/servers/test_physics_softbody_strain_rate_damping.cpp'
+      - 'tests/stress/test_physics_softbody_nonlinear_materials.py'
+      - 'tests/stress/test_physics_xpbd_tension_hardening.py'
+      - '.github/workflows/physics-softbody-nonlinear-materials.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: softbody-nonlinear-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  numerical-contracts:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - name: Python syntax
+        run: |
+          python3 -m py_compile tests/stress/test_physics_softbody_nonlinear_materials.py tests/stress/test_physics_xpbd_tension_hardening.py
+      - name: Nonlinear compression, viscosity and legacy tension regression contracts
+        run: |
+          python3 -m unittest discover -s tests/stress -p 'test_physics_softbody_nonlinear_materials.py' -v
+          python3 -m unittest discover -s tests/stress -p 'test_physics_xpbd_tension_hardening.py' -v
+          python3 -m unittest discover -s tests/stress -p 'test_physics_softbody_link_damping.py' -v

@@ -1,0 +1,81 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<class name="DestructibleBody3D" inherits="RigidBody3D" api_type="core" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="../class.xsd">
+	<brief_description>
+		A rigid body that shatters into debris.
+	</brief_description>
+	<description>
+		DestructibleBody3D is a [RigidBody3D] that can break apart. When it breaks, the first [BoxShape3D] or [ConvexPolygonShape3D] among its [CollisionShape3D] children is cut into [member piece_count] convex pieces with a Voronoi diagram: every random seed point inside the body owns the part of it that is closer to that seed than to any other. The pieces tile the body exactly, so none of the volume is lost or duplicated. Each piece becomes a new [RigidBody3D] with a matching convex collision shape and a mesh of its own, placed where the piece was, and the original body is removed.
+		The debris shares the mass of the body by volume and keeps its linear and angular motion, so the total momentum is conserved; the pieces are additionally thrown away from the point of impact ([member scatter_speed]) in a way that adds no net momentum. Pieces near the impact are smaller and fly faster, because the seeds cluster around the impact ([member seed_concentration]).
+		A body breaks when [member break_impulse] is reached by an impact, when [member health] runs out through [method apply_damage], or when you call [method fracture], for example for an explosion. The faces on the original surface use the material of the first [MeshInstance3D] child; the new faces created by the cut use [member inner_material].
+		[codeblock]
+		var crate = DestructibleBody3D.new()
+		crate.mass = 5.0
+		crate.break_impulse = 20.0   # N*s, about a 5 kg crate hitting the ground at 4 m/s.
+		crate.piece_count = 12
+		crate.inner_material = preload("res://wood_inside.tres")
+		# ... add a BoxShape3D collider and a MeshInstance3D as children ...
+		crate.fractured.connect(func(debris): print(debris.size(), " pieces"))
+		[/codeblock]
+		[b]Note:[/b] Debris collision uses the convex hull of each piece. Many pieces cost physics time: keep [member piece_count] low for frequent breaks and set [member debris_lifetime] so old debris disappears. Impacts are detected from the change in velocity of the body (minus gravity), which works with every physics engine; setting the velocity from a script counts as an impact too.
+	</description>
+	<tutorials>
+	</tutorials>
+	<methods>
+		<method name="apply_damage">
+			<return type="void" />
+			<param index="0" name="amount" type="float" />
+			<param index="1" name="global_point" type="Vector3" />
+			<description>
+				Reduces [member health] by [param amount]. When it reaches zero the body breaks around [param global_point]. Has no effect if [member health] is [code]0[/code] at the start, and negative amounts are ignored.
+			</description>
+		</method>
+		<method name="fracture">
+			<return type="Array" />
+			<param index="0" name="global_point" type="Vector3" />
+			<param index="1" name="impulse" type="Vector3" default="Vector3(0, 0, 0)" />
+			<description>
+				Breaks the body now. [param global_point] is where it is hit: pieces there are smaller and fly faster. [param impulse] (in N*s) is shared by all pieces on top of the body's own motion, for a blast. Returns the new debris bodies, or an empty array if the body already broke or has no box or convex shape. Emits [signal fractured].
+			</description>
+		</method>
+		<method name="is_broken" qualifiers="const">
+			<return type="bool" />
+			<description>
+				Returns [code]true[/code] after the body has broken.
+			</description>
+		</method>
+	</methods>
+	<members>
+		<member name="break_impulse" type="float" setter="set_break_impulse" getter="get_break_impulse" default="0.0">
+			The impulse, in newton-seconds, that breaks the body when something hits it (the mass times the change of velocity in one physics step, gravity not counted). [code]0[/code] disables breaking by impact.
+		</member>
+		<member name="debris_lifetime" type="float" setter="set_debris_lifetime" getter="get_debris_lifetime" default="10.0">
+			Seconds until the debris is removed. [code]0[/code] keeps it forever.
+		</member>
+		<member name="health" type="float" setter="set_health" getter="get_health" default="0.0">
+			Hit points for [method apply_damage]. [code]0[/code] disables damage.
+		</member>
+		<member name="inner_material" type="Material" setter="set_inner_material" getter="get_inner_material">
+			Material of the new faces created by the cut. If not set, the material of the original surface is used.
+		</member>
+		<member name="piece_count" type="int" setter="set_piece_count" getter="get_piece_count" default="8">
+			Number of pieces the body breaks into. Very small pieces are discarded, so there can be fewer.
+		</member>
+		<member name="random_seed" type="int" setter="set_random_seed" getter="get_random_seed" default="0">
+			Seed for the random cut. The same seed gives the same shards. [code]0[/code] picks a different cut every time.
+		</member>
+		<member name="scatter_speed" type="float" setter="set_scatter_speed" getter="get_scatter_speed" default="2.0">
+			Speed in meters per second with which the pieces fly away from the point of impact. It adds no net momentum.
+		</member>
+		<member name="seed_concentration" type="float" setter="set_seed_concentration" getter="get_seed_concentration" default="1.0">
+			How strongly the cut concentrates around the point of impact. [code]0[/code] cuts evenly through the whole body; larger values give many small pieces near the impact and a few big ones far from it.
+		</member>
+	</members>
+	<signals>
+		<signal name="fractured">
+			<param index="0" name="debris" type="Array" />
+			<description>
+				Emitted when the body breaks. [param debris] holds the new [RigidBody3D] pieces.
+			</description>
+		</signal>
+	</signals>
+</class>

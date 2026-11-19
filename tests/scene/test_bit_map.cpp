@@ -499,4 +499,557 @@ TEST_CASE("[BitMap] Clip to polygon") {
 	CHECK_MESSAGE(polygons[0].size() == 6, "The polygon should have exactly 6 points");
 }
 
+TEST_CASE("[BitMap] Rect byte ranges match an independent per-pixel reference") {
+	// Exercise byte boundaries, non-byte-aligned row widths, clipping, one-bit
+	// spans, empty rectangles, and repeated set/clear operations.
+	const int widths[] = { 1, 2, 3, 7, 8, 9, 15, 16, 17, 31, 32, 33, 65 };
+	const int heights[] = { 1, 2, 9, 17 };
+	for (int width : widths) {
+		for (int height : heights) {
+			BitMap bit_map;
+			bit_map.create(Size2i(width, height));
+
+			Vector<uint8_t> expected;
+			expected.resize(width * height);
+			uint8_t *reference = expected.ptrw();
+			memset(reference, 0, expected.size());
+
+			uint32_t state = 0x5a1731bdu ^ uint32_t(width * 137 + height);
+			auto random = [&state]() -> uint32_t {
+				state = state * 1664525u + 1013904223u;
+				return state;
+			};
+
+			for (int iteration = 0; iteration < 120; iteration++) {
+				const int x = int(random() % uint32_t(width * 3)) - width;
+				const int y = int(random() % uint32_t(height * 3)) - height;
+				const int rect_width = int(random() % uint32_t(width * 2 + 1));
+				const int rect_height = int(random() % uint32_t(height * 2 + 1));
+				const bool value = iteration % 4 != 1;
+				const Rect2i rect(x, y, rect_width, rect_height);
+
+				bit_map.set_bit_rect(rect, value);
+
+				int expected_count = 0;
+				bool all_match = true;
+				for (int row = 0; row < height; row++) {
+					for (int col = 0; col < width; col++) {
+						const int index = row * width + col;
+						if (rect.has_point(Point2i(col, row))) {
+							reference[index] = value ? 1 : 0;
+						}
+						const bool expected_bit = reference[index] != 0;
+						expected_count += expected_bit;
+						if (bit_map.get_bit(col, row) != expected_bit) {
+							all_match = false;
+						}
+					}
+				}
+				CHECK(all_match);
+				CHECK(bit_map.get_true_bit_count() == expected_count);
+			}
+		}
+	}
+}
+
+TEST_CASE("[BitMap] Direct L8 image conversion preserves pixels and odd-width rows") {
+	BitMap bit_map;
+	const int width = 37;
+	const int height = 19;
+	bit_map.create(Size2i(width, height));
+
+	for (int y = 0; y < height; y++) {
+		for (int x = 0; x < width; x++) {
+			if ((x * 13 + y * 7) % 5 < 2) {
+				bit_map.set_bit(x, y, true);
+			}
+		}
+	}
+
+	const Ref<Image> image = bit_map.convert_to_image();
+	REQUIRE(image.is_valid());
+	CHECK(image->get_size() == Size2i(width, height));
+	CHECK(image->get_format() == Image::FORMAT_L8);
+	for (int y = 0; y < height; y++) {
+		for (int x = 0; x < width; x++) {
+			const float expected_value = bit_map.get_bit(x, y) ? 1.0f : 0.0f;
+			CHECK(image->get_pixel(x, y).r == expected_value);
+		}
+	}
+}
+
+TEST_CASE("[BitMap] LA8 alpha import does not alter source image") {
+	const int width = 19;
+	const int height = 9;
+	Ref<Image> image = Image::create_empty(width, height, false, Image::FORMAT_LA8);
+	for (int y = 0; y < height; y++) {
+		for (int x = 0; x < width; x++) {
+			const float alpha = float((x + 2 * y) % 4) / 3.0f;
+			image->set_pixel(x, y, Color(0.5, 0.5, 0.5, alpha));
+		}
+	}
+	const Vector<uint8_t> source_bytes = image->get_data();
+
+	BitMap bit_map;
+	bit_map.create_from_image_alpha(image, 0.4f);
+
+	CHECK(image->get_format() == Image::FORMAT_LA8);
+	CHECK(image->get_data() == source_bytes);
+	CHECK(bit_map.get_size() == Size2i(width, height));
+	for (int y = 0; y < height; y++) {
+		for (int x = 0; x < width; x++) {
+			const bool expected = image->get_pixel(x, y).a > 0.4f;
+			CHECK(bit_map.get_bit(x, y) == expected);
+		}
+	}
+}
+
+TEST_CASE("[BitMap] Packed nearest-neighbor resize matches original sampling") {
+	// Compare multiple upscale/downscale combinations, including non-byte-
+	// aligned widths, against independent pixel coordinates and source bits.
+	const int source_widths[] = { 1, 3, 8, 9, 17 };
+	const int source_heights[] = { 1, 2, 7, 11 };
+	const int dest_widths[] = { 1, 2, 5, 8, 15, 32 };
+	const int dest_heights[] = { 1, 3, 8, 19 };
+	for (int width : source_widths) {
+		for (int height : source_heights) {
+			Vector<uint8_t> source_bits;
+			source_bits.resize(width * height);
+			uint8_t *reference = source_bits.ptrw();
+
+			for (int y = 0; y < height; y++) {
+				for (int x = 0; x < width; x++) {
+					reference[y * width + x] = ((x * 7 + y * 13) % 5 < 2) ? 1 : 0;
+				}
+			}
+
+			for (int new_width : dest_widths) {
+				for (int new_height : dest_heights) {
+					BitMap bitmap;
+					bitmap.create(Size2i(width, height));
+					for (int y = 0; y < height; y++) {
+						for (int x = 0; x < width; x++) {
+							if (reference[y * width + x]) {
+								bitmap.set_bit(x, y, true);
+							}
+						}
+					}
+					bitmap.resize(Size2i(new_width, new_height));
+					CHECK(bitmap.get_size() == Size2i(new_width, new_height));
+
+					const float scale_x = float(width) / new_width;
+					const float scale_y = float(height) / new_height;
+					int expected_count = 0;
+					bool all_match = true;
+					for (int y = 0; y < new_height; y++) {
+						for (int x = 0; x < new_width; x++) {
+							const int sample_x = int(x * scale_x);
+							const int sample_y = int(y * scale_y);
+							const bool expected_bit = sample_x < width && sample_y < height &&
+									reference[sample_y * width + sample_x];
+							expected_count += expected_bit;
+							if (bitmap.get_bit(x, y) != expected_bit) {
+								all_match = false;
+							}
+						}
+					}
+					CHECK(all_match);
+					CHECK(bitmap.get_true_bit_count() == expected_count);
+				}
+			}
+		}
+	}
+}
+
+TEST_CASE("[BitMap] Packed blit matches independent clipped OR overlay") {
+	const int widths[] = { 3, 8, 17, 33 };
+	const int heights[] = { 2, 9 };
+	for (int width : widths) {
+		for (int height : heights) {
+			Ref<BitMap> source;
+			source.instantiate();
+			source->create(Size2i(width, height));
+			for (int y = 0; y < height; y++) {
+				for (int x = 0; x < width; x++) {
+					if ((x * 5 + y * 11) % 3 == 0) {
+						source->set_bit(x, y, true);
+					}
+				}
+			}
+			const Vector2i offsets[] = {
+				Vector2i(-width, -height), Vector2i(-3, 1),
+				Vector2i(0, 0), Vector2i(1, 2),
+				Vector2i(width - 1, height - 1),
+				Vector2i(width + 4, height + 4),
+			};
+			for (const Vector2i &offset : offsets) {
+				BitMap destination;
+				destination.create(Size2i(width, height));
+				for (int y = 0; y < height; y++) {
+					for (int x = 0; x < width; x++) {
+						if ((x * 7 + y * 2) % 11 == 0) {
+							destination.set_bit(x, y, true);
+						}
+					}
+				}
+				destination.blit(offset, source);
+				int expected_count = 0;
+				bool all_match = true;
+				for (int y = 0; y < height; y++) {
+					for (int x = 0; x < width; x++) {
+						const int sx = x - offset.x;
+						const int sy = y - offset.y;
+						const bool original = (x * 7 + y * 2) % 11 == 0;
+						const bool copied = sx >= 0 && sx < width && sy >= 0 && sy < height &&
+								((sx * 5 + sy * 11) % 3 == 0);
+						const bool expected = original || copied;
+						expected_count += expected;
+						if (destination.get_bit(x, y) != expected) {
+							all_match = false;
+						}
+					}
+				}
+				CHECK(all_match);
+				CHECK(destination.get_true_bit_count() == expected_count);
+			}
+		}
+	}
+}
+
+TEST_CASE("[BitMap] Overlapping self-blit preserves original copy order") {
+	Ref<BitMap> bitmap;
+	bitmap.instantiate();
+	const int width = 7;
+	const int height = 5;
+	bitmap->create(Size2i(width, height));
+	Vector<uint8_t> reference;
+	reference.resize(width * height);
+	uint8_t *bits = reference.ptrw();
+	for (int y = 0; y < height; y++) {
+		for (int x = 0; x < width; x++) {
+			const bool value = (x * 3 + y * 7) % 5 == 0;
+			bits[y * width + x] = value ? 1 : 0;
+			if (value) {
+				bitmap->set_bit(x, y, true);
+			}
+		}
+	}
+	// The previous implementation iterated source columns before rows.
+	for (int x = 0; x < width; x++) {
+		for (int y = 0; y < height; y++) {
+			const int dx = x + 1;
+			const int dy = y + 1;
+			if (dx < width && dy < height && bits[y * width + x]) {
+				bits[dy * width + dx] = 1;
+			}
+		}
+	}
+	bitmap->blit(Vector2i(1, 1), bitmap);
+	for (int y = 0; y < height; y++) {
+		for (int x = 0; x < width; x++) {
+			CHECK(bitmap->get_bit(x, y) == (bits[y * width + x] != 0));
+		}
+	}
+}
+
+TEST_CASE("[BitMap] Packed LA8 alpha thresholds agree with all 256 alpha levels") {
+	// A byte-packed mask must preserve the original floating-point
+	// comparison, including alpha zero, threshold 1 and partial bytes.
+	constexpr int WIDTH = 257;
+	constexpr int HEIGHT = 3;
+	Vector<uint8_t> la8;
+	la8.resize(WIDTH * HEIGHT * 2);
+	uint8_t *bytes = la8.ptrw();
+	for (int i = 0; i < WIDTH * HEIGHT; i++) {
+		bytes[i * 2] = 127;
+		bytes[i * 2 + 1] = uint8_t(i & 255);
+	}
+	const Ref<Image> source = Image::create_from_data(WIDTH, HEIGHT, false, Image::FORMAT_LA8, la8);
+	REQUIRE(source.is_valid());
+
+	const float thresholds[] = { -1.0f, 0.0f, 0.08f, 0.1f, 0.25f, 0.5f, 0.75f, 0.999f, 1.0f, 2.0f };
+	for (float threshold : thresholds) {
+		BitMap map;
+		map.create_from_image_alpha(source, threshold);
+		CHECK(map.get_size() == Size2i(WIDTH, HEIGHT));
+		int expected_count = 0;
+		bool all_pixels_match = true;
+		for (int i = 0; i < WIDTH * HEIGHT; i++) {
+			const int alpha = i & 255;
+			const bool expected = alpha / 255.0 > threshold;
+			expected_count += expected;
+			if (map.get_bit(i % WIDTH, i / WIDTH) != expected) {
+				all_pixels_match = false;
+			}
+		}
+		CHECK(all_pixels_match);
+		CHECK(map.get_true_bit_count() == expected_count);
+	}
+}
+
+TEST_CASE("[BitMap] Full-map byte fill preserves partial-byte padding") {
+	const Size2i dimensions[] = { Size2i(1, 1), Size2i(7, 3),
+		Size2i(9, 7), Size2i(17, 11), Size2i(64, 9) };
+	for (const Size2i &size : dimensions) {
+		BitMap map;
+		map.create(size);
+		const Rect2i full(Point2i(), size);
+		map.set_bit_rect(full, true);
+		CHECK(map.get_true_bit_count() == size.width * size.height);
+		for (int y = 0; y < size.height; y++) {
+			for (int x = 0; x < size.width; x++) {
+				CHECK(map.get_bit(x, y));
+			}
+		}
+		map.set_bit_rect(full, false);
+		CHECK(map.get_true_bit_count() == 0);
+	}
+}
+
+TEST_CASE("[BitMap] Byte-wise blit preserves unaligned source and destination rows") {
+	// Independently verify the packed byte-OR path across different pitches,
+	// clipping, short spans, and offsets on either side of byte boundaries.
+	const int source_widths[] = { 1, 7, 8, 9, 15, 17, 33, 65 };
+	const int source_heights[] = { 1, 3, 9 };
+	const int dest_widths[] = { 1, 5, 8, 9, 17, 32 };
+	const int dest_heights[] = { 1, 5, 11 };
+	for (int sw : source_widths) {
+		for (int sh : source_heights) {
+			Ref<BitMap> source;
+			source.instantiate();
+			source->create(Size2i(sw, sh));
+			for (int y = 0; y < sh; y++) {
+				for (int x = 0; x < sw; x++) {
+					if ((x * 13 + y * 7) % 11 < 5) {
+						source->set_bit(x, y, true);
+					}
+				}
+			}
+			for (int dw : dest_widths) {
+				for (int dh : dest_heights) {
+					const Point2i offsets[] = {
+						Point2i(-sw, -sh), Point2i(-3, 2),
+						Point2i(0, 0), Point2i(1, 1),
+						Point2i(dw - 4, dh - 2),
+						Point2i(dw + 1, dh + 1),
+					};
+					for (const Point2i &offset : offsets) {
+						BitMap dest;
+						dest.create(Size2i(dw, dh));
+						for (int y = 0; y < dh; y++) {
+							for (int x = 0; x < dw; x++) {
+								if ((x * 5 + y * 17) % 13 == 0) {
+									dest.set_bit(x, y, true);
+								}
+							}
+						}
+						dest.blit(offset, source);
+						int expected_count = 0;
+						bool all_match = true;
+						for (int y = 0; y < dh; y++) {
+							for (int x = 0; x < dw; x++) {
+								const int sx = x - offset.x;
+								const int sy = y - offset.y;
+								const bool initial = (x * 5 + y * 17) % 13 == 0;
+								const bool from_source = sx >= 0 && sx < sw && sy >= 0 && sy < sh &&
+										((sx * 13 + sy * 7) % 11 < 5);
+								const bool expected = initial || from_source;
+								expected_count += expected;
+								if (dest.get_bit(x, y) != expected) {
+									all_match = false;
+								}
+							}
+						}
+						CHECK(all_match);
+						CHECK(dest.get_true_bit_count() == expected_count);
+					}
+				}
+			}
+		}
+	}
+}
+
+TEST_CASE("[BitMap] One-pixel grow and shrink match independent four-neighbor reference") {
+	const int widths[] = { 1, 2, 3, 7, 8, 9, 17 };
+	const int heights[] = { 1, 2, 5, 11 };
+	for (int width : widths) {
+		for (int height : heights) {
+			const Rect2i rectangles[] = {
+				Rect2i(0, 0, width, height),
+				Rect2i(-2, -2, width + 4, height + 4),
+				Rect2i(1, 0, width - 1, height),
+				Rect2i(0, 1, width, height - 1),
+				Rect2i(width / 2, height / 2, 1, 1),
+				Rect2i(width, height, 1, 1),
+			};
+			for (const Rect2i &rect : rectangles) {
+				for (int pixels : { -1, 1 }) {
+					BitMap bitmap;
+					bitmap.create(Size2i(width, height));
+					Vector<uint8_t> reference;
+					reference.resize(width * height);
+					uint8_t *values = reference.ptrw();
+					for (int y = 0; y < height; y++) {
+						for (int x = 0; x < width; x++) {
+							const bool filled = (x * 17 + y * 5 + width) % 7 < 3;
+							values[y * width + x] = filled ? 1 : 0;
+							if (filled) {
+								bitmap.set_bit(x, y, true);
+							}
+						}
+					}
+
+					const bool grow = pixels > 0;
+					const Point2i offsets[] = {
+						Point2i(-1, 0), Point2i(1, 0),
+						Point2i(0, -1), Point2i(0, 1),
+					};
+					bool all_match = true;
+					int expected_count = 0;
+					bitmap.grow_mask(pixels, rect);
+					for (int y = 0; y < height; y++) {
+						for (int x = 0; x < width; x++) {
+							bool expected = values[y * width + x] != 0;
+							if (rect.has_point(Point2i(x, y)) && expected != grow) {
+								for (const Point2i &offset : offsets) {
+									const Point2i neighbor = Point2i(x, y) + offset;
+									const bool inside_rect = rect.has_point(neighbor);
+									const bool inside_image = neighbor.x >= 0 && neighbor.x < width &&
+											neighbor.y >= 0 && neighbor.y < height;
+									const bool neighbor_value = inside_image &&
+											values[neighbor.y * width + neighbor.x];
+									if ((!inside_rect && !grow) || (inside_rect && neighbor_value == grow)) {
+										expected = grow;
+										break;
+									}
+								}
+							}
+							expected_count += expected;
+							if (bitmap.get_bit(x, y) != expected) {
+								all_match = false;
+							}
+						}
+					}
+					CHECK(all_match);
+					CHECK(bitmap.get_true_bit_count() == expected_count);
+				}
+			}
+		}
+	}
+}
+
+TEST_CASE("[BitMap] Generic-radius morphology matches independent disk reference") {
+	const int widths[] = { 3, 8, 11, 17 };
+	const int heights[] = { 2, 9 };
+	const int radii[] = { -5, -3, -2, 2, 3, 5 };
+	for (int width : widths) {
+		for (int height : heights) {
+			const Rect2i rectangles[] = {
+				Rect2i(0, 0, width, height),
+				Rect2i(-2, -2, width + 4, height + 4),
+				Rect2i(1, 1, width - 1, height - 1),
+			};
+			for (const Rect2i &rect : rectangles) {
+				for (int pixels : radii) {
+					BitMap bitmap;
+					bitmap.create(Size2i(width, height));
+					Vector<uint8_t> source;
+					source.resize(width * height);
+					uint8_t *reference = source.ptrw();
+					for (int y = 0; y < height; y++) {
+						for (int x = 0; x < width; x++) {
+							const bool value = (x * 11 + y * 7 + width) % 9 < 4;
+							reference[y * width + x] = value ? 1 : 0;
+							if (value) {
+								bitmap.set_bit(x, y, true);
+							}
+						}
+					}
+					bitmap.grow_mask(pixels, rect);
+					const bool grow = pixels > 0;
+					const int radius = Math::abs(pixels);
+					bool all_match = true;
+					int expected_count = 0;
+					for (int y = 0; y < height; y++) {
+						for (int x = 0; x < width; x++) {
+							bool expected = reference[y * width + x] != 0;
+							if (rect.has_point(Point2i(x, y)) && expected != grow) {
+								bool found = false;
+								for (int dy = -radius; dy <= radius && !found; dy++) {
+									for (int dx = -radius; dx <= radius; dx++) {
+										if (dx * dx + dy * dy > radius * radius) {
+											continue;
+										}
+										const Point2i sample(x + dx, y + dy);
+										const bool inside_rect = rect.has_point(sample);
+										if (!inside_rect) {
+											if (!grow) {
+												found = true;
+												break;
+											}
+											continue;
+										}
+										const bool inside_image = sample.x >= 0 && sample.x < width &&
+												sample.y >= 0 && sample.y < height;
+										const bool sample_value = inside_image && reference[sample.y * width + sample.x];
+										if (sample_value == grow) {
+											found = true;
+											break;
+										}
+									}
+								}
+								if (found) {
+									expected = grow;
+								}
+							}
+							expected_count += expected;
+							if (bitmap.get_bit(x, y) != expected) {
+								all_match = false;
+							}
+						}
+					}
+					CHECK(all_match);
+					CHECK(bitmap.get_true_bit_count() == expected_count);
+				}
+			}
+		}
+	}
+}
+
+TEST_CASE("[BitMap] Large morphology radii preserve clipped source and clear semantics") {
+	BitMap bitmap;
+	bitmap.create(Size2i(9, 7));
+	bitmap.set_bit(4, 3, true);
+
+	// Even a giant radius cannot grow from a source outside the supplied
+	// rectangle: the operation is explicitly clipped to that rectangle.
+	bitmap.grow_mask(100, Rect2i(0, 0, 2, 2));
+	CHECK(bitmap.get_true_bit_count() == 1);
+	CHECK(bitmap.get_bit(4, 3));
+
+	bitmap.grow_mask(100, Rect2i(-4, -5, 18, 20));
+	CHECK(bitmap.get_true_bit_count() == 63);
+	bitmap.grow_mask(-100, Rect2i(-4, -5, 18, 20));
+	CHECK(bitmap.get_true_bit_count() == 0);
+
+	// A single seed must fill only the selected sub-rectangle when its
+	// radius spans that region's diagonal.
+	bitmap.set_bit(3, 2, true);
+	bitmap.grow_mask(100, Rect2i(2, 1, 4, 3));
+	CHECK(bitmap.get_true_bit_count() == 12);
+	CHECK(!bitmap.get_bit(1, 1));
+	CHECK(bitmap.get_bit(2, 1));
+	CHECK(bitmap.get_bit(5, 3));
+
+	bitmap.grow_mask(-100, Rect2i(2, 1, 4, 3));
+	CHECK(bitmap.get_true_bit_count() == 0);
+
+	// abs(INT32_MIN) is not representable as signed int.
+	bitmap.set_bit(3, 2, true);
+	ERR_PRINT_OFF
+	bitmap.grow_mask(INT32_MIN, Rect2i(0, 0, 9, 7));
+	ERR_PRINT_ON
+	CHECK(bitmap.get_true_bit_count() == 1);
+}
+
 } // namespace TestBitMap

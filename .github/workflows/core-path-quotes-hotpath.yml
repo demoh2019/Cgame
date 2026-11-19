@@ -1,0 +1,53 @@
+name: Resource path cache and string quoting hotpath
+
+on:
+  push:
+    branches: [develop]
+    paths:
+      - 'core/io/resource.cpp'
+      - 'core/string/ustring.cpp'
+      - 'core/string/ustring.h'
+      - 'tests/core/io/test_resource.cpp'
+      - 'tests/core/string/test_string.cpp'
+      - 'misc/scripts/tests/test_core_path_quotes_hotpath.py'
+      - '.github/workflows/core-path-quotes-hotpath.yml'
+  pull_request:
+    paths:
+      - 'core/io/resource.cpp'
+      - 'core/string/ustring.cpp'
+      - 'core/string/ustring.h'
+      - 'tests/core/io/test_resource.cpp'
+      - 'tests/core/string/test_string.cpp'
+      - 'misc/scripts/tests/test_core_path_quotes_hotpath.py'
+      - '.github/workflows/core-path-quotes-hotpath.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  source-regressions:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - run: python3 -m unittest discover -s misc/scripts/tests -p test_core_path_quotes_hotpath.py -v
+
+  native-regressions:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+      - uses: ./.github/actions/godot-deps
+      - uses: ./.github/actions/godot-build
+        with:
+          platform: linuxbsd
+          target: editor
+          scons-flags: dev_build=yes tests=yes debug_symbols=no module_mono_enabled=no accesskit=no -j2
+      - run: |
+          ./bin/godot.linuxbsd.editor.dev.x86_64 --headless --test --test-case="*[Resource] set_path*"
+          ./bin/godot.linuxbsd.editor.dev.x86_64 --headless --test --test-case="*[String] Quoted strings*"
+          ./bin/godot.linuxbsd.editor.dev.x86_64 --headless --test --test-case="*[String] Path functions*"
+          ./bin/godot.linuxbsd.editor.dev.x86_64 --headless --test --test-case="*[String] Path extraction single-pass regressions*"
+          ./bin/godot.linuxbsd.editor.dev.x86_64 --headless --test --test-case="*[String] Split maxsplit tail hotpath regressions*"

@@ -64,13 +64,17 @@ bool GDScriptDataType::is_type(const Variant &p_variant, bool p_allow_implicit_c
 				Dictionary dictionary = p_variant;
 				if (dictionary.is_typed()) {
 					if (dictionary.is_typed_key()) {
-						GDScriptDataType key = get_container_element_type_or_variant(0);
-						valid = key.is_type_exact(dictionary.get_key_type());
+						// The first slot exists because has_container_element_types()
+						// succeeded. Avoid constructing a temporary GDScriptDataType
+						// (including Ref<Script> refcount churn) on every check.
+						valid = container_element_types[0].is_type_exact(dictionary.get_key_type());
 					}
 
 					if (valid && dictionary.is_typed_value()) {
-						GDScriptDataType value = get_container_element_type_or_variant(1);
-						valid = value.is_type_exact(dictionary.get_value_type());
+						// A missing value slot previously returned a VARIANT data type,
+						// which never matched a concrete ContainerType.
+						valid = container_element_types.size() > 1 &&
+								container_element_types[1].is_type_exact(dictionary.get_value_type());
 					}
 				} else {
 					valid = false;

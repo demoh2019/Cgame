@@ -571,6 +571,11 @@ private:
 
 		GeometryInstanceSurfaceDataCache() :
 				compilation_dirty_element(this), compilation_all_element(this) {}
+
+		// Sort-key equivalence controls whether consecutive surfaces can be drawn as instances.
+		_FORCE_INLINE_ bool can_repeat_with(const GeometryInstanceSurfaceDataCache &p_other) const {
+			return sort.sort_key1 == p_other.sort.sort_key1 && sort.sort_key2 == p_other.sort.sort_key2 && uses_lightmap_specular == p_other.uses_lightmap_specular;
+		}
 	};
 
 	class GeometryInstanceForwardClustered : public RenderGeometryInstanceBase {

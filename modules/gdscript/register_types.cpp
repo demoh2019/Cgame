@@ -51,6 +51,7 @@
 
 #ifdef TESTS_ENABLED
 #include "tests/test_gdscript.h"
+#include "tests/test_script_language_api.h"
 #endif
 
 #include "core/io/file_access.h"
@@ -195,9 +196,10 @@ void uninitialize_gdscript_module(ModuleInitializationLevel p_level) {
 	}
 
 #ifdef TOOLS_ENABLED
-	if (p_level == MODULE_INITIALIZATION_LEVEL_EDITOR) {
+	if (p_level == MODULE_INITIALIZATION_LEVEL_SERVERS) {
 		EditorTranslationParser::get_singleton()->remove_parser(gdscript_translation_parser_plugin, EditorTranslationParser::STANDARD);
 		gdscript_translation_parser_plugin.unref();
+	} else if (p_level == MODULE_INITIALIZATION_LEVEL_EDITOR) {
 #ifndef GDSCRIPT_NO_LSP
 		memdelete(GDScriptLanguageProtocol::get_singleton());
 #endif // GDSCRIPT_NO_LSP

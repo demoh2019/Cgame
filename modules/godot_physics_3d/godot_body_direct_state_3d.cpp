@@ -249,5 +249,5 @@ RequiredResult<PhysicsDirectSpaceState3D> GodotPhysicsDirectBodyState3D::get_spa
 }
 
 real_t GodotPhysicsDirectBodyState3D::get_step() const {
-	return body->get_space()->get_last_step();
+	return body->get_space()->get_full_step();
 }

@@ -293,4 +293,121 @@ TEST_CASE("[Curve3D] Even length tessellation") {
 	CHECK(curve->tessellate_even_length().size() > default_size + 5);
 }
 
+
+TEST_CASE("[Curve3D][Performance] Tessellation preserves order and closed endpoints") {
+	Ref<Curve3D> curve = memnew(Curve3D);
+	curve->add_point(Vector3(0, 0, 0), Vector3(), Vector3(0, 16, 0));
+	curve->add_point(Vector3(10, 0, 0), Vector3(0, 16, 0), Vector3());
+	const PackedVector3Array tess = curve->tessellate(9, 0.5);
+	REQUIRE(tess.size() > 2);
+	CHECK(tess[0] == Vector3(0, 0, 0));
+	CHECK(tess[tess.size() - 1] == Vector3(10, 0, 0));
+	for (int i = 1; i < tess.size(); ++i) {
+		CHECK(tess[i - 1].x < tess[i].x);
+	}
+	curve->set_closed(true);
+	const PackedVector3Array closed_tess = curve->tessellate(9, 0.5);
+	REQUIRE(closed_tess.size() >= tess.size());
+	CHECK(closed_tess[0] == Vector3(0, 0, 0));
+	CHECK(closed_tess[closed_tess.size() - 1] == Vector3(0, 0, 0));
+}
+
+
+TEST_CASE("[Curve3D][Performance] Even length tessellation and baked cache retain endpoints") {
+	Ref<Curve3D> curve = memnew(Curve3D);
+	curve->add_point(Vector3(0, 0, 0), Vector3(), Vector3(0, 18, 0));
+	curve->add_point(Vector3(100, 0, 0), Vector3(0, 18, 0), Vector3());
+	const PackedVector3Array even = curve->tessellate_even_length(10, 2.0);
+	REQUIRE(even.size() > 2);
+	CHECK(even[0] == Vector3(0, 0, 0));
+	CHECK(even[even.size() - 1] == Vector3(100, 0, 0));
+	for (int i = 1; i < even.size(); ++i) {
+		CHECK(even[i - 1].x < even[i].x);
+	}
+	curve->set_bake_interval(2.0);
+	const PackedVector3Array baked = curve->get_baked_points();
+	REQUIRE(baked.size() > 2);
+	CHECK(baked[0] == Vector3(0, 0, 0));
+	CHECK(baked[baked.size() - 1] == Vector3(100, 0, 0));
+}
+
+
+TEST_CASE("[Curve3D] Closest segment projection uses squared length") {
+	Ref<Curve3D> curve = memnew(Curve3D);
+	curve->add_point(Vector3(0, 0, 0));
+	curve->add_point(Vector3(100, 0, 0));
+
+	for (int i = -25; i <= 125; i += 5) {
+		const Vector3 point(i, 19, -7);
+		const real_t clamped = CLAMP((real_t)i, (real_t)0, (real_t)100);
+		CHECK(curve->get_closest_point(point).is_equal_approx(Vector3(clamped, 0, 0)));
+		CHECK(curve->get_closest_offset(point) == doctest::Approx(clamped).epsilon(0.0001));
+	}
+
+	Ref<Curve3D> repeated = memnew(Curve3D);
+	repeated->add_point(Vector3(0, 0, 0));
+	repeated->add_point(Vector3(0, 0, 0));
+	repeated->add_point(Vector3(20, 0, 0));
+	const Vector3 closest = repeated->get_closest_point(Vector3(5, 2, 3));
+	CHECK(Math::is_finite(closest.x));
+	CHECK(Math::is_finite(closest.y));
+	CHECK(Math::is_finite(closest.z));
+	CHECK(Math::is_finite(repeated->get_closest_offset(Vector3(5, 2, 3))));
+}
+
+
+TEST_CASE("[Curve3D][Performance] Recursive midpoint reuse preserves closed and baked paths") {
+	Ref<Curve3D> curve = memnew(Curve3D);
+	curve->add_point(Vector3(0, 0, 0), Vector3(), Vector3(4, 18, 3));
+	curve->add_point(Vector3(12, -3, 8), Vector3(-6, 9, 1), Vector3(6, -18, -2));
+	curve->add_point(Vector3(25, 4, 0), Vector3(-4, -12, 2), Vector3());
+	const PackedVector3Array adaptive = curve->tessellate(9, 0.5);
+	const PackedVector3Array even = curve->tessellate_even_length(10, 1.0);
+	REQUIRE(adaptive.size() > 3);
+	REQUIRE(even.size() > 3);
+	CHECK(adaptive[0] == Vector3(0, 0, 0));
+	CHECK(adaptive[adaptive.size() - 1] == Vector3(25, 4, 0));
+	CHECK(even[0] == Vector3(0, 0, 0));
+	CHECK(even[even.size() - 1] == Vector3(25, 4, 0));
+	curve->set_closed(true);
+	const PackedVector3Array closed = curve->tessellate(9, 0.5);
+	REQUIRE(closed.size() > adaptive.size());
+	CHECK(closed[0] == closed[closed.size() - 1]);
+	curve->set_bake_interval(1.0);
+	const PackedVector3Array baked = curve->get_baked_points();
+	REQUIRE(baked.size() > 3);
+	CHECK(baked[0] == baked[baked.size() - 1]);
+}
+
+
+TEST_CASE("[Curve3D] Baked interval lookup preserves every sample boundary") {
+	Ref<Curve3D> curve = memnew(Curve3D);
+	curve->set_bake_interval(1.5);
+	curve->set_up_vector_enabled(false);
+	curve->add_point(Vector3(0, 0, 0));
+	curve->add_point(Vector3(100, 25, -50));
+	const PackedVector3Array points = curve->get_baked_points();
+	REQUIRE(points.size() > 16);
+
+	real_t offset = 0;
+	for (int i = 0; i < points.size(); i++) {
+		if (i != 0) {
+			offset += points[i - 1].distance_to(points[i]);
+		}
+		CHECK((curve->sample_baked(offset) - points[i]).length() < real_t(0.002));
+	}
+	CHECK(curve->sample_baked(-100).is_equal_approx(points[0]));
+	CHECK(curve->sample_baked(offset + 100).is_equal_approx(points[points.size() - 1]));
+}
+
+
+TEST_CASE("[Curve3D] Squared chord threshold matches zero and negative segment tolerances") {
+	Ref<Curve3D> curve = memnew(Curve3D);
+	curve->add_point(Vector3(0, 0, 0));
+	curve->add_point(Vector3(8, 0, 0));
+	CHECK(curve->tessellate_even_length(3, 1000.0).size() == 2);
+	CHECK(curve->tessellate_even_length(3, 0.0).size() == 9);
+	CHECK(curve->tessellate_even_length(3, -1.0).size() == 9);
+}
+
 } // namespace TestCurve3D

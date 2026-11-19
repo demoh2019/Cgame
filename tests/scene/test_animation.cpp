@@ -308,4 +308,96 @@ TEST_CASE("[Animation] Create Bezier track") {
 	ERR_PRINT_ON;
 }
 
+
+TEST_CASE("[Animation][Performance] Key ranges on long tracks match linear inclusive/exclusive scan") {
+	Ref<Animation> animation = memnew(Animation);
+	animation->set_length(5.0);
+	const int track = animation->add_track(Animation::TYPE_VALUE);
+	const int count = 2049;
+	for (int i = 0; i < count; i++) {
+		// Binary-exact key times avoid floating point accumulation drift.
+		const double time = double(i) / 512.0;
+		animation->track_insert_key(track, time, i);
+	}
+	REQUIRE(animation->track_get_key_count(track) == count);
+
+	// Reference each range independently against the old linear predicate.
+	auto check_range = [&](double start, double end) {
+		LocalVector<int> actual;
+		animation->track_get_key_indices_in_range(track, end, end - start, 0.0, 5.0, &actual);
+		LocalVector<int> expected;
+		const bool backward = start > end;
+		const double from = MIN(start, end);
+		const double to = MAX(start, end);
+		if (!backward) {
+			for (int i = 0; i < count; i++) {
+				const double time = animation->track_get_key_time(track, i);
+				if ((time < from || Math::is_equal_approx(time, from)) ||
+						(time > to && !Math::is_equal_approx(time, to))) {
+					continue;
+				}
+				expected.push_back(i);
+			}
+		} else {
+			for (int i = count - 1; i >= 0; i--) {
+				const double time = animation->track_get_key_time(track, i);
+				if ((time < from && !Math::is_equal_approx(time, from)) ||
+						(time > to || Math::is_equal_approx(time, to))) {
+					continue;
+				}
+				expected.push_back(i);
+			}
+		}
+		REQUIRE(actual.size() == expected.size());
+		for (uint32_t i = 0; i < actual.size(); i++) {
+			CHECK(actual[i] == expected[i]);
+		}
+	};
+
+	check_range(0, 4.0);
+	check_range(4.0, 0);
+	check_range(1.0, 1.25);
+	check_range(1.25, 1.0);
+	check_range(2.0, 2.0 + 0.001);
+	check_range(2.0 + 0.001, 2.0);
+	check_range(4.0 - 0.00000001, 4.0);
+	check_range(4.0, 4.0 - 0.00000001);
+	check_range(0.5, 0.500000001);
+	check_range(0.500000001, 0.5);
+
+	// Deterministic varied-width intervals exercise empty, singleton and
+	// dense outputs throughout the long track, in both directions.
+	for (int test = 0; test < 96; test++) {
+		double a = double((test * 631) % 2048) / 512.0;
+		double b = double((test * 97 + 13) % 2048) / 512.0;
+		if (a == b) {
+			b += 0.0001;
+		}
+		check_range(a, b);
+		check_range(b, a);
+	}
+}
+
+TEST_CASE("[Animation][Performance] Short key tracks retain boundary behavior") {
+	Ref<Animation> animation = memnew(Animation);
+	animation->set_length(3.0);
+	const int track = animation->add_track(Animation::TYPE_VALUE);
+	animation->track_insert_key(track, 0.5, 10);
+	animation->track_insert_key(track, 1.0, 20);
+	animation->track_insert_key(track, 1.5, 30);
+	LocalVector<int> indices;
+	animation->track_get_key_indices_in_range(track, 1.0, 0.5, 0, 3, &indices);
+	REQUIRE(indices.size() == 1);
+	CHECK(indices[0] == 1);
+
+	indices.clear();
+	animation->track_get_key_indices_in_range(track, 0.5, -0.5, 0, 3, &indices);
+	REQUIRE(indices.size() == 1);
+	CHECK(indices[0] == 0);
+
+	indices.clear();
+	animation->track_get_key_indices_in_range(track, 1.0, 0, 0, 3, &indices);
+	CHECK(indices.is_empty());
+}
+
 } // namespace TestAnimation

@@ -1,0 +1,50 @@
+name: Native JSON known-size container regressions
+
+on:
+  pull_request:
+    paths:
+      - 'core/io/json.cpp'
+      - 'core/io/ip.cpp'
+      - 'core/extension/gdextension_manager.cpp'
+      - 'core/extension/gdextension.cpp'
+      - 'core/extension/gdextension_library_loader.cpp'
+      - 'core/input/shortcut.cpp'
+      - 'tests/core/io/test_json.cpp'
+      - 'tests/core/input/test_shortcut.cpp'
+      - '.github/workflows/native-json-container-fastpaths.yml'
+  push:
+    branches: [develop]
+    paths:
+      - 'core/io/json.cpp'
+      - 'core/io/ip.cpp'
+      - 'core/extension/gdextension_manager.cpp'
+      - 'core/extension/gdextension.cpp'
+      - 'core/extension/gdextension_library_loader.cpp'
+      - 'core/input/shortcut.cpp'
+      - 'tests/core/io/test_json.cpp'
+      - 'tests/core/input/test_shortcut.cpp'
+      - '.github/workflows/native-json-container-fastpaths.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  native-core-preallocation:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+      - uses: ./.github/actions/godot-deps
+      - name: Compile editor and native regression tests
+        uses: ./.github/actions/godot-build
+        with:
+          platform: linuxbsd
+          target: editor
+          scons-flags: dev_build=yes tests=yes debug_symbols=no module_mono_enabled=no module_text_server_fb_enabled=yes accesskit=no -j2
+      - name: Validate packed-array conversion and shortcut event lists
+        run: |
+          ./bin/godot.linuxbsd.editor.dev.x86_64 --headless --test --test-case="*[JSON] Native serialization preserves large packed arrays and dictionaries*"
+          ./bin/godot.linuxbsd.editor.dev.x86_64 --headless --test --test-case="*[Shortcut] Pre-sized event list preserves order when growing and shrinking*"

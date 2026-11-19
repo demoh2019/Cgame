@@ -56,7 +56,6 @@ Dependency::~Dependency() {
 		WARN_PRINT("Leaked instance dependency: Bug - did not call instance_notify_deleted when freeing.");
 	}
 #endif
-	// Always unlink from trackers: release builds must not leave dangling pointers.
 	for (const KeyValue<DependencyTracker *, uint32_t> &E : instances) {
 		E.key->dependencies.erase(this);
 	}

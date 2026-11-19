@@ -1,0 +1,58 @@
+name: Upstream backport regression tests
+
+on:
+  pull_request:
+    paths:
+      - "editor/script/find_in_files.cpp"
+      - "drivers/gles3/rasterizer_gles3.cpp"
+      - "doc/classes/TextureRect.xml"
+      - "misc/scripts/tests/test_upstream_backports.py"
+      - "misc/scripts/tests/test_upstream_backports_cpp.py"
+      - "core/string/string_name.cpp"
+      - "modules/gdscript/register_types.cpp"
+      - "drivers/vulkan/rendering_device_driver_vulkan.cpp"
+      - "tests/core/string/test_string_name.cpp"
+      - "misc/scripts/tests/test_upstream_backports_lifecycle.py"
+      - "scene/gui/control.cpp"
+      - "tests/scene/test_control.cpp"
+      - "tests/scene/test_label.cpp"
+      - "misc/scripts/tests/test_upstream_editor_lifecycle.py"
+      - ".github/workflows/upstream-backport-regressions.yml"
+  push:
+    branches: [develop]
+    paths:
+      - "editor/script/find_in_files.cpp"
+      - "drivers/gles3/rasterizer_gles3.cpp"
+      - "doc/classes/TextureRect.xml"
+      - "misc/scripts/tests/test_upstream_backports.py"
+      - "misc/scripts/tests/test_upstream_backports_cpp.py"
+      - "core/string/string_name.cpp"
+      - "modules/gdscript/register_types.cpp"
+      - "drivers/vulkan/rendering_device_driver_vulkan.cpp"
+      - "tests/core/string/test_string_name.cpp"
+      - "misc/scripts/tests/test_upstream_backports_lifecycle.py"
+      - "scene/gui/control.cpp"
+      - "tests/scene/test_control.cpp"
+      - "tests/scene/test_label.cpp"
+      - "misc/scripts/tests/test_upstream_editor_lifecycle.py"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  backport-regressions:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - name: Check Python syntax
+        run: python3 -m py_compile misc/scripts/tests/test_upstream_backports.py misc/scripts/tests/test_upstream_backports_lifecycle.py misc/scripts/tests/test_upstream_editor_lifecycle.py
+      - name: Run editor, platform, lifecycle and Vulkan cache contracts
+        run: python3 -m unittest discover -s misc/scripts/tests -p 'test_upstream_backports*.py' -v
+      - name: Run Control and GDScript C++ harnesses (GCC and Clang)
+        run: |
+          CXX=g++ python3 -m unittest discover -s misc/scripts/tests -p 'test_upstream_editor_lifecycle.py' -v
+          CXX=clang++ python3 -m unittest discover -s misc/scripts/tests -p 'test_upstream_editor_lifecycle.py' -v
+      - name: Run existing asset audit regressions
+        run: python3 -m unittest discover -s misc/scripts/tests -p 'test_project_asset_audit.py' -v

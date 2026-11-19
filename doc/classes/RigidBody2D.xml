@@ -234,6 +234,18 @@
 		<member name="lock_rotation" type="bool" setter="set_lock_rotation_enabled" getter="is_lock_rotation_enabled" default="false">
 			If [code]true[/code], the body cannot rotate. Gravity and forces only apply linear movement.
 		</member>
+		<member name="max_angular_velocity" type="float" setter="set_max_angular_velocity" getter="get_max_angular_velocity" default="0.0">
+			Maximum angular speed of this body in radians per second (similar to Unity's [code]Rigidbody.maxAngularVelocity[/code]). [code]0[/code] uses [member ProjectSettings.physics/2d/solver/max_angular_velocity].
+			[b]Note:[/b] Only supported by Godot Physics.
+		</member>
+		<member name="max_depenetration_velocity" type="float" setter="set_max_depenetration_velocity" getter="get_max_depenetration_velocity" default="0.0">
+			Maximum speed (in px/s) at which this body is pushed out of overlapping bodies (similar to Unity's [code]Rigidbody.maxDepenetrationVelocity[/code]). A low value stops embedded bodies from being launched out of each other. For a contact between two bodies with limits, the smaller limit applies. [code]0[/code] uses [member ProjectSettings.physics/2d/solver/max_contact_push_speed].
+			[b]Note:[/b] Only supported by Godot Physics.
+		</member>
+		<member name="max_linear_velocity" type="float" setter="set_max_linear_velocity" getter="get_max_linear_velocity" default="0.0">
+			Maximum linear speed of this body in px/s (similar to Unity's [code]Rigidbody.maxLinearVelocity[/code]). [code]0[/code] uses [member ProjectSettings.physics/2d/solver/max_linear_velocity].
+			[b]Note:[/b] Only supported by Godot Physics.
+		</member>
 		<member name="mass" type="float" setter="set_mass" getter="get_mass" default="1.0">
 			The body's mass.
 		</member>
@@ -247,6 +259,10 @@
 		</member>
 		<member name="sleeping" type="bool" setter="set_sleeping" getter="is_sleeping" default="false">
 			If [code]true[/code], the body will not move and will not calculate forces until woken up by another body through, for example, a collision, or by using the [method apply_impulse] or [method apply_force] methods.
+		</member>
+		<member name="solver_priority" type="int" setter="set_solver_priority" getter="get_solver_priority" default="1">
+			How many times more solver iterations the contacts of this body receive (similar to Unity's [code]Rigidbody.solverIterations[/code]). A value of [code]4[/code] solves every contact that touches this body four times as often per physics step, which makes stacks, wheels or heavy loads more rigid at a proportional cost. Contacts between two bodies use the larger of their values. Joints have their own priority.
+			[b]Note:[/b] Only supported by Godot Physics.
 		</member>
 	</members>
 	<signals>

@@ -436,7 +436,6 @@ TEST_CASE("[Quaternion] Normalize") {
 	ERR_PRINT_ON;
 }
 
-
 TEST_CASE("[Quaternion] Normalize preserves valid rotations and guards non-finite components") {
 	ERR_PRINT_OFF;
 	Quaternion value(1, 2, 3, 4);

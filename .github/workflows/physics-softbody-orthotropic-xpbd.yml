@@ -1,0 +1,51 @@
+name: SoftBody3D orthotropic XPBD edge material contracts
+
+on:
+  pull_request:
+    paths:
+      - 'servers/physics_xpbd_anisotropic_stretch.h'
+      - 'servers/physics_3d/physics_server_3d.cpp'
+      - 'modules/godot_physics_3d/godot_space_3d.h'
+      - 'modules/godot_physics_3d/godot_space_3d.cpp'
+      - 'modules/godot_physics_3d/godot_soft_body_3d.cpp'
+      - 'tests/servers/test_physics_xpbd_anisotropic_stretch.cpp'
+      - 'tests/stress/test_physics_xpbd_anisotropic_stretch.py'
+      - 'tests/stress/test_physics_xpbd_tension_hardening.py'
+      - 'tests/stress/test_physics_softbody_nonlinear_materials.py'
+      - '.github/workflows/physics-softbody-orthotropic-xpbd.yml'
+  push:
+    branches: [develop]
+    paths:
+      - 'servers/physics_xpbd_anisotropic_stretch.h'
+      - 'servers/physics_3d/physics_server_3d.cpp'
+      - 'modules/godot_physics_3d/godot_space_3d.h'
+      - 'modules/godot_physics_3d/godot_space_3d.cpp'
+      - 'modules/godot_physics_3d/godot_soft_body_3d.cpp'
+      - 'tests/servers/test_physics_xpbd_anisotropic_stretch.cpp'
+      - 'tests/stress/test_physics_xpbd_anisotropic_stretch.py'
+      - 'tests/stress/test_physics_xpbd_tension_hardening.py'
+      - 'tests/stress/test_physics_softbody_nonlinear_materials.py'
+      - '.github/workflows/physics-softbody-orthotropic-xpbd.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: physics-orthotropic-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  numerical-contracts:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - name: Verify Python syntax
+        run: |
+          python3 -m py_compile tests/stress/test_physics_xpbd_anisotropic_stretch.py tests/stress/test_physics_xpbd_tension_hardening.py tests/stress/test_physics_softbody_nonlinear_materials.py
+      - name: Test fiber direction, rotations, stiffness, legacy solver source wiring
+        run: |
+          python3 -m unittest discover -s tests/stress -p 'test_physics_xpbd_anisotropic_stretch.py' -v
+          python3 -m unittest discover -s tests/stress -p 'test_physics_xpbd_tension_hardening.py' -v
+          python3 -m unittest discover -s tests/stress -p 'test_physics_softbody_nonlinear_materials.py' -v

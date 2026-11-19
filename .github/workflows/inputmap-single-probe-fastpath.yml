@@ -1,0 +1,34 @@
+name: InputMap Single Probe Action Lookups
+on:
+  pull_request:
+    paths:
+      - "core/input/input_map.cpp"
+      - "tests/core/input/test_input_event.cpp"
+      - ".github/workflows/inputmap-single-probe-fastpath.yml"
+  workflow_dispatch:
+
+jobs:
+  native-tests:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          submodules: recursive
+      - uses: ./.github/actions/godot-cache-restore
+        with:
+          cache-name: linux-inputmap-single-probe
+        continue-on-error: true
+      - uses: ./.github/actions/godot-deps
+      - name: Compile InputMap C++ regression tests
+        uses: ./.github/actions/godot-build
+        with:
+          platform: linuxbsd
+          target: editor
+          scons-flags: tests=yes module_text_server_fb_enabled=yes -j2
+      - uses: ./.github/actions/godot-cache-save
+        with:
+          cache-name: linux-inputmap-single-probe
+        continue-on-error: true
+      - name: Verify action lookup and device matching
+        run: ./bin/godot.linuxbsd.editor.x86_64 --headless --test --test-case="*[InputMapSingleProbe]*"

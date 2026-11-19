@@ -1,0 +1,33 @@
+name: Vulkan pipeline cache size regression
+
+on:
+  pull_request:
+    branches: [develop]
+    paths:
+      - "drivers/vulkan/rendering_device_driver_vulkan.cpp"
+      - "misc/scripts/tests/test_vulkan_pipeline_cache_resize.py"
+      - ".github/workflows/vulkan-pipeline-cache-regression.yml"
+  push:
+    branches: [develop]
+    paths:
+      - "drivers/vulkan/rendering_device_driver_vulkan.cpp"
+      - "misc/scripts/tests/test_vulkan_pipeline_cache_resize.py"
+      - ".github/workflows/vulkan-pipeline-cache-regression.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  real-serializer-mock-vulkan:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        cxx: [g++, clang++]
+    steps:
+      - uses: actions/checkout@v4
+      - name: Compile and execute upstream pipeline-cache regression cases
+        env:
+          CXX: ${{ matrix.cxx }}
+        run: python3 -m unittest discover -s misc/scripts/tests -p test_vulkan_pipeline_cache_resize.py -v

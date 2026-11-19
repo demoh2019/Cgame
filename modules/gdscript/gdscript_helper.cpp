@@ -41,7 +41,7 @@ Variant construct_empty_value_for_data_type(const GDScriptDataType &p_data_type)
 			// Typed array.
 			if (p_data_type.has_container_element_type(0)) {
 				const GDScriptDataType &element_type = p_data_type.get_container_element_type(0);
-				array.set_typed(element_type.builtin_type, element_type.native_type, element_type.script_type);
+				array.set_typed(element_type.builtin_type, element_type.native_type, Ref<Script>(element_type.script_type));
 			}
 
 			return array;
@@ -51,7 +51,7 @@ Variant construct_empty_value_for_data_type(const GDScriptDataType &p_data_type)
 			if (p_data_type.has_container_element_types()) {
 				const GDScriptDataType &key_type = p_data_type.get_container_element_type_or_variant(0);
 				const GDScriptDataType &value_type = p_data_type.get_container_element_type_or_variant(1);
-				dict.set_typed(key_type.builtin_type, key_type.native_type, key_type.script_type, value_type.builtin_type, value_type.native_type, value_type.script_type);
+				dict.set_typed(key_type.builtin_type, key_type.native_type, Ref<Script>(key_type.script_type), value_type.builtin_type, value_type.native_type, Ref<Script>(value_type.script_type));
 			}
 
 			return dict;

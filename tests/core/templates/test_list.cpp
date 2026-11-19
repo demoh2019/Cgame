@@ -55,6 +55,32 @@ TEST_CASE("[List] List initialization") {
 	CHECK(list.get(4) == 4);
 }
 
+TEST_CASE("[List] Random access from both ends preserves element identity") {
+	for (int count : { 1, 2, 3, 16, 17, 257 }) {
+		List<int> list;
+		for (int i = 0; i < count; ++i) {
+			list.push_back(i * 7);
+		}
+		const List<int> &const_list = list;
+		const List<int>::Element *from_front = list.front();
+		for (int i = 0; i < count; ++i) {
+			CHECK(list.get(i) == i * 7);
+			CHECK(const_list.get(i) == i * 7);
+			CHECK(&list.get(i) == &from_front->get());
+			CHECK(&const_list.get(i) == &from_front->get());
+			from_front = from_front->next();
+		}
+		CHECK(from_front == nullptr);
+		// Last element must still be accessed by reference, not by copy.
+		list.get(count - 1) = -9;
+		CHECK(const_list.get(count - 1) == -9);
+		list.pop_back();
+		if (count > 1) {
+			CHECK(list.get(count - 2) == (count - 2) * 7);
+		}
+	}
+}
+
 TEST_CASE("[List] Push/pop back") {
 	List<String> list;
 
