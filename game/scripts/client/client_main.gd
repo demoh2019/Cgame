@@ -283,9 +283,11 @@ func _sync_barricades() -> void:
 		structure.position = point
 		var visual: MeshInstance3D = structure.get_node("Body")
 		var health_fraction := clampf(float(wall["hp"]) / 120.0, 0.0, 1.0)
-		var material := StandardMaterial3D.new()
+		var material: StandardMaterial3D = visual.material_override
+		if material == null or material == _materials.get(str(Color(0.57, 0.40, 0.23))):
+			material = StandardMaterial3D.new()
+			visual.material_override = material
 		material.albedo_color = Color(0.27, 0.20, 0.17).lerp(Color(0.64, 0.48, 0.3), health_fraction)
-		visual.material_override = material
 	for id in _barricade_bodies.keys():
 		if not active.has(id):
 			_barricade_bodies[id].queue_free()
