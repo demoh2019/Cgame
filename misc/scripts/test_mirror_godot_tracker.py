@@ -25,6 +25,7 @@ class FakeAPI:
         self.issues_enabled = issues_enabled
         self.writes = []
         self.next_num = 50
+        self.live_states = {}
 
     def list_pages(self, endpoint, *, params=None):
         from urllib.parse import urlencode
@@ -43,7 +44,13 @@ class FakeAPI:
             from urllib.parse import parse_qs
             params = parse_qs(path.split("?", 1)[1])
             page = int(params["page"][0]); per_page = int(params["per_page"][0])
-            return self.source[(page - 1) * per_page:page * per_page]
+            state = params.get("state", ["all"])[0]
+            matching = [obj for obj in self.source if state == "all" or obj["state"] == state]
+            return matching[(page - 1) * per_page:page * per_page]
+        if method == "GET" and path.startswith("/repos/godotengine/godot/issues/"):
+            number = int(path.rsplit("/", 1)[1])
+            original = next(obj for obj in self.source if obj["number"] == number)
+            return {**original, "state": self.live_states.get(number, original["state"])}
         if method == "GET" and path.startswith("/repos/demoh2019/godot/issues?"):
             from urllib.parse import parse_qs
             params = parse_qs(path.split("?", 1)[1])
@@ -77,8 +84,9 @@ class MirrorTests(unittest.TestCase):
         self.db.close()
         self.tmp.cleanup()
 
-    def test_scan_distinguishes_prs_and_issues(self):
-        api = FakeAPI([issue(1), issue(2, kind="pr", state="closed"), issue(3)])
+    def test_scan_distinguishes_only_open_prs_and_issues(self):
+        api = FakeAPI([issue(1), issue(2, kind="pr"), issue(3),
+                       issue(4, kind="pr", state="closed"), issue(5, state="closed")])
         result = m.scan(api, self.db)
         self.assertEqual((result["issues"], result["prs"]), (2, 1))
         self.assertEqual(result["records_seen"], 3)
@@ -111,27 +119,26 @@ class MirrorTests(unittest.TestCase):
             m.synchronize(api, self.db, apply=True)
         self.assertEqual(api.writes, [])
 
-    def test_import_issue_preserves_attribution_and_state(self):
-        api = FakeAPI([issue(8, state="closed", author="some-user")])
+    def test_import_open_issue_preserves_attribution_without_closing(self):
+        api = FakeAPI([issue(8, state="open", author="some-user")])
         m.scan(api, self.db)
         out = m.synchronize(api, self.db, apply=True)
         self.assertEqual(out["created_issues"], 1)
-        self.assertEqual(len(api.writes), 2)
+        self.assertEqual(len(api.writes), 1)
         self.assertIn("Author: @some-user", api.writes[0][2]["body"])
         self.assertIn("godot-upstream-mirror kind=issue number=8", api.writes[0][2]["body"])
         self.assertIn("Labels: bug", api.writes[0][2]["body"])
-        self.assertEqual(api.writes[1][2], {"state": "closed"})
+        self.assertEqual(api.existing[0]["state"], "open")
         self.assertEqual(m.synchronize(api, self.db, apply=True)["created_issues"], 0)
 
-    def test_pr_archive_is_not_pretended_to_be_real_pr(self):
+    def test_closed_prs_are_not_archived_as_issues(self):
         api = FakeAPI([issue(4, kind="pr", state="closed")])
         m.scan(api, self.db)
         out = m.synchronize(api, self.db, kind="prs", apply=True)
+        self.assertEqual(out["candidates"], 0)
         self.assertEqual(out["created_prs"], 0)
-        self.assertEqual(out["created_issues"], 1)
-        self.assertIn("[Upstream PR] #4:", api.writes[0][2]["title"])
-        self.assertIn("cannot be re-created", api.writes[0][2]["body"])
-        self.assertIn("godot-upstream-mirror kind=pr number=4", api.writes[0][2]["body"])
+        self.assertEqual(out["created_issues"], 0)
+        self.assertEqual(api.writes, [])
 
     def test_deduplication_from_existing_marker_survives_db_loss(self):
         original = issue(123)
@@ -155,10 +162,10 @@ class MirrorTests(unittest.TestCase):
         self.assertEqual(result["candidates"], 0)
         self.assertEqual(api.writes, [])
 
-    def test_skip_closed_prs_gate_allows_open_only_with_disabled_issues(self):
+    def test_closed_prs_are_ignored_even_when_issues_feature_disabled(self):
         api = FakeAPI([issue(10, kind="pr", state="closed")], issues_enabled=False)
         m.scan(api, self.db)
-        res = m.synchronize(api, self.db, kind="prs", skip_closed_prs=True, apply=True)
+        res = m.synchronize(api, self.db, kind="prs", apply=True)
         self.assertEqual(res["candidates"], 0)
         self.assertEqual(api.writes, [])
 
@@ -205,37 +212,65 @@ class MirrorTests(unittest.TestCase):
         self.assertEqual(m.synchronize(api, self.db, kind="issues", limit=1, apply=True)["created_issues"], 1)
         self.assertEqual(m.synchronize(api, self.db, kind="issues", limit=1, apply=True)["created_issues"], 0)
 
-    def test_closure_patch_failure_is_recovered_without_duplicate(self):
-        class FlakyAPI(FakeAPI):
-            failures_left = 1
-            def request(self, method, path, payload=None):
-                if method == "PATCH" and self.failures_left:
-                    self.failures_left -= 1
-                    raise m.ApiError(503, "transient backend failure")
-                return super().request(method, path, payload)
-        api = FlakyAPI([issue(77, state="closed")])
+    def test_issue_closed_after_scan_is_skipped_before_writes(self):
+        api = FakeAPI([issue(77)])
         m.scan(api, self.db)
-        with self.assertRaises(m.ApiError):
-            m.synchronize(api, self.db, apply=True)
-        self.assertEqual(len(api.existing), 1)
-        self.assertEqual(self.db.execute("SELECT COUNT(*) FROM pending_closures").fetchone()[0], 1)
-        self.assertEqual(self.db.execute("SELECT COUNT(*) FROM mirrored").fetchone()[0], 1)
-        retry = m.synchronize(api, self.db, apply=True)
-        self.assertEqual(retry["candidates"], 0)
-        self.assertEqual(len(api.existing), 1)
-        self.assertEqual(api.existing[0]["state"], "closed")
-        self.assertEqual(self.db.execute("SELECT COUNT(*) FROM pending_closures").fetchone()[0], 0)
-
-    def test_reconcile_mirrored_but_open_target(self):
-        src = issue(79, state="closed")
-        target = {"number": 87, "title": "existing", "html_url": "https://github.com/demoh2019/godot/issues/87",
-                  "body": m.provenance_body(src, "issue"), "state": "open"}
-        api = FakeAPI([src], existing=[target])
-        m.scan(api, self.db)
+        api.live_states[77] = "closed"
         out = m.synchronize(api, self.db, apply=True)
-        self.assertEqual(out["candidates"], 0)
-        self.assertEqual(api.existing[0]["state"], "closed")
-        self.assertEqual([op[0] for op in api.writes], ["PATCH"])
+        self.assertEqual(out["skipped_now_closed"], 1)
+        self.assertEqual(out["created_issues"], 0)
+        self.assertEqual(api.writes, [])
+        self.assertEqual(self.db.execute("SELECT state FROM source_records WHERE number=77").fetchone()[0], "closed")
+        self.assertEqual(m.synchronize(api, self.db, apply=False)["candidates"], 0)
+
+    def test_legacy_pending_closures_are_not_executed(self):
+        api = FakeAPI([issue(79)])
+        m.scan(api, self.db)
+        self.db.execute("INSERT INTO pending_closures(kind,number,dest_number) VALUES('issue',79,600)")
+        self.db.commit()
+        out = m.synchronize(api, self.db, apply=True)
+        self.assertEqual(out["created_issues"], 1)
+        self.assertTrue(all(method != "PATCH" for method, _, _ in api.writes))
+
+    def test_stale_legacy_closed_inventory_is_not_imported(self):
+        api = FakeAPI([issue(91)])
+        m.scan(api, self.db)
+        self.db.execute("INSERT INTO source_records(kind,number,title,state,raw) VALUES(?,?,?,?,?)",
+                        ("pr", 92, "old closed PR", "closed", json.dumps(issue(92, kind="pr", state="closed"))))
+        self.db.commit()
+        self.assertEqual(m.synchronize(api, self.db, apply=False)["candidates"], 1)
+
+    def test_real_open_pr_requires_explicit_replay(self):
+        api = FakeAPI([issue(100, kind="pr")], issues_enabled=False)
+        m.scan(api, self.db)
+        with self.assertRaisesRegex(m.MirrorError, "--replay-open-prs"):
+            m.synchronize(api, self.db, kind="prs", apply=True)
+        self.assertEqual(api.writes, [])
+
+    def test_open_pr_creates_actual_draft_not_issue(self):
+        src = issue(101, kind="pr")
+        api = FakeAPI([src], issues_enabled=False)
+        m.scan(api, self.db)
+        created = {"number": 230, "html_url": "https://github.com/demoh2019/godot/pull/230"}
+        with patch.object(m, "create_code_pr", return_value=created) as fn:
+            out = m.synchronize(api, self.db, kind="prs", apply=True,
+                                replay_open_prs=True, git_root=Path("/source"))
+        self.assertEqual(out["created_prs"], 1)
+        self.assertEqual(out["created_issues"], 0)
+        self.assertEqual(self.db.execute("SELECT dest_kind FROM mirrored WHERE number=101").fetchone()[0], "pr")
+        self.assertEqual(api.writes, [])
+        fn.assert_called_once()
+
+    def test_open_pr_closed_after_scan_is_not_replayed(self):
+        api = FakeAPI([issue(102, kind="pr")], issues_enabled=False)
+        m.scan(api, self.db)
+        api.live_states[102] = "closed"
+        with patch.object(m, "create_code_pr") as fn:
+            out = m.synchronize(api, self.db, kind="prs", apply=True,
+                                replay_open_prs=True, git_root=Path("/source"))
+        self.assertEqual(out["skipped_now_closed"], 1)
+        self.assertEqual(out["created_prs"], 0)
+        fn.assert_not_called()
 
     def test_post_server_error_is_not_retried(self):
         from urllib.error import HTTPError
@@ -263,6 +298,25 @@ class MirrorTests(unittest.TestCase):
         result = m.scan(api, self.db, reset=True)
         self.assertEqual(result["issues"], 2)
         self.assertEqual(result["records_seen"], 2)
+
+    def test_open_scan_reset_prunes_closed_and_old_records(self):
+        api = FakeAPI([issue(1), issue(2, kind="pr")])
+        m.scan(api, self.db)
+        api.source[0]["state"] = "closed"
+        result = m.scan(api, self.db, reset=True)
+        self.assertEqual((result["issues"], result["prs"]), (0, 1))
+        self.assertEqual(m.meta_get(self.db, "scan_mode", ""), "open-v1")
+
+    def test_migration_from_old_scan_mode_discards_closed_inventory(self):
+        old = issue(200, state="closed")
+        self.db.execute("INSERT INTO source_records(kind,number,title,state,raw) VALUES(?,?,?,?,?)",
+                        ("issue", 200, old["title"], "closed", json.dumps(old)))
+        self.db.execute("INSERT INTO meta(key,value) VALUES('scan_next_page','999')")
+        self.db.commit()
+        result = m.scan(FakeAPI([issue(1)]), self.db)
+        self.assertEqual(result["issues"], 1)
+        self.assertEqual(result["next_page"], 1)
+        self.assertEqual(self.db.execute("SELECT number FROM source_records").fetchone()[0], 1)
 
 
 if __name__ == "__main__":
