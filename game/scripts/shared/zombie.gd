@@ -211,6 +211,25 @@ func receive_pack_alert(peer_id: int, players: Dictionary) -> bool:
 	return true
 
 
+## An unattended infected may investigate a thrown clattering lure.
+## This never steals aggro from a real chase, raid boss or attacker.
+func investigate_decoy(site: Vector2) -> bool:
+	if not site.is_finite() or state == State.DEAD or raid_boss:
+		return false
+	if state == State.CHASE or state == State.ATTACK or not threat.is_empty():
+		return false
+	if Vector2(position.x, position.z).distance_to(site) > float(data["lose"]):
+		return false
+	if state == State.INVESTIGATE and last_known_target.distance_to(site) < 0.25:
+		return false
+	target_id = -1
+	last_known_target = site
+	investigate_time = INVESTIGATE_SECONDS
+	think_timer = 0.25
+	state = State.INVESTIGATE
+	return true
+
+
 func _move_toward(world, here: Vector2, goal: Vector2, speed: float, delta: float) -> void:
 	var direction := goal - here
 	if direction.length() < 0.01:

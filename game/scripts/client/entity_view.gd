@@ -30,6 +30,8 @@ func update_from(client) -> void:
 		_touch("barricade:%d" % id, "barricade", client.barricades[id], seen)
 	for id in client.campfires:
 		_touch("campfire:%d" % id, "campfire", client.campfires[id], seen)
+	for id in client.decoys:
+		_touch("decoy:%d" % id, "decoy", client.decoys[id], seen)
 	if not client.raid_telegraph.is_empty():
 		_touch("raid_warning:%d" % int(client.raid_telegraph["id"]),
 			"raid_warning", client.raid_telegraph, seen)
@@ -104,6 +106,28 @@ func _make(kind: String, entity: Dictionary) -> Node3D:
 		material.albedo_color = Color(0.6, 0.45, 0.27)
 		barricade.material_override = material
 		root.add_child(barricade)
+		return root
+	if kind == "decoy":
+		var clacker := MeshInstance3D.new()
+		var shape := CylinderMesh.new()
+		shape.top_radius = 0.22
+		shape.bottom_radius = 0.3
+		shape.height = 0.26
+		clacker.mesh = shape
+		clacker.position.y = 0.18
+		var material := StandardMaterial3D.new()
+		material.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+		material.albedo_color = Color(0.98, 0.68, 0.16)
+		clacker.material_override = material
+		root.add_child(clacker)
+		var label := Label3D.new()
+		label.text = "NOISE LURE"
+		label.name = "Label"
+		label.billboard = BaseMaterial3D.BILLBOARD_ENABLED
+		label.font_size = 18
+		label.pixel_size = 0.006
+		label.position.y = 1.0
+		root.add_child(label)
 		return root
 	if kind == "campfire":
 		var wood := MeshInstance3D.new()

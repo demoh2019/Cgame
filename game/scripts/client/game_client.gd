@@ -22,6 +22,7 @@ var players: Dictionary = {} # id -> entity from the latest snapshot
 var zombies: Dictionary = {}
 var barricades: Dictionary = {} # Nearby defenses from the server.
 var campfires: Dictionary = {} # Nearby temporary warmth sources, server-provided.
+var decoys: Dictionary = {} # Ephemeral world lures from the server snapshot.
 var raid_telegraph: Dictionary = {} # Current server-authored raid attack warning, if visible.
 var outposts: Array = [] # Public server-controlled PvP objectives.
 var bags: Dictionary = {}
@@ -86,6 +87,9 @@ func on_snapshot(snapshot: Dictionary) -> void:
 	zombies.clear()
 	for entity in snapshot["zombies"]:
 		zombies[entity["id"]] = entity
+	decoys.clear()
+	for entity in snapshot.get("decoys", []):
+		decoys[int(entity["id"])] = entity
 	campfires.clear()
 	for entity in snapshot.get("campfires", []):
 		campfires[int(entity["id"])] = entity
@@ -347,6 +351,11 @@ func build(point: Vector2) -> void:
 
 func repair(id: int) -> void:
 	net.c_repair.rpc_id(1, id)
+
+
+func throw_decoy(direction: Vector2) -> void:
+	if direction.is_finite() and direction.length_squared() > 0.0001:
+		net.c_throw_decoy.rpc_id(1, direction.normalized().x, direction.normalized().y)
 
 
 func light_campfire(point: Vector2) -> void:

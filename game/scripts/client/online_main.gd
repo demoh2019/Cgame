@@ -525,6 +525,12 @@ func _unhandled_input(event: InputEvent) -> void:
 				hud.toggle_inventory()
 			KEY_C:
 				hud.toggle_crafting()
+			KEY_COMMA:
+				if not hud.is_menu_open() and bool(client.you.get("alive", false)):
+					var decoy_direction: Vector2 = _aim_direction()
+					if decoy_direction.length_squared() < 0.0001:
+						decoy_direction = Vector2(sin(client.yaw), cos(client.yaw))
+					client.throw_decoy(decoy_direction)
 			KEY_O:
 				if not hud.is_menu_open() and bool(client.you.get("alive", false)):
 					var direction: Vector2 = _aim_direction()

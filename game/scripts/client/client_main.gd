@@ -48,6 +48,7 @@ var _crate_meshes: Dictionary = {}
 var _zombie_meshes: Dictionary = {}
 var _barricade_bodies: Dictionary = {}
 var _campfire_visuals: Dictionary = {}
+var _decoy_visuals: Dictionary = {}
 var _materials: Dictionary = {}
 var _last_center: Vector2i = Vector2i(999999, 999999)
 var _hud_clock: float = 0.0
@@ -97,6 +98,7 @@ func _setup_actions() -> void:
 	_bind_key("survive_lake", KEY_R)
 	_bind_key("survive_build", KEY_U)
 	_bind_key("survive_campfire", KEY_O)
+	_bind_key("survive_decoy", KEY_COMMA)
 	_bind_key("survive_refuel", KEY_9)
 	_bind_key("survive_extinguish", KEY_MINUS)
 	_bind_key("survive_repair", KEY_H)
@@ -424,6 +426,35 @@ func _sync_campfires() -> void:
 			_campfire_visuals.erase(id)
 
 
+func _sync_decoys() -> void:
+	var visible: Dictionary = {}
+	for id in sim.decoys:
+		var lure: Dictionary = sim.decoys[id]
+		var point := Vector3(float(lure["x"]), float(lure["y"]), float(lure["z"]))
+		if survivor.position.distance_to(point) > 95.0:
+			continue
+		visible[id] = true
+		if not _decoy_visuals.has(id):
+			var node := Node3D.new()
+			node.name = "Decoy_%d" % int(id)
+			var clacker := _mesh(Vector3(0.5, 0.25, 0.5), Color(0.96, 0.72, 0.12))
+			clacker.position.y = 0.18
+			node.add_child(clacker)
+			var marker := OmniLight3D.new()
+			marker.light_color = Color(1.0, 0.78, 0.28)
+			marker.light_energy = 0.45
+			marker.omni_range = 3.5
+			marker.position.y = 0.4
+			node.add_child(marker)
+			add_child(node)
+			_decoy_visuals[id] = node
+		_decoy_visuals[id].position = point
+	for id in _decoy_visuals.keys():
+		if not visible.has(id):
+			_decoy_visuals[id].queue_free()
+			_decoy_visuals.erase(id)
+
+
 func _nearest_campfire() -> int:
 	var result: int = -1
 	var best_squared: float = FieldCampfire.REFUEL_RANGE * FieldCampfire.REFUEL_RANGE
@@ -479,6 +510,7 @@ func _physics_process(delta: float) -> void:
 	_sync_zombies()
 	_sync_barricades()
 	_sync_campfires()
+	_sync_decoys()
 	_hud_clock += delta
 	if _hud_clock > 0.15:
 		_hud_clock = 0.0
@@ -701,6 +733,8 @@ func _unhandled_input(event: InputEvent) -> void:
 			_feedback = "Refuel: no campfire within 3 metres."
 		else:
 			_result("Refuel campfire", sim.cmd_refuel_campfire(LOCAL_PLAYER_ID, fire_id))
+	elif event.is_action_pressed("survive_decoy"):
+		_result("Throw noise decoy", sim.cmd_throw_decoy(LOCAL_PLAYER_ID, _facing.x, _facing.y))
 	elif event.is_action_pressed("survive_campfire"):
 		var point := Vector2(survivor.position.x, survivor.position.z) + _facing * 2.8
 		_result("Light campfire", sim.cmd_light_campfire(LOCAL_PLAYER_ID, point.x, point.y))
@@ -812,7 +846,7 @@ func _update_hud() -> void:
 	var station_status: String = "WORKBENCH" if near_bench else "workbench at x=9, z=0"
 	if recipe.get("station", "") == "campfire":
 		station_status = "FIRE READY" if nearby_fire else ("WORKBENCH" if near_bench else "need lit fire or workbench")
-	_instructions.text = "WASD move | Shift sprint | E gather | Q loot | F attack | G weapon skill | Space dodge | U build | O campfire | 9 refuel | 0 cook fish | - extinguish | H repair | Y upgrade | X dismantle\nTab / Shift+Tab recipes | C craft | B stash | 1 food 2 water 3 heal 4 cycle weapon 5 armor 6 antiseptic 7 antibiotics 8 heat pack R lake (filter prevents infection)\nN buy water / V sell materials / Shift+V sell fish | T fish near shore | P accept / Shift+P turn in (hub)\nCRAFT %s -> %s x%d | %s | inputs %s\n%s" % [
+	_instructions.text = "WASD move | Shift sprint | E gather | Q loot | F attack | G weapon skill | Space dodge | U build | O campfire | , noise decoy | 9 refuel | 0 cook fish | - extinguish | H repair | Y upgrade | X dismantle\nTab / Shift+Tab recipes | C craft | B stash | 1 food 2 water 3 heal 4 cycle weapon 5 armor 6 antiseptic 7 antibiotics 8 heat pack R lake (filter prevents infection)\nN buy water / V sell materials / Shift+V sell fish | T fish near shore | P accept / Shift+P turn in (hub)\nCRAFT %s -> %s x%d | %s | inputs %s\n%s" % [
 		recipe_id, str(recipe.get("output", "")), int(recipe.get("count", 0)),
 		station_status,
 		str(recipe.get("inputs", {})), _feedback

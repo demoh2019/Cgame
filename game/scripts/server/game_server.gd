@@ -41,6 +41,7 @@ const Weather = preload("res://scripts/shared/weather.gd")
 const Progression = preload("res://scripts/shared/progression.gd")
 const CampRest = preload("res://scripts/shared/camp_rest.gd")
 const FieldCampfire = preload("res://scripts/shared/field_campfire.gd")
+const NoiseDecoy = preload("res://scripts/shared/noise_decoy.gd")
 const Fishing = preload("res://scripts/shared/fishing.gd")
 const FieldWater = preload("res://scripts/shared/field_water.gd")
 
@@ -89,6 +90,7 @@ class Player:
 	var combat_energy: float = 100.0
 	var noise_radius: float = 0.0
 	var noise_timer: float = 0.0
+	var decoy_timer: float = 0.0 # Anti-spam timer; no persistent character data.
 	var action: Dictionary = {} # Current gathering or fishing: {"remaining": s, "total": s, ...}
 	var fish_next_at: float = 0.0
 	var respawn_timer: float = 0.0
@@ -120,6 +122,7 @@ var raid_pending_slam: Dictionary = {} # World position & deadline are server-ow
 var raid_wave: int = 0 # Number of completed reinforcement phases.
 var raid_minions: Array[int] = [] # Raid-only infected are cleared with boss.
 var campfires: Dictionary = {} # Temporary shared warmth, never checkpointed.
+var decoys: Dictionary = {} # Temporary physical sound lures; server-owned, never persisted.
 var trades: Dictionary = {} # trade id -> offer/accept/expiry
 var market_orders: Dictionary = {} # id -> advertised online stock (not escrow).
 var market_sales: Array = [] # Bounded session-only receipts, NOT durable settlement.
@@ -1200,6 +1203,41 @@ func cmd_stash(peer_id: int, item_id: String, count: int, deposit: bool) -> Dict
 ## Building is intentionally forbidden inside the town sanctuary.
 ## The client requests coordinates, but cannot claim warmth, time or a free
 ## fire. All placement and inventory costs are validated by the server.
+## The client supplies a direction, not the position, price or affected NPCs.
+## Cost and flight-path validation happen atomically on this simulation.
+func cmd_throw_decoy(peer_id: int, direction_x: float, direction_z: float) -> Dictionary:
+	var player: Player = players.get(peer_id)
+	if player == null or not _alive(player):
+		return {"ok": false, "reason": "dead"}
+	if player.decoy_timer > 0.0:
+		return {"ok": false, "reason": "cooldown"}
+	if decoys.size() >= NoiseDecoy.MAX_ACTIVE:
+		return {"ok": false, "reason": "world_limit"}
+	var owned: int = 0
+	for lure in decoys.values():
+		if int(lure["owner"]) == peer_id and float(lure["expires"]) > time:
+			owned += 1
+	if owned >= NoiseDecoy.MAX_PER_OWNER:
+		return {"ok": false, "reason": "owner_limit"}
+	var site: Dictionary = NoiseDecoy.landing(world, player.position,
+			Vector2(direction_x, direction_z))
+	if site.is_empty():
+		return {"ok": false, "reason": "invalid_landing"}
+	if player.inventory.count(NoiseDecoy.ITEM_ID) < 1:
+		return {"ok": false, "reason": "not_carried"}
+	if not player.inventory.remove(NoiseDecoy.ITEM_ID, 1):
+		return {"ok": false, "reason": "not_carried"}
+	var id: int = new_id()
+	decoys[id] = {"id": id, "x": site["x"], "y": site["y"], "z": site["z"],
+		"owner": peer_id, "expires": time + NoiseDecoy.DURATION}
+	player.decoy_timer = NoiseDecoy.COOLDOWN
+	player.dirty_inventory = true
+	player.dirty_character = true
+	events.append({"type": "decoy_thrown", "peer": peer_id,
+		"x": site["x"], "z": site["z"]})
+	return {"ok": true, "id": id, "seconds": NoiseDecoy.DURATION}
+
+
 func cmd_light_campfire(peer_id: int, x: float, z: float) -> Dictionary:
 	var player: Player = players.get(peer_id)
 	if player == null or not _alive(player):
@@ -2071,6 +2109,7 @@ func _tick_players(delta: float) -> void:
 				not GuardianTaunt.melee_equipped(player.inventory)):
 			player.guardian_brace = 0.0
 		player.lake_drink_cooldown = maxf(0.0, player.lake_drink_cooldown - maxf(0.0, delta))
+		player.decoy_timer = maxf(0.0, player.decoy_timer - maxf(0.0, delta))
 		player.attack_timer = maxf(player.attack_timer - delta, 0.0)
 		player.skill_timer = maxf(player.skill_timer - delta, 0.0)
 		player.dodge_timer = maxf(player.dodge_timer - delta, 0.0)
@@ -2374,6 +2413,10 @@ func _tick_zombies(delta: float) -> void:
 	# Activate spawns near players and put far-away zombies to sleep.
 	if tick_count % 20 == 1:
 		_manage_zombie_population()
+	# Every fourth of a second alert only idle, non-raid infected within
+	# hearing range. Active chases and combat threat always take priority.
+	if tick_count % 5 == 0 and not decoys.is_empty():
+		_alert_noise_decoys()
 	for zombie in zombies.values():
 		var result: Dictionary = zombie.think(world, info, delta, rng)
 		# Zombies chip away at obstacles only while actually stuck pursuing
@@ -2434,6 +2477,16 @@ func _tick_zombies(delta: float) -> void:
 
 ## Shares target awareness inside a bounded 2D neighborhood. Bucket lookup
 ## avoids checking every zombie against every other zombie in crowded ruins.
+func _alert_noise_decoys() -> void:
+	for infected in zombies.values():
+		if not infected.is_alive() or infected.raid_boss:
+			continue
+		for lure in decoys.values():
+			if NoiseDecoy.is_audible(lure, infected.position, time):
+				if infected.investigate_decoy(Vector2(float(lure["x"]), float(lure["z"]))):
+					break
+
+
 func _alert_infected_pack(player_info: Dictionary) -> void:
 	var buckets: Dictionary = {}
 	var alert_sources: Array = []
@@ -2515,6 +2568,9 @@ func _nearest_player_distance(point: Vector2) -> float:
 
 
 func _tick_world(_delta: float) -> void:
+	for id in decoys.keys():
+		if time >= float(decoys[id]["expires"]):
+			decoys.erase(id)
 	for id in campfires.keys():
 		if time >= float(campfires[id]["expires"]):
 			campfires.erase(id)
@@ -2567,6 +2623,12 @@ func snapshot_for(peer_id: int) -> Dictionary:
 			nearby_barricades.append(Structures.public_state(wall))
 	var nearby_campfires: Array = FieldCampfire.visible(campfires,
 			player.position, time, Defs.INTEREST_RADIUS)
+	var nearby_decoys: Array = []
+	for lure in decoys.values():
+		if NoiseDecoy.is_audible(lure, player.position, time) or (
+				here.distance_to(Vector2(float(lure["x"]), float(lure["z"]))) <= Defs.INTEREST_RADIUS and
+				float(lure["expires"]) > time):
+			nearby_decoys.append(NoiseDecoy.visible_state(lure, time))
 	var nearby_bags: Array = []
 	for bag in bags.values():
 		if here.distance_to(Vector2(bag["x"], bag["z"])) <= Defs.INTEREST_RADIUS:
@@ -2627,6 +2689,7 @@ func snapshot_for(peer_id: int) -> Dictionary:
 		},
 		"players": nearby_players, "zombies": nearby_zombies, "bags": nearby_bags,
 		"barricades": nearby_barricades, "campfires": nearby_campfires,
+		"decoys": nearby_decoys,
 		"depleted": gone_nodes, "crates_used": used_crates,
 	}
 	# Send a ground telegraph only to survivors close enough to see it.

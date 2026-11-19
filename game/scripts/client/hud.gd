@@ -172,6 +172,14 @@ func _build() -> void:
 		var direction := Vector2(sin(client.yaw), cos(client.yaw))
 		client.light_campfire(Vector2(pos.x, pos.z) + direction * 2.8))
 	inventory_box.add_child(campfire_button)
+	var decoy_button := Button.new()
+	decoy_button.name = "ThrowNoiseDecoy"
+	decoy_button.text = "Throw clattering decoy (,): 8s distraction"
+	decoy_button.tooltip_text = "Needs a crafted decoy: 2 wood T1 + 1 scrap"
+	decoy_button.pressed.connect(func() -> void:
+		var heading := Vector2(sin(client.yaw), cos(client.yaw))
+		client.throw_decoy(heading))
+	inventory_box.add_child(decoy_button)
 	var refuel_button := Button.new()
 	refuel_button.name = "RefuelCampfire"
 	refuel_button.text = "Refuel nearest campfire (+2 min, 2 wood T1; 9)"
@@ -691,6 +699,10 @@ func _claim_nearest_outpost_cache() -> void:
 
 
 func _on_result(kind: String, data: Dictionary) -> void:
+	if kind == "throw_decoy":
+		say("Decoy deployed: nearby idle infected investigate the sound." if bool(data.get("ok", false)) else
+				"Decoy denied: " + str(data.get("reason", "rejected")))
+		return
 	if kind == "guardian_taunt":
 		if bool(data.get("ok", false)):
 			say("Guardian: drew %d infected; defensive brace for 3 seconds (-30%% infected damage)." % int(data.get("count", 0)))

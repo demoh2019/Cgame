@@ -287,6 +287,11 @@ static func _build_items() -> void:
 	_add_recipe("ammo_9mm", "ammo_9mm", 12,
 		{"scrap": 2, "bar_2": 1}, "workbench", 4.0)
 	_add_item("scrap", {"name": "Scrap Metal", "kind": "resource", "tier": 2, "stack": 100, "value": 3})
+	# Crafted noise maker: brief diversion for stealth runs, not free aggro.
+	_add_item("noise_decoy", {"name": "Clattering Decoy", "kind": "decoy",
+		"tier": 1, "stack": 10, "value": 14, "weight": 0.25})
+	_add_recipe("noise_decoy", "noise_decoy", 1,
+		{"wood_1": 2, "scrap": 1}, "", 2.5)
 	_add_item("silver", {"name": "Silver", "kind": "currency", "stack": 100000, "value": 1})
 
 
