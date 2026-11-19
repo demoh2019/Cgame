@@ -31,6 +31,7 @@ class ContactFrictionFastPathContracts(unittest.TestCase):
             return source[pos:source.index(end, pos)]
         cls.soft_callback = section("void GodotBodySoftBodyPair3D::contact_added_callback(", "void GodotBodySoftBodyPair3D::validate_contacts(")
         cls.soft_solve = section("void GodotBodySoftBodyPair3D::solve(", "GodotBodySoftBodyPair3D::GodotBodySoftBodyPair3D(")
+        cls.rigid_pre_solve = section("bool GodotBodyPair3D::pre_solve(", "void GodotBodyPair3D::solve(")
         cls.rigid_solve = section("void GodotBodyPair3D::solve(", "GodotBodyPair3D::GodotBodyPair3D(")
 
     def test_soft_contact_warmstart_requires_matching_normal(self):
@@ -45,6 +46,24 @@ class ContactFrictionFastPathContracts(unittest.TestCase):
                 self.assertIn("fi_len_squared > jtMax * jtMax", code)
                 self.assertIn("Math::sqrt(fi_len_squared)", code)
                 self.assertNotIn("real_t fi_len = c.acc_tangent_impulse.length()", code)
+
+    def test_rigid_warmstart_avoids_unneeded_square_root(self):
+        code = self.rigid_pre_solve
+        self.assertIn("cached_tangent_length_squared = c.acc_tangent_impulse.length_squared()", code)
+        self.assertIn("cached_tangent_length_squared > cached_tangent_limit * cached_tangent_limit", code)
+        self.assertIn("Math::sqrt(cached_tangent_length_squared)", code)
+        self.assertIn("cached_tangent_limit <= 0.0", code)
+        self.assertNotIn("cached_tangent_length = c.acc_tangent_impulse.length()", code)
+
+    def test_rigid_warmstart_clamp_matches_nonnegative_reference(self):
+        for x, y, z in ((0.0, 0.0, 0.0), (0.1, -0.2, 0.3), (3.0, 4.0, 0.0), (1e-8, 2e-8, 0.0)):
+            magnitude = math.sqrt(x * x + y * y + z * z)
+            for limit in (0.0, 0.01, 0.5, 1.0, 10.0):
+                reference_scale = 0.0 if limit <= 0 else (min(1.0, limit / magnitude) if magnitude > 0 else 1.0)
+                length_sq = x * x + y * y + z * z
+                optimized_scale = 0.0 if limit <= 0 else (limit / math.sqrt(length_sq) if length_sq > limit * limit else 1.0)
+                with self.subTest(impulse=(x, y, z), limit=limit):
+                    self.assertTrue(math.isclose(reference_scale, optimized_scale, rel_tol=1e-12, abs_tol=1e-12))
 
     def test_soft_signed_material_override_is_preserved(self):
         self.assertIn("jtMax < 0.0 || fi_len_squared > jtMax * jtMax", self.soft_solve)

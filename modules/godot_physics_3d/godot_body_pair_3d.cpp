@@ -507,9 +507,16 @@ bool GodotBodyPair3D::pre_solve(real_t p_step) {
 		// tangential impulse during the warm start.
 		if (has_friction) {
 			const real_t cached_tangent_limit = mixed_friction * c.acc_normal_impulse;
-			const real_t cached_tangent_length = c.acc_tangent_impulse.length();
-			if (cached_tangent_length > cached_tangent_limit) {
-				c.acc_tangent_impulse *= cached_tangent_limit / cached_tangent_length;
+			if (cached_tangent_limit <= 0.0) {
+				// No normal impulse means no admissible tangent impulse.
+				c.acc_tangent_impulse = Vector3();
+			} else {
+				// Most warm-start contacts already lie inside the Coulomb cone.
+				// Avoid a square root unless a cached impulse must be clamped.
+				const real_t cached_tangent_length_squared = c.acc_tangent_impulse.length_squared();
+				if (cached_tangent_length_squared > cached_tangent_limit * cached_tangent_limit) {
+					c.acc_tangent_impulse *= cached_tangent_limit / Math::sqrt(cached_tangent_length_squared);
+				}
 			}
 		} else {
 			c.acc_tangent_impulse = Vector3();
