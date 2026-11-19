@@ -7,6 +7,7 @@ const PICKUP_SCRIPT = preload("res://pickup.gd")
 const STATE_SCRIPT = preload("res://survival_state.gd")
 const RESOURCE_SCRIPT = preload("res://resource_node.gd")
 const ENEMY_SCRIPT = preload("res://enemy.gd")
+const SAVE_SCRIPT = preload("res://save_game.gd")
 
 var state = STATE_SCRIPT.new()
 var player
@@ -14,6 +15,8 @@ var stats_label: Label
 var prompt_label: Label
 var status_label: Label
 var progression_label: Label
+var _save_notice: String = ""
+var _save_notice_time: float = 0.0
 
 
 func _ready() -> void:
@@ -28,6 +31,7 @@ func _process(delta: float) -> void:
     if player == null:
         return
     state.tick(delta, player.is_sprinting)
+    _save_notice_time = maxf(0.0, _save_notice_time - delta)
     player.sprint_allowed = state.stamina > 0.1 and not state.dead
     player.can_move = not state.dead
     if stats_label != null:
@@ -48,7 +52,10 @@ func _process(delta: float) -> void:
         var focus = player.get_focused_pickup()
         prompt_label.text = "[E] Gather %s" % str(focus.get("resource_type")).capitalize() if focus != null else ""
     if status_label != null:
-        status_label.text = "YOU DID NOT SURVIVE" if state.dead else "WASD move / Shift sprint / E gather / Left click attack / Esc mouse\n1 Eat  2 Drink  3 Craft spear  4 Craft coat  5 Craft bandage\n6 Equip spear  7 Equip coat  8 Use bandage"
+        var help_text := "YOU DID NOT SURVIVE" if state.dead else "WASD move / Shift sprint / E gather / Left click attack / Esc mouse\n1 Eat  2 Drink  3 Craft spear  4 Craft coat  5 Craft bandage\n6 Equip spear  7 Equip coat  8 Use bandage  |  F5 Save  F9 Load"
+        if _save_notice_time > 0.0:
+            help_text += "\n" + _save_notice
+        status_label.text = help_text
 
 
 func _unhandled_input(event: InputEvent) -> void:
@@ -68,6 +75,10 @@ func _unhandled_input(event: InputEvent) -> void:
         state.equip("padded_coat")
     elif event.is_action_pressed("use_bandage"):
         state.use_resource("bandage")
+    elif event.is_action_pressed("save_game"):
+        save_game()
+    elif event.is_action_pressed("load_game"):
+        load_game()
     elif event.is_action_pressed("release_mouse"):
         Input.set_mouse_mode(Input.MOUSE_MODE_VISIBLE)
     elif event is InputEventMouseButton and event.pressed and event.button_index == MOUSE_BUTTON_LEFT:
@@ -95,6 +106,21 @@ func _on_enemy_attack(raw_damage: float) -> void:
     state.apply_damage(raw_damage)
 
 
+## Game saves use native FileAccess, with whole-snapshot validation and atomic replace.
+func save_game(path: String = SAVE_SCRIPT.DEFAULT_PATH) -> bool:
+    var success: bool = SAVE_SCRIPT.save(self, path)
+    _save_notice = "CHECKPOINT SAVED" if success else "SAVE FAILED"
+    _save_notice_time = 4.0
+    return success
+
+
+func load_game(path: String = SAVE_SCRIPT.DEFAULT_PATH) -> bool:
+    var success: bool = SAVE_SCRIPT.load(self, path)
+    _save_notice = "CHECKPOINT RESTORED" if success else "NO VALID CHECKPOINT"
+    _save_notice_time = 4.0
+    return success
+
+
 func _install_inputs() -> void:
     _bind_key("move_forward", KEY_W)
     _bind_key("move_back", KEY_S)
@@ -111,6 +137,8 @@ func _install_inputs() -> void:
     _bind_key("equip_spear", KEY_6)
     _bind_key("equip_coat", KEY_7)
     _bind_key("use_bandage", KEY_8)
+    _bind_key("save_game", KEY_F5)
+    _bind_key("load_game", KEY_F9)
     if not InputMap.has_action("attack"):
         InputMap.add_action("attack")
         var attack_key := InputEventMouseButton.new()
