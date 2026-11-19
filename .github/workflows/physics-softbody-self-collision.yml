@@ -1,0 +1,27 @@
+name: Physics soft-body self-collision source contracts
+
+on:
+  pull_request:
+    paths:
+      - "servers/physics_softbody_self_collision.h"
+      - "servers/physics_3d/physics_server_3d.cpp"
+      - "modules/godot_physics_3d/godot_space_3d.cpp"
+      - "modules/godot_physics_3d/godot_space_3d.h"
+      - "modules/godot_physics_3d/godot_soft_body_3d.cpp"
+      - "modules/godot_physics_3d/godot_soft_body_3d.h"
+      - "tests/servers/test_physics_softbody_self_collision.cpp"
+      - "tests/stress/test_physics_softbody_self_collision.py"
+      - ".github/workflows/physics-softbody-self-collision.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  softbody-self-collision-contracts:
+    name: Self-collision BVH and topology source checks
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Check opt-in configuration, BVH budgets and helper test coverage
+        run: python3 -m unittest discover -s tests/stress -p 'test_physics_softbody_self_collision.py' -v
