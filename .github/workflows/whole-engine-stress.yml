@@ -116,6 +116,7 @@ jobs:
           ./bin/godot.linuxbsd.editor.dev.x86_64 --headless --path tests/stress --script res://physics_jolt_softbody_wind_fastpath_regression.gd --check-only
           ./bin/godot.linuxbsd.editor.dev.x86_64 --headless --path tests/stress --script res://physics_jolt_softbody_lra_shrink_regression.gd --check-only
           ./bin/godot.linuxbsd.editor.dev.x86_64 --headless --path tests/stress --script res://physics_jolt_softbody_volume_shrink_regression.gd --check-only
+          ./bin/godot.linuxbsd.editor.dev.x86_64 --headless --path tests/stress --script res://physics_jolt_softbody_anisotropic_fiber_regression.gd --check-only
           ./bin/godot.linuxbsd.editor.dev.x86_64 --headless --path tests/stress --script res://physics_jolt_layer_filter_regression.gd --check-only
           ./bin/godot.linuxbsd.editor.dev.x86_64 --headless --path tests/stress --script res://physics_jolt_broadphase_filter_regression.gd --check-only
           ./bin/godot.linuxbsd.editor.dev.x86_64 --headless --path tests/stress --script res://physics_jolt_area_event_dedup_regression.gd --check-only
@@ -431,6 +432,29 @@ jobs:
               grep -Fq 'Jolt soft-body volumetric shrink regression passed.' "physics-jolt-volume-shrink-$RADIAL-$FOLLOW.log"
             done
           done
+      - name: Regression-test anisotropic Jolt XPBD woven-cloth fibers
+        shell: bash
+        run: |
+          set -euo pipefail
+          # Isotropic baseline, stiff/soft X fibers, Y fibers and out-of-
+          # plane Z fibers. Physics settings are read during engine startup.
+          for SPEC in "0:1.0" "0:0.25" "0:4.0" "1:4.0" "2:4.0"; do
+            IFS=: read -r AXIS MULTIPLIER <<< "$SPEC"
+            PROJECT="$RUNNER_TEMP/cgame-jolt-anisotropy-$AXIS-$MULTIPLIER"
+            mkdir -p "$PROJECT"
+            cp -a tests/stress/. "$PROJECT/"
+            sed -i 's|^3d/physics_engine="GodotPhysics3D"$|3d/physics_engine="Jolt Physics"|' "$PROJECT/project.godot"
+            sed -i "/^\[physics\]$/a jolt_physics_3d/simulation/soft_body_fiber_axis=$AXIS" "$PROJECT/project.godot"
+            sed -i "/^\[physics\]$/a jolt_physics_3d/simulation/soft_body_fiber_compliance_multiplier=$MULTIPLIER" "$PROJECT/project.godot"
+            grep -Fqx '3d/physics_engine="Jolt Physics"' "$PROJECT/project.godot"
+            grep -Fqx "jolt_physics_3d/simulation/soft_body_fiber_axis=$AXIS" "$PROJECT/project.godot"
+            grep -Fqx "jolt_physics_3d/simulation/soft_body_fiber_compliance_multiplier=$MULTIPLIER" "$PROJECT/project.godot"
+            timeout 180s ./bin/godot.linuxbsd.editor.dev.x86_64 \
+              --headless --path "$PROJECT" \
+              --script res://physics_jolt_softbody_anisotropic_fiber_regression.gd \
+              2>&1 | tee "physics-jolt-anisotropy-$AXIS-$MULTIPLIER.log"
+            grep -Fq 'Jolt anisotropic cloth fiber regression passed.' "physics-jolt-anisotropy-$AXIS-$MULTIPLIER.log"
+          done
       - name: Verify Jolt packed object-layer filtering
         shell: bash
         run: |
@@ -487,6 +511,7 @@ jobs:
             physics-jolt-softbody-wind-fastpath.log
             physics-jolt-lra-shrink-*.log
             physics-jolt-volume-shrink-*.log
+            physics-jolt-anisotropy-*.log
             physics-jolt-layer-filter.log
             physics-jolt-broadphase-filter.log
             physics-jolt-area-event-dedup.log
