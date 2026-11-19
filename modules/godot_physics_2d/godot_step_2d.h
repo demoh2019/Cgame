@@ -43,6 +43,9 @@ class GodotStep2D {
 	LocalVector<LocalVector<GodotBody2D *>> body_islands;
 	LocalVector<LocalVector<GodotConstraint2D *>> constraint_islands;
 	LocalVector<GodotConstraint2D *> all_constraints;
+	// Filled only when pre_solve removes constraints from some islands.
+	// Dense frames use direct island indices with no extra allocation.
+	LocalVector<uint32_t> solve_island_indices;
 	LocalVector<GodotBody2D *> pending_bodies; // Reused, bounded by the DFS frontier, not island depth.
 
 	void _populate_island(GodotBody2D *p_body, LocalVector<GodotBody2D *> &p_body_island, LocalVector<GodotConstraint2D *> &p_constraint_island);
