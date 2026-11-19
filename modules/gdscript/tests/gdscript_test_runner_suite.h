@@ -238,9 +238,9 @@ TEST_CASE("[GDScriptScriptProperties] declaration order and Variant types are pr
 	int index = 0;
 	int alpha = -1, beta = -1, gamma = -1;
 	for (const PropertyInfo &p : properties) {
-		if (p.name == "alpha") { alpha = index; CHECK_EQ(p.type, Variant::INT); }
-		if (p.name == "beta") { beta = index; CHECK_EQ(p.type, Variant::STRING); }
-		if (p.name == "gamma") { gamma = index; CHECK_EQ(p.type, Variant::VECTOR2); }
+		if (p.name == StringName("alpha")) { alpha = index; CHECK_EQ(p.type, Variant::INT); }
+		if (p.name == StringName("beta")) { beta = index; CHECK_EQ(p.type, Variant::STRING); }
+		if (p.name == StringName("gamma")) { gamma = index; CHECK_EQ(p.type, Variant::VECTOR2); }
 		index++;
 	}
 	REQUIRE(alpha >= 0);
