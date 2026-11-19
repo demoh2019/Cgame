@@ -492,4 +492,41 @@ TEST_CASE("[Curve][Performance] Rebaking reuses the cache and overwrites all sam
 	CHECK(Math::is_equal_approx(curve->sample_baked(1), (real_t)0.75));
 }
 
+
+TEST_CASE("[Curve] Monotone baking matches direct sampling over hundreds of points") {
+	Ref<Curve> curve = memnew(Curve);
+	curve->set_bake_resolution(1000);
+	for (int i = 0; i <= 256; i++) {
+		const real_t x = real_t(i) / 256.0;
+		const real_t y = real_t((i * 73) % 257) / 257.0;
+		curve->add_point(Vector2(x, y), -real_t(i % 5) / 7.0, real_t(i % 7) / 11.0);
+	}
+	curve->bake();
+	for (int i = 1; i < 999; i++) {
+		const real_t x = curve->get_domain_range() * i / real_t(999) + curve->get_min_domain();
+		CHECK(curve->sample_baked(x) == doctest::Approx(curve->sample(x)).epsilon(0.0001));
+	}
+
+	// Rebaking reuses the cache and must still produce current samples.
+	curve->set_point_value(128, real_t(0.75));
+	curve->bake();
+	for (int i = 1; i < 999; i += 7) {
+		const real_t x = curve->get_domain_range() * i / real_t(999) + curve->get_min_domain();
+		CHECK(curve->sample_baked(x) == doctest::Approx(curve->sample(x)).epsilon(0.0001));
+	}
+}
+
+TEST_CASE("[Curve] Monotone baking preserves overlapping control points") {
+	Ref<Curve> curve = memnew(Curve);
+	curve->add_point(Vector2(0, 0.1));
+	curve->add_point(Vector2(0.5, 0.4));
+	curve->add_point(Vector2(0.5, 0.6));
+	curve->add_point(Vector2(1, 0.9));
+	curve->set_bake_resolution(101);
+	curve->bake();
+	for (int i = 1; i < 100; i++) {
+		const real_t x = real_t(i) / 100.0;
+		CHECK(curve->sample_baked(x) == doctest::Approx(curve->sample(x)).epsilon(0.0001));
+	}
+}
 } // namespace TestCurve
