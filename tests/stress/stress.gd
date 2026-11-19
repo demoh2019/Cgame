@@ -11,6 +11,9 @@ const CASES := [
 	"file_io", "threads", "physics_2d", "physics_3d",
 	"memory_churn", "astar_grid", "tweens", "audio_buffers",
 	"variant_codec", "render_2d", "render_3d",
+	"compression", "regex", "astar_3d", "scene_reparent",
+	"resource_roundtrip", "thread_contention", "physics_queries_2d",
+	"render_multimesh",
 ]
 
 var signal_total: int = 0
@@ -195,7 +198,8 @@ func _run_case(test_case: String, scale: int, frames: int, seed: int) -> Diction
 			return await _render_2d(scale, frames)
 		"render_3d":
 			return await _render_3d(scale, frames)
-	return {"error": "Unhandled case"}
+	var additional := preload("res://extra_stress.gd").new()
+	return await additional.run_case(test_case, self, scale, frames, seed)
 
 
 func _on_sample(value: int) -> void:
