@@ -1492,7 +1492,7 @@ func _damage_target(attacker: Player, hit: Dictionary, damage: float) -> void:
 			if equipped != "" and attacker.inventory.count(equipped) > 0:
 				zombie.contributors[attacker.id] = {"time": time, "weapon": equipped}
 		events.append({"type": "hit", "kind": "zombie", "id": zombie.id, "damage": damage, "x": zombie.position.x, "z": zombie.position.z})
-		if zombie.take_damage(damage):
+		if zombie.take_damage(damage, attacker.id):
 			attacker.kills += 1
 			# Award XP once, when a living infected is defeated with owned/equipped
 			# gear. Ordinary hits, missed shots and re-killing corpses award none.

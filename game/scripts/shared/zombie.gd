@@ -4,6 +4,7 @@ extends RefCounted
 
 const Defs = preload("res://scripts/shared/defs.gd")
 const Movement = preload("res://scripts/shared/movement.gd")
+const Threat = preload("res://scripts/shared/threat.gd")
 
 enum State { IDLE, WANDER, CHASE, ATTACK, DEAD, INVESTIGATE }
 
@@ -25,6 +26,7 @@ var attack_timer: float = 0.0
 var stuck_time: float = 0.0
 var contributors: Dictionary = {} # Server: peer -> time + equipped weapon for PvE assist XP.
 var data: Dictionary
+var threat: Dictionary = {} # Bounded per-zombie server combat threat; not sent to clients.
 
 
 func _init(p_id: int, p_type: String, p_position: Vector3, p_spawn_id: int = 0) -> void:
@@ -50,6 +52,7 @@ func think(world, players: Dictionary, delta: float, rng: RandomNumberGenerator)
 	if state == State.DEAD:
 		return {}
 	attack_timer = maxf(attack_timer - delta, 0.0)
+	Threat.decay(threat, delta)
 	think_timer -= delta
 	var here := Vector2(position.x, position.z)
 
@@ -108,6 +111,15 @@ func think(world, players: Dictionary, delta: float, rng: RandomNumberGenerator)
 
 
 func _select_target(players: Dictionary, here: Vector2) -> void:
+	# Damage-earning attackers within the leash take priority over passive
+	# proximity targeting. Invalid, safe, disconnected or distant IDs expire.
+	var priority: int = Threat.pick(threat, players, here, float(data["lose"]), target_id)
+	if priority != -1:
+		target_id = priority
+		if state == State.IDLE or state == State.WANDER or state == State.INVESTIGATE:
+			state = State.CHASE
+			investigate_time = 0.0
+		return
 	var best := -1
 	var best_distance := INF
 	for peer_id in players:
@@ -169,14 +181,16 @@ func _move_toward(world, here: Vector2, goal: Vector2, speed: float, delta: floa
 		stuck_time = 0.0
 
 
-func take_damage(amount: float) -> bool:
-	## Returns true if the zombie died from it.
-	if state == State.DEAD:
+func take_damage(amount: float, attacker_id: int = -1) -> bool:
+	## Server-confirmed harm only; credit the actual effective damage, so a
+	## huge overkill value cannot fabricate an unlimited hate advantage.
+	if state == State.DEAD or not is_finite(amount) or amount <= 0.0:
 		return false
-	health -= amount
+	Threat.record(threat, attacker_id, minf(health, amount))
+	health = maxf(0.0, health - amount)
 	if health <= 0.0:
-		health = 0.0
 		state = State.DEAD
+		threat.clear()
 		return true
 	if state == State.IDLE or state == State.WANDER:
 		state = State.CHASE
