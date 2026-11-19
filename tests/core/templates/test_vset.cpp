@@ -143,7 +143,9 @@ TEST_CASE("[VSet] Equivalent keys use strict weak ordering rather than equality"
 	set.insert({ 12 });
 	set.insert({ 19 });
 	set.insert({ 25 });
+	set.insert({ 29 }); // Equivalent to the current maximum.
 	CHECK(set.size() == 2);
+	CHECK(set[1].value == 25); // Existing key is not overwritten.
 	CHECK(set.find({ 11 }) == 0);
 	CHECK(set.has({ 18 }));
 	CHECK(set.find({ 29 }) == 1);
@@ -167,8 +169,11 @@ TEST_CASE("[VSet] Ascending insertion uses one comparison after the first elemen
 	}
 
 	// Duplicate maximums and smaller insertions must preserve uniqueness and order.
+	ComparisonCountedInt::comparisons = 0;
 	set.insert({ 511 });
 	CHECK(set.size() == 512);
+	// An already-present maximum must never search the whole container.
+	CHECK(ComparisonCountedInt::comparisons == 2);
 	set.insert({ -1 });
 	CHECK(set.size() == 513);
 	CHECK(set[0].value == -1);
