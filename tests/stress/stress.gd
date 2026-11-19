@@ -15,6 +15,7 @@ const DensePhysicsStress := preload("res://physics_dense.gd")
 const LargeIsland3DStress := preload("res://physics_large_island_3d.gd")
 const PhysicsLargeIslandStress := preload("res://physics_large_island_stress.gd")
 const PhysicsFilterToggle := preload("res://physics_filter_toggle.gd")
+const MotionFilterOverflow3D := preload("res://physics_motion_filter_overflow_3d.gd")
 const CachedAABBStress := preload("res://physics_proxy_same_aabb.gd")
 const CanvasScenePerf := preload("res://canvas_scene_perf.gd")
 const CASES := [
@@ -36,7 +37,7 @@ const CASES := [
 	"bitmap_rects", "bitmap_pipeline", "bitmap_morphology",
 	"curve_tessellation_2d", "curve_tessellation_3d", "curve_bake", "curve_nearest",
 	"canvas_transform_2d", "process_dispatch",
-	"physics_filter_toggle_2d", "physics_filter_toggle_3d",
+	"physics_filter_toggle_2d", "physics_filter_toggle_3d", "physics_motion_filter_overflow_3d",
 ]
 
 var signal_total: int = 0
@@ -409,6 +410,8 @@ func _run_case(test_case: String, scale: int, frames: int, seed: int) -> Diction
 			return await PhysicsFilterToggle.new().run_2d(self, scale, frames)
 		"physics_filter_toggle_3d":
 			return await PhysicsFilterToggle.new().run_3d(self, scale, frames)
+		"physics_motion_filter_overflow_3d":
+			return await MotionFilterOverflow3D.new().run(self, scale, frames)
 	return {"error": "Unhandled case"}
 
 
