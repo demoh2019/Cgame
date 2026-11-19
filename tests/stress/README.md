@@ -1,5 +1,34 @@
 # Cgame whole-engine stress and performance regression suite
 
+## Jolt 3D island, broadphase and contact-manifold tuning
+
+Jolt defaults are preserved. Advanced per-world settings:
+
+| Setting (`physics/jolt_physics_3d`) | Default | Usage |
+| --- | ---: | --- |
+| `limits/max_in_flight_body_pairs` | 16384 | Temporary body-pair queue capacity (1024–262144) |
+| `simulation/use_large_island_splitter` | true | Parallelize large constraint islands |
+| `simulation/use_manifold_reduction` | true | Merge compatible contact manifolds |
+| `simulation/contact_manifold_merge_angle` | 5° | Allowed manifold-normal angle |
+| `simulation/contact_warm_start_distance` | 0.01 m | Distance threshold for cached contact impulses |
+| `simulation/max_penetration_correction_distance` | 0.2 m | Limit per-iteration position correction |
+
+Each value is read when the Jolt physics space is created. Changing the project
+setting does not reconfigure existing spaces. The body-pair queue uses Jolt's
+per-step temporary allocator, not a persistent collision-pair limit. Reducing it
+may lower arena pressure but limit parallelism; disabling manifold reduction or
+large-island splitting can increase workload costs.
+
+```bash
+python3 -m unittest discover -s tests/stress -p test_jolt_pipeline_tuning.py -v
+python3 tests/stress/test_jolt_pipeline_tuning.py --godot /path/to/cgame
+```
+
+The second command creates isolated Jolt projects and simulates 144 spheres
+under three solver/queue profiles. No CPU, RSS, or stability improvement is
+claimed until native builds and fixed-hardware benchmarks pass.
+
+
 ## Bounded idle BVH changed-proxy queue retention
 
 The shared Cgame BVH used by GodotPhysics2D/3D and other spatial clients
