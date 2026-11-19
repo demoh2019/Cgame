@@ -60,6 +60,10 @@ class FakeAPI:
             return item
         if method == "PATCH" and path.startswith("/repos/demoh2019/godot/issues/"):
             self.writes.append((method, path, payload))
+            number = int(path.rsplit("/", 1)[1])
+            for target in self.existing:
+                if target["number"] == number:
+                    target["state"] = payload["state"]
             return {"state": payload["state"]}
         raise AssertionError((method, path, payload))
 
@@ -200,6 +204,58 @@ class MirrorTests(unittest.TestCase):
         self.assertEqual(self.db.execute("SELECT COUNT(*) FROM mirrored").fetchone()[0], 1)
         self.assertEqual(m.synchronize(api, self.db, kind="issues", limit=1, apply=True)["created_issues"], 1)
         self.assertEqual(m.synchronize(api, self.db, kind="issues", limit=1, apply=True)["created_issues"], 0)
+
+    def test_closure_patch_failure_is_recovered_without_duplicate(self):
+        class FlakyAPI(FakeAPI):
+            failures_left = 1
+            def request(self, method, path, payload=None):
+                if method == "PATCH" and self.failures_left:
+                    self.failures_left -= 1
+                    raise m.ApiError(503, "transient backend failure")
+                return super().request(method, path, payload)
+        api = FlakyAPI([issue(77, state="closed")])
+        m.scan(api, self.db)
+        with self.assertRaises(m.ApiError):
+            m.synchronize(api, self.db, apply=True)
+        self.assertEqual(len(api.existing), 1)
+        self.assertEqual(self.db.execute("SELECT COUNT(*) FROM pending_closures").fetchone()[0], 1)
+        self.assertEqual(self.db.execute("SELECT COUNT(*) FROM mirrored").fetchone()[0], 1)
+        retry = m.synchronize(api, self.db, apply=True)
+        self.assertEqual(retry["candidates"], 0)
+        self.assertEqual(len(api.existing), 1)
+        self.assertEqual(api.existing[0]["state"], "closed")
+        self.assertEqual(self.db.execute("SELECT COUNT(*) FROM pending_closures").fetchone()[0], 0)
+
+    def test_reconcile_mirrored_but_open_target(self):
+        src = issue(79, state="closed")
+        target = {"number": 87, "title": "existing", "html_url": "https://github.com/demoh2019/godot/issues/87",
+                  "body": m.provenance_body(src, "issue"), "state": "open"}
+        api = FakeAPI([src], existing=[target])
+        m.scan(api, self.db)
+        out = m.synchronize(api, self.db, apply=True)
+        self.assertEqual(out["candidates"], 0)
+        self.assertEqual(api.existing[0]["state"], "closed")
+        self.assertEqual([op[0] for op in api.writes], ["PATCH"])
+
+    def test_post_server_error_is_not_retried(self):
+        from urllib.error import HTTPError
+        from io import BytesIO
+        error = HTTPError("https://api.github.com/repos/x", 500, "Server Error", {}, BytesIO(b'{"message":"failed"}'))
+        api = m.GitHub("TOKEN", sleep=lambda _: None)
+        with patch("urllib.request.urlopen", side_effect=error) as opener:
+            with self.assertRaises(m.ApiError):
+                api.request("POST", "/repos/foo/bar/issues", {"title": "One"})
+            self.assertEqual(opener.call_count, 1)
+
+    def test_existing_closed_issue_requires_no_extra_writes(self):
+        src = issue(80, state="closed")
+        target = {"number": 88, "title": "existing", "html_url": "https://github.com/demoh2019/godot/issues/88",
+                  "body": m.provenance_body(src, "issue"), "state": "closed"}
+        api = FakeAPI([src], existing=[target])
+        m.scan(api, self.db)
+        out = m.synchronize(api, self.db, apply=True)
+        self.assertEqual(out["candidates"], 0)
+        self.assertEqual(api.writes, [])
 
     def test_scan_reset_is_idempotent(self):
         api = FakeAPI([issue(1), issue(2)])
