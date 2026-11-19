@@ -50,6 +50,6 @@ void initialize_behavior_tree_module(ModuleInitializationLevel p_level) {
 	GDREGISTER_CLASS(BehaviorTreeRunner);
 }
 
-void uninitialize_behavior_tree_module(ModuleInitializationLevel p_level) {
+void uninitialize_behavior_tree_module(ModuleInitializationLevel) {
 	// No global state to release.
 }
