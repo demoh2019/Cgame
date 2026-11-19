@@ -41,6 +41,7 @@
 #include "servers/physics_uniform_fluid.h"
 #include "servers/physics_gyroscopic_3d.h"
 #include "servers/physics_fluid_buoyancy_3d.h"
+#include "servers/physics_fluid_convex_hull_3d.h"
 
 void GodotBody3D::_mass_properties_changed() {
 	if (get_space() && !mass_properties_update_list.in_list()) {
@@ -715,9 +716,22 @@ void GodotBody3D::integrate_forces(real_t p_step, bool p_defer_motion) {
 							// A tilted capsule has noncircular horizontal slices.
 							sample = godot_physics_fluid_sample_3d(bounds, shape_volume, water_height);
 						}
+					} else if (shape_type == PS3DE::SHAPE_CONVEX_POLYGON) {
+						const GodotConvexPolygonShape3D *convex = static_cast<const GodotConvexPolygonShape3D *>(shape);
+						real_t hull_volume = 0.0;
+						if (godot_physics_fluid_convex_hull_sample_3d(convex->get_mesh(), shape_world,
+									water_height, sample, hull_volume)) {
+							// ConvexPolygonShape3D uses AABB volume for its mass;
+							// correct both the fluid displacement and the denominator
+							// for submerged-fraction angular damping here.
+							total_fluid_shape_volume += hull_volume - shape_volume;
+						} else {
+							// Invalid or extremely complex hulls retain the cheap
+							// AABB model rather than suppressing buoyancy entirely.
+							sample = godot_physics_fluid_sample_3d(bounds, shape_volume, water_height);
+						}
 					} else {
-							// Nonuniform scales, shear and complex shapes keep the
-							// existing low-cost AABB approximation.
+						// Shapes without an exact supported solver use the AABB path.
 						sample = godot_physics_fluid_sample_3d(bounds, shape_volume, water_height);
 					}
 					if (!(sample.submerged_volume > 0.0)) {
