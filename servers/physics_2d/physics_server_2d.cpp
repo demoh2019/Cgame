@@ -376,6 +376,9 @@ PhysicsServer2D::PhysicsServer2D() {
 	GLOBAL_DEF(PropertyInfo(Variant::BOOL, "physics/2d/solver/manifold_spread_reduction"), false);
 	GLOBAL_DEF(PropertyInfo(Variant::FLOAT, "physics/2d/solver/contact_recycle_radius", PROPERTY_HINT_RANGE, "0,10,0.01,or_greater,suffix:m"), 1.0);
 	GLOBAL_DEF(PropertyInfo(Variant::FLOAT, "physics/2d/solver/contact_max_separation", PROPERTY_HINT_RANGE, "0,10,0.01,or_greater,suffix:m"), 1.5);
+	// Experimental sphere-only speculative contacts for existing broadphase pairs.
+	// 0 preserves legacy behavior; wider gaps can produce ghost interactions.
+	GLOBAL_DEF(PropertyInfo(Variant::FLOAT, "physics/2d/solver/speculative_sphere_distance", PROPERTY_HINT_RANGE, "0,16,0.1,or_greater,suffix:px"), 0.0);
 	GLOBAL_DEF(PropertyInfo(Variant::FLOAT, "physics/2d/solver/contact_max_allowed_penetration", PROPERTY_HINT_RANGE, "0.01,10,0.01,or_greater,suffix:m"), 0.3);
 	GLOBAL_DEF(PropertyInfo(Variant::FLOAT, "physics/2d/solver/default_contact_bias", PROPERTY_HINT_RANGE, "0,1,0.01"), 0.8);
 	// Zero disables the clamp for backwards-compatible penetration recovery.
