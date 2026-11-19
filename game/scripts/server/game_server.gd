@@ -9,6 +9,7 @@ const WorldGen = preload("res://scripts/shared/world_gen.gd")
 const Inventory = preload("res://scripts/shared/inventory.gd")
 const Vendor = preload("res://scripts/shared/vendor.gd")
 const PvpInfamy = preload("res://scripts/shared/pvp_infamy.gd")
+const CombatLogout = preload("res://scripts/shared/combat_logout.gd")
 const PvPHonor = preload("res://scripts/shared/pvp_honor.gd")
 const PlayerTrade = preload("res://scripts/shared/player_trade.gd")
 const Party = preload("res://scripts/shared/party.gd")
@@ -101,6 +102,7 @@ class Player:
 	var respawn_timer: float = 0.0
 	var keep_inventory_on_respawn: bool = false
 	var last_death_full_loot: bool = false
+	var combat_tag_until: float = 0.0 # Only server ticks mark PvP combat, never persisted.
 	var kills: int = 0
 	var deaths: int = 0
 	var pvp_infamy: float = 0.0 # Persistent server-only criminal reputation.
@@ -363,7 +365,29 @@ func valid_character_data(data: Dictionary) -> bool:
 	return valid
 
 
+## Call before building a logout save. A live player disconnecting while
+## PvP-tagged in a full-loot zone drops equipment once, then respawns safely.
+## This applies to voluntary exits and network loss alike. Safes and PvE are
+## exempt; stash and character progression are never dropped.
+func prepare_disconnect(peer_id: int) -> bool:
+	var player: Player = players.get(peer_id)
+	if player == null:
+		return false
+	var zone: int = world.zone_at(player.position.x, player.position.z) if player.position.is_finite() else -1
+	if not CombatLogout.penalize_on_disconnect(player, zone, time):
+		return false
+	player.combat_tag_until = 0.0 # Idempotent even if remove_player runs later.
+	# The same confirmed full-loot death path handles the drops, persistence
+	# flags, equipped gear, respawn starter kit and active trades.
+	player.survival.hurt(player.survival.health)
+	_on_player_death(player, -1)
+	_spawn_player(player)
+	return true
+
+
 func remove_player(peer_id: int) -> void:
+	# Direct server removals must obey the same rule as authenticated Net.leave.
+	prepare_disconnect(peer_id)
 	# Prevent a recycled peer ID inheriting another survivor's guilt.
 	for survivor in players.values():
 		if survivor.defense_target == peer_id:
@@ -2037,6 +2061,11 @@ func _damage_target(attacker: Player, hit: Dictionary, damage: float) -> void:
 			return
 		var final_damage: float = Combat.apply_armor(damage, victim.inventory.armor)
 		var applied: float = victim.survival.hurt(final_damage)
+		if applied > 0.0:
+			# Both participants are combat-tagged from actual server-applied PvP
+			# damage, including the attacker after a lethal finishing strike.
+			CombatLogout.mark(attacker, time)
+			CombatLogout.mark(victim, time)
 		# Only genuine dangerous-zone player damage grants retaliation.
 		# A legally counterattacking victim cannot justify the original
 		# initiator's aggression, and wanted outlaws get no immunity.
@@ -2773,6 +2802,7 @@ func snapshot_for(peer_id: int) -> Dictionary:
 			"stamina": player.survival.stamina,
 			"alive": _alive(player), "kills": player.kills, "deaths": player.deaths, "zone": player.zone_notice,
 			"pvp_infamy": player.pvp_infamy, "outlaw": PvpInfamy.is_outlaw(player.pvp_infamy),
+			"combat_tag_seconds": CombatLogout.remaining(player.combat_tag_until, time),
 			"self_defense_seconds": PvpInfamy.defense_remaining(
 				player.defense_target, player.defense_until, time),
 			"pvp_kills": player.pvp_kills, "pvp_honor": player.pvp_honor,

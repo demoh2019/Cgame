@@ -193,6 +193,10 @@ func leave(peer: int) -> bool:
 	if player == null:
 		return true
 	var user_id: String = player.user_id
+	# The server must resolve combat-logout full loot BEFORE serializing
+	# the final Nakama character. Otherwise a disconnect could save gear
+	# from before the drop, creating both a public bag and a retained copy.
+	sim.prepare_disconnect(peer)
 	var data: Dictionary = sim.character_data(player)
 	if user_id != "":
 		_departing_accounts[user_id] = true

@@ -949,6 +949,9 @@ func _process(_delta: float) -> void:
 	_contract_label.text = Contracts.description(journal if journal is Dictionary else Contracts.empty_state())
 	_contract_label.text += "\n" + str(client.you.get("daily_description", "Daily bounty pending server"))
 	_info_label.text += "  Rest %.0fs" % float(client.you.get("rest_cooldown", 0.0))
+	var combat_tag: float = float(client.you.get("combat_tag_seconds", 0.0))
+	if combat_tag > 0.0:
+		_info_label.text += "\nPvP COMBAT %.0fs — leaving a full-loot zone now drops gear!" % ceil(combat_tag)
 	_info_label.text += "\nPvP victories %d | Honor %d | %s" % [
 		int(client.you.get("pvp_kills", 0)), int(client.you.get("pvp_honor", 0)),
 		str(client.you.get("pvp_rank", "Wanderer"))
