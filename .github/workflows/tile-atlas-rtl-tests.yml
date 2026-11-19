@@ -1,0 +1,31 @@
+name: Tile Atlas RTL Regression Tests
+
+on:
+  pull_request:
+    paths:
+      - "modules/tilemap/editor/tile_atlas_view.cpp"
+      - "modules/tilemap/editor/tile_atlas_view.h"
+      - "modules/tilemap/tests/test_tile_atlas_view_rtl.h"
+      - ".github/workflows/tile-atlas-rtl-tests.yml"
+  workflow_dispatch:
+
+jobs:
+  tile-atlas-rtl-native-tests:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 120
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+        with:
+          submodules: recursive
+
+      - name: Set up dependencies
+        uses: ./.github/actions/godot-deps
+
+      - name: Compile editor and TileMap module regression tests
+        run: |
+          scons platform=linuxbsd target=editor tests=yes module_text_server_fb_enabled=yes -j2
+
+      - name: Run tile-atlas RTL layout regression tests
+        run: |
+          ./bin/godot.linuxbsd.editor.x86_64 --headless --test --test-case="*TileAtlasView*"
