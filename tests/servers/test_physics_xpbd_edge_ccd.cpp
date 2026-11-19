@@ -142,9 +142,9 @@ TEST_CASE("[PhysicsEdgeCCD] Invalid masses, fully pinned contact and nonfinite v
 			-1, 1, 1, 1, 0.12, 0, hit, lambda));
 	CHECK_FALSE(physics_xpbd_solve_swept_edges(a1, b1, c, d,
 			1, 1, 1, 1, 0.12, -1, hit, lambda));
+	lambda = std::numeric_limits<real_t>::infinity();
 	CHECK_FALSE(physics_xpbd_solve_swept_edges(a1, b1, c, d,
-			1, 1, 1, 1, 0.12, 0, hit,
-			lambda = std::numeric_limits<real_t>::infinity()));
+			1, 1, 1, 1, 0.12, 0, hit, lambda));
 	CHECK(a1 == old_a);
 	CHECK(b1 == old_b);
 	CHECK(c == old_c);
