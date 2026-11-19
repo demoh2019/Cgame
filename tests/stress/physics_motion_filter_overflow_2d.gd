@@ -79,6 +79,7 @@ func run(tree: SceneTree, scale: int, frames: int) -> Dictionary:
 
 	PhysicsServer2D.body_add_collision_exception(mover, obstacle)
 	var exception_rejected := not PhysicsServer2D.body_test_motion(mover, query)
+	PhysicsServer2D.body_remove_collision_exception(mover, obstacle)
 
 	# A stationary recovery test must not divide by zero when forming
 	# motion_normal. There is no initial overlap with the valid obstacle.
