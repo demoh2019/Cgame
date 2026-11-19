@@ -1797,6 +1797,52 @@ The tests check finite body states and joint spacing, not physical
 equivalence to the serial solver or measured performance improvements.
 Start with small scales and monitor CPU usage, peak RSS and frame p95.
 
+### Embedded 2D circle/rectangle analytic manifolds (Box2D-style)
+
+GodotPhysics2D now handles an additional common narrowphase case without a
+generic SAT pass: a circle whose **center is inside a non-degenerate
+rectangle**. Previously the specialized circle/rectangle path handled only
+centers outside the rectangle, even when the contained circle was clearly
+colliding. The new branch selects the nearest exit face in rectangle-local
+coordinates and constructs a single analytic contact point pair. Its normal
+and contact depth ensure that a contained rigid circle is pushed towards
+that face. Circle radius and nonnegative collision margins are included,
+and any cached separation axis is invalidated after a successful contact.
+
+The fast path is limited to **unscaled, unsheared, unit-orthogonal** circle
+and rectangle transforms, nonnegative margins, and non-swept contacts.
+Degenerate rectangles, affine-scaled shapes and swept CCD pairs still use
+the existing SAT solver. It does not allocate heap memory.
+
+Validation consists of a Python source contract and 5,000 deterministic
+randomized analytical contact checks across rotated rectangles, centers,
+radii and margins. The headless test checks circle centers inside,
+near the border, outside corners, and an actual rigid-body escape toward
+the nearest exit. A scaled rectangle explicitly covers the SAT fallback:
+
+```bash
+python3 -m unittest discover -s tests/stress -p 'test_physics_embedded_circle_rectangle_2d.py' -v
+./bin/godot.macos.editor.arm64 --headless --path tests/stress \
+  --script res://physics_embedded_circle_rectangle_2d_regression.gd
+```
+
+For CPU/p95/RSS profiling, two stress cases create the same number of
+circle/rectangle pairs at each scale, with circles either embedded
+or overlapping from outside. Both refresh transforms every physics step:
+
+```bash
+python3 tests/stress/run.py --godot ./bin/godot.macos.editor.arm64 \
+  --case physics_circle_rectangle_embedded_2d,physics_circle_rectangle_exterior_2d \
+  --scale 4 --frames 90 --repeats 5 --timeout 600 \
+  --rss-limit-mib 4096 --output out/physics-circle-rectangle-2d.json
+```
+
+Benchmark each scene against the same scene on the *previous* engine build
+to attribute a speed difference to this optimization. The two workloads
+also have different contact depths, so their absolute timings are not a
+direct algorithm-only speed ratio. Compiled Godot headless tests and real
+benchmarks remain necessary before claiming production speedups.
+
 ### Optimized 3D sphere-box closest-point detection
 
 Cgame now specializes GodotPhysics3D's sphere-versus-box narrow phase
