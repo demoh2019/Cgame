@@ -61,7 +61,8 @@ func is_alive() -> bool:
 
 
 ## Advances the brain. `players` maps peer id to {position: Vector3, alive: bool,
-## safe: bool, noise: float}. Noisy survivors may be detected farther away.
+## safe: bool, noise: float, scent: float}. Sound and blood scent are
+## server-owned sensory channels revealing noisy or wounded survivors.
 ## Returns {"hit": peer_id, "damage": float} when the zombie lands a blow, else {}.
 func think(world, players: Dictionary, delta: float, rng: RandomNumberGenerator) -> Dictionary:
 	if state == State.DEAD:
@@ -178,7 +179,13 @@ func _select_target(players: Dictionary, here: Vector2) -> void:
 		var sight_multiplier := clampf(float(info.get("notice_multiplier", 1.0)), 1.0, 1.35)
 		var notice := minf(float(data["notice"]) * sight_multiplier, float(data["lose"]) - 1.0)
 		var hearing := clampf(float(info.get("noise", 0.0)), 0.0, float(data["lose"]) - 1.0)
-		var detect_range := maxf(notice, hearing)
+		# Scent can improve discovery but never expands the pursuit leash,
+		# overrides combat threat or bypasses safe/dead player protections.
+		var scent_raw: float = float(info.get("scent", 0.0))
+		var scent: float = 0.0
+		if is_finite(scent_raw):
+			scent = clampf(scent_raw, 0.0, float(data["lose"]) - 1.0)
+		var detect_range := maxf(maxf(notice, hearing), scent)
 		if distance < best_distance and (distance <= detect_range or peer_id == target_id):
 			best = peer_id
 			best_distance = distance
