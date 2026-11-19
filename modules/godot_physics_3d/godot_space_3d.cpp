@@ -1283,6 +1283,15 @@ GodotSpace3D::GodotSpace3D() {
 	contact_recycle_radius = GLOBAL_GET("physics/3d/solver/contact_recycle_radius");
 	contact_max_separation = GLOBAL_GET("physics/3d/solver/contact_max_separation");
 	speculative_sphere_distance = MAX(real_t(0.0), (real_t)GLOBAL_GET("physics/3d/solver/speculative_sphere_distance"));
+	const real_t configured_strain_max_ratio = GLOBAL_GET("physics/3d/solver/soft_body_xpbd_strain_max_stretch_ratio");
+	soft_body_xpbd_strain_max_stretch_ratio = Math::is_finite(configured_strain_max_ratio) && configured_strain_max_ratio > 0.0 ?
+			MAX(real_t(1.0), configured_strain_max_ratio) : real_t(0.0);
+	const real_t configured_strain_min_ratio = GLOBAL_GET("physics/3d/solver/soft_body_xpbd_strain_min_compression_ratio");
+	soft_body_xpbd_strain_min_compression_ratio = Math::is_finite(configured_strain_min_ratio) ?
+			CLAMP(configured_strain_min_ratio, real_t(0.0), real_t(1.0)) : real_t(0.0);
+	const real_t configured_strain_compliance = GLOBAL_GET("physics/3d/solver/soft_body_xpbd_strain_limit_compliance");
+	soft_body_xpbd_strain_limit_compliance = Math::is_finite(configured_strain_compliance) ?
+			MAX(real_t(0.0), configured_strain_compliance) : real_t(0.0);
 	const real_t configured_xpbd_compliance = GLOBAL_GET("physics/3d/solver/soft_body_xpbd_compliance");
 	soft_body_xpbd_compliance = Math::is_finite(configured_xpbd_compliance) ? MAX(real_t(0.0), configured_xpbd_compliance) : real_t(0.0);
 	const real_t configured_plastic_yield = GLOBAL_GET("physics/3d/solver/soft_body_plastic_yield_strain");
