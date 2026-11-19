@@ -22,6 +22,11 @@ struct ItemPairs {
 	LocalVector<Link> extended_pairs;
 
 	void add_pair_to(BVHHandle p_handle, void *p_userdata) {
+		// Most objects have only a few neighbors. Reserve exactly one link
+		// on first contact rather than eagerly allocating room for two.
+		if (extended_pairs.get_capacity() == 0) {
+			extended_pairs.reserve_exact(1);
+		}
 		Link temp;
 		temp.set(p_handle, p_userdata);
 
@@ -47,6 +52,11 @@ struct ItemPairs {
 		DEV_ASSERT(p_index < extended_pairs.size());
 		void *userdata = extended_pairs[p_index].userdata;
 		extended_pairs.remove_at_unordered(p_index);
+		// Avoid pinning a large allocation to an object after a temporary
+		// high-density contact event. Keep small buffers for contact churn.
+		if (extended_pairs.is_empty() && extended_pairs.get_capacity() > 8) {
+			extended_pairs.reset();
+		}
 		return userdata;
 	}
 
