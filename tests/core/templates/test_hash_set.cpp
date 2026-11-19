@@ -36,6 +36,69 @@ TEST_FORCE_LINK(test_hash_set)
 
 namespace TestHashSet {
 
+struct CountingHasher {
+	static inline uint32_t calls = 0;
+
+	static uint32_t hash(const int &p_key) {
+		++calls;
+		// Exercise the EMPTY_HASH normalization as well as the ordinary path.
+		return p_key == 0 ? 0 : HashMapHasherDefault::hash(p_key);
+	}
+};
+
+struct ClusteredHasher {
+	static uint32_t hash(const int &p_key) {
+		// Force long probe chains, including keys whose hash is zero.
+		return uint32_t(p_key % 4);
+	}
+};
+
+TEST_CASE("[HashSet] Insert hashes new and existing keys only once") {
+	HashSet<int, CountingHasher> set;
+
+	CountingHasher::calls = 0;
+	set.insert(0);
+	CHECK_EQ(CountingHasher::calls, 1);
+	CHECK_EQ(set.size(), 1);
+
+	CountingHasher::calls = 0;
+	set.insert(0);
+	CHECK_EQ(CountingHasher::calls, 1);
+	CHECK_EQ(set.size(), 1);
+
+	CountingHasher::calls = 0;
+	for (int i = 1; i <= 256; i++) {
+		set.insert(i);
+	}
+	// Growing / rehashing must use saved hashes, not rehash existing keys.
+	CHECK_EQ(CountingHasher::calls, 256);
+	CHECK_EQ(set.size(), 257);
+
+	for (int i = 0; i <= 256; i++) {
+		CHECK(set.has(i));
+	}
+}
+
+TEST_CASE("[HashSet] Colliding keys survive wraparound and repeated erases") {
+	HashSet<int, ClusteredHasher> set;
+	for (int i = 0; i < 160; i++) {
+		set.insert(i);
+	}
+	for (int i = 0; i < 160; i += 3) {
+		CHECK(set.erase(i));
+	}
+	for (int i = 0; i < 160; i++) {
+		CHECK(set.has(i) == (i % 3 != 0));
+	}
+	for (int i = 0; i < 160; i += 3) {
+		set.insert(i);
+	}
+	CHECK_EQ(set.size(), 160);
+	for (int i = 0; i < 160; i++) {
+		CHECK(set.has(i));
+	}
+}
+
 TEST_CASE("[HashSet] List initialization") {
 	HashSet<int> set{ 0, 1, 2, 3, 4 };
 
