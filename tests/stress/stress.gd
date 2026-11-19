@@ -16,7 +16,7 @@ const CanvasScenePerf := preload("res://canvas_scene_perf.gd")
 const CASES := [
 	"containers", "array_literals", "dictionary_snapshot", "strings", "script_vm", "math", "signals",
 	"scene_tree", "packed_scene", "images", "json", "stream", "stream_bulk",
-	"file_io", "threads", "physics_2d", "physics_contacts_zero_friction_2d", "physics_contacts_friction_2d", "physics_contact_manifolds_2d", "physics_3d", "physics_frictionless_3d", "physics_ccd_2d", "physics_dense_2d", "physics_dense_3d", "physics_pending_3d", "physics_ccd_3d", "physics_joint_chain_2d", "physics_joint_chain_3d", "physics_sparse_2d", "physics_sparse_3d", "physics_proxies_2d", "physics_proxies_3d", "physics_rid_sparse_2d", "physics_rid_sparse_3d", "physics_rid_moving_2d", "physics_rid_moving_3d", "physics_restitution_2d", "physics_restitution_3d",
+	"file_io", "threads", "physics_2d", "physics_contacts_zero_friction_2d", "physics_contacts_friction_2d", "physics_contact_manifolds_2d", "physics_3d", "physics_frictionless_3d", "physics_soft_contacts_zero_friction_3d", "physics_soft_contacts_friction_3d", "physics_ccd_2d", "physics_dense_2d", "physics_dense_3d", "physics_pending_3d", "physics_ccd_3d", "physics_joint_chain_2d", "physics_joint_chain_3d", "physics_sparse_2d", "physics_sparse_3d", "physics_proxies_2d", "physics_proxies_3d", "physics_rid_sparse_2d", "physics_rid_sparse_3d", "physics_rid_moving_2d", "physics_rid_moving_3d", "physics_restitution_2d", "physics_restitution_3d",
 	"object_churn", "memory_churn", "astar_grid", "astar_grid_neighbors", "astar_grid_jps", "astar_grid_fill", "astar_grid_rebuild", "astar_relax_2d", "astar_relax_3d", "astar_graph", "tweens", "audio_buffers",
 	"variant_codec", "packet_stream", "packet_tx_batch", "packet_rx_batch", "packet_variant_reuse", "ui_layout", "grid_reflow", "box_reflow", "flow_reflow", "render_2d", "render_3d", "render_ellipse_2d", "render_light_culling_3d",
 	"resource_load",
@@ -268,6 +268,10 @@ func _run_case(test_case: String, scale: int, frames: int, seed: int) -> Diction
 			return await _physics_3d(scale, frames)
 		"physics_frictionless_3d":
 			return await _physics_3d(scale, frames, true)
+		"physics_soft_contacts_zero_friction_3d":
+			return await _physics_soft_contacts_3d(scale, frames, true)
+		"physics_soft_contacts_friction_3d":
+			return await _physics_soft_contacts_3d(scale, frames, false)
 		"physics_ccd_2d":
 			return await _physics_ccd_2d(scale, frames)
 		"physics_dense_2d":
@@ -799,6 +803,74 @@ func _physics_3d(scale: int, frames: int, p_frictionless: bool = false) -> Dicti
 
 # Stress 2D CCD ray casts where the first leading support misses a target
 # but the second support intersects it. Isolated lanes avoid unrelated pairs.
+
+# Dense rigid/soft contacts: compare the hot paths with and without friction.
+# A separate soft mesh is used per lane so no cross-lane interaction is needed.
+func _physics_soft_contacts_3d(scale: int, frames: int, frictionless: bool) -> Dictionary:
+	var world := Node3D.new()
+	root.add_child(world)
+	var mesh := SphereMesh.new()
+	mesh.radius = 0.75
+	mesh.height = 1.5
+	mesh.radial_segments = 8
+	mesh.rings = 4
+	var rigid_shape := SphereShape3D.new()
+	rigid_shape.radius = 0.5
+	var material := PhysicsMaterial.new()
+	material.friction = 0.0 if frictionless else 0.8
+
+	var count := 16 * scale
+	var soft_bodies: Array[SoftBody3D] = []
+	var rigid_bodies: Array[RigidBody3D] = []
+	soft_bodies.resize(count)
+	rigid_bodies.resize(count)
+	for i in range(count):
+		var lane_x := float(i) * 4.0
+		var soft := SoftBody3D.new()
+		soft.mesh = mesh
+		soft.simulation_precision = 3
+		soft.total_mass = 1.0
+		soft.position = Vector3(lane_x, 2.1, 0.0)
+		world.add_child(soft)
+		soft_bodies[i] = soft
+
+		var body := RigidBody3D.new()
+		body.gravity_scale = 0.0
+		body.can_sleep = false
+		body.physics_material_override = material
+		body.position = Vector3(lane_x, 3.1, 0.0)
+		var collider := CollisionShape3D.new()
+		collider.shape = rigid_shape
+		body.add_child(collider)
+		world.add_child(body)
+		body.linear_velocity = Vector3(0.0, -0.25, 0.0)
+		rigid_bodies[i] = body
+
+	var peak_physics_ms := 0.0
+	var peak_pairs := 0
+	var frame_intervals: Array[float] = []
+	var last_tick := Time.get_ticks_usec()
+	for frame in range(frames):
+		await physics_frame
+		var now := Time.get_ticks_usec()
+		frame_intervals.append(float(now - last_tick) / 1000.0)
+		last_tick = now
+		peak_physics_ms = maxf(peak_physics_ms, Performance.get_monitor(Performance.TIME_PHYSICS_PROCESS) * 1000.0)
+		peak_pairs = maxi(peak_pairs, int(Performance.get_monitor(Performance.PHYSICS_3D_COLLISION_PAIRS)))
+
+	var probe: Vector3 = soft_bodies[0].get_point_transform(0)
+	var state_valid := probe.is_finite() and rigid_bodies[0].position.is_finite() and rigid_bodies[0].linear_velocity.is_finite()
+	world.queue_free()
+	await process_frame
+	if not state_valid:
+		return {"error": "Rigid/soft 3D contacts produced non-finite positions or velocities", "frictionless": frictionless}
+	var stats := _frame_statistics(frame_intervals)
+	return {"soft_bodies": count, "rigid_bodies": count, "frictionless": frictionless, "physics_frames": frames,
+			"peak_physics_ms": peak_physics_ms, "peak_collision_pairs": peak_pairs,
+			"frame_interval_ms": stats, "frame_p95_ms": stats["p95"], "state_valid": state_valid}
+
+
+
 func _physics_ccd_2d(scale: int, frames: int) -> Dictionary:
 	var world := Node2D.new()
 	root.add_child(world)
