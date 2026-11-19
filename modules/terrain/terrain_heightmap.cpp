@@ -39,6 +39,27 @@ int TerrainHeightmap::_index(int p_x, int p_z) const {
     return p_z * dimensions.x + p_x;
 }
 
+void TerrainHeightmap::_notify_changed() {
+    if (edit_depth > 0) {
+        pending_change = true;
+    } else {
+        emit_changed();
+    }
+}
+
+void TerrainHeightmap::begin_edit() {
+    edit_depth++;
+}
+
+void TerrainHeightmap::end_edit() {
+    ERR_FAIL_COND_MSG(edit_depth == 0, "end_edit() called without begin_edit().");
+    edit_depth--;
+    if (edit_depth == 0 && pending_change) {
+        pending_change = false;
+        emit_changed();
+    }
+}
+
 TerrainHeightmap::TerrainHeightmap() {
     heights.resize(dimensions.x * dimensions.y);
     heights.fill(0.0f);
@@ -76,7 +97,7 @@ void TerrainHeightmap::set_dimensions(const Size2i &p_dimensions) {
     dimensions = p_dimensions;
     heights = new_heights;
     paint_weights = new_weights;
-    emit_changed();
+    _notify_changed();
 }
 
 Size2i TerrainHeightmap::get_dimensions() const {
@@ -92,7 +113,7 @@ void TerrainHeightmap::set_heights(const PackedFloat32Array &p_heights) {
         return;
     }
     heights = p_heights;
-    emit_changed();
+    _notify_changed();
 }
 
 PackedFloat32Array TerrainHeightmap::get_heights() const {
@@ -112,7 +133,7 @@ void TerrainHeightmap::set_paint_weights(const PackedColorArray &p_weights) {
         return;
     }
     paint_weights = p_weights;
-    emit_changed();
+    _notify_changed();
 }
 
 PackedColorArray TerrainHeightmap::get_paint_weights() const {
@@ -124,7 +145,7 @@ void TerrainHeightmap::set_height_at(int p_x, int p_z, float p_height) {
     const int index = _index(p_x, p_z);
     if (heights[index] != p_height) {
         heights.set(index, p_height);
-        emit_changed();
+        _notify_changed();
     }
 }
 
@@ -178,7 +199,7 @@ void TerrainHeightmap::sculpt(const Vector2 &p_center, float p_radius, float p_d
         }
     }
     if (modified) {
-        emit_changed();
+        _notify_changed();
     }
 }
 
@@ -216,7 +237,7 @@ void TerrainHeightmap::smooth(const Vector2 &p_center, float p_radius, float p_s
         }
     }
     if (modified) {
-        emit_changed();
+        _notify_changed();
     }
 }
 
@@ -271,7 +292,7 @@ void TerrainHeightmap::erode_talus(int p_iterations, float p_talus, float p_rate
         modified = true;
     }
     if (modified) {
-        emit_changed();
+        _notify_changed();
     }
 }
 
@@ -306,7 +327,7 @@ void TerrainHeightmap::paint_layer(const Vector2 &p_center, float p_radius, int 
         }
     }
     if (modified) {
-        emit_changed();
+        _notify_changed();
     }
 }
 
@@ -373,6 +394,8 @@ Ref<ArrayMesh> TerrainHeightmap::build_mesh(float p_cell_size) const {
 }
 
 void TerrainHeightmap::_bind_methods() {
+    ClassDB::bind_method(D_METHOD("begin_edit"), &TerrainHeightmap::begin_edit);
+    ClassDB::bind_method(D_METHOD("end_edit"), &TerrainHeightmap::end_edit);
     ClassDB::bind_method(D_METHOD("set_dimensions", "dimensions"), &TerrainHeightmap::set_dimensions);
     ClassDB::bind_method(D_METHOD("get_dimensions"), &TerrainHeightmap::get_dimensions);
     ClassDB::bind_method(D_METHOD("set_heights", "heights"), &TerrainHeightmap::set_heights);
