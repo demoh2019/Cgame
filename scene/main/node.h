@@ -350,6 +350,7 @@ private:
 	}
 
 	void _update_children_cache_impl() const;
+	void _append_find_children(const String &p_pattern, const String &p_type, bool p_recursive, bool p_owned, TypedArray<Node> &r_result) const;
 
 	// Process group management
 	void _add_process_group();
