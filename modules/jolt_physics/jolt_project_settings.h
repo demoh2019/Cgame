@@ -73,6 +73,9 @@ public:
 	// Opt-in soft body self collision: non-neighboring vertices against the
 	// body's own deformable triangles. Uses a separate per-space CPU budget.
 	inline static bool soft_body_self_contacts = false;
+	// Opt-in conservative-advancement point/face CCD *inside* one soft
+	// body; independent of inter-body speculative CCD and self edge CCD.
+	inline static bool soft_body_self_speculative_vertex_face_ccd = false;
 	// Optional nonlocal self edge/edge collisions, separate quota within
 	// the existing global self-contact budget. Requires self_contacts=true.
 	inline static bool soft_body_self_edge_contacts = false;
