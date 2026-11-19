@@ -35,22 +35,28 @@
 #include "servers/physics_3d/physics_server_3d.h"
 
 Vector<Vector3> SphereShape3D::get_debug_mesh_lines() const {
-	float r = get_radius();
+	const float r = get_radius();
 
+	// Every segment shares its first endpoint with the previous segment's
+	// last endpoint. Compute each sine/cosine pair once, not twice.
+	constexpr int SEGMENTS = 361;
 	Vector<Vector3> points;
+	points.resize(SEGMENTS * 6);
+	Vector3 *vertices = points.ptrw();
+	Point2 a(0.0f, r);
+	int write_idx = 0;
 
-	for (int i = 0; i <= 360; i++) {
-		float ra = Math::deg_to_rad((float)i);
-		float rb = Math::deg_to_rad((float)i + 1);
-		Point2 a = Vector2(Math::sin(ra), Math::cos(ra)) * r;
-		Point2 b = Vector2(Math::sin(rb), Math::cos(rb)) * r;
+	for (int i = 0; i < SEGMENTS; i++) {
+		const float next_angle = Math::deg_to_rad((float)i + 1);
+		const Point2 b = Vector2(Math::sin(next_angle), Math::cos(next_angle)) * r;
 
-		points.push_back(Vector3(a.x, 0, a.y));
-		points.push_back(Vector3(b.x, 0, b.y));
-		points.push_back(Vector3(0, a.x, a.y));
-		points.push_back(Vector3(0, b.x, b.y));
-		points.push_back(Vector3(a.x, a.y, 0));
-		points.push_back(Vector3(b.x, b.y, 0));
+		vertices[write_idx++] = Vector3(a.x, 0, a.y);
+		vertices[write_idx++] = Vector3(b.x, 0, b.y);
+		vertices[write_idx++] = Vector3(0, a.x, a.y);
+		vertices[write_idx++] = Vector3(0, b.x, b.y);
+		vertices[write_idx++] = Vector3(a.x, a.y, 0);
+		vertices[write_idx++] = Vector3(b.x, b.y, 0);
+		a = b;
 	}
 
 	return points;
