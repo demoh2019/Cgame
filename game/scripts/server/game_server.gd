@@ -2711,6 +2711,7 @@ func snapshot_for(peer_id: int) -> Dictionary:
 	var player: Player = players.get(peer_id)
 	if player == null:
 		return {}
+	_refresh_daily(player)
 	var here := Vector2(player.position.x, player.position.z)
 	var nearby_players: Array = []
 	for other in players.values():
@@ -2804,7 +2805,7 @@ func snapshot_for(peer_id: int) -> Dictionary:
 			"combat_levels": player.progression.combat_levels(),
 			"contract": player.contract_state.duplicate(true),
 			"daily_bounty": player.daily_bounty.duplicate(true),
-			"daily_description": DailyBounties.description(player.daily_bounty, _refresh_daily(player)),
+			"daily_description": DailyBounties.description(player.daily_bounty, DailyBounties.utc_day()),
 			"daily_utc_day": DailyBounties.utc_day(),
 			"renown": player.renown,
 			"renown_rank": Reputation.title(player.renown),
