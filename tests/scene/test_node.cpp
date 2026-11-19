@@ -1465,6 +1465,78 @@ TEST_CASE("[SceneTree][Node] Large mixed-mode children cache preserves index ord
 }
 
 
+TEST_CASE("[SceneTree][Node] Move child shifts only the affected range and preserves child indices") {
+	Node *root = memnew(Node);
+	Vector<Node *> front;
+	Vector<Node *> ordinary;
+	Vector<Node *> back;
+	for (int i = 0; i < 8; i++) {
+		Node *child = memnew(Node);
+		child->set_name("Front" + itos(i));
+		root->add_child(child, false, Node::INTERNAL_MODE_FRONT);
+		front.push_back(child);
+	}
+	for (int i = 0; i < 192; i++) {
+		Node *child = memnew(Node);
+		child->set_name("Ordinary" + itos(i));
+		root->add_child(child);
+		ordinary.push_back(child);
+	}
+	for (int i = 0; i < 8; i++) {
+		Node *child = memnew(Node);
+		child->set_name("Back" + itos(i));
+		root->add_child(child, false, Node::INTERNAL_MODE_BACK);
+		back.push_back(child);
+	}
+
+	// Use Vector as a simple reference model. Exercise adjacent moves
+	// in both directions, distant moves and the one-past-end index.
+	auto check_order = [&]() {
+		CHECK_EQ(root->get_child_count(true), front.size() + ordinary.size() + back.size());
+		CHECK_EQ(root->get_child_count(false), ordinary.size());
+		int global_index = 0;
+		for (int i = 0; i < front.size(); i++) {
+			CHECK_EQ(root->get_child(global_index++, true), front[i]);
+			CHECK_EQ(front[i]->get_index(), i);
+		}
+		for (int i = 0; i < ordinary.size(); i++) {
+			CHECK_EQ(root->get_child(global_index++, true), ordinary[i]);
+			CHECK_EQ(root->get_child(i, false), ordinary[i]);
+			CHECK_EQ(ordinary[i]->get_index(), i);
+		}
+		for (int i = 0; i < back.size(); i++) {
+			CHECK_EQ(root->get_child(global_index++, true), back[i]);
+			CHECK_EQ(back[i]->get_index(), i);
+		}
+	};
+	auto move = [&](Vector<Node *> &r_reference, int p_from, int p_to) {
+		Node *child = r_reference[p_from];
+		root->move_child(child, p_to);
+		int normalized_to = p_to < 0 ? p_to + r_reference.size() : p_to;
+		if (normalized_to == r_reference.size()) {
+			normalized_to--;
+		}
+		r_reference.remove_at(p_from);
+		r_reference.insert(normalized_to, child);
+		check_order();
+	};
+
+	check_order();
+	move(ordinary, 85, 86);
+	move(ordinary, 86, 85);
+	move(ordinary, 191, 0);
+	move(ordinary, 0, 191);
+	move(ordinary, 11, -1);
+	move(ordinary, 0, ordinary.size());
+	move(front, 3, 4);
+	move(front, 0, 7);
+	move(front, 7, 0);
+	move(back, 3, 4);
+	move(back, 0, 7);
+	move(back, 7, 0);
+	memdelete(root);
+}
+
 TEST_CASE("[SceneTree][Node] Human-readable names carry long numeric suffixes") {
 	Node *root = memnew(Node);
 	String separator;
