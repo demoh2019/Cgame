@@ -44,6 +44,7 @@
 #include "servers/physics_softbody_plasticity.h"
 #include "servers/physics_softbody_volume_safe.h"
 #include "servers/physics_xpbd_distance.h"
+#include "servers/physics_xpbd_compression_buckling.h"
 #include "servers/physics_xpbd_tension_hardening.h"
 #include "servers/physics_xpbd_area.h"
 #include "servers/physics_xpbd_dihedral.h"
@@ -2231,6 +2232,9 @@ void GodotSoftBody3D::solve_constraints(real_t p_delta) {
 	const bool use_xpbd = compliance > 0.0 && Math::is_finite(alpha_double) && alpha_double > 0.0;
 	const real_t tension_hardening = get_space() ? get_space()->get_soft_body_xpbd_tension_hardening() : real_t(0.0);
 	const bool use_tension_hardening = use_xpbd && tension_hardening > real_t(0.0);
+	const real_t buckling_ratio = get_space() ? get_space()->get_soft_body_xpbd_buckling_softening_ratio() : real_t(1.0);
+	const bool use_compression_buckling = use_xpbd && buckling_ratio > real_t(1.0);
+	const bool use_nonlinear_links = use_tension_hardening || use_compression_buckling;
 	// Unilateral strain limits supplement (rather than replace) the elastic
 	// stretch solver. No extra per-link scratch or work with both ratios 0.
 	const real_t strain_max_ratio = get_space() ? get_space()->get_soft_body_xpbd_strain_max_stretch_ratio() : real_t(0.0);
@@ -2292,16 +2296,29 @@ void GodotSoftBody3D::solve_constraints(real_t p_delta) {
 		xpbd_link_lambdas.reset();
 	}
 
-	// Freeze nonlinear compliance for the whole physics step. Recomputing
-	// alpha within iterations while retaining lambda causes oscillation.
-	if (use_tension_hardening) {
+	// Freeze nonlinear tension/compression compliance for the whole physics
+	// step. Retained XPBD lambda must use a constant alpha each iteration.
+	// Reuse one per-link buffer when both nonlinear responses are enabled.
+	if (use_nonlinear_links) {
 		xpbd_link_hardening_alphas.resize(links.size());
-		const real_t yield_strain = get_space()->get_soft_body_xpbd_tension_yield_strain();
+		const real_t tension_yield = get_space()->get_soft_body_xpbd_tension_yield_strain();
+		const real_t compression_yield = get_space()->get_soft_body_xpbd_buckling_yield_strain();
+		const real_t compression_transition = get_space()->get_soft_body_xpbd_buckling_transition_strain();
 		for (uint32_t link_index = 0; link_index < links.size(); ++link_index) {
 			const Link &link = links[link_index];
 			real_t link_alpha = alpha;
-			physics_xpbd_tension_hardening_alpha(link.n[0]->x, link.n[1]->x,
-					link.rl, alpha, yield_strain, tension_hardening, link_alpha);
+			if (use_tension_hardening) {
+				physics_xpbd_tension_hardening_alpha(link.n[0]->x, link.n[1]->x,
+						link.rl, alpha, tension_yield, tension_hardening, link_alpha);
+			}
+			if (use_compression_buckling) {
+				real_t buckled_alpha = link_alpha;
+				if (physics_xpbd_compression_buckling_alpha(link.n[0]->x, link.n[1]->x,
+						link.rl, link_alpha, compression_yield, compression_transition,
+						buckling_ratio, buckled_alpha)) {
+					link_alpha = buckled_alpha;
+				}
+			}
 			xpbd_link_hardening_alphas[link_index] = link_alpha;
 		}
 	} else if (!xpbd_link_hardening_alphas.is_empty()) {
@@ -2390,7 +2407,7 @@ void GodotSoftBody3D::solve_constraints(real_t p_delta) {
 				if (link.c0 > 0.0) {
 					physics_xpbd_solve_distance(link.n[0]->x, link.n[1]->x,
 							link.n[0]->im, link.n[1]->im, link.rl,
-							use_tension_hardening ? xpbd_link_hardening_alphas[link_index] : alpha,
+							use_nonlinear_links ? xpbd_link_hardening_alphas[link_index] : alpha,
 							xpbd_link_lambdas[link_index]);
 				}
 			}
