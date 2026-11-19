@@ -93,6 +93,10 @@ func _run() -> void:
 		_body(space, meshes[1], [2, 5]),
 		_body(space, meshes[2], [0, 3])
 	]
+	# Make sure the Jolt bodies have been inserted and soft particles
+	# initialized before sampling the flat control's resting position.
+	for warmup in range(2):
+		await physics_frame
 	var initial_fold_gap := 0.055
 	var start_usec := Time.get_ticks_usec()
 	var maximum_control_drift := 0.0
