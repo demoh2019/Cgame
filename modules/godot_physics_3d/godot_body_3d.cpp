@@ -29,6 +29,7 @@
 /**************************************************************************/
 
 #include "godot_body_3d.h"
+#include "servers/physics_linear_velocity_cap.h"
 
 #include "godot_area_3d.h"
 #include "godot_body_direct_state_3d.h"
@@ -656,6 +657,10 @@ void GodotBody3D::integrate_forces(real_t p_step, bool p_defer_motion) {
 			angular_velocity += _inv_inertia_tensor.xform(torque) * p_step;
 		}
 
+		// Bound physical velocity before calculating the broadphase CCD sweep.
+		// This is skipped by static and kinematic bodies.
+		linear_velocity = godot_physics_clamp_linear_velocity(linear_velocity, get_space()->get_max_linear_velocity());
+
 		if (continuous_cd) {
 			motion = linear_velocity * p_step;
 			do_motion = true;
@@ -717,6 +722,9 @@ void GodotBody3D::integrate_velocities(real_t p_step) {
 		return;
 	}
 
+	// Contact and joint impulses can add speed after force integration.
+	// Cap the physical component before position integration too.
+	linear_velocity = godot_physics_clamp_linear_velocity(linear_velocity, get_space()->get_max_linear_velocity());
 	Vector3 total_angular_velocity = angular_velocity + biased_angular_velocity;
 	Vector3 total_linear_velocity = linear_velocity + biased_linear_velocity;
 
