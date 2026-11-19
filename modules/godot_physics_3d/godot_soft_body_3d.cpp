@@ -660,6 +660,7 @@ void GodotSoftBody3D::initialize_volume_constraint() {
 					get_space()->get_soft_body_gas_pressure_gamma() <= 0.0 &&
 					get_space()->get_soft_body_tetra_fem_compliance() <= 0.0 &&
 					get_space()->get_soft_body_tetra_fem_viscosity() <= 0.0 &&
+					get_space()->get_soft_body_tetra_fiber_compliance() <= 0.0 &&
 					get_space()->get_soft_body_volume_damping_rate() <= 0.0) ||
 			nodes.size() < 4 || faces.size() < 4) {
 		// Neither XPBD nor gas mode needs the volume for ordinary cloth.
