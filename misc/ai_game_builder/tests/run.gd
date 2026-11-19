@@ -467,6 +467,35 @@ func _run_headless_gate_tests() -> void:
 		_check(malformed.errors.size() == 1, "invalid JSON yields one clear diagnostic")
 		_check(String(malformed.errors[0]).contains("headless_invalid.json"), "JSON error includes the source filename")
 
+	# A file can change after the AI plan was approved. The checker must
+	# enforce safe content at verification time rather than trusting the plan.
+	var dangerous_script := FileAccess.open(script_path, FileAccess.WRITE)
+	_check(dangerous_script != null, "headless guard fixture can edit approved script")
+	if dangerous_script != null:
+		dangerous_script.store_string("@tool\\nextends Node\\n")
+		dangerous_script.close()
+		_check(not SmokeGate.validate_targets(good).ok, "headless preflight blocks newly added editor tool script")
+		var process_script := FileAccess.open(script_path, FileAccess.WRITE)
+		if process_script != null:
+			process_script.store_string("extends Node\\nfunc run():\\n\\tOS.execute(\\\"sh\\\", [])\\n")
+			process_script.close()
+			_check(not SmokeGate.validate_targets(good).ok, "headless preflight blocks process launches")
+		var restored_script := FileAccess.open(script_path, FileAccess.WRITE)
+		if restored_script != null:
+			restored_script.store_string("extends Node\\nfunc answer() -> int:\\n\\treturn 42\\n")
+			restored_script.close()
+			_check(SmokeGate.validate_targets(good).ok, "restored safe script accepted")
+
+	# Oversized generated files are rejected even when they exist on disk.
+	var huge_path := "res://ai_generated/tests/headless_oversized.md"
+	var huge_file := FileAccess.open(huge_path, FileAccess.WRITE)
+	_check(huge_file != null, "headless size-limit fixture can create a file")
+	if huge_file != null:
+		huge_file.store_string("x".repeat(Validator.MAX_FILE_BYTES + 1))
+		huge_file.close()
+		_check(not SmokeGate.validate_targets([scene_path, huge_path]).ok, "headless preflight rejects oversized existing files")
+		_check(DirAccess.remove_absolute(ProjectSettings.globalize_path(huge_path)) == OK, "oversized fixture cleaned up")
+
 	for target in paths:
 		if FileAccess.file_exists(target):
 			_check(DirAccess.remove_absolute(ProjectSettings.globalize_path(target)) == OK, "headless test asset cleaned up")
