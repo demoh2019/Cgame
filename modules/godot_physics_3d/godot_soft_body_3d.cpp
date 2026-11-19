@@ -613,7 +613,7 @@ bool GodotSoftBody3D::solve_edge_self_collisions(real_t p_delta) {
 		const Node &b = nodes[edge.b];
 		AABB edge_bounds(a.x, Vector3());
 		edge_bounds.expand_to(b.x);
-		if (swept_ccd) {
+		if (swept_ccd && a.q.is_finite() && b.q.is_finite()) {
 			edge_bounds.expand_to(a.q);
 			edge_bounds.expand_to(b.q);
 		}
