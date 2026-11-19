@@ -1,0 +1,67 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<class name="TerrainSplatmap" inherits="Resource" api_type="core" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="../../../doc/class.xsd">
+    <brief_description>
+        Four normalized texture-layer weights for heightmap terrain.
+    </brief_description>
+    <description>
+        Stores four texture blend weights per grid sample in a [PackedColorArray], mapped to the red, green, blue, and alpha channels. Each weight must be nonnegative, finite, and the four channels must sum to one. Layer 0 starts at full weight.
+        Assign to [member HeightmapTerrain3D.splatmap] and provide texture resources to the terrain node's four layer properties. In the editor, choose a texture layer brush to paint weights with radial falloff.
+        [b]Note:[/b] The data resolution matches [TerrainHeightmap]. New cells default to layer 0; values are stored as floating-point colors but the GPU upload quantizes them to 8-bit RGBA.
+    </description>
+    <tutorials>
+    </tutorials>
+    <methods>
+        <method name="get_layer_weight" qualifiers="const">
+            <return type="float" />
+            <param index="0" name="x" type="int" />
+            <param index="1" name="z" type="int" />
+            <param index="2" name="layer" type="int" />
+            <description>
+                Returns the weight for layer 0–3 at the given grid sample.
+            </description>
+        </method>
+        <method name="get_weights_at" qualifiers="const">
+            <return type="Color" />
+            <param index="0" name="x" type="int" />
+            <param index="1" name="z" type="int" />
+            <description>
+                Returns the RGBA blend weights at the specified grid position.
+            </description>
+        </method>
+        <method name="paint_layer">
+            <return type="void" />
+            <param index="0" name="layer" type="int" />
+            <param index="1" name="center" type="Vector2" />
+            <param index="2" name="radius" type="float" />
+            <param index="3" name="strength" type="float" />
+            <description>
+                Paints the chosen layer, blending it with existing normalized weights using linear radial falloff. Other weights are reduced proportionally. Strength is clamped to the interval 0–1 and radius is in terrain grid cells.
+            </description>
+        </method>
+        <method name="set_dimensions">
+            <return type="void" />
+            <param index="0" name="width" type="int" />
+            <param index="1" name="depth" type="int" />
+            <description>
+                Resizes the sample grid while retaining weights within the overlapping region.
+            </description>
+        </method>
+        <method name="to_image" qualifiers="const">
+            <return type="Image" />
+            <description>
+                Creates an [Image] in RGBA8 format containing the current blend weights. The result can be used as a shader mask or exported for inspection.
+            </description>
+        </method>
+    </methods>
+    <members>
+        <member name="depth" type="int" setter="set_depth" getter="get_depth" default="17">
+            Sample count on the Z axis (2–513).
+        </member>
+        <member name="weights" type="PackedColorArray" setter="set_weights" getter="get_weights" default="PackedColorArray()">
+            Row-major array of normalized RGBA weights. Must contain exactly width × depth samples.
+        </member>
+        <member name="width" type="int" setter="set_width" getter="get_width" default="17">
+            Sample count on the X axis (2–513).
+        </member>
+    </members>
+</class>
