@@ -36,6 +36,9 @@
 #include "core/object/class_db.h"
 #include "core/object/script_language.h"
 #include "core/variant/container_type_validate.h"
+#include "core/variant/variant_internal.h"
+
+#include <optional>
 
 const char *JSON::tk_name[TK_MAX] = {
 	"'{'",
@@ -125,13 +128,24 @@ void JSON::_stringify(StringBuilder &r_result, const Variant &p_var, const Strin
 		case Variant::PACKED_FLOAT64_ARRAY:
 		case Variant::PACKED_STRING_ARRAY:
 		case Variant::ARRAY: {
-			Array a = p_var;
-			if (p_markers.has(a.id())) {
+			// Borrow native Array storage from the Variant without a temporary
+			// reference count increment. Packed arrays still require conversion.
+			std::optional<Array> converted;
+			const Array *a = nullptr;
+			if (p_var.get_type() == Variant::ARRAY) {
+				a = VariantInternal::get_array(&p_var);
+			} else {
+				// Do not default-construct an Array for the native Array
+				// branch: its constructor allocates an ArrayPrivate.
+				converted.emplace(static_cast<Array>(p_var));
+				a = &*converted;
+			}
+			if (p_markers.has(a->id())) {
 				r_result += "\"[...]\"";
 				ERR_FAIL_MSG("Converting circular structure to JSON.");
 			}
 
-			if (a.is_empty()) {
+			if (a->is_empty()) {
 				r_result += "[]";
 				return;
 			}
@@ -139,10 +153,10 @@ void JSON::_stringify(StringBuilder &r_result, const Variant &p_var, const Strin
 			r_result += "[";
 			r_result += end_statement;
 
-			p_markers.insert(a.id());
+			p_markers.insert(a->id());
 
 			bool first = true;
-			for (const Variant &var : a) {
+			for (const Variant &var : *a) {
 				if (first) {
 					first = false;
 				} else {
@@ -155,11 +169,13 @@ void JSON::_stringify(StringBuilder &r_result, const Variant &p_var, const Strin
 			r_result += end_statement;
 			_add_indent(r_result, p_indent, p_cur_indent);
 			r_result += "]";
-			p_markers.erase(a.id());
+			p_markers.erase(a->id());
 			return;
 		}
 		case Variant::DICTIONARY: {
-			Dictionary d = p_var;
+			// The input Variant keeps this dictionary alive for the entire call.
+			// Reuse it without another atomic COW reference increment/decrement.
+			const Dictionary &d = *VariantInternal::get_dictionary(&p_var);
 			if (p_markers.has(d.id())) {
 				r_result += "\"{...}\"";
 				ERR_FAIL_MSG("Converting circular structure to JSON.");

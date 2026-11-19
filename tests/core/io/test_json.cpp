@@ -637,4 +637,68 @@ TEST_CASE("[JSON] Large dictionary serializes without missing or reordered value
 	CHECK(second > first);
 }
 
+
+TEST_CASE("[JSON] Native Array and Dictionary Variants retain contents across serialization") {
+	Array nested;
+	nested.push_back(2);
+	nested.push_back(3);
+	Dictionary object;
+	object["ok"] = true;
+	Array source;
+	source.push_back(1);
+	source.push_back(String(U"雪"));
+	source.push_back(nested);
+	source.push_back(object);
+
+	const Variant root(source);
+	for (int i = 0; i < 128; i++) {
+		CHECK_EQ(JSON::stringify(root), "[1,\"雪\",[2,3],{\"ok\":true}]");
+		CHECK_EQ(source.size(), 4);
+		CHECK_EQ(nested.size(), 2);
+		CHECK_EQ(object["ok"], Variant(true));
+	}
+}
+
+TEST_CASE("[JSON] Packed arrays still use the converted Array representation") {
+	PackedInt32Array ints;
+	ints.push_back(-1);
+	ints.push_back(0);
+	ints.push_back(32768);
+	CHECK_EQ(JSON::stringify(Variant(ints)), "[-1,0,32768]");
+
+	PackedStringArray labels;
+	labels.push_back(String(U"雪"));
+	labels.push_back(String(U"🚀"));
+	CHECK_EQ(JSON::stringify(Variant(labels)), "[\"雪\",\"🚀\"]");
+
+	PackedFloat64Array numbers;
+	numbers.push_back(0.5);
+	numbers.push_back(-1.25);
+	const Array decoded = JSON::parse_string(JSON::stringify(Variant(numbers)));
+	REQUIRE_EQ(decoded.size(), 2);
+	CHECK_EQ(decoded[0], Variant(0.5));
+	CHECK_EQ(decoded[1], Variant(-1.25));
+}
+
+TEST_CASE("[JSON] Deep nested native arrays stringify repeatedly without corruption") {
+	Array root;
+	for (int i = 0; i < 32; i++) {
+		Array outer;
+		for (int j = 0; j < 32; j++) {
+			outer.push_back(i * 32 + j);
+		}
+		root.push_back(outer);
+	}
+	const Variant root_variant(root);
+	for (int run = 0; run < 16; run++) {
+		const Array decoded = JSON::parse_string(JSON::stringify(root_variant));
+		REQUIRE_EQ(decoded.size(), 32);
+		for (int i = 0; i < 32; i++) {
+			const Array values = decoded[i];
+			REQUIRE_EQ(values.size(), 32);
+			CHECK_EQ(values[0], Variant(i * 32));
+			CHECK_EQ(values[31], Variant(i * 32 + 31));
+		}
+	}
+}
 } // namespace TestJSON
