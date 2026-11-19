@@ -129,6 +129,7 @@ private:
 	real_t soft_body_xpbd_area_compliance = 0.0;
 	real_t soft_body_self_collision_thickness = 0.0; // Off by default, in meters.
 	real_t soft_body_self_collision_compliance = 0.0;
+	bool soft_body_self_collision_edge_contacts = false; // Extra opt-in narrowphase.
 	real_t soft_body_xpbd_dihedral_compliance = 0.0; // Opt-in angle-based cloth bending.
 	real_t soft_body_xpbd_tether_compliance = 0.0; // Zero bypasses tether setup and solver.
 	real_t soft_body_xpbd_tether_slack = 0.05; // Opt-in triangle area preservation.
@@ -237,6 +238,7 @@ public:
 	_FORCE_INLINE_ real_t get_soft_body_xpbd_area_compliance() const { return soft_body_xpbd_area_compliance; }
 	_FORCE_INLINE_ real_t get_soft_body_self_collision_thickness() const { return soft_body_self_collision_thickness; }
 	_FORCE_INLINE_ real_t get_soft_body_self_collision_compliance() const { return soft_body_self_collision_compliance; }
+	_FORCE_INLINE_ bool are_soft_body_self_collision_edge_contacts_enabled() const { return soft_body_self_collision_edge_contacts; }
 	_FORCE_INLINE_ real_t get_soft_body_xpbd_dihedral_compliance() const { return soft_body_xpbd_dihedral_compliance; }
 	_FORCE_INLINE_ real_t get_soft_body_xpbd_tether_compliance() const { return soft_body_xpbd_tether_compliance; }
 	_FORCE_INLINE_ real_t get_soft_body_xpbd_tether_slack() const { return soft_body_xpbd_tether_slack; }
