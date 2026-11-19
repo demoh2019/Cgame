@@ -4,6 +4,12 @@ extends RefCounted
 const Defs = preload("res://scripts/shared/defs.gd")
 
 var health: float = Defs.MAX_HEALTH
+# Skill bonuses set by the server; the defaults are the base game.
+var max_health: float = Defs.MAX_HEALTH
+var hunger_mult: float = 1.0 # Multiplies how fast hunger grows.
+var thirst_mult: float = 1.0
+var stamina_drain_mult: float = 1.0
+var stamina_regen_mult: float = 1.0
 var hunger: float = 100.0 # 100 is full.
 var thirst: float = 100.0
 var infection: float = 0.0
@@ -28,7 +34,7 @@ static func can_sprint_with(value: float, hunger_value: float, thirst_value: flo
 func try_sprint(seconds: float) -> bool:
 	if not alive or not can_sprint_with(stamina, hunger, thirst, seconds):
 		return false
-	stamina = maxf(0.0, stamina - Defs.SPRINT_STAMINA_PER_SECOND * seconds)
+	stamina = maxf(0.0, stamina - Defs.SPRINT_STAMINA_PER_SECOND * stamina_drain_mult * seconds)
 	stamina_recovery_delay = Defs.STAMINA_RECOVERY_DELAY
 	return true
 
@@ -37,13 +43,13 @@ func try_sprint(seconds: float) -> bool:
 func tick(delta: float) -> float:
 	if not alive:
 		return 0.0
-	hunger = maxf(hunger - Defs.HUNGER_PER_SECOND * delta, 0.0)
-	thirst = maxf(thirst - Defs.THIRST_PER_SECOND * delta, 0.0)
+	hunger = maxf(hunger - Defs.HUNGER_PER_SECOND * hunger_mult * delta, 0.0)
+	thirst = maxf(thirst - Defs.THIRST_PER_SECOND * thirst_mult * delta, 0.0)
 	var resting := maxf(delta - stamina_recovery_delay, 0.0)
 	stamina_recovery_delay = maxf(0.0, stamina_recovery_delay - delta)
 	if resting > 0.0:
 		var nourishment := 0.5 if hunger <= 20.0 or thirst <= 20.0 else 1.0
-		stamina = minf(Defs.MAX_STAMINA, stamina + Defs.STAMINA_REGEN_PER_SECOND * resting * nourishment)
+		stamina = minf(Defs.MAX_STAMINA, stamina + Defs.STAMINA_REGEN_PER_SECOND * stamina_regen_mult * resting * nourishment)
 	if infection > 0.0:
 		infection = minf(Defs.INFECTION_MAX,
 			infection + Defs.INFECTION_GROWTH_PER_SECOND * maxf(0.0, delta))
@@ -60,7 +66,7 @@ func tick(delta: float) -> float:
 		hurt(damage)
 	elif hunger > 40.0 and thirst > 40.0:
 		# Well fed and watered: slow natural recovery.
-		health = minf(health + 0.35 * delta, Defs.MAX_HEALTH)
+		health = minf(health + 0.35 * delta, max_health)
 	return damage
 
 
@@ -100,7 +106,7 @@ func hurt(amount: float) -> float:
 
 func heal(amount: float) -> void:
 	if alive and amount > 0.0:
-		health = minf(health + amount, Defs.MAX_HEALTH)
+		health = minf(health + amount, max_health)
 
 
 func eat(amount: float) -> void:
@@ -135,7 +141,7 @@ func apply_thermal_wrap() -> bool:
 
 
 func reset() -> void:
-	health = Defs.MAX_HEALTH
+	health = max_health
 	hunger = 80.0
 	thirst = 80.0
 	stamina = Defs.MAX_STAMINA

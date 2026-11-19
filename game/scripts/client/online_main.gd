@@ -16,6 +16,8 @@ const CharacterModel = preload("res://scripts/client/character_model.gd")
 const HubView = preload("res://scripts/client/hub_view.gd")
 const Audio = preload("res://scripts/client/audio.gd")
 const Social = preload("res://scripts/client/social.gd")
+const SkillsPanel = preload("res://scripts/client/skills_panel.gd")
+const Skills = preload("res://scripts/shared/skills.gd")
 
 const CAMERA_OFFSET := Vector3(0.0, 17.0, 12.5)
 const DAY_LENGTH := WorldCycle.DAY_LENGTH # Shared with server simulation and local client.
@@ -35,6 +37,7 @@ var avatar: Node3D
 var avatar_model
 var audio
 var hub_view
+var skills_panel
 var social
 var chat_edit: LineEdit
 var account := {} # Result of the Nakama sign-in, empty when playing without accounts.
@@ -206,6 +209,21 @@ func _connect() -> void:
 	net.join_refused.connect(func(reason: String) -> void: status_label.text = reason)
 
 
+func _on_skill_event(event: Dictionary) -> void:
+	match event["type"]:
+		"xp":
+			var parts: Array[String] = []
+			for skill_id in event["gains"]:
+				parts.append("+%d %s" % [event["gains"][skill_id], Skills.SKILLS[skill_id]["name"] if Skills.SKILLS.has(skill_id) else skill_id])
+			hud.say("  ".join(parts))
+		"skill_up":
+			var skill_name: String = Skills.SKILLS[event["skill"]]["name"] if Skills.SKILLS.has(event["skill"]) else str(event["skill"])
+			hud.say("LEVEL UP: %s %d  (%d skill points, press K)" % [skill_name, event["level"], event["points"]])
+			audio.play_ui("coin", -2.0)
+		"perk":
+			hud.say("Perk learned: %s" % Skills.PERKS[event["perk"]]["name"])
+
+
 func _setup_chat() -> void:
 	chat_edit = LineEdit.new()
 	chat_edit.placeholder_text = "Enter to chat. /g guild text, /guild name, /guilds, /join name, /leave"
@@ -262,6 +280,10 @@ func _on_welcomed() -> void:
 	hud = Hud.new()
 	add_child(hud)
 	hud.setup(client)
+	skills_panel = SkillsPanel.new()
+	hud.add_child(skills_panel)
+	skills_panel.setup(client)
+	client.event_received.connect(_on_skill_event)
 	_setup_chat()
 	# Streaming: chunks are built from the seed as the player walks.
 	streamer = WorldStreamer.new()
@@ -434,6 +456,8 @@ func _unhandled_input(event: InputEvent) -> void:
 		return
 	if event is InputEventKey and event.pressed and not event.echo and not _typing():
 		match event.keycode:
+			KEY_K:
+				skills_panel.toggle()
 			KEY_ENTER, KEY_KP_ENTER:
 				if chat_edit != null:
 					chat_edit.visible = true
@@ -545,6 +569,17 @@ func _run_demo() -> void:
 				var spot := _find_forest()
 				net_ref.c_debug.rpc_id(1, "teleport", {"x": spot.x, "z": spot.y})
 				net_ref.c_debug.rpc_id(1, "give", {"item": "axe_1", "count": 1})
+		"skills":
+			if _demo_frames == 30:
+				for entry in [["woodcutting", 4200], ["mining", 1600], ["melee", 9000], ["slayer", 2600], ["athletics", 5200], ["toughness", 3000], ["crafting", 900], ["explorer", 2200], ["survivalist", 700]]:
+					net_ref.c_debug.rpc_id(1, "xp", {"skill": entry[0], "amount": entry[1]})
+			if _demo_frames == 80:
+				client.buy_perk("sharp_axe")
+				client.buy_perk("heavy_hands")
+				client.buy_perk("swift_feet")
+			if _demo_frames == 120 and skills_panel != null:
+				skills_panel.toggle()
+				skills_panel._tabs.current_tab = 1
 		"hub":
 			if _demo_frames == 40:
 				net_ref.c_debug.rpc_id(1, "teleport", {"x": 14.0, "z": 6.0})

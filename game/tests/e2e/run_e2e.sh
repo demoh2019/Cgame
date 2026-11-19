@@ -8,7 +8,7 @@ LOG="${TMPDIR:-/tmp}/albion_e2e"
 mkdir -p "$LOG"
 cd "$HERE" || exit 2
 
-"$GODOT" --headless --path . --script res://scripts/server/server_main.gd -- --port "$PORT" --seed 1337 --debug-commands --quit-after 150 > "$LOG/server.log" 2>&1 &
+"$GODOT" --headless --path . --script res://scripts/server/server_main.gd -- --port "$PORT" --seed 1337 --debug-commands --quit-after 300 > "$LOG/server.log" 2>&1 &
 SERVER=$!
 sleep 3
 fail=0
@@ -25,11 +25,13 @@ KILLER=$!
 for pid in $SOLO $VICTIM $KILLER; do
   wait $pid || fail=1
 done
+# The skill tree run is alone on the server, so the other bots cannot interfere with its checks.
+run_bot Skiller skills || fail=1
 kill $SERVER 2>/dev/null
 wait $SERVER 2>/dev/null
 # A bot that never ran (parse error, crash) must not count as a pass: demand its PASS line.
 grep -q "SERVER listening" "$LOG/server.log" || { echo "the server never started"; fail=1; }
-for name in Solo Victim Killer; do
+for name in Solo Victim Killer Skiller; do
   if grep -q "^BOT $name PASS" "$LOG/$name.log"; then
     grep -E "^BOT $name" "$LOG/$name.log"
   else

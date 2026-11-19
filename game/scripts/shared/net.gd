@@ -405,6 +405,13 @@ func c_vendor(item_id: String, quantity: int, buy: bool) -> void:
 
 
 @rpc("any_peer", "reliable")
+func c_perk(perk_id: String) -> void:
+	var peer := multiplayer.get_remote_sender_id()
+	if _allowed(peer):
+		s_result.rpc_id(peer, "perk", sim.cmd_perk(peer, str(perk_id)))
+
+
+@rpc("any_peer", "reliable")
 func c_use(item_id: String) -> void:
 	var peer := multiplayer.get_remote_sender_id()
 	if _allowed(peer):
@@ -463,6 +470,8 @@ func c_debug(command: String, args: Dictionary) -> void:
 			var Zombie = load("res://scripts/shared/zombie.gd")
 			var zombie = Zombie.new(sim.new_id(), str(args["type"]), Vector3(float(args["x"]), sim.world.height_at(float(args["x"]), float(args["z"])), float(args["z"])))
 			sim.zombies[zombie.id] = zombie
+		"xp":
+			sim._award(player, str(args["skill"]), float(args["amount"]))
 		"hurt":
 			player.survival.hurt(float(args["amount"]))
 			if not player.survival.alive:
@@ -538,7 +547,7 @@ func _is_nearby(event: Dictionary, peer: int) -> bool:
 
 func _event_visible_to(event: Dictionary, peer: int) -> bool:
 	match event["type"]:
-		"spawn", "zone", "gathered", "fished", "crate", "mastery", "scavenging", "infection", "evaded":
+		"spawn", "zone", "gathered", "fished", "crate", "mastery", "scavenging", "infection", "evaded", "xp", "skill_up", "perk":
 			return event.get("peer", -1) == peer
 		"trade":
 			return event.get("a", -1) == peer or event.get("b", -1) == peer

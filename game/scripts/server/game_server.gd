@@ -12,6 +12,7 @@ const PlayerTrade = preload("res://scripts/shared/player_trade.gd")
 const Party = preload("res://scripts/shared/party.gd")
 const MarketBoard = preload("res://scripts/shared/market_board.gd")
 const Contracts = preload("res://scripts/shared/contracts.gd")
+const Skills = preload("res://scripts/shared/skills.gd")
 const SaveValidation = preload("res://scripts/shared/save_validation.gd")
 const Crafting = preload("res://scripts/shared/crafting.gd")
 const Survival = preload("res://scripts/shared/survival.gd")
@@ -40,6 +41,10 @@ const ZOMBIE_PACK_ALERT_RADIUS := 18.0
 const ZOMBIE_PACK_BUCKET_SIZE := 18.0
 const BAG_LIFETIME := 300.0
 const MAX_NAME_LENGTH := 20
+const SNAPSHOT_REPEAT_SECONDS := 2.5
+const SKILL_NOURISH_THRESHOLD := 90.0 # Eating or drinking above this teaches nothing.
+const SKILL_METERS_PER_ATHLETICS_XP := 6.0
+const SKILL_METERS_PER_EXPLORER_XP := 25.0
 const STARTER_KIT := {"bandage": 2, "canned_food": 2, "water_bottle": 2}
 
 var world
@@ -56,6 +61,16 @@ class Player:
 	var stash # Account-bound safe storage; isolated from full-loot death drops.
 	var survival
 	var progression # Permanent skills; gear is lost on death, not experience.
+	var skills # The skill tree: XP in every kind of action, perks, bonuses.
+	var pending_xp: Dictionary = {} # skill -> XP gained since the last report to the player
+	var pending_levels: Array = [] # [{"skill", "level"}] reached since the last report
+	var xp_report_timer: float = 0.0
+	var run_meters: float = 0.0 # Sprinted distance not yet turned into XP.
+	var travel_meters: float = 0.0
+	var dirty_skills: bool = true
+	var skills_sent_at: float = -100.0
+	var inventory_sent_at: float = -100.0
+	var stash_sent_at: float = -100.0
 	var contract_state: Dictionary = {} # Server-owned persistent camp contract journal.
 	var rest_cooldown: float = 0.0 # Per-survivor seconds until next camp recovery.
 	var lake_drink_cooldown: float = 0.0 # Prevents lake hydration spam and relog bypass.
@@ -126,6 +141,7 @@ func add_player(peer_id: int, p_name: String, p_user_id: String = "", saved: Dic
 	player.stash = Inventory.new(Defs.STASH_SLOTS)
 	player.survival = Survival.new()
 	player.progression = Progression.new()
+	player.skills = Skills.new()
 	player.contract_state = Contracts.empty_state()
 	players[peer_id] = player
 	# Bind restored account-owned structures to this authenticated session.
@@ -155,6 +171,7 @@ func character_data(player: Player) -> Dictionary:
 		"inventory": player.inventory.to_dict(),
 		"stash": player.stash.to_dict(),
 		"progression": player.progression.to_dict(),
+		"skills": player.skills.to_dict(),
 		"contracts": player.contract_state.duplicate(true),
 		"rest_cooldown": player.rest_cooldown, "lake_drink_cooldown": player.lake_drink_cooldown,
 	}
@@ -179,7 +196,7 @@ func apply_character(player: Player, data: Dictionary) -> bool:
 		return false
 
 	# Check all persisted scalar values before changing the live Player.
-	if not SaveValidation.finite_number(data.get("health", 100.0), 0.0, Defs.MAX_HEALTH):
+	if not SaveValidation.finite_number(data.get("health", 100.0), 0.0, Defs.MAX_HEALTH + Skills.MAX_HEALTH_BONUS):
 		return false
 	if not SaveValidation.finite_number(data.get("hunger", 80.0), 0.0, 100.0):
 		return false
@@ -205,7 +222,7 @@ func apply_character(player: Player, data: Dictionary) -> bool:
 		return false
 
 	var survival = Survival.new()
-	survival.health = clampf(float(data.get("health", 100.0)), 1.0, Defs.MAX_HEALTH)
+	survival.health = clampf(float(data.get("health", 100.0)), 1.0, Defs.MAX_HEALTH + Skills.MAX_HEALTH_BONUS)
 	survival.hunger = float(data.get("hunger", 80.0))
 	survival.thirst = float(data.get("thirst", 80.0))
 	# Legacy v1 characters without stamina are restored fully rested.
@@ -239,9 +256,16 @@ func apply_character(player: Player, data: Dictionary) -> bool:
 	if not Contracts.valid_state(loaded_contracts):
 		return false
 
+	# Characters saved before the skill tree start with a blank sheet. A sheet that is present must be consistent.
+	var loaded_skills = Skills.new()
+	if data.has("skills") and not loaded_skills.load_dict(data["skills"]):
+		return false
+
 	# One commit point: a failed parse cannot partially replace the player's
 	# inventory, protected stash, progression or survival state.
 	player.progression = loaded_progression
+	player.skills = loaded_skills
+	player.dirty_skills = true
 	player.contract_state = (loaded_contracts as Dictionary).duplicate(true)
 	player.rest_cooldown = float(data.get("rest_cooldown", 0.0))
 	player.lake_drink_cooldown = float(data.get("lake_drink_cooldown", 0.0))
@@ -250,6 +274,8 @@ func apply_character(player: Player, data: Dictionary) -> bool:
 	player.kills = int(data.get("kills", 0))
 	player.deaths = int(data.get("deaths", 0))
 	player.survival = survival
+	_apply_skill_bonuses(player)
+	survival.health = minf(survival.health, survival.max_health)
 	player.position = restore_position
 	player.dirty_inventory = true
 	player.dirty_stash = true
@@ -292,6 +318,7 @@ func _spawn_player(player: Player) -> void:
 			spot = candidate
 			break
 	player.position = Vector3(spot.x, world.height_at(spot.x, spot.y), spot.y)
+	_apply_skill_bonuses(player)
 	player.survival.reset()
 	var kept_gear: bool = player.keep_inventory_on_respawn
 	player.keep_inventory_on_respawn = false
@@ -337,13 +364,26 @@ func submit_input(peer_id: int, seq: int, move_x: float, move_z: float, sprint: 
 	if allowed > 0.0:
 		# No client-supplied cargo, stamina or sound radius: server owns all three.
 		var before_move: Vector3 = player.position
-		var factor: float = player.inventory.movement_factor()
+		var factor: float = player.inventory.movement_factor(player.skills.bonus("carry_capacity"))
 		var moving := move_x * move_x + move_z * move_z > 0.00001
 		var sprint_allowed: bool = sprint and moving and factor >= 0.9999 and player.survival.try_sprint(allowed)
 		player.position = Movement.step(world, player.position, {
 			"x": move_x, "z": move_z, "sprint": sprint_allowed,
-			"cargo_factor": factor,
+			"cargo_factor": factor, "speed_bonus": player.skills.bonus("move_speed"),
 		}, allowed)
+		var moved: float = Vector2(player.position.x - before_move.x, player.position.z - before_move.z).length()
+		# Distance on foot trains athletics (running) and explorer (any travel); never more than the
+		# server itself moved the player.
+		if moved > 0.0:
+			player.travel_meters += moved
+			while player.travel_meters >= SKILL_METERS_PER_EXPLORER_XP:
+				player.travel_meters -= SKILL_METERS_PER_EXPLORER_XP
+				_award(player, "explorer", 1.0)
+			if sprint_allowed:
+				player.run_meters += moved
+				while player.run_meters >= SKILL_METERS_PER_ATHLETICS_XP:
+					player.run_meters -= SKILL_METERS_PER_ATHLETICS_XP
+					_award(player, "athletics", 1.0)
 		if sprint_allowed and player.position.distance_to(before_move) > 0.01:
 			player.noise_radius = maxf(player.noise_radius, Defs.SPRINT_NOISE_RADIUS)
 			player.noise_timer = maxf(player.noise_timer, Defs.SPRINT_NOISE_SECONDS)
@@ -406,6 +446,9 @@ func cmd_gather(peer_id: int, node_id: int) -> Dictionary:
 	# Tool tier and profession tier are independent: a bought tool is not enough.
 	if not player.progression.can_gather(String(node["kind"]), int(node["tier"])):
 		return {"ok": false, "reason": "need_skill", "skill": Progression.resource_skill(String(node["kind"])), "tier": node["tier"]}
+	var gather_skill := Skills.skill_for_node(String(node["kind"]))
+	if gather_skill != "":
+		speed *= 1.0 + player.skills.bonus("gather_speed." + gather_skill)
 	var total := float(info["seconds"]) / speed
 	player.action = {"node": node_id, "remaining": total, "total": total}
 	return {"ok": true, "seconds": total}
@@ -428,6 +471,12 @@ func cmd_craft(peer_id: int, recipe_id: String, times: int = 1) -> Dictionary:
 	var status: int = Crafting.craft(player.inventory, recipe_id, at_bench, times, at_fire)
 	if status == Crafting.Result.OK:
 		player.progression.award_craft(recipe_tier, times)
+		_award(player, "crafting", 8.0 * float(recipe_tier) * float(times))
+		# Skill: each batch may save a unit of one of its materials.
+		var input_ids: Array = recipe["inputs"].keys()
+		for batch in times:
+			if not input_ids.is_empty() and rng.randf() < player.skills.bonus("craft_refund"):
+				player.inventory.add(String(input_ids[rng.randi() % input_ids.size()]), 1)
 		player.dirty_inventory = true
 		player.dirty_character = true
 		return {"ok": true}
@@ -1175,20 +1224,27 @@ func cmd_use(peer_id: int, item_id: String) -> Dictionary:
 				return {"ok": false, "reason": "already_warm"}
 			player.inventory.remove(item_id, 1)
 		"food":
+			var was_hungry: bool = player.survival.hunger <= SKILL_NOURISH_THRESHOLD
 			player.inventory.remove(item_id, 1)
-			player.survival.eat(float(data["food"]))
+			player.survival.eat(float(data["food"]) * (1.0 + player.skills.bonus("food_power")))
+			if was_hungry: # Stuffing yourself while full teaches nothing.
+				_award(player, "survivalist", 3.0)
 		"drink":
+			var was_thirsty: bool = player.survival.thirst <= SKILL_NOURISH_THRESHOLD
 			player.inventory.remove(item_id, 1)
-			player.survival.drink(float(data["drink"]))
+			player.survival.drink(float(data["drink"]) * (1.0 + player.skills.bonus("food_power")))
+			if was_thirsty:
+				_award(player, "survivalist", 3.0)
 		"medical":
 			var healing: float = float(data.get("heal", 0.0))
 			var curing: float = float(data.get("cure", 0.0))
-			if (healing <= 0.0 or player.survival.health >= Defs.MAX_HEALTH) and (
+			if (healing <= 0.0 or player.survival.health >= player.survival.max_health) and (
 					curing <= 0.0 or player.survival.infection <= 0.0):
 				return {"ok": false, "reason": "no_effect"}
 			player.inventory.remove(item_id, 1)
-			player.survival.heal(healing)
+			player.survival.heal(healing * (1.0 + player.skills.bonus("heal_power")))
 			player.survival.treat_infection(curing)
+			_award(player, "medic", 6.0)
 		"weapon", "armor":
 			player.inventory.equip(item_id)
 		_:
@@ -1215,7 +1271,8 @@ func cmd_drink_water(peer_id: int) -> Dictionary:
 		if not player.inventory.remove(FieldWater.FILTER_ITEM, 1):
 			return {"ok": false, "reason": "filter_unavailable"}
 		player.dirty_inventory = true
-	player.survival.drink(FieldWater.THIRST_RESTORED)
+	_award(player, "survivalist", 2.0) # needs_drink() above guarantees the player really was thirsty.
+	player.survival.drink(FieldWater.THIRST_RESTORED * (1.0 + player.skills.bonus("food_power")))
 	if not filtered:
 		player.survival.add_infection(FieldWater.UNTREATED_INFECTION)
 	player.lake_drink_cooldown = FieldWater.COOLDOWN_SECONDS
@@ -1252,18 +1309,24 @@ func cmd_attack(peer_id: int, dir_x: float, dir_z: float) -> Dictionary:
 		if player.inventory.count(ammo) < 1:
 			player.attack_timer = 0.3
 			return {"ok": false, "reason": "no_ammo"}
-		player.inventory.remove(ammo, 1)
+		if rng.randf() >= player.skills.bonus("ammo_save"):
+			player.inventory.remove(ammo, 1)
 		player.dirty_inventory = true
 		# Only a real shot with ammunition makes gunshot noise.
 		player.noise_radius = maxf(player.noise_radius, Defs.GUNSHOT_NOISE_RADIUS)
 		player.noise_timer = maxf(player.noise_timer, Defs.GUNSHOT_NOISE_SECONDS)
 		reach = Defs.PISTOL_RANGE
+	var is_ranged := kind == "ranged"
+	damage *= 1.0 + player.skills.bonus("ranged_damage" if is_ranged else "melee_damage")
+	var crit: bool = not is_ranged and rng.randf() < float(player.skills.bonus("crit_chance"))
+	if crit:
+		damage *= 1.5 + player.skills.bonus("crit_damage")
 	var hit := _find_hit(player, origin, direction, reach, kind == "ranged")
 	events.append({"type": "attack", "peer": peer_id, "dir": direction, "ranged": kind == "ranged", "x": player.position.x, "z": player.position.z})
 	if hit.is_empty():
 		return {"ok": true, "hit": false}
-	_damage_target(player, hit, damage)
-	return {"ok": true, "hit": true, "target": hit["kind"]}
+	_damage_target(player, hit, damage, "ranged" if is_ranged else "melee")
+	return {"ok": true, "hit": true, "target": hit["kind"], "crit": crit}
 
 
 ## Resolve active combat on the server; the client supplies only aim direction.
@@ -1294,8 +1357,8 @@ func cmd_skill(peer_id: int, dir_x: float, dir_z: float) -> Dictionary:
 	events.append({"type": "attack", "peer": peer_id, "dir": direction, "ranged": false, "skill": skill["id"], "x": player.position.x, "z": player.position.z})
 	if hit.is_empty():
 		return {"ok": true, "hit": false, "energy": player.combat_energy}
-	var skilled_damage: float = float(skill["damage"]) * player.progression.combat_damage_multiplier(weapon)
-	_damage_target(player, hit, skilled_damage)
+	var skilled_damage: float = float(skill["damage"]) * player.progression.combat_damage_multiplier(weapon) * (1.0 + player.skills.bonus("melee_damage"))
+	_damage_target(player, hit, skilled_damage, "melee")
 	return {"ok": true, "hit": true, "target": hit["kind"], "energy": player.combat_energy}
 
 
@@ -1345,7 +1408,10 @@ func cmd_loot(peer_id: int, entity_id: int) -> Dictionary:
 		var bag: Dictionary = bags[entity_id]
 		if _distance_xz(player.position, bag) > Defs.REACH + 0.5:
 			return {"ok": false, "reason": "too_far"}
+		var taken_before: int = _item_total(bag["items"])
 		var left := _give_items(player, bag["items"])
+		if _item_total(left) < taken_before:
+			_award(player, "scavenging", 3.0)
 		if left.is_empty():
 			bags.erase(entity_id)
 		else:
@@ -1364,6 +1430,8 @@ func cmd_loot(peer_id: int, entity_id: int) -> Dictionary:
 		# real reachable unopened world crate can grant XP or extra materials.
 		var loot: Dictionary = Scavenging.enriched_loot(zone,
 			player.progression.scavenging_level(), Combat.crate_loot(zone, local_rng))
+		_apply_loot_skills(player, loot, local_rng)
+		_award(player, "scavenging", 12.0 + 4.0 * float(zone))
 		var left: Dictionary = _give_items(player, loot)
 		if not left.is_empty():
 			# Whatever does not fit stays on the ground next to the crate.
@@ -1379,6 +1447,88 @@ func cmd_loot(peer_id: int, entity_id: int) -> Dictionary:
 		events.append({"type": "crate", "peer": peer_id, "id": entity_id})
 		return {"ok": true, "scavenging_xp": gained_xp}
 	return {"ok": false, "reason": "nothing_there"}
+
+
+# --- Skills -------------------------------------------------------------------------------------------------
+
+## Turns the skill sheet into the numbers the survival model uses. Cheap; called whenever a level or perk changes.
+func _apply_skill_bonuses(player: Player) -> void:
+	var s = player.skills
+	var survival = player.survival
+	var old_max: float = survival.max_health
+	survival.max_health = Defs.MAX_HEALTH + s.bonus("max_health")
+	if survival.max_health > old_max:
+		survival.health = minf(survival.health + (survival.max_health - old_max), survival.max_health)
+	survival.hunger_mult = 1.0 - s.bonus("hunger_rate")
+	survival.thirst_mult = 1.0 - s.bonus("thirst_rate")
+	survival.stamina_drain_mult = 1.0 - s.bonus("stamina_drain")
+	survival.stamina_regen_mult = 1.0 + s.bonus("stamina_regen")
+	player.dirty_skills = true
+
+
+## The one place XP is granted. Callers pass what the action was worth; refused actions never call it.
+func _award(player: Player, skill: String, amount: float) -> void:
+	var result: Dictionary = player.skills.add_xp(skill, amount)
+	if int(result["gained"]) <= 0:
+		return
+	player.pending_xp[skill] = int(player.pending_xp.get(skill, 0)) + int(result["gained"])
+	player.dirty_skills = true
+	player.dirty_character = true
+	if not result["levels"].is_empty():
+		for reached in result["levels"]:
+			events.append({"type": "skill_up", "peer": player.id, "skill": skill, "level": int(reached), "points": player.skills.points_available()})
+		_apply_skill_bonuses(player)
+
+
+## Tells the player what they have gained in the last second, in one message.
+func _flush_xp(player: Player) -> void:
+	if player.pending_xp.is_empty():
+		return
+	events.append({"type": "xp", "peer": player.id, "gains": player.pending_xp.duplicate()})
+	player.pending_xp = {}
+
+
+func _item_total(items: Dictionary) -> int:
+	var total := 0
+	for id in items:
+		total += int(items[id])
+	return total
+
+
+## Scavenging skill: more silver, and sometimes an extra item, from what a crate holds.
+func _apply_loot_skills(player: Player, loot: Dictionary, local_rng: RandomNumberGenerator) -> void:
+	if loot.has("silver"):
+		loot["silver"] = int(round(float(loot["silver"]) * (1.0 + player.skills.bonus("loot_silver"))))
+	if local_rng.randf() < player.skills.bonus("loot_extra"):
+		var extras: Array = []
+		for id in loot:
+			if id != "silver":
+				extras.append(id)
+		if not extras.is_empty():
+			var pick: String = String(extras[local_rng.randi() % extras.size()])
+			loot[pick] = int(loot[pick]) + 1
+
+
+## Damage a player takes: toughness reduces it and trains from it.
+func _hurt_player(victim: Player, raw_damage: float) -> float:
+	var reduced: float = raw_damage * (1.0 - victim.skills.bonus("damage_reduction"))
+	var applied: float = victim.survival.hurt(reduced)
+	if applied > 0.0:
+		_award(victim, "toughness", minf(applied * 0.4, 6.0))
+	return applied
+
+
+func cmd_perk(peer_id: int, perk_id: String) -> Dictionary:
+	var player: Player = players.get(peer_id)
+	if player == null:
+		return {"ok": false, "reason": "no_player"}
+	var status: int = player.skills.buy_perk(perk_id)
+	if status != Skills.Buy.OK:
+		return {"ok": false, "reason": ["ok", "unknown_perk", "max_rank", "need_level", "need_perk", "need_points"][status]}
+	_apply_skill_bonuses(player)
+	player.dirty_character = true
+	events.append({"type": "perk", "peer": peer_id, "perk": perk_id, "rank": player.skills.rank(perk_id)})
+	return {"ok": true, "rank": player.skills.rank(perk_id), "points": player.skills.points_available()}
 
 
 # --- Helpers ----------------------------------------------------------------------------------------------
@@ -1484,17 +1634,20 @@ func _hit_distance(origin: Vector2, direction: Vector2, target: Vector2, reach: 
 	return distance if to_target.normalized().dot(direction) >= 0.34 else -1.0
 
 
-func _damage_target(attacker: Player, hit: Dictionary, damage: float) -> void:
+func _damage_target(attacker: Player, hit: Dictionary, damage: float, source: String = "melee") -> void:
 	attacker.dirty_character = true
 	if hit["kind"] == "zombie":
 		var zombie = zombies.get(hit["id"])
 		if zombie == null:
 			return
+		damage *= 1.0 + attacker.skills.bonus("zombie_damage")
 		# Only real, positive, server-applied hits can qualify for group XP.
 		if damage > 0.0 and zombie.is_alive() and (zombie.contributors.size() < 16 or zombie.contributors.has(attacker.id)):
 			var equipped: String = attacker.inventory.weapon
 			if equipped != "" and attacker.inventory.count(equipped) > 0:
 				zombie.contributors[attacker.id] = {"time": time, "weapon": equipped}
+		# A real hit on a living enemy trains the weapon skill (more for heavier hits).
+		_award(attacker, "marksman" if source == "ranged" else "melee", 1.0 + damage / 6.0)
 		events.append({"type": "hit", "kind": "zombie", "id": zombie.id, "damage": damage, "x": zombie.position.x, "z": zombie.position.z})
 		if zombie.take_damage(damage, attacker.id):
 			attacker.kills += 1
@@ -1509,9 +1662,10 @@ func _damage_target(attacker: Player, hit: Dictionary, damage: float) -> void:
 						"skill": Progression.combat_skill_for_weapon(weapon),
 						"xp": mastery_xp})
 			_party_award_assists(attacker, zombie)
+			_award(attacker, "slayer", float(Defs.ZOMBIES[zombie.type].get("xp", 5)) * 2.0)
 			if Contracts.record_kill(attacker.contract_state):
 				attacker.dirty_character = true
-			_on_zombie_death(zombie)
+			_on_zombie_death(zombie, attacker)
 	else:
 		var victim: Player = players.get(hit["id"])
 		if victim == null or not _alive(victim):
@@ -1523,8 +1677,9 @@ func _damage_target(attacker: Player, hit: Dictionary, damage: float) -> void:
 		if not ZoneRisk.can_pvp(world.zone_at(attacker.position.x, attacker.position.z),
 				world.zone_at(victim.position.x, victim.position.z)):
 			return
+		_award(attacker, "marksman" if source == "ranged" else "melee", 1.0 + damage / 6.0)
 		var final_damage: float = Combat.apply_armor(damage, victim.inventory.armor)
-		victim.survival.hurt(final_damage)
+		_hurt_player(victim, final_damage)
 		events.append({"type": "hit", "kind": "player", "id": victim.id, "damage": final_damage, "by": attacker.id})
 		if not _alive(victim):
 			attacker.kills += 1
@@ -1567,11 +1722,14 @@ func _party_award_assists(killer: Player, zombie) -> void:
 				"xp": actual, "assist": true})
 
 
-func _on_zombie_death(zombie) -> void:
+func _on_zombie_death(zombie, killer = null) -> void:
 	var zone: int = world.zone_at(zombie.position.x, zombie.position.z)
 	var loot_rng := RandomNumberGenerator.new()
 	loot_rng.seed = WorldGen.mix(zombie.id, int(time * 10.0), world.world_seed, 5)
-	_make_bag(zombie.position, Combat.zombie_loot(zombie.type, zone, loot_rng))
+	var zombie_loot: Dictionary = Combat.zombie_loot(zombie.type, zone, loot_rng)
+	if killer != null and zombie_loot.has("silver"):
+		zombie_loot["silver"] = int(round(float(zombie_loot["silver"]) * (1.0 + killer.skills.bonus("zombie_silver"))))
+	_make_bag(zombie.position, zombie_loot)
 	if spawn_state.has(zombie.spawn_id):
 		spawn_state[zombie.spawn_id] = {"zombie": -1, "next": time + (240.0 if zone < 2 else 360.0)}
 	events.append({"type": "zombie_died", "id": zombie.id, "x": zombie.position.x, "z": zombie.position.z})
@@ -1650,6 +1808,14 @@ func _tick_players(delta: float) -> void:
 		if zone != player.zone_notice:
 			player.zone_notice = zone
 			events.append({"type": "zone", "peer": player.id, "zone": zone})
+			var region_bit: int = 1 << zone
+			if zone >= 1 and int(player.skills.zones_seen) & region_bit == 0:
+				player.skills.zones_seen = int(player.skills.zones_seen) | region_bit
+				_award(player, "explorer", 40.0 * float(zone))
+		player.xp_report_timer += delta
+		if player.xp_report_timer >= 1.0:
+			player.xp_report_timer = 0.0
+			_flush_xp(player)
 		if not player.action.is_empty():
 			if player.action.has("fish"):
 				var cast_at := Vector2(float(player.action["cast_x"]), float(player.action["cast_z"]))
@@ -1695,7 +1861,12 @@ func _finish_gather(player: Player, node: Dictionary) -> void:
 	if item_id in ["wood", "stone", "ore", "fiber"]:
 		item_id = "%s_%d" % [item_id, int(node["tier"])]
 	var amount: int = int(info["amount"]) + (1 if rng.randf() < 0.3 else 0)
+	var gather_skill := Skills.skill_for_node(String(node["kind"]))
+	if gather_skill != "" and rng.randf() < player.skills.bonus("gather_yield." + gather_skill):
+		amount += 1 # Skill: a lucky harvest.
 	var left: int = player.inventory.add(item_id, amount)
+	if gather_skill != "" and amount - left > 0:
+		_award(player, gather_skill, (3.0 + 2.0 * float(amount - left)) * float(int(node["tier"])))
 	# No XP for items that did not fit, nor for repeat attempts on depleted nodes.
 	player.progression.award_gather(String(node["kind"]), int(node["tier"]), amount - left)
 	player.dirty_inventory = true
@@ -1785,7 +1956,7 @@ func _tick_zombies(delta: float) -> void:
 					events.append({"type": "evaded", "peer": victim.id, "zombie": zombie.id})
 					continue
 				var damage: float = Combat.apply_armor(float(result["damage"]), victim.inventory.armor)
-				victim.survival.hurt(damage)
+				_hurt_player(victim, damage)
 				if victim.survival.add_infection(float(Defs.ZOMBIE_INFECTION_PER_HIT.get(zombie.type, 0.0))):
 					victim.dirty_character = true
 					events.append({"type": "infection", "peer": victim.id,
@@ -1960,16 +2131,29 @@ func snapshot_for(peer_id: int) -> Dictionary:
 			"combat_levels": player.progression.combat_levels(),
 			"contract": player.contract_state.duplicate(true),
 			"carry_kg": player.inventory.total_weight(),
-			"cargo_factor": player.inventory.movement_factor(),
+			"cargo_factor": player.inventory.movement_factor(player.skills.bonus("carry_capacity")),
+			"max_health": player.survival.max_health,
+			"speed_bonus": player.skills.bonus("move_speed"), "carry_bonus": player.skills.bonus("carry_capacity"),
 		},
 		"players": nearby_players, "zombies": nearby_zombies, "bags": nearby_bags,
 		"barricades": nearby_barricades, "campfires": nearby_campfires,
 		"depleted": gone_nodes, "crates_used": used_crates,
 	}
-	if player.dirty_inventory:
+	# The skill sheet is small, but snapshots can be lost: resend it when it changed and every few seconds.
+	if player.dirty_skills or time - player.skills_sent_at > SNAPSHOT_REPEAT_SECONDS:
+		var sheet: Dictionary = player.skills.to_dict()
+		sheet["points"] = player.skills.points_available()
+		snapshot["skills"] = sheet
+		player.skills_sent_at = time
+		player.dirty_skills = false
+	# Snapshots are unreliable, so a change that was reported once could be lost for good: repeat the
+	# containers every few seconds as well as when they change.
+	if player.dirty_inventory or time - player.inventory_sent_at > SNAPSHOT_REPEAT_SECONDS:
 		snapshot["inventory"] = player.inventory.to_dict()
 		player.dirty_inventory = false
-	if player.dirty_stash:
+		player.inventory_sent_at = time
+	if player.dirty_stash or time - player.stash_sent_at > SNAPSHOT_REPEAT_SECONDS:
 		snapshot["stash"] = player.stash.to_dict()
 		player.dirty_stash = false
+		player.stash_sent_at = time
 	return snapshot

@@ -162,6 +162,8 @@ func _run() -> void:
 			await _scenario_killer()
 		"idle":
 			await until(func() -> bool: return false, 3.0)
+		"skills":
+			await _scenario_skills()
 		"persist1":
 			await _scenario_persist1()
 		"persist2":
@@ -176,8 +178,9 @@ func _run() -> void:
 func _scenario_solo() -> void:
 	# 1. Walk for real and check that prediction and server agree.
 	var start := here()
-	var reached := await walk_to(start + Vector2(0.0, 30.0), 14.0)
-	check(reached, "walked 30 m north inside the hub")
+	# Walk to the fountain at the center of the hub (the spawn point is random, and houses stand beyond it).
+	var reached := await walk_to(Vector2(-4.0, 3.0), 14.0)
+	check(reached, "walked to the fountain inside the hub")
 	await until(func() -> bool: return client.snapshots_received > 20, 3.0)
 	await until(func() -> bool: return Vector2(client.you["x"], client.you["z"]).distance_to(here()) < 0.8, 2.0)
 	var gap := Vector2(client.you["x"], client.you["z"]).distance_to(here())
@@ -318,6 +321,10 @@ func _scenario_killer() -> void:
 
 func _scenario_persist1() -> void:
 	check(client.inventory.count("silver") == 0, "a brand new account starts without silver")
+	debug("xp", {"skill": "melee", "amount": 3000})
+	check(await until(func() -> bool: return client.skills.level("melee") >= 8, 4.0), "melee trained to level 8")
+	client.buy_perk("heavy_hands")
+	check(await until(func() -> bool: return client.skills.rank("heavy_hands") == 1, 4.0), "bought a perk")
 	debug("give", {"item": "silver", "count": 123})
 	debug("give", {"item": "club_3", "count": 1})
 	check(await until(func() -> bool: return client.inventory.count("silver") == 123 and client.inventory.count("club_3") == 1, 4.0), "has silver and a club")
@@ -334,9 +341,63 @@ func _scenario_persist1() -> void:
 
 
 func _scenario_persist2() -> void:
+	check(client.skills.level("melee") >= 8, "the melee level was kept across sessions (%d)" % client.skills.level("melee"))
+	check(client.skills.rank("heavy_hands") == 1, "and the perk")
 	check(client.inventory.count("silver") == 123, "the silver was kept across sessions (%d)" % client.inventory.count("silver"))
 	check(client.inventory.count("club_3") == 1, "the club was kept")
 	check(client.you.get("weapon", "") == "club_3", "and is still equipped")
 	check(client.inventory.count("canned_food") == 1, "eaten food stays eaten")
 	check(client.you["health"] < 85.0, "the injury was kept (%.0f)" % client.you["health"])
 	check(Vector2(client.you["x"], client.you["z"]).distance_to(Vector2(300.0, 300.0)) < 6.0, "they reappear where they logged out")
+
+
+func _scenario_skills() -> void:
+	check(client.skills.level("woodcutting") == 1, "a new character starts at level 1")
+	check(client.skill_points == 0, "with no points")
+	# Gathering trains its skill and the server reports it.
+	var tree := {}
+	var best := INF
+	for cx in range(-6, 7):
+		for cz in range(-6, 7):
+			for node in client.world.chunk(Vector2i(cx, cz))["nodes"]:
+				if node["kind"] == "tree" and node["tier"] == 1:
+					var d := Vector2(node["x"], node["z"]).length()
+					if d > 140.0 and d < best: # A different tree than the solo bot chops.
+						tree = node
+						best = d
+	await teleport(tree["x"] - 1.6, tree["z"])
+	client.gather(tree["id"])
+	check(await until(func() -> bool: return client.skills.xp["woodcutting"] > 0, 14.0), "chopping a tree trained woodcutting on the server and in the snapshot")
+	var heard := func(kind: String, key: String, value: String) -> bool:
+		for event in client.events:
+			if event["type"] != kind or not event.has(key):
+				continue
+			var field: Variant = event[key]
+			if field is Dictionary and field.has(value):
+				return true
+			if field is String and field == value:
+				return true
+		return false
+	check(await until(func() -> bool: return heard.call("xp", "gains", "woodcutting"), 4.0), "the xp gain was announced")
+	# A level up arrives as an event and as points.
+	debug("xp", {"skill": "woodcutting", "amount": 1200})
+	check(await until(func() -> bool: return client.skills.level("woodcutting") >= 5, 4.0), "level 5 reached")
+	check(await until(func() -> bool: return heard.call("skill_up", "skill", "woodcutting"), 3.0), "the level up was announced")
+	check(client.skill_points >= 4, "and gave skill points (%d)" % client.skill_points)
+	# Perks: refused without the level, bought with it.
+	client.last_results.erase("perk")
+	client.buy_perk("forest_master")
+	check(await until(func() -> bool: return client.last_results.has("perk"), 3.0), "the server answers a perk request")
+	check(client.last_results["perk"].get("reason", "") == "need_level", "a perk above your level is refused")
+	var points_before: int = client.skill_points
+	client.last_results.erase("perk")
+	client.buy_perk("sharp_axe")
+	check(await until(func() -> bool: return client.skills.rank("sharp_axe") == 1, 4.0), "Sharp Axe bought")
+	check(client.skill_points == points_before - 1, "and paid for")
+	# Max health follows the toughness skill.
+	var health_before: float = client.you["max_health"]
+	debug("xp", {"skill": "toughness", "amount": 2000})
+	check(await until(func() -> bool: return client.you["max_health"] > health_before, 4.0), "toughness raised the maximum health (%.1f -> %.1f)" % [health_before, client.you["max_health"]])
+	# Running bonus reaches the client for prediction.
+	debug("xp", {"skill": "athletics", "amount": 3000})
+	check(await until(func() -> bool: return client.you.get("speed_bonus", 0.0) > 0.02, 4.0), "the speed bonus reaches the client")

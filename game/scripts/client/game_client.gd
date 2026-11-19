@@ -7,6 +7,7 @@ const WorldGen = preload("res://scripts/shared/world_gen.gd")
 const Inventory = preload("res://scripts/shared/inventory.gd")
 const Movement = preload("res://scripts/shared/movement.gd")
 const Survival = preload("res://scripts/shared/survival.gd")
+const Skills = preload("res://scripts/shared/skills.gd")
 
 signal snapshot_received
 signal event_received(event: Dictionary)
@@ -16,6 +17,8 @@ var world
 var peer_id: int = 0
 var welcomed: bool = false
 var inventory = Inventory.new()
+var skills = Skills.new() # The character's skill sheet, as last reported by the server.
+var skill_points: int = 0
 var stash = Inventory.new(Defs.STASH_SLOTS)
 var you: Dictionary = {}
 var players: Dictionary = {} # id -> entity from the latest snapshot
@@ -74,6 +77,8 @@ func on_snapshot(snapshot: Dictionary) -> void:
 	you = snapshot["you"]
 	if snapshot.has("inventory"):
 		inventory.load_dict(snapshot["inventory"])
+	if snapshot.has("skills") and skills.load_dict(snapshot["skills"]):
+		skill_points = int(snapshot["skills"].get("points", 0))
 	if snapshot.has("stash"):
 		stash.load_dict(snapshot["stash"])
 	players.clear()
@@ -149,11 +154,11 @@ func send_input(move: Vector2, sprint: bool, face_yaw: float, delta: float) -> v
 	_seq += 1
 	yaw = face_yaw
 	# Prediction uses the same weight calculation as the authoritative server.
-	var factor: float = inventory.movement_factor()
+	var factor: float = inventory.movement_factor(float(you.get("carry_bonus", 0.0)))
 	var running := sprint and move.length_squared() > 0.00001 and factor >= 0.9999
 	running = running and Survival.can_sprint_with(predicted_stamina,
 			float(you.get("hunger", 100.0)), float(you.get("thirst", 100.0)), delta)
-	var input := {"x": move.x, "z": move.y, "sprint": running, "cargo_factor": factor}
+	var input := {"x": move.x, "z": move.y, "sprint": running, "cargo_factor": factor, "speed_bonus": float(you.get("speed_bonus", 0.0))}
 	predicted = Movement.step(world, predicted, input, delta)
 	if running:
 		predicted_stamina = maxf(0.0, predicted_stamina - Defs.SPRINT_STAMINA_PER_SECOND * delta)
@@ -190,6 +195,10 @@ func fish() -> void:
 
 func craft(recipe: String, times: int = 1) -> void:
 	net.c_craft.rpc_id(1, recipe, times)
+
+
+func buy_perk(perk_id: String) -> void:
+	net.c_perk.rpc_id(1, perk_id)
 
 
 func use_item(item_id: String) -> void:

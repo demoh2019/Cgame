@@ -32,8 +32,9 @@ func total_weight() -> float:
 	return weight
 
 
-func movement_factor() -> float:
-	return Defs.carry_speed_factor(total_weight())
+## `capacity_bonus` (from skills) makes the same load count as lighter: 0.25 means a quarter more capacity.
+func movement_factor(capacity_bonus: float = 0.0) -> float:
+	return Defs.carry_speed_factor(total_weight() / (1.0 + maxf(capacity_bonus, 0.0)))
 
 
 func has_all(inputs: Dictionary) -> bool:
