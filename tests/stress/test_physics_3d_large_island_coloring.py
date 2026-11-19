@@ -47,7 +47,10 @@ class LargeIsland3DColoringContracts(unittest.TestCase):
         self.assertIn("uint32_t color_batch_offset = 0;", header)
         self.assertIn("bool _solve_large_island(", header)
         self.assertIn("colored_constraints.resize(constraint_count);", self.coloring)
-        self.assertIn("HashMap<GodotBody3D *, uint32_t> occupied_colors;", self.coloring)
+        self.assertIn("HashMap<GodotBody3D *, uint32_t> occupied_colors;", header)
+        self.assertIn("occupied_colors.clear();", self.coloring)
+        self.assertIn("constraint_colors.resize(constraint_count);", self.coloring)
+        self.assertIn("color_batch_count = count;", self.coloring)
         self.assertIn("MIN_PARALLEL_COLOR_CONSTRAINTS", self.coloring)
         self.assertIn("MIN_PARALLEL_LARGE_ISLAND", self.coloring)
 
