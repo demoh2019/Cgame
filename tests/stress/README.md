@@ -759,9 +759,18 @@ positions/velocities remain finite for 150 physics frames, and that changing
 contact friction from 1 to 0 to 1 does not cause unstable velocities.
 
 This specifically exercises contact persistence, warm-start impulse reuse
-and the zero-friction tangent-solver shortcut. It does not establish a speedup;
-use matched builds and hardware with the dense `physics_2d` stress scenario
-for performance measurements.
+and the zero-friction tangent-solver shortcut. It does not establish a speedup.
+For throughput, two matched low-level workloads use the same dense circle
+geometry while varying only the friction coefficient. Compare each case
+against a baseline from the same machine, binary settings and scale; do not
+treat time differences *between* friction modes as an engine-version speedup.
+
+```bash
+python3 tests/stress/run.py --godot ./bin/godot.macos.editor.arm64 \
+  --case physics_contacts_zero_friction_2d,physics_contacts_friction_2d \
+  --scale 4 --frames 90 --repeats 5 --rss-limit-mib 4096 \
+  --output out/physics-contact-solver.json
+```
 
 ```bash
 # Build an engine before running (arm64 macOS example):
