@@ -30,14 +30,17 @@ class SweptEdgeContracts(unittest.TestCase):
         for _ in range(5000):
             start = rng.uniform(0.001, 10)
             finish = rng.uniform(0.001, 10)
-            impact = start / (start + finish)
+            # Orthogonal unit-half-length edges cross at their interiors.
+            # Their cubic determinant reduces to 4 * z(t), giving an
+            # analytical TOI that is not a discrete end-position contact.
+            coeff0 = 4.0 * start
+            coeff1 = -4.0 * (start + finish)
+            impact = -coeff0 / coeff1
             self.assertGreater(impact, 0.0)
             self.assertLess(impact, 1.0)
-            self.assertAlmostEqual(start + impact * (-finish - start), 0.0, delta=1e-12)
-            # A and B move on the same x-directed segment; C/D fixed on y.
-            # The fixed-line coplanarity polynomial is linear here and its
-            # one root has both segment weights 1/2 (interior).
-            self.assertEqual((0.5, 0.5), (0.5, 0.5))
+            self.assertAlmostEqual(coeff0 + impact * coeff1, 0.0, delta=1e-12)
+            self.assertAlmostEqual(-1.0 + 2.0 * 0.5, 0.0, delta=1e-12)
+            self.assertGreater(finish, 0.0)  # Endpoints lie on the other side.
 
     def test_cubic_coplanarity_coefficients_randomized(self):
         rng = random.Random(20261120)
