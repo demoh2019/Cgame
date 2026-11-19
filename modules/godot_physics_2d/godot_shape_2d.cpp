@@ -258,27 +258,34 @@ bool GodotCircleShape2D::contains_point(const Vector2 &p_point) const {
 }
 
 bool GodotCircleShape2D::intersect_segment(const Vector2 &p_begin, const Vector2 &p_end, Vector2 &r_point, Vector2 &r_normal) const {
-	Vector2 line_vec = p_end - p_begin;
+	const Vector2 direction = p_end - p_begin;
+	const real_t direction_length_squared = direction.length_squared();
 
-	real_t a, b, c;
-
-	a = line_vec.dot(line_vec);
-	b = 2 * p_begin.dot(line_vec);
-	c = p_begin.dot(p_begin) - radius * radius;
-
-	real_t sqrtterm = b * b - 4 * a * c;
-
-	if (sqrtterm < 0) {
-		return false;
-	}
-	sqrtterm = Math::sqrt(sqrtterm);
-	real_t res = (-b - sqrtterm) / (2 * a);
-
-	if (res < 0 || res > 1 + CMP_EPSILON) {
+	// A zero-length ray has no entering surface. Avoid 0 / 0 in the
+	// quadratic formula, which would otherwise report a false hit.
+	if (direction_length_squared == 0.0) {
 		return false;
 	}
 
-	r_point = p_begin + line_vec * res;
+	// Solve a*t^2 + 2*b*t + c = 0, only for the first entry.
+	// Using half-b removes two multiplications from the discriminant.
+	const real_t half_b = p_begin.dot(direction);
+	const real_t c = p_begin.length_squared() - radius * radius;
+	if (c > 0.0 && half_b >= 0.0) {
+		return false; // Ray starts outside and points away from the circle.
+	}
+
+	const real_t discriminant = half_b * half_b - direction_length_squared * c;
+	if (discriminant < 0.0) {
+		return false;
+	}
+
+	const real_t fraction = (-half_b - Math::sqrt(discriminant)) / direction_length_squared;
+	if (fraction < 0.0 || fraction > 1.0 + CMP_EPSILON) {
+		return false;
+	}
+
+	r_point = p_begin + direction * fraction;
 	r_normal = r_point.normalized();
 	return true;
 }
@@ -400,42 +407,41 @@ bool GodotCapsuleShape2D::contains_point(const Vector2 &p_point) const {
 }
 
 bool GodotCapsuleShape2D::intersect_segment(const Vector2 &p_begin, const Vector2 &p_end, Vector2 &r_point, Vector2 &r_normal) const {
-	real_t d = 1e10;
-	Vector2 n = (p_end - p_begin).normalized();
+	const Vector2 direction = p_end - p_begin;
+	const real_t direction_length_squared = direction.length_squared();
+	if (direction_length_squared == 0.0) {
+		return false;
+	}
+
+	const Vector2 n = direction / Math::sqrt(direction_length_squared);
+	real_t d = real_t(Math::INF);
 	bool collided = false;
 
-	//try spheres
+	// Check both end caps. The ray direction and its squared length do
+	// not change when translated into either cap's local coordinates.
 	for (int i = 0; i < 2; i++) {
 		Vector2 begin = p_begin;
-		Vector2 end = p_end;
-		real_t ofs = (i == 0) ? -height * 0.5 + radius : height * 0.5 - radius;
+		const real_t ofs = (i == 0) ? -height * 0.5 + radius : height * 0.5 - radius;
 		begin.y += ofs;
-		end.y += ofs;
 
-		Vector2 line_vec = end - begin;
-
-		real_t a, b, c;
-
-		a = line_vec.dot(line_vec);
-		b = 2 * begin.dot(line_vec);
-		c = begin.dot(begin) - radius * radius;
-
-		real_t sqrtterm = b * b - 4 * a * c;
-
-		if (sqrtterm < 0) {
+		const real_t half_b = begin.dot(direction);
+		const real_t c = begin.length_squared() - radius * radius;
+		if (c > 0.0 && half_b >= 0.0) {
+			continue;
+		}
+		const real_t discriminant = half_b * half_b - direction_length_squared * c;
+		if (discriminant < 0.0) {
 			continue;
 		}
 
-		sqrtterm = Math::sqrt(sqrtterm);
-		real_t res = (-b - sqrtterm) / (2 * a);
-
-		if (res < 0 || res > 1 + CMP_EPSILON) {
+		const real_t fraction = (-half_b - Math::sqrt(discriminant)) / direction_length_squared;
+		if (fraction < 0.0 || fraction > 1.0 + CMP_EPSILON) {
 			continue;
 		}
 
-		Vector2 point = begin + line_vec * res;
-		Vector2 pointf(point.x, point.y - ofs);
-		real_t pd = n.dot(pointf);
+		const Vector2 point = begin + direction * fraction;
+		const Vector2 pointf(point.x, point.y - ofs);
+		const real_t pd = n.dot(pointf);
 		if (pd < d) {
 			r_point = pointf;
 			r_normal = point.normalized();
@@ -446,17 +452,15 @@ bool GodotCapsuleShape2D::intersect_segment(const Vector2 &p_begin, const Vector
 
 	Vector2 rpos, rnorm;
 	if (Rect2(Point2(-radius, -height * 0.5 + radius), Size2(radius * 2.0, height - radius * 2)).intersects_segment(p_begin, p_end, &rpos, &rnorm)) {
-		real_t pd = n.dot(rpos);
+		const real_t pd = n.dot(rpos);
 		if (pd < d) {
 			r_point = rpos;
 			r_normal = rnorm;
-			d = pd;
 			collided = true;
 		}
 	}
 
-	//return get_aabb().intersects_segment(p_begin,p_end,&r_point,&r_normal);
-	return collided; //todo
+	return collided;
 }
 
 Vector2 GodotCapsuleShape2D::_get_second_moments() const {
@@ -514,7 +518,8 @@ void GodotCapsuleShape2D::set_data(const Variant &p_data) {
 }
 
 Variant GodotCapsuleShape2D::get_data() const {
-	return Point2(height, radius);
+	// Match set_data(Vector2) and PhysicsServer2D's (radius, height) convention.
+	return Point2(radius, height);
 }
 
 /*********************************************************/
@@ -550,19 +555,25 @@ void GodotConvexPolygonShape2D::get_supports(const Vector2 &p_normal, Vector2 *r
 }
 
 bool GodotConvexPolygonShape2D::contains_point(const Vector2 &p_point) const {
-	bool out = false;
-	bool in = false;
+	bool has_positive = false;
+	bool has_negative = false;
 
 	for (int i = 0; i < point_count; i++) {
-		real_t d = points[i].normal.dot(p_point) - points[i].normal.dot(points[i].pos);
-		if (d > 0) {
-			out = true;
-		} else {
-			in = true;
+		// A convex point is outside when two edges disagree on its side.
+		// Zero-distance edges are neutral, so boundary hits work with
+		// either vertex winding.
+		const real_t d = points[i].normal.dot(p_point - points[i].pos);
+		if (d > 0.0) {
+			has_positive = true;
+		} else if (d < 0.0) {
+			has_negative = true;
+		}
+		if (has_positive && has_negative) {
+			return false;
 		}
 	}
 
-	return in != out;
+	return point_count > 0;
 }
 
 bool GodotConvexPolygonShape2D::intersect_segment(const Vector2 &p_begin, const Vector2 &p_end, Vector2 &r_point, Vector2 &r_normal) const {
