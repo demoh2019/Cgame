@@ -1,0 +1,48 @@
+name: Single-allocation String code line formatting
+
+on:
+  pull_request:
+    branches: [develop]
+    paths:
+      - "core/string/ustring.cpp"
+      - "tests/core/string/test_string.cpp"
+      - "misc/scripts/tests/test_string_code_lines_single_allocation.py"
+      - ".github/workflows/string-code-lines-performance.yml"
+  push:
+    branches: [develop]
+    paths:
+      - "core/string/ustring.cpp"
+      - "tests/core/string/test_string.cpp"
+      - "misc/scripts/tests/test_string_code_lines_single_allocation.py"
+      - ".github/workflows/string-code-lines-performance.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  contracts:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - run: |
+          python3 -m py_compile misc/scripts/tests/test_string_code_lines_single_allocation.py
+          python3 -m unittest discover -s misc/scripts/tests -p test_string_code_lines_single_allocation.py -v
+
+  string-tests:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+      - uses: ./.github/actions/godot-deps
+      - uses: ./.github/actions/godot-build
+        with:
+          platform: linuxbsd
+          target: editor
+          scons-flags: dev_build=yes tests=yes debug_symbols=no module_mono_enabled=no accesskit=no
+      - name: Test identical formatting, Unicode, and >10000 lines
+        run: |
+          timeout 300s ./bin/godot.linuxbsd.editor.dev.x86_64 --headless --test --test-case="*get_with_code_lines matches original*" --no-colors
