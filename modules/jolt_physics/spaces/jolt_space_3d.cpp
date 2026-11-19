@@ -1520,6 +1520,16 @@ static void resolve_soft_body_self_edge_contacts(JPH::Body &p_body, const JoltSo
 	const float radius_sq = radius * radius;
 	const float recovery = JoltProjectSettings::soft_body_soft_contact_recovery / p_step;
 	const float friction = JoltProjectSettings::soft_body_soft_contact_friction;
+	// A pair's closest distance cannot close faster than the maximum
+	// relative endpoint speed. Every predicted contact is rejected if
+	// that speed times dt exceeds max_sweep. Therefore a current-state
+	// BVH expanded by max_sweep is a conservative swept broadphase for
+	// every pair that the bounded predictor is allowed to accept.
+	// Keeping the tree in CURRENT space also works with persistent refits.
+	const bool swept_self_edge_ccd = JoltProjectSettings::soft_body_self_speculative_edge_ccd &&
+			JoltProjectSettings::soft_body_soft_ccd_max_sweep > 0.0f;
+	const float candidate_radius = radius +
+			(swept_self_edge_ccd ? JoltProjectSettings::soft_body_soft_ccd_max_sweep : 0.0f);
 	bool use_edge_bvh = false;
 	if (JoltProjectSettings::soft_body_self_edge_bvh) {
 		const bool persistent = JoltProjectSettings::soft_body_self_persistent_bvh;
@@ -1556,7 +1566,7 @@ static void resolve_soft_body_self_edge_contacts(JPH::Body &p_body, const JoltSo
 		const JPH::Vec3 p_min = JPH::Vec3::sMin(p0, p1);
 		const JPH::Vec3 p_max = JPH::Vec3::sMax(p0, p1);
 		if (use_edge_bvh) {
-			query_soft_self_edge_bvh(p_min, p_max, radius, r_scratch.edge_bvh, r_budget);
+			query_soft_self_edge_bvh(p_min, p_max, candidate_radius, r_scratch.edge_bvh, r_budget);
 		}
 		const uint32_t candidate_count = use_edge_bvh ? uint32_t(r_scratch.edge_bvh.candidates.size()) : edge_count;
 		for (uint32_t candidate = 0; candidate < candidate_count && r_budget > 0; ++candidate) {
@@ -1577,7 +1587,7 @@ static void resolve_soft_body_self_edge_contacts(JPH::Body &p_body, const JoltSo
 			const JPH::Vec3 q1 = b1.mPosition;
 			const JPH::Vec3 q_min = JPH::Vec3::sMin(q0, q1);
 			const JPH::Vec3 q_max = JPH::Vec3::sMax(q0, q1);
-			if (!soft_self_edge_bounds_overlap(p_min, p_max, q_min, q_max, radius)) {
+			if (!soft_self_edge_bounds_overlap(p_min, p_max, q_min, q_max, candidate_radius)) {
 				continue;
 			}
 
@@ -1588,8 +1598,22 @@ static void resolve_soft_body_self_edge_contacts(JPH::Body &p_body, const JoltSo
 			}
 			const JPH::Vec3 diff = near_b - near_a;
 			const float distance_sq = diff.LengthSq();
-			if (!Math::is_finite(distance_sq) || distance_sq >= radius_sq) {
+			if (!Math::is_finite(distance_sq)) {
 				continue;
+			}
+			bool swept_contact = false;
+			JPH::Vec3 swept_normal = JPH::Vec3::sZero();
+			if (distance_sq >= radius_sq) {
+				// The shared conservative-advancement predictor is also used
+				// for inter-body EE. Its segment geometry, velocity and work
+				// budgets are valid in this body's local coordinates.
+				if (!swept_self_edge_ccd || !predict_soft_edge_edge_sweep(p0, p1, q0, q1,
+						 a0.mVelocity, a1.mVelocity, b0.mVelocity, b1.mVelocity,
+						 p_step, radius, JoltProjectSettings::soft_body_soft_ccd_max_sweep,
+						 r_budget, s, t, swept_normal)) {
+					continue;
+				}
+				swept_contact = true;
 			}
 
 			const float wa0 = 1.0f - s, wa1 = s, wb0 = 1.0f - t, wb1 = t;
@@ -1600,9 +1624,11 @@ static void resolve_soft_body_self_edge_contacts(JPH::Body &p_body, const JoltSo
 			}
 			const JPH::Vec3 relative_velocity = wb0 * b0.mVelocity + wb1 * b1.mVelocity -
 					wa0 * a0.mVelocity - wa1 * a1.mVelocity;
-			const float distance = Math::sqrt(MAX(distance_sq, 0.0f));
-			JPH::Vec3 normal;
-			if (distance > 1.0e-6f) {
+			const float distance = swept_contact ? radius : Math::sqrt(MAX(distance_sq, 0.0f));
+			JPH::Vec3 normal = swept_normal;
+			if (swept_contact) {
+				// Use the impact-time normal returned by the predictor.
+			} else if (distance > 1.0e-6f) {
 				normal = diff / distance;
 			} else {
 				const JPH::Vec3 cross_normal = (p1 - p0).Cross(q1 - q0);
@@ -1624,15 +1650,20 @@ static void resolve_soft_body_self_edge_contacts(JPH::Body &p_body, const JoltSo
 			if (!Math::is_finite(normal_speed)) {
 				continue;
 			}
-			if (r_scratch.position_projection_ready) {
+			// Never project *future* contacts into current penetration;
+			// the Jacobi projection only corrects actual overlaps.
+			if (!swept_contact && r_scratch.position_projection_ready) {
 				const uint32_t indices[4] = { uint32_t(key_a >> 32), uint32_t(key_a),
 					uint32_t(key_b >> 32), uint32_t(key_b) };
 				const float gradients[4] = { -wa0, -wa1, wb0, wb1 };
 				accumulate_soft_self_position_projection(r_scratch, vertices, indices, gradients,
 						normal, radius - distance, p_step);
 			}
-			const float recovery_speed = MIN((radius - distance) * recovery, MAX_SOFT_SOFT_PENETRATION_BIAS);
-			const float correction = MIN(MAX(recovery_speed - normal_speed, 0.0f), MAX_SOFT_SOFT_CONTACT_SPEED_CORRECTION);
+			const float recovery_speed = swept_contact ? 0.0f :
+					MIN((radius - distance) * recovery, MAX_SOFT_SOFT_PENETRATION_BIAS);
+			const float max_correction = swept_contact ? JoltProjectSettings::soft_body_soft_ccd_max_correction_speed :
+					MAX_SOFT_SOFT_CONTACT_SPEED_CORRECTION;
+			const float correction = MIN(MAX(recovery_speed - normal_speed, 0.0f), max_correction);
 			if (correction <= 0.0f) {
 				continue;
 			}
