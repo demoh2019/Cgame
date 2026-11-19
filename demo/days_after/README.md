@@ -150,3 +150,24 @@ godot --headless --path demo/days_after --script res://smoke_test_construction.g
 
 This is a small offline construction prototype, not unrestricted freeform
 building, structural physics or networked ownership. Those remain future work.
+
+
+## Infected navigation: procedural A* grid
+
+Infected now follow a small 1m XZ navigation grid built from the collidable
+ruins and active shelter barricades. They can route around static buildings.
+Building, destroying or loading barriers refreshes occupied cells, forcing
+infected to reconsider their paths. Enemies recalculate periodically and when
+the goal or grid changes; no navmesh asset or external addon is required.
+
+The implementation uses existing Cgame/Godot `AStarGrid2D`, `StaticBody3D`
+and ray-collision APIs. This is intentionally limited to the small flat demo
+area; large streaming worlds will need chunked navigation/NavigationServer3D,
+crowd avoidance and world-specific profiling.
+
+```sh
+godot --headless --path demo/days_after --script res://smoke_test_navigation.gd
+```
+
+The regression checks detours around a ruined wall, dynamically blocked
+construction pads, destroyed-barrier removal and infected navigation wiring.

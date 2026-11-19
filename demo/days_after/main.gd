@@ -10,6 +10,7 @@ const ZOMBIE_SCRIPT = preload("res://zombie.gd")
 const STASH_SCRIPT = preload("res://stash.gd")
 const WORLD_SAVE = preload("res://world_state.gd")
 const CONSTRUCTION_SCRIPT = preload("res://construction.gd")
+const NAVIGATION_SCRIPT = preload("res://infected_navigation.gd")
 const STASH_ITEMS := [
     "wood_t1", "stone_t1", "fiber_t1", "wood_t2", "stone_t2", "fiber_t2",
     "food", "water", "field_bandage", "reinforced_bandage",
@@ -22,6 +23,7 @@ var prompt_label: Label
 var infected_kills: int = 0
 var infected_total: int = 0
 var construction: Node3D
+var infected_navigation: Node
 var shelter_stash: Area3D
 var stash_open := false
 var stash_selected := 0
@@ -35,6 +37,7 @@ func _ready() -> void:
     _build_resources()
     _build_stash()
     _build_construction()
+    _build_navigation()
     _build_enemies()
     _build_hud()
 
@@ -108,6 +111,9 @@ func _add_static_box(body_name: String, center: Vector3, size: Vector3, color: C
     var body := StaticBody3D.new()
     body.name = body_name
     body.position = center
+    if body_name != "Ground":
+        body.set_meta("nav_footprint_size", Vector2(size.x, size.z))
+        body.add_to_group("nav_static_obstacle")
 
     var collision := CollisionShape3D.new()
     var shape := BoxShape3D.new()
@@ -214,6 +220,7 @@ func _spawn_infected(node_name: String, location: Vector3) -> void:
     var infected = ZOMBIE_SCRIPT.new()
     infected.name = node_name
     infected.target = player
+    infected.navigation = infected_navigation
     infected.position = location
     infected.eliminated.connect(_on_infected_eliminated)
     add_child(infected)
@@ -250,6 +257,13 @@ func _on_infected_eliminated() -> void:
     player.last_message = "Заражённый уничтожен! Опыт боя +25."
 
 
+
+
+func _build_navigation() -> void:
+    infected_navigation = NAVIGATION_SCRIPT.new() as Node
+    infected_navigation.name = "InfectedNavigation"
+    add_child(infected_navigation)
+    construction.connect("layout_changed", Callable(infected_navigation, "refresh"))
 
 
 func _build_construction() -> void:

@@ -1,6 +1,6 @@
 extends CharacterBody3D
 ## Original infected enemy for the Days After survival sandbox.
-## Navigation around obstacles is a future milestone; physical collisions are active.
+## Replans AStarGrid2D waypoints on target movement and construction changes.
 
 signal eliminated
 
@@ -10,6 +10,11 @@ const AGGRO_RADIUS := 19.0
 const STRIKE_RADIUS := 1.6
 
 var target: Node3D
+var navigation: Node
+var _path: Array[Vector3] = []
+var _repath_delay := 0.0
+var _known_revision := -1
+var _known_goal := Vector2i(100000, 100000)
 var health: float = 72.0
 var strike_cooldown: float = 0.0
 var defeated: bool = false
@@ -59,7 +64,7 @@ func _physics_process(delta: float) -> void:
             else:
                 movement = to_barrier.normalized()
         elif distance <= AGGRO_RADIUS and distance > STRIKE_RADIUS:
-            movement = to_target.normalized()
+            movement = _navigation_direction(delta, target.global_position)
         elif distance <= STRIKE_RADIUS and strike_cooldown <= 0.0:
             target.call("take_damage", 10.0)
             strike_cooldown = 1.3
@@ -98,3 +103,34 @@ func _find_blocking_barricade() -> Node3D:
     if collider != null and collider.is_in_group("shelter_barricades"):
         return collider
     return null
+
+
+func _navigation_direction(delta: float, destination: Vector3) -> Vector3:
+    if not is_instance_valid(navigation):
+        var direct := destination - global_position
+        direct.y = 0.0
+        return direct.normalized()
+
+    _repath_delay -= delta
+    var goal := Vector2i(roundi(destination.x), roundi(destination.z))
+    var current_revision: int = int(navigation.get("revision"))
+    if (_repath_delay <= 0.0 or _known_revision != current_revision
+            or goal != _known_goal):
+        _path.clear()
+        var calculated: Array = navigation.call("get_path", global_position, destination)
+        for waypoint in calculated:
+            _path.append(waypoint)
+        _known_goal = goal
+        _known_revision = current_revision
+        # Offset repaths across infected instances instead of all on one frame.
+        _repath_delay = 0.35 + float(get_instance_id() % 7) * 0.03
+
+    while not _path.is_empty():
+        var next: Vector3 = _path[0]
+        next.y = global_position.y
+        var displacement: Vector3 = next - global_position
+        if displacement.length_squared() < 0.36:
+            _path.remove_at(0)
+        else:
+            return displacement.normalized()
+    return Vector3.ZERO
