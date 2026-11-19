@@ -18,6 +18,7 @@ const Movement = preload("res://scripts/shared/movement.gd")
 const Evasion = preload("res://scripts/shared/evasion.gd")
 const Combat = preload("res://scripts/shared/combat.gd")
 const Structures = preload("res://scripts/shared/structures.gd")
+const SiegeWaves = preload("res://scripts/shared/siege_waves.gd")
 const Zombie = preload("res://scripts/shared/zombie.gd")
 const ZoneRisk = preload("res://scripts/shared/zone_risk.gd")
 const Weather = preload("res://scripts/shared/weather.gd")
@@ -82,7 +83,10 @@ var zombies: Dictionary = {} # zombie id -> Zombie
 var depleted: Dictionary = {} # node id -> time it comes back
 var opened_crates: Dictionary = {} # crate id -> time it refills
 var spawn_state: Dictionary = {} # spawn id -> {"zombie": id or -1, "next": time}
-var barricades: Dictionary = {} # Server-owned structures; authenticated walls may persist.
+var barricades: Dictionary = {}
+var siege_last_by_wall: Dictionary = {} # Session timers only; no character persistence.
+var last_siege_time: float = -1000000.0
+var siege_waves_started: int = 0 # Server-owned structures; authenticated walls may persist.
 var campfires: Dictionary = {} # Temporary shared warmth, never checkpointed.
 var trades: Dictionary = {} # trade id -> offer/accept/expiry
 var market_orders: Dictionary = {} # id -> advertised online stock (not escrow).
@@ -988,6 +992,7 @@ func cmd_dismantle(peer_id: int, id: int) -> Dictionary:
 	# Atomic gameplay commit: a failed attempt cannot erase a barricade or mint loot.
 	player.inventory.load_dict(trial.to_dict())
 	barricades.erase(id)
+	siege_last_by_wall.erase(id)
 	world_structure_revision += 1
 	world.remove_dynamic_blocker(id)
 	player.dirty_inventory = true
@@ -1006,6 +1011,7 @@ func damage_barricade(id: int, damage: float) -> bool:
 	world_structure_revision += 1
 	if float(item["hp"]) <= 0.0:
 		barricades.erase(id)
+		siege_last_by_wall.erase(id)
 		world.remove_dynamic_blocker(id)
 		events.append({"type": "barricade_broken", "id": id})
 		return true
@@ -1400,6 +1406,8 @@ func tick(delta: float) -> void:
 	_tick_market()
 	_tick_trades()
 	_tick_players(delta)
+	if tick_count % SiegeWaves.CHECK_EVERY_TICKS == 0:
+		_tick_siege_waves()
 	_tick_zombies(delta)
 	_tick_world(delta)
 
@@ -1492,6 +1500,53 @@ func _finish_gather(player: Player, node: Dictionary) -> void:
 	player.action = {}
 	depleted[int(node["id"])] = time + float(info["respawn"])
 	events.append({"type": "gathered", "peer": player.id, "item": item_id, "amount": amount - left, "node": node["id"]})
+
+
+## Night-only server raids on defended survivors. Neither clients nor
+## old persistent-world snapshots get to dictate wave locations or strength.
+func _tick_siege_waves() -> void:
+	if not WorldCycle.is_night(time) or time - last_siege_time < SiegeWaves.GLOBAL_COOLDOWN:
+		return
+	if zombies.size() >= SiegeWaves.MAX_ACTIVE_ZOMBIES or barricades.is_empty() or players.is_empty():
+		return
+	var wall_ids: Array = barricades.keys()
+	wall_ids.sort()
+	for wall_id in wall_ids:
+		if time - float(siege_last_by_wall.get(wall_id, -1000000.0)) < SiegeWaves.WALL_COOLDOWN:
+			continue
+		var wall: Dictionary = barricades[wall_id]
+		for player in players.values():
+			if not _alive(player) or _is_safe(player.position):
+				continue
+			if not SiegeWaves.eligible(wall, player.position, time):
+				continue
+			var budget: int = mini(SiegeWaves.wave_size(Structures.tier_of(wall)),
+				SiegeWaves.MAX_ACTIVE_ZOMBIES - zombies.size())
+			var sites: Array[Vector2] = SiegeWaves.spawn_sites(world, wall,
+				player.position, budget, rng.randi_range(0, SiegeWaves.SPAWN_ANGLES - 1))
+			if sites.is_empty():
+				continue
+			var target_info: Dictionary = {player.id: {"position": player.position,
+				"alive": true, "safe": false}}
+			for index in sites.size():
+				var at: Vector2 = sites[index]
+				var kind := "walker"
+				if Structures.tier_of(wall) >= 4 and index == sites.size() - 1:
+					kind = "brute"
+				elif Structures.tier_of(wall) >= 2 and index % 3 == 2:
+					kind = "runner"
+				var spawned_id: int = new_id()
+				var infected = Zombie.new(spawned_id, kind,
+					Vector3(at.x, world.height_at(at.x, at.y), at.y), -1)
+				infected.receive_pack_alert(player.id, target_info)
+				zombies[spawned_id] = infected
+			last_siege_time = time
+			siege_last_by_wall[wall_id] = time
+			siege_waves_started += 1
+			events.append({"type": "siege_started", "id": wall_id,
+				"peer": player.id, "x": wall["x"], "z": wall["z"],
+				"count": sites.size(), "tier": Structures.tier_of(wall)})
+			return # At most one wave per scheduler check.
 
 
 func _tick_zombies(delta: float) -> void:
