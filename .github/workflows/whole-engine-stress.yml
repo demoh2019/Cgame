@@ -156,6 +156,10 @@ jobs:
             --script res://physics_ccd_capsule_segment_2d_regression.gd \
             2>&1 | tee physics2d-capsule-segment-ccd.log
           grep -Fq '2D capsule-segment CCD regression passed.' physics2d-capsule-segment-ccd.log
+          timeout 120s "$BIN" --headless --path "$PROJECT" \
+            --script res://physics_ccd_rotating_capsule_segment_2d_regression.gd \
+            2>&1 | tee physics2d-rotating-capsule-segment-ccd.log
+          grep -Fq '2D rotating capsule-segment CCD regression passed.' physics2d-rotating-capsule-segment-ccd.log
 
       - name: Regression-test analytic circle-segment TOI in native C++
         shell: bash
@@ -174,6 +178,15 @@ jobs:
             --headless --test --test-case="*CapsuleSegmentTOI*" \
             --success=true --no-colors 2>&1 | tee physics2d-capsule-segment-toi.log
           grep -Fq '[CapsuleSegmentTOI]' physics2d-capsule-segment-toi.log
+
+      - name: Regression-test rotating capsule versus finite segment nonlinear CCD
+        shell: bash
+        run: |
+          set -euo pipefail
+          timeout 120s ./bin/godot.linuxbsd.editor.dev.x86_64 \
+            --headless --test --test-case="*RotatingCapsuleSegmentTOI*" \
+            --success=true --no-colors 2>&1 | tee physics2d-rotating-capsule-segment-toi.log
+          grep -Fq '[RotatingCapsuleSegmentTOI]' physics2d-rotating-capsule-segment-toi.log
 
       - name: Exercise repeated Jolt pending-body batch reuse
         shell: bash
@@ -475,6 +488,8 @@ jobs:
             physics2d-circle-segment-ccd.log
             physics2d-capsule-segment-toi.log
             physics2d-capsule-segment-ccd.log
+            physics2d-rotating-capsule-segment-toi.log
+            physics2d-rotating-capsule-segment-ccd.log
             physics3d-colored-islands.log
             physics3d-ccd-relative.log
             physics3d-capsule-rays.log
