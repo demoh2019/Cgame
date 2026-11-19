@@ -79,6 +79,18 @@ class GodotSoftBody3D : public GodotCollisionObject3D {
 	LocalVector<Node> nodes;
 	LocalVector<Link> links;
 	LocalVector<Face> faces;
+
+	// Advanced XPBD soft-body solver. All allocations are opt-in; legacy
+	// soft bodies retain their existing memory footprint and behavior.
+	bool xpbd_distance_constraints = false;
+	bool xpbd_volume_preservation = false;
+	bool xpbd_volume_valid = false; // Only for closed consistently oriented meshes.
+	real_t xpbd_distance_compliance = 0.0;
+	real_t xpbd_volume_compliance = 0.0;
+	real_t xpbd_rest_volume = 0.0;
+	real_t xpbd_volume_lambda = 0.0;
+	LocalVector<real_t> xpbd_link_lambdas;
+	LocalVector<Vector3> xpbd_volume_gradients;
 	// Number of particles with nonzero inverse mass. Maintained on pin,
 	// unpin and mesh rebuild for O(1) central impulse/force normalization.
 	uint32_t dynamic_node_count = 0;
@@ -235,6 +247,8 @@ private:
 	void update_area();
 	void reset_link_rest_lengths();
 	void update_link_constants();
+	void rebuild_xpbd_volume_rest_state();
+	void solve_xpbd_volume_constraint(real_t p_alpha_tilde);
 
 	void apply_nodes_transform(const Transform3D &p_transform);
 
