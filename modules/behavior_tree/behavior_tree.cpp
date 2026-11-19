@@ -40,7 +40,7 @@ void BehaviorTreeTask::_bind_methods() {
 	BIND_ENUM_CONSTANT(RUNNING);
 }
 
-BehaviorTreeTask::Status BehaviorTreeTask::execute(const Dictionary &p_blackboard, Dictionary &r_memory, const String &p_path, double p_delta) {
+BehaviorTreeTask::Status BehaviorTreeTask::execute(const Dictionary &p_blackboard, Dictionary &, const String &, double p_delta) {
 	int result = FAILURE;
 	if (GDVIRTUAL_CALL(_tick, p_blackboard, p_delta, result)) {
 		if (result >= SUCCESS && result <= RUNNING) {
@@ -233,7 +233,7 @@ void BehaviorTreeBlackboardCheck::_bind_methods() {
 	ADD_PROPERTY(PropertyInfo(Variant::NIL, "expected_value", PROPERTY_HINT_NONE, "", PROPERTY_USAGE_DEFAULT | PROPERTY_USAGE_NIL_IS_VARIANT), "set_expected_value", "get_expected_value");
 }
 
-BehaviorTreeTask::Status BehaviorTreeBlackboardCheck::execute(const Dictionary &p_blackboard, Dictionary &r_memory, const String &p_path, double p_delta) {
+BehaviorTreeTask::Status BehaviorTreeBlackboardCheck::execute(const Dictionary &p_blackboard, Dictionary &, const String &, double) {
 	if (key.is_empty() || !p_blackboard.has(key)) {
 		return FAILURE;
 	}
@@ -250,7 +250,7 @@ void BehaviorTreeBlackboardSet::_bind_methods() {
 	ADD_PROPERTY(PropertyInfo(Variant::NIL, "value", PROPERTY_HINT_NONE, "", PROPERTY_USAGE_DEFAULT | PROPERTY_USAGE_NIL_IS_VARIANT), "set_value", "get_value");
 }
 
-BehaviorTreeTask::Status BehaviorTreeBlackboardSet::execute(const Dictionary &p_blackboard, Dictionary &r_memory, const String &p_path, double p_delta) {
+BehaviorTreeTask::Status BehaviorTreeBlackboardSet::execute(const Dictionary &p_blackboard, Dictionary &, const String &, double) {
 	if (key.is_empty()) {
 		return FAILURE;
 	}
@@ -273,7 +273,7 @@ void BehaviorTreeWait::set_duration(double p_duration) {
 	emit_changed();
 }
 
-BehaviorTreeTask::Status BehaviorTreeWait::execute(const Dictionary &p_blackboard, Dictionary &r_memory, const String &p_path, double p_delta) {
+BehaviorTreeTask::Status BehaviorTreeWait::execute(const Dictionary &, Dictionary &r_memory, const String &p_path, double p_delta) {
 	const double elapsed = static_cast<double>(r_memory.get(p_path, 0.0)) + MAX(0.0, p_delta);
 	if (elapsed >= duration) {
 		r_memory.erase(p_path);
