@@ -80,14 +80,17 @@ void PackedData::add_path(const String &p_pkg_path, const String &p_path, uint64
 			Vector<String> ds = simplified_path.get_base_dir().split("/");
 
 			for (int j = 0; j < ds.size(); j++) {
-				if (!cd->subdirs.has(ds[j])) {
+				// The common case is a directory shared by many packed files.
+				// Reuse the lookup result instead of hashing twice (has + []).
+				HashMap<String, PackedDir *>::Iterator child = cd->subdirs.find(ds[j]);
+				if (child) {
+					cd = child->value;
+				} else {
 					PackedDir *pd = memnew(PackedDir);
 					pd->name = ds[j];
 					pd->parent = cd;
 					cd->subdirs[pd->name] = pd;
 					cd = pd;
-				} else {
-					cd = cd->subdirs[ds[j]];
 				}
 			}
 		}
@@ -113,11 +116,11 @@ void PackedData::remove_path(const String &p_path) {
 		Vector<String> ds = simplified_path.get_base_dir().split("/");
 
 		for (int j = 0; j < ds.size(); j++) {
-			if (!cd->subdirs.has(ds[j])) {
+			HashMap<String, PackedDir *>::Iterator child = cd->subdirs.find(ds[j]);
+			if (!child) {
 				return; // Subdirectory does not exist, do not bother creating.
-			} else {
-				cd = cd->subdirs[ds[j]];
 			}
+			cd = child->value;
 		}
 	}
 
@@ -172,6 +175,7 @@ HashSet<String> PackedData::get_file_paths() const {
 }
 
 void PackedData::_get_file_paths(PackedDir *p_dir, const String &p_parent_dir, HashSet<String> &r_paths) const {
+	r_paths.reserve(r_paths.size() + p_dir->files.size());
 	for (const String &E : p_dir->files) {
 		r_paths.insert(p_parent_dir.path_join(E));
 	}
@@ -473,24 +477,31 @@ uint64_t FileAccessPack::get_buffer(uint8_t *p_dst, uint64_t p_length) const {
 	ERR_FAIL_COND_V_MSG(f.is_null(), -1, "File must be opened before use.");
 	ERR_FAIL_COND_V(!p_dst && p_length > 0, -1);
 
-	if (eof) {
+	if (eof || p_length == 0) {
 		return 0;
 	}
 
-	int64_t to_read = p_length;
-	if (to_read + pos > pf.size) {
+	// Keep the entire calculation unsigned, without overflow, and never read
+	// outside the logical packed-file bounds (even after an oversized seek).
+	const uint64_t available = pos < pf.size ? pf.size - pos : 0;
+	const uint64_t to_read = MIN(p_length, available);
+	if (to_read == 0) {
 		eof = true;
-		to_read = (int64_t)pf.size - (int64_t)pos;
-	}
-
-	pos += to_read;
-
-	if (to_read <= 0) {
 		return 0;
 	}
-	f->get_buffer(p_dst, to_read);
 
-	return to_read;
+	const uint64_t bytes_read = f->get_buffer(p_dst, to_read);
+	if (bytes_read > to_read) {
+		// Underlying FileAccess implementations can signal errors as UINT64_MAX.
+		eof = true;
+		return 0;
+	}
+
+	// Report bytes actually received, not the amount requested. This also
+	// prevents skipping data after a short read (e.g. a truncated pack).
+	pos += bytes_read;
+	eof = p_length > available || bytes_read < to_read;
+	return bytes_read;
 }
 
 void FileAccessPack::set_big_endian(bool p_big_endian) {

@@ -32,7 +32,11 @@
 
 TEST_FORCE_LINK(test_node_2d)
 
+#include "core/templates/local_vector.h"
 #include "scene/2d/node_2d.h"
+#ifndef PHYSICS_2D_DISABLED
+#include "scene/2d/physics/character_body_2d.h"
+#endif
 #include "scene/main/scene_tree.h"
 #include "scene/main/window.h"
 
@@ -209,6 +213,74 @@ TEST_CASE("[SceneTree][Node2D] Utility methods") {
 	memdelete(test_node3);
 	memdelete(test_node2);
 	memdelete(test_node1);
+}
+
+
+#ifndef PHYSICS_2D_DISABLED
+TEST_CASE("[CharacterBodySlideFastPath] CharacterBody2D no-collision queries preserve nil semantics") {
+	CharacterBody2D *body = memnew(CharacterBody2D);
+	CHECK_EQ(body->get_slide_collision_count(), 0);
+	Variant last = body->call(SNAME("get_last_slide_collision"));
+	CHECK_EQ(last.get_type(), Variant::NIL);
+	ERR_PRINT_OFF;
+	Variant invalid = body->call(SNAME("get_slide_collision"), 0);
+	ERR_PRINT_ON;
+	CHECK_EQ(invalid.get_type(), Variant::NIL);
+	CHECK_EQ(body->get_slide_collision_count(), 0);
+	memdelete(body);
+}
+
+TEST_CASE("[CharacterBodySlideFastPath] CharacterBody2D repeated missing collision requests allocate no result") {
+	CharacterBody2D *body = memnew(CharacterBody2D);
+	ERR_PRINT_OFF;
+	for (int i = 0; i < 32; i++) {
+		const Variant result = body->call(SNAME("get_slide_collision"), 0);
+		CHECK_EQ(result.get_type(), Variant::NIL);
+	}
+	ERR_PRINT_ON;
+	CHECK_EQ(body->get_slide_collision_count(), 0);
+	memdelete(body);
+}
+#endif // PHYSICS_2D_DISABLED
+
+
+TEST_CASE("[SceneTree][Node2D] Wide transform propagation preserves descendant positions") {
+	Node2D *scene_root = memnew(Node2D);
+	SceneTree::get_singleton()->get_root()->add_child(scene_root);
+	scene_root->set_oversampling_with_scale(CanvasItem::OVERSAMPLING_WITH_SCALE_ENABLED);
+	scene_root->set_scale(Vector2(2, 2));
+
+	// One parent movement touches every CanvasItem in a wide, two-level
+	// subtree. The originating item's oversampling must not be recomputed
+	// once for every descendant, while all global transforms stay correct.
+	LocalVector<Node2D *> leaves;
+	for (int i = 0; i < 160; i++) {
+		Node2D *branch = memnew(Node2D);
+		branch->set_name("Branch" + itos(i));
+		branch->set_position(Vector2(i, 1));
+		scene_root->add_child(branch);
+
+		Node2D *leaf = memnew(Node2D);
+		leaf->set_name("Leaf");
+		leaf->set_position(Vector2(2, 3));
+		branch->add_child(leaf);
+		leaves.push_back(leaf);
+	}
+
+	for (int pass = 0; pass < 12; pass++) {
+		scene_root->set_position(Vector2(pass, pass * 0.5));
+		for (int i = 0; i < (int)leaves.size(); i++) {
+			const Vector2 expected(pass + 2 * (i + 2), pass * 0.5 + 8);
+			CHECK(leaves[i]->get_global_position().is_equal_approx(expected));
+		}
+	}
+	// Changing the origin scale must still reach and invalidate its leaves.
+	scene_root->set_scale(Vector2(3, 3));
+	for (int i = 0; i < (int)leaves.size(); i++) {
+		const Vector2 expected(11 + 3 * (i + 2), 5.5 + 12);
+		CHECK(leaves[i]->get_global_position().is_equal_approx(expected));
+	}
+	memdelete(scene_root);
 }
 
 } // namespace TestNode2D

@@ -40,6 +40,7 @@
 #endif // PHYSICS_3D_DISABLED
 
 #include <cfloat> // FLT_EPSILON
+#include <utility> // std::move
 
 Ref<ImporterMesh> ImporterMesh::merge_importer_meshes(const TypedArray<ImporterMesh> &p_importer_meshes, const TypedArray<Transform3D> &p_relative_transforms, bool p_deduplicate_surfaces) {
 	// Setup and safety checks.
@@ -66,20 +67,25 @@ Ref<ImporterMesh> ImporterMesh::merge_importer_meshes(const TypedArray<ImporterM
 			// Transform the data of the mesh by the instance's relative transform.
 			{
 				PackedVector3Array vertices = this_surface_arrays[Mesh::ARRAY_VERTEX];
+				// Detach each packed array at most once: the old per-vertex ptrw()
+				// checks and repeated indexed reads add up on large imported meshes.
+				Vector3 *vertices_write = vertices.is_empty() ? nullptr : vertices.ptrw();
 				for (int vertex_index = 0; vertex_index < vertices.size(); vertex_index++) {
-					vertices.ptrw()[vertex_index] = relative_transform.xform(vertices[vertex_index]);
+					vertices_write[vertex_index] = relative_transform.xform(vertices_write[vertex_index]);
 				}
 				PackedVector3Array normals = this_surface_arrays[Mesh::ARRAY_NORMAL];
+				Vector3 *normals_write = normals.is_empty() ? nullptr : normals.ptrw();
 				for (int normal_index = 0; normal_index < normals.size(); normal_index++) {
-					normals.ptrw()[normal_index] = relative_transform.basis.xform(normals[normal_index]).normalized();
+					normals_write[normal_index] = relative_transform.basis.xform(normals_write[normal_index]).normalized();
 				}
 				PackedFloat32Array tangents = this_surface_arrays[Mesh::ARRAY_TANGENT];
+				float *tangents_write = tangents.is_empty() ? nullptr : tangents.ptrw();
 				for (int tangent_index = 0; tangent_index < tangents.size(); tangent_index += 4) {
-					Vector3 tangent = Vector3(tangents[tangent_index], tangents[tangent_index + 1], tangents[tangent_index + 2]);
+					Vector3 tangent(tangents_write[tangent_index], tangents_write[tangent_index + 1], tangents_write[tangent_index + 2]);
 					tangent = relative_transform.basis.xform(tangent).normalized();
-					tangents.ptrw()[tangent_index + 0] = tangent.x;
-					tangents.ptrw()[tangent_index + 1] = tangent.y;
-					tangents.ptrw()[tangent_index + 2] = tangent.z;
+					tangents_write[tangent_index + 0] = tangent.x;
+					tangents_write[tangent_index + 1] = tangent.y;
+					tangents_write[tangent_index + 2] = tangent.z;
 					// The tangent's W component is not transformed (the binormal direction sign), so we keep it as is.
 				}
 				// If the determinant is negative, we need to swap vertices to fix the winding order.
@@ -278,8 +284,9 @@ Ref<ImporterMesh> ImporterMesh::merge_importer_meshes(const TypedArray<ImporterM
 							PackedInt32Array existing_indices = merged_surface_arrays[Mesh::ARRAY_INDEX];
 							PackedInt32Array incoming_indices = this_surface_arrays[Mesh::ARRAY_INDEX];
 							if (!existing_indices.is_empty() || !incoming_indices.is_empty()) {
+								int32_t *indices_write = incoming_indices.ptrw();
 								for (int i = 0; i < incoming_indices.size(); i++) {
-									incoming_indices.ptrw()[i] = incoming_indices[i] + existing_vertex_count;
+									indices_write[i] += existing_vertex_count;
 								}
 								existing_indices.append_array(incoming_indices);
 								merged_surface_arrays[Mesh::ARRAY_INDEX] = existing_indices;
@@ -772,6 +779,9 @@ void ImporterMesh::generate_lods(float p_normal_merge_angle, Array p_bone_transf
 
 			int simplify_options = SurfaceTool::SIMPLIFY_SPARSE; // Does not change appearance, but speeds up subsequent iterations.
 
+			// Limit excessive attribute errors in areas with high attribute variance.
+			simplify_options |= SurfaceTool::SIMPLIFY_ERROR_CLAMPED;
+
 			// Lock geometric boundary in case the mesh is composed of multiple material subsets.
 			simplify_options |= SurfaceTool::SIMPLIFY_LOCK_BORDER;
 
@@ -866,6 +876,9 @@ Ref<ArrayMesh> ImporterMesh::get_mesh(const Ref<ArrayMesh> &p_base) {
 		if (mesh.is_null()) {
 			mesh.instantiate();
 		}
+		// p_base may already be in use, so only emit changed once the mesh is complete.
+		mesh->_block_emit_changed();
+
 		mesh->set_name(get_name());
 		if (has_meta("import_id")) {
 			mesh->set_meta("import_id", get_meta("import_id"));
@@ -903,6 +916,8 @@ Ref<ArrayMesh> ImporterMesh::get_mesh(const Ref<ArrayMesh> &p_base) {
 			Ref<ArrayMesh> shadow = shadow_mesh->get_mesh();
 			mesh->set_shadow_mesh(shadow);
 		}
+
+		mesh->_unblock_emit_changed();
 	}
 
 	return mesh;
@@ -1130,24 +1145,43 @@ Dictionary ImporterMesh::_get_data() const {
 
 Vector<Face3> ImporterMesh::get_faces() const {
 	Vector<Face3> faces;
+	// Calculate the exact triangle count once to avoid repeated allocation and
+	// relocation as large imported meshes are converted to navigation faces.
+	int face_count = 0;
+	for (const Surface &surface : surfaces) {
+		if (surface.primitive != Mesh::PRIMITIVE_TRIANGLES) {
+			continue;
+		}
+		const Vector<int> indices = surface.arrays[Mesh::ARRAY_INDEX];
+		if (!indices.is_empty()) {
+			face_count += indices.size() / 3;
+		} else {
+			const Vector<Vector3> vertices = surface.arrays[Mesh::ARRAY_VERTEX];
+			face_count += vertices.size() / 3;
+		}
+	}
+	faces.reserve_exact(face_count);
+
 	for (int i = 0; i < surfaces.size(); i++) {
 		if (surfaces[i].primitive == Mesh::PRIMITIVE_TRIANGLES) {
-			Vector<Vector3> vertices = surfaces[i].arrays[Mesh::ARRAY_VERTEX];
-			Vector<int> indices = surfaces[i].arrays[Mesh::ARRAY_INDEX];
-			if (indices.size()) {
+			const Vector<Vector3> vertices = surfaces[i].arrays[Mesh::ARRAY_VERTEX];
+			const Vector<int> indices = surfaces[i].arrays[Mesh::ARRAY_INDEX];
+			const Vector3 *vertex_ptr = vertices.ptr();
+			const int *index_ptr = indices.ptr();
+			if (!indices.is_empty()) {
 				for (int j = 0; j < indices.size(); j += 3) {
 					Face3 f;
-					f.vertex[0] = vertices[indices[j + 0]];
-					f.vertex[1] = vertices[indices[j + 1]];
-					f.vertex[2] = vertices[indices[j + 2]];
+					f.vertex[0] = vertex_ptr[index_ptr[j + 0]];
+					f.vertex[1] = vertex_ptr[index_ptr[j + 1]];
+					f.vertex[2] = vertex_ptr[index_ptr[j + 2]];
 					faces.push_back(f);
 				}
 			} else {
 				for (int j = 0; j < vertices.size(); j += 3) {
 					Face3 f;
-					f.vertex[0] = vertices[j + 0];
-					f.vertex[1] = vertices[j + 1];
-					f.vertex[2] = vertices[j + 2];
+					f.vertex[0] = vertex_ptr[j + 0];
+					f.vertex[1] = vertex_ptr[j + 1];
+					f.vertex[2] = vertex_ptr[j + 2];
 					faces.push_back(f);
 				}
 			}
@@ -1281,11 +1315,11 @@ Ref<NavigationMesh> ImporterMesh::create_navigation_mesh() {
 		for (int j = 0; j < 3; j++) {
 			Vector3 v = faces[i].vertex[j];
 			int idx;
-			if (unique_vertices.has(v)) {
-				idx = unique_vertices[v];
+			if (const int *existing = unique_vertices.getptr(v)) {
+				idx = *existing;
 			} else {
 				idx = unique_vertices.size();
-				unique_vertices[v] = idx;
+				unique_vertices.insert(v, idx);
 			}
 			face_indices.write[j] = idx;
 		}
@@ -1327,6 +1361,7 @@ Error ImporterMesh::lightmap_unwrap_cached(const Transform3D &p_base_transform, 
 	LocalVector<Pair<int, int>> uv_indices;
 
 	Vector<EditorSceneFormatImporterMeshLightmapSurface> lightmap_surfaces;
+	lightmap_surfaces.reserve_exact(get_surface_count());
 
 	// Keep only the scale
 	Basis basis = p_base_transform.get_basis();
@@ -1350,43 +1385,48 @@ Error ImporterMesh::lightmap_unwrap_cached(const Transform3D &p_base_transform, 
 		// Format was generated by SurfaceTool, manually copy over the original compression flag.
 		s.format |= (get_surface_format(i) & RSE::ARRAY_FLAG_COMPRESS_ATTRIBUTES);
 
-		PackedVector3Array rvertices = arrays[Mesh::ARRAY_VERTEX];
-		int vc = rvertices.size();
+		const PackedVector3Array rvertices = arrays[Mesh::ARRAY_VERTEX];
+		const int vc = rvertices.size();
 
-		PackedVector3Array rnormals = arrays[Mesh::ARRAY_NORMAL];
-
-		if (!rnormals.size()) {
+		const PackedVector3Array rnormals = arrays[Mesh::ARRAY_NORMAL];
+		if (rnormals.is_empty()) {
 			continue;
 		}
 
-		int vertex_ofs = vertices.size() / 3;
+		const Vector3 *read_vertices = rvertices.ptr();
+		const Vector3 *read_normals = rnormals.ptr();
+		const int vertex_ofs = vertices.size() / 3;
 
 		vertices.resize((vertex_ofs + vc) * 3);
 		normals.resize((vertex_ofs + vc) * 3);
 		uv_indices.resize(vertex_ofs + vc);
 
-		for (int j = 0; j < vc; j++) {
-			Vector3 v = transform.xform(rvertices[j]);
-			Vector3 n = normal_basis.xform(rnormals[j]).normalized();
+		float *vertices_write = vertices.ptr() + vertex_ofs * 3;
+		float *normals_write = normals.ptr() + vertex_ofs * 3;
+		Pair<int, int> *uv_indices_write = uv_indices.ptr() + vertex_ofs;
 
-			vertices[(j + vertex_ofs) * 3 + 0] = v.x;
-			vertices[(j + vertex_ofs) * 3 + 1] = v.y;
-			vertices[(j + vertex_ofs) * 3 + 2] = v.z;
-			normals[(j + vertex_ofs) * 3 + 0] = n.x;
-			normals[(j + vertex_ofs) * 3 + 1] = n.y;
-			normals[(j + vertex_ofs) * 3 + 2] = n.z;
-			uv_indices[j + vertex_ofs] = Pair<int, int>(i, j);
+		for (int j = 0; j < vc; j++) {
+			const Vector3 v = transform.xform(read_vertices[j]);
+			const Vector3 n = normal_basis.xform(read_normals[j]).normalized();
+			vertices_write[j * 3 + 0] = v.x;
+			vertices_write[j * 3 + 1] = v.y;
+			vertices_write[j * 3 + 2] = v.z;
+			normals_write[j * 3 + 0] = n.x;
+			normals_write[j * 3 + 1] = n.y;
+			normals_write[j * 3 + 2] = n.z;
+			uv_indices_write[j] = Pair<int, int>(i, j);
 		}
 
-		PackedInt32Array rindices = arrays[Mesh::ARRAY_INDEX];
-		int ic = rindices.size();
+		const PackedInt32Array rindices = arrays[Mesh::ARRAY_INDEX];
+		const int32_t *read_indices = rindices.ptr();
+		const int ic = rindices.size();
 
 		float eps = 1.19209290e-7F; // Taken from xatlas.h
 		if (ic == 0) {
 			for (int j = 0; j < vc / 3; j++) {
-				Vector3 p0 = transform.xform(rvertices[j * 3 + 0]);
-				Vector3 p1 = transform.xform(rvertices[j * 3 + 1]);
-				Vector3 p2 = transform.xform(rvertices[j * 3 + 2]);
+				Vector3 p0 = transform.xform(read_vertices[j * 3 + 0]);
+				Vector3 p1 = transform.xform(read_vertices[j * 3 + 1]);
+				Vector3 p2 = transform.xform(read_vertices[j * 3 + 2]);
 
 				if ((p0 - p1).length_squared() < eps || (p1 - p2).length_squared() < eps || (p2 - p0).length_squared() < eps) {
 					continue;
@@ -1399,24 +1439,29 @@ Error ImporterMesh::lightmap_unwrap_cached(const Transform3D &p_base_transform, 
 
 		} else {
 			for (int j = 0; j < ic / 3; j++) {
-				ERR_FAIL_INDEX_V(rindices[j * 3 + 0], rvertices.size(), ERR_INVALID_DATA);
-				ERR_FAIL_INDEX_V(rindices[j * 3 + 1], rvertices.size(), ERR_INVALID_DATA);
-				ERR_FAIL_INDEX_V(rindices[j * 3 + 2], rvertices.size(), ERR_INVALID_DATA);
-				Vector3 p0 = transform.xform(rvertices[rindices[j * 3 + 0]]);
-				Vector3 p1 = transform.xform(rvertices[rindices[j * 3 + 1]]);
-				Vector3 p2 = transform.xform(rvertices[rindices[j * 3 + 2]]);
+				const int i0 = read_indices[j * 3 + 0];
+				const int i1 = read_indices[j * 3 + 1];
+				const int i2 = read_indices[j * 3 + 2];
+				ERR_FAIL_INDEX_V(i0, vc, ERR_INVALID_DATA);
+				ERR_FAIL_INDEX_V(i1, vc, ERR_INVALID_DATA);
+				ERR_FAIL_INDEX_V(i2, vc, ERR_INVALID_DATA);
+				const Vector3 p0 = transform.xform(read_vertices[i0]);
+				const Vector3 p1 = transform.xform(read_vertices[i1]);
+				const Vector3 p2 = transform.xform(read_vertices[i2]);
 
 				if ((p0 - p1).length_squared() < eps || (p1 - p2).length_squared() < eps || (p2 - p0).length_squared() < eps) {
 					continue;
 				}
 
-				indices.push_back(vertex_ofs + rindices[j * 3 + 0]);
-				indices.push_back(vertex_ofs + rindices[j * 3 + 1]);
-				indices.push_back(vertex_ofs + rindices[j * 3 + 2]);
+				indices.push_back(vertex_ofs + i0);
+				indices.push_back(vertex_ofs + i1);
+				indices.push_back(vertex_ofs + i2);
 			}
 		}
 
-		lightmap_surfaces.push_back(s);
+		// SurfaceTool::Vertex buffers can be huge; move their storage instead
+		// of duplicating every imported surface's vertex array.
+		lightmap_surfaces.push_back(std::move(s));
 	}
 
 	//unwrap

@@ -34,6 +34,10 @@ TEST_FORCE_LINK(test_vector)
 
 #include "core/templates/vector.h"
 
+#include <algorithm>
+#include <cstdint>
+#include <vector>
+
 namespace TestVector {
 
 TEST_CASE("[Vector] List initialization") {
@@ -396,6 +400,100 @@ TEST_CASE("[Vector] To byte array") {
 	CHECK(byte_array[15] == 59);
 }
 
+struct GreaterVectorComparator {
+	bool operator()(const int &p_a, const int &p_b) const {
+		return p_a > p_b;
+	}
+};
+
+TEST_CASE("[Vector] Sorting large shared ordered data preserves COW storage") {
+	Vector<int> original;
+	REQUIRE(original.reserve_exact(8192) == OK);
+	for (int i = 0; i < 512; ++i) {
+		original.push_back(i / 2);
+	}
+	const int *const original_storage = original.ptr();
+	Vector<int> sorted_copy = original;
+	sorted_copy.sort();
+	CHECK(sorted_copy.ptr() == original_storage);
+	CHECK(original.ptr() == original_storage);
+	CHECK(sorted_copy.size() == 512);
+	CHECK(sorted_copy[0] == 0);
+	CHECK(sorted_copy[511] == 255);
+
+	// A comparator with descending ordering must use the same fast path.
+	Vector<int> descending;
+	for (int i = 255; i >= 0; --i) {
+		descending.push_back(i);
+	}
+	Vector<int> descending_copy = descending;
+	const int *const descending_storage = descending.ptr();
+	descending_copy.sort_custom<GreaterVectorComparator>();
+	CHECK(descending_copy.ptr() == descending_storage);
+	CHECK(descending.ptr() == descending_storage);
+
+	// Real reordering must detach and leave the shared original intact.
+	Vector<int> reversed;
+	for (int i = 255; i >= 0; --i) {
+		reversed.push_back(i);
+	}
+	Vector<int> reversed_copy = reversed;
+	reversed_copy.sort();
+	CHECK(reversed_copy.ptr() != reversed.ptr());
+	for (int i = 0; i < 256; i++) {
+		CHECK(reversed_copy[i] == i);
+		CHECK(reversed[i] == 255 - i);
+	}
+
+	// No-op sorting of shared nontrivial values must also avoid COW.
+	Vector<String> strings;
+	for (int i = 0; i < 128; i++) {
+		strings.push_back("same");
+	}
+	const String *const string_storage = strings.ptr();
+	Vector<String> strings_copy = strings;
+	strings_copy.sort();
+	CHECK(strings_copy.ptr() == string_storage);
+	strings_copy.write[0] = "changed";
+	CHECK(strings[0] == "same");
+	CHECK(strings_copy[0] == "changed");
+}
+
+TEST_CASE("[Vector] No-op operations do not detach shared COW storage") {
+	// An empty vector can still own a large reserved allocation.
+	Vector<int> empty;
+	REQUIRE(empty.reserve_exact(8192) == OK);
+	Vector<int> other_empty = empty;
+	const int *empty_storage = empty.ptr();
+	REQUIRE(empty_storage != nullptr);
+	other_empty.fill(42);
+	other_empty.reverse();
+	other_empty.sort();
+	CHECK(other_empty.ptr() == empty_storage);
+	CHECK(empty.ptr() == empty_storage);
+	CHECK(other_empty.capacity() == empty.capacity());
+	CHECK(other_empty.is_empty());
+
+	// Sorting and reversing a singleton cannot change its contents.
+	// These operations must not fork the large reserved backing storage.
+	Vector<String> singleton;
+	singleton.push_back("kept");
+	REQUIRE(singleton.reserve_exact(4096) == OK);
+	Vector<String> shared = singleton;
+	const String *original_ptr = singleton.ptr();
+	shared.sort();
+	shared.reverse();
+	CHECK(shared.ptr() == original_ptr);
+	CHECK(singleton.ptr() == original_ptr);
+	CHECK(shared[0] == "kept");
+
+	// An actual write must still detach and preserve independent values.
+	shared.write[0] = "changed";
+	CHECK(shared.ptr() != singleton.ptr());
+	CHECK(singleton[0] == "kept");
+	CHECK(shared[0] == "changed");
+}
+
 TEST_CASE("[Vector] Slice") {
 	Vector<int> vector;
 	vector.push_back(0);
@@ -442,6 +540,89 @@ TEST_CASE("[Vector] Slice") {
 	Vector<int> slice7 = vector.slice(5, 1);
 	CHECK(slice7.size() == 0); // Expected to fail.
 	ERR_PRINT_ON;
+}
+
+TEST_CASE("[Vector] Full slice reuses COW storage and detaches on mutation") {
+	Vector<uint8_t> bytes;
+	REQUIRE(bytes.resize(8192) == OK);
+	for (int i = 0; i < bytes.size(); i++) {
+		bytes.write[i] = uint8_t(i * 17);
+	}
+
+	const uint8_t *original_ptr = bytes.ptr();
+	Vector<uint8_t> full = bytes.slice(0, bytes.size());
+	CHECK(full.size() == bytes.size());
+	CHECK(full.ptr() == original_ptr); // No allocation or bulk copy.
+
+	// Mutating either owner must preserve the other's values.
+	full.write[0] = 251;
+	CHECK(full.ptr() != bytes.ptr());
+	CHECK(bytes[0] == 0);
+	CHECK(full[0] == 251);
+	CHECK(bytes[7000] == uint8_t(7000 * 17));
+
+	Vector<uint8_t> clamped = bytes.slice(-8192, 999999);
+	CHECK(clamped.ptr() == bytes.ptr());
+	bytes.write[1] = 252;
+	CHECK(clamped[1] == uint8_t(17));
+	CHECK(bytes[1] == 252);
+
+	Vector<String> words;
+	words.push_back("alpha");
+	words.push_back("beta");
+	words.push_back("gamma");
+	Vector<String> copied = words.slice(0);
+	CHECK(copied.ptr() == words.ptr());
+	words.write[0] = "changed";
+	CHECK(copied[0] == "alpha");
+	CHECK(words[0] == "changed");
+	copied.write[1] = "modified";
+	CHECK(words[1] == "beta");
+	CHECK(copied[1] == "modified");
+}
+
+TEST_CASE("[Vector] Slice large trivial arrays without aliasing") {
+	Vector<uint8_t> values;
+	REQUIRE(values.resize(8192) == OK);
+	uint8_t *const data = values.ptrw();
+	for (int i = 0; i < 8192; i++) {
+		data[i] = uint8_t(i * 37);
+	}
+
+	// The source is shared, but the slice must own independent storage.
+	Vector<uint8_t> shared = values;
+	Vector<uint8_t> slice = values.slice(31, 8191);
+	REQUIRE(slice.size() == 8160);
+	for (int i = 0; i < slice.size(); i++) {
+		CHECK(slice[i] == uint8_t((i + 31) * 37));
+	}
+	slice.write[0] = 255;
+	CHECK(values[31] == uint8_t(31 * 37));
+	CHECK(shared[31] == uint8_t(31 * 37));
+
+	Vector<uint8_t> empty_slice = values.slice(100, 100);
+	CHECK(empty_slice.is_empty());
+}
+
+TEST_CASE("[Vector] Slice nontrivial strings preserve independent values") {
+	Vector<String> words;
+	words.push_back("alpha");
+	words.push_back("beta");
+	words.push_back("gamma");
+	words.push_back("delta");
+
+	Vector<String> slice = words.slice(1, 3);
+	REQUIRE(slice.size() == 2);
+	CHECK(slice[0] == "beta");
+	CHECK(slice[1] == "gamma");
+	words.write[1] = "changed";
+	CHECK(slice[0] == "beta");
+	slice.write[1] = "updated";
+	CHECK(words[2] == "gamma");
+
+	Vector<String> empty;
+	CHECK(empty.slice(0, 0).is_empty());
+	CHECK(words.slice(-1, -1).is_empty());
 }
 
 TEST_CASE("[Vector] Find, has") {
@@ -706,5 +887,120 @@ TEST_CASE("[Vector] Cyclic Reference") {
 	// The vector goes out of scope and destructs, calling CyclicVectorHolder's destructor.
 }
 #endif
+
+
+TEST_CASE("[Vector] shared buffer equality and inequality fast paths") {
+	Vector<int> first;
+	first.resize(4096);
+	for (int i = 0; i < first.size(); i++) {
+		first.write[i] = i;
+	}
+	Vector<int> shared = first;
+	CHECK(first == shared);
+	CHECK_FALSE(first != shared);
+	CHECK(shared == first);
+	CHECK_FALSE(shared != first);
+
+	Vector<int> separate;
+	separate.resize(first.size());
+	for (int i = 0; i < separate.size(); i++) {
+		separate.write[i] = i;
+	}
+	CHECK(first == separate);
+	CHECK_FALSE(first != separate);
+	CHECK(separate == shared);
+	CHECK_FALSE(separate != shared);
+
+	shared.write[2048] = -1;
+	CHECK_FALSE(first == shared);
+	CHECK(first != shared);
+	CHECK_EQ(first[2048], 2048);
+	CHECK_EQ(shared[2048], -1);
+
+	Vector<int> empty;
+	Vector<int> empty_copy = empty;
+	CHECK(empty == empty_copy);
+	CHECK_FALSE(empty != empty_copy);
+	CHECK(empty != first);
+	CHECK_FALSE(empty == first);
+}
+
+TEST_CASE("[Vector] shared String vector comparisons respect copy-on-write") {
+	Vector<String> first;
+	first.push_back("alpha");
+	first.push_back("beta");
+	Vector<String> copy = first;
+	CHECK(first == copy);
+	CHECK_FALSE(first != copy);
+	copy.write[1] = "gamma";
+	CHECK(first != copy);
+	CHECK_FALSE(first == copy);
+	CHECK_EQ(first[1], String("beta"));
+}
+
+
+struct OrderedInsertComparisonCount {
+	int value = 0;
+	static inline int comparisons = 0;
+
+	bool operator<(const OrderedInsertComparisonCount &p_other) const {
+		comparisons++;
+		return value < p_other.value;
+	}
+};
+
+TEST_CASE("[Vector] Ordered insert fast append skips binary search") {
+	Vector<OrderedInsertComparisonCount> values;
+	for (int i = 0; i < 256; i++) {
+		OrderedInsertComparisonCount::comparisons = 0;
+		values.ordered_insert({ i });
+		CHECK(OrderedInsertComparisonCount::comparisons == (i == 0 ? 0 : 1));
+	}
+	CHECK(values.size() == 256);
+	for (int i = 0; i < 256; i++) {
+		CHECK(values[i].value == i);
+	}
+
+	OrderedInsertComparisonCount::comparisons = 0;
+	values.ordered_insert({ 255 });
+	CHECK(OrderedInsertComparisonCount::comparisons == 1);
+	CHECK(values[256].value == 255);
+	values.ordered_insert({ -1 });
+	CHECK(values[0].value == -1);
+	CHECK(values.size() == 258);
+}
+
+TEST_CASE("[Vector] Ordered insert matches upper_bound with duplicates and random keys") {
+	Vector<int> values;
+	std::vector<int> reference;
+	uint32_t seed = 0x3f291ab7u;
+	for (int i = 0; i < 2048; i++) {
+		seed = seed * 1664525u + 1013904223u;
+		const int value = i < 500 ? i : (i < 1000 ? 1000 - i : int((seed >> 8) % 129u) - 64);
+		values.ordered_insert(value);
+		reference.insert(std::upper_bound(reference.begin(), reference.end(), value), value);
+	}
+	CHECK(values.size() == int(reference.size()));
+	for (int i = 0; i < values.size(); i++) {
+		CHECK(values[i] == reference[size_t(i)]);
+	}
+}
+
+TEST_CASE("[Vector] Ordered append preserves shared copy-on-write storage") {
+	Vector<int> source;
+	for (int i = 0; i < 128; i++) {
+		source.ordered_insert(i);
+	}
+	Vector<int> copy = source;
+	copy.ordered_insert(128);
+	CHECK(copy.size() == 129);
+	CHECK(source.size() == 128);
+	CHECK(copy[128] == 128);
+	CHECK(source[127] == 127);
+
+	source.ordered_insert(129);
+	CHECK(source[128] == 129);
+	CHECK(copy[128] == 128);
+}
 
 } // namespace TestVector

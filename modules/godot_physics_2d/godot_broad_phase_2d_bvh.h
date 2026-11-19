@@ -31,6 +31,7 @@
 #pragma once
 
 #include "godot_broad_phase_2d.h"
+#include "godot_body_2d.h"
 
 #include "core/math/bvh.h"
 #include "core/math/rect2.h"
@@ -41,8 +42,20 @@ class GodotBroadPhase2DBVH : public GodotBroadPhase2D {
 	class UserPairTestFunction {
 	public:
 		static bool user_pair_check(const T *p_a, const T *p_b) {
-			// return false if no collision, decided by masks etc
-			return p_a->interacts_with(p_b);
+			// Reject invalid pairs before allocating constraint records or
+			// touching the narrowphase. Area monitoring is unaffected.
+			if (!p_a->interacts_with(p_b)) {
+				return false;
+			}
+			if (p_a->get_type() == GodotCollisionObject2D::TYPE_BODY &&
+					p_b->get_type() == GodotCollisionObject2D::TYPE_BODY) {
+				const GodotBody2D *body_a = static_cast<const GodotBody2D *>(p_a);
+				const GodotBody2D *body_b = static_cast<const GodotBody2D *>(p_b);
+				// Either endpoint can exclude the pair (including joint exceptions).
+				return !body_a->has_exception(body_b->get_self()) &&
+						!body_b->has_exception(body_a->get_self());
+			}
+			return true;
 		}
 	};
 
@@ -73,10 +86,16 @@ class GodotBroadPhase2DBVH : public GodotBroadPhase2D {
 	void *pair_userdata = nullptr;
 	UnpairCallback unpair_callback = nullptr;
 	void *unpair_userdata = nullptr;
+	uint32_t batch_depth = 0;
 
 public:
 	// 0 is an invalid ID
 	virtual ID create(GodotCollisionObject2D *p_object, int p_subindex = 0, const Rect2 &p_aabb = Rect2(), bool p_static = false) override;
+	virtual ID create_deferred(GodotCollisionObject2D *p_object, int p_subindex, const Rect2 &p_aabb, bool p_static) override;
+	virtual void flush_pending_pairs() override;
+	virtual void force_collision_check(ID p_id) override;
+	virtual void begin_batch() override;
+	virtual void end_batch() override;
 	virtual void move(ID p_id, const Rect2 &p_aabb) override;
 	virtual void set_static(ID p_id, bool p_static) override;
 	virtual void remove(ID p_id) override;
@@ -85,7 +104,10 @@ public:
 	virtual bool is_static(ID p_id) const override;
 	virtual int get_subindex(ID p_id) const override;
 
+	virtual void cast_segment(const Vector2 &p_from, const Vector2 &p_to, SegmentCastCallback p_callback, void *p_userdata) override;
 	virtual int cull_segment(const Vector2 &p_from, const Vector2 &p_to, GodotCollisionObject2D **p_results, int p_max_results, int *p_result_indices = nullptr) override;
+	virtual void visit_point(const Vector2 &p_point, QueryVisitor p_visitor, void *p_userdata) override;
+	virtual void visit_aabb(const Rect2 &p_aabb, QueryVisitor p_visitor, void *p_userdata) override;
 	virtual int cull_aabb(const Rect2 &p_aabb, GodotCollisionObject2D **p_results, int p_max_results, int *p_result_indices = nullptr) override;
 
 	virtual void set_pair_callback(PairCallback p_pair_callback, void *p_userdata) override;

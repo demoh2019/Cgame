@@ -34,6 +34,8 @@ TEST_FORCE_LINK(test_a_hash_map)
 
 #include "core/templates/a_hash_map.h"
 
+#include <utility>
+
 namespace TestAHashMap {
 
 TEST_CASE("[AHashMap] List initialization") {
@@ -309,6 +311,146 @@ TEST_CASE("[AHashMap] Array methods") {
 	CHECK(map.erase_by_index(index));
 	CHECK(!map.erase_by_index(index));
 	CHECK(map.get_index(1) == -1);
+}
+
+
+TEST_CASE("[AHashMap][Move] Assigning into an empty map transfers storage without copying") {
+	AHashMap<int, String> source;
+	for (int i = 0; i < 128; i++) {
+		source.insert(i, itos(i));
+	}
+	const String *original_storage = source.getptr(37);
+	CHECK(original_storage != nullptr);
+
+	AHashMap<int, String> destination;
+	destination = std::move(source);
+
+	CHECK(destination.size() == 128);
+	CHECK(destination.getptr(37) == original_storage);
+	CHECK(source.is_empty());
+	for (int i = 0; i < 128; i++) {
+		CHECK(destination.has(i));
+		CHECK(destination[i] == itos(i));
+	}
+
+	// The moved-from object must remain fully reusable.
+	source.insert(999, "reused");
+	CHECK(source[999] == "reused");
+	CHECK(destination.size() == 128);
+}
+
+TEST_CASE("[AHashMap][Move] Replacing occupied storage leaves both maps valid") {
+	AHashMap<int, String> source;
+	AHashMap<int, String> destination;
+	for (int i = 0; i < 64; i++) {
+		source.insert(i, itos(i));
+	}
+	for (int i = -8; i < 0; i++) {
+		destination.insert(i, "old");
+	}
+
+	const String *original_storage = source.getptr(10);
+	destination = std::move(source);
+	CHECK(destination.size() == 64);
+	CHECK(destination.getptr(10) == original_storage);
+	for (int i = 0; i < 64; i++) {
+		CHECK(destination.has(i));
+		CHECK(destination[i] == itos(i));
+	}
+	for (int i = -8; i < 0; i++) {
+		CHECK(!destination.has(i));
+	}
+	// Swap-based move assignment gives the source the prior destination.
+	CHECK(source.size() == 8);
+	for (int i = -8; i < 0; i++) {
+		CHECK(source[i] == "old");
+	}
+	source.clear();
+	CHECK(source.is_empty());
+	source.insert(500, "still valid");
+	CHECK(source[500] == "still valid");
+}
+
+TEST_CASE("[AHashMap][Move] Self move assignment preserves all values") {
+	AHashMap<int, String> map;
+	for (int i = 0; i < 32; i++) {
+		map.insert(i, itos(i));
+	}
+	const String *old_storage = map.getptr(3);
+	AHashMap<int, String> &same = map;
+	map = std::move(same);
+
+	CHECK(map.size() == 32);
+	CHECK(map.getptr(3) == old_storage);
+	for (int i = 0; i < 32; i++) {
+		CHECK(map[i] == itos(i));
+	}
+}
+
+TEST_CASE("[AHashMap][Move] Repeated transfers preserve keys and values") {
+	AHashMap<int, String> left;
+	AHashMap<int, String> right;
+	for (int i = 0; i < 48; i++) {
+		left.insert(i, itos(i));
+		right.insert(i + 100, itos(i + 100));
+	}
+	for (int repetition = 0; repetition < 32; repetition++) {
+		left = std::move(right);
+		for (int i = 0; i < 48; i++) {
+			const int expected = repetition % 2 == 0 ? i + 100 : i;
+			CHECK(left.has(expected));
+			CHECK(left[expected] == itos(expected));
+		}
+		for (int i = 0; i < 48; i++) {
+			const int expected = repetition % 2 == 0 ? i : i + 100;
+			CHECK(right.has(expected));
+			CHECK(right[expected] == itos(expected));
+		}
+	}
+}
+
+TEST_CASE("[AHashMap][Move] Move a reserved empty table into an occupied map") {
+	AHashMap<int, String> source(256);
+	AHashMap<int, String> destination;
+	destination.insert(1, "old");
+	destination = std::move(source);
+
+	CHECK(destination.is_empty());
+	CHECK(source.size() == 1);
+	CHECK(source[1] == "old");
+	destination.insert(20, "new");
+	CHECK(destination[20] == "new");
+	CHECK(!source.has(20));
+}
+
+TEST_CASE("[AnimationAudioMapFastPath] one pointer lookup finds active audio stream metadata") {
+	AHashMap<int, int> stream_info;
+	stream_info[10] = 1234;
+	stream_info[11] = 5678;
+	const int *existing = stream_info.getptr(10);
+	REQUIRE(existing != nullptr);
+	CHECK_EQ(*existing, 1234);
+	CHECK(stream_info.getptr(99) == nullptr);
+	CHECK_EQ(stream_info.size(), 2);
+}
+
+TEST_CASE("[AnimationAudioMapFastPath] stream erase after pointer read retains other metadata") {
+	AHashMap<int, int> stream_info;
+	for (int i = 0; i < 96; ++i) {
+		stream_info[i] = i + 1000;
+	}
+	for (int i = 0; i < 96; i += 2) {
+		const int *existing = stream_info.getptr(i);
+		REQUIRE(existing != nullptr);
+		CHECK_EQ(*existing, i + 1000);
+		stream_info.erase(i);
+	}
+	CHECK_EQ(stream_info.size(), 48);
+	for (int i = 1; i < 96; i += 2) {
+		const int *existing = stream_info.getptr(i);
+		REQUIRE(existing != nullptr);
+		CHECK_EQ(*existing, i + 1000);
+	}
 }
 
 } // namespace TestAHashMap

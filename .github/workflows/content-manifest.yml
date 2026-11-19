@@ -1,0 +1,42 @@
+name: Content manifest regression tests
+
+on:
+  push:
+    branches: [develop]
+    paths:
+      - 'misc/scripts/content_manifest.py'
+      - 'misc/scripts/tests/test_content_manifest.py'
+      - 'misc/scripts/README_content_manifest.md'
+      - '.github/workflows/content-manifest.yml'
+  pull_request:
+    paths:
+      - 'misc/scripts/content_manifest.py'
+      - 'misc/scripts/tests/test_content_manifest.py'
+      - 'misc/scripts/README_content_manifest.md'
+      - '.github/workflows/content-manifest.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: content-manifest-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  python-tests:
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+        python-version: ['3.9', '3.13']
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+      - name: Compile and run content manifest regressions
+        run: |
+          python -m py_compile misc/scripts/content_manifest.py misc/scripts/tests/test_content_manifest.py
+          python -m unittest discover -s misc/scripts/tests -p test_content_manifest.py -v

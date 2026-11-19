@@ -39,25 +39,20 @@ TEST_FORCE_LINK(test_sky)
 
 namespace TestSky {
 
-TEST_CASE("[SceneTree][Sky] Reflection roughness layer range") {
-	const String setting = "rendering/reflections/sky_reflections/roughness_layers";
-	ProjectSettings *settings = ProjectSettings::get_singleton();
-	REQUIRE(settings != nullptr);
-	REQUIRE(settings->has_setting(setting));
-
+TEST_CASE("[SceneTree][Sky] Reflection roughness minimum is exposed in ProjectSettings") {
 	List<PropertyInfo> properties;
-	settings->get_property_list(&properties);
+	ProjectSettings::get_singleton()->get_property_list(&properties);
 	bool found = false;
 	for (const PropertyInfo &property : properties) {
-		if (property.name == setting) {
+		if (property.name == "rendering/reflections/sky_reflections/roughness_layers") {
 			found = true;
-			CHECK(property.hint == PROPERTY_HINT_RANGE);
-			CHECK(property.hint_string == "2,32,1");
+			CHECK_EQ(property.hint, PROPERTY_HINT_RANGE);
+			CHECK_EQ(property.hint_string, "2,32,1");
+			break;
 		}
 	}
 	CHECK(found);
 }
-
 
 TEST_CASE("[SceneTree][Sky] Constructor") {
 	Ref<Sky> test_sky;

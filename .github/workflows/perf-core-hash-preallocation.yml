@@ -1,0 +1,58 @@
+name: Core hash container preallocation regressions
+
+on:
+  pull_request:
+    paths:
+      - "core/**"
+      - "tests/core/templates/test_hash_preallocation.cpp"
+      - "misc/scripts/tests/test_core_hash_preallocation.py"
+      - ".github/workflows/perf-core-hash-preallocation.yml"
+  push:
+    branches: [develop]
+    paths:
+      - "core/**"
+      - "tests/core/templates/test_hash_preallocation.cpp"
+      - "misc/scripts/tests/test_core_hash_preallocation.py"
+      - ".github/workflows/perf-core-hash-preallocation.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  source-contracts:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.10", "3.13"]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+      - name: Check known-size hash preallocation contracts
+        run: python -m unittest discover -s misc/scripts/tests -p 'test_core_hash_preallocation.py' -v
+
+  native-engine:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install native dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libwayland-bin
+      - uses: ./.github/actions/godot-deps
+      - name: Build Cgame editor with tests
+        uses: ./.github/actions/godot-build
+        with:
+          platform: linuxbsd
+          target: editor
+          scons-flags: dev_build=yes debug_symbols=no tests=yes module_text_server_fb_enabled=yes -j2
+      - name: Verify reserved hash container behavior
+        shell: bash
+        run: |
+          set -euo pipefail
+          timeout 240s ./bin/godot.linuxbsd.editor.dev.x86_64 --headless --test --test-suite="*[HashPreallocation]*" --no-colors

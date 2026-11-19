@@ -1,0 +1,39 @@
+name: Incremental project import pipeline tests
+
+on:
+  push:
+    branches: [develop]
+    paths:
+      - 'misc/scripts/project_import_pipeline.py'
+      - 'misc/scripts/tests/test_project_import_pipeline.py'
+      - 'misc/scripts/README_project_import_pipeline.md'
+      - '.github/workflows/project-import-pipeline.yml'
+  pull_request:
+    paths:
+      - 'misc/scripts/project_import_pipeline.py'
+      - 'misc/scripts/tests/test_project_import_pipeline.py'
+      - 'misc/scripts/README_project_import_pipeline.md'
+      - '.github/workflows/project-import-pipeline.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  python-tests:
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 10
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+        python-version: ['3.10', '3.13']
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+      - name: Validate Python syntax
+        run: python -m py_compile misc/scripts/project_import_pipeline.py misc/scripts/tests/test_project_import_pipeline.py
+      - name: Run import pipeline tests
+        run: python -m unittest discover -s misc/scripts/tests -p 'test_project_import_pipeline.py' -v

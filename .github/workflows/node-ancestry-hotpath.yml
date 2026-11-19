@@ -1,0 +1,54 @@
+name: Allocation-free scene ancestor and NodePath regressions
+
+on:
+  push:
+    branches: [develop]
+    paths:
+      - "scene/main/node.cpp"
+      - "scene/main/node.h"
+      - "tests/scene/test_node.cpp"
+      - "misc/scripts/tests/test_node_ancestry_hotpath.py"
+      - ".github/workflows/node-ancestry-hotpath.yml"
+  pull_request:
+    paths:
+      - "scene/main/node.cpp"
+      - "scene/main/node.h"
+      - "tests/scene/test_node.cpp"
+      - "misc/scripts/tests/test_node_ancestry_hotpath.py"
+      - ".github/workflows/node-ancestry-hotpath.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  compile-actual-functions:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 12
+    steps:
+      - uses: actions/checkout@v4
+      - name: Compile and exhaustively verify node ancestry paths with GCC
+        run: |
+          python3 -m py_compile misc/scripts/tests/test_node_ancestry_hotpath.py
+          CXX=g++ python3 -m unittest discover -s misc/scripts/tests -p test_node_ancestry_hotpath.py -v
+      - name: Repeat with Clang
+        run: CXX=clang++ python3 -m unittest discover -s misc/scripts/tests -p test_node_ancestry_hotpath.py -v
+
+  native-node-tests:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+      - uses: ./.github/actions/godot-deps
+      - name: Compile native test-enabled Linux editor
+        uses: ./.github/actions/godot-build
+        with:
+          platform: linuxbsd
+          target: editor
+          scons-flags: dev_build=yes tests=yes debug_symbols=no module_mono_enabled=no module_text_server_fb_enabled=yes accesskit=no -j2
+      - name: Verify all scene node ancestry regressions
+        run: |
+          ./bin/godot.linuxbsd.editor.dev.x86_64 --headless --test --test-case="*get_path_to*"
+          ./bin/godot.linuxbsd.editor.dev.x86_64 --headless --test --test-case="*find_common_parent_with*"

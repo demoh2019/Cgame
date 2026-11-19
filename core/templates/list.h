@@ -545,33 +545,44 @@ public:
 	}
 
 	// Random access to elements, use with care,
-	// do not use for iteration.
+	// do not use for iteration. Traverse from the nearer end to avoid
+	// walking most of the list for indices near its tail.
 	T &get(int p_index) _LIFETIME_BOUND_ {
-		CRASH_BAD_INDEX(p_index, size());
+		const int length = size();
+		CRASH_BAD_INDEX(p_index, length);
 
-		Element *I = front();
-		int c = 0;
-		while (c < p_index) {
-			I = I->next();
-			c++;
+		if (p_index < length / 2) {
+			Element *element = front();
+			for (int i = 0; i < p_index; ++i) {
+				element = element->next();
+			}
+			return element->get();
 		}
-
-		return I->get();
+		Element *element = back();
+		for (int i = length - 1; i > p_index; --i) {
+			element = element->prev();
+		}
+		return element->get();
 	}
 
 	// Random access to elements, use with care,
 	// do not use for iteration.
 	const T &get(int p_index) const _LIFETIME_BOUND_ {
-		CRASH_BAD_INDEX(p_index, size());
+		const int length = size();
+		CRASH_BAD_INDEX(p_index, length);
 
-		const Element *I = front();
-		int c = 0;
-		while (c < p_index) {
-			I = I->next();
-			c++;
+		if (p_index < length / 2) {
+			const Element *element = front();
+			for (int i = 0; i < p_index; ++i) {
+				element = element->next();
+			}
+			return element->get();
 		}
-
-		return I->get();
+		const Element *element = back();
+		for (int i = length - 1; i > p_index; --i) {
+			element = element->prev();
+		}
+		return element->get();
 	}
 
 	void move_to_back(Element *p_element) {

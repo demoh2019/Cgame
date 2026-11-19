@@ -490,4 +490,99 @@ TEST_CASE("[Marshalls] Typed dictionary decoding") {
 	CHECK(dictionary[Variant(uint64_t(0x0f123456789abcdef))] == Variant(uint64_t(0x0f123456789abcdef)));
 }
 
+static void check_bulk_variant_roundtrip(const Variant &p_source) {
+	int expected_length = 0;
+	REQUIRE_EQ(encode_variant(p_source, nullptr, expected_length), OK);
+	REQUIRE(expected_length >= 4);
+	Vector<uint8_t> encoded;
+	REQUIRE_EQ(encoded.resize(expected_length), OK);
+	int written = 0;
+	REQUIRE_EQ(encode_variant(p_source, encoded.ptrw(), written), OK);
+	REQUIRE_EQ(written, expected_length);
+
+	Variant decoded;
+	int consumed = 0;
+	REQUIRE_EQ(decode_variant(decoded, encoded.ptr(), written, &consumed), OK);
+	CHECK_EQ(consumed, written);
+	CHECK_EQ(decoded.get_type(), p_source.get_type());
+	CHECK(decoded == p_source);
+}
+
+TEST_CASE("[Marshalls] Large NodePath and arrays use bounded bulk decoding") {
+	String path = "/Root";
+	for (int i = 0; i < 96; i++) {
+		path += "/child_" + itos(i);
+	}
+	for (int i = 0; i < 48; i++) {
+		path += ":subname_" + itos(i);
+	}
+	const NodePath long_path(path);
+	check_bulk_variant_roundtrip(long_path);
+
+	PackedStringArray strings;
+	for (int i = 0; i < 384; i++) {
+		strings.push_back("value_" + itos(i) + "_with_extra_text");
+	}
+	check_bulk_variant_roundtrip(strings);
+
+	Array array;
+	for (int i = 0; i < 512; i++) {
+		array.push_back(i % 7 == 0 ? Variant("text_" + itos(i)) : Variant(i * 5));
+	}
+	check_bulk_variant_roundtrip(array);
+
+	Array typed;
+	typed.set_typed(Variant::INT, StringName(), Ref<Script>());
+	for (int i = 0; i < 256; i++) {
+		typed.push_back(i * 11);
+	}
+	check_bulk_variant_roundtrip(typed);
+}
+
+TEST_CASE("[Marshalls] Truncated enormous declared array counts are rejected before allocation") {
+	Variant decoded;
+	int consumed = 0;
+	uint8_t invalid_array[8] = {};
+	encode_uint32(Variant::ARRAY, invalid_array);
+	encode_uint32(0x7FFFFFFF, invalid_array + 4);
+
+	uint8_t invalid_strings[8] = {};
+	encode_uint32(Variant::PACKED_STRING_ARRAY, invalid_strings);
+	encode_uint32(0x7FFFFFFF, invalid_strings + 4);
+
+	uint8_t invalid_nodepath[16] = {};
+	encode_uint32(Variant::NODE_PATH, invalid_nodepath);
+	encode_uint32(0xFFFFFFFF, invalid_nodepath + 4); // New format and too many names.
+	encode_uint32(0, invalid_nodepath + 8);
+	encode_uint32(0, invalid_nodepath + 12);
+
+	uint8_t overflow_nodepath[16] = {};
+	encode_uint32(Variant::NODE_PATH, overflow_nodepath);
+	encode_uint32(0x80000000, overflow_nodepath + 4);
+	encode_uint32(0xFFFFFFFF, overflow_nodepath + 8); // Overflows with obsolete property field.
+	encode_uint32(2, overflow_nodepath + 12);
+
+	ERR_PRINT_OFF;
+	CHECK_EQ(decode_variant(decoded, invalid_array, sizeof(invalid_array), &consumed), ERR_INVALID_DATA);
+	CHECK_EQ(decode_variant(decoded, invalid_strings, sizeof(invalid_strings), &consumed), ERR_INVALID_DATA);
+	CHECK_EQ(decode_variant(decoded, invalid_nodepath, sizeof(invalid_nodepath), &consumed), ERR_INVALID_DATA);
+	CHECK_EQ(decode_variant(decoded, overflow_nodepath, sizeof(overflow_nodepath), &consumed), ERR_INVALID_DATA);
+	ERR_PRINT_ON;
+}
+
+
+TEST_CASE("[Marshalls] Packed Unicode strings keep binary serialization roundtrip") {
+	PackedStringArray source;
+	for (int i = 0; i < 2048; i++) {
+		if (i % 11 == 0) {
+			source.push_back(String());
+		} else if (i % 7 == 0) {
+			source.push_back("é_日本");
+		} else {
+			source.push_back("value_" + itos(i % 293) + "_élève_日本");
+		}
+	}
+	check_bulk_variant_roundtrip(Variant(source));
+}
+
 } // namespace TestMarshalls

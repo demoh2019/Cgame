@@ -184,7 +184,7 @@ public:
 
 	_FORCE_INLINE_ Size size() const { return !_ptr ? 0 : *_get_size(); }
 	_FORCE_INLINE_ USize capacity() const { return !_ptr ? 0 : *_get_capacity(); }
-	_FORCE_INLINE_ USize refcount() const { return !_ptr ? 0 : *_get_refcount(); }
+	_FORCE_INLINE_ USize refcount() const { return !_ptr ? 0 : _get_refcount()->get(); }
 
 	_FORCE_INLINE_ void clear() { _unref(); }
 	_FORCE_INLINE_ bool is_empty() const { return size() == 0; }

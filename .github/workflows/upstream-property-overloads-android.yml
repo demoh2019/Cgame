@@ -1,0 +1,61 @@
+name: Upstream PropertyInfo/ClassDB and Android compiler regressions
+
+on:
+  pull_request:
+    paths:
+      - 'core/object/property_info.cpp'
+      - 'core/object/property_info.h'
+      - 'core/object/class_db.cpp'
+      - 'core/object/class_db.h'
+      - 'core/object/object.h'
+      - 'platform/android/display_server_android.cpp'
+      - 'tests/core/object/test_property_info_overloads.cpp'
+      - 'misc/scripts/tests/test_upstream_property_overloads_android.py'
+      - '.github/workflows/upstream-property-overloads-android.yml'
+  push:
+    branches: [develop]
+    paths:
+      - 'core/object/property_info.cpp'
+      - 'core/object/property_info.h'
+      - 'core/object/class_db.cpp'
+      - 'core/object/class_db.h'
+      - 'core/object/object.h'
+      - 'platform/android/display_server_android.cpp'
+      - 'tests/core/object/test_property_info_overloads.cpp'
+      - 'misc/scripts/tests/test_upstream_property_overloads_android.py'
+      - '.github/workflows/upstream-property-overloads-android.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  compiler-and-source-contracts:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - name: Python syntax and compiler configurations
+        run: |
+          python3 -m py_compile misc/scripts/tests/test_upstream_property_overloads_android.py
+          python3 -m unittest discover -s misc/scripts/tests -p test_upstream_property_overloads_android.py -v
+
+  native-engine-tests:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+      - uses: ./.github/actions/godot-deps
+      - name: Build native Cgame tests
+        uses: ./.github/actions/godot-build
+        with:
+          platform: linuxbsd
+          target: editor
+          scons-flags: dev_build=yes tests=yes debug_symbols=no module_mono_enabled=no accesskit=no -j2
+      - name: Exercise PropertyInfo constructors and ClassDB overloads
+        shell: bash
+        run: |
+          set -euo pipefail
+          ./bin/godot.linuxbsd.editor.dev.x86_64 --headless --test --test-case='*[PropertyInfoOverloads]*'

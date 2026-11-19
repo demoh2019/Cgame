@@ -29,11 +29,46 @@
 /**************************************************************************/
 
 #include "godot_body_2d.h"
+#include "servers/physics_angular_velocity_cap.h"
+#include "servers/physics_linear_velocity_cap.h"
 
 #include "godot_area_2d.h"
 #include "godot_body_direct_state_2d.h"
 #include "godot_constraint_2d.h"
 #include "godot_space_2d.h"
+#include "godot_velocity_limit_2d.h"
+
+#include "servers/physics_damping.h"
+#include "servers/physics_uniform_fluid.h"
+
+void GodotBody2D::add_constraint(GodotConstraint2D *p_constraint, int p_pos) {
+	p_constraint->set_body_slot(p_pos, constraint_list.size());
+	constraint_list.push_back({ p_constraint, p_pos });
+}
+
+void GodotBody2D::remove_constraint(GodotConstraint2D *p_constraint, int p_pos) {
+	uint32_t index = p_constraint->get_body_slot(p_pos);
+	if (index >= constraint_list.size() || constraint_list[index].first != p_constraint || constraint_list[index].second != p_pos) {
+		// The list was cleared or reordered behind the constraint's back.
+		index = UINT32_MAX;
+		for (uint32_t i = 0; i < constraint_list.size(); i++) {
+			if (constraint_list[i].first == p_constraint && constraint_list[i].second == p_pos) {
+				index = i;
+				break;
+			}
+		}
+		if (index == UINT32_MAX) {
+			return;
+		}
+	}
+
+	const uint32_t last = constraint_list.size() - 1;
+	if (index != last) {
+		constraint_list[index] = constraint_list[last];
+		constraint_list[index].first->set_body_slot(constraint_list[index].second, index);
+	}
+	constraint_list.resize(last);
+}
 
 void GodotBody2D::_mass_properties_changed() {
 	if (get_space() && !mass_properties_update_list.in_list()) {
@@ -46,34 +81,29 @@ void GodotBody2D::update_mass_properties() {
 
 	switch (mode) {
 		case PS2DE::BODY_MODE_RIGID: {
-			real_t total_area = 0;
+			// Accumulate area and its first moment in a single pass. The center
+			// of mass does not depend on the total body mass, so there is no
+			// reason to revisit every shape to normalize its contribution.
+			real_t total_area = 0.0;
+			Vector2 weighted_centroid;
 			for (int i = 0; i < get_shape_count(); i++) {
 				if (is_shape_disabled(i)) {
 					continue;
 				}
-				total_area += get_shape_aabb(i).get_area();
-			}
 
-			if (calculate_center_of_mass) {
-				// We have to recompute the center of mass.
-				center_of_mass_local = Vector2();
-
-				if (total_area != 0.0) {
-					for (int i = 0; i < get_shape_count(); i++) {
-						if (is_shape_disabled(i)) {
-							continue;
-						}
-
-						real_t area = get_shape_aabb(i).get_area();
-
-						real_t mass_new = area * mass / total_area;
-
-						// NOTE: we assume that the shape origin is also its center of mass.
-						center_of_mass_local += mass_new * get_shape_transform(i).get_origin();
-					}
-
-					center_of_mass_local /= mass;
+				const GodotShape2D *shape = get_shape(i);
+				const Transform2D &shape_transform = get_shape_transform(i);
+				const real_t area = shape->get_mass_area() * Math::abs(shape_transform.determinant());
+				if (area <= 0.0) {
+					continue;
 				}
+				total_area += area;
+				if (calculate_center_of_mass) {
+					weighted_centroid += area * shape_transform.xform(shape->get_center_of_mass());
+				}
+			}
+			if (calculate_center_of_mass) {
+				center_of_mass_local = total_area > 0.0 ? weighted_centroid / total_area : Vector2();
 			}
 
 			if (calculate_inertia) {
@@ -86,17 +116,16 @@ void GodotBody2D::update_mass_properties() {
 
 					const GodotShape2D *shape = get_shape(i);
 
-					real_t area = get_shape_aabb(i).get_area();
+					const real_t area = shape->get_mass_area() * Math::abs(get_shape_transform(i).determinant());
 					if (area == 0.0) {
 						continue;
 					}
 
 					real_t mass_new = area * mass / total_area;
 
-					Transform2D mtx = get_shape_transform(i);
-					Vector2 scale = mtx.get_scale();
-					Vector2 shape_origin = mtx.get_origin() - center_of_mass_local;
-					inertia += shape->get_moment_of_inertia(mass_new, scale) + mass_new * shape_origin.length_squared();
+					const Transform2D &mtx = get_shape_transform(i);
+					const Vector2 shape_centroid = mtx.xform(shape->get_center_of_mass()) - center_of_mass_local;
+					inertia += shape->get_moment_of_inertia_transformed(mass_new, mtx) + mass_new * shape_centroid.length_squared();
 				}
 			}
 
@@ -311,7 +340,14 @@ void GodotBody2D::set_state(PS2DE::BodyState p_state, const Variant &p_variant) 
 					first_time_kinematic = false;
 				}
 			} else if (mode == PS2DE::BODY_MODE_STATIC) {
-				_set_transform(p_variant);
+				// A repeated identical transform is not a motion event. Avoid
+				// broadphase updates, matrix inversion and waking nearby bodies.
+				// Shape changes have their own update/wakeup path.
+				const Transform2D new_static_transform = p_variant;
+				if (new_static_transform == get_transform()) {
+					break;
+				}
+				_set_transform(new_static_transform);
 				_set_inv_transform(get_transform().affine_inverse());
 				wakeup_neighbours();
 			} else {
@@ -419,7 +455,7 @@ void GodotBody2D::_update_transform_dependent() {
 	center_of_mass = get_transform().basis_xform(center_of_mass_local);
 }
 
-void GodotBody2D::integrate_forces(real_t p_step) {
+void GodotBody2D::integrate_forces(real_t p_step, bool p_defer_motion) {
 	if (mode == PS2DE::BODY_MODE_STATIC) {
 		return;
 	}
@@ -442,7 +478,7 @@ void GodotBody2D::integrate_forces(real_t p_step) {
 	// Combine gravity and damping from overlapping areas in priority order.
 	if (ac) {
 		areas.sort();
-		const AreaCMP *aa = &areas[0];
+		const AreaCMP *aa = areas.ptr();
 		for (int i = ac - 1; i >= 0 && !stopped; i--) {
 			if (!gravity_done) {
 				PS2DE::AreaSpaceOverrideMode area_gravity_mode = (PS2DE::AreaSpaceOverrideMode)(int)aa[i].area->get_param(PS2DE::AREA_PARAM_GRAVITY_OVERRIDE_MODE);
@@ -571,26 +607,56 @@ void GodotBody2D::integrate_forces(real_t p_step) {
 			//overridden by direct state query
 
 			Vector2 force = gravity * mass + applied_force + constant_force;
+			// Uniform fully submerged buoyancy: force = -buoyancy * mass * gravity.
+			// Gravity already includes the body's gravity scale and area
+			// overrides. With buoyancy 1, gravity and buoyancy cancel.
+			// Zero (the default) preserves the old force calculation.
+			if (get_space()->get_fluid_buoyancy() > real_t(0.0)) {
+				force -= gravity * (mass * get_space()->get_fluid_buoyancy());
+			}
 			real_t torque = applied_torque + constant_torque;
 
-			real_t damp = 1.0 - p_step * total_linear_damp;
-
-			if (damp < 0) { // reached zero in the given time
-				damp = 0;
-			}
-
-			real_t angular_damp_new = 1.0 - p_step * total_angular_damp;
-
-			if (angular_damp_new < 0) { // reached zero in the given time
-				angular_damp_new = 0;
-			}
+			// This per-space option uses Box2D's implicit (Pade) damping
+			// for nonnegative coefficients. The default retains the legacy
+			// clamped explicit-Euler result exactly.
+			const bool implicit_damping = get_space()->is_implicit_damping_enabled();
+			const real_t damp = godot_physics_damping_factor(p_step, total_linear_damp, implicit_damping);
+			const real_t angular_damp_new = godot_physics_damping_factor(p_step, total_angular_damp, implicit_damping);
 
 			linear_velocity *= damp;
 			angular_velocity *= angular_damp_new;
 
 			linear_velocity += _inv_mass * force * p_step;
 			angular_velocity += _inv_inertia * torque * p_step;
+			// Apply nonlinear drag after external forces. The stable exact
+			// solution slows motion relative to the fluid current and never
+			// reverses it, even for large physics timesteps.
+			linear_velocity = godot_physics_fluid_linear_drag(
+					linear_velocity, get_space()->get_fluid_flow_velocity(), get_space()->get_fluid_linear_drag(), p_step);
+			angular_velocity = godot_physics_fluid_angular_drag(
+					angular_velocity, get_space()->get_fluid_angular_drag(), p_step);
 		}
+
+		// Limit dynamic angular speed after damping, torque and optional gyro
+		// integration. Kinematic bodies retain their requested target rotation.
+		angular_velocity = godot_physics_clamp_angular_velocity(angular_velocity, get_effective_max_angular_velocity(get_space()->get_max_angular_velocity()));
+		// Rapier-style CCD safeguard: limit the *physical* rotation across
+		// one step, not the penetration-correction bias. A joint/contact may
+		// change angular velocity after force integration, so apply at both
+		// integration boundaries. Disabled by default and for non-CCD bodies.
+		// Limit the force-integrated speed before computing the swept CCD bounds.
+		const real_t velocity_limit = get_space()->get_max_linear_velocity();
+		if (velocity_limit > 0.0) {
+			linear_velocity = godot_physics_2d_limit_linear_velocity(linear_velocity, velocity_limit);
+		}
+		if (continuous_cd_mode != PS2DE::CCD_MODE_DISABLED) {
+			angular_velocity = godot_physics_clamp_ccd_angular_velocity(
+					angular_velocity, get_space()->get_ccd_max_angular_motion(), p_step);
+		}
+
+		// Bound physical velocity before calculating the broadphase CCD sweep.
+		// This is skipped by static and kinematic bodies.
+		linear_velocity = godot_physics_clamp_linear_velocity(linear_velocity, get_effective_max_linear_velocity(get_space()->get_max_linear_velocity()));
 
 		if (continuous_cd_mode != PS2DE::CCD_MODE_DISABLED) {
 			motion = linear_velocity * p_step;
@@ -605,7 +671,12 @@ void GodotBody2D::integrate_forces(real_t p_step) {
 	biased_linear_velocity = Vector2();
 
 	if (do_motion) { //shapes temporarily extend for raycast
-		_update_shapes_with_motion(motion);
+		if (p_defer_motion) {
+			deferred_motion = motion;
+			has_deferred_motion = true;
+		} else {
+			_update_shapes_with_motion(motion, angular_velocity * p_step, get_transform().get_origin() + center_of_mass);
+		}
 	}
 
 	contact_count = 0;
@@ -631,8 +702,34 @@ void GodotBody2D::integrate_velocities(real_t p_step) {
 		return;
 	}
 
+	// Contact and joint impulses can add speed after force integration.
+	// Cap the physical component before position integration too.
+	linear_velocity = godot_physics_clamp_linear_velocity(linear_velocity, get_effective_max_linear_velocity(get_space()->get_max_linear_velocity()));
+	// Contacts and joints can increase angular velocity after force integration.
+	// Limit physical rotation, leaving penetration-correction bias untouched.
+	angular_velocity = godot_physics_clamp_angular_velocity(angular_velocity, get_effective_max_angular_velocity(get_space()->get_max_angular_velocity()));
+	// Reapply the CCD-only per-step cap after contact/joint impulses.
+	if (continuous_cd_mode != PS2DE::CCD_MODE_DISABLED) {
+		angular_velocity = godot_physics_clamp_ccd_angular_velocity(
+				angular_velocity, get_space()->get_ccd_max_angular_motion(), p_step);
+	}
+	// Contact and joint impulses can accelerate the body after force integration.
+	// Clamp its physical velocity again, but never clamp bias recovery motion.
+	const real_t velocity_limit = get_space()->get_max_linear_velocity();
+	if (velocity_limit > 0.0) {
+		linear_velocity = godot_physics_2d_limit_linear_velocity(linear_velocity, velocity_limit);
+	}
 	real_t total_angular_velocity = angular_velocity + biased_angular_velocity;
 	Vector2 total_linear_velocity = linear_velocity + biased_linear_velocity;
+
+	// Active bodies with no motion need neither a transform rebuild nor a
+	// matrix inverse. Preserve CCD's previous-transform bookkeeping.
+	if (total_angular_velocity == 0.0 && total_linear_velocity == Vector2()) {
+		if (continuous_cd_mode != PS2DE::CCD_MODE_DISABLED) {
+			new_transform = get_transform();
+		}
+		return;
+	}
 
 	real_t angle_delta = total_angular_velocity * p_step;
 	real_t angle = get_transform().get_rotation() + angle_delta;
@@ -753,6 +850,9 @@ GodotBody2D::GodotBody2D() :
 }
 
 GodotBody2D::~GodotBody2D() {
+	if (solver_priority > 1) {
+		high_priority_body_count--;
+	}
 	memdelete(fi_callback_data);
 	memdelete(direct_state);
 }

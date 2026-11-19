@@ -100,6 +100,7 @@
 #include "scene/gui/virtual_joystick.h"
 #include "scene/main/canvas_item.h"
 #include "scene/main/canvas_layer.h"
+#include "scene/main/debug_draw.h"
 #include "scene/main/http_request.h"
 #include "scene/main/instance_placeholder.h"
 #include "scene/main/missing_node.h"
@@ -111,6 +112,7 @@
 #include "scene/main/timer.h"
 #include "scene/main/viewport.h"
 #include "scene/main/window.h"
+#include "scene/main/world_streamer.h"
 #include "scene/resources/animation_library.h"
 #include "scene/resources/atlas_texture.h"
 #include "scene/resources/audio/audio_stream.h"
@@ -241,9 +243,11 @@
 #include "scene/3d/cpu_particles_3d.h"
 #include "scene/3d/decal.h"
 #include "scene/3d/fabr_ik_3d.h"
+#include "scene/3d/floating_origin_3d.h"
 #include "scene/3d/fog_volume.h"
 #include "scene/3d/gpu_particles_3d.h"
 #include "scene/3d/gpu_particles_collision_3d.h"
+#include "scene/3d/heightmap_terrain_3d.h"
 #include "scene/3d/ik_modifier_3d.h"
 #include "scene/3d/importer_mesh_instance_3d.h"
 #include "scene/3d/iterate_ik_3d.h"
@@ -265,6 +269,7 @@
 #include "scene/3d/reflection_probe.h"
 #include "scene/3d/remote_transform_3d.h"
 #include "scene/3d/retarget_modifier_3d.h"
+#include "scene/3d/rope_3d.h"
 #include "scene/3d/skeleton_3d.h"
 #include "scene/3d/skeleton_modifier_3d.h"
 #include "scene/3d/spline_ik_3d.h"
@@ -348,6 +353,7 @@
 #include "scene/3d/physics/character_body_3d.h"
 #include "scene/3d/physics/collision_polygon_3d.h"
 #include "scene/3d/physics/collision_shape_3d.h"
+#include "scene/3d/physics/destructible_body_3d.h"
 #include "scene/3d/physics/joints/cone_twist_joint_3d.h"
 #include "scene/3d/physics/joints/generic_6dof_joint_3d.h"
 #include "scene/3d/physics/joints/hinge_joint_3d.h"
@@ -365,6 +371,7 @@
 #include "scene/3d/physics/spring_arm_3d.h"
 #include "scene/3d/physics/static_body_3d.h"
 #include "scene/3d/physics/vehicle_body_3d.h"
+#include "scene/3d/physics/vehicle_drivetrain_3d.h"
 #include "scene/resources/3d/box_shape_3d.h"
 #include "scene/resources/3d/capsule_shape_3d.h"
 #include "scene/resources/3d/concave_polygon_shape_3d.h"
@@ -386,6 +393,7 @@ static Ref<ResourceFormatLoaderText> resource_loader_text;
 static Ref<ResourceFormatLoaderCompressedTexture2D> resource_loader_compressed_texture;
 static Ref<ResourceFormatLoaderStreamedTexture2D> resource_loader_streamed_texture;
 static Ref<ResourceFormatLoaderCompressedTextureLayered> resource_loader_texture_layered;
+static DebugDraw *debug_draw = nullptr;
 static Ref<ResourceFormatLoaderCompressedTexture3D> resource_loader_texture_3d;
 
 static Ref<ResourceFormatSaverShader> resource_saver_shader;
@@ -648,6 +656,9 @@ void register_scene_types() {
 	GDREGISTER_VIRTUAL_CLASS(VisualInstance3D);
 	GDREGISTER_VIRTUAL_CLASS(GeometryInstance3D);
 	GDREGISTER_CLASS(Camera3D);
+	GDREGISTER_CLASS(FloatingOrigin3D);
+	GDREGISTER_CLASS(HeightmapTerrain3D);
+	GDREGISTER_CLASS(Rope3D);
 	GDREGISTER_CLASS(AudioListener3D);
 	GDREGISTER_CLASS(MeshInstance3D);
 #ifndef DISABLE_DEPRECATED
@@ -738,6 +749,7 @@ void register_scene_types() {
 	GDREGISTER_CLASS(StaticBody3D);
 	GDREGISTER_CLASS(AnimatableBody3D);
 	GDREGISTER_CLASS(RigidBody3D);
+	GDREGISTER_CLASS(DestructibleBody3D);
 	GDREGISTER_CLASS(KinematicCollision3D);
 	GDREGISTER_CLASS(CharacterBody3D);
 	GDREGISTER_CLASS(SpringArm3D);
@@ -756,6 +768,7 @@ void register_scene_types() {
 
 #ifndef PHYSICS_3D_DISABLED
 	GDREGISTER_CLASS(VehicleBody3D);
+	GDREGISTER_CLASS(VehicleDrivetrain3D);
 	GDREGISTER_CLASS(VehicleWheel3D);
 	GDREGISTER_CLASS(Area3D);
 	GDREGISTER_CLASS(CollisionShape3D);
@@ -1354,6 +1367,12 @@ void register_scene_types() {
 void unregister_scene_types() {
 	OS::get_singleton()->benchmark_begin_measure("Scene", "Unregister Types");
 
+	if (debug_draw) {
+		Engine::get_singleton()->remove_singleton("DebugDraw");
+		memdelete(debug_draw);
+		debug_draw = nullptr;
+	}
+
 	SceneDebugger::deinitialize();
 
 	if constexpr (GD_IS_CLASS_ENABLED(TextureLayered)) {
@@ -1422,8 +1441,13 @@ void register_scene_singletons() {
 	OS::get_singleton()->benchmark_begin_measure("Scene", "Register Singletons");
 
 	GDREGISTER_CLASS(ThemeDB);
+	GDREGISTER_CLASS(DebugDraw);
+	GDREGISTER_CLASS(WorldStreamer);
 
 	Engine::get_singleton()->add_singleton(Engine::Singleton("ThemeDB", ThemeDB::get_singleton()));
+
+	debug_draw = memnew(DebugDraw);
+	Engine::get_singleton()->add_singleton(Engine::Singleton("DebugDraw", debug_draw));
 
 	OS::get_singleton()->benchmark_end_measure("Scene", "Register Singletons");
 }

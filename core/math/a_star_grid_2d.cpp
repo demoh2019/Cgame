@@ -34,6 +34,68 @@
 #include "core/object/class_db.h"
 #include "core/variant/typed_array.h"
 
+#include <algorithm>
+
+void AStarGrid2D::OpenList::_sift_up(uint32_t p_hole, Point *p_point) {
+	SortPoints worse;
+	while (p_hole > 0) {
+		const uint32_t parent = (p_hole - 1) / 2;
+		Point *above = items[parent];
+		if (!worse(above, p_point)) {
+			break;
+		}
+		items[p_hole] = above;
+		above->heap_index = p_hole;
+		p_hole = parent;
+	}
+	items[p_hole] = p_point;
+	p_point->heap_index = p_hole;
+}
+
+void AStarGrid2D::OpenList::push(Point *p_point) {
+	const uint32_t index = items.size();
+	items.push_back(p_point);
+	_sift_up(index, p_point);
+}
+
+void AStarGrid2D::OpenList::decrease_key(Point *p_point) {
+	_sift_up(p_point->heap_index, p_point);
+}
+
+void AStarGrid2D::OpenList::pop() {
+	const uint32_t count = items.size();
+	if (count == 1) {
+		items.remove_at(0);
+		return;
+	}
+	Point *last = items[count - 1];
+	items.remove_at(count - 1);
+	const uint32_t length = count - 1;
+	uint32_t hole = 0;
+	uint32_t second_child = 2;
+	SortPoints worse;
+
+	// Preserve SortArray::adjust_heap's child selection and tie ordering.
+	while (second_child < length) {
+		if (worse(items[second_child], items[second_child - 1])) {
+			second_child--;
+		}
+		Point *child = items[second_child];
+		items[hole] = child;
+		child->heap_index = hole;
+		hole = second_child;
+		second_child = 2 * (second_child + 1);
+	}
+	if (second_child == length) {
+		Point *child = items[second_child - 1];
+		items[hole] = child;
+		child->heap_index = hole;
+		hole = second_child - 1;
+	}
+	_sift_up(hole, last);
+}
+
+
 static real_t heuristic_euclidean(const Vector2i &p_from, const Vector2i &p_to) {
 	real_t dx = (real_t)Math::abs(p_to.x - p_from.x);
 	real_t dy = (real_t)Math::abs(p_to.y - p_from.y);
@@ -127,19 +189,51 @@ void AStarGrid2D::update() {
 		return;
 	}
 
-	points.clear();
-	solid_mask.clear();
+	const uint64_t total_points = uint64_t(region.size.x) * uint64_t(region.size.y);
+	const uint64_t padded_width = uint64_t(region.size.x) + 2;
+	const uint64_t padded_height = uint64_t(region.size.y) + 2;
+	const uint64_t mask_cells = padded_width * padded_height;
+	// The underlying LocalVector uses 32-bit indices. Check limits before
+	// reserving to avoid truncation and multiplication overflow.
+	ERR_FAIL_COND_MSG(total_points > UINT32_MAX || mask_cells > UINT32_MAX || total_points > SIZE_MAX / sizeof(Point),
+			"AStarGrid2D region is too large to allocate.");
+	// Reuse buffers for similarly-sized rebuilds, but release large allocations
+	// after shrinking a grid (otherwise a tiny map retains the old peak RSS).
+	if (total_points < uint64_t(points.get_capacity()) / 4) {
+		points.reset();
+	} else {
+		points.clear();
+	}
+	if (mask_cells < uint64_t(solid_mask.get_capacity()) / 4) {
+		solid_mask.reset();
+	} else {
+		solid_mask.clear();
+	}
+
+	// One contiguous allocation for cells, rather than one per row.
+	points.reserve(uint32_t(total_points));
+	solid_mask.reserve(uint32_t(mask_cells));
+
+	// All interior cells are initially passable. Construct and zero the mask
+	// once, then touch only the border (O(width + height) extra stores).
+	solid_mask.resize_initialized(uint32_t(mask_cells));
+	bool *mask = solid_mask.ptr();
+	const uint32_t width = uint32_t(padded_width);
+	const uint32_t height = uint32_t(padded_height);
+	const uint32_t bottom_row = (height - 1) * width;
+	for (uint32_t x = 0; x < width; x++) {
+		mask[x] = true;
+		mask[bottom_row + x] = true;
+	}
+	for (uint32_t y = 1; y < height - 1; y++) {
+		mask[y * width] = true;
+		mask[(y + 1) * width - 1] = true;
+	}
 
 	const int32_t end_x = region.get_end().x;
 	const int32_t end_y = region.get_end().y;
 	const Vector2 half_cell_size = cell_size / 2;
-	for (int32_t x = region.position.x; x < end_x + 2; x++) {
-		solid_mask.push_back(true);
-	}
-
 	for (int32_t y = region.position.y; y < end_y; y++) {
-		LocalVector<Point> line;
-		solid_mask.push_back(true);
 		for (int32_t x = region.position.x; x < end_x; x++) {
 			Vector2 v = offset;
 			switch (cell_shape) {
@@ -155,15 +249,8 @@ void AStarGrid2D::update() {
 				default:
 					break;
 			}
-			line.push_back(Point(Vector2i(x, y), v));
-			solid_mask.push_back(false);
+			points.push_back(Point(Vector2i(x, y), v));
 		}
-		solid_mask.push_back(true);
-		points.push_back(std::move(line));
-	}
-
-	for (int32_t x = region.position.x; x < end_x + 2; x++) {
-		solid_mask.push_back(true);
 	}
 
 	dirty = false;
@@ -245,13 +332,20 @@ void AStarGrid2D::fill_solid_region(const Rect2i &p_region, bool p_solid) {
 	ERR_FAIL_COND_MSG(dirty, "Grid is not initialized. Call the update method.");
 
 	const Rect2i safe_region = p_region.intersection(region);
-	const int32_t end_x = safe_region.get_end().x;
-	const int32_t end_y = safe_region.get_end().y;
+	if (safe_region.size.x <= 0 || safe_region.size.y <= 0) {
+		return;
+	}
 
-	for (int32_t y = safe_region.position.y; y < end_y; y++) {
-		for (int32_t x = safe_region.position.x; x < end_x; x++) {
-			_set_solid_unchecked(x, y, p_solid);
-		}
+	// Consecutive cells share one contiguous span in each padded mask row.
+	// Resolve the first index once instead of multiplying the 2D coordinates
+	// for every cell in a bulk edit.
+	bool *mask = solid_mask.ptr();
+	const size_t stride = size_t(region.size.x) + 2;
+	size_t row = _to_mask_index(safe_region.position.x, safe_region.position.y);
+	const size_t count = size_t(safe_region.size.x);
+	for (int32_t y = 0; y < safe_region.size.y; ++y) {
+		std::fill_n(mask + row, count, p_solid);
+		row += stride;
 	}
 }
 
@@ -260,37 +354,55 @@ void AStarGrid2D::fill_weight_scale_region(const Rect2i &p_region, real_t p_weig
 	ERR_FAIL_COND_MSG(p_weight_scale < 0.0, vformat("Can't set point's weight scale less than 0.0: %f.", p_weight_scale));
 
 	const Rect2i safe_region = p_region.intersection(region);
-	const int32_t end_x = safe_region.get_end().x;
-	const int32_t end_y = safe_region.get_end().y;
+	if (safe_region.size.x <= 0 || safe_region.size.y <= 0) {
+		return;
+	}
 
-	for (int32_t y = safe_region.position.y; y < end_y; y++) {
-		for (int32_t x = safe_region.position.x; x < end_x; x++) {
-			_get_point_unchecked(x, y)->weight_scale = p_weight_scale;
+	// Points are row-major and the row stride is fixed for the entire grid.
+	// Walk adjacent Point objects directly, keeping each write contiguous.
+	Point *row = _get_point_unchecked(safe_region.position.x, safe_region.position.y);
+	const int32_t stride = region.size.x;
+	for (int32_t y = 0; y < safe_region.size.y; ++y) {
+		for (int32_t x = 0; x < safe_region.size.x; ++x) {
+			row[x].weight_scale = p_weight_scale;
+		}
+		if (y + 1 < safe_region.size.y) {
+			row += stride; // Do not form a pointer beyond one-past the last Point.
 		}
 	}
 }
 
 AStarGrid2D::Point *AStarGrid2D::_jump(Point *p_from, Point *p_to) {
-	int32_t from_x = p_from->id.x;
-	int32_t from_y = p_from->id.y;
-
+	const int32_t from_x = p_from->id.x;
+	const int32_t from_y = p_from->id.y;
 	int32_t to_x = p_to->id.x;
 	int32_t to_y = p_to->id.y;
+	const int32_t dx = to_x - from_x;
+	const int32_t dy = to_y - from_y;
 
-	int32_t dx = to_x - from_x;
-	int32_t dy = to_y - from_y;
+	// JPS advances along one fixed direction. All obstacle probes can use
+	// constant offsets from the current mask cell rather than recalculating
+	// the row-major index for each 2D coordinate.
+	const ptrdiff_t stride = ptrdiff_t(region.size.x) + 2;
+	const ptrdiff_t step_x = dx;
+	const ptrdiff_t step_y = ptrdiff_t(dy) * stride;
+	const ptrdiff_t step = step_x + step_y;
+	const bool *mask = solid_mask.ptr();
+	ptrdiff_t index = (ptrdiff_t(to_y) - region.position.y + 1) * stride + ptrdiff_t(to_x) - region.position.x + 1;
+	const auto walkable = [&](ptrdiff_t p_offset) { return !mask[index + p_offset]; };
 
 	if (diagonal_mode == DIAGONAL_MODE_ALWAYS || diagonal_mode == DIAGONAL_MODE_AT_LEAST_ONE_WALKABLE) {
 		if (dx == 0 || dy == 0) {
 			return _forced_successor(to_x, to_y, dx, dy);
 		}
 
-		while (_is_walkable(to_x, to_y) && (diagonal_mode == DIAGONAL_MODE_ALWAYS || _is_walkable(to_x, to_y - dy) || _is_walkable(to_x - dx, to_y))) {
+		const bool always = diagonal_mode == DIAGONAL_MODE_ALWAYS;
+		while (walkable(0) && (always || walkable(-step_y) || walkable(-step_x))) {
 			if (end->id.x == to_x && end->id.y == to_y) {
 				return end;
 			}
 
-			if ((_is_walkable(to_x - dx, to_y + dy) && !_is_walkable(to_x - dx, to_y)) || (_is_walkable(to_x + dx, to_y - dy) && !_is_walkable(to_x, to_y - dy))) {
+			if ((walkable(-step_x + step_y) && !walkable(-step_x)) || (walkable(step_x - step_y) && !walkable(-step_y))) {
 				return _get_point_unchecked(to_x, to_y);
 			}
 
@@ -298,6 +410,7 @@ AStarGrid2D::Point *AStarGrid2D::_jump(Point *p_from, Point *p_to) {
 				return _get_point_unchecked(to_x, to_y);
 			}
 
+			index += step;
 			to_x += dx;
 			to_y += dy;
 		}
@@ -307,12 +420,12 @@ AStarGrid2D::Point *AStarGrid2D::_jump(Point *p_from, Point *p_to) {
 			return _forced_successor(from_x, from_y, dx, dy, true);
 		}
 
-		while (_is_walkable(to_x, to_y) && _is_walkable(to_x, to_y - dy) && _is_walkable(to_x - dx, to_y)) {
+		while (walkable(0) && walkable(-step_y) && walkable(-step_x)) {
 			if (end->id.x == to_x && end->id.y == to_y) {
 				return end;
 			}
 
-			if ((_is_walkable(to_x + dx, to_y + dy) && !_is_walkable(to_x, to_y + dy)) || !_is_walkable(to_x + dx, to_y)) {
+			if ((walkable(step) && !walkable(step_y)) || !walkable(step_x)) {
 				return _get_point_unchecked(to_x, to_y);
 			}
 
@@ -320,6 +433,7 @@ AStarGrid2D::Point *AStarGrid2D::_jump(Point *p_from, Point *p_to) {
 				return _get_point_unchecked(to_x, to_y);
 			}
 
+			index += step;
 			to_x += dx;
 			to_y += dy;
 		}
@@ -329,12 +443,12 @@ AStarGrid2D::Point *AStarGrid2D::_jump(Point *p_from, Point *p_to) {
 			return _forced_successor(from_x, from_y, dx, 0, true);
 		}
 
-		while (_is_walkable(to_x, to_y)) {
+		while (walkable(0)) {
 			if (end->id.x == to_x && end->id.y == to_y) {
 				return end;
 			}
 
-			if ((_is_walkable(to_x - 1, to_y) && !_is_walkable(to_x - 1, to_y - dy)) || (_is_walkable(to_x + 1, to_y) && !_is_walkable(to_x + 1, to_y - dy))) {
+			if ((walkable(-1) && !walkable(-1 - step_y)) || (walkable(1) && !walkable(1 - step_y))) {
 				return _get_point_unchecked(to_x, to_y);
 			}
 
@@ -342,156 +456,137 @@ AStarGrid2D::Point *AStarGrid2D::_jump(Point *p_from, Point *p_to) {
 				return _get_point_unchecked(to_x, to_y);
 			}
 
+			index += step_y;
 			to_y += dy;
 		}
 	}
-
 	return nullptr;
 }
 
 AStarGrid2D::Point *AStarGrid2D::_forced_successor(int32_t p_x, int32_t p_y, int32_t p_dx, int32_t p_dy, bool p_inclusive) {
-	// Remembering previous results can improve performance.
-	bool l_prev = false, r_prev = false, l = false, r = false;
+	// JPS scans a straight line. Turn 2D coordinates into an index only
+	// once, then walk the padded solid mask with constant offsets. This
+	// avoids multiple coordinate multiplications at every visited cell.
+	const ptrdiff_t stride = ptrdiff_t(region.size.x) + 2;
+	const ptrdiff_t origin = (ptrdiff_t(p_y) - region.position.y + 1) * stride + ptrdiff_t(p_x) - region.position.x + 1;
+	const ptrdiff_t step = ptrdiff_t(p_dx) + ptrdiff_t(p_dy) * stride;
+	const ptrdiff_t side = ptrdiff_t(p_dy) + ptrdiff_t(p_dx) * stride;
+	const bool *mask = solid_mask.ptr();
 
-	int32_t o_x = p_x, o_y = p_y;
-	if (p_inclusive) {
-		o_x += p_dx;
-		o_y += p_dy;
-	}
+	ptrdiff_t current = origin + (p_inclusive ? step : 0);
+	ptrdiff_t left = origin - side;
+	ptrdiff_t right = origin + side;
+	int32_t x = p_x + (p_inclusive ? p_dx : 0);
+	int32_t y = p_y + (p_inclusive ? p_dy : 0);
+	bool prev_left = false;
+	bool prev_right = false;
+	bool walk_left = false;
+	bool walk_right = false;
 
-	int32_t l_x = p_x - p_dy, l_y = p_y - p_dx;
-	int32_t r_x = p_x + p_dy, r_y = p_y + p_dx;
-
-	while (_is_walkable(o_x, o_y)) {
-		if (end->id.x == o_x && end->id.y == o_y) {
+	while (!mask[current]) {
+		if (end->id.x == x && end->id.y == y) {
 			return end;
 		}
 
-		l_prev = l || _is_walkable(l_x, l_y);
-		r_prev = r || _is_walkable(r_x, r_y);
+		// Retain the original short-circuit logic for forced neighbors:
+		// previous sides refer to the cell before advancing the scan.
+		prev_left = walk_left || !mask[left];
+		prev_right = walk_right || !mask[right];
+		left += step;
+		right += step;
+		walk_left = !mask[left];
+		walk_right = !mask[right];
 
-		l_x += p_dx;
-		l_y += p_dy;
-		r_x += p_dx;
-		r_y += p_dy;
-
-		l = _is_walkable(l_x, l_y);
-		r = _is_walkable(r_x, r_y);
-
-		if ((l && !l_prev) || (r && !r_prev)) {
-			return _get_point_unchecked(o_x, o_y);
+		if ((walk_left && !prev_left) || (walk_right && !prev_right)) {
+			return _get_point_unchecked(x, y);
 		}
 
-		o_x += p_dx;
-		o_y += p_dy;
+		current += step;
+		x += p_dx;
+		y += p_dy;
 	}
 	return nullptr;
 }
 
-void AStarGrid2D::_get_nbors(Point *p_point, LocalVector<Point *> &r_nbors) {
-	bool ts0 = false, td0 = false,
-		 ts1 = false, td1 = false,
-		 ts2 = false, td2 = false,
-		 ts3 = false, td3 = false;
+void AStarGrid2D::_get_nbors(Point *p_point, FixedVector<Point *, 8> &r_nbors) {
+	// Points are stored in row-major order. Relative pointer offsets avoid
+	// recomputing the flattened grid index for every neighbor visited by A*.
+	const int32_t x = p_point->id.x - region.position.x;
+	const int32_t y = p_point->id.y - region.position.y;
+	const int32_t width = region.size.x;
+	const int32_t height = region.size.y;
+	Point *left = x > 0 ? p_point - 1 : nullptr;
+	Point *right = x + 1 < width ? p_point + 1 : nullptr;
+	Point *top = y > 0 ? p_point - width : nullptr;
+	Point *bottom = y + 1 < height ? p_point + width : nullptr;
 
-	Point *left = nullptr;
-	Point *right = nullptr;
-	Point *top = nullptr;
-	Point *bottom = nullptr;
+	// The occupancy bitmap has a one-cell border. Locate the center just
+	// once, then check all neighbors with fixed offsets into the same row.
+	const bool *mask = solid_mask.ptr();
+	const size_t mask_stride = size_t(width) + 2;
+	const size_t mask_pos = (size_t(y) + 1) * mask_stride + size_t(x) + 1;
 
-	Point *top_left = nullptr;
-	Point *top_right = nullptr;
-	Point *bottom_left = nullptr;
-	Point *bottom_right = nullptr;
+	const bool walk_top = top && !mask[mask_pos - mask_stride];
+	const bool walk_right = right && !mask[mask_pos + 1];
+	const bool walk_bottom = bottom && !mask[mask_pos + mask_stride];
+	const bool walk_left = left && !mask[mask_pos - 1];
 
-	{
-		bool has_left = false;
-		bool has_right = false;
-
-		if (p_point->id.x - 1 >= region.position.x) {
-			left = _get_point_unchecked(p_point->id.x - 1, p_point->id.y);
-			has_left = true;
-		}
-		if (p_point->id.x + 1 < region.position.x + region.size.width) {
-			right = _get_point_unchecked(p_point->id.x + 1, p_point->id.y);
-			has_right = true;
-		}
-		if (p_point->id.y - 1 >= region.position.y) {
-			top = _get_point_unchecked(p_point->id.x, p_point->id.y - 1);
-			if (has_left) {
-				top_left = _get_point_unchecked(p_point->id.x - 1, p_point->id.y - 1);
-			}
-			if (has_right) {
-				top_right = _get_point_unchecked(p_point->id.x + 1, p_point->id.y - 1);
-			}
-		}
-		if (p_point->id.y + 1 < region.position.y + region.size.height) {
-			bottom = _get_point_unchecked(p_point->id.x, p_point->id.y + 1);
-			if (has_left) {
-				bottom_left = _get_point_unchecked(p_point->id.x - 1, p_point->id.y + 1);
-			}
-			if (has_right) {
-				bottom_right = _get_point_unchecked(p_point->id.x + 1, p_point->id.y + 1);
-			}
-		}
-	}
-
-	if (top && !_get_solid_unchecked(top->id)) {
+	if (walk_top) {
 		r_nbors.push_back(top);
-		ts0 = true;
 	}
-	if (right && !_get_solid_unchecked(right->id)) {
+	if (walk_right) {
 		r_nbors.push_back(right);
-		ts1 = true;
 	}
-	if (bottom && !_get_solid_unchecked(bottom->id)) {
+	if (walk_bottom) {
 		r_nbors.push_back(bottom);
-		ts2 = true;
 	}
-	if (left && !_get_solid_unchecked(left->id)) {
+	if (walk_left) {
 		r_nbors.push_back(left);
-		ts3 = true;
 	}
 
+	// A common pathfinding mode is cardinal-only. Avoid resolving, testing
+	// or allocating any diagonal neighbors on this hot path.
+	if (diagonal_mode == DIAGONAL_MODE_NEVER) {
+		return;
+	}
+
+	bool d0 = false;
+	bool d1 = false;
+	bool d2 = false;
+	bool d3 = false;
 	switch (diagonal_mode) {
 		case DIAGONAL_MODE_ALWAYS: {
-			td0 = true;
-			td1 = true;
-			td2 = true;
-			td3 = true;
-		} break;
-		case DIAGONAL_MODE_NEVER: {
+			d0 = d1 = d2 = d3 = true;
 		} break;
 		case DIAGONAL_MODE_AT_LEAST_ONE_WALKABLE: {
-			td0 = ts3 || ts0;
-			td1 = ts0 || ts1;
-			td2 = ts1 || ts2;
-			td3 = ts2 || ts3;
+			d0 = walk_left || walk_top;
+			d1 = walk_top || walk_right;
+			d2 = walk_right || walk_bottom;
+			d3 = walk_bottom || walk_left;
 		} break;
 		case DIAGONAL_MODE_ONLY_IF_NO_OBSTACLES: {
-			td0 = ts3 && ts0;
-			td1 = ts0 && ts1;
-			td2 = ts1 && ts2;
-			td3 = ts2 && ts3;
+			d0 = walk_left && walk_top;
+			d1 = walk_top && walk_right;
+			d2 = walk_right && walk_bottom;
+			d3 = walk_bottom && walk_left;
 		} break;
 		default:
 			break;
 	}
 
-	if (td0 && (top_left && !_get_solid_unchecked(top_left->id))) {
-		r_nbors.push_back(top_left);
+	if (d0 && top && left && !mask[mask_pos - mask_stride - 1]) {
+		r_nbors.push_back(top - 1);
 	}
-	if (td1 && (top_right && !_get_solid_unchecked(top_right->id))) {
-		r_nbors.push_back(top_right);
+	if (d1 && top && right && !mask[mask_pos - mask_stride + 1]) {
+		r_nbors.push_back(top + 1);
 	}
-	if (td2 && (bottom_right && !_get_solid_unchecked(bottom_right->id))) {
-		r_nbors.push_back(bottom_right);
+	if (d2 && bottom && right && !mask[mask_pos + mask_stride + 1]) {
+		r_nbors.push_back(bottom + 1);
 	}
-	if (td3 && (bottom_left && !_get_solid_unchecked(bottom_left->id))) {
-		r_nbors.push_back(bottom_left);
+	if (d3 && bottom && left && !mask[mask_pos + mask_stride - 1]) {
+		r_nbors.push_back(bottom - 1);
 	}
 }
-
 bool AStarGrid2D::_solve(Point *p_begin_point, Point *p_end_point, bool p_allow_partial_path) {
 	last_closest_point = nullptr;
 	pass++;
@@ -508,23 +603,30 @@ bool AStarGrid2D::_solve(Point *p_begin_point, Point *p_end_point, bool p_allow_
 
 	bool found_route = false;
 
-	LocalVector<Point *> open_list;
-	SortArray<Point *, SortPoints> sorter;
-	LocalVector<Point *> nbors;
+	OpenList open_list;
+	// A grid cell has at most four cardinal and four diagonal neighbors.
+	// Keep the scratch list on the stack instead of allocating a heap buffer.
+	FixedVector<Point *, 8> nbors;
 
 	p_begin_point->g_score = 0;
 	p_begin_point->f_score = _estimate_cost(p_begin_point->id, p_end_point->id);
-	p_begin_point->abs_g_score = 0;
-	p_begin_point->abs_f_score = _estimate_cost(p_begin_point->id, p_end_point->id);
-	open_list.push_back(p_begin_point);
+	open_list.push(p_begin_point);
 	end = p_end_point;
 
 	while (!open_list.is_empty()) {
-		Point *p = open_list[0]; // The currently processed point.
+		Point *p = open_list.top(); // The currently processed point.
 
 		// Find point closer to end_point, or same distance to end_point but closer to begin_point.
-		if (last_closest_point == nullptr || last_closest_point->abs_f_score > p->abs_f_score || (last_closest_point->abs_f_score >= p->abs_f_score && last_closest_point->abs_g_score > p->abs_g_score)) {
+		if (last_closest_point == nullptr) {
 			last_closest_point = p;
+		} else {
+			// The remaining-cost estimate is f - g. Computing it when needed
+			// avoids storing another real_t in every point in the graph.
+			const real_t best_h = last_closest_point->f_score - last_closest_point->g_score;
+			const real_t current_h = p->f_score - p->g_score;
+			if (best_h > current_h || (best_h >= current_h && last_closest_point->g_score > p->g_score)) {
+				last_closest_point = p;
+			}
 		}
 
 		if (p == p_end_point) {
@@ -532,8 +634,7 @@ bool AStarGrid2D::_solve(Point *p_begin_point, Point *p_end_point, bool p_allow_
 			break;
 		}
 
-		sorter.pop_heap(0, open_list.size(), open_list.ptr()); // Remove the current point from the open list.
-		open_list.remove_at(open_list.size() - 1);
+		open_list.pop(); // Heap removal is logarithmic in frontier size.
 		p->closed_pass = pass; // Mark the point as closed.
 
 		nbors.clear();
@@ -549,7 +650,10 @@ bool AStarGrid2D::_solve(Point *p_begin_point, Point *p_end_point, bool p_allow_
 					continue;
 				}
 			} else {
-				if (_get_solid_unchecked(e->id) || e->closed_pass == pass) {
+				// _get_nbors() already filters every solid cardinal and
+				// diagonal cell. Avoid checking the same obstacle mask a
+				// second time for every neighbor expanded by A*.
+				if (e->closed_pass == pass) {
 					continue;
 				}
 				weight_scale = e->weight_scale;
@@ -560,7 +664,6 @@ bool AStarGrid2D::_solve(Point *p_begin_point, Point *p_end_point, bool p_allow_
 
 			if (e->open_pass != pass) { // The point wasn't inside the open list.
 				e->open_pass = pass;
-				open_list.push_back(e);
 				new_point = true;
 			} else if (tentative_g_score >= e->g_score) { // The new path is worse than the previous.
 				continue;
@@ -570,13 +673,11 @@ bool AStarGrid2D::_solve(Point *p_begin_point, Point *p_end_point, bool p_allow_
 			e->g_score = tentative_g_score;
 			e->f_score = e->g_score + _estimate_cost(e->id, p_end_point->id);
 
-			e->abs_g_score = tentative_g_score;
-			e->abs_f_score = e->f_score - e->g_score;
 
-			if (new_point) { // The position of the new points is already known.
-				sorter.push_heap(0, open_list.size() - 1, 0, e, open_list.ptr());
+			if (new_point) {
+				open_list.push(e); // Only insert after computing the new priority.
 			} else {
-				sorter.push_heap(0, open_list.find(e), 0, e, open_list.ptr());
+				open_list.decrease_key(e);
 			}
 		}
 	}
@@ -601,7 +702,10 @@ real_t AStarGrid2D::_compute_cost(const Vector2i &p_from_id, const Vector2i &p_t
 }
 
 void AStarGrid2D::clear() {
-	points.clear();
+	points.reset();
+	solid_mask.reset();
+	end = nullptr;
+	last_closest_point = nullptr;
 	region = Rect2i();
 }
 
@@ -621,17 +725,19 @@ TypedArray<Dictionary> AStarGrid2D::get_point_data_in_region(const Rect2i &p_reg
 	const int32_t end_y = inter_region.get_end().y - region.position.y;
 
 	TypedArray<Dictionary> data;
+	data.resize((end_y - start_y) * (end_x - start_x));
+	int idx = 0;
 
 	for (int32_t y = start_y; y < end_y; y++) {
 		for (int32_t x = start_x; x < end_x; x++) {
-			const Point &p = points[y][x];
+			const Point &p = points[uint32_t(uint64_t(y) * uint32_t(region.size.x) + uint32_t(x))];
 
 			Dictionary dict;
 			dict["id"] = p.id;
 			dict["position"] = p.pos;
 			dict["solid"] = _get_solid_unchecked(p.id);
 			dict["weight_scale"] = p.weight_scale;
-			data.push_back(dict);
+			data.set(idx++, dict);
 		}
 	}
 

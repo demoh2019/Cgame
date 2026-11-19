@@ -1,0 +1,40 @@
+name: Object mutex footprint and locking regression
+
+on:
+  push:
+    branches: [develop]
+    paths:
+      - 'core/object/object.cpp'
+      - 'core/object/object.h'
+      - 'scene/main/node.h'
+      - 'misc/scripts/tests/test_object_mutex_perf.py'
+      - '.github/workflows/object-mutex-perf.yml'
+  pull_request:
+    branches: [develop]
+    paths:
+      - 'core/object/object.cpp'
+      - 'core/object/object.h'
+      - 'scene/main/node.h'
+      - 'misc/scripts/tests/test_object_mutex_perf.py'
+      - '.github/workflows/object-mutex-perf.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  contracts:
+    runs-on: ubuntu-24.04
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ['3.9', '3.13']
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+      - name: Compile production signal-lock and binding-reference code
+        run: |
+          python -m py_compile misc/scripts/tests/test_object_mutex_perf.py
+          python -m unittest discover -s misc/scripts/tests -p test_object_mutex_perf.py -v

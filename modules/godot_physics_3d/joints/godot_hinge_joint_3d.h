@@ -98,7 +98,7 @@ public:
 	virtual PS3DE::JointType get_type() const override { return PS3DE::JOINT_TYPE_HINGE; }
 
 	virtual bool setup(real_t p_step) override;
-	virtual void solve(real_t p_step) override;
+	virtual void _solve_joint(real_t p_step) override;
 
 	real_t get_hinge_angle();
 

@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<class name="BehaviorTreeBlackboardCheck" inherits="BehaviorTreeTask" api_type="core" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="../../../doc/class.xsd">
+	<brief_description>Succeeds if a blackboard entry equals a configured value.</brief_description>
+	<description>Checks whether the blackboard has [member key] and its current value equals [member expected_value]. Missing keys always fail, even when the expected value is [code]null[/code].</description>
+	<members>
+		<member name="key" type="StringName">Blackboard key to test.</member>
+		<member name="expected_value" type="Variant">Value to compare with the blackboard entry.</member>
+	</members>
+</class>

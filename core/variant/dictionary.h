@@ -38,6 +38,9 @@
 class Array;
 class StringName;
 class Variant;
+class Script;
+template <typename T>
+class Ref;
 struct ContainerType;
 struct ContainerTypeValidate;
 struct DictionaryPrivate;
@@ -64,6 +67,7 @@ public:
 	ConstIterator end() const;
 
 	LocalVector<Variant> get_key_list() const;
+	const KeyValue<Variant, Variant> *get_key_value_at_index(int p_index) const;
 	Variant get_key_at_index(int p_index) const;
 	Variant get_value_at_index(int p_index) const;
 
@@ -112,6 +116,7 @@ public:
 
 	void set_typed(const ContainerType &p_key_type, const ContainerType &p_value_type);
 	void set_typed(uint32_t p_key_type, const StringName &p_key_class_name, const Variant &p_key_script, uint32_t p_value_type, const StringName &p_value_class_name, const Variant &p_value_script);
+	void set_typed(uint32_t p_key_type, const StringName &p_key_class_name, const Ref<Script> &p_key_script, uint32_t p_value_type, const StringName &p_value_class_name, const Ref<Script> &p_value_script);
 
 	bool is_typed() const;
 	bool is_typed_key() const;
@@ -139,6 +144,7 @@ public:
 
 	Dictionary(const Dictionary &p_base, const ContainerType &p_key_type, const ContainerType &p_value_type);
 	Dictionary(const Dictionary &p_base, uint32_t p_key_type, const StringName &p_key_class_name, const Variant &p_key_script, uint32_t p_value_type, const StringName &p_value_class_name, const Variant &p_value_script);
+	Dictionary(const Dictionary &p_base, uint32_t p_key_type, const StringName &p_key_class_name, const Ref<Script> &p_key_script, uint32_t p_value_type, const StringName &p_value_class_name, const Ref<Script> &p_value_script);
 	Dictionary(const Dictionary &p_from);
 	Dictionary(std::initializer_list<KeyValue<Variant, Variant>> p_init);
 	Dictionary();

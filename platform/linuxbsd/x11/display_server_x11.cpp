@@ -3997,6 +3997,19 @@ void DisplayServerX11::_get_key_modifier_state(unsigned int p_x11_state, Ref<Inp
 	state->set_meta_pressed((p_x11_state & Mod4Mask));
 }
 
+// Match Windows: Ctrl, Alt, and Meta shortcuts do not insert text. AltGr
+// (Ctrl+Alt without Meta on X11) must still produce international characters.
+bool DisplayServerX11::_tracks_double_click(MouseButton p_button) {
+	return p_button < MouseButton::WHEEL_UP || p_button > MouseButton::WHEEL_RIGHT;
+}
+
+bool DisplayServerX11::_is_text_suppressed(unsigned int p_x11_state) {
+	const bool ctrl = p_x11_state & ControlMask;
+	const bool alt = p_x11_state & Mod1Mask;
+	const bool meta = p_x11_state & Mod4Mask;
+	return (ctrl || alt || meta) && !(ctrl && alt && !meta);
+}
+
 void DisplayServerX11::_handle_key_event(DisplayServerEnums::WindowID p_window, XKeyEvent *p_event, LocalVector<XEvent> &p_events, uint32_t &p_event_index, bool p_echo) {
 	WindowData &wd = windows[p_window];
 	// X11 functions don't know what const is
@@ -4125,7 +4138,7 @@ void DisplayServerX11::_handle_key_event(DisplayServerEnums::WindowID p_window, 
 				} else {
 					k->set_key_label(keycode);
 				}
-				if (keypress) {
+				if (keypress && !_is_text_suppressed(xkeyevent->state)) {
 					k->set_unicode(fix_unicode(tmp[i]));
 				}
 
@@ -4205,7 +4218,7 @@ void DisplayServerX11::_handle_key_event(DisplayServerEnums::WindowID p_window, 
 					} else {
 						k->set_key_label(keycode);
 					}
-					if (keypress) {
+					if (keypress && !_is_text_suppressed(xkeyevent->state)) {
 						k->set_unicode(fix_unicode(tmp[i]));
 					}
 
@@ -4343,7 +4356,7 @@ void DisplayServerX11::_handle_key_event(DisplayServerEnums::WindowID p_window, 
 	} else {
 		k->set_key_label(keycode);
 	}
-	if (keypress) {
+	if (keypress && !_is_text_suppressed(xkeyevent->state)) {
 		k->set_unicode(fix_unicode(unicode));
 	}
 
@@ -5439,23 +5452,24 @@ void DisplayServerX11::process_events() {
 						_set_input_focus(wd.x11_window, RevertToPointerRoot);
 					}
 
-					uint64_t diff = OS::get_singleton()->get_ticks_usec() / 1000 - last_click_ms;
+					if (_tracks_double_click(mb->get_button_index())) {
+						uint64_t diff = OS::get_singleton()->get_ticks_usec() / 1000 - last_click_ms;
 
-					if (mb->get_button_index() == last_click_button_index) {
-						if (diff < 400 && Vector2(last_click_pos).distance_to(Vector2(event.xbutton.x, event.xbutton.y)) < 5) {
-							last_click_ms = 0;
-							last_click_pos = Point2i(-100, -100);
-							last_click_button_index = MouseButton::NONE;
-							mb->set_double_click(true);
+						if (mb->get_button_index() == last_click_button_index) {
+							if (diff < 400 && Vector2(last_click_pos).distance_to(Vector2(event.xbutton.x, event.xbutton.y)) < 5) {
+								last_click_ms = 0;
+								last_click_pos = Point2i(-100, -100);
+								last_click_button_index = MouseButton::NONE;
+								mb->set_double_click(true);
+							}
+						} else {
+							last_click_button_index = mb->get_button_index();
 						}
 
-					} else if (mb->get_button_index() < MouseButton::WHEEL_UP || mb->get_button_index() > MouseButton::WHEEL_RIGHT) {
-						last_click_button_index = mb->get_button_index();
-					}
-
-					if (!mb->is_double_click()) {
-						last_click_ms += diff;
-						last_click_pos = Point2i(event.xbutton.x, event.xbutton.y);
+						if (!mb->is_double_click()) {
+							last_click_ms += diff;
+							last_click_pos = Point2i(event.xbutton.x, event.xbutton.y);
+						}
 					}
 				} else {
 					DEBUG_LOG_X11("[%u] ButtonRelease window=%lu (%u), button_index=%u \n", frame, event.xbutton.window, window_id, mb->get_button_index());

@@ -135,11 +135,15 @@ int Curve::get_index(real_t p_offset) const {
 	while (imax - imin > 1) {
 		int m = (imin + imax) / 2;
 
-		real_t a = _points[m].position.x;
-		real_t b = _points[m + 1].position.x;
-
-		if (a < p_offset && b < p_offset) {
-			imin = m;
+		// Read the next point only when the midpoint is to the left.
+		// This avoids a second cache-line access on right-half searches.
+		const real_t a = _points[m].position.x;
+		if (a < p_offset) {
+			if (_points[m + 1].position.x < p_offset) {
+				imin = m;
+			} else {
+				return m;
+			}
 		} else if (a > p_offset) {
 			imax = m;
 		} else {
@@ -155,20 +159,34 @@ int Curve::get_index(real_t p_offset) const {
 }
 
 void Curve::clean_dupes() {
-	bool dirty = false;
+	const uint32_t count = _points.size();
+	if (count < 2) {
+		return;
+	}
 
-	for (uint32_t i = 1; i < _points.size(); ++i) {
-		real_t diff = _points[i - 1].position.x - _points[i].position.x;
-		if (diff <= CMP_EPSILON) {
-			_points.remove_at(i);
-			--i;
-			dirty = true;
+	// Points are sorted in ascending x order. Keep the first sample in each
+	// near-duplicate run and compact survivors in place. Repeated remove_at()
+	// shifted the entire suffix for every duplicate (quadratic work).
+	Point *points = _points.ptr();
+	uint32_t write = 1;
+	for (uint32_t read = 1; read < count; read++) {
+		// Compare current - previous (not previous - current): the old sign
+		// incorrectly classified ordinary ascending points as duplicates.
+		const real_t distance = points[read].position.x - points[write - 1].position.x;
+		if (distance <= CMP_EPSILON) {
+			continue;
 		}
+		if (write != read) {
+			points[write] = points[read];
+		}
+		write++;
 	}
 
-	if (dirty) {
-		mark_dirty();
+	if (write == count) {
+		return; // Preserve baked cache when there was nothing to remove.
 	}
+	_points.resize(write);
+	mark_dirty();
 }
 
 void Curve::set_point_left_tangent(int p_index, real_t p_tangent) {
@@ -292,28 +310,35 @@ void Curve::update_auto_tangents(int p_index) {
 	Point &p = _points[p_index];
 
 	if (p_index > 0) {
-		if (p.left_mode == TANGENT_LINEAR) {
-			Vector2 v = (_points[p_index - 1].position - p.position).normalized();
-			p.left_tangent = v.y / v.x;
-		}
-		if (_points[p_index - 1].right_mode == TANGENT_LINEAR) {
-			Vector2 v = (_points[p_index - 1].position - p.position).normalized();
-			_points[p_index - 1].right_tangent = v.y / v.x;
+		Point &previous = _points[p_index - 1];
+		if (p.left_mode == TANGENT_LINEAR || previous.right_mode == TANGENT_LINEAR) {
+			// Normalize-and-divide computes a square root that cancels out
+			// in the tangent slope; evaluate delta.y / delta.x once instead.
+			const Vector2 delta = previous.position - p.position;
+			const real_t slope = delta.y / delta.x;
+			if (p.left_mode == TANGENT_LINEAR) {
+				p.left_tangent = slope;
+			}
+			if (previous.right_mode == TANGENT_LINEAR) {
+				previous.right_tangent = slope;
+			}
 		}
 	}
 
 	if ((uint32_t)p_index + 1 < _points.size()) {
-		if (p.right_mode == TANGENT_LINEAR) {
-			Vector2 v = (_points[p_index + 1].position - p.position).normalized();
-			p.right_tangent = v.y / v.x;
-		}
-		if (_points[p_index + 1].left_mode == TANGENT_LINEAR) {
-			Vector2 v = (_points[p_index + 1].position - p.position).normalized();
-			_points[p_index + 1].left_tangent = v.y / v.x;
+		Point &next = _points[p_index + 1];
+		if (p.right_mode == TANGENT_LINEAR || next.left_mode == TANGENT_LINEAR) {
+			const Vector2 delta = next.position - p.position;
+			const real_t slope = delta.y / delta.x;
+			if (p.right_mode == TANGENT_LINEAR) {
+				p.right_tangent = slope;
+			}
+			if (next.left_mode == TANGENT_LINEAR) {
+				next.left_tangent = slope;
+			}
 		}
 	}
 }
-
 #define MIN_X_RANGE 0.01
 #define MIN_Y_RANGE 0.01
 
@@ -412,8 +437,8 @@ real_t Curve::sample(real_t p_offset) const {
 }
 
 real_t Curve::sample_local_nocheck(int p_index, real_t p_local_offset) const {
-	const Point a = _points[p_index];
-	const Point b = _points[p_index + 1];
+	const Point &a = _points[p_index];
+	const Point &b = _points[p_index + 1];
 
 	/* Cubic bézier
 	 *
@@ -526,19 +551,55 @@ void Curve::bake() {
 }
 
 void Curve::_bake() const {
-	_baked_cache.clear();
+	// Most rebakes keep the same resolution. Reuse the existing COW buffer
+	// instead of clearing it and allocating a fresh array on every edit.
+	ERR_FAIL_COND_MSG(_baked_cache.resize(_bake_resolution) != OK, "Failed to allocate the baked Curve cache.");
+	real_t *const values = _baked_cache.ptrw();
 
-	_baked_cache.resize(_bake_resolution);
+	const real_t domain_range = get_domain_range();
+	const int count = _points.size();
+	const Point *points = _points.ptr();
 
-	for (int i = 1; i < _bake_resolution - 1; ++i) {
-		real_t x = get_domain_range() * i / static_cast<real_t>(_bake_resolution - 1) + _min_domain;
-		real_t y = sample(x);
-		_baked_cache.write[i] = y;
+	// Baking visits increasing x coordinates. For ordinary strictly ordered
+	// control points, a single forward cursor replaces one binary search per
+	// sample: O(resolution + points) rather than O(resolution * log(points)).
+	// Duplicate or non-finite control offsets retain the old search path.
+	bool strictly_ordered = Math::is_finite(domain_range);
+	for (int i = 1; strictly_ordered && i < count; i++) {
+		if (!Math::is_finite(points[i - 1].position.x) || !Math::is_finite(points[i].position.x) || points[i].position.x <= points[i - 1].position.x) {
+			strictly_ordered = false;
+		}
 	}
 
-	if (_points.size() != 0) {
-		_baked_cache.write[0] = _points[0].position.y;
-		_baked_cache.write[_baked_cache.size() - 1] = _points[_points.size() - 1].position.y;
+	int segment = 0;
+	for (int i = 1; i < _bake_resolution - 1; ++i) {
+		const real_t x = domain_range * i / static_cast<real_t>(_bake_resolution - 1) + _min_domain;
+		if (!strictly_ordered || count < 2) {
+			values[i] = sample(x);
+			continue;
+		}
+
+		while (segment + 1 < count && points[segment + 1].position.x < x) {
+			segment++;
+		}
+
+		if (x <= points[0].position.x) {
+			values[i] = points[0].position.y;
+		} else if (segment == count - 1 || x >= points[count - 1].position.x) {
+			values[i] = points[count - 1].position.y;
+		} else {
+			values[i] = sample_local_nocheck(segment, x - points[segment].position.x);
+		}
+	}
+
+	// Always overwrite the endpoints: the buffer may have been reused from
+	// a previous bake with different control points, including an empty curve.
+	if (_points.is_empty()) {
+		values[0] = 0;
+		values[_bake_resolution - 1] = 0;
+	} else {
+		values[0] = _points[0].position.y;
+		values[_bake_resolution - 1] = _points[_points.size() - 1].position.y;
 	}
 
 	_baked_cache_dirty = false;
@@ -796,39 +857,37 @@ void Curve2D::mark_dirty() {
 	emit_changed();
 }
 
-void Curve2D::_bake_segment2d(RBMap<real_t, Vector2> &r_bake, real_t p_begin, real_t p_end, const Vector2 &p_a, const Vector2 &p_out, const Vector2 &p_b, const Vector2 &p_in, int p_depth, int p_max_depth, real_t p_tol) const {
+void Curve2D::_bake_segment2d(LocalVector<Vector2> &r_bake, real_t p_begin, real_t p_end, const Vector2 &p_a, const Vector2 &p_control_1, const Vector2 &p_b, const Vector2 &p_control_2, const Vector2 &p_begin_pos, const Vector2 &p_end_pos, int p_depth, int p_max_depth, real_t p_cos_threshold) const {
 	real_t mp = p_begin + (p_end - p_begin) * 0.5;
-	Vector2 beg = p_a.bezier_interpolate(p_a + p_out, p_b + p_in, p_b, p_begin);
-	Vector2 mid = p_a.bezier_interpolate(p_a + p_out, p_b + p_in, p_b, mp);
-	Vector2 end = p_a.bezier_interpolate(p_a + p_out, p_b + p_in, p_b, p_end);
+	Vector2 mid = p_a.bezier_interpolate(p_control_1, p_control_2, p_b, mp);
 
-	Vector2 na = (mid - beg).normalized();
-	Vector2 nb = (end - mid).normalized();
+	Vector2 na = (mid - p_begin_pos).normalized();
+	Vector2 nb = (p_end_pos - mid).normalized();
 	real_t dp = na.dot(nb);
 
-	if (dp < Math::cos(Math::deg_to_rad(p_tol))) {
-		r_bake[mp] = mid;
-	}
-
+	// In-order traversal produces ascending parameter positions without a map.
 	if (p_depth < p_max_depth) {
-		_bake_segment2d(r_bake, p_begin, mp, p_a, p_out, p_b, p_in, p_depth + 1, p_max_depth, p_tol);
-		_bake_segment2d(r_bake, mp, p_end, p_a, p_out, p_b, p_in, p_depth + 1, p_max_depth, p_tol);
+		_bake_segment2d(r_bake, p_begin, mp, p_a, p_control_1, p_b, p_control_2, p_begin_pos, mid, p_depth + 1, p_max_depth, p_cos_threshold);
+	}
+	if (dp < p_cos_threshold) {
+		r_bake.push_back(mid);
+	}
+	if (p_depth < p_max_depth) {
+		_bake_segment2d(r_bake, mp, p_end, p_a, p_control_1, p_b, p_control_2, mid, p_end_pos, p_depth + 1, p_max_depth, p_cos_threshold);
 	}
 }
 
-void Curve2D::_bake_segment2d_even_length(RBMap<real_t, Vector2> &r_bake, real_t p_begin, real_t p_end, const Vector2 &p_a, const Vector2 &p_out, const Vector2 &p_b, const Vector2 &p_in, int p_depth, int p_max_depth, real_t p_length) const {
-	Vector2 beg = p_a.bezier_interpolate(p_a + p_out, p_b + p_in, p_b, p_begin);
-	Vector2 end = p_a.bezier_interpolate(p_a + p_out, p_b + p_in, p_b, p_end);
+void Curve2D::_bake_segment2d_even_length(LocalVector<Pair<real_t, Vector2>> &r_bake, real_t p_begin, real_t p_end, const Vector2 &p_a, const Vector2 &p_control_1, const Vector2 &p_b, const Vector2 &p_control_2, const Vector2 &p_begin_pos, const Vector2 &p_end_pos, int p_depth, int p_max_depth, real_t p_length) const {
 
-	real_t length = beg.distance_to(end);
-
-	if (length > p_length && p_depth < p_max_depth) {
+	// Compare squared distances (no sqrt), and do no distance work at leaf depth.
+	// Negative length still forces subdivision, as with the previous comparison.
+	if (p_depth < p_max_depth && (p_length < 0 || p_begin_pos.distance_squared_to(p_end_pos) > p_length * p_length)) {
 		real_t mp = (p_begin + p_end) * 0.5;
-		Vector2 mid = p_a.bezier_interpolate(p_a + p_out, p_b + p_in, p_b, mp);
-		r_bake[mp] = mid;
-
-		_bake_segment2d_even_length(r_bake, p_begin, mp, p_a, p_out, p_b, p_in, p_depth + 1, p_max_depth, p_length);
-		_bake_segment2d_even_length(r_bake, mp, p_end, p_a, p_out, p_b, p_in, p_depth + 1, p_max_depth, p_length);
+		Vector2 mid = p_a.bezier_interpolate(p_control_1, p_control_2, p_b, mp);
+		// Left, midpoint, right: parametric order without sorting or map nodes.
+		_bake_segment2d_even_length(r_bake, p_begin, mp, p_a, p_control_1, p_b, p_control_2, p_begin_pos, mid, p_depth + 1, p_max_depth, p_length);
+		r_bake.push_back(Pair<real_t, Vector2>(mp, mid));
+		_bake_segment2d_even_length(r_bake, mp, p_end, p_a, p_control_1, p_b, p_control_2, mid, p_end_pos, p_depth + 1, p_max_depth, p_length);
 	}
 }
 
@@ -887,7 +946,7 @@ void Curve2D::_bake() const {
 
 	// Tessellate curve to (almost) even length segments.
 	{
-		Vector<RBMap<real_t, Vector2>> midpoints = _tessellate_even_length(10, bake_interval);
+		Vector<LocalVector<Pair<real_t, Vector2>>> midpoints = _tessellate_even_length(10, bake_interval);
 
 		int pc = 1;
 		for (uint32_t i = 0; i < points.size() - 1; i++) {
@@ -908,10 +967,10 @@ void Curve2D::_bake() const {
 		int pidx = 0;
 
 		for (uint32_t i = 0; i < points.size() - 1; i++) {
-			for (const KeyValue<real_t, Vector2> &E : midpoints[i]) {
+			for (const Pair<real_t, Vector2> &E : midpoints[i]) {
 				pidx++;
-				bpw[pidx] = E.value;
-				bfw[pidx] = _calculate_tangent(points[i].position, points[i].position + points[i].out, points[i + 1].position + points[i + 1].in, points[i + 1].position, E.key);
+				bpw[pidx] = E.second;
+				bfw[pidx] = _calculate_tangent(points[i].position, points[i].position + points[i].out, points[i + 1].position + points[i + 1].in, points[i + 1].position, E.first);
 			}
 
 			pidx++;
@@ -947,22 +1006,25 @@ Curve2D::Interval Curve2D::_find_interval(real_t p_offset) const {
 	int pc = baked_point_cache.size();
 	ERR_FAIL_COND_V_MSG(pc < 2, interval, "Less than two points in cache");
 
+	// The distance cache is sorted and has exactly pc elements. Search the
+	// segment directly between the first and last samples; the last sample
+	// cannot be a segment start. Accessing the pointer avoids repeated
+	// bounds checks in the hot inner loop.
+	const real_t *distances = baked_dist_cache.ptr();
 	int start = 0;
-	int end = pc;
-	int idx = (end + start) / 2;
-	// Binary search to find baked points.
-	while (start < idx) {
-		real_t offset = baked_dist_cache[idx];
-		if (p_offset <= offset) {
-			end = idx;
+	int end = pc - 1;
+	while (end - start > 1) {
+		const int middle = start + (end - start) / 2;
+		if (p_offset <= distances[middle]) {
+			end = middle;
 		} else {
-			start = idx;
+			start = middle;
 		}
-		idx = (end + start) / 2;
 	}
+	const int idx = start;
 
-	real_t offset_begin = baked_dist_cache[idx];
-	real_t offset_end = baked_dist_cache[idx + 1];
+	const real_t offset_begin = distances[idx];
+	const real_t offset_end = distances[idx + 1];
 
 	real_t idx_interval = offset_end - offset_begin;
 	ERR_FAIL_COND_V_MSG(p_offset < offset_begin || p_offset > offset_end, interval, "Offset out of range.");
@@ -1089,6 +1151,16 @@ PackedVector2Array Curve2D::get_points() const {
 	return _get_data()["points"];
 }
 
+// Compute the nearest point without first normalizing the segment by its
+// length. This uses one scalar division, and coincident points remain valid.
+template <typename T>
+_FORCE_INLINE_ T _curve_closest_segment_point(const T &p_point, const T &p_begin, const T &p_end, real_t &r_fraction) {
+	const T displacement = p_end - p_begin;
+	const real_t length_squared = displacement.length_squared();
+	r_fraction = length_squared > 0 ? CLAMP((p_point - p_begin).dot(displacement) / length_squared, (real_t)0, (real_t)1) : (real_t)0;
+	return p_begin + displacement * r_fraction;
+}
+
 Vector2 Curve2D::get_closest_point(const Vector2 &p_to_point) const {
 	// Brute force method.
 
@@ -1110,12 +1182,8 @@ Vector2 Curve2D::get_closest_point(const Vector2 &p_to_point) const {
 	real_t nearest_dist = -1.0f;
 
 	for (int i = 0; i < pc - 1; i++) {
-		const real_t interval = baked_dist_cache[i + 1] - baked_dist_cache[i];
-		Vector2 origin = r[i];
-		Vector2 direction = (r[i + 1] - origin) / interval;
-
-		real_t d = CLAMP((p_to_point - origin).dot(direction), 0.0f, interval);
-		Vector2 proj = origin + direction * d;
+		real_t fraction;
+		const Vector2 proj = _curve_closest_segment_point(p_to_point, r[i], r[i + 1], fraction);
 
 		real_t dist = proj.distance_squared_to(p_to_point);
 
@@ -1152,17 +1220,13 @@ real_t Curve2D::get_closest_offset(const Vector2 &p_to_point) const {
 	for (int i = 0; i < pc - 1; i++) {
 		offset = baked_dist_cache[i];
 
-		const real_t interval = baked_dist_cache[i + 1] - baked_dist_cache[i];
-		Vector2 origin = r[i];
-		Vector2 direction = (r[i + 1] - origin) / interval;
-
-		real_t d = CLAMP((p_to_point - origin).dot(direction), 0.0f, interval);
-		Vector2 proj = origin + direction * d;
+		real_t fraction;
+		const Vector2 proj = _curve_closest_segment_point(p_to_point, r[i], r[i + 1], fraction);
 
 		real_t dist = proj.distance_squared_to(p_to_point);
 
 		if (nearest_dist < 0.0f || dist < nearest_dist) {
-			nearest = offset + d;
+			nearest = offset + (baked_dist_cache[i + 1] - offset) * fraction;
 			nearest_dist = dist;
 		}
 	}
@@ -1215,49 +1279,35 @@ void Curve2D::_set_data(const Dictionary &p_data) {
 
 PackedVector2Array Curve2D::tessellate(int p_max_stages, real_t p_tolerance) const {
 	PackedVector2Array tess;
-
 	if (points.is_empty()) {
 		return tess;
 	}
 
-	// The current implementation requires a sorted map.
-	Vector<RBMap<real_t, Vector2>> midpoints;
-
-	midpoints.resize(points.size() - 1);
-
-	int pc = 1;
-	for (uint32_t i = 0; i < points.size() - 1; i++) {
-		_bake_segment2d(midpoints.write[i], 0, 1, points[i].position, points[i].out, points[i + 1].position, points[i + 1].in, 0, p_max_stages, p_tolerance);
-		pc++;
-		pc += midpoints[i].size();
+	// Adaptive subdivision visits parametric midpoints in increasing order.
+	// A contiguous scratch array avoids per-midpoint tree allocations and lookup.
+	LocalVector<Vector2> result;
+	result.push_back(points[0].position);
+	const real_t cos_threshold = Math::cos(Math::deg_to_rad(p_tolerance));
+	for (uint32_t i = 0; i + 1 < points.size(); ++i) {
+		_bake_segment2d(result, 0, 1, points[i].position, points[i].position + points[i].out, points[i + 1].position, points[i + 1].position + points[i + 1].in, points[i].position, points[i + 1].position, 0, p_max_stages, cos_threshold);
+		result.push_back(points[i + 1].position);
 	}
 
-	tess.resize(pc);
-	Vector2 *bpw = tess.ptrw();
-	bpw[0] = points[0].position;
-	int pidx = 0;
-
-	for (uint32_t i = 0; i < points.size() - 1; i++) {
-		for (const KeyValue<real_t, Vector2> &E : midpoints[i]) {
-			pidx++;
-			bpw[pidx] = E.value;
-		}
-
-		pidx++;
-		bpw[pidx] = points[i + 1].position;
+	tess.resize(result.size());
+	Vector2 *dst = tess.ptrw();
+	for (uint32_t i = 0; i < result.size(); ++i) {
+		dst[i] = result[i];
 	}
-
 	return tess;
 }
-
-Vector<RBMap<real_t, Vector2>> Curve2D::_tessellate_even_length(int p_max_stages, real_t p_length) const {
-	Vector<RBMap<real_t, Vector2>> midpoints;
+Vector<LocalVector<Pair<real_t, Vector2>>> Curve2D::_tessellate_even_length(int p_max_stages, real_t p_length) const {
+	Vector<LocalVector<Pair<real_t, Vector2>>> midpoints;
 	ERR_FAIL_COND_V_MSG(points.size() < 2, midpoints, "Curve must have at least 2 control point");
 
 	midpoints.resize(points.size() - 1);
 
 	for (uint32_t i = 0; i < points.size() - 1; i++) {
-		_bake_segment2d_even_length(midpoints.write[i], 0, 1, points[i].position, points[i].out, points[i + 1].position, points[i + 1].in, 0, p_max_stages, p_length);
+		_bake_segment2d_even_length(midpoints.write[i], 0, 1, points[i].position, points[i].position + points[i].out, points[i + 1].position, points[i + 1].position + points[i + 1].in, points[i].position, points[i + 1].position, 0, p_max_stages, p_length);
 	}
 	return midpoints;
 }
@@ -1275,7 +1325,7 @@ bool Curve2D::_filter_property(const String &p_name, int p_index) const {
 PackedVector2Array Curve2D::tessellate_even_length(int p_max_stages, real_t p_length) const {
 	PackedVector2Array tess;
 
-	Vector<RBMap<real_t, Vector2>> midpoints = _tessellate_even_length(p_max_stages, p_length);
+	Vector<LocalVector<Pair<real_t, Vector2>>> midpoints = _tessellate_even_length(p_max_stages, p_length);
 	if (midpoints.is_empty()) {
 		return tess;
 	}
@@ -1292,9 +1342,9 @@ PackedVector2Array Curve2D::tessellate_even_length(int p_max_stages, real_t p_le
 	int pidx = 0;
 
 	for (uint32_t i = 0; i < points.size() - 1; i++) {
-		for (const KeyValue<real_t, Vector2> &E : midpoints[i]) {
+		for (const Pair<real_t, Vector2> &E : midpoints[i]) {
 			pidx++;
-			bpw[pidx] = E.value;
+			bpw[pidx] = E.second;
 		}
 
 		pidx++;
@@ -1514,38 +1564,37 @@ void Curve3D::mark_dirty() {
 	emit_changed();
 }
 
-void Curve3D::_bake_segment3d(RBMap<real_t, Vector3> &r_bake, real_t p_begin, real_t p_end, const Vector3 &p_a, const Vector3 &p_out, const Vector3 &p_b, const Vector3 &p_in, int p_depth, int p_max_depth, real_t p_tol) const {
+void Curve3D::_bake_segment3d(LocalVector<Vector3> &r_bake, real_t p_begin, real_t p_end, const Vector3 &p_a, const Vector3 &p_control_1, const Vector3 &p_b, const Vector3 &p_control_2, const Vector3 &p_begin_pos, const Vector3 &p_end_pos, int p_depth, int p_max_depth, real_t p_cos_threshold) const {
 	real_t mp = p_begin + (p_end - p_begin) * 0.5;
-	Vector3 beg = p_a.bezier_interpolate(p_a + p_out, p_b + p_in, p_b, p_begin);
-	Vector3 mid = p_a.bezier_interpolate(p_a + p_out, p_b + p_in, p_b, mp);
-	Vector3 end = p_a.bezier_interpolate(p_a + p_out, p_b + p_in, p_b, p_end);
+	Vector3 mid = p_a.bezier_interpolate(p_control_1, p_control_2, p_b, mp);
 
-	Vector3 na = (mid - beg).normalized();
-	Vector3 nb = (end - mid).normalized();
+	Vector3 na = (mid - p_begin_pos).normalized();
+	Vector3 nb = (p_end_pos - mid).normalized();
 	real_t dp = na.dot(nb);
 
-	if (dp < Math::cos(Math::deg_to_rad(p_tol))) {
-		r_bake[mp] = mid;
+	// In-order traversal produces ascending parameter positions without a map.
+	if (p_depth < p_max_depth) {
+		_bake_segment3d(r_bake, p_begin, mp, p_a, p_control_1, p_b, p_control_2, p_begin_pos, mid, p_depth + 1, p_max_depth, p_cos_threshold);
+	}
+	if (dp < p_cos_threshold) {
+		r_bake.push_back(mid);
 	}
 	if (p_depth < p_max_depth) {
-		_bake_segment3d(r_bake, p_begin, mp, p_a, p_out, p_b, p_in, p_depth + 1, p_max_depth, p_tol);
-		_bake_segment3d(r_bake, mp, p_end, p_a, p_out, p_b, p_in, p_depth + 1, p_max_depth, p_tol);
+		_bake_segment3d(r_bake, mp, p_end, p_a, p_control_1, p_b, p_control_2, mid, p_end_pos, p_depth + 1, p_max_depth, p_cos_threshold);
 	}
 }
 
-void Curve3D::_bake_segment3d_even_length(RBMap<real_t, Vector3> &r_bake, real_t p_begin, real_t p_end, const Vector3 &p_a, const Vector3 &p_out, const Vector3 &p_b, const Vector3 &p_in, int p_depth, int p_max_depth, real_t p_length) const {
-	Vector3 beg = p_a.bezier_interpolate(p_a + p_out, p_b + p_in, p_b, p_begin);
-	Vector3 end = p_a.bezier_interpolate(p_a + p_out, p_b + p_in, p_b, p_end);
+void Curve3D::_bake_segment3d_even_length(LocalVector<Pair<real_t, Vector3>> &r_bake, real_t p_begin, real_t p_end, const Vector3 &p_a, const Vector3 &p_control_1, const Vector3 &p_b, const Vector3 &p_control_2, const Vector3 &p_begin_pos, const Vector3 &p_end_pos, int p_depth, int p_max_depth, real_t p_length) const {
 
-	real_t length = beg.distance_to(end);
-
-	if (length > p_length && p_depth < p_max_depth) {
+	// Compare squared distances (no sqrt), and do no distance work at leaf depth.
+	// Negative length still forces subdivision, as with the previous comparison.
+	if (p_depth < p_max_depth && (p_length < 0 || p_begin_pos.distance_squared_to(p_end_pos) > p_length * p_length)) {
 		real_t mp = (p_begin + p_end) * 0.5;
-		Vector3 mid = p_a.bezier_interpolate(p_a + p_out, p_b + p_in, p_b, mp);
-		r_bake[mp] = mid;
-
-		_bake_segment3d_even_length(r_bake, p_begin, mp, p_a, p_out, p_b, p_in, p_depth + 1, p_max_depth, p_length);
-		_bake_segment3d_even_length(r_bake, mp, p_end, p_a, p_out, p_b, p_in, p_depth + 1, p_max_depth, p_length);
+		Vector3 mid = p_a.bezier_interpolate(p_control_1, p_control_2, p_b, mp);
+		// Left, midpoint, right: parametric order without sorting or map nodes.
+		_bake_segment3d_even_length(r_bake, p_begin, mp, p_a, p_control_1, p_b, p_control_2, p_begin_pos, mid, p_depth + 1, p_max_depth, p_length);
+		r_bake.push_back(Pair<real_t, Vector3>(mp, mid));
+		_bake_segment3d_even_length(r_bake, mp, p_end, p_a, p_control_1, p_b, p_control_2, mid, p_end_pos, p_depth + 1, p_max_depth, p_length);
 	}
 }
 
@@ -1624,7 +1673,7 @@ void Curve3D::_bake() const {
 
 	// Step 1: Tessellate curve to (almost) even length segments.
 	{
-		Vector<RBMap<real_t, Vector3>> midpoints = _tessellate_even_length(10, bake_interval);
+		Vector<LocalVector<Pair<real_t, Vector3>>> midpoints = _tessellate_even_length(10, bake_interval);
 
 		const int num_intervals = closed ? points.size() : points.size() - 1;
 
@@ -1659,15 +1708,15 @@ void Curve3D::_bake() const {
 		int pidx = 0;
 
 		for (int i = 0; i < num_intervals; i++) {
-			for (const KeyValue<real_t, Vector3> &E : midpoints[i]) {
+			for (const Pair<real_t, Vector3> &E : midpoints[i]) {
 				pidx++;
-				bpw[pidx] = E.value;
+				bpw[pidx] = E.second;
 				if (!closed || i < num_intervals - 1) {
-					bfw[pidx] = _calculate_tangent(points[i].position, points[i].position + points[i].out, points[i + 1].position + points[i + 1].in, points[i + 1].position, E.key);
-					btw[pidx] = Math::lerp(points[i].tilt, points[i + 1].tilt, E.key);
+					bfw[pidx] = _calculate_tangent(points[i].position, points[i].position + points[i].out, points[i + 1].position + points[i + 1].in, points[i + 1].position, E.first);
+					btw[pidx] = Math::lerp(points[i].tilt, points[i + 1].tilt, E.first);
 				} else {
-					bfw[pidx] = _calculate_tangent(points[i].position, points[i].position + points[i].out, points[0].position + points[0].in, points[0].position, E.key);
-					btw[pidx] = Math::lerp(points[i].tilt, points[0].tilt, E.key);
+					bfw[pidx] = _calculate_tangent(points[i].position, points[i].position + points[i].out, points[0].position + points[0].in, points[0].position, E.first);
+					btw[pidx] = Math::lerp(points[i].tilt, points[0].tilt, E.first);
 				}
 			}
 
@@ -1794,22 +1843,25 @@ Curve3D::Interval Curve3D::_find_interval(real_t p_offset) const {
 	int pc = baked_point_cache.size();
 	ERR_FAIL_COND_V_MSG(pc < 2, interval, "Less than two points in cache");
 
+	// The distance cache is sorted and has exactly pc elements. Search the
+	// segment directly between the first and last samples; the last sample
+	// cannot be a segment start. Accessing the pointer avoids repeated
+	// bounds checks in the hot inner loop.
+	const real_t *distances = baked_dist_cache.ptr();
 	int start = 0;
-	int end = pc;
-	int idx = (end + start) / 2;
-	// Binary search to find baked points.
-	while (start < idx) {
-		real_t offset = baked_dist_cache[idx];
-		if (p_offset <= offset) {
-			end = idx;
+	int end = pc - 1;
+	while (end - start > 1) {
+		const int middle = start + (end - start) / 2;
+		if (p_offset <= distances[middle]) {
+			end = middle;
 		} else {
-			start = idx;
+			start = middle;
 		}
-		idx = (end + start) / 2;
 	}
+	const int idx = start;
 
-	real_t offset_begin = baked_dist_cache[idx];
-	real_t offset_end = baked_dist_cache[idx + 1];
+	const real_t offset_begin = distances[idx];
+	const real_t offset_end = distances[idx + 1];
 
 	real_t idx_interval = offset_end - offset_begin;
 	ERR_FAIL_COND_V_MSG(p_offset < offset_begin || p_offset > offset_end, interval, "Offset out of range.");
@@ -2075,12 +2127,8 @@ Vector3 Curve3D::get_closest_point(const Vector3 &p_to_point) const {
 	real_t nearest_dist = -1.0f;
 
 	for (int i = 0; i < pc - 1; i++) {
-		const real_t interval = baked_dist_cache[i + 1] - baked_dist_cache[i];
-		Vector3 origin = r[i];
-		Vector3 direction = (r[i + 1] - origin) / interval;
-
-		real_t d = CLAMP((p_to_point - origin).dot(direction), 0.0f, interval);
-		Vector3 proj = origin + direction * d;
+		real_t fraction;
+		const Vector3 proj = _curve_closest_segment_point(p_to_point, r[i], r[i + 1], fraction);
 
 		real_t dist = proj.distance_squared_to(p_to_point);
 
@@ -2121,17 +2169,13 @@ real_t Curve3D::get_closest_offset(const Vector3 &p_to_point) const {
 	for (int i = 0; i < pc - 1; i++) {
 		offset = baked_dist_cache[i];
 
-		const real_t interval = baked_dist_cache[i + 1] - baked_dist_cache[i];
-		Vector3 origin = r[i];
-		Vector3 direction = (r[i + 1] - origin) / interval;
-
-		real_t d = CLAMP((p_to_point - origin).dot(direction), 0.0f, interval);
-		Vector3 proj = origin + direction * d;
+		real_t fraction;
+		const Vector3 proj = _curve_closest_segment_point(p_to_point, r[i], r[i + 1], fraction);
 
 		real_t dist = proj.distance_squared_to(p_to_point);
 
 		if (nearest_dist < 0.0f || dist < nearest_dist) {
-			nearest = offset + d;
+			nearest = offset + (baked_dist_cache[i + 1] - offset) * fraction;
 			nearest_dist = dist;
 		}
 	}
@@ -2225,51 +2269,30 @@ void Curve3D::_set_data(const Dictionary &p_data) {
 
 PackedVector3Array Curve3D::tessellate(int p_max_stages, real_t p_tolerance) const {
 	PackedVector3Array tess;
-
 	if (points.is_empty()) {
 		return tess;
 	}
-	Vector<RBMap<real_t, Vector3>> midpoints;
 
-	const int num_intervals = closed ? points.size() : points.size() - 1;
-	midpoints.resize(num_intervals);
-
-	// Point Count: Begins at 1 to account for the last point.
-	int pc = 1;
-	for (int i = 0; i < num_intervals; i++) {
-		if (!closed || i < num_intervals - 1) {
-			_bake_segment3d(midpoints.write[i], 0, 1, points[i].position, points[i].out, points[i + 1].position, points[i + 1].in, 0, p_max_stages, p_tolerance);
-		} else {
-			_bake_segment3d(midpoints.write[i], 0, 1, points[i].position, points[i].out, points[0].position, points[0].in, 0, p_max_stages, p_tolerance);
-		}
-		pc++;
-		pc += midpoints[i].size();
+	LocalVector<Vector3> result;
+	result.push_back(points[0].position);
+	const real_t cos_threshold = Math::cos(Math::deg_to_rad(p_tolerance));
+	const int point_count = points.size();
+	const int num_intervals = closed ? point_count : point_count - 1;
+	for (int i = 0; i < num_intervals; ++i) {
+		const int next = i + 1 == point_count ? 0 : i + 1;
+		_bake_segment3d(result, 0, 1, points[i].position, points[i].position + points[i].out, points[next].position, points[next].position + points[next].in, points[i].position, points[next].position, 0, p_max_stages, cos_threshold);
+		result.push_back(points[next].position);
 	}
 
-	tess.resize(pc);
-	Vector3 *bpw = tess.ptrw();
-	bpw[0] = points[0].position;
-	int pidx = 0;
-
-	for (int i = 0; i < num_intervals; i++) {
-		for (const KeyValue<real_t, Vector3> &E : midpoints[i]) {
-			pidx++;
-			bpw[pidx] = E.value;
-		}
-
-		pidx++;
-		if (!closed || i < num_intervals - 1) {
-			bpw[pidx] = points[i + 1].position;
-		} else {
-			bpw[pidx] = points[0].position;
-		}
+	tess.resize(result.size());
+	Vector3 *dst = tess.ptrw();
+	for (uint32_t i = 0; i < result.size(); ++i) {
+		dst[i] = result[i];
 	}
-
 	return tess;
 }
-
-Vector<RBMap<real_t, Vector3>> Curve3D::_tessellate_even_length(int p_max_stages, real_t p_length) const {
-	Vector<RBMap<real_t, Vector3>> midpoints;
+Vector<LocalVector<Pair<real_t, Vector3>>> Curve3D::_tessellate_even_length(int p_max_stages, real_t p_length) const {
+	Vector<LocalVector<Pair<real_t, Vector3>>> midpoints;
 	ERR_FAIL_COND_V_MSG(points.size() < 2, midpoints, "Curve must have at least 2 control point");
 
 	const int num_intervals = closed ? points.size() : points.size() - 1;
@@ -2277,9 +2300,9 @@ Vector<RBMap<real_t, Vector3>> Curve3D::_tessellate_even_length(int p_max_stages
 
 	for (int i = 0; i < num_intervals; i++) {
 		if (!closed || i < num_intervals - 1) {
-			_bake_segment3d_even_length(midpoints.write[i], 0, 1, points[i].position, points[i].out, points[i + 1].position, points[i + 1].in, 0, p_max_stages, p_length);
+			_bake_segment3d_even_length(midpoints.write[i], 0, 1, points[i].position, points[i].position + points[i].out, points[i + 1].position, points[i + 1].position + points[i + 1].in, points[i].position, points[i + 1].position, 0, p_max_stages, p_length);
 		} else {
-			_bake_segment3d_even_length(midpoints.write[i], 0, 1, points[i].position, points[i].out, points[0].position, points[0].in, 0, p_max_stages, p_length);
+			_bake_segment3d_even_length(midpoints.write[i], 0, 1, points[i].position, points[i].position + points[i].out, points[0].position, points[0].position + points[0].in, points[i].position, points[0].position, 0, p_max_stages, p_length);
 		}
 	}
 	return midpoints;
@@ -2298,7 +2321,7 @@ bool Curve3D::_filter_property(const String &p_name, int p_index) const {
 PackedVector3Array Curve3D::tessellate_even_length(int p_max_stages, real_t p_length) const {
 	PackedVector3Array tess;
 
-	Vector<RBMap<real_t, Vector3>> midpoints = _tessellate_even_length(p_max_stages, p_length);
+	Vector<LocalVector<Pair<real_t, Vector3>>> midpoints = _tessellate_even_length(p_max_stages, p_length);
 	if (midpoints.is_empty()) {
 		return tess;
 	}
@@ -2317,9 +2340,9 @@ PackedVector3Array Curve3D::tessellate_even_length(int p_max_stages, real_t p_le
 	int pidx = 0;
 
 	for (int i = 0; i < num_intervals; i++) {
-		for (const KeyValue<real_t, Vector3> &E : midpoints[i]) {
+		for (const Pair<real_t, Vector3> &E : midpoints[i]) {
 			pidx++;
-			bpw[pidx] = E.value;
+			bpw[pidx] = E.second;
 		}
 
 		pidx++;

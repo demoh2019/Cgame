@@ -1,0 +1,97 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<class name="TerrainHeightmap" inherits="Resource" api_type="core" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="../../../doc/class.xsd">
+    <brief_description>
+        A serializable grid of terrain heights and vertex colors.
+    </brief_description>
+    <description>
+        Stores a rectangular grid of height samples and vertex colors for [HeightmapTerrain3D]. Samples are laid out in row-major order, with [code]z * width + x[/code] indexing. Coordinates of brush methods are in grid cells, not world units. This is a simple heightmap implementation intended for small landscapes; it does not yet support virtual textures, chunked terrain streaming, or LOD.
+        [b]Note:[/b] Multiple nodes can share the same resource. Editing shared heightmap data updates all subscribers.
+    </description>
+    <tutorials>
+    </tutorials>
+    <methods>
+        <method name="apply_color_brush">
+            <return type="void" />
+            <param index="0" name="center" type="Vector2" />
+            <param index="1" name="radius" type="float" />
+            <param index="2" name="color" type="Color" />
+            <param index="3" name="strength" type="float" />
+            <description>
+                Paints vertex colors using linear radial falloff. Strength is clamped to the range [code]0.0[/code] to [code]1.0[/code].
+            </description>
+        </method>
+        <method name="apply_height_brush">
+            <return type="void" />
+            <param index="0" name="center" type="Vector2" />
+            <param index="1" name="radius" type="float" />
+            <param index="2" name="amount" type="float" />
+            <description>
+                Adds [param amount] to the center sample and less to nearby samples, using linear falloff. Negative values lower the terrain. The brush radius must be positive.
+            </description>
+        </method>
+        <method name="get_color" qualifiers="const">
+            <return type="Color" />
+            <param index="0" name="x" type="int" />
+            <param index="1" name="z" type="int" />
+            <description>
+                Returns the color stored at the given sample.
+            </description>
+        </method>
+        <method name="get_height" qualifiers="const">
+            <return type="float" />
+            <param index="0" name="x" type="int" />
+            <param index="1" name="z" type="int" />
+            <description>
+                Returns the height at the integer sample position.
+            </description>
+        </method>
+        <method name="import_height_image">
+            <return type="void" />
+            <param index="0" name="image" type="Image" />
+            <param index="1" name="min_height" type="float" />
+            <param index="2" name="max_height" type="float" />
+            <description>
+                Sets grid dimensions from the supplied uncompressed image. Grayscale or single-channel images use the red channel; RGB images use luminance. Values are clamped to [code]0.0[/code]–[code]1.0[/code] and mapped between [param min_height] and [param max_height]. Images must be between 2 and 513 pixels on each axis.
+            </description>
+        </method>
+        <method name="sample_height" qualifiers="const">
+            <return type="float" />
+            <param index="0" name="x" type="float" />
+            <param index="1" name="z" type="float" />
+            <description>
+                Returns bilinearly interpolated height. Positions outside the grid are clamped to the nearest edge.
+            </description>
+        </method>
+        <method name="set_dimensions">
+            <return type="void" />
+            <param index="0" name="width" type="int" />
+            <param index="1" name="depth" type="int" />
+            <description>
+                Resizes the grid while preserving the overlap of old and new samples. New heights are zero and new vertex colors are white.
+            </description>
+        </method>
+        <method name="set_height">
+            <return type="void" />
+            <param index="0" name="x" type="int" />
+            <param index="1" name="z" type="int" />
+            <param index="2" name="height" type="float" />
+            <description>
+                Changes one height sample, triggering mesh rebuilds for all subscribed nodes.
+            </description>
+        </method>
+    </methods>
+    <members>
+        <member name="colors" type="PackedColorArray" setter="set_colors" getter="get_colors" default="PackedColorArray()">
+            Row-major vertex color samples. The count must equal [member width] multiplied by [member depth].
+        </member>
+        <member name="depth" type="int" setter="set_depth" getter="get_depth" default="17">
+            Number of samples along the local Z axis.
+        </member>
+        <member name="heights" type="PackedFloat32Array" setter="set_heights" getter="get_heights" default="PackedFloat32Array()">
+            Row-major elevation samples. The count must equal [member width] multiplied by [member depth].
+        </member>
+        <member name="width" type="int" setter="set_width" getter="get_width" default="17">
+            Number of samples along the local X axis.
+        </member>
+    </members>
+</class>

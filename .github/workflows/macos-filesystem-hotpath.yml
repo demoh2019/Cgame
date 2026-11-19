@@ -1,0 +1,50 @@
+name: macOS filesystem indexing and Unix file access regressions
+
+on:
+  push:
+    branches: [develop]
+    paths:
+      - "drivers/unix/dir_access_unix.h"
+      - "drivers/unix/file_access_unix.cpp"
+      - "platform/macos/dir_access_macos.mm"
+      - "misc/scripts/tests/test_macos_filesystem_hotpath.py"
+      - ".github/workflows/macos-filesystem-hotpath.yml"
+  pull_request:
+    paths:
+      - "drivers/unix/dir_access_unix.h"
+      - "drivers/unix/file_access_unix.cpp"
+      - "platform/macos/dir_access_macos.mm"
+      - "misc/scripts/tests/test_macos_filesystem_hotpath.py"
+      - ".github/workflows/macos-filesystem-hotpath.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  fast-contracts:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - name: Check native hidden flags, fd lookups, Unix IO semantics
+        run: |
+          python3 -m py_compile misc/scripts/tests/test_macos_filesystem_hotpath.py
+          python3 -m unittest discover -s misc/scripts/tests -p test_macos_filesystem_hotpath.py -v
+
+  compile-macos-editor:
+    runs-on: macos-26
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+      - uses: ./.github/actions/godot-deps
+      - name: Build editor with native macOS filesystem paths
+        uses: ./.github/actions/godot-build
+        with:
+          platform: macos
+          target: editor
+          scons-flags: arch=x86_64 dev_build=yes debug_symbols=no module_mono_enabled=no tests=yes vulkan=no metal=no angle=no accesskit=no -j3
+      - name: Check editor startup on macOS
+        run: ./bin/godot.macos.editor.dev.x86_64 --version

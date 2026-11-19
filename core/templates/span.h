@@ -33,6 +33,8 @@
 #include "core/error/error_macros.h"
 #include "core/typedefs.h"
 
+#include <cstring>
+
 template <typename LHS, typename RHS>
 bool are_spans_equal(const LHS *p_lhs, const RHS *p_rhs, size_t p_size) {
 	if constexpr (std::is_same_v<LHS, RHS> && std::is_fundamental_v<LHS>) {
@@ -40,7 +42,10 @@ bool are_spans_equal(const LHS *p_lhs, const RHS *p_rhs, size_t p_size) {
 		// is_trivially_equality_comparable would help, but it doesn't exist.
 		// memcmp requires pointer argument to be valid even on size = 0 (C11 §7.24.1(2)).
 		// Span allows ptr arguments to be invalid as long as size = 0, so only call when p_size > 0.
-		return p_size == 0 || memcmp(p_lhs, p_rhs, p_size * sizeof(LHS)) == 0;
+		// Identical storage is already byte-for-byte equal: skip the full scan.
+		// Restrict this shortcut to the bitwise-comparison branch so types with
+		// non-reflexive custom equality operators keep their existing semantics.
+		return p_size == 0 || p_lhs == p_rhs || memcmp(p_lhs, p_rhs, p_size * sizeof(LHS)) == 0;
 	} else {
 		// Normal case: Need to iterate the array manually.
 		for (size_t j = 0; j < p_size; j++) {
@@ -125,7 +130,7 @@ public:
 	template <typename T1 = T>
 	constexpr int64_t rfind_sequence(const Span<T1> &p_span, uint64_t p_from) const;
 	template <typename T1 = T>
-	_FORCE_INLINE_ constexpr int64_t rfind_sequence(const Span<T1> &p_span) const { return rfind_sequence(p_span, size() - p_span.size()); }
+	_FORCE_INLINE_ constexpr int64_t rfind_sequence(const Span<T1> &p_span) const { return p_span.size() > size() ? -1 : rfind_sequence(p_span, size() - p_span.size()); }
 	constexpr uint64_t count(const T &p_val) const;
 	/// Find the index of the given value using binary search.
 	/// Note: Assumes that elements in the span are sorted. Otherwise, use find() instead.
@@ -138,6 +143,19 @@ public:
 
 template <typename T>
 constexpr int64_t Span<T>::find(const T &p_val, uint64_t p_from) const {
+#if defined(__GNUC__) || defined(__clang__)
+	if constexpr (std::is_integral_v<T> && sizeof(T) == 1 && !std::is_same_v<std::remove_cv_t<T>, bool>) {
+		// Preserve compile-time evaluation while allowing libc's vectorized
+		// byte scanner for runtime calls on GCC/Clang.
+		if (!__builtin_is_constant_evaluated()) {
+			if (p_from >= size()) {
+				return -1;
+			}
+			const T *const found = static_cast<const T *>(std::memchr(ptr() + p_from, static_cast<unsigned char>(p_val), size_t(size() - p_from)));
+			return found ? int64_t(found - ptr()) : -1;
+		}
+	}
+#endif
 	for (uint64_t i = p_from; i < size(); i++) {
 		if (ptr()[i] == p_val) {
 			return i;
@@ -149,18 +167,143 @@ constexpr int64_t Span<T>::find(const T &p_val, uint64_t p_from) const {
 template <typename T>
 template <typename T1>
 constexpr int64_t Span<T>::find_sequence(const Span<T1> &p_span, uint64_t p_from) const {
-	for (uint64_t i = p_from; i <= size() - p_span.size(); i++) {
-		if (are_spans_equal(ptr() + i, p_span.ptr(), p_span.size())) {
+	const uint64_t needle_size = p_span.size();
+	// Subtract only after validating the range; otherwise unsigned underflow
+	// can make an oversized pattern scan past the end of the haystack.
+	if (p_from > size() || needle_size > size() - p_from) {
+		return -1;
+	}
+	if (needle_size == 0) {
+		return p_from;
+	}
+
+	const T *const haystack = ptr();
+	const T1 *const needle = p_span.ptr();
+	const uint64_t last_start = size() - needle_size;
+#if defined(__GNUC__) || defined(__clang__)
+	if constexpr (std::is_same_v<T, T1> && std::is_integral_v<T> && sizeof(T) == 1 && !std::is_same_v<std::remove_cv_t<T>, bool>) {
+		if (!__builtin_is_constant_evaluated()) {
+			// On large buffers dominated by one byte, searching for the first
+			// pattern byte can trigger a full comparison at nearly every offset.
+			// Sample a small prefix to switch to a rarer anchor only when the
+			// frequency gap is large. This uses no extra allocation and leaves
+			// the usual vectorized memchr path unchanged for other inputs.
+			if (needle_size >= 8 && size() - p_from >= 8192) {
+				if (haystack[p_from] == needle[0] &&
+						haystack[p_from + needle_size - 1] == needle[needle_size - 1] &&
+						std::memcmp(haystack + p_from, needle, size_t(needle_size)) == 0) {
+					return int64_t(p_from);
+				}
+
+				uint64_t alternate_offset = needle_size - 1;
+				if (needle[alternate_offset] == needle[0]) {
+					alternate_offset = 0;
+					// Bound the preprocessing cost even for extremely long needles.
+					const uint64_t limit = needle_size > 33 ? needle_size - 33 : 0;
+					for (uint64_t i = needle_size - 1; i > limit;) {
+						--i;
+						if (needle[i] != needle[0]) {
+							alternate_offset = i;
+							break;
+						}
+					}
+				}
+				if (alternate_offset != 0) {
+					uint32_t first_hits = 0;
+					uint32_t alternate_hits = 0;
+					for (uint64_t i = p_from; i < p_from + 128; i++) {
+						first_hits += haystack[i] == needle[0];
+						alternate_hits += haystack[i] == needle[alternate_offset];
+					}
+					if (first_hits >= 16 && alternate_hits * 4 < first_hits) {
+						const T *candidate = haystack + p_from + alternate_offset;
+						const T *const end = haystack + last_start + alternate_offset + 1;
+						while (candidate < end) {
+							candidate = static_cast<const T *>(std::memchr(candidate, static_cast<unsigned char>(needle[alternate_offset]), size_t(end - candidate)));
+							if (!candidate) {
+								return -1;
+							}
+							const T *const start = candidate - alternate_offset;
+							if (start[0] == needle[0] && start[needle_size - 1] == needle[needle_size - 1] &&
+								std::memcmp(start, needle, size_t(needle_size)) == 0) {
+								return int64_t(start - haystack);
+							}
+							candidate++;
+						}
+						return -1;
+					}
+				}
+			}
+			// Skip directly to byte candidates instead of scanning each offset.
+			const T *candidate = haystack + p_from;
+			const T *const end = haystack + last_start + 1;
+			while (candidate < end) {
+				candidate = static_cast<const T *>(std::memchr(candidate, static_cast<unsigned char>(needle[0]), size_t(end - candidate)));
+				if (!candidate) {
+					return -1;
+				}
+				if (needle_size == 1 || (candidate[needle_size - 1] == needle[needle_size - 1] && std::memcmp(candidate, needle, size_t(needle_size)) == 0)) {
+					return int64_t(candidate - haystack);
+				}
+				candidate++;
+			}
+			return -1;
+		}
+	}
+#endif
+	for (uint64_t i = p_from; i <= last_start; i++) {
+		// Avoid calling memcmp / traversing a class sequence when either
+		// endpoint already disproves the candidate. For same-type floats,
+		// preserve the bitwise memcmp semantics of are_spans_equal().
+		if constexpr (!(std::is_same_v<T, T1> && std::is_floating_point_v<T>)) {
+			if (haystack[i] != needle[0] || (needle_size > 1 && haystack[i + needle_size - 1] != needle[needle_size - 1])) {
+				continue;
+			}
+		}
+		if (are_spans_equal(haystack + i, needle, needle_size)) {
 			return i;
 		}
 	}
-
 	return -1;
 }
 
 template <typename T>
 constexpr int64_t Span<T>::rfind(const T &p_val, uint64_t p_from) const {
 	DEV_ASSERT(p_from < size());
+#if defined(__GNUC__) || defined(__clang__)
+	if constexpr (std::is_integral_v<T> && sizeof(T) == 1 && !std::is_same_v<std::remove_cv_t<T>, bool>) {
+		if (!__builtin_is_constant_evaluated()) {
+			// Search 8 bytes per iteration, with no alignment assumptions.
+			// The zero-byte test can mark an adjacent nonzero byte after a borrow,
+			// so verify candidates in reverse order before returning a match.
+			constexpr uint64_t ONE_PER_BYTE = 0x0101010101010101ULL;
+			constexpr uint64_t HIGH_BIT_PER_BYTE = 0x8080808080808080ULL;
+			const uint64_t repeated_value = uint64_t(uint8_t(p_val)) * ONE_PER_BYTE;
+			uint64_t remaining = p_from + 1;
+			while (remaining >= sizeof(uint64_t)) {
+				remaining -= sizeof(uint64_t);
+				uint64_t block = 0;
+				std::memcpy(&block, ptr() + remaining, sizeof(block));
+				const uint64_t diff = block ^ repeated_value;
+				if (((diff - ONE_PER_BYTE) & ~diff & HIGH_BIT_PER_BYTE) != 0) {
+					for (uint64_t i = sizeof(uint64_t); i > 0;) {
+						--i;
+						if (ptr()[remaining + i] == p_val) {
+							return int64_t(remaining + i);
+						}
+					}
+				}
+			}
+			while (remaining > 0) {
+				--remaining;
+				if (ptr()[remaining] == p_val) {
+					return int64_t(remaining);
+				}
+			}
+			return -1;
+		}
+	}
+#endif
 	for (int64_t i = p_from; i >= 0; i--) {
 		if (ptr()[i] == p_val) {
 			return i;
@@ -172,18 +315,177 @@ constexpr int64_t Span<T>::rfind(const T &p_val, uint64_t p_from) const {
 template <typename T>
 template <typename T1>
 constexpr int64_t Span<T>::rfind_sequence(const Span<T1> &p_span, uint64_t p_from) const {
-	DEV_ASSERT(p_from + p_span.size() <= size());
-	for (int64_t i = p_from; i >= 0; i--) {
-		if (are_spans_equal(ptr() + i, p_span.ptr(), p_span.size())) {
+	const uint64_t needle_size = p_span.size();
+	if (p_from > size() || needle_size > size() - p_from) {
+		return -1;
+	}
+	if (needle_size == 0) {
+		return p_from;
+	}
+
+	const T *const haystack = ptr();
+	const T1 *const needle = p_span.ptr();
+#if defined(__GNUC__) || defined(__clang__)
+	if constexpr (std::is_same_v<T, T1> && std::is_integral_v<T> && sizeof(T) == 1 && !std::is_same_v<std::remove_cv_t<T>, bool>) {
+		if (!__builtin_is_constant_evaluated()) {
+			if (needle_size == 1) {
+				return rfind(needle[0], p_from);
+			}
+			// When both endpoints are frequent, every offset may otherwise
+			// trigger a full pattern comparison. For large repetitive buffers,
+			// scan a rarer internal byte eight candidates at a time instead.
+			// A short local sample keeps random buffers on the usual fast path.
+			if (needle_size >= 8 && p_from >= 8192 && needle[0] == needle[needle_size - 1]) {
+				if (haystack[p_from] == needle[0] && std::memcmp(haystack + p_from, needle, size_t(needle_size)) == 0) {
+					return int64_t(p_from);
+				}
+				uint64_t anchor = 0;
+				const uint64_t limit = needle_size > 33 ? needle_size - 33 : 0;
+				for (uint64_t i = needle_size - 1; i > limit;) {
+					--i;
+					if (needle[i] != needle[0]) {
+						anchor = i;
+						break;
+					}
+				}
+				if (anchor != 0) {
+					uint32_t first_hits = 0;
+					uint32_t anchor_hits = 0;
+					for (uint64_t j = 0; j < 128; j++) {
+						first_hits += haystack[p_from - j] == needle[0];
+						anchor_hits += haystack[p_from - j + anchor] == needle[anchor];
+					}
+					if (first_hits >= 16 && anchor_hits * 4 < first_hits) {
+						constexpr uint64_t ONE_PER_BYTE = 0x0101010101010101ULL;
+						constexpr uint64_t HIGH_BIT_PER_BYTE = 0x8080808080808080ULL;
+						const uint64_t anchor_pattern = uint64_t(uint8_t(needle[anchor])) * ONE_PER_BYTE;
+						uint64_t remaining = p_from + 1;
+						while (remaining >= sizeof(uint64_t)) {
+							remaining -= sizeof(uint64_t);
+							uint64_t word = 0;
+							std::memcpy(&word, haystack + remaining + anchor, sizeof(word));
+							const uint64_t diff = word ^ anchor_pattern;
+							if (((diff - ONE_PER_BYTE) & ~diff & HIGH_BIT_PER_BYTE) == 0) {
+								continue;
+							}
+							// Borrowing can produce false matches: verify each lane.
+							for (uint64_t j = sizeof(uint64_t); j > 0;) {
+								--j;
+								const uint64_t pos = remaining + j;
+								if (haystack[pos + anchor] == needle[anchor] && haystack[pos] == needle[0] &&
+										haystack[pos + needle_size - 1] == needle[needle_size - 1] &&
+										std::memcmp(haystack + pos, needle, size_t(needle_size)) == 0) {
+									return int64_t(pos);
+								}
+							}
+						}
+						while (remaining > 0) {
+							--remaining;
+							if (haystack[remaining + anchor] == needle[anchor] && haystack[remaining] == needle[0] &&
+									haystack[remaining + needle_size - 1] == needle[needle_size - 1] &&
+									std::memcmp(haystack + remaining, needle, size_t(needle_size)) == 0) {
+								return int64_t(remaining);
+							}
+						}
+						return -1;
+					}
+				}
+			}
+			// When the endpoints differ, check eight candidate starts at once.
+			// If both endpoints are the same, the scalar path avoids overhead
+			// for extremely frequent candidates in repeated-byte buffers.
+			if (needle[0] != needle[needle_size - 1]) {
+				constexpr uint64_t ONE_PER_BYTE = 0x0101010101010101ULL;
+				constexpr uint64_t HIGH_BIT_PER_BYTE = 0x8080808080808080ULL;
+				const uint64_t first_pattern = uint64_t(uint8_t(needle[0])) * ONE_PER_BYTE;
+				const uint64_t last_pattern = uint64_t(uint8_t(needle[needle_size - 1])) * ONE_PER_BYTE;
+				uint64_t remaining = p_from + 1;
+				while (remaining >= sizeof(uint64_t)) {
+					remaining -= sizeof(uint64_t);
+					uint64_t first_word = 0;
+					std::memcpy(&first_word, haystack + remaining, sizeof(first_word));
+					const uint64_t first_diff = first_word ^ first_pattern;
+					const uint64_t first_candidates = (first_diff - ONE_PER_BYTE) & ~first_diff & HIGH_BIT_PER_BYTE;
+					if (first_candidates == 0) {
+						continue;
+					}
+					uint64_t last_word = 0;
+					std::memcpy(&last_word, haystack + remaining + needle_size - 1, sizeof(last_word));
+					const uint64_t last_diff = last_word ^ last_pattern;
+					const uint64_t last_candidates = (last_diff - ONE_PER_BYTE) & ~last_diff & HIGH_BIT_PER_BYTE;
+					if ((first_candidates & last_candidates) == 0) {
+						continue;
+					}
+					// Borrow propagation can produce false candidate bits.
+					// Verify both endpoints in reverse order before comparing the interior.
+					for (uint64_t i = sizeof(uint64_t); i > 0;) {
+						--i;
+						const uint64_t pos = remaining + i;
+						if (haystack[pos] == needle[0] &&
+								haystack[pos + needle_size - 1] == needle[needle_size - 1] &&
+								(needle_size == 2 || std::memcmp(haystack + pos, needle, size_t(needle_size)) == 0)) {
+							return int64_t(pos);
+						}
+					}
+				}
+				while (remaining > 0) {
+					--remaining;
+					if (haystack[remaining] == needle[0] &&
+							haystack[remaining + needle_size - 1] == needle[needle_size - 1] &&
+							(needle_size == 2 || std::memcmp(haystack + remaining, needle, size_t(needle_size)) == 0)) {
+						return int64_t(remaining);
+					}
+				}
+				return -1;
+			}
+		}
+	}
+#endif
+	// Never truncate the unsigned range to signed before walking backwards.
+	for (uint64_t i = p_from + 1; i > 0;) {
+		--i;
+		if constexpr (!(std::is_same_v<T, T1> && std::is_floating_point_v<T>)) {
+			if (haystack[i] != needle[0] || (needle_size > 1 && haystack[i + needle_size - 1] != needle[needle_size - 1])) {
+				continue;
+			}
+		}
+		if (are_spans_equal(haystack + i, needle, needle_size)) {
 			return i;
 		}
 	}
-
 	return -1;
 }
 
 template <typename T>
 constexpr uint64_t Span<T>::count(const T &p_val) const {
+#if defined(__GNUC__) || defined(__clang__)
+	if constexpr (std::is_integral_v<T> && sizeof(T) == 1 && !std::is_same_v<std::remove_cv_t<T>, bool>) {
+		if (!__builtin_is_constant_evaluated() && size() >= 64) {
+			// Count eight bytes in each unaligned word without branchy byte checks.
+			// Unlike the standard zero-byte existence test, the low-7-bit
+			// formulation produces one exact match bit per lane (no borrow
+			// false positives). A multiply sums those eight bits.
+			constexpr uint64_t ONES = 0x0101010101010101ULL;
+			constexpr uint64_t LOW_BITS = 0x7f7f7f7f7f7f7f7fULL;
+			constexpr uint64_t HIGH_BITS = 0x8080808080808080ULL;
+			const uint64_t repeated = uint64_t(uint8_t(p_val)) * ONES;
+			const uint64_t block_end = size() & ~uint64_t(7);
+			uint64_t amount = 0;
+			uint64_t i = 0;
+			for (; i < block_end; i += sizeof(uint64_t)) {
+				uint64_t word = 0;
+				std::memcpy(&word, ptr() + i, sizeof(word));
+				const uint64_t diff = word ^ repeated;
+				const uint64_t matches = ~(((diff & LOW_BITS) + LOW_BITS) | diff | LOW_BITS) & HIGH_BITS;
+				amount += ((matches >> 7) * ONES) >> 56;
+			}
+			for (; i < size(); i++) {
+				amount += ptr()[i] == p_val;
+			}
+			return amount;
+		}
+	}
+#endif
 	uint64_t amount = 0;
 	for (uint64_t i = 0; i < size(); i++) {
 		if (ptr()[i] == p_val) {

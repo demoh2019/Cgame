@@ -1,0 +1,61 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<class name="SmoothDamp" inherits="RefCounted" api_type="core" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="../class.xsd">
+	<brief_description>
+		Smoothly follows a moving target with a critically damped spring.
+	</brief_description>
+	<description>
+		SmoothDamp eases a value toward a target without overshooting and without the frame-rate dependence of [method @GlobalScope.lerp] used with a constant weight. It is the equivalent of Unity's [code]Mathf.SmoothDamp[/code] and [code]Vector3.SmoothDamp[/code] and is typically used for follow cameras, UI value changes and chasing a moving object.
+		The object keeps the current velocity, so you only pass the current value and the target every frame:
+		[codeblocks]
+		[gdscript]
+		var damper := SmoothDamp.new()
+
+		func _ready():
+		    damper.smooth_time = 0.25
+
+		func _process(delta):
+		    camera.position = damper.step(camera.position, player.position, delta)
+		[/gdscript]
+		[/codeblocks]
+		Floats, [Vector2], [Vector3] and [Vector4] are supported. Use one SmoothDamp per value you want to smooth, since each keeps its own velocity.
+	</description>
+	<tutorials>
+	</tutorials>
+	<methods>
+		<method name="reset">
+			<return type="void" />
+			<description>
+				Clears the stored velocity, so the next [method step] starts from rest. Call it after teleporting the smoothed value.
+			</description>
+		</method>
+		<method name="step">
+			<return type="Variant" />
+			<param index="0" name="current" type="Variant" />
+			<param index="1" name="target" type="Variant" />
+			<param index="2" name="delta" type="float" />
+			<description>
+				Moves [param current] toward [param target] for one frame of duration [param delta] and returns the new value. [param current] and [param target] must be of the same type ([int] is treated as [float]). The result never passes the target. Returns [param current] unchanged if [param delta] is not positive.
+			</description>
+		</method>
+		<method name="step_angle">
+			<return type="float" />
+			<param index="0" name="current" type="float" />
+			<param index="1" name="target" type="float" />
+			<param index="2" name="delta" type="float" />
+			<description>
+				Like [method step] for an angle in radians. The value takes the shortest way around the circle (for example, from [code]350°[/code] to [code]10°[/code] it passes through [code]0°[/code]).
+			</description>
+		</method>
+	</methods>
+	<members>
+		<member name="max_speed" type="float" setter="set_max_speed" getter="get_max_speed" default="0.0">
+			Maximum speed of the smoothed value, in value units per second. [code]0[/code] means unlimited.
+		</member>
+		<member name="smooth_time" type="float" setter="set_smooth_time" getter="get_smooth_time" default="0.3">
+			Approximate time in seconds to reach the target. Smaller values follow more tightly. Values below [code]0.0001[/code] are clamped.
+		</member>
+		<member name="velocity" type="Variant" setter="set_velocity" getter="get_velocity" default="null">
+			The current velocity of the smoothed value, of the same type as the value. Setting it lets you hand over momentum from another movement system.
+		</member>
+	</members>
+</class>

@@ -1,0 +1,19 @@
+name: Editor Batch Fast Path Contracts
+on:
+  pull_request:
+    paths:
+      - "editor/project_manager/project_list.cpp"
+      - "editor/script/find_in_files.cpp"
+      - "misc/tests/test_editor_batch_fastpaths.py"
+      - ".github/workflows/editor-batch-fastpaths.yml"
+  workflow_dispatch:
+
+jobs:
+  source-contracts:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+      - run: python -m unittest discover -s misc/tests -p test_editor_batch_fastpaths.py -v
