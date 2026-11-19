@@ -384,7 +384,9 @@ func _on_event(event: Dictionary) -> void:
 			say("+%d %s" % [event["amount"], Defs.item(event["item"]).get("name", event["item"])])
 		"fished":
 			if int(event.get("peer", -1)) == client.peer_id:
-				say("Fishing: caught %d raw fish. Cook at the hub workbench." % int(event.get("amount", 0)))
+				var catch_id: String = str(event.get("item", "raw_fish"))
+				var display: String = str(Defs.item(catch_id).get("name", catch_id))
+				say("Fishing: caught %d %s. Cook at the camp." % [int(event.get("amount", 0)), display])
 		"zone":
 			var zone: int = clampi(int(event["zone"]), 0, 3)
 			say("Entering %s: %s" % [Defs.ZONE_NAMES[zone], ZoneRisk.description(zone)])
@@ -446,7 +448,12 @@ func _on_result(kind: String, data: Dictionary) -> void:
 			say("Camp rest: " + str(data.get("reason", "rejected")))
 		return
 	if kind == "fish":
-		say("Fishing: casting..." if bool(data.get("ok", false)) else "Fishing: %s" % str(data.get("reason", "denied")))
+		if bool(data.get("ok", false)):
+			var fish_id: String = str(data.get("item", "raw_fish"))
+			say("Fishing: casting for %s (%d s)..." % [
+				str(Defs.item(fish_id).get("name", fish_id)), int(data.get("seconds", 5))])
+		else:
+			say("Fishing: %s" % str(data.get("reason", "denied")))
 		return
 	if kind == "market":
 		if not bool(data.get("ok", false)):
