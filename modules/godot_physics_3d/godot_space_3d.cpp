@@ -777,10 +777,6 @@ bool GodotSpace3D::test_body_motion(GodotBody3D *p_body, const PS3DT::MotionPara
 	{
 		// STEP 2 ATTEMPT MOTION
 
-		AABB motion_aabb = body_aabb;
-		motion_aabb.position += p_parameters.motion;
-		motion_aabb = motion_aabb.merge(body_aabb);
-
 		for (int j = 0; j < p_body->get_shape_count(); j++) {
 			if (p_body->is_shape_disabled(j)) {
 				continue;
@@ -810,8 +806,9 @@ bool GodotSpace3D::test_body_motion(GodotBody3D *p_body, const PS3DT::MotionPara
 			real_t best_safe = 1;
 			real_t best_unsafe = 1;
 
-			// Sweep the current shape's tight AABB; keep the original whole-body
-			// motion_aabb for the distance solver's conservative auxiliary bound.
+			// Sweep the current shape's tight AABB and use the same conservative
+			// world-space hint for concave-mesh triangle culling in solve_distance.
+			// A large compound AABB would otherwise traverse unrelated triangles.
 			AABB shape_motion_aabb = body_shape_xform.xform(body_shape->get_aabb()).grow(margin);
 			AABB shape_end_aabb = shape_motion_aabb;
 			shape_end_aabb.position += p_parameters.motion;
@@ -828,12 +825,12 @@ bool GodotSpace3D::test_body_motion(GodotBody3D *p_body, const PS3DT::MotionPara
 				// Restore the full displacement before testing the next obstacle.
 				mshape.motion = full_motion_local;
 				//test initial overlap, does it collide if going all the way?
-				if (GodotCollisionSolver3D::solve_distance(&mshape, body_shape_xform, col_obj->get_shape(shape_idx), col_obj_xform, point_A, point_B, motion_aabb, &sep_axis)) {
+				if (GodotCollisionSolver3D::solve_distance(&mshape, body_shape_xform, col_obj->get_shape(shape_idx), col_obj_xform, point_A, point_B, shape_motion_aabb, &sep_axis)) {
 					return true;
 				}
 				sep_axis = motion_normal;
 
-				if (!GodotCollisionSolver3D::solve_distance(body_shape, body_shape_xform, col_obj->get_shape(shape_idx), col_obj_xform, point_A, point_B, motion_aabb, &sep_axis)) {
+				if (!GodotCollisionSolver3D::solve_distance(body_shape, body_shape_xform, col_obj->get_shape(shape_idx), col_obj_xform, point_A, point_B, shape_motion_aabb, &sep_axis)) {
 					stuck = true;
 					return false;
 				}
@@ -852,7 +849,7 @@ bool GodotSpace3D::test_body_motion(GodotBody3D *p_body, const PS3DT::MotionPara
 
 					Vector3 lA, lB;
 					Vector3 sep = motion_normal; //important optimization for this to work fast enough
-					bool collided = !GodotCollisionSolver3D::solve_distance(&mshape, body_shape_xform, col_obj->get_shape(shape_idx), col_obj_xform, lA, lB, motion_aabb, &sep);
+					bool collided = !GodotCollisionSolver3D::solve_distance(&mshape, body_shape_xform, col_obj->get_shape(shape_idx), col_obj_xform, lA, lB, shape_motion_aabb, &sep);
 
 					if (collided) {
 						hi = fraction;
