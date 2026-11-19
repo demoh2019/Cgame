@@ -34,6 +34,7 @@ TEST_FORCE_LINK(test_file_access)
 
 #include "core/io/dir_access.h"
 #include "core/io/file_access.h"
+#include "core/io/file_access_packed_byte_array.h"
 #include "tests/test_utils.h"
 
 namespace TestFileAccess {
@@ -295,6 +296,68 @@ TEST_CASE("[FileAccess] Cursor positioning") {
 		f->seek_end(-len - 10); // seeking to a position below 0; ignored.
 		CHECK(f->get_position() == 5);
 	}
+}
+
+
+TEST_CASE("[FileAccess] PackedByteArray zero-length read at start and end") {
+	Ref<FileAccessPackedByteArray> f;
+	f.instantiate();
+	PackedByteArray bytes;
+	bytes.resize_initialized(4096);
+	bytes.set(0, 42);
+	bytes.set(4095, 99);
+	REQUIRE(f->open_custom(bytes) == OK);
+
+	uint8_t sentinel = 0x5a;
+	CHECK(f->get_buffer(&sentinel, 0) == 0);
+	CHECK(f->get_position() == 0);
+	CHECK(sentinel == 0x5a);
+	CHECK_FALSE(f->eof_reached());
+
+	uint8_t page[4096] = {};
+	CHECK(f->get_buffer(page, 4096) == 4096);
+	CHECK(page[0] == 42);
+	CHECK(page[4095] == 99);
+	CHECK(f->get_position() == 4096);
+	CHECK(f->eof_reached());
+	CHECK(f->get_error() == ERR_FILE_EOF);
+	CHECK(f->get_buffer(&sentinel, 0) == 0);
+	CHECK(sentinel == 0x5a);
+	CHECK(f->get_position() == 4096);
+}
+
+TEST_CASE("[FileAccess] PackedByteArray page-aligned and empty buffer reads") {
+	Ref<FileAccessPackedByteArray> f;
+	f.instantiate();
+	PackedByteArray empty;
+	REQUIRE(f->open_custom(empty) == OK);
+	uint8_t sentinel = 0x7b;
+	CHECK(f->get_buffer(&sentinel, 0) == 0);
+	CHECK(sentinel == 0x7b);
+	CHECK(f->get_position() == 0);
+	CHECK(f->eof_reached());
+
+	PackedByteArray pages;
+	pages.resize_initialized(8192);
+	pages.set(0, 3);
+	pages.set(4096, 7);
+	pages.set(8191, 11);
+	REQUIRE(f->open_custom(pages) == OK);
+	uint8_t block[4096] = {};
+	for (int i = 0; i < 2; i++) {
+		CHECK(f->get_buffer(block, 4096) == 4096);
+		CHECK(f->get_position() == uint64_t((i + 1) * 4096));
+		CHECK(f->get_buffer(&sentinel, 0) == 0);
+		CHECK(sentinel == 0x7b);
+	}
+	CHECK(f->get_position() == 8192);
+	CHECK(f->eof_reached());
+	f->seek(0);
+	CHECK(f->get_buffer(block, 4096) == 4096);
+	CHECK(block[0] == 3);
+	CHECK(f->get_buffer(block, 4096) == 4096);
+	CHECK(block[0] == 7);
+	CHECK(block[4095] == 11);
 }
 
 } // namespace TestFileAccess
