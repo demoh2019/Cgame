@@ -143,8 +143,8 @@ func _build_supplies() -> void:
 func spawn_pickup(item_type: String, amount: int, at_position: Vector3) -> Node3D:
     var pickup = PICKUP_SCRIPT.new()
     pickup.configure(item_type, amount)
+    pickup.position = at_position
     add_child(pickup)
-    pickup.global_position = at_position
     return pickup
 
 
