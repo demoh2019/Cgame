@@ -78,6 +78,7 @@ class GodotBodyPair2D : public GodotConstraint2D {
 	Vector2 sep_axis;
 	Contact contacts[MAX_CONTACTS];
 	int contact_count = 0;
+	real_t mixed_friction = 0.0; // Recomputed in pre_solve, reused across solver iterations.
 	bool collided = false;
 	bool check_ccd = false;
 	bool oneway_disabled = false;
