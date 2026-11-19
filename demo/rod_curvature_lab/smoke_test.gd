@@ -12,6 +12,10 @@ func _initialize() -> void:
         push_error("Rod bend compliance must be enabled for the demo smoke test.")
         quit(1)
         return
+    if float(ProjectSettings.get_setting("physics/3d/solver/soft_body_xpbd_rod_torsion_compliance", 0.0)) <= 0.0:
+        push_error("Rod geometric torsion must be enabled for this smoke test.")
+        quit(1)
+        return
     call_deferred("_test")
 
 
@@ -39,5 +43,5 @@ func _test() -> void:
     lab.queue_free()
     await process_frame
     if valid:
-        print("PASS: native rod centerline lab and 90 physics frames.")
+        print("PASS: nonplanar rod bend and geometric torsion lab, 90 physics frames.")
     quit(0 if valid else 1)
