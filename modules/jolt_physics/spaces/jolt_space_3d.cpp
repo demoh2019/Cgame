@@ -981,6 +981,10 @@ struct SoftSelfContactScratch {
 	SoftFaceBVHScratch bvh;
 	SoftFaceBVHScratch edge_bvh; // Reused across active soft bodies.
 	JPH::Array<uint64_t> one_ring_edges;
+	// Jacobi self-contact corrections are accumulated without moving BVH
+	// geometry during a candidate query, then uniformly capped and applied.
+	JPH::Array<JPH::Vec3> position_deltas;
+	bool position_projection_ready = false;
 
 	// Face-array address identifies an immutable Jolt SoftBodySharedSettings
 	// topology. A body rebuild gets a new BodyID, invalidating this cache.
