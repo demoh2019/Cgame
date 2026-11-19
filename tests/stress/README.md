@@ -124,3 +124,7 @@ It also records median and p95 **in-engine duration** independently of process
 startup, and baseline comparisons now track median engine time. These rankings
 are a triage aid, not a universal throughput leaderboard: scenarios do different
 amounts of work. Native CI archives both JSON and Markdown artifacts.
+
+## Bottleneck triage
+
+The [diagnostic guide](BOTTLENECKS.md) explains ranked Markdown/CSV reports, matched baseline comparisons, and the meaning of frame p95 and memory alerts.
