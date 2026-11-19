@@ -179,6 +179,8 @@ class GodotSoftBody3D : public GodotCollisionObject3D {
 	// Tetra rest matrices and XPBD multipliers are retained across iterations.
 	// Empty unless tetra FEM compliance is explicitly enabled.
 	LocalVector<PhysicsFEMConvexTetra> xpbd_fem_tetrahedra;
+	// Opt-in irreversible state; no persistent per-tet memory if rate=0.
+	LocalVector<real_t> xpbd_fem_tetra_damage;
 	// Allocated only when tension-only tetra material fibers are enabled.
 	// One XPBD multiplier per cooked tetra, reused across solver iterations.
 	LocalVector<double> xpbd_fem_fiber_lambdas;
