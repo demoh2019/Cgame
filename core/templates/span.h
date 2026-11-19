@@ -219,6 +219,40 @@ constexpr int64_t Span<T>::find_sequence(const Span<T1> &p_span, uint64_t p_from
 template <typename T>
 constexpr int64_t Span<T>::rfind(const T &p_val, uint64_t p_from) const {
 	DEV_ASSERT(p_from < size());
+#if defined(__GNUC__) || defined(__clang__)
+	if constexpr (std::is_integral_v<T> && sizeof(T) == 1 && !std::is_same_v<std::remove_cv_t<T>, bool>) {
+		if (!__builtin_is_constant_evaluated()) {
+			// Search 8 bytes per iteration, with no alignment assumptions.
+			// The zero-byte test can mark an adjacent nonzero byte after a borrow,
+			// so verify candidates in reverse order before returning a match.
+			constexpr uint64_t ONE_PER_BYTE = 0x0101010101010101ULL;
+			constexpr uint64_t HIGH_BIT_PER_BYTE = 0x8080808080808080ULL;
+			const uint64_t repeated_value = uint64_t(uint8_t(p_val)) * ONE_PER_BYTE;
+			uint64_t remaining = p_from + 1;
+			while (remaining >= sizeof(uint64_t)) {
+				remaining -= sizeof(uint64_t);
+				uint64_t block;
+				std::memcpy(&block, ptr() + remaining, sizeof(block));
+				const uint64_t diff = block ^ repeated_value;
+				if (((diff - ONE_PER_BYTE) & ~diff & HIGH_BIT_PER_BYTE) != 0) {
+					for (uint64_t i = sizeof(uint64_t); i > 0;) {
+						--i;
+						if (ptr()[remaining + i] == p_val) {
+							return int64_t(remaining + i);
+						}
+					}
+				}
+			}
+			while (remaining > 0) {
+				--remaining;
+				if (ptr()[remaining] == p_val) {
+					return int64_t(remaining);
+				}
+			}
+			return -1;
+		}
+	}
+#endif
 	for (int64_t i = p_from; i >= 0; i--) {
 		if (ptr()[i] == p_val) {
 			return i;
