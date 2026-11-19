@@ -32,6 +32,7 @@
 
 TEST_FORCE_LINK(test_geometry_2d)
 
+#include "core/core_bind.h"
 #include "core/math/geometry_2d.h"
 
 namespace TestGeometry2D {
@@ -937,6 +938,34 @@ TEST_CASE("[Geometry2D] Bresenham line") {
 		CHECK(r[9] == Vector2i(9, 4));
 		CHECK(r[10] == Vector2i(10, 5));
 		CHECK(r[11] == Vector2i(11, 5));
+	}
+}
+
+TEST_CASE("[CoreBind] Geometry2D polygon conversion preserves native points") {
+	CoreBind::Geometry2D *api = CoreBind::Geometry2D::get_singleton();
+	REQUIRE(api != nullptr);
+
+	Vector<Vector2> first;
+	first.push_back(Vector2(0, 0));
+	first.push_back(Vector2(10, 0));
+	first.push_back(Vector2(10, 10));
+	first.push_back(Vector2(0, 10));
+
+	Vector<Vector2> second;
+	second.push_back(Vector2(20, 20));
+	second.push_back(Vector2(30, 20));
+	second.push_back(Vector2(30, 30));
+	second.push_back(Vector2(20, 30));
+
+	const Vector<Vector<Point2>> expected = Geometry2D::merge_polygons(first, second);
+	const TypedArray<PackedVector2Array> actual = api->merge_polygons(first, second);
+	REQUIRE_EQ(actual.size(), expected.size());
+	for (int polygon = 0; polygon < expected.size(); polygon++) {
+		PackedVector2Array result = actual[polygon];
+		REQUIRE_EQ(result.size(), expected[polygon].size());
+		for (int i = 0; i < result.size(); i++) {
+			CHECK(result[i].is_equal_approx(expected[polygon][i]));
+		}
 	}
 }
 
