@@ -267,7 +267,7 @@ func _test_raw_cycles_and_excess() -> void:
 	graph.connections.append({"from": b, "to": 2})
 	_fails(graph, "malformed cyclic resource")
 	var oversized := Graph.make_default()
-	while oversized.nodes.size() <= Graph.MAX_NODES:
+	while oversized.nodes.size() < Graph.MAX_NODES:
 		oversized.add_graph_node("JITTER")
 	# add_graph_node correctly refuses over limit; insert malformed extra resource data.
 	oversized.nodes.append({"id": 257, "kind": "GRID", "params": Graph.default_parameters("GRID")})
@@ -281,7 +281,7 @@ func _test_serialization() -> void:
 	graph.seed = 748
 	var path := "user://pcg_graph_test.tres"
 	_check(ResourceSaver.save(graph, path) == OK, "graph ResourceSaver writes .tres")
-	var loaded := ResourceLoader.load(path, "PCGGraph", ResourceLoader.CACHE_MODE_IGNORE) as PCGGraph
+	var loaded := ResourceLoader.load(path, "", ResourceLoader.CACHE_MODE_IGNORE) as PCGGraph
 	_check(loaded != null, "serialized PCGGraph loads")
 	if loaded != null:
 		_check(loaded.seed == graph.seed, "seed persists")
