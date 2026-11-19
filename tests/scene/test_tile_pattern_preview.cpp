@@ -32,7 +32,9 @@
 
 TEST_FORCE_LINK(test_tile_pattern_preview)
 
-#ifdef TOOLS_ENABLED
+#include "modules/modules_enabled.gen.h"
+
+#if defined(TOOLS_ENABLED) && defined(MODULE_TILEMAP_ENABLED)
 
 #include "modules/tilemap/editor/tiles_editor_plugin.h"
 #include "modules/tilemap/tile_map_layer.h"
@@ -120,4 +122,4 @@ TEST_CASE("[TilePatternPreview] Scale stays finite for assorted valid extents") 
 
 } // namespace TestTilePatternPreview
 
-#endif // TOOLS_ENABLED
+#endif // TOOLS_ENABLED && MODULE_TILEMAP_ENABLED
