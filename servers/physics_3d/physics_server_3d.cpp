@@ -591,6 +591,9 @@ PhysicsServer3D::PhysicsServer3D() {
 	// Account for rotating CCD shapes in broadphase candidate generation.
 	// Conservative only: narrowphase angular time-of-impact remains separate.
 	GLOBAL_DEF(PropertyInfo(Variant::BOOL, "physics/3d/solver/ccd_rotational_bounds"), false);
+	// Exact arc extrema for every AABB corner, instead of radial padding.
+	// Opt-in for scenes where fewer broadphase pairs amortize extra math.
+	GLOBAL_DEF(PropertyInfo(Variant::BOOL, "physics/3d/solver/ccd_tight_rotational_bounds"), false);
 	GLOBAL_DEF(PropertyInfo(Variant::BOOL, "physics/3d/solver/implicit_damping"), false);
 	// Reproduce free rotation of asymmetric bodies (Jolt-style gyroscopic term).
 	// Off by default because it changes angular motion and costs extra math.
