@@ -17,10 +17,20 @@
 
 #include "core/object/class_db.h"
 
+#ifdef TOOLS_ENABLED
+#include "editor/terrain_editor_plugin.h"
+#include "editor/plugins/editor_plugin.h"
+#endif
+
 void initialize_terrain_module(ModuleInitializationLevel p_level) {
 	if (p_level == MODULE_INITIALIZATION_LEVEL_SCENE) {
 		GDREGISTER_CLASS(TerrainMesh);
 	}
+#ifdef TOOLS_ENABLED
+	if (p_level == MODULE_INITIALIZATION_LEVEL_EDITOR) {
+		EditorPlugins::add_by_type<TerrainEditorPlugin>();
+	}
+#endif
 }
 
 void uninitialize_terrain_module(ModuleInitializationLevel p_level) {
