@@ -37,6 +37,7 @@
 #include "godot_broad_phase_2d.h"
 #include "godot_collision_object_2d.h"
 
+#include "core/templates/hashfuncs.h"
 #include "core/templates/paged_allocator.h"
 #include "core/typedefs.h"
 #include "servers/physics_contact_push_speed.h"
@@ -78,6 +79,17 @@ private:
 		int local_shape_index = 0;
 		const GodotCollisionObject2D *against_object = nullptr;
 		int against_shape_index = 0;
+
+		_FORCE_INLINE_ uint32_t hash() const {
+			uint32_t result = hash_murmur3_one_64(uint64_t(reinterpret_cast<uintptr_t>(against_object)));
+			result = hash_murmur3_one_32(uint32_t(local_shape_index), result);
+			return hash_fmix32(hash_murmur3_one_32(uint32_t(against_shape_index), result));
+		}
+		_FORCE_INLINE_ bool operator==(const ExcludedShapeSW &p_other) const {
+			return local_shape_index == p_other.local_shape_index &&
+					against_object == p_other.against_object &&
+					against_shape_index == p_other.against_shape_index;
+		}
 	};
 
 	uint64_t elapsed_time[ELAPSED_TIME_MAX] = {};
