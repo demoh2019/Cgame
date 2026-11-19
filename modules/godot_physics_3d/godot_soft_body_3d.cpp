@@ -41,6 +41,7 @@
 #include "servers/physics_xpbd_area.h"
 #include "servers/physics_xpbd_dihedral.h"
 #include "servers/physics_xpbd_self_collision.h"
+#include "servers/physics_xpbd_self_friction.h"
 #include "servers/rendering/rendering_server.h"
 
 #include <limits>
@@ -619,6 +620,25 @@ void GodotSoftBody3D::solve_self_collisions(real_t p_delta) {
 					face.n[0]->x, face.n[1]->x, face.n[2]->x,
 					node.im, face.n[0]->im, face.n[1]->im, face.n[2]->im,
 					thickness, alpha, contact.side, contact.lambda);
+		}
+	}
+	// Coulomb-limited tangential friction follows the normal XPBD solve.
+	// Positions are still the source of truth: velocities are reconstructed
+	// from x - q later in solve_constraints(). A direct velocity impulse here
+	// would be overwritten by that step. Zero friction skips this pass.
+	const real_t friction = get_space()->get_soft_body_self_collision_friction();
+	if (friction > real_t(0.0)) {
+		for (const SelfCollisionContact &contact : xpbd_self_contacts) {
+			if (!(contact.lambda > real_t(0.0))) {
+				continue; // No normal reaction, so no tangential friction.
+			}
+			Node &vertex = nodes[contact.vertex];
+			Face &face = faces[contact.face];
+			physics_xpbd_solve_self_friction(vertex.x,
+					face.n[0]->x, face.n[1]->x, face.n[2]->x,
+					vertex.q, face.n[0]->q, face.n[1]->q, face.n[2]->q,
+					vertex.im, face.n[0]->im, face.n[1]->im, face.n[2]->im,
+					friction, contact.lambda, thickness);
 		}
 	}
 	// Refit face queries after the correction so subsequent raycasts don't
