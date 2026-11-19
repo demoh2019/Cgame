@@ -24,6 +24,10 @@ func _check() -> void:
 		ok = ok and game.get_node_or_null("HUD/Instructions") != null
 		ok = ok and game.get_node_or_null("Survivor") != null
 		ok = ok and game.get_node_or_null("SafeStash") != null
+		ok = ok and game.get("_recipes").has("axe_2")
+		ok = ok and game.get("_recipes").has("jacket_4")
+		ok = ok and game.get_node("HUD/Stats").text.contains("PROFESSIONS")
+		ok = ok and game.get_node("HUD/Stats").text.contains("CARRY")
 		ok = ok and game.get_node_or_null("HUD/BankPanel/Contents") != null
 		ok = ok and game.get("_chunks").size() >= 1
 		if ok:
@@ -43,10 +47,12 @@ func _check() -> void:
 			ok = ok and opening and game.get_node("HUD/BankPanel").visible
 			game.set("_selected_bank_item", "wood_1")
 			var carry_before: int = player.inventory.count("wood_1")
+			var carry_kg_before: float = player.inventory.total_weight()
 			var stored_before: int = player.stash.count("wood_1")
 			var deposited: bool = bool(game.call("_bank_transfer", true, 3))
 			ok = ok and deposited
 			ok = ok and player.inventory.count("wood_1") == carry_before - 3
+			ok = ok and player.inventory.total_weight() < carry_kg_before
 			ok = ok and player.stash.count("wood_1") == stored_before + 3
 			var withdrawn: bool = bool(game.call("_bank_transfer", false, 2))
 			ok = ok and withdrawn

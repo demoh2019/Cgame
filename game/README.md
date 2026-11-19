@@ -28,6 +28,21 @@ Controls: WASD movement, Shift sprint, E gather, Q loot, F attack,
 Tab choose recipe, C craft, 1 food, 2 water, 3 bandage,
 4 equip club, 5 equip jacket, R drink from natural water.
 
+### Crafting tiers and classless progression in the client
+
+The local preview now lists **every recipe in the authoritative item registry**,
+including T1-T4 tools, refined materials, melee gear and armor.
+Use **Tab / Shift+Tab** to choose the next/previous recipe and **C** to craft.
+Actual station, materials, profession-tier and inventory-space checks remain
+on `GameServer`, so a higher-tier recipe appearing in the menu does not mean
+it can be crafted without training.
+
+The HUD also shows separate wood, stone, ore, fiber and crafting levels,
+current carried kilograms, encumbrance-adjusted movement speed, and whether
+the character is in the **safe hub** or at risk of **PvP/full loot**.
+These values come from the existing server-owned inventory and progression
+rather than being guessed from player actions.
+
 ### Safe hub protected stash (local preview)
 
 Return to the blue stash building beside the workbench (x=5, z=0).

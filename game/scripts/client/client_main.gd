@@ -8,7 +8,6 @@ const WorldGen = preload("res://scripts/shared/world_gen.gd")
 const GameServer = preload("res://scripts/server/game_server.gd")
 const LOCAL_PLAYER_ID := 2
 const TERRAIN_STEP := 8.0
-const RECIPES := ["plank_1", "cloth_1", "bar_1", "axe_1", "pickaxe_1", "club_1", "jacket_1", "bandage"]
 
 var world
 var sim
@@ -16,6 +15,7 @@ var survivor
 var _sequence: int = 0
 var _facing: Vector2 = Vector2(0.0, -1.0)
 var _recipe_index: int = 0
+var _recipes: Array[String] = []
 var _camera: Camera3D
 var _avatar: MeshInstance3D
 var _stats: Label
@@ -39,6 +39,10 @@ func _ready() -> void:
 	world = WorldGen.new(1337)
 	sim = GameServer.new(world, 1337)
 	survivor = sim.add_player(LOCAL_PLAYER_ID, "Survivor")
+	var recipe_ids: Array = Defs.recipes().keys()
+	recipe_ids.sort()
+	for recipe_id in recipe_ids:
+		_recipes.append(str(recipe_id))
 	_make_light_and_camera()
 	_make_avatar()
 	_make_workbench()
@@ -157,12 +161,12 @@ func _make_hud() -> void:
 	layer.add_child(_stats)
 	_instructions = Label.new()
 	_instructions.name = "Instructions"
-	_instructions.position = Vector2(18, 145)
+	_instructions.position = Vector2(18, 202)
 	_instructions.add_theme_font_size_override("font_size", 15)
 	layer.add_child(_instructions)
 	_bank_panel = PanelContainer.new()
 	_bank_panel.name = "BankPanel"
-	_bank_panel.position = Vector2(18, 330)
+	_bank_panel.position = Vector2(18, 378)
 	_bank_panel.custom_minimum_size = Vector2(600, 165)
 	_bank_panel.visible = false
 	layer.add_child(_bank_panel)
@@ -480,9 +484,13 @@ func _unhandled_input(event: InputEvent) -> void:
 	elif event.is_action_pressed("survive_attack"):
 		_result("Attack", sim.cmd_attack(LOCAL_PLAYER_ID, _facing.x, _facing.y))
 	elif event.is_action_pressed("survive_next_recipe"):
-		_recipe_index = (_recipe_index + 1) % RECIPES.size()
+		if not _recipes.is_empty():
+			var step: int = -1 if Input.is_key_pressed(KEY_SHIFT) else 1
+			_recipe_index = posmod(_recipe_index + step, _recipes.size())
+			_update_hud()
 	elif event.is_action_pressed("survive_craft"):
-		_result("Craft", sim.cmd_craft(LOCAL_PLAYER_ID, RECIPES[_recipe_index]))
+		if not _recipes.is_empty():
+			_result("Craft", sim.cmd_craft(LOCAL_PLAYER_ID, _recipes[_recipe_index]))
 	elif event.is_action_pressed("survive_food"):
 		_result("Eat", sim.cmd_use(LOCAL_PLAYER_ID, "canned_food"))
 	elif event.is_action_pressed("survive_water"):
@@ -512,16 +520,23 @@ func _update_hud() -> void:
 	for slot in survivor.inventory.slots:
 		if not slot.is_empty():
 			rows.append("%s:%d" % [str(slot["id"]), int(slot["count"])])
-	_stats.text = "ALBION AFTER | LOCAL SURVIVAL PREVIEW\nHP %d  HUNGER %d  THIRST %d  STAMINA %d  KILLS %d\nZONE %s (T%d)  POS %d,%d  ZOMBIES %d\nSILVER %d  INVENTORY %s" % [
+	var levels: Dictionary = survivor.progression.levels()
+	var weight: float = survivor.inventory.total_weight()
+	var speed_pct: int = int(round(survivor.inventory.movement_factor() * 100.0))
+	var risk: String = "SAFE HUB" if world.is_safe(position.x, position.z) else "PVP + FULL LOOT"
+	_stats.text = "ALBION AFTER | SURVIVAL SANDBOX\nHP %d HUNGER %d THIRST %d STAMINA %d KILLS %d\nZONE %s (T%d) %s POS %d,%d ZOMBIES %d\nPROFESSIONS Wood T%d Stone T%d Ore T%d Fiber T%d Craft T%d\nCARRY %.1f kg MOVEMENT %d%% SILVER %d\nINVENTORY %s" % [
 		int(vitals.health), int(vitals.hunger), int(vitals.thirst), int(vitals.stamina), survivor.kills,
-		Defs.ZONE_NAMES[zone], WorldGen.tier_for_zone(zone), int(position.x), int(position.z),
-		sim.zombies.size(), survivor.inventory.count("silver"), ", ".join(rows)
+		Defs.ZONE_NAMES[zone], WorldGen.tier_for_zone(zone), risk, int(position.x), int(position.z), sim.zombies.size(),
+		int(levels["wood"]), int(levels["stone"]), int(levels["ore"]), int(levels["fiber"]),
+		survivor.progression.crafting_level(), weight, speed_pct, survivor.inventory.count("silver"),
+		", ".join(rows)
 	]
-	var recipe: Dictionary = Defs.recipes()[RECIPES[_recipe_index]]
+	var recipe_id: String = _recipes[_recipe_index] if not _recipes.is_empty() else "bandage"
+	var recipe: Dictionary = Defs.recipes().get(recipe_id, {})
 	var near_bench: bool = Vector2(position.x, position.z).distance_to(GameServer.WORKBENCH_POSITION) < GameServer.WORKBENCH_RANGE
-	_instructions.text = "WASD move | Shift sprint | E gather | Q loot | F attack\nTab recipe | C craft | B stash (at hub) | 1 food 2 water 3 heal 4 weapon 5 armor R lake\nN buy water / V sell salvage at hub\nCRAFT %s -> %s x%d | %s | inputs %s\n%s" % [
-		RECIPES[_recipe_index], str(recipe["output"]), int(recipe["count"]),
+	_instructions.text = "WASD move | Shift sprint | E gather | Q loot | F attack\nTab / Shift+Tab recipes | C craft | B stash | 1 food 2 water 3 heal 4 weapon 5 armor R lake\nN buy water / V sell salvage at hub\nCRAFT %s -> %s x%d | %s | inputs %s\n%s" % [
+		recipe_id, str(recipe.get("output", "")), int(recipe.get("count", 0)),
 		"WORKBENCH" if near_bench else "workbench at x=9, z=0",
-		str(recipe["inputs"]), _feedback
+		str(recipe.get("inputs", {})), _feedback
 	]
 	_update_bank_hud()
