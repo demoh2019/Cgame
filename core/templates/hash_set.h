@@ -92,11 +92,15 @@ private:
 		if (_keys == nullptr || _size == 0) {
 			return false; // Failed lookups, no elements
 		}
+		return _lookup_key_idx_unchecked(p_key, _hash(p_key), r_key_idx);
+	}
 
+	// The caller has already calculated the normalized hash. Reuse it on insert
+	// rather than hashing long String / StringName keys a second time.
+	bool _lookup_key_idx_unchecked(const TKey &p_key, uint32_t p_hash, uint32_t &r_key_idx) const {
 		const uint32_t capacity = hash_table_size_primes[_capacity_idx];
 		const uint64_t capacity_inv = hash_table_size_primes_inv[_capacity_idx];
-		uint32_t hash = _hash(p_key);
-		uint32_t hash_idx = fastmod(hash, capacity_inv, capacity);
+		uint32_t hash_idx = fastmod(p_hash, capacity_inv, capacity);
 		uint32_t distance = 0;
 
 		while (true) {
@@ -104,7 +108,7 @@ private:
 				return false;
 			}
 
-			if (_hashes[hash_idx] == hash && Comparator::compare(_keys[_hash_idx_to_key_idx[hash_idx]], p_key)) {
+			if (_hashes[hash_idx] == p_hash && Comparator::compare(_keys[_hash_idx_to_key_idx[hash_idx]], p_key)) {
 				r_key_idx = _hash_idx_to_key_idx[hash_idx];
 				return true;
 			}
@@ -185,8 +189,9 @@ private:
 			_hash_idx_to_key_idx = reinterpret_cast<uint32_t *>(Memory::alloc_static(sizeof(uint32_t) * capacity));
 		}
 
+		const uint32_t hash = _hash(p_key);
 		uint32_t key_idx = 0;
-		bool exists = _lookup_key_idx(p_key, key_idx);
+		bool exists = _size > 0 && _lookup_key_idx_unchecked(p_key, hash, key_idx);
 
 		if (exists) {
 			return key_idx;
@@ -196,7 +201,6 @@ private:
 				_resize_and_rehash(_capacity_idx + 1);
 			}
 
-			uint32_t hash = _hash(p_key);
 			memnew_placement(&_keys[_size], TKey(p_key));
 			_insert_with_hash(hash, _size);
 			_size++;
@@ -274,7 +278,8 @@ public:
 
 		const uint32_t capacity = hash_table_size_primes[_capacity_idx];
 		const uint64_t capacity_inv = hash_table_size_primes_inv[_capacity_idx];
-		uint32_t next_hash_idx = fastmod(hash_idx + 1, capacity_inv, capacity);
+		uint32_t next_hash_idx = hash_idx;
+		_increment_mod(next_hash_idx, capacity);
 		while (_hashes[next_hash_idx] != EMPTY_HASH && _get_probe_length(next_hash_idx, _hashes[next_hash_idx], capacity, capacity_inv) != 0) {
 			uint32_t cur_key_idx = _hash_idx_to_key_idx[hash_idx];
 			uint32_t next_key_idx = _hash_idx_to_key_idx[next_hash_idx];
