@@ -28,6 +28,8 @@
 /**************************************************************************/
 
 #include "servers/physics_speculative_capsule_contact.h"
+#include "core/math/transform_2d.h"
+#include "core/math/transform_3d.h"
 #include "servers/physics_contact_recycling.h"
 #include "tests/test_macros.h"
 
@@ -194,6 +196,45 @@ TEST_CASE("[PhysicsSpeculativeCapsule] Randomized 3D candidate filter agrees wit
 				real_t(0.5), half_segment, motion, real_t(10), a, b, normal);
 		CHECK(actual == expected);
 	}
+}
+
+
+TEST_CASE("[PhysicsSpeculativeCapsule] Rotated and uniformly scaled 2D anchors preserve gap and pair order") {
+	const Transform2D capsule_frame(Vector2(0, 2), Vector2(-2, 0), Vector2(10, 20));
+	const Transform2D inverse_capsule = capsule_frame.affine_inverse();
+	const Vector2 circle_world = capsule_frame.xform(Vector2(-3, 0));
+	const Vector2 motion_world = capsule_frame.basis_xform(Vector2(5, 0));
+	Vector2 circle_local, capsule_local, local_normal;
+	CHECK(physics_speculative_sphere_capsule_contact(
+			inverse_capsule.xform(circle_world), real_t(0.5), real_t(0.5),
+			real_t(1.5), inverse_capsule.basis_xform(motion_world), real_t(3),
+			circle_local, capsule_local, local_normal));
+	const Vector2 world_circle = capsule_frame.xform(circle_local);
+	const Vector2 world_capsule = capsule_frame.xform(capsule_local);
+	const Vector2 world_normal = capsule_frame.basis_xform(local_normal).normalized();
+	CHECK(Math::is_equal_approx((world_circle - world_capsule).dot(world_normal), real_t(-4)));
+	CHECK(Math::is_equal_approx((world_capsule - world_circle).dot(-world_normal), real_t(-4)));
+}
+
+TEST_CASE("[PhysicsSpeculativeCapsule] Rotated and uniformly scaled 3D anchors preserve gap and pair order") {
+	Basis basis;
+	basis.set_column(0, Vector3(0, 2, 0));
+	basis.set_column(1, Vector3(-2, 0, 0));
+	basis.set_column(2, Vector3(0, 0, 2));
+	const Transform3D capsule_frame(basis, Vector3(10, 20, 30));
+	const Transform3D inverse_capsule = capsule_frame.affine_inverse();
+	const Vector3 sphere_world = capsule_frame.xform(Vector3(-3, 0, 0));
+	const Vector3 motion_world = capsule_frame.basis.xform(Vector3(5, 0, 0));
+	Vector3 sphere_local, capsule_local, local_normal;
+	CHECK(physics_speculative_sphere_capsule_contact(
+			inverse_capsule.xform(sphere_world), real_t(0.5), real_t(0.5),
+			real_t(1.5), inverse_capsule.basis.xform(motion_world), real_t(3),
+			sphere_local, capsule_local, local_normal));
+	const Vector3 world_sphere = capsule_frame.xform(sphere_local);
+	const Vector3 world_capsule = capsule_frame.xform(capsule_local);
+	const Vector3 world_normal = capsule_frame.basis.xform(local_normal).normalized();
+	CHECK(Math::is_equal_approx((world_sphere - world_capsule).dot(world_normal), real_t(-4)));
+	CHECK(Math::is_equal_approx((world_capsule - world_sphere).dot(-world_normal), real_t(-4)));
 }
 
 } // namespace TestPhysicsSpeculativeCapsuleContact
