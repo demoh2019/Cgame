@@ -211,6 +211,35 @@ def summarize(runs: list[dict[str, Any]]) -> dict[str, Any]:
     }
 
 
+
+def check_absolute_limits(cases: dict[str, Any], max_frame_ms: float | None,
+                          max_physics_ms: float | None, max_vram_mib: float | None) -> list[str]:
+    """Enforce explicit local budgets against measured scenario maxima."""
+    failures = []
+    metrics = (
+        ("peak_frame_ms", max_frame_ms, "ms"),
+        ("peak_physics_ms", max_physics_ms, "ms"),
+        ("peak_video_memory_bytes", None if max_vram_mib is None else max_vram_mib * 1048576, "bytes"),
+    )
+    for case_name, case in cases.items():
+        for number, run in enumerate(case.get("runs", []), start=1):
+            if run.get("status") != "passed":
+                continue
+            detail = run.get("engine", {}).get("detail", {})
+            if not isinstance(detail, dict):
+                continue
+            for field, limit, unit in metrics:
+                if limit is None or field not in detail:
+                    continue
+                reading = detail[field]
+                if not isinstance(reading, (int, float)) or not math.isfinite(reading) or reading < 0:
+                    failures.append("%s #%d invalid %s: %r" % (case_name, number, field, reading))
+                elif reading > limit:
+                    failures.append("%s #%d %s: %.3f %s > %.3f %s" % (
+                        case_name, number, field, reading, unit, limit, unit))
+    return failures
+
+
 def compare_baseline(current: dict[str, Any], baseline: dict[str, Any],
                      percent: float, memory_growth_limit_mib: float | None) -> list[str]:
     errors: list[str] = []
@@ -302,6 +331,9 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--baseline", type=Path, help="Previous JSON report with identical preset/scale/mode")
     parser.add_argument("--max-regression-pct", type=float, default=20.0)
     parser.add_argument("--max-retained-growth-mib", type=float, default=None)
+    parser.add_argument("--max-frame-ms", type=float, help="Maximum observed script/frame time (ms), for cases reporting it")
+    parser.add_argument("--max-physics-ms", type=float, help="Maximum observed physics process time (ms)")
+    parser.add_argument("--max-vram-mib", type=float, help="Maximum observed renderer video memory (MiB)")
     parser.add_argument("--output", type=Path, default=Path("stress-results.json"))
     parser.add_argument("--summary-md", type=Path, help="Also write a ranked human-readable bottleneck report")
     parser.add_argument("--list-cases", action="store_true")
@@ -319,6 +351,8 @@ def main(argv: list[str] | None = None) -> int:
     if (config["repeats"] < 1 or config["scale"] < 1 or config["scale"] > 1000
             or config["frames"] < 1 or config["frames"] > 100000
             or config["timeout"] <= 0 or config["rss_mib"] <= 0
+            or any(value is not None and value < 0 for value in (
+                args.max_frame_ms, args.max_physics_ms, args.max_vram_mib))
             or args.max_regression_pct < 0
             or (args.max_retained_growth_mib is not None and args.max_retained_growth_mib < 0)):
         parser.error("All limits and iterations must be positive and within engine bounds")
@@ -360,6 +394,8 @@ def main(argv: list[str] | None = None) -> int:
                                           (case, repetition + 1, run.get("failure", "failed")))
         report["cases"][case] = summarize(runs)
 
+    report["failures"].extend(check_absolute_limits(
+        report["cases"], args.max_frame_ms, args.max_physics_ms, args.max_vram_mib))
     try:
         baseline = json.loads(args.baseline.read_text(encoding="utf-8")) if args.baseline else report
         report["failures"].extend(compare_baseline(report, baseline,
