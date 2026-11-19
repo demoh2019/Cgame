@@ -1140,8 +1140,9 @@ TEST_CASE("[FileAccess][Performance] Compressed block tables preserve tiny files
 			const uint64_t offset = uint64_t(byte_count / 2);
 			reader->seek(offset);
 			uint8_t segment[13] = {};
-			REQUIRE(reader->get_buffer(segment, sizeof(segment)) == sizeof(segment));
-			for (int i = 0; i < int(sizeof(segment)); i++) {
+			const uint64_t segment_size = MIN(uint64_t(sizeof(segment)), uint64_t(byte_count) - offset);
+			REQUIRE(reader->get_buffer(segment, segment_size) == segment_size);
+			for (int i = 0; i < int(segment_size); i++) {
 				CHECK(segment[i] == source[int(offset) + i]);
 			}
 			reader->close();
