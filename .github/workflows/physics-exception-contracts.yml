@@ -11,11 +11,13 @@ on:
       - "modules/godot_physics_3d/**"
       - "tests/stress/physics_exception_pairs_*.gd"
       - "tests/stress/physics_bvh_streaming_*.gd"
+      - "tests/stress/physics_compound_filter_batch_*.gd"
       - "tests/stress/physics_motion_exclusions_*.gd"
       - "tests/stress/stress.gd"
       - "tests/stress/run.py"
       - "tests/stress/project.godot"
       - "tests/stress/test_physics_bvh_streaming.py"
+      - "tests/stress/test_physics_compound_filter_batch.py"
       - "tests/stress/test_physics_early_pair_filter.py"
       - "tests/stress/test_physics_motion_shape_pruning.py"
   pull_request:
@@ -41,3 +43,4 @@ jobs:
           python3 -m unittest discover -s tests/stress -p 'test_physics_early_pair_filter.py' -v
           python3 -m unittest discover -s tests/stress -p 'test_physics_motion_shape_pruning.py' -v
           python3 -m unittest discover -s tests/stress -p 'test_physics_bvh_streaming.py' -v
+          python3 -m unittest discover -s tests/stress -p 'test_physics_compound_filter_batch.py' -v
