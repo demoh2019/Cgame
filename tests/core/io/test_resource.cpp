@@ -701,4 +701,39 @@ TEST_CASE("[Resource] Breaking circular references on save") {
 	resource_c->remove_meta("next");
 }
 
+TEST_CASE("[Resource] Threaded nested loads release task tokens") {
+	const String directory = TestUtils::get_temp_path("threaded_resource_token_lifetime");
+	REQUIRE(DirAccess::make_dir_recursive_absolute(directory) == OK);
+	const String child_path = directory.path_join("child.tres");
+	const String parent_path = directory.path_join("parent.tres");
+
+	Ref<Resource> child = memnew(Resource);
+	child->set_name("Threaded child");
+	REQUIRE(ResourceSaver::save(child, child_path) == OK);
+	child->set_path_cache(child_path);
+
+	Ref<Resource> parent = memnew(Resource);
+	parent->set_name("Threaded parent");
+	parent->set_meta("external_resource", child);
+	REQUIRE(ResourceSaver::save(parent, parent_path, ResourceSaver::FLAG_RELATIVE_PATHS) == OK);
+	child.unref();
+	parent.unref();
+
+	// Repeated, uncached loads exercise reference release with and without sub-threads.
+	for (bool sub_threads : { false, true }) {
+		for (int iteration = 0; iteration < 12; ++iteration) {
+			INFO("sub_threads: ", sub_threads, ", iteration: ", iteration);
+			REQUIRE(ResourceLoader::load_threaded_request(parent_path, "", sub_threads, ResourceLoader::CACHE_MODE_IGNORE) == OK);
+			Error error = ERR_BUG;
+			Ref<Resource> loaded = ResourceLoader::load_threaded_get(parent_path, &error);
+			REQUIRE(error == OK);
+			REQUIRE(loaded.is_valid());
+			CHECK(loaded->get_name() == "Threaded parent");
+			Ref<Resource> nested = loaded->get_meta("external_resource");
+			REQUIRE(nested.is_valid());
+			CHECK(nested->get_name() == "Threaded child");
+		}
+	}
+}
+
 } // namespace TestResource
