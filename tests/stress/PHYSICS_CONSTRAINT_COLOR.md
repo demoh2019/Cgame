@@ -50,15 +50,16 @@ The standalone benchmark verifies masks before reporting timing in ns/op,
 using deterministic pseudo-random values for common, random and saturated
 hub cases. Results are sensitive to compiler flags and CPU architecture.
 Any claimed speedup applies only to color selection, not constraint graph
-building, solver iteration, total frame rate or resident RAM.
+building, solver iteration, total frame rate or resident RAM. This standalone
+benchmark is not an end-to-end physics-frame benchmark.
 
-## Performance validation before merging
+## Performance validation before release acceptance
 
 Benchmark equivalent scenes on the same hardware with and without this
 change: one dominant contact island, one high-degree hub, many small
 islands (which bypass color selection), and an unchanged frame that reuses
 the color cache. Report per-frame physics-step time (median and p95),
-CPU usage and peak RSS. Native tests and CI must pass before merging.
+CPU usage and peak RSS. Native engine tests and CI must pass before a release is considered verified.
 
 References:
 - Box2D: https://box2d.org/posts/2024/08/simd-matters/
