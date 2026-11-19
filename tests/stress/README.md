@@ -283,6 +283,37 @@ this solver. Benchmark identical builds on the same machine, and separate
 sparse-body tests from expensive soft contact workloads. These new cases do
 not constitute a completed performance measurement until run.
 
+## SoftBody3D exact finite segment raycasts (Jolt / Rapier parity)
+
+The built-in GodotPhysics3D soft-body ray query now intersects triangles
+against the **finite requested segment**, rather than an infinite ray. This
+prevents false hits just beyond the endpoint when the face BVH is expanded
+by the contact margin. It honors `hit_back_faces` with triangle-winding
+culling and correctly flips the surface normal for allowed back hits.
+The selected triangle's **face index** is reported to scene ray queries.
+Nearest-hit ordering uses a dominant-axis segment fraction rather than
+world-space squared distance, avoiding the float32 squared-distance
+overflow failure on large world raycasts. A zero-length segment returns
+a miss without traversing the face BVH.
+
+These behaviors mirror Jolt's configurable triangle back-face mode and
+Rapier's bounded ray/time-of-impact and hit-feature reporting, while
+keeping Cgame's existing DynamicBVH and Geometry3D implementation.
+
+```bash
+python3 -m unittest discover -s tests/stress -p test_physics_soft_segment_raycast.py -v
+
+./bin/godot.macos.editor.arm64 --headless --path tests/stress \
+  --script res://physics_soft_segment_raycast_regression.gd
+```
+
+The runtime scene uses two fixed triangles at different heights. It checks
+the nearest face index, normal orientation on both sides, a segment that
+ends inside an inflated BVH leaf but short of the triangle, and a long ray.
+It requires a built Cgame editor using the built-in GodotPhysics3D backend.
+The source/reference checks do not establish a successful C++ build or
+native integration run by themselves.
+
 ## SoftBody3D central impulse and force with pinned particles
 
 The built-in GodotPhysics3D solver now distributes `soft_body_apply_central_impulse`
