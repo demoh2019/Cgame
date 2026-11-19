@@ -318,7 +318,7 @@ bool GodotBodyPair2D::setup(real_t p_step) {
 			B->get_continuous_collision_detection_mode() != PS2DE::CCD_MODE_DISABLED;
 	const uint64_t geometry_version_a = A->get_collision_geometry_version();
 	const uint64_t geometry_version_b = B->get_collision_geometry_version();
-	if (contact_recycling.can_reuse(geometry_version_a, geometry_version_b, collided, contact_count, ccd_enabled)) {
+	if (contact_recycling.can_reuse(geometry_version_a, geometry_version_b, collided && !oneway_disabled, contact_count, ccd_enabled)) {
 		// SAT may have emitted a new manifold with fewer points, leaving
 		// old (unused) contacts to be pruned on the next frame. Never recycle
 		// such a mixed manifold indefinitely without validating the points.
