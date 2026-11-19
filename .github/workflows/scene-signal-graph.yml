@@ -1,0 +1,37 @@
+name: AI scene signal graph regressions
+on:
+  push:
+    branches: [develop]
+    paths:
+      - 'misc/scripts/scene_signal_graph.py'
+      - 'misc/scripts/scene_context_export.py'
+      - 'misc/scripts/tests/test_scene_signal_graph.py'
+      - 'misc/scripts/README_scene_signal_graph.md'
+      - '.github/workflows/scene-signal-graph.yml'
+  pull_request:
+    paths:
+      - 'misc/scripts/scene_signal_graph.py'
+      - 'misc/scripts/scene_context_export.py'
+      - 'misc/scripts/tests/test_scene_signal_graph.py'
+      - 'misc/scripts/README_scene_signal_graph.md'
+      - '.github/workflows/scene-signal-graph.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  offline-regressions:
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ['3.9', '3.13']
+        os: [ubuntu-latest, windows-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+      - name: Verify syntax and run signal topology tests
+        run: |
+          python -m py_compile misc/scripts/scene_context_export.py misc/scripts/scene_signal_graph.py misc/scripts/tests/test_scene_signal_graph.py
+          python -m unittest discover -s misc/scripts/tests -p test_scene_signal_graph.py -v
