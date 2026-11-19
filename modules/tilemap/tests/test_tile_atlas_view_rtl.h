@@ -32,6 +32,7 @@
 
 #if defined(TOOLS_ENABLED)
 
+#include "core/math/math_funcs.h"
 #include "modules/tilemap/editor/tile_atlas_view.h"
 #include "tests/test_macros.h"
 
