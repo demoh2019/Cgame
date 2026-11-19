@@ -34,6 +34,10 @@
 
 #include "terrain_mesh.h"
 
+#ifndef PHYSICS_3D_DISABLED
+#include "terrain_collision_3d.h"
+#endif
+
 #include "core/object/class_db.h"
 
 #ifdef TOOLS_ENABLED
@@ -44,6 +48,9 @@
 void initialize_terrain_module(ModuleInitializationLevel p_level) {
 	if (p_level == MODULE_INITIALIZATION_LEVEL_SCENE) {
 		GDREGISTER_CLASS(TerrainMesh);
+#ifndef PHYSICS_3D_DISABLED
+		GDREGISTER_CLASS(TerrainCollision3D);
+#endif
 	}
 #ifdef TOOLS_ENABLED
 	if (p_level == MODULE_INITIALIZATION_LEVEL_EDITOR) {
