@@ -59,6 +59,10 @@ public:
 int cull_convex(CullParams &r_params, bool p_translate_hits = true) {
 	_cull_hits.clear();
 	r_params.result_count = 0;
+	// No matching tree or no output capacity: avoid traversing the BVH.
+	if (r_params.tree_collision_mask == 0 || r_params.result_max <= 0) {
+		return 0;
+	}
 
 	for (int n = 0; n < NUM_TREES; n++) {
 		const uint32_t tree_test_mask = uint32_t(1) << n;
@@ -87,6 +91,10 @@ int cull_convex(CullParams &r_params, bool p_translate_hits = true) {
 int cull_segment(CullParams &r_params, bool p_translate_hits = true) {
 	_cull_hits.clear();
 	r_params.result_count = 0;
+	// No matching tree or no output capacity: avoid traversing the BVH.
+	if (r_params.tree_collision_mask == 0 || r_params.result_max <= 0) {
+		return 0;
+	}
 
 	for (int n = 0; n < NUM_TREES; n++) {
 		const uint32_t tree_test_mask = uint32_t(1) << n;
@@ -118,7 +126,7 @@ int cull_segment(CullParams &r_params, bool p_translate_hits = true) {
 // a segment crosses more than INTERSECTION_QUERY_MAX physics shapes.
 using SegmentCastCallback = real_t (*)(T *, int, real_t, void *);
 void cast_segment(const POINT &p_from, const POINT &p_to, SegmentCastCallback p_callback, void *p_userdata, uint32_t p_tree_collision_mask, const T *p_tester = nullptr) {
-	if (!p_callback) {
+	if (!p_callback || p_tree_collision_mask == 0) {
 		return;
 	}
 
@@ -165,6 +173,10 @@ void cast_segment(const POINT &p_from, const POINT &p_to, SegmentCastCallback p_
 int cull_point(CullParams &r_params, bool p_translate_hits = true) {
 	_cull_hits.clear();
 	r_params.result_count = 0;
+	// No matching tree or no output capacity: avoid traversing the BVH.
+	if (r_params.tree_collision_mask == 0 || r_params.result_max <= 0) {
+		return 0;
+	}
 
 	for (int n = 0; n < NUM_TREES; n++) {
 		const uint32_t tree_test_mask = uint32_t(1) << n;
@@ -193,6 +205,10 @@ int cull_point(CullParams &r_params, bool p_translate_hits = true) {
 int cull_aabb(CullParams &r_params, bool p_translate_hits = true) {
 	_cull_hits.clear();
 	r_params.result_count = 0;
+	// No matching tree or no output capacity: avoid traversing the BVH.
+	if (r_params.tree_collision_mask == 0 || r_params.result_max <= 0) {
+		return 0;
+	}
 
 	for (int n = 0; n < NUM_TREES; n++) {
 		const uint32_t tree_test_mask = uint32_t(1) << n;
