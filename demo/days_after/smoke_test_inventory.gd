@@ -101,6 +101,8 @@ func _run() -> void:
     negative.call("interact", player)
     _expect(int(player.get("food_count")) == 1,
             "negative pickup quantity must not modify inventory")
+    _expect(not bool(negative.get("collected")),
+            "invalid quantities must not consume a world pickup")
 
     player.queue_free()
     invalid.queue_free()
