@@ -43,6 +43,7 @@
 #include "servers/physics_softbody_adiabatic_gas.h"
 #include "servers/physics_softbody_shape_matching.h"
 #include "servers/physics_fem_tetra_neo_hookean.h"
+#include "servers/physics_fem_tetra_standard_linear_solid.h"
 #include "servers/physics_fem_tetra_mooney_rivlin.h"
 #include "servers/physics_fem_tetra_ogden.h"
 #include "servers/physics_fem_tetra_principal_limits.h"
@@ -566,6 +567,7 @@ void GodotSoftBody3D::solve_shape_matching_clusters(real_t p_strength) {
 void GodotSoftBody3D::initialize_fem_tetra() {
 	const bool previously_lumped = !xpbd_fem_mass_fractions.is_empty();
 	xpbd_fem_tetrahedra.reset();
+	xpbd_fem_sls_states.reset();
 	xpbd_fem_fiber_lambdas.reset();
 	xpbd_fem_principal_lambdas.reset();
 	xpbd_fem_fiber_plastic_rest_stretches.reset();
@@ -655,6 +657,18 @@ void GodotSoftBody3D::initialize_fem_tetra() {
 			xpbd_fem_damage.resize(xpbd_fem_tetrahedra.size());
 			for (double &damage : xpbd_fem_damage) {
 				damage = 0.0;
+			}
+		}
+
+		// An SLS element remembers its own material-frame viscous strain.
+		// The full state only exists when BOTH equilibrium FEM and the
+		// transient viscoelastic spring are explicitly enabled.
+		if (!xpbd_fem_tetrahedra.is_empty() &&
+				get_space()->get_soft_body_tetra_fem_compliance() > 0.0 &&
+				get_space()->get_soft_body_tetra_sls_compliance() > 0.0) {
+			xpbd_fem_sls_states.resize(xpbd_fem_tetrahedra.size());
+			for (PhysicsFEMTetraSLSState &state : xpbd_fem_sls_states) {
+				state = PhysicsFEMTetraSLSState();
 			}
 		}
 
@@ -3430,6 +3444,26 @@ void GodotSoftBody3D::solve_constraints(real_t p_delta) {
 		xpbd_fem_fiber_plastic_rest_stretches.reset();
 	}
 
+	// One-arm Standard Linear Solid: update the *material-frame internal
+	// strain* exactly once per physics tick. Only the XPBD multiplier may
+	// change during solver iterations; this history persists across ticks.
+	// A rejected/inverted element keeps its last valid internal strain.
+	if (!xpbd_fem_sls_states.is_empty() &&
+			xpbd_fem_sls_states.size() == xpbd_fem_tetrahedra.size() &&
+			get_space()->get_soft_body_tetra_fem_compliance() > 0.0 &&
+			get_space()->get_soft_body_tetra_sls_compliance() > 0.0 && p_delta > 0.0) {
+		const double tau = double(get_space()->get_soft_body_tetra_sls_relaxation_time());
+		for (uint32_t i = 0; i < xpbd_fem_tetrahedra.size(); ++i) {
+			const PhysicsFEMConvexTetra &tet = xpbd_fem_tetrahedra[i];
+			const Vector3 positions[4] = {
+				nodes[tet.a].x, nodes[tet.b].x,
+				nodes[tet.c].x, nodes[tet.d].x
+			};
+			physics_fem_tetra_sls_relax(positions, tet.rest, tau,
+					double(p_delta), xpbd_fem_sls_states[i]);
+		}
+	}
+
 	// Local scalar continuum damage is evaluated on predicted positions
 	// BEFORE the elastic XPBD projection removes the over-yield strain.
 	// The strength history is updated once per fixed physics tick, not
@@ -3596,6 +3630,12 @@ void GodotSoftBody3D::solve_constraints(real_t p_delta) {
 	const double fem_alpha = p_delta > 0.0 ? fem_compliance / (double(p_delta) * double(p_delta)) : 0.0;
 	const bool use_fem = !xpbd_fem_tetrahedra.is_empty() && fem_compliance > 0.0 && p_delta > 0.0 &&
 			Math::is_finite(fem_alpha) && fem_alpha > 0.0;
+	const double fem_sls_compliance = get_space() ? double(get_space()->get_soft_body_tetra_sls_compliance()) : 0.0;
+	const double fem_sls_alpha = p_delta > 0.0 ?
+			fem_sls_compliance / (double(p_delta) * double(p_delta)) : 0.0;
+	const bool use_fem_sls = use_fem && fem_sls_compliance > 0.0 &&
+			Math::is_finite(fem_sls_alpha) && fem_sls_alpha > 0.0 &&
+			xpbd_fem_sls_states.size() == xpbd_fem_tetrahedra.size();
 	const double fem_principal_min = get_space() ? double(get_space()->get_soft_body_tetra_principal_min_stretch()) : 0.0;
 	const double fem_principal_max = get_space() ? double(get_space()->get_soft_body_tetra_principal_max_stretch()) : 0.0;
 	const double fem_principal_compliance = get_space() ? double(get_space()->get_soft_body_tetra_principal_limit_compliance()) : 0.0;
@@ -3786,6 +3826,14 @@ void GodotSoftBody3D::solve_constraints(real_t p_delta) {
 			tetra.lambda = 0.0;
 		}
 	}
+	// Each Maxwell spring has its own solver multiplier, distinct from
+	// the permanent tensor history. Reset only lambda each tick; leave
+	// relaxing_strain unchanged (and free no state while enabled).
+	if (use_fem_sls) {
+		for (PhysicsFEMTetraSLSState &state : xpbd_fem_sls_states) {
+			state.lambda = 0.0;
+		}
+	}
 	// The two unilateral singular-value constraints keep one pair of
 	// multipliers per cooked tetra, persisting only within this physics tick.
 	if (use_fem_principal) {
@@ -3935,6 +3983,17 @@ void GodotSoftBody3D::solve_constraints(real_t p_delta) {
 					physics_fem_tetra_solve(a.x, b.x, c.x, d.x,
 							a.im, b.im, c.im, d.im,
 							tetra.rest, fem_poisson, local_alpha, tetra.lambda);
+				}
+				if (use_fem_sls) {
+					PhysicsFEMTetraSLSState &state = xpbd_fem_sls_states[i];
+					double local_sls_alpha = fem_sls_alpha;
+					if (has_damage) {
+						PhysicsFEMTetraDamage::effective_compliance(
+								fem_sls_alpha, xpbd_fem_damage[i], local_sls_alpha);
+					}
+					physics_fem_tetra_sls_solve(a.x, b.x, c.x, d.x,
+							a.im, b.im, c.im, d.im, tetra.rest,
+							state, fem_poisson, local_sls_alpha, state.lambda);
 				}
 				if (use_fem_principal) {
 					PhysicsFEMTetraPrincipalLambdas &lambda = xpbd_fem_principal_lambdas[i];
@@ -4249,6 +4308,7 @@ void GodotSoftBody3D::destroy() {
 	xpbd_volume_rest = 0.0;
 	xpbd_volume_original_rest = 0.0;
 	xpbd_fem_tetrahedra.reset();
+	xpbd_fem_sls_states.reset();
 	xpbd_fem_fiber_lambdas.reset();
 	xpbd_fem_principal_lambdas.reset();
 	xpbd_fem_fiber_plastic_rest_stretches.reset();

@@ -1390,6 +1390,12 @@ GodotSpace3D::GodotSpace3D() {
 	soft_body_tetra_fiber_plastic_max_stretch = Math::is_finite(fiber_plastic_max_stretch) ? CLAMP(fiber_plastic_max_stretch, real_t(1.0), real_t(16.0)) : real_t(3.0);
 	const real_t configured_tetra_viscosity = GLOBAL_GET("physics/3d/solver/soft_body_tetra_fem_viscosity");
 	soft_body_tetra_fem_viscosity = Math::is_finite(configured_tetra_viscosity) ? MAX(real_t(0.0), configured_tetra_viscosity) : real_t(0.0);
+	const real_t configured_sls_compliance = GLOBAL_GET("physics/3d/solver/soft_body_tetra_sls_compliance");
+	soft_body_tetra_sls_compliance = Math::is_finite(configured_sls_compliance) ?
+			MAX(real_t(0.0), configured_sls_compliance) : real_t(0.0);
+	const real_t configured_sls_tau = GLOBAL_GET("physics/3d/solver/soft_body_tetra_sls_relaxation_time");
+	soft_body_tetra_sls_relaxation_time = Math::is_finite(configured_sls_tau) ?
+			MAX(real_t(0.001), configured_sls_tau) : real_t(0.25);
 	const real_t configured_tetra_plastic_rate = GLOBAL_GET("physics/3d/solver/soft_body_tetra_volume_plastic_rate");
 	soft_body_tetra_volume_plastic_rate = Math::is_finite(configured_tetra_plastic_rate) ? MAX(real_t(0.0), configured_tetra_plastic_rate) : real_t(0.0);
 	const real_t configured_tetra_plastic_yield = GLOBAL_GET("physics/3d/solver/soft_body_tetra_volume_plastic_yield");
