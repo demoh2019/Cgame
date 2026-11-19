@@ -393,9 +393,19 @@ JPH::SoftBodySharedSettings *JoltSoftBody3D::_create_shared_settings() {
 	if (JoltProjectSettings::soft_body_volume_preservation) {
 		try_build_convex_volume_fan(*settings, JoltProjectSettings::soft_body_volume_compliance);
 	}
-	float multiplier = 1.0f - shrinking_factor;
+	const float multiplier = 1.0f - shrinking_factor;
 	for (JPH::SoftBodySharedSettings::Edge &e : settings->mEdgeConstraints) {
 		e.mRestLength *= multiplier;
+	}
+	// Long-range tethers also encode rest lengths. If cloth contracts
+	// without scaling the tether limits, they allow the old unshrunken
+	// anchor distance and defeat part of the contraction. Negative
+	// shrinking_factor expands both kinds of constraint consistently.
+	// Skip this pass entirely for the common shrinking_factor == 0.
+	if (multiplier != 1.0f) {
+		for (JPH::SoftBodySharedSettings::LRA &tether : settings->mLRAConstraints) {
+			tether.mMaxDistance *= multiplier;
+		}
 	}
 	settings->Optimize();
 
