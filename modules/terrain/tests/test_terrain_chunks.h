@@ -24,6 +24,8 @@
 #include "../terrain_3d.h"
 #include "tests/test_macros.h"
 
+#include <limits>
+
 namespace TestTerrainChunks {
 
 TEST_CASE("[TerrainChunks] Chunk mesh at origin equals full mesh") {
@@ -38,11 +40,21 @@ TEST_CASE("[TerrainChunks] Chunk mesh at origin equals full mesh") {
     REQUIRE(chunk.is_valid());
     const Array fa = full->surface_get_arrays(0);
     const Array ca = chunk->surface_get_arrays(0);
-    CHECK(PackedVector3Array(fa[Mesh::ARRAY_VERTEX]) == PackedVector3Array(ca[Mesh::ARRAY_VERTEX]));
-    CHECK(PackedVector3Array(fa[Mesh::ARRAY_NORMAL]) == PackedVector3Array(ca[Mesh::ARRAY_NORMAL]));
-    CHECK(PackedVector2Array(fa[Mesh::ARRAY_TEX_UV]) == PackedVector2Array(ca[Mesh::ARRAY_TEX_UV]));
-    CHECK(PackedColorArray(fa[Mesh::ARRAY_COLOR]) == PackedColorArray(ca[Mesh::ARRAY_COLOR]));
-    CHECK(PackedInt32Array(fa[Mesh::ARRAY_INDEX]) == PackedInt32Array(ca[Mesh::ARRAY_INDEX]));
+    const PackedVector3Array fv = fa[Mesh::ARRAY_VERTEX];
+    const PackedVector3Array cv = ca[Mesh::ARRAY_VERTEX];
+    const PackedVector3Array fn = fa[Mesh::ARRAY_NORMAL];
+    const PackedVector3Array cn = ca[Mesh::ARRAY_NORMAL];
+    const PackedVector2Array fuv = fa[Mesh::ARRAY_TEX_UV];
+    const PackedVector2Array cuv = ca[Mesh::ARRAY_TEX_UV];
+    const PackedColorArray fc = fa[Mesh::ARRAY_COLOR];
+    const PackedColorArray cc = ca[Mesh::ARRAY_COLOR];
+    const PackedInt32Array fi = fa[Mesh::ARRAY_INDEX];
+    const PackedInt32Array ci = ca[Mesh::ARRAY_INDEX];
+    CHECK(fv == cv);
+    CHECK(fn == cn);
+    CHECK(fuv == cuv);
+    CHECK(fc == cc);
+    CHECK(fi == ci);
 }
 
 TEST_CASE("[TerrainChunks] Chunk vertices use local coordinates and global UVs") {
@@ -73,9 +85,15 @@ TEST_CASE("[TerrainChunks] Coarser strides reduce the mesh triangle budget") {
     REQUIRE(a.is_valid());
     REQUIRE(b.is_valid());
     REQUIRE(c.is_valid());
-    CHECK(PackedInt32Array(a->surface_get_arrays(0)[Mesh::ARRAY_INDEX]).size() == 16 * 16 * 6);
-    CHECK(PackedInt32Array(b->surface_get_arrays(0)[Mesh::ARRAY_INDEX]).size() == 8 * 8 * 6);
-    CHECK(PackedInt32Array(c->surface_get_arrays(0)[Mesh::ARRAY_INDEX]).size() == 4 * 4 * 6);
+    const Array arr_a = a->surface_get_arrays(0);
+    const Array arr_b = b->surface_get_arrays(0);
+    const Array arr_c = c->surface_get_arrays(0);
+    const PackedInt32Array indices_a = arr_a[Mesh::ARRAY_INDEX];
+    const PackedInt32Array indices_b = arr_b[Mesh::ARRAY_INDEX];
+    const PackedInt32Array indices_c = arr_c[Mesh::ARRAY_INDEX];
+    CHECK(indices_a.size() == 16 * 16 * 6);
+    CHECK(indices_b.size() == 8 * 8 * 6);
+    CHECK(indices_c.size() == 4 * 4 * 6);
 }
 
 TEST_CASE("[TerrainChunks] Chunks share edge positions at identical LOD") {
@@ -110,7 +128,8 @@ TEST_CASE("[TerrainChunks] Vertex paint weights sample the correct source cells"
     data->paint_layer(Vector2(6, 6), 0.75f, 3, 1.0f);
     const Ref<ArrayMesh> chunk = data->build_chunk_mesh(Vector2i(4, 4), Vector2i(4, 4), 2);
     REQUIRE(chunk.is_valid());
-    const PackedColorArray colors = chunk->surface_get_arrays(0)[Mesh::ARRAY_COLOR];
+    const Array arrays = chunk->surface_get_arrays(0);
+    const PackedColorArray colors = arrays[Mesh::ARRAY_COLOR];
     REQUIRE(colors.size() == 9);
     CHECK(colors[4] == Color(0, 0, 0, 1));
     CHECK(colors[0] == Color(1, 0, 0, 0));
@@ -123,8 +142,10 @@ TEST_CASE("[TerrainChunks] Minimal 1x1 chunk has two triangles") {
     const Ref<ArrayMesh> chunk = data->build_chunk_mesh(Vector2i(), Vector2i(1, 1));
     REQUIRE(chunk.is_valid());
     const Array arrays = chunk->surface_get_arrays(0);
-    CHECK(PackedInt32Array(arrays[Mesh::ARRAY_INDEX]).size() == 6);
-    CHECK(PackedVector3Array(arrays[Mesh::ARRAY_VERTEX]).size() == 4);
+    const PackedInt32Array indices = arrays[Mesh::ARRAY_INDEX];
+    const PackedVector3Array vertices = arrays[Mesh::ARRAY_VERTEX];
+    CHECK(indices.size() == 6);
+    CHECK(vertices.size() == 4);
 }
 
 TEST_CASE("[TerrainChunks] Reject chunks extending beyond the heightmap") {
