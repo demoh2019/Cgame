@@ -1,0 +1,55 @@
+name: WorkerThreadPool callable shutdown regressions
+
+on:
+  pull_request:
+    branches: [develop]
+    paths:
+      - "core/object/worker_thread_pool.cpp"
+      - "misc/scripts/tests/test_worker_pool_callable_shutdown.py"
+      - "misc/scripts/tests/worker_pool_unwaited_shutdown.gd"
+      - ".github/workflows/worker-pool-callable-shutdown.yml"
+  push:
+    branches: [develop]
+    paths:
+      - "core/object/worker_thread_pool.cpp"
+      - "misc/scripts/tests/test_worker_pool_callable_shutdown.py"
+      - "misc/scripts/tests/worker_pool_unwaited_shutdown.gd"
+      - ".github/workflows/worker-pool-callable-shutdown.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  contracts:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - run: |
+          python3 -m py_compile misc/scripts/tests/test_worker_pool_callable_shutdown.py
+          python3 -m unittest discover -s misc/scripts/tests -p 'test_worker_pool_callable_shutdown.py' -v
+
+  native-shutdown-smoke:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+      - uses: ./.github/actions/godot-deps
+      - name: Build test-enabled Linux editor
+        uses: ./.github/actions/godot-build
+        with:
+          platform: linuxbsd
+          target: editor
+          scons-flags: dev_build=yes tests=yes debug_symbols=no module_mono_enabled=no accesskit=no
+      - name: Run GDScript tasks and exit with unclaimed completed callbacks
+        shell: bash
+        run: |
+          set -euo pipefail
+          dir="$RUNNER_TEMP/pool-shutdown-test"
+          mkdir -p "$dir"
+          cp misc/scripts/tests/worker_pool_unwaited_shutdown.gd "$dir/"
+          printf '[application]\nconfig/name="Worker shutdown test"\n' > "$dir/project.godot"
+          timeout 120s ./bin/godot.linuxbsd.editor.dev.x86_64 --headless --path "$dir" --script res://worker_pool_unwaited_shutdown.gd
