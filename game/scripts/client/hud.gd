@@ -3,6 +3,7 @@ extends CanvasLayer
 
 const Defs = preload("res://scripts/shared/defs.gd")
 const Crafting = preload("res://scripts/shared/crafting.gd")
+const Vendor = preload("res://scripts/shared/vendor.gd")
 const ZoneRisk = preload("res://scripts/shared/zone_risk.gd")
 
 var client
@@ -111,6 +112,29 @@ func _build() -> void:
 	_stash_grid.columns = 4
 	stash_scroll.add_child(_stash_grid)
 
+	var vendor_title := Label.new()
+	vendor_title.text = "NPC vendor (hub workbench only)"
+	inventory_box.add_child(vendor_title)
+	var vendor_buttons := GridContainer.new()
+	vendor_buttons.columns = 2
+	inventory_box.add_child(vendor_buttons)
+	var buy_water := Button.new()
+	buy_water.text = "Buy water (%d silver)" % int(Vendor.BUY_PRICES["water_bottle"])
+	buy_water.pressed.connect(func() -> void: client.vendor("water_bottle", 1, true))
+	vendor_buttons.add_child(buy_water)
+	var buy_food := Button.new()
+	buy_food.text = "Buy food (%d silver)" % int(Vendor.BUY_PRICES["canned_food"])
+	buy_food.pressed.connect(func() -> void: client.vendor("canned_food", 1, true))
+	vendor_buttons.add_child(buy_food)
+	var sell_scrap := Button.new()
+	sell_scrap.text = "Sell scrap (+%d silver)" % int(Vendor.SELL_PRICES["scrap"])
+	sell_scrap.pressed.connect(func() -> void: client.vendor("scrap", 1, false))
+	vendor_buttons.add_child(sell_scrap)
+	var sell_wood := Button.new()
+	sell_wood.text = "Sell wood (+%d silver)" % int(Vendor.SELL_PRICES["wood_1"])
+	sell_wood.pressed.connect(func() -> void: client.vendor("wood_1", 1, false))
+	vendor_buttons.add_child(sell_wood)
+
 	_craft_panel = PanelContainer.new()
 	_craft_panel.set_anchors_preset(Control.PRESET_CENTER_LEFT)
 	_craft_panel.position = Vector2(14, -220)
@@ -182,6 +206,24 @@ func _on_event(event: Dictionary) -> void:
 
 
 func _on_result(kind: String, data: Dictionary) -> void:
+	if kind == "vendor":
+		if bool(data.get("ok", false)):
+			say("%s %d x %s (%d silver)" % [
+				"Bought" if data.get("buy", false) else "Sold",
+				int(data.get("quantity", 0)), str(data.get("item", "")),
+				int(data.get("silver_delta", 0))])
+		else:
+			var messages := {
+				"no_station": "Vendor: return to hub workbench",
+				"dead": "Vendor: unavailable while dead",
+				"invalid_quantity": "Vendor: invalid quantity",
+				"not_traded": "Vendor: item is not traded here",
+				"missing_items": "Vendor: insufficient resources",
+				"insufficient_silver": "Vendor: insufficient silver",
+				"no_space": "Vendor: backpack slots or stacks are full",
+			}
+			say(str(messages.get(str(data.get("reason", "")), "Vendor: rejected")))
+		return
 	if kind != "stash":
 		return
 	if bool(data.get("ok", false)):
