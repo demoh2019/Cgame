@@ -3261,25 +3261,43 @@ void Image::blit_rect(const Ref<Image> &p_src, const Rect2i &p_src_rect, const P
 		return;
 	}
 
-	uint8_t *wp = data.ptrw();
-	uint8_t *dst_data_ptr = wp;
+	const bool self_blit = p_src.ptr() == this;
+	// A no-op self-copy must not detach a shared copy-on-write image buffer.
+	if (self_blit && src_rect.position == dest_rect.position) {
+		return;
+	}
 
-	const uint8_t *rp = p_src->data.ptr();
-	const uint8_t *src_data_ptr = rp;
+	uint8_t *const dst_pixels = data.ptrw();
+	const uint8_t *const src_pixels = p_src->data.ptr();
+	const size_t pixel_size = get_format_pixel_size(format);
 
-	int pixel_size = get_format_pixel_size(format);
-
-	// If the rect width is equivalent for both src and dst and the x offset is 0, we can blit in a single memcpy.
-	// Else, we do a per-line copy.
-	if ((dest_rect.size.x == p_src->width) && (p_src->width == width) && (dest_rect.position.x == 0) && (src_rect.position.x == 0)) {
-		const uint8_t *src = &src_data_ptr[(src_rect.position.y * p_src->width) * pixel_size];
-		uint8_t *dst = &dst_data_ptr[(dest_rect.position.y * width) * pixel_size];
-		memcpy(dst, src, width * dest_rect.size.y * pixel_size);
+	// Whole rows are contiguous in memory. memmove handles self-overlap
+	// without an intermediate image allocation, and memcpy remains the
+	// fast path for distinct source and destination objects.
+	if (dest_rect.size.x == p_src->width && p_src->width == width &&
+			dest_rect.position.x == 0 && src_rect.position.x == 0) {
+		const size_t src_offset = size_t(src_rect.position.y) * p_src->width * pixel_size;
+		const size_t dst_offset = size_t(dest_rect.position.y) * width * pixel_size;
+		const size_t bytes = size_t(width) * dest_rect.size.y * pixel_size;
+		if (self_blit) {
+			memmove(dst_pixels + dst_offset, src_pixels + src_offset, bytes);
+		} else {
+			memcpy(dst_pixels + dst_offset, src_pixels + src_offset, bytes);
+		}
 	} else {
-		for (int i = 0; i < dest_rect.size.y; i++) {
-			const uint8_t *src = &src_data_ptr[((src_rect.position.y + i) * p_src->width + src_rect.position.x) * pixel_size];
-			uint8_t *dst = &dst_data_ptr[((dest_rect.position.y + i) * width + dest_rect.position.x) * pixel_size];
-			memcpy(dst, src, pixel_size * dest_rect.size.x);
+		// When moving pixels down in the same image, process lower rows first
+		// so that later reads still observe their original source pixels.
+		const bool reverse_rows = self_blit && dest_rect.position.y > src_rect.position.y;
+		const size_t row_bytes = size_t(dest_rect.size.x) * pixel_size;
+		for (int row = 0; row < dest_rect.size.y; row++) {
+			const int i = reverse_rows ? dest_rect.size.y - 1 - row : row;
+			const size_t src_offset = (size_t(src_rect.position.y + i) * p_src->width + src_rect.position.x) * pixel_size;
+			const size_t dst_offset = (size_t(dest_rect.position.y + i) * width + dest_rect.position.x) * pixel_size;
+			if (self_blit) {
+				memmove(dst_pixels + dst_offset, src_pixels + src_offset, row_bytes);
+			} else {
+				memcpy(dst_pixels + dst_offset, src_pixels + src_offset, row_bytes);
+			}
 		}
 	}
 }
