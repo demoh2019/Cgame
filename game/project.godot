@@ -1,0 +1,23 @@
+; Engine configuration file.
+config_version=5
+
+[application]
+
+config/name="Albion After"
+config/description="A persistent open world: Albion-style tiers, zones and full loot, Days-After-style scavenging and zombies."
+run/main_scene="res://scripts/client/client_main.tscn"
+
+[display]
+
+window/size/viewport_width=1280
+window/size/viewport_height=720
+
+[physics]
+
+3d/physics_engine="GodotPhysics3D"
+common/physics_ticks_per_second=30
+
+[rendering]
+
+renderer/rendering_method="gl_compatibility"
+renderer/rendering_method.mobile="gl_compatibility"
