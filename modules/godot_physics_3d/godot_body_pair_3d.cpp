@@ -1096,7 +1096,7 @@ void GodotBodySoftBodyPair3D::solve(real_t p_step) {
 			const real_t jtMax = c.acc_normal_impulse * friction;
 
 			// Only compute sqrt for impulses outside the friction cone.
-			if (fi_len_squared > CMP_EPSILON * CMP_EPSILON && fi_len_squared > jtMax * jtMax) {
+			if (fi_len_squared > CMP_EPSILON * CMP_EPSILON && (jtMax < 0.0 || fi_len_squared > jtMax * jtMax)) {
 				c.acc_tangent_impulse *= jtMax / Math::sqrt(fi_len_squared);
 			}
 
