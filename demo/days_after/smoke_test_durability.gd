@@ -22,7 +22,7 @@ func _run() -> void:
         return
     var game := packed.instantiate()
     root.add_child(game)
-    var player = game.get_node_or_null("Player")
+    var player := game.get_node_or_null("Player") as Node3D
     if player == null:
         _fail("Missing survivor.")
         return
@@ -64,7 +64,8 @@ func _run() -> void:
 
     player.call("add_item", "scavenger_tool", 1)
     player.call("equip_item", "tool", "scavenger_tool")
-    (player.get("gathering_xp") as Dictionary)["wood"] = 100
+    var mastery: Dictionary = player.get("gathering_xp")
+    mastery["wood"] = 100
     Durability.wear(player.get("durability") as Dictionary, "scavenger_tool", 100)
     if player.call("try_gather", "wood", 2, 1):
         _fail("Broken tool must not harvest tier 2.")
@@ -100,7 +101,8 @@ func _run() -> void:
     if not SaveState.validate_snapshot(data):
         _fail("Current character snapshot rejected.")
         return
-    (player.get("durability") as Dictionary).clear()
+    var conditions: Dictionary = player.get("durability")
+    conditions.clear()
     if not SaveState.apply_snapshot(player, data):
         _fail("Couldn't restore saved condition.")
         return
