@@ -413,7 +413,9 @@ func _on_player_death(victim: Player, killer: int) -> void:
 # --- The simulation tick -------------------------------------------------------------------------------
 
 func tick(delta: float) -> void:
-	events.clear()
+	# Events from commands that arrived since the last tick are kept: the network layer drains them.
+	if events.size() > 2000:
+		events = events.slice(events.size() - 1000)
 	time += delta
 	tick_count += 1
 	_tick_players(delta)
@@ -533,6 +535,13 @@ func _tick_world(_delta: float) -> void:
 	for id in bags.keys():
 		if time >= float(bags[id]["expires"]):
 			bags.erase(id)
+
+
+## Returns the events since the last call and forgets them.
+func drain_events() -> Array:
+	var result := events
+	events = []
+	return result
 
 
 # --- Snapshots --------------------------------------------------------------------------------------------------
