@@ -140,6 +140,18 @@ python3 tests/stress/run.py --godot ./bin/godot.linuxbsd.editor.dev.x86_64 \
   --rss-limit-mib 8192 --output out/physics-million.json
 ```
 
+To stress broadphase updates and velocity integration, run the matching
+`physics_rid_moving_2d` and `physics_rid_moving_3d` cases. Every body gets
+the same linear velocity so their relative separation remains unchanged,
+avoiding collision-workload contamination of the movement benchmark:
+
+```bash
+python3 tests/stress/run.py --godot ./bin/godot.linuxbsd.editor.dev.x86_64 \
+  --case physics_rid_moving_2d,physics_rid_moving_3d \
+  --scale 16 --frames 90 --repeats 5 \
+  --output out/physics-rid-moving.json
+```
+
 This isolates **sparse** solver and broadphase overhead. It does **not** imply
 million-body real-time stability in densely colliding scenes, simulate any
 fluid/material physics, or cover rendering. Run dense-contact and joint-chain
