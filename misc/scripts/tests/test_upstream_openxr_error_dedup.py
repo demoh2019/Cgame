@@ -6,6 +6,7 @@ This does not require an OpenXR runtime or a full Godot build.
 """
 
 from pathlib import Path
+import os
 import shutil
 import subprocess
 import tempfile
@@ -92,7 +93,7 @@ class OpenXRFrameErrorTests(unittest.TestCase):
                 self.assertNotIn(old_log, self.cpp)
 
     def test_actual_cpp_helper_deduplicates_and_recovers_after_success(self):
-        compiler = shutil.which("c++")
+        compiler = shutil.which(os.environ.get("CXX", "c++"))
         if not compiler:
             self.skipTest("A C++ compiler is not available")
 
