@@ -1299,6 +1299,72 @@ static bool predict_soft_self_vertex_face_sweep(
 	return false; // Iteration cap and shared contact work budget.
 }
 
+// The median face hierarchy is built in parent-before-children order.
+// Once the topology and leaf face indices are cached, every physics step
+// can refit the CURRENT deformed triangle AABBs in reverse node order.
+// Unlike a rebuilt tree, median partitions are reused; periodically
+// rebuilding compensates for a cloth that folds far from its old layout.
+static bool refit_soft_self_face_bvh(
+		const JPH::Array<JPH::SoftBodySharedSettings::Face> &p_faces,
+		const JPH::Array<JPH::SoftBodyVertex> &p_vertices,
+		SoftFaceBVHScratch &r_bvh, uint32_t &r_budget) {
+	const uint32_t entry_count = uint32_t(r_bvh.entries.size());
+	const uint32_t node_count = uint32_t(r_bvh.nodes.size());
+	if (entry_count == 0 || node_count == 0) {
+		return false;
+	}
+	// Three corner reads + bounds calculation per face, plus node unions.
+	// Charge before touching data so the global self VF quota stays bounded.
+	const uint32_t refit_cost = 4 * entry_count + node_count;
+	if (r_budget <= refit_cost) {
+		return false;
+	}
+	r_budget -= refit_cost;
+	for (SoftFaceBVHEntry &entry : r_bvh.entries) {
+		if (entry.face_index >= p_faces.size()) {
+			return false;
+		}
+		const JPH::SoftBodySharedSettings::Face &face = p_faces[entry.face_index];
+		const uint32_t a = face.mVertex[0], b = face.mVertex[1], c = face.mVertex[2];
+		if (face.IsDegenerate() || a >= p_vertices.size() ||
+				b >= p_vertices.size() || c >= p_vertices.size()) {
+			return false; // Rebuild, filtering any invalid source faces.
+		}
+		const JPH::Vec3 p0 = p_vertices[a].mPosition;
+		const JPH::Vec3 p1 = p_vertices[b].mPosition;
+		const JPH::Vec3 p2 = p_vertices[c].mPosition;
+		entry.min = JPH::Vec3::sMin(p0, JPH::Vec3::sMin(p1, p2));
+		entry.max = JPH::Vec3::sMax(p0, JPH::Vec3::sMax(p1, p2));
+		if (!Math::is_finite(entry.min.GetX()) || !Math::is_finite(entry.min.GetY()) ||
+				!Math::is_finite(entry.min.GetZ()) || !Math::is_finite(entry.max.GetX()) ||
+				!Math::is_finite(entry.max.GetY()) || !Math::is_finite(entry.max.GetZ())) {
+			return false; // Never query stale or nonfinite bounds.
+		}
+	}
+	for (uint32_t i = node_count; i > 0; --i) {
+		SoftFaceBVHNode &node = r_bvh.nodes[i - 1];
+		if (node.end <= node.begin || node.end > entry_count) {
+			return false;
+		}
+		if (node.end - node.begin <= SOFT_FACE_BVH_LEAF_SIZE) {
+			node.min = r_bvh.entries[node.begin].min;
+			node.max = r_bvh.entries[node.begin].max;
+			for (uint32_t j = node.begin + 1; j < node.end; ++j) {
+				node.min = JPH::Vec3::sMin(node.min, r_bvh.entries[j].min);
+				node.max = JPH::Vec3::sMax(node.max, r_bvh.entries[j].max);
+			}
+		} else {
+			if (node.left <= i - 1 || node.right <= i - 1 ||
+					node.left >= node_count || node.right >= node_count) {
+				return false;
+			}
+			node.min = JPH::Vec3::sMin(r_bvh.nodes[node.left].min, r_bvh.nodes[node.right].min);
+			node.max = JPH::Vec3::sMax(r_bvh.nodes[node.left].max, r_bvh.nodes[node.right].max);
+		}
+	}
+	return true;
+}
+
 static void resolve_soft_body_self_contacts(JPH::Body &p_body, const JoltSoftBody3D &p_object,
 		float p_step, uint32_t &r_budget, SoftSelfContactScratch &r_scratch) {
 	JPH::SoftBodyMotionProperties &props = static_cast<JPH::SoftBodyMotionProperties &>(*p_body.GetMotionPropertiesUnchecked());
