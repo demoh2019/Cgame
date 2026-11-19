@@ -43,6 +43,9 @@ class GodotStep2D {
 
 	LocalVector<LocalVector<GodotBody2D *>> body_islands;
 	LocalVector<LocalVector<GodotConstraint2D *>> constraint_islands;
+	// Avoid retaining peak nested island allocations after a large scene unload.
+	uint8_t body_island_idle_steps = 0;
+	uint8_t constraint_island_idle_steps = 0;
 	LocalVector<GodotConstraint2D *> all_constraints;
 	// Filled only when pre_solve removes constraints from some islands.
 	// Dense frames use direct island indices with no extra allocation.
