@@ -71,6 +71,38 @@ that ordinary solids still block motion and that a second compound shape
 using the same shape resource detects its own obstacle. This workload is
 a correctness regression, not a claim about measured throughput.
 
+## Early broadphase exception filtering (2D and 3D)
+
+The BVH previously discarded body-body collision exceptions only during the
+constraint setup pass, after allocating a persistent pair for each overlapping
+shape combination. Cgame now checks both bodies' collision-exception lists
+during the BVH's existing user-pair filter, before constructing constraints.
+In 3D the same rule applies to rigid-body/soft-body pairs, in either direction.
+Area pairs and monitoring behavior remain unchanged.
+
+Removing or adding an exception must immediately reconstruct the BVH pairing
+without requiring bodies to move. The physics servers call
+`refresh_collision_pairs()` after every exception mutation; this performs
+the required full per-proxy BVH checks **without recalculating body mass or
+invalidating the shape's collision-geometry cache**. Changes to collision
+layers and masks still use the full geometry/filter invalidation path.
+
+```bash
+python3 -m unittest discover -s tests/stress -p 'test_physics_early_pair_filter.py' -v
+python3 tests/stress/run.py --godot ./bin/godot.macos.editor.arm64 \
+  --case physics_exception_pairs_2d,physics_exception_pairs_3d \
+  --scale 4 --repeats 5 --frames 90 --rss-limit-mib 6144 \
+  --output out/physics-exception-pairs.json
+```
+
+Each engine stress case creates many stationary overlapping static/kinematic
+pairs, records `INFO_COLLISION_PAIRS`, excludes all pairs through one endpoint,
+restores them, then repeats the test using exceptions on the other endpoint.
+All transitions happen **without moving bodies**, so the test verifies the
+BVH's explicit pair revalidation. Pair counts and durations are returned for
+before/after comparison on identical hardware. A separate integration test for
+runtime rigid/soft-body constraints is still needed.
+
 ## Streaming kinematic motion queries (2D and 3D)
 
 The stress project's `project.godot` explicitly selects `GodotPhysics2D`
