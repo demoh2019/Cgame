@@ -39,6 +39,8 @@ textures/default_filters/use_nearest_mipmap_filter=false
 3d/solver/soft_body_membrane_poisson_ratio=0.3
 # Opt-in Neo-Hookean FEM for closed convex meshes: cube station has six tets.
 3d/solver/soft_body_tetra_fem_compliance=0.00002
+# Volume-weighted nodal masses for the six-tet FEM cube (lab only).
+3d/solver/soft_body_tetra_fem_lumped_mass=true
 3d/solver/soft_body_tetra_fem_poisson_ratio=0.3
 # Optional objective bulk FEM damping, separate from StVK surface viscosity.
 3d/solver/soft_body_tetra_fem_viscosity=0.8
