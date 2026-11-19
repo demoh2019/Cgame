@@ -1343,6 +1343,7 @@ GodotSpace3D::GodotSpace3D() {
 			CLAMP(configured_membrane_poisson, real_t(-0.49), real_t(0.49)) : real_t(0.3);
 	const real_t configured_tetra_compliance = GLOBAL_GET("physics/3d/solver/soft_body_tetra_fem_compliance");
 	soft_body_tetra_fem_compliance = Math::is_finite(configured_tetra_compliance) ? MAX(real_t(0.0), configured_tetra_compliance) : real_t(0.0);
+	soft_body_tetra_fem_lumped_mass = bool(GLOBAL_GET("physics/3d/solver/soft_body_tetra_fem_lumped_mass"));
 	const real_t configured_tetra_poisson = GLOBAL_GET("physics/3d/solver/soft_body_tetra_fem_poisson_ratio");
 	soft_body_tetra_fem_poisson_ratio = Math::is_finite(configured_tetra_poisson) ? CLAMP(configured_tetra_poisson, real_t(0.0), real_t(0.49)) : real_t(0.3);
 	const real_t configured_fem_fiber_compliance = GLOBAL_GET("physics/3d/solver/soft_body_tetra_fiber_compliance");
