@@ -1079,6 +1079,58 @@ Compare runtime, collision pair count, stability and RSS across modes.
 Enabling block solving does not guarantee higher throughput: the 2x2
 system adds work per iteration and can instead improve convergence.
 
+## 3D large rigid-body islands: opt-in conflict-free parallel solver
+
+GodotPhysics3D can now divide **one large connected rigid-body island** into
+non-conflicting constraint colors, inspired by Box2D's graph-color solver and
+Jolt's large-island scheduling. Each color contains constraints that do not
+share body pointers; static/kinematic bodies are conservatively treated as
+shared too. Colors run in sequence with a worker-pool barrier between each,
+and a bounded serial overflow batch handles highly connected bodies.
+
+Enable only after validating your project's behavior:
+
+```ini
+[physics]
+3d/solver/parallel_large_islands=true
+```
+
+The setting is `false` by default, cached when a GodotPhysics3D space is
+created and ignored by third-party physics backends. This path is attempted
+only when **one active solve island** has at least 256 constraints, all
+constraints have priority 1, and none involve soft bodies. Constraints with
+higher joint priorities, soft-body dependencies, null/empty body lists, or
+insufficient independent parallel work fall back to the existing sequential
+priority solver. The bounded coloring scratch buffer is reused across steps.
+
+As with any iterative constraint solver, changing the order of constraints
+may change convergence and determinism. Keep the option disabled if strict
+frame-for-frame comparison with the legacy solver is required.
+
+Run source contracts and the runtime finite-state/joint-spacing regression:
+
+```bash
+python3 -m unittest discover -s tests/stress -p 'test_physics_3d_large_island_coloring.py' -v
+./bin/godot.macos.editor.arm64 --headless --path tests/stress \
+  --script res://physics_large_island_3d_regression.gd
+```
+
+Benchmark the **identical** 320-joint-per-scale connected chain with
+parallelism off/on in separate engine processes. The third case adds a
+priority-2 joint and checks the sequential fallback. Run one case at a
+time under the same binary/hardware conditions:
+
+```bash
+python3 tests/stress/run.py --godot ./bin/godot.macos.editor.arm64 \
+  --case physics_large_island_3d_serial,physics_large_island_3d_parallel,physics_large_island_3d_priority \
+  --scale 2 --frames 90 --repeats 5 --timeout 600 \
+  --rss-limit-mib 4096 --output out/physics-large-island-3d.json
+```
+
+The tests check finite body states and joint spacing, not physical
+equivalence to the serial solver or measured performance improvements.
+Start with small scales and monitor CPU usage, peak RSS and frame p95.
+
 ## 3D contact warm-start timestep and material stability
 
 Built-in GodotPhysics3D now scales cached normal, friction, and bias impulses
