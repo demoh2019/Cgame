@@ -801,7 +801,10 @@ void SceneTree::process_timers(double p_delta, bool p_physics_frame) {
 
 	for (List<Ref<SceneTreeTimer>>::Element *E = timers.front(); E;) {
 		List<Ref<SceneTreeTimer>>::Element *N = E->next();
-		Ref<SceneTreeTimer> timer = E->get();
+		// Borrow the list's Ref during ordinary ticks; copying it here
+		// increments/decrements the atomic refcount for every live timer
+		// on every frame, even when its timeout is far in the future.
+		const Ref<SceneTreeTimer> &timer = E->get();
 
 		if ((paused && !timer->is_process_always()) || (timer->is_process_in_physics() != p_physics_frame)) {
 			if (E == L) {
@@ -816,7 +819,10 @@ void SceneTree::process_timers(double p_delta, bool p_physics_frame) {
 		timer->set_time_left(time_left);
 
 		if (time_left <= 0) {
-			E->get()->emit_signal(SNAME("timeout"));
+			// Keep the timer alive across callbacks and removal. Only the
+			// expired-timer path needs to acquire an additional strong Ref.
+			Ref<SceneTreeTimer> timeout_timer = timer;
+			timeout_timer->emit_signal(SNAME("timeout"));
 			timers.erase(E);
 		}
 		if (E == L) {

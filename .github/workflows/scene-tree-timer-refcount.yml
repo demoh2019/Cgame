@@ -1,0 +1,50 @@
+name: SceneTree timer refcount performance regressions
+
+on:
+  pull_request:
+    branches: [develop]
+    paths:
+      - 'scene/main/scene_tree.cpp'
+      - 'tests/scene/test_timer.cpp'
+      - 'misc/scripts/tests/test_scene_tree_timer_refcount.py'
+      - '.github/workflows/scene-tree-timer-refcount.yml'
+  push:
+    branches: [develop]
+    paths:
+      - 'scene/main/scene_tree.cpp'
+      - 'tests/scene/test_timer.cpp'
+      - 'misc/scripts/tests/test_scene_tree_timer_refcount.py'
+      - '.github/workflows/scene-tree-timer-refcount.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  source-contracts:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - name: Check timer lifetime and phase filters
+        run: |
+          python3 -m py_compile misc/scripts/tests/test_scene_tree_timer_refcount.py
+          python3 -m unittest discover -s misc/scripts/tests -p test_scene_tree_timer_refcount.py -v
+
+  native-timer-regressions:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+      - uses: ./.github/actions/godot-deps
+      - name: Build engine and native timer tests
+        uses: ./.github/actions/godot-build
+        with:
+          platform: linuxbsd
+          target: editor
+          scons-flags: dev_build=yes tests=yes debug_symbols=no module_mono_enabled=no module_text_server_fb_enabled=yes accesskit=no -j2
+      - name: Run native timer lifetime and signal tests
+        run: |
+          timeout 300s ./bin/godot.linuxbsd.editor.dev.x86_64 --headless --test --test-case="*[SceneTreeTimerRefFastPath]*"
