@@ -474,17 +474,17 @@ bool GodotPhysicsDirectSpaceState2D::rest_info(const PS2DT::ShapeParameters &p_p
 
 int GodotSpace2D::_cull_aabb_for_body(GodotBody2D *p_body, const Rect2 &p_aabb, const PS2DT::MotionParameters &p_parameters) {
 	// Filter inside BVH traversal. Areas, collision exceptions and explicit
-	// exclusions must not consume the 2048 candidate slots needed by solid
-	// colliders in dense worlds.
+	// exclusions must not consume narrowphase work in dense worlds.
 	struct MotionCullData {
 		GodotBody2D *body;
 		const PS2DT::MotionParameters &params;
-		GodotCollisionObject2D **results;
-		int *subindices;
-		int capacity;
-		int count = 0;
+		LocalVector<GodotCollisionObject2D *> &results;
+		LocalVector<int> &subindices;
 	};
-	MotionCullData data = { p_body, p_parameters, intersection_query_results, intersection_query_subindex_results, INTERSECTION_QUERY_MAX };
+	// Retain capacity across queries; newly allocated pages are paid for only when needed.
+	intersection_query_results.clear();
+	intersection_query_subindex_results.clear();
+	MotionCullData data = { p_body, p_parameters, intersection_query_results, intersection_query_subindex_results };
 
 	auto visitor = [](GodotCollisionObject2D *p_object, int p_subindex, void *p_userdata) -> bool {
 		MotionCullData &query = *static_cast<MotionCullData *>(p_userdata);
@@ -503,14 +503,13 @@ int GodotSpace2D::_cull_aabb_for_body(GodotBody2D *p_body, const Rect2 &p_aabb, 
 			return true;
 		}
 
-		query.results[query.count] = p_object;
-		query.subindices[query.count] = p_subindex;
-		++query.count;
-		return query.count < query.capacity;
+		query.results.push_back(p_object);
+		query.subindices.push_back(p_subindex);
+		return true;
 	};
 
 	broadphase->visit_aabb(p_aabb, visitor, &data);
-	return data.count;
+	return intersection_query_results.size();
 }
 
 bool GodotSpace2D::test_body_motion(GodotBody2D *p_body, const PS2DT::MotionParameters &p_parameters, PS2DT::MotionResult *r_result) {
