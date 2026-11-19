@@ -71,8 +71,9 @@ void GodotBodyPair2D::_contact_added_callback(const Vector2 &p_point_A, const Ve
 	real_t best_distance_squared = 0.0;
 	for (int i = 0; i < contact_count; i++) {
 		const Contact &c = contacts[i];
-		if (c.used) {
-			// Already matched to a contact generated during this setup pass.
+		if (c.used || c.normal.dot(contact.normal) < real_t(0.98)) {
+			// Match only unused points on a compatible contact plane.
+			// A closer point from another face must not mask a valid match.
 			continue;
 		}
 
