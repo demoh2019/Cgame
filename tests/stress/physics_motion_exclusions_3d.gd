@@ -70,16 +70,20 @@ func run(tree: SceneTree, scale: int, frames: int) -> Dictionary:
 	query.exclude_bodies = excluded_bodies
 	var far_hit := PhysicsServer3D.body_test_motion(mover, query, result)
 	var far_fraction := result.get_collision_safe_fraction()
-	var far_valid := far_hit and result.get_collision_count() > 0 \
-			and result.get_collider_rid() == far_body and far_fraction > near_fraction
+	var far_valid := (
+		far_hit and result.get_collision_count() > 0
+		and result.get_collider_rid() == far_body and far_fraction > near_fraction
+	)
 
 	# A stationary sweep must not normalize a zero-length vector to NaNs.
 	query.motion = Vector3.ZERO
 	query.from = Transform3D.IDENTITY
 	query.recovery_as_collision = true
 	var static_hit := PhysicsServer3D.body_test_motion(mover, query, result)
-	var stationary_valid := not static_hit and result.get_travel().is_finite() \
-			and result.get_remainder().is_finite()
+	var stationary_valid := (
+		not static_hit and result.get_travel().is_finite()
+		and result.get_remainder().is_finite()
+	)
 
 	PhysicsServer3D.space_set_active(space, false)
 	for body in excluded_bodies:
