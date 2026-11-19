@@ -6,6 +6,19 @@ var _contention_mutex := Mutex.new()
 var _contention_counter := 0
 
 
+func _percentiles(values: Array[float]) -> Dictionary:
+	if values.is_empty():
+		return {}
+	values.sort()
+	var size := values.size()
+	return {
+		"p50": values[clampi(ceili(float(size) * 0.50) - 1, 0, size - 1)],
+		"p95": values[clampi(ceili(float(size) * 0.95) - 1, 0, size - 1)],
+		"p99": values[clampi(ceili(float(size) * 0.99) - 1, 0, size - 1)],
+		"max": values[size - 1],
+	}
+
+
 func run_case(test_case: String, tree: SceneTree, scale: int, frames: int, seed: int) -> Dictionary:
 	match test_case:
 		"compression":
@@ -186,6 +199,7 @@ func _physics_queries_2d(tree: SceneTree, scale: int, frames: int) -> Dictionary
 	var query := PhysicsRayQueryParameters2D.create(Vector2(0.0, -20.0), Vector2(0.0, 20.0))
 	var queries := 0
 	var peak_physics_ms := 0.0
+	var latency_samples: Array[float] = []
 	for frame in range(frames):
 		for i in range(50 * scale):
 			var x := float((i + frame) % 500) - 250.0
@@ -198,10 +212,12 @@ func _physics_queries_2d(tree: SceneTree, scale: int, frames: int) -> Dictionary
 				return {"error": "Physics ray failed to hit known static body"}
 			queries += 1
 		await tree.physics_frame
-		peak_physics_ms = maxf(peak_physics_ms, Performance.get_monitor(Performance.TIME_PHYSICS_PROCESS) * 1000.0)
+		var latency_ms := Performance.get_monitor(Performance.TIME_PHYSICS_PROCESS) * 1000.0
+		latency_samples.append(latency_ms)
+		peak_physics_ms = maxf(peak_physics_ms, latency_ms)
 	world.queue_free()
 	await tree.process_frame
-	return {"queries": queries, "frames": frames, "peak_physics_ms": peak_physics_ms}
+	return {"queries": queries, "frames": frames, "peak_physics_ms": peak_physics_ms, "physics_latency_ms": _percentiles(latency_samples)}
 
 
 func _render_multimesh(tree: SceneTree, scale: int, frames: int) -> Dictionary:
@@ -226,13 +242,16 @@ func _render_multimesh(tree: SceneTree, scale: int, frames: int) -> Dictionary:
 	batch.multimesh = multimesh
 	world.add_child(batch)
 	var peak_frame_ms := 0.0
+	var latency_samples: Array[float] = []
 	var peak_draw_calls := 0
 	var peak_video_bytes := 0
 	for i in range(frames):
 		await tree.process_frame
-		peak_frame_ms = maxf(peak_frame_ms, Performance.get_monitor(Performance.TIME_PROCESS) * 1000.0)
+		var latency_ms := Performance.get_monitor(Performance.TIME_PROCESS) * 1000.0
+		latency_samples.append(latency_ms)
+		peak_frame_ms = maxf(peak_frame_ms, latency_ms)
 		peak_draw_calls = maxi(peak_draw_calls, int(Performance.get_monitor(Performance.RENDER_TOTAL_DRAW_CALLS_IN_FRAME)))
 		peak_video_bytes = maxi(peak_video_bytes, int(Performance.get_monitor(Performance.RENDER_VIDEO_MEM_USED)))
 	world.queue_free()
 	await tree.process_frame
-	return {"instances": instances, "frames": frames, "peak_frame_ms": peak_frame_ms, "peak_draw_calls": peak_draw_calls, "peak_video_memory_bytes": peak_video_bytes}
+	return {"instances": instances, "frames": frames, "peak_frame_ms": peak_frame_ms, "peak_draw_calls": peak_draw_calls, "peak_video_memory_bytes": peak_video_bytes, "frame_latency_ms": _percentiles(latency_samples)}
