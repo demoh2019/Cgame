@@ -1,0 +1,101 @@
+name: Engine hot-path performance and resource benchmarks
+
+on:
+  push:
+    branches: [develop]
+    paths:
+      - 'servers/rendering/renderer_scene_cull.cpp'
+      - 'modules/gdscript/gdscript.cpp'
+      - 'scene/animation/animation_blend_tree.cpp'
+      - 'scene/animation/animation_mixer.cpp'
+      - 'scene/animation/animation_player.cpp'
+      - 'scene/animation/animation_player.h'
+      - 'editor/file_system/editor_file_system.cpp'
+      - 'drivers/unix/dir_access_unix.cpp'
+      - 'misc/scripts/tests/test_engine_hotpath_perf.py'
+      - 'misc/scripts/tests/test_editor_file_path_perf.py'
+      - '.github/workflows/engine-hotpath-performance.yml'
+  pull_request:
+    paths:
+      - 'servers/rendering/renderer_scene_cull.cpp'
+      - 'modules/gdscript/gdscript.cpp'
+      - 'scene/animation/animation_blend_tree.cpp'
+      - 'scene/animation/animation_mixer.cpp'
+      - 'scene/animation/animation_player.cpp'
+      - 'scene/animation/animation_player.h'
+      - 'editor/file_system/editor_file_system.cpp'
+      - 'drivers/unix/dir_access_unix.cpp'
+      - 'misc/scripts/tests/test_engine_hotpath_perf.py'
+      - 'misc/scripts/tests/test_editor_file_path_perf.py'
+      - '.github/workflows/engine-hotpath-performance.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: engine-hotpaths-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  regression-contracts:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        compiler: [g++, clang++]
+    steps:
+      - uses: actions/checkout@v4
+      - name: Compile Python source tests
+        run: python3 -m py_compile misc/scripts/tests/test_engine_hotpath_perf.py misc/scripts/tests/test_editor_file_path_perf.py
+      - name: Run randomized and compiled C++ regression harnesses
+        env:
+          CXX: ${{ matrix.compiler }}
+        run: |
+          python3 -m unittest discover -s misc/scripts/tests -p test_engine_hotpath_perf.py -v
+          python3 -m unittest discover -s misc/scripts/tests -p test_editor_file_path_perf.py -v
+
+  native-build-and-resource-benchmarks:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install native dependencies and GNU time
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libwayland-bin time
+      - uses: ./.github/actions/godot-deps
+      - name: Build native Cgame editor with test suites
+        uses: ./.github/actions/godot-build
+        with:
+          platform: linuxbsd
+          target: editor
+          scons-flags: dev_build=yes tests=yes debug_symbols=no module_text_server_fb_enabled=yes -j2
+      - name: Run native GDScript and animation regressions
+        shell: bash
+        run: |
+          set -euo pipefail
+          BIN=./bin/godot.linuxbsd.editor.dev.x86_64
+          "$BIN" --version
+          timeout 240s "$BIN" --headless --test --test-suite="*GDScript*" --no-colors
+          timeout 240s "$BIN" --headless --test --test-suite="*Animation*" --no-colors
+      - name: Measure wall time, CPU time and peak RSS (GNU time)
+        shell: bash
+        run: |
+          set -euo pipefail
+          BIN=./bin/godot.linuxbsd.editor.dev.x86_64
+          PROJECT=misc/scripts/tests/fixtures/scene_smoke/valid
+          echo 'mode,iteration,wall_seconds,user_seconds,sys_seconds,peak_rss_kib' > hotpath-perf.csv
+          for iteration in 1 2 3; do
+            /usr/bin/time -a -o hotpath-perf.csv -f "editor_import,$iteration,%e,%U,%S,%M" "$BIN" --headless --path "$PROJECT" --import
+            /usr/bin/time -a -o hotpath-perf.csv -f "scene_headless,$iteration,%e,%U,%S,%M" "$BIN" --headless --path "$PROJECT" --scene res://scenes/healthy.tscn --quit-after 3
+          done
+          cat hotpath-perf.csv
+      - name: Archive observed resource metrics
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: linux-hotpath-resource-metrics
+          path: hotpath-perf.csv
+          if-no-files-found: ignore

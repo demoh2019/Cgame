@@ -39,12 +39,185 @@
 #include "jolt_group_filter.h"
 
 #include "core/config/engine.h"
+#include "core/templates/a_hash_map.h"
 #include "servers/physics_3d/physics_server_3d_rendering_server_handler.h"
 #include "servers/rendering/rendering_server.h"
 
 #include <Jolt/Physics/SoftBody/SoftBodyMotionProperties.h>
 
+#include <cfloat>
+
 namespace {
+
+// An opt-in tetrahedral fan for CLOSED CONVEX soft meshes. The fan adds an
+// interior particle, with one Jolt XPBD volume constraint per surface face.
+// It cannot describe concave geometry; reject unclosed, inconsistent or
+// nonconvex meshes rather than silently creating inverted tetrahedra.
+static bool try_build_convex_volume_fan(JPH::SoftBodySharedSettings &r_settings, float p_compliance) {
+	JPH::Array<JPH::SoftBodySharedSettings::Vertex> &vertices = r_settings.mVertices;
+	const JPH::Array<JPH::SoftBodySharedSettings::Face> &faces = r_settings.mFaces;
+
+	// Bound the O(vertices * faces) convexity validation and fan solver cost.
+	constexpr uint32_t MAX_VERTICES = 2048;
+	constexpr uint32_t MAX_FACES = 4096;
+	if (vertices.size() < 4 || vertices.size() > MAX_VERTICES || faces.size() < 4 || faces.size() > MAX_FACES) {
+		return false;
+	}
+
+	double x_sum = 0.0;
+	double y_sum = 0.0;
+	double z_sum = 0.0;
+	for (const JPH::SoftBodySharedSettings::Vertex &vertex : vertices) {
+		const JPH::Float3 &p = vertex.mPosition;
+		if (!Math::is_finite(p.x) || !Math::is_finite(p.y) || !Math::is_finite(p.z)) {
+			return false;
+		}
+		x_sum += p.x;
+		y_sum += p.y;
+		z_sum += p.z;
+	}
+
+	const float inv_count = 1.0f / (float)vertices.size();
+	const JPH::Vec3 center((float)(x_sum * inv_count), (float)(y_sum * inv_count), (float)(z_sum * inv_count));
+	float max_radius_sq = 0.0f;
+	for (const JPH::SoftBodySharedSettings::Vertex &vertex : vertices) {
+		max_radius_sq = MAX(max_radius_sq, (JPH::Vec3(vertex.mPosition) - center).LengthSq());
+	}
+	if (!Math::is_finite(max_radius_sq) || max_radius_sq <= 0.0f) {
+		return false;
+	}
+
+	// Each undirected edge must occur exactly twice, with opposite winding.
+	// 1/-1 means an unmatched oriented edge, 0 is a completed pair.
+	AHashMap<uint64_t, int8_t> edges;
+	edges.reserve(uint32_t(faces.size()) * 3 / 2 + 1);
+	const float radius = Math::sqrt(max_radius_sq);
+	for (const JPH::SoftBodySharedSettings::Face &face : faces) {
+		const uint32_t a = face.mVertex[0];
+		const uint32_t b = face.mVertex[1];
+		const uint32_t c = face.mVertex[2];
+		if (a >= vertices.size() || b >= vertices.size() || c >= vertices.size() || face.IsDegenerate()) {
+			return false;
+		}
+		const JPH::Vec3 p0(vertices[a].mPosition);
+		const JPH::Vec3 p1(vertices[b].mPosition);
+		const JPH::Vec3 p2(vertices[c].mPosition);
+		const JPH::Vec3 normal = (p1 - p0).Cross(p2 - p0);
+		const float normal_len_sq = normal.LengthSq();
+		if (!Math::is_finite(normal_len_sq) || normal_len_sq <= max_radius_sq * max_radius_sq * 1.0e-12f) {
+			return false;
+		}
+		const float tolerance = Math::sqrt(normal_len_sq) * radius * 1.0e-5f;
+		const float center_side = normal.Dot(center - p0);
+		if (!Math::is_finite(center_side) || Math::abs(center_side) <= tolerance) {
+			return false;
+		}
+		const float side = center_side > 0.0f ? 1.0f : -1.0f;
+		// Every other vertex must lie on the center-facing side of this
+		// triangle plane. This rejects nonconvex or inverted mesh regions.
+		for (const JPH::SoftBodySharedSettings::Vertex &vertex : vertices) {
+			if (side * normal.Dot(JPH::Vec3(vertex.mPosition) - p0) < -tolerance) {
+				return false;
+			}
+		}
+
+		const uint32_t indices[3] = { a, b, c };
+		for (int i = 0; i < 3; ++i) {
+			const uint32_t v0 = indices[i];
+			const uint32_t v1 = indices[(i + 1) % 3];
+			const uint64_t key = (uint64_t(MIN(v0, v1)) << 32) | MAX(v0, v1);
+			const int8_t direction = v0 < v1 ? 1 : -1;
+			int8_t *state = edges.getptr(key);
+			if (state == nullptr) {
+				edges.insert(key, direction);
+			} else if (*state == -direction) {
+				*state = 0;
+			} else {
+				return false; // Repeated/same-direction or non-manifold edge.
+			}
+		}
+	}
+
+	for (const JPH::SoftBodySharedSettings::Face &face : faces) {
+		for (int i = 0; i < 3; ++i) {
+			const uint32_t v0 = face.mVertex[i];
+			const uint32_t v1 = face.mVertex[(i + 1) % 3];
+			const uint64_t key = (uint64_t(MIN(v0, v1)) << 32) | MAX(v0, v1);
+			const int8_t *state = edges.getptr(key);
+			if (state == nullptr || *state != 0) {
+				return false; // Boundary edge: the surface is open.
+			}
+		}
+	}
+
+	// Keep the interior vertex out of the surface face list and render map.
+	// The interior particle MUST exist before CreateConstraints(): that API
+	// caches mClosestKinematic when LRA is enabled. Appending a vertex after
+	// that cache is built would leave its size stale during Optimize().
+	// The center is not part of any surface face/edge, so LRA leaves it free.
+	const uint32_t center_index = (uint32_t)vertices.size();
+	vertices.emplace_back(JPH::Float3(center.GetX(), center.GetY(), center.GetZ()), JPH::Float3(0.0f, 0.0f, 0.0f), 1.0f);
+	r_settings.mVolumeConstraints.reserve(faces.size());
+	for (const JPH::SoftBodySharedSettings::Face &face : faces) {
+		const JPH::Vec3 p0(vertices[face.mVertex[0]].mPosition);
+		const JPH::Vec3 p1(vertices[face.mVertex[1]].mPosition);
+		const JPH::Vec3 p2(vertices[face.mVertex[2]].mPosition);
+		const float signed_six_volume = (p1 - p0).Cross(p2 - p0).Dot(center - p0);
+		// Jolt's volume solver uses |six_volume| for the constraint but
+		// the signed-volume gradients for the correction. Keep every rest
+		// tetrahedron positively oriented, irrespective of surface winding,
+		// so compression/restoration acts in the physically correct direction.
+		if (signed_six_volume > 0.0f) {
+			r_settings.mVolumeConstraints.emplace_back(face.mVertex[0], face.mVertex[1], face.mVertex[2], center_index, p_compliance);
+		} else {
+			r_settings.mVolumeConstraints.emplace_back(face.mVertex[0], face.mVertex[2], face.mVertex[1], center_index, p_compliance);
+		}
+	}
+	r_settings.CalculateVolumeConstraintVolumes();
+	return true;
+}
+
+// Add these edges AFTER CreateConstraints (which clears surface edges) and
+// AFTER the surface shrink operation, but BEFORE Optimize(). The centroid
+// and validated convex fan were created before CreateConstraints, keeping
+// the Jolt closest-kinematic cache sized for all the physics particles.
+//
+// Optional directional compliance allows a lightweight, mesh-local
+// approximation of anisotropic radial elasticity. It is not FEM.
+static void append_volume_radial_springs(JPH::SoftBodySharedSettings &r_settings, float p_compliance, int p_anisotropy_axis, float p_anisotropy_ratio) {
+	JPH::Array<JPH::SoftBodySharedSettings::Vertex> &vertices = r_settings.mVertices;
+	const uint32_t center_index = (uint32_t)vertices.size() - 1;
+	const JPH::Vec3 center(vertices[center_index].mPosition);
+
+	float max_distance_sq = 0.0f;
+	for (uint32_t i = 0; i < center_index; ++i) {
+		const float distance_sq = (JPH::Vec3(vertices[i].mPosition) - center).LengthSq();
+		max_distance_sq = MAX(max_distance_sq, distance_sq);
+	}
+	if (max_distance_sq <= 0.0f) {
+		return;
+	}
+
+	const float min_distance_sq = max_distance_sq * 1.0e-12f;
+	r_settings.mEdgeConstraints.reserve(r_settings.mEdgeConstraints.size() + center_index);
+	for (uint32_t i = 0; i < center_index; ++i) {
+		const JPH::Vec3 offset = JPH::Vec3(vertices[i].mPosition) - center;
+		const float distance_sq = offset.LengthSq();
+		if (distance_sq <= min_distance_sq) {
+			continue;
+		}
+
+		float compliance = p_compliance;
+		if (p_anisotropy_axis != 0 && p_anisotropy_ratio != 1.0f) {
+			const float axis_displacement = p_anisotropy_axis == 1 ? offset.GetX() : (p_anisotropy_axis == 2 ? offset.GetY() : offset.GetZ());
+			const float alignment_sq = (axis_displacement * axis_displacement) / distance_sq;
+			compliance *= 1.0f + (p_anisotropy_ratio - 1.0f) * alignment_sq;
+		}
+		JPH::SoftBodySharedSettings::Edge radial(center_index, i, compliance);
+		radial.mRestLength = Math::sqrt(distance_sq);
+		r_settings.mEdgeConstraints.push_back(radial);
+	}
+}
 
 template <typename TJoltVertex>
 void pin_vertices(const JoltSoftBody3D &p_body, const HashSet<int> &p_pinned_vertices, const LocalVector<int> &p_mesh_to_physics, JPH::Array<TJoltVertex> &r_physics_vertices) {
@@ -138,21 +311,33 @@ JPH::SoftBodySharedSettings *JoltSoftBody3D::_create_shared_settings() {
 	const PackedVector3Array mesh_vertices = mesh_data[RSE::ARRAY_VERTEX];
 	ERR_FAIL_COND_V(mesh_vertices.is_empty(), nullptr);
 
+	// Validate mesh topology before allocating Jolt settings. Invalid indices
+	// must not reach mesh_to_physics or the Jolt constraint generator.
+	// A truncated final triangle would also read past mesh_indices.
+	const int mesh_index_count = mesh_indices.size();
+	const int mesh_vertex_count = mesh_vertices.size();
+	ERR_FAIL_COND_V_MSG(mesh_index_count % 3 != 0, nullptr, "Soft body mesh index count must be a multiple of three.");
+	for (int mesh_index : mesh_indices) {
+		ERR_FAIL_COND_V_MSG(mesh_index < 0 || mesh_index >= mesh_vertex_count, nullptr, "Soft body mesh contains an out-of-range vertex index.");
+	}
+
 	JPH::SoftBodySharedSettings *settings = new JPH::SoftBodySharedSettings();
 	JPH::Array<JPH::SoftBodySharedSettings::Vertex> &physics_vertices = settings->mVertices;
 	JPH::Array<JPH::SoftBodySharedSettings::Face> &physics_faces = settings->mFaces;
 
-	HashMap<Vector3, int> vertex_to_physics;
-
-	const int mesh_vertex_count = mesh_vertices.size();
-	const int mesh_index_count = mesh_indices.size();
+	// Position deduplication is only needed for the first use of each mesh
+	// vertex index. AHashMap avoids node allocations for large cloth meshes.
+	AHashMap<Vector3, int> vertex_to_physics;
 
 	mesh_to_physics.resize(mesh_vertex_count);
 	for (int &index : mesh_to_physics) {
 		index = -1;
 	}
 	physics_vertices.reserve(mesh_vertex_count);
-	vertex_to_physics.reserve(mesh_vertex_count);
+	// The map has a ~75% load factor. Reserve enough slots for the upper
+	// bound of unique referenced vertices to avoid growing mid-conversion.
+	const uint32_t max_referenced_vertices = MIN(uint32_t(mesh_vertex_count), uint32_t(mesh_index_count));
+	vertex_to_physics.reserve(max_referenced_vertices + max_referenced_vertices / 2 + 1);
 
 	int physics_index_count = 0;
 
@@ -163,17 +348,25 @@ JPH::SoftBodySharedSettings *JoltSoftBody3D::_create_shared_settings() {
 
 		for (int j = 0; j < 3; ++j) {
 			const int mesh_index = mesh_indices[i + j];
-			const Vector3 vertex = mesh_vertices[mesh_index];
+			int physics_index = mesh_to_physics[mesh_index];
 
-			HashMap<Vector3, int>::Iterator iter_physics_index = vertex_to_physics.find(vertex);
-
-			if (iter_physics_index == vertex_to_physics.end()) {
-				physics_vertices.emplace_back(JPH::Float3((float)(vertex.x - body_position.GetX()), (float)(vertex.y - body_position.GetY()), (float)(vertex.z - body_position.GetZ())), JPH::Float3(0.0f, 0.0f, 0.0f), 1.0f);
-				iter_physics_index = vertex_to_physics.insert(vertex, physics_index_count++);
+			// Triangle indices repeatedly reference the same mesh vertex.
+			// Bypass the position hash entirely after its first occurrence.
+			if (physics_index == -1) {
+				const Vector3 vertex = mesh_vertices[mesh_index];
+				const int *existing_index = vertex_to_physics.getptr(vertex);
+				if (existing_index != nullptr) {
+					// Distinct mesh indices can still refer to the same position.
+					physics_index = *existing_index;
+				} else {
+					physics_index = physics_index_count++;
+					physics_vertices.emplace_back(JPH::Float3((float)(vertex.x - body_position.GetX()), (float)(vertex.y - body_position.GetY()), (float)(vertex.z - body_position.GetZ())), JPH::Float3(0.0f, 0.0f, 0.0f), 1.0f);
+					vertex_to_physics.insert(vertex, physics_index);
+				}
+				mesh_to_physics[mesh_index] = physics_index;
 			}
 
-			physics_face[j] = iter_physics_index->value;
-			mesh_to_physics[mesh_index] = iter_physics_index->value;
+			physics_face[j] = physics_index;
 		}
 
 		if (physics_face[0] == physics_face[1] || physics_face[0] == physics_face[2] || physics_face[1] == physics_face[2]) {
@@ -184,10 +377,22 @@ JPH::SoftBodySharedSettings *JoltSoftBody3D::_create_shared_settings() {
 		physics_faces.emplace_back((JPH::uint32)physics_face[2], (JPH::uint32)physics_face[1], (JPH::uint32)physics_face[0]);
 	}
 
+	// Only vertices created from referenced surface faces are eligible for
+	// soft-soft particle contacts: the optional tetrahedral center is internal.
+	surface_particle_count = (uint32_t)physics_vertices.size();
+
 	// Pin whatever pinned vertices we have currently. This is used during the `Optimize` call below to order the
 	// constraints. Note that it's fine if the pinned vertices change later, but that will reduce the effectiveness
 	// of the constraints a bit.
 	pin_vertices(*this, pinned_vertices, mesh_to_physics, physics_vertices);
+
+	// Populate the complete particle array BEFORE Jolt constructs the LRA
+	// closest-kinematic cache and before computing XPBD mass/compliance.
+	// Rejected convex meshes retain their original particle topology.
+	bool has_convex_volume = false;
+	if (JoltProjectSettings::soft_body_volume_preservation) {
+		has_convex_volume = try_build_convex_volume_fan(*settings, JoltProjectSettings::soft_body_volume_compliance);
+	}
 
 	// Since Godot's stiffness is input as a coefficient between 0 and 1, and Jolt uses actual stiffness for its
 	// edge constraints, we must map one to the other.
@@ -208,22 +413,136 @@ JPH::SoftBodySharedSettings *JoltSoftBody3D::_create_shared_settings() {
 	// which simplifies to:
 	// compliance = dt^2 * (1 / k - 1) * (w1 + w2)
 
-	// Assuming that the vertices have the same mass:
-	const float w1_plus_w2 = 2.0f * physics_vertices.size() / mass;
+	// Assuming that the vertices have the same mass. The validated convex
+	// volume fan (when enabled) has already added its interior particle.
+	// Use double here as
+	// a tiny but positive mass can overflow the float intermediate.
+	const double w1_plus_w2 = 2.0 * double(physics_vertices.size()) / double(mass);
 
 	// Calculate time step of a single XPBD iteration
 	const float dt = 1.0f / Engine::get_singleton()->get_user_physics_ticks_per_second() / simulation_precision;
 
-	// Now calculate the compliance
-	const float inverse_stiffness = dt * dt * (1.0f / stiffness_coefficient - 1.0f) * w1_plus_w2;
+	// Jolt uses FLT_MAX to disable an edge constraint. At zero stiffness,
+	// calculating 1 / k would produce infinity (and potentially NaNs in the
+	// constraint solver). Saturate in double precision for very small k.
+	const double inverse_stiffness_unbounded = double(dt) * double(dt) *
+			(1.0 / double(MAX(stiffness_coefficient, FLT_MIN)) - 1.0) * w1_plus_w2;
+	const float inverse_stiffness = stiffness_coefficient <= 0.0f ?
+			FLT_MAX : float(MIN(inverse_stiffness_unbounded, double(FLT_MAX)));
 
 	JPH::SoftBodySharedSettings::VertexAttributes vertex_attrib;
 	vertex_attrib.mCompliance = vertex_attrib.mShearCompliance = inverse_stiffness;
 
-	settings->CreateConstraints(&vertex_attrib, 1, JPH::SoftBodySharedSettings::EBendType::None);
-	float multiplier = 1.0f - shrinking_factor;
+	// Jolt supports distance- and dihedral-based XPBD bending. Keep disabled
+	// by default for backward compatibility; enable through project settings.
+	vertex_attrib.mBendCompliance = JoltProjectSettings::soft_body_bend_compliance;
+
+	// Long-range attachment constraints keep pinned cloth from stretching
+	// excessively under gravity. Generate them only when requested AND at
+	// least one *valid* pinned physics vertex exists. The default remains
+	// zero-cost; invalid or unused mesh pin indices cannot become anchors.
+	if (JoltProjectSettings::soft_body_lra_mode != 0) {
+		bool has_kinematic_vertex = false;
+		for (const JPH::SoftBodySharedSettings::Vertex &vertex : physics_vertices) {
+			if (vertex.mInvMass == 0.0f) {
+				has_kinematic_vertex = true;
+				break;
+			}
+		}
+		if (has_kinematic_vertex) {
+			using LRAType = JPH::SoftBodySharedSettings::ELRAType;
+			vertex_attrib.mLRAType = JoltProjectSettings::soft_body_lra_mode == 1 ? LRAType::EuclideanDistance : LRAType::GeodesicDistance;
+			vertex_attrib.mLRAMaxDistanceMultiplier = JoltProjectSettings::soft_body_lra_max_distance_multiplier;
+		}
+	}
+
+	using BendType = JPH::SoftBodySharedSettings::EBendType;
+	const int bend_mode = JoltProjectSettings::soft_body_bend_mode;
+	const BendType bend_type = bend_mode == 1 ? BendType::Distance : (bend_mode == 2 ? BendType::Dihedral : BendType::None);
+	settings->CreateConstraints(&vertex_attrib, 1, bend_type);
+	// Optional warp/weft response of woven cloth. Jolt stores compliance
+	// per structural spring; use the rest-pose edge direction rather than a
+	// world-space direction so rotating the soft body doesn't change its
+	// material. 1.0 is isotropic and skips this entire construction pass.
+	// The convex fan's radial springs are added *later*, so they retain
+	// their independent volumetric compliance.
+	const float fiber_multiplier = JoltProjectSettings::soft_body_fiber_compliance_multiplier;
+	if (fiber_multiplier != 1.0f) {
+		const int fiber_axis = JoltProjectSettings::soft_body_fiber_axis;
+		for (JPH::SoftBodySharedSettings::Edge &edge : settings->mEdgeConstraints) {
+			// FLT_MAX disables an edge in Jolt. Don't reactivate it, and
+			// don't modify rigid (zero-compliance) springs.
+			if (edge.mCompliance <= 0.0f || edge.mCompliance >= FLT_MAX || !Math::is_finite(edge.mCompliance)) {
+				continue;
+			}
+
+			const JPH::Float3 &a = settings->mVertices[edge.mVertex[0]].mPosition;
+			const JPH::Float3 &b = settings->mVertices[edge.mVertex[1]].mPosition;
+			const double dx = double(b.x) - double(a.x);
+			const double dy = double(b.y) - double(a.y);
+			const double dz = double(b.z) - double(a.z);
+			const double length_sq = dx * dx + dy * dy + dz * dz;
+			if (length_sq <= 0.0 || !Math::is_finite(length_sq)) {
+				continue;
+			}
+
+			const double parallel = fiber_axis == 0 ? dx : (fiber_axis == 1 ? dy : dz);
+			const double alignment_sq = parallel * parallel / length_sq;
+			const double compliance_scale = 1.0 + (double(fiber_multiplier) - 1.0) * alignment_sq;
+			const double adjusted = double(edge.mCompliance) * compliance_scale;
+			if (Math::is_finite(adjusted)) {
+				edge.mCompliance = float(MIN(adjusted, double(FLT_MAX)));
+			}
+		}
+	}
+
+	const float multiplier = 1.0f - shrinking_factor;
 	for (JPH::SoftBodySharedSettings::Edge &e : settings->mEdgeConstraints) {
 		e.mRestLength *= multiplier;
+	}
+	// Long-range tethers also encode rest lengths. If cloth contracts
+	// without scaling the tether limits, they allow the old unshrunken
+	// anchor distance and defeat part of the contraction. Negative
+	// shrinking_factor expands both kinds of constraint consistently.
+	// Skip this pass entirely for the common shrinking_factor == 0.
+	if (multiplier != 1.0f) {
+		for (JPH::SoftBodySharedSettings::LRA &tether : settings->mLRAConstraints) {
+			tether.mMaxDistance *= multiplier;
+		}
+	}
+	// A compressible volumetric material has a rest-volume factor s^3
+	// when its edge rest lengths scale by s. Keep the old incompressible
+	// target by default; the convex fan must have been constructed first.
+	const bool follow_volume_shrink = has_convex_volume &&
+			JoltProjectSettings::soft_body_volume_follow_shrinking_factor &&
+			multiplier > 0.0f && multiplier != 1.0f;
+	if (follow_volume_shrink) {
+		const double scale = double(multiplier);
+		const double volume_scale = scale * scale * scale;
+		if (Math::is_finite(volume_scale)) {
+			for (JPH::SoftBodySharedSettings::Volume &volume : settings->mVolumeConstraints) {
+				const double target = double(volume.mSixRestVolume) * volume_scale;
+				volume.mSixRestVolume = float(CLAMP(target, -double(FLT_MAX), double(FLT_MAX)));
+			}
+		}
+	}
+
+	// The radial springs are a separate volumetric material, added AFTER
+	// textile fiber compliance and LRA constraint creation.
+	if (has_convex_volume && JoltProjectSettings::soft_body_volume_radial_springs) {
+		const uint32_t surface_edge_count = (uint32_t)settings->mEdgeConstraints.size();
+		append_volume_radial_springs(*settings, JoltProjectSettings::soft_body_volume_radial_compliance,
+				JoltProjectSettings::soft_body_radial_anisotropy_axis, JoltProjectSettings::soft_body_radial_anisotropy_ratio);
+		if (follow_volume_shrink) {
+			const double scale = double(multiplier);
+			for (uint32_t i = surface_edge_count; i < settings->mEdgeConstraints.size(); ++i) {
+				JPH::SoftBodySharedSettings::Edge &radial = settings->mEdgeConstraints[i];
+				const double target = double(radial.mRestLength) * scale;
+				if (Math::is_finite(target)) {
+					radial.mRestLength = float(MIN(target, double(FLT_MAX)));
+				}
+			}
+		}
 	}
 	settings->Optimize();
 
@@ -236,8 +555,9 @@ void JoltSoftBody3D::_apply_environmental_forces(float p_step) {
 
 	// Calculate gravity and which areas affect the soft body through wind.
 	bool gravity_done = false;
+	bool has_distance_attenuation = false;
 	Vector3 gravity;
-	LocalVector<JoltArea3D *> wind_areas;
+	wind_areas_scratch.clear();
 	for (JoltArea3D *area : areas) {
 		if (!gravity_done) {
 			gravity_done = JoltArea3D::apply_override(gravity, area->get_gravity_mode(), [&]() {
@@ -246,7 +566,8 @@ void JoltSoftBody3D::_apply_environmental_forces(float p_step) {
 		}
 
 		if (area->get_wind_pressure() > CMP_EPSILON) {
-			wind_areas.push_back(area);
+			wind_areas_scratch.push_back(area);
+			has_distance_attenuation |= area->get_wind_attenuation_factor() != 0.0f;
 		}
 	}
 
@@ -258,7 +579,9 @@ void JoltSoftBody3D::_apply_environmental_forces(float p_step) {
 	// Apply gravity to soft body. Note that this only works so long as vertices have uniform mass (excluding pinned vertices).
 	jolt_body->AddForce(to_jolt(gravity) * mass);
 
-	if (!wind_areas.is_empty()) {
+	// Aerodynamic drag needs the same triangle traversal as wind, but must
+	// also work in still air without any Area3D. Zero drag stays on the wind-only fast path.
+	if (!wind_areas_scratch.is_empty() || drag_coefficient > 0.0f) {
 		JPH::SoftBodyMotionProperties &motion_properties = static_cast<JPH::SoftBodyMotionProperties &>(*jolt_body->GetMotionPropertiesUnchecked());
 		JPH::Array<JPH::SoftBodyVertex> &physics_vertices = motion_properties.GetVertices();
 
@@ -271,7 +594,10 @@ void JoltSoftBody3D::_apply_environmental_forces(float p_step) {
 			Vector3 v0 = to_godot(physics_vertex0.mPosition);
 			Vector3 v1 = to_godot(physics_vertex1.mPosition);
 			Vector3 v2 = to_godot(physics_vertex2.mPosition);
-			Vector3 centroid = com_position + (v0 + v1 + v2) * real_t(1.0 / 3.0);
+			Vector3 centroid;
+			if (has_distance_attenuation) {
+				centroid = com_position + (v0 + v1 + v2) * real_t(1.0 / 3.0);
+			}
 
 			// Calculate the triangle normal.
 			Vector3 normal = (v2 - v0).cross(v1 - v0);
@@ -284,14 +610,16 @@ void JoltSoftBody3D::_apply_environmental_forces(float p_step) {
 
 				// Accumulate wind forces from all wind areas.
 				Vector3 wind_force;
-				for (const JoltArea3D *area : wind_areas) {
+				for (const JoltArea3D *area : wind_areas_scratch) {
 					const Vector3 &wind_direction = area->get_wind_direction();
-					const Vector3 &wind_source = area->get_wind_source();
-
-					// Calculate attenuation factor based on distance from wind source to triangle centroid.
-					// We do not allow a projection below 1 to ensure that we never amplify and to avoid NaNs when the value would be negative.
-					real_t projection_toward_centroid = MAX((centroid - wind_source).dot(wind_direction), real_t(1.0));
-					real_t attenuation_over_distance = Math::pow(projection_toward_centroid, -real_t(area->get_wind_attenuation_factor()));
+					const float attenuation_factor = area->get_wind_attenuation_factor();
+					real_t attenuation_over_distance = real_t(1.0);
+					if (attenuation_factor != 0.0f) {
+						const Vector3 &wind_source = area->get_wind_source();
+						// The projection remains >= 1 to avoid amplifying wind near its source.
+						const real_t projection_toward_centroid = MAX((centroid - wind_source).dot(wind_direction), real_t(1.0));
+						attenuation_over_distance = Math::pow(projection_toward_centroid, -real_t(attenuation_factor));
+					}
 
 					// Calculate force magnitude.
 					real_t force_magnitude = area->get_wind_pressure() * triangle_area;
@@ -301,13 +629,47 @@ void JoltSoftBody3D::_apply_environmental_forces(float p_step) {
 					wind_force += (force_magnitude * attenuation_over_distance * real_t(1.0 / 3.0) * normal.dot(wind_direction)) * normal;
 				}
 
-				// Apply the force as an impulse over the timestep.
-				JPH::Vec3 impulse = to_jolt(wind_force * p_step);
+				// Force and impulse are per vertex (one third of each face force).
+				Vector3 impulse_per_vertex = wind_force * p_step;
+				if (drag_coefficient > 0.0f) {
+					// Two-sided quadratic aerodynamic drag projected onto the
+					// current triangle normal. This works even without wind.
+					const Vector3 average_velocity = (to_godot(physics_vertex0.mVelocity) +
+								to_godot(physics_vertex1.mVelocity) + to_godot(physics_vertex2.mVelocity)) * real_t(1.0 / 3.0);
+					const real_t normal_speed = normal.dot(average_velocity);
+					const real_t inverse_mass_sum = physics_vertex0.mInvMass + physics_vertex1.mInvMass + physics_vertex2.mInvMass;
+					if (normal_speed != 0.0f && inverse_mass_sum > 0.0f) {
+						// Clamp to prevent a large timestep, speed or coefficient
+						// from reversing the face's average normal velocity.
+						// Double precision avoids overflow in intermediate products.
+						const double normal_speed_d = double(normal_speed);
+						const double impulse_magnitude = MIN(
+								double(drag_coefficient) * double(triangle_area) * (1.0 / 6.0) *
+										normal_speed_d * normal_speed_d * double(p_step),
+								3.0 * Math::abs(normal_speed_d) / double(inverse_mass_sum));
+						impulse_per_vertex -= normal * real_t((normal_speed > 0.0f ? 1.0 : -1.0) * impulse_magnitude);
+					}
+				}
+
+				// Apply the combined wind and drag impulse to each free vertex.
+				JPH::Vec3 impulse = to_jolt(impulse_per_vertex);
 				physics_vertex0.mVelocity += impulse * physics_vertex0.mInvMass;
 				physics_vertex1.mVelocity += impulse * physics_vertex1.mInvMass;
 				physics_vertex2.mVelocity += impulse * physics_vertex2.mInvMass;
 			}
 		}
+	}
+
+	// Reuse capacity under steady wind; trim the scratch after a large burst.
+	// Clear pointers before another frame can remove the referenced areas.
+	constexpr uint32_t MIN_CACHED_WIND_AREAS = 64;
+	const uint32_t wind_count = wind_areas_scratch.size();
+	const uint32_t retained_capacity = MAX(MIN_CACHED_WIND_AREAS,
+			wind_count > UINT32_MAX / 4 ? UINT32_MAX : wind_count * 4);
+	if (wind_areas_scratch.get_capacity() > retained_capacity) {
+		wind_areas_scratch.reset();
+	} else {
+		wind_areas_scratch.clear();
 	}
 }
 
@@ -515,12 +877,13 @@ void JoltSoftBody3D::apply_vertex_impulse(int p_index, const Vector3 &p_impulse)
 	ERR_FAIL_INDEX(p_index, (int)mesh_to_physics.size());
 	const int physics_index = mesh_to_physics[p_index];
 	ERR_FAIL_COND_MSG(physics_index < 0, vformat("Soft body vertex %d was not used by a face and has been omitted for '%s'. No impulse can be applied.", p_index, to_string()));
-	ERR_FAIL_COND_MSG(pinned_vertices.has(physics_index), vformat("Failed to apply impulse to point at index %d for '%s'. Point was found to be pinned.", static_cast<int>(physics_index), to_string()));
-
 	JPH::SoftBodyMotionProperties &motion_properties = static_cast<JPH::SoftBodyMotionProperties &>(*jolt_body->GetMotionPropertiesUnchecked());
 
 	JPH::Array<JPH::SoftBodyVertex> &physics_vertices = motion_properties.GetVertices();
 	JPH::SoftBodyVertex &physics_vertex = physics_vertices[physics_index];
+	// Visual mesh indices can alias the same physical particle. Check its
+	// actual inverse mass rather than treating a mesh index as a physics index.
+	ERR_FAIL_COND_MSG(physics_vertex.mInvMass <= 0.0f, vformat("Failed to apply impulse to pinned point %d for '%s'.", p_index, to_string()));
 
 	physics_vertex.mVelocity += to_jolt(p_impulse) * physics_vertex.mInvMass;
 
@@ -583,17 +946,20 @@ void JoltSoftBody3D::set_is_sleep_allowed(bool p_enabled) {
 }
 
 void JoltSoftBody3D::set_simulation_precision(int p_precision) {
-	if (unlikely(simulation_precision == p_precision)) {
+	// XPBD computes a per-iteration timestep by dividing by this number.
+	// Zero iterations would create a non-finite compliance at mesh creation.
+	const int precision = MAX(p_precision, 1);
+	if (unlikely(simulation_precision == precision)) {
 		return;
 	}
 
-	simulation_precision = MAX(p_precision, 0);
+	simulation_precision = precision;
 
 	_simulation_precision_changed();
 }
 
 void JoltSoftBody3D::set_mass(float p_mass) {
-	ERR_FAIL_COND(p_mass <= 0.0); // A mass of zero would result in infinite inverse mass.
+	ERR_FAIL_COND(p_mass <= 0.0f || !Math::is_finite(p_mass)); // Avoid infinite or non-finite inverse mass.
 
 	if (unlikely(mass == p_mass)) {
 		return;
@@ -609,6 +975,7 @@ float JoltSoftBody3D::get_stiffness_coefficient() const {
 }
 
 void JoltSoftBody3D::set_stiffness_coefficient(float p_coefficient) {
+	ERR_FAIL_COND(!Math::is_finite(p_coefficient));
 	stiffness_coefficient = CLAMP(p_coefficient, 0.0f, 1.0f);
 }
 
@@ -641,12 +1008,12 @@ void JoltSoftBody3D::set_linear_damping(float p_damping) {
 }
 
 float JoltSoftBody3D::get_drag() const {
-	// Drag is not a thing in Jolt, and not supported by Godot Physics either.
-	return 0.0f;
+	return drag_coefficient;
 }
 
 void JoltSoftBody3D::set_drag(float p_drag) {
-	// Drag is not a thing in Jolt, and not supported by Godot Physics either.
+	ERR_FAIL_COND_MSG(p_drag < 0.0f || !Math::is_finite(p_drag), "Soft body drag must be nonnegative and finite.");
+	drag_coefficient = p_drag;
 }
 
 Variant JoltSoftBody3D::get_state(PS3DE::BodyState p_state) const {
@@ -852,6 +1219,10 @@ bool JoltSoftBody3D::is_vertex_pinned(int p_index) const {
 
 	ERR_FAIL_INDEX_V(p_index, (int)mesh_to_physics.size(), false);
 	const int physics_index = mesh_to_physics[p_index];
+	ERR_FAIL_COND_V_MSG(physics_index < 0, false, "Cannot query an unused soft body mesh vertex.");
 
-	return pinned_vertices.has(physics_index);
+	// Mesh vertices may be welded: every visual alias of a pinned physical
+	// particle must report the same pin status.
+	const JPH::SoftBodyMotionProperties &motion_properties = static_cast<const JPH::SoftBodyMotionProperties &>(*jolt_body->GetMotionPropertiesUnchecked());
+	return motion_properties.GetVertices()[physics_index].mInvMass == 0.0f;
 }

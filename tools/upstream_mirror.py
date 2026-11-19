@@ -24,7 +24,7 @@ from typing import Any
 
 API = "https://api.github.com"
 SOURCE = "godotengine/godot"
-DESTINATION = "demoh2019/godot"
+DESTINATION = "demoh2019/Cgame"
 STATE_BRANCH = "upstream-mirror-state"
 STATE_PATH = "tools/upstream_mirror_state.json"
 PAGE_SIZE = 100

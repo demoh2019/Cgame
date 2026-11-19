@@ -1,0 +1,39 @@
+name: Upstream CSV and WAV regressions
+
+on:
+  push:
+    branches: [develop]
+    paths:
+      - 'editor/script/script_editor_plugin.cpp'
+      - 'editor/script/script_editor_plugin.h'
+      - 'scene/resources/audio/audio_stream_wav.cpp'
+      - 'tests/scene/test_audio_stream_wav.cpp'
+      - 'misc/scripts/tests/test_upstream_wav_csv_20261119.py'
+      - '.github/workflows/upstream-wav-csv-regressions.yml'
+  pull_request:
+    paths:
+      - 'editor/script/script_editor_plugin.cpp'
+      - 'editor/script/script_editor_plugin.h'
+      - 'scene/resources/audio/audio_stream_wav.cpp'
+      - 'tests/scene/test_audio_stream_wav.cpp'
+      - 'misc/scripts/tests/test_upstream_wav_csv_20261119.py'
+      - '.github/workflows/upstream-wav-csv-regressions.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  source-regressions:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ['3.10', '3.13']
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+      - name: Validate CSV and WAV source contracts
+        run: python -m unittest discover -s misc/scripts/tests -p test_upstream_wav_csv_20261119.py -v

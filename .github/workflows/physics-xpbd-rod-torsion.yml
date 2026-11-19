@@ -1,0 +1,51 @@
+name: Native XPBD rod centerline geometric torsion contracts
+
+on:
+  pull_request:
+    paths:
+      - 'servers/physics_xpbd_rod_torsion.h'
+      - 'modules/godot_physics_3d/godot_soft_body_3d.cpp'
+      - 'modules/godot_physics_3d/godot_soft_body_3d.h'
+      - 'modules/godot_physics_3d/godot_space_3d.h'
+      - 'modules/godot_physics_3d/godot_space_3d.cpp'
+      - 'servers/physics_3d/physics_server_3d.cpp'
+      - 'tests/servers/test_physics_xpbd_rod_torsion.cpp'
+      - 'tests/stress/test_physics_xpbd_rod_torsion.py'
+      - 'demo/rod_curvature_lab/**'
+      - '.github/workflows/physics-xpbd-rod-torsion.yml'
+  push:
+    branches: [develop]
+    paths:
+      - 'servers/physics_xpbd_rod_torsion.h'
+      - 'modules/godot_physics_3d/godot_soft_body_3d.cpp'
+      - 'modules/godot_physics_3d/godot_soft_body_3d.h'
+      - 'modules/godot_physics_3d/godot_space_3d.h'
+      - 'modules/godot_physics_3d/godot_space_3d.cpp'
+      - 'servers/physics_3d/physics_server_3d.cpp'
+      - 'tests/servers/test_physics_xpbd_rod_torsion.cpp'
+      - 'tests/stress/test_physics_xpbd_rod_torsion.py'
+      - 'demo/rod_curvature_lab/**'
+      - '.github/workflows/physics-xpbd-rod-torsion.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: xpbd-rod-geometric-torsion-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  numerical-and-source-contracts:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - name: Check Python source syntax
+        run: |
+          python3 -m py_compile tests/stress/test_physics_xpbd_rod_torsion.py tests/stress/test_physics_xpbd_rod_bend.py
+      - name: Signed torsion, chain connectivity, pins, and legacy rod constraints
+        run: |
+          python3 -m unittest discover -s tests/stress -p 'test_physics_xpbd_rod_torsion.py' -v
+          python3 -m unittest discover -s tests/stress -p 'test_physics_xpbd_rod_bend.py' -v
+          python3 -m unittest discover -s tests/stress -p 'test_physics_xpbd_dihedral.py' -v

@@ -1,0 +1,37 @@
+name: Upstream external-change modal regression tests
+
+on:
+  pull_request:
+    paths:
+      - "editor/editor_node.cpp"
+      - "editor/editor_node.h"
+      - "misc/scripts/tests/test_upstream_external_change_modal.py"
+      - ".github/workflows/upstream-external-change-modal.yml"
+  push:
+    branches: [develop]
+    paths:
+      - "editor/editor_node.cpp"
+      - "editor/editor_node.h"
+      - "misc/scripts/tests/test_upstream_external_change_modal.py"
+      - ".github/workflows/upstream-external-change-modal.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  contracts:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          sparse-checkout: |
+            editor/editor_node.cpp
+            editor/editor_node.h
+            misc/scripts/tests/test_upstream_external_change_modal.py
+          sparse-checkout-cone-mode: false
+      - name: Check test syntax
+        run: python3 -m py_compile misc/scripts/tests/test_upstream_external_change_modal.py
+      - name: Run 19 external change modal regression contracts
+        run: python3 -m unittest discover -s misc/scripts/tests -p 'test_upstream_external_change_modal.py' -v

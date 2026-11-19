@@ -1,0 +1,54 @@
+name: Core container bulk-move performance regressions
+
+on:
+  push:
+    branches: [develop]
+    paths:
+      - 'core/templates/vector.h'
+      - 'core/templates/local_vector.h'
+      - 'core/templates/ring_buffer.h'
+      - 'tests/core/templates/test_vector.cpp'
+      - 'tests/core/templates/test_local_vector.cpp'
+      - 'tests/core/templates/test_ring_buffer.cpp'
+      - '.github/workflows/core-container-bulk-perf.yml'
+  pull_request:
+    paths:
+      - 'core/templates/vector.h'
+      - 'core/templates/local_vector.h'
+      - 'core/templates/ring_buffer.h'
+      - 'tests/core/templates/test_vector.cpp'
+      - 'tests/core/templates/test_local_vector.cpp'
+      - 'tests/core/templates/test_ring_buffer.cpp'
+      - '.github/workflows/core-container-bulk-perf.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: core-container-bulk-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  native-regressions:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+      - uses: ./.github/actions/godot-deps
+      - name: Build native editor and C++ tests
+        uses: ./.github/actions/godot-build
+        with:
+          platform: linuxbsd
+          target: editor
+          scons-flags: dev_build=yes tests=yes debug_symbols=no module_mono_enabled=no module_text_server_fb_enabled=yes accesskit=no -j2
+      - name: Run Vector, LocalVector and RingBuffer unit tests
+        shell: bash
+        run: |
+          set -euo pipefail
+          BIN=./bin/godot.linuxbsd.editor.dev.x86_64
+          "$BIN" --headless --test --test-case="*[Vector]*" --no-colors
+          "$BIN" --headless --test --test-case="*[RingBuffer]*" --no-colors
+          "$BIN" --headless --test --test-case="*[LocalVector]*" --no-colors

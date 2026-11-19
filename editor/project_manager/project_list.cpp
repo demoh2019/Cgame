@@ -663,7 +663,7 @@ void ProjectList::_notification(int p_what) {
 		case NOTIFICATION_PROCESS: {
 			// Load icons as a coroutine to speed up launch when you have hundreds of projects.
 			if (_icon_load_index < _projects.size()) {
-				Item &item = _projects.write[_icon_load_index];
+				const Item &item = _projects[_icon_load_index];
 				if (item.control->should_load_project_icon()) {
 					_load_project_icon(_icon_load_index);
 				}
@@ -721,17 +721,42 @@ void ProjectList::_scan_finished() {
 		scan_progress->hide();
 	}
 
-	for (const String &E : scan_data->found_projects) {
-		add_project(E, false);
+	// A single hash index replaces O(found_projects * registered_projects)
+	// linear scans. This also filters duplicate paths discovered in the same scan.
+	HashSet<String> known_paths;
+	if (!scan_data->found_projects.is_empty()) {
+		known_paths.reserve(_projects.size() + scan_data->found_projects.size());
+		for (const Item &project : _projects) {
+			known_paths.insert(project.path);
+		}
+	}
+
+	bool edited = false;
+	for (const String &path : scan_data->found_projects) {
+		// Insert performs one hash probe and tells us whether the path is new.
+		const uint32_t previous_count = known_paths.size();
+		known_paths.insert(path);
+		if (known_paths.size() == previous_count) {
+			continue;
+		}
+
+		add_project(path, false);
+		_projects.push_back(load_project_data(path, false));
+		_create_project_item_control(_projects.size() - 1);
+		edited = true;
 	}
 	memdelete(scan_data);
 	scan_data = nullptr;
 
-	save_config();
-
-	if (ProjectManager::get_singleton()->is_initialized()) {
-		update_project_list();
+	if (!edited) {
+		return;
 	}
+
+	// Reorder only the existing controls and newly discovered projects.
+	save_config();
+	sort_projects();
+	emit_signal(SNAME(SIGNAL_LIST_CHANGED));
+	set_v_scroll(0);
 }
 
 // Initialization & loading.
@@ -975,13 +1000,14 @@ void ProjectList::sort_projects() {
 		}
 	}
 
+	const bool search_full_path = search_term.contains_char('/');
 	for (int i = 0; i < _projects.size(); ++i) {
-		Item &item = _projects.write[i];
+		const Item &item = _projects[i];
 
 		bool item_visible = true;
 		if (!_search_term.is_empty()) {
 			String search_path;
-			if (search_term.contains_char('/')) {
+			if (search_full_path) {
 				// Search path will match the whole path
 				search_path = item.path;
 			} else {
@@ -1005,8 +1031,11 @@ void ProjectList::sort_projects() {
 	}
 
 	for (int i = 0; i < _projects.size(); ++i) {
-		Item &item = _projects.write[i];
-		item.control->get_parent()->move_child(item.control, i);
+		const Item &item = _projects[i];
+		// Avoid even entering Node::move_child for items already in place.
+		if (item.control->get_index() != i) {
+			item.control->get_parent()->move_child(item.control, i);
+		}
 	}
 
 	// Rewind the coroutine because order of projects changed

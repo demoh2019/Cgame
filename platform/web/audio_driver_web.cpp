@@ -96,9 +96,6 @@ void AudioDriverWeb::_audio_driver_process(int p_from, int p_samples) {
 }
 
 void AudioDriverWeb::_audio_driver_capture(int p_from, int p_samples) {
-	if (get_input_buffer().is_empty()) {
-		return; // Input capture stopped.
-	}
 	const int max_samples = memarr_len(input_rb);
 
 	int read_pos = p_from;
@@ -199,9 +196,10 @@ Error AudioDriverWeb::input_start() {
 
 Error AudioDriverWeb::input_stop() {
 	godot_audio_input_stop();
-	lock();
-	input_buffer.clear();
-	unlock();
+	// Preserve the fixed capture buffer across restarts; reset only its cursors.
+	// Clearing the Vector would invalidate the cached raw sample pointer.
+	input_position.set(0);
+	input_size.set(0);
 	return OK;
 }
 

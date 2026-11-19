@@ -1,0 +1,45 @@
+name: Godot Agent MCP server tests
+
+on:
+  pull_request:
+    paths:
+      - 'misc/godot_agent/**'
+      - '.github/workflows/godot_agent.yml'
+  push:
+    paths:
+      - 'misc/godot_agent/**'
+      - '.github/workflows/godot_agent.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  agent-tests:
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          sparse-checkout: |
+            misc/godot_agent
+          sparse-checkout-cone-mode: true
+      - name: Install Godot 4.8 beta 4
+        shell: bash
+        run: |
+          set -euo pipefail
+          curl --fail --location --retry 3 -o /tmp/godot.zip \
+            https://github.com/godotengine/godot-builds/releases/download/4.8-beta4/Godot_v4.8-beta4_linux.x86_64.zip
+          unzip -q /tmp/godot.zip -d /tmp/
+          chmod +x /tmp/Godot_v4.8-beta4_linux.x86_64
+      - name: Unit tests
+        shell: bash
+        run: |
+          set -euo pipefail
+          /tmp/Godot_v4.8-beta4_linux.x86_64 --headless --path misc/godot_agent --script res://tests/test_common.gd
+      - name: End-to-end MCP tests
+        shell: bash
+        run: |
+          set -euo pipefail
+          misc/godot_agent/tests/e2e.sh /tmp/Godot_v4.8-beta4_linux.x86_64

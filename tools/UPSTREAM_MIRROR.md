@@ -1,7 +1,7 @@
 # godotengine/godot issue and PR metadata mirror
 
 This tool is **not a GitHub issue transfer** and **does not transplant pull-request code**.
-It creates new issues in `demoh2019/godot`, preserving the upstream URL,
+It creates new issues in `demoh2019/Cgame`, preserving the upstream URL,
 original author and status, labels as text, description, and key PR metadata.
 For upstream pull requests, the destination entry is explicitly marked as a
 **tracking issue**; reviews, branch commits, checks, and original authorship
@@ -14,7 +14,7 @@ be expensive to administer. Read before enabling scheduled writes.
 
 ## Setup
 
-1. Enable **Settings → General → Features → Issues** in `demoh2019/godot`.
+1. Enable **Settings → General → Features → Issues** in `demoh2019/Cgame`.
    The feature is currently disabled. Without it the script refuses all writes.
 2. Merge the tooling PR into the destination repository.
 3. In **Actions**, open **Mirror upstream Godot issue and PR metadata**.
@@ -61,3 +61,5 @@ check license and attribution, compile, run unit/regression/integration tests,
 and open a **separate draft PR** after evaluating conflicts and superseded PRs.
 Do not mass-merge all upstream open PRs; many are experimental, conflict with
 one another or have unresolved review notes.
+
+This metadata-only mirror intentionally uses a separate workflow from the existing upstream code/PR mirror. Scheduled runs are read-only; GitHub writes require explicit workflow dispatch with dry-run disabled.

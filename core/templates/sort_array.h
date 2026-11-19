@@ -33,6 +33,8 @@
 #include "core/error/error_macros.h"
 #include "core/typedefs.h"
 
+#include <utility> // std::move in insertion sort.
+
 #define ERR_BAD_COMPARE(cond) \
 	if (unlikely(cond)) { \
 		ERR_PRINT("bad comparison function; sorting will be broken"); \
@@ -76,11 +78,20 @@ public:
 	}
 
 	inline int64_t bitlog(int64_t p_n) const {
-		int64_t k;
-		for (k = 0; p_n != 1; p_n >>= 1) {
-			++k;
+		if (p_n <= 1) {
+			return 0;
 		}
-		return k;
+#if defined(__GNUC__) || defined(__clang__)
+		// Depth budget is floor(log2(n)); avoid a shift loop per sort call.
+		return 63 - __builtin_clzll(static_cast<unsigned long long>(p_n));
+#else
+		int64_t result = 0;
+		while (p_n > 1) {
+			p_n >>= 1;
+			result++;
+		}
+		return result;
+#endif
 	}
 
 	/* Heap / Heapsort functions */
@@ -88,19 +99,19 @@ public:
 	inline void push_heap(int64_t p_first, int64_t p_hole_idx, int64_t p_top_index, T p_value, T *p_array) const {
 		int64_t parent = (p_hole_idx - 1) / 2;
 		while (p_hole_idx > p_top_index && compare(p_array[p_first + parent], p_value)) {
-			p_array[p_first + p_hole_idx] = p_array[p_first + parent];
+			p_array[p_first + p_hole_idx] = std::move(p_array[p_first + parent]);
 			p_hole_idx = parent;
 			parent = (p_hole_idx - 1) / 2;
 		}
-		p_array[p_first + p_hole_idx] = p_value;
+		p_array[p_first + p_hole_idx] = std::move(p_value);
 	}
 
 	inline void pop_heap(int64_t p_first, int64_t p_last, int64_t p_result, T p_value, T *p_array) const {
-		p_array[p_result] = p_array[p_first];
-		adjust_heap(p_first, 0, p_last - p_first, p_value, p_array);
+		p_array[p_result] = std::move(p_array[p_first]);
+		adjust_heap(p_first, 0, p_last - p_first, std::move(p_value), p_array);
 	}
 	inline void pop_heap(int64_t p_first, int64_t p_last, T *p_array) const {
-		pop_heap(p_first, p_last - 1, p_last - 1, p_array[p_last - 1], p_array);
+		pop_heap(p_first, p_last - 1, p_last - 1, std::move(p_array[p_last - 1]), p_array);
 	}
 
 	inline void adjust_heap(int64_t p_first, int64_t p_hole_idx, int64_t p_len, T p_value, T *p_array) const {
@@ -112,16 +123,16 @@ public:
 				second_child--;
 			}
 
-			p_array[p_first + p_hole_idx] = p_array[p_first + second_child];
+			p_array[p_first + p_hole_idx] = std::move(p_array[p_first + second_child]);
 			p_hole_idx = second_child;
 			second_child = 2 * (second_child + 1);
 		}
 
 		if (second_child == p_len) {
-			p_array[p_first + p_hole_idx] = p_array[p_first + (second_child - 1)];
+			p_array[p_first + p_hole_idx] = std::move(p_array[p_first + (second_child - 1)]);
 			p_hole_idx = second_child - 1;
 		}
-		push_heap(p_first, p_hole_idx, top_index, p_value, p_array);
+		push_heap(p_first, p_hole_idx, top_index, std::move(p_value), p_array);
 	}
 
 	inline void sort_heap(int64_t p_first, int64_t p_last, T *p_array) const {
@@ -138,7 +149,7 @@ public:
 		int64_t parent = (len - 2) / 2;
 
 		while (true) {
-			adjust_heap(p_first, parent, len, p_array[p_first + parent], p_array);
+			adjust_heap(p_first, parent, len, std::move(p_array[p_first + parent]), p_array);
 			if (parent == 0) {
 				return;
 			}
@@ -150,7 +161,7 @@ public:
 		make_heap(p_first, p_middle, p_array);
 		for (int64_t i = p_middle; i < p_last; i++) {
 			if (compare(p_array[i], p_array[p_first])) {
-				pop_heap(p_first, p_middle, i, p_array[i], p_array);
+				pop_heap(p_first, p_middle, i, std::move(p_array[i]), p_array);
 			}
 		}
 		sort_heap(p_first, p_middle, p_array);
@@ -160,7 +171,7 @@ public:
 		make_heap(p_first, p_middle, p_array);
 		for (int64_t i = p_middle; i < p_last; i++) {
 			if (compare(p_array[i], p_array[p_first])) {
-				pop_heap(p_first, p_middle, i, p_array[i], p_array);
+				pop_heap(p_first, p_middle, i, std::move(p_array[i]), p_array);
 			}
 		}
 	}
@@ -214,8 +225,20 @@ public:
 					median_of_3_index(p_array, p_first, p_first + (p_last - p_first) / 2, p_last - 1),
 					p_array);
 
-			introsort(cut, p_last, p_array, p_max_depth);
-			p_last = cut;
+			// Recurse only into the smaller partition. The larger partition is
+			// handled by the loop, keeping stack usage logarithmic even when
+			// pivot splits are highly unbalanced.
+			if (cut - p_first < p_last - cut) {
+				if (cut - p_first > INTROSORT_THRESHOLD) {
+					introsort(p_first, cut, p_array, p_max_depth);
+				}
+				p_first = cut;
+			} else {
+				if (p_last - cut > INTROSORT_THRESHOLD) {
+					introsort(cut, p_last, p_array, p_max_depth);
+				}
+				p_last = cut;
+			}
 		}
 	}
 
@@ -245,29 +268,43 @@ public:
 		insertion_sort(p_first, p_last, p_array);
 	}
 
-	inline void unguarded_linear_insert(int64_t p_last, T p_value, T *p_array) const {
+	inline void unguarded_linear_insert(int64_t p_last, T *p_array) const {
+		// Most elements in introsort's final insertion pass are already in
+		// order. Avoid two moves (and potential heap work in T) for those
+		// entries. This method is only called with a valid predecessor.
+		if (!compare(p_array[p_last], p_array[p_last - 1])) {
+			return;
+		}
+
+		T val = std::move(p_array[p_last]);
 		int64_t next = p_last - 1;
-		while (compare(p_value, p_array[next])) {
+		while (compare(val, p_array[next])) {
 			if constexpr (Validate) {
 				ERR_BAD_COMPARE(next == 0);
 			}
-			p_array[p_last] = p_array[next];
+			p_array[p_last] = std::move(p_array[next]);
 			p_last = next;
 			next--;
 		}
-		p_array[p_last] = p_value;
+
+		p_array[p_last] = std::move(val);
 	}
 
 	inline void linear_insert(int64_t p_first, int64_t p_last, T *p_array) const {
-		T val = p_array[p_last];
-		if (compare(val, p_array[p_first])) {
+		// Already sorted (including equal neighbors): skip all object moves
+		// and the potentially more expensive comparison with the first item.
+		if (!compare(p_array[p_last], p_array[p_last - 1])) {
+			return;
+		}
+		if (compare(p_array[p_last], p_array[p_first])) {
+			T val = std::move(p_array[p_last]);
 			for (int64_t i = p_last; i > p_first; i--) {
-				p_array[i] = p_array[i - 1];
+				p_array[i] = std::move(p_array[i - 1]);
 			}
 
-			p_array[p_first] = val;
+			p_array[p_first] = std::move(val);
 		} else {
-			unguarded_linear_insert(p_last, val, p_array);
+			unguarded_linear_insert(p_last, p_array);
 		}
 	}
 
@@ -282,7 +319,7 @@ public:
 
 	inline void unguarded_insertion_sort(int64_t p_first, int64_t p_last, T *p_array) const {
 		for (int64_t i = p_first; i != p_last; i++) {
-			unguarded_linear_insert(i, p_array[i], p_array);
+			unguarded_linear_insert(i, p_array);
 		}
 	}
 
@@ -297,6 +334,40 @@ public:
 
 	inline void sort_range(int64_t p_first, int64_t p_last, T *p_array) const {
 		if (p_first != p_last) {
+			// Sorting long runs of equivalent keys only creates useless moves.
+			// A linear check is much cheaper than partitioning an all-equal
+			// range, and leaves expensive objects completely untouched. For
+			// ordinary input, reject the fast path after a few comparisons.
+			if (p_last - p_first >= 64) {
+				const T &first = p_array[p_first];
+				const int64_t middle = p_first + (p_last - p_first) / 2;
+				if (!compare(first, p_array[middle]) && !compare(p_array[middle], first) &&
+						!compare(first, p_array[p_last - 1]) && !compare(p_array[p_last - 1], first)) {
+					bool all_equivalent = true;
+					for (int64_t i = p_first + 1; i < p_last - 1; i++) {
+						if (compare(first, p_array[i]) || compare(p_array[i], first)) {
+							all_equivalent = false;
+							break;
+						}
+					}
+					if (all_equivalent) {
+						return;
+					}
+				}
+				// Most unsorted arrays reject this check on the first few
+				// adjacent pairs. Re-sorting an unchanged ordered array,
+				// however, needs no partition swaps or object moves at all.
+				bool already_sorted = true;
+				for (int64_t i = p_first + 1; i < p_last; i++) {
+					if (compare(p_array[i], p_array[i - 1])) {
+						already_sorted = false;
+						break;
+					}
+				}
+				if (already_sorted) {
+					return;
+				}
+			}
 			introsort(p_first, p_last, p_array, bitlog(p_last - p_first) * 2);
 			final_insertion_sort(p_first, p_last, p_array);
 		}

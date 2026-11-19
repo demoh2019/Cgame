@@ -1,0 +1,39 @@
+name: Compiler, terrain and icon container clone regressions
+
+on:
+  push:
+    branches: [develop]
+    paths:
+      - 'editor/themes/editor_icons.cpp'
+      - 'modules/gdscript/gdscript_compiler.cpp'
+      - 'modules/tilemap/tile_set.cpp'
+      - 'misc/scripts/tests/test_compiler_terrain_icon_copies.py'
+      - '.github/workflows/compiler-terrain-icon-perf.yml'
+  pull_request:
+    branches: [develop]
+    paths:
+      - 'editor/themes/editor_icons.cpp'
+      - 'modules/gdscript/gdscript_compiler.cpp'
+      - 'modules/tilemap/tile_set.cpp'
+      - 'misc/scripts/tests/test_compiler_terrain_icon_copies.py'
+      - '.github/workflows/compiler-terrain-icon-perf.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  source-contracts:
+    runs-on: ubuntu-24.04
+    strategy:
+      matrix:
+        python-version: ['3.9', '3.13']
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+      - name: Validate no-clone hotpaths
+        run: |
+          python -m py_compile misc/scripts/tests/test_compiler_terrain_icon_copies.py
+          python -m unittest discover -s misc/scripts/tests -p test_compiler_terrain_icon_copies.py -v

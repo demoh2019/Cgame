@@ -31,6 +31,7 @@
 #include "box_container.h"
 
 #include "core/object/class_db.h"
+#include "core/templates/local_vector.h"
 #include "scene/gui/label.h"
 #include "scene/gui/margin_container.h"
 #include "scene/theme/theme_db.h"
@@ -42,6 +43,11 @@ struct _MinSizeCache {
 	real_t stretch_ratio = 0;
 	bool will_stretch = false;
 	int final_size = 0;
+};
+
+struct _BoxLayoutEntry {
+	Control *control = nullptr;
+	_MinSizeCache size;
 };
 
 void BoxContainer::_resort() {
@@ -57,10 +63,15 @@ void BoxContainer::_resort() {
 	int stretch_space = 0;
 	float stretch_ratio_total = 0.0;
 	int desired_extra_space = 0;
-	HashMap<Control *, _MinSizeCache> min_size_cache;
+	// Store measurements in child order rather than hashing each Control
+	// into a fresh map on every layout. Keep the pointer for a cheap
+	// validation if a child is replaced during reentrant notifications.
+	const int child_count = get_child_count();
+	LocalVector<_BoxLayoutEntry> min_size_cache;
+	min_size_cache.resize(child_count);
 	const int cross_axis = vertical ? 0 : 1;
 
-	for (int i = 0; i < get_child_count(); i++) {
+	for (int i = 0; i < child_count; i++) {
 		Control *c = as_sortable_control(get_child(i));
 		if (!c) {
 			continue;
@@ -109,7 +120,8 @@ void BoxContainer::_resort() {
 		desired_extra_space += msc.desired_size - msc.min_size;
 
 		msc.final_size = msc.min_size;
-		min_size_cache[c] = msc;
+		min_size_cache[i].control = c;
+		min_size_cache[i].size = msc;
 		children_count++;
 	}
 
@@ -134,13 +146,16 @@ void BoxContainer::_resort() {
 	if (stretch_diff > 0 && desired_extra_space > 0) {
 		real_t space_available_ratio = MIN(real_t(stretch_diff) / real_t(desired_extra_space), 1.0);
 
-		for (Node *child : iterate_children()) {
-			Control *c = as_sortable_control(child, SortableVisibilityMode::VISIBLE);
+		ERR_FAIL_COND(get_child_count() != child_count);
+		for (int i = 0; i < child_count; i++) {
+			// Locally visible controls outside the tree never entered the
+			// first-pass cache, and contributed no sizes in the old map.
+			Control *c = as_sortable_control(get_child(i));
 			if (!c) {
 				continue;
 			}
-
-			_MinSizeCache &msc = min_size_cache[c];
+			ERR_FAIL_COND(min_size_cache[i].control != c);
+			_MinSizeCache &msc = min_size_cache[i].size;
 
 			if (msc.desired_size > msc.min_size) {
 				int desired_size_increase = floor((msc.desired_size - msc.min_size) * space_available_ratio);
@@ -164,14 +179,14 @@ void BoxContainer::_resort() {
 		bool refit_successful = true;
 		float error = 0.0; // Keep track of accumulated error in pixels
 
-		for (int i = 0; i < get_child_count(); i++) {
+		for (int i = 0; i < child_count; i++) {
 			Control *c = as_sortable_control(get_child(i));
 			if (!c) {
 				continue;
 			}
 
-			ERR_FAIL_COND(!min_size_cache.has(c));
-			_MinSizeCache &msc = min_size_cache[c];
+			ERR_FAIL_COND(min_size_cache[i].control != c);
+			_MinSizeCache &msc = min_size_cache[i].size;
 
 			if (msc.will_stretch) {
 				float final_pixel_size = stretch_space * msc.stretch_ratio / stretch_ratio_total;
@@ -214,14 +229,14 @@ void BoxContainer::_resort() {
 
 	int ofs = 0;
 	int final_stretch_diff = max_space - combined_min;
-	for (int i = 0; i < get_child_count(); i++) {
+	for (int i = 0; i < child_count; i++) {
 		Control *c = as_sortable_control(get_child(i));
 		if (!c) {
 			continue;
 		}
 
-		ERR_FAIL_COND(!min_size_cache.has(c));
-		_MinSizeCache &msc = min_size_cache[c];
+		ERR_FAIL_COND(min_size_cache[i].control != c);
+		_MinSizeCache &msc = min_size_cache[i].size;
 		final_stretch_diff -= msc.final_size - msc.min_size;
 	}
 
@@ -266,22 +281,24 @@ void BoxContainer::_resort() {
 	int delta;
 
 	if ((rtl && !vertical) != reverse_sort) {
-		start = get_child_count() - 1;
+		start = child_count - 1;
 		end = -1;
 		delta = -1;
 	} else {
 		start = 0;
-		end = get_child_count();
+		end = child_count;
 		delta = +1;
 	}
 
 	for (int i = start; i != end; i += delta) {
+		ERR_FAIL_COND(get_child_count() != child_count);
 		Control *c = as_sortable_control(get_child(i));
 		if (!c) {
 			continue;
 		}
 
-		_MinSizeCache &msc = min_size_cache[c];
+		ERR_FAIL_COND(min_size_cache[i].control != c);
+		_MinSizeCache &msc = min_size_cache[i].size;
 
 		if (first) {
 			first = false;
@@ -321,17 +338,17 @@ Size2 BoxContainer::_get_minimum_size(bool p_use_desired_sizes) const {
 	const int other_axis = vertical ? 0 : 1;
 
 	Size2 minimum;
+	int visible_children = 0;
 
-	List<Control *> children;
+	// The minimum-size computation is read-only: accumulate in one pass
+	// instead of allocating a List node for every visible Control.
 	for (Node *child : iterate_children()) {
 		Control *c = as_sortable_control(child, SortableVisibilityMode::VISIBLE);
 		if (!c) {
 			continue;
 		}
-		children.push_back(c);
-	}
+		visible_children++;
 
-	for (Control *c : children) {
 		const Size2 min_size = p_use_desired_sizes ? c->get_bound_desired_size().ceil() : c->get_bound_minimum_size().ceil();
 		const Size2 max_size = c->get_custom_maximum_size();
 
@@ -345,8 +362,8 @@ Size2 BoxContainer::_get_minimum_size(bool p_use_desired_sizes) const {
 		minimum[other_axis] = MAX(minimum[other_axis], other_axis_size);
 	}
 
-	if (children.size() > 0) {
-		minimum[axis] += theme_cache.separation * (children.size() - 1);
+	if (visible_children > 0) {
+		minimum[axis] += theme_cache.separation * (visible_children - 1);
 	}
 
 	return minimum;

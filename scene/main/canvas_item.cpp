@@ -696,7 +696,9 @@ bool CanvasItem::_set(const StringName &p_name, const Variant &p_value) {
 bool CanvasItem::_get(const StringName &p_name, Variant &r_ret) const {
 	const StringName *r = _instance_shader_parameter_get_remap(p_name);
 	if (r) {
-		r_ret = get_instance_shader_parameter(*r);
+		// The server stores only the RID for resource values; retain the resource for scene serialization.
+		const Variant *stored = instance_shader_parameters.getptr(*r);
+		r_ret = (stored && stored->get_type() == Variant::OBJECT) ? *stored : get_instance_shader_parameter(*r);
 		return true;
 	}
 
@@ -726,8 +728,25 @@ void CanvasItem::_get_property_list(List<PropertyInfo> *p_list) const {
 #ifdef TOOLS_ENABLED
 		instance_parameter_cache.insert("instance_shader_parameters/" + pi.name, pi.name);
 #endif
-		pi.name = "instance_shader_parameters/" + pi.name;
-		p_list->push_back(pi);
+		PropertyInfo pi_out = pi;
+		pi_out.name = "instance_shader_parameters/" + pi.name;
+		p_list->push_back(pi_out);
+	}
+
+	// Keep unresolved authored overrides as storage-only properties so re-saving
+	// a scene while its shader is absent or invalid does not discard them.
+	for (const KeyValue<StringName, Variant> &E : instance_shader_parameters) {
+		bool exposed = false;
+		for (const PropertyInfo &pi : pinfo) {
+			if (pi.name == E.key) {
+				exposed = true;
+				break;
+			}
+		}
+		if (exposed) {
+			continue;
+		}
+		p_list->push_back(PropertyInfo(E.value.get_type(), "instance_shader_parameters/" + E.key, PROPERTY_HINT_NONE, "", PROPERTY_USAGE_STORAGE));
 	}
 }
 
@@ -1163,7 +1182,13 @@ void CanvasItem::_notify_transform(CanvasItem *p_node) {
 	 * notification anyway).
 	 */
 
-	_update_oversampling(false);
+	// Recursive calls keep 'this' as the originating item, but advance
+	// p_node through its descendants. Refreshing the same origin's
+	// oversampling for every descendant repeats identical transform work
+	// O(subtree size) times. Only the initial call needs this update.
+	if (p_node == this) {
+		_update_oversampling(false);
+	}
 
 	if (/*p_node->xform_change.in_list() &&*/ p_node->_is_global_invalid()) {
 		return; //nothing to do

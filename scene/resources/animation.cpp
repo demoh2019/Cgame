@@ -2896,7 +2896,7 @@ Animation::UpdateMode Animation::value_track_get_update_mode(int p_track) const 
 
 template <typename T>
 void Animation::_track_get_key_indices_in_range(const LocalVector<T> &p_array, double from_time, double to_time, LocalVector<int> *r_indices, bool p_is_backward) const {
-	int len = p_array.size();
+	const int len = p_array.size();
 	if (len == 0) {
 		return;
 	}
@@ -2904,31 +2904,78 @@ void Animation::_track_get_key_indices_in_range(const LocalVector<T> &p_array, d
 	int from = 0;
 	int to = len - 1;
 
-	if (!p_is_backward) {
-		while (p_array[from].time < from_time || Math::is_equal_approx(p_array[from].time, from_time)) {
-			from++;
-			if (to < from) {
-				return;
+	if (len < 16) {
+		// Short tracks are common: linear checks avoid binary-search setup
+		// and retain the existing branch behavior on tiny arrays.
+		if (!p_is_backward) {
+			while (p_array[from].time < from_time || Math::is_equal_approx(p_array[from].time, from_time)) {
+				from++;
+				if (to < from) {
+					return;
+				}
 			}
-		}
-		while (p_array[to].time > to_time && !Math::is_equal_approx(p_array[to].time, to_time)) {
-			to--;
-			if (to < from) {
-				return;
+			while (p_array[to].time > to_time && !Math::is_equal_approx(p_array[to].time, to_time)) {
+				to--;
+				if (to < from) {
+					return;
+				}
+			}
+		} else {
+			while (p_array[from].time < from_time && !Math::is_equal_approx(p_array[from].time, from_time)) {
+				from++;
+				if (to < from) {
+					return;
+				}
+			}
+			while (p_array[to].time > to_time || Math::is_equal_approx(p_array[to].time, to_time)) {
+				to--;
+				if (to < from) {
+					return;
+				}
 			}
 		}
 	} else {
-		while (p_array[from].time < from_time && !Math::is_equal_approx(p_array[from].time, from_time)) {
-			from++;
-			if (to < from) {
-				return;
+		// Key times are sorted. Find the first included key and one past
+		// the last included key in O(log N) rather than scanning both ends
+		// of a potentially long animation on every frame. Preserve the
+		// original approximate-exclusive (forward start/backward end)
+		// and approximate-inclusive boundary semantics.
+		int low = 0;
+		int high = len;
+		while (low < high) {
+			const int middle = low + (high - low) / 2;
+			const double time = p_array[middle].time;
+			const bool skipped = p_is_backward
+					? (time < from_time && !Math::is_equal_approx(time, from_time))
+					: (time < from_time || Math::is_equal_approx(time, from_time));
+			if (skipped) {
+				low = middle + 1;
+			} else {
+				high = middle;
 			}
 		}
-		while (p_array[to].time > to_time || Math::is_equal_approx(p_array[to].time, to_time)) {
-			to--;
-			if (to < from) {
-				return;
+		from = low;
+		if (from == len) {
+			return;
+		}
+
+		low = from;
+		high = len;
+		while (low < high) {
+			const int middle = low + (high - low) / 2;
+			const double time = p_array[middle].time;
+			const bool skipped = p_is_backward
+					? (time > to_time || Math::is_equal_approx(time, to_time))
+					: (time > to_time && !Math::is_equal_approx(time, to_time));
+			if (skipped) {
+				high = middle;
+			} else {
+				low = middle + 1;
 			}
+		}
+		to = low - 1;
+		if (to < from) {
+			return;
 		}
 	}
 

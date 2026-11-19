@@ -1,0 +1,90 @@
+name: Afterfall Frontier playable survival sandbox
+
+on:
+  pull_request:
+    paths:
+      - "demo/afterfall_frontier/**"
+      - ".github/workflows/afterfall-frontier-game.yml"
+  push:
+    branches: [develop]
+    paths:
+      - "demo/afterfall_frontier/**"
+      - ".github/workflows/afterfall-frontier-game.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: afterfall-frontier-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  gameplay-contracts:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - name: Compile and run repository structural contracts
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 -m py_compile demo/afterfall_frontier/tests/test_project_contracts.py
+          python3 -m unittest discover \
+            -s demo/afterfall_frontier/tests -p 'test_*.py' -v
+
+  playable-godot-headless:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    needs: gameplay-contracts
+    steps:
+      - uses: actions/checkout@v4
+      - name: Download and verify official Godot 4.7.2 Linux test editor
+        shell: bash
+        run: |
+          set -euo pipefail
+          curl --retry 4 --retry-delay 3 -fL -o godot.zip \
+            https://github.com/godotengine/godot-builds/releases/download/4.7.2-stable/Godot_v4.7.2-stable_linux.x86_64.zip
+          echo 'cadd3204e728a35d3f13adb7fd0d7902636b79f6b95c40c265eb73b6c35329e4  godot.zip' | sha256sum -c -
+          unzip -q godot.zip
+          chmod +x Godot_v4.7.2-stable_linux.x86_64
+          mv Godot_v4.7.2-stable_linux.x86_64 godot
+          ./godot --version
+      - name: Import real game scene and compile all GDScript dependencies
+        shell: bash
+        run: |
+          set -euo pipefail
+          timeout 120s ./godot --headless --path demo/afterfall_frontier \
+            --editor --import --quit 2>&1 | tee afterfall-import.log
+          if grep -Ei 'SCRIPT ERROR:|Parse Error:|Failed to load script|Failed loading resource' afterfall-import.log; then
+            exit 1
+          fi
+      - name: Run actual world, craft, loot, save and risk-zone logic
+        shell: bash
+        run: |
+          set -euo pipefail
+          timeout 120s ./godot --headless --path demo/afterfall_frontier \
+            --script res://smoke_test.gd 2>&1 | tee afterfall-smoke.log
+          grep -Fq 'PASS: Afterfall Frontier survival/crafting/base/economy/loot game and scene' afterfall-smoke.log
+          if grep -Ei 'SCRIPT ERROR:|Parse Error:|Failed to load script|Failed loading resource|FAIL: Afterfall Frontier' afterfall-smoke.log; then
+            exit 1
+          fi
+      - name: Verify game can run several renderless frames as main project
+        shell: bash
+        run: |
+          set -euo pipefail
+          timeout 120s ./godot --headless --path demo/afterfall_frontier \
+            --quit-after 12 2>&1 | tee afterfall-main.log
+          if grep -Ei 'SCRIPT ERROR:|Parse Error:|Failed to load script|Failed loading resource' afterfall-main.log; then
+            exit 1
+          fi
+      - name: Preserve import, smoke and playable-scene logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: afterfall-frontier-game-logs
+          path: |
+            afterfall-import.log
+            afterfall-smoke.log
+            afterfall-main.log
+          if-no-files-found: ignore

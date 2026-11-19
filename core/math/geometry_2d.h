@@ -37,6 +37,7 @@
 #include "core/math/vector2i.h"
 #include "core/math/vector3.h"
 #include "core/math/vector3i.h"
+#include "core/templates/iterable.h"
 #include "core/templates/vector.h"
 
 class Geometry2D {
@@ -206,7 +207,19 @@ public:
 		// Fail if segments are parallel or colinear.
 		// (when A x B == zero, i.e (C - D) x B == zero, i.e C x B == D x B)
 		if (Math::is_equal_approx(C.y, D.y)) {
-			return false;
+			// C.y and D.y are divided by |AB|^2, so for long segments both become tiny and the
+			// absolute comparison above mistakes a crossing segment for a parallel one. Treat the
+			// pair as parallel only if the directions are parallel relative to their lengths,
+			// and otherwise require C and D to lie strictly on opposite sides of line A-B.
+			const Vector2 E = p_to_b - p_from_b;
+			const real_t e_len_sq = E.length_squared();
+			const real_t cross = B.cross(E);
+			if (e_len_sq <= 0 || Math::abs(cross) <= (real_t)CMP_EPSILON * Math::sqrt(ABlen * e_len_sq)) {
+				return false;
+			}
+			if (!((C.y < 0 && D.y > 0) || (C.y > 0 && D.y < 0))) {
+				return false;
+			}
 		}
 
 		real_t ABpos = D.x + (C.x - D.x) * D.y / (D.y - C.y);
@@ -461,41 +474,77 @@ public:
 		return H;
 	}
 
-	static Vector<Point2i> bresenham_line(const Point2i &p_from, const Point2i &p_to) {
-		Vector<Point2i> points;
+	class BresenhamIterator {
+		bool is_end;
+		Vector2i to;
 
-		Vector2i delta = (p_to - p_from).abs() * 2;
-		Vector2i step = (p_to - p_from).sign();
-		Vector2i current = p_from;
+		Vector2i pos;
+		int err;
+		Vector2i delta;
+		Vector2i step;
 
-		if (delta.x > delta.y) {
-			int err = delta.x / 2;
-
-			for (; current.x != p_to.x; current.x += step.x) {
-				points.push_back(current);
-
+	public:
+		_FORCE_INLINE_ void operator++() {
+			if (pos == to) {
+				is_end = true;
+				return;
+			}
+			if (delta.x > delta.y) {
 				err -= delta.y;
 				if (err < 0) {
-					current.y += step.y;
+					pos.y += step.y;
 					err += delta.x;
 				}
-			}
-		} else {
-			int err = delta.y / 2;
-
-			for (; current.y != p_to.y; current.y += step.y) {
-				points.push_back(current);
-
+				pos.x += step.x;
+			} else {
 				err -= delta.x;
 				if (err < 0) {
-					current.x += step.x;
+					pos.x += step.x;
 					err += delta.y;
 				}
+				pos.y += step.y;
 			}
 		}
 
-		points.push_back(current);
+		_FORCE_INLINE_ Vector2i operator*() {
+			return pos;
+		}
 
+		_FORCE_INLINE_ bool operator!=(const BresenhamIterator &p_it) const {
+			return (is_end && p_it.is_end) ? false : (is_end != p_it.is_end || pos != p_it.pos);
+		}
+
+	public:
+		BresenhamIterator(const Vector2i &p_from, const Vector2i &p_to) {
+			is_end = false;
+
+			pos = p_from;
+			to = p_to;
+
+			Vector2i offset = p_to - p_from;
+			delta = offset.abs() * 2;
+			step = offset.sign();
+			if (delta.x > delta.y) {
+				err = delta.x / 2;
+			} else {
+				err = delta.y / 2;
+			}
+		}
+
+		BresenhamIterator() {
+			is_end = true;
+		}
+	};
+
+	static Iterable<BresenhamIterator> bresenham_iter(Vector2i p_from, Vector2i p_to) {
+		return Iterable<BresenhamIterator>(BresenhamIterator(p_from, p_to), BresenhamIterator());
+	}
+
+	static Vector<Point2i> bresenham_line(const Point2i &p_from, const Point2i &p_to) {
+		Vector<Point2i> points;
+		for (Vector2i point : bresenham_iter(p_from, p_to)) {
+			points.push_back(point);
+		}
 		return points;
 	}
 

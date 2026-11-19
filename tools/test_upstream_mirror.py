@@ -40,17 +40,17 @@ class FakeAPI:
 
     def request(self, method, path, payload=None):
         self.requests.append((method, path, payload))
-        if path == "/repos/demoh2019/godot":
+        if path == "/repos/demoh2019/Cgame":
             return {"has_issues": self.issues_enabled}
-        if path.startswith("/repos/demoh2019/godot/labels/"):
+        if path.startswith("/repos/demoh2019/Cgame/labels/"):
             name = path.rsplit("/", 1)[1]
             if name not in self.labels:
                 raise APIError(404, "missing label")
             return {"name": name}
-        if path == "/repos/demoh2019/godot/labels" and method == "POST":
+        if path == "/repos/demoh2019/Cgame/labels" and method == "POST":
             self.labels.add(payload["name"])
             return payload
-        if path.startswith("/repos/demoh2019/godot/issues?state=all"):
+        if path.startswith("/repos/demoh2019/Cgame/issues?state=all"):
             if parse_qs(urlsplit(path).query).get("page") == ["1"]:
                 return list(reversed(self.existing))[:100]
             return []
@@ -58,13 +58,13 @@ class FakeAPI:
             page = int(parse_qs(urlsplit(path).query)["page"][0]); return self.source[(page - 1) * 100:page * 100]
         if path.startswith("/repos/godotengine/godot/pulls/"):
             return {"base": {"ref": "master"}, "head": {"label": "alice:patch", "sha": "abc"}, "draft": True, "merged_at": None}
-        if path == "/repos/demoh2019/godot/issues" and method == "POST":
+        if path == "/repos/demoh2019/Cgame/issues" and method == "POST":
             self.created.append(payload)
-            result = {"number": self.next_number, "html_url": f"https://github.com/demoh2019/godot/issues/{self.next_number}", "body": payload["body"]}
+            result = {"number": self.next_number, "html_url": f"https://github.com/demoh2019/Cgame/issues/{self.next_number}", "body": payload["body"]}
             self.existing.append(result)
             self.next_number += 1
             return result
-        if path.startswith("/repos/demoh2019/godot/issues/") and method == "PATCH":
+        if path.startswith("/repos/demoh2019/Cgame/issues/") and method == "PATCH":
             return {"ok": True}
         raise AssertionError(f"Unexpected request: {method} {path}")
 
@@ -171,7 +171,7 @@ class TestWorkflow(unittest.TestCase):
         api = FakeAPI([issue(1)])
         orig = api.request
         def failing(method, path, payload=None):
-            if method == "POST" and path == "/repos/demoh2019/godot/issues":
+            if method == "POST" and path == "/repos/demoh2019/Cgame/issues":
                 raise APIError(403, "secondary rate limit")
             return orig(method, path, payload)
         api.request = failing

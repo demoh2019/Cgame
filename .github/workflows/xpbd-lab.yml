@@ -1,0 +1,39 @@
+name: XPBD rope and cloth regression
+
+on:
+  pull_request:
+    paths:
+      - "misc/xpbd_lab/**"
+      - ".github/workflows/xpbd-lab.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  xpbd:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        godot_version: ["4.6.3", "4.7.2"]
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          sparse-checkout: |
+            misc/xpbd_lab
+      - name: Download released Godot Linux editor
+        run: |
+          set -euo pipefail
+          VERSION=${{ matrix.godot_version }}
+          curl -fL --retry 3 -o godot.zip "https://github.com/godotengine/godot-builds/releases/download/${VERSION}-stable/Godot_v${VERSION}-stable_linux.x86_64.zip"
+          unzip -q godot.zip
+          chmod +x "Godot_v${VERSION}-stable_linux.x86_64"
+          mv "Godot_v${VERSION}-stable_linux.x86_64" godot
+      - name: Import and parse GDScript
+        run: ./godot --headless --path misc/xpbd_lab --import
+      - name: Verify XPBD solver behavior
+        run: ./godot --headless --path misc/xpbd_lab --script res://tests/test_xpbd.gd
+      - name: Smoke test interactive demo scene for 60 physics frames
+        run: ./godot --headless --path misc/xpbd_lab --quit-after 60

@@ -1,23 +1,24 @@
-name: Test upstream Godot metadata mirror
+name: Upstream Mirror Tests
+
 on:
-  pull_request:
-    paths:
-      - 'tools/upstream_mirror.py'
-      - 'tools/test_upstream_mirror.py'
-      - '.github/workflows/upstream-mirror*.yml'
   push:
     paths:
-      - 'tools/upstream_mirror.py'
-      - 'tools/test_upstream_mirror.py'
-      - '.github/workflows/upstream-mirror*.yml'
+      - "misc/scripts/mirror_upstream_github.py"
+      - "tests/mirror/**"
+      - ".github/workflows/upstream-mirror-tests.yml"
+  pull_request:
+    paths:
+      - "misc/scripts/mirror_upstream_github.py"
+      - "tests/mirror/**"
+      - ".github/workflows/upstream-mirror-tests.yml"
+
 permissions:
   contents: read
+
 jobs:
-  unit-tests:
+  unittest:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
-        with:
-          python-version: '3.12'
-      - run: python -m unittest discover -s tools -p 'test_upstream_mirror.py' -v
+      - name: Test mirror importer without external GitHub calls
+        run: python3 -m unittest discover -s tests/mirror -p 'test_*.py' -v

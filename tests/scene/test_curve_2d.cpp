@@ -296,4 +296,124 @@ TEST_CASE("[Curve2D] Even length tessellation") {
 	CHECK(curve->tessellate_even_length().size() > default_size + 5);
 }
 
+
+TEST_CASE("[Curve2D][Performance] Tessellation emits strictly ordered adaptive samples") {
+	Ref<Curve2D> curve = memnew(Curve2D);
+	curve->add_point(Vector2(0, 0), Vector2(), Vector2(0, 16));
+	curve->add_point(Vector2(10, 0), Vector2(0, 16), Vector2());
+	const PackedVector2Array tess = curve->tessellate(9, 0.5);
+	REQUIRE(tess.size() > 2);
+	CHECK(tess[0] == Vector2(0, 0));
+	CHECK(tess[tess.size() - 1] == Vector2(10, 0));
+	for (int i = 1; i < tess.size(); ++i) {
+		CHECK(tess[i - 1].x < tess[i].x);
+	}
+	const PackedVector2Array repeat = curve->tessellate(9, 0.5);
+	REQUIRE(repeat.size() == tess.size());
+	for (int i = 0; i < tess.size(); ++i) {
+		CHECK(repeat[i] == tess[i]);
+	}
+}
+
+
+TEST_CASE("[Curve2D][Performance] Even length tessellation and baked cache preserve progression") {
+	Ref<Curve2D> curve = memnew(Curve2D);
+	curve->add_point(Vector2(0, 0), Vector2(), Vector2(0, 18));
+	curve->add_point(Vector2(100, 0), Vector2(0, 18), Vector2());
+	const PackedVector2Array even = curve->tessellate_even_length(10, 2.0);
+	REQUIRE(even.size() > 2);
+	CHECK(even[0] == Vector2(0, 0));
+	CHECK(even[even.size() - 1] == Vector2(100, 0));
+	for (int i = 1; i < even.size(); ++i) {
+		CHECK(even[i - 1].x < even[i].x);
+	}
+	curve->set_bake_interval(2.0);
+	const PackedVector2Array baked = curve->get_baked_points();
+	REQUIRE(baked.size() > 2);
+	CHECK(baked[0] == Vector2(0, 0));
+	CHECK(baked[baked.size() - 1] == Vector2(100, 0));
+}
+
+
+TEST_CASE("[Curve2D] Closest segment projection uses squared length") {
+	Ref<Curve2D> curve = memnew(Curve2D);
+	curve->add_point(Vector2(0, 0));
+	curve->add_point(Vector2(100, 0));
+
+	for (int i = -25; i <= 125; i += 5) {
+		const Vector2 point(i, 19);
+		const real_t clamped = CLAMP((real_t)i, (real_t)0, (real_t)100);
+		CHECK(curve->get_closest_point(point).is_equal_approx(Vector2(clamped, 0)));
+		CHECK(curve->get_closest_offset(point) == doctest::Approx(clamped).epsilon(0.0001));
+	}
+
+	Ref<Curve2D> repeated = memnew(Curve2D);
+	repeated->add_point(Vector2(0, 0));
+	repeated->add_point(Vector2(0, 0));
+	repeated->add_point(Vector2(20, 0));
+	const Vector2 closest = repeated->get_closest_point(Vector2(5, 2));
+	CHECK(Math::is_finite(closest.x));
+	CHECK(Math::is_finite(closest.y));
+	CHECK(Math::is_finite(repeated->get_closest_offset(Vector2(5, 2))));
+}
+
+
+TEST_CASE("[Curve2D][Performance] Recursive midpoint reuse preserves adaptive and baked outputs") {
+	Ref<Curve2D> curve = memnew(Curve2D);
+	curve->add_point(Vector2(0, 0), Vector2(), Vector2(4, 20));
+	curve->add_point(Vector2(12, -3), Vector2(-6, 9), Vector2(6, -18));
+	curve->add_point(Vector2(25, 4), Vector2(-4, -12), Vector2());
+	const PackedVector2Array adaptive = curve->tessellate(9, 0.5);
+	const PackedVector2Array even = curve->tessellate_even_length(10, 1.0);
+	REQUIRE(adaptive.size() > 3);
+	REQUIRE(even.size() > 3);
+	CHECK(adaptive[0] == Vector2(0, 0));
+	CHECK(adaptive[adaptive.size() - 1] == Vector2(25, 4));
+	CHECK(even[0] == Vector2(0, 0));
+	CHECK(even[even.size() - 1] == Vector2(25, 4));
+	// Recomputing the subdivisions must produce byte-for-byte identical vertices.
+	const PackedVector2Array repeated = curve->tessellate(9, 0.5);
+	REQUIRE(repeated.size() == adaptive.size());
+	for (int i = 0; i < adaptive.size(); ++i) {
+		CHECK(repeated[i] == adaptive[i]);
+	}
+	curve->set_bake_interval(1.0);
+	const PackedVector2Array baked = curve->get_baked_points();
+	CHECK(baked.size() >= 3);
+	CHECK(baked[0] == Vector2(0, 0));
+	CHECK(baked[baked.size() - 1] == Vector2(25, 4));
+}
+
+
+TEST_CASE("[Curve2D] Baked interval lookup preserves every sample boundary") {
+	Ref<Curve2D> curve = memnew(Curve2D);
+	curve->set_bake_interval(1.5);
+	curve->add_point(Vector2(0, 0));
+	curve->add_point(Vector2(100, 25));
+	const PackedVector2Array points = curve->get_baked_points();
+	REQUIRE(points.size() > 16);
+
+	real_t offset = 0;
+	for (int i = 0; i < points.size(); i++) {
+		if (i != 0) {
+			offset += points[i - 1].distance_to(points[i]);
+		}
+		// Exact interval boundaries must resolve to the preceding segment
+		// and interpolation must reproduce the corresponding baked vertex.
+		CHECK((curve->sample_baked(offset) - points[i]).length() < real_t(0.002));
+	}
+	CHECK(curve->sample_baked(-100).is_equal_approx(points[0]));
+	CHECK(curve->sample_baked(offset + 100).is_equal_approx(points[points.size() - 1]));
+}
+
+
+TEST_CASE("[Curve2D] Squared chord threshold matches zero and negative segment tolerances") {
+	Ref<Curve2D> curve = memnew(Curve2D);
+	curve->add_point(Vector2(0, 0));
+	curve->add_point(Vector2(8, 0));
+	CHECK(curve->tessellate_even_length(3, 1000.0).size() == 2);
+	CHECK(curve->tessellate_even_length(3, 0.0).size() == 9);
+	CHECK(curve->tessellate_even_length(3, -1.0).size() == 9);
+}
+
 } // namespace TestCurve2D

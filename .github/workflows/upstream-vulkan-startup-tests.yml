@@ -1,0 +1,36 @@
+name: Upstream Vulkan and startup regressions
+
+on:
+  push:
+    branches: [develop]
+    paths:
+      - 'drivers/vulkan/rendering_device_driver_vulkan.cpp'
+      - 'main/main.cpp'
+      - 'misc/scripts/tests/test_upstream_vulkan_startup.py'
+      - 'misc/scripts/README_upstream_vulkan_startup.md'
+      - '.github/workflows/upstream-vulkan-startup-tests.yml'
+  pull_request:
+    paths:
+      - 'drivers/vulkan/rendering_device_driver_vulkan.cpp'
+      - 'main/main.cpp'
+      - 'misc/scripts/tests/test_upstream_vulkan_startup.py'
+      - 'misc/scripts/README_upstream_vulkan_startup.md'
+      - '.github/workflows/upstream-vulkan-startup-tests.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  cpp-regressions:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - name: Check test script syntax
+        run: python3 -m py_compile misc/scripts/tests/test_upstream_vulkan_startup.py
+      - name: Run extracted C++ behavior regressions
+        run: python3 -m unittest discover -s misc/scripts/tests -p test_upstream_vulkan_startup.py -v

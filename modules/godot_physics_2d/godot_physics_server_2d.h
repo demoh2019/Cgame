@@ -62,6 +62,12 @@ class GodotPhysicsServer2D : public PhysicsServer2D {
 	mutable RID_PtrOwner<GodotArea2D, true> area_owner;
 	mutable RID_PtrOwner<GodotBody2D, true> body_owner{ 65536, 1048576 };
 	mutable RID_PtrOwner<GodotJoint2D, true> joint_owner;
+	// Joints with a break threshold are checked after every step; broken ones are queued so
+	// their callbacks run from flush_queries(), outside the solver.
+	HashSet<RID> breakable_joints;
+	LocalVector<RID> broken_joint_queue;
+	void _update_breakable(RID p_joint, GodotJoint2D *p_joint_ptr);
+	void _process_joint_breaks();
 
 	static GodotPhysicsServer2D *godot_singleton;
 
@@ -208,6 +214,15 @@ public:
 	virtual void body_set_param(RID p_body, PS2DE::BodyParameter p_param, const Variant &p_value) override;
 	virtual Variant body_get_param(RID p_body, PS2DE::BodyParameter p_param) const override;
 
+	virtual void body_set_solver_priority(RID p_body, int p_priority) override;
+	virtual int body_get_solver_priority(RID p_body) const override;
+	virtual void body_set_max_depenetration_velocity(RID p_body, real_t p_value) override;
+	virtual real_t body_get_max_depenetration_velocity(RID p_body) const override;
+	virtual void body_set_max_angular_velocity(RID p_body, real_t p_value) override;
+	virtual real_t body_get_max_angular_velocity(RID p_body) const override;
+	virtual void body_set_max_linear_velocity(RID p_body, real_t p_value) override;
+	virtual real_t body_get_max_linear_velocity(RID p_body) const override;
+
 	virtual void body_reset_mass_properties(RID p_body) override;
 
 	virtual void body_set_state(RID p_body, PS2DE::BodyState p_state, const Variant &p_variant) override;
@@ -269,6 +284,15 @@ public:
 
 	virtual void joint_disable_collisions_between_bodies(RID p_joint, const bool p_disabled) override;
 	virtual bool joint_is_disabled_collisions_between_bodies(RID p_joint) const override;
+
+	virtual void joint_set_break_force(RID p_joint, real_t p_force) override;
+	virtual real_t joint_get_break_force(RID p_joint) const override;
+	virtual void joint_set_break_torque(RID p_joint, real_t p_torque) override;
+	virtual real_t joint_get_break_torque(RID p_joint) const override;
+	virtual Vector2 joint_get_reaction_force(RID p_joint) const override;
+	virtual real_t joint_get_reaction_torque(RID p_joint) const override;
+	virtual bool joint_is_broken(RID p_joint) const override;
+	virtual void joint_set_break_callback(RID p_joint, const Callable &p_callable) override;
 
 	virtual void joint_make_pin(RID p_joint, const Vector2 &p_anchor, RID p_body_a, RID p_body_b = RID()) override;
 	virtual void joint_make_groove(RID p_joint, const Vector2 &p_a_groove1, const Vector2 &p_a_groove2, const Vector2 &p_b_anchor, RID p_body_a, RID p_body_b) override;
