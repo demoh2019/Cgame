@@ -122,7 +122,7 @@ public:
 	}
 };
 
-TEST_CASE("[ExportTemplatePC] Custom debug template is preferred when it exists") {
+TEST_CASE("[Editor][ExportTemplatePC] Custom debug template is preferred when it exists") {
 	Fixture f;
 	REQUIRE(f.has_files());
 	f.preset_impl->put("custom_template/debug", f.debug_path);
@@ -131,7 +131,7 @@ TEST_CASE("[ExportTemplatePC] Custom debug template is preferred when it exists"
 	CHECK(error.is_empty());
 }
 
-TEST_CASE("[ExportTemplatePC] Custom release template is preferred when it exists") {
+TEST_CASE("[Editor][ExportTemplatePC] Custom release template is preferred when it exists") {
 	Fixture f;
 	REQUIRE(f.has_files());
 	f.preset_impl->put("custom_template/release", f.release_path);
@@ -140,7 +140,7 @@ TEST_CASE("[ExportTemplatePC] Custom release template is preferred when it exist
 	CHECK(error.is_empty());
 }
 
-TEST_CASE("[ExportTemplatePC] Surrounding whitespace is trimmed from custom paths") {
+TEST_CASE("[Editor][ExportTemplatePC] Surrounding whitespace is trimmed from custom paths") {
 	Fixture f;
 	REQUIRE(f.has_files());
 	f.preset_impl->put("custom_template/debug", "  \t" + f.debug_path + "\n  ");
@@ -149,7 +149,7 @@ TEST_CASE("[ExportTemplatePC] Surrounding whitespace is trimmed from custom path
 	CHECK(error.is_empty());
 }
 
-TEST_CASE("[ExportTemplatePC] Missing debug custom template is reported") {
+TEST_CASE("[Editor][ExportTemplatePC] Missing debug custom template is reported") {
 	Fixture f;
 	f.preset_impl->put("custom_template/debug", f.dir.path_join("missing_debug.exe"));
 	String error;
@@ -157,7 +157,7 @@ TEST_CASE("[ExportTemplatePC] Missing debug custom template is reported") {
 	CHECK_FALSE(error.is_empty());
 }
 
-TEST_CASE("[ExportTemplatePC] Missing release custom template is reported") {
+TEST_CASE("[Editor][ExportTemplatePC] Missing release custom template is reported") {
 	Fixture f;
 	f.preset_impl->put("custom_template/release", f.dir.path_join("missing_release.exe"));
 	String error;
@@ -165,7 +165,7 @@ TEST_CASE("[ExportTemplatePC] Missing release custom template is reported") {
 	CHECK_FALSE(error.is_empty());
 }
 
-TEST_CASE("[ExportTemplatePC] Missing custom template is not silently replaced with official template") {
+TEST_CASE("[Editor][ExportTemplatePC] Missing custom template is not silently replaced with official template") {
 	Fixture f;
 	f.preset_impl->put("custom_template/debug", f.dir.path_join("explicitly_missing_debug.exe"));
 	String error = "existing warning\n";
@@ -174,7 +174,7 @@ TEST_CASE("[ExportTemplatePC] Missing custom template is not silently replaced w
 	CHECK(error.length() > String("existing warning\n").length());
 }
 
-TEST_CASE("[ExportTemplatePC] Debug and release settings are independent") {
+TEST_CASE("[Editor][ExportTemplatePC] Debug and release settings are independent") {
 	Fixture f;
 	REQUIRE(f.has_files());
 	f.preset_impl->put("custom_template/debug", f.debug_path);
@@ -186,7 +186,7 @@ TEST_CASE("[ExportTemplatePC] Debug and release settings are independent") {
 	CHECK(release_error.is_empty());
 }
 
-TEST_CASE("[ExportTemplatePC] Missing debug custom template does not prevent valid release") {
+TEST_CASE("[Editor][ExportTemplatePC] Missing debug custom template does not prevent valid release") {
 	Fixture f;
 	REQUIRE(f.has_files());
 	f.preset_impl->put("custom_template/debug", f.dir.path_join("missing_debug.exe"));
@@ -198,7 +198,7 @@ TEST_CASE("[ExportTemplatePC] Missing debug custom template does not prevent val
 	CHECK(release_error.is_empty());
 }
 
-TEST_CASE("[ExportTemplatePC] Missing release custom template does not prevent valid debug") {
+TEST_CASE("[Editor][ExportTemplatePC] Missing release custom template does not prevent valid debug") {
 	Fixture f;
 	REQUIRE(f.has_files());
 	f.preset_impl->put("custom_template/debug", f.debug_path);
@@ -210,13 +210,13 @@ TEST_CASE("[ExportTemplatePC] Missing release custom template does not prevent v
 	CHECK_FALSE(release_error.is_empty());
 }
 
-TEST_CASE("[ExportTemplatePC] Error message pointer is optional") {
+TEST_CASE("[Editor][ExportTemplatePC] Error message pointer is optional") {
 	Fixture f;
 	f.preset_impl->put("custom_template/debug", f.dir.path_join("missing_debug.exe"));
 	CHECK(f.platform->get_export_template_to_use(f.preset, "debug").is_empty());
 }
 
-TEST_CASE("[ExportTemplatePC] Custom path resolution is stable across repeated calls") {
+TEST_CASE("[Editor][ExportTemplatePC] Custom path resolution is stable across repeated calls") {
 	Fixture f;
 	REQUIRE(f.has_files());
 	f.preset_impl->put("custom_template/debug", f.debug_path);
@@ -227,7 +227,7 @@ TEST_CASE("[ExportTemplatePC] Custom path resolution is stable across repeated c
 	}
 }
 
-TEST_CASE("[ExportTemplatePC] Empty custom path uses official-template lookup") {
+TEST_CASE("[Editor][ExportTemplatePC] Empty custom path uses official-template lookup") {
 	Fixture f;
 	f.preset_impl->put("custom_template/debug", "  \n\t ");
 	// The dummy platform returns a deliberately nonexistent official template name.
