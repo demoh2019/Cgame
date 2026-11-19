@@ -35,10 +35,18 @@ class LinearSpeedContracts(unittest.TestCase):
                     self.assertLessEqual(math.hypot(*candidate), maximum + 1e-12)
                     self.assertTrue(all(a * b >= 0 for a, b in zip(velocity, candidate)))
 
+    def test_extreme_finite_velocities_normalize_safely(self):
+        # Python's hypot is overflow-safe and serves as a reference.
+        for vector in ((1e20, 0.0), (-1e20, 1e20, 0.0)):
+            actual = cap(vector, 10.0)
+            self.assertAlmostEqual(math.hypot(*actual), 10.0, places=5)
+
     def test_cpp_coverage(self):
         helper = (ROOT / "servers/physics_linear_velocity_cap.h").read_text()
         tests = (ROOT / "tests/servers/test_godot_physics_linear_velocity_cap.cpp").read_text()
         self.assertIn("p_velocity.length_squared()", helper)
+        self.assertIn("absolute.max_axis_index()", helper)
+        self.assertIn("p_velocity / greatest", helper)
         self.assertIn("TEST_FORCE_LINK(test_godot_physics_linear_velocity_cap)", tests)
         self.assertGreaterEqual(tests.count("SUBCASE("), 5)
 
