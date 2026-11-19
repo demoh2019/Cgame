@@ -72,6 +72,10 @@ public:
 	virtual void cast_segment(const Vector3 &p_from, const Vector3 &p_to, SegmentCastCallback p_callback, void *p_userdata) = 0;
 
 	virtual int cull_segment(const Vector3 &p_from, const Vector3 &p_to, GodotCollisionObject3D **p_results, int p_max_results, int *p_result_indices = nullptr) = 0;
+	using QueryVisitor = bool (*)(GodotCollisionObject3D *, int, void *);
+	virtual void visit_point(const Vector3 &p_point, QueryVisitor p_visitor, void *p_userdata) = 0;
+	virtual void visit_aabb(const AABB &p_aabb, QueryVisitor p_visitor, void *p_userdata) = 0;
+
 	virtual int cull_aabb(const AABB &p_aabb, GodotCollisionObject3D **p_results, int p_max_results, int *p_result_indices = nullptr) = 0;
 
 	virtual void set_pair_callback(PairCallback p_pair_callback, void *p_userdata) = 0;
