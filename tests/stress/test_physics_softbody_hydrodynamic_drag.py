@@ -98,8 +98,8 @@ class TestHydrodynamicSoftbody(unittest.TestCase):
         inv = (1,)*3
         a = submerged_drag(points, velocity, inv, (0, 0, 0), surface=0, dt=0.001, tangent_ratio=0)
         b = submerged_drag(points, velocity, inv, (0, 0, 0), surface=3, dt=0.001, tangent_ratio=0)
-        force_ratio = math.sqrt(sum(sum(x*x for x in v) for v in a)) / math.sqrt(
-            sum(sum(x*x for x in v) for v in b))
+        force_ratio = math.sqrt(sum(sum(v[j] for v in a)**2 for j in range(3))) / math.sqrt(
+            sum(sum(v[j] for v in b)**2 for j in range(3)))
         self.assertAlmostEqual(force_ratio, 0.25, delta=0.001)
 
     def test_stationary_water_dissipates_normal_and_shear_motion(self):
