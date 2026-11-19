@@ -4,6 +4,9 @@ on:
   pull_request:
     paths:
       - "editor/script/find_in_files.cpp"
+      - "main/main.cpp"
+      - "modules/gdscript/register_types.cpp"
+      - "misc/scripts/tests/test_upstream_backports_lifecycle.py"
       - "drivers/gles3/rasterizer_gles3.cpp"
       - "doc/classes/TextureRect.xml"
       - "misc/scripts/tests/test_upstream_backports.py"
@@ -13,6 +16,9 @@ on:
     branches: [develop]
     paths:
       - "editor/script/find_in_files.cpp"
+      - "main/main.cpp"
+      - "modules/gdscript/register_types.cpp"
+      - "misc/scripts/tests/test_upstream_backports_lifecycle.py"
       - "drivers/gles3/rasterizer_gles3.cpp"
       - "doc/classes/TextureRect.xml"
       - "misc/scripts/tests/test_upstream_backports.py"
@@ -29,7 +35,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - name: Check Python syntax
-        run: python3 -m py_compile misc/scripts/tests/test_upstream_backports.py
+        run: python3 -m py_compile misc/scripts/tests/test_upstream_backports.py misc/scripts/tests/test_upstream_backports_lifecycle.py
       - name: Run editor, GLES3 and documentation regressions
         run: python3 -m unittest discover -s misc/scripts/tests -p 'test_upstream_backports*.py' -v
       - name: Run existing asset audit regressions
