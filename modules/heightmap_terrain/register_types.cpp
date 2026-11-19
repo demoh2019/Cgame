@@ -54,7 +54,11 @@ void initialize_heightmap_terrain_module(ModuleInitializationLevel p_level) {
 #endif
 }
 #else
-void initialize_heightmap_terrain_module(ModuleInitializationLevel p_level) {}
+void initialize_heightmap_terrain_module(ModuleInitializationLevel p_level) {
+    (void)p_level;
+}
 #endif
 
-void uninitialize_heightmap_terrain_module(ModuleInitializationLevel p_level) {}
+void uninitialize_heightmap_terrain_module(ModuleInitializationLevel p_level) {
+    (void)p_level;
+}
