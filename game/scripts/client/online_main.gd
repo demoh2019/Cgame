@@ -15,6 +15,7 @@ const Meshes = preload("res://scripts/client/meshes.gd")
 const CharacterModel = preload("res://scripts/client/character_model.gd")
 const HubView = preload("res://scripts/client/hub_view.gd")
 const Audio = preload("res://scripts/client/audio.gd")
+const Assets = preload("res://scripts/client/assets.gd")
 const Social = preload("res://scripts/client/social.gd")
 const SkillsPanel = preload("res://scripts/client/skills_panel.gd")
 const Skills = preload("res://scripts/shared/skills.gd")
@@ -209,7 +210,24 @@ func _connect() -> void:
 	net.join_refused.connect(func(reason: String) -> void: status_label.text = reason)
 
 
+## Chopping and harvesting loops while the server says this player is gathering.
+func _gather_animation() -> String:
+	var action: Dictionary = client.you.get("action", {})
+	if action.is_empty():
+		return ""
+	var node: Dictionary = client.node_by_id(int(action.get("node", 0)), client.predicted)
+	return "TreeChopping_Loop" if node.get("kind", "") == "tree" else "Farm_Harvest"
+
+
 func _on_skill_event(event: Dictionary) -> void:
+	if event["type"] == "attack" and avatar_model != null:
+		# Everyone's swings and shots: this player's own model, or the one drawn for that player.
+		if int(event.get("peer", -1)) == client.peer_id:
+			var mine: String = str(client.you.get("weapon", ""))
+			avatar_model.play_action(EntityView.attack_animation(mine, bool(event.get("ranged", false))))
+		else:
+			var other: Dictionary = client.players.get(int(event.get("peer", -1)), {})
+			entities.play_attack(int(event.get("peer", -1)), str(other.get("weapon", "")), bool(event.get("ranged", false)))
 	match event["type"]:
 		"xp":
 			var parts: Array[String] = []
@@ -303,7 +321,7 @@ func _on_welcomed() -> void:
 	client.event_received.connect(func(event: Dictionary) -> void: audio.on_event(event, client.peer_id, client.world.height_at))
 	avatar = Node3D.new()
 	avatar_model = CharacterModel.new()
-	avatar_model.setup(Color(1.0, 0.95, 0.5), 2.0, 1.0)
+	avatar_model.setup(Color(1.0, 0.95, 0.5) if not Assets.has_characters() else Color.WHITE, 2.0, 1.0, Assets.CHARACTER_NAMES[abs(hash(name_edit.text)) % Assets.CHARACTER_NAMES.size()], false)
 	avatar.add_child(avatar_model)
 	var label := Label3D.new()
 	label.text = name_edit.text
@@ -354,6 +372,8 @@ func _process(delta: float) -> void:
 		avatar.rotation.y = lerp_angle(avatar.rotation.y, client.yaw, 1.0 - exp(-16.0 * delta))
 		avatar.visible = bool(client.you.get("alive", true))
 		avatar_model.update_motion(delta)
+		avatar_model.set_dead(not bool(client.you.get("alive", true)))
+		avatar_model.set_action_loop(_gather_animation())
 		audio.set_footsteps(avatar_model._moving and avatar.visible)
 	if streamer != null:
 		streamer.focus_position = position
@@ -433,7 +453,7 @@ func _update_prompt() -> void:
 		text = "Wall T%d (%d/%d HP) | H repair | Y upgrade | X dismantle" % [level, hp, max_hp]
 		if level < Structures.MAX_TIER:
 			text += " | next: " + str(Structures.upgrade_cost(level + 1))
-		elif Vector2(p.x, p.z).distance_to(Vector2(9.0, 0.0)) < 6.0:
+	elif Vector2(p.x, p.z).distance_to(Vector2(9.0, 0.0)) < 6.0:
 		text = "Workbench: press C to craft"
 	elif _near_water(p):
 		text = "[F] Drink"

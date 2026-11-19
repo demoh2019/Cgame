@@ -5,11 +5,12 @@ const Defs = preload("res://scripts/shared/defs.gd")
 const Structures = preload("res://scripts/shared/structures.gd")
 const Meshes = preload("res://scripts/client/meshes.gd")
 const CharacterModel = preload("res://scripts/client/character_model.gd")
+const Assets = preload("res://scripts/client/assets.gd")
 
 const ZOMBIE_LOOK := {
-	"walker": {"tint": Color(0.62, 0.85, 0.55), "scale": 2.0, "walk": 0.8},
-	"runner": {"tint": Color(0.9, 0.9, 0.45), "scale": 1.85, "walk": 1.8},
-	"brute": {"tint": Color(0.55, 0.5, 0.7), "scale": 3.0, "walk": 0.7},
+	"walker": {"tint": Color(0.62, 0.85, 0.55), "scale": 2.0, "walk": 0.8, "model": "Orc_Male"},
+	"runner": {"tint": Color(0.9, 0.9, 0.45), "scale": 1.85, "walk": 1.8, "model": "Elf_Female"},
+	"brute": {"tint": Color(0.55, 0.5, 0.7), "scale": 3.0, "walk": 0.7, "model": "Orc_Female"},
 }
 const ALERT_TINT := Color(1.0, 0.45, 0.4)
 
@@ -60,8 +61,13 @@ func _touch(key: String, kind: String, entity: Dictionary, seen: Dictionary) -> 
 		var model: Node3D = _nodes[key].get_node("Model")
 		var base: Color = ZOMBIE_LOOK[entity["type"]]["tint"]
 		model.set_tint(base.lerp(ALERT_TINT, 0.6) if int(entity["state"]) >= 2 else base)
+		model.set_zombie_state(int(entity["state"]))
 	if kind == "player":
-		_nodes[key].get_node("Model").visible = bool(entity["alive"])
+		var player_model: Node3D = _nodes[key].get_node("Model")
+		if player_model.pack_mode:
+			player_model.set_dead(not bool(entity["alive"])) # A dead player lies down instead of vanishing.
+		else:
+			player_model.visible = bool(entity["alive"])
 
 
 func _make(kind: String, entity: Dictionary) -> Node3D:
@@ -110,7 +116,11 @@ func _make(kind: String, entity: Dictionary) -> Node3D:
 		return root
 	if kind == "bag":
 		var mesh := MeshInstance3D.new()
-		mesh.mesh = Meshes.get_mesh("bag")
+		if Assets.has_village():
+			mesh.mesh = Assets.village_mesh("EA03_Prop_Container_Basket_01a")
+			mesh.scale = Vector3.ONE * 1.8
+		else:
+			mesh.mesh = Meshes.get_mesh("bag")
 		root.add_child(mesh)
 		return root
 	var model := CharacterModel.new()
@@ -118,11 +128,15 @@ func _make(kind: String, entity: Dictionary) -> Node3D:
 	var height := 2.0
 	if kind == "zombie":
 		var look: Dictionary = ZOMBIE_LOOK[entity["type"]]
-		model.setup(look["tint"], look["scale"], look["walk"])
+		var zombie_model: String = look["model"]
+		if entity["type"] == "walker" and int(entity["id"]) % 2 == 1:
+			zombie_model = "Orc_Female"
+		model.setup(look["tint"], look["scale"], look["walk"], zombie_model, true)
 		height = 1.3 * float(look["scale"])
 	else:
 		var hue := float(abs(int(entity["id"]) * 2654435761 % 1000)) / 1000.0
-		model.setup(Color.from_hsv(hue, 0.45, 1.0), 2.0, 1.0)
+		var character: String = Assets.CHARACTER_NAMES[int(abs(int(entity["id"]))) % Assets.CHARACTER_NAMES.size()]
+		model.setup(Color.WHITE if Assets.has_characters() else Color.from_hsv(hue, 0.45, 1.0), 2.0, 1.0, character, false)
 	root.add_child(model)
 	var label := Label3D.new()
 	label.name = "Label"
@@ -145,3 +159,19 @@ func _process(delta: float) -> void:
 		if not (key.begins_with("bag") or key.begins_with("barricade") or key.begins_with("campfire")):
 			node.rotation.y = lerp_angle(node.rotation.y, target["yaw"], blend)
 			node.get_node("Model").update_motion(delta)
+
+
+## A swing or a shot by another player.
+func play_attack(peer_id: int, weapon_id: String, ranged: bool) -> void:
+	var key := "player:%d" % peer_id
+	if _nodes.has(key):
+		_nodes[key].get_node("Model").play_action(attack_animation(weapon_id, ranged))
+
+
+## Which animation a weapon uses.
+static func attack_animation(weapon_id: String, ranged: bool) -> String:
+	if ranged:
+		return "Pistol_Shoot"
+	if weapon_id == "":
+		return "Punch_Jab"
+	return "Sword_Regular_A"

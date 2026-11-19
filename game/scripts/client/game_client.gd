@@ -359,6 +359,17 @@ func drink() -> void:
 
 # --- Queries for the UI ---------------------------------------------------------------------------------
 
+## A gatherable node by id, looked up in the chunks around a point (the server only reports ids).
+func node_by_id(node_id: int, near: Vector3) -> Dictionary:
+	var cell := WorldGen.cell_of(near.x, near.z)
+	for dx in range(-1, 2):
+		for dz in range(-1, 2):
+			for node in world.chunk(Vector2i(cell.x + dx, cell.y + dz))["nodes"]:
+				if node["id"] == node_id:
+					return node
+	return {}
+
+
 ## Closest gatherable node (not depleted) within `radius` of a point.
 func nearest_node(point: Vector3, radius: float) -> Dictionary:
 	var best: Dictionary = {}

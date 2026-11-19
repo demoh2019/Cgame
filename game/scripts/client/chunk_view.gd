@@ -51,6 +51,8 @@ var _world
 var _terrain
 var _groups: Dictionary = {} # kind -> {"multimesh": MultiMesh, "index": {node_id: i}, "transforms": [...]}
 var _hidden: Dictionary = {} # node id -> true, currently hidden
+var _use_nature := false
+var _use_village := false
 
 
 static func ground_material() -> ShaderMaterial:
@@ -63,6 +65,8 @@ static func ground_material() -> ShaderMaterial:
 
 
 func build(p_world, p_cell: Vector2i) -> void:
+	_use_nature = Assets.has_nature()
+	_use_village = Assets.has_village()
 	_world = p_world
 	cell = p_cell
 	var origin := WorldGen.cell_origin(cell)
@@ -97,26 +101,72 @@ func _build_terrain(origin: Vector2) -> void:
 
 
 func _mesh_for(kind: String) -> Mesh:
+	if _use_nature:
+		# The downloaded Quaternius nature kit.
+		if kind.begins_with("tree:"):
+			return Assets.nature_mesh(Assets.TREE_FILES[int(kind.get_slice(":", 1)) % Assets.TREE_FILES.size()])
+		if kind.begins_with("rock:") or kind.begins_with("ore:"):
+			return Assets.nature_mesh(Assets.ROCK_FILES[int(kind.get_slice(":", 1)) % Assets.ROCK_FILES.size()])
+		if kind == "bush":
+			return Assets.nature_mesh("Bush_Common")
+		if kind == "berry":
+			return Assets.nature_mesh("Bush_Common_Flowers")
+	if _use_village:
+		if kind.begins_with("building:"):
+			return Assets.pack_building(int(kind.get_slice(":", 1)))["mesh"]
+		if kind == "wall":
+			return Assets.village_mesh("EA03_Fence_Wall_01b")
+		if kind == "crate":
+			return Assets.village_mesh("EA03_Prop_Container_Crate_01a")
 	if kind.begins_with("tree:"):
 		return Assets.tree_meshes()[int(kind.get_slice(":", 1))]
 	if kind.begins_with("building:"):
 		return Assets.building_mesh(int(kind.get_slice(":", 1)))
 	if kind == "wall":
 		return Assets.mesh("fps/wall-high")
+	if kind.begins_with("rock:") or kind.begins_with("ore:"):
+		return Meshes.get_mesh(kind.get_slice(":", 0))
 	return Meshes.get_mesh(kind)
+
+
+## Size of one instance of a group, and (for pack models) the yaw-independent ground offset.
+func _size_for(kind: String, node: Dictionary, rng: RandomNumberGenerator) -> float:
+	if _use_nature and kind.begins_with("tree:"):
+		return rng.randf_range(0.85, 1.25)
+	if _use_nature and (kind.begins_with("rock:") or kind.begins_with("ore:")):
+		return rng.randf_range(0.65, 1.0) * (1.0 if kind.begins_with("rock:") else 0.8)
+	if _use_nature and (kind == "bush" or kind == "berry"):
+		return rng.randf_range(0.8, 1.1)
+	if _use_village and kind.begins_with("building:"):
+		return float(Assets.pack_building(int(kind.get_slice(":", 1)))["scale"])
+	if _use_village and kind == "wall":
+		return Assets.fit_scale(_mesh_for(kind), Assets.WALL_LENGTH)
+	if _use_village and kind == "crate":
+		return 1.5
+	if kind.begins_with("tree:"):
+		return Assets.TREE_SCALE * rng.randf_range(0.85, 1.3)
+	if kind.begins_with("rock:") or kind.begins_with("ore:") or kind == "rock" or kind == "ore":
+		return rng.randf_range(0.8, 1.3)
+	if kind == "wall" or kind.begins_with("building:"):
+		return float(node["scale"])
+	return 1.0
 
 
 func _build_objects(data: Dictionary) -> void:
 	var origin := WorldGen.cell_origin(cell)
 	var rng := RandomNumberGenerator.new()
 	rng.seed = WorldGen.mix(cell.x, cell.y, 99)
-	var tree_variants: int = Assets.tree_meshes().size()
+	var tree_variants: int = Assets.TREE_FILES.size() if _use_nature else Assets.tree_meshes().size()
+	var rock_variants: int = Assets.ROCK_FILES.size()
 	# Group everything that shares a mesh, so each group is one draw call.
 	var by_kind: Dictionary = {}
 	for node in data["nodes"]:
 		var kind: String = node["kind"]
+		var variant: int = WorldGen.mix(int(node["id"]), 3, 5)
 		if kind == "tree":
-			kind = "tree:%d" % (WorldGen.mix(int(node["id"]), 3, 5) % tree_variants)
+			kind = "tree:%d" % (variant % tree_variants)
+		elif _use_nature and (kind == "rock" or kind == "ore"):
+			kind = "%s:%d" % [kind, variant % rock_variants]
 		by_kind.get_or_add(kind, []).append(node)
 	for crate in data["crates"]:
 		by_kind.get_or_add("crate", []).append(crate)
@@ -132,21 +182,16 @@ func _build_objects(data: Dictionary) -> void:
 		multimesh.instance_count = list.size()
 		var index: Dictionary = {}
 		var transforms: Array = []
+		var is_building: bool = kind == "wall" or kind.begins_with("building:")
 		for i in list.size():
 			var node: Dictionary = list[i]
-			var size := 1.0
-			var yaw := rng.randf() * TAU
-			if kind.begins_with("tree:"):
-				size = Assets.TREE_SCALE * rng.randf_range(0.85, 1.3)
-			elif kind in ["rock", "ore"]:
-				size = rng.randf_range(0.8, 1.3)
-			elif kind == "wall" or kind.begins_with("building:"):
-				size = float(node["scale"])
-				yaw = float(node["yaw"])
+			var size: float = _size_for(kind, node, rng)
+			var yaw: float = float(node["yaw"]) if is_building else rng.randf() * TAU
 			var basis := Basis(Vector3.UP, yaw).scaled(Vector3.ONE * size)
-			var transform := Transform3D(basis, Vector3(node["x"] - origin.x, node["y"] - (0.05 if size > 2.0 and not kind.begins_with("tree:") else 0.0), node["z"] - origin.y))
+			var sink: float = 0.05 if (is_building or kind == "crate") else 0.0
+			var transform := Transform3D(basis, Vector3(node["x"] - origin.x, node["y"] - sink, node["z"] - origin.y))
 			multimesh.set_instance_transform(i, transform)
-			# The tier shows as a tint: higher tiers are darker and bluer.
+			# The tier shows as a tint on the Kenney meshes (which use vertex colors).
 			var tier: int = node.get("tier", 1)
 			if kind in ["rock", "ore"]:
 				multimesh.set_instance_color(i, Color.WHITE.lerp(Color(0.8, 0.85, 1.0), (tier - 1) * 0.2))
@@ -157,8 +202,68 @@ func _build_objects(data: Dictionary) -> void:
 		var instance := MultiMeshInstance3D.new()
 		instance.multimesh = multimesh
 		instance.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+		if _use_nature and kind.begins_with("ore:"):
+			instance.material_override = _ore_material(multimesh.mesh)
 		add_child(instance)
 		_groups[kind] = {"multimesh": multimesh, "index": index, "transforms": transforms}
+	if _use_nature:
+		_build_decor(origin, rng)
+
+
+## Ore is the same rock tinted like copper, so it reads as something worth mining.
+static var _ore_material_cache: StandardMaterial3D
+
+static func _ore_material(mesh: Mesh) -> Material:
+	if _ore_material_cache == null:
+		var base := mesh.surface_get_material(0)
+		_ore_material_cache = (base as StandardMaterial3D).duplicate() as StandardMaterial3D if base is StandardMaterial3D else StandardMaterial3D.new()
+		_ore_material_cache.albedo_color = Color(1.0, 0.62, 0.35)
+	return _ore_material_cache
+
+
+# Decoration that exists only on the client: it never blocks anyone, so the server knows nothing about it.
+const DECOR := [
+	{"file": "Grass_Common_Tall", "count": 70, "scale": [0.9, 1.4], "biomes": ["forest", "plains", "swamp"]},
+	{"file": "Grass_Wispy_Short", "count": 70, "scale": [0.9, 1.5], "biomes": ["forest", "plains", "beach"]},
+	{"file": "Fern_1", "count": 14, "scale": [0.8, 1.3], "biomes": ["forest", "swamp"]},
+	{"file": "Flower_3_Group", "count": 12, "scale": [0.8, 1.2], "biomes": ["plains", "forest"]},
+	{"file": "Flower_4_Group", "count": 10, "scale": [0.8, 1.2], "biomes": ["plains"]},
+	{"file": "Mushroom_Common", "count": 6, "scale": [0.9, 1.6], "biomes": ["forest", "swamp"]},
+	{"file": "Pebble_Round_1", "count": 18, "scale": [0.8, 1.8], "biomes": ["forest", "plains", "beach", "mountain"]},
+	{"file": "Pebble_Square_2", "count": 12, "scale": [0.8, 1.8], "biomes": ["plains", "beach", "mountain"]},
+]
+
+
+func _build_decor(origin: Vector2, rng: RandomNumberGenerator) -> void:
+	var center := origin + Vector2.ONE * Defs.CHUNK_SIZE * 0.5
+	if center.length() < Defs.HUB_SAFE_RADIUS + 30.0:
+		return # The hub is paved.
+	for entry in DECOR:
+		var mesh := Assets.nature_mesh(entry["file"])
+		if mesh == null:
+			continue
+		var spots: Array = []
+		for i in int(entry["count"]):
+			var x := origin.x + rng.randf() * Defs.CHUNK_SIZE
+			var z := origin.y + rng.randf() * Defs.CHUNK_SIZE
+			if _world.is_water(x, z) or not (_world.biome_at(x, z) in entry["biomes"]):
+				continue
+			spots.append(Vector3(x, _world.height_at(x, z), z))
+		if spots.is_empty():
+			continue
+		var multimesh := MultiMesh.new()
+		multimesh.transform_format = MultiMesh.TRANSFORM_3D
+		multimesh.mesh = mesh
+		multimesh.instance_count = spots.size()
+		for i in spots.size():
+			var size := rng.randf_range(float(entry["scale"][0]), float(entry["scale"][1]))
+			var basis := Basis(Vector3.UP, rng.randf() * TAU).scaled(Vector3.ONE * size)
+			multimesh.set_instance_transform(i, Transform3D(basis, Vector3(spots[i].x - origin.x, spots[i].y, spots[i].z - origin.y)))
+		var instance := MultiMeshInstance3D.new()
+		instance.multimesh = multimesh
+		instance.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+		instance.visibility_range_end = 110.0 # Small things are not worth drawing far away.
+		add_child(instance)
 
 
 ## Hides depleted nodes and opened crates. `hidden_ids` is the set of ids the server says are gone.
