@@ -34,6 +34,7 @@
 #include "servers/physics_xpbd_tether.h"
 #include "servers/physics_softbody_shape_clusters.h"
 #include "servers/physics_xpbd_membrane.h"
+#include "servers/physics_fem_tetra_neo_hookean.h"
 #include "servers/physics_xpbd_strain_limit.h"
 #include "godot_collision_object_3d.h"
 
@@ -170,6 +171,8 @@ class GodotSoftBody3D : public GodotCollisionObject3D {
 	double xpbd_volume_rest = 0.0; // May change via plastic creep.
 	double xpbd_volume_original_rest = 0.0; // Frozen gas reference and damage baseline.
 	bool xpbd_volume_closed = false;
+	PhysicsFEMTetraRest xpbd_fem_tetra_rest;
+	bool xpbd_fem_tetra_valid = false;
 	LocalVector<Face> faces;
 	// Number of particles with nonzero inverse mass. Maintained on pin,
 	// unpin and mesh rebuild for O(1) central impulse/force normalization.
@@ -334,6 +337,7 @@ private:
 	void update_constants();
 	void update_area();
 	void initialize_membrane_constraints();
+	void initialize_fem_tetra();
 	void initialize_shear_constraints();
 	void initialize_dihedral_constraints();
 	void initialize_shape_matching();
