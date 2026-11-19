@@ -1,0 +1,34 @@
+name: GDScript Script Property Pointer Sort
+on:
+  pull_request:
+    paths:
+      - "modules/gdscript/gdscript.cpp"
+      - "modules/gdscript/tests/gdscript_test_runner_suite.h"
+      - ".github/workflows/gdscript-script-property-pointer-sort.yml"
+  workflow_dispatch:
+
+jobs:
+  native-tests:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          submodules: recursive
+      - uses: ./.github/actions/godot-cache-restore
+        with:
+          cache-name: linux-gdscript-script-property-pointers
+        continue-on-error: true
+      - uses: ./.github/actions/godot-deps
+      - name: Compile native engine tests
+        uses: ./.github/actions/godot-build
+        with:
+          platform: linuxbsd
+          target: editor
+          scons-flags: tests=yes module_text_server_fb_enabled=yes -j2
+      - uses: ./.github/actions/godot-cache-save
+        with:
+          cache-name: linux-gdscript-script-property-pointers
+        continue-on-error: true
+      - name: Run script property-list regressions
+        run: ./bin/godot.linuxbsd.editor.x86_64 --headless --test --test-case="*[GDScriptScriptProperties]*"

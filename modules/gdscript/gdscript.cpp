@@ -314,29 +314,35 @@ void GDScript::get_script_method_list(List<MethodInfo> *r_list) const {
 	_get_script_method_list(r_list, true);
 }
 
+// The sort only needs declaration order and an already-found property address.
+// Avoid copying StringName keys and a second hash lookup for every property.
+struct _GDScriptPropertySort {
+	int index = 0;
+	const PropertyInfo *info = nullptr;
+	_FORCE_INLINE_ bool operator<(const _GDScriptPropertySort &p_other) const { return index < p_other.index; }
+};
+
 void GDScript::_get_script_property_list(List<PropertyInfo> *r_list, bool p_include_base) const {
 	const GDScript *sptr = this;
 
 	while (sptr) {
-		Vector<_GDScriptMemberSort> msort;
+		LocalVector<_GDScriptPropertySort> sorted;
+		sorted.reserve(sptr->member_indices.size());
 		for (const KeyValue<StringName, MemberInfo> &E : sptr->member_indices) {
 			if (!sptr->members.has(E.key)) {
 				continue; // Skip base class members.
 			}
-			_GDScriptMemberSort ms;
-			ms.index = E.value.index;
-			ms.name = E.key;
-			msort.push_back(ms);
+			sorted.push_back({ E.value.index, &E.value.property_info });
 		}
 
-		msort.sort();
+		sorted.sort();
 
 #ifdef TOOLS_ENABLED
 		r_list->push_back(sptr->get_class_category());
 #endif // TOOLS_ENABLED
 
-		for (const _GDScriptMemberSort &member : msort) {
-			r_list->push_back(sptr->member_indices[member.name].property_info);
+		for (const _GDScriptPropertySort &member : sorted) {
+			r_list->push_back(*member.info);
 		}
 
 		if (!p_include_base) {
