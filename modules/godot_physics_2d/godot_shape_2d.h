@@ -317,19 +317,14 @@ public:
 	virtual Variant get_data() const override;
 
 	_FORCE_INLINE_ void project_range(const Vector2 &p_normal, const Transform2D &p_transform, real_t &r_min, real_t &r_max) const {
-		// no matter the angle, the box is mirrored anyway
-		r_max = -1e20;
-		r_min = 1e20;
-		for (int i = 0; i < 4; i++) {
-			real_t d = p_normal.dot(p_transform.xform(Vector2(((i & 1) * 2 - 1) * half_extents.x, ((i >> 1) * 2 - 1) * half_extents.y)));
-
-			if (d > r_max) {
-				r_max = d;
-			}
-			if (d < r_min) {
-				r_min = d;
-			}
-		}
+		// A transformed rectangle is a parallelogram. Its projection radius
+		// is the sum of its two signed half-axis projections, in absolute value.
+		// Avoid transforming and projecting all four corners on every SAT axis.
+		const real_t center = p_normal.dot(p_transform.get_origin());
+		const real_t radius = Math::abs(p_normal.dot(p_transform.columns[0]) * half_extents.x) +
+				Math::abs(p_normal.dot(p_transform.columns[1]) * half_extents.y);
+		r_min = center - radius;
+		r_max = center + radius;
 	}
 
 	_FORCE_INLINE_ Vector2 get_circle_axis(const Transform2D &p_xform, const Transform2D &p_xform_inv, const Vector2 &p_circle) const {
