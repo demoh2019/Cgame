@@ -7,20 +7,20 @@ extends Node2D
 const Rules = preload("res://rules.gd")
 const Survivor = preload("res://survivor.gd")
 
-const SAVE_PATH := "user://afterfall_frontier_v1.json"
-const START := Vector2(240.0, 525.0)
-const TRADER := Vector2(250.0, 330.0)
-const HOME := Vector2(205.0, 645.0)
-const MOVE_SPEED := 205.0
-const SPRINT_MULTIPLIER := 1.5
-const INTERACTION_RANGE := 80.0
+const SAVE_PATH = "user://afterfall_frontier_v1.json"
+const START = Vector2(240.0, 525.0)
+const TRADER = Vector2(250.0, 330.0)
+const HOME = Vector2(205.0, 645.0)
+const MOVE_SPEED = 205.0
+const SPRINT_MULTIPLIER = 1.5
+const INTERACTION_RANGE = 80.0
 
-const ZONE_COLORS := [
+const ZONE_COLORS = [
 	Color(0.12, 0.23, 0.22),
 	Color(0.22, 0.20, 0.15),
 	Color(0.23, 0.12, 0.14)
 ]
-const RESOURCE_COLORS := {
+const RESOURCE_COLORS = {
 	"wood": Color(0.29, 0.77, 0.35),
 	"stone": Color(0.70, 0.72, 0.78),
 	"fiber": Color(0.60, 0.84, 0.45),
@@ -347,9 +347,12 @@ func _notice(content: String) -> void:
 
 
 func _unhandled_key_input(event: InputEvent) -> void:
-	if not event is InputEventKey or not event.pressed or event.echo:
+	if not event is InputEventKey:
 		return
-	match event.keycode:
+	var key: InputEventKey = event as InputEventKey
+	if not key.pressed or key.echo:
+		return
+	match key.keycode:
 		KEY_E:
 			_gather_or_recover()
 		KEY_F:
