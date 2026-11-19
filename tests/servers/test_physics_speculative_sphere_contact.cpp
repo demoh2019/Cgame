@@ -204,4 +204,60 @@ TEST_CASE("[PhysicsSpeculative] Predictive provenance fits inside recycling-cach
 	CHECK(recycling.matches_geometry(7, 8));
 }
 
+TEST_CASE("[PhysicsSpeculative] large finite separations keep predictive 2D and 3D contacts") {
+	// float32 squares 2.5e19 to infinity, even though the input centers,
+	// velocities, radii, and output contact anchors are all finite.
+	const real_t unit = real_t(1e19);
+	Vector2 a2, b2, n2;
+	CHECK(physics_speculative_sphere_contact(
+			Vector2(), unit, Vector2(real_t(2.5) * unit, 0), unit,
+			Vector2(real_t(1e20), 0), Vector2(), real_t(0.1), unit, a2, b2, n2));
+	CHECK(a2.is_finite());
+	CHECK(b2.is_finite());
+	CHECK(n2.is_equal_approx(Vector2(1, 0)));
+	CHECK(a2.x / unit == doctest::Approx(1.0));
+	CHECK(b2.x / unit == doctest::Approx(1.5));
+
+	Vector3 a3, b3, n3;
+	CHECK(physics_speculative_sphere_contact(
+			Vector3(), unit, Vector3(real_t(2.5) * unit, 0, 0), unit,
+			Vector3(real_t(1e20), 0, 0), Vector3(), real_t(0.1), unit, a3, b3, n3));
+	CHECK(a3.is_finite());
+	CHECK(b3.is_finite());
+	CHECK(n3.is_equal_approx(Vector3(1, 0, 0)));
+	CHECK(a3.x / unit == doctest::Approx(1.0));
+	CHECK(b3.x / unit == doctest::Approx(1.5));
+
+	// Large perpendicular displacement must not manufacture a contact.
+	CHECK_FALSE(physics_speculative_sphere_contact(
+			Vector2(), unit, Vector2(real_t(2.5) * unit, 0), unit,
+			Vector2(0, real_t(1e20)), Vector2(), real_t(0.1), unit, a2, b2, n2));
+}
+
+TEST_CASE("[PhysicsSpeculative] overflowed relative speed can have finite short-step displacement") {
+	const real_t unit = real_t(1e19);
+	const real_t speed = real_t(2e38); // Each speed fits float32; their difference does not.
+	Vector2 a2, b2, n2;
+	CHECK(physics_speculative_sphere_contact(
+			Vector2(), unit, Vector2(real_t(2.5) * unit, 0), unit,
+			Vector2(speed, 0), Vector2(-speed, 0), real_t(1e-19), unit, a2, b2, n2));
+	CHECK(n2.is_equal_approx(Vector2(1, 0)));
+	CHECK(a2.is_finite());
+	CHECK(b2.is_finite());
+
+	Vector3 a3, b3, n3;
+	CHECK(physics_speculative_sphere_contact(
+			Vector3(), unit, Vector3(real_t(2.5) * unit, 0, 0), unit,
+			Vector3(speed, 0, 0), Vector3(-speed, 0, 0), real_t(1e-19), unit, a3, b3, n3));
+	CHECK(n3.is_equal_approx(Vector3(1, 0, 0)));
+	CHECK(a3.is_finite());
+	CHECK(b3.is_finite());
+
+	// Avoid false hits: the same extreme velocities cannot reach the
+	// target when the step is too short.
+	CHECK_FALSE(physics_speculative_sphere_contact(
+			Vector2(), unit, Vector2(real_t(2.5) * unit, 0), unit,
+			Vector2(speed, 0), Vector2(-speed, 0), real_t(1e-30), unit, a2, b2, n2));
+}
+
 } // namespace TestPhysicsSpeculativeSphereContact
