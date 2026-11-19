@@ -865,12 +865,19 @@ func _physics_soft_contacts_3d(scale: int, frames: int, frictionless: bool) -> D
 		peak_physics_ms = maxf(peak_physics_ms, Performance.get_monitor(Performance.TIME_PHYSICS_PROCESS) * 1000.0)
 		peak_pairs = maxi(peak_pairs, int(Performance.get_monitor(Performance.PHYSICS_3D_COLLISION_PAIRS)))
 
-	var probe: Vector3 = soft_bodies[0].get_point_transform(0)
-	var state_valid := probe.is_finite() and rigid_bodies[0].position.is_finite() and rigid_bodies[0].linear_velocity.is_finite()
+	# Sample different lanes to catch numerical failures across a larger grid.
+	var state_valid := true
+	for index in [0, int(count / 2), count - 1]:
+		var point: Vector3 = soft_bodies[index].get_point_transform(0)
+		var body: RigidBody3D = rigid_bodies[index]
+		if not point.is_finite() or not body.position.is_finite() or not body.linear_velocity.is_finite():
+			state_valid = false
 	world.queue_free()
 	await process_frame
 	if not state_valid:
 		return {"error": "Rigid/soft 3D contacts produced non-finite positions or velocities", "frictionless": frictionless}
+	if peak_pairs == 0:
+		return {"error": "Rigid/soft 3D benchmark did not generate collision pairs", "frictionless": frictionless}
 	var stats := _frame_statistics(frame_intervals)
 	return {"soft_bodies": count, "rigid_bodies": count, "frictionless": frictionless, "physics_frames": frames,
 			"peak_physics_ms": peak_physics_ms, "peak_collision_pairs": peak_pairs,
