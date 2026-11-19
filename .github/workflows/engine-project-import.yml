@@ -1,0 +1,35 @@
+name: Cross-engine import tests
+
+on:
+  push:
+    branches: [develop, master]
+    paths:
+      - misc/scripts/engine_project_import.py
+      - misc/scripts/tests/test_engine_project_import.py
+      - misc/scripts/README_engine_project_import.md
+      - .github/workflows/engine-project-import.yml
+  pull_request:
+    paths:
+      - misc/scripts/engine_project_import.py
+      - misc/scripts/tests/test_engine_project_import.py
+      - misc/scripts/README_engine_project_import.md
+      - .github/workflows/engine-project-import.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  importer-tests:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ['3.10', '3.13']
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+      - name: Run offline cross-engine importer regression tests
+        run: python -m unittest discover -s misc/scripts/tests -p 'test_engine_project_import.py' -v
