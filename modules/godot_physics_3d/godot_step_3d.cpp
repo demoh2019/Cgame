@@ -230,8 +230,13 @@ bool GodotStep3D::_solve_large_island(const LocalVector<GodotConstraint3D *> &p_
 
 	// Greedy coloring remains exclusive for every dynamic body and for
 	// ALL bodies in mixed joint/contact islands. Overflow stays serial.
-	HashMap<GodotBody3D *, uint32_t> occupied_colors;
-	LocalVector<uint8_t> constraint_colors;
+	// Persistent scratch avoids hash-table allocations on each physics tick.
+	// Discard peak capacity when the world shrinks substantially.
+	if (occupied_colors.get_capacity() > MAX(uint32_t(1024), constraint_count * uint32_t(4))) {
+		occupied_colors.reset();
+	} else {
+		occupied_colors.clear();
+	}
 	constraint_colors.resize(constraint_count);
 	uint32_t group_sizes[MAX_LARGE_ISLAND_COLORS + 1] = {};
 
@@ -591,6 +596,14 @@ void GodotStep3D::step(GodotSpace3D *p_space, real_t p_delta) {
 				}
 			}
 		}
+	}
+
+	if (large_island_count != 1 && (!colored_constraints.is_empty() || !constraint_colors.is_empty() || !occupied_colors.is_empty())) {
+		// These arrays are only used by the single-large-island path.
+		// Release peaks instead of retaining memory while simulating small worlds.
+		colored_constraints.reset();
+		constraint_colors.reset();
+		occupied_colors.reset();
 	}
 
 	if (large_island_count == 1) {
