@@ -847,6 +847,9 @@ static void _collision_sphere_box(const GodotShape3D *p_a, const Transform3D &p_
 	const Transform3D box_inverse = p_transform_b.affine_inverse();
 	Vector3 center = box_inverse.xform(p_transform_a.origin);
 	Vector3 extents = box_B->get_half_extents();
+	const bool center_inside = Math::abs(center.x) <= extents.x &&
+			Math::abs(center.y) <= extents.y &&
+			Math::abs(center.z) <= extents.z;
 	Vector3 nearest(MIN(MAX(center.x, -extents.x), extents.x),
 			MIN(MAX(center.y, -extents.y), extents.y),
 			MIN(MAX(center.z, -extents.z), extents.z));
@@ -867,7 +870,7 @@ static void _collision_sphere_box(const GodotShape3D *p_a, const Transform3D &p_
 	}
 	const real_t length = Math::sqrt(distance_squared);
 	Vector3 axis;
-	if (length == 0) {
+	if (center_inside) {
 		// The sphere center is inside (or on) the box. The clamped closest
 		// point is its own center, so the old center-to-center normal can be
 		// zero. Find the nearest exit face, using world-space face distances
