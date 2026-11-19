@@ -584,27 +584,87 @@ bool GodotConvexPolygonShape2D::contains_point(const Vector2 &p_point) const {
 }
 
 bool GodotConvexPolygonShape2D::intersect_segment(const Vector2 &p_begin, const Vector2 &p_end, Vector2 &r_point, Vector2 &r_normal) const {
-	Vector2 n = (p_end - p_begin).normalized();
-	real_t d = 0.0;
-	bool inters = false;
-
-	for (int i = 0; i < point_count; i++) {
-		Vector2 res;
-
-		if (!Geometry2D::segment_intersects_segment(p_begin, p_end, points[i].pos, points[(i + 1) % point_count].pos, &res)) {
-			continue;
-		}
-
-		real_t nd = n.dot(res);
-		if (!inters || nd < d) {
-			d = nd;
-			r_point = res;
-			r_normal = points[i].normal;
-			inters = true;
-		}
+	if (p_begin == p_end) {
+		return false;
 	}
 
-	return inters;
+	if (valid_mass_properties) {
+		// Convex ray cast by clipping the segment against every edge half-plane.
+		// This avoids one generic segment/segment intersection per polygon edge.
+		// Keep the calculation in double precision to preserve the first hit
+		// when the ray is very long or the polygon is far from the origin.
+		const double dx = double(p_end.x) - double(p_begin.x);
+		const double dy = double(p_end.y) - double(p_begin.y);
+		double enter_fraction = 0.0;
+		double exit_fraction = 1.0;
+		int enter_edge = -1;
+		int exit_edge = -1;
+
+		for (int i = 0; i < point_count; i++) {
+			const Vector2 &a = points[i].pos;
+			const Vector2 &b = points[(i + 1) % point_count].pos;
+			const double edge_x = double(b.x) - double(a.x);
+			const double edge_y = double(b.y) - double(a.y);
+			// Vector2::orthogonal() is outward for counter-clockwise polygons.
+			const double outward_x = mass_clockwise ? -edge_y : edge_y;
+			const double outward_y = mass_clockwise ? edge_x : -edge_x;
+			const double distance = outward_x * (double(p_begin.x) - double(a.x)) +
+					outward_y * (double(p_begin.y) - double(a.y));
+			const double velocity = outward_x * dx + outward_y * dy;
+
+			if (velocity == 0.0) {
+				if (distance > 0.0) {
+					return false;
+				}
+				continue;
+			}
+
+			const double fraction = -distance / velocity;
+			if (velocity < 0.0) {
+				if (fraction >= enter_fraction) {
+					enter_fraction = fraction;
+					enter_edge = i;
+				}
+			} else if (fraction <= exit_fraction) {
+				exit_fraction = fraction;
+				exit_edge = i;
+			}
+			if (enter_fraction > exit_fraction) {
+				return false;
+			}
+		}
+
+		// Prefer the first entering boundary. If the ray begins inside,
+		// preserve the previous behavior by returning its first exit.
+		const int hit_edge = enter_edge >= 0 ? enter_edge : exit_edge;
+		const double fraction = enter_edge >= 0 ? enter_fraction : exit_fraction;
+		if (hit_edge < 0 || fraction < 0.0 || fraction > 1.0) {
+			return false;
+		}
+		r_point = Vector2(real_t(double(p_begin.x) + dx * fraction),
+				real_t(double(p_begin.y) + dy * fraction));
+		r_normal = points[hit_edge].normal;
+		return true;
+	}
+
+	// Preserve the segment-based behavior for zero-area/degenerate polygons.
+	const Vector2 direction = (p_end - p_begin).normalized();
+	real_t closest_distance = 0.0;
+	bool intersects = false;
+	for (int i = 0; i < point_count; i++) {
+		Vector2 hit;
+		if (!Geometry2D::segment_intersects_segment(p_begin, p_end, points[i].pos, points[(i + 1) % point_count].pos, &hit)) {
+			continue;
+		}
+		const real_t distance = direction.dot(hit);
+		if (!intersects || distance < closest_distance) {
+			closest_distance = distance;
+			r_point = hit;
+			r_normal = points[i].normal;
+			intersects = true;
+		}
+	}
+	return intersects;
 }
 
 real_t GodotConvexPolygonShape2D::get_moment_of_inertia(real_t p_mass, const Size2 &p_scale) const {
@@ -656,6 +716,7 @@ void GodotConvexPolygonShape2D::set_data(const Variant &p_data) {
 	mass_covariance_xy = 0.0;
 	mass_area = 0.0;
 	valid_mass_properties = false;
+	mass_clockwise = false;
 
 	if (p_data.get_type() == Variant::PACKED_VECTOR2_ARRAY) {
 		Vector<Vector2> arr = p_data;
@@ -728,6 +789,7 @@ void GodotConvexPolygonShape2D::set_data(const Variant &p_data) {
 		// Use the local AABB area as a scale reference instead.
 		const double area_scale = double(aabb_new.size.x) * double(aabb_new.size.y);
 		if (Math::abs(twice_area) > 1.0e-12 * area_scale) {
+			mass_clockwise = twice_area < 0.0;
 			const double cx = first_x / (3.0 * twice_area);
 			const double cy = first_y / (3.0 * twice_area);
 			const double vx = second_x / (6.0 * twice_area) - cx * cx;
