@@ -195,7 +195,10 @@ def review(root, edits):
             total_diff += diff[:remaining]
         actions.append({'path': name, 'action': kind, 'before_sha256': _sha(before) if current is not None else None,
                         'after_sha256': _sha(after) if kind != 'delete' else None})
-    remaining = [p for p in paths if p not in {x['path'] for x in actions if x['action'] == 'delete'}]
+    # Build the deleted-path lookup once, not once for every source file.
+    # Large projects can have thousands of files but only a handful of edits.
+    deleted_paths = {action['path'] for action in actions if action['action'] == 'delete'}
+    remaining = [path for path in paths if path not in deleted_paths]
     new_names = remaining + list(planned_creates)
     prefixes = set(new_names)
     for name in new_names:

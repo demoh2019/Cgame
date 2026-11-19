@@ -167,6 +167,31 @@ class AIProjectPatchTests(unittest.TestCase):
         with self.assertRaises(a.PatchError):
             a.review(self.root, edits)
 
+    def test_deleted_file_can_become_a_directory(self):
+        # A deleted file must not trigger a false parent-directory conflict.
+        edits = self.plan(self.delete(), self.create('scripts/main.gd/child.txt', 'generated'))
+        report = a.review(self.root, edits)
+        self.assertEqual([change['action'] for change in report['changes']], ['delete', 'create'])
+        a.stage(self.root, edits, report, self.out)
+        self.assertTrue((self.out / 'scripts/main.gd' / 'child.txt').is_file())
+        self.assertTrue((self.root / 'scripts/main.gd').is_file())
+
+    def test_large_project_with_multiple_deletions(self):
+        # Mock only the file scan and reads: validation must still correctly
+        # handle a nearly full 20k-file snapshot with many deleted paths.
+        paths = [f'assets/file_{i:05d}.gd' for i in range(19999)]
+        deletes = [
+            {'path': paths[i], 'expected_sha256': self.hash('extends Node\n'), 'delete': True}
+            for i in range(18)
+        ]
+        edits = self.plan(*deletes, self.create('assets/new_script.gd', 'extends Node2D\n'))
+        with patch.object(a, '_scan_project', return_value=paths):
+            with patch.object(a, '_read_regular', return_value=b'extends Node\n'):
+                report = a.review(self.root, edits)
+        self.assertTrue(report['ok'])
+        self.assertEqual(len(report['changes']), 19)
+        self.assertEqual([change['action'] for change in report['changes']].count('delete'), 18)
+
     def test_existing_output_is_preserved(self):
         edits = self.plan(self.create())
         self.out.mkdir()
