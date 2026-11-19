@@ -48,6 +48,10 @@ void HeightmapTerrainEditorPlugin::_notification(int p_what) {
         brush_mode->add_item("Raise", 0);
         brush_mode->add_item("Lower", 1);
         brush_mode->add_item("Paint Color", 2);
+        brush_mode->add_item("Texture Layer 0", 3);
+        brush_mode->add_item("Texture Layer 1", 4);
+        brush_mode->add_item("Texture Layer 2", 5);
+        brush_mode->add_item("Texture Layer 3", 6);
         toolbar->add_child(brush_mode);
 
         Label *radius_label = memnew(Label);
@@ -151,7 +155,23 @@ EditorPlugin::AfterGUIInput HeightmapTerrainEditorPlugin::forward_3d_gui_input(C
         return AFTER_GUI_INPUT_PASS;
     }
 
-    if (mode == 2) {
+    if (mode >= 3 && mode <= 6) {
+        Ref<TerrainSplatmap> splatmap = terrain->get_splatmap();
+        if (splatmap.is_null()) {
+            return AFTER_GUI_INPUT_PASS;
+        }
+        const PackedColorArray before = splatmap->get_weights();
+        splatmap->paint_layer(mode - 3, grid_center, grid_radius, CLAMP(power, 0.0, 1.0));
+        const PackedColorArray after = splatmap->get_weights();
+        if (before == after) {
+            return AFTER_GUI_INPUT_PASS;
+        }
+        splatmap->set_weights(before);
+        undo->create_action("Paint Terrain Texture Layer", UndoRedo::MERGE_DISABLE, terrain);
+        undo->add_do_method(splatmap.ptr(), SNAME("set_weights"), after);
+        undo->add_undo_method(splatmap.ptr(), SNAME("set_weights"), before);
+        undo->commit_action();
+    } else if (mode == 2) {
         const PackedColorArray before = data->get_colors();
         data->apply_color_brush(grid_center, grid_radius, paint_color->get_pick_color(), CLAMP(power, 0.0, 1.0));
         const PackedColorArray after = data->get_colors();
