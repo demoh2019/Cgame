@@ -33,6 +33,8 @@
 #include "godot_area_3d.h"
 #include "godot_collision_object_3d.h"
 
+#include "core/templates/local_vector.h"
+#include "core/templates/pair.h"
 #include "core/templates/vset.h"
 #include "servers/physics_3d/physics_server_3d_constants.h"
 
@@ -117,7 +119,10 @@ class GodotBody3D : public GodotCollisionObject3D {
 	Vector3 deferred_motion;
 	bool has_deferred_motion = false;
 
-	HashMap<GodotConstraint3D *, int> constraint_map;
+	// Constraints touching this body. Each constraint caches its index here
+	// (see `GodotConstraint3D::get_body_slot`), so removal is O(1) even for a
+	// static body shared by thousands of contacts.
+	LocalVector<Pair<GodotConstraint3D *, int>> constraint_list;
 
 	Vector<AreaCMP> areas;
 
@@ -201,10 +206,10 @@ public:
 	_FORCE_INLINE_ uint64_t get_island_step() const { return island_step; }
 	_FORCE_INLINE_ void set_island_step(uint64_t p_step) { island_step = p_step; }
 
-	_FORCE_INLINE_ void add_constraint(GodotConstraint3D *p_constraint, int p_pos) { constraint_map[p_constraint] = p_pos; }
-	_FORCE_INLINE_ void remove_constraint(GodotConstraint3D *p_constraint) { constraint_map.erase(p_constraint); }
-	const HashMap<GodotConstraint3D *, int> &get_constraint_map() const { return constraint_map; }
-	_FORCE_INLINE_ void clear_constraint_map() { constraint_map.clear(); }
+	void add_constraint(GodotConstraint3D *p_constraint, int p_pos);
+	void remove_constraint(GodotConstraint3D *p_constraint, int p_pos);
+	const LocalVector<Pair<GodotConstraint3D *, int>> &get_constraint_list() const { return constraint_list; }
+	_FORCE_INLINE_ void clear_constraint_list() { constraint_list.clear(); }
 
 	_FORCE_INLINE_ void set_omit_force_integration(bool p_omit_force_integration) { omit_force_integration = p_omit_force_integration; }
 	_FORCE_INLINE_ bool get_omit_force_integration() const { return omit_force_integration; }

@@ -761,14 +761,43 @@ void GodotBody3D::integrate_velocities(real_t p_step) {
 	}
 }
 
+void GodotBody3D::add_constraint(GodotConstraint3D *p_constraint, int p_pos) {
+	p_constraint->set_body_slot(p_pos, constraint_list.size());
+	constraint_list.push_back({ p_constraint, p_pos });
+}
+
+void GodotBody3D::remove_constraint(GodotConstraint3D *p_constraint, int p_pos) {
+	uint32_t index = p_constraint->get_body_slot(p_pos);
+	if (index >= constraint_list.size() || constraint_list[index].first != p_constraint || constraint_list[index].second != p_pos) {
+		// The list was cleared or reordered behind the constraint's back.
+		index = UINT32_MAX;
+		for (uint32_t i = 0; i < constraint_list.size(); i++) {
+			if (constraint_list[i].first == p_constraint && constraint_list[i].second == p_pos) {
+				index = i;
+				break;
+			}
+		}
+		if (index == UINT32_MAX) {
+			return;
+		}
+	}
+
+	const uint32_t last = constraint_list.size() - 1;
+	if (index != last) {
+		constraint_list[index] = constraint_list[last];
+		constraint_list[index].first->set_body_slot(constraint_list[index].second, index);
+	}
+	constraint_list.resize(last);
+}
+
 void GodotBody3D::wakeup_neighbours() {
-	for (const KeyValue<GodotConstraint3D *, int> &E : constraint_map) {
-		const GodotConstraint3D *c = E.key;
+	for (const Pair<GodotConstraint3D *, int> &E : constraint_list) {
+		const GodotConstraint3D *c = E.first;
 		GodotBody3D **n = c->get_body_ptr();
 		int bc = c->get_body_count();
 
 		for (int i = 0; i < bc; i++) {
-			if (i == E.value) {
+			if (i == E.second) {
 				continue;
 			}
 			GodotBody3D *b = n[i];

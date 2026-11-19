@@ -114,7 +114,7 @@ GodotAreaPair3D::~GodotAreaPair3D() {
 			area->remove_body_from_query(body, body_shape, area_shape);
 		}
 	}
-	body->remove_constraint(this);
+	body->remove_constraint(this, 0);
 	area->remove_constraint(this);
 }
 

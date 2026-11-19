@@ -91,7 +91,7 @@ public:
 		for (int i = 0; i < get_body_count(); i++) {
 			GodotBody3D *body = get_body_ptr()[i];
 			if (body) {
-				body->remove_constraint(this);
+				body->remove_constraint(this, i);
 			}
 		}
 	}
