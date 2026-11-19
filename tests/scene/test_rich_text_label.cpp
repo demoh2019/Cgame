@@ -221,7 +221,6 @@ TEST_CASE("[SceneTree][RichTextLabel] append_text brackets with incorrect case")
 	memdelete(label);
 }
 
-
 } // namespace TestRichTextLabel
 
 #endif // ADVANCED_GUI_DISABLED
