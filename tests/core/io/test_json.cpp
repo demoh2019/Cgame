@@ -493,4 +493,59 @@ TEST_CASE("[JSON] Native serialization preserves large packed arrays and diction
 	}
 }
 
+
+TEST_CASE("[JSON] StringBuilder serialization preserves large arrays and nested dictionaries") {
+	Array values;
+	for (int i = 0; i < 1024; i++) {
+		Dictionary entry;
+		entry["index"] = i;
+		entry["enabled"] = (i % 2) == 0;
+		entry["name"] = String("item_") + itos(i);
+		values.push_back(entry);
+	}
+	const String compact = JSON::stringify(values);
+	CHECK(compact.begins_with("[{"));
+	CHECK(compact.ends_with("}]"));
+	const Variant decoded = JSON::parse_string(compact);
+	REQUIRE(decoded.get_type() == Variant::ARRAY);
+	const Array result = decoded;
+	REQUIRE(result.size() == values.size());
+	for (int i = 0; i < result.size(); i++) {
+		const Dictionary item = result[i];
+		CHECK(item["index"] == Variant(i));
+		CHECK(item["enabled"] == Variant((i % 2) == 0));
+		CHECK(item["name"] == Variant(String("item_") + itos(i)));
+	}
+}
+
+TEST_CASE("[JSON] StringBuilder serialization keeps exact pretty-print formatting") {
+	Array inner_array;
+	inner_array.push_back(1);
+	inner_array.push_back(2);
+	Dictionary inner;
+	inner["numbers"] = inner_array;
+	Dictionary outer;
+	outer["y"] = inner;
+	outer["a"] = true;
+	const String result = JSON::stringify(outer, "--");
+	CHECK(result == "{\\n--\\\"a\\\": true,\\n--\\\"y\\\": {\\n----\\\"numbers\\\": [\\n------1,\\n------2\\n----]\\n--}\\n}");
+	const Variant parsed = JSON::parse_string(result);
+	CHECK(parsed.get_type() == Variant::DICTIONARY);
+	CHECK(JSON::stringify(parsed, "--") == result);
+}
+
+TEST_CASE("[JSON] StringBuilder serialization preserves escaping and key sorting") {
+	Dictionary source;
+	source["z"] = String("backslash\\\\ quote\\\" newline\\n tab\\t");
+	source["a"] = String("first");
+	source["nested"] = Array();
+	const String compact = JSON::stringify(source);
+	CHECK(compact.begins_with("{\\\"a\\\":\\\"first\\\""));
+	const Dictionary roundtrip = JSON::parse_string(compact);
+	CHECK(roundtrip["a"] == source["a"]);
+	CHECK(roundtrip["z"] == source["z"]);
+	CHECK(roundtrip["nested"] == source["nested"]);
+	CHECK(JSON::stringify(source, "\t", true) == JSON::stringify(roundtrip, "\t", true));
+}
+
 } // namespace TestJSON
