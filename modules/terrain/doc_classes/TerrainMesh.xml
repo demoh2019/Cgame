@@ -7,7 +7,7 @@
 		[TerrainMesh] generates an upward-facing triangulated heightfield from a rectangular grid of floating-point heights. It can be assigned directly to [member MeshInstance3D.mesh], and automatically rebuilds its geometry after edits.
 		Heights are stored in a row-major array (X first, then Z). A grid position [code]Vector2(x, z)[/code] selects the sample at horizontal coordinate [code]x * cell_size[/code] and depth coordinate [code]z * cell_size[/code]. The rendered Y coordinate is the stored height multiplied by [member height_scale].
 		Use [method sculpt] to raise or lower terrain, [method smooth] to reduce abrupt height changes, or [method erode] for basic thermal erosion. All brush positions and radii are specified in grid cells, not world units.
-		[b]Note:[/b] This is a basic single-mesh terrain resource. It does not yet implement chunk streaming, LOD, texture painting, dedicated viewport brushes, or automatic collision regeneration.
+		When 3D physics is enabled, use a [TerrainCollision3D] node to generate a matching static collider that automatically follows resource edits.\n\t\t[b]Note:[/b] This is a basic single-mesh terrain resource. It does not yet implement chunk streaming, LOD, texture painting, dedicated viewport brushes, or asynchronous collision baking.
 	</description>
 	<methods>
 		<method name="erode">
