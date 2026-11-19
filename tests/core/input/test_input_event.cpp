@@ -110,4 +110,45 @@ TEST_CASE("[InputEvent] Test xformed_by") {
 	CHECK(iemm2->get_position().is_equal_approx(Vector2(2.0f, 3.0f)));
 }
 
+
+TEST_CASE("[BuiltinInputFastPath] builtin action map returns stable cached references") {
+	InputMap *map = InputMap::get_singleton();
+	REQUIRE(map != nullptr);
+	const HashMap<String, List<Ref<InputEvent>>> &first = map->get_builtins();
+	const HashMap<String, List<Ref<InputEvent>>> &second = map->get_builtins();
+	CHECK(&first == &second);
+	CHECK_FALSE(first.is_empty());
+	for (const KeyValue<String, List<Ref<InputEvent>>> &entry : first) {
+		CHECK_FALSE(entry.key.is_empty());
+	}
+}
+
+TEST_CASE("[BuiltinInputFastPath] feature-filtered action map returns stable cached references") {
+	InputMap *map = InputMap::get_singleton();
+	REQUIRE(map != nullptr);
+	const auto &first = map->get_builtins_with_feature_overrides_applied();
+	const auto &second = map->get_builtins_with_feature_overrides_applied();
+	CHECK(&first == &second);
+	CHECK_FALSE(first.is_empty());
+	CHECK_EQ(first.size(), second.size());
+}
+
+TEST_CASE("[BuiltinInputFastPath] builtin definitions do not change when runtime actions are added") {
+	InputMap *map = InputMap::get_singleton();
+	REQUIRE(map != nullptr);
+	const auto &builtins = map->get_builtins();
+	const int original_size = builtins.size();
+	const String action = "__cgame_builtin_actions_perf_test_20261119__";
+	const bool was_present = map->has_action(action);
+	if (!was_present) {
+		map->add_action(action);
+	}
+	CHECK(map->has_action(action));
+	CHECK_EQ(builtins.size(), original_size);
+	if (!was_present) {
+		map->erase_action(action);
+	}
+	CHECK_EQ(builtins.size(), original_size);
+}
+
 } // namespace TestInputEvent
