@@ -1492,6 +1492,28 @@ void GodotSoftBody3D::solve_constraints(real_t p_delta) {
 	const double volume_alpha = p_delta > 0.0 ? volume_compliance / (double(p_delta) * double(p_delta)) : 0.0;
 	const bool use_volume_xpbd = xpbd_volume_closed && volume_compliance > 0.0 &&
 			Math::is_finite(volume_alpha) && volume_alpha > 0.0;
+	// Long-range attachments cap distance from fixed vertices along the
+	// structural mesh, without applying compression or creating ghost
+	// forces inside the reachable range. They are opt-in and O(nodes)
+	// per iteration once the nearest-pin graph has been built.
+	const double tether_compliance = get_space() ? double(get_space()->get_soft_body_xpbd_tether_compliance()) : 0.0;
+	const double tether_alpha_double = p_delta > 0.0 ? tether_compliance / (double(p_delta) * double(p_delta)) : 0.0;
+	const bool use_tethers = tether_compliance > 0.0 && dynamic_node_count < nodes.size() &&
+			Math::is_finite(tether_alpha_double) && tether_alpha_double > 0.0;
+	const real_t tether_alpha = use_tethers ? real_t(MIN(tether_alpha_double, double(std::numeric_limits<real_t>::max()))) : real_t(0.0);
+	if (use_tethers) {
+		if (xpbd_tethers_dirty || xpbd_tethers.size() != nodes.size()) {
+			rebuild_xpbd_tethers(get_space()->get_soft_body_xpbd_tether_slack());
+		}
+		for (PhysicsXPBDTether &tether : xpbd_tethers) {
+			tether.lambda = 0.0; // XPBD lambda persists only within one step.
+		}
+	} else {
+		if (!xpbd_tethers.is_empty()) {
+			xpbd_tethers.reset();
+		}
+		xpbd_tethers_dirty = true;
+	}
 
 	if (use_xpbd) {
 		xpbd_link_lambdas.resize(links.size());
@@ -1545,6 +1567,17 @@ void GodotSoftBody3D::solve_constraints(real_t p_delta) {
 		}
 		if (use_volume_xpbd) {
 			solve_volume_constraint(volume_alpha, volume_lambda);
+		}
+		if (use_tethers) {
+			for (uint32_t node_index = 0; node_index < xpbd_tethers.size(); ++node_index) {
+				PhysicsXPBDTether &tether = xpbd_tethers[node_index];
+				if (tether.anchor >= nodes.size() || tether.anchor == node_index ||
+						nodes[node_index].im <= 0.0 || nodes[tether.anchor].im != 0.0) {
+					continue;
+				}
+				physics_xpbd_solve_tether(nodes[node_index].x, nodes[tether.anchor].x,
+						nodes[node_index].im, tether.max_length, tether_alpha, tether.lambda);
+			}
 		}
 	}
 	const real_t vc = (1.0 - damping_coefficient) * inv_delta;
