@@ -679,4 +679,34 @@ TEST_CASE("[LocalVector] Nontrivial insert does not create temporary default obj
 	CHECK(values[39].value == "keep");
 }
 
+TEST_CASE("[LocalVector] Exact initial reserve keeps single-entry lists compact") {
+	LocalVector<uint64_t> values;
+	CHECK(values.get_capacity() == 0);
+
+	values.reserve_exact(1);
+	CHECK(values.get_capacity() == 1);
+	values.push_back(0x12345678ULL);
+	CHECK(values.size() == 1);
+
+	// An equal or smaller reservation must not move or shrink the data.
+	const uint64_t *original = values.ptr();
+	values.reserve_exact(1);
+	CHECK(values.ptr() == original);
+	CHECK(values.get_capacity() == 1);
+
+	// A larger exact reserve retains data; subsequent growth is geometric.
+	values.reserve_exact(4);
+	CHECK(values.get_capacity() == 4);
+	CHECK(values[0] == 0x12345678ULL);
+	for (uint64_t i = 1; i < 6; i++) {
+		values.push_back(i);
+	}
+	CHECK(values.get_capacity() >= 6);
+	CHECK(values.size() == 6);
+	CHECK(values[0] == 0x12345678ULL);
+	for (uint64_t i = 1; i < 6; i++) {
+		CHECK(values[i] == i);
+	}
+}
+
 } // namespace TestLocalVector
