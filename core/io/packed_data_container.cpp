@@ -32,6 +32,9 @@
 
 #include "core/io/marshalls.h"
 #include "core/object/class_db.h"
+#include "core/templates/local_vector.h"
+
+#include <utility>
 
 Variant PackedDataContainer::getvar(const Variant &p_key, bool *r_valid) const {
 	bool err = false;
@@ -214,8 +217,9 @@ uint32_t PackedDataContainer::_pack(const Variant &p_data, Vector<uint8_t> &r_tm
 	switch (p_data.get_type()) {
 		case Variant::STRING: {
 			String s = p_data;
-			if (r_string_cache.has(s)) {
-				return r_string_cache[s];
+			// A single lookup avoids hashing and probing this string twice.
+			if (const uint32_t *existing_offset = r_string_cache.getptr(s)) {
+				return *existing_offset;
 			}
 
 			r_string_cache[s] = r_tmpdata.size();
@@ -269,13 +273,15 @@ uint32_t PackedDataContainer::_pack(const Variant &p_data, Vector<uint8_t> &r_tm
 			encode_uint32(TYPE_DICT, &r_tmpdata.write[pos + 0]);
 			encode_uint32(len, &r_tmpdata.write[pos + 4]);
 
-			List<DictKey> sortk;
-
+			// Contiguous storage avoids a heap allocation per dictionary key
+			// and improves cache locality while sorting hash groups.
+			LocalVector<DictKey> sortk;
+			sortk.reserve(len);
 			for (const KeyValue<Variant, Variant> &kv : d) {
 				DictKey dk;
 				dk.hash = kv.key.hash();
 				dk.key = kv.key;
-				sortk.push_back(dk);
+				sortk.push_back(std::move(dk));
 			}
 
 			sortk.sort();
@@ -324,10 +330,10 @@ Error PackedDataContainer::pack(const Variant &p_data) {
 	Vector<uint8_t> tmpdata;
 	HashMap<String, uint32_t> string_cache;
 	_pack(p_data, tmpdata, string_cache);
-	datalen = tmpdata.size();
-	data.resize(tmpdata.size());
-	uint8_t *w = data.ptrw();
-	memcpy(w, tmpdata.ptr(), tmpdata.size());
+	// Steal the completed COW buffer instead of allocating a second
+	// equally-sized buffer and copying its entire contents.
+	data = std::move(tmpdata);
+	datalen = data.size();
 
 	return OK;
 }
