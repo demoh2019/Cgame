@@ -328,7 +328,29 @@ func _make_soft_body() -> void:
     imported.total_mass = 2.5
     imported.material_override = _material(Color("#f7b476"))
     add_child(imported)
-    _static_box("SoftBodyObstacle", Vector3(14.5, 0.75, -11), Vector3(12.5, 1.5, 6), Color("#b3a9ce"))
+
+    # The FEM simulation has 9 nodes: 8 on the surface + 1 interior.
+    # Build 12 tetrahedra linking the interior node to each cube face.
+    # The center is integrated by FEM and mass-lumping but has no BVH
+    # point collider or rendering vertex.
+    var inner_cube := SoftBody3D.new()
+    inner_cube.name = "FEMInteriorNodeTwelveTets"
+    inner_cube.tetrahedral_interior_positions = PackedVector3Array([Vector3.ZERO])
+    var interior_mesh := _build_fem_convex_cube()
+    var shell_triangles: PackedInt32Array = interior_mesh.surface_get_arrays(0)[Mesh.ARRAY_INDEX]
+    var tetra_indices := PackedInt32Array()
+    for i in range(0, shell_triangles.size(), 3):
+        tetra_indices.append_array(PackedInt32Array([
+            8, shell_triangles[i], shell_triangles[i + 1], shell_triangles[i + 2]
+        ]))
+    inner_cube.tetrahedral_indices = tetra_indices
+    inner_cube.mesh = interior_mesh
+    inner_cube.position = Vector3(22.3, 6, -11)
+    inner_cube.simulation_precision = 12
+    inner_cube.total_mass = 4.0
+    inner_cube.material_override = _material(Color("#92e4ae"))
+    add_child(inner_cube)
+    _static_box("SoftBodyObstacle", Vector3(16.5, 0.75, -11), Vector3(17.5, 1.5, 6), Color("#b3a9ce"))
 
 
 func _make_ccd_station() -> void:

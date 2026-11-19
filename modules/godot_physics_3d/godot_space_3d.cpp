@@ -1283,6 +1283,7 @@ GodotSpace3D::GodotSpace3D() {
 	manifold_spread_reduction = GLOBAL_GET("physics/3d/solver/manifold_spread_reduction");
 	contact_recycle_radius = GLOBAL_GET("physics/3d/solver/contact_recycle_radius");
 	contact_max_separation = GLOBAL_GET("physics/3d/solver/contact_max_separation");
+	air_density = MAX(real_t(GLOBAL_GET("physics/3d/solver/air_density")), real_t(0.0));
 	speculative_sphere_distance = MAX(real_t(0.0), (real_t)GLOBAL_GET("physics/3d/solver/speculative_sphere_distance"));
 	const real_t configured_strain_max_ratio = GLOBAL_GET("physics/3d/solver/soft_body_xpbd_strain_max_stretch_ratio");
 	soft_body_xpbd_strain_max_stretch_ratio = Math::is_finite(configured_strain_max_ratio) && configured_strain_max_ratio > 0.0 ?
@@ -1331,6 +1332,22 @@ GodotSpace3D::GodotSpace3D() {
 	soft_body_plastic_creep_rate = Math::is_finite(configured_plastic_creep_rate) ? MAX(real_t(0.0), configured_plastic_creep_rate) : real_t(0.0);
 	const real_t configured_link_damping = GLOBAL_GET("physics/3d/solver/soft_body_link_damping");
 	soft_body_link_damping = Math::is_finite(configured_link_damping) ? MAX(real_t(0.0), configured_link_damping) : real_t(0.0);
+	const real_t thermal_conduction = GLOBAL_GET("physics/3d/solver/soft_body_thermal_conduction_rate");
+	soft_body_thermal_conduction_rate = Math::is_finite(thermal_conduction) ? CLAMP(thermal_conduction, real_t(0.0), real_t(1000.0)) : real_t(0.0);
+	const real_t thermal_ambient_exchange = GLOBAL_GET("physics/3d/solver/soft_body_thermal_ambient_exchange_rate");
+	soft_body_thermal_ambient_exchange_rate = Math::is_finite(thermal_ambient_exchange) ? CLAMP(thermal_ambient_exchange, real_t(0.0), real_t(1000.0)) : real_t(0.0);
+	const real_t thermal_ambient = GLOBAL_GET("physics/3d/solver/soft_body_thermal_ambient_temperature");
+	soft_body_thermal_ambient_temperature = Math::is_finite(thermal_ambient) ? CLAMP(thermal_ambient, real_t(-273.0), real_t(2000.0)) : real_t(20.0);
+	const real_t thermal_source_rate = GLOBAL_GET("physics/3d/solver/soft_body_thermal_source_rate");
+	soft_body_thermal_source_rate = Math::is_finite(thermal_source_rate) ? CLAMP(thermal_source_rate, real_t(0.0), real_t(1000.0)) : real_t(0.0);
+	const real_t thermal_source_temperature = GLOBAL_GET("physics/3d/solver/soft_body_thermal_source_temperature");
+	soft_body_thermal_source_temperature = Math::is_finite(thermal_source_temperature) ? CLAMP(thermal_source_temperature, real_t(-273.0), real_t(2000.0)) : real_t(100.0);
+	const Vector3 configured_thermal_source_center = GLOBAL_GET("physics/3d/solver/soft_body_thermal_source_center");
+	soft_body_thermal_source_center = configured_thermal_source_center.is_finite() ? configured_thermal_source_center : Vector3();
+	const real_t configured_thermal_source_radius = GLOBAL_GET("physics/3d/solver/soft_body_thermal_source_radius");
+	soft_body_thermal_source_radius = Math::is_finite(configured_thermal_source_radius) ? CLAMP(configured_thermal_source_radius, real_t(0.0), real_t(10000.0)) : real_t(0.0);
+	const real_t configured_thermal_expansion = GLOBAL_GET("physics/3d/solver/soft_body_thermal_expansion_coefficient");
+	soft_body_thermal_expansion_coefficient = Math::is_finite(configured_thermal_expansion) ? CLAMP(configured_thermal_expansion, real_t(-0.01), real_t(0.01)) : real_t(0.0);
 	const real_t configured_strain_rate_damping = GLOBAL_GET("physics/3d/solver/soft_body_strain_rate_damping");
 	soft_body_strain_rate_damping = Math::is_finite(configured_strain_rate_damping) ?
 			MAX(real_t(0.0), configured_strain_rate_damping) : real_t(0.0);
@@ -1361,6 +1378,15 @@ GodotSpace3D::GodotSpace3D() {
 	soft_body_tetra_fem_lumped_mass = bool(GLOBAL_GET("physics/3d/solver/soft_body_tetra_fem_lumped_mass"));
 	const real_t configured_tetra_poisson = GLOBAL_GET("physics/3d/solver/soft_body_tetra_fem_poisson_ratio");
 	soft_body_tetra_fem_poisson_ratio = Math::is_finite(configured_tetra_poisson) ? CLAMP(configured_tetra_poisson, real_t(0.0), real_t(0.49)) : real_t(0.3);
+	const real_t configured_principal_min = GLOBAL_GET("physics/3d/solver/soft_body_tetra_principal_min_stretch");
+	soft_body_tetra_principal_min_stretch = Math::is_finite(configured_principal_min) ?
+			CLAMP(configured_principal_min, real_t(0.0), real_t(1.0)) : real_t(0.0);
+	const real_t configured_principal_max = GLOBAL_GET("physics/3d/solver/soft_body_tetra_principal_max_stretch");
+	soft_body_tetra_principal_max_stretch = Math::is_finite(configured_principal_max) && configured_principal_max > 0.0 ?
+			CLAMP(configured_principal_max, real_t(1.0), real_t(16.0)) : real_t(0.0);
+	const real_t configured_principal_compliance = GLOBAL_GET("physics/3d/solver/soft_body_tetra_principal_limit_compliance");
+	soft_body_tetra_principal_limit_compliance = Math::is_finite(configured_principal_compliance) ?
+			MAX(real_t(0.0), configured_principal_compliance) : real_t(0.0);
 	const int configured_tetra_material_model = GLOBAL_GET("physics/3d/solver/soft_body_tetra_fem_material_model");
 	soft_body_tetra_fem_material_model = CLAMP(configured_tetra_material_model, 0, 2);
 	const real_t configured_tetra_ogden_exponent = GLOBAL_GET("physics/3d/solver/soft_body_tetra_ogden_exponent");
@@ -1372,25 +1398,80 @@ GodotSpace3D::GodotSpace3D() {
 	soft_body_tetra_fiber_compliance = Math::is_finite(configured_fem_fiber_compliance) ? MAX(real_t(0.0), configured_fem_fiber_compliance) : real_t(0.0);
 	const Vector3 configured_fem_fiber_axis = GLOBAL_GET("physics/3d/solver/soft_body_tetra_fiber_axis");
 	soft_body_tetra_fiber_axis = configured_fem_fiber_axis.is_finite() && configured_fem_fiber_axis.length_squared() > real_t(0.0) ? configured_fem_fiber_axis : Vector3(1, 0, 0);
+	const real_t secondary_compliance = GLOBAL_GET("physics/3d/solver/soft_body_tetra_fiber_secondary_compliance");
+	soft_body_tetra_fiber_secondary_compliance = Math::is_finite(secondary_compliance) ? MAX(real_t(0.0), secondary_compliance) : real_t(0.0);
+	const Vector3 secondary_axis = GLOBAL_GET("physics/3d/solver/soft_body_tetra_fiber_secondary_axis");
+	soft_body_tetra_fiber_secondary_axis = secondary_axis.is_finite() && secondary_axis.length_squared() > real_t(0.0) ? secondary_axis : Vector3(0, 1, 0);
 	const real_t fiber_plastic_yield = GLOBAL_GET("physics/3d/solver/soft_body_tetra_fiber_plastic_yield_ratio");
 	soft_body_tetra_fiber_plastic_yield_ratio = Math::is_finite(fiber_plastic_yield) ? CLAMP(fiber_plastic_yield, real_t(0.0), real_t(10.0)) : real_t(0.15);
 	const real_t fiber_plastic_creep = GLOBAL_GET("physics/3d/solver/soft_body_tetra_fiber_plastic_creep_rate");
 	soft_body_tetra_fiber_plastic_creep_rate = Math::is_finite(fiber_plastic_creep) ? MAX(real_t(0.0), fiber_plastic_creep) : real_t(0.0);
 	const real_t fiber_plastic_max_stretch = GLOBAL_GET("physics/3d/solver/soft_body_tetra_fiber_plastic_max_stretch");
 	soft_body_tetra_fiber_plastic_max_stretch = Math::is_finite(fiber_plastic_max_stretch) ? CLAMP(fiber_plastic_max_stretch, real_t(1.0), real_t(16.0)) : real_t(3.0);
+	const real_t secondary_yield = GLOBAL_GET("physics/3d/solver/soft_body_tetra_fiber_secondary_plastic_yield_ratio");
+	soft_body_tetra_fiber_secondary_plastic_yield_ratio = Math::is_finite(secondary_yield) ? CLAMP(secondary_yield, real_t(0.0), real_t(10.0)) : real_t(0.15);
+	const real_t secondary_creep = GLOBAL_GET("physics/3d/solver/soft_body_tetra_fiber_secondary_plastic_creep_rate");
+	soft_body_tetra_fiber_secondary_plastic_creep_rate = Math::is_finite(secondary_creep) ? MAX(real_t(0.0), secondary_creep) : real_t(0.0);
+	const real_t secondary_max_stretch = GLOBAL_GET("physics/3d/solver/soft_body_tetra_fiber_secondary_plastic_max_stretch");
+	soft_body_tetra_fiber_secondary_plastic_max_stretch = Math::is_finite(secondary_max_stretch) ? CLAMP(secondary_max_stretch, real_t(1.0), real_t(16.0)) : real_t(3.0);
 	const real_t configured_tetra_viscosity = GLOBAL_GET("physics/3d/solver/soft_body_tetra_fem_viscosity");
 	soft_body_tetra_fem_viscosity = Math::is_finite(configured_tetra_viscosity) ? MAX(real_t(0.0), configured_tetra_viscosity) : real_t(0.0);
+	const real_t configured_sls_compliance = GLOBAL_GET("physics/3d/solver/soft_body_tetra_sls_compliance");
+	soft_body_tetra_sls_compliance = Math::is_finite(configured_sls_compliance) ?
+			MAX(real_t(0.0), configured_sls_compliance) : real_t(0.0);
+	const real_t configured_sls_tau = GLOBAL_GET("physics/3d/solver/soft_body_tetra_sls_relaxation_time");
+	soft_body_tetra_sls_relaxation_time = Math::is_finite(configured_sls_tau) ?
+			MAX(real_t(0.001), configured_sls_tau) : real_t(0.25);
+	const real_t prony_fast_compliance = GLOBAL_GET("physics/3d/solver/soft_body_tetra_prony_fast_compliance");
+	soft_body_tetra_prony_fast_compliance = Math::is_finite(prony_fast_compliance) ?
+			MAX(real_t(0.0), prony_fast_compliance) : real_t(0.0);
+	const real_t prony_fast_time = GLOBAL_GET("physics/3d/solver/soft_body_tetra_prony_fast_relaxation_time");
+	soft_body_tetra_prony_fast_relaxation_time = Math::is_finite(prony_fast_time) ?
+			MAX(real_t(0.001), prony_fast_time) : real_t(0.04);
+	const real_t prony_slow_compliance = GLOBAL_GET("physics/3d/solver/soft_body_tetra_prony_slow_compliance");
+	soft_body_tetra_prony_slow_compliance = Math::is_finite(prony_slow_compliance) ?
+			MAX(real_t(0.0), prony_slow_compliance) : real_t(0.0);
+	const real_t prony_slow_time = GLOBAL_GET("physics/3d/solver/soft_body_tetra_prony_slow_relaxation_time");
+	soft_body_tetra_prony_slow_relaxation_time = Math::is_finite(prony_slow_time) ?
+			MAX(real_t(0.001), prony_slow_time) : real_t(2.0);
 	const real_t configured_tetra_plastic_rate = GLOBAL_GET("physics/3d/solver/soft_body_tetra_volume_plastic_rate");
 	soft_body_tetra_volume_plastic_rate = Math::is_finite(configured_tetra_plastic_rate) ? MAX(real_t(0.0), configured_tetra_plastic_rate) : real_t(0.0);
 	const real_t configured_tetra_plastic_yield = GLOBAL_GET("physics/3d/solver/soft_body_tetra_volume_plastic_yield");
 	soft_body_tetra_volume_plastic_yield = Math::is_finite(configured_tetra_plastic_yield) ?
 			CLAMP(configured_tetra_plastic_yield, real_t(0.0), real_t(2.0)) : real_t(0.15);
+	const real_t configured_tetra_shear_plastic_rate = GLOBAL_GET("physics/3d/solver/soft_body_tetra_shear_plastic_rate");
+	soft_body_tetra_shear_plastic_rate = Math::is_finite(configured_tetra_shear_plastic_rate) ?
+			MAX(real_t(0.0), configured_tetra_shear_plastic_rate) : real_t(0.0);
+	const real_t configured_tetra_shear_plastic_yield = GLOBAL_GET("physics/3d/solver/soft_body_tetra_shear_plastic_yield");
+	soft_body_tetra_shear_plastic_yield = Math::is_finite(configured_tetra_shear_plastic_yield) ?
+			CLAMP(configured_tetra_shear_plastic_yield, real_t(0.0), real_t(2.0)) : real_t(0.2);
+	const real_t configured_tetra_shear_hardening = GLOBAL_GET("physics/3d/solver/soft_body_tetra_shear_plastic_hardening");
+	soft_body_tetra_shear_plastic_hardening = Math::is_finite(configured_tetra_shear_hardening) ?
+			CLAMP(configured_tetra_shear_hardening, real_t(0.0), real_t(10.0)) : real_t(0.0);
+	const real_t configured_tetra_shear_plastic_max = GLOBAL_GET("physics/3d/solver/soft_body_tetra_shear_plastic_max_strain");
+	soft_body_tetra_shear_plastic_max_strain = Math::is_finite(configured_tetra_shear_plastic_max) ?
+			CLAMP(configured_tetra_shear_plastic_max, real_t(0.01), real_t(4.0)) : real_t(2.0);
 	soft_body_tetra_inversion_recovery = GLOBAL_GET("physics/3d/solver/soft_body_tetra_inversion_recovery");
 	const real_t configured_tetra_min_j = GLOBAL_GET("physics/3d/solver/soft_body_tetra_inversion_min_j");
 	soft_body_tetra_inversion_min_j = Math::is_finite(configured_tetra_min_j) ?
 			CLAMP(configured_tetra_min_j, real_t(0.001), real_t(0.5)) : real_t(0.05);
 	const real_t damage_rate = GLOBAL_GET("physics/3d/solver/soft_body_tetra_damage_rate");
 	soft_body_tetra_damage_rate = Math::is_finite(damage_rate) ? MAX(real_t(0.0), damage_rate) : real_t(0.0);
+	const real_t fatigue_endurance = GLOBAL_GET("physics/3d/solver/soft_body_tetra_fatigue_endurance_amplitude");
+	soft_body_tetra_fatigue_endurance_amplitude = Math::is_finite(fatigue_endurance) ?
+			MAX(real_t(0.0), fatigue_endurance) : real_t(0.05);
+	const real_t fatigue_reference = GLOBAL_GET("physics/3d/solver/soft_body_tetra_fatigue_reference_amplitude");
+	soft_body_tetra_fatigue_reference_amplitude = Math::is_finite(fatigue_reference) ?
+			MAX(real_t(0.0), fatigue_reference) : real_t(0.3);
+	const real_t fatigue_cycles = GLOBAL_GET("physics/3d/solver/soft_body_tetra_fatigue_reference_cycles");
+	soft_body_tetra_fatigue_reference_cycles = Math::is_finite(fatigue_cycles) ?
+			MAX(real_t(0.0), fatigue_cycles) : real_t(0.0);
+	const real_t fatigue_exponent = GLOBAL_GET("physics/3d/solver/soft_body_tetra_fatigue_exponent");
+	soft_body_tetra_fatigue_exponent = Math::is_finite(fatigue_exponent) ?
+			CLAMP(fatigue_exponent, real_t(1.0), real_t(10.0)) : real_t(3.0);
+	const real_t fatigue_deadband = GLOBAL_GET("physics/3d/solver/soft_body_tetra_fatigue_reversal_deadband");
+	soft_body_tetra_fatigue_reversal_deadband = Math::is_finite(fatigue_deadband) ?
+			MAX(real_t(0.0), fatigue_deadband) : real_t(0.002);
 	const real_t damage_yield = GLOBAL_GET("physics/3d/solver/soft_body_tetra_damage_yield_strain");
 	soft_body_tetra_damage_yield_strain = Math::is_finite(damage_yield) ? MAX(real_t(0.0), damage_yield) : real_t(0.25);
 	const real_t configured_membrane_damping = GLOBAL_GET("physics/3d/solver/soft_body_membrane_damping_rate");
@@ -1400,6 +1481,18 @@ GodotSpace3D::GodotSpace3D() {
 	soft_body_xpbd_shear_compliance = Math::is_finite(configured_shear_compliance) ? MAX(real_t(0.0), configured_shear_compliance) : real_t(0.0);
 	const real_t configured_dihedral_compliance = GLOBAL_GET("physics/3d/solver/soft_body_xpbd_dihedral_compliance");
 	soft_body_xpbd_dihedral_compliance = Math::is_finite(configured_dihedral_compliance) ? MAX(real_t(0.0), configured_dihedral_compliance) : real_t(0.0);
+	const real_t configured_rod_bend_compliance = GLOBAL_GET("physics/3d/solver/soft_body_xpbd_rod_bend_compliance");
+	soft_body_xpbd_rod_bend_compliance = Math::is_finite(configured_rod_bend_compliance) ?
+			MAX(real_t(0.0), configured_rod_bend_compliance) : real_t(0.0);
+	const real_t configured_rod_torsion = GLOBAL_GET("physics/3d/solver/soft_body_xpbd_rod_torsion_compliance");
+	soft_body_xpbd_rod_torsion_compliance = Math::is_finite(configured_rod_torsion) ?
+			MAX(real_t(0.0), configured_rod_torsion) : real_t(0.0);
+	const real_t configured_rod_straightness = GLOBAL_GET("physics/3d/solver/soft_body_xpbd_rod_straightness");
+	soft_body_xpbd_rod_straightness = Math::is_finite(configured_rod_straightness) ?
+			CLAMP(configured_rod_straightness, real_t(0.0), real_t(0.9999)) : real_t(0.9);
+	const real_t configured_bend_parallel_ratio = GLOBAL_GET("physics/3d/solver/soft_body_xpbd_bend_parallel_compliance_ratio");
+	soft_body_xpbd_bend_parallel_compliance_ratio = Math::is_finite(configured_bend_parallel_ratio) ?
+			CLAMP(configured_bend_parallel_ratio, real_t(0.01), real_t(100.0)) : real_t(1.0);
 	const real_t configured_shape_stiffness = GLOBAL_GET("physics/3d/solver/soft_body_shape_matching_stiffness");
 	soft_body_shape_matching_stiffness = Math::is_finite(configured_shape_stiffness) ? CLAMP(configured_shape_stiffness, real_t(0.0), real_t(1.0)) : real_t(0.0);
 	const int configured_shape_cluster_size = GLOBAL_GET("physics/3d/solver/soft_body_shape_matching_cluster_size");
@@ -1465,6 +1558,22 @@ GodotSpace3D::GodotSpace3D() {
 	sphere_magnus_max_lift_coefficient = Math::is_finite(configured_magnus_max_lift) ? CLAMP(configured_magnus_max_lift, real_t(0.0), real_t(5.0)) : real_t(1.5);
 	const Vector3 configured_magnus_flow = GLOBAL_GET("physics/3d/solver/sphere_magnus_flow_velocity");
 	sphere_magnus_flow_velocity = configured_magnus_flow.is_finite() ? configured_magnus_flow : Vector3();
+	const real_t configured_box_pressure = GLOBAL_GET("physics/3d/solver/rigid_box_aero_pressure_coefficient");
+	rigid_box_aero_pressure_coefficient = Math::is_finite(configured_box_pressure) ? CLAMP(configured_box_pressure, real_t(0.0), real_t(10.0)) : real_t(0.0);
+	const real_t configured_box_skin = GLOBAL_GET("physics/3d/solver/rigid_box_aero_skin_coefficient");
+	rigid_box_aero_skin_coefficient = Math::is_finite(configured_box_skin) ? CLAMP(configured_box_skin, real_t(0.0), real_t(10.0)) : real_t(0.0);
+	const real_t configured_box_density = GLOBAL_GET("physics/3d/solver/rigid_box_aero_density");
+	rigid_box_aero_density = Math::is_finite(configured_box_density) ? CLAMP(configured_box_density, real_t(0.0), real_t(2000.0)) : real_t(1.225);
+	const Vector3 configured_box_wind = GLOBAL_GET("physics/3d/solver/rigid_box_aero_wind_velocity");
+	rigid_box_aero_wind_velocity = configured_box_wind.is_finite() ? configured_box_wind : Vector3();
+	const real_t configured_convex_pressure = GLOBAL_GET("physics/3d/solver/rigid_convex_aero_pressure_coefficient");
+	rigid_convex_aero_pressure_coefficient = Math::is_finite(configured_convex_pressure) ? CLAMP(configured_convex_pressure, real_t(0.0), real_t(10.0)) : real_t(0.0);
+	const real_t configured_convex_skin = GLOBAL_GET("physics/3d/solver/rigid_convex_aero_skin_coefficient");
+	rigid_convex_aero_skin_coefficient = Math::is_finite(configured_convex_skin) ? CLAMP(configured_convex_skin, real_t(0.0), real_t(10.0)) : real_t(0.0);
+	const real_t configured_convex_density = GLOBAL_GET("physics/3d/solver/rigid_convex_aero_density");
+	rigid_convex_aero_density = Math::is_finite(configured_convex_density) ? CLAMP(configured_convex_density, real_t(0.0), real_t(2000.0)) : real_t(1.225);
+	const Vector3 configured_convex_wind = GLOBAL_GET("physics/3d/solver/rigid_convex_aero_wind_velocity");
+	rigid_convex_aero_wind_velocity = configured_convex_wind.is_finite() ? configured_convex_wind : Vector3();
 	fluid_plane_enabled = GLOBAL_GET("physics/3d/fluid_plane/enabled");
 	fluid_plane_surface_height = GLOBAL_GET("physics/3d/fluid_plane/surface_height");
 	fluid_plane_density = MAX(real_t(0.0), (real_t)GLOBAL_GET("physics/3d/fluid_plane/density"));
@@ -1472,6 +1581,19 @@ GodotSpace3D::GodotSpace3D() {
 	fluid_plane_angular_drag = MAX(real_t(0.0), (real_t)GLOBAL_GET("physics/3d/fluid_plane/angular_drag"));
 	fluid_plane_flow_velocity = GLOBAL_GET("physics/3d/fluid_plane/flow_velocity");
 	gyroscopic_forces = GLOBAL_GET("physics/3d/solver/gyroscopic_forces");
+	rotating_frame_enabled = GLOBAL_GET("physics/3d/solver/rotating_frame_enabled");
+	const Vector3 configured_frame_origin = GLOBAL_GET("physics/3d/solver/rotating_frame_origin");
+	rotating_frame_origin = configured_frame_origin.is_finite() ? configured_frame_origin : Vector3();
+	const Vector3 configured_frame_omega = GLOBAL_GET("physics/3d/solver/rotating_frame_angular_velocity");
+	rotating_frame_angular_velocity = configured_frame_omega.is_finite() ?
+			Vector3(CLAMP(configured_frame_omega.x, real_t(-100.0), real_t(100.0)),
+					CLAMP(configured_frame_omega.y, real_t(-100.0), real_t(100.0)),
+					CLAMP(configured_frame_omega.z, real_t(-100.0), real_t(100.0))) : Vector3();
+	const Vector3 configured_frame_alpha = GLOBAL_GET("physics/3d/solver/rotating_frame_angular_acceleration");
+	rotating_frame_angular_acceleration = configured_frame_alpha.is_finite() ?
+			Vector3(CLAMP(configured_frame_alpha.x, real_t(-100.0), real_t(100.0)),
+					CLAMP(configured_frame_alpha.y, real_t(-100.0), real_t(100.0)),
+					CLAMP(configured_frame_alpha.z, real_t(-100.0), real_t(100.0))) : Vector3();
 	gyroscopic_integration_mode = CLAMP((int)GLOBAL_GET("physics/3d/solver/gyroscopic_integration_mode"), 0, 1);
 	rolling_friction = MAX(real_t(0.0), (real_t)GLOBAL_GET("physics/3d/solver/rolling_friction"));
 	spinning_friction = MAX(real_t(0.0), (real_t)GLOBAL_GET("physics/3d/solver/spinning_friction"));

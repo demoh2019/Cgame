@@ -39,6 +39,11 @@ textures/default_filters/use_nearest_mipmap_filter=false
 3d/solver/soft_body_fatigue_max_damage=0.85
 3d/solver/soft_body_xpbd_parallel_compliance_ratio=0.2
 3d/solver/soft_body_xpbd_material_axis=Vector3(1, 0, 0)
+# NEW: directional hinge bending. Independently adjust fold stiffness
+# around fabric fibers in rest mesh space, using the same local X axis.
+# Compare bend ratio=0.2 with 1.0 for isotropic cloth bending.
+3d/solver/soft_body_xpbd_dihedral_compliance=0.00001
+3d/solver/soft_body_xpbd_bend_parallel_compliance_ratio=0.2
 # Coupled StVK membrane deformation (GodotPhysics3D backend only).
 3d/solver/soft_body_xpbd_membrane_compliance=0.00001
 3d/solver/soft_body_membrane_poisson_ratio=0.3

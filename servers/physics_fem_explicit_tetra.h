@@ -32,9 +32,11 @@
 #include <utility>
 
 // Explicit tetrahedral connectivity for concave/heterogeneous closed shells.
-// These vertices belong to the SAME welded surface-particle array as the
-// surrounding SoftBody3D faces. This is NOT yet a separate simulation mesh,
-// and unused/interior-only vertices are intentionally rejected.
+// All vertices belong to the same physics-particle array. The caller can
+// append separately authored FEM-only interior particles AFTER its welded
+// surface vertices; they are not required to appear in any boundary face.
+// This is not yet an independent render/collision embedding mesh. Unused
+// vertices (including unused interior particles) are rejected.
 //
 // Validation:
 //  * each element has 4 distinct in-range nodes and positive rest volume;

@@ -126,6 +126,7 @@ private:
 
 	real_t contact_recycle_radius = 0.0;
 	real_t contact_max_separation = 0.0;
+	real_t air_density = 1.225;
 	real_t speculative_sphere_distance = 0.0; // Off unless explicitly enabled.
 	real_t soft_body_xpbd_strain_max_stretch_ratio = 0.0; // 0 disables upper limit; >=1 clamps stretch.
 	real_t soft_body_xpbd_strain_min_compression_ratio = 0.0; // 0 disables lower limit; 0..1.
@@ -143,6 +144,14 @@ private:
 	real_t soft_body_plastic_yield_strain = 0.1; // Relative elastic yield limit.
 	real_t soft_body_plastic_creep_rate = 0.0; // 1/second; 0 keeps elastic behavior.
 	real_t soft_body_link_damping = 0.0; // Optional longitudinal dashpot rate, 1/s.
+	real_t soft_body_thermal_conduction_rate = 0.0;
+	real_t soft_body_thermal_ambient_exchange_rate = 0.0;
+	real_t soft_body_thermal_ambient_temperature = 20.0;
+	real_t soft_body_thermal_source_rate = 0.0;
+	real_t soft_body_thermal_source_temperature = 100.0;
+	Vector3 soft_body_thermal_source_center;
+	real_t soft_body_thermal_source_radius = 0.0;
+	real_t soft_body_thermal_expansion_coefficient = 0.0;
 	real_t soft_body_strain_rate_damping = 0.0; // Optional rate-sensitive longitudinal damping.
 	real_t soft_body_strain_rate_yield = 0.0; // Minimum relative link strain rate [1/s].
 	real_t soft_body_lift_coefficient = 0.0; // Two-sided aerodynamic cloth lift, opt-in.
@@ -158,24 +167,59 @@ private:
 	real_t soft_body_tetra_fem_compliance = 0.0; // Disabled by default.
 	bool soft_body_tetra_fem_lumped_mass = false; // Opt-in volume-weighted vertex masses.
 	real_t soft_body_tetra_fem_poisson_ratio = 0.3;
+	real_t soft_body_tetra_principal_min_stretch = 0.0; // 0: no min singular cap.
+	real_t soft_body_tetra_principal_max_stretch = 0.0; // 0: no max singular cap.
+	real_t soft_body_tetra_principal_limit_compliance = 0.0; // 0: hard cap.
 	int soft_body_tetra_fem_material_model = 0; // 0 Neo-Hookean, 1 Mooney-Rivlin, 2 Ogden.
 	real_t soft_body_tetra_ogden_exponent = 3.0; // 1..8, nonlinear principal stretch power.
 	real_t soft_body_tetra_mooney_rivlin_fraction = 0.5;
 	real_t soft_body_tetra_fiber_compliance = 0.0; // 0: no FEM directional reinforcement.
 	Vector3 soft_body_tetra_fiber_axis = Vector3(1, 0, 0); // Undeformed material direction.
+	// A second, independent tension-only material fiber family. Its zero
+	// compliance disables all extra FEM constraints and persistent memory.
+	real_t soft_body_tetra_fiber_secondary_compliance = 0.0;
+	Vector3 soft_body_tetra_fiber_secondary_axis = Vector3(0, 1, 0);
 	// One-sided plastic rest stretch, off unless creep rate >0.
 	real_t soft_body_tetra_fiber_plastic_yield_ratio = 0.15;
 	real_t soft_body_tetra_fiber_plastic_creep_rate = 0.0;
 	real_t soft_body_tetra_fiber_plastic_max_stretch = 3.0;
+	// Secondary family can yield/plastically extend independently of primary.
+	real_t soft_body_tetra_fiber_secondary_plastic_yield_ratio = 0.15;
+	real_t soft_body_tetra_fiber_secondary_plastic_creep_rate = 0.0;
+	real_t soft_body_tetra_fiber_secondary_plastic_max_stretch = 3.0;
 	real_t soft_body_tetra_fem_viscosity = 0.0; // Objective Kelvin-Voigt material damping.
+	real_t soft_body_tetra_sls_compliance = 0.0; // Zener/Maxwell branch is disabled by default.
+	real_t soft_body_tetra_sls_relaxation_time = 0.25; // SLS material memory timescale, seconds.
+	real_t soft_body_tetra_prony_fast_compliance = 0.0; // Disable fast arm by default.
+	real_t soft_body_tetra_prony_fast_relaxation_time = 0.04;
+	real_t soft_body_tetra_prony_slow_compliance = 0.0; // Disable slow arm by default.
+	real_t soft_body_tetra_prony_slow_relaxation_time = 2.0;
 	real_t soft_body_tetra_volume_plastic_rate = 0.0; // 1/s, opt-in per-tet isotropic plastic rest deformation.
 	real_t soft_body_tetra_volume_plastic_yield = 0.15; // Elastic volume strain window in |ln(J)|.
+	real_t soft_body_tetra_shear_plastic_rate = 0.0; // 1/s, opt-in J2-like deviatoric rest creep.
+	real_t soft_body_tetra_shear_plastic_yield = 0.2; // Equivalent deviatoric Hencky strain threshold.
+	real_t soft_body_tetra_shear_plastic_hardening = 0.0; // H=0 preserves old plasticity.
+	real_t soft_body_tetra_shear_plastic_max_strain = 2.0; // Cumulative per-tetra plastic strain budget.
 	bool soft_body_tetra_inversion_recovery = false; // Recover inverted/collapsed FEM tetrahedra, opt-in.
 	real_t soft_body_tetra_inversion_min_j = 0.05; // Minimum positive det(F) after recovery.
 	real_t soft_body_tetra_damage_yield_strain = 0.25;
 	real_t soft_body_tetra_damage_rate = 0.0;
+	// Signed principal-log-strain cycle fatigue (Miner-like), disabled unless
+	// fatigue_reference_cycles > 0.0. Uses the shared FEM scalar damage D.
+	real_t soft_body_tetra_fatigue_endurance_amplitude = 0.05;
+	real_t soft_body_tetra_fatigue_reference_amplitude = 0.3;
+	real_t soft_body_tetra_fatigue_reference_cycles = 0.0;
+	real_t soft_body_tetra_fatigue_exponent = 3.0;
+	real_t soft_body_tetra_fatigue_reversal_deadband = 0.002;
 	real_t soft_body_xpbd_shear_compliance = 0.0; // Opt-in angular shear preservation.
 	real_t soft_body_xpbd_dihedral_compliance = 0.0; // Opt-in angle-based cloth bending.
+	// Optional 3-particle discrete rod centerline curvature on nearly aligned
+	// structural mesh-edge chains. Not a Cosserat rod twist/director solver.
+	real_t soft_body_xpbd_rod_bend_compliance = 0.0;
+	// Geometric torsion between adjacent curved centerline segments (not material twist).
+	real_t soft_body_xpbd_rod_torsion_compliance = 0.0;
+	real_t soft_body_xpbd_rod_straightness = 0.9;
+	real_t soft_body_xpbd_bend_parallel_compliance_ratio = 1.0; // Directional bend about a rest-mesh fiber axis.
 	real_t soft_body_shape_matching_stiffness = 0.0; // Optional global shape recovery.
 	int soft_body_shape_matching_cluster_size = 0; // 0 global; 3..64 local BFS cores.
 	real_t soft_body_dihedral_damping = 0.0; // Opt-in angular dashpot rate, 1/s.
@@ -220,6 +264,14 @@ private:
 	real_t sphere_magnus_medium_density = 1.225; // Air density kg/m^3.
 	real_t sphere_magnus_max_lift_coefficient = 1.5;
 	Vector3 sphere_magnus_flow_velocity; // Magnus medium velocity, world space.
+	real_t rigid_box_aero_pressure_coefficient = 0.0; // 0: off, pressure on windward faces.
+	real_t rigid_box_aero_skin_coefficient = 0.0; // 0: off, tangential quadratic drag.
+	real_t rigid_box_aero_density = 1.225; // Air density, kg/m^3.
+	Vector3 rigid_box_aero_wind_velocity; // Wind in world-space m/s.
+	real_t rigid_convex_aero_pressure_coefficient = 0.0; // Windward polygon pressure.
+	real_t rigid_convex_aero_skin_coefficient = 0.0; // Tangential polygon drag.
+	real_t rigid_convex_aero_density = 1.225; // Approximate air density, kg/m^3.
+	Vector3 rigid_convex_aero_wind_velocity; // World-space airflow, m/s.
 	// Advanced, opt-in flat water plane: displacement per partly submerged shape.
 	bool fluid_plane_enabled = false;
 	real_t fluid_plane_surface_height = 0.0;
@@ -228,6 +280,10 @@ private:
 	real_t fluid_plane_angular_drag = 0.1;
 	Vector3 fluid_plane_flow_velocity;
 	bool gyroscopic_forces = false; // Jolt-style asymmetric rigid-body rotation; opt-in.
+	bool rotating_frame_enabled = false; // Translational rotating reference frame, opt-in.
+	Vector3 rotating_frame_origin; // Frame rotation center in simulation/world coordinates.
+	Vector3 rotating_frame_angular_velocity; // Frame omega, rad/s.
+	Vector3 rotating_frame_angular_acceleration; // Instantaneous omega derivative, rad/s^2.
 	int gyroscopic_integration_mode = 0; // 0: normalized Euler, 1: implicit midpoint.
 	// Bullet-style resistance about and perpendicular to the contact normal.
 	real_t rolling_friction = 0.0;
@@ -316,6 +372,7 @@ public:
 	_FORCE_INLINE_ bool is_manifold_spread_reduction_enabled() const { return manifold_spread_reduction; }
 	_FORCE_INLINE_ real_t get_contact_recycle_radius() const { return contact_recycle_radius; }
 	_FORCE_INLINE_ real_t get_contact_max_separation() const { return contact_max_separation; }
+	_FORCE_INLINE_ real_t get_air_density() const { return air_density; }
 	_FORCE_INLINE_ real_t get_speculative_sphere_distance() const { return speculative_sphere_distance; }
 	_FORCE_INLINE_ real_t get_soft_body_xpbd_strain_max_stretch_ratio() const { return soft_body_xpbd_strain_max_stretch_ratio; }
 	_FORCE_INLINE_ real_t get_soft_body_xpbd_strain_min_compression_ratio() const { return soft_body_xpbd_strain_min_compression_ratio; }
@@ -333,6 +390,14 @@ public:
 	_FORCE_INLINE_ real_t get_soft_body_plastic_yield_strain() const { return soft_body_plastic_yield_strain; }
 	_FORCE_INLINE_ real_t get_soft_body_plastic_creep_rate() const { return soft_body_plastic_creep_rate; }
 	_FORCE_INLINE_ real_t get_soft_body_link_damping() const { return soft_body_link_damping; }
+	_FORCE_INLINE_ real_t get_soft_body_thermal_conduction_rate() const { return soft_body_thermal_conduction_rate; }
+	_FORCE_INLINE_ real_t get_soft_body_thermal_ambient_exchange_rate() const { return soft_body_thermal_ambient_exchange_rate; }
+	_FORCE_INLINE_ real_t get_soft_body_thermal_ambient_temperature() const { return soft_body_thermal_ambient_temperature; }
+	_FORCE_INLINE_ real_t get_soft_body_thermal_source_rate() const { return soft_body_thermal_source_rate; }
+	_FORCE_INLINE_ real_t get_soft_body_thermal_source_temperature() const { return soft_body_thermal_source_temperature; }
+	_FORCE_INLINE_ const Vector3 &get_soft_body_thermal_source_center() const { return soft_body_thermal_source_center; }
+	_FORCE_INLINE_ real_t get_soft_body_thermal_source_radius() const { return soft_body_thermal_source_radius; }
+	_FORCE_INLINE_ real_t get_soft_body_thermal_expansion_coefficient() const { return soft_body_thermal_expansion_coefficient; }
 	_FORCE_INLINE_ real_t get_soft_body_strain_rate_damping() const { return soft_body_strain_rate_damping; }
 	_FORCE_INLINE_ real_t get_soft_body_strain_rate_yield() const { return soft_body_strain_rate_yield; }
 	_FORCE_INLINE_ real_t get_soft_body_lift_coefficient() const { return soft_body_lift_coefficient; }
@@ -347,24 +412,51 @@ public:
 	_FORCE_INLINE_ real_t get_soft_body_tetra_fem_compliance() const { return soft_body_tetra_fem_compliance; }
 	_FORCE_INLINE_ bool get_soft_body_tetra_fem_lumped_mass() const { return soft_body_tetra_fem_lumped_mass; }
 	_FORCE_INLINE_ real_t get_soft_body_tetra_fem_poisson_ratio() const { return soft_body_tetra_fem_poisson_ratio; }
+	_FORCE_INLINE_ real_t get_soft_body_tetra_principal_min_stretch() const { return soft_body_tetra_principal_min_stretch; }
+	_FORCE_INLINE_ real_t get_soft_body_tetra_principal_max_stretch() const { return soft_body_tetra_principal_max_stretch; }
+	_FORCE_INLINE_ real_t get_soft_body_tetra_principal_limit_compliance() const { return soft_body_tetra_principal_limit_compliance; }
 	_FORCE_INLINE_ int get_soft_body_tetra_fem_material_model() const { return soft_body_tetra_fem_material_model; }
 	_FORCE_INLINE_ real_t get_soft_body_tetra_ogden_exponent() const { return soft_body_tetra_ogden_exponent; }
 	_FORCE_INLINE_ real_t get_soft_body_tetra_mooney_rivlin_fraction() const { return soft_body_tetra_mooney_rivlin_fraction; }
 	_FORCE_INLINE_ real_t get_soft_body_tetra_fiber_compliance() const { return soft_body_tetra_fiber_compliance; }
 	_FORCE_INLINE_ const Vector3 &get_soft_body_tetra_fiber_axis() const { return soft_body_tetra_fiber_axis; }
+	_FORCE_INLINE_ real_t get_soft_body_tetra_fiber_secondary_compliance() const { return soft_body_tetra_fiber_secondary_compliance; }
+	_FORCE_INLINE_ const Vector3 &get_soft_body_tetra_fiber_secondary_axis() const { return soft_body_tetra_fiber_secondary_axis; }
 	_FORCE_INLINE_ real_t get_soft_body_tetra_fiber_plastic_yield_ratio() const { return soft_body_tetra_fiber_plastic_yield_ratio; }
 	_FORCE_INLINE_ real_t get_soft_body_tetra_fiber_plastic_creep_rate() const { return soft_body_tetra_fiber_plastic_creep_rate; }
 	_FORCE_INLINE_ real_t get_soft_body_tetra_fiber_plastic_max_stretch() const { return soft_body_tetra_fiber_plastic_max_stretch; }
+	_FORCE_INLINE_ real_t get_soft_body_tetra_fiber_secondary_plastic_yield_ratio() const { return soft_body_tetra_fiber_secondary_plastic_yield_ratio; }
+	_FORCE_INLINE_ real_t get_soft_body_tetra_fiber_secondary_plastic_creep_rate() const { return soft_body_tetra_fiber_secondary_plastic_creep_rate; }
+	_FORCE_INLINE_ real_t get_soft_body_tetra_fiber_secondary_plastic_max_stretch() const { return soft_body_tetra_fiber_secondary_plastic_max_stretch; }
 	_FORCE_INLINE_ real_t get_soft_body_tetra_fem_viscosity() const { return soft_body_tetra_fem_viscosity; }
+	_FORCE_INLINE_ real_t get_soft_body_tetra_sls_compliance() const { return soft_body_tetra_sls_compliance; }
+	_FORCE_INLINE_ real_t get_soft_body_tetra_sls_relaxation_time() const { return soft_body_tetra_sls_relaxation_time; }
+	_FORCE_INLINE_ real_t get_soft_body_tetra_prony_fast_compliance() const { return soft_body_tetra_prony_fast_compliance; }
+	_FORCE_INLINE_ real_t get_soft_body_tetra_prony_fast_relaxation_time() const { return soft_body_tetra_prony_fast_relaxation_time; }
+	_FORCE_INLINE_ real_t get_soft_body_tetra_prony_slow_compliance() const { return soft_body_tetra_prony_slow_compliance; }
+	_FORCE_INLINE_ real_t get_soft_body_tetra_prony_slow_relaxation_time() const { return soft_body_tetra_prony_slow_relaxation_time; }
 	_FORCE_INLINE_ real_t get_soft_body_tetra_volume_plastic_rate() const { return soft_body_tetra_volume_plastic_rate; }
 	_FORCE_INLINE_ real_t get_soft_body_tetra_volume_plastic_yield() const { return soft_body_tetra_volume_plastic_yield; }
+	_FORCE_INLINE_ real_t get_soft_body_tetra_shear_plastic_rate() const { return soft_body_tetra_shear_plastic_rate; }
+	_FORCE_INLINE_ real_t get_soft_body_tetra_shear_plastic_yield() const { return soft_body_tetra_shear_plastic_yield; }
+	_FORCE_INLINE_ real_t get_soft_body_tetra_shear_plastic_hardening() const { return soft_body_tetra_shear_plastic_hardening; }
+	_FORCE_INLINE_ real_t get_soft_body_tetra_shear_plastic_max_strain() const { return soft_body_tetra_shear_plastic_max_strain; }
 	_FORCE_INLINE_ bool is_soft_body_tetra_inversion_recovery_enabled() const { return soft_body_tetra_inversion_recovery; }
 	_FORCE_INLINE_ real_t get_soft_body_tetra_inversion_min_j() const { return soft_body_tetra_inversion_min_j; }
 	_FORCE_INLINE_ real_t get_soft_body_tetra_damage_rate() const { return soft_body_tetra_damage_rate; }
+	_FORCE_INLINE_ real_t get_soft_body_tetra_fatigue_endurance_amplitude() const { return soft_body_tetra_fatigue_endurance_amplitude; }
+	_FORCE_INLINE_ real_t get_soft_body_tetra_fatigue_reference_amplitude() const { return soft_body_tetra_fatigue_reference_amplitude; }
+	_FORCE_INLINE_ real_t get_soft_body_tetra_fatigue_reference_cycles() const { return soft_body_tetra_fatigue_reference_cycles; }
+	_FORCE_INLINE_ real_t get_soft_body_tetra_fatigue_exponent() const { return soft_body_tetra_fatigue_exponent; }
+	_FORCE_INLINE_ real_t get_soft_body_tetra_fatigue_reversal_deadband() const { return soft_body_tetra_fatigue_reversal_deadband; }
 	_FORCE_INLINE_ real_t get_soft_body_tetra_damage_yield_strain() const { return soft_body_tetra_damage_yield_strain; }
 	_FORCE_INLINE_ real_t get_soft_body_membrane_damping_rate() const { return soft_body_membrane_damping_rate; }
 	_FORCE_INLINE_ real_t get_soft_body_xpbd_shear_compliance() const { return soft_body_xpbd_shear_compliance; }
 	_FORCE_INLINE_ real_t get_soft_body_xpbd_dihedral_compliance() const { return soft_body_xpbd_dihedral_compliance; }
+	_FORCE_INLINE_ real_t get_soft_body_xpbd_rod_bend_compliance() const { return soft_body_xpbd_rod_bend_compliance; }
+	_FORCE_INLINE_ real_t get_soft_body_xpbd_rod_torsion_compliance() const { return soft_body_xpbd_rod_torsion_compliance; }
+	_FORCE_INLINE_ real_t get_soft_body_xpbd_rod_straightness() const { return soft_body_xpbd_rod_straightness; }
+	_FORCE_INLINE_ real_t get_soft_body_xpbd_bend_parallel_compliance_ratio() const { return soft_body_xpbd_bend_parallel_compliance_ratio; }
 	_FORCE_INLINE_ real_t get_soft_body_shape_matching_stiffness() const { return soft_body_shape_matching_stiffness; }
 	_FORCE_INLINE_ int get_soft_body_shape_matching_cluster_size() const { return soft_body_shape_matching_cluster_size; }
 	_FORCE_INLINE_ real_t get_soft_body_dihedral_damping() const { return soft_body_dihedral_damping; }
@@ -418,6 +510,14 @@ public:
 	_FORCE_INLINE_ real_t get_sphere_magnus_medium_density() const { return sphere_magnus_medium_density; }
 	_FORCE_INLINE_ real_t get_sphere_magnus_max_lift_coefficient() const { return sphere_magnus_max_lift_coefficient; }
 	_FORCE_INLINE_ const Vector3 &get_sphere_magnus_flow_velocity() const { return sphere_magnus_flow_velocity; }
+	_FORCE_INLINE_ real_t get_rigid_box_aero_pressure_coefficient() const { return rigid_box_aero_pressure_coefficient; }
+	_FORCE_INLINE_ real_t get_rigid_box_aero_skin_coefficient() const { return rigid_box_aero_skin_coefficient; }
+	_FORCE_INLINE_ real_t get_rigid_box_aero_density() const { return rigid_box_aero_density; }
+	_FORCE_INLINE_ const Vector3 &get_rigid_box_aero_wind_velocity() const { return rigid_box_aero_wind_velocity; }
+	_FORCE_INLINE_ real_t get_rigid_convex_aero_pressure_coefficient() const { return rigid_convex_aero_pressure_coefficient; }
+	_FORCE_INLINE_ real_t get_rigid_convex_aero_skin_coefficient() const { return rigid_convex_aero_skin_coefficient; }
+	_FORCE_INLINE_ real_t get_rigid_convex_aero_density() const { return rigid_convex_aero_density; }
+	_FORCE_INLINE_ const Vector3 &get_rigid_convex_aero_wind_velocity() const { return rigid_convex_aero_wind_velocity; }
 	_FORCE_INLINE_ bool is_fluid_plane_enabled() const { return fluid_plane_enabled; }
 	_FORCE_INLINE_ real_t get_fluid_plane_surface_height() const { return fluid_plane_surface_height; }
 	_FORCE_INLINE_ real_t get_fluid_plane_density() const { return fluid_plane_density; }
@@ -425,6 +525,10 @@ public:
 	_FORCE_INLINE_ real_t get_fluid_plane_angular_drag() const { return fluid_plane_angular_drag; }
 	_FORCE_INLINE_ const Vector3 &get_fluid_plane_flow_velocity() const { return fluid_plane_flow_velocity; }
 	_FORCE_INLINE_ bool are_gyroscopic_forces_enabled() const { return gyroscopic_forces; }
+	_FORCE_INLINE_ bool is_rotating_frame_enabled() const { return rotating_frame_enabled; }
+	_FORCE_INLINE_ const Vector3 &get_rotating_frame_origin() const { return rotating_frame_origin; }
+	_FORCE_INLINE_ const Vector3 &get_rotating_frame_angular_velocity() const { return rotating_frame_angular_velocity; }
+	_FORCE_INLINE_ const Vector3 &get_rotating_frame_angular_acceleration() const { return rotating_frame_angular_acceleration; }
 	_FORCE_INLINE_ int get_gyroscopic_integration_mode() const { return gyroscopic_integration_mode; }
 	_FORCE_INLINE_ real_t get_rolling_friction() const { return rolling_friction; }
 	_FORCE_INLINE_ real_t get_static_friction_multiplier() const { return static_friction_multiplier; }

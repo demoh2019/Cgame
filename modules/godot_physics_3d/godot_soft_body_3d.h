@@ -35,7 +35,10 @@
 #include "servers/physics_softbody_shape_clusters.h"
 #include "servers/physics_xpbd_membrane.h"
 #include "servers/physics_fem_convex_star.h"
+#include "servers/physics_fem_tetra_standard_linear_solid.h"
+#include "servers/physics_fem_tetra_prony.h"
 #include "servers/physics_fem_explicit_tetra.h"
+#include "servers/physics_fem_tetra_principal_limits.h"
 #include "servers/physics_xpbd_strain_limit.h"
 #include "godot_collision_object_3d.h"
 
@@ -88,6 +91,11 @@ class GodotSoftBody3D : public GodotCollisionObject3D {
 	LocalVector<Vector3> pair_ccd_previous;
 	AABB pair_ccd_swept_bounds;
 	LocalVector<Link> links;
+	// Thermal material histories are separate from viscoplastic rest length.
+	// Allocate only if heat transport, source, or expansion is enabled.
+	LocalVector<real_t> thermal_node_temperatures;
+	// One frozen XPBD rest length per link, only with nonzero expansion.
+	LocalVector<real_t> thermal_link_rest_lengths;
 	// Only allocated if tethers are enabled and at least one vertex is pinned.
 	LocalVector<PhysicsXPBDTether> xpbd_tethers;
 	bool xpbd_tethers_dirty = true;
@@ -119,8 +127,33 @@ class GodotSoftBody3D : public GodotCollisionObject3D {
 		uint32_t c = 0;
 		uint32_t d = 0;
 		real_t rest_angle = 0.0;
+		// Precomputed at mesh construction from the undeformed edge and fiber.
+		// Used only by optional orthotropic XPBD hinge compliance.
+		real_t bend_compliance_ratio = 1.0;
 	};
 	LocalVector<DihedralHinge> xpbd_dihedral_hinges;
+	// XPBD centerline bend triplets selected from original triangle edges.
+	// Unlike a two-hop spring, this constrains the local bend angle.
+	// Zero rod compliance allocates no rod constraints.
+	struct RodBendConstraint {
+		uint32_t a = 0;
+		uint32_t middle = 0;
+		uint32_t c = 0;
+		real_t rest_angle = 0.0;
+		real_t lambda = 0.0;
+	};
+	LocalVector<RodBendConstraint> xpbd_rod_bends;
+	// Geometric torsion between adjacent rod-centerline bend planes.
+	// It is a position-only, four-node constraint, not Cosserat material twist.
+	struct RodTorsionConstraint {
+		uint32_t a = 0;
+		uint32_t b = 0;
+		uint32_t c = 0;
+		uint32_t d = 0;
+		real_t rest_angle = 0.0;
+		real_t lambda = 0.0;
+	};
+	LocalVector<RodTorsionConstraint> xpbd_rod_torsions;
 	LocalVector<real_t> xpbd_dihedral_lambdas;
 	// Optional per-particle reference offsets for meshless rigid shape fitting.
 	// Zero stiffness allocates no additional per-node data.
@@ -182,18 +215,29 @@ class GodotSoftBody3D : public GodotCollisionObject3D {
 	// Tetra rest matrices and XPBD multipliers are retained across iterations.
 	// Empty unless tetra FEM compliance is explicitly enabled.
 	LocalVector<PhysicsFEMConvexTetra> xpbd_fem_tetrahedra;
+	LocalVector<PhysicsFEMTetraSLSState> xpbd_fem_sls_states;
+	LocalVector<PhysicsFEMTetraPronyState> xpbd_fem_prony_states; // Lazy fast/slow Maxwell memories. // Optional persistent transient material strain.
 	// Optional imported tet indices referencing original visual mesh vertices.
 	// Preserved across mesh rebuilds, recooked into welded particle indices.
 	PackedInt32Array xpbd_explicit_tetra_visual_indices;
+	// Optional FEM simulation nodes that do not belong to the rendered/collision
+	// surface. Rest positions are given in the mesh's local coordinates.
+	PackedVector3Array xpbd_explicit_tetra_interior_positions;
+	uint32_t xpbd_surface_node_count = 0;
 	// Normalized FEM rest-volume fractions; only populated with opt-in lumped mass.
 	// Includes pinned nodes so unpin and mass changes restore their physical mass.
 	LocalVector<double> xpbd_fem_mass_fractions;
 	// Allocated only when tension-only tetra material fibers are enabled.
 	// One XPBD multiplier per cooked tetra, reused across solver iterations.
 	LocalVector<double> xpbd_fem_fiber_lambdas;
+	// Secondary family has independent XPBD lambda and optional rest creep.
+	LocalVector<double> xpbd_fem_fiber_secondary_lambdas;
+	LocalVector<PhysicsFEMTetraPrincipalLambdas> xpbd_fem_principal_lambdas; // Lazy local min/max lambdas.
 	// Persistent rest stretch of each material fiber, lazily allocated.
 	LocalVector<real_t> xpbd_fem_fiber_plastic_rest_stretches;
+	LocalVector<real_t> xpbd_fem_fiber_secondary_plastic_rest_stretches;
 	LocalVector<double> xpbd_fem_damage; // Irreversible per-tetra scalar damage.
+	LocalVector<PhysicsFEMTetraCycleFatigueState> xpbd_fem_cycle_fatigue_states; // Optional per-tet reversal history.
 	LocalVector<Face> faces;
 	// Number of particles with nonzero inverse mass. Maintained on pin,
 	// unpin and mesh rebuild for O(1) central impulse/force normalization.
@@ -278,6 +322,9 @@ public:
 
 	void set_mesh(RID p_mesh);
 	void set_tetrahedral_indices(const PackedInt32Array &p_indices);
+	void set_tetrahedral_interior_positions(const PackedVector3Array &p_positions);
+	uint32_t get_fem_tetrahedron_count() const { return xpbd_fem_tetrahedra.size(); }
+	uint32_t get_fem_interior_node_count() const { return nodes.size() - xpbd_surface_node_count; }
 
 	void update_rendering_server(PhysicsServer3DRenderingServerHandler *p_rendering_server_handler);
 
@@ -363,6 +410,8 @@ private:
 	real_t get_unpinned_node_inverse_mass(uint32_t p_node_index) const;
 	void initialize_shear_constraints();
 	void initialize_dihedral_constraints();
+	void initialize_rod_bend_constraints();
+	void initialize_rod_torsion_constraints();
 	void initialize_shape_matching();
 	void solve_shape_matching(real_t p_strength);
 	void solve_shape_matching_clusters(real_t p_strength);
@@ -394,6 +443,7 @@ private:
 	void append_link(uint32_t p_node1, uint32_t p_node2);
 	void append_face(uint32_t p_node1, uint32_t p_node2, uint32_t p_node3);
 
+	void advance_thermal_material(real_t p_delta, bool p_xpbd_enabled);
 	void solve_links(real_t kst, real_t ti);
 
 	void initialize_face_tree();

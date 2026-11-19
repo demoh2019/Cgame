@@ -43,6 +43,25 @@ func _check_both_labs() -> void:
             if lab.get_node_or_null(node_name) == null:
                 push_error("%s missing node %s" % [check["scene"], node_name])
                 successful = false
+        # These checks verify that native FEM cooking actually succeeded,
+        # rather than merely asserting that a demo node was instantiated.
+        if check["scene"] == "res://lab_3d.tscn":
+            var fem_expected := {
+                "FEMConvexCubeSixTets": [6, 0],
+                "FEMConcaveImportedTwoTets": [2, 0],
+                "FEMInteriorNodeTwelveTets": [12, 1]
+            }
+            for body_name in fem_expected:
+                var fem_body := lab.get_node_or_null(body_name) as SoftBody3D
+                if fem_body == null:
+                    continue
+                var body_rid := fem_body.get_physics_rid()
+                var tet_count := PhysicsServer3D.soft_body_get_tetrahedron_count(body_rid)
+                var interior_count := PhysicsServer3D.soft_body_get_tetrahedral_interior_node_count(body_rid)
+                if tet_count != fem_expected[body_name][0] or interior_count != fem_expected[body_name][1]:
+                    push_error("%s has %d FEM tets/%d interior nodes, expected %s" %
+                            [body_name, tet_count, interior_count, fem_expected[body_name]])
+                    successful = false
         var count := get_nodes_in_group(check["group"]).size()
         # Also exercise newly exposed physics interactions (no UI required).
         var controller_name := "Environment3D" if check["group"] == "demo_dynamic" else "Environment2D"

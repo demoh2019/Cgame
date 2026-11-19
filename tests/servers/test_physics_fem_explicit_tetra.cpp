@@ -25,6 +25,7 @@
 /**************************************************************************/
 
 #include "servers/physics_fem_explicit_tetra.h"
+#include "servers/physics_fem_lumped_mass.h"
 #include "tests/test_macros.h"
 
 #include <initializer_list>
@@ -173,6 +174,98 @@ TEST_CASE("[PhysicsFEMExplicit] Duplicate and non-manifold tet volume are reject
 	}
 	LocalVector<PhysicsFEMConvexTetra> cooked;
 	CHECK_FALSE(physics_fem_build_explicit_tetrahedra(positions, faces, indices, 2.5 / 6.0, cooked));
+}
+
+
+static void make_interior_cube(LocalVector<Vector3> &r_positions,
+		LocalVector<PhysicsFEMConvexFace> &r_faces,
+		LocalVector<uint32_t> &r_indices) {
+	r_positions.reset();
+	r_faces.reset();
+	r_indices.reset();
+	const Vector3 points[] = {
+		Vector3(-1, -1, -1), Vector3(1, -1, -1),
+		Vector3(1, 1, -1), Vector3(-1, 1, -1),
+		Vector3(-1, -1, 1), Vector3(1, -1, 1),
+		Vector3(1, 1, 1), Vector3(-1, 1, 1),
+		Vector3(0, 0, 0) // Internal simulation node, not a surface vertex.
+	};
+	const PhysicsFEMConvexFace triangles[] = {
+		{ 0, 2, 1 }, { 0, 3, 2 }, { 4, 5, 6 }, { 4, 6, 7 },
+		{ 0, 1, 5 }, { 0, 5, 4 }, { 3, 7, 6 }, { 3, 6, 2 },
+		{ 0, 4, 7 }, { 0, 7, 3 }, { 1, 2, 6 }, { 1, 6, 5 }
+	};
+	for (const Vector3 &p : points) {
+		r_positions.push_back(p);
+	}
+	for (const PhysicsFEMConvexFace &tri : triangles) {
+		r_faces.push_back(tri);
+		r_indices.push_back(8);
+		r_indices.push_back(tri.a);
+		r_indices.push_back(tri.b);
+		r_indices.push_back(tri.c);
+	}
+}
+
+TEST_CASE("[PhysicsFEMExplicit] Interior vertex creates 12 non-overlapping cube tetrahedra") {
+	LocalVector<Vector3> points;
+	LocalVector<PhysicsFEMConvexFace> faces;
+	LocalVector<uint32_t> indices;
+	make_interior_cube(points, faces, indices);
+	LocalVector<PhysicsFEMConvexTetra> cooked;
+	REQUIRE(physics_fem_build_explicit_tetrahedra(points, faces, indices, 8.0, cooked));
+	REQUIRE(cooked.size() == 12);
+	double volume = 0.0;
+	for (const PhysicsFEMConvexTetra &tetra : cooked) {
+		CHECK(tetra.a == 8);
+		CHECK(tetra.rest.signed_det > 0.0);
+		volume += tetra.rest.volume;
+	}
+	CHECK(volume == doctest::Approx(8.0).epsilon(1e-6));
+}
+
+TEST_CASE("[PhysicsFEMExplicit] Interior node receives exactly one-quarter of volume-lumped mass") {
+	LocalVector<Vector3> points;
+	LocalVector<PhysicsFEMConvexFace> faces;
+	LocalVector<uint32_t> indices;
+	make_interior_cube(points, faces, indices);
+	LocalVector<PhysicsFEMConvexTetra> cooked;
+	REQUIRE(physics_fem_build_explicit_tetrahedra(points, faces, indices, 8.0, cooked));
+	LocalVector<double> fractions;
+	LocalVector<real_t> inverse_masses;
+	REQUIRE(physics_fem_build_lumped_masses(
+			points.size(), cooked, real_t(12.0), fractions, inverse_masses));
+	REQUIRE(fractions.size() == 9);
+	CHECK(fractions[8] == doctest::Approx(0.25).epsilon(1e-6));
+	CHECK(inverse_masses[8] == doctest::Approx(1.0 / 3.0).epsilon(1e-6));
+	double total_mass = 0.0;
+	for (uint32_t i = 0; i < fractions.size(); ++i) {
+		total_mass += 1.0 / double(inverse_masses[i]);
+	}
+	CHECK(total_mass == doctest::Approx(12.0).epsilon(1e-6));
+}
+
+TEST_CASE("[PhysicsFEMExplicit] Interior node outside the volume rejects the FEM cook") {
+	LocalVector<Vector3> points;
+	LocalVector<PhysicsFEMConvexFace> faces;
+	LocalVector<uint32_t> indices;
+	make_interior_cube(points, faces, indices);
+	LocalVector<PhysicsFEMConvexTetra> cooked;
+	REQUIRE(physics_fem_build_explicit_tetrahedra(points, faces, indices, 8.0, cooked));
+	points[8] = Vector3(3, 3, 3); // Produces overlapping/inverted tet volumes.
+	CHECK_FALSE(physics_fem_build_explicit_tetrahedra(points, faces, indices, 8.0, cooked));
+	CHECK(cooked.size() == 12);
+}
+
+TEST_CASE("[PhysicsFEMExplicit] Degenerate internal node on the surface rejects FEM") {
+	LocalVector<Vector3> points;
+	LocalVector<PhysicsFEMConvexFace> faces;
+	LocalVector<uint32_t> indices;
+	make_interior_cube(points, faces, indices);
+	points[8] = Vector3(-1, -1, -1);
+	LocalVector<PhysicsFEMConvexTetra> cooked;
+	CHECK_FALSE(physics_fem_build_explicit_tetrahedra(points, faces, indices, 8.0, cooked));
+	CHECK(cooked.is_empty());
 }
 
 } // namespace TestPhysicsFEMExplicitTetra

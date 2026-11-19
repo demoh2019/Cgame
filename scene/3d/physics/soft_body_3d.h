@@ -88,6 +88,7 @@ private:
 
 	RID physics_rid;
 	PackedInt32Array tetrahedral_indices; // Four visual indices per simulation tetrahedron.
+	PackedVector3Array tetrahedral_interior_positions; // Optional internal FEM-only nodes.
 
 	DisableMode disable_mode = DISABLE_MODE_REMOVE;
 
@@ -136,6 +137,8 @@ public:
 	RID get_physics_rid() const { return physics_rid; }
 	void set_tetrahedral_indices(const PackedInt32Array &p_indices);
 	PackedInt32Array get_tetrahedral_indices() const;
+	void set_tetrahedral_interior_positions(const PackedVector3Array &p_positions);
+	PackedVector3Array get_tetrahedral_interior_positions() const;
 
 	void set_collision_mask(uint32_t p_mask);
 	uint32_t get_collision_mask() const;

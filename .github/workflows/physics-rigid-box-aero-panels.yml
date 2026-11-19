@@ -1,0 +1,32 @@
+name: GodotPhysics3D rigid box aerodynamic panel contracts
+
+on:
+  pull_request:
+    paths:
+      - "servers/physics_rigid_box_aero_panels_3d.h"
+      - "servers/physics_3d/physics_server_3d.cpp"
+      - "modules/godot_physics_3d/godot_space_3d.cpp"
+      - "modules/godot_physics_3d/godot_space_3d.h"
+      - "modules/godot_physics_3d/godot_body_3d.cpp"
+      - "tests/servers/test_physics_rigid_box_aero_panels_3d.cpp"
+      - "tests/stress/test_physics_rigid_box_aero_panels_3d.py"
+      - ".github/workflows/physics-rigid-box-aero-panels.yml"
+  push:
+    branches: [develop]
+    paths:
+      - "servers/physics_rigid_box_aero_panels_3d.h"
+      - "modules/godot_physics_3d/godot_body_3d.cpp"
+      - "tests/stress/test_physics_rigid_box_aero_panels_3d.py"
+      - ".github/workflows/physics-rigid-box-aero-panels.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  numerical-contracts:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Validate oriented box panel drag and GodotPhysics3D wiring
+        run: python3 -m unittest discover -s tests/stress -p test_physics_rigid_box_aero_panels_3d.py -v
