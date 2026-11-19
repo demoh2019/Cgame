@@ -1559,3 +1559,23 @@ single-character preview has no party to protect, so this is an online
 party-only ability. Regression coverage lives in
 `game/tests/test_guardian_taunt.gd`, registered in `run_all.gd`.
 No new C++ engine primitive was needed.
+
+
+## Elite trophy armor: Infected Warden Jacket T3
+
+Survivors can forge an **Infected Warden Jacket T3** at the workbench
+with three elite/raid Infected Cores, four T3 cloth and one T3 bar.
+Crafting T3 mastery and real server-owned material consumption are required.
+Like ordinary T3 armor, the jacket reduces direct damage by 22%.
+
+The jacket additionally reduces **infection from actual infected hits by
+40%** and **bleeding from infected hits by 30%**. These modifiers are
+implemented in the authoritative zombie-hit branch: the server checks
+that the armor is still physically carried and equipped; a stale slot,
+missing item or normal T3 jacket has no protection against secondary
+wounds. PvP bleeding uses the original rules without these infected-only
+bonuses. The armor is ordinary equippable and tradable full-loot equipment.
+
+The new `test_warden_jacket.gd` suite checks T3 recipe gates, trophy costs,
+actual zombie damage and wound events, stale equipment, and PvP separation.
+No Cgame core changes are necessary for this feature.

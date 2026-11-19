@@ -2283,14 +2283,24 @@ func _tick_zombies(delta: float) -> void:
 				if victim.dodge_immunity > 0.0:
 					events.append({"type": "evaded", "peer": victim.id, "zombie": zombie.id})
 					continue
-				var damage: float = Combat.apply_armor(float(result["damage"]), victim.inventory.armor)
+				var armor_id: String = victim.inventory.armor
+				var armor_owned: bool = armor_id != "" and victim.inventory.count(armor_id) > 0
+				var damage: float = Combat.apply_armor(float(result["damage"]),
+					armor_id if armor_owned else "")
 				var applied: float = victim.survival.hurt(damage)
-				if applied > 0.0 and _alive(victim) and victim.survival.add_bleeding(
-						float(Defs.ZOMBIE_BLEEDING_PER_HIT.get(zombie.type, 0.0))):
+				# Only real carried armor protects from infected secondary wounds.
+				# PvP bleeding continues to follow its ordinary rules.
+				var wound_bleeding: float = Combat.infected_wound_amount(
+					float(Defs.ZOMBIE_BLEEDING_PER_HIT.get(zombie.type, 0.0)),
+					armor_id, armor_owned, "bleeding")
+				var wound_infection: float = Combat.infected_wound_amount(
+					float(Defs.ZOMBIE_INFECTION_PER_HIT.get(zombie.type, 0.0)),
+					armor_id, armor_owned, "infection")
+				if applied > 0.0 and _alive(victim) and victim.survival.add_bleeding(wound_bleeding):
 					victim.dirty_character = true
 					events.append({"type": "bleeding", "peer": victim.id,
 						"severity": victim.survival.bleeding, "source": zombie.type})
-				if victim.survival.add_infection(float(Defs.ZOMBIE_INFECTION_PER_HIT.get(zombie.type, 0.0))):
+				if victim.survival.add_infection(wound_infection):
 					victim.dirty_character = true
 					events.append({"type": "infection", "peer": victim.id,
 						"severity": victim.survival.infection, "source": zombie.type})

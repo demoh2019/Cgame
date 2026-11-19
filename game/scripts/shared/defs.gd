@@ -259,6 +259,16 @@ static func _build_items() -> void:
 	_add_recipe("purifier_maul_3", "purifier_maul_3", 1,
 		{"infected_core": 4, "bar_3": 3, "plank_3": 2, "cloth_3": 1},
 		"workbench", 9.0)
+	# Specialized expedition protection forged from genuine elite trophies.
+	# The ordinary T3 jacket has the same base armor; this one mitigates only
+	# secondary wounds inflicted by infected, never bleeding from PvP.
+	_add_item("warden_jacket_3", {"name": "Infected Warden Jacket T3",
+		"kind": "armor", "tier": 3, "armor": 0.22,
+		"infection_resistance": 0.4, "bleeding_resistance": 0.3,
+		"weight": 4.5, "value": 220})
+	_add_recipe("warden_jacket_3", "warden_jacket_3", 1,
+		{"infected_core": 3, "cloth_3": 4, "bar_3": 1},
+		"workbench", 8.0)
 	# Days After loot: only found while scavenging ruins.
 	_add_item("pistol", {"name": "Pistol", "kind": "weapon", "weapon": "ranged", "tier": 3, "damage": 22.0, "cooldown": 0.45, "ammo": "ammo_9mm", "value": 150})
 	# Ranged fighting can be sustained through scavenging and T2 metalworking.

@@ -13,6 +13,27 @@ static func apply_armor(damage: float, armor_id: String) -> float:
 	return damage * (1.0 - clampf(reduction, 0.0, 0.8))
 
 
+## Equipment-specific secondary wound resistance. Used only when the
+## server has confirmed a real infected hit against the wearer, and after
+## verifying the armor is still physically in their inventory.
+static func infected_wound_amount(amount: float, armor_id: String,
+		owned: bool, wound: String) -> float:
+	if not is_finite(amount) or amount <= 0.0:
+		return 0.0
+	if not owned:
+		return amount
+	var resistance_key := ""
+	match wound:
+		"infection":
+			resistance_key = "infection_resistance"
+		"bleeding":
+			resistance_key = "bleeding_resistance"
+		_:
+			return amount
+	var reduction: float = float(Defs.item(armor_id).get(resistance_key, 0.0))
+	return amount * (1.0 - clampf(reduction, 0.0, 0.8))
+
+
 ## What a weapon does per hit. Fists when unarmed.
 static func weapon_damage(weapon_id: String) -> float:
 	if weapon_id == "":
