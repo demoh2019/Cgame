@@ -93,6 +93,32 @@ int main(){
    }
   }
  }
+ // Exhaustive runtime byte counts on the real Span implementation.
+ static constexpr uint8_t constexpr_bytes[] = {0, 1, 0, 2, 0};
+ static constexpr Span<uint8_t> constexpr_span(constexpr_bytes);
+ static_assert(constexpr_span.count(uint8_t(0)) == 3);
+ static_assert(constexpr_span.count(uint8_t(2)) == 1);
+ static_assert(Span<uint8_t>().count(uint8_t(0)) == 0);
+ std::vector<uint8_t> count_data(1033);
+ for(auto &value : count_data)value=uint8_t(rng()%256);
+ const uint64_t lengths[]={0,1,2,7,8,9,15,16,31,32,33,63,64,65,71,127,128,129,255,256,257,511,512,513,1024};
+ for(int offset=0;offset<8;offset++){
+  for(uint64_t length:lengths){
+   Span<uint8_t> values(count_data.data()+offset,length);
+   for(int needle=0;needle<256;needle++){
+    const uint64_t expected=std::count(count_data.begin()+offset,count_data.begin()+offset+length,uint8_t(needle));
+    if(values.count(uint8_t(needle))!=expected)return 8;
+   }
+  }
+ }
+ int8_t signed_values[130];
+ for(int i=0;i<130;i++)signed_values[i]=int8_t(i*17-128);
+ Span<int8_t> signed_span(signed_values);
+ for(int needle=-128;needle<128;needle++){
+  uint64_t expected=0;
+  for(int8_t value:signed_values)expected+=(value==int8_t(needle));
+  if(signed_span.count(int8_t(needle))!=expected)return 9;
+ }
  std::vector<uint8_t> big(2*1024*1024,0);
  const uint8_t needle[]={255,32,48,64,80,96,112,128};
  Span<uint8_t> hs(big.data(),big.size()),ns(needle);
@@ -103,7 +129,7 @@ int main(){
   return std::chrono::duration<double,std::milli>(std::chrono::steady_clock::now()-start).count();
  };
  const double base=run(false),fast=run(true);
- std::cout << "2400 randomized Span searches passed; baseline ms=" << base << "; fast ms=" << fast << "; sink=" << sink << "\n";
+ std::cout << "2400 randomized Span searches and exhaustive byte count checks passed; baseline ms=" << base << "; fast ms=" << fast << "; sink=" << sink << "\n";
 }
 """
 
