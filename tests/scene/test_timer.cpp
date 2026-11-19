@@ -240,5 +240,4 @@ TEST_CASE("[SceneTree][Timer] Check Paused Timer behavior") {
 	memdelete(test_timer);
 }
 
-
 } // namespace TestTimer
