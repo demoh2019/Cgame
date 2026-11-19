@@ -188,4 +188,20 @@ TEST_CASE("[PhysicsSpeculative] Velocity-sensitive caching retains legacy behavi
 	CHECK_FALSE(recycling.can_reuse_separation(100, 200, true));
 }
 
+
+TEST_CASE("[PhysicsSpeculative] Predictive provenance fits inside recycling-cache padding") {
+	GodotPhysicsContactRecycling recycling;
+	CHECK_FALSE(recycling.speculative_contact);
+	// Two revisions and two flags should occupy the same storage as the
+	// previous two-revision, one-flag cache on normally aligned platforms.
+	CHECK(sizeof(GodotPhysicsContactRecycling) == sizeof(uint64_t) * 2 + alignof(uint64_t));
+	recycling.remember(7, 8, true);
+	recycling.speculative_contact = true;
+	CHECK(recycling.speculative_contact);
+	CHECK(recycling.matches_geometry(7, 8));
+	recycling.speculative_contact = false;
+	CHECK_FALSE(recycling.speculative_contact);
+	CHECK(recycling.matches_geometry(7, 8));
+}
+
 } // namespace TestPhysicsSpeculativeSphereContact
