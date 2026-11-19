@@ -241,6 +241,9 @@ void GodotSoftBody3D::update_constants() {
 	reset_link_rest_lengths();
 	update_link_constants();
 	update_area();
+	// A mesh transform or rest-shape reset invalidates the XPBD baseline.
+	// The expensive manifold check is deferred until volume is enabled.
+	xpbd_volume_topology_checked = false;
 }
 
 void GodotSoftBody3D::update_area() {
@@ -1332,6 +1335,21 @@ void GodotSoftBody3D::solve_constraints(real_t p_delta) {
 		node.x = node.q + node.v * p_delta;
 	}
 
+	// Global volume constraint is independent of distance/edge compliance:
+	// open cloth never gets a volume correction. The topology scan is lazy
+	// and performed only once per mesh or rest-transform change.
+	const bool volume_requested = get_space() && get_space()->is_soft_body_xpbd_volume_enabled();
+	if (volume_requested && !xpbd_volume_topology_checked) {
+		rebuild_xpbd_volume_rest_state();
+	}
+	const double volume_compliance = volume_requested ? double(get_space()->get_soft_body_xpbd_volume_compliance()) : 0.0;
+	const double volume_alpha_double = p_delta > 0.0 ? volume_compliance / (double(p_delta) * p_delta) : 0.0;
+	const bool use_volume = volume_requested && xpbd_volume_valid && p_delta > 0.0 &&
+			Math::is_finite(volume_alpha_double) && volume_alpha_double >= 0.0 &&
+			volume_alpha_double <= double(std::numeric_limits<real_t>::max());
+	const real_t volume_alpha = use_volume ? real_t(volume_alpha_double) : real_t(0.0);
+	xpbd_volume_lambda = 0.0; // Only accumulate during this physics step.
+
 	// Optional XPBD distance constraints keep a compliant elastic response
 	// less dependent on iteration count or the physics step size. This also
 	// covers topology-generated bending links; only enabled for an explicit
@@ -1357,12 +1375,18 @@ void GodotSoftBody3D::solve_constraints(real_t p_delta) {
 							alpha, xpbd_link_lambdas[link_index]);
 				}
 			}
+			if (use_volume) {
+				solve_xpbd_volume_constraint(volume_alpha);
+			}
 		}
 	} else {
 		// Legacy PBD solver, unchanged when compliance is zero.
 		for (int isolve = 0; isolve < iteration_count; ++isolve) {
 			const real_t ti = isolve / (real_t)iteration_count;
 			solve_links(1.0, ti);
+			if (use_volume) {
+				solve_xpbd_volume_constraint(volume_alpha);
+			}
 		}
 	}
 	const real_t vc = (1.0 - damping_coefficient) * inv_delta;
@@ -1511,6 +1535,11 @@ void GodotSoftBody3D::destroy() {
 	nodes.clear();
 	links.clear();
 	faces.clear();
+	xpbd_volume_gradients.reset();
+	xpbd_volume_valid = false;
+	xpbd_volume_topology_checked = false;
+	xpbd_rest_volume = 0.0;
+	xpbd_volume_lambda = 0.0;
 
 	bounds = AABB();
 	deinitialize_shape();
