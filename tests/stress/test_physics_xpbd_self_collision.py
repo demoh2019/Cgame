@@ -144,6 +144,7 @@ class XPBDSelfCollisionContracts(unittest.TestCase):
         self.assertIn("physics_xpbd_solve_self_collision(", self.helper)
         self.assertIn("u < 0.0 || v < 0.0 || w < 0.0", self.helper)
         self.assertIn("p_inv_vertex < 0.0", self.helper)
+        self.assertIn("if (!Math::is_finite(delta_lambda))", self.helper)
         self.assertIn("const double next_lambda_double = MAX(0.0", self.helper)
         self.assertIn("if (!next_vertex.is_finite() || !next_a.is_finite()", self.helper)
         self.assertIn("r_vertex = next_vertex;\n\tr_a = next_a;\n\tr_b = next_b;\n\tr_c = next_c;", self.helper)
