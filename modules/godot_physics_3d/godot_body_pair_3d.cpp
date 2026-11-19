@@ -31,6 +31,7 @@
 #include "godot_body_pair_3d.h"
 
 #include "godot_collision_solver_3d.h"
+#include "godot_contact_normal_3d.h"
 #include "godot_space_3d.h"
 
 #include <cfloat> // FLT_MAX
@@ -56,7 +57,7 @@ void GodotBodyPair3D::contact_added_callback(const Vector3 &p_point_A, int p_ind
 	contact.index_B = p_index_B;
 	contact.local_A = local_A;
 	contact.local_B = local_B;
-	contact.normal = (p_point_A - p_point_B).normalized();
+	contact.normal = godot_physics_3d_contact_normal(p_point_A, p_point_B, normal);
 	contact.used = true;
 
 	// Match each new manifold point to the closest UNUSED old contact.
