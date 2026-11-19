@@ -199,8 +199,8 @@ class ProjectContextTests(unittest.TestCase):
                     yield match
 
         pattern = CountedPattern(ctx.NODE)
-        content = "[gd_scene format=3]\\n" + "".join(
-            f'[node name="N{i}" type="Node2D"]\\n' for i in range(10000)
+        content = "[gd_scene format=3]\n" + "".join(
+            f'[node name="N{i}" type="Node2D"]\n' for i in range(10000)
         )
         with patch.object(ctx, "NODE", pattern):
             result = ctx._outline("large.tscn", content)
@@ -225,15 +225,15 @@ class ProjectContextTests(unittest.TestCase):
                     yield match
 
         pattern = CountedPattern(ctx.FUNCTION)
-        content = "".join(f"func f{i}(): pass\\n" for i in range(10000))
+        content = "".join(f"func f{i}(): pass\n" for i in range(10000))
         with patch.object(ctx, "FUNCTION", pattern):
             result = ctx._outline("large.gd", content)
         self.assertEqual(result["functions"], [f"f{i}" for i in range(64)])
         self.assertEqual(pattern.visited, 64)
 
     def test_script_duplicate_function_names_keep_first_occurrence_order(self):
-        content = ("func repeated(): pass\\n" * 100
-                   + "".join(f"func unique_{i}(): pass\\n" for i in range(100)))
+        content = ("func repeated(): pass\n" * 100
+                   + "".join(f"func unique_{i}(): pass\n" for i in range(100)))
         result = ctx._outline("duplicate.gd", content)
         self.assertEqual(result["functions"],
                          ["repeated"] + [f"unique_{i}" for i in range(63)])
