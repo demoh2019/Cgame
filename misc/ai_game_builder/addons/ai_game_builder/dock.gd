@@ -20,6 +20,7 @@ Rules:
   .md, .txt, .cfg, .csv. Do not depend on external images, fonts or plugins.
 - Use relative project paths without res:// prefix, leading slash, or ..
 - Never write project.godot, editor addons, .godot, .git or secret files.
+- Never use @tool annotations in generated GDScript. They are rejected.
 - Prioritize a playable vertical slice with input, feedback, restart and
   clear win/lose conditions where appropriate.
 - For changes, include the full final contents of every changed file.
