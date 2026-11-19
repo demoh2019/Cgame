@@ -109,6 +109,8 @@ private:
 	uint8_t was_string = 0;
 	uint64_t last_heartbeat = 0;
 	bool heartbeat_waiting = false;
+	// Control frames may interrupt fragmented data messages, but must never enter their payload.
+	bool current_frame_is_data = false;
 	PendingMessage pending_message;
 
 	// WebSocket configuration.
