@@ -53,7 +53,7 @@ namespace {
 // interior particle, with one Jolt XPBD volume constraint per surface face.
 // It cannot describe concave geometry; reject unclosed, inconsistent or
 // nonconvex meshes rather than silently creating inverted tetrahedra.
-static bool try_build_convex_volume_fan(JPH::SoftBodySharedSettings &r_settings, float p_compliance, bool p_radial_springs, float p_radial_compliance) {
+static bool try_build_convex_volume_fan(JPH::SoftBodySharedSettings &r_settings, float p_compliance) {
 	JPH::Array<JPH::SoftBodySharedSettings::Vertex> &vertices = r_settings.mVertices;
 	const JPH::Array<JPH::SoftBodySharedSettings::Face> &faces = r_settings.mFaces;
 
@@ -151,38 +151,72 @@ static bool try_build_convex_volume_fan(JPH::SoftBodySharedSettings &r_settings,
 	}
 
 	// Keep the interior vertex out of the surface face list and render map.
-	// Volume constraints are built AFTER edge/bend/LRA constraints, because
-	// the center does not belong to the cloth surface's edge graph.
+	// The interior particle MUST exist before CreateConstraints(): that API
+	// caches mClosestKinematic when LRA is enabled. Appending a vertex after
+	// that cache is built would leave its size stale during Optimize().
+	// The center is not part of any surface face/edge, so LRA leaves it free.
 	const uint32_t center_index = (uint32_t)vertices.size();
 	vertices.emplace_back(JPH::Float3(center.GetX(), center.GetY(), center.GetZ()), JPH::Float3(0.0f, 0.0f, 0.0f), 1.0f);
 	r_settings.mVolumeConstraints.reserve(faces.size());
 	for (const JPH::SoftBodySharedSettings::Face &face : faces) {
-		r_settings.mVolumeConstraints.emplace_back(face.mVertex[0], face.mVertex[1], face.mVertex[2], center_index, p_compliance);
-	}
-	r_settings.CalculateVolumeConstraintVolumes();
-
-	// A volume-only star fan cannot resist every shear/stretch mode:
-	// each tetrahedron retains its rest volume, but the interior particle
-	// can move relative to the surface. Optional center-to-surface XPBD
-	// springs add a radial elastic response using Jolt's regular edge solver.
-	// Build these only after full mesh validation and after the surface
-	// shrinking factor has been applied, so shrink only affects cloth edges.
-	if (p_radial_springs) {
-		r_settings.mEdgeConstraints.reserve(r_settings.mEdgeConstraints.size() + center_index);
-		for (uint32_t i = 0; i < center_index; ++i) {
-			const float distance = (JPH::Vec3(vertices[i].mPosition) - center).Length();
-			// Convex fan center is strictly interior, but reject zero-length
-			// spokes from degenerate/imprecise vertex arrangements.
-			if (distance <= radius * 1.0e-6f) {
-				continue;
-			}
-			JPH::SoftBodySharedSettings::Edge radial(center_index, i, p_radial_compliance);
-			radial.mRestLength = distance;
-			r_settings.mEdgeConstraints.push_back(radial);
+		const JPH::Vec3 p0(vertices[face.mVertex[0]].mPosition);
+		const JPH::Vec3 p1(vertices[face.mVertex[1]].mPosition);
+		const JPH::Vec3 p2(vertices[face.mVertex[2]].mPosition);
+		const float signed_six_volume = (p1 - p0).Cross(p2 - p0).Dot(center - p0);
+		// Jolt's volume solver uses |six_volume| for the constraint but
+		// the signed-volume gradients for the correction. Keep every rest
+		// tetrahedron positively oriented, irrespective of surface winding,
+		// so compression/restoration acts in the physically correct direction.
+		if (signed_six_volume > 0.0f) {
+			r_settings.mVolumeConstraints.emplace_back(face.mVertex[0], face.mVertex[1], face.mVertex[2], center_index, p_compliance);
+		} else {
+			r_settings.mVolumeConstraints.emplace_back(face.mVertex[0], face.mVertex[2], face.mVertex[1], center_index, p_compliance);
 		}
 	}
-
+	r_settings.CalculateVolumeConstraintVolumes();
 	return true;
+}
+
+// Add these edges AFTER CreateConstraints (which clears surface edges) and
+// AFTER the surface shrink operation, but BEFORE Optimize(). The centroid
+// and validated convex fan were created before CreateConstraints, keeping
+// the Jolt closest-kinematic cache sized for all the physics particles.
+//
+// Optional directional compliance allows a lightweight, mesh-local
+// approximation of anisotropic radial elasticity. It is not FEM.
+static void append_volume_radial_springs(JPH::SoftBodySharedSettings &r_settings, float p_compliance, int p_anisotropy_axis, float p_anisotropy_ratio) {
+	JPH::Array<JPH::SoftBodySharedSettings::Vertex> &vertices = r_settings.mVertices;
+	const uint32_t center_index = (uint32_t)vertices.size() - 1;
+	const JPH::Vec3 center(vertices[center_index].mPosition);
+
+	float max_distance_sq = 0.0f;
+	for (uint32_t i = 0; i < center_index; ++i) {
+		const float distance_sq = (JPH::Vec3(vertices[i].mPosition) - center).LengthSq();
+		max_distance_sq = MAX(max_distance_sq, distance_sq);
+	}
+	if (max_distance_sq <= 0.0f) {
+		return;
+	}
+
+	const float min_distance_sq = max_distance_sq * 1.0e-12f;
+	r_settings.mEdgeConstraints.reserve(r_settings.mEdgeConstraints.size() + center_index);
+	for (uint32_t i = 0; i < center_index; ++i) {
+		const JPH::Vec3 offset = JPH::Vec3(vertices[i].mPosition) - center;
+		const float distance_sq = offset.LengthSq();
+		if (distance_sq <= min_distance_sq) {
+			continue;
+		}
+
+		float compliance = p_compliance;
+		if (p_anisotropy_axis != 0 && p_anisotropy_ratio != 1.0f) {
+			const float axis_displacement = p_anisotropy_axis == 1 ? offset.GetX() : (p_anisotropy_axis == 2 ? offset.GetY() : offset.GetZ());
+			const float alignment_sq = (axis_displacement * axis_displacement) / distance_sq;
+			compliance *= 1.0f + (p_anisotropy_ratio - 1.0f) * alignment_sq;
+		}
+		JPH::SoftBodySharedSettings::Edge radial(center_index, i, compliance);
+		radial.mRestLength = Math::sqrt(distance_sq);
+		r_settings.mEdgeConstraints.push_back(radial);
+	}
 }
 
 template <typename TJoltVertex>
@@ -348,6 +382,14 @@ JPH::SoftBodySharedSettings *JoltSoftBody3D::_create_shared_settings() {
 	// of the constraints a bit.
 	pin_vertices(*this, pinned_vertices, mesh_to_physics, physics_vertices);
 
+	// Populate the complete particle array BEFORE Jolt constructs the LRA
+	// closest-kinematic cache and before computing XPBD mass/compliance.
+	// Rejected convex meshes retain their original particle topology.
+	bool has_convex_volume = false;
+	if (JoltProjectSettings::soft_body_volume_preservation) {
+		has_convex_volume = try_build_convex_volume_fan(*settings, JoltProjectSettings::soft_body_volume_compliance);
+	}
+
 	// Since Godot's stiffness is input as a coefficient between 0 and 1, and Jolt uses actual stiffness for its
 	// edge constraints, we must map one to the other.
 	//
@@ -367,7 +409,9 @@ JPH::SoftBodySharedSettings *JoltSoftBody3D::_create_shared_settings() {
 	// which simplifies to:
 	// compliance = dt^2 * (1 / k - 1) * (w1 + w2)
 
-	// Assuming that the vertices have the same mass. Use double here as
+	// Assuming that the vertices have the same mass. The validated convex
+	// volume fan (when enabled) has already added its interior particle.
+	// Use double here as
 	// a tiny but positive mass can overflow the float intermediate.
 	const double w1_plus_w2 = 2.0 * double(physics_vertices.size()) / double(mass);
 
@@ -412,7 +456,6 @@ JPH::SoftBodySharedSettings *JoltSoftBody3D::_create_shared_settings() {
 	const int bend_mode = JoltProjectSettings::soft_body_bend_mode;
 	const BendType bend_type = bend_mode == 1 ? BendType::Distance : (bend_mode == 2 ? BendType::Dihedral : BendType::None);
 	settings->CreateConstraints(&vertex_attrib, 1, bend_type);
-
 	// Optional warp/weft response of woven cloth. Jolt stores compliance
 	// per structural spring; use the rest-pose edge direction rather than a
 	// world-space direction so rotating the soft body doesn't change its
@@ -463,32 +506,37 @@ JPH::SoftBodySharedSettings *JoltSoftBody3D::_create_shared_settings() {
 			tether.mMaxDistance *= multiplier;
 		}
 	}
-	// Build the convex volume fan after shrinking surface springs. In
-	// incompressible mode, radial springs retain their geometric rest
-	// lengths and each tetrahedron retains its original rest volume.
-	if (JoltProjectSettings::soft_body_volume_preservation) {
-		const uint32_t surface_edge_count = (uint32_t)settings->mEdgeConstraints.size();
-		const bool has_volume_fan = try_build_convex_volume_fan(*settings, JoltProjectSettings::soft_body_volume_compliance,
-				JoltProjectSettings::soft_body_volume_radial_springs, JoltProjectSettings::soft_body_volume_radial_compliance);
+	// Restore optional isotropic rest-volume contraction on top of the
+	// updated Jolt fan topology. The fan now builds its tetrahedral
+	// constraints BEFORE surface constraints, to keep LRA cached indices
+	// valid. Rest-volume targets still scale by the cube of the length.
+	const bool follow_volume_shrink = has_convex_volume &&
+			JoltProjectSettings::soft_body_volume_follow_shrinking_factor &&
+			multiplier > 0.0f && multiplier != 1.0f;
+	if (follow_volume_shrink) {
+		const double scale = double(multiplier);
+		const double volume_scale = scale * scale * scale;
+		if (Math::is_finite(volume_scale)) {
+			for (JPH::SoftBodySharedSettings::Volume &volume : settings->mVolumeConstraints) {
+				const double target = double(volume.mSixRestVolume) * volume_scale;
+				volume.mSixRestVolume = float(CLAMP(target, -double(FLT_MAX), double(FLT_MAX)));
+			}
+		}
+	}
 
-		// For a compressible, isotropically contracting/expanding material
-		// lengths scale as s while signed tetrahedral volumes scale as s^3.
-		// This mode is opt-in: the default keeps an incompressible core.
-		// Clamp extreme scale products before they enter the XPBD solver.
-		if (has_volume_fan && JoltProjectSettings::soft_body_volume_follow_shrinking_factor &&
-				multiplier != 1.0f && multiplier > 0.0f) {
+	// Build optional radial springs AFTER directional surface elasticity.
+	// These springs have independent anisotropy settings and must not be
+	// modified by the textile's warp/weft fiber axis.
+	if (has_convex_volume && JoltProjectSettings::soft_body_volume_radial_springs) {
+		const uint32_t surface_edge_count = (uint32_t)settings->mEdgeConstraints.size();
+		append_volume_radial_springs(*settings, JoltProjectSettings::soft_body_volume_radial_compliance,
+				JoltProjectSettings::soft_body_radial_anisotropy_axis, JoltProjectSettings::soft_body_radial_anisotropy_ratio);
+		if (follow_volume_shrink) {
 			const double scale = double(multiplier);
-			const double volume_scale = scale * scale * scale;
-			if (Math::is_finite(volume_scale)) {
-				for (JPH::SoftBodySharedSettings::Volume &volume : settings->mVolumeConstraints) {
-					const double target = double(volume.mSixRestVolume) * volume_scale;
-					volume.mSixRestVolume = float(CLAMP(target, -double(FLT_MAX), double(FLT_MAX)));
-				}
-				// Radial springs are appended by the fan builder after the
-				// surface springs; include them in the isotropic contraction.
-				for (uint32_t i = surface_edge_count; i < settings->mEdgeConstraints.size(); ++i) {
-					JPH::SoftBodySharedSettings::Edge &radial = settings->mEdgeConstraints[i];
-					const double target = double(radial.mRestLength) * scale;
+			for (uint32_t i = surface_edge_count; i < settings->mEdgeConstraints.size(); ++i) {
+				JPH::SoftBodySharedSettings::Edge &radial = settings->mEdgeConstraints[i];
+				const double target = double(radial.mRestLength) * scale;
+				if (Math::is_finite(target)) {
 					radial.mRestLength = float(MIN(target, double(FLT_MAX)));
 				}
 			}
