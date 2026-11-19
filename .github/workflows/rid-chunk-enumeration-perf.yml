@@ -39,3 +39,4 @@ jobs:
           set -euo pipefail
           BIN=./bin/godot.linuxbsd.editor.dev.x86_64
           "$BIN" --headless --test --test-case="*[RID]*" --no-colors
+          "$BIN" --headless --test --test-case="*[RID_Owner]*" --no-colors
