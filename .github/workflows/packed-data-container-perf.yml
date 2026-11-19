@@ -5,11 +5,13 @@ on:
     branches: [develop]
     paths:
       - 'core/io/packed_data_container.cpp'
+      - 'core/io/packed_data_container.h'
       - 'tests/core/io/test_packed_data_container.cpp'
       - '.github/workflows/packed-data-container-perf.yml'
   pull_request:
     paths:
       - 'core/io/packed_data_container.cpp'
+      - 'core/io/packed_data_container.h'
       - 'tests/core/io/test_packed_data_container.cpp'
       - '.github/workflows/packed-data-container-perf.yml'
   workflow_dispatch:
