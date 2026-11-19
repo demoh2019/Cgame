@@ -442,12 +442,12 @@ func cmd_party_invite(peer_id: int, target_id: int) -> Dictionary:
 	var target: Player = players.get(target_id)
 	if source == null or target == null or not _alive(source) or not _alive(target):
 		return {"ok": false, "reason": "unavailable"}
-	if not Party_member_invite_range(source, target):
+	if not _party_invite_in_range(source, target):
 		return {"ok": false, "reason": "too_far"}
 	return parties.invite(peer_id, target_id, time)
 
 
-func Party_member_invite_range(first: Player, second: Player) -> bool:
+func _party_invite_in_range(first: Player, second: Player) -> bool:
 	var a := Vector2(first.position.x, first.position.z)
 	var b := Vector2(second.position.x, second.position.z)
 	return a.is_finite() and b.is_finite() and a.distance_to(b) <= Party.INVITE_RANGE
@@ -1486,6 +1486,11 @@ func _damage_target(attacker: Player, hit: Dictionary, damage: float) -> void:
 		var zombie = zombies.get(hit["id"])
 		if zombie == null:
 			return
+		# Only real, positive, server-applied hits can qualify for group XP.
+		if damage > 0.0 and zombie.is_alive() and (zombie.contributors.size() < 16 or zombie.contributors.has(attacker.id)):
+			var equipped: String = attacker.inventory.weapon
+			if equipped != "" and attacker.inventory.count(equipped) > 0:
+				zombie.contributors[attacker.id] = {"time": time, "weapon": equipped}
 		events.append({"type": "hit", "kind": "zombie", "id": zombie.id, "damage": damage, "x": zombie.position.x, "z": zombie.position.z})
 		if zombie.take_damage(damage):
 			attacker.kills += 1
@@ -1499,12 +1504,17 @@ func _damage_target(attacker: Player, hit: Dictionary, damage: float) -> void:
 					events.append({"type": "mastery", "peer": attacker.id,
 						"skill": Progression.combat_skill_for_weapon(weapon),
 						"xp": mastery_xp})
+			_party_award_assists(attacker, zombie)
 			if Contracts.record_kill(attacker.contract_state):
 				attacker.dirty_character = true
 			_on_zombie_death(zombie)
 	else:
 		var victim: Player = players.get(hit["id"])
 		if victim == null or not _alive(victim):
+			return
+		# Parties are cooperative: do not allow friendly fire in red zones.
+		var attacker_party: int = parties.group_of(attacker.id)
+		if attacker_party != 0 and attacker_party == parties.group_of(victim.id):
 			return
 		if not ZoneRisk.can_pvp(world.zone_at(attacker.position.x, attacker.position.z),
 				world.zone_at(victim.position.x, victim.position.z)):
@@ -1515,6 +1525,38 @@ func _damage_target(attacker: Player, hit: Dictionary, damage: float) -> void:
 		if not _alive(victim):
 			attacker.kills += 1
 			_on_player_death(victim, attacker.id)
+
+
+## Nearby party members gain modest weapon mastery XP only if they personally
+## hit this infected in the last 20 seconds. AFK/nonparticipants receive none.
+## The killing blow and contract progress still belong to the actual killer.
+func _party_award_assists(killer: Player, zombie) -> void:
+	var group: Array = parties.members_of(killer.id)
+	if group.size() < 2:
+		return
+	var source := Vector2(zombie.position.x, zombie.position.z)
+	for member_id in group:
+		if int(member_id) == killer.id:
+			continue
+		var participant: Player = players.get(int(member_id))
+		if participant == null or not _alive(participant):
+			continue
+		var at := Vector2(participant.position.x, participant.position.z)
+		if not at.is_finite() or not source.is_finite() or at.distance_to(source) > Party.ASSIST_RANGE:
+			continue
+		var hit: Dictionary = zombie.contributors.get(int(member_id), {})
+		if hit.is_empty() or time - float(hit.get("time", -INF)) > Party.ASSIST_WINDOW:
+			continue
+		var used_weapon: String = str(hit.get("weapon", ""))
+		if used_weapon.is_empty() or participant.inventory.count(used_weapon) < 1:
+			continue
+		var amount: int = maxi(1, int(floor(float(zombie.data.get("xp", 0)) * Party.ASSIST_XP_RATE)))
+		var actual: int = participant.progression.award_combat(used_weapon, amount)
+		if actual > 0:
+			participant.dirty_character = true
+			events.append({"type": "mastery", "peer": participant.id,
+				"skill": Progression.combat_skill_for_weapon(used_weapon),
+				"xp": actual, "assist": true})
 
 
 func _on_zombie_death(zombie) -> void:
