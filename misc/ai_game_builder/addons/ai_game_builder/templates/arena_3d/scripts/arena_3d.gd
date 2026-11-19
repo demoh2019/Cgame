@@ -41,9 +41,9 @@ func _ready() -> void:
 	var camera := Camera3D.new()
 	camera.name = "Camera3D"
 	camera.position = Vector3(0, 17, 17)
+	add_child(camera)
 	camera.look_at(Vector3.ZERO, Vector3.UP)
 	camera.current = true
-	add_child(camera)
 
 	var overlay := CanvasLayer.new()
 	overlay.name = "Overlay"
