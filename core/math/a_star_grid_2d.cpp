@@ -130,6 +130,16 @@ void AStarGrid2D::update() {
 	points.clear();
 	solid_mask.clear();
 
+	// Grid dimensions are known before construction. Reserve the outer rows,
+	// each row's points, and the complete border-padded occupancy mask once.
+	points.reserve(region.size.y);
+	const uint64_t padded_width = uint64_t(region.size.x) + 2;
+	const uint64_t padded_height = uint64_t(region.size.y) + 2;
+	const uint64_t mask_cells = padded_width * padded_height;
+	if (mask_cells <= UINT32_MAX) {
+		solid_mask.reserve(uint32_t(mask_cells));
+	}
+
 	const int32_t end_x = region.get_end().x;
 	const int32_t end_y = region.get_end().y;
 	const Vector2 half_cell_size = cell_size / 2;
@@ -139,6 +149,7 @@ void AStarGrid2D::update() {
 
 	for (int32_t y = region.position.y; y < end_y; y++) {
 		LocalVector<Point> line;
+		line.reserve(region.size.x);
 		solid_mask.push_back(true);
 		for (int32_t x = region.position.x; x < end_x; x++) {
 			Vector2 v = offset;
