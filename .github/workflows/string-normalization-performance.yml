@@ -1,0 +1,38 @@
+name: Linear-time path and escape normalization
+
+on:
+  pull_request:
+    branches: [develop]
+    paths:
+      - 'core/string/ustring.cpp'
+      - 'tests/core/string/test_string.cpp'
+      - '.github/workflows/string-normalization-performance.yml'
+  push:
+    branches: [develop]
+    paths:
+      - 'core/string/ustring.cpp'
+      - 'tests/core/string/test_string.cpp'
+      - '.github/workflows/string-normalization-performance.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  native-regressions:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+      - uses: ./.github/actions/godot-deps
+      - uses: ./.github/actions/godot-build
+        with:
+          platform: linuxbsd
+          target: editor
+          scons-flags: dev_build=yes tests=yes debug_symbols=no module_mono_enabled=no accesskit=no
+      - name: Run native path and escape regressions
+        run: |
+          timeout 300s ./bin/godot.linuxbsd.editor.dev.x86_64 --headless --test --test-case='*Linear path normalization*' --no-colors
+          timeout 300s ./bin/godot.linuxbsd.editor.dev.x86_64 --headless --test --test-case='*Strip escapes*' --no-colors
