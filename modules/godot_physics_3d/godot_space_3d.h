@@ -164,6 +164,7 @@ private:
 	real_t soft_body_pair_collision_friction = 0.0; // Tangential Coulomb impulse, opt-in.
 	bool soft_body_pair_collision_ccd = false; // Optional swept pair contacts.
 	bool soft_body_pair_collision_edge_edge = false; // Opt-in inter-body structural edge pairs.
+	bool soft_body_pair_collision_edge_ccd = false; // Extra conservative swept edge/edge TOI.
 	int soft_body_pair_max_contacts = 256; // Per pair, temporary bounded scratch.
 	int soft_body_pair_max_pairs = 128; // Candidate body-pairs per step.
 	real_t soft_body_xpbd_tether_compliance = 0.0; // Zero bypasses tether setup and solver.
@@ -312,6 +313,7 @@ public:
 	_FORCE_INLINE_ real_t get_soft_body_pair_collision_friction() const { return soft_body_pair_collision_friction; }
 	_FORCE_INLINE_ bool is_soft_body_pair_collision_ccd_enabled() const { return soft_body_pair_collision_ccd; }
 	_FORCE_INLINE_ bool is_soft_body_pair_collision_edge_edge_enabled() const { return soft_body_pair_collision_edge_edge; }
+	_FORCE_INLINE_ bool is_soft_body_pair_collision_edge_ccd_enabled() const { return soft_body_pair_collision_edge_ccd; }
 	_FORCE_INLINE_ int get_soft_body_pair_max_contacts() const { return soft_body_pair_max_contacts; }
 	_FORCE_INLINE_ int get_soft_body_pair_max_pairs() const { return soft_body_pair_max_pairs; }
 	_FORCE_INLINE_ real_t get_soft_body_xpbd_tether_compliance() const { return soft_body_xpbd_tether_compliance; }

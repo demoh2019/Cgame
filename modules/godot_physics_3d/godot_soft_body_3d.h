@@ -353,7 +353,7 @@ private:
 	void solve_self_collisions(real_t p_delta);
 	bool solve_edge_self_collisions(real_t p_delta);
 	void initialize_pair_edge_topology(real_t p_thickness);
-	void update_pair_edge_tree(real_t p_thickness);
+	void update_pair_edge_tree(real_t p_thickness, bool p_swept);
 	bool solve_pair_edge_contacts(GodotSoftBody3D &p_other, real_t p_delta,
 			real_t p_thickness, real_t p_alpha, uint32_t p_contact_budget);
 	void initialize_volume_constraint();
