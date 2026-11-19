@@ -119,6 +119,8 @@ private:
 	real_t contact_bias = 0.0;
 	real_t max_contact_push_speed = 0.0; // 0: unlimited (legacy behavior).
 	real_t warm_start_coefficient = 1.0;
+	// Bullet-style angular rolling resistance; zero leaves the classic solver unchanged.
+	real_t rolling_friction = 0.0;
 	real_t constraint_bias = 0.0;
 	real_t restitution_velocity_threshold = 0.0;
 	int friction_combine_mode = 0; // 0: legacy, 1: geometric, 2: average, 3: maximum
@@ -184,6 +186,7 @@ public:
 	_FORCE_INLINE_ real_t get_contact_bias() const { return contact_bias; }
 	_FORCE_INLINE_ real_t limit_contact_bias(real_t p_bias) const { return godot_physics_limit_contact_bias(p_bias, max_contact_push_speed); }
 	_FORCE_INLINE_ real_t get_warm_start_coefficient() const { return warm_start_coefficient; }
+	_FORCE_INLINE_ real_t get_rolling_friction() const { return rolling_friction; }
 	_FORCE_INLINE_ real_t get_restitution_velocity_threshold() const { return restitution_velocity_threshold; }
 	_FORCE_INLINE_ real_t mix_restitution(real_t p_a, real_t p_b) const { return godot_physics_combine_restitution(p_a, p_b, restitution_combine_mode); }
 	// Match Box2D's geometric mean when explicitly selected, while keeping
