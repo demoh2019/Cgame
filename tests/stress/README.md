@@ -779,3 +779,29 @@ scons platform=macos target=editor arch=arm64 -j$(sysctl -n hw.ncpu)
 ./bin/godot.macos.editor.arm64 --headless \
   --path tests/stress --script res://physics_contact_solver_regression.gd
 ```
+
+
+## 3D frictionless contact solver regression
+
+The `physics_frictionless_3d` workload is identical in topology to
+`physics_3d` but applies a shared zero-friction material to every body.
+This exercises the fast path that skips 3D tangential impulse and inertia
+work while preserving normal, bias and restitution impulses.
+
+```bash
+python3 tests/stress/run.py --godot ./bin/godot.linuxbsd.editor.dev.x86_64 \\
+  --case physics_3d,physics_frictionless_3d --scale 4 --frames 90 \\
+  --repeats 3 --timeout 600 --rss-limit-mib 6144 \\
+  --output out/frictionless-3d.json
+```
+
+For contact correctness, run the independent 3D material-switch test:
+
+```bash
+./bin/godot.linuxbsd.editor.dev.x86_64 --headless --path tests/stress \\
+  --script res://physics_frictionless_3d_regression.gd
+```
+
+Compare performance of each case **against the same case on the baseline**,
+not the frictional case against the frictionless case; they intentionally
+model different physical behavior.
