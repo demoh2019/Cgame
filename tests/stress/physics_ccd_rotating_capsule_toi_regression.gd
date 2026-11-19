@@ -19,8 +19,11 @@ func _initialize() -> void:
 func _run() -> void:
 	var results: Array[Dictionary] = []
 	for dim in [2, 3]:
-		results.append(await _case(dim, false))
-		results.append(await _case(dim, true))
+		# The same rotation must work outside world origin. A translated
+		# rotor also exercises an explicitly offset center of mass.
+		for offset in [Vector2.ZERO, Vector2(2048.0, -4096.0)]:
+			results.append(await _case(dim, false, offset))
+			results.append(await _case(dim, true, offset))
 	var valid := true
 	for result in results:
 		print("ROTATING_CAPSULE_TOI:" + JSON.stringify(result))
@@ -38,7 +41,7 @@ func _run() -> void:
 		quit(1)
 
 
-func _case(dim: int, enabled: bool) -> Dictionary:
+func _case(dim: int, enabled: bool, offset: Vector2 = Vector2.ZERO) -> Dictionary:
 	var bounds_key := "physics/%dd/solver/ccd_rotational_bounds" % dim
 	var limit_key := "physics/%dd/solver/ccd_max_angular_motion" % dim
 	var max_speed_key := "physics/%dd/solver/max_angular_velocity" % dim
@@ -70,13 +73,16 @@ func _case(dim: int, enabled: bool) -> Dictionary:
 		PhysicsServer2D.body_set_param(rotor, PhysicsServer2D.BODY_PARAM_ANGULAR_DAMP_MODE, PhysicsServer2D.BODY_DAMP_MODE_REPLACE)
 		PhysicsServer2D.body_set_param(rotor, PhysicsServer2D.BODY_PARAM_ANGULAR_DAMP, 0.0)
 		PhysicsServer2D.body_set_state(rotor, PhysicsServer2D.BODY_STATE_CAN_SLEEP, false)
+		PhysicsServer2D.body_set_state(rotor, PhysicsServer2D.BODY_STATE_TRANSFORM, Transform2D(0.0, offset))
+		if offset != Vector2.ZERO:
+			PhysicsServer2D.body_set_param(rotor, PhysicsServer2D.BODY_PARAM_CENTER_OF_MASS, Vector2(0.2, 0.0))
 		PhysicsServer2D.body_set_state(rotor, PhysicsServer2D.BODY_STATE_ANGULAR_VELOCITY, initial_speed)
 		PhysicsServer2D.body_set_continuous_collision_detection_mode(rotor, PhysicsServer2D.CCD_MODE_CAST_RAY)
 		stationary = PhysicsServer2D.body_create()
 		PhysicsServer2D.body_set_mode(stationary, PhysicsServer2D.BODY_MODE_STATIC)
 		PhysicsServer2D.body_add_shape(stationary, sphere)
 		PhysicsServer2D.body_set_state(stationary, PhysicsServer2D.BODY_STATE_TRANSFORM,
-				Transform2D(0.0, Vector2(TARGET_X, 0)))
+				Transform2D(0.0, offset + Vector2(TARGET_X, 0)))
 		PhysicsServer2D.body_set_space(stationary, space)
 		PhysicsServer2D.body_set_space(rotor, space)
 		PhysicsServer2D.space_set_active(space, true)
@@ -92,6 +98,9 @@ func _case(dim: int, enabled: bool) -> Dictionary:
 		PhysicsServer3D.body_set_param(rotor, PhysicsServer3D.BODY_PARAM_ANGULAR_DAMP_MODE, PhysicsServer3D.BODY_DAMP_MODE_REPLACE)
 		PhysicsServer3D.body_set_param(rotor, PhysicsServer3D.BODY_PARAM_ANGULAR_DAMP, 0.0)
 		PhysicsServer3D.body_set_state(rotor, PhysicsServer3D.BODY_STATE_CAN_SLEEP, false)
+		PhysicsServer3D.body_set_state(rotor, PhysicsServer3D.BODY_STATE_TRANSFORM, Transform3D(Basis(), Vector3(offset.x, offset.y, 0.0)))
+		if offset != Vector2.ZERO:
+			PhysicsServer3D.body_set_param(rotor, PhysicsServer3D.BODY_PARAM_CENTER_OF_MASS, Vector3(0.2, 0.0, 0.0))
 		PhysicsServer3D.body_set_state(rotor, PhysicsServer3D.BODY_STATE_ANGULAR_VELOCITY,
 				Vector3(0, 0, initial_speed))
 		PhysicsServer3D.body_set_enable_continuous_collision_detection(rotor, true)
@@ -99,7 +108,7 @@ func _case(dim: int, enabled: bool) -> Dictionary:
 		PhysicsServer3D.body_set_mode(stationary, PhysicsServer3D.BODY_MODE_STATIC)
 		PhysicsServer3D.body_add_shape(stationary, sphere)
 		PhysicsServer3D.body_set_state(stationary, PhysicsServer3D.BODY_STATE_TRANSFORM,
-				Transform3D(Basis(), Vector3(TARGET_X, 0, 0)))
+				Transform3D(Basis(), Vector3(offset.x + TARGET_X, offset.y, 0)))
 		PhysicsServer3D.body_set_space(stationary, space)
 		PhysicsServer3D.body_set_space(rotor, space)
 		PhysicsServer3D.space_set_active(space, true)
@@ -137,7 +146,7 @@ func _case(dim: int, enabled: bool) -> Dictionary:
 		PhysicsServer3D.free_rid(space)
 
 	return {
-		"dimension": dim, "enabled": enabled, "frames": FRAMES,
+		"dimension": dim, "enabled": enabled, "offset": offset, "frames": FRAMES,
 		"initial_speed": initial_speed, "minimum_speed": minimum_speed,
 		"finite": finite
 	}
