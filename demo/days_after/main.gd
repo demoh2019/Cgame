@@ -177,6 +177,7 @@ func _build_resources() -> void:
     # and a crafted scavenger tool. The world never generates free inventory.
     _add_resource("WoodPileA", "wood", 1, Vector3(-2.0, 1.0, 5.0), 2)
     _add_resource("WoodPileB", "wood", 1, Vector3(-4.0, 1.0, 5.5), 2)
+    _add_resource("WoodPileC", "wood", 1, Vector3(5.5, 1.0, 5.5), 2)
     _add_resource("ScrapStoneA", "stone", 1, Vector3(2.0, 1.0, 4.5), 2)
     _add_resource("ScrapStoneB", "stone", 1, Vector3(4.0, 1.0, 5.5), 2)
     _add_resource("FiberBushA", "fiber", 1, Vector3(-2.0, 1.0, 1.0), 2)
