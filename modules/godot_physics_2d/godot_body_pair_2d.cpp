@@ -42,6 +42,7 @@
 #include "servers/physics_speculative_capsule_contact.h"
 #include "servers/physics_ccd_capsule_toi.h"
 #include "servers/physics_ccd_capsule_pair_toi.h"
+#include "servers/physics_ccd_circle_segment_toi.h"
 #include "servers/physics_ccd_swept_bounds.h"
 #include "servers/physics_ccd_rotational_sphere_cull.h"
 
@@ -353,6 +354,42 @@ bool GodotBodyPair2D::_test_ccd(real_t p_step, GodotBody2D *p_A, int p_shape_A, 
 		}
 		// Nonuniform scales turn circles into ellipses; retain the existing
 		// support-ray fallback rather than applying a wrong circular TOI.
+	}
+
+	// Circle versus finite segment is a swept point versus the segment
+	// enlarged by the circle radius (a capsule). A leading support ray
+	// misses glancing hits against segment endpoints. Handle both orders
+	// in world coordinates, including arbitrary affine segment transforms.
+	if (((shape_A_ptr->get_type() == PS2DE::SHAPE_CIRCLE && shape_B_ptr->get_type() == PS2DE::SHAPE_SEGMENT) ||
+			(shape_A_ptr->get_type() == PS2DE::SHAPE_SEGMENT && shape_B_ptr->get_type() == PS2DE::SHAPE_CIRCLE)) &&
+			p_A->get_angular_velocity() == 0.0 && p_B->get_angular_velocity() == 0.0) {
+		const bool circle_is_A = shape_A_ptr->get_type() == PS2DE::SHAPE_CIRCLE;
+		const GodotCircleShape2D *circle = static_cast<GodotCircleShape2D *>(circle_is_A ? shape_A_ptr : shape_B_ptr);
+		const GodotSegmentShape2D *segment = static_cast<GodotSegmentShape2D *>(circle_is_A ? shape_B_ptr : shape_A_ptr);
+		const Transform2D &circle_transform = circle_is_A ? p_xform_A : p_xform_B;
+		const Transform2D &segment_transform = circle_is_A ? p_xform_B : p_xform_A;
+		const double circle_scale = physics_ccd_uniform_sphere_scale(circle_transform);
+		if (circle_scale > 0.0) {
+			double impact_fraction = 0.0;
+			const PhysicsCCDCircleSegmentTOIResult result = physics_ccd_circle_segment_toi(
+					circle_transform.get_origin(), circle_is_A ? relative_motion : -relative_motion,
+					segment_transform.xform(segment->get_a()), segment_transform.xform(segment->get_b()),
+					double(circle->get_radius()) * circle_scale, impact_fraction);
+			if (result == PhysicsCCDCircleSegmentTOIResult::MISS) {
+				return false;
+			}
+			if (result == PhysicsCCDCircleSegmentTOIResult::HIT) {
+				const real_t allowed_distance = CLAMP(real_t(impact_fraction * double(mlen)) + (max - min) * real_t(0.01), real_t(0.0), mlen);
+				const Vector2 desired_velocity = velocity_B + mnormal * (allowed_distance / p_step);
+				const Vector2 velocity_A = p_A->get_linear_velocity();
+				const real_t initial_speed = velocity_A.length();
+				const Vector2 travel_direction = velocity_A / initial_speed;
+				const real_t clipped_speed = CLAMP(desired_velocity.dot(travel_direction), real_t(0.0), initial_speed);
+				p_A->set_linear_velocity(travel_direction * clipped_speed);
+				return true;
+			}
+			// Initial overlap or unusable input: preserve the old solver.
+		}
 	}
 
 	// Reject impossible linear sweeps before building support rays or
