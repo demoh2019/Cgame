@@ -129,6 +129,8 @@ private:
 	real_t soft_body_link_damping = 0.0; // Optional longitudinal dashpot rate, 1/s.
 	real_t soft_body_xpbd_area_compliance = 0.0;
 	real_t soft_body_xpbd_dihedral_compliance = 0.0; // Opt-in angle-based cloth bending.
+	real_t soft_body_bending_plastic_yield_angle = 0.2; // Elastic angular tolerance, radians.
+	real_t soft_body_bending_plastic_creep_rate = 0.0; // 1/s; no plastic folds by default.
 	real_t soft_body_self_collision_thickness = 0.0; // 0: no self-contact work or buffers.
 	real_t soft_body_self_collision_compliance = 0.000001;
 	real_t soft_body_self_collision_friction = 0.0; // Optional mass-weighted face slip resistance.
@@ -242,6 +244,8 @@ public:
 	_FORCE_INLINE_ real_t get_soft_body_link_damping() const { return soft_body_link_damping; }
 	_FORCE_INLINE_ real_t get_soft_body_xpbd_area_compliance() const { return soft_body_xpbd_area_compliance; }
 	_FORCE_INLINE_ real_t get_soft_body_xpbd_dihedral_compliance() const { return soft_body_xpbd_dihedral_compliance; }
+	_FORCE_INLINE_ real_t get_soft_body_bending_plastic_yield_angle() const { return soft_body_bending_plastic_yield_angle; }
+	_FORCE_INLINE_ real_t get_soft_body_bending_plastic_creep_rate() const { return soft_body_bending_plastic_creep_rate; }
 	_FORCE_INLINE_ real_t get_soft_body_self_collision_thickness() const { return soft_body_self_collision_thickness; }
 	_FORCE_INLINE_ real_t get_soft_body_self_collision_compliance() const { return soft_body_self_collision_compliance; }
 	_FORCE_INLINE_ real_t get_soft_body_self_collision_friction() const { return soft_body_self_collision_friction; }
