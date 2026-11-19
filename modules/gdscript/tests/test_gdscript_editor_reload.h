@@ -156,7 +156,7 @@ TEST_CASE("[Editor][GDScriptReload] Keeps the editor stable with no live owners"
 	REQUIRE_EQ(script->reload(), OK);
 	script->set_source_code("@tool\nextends Node\n@export_range(0, 100) var score: int = 0\n");
 	CHECK_EQ(script->reload(true), OK);
-	CHECK(script->is_valid());
+	CHECK(script->can_instantiate());
 }
 
 TEST_CASE("[Editor][GDScriptReload] Skips owner refresh outside editor mode") {
