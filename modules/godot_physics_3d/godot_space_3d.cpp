@@ -1260,6 +1260,7 @@ GodotSpace3D::GodotSpace3D() {
 	max_linear_velocity = MAX((real_t)0.0, (real_t)GLOBAL_GET("physics/3d/solver/max_linear_velocity"));
 	warm_start_coefficient = CLAMP((real_t)GLOBAL_GET("physics/3d/solver/warm_start_coefficient"), real_t(0.0), real_t(1.0));
 	implicit_damping = GLOBAL_GET("physics/3d/solver/implicit_damping");
+	gyroscopic_forces = GLOBAL_GET("physics/3d/solver/gyroscopic_forces");
 	rolling_friction = MAX(real_t(0.0), (real_t)GLOBAL_GET("physics/3d/solver/rolling_friction"));
 	spinning_friction = MAX(real_t(0.0), (real_t)GLOBAL_GET("physics/3d/solver/spinning_friction"));
 	friction_combine_mode = CLAMP((int)GLOBAL_GET("physics/3d/solver/friction_combine_mode"), 0, 3);
