@@ -38,6 +38,9 @@ TEST_FORCE_LINK(test_arraymesh)
 #include "scene/resources/3d/importer_mesh.h"
 #include "scene/resources/3d/primitive_meshes.h"
 #include "scene/resources/mesh.h"
+#ifndef PHYSICS_3D_DISABLED
+#include "scene/resources/3d/concave_polygon_shape_3d.h"
+#endif
 #include "tests/signal_watcher.h"
 
 #ifdef TOOLS_ENABLED
@@ -50,6 +53,84 @@ TEST_FORCE_LINK(test_arraymesh)
 #include "servers/rendering/rendering_server.h"
 
 namespace TestArrayMesh {
+
+
+#ifndef PHYSICS_3D_DISABLED
+TEST_CASE("[TrimeshShapeFastPath] empty mesh returns no concave collision shape") {
+	Ref<ArrayMesh> mesh;
+	mesh.instantiate();
+	CHECK(mesh->create_trimesh_shape().is_null());
+}
+
+TEST_CASE("[TrimeshShapeFastPath] one indexed triangle preserves all collision vertices") {
+	Ref<ArrayMesh> mesh;
+	mesh.instantiate();
+	Array arrays;
+	arrays.resize(Mesh::ARRAY_MAX);
+	const PackedVector3Array verts = {
+		Vector3(1, 2, 3), Vector3(4, 5, 6), Vector3(7, 8, 9)
+	};
+	const PackedInt32Array indices = { 0, 1, 2 };
+	arrays[Mesh::ARRAY_VERTEX] = verts;
+	arrays[Mesh::ARRAY_INDEX] = indices;
+	mesh->add_surface_from_arrays(Mesh::PRIMITIVE_TRIANGLES, arrays);
+	const Ref<ConcavePolygonShape3D> shape = mesh->create_trimesh_shape();
+	REQUIRE(shape.is_valid());
+	const Vector<Vector3> points = shape->get_faces();
+	REQUIRE_EQ(points.size(), 3);
+	for (int i = 0; i < 3; ++i) {
+		CHECK_EQ(points[i], verts[i]);
+	}
+}
+
+TEST_CASE("[TrimeshShapeFastPath] indexed quad collision faces match source face order") {
+	Ref<ArrayMesh> mesh;
+	mesh.instantiate();
+	Array arrays;
+	arrays.resize(Mesh::ARRAY_MAX);
+	const PackedVector3Array verts = {
+		Vector3(1, 0, 0), Vector3(2, 0, 0),
+		Vector3(2, 1, 0), Vector3(1, 1, 0)
+	};
+	const PackedInt32Array indices = { 0, 1, 2, 0, 2, 3 };
+	arrays[Mesh::ARRAY_VERTEX] = verts;
+	arrays[Mesh::ARRAY_INDEX] = indices;
+	mesh->add_surface_from_arrays(Mesh::PRIMITIVE_TRIANGLES, arrays);
+	const Vector<Face3> faces = mesh->get_faces();
+	REQUIRE_EQ(faces.size(), 2);
+	const Ref<ConcavePolygonShape3D> shape = mesh->create_trimesh_shape();
+	REQUIRE(shape.is_valid());
+	const Vector<Vector3> points = shape->get_faces();
+	REQUIRE_EQ(points.size(), faces.size() * 3);
+	for (int f = 0; f < faces.size(); ++f) {
+		for (int v = 0; v < 3; ++v) {
+			CHECK_EQ(points[f * 3 + v], faces[f].vertex[v]);
+		}
+	}
+}
+
+TEST_CASE("[TrimeshShapeFastPath] large triangle sequence contains no unwritten positions") {
+	Ref<ArrayMesh> mesh;
+	mesh.instantiate();
+	Array arrays;
+	arrays.resize(Mesh::ARRAY_MAX);
+	PackedVector3Array verts;
+	for (int i = 0; i < 256; ++i) {
+		verts.push_back(Vector3(i + 1, 0, 0));
+		verts.push_back(Vector3(i + 1, 1, 0));
+		verts.push_back(Vector3(i + 1, 0, 1));
+	}
+	arrays[Mesh::ARRAY_VERTEX] = verts;
+	mesh->add_surface_from_arrays(Mesh::PRIMITIVE_TRIANGLES, arrays);
+	const Ref<ConcavePolygonShape3D> shape = mesh->create_trimesh_shape();
+	REQUIRE(shape.is_valid());
+	const Vector<Vector3> points = shape->get_faces();
+	REQUIRE_EQ(points.size(), 256 * 3);
+	for (int i = 0; i < verts.size(); ++i) {
+		CHECK_EQ(points[i], verts[i]);
+	}
+}
+#endif // PHYSICS_3D_DISABLED
 
 static Ref<ArrayMesh> _make_mesh_for_debug_fastpath() {
 	Ref<ArrayMesh> mesh;
