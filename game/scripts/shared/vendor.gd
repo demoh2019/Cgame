@@ -32,6 +32,8 @@ const SELL_PRICES := {
 	"stone_4": 8,
 	"ore_4": 12,
 	"fiber_4": 8,
+	# Fishing is a risk-graded source of silver, but not a buy/sell loop.
+	"raw_fish": 4, "raw_fish_2": 8, "raw_fish_3": 14, "raw_fish_4": 22,
 	"plank_1": 5, "plank_2": 10, "plank_3": 15, "plank_4": 20,
 	"bar_1": 8, "bar_2": 16, "bar_3": 24, "bar_4": 32,
 	"cloth_1": 5, "cloth_2": 10, "cloth_3": 15, "cloth_4": 20,
