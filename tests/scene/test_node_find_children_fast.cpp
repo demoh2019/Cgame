@@ -142,7 +142,7 @@ TEST_CASE("[NodeFindChildrenFast] Repeated queries and mutations are independent
 	Node *root = memnew(Node);
 	for (int i = 0; i < 128; i++) {
 		Node *child = memnew(Node);
-		child->set_name("Child" + itos(i));
+		child->set_name(String("Child") + itos(i));
 		root->add_child(child);
 	}
 	TypedArray<Node> first = root->find_children("Child*", "", true, false);
