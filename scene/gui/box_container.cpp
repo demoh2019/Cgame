@@ -321,17 +321,17 @@ Size2 BoxContainer::_get_minimum_size(bool p_use_desired_sizes) const {
 	const int other_axis = vertical ? 0 : 1;
 
 	Size2 minimum;
+	int visible_children = 0;
 
-	List<Control *> children;
+	// The minimum-size computation is read-only: accumulate in one pass
+	// instead of allocating a List node for every visible Control.
 	for (Node *child : iterate_children()) {
 		Control *c = as_sortable_control(child, SortableVisibilityMode::VISIBLE);
 		if (!c) {
 			continue;
 		}
-		children.push_back(c);
-	}
+		visible_children++;
 
-	for (Control *c : children) {
 		const Size2 min_size = p_use_desired_sizes ? c->get_bound_desired_size().ceil() : c->get_bound_minimum_size().ceil();
 		const Size2 max_size = c->get_custom_maximum_size();
 
@@ -345,8 +345,8 @@ Size2 BoxContainer::_get_minimum_size(bool p_use_desired_sizes) const {
 		minimum[other_axis] = MAX(minimum[other_axis], other_axis_size);
 	}
 
-	if (children.size() > 0) {
-		minimum[axis] += theme_cache.separation * (children.size() - 1);
+	if (visible_children > 0) {
+		minimum[axis] += theme_cache.separation * (visible_children - 1);
 	}
 
 	return minimum;
