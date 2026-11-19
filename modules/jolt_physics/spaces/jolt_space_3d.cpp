@@ -61,6 +61,10 @@ constexpr double SPACE_DEFAULT_SLEEP_THRESHOLD_LINEAR = 0.1;
 constexpr double SPACE_DEFAULT_SLEEP_THRESHOLD_ANGULAR = 8.0 * Math::PI / 180;
 constexpr double SPACE_DEFAULT_SOLVER_ITERATIONS = 8;
 
+// Cache up to 4,096 BodyIDs (about 16 KiB per list) between flushes to avoid
+// reallocation on streaming/spawn-heavy scenes. Release larger one-off batches.
+constexpr uint32_t MAX_RETAINED_PENDING_BODY_IDS = 4096;
+
 // A hash index is unnecessary in the common case of a few queued bodies.
 // For large create/destroy bursts, linear erase_unordered() becomes O(n^2).
 static void ensure_pending_index(const LocalVector<JPH::BodyID> &p_bodies, HashMap<uint32_t, uint32_t> &r_indices) {
@@ -521,14 +525,22 @@ void JoltSpace3D::flush_pending_objects() {
 	if (!pending_objects_sleeping.is_empty()) {
 		JPH::BodyInterface::AddState add_state = body_iface.AddBodiesPrepare(pending_objects_sleeping.ptr(), pending_objects_sleeping.size());
 		body_iface.AddBodiesFinalize(pending_objects_sleeping.ptr(), pending_objects_sleeping.size(), add_state, JPH::EActivation::DontActivate);
-		pending_objects_sleeping.reset();
+		if (pending_objects_sleeping.get_capacity() > MAX_RETAINED_PENDING_BODY_IDS) {
+			pending_objects_sleeping.reset();
+		} else {
+			pending_objects_sleeping.clear();
+		}
 		pending_sleeping_indices = HashMap<uint32_t, uint32_t>();
 	}
 
 	if (!pending_objects_awake.is_empty()) {
 		JPH::BodyInterface::AddState add_state = body_iface.AddBodiesPrepare(pending_objects_awake.ptr(), pending_objects_awake.size());
 		body_iface.AddBodiesFinalize(pending_objects_awake.ptr(), pending_objects_awake.size(), add_state, JPH::EActivation::Activate);
-		pending_objects_awake.reset();
+		if (pending_objects_awake.get_capacity() > MAX_RETAINED_PENDING_BODY_IDS) {
+			pending_objects_awake.reset();
+		} else {
+			pending_objects_awake.clear();
+		}
 		pending_awake_indices = HashMap<uint32_t, uint32_t>();
 	}
 }
