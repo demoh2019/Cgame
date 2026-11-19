@@ -191,6 +191,36 @@ TEST_CASE("[GDScriptPropertyListFastPath] repeated enumeration preserves propert
 	}
 }
 
+TEST_CASE("[GDScriptPropertyListFastPath] property type lookup reports valid and missing members") {
+	GDScriptLanguage::get_singleton()->init();
+	Ref<GDScript> script = memnew(GDScript);
+	script->set_source_code("extends RefCounted\\n@export var count: int = 7\\n@export var label: String = \\"hello\\"\\n");
+	ERR_PRINT_OFF;
+	const Error err = script->reload();
+	ERR_PRINT_ON;
+	REQUIRE_EQ(err, OK);
+
+	Ref<RefCounted> object = memnew(RefCounted);
+	object->set_script(script);
+	ScriptInstance *instance = object->get_script_instance();
+	REQUIRE(instance != nullptr);
+
+	bool valid = false;
+	CHECK_EQ(instance->get_property_type(StringName("count"), &valid), Variant::INT);
+	CHECK(valid);
+
+	valid = false;
+	CHECK_EQ(instance->get_property_type(StringName("label"), &valid), Variant::STRING);
+	CHECK(valid);
+
+	valid = true;
+	CHECK_EQ(instance->get_property_type(StringName("missing_member"), &valid), Variant::NIL);
+	CHECK_FALSE(valid);
+
+	CHECK_EQ(instance->get_property_type(StringName("count"), nullptr), Variant::INT);
+	CHECK_EQ(instance->get_property_type(StringName("missing_member"), nullptr), Variant::NIL);
+}
+
 TEST_CASE("[Modules][GDScript] Loading keeps ResourceCache and GDScriptCache in sync") {
 	GDScriptLanguage::get_singleton()->init();
 	const String path = TestUtils::get_temp_path("gdscript_load_test.gd");
