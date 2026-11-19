@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import argparse
 import json
+from heapq import nsmallest
 import math
 import os
 from pathlib import Path
@@ -73,20 +74,30 @@ def scan(root: Path, top: int = 20, max_total: int | None = None,
             item["files"] += 1
             item["bytes"] += size
 
-    ranked = sorted(files, key=lambda item: (-item[1], item[0]))
+    # Limit the selection heap to requested output size instead of sorting
+    # every asset when the usual report needs only a small top-N.
+    rank_key = lambda item: (-item[1], item[0])
+    # Sorting violations is necessary for deterministic diagnostics, but
+    # passing assets never need to be part of that sort.
+    violating_files = (sorted((item for item in files if item[1] > max_file), key=rank_key)
+                       if max_file is not None else [])
+    # If the violations already fill the top-N they are the top-N of all
+    # assets too, so reuse the ranked list rather than sorting a second time.
+    largest = (violating_files[:top] if len(violating_files) >= top
+               else nsmallest(top, files, key=rank_key))
     violations: list[dict] = []
     if max_total is not None and total > max_total:
         violations.append({"kind": "total", "bytes": total, "limit_bytes": max_total})
     if max_file is not None:
         violations.extend({"kind": "file", "path": path, "bytes": size, "limit_bytes": max_file}
-                          for path, size in ranked if size > max_file)
+                          for path, size in violating_files)
 
     return {
         "format": 1,
         "summary": {"files": len(files), "total_bytes": total},
         "by_extension": dict(sorted(extensions.items())),
         "by_directory": dict(sorted(directories.items())),
-        "largest": [{"path": path, "bytes": size} for path, size in ranked[:top]],
+        "largest": [{"path": path, "bytes": size} for path, size in largest],
         "violations": violations,
     }
 
