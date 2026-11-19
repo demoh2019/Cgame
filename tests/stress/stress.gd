@@ -10,6 +10,7 @@ const GridReflowStress := preload("res://grid_reflow.gd")
 const BoxReflowStress := preload("res://box_reflow.gd")
 const BitMapMorphologyStress := preload("res://bitmap_morphology.gd")
 const PressureStress := preload("res://pressure_scenarios.gd")
+const CanvasScenePerf := preload("res://canvas_scene_perf.gd")
 const CASES := [
 	"containers", "array_literals", "dictionary_snapshot", "strings", "script_vm", "math", "signals",
 	"scene_tree", "packed_scene", "images", "json", "stream", "stream_bulk",
@@ -28,6 +29,7 @@ const CASES := [
 	"scene_reparent", "scene_move", "resource_roundtrip", "audio_bus_churn",
 	"bitmap_rects", "bitmap_pipeline", "bitmap_morphology",
 	"curve_tessellation_2d", "curve_tessellation_3d", "curve_bake", "curve_nearest",
+	"canvas_transform_2d", "process_dispatch",
 ]
 
 var signal_total: int = 0
@@ -312,6 +314,10 @@ func _run_case(test_case: String, scale: int, frames: int, seed: int) -> Diction
 			return _curve_bake(scale)
 		"curve_nearest":
 			return _curve_nearest(scale)
+		"canvas_transform_2d":
+			return CanvasScenePerf.new().canvas_transform(self, scale)
+		"process_dispatch":
+			return await CanvasScenePerf.new().process_dispatch(self, scale, frames)
 	return {"error": "Unhandled case"}
 
 
