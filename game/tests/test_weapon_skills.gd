@@ -16,7 +16,8 @@ func run(t) -> void:
 	t.eq(server.cmd_skill(80, 1.0, 0.0).get("reason"), "no_skill", "unarmed cannot use a club skill")
 	t.near(p.combat_energy, Defs.COMBAT_ENERGY_MAX, 0.0001, "unarmed rejection does not cost energy")
 	t.eq(server.cmd_skill(999, 1.0, 0.0).get("reason"), "dead", "unknown peer cannot use a skill")
-	t.check(Combat.active_skill("pistol").is_empty(), "ranged weapons do not grant heavy melee attacks")
+	t.eq(Combat.active_skill("pistol").get("id", ""), "focused_shot",
+		"pistol grants its own ranged skill, not heavy melee attack")
 	t.check(Combat.active_skill("not_an_item").is_empty(), "unknown gear cannot grant an ability")
 
 	p.inventory.add("club_2", 1)

@@ -2,6 +2,7 @@ extends CanvasLayer
 ## All of the interface, built in code: vitals, zone, inventory, crafting and a message log.
 
 const Defs = preload("res://scripts/shared/defs.gd")
+const Combat = preload("res://scripts/shared/combat.gd")
 const QuickCooking = preload("res://scripts/shared/quick_cooking.gd")
 const FishingDisplay = preload("res://scripts/shared/fishing_display.gd")
 const WorldCycle = preload("res://scripts/shared/world_cycle.gd")
@@ -10,12 +11,17 @@ const Vendor = preload("res://scripts/shared/vendor.gd")
 const Contracts = preload("res://scripts/shared/contracts.gd")
 const CampRest = preload("res://scripts/shared/camp_rest.gd")
 const ZoneRisk = preload("res://scripts/shared/zone_risk.gd")
+const PvpInfamy = preload("res://scripts/shared/pvp_infamy.gd")
+const Reputation = preload("res://scripts/shared/reputation.gd")
 const SurvivalRadar = preload("res://scripts/client/survival_radar.gd")
+const PartyFrames = preload("res://scripts/client/party_frames.gd")
 
 var client
 var _bars: Dictionary = {}
 var _zone_label: Label
 var _info_label: Label
+var _vendor_water_button: Button
+var _vendor_food_button: Button
 var _radar
 var _contract_label: Label
 var _prompt: Label
@@ -27,6 +33,7 @@ var _craft_panel: PanelContainer
 var _craft_list: VBoxContainer
 var _death: Label
 var _equipped: Label
+var _party_frames: Label
 var _log_lines: Array[String] = []
 var _craft_signature: String = ""
 var _inventory_signature: String = ""
@@ -85,7 +92,7 @@ func _build() -> void:
 	top_left.size_flags_horizontal = Control.SIZE_SHRINK_BEGIN
 	top_left.size_flags_vertical = Control.SIZE_SHRINK_BEGIN
 	margin.add_child(top_left)
-	for entry in [["health", Color(0.85, 0.2, 0.2)], ["hunger", Color(0.9, 0.65, 0.2)], ["thirst", Color(0.25, 0.55, 0.95)], ["infection", Color(0.54, 0.28, 0.65)], ["exposure", Color(0.38, 0.7, 0.88)]]:
+	for entry in [["health", Color(0.85, 0.2, 0.2)], ["hunger", Color(0.9, 0.65, 0.2)], ["thirst", Color(0.25, 0.55, 0.95)], ["infection", Color(0.54, 0.28, 0.65)], ["bleeding", Color(0.73, 0.21, 0.27)], ["exposure", Color(0.38, 0.7, 0.88)]]:
 		var bar := ProgressBar.new()
 		bar.custom_minimum_size = Vector2(240, 18)
 		bar.max_value = 100.0
@@ -101,6 +108,11 @@ func _build() -> void:
 		_bars[entry[0]] = bar
 	_equipped = Label.new()
 	top_left.add_child(_equipped)
+	_party_frames = Label.new()
+	_party_frames.name = "PartyFrames"
+	_party_frames.add_theme_font_size_override("font_size", 14)
+	_party_frames.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	top_left.add_child(_party_frames)
 
 	var top_right := VBoxContainer.new()
 	top_right.mouse_filter = Control.MOUSE_FILTER_IGNORE
@@ -160,6 +172,14 @@ func _build() -> void:
 		var direction := Vector2(sin(client.yaw), cos(client.yaw))
 		client.light_campfire(Vector2(pos.x, pos.z) + direction * 2.8))
 	inventory_box.add_child(campfire_button)
+	var decoy_button := Button.new()
+	decoy_button.name = "ThrowNoiseDecoy"
+	decoy_button.text = "Throw clattering decoy (,): 8s distraction"
+	decoy_button.tooltip_text = "Needs a crafted decoy: 2 wood T1 + 1 scrap"
+	decoy_button.pressed.connect(func() -> void:
+		var heading := Vector2(sin(client.yaw), cos(client.yaw))
+		client.throw_decoy(heading))
+	inventory_box.add_child(decoy_button)
 	var refuel_button := Button.new()
 	refuel_button.name = "RefuelCampfire"
 	refuel_button.text = "Refuel nearest campfire (+2 min, 2 wood T1; 9)"
@@ -172,7 +192,7 @@ func _build() -> void:
 	inventory_box.add_child(refuel_button)
 	var extinguish_button := Button.new()
 	extinguish_button.name = "ExtinguishCampfire"
-	extinguish_button.text = "Extinguish my nearby campfire (no refund; 0)"
+	extinguish_button.text = "Extinguish my nearby campfire (no refund; -)"
 	extinguish_button.pressed.connect(func() -> void:
 		var fire_id: int = client.nearest_campfire(client.display_position())
 		if fire_id == -1:
@@ -194,8 +214,8 @@ func _build() -> void:
 	stash_scroll.add_child(_stash_grid)
 
 	var rest_button := Button.new()
-	rest_button.text = "Rest at camp (2 wood, 1 water, 1 food)"
-	rest_button.tooltip_text = "Recover health and stamina in the safe settlement; 90s cooldown"
+	rest_button.text = "Rest: safe hub or a lit field campfire"
+	rest_button.tooltip_text = "Hub: 2 wood + canned food + water. Fire: cooked fish/canned ration + water, no nearby threats; 90s cooldown."
 	rest_button.pressed.connect(Callable(client, "rest"))
 	inventory_box.add_child(rest_button)
 
@@ -209,10 +229,12 @@ func _build() -> void:
 	buy_water.text = "Buy water (%d silver)" % int(Vendor.BUY_PRICES["water_bottle"])
 	buy_water.pressed.connect(func() -> void: client.vendor("water_bottle", 1, true))
 	vendor_buttons.add_child(buy_water)
+	_vendor_water_button = buy_water
 	var buy_food := Button.new()
 	buy_food.text = "Buy food (%d silver)" % int(Vendor.BUY_PRICES["canned_food"])
 	buy_food.pressed.connect(func() -> void: client.vendor("canned_food", 1, true))
 	vendor_buttons.add_child(buy_food)
+	_vendor_food_button = buy_food
 	var sell_scrap := Button.new()
 	sell_scrap.text = "Sell scrap (+%d silver)" % int(Vendor.SELL_PRICES["scrap"])
 	sell_scrap.pressed.connect(func() -> void: client.vendor("scrap", 1, false))
@@ -256,6 +278,19 @@ func _build() -> void:
 	claim_contract.text = "Turn in mission"
 	claim_contract.pressed.connect(func() -> void: client.contract("claim"))
 	contract_actions.add_child(claim_contract)
+	var daily_claim := Button.new()
+	daily_claim.text = "Turn in UTC daily bounty"
+	daily_claim.tooltip_text = "One repeatable camp bounty each UTC day. Collect only at the camp workbench."
+	daily_claim.pressed.connect(func() -> void: client.contract("daily_claim"))
+	contract_actions.add_child(daily_claim)
+
+	var cache_heading := Label.new()
+	cache_heading.text = "Frontier cache (capture a red/black outpost)"
+	inventory_box.add_child(cache_heading)
+	var claim_cache_button := Button.new()
+	claim_cache_button.text = "Collect nearest captured outpost supplies"
+	claim_cache_button.pressed.connect(_claim_nearest_outpost_cache)
+	inventory_box.add_child(claim_cache_button)
 
 	var party_title := Label.new()
 	party_title.text = "Survivor party (nearby invites, up to 5 players)"
@@ -288,6 +323,76 @@ func _build() -> void:
 	leave_party.text = "Leave"
 	leave_party.pressed.connect(func() -> void: client.party_leave())
 	party_buttons.add_child(leave_party)
+	var rally_button := Button.new()
+	rally_button.text = "Set rally"
+	rally_button.tooltip_text = "Leader only: signal your current server position for 45 seconds"
+	rally_button.pressed.connect(func() -> void: client.party_rally())
+	party_buttons.add_child(rally_button)
+	var guardian_button := Button.new()
+	guardian_button.text = "Guardian taunt (F1)"
+	guardian_button.tooltip_text = "Melee weapon, party, 25 combat energy, 20s cooldown; defend nearby allies"
+	guardian_button.pressed.connect(func() -> void: client.guardian_taunt())
+	inventory_box.add_child(guardian_button)
+	var fortify_button := Button.new()
+	fortify_button.name = "FortifyOutpost"
+	fortify_button.text = "Fortify controlled outpost (4m, wood + stone)"
+	fortify_button.tooltip_text = "Stand next to a party-controlled outpost in a PvP zone. Each upgrade increases enemy capture time."
+	fortify_button.pressed.connect(func() -> void:
+		var here: Vector3 = client.display_position()
+		var nearest: Dictionary = {}
+		var closest_distance := INF
+		for site in client.outposts:
+			var distance: float = Vector2(here.x, here.z).distance_to(
+				Vector2(float(site["x"]), float(site["z"])))
+			if distance < closest_distance:
+				closest_distance = distance
+				nearest = site
+		if nearest.is_empty() or closest_distance > 4.0:
+			say("Fortification: move within 4m of an outpost")
+		else:
+			client.outpost_fortify(int(nearest["id"])))
+	inventory_box.add_child(fortify_button)
+	var breach_button := Button.new()
+	breach_button.name = "BreachOutpost"
+	breach_button.text = "Breach enemy outpost (2 planks T2 + 2 bars T2)"
+	breach_button.tooltip_text = "Two living attackers in one party must be near the enemy flag. Reduces one fortification tier; 45s cooldown."
+	breach_button.pressed.connect(func() -> void:
+		var here: Vector3 = client.display_position()
+		var nearest: Dictionary = {}
+		var distance := INF
+		for site in client.outposts:
+			var delta: float = Vector2(here.x, here.z).distance_to(
+				Vector2(float(site["x"]), float(site["z"])))
+			if delta < distance:
+				distance = delta
+				nearest = site
+		if nearest.is_empty() or distance > 4.0:
+			say("Breach: move within 4m of an enemy outpost")
+		else:
+			client.outpost_breach(int(nearest["id"])))
+	inventory_box.add_child(breach_button)
+	var war_button := Button.new()
+	war_button.name = "DeclareSiege"
+	war_button.text = "Declare siege (2 cloth T2 + 25 silver)"
+	war_button.tooltip_text = "Party leader only: two nearby party members, 20s preparation, 180s assault."
+	war_button.pressed.connect(func() -> void:
+		var here: Vector3 = client.display_position()
+		var nearest: Dictionary = {}
+		var distance := INF
+		for site in client.outposts:
+			var gap: float = Vector2(here.x, here.z).distance_to(
+				Vector2(float(site["x"]), float(site["z"])))
+			if gap < distance:
+				distance = gap
+				nearest = site
+		if nearest.is_empty() or distance > 24.0:
+			say("Siege: leader must be within 24m of a rival outpost")
+		else:
+			client.siege_declare(int(nearest["id"])))
+	inventory_box.add_child(war_button)
+
+
+
 	var kick_member := Button.new()
 	kick_member.text = "Kick"
 	kick_member.pressed.connect(func() -> void:
@@ -297,6 +402,26 @@ func _build() -> void:
 		else:
 			say("Party: select the member to remove"))
 	party_buttons.add_child(kick_member)
+	# Equipment-free support role, paid for with real carried medical items.
+	var aid_row := HBoxContainer.new()
+	inventory_box.add_child(aid_row)
+	var aid_items := OptionButton.new()
+	for item_id in ["bandage", "field_antiseptic", "antibiotics", "purified_serum"]:
+		if Defs.is_item(item_id):
+			var index: int = aid_items.item_count
+			aid_items.add_item(str(Defs.item(item_id).get("name", item_id)))
+			aid_items.set_item_metadata(index, item_id)
+	aid_row.add_child(aid_items)
+	var aid_button := Button.new()
+	aid_button.text = "Aid"
+	aid_button.tooltip_text = "Treat the selected nearby party member with one medical item; 5s cooldown."
+	aid_button.pressed.connect(func() -> void:
+		var target: int = _party_target.get_selected_id()
+		if target < 0 or aid_items.selected < 0:
+			say("Aid: select a nearby party member and a medical item.")
+		else:
+			client.party_aid(target, str(aid_items.get_selected_metadata())))
+	aid_row.add_child(aid_button)
 
 	var trade_title := Label.new()
 	trade_title.text = "Player barter (safe hub, within 6 metres)"
@@ -470,6 +595,18 @@ func say(text: String) -> void:
 
 func _on_event(event: Dictionary) -> void:
 	match event["type"]:
+		"self_defense":
+			if int(event.get("peer", -1)) == client.peer_id:
+				say("ATTACKED! You may retaliate for 30 seconds without infamy.")
+		"justice":
+			if int(event.get("peer", -1)) == client.peer_id:
+				say("Lawful PvP victory (%s). No criminal infamy added." % str(event.get("reason", "defense")))
+		"party_aid":
+			if int(event.get("peer", -1)) == client.peer_id:
+				say("Teammate treated you: +%d HP, -%d infection, -%d bleeding." % [
+					roundi(float(event.get("heal", 0.0))),
+					roundi(float(event.get("cure", 0.0))),
+					roundi(float(event.get("bleeding_stopped", 0.0)))])
 		"gathered":
 			say("+%d %s" % [event["amount"], Defs.item(event["item"]).get("name", event["item"])])
 		"campfire_refueled":
@@ -494,6 +631,14 @@ func _on_event(event: Dictionary) -> void:
 		"infection":
 			if event.get("peer", -1) == client.peer_id:
 				say("Infected wound: severity %d. Use antiseptic or antibiotics." % int(event.get("severity", 0)))
+		"bleeding":
+			if event.get("peer", -1) == client.peer_id:
+				say("Bleeding wound: %d/100. Use a bandage or antiseptic." % int(event.get("severity", 0)))
+		"renown":
+			if int(event.get("peer", -1)) == client.peer_id:
+				say("+%d renown from %s | %s (%d total)" % [
+					int(event.get("earned", 0)), str(event.get("source", "survival")),
+					str(event.get("rank", "Newcomer")), int(event.get("total", 0))])
 		"mastery":
 			if event.get("peer", -1) == client.peer_id:
 				say("+%d %s weapon mastery XP" % [int(event.get("xp", 0)),
@@ -503,6 +648,27 @@ func _on_event(event: Dictionary) -> void:
 				say("Evaded an infected attack!")
 		"siege_started":
 			say("Night siege! %d infected are attacking a T%d barricade." % [int(event.get("count", 0)), int(event.get("tier", 1))])
+		"guardian_taunt":
+			say("Frontline guardian draws %d infected away from teammates!" % int(event.get("count", 0)))
+		"raid_started":
+			say("RAID BOSS nearby! A mutant warlord entered the dangerous zone.")
+		"raid_enraged":
+			say("RAID PHASE TWO! The warlord is enraged. Dodge more frequent, stronger slams!")
+		"raid_warning":
+			say("RAID SLAM in %.1f seconds! Evade the marked %dm circle." % [
+				float(event.get("seconds", 2.0)), int(event.get("radius", 5))])
+		"raid_slam":
+			say("Raid boss slam struck. Dodge or retreat from the next circle.")
+		"raid_defeated":
+			say("RAID VICTORY! The warlord dropped one shared loot bag.")
+		"raid_expired":
+			say("Raid boss retreated. The encounter is over.")
+		"pvp_honor":
+			say("PvP: +%d honor | %d total (%s)" % [int(event.get("earned", 0)),
+				int(event.get("honor", 0)), str(event.get("rank", "Wanderer"))])
+		"raid_reinforcements":
+			say("RAID PHASE %d! %d additional infected appeared." % [
+				int(event.get("phase", 1)), int(event.get("count", 0))])
 		"scavenging":
 			if event.get("peer", -1) == client.peer_id:
 				say("+%d scavenging XP (rank %d)" % [
@@ -527,7 +693,81 @@ func _sell_one_material() -> void:
 	client.vendor(item_id, 1, false)
 
 
+func _claim_nearest_outpost_cache() -> void:
+	if client.you.is_empty():
+		return
+	var position := Vector2(float(client.you.get("x", 0.0)),
+		float(client.you.get("z", 0.0)))
+	var nearest_id: int = -1
+	var distance: float = 4.01
+	for site in client.outposts:
+		var at := Vector2(float(site["x"]), float(site["z"]))
+		var separation: float = position.distance_to(at)
+		if separation < distance:
+			nearest_id = int(site["id"])
+			distance = separation
+	if nearest_id < 0:
+		say("Outpost cache: move within 4 metres of a captured flag.")
+	else:
+		client.outpost_supplies(nearest_id)
+
+
 func _on_result(kind: String, data: Dictionary) -> void:
+	if kind == "throw_decoy":
+		say("Decoy deployed: nearby idle infected investigate the sound." if bool(data.get("ok", false)) else
+				"Decoy denied: " + str(data.get("reason", "rejected")))
+		return
+	if kind == "guardian_taunt":
+		if bool(data.get("ok", false)):
+			say("Guardian: drew %d infected; defensive brace for 3 seconds (-30%% infected damage)." % int(data.get("count", 0)))
+		else:
+			say("Guardian: " + str(data.get("reason", "rejected")))
+		return
+	if kind == "outpost_supplies":
+		if bool(data.get("ok", false)):
+			say("Outpost supplies collected! %d cache shares left. Inventory updated." % int(data.get("remaining", 0)))
+		else:
+			say("Outpost cache: " + str(data.get("reason", "rejected")))
+		return
+	if kind == "party_aid":
+		if bool(data.get("ok", false)):
+			say("Field aid: +%d HP, -%d infection, -%d bleeding." % [
+				roundi(float(data.get("heal", 0.0))),
+				roundi(float(data.get("cure", 0.0))),
+				roundi(float(data.get("bleeding_stopped", 0.0)))])
+		else:
+			say("Field aid denied: " + str(data.get("reason", "rejected")))
+		return
+	if kind == "loot" and str(data.get("reason", "")) == "raid_reserved":
+		say("Raid loot is reserved for its contributors (%ds remaining)." % [
+			int(ceil(float(data.get("remaining", 0.0))))])
+		return
+	if kind == "siege_declare":
+		if bool(data.get("ok", false)):
+			say("Siege declared! Prepare for %ds, attack within %ds." % [
+				int(data.get("preparation", 0)), int(data.get("attack_window", 0))])
+		else:
+			say("Siege declaration: " + str(data.get("reason", "rejected")))
+		return
+	if kind == "outpost_breach":
+		if bool(data.get("ok", false)):
+			say("Siege breach successful: enemy fortification now T%d." % int(data.get("level", 0)))
+		else:
+			say("Siege breach: " + str(data.get("reason", "rejected")))
+		return
+	if kind == "outpost_fortify":
+		if bool(data.get("ok", false)):
+			say("Outpost fortified to T%d; spent %s" % [
+				int(data.get("level", 0)), str(data.get("spent", {}))])
+		else:
+			say("Outpost fortification: " + str(data.get("reason", "rejected")))
+		return
+	if kind == "rally":
+		if bool(data.get("ok", false)):
+			say("Party rally active for 45 seconds. Only teammates see the marker.")
+		else:
+			say("Party rally: " + str(data.get("reason", "rejected")))
+		return
 	if kind == "party":
 		if bool(data.get("ok", false)):
 			say("Party updated. Member lists appear in the next server snapshot.")
@@ -560,7 +800,7 @@ func _on_result(kind: String, data: Dictionary) -> void:
 		return
 	if kind == "rest":
 		if bool(data.get("ok", false)):
-			say("Camp rest: recovered; 90 seconds until the next rest")
+			say("Field respite: recovered by a safe campfire (90s cooldown)" if bool(data.get("field", false)) else "Hub rest: recovered (90s cooldown)")
 		else:
 			say("Camp rest: " + str(data.get("reason", "rejected")))
 		return
@@ -632,22 +872,74 @@ func _on_result(kind: String, data: Dictionary) -> void:
 		say(reasons.get(reason, "Stash: " + reason))
 
 
+## Shows the actual authoritative unit price formula; PvP infamy increases
+## the price AFTER earned renown discount, and the result may change live.
+func _refresh_vendor_price_labels() -> void:
+	if _vendor_water_button == null or _vendor_food_button == null:
+		return
+	var points: int = int(client.you.get("renown", 0))
+	var crime: float = float(client.you.get("pvp_infamy", 0.0))
+	var water: int = PvpInfamy.vendor_unit_price(
+		Reputation.buy_price(int(Vendor.BUY_PRICES["water_bottle"]), 1, points),
+		crime, true)
+	var food: int = PvpInfamy.vendor_unit_price(
+		Reputation.buy_price(int(Vendor.BUY_PRICES["canned_food"]), 1, points),
+		crime, true)
+	_vendor_water_button.text = "Buy water (%d silver)" % water
+	_vendor_food_button.text = "Buy food (%d silver)" % food
+
+
 func _process(_delta: float) -> void:
 	if client == null or not client.you.has("health"):
 		return
+	_refresh_vendor_price_labels()
 	_bars["health"].value = client.you["health"]
 	_bars["hunger"].value = client.you["hunger"]
 	_bars["thirst"].value = client.you["thirst"]
 	_bars["infection"].value = float(client.you.get("infection", 0.0))
+	_bars["bleeding"].value = float(client.you.get("bleeding", 0.0))
 	_bars["exposure"].value = float(client.you.get("exposure", 0.0))
 	var zone: int = clampi(int(client.you.get("zone", 0)), 0, 3)
 	_zone_label.text = "%s zone (T%d)\n%s" % [Defs.ZONE_NAMES[zone].capitalize(), zone + 1, ZoneRisk.description(zone)]
+	var response_time: float = float(client.you.get("self_defense_seconds", 0.0))
+	if response_time > 0.0:
+		_info_label.text += "\nSELF-DEFENSE: %ds remaining" % ceili(response_time)
+	var infamy: float = float(client.you.get("pvp_infamy", 0.0))
+	if infamy > 0.0:
+		_zone_label.text += "\n%s %d/100 | Vendor penalty" % [
+			"OUTLAW" if PvpInfamy.is_outlaw(infamy) else "Infamy", ceili(infamy)]
 	_zone_label.add_theme_color_override("font_color", [Color(0.4, 0.9, 0.4), Color(0.95, 0.85, 0.3), Color(0.95, 0.45, 0.3), Color(0.8, 0.3, 0.9)][zone])
-	_info_label.text = "%s | FPS %d  kills %d  deaths %d  Load %.1f kg  Speed %.0f%%  Stamina %d  Dodge %.1fs" % [
+	_info_label.text = "%s | FPS %d  kills %d  deaths %d  Load %.1f kg  Speed %.0f%%  Stamina %d  Dodge %.1fs  Guardian %.1fs  Brace %.1fs" % [
 		"NIGHT" if WorldCycle.is_night(client.server_time) else "DAY", Engine.get_frames_per_second(), client.you.get("kills", 0), client.you.get("deaths", 0),
 		float(client.you.get("carry_kg", 0.0)), 100.0 * float(client.you.get("cargo_factor", 1.0)),
-		int(client.you.get("stamina", Defs.MAX_STAMINA)), float(client.you.get("dodge_cooldown", 0.0))
+		int(client.you.get("stamina", Defs.MAX_STAMINA)), float(client.you.get("dodge_cooldown", 0.0)),
+		float(client.you.get("guardian_cooldown", 0.0)),
+		float(client.you.get("guardian_brace", 0.0))
 	]
+	var guild: Dictionary = client.you.get("guild", {})
+	if str(guild.get("id", "")) != "":
+		var nearby_mates := 0
+		for other in client.players.values():
+			var tag: Dictionary = other.get("guild", {})
+			if str(tag.get("id", "")) == str(guild["id"]):
+				nearby_mates += 1
+		_info_label.text += "\nGuild: %s | allies nearby: %d" % [
+			str(guild.get("name", "")), nearby_mates
+		]
+	if bool(client.you.get("warden_ward", false)):
+		_info_label.text += "\nWARDEN'S WARD: -15% infected wounds (nearby relic ally)"
+	_info_label.text += "\nStorm insulation %d%% (equipped armor)" % int(
+		round(100.0 * float(client.you.get("weather_insulation", 0.0))))
+	_info_label.text += "\nCAMP RENOWN %s: %d / %d | NPC buy discount %d%%" % [
+		str(client.you.get("renown_rank", "Newcomer")),
+		int(client.you.get("renown", 0)), int(client.you.get("renown_next", 40)),
+		int(client.you.get("vendor_discount", 0))]
+	var blood_range: float = float(client.you.get("blood_scent_radius", 0.0))
+	if blood_range > 0.0:
+		_info_label.text += "\nBLOOD SCENT: infected can sense the wound from %d m" % ceili(blood_range)
+	var stim_remaining: float = float(client.you.get("stim_cooldown", 0.0))
+	if stim_remaining > 0.0:
+		_info_label.text += "\nFIELD STIM: recharge %.0fs" % stim_remaining
 	var weather: Dictionary = client.you.get("weather", {})
 	if not weather.is_empty():
 		_info_label.text += "\nWeather: %s %.0fC %s | Exposure %d/100 | Heat pack %ds" % [
@@ -658,22 +950,91 @@ func _process(_delta: float) -> void:
 		]
 	var journal: Variant = client.you.get("contract", Contracts.empty_state())
 	_contract_label.text = Contracts.description(journal if journal is Dictionary else Contracts.empty_state())
+	_contract_label.text += "\n" + str(client.you.get("daily_description", "Daily bounty pending server"))
 	_info_label.text += "  Rest %.0fs" % float(client.you.get("rest_cooldown", 0.0))
+	var combat_tag: float = float(client.you.get("combat_tag_seconds", 0.0))
+	if combat_tag > 0.0:
+		_info_label.text += "\nPvP COMBAT %.0fs — leaving a full-loot zone now drops gear!" % ceil(combat_tag)
+	_info_label.text += "\nPvP victories %d | Honor %d | %s" % [
+		int(client.you.get("pvp_kills", 0)), int(client.you.get("pvp_honor", 0)),
+		str(client.you.get("pvp_rank", "Wanderer"))
+	]
+	# A lightweight compass for siege outposts; all coordinates, owners and
+	# progress originate in the authoritative snapshot, not client commands.
+	var closest: Dictionary = {}
+	var best_distance := INF
+	var here := Vector2(float(client.you.get("x", 0.0)), float(client.you.get("z", 0.0)))
+	for post in client.outposts:
+		var distance: float = here.distance_to(Vector2(float(post["x"]), float(post["z"])))
+		if distance < best_distance:
+			best_distance = distance
+			closest = post
+	if not closest.is_empty():
+		var group_id: int = int(client.you.get("party", {}).get("id", 0))
+		var owner: int = int(closest["owner"])
+		var status: String = "Neutral" if owner == 0 else ("YOURS" if owner == group_id and group_id != 0 else "Party %d" % owner)
+		if bool(closest["contested"]):
+			status += " | CONTESTED"
+		elif int(closest["challenger"]) != 0:
+			status += " | Capture %d%%" % int(100.0 * float(closest["progress"]) / maxf(1.0, float(closest.get("capture_target", 30.0))))
+		status += " | Fort T%d" % int(closest.get("fortification", 0))
+		if str(closest.get("siege_phase", "")) != "":
+			var pending: bool = str(closest["siege_phase"]) == "preparing"
+			var seconds: int = int(ceil(float(closest["siege_starts_in"] if pending else closest["siege_ends_in"])))
+			status += " | WAR %s %ds (party %d)" % [
+				"prep" if pending else "active", seconds, int(closest["siege_attacker"])
+			]
+		if float(closest.get("breach_cooldown", 0.0)) > 0.0:
+			status += " | Breach CD %ds" % int(ceil(float(closest["breach_cooldown"])))
+		status += " | Supplies %d/5" % int(closest.get("supplies_left", 0))
+		_info_label.text += "\nSiege outpost #%d at (%d, %d): %.0f m | %s" % [
+			int(closest["id"]), int(closest["x"]), int(closest["z"]), best_distance, status
+		]
+
+	if int(client.you.get("siege_wins", 0)) > 0:
+		_info_label.text += " | Siege victories: %d" % int(client.you["siege_wins"])
+	var rally: Dictionary = client.you.get("party", {}).get("rally", {})
+	if not rally.is_empty():
+		_info_label.text += "\nPARTY RALLY x%d z%d | %ds left" % [
+			int(rally["x"]), int(rally["z"]), int(ceil(float(rally["remaining"])))]
 	var fishing_status: String = FishingDisplay.progress(client.you.get("action", {}))
 	if not fishing_status.is_empty():
 		_info_label.text += "\n" + fishing_status
 	var weapon: String = client.you.get("weapon", "")
 	var levels: Dictionary = client.you.get("gathering_levels", {})
 	var weapon_levels: Dictionary = client.you.get("combat_levels", {})
-	_equipped.text = "Weapon: %s | Craft L%d (%d XP)\nWood L%d | Stone L%d | Ore L%d | Fiber L%d | Fishing L%d | Scavenging L%d (%d XP)\nMastery: Melee L%d | Ranged L%d" % [
+	var active: Dictionary = Combat.active_skill(weapon)
+	var skill_name: String = "None"
+	if not active.is_empty():
+		match str(active["id"]):
+			"focused_shot":
+				skill_name = "Focused Shot (G)"
+			"power_draw":
+				skill_name = "Power Draw (G)"
+			"piercing_thrust":
+				skill_name = "Piercing Thrust (G)"
+			"purifying_slam":
+				skill_name = "Purifying Slam (G)"
+			"heavy_strike":
+				skill_name = "Heavy Strike (G)"
+	_equipped.text = "Weapon: %s | Craft L%d (%d XP)\nWood L%d | Stone L%d | Ore L%d | Fiber L%d | Fishing L%d | Scavenging L%d (%d XP)\nMastery: Melee L%d | Ranged L%d\nSkill: %s  Energy %d/%d  Cooldown %.1fs" % [
 		(Defs.item(weapon).get("name", weapon) if weapon != "" else "fists"),
 		int(client.you.get("crafting_level", 1)), int(client.you.get("crafting_xp", 0)),
 		int(levels.get("wood", 1)), int(levels.get("stone", 1)),
 		int(levels.get("ore", 1)), int(levels.get("fiber", 1)),
 		int(levels.get("fishing", 1)),
 		int(client.you.get("scavenging_level", 1)), int(client.you.get("scavenging_xp", 0)),
-		int(weapon_levels.get("melee", 1)), int(weapon_levels.get("ranged", 1))
+		int(weapon_levels.get("melee", 1)), int(weapon_levels.get("ranged", 1)),
+		skill_name, int(client.you.get("combat_energy", 0)), int(Defs.COMBAT_ENERGY_MAX),
+		float(client.you.get("skill_cooldown", 0.0))
 	]
+	var ranged_ammo: String = str(Defs.item(weapon).get("ammo", ""))
+	if not ranged_ammo.is_empty():
+		_equipped.text += "\nAmmo: %s ×%d" % [
+			str(Defs.item(ranged_ammo).get("name", ranged_ammo)),
+			client.inventory.count(ranged_ammo)]
+	_party_frames.text = PartyFrames.describe(client.you.get("party", {}), client.peer_id)
+	_party_frames.visible = not _party_frames.text.is_empty()
 	_death.visible = not bool(client.you.get("alive", true))
 	_death.text = "YOU DIED\n%s" % ("All carried items dropped." if bool(client.you.get("last_death_full_loot", false)) else "Carried equipment retained.")
 	if _inventory_panel.visible:
@@ -708,6 +1069,7 @@ func _refresh_party_controls() -> void:
 	var state: Dictionary = client.you.get("party", {})
 	var group_id: int = int(state.get("id", 0))
 	var roster: Array = state.get("roster", [])
+	var remaining_aid: float = float(client.you.get("party_aid_cooldown", 0.0))
 	if group_id == 0:
 		_party_status.text = "No party. Invite someone nearby to start one."
 	else:
@@ -716,8 +1078,14 @@ func _refresh_party_controls() -> void:
 			var prefix: String = "[Leader] " if int(member["id"]) == int(state.get("leader", 0)) else ""
 			names.append("%s%s (%d HP)" % [prefix, str(member["name"]), int(member["health"])])
 		_party_status.text = "Party %d (%d/5): %s" % [group_id, roster.size(), ", ".join(names)]
+	if remaining_aid > 0.0:
+		_party_status.text += "\nMedical aid ready in %.1f s" % remaining_aid
 	if int(state.get("invite_from", 0)) > 0:
 		_party_status.text += "\nInvitation from " + str(state.get("invite_name", "Survivor"))
+	var rally: Dictionary = state.get("rally", {})
+	if not rally.is_empty():
+		_party_status.text += "\nRally: x%d z%d (%d seconds)" % [
+			int(rally["x"]), int(rally["z"]), int(ceil(float(rally["remaining"])))]
 	var nearby: Array = []
 	for peer in client.players.values():
 		nearby.append([int(peer["id"]), str(peer.get("name", "Survivor"))])

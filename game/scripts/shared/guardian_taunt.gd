@@ -1,0 +1,42 @@
+extends RefCounted
+## Classless party guardian: server-owned redirection of infected already
+## pursuing allies. Client cannot choose a zombie or manipulate its hate.
+
+const Defs = preload("res://scripts/shared/defs.gd")
+const RADIUS := 12.0
+const MAX_TARGETS := 3
+const FOCUS_SECONDS := 3.0
+const COOLDOWN := 20.0
+const ENERGY_COST := 25.0
+# Successfully pulling infected off the party grants a short defensive
+# brace, not permanent damage resistance or PvP protection.
+const GUARD_SECONDS := FOCUS_SECONDS
+const INFECTED_DAMAGE_REDUCTION := 0.30
+
+## Apply after armor only to an active, melee-equipped group guardian.
+## No infection, bleed, poison, hunger or player-vs-player reduction.
+static func brace_damage(damage: float, seconds: float, equipped: bool, grouped: bool) -> float:
+	if not is_finite(damage) or damage <= 0.0:
+		return 0.0
+	if is_finite(seconds) and seconds > 0.0 and equipped and grouped:
+		return damage * (1.0 - INFECTED_DAMAGE_REDUCTION)
+	return damage
+
+
+
+static func melee_equipped(inventory) -> bool:
+	var id: String = inventory.weapon
+	return id != "" and inventory.count(id) > 0 and 		str(Defs.item(id).get("weapon", "")) == "melee"
+
+
+static func eligible_enemy(enemy, origin: Vector3, members: Array, world) -> bool:
+	if not origin.is_finite() or not enemy.position.is_finite() or not enemy.is_alive():
+		return false
+	if enemy.target_id <= 0 or not members.has(enemy.target_id):
+		return false
+	if world.is_safe(origin.x, origin.z):
+		return false
+	if world.zone_at(origin.x, origin.z) != world.zone_at(enemy.position.x, enemy.position.z):
+		return false
+	var distance := Vector2(enemy.position.x - origin.x, enemy.position.z - origin.z).length_squared()
+	return distance <= RADIUS * RADIUS and distance <= 		float(enemy.data["lose"]) * float(enemy.data["lose"])

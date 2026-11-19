@@ -6,6 +6,7 @@ const Structures = preload("res://scripts/shared/structures.gd")
 const Meshes = preload("res://scripts/client/meshes.gd")
 const CharacterModel = preload("res://scripts/client/character_model.gd")
 const Assets = preload("res://scripts/client/assets.gd")
+const LootLabel = preload("res://scripts/shared/loot_label.gd")
 
 const ZOMBIE_LOOK := {
 	"walker": {"tint": Color(0.62, 0.85, 0.55), "scale": 2.0, "walk": 0.8, "model": "Orc_Male"},
@@ -30,6 +31,11 @@ func update_from(client) -> void:
 		_touch("barricade:%d" % id, "barricade", client.barricades[id], seen)
 	for id in client.campfires:
 		_touch("campfire:%d" % id, "campfire", client.campfires[id], seen)
+	for id in client.decoys:
+		_touch("decoy:%d" % id, "decoy", client.decoys[id], seen)
+	if not client.raid_telegraph.is_empty():
+		_touch("raid_warning:%d" % int(client.raid_telegraph["id"]),
+			"raid_warning", client.raid_telegraph, seen)
 	for key in _nodes.keys():
 		if not seen.has(key):
 			_nodes[key].queue_free()
@@ -47,9 +53,27 @@ func _touch(key: String, kind: String, entity: Dictionary, seen: Dictionary) -> 
 	var label: Label3D = _nodes[key].get_node_or_null("Label")
 	if label != null:
 		if kind == "zombie":
-			label.text = "%s  %d" % [entity["type"], int(entity["hp"])]
+			label.text = "%s%s  %d" % [
+				"ENRAGED RAID BOSS " if bool(entity.get("raid_enraged", false)) else (
+				"RAID BOSS " if bool(entity.get("raid_boss", false)) else (
+				"ELITE " if bool(entity.get("elite", false)) else "")),
+				str(entity["type"]), int(entity["hp"])]
 		elif kind == "player":
-			label.text = str(entity["name"]) if entity["alive"] else "%s (dead)" % entity["name"]
+			label.text = ("%s%s" % [
+				"OUTLAW " if bool(entity.get("outlaw", false)) else "", str(entity["name"])]) if entity["alive"] else "%s (dead)" % entity["name"]
+		elif kind == "bag":
+			label.text = LootLabel.for_bag(entity)
+			label.visible = not label.text.is_empty()
+	if kind == "bag":
+		# Gold = available to your party, grey = reserved, brown = public.
+		var loot_mesh: MeshInstance3D = _nodes[key].get_child(0)
+		var loot_material: StandardMaterial3D = loot_mesh.material_override
+		if bool(entity.get("reserved", false)):
+			loot_material.albedo_color = (
+				Color(0.96, 0.69, 0.22) if bool(entity.get("can_loot", false))
+				else Color(0.43, 0.47, 0.51))
+		else:
+			loot_material.albedo_color = Color(0.64, 0.42, 0.23)
 	if kind == "barricade":
 		var barricade_mesh: MeshInstance3D = _nodes[key].get_child(0)
 		var barricade_material: StandardMaterial3D = barricade_mesh.material_override
@@ -60,7 +84,13 @@ func _touch(key: String, kind: String, entity: Dictionary, seen: Dictionary) -> 
 		# A zombie that has locked on to someone flushes red.
 		var model: Node3D = _nodes[key].get_node("Model")
 		var base: Color = ZOMBIE_LOOK[entity["type"]]["tint"]
-		model.set_tint(base.lerp(ALERT_TINT, 0.6) if int(entity["state"]) >= 2 else base)
+		if bool(entity.get("raid_enraged", false)):
+			base = Color(1.0, 0.12, 0.12)
+		elif bool(entity.get("raid_boss", false)):
+			base = Color(0.92, 0.2, 0.63)
+		elif bool(entity.get("elite", false)):
+			base = Color(0.98, 0.65, 0.18)
+		model.set_tint(base.lerp(ALERT_TINT, 0.45) if int(entity["state"]) >= 2 else base)
 		model.set_zombie_state(int(entity["state"]))
 	if kind == "player":
 		var player_model: Node3D = _nodes[key].get_node("Model")
@@ -82,6 +112,28 @@ func _make(kind: String, entity: Dictionary) -> Node3D:
 		material.albedo_color = Color(0.6, 0.45, 0.27)
 		barricade.material_override = material
 		root.add_child(barricade)
+		return root
+	if kind == "decoy":
+		var clacker := MeshInstance3D.new()
+		var shape := CylinderMesh.new()
+		shape.top_radius = 0.22
+		shape.bottom_radius = 0.3
+		shape.height = 0.26
+		clacker.mesh = shape
+		clacker.position.y = 0.18
+		var material := StandardMaterial3D.new()
+		material.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+		material.albedo_color = Color(0.98, 0.68, 0.16)
+		clacker.material_override = material
+		root.add_child(clacker)
+		var label := Label3D.new()
+		label.text = "NOISE LURE"
+		label.name = "Label"
+		label.billboard = BaseMaterial3D.BILLBOARD_ENABLED
+		label.font_size = 18
+		label.pixel_size = 0.006
+		label.position.y = 1.0
+		root.add_child(label)
 		return root
 	if kind == "campfire":
 		var wood := MeshInstance3D.new()
@@ -114,14 +166,46 @@ func _make(kind: String, entity: Dictionary) -> Node3D:
 		light.shadow_enabled = false
 		root.add_child(light)
 		return root
+	if kind == "raid_warning":
+		# Flat translucent danger disc. No physics body, network authority or
+		# client damage calculation; the server alone resolves the timed slam.
+		var circle := MeshInstance3D.new()
+		var shape := CylinderMesh.new()
+		shape.top_radius = float(entity.get("radius", 5.0))
+		shape.bottom_radius = shape.top_radius
+		shape.height = 0.06
+		shape.radial_segments = 48
+		circle.mesh = shape
+		circle.position.y = 0.16
+		var warning_material := StandardMaterial3D.new()
+		warning_material.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+		warning_material.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+		warning_material.albedo_color = Color(0.98, 0.12, 0.36, 0.30)
+		warning_material.cull_mode = BaseMaterial3D.CULL_DISABLED
+		circle.material_override = warning_material
+		root.add_child(circle)
+		return root
 	if kind == "bag":
 		var mesh := MeshInstance3D.new()
 		if Assets.has_village():
 			mesh.mesh = Assets.village_mesh("EA03_Prop_Container_Basket_01a")
 			mesh.scale = Vector3.ONE * 1.8
+			var basket_material := mesh.mesh.surface_get_material(0)
+			mesh.material_override = basket_material.duplicate() if basket_material is StandardMaterial3D else StandardMaterial3D.new()
 		else:
 			mesh.mesh = Meshes.get_mesh("bag")
+			mesh.material_override = StandardMaterial3D.new()
 		root.add_child(mesh)
+		var label := Label3D.new()
+		label.name = "Label"
+		label.billboard = BaseMaterial3D.BILLBOARD_ENABLED
+		label.no_depth_test = true
+		label.pixel_size = 0.008
+		label.font_size = 24
+		label.outline_size = 8
+		label.position.y = 1.3
+		label.visible = false
+		root.add_child(label)
 		return root
 	var model := CharacterModel.new()
 	model.name = "Model"
@@ -131,8 +215,10 @@ func _make(kind: String, entity: Dictionary) -> Node3D:
 		var zombie_model: String = look["model"]
 		if entity["type"] == "walker" and int(entity["id"]) % 2 == 1:
 			zombie_model = "Orc_Female"
-		model.setup(look["tint"], look["scale"], look["walk"], zombie_model, true)
-		height = 1.3 * float(look["scale"])
+		model.setup(look["tint"], float(look["scale"]) * (
+			1.75 if bool(entity.get("raid_boss", false)) else (
+			1.18 if bool(entity.get("elite", false)) else 1.0)), look["walk"], zombie_model, true)
+		height = 1.3 * float(look["scale"]) * (1.75 if bool(entity.get("raid_boss", false)) else 1.0)
 	else:
 		var hue := float(abs(int(entity["id"]) * 2654435761 % 1000)) / 1000.0
 		var character: String = Assets.CHARACTER_NAMES[int(abs(int(entity["id"]))) % Assets.CHARACTER_NAMES.size()]

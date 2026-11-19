@@ -956,7 +956,7 @@ execute `tests/test_scavenging.gd` along with the existing server suites.
 
 ## Extinguishing a field campfire
 
-A survivor can now extinguish a **fire they own** by pressing **0** near it,
+A survivor can now extinguish a **fire they own** by pressing **-** near it,
 or by choosing **Extinguish my nearby campfire** from the online inventory.
 The command is validated by the dedicated server: the fire must still be
 burning, the owner must be alive and within 3.2 metres, and account ownership
@@ -1088,3 +1088,988 @@ contribution cannot generate shared XP.
 roster changes, PvP hit selection, XP limits and exploit rejections.
 This is cooperative PvE progression, not an automated loot distribution
 or guild/clan replacement.
+
+## Party rally beacon (group coordination)
+
+A formed expedition party can mark a temporary **rally point** using
+**Set rally** in the online **I** inventory menu. Only its leader can place
+a marker, and the position comes from the leader's actual server-side
+character coordinates — there is no client-supplied map position to forge.
+The party sees the shared blue 3D waypoint plus its X/Z coordinates and
+remaining lifetime. It lasts 45 seconds and can be refreshed only once
+per 12 seconds. Solo players, non-leaders and outsiders cannot place or
+observe group markers, even if they stand nearby. A party disband or
+expiration hides the waypoint; markers do not survive server restarts.
+
+This is separate from guild territory claims and loot rights. Existing
+Godot/Cgame script and scene APIs are sufficient. Regression tests:
+`game/tests/test_party_rally.gd` in the canonical headless runner.
+
+
+## Elite infected encounters (MMORPG ruin champions)
+
+Rare **elite infected** appear deterministically among ruin spawn points in
+**red and black** risk zones only (approximately one in seven ruin spawns).
+They have **2.5× health**, **1.4× damage** and **3× base weapon mastery XP**,
+and retain existing aggro, party-assist, group threat and protection rules.
+Elites are larger and gold-tinted in both clients; multiplayer snapshots
+replicate an `elite` flag rather than trusting clients to label enemies.
+
+Elite kills drop the original infected loot plus guaranteed salvage,
+silver and one **Infected Core**, in an ordinary lootable world bag. Two
+cores, a bandage and a water bottle can be crafted at the workbench into
+**Purified Survivor Serum** (T3), which heals 16 health and treats 65
+infection using the existing medical item rules. This connects cooperative
+PvE hunts with the survival and player-economy loops.
+
+`tests/test_elite_infected.gd` checks deterministic rarity, safe-zone
+exclusion, stat isolation, server visibility, one-time loot rewards and
+the trophy crafting recipe. It is included in the main `game/` test suite.
+No native Cgame engine change is required for this game-layer feature.
+
+### Non-overlapping survival hotkeys
+
+**0** remains quick-cook fish in both offline and connected clients; **-**
+(minus) now extinguishes the nearest owned campfire. These actions previously
+shared key 0, causing ambiguous/unreachable behaviour. The inventory buttons
+remain available as alternative controls.
+
+## Group-combat XP integrity
+
+A group assist now remembers the **server-side party ID at the time of
+confirmed infected damage**, not merely at the moment the enemy dies.
+Joining a party after damaging an infected or leaving and reforming a
+new party cannot retroactively turn that old hit into shared weapon mastery
+XP. Fresh damage while an eligible party member continues to award the
+normal bounded assist XP.
+
+The new headless `test_party_assist_integrity.gd` regression is included
+in `tests/run_all.gd`. It verifies pre-invite hits, legitimate assists,
+corpse replay denial, regrouping and single-loot accounting. Existing
+Lineage-style invitations, rally points, contribution windows, party
+friendly-fire immunity and guild systems remain unchanged.
+
+## Contested survivor outposts (Lineage-style siege prototype)
+
+Three seed-deterministic outposts are placed on traversable land in the
+**red and black full-loot PvP zones**. In the multiplayer HUD the nearest
+outpost is displayed with its world coordinates, distance, controller and
+capture progress. The same public state travels in authoritative snapshots.
+
+At least **two living members of one server-owned party** must stand within
+12 metres of a flag for 30 accumulated seconds to claim it. A rival nearby
+survivor contests the capture, even if not yet in a party. Rival parties can
+retake the flag by driving the defenders away and capturing it themselves.
+Ownership lasts for at most 15 minutes, and ends earlier if its party
+disbands. Outpost ownership and capture timers are server-session data only.
+There are no client RPCs for setting owners, changing progress or claiming
+unearned rewards.
+
+While a party controls an outpost, its members gain **2 additional stamina
+per second** while within 18 metres, provided they are alive, sufficiently
+fed and hydrated, and not in the normal stamina-recovery delay. The benefit
+is capped at the normal stamina maximum and never applies remotely.
+Successful captures emit one server-owned event; the list and progress are
+synchronized in the existing snapshots.
+
+This is a **party-controlled siege prototype**, not permanent Nakama guild
+ownership or a persistent castle economy. Proper clan wars will require
+authenticated guild membership, authority rules for scheduling sieges, and
+durable territory ownership before they can be enabled. Static battle
+logic is in `scripts/shared/territory_control.gd`, integrated with
+`scripts/server/game_server.gd`, and regression-tested by
+`tests/test_territory_control.gd` through `tests/run_all.gd`.
+Existing Cgame physics, ENet and snapshot APIs are sufficient.
+
+## On-screen cooperative party health
+
+The multiplayer HUD now shows a **compact persistent party frame** below
+the survivor's equipment readout. It displays the server-reported party
+size, leader marker, teammates' current health, and whether anyone is
+down. The local player is labeled separately. Players fighting a night
+siege, a ruin elite or an infected pack no longer have to open their
+inventory to check allies' status.
+
+The new pure formatter in `scripts/client/party_frames.gd` uses only the
+authoritative `you.party.roster` snapshot. It limits the display to five
+members, truncates/sanitizes names and clamps malformed health values.
+The `tests/test_party_frames.gd` regression checks leader identity,
+health, death state, sanitization and empty-party behavior. No engine
+modifications are required.
+
+## Bleeding wounds and first aid
+
+Real zombie strikes and eligible player melee hits outside protected areas can cause
+persistent bleeding. Bleeding gradually clots but drains health while active;
+its severity is computed only by the authoritative server. Zombies still cause
+infection independently, and dodged strikes cannot wound the survivor.
+
+Bandages and crafted field antiseptic now **stop bleeding** as well as retaining
+their original healing / infection effects. A bandage is usable even at full
+health if a wound is bleeding; no medicine is spent on a completely healthy
+survivor. The wound severity appears in both the local HUD and networked UI,
+is saved with existing version-1 character data, defaults to zero in legacy
+saves, and rejects corrupt values during restore.
+
+The implementation uses existing Cgame APIs, so this change does not need
+modifications to the native engine. Run:
+
+```bash
+godot --headless --path game --script res://tests/run_all.gd
+```
+
+The `test_bleeding.gd` suite verifies bleed damage/decay, cure rules, zombie
+strikes, PvP protection, persistence and invalid save rejection.
+
+## Raid loot ownership (Lineage-style cooperative PvE)
+
+Defeating a server-spawned raid boss creates **one shared loot bag**.
+For the first **75 seconds**, pickup is reserved for the killing survivor
+and surviving same-party members who actually damaged the boss within
+20 seconds, remained close, and carried the weapon used in combat.
+Nonparticipating spectators and other parties cannot take these rare
+materials immediately. After the reservation, any nearby survivor can
+collect what remains; normal zombie loot is unchanged.
+
+The server freezes entitlement at the confirmed kill and uses trusted
+account identities (or per-object guest session IDs), never client-supplied
+loot ownership. A reconnecting account keeps its earned access, while a
+recycled guest peer number cannot steal it. Public snapshots reveal only
+bag location and remaining reservation time, not account identities.
+The bag is not duplicated for each player, and repeated pickups cannot
+create items. The new `tests/test_raid_loot_rights.gd` is part of the
+headless suite. Existing Cgame APIs were sufficient.
+
+
+## Cooperative dangerous-zone raid boss — Lineage-inspired PvE
+
+The canonical online game in `game/` now features a **server-scheduled
+mutant warlord encounter**. It builds on the existing survivor parties,
+zombie AI, tank threat lists, classless weapon mastery and loot-bag economy.
+
+- Assemble at least **two living members of the same party** within
+  **20 metres** of its leader in a **red or black zone**. After the world
+  has been running for 90 seconds, the dedicated scheduler can summon
+  a raid boss nearby. A lone player, strangers without a party, a safe-zone
+  group or distant teammates cannot trigger it.
+- The server chooses an accessible spawn spot **22–30 metres** from the
+  leader, away from all players, water, blocked terrain and safe-zone or
+  risk-zone boundaries. Client input cannot nominate a boss ID, position,
+  rewards or timer.
+- Only **one raid boss** can exist at a time. It has **600 HP**, uses the
+  existing brute zombie chase and threat mechanics, and retreats after
+  **4 minutes** or when no survivor remains nearby. A new encounter
+  requires **10 minutes since the previous spawn**.
+- The boss performs a **telegraphed 5-metre area slam**. The networked
+  client sees a red ground disc and a warning **2 seconds** before impact.
+  Players can move outside it or dodge. The server calculates damage,
+  armor mitigation, life state and protected-zone restrictions.
+- Defeating it produces **exactly one shared world loot bag**, with
+  silver, infected cores, high-tier metal bars and field bandages.
+  The normal zombie loot and classless combat XP still apply. Party
+  members receive bonus weapon mastery only after actual confirmed
+  contributions, not for standing idle.
+- Raid messages are distributed only to nearby observers. No reward
+  duplication, client-owned boss spawns, duplicated quest progress or
+  persistence of session timers is allowed.
+
+This is an original, small cooperative world-boss encounter — **not yet**
+an instanced dungeon, a scheduled global raid calendar, a persistent
+guild war or a fully balanced MMO boss rotation. Those systems can grow
+from the same authoritative primitives rather than creating copies
+of NPC logic in `demo/`.
+
+Run the existing test suite:
+
+```sh
+godot --headless --path game --script res://tests/run_all.gd
+```
+
+`test_raid_encounter.gd` covers safe-zone/group restrictions, 2-player
+eligibility, bounded terrain-safe spawning, private announcements, attack
+warning/dodge/damage, once-only shared loot and boss cooldown/expiry.
+The `albion-after-raid-boss.yml` GitHub Actions workflow invokes the
+same tests. Successful Godot/Cgame execution must be checked before a
+production deployment. No additional C++ engine primitive was needed
+for this gameplay feature.
+
+
+## Party-first PvE loot and public full-loot drops
+
+An infected kill creates a loot bag exclusively available to the **actual
+server-confirmed killer and the party members present at the moment of death**
+for the first 18 seconds. After that, the bag is public for the remainder of
+its normal five-minute lifetime. Players who join the party after the kill
+cannot retroactively gain rights to earlier bags. Loose items left over after
+scavenging a crate have the same short protection for that scavenger's party.
+
+The server validates every `cmd_loot` against the original eligibility
+snapshot, including distance checks and inventory limits. Unauthorized
+attempts return `reserved` without transferring or deleting items. Clients
+see their own `can_loot` flag and remaining timer, but **never receive the
+server's owner/party identity tokens**. Authenticated accounts can reclaim their PvE loot after reconnect, while a new guest reusing a disconnected peer ID cannot inherit an old session's rights. Online world bags are gold for eligible party
+members, grey when reserved by someone else, and brown once public.
+
+**Player-death bags in red and black zones are always public immediately.**
+This feature does not weaken the full-loot PvP risk. No native engine additions
+are necessary: the server owns access control, and the existing snapshot and
+Godot 3D rendering APIs handle the client. Test via
+`godot --headless --path game --script res://tests/run_all.gd`
+(`game/tests/test_loot_rights.gd`).
+
+
+## Team field medicine — server-authoritative party support
+
+Survivors in the same squad can help injured or infected teammates without
+choosing a fixed healing class. In the **online inventory/party panel**,
+select a nearby member, select a medical item and press **Aid**.
+
+- A healer and recipient must both be alive, in the same accepted party,
+  within **3.2 metres horizontally** and **2.5 metres vertically**.
+  Self-healing continues to use the existing personal item command.
+- Aid uses **one real carried item**: bandage, field antiseptic, antibiotics
+  or survivor serum. Healing/cure stats are read from the existing item
+  definitions; the client cannot choose or multiply effect values.
+- A successful treatment has a **five-second healer cooldown**, marks both
+  accounts for saving, and sends private UI feedback to the two participants.
+  Failed attempts never consume an item or start a cooldown.
+- Medicine cannot revive a dead character, cannot be used remotely, and
+  cannot be wasted when the target is completely healthy and uninfected.
+- Cooldown is temporary session combat state and resets on respawn; HP,
+  infection and inventory remain part of existing persistent character data.
+
+The system is in `scripts/shared/party_aid.gd`,
+`scripts/server/game_server.gd` and `scripts/shared/net.gd`.
+The server test `tests/test_party_aid.gd` runs with the rest of the
+game suite via `godot --headless --path game --script res://tests/run_all.gd`.
+
+Existing Cgame networking, UI and gameplay APIs support the feature; no
+native engine changes were necessary.
+
+## Group first aid now stops bleeding
+
+The existing **Party Aid** feature supports injured survivors with bandages,
+field antiseptics and antibiotics at close range, using real carried items
+and a server-owned cooldown. It now also treats the game's persistent
+**bleeding wounds**: bandages and antiseptics can stop active bleeding even
+if the teammate is at full health and has no infection. Antibiotics still
+treat infection only. No-effect, cooldown, distance, unaffiliated-player
+and deceased-patient attempts consume **no items**.
+
+The server's `PartyAid.has_effect` now considers the patient's wound
+severity. `GameServer.cmd_party_aid` calls the same
+`Survival.stop_bleeding` action used for self-treatment and returns the
+actual stopped severity to the medic and patient. The network HUD includes
+bleeding treatment in feedback, while existing privacy protections remain.
+`test_party_aid.gd` checks bleeding-only treatment at full health,
+repeated no-effect calls, correct payment and antiseptic treating bleeding
+and infection together. This uses existing Cgame medical/survival APIs.
+
+## Raid boss phase two: enrage (Lineage-style PvE)
+
+The group mutant warlord now enters a second server-controlled phase
+at **35% health** (210 of 600 HP). It becomes crimson with an
+**ENRAGED RAID BOSS** nameplate; nearby survivors receive a one-time
+phase warning. Existing melee damage rises by 35%, telegraphed slams
+rise from 34 to 44 base damage, and their cooldown drops from 14 to
+8 seconds. The two-second danger circle, safe-zone rules, armor and
+dodge immunity still apply. An already pending slam is never cancelled
+or duplicated by a phase transition.
+
+No client message can trigger enrage or modify its damage and timers.
+Ordinary infected/elite stats remain unchanged. Bosses, rewards and
+phase state remain session-only; the existing single shared loot bag
+and participant-first loot rights continue unchanged. Test coverage:
+`game/tests/test_raid_phase.gd` in the standard headless suite.
+The feature uses existing Cgame scripting, networking and scene APIs.
+
+## Resource-built outpost fortifications (survival x siege warfare)
+
+Captured PvP outposts can now be **fortified up to tier 3** using materials
+collected in the survival world. Stand within **4 metres** of your
+party-owned flag and choose **Fortify controlled outpost** in the online
+inventory. Any living party member may contribute resources, but the site
+must be owned by the party, not expired and not currently under attack.
+
+The server verifies ownership, current enemy presence, player coordinates
+and the carried materials; clients cannot set fortification levels, prices
+or owners. Exact costs are: T1 **4 wood / 3 stone**, T2 **8 wood / 6 stone**,
+T3 **12 wood / 10 stone**, all tier-1 materials. Resource spending and
+one-tier upgrading occur in one synchronous server operation. A failed
+upgrade removes nothing and cannot change the level.
+
+Enemy capture requires **30 seconds + 10 seconds per fortification tier**
+of uncontested presence. The bonus affects only the current owner; when the
+outpost is captured by another group, abandoned or expires, its
+fortifications are destroyed without a material refund. The HUD displays
+the fortification tier, and capture progress uses its actual duration.
+
+Every fortification request has a monotonic per-player session ID. Duplicate
+requests return their original result without spending resources again,
+while stale IDs and reused IDs with changed arguments are refused.
+Outpost capture and reinforcement events are visible only to players within
+interest range. The logic and tests are in `outpost_fortification.gd`,
+`territory_control.gd`, `game_server.gd` and
+`tests/test_outpost_fortification.gd`.
+
+This is still session-based **party** warfare, not durable guild
+territory ownership. A future phase must authenticate guilds in Nakama
+and persist fortification ownership transactionally before cross-server
+clan sieges. No native Cgame engine changes were necessary for this stage.
+
+
+## Pistol active skill: Focused Shot (classless ranged equipment ability)
+
+Equipping an owned **pistol** grants **Focused Shot** on **G**, replacing
+the club-only Heavy Strike. The real authoritative server charges **40 combat
+energy and one 9mm round** per use, enforces an **8-second cooldown** and
+a 0.55-second regular-attack lock, and calculates **1.75× pistol damage**
+at **4 metres beyond normal pistol range**. Existing ranged weapon
+mastery scales the shot, and the shot generates normal gunshot noise.
+
+Invalid aim, insufficient energy, missing ammunition, missing weapon,
+death and cooldown reject without consuming resources or issuing a shot.
+Shots that miss still spend one real round and energy. The same `cmd_skill`
+logic works in the local playable scene and through the online `c_skill`
+RPC. Red/black PvP rules and group friendly-fire safeguards remain in force.
+
+`game/tests/test_ranged_skills.gd` exercises real zombie damage, ammunition,
+energy, noise, mastery, replay prevention, respawn and safe-hub PvP with
+`godot --headless --path game --script res://tests/run_all.gd`.
+Existing Cgame APIs suffice; no native engine addition was needed.
+
+
+## Frontier outpost supply caches (survival + territorial MMO economy)
+
+The canonical `game/` PvP siege outposts now hold **finite server-owned
+supply caches**, connecting Lineage-style territorial control with the
+Albion-style gathering economy and Days After survival loop.
+
+- Capture an existing **red/black-zone outpost** with at least two living
+  survivors in one real server party. This still requires uncontested
+  presence for the usual capture period. Each new successful capture
+  initializes **five shared supply parcels** at that flag.
+- Any member of the controlling party can stand **within 4 metres** of
+  the captured flag and use **Collect nearest captured outpost supplies**
+  from the **I** inventory panel. The server checks actual position,
+  current party membership, owner, expiry, and **live nearby enemies**.
+  A contested outpost cannot be looted.
+- Each successful parcel supplies **silver, scrap, one T3/T4 metal bar,
+  and a bandage**. Red zone yields 30 silver, six scrap and one T3 bar;
+  black zone yields 40 silver, eight scrap and one T4 bar.
+  These items are normal inventory resources and remain subject to
+  carry weight, trading, crafting and full-loot PvP rules.
+- **One parcel per authenticated account per capture**. Repeated commands,
+  relogging with the same Nakama identity, or changing the network peer
+  number cannot create another parcel. Guests use a session-unique
+  identity rather than their reusable network ID.
+- The reward goes into a *transactional inventory copy* first: insufficient
+  space results in **zero items added and zero stock consumed**. Successful
+  claims atomically reduce the public `supplies_left` count by one.
+- A disbanded or expired owner loses access immediately; on the next
+  territory tick the remaining cache is cleared. The server initializes a
+  new five-parcel stock only when a valid group captures the flag again.
+  Cache claimant identities are **never included in public snapshots**.
+- Supply stocks are server-session state, like the current outpost
+  ownership; this is not yet a persistent guild treasury. The permanent
+  character inventory received after a successful claim is saved by the
+  normal Nakama autosave/logout flow.
+
+This feature needs no additional C++ engine primitives: the existing
+authoritative terrain, parties, combat risk, inventory and networking APIs
+already cover safe transfer.
+
+```sh
+godot --headless --path game --script res://tests/run_all.gd
+```
+
+The `game/tests/test_outpost_supplies.gd` suite validates PvP-zone
+reward tables, real capture requirements, proximity and hostile presence,
+full-backpack rollback, once-per-account protection, finite shares, expiry
+and renewal after recapture.
+
+
+## Combat skill merge regression: maul + pistol both available
+
+The **Purifier Maul T3** from elite/raid cores and the pistol's
+**Focused Shot** now coexist in the same classless combat rules.
+The maul has **Purifying Slam** (35 energy; 8-second cooldown) and grants
+25% additional damage to infected only. The pistol retains its existing
+ammunition-consuming ranged ability. The server derives melee/ranged
+hits, stamina, cooldown and carried-weapon ownership from its own state.
+
+Fixes an earlier merge that accidentally dropped the maul's skill and
+its infected-only damage trait while adding the pistol skill. Also fixes
+stale/ghost equipped items dealing weapon damage after the last copy has
+left the inventory. PvP remains unaffected by the PvE bonus.
+
+The existing `tests/test_purifier_maul.gd` is updated for Focused Shot
+coexistence and re-registered in `tests/run_all.gd`; both the regular
+`test_ranged_skills.gd` and relic tests must run together.
+
+
+## Attacker siege breaches (crafting x dangerous-zone PvP)
+
+The defenders' T1–T3 outpost walls now have a resource-paid counterplay
+mechanic. **Two living members of the same attacking party** must be within
+the outpost's 12-metre capture radius; the player performing the breach must
+be within 4 metres. The target must have an active enemy owner and at least
+one fortification tier. Each successful breach consumes **2 Planks T2 and
+2 Metal Bars T2** from the attacker's backpack, destroys one fortification
+tier and shortens the remaining capture requirement by 10 seconds. These
+materials are produced through the existing gathering/refining economy.
+
+An individual outpost has a server-owned **45-second breach cooldown**,
+visible in the regular world snapshot and outpost HUD. The timer resets
+when the outpost changes hands or becomes neutral. Attackers can fight
+defenders while attempting a breach, but are exposed to full-loot PvP.
+Owners cannot break their own defenses through this command.
+
+The server authenticates the sending player, derives party membership and
+number of nearby living attackers, checks backpack supplies and commits
+both item removal and fortification reduction synchronously. Client RPCs
+have monotonic request IDs, with cached receipts preventing repeat spends
+and repeat siege damage. A breach emits a nearby-only network event.
+Tests in `tests/test_outpost_breach.gd` cover ownership, group size,
+distance, consumption, replays, cooldown, character dirty flags and
+restoring defenses.
+
+Outposts still belong to session-based parties, not persistent guilds.
+This patch does not claim crash-atomic cross-character transactions or
+durable territory ownership. The current engine already supports its
+server-side simulation and reliable RPCs; no native Cgame change is required.
+
+## Guardian frontliner — classless group tanking
+
+A party survivor carrying an equipped **melee weapon** can press **F1**
+or select **Guardian taunt** in the online **I** inventory/party panel.
+The ability costs **25 combat energy**, has a **20-second cooldown**,
+and briefly redirects up to **three nearby infected already chasing
+teammates** toward the guardian. Forced focus lasts **3 seconds** within
+12 metres. Aggro is released early when the guardian enters the safe
+hub, dies, disconnects or runs beyond the infected pursuit leash.
+
+This is a PvE role rather than a PvP stun or class lock: it does not
+change other players' targeting, steal solo players' engagements, pull
+neutral enemies or award fake damage/mastery. The dedicated server derives
+party membership, current infected targets, range, equipped weapon and
+energy from authoritative state. The client sends only a request and
+shows its own cooldown. Rejected casts consume nothing. The offline
+single-character preview has no party to protect, so this is an online
+party-only ability. Regression coverage lives in
+`game/tests/test_guardian_taunt.gd`, registered in `run_all.gd`.
+No new C++ engine primitive was needed.
+
+
+## Elite trophy armor: Infected Warden Jacket T3
+
+Survivors can forge an **Infected Warden Jacket T3** at the workbench
+with three elite/raid Infected Cores, four T3 cloth and one T3 bar.
+Crafting T3 mastery and real server-owned material consumption are required.
+Like ordinary T3 armor, the jacket reduces direct damage by 22%.
+
+The jacket additionally reduces **infection from actual infected hits by
+40%** and **bleeding from infected hits by 30%**. These modifiers are
+implemented in the authoritative zombie-hit branch: the server checks
+that the armor is still physically carried and equipped; a stale slot,
+missing item or normal T3 jacket has no protection against secondary
+wounds. PvP bleeding uses the original rules without these infected-only
+bonuses. The armor is ordinary equippable and tradable full-loot equipment.
+
+The new `test_warden_jacket.gd` suite checks T3 recipe gates, trophy costs,
+actual zombie damage and wound events, stale equipment, and PvP separation.
+No Cgame core changes are necessary for this feature.
+
+
+## Survival spears T1–T4 — classless long-reach melee equipment
+
+The canonical `game/` world now offers craftable **Survival Spears** at all
+four equipment tiers. Each tier costs 2 matching planks, 1 matching metal bar
+and 2 matching fibers at the workbench. Existing crafting mastery gates higher
+tiers; spears are ordinary gear for inventory, trading, stash and full-loot PvP.
+
+- **Basic spear attacks:** 3.5 m melee reach, 0.86 s attack interval,
+  damage 12/20/28/36 by tier. Clubs remain faster and hit harder up close.
+- **Piercing Thrust (G):** 4.5 m forward reach, 1.45× base spear damage,
+  **25 combat energy**, **5.5 s cooldown**, and **0.9 s attack lock**.
+- The server derives reach, damage and the skill from actually equipped and
+  owned gear; it validates aim vectors, cooldown and combat energy. No RPC
+  accepts client-authored attack reach or damage. Misses still consume energy.
+- Spear kills advance the same persistent melee weapon mastery as clubs.
+  Infected hits, PvP safe zones, group-friendly-fire rules and bleeding remain
+  processed by the existing shared combat and survival code.
+- Online HUD identifies **Piercing Thrust (G)** when a spear is equipped;
+  the local gameplay scene already uses the same server skill command via G.
+
+`game/tests/test_spears.gd` is part of
+`godot --headless --path game --script res://tests/run_all.gd` and checks
+recipes, server-side crafting, range, mastery, cooldown, anti-spam, stale gear
+and safe-zone protection. The current Cgame engine APIs support this feature;
+no changes to the engine core were necessary.
+
+
+## Persistent survivor renown and supply discounts (Days After × Albion × Lineage)
+
+Camp renown is a **per-character progression** that rewards verified survival
+and PvE without permanent classes, extra PvP damage or free loot. It lives in
+the canonical `game/` game server and is saved with the existing Nakama
+version-1 character record.
+
+The server, never a client request, grants renown **once per actual infected
+death** (walker 1, runner 2, brute 4, elite +5, raid boss +35) or **once
+per successful camp-contract turn-in** (+8). A failed claim, unaccepted
+contract, duplicate hit on a corpse or idle party observer yields nothing.
+The lifetime score is bounded at **10,000**. Rank milestones are:
+
+| Renown | Title | Discount on NPC purchases |
+|---:|---|---:|
+| 0–39 | Newcomer | 0% |
+| 40–159 | Settler | 10% |
+| 160–499 | Ranger | 15% |
+| 500+ | Warden | 20% |
+
+Only the **hub NPC's water, food and bandages** use the ranked purchase
+price. The server rounds each discounted unit price **up to at least one
+silver**, and then multiplies by quantity. The **renown discount alone** does not alter NPC sale payouts,
+player-to-player barter or market orders. If a survivor also has
+PvP criminal infamy, the existing **infamy markup is applied after
+the renown discount** (and infamy may independently penalize NPC sales).
+Both effects are calculated server-side and the online/local UI displays
+the resulting purchase price. This avoids a
+buy/sell currency loop while giving established survivors modest relief
+on necessities.
+
+The online HUD shows the survivor's title, accumulated renown,
+next milestone and current NPC discount, and displays recipient-only
+renown notifications. The local preview shows the same values and actual
+discounted water price when pressing **N** near the camp workbench.
+
+Renown is restored transactionally alongside the survivor's inventory,
+bank, contracts and professions. Legacy version-1 Nakama characters
+missing the field start at zero; fractional, negative, infinite, string,
+boolean or over-cap scores invalidate a corrupt save **without partially
+mutating the live character**. A network client cannot send rank or points.
+
+Test the shared server and world:
+
+```bash
+godot --headless --path game --script res://tests/run_all.gd
+```
+
+`game/tests/test_reputation.gd` covers rank boundaries, capped awards,
+once-only walker/elite/raid kills and contract rewards, private network
+notifications, discount pricing, atomic purchases, save migration and
+invalid-save rejection. This is persistent **individual reputation**,
+not yet a persistent guild ranking or shared clan treasury; those will
+require an account-owned group domain to prevent cross-account fraud.
+
+
+## Guardian brace — frontline damage mitigation
+
+A successful party **Guardian taunt** now also grants its melee-equipped
+user a short **3-second defensive brace**. While in a real party and
+still carrying the weapon, the guardian takes **30% less direct damage
+from infected**. The mitigation is applied *after armor* to both normal
+zombie melee attacks and raid boss area attacks, without changing their
+telegraphs or dodge timing. It does not protect against other players,
+bleeding, infection, thirst, or environmental damage.
+
+The server starts brace only after a successful energy-paid taunt and
+expires it using the authoritative game tick. Leaving the party, losing
+the equipped weapon, dying or respawning removes its protection;
+rejected taunts cannot create free mitigation. HUD displays **Brace**
+remaining seconds alongside the existing guardian cooldown. A new
+`tests/test_guardian_brace.gd` suite covers damage, expiry, equipment
+and group invalidation, server snapshots and death cleanup. No changes
+to engine C++ are necessary for this mechanic.
+
+
+## PvP infamy and outlaw reputation (classless frontier)
+
+The canonical `game/` tracks **server-owned PvP infamy** (0–100).
+Only an actual lethal attack on another survivor in an existing **red/black**
+PvP zone adds 25 points. Hits, missed attacks, infected kills, protected-zone
+attacks and damage to party members grant nothing. Two confirmed PvP kills
+mark a character **OUTLAW** at 50 points.
+
+Notoriety persists in the version-1 character account record; older saves
+missing the field start at zero. Invalid, negative, non-numeric, non-finite
+or over-cap values reject restoration atomically. Infamy decays one point
+per **three minutes of online server simulation** and is not erased by death,
+logout or respawn.
+
+The safe-hub NPC first applies existing **survivor renown discounts**, then adjusts its own transaction prices using infamy:
+up to **50% extra** for purchased survival supplies and up to **25% less**
+for materials sold to the merchant. The unit cost is calculated by the
+server before debiting or crediting real items; quantity splitting cannot
+evade the per-unit price. The player market and private trades keep their
+original negotiated prices.
+
+The owner sees the exact score and outlaw flag in the multiplayer HUD.
+Other nearby survivors see only an **OUTLAW** nameplate marker, not the
+private score. The local preview also displays current reputation.
+This system **does not change** safe-zone PvP protection or the
+red/black full-loot policy. No automatic bounties or guild penalties
+are added in this iteration.
+
+Run `godot --headless --path game --script res://tests/run_all.gd`:
+`game/tests/test_pvp_infamy.gd` covers red-zone kills, anti-replay,
+safe-zone/PvE immunity, privacy, pricing, atomic vendor trades, decay,
+legacy saves, invalid values and death retention. No new native engine
+capability is required.
+
+## Spear piercing attacks
+
+The existing T1-T4 Survival Spear's **Piercing Thrust (G)** now hits up to
+three distinct valid targets along its forward **4.5 m** line. It retains
+its original 25-energy cost, 5.5-second cooldown and 1.45x damage. The
+server enforces all existing party-friendly-fire and PvP zone protections.
+Clubs and firearms retain single-target active skills.
+
+The canonical local preview already cycles through owned weapons with **4**;
+the online HUD names the currently equipped ability. Test coverage:
+`game/tests/test_piercing_thrust.gd` within `game/tests/run_all.gd`.
+No additional native engine APIs are required for this gameplay feature.
+
+
+## Warden two-piece set aura for party expeditions
+
+Survivors who **equip and physically carry both** the rare
+`purifier_maul_3` and `warden_jacket_3` become expedition guardians.
+Within **8 metres**, their living party allies receive **15% less
+infection and bleeding from actual infected attacks**. The ward does
+not stack with additional guardians, never activates for solo players
+or for the guardian themselves, and immediately stops when the set is
+removed, the guardian dies, party membership changes, or players
+separate into different zones. The safe settlement does not emit a ward.
+
+The server validates the complete two-piece set and party roster at each
+actual zombie hit. The existing jacket's personal wound resistance is
+calculated first; this party set bonus only mitigates secondary infected
+wounds and never alters incoming damage, PvP bleeding, dodge immunity,
+experience, attack threat or full-loot drops. The multiplayer HUD shows
+**WARDEN'S WARD** only when the server reports it active. This makes
+elite-core gear meaningful for classless Lineage-style group support.
+
+The headless `tests/test_warden_aura.gd` covers real server combat,
+multiple guardians, worn/owned equipment, movement, death, party changes
+and unchanged PvP. No native Cgame engine changes are needed.
+
+## Declared siege contracts (party war preparation and honor)
+
+A party leader can declare a **timed siege challenge** against a hostile
+player-controlled outpost from within 24 metres, provided a second living
+party member is also nearby. The declaration consumes **2 Cloth T2 and 25
+Silver** from the leader's real backpack. Players must own neither the
+outpost nor its party; objectives about to expire refuse new challenges.
+Any already-active declaration or recently resolved siege blocks repeat
+contracts for that site.
+
+The declaration announces a **20-second preparation countdown**, followed by
+an **180-second assault window**. The normal territorial capture and full-loot
+PvP rules are unchanged: another team can still seize an outpost without a
+contract, but only a genuinely completed capture *during the declared
+window* earns a siege-contract victory. Early conquest, capture by a third
+party, loss of either group or the end of the window cancel the challenge
+without rewarding honor. Site cooldown is 300 seconds after resolution;
+the non-tradable siege victory counter belongs to the current server party.
+
+The server derives leader permissions, teammate proximity, party identity,
+target ownership, deadlines and item costs. Only the actual server
+`outpost_taken` event can award a victory, once per challenge. Requests
+carry monotonic peer IDs; retries return the prior result without
+double-charging resources. Nearby players see declaration/result events,
+and everyone receives public outpost preparation/assault timers through
+the existing snapshot. The HUD adds a **Declare siege** action and displays
+the current party's siege victories.
+
+Source: `scripts/shared/siege_contracts.gd`, `game_server.gd`, network RPCs
+and HUD; regression checks: `tests/test_siege_contracts.gd`. This is
+**session-based party siege warfare**, not permanent authenticated guild
+ownership, cross-server match scheduling or Nakama-backed honor. Those
+features require an identity-checked guild persistence layer. No native
+Cgame engine change is required by this phase.
+
+## Clattering noise decoy — craftable stealth tactic
+
+Craft a **Clattering Decoy** from **2 Wood T1 and 1 Scrap Metal** using
+the ordinary crafting system. Press **comma (,)** in either local preview
+or dedicated multiplayer to throw it **8 metres** forward; the online
+inventory also offers a *Throw clattering decoy* button.
+
+A decoy produces **8 seconds** of sound that attracts idle infected
+within **23 metres** to investigate the landing site. It never acts as
+a fake player, interrupts an active chase or tank-generated combat threat,
+or distracts raid bosses. It does not change full-loot PvP, zombie damage,
+or experience rewards.
+
+The dedicated server checks the real player's inventory and position,
+finite input direction, terrain, water, safe zone, and every obstruction
+along the flight path. Each valid throw consumes exactly one item and
+starts a **3-second cooldown**, with a maximum of **two active decoys
+per player and 48 server-wide**. Temporary decoys are cleaned up after
+expiration and never persisted. Only their visible position and remaining
+lifetime are sent to nearby clients; both clients render a small yellow lure.
+
+`test_noise_decoy.gd` verifies placement, inventory cost, cooldown,
+zombie investigation, active combat and boss immunity, privacy, interest
+filtering, and cleanup. Existing Cgame simulation, world geometry and
+rendering APIs cover the feature without a native engine change.
+
+
+## T2–T4 expedition stormcoats (weather-versus-combat loadouts)
+
+Survivors can now craft **Expedition Stormcoats T2–T4** at the normal
+workbench using **six matching-tier cloth and four matching-tier fiber**.
+Higher tiers require matching server-owned crafting mastery. Coats are
+equippable, storable, tradeable, and can be dropped under existing full-loot
+rules, just like other armor.
+
+Ordinary jackets and raid armor retain their existing **35% weather
+insulation**. Expedition coats instead provide **55% (T2), 67% (T3), or
+78% (T4)** storm insulation, while reducing ordinary attack mitigation
+by three percentage points compared with a same-tier combat jacket.
+They use the existing exclusive armor slot, so players must choose a
+mountain/storm expedition loadout or their optimal PvP combat defense.
+
+The actual game server verifies that the equipped coat still exists in
+the backpack before granting any weather protection; a ghost equipment
+slot cannot manufacture warmth. Both the local and connected HUDs display
+the selected insulation percentage. Cold exposure, heat packs, campfires,
+biome temperatures, shelter and death remain controlled by existing rules.
+
+New `test_stormcoats.gd` checks every tier, recipe costs, profession gates,
+real server cold exposure, owner snapshots and stale-item exploit prevention.
+This game-layer expansion needs no changes to Cgame's native engine code.
+
+
+## Blood scent: wounds affect infected detection (survival + zombie AI)
+
+Untreated bleeding now affects stealth in both the canonical local preview
+and authoritative multiplayer game. When bleeding exceeds **12/100**,
+infected can smell a survivor's wound from **about 20–30 metres**,
+compared with a walker's normal **16 m** sight range. The radius scales
+with actual wound severity and drops as a wound naturally clots.
+Bandages and party medical aid that stop bleeding immediately remove
+this *additional* detection channel.
+
+Existing safety and combat rules remain intact: infected cannot acquire
+a dead or safe-hub survivor through scent, pack/threat and guardian
+taunt priorities still apply, and scent never extends an enemy's
+normal pursuit leash. A zombie already pursuing a player can keep
+following until it ordinarily loses interest — healing does not
+magically reset an established chase.
+
+The server calculates scent exclusively from the authoritative character
+`Survival.bleeding`, not a client RPC. Only the survivor gets their
+effective scent radius in the private snapshot for a HUD warning;
+bleeding values are not added to the replicated bystander list.
+The local playable preview shows the same warning and first-aid hint.
+
+Implementation: `scripts/shared/blood_scent.gd`,
+`scripts/shared/zombie.gd`, and `scripts/server/game_server.gd`.
+Tests: `game/tests/test_blood_scent.gd` in the headless suite
+(`godot --headless --path game --script res://tests/run_all.gd`).
+Existing GDScript simulation and networking provide this mechanic;
+no native Cgame engine extension is necessary.
+
+
+## Classless archery: crafted bows T1–T4 and quiet Power Draw
+
+The canonical `game/` project now has **Survival Bows T1–T4** for
+survivors who prefer hunting infected without loud gunfire. Each bow is
+crafted at the workbench from 2 planks, 2 fibres and 1 cloth of its tier;
+higher tiers use the existing crafting mastery gates. Equip with the
+online inventory panel or the local preview's **4** weapon-cycle key.
+
+- **Normal shot:** 27 m range, 1.05-second interval, 10/17/24/31 base
+  damage by tier. A real wooden arrow is consumed for each successful shot
+  attempt (including shots that miss).
+- **Wooden Arrows:** 2 wood T1 + 2 fibre T1 craft **16 arrows** without
+  a workbench. They are ordinary consumable inventory and market goods.
+- **G — Power Draw:** 32 m range, 1.6× bow damage, 30 combat energy,
+  one arrow, 6-second skill cooldown, 1.2-second regular-attack lock.
+- **Quiet ranged combat:** a bow shot makes 9 m noise for 0.8 seconds;
+  a pistol retains its original 32 m noise for 3 seconds. Both normal
+  shots and active skills feed the existing zombie hearing AI.
+- **Ranged mastery:** bows share the existing permanent weapon mastery
+  with pistols; owned equipment, arrows, aim vectors, distance, damage,
+  cooldown, risk-zone PvP and party-friendly-fire are validated server-side.
+
+The new regression `game/tests/test_bows.gd` covers real crafting and
+inventory, authoritative damage, arrow consumption, quiet sound, mastery,
+PvP safe zones, stale equipment and saved gear. Run it with the rest of
+the game via `godot --headless --path game --script res://tests/run_all.gd`.
+
+The feature reuses existing Cgame gameplay, physics, audio signalling
+and multiplayer primitives. No native engine changes were required.
+
+## PvP self-defense and hunting criminal outlaws
+
+A real damaging PvP attack in red/black zones opens a **30-second legal
+retaliation** window for the victim against that attacker. The original
+aggressor cannot earn an exemption simply because their victim hits back.
+Players marked **OUTLAW** (50+ infamy) may also be defeated without
+accruing criminal infamy. Ordinary unprovoked kills continue to add
+25 infamy. Server-only timers expire automatically and are cleared upon
+an aggressor disconnect, a victim's death or respawn. They are never
+stored in Nakama saves, and a recycled peer ID cannot transfer guilt.
+
+The existing kill/death, full-loot and anti-farming PvP honor rules stay
+unchanged; this system creates no new silver, experience or loot. Online
+HUD and private network messages inform the defender and lawful hunter.
+Headless checks are registered as `tests/test_pvp_justice.gd`. Existing
+Cgame PvP simulation and RPC APIs are sufficient; no C++ work is required.
+
+## Scalable infected hearing for noise lures
+
+Temporary sound lures use a bounded, deterministic spatial hearing index
+instead of checking every active lure against every infected on each AI pass.
+Cells are one hearing radius wide, so a zombie checks only nine nearby
+cells. Among audible devices the nearest wins (ties use world ID). Expired
+or invalid sources are excluded. An infected already investigating a lure
+finishes its investigation rather than switching targets every quarter
+second; active combat and raid targeting remain unchanged.
+
+A forged very large client direction is rejected before vector normalization,
+and a lure cannot be thrown out of the protected settlement from inside it.
+The existing ordinary items, NPCs, snapshots, recipes and controls are
+unchanged. Tests: `game/tests/test_noise_decoy_grid.gd`.
+
+## Verified Nakama guild identity and guild-safe PvP
+
+Authenticated ENet players now receive a **server-verified guild affiliation**.
+A server-key-only Nakama Lua RPC queries `user_groups_list`, accepts only
+full member/admin/founder roles (states 2/1/0), and returns the selected
+guild's ID, display name and role. Pending invitations and join requests do
+not count. The server loads this identity at sign-in and refreshes it
+every 45 seconds; lookup failures clear the cached privileges. Guests do
+not receive a guild. Guild IDs are **never read from client RPC parameters
+or character save documents**. The ordinary account ID is still private.
+
+Confirmed members of the **same guild cannot harm each other in PvP**, even
+when in different parties. The server skips verified guildmates when
+selecting melee/ranged hit targets, and repeats the same check at actual
+damage application, so a direct damage call cannot bypass the protection.
+Members of different guilds remain enemies in red/black zones; temporary
+party-friendly fire protection still applies separately. A leave or kick
+is reflected after the server's next guild refresh (up to 45 seconds),
+and after reconnect immediately. The HUD displays the verified guild
+name and number of guildmates nearby, while public nearby-player snapshots
+contain only guild name and ID, not account IDs or member roles.
+
+Tests: `tests/test_verified_guild_pvp.gd` covers identity validation,
+enemy targeting, damage prevention, revocation, guest isolation and
+private fields. `tests/test_nakama_backend.gd` additionally creates and
+joins a real guild, verifies role membership and proves the privileged
+identity RPC is inaccessible from normal player sessions.
+
+**This is not yet persistent guild territory ownership.** Current outpost
+control and declared sieges still use temporary parties; authenticated
+guild tags and same-guild combat rules are a safe prerequisite for
+introducing persistent Nakama guild claims and a durable war ledger.
+All functionality uses existing Nakama and Cgame network APIs; no native
+engine modification was necessary.
+
+
+## Expedition field respite (live fire, food and nearby danger)
+
+The existing **Z** rest action in the local game and multiplayer **Rest**
+button also support field respite near an existing active campfire (5m).
+This consumes **one clean water bottle** plus **one cooked fish T1–T4**
+(lowest tier first), or **one canned ration** when no fish is available.
+Field respite heals 12 HP and restores 30 stamina, 8 hunger and 10 thirst.
+The safe hub keeps its more generous recovery and resource requirements.
+
+Both actions share the persisted **90-second cooldown**. The server rejects
+field rest if a fire has expired, a survivor is fighting, an infected is
+within 13m, or a potential nonparty PvP opponent is within 10m in red/black
+zones. Refused requests consume nothing. Infection and bleeding still
+require real medical supplies; field resting cannot be used for immunity or
+instant recovery during combat.
+
+`tests/test_field_rest.gd` covers a real server-built fire, ingredient
+transactions, T2 fish fallback, cooldown, nearby infected and PvP threats,
+and expired fires. Existing Cgame APIs and RPCs support this game feature.
+
+
+## UTC daily camp bounties — repeatable MMORPG survival loop
+
+The existing four **one-time story contracts** remain unchanged. After
+finishing them, or while progressing through them, every survivor also has
+a **repeatable camp bounty** that rotates automatically at **00:00 UTC**.
+
+The authoritative server chooses the task from the UTC day number
+(`floor(unix_time / 86400) % 3`) — the client cannot choose a
+preferred task, fake its progress, or submit a different timestamp.
+
+| Rotation | Real-world objective | Reward |
+|---|---|---|
+| Infected sweep | Defeat 4 real infected | 24 silver, 1 bandage, 4 renown |
+| Ruin reconnaissance | Open 2 distinct unopened ruin crates | 30 silver, 1 water, 5 renown |
+| Camp resupply | Deliver 5 T1 wood and 4 T1 fiber | 28 silver, 1 canned food, 4 renown |
+
+Confirmed infected deaths and real crate openings advance progress using the
+**existing game server**, not a client counter. One crate cannot count twice
+even if it refills. Daily material delivery is checked only when claiming the
+reward at the camp workbench. Failed inventory capacity checks, missing
+materials, and attempts to turn in away from camp have **no payout**.
+Each character receives **at most one bounty payment per UTC day**, even
+after logout/reconnection. A backwards-moving server clock never reopens
+a previously claimed day.
+
+To check progress, open the **I** inventory panel; a daily mission line
+appears alongside the original camp contracts. Use **Turn in UTC daily
+bounty** at the settlement workbench. In the local singleplayer preview,
+the bounty is displayed in survival statistics and **Ctrl+P** turns it in
+(ordinary `P` and `Shift+P` still operate the one-time contracts).
+
+The separate `daily_bounty` record is saved alongside inventory, stash,
+contracts, professions and renown in the existing **Nakama v1 character**
+document. Older characters default safely to a new bounty. Malformed
+progress, duplicate crate IDs, impossible day values and forged completion
+states are rejected **before** any live character state is replaced.
+
+`game/tests/test_daily_bounties.gd` is included in the main Godot
+headless regression suite and covers all three rotations, one-time
+payouts, atomic delivery, daily reset, server-authorized PvE/scavenging,
+camp distance, account reconnect and save migration:
+
+```sh
+godot --headless --path game --script res://tests/run_all.gd
+```
+
+No new C++ engine feature was required: authoritative game events,
+persistent Nakama character documents, server-side UTC timestamps and
+atomic inventory transfers are already supported by Cgame.
+
+
+## Frontier adrenaline shot: elite-sourced expedition recovery
+
+The canonical `game/` adds a rare **Frontier Adrenaline Shot**, bridging
+Days After survival supplies with Albion-style classless combat energy.
+It requires T3 crafting mastery at the safe hub workbench and uses one real infected core,
+one field antiseptic, and one clean water bottle. Elites and other
+existing infected-core sources remain the only way to obtain the trophy;
+neither the vendor nor a new debug spawn grants a free shot.
+
+Using a carried dose while genuinely fatigued immediately restores
+**50 stamina and 35 combat energy**, capped by existing player maxima,
+but costs **12 thirst** and starts a **90-second personal cooldown**.
+When both resources are almost full, the dose is rejected as wasteful;
+survivors with less than 12 thirst cannot inject it. Failed use,
+cooldown/replay attempts and missing inventory do not consume a dose.
+
+The server computes the effect and deducts the actual item. The cooldown
+is serialized in the existing version-1 character save, validated before
+any live state is modified, and persists through death, respawn and
+reconnection. Old saves without `stim_cooldown` remain compatible.
+The existing `c_use` RPC and inventory action support the online client;
+its HUD shows any remaining recharge. The local playable preview has
+a dedicated **.** key and displays the same cooldown.
+
+Files: `scripts/shared/frontier_stim.gd`, existing item and recipe
+definitions, `scripts/server/game_server.gd`, and both clients.
+Headless regression suite `game/tests/test_frontier_stim.gd` is
+registered in `game/tests/run_all.gd`. Native engine changes are not
+required for a fully server-owned, inventory-paid consumable.

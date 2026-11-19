@@ -13,11 +13,65 @@ static func apply_armor(damage: float, armor_id: String) -> float:
 	return damage * (1.0 - clampf(reduction, 0.0, 0.8))
 
 
+## Equipment-specific secondary wound resistance. Used only when the
+## server has confirmed a real infected hit against the wearer, and after
+## verifying the armor is still physically in their inventory.
+static func infected_wound_amount(amount: float, armor_id: String,
+		owned: bool, wound: String) -> float:
+	if not is_finite(amount) or amount <= 0.0:
+		return 0.0
+	if not owned:
+		return amount
+	var resistance_key := ""
+	match wound:
+		"infection":
+			resistance_key = "infection_resistance"
+		"bleeding":
+			resistance_key = "bleeding_resistance"
+		_:
+			return amount
+	var reduction: float = float(Defs.item(armor_id).get(resistance_key, 0.0))
+	return amount * (1.0 - clampf(reduction, 0.0, 0.8))
+
+
 ## What a weapon does per hit. Fists when unarmed.
 static func weapon_damage(weapon_id: String) -> float:
 	if weapon_id == "":
 		return 6.0
 	return float(Defs.item(weapon_id).get("damage", 6.0))
+
+
+## PvE-only equipment trait. The authoritative server calls this ONLY after
+## resolving a hit against a living infected, never for player-versus-player.
+static func against_infected(damage: float, weapon_id: String, owned: bool) -> float:
+	if not is_finite(damage) or damage <= 0.0:
+		return 0.0
+	if not owned:
+		return damage
+	var bonus_fraction: float = float(Defs.item(weapon_id).get("infected_bonus", 0.0))
+	return damage * (1.0 + clampf(bonus_fraction, 0.0, 0.5))
+
+
+## Reach is configured by the carried weapon on the server.
+static func weapon_reach(weapon_id: String) -> float:
+	return clampf(float(Defs.item(weapon_id).get("reach", Defs.MELEE_RANGE)),
+		Defs.MELEE_RANGE, Defs.MELEE_RANGE + 1.3)
+
+
+## Ranged distance and noise are derived from carried gear on the server.
+static func ranged_range(weapon_id: String) -> float:
+	return clampf(float(Defs.item(weapon_id).get("range", Defs.PISTOL_RANGE)),
+		8.0, Defs.PISTOL_RANGE)
+
+
+static func ranged_noise(weapon_id: String) -> Dictionary:
+	var data: Dictionary = Defs.item(weapon_id)
+	return {
+		"radius": clampf(float(data.get("shot_noise_radius", Defs.GUNSHOT_NOISE_RADIUS)),
+			0.0, Defs.GUNSHOT_NOISE_RADIUS),
+		"seconds": clampf(float(data.get("shot_noise_seconds", Defs.GUNSHOT_NOISE_SECONDS)),
+			0.0, Defs.GUNSHOT_NOISE_SECONDS)
+	}
 
 
 static func weapon_cooldown(weapon_id: String) -> float:
@@ -26,14 +80,38 @@ static func weapon_cooldown(weapon_id: String) -> float:
 	return float(Defs.item(weapon_id).get("cooldown", 0.8))
 
 
-## A server-owned ability granted by a melee club, independent of character class.
+## Equipment determines the active ability. No class selection or client damage.
+## Ranged skills consume real server-owned ammunition in GameServer.cmd_skill.
 static func active_skill(weapon_id: String) -> Dictionary:
 	var info: Dictionary = Defs.item(weapon_id)
-	if info.is_empty() or str(info.get("weapon", "")) != "melee" or not weapon_id.begins_with("club_"):
+	if info.is_empty():
 		return {}
-	return {"id": "heavy_strike", "energy_cost": 30.0, "cooldown": 6.0,
-		"attack_lock": 0.95, "range": Defs.MELEE_RANGE + 0.6,
-		"damage": weapon_damage(weapon_id) * 1.6}
+	if weapon_id == "purifier_maul_3" and str(info.get("weapon", "")) == "melee":
+		return {"id": "purifying_slam", "energy_cost": 35.0, "cooldown": 8.0,
+			"attack_lock": 1.1, "range": Defs.MELEE_RANGE + 0.8,
+			"damage": weapon_damage(weapon_id) * 1.5,
+			"ranged": false}
+	if weapon_id.begins_with("spear_") and str(info.get("weapon", "")) == "melee":
+		return {"id": "piercing_thrust", "energy_cost": 25.0, "cooldown": 5.5,
+			"attack_lock": 0.9, "range": weapon_reach(weapon_id) + 1.0,
+			"pierce_targets": 3, "damage": weapon_damage(weapon_id) * 1.45,
+			"ranged": false}
+	if weapon_id.begins_with("club_") and str(info.get("weapon", "")) == "melee":
+		return {"id": "heavy_strike", "energy_cost": 30.0, "cooldown": 6.0,
+			"attack_lock": 0.95, "range": Defs.MELEE_RANGE + 0.6,
+			"damage": weapon_damage(weapon_id) * 1.6,
+			"ranged": false}
+	if weapon_id.begins_with("bow_") and str(info.get("weapon", "")) == "ranged":
+		return {"id": "power_draw", "energy_cost": 30.0, "cooldown": 6.0,
+			"attack_lock": 1.2, "range": ranged_range(weapon_id) + 5.0,
+			"damage": weapon_damage(weapon_id) * 1.6,
+			"ranged": true, "ammo": str(info.get("ammo", ""))}
+	if weapon_id == "pistol" and str(info.get("weapon", "")) == "ranged":
+		return {"id": "focused_shot", "energy_cost": 40.0, "cooldown": 8.0,
+			"attack_lock": 0.55, "range": Defs.PISTOL_RANGE + 4.0,
+			"damage": weapon_damage(weapon_id) * 1.75,
+			"ranged": true, "ammo": str(info.get("ammo", ""))}
+	return {}
 
 
 ## Loot from a ruin crate or a dead zombie: {item_id: count}. Deterministic for a given rng.

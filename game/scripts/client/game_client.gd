@@ -25,6 +25,9 @@ var players: Dictionary = {} # id -> entity from the latest snapshot
 var zombies: Dictionary = {}
 var barricades: Dictionary = {} # Nearby defenses from the server.
 var campfires: Dictionary = {} # Nearby temporary warmth sources, server-provided.
+var decoys: Dictionary = {} # Ephemeral world lures from the server snapshot.
+var raid_telegraph: Dictionary = {} # Current server-authored raid attack warning, if visible.
+var outposts: Array = [] # Public server-controlled PvP objectives.
 var bags: Dictionary = {}
 var depleted: Dictionary = {}
 var crates_used: Dictionary = {}
@@ -75,6 +78,8 @@ func on_snapshot(snapshot: Dictionary) -> void:
 	snapshots_received += 1
 	server_time = float(snapshot["time"])
 	you = snapshot["you"]
+	raid_telegraph = snapshot.get("raid_telegraph", {}).duplicate(true)
+	outposts = snapshot.get("outposts", [])
 	if snapshot.has("inventory"):
 		inventory.load_dict(snapshot["inventory"])
 	if snapshot.has("skills") and skills.load_dict(snapshot["skills"]):
@@ -87,6 +92,9 @@ func on_snapshot(snapshot: Dictionary) -> void:
 	zombies.clear()
 	for entity in snapshot["zombies"]:
 		zombies[entity["id"]] = entity
+	decoys.clear()
+	for entity in snapshot.get("decoys", []):
+		decoys[int(entity["id"])] = entity
 	campfires.clear()
 	for entity in snapshot.get("campfires", []):
 		campfires[int(entity["id"])] = entity
@@ -230,6 +238,44 @@ func party_kick(target_id: int) -> void:
 	net.c_party_kick.rpc_id(1, target_id)
 
 
+func party_aid(target_id: int, item_id: String) -> void:
+	net.c_party_aid.rpc_id(1, target_id, item_id)
+
+
+func party_rally() -> void:
+	net.c_party_rally.rpc_id(1)
+
+
+var _outpost_fortify_request_id: int = 0
+
+
+func outpost_fortify(site_id: int) -> void:
+	if _outpost_fortify_request_id >= 2_147_483_647:
+		return # Reconnect rather than wrap a request identifier.
+	_outpost_fortify_request_id += 1
+	net.c_outpost_fortify.rpc_id(1, site_id, _outpost_fortify_request_id)
+
+
+var _outpost_breach_request_id: int = 0
+
+
+func outpost_breach(site_id: int) -> void:
+	if _outpost_breach_request_id >= 2_147_483_647:
+		return # Reconnect instead of wrapping a session-specific request ID.
+	_outpost_breach_request_id += 1
+	net.c_outpost_breach.rpc_id(1, site_id, _outpost_breach_request_id)
+
+
+var _siege_declare_request_id: int = 0
+
+
+func siege_declare(site_id: int) -> void:
+	if _siege_declare_request_id >= 2_147_483_647:
+		return
+	_siege_declare_request_id += 1
+	net.c_siege_declare.rpc_id(1, site_id, _siege_declare_request_id)
+
+
 func trade_invite(target_id: int) -> void:
 	net.c_trade_invite.rpc_id(1, target_id)
 
@@ -281,12 +327,21 @@ func contract(action: String) -> void:
 	net.c_contract.rpc_id(1, action)
 
 
+func outpost_supplies(site_id: int) -> void:
+	net.c_outpost_supplies.rpc_id(1, site_id)
+
+
 func attack(direction: Vector2) -> void:
 	net.c_attack.rpc_id(1, direction.x, direction.y)
 
 
 func skill(direction: Vector2) -> void:
 	net.c_skill.rpc_id(1, direction.x, direction.y)
+
+
+func guardian_taunt() -> void:
+	# The server selects all targets; the client sends no enemy IDs.
+	net.c_guardian_taunt.rpc_id(1)
 
 
 func dodge(direction: Vector2) -> void:
@@ -305,6 +360,11 @@ func build(point: Vector2) -> void:
 
 func repair(id: int) -> void:
 	net.c_repair.rpc_id(1, id)
+
+
+func throw_decoy(direction: Vector2) -> void:
+	if direction.is_finite() and direction.length_squared() > 0.0001:
+		net.c_throw_decoy.rpc_id(1, direction.normalized().x, direction.normalized().y)
 
 
 func light_campfire(point: Vector2) -> void:

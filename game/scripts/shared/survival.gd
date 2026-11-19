@@ -13,6 +13,7 @@ var stamina_regen_mult: float = 1.0
 var hunger: float = 100.0 # 100 is full.
 var thirst: float = 100.0
 var infection: float = 0.0
+var bleeding: float = 0.0 # Wound severity 0..100, independent of infection.
 var exposure: float = 0.0 # 0..100 cumulative weather stress.
 var warmth_seconds: float = 0.0 # Remaining protection from a carried heat pack.
 var stamina: float = Defs.MAX_STAMINA
@@ -54,6 +55,13 @@ func tick(delta: float) -> float:
 		infection = minf(Defs.INFECTION_MAX,
 			infection + Defs.INFECTION_GROWTH_PER_SECOND * maxf(0.0, delta))
 	var damage := 0.0
+	if bleeding > 0.0:
+		# Integrate the decaying severity so large ticks cannot cause damage
+		# after a wound would already have clotted.
+		var active_seconds: float = minf(maxf(delta, 0.0), bleeding / Defs.BLEEDING_DECAY_PER_SECOND)
+		var average_severity: float = bleeding - 0.5 * Defs.BLEEDING_DECAY_PER_SECOND * active_seconds
+		damage += Defs.BLEEDING_DAMAGE_PER_SECOND * average_severity / Defs.BLEEDING_MAX * active_seconds
+		bleeding = maxf(0.0, bleeding - Defs.BLEEDING_DECAY_PER_SECOND * maxf(0.0, delta))
 	if hunger <= 0.0:
 		damage += Defs.STARVE_DAMAGE_PER_SECOND * delta
 	if thirst <= 0.0:
@@ -132,6 +140,22 @@ func treat_infection(amount: float) -> bool:
 	return true
 
 
+## Call only when an actual attack inflicted damage; fake client wounds are ignored.
+func add_bleeding(amount: float) -> bool:
+	if not alive or not is_finite(amount) or amount <= 0.0:
+		return false
+	var before: float = bleeding
+	bleeding = minf(Defs.BLEEDING_MAX, bleeding + amount)
+	return bleeding > before
+
+
+func stop_bleeding() -> bool:
+	if not alive or bleeding <= 0.0:
+		return false
+	bleeding = 0.0
+	return true
+
+
 ## The server consumes an actual heat pack only if there is no current buff.
 func apply_thermal_wrap() -> bool:
 	if not alive or warmth_seconds > 0.0:
@@ -147,10 +171,11 @@ func reset() -> void:
 	stamina = Defs.MAX_STAMINA
 	stamina_recovery_delay = 0.0
 	infection = 0.0
+	bleeding = 0.0
 	exposure = 0.0
 	warmth_seconds = 0.0
 	alive = true
 
 
 func to_dict() -> Dictionary:
-	return {"health": health, "hunger": hunger, "thirst": thirst, "stamina": stamina, "infection": infection, "exposure": exposure, "warmth_seconds": warmth_seconds, "alive": alive}
+	return {"health": health, "hunger": hunger, "thirst": thirst, "stamina": stamina, "infection": infection, "bleeding": bleeding, "exposure": exposure, "warmth_seconds": warmth_seconds, "alive": alive}

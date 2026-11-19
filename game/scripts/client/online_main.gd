@@ -10,6 +10,7 @@ const Net = preload("res://scripts/shared/net.gd")
 const GameClient = preload("res://scripts/client/game_client.gd")
 const ChunkView = preload("res://scripts/client/chunk_view.gd")
 const EntityView = preload("res://scripts/client/entity_view.gd")
+const RaidTelegraph = preload("res://scripts/client/raid_telegraph.gd")
 const Hud = preload("res://scripts/client/hud.gd")
 const Meshes = preload("res://scripts/client/meshes.gd")
 const CharacterModel = preload("res://scripts/client/character_model.gd")
@@ -48,6 +49,8 @@ var name_edit: LineEdit
 var status_label: Label
 var _zoom := 1.0
 var _attack_cooldown := 0.0
+var _party_rally_marker: Node3D
+var _raid_telegraph: Node3D
 var _screenshot_path := ""
 var _screenshot_frames := 0
 var _demo := ""
@@ -86,6 +89,40 @@ func _ready() -> void:
 		_connect()
 
 
+func _make_party_rally_marker() -> void:
+	_party_rally_marker = Node3D.new()
+	_party_rally_marker.name = "PartyRally"
+	_party_rally_marker.visible = false
+	var beacon := MeshInstance3D.new()
+	var sphere := SphereMesh.new()
+	sphere.radius = 0.35
+	sphere.height = 0.7
+	beacon.mesh = sphere
+	var material := StandardMaterial3D.new()
+	material.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	material.albedo_color = Color(0.4, 0.9, 1.0)
+	beacon.material_override = material
+	_party_rally_marker.add_child(beacon)
+	var label := Label3D.new()
+	label.name = "Label"
+	label.billboard = BaseMaterial3D.BILLBOARD_ENABLED
+	label.position.y = 0.75
+	label.text = "PARTY RALLY"
+	_party_rally_marker.add_child(label)
+	add_child(_party_rally_marker)
+
+
+func _update_party_rally_marker() -> void:
+	var rally: Dictionary = client.you.get("party", {}).get("rally", {})
+	_party_rally_marker.visible = not rally.is_empty()
+	if rally.is_empty():
+		return
+	_party_rally_marker.position = Vector3(float(rally["x"]),
+			float(rally["y"]) + 1.8, float(rally["z"]))
+	var label := _party_rally_marker.get_node("Label") as Label3D
+	label.text = "PARTY RALLY  %ds" % int(ceil(float(rally["remaining"])))
+
+
 func _build_environment() -> void:
 	environment = Environment.new()
 	environment.background_mode = Environment.BG_SKY
@@ -109,6 +146,10 @@ func _build_environment() -> void:
 	camera.position = CAMERA_OFFSET * 3.0
 	add_child(camera)
 	camera.look_at(Vector3.ZERO)
+	_make_party_rally_marker()
+	_raid_telegraph = RaidTelegraph.new()
+	_raid_telegraph.name = "RaidGroundSlamWarning"
+	add_child(_raid_telegraph)
 	camera.current = true
 	chunk_root = Node3D.new()
 	chunk_root.name = "Chunks"
@@ -319,6 +360,8 @@ func _on_welcomed() -> void:
 	audio = Audio.new()
 	add_child(audio)
 	client.event_received.connect(func(event: Dictionary) -> void: audio.on_event(event, client.peer_id, client.world.height_at))
+	_raid_telegraph.clear()
+	client.event_received.connect(func(event: Dictionary) -> void: _raid_telegraph.consume(event, client.world))
 	avatar = Node3D.new()
 	avatar_model = CharacterModel.new()
 	avatar_model.setup(Color(1.0, 0.95, 0.5) if not Assets.has_characters() else Color.WHITE, 2.0, 1.0, Assets.CHARACTER_NAMES[abs(hash(name_edit.text)) % Assets.CHARACTER_NAMES.size()], false)
@@ -379,6 +422,7 @@ func _process(delta: float) -> void:
 		streamer.focus_position = position
 		_apply_world_state()
 	entities.update_from(client)
+	_update_party_rally_marker()
 	# The camera glides after the player.
 	var target := position + CAMERA_OFFSET * _zoom
 	camera.position = camera.position.lerp(target, 1.0 - exp(-10.0 * delta))
@@ -486,6 +530,9 @@ func _unhandled_input(event: InputEvent) -> void:
 				_interact()
 			KEY_F:
 				client.drink()
+			KEY_F1:
+				if not hud.is_menu_open() and bool(client.you.get("alive", false)):
+					client.guardian_taunt()
 			KEY_G:
 				if not hud.is_menu_open() and bool(client.you.get("alive", false)):
 					var skill_direction: Vector2 = _aim_direction()
@@ -503,7 +550,7 @@ func _unhandled_input(event: InputEvent) -> void:
 					if dodge_direction.length_squared() < 0.0001:
 						dodge_direction = Vector2(sin(client.yaw), cos(client.yaw))
 					client.dodge(dodge_direction.normalized())
-			KEY_0:
+			KEY_MINUS:
 				if not hud.is_menu_open() and bool(client.you.get("alive", false)):
 					var fire_id: int = client.nearest_campfire(client.display_position())
 					if fire_id != -1:
@@ -522,6 +569,12 @@ func _unhandled_input(event: InputEvent) -> void:
 				hud.toggle_inventory()
 			KEY_C:
 				hud.toggle_crafting()
+			KEY_COMMA:
+				if not hud.is_menu_open() and bool(client.you.get("alive", false)):
+					var decoy_direction: Vector2 = _aim_direction()
+					if decoy_direction.length_squared() < 0.0001:
+						decoy_direction = Vector2(sin(client.yaw), cos(client.yaw))
+					client.throw_decoy(decoy_direction)
 			KEY_O:
 				if not hud.is_menu_open() and bool(client.you.get("alive", false)):
 					var direction: Vector2 = _aim_direction()

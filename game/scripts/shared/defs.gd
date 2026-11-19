@@ -27,6 +27,12 @@ const INFECTION_GROWTH_PER_SECOND := 0.065
 const INFECTION_DAMAGE_START := 30.0
 const INFECTION_DAMAGE_PER_SECOND := 1.4
 const ZOMBIE_INFECTION_PER_HIT := {"walker": 8.0, "runner": 12.0, "brute": 20.0}
+# Persistent wounds: real attacks cause bleeding; untreated bleeding slowly clots but costs HP.
+const BLEEDING_MAX := 100.0
+const BLEEDING_DAMAGE_PER_SECOND := 1.2
+const BLEEDING_DECAY_PER_SECOND := 0.2
+const ZOMBIE_BLEEDING_PER_HIT := {"walker": 9.0, "runner": 13.0, "brute": 22.0}
+const PVP_MELEE_BLEEDING_PER_HIT := 12.0
 const COMBAT_ENERGY_MAX := 100.0
 const COMBAT_ENERGY_REGEN := 9.0
 # Sprint exhaustion is a server-owned survival mechanic.
@@ -176,9 +182,40 @@ static func _build_items() -> void:
 			club_inputs["bar_%d" % t] = 1
 		_add_item("club_%d" % t, {"name": "Club T%d" % t, "kind": "weapon", "weapon": "melee", "tier": t, "damage": 14.0 + 9.0 * (t - 1), "cooldown": 0.7, "value": 40 * t})
 		_add_recipe("club_%d" % t, "club_%d" % t, 1, club_inputs, "workbench", 5.0)
+		# Craftable reach weapon across all existing gathering/crafting tiers.
+		var spear_inputs: Dictionary = {
+			"plank_%d" % t: 2, "bar_%d" % t: 1, "fiber_%d" % t: 2}
+		_add_item("spear_%d" % t, {"name": "Survival Spear T%d" % t,
+			"kind": "weapon", "weapon": "melee", "tier": t,
+			"damage": 12.0 + 8.0 * (t - 1), "cooldown": 0.86,
+			"reach": 3.5, "weight": 3.6, "value": 54 * t})
+		_add_recipe("spear_%d" % t, "spear_%d" % t, 1,
+			spear_inputs, "workbench", 6.0)
+		# Lightweight classless archery: affordable arrows, limited distance and noise.
+		_add_item("bow_%d" % t, {"name": "Survival Bow T%d" % t,
+			"kind": "weapon", "weapon": "ranged", "tier": t,
+			"damage": 10.0 + 7.0 * (t - 1), "cooldown": 1.05,
+			"range": 27.0, "ammo": "arrow",
+			"shot_noise_radius": 9.0, "shot_noise_seconds": 0.8,
+			"weight": 2.2, "value": 38 * t})
+		_add_recipe("bow_%d" % t, "bow_%d" % t, 1,
+			{"plank_%d" % t: 2, "fiber_%d" % t: 2,
+				"cloth_%d" % t: 1}, "workbench", 5.0)
 		# Armour: reduces incoming damage.
 		_add_item("jacket_%d" % t, {"name": "Jacket T%d" % t, "kind": "armor", "tier": t, "armor": 0.08 + 0.07 * (t - 1), "value": 35 * t})
 		_add_recipe("jacket_%d" % t, "jacket_%d" % t, 1, {"cloth_%d" % t: 4}, "workbench", 5.0)
+		# Environmental armor for expedition gatherers: better insulation than
+		# combat jackets, but weaker against attacks of the same tier.
+		if t >= 2:
+			var storm_id: String = "storm_coat_%d" % t
+			var cold_protection: float = 0.55 if t == 2 else (0.67 if t == 3 else 0.78)
+			_add_item(storm_id, {"name": "Expedition Stormcoat T%d" % t,
+				"kind": "armor", "tier": t, "armor": 0.05 + 0.07 * float(t - 1),
+				"insulation": cold_protection, "weight": 3.4 + 0.3 * float(t),
+				"value": 48 * t})
+			_add_recipe(storm_id, storm_id, 1,
+				{"cloth_%d" % t: 6, "fiber_%d" % t: 4},
+				"workbench", 6.0 + float(t))
 	# Consumables.
 	# Shore fishing: scavenging food supports the classless artisan loop.
 	_add_item("fishing_rod", {"name": "Fishing Rod", "kind": "tool", "tool": "fishing",
@@ -227,24 +264,65 @@ static func _build_items() -> void:
 		"stack": 10, "value": 14, "weight": 0.25})
 	_add_recipe("charcoal_filter", "charcoal_filter", 1,
 		{"cloth_1": 1, "wood_1": 1, "stone_1": 1}, "", 2.5)
-	_add_item("bandage", {"name": "Bandage", "kind": "medical", "heal": 28.0, "stack": 10, "value": 10})
+	_add_item("bandage", {"name": "Bandage", "kind": "medical", "heal": 28.0, "stop_bleeding": true, "stack": 10, "value": 10})
 	_add_recipe("bandage", "bandage", 2, {"cloth_1": 2}, "", 2.0)
 	# Common crafted wound care and scarce medical loot from infected ruins.
 	_add_item("field_antiseptic", {"name": "Field Antiseptic", "kind": "medical",
-		"heal": 8.0, "cure": 40.0, "stack": 5, "value": 20})
+		"heal": 8.0, "cure": 40.0, "stop_bleeding": true, "stack": 5, "value": 20})
 	_add_recipe("field_antiseptic", "field_antiseptic", 1,
 		{"bandage": 1, "cloth_1": 1, "water_bottle": 1}, "", 3.0)
 	_add_item("antibiotics", {"name": "Antibiotics", "kind": "medical",
 		"cure": 100.0, "stack": 5, "value": 80})
+	# Lineage-style elite hunts feed back into survival via medical crafting.
+	_add_item("infected_core", {"name": "Infected Core", "kind": "resource",
+		"tier": 3, "stack": 20, "value": 48, "weight": 0.4})
+	_add_item("purified_serum", {"name": "Purified Survivor Serum", "kind": "medical",
+		"tier": 3, "heal": 16.0, "cure": 65.0, "stack": 5,
+		"value": 110, "weight": 0.2})
+	_add_recipe("purified_serum", "purified_serum", 1,
+		{"infected_core": 2, "bandage": 1, "water_bottle": 1},
+		"workbench", 6.0)
+	# A single-use expedition stimulant: elite trophy + field medicine.
+	_add_item("frontier_stim", {"name": "Frontier Adrenaline Shot",
+		"kind": "stimulant", "tier": 3, "stack": 5, "value": 95, "weight": 0.25})
+	_add_recipe("frontier_stim", "frontier_stim", 1,
+		{"infected_core": 1, "field_antiseptic": 1, "water_bottle": 1},
+		"workbench", 5.0)
+	# Rare raid equipment: no loot-table bypass. Earn cores through real elite
+	# infected and raid kills, then craft it with tier 3 artisan mastery.
+	_add_item("purifier_maul_3", {"name": "Purifier Maul T3", "kind": "weapon",
+		"weapon": "melee", "tier": 3, "damage": 32.0, "cooldown": 0.78,
+		"infected_bonus": 0.25, "weight": 4.8, "value": 260})
+	_add_recipe("purifier_maul_3", "purifier_maul_3", 1,
+		{"infected_core": 4, "bar_3": 3, "plank_3": 2, "cloth_3": 1},
+		"workbench", 9.0)
+	# Specialized expedition protection forged from genuine elite trophies.
+	# The ordinary T3 jacket has the same base armor; this one mitigates only
+	# secondary wounds inflicted by infected, never bleeding from PvP.
+	_add_item("warden_jacket_3", {"name": "Infected Warden Jacket T3",
+		"kind": "armor", "tier": 3, "armor": 0.22,
+		"infection_resistance": 0.4, "bleeding_resistance": 0.3,
+		"weight": 4.5, "value": 220})
+	_add_recipe("warden_jacket_3", "warden_jacket_3", 1,
+		{"infected_core": 3, "cloth_3": 4, "bar_3": 1},
+		"workbench", 8.0)
 	# Days After loot: only found while scavenging ruins.
 	_add_item("pistol", {"name": "Pistol", "kind": "weapon", "weapon": "ranged", "tier": 3, "damage": 22.0, "cooldown": 0.45, "ammo": "ammo_9mm", "value": 150})
 	# Ranged fighting can be sustained through scavenging and T2 metalworking.
 	# Recipes use the existing authoritative bench and crafting mastery rules.
+	_add_item("arrow", {"name": "Wooden Arrows", "kind": "ammo",
+		"tier": 1, "stack": 80, "value": 1, "weight": 0.06})
+	_add_recipe("arrow", "arrow", 16, {"wood_1": 2, "fiber_1": 2}, "", 2.5)
 	_add_item("ammo_9mm", {"name": "9mm Ammo", "kind": "ammo",
 		"tier": 2, "stack": 60, "value": 2})
 	_add_recipe("ammo_9mm", "ammo_9mm", 12,
 		{"scrap": 2, "bar_2": 1}, "workbench", 4.0)
 	_add_item("scrap", {"name": "Scrap Metal", "kind": "resource", "tier": 2, "stack": 100, "value": 3})
+	# Crafted noise maker: brief diversion for stealth runs, not free aggro.
+	_add_item("noise_decoy", {"name": "Clattering Decoy", "kind": "decoy",
+		"tier": 1, "stack": 10, "value": 14, "weight": 0.25})
+	_add_recipe("noise_decoy", "noise_decoy", 1,
+		{"wood_1": 2, "scrap": 1}, "", 2.5)
 	_add_item("silver", {"name": "Silver", "kind": "currency", "stack": 100000, "value": 1})
 
 

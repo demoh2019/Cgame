@@ -4,6 +4,7 @@ extends RefCounted
 ## No client-supplied weather value is ever accepted by the combat/survival rules.
 
 const WorldGen = preload("res://scripts/shared/world_gen.gd")
+const Defs = preload("res://scripts/shared/defs.gd")
 const WEATHER_CELL_METERS := 256.0
 const CHANGE_SECONDS := 240.0
 const COLD_START_C := 8.0
@@ -43,7 +44,12 @@ static func conditions(world, x: float, z: float, server_seconds: float) -> Dict
 ## Armor works as simple wind/rain insulation for the first survival slice.
 ## The protection is derived from the equipped item on the authoritative server.
 static func protection(armor_id: String) -> float:
-	return 0.35 if not armor_id.is_empty() else 0.0
+	var item: Dictionary = Defs.item(armor_id)
+	if str(item.get("kind", "")) != "armor":
+		return 0.0
+	# Keep ordinary jackets and relic combat armor at their historical 35%.
+	# Specialized expedition coats trade attack protection for cold resistance.
+	return clampf(float(item.get("insulation", 0.35)), 0.0, 0.85)
 
 
 static func effective_severity(weather: Dictionary, armor_id: String) -> float:

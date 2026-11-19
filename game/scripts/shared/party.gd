@@ -9,6 +9,9 @@ const INVITE_RANGE := 16.0
 const ASSIST_RANGE := 28.0
 const ASSIST_WINDOW := 20.0
 const ASSIST_XP_RATE := 0.5
+# Party-only temporary rendezvous; server position, never client coordinates.
+const RALLY_SECONDS := 45.0
+const RALLY_COOLDOWN := 12.0
 
 
 ## Only the server invokes this after a confirmed infected kill.
@@ -28,6 +31,28 @@ var groups: Dictionary = {} # group id -> {"leader": peer, "members": [peers]}
 var group_by_peer: Dictionary = {} # peer id -> group id
 var invites: Dictionary = {} # invited peer -> {"from": id, "group": id, "expires": time}
 var _next_id: int = 0
+
+
+## The leader marks their own authoritative location. Party members see
+## exactly one active marker; ungrouped and unrelated clients never receive it.
+func mark_rally(peer_id: int, position: Vector3, now: float) -> Dictionary:
+	var group_id: int = group_of(peer_id)
+	if group_id == 0 or not groups.has(group_id):
+		return {"ok": false, "reason": "not_in_party"}
+	var group: Dictionary = groups[group_id]
+	if int(group["leader"]) != peer_id:
+		return {"ok": false, "reason": "leader_only"}
+	if not position.is_finite() or not is_finite(now):
+		return {"ok": false, "reason": "invalid_position"}
+	var previous: float = float(group.get("rally_last_at", -INF))
+	if now - previous < RALLY_COOLDOWN:
+		return {"ok": false, "reason": "cooldown"}
+	group["rally_last_at"] = now
+	group["rally"] = {
+		"x": position.x, "y": position.y, "z": position.z,
+		"expires": now + RALLY_SECONDS,
+	}
+	return {"ok": true, "seconds": RALLY_SECONDS}
 
 
 func members_of(peer_id: int) -> Array:
@@ -151,12 +176,19 @@ func expire(now: float) -> void:
 			invites.erase(target)
 
 
-func state_for(peer_id: int) -> Dictionary:
+func state_for(peer_id: int, now: float = 0.0) -> Dictionary:
 	var group_id: int = group_of(peer_id)
 	if group_id == 0 or not groups.has(group_id):
-		return {"id": 0, "leader": 0, "members": [],
+		return {"id": 0, "leader": 0, "members": [], "rally": {},
 			"invite_from": int(invites.get(peer_id, {}).get("from", 0))}
 	var group: Dictionary = groups[group_id]
+	var marker: Dictionary = group.get("rally", {})
+	var shared_marker := {}
+	if not marker.is_empty() and now < float(marker["expires"]):
+		# Never expose the marker to nonmembers or stale clients.
+		shared_marker = {"x": float(marker["x"]), "y": float(marker["y"]),
+			"z": float(marker["z"]),
+			"remaining": maxf(0.0, float(marker["expires"]) - now)}
 	return {"id": group_id, "leader": int(group["leader"]),
-		"members": (group["members"] as Array).duplicate(),
+		"members": (group["members"] as Array).duplicate(), "rally": shared_marker,
 		"invite_from": int(invites.get(peer_id, {}).get("from", 0))}

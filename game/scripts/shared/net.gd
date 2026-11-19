@@ -3,6 +3,7 @@ extends Node
 ## and on every client (Godot needs that), and `role` decides which half of it does anything.
 
 const Defs = preload("res://scripts/shared/defs.gd")
+const GuildIdentity = preload("res://scripts/shared/guild_identity.gd")
 
 signal welcomed
 signal join_refused(reason: String)
@@ -27,6 +28,9 @@ var _pending_saves: Dictionary = {} # Account -> final state when Nakama is temp
 var _autosave_running := false
 var _save_clock: float = 0.0
 const SAVE_INTERVAL := 30.0
+const GUILD_REFRESH_SECONDS := 45.0
+var _guild_refresh_clock: float = 0.0
+var _guild_refresh_running: bool = false
 
 
 func _process(delta: float) -> void:
@@ -34,6 +38,37 @@ func _process(delta: float) -> void:
 	if _count_clock >= 1.0:
 		_count_clock = 0.0
 		_command_counts.clear()
+	if role == "server" and not shutting_down and gateway != null and gateway.enabled:
+		_guild_refresh_clock += maxf(0.0, delta)
+		if _guild_refresh_clock >= GUILD_REFRESH_SECONDS and not _guild_refresh_running:
+			_guild_refresh_clock = 0.0
+			_refresh_verified_guilds()
+
+
+## Memberships can change while a character is online. Only freshly
+## authenticated Nakama account IDs are queried, never client-provided guilds.
+## On lookup failure guild privileges are cleared rather than kept stale.
+func _refresh_verified_guilds() -> void:
+	if _guild_refresh_running or gateway == null or not gateway.enabled:
+		return
+	_guild_refresh_running = true
+	for peer_id in sim.players.keys():
+		var player = sim.players.get(peer_id)
+		if player == null or player.user_id.is_empty() or _departing_accounts.has(player.user_id):
+			continue
+		var account: String = player.user_id
+		var verified: Dictionary = await gateway.lookup_guild(account)
+		# A slow RPC may complete after disconnect and peer ID reuse.
+		var current = sim.players.get(peer_id)
+		if current == null or current.user_id != account:
+			continue
+		if GuildIdentity.normalize(verified).is_empty():
+			sim.set_verified_guild(peer_id, {
+				"ok": true, "guild_id": "", "guild_name": "", "rank": -1,
+			})
+		else:
+			sim.set_verified_guild(peer_id, verified)
+	_guild_refresh_running = false
 
 
 ## False if this peer is sending too many commands (a basic flood guard).
@@ -109,8 +144,19 @@ func c_join(player_name: String, token: String = "", refresh: String = "") -> vo
 	if loaded.get("exists", false) and not sim.valid_character_data(saved):
 		_refuse_join(peer, user_id, "Stored character is invalid. Contact an administrator.")
 		return
+	# Resolve membership with the server key. An ENet client cannot invent
+	# a guild tag, and pending invitations grant no combat protection.
+	var verified_guild: Dictionary = await gateway.lookup_guild(user_id)
+	if not multiplayer.get_peers().has(peer) or _joining_users.get(user_id, -1) != peer:
+		_joining_users.erase(user_id)
+		_joining.erase(peer)
+		return
+	if GuildIdentity.normalize(verified_guild).is_empty():
+		_refuse_join(peer, user_id, "Guild verification is unavailable. Please retry.")
+		return
 	user_to_peer[user_id] = peer
 	sim.add_player(peer, str(identity["username"]), user_id, saved)
+	sim.set_verified_guild(peer, verified_guild)
 	_joining_users.erase(user_id)
 	_joining.erase(peer)
 	s_welcome.rpc_id(peer, sim.world.world_seed, Defs.TICK_RATE)
@@ -147,6 +193,10 @@ func leave(peer: int) -> bool:
 	if player == null:
 		return true
 	var user_id: String = player.user_id
+	# The server must resolve combat-logout full loot BEFORE serializing
+	# the final Nakama character. Otherwise a disconnect could save gear
+	# from before the drop, creating both a public bag and a retained copy.
+	sim.prepare_disconnect(peer)
 	var data: Dictionary = sim.character_data(player)
 	if user_id != "":
 		_departing_accounts[user_id] = true
@@ -240,6 +290,15 @@ func c_build(x: float, z: float) -> void:
 		s_result.rpc_id(peer, "build", sim.cmd_build(peer, x, z))
 
 
+
+@rpc("any_peer", "reliable")
+func c_throw_decoy(direction_x: float, direction_z: float) -> void:
+	var peer := multiplayer.get_remote_sender_id()
+	if _allowed(peer):
+		s_result.rpc_id(peer, "throw_decoy",
+				sim.cmd_throw_decoy(peer, direction_x, direction_z))
+
+
 @rpc("any_peer", "reliable")
 func c_light_campfire(x: float, z: float) -> void:
 	var peer := multiplayer.get_remote_sender_id()
@@ -298,6 +357,14 @@ func c_rest() -> void:
 
 
 @rpc("any_peer", "reliable")
+func c_outpost_supplies(site_id: int) -> void:
+	var peer := multiplayer.get_remote_sender_id()
+	if _allowed(peer):
+		s_result.rpc_id(peer, "outpost_supplies",
+			sim.cmd_outpost_supplies(peer, site_id))
+
+
+@rpc("any_peer", "reliable")
 func c_contract(action: String) -> void:
 	var peer := multiplayer.get_remote_sender_id()
 	if _allowed(peer):
@@ -335,10 +402,51 @@ func c_party_leave() -> void:
 
 
 @rpc("any_peer", "reliable")
+func c_party_rally() -> void:
+	var peer := multiplayer.get_remote_sender_id()
+	if _allowed(peer):
+		s_result.rpc_id(peer, "rally", sim.cmd_party_rally(peer))
+
+
+@rpc("any_peer", "reliable")
+func c_party_aid(target_id: int, item_id: String) -> void:
+	var peer := multiplayer.get_remote_sender_id()
+	if _allowed(peer):
+		s_result.rpc_id(peer, "party_aid", sim.cmd_party_aid(peer, target_id, item_id))
+
+
+@rpc("any_peer", "reliable")
 func c_party_kick(target_id: int) -> void:
 	var peer := multiplayer.get_remote_sender_id()
 	if _allowed(peer):
 		s_result.rpc_id(peer, "party", sim.cmd_party_kick(peer, target_id))
+
+
+## Only the sender's authoritative party and backpack can reinforce a flag.
+@rpc("any_peer", "reliable")
+func c_outpost_fortify(site_id: int, request_id: int) -> void:
+	var peer := multiplayer.get_remote_sender_id()
+	if _allowed(peer):
+		s_result.rpc_id(peer, "outpost_fortify",
+			sim.cmd_outpost_fortify(peer, site_id, request_id))
+
+
+## Siege damage is calculated exclusively from authoritative party and inventory state.
+@rpc("any_peer", "reliable")
+func c_outpost_breach(site_id: int, request_id: int) -> void:
+	var peer := multiplayer.get_remote_sender_id()
+	if _allowed(peer):
+		s_result.rpc_id(peer, "outpost_breach",
+			sim.cmd_outpost_breach(peer, site_id, request_id))
+
+
+## A session war declaration may only come from the acting peer.
+@rpc("any_peer", "reliable")
+func c_siege_declare(site_id: int, request_id: int) -> void:
+	var peer := multiplayer.get_remote_sender_id()
+	if _allowed(peer):
+		s_result.rpc_id(peer, "siege_declare",
+			sim.cmd_siege_declare(peer, site_id, request_id))
 
 
 @rpc("any_peer", "reliable")
@@ -423,6 +531,13 @@ func c_attack(dir_x: float, dir_z: float) -> void:
 	var peer := multiplayer.get_remote_sender_id()
 	if _allowed(peer):
 		s_result.rpc_id(peer, "attack", sim.cmd_attack(peer, dir_x, dir_z))
+
+
+@rpc("any_peer", "reliable")
+func c_guardian_taunt() -> void:
+	var peer := multiplayer.get_remote_sender_id()
+	if _allowed(peer):
+		s_result.rpc_id(peer, "guardian_taunt", sim.cmd_guardian_taunt(peer))
 
 
 @rpc("any_peer", "reliable")
@@ -547,14 +662,22 @@ func _is_nearby(event: Dictionary, peer: int) -> bool:
 
 func _event_visible_to(event: Dictionary, peer: int) -> bool:
 	match event["type"]:
-		"spawn", "zone", "gathered", "fished", "crate", "mastery", "scavenging", "infection", "evaded", "xp", "skill_up", "perk":
+		"spawn", "zone", "gathered", "fished", "crate", "mastery", "renown", "self_defense", "justice", "scavenging", "infection", "evaded", "pvp_honor", "xp", "skill_up", "perk":
 			return event.get("peer", -1) == peer
+		"party_aid":
+			return event.get("peer", -1) == peer or event.get("by", -1) == peer
 		"trade":
 			return event.get("a", -1) == peer or event.get("b", -1) == peer
+		"guardian_taunt":
+			return _is_nearby(event, peer)
+		"outpost_taken", "outpost_lost", "outpost_fortified", "outpost_breached", \
+				"siege_contract_declared", "siege_contract_result":
+			return _is_nearby(event, peer)
 		"death":
 			return true # Everyone hears that somebody died (no position is shared).
 		"hit":
 			return event.get("id", -1) == peer or event.get("by", 0) == peer or _is_nearby(event, peer)
-		"attack", "zombie_died", "siege_started":
+		"attack", "zombie_died", "decoy_thrown", "siege_started", "raid_started", \
+				"raid_warning", "raid_slam", "raid_enraged", "raid_reinforcements", "raid_defeated", "raid_expired":
 			return _is_nearby(event, peer)
 	return false

@@ -5,17 +5,23 @@ extends RefCounted
 const Defs = preload("res://scripts/shared/defs.gd")
 const Movement = preload("res://scripts/shared/movement.gd")
 const Threat = preload("res://scripts/shared/threat.gd")
+const EliteInfected = preload("res://scripts/shared/elite_infected.gd")
 
 enum State { IDLE, WANDER, CHASE, ATTACK, DEAD, INVESTIGATE }
 
 var id: int
 var type: String
+var elite: bool = false
+var raid_boss: bool = false # Session-only group encounter; never a client-spawnable type.
+var raid_enraged: bool = false # Server transitions once at low raid boss health.
 var spawn_id: int
 var position: Vector3
 var yaw: float = 0.0
 var health: float
 var state: int = State.IDLE
 var target_id: int = -1 # Peer id of the player being chased.
+var forced_target_id: int = -1 # Server-authorized party guardian.
+var forced_target_seconds: float = 0.0
 var home: Vector2
 var wander_target: Vector2
 var last_known_target: Vector2
@@ -41,18 +47,31 @@ func _init(p_id: int, p_type: String, p_position: Vector3, p_spawn_id: int = 0) 
 	spawn_id = p_spawn_id
 
 
+## One-way transformation on server-created enemies. Never shared mutable stats.
+func become_elite() -> void:
+	if elite or state == State.DEAD:
+		return
+	data = EliteInfected.empowered_stats(data)
+	health = float(data["health"])
+	elite = true
+
+
 func is_alive() -> bool:
 	return state != State.DEAD
 
 
 ## Advances the brain. `players` maps peer id to {position: Vector3, alive: bool,
-## safe: bool, noise: float}. Noisy survivors may be detected farther away.
+## safe: bool, noise: float, scent: float}. Sound and blood scent are
+## server-owned sensory channels revealing noisy or wounded survivors.
 ## Returns {"hit": peer_id, "damage": float} when the zombie lands a blow, else {}.
 func think(world, players: Dictionary, delta: float, rng: RandomNumberGenerator) -> Dictionary:
 	if state == State.DEAD:
 		return {}
 	attack_timer = maxf(attack_timer - delta, 0.0)
 	Threat.decay(threat, delta)
+	forced_target_seconds = maxf(0.0, forced_target_seconds - delta)
+	if forced_target_seconds <= 0.0:
+		forced_target_id = -1
 	think_timer -= delta
 	var here := Vector2(position.x, position.z)
 
@@ -110,7 +129,34 @@ func think(world, players: Dictionary, delta: float, rng: RandomNumberGenerator)
 	return result
 
 
+## Only the authoritative server calls this after checking the guardian's party,
+## weapon, distance, combat energy and cooldown.
+func force_taunt(peer_id: int, seconds: float) -> bool:
+	if not is_alive() or peer_id <= 0 or not is_finite(seconds) or seconds <= 0.0 or seconds > 5.0:
+		return false
+	forced_target_id = peer_id
+	forced_target_seconds = seconds
+	target_id = peer_id
+	state = State.CHASE
+	think_timer = 0.0
+	investigate_time = 0.0
+	Threat.record(threat, peer_id, 30.0)
+	return true
+
+
 func _select_target(players: Dictionary, here: Vector2) -> void:
+	# Threat is subordinate only during the short guardian focus.
+	# Safe, dead, distant and disconnected taunts are cleared immediately.
+	if forced_target_seconds > 0.0 and players.has(forced_target_id):
+		var info: Dictionary = players[forced_target_id]
+		var at: Vector3 = info.get("position", Vector3.INF)
+		if bool(info.get("alive", false)) and not bool(info.get("safe", true)) and 				at.is_finite() and here.distance_to(Vector2(at.x, at.z)) <= float(data["lose"]):
+			target_id = forced_target_id
+			state = State.CHASE
+			investigate_time = 0.0
+			return
+	forced_target_id = -1
+	forced_target_seconds = 0.0
 	# Damage-earning attackers within the leash take priority over passive
 	# proximity targeting. Invalid, safe, disconnected or distant IDs expire.
 	var priority: int = Threat.pick(threat, players, here, float(data["lose"]), target_id)
@@ -133,7 +179,13 @@ func _select_target(players: Dictionary, here: Vector2) -> void:
 		var sight_multiplier := clampf(float(info.get("notice_multiplier", 1.0)), 1.0, 1.35)
 		var notice := minf(float(data["notice"]) * sight_multiplier, float(data["lose"]) - 1.0)
 		var hearing := clampf(float(info.get("noise", 0.0)), 0.0, float(data["lose"]) - 1.0)
-		var detect_range := maxf(notice, hearing)
+		# Scent can improve discovery but never expands the pursuit leash,
+		# overrides combat threat or bypasses safe/dead player protections.
+		var scent_raw: float = float(info.get("scent", 0.0))
+		var scent: float = 0.0
+		if is_finite(scent_raw):
+			scent = clampf(scent_raw, 0.0, float(data["lose"]) - 1.0)
+		var detect_range := maxf(maxf(notice, hearing), scent)
 		if distance < best_distance and (distance <= detect_range or peer_id == target_id):
 			best = peer_id
 			best_distance = distance
@@ -163,6 +215,27 @@ func receive_pack_alert(peer_id: int, players: Dictionary) -> bool:
 	state = State.CHASE
 	think_timer = 0.25
 	investigate_time = 0.0
+	return true
+
+
+## An unattended infected may investigate a thrown clattering lure.
+## This never steals aggro from a real chase, raid boss or attacker.
+func investigate_decoy(site: Vector2) -> bool:
+	if not site.is_finite() or state == State.DEAD or raid_boss:
+		return false
+	if state == State.CHASE or state == State.ATTACK or not threat.is_empty():
+		return false
+	if Vector2(position.x, position.z).distance_to(site) > float(data["lose"]):
+		return false
+	# A lure already being investigated must not redirect the zombie to
+	# another newly placed lure every AI tick (unbounded ping-pong).
+	if state == State.INVESTIGATE:
+		return false
+	target_id = -1
+	last_known_target = site
+	investigate_time = INVESTIGATE_SECONDS
+	think_timer = 0.25
+	state = State.INVESTIGATE
 	return true
 
 
