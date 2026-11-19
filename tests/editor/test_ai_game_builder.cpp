@@ -94,6 +94,12 @@ TEST_CASE("[AIGameBuilder] Portable project paths") {
 		"scripts/a#b.gd",
 		"scripts/a%20b.gd",
 		"scripts/a|b.gd",
+		"CON.gd",
+		"nul.tscn",
+		"data/PRN.csv",
+		"COM1.gd",
+		"lpt9.tres",
+		"folder/AUX/main.gd",
 	};
 	for (const char *path : unsafe_paths) {
 		INFO("Path: ", path);
@@ -274,6 +280,37 @@ TEST_CASE("[AIGameBuilder] Enforces 256 KiB per file and 1 MiB total") {
 	Array files;
 	String summary;
 	String error;
+	CHECK_EQ(AIGameBuilderPlugin::parse_plan(JSON::stringify(plan), files, summary, error), ERR_INVALID_DATA);
+	CHECK(files.is_empty());
+}
+
+TEST_CASE("[AIGameBuilder] Rejects editor-executed tool scripts and NUL bytes") {
+	Array files;
+	String summary;
+	String error;
+	const char *unsafe_code[] = {
+		"@tool\\nextends Node",
+		"extends Node\\n@tool",
+		"# @tool\\nextends Node",
+	};
+	for (const char *code : unsafe_code) {
+		Dictionary file;
+		file["path"] = "scripts/main.gd";
+		file["content"] = code;
+		Array input;
+		input.push_back(file);
+		Dictionary plan;
+		plan["files"] = input;
+		CHECK_EQ(AIGameBuilderPlugin::parse_plan(JSON::stringify(plan), files, summary, error), ERR_INVALID_DATA);
+		CHECK(files.is_empty());
+	}
+	Dictionary file;
+	file["path"] = "scripts/main.gd";
+	file["content"] = String("extends Node") + String::chr(0) + "danger";
+	Array input;
+	input.push_back(file);
+	Dictionary plan;
+	plan["files"] = input;
 	CHECK_EQ(AIGameBuilderPlugin::parse_plan(JSON::stringify(plan), files, summary, error), ERR_INVALID_DATA);
 	CHECK(files.is_empty());
 }
