@@ -270,6 +270,32 @@ def compare_baseline(current: dict[str, Any], baseline: dict[str, Any],
 
 
 
+def ramp_scales(initial: int, steps: int, factor: int) -> list[int]:
+    """Bounded geometric ramp, in fresh processes, up to the engine scale limit."""
+    if initial < 1 or initial > 1000 or steps < 1 or factor < 2:
+        raise ValueError("Invalid ramp parameters")
+    values = [initial]
+    for _ in range(steps - 1):
+        if values[-1] > 1000 // factor:
+            break
+        values.append(values[-1] * factor)
+    return values
+
+
+def ranking(report: dict[str, Any]) -> dict[str, list[dict[str, Any]]]:
+    """Rank absolute case cost. Unlike work units are not directly comparable."""
+    result = {}
+    for metric in ("median_wall_seconds", "median_cpu_seconds", "median_engine_ms",
+                   "max_rss_mib", "max_post_warmup_rss_growth_mib",
+                   "max_p95_frame_ms", "max_p95_physics_ms"):
+        values = ((name, data.get(metric)) for name, data in report["cases"].items()
+                  if data["status"] == "passed")
+        ordered = sorted(((name, value) for name, value in values if value is not None),
+                         key=lambda pair: pair[1], reverse=True)
+        result[metric] = [{"case": name, "value": value} for name, value in ordered[:10]]
+    return result
+
+
 def markdown_hotspots(report: dict[str, Any]) -> str:
     """Human-readable ranking; distinct workloads are not normalized to identical work."""
     rows = []
@@ -324,6 +350,9 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--case", action="append", default=[], help="Repeat or use a comma-separated list; default: all")
     parser.add_argument("--render-mode", choices=("headless", "display"), default="headless")
     parser.add_argument("--repeats", type=int)
+    parser.add_argument("--ramp", action="store_true", help="Scale each case until failure or max levels")
+    parser.add_argument("--ramp-steps", type=int, default=4)
+    parser.add_argument("--ramp-factor", type=int, default=2)
     parser.add_argument("--scale", type=int)
     parser.add_argument("--frames", type=int)
     parser.add_argument("--timeout", type=float, help="Seconds per scenario process")
@@ -351,6 +380,7 @@ def main(argv: list[str] | None = None) -> int:
             or config["frames"] < 1 or config["frames"] > 100000
             or config["timeout"] <= 0 or config["rss_mib"] <= 0
             or args.max_regression_pct < 0
+            or args.ramp_steps < 1 or args.ramp_steps > 10 or args.ramp_factor < 2
             or (args.max_retained_growth_mib is not None and args.max_retained_growth_mib < 0)):
         parser.error("All limits and iterations must be positive and within engine bounds")
     try:
@@ -371,25 +401,33 @@ def main(argv: list[str] | None = None) -> int:
         "configuration": {"preset": args.preset, "scale": config["scale"],
                           "frames": config["frames"], "repeats": config["repeats"],
                           "render_mode": args.render_mode, "timeout_seconds": config["timeout"],
-                          "rss_limit_mib": config["rss_mib"], "seed": args.seed},
+                          "rss_limit_mib": config["rss_mib"], "seed": args.seed,
+                          "ramp": args.ramp, "ramp_steps": args.ramp_steps,
+                          "ramp_factor": args.ramp_factor},
         "cases": {},
         "failures": [],
     }
     for case in selected:
-        runs = []
-        for repetition in range(config["repeats"]):
-            cmd = build_command(binary, project, case, config["scale"], config["frames"],
-                                args.seed, args.render_mode, args.godot_arg)
-            print("[%s] %s run %d/%d" % (args.preset, case, repetition + 1, config["repeats"]), flush=True)
-            run = run_once(cmd, config["timeout"], config["rss_mib"],
-                           case, config["scale"], config["frames"], args.seed)
-            runs.append(run)
-            print("  %s: %.3fs; RSS %s MiB" % (
-                run["status"], run["wall_seconds"], run["peak_rss_mib"]), flush=True)
-            if run["status"] != "passed":
-                report["failures"].append("%s #%d: %s" %
-                                          (case, repetition + 1, run.get("failure", "failed")))
-        report["cases"][case] = summarize(runs)
+        scales = ramp_scales(config["scale"], args.ramp_steps, args.ramp_factor) if args.ramp else [config["scale"]]
+        for level in scales:
+            name = "%s@%d" % (case, level) if args.ramp else case
+            runs = []
+            for repetition in range(config["repeats"]):
+                cmd = build_command(binary, project, case, level, config["frames"],
+                                    args.seed, args.render_mode, args.godot_arg)
+                print("[%s] %s run %d/%d" % (args.preset, name, repetition + 1, config["repeats"]), flush=True)
+                run = run_once(cmd, config["timeout"], config["rss_mib"],
+                               case, level, config["frames"], args.seed)
+                runs.append(run)
+                print("  %s: %.3fs; RSS %s MiB" % (
+                    run["status"], run["wall_seconds"], run["peak_rss_mib"]), flush=True)
+                if run["status"] != "passed":
+                    report["failures"].append("%s #%d: %s" %
+                                              (name, repetition + 1, run.get("failure", "failed")))
+                    break
+            report["cases"][name] = summarize(runs)
+            if report["cases"][name]["status"] != "passed":
+                break
 
     try:
         baseline = json.loads(args.baseline.read_text(encoding="utf-8")) if args.baseline else report
@@ -397,6 +435,7 @@ def main(argv: list[str] | None = None) -> int:
                               args.max_regression_pct, args.max_retained_growth_mib))
     except (ValueError, OSError, KeyError, TypeError) as exc:
         report["failures"].append("baseline_error: %s" % exc)
+    report["rankings"] = ranking(report)
     report["status"] = "failed" if report["failures"] else "passed"
     args.output.parent.mkdir(parents=True, exist_ok=True)
     temp = args.output.with_name(args.output.name + ".tmp")
