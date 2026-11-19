@@ -29,6 +29,7 @@
 /**************************************************************************/
 
 #include "servers/physics_speculative_sphere_contact.h"
+#include "servers/physics_contact_recycling.h"
 #include "tests/test_macros.h"
 
 TEST_FORCE_LINK(test_physics_speculative_sphere_contact)
@@ -128,6 +129,63 @@ TEST_CASE("[PhysicsSpeculative] Tangential near-misses do not create ghost conta
 	CHECK(physics_speculative_sphere_contact(
 			Vector3(-3, 0, 0), real_t(1), Vector3(0, 0, 1.8), real_t(1),
 			Vector3(10, 0, 0), Vector3(), real_t(0.5), real_t(1.6), a3, b3, n3));
+}
+
+
+TEST_CASE("[PhysicsSpeculative] Reevaluate a previously separated 2D pair when velocity changes") {
+	GodotPhysicsContactRecycling recycling;
+	Vector2 point_a, point_b, normal;
+	const Vector2 center_a, center_b(real_t(2.5), 0);
+	const real_t step = real_t(0.01);
+	const real_t prediction_distance = real_t(0.6);
+
+	// The geometry stays fixed between setup calls; only velocity changes.
+	CHECK_FALSE(physics_speculative_sphere_contact(center_a, real_t(1), center_b, real_t(1),
+			Vector2(), Vector2(), step, prediction_distance, point_a, point_b, normal));
+	recycling.remember(13, 21, false);
+	CHECK(recycling.can_reuse_separation(13, 21, false)); // Legacy geometry-only cache.
+	CHECK_FALSE(recycling.can_reuse_separation(13, 21, false, true)); // Predictive pair.
+
+	CHECK(physics_speculative_sphere_contact(center_a, real_t(1), center_b, real_t(1),
+			Vector2(100, 0), Vector2(), step, prediction_distance, point_a, point_b, normal));
+	recycling.remember(13, 21, true);
+	CHECK(recycling.can_reuse(13, 21, true, 1, false));
+	CHECK_FALSE(recycling.can_reuse(13, 21, true, 1, false, true));
+
+	// The next frame might reverse the velocity without changing the pose.
+	CHECK_FALSE(physics_speculative_sphere_contact(center_a, real_t(1), center_b, real_t(1),
+			Vector2(-100, 0), Vector2(), step, prediction_distance, point_a, point_b, normal));
+	CHECK_FALSE(recycling.can_reuse(13, 21, true, 1, false, true));
+}
+
+TEST_CASE("[PhysicsSpeculative] Reevaluate a previously separated 3D pair when velocity changes") {
+	GodotPhysicsContactRecycling recycling;
+	Vector3 point_a, point_b, normal;
+	const Vector3 center_a, center_b(real_t(2.4), 0, 0);
+	const real_t step = real_t(0.01);
+	const real_t prediction_distance = real_t(0.6);
+	recycling.remember(70, 90, false);
+	CHECK(recycling.can_reuse_separation(70, 90, false));
+	CHECK_FALSE(recycling.can_reuse_separation(70, 90, false, true));
+	CHECK(physics_speculative_sphere_contact(center_a, real_t(1), center_b, real_t(1),
+			Vector3(100, 0, 0), Vector3(), step, prediction_distance, point_a, point_b, normal));
+	recycling.remember(70, 90, true);
+	CHECK(recycling.can_reuse(70, 90, true, 1, false));
+	CHECK_FALSE(recycling.can_reuse(70, 90, true, 1, false, true));
+	CHECK_FALSE(recycling.can_reuse(70, 90, true, 1, true, false));
+}
+
+TEST_CASE("[PhysicsSpeculative] Velocity-sensitive caching retains legacy behavior for nonpredictive shapes") {
+	GodotPhysicsContactRecycling recycling;
+	recycling.remember(100, 200, true);
+	CHECK(recycling.can_reuse(100, 200, true, 2, false));
+	CHECK(recycling.can_reuse(100, 200, true, 2, false, false));
+	CHECK_FALSE(recycling.can_reuse(100, 201, true, 2, false));
+	CHECK_FALSE(recycling.can_reuse(100, 200, true, 0, false));
+	CHECK_FALSE(recycling.can_reuse(100, 200, true, 2, true));
+	recycling.remember(100, 200, false);
+	CHECK(recycling.can_reuse_separation(100, 200, false));
+	CHECK_FALSE(recycling.can_reuse_separation(100, 200, true));
 }
 
 } // namespace TestPhysicsSpeculativeSphereContact
