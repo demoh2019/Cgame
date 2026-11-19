@@ -54,7 +54,7 @@ class HashPreallocationContracts(unittest.TestCase):
 
     def test_bounds_are_known_before_reserve(self):
         source = (ROOT / "core/io/resource_format_binary.cpp").read_text(encoding="utf-8")
-        self.assertLess(source.find("len &= 0x7FFFFFFF;"), source.find("d.reserve(len);"))
+        self.assertLess(source.find("len &= 0x7FFFFFFF;"), source.find("d.reserve(MIN(len, 65536u));"))
         source = (ROOT / "core/io/marshalls.cpp").read_text(encoding="utf-8")
         self.assertIn("dict.reserve(MIN(count, 65536));", source)
         source = (ROOT / "core/string/translation.cpp").read_text(encoding="utf-8")
