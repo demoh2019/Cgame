@@ -14,7 +14,7 @@ var stamina := 100.0
 var coins := 12
 var shelter_level := 0
 var zone := 0
-var elapsed_days := 0.0
+var elapsed_days := 0.35
 var deaths := 0
 var infected_kills := 0
 var last_message := ""
@@ -282,7 +282,7 @@ func import_snapshot(data: Variant) -> bool:
 	coins = clampi(int(data.get("coins", 12)), 0, 1000000)
 	shelter_level = clampi(int(data.get("shelter_level", 0)), 0, 3)
 	zone = clampi(int(data.get("zone", 0)), 0, 2)
-	elapsed_days = clampf(float(data.get("elapsed_days", 0.0)), 0.0, 100000.0)
+	elapsed_days = clampf(float(data.get("elapsed_days", 0.35)), 0.0, 100000.0)
 	deaths = clampi(int(data.get("deaths", 0)), 0, 1000000)
 	infected_kills = clampi(int(data.get("infected_kills", 0)), 0, 1000000)
 	return true
