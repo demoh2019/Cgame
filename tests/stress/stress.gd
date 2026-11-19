@@ -12,6 +12,9 @@ const CASES := [
 	"file_io", "threads", "physics_2d", "physics_3d",
 	"memory_churn", "astar_grid", "tweens", "audio_buffers",
 	"variant_codec", "packet_stream", "ui_layout", "render_2d", "render_3d",
+	"resource_load",
+	"input_map",
+	"transform_hierarchy",
 	"node_paths", "regex", "compression", "hashing",
 	"resource_io", "astar_3d", "thread_contention",
 	"geometry_2d", "mesh_build", "input_dispatch", "image_codec", "group_calls",
@@ -205,6 +208,12 @@ func _run_case(test_case: String, scale: int, frames: int, seed: int) -> Diction
 			return await _render_2d(scale, frames)
 		"render_3d":
 			return await _render_3d(scale, frames)
+		"resource_load":
+			return _resource_load(scale)
+		"input_map":
+			return _input_map(scale)
+		"transform_hierarchy":
+			return _transform_hierarchy(scale)
 		"node_paths":
 			return _node_paths(scale)
 		"regex":
@@ -847,3 +856,77 @@ func _render_multimesh_3d(scale: int, frames: int) -> Dictionary:
 	world.queue_free()
 	await process_frame
 	return {"instances": instances, "frames": frames, "p95_frame_ms": p95_frame_ms, "peak_frame_ms": peak_frame_ms, "peak_draw_calls": peak_draw_calls}
+
+
+func _resource_load(scale: int) -> Dictionary:
+	var path := "user://stress_generated_scene.tscn"
+	var prototype := Node2D.new()
+	for i in range(12):
+		var child := Node2D.new()
+		child.name = "Child%d" % i
+		prototype.add_child(child)
+		child.owner = prototype
+	var scene := PackedScene.new()
+	if scene.pack(prototype) != OK:
+		prototype.free()
+		return {"error": "Could not pack resource prototype"}
+	prototype.free()
+	if ResourceSaver.save(scene, path) != OK:
+		return {"error": "ResourceSaver failed"}
+	scene = null
+	var checksum := 0
+	for i in range(40 * scale):
+		# Cache bypass deliberately exercises disk IO + text resource parsing.
+		var loaded := ResourceLoader.load(path, "PackedScene", ResourceLoader.CACHE_MODE_IGNORE) as PackedScene
+		if not (loaded is PackedScene):
+			DirAccess.remove_absolute(ProjectSettings.globalize_path(path))
+			return {"error": "ResourceLoader failed"}
+		var instance := loaded.instantiate()
+		if instance == null or instance.get_child_count() != 12:
+			if instance != null:
+				instance.free()
+			DirAccess.remove_absolute(ProjectSettings.globalize_path(path))
+			return {"error": "Loaded scene contents mismatch"}
+		checksum += instance.get_child_count()
+		instance.free()
+	var cleanup := DirAccess.remove_absolute(ProjectSettings.globalize_path(path))
+	if cleanup != OK:
+		return {"error": "Could not remove generated test resource"}
+	return {"reloads": 40 * scale, "checksum": checksum}
+
+
+func _input_map(scale: int) -> Dictionary:
+	var action := &"stress_generated_input_action"
+	var event := InputEventKey.new()
+	event.keycode = KEY_A
+	event.pressed = true
+	var matches := 0
+	for i in range(3000 * scale):
+		InputMap.add_action(action)
+		InputMap.action_add_event(action, event)
+		if not InputMap.event_is_action(event, action, true):
+			InputMap.erase_action(action)
+			return {"error": "Input action lookup mismatch"}
+		matches += 1
+		InputMap.erase_action(action)
+	return {"registrations": matches, "checksum": matches}
+
+
+func _transform_hierarchy(scale: int) -> Dictionary:
+	var world := Node3D.new()
+	root.add_child(world)
+	var nodes: Array[Node3D] = [world]
+	var count := 300 * scale
+	for i in range(count):
+		var node := Node3D.new()
+		node.position = Vector3(float(i & 7), 1.0, float(i & 15))
+		nodes[int(i / 2)].add_child(node)
+		nodes.append(node)
+	var checksum := 0.0
+	for pass_index in range(3):
+		for i in range(1, nodes.size()):
+			var node := nodes[i]
+			node.position.x += 0.25
+			checksum += node.global_position.x
+	world.free()
+	return {"nodes": count, "transform_reads": count * 3, "checksum": checksum}
