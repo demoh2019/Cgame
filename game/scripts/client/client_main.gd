@@ -738,8 +738,9 @@ func _unhandled_input(event: InputEvent) -> void:
 	elif event.is_action_pressed("survive_rest"):
 		_result("Camp rest", sim.cmd_rest(LOCAL_PLAYER_ID))
 	elif event.is_action_pressed("survive_vendor_buy"):
-		_result("Buy water (%d silver)" % Reputation.buy_price(
-			int(Vendor.BUY_PRICES["water_bottle"]), 1, survivor.renown),
+		_result("Buy water (%d silver)" % PvpInfamy.vendor_unit_price(
+			Reputation.buy_price(int(Vendor.BUY_PRICES["water_bottle"]), 1,
+				survivor.renown), survivor.pvp_infamy, true),
 			sim.cmd_vendor(LOCAL_PLAYER_ID, "water_bottle", 1, true))
 	elif event.is_action_pressed("survive_vendor_sell"):
 		var fish_only: bool = Input.is_key_pressed(KEY_SHIFT)
