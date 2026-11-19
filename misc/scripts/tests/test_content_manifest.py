@@ -188,6 +188,28 @@ class ContentManifestTests(unittest.TestCase):
         with self.assertRaises(cm.ManifestError):
             self.build()
 
+    def test_manifest_rejects_file_directory_collisions(self):
+        row = {"bytes": 0, "sha256": "a" * 64}
+        for paths in (["data", "data/sprite.png"],
+                      ["assets/world", "assets/world/maps/file"],
+                      ["one", "one/two"]):
+            with self.subTest(paths=paths):
+                self.error({"format": 1, "files": [
+                    {"path": name, **row} for name in sorted(paths)]})
+
+    def test_scan_does_not_ignore_unreadable_directories(self):
+        self.put("safe.txt")
+
+        def broken_walk(root, *, followlinks, onerror):
+            self.assertFalse(followlinks)
+            self.assertTrue(callable(onerror))
+            yield str(root), [], ["safe.txt"]
+            onerror(PermissionError("unreadable nested directory"))
+
+        with patch.object(cm.os, "walk", side_effect=broken_walk):
+            with self.assertRaisesRegex(cm.ManifestError, "Cannot traverse project tree"):
+                cm.inventory(self.project)
+
     def test_rejects_decomposed_unicode(self):
         with self.assertRaises(cm.ManifestError):
             cm.validate_path("cafe\u0301.png")
