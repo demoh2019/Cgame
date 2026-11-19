@@ -203,6 +203,62 @@ manifolds, compare the existing `physics_contacts_friction_2d`,
 `physics_contact_manifolds_2d`, and `physics_3d` stress cases with the same
 hardware and engine build.
 
+## Optional 3D manifold patch coverage (Jolt / Rapier-style)
+
+GodotPhysics3D normally keeps at most four rigid contact points, replacing
+the shallowest when a fifth candidate arrives. On a large flat face this can
+select multiple points close together and leave the contact patch poorly
+supported. Jolt's manifold reduction and Rapier's contact clustering use
+similar-normal contact groups to reduce redundant solver constraints while
+preserving usable contacts.
+
+Cgame adds an **opt-in** area-aware replacement mode:
+
+```ini
+[physics]
+3d/solver/manifold_spread_reduction=true
+```
+
+The default is `false`: existing scenes keep the legacy depth-first contact
+selection and deterministic order. The option is read when a new GodotPhysics3D
+space is constructed; it does not affect third-party physics backends.
+
+When a fifth rigid contact competes for four slots, the new method:
+
+- Always keeps the point with deepest penetration.
+- For contact normals differing by less than approximately 11.5 degrees,
+  scores all four-point subsets by summed squared projected triangle areas
+  and chooses the most spatially distributed contact patch.
+- Uses 1% score hysteresis when the existing four points already contain
+  the deepest contact, avoiding unnecessary impulse-cache reshuffling.
+- Reverts to the original depth-first selection when normals disagree,
+  preserving the behavior at sharp edges and mixed-face manifolds.
+- Runs on five fixed-size stack candidates with no heap allocations or
+  additional per-contact persistent memory.
+
+As with other manifold reducers, changes to contact selection can affect
+constraint convergence, reproducibility and stability. This feature needs
+real-world benchmarking before being enabled in production.
+
+Native C++ cases cover deep-point retention, patch expansion, mixed normals,
+degenerate line contacts and rejection of a redundant central point.
+A Python source-contract and deterministic reference-model suite checks the
+integration and 1000 randomized contact patches:
+
+```bash
+python3 -m unittest discover -s tests/stress \
+  -p 'test_physics_3d_manifold_reduction.py' -v
+
+./bin/godot.macos.editor.arm64 --headless \
+  --path tests/stress \
+  --script res://physics_manifold_spread_3d_regression.gd
+```
+
+The runtime script creates eight stacks of five rigid boxes and validates
+finite body states both with the option disabled and enabled. It is a smoke
+regression, not a measured performance benefit or a guarantee that all
+possible overfull manifolds are exercised.
+
 ## Converged-contact zero-impulse fast path and singular-mass guards
 
 Built-in GodotPhysics 2D and 3D now skip the **body update**, but not the
