@@ -1406,6 +1406,18 @@ GodotSpace3D::GodotSpace3D() {
 	const real_t configured_sls_tau = GLOBAL_GET("physics/3d/solver/soft_body_tetra_sls_relaxation_time");
 	soft_body_tetra_sls_relaxation_time = Math::is_finite(configured_sls_tau) ?
 			MAX(real_t(0.001), configured_sls_tau) : real_t(0.25);
+	const real_t prony_fast_compliance = GLOBAL_GET("physics/3d/solver/soft_body_tetra_prony_fast_compliance");
+	soft_body_tetra_prony_fast_compliance = Math::is_finite(prony_fast_compliance) ?
+			MAX(real_t(0.0), prony_fast_compliance) : real_t(0.0);
+	const real_t prony_fast_time = GLOBAL_GET("physics/3d/solver/soft_body_tetra_prony_fast_relaxation_time");
+	soft_body_tetra_prony_fast_relaxation_time = Math::is_finite(prony_fast_time) ?
+			MAX(real_t(0.001), prony_fast_time) : real_t(0.04);
+	const real_t prony_slow_compliance = GLOBAL_GET("physics/3d/solver/soft_body_tetra_prony_slow_compliance");
+	soft_body_tetra_prony_slow_compliance = Math::is_finite(prony_slow_compliance) ?
+			MAX(real_t(0.0), prony_slow_compliance) : real_t(0.0);
+	const real_t prony_slow_time = GLOBAL_GET("physics/3d/solver/soft_body_tetra_prony_slow_relaxation_time");
+	soft_body_tetra_prony_slow_relaxation_time = Math::is_finite(prony_slow_time) ?
+			MAX(real_t(0.001), prony_slow_time) : real_t(2.0);
 	const real_t configured_tetra_plastic_rate = GLOBAL_GET("physics/3d/solver/soft_body_tetra_volume_plastic_rate");
 	soft_body_tetra_volume_plastic_rate = Math::is_finite(configured_tetra_plastic_rate) ? MAX(real_t(0.0), configured_tetra_plastic_rate) : real_t(0.0);
 	const real_t configured_tetra_plastic_yield = GLOBAL_GET("physics/3d/solver/soft_body_tetra_volume_plastic_yield");

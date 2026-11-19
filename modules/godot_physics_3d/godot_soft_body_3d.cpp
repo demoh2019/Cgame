@@ -44,6 +44,7 @@
 #include "servers/physics_softbody_shape_matching.h"
 #include "servers/physics_fem_tetra_neo_hookean.h"
 #include "servers/physics_fem_tetra_standard_linear_solid.h"
+#include "servers/physics_fem_tetra_prony.h"
 #include "servers/physics_fem_tetra_mooney_rivlin.h"
 #include "servers/physics_fem_tetra_ogden.h"
 #include "servers/physics_fem_tetra_principal_limits.h"
@@ -571,6 +572,7 @@ void GodotSoftBody3D::initialize_fem_tetra() {
 	const bool previously_lumped = !xpbd_fem_mass_fractions.is_empty();
 	xpbd_fem_tetrahedra.reset();
 	xpbd_fem_sls_states.reset();
+	xpbd_fem_prony_states.reset();
 	xpbd_fem_fiber_lambdas.reset();
 	xpbd_fem_fiber_secondary_lambdas.reset();
 	xpbd_fem_principal_lambdas.reset();
@@ -675,6 +677,19 @@ void GodotSoftBody3D::initialize_fem_tetra() {
 			xpbd_fem_sls_states.resize(xpbd_fem_tetrahedra.size());
 			for (PhysicsFEMTetraSLSState &state : xpbd_fem_sls_states) {
 				state = PhysicsFEMTetraSLSState();
+			}
+		}
+
+		// An optional pair of EXTRA Maxwell arms, with independent fast and
+		// slow relaxation constants. The first arm is the existing SLS
+		// history. Allocate nothing in scenes using only legacy SLS.
+		if (!xpbd_fem_tetrahedra.is_empty() &&
+				get_space()->get_soft_body_tetra_fem_compliance() > 0.0 &&
+				(get_space()->get_soft_body_tetra_prony_fast_compliance() > 0.0 ||
+						get_space()->get_soft_body_tetra_prony_slow_compliance() > 0.0)) {
+			xpbd_fem_prony_states.resize(xpbd_fem_tetrahedra.size());
+			for (PhysicsFEMTetraPronyState &state : xpbd_fem_prony_states) {
+				state = PhysicsFEMTetraPronyState();
 			}
 		}
 
@@ -3618,6 +3633,28 @@ void GodotSoftBody3D::solve_constraints(real_t p_delta) {
 		xpbd_fem_fiber_secondary_plastic_rest_stretches.reset();
 	}
 
+	// Generalized-Maxwell Prony spectrum: two extra material-frame strain
+	// memories with fast/slow exponential time constants. Update exactly
+	// ONCE per physics tick (not per XPBD iteration) and atomically per tet.
+	if (!xpbd_fem_prony_states.is_empty() &&
+			xpbd_fem_prony_states.size() == xpbd_fem_tetrahedra.size() &&
+			get_space()->get_soft_body_tetra_fem_compliance() > 0.0 && p_delta > 0.0) {
+		const bool fast_enabled = get_space()->get_soft_body_tetra_prony_fast_compliance() > 0.0;
+		const bool slow_enabled = get_space()->get_soft_body_tetra_prony_slow_compliance() > 0.0;
+		const double fast_tau = double(get_space()->get_soft_body_tetra_prony_fast_relaxation_time());
+		const double slow_tau = double(get_space()->get_soft_body_tetra_prony_slow_relaxation_time());
+		for (uint32_t i = 0; i < xpbd_fem_tetrahedra.size(); ++i) {
+			const PhysicsFEMConvexTetra &tet = xpbd_fem_tetrahedra[i];
+			const Vector3 positions[4] = {
+				nodes[tet.a].x, nodes[tet.b].x,
+				nodes[tet.c].x, nodes[tet.d].x
+			};
+			physics_fem_tetra_prony_relax(positions, tet.rest,
+					fast_enabled, fast_tau, slow_enabled, slow_tau,
+					double(p_delta), xpbd_fem_prony_states[i]);
+		}
+	}
+
 	// Local scalar continuum damage is evaluated on predicted positions
 	// BEFORE the elastic XPBD projection removes the over-yield strain.
 	// The strength history is updated once per fixed physics tick, not
@@ -3796,6 +3833,12 @@ void GodotSoftBody3D::solve_constraints(real_t p_delta) {
 	const bool use_fem_sls = use_fem && fem_sls_compliance > 0.0 &&
 			Math::is_finite(fem_sls_alpha) && fem_sls_alpha > 0.0 &&
 			xpbd_fem_sls_states.size() == xpbd_fem_tetrahedra.size();
+	const double fem_prony_fast_compliance = get_space() ? double(get_space()->get_soft_body_tetra_prony_fast_compliance()) : 0.0;
+	const double fem_prony_slow_compliance = get_space() ? double(get_space()->get_soft_body_tetra_prony_slow_compliance()) : 0.0;
+	const bool use_fem_prony = use_fem &&
+			(fem_prony_fast_compliance > 0.0 || fem_prony_slow_compliance > 0.0) &&
+			xpbd_fem_prony_states.size() == xpbd_fem_tetrahedra.size() &&
+			Math::is_finite(1.0 / (double(p_delta) * double(p_delta)));
 	const double fem_principal_min = get_space() ? double(get_space()->get_soft_body_tetra_principal_min_stretch()) : 0.0;
 	const double fem_principal_max = get_space() ? double(get_space()->get_soft_body_tetra_principal_max_stretch()) : 0.0;
 	const double fem_principal_compliance = get_space() ? double(get_space()->get_soft_body_tetra_principal_limit_compliance()) : 0.0;
@@ -4010,6 +4053,13 @@ void GodotSoftBody3D::solve_constraints(real_t p_delta) {
 			state.lambda = 0.0;
 		}
 	}
+	// The combined multi-arm XPBD multiplier resets each tick, while the
+	// two per-arm material histories remain unchanged across iterations.
+	if (use_fem_prony) {
+		for (PhysicsFEMTetraPronyState &state : xpbd_fem_prony_states) {
+			state.lambda = 0.0;
+		}
+	}
 	// The two unilateral singular-value constraints keep one pair of
 	// multipliers per cooked tetra, persisting only within this physics tick.
 	if (use_fem_principal) {
@@ -4180,7 +4230,29 @@ void GodotSoftBody3D::solve_constraints(real_t p_delta) {
 							a.im, b.im, c.im, d.im,
 							tetra.rest, fem_poisson, local_alpha, tetra.lambda);
 				}
-				if (use_fem_sls) {
+				if (use_fem_prony) {
+					// The base SLS arm and two optional additional Maxwell arms
+					// are combined into ONE elastic-energy XPBD constraint.
+					// Spring weights are inverse compliances. Scalar damage
+					// reduces all transient branch stiffnesses consistently.
+					PhysicsFEMTetraPronyState &state = xpbd_fem_prony_states[i];
+					const PhysicsFEMTetraSLSState *arms[3] = {
+						use_fem_sls ? &xpbd_fem_sls_states[i] : nullptr,
+						fem_prony_fast_compliance > 0.0 ? &state.fast : nullptr,
+						fem_prony_slow_compliance > 0.0 ? &state.slow : nullptr
+					};
+					const double damage_factor = has_damage ?
+						1.0 / (1.0 - xpbd_fem_damage[i]) : 1.0;
+					const double compliances[3] = {
+						use_fem_sls ? fem_sls_compliance * damage_factor : 0.0,
+						fem_prony_fast_compliance > 0.0 ? fem_prony_fast_compliance * damage_factor : 0.0,
+						fem_prony_slow_compliance > 0.0 ? fem_prony_slow_compliance * damage_factor : 0.0
+					};
+					physics_fem_tetra_prony_solve(a.x, b.x, c.x, d.x,
+							a.im, b.im, c.im, d.im, tetra.rest,
+							arms, compliances, fem_poisson, double(p_delta), state.lambda);
+				} else if (use_fem_sls) {
+					// Strict compatibility with the existing one-arm SLS path.
 					PhysicsFEMTetraSLSState &state = xpbd_fem_sls_states[i];
 					double local_sls_alpha = fem_sls_alpha;
 					if (has_damage) {
@@ -4524,6 +4596,7 @@ void GodotSoftBody3D::destroy() {
 	xpbd_volume_original_rest = 0.0;
 	xpbd_fem_tetrahedra.reset();
 	xpbd_fem_sls_states.reset();
+	xpbd_fem_prony_states.reset();
 	xpbd_fem_fiber_lambdas.reset();
 	xpbd_fem_fiber_secondary_lambdas.reset();
 	xpbd_fem_principal_lambdas.reset();
