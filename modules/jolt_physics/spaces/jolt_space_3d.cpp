@@ -248,7 +248,18 @@ void JoltSpace3D::step(float p_step) {
 
 	_pre_step(p_step);
 
-	const JPH::EPhysicsUpdateError update_error = physics_system->Update(p_step, 1, temp_allocator, job_system);
+	// Jolt runs collision detection and integration for each collision step.
+	// Keep the default single step for low overhead, but allow finer time steps
+	// for high-speed scenes or projects using a lower physics tick rate.
+	int collision_steps = CLAMP(JoltProjectSettings::simulation_collision_steps, 1, 8);
+	const float max_step_seconds = JoltProjectSettings::simulation_max_collision_step_seconds;
+	if (max_step_seconds > 0.0f && p_step > max_step_seconds) {
+		const float estimated_steps = p_step / max_step_seconds;
+		// Bound before converting to int, including extremely small thresholds.
+		const int needed_steps = estimated_steps >= 8.0f ? 8 : int(Math::ceil(estimated_steps));
+		collision_steps = MAX(collision_steps, needed_steps);
+	}
+	const JPH::EPhysicsUpdateError update_error = physics_system->Update(p_step, collision_steps, temp_allocator, job_system);
 
 	if ((update_error & JPH::EPhysicsUpdateError::ManifoldCacheFull) != JPH::EPhysicsUpdateError::None) {
 		WARN_PRINT_ONCE(vformat("Jolt Physics manifold cache exceeded capacity and contacts were ignored. "
