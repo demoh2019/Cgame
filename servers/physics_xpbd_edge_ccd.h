@@ -232,12 +232,17 @@ _FORCE_INLINE_ bool physics_xpbd_solve_swept_edges(
 		return false;
 	}
 	// Wide accumulation of weighted relative separation at the end of step.
-	const double sx = wa * double(r_a.x) + wb * double(r_b.x) -
-			wc * double(r_c.x) - wd * double(r_d.x);
-	const double sy = wa * double(r_a.y) + wb * double(r_b.y) -
-			wc * double(r_c.y) - wd * double(r_d.y);
-	const double sz = wa * double(r_a.z) + wb * double(r_b.z) -
-			wc * double(r_c.z) - wd * double(r_d.z);
+	// Translate the weighted pair to the same origin before taking the
+	// contact gap. This avoids subtracting four huge world-space sums.
+	const double sx = wa * (double(r_a.x) - double(r_c.x)) +
+			wb * (double(r_b.x) - double(r_c.x)) -
+			wd * (double(r_d.x) - double(r_c.x));
+	const double sy = wa * (double(r_a.y) - double(r_c.y)) +
+			wb * (double(r_b.y) - double(r_c.y)) -
+			wd * (double(r_d.y) - double(r_c.y));
+	const double sz = wa * (double(r_a.z) - double(r_c.z)) +
+			wb * (double(r_b.z) - double(r_c.z)) -
+			wd * (double(r_d.z) - double(r_c.z));
 	const double gap = sx * double(normal.x) + sy * double(normal.y) +
 			sz * double(normal.z);
 	const double dlambda = (double(p_thickness) - gap -
