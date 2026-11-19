@@ -67,6 +67,7 @@ struct PhysicsFEMConvexTetra {
 	PhysicsFEMTetraRest rest;
 	double lambda = 0.0;
 	double plastic_volume_scale = 1.0; // Irreversible local rest-volume ratio (0.2..5), default intact.
+	double plastic_deviatoric_strain = 0.0; // Accumulated tensorial isochoric plastic strain budget.
 };
 
 // The normal orientation is inferred from the already validated signed
