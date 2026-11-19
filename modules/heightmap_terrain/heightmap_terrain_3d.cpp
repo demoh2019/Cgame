@@ -93,7 +93,10 @@ uniform float texture_tiling : hint_range(0.01, 256.0) = 8.0;
 
 void fragment() {
     // Splatmap weights are linear data, never sRGB color channels.
-    vec4 weights = max(texture(splat_weights, UV), vec4(0.0));
+    // Map grid vertex UVs to texel centers, preventing a half-pixel offset.
+    vec2 mask_size = vec2(textureSize(splat_weights, 0));
+    vec2 mask_uv = (UV * (mask_size - vec2(1.0)) + vec2(0.5)) / mask_size;
+    vec4 weights = max(texture(splat_weights, mask_uv), vec4(0.0));
     weights /= max(dot(weights, vec4(1.0)), 0.00001);
     vec2 tiled_uv = UV * texture_tiling;
     vec3 a = texture(layer_0, tiled_uv).rgb;
