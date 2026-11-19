@@ -1,0 +1,34 @@
+name: GDScript Symbol Single Probe
+on:
+  pull_request:
+    paths:
+      - "modules/gdscript/gdscript.cpp"
+      - "modules/gdscript/tests/gdscript_test_runner_suite.h"
+      - ".github/workflows/gdscript-symbol-fastpath.yml"
+  workflow_dispatch:
+
+jobs:
+  native-tests:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          submodules: recursive
+      - uses: ./.github/actions/godot-cache-restore
+        with:
+          cache-name: linux-gdscript-symbol-fastpath
+        continue-on-error: true
+      - uses: ./.github/actions/godot-deps
+      - name: Compile C++ native tests
+        uses: ./.github/actions/godot-build
+        with:
+          platform: linuxbsd
+          target: editor
+          scons-flags: tests=yes module_text_server_fb_enabled=yes -j2
+      - uses: ./.github/actions/godot-cache-save
+        with:
+          cache-name: linux-gdscript-symbol-fastpath
+        continue-on-error: true
+      - name: GDScript single-lookup regression suite
+        run: ./bin/godot.linuxbsd.editor.x86_64 --headless --test --test-case="*[GDScriptSymbolFastPath]*"
