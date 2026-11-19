@@ -56,7 +56,8 @@ func _check_2d() -> Dictionary:
 	params.collide_with_bodies = false
 	ok = ok and state.intersect_shape(params, 1).is_empty() and state.get_rest_info(params).is_empty()
 	params.collide_with_bodies = true
-	params.exclude = [bodies[FILTERED_COUNT]]
+	var excluded: Array[RID] = [bodies[FILTERED_COUNT]]
+	params.exclude = excluded
 	ok = ok and state.intersect_shape(params, 1).is_empty() and state.get_rest_info(params).is_empty()
 
 	for body in bodies:
@@ -101,7 +102,8 @@ func _check_3d() -> Dictionary:
 	params.collide_with_bodies = false
 	ok = ok and state.intersect_shape(params, 1).is_empty() and state.get_rest_info(params).is_empty()
 	params.collide_with_bodies = true
-	params.exclude = [bodies[FILTERED_COUNT]]
+	var excluded: Array[RID] = [bodies[FILTERED_COUNT]]
+	params.exclude = excluded
 	ok = ok and state.intersect_shape(params, 1).is_empty() and state.get_rest_info(params).is_empty()
 
 	for body in bodies:
