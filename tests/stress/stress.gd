@@ -206,6 +206,19 @@ func _on_sample(value: int) -> void:
 	signal_total += value
 
 
+func _sample_percentiles(values: Array[float]) -> Dictionary:
+	if values.is_empty():
+		return {}
+	values.sort()
+	var size := values.size()
+	return {
+		"p50": values[clampi(ceili(float(size) * 0.50) - 1, 0, size - 1)],
+		"p95": values[clampi(ceili(float(size) * 0.95) - 1, 0, size - 1)],
+		"p99": values[clampi(ceili(float(size) * 0.99) - 1, 0, size - 1)],
+		"max": values[size - 1],
+	}
+
+
 func _file_io(scale: int) -> Dictionary:
 	var path := "user://stress_file_io.bin"
 	var payload := PackedByteArray()
@@ -321,12 +334,15 @@ func _tweens(scale: int, frames: int) -> Dictionary:
 		tween.tween_property(node, "position", Vector2(float(i & 31), 20.0), 0.1)
 		tween.tween_property(node, "position", Vector2.ZERO, 0.1)
 	var peak_frame_ms := 0.0
+	var latency_samples: Array[float] = []
 	for i in range(frames):
 		await process_frame
-		peak_frame_ms = maxf(peak_frame_ms, Performance.get_monitor(Performance.TIME_PROCESS) * 1000.0)
+		var sample_ms := Performance.get_monitor(Performance.TIME_PROCESS) * 1000.0
+		latency_samples.append(sample_ms)
+		peak_frame_ms = maxf(peak_frame_ms, sample_ms)
 	world.queue_free()
 	await process_frame
-	return {"active_tweens": count, "frames": frames, "peak_frame_ms": peak_frame_ms}
+	return {"active_tweens": count, "frames": frames, "peak_frame_ms": peak_frame_ms, "frame_latency_ms": _sample_percentiles(latency_samples)}
 
 
 func _physics_2d(scale: int, frames: int) -> Dictionary:
@@ -343,14 +359,17 @@ func _physics_2d(scale: int, frames: int) -> Dictionary:
 		body.add_child(collider)
 		world.add_child(body)
 	var peak_physics_ms := 0.0
+	var latency_samples: Array[float] = []
 	var peak_pairs := 0
 	for i in range(frames):
 		await physics_frame
-		peak_physics_ms = maxf(peak_physics_ms, Performance.get_monitor(Performance.TIME_PHYSICS_PROCESS) * 1000.0)
+		var sample_ms := Performance.get_monitor(Performance.TIME_PHYSICS_PROCESS) * 1000.0
+		latency_samples.append(sample_ms)
+		peak_physics_ms = maxf(peak_physics_ms, sample_ms)
 		peak_pairs = maxi(peak_pairs, int(Performance.get_monitor(Performance.PHYSICS_2D_COLLISION_PAIRS)))
 	world.queue_free()
 	await process_frame
-	return {"bodies": length, "physics_frames": frames, "peak_physics_ms": peak_physics_ms, "peak_collision_pairs": peak_pairs}
+	return {"bodies": length, "physics_frames": frames, "peak_physics_ms": peak_physics_ms, "peak_collision_pairs": peak_pairs, "physics_latency_ms": _sample_percentiles(latency_samples)}
 
 
 func _physics_3d(scale: int, frames: int) -> Dictionary:
@@ -367,14 +386,17 @@ func _physics_3d(scale: int, frames: int) -> Dictionary:
 		body.add_child(collider)
 		world.add_child(body)
 	var peak_physics_ms := 0.0
+	var latency_samples: Array[float] = []
 	var peak_pairs := 0
 	for i in range(frames):
 		await physics_frame
-		peak_physics_ms = maxf(peak_physics_ms, Performance.get_monitor(Performance.TIME_PHYSICS_PROCESS) * 1000.0)
+		var sample_ms := Performance.get_monitor(Performance.TIME_PHYSICS_PROCESS) * 1000.0
+		latency_samples.append(sample_ms)
+		peak_physics_ms = maxf(peak_physics_ms, sample_ms)
 		peak_pairs = maxi(peak_pairs, int(Performance.get_monitor(Performance.PHYSICS_3D_COLLISION_PAIRS)))
 	world.queue_free()
 	await process_frame
-	return {"bodies": length, "physics_frames": frames, "peak_physics_ms": peak_physics_ms, "peak_collision_pairs": peak_pairs}
+	return {"bodies": length, "physics_frames": frames, "peak_physics_ms": peak_physics_ms, "peak_collision_pairs": peak_pairs, "physics_latency_ms": _sample_percentiles(latency_samples)}
 
 
 func _memory_churn(scale: int) -> Dictionary:
@@ -405,16 +427,19 @@ func _render_2d(scale: int, frames: int) -> Dictionary:
 		sprite.position = Vector2(float(i % 120) * 9.0, float(i / 120) * 9.0)
 		world.add_child(sprite)
 	var peak_frame_ms := 0.0
+	var latency_samples: Array[float] = []
 	var peak_draw_calls := 0
 	var peak_video_memory := 0
 	for i in range(frames):
 		await process_frame
-		peak_frame_ms = maxf(peak_frame_ms, Performance.get_monitor(Performance.TIME_PROCESS) * 1000.0)
+		var sample_ms := Performance.get_monitor(Performance.TIME_PROCESS) * 1000.0
+		latency_samples.append(sample_ms)
+		peak_frame_ms = maxf(peak_frame_ms, sample_ms)
 		peak_draw_calls = maxi(peak_draw_calls, int(Performance.get_monitor(Performance.RENDER_TOTAL_DRAW_CALLS_IN_FRAME)))
 		peak_video_memory = maxi(peak_video_memory, int(Performance.get_monitor(Performance.RENDER_VIDEO_MEM_USED)))
 	world.queue_free()
 	await process_frame
-	return {"sprites": 600 * scale, "frames": frames, "peak_frame_ms": peak_frame_ms, "peak_draw_calls": peak_draw_calls, "peak_video_memory_bytes": peak_video_memory}
+	return {"sprites": 600 * scale, "frames": frames, "peak_frame_ms": peak_frame_ms, "peak_draw_calls": peak_draw_calls, "peak_video_memory_bytes": peak_video_memory, "frame_latency_ms": _sample_percentiles(latency_samples)}
 
 
 func _render_3d(scale: int, frames: int) -> Dictionary:
@@ -434,13 +459,16 @@ func _render_3d(scale: int, frames: int) -> Dictionary:
 		mesh.position = Vector3(float(i % 40) - 20.0, 0.0, float(i / 40) - 10.0)
 		world.add_child(mesh)
 	var peak_frame_ms := 0.0
+	var latency_samples: Array[float] = []
 	var peak_draw_calls := 0
 	var peak_video_memory := 0
 	for i in range(frames):
 		await process_frame
-		peak_frame_ms = maxf(peak_frame_ms, Performance.get_monitor(Performance.TIME_PROCESS) * 1000.0)
+		var sample_ms := Performance.get_monitor(Performance.TIME_PROCESS) * 1000.0
+		latency_samples.append(sample_ms)
+		peak_frame_ms = maxf(peak_frame_ms, sample_ms)
 		peak_draw_calls = maxi(peak_draw_calls, int(Performance.get_monitor(Performance.RENDER_TOTAL_DRAW_CALLS_IN_FRAME)))
 		peak_video_memory = maxi(peak_video_memory, int(Performance.get_monitor(Performance.RENDER_VIDEO_MEM_USED)))
 	world.queue_free()
 	await process_frame
-	return {"meshes": 200 * scale, "frames": frames, "peak_frame_ms": peak_frame_ms, "peak_draw_calls": peak_draw_calls, "peak_video_memory_bytes": peak_video_memory}
+	return {"meshes": 200 * scale, "frames": frames, "peak_frame_ms": peak_frame_ms, "peak_draw_calls": peak_draw_calls, "peak_video_memory_bytes": peak_video_memory, "frame_latency_ms": _sample_percentiles(latency_samples)}
