@@ -31,10 +31,10 @@
 #include "core/object/class_db.h"
 
 void initialize_terrain_module(ModuleInitializationLevel p_level) {
-    if (p_level == MODULE_INITIALIZATION_LEVEL_SCENE) {
-        GDREGISTER_CLASS(TerrainHeightmap);
-        GDREGISTER_CLASS(HeightmapTerrain3D);
-    }
+	if (p_level == MODULE_INITIALIZATION_LEVEL_SCENE) {
+		GDREGISTER_CLASS(TerrainHeightmap);
+		GDREGISTER_CLASS(HeightmapTerrain3D);
+	}
 }
 
 void uninitialize_terrain_module(ModuleInitializationLevel p_level) {
