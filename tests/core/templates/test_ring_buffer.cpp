@@ -34,6 +34,8 @@ TEST_FORCE_LINK(test_ring_buffer)
 
 #include "core/templates/ring_buffer.h"
 
+#include <climits>
+#include <deque>
 #include <string>
 
 namespace TestRingBuffer {
@@ -431,6 +433,118 @@ TEST_CASE("[RingBuffer] Nontrivial element search keeps equality semantics") {
 	CHECK(rb.find(std::string("three"), 0, 4) == 2);
 	CHECK(rb.find(std::string("two"), 1, 2) == 0);
 	CHECK(rb.find(std::string("absent"), 0, 4) == -1);
+}
+
+TEST_CASE("[RingBuffer] Mixed bulk transfers preserve FIFO and occupancy") {
+	RingBuffer<int> rb(5);
+	std::deque<int> expected;
+	uint32_t seed = 0x9e3779b9;
+	int next_value = 1;
+
+	for (int step = 0; step < 4096; step++) {
+		seed ^= seed << 13;
+		seed ^= seed >> 17;
+		seed ^= seed << 5;
+		int count = int(seed & 15);
+		if (seed & 16) {
+			int input[16];
+			for (int i = 0; i < count; i++) {
+				input[i] = next_value++;
+			}
+			const int capacity_left = rb.size() - 1 - int(expected.size());
+			const int written = rb.write(input, count);
+			CHECK(written == MIN(count, capacity_left));
+			for (int i = 0; i < written; i++) {
+				expected.push_back(input[i]);
+			}
+		} else {
+			int output[16] = {};
+			const bool advance = (seed & 32) != 0;
+			const int readable = MIN(count, int(expected.size()));
+			const int got = rb.read(output, count, advance);
+			CHECK(got == readable);
+			for (int i = 0; i < got; i++) {
+				CHECK(output[i] == expected[size_t(i)]);
+			}
+			if (advance) {
+				for (int i = 0; i < got; i++) {
+					expected.pop_front();
+				}
+			}
+		}
+		CHECK(rb.data_left() == int(expected.size()));
+		CHECK(rb.space_left() == rb.size() - 1 - int(expected.size()));
+	}
+
+	int remaining[32] = {};
+	CHECK(rb.read(remaining, 32) == int(expected.size()));
+	for (size_t i = 0; i < expected.size(); i++) {
+		CHECK(remaining[i] == expected[i]);
+	}
+}
+
+TEST_CASE("[RingBuffer] Wrapped search respects offsets and clipping") {
+	RingBuffer<int> rb(3);
+	const int first[] = { 1, 2, 3, 4, 5, 6 };
+	CHECK(rb.write(first, 6) == 6);
+	CHECK(rb.advance_read(5) == 5);
+	const int second[] = { 7, 8, 9, 10, 11, 12 };
+	CHECK(rb.write(second, 6) == 6);
+	CHECK(rb.data_left() == 7);
+	CHECK(rb.find(6, 0, 7) == 0);
+	CHECK(rb.find(8, 1, 6) == 1);
+	CHECK(rb.find(12, 2, 5) == 4);
+	CHECK(rb.find(6, 1, 6) == -1);
+	CHECK(rb.find(7, 2, 5) == -1);
+	CHECK(rb.find(12, 6, 1) == 0);
+	CHECK(rb.find(1234, 0, 7) == -1);
+	CHECK(rb.find(6, 0, 0) == -1);
+	CHECK(rb.find(6, -1, 7) == -1);
+	CHECK(rb.find(6, INT_MAX, INT_MAX) == -1);
+	CHECK(rb.find(6, 0, INT_MAX) == 0);
+}
+
+TEST_CASE("[RingBuffer] Wrapped copies clamp without overflowing offsets") {
+	RingBuffer<int> rb(3);
+	const int first[] = { 1, 2, 3, 4, 5, 6 };
+	CHECK(rb.write(first, 6) == 6);
+	CHECK(rb.advance_read(5) == 5);
+	const int second[] = { 7, 8, 9, 10, 11, 12 };
+	CHECK(rb.write(second, 6) == 6);
+
+	int out[8] = { 99, 99, 99, 99, 99, 99, 99, 99 };
+	CHECK(rb.copy(out, 2, INT_MAX) == 5);
+	for (int i = 0; i < 5; i++) {
+		CHECK(out[i] == 8 + i);
+	}
+	CHECK(out[5] == 99);
+	CHECK(rb.copy(out, -1, 1) == 0);
+	CHECK(rb.copy(out, INT_MAX, INT_MAX) == 0);
+	CHECK(rb.copy(out, 7, 1) == 0);
+	CHECK(rb.copy(out, 0, -1) == 0);
+	CHECK(rb.data_left() == 7);
+}
+
+TEST_CASE("[RingBuffer] All power-of-two occupancy positions") {
+	for (int power = 0; power <= 7; power++) {
+		RingBuffer<int> rb(power);
+		const int capacity = rb.size() - 1;
+		for (int round = 0; round < 4; round++) {
+			CHECK(rb.data_left() == 0);
+			CHECK(rb.space_left() == capacity);
+			for (int i = 0; i < capacity; i++) {
+				CHECK(rb.write(i) == OK);
+				CHECK(rb.data_left() == i + 1);
+				CHECK(rb.space_left() == capacity - i - 1);
+			}
+			CHECK(rb.space_left() == 0);
+			for (int i = 0; i < capacity; i++) {
+				CHECK(rb.read() == i);
+				CHECK(rb.data_left() == capacity - i - 1);
+				CHECK(rb.space_left() == i + 1);
+			}
+		}
+	}
 }
 
 } //namespace TestRingBuffer
