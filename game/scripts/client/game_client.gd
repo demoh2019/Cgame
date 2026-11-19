@@ -213,6 +213,23 @@ func trade_cancel(trade_id: int) -> void:
 	net.c_trade_cancel.rpc_id(1, trade_id)
 
 
+## Listings are advertised stock, not escrow. Only the server changes inventories.
+func market_list() -> void:
+	net.c_market_list.rpc_id(1)
+
+
+func market_create(item_id: String, quantity: int, price: int) -> void:
+	net.c_market_create.rpc_id(1, item_id, quantity, price)
+
+
+func market_buy(listing_id: int, quantity: int) -> void:
+	net.c_market_buy.rpc_id(1, listing_id, quantity)
+
+
+func market_cancel(listing_id: int) -> void:
+	net.c_market_cancel.rpc_id(1, listing_id)
+
+
 func vendor(item_id: String, quantity: int, buy: bool) -> void:
 	net.c_vendor.rpc_id(1, item_id, quantity, buy)
 

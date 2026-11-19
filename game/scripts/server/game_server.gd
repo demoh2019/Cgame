@@ -9,6 +9,7 @@ const WorldGen = preload("res://scripts/shared/world_gen.gd")
 const Inventory = preload("res://scripts/shared/inventory.gd")
 const Vendor = preload("res://scripts/shared/vendor.gd")
 const PlayerTrade = preload("res://scripts/shared/player_trade.gd")
+const MarketBoard = preload("res://scripts/shared/market_board.gd")
 const Contracts = preload("res://scripts/shared/contracts.gd")
 const SaveValidation = preload("res://scripts/shared/save_validation.gd")
 const Crafting = preload("res://scripts/shared/crafting.gd")
@@ -80,6 +81,8 @@ var opened_crates: Dictionary = {} # crate id -> time it refills
 var spawn_state: Dictionary = {} # spawn id -> {"zombie": id or -1, "next": time}
 var barricades: Dictionary = {} # Server-owned structures; authenticated walls may persist.
 var trades: Dictionary = {} # trade id -> offer/accept/expiry
+var market_orders: Dictionary = {} # id -> advertised online stock (not escrow).
+var market_sales: Array = [] # Bounded session-only receipts, NOT durable settlement.
 var trade_by_player: Dictionary = {} # peer -> active trade
 var world_structure_revision: int = 0
 var bags: Dictionary = {} # bag id -> {"id", "x","y","z", "items": {id: n}, "expires": t}
@@ -248,6 +251,7 @@ func valid_character_data(data: Dictionary) -> bool:
 
 
 func remove_player(peer_id: int) -> void:
+	_cancel_market_seller(peer_id)
 	_cancel_player_trade(peer_id, "disconnected")
 	var player: Player = players.get(peer_id)
 	if player != null and not player.user_id.is_empty():
@@ -564,6 +568,126 @@ func _tick_trades() -> void:
 			_close_trade(trade, "cancelled", "expired")
 		elif not _trade_available(int(trade["a"]), int(trade["b"])):
 			_close_trade(trade, "cancelled", "out_of_range")
+
+
+# --- Player market board: online-only listings with execution-time inventory checks. ---
+# Posting a listing does NOT debit goods. A new durable backend journal is
+# required before adding offline listings or player escrow.
+
+func _market_at_hub(player: Player) -> bool:
+	if player == null or not _alive(player):
+		return false
+	var spot := Vector2(player.position.x, player.position.z)
+	return spot.is_finite() and _is_safe(player.position) \
+		and spot.distance_to(WORKBENCH_POSITION) <= WORKBENCH_RANGE
+
+
+func _cancel_market_seller(peer_id: int) -> void:
+	for listing_id in market_orders.keys():
+		if int(market_orders[listing_id]["seller"]) == peer_id:
+			market_orders.erase(listing_id)
+
+
+func _tick_market() -> void:
+	for listing_id in market_orders.keys():
+		var listing: Dictionary = market_orders[listing_id]
+		var seller: Player = players.get(int(listing["seller"]))
+		if seller == null or not _market_at_hub(seller) \
+				or time >= float(listing["expires"]) \
+				or seller.inventory.count(str(listing["item"])) < int(listing["remaining"]):
+			market_orders.erase(listing_id)
+
+
+func cmd_market_list(peer_id: int) -> Dictionary:
+	if not players.has(peer_id):
+		return {"ok": false, "reason": "unknown_player"}
+	var public_orders: Array = []
+	var sorted_ids: Array = market_orders.keys()
+	sorted_ids.sort()
+	for listing_id in sorted_ids:
+		var order: Dictionary = market_orders[listing_id]
+		var seller: Player = players.get(int(order["seller"]))
+		if seller == null or not _market_at_hub(seller) or seller.inventory.count(str(order["item"])) < int(order["remaining"]):
+			continue
+		public_orders.append({
+			"id": listing_id, "item": order["item"], "quantity": order["remaining"],
+			"price": order["price"], "seller_name": seller.name,
+			"own": seller.id == peer_id,
+		})
+	return {"ok": true, "action": "list", "orders": public_orders}
+
+
+func cmd_market_create(peer_id: int, item_id: String, quantity: int, unit_price: int) -> Dictionary:
+	var seller: Player = players.get(peer_id)
+	if not _market_at_hub(seller):
+		return {"ok": false, "reason": "no_station"}
+	var validation: String = MarketBoard.validate_listing(seller.inventory, item_id, quantity, unit_price)
+	if validation != "":
+		return {"ok": false, "reason": validation}
+	if market_orders.size() >= MarketBoard.MAX_LISTINGS:
+		return {"ok": false, "reason": "market_full"}
+	var count := 0
+	for order in market_orders.values():
+		if int(order["seller"]) == peer_id:
+			count += 1
+	if count >= MarketBoard.MAX_PER_SELLER:
+		return {"ok": false, "reason": "too_many_listings"}
+	var listing_id: int = new_id()
+	market_orders[listing_id] = {
+		"seller": peer_id, "item": item_id, "remaining": quantity,
+		"price": unit_price, "expires": time + MarketBoard.LISTING_LIFETIME,
+	}
+	return {"ok": true, "action": "created", "id": listing_id}
+
+
+func cmd_market_cancel(peer_id: int, listing_id: int) -> Dictionary:
+	var order: Dictionary = market_orders.get(listing_id, {})
+	if order.is_empty():
+		return {"ok": false, "reason": "unknown_listing"}
+	if int(order["seller"]) != peer_id:
+		return {"ok": false, "reason": "not_owner"}
+	market_orders.erase(listing_id)
+	return {"ok": true, "action": "cancelled", "id": listing_id}
+
+
+func cmd_market_buy(peer_id: int, listing_id: int, quantity: int) -> Dictionary:
+	var buyer: Player = players.get(peer_id)
+	if not _market_at_hub(buyer):
+		return {"ok": false, "reason": "no_station"}
+	var listing: Dictionary = market_orders.get(listing_id, {})
+	if listing.is_empty():
+		return {"ok": false, "reason": "unknown_listing"}
+	var seller_id: int = int(listing["seller"])
+	var seller: Player = players.get(seller_id)
+	if peer_id == seller_id:
+		return {"ok": false, "reason": "self_purchase"}
+	if seller == null or not _market_at_hub(seller) or time >= float(listing["expires"]):
+		market_orders.erase(listing_id)
+		return {"ok": false, "reason": "seller_unavailable"}
+	# Synchronous on this server's simulation thread; no yield between the
+	# balance checks and the two-inventory commit.
+	var transaction: Dictionary = MarketBoard.purchase(buyer.inventory, seller.inventory, listing, quantity)
+	if not transaction.get("ok", false):
+		return transaction
+	listing["remaining"] = int(listing["remaining"]) - quantity
+	if int(listing["remaining"]) == 0:
+		market_orders.erase(listing_id)
+	for player in [buyer, seller]:
+		player.dirty_inventory = true
+		player.dirty_character = true
+	var receipt_id: int = new_id()
+	market_sales.append({
+		"id": receipt_id, "buyer": peer_id, "seller": seller_id,
+		"listing": listing_id, "item": listing["item"],
+		"quantity": quantity, "total": transaction["total"],
+	})
+	if market_sales.size() > 128:
+		market_sales.pop_front()
+	return {
+		"ok": true, "action": "bought", "id": listing_id,
+		"receipt": receipt_id, "quantity": quantity,
+		"item": listing["item"], "total": transaction["total"],
+	}
 
 
 ## The safe-hub vendor uses server position and inventory only.
@@ -1127,6 +1251,7 @@ func _on_zombie_death(zombie) -> void:
 
 ## Full-loot deaths occur in red/black. Green/yellow deaths retain gear.
 func _on_player_death(victim: Player, killer: int) -> void:
+	_cancel_market_seller(victim.id)
 	_cancel_player_trade(victim.id, "dead")
 	victim.deaths += 1
 	victim.dirty_character = true
@@ -1152,6 +1277,7 @@ func tick(delta: float) -> void:
 		events = events.slice(events.size() - 1000)
 	time += delta
 	tick_count += 1
+	_tick_market()
 	_tick_trades()
 	_tick_players(delta)
 	_tick_zombies(delta)
