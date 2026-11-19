@@ -81,9 +81,6 @@ class GodotBodyPair2D : public GodotConstraint2D {
 	Contact contacts[MAX_CONTACTS];
 	int contact_count = 0;
 	GodotPhysicsContactRecycling contact_recycling;
-	// Explicit provenance: a SAT contact with a small negative separation is
-	// not necessarily a speculative contact. Set only by the TOI fallback.
-	bool speculative_contact = false;
 	real_t mixed_friction = 0.0; // Recomputed in pre_solve, reused across solver iterations.
 	// Box2D-style two-point normal block matrix, assembled once in pre_solve.
 	// Solving iterations only update the right-hand side from current velocities.
