@@ -72,7 +72,7 @@ class ColdClassInitContracts(unittest.TestCase):
 
     def test_mutex_remains_in_cold_path(self):
         self.assertLess(self.block.index("_initialize_class_cold(SafeFlag &initialized)"),
-                        self.block.index("static BinaryMutex __init_mutex;"))
+                        self.block.index("_initialize_class_cold(SafeFlag &initialized)") + self.cold.index("static BinaryMutex __init_mutex;"))
 
     def test_lock_before_second_check(self):
         self.assertLess(self.cold.index("MutexLock lock(__init_mutex);"),
@@ -95,8 +95,8 @@ class ColdClassInitContracts(unittest.TestCase):
         self.assertIn("_bind_compatibility_methods();", self.block)
 
     def test_flag_set_after_bindings(self):
-        self.assertLess(self.block.index("_bind_compatibility_methods();"),
-                        self.block.index("initialized.set();"))
+        self.assertLess(self.cold.index("_bind_compatibility_methods();"),
+                        self.cold.index("initialized.set();"))
 
     def test_class_init_still_initializes_virtual_base(self):
         self.assertIn("virtual void _initialize_classv() override", self.obj)

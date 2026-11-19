@@ -1,0 +1,69 @@
+name: TileMap warning overlay cache and native revision tests
+
+on:
+  push:
+    branches: [develop]
+    paths:
+      - 'modules/tilemap/editor/tile_map_layer_editor.cpp'
+      - 'modules/tilemap/editor/tile_map_layer_editor.h'
+      - 'modules/tilemap/tile_map_layer.cpp'
+      - 'modules/tilemap/tile_map_layer.h'
+      - 'misc/scripts/tests/test_tile_warning_cache.py'
+      - 'misc/scripts/bench_tile_warning_cache.py'
+      - 'tests/scene/test_tilemap_layer_cell_revision.cpp'
+      - '.github/workflows/tile-warning-perf.yml'
+  pull_request:
+    paths:
+      - 'modules/tilemap/editor/tile_map_layer_editor.cpp'
+      - 'modules/tilemap/editor/tile_map_layer_editor.h'
+      - 'modules/tilemap/tile_map_layer.cpp'
+      - 'modules/tilemap/tile_map_layer.h'
+      - 'misc/scripts/tests/test_tile_warning_cache.py'
+      - 'misc/scripts/bench_tile_warning_cache.py'
+      - 'tests/scene/test_tilemap_layer_cell_revision.cpp'
+      - '.github/workflows/tile-warning-perf.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  source-and-synthetic-correctness:
+    runs-on: ubuntu-24.04
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ['3.10', '3.13']
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+      - run: python -m py_compile misc/scripts/tests/test_tile_warning_cache.py misc/scripts/bench_tile_warning_cache.py
+      - name: Verify TileMap revision and viewport-culling source contracts
+        run: python -m unittest discover -s misc/scripts/tests -p test_tile_warning_cache.py -v
+      - name: Compare synthetic visible results and work counts
+        run: python misc/scripts/bench_tile_warning_cache.py
+
+  native-editor-tests:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+      - name: Linux build prerequisites
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libwayland-bin
+      - uses: ./.github/actions/godot-deps
+      - name: Compile Cgame editor with native tests
+        uses: ./.github/actions/godot-build
+        with:
+          platform: linuxbsd
+          target: editor
+          scons-flags: dev_build=yes debug_symbols=no tests=yes module_text_server_fb_enabled=yes -j2
+      - name: Run native TileMap revision/doctest cases
+        shell: bash
+        run: |
+          set -euo pipefail
+          GODOT=./bin/godot.linuxbsd.editor.dev.x86_64
+          "$GODOT" --headless --test --test-case='[TileMapLayer][Editor]*'
