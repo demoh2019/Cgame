@@ -55,6 +55,18 @@ static void compare_text_and_buffer(const String &p_source, GDScriptTokenizerBuf
 	REQUIRE(buffered.set_code_buffer(binary) == OK);
 	buffered.set_multiline_mode(true);
 
+	// Inspect stored binary tokens rather than synthetic NEWLINE/DEDENT/EOF
+	// tokens, which are constructed by scan() without a name literal.
+	for (const GDScriptTokenizer::Token &stored : buffered.tokens) {
+		if (stored.type == GDScriptTokenizer::Token::LITERAL ||
+				stored.type == GDScriptTokenizer::Token::ERROR ||
+				stored.type == GDScriptTokenizer::Token::IDENTIFIER ||
+				stored.type == GDScriptTokenizer::Token::ANNOTATION) {
+			continue;
+		}
+		CHECK(stored.literal == (stored.type == GDScriptTokenizer::Token::CONST_NAN ? String("NAN") : String(stored.get_name())));
+	}
+
 	int scanned = 0;
 	while (scanned < 100000) {
 		const GDScriptTokenizer::Token expected = text.scan();
@@ -68,10 +80,6 @@ static void compare_text_and_buffer(const String &p_source, GDScriptTokenizerBuf
 			CHECK(actual.literal == expected.literal);
 		} else if (actual.type == GDScriptTokenizer::Token::CONST_NAN) {
 			CHECK(actual.literal == String("NAN"));
-		} else {
-			// The fast decoder still assigns token-name literals for keywords,
-			// punctuation, operators and other non-payload tokens.
-			CHECK(actual.literal == String(actual.get_name()));
 		}
 		scanned++;
 		if (expected.type == GDScriptTokenizer::Token::TK_EOF) {
