@@ -473,4 +473,38 @@ TEST_CASE("[PacketPeer][Performance] Write-only streams never poll the receiver"
 	CHECK(stream->partial_reads == 1);
 }
 
+
+TEST_CASE("[PacketPeer][Performance] Header consumption survives many ring wraps") {
+	Ref<StreamPeerBuffer> stream;
+	stream.instantiate();
+	Ref<PacketPeerStream> packets;
+	packets.instantiate();
+	packets->set_stream_peer(stream);
+	packets->set_input_buffer_max_size(64);
+
+	// Frames are five bytes long, deliberately not aligned to the ring's
+	// power-of-two boundary, exercising split headers and wrapped payloads.
+	constexpr int COUNT = 513;
+	Vector<uint8_t> wire;
+	REQUIRE(wire.resize_uninitialized(COUNT * 5) == OK);
+	uint8_t *dst = wire.ptrw();
+	for (int i = 0; i < COUNT; ++i) {
+		dst[5 * i + 0] = 1;
+		dst[5 * i + 1] = 0;
+		dst[5 * i + 2] = 0;
+		dst[5 * i + 3] = 0;
+		dst[5 * i + 4] = uint8_t(i);
+	}
+	REQUIRE(stream->put_data(wire.ptr(), wire.size()) == OK);
+	stream->seek(0);
+	const uint8_t *payload = nullptr;
+	int length = -1;
+	for (int i = 0; i < COUNT; ++i) {
+		REQUIRE(packets->get_packet(&payload, length) == OK);
+		REQUIRE(length == 1);
+		CHECK(payload[0] == uint8_t(i));
+	}
+	CHECK(packets->get_available_packet_count() == 0);
+}
+
 } // namespace TestPacketPeer

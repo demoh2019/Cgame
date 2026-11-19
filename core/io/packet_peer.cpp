@@ -245,7 +245,7 @@ Error PacketPeerStream::get_packet(const uint8_t **r_buffer, int &r_buffer_size)
 	ERR_FAIL_COND_V(len > uint32_t(remaining - 4), ERR_UNAVAILABLE);
 	ERR_FAIL_COND_V(len > uint32_t(input_buffer.size()), ERR_UNAVAILABLE);
 
-	ring_buffer.read(lbuf, 4); // Discard the header.
+	ring_buffer.advance_read(4); // Header was already decoded; do not copy it again.
 	ring_buffer.read(input_buffer.ptrw(), int(len));
 	parsed_frame_bytes -= 4 + int(len);
 	complete_packet_count--;
