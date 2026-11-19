@@ -83,7 +83,7 @@ class DisplayFailureCleanupTests(unittest.TestCase):
         src = read_source("main/main.cpp")
         cls.finalize = function_body(src, "void finalize_display()")
         setup = function_body(src, "Error Main::setup2(")
-        failure_start = setup.index("if (err != OK || display_server == nullptr) {")
+        failure_start = setup.rindex("if (err != OK || display_server == nullptr) {")
         cls.failure = function_body(setup[failure_start:], "if (err != OK || display_server == nullptr)")
 
     def test_rendering_server_finishes_before_deletion(self):
