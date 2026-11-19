@@ -1387,18 +1387,35 @@ String String::to_upper() const {
 		return *this;
 	}
 
-	String upper;
-	upper.resize_uninitialized(size());
 	const char32_t *old_ptr = ptr();
-	char32_t *upper_ptrw = upper.ptrw();
-
-	while (*old_ptr) {
-		const char32_t ch = *old_ptr++;
-		*upper_ptrw++ = ch < 128 ? (is_ascii_lower_case(ch) ? ch - ('a' - 'A') : ch) : _find_upper(ch);
+	const int len = length();
+	int first_change = 0;
+	for (; first_change < len && old_ptr[first_change]; ++first_change) {
+		const char32_t ch = old_ptr[first_change];
+		const char32_t mapped = ch < 128 ? (is_ascii_lower_case(ch) ? ch - ('a' - 'A') : ch) : _find_upper(ch);
+		if (mapped != ch) {
+			break;
+		}
 	}
 
-	*upper_ptrw = 0;
+	// Already uppercase: share the existing copy-on-write buffer.
+	if (first_change == len) {
+		return *this;
+	}
 
+	String upper;
+	upper.resize_uninitialized(size());
+	char32_t *upper_ptrw = upper.ptrw();
+	if (first_change > 0) {
+		memcpy(upper_ptrw, old_ptr, first_change * sizeof(char32_t));
+	}
+
+	int i = first_change;
+	for (; i < len && old_ptr[i]; ++i) {
+		const char32_t ch = old_ptr[i];
+		upper_ptrw[i] = ch < 128 ? (is_ascii_lower_case(ch) ? ch - ('a' - 'A') : ch) : _find_upper(ch);
+	}
+	upper_ptrw[i] = 0;
 	return upper;
 }
 
@@ -1407,18 +1424,35 @@ String String::to_lower() const {
 		return *this;
 	}
 
-	String lower;
-	lower.resize_uninitialized(size());
 	const char32_t *old_ptr = ptr();
-	char32_t *lower_ptrw = lower.ptrw();
-
-	while (*old_ptr) {
-		const char32_t ch = *old_ptr++;
-		*lower_ptrw++ = ch < 128 ? (is_ascii_upper_case(ch) ? ch + ('a' - 'A') : ch) : _find_lower(ch);
+	const int len = length();
+	int first_change = 0;
+	for (; first_change < len && old_ptr[first_change]; ++first_change) {
+		const char32_t ch = old_ptr[first_change];
+		const char32_t mapped = ch < 128 ? (is_ascii_upper_case(ch) ? ch + ('a' - 'A') : ch) : _find_lower(ch);
+		if (mapped != ch) {
+			break;
+		}
 	}
 
-	*lower_ptrw = 0;
+	// Already lowercase: share the existing copy-on-write buffer.
+	if (first_change == len) {
+		return *this;
+	}
 
+	String lower;
+	lower.resize_uninitialized(size());
+	char32_t *lower_ptrw = lower.ptrw();
+	if (first_change > 0) {
+		memcpy(lower_ptrw, old_ptr, first_change * sizeof(char32_t));
+	}
+
+	int i = first_change;
+	for (; i < len && old_ptr[i]; ++i) {
+		const char32_t ch = old_ptr[i];
+		lower_ptrw[i] = ch < 128 ? (is_ascii_upper_case(ch) ? ch + ('a' - 'A') : ch) : _find_lower(ch);
+	}
+	lower_ptrw[i] = 0;
 	return lower;
 }
 
