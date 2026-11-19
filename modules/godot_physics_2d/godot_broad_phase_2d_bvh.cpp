@@ -111,6 +111,10 @@ int GodotBroadPhase2DBVH::cull_segment(const Vector2 &p_from, const Vector2 &p_t
 	return bvh.cull_segment(p_from, p_to, p_results, p_max_results, nullptr, 0xFFFFFFFF, p_result_indices);
 }
 
+void GodotBroadPhase2DBVH::visit_aabb(const Rect2 &p_aabb, QueryVisitor p_visitor, void *p_userdata) {
+	bvh.visit_aabb(p_aabb, p_visitor, p_userdata);
+}
+
 int GodotBroadPhase2DBVH::cull_aabb(const Rect2 &p_aabb, GodotCollisionObject2D **p_results, int p_max_results, int *p_result_indices) {
 	return bvh.cull_aabb(p_aabb, p_results, p_max_results, nullptr, 0xFFFFFFFF, p_result_indices);
 }
