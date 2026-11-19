@@ -157,9 +157,9 @@ class SoftSelfEdgeTests(unittest.TestCase):
         self.assertIn("self_edge_budget = self_edges ? self_budget / 2 : 0;", self.pre)
         self.assertIn("self_budget -= self_edge_budget;", self.pre)
         self.assertIn("(self_budget > 0 || self_edge_budget > 0)", self.pre)
-        self.assertIn("self_scratch.one_ring_edges.clear();", self.pre)
-        self.assertIn("r_scratch.one_ring_edges.empty()", self.solver)
-        self.assertIn("prepare_soft_self_topology(", self.solver)
+        self.assertIn("scratch->one_ring_edges.clear();", self.pre)
+        self.assertIn("ensure_soft_self_topology(", self.solver)
+        self.assertIn("soft_body_self_persistent_bvh", self.solver)
         self.assertIn("--r_budget; // Every tested candidate", self.solver)
         self.assertIn("r_scratch.one_ring_edges", self.solver)
 
