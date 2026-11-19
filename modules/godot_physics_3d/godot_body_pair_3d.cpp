@@ -59,26 +59,49 @@ void GodotBodyPair3D::contact_added_callback(const Vector3 &p_point_A, int p_ind
 	contact.normal = (p_point_A - p_point_B).normalized();
 	contact.used = true;
 
-	// Attempt to determine if the contact will be reused.
+	// Match each new manifold point to the closest UNUSED old contact.
+	// A first-match search can recycle the same impulse into multiple nearby
+	// points when a box slides or rotates. Keep the per-contact search bounded
+	// by MAX_CONTACTS (4), without extra allocations.
 	const real_t contact_recycle_radius = space->get_contact_recycle_radius();
 	const real_t contact_recycle_radius_squared = contact_recycle_radius * contact_recycle_radius;
+	int best_match = -1;
+	real_t best_distance_squared = 0.0;
 
 	for (int i = 0; i < contact_count; i++) {
-		Contact &c = contacts[i];
-		if (c.local_A.distance_squared_to(local_A) < contact_recycle_radius_squared &&
-				c.local_B.distance_squared_to(local_B) < contact_recycle_radius_squared) {
-			// Contact anchors can remain near a corner while the normal changes
-			// substantially. Never warm-start the new normal with old impulses.
-			if (c.normal.dot(contact.normal) >= real_t(0.98)) {
-				contact.acc_normal_impulse = c.acc_normal_impulse;
-				contact.acc_bias_impulse = c.acc_bias_impulse;
-				contact.acc_bias_impulse_center_of_mass = c.acc_bias_impulse_center_of_mass;
-				// The old friction impulse may no longer be tangent to the new normal.
-				contact.acc_tangent_impulse = c.acc_tangent_impulse - contact.normal * c.acc_tangent_impulse.dot(contact.normal);
-			}
-			c = contact;
-			return;
+		const Contact &previous = contacts[i];
+		if (previous.used) {
+			continue;
 		}
+
+		const real_t distance_A_squared = previous.local_A.distance_squared_to(local_A);
+		if (distance_A_squared >= contact_recycle_radius_squared) {
+			continue;
+		}
+		const real_t distance_B_squared = previous.local_B.distance_squared_to(local_B);
+		if (distance_B_squared >= contact_recycle_radius_squared) {
+			continue;
+		}
+
+		const real_t total_distance_squared = distance_A_squared + distance_B_squared;
+		if (best_match == -1 || total_distance_squared < best_distance_squared) {
+			best_match = i;
+			best_distance_squared = total_distance_squared;
+		}
+	}
+
+	if (best_match != -1) {
+		Contact &previous = contacts[best_match];
+		// Do not reuse impulses after the normal changes sharply at an edge.
+		if (previous.normal.dot(contact.normal) >= real_t(0.98)) {
+			contact.acc_normal_impulse = previous.acc_normal_impulse;
+			contact.acc_bias_impulse = previous.acc_bias_impulse;
+			contact.acc_bias_impulse_center_of_mass = previous.acc_bias_impulse_center_of_mass;
+			// Friction must remain tangent when the manifold normal rotates.
+			contact.acc_tangent_impulse = previous.acc_tangent_impulse - contact.normal * previous.acc_tangent_impulse.dot(contact.normal);
+		}
+		previous = contact;
+		return;
 	}
 
 	// Figure out if the contact amount must be reduced to fit the new contact.
