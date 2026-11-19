@@ -38,6 +38,7 @@
 #include "servers/physics_softbody_volume_safe.h"
 #include "servers/physics_xpbd_distance.h"
 #include "servers/physics_xpbd_area.h"
+#include "servers/physics_xpbd_dihedral.h"
 #include "servers/rendering/rendering_server.h"
 
 #include <limits>
@@ -134,6 +135,7 @@ void GodotSoftBody3D::set_space(GodotSpace3D *p_space) {
 	// A mesh may have been assigned before the space was created. Validate
 	// its rest volume only after space-level compliance is available.
 	initialize_volume_constraint();
+	initialize_dihedral_constraints();
 
 	if (get_space()) {
 		get_space()->soft_body_add_to_active_list(&active_list);
@@ -249,6 +251,7 @@ void GodotSoftBody3D::update_constants() {
 	update_link_constants();
 	update_area();
 	initialize_volume_constraint();
+	initialize_dihedral_constraints();
 }
 
 // The enclosed volume of an oriented triangle soup is the sum of signed
@@ -420,6 +423,79 @@ bool GodotSoftBody3D::solve_volume_constraint(double p_alpha, double &r_lambda) 
 	}
 	r_lambda = next_lambda;
 	return true;
+}
+
+// Construct a deterministic hinge list from the ORIGINAL triangle faces.
+// Two-hop bending links are a distance approximation and cannot preserve a
+// non-flat rest dihedral angle, so this is an independent opt-in constraint.
+// The map is temporary; runtime iteration uses only compact indexed hinges.
+// Boundary edges, inconsistent winding and >2 faces per edge are rejected.
+void GodotSoftBody3D::initialize_dihedral_constraints() {
+	xpbd_dihedral_hinges.reset();
+	xpbd_dihedral_lambdas.reset();
+	if (!get_space() || get_space()->get_soft_body_xpbd_dihedral_compliance() <= 0.0 ||
+			faces.size() < 2 || nodes.size() < 4) {
+		return;
+	}
+
+	struct EdgeFaces {
+		uint32_t a = 0;
+		uint32_t b = 0;
+		uint32_t c = 0;
+		uint32_t d = 0;
+		uint8_t count = 0;
+		bool correctly_wound = false;
+	};
+	HashMap<uint64_t, uint32_t> edge_lookup;
+	LocalVector<EdgeFaces> edge_faces;
+	for (const Face &face : faces) {
+		const uint32_t ids[3] = { face.n[0]->index, face.n[1]->index, face.n[2]->index };
+		for (int side = 0; side < 3; ++side) {
+			const uint32_t a = ids[side];
+			const uint32_t b = ids[(side + 1) % 3];
+			const uint32_t c = ids[(side + 2) % 3];
+			if (a == b || b == c || c == a) {
+				continue;
+			}
+			const uint64_t key = _soft_body_edge_key(a, b);
+			const HashMap<uint64_t, uint32_t>::Iterator existing = edge_lookup.find(key);
+			if (!existing) {
+				EdgeFaces entry;
+				entry.a = a;
+				entry.b = b;
+				entry.c = c;
+				entry.count = 1;
+				edge_lookup.insert(key, edge_faces.size());
+				edge_faces.push_back(entry);
+			} else {
+				EdgeFaces &entry = edge_faces[existing->value];
+				if (entry.count == 1) {
+					entry.d = c;
+					entry.correctly_wound = entry.a == b && entry.b == a && entry.c != c;
+					entry.count = 2;
+				} else {
+					entry.count = 3; // Non-manifold: never generate a hinge.
+				}
+			}
+		}
+	}
+	for (const EdgeFaces &edge : edge_faces) {
+		if (edge.count != 2 || !edge.correctly_wound) {
+			continue;
+		}
+		real_t rest_angle = 0.0;
+		if (!physics_xpbd_dihedral_angle(nodes[edge.a].x, nodes[edge.b].x,
+					nodes[edge.c].x, nodes[edge.d].x, rest_angle)) {
+			continue;
+		}
+		DihedralHinge hinge;
+		hinge.a = edge.a;
+		hinge.b = edge.b;
+		hinge.c = edge.c;
+		hinge.d = edge.d;
+		hinge.rest_angle = rest_angle;
+		xpbd_dihedral_hinges.push_back(hinge);
+	}
 }
 
 void GodotSoftBody3D::update_area() {
@@ -1742,6 +1818,8 @@ void GodotSoftBody3D::destroy() {
 
 	xpbd_link_lambdas.reset();
 	xpbd_area_lambdas.reset();
+	xpbd_dihedral_hinges.reset();
+	xpbd_dihedral_lambdas.reset();
 	xpbd_volume_gradients.reset();
 	xpbd_volume_closed = false;
 	xpbd_volume_rest = 0.0;
