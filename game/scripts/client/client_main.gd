@@ -30,6 +30,7 @@ var _chunks: Dictionary = {}
 var _resource_meshes: Dictionary = {}
 var _crate_meshes: Dictionary = {}
 var _zombie_meshes: Dictionary = {}
+var _barricade_bodies: Dictionary = {}
 var _materials: Dictionary = {}
 var _last_center: Vector2i = Vector2i(999999, 999999)
 var _hud_clock: float = 0.0
@@ -71,6 +72,8 @@ func _setup_actions() -> void:
 	_bind_key("survive_weapon", KEY_4)
 	_bind_key("survive_armor", KEY_5)
 	_bind_key("survive_lake", KEY_R)
+	_bind_key("survive_build", KEY_U)
+	_bind_key("survive_repair", KEY_H)
 	_bind_key("survive_vendor_buy", KEY_N)
 	_bind_key("survive_vendor_sell", KEY_V)
 	_bind_key("survive_bank", KEY_B)
@@ -293,6 +296,56 @@ func _sync_zombies() -> void:
 			_zombie_meshes.erase(zombie_id)
 
 
+func _sync_barricades() -> void:
+	var active: Dictionary = {}
+	for id in sim.barricades:
+		var wall: Dictionary = sim.barricades[id]
+		var point := Vector3(float(wall["x"]), float(wall["y"]) + 0.8, float(wall["z"]))
+		if survivor.position.distance_to(point) > 95.0:
+			continue
+		active[id] = true
+		if not _barricade_bodies.has(id):
+			var body := StaticBody3D.new()
+			body.name = "Barricade_%d" % int(id)
+			var shape_node := CollisionShape3D.new()
+			var box := BoxShape3D.new()
+			box.size = Vector3(1.7, 1.6, 1.7)
+			shape_node.shape = box
+			body.add_child(shape_node)
+			var visual := _mesh(box.size, Color(0.57, 0.40, 0.23))
+			visual.name = "Body"
+			body.add_child(visual)
+			add_child(body)
+			_barricade_bodies[id] = body
+		var structure: StaticBody3D = _barricade_bodies[id]
+		structure.position = point
+		var visual: MeshInstance3D = structure.get_node("Body")
+		var health_fraction := clampf(float(wall["hp"]) / 120.0, 0.0, 1.0)
+		var material: StandardMaterial3D = visual.material_override
+		if material == null or material == _materials.get(str(Color(0.57, 0.40, 0.23))):
+			material = StandardMaterial3D.new()
+			visual.material_override = material
+		material.albedo_color = Color(0.27, 0.20, 0.17).lerp(Color(0.64, 0.48, 0.3), health_fraction)
+	for id in _barricade_bodies.keys():
+		if not active.has(id):
+			_barricade_bodies[id].queue_free()
+			_barricade_bodies.erase(id)
+
+
+func _nearest_barricade() -> int:
+	var nearest := -1
+	var distance := 3.0
+	var current := Vector2(survivor.position.x, survivor.position.z)
+	for id in sim.barricades:
+		var item: Dictionary = sim.barricades[id]
+		var delta_position := Vector2(float(item["x"]), float(item["z"])) - current
+		var d := delta_position.length()
+		if d < distance and (d < 0.001 or delta_position.normalized().dot(_facing) > 0.15):
+			distance = d
+			nearest = int(id)
+	return nearest
+
+
 func _physics_process(delta: float) -> void:
 	if sim == null:
 		return
@@ -315,6 +368,7 @@ func _physics_process(delta: float) -> void:
 	for item_id in _crate_meshes:
 		_crate_meshes[item_id].visible = not sim.opened_crates.has(item_id)
 	_sync_zombies()
+	_sync_barricades()
 	_hud_clock += delta
 	if _hud_clock > 0.15:
 		_hud_clock = 0.0
@@ -507,6 +561,16 @@ func _unhandled_input(event: InputEvent) -> void:
 		_result("Equip armor", sim.cmd_use(LOCAL_PLAYER_ID, "jacket_1"))
 	elif event.is_action_pressed("survive_lake"):
 		_result("Drink from water", sim.cmd_drink_water(LOCAL_PLAYER_ID))
+	elif event.is_action_pressed("survive_build"):
+		var point := Vector2(survivor.position.x, survivor.position.z) + _facing * 2.8
+		_result("Build barricade", sim.cmd_build(LOCAL_PLAYER_ID, point.x, point.y))
+	elif event.is_action_pressed("survive_repair"):
+		var wall_id := _nearest_barricade()
+		if wall_id == -1:
+			_feedback = "Repair: aim toward a nearby barricade"
+		else:
+			_result("Repair barricade", sim.cmd_repair(LOCAL_PLAYER_ID, wall_id))
+
 	elif event.is_action_pressed("survive_vendor_buy"):
 		_result("Buy water (12 silver)", sim.cmd_vendor(LOCAL_PLAYER_ID, "water_bottle", 1, true))
 	elif event.is_action_pressed("survive_vendor_sell"):
@@ -543,7 +607,7 @@ func _update_hud() -> void:
 	var recipe_id: String = _recipes[_recipe_index] if not _recipes.is_empty() else "bandage"
 	var recipe: Dictionary = Defs.recipes().get(recipe_id, {})
 	var near_bench: bool = Vector2(position.x, position.z).distance_to(GameServer.WORKBENCH_POSITION) < GameServer.WORKBENCH_RANGE
-	_instructions.text = "WASD move | Shift sprint | E gather | Q loot | F attack | G heavy strike\nTab / Shift+Tab recipes | C craft | B stash | 1 food 2 water 3 heal 4 weapon 5 armor R lake\nN buy water / V sell salvage at hub\nCRAFT %s -> %s x%d | %s | inputs %s\n%s" % [
+	_instructions.text = "WASD move | Shift sprint | E gather | Q loot | F attack | G heavy strike | U build | H repair\nTab / Shift+Tab recipes | C craft | B stash | 1 food 2 water 3 heal 4 weapon 5 armor R lake\nN buy water / V sell salvage at hub\nCRAFT %s -> %s x%d | %s | inputs %s\n%s" % [
 		recipe_id, str(recipe.get("output", "")), int(recipe.get("count", 0)),
 		"WORKBENCH" if near_bench else "workbench at x=9, z=0",
 		str(recipe.get("inputs", {})), _feedback
