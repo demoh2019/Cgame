@@ -323,6 +323,7 @@ void GodotSoftBody3D::update_link_constants() {
 void GodotSoftBody3D::rebuild_xpbd_volume_rest_state() {
 	xpbd_volume_topology_checked = true;
 	xpbd_volume_valid = false;
+	xpbd_volume_gradients.reset();
 	xpbd_rest_volume = 0.0;
 	xpbd_volume_lambda = 0.0;
 	if (nodes.size() < 4 || faces.size() < 4) {
@@ -424,7 +425,9 @@ void GodotSoftBody3D::solve_xpbd_volume_constraint(real_t p_alpha_tilde) {
 		if (!xpbd_volume_gradients[i].is_finite()) {
 			return;
 		}
-		weighted_norm += double(nodes[i].im) * double(xpbd_volume_gradients[i].length_squared());
+		const Vector3 &g = xpbd_volume_gradients[i];
+		const double norm_squared = double(g.x) * double(g.x) + double(g.y) * double(g.y) + double(g.z) * double(g.z);
+		weighted_norm += double(nodes[i].im) * norm_squared;
 	}
 	if (!(weighted_norm > 0.0) || !Math::is_finite(weighted_norm) ||
 			weighted_norm > double(std::numeric_limits<real_t>::max())) {
@@ -1404,6 +1407,19 @@ void GodotSoftBody3D::solve_constraints(real_t p_delta) {
 		}
 	}
 
+	// Preserve enclosed volume only for a closed consistently wound manifold.
+	// A one-time topology scan is deferred until a project enables the option.
+	const bool volume_requested = get_space() && get_space()->is_soft_body_xpbd_volume_enabled();
+	if (volume_requested && !xpbd_volume_topology_checked) {
+		rebuild_xpbd_volume_rest_state();
+	}
+	const double volume_compliance = volume_requested ? double(get_space()->get_soft_body_xpbd_volume_compliance()) : 0.0;
+	const double volume_alpha_double = p_delta > real_t(0.0) ? volume_compliance / (double(p_delta) * double(p_delta)) : 0.0;
+	const bool use_volume = volume_requested && xpbd_volume_valid &&
+			p_delta > real_t(0.0) && Math::is_finite(volume_alpha_double) && volume_alpha_double >= 0.0;
+	const real_t volume_alpha = use_volume ? real_t(MIN(volume_alpha_double, double(std::numeric_limits<real_t>::max()))) : real_t(0.0);
+	xpbd_volume_lambda = real_t(0.0); // Multiplier is per physics step, not persistent.
+
 	// Optional, independent XPBD stretch and triangle area constraints.
 	// Area preservation resists cloth shear/compression that edge lengths
 	// alone do not fully control. Each lambda persists only within one step.
@@ -1459,6 +1475,9 @@ void GodotSoftBody3D::solve_constraints(real_t p_delta) {
 						face.n[0]->im, face.n[1]->im, face.n[2]->im,
 						face.ra, area_alpha, xpbd_area_lambdas[face_index]);
 			}
+		}
+		if (use_volume) {
+			solve_xpbd_volume_constraint(volume_alpha);
 		}
 	}
 	const real_t vc = (1.0 - damping_coefficient) * inv_delta;
@@ -1606,6 +1625,11 @@ void GodotSoftBody3D::destroy() {
 
 	xpbd_link_lambdas.reset();
 	xpbd_area_lambdas.reset();
+	xpbd_volume_gradients.reset();
+	xpbd_volume_topology_checked = false;
+	xpbd_volume_valid = false;
+	xpbd_rest_volume = real_t(0.0);
+	xpbd_volume_lambda = real_t(0.0);
 	nodes.clear();
 	links.clear();
 	faces.clear();
