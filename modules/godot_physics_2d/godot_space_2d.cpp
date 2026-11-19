@@ -115,94 +115,79 @@ int GodotPhysicsDirectSpaceState2D::intersect_point(const PS2DT::PointParameters
 bool GodotPhysicsDirectSpaceState2D::intersect_ray(const PS2DT::RayParameters &p_parameters, PS2DT::RayResult &r_result) {
 	ERR_FAIL_COND_V(space->locked, false);
 
-	Vector2 begin, end;
-	Vector2 normal;
-	begin = p_parameters.from;
-	end = p_parameters.to;
-	normal = (end - begin).normalized();
-
-	int amount = space->broadphase->cull_segment(begin, end, space->intersection_query_results, GodotSpace2D::INTERSECTION_QUERY_MAX, space->intersection_query_subindex_results);
-
-	// Results are unordered; the cached per-shape AABB prunes candidates after the first hit.
-
-	bool collided = false;
-	Vector2 res_point, res_normal;
-	int res_shape = -1;
-	const GodotCollisionObject2D *res_obj = nullptr;
-	real_t min_d = Math::INF;
-
-	for (int i = 0; i < amount; i++) {
-		if (!_can_collide_with(space->intersection_query_results[i], p_parameters.collision_mask, p_parameters.collide_with_bodies, p_parameters.collide_with_areas)) {
-			continue;
-		}
-
-		if (p_parameters.exclude.has(space->intersection_query_results[i]->get_self())) {
-			continue;
-		}
-
-		const GodotCollisionObject2D *col_obj = space->intersection_query_results[i];
-
-		int shape_idx = space->intersection_query_subindex_results[i];
-
-		// Once a nearer hit is known, avoid narrowphase tests beyond it.
-		if (collided && !col_obj->get_shape_aabb(shape_idx).intersects_segment(begin, res_point)) {
-			continue;
-		}
-
-		Transform2D inv_xform = col_obj->get_shape_inv_transform(shape_idx) * col_obj->get_inv_transform();
-
-		Vector2 local_from = inv_xform.xform(begin);
-		Vector2 local_to = inv_xform.xform(end);
-
-		const GodotShape2D *shape = col_obj->get_shape(shape_idx);
-
-		Vector2 shape_point, shape_normal;
-
-		if (shape->contains_point(local_from)) {
-			if (p_parameters.hit_from_inside) {
-				// Hit shape at starting point.
-				min_d = 0;
-				res_point = begin;
-				res_normal = Vector2();
-				res_shape = shape_idx;
-				res_obj = col_obj;
-				collided = true;
-				break;
-			} else {
-				// Ignore shape when starting inside.
-				continue;
-			}
-		}
-
-		if (shape->intersect_segment(local_from, local_to, shape_point, shape_normal)) {
-			Transform2D xform = col_obj->get_transform() * col_obj->get_shape_transform(shape_idx);
-			shape_point = xform.xform(shape_point);
-
-			real_t ld = normal.dot(shape_point - begin);
-
-			if (ld < min_d) {
-				min_d = ld;
-				res_point = shape_point;
-				res_normal = inv_xform.basis_xform_inv(shape_normal).normalized();
-				res_shape = shape_idx;
-				res_obj = col_obj;
-				collided = true;
-			}
-		}
-	}
-
-	if (!collided) {
+	const Vector2 begin = p_parameters.from;
+	const Vector2 end = p_parameters.to;
+	const Vector2 motion = end - begin;
+	const real_t length_squared = motion.length_squared();
+	if (length_squared == 0.0) {
 		return false;
 	}
-	ERR_FAIL_NULL_V(res_obj, false); // Shouldn't happen but silences warning.
 
-	r_result.collider_id = res_obj->get_instance_id();
-	r_result.normal = res_normal;
-	r_result.position = res_point;
-	r_result.rid = res_obj->get_self();
-	r_result.shape = res_shape;
+	// Box2D/Jolt-style streaming BVH traversal. The narrowphase callback
+	// clips the segment to the nearest exact hit, without a 2048-result cap.
+	struct RayCastData {
+		const PS2DT::RayParameters &params;
+		PS2DT::RayResult &result;
+		Vector2 from;
+		Vector2 to;
+		Vector2 motion;
+		real_t inv_motion_length_squared;
+		bool hit = false;
+	};
+	RayCastData state = { p_parameters, r_result, begin, end, motion, 1.0 / length_squared };
 
-	return true;
+	auto visitor = [] (GodotCollisionObject2D *object, int p_shape, real_t p_max_fraction, void *p_userdata) -> real_t {
+		RayCastData &data = *static_cast<RayCastData *>(p_userdata);
+		if (!_can_collide_with(object, data.params.collision_mask, data.params.collide_with_bodies, data.params.collide_with_areas)) {
+			return p_max_fraction;
+		}
+		if (data.params.exclude.has(object->get_self())) {
+			return p_max_fraction;
+		}
+
+		const Transform2D inv_xform = object->get_shape_inv_transform(p_shape) * object->get_inv_transform();
+		const Vector2 local_from = inv_xform.xform(data.from);
+		const Vector2 local_to = inv_xform.xform(data.to);
+		const GodotShape2D *shape = object->get_shape(p_shape);
+
+		Vector2 world_point;
+		Vector2 world_normal;
+		real_t fraction = 0.0;
+		if (shape->contains_point(local_from)) {
+			if (!data.params.hit_from_inside) {
+				return p_max_fraction;
+			}
+			// Keep the hit-from-inside result and terminate traversal at 0.
+			world_point = data.from;
+			world_normal = Vector2();
+			fraction = 0.0;
+		} else {
+			Vector2 shape_point;
+			Vector2 shape_normal;
+			if (!shape->intersect_segment(local_from, local_to, shape_point, shape_normal)) {
+				return p_max_fraction;
+			}
+			const Transform2D xform = object->get_transform() * object->get_shape_transform(p_shape);
+			world_point = xform.xform(shape_point);
+			world_normal = inv_xform.basis_xform_inv(shape_normal).normalized();
+			fraction = data.motion.dot(world_point - data.from) * data.inv_motion_length_squared;
+		}
+
+		// The broadphase may visit objects in any order. A closer exact hit
+		// controls both the result and the clipped ray for subsequent nodes.
+		if (fraction < 0.0 || fraction > p_max_fraction || (data.hit && fraction >= p_max_fraction)) {
+			return p_max_fraction;
+		}
+		data.hit = true;
+		data.result.collider_id = object->get_instance_id();
+		data.result.normal = world_normal;
+		data.result.position = world_point;
+		data.result.rid = object->get_self();
+		data.result.shape = p_shape;
+		return fraction;
+	};
+	space->broadphase->cast_segment(begin, end, visitor, &state);
+	return state.hit;
 }
 
 int GodotPhysicsDirectSpaceState2D::intersect_shape(const PS2DT::ShapeParameters &p_parameters, PS2DT::ShapeResult *r_results, int p_result_max) {
