@@ -81,6 +81,8 @@ func _run() -> void:
 	PhysicsServer3D.soft_body_pin_point(cloth, 0, true)
 	PhysicsServer3D.soft_body_set_space(solid, space)
 	PhysicsServer3D.soft_body_set_space(cloth, space)
+	for frame in range(3):
+		await physics_frame
 
 	var initial := _vertex_positions(solid, 4)
 	var initial_volume := _tetra_volume(initial)
