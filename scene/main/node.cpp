@@ -2080,30 +2080,40 @@ TypedArray<Node> Node::find_children(const String &p_pattern, const String &p_ty
 		return ret;
 	}
 
-	// Store only the current DFS path, not all siblings, so temporary memory
-	// is O(tree depth) and we never create one TypedArray per descendant.
-	struct TraversalFrame {
-		const Node *parent;
-		uint32_t next_child;
-	};
-	LocalVector<TraversalFrame> frames;
-	frames.push_back({ this, 0 });
-	while (!frames.is_empty()) {
-		TraversalFrame &frame = frames[frames.size() - 1];
-		if (frame.next_child >= frame.parent->data.children_cache.size()) {
-			frames.resize(frames.size() - 1);
-			continue;
+	// Traverse depth-first with parent pointers and the cached child indices.
+	// Unlike a per-call DFS stack, this does not allocate even for deep trees.
+	Node *current_node = data.children_cache[0];
+	while (current_node != this) {
+		if (!p_owned || current_node->data.owner) {
+			append_match(current_node);
+			current_node->_update_children_cache();
+			if (!current_node->data.children_cache.is_empty()) {
+				current_node = current_node->data.children_cache[0];
+				continue;
+			}
 		}
 
-		Node *child = frame.parent->data.children_cache[frame.next_child++];
-		if (p_owned && !child->data.owner) {
-			// Preserve the original behavior: an unowned branch is not traversed.
-			continue;
-		}
-		append_match(child);
-		child->_update_children_cache();
-		if (!child->data.children_cache.is_empty()) {
-			frames.push_back({ child, 0 });
+		// Go to the next sibling, climbing until the enclosing subtree has
+		// another child. Child indices are relative to their internal mode;
+		// children_cache also contains front and back internal children.
+		while (current_node != this) {
+			Node *parent = current_node->data.parent;
+			uint32_t next_index = current_node->data.index + 1;
+			switch (current_node->data.internal_mode) {
+				case INTERNAL_MODE_FRONT: {
+				} break;
+				case INTERNAL_MODE_DISABLED: {
+					next_index += parent->data.internal_children_front_count_cache;
+				} break;
+				case INTERNAL_MODE_BACK: {
+					next_index += parent->data.internal_children_front_count_cache + parent->data.external_children_count_cache;
+				} break;
+			}
+			if (next_index < parent->data.children_cache.size()) {
+				current_node = parent->data.children_cache[next_index];
+				break;
+			}
+			current_node = parent;
 		}
 	}
 	return ret;

@@ -1277,4 +1277,106 @@ TEST_CASE("[SceneTree][Node] find_children iterative traversal handles deep scen
 	memdelete(root);
 }
 
+
+TEST_CASE("[SceneTree][Node] find_children stackless with mixed internal children") {
+	Node *root = memnew(Node);
+	root->set_name("Root");
+	Node *front = memnew(Node);
+	front->set_name("ItemFront");
+	root->add_child(front, false, Node::INTERNAL_MODE_FRONT);
+	Node *a = memnew(Node);
+	a->set_name("ItemA");
+	root->add_child(a);
+	Node *a1 = memnew(Node);
+	a1->set_name("ItemA1");
+	a->add_child(a1);
+	Node *a2 = memnew(Node);
+	a2->set_name("ItemA2");
+	a->add_child(a2);
+	Node *b = memnew(Node);
+	b->set_name("ItemB");
+	root->add_child(b);
+	Node *b1 = memnew(Node);
+	b1->set_name("ItemB1");
+	b->add_child(b1);
+	Node *back = memnew(Node);
+	back->set_name("ItemBack");
+	root->add_child(back, false, Node::INTERNAL_MODE_BACK);
+
+	TypedArray<Node> recursive = root->find_children("Item*", "", true, false);
+	REQUIRE_EQ(recursive.size(), 7);
+	CHECK_EQ(Object::cast_to<Node>(recursive[0]), front);
+	CHECK_EQ(Object::cast_to<Node>(recursive[1]), a);
+	CHECK_EQ(Object::cast_to<Node>(recursive[2]), a1);
+	CHECK_EQ(Object::cast_to<Node>(recursive[3]), a2);
+	CHECK_EQ(Object::cast_to<Node>(recursive[4]), b);
+	CHECK_EQ(Object::cast_to<Node>(recursive[5]), b1);
+	CHECK_EQ(Object::cast_to<Node>(recursive[6]), back);
+
+	TypedArray<Node> shallow = root->find_children("Item*", "", false, false);
+	REQUIRE_EQ(shallow.size(), 4);
+	CHECK_EQ(Object::cast_to<Node>(shallow[0]), front);
+	CHECK_EQ(Object::cast_to<Node>(shallow[1]), a);
+	CHECK_EQ(Object::cast_to<Node>(shallow[2]), b);
+	CHECK_EQ(Object::cast_to<Node>(shallow[3]), back);
+	memdelete(root);
+}
+
+TEST_CASE("[SceneTree][Node] find_children stackless skips unowned descendants") {
+	Node *root = memnew(Node);
+	root->set_name("Root");
+	Node *owned = memnew(Node);
+	owned->set_name("ItemOwned");
+	root->add_child(owned);
+	owned->set_owner(root);
+	Node *nested = memnew(Node);
+	nested->set_name("ItemNested");
+	owned->add_child(nested);
+	nested->set_owner(root);
+	Node *hidden = memnew(Node);
+	hidden->set_name("ItemUnowned");
+	root->add_child(hidden);
+	Node *skipped = memnew(Node);
+	skipped->set_name("ItemSkipped");
+	hidden->add_child(skipped);
+	skipped->set_owner(root);
+	Node *last = memnew(Node);
+	last->set_name("ItemLast");
+	root->add_child(last);
+	last->set_owner(root);
+
+	TypedArray<Node> owned_only = root->find_children("Item*", "", true, true);
+	REQUIRE_EQ(owned_only.size(), 3);
+	CHECK_EQ(Object::cast_to<Node>(owned_only[0]), owned);
+	CHECK_EQ(Object::cast_to<Node>(owned_only[1]), nested);
+	CHECK_EQ(Object::cast_to<Node>(owned_only[2]), last);
+	TypedArray<Node> all = root->find_children("Item*", "", true, false);
+	CHECK_EQ(all.size(), 5);
+	memdelete(root);
+}
+
+TEST_CASE("[SceneTree][Node] find_children stackless handles deep branches") {
+	Node *root = memnew(Node);
+	root->set_name("Root");
+	Node *head = memnew(Node);
+	head->set_name("ItemHead");
+	root->add_child(head);
+	Node *leaf = head;
+	for (int i = 0; i < 384; ++i) {
+		Node *child = memnew(Node);
+		child->set_name("Item" + itos(i));
+		leaf->add_child(child);
+		leaf = child;
+	}
+	Node *last = memnew(Node);
+	last->set_name("ItemLast");
+	root->add_child(last);
+	TypedArray<Node> nodes = root->find_children("Item*", "", true, false);
+	REQUIRE_EQ(nodes.size(), 386);
+	CHECK_EQ(Object::cast_to<Node>(nodes[0]), head);
+	CHECK_EQ(Object::cast_to<Node>(nodes[nodes.size() - 2]), leaf);
+	CHECK_EQ(Object::cast_to<Node>(nodes[nodes.size() - 1]), last);
+	memdelete(root);
+}
+
 } // namespace TestNode
