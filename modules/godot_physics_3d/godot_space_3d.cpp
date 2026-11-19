@@ -1308,6 +1308,8 @@ GodotSpace3D::GodotSpace3D() {
 	soft_body_lift_coefficient = Math::is_finite(configured_lift_coefficient) ? MAX(real_t(0.0), configured_lift_coefficient) : real_t(0.0);
 	const real_t configured_gas_gamma = GLOBAL_GET("physics/3d/solver/soft_body_gas_pressure_gamma");
 	soft_body_gas_pressure_gamma = Math::is_finite(configured_gas_gamma) ? CLAMP(configured_gas_gamma, real_t(0.0), real_t(5.0)) : real_t(0.0);
+	const real_t configured_gas_leak_rate = GLOBAL_GET("physics/3d/solver/soft_body_gas_leak_rate");
+	soft_body_gas_leak_rate = Math::is_finite(configured_gas_leak_rate) ? MAX(real_t(0.0), configured_gas_leak_rate) : real_t(0.0);
 	const real_t configured_tangential_drag = GLOBAL_GET("physics/3d/solver/soft_body_tangential_drag_ratio");
 	soft_body_tangential_drag_ratio = Math::is_finite(configured_tangential_drag) ? MAX(real_t(0.0), configured_tangential_drag) : real_t(0.0);
 	const real_t configured_area_compliance = GLOBAL_GET("physics/3d/solver/soft_body_xpbd_area_compliance");
