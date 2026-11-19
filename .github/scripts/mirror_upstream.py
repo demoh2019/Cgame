@@ -219,6 +219,7 @@ class Mirror:
         self.apply, self.comments, self.pr_mode = apply, comments, pr_mode
         self.git_mirror = git_mirror
         self.present = set()
+        self.mirrored_targets = {}
         self.stats = {"created_issues": 0, "created_prs": 0, "skipped": 0,
                       "dry_run": 0, "errors": 0}
 
@@ -233,9 +234,17 @@ class Mirror:
             )
 
     def build_index(self):
-        self.present = existing_keys(
-            self.api.pages(f"/repos/{self.dest}/issues?state=all"), self.source
-        )
+        self.present = set()
+        self.mirrored_targets = {}
+        for record in self.api.pages(f"/repos/{self.dest}/issues?state=all"):
+            self.present.update(existing_keys([record], self.source))
+            for matched in MARKER_RE.finditer(record.get("body") or ""):
+                if matched.group(1) != self.source:
+                    continue
+                key = source_key(matched.group(2), int(matched.group(3)))
+                self.mirrored_targets[key] = (
+                    record["number"], record.get("state"), bool(record.get("pull_request"))
+                )
         print(f"Existing upstream references in destination: {len(self.present)}")
 
     def mirror_comments(self, upstream_num, destination_num):
@@ -267,6 +276,9 @@ class Mirror:
         result = self.api.request("POST", f"/repos/{self.dest}/issues", payload)
         created_number = result["number"]
         self.present.add(source_key(kind, number))
+        self.mirrored_targets[source_key(kind, number)] = (
+            created_number, item["state"], False
+        )
         if self.comments:
             self.mirror_comments(number, created_number)
         if item["state"] == "closed":
@@ -299,6 +311,11 @@ class Mirror:
             print(f"PR #{number} could not be opened (422); archiving")
             return self.create_archive(item, "pull", detail)
         self.present.add(source_key("pull", number))
+        self.mirrored_targets[source_key("pull", number)] = (
+            result["number"], "open", True
+        )
+        if self.comments:
+            self.mirror_comments(number, result["number"])
         self.stats["created_prs"] += 1
         print(f"Created draft PR #{result['number']} for upstream #{number}")
 
@@ -307,6 +324,15 @@ class Mirror:
         number = item["number"]
         key = source_key(kind, number)
         if key in self.present:
+            # A previous run may have created an issue but stopped in the middle
+            # of comments or before closing it. Repair that partial import.
+            if self.apply and key in self.mirrored_targets:
+                dest_number, dest_state, is_pr = self.mirrored_targets[key]
+                if self.comments:
+                    self.mirror_comments(number, dest_number)
+                if item["state"] == "closed" and dest_state != "closed" and not is_pr:
+                    self.api.request("PATCH", f"/repos/{self.dest}/issues/{dest_number}",
+                                     {"state": "closed"})
             self.stats["skipped"] += 1
             return
         if not self.apply:
