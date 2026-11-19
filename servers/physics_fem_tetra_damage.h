@@ -112,7 +112,7 @@ _FORCE_INLINE_ static bool physics_fem_tetra_accumulate_damage(
 	}
 	const double excess = p_strain - p_yield_strain;
 	const double intensity = excess / (1.0 + excess);
-	const double fraction = -Math::expm1(-p_rate * p_delta);
+	const double fraction = 1.0 - Math::exp(-p_rate * p_delta);
 	if (!(intensity > 0.0) || !Math::is_finite(intensity) ||
 			!(fraction > 0.0) || !Math::is_finite(fraction)) {
 		return false;
