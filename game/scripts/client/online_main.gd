@@ -3,6 +3,7 @@ extends Node3D
 ## network state and what is drawn.
 
 const Defs = preload("res://scripts/shared/defs.gd")
+const WorldCycle = preload("res://scripts/shared/world_cycle.gd")
 const WorldGen = preload("res://scripts/shared/world_gen.gd")
 const Net = preload("res://scripts/shared/net.gd")
 const GameClient = preload("res://scripts/client/game_client.gd")
@@ -16,7 +17,7 @@ const Audio = preload("res://scripts/client/audio.gd")
 const Social = preload("res://scripts/client/social.gd")
 
 const CAMERA_OFFSET := Vector3(0.0, 17.0, 12.5)
-const DAY_LENGTH := 900.0 # Seconds of server time per day.
+const DAY_LENGTH := WorldCycle.DAY_LENGTH # Shared with server simulation and local client.
 
 var net
 var client
@@ -357,11 +358,10 @@ func _apply_world_state() -> void:
 
 
 func _update_time_of_day() -> void:
-	var day := fmod(client.server_time / DAY_LENGTH, 1.0)
-	var sun_angle := day * TAU
-	var height := sin(sun_angle) # 1 at noon, -1 at midnight.
+	var day := WorldCycle.phase(client.server_time)
+	var height := WorldCycle.sun_height(client.server_time) # 1 at noon, -1 at midnight.
 	sun.rotation = Vector3(-deg_to_rad(lerpf(8.0, 70.0, clampf(height, 0.0, 1.0))), deg_to_rad(35.0 + day * 90.0), 0.0)
-	var daylight := clampf(height * 2.0 + 0.5, 0.0, 1.0)
+	var daylight := WorldCycle.daylight(client.server_time)
 	sun.light_energy = lerpf(0.08, 1.15, daylight)
 	sun.light_color = Color(1.0, 0.85, 0.65).lerp(Color(1.0, 0.98, 0.94), clampf(height * 1.5, 0.0, 1.0))
 	environment.ambient_light_energy = lerpf(0.25, 1.0, daylight)

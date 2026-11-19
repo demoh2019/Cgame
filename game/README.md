@@ -513,3 +513,21 @@ durable database transaction**. Do not use for production cross-server markets
 until a backend transactional ledger or transactional character write is added.
 No Cgame engine changes were needed; the current networking API supports
 these commands and reliable events.
+
+## Shared day/night cycle and night infected threat
+
+The canonical network client already displayed a 900-second lighting cycle,
+but its clock was duplicated and the offline playable client never changed
+lighting. `game/scripts/shared/world_cycle.gd` now defines the same
+sunrise-to-sunrise period for the **dedicated server and both clients**.
+The offline demo varies directional and ambient light and sky color using
+that shared clock; the online client keeps the same established sky and fog
+behavior but reads the shared time calculations. Both HUDs identify day/night.
+At night, the authoritative server increases an infected's **visual notice
+radius by 35%**, capped by its existing pursuit range. Existing noise detection,
+safe-hub immunity, attack damage and chase speed are unchanged. No client
+request can forge the world time or night detection multiplier. The cycle
+uses server elapsed time; it restarts with the game server rather than being
+persisted as a calendar. Run the full suite, which includes
+`game/tests/test_world_cycle.gd` (clock boundaries, detection, safe hub,
+network snapshots).

@@ -4,6 +4,7 @@ extends RefCounted
 ## reads snapshots out of it, so the whole game can be tested by calling it directly.
 
 const Defs = preload("res://scripts/shared/defs.gd")
+const WorldCycle = preload("res://scripts/shared/world_cycle.gd")
 const WorldGen = preload("res://scripts/shared/world_gen.gd")
 const Inventory = preload("res://scripts/shared/inventory.gd")
 const Vendor = preload("res://scripts/shared/vendor.gd")
@@ -1141,7 +1142,8 @@ func _tick_zombies(delta: float) -> void:
 	var info: Dictionary = {}
 	for player in players.values():
 		info[player.id] = {"position": player.position, "alive": _alive(player),
-			"safe": _is_safe(player.position), "noise": player.noise_radius if player.noise_timer > 0.0 else 0.0}
+			"safe": _is_safe(player.position), "noise": player.noise_radius if player.noise_timer > 0.0 else 0.0,
+			"notice_multiplier": WorldCycle.notice_multiplier(time)}
 	# Activate spawns near players and put far-away zombies to sleep.
 	if tick_count % 20 == 1:
 		_manage_zombie_population()
@@ -1325,6 +1327,7 @@ func snapshot_for(peer_id: int) -> Dictionary:
 			"dodge_cooldown": player.dodge_timer, "dodge_immunity": player.dodge_immunity,
 			"weapon": player.inventory.weapon, "armor": player.inventory.armor,
 			"last_death_full_loot": player.last_death_full_loot,
+			"is_night": WorldCycle.is_night(time),
 			"gathering_levels": player.progression.levels(), "crafting_level": player.progression.crafting_level(),
 			"crafting_xp": player.progression.crafting_xp,
 			"contract": player.contract_state.duplicate(true),

@@ -5,6 +5,8 @@ extends Node3D
 
 const Defs = preload("res://scripts/shared/defs.gd")
 const WorldGen = preload("res://scripts/shared/world_gen.gd")
+const WorldCycle = preload("res://scripts/shared/world_cycle.gd")
+const ZoneRisk = preload("res://scripts/shared/zone_risk.gd")
 const GameServer = preload("res://scripts/server/game_server.gd")
 const Vendor = preload("res://scripts/shared/vendor.gd")
 const SurvivalRadar = preload("res://scripts/client/survival_radar.gd")
@@ -20,6 +22,8 @@ var _facing: Vector2 = Vector2(0.0, -1.0)
 var _recipe_index: int = 0
 var _recipes: Array[String] = []
 var _camera: Camera3D
+var _sun: DirectionalLight3D
+var _world_environment: Environment
 var _avatar: MeshInstance3D
 var _stats: Label
 var _instructions: Label
@@ -109,16 +113,31 @@ func _make_light_and_camera() -> void:
 	env.ambient_light_color = Color(0.62, 0.68, 0.73)
 	env.ambient_light_energy = 0.7
 	env_node.environment = env
+	_world_environment = env
 	add_child(env_node)
-	var sun := DirectionalLight3D.new()
-	sun.rotation_degrees = Vector3(-52.0, -32.0, 0.0)
-	sun.light_energy = 1.3
-	add_child(sun)
+	_sun = DirectionalLight3D.new()
+	_sun.rotation_degrees = Vector3(-52.0, -32.0, 0.0)
+	_sun.light_energy = 1.3
+	add_child(_sun)
+	_update_world_light()
 	_camera = Camera3D.new()
 	_camera.name = "Camera3D"
 	_camera.current = true
 	_camera.fov = 58.0
 	add_child(_camera)
+
+
+## Keep the offline world consistent with the networked server clock.
+func _update_world_light() -> void:
+	if _sun == null or _world_environment == null or sim == null:
+		return
+	var brightness: float = WorldCycle.daylight(sim.time)
+	var height: float = WorldCycle.sun_height(sim.time)
+	_sun.rotation_degrees = Vector3(-lerpf(8.0, 70.0, clampf(height, 0.0, 1.0)), 35.0 + WorldCycle.phase(sim.time) * 90.0, 0.0)
+	_sun.light_energy = lerpf(0.08, 1.15, brightness)
+	_sun.light_color = Color(1.0, 0.85, 0.65).lerp(Color(1.0, 0.98, 0.94), clampf(height * 1.5, 0.0, 1.0))
+	_world_environment.ambient_light_energy = lerpf(0.25, 0.85, brightness)
+	_world_environment.background_color = Color(0.025, 0.036, 0.07).lerp(Color(0.16, 0.19, 0.24), brightness)
 
 
 func _mesh(box_size: Vector3, color: Color) -> MeshInstance3D:
@@ -371,6 +390,7 @@ func _physics_process(delta: float) -> void:
 	if sim == null:
 		return
 	sim.tick(delta)
+	_update_world_light()
 	var movement := Input.get_vector("survive_left", "survive_right", "survive_up", "survive_down")
 	if movement.length_squared() > 0.001:
 		_facing = movement.normalized()
@@ -635,8 +655,9 @@ func _update_hud() -> void:
 	var levels: Dictionary = survivor.progression.levels()
 	var weight: float = survivor.inventory.total_weight()
 	var speed_pct: int = int(round(survivor.inventory.movement_factor() * 100.0))
-	var risk: String = "SAFE HUB" if world.is_safe(position.x, position.z) else "PVP + FULL LOOT"
-	_stats.text = "ALBION AFTER | SURVIVAL SANDBOX\nHP %d HUNGER %d THIRST %d STAMINA %d INFECTION %d KILLS %d\nCOMBAT ENERGY %d/%d SKILL CD %.1fs DODGE CD %.1fs WEAPON %s\nZONE %s (T%d) %s POS %d,%d ZOMBIES %d\nPROFESSIONS Wood T%d Stone T%d Ore T%d Fiber T%d Craft T%d\nCARRY %.1f kg MOVEMENT %d%% SILVER %d\nCONTRACT %s\nINVENTORY %s" % [
+	var risk: String = "SAFE HUB" if world.is_safe(position.x, position.z) else ZoneRisk.description(zone)
+	_stats.text = "ALBION AFTER | SURVIVAL SANDBOX\n%s | World clock %.0fs\nHP %d HUNGER %d THIRST %d STAMINA %d INFECTION %d KILLS %d\nCOMBAT ENERGY %d/%d SKILL CD %.1fs DODGE CD %.1fs WEAPON %s\nZONE %s (T%d) %s POS %d,%d ZOMBIES %d\nPROFESSIONS Wood T%d Stone T%d Ore T%d Fiber T%d Craft T%d\nCARRY %.1f kg MOVEMENT %d%% SILVER %d\nCONTRACT %s\nINVENTORY %s" % [
+		"NIGHT - infected notice farther" if WorldCycle.is_night(sim.time) else "DAY", sim.time,
 		int(vitals.health), int(vitals.hunger), int(vitals.thirst), int(vitals.stamina),
 		int(vitals.infection), survivor.kills,
 		int(survivor.combat_energy), int(Defs.COMBAT_ENERGY_MAX), survivor.skill_timer, survivor.dodge_timer,

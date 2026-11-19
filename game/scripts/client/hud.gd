@@ -2,6 +2,7 @@ extends CanvasLayer
 ## All of the interface, built in code: vitals, zone, inventory, crafting and a message log.
 
 const Defs = preload("res://scripts/shared/defs.gd")
+const WorldCycle = preload("res://scripts/shared/world_cycle.gd")
 const Crafting = preload("res://scripts/shared/crafting.gd")
 const Vendor = preload("res://scripts/shared/vendor.gd")
 const Contracts = preload("res://scripts/shared/contracts.gd")
@@ -399,8 +400,8 @@ func _process(_delta: float) -> void:
 	var zone: int = clampi(int(client.you.get("zone", 0)), 0, 3)
 	_zone_label.text = "%s zone (T%d)\n%s" % [Defs.ZONE_NAMES[zone].capitalize(), zone + 1, ZoneRisk.description(zone)]
 	_zone_label.add_theme_color_override("font_color", [Color(0.4, 0.9, 0.4), Color(0.95, 0.85, 0.3), Color(0.95, 0.45, 0.3), Color(0.8, 0.3, 0.9)][zone])
-	_info_label.text = "FPS %d  kills %d  deaths %d  Load %.1f kg  Speed %.0f%%  Stamina %d  Dodge %.1fs" % [
-		Engine.get_frames_per_second(), client.you.get("kills", 0), client.you.get("deaths", 0),
+	_info_label.text = "%s | FPS %d  kills %d  deaths %d  Load %.1f kg  Speed %.0f%%  Stamina %d  Dodge %.1fs" % [
+		"NIGHT" if WorldCycle.is_night(client.server_time) else "DAY", Engine.get_frames_per_second(), client.you.get("kills", 0), client.you.get("deaths", 0),
 		float(client.you.get("carry_kg", 0.0)), 100.0 * float(client.you.get("cargo_factor", 1.0)),
 		int(client.you.get("stamina", Defs.MAX_STAMINA)), float(client.you.get("dodge_cooldown", 0.0))
 	]

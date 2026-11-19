@@ -109,15 +109,16 @@ func think(world, players: Dictionary, delta: float, rng: RandomNumberGenerator)
 func _select_target(players: Dictionary, here: Vector2) -> void:
 	var best := -1
 	var best_distance := INF
-	var notice := float(data["notice"])
 	for peer_id in players:
 		var info: Dictionary = players[peer_id]
 		if not info["alive"] or info["safe"]:
 			continue
 		var p: Vector3 = info["position"]
 		var distance := here.distance_to(Vector2(p.x, p.z))
-		# A shot or running steps reveal the survivor even outside visual notice.
-		# Bound hearing by the zombie's leash so it can actually pursue the sound.
+		# Night makes infected more vigilant; cap new detection by pursuit leash.
+		# Hearing remains independent of night and is always authoritative.
+		var sight_multiplier := clampf(float(info.get("notice_multiplier", 1.0)), 1.0, 1.35)
+		var notice := minf(float(data["notice"]) * sight_multiplier, float(data["lose"]) - 1.0)
 		var hearing := clampf(float(info.get("noise", 0.0)), 0.0, float(data["lose"]) - 1.0)
 		var detect_range := maxf(notice, hearing)
 		if distance < best_distance and (distance <= detect_range or peer_id == target_id):
