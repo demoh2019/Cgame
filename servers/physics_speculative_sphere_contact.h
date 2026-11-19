@@ -33,6 +33,26 @@
 #include "core/math/vector3.h"
 #include "servers/physics_ccd_sphere_toi.h"
 
+// Keep the common float32 hot path, but recover large finite separations
+// without squaring a float32 vector into infinity. This also works in double
+// precision builds and introduces no state or heap allocation.
+_FORCE_INLINE_ static double physics_speculative_sphere_length_squared_wide(const Vector2 &p_delta) {
+	return double(p_delta.x) * p_delta.x + double(p_delta.y) * p_delta.y;
+}
+
+_FORCE_INLINE_ static double physics_speculative_sphere_length_squared_wide(const Vector3 &p_delta) {
+	return double(p_delta.x) * p_delta.x + double(p_delta.y) * p_delta.y + double(p_delta.z) * p_delta.z;
+}
+
+_FORCE_INLINE_ static Vector2 physics_speculative_sphere_normal_wide(const Vector2 &p_delta, double p_distance) {
+	return Vector2(real_t(double(p_delta.x) / p_distance), real_t(double(p_delta.y) / p_distance));
+}
+
+_FORCE_INLINE_ static Vector3 physics_speculative_sphere_normal_wide(const Vector3 &p_delta, double p_distance) {
+	return Vector3(real_t(double(p_delta.x) / p_distance), real_t(double(p_delta.y) / p_distance),
+			real_t(double(p_delta.z) / p_distance));
+}
+
 // Return an unpenetrated contact for an approaching pair of actual circles
 // or spheres, not the inflated points from a shape-margin SAT query.
 // Normals point from A to B; depth = dot(pointA - pointB, normal) is negative.
@@ -54,19 +74,36 @@ _FORCE_INLINE_ bool physics_speculative_sphere_contact(
 
 	const Vector center_delta = p_center_b - p_center_a;
 	const real_t distance_squared = center_delta.length_squared();
-	if (!Math::is_finite(distance_squared) || distance_squared <= 0.0) {
+	double distance;
+	Vector normal;
+	if (Math::is_finite(distance_squared) && distance_squared > real_t(0.0)) {
+		// Preserve the original fast path and rounding for ordinary scenes.
+		const real_t short_distance = Math::sqrt(distance_squared);
+		distance = short_distance;
+		normal = center_delta / short_distance;
+	} else {
+		// A finite center delta may have an infinite float32 squared length.
+		// Calculate in double and normalize each component before narrowing.
+		const double wide_squared = physics_speculative_sphere_length_squared_wide(center_delta);
+		if (!Math::is_finite(wide_squared) || wide_squared <= 0.0) {
+			return false;
+		}
+		distance = Math::sqrt(wide_squared);
+		normal = physics_speculative_sphere_normal_wide(center_delta, distance);
+	}
+	const double gap = distance - (double(p_radius_a) + double(p_radius_b));
+	if (!(gap > 0.0 && gap <= double(p_max_gap))) {
 		return false;
 	}
-	const real_t distance = Math::sqrt(distance_squared);
-	const real_t gap = distance - (p_radius_a + p_radius_b);
-	if (!(gap > 0.0 && gap <= p_max_gap)) {
-		return false;
-	}
-	const Vector normal = center_delta / distance;
 	// Radial closing speed alone produces ghost contacts for glancing paths
 	// with large tangential motion. Use the exact linear sphere TOI instead:
 	// the pair must actually reach its Minkowski contact surface this step.
-	const Vector relative_motion = (p_velocity_a - p_velocity_b) * p_step;
+	Vector relative_motion = (p_velocity_a - p_velocity_b) * p_step;
+	if (!relative_motion.is_finite()) {
+		// Opposing finite float32 velocities can overflow on subtraction,
+		// although their displacement during a short step is representable.
+		relative_motion = p_velocity_a * p_step - p_velocity_b * p_step;
+	}
 	double impact_fraction = 0.0;
 	if (!relative_motion.is_finite() ||
 			!physics_ccd_sphere_toi(-center_delta, relative_motion,
