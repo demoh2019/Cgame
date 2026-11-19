@@ -358,4 +358,63 @@ TEST_CASE("[Span] Non-reflexive custom comparisons still call element equality")
 	CHECK_FALSE(same == same);
 }
 
+
+TEST_CASE("[Span] Byte count matches scalar reference for every byte and boundary") {
+	uint8_t storage[1033];
+	uint32_t state = 0x27c16f4au;
+	for (uint8_t &byte : storage) {
+		state = state * 1664525u + 1013904223u;
+		byte = uint8_t(state >> 24);
+	}
+	const uint64_t lengths[] = { 0, 1, 2, 7, 8, 9, 15, 16, 31, 32, 33, 63, 64, 65, 71, 127, 128, 129, 255, 256, 257, 511, 512, 513, 1024 };
+	for (int offset = 0; offset < 8; offset++) {
+		for (uint64_t length : lengths) {
+			const Span<uint8_t> values(storage + offset, length);
+			for (int byte = 0; byte < 256; byte++) {
+				uint64_t expected = 0;
+				for (uint64_t i = 0; i < length; i++) {
+					expected += storage[offset + i] == uint8_t(byte);
+				}
+				CHECK(values.count(uint8_t(byte)) == expected);
+			}
+		}
+	}
+}
+
+TEST_CASE("[Span] Byte count preserves signed, borrow and constexpr semantics") {
+	static constexpr uint8_t constant_bytes[] = { 1, 0, 1, 2, 1, 0 };
+	static constexpr Span<uint8_t> constant_span(constant_bytes);
+	static_assert(constant_span.count(uint8_t(1)) == 3);
+	static_assert(constant_span.count(uint8_t(0)) == 2);
+	static_assert(constant_span.count(uint8_t(255)) == 0);
+	static_assert(Span<uint8_t>().count(uint8_t(0)) == 0);
+
+	int8_t signed_values[130];
+	for (int i = 0; i < 130; i++) {
+		signed_values[i] = int8_t((i * 17) - 128);
+	}
+	const Span<int8_t> signed_span(signed_values);
+	for (int needle = -128; needle <= 127; needle++) {
+		uint64_t expected = 0;
+		for (int8_t element : signed_values) {
+			expected += element == int8_t(needle);
+		}
+		CHECK(signed_span.count(int8_t(needle)) == expected);
+	}
+
+	uint8_t borrow_values[128];
+	for (int i = 0; i < 128; i++) {
+		borrow_values[i] = i % 3 == 0 ? 0 : 1;
+	}
+	const Span<uint8_t> borrow_span(borrow_values);
+	CHECK(borrow_span.count(uint8_t(0)) == 43);
+	CHECK(borrow_span.count(uint8_t(1)) == 85);
+	CHECK(borrow_span.count(uint8_t(2)) == 0);
+
+	const int normal_values[] = { 1, 0, 1, 2, 1, 0 };
+	CHECK(Span<int>(normal_values).count(1) == 3);
+	const float float_values[] = { -0.0f, 0.0f, 1.0f };
+	CHECK(Span<float>(float_values).count(0.0f) == 2);
+}
+
 } // namespace TestSpan

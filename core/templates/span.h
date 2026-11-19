@@ -347,6 +347,34 @@ constexpr int64_t Span<T>::rfind_sequence(const Span<T1> &p_span, uint64_t p_fro
 
 template <typename T>
 constexpr uint64_t Span<T>::count(const T &p_val) const {
+#if defined(__GNUC__) || defined(__clang__)
+	if constexpr (std::is_integral_v<T> && sizeof(T) == 1 && !std::is_same_v<std::remove_cv_t<T>, bool>) {
+		if (!__builtin_is_constant_evaluated() && size() >= 64) {
+			// Count eight bytes in each unaligned word without branchy byte checks.
+			// Unlike the standard zero-byte existence test, the low-7-bit
+			// formulation produces one exact match bit per lane (no borrow
+			// false positives). A multiply sums those eight bits.
+			constexpr uint64_t ONES = 0x0101010101010101ULL;
+			constexpr uint64_t LOW_BITS = 0x7f7f7f7f7f7f7f7fULL;
+			constexpr uint64_t HIGH_BITS = 0x8080808080808080ULL;
+			const uint64_t repeated = uint64_t(uint8_t(p_val)) * ONES;
+			const uint64_t block_end = size() & ~uint64_t(7);
+			uint64_t amount = 0;
+			uint64_t i = 0;
+			for (; i < block_end; i += sizeof(uint64_t)) {
+				uint64_t word;
+				std::memcpy(&word, ptr() + i, sizeof(word));
+				const uint64_t diff = word ^ repeated;
+				const uint64_t matches = ~(((diff & LOW_BITS) + LOW_BITS) | diff | LOW_BITS) & HIGH_BITS;
+				amount += ((matches >> 7) * ONES) >> 56;
+			}
+			for (; i < size(); i++) {
+				amount += ptr()[i] == p_val;
+			}
+			return amount;
+		}
+	}
+#endif
 	uint64_t amount = 0;
 	for (uint64_t i = 0; i < size(); i++) {
 		if (ptr()[i] == p_val) {
