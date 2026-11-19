@@ -15,6 +15,7 @@ var world
 var peer_id: int = 0
 var welcomed: bool = false
 var inventory = Inventory.new()
+var stash = Inventory.new(Defs.STASH_SLOTS)
 var you: Dictionary = {}
 var players: Dictionary = {} # id -> entity from the latest snapshot
 var zombies: Dictionary = {}
@@ -68,6 +69,8 @@ func on_snapshot(snapshot: Dictionary) -> void:
 	you = snapshot["you"]
 	if snapshot.has("inventory"):
 		inventory.load_dict(snapshot["inventory"])
+	if snapshot.has("stash"):
+		stash.load_dict(snapshot["stash"])
 	players.clear()
 	for entity in snapshot["players"]:
 		players[entity["id"]] = entity
@@ -149,6 +152,10 @@ func craft(recipe: String, times: int = 1) -> void:
 
 func use_item(item_id: String) -> void:
 	net.c_use.rpc_id(1, item_id)
+
+
+func move_stash(item_id: String, count: int, deposit: bool) -> void:
+	net.c_stash.rpc_id(1, item_id, count, deposit)
 
 
 func attack(direction: Vector2) -> void:
