@@ -111,6 +111,30 @@ python3 tests/stress/scale_sweep.py \
 | 2D transform propagation | `canvas_transform_2d` | Wide CanvasItem subtree; separate parent transform mutation and descendant global-transform rebuild times |
 | SceneTree notification dispatch | `process_dispatch` | Thousands of native Nodes with mixed ordinary/internal process flags and frame/physics time monitors |
 
+## Sparse constraint-island scheduling (2D and 3D)
+
+After per-island `pre_solve`, the built-in GodotPhysics scheduler skips islands
+whose remaining constraint lists are empty. Area monitoring constraints always
+return `false` from `pre_solve` after emitting notifications, so this removes
+worker-group overhead in sensor-dense scenes without dropping enter/exit events.
+A compact index list is allocated only if at least 32 islands and at
+least one quarter of all islands are empty; smaller sparse cases retain direct
+indexing to avoid allocation and per-task indirection. If no islands remain,
+solver dispatch is skipped unconditionally.
+
+Run the headless 2D+3D area-only regression with built-in GodotPhysics enabled:
+
+```bash
+./bin/godot.linuxbsd.editor.dev.x86_64 --headless --path tests/stress \
+  --script res://physics_sensor_island_regression.gd
+```
+
+This test creates independent sensor/body pairs and checks all enter and exit
+notifications; it is a correctness test, **not** a performance measurement.
+For speed/RSS comparisons capture before/after runs using the runner's
+`physics_sparse_2d`, `physics_sparse_3d` and
+`physics_contact_manifolds_2d` workloads on the same host.
+
 ## Contact restitution stability (Jolt / Box2D-style threshold)
 
 Built-in GodotPhysics now suppresses contact restitution when the approaching

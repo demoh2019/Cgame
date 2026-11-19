@@ -43,6 +43,9 @@ class GodotStep3D {
 	LocalVector<LocalVector<GodotBody3D *>> body_islands;
 	LocalVector<LocalVector<GodotConstraint3D *>> constraint_islands;
 	LocalVector<GodotConstraint3D *> all_constraints;
+	// Filled only when pre_solve removes constraints from some islands.
+	// Dense frames use direct island indices with no extra allocation.
+	LocalVector<uint32_t> solve_island_indices;
 
 	struct IslandTask {
 		GodotBody3D *body = nullptr;

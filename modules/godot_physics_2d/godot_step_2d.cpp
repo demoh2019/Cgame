@@ -98,7 +98,9 @@ void GodotStep2D::_pre_solve_island(LocalVector<GodotConstraint2D *> &p_constrai
 }
 
 void GodotStep2D::_solve_island(uint32_t p_island_index, void *p_userdata) const {
-	const LocalVector<GodotConstraint2D *> &constraint_island = constraint_islands[p_island_index];
+	// Most frames have no pruned islands: the empty map retains direct indexing.
+	const uint32_t island_index = solve_island_indices.is_empty() ? p_island_index : solve_island_indices[p_island_index];
+	const LocalVector<GodotConstraint2D *> &constraint_island = constraint_islands[island_index];
 
 	for (int i = 0; i < iterations; i++) {
 		uint32_t constraint_count = constraint_island.size();
@@ -266,21 +268,46 @@ void GodotStep2D::step(GodotSpace2D *p_space, real_t p_delta) {
 
 	/* PRE-SOLVE CONSTRAINT ISLANDS */
 
-	// WARNING: This doesn't run on threads, because it involves thread-unsafe processing.
+	// Pre-solve may disable every constraint in an island (e.g. moved
+	// areas or non-contacting pairs). Do not schedule solver work for these.
+	// Keep the full island list intact for sleeping and process metrics.
+	uint32_t solve_island_count = 0;
 	for (uint32_t island_index = 0; island_index < island_count; ++island_index) {
 		_pre_solve_island(constraint_islands[island_index]);
+		if (!constraint_islands[island_index].is_empty()) {
+			++solve_island_count;
+		}
+	}
+
+	// A compact index list pays for itself only when many jobs would be
+	// empty. For dense scenes with just a few empty islands, dispatching
+	// the no-op jobs is cheaper than allocating and indirection per task.
+	solve_island_indices.clear();
+	const uint32_t empty_island_count = island_count - solve_island_count;
+	if (solve_island_count == 0) {
+		// Nothing to dispatch, irrespective of how many islands existed.
+	} else if (empty_island_count >= 32 && empty_island_count >= island_count / 4) {
+		for (uint32_t island_index = 0; island_index < island_count; ++island_index) {
+			if (!constraint_islands[island_index].is_empty()) {
+				solve_island_indices.push_back(island_index);
+			}
+		}
+	} else {
+		// Keep direct indexing and avoid retaining a large index allocation
+		// to skip only a handful of empty islands.
+		solve_island_count = island_count;
 	}
 
 	/* SOLVE CONSTRAINT ISLANDS */
 
 	// WARNING: `_solve_island` modifies the constraint islands for optimization purpose,
 	// their content is not reliable after these calls and shouldn't be used anymore.
-	if (island_count == 1) {
+	if (solve_island_count == 1) {
 		// A single island cannot be solved in parallel with another island.
 		// Avoid queueing workers and immediately waiting for them.
 		_solve_island(0, nullptr);
-	} else if (island_count > 1) {
-		WorkerThreadPool::GroupID group_task = WorkerThreadPool::get_singleton()->add_template_group_task(this, &GodotStep2D::_solve_island, nullptr, island_count, -1, true, SNAME("Physics2DConstraintSolveIslands"));
+	} else if (solve_island_count > 1) {
+		WorkerThreadPool::GroupID group_task = WorkerThreadPool::get_singleton()->add_template_group_task(this, &GodotStep2D::_solve_island, nullptr, solve_island_count, -1, true, SNAME("Physics2DConstraintSolveIslands"));
 		WorkerThreadPool::get_singleton()->wait_for_group_task_completion(group_task);
 	}
 
