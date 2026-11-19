@@ -201,6 +201,8 @@ private:
 	// Optional 3-particle discrete rod centerline curvature on nearly aligned
 	// structural mesh-edge chains. Not a Cosserat rod twist/director solver.
 	real_t soft_body_xpbd_rod_bend_compliance = 0.0;
+	// Geometric torsion between adjacent curved centerline segments (not material twist).
+	real_t soft_body_xpbd_rod_torsion_compliance = 0.0;
 	real_t soft_body_xpbd_rod_straightness = 0.9;
 	real_t soft_body_xpbd_bend_parallel_compliance_ratio = 1.0; // Directional bend about a rest-mesh fiber axis.
 	real_t soft_body_shape_matching_stiffness = 0.0; // Optional global shape recovery.
@@ -408,6 +410,7 @@ public:
 	_FORCE_INLINE_ real_t get_soft_body_xpbd_shear_compliance() const { return soft_body_xpbd_shear_compliance; }
 	_FORCE_INLINE_ real_t get_soft_body_xpbd_dihedral_compliance() const { return soft_body_xpbd_dihedral_compliance; }
 	_FORCE_INLINE_ real_t get_soft_body_xpbd_rod_bend_compliance() const { return soft_body_xpbd_rod_bend_compliance; }
+	_FORCE_INLINE_ real_t get_soft_body_xpbd_rod_torsion_compliance() const { return soft_body_xpbd_rod_torsion_compliance; }
 	_FORCE_INLINE_ real_t get_soft_body_xpbd_rod_straightness() const { return soft_body_xpbd_rod_straightness; }
 	_FORCE_INLINE_ real_t get_soft_body_xpbd_bend_parallel_compliance_ratio() const { return soft_body_xpbd_bend_parallel_compliance_ratio; }
 	_FORCE_INLINE_ real_t get_soft_body_shape_matching_stiffness() const { return soft_body_shape_matching_stiffness; }

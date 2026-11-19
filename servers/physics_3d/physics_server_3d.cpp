@@ -756,6 +756,10 @@ PhysicsServer3D::PhysicsServer3D() {
 	// (not the synthesized two-hop bending links), at most two per center.
 	// This is not full Cosserat twist: no segment orientation DOFs yet.
 	GLOBAL_DEF(PropertyInfo(Variant::FLOAT, "physics/3d/solver/soft_body_xpbd_rod_bend_compliance", PROPERTY_HINT_RANGE, "0,0.01,0.000001,or_greater"), 0.0);
+	// Curved-centerline torsion: preserve the angle between the two local
+	// bend planes of a four-particle strand. Independent rotational material
+	// twist of a straight Cosserat rod requires additional orientation DOFs.
+	GLOBAL_DEF(PropertyInfo(Variant::FLOAT, "physics/3d/solver/soft_body_xpbd_rod_torsion_compliance", PROPERTY_HINT_RANGE, "0,0.01,0.000001,or_greater"), 0.0);
 	GLOBAL_DEF(PropertyInfo(Variant::FLOAT, "physics/3d/solver/soft_body_xpbd_rod_straightness", PROPERTY_HINT_RANGE, "0,0.9999,0.001"), 0.9);
 	// Independent orthotropic fold compliance about the rest-mesh material
 	// fiber direction. Reuses soft_body_xpbd_material_axis (mesh-local).
