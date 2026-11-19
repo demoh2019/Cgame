@@ -460,6 +460,42 @@ JPH::SoftBodySharedSettings *JoltSoftBody3D::_create_shared_settings() {
 	const int bend_mode = JoltProjectSettings::soft_body_bend_mode;
 	const BendType bend_type = bend_mode == 1 ? BendType::Distance : (bend_mode == 2 ? BendType::Dihedral : BendType::None);
 	settings->CreateConstraints(&vertex_attrib, 1, bend_type);
+	// Optional warp/weft response of woven cloth. Jolt stores compliance
+	// per structural spring; use the rest-pose edge direction rather than a
+	// world-space direction so rotating the soft body doesn't change its
+	// material. 1.0 is isotropic and skips this entire construction pass.
+	// The convex fan's radial springs are added *later*, so they retain
+	// their independent volumetric compliance.
+	const float fiber_multiplier = JoltProjectSettings::soft_body_fiber_compliance_multiplier;
+	if (fiber_multiplier != 1.0f) {
+		const int fiber_axis = JoltProjectSettings::soft_body_fiber_axis;
+		for (JPH::SoftBodySharedSettings::Edge &edge : settings->mEdgeConstraints) {
+			// FLT_MAX disables an edge in Jolt. Don't reactivate it, and
+			// don't modify rigid (zero-compliance) springs.
+			if (edge.mCompliance <= 0.0f || edge.mCompliance >= FLT_MAX || !Math::is_finite(edge.mCompliance)) {
+				continue;
+			}
+
+			const JPH::Float3 &a = settings->mVertices[edge.mVertex[0]].mPosition;
+			const JPH::Float3 &b = settings->mVertices[edge.mVertex[1]].mPosition;
+			const double dx = double(b.x) - double(a.x);
+			const double dy = double(b.y) - double(a.y);
+			const double dz = double(b.z) - double(a.z);
+			const double length_sq = dx * dx + dy * dy + dz * dz;
+			if (length_sq <= 0.0 || !Math::is_finite(length_sq)) {
+				continue;
+			}
+
+			const double parallel = fiber_axis == 0 ? dx : (fiber_axis == 1 ? dy : dz);
+			const double alignment_sq = parallel * parallel / length_sq;
+			const double compliance_scale = 1.0 + (double(fiber_multiplier) - 1.0) * alignment_sq;
+			const double adjusted = double(edge.mCompliance) * compliance_scale;
+			if (Math::is_finite(adjusted)) {
+				edge.mCompliance = float(MIN(adjusted, double(FLT_MAX)));
+			}
+		}
+	}
+
 	const float multiplier = 1.0f - shrinking_factor;
 	for (JPH::SoftBodySharedSettings::Edge &e : settings->mEdgeConstraints) {
 		e.mRestLength *= multiplier;
@@ -474,12 +510,39 @@ JPH::SoftBodySharedSettings *JoltSoftBody3D::_create_shared_settings() {
 			tether.mMaxDistance *= multiplier;
 		}
 	}
-	// Build optional radial springs after surface edge contraction. An
-	// interior vertex was already appended before CreateConstraints, so the
-	// LRA cache remains valid even with this additional constraint set.
+	// A compressible volumetric material has a rest-volume factor s^3
+	// when its edge rest lengths scale by s. Keep the old incompressible
+	// target by default; the convex fan must have been constructed first.
+	const bool follow_volume_shrink = has_convex_volume &&
+			JoltProjectSettings::soft_body_volume_follow_shrinking_factor &&
+			multiplier > 0.0f && multiplier != 1.0f;
+	if (follow_volume_shrink) {
+		const double scale = double(multiplier);
+		const double volume_scale = scale * scale * scale;
+		if (Math::is_finite(volume_scale)) {
+			for (JPH::SoftBodySharedSettings::Volume &volume : settings->mVolumeConstraints) {
+				const double target = double(volume.mSixRestVolume) * volume_scale;
+				volume.mSixRestVolume = float(CLAMP(target, -double(FLT_MAX), double(FLT_MAX)));
+			}
+		}
+	}
+
+	// The radial springs are a separate volumetric material, added AFTER
+	// textile fiber compliance and LRA constraint creation.
 	if (has_convex_volume && JoltProjectSettings::soft_body_volume_radial_springs) {
+		const uint32_t surface_edge_count = (uint32_t)settings->mEdgeConstraints.size();
 		append_volume_radial_springs(*settings, JoltProjectSettings::soft_body_volume_radial_compliance,
 				JoltProjectSettings::soft_body_radial_anisotropy_axis, JoltProjectSettings::soft_body_radial_anisotropy_ratio);
+		if (follow_volume_shrink) {
+			const double scale = double(multiplier);
+			for (uint32_t i = surface_edge_count; i < settings->mEdgeConstraints.size(); ++i) {
+				JPH::SoftBodySharedSettings::Edge &radial = settings->mEdgeConstraints[i];
+				const double target = double(radial.mRestLength) * scale;
+				if (Math::is_finite(target)) {
+					radial.mRestLength = float(MIN(target, double(FLT_MAX)));
+				}
+			}
+		}
 	}
 	settings->Optimize();
 

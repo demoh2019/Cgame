@@ -90,9 +90,9 @@ class JoltVolumetricContractionTests(unittest.TestCase):
 
     def test_default_and_zero_shrink_add_no_extra_volume_work(self):
         code = self.builder
-        self.assertIn("if (has_volume_fan && JoltProjectSettings::soft_body_volume_follow_shrinking_factor &&", code)
-        self.assertIn("multiplier != 1.0f && multiplier > 0.0f)", code)
-        self.assertIn("has_volume_fan && JoltProjectSettings::soft_body_volume_follow_shrinking_factor", code)
+        self.assertIn("const bool follow_volume_shrink = has_convex_volume &&", code)
+        self.assertIn("multiplier > 0.0f && multiplier != 1.0f;", code)
+        self.assertIn("JoltProjectSettings::soft_body_volume_follow_shrinking_factor &&", code)
         self.assertIn("if (Math::is_finite(volume_scale))", code)
         self.assertIn("for (JPH::SoftBodySharedSettings::Volume &volume : settings->mVolumeConstraints)", code)
         self.assertIn("const uint32_t surface_edge_count = (uint32_t)settings->mEdgeConstraints.size();", code)
@@ -101,17 +101,17 @@ class JoltVolumetricContractionTests(unittest.TestCase):
 
     def test_radial_spokes_are_scaled_only_after_convex_fan_creation(self):
         code = self.builder
-        self.assertIn("const bool has_volume_fan = try_build_convex_volume_fan(", code)
+        self.assertIn("has_convex_volume = try_build_convex_volume_fan(*settings", code)
         self.assertIn("JoltProjectSettings::soft_body_volume_radial_springs", code)
         self.assertIn("const uint32_t surface_edge_count = (uint32_t)settings->mEdgeConstraints.size();", code)
         self.assertIn("radial.mRestLength = float(MIN(target, double(FLT_MAX)));", code)
-        self.assertLess(code.index("surface_edge_count ="), code.index("const bool has_volume_fan"))
-        self.assertLess(code.index("const bool has_volume_fan"), code.index("radial.mRestLength ="))
+        self.assertLess(code.index("surface_edge_count ="), code.index("append_volume_radial_springs(*settings"))
+        self.assertLess(code.index("append_volume_radial_springs(*settings"), code.index("radial.mRestLength ="))
         self.assertLess(code.index("radial.mRestLength ="), code.index("settings->Optimize();"))
 
     def test_volume_scaling_does_not_run_on_invalid_or_open_mesh(self):
         code = self.builder
-        self.assertIn("has_volume_fan &&", code)
+        self.assertIn("const bool follow_volume_shrink = has_convex_volume &&", code)
         self.assertIn("multiplier > 0.0f", code)
         self.assertIn("Math::is_finite(volume_scale)", code)
         self.assertIn("const double target = double(volume.mSixRestVolume) * volume_scale;", code)
