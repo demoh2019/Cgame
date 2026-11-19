@@ -138,6 +138,41 @@ def _diagnostics(text: str, stage: Path) -> tuple[list[str], list[str]]:
     return errors, warnings
 
 
+def _scan_log_diagnostics(logfile, stage: Path) -> tuple[list[str], list[str], int, int]:
+    """Inspect the entire output file without loading unbounded logs into RAM.
+
+    A sampled head/tail log can omit a parser error in its middle. Read each
+    line in bounded chunks instead, and keep counts even after the report cap.
+    """
+    errors: list[str] = []
+    warnings: list[str] = []
+    error_count = 0
+    warning_count = 0
+    logfile.seek(0)
+    while True:
+        prefix = logfile.readline(8192)
+        if not prefix:
+            break
+        # Discard the remainder of a very long line in bounded reads.
+        # The diagnostic prefix is all we need for classification.
+        if not prefix.endswith(b"\n"):
+            while True:
+                remainder = logfile.readline(8192)
+                if not remainder or remainder.endswith(b"\n"):
+                    break
+        line = prefix.decode("utf-8", errors="replace").replace(
+            str(stage), "<STAGED_PROJECT>")[:500]
+        if ERROR_LINE.match(line):
+            error_count += 1
+            if len(errors) < MAX_DIAGNOSTICS:
+                errors.append(line)
+        elif WARNING_LINE.match(line):
+            warning_count += 1
+            if len(warnings) < MAX_DIAGNOSTICS:
+                warnings.append(line)
+    return errors, warnings, error_count, warning_count
+
+
 def _run_stage(godot: str, stage: Path, name: str, timeout: float,
                workspace: Path, max_log_bytes: int = MAX_LOG_BYTES) -> dict:
     args = [godot, "--headless", "--path", str(stage)]
@@ -155,11 +190,13 @@ def _run_stage(godot: str, stage: Path, name: str, timeout: float,
             timed_out = True
             process.kill()
             process.wait()
-        text, truncated = _sample_output(logfile, max_log_bytes)
-    errors, warnings = _diagnostics(text, stage)
-    return {"name": name, "ok": not timed_out and process.returncode == 0 and not errors,
+        _, truncated = _sample_output(logfile, max_log_bytes)
+        errors, warnings, error_count, warning_count = _scan_log_diagnostics(logfile, stage)
+    return {"name": name, "ok": not timed_out and process.returncode == 0 and error_count == 0,
             "exit_code": process.returncode, "timed_out": timed_out,
-            "output_truncated": truncated, "errors": errors, "warnings": warnings}
+            "output_truncated": truncated, "errors": errors, "warnings": warnings,
+            "error_count": error_count, "warning_count": warning_count,
+            "diagnostics_truncated": (error_count > len(errors) or warning_count > len(warnings))}
 
 
 def check_project(source: Path, *, godot: str = "godot", timeout: float = 90,
