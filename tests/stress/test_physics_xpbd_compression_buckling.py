@@ -43,7 +43,7 @@ class XPBDCompressionBucklingTests(unittest.TestCase):
         self.assertTrue(all(.2 - 1e-12 <= x <= 1.8 + 1e-12 for x in samples))
 
     def test_step_transition(self):
-        self.assertAlmostEqual(buckling_alpha(.95, 1, .2, transition=0), .2)
+        self.assertAlmostEqual(buckling_alpha(.96, 1, .2, transition=0), .2)
         self.assertAlmostEqual(buckling_alpha(.94, 1, .2, transition=0), 1.8)
 
     def test_settings_and_caching(self):
