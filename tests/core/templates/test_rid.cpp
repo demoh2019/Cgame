@@ -322,4 +322,44 @@ TEST_CASE("[RID_Owner] Enumerate many chunks with exact memory reservation") {
 	}
 }
 
+TEST_CASE("[RID_Owner] Growing hundreds of tiny chunks preserves every handle") {
+	// One element per chunk forces repeated metadata growth rather than
+	// merely appending within a preallocated chunk.
+	RID_Owner<int, false> owner(sizeof(int), 512);
+	LocalVector<RID> handles;
+	for (int i = 0; i < 384; i++) {
+		handles.push_back(owner.make_rid(i + 100));
+	}
+	CHECK(owner.get_rid_count() == 384);
+	for (uint32_t i = 0; i < handles.size(); i += 2) {
+		owner.free(handles[i]);
+	}
+	CHECK(owner.get_rid_count() == 192);
+
+	LocalVector<RID> reused;
+	for (int i = 0; i < 192; i++) {
+		reused.push_back(owner.make_rid(10000 + i));
+	}
+	for (uint32_t i = 0; i < handles.size(); i++) {
+		if ((i & 1) == 0) {
+			CHECK(owner.get_or_null(handles[i]) == nullptr);
+			continue;
+		}
+		const int *value = owner.get_or_null(handles[i]);
+		REQUIRE(value != nullptr);
+		CHECK(*value == int(i) + 100);
+	}
+	for (uint32_t i = 0; i < reused.size(); i++) {
+		const int *value = owner.get_or_null(reused[i]);
+		REQUIRE(value != nullptr);
+		CHECK(*value == 10000 + int(i));
+	}
+	const LocalVector<RID> all = owner.get_owned_list();
+	CHECK(all.size() == 384);
+	for (const RID &rid : all) {
+		owner.free(rid);
+	}
+	CHECK(owner.get_rid_count() == 0);
+}
+
 } // namespace TestRID
