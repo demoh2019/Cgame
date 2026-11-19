@@ -5,6 +5,12 @@ on:
     branches: [develop]
     paths:
       - "servers/physics_pbf_3d.h"
+      - "servers/physics_pbf_rigid_coupling_3d.h"
+      - "tests/servers/test_physics_pbf_rigid_coupling_3d.cpp"
+      - "tests/stress/test_physics_pbf_rigid_coupling_3d.py"
+      - "tests/stress/test_physics_pbf_rigid_coupling_compiler.cpp"
+      - "tests/stress/physics_pbf_cpp_stubs/core/math/basis.h"
+      - "tests/stress/physics_pbf_rigid_coupling_3d_regression.gd"
       - "scene/3d/physics/pbf_particle_fluid_3d.h"
       - "scene/3d/physics/pbf_particle_fluid_3d.cpp"
       - "scene/register_scene_types.cpp"
@@ -42,5 +48,18 @@ jobs:
               -o "/tmp/physics_pbf_kernel_$precision"
             "/tmp/physics_pbf_kernel_$precision"
           done
+      - name: Compile real paired particle/rigid impulse header in float and double
+        run: |
+          for precision in float double; do
+            flags=""
+            if [ "$precision" = "double" ]; then flags="-DCGAME_USE_DOUBLE"; fi
+            g++ -std=c++17 -O2 -Wall -Wextra -Werror $flags \
+              -Itests/stress/physics_pbf_cpp_stubs -I. \
+              tests/stress/test_physics_pbf_rigid_coupling_compiler.cpp \
+              -o "/tmp/physics_pbf_contact_$precision"
+            "/tmp/physics_pbf_contact_$precision"
+          done
+      - name: Independent 5000 random two-way collision momentum and energy contracts
+        run: python3 -m unittest discover -s tests/stress -p 'test_physics_pbf_rigid_coupling_3d.py' -v
       - name: Validate independent SPH/PBF kernel, grid and projection contracts
         run: python3 -m unittest discover -s tests/stress -p 'test_physics_pbf_3d.py' -v
