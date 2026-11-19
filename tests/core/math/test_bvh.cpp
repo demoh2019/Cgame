@@ -468,4 +468,37 @@ TEST_CASE("[BVH] Bulk insertion of independent 2D bodies preserves every adjacen
 	CHECK(removed == COUNT - 1);
 }
 
+
+TEST_CASE("[BVH] Bulk insertion of independent 3D bodies preserves adjacent pairs") {
+	using Tree = BVH_Manager<Item, 2, true, 16, PairTest, CullTest, AABB, Vector3, false>;
+	Tree tree;
+	constexpr int COUNT = 96;
+	Item items[COUNT];
+	BVHHandle handles[COUNT];
+	BatchAdjacentPairRecorder recorder;
+	int removed = 0;
+	tree.set_pair_callback(record_adjacent_pair, &recorder);
+	tree.set_unpair_callback(count_unpair, &removed);
+
+	for (int i = 0; i < COUNT; i++) {
+		items[i].value = i;
+		handles[i] = tree.create(&items[i], true, uint32_t(i & 1), 3,
+				AABB(Vector3(real_t(i) * real_t(1.5), 0, 0), Vector3(2, 2, 2)), 0, true);
+	}
+	CHECK(recorder.total == 0);
+	tree.flush_pending_pairs();
+	CHECK(recorder.total == COUNT - 1);
+	CHECK(recorder.non_adjacent == 0);
+	for (int i = 0; i < COUNT - 1; i++) {
+		CHECK(recorder.adjacent[i] == 1);
+	}
+	tree.update();
+	CHECK(recorder.total == COUNT - 1);
+
+	for (int i = 0; i < COUNT; i++) {
+		tree.erase(handles[i]);
+	}
+	CHECK(removed == COUNT - 1);
+}
+
 } // namespace TestBVH
