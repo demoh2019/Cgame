@@ -1240,6 +1240,51 @@ The tests check finite body states and joint spacing, not physical
 equivalence to the serial solver or measured performance improvements.
 Start with small scales and monitor CPU usage, peak RSS and frame p95.
 
+### 3D cached constraint colors and batched setup
+
+The built-in **GodotPhysics3D** opt-in large-island solver now follows the
+topology-reuse technique also used by Cgame's 2D solver. When a large island
+retains exactly the same ordered constraints, endpoint body pointers, body
+modes and contact-only classification, it reuses the previous conflict-free
+color schedule instead of rebuilding a hash table and counting-sort array on
+every physics frame. The cache uses **exact comparisons, not hashes**.
+Rebound joints, changed body modes, missing endpoints and unsupported
+constraints with more than two rigid-body endpoints invalidate the cache;
+soft-body contacts and non-default joint priorities still take the legacy
+sequential fallback. Idle scenes release cached scratch allocations.
+
+Color-mask storage now uses the more compact `AHashMap`, matching the 2D
+implementation. Independent 3D constraint setup uses **16 constraints per
+worker-pool callback** (with the previous inline threshold for tiny batches)
+instead of one callback per constraint. This preserves setup order inside each
+batch and the barrier before pre-solve, without changing constraint equations.
+
+Validation commands:
+
+```bash
+python3 -m unittest discover -s tests/stress -p 'test_physics_3d_setup_batches.py' -v
+python3 -m unittest discover -s tests/stress -p 'test_physics_3d_color_cache.py' -v
+python3 -m unittest discover -s tests/stress -p 'test_physics_3d_large_island_coloring.py' -v
+./bin/godot.macos.editor.arm64 --headless --path tests/stress \
+  --script res://physics_large_island_3d_topology_cache_regression.gd
+```
+
+The new churn workload rebinds a pin joint twice and temporarily raises
+another joint's solve priority after the color cache has been populated.
+Compare identical serial and parallel scenes, running each case in its own
+process with the same GodotPhysics3D backend:
+
+```bash
+python3 tests/stress/run.py --godot ./bin/godot.macos.editor.arm64 \
+  --case physics_large_island_3d_topology_serial,physics_large_island_3d_topology_parallel \
+  --scale 1 --frames 90 --repeats 5 --timeout 600 \
+  --rss-limit-mib 4096 --output out/physics-3d-color-cache.json
+```
+
+Enable `physics/3d/solver/parallel_large_islands` only after verifying
+runtime stability and numeric performance. Structural and reference tests
+alone do not prove performance gains or compiled-backend correctness.
+
 ### 3D dominant-island scheduling among smaller islands
 
 The 3D scheduler now applies the graph-colored large-island path when there is
