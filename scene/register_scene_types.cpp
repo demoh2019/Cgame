@@ -353,6 +353,7 @@
 #include "scene/3d/physics/character_body_3d.h"
 #include "scene/3d/physics/collision_polygon_3d.h"
 #include "scene/3d/physics/collision_shape_3d.h"
+#include "scene/3d/physics/destructible_body_3d.h"
 #include "scene/3d/physics/joints/cone_twist_joint_3d.h"
 #include "scene/3d/physics/joints/generic_6dof_joint_3d.h"
 #include "scene/3d/physics/joints/hinge_joint_3d.h"
@@ -747,6 +748,7 @@ void register_scene_types() {
 	GDREGISTER_CLASS(StaticBody3D);
 	GDREGISTER_CLASS(AnimatableBody3D);
 	GDREGISTER_CLASS(RigidBody3D);
+	GDREGISTER_CLASS(DestructibleBody3D);
 	GDREGISTER_CLASS(KinematicCollision3D);
 	GDREGISTER_CLASS(CharacterBody3D);
 	GDREGISTER_CLASS(SpringArm3D);
