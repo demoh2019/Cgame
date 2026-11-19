@@ -77,6 +77,7 @@ public:
 	virtual ID create(GodotCollisionObject3D *p_object, int p_subindex = 0, const AABB &p_aabb = AABB(), bool p_static = false) override;
 	virtual ID create_deferred(GodotCollisionObject3D *p_object, int p_subindex, const AABB &p_aabb, bool p_static) override;
 	virtual void flush_pending_pairs() override;
+	virtual void force_collision_check(ID p_id) override;
 	virtual void move(ID p_id, const AABB &p_aabb) override;
 	virtual void set_static(ID p_id, bool p_static) override;
 	virtual void remove(ID p_id) override;
