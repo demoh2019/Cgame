@@ -1,6 +1,6 @@
 extends RefCounted
 ## Exercise dynamic broadphase layer/mask filtering without moving colliders.
-## Static bodies use mask=0 and areas use layer=0, so only the area's
+## Zero-gravity rigid bodies use mask=0 and areas use layer=0, so only the area's
 ## collision mask determines whether the pair should exist.
 
 func run_2d(tree: SceneTree, scale: int, frames: int) -> Dictionary:
@@ -13,7 +13,9 @@ func run_2d(tree: SceneTree, scale: int, frames: int) -> Dictionary:
 	areas.resize(count)
 	for i in range(count):
 		var position_2d := Vector2(float(i % 128) * 3.0, float(int(i / 128)) * 3.0)
-		var body := StaticBody2D.new()
+		var body := RigidBody2D.new()
+		body.gravity_scale = 0.0
+		body.can_sleep = false
 		body.collision_layer = 1
 		body.collision_mask = 0
 		body.position = position_2d
@@ -77,7 +79,9 @@ func run_3d(tree: SceneTree, scale: int, frames: int) -> Dictionary:
 	areas.resize(count)
 	for i in range(count):
 		var position_3d := Vector3(float(i % 128) * 3.0, float(int(i / 128)) * 3.0, 0.0)
-		var body := StaticBody3D.new()
+		var body := RigidBody3D.new()
+		body.gravity_scale = 0.0
+		body.can_sleep = false
 		body.collision_layer = 1
 		body.collision_mask = 0
 		body.position = position_3d
