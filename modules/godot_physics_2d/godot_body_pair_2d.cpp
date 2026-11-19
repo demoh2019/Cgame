@@ -207,8 +207,10 @@ bool GodotBodyPair2D::_test_ccd(real_t p_step, GodotBody2D *p_A, int p_shape_A, 
 	if (motion_A.length_squared() == 0.0) {
 		return false;
 	}
-	const Vector2 motion_B = p_B->get_linear_velocity() * p_step;
-	const Vector2 relative_motion = motion_A - motion_B;
+	// Static bodies can have a constant surface velocity for friction, but
+	// their collision geometry does not move between physics steps.
+	const Vector2 velocity_B = p_B->get_mode() == PS2DE::BODY_MODE_STATIC ? Vector2() : p_B->get_linear_velocity();
+	const Vector2 relative_motion = motion_A - velocity_B * p_step;
 	const real_t mlen = relative_motion.length();
 	if (mlen < CMP_EPSILON || motion_A.dot(relative_motion) <= 0.0) {
 		// Co-moving bodies cannot meet along this sweep. Also avoid changing A
@@ -290,7 +292,7 @@ bool GodotBodyPair2D::_test_ccd(real_t p_step, GodotBody2D *p_A, int p_shape_A, 
 	// penetration allowance. Preserve B's velocity when converting this
 	// relative motion back to the world frame.
 	const real_t newlen = CLAMP(best_hit_distance + (max - min) * real_t(0.01), real_t(0.0), mlen);
-	const Vector2 corrected_velocity = p_B->get_linear_velocity() + mnormal * (newlen / p_step);
+	const Vector2 corrected_velocity = velocity_B + mnormal * (newlen / p_step);
 	// This CCD mode is a velocity clamp, not an impulse solver. Do not
 	// reverse or accelerate A just because B is approaching quickly.
 	// B's own CCD handles fast inbound motion when enabled.
