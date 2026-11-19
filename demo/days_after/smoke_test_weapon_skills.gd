@@ -36,6 +36,13 @@ func _run() -> void:
         _fail("Player missing")
         return
     survivor.connect("attack_requested", Callable(self, "_record_attack"))
+    var infected := game.get_node_or_null("InfectedWalker") as CharacterBody3D
+    if infected == null:
+        _fail("Combat enemy missing from the playable scene")
+        return
+    # Put a real infected just outside normal range, but within spear skill range.
+    infected.global_position = survivor.global_position - survivor.global_transform.basis.z * 2.9
+    var infected_health: float = float(infected.get("health"))
     if not InputMap.has_action("weapon_skill"):
         _fail("Q action not installed by main game")
         return
@@ -55,6 +62,9 @@ func _run() -> void:
         return
     if observed_hits != 1 or not is_equal_approx(observed_damage, 48.0) or not is_equal_approx(observed_range, 3.1):
         _fail("Spear skill damage or reach differs from weapon rule")
+        return
+    if not is_equal_approx(float(infected.get("health")), infected_health - 48.0):
+        _fail("Spear skill signal did not damage an actual infected in range")
         return
     if not is_equal_approx(float(survivor.get("combat_energy")), 75.0):
         _fail("Spear did not spend the specified energy")
