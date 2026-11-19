@@ -71,23 +71,37 @@ func run(t) -> void:
 	t.eq(visible["orders"].size(), 1, "one listing visible to buyer")
 	t.check(not bool(visible["orders"][0]["own"]), "buyer sees another seller")
 	t.check(bool(server.cmd_market_list(100)["orders"][0]["own"]), "seller sees own offer")
-	t.eq(server.cmd_market_buy(100, listing_id, 1)["reason"], "self_purchase", "no self-dealing")
-	var first_sale: Dictionary = server.cmd_market_buy(200, listing_id, 4)
+	t.eq(server.cmd_market_buy(100, listing_id, 1, 1)["reason"], "self_purchase", "no self-dealing")
+	var first_sale: Dictionary = server.cmd_market_buy(200, listing_id, 4, 1)
 	t.check(first_sale["ok"], "four units purchased")
+	t.eq(server.cmd_market_buy(200, listing_id, 4, 1), first_sale,
+		"same request ID returns cached receipt without buying again")
+	t.eq(server.cmd_market_buy(200, listing_id, 5, 1)["reason"], "request_conflict",
+		"reused ID with different quantity cannot be executed")
+	t.eq(server.cmd_market_buy(200, listing_id, 4, 0)["reason"], "invalid_request_id",
+		"zero request ID rejected")
+	t.eq(server.cmd_market_buy(200, listing_id, 4, -1)["reason"], "invalid_request_id",
+		"negative request ID rejected")
+	t.eq(server.cmd_market_buy(200, listing_id, 4, GameServer.MARKET_MAX_REQUEST_ID + 1)["reason"],
+		"invalid_request_id", "oversized request ID rejected")
 	t.eq(server.market_orders[listing_id]["remaining"], 6, "six units remain listed")
 	t.eq(seller.inventory.count("wood_1"), 8, "seller debited four units")
 	t.eq(buyer.inventory.count("wood_1"), 4, "buyer owns four units")
 	t.eq(seller.inventory.count("silver"), 20, "seller paid once")
 	t.eq(buyer.inventory.count("silver"), 80, "buyer spent twenty")
 	t.eq(server.market_sales.size(), 1, "one receipt in bounded session audit")
-	t.eq(server.cmd_market_buy(200, listing_id, 7)["reason"], "invalid_quantity",
+	t.eq(server.cmd_market_buy(200, listing_id, 7, 2)["reason"], "invalid_quantity",
 		"cannot exceed remaining listing amount")
+	t.eq(server.cmd_market_buy(200, listing_id, 7, 2)["reason"], "invalid_quantity",
+		"a failed request is also idempotent")
 	t.eq(server.cmd_market_cancel(200, listing_id)["reason"], "not_owner",
 		"other users cannot cancel seller's order")
-	var second_sale: Dictionary = server.cmd_market_buy(200, listing_id, 6)
+	var second_sale: Dictionary = server.cmd_market_buy(200, listing_id, 6, 3)
 	t.check(second_sale["ok"], "remaining quantity can be bought")
+	t.eq(server.cmd_market_buy(200, listing_id, 4, 1)["reason"], "stale_request",
+		"old request cannot execute again after another purchase")
 	t.check(not server.market_orders.has(listing_id), "filled listing is removed")
-	t.eq(server.cmd_market_buy(200, listing_id, 1)["reason"], "unknown_listing",
+	t.eq(server.cmd_market_buy(200, listing_id, 1, 4)["reason"], "unknown_listing",
 		"replayed purchase cannot double-award items")
 	t.eq(seller.inventory.count("silver"), 50, "seller receives 50 silver total")
 	t.eq(buyer.inventory.count("wood_1"), 10, "buyer gets 10 wood total")
@@ -98,7 +112,7 @@ func run(t) -> void:
 	var next: Dictionary = server.cmd_market_create(100, "wood_1", 2, 9)
 	var next_id: int = int(next["id"])
 	seller.inventory.remove("wood_1", 2)
-	t.eq(server.cmd_market_buy(200, next_id, 2)["reason"], "missing_items",
+	t.eq(server.cmd_market_buy(200, next_id, 2, 5)["reason"], "missing_items",
 		"advertised goods are not created when seller spends them")
 	server._tick_market()
 	t.check(not server.market_orders.has(next_id), "unbacked listing is pruned by server tick")
@@ -107,12 +121,13 @@ func run(t) -> void:
 	remote.position = Vector3(170.0, server.world.height_at(170.0, 170.0), 170.0)
 	t.eq(server.cmd_market_create(400, "wood_1", 1, 9)["reason"], "no_station",
 		"remote listing forbidden")
-	t.eq(server.cmd_market_buy(400, listing_id, 1)["reason"], "no_station",
+	t.eq(server.cmd_market_buy(400, listing_id, 1, 1)["reason"], "no_station",
 		"remote buying forbidden")
 	seller.inventory.add("wood_1", 2)
 	var cancellation := server.cmd_market_create(100, "wood_1", 1, 9)
 	var cancellation_id: int = int(cancellation["id"])
 	server.remove_player(100)
+	t.check(not server.market_buy_requests.has(100), "disconnect clears request state for recycled peer ids")
 	t.check(not server.market_orders.has(cancellation_id), "disconnect cancels online advert")
 	t.eq(server.cmd_market_cancel(100, cancellation_id)["reason"], "unknown_listing",
 		"cancelled listing cannot be reused")

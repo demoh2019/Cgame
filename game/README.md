@@ -856,3 +856,19 @@ capacity, tiered rod crafting, cooking and server-atomic sales.
 No general Cgame engine feature was missing for this step: the shared
 game data, authoritative simulation, client networking and tiered
 inventory/crafting APIs already provide the required primitives.
+
+### Exactly-once processing of market buy requests (within one server session)
+
+Every network purchase now carries a strictly increasing, per-client request
+ID. The server records the last ID, listing ID, quantity and result for each
+connected peer. Repeating an identical request returns its *original* result
+and receipt without transferring items a second time; reusing the ID with
+different parameters is rejected, as are older or invalid IDs. This also
+protects partially filled listings, for which a duplicate purchase was
+previously possible. The per-peer record is cleared at disconnect and
+does not grow with the number of purchases.
+
+**Scope:** this is session-level RPC idempotency, not durable settlement.
+A new higher ID is an intentionally new purchase. Server crashes can still
+lose unsaved balances; durable cross-account transaction storage in Nakama
+remains necessary for an offline auction house and crash-safe markets.

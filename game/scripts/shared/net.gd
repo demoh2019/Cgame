@@ -333,10 +333,10 @@ func c_market_create(item_id: String, quantity: int, price: int) -> void:
 
 
 @rpc("any_peer", "reliable")
-func c_market_buy(listing_id: int, quantity: int) -> void:
+func c_market_buy(listing_id: int, quantity: int, request_id: int) -> void:
 	var peer := multiplayer.get_remote_sender_id()
 	if _allowed(peer):
-		s_result.rpc_id(peer, "market", sim.cmd_market_buy(peer, listing_id, quantity))
+		s_result.rpc_id(peer, "market", sim.cmd_market_buy(peer, listing_id, quantity, request_id))
 
 
 @rpc("any_peer", "reliable")
