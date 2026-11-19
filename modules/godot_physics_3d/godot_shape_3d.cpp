@@ -1171,18 +1171,18 @@ GodotConvexPolygonShape3D::GodotConvexPolygonShape3D() {
 /********** FACE POLYGON *************/
 
 void GodotFaceShape3D::project_range(const Vector3 &p_normal, const Transform3D &p_transform, real_t &r_min, real_t &r_max) const {
-	for (int i = 0; i < 3; i++) {
-		Vector3 v = p_transform.xform(vertex[i]);
-		real_t d = p_normal.dot(v);
-
-		if (i == 0 || d > r_max) {
-			r_max = d;
-		}
-
-		if (i == 0 || d < r_min) {
-			r_min = d;
-		}
+	// Transform the SAT axis once rather than transforming three vertices.
+	const Vector3 local_axis = p_transform.basis.xform_inv(p_normal);
+	const real_t center = p_normal.dot(p_transform.origin);
+	real_t projected_min = local_axis.dot(vertex[0]);
+	real_t projected_max = projected_min;
+	for (int i = 1; i < 3; i++) {
+		const real_t value = local_axis.dot(vertex[i]);
+		projected_min = MIN(projected_min, value);
+		projected_max = MAX(projected_max, value);
 	}
+	r_min = center + projected_min;
+	r_max = center + projected_max;
 }
 
 Vector3 GodotFaceShape3D::get_support(const Vector3 &p_normal) const {
@@ -1301,24 +1301,27 @@ Vector<Vector3> GodotConcavePolygonShape3D::get_faces() const {
 }
 
 void GodotConcavePolygonShape3D::project_range(const Vector3 &p_normal, const Transform3D &p_transform, real_t &r_min, real_t &r_max) const {
-	int count = vertices.size();
+	const int count = vertices.size();
 	if (count == 0) {
 		r_min = 0;
 		r_max = 0;
 		return;
 	}
-	const Vector3 *vptr = vertices.ptr();
 
-	for (int i = 0; i < count; i++) {
-		real_t d = p_normal.dot(p_transform.xform(vptr[i]));
-
-		if (i == 0 || d > r_max) {
-			r_max = d;
-		}
-		if (i == 0 || d < r_min) {
-			r_min = d;
-		}
+	// The same transpose-axis projection used by convex SAT avoids a full
+	// affine transform for every triangle-mesh vertex.
+	const Vector3 local_axis = p_transform.basis.xform_inv(p_normal);
+	const real_t center = p_normal.dot(p_transform.origin);
+	const Vector3 *const points = vertices.ptr();
+	real_t projected_min = local_axis.dot(points[0]);
+	real_t projected_max = projected_min;
+	for (int i = 1; i < count; i++) {
+		const real_t value = local_axis.dot(points[i]);
+		projected_min = MIN(projected_min, value);
+		projected_max = MAX(projected_max, value);
 	}
+	r_min = center + projected_min;
+	r_max = center + projected_max;
 }
 
 Vector3 GodotConcavePolygonShape3D::get_support(const Vector3 &p_normal) const {
