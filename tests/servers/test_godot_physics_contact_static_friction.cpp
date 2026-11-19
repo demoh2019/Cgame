@@ -62,8 +62,8 @@ TEST_CASE("[GodotPhysics] Static and dynamic Coulomb friction cones") {
 				Vector3(real_t(1e20), real_t(-1e20), real_t(0.0)),
 				real_t(5.0), real_t(2.0));
 		CHECK(slip.is_finite());
-		CHECK(slip.x / real_t(5.0) == doctest::Approx(0.70710678118));
-		CHECK(slip.y / real_t(5.0) == doctest::Approx(-0.70710678118));
+		CHECK(slip.x / real_t(5.0) == doctest::Approx(0.70710678118).epsilon(1e-5));
+		CHECK(slip.y / real_t(5.0) == doctest::Approx(-0.70710678118).epsilon(1e-5));
 		CHECK(slip.z == real_t(0.0));
 		CHECK(slip.length() == doctest::Approx(5.0));
 	}
@@ -77,8 +77,8 @@ TEST_CASE("[GodotPhysics] Static and dynamic Coulomb friction cones") {
 				Vector3(real_t(1e38), real_t(-1e38), real_t(0.0)),
 				real_t(1e-10), real_t(1.0));
 		CHECK(slip.is_finite());
-		CHECK(slip.x / real_t(1e-10) == doctest::Approx(0.70710678118));
-		CHECK(slip.y / real_t(1e-10) == doctest::Approx(-0.70710678118));
+		CHECK(slip.x / real_t(1e-10) == doctest::Approx(0.70710678118).epsilon(1e-5));
+		CHECK(slip.y / real_t(1e-10) == doctest::Approx(-0.70710678118).epsilon(1e-5));
 		CHECK(godot_physics_clamp_static_friction_3d(
 					Vector3(real_t(1e20), 0, 0), real_t(0.0), real_t(2.0)) == Vector3());
 	}
