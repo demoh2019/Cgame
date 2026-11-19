@@ -161,6 +161,52 @@ TEST_CASE("[GodotPhysics3D] Sphere-box squared-distance narrowphase") {
 		CHECK(sat_calculate_penetration(&sphere, sphere_transform, &box, box_transform, record_contact, &contact, false, nullptr, real_t(0.2), real_t(0.1)));
 		CHECK(contact.count == 1);
 	}
+
+	SUBCASE("Contained sphere uses nearest exit face") {
+		sphere_transform.origin = Vector3(0.5, 0.0, 0.0);
+		CHECK(sat_calculate_penetration(&sphere, sphere_transform, &box, box_transform, record_contact, &contact));
+		CHECK(contact.count == 1);
+		CHECK(contact.point_a.is_equal_approx(Vector3(-0.5, 0.0, 0.0)));
+		CHECK(contact.point_b.is_equal_approx(Vector3(1.0, 0.0, 0.0)));
+		CHECK(contact.normal.is_equal_approx(Vector3(1.0, 0.0, 0.0)));
+	}
+
+	SUBCASE("Coincident centers produce a stable nonzero contact normal") {
+		CHECK(sat_calculate_penetration(&sphere, sphere_transform, &box, box_transform, record_contact, &contact));
+		CHECK(contact.count == 1);
+		CHECK(contact.point_a.is_equal_approx(Vector3(-1.0, 0.0, 0.0)));
+		CHECK(contact.point_b.is_equal_approx(Vector3(1.0, 0.0, 0.0)));
+		CHECK(contact.normal.is_equal_approx(Vector3(1.0, 0.0, 0.0)));
+	}
+
+	SUBCASE("Rotated box chooses rotated exit face") {
+		box_transform.basis = Basis(Vector3(0.0, 0.0, 1.0), real_t(Math_PI / 2.0));
+		sphere_transform.origin = box_transform.xform(Vector3(0.5, 0.0, 0.0));
+		CHECK(sat_calculate_penetration(&sphere, sphere_transform, &box, box_transform, record_contact, &contact));
+		CHECK(contact.count == 1);
+		CHECK(contact.point_a.is_equal_approx(box_transform.xform(Vector3(-0.5, 0.0, 0.0))));
+		CHECK(contact.point_b.is_equal_approx(box_transform.xform(Vector3(1.0, 0.0, 0.0))));
+		CHECK(contact.normal.is_equal_approx(Vector3(0.0, 1.0, 0.0)));
+	}
+
+	SUBCASE("Nonuniform box scale uses world-space face distance") {
+		box_transform.basis.scale(Vector3(4.0, 1.0, 2.0));
+		sphere_transform.origin = Vector3(0.0, 0.25, 0.0);
+		CHECK(sat_calculate_penetration(&sphere, sphere_transform, &box, box_transform, record_contact, &contact));
+		CHECK(contact.count == 1);
+		CHECK(contact.point_a.is_equal_approx(Vector3(0.0, -0.75, 0.0)));
+		CHECK(contact.point_b.is_equal_approx(Vector3(0.0, 1.0, 0.0)));
+		CHECK(contact.normal.is_equal_approx(Vector3(0.0, 1.0, 0.0)));
+	}
+
+	SUBCASE("Contained sphere with margins exits outwards") {
+		sphere_transform.origin = Vector3(0.5, 0.0, 0.0);
+		CHECK(sat_calculate_penetration(&sphere, sphere_transform, &box, box_transform, record_contact, &contact, false, nullptr, real_t(0.2), real_t(0.1)));
+		CHECK(contact.count == 1);
+		CHECK(contact.point_a.is_equal_approx(Vector3(-0.7, 0.0, 0.0)));
+		CHECK(contact.point_b.is_equal_approx(Vector3(1.1, 0.0, 0.0)));
+		CHECK(contact.normal.is_equal_approx(Vector3(1.0, 0.0, 0.0)));
+	}
 }
 
 TEST_CASE("[GodotPhysics3D] Sphere-cylinder squared-distance narrowphase") {

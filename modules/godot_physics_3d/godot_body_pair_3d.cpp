@@ -193,6 +193,10 @@ bool GodotBodyPair3D::_test_ccd(real_t p_step, GodotBody3D *p_A, int p_shape_A, 
 
 	// Roughly predict body B's position in the next frame (ignoring collisions).
 	Transform3D predicted_xform_B = p_xform_B.translated(p_B->get_linear_velocity() * p_step);
+	// A CCD cast can test up to 16 support vertices against the same shape.
+	// Transform inversion is invariant across the whole cast.
+	const Transform3D predicted_inv_B = predicted_xform_B.affine_inverse();
+	GodotShape3D *shape_B_ptr = p_B->get_shape(p_shape_B);
 
 	// Support points are the farthest forward points on A in the direction of the motion vector.
 	// i.e. the candidate points of which one should hit B first if any collision does occur.
@@ -213,17 +217,15 @@ bool GodotBodyPair3D::_test_ccd(real_t p_step, GodotBody3D *p_A, int p_shape_A, 
 		Vector3 from = supports_A[i];
 		Vector3 to = from + motion;
 
-		Transform3D from_inv = predicted_xform_B.affine_inverse();
-
 		// Back up 10% of the per-frame motion behind the support point and use that as the beginning of our cast.
 		// At high speeds, this may mean we're actually casting from well behind the body instead of inside it, which is odd.
 		// But it still works out.
-		Vector3 local_from = from_inv.xform(from - motion * 0.1);
-		Vector3 local_to = from_inv.xform(to);
+		Vector3 local_from = predicted_inv_B.xform(from - motion * 0.1);
+		Vector3 local_to = predicted_inv_B.xform(to);
 
 		Vector3 rpos, rnorm;
 		int fi = -1;
-		if (p_B->get_shape(p_shape_B)->intersect_segment(local_from, local_to, rpos, rnorm, fi, true)) {
+		if (shape_B_ptr->intersect_segment(local_from, local_to, rpos, rnorm, fi, true)) {
 			real_t hit_length = local_from.distance_to(rpos);
 			if (hit_length < segment_hit_length) {
 				segment_support_idx = i;
