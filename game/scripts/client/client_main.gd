@@ -696,9 +696,10 @@ func _unhandled_input(event: InputEvent) -> void:
 	elif event.is_action_pressed("survive_vendor_buy"):
 		_result("Buy water (12 silver)", sim.cmd_vendor(LOCAL_PLAYER_ID, "water_bottle", 1, true))
 	elif event.is_action_pressed("survive_vendor_sell"):
-		var salvage_id: String = Vendor.first_sellable(survivor.inventory)
+		var fish_only: bool = Input.is_key_pressed(KEY_SHIFT)
+		var salvage_id: String = Vendor.first_fish(survivor.inventory) if fish_only else Vendor.first_sellable(survivor.inventory)
 		if salvage_id.is_empty():
-			_feedback = "No materials for sale."
+			_feedback = "No raw fish to sell." if fish_only else "No materials for sale."
 		else:
 			_result("Sell %s" % salvage_id, sim.cmd_vendor(LOCAL_PLAYER_ID, salvage_id, 1, false))
 
@@ -738,7 +739,7 @@ func _update_hud() -> void:
 	var recipe_id: String = _recipes[_recipe_index] if not _recipes.is_empty() else "bandage"
 	var recipe: Dictionary = Defs.recipes().get(recipe_id, {})
 	var near_bench: bool = Vector2(position.x, position.z).distance_to(GameServer.WORKBENCH_POSITION) < GameServer.WORKBENCH_RANGE
-	_instructions.text = "WASD move | Shift sprint | E gather | Q loot | F attack | G heavy strike | Space dodge | U build | O campfire | H repair | Y upgrade | X dismantle\nTab / Shift+Tab recipes | C craft | B stash | 1 food 2 water 3 heal 4 weapon 5 armor 6 antiseptic 7 antibiotics 8 heat pack R lake (filter prevents infection)\nN buy water / V sell salvage | T fish near shore | P accept / Shift+P turn in (hub)\nCRAFT %s -> %s x%d | %s | inputs %s\n%s" % [
+	_instructions.text = "WASD move | Shift sprint | E gather | Q loot | F attack | G heavy strike | Space dodge | U build | O campfire | H repair | Y upgrade | X dismantle\nTab / Shift+Tab recipes | C craft | B stash | 1 food 2 water 3 heal 4 weapon 5 armor 6 antiseptic 7 antibiotics 8 heat pack R lake (filter prevents infection)\nN buy water / V sell materials / Shift+V sell fish | T fish near shore | P accept / Shift+P turn in (hub)\nCRAFT %s -> %s x%d | %s | inputs %s\n%s" % [
 		recipe_id, str(recipe.get("output", "")), int(recipe.get("count", 0)),
 		"WORKBENCH" if near_bench else "workbench at x=9, z=0",
 		str(recipe.get("inputs", {})), _feedback
