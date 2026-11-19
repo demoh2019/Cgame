@@ -17,7 +17,7 @@ rejecting zero-volume, flat or non-finite geometry. The reference signed
 volume uses the existing double-precision translated-world formulation.
 
 **Numerical gradients.** Finite float32 positions can have differences
-that overflow a float32 subtraction (`1e38 - (-1e38)`), while a face
+that overflow a float32 subtraction (`2e38 - (-2e38)`), while a face
 gradient assembled in wider precision may still be representable.
 New helpers compute the differences and face cross-products in `double`,
 then check every resulting `Vector3` gradient before committing any
