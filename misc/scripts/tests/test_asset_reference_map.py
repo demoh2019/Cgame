@@ -129,6 +129,33 @@ class ReferenceMapTests(unittest.TestCase):
         self.put('a.tscn', 'path="res:///tmp/secret"')
         self.assertEqual(self.run_map('a.tscn')['problems'][0]['kind'], 'invalid')
 
+    def test_large_unquoted_source_scans_without_false_references(self):
+        # Ordinary source is the common case in large scripts/shaders.
+        prelude = "ordinary_identifier_with_arguments_123456789012345\n" * 8000
+        for suffix in ('.gd', '.cs', '.gdextension'):
+            with self.subTest(suffix=suffix):
+                self.assertEqual(
+                    arm._references(prelude + '"res://assets/hero.png"', suffix),
+                    ['assets/hero.png'])
+
+    def test_token_skip_preserves_comment_and_escaped_quote_rules(self):
+        examples = [
+            ('.gd',
+             '# "res://ignored.png"\nvar x = "res://a.png" # "res://also_ignored.png"\n'
+             "var y = 'res://b.png'\n",
+             ['a.png', 'b.png']),
+            ('.cs',
+             '/* "res://ignored.png" */\nvar x = "res://a.png"; // "res://wrong.png"\n'
+             "var y = 'res://b.png';\n",
+             ['a.png', 'b.png']),
+            ('.gdshader',
+             '#include "res://a.gdshaderinc" // "res://wrong.png"\n',
+             ['a.gdshaderinc']),
+        ]
+        for suffix, source, expected in examples:
+            with self.subTest(suffix=suffix):
+                self.assertEqual(arm._references(source, suffix), expected)
+
     def test_invalid_windows_name_diagnostic(self):
         self.put('a.tscn', 'path="res://COM1.png"')
         self.assertEqual(self.run_map('a.tscn')['problems'][0]['kind'], 'invalid')
