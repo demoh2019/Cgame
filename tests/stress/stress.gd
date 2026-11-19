@@ -11,7 +11,7 @@ const CASES := [
 	"scene_tree", "packed_scene", "images", "json", "stream",
 	"file_io", "threads", "physics_2d", "physics_3d",
 	"memory_churn", "astar_grid", "tweens", "audio_buffers",
-	"variant_codec", "render_2d", "render_3d",
+	"variant_codec", "packet_stream", "ui_layout", "render_2d", "render_3d",
 	"node_paths", "regex", "compression", "hashing",
 	"resource_io", "astar_3d", "ui_layout", "thread_contention",
 	"geometry_2d", "mesh_build", "input_dispatch", "image_codec", "group_calls",
@@ -189,6 +189,10 @@ func _run_case(test_case: String, scale: int, frames: int, seed: int) -> Diction
 			return _variant_codec(scale)
 		"tweens":
 			return await _tweens(scale, frames)
+		"packet_stream":
+			return _packet_stream(scale)
+		"ui_layout":
+			return await _ui_layout(scale, frames)
 		"physics_2d":
 			return await _physics_2d(scale, frames)
 		"physics_3d":
@@ -345,6 +349,60 @@ func _tweens(scale: int, frames: int) -> Dictionary:
 	world.queue_free()
 	await process_frame
 	return {"active_tweens": count, "frames": frames, "peak_frame_ms": peak_frame_ms}
+
+
+
+func _packet_stream(scale: int) -> Dictionary:
+	# Exercises the framing and ring-buffer path, including boundary sizes.
+	var checksum := 0
+	var lengths := PackedInt32Array([1, 7, 64, 1024, 8191, 16384])
+	for i in range(120 * scale):
+		var length := lengths[i % lengths.size()]
+		var payload := PackedByteArray()
+		payload.resize(length)
+		for j in range(length):
+			payload[j] = (i * 17 + j * 29) & 255
+		var memory_stream := StreamPeerBuffer.new()
+		var packet_peer := PacketPeerStream.new()
+		packet_peer.input_buffer_max_size = 32768
+		packet_peer.output_buffer_max_size = 32768
+		packet_peer.stream_peer = memory_stream
+		if packet_peer.put_packet(payload) != OK:
+			return {"error": "Packet write failed at %d" % i}
+		memory_stream.seek(0)
+		var received := packet_peer.get_packet()
+		if packet_peer.get_packet_error() != OK or received != payload:
+			return {"error": "Packet corruption at %d (%d bytes)" % [i, length]}
+		checksum += received.size()
+	return {"packets": 120 * scale, "bytes": checksum, "checksum": checksum}
+
+
+func _ui_layout(scale: int, frames: int) -> Dictionary:
+	var viewport_ui := PanelContainer.new()
+	viewport_ui.set_anchors_preset(Control.PRESET_FULL_RECT)
+	root.add_child(viewport_ui)
+	var scroll := ScrollContainer.new()
+	scroll.custom_minimum_size = Vector2(800, 600)
+	viewport_ui.add_child(scroll)
+	var grid := GridContainer.new()
+	grid.columns = 12
+	scroll.add_child(grid)
+	var length := 250 * scale
+	for i in range(length):
+		var button := Button.new()
+		button.text = "Test Button %05d" % i
+		button.custom_minimum_size = Vector2(120, 24)
+		grid.add_child(button)
+	var peak_frame_ms := 0.0
+	for frame in range(frames):
+		if frame % 8 == 0:
+			grid.columns = 8 + (frame % 16)
+		await process_frame
+		peak_frame_ms = maxf(peak_frame_ms, Performance.get_monitor(Performance.TIME_PROCESS) * 1000.0)
+	viewport_ui.queue_free()
+	await process_frame
+	return {"controls": length, "frames": frames, "peak_frame_ms": peak_frame_ms}
+
 
 
 func _physics_2d(scale: int, frames: int) -> Dictionary:
