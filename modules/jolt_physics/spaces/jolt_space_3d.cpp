@@ -1030,6 +1030,42 @@ static bool prepare_soft_self_topology(const JPH::Array<JPH::SoftBodySharedSetti
 	return !r_edges.empty();
 }
 
+// Jolt's shared soft-body settings are immutable at runtime. The pointer
+// identity of the face array and the vertex/face counts are therefore a
+// safe topology generation key for the lifetime of one Jolt BodyID. When
+// the body is rebuilt, remove_object() destroys its per-body cache.
+static bool ensure_soft_self_topology(const JPH::Array<JPH::SoftBodySharedSettings::Face> &p_faces,
+		uint32_t p_vertex_count, SoftSelfContactScratch &r_scratch,
+		uint32_t &r_budget, bool p_persistent) {
+	if (r_budget == 0) {
+		return false;
+	}
+	if (p_persistent && !r_scratch.one_ring_edges.empty() &&
+			r_scratch.topology_faces == &p_faces &&
+			r_scratch.topology_face_count == p_faces.size() &&
+			r_scratch.topology_vertex_count == p_vertex_count) {
+		--r_budget; // Account for constant-time topology validation.
+		return true;
+	}
+	if (!p_persistent && !r_scratch.one_ring_edges.empty()) {
+		return true; // Same-step reuse between VF and EE as before.
+	}
+
+	// A changed topology invalidates both the adjacency and the edge
+	// tree's leaf-index mapping before any query can access it.
+	r_scratch.edge_bvh_ready = false;
+	r_scratch.edge_bvh_edge_count = 0;
+	r_scratch.edge_bvh_refits = 0;
+	r_scratch.topology_faces = nullptr;
+	const bool valid = prepare_soft_self_topology(p_faces, p_vertex_count, r_scratch.one_ring_edges, r_budget);
+	if (valid && p_persistent) {
+		r_scratch.topology_faces = &p_faces;
+		r_scratch.topology_face_count = uint32_t(p_faces.size());
+		r_scratch.topology_vertex_count = p_vertex_count;
+	}
+	return valid;
+}
+
 static bool soft_self_is_neighbor(uint32_t p_point, const JPH::SoftBodySharedSettings::Face &p_face,
 		const JPH::Array<uint64_t> &p_topology_edges) {
 	// Reject points on the tested face, plus the direct one-ring of any
