@@ -46,6 +46,18 @@ TEST_CASE("[GodotPhysics] Opt-in dynamic linear velocity cap") {
 		const Vector3 v = godot_physics_clamp_linear_velocity(Vector3(0.0, 0.0, -20.0), 2.0);
 		CHECK(v.is_equal_approx(Vector3(0.0, 0.0, -2.0)));
 	}
+	SUBCASE("Overflow-safe scaling of extreme finite velocities") {
+		// In 32-bit real_t, these vectors are finite but length_squared()
+		// overflows. They must still be clamped instead of passing through.
+		const Vector2 extreme2 = godot_physics_clamp_linear_velocity(
+				Vector2(real_t(1e20), real_t(0.0)), real_t(7.0));
+		CHECK(extreme2.is_equal_approx(Vector2(7.0, 0.0)));
+		const Vector3 extreme3 = godot_physics_clamp_linear_velocity(
+				Vector3(real_t(-1e20), real_t(1e20), real_t(0.0)), real_t(10.0));
+		CHECK(extreme3.length() == doctest::Approx(10.0));
+		CHECK(extreme3.x < 0.0);
+		CHECK(extreme3.y > 0.0);
+	}
 	SUBCASE("Zero and large velocities") {
 		CHECK(godot_physics_clamp_linear_velocity(Vector2(), 5.0) == Vector2());
 		CHECK(godot_physics_clamp_linear_velocity(Vector3(), 5.0) == Vector3());
