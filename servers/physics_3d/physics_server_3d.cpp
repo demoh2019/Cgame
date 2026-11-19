@@ -265,6 +265,7 @@ void PhysicsServer3D::_bind_methods() {
 
 	ClassDB::bind_method(D_METHOD("soft_body_set_mesh", "body", "mesh"), &PhysicsServer3D::soft_body_set_mesh);
 	ClassDB::bind_method(D_METHOD("soft_body_set_tetrahedral_indices", "body", "tetrahedral_indices"), &PhysicsServer3D::soft_body_set_tetrahedral_indices);
+	ClassDB::bind_method(D_METHOD("soft_body_set_tetrahedral_interior_positions", "body", "positions"), &PhysicsServer3D::soft_body_set_tetrahedral_interior_positions);
 
 	ClassDB::bind_method(D_METHOD("soft_body_get_bounds", "body"), &PhysicsServer3D::soft_body_get_bounds);
 
