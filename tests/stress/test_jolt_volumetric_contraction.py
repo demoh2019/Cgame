@@ -78,9 +78,9 @@ class JoltVolumetricContractionTests(unittest.TestCase):
         self.assertIn("const float multiplier = 1.0f - shrinking_factor;", code)
         self.assertIn("e.mRestLength *= multiplier;", code)
         self.assertIn("tether.mMaxDistance *= multiplier;", code)
-        self.assertIn("const double scale = MAX(double(multiplier), 0.0);", code)
+        self.assertIn("const double scale = double(multiplier);", code)
         self.assertIn("const double volume_scale = scale * scale * scale;", code)
-        self.assertIn("volume.mSixRestVolume = float(CLAMP(scaled_rest_volume, -double(FLT_MAX), double(FLT_MAX)));", code)
+        self.assertIn("volume.mSixRestVolume = float(CLAMP(target, -double(FLT_MAX), double(FLT_MAX)));", code)
         self.assertLess(code.index("settings->CreateConstraints(&vertex_attrib"),
                         code.index("volume.mSixRestVolume ="))
         self.assertLess(code.index("try_build_convex_volume_fan(*settings"),
@@ -91,9 +91,30 @@ class JoltVolumetricContractionTests(unittest.TestCase):
     def test_default_and_zero_shrink_add_no_extra_volume_work(self):
         code = self.builder
         self.assertIn("if (JoltProjectSettings::soft_body_volume_follow_shrinking_factor &&", code)
-        self.assertIn("multiplier != 1.0f && !settings->mVolumeConstraints.empty())", code)
+        self.assertIn("multiplier != 1.0f && multiplier > 0.0f)", code)
+        self.assertIn("has_volume_fan && JoltProjectSettings::soft_body_volume_follow_shrinking_factor", code)
         self.assertIn("if (Math::is_finite(volume_scale))", code)
         self.assertIn("for (JPH::SoftBodySharedSettings::Volume &volume : settings->mVolumeConstraints)", code)
+        self.assertIn("const uint32_t surface_edge_count = (uint32_t)settings->mEdgeConstraints.size();", code)
+        self.assertIn("for (uint32_t i = surface_edge_count; i < settings->mEdgeConstraints.size(); ++i)", code)
+        self.assertIn("radial.mRestLength = float(MIN(target, double(FLT_MAX)));", code)
+
+    def test_radial_spokes_are_scaled_only_after_convex_fan_creation(self):
+        code = self.builder
+        self.assertIn("const bool has_volume_fan = try_build_convex_volume_fan(", code)
+        self.assertIn("JoltProjectSettings::soft_body_volume_radial_springs", code)
+        self.assertIn("const uint32_t surface_edge_count = (uint32_t)settings->mEdgeConstraints.size();", code)
+        self.assertIn("radial.mRestLength = float(MIN(target, double(FLT_MAX)));", code)
+        self.assertLess(code.index("surface_edge_count ="), code.index("const bool has_volume_fan"))
+        self.assertLess(code.index("const bool has_volume_fan"), code.index("radial.mRestLength ="))
+        self.assertLess(code.index("radial.mRestLength ="), code.index("settings->Optimize();"))
+
+    def test_volume_scaling_does_not_run_on_invalid_or_open_mesh(self):
+        code = self.builder
+        self.assertIn("has_volume_fan &&", code)
+        self.assertIn("multiplier > 0.0f", code)
+        self.assertIn("Math::is_finite(volume_scale)", code)
+        self.assertIn("const double target = double(volume.mSixRestVolume) * volume_scale;", code)
 
     def test_jolt_volume_rest_value_and_constraint_type(self):
         self.assertIn("struct JPH_EXPORT Volume", self.jolt_h)
