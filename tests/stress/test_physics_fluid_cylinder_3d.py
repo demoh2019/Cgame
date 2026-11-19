@@ -51,9 +51,14 @@ def analytic(half_length, ay, level):
         start = -half_length if ay>0 else max(-half_length,crossing)
         stop = min(half_length,crossing) if ay>0 else half_length
         return (math.pi*(stop-start), math.pi*(stop-start)*(start+stop)/2, 0.)
-    if abs(ay) <= 1e-7:
+    if ay == 0.:
         return (2*half_length*disk_area(level/beta), 0.,
                 2*half_length*disk_moment(level/beta))
+    if (abs(ay)*half_length <= 1e-6*beta and abs(level/beta) <= .95):
+        t = level/beta
+        return (2*half_length*disk_area(t),
+                -(ay/beta)*(4/3)*half_length**3*math.sqrt(1-t*t),
+                2*half_length*disk_moment(t))
     cuts = [-half_length, half_length]
     for t in (-1., 1.):
         axial = (level-beta*t)/ay
@@ -152,6 +157,21 @@ class CylinderFluidHydrostatics(unittest.TestCase):
                 self.assertLess(relative, 2e-6)
         self.assertLess(max_relative_error, 2e-6)
 
+    def test_almost_horizontal_extremely_long_cylinder_keeps_axial_torque(self):
+        # A naive 'horizontal' early exit would set this first moment to
+        # zero. The tiny tilt times a million-radius axial lever matters.
+        length = 1e6
+        ay = 1e-12
+        integral = analytic(length, ay, .1)
+        self.assertGreater(integral[0], 0.)
+        centroid_axial = integral[1]/integral[0]
+        self.assertLess(centroid_axial, -.25)
+        self.assertGreater(centroid_axial, -.50)
+        reference_values = reference(length, ay, .1, intervals=512)
+        self.assertAlmostEqual(centroid_axial,
+                               reference_values[1]/reference_values[0],
+                               delta=2e-4)
+
     def test_symmetry_axis_reversal_and_monotonic_volume(self):
         rng = random.Random(9182)
         for _ in range(800):
@@ -195,7 +215,7 @@ class CylinderFluidHydrostatics(unittest.TestCase):
         scene=(ROOT/"tests/stress/physics_cylinder_buoyancy_3d_regression.gd").read_text()
         ci=(ROOT/".github/workflows/whole-engine-stress.yml").read_text()
         self.assertIn("TEST_FORCE_LINK(test_physics_fluid_cylinder_3d)",native)
-        self.assertEqual(native.count('TEST_CASE("[PhysicsCylinderFluid]'),8)
+        self.assertEqual(native.count('TEST_CASE("[PhysicsCylinderFluid]'),9)
         self.assertIn("PhysicsServer3D.cylinder_shape_create()",scene)
         self.assertIn("cylinder_sinks",scene)
         self.assertIn("tilt_torque",scene)
