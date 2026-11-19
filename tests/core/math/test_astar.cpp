@@ -299,6 +299,44 @@ TEST_CASE("[AStar3D] Known-size point IDs and connections preserve all entries")
 	CHECK_EQ(astar.get_point_connections(0).size(), 254);
 }
 
+TEST_CASE("[AStar3D][Performance] Direct result writes preserve large graph snapshots") {
+	AStar3D graph;
+	graph.add_point(0, Vector3());
+	constexpr int spokes = 2048;
+	for (int i = 1; i <= spokes; i++) {
+		graph.add_point(i, Vector3(i, i % 7, 0));
+		graph.connect_points(0, i, false);
+	}
+
+	const PackedInt64Array ids = graph.get_point_ids();
+	const Vector<int64_t> edges = graph.get_point_connections(0);
+	REQUIRE_EQ(ids.size(), spokes + 1);
+	REQUIRE_EQ(edges.size(), spokes);
+
+	HashSet<int64_t> all_ids;
+	HashSet<int64_t> all_edges;
+	for (int i = 0; i < ids.size(); i++) {
+		CHECK_FALSE(all_ids.has(ids[i]));
+		all_ids.insert(ids[i]);
+	}
+	for (int i = 0; i < edges.size(); i++) {
+		CHECK_FALSE(all_edges.has(edges[i]));
+		all_edges.insert(edges[i]);
+	}
+	for (int i = 1; i <= spokes; i++) {
+		CHECK(all_ids.has(i));
+		CHECK(all_edges.has(i));
+	}
+	CHECK(all_ids.has(0));
+
+	// The buffers are snapshots, not aliases of the graph's live storage.
+	graph.remove_point(spokes);
+	CHECK_EQ(ids.size(), spokes + 1);
+	CHECK_EQ(edges.size(), spokes);
+	CHECK_EQ(graph.get_point_ids().size(), spokes);
+	CHECK_EQ(graph.get_point_connections(0).size(), spokes - 1);
+}
+
 class CountingHeuristicGrid2D : public AStarGrid2D {
 public:
 	int start_heuristic_calls = 0;
