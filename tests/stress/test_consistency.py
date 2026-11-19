@@ -77,7 +77,7 @@ class WorkloadConsistencyTests(unittest.TestCase):
         self.assertTrue(PRESSURE_SCRIPT.is_file())
         self.assertIn('preload("res://pressure_scenarios.gd")', self.engine)
         source = PRESSURE_SCRIPT.read_text(encoding="utf-8")
-        expected = ("scene_reparent", "resource_roundtrip", "audio_bus_churn")
+        expected = ("scene_reparent", "scene_move", "resource_roundtrip", "audio_bus_churn")
         cases = registered_cases(self.engine)
         for name in expected:
             self.assertIn(name, cases)
