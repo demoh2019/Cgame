@@ -599,48 +599,34 @@ GodotPhysicsDirectSpaceState3D::GodotPhysicsDirectSpaceState3D() {
 
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////
 
-int GodotSpace3D::_cull_aabb_for_body(GodotBody3D *p_body, const AABB &p_aabb, const PS3DT::MotionParameters &p_parameters) {
-	// Jolt-style early filtering: unrelated areas, soft bodies and collision
-	// exceptions must not consume the motion query results.
-	// In dense worlds, filtering before collection avoids unnecessary
-	// narrowphase work, while the buffers grow to fit all valid candidates.
-	struct MotionCullData {
+template <typename Visitor>
+void GodotSpace3D::_visit_motion_candidates(GodotBody3D *p_body, const AABB &p_aabb, const PS3DT::MotionParameters &p_parameters, const Visitor &p_callback) {
+	// Traverse the broadphase directly. A dense compound shape should not
+	// require a per-space allocation proportional to the number of proxies.
+	struct MotionVisit {
 		GodotBody3D *body;
 		const PS3DT::MotionParameters &params;
-		LocalVector<GodotCollisionObject3D *> &results;
-		LocalVector<int> &subindices;
+		const Visitor &callback;
 	};
-	// Retain capacity across queries; newly allocated pages are paid for only when needed.
-	intersection_query_results.clear();
-	intersection_query_subindex_results.clear();
-	MotionCullData data = { p_body, p_parameters, intersection_query_results, intersection_query_subindex_results };
-
+	MotionVisit data = { p_body, p_parameters, p_callback };
 	auto visitor = [](GodotCollisionObject3D *p_object, int p_subindex, void *p_userdata) -> bool {
-		MotionCullData &query = *static_cast<MotionCullData *>(p_userdata);
+		MotionVisit &query = *static_cast<MotionVisit *>(p_userdata);
 		if (p_object == query.body || p_object->get_type() != GodotCollisionObject3D::TYPE_BODY) {
 			return true;
 		}
-
-		// Exclude user-filtered bodies before they consume a result slot.
 		if (query.params.exclude_bodies.has(p_object->get_self()) ||
 				query.params.exclude_objects.has(p_object->get_instance_id())) {
 			return true;
 		}
-
 		GodotBody3D *other = static_cast<GodotBody3D *>(p_object);
 		if (!query.body->collides_with(other) ||
 				other->has_exception(query.body->get_self()) ||
 				query.body->has_exception(other->get_self())) {
 			return true;
 		}
-
-		query.results.push_back(p_object);
-		query.subindices.push_back(p_subindex);
-		return true;
+		return query.callback(p_object, p_subindex);
 	};
-
 	broadphase->visit_aabb(p_aabb, visitor, &data);
-	return intersection_query_results.size();
 }
 
 bool GodotSpace3D::test_body_motion(GodotBody3D *p_body, const PS3DT::MotionParameters &p_parameters, PS3DT::MotionResult *r_result) {
@@ -717,8 +703,6 @@ bool GodotSpace3D::test_body_motion(GodotBody3D *p_body, const PS3DT::MotionPara
 
 			bool collided = false;
 
-			int amount = _cull_aabb_for_body(p_body, body_aabb, p_parameters);
-
 			for (int j = 0; j < p_body->get_shape_count(); j++) {
 				if (p_body->is_shape_disabled(j)) {
 					continue;
@@ -727,16 +711,7 @@ bool GodotSpace3D::test_body_motion(GodotBody3D *p_body, const PS3DT::MotionPara
 				Transform3D body_shape_xform = body_transform * p_body->get_shape_transform(j);
 				GodotShape3D *body_shape = p_body->get_shape(j);
 
-				for (int i = 0; i < amount; i++) {
-					const GodotCollisionObject3D *col_obj = intersection_query_results[i];
-					if (p_parameters.exclude_bodies.has(col_obj->get_self())) {
-						continue;
-					}
-					if (p_parameters.exclude_objects.has(col_obj->get_instance_id())) {
-						continue;
-					}
-
-					int shape_idx = intersection_query_subindex_results[i];
+				_visit_motion_candidates(p_body, body_aabb, p_parameters, [&](const GodotCollisionObject3D *col_obj, int shape_idx) -> bool {
 
 					if (GodotCollisionSolver3D::solve_static(body_shape, body_shape_xform, col_obj->get_shape(shape_idx), col_obj->get_transform() * col_obj->get_shape_transform(shape_idx), cbkres, cbkptr, nullptr, margin)) {
 						collided = cbk.amount > 0;
@@ -745,7 +720,9 @@ bool GodotSpace3D::test_body_motion(GodotBody3D *p_body, const PS3DT::MotionPara
 						priorities[priority_amount] = col_obj->get_collision_priority();
 						priority_amount++;
 					}
-				}
+				
+				return true;
+			})
 			}
 
 			if (!collided) {
@@ -801,8 +778,6 @@ bool GodotSpace3D::test_body_motion(GodotBody3D *p_body, const PS3DT::MotionPara
 		motion_aabb.position += p_parameters.motion;
 		motion_aabb = motion_aabb.merge(body_aabb);
 
-		int amount = _cull_aabb_for_body(p_body, motion_aabb, p_parameters);
-
 		for (int j = 0; j < p_body->get_shape_count(); j++) {
 			if (p_body->is_shape_disabled(j)) {
 				continue;
@@ -832,16 +807,7 @@ bool GodotSpace3D::test_body_motion(GodotBody3D *p_body, const PS3DT::MotionPara
 			real_t best_safe = 1;
 			real_t best_unsafe = 1;
 
-			for (int i = 0; i < amount; i++) {
-				const GodotCollisionObject3D *col_obj = intersection_query_results[i];
-				if (p_parameters.exclude_bodies.has(col_obj->get_self())) {
-					continue;
-				}
-				if (p_parameters.exclude_objects.has(col_obj->get_instance_id())) {
-					continue;
-				}
-
-				int shape_idx = intersection_query_subindex_results[i];
+			_visit_motion_candidates(p_body, motion_aabb, p_parameters, [&](const GodotCollisionObject3D *col_obj, int shape_idx) -> bool {
 
 				//test initial overlap, does it collide if going all the way?
 				Vector3 point_A, point_B;
@@ -853,13 +819,13 @@ bool GodotSpace3D::test_body_motion(GodotBody3D *p_body, const PS3DT::MotionPara
 				mshape.motion = full_motion_local;
 				//test initial overlap, does it collide if going all the way?
 				if (GodotCollisionSolver3D::solve_distance(&mshape, body_shape_xform, col_obj->get_shape(shape_idx), col_obj_xform, point_A, point_B, motion_aabb, &sep_axis)) {
-					continue;
+					return true;
 				}
 				sep_axis = motion_normal;
 
 				if (!GodotCollisionSolver3D::solve_distance(body_shape, body_shape_xform, col_obj->get_shape(shape_idx), col_obj_xform, point_A, point_B, motion_aabb, &sep_axis)) {
 					stuck = true;
-					break;
+					return false;
 				}
 
 				//just do kinematic solving
@@ -907,7 +873,9 @@ bool GodotSpace3D::test_body_motion(GodotBody3D *p_body, const PS3DT::MotionPara
 					best_safe = low;
 					best_unsafe = hi;
 				}
-			}
+			
+				return true;
+			})
 
 			if (stuck) {
 				safe = 0;
@@ -948,8 +916,6 @@ bool GodotSpace3D::test_body_motion(GodotBody3D *p_body, const PS3DT::MotionPara
 		rcd.min_allowed_depth = MIN(motion_length, min_contact_depth);
 
 		body_aabb.position += p_parameters.motion * unsafe;
-		int amount = _cull_aabb_for_body(p_body, body_aabb, p_parameters);
-
 		int from_shape = best_shape != -1 ? best_shape : 0;
 		int to_shape = best_shape != -1 ? best_shape + 1 : p_body->get_shape_count();
 
@@ -961,25 +927,18 @@ bool GodotSpace3D::test_body_motion(GodotBody3D *p_body, const PS3DT::MotionPara
 			Transform3D body_shape_xform = ugt * p_body->get_shape_transform(j);
 			GodotShape3D *body_shape = p_body->get_shape(j);
 
-			for (int i = 0; i < amount; i++) {
-				const GodotCollisionObject3D *col_obj = intersection_query_results[i];
-				if (p_parameters.exclude_bodies.has(col_obj->get_self())) {
-					continue;
-				}
-				if (p_parameters.exclude_objects.has(col_obj->get_instance_id())) {
-					continue;
-				}
-
-				int shape_idx = intersection_query_subindex_results[i];
+			_visit_motion_candidates(p_body, body_aabb, p_parameters, [&](const GodotCollisionObject3D *col_obj, int shape_idx) -> bool {
 
 				rcd.object = col_obj;
 				rcd.shape = shape_idx;
 				rcd.local_shape = j;
 				bool sc = GodotCollisionSolver3D::solve_static(body_shape, body_shape_xform, col_obj->get_shape(shape_idx), col_obj->get_transform() * col_obj->get_shape_transform(shape_idx), _rest_cbk_result, &rcd, nullptr, margin);
 				if (!sc) {
-					continue;
+					return true;
 				}
-			}
+			
+				return true;
+			})
 		}
 
 		if (rcd.result_count > 0) {
