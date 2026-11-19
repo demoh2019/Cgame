@@ -111,10 +111,10 @@ TEST_CASE("[WebSocketPeer] Interleaved control frames preserve fragmented messag
 				server_peer->get_ready_state() == WebSocketPeer::STATE_OPEN;
 	}));
 
-
 	// A control frame in the middle of a fragmented data message must not
 	// contribute bytes to the message, regardless of whether it is Ping or Pong.
-	for (uint8_t control_opcode : { uint8_t(0x89), uint8_t(0x8A) }) {
+	const uint8_t control_opcodes[] = { 0x89, 0x8A };
+	for (uint8_t control_opcode : control_opcodes) {
 		const uint8_t frames[] = {
 			0x01, 0x01, 'A', // Text fragment, FIN clear.
 			control_opcode, 0x01, '!', // Interleaved control payload.
@@ -132,7 +132,6 @@ TEST_CASE("[WebSocketPeer] Interleaved control frames preserve fragmented messag
 		CHECK_EQ(String::utf8(reinterpret_cast<const char *>(packet.ptr()), packet.size()), "AB");
 		CHECK_EQ(packet.size(), 2);
 	}
-
 }
 
 } // namespace TestWebSocketPeer
