@@ -3658,7 +3658,17 @@ Variant GDScriptFunction::call(GDScriptInstance *p_instance, const Variant **p_a
 					ip = jumpto;
 				} else {
 					GET_VARIANT_PTR(iterator, 2);
-					*VariantInternal::get_string(iterator) = str->substr(*idx, 1);
+					String *character = VariantInternal::get_string(iterator);
+					const char32_t codepoint = str->ptr()[*idx];
+					if (likely(character->length() == 1)) {
+						// Reuse the existing single-character buffer instead
+						// of allocating a substring for each loop iteration.
+						// ptrw() detaches if a previous character was saved
+						// elsewhere, preserving String's COW value semantics.
+						character->ptrw()[0] = codepoint;
+					} else {
+						*character = str->substr(*idx, 1);
+					}
 
 					ip += 5; // Loop again.
 				}
