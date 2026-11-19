@@ -9,6 +9,7 @@ func _ready() -> void:
     _add_environment()
     _add_pool()
     _add_soft_cubes()
+    _add_open_cloth()
     _add_labels()
 
 
@@ -105,6 +106,39 @@ func _closed_cube_mesh() -> ArrayMesh:
     return mesh
 
 
+# An OPEN indexed cloth does not receive hydrostatic pressure. It still
+# receives submerged hydrodynamic drag from the native C++ solver.
+func _open_cloth_mesh() -> ArrayMesh:
+    var points := PackedVector3Array()
+    var normals := PackedVector3Array()
+    var indices := PackedInt32Array()
+    const SIDE = 5
+    for z in range(SIDE):
+        for x in range(SIDE):
+            points.append(Vector3((float(x) - 2.0) * 0.5, 0.0, (float(z) - 2.0) * 0.5))
+            normals.append(Vector3.UP)
+    for z in range(SIDE - 1):
+        for x in range(SIDE - 1):
+            var a := z * SIDE + x
+            var b := a + 1
+            var c := a + SIDE
+            var d := c + 1
+            indices.append_array(PackedInt32Array([a, c, b, b, c, d]))
+    var arrays := []
+    arrays.resize(Mesh.ARRAY_MAX)
+    arrays[Mesh.ARRAY_VERTEX] = points
+    arrays[Mesh.ARRAY_NORMAL] = normals
+    arrays[Mesh.ARRAY_INDEX] = indices
+    var mesh := ArrayMesh.new()
+    mesh.add_surface_from_arrays(Mesh.PRIMITIVE_TRIANGLES, arrays)
+    return mesh
+
+
+func _add_open_cloth() -> void:
+    _add_soft("OpenClothInCurrent", Vector3(0, 1.6, 3.0),
+            _open_cloth_mesh(), 2.0, Color("#f8e192"))
+
+
 func _add_soft_cubes() -> void:
     # Give each independently simulated hull a distinct mesh resource.
     _add_soft("LightFloatingSoftBody", Vector3(-3.0, 2.7, 0), _closed_cube_mesh(), 6.0, Color("#92edd2"))
@@ -136,7 +170,7 @@ func _add_labels() -> void:
     panel.add_child(margin)
     var label := Label.new()
     label.name = "WaterExplanation"
-    label.text = "Cgame Native SoftBody3D Water Lab\nClosed deformable mesh + hydrostatic pressure\nGreen: 6 kg   |   Orange: 45 kg\nFluid density: 2.5 kg/m³   |   Surface: y = %.1f\nR: restart     |     Esc: quit\nPressure is calculated in C++, not GDScript" % WATER_LEVEL
+    label.text = "Cgame Native SoftBody3D Water Lab\nClosed hulls: hydrostatic pressure + current drag\nGreen: 6 kg (float) | Orange: 45 kg (sink)\nYellow: open cloth (current drag only)\nFluid: 2.5 kg/m³ | Surface y = %.1f | Flow +X at 1.5 m/s\nR: restart | Esc: quit\nWater forces come from C++, not GDScript" % WATER_LEVEL
     margin.add_child(label)
 
 

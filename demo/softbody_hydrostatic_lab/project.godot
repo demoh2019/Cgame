@@ -20,11 +20,16 @@ renderer/rendering_method.mobile="gl_compatibility"
 3d/physics_engine="GodotPhysics3D"
 # Native per-face buoyancy is opt-in and requires a closed surface.
 3d/solver/soft_body_hydrostatic_pressure=true
+# Quadratic, energy-limited underwater drag now acts on both closed and open
+# soft meshes; flow is a constant world-space water current.
+3d/solver/soft_body_hydrodynamic_drag=true
+3d/solver/soft_body_hydrodynamic_tangent_ratio=0.35
 # Shared flat-world water-plane parameters (rigid and soft bodies).
 3d/fluid_plane/enabled=true
 3d/fluid_plane/surface_height=2.0
 3d/fluid_plane/density=2.5
-3d/fluid_plane/drag_coefficient=0.0
+3d/fluid_plane/drag_coefficient=0.8
+3d/fluid_plane/flow_velocity=Vector3(1.5, 0, 0)
 # XPBD fabric stretch avoids over-constraining the material at water contact.
 3d/solver/soft_body_xpbd_compliance=0.00002
 3d/solver/soft_body_xpbd_volume_compliance=0.000002

@@ -7,7 +7,8 @@ func _initialize() -> void:
     var expected := {
         "physics/3d/physics_engine": "GodotPhysics3D",
         "physics/3d/fluid_plane/enabled": true,
-        "physics/3d/solver/soft_body_hydrostatic_pressure": true
+        "physics/3d/solver/soft_body_hydrostatic_pressure": true,
+        "physics/3d/solver/soft_body_hydrodynamic_drag": true
     }
     for key in expected:
         if ProjectSettings.get_setting(key, null) != expected[key]:
@@ -29,6 +30,7 @@ func _smoke() -> void:
     for path in [
         "LightFloatingSoftBody",
         "HeavySinkingSoftBody",
+        "OpenClothInCurrent",
         "PoolBottom",
         "WaterVolumeVisual",
         "Camera"
@@ -36,7 +38,7 @@ func _smoke() -> void:
         if lab.get_node_or_null(path) == null:
             push_error("Hydrostatic lab missing: " + path)
             good = false
-    for body_name in ["LightFloatingSoftBody", "HeavySinkingSoftBody"]:
+    for body_name in ["LightFloatingSoftBody", "HeavySinkingSoftBody", "OpenClothInCurrent"]:
         var body := lab.get_node_or_null(body_name) as SoftBody3D
         if body == null or body.mesh == null:
             push_error("Invalid closed deformable hull: " + body_name)
@@ -46,5 +48,5 @@ func _smoke() -> void:
     lab.queue_free()
     await process_frame
     if good:
-        print("PASS: native hydrostatic lab settings, two closed soft bodies and 120 physics frames")
+        print("PASS: hydrostatic and hydrodynamic settings, two closed hulls and one open cloth across 120 frames")
     quit(0 if good else 1)

@@ -55,6 +55,7 @@
 #include "servers/physics_softbody_shape_clusters.h"
 #include "servers/physics_softbody_aerodynamic_drag.h"
 #include "servers/physics_softbody_hydrostatic.h"
+#include "servers/physics_softbody_hydrodynamic_drag.h"
 #include "servers/physics_softbody_plasticity.h"
 #include "servers/physics_softbody_volume_plasticity.h"
 #include "servers/physics_softbody_volume_safe.h"
@@ -2778,6 +2779,73 @@ void GodotSoftBody3D::apply_hydrostatic_forces(const Vector3 &p_gravity) {
 	}
 }
 
+// An opt-in, force-free velocity pass for submerged drag. Updating node
+// velocities after EACH triangle makes the helper's energy bound hold for
+// the entire mesh, even when many adjacent faces share the same vertex.
+// Unlike hydrostatic pressure, an open cloth can experience drag.
+void GodotSoftBody3D::apply_hydrodynamic_drag(real_t p_delta) {
+	const GodotSpace3D *space = get_space();
+	if (!space || !space->is_soft_body_hydrodynamic_drag_enabled() ||
+			!space->is_fluid_plane_enabled() || !(p_delta > real_t(0.0)) ||
+			faces.is_empty()) {
+		return;
+	}
+	const real_t density = space->get_fluid_plane_density();
+	const real_t drag_coefficient = space->get_fluid_plane_drag_coefficient();
+	const real_t tangent_ratio = space->get_soft_body_hydrodynamic_tangent_ratio();
+	const real_t surface_y = space->get_fluid_plane_surface_height();
+	const Vector3 &fluid_velocity = space->get_fluid_plane_flow_velocity();
+	if (!Math::is_finite(density) || !(density > real_t(0.0)) ||
+			!Math::is_finite(drag_coefficient) || !(drag_coefficient > real_t(0.0)) ||
+			!Math::is_finite(tangent_ratio) || tangent_ratio < real_t(0.0) ||
+			!Math::is_finite(surface_y) || !fluid_velocity.is_finite()) {
+		return;
+	}
+	for (Face &face : faces) {
+		// Most cloth may be entirely outside the fluid: reject dry faces
+		// before building velocities or running submerged polygon clipping.
+		if (face.n[0]->x.y > surface_y && face.n[1]->x.y > surface_y &&
+				face.n[2]->x.y > surface_y) {
+			continue;
+		}
+		if (face.n[0]->im == real_t(0.0) && face.n[1]->im == real_t(0.0) &&
+				face.n[2]->im == real_t(0.0)) {
+			continue;
+		}
+		Vector3 position[3];
+		Vector3 velocity[3];
+		real_t inverse_mass[3];
+		for (int j = 0; j < 3; ++j) {
+			position[j] = face.n[j]->x;
+			velocity[j] = face.n[j]->v;
+			inverse_mass[j] = face.n[j]->im;
+		}
+		Vector3 delta_velocity[3];
+		if (!physics_softbody_hydrodynamic_drag_face(position, velocity,
+					inverse_mass, fluid_velocity, double(surface_y),
+					double(density), double(drag_coefficient), double(tangent_ratio),
+					double(p_delta), delta_velocity)) {
+			continue;
+		}
+		Vector3 next[3];
+		bool valid = true;
+		for (int j = 0; j < 3; ++j) {
+			next[j] = velocity[j] + delta_velocity[j];
+			if (!next[j].is_finite()) {
+				valid = false;
+				break;
+			}
+		}
+		if (valid) {
+			for (int j = 0; j < 3; ++j) {
+				if (inverse_mass[j] > real_t(0.0)) {
+					face.n[j]->v = next[j];
+				}
+			}
+		}
+	}
+}
+
 Vector3 GodotSoftBody3D::_compute_area_windforce(const GodotArea3D *p_area, const Face *p_face) {
 	const real_t magnitude = p_area->get_wind_force_magnitude();
 	const Vector3 &wind_direction = p_area->get_wind_direction();
@@ -2861,6 +2929,7 @@ void GodotSoftBody3D::predict_motion(real_t p_delta) {
 		apply_forces(wind_areas, p_delta);
 	}
 	apply_hydrostatic_forces(gravity);
+	apply_hydrodynamic_drag(p_delta);
 
 	// An objective surface dashpot damps deformation rates rather than
 	// world-space translation or rotation. Reuse the cached membrane rest
