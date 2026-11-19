@@ -1,0 +1,58 @@
+name: Fixed audio capture buffer performance regressions
+
+on:
+  pull_request:
+    branches: [develop]
+    paths:
+      - "servers/audio/**"
+      - "scene/resources/audio/audio_stream_microphone.cpp"
+      - "drivers/coreaudio/audio_driver_coreaudio.mm"
+      - "drivers/pulseaudio/audio_driver_pulseaudio.cpp"
+      - "drivers/wasapi/audio_driver_wasapi.cpp"
+      - "platform/web/audio_driver_web.cpp"
+      - "tests/servers/test_audio_input_cow.cpp"
+      - "misc/scripts/tests/test_audio_input_fixed_buffer.py"
+      - ".github/workflows/audio-input-fixed-buffer.yml"
+  push:
+    branches: [develop]
+    paths:
+      - "servers/audio/**"
+      - "scene/resources/audio/audio_stream_microphone.cpp"
+      - "drivers/coreaudio/audio_driver_coreaudio.mm"
+      - "drivers/pulseaudio/audio_driver_pulseaudio.cpp"
+      - "drivers/wasapi/audio_driver_wasapi.cpp"
+      - "platform/web/audio_driver_web.cpp"
+      - "tests/servers/test_audio_input_cow.cpp"
+      - "misc/scripts/tests/test_audio_input_fixed_buffer.py"
+      - ".github/workflows/audio-input-fixed-buffer.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  contracts:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - run: |
+          python3 -m py_compile misc/scripts/tests/test_audio_input_fixed_buffer.py
+          python3 -m unittest discover -s misc/scripts/tests -p test_audio_input_fixed_buffer.py -v
+
+  native-audio:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+      - uses: ./.github/actions/godot-deps
+      - uses: ./.github/actions/godot-build
+        with:
+          platform: linuxbsd
+          target: editor
+          scons-flags: dev_build=yes tests=yes debug_symbols=no module_mono_enabled=no accesskit=no
+      - name: Run fixed input buffer native test
+        run: |
+          timeout 300s ./bin/godot.linuxbsd.editor.dev.x86_64 --headless --test --test-case="*Fixed input buffer pointer does not detach on write*" --no-colors

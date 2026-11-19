@@ -38,18 +38,22 @@ TEST_FORCE_LINK(test_audio_input_cow)
 
 namespace TestAudioInputCOW {
 
-static_assert(std::is_same_v<decltype(std::declval<AudioDriver &>().get_input_buffer()), const Vector<int32_t> &>,
-        "Audio input must return a const view and not a copied COW Vector.");
+static_assert(std::is_same_v<decltype(std::declval<AudioDriver &>().get_input_buffer_data()), const int32_t *>,
+        "Audio input must expose a stable non-owning pointer to avoid COW buffer copies.");
+static_assert(std::is_same_v<decltype(std::declval<AudioDriver &>().get_input_size()), unsigned int>,
+        "Audio input size must be a safe value snapshot.");
 
-TEST_CASE("[Audio] Read-only input buffer view does not detach on write") {
+TEST_CASE("[Audio] Fixed input buffer pointer does not detach on write") {
     Vector<int32_t> samples;
     samples.resize(64);
-    const int32_t *original = samples.ptr();
-    const Vector<int32_t> &view = samples;
-    CHECK(view.ptr() == original);
+    int32_t *original = samples.ptrw();
+    const int32_t *view = original;
+    CHECK(view == samples.ptr());
     samples.write[8] = 42;
     CHECK(samples.ptr() == original);
     CHECK(view[8] == 42);
+    samples.write[63] = 99;
+    CHECK(view[63] == 99);
 }
 
 } // namespace TestAudioInputCOW
