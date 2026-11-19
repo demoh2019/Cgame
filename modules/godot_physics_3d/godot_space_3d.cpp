@@ -710,8 +710,11 @@ bool GodotSpace3D::test_body_motion(GodotBody3D *p_body, const PS3DT::MotionPara
 
 				Transform3D body_shape_xform = body_transform * p_body->get_shape_transform(j);
 				GodotShape3D *body_shape = p_body->get_shape(j);
+				// Jolt/Box2D-style shape-level broadphase query: a distant shape
+				// in the same compound body must not widen this collision test.
+				const AABB shape_query_aabb = body_shape_xform.xform(body_shape->get_aabb()).grow(margin);
 
-				_visit_motion_candidates(p_body, body_aabb, p_parameters, [&](const GodotCollisionObject3D *col_obj, int shape_idx) -> bool {
+				_visit_motion_candidates(p_body, shape_query_aabb, p_parameters, [&](const GodotCollisionObject3D *col_obj, int shape_idx) -> bool {
 
 					if (GodotCollisionSolver3D::solve_static(body_shape, body_shape_xform, col_obj->get_shape(shape_idx), col_obj->get_transform() * col_obj->get_shape_transform(shape_idx), cbkres, cbkptr, nullptr, margin)) {
 						collided = cbk.amount > 0;
@@ -807,7 +810,14 @@ bool GodotSpace3D::test_body_motion(GodotBody3D *p_body, const PS3DT::MotionPara
 			real_t best_safe = 1;
 			real_t best_unsafe = 1;
 
-			_visit_motion_candidates(p_body, motion_aabb, p_parameters, [&](const GodotCollisionObject3D *col_obj, int shape_idx) -> bool {
+			// Sweep the current shape's tight AABB; keep the original whole-body
+			// motion_aabb for the distance solver's conservative auxiliary bound.
+			AABB shape_motion_aabb = body_shape_xform.xform(body_shape->get_aabb()).grow(margin);
+			AABB shape_end_aabb = shape_motion_aabb;
+			shape_end_aabb.position += p_parameters.motion;
+			shape_motion_aabb = shape_motion_aabb.merge(shape_end_aabb);
+
+			_visit_motion_candidates(p_body, shape_motion_aabb, p_parameters, [&](const GodotCollisionObject3D *col_obj, int shape_idx) -> bool {
 
 				//test initial overlap, does it collide if going all the way?
 				Vector3 point_A, point_B;
@@ -926,8 +936,9 @@ bool GodotSpace3D::test_body_motion(GodotBody3D *p_body, const PS3DT::MotionPara
 
 			Transform3D body_shape_xform = ugt * p_body->get_shape_transform(j);
 			GodotShape3D *body_shape = p_body->get_shape(j);
+			const AABB shape_rest_aabb = body_shape_xform.xform(body_shape->get_aabb()).grow(margin);
 
-			_visit_motion_candidates(p_body, body_aabb, p_parameters, [&](const GodotCollisionObject3D *col_obj, int shape_idx) -> bool {
+			_visit_motion_candidates(p_body, shape_rest_aabb, p_parameters, [&](const GodotCollisionObject3D *col_obj, int shape_idx) -> bool {
 
 				rcd.object = col_obj;
 				rcd.shape = shape_idx;
