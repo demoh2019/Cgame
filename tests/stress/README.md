@@ -42,6 +42,35 @@ python3 tests/stress/run.py --godot /path/to/godot --case memory_churn --max-ret
 Run `--list-cases` for supported identifiers.
 
 
+## One-way platform overflow and shared Shape2D identity
+
+The GodotPhysics2D kinematic recovery solver previously recorded only 32
+one-way shape-pair exclusions. In a dense platform field, extra invalid
+one-way contacts could be mistaken for blocking motion during the sweep
+phase. Cgame now retains all rejected pairs, using a 32-entry stack fast
+path and a hash set for overflow. Each exclusion is keyed by the **moving
+shape slot**, the other collision object and the other shape slot, rather
+than only by the shared Shape2D resource pointer.
+
+The overflow hash set is allocated only if a query sees more than 32
+invalid one-way contacts. Overflow lookups are amortized constant time;
+the common path retains simple fixed-size stack scans. The hash set is
+cleared on recovery retries, so exclusions from previous recovery positions
+are not reused accidentally.
+
+```bash
+python3 -m unittest discover -s tests/stress -p 'test_physics_motion_shape_pruning.py' -v
+python3 tests/stress/run.py --godot ./bin/godot.macos.editor.arm64 \
+  --case physics_one_way_overflow_2d --scale 4 --repeats 5 --frames 90 \
+  --rss-limit-mib 6144 --output out/one-way-overflow.json
+```
+
+The engine scenario checks dozens to hundreds of one-way platforms
+overlapping a kinematic mover from the rejected direction, then verifies
+that ordinary solids still block motion and that a second compound shape
+using the same shape resource detects its own obstacle. This workload is
+a correctness regression, not a claim about measured throughput.
+
 ## Streaming kinematic motion queries (2D and 3D)
 
 The stress project's `project.godot` explicitly selects `GodotPhysics2D`
