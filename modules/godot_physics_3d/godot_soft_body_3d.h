@@ -32,6 +32,7 @@
 
 #include "godot_area_3d.h"
 #include "servers/physics_xpbd_tether.h"
+#include "servers/physics_xpbd_strain_limit.h"
 #include "godot_collision_object_3d.h"
 
 #include "core/math/aabb.h"
@@ -85,6 +86,9 @@ class GodotSoftBody3D : public GodotCollisionObject3D {
 	// Only allocated when the experimental XPBD solver is enabled. The
 	// lambda for each link is retained across iterations of the same step.
 	LocalVector<real_t> xpbd_link_lambdas;
+	// Optional unilateral stretch/compression limits. Each link retains two
+	// XPBD multipliers per step; the default settings allocate nothing.
+	LocalVector<PhysicsXPBDStrainLimitLambdas> xpbd_strain_lambdas;
 	// One compliance multiplier per triangle, allocated only in area-XPBD mode.
 	LocalVector<real_t> xpbd_area_lambdas;
 	// Optional per-face undeformed angle and per-step XPBD multipliers.
