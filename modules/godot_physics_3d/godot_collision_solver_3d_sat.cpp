@@ -968,7 +968,15 @@ static void analytic_sphere_cylinder_collision(real_t p_radius_a, real_t p_radiu
 		// radial and cap distances are converted to world-space distances
 		// through the inverse-transposed transform basis.
 		const Basis normal_basis = cylinder_inverse.basis.transposed();
-		const Vector3 radial_axis = r > CMP_EPSILON ? Vector3(center.x / r, 0.0, center.z / r) : Vector3(1.0, 0.0, 0.0);
+		Vector3 radial_axis;
+		if (r > CMP_EPSILON) {
+			radial_axis = Vector3(center.x / r, 0.0, center.z / r);
+		} else {
+			// On the cylinder's centerline, prefer the shortest world-space
+			// radial exit under nonuniform scaling; ties choose local +X.
+			radial_axis = normal_basis.get_column(0).length_squared() >= normal_basis.get_column(2).length_squared() ?
+					Vector3(1.0, 0.0, 0.0) : Vector3(0.0, 0.0, 1.0);
+		}
 		const Vector3 radial_normal = normal_basis.xform(radial_axis);
 		const Vector3 cap_normal = normal_basis.get_column(1);
 		const real_t radial_normal_length = radial_normal.length();
