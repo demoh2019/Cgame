@@ -77,6 +77,9 @@ void JoltProjectSettings::register_settings() {
 	// Capture narrow cloth folds where two nonadjacent edges cross even
 	// though no point comes close to an opposing triangle.
 	GLOBAL_DEF(PropertyInfo(Variant::BOOL, "physics/jolt_physics_3d/simulation/soft_body_self_edge_contacts"), false);
+	// Bounded conservative-advancement prediction of nonlocal self
+	// edge crossings. Reuses swept contact distance and impulse limits.
+	GLOBAL_DEF(PropertyInfo(Variant::BOOL, "physics/jolt_physics_3d/simulation/soft_body_self_speculative_edge_ccd"), false);
 	// A bounded, per-step BVH accelerates distant self edge pairs. Keep
 	// this default-off until native performance baselines are available.
 	GLOBAL_DEF(PropertyInfo(Variant::BOOL, "physics/jolt_physics_3d/simulation/soft_body_self_edge_bvh"), false);
@@ -204,6 +207,7 @@ void JoltProjectSettings::read_settings() {
 	soft_body_soft_speculative_edge_ccd = GLOBAL_GET("physics/jolt_physics_3d/simulation/soft_body_soft_speculative_edge_ccd");
 	soft_body_self_contacts = GLOBAL_GET("physics/jolt_physics_3d/simulation/soft_body_self_contacts");
 	soft_body_self_edge_contacts = GLOBAL_GET("physics/jolt_physics_3d/simulation/soft_body_self_edge_contacts");
+	soft_body_self_speculative_edge_ccd = GLOBAL_GET("physics/jolt_physics_3d/simulation/soft_body_self_speculative_edge_ccd");
 	soft_body_self_edge_bvh = GLOBAL_GET("physics/jolt_physics_3d/simulation/soft_body_self_edge_bvh");
 	soft_body_self_persistent_bvh = GLOBAL_GET("physics/jolt_physics_3d/simulation/soft_body_self_persistent_bvh");
 	soft_body_self_contact_max_checks = CLAMP((int)GLOBAL_GET("physics/jolt_physics_3d/simulation/soft_body_self_contact_max_checks"), 1024, 65536);
