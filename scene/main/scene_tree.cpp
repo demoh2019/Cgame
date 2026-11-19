@@ -398,7 +398,7 @@ void SceneTree::call_group_flagsp(uint32_t p_call_flags, const StringName &p_gro
 		nodes_copy = g.nodes;
 	}
 
-	Node **gr_nodes = nodes_copy.ptrw();
+	Node *const *gr_nodes = nodes_copy.ptr();
 	int gr_node_count = nodes_copy.size();
 
 	{
@@ -470,7 +470,7 @@ void SceneTree::notify_group_flags(uint32_t p_call_flags, const StringName &p_gr
 		nodes_copy = g.nodes;
 	}
 
-	Node **gr_nodes = nodes_copy.ptrw();
+	Node *const *gr_nodes = nodes_copy.ptr();
 	int gr_node_count = nodes_copy.size();
 
 	{
@@ -532,7 +532,7 @@ void SceneTree::set_group_flags(uint32_t p_call_flags, const StringName &p_group
 
 		nodes_copy = g.nodes;
 	}
-	Node **gr_nodes = nodes_copy.ptrw();
+	Node *const *gr_nodes = nodes_copy.ptr();
 	int gr_node_count = nodes_copy.size();
 
 	{
@@ -1459,13 +1459,13 @@ void SceneTree::_call_input_pause(const StringName &p_group, CallInputType p_cal
 
 		_update_group_order(g);
 
-		//copy, so copy on write happens in case something is removed from process while being called
-		//performance is not lost because only if something is added/removed the vector is copied.
+		// Keep a shared COW snapshot: callbacks can add/remove group members safely.
+		// Only a mutation of the group forks its buffer, not every input event.
 		nodes_copy = g.nodes;
 	}
 
 	int gr_node_count = nodes_copy.size();
-	Node **gr_nodes = nodes_copy.ptrw();
+	Node *const *gr_nodes = nodes_copy.ptr();
 
 	{
 		_THREAD_SAFE_METHOD_
@@ -1588,7 +1588,7 @@ TypedArray<Node> SceneTree::_get_nodes_in_group(const StringName &p_group) {
 
 	ret.resize(nc);
 
-	Node **ptr = E->value.nodes.ptrw();
+	Node *const *ptr = E->value.nodes.ptr();
 	for (int i = 0; i < nc; i++) {
 		ret[i] = ptr[i];
 	}
