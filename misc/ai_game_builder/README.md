@@ -20,7 +20,7 @@ The API key is held only in the dock's memory. This plugin does not persist it.
 
 - AI only returns candidate text files. It cannot execute commands, edit existing files, install packages, or make arbitrary changes to engine settings.
 - No output is written until the preview is accepted. Existing paths are never overwritten.
-- Only safe ASCII relative file paths within res://ai_generated/ are allowed.
+- Only safe ASCII relative file paths within res://ai_generated/ are allowed. Pre-existing symlinks in the output path are rejected.
 - Allowed file types: .gd, .tscn, .tres, .gdshader, .json, .md, .txt.
 - Up to 16 files, 64 KiB each, 256 KiB total, and a 1 MiB HTTP response body.
 - Only HTTPS remote providers or HTTP loopback endpoints are allowed. Redirects are disabled.
@@ -34,7 +34,7 @@ Run the standalone test project (this folder) from the source checkout:
 
     godot --headless --path misc/ai_game_builder --script res://tests/run.gd
 
-The suite contains 92 assertions for successful and rejected plans, JSON parsing, provider reply handling, path traversal prevention, size limits, duplicates, generated dependencies, repair context, script loading, creation, and overwrite prevention. The writer tests create and remove a temporary file in the standalone project. Do not execute these tests from a production Godot project.
+The suite includes 90+ assertions for successful and rejected plans, JSON parsing, provider reply handling, path traversal prevention, size limits, duplicates, generated dependencies, repair context, script loading, creation, and overwrite prevention. The writer tests create and remove a temporary file in the standalone project. Do not execute these tests from a production Godot project.
 
 ## Suggested follow-up milestones
 
