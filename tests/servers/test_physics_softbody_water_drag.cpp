@@ -57,10 +57,10 @@ TEST_CASE("[PhysicsWaterDrag] Normal drag opposes downwards velocity without rev
 	CHECK(physics_softbody_water_drag_face(positions, velocities, masses, 0, 1000, 5, 0, Vector3(), 1.0, force));
 	const Vector3 combined = total_force(force);
 	CHECK(combined.y > 0);
-	CHECK(combined.y <= doctest::Approx(300).epsilon(1e-5));
+	CHECK(combined.y <= real_t(300.0001));
 	CHECK(combined.x == doctest::Approx(0));
 	CHECK(combined.z == doctest::Approx(0));
-	CHECK(real_t(-100) + combined.y / 3.0 <= doctest::Approx(0).epsilon(1e-5));
+	CHECK(real_t(-100) + combined.y / 3.0 <= real_t(0.0001));
 }
 
 TEST_CASE("[PhysicsWaterDrag] Fluid current accelerates still cloth when skin drag is enabled") {
