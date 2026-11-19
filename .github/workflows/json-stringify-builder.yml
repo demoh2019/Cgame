@@ -1,0 +1,39 @@
+name: JSON StringBuilder serialization regressions
+
+on:
+  pull_request:
+    branches: [develop]
+    paths:
+      - 'core/io/json.cpp'
+      - 'core/io/json.h'
+      - 'tests/core/io/test_json.cpp'
+      - '.github/workflows/json-stringify-builder.yml'
+  push:
+    branches: [develop]
+    paths:
+      - 'core/io/json.cpp'
+      - 'core/io/json.h'
+      - 'tests/core/io/test_json.cpp'
+      - '.github/workflows/json-stringify-builder.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  native-json-serialization:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+      - uses: ./.github/actions/godot-deps
+      - name: Build native JSON regressions
+        uses: ./.github/actions/godot-build
+        with:
+          platform: linuxbsd
+          target: editor
+          scons-flags: dev_build=yes tests=yes debug_symbols=no module_mono_enabled=no module_text_server_fb_enabled=yes accesskit=no -j2
+      - name: Run all JSON doctest regressions
+        run: ./bin/godot.linuxbsd.editor.dev.x86_64 --headless --test --test-case="*[JSON]*"
