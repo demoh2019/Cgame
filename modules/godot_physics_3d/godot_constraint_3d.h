@@ -64,6 +64,10 @@ public:
 	_FORCE_INLINE_ GodotBody3D **get_body_ptr() const { return _body_ptr; }
 	_FORCE_INLINE_ int get_body_count() const { return _body_count; }
 
+	// Contact-only islands can treat static/kinematic bodies as read-only.
+	// Other constraint types retain conservative exclusive body ownership.
+	virtual bool permits_parallel_immovable_body_sharing() const { return false; }
+
 	virtual GodotSoftBody3D *get_soft_body_ptr(int p_index) const { return nullptr; }
 	virtual int get_soft_body_count() const { return 0; }
 
