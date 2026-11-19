@@ -25,8 +25,8 @@ func take_damage(amount: float) -> bool:
 func _blocking_barricade() -> StaticBody3D:
     if not is_instance_valid(target):
         return null
-    var source := global_position + Vector3.UP * 0.65
-    var destination := target.global_position + Vector3.UP * 0.65
+    var source := global_position + Vector3.UP * 0.2
+    var destination := target.global_position + Vector3.UP * 0.2
     var query := PhysicsRayQueryParameters3D.create(source, destination)
     query.exclude = [get_rid()]
     var hit: Dictionary = get_world_3d().direct_space_state.intersect_ray(query)

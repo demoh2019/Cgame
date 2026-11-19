@@ -71,6 +71,20 @@ func _run() -> void:
     var remaining_wood: int = world_state.items["wood"]
     _check(not game.call("_repair_barricade"), "Full barricades cannot be repaired.")
     _check(int(world_state.items["wood"]) == remaining_wood, "Full repair must not spend resources.")
+
+    # Put an infected on the opposite side of a wall, verifying actual ray-based
+    # obstruction detection and NPC damage (not only direct world API damage).
+    var zombie = get_nodes_in_group("infected")[0]
+    zombie.attack_cooldown = 4.0
+    zombie.global_position = Vector3(0.0, 0.95, -4.2)
+    zombie.velocity = Vector3.ZERO
+    await physics_frame
+    _check(zombie.call("_blocking_barricade") == barrier, "Zombie sightline must detect a blocking barricade.")
+    zombie.attack_cooldown = 0.0
+    var before_infected_hit: float = barrier.get_meta("hp")
+    zombie.call("_physics_process", 0.016)
+    _check(float(barrier.get_meta("hp")) < before_infected_hit, "Infected must attack blocking structures.")
+
     _check(game.call("_salvage_barricade"), "Nearby barricades can be dismantled.")
     _check(get_nodes_in_group("player_building").size() == 0, "Salvaged barricades leave the world.")
     _check(int(world_state.items["wood"]) == remaining_wood + 1, "Salvage should refund some wood.")
