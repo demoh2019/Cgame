@@ -75,7 +75,7 @@ def cached_clip_polygon(points, planes):
             if dist0 * dist1 < 0.0 and not (edge and j):
                 rel = tuple(p1[k] - p0[k] for k in range(2))
                 denominator = dot(normal, rel)
-                fraction = -(dot(normal, p0) - d) / denominator
+                fraction = -dist0 / denominator
                 clipbuf_dst.append(tuple(p0[k] + rel[k] * fraction for k in range(2)))
             dist0 = dist1
         clipbuf_src = clipbuf_dst
@@ -97,6 +97,7 @@ class FaceClipDistanceCacheTests(unittest.TestCase):
         self.assertIn("real_t dist0 = first_clip_distance;", code)
         self.assertIn("const real_t dist1 = j_n == 0 ? first_clip_distance : clip.distance_to(edge1_A);", code)
         self.assertIn("dist0 = dist1;", code)
+        self.assertIn("const real_t dist = -dist0 / den;", code)
         self.assertIn("SWAP(clipbuf_src, clipbuf_dst);", code)
         self.assertLess(code.index("if (clipbuf_len == 0)"),
                         code.index("const real_t first_clip_distance"))
