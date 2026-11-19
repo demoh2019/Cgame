@@ -190,3 +190,25 @@ func _run() -> void:
 		_check(FileAccess.get_file_as_string(output) == "generated", "existing content unchanged")
 		DirAccess.remove_absolute(absolute)
 	_check(not Writer.apply(_plan("../escape.gd")).ok, "writer revalidates paths")
+
+	# The output directory may contain symlinks supplied by a project author.
+	# Avoid creating any file that traverses through one.
+	var output_root := ProjectSettings.globalize_path("res://ai_generated/")
+	var create_root := DirAccess.make_dir_recursive_absolute(output_root)
+	_check(create_root == OK, "symlink test output folder exists")
+	var link_path := output_root.path_join("_symlink_test")
+	var link_target := ProjectSettings.globalize_path("res://")
+	if DirAccess.dir_exists_absolute(link_path):
+		printerr("SKIP symlink test: conflicting directory already exists.")
+	else:
+		var output_dir := DirAccess.open("res://ai_generated/")
+		if output_dir != null:
+			var create_link_error := output_dir.create_link(link_target, link_path)
+			if create_link_error == OK:
+				var escape_file := "res://writer_escape_proof.txt"
+				_check(not Writer.apply(_plan("_symlink_test/writer_escape_proof.txt", "escape")).ok, "writer rejects symlink directory")
+				_check(not FileAccess.file_exists(escape_file), "symlink escape wrote no external file")
+				DirAccess.remove_absolute(link_path)
+			else:
+				print("SKIP symlink test: filesystem does not support creating symlinks.")
+
