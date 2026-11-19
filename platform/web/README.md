@@ -8,6 +8,20 @@ It also contains a ESLint linting setup (see [`package.json`](package.json)).
 See also [`misc/dist/html`](/misc/dist/html) folder for additional files used by
 this platform such as the html shell (web page).
 
+## Publishing games in a browser
+
+Use [`publish.py`](publish.py) to export a Godot project with the installed
+Web export templates, verify the resulting WebAssembly bundle, preview it
+locally, and optionally create a ZIP for static hosting.
+
+```sh
+python platform/web/publish.py export /path/to/game --out /tmp/game-web --zip /tmp/game-web.zip
+python platform/web/publish.py serve /tmp/game-web
+```
+
+See [the browser publishing guide](PUBLISHING.md) for requirements, PWA
+options, HTTPS headers, and regression tests.
+
 ## Documentation
 
 - [Compiling for the Web](https://docs.godotengine.org/en/latest/engine_details/development/compiling/compiling_for_web.html)
