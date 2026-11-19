@@ -196,6 +196,10 @@ func vendor(item_id: String, quantity: int, buy: bool) -> void:
 	net.c_vendor.rpc_id(1, item_id, quantity, buy)
 
 
+func contract(action: String) -> void:
+	net.c_contract.rpc_id(1, action)
+
+
 func attack(direction: Vector2) -> void:
 	net.c_attack.rpc_id(1, direction.x, direction.y)
 
