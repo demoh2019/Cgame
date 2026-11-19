@@ -37,6 +37,7 @@
 #include "servers/physics_contact_angular_friction.h"
 #include "servers/physics_manifold_reduction_2d.h"
 #include "servers/physics_ccd_sphere_toi.h"
+#include "servers/physics_speculative_sphere_contact.h"
 #include "servers/physics_ccd_capsule_toi.h"
 #include "servers/physics_ccd_swept_bounds.h"
 
@@ -573,6 +574,38 @@ bool GodotBodyPair2D::setup(real_t p_step) {
 	bool prev_collided = collided;
 
 	collided = GodotCollisionSolver2D::solve(shape_A_ptr, xform_A, motion_A, shape_B_ptr, xform_B, motion_B, _add_contact, this, &sep_axis);
+
+	// Optional Box2D/Jolt-style speculative contact for separated circles.
+	// Do not expand collision geometry: use anchors on the ACTUAL surfaces
+	// with negative depth. Only an approaching pair that would touch this
+	// step is eligible; one-way, report-only, rotating and swept shapes retain
+	// their normal paths. This is an opt-in narrowphase fallback for pairs
+	// already admitted by the broadphase, not a replacement for full CCD.
+	if (!collided && !report_contacts_only && space->get_speculative_sphere_distance() > 0.0 &&
+			motion_A == Vector2() && motion_B == Vector2() &&
+			A->get_angular_velocity() == 0.0 && B->get_angular_velocity() == 0.0 &&
+			!A->is_shape_set_as_one_way_collision(shape_A) && !B->is_shape_set_as_one_way_collision(shape_B) &&
+			shape_A_ptr->get_type() == PS2DE::SHAPE_CIRCLE && shape_B_ptr->get_type() == PS2DE::SHAPE_CIRCLE) {
+		const double scale_A = physics_ccd_uniform_sphere_scale(xform_A);
+		const double scale_B = physics_ccd_uniform_sphere_scale(xform_B);
+		if (scale_A > 0.0 && scale_B > 0.0) {
+			Vector2 point_A, point_B, normal;
+			const real_t radius_A = real_t(double(static_cast<GodotCircleShape2D *>(shape_A_ptr)->get_radius()) * scale_A);
+			const real_t radius_B = real_t(double(static_cast<GodotCircleShape2D *>(shape_B_ptr)->get_radius()) * scale_B);
+			const Vector2 velocity_B = B->get_mode() == PS2DE::BODY_MODE_STATIC ? Vector2() : B->get_linear_velocity();
+			if (physics_speculative_sphere_contact(xform_A.get_origin(), radius_A, xform_B.get_origin(), radius_B,
+					A->get_linear_velocity(), velocity_B, p_step, space->get_speculative_sphere_distance(), point_A, point_B, normal)) {
+				Contact speculative;
+				speculative.local_A = A->get_inv_transform().basis_xform(point_A);
+				speculative.local_B = B->get_inv_transform().basis_xform(point_B - offset_B);
+				speculative.normal = normal;
+				speculative.used = true;
+				contacts[0] = speculative;
+				contact_count = 1;
+				collided = true;
+			}
+		}
+	}
 	contact_recycling.remember(geometry_version_a, geometry_version_b, collided);
 	if (!collided) {
 		oneway_disabled = false;
