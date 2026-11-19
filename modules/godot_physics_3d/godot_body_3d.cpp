@@ -38,6 +38,7 @@
 #include "godot_space_3d.h"
 
 #include "servers/physics_damping.h"
+#include "servers/physics_uniform_fluid.h"
 #include "servers/physics_gyroscopic_3d.h"
 
 void GodotBody3D::_mass_properties_changed() {
@@ -643,6 +644,13 @@ void GodotBody3D::integrate_forces(real_t p_step, bool p_defer_motion) {
 			//overridden by direct state query
 
 			Vector3 force = gravity * mass + applied_force + constant_force;
+			// Uniform fully submerged buoyancy: force = -buoyancy * mass * gravity.
+			// Gravity already includes the body's gravity scale and area
+			// overrides. With buoyancy 1, gravity and buoyancy cancel.
+			// Zero (the default) preserves the old force calculation.
+			if (get_space()->get_fluid_buoyancy() > real_t(0.0)) {
+				force -= gravity * (mass * get_space()->get_fluid_buoyancy());
+			}
 			Vector3 torque = applied_torque + constant_torque;
 
 			// This per-space option uses Box2D's implicit (Pade) damping
@@ -674,6 +682,14 @@ void GodotBody3D::integrate_forces(real_t p_step, bool p_defer_motion) {
 					angular_velocity = principal_frame.xform(corrected_omega);
 				}
 			}
+	
+			// Quadratic fluid resistance acts after external forces and
+			// optional gyroscopic integration. Kinematic bodies and custom
+			// force integration remain untouched.
+			linear_velocity = godot_physics_fluid_linear_drag(
+					linear_velocity, get_space()->get_fluid_flow_velocity(), get_space()->get_fluid_linear_drag(), p_step);
+			angular_velocity = godot_physics_fluid_angular_drag(
+					angular_velocity, get_space()->get_fluid_angular_drag(), p_step);
 		}
 
 		// Limit dynamic angular speed after damping, torque and optional gyro
