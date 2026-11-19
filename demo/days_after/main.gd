@@ -42,6 +42,7 @@ func _configure_controls() -> void:
     _bind_key("use_advanced_bandage", KEY_7)
     _bind_key("restart", KEY_R)
     _bind_key("attack", KEY_F)
+    _bind_key("weapon_skill", KEY_Q)
     _bind_key("craft_spear", KEY_8)
     _bind_key("craft_vest", KEY_9)
 
@@ -259,7 +260,7 @@ func _build_hud() -> void:
     help_label.text = "WASD движение | Shift бег | Space прыжок | F удар\n" + \
         "E сбор | 1 еда | 2 вода | 3 бинт | 4 инструмент | 5 лечение\n" + \
         "6 улучшенный бинт | 7 лечение | 8 копьё | 9 броня\n" + \
-        "Esc мышь | ЛКМ захват мыши | R перезапуск"
+        "F обычная атака | Q особый удар копьём | Esc мышь | R перезапуск"
     column.add_child(help_label)
 
     prompt_label = Label.new()
@@ -300,6 +301,9 @@ func _process(_delta: float) -> void:
             player.equipped_weapon if not player.equipped_weapon.is_empty() else "руки",
             player.equipped_armor if not player.equipped_armor.is_empty() else "нет",
             player.equipped_tool if not player.equipped_tool.is_empty() else "нет"
+        ] +
+        "Боевая энергия: %d/100 | %s\n" % [
+            roundi(player.combat_energy), player.get_weapon_skill_status()
         ] +
         "Заражённые: %d/%d | Боевой опыт %d\n" % [
             infected_kills, infected_total, player.combat_xp

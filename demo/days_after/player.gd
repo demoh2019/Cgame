@@ -12,6 +12,8 @@ const GRAVITY := 18.0
 const MOUSE_SENSITIVITY := 0.0025
 const XP_PER_LEVEL := 60
 const SAVE_STATE = preload("res://save_state.gd")
+const WEAPON_SKILLS = preload("res://weapon_skill_rules.gd")
+const ENERGY_REGEN_PER_SECOND := 9.0
 
 const RECIPES := {
     "field_bandage": {"fiber_t1": 2},
@@ -33,6 +35,8 @@ var equipped_weapon: String = ""
 var equipped_armor: String = ""
 var combat_xp: int = 0
 var attack_cooldown: float = 0.0
+var combat_energy: float = 100.0
+var weapon_skill_cooldown: float = 0.0
 var last_message: String = "Ищите припасы, сырьё и создавайте снаряжение."
 
 @onready var camera: Camera3D = $Head/Camera3D
@@ -75,8 +79,10 @@ func _physics_process(delta: float) -> void:
     move_and_slide()
 
     attack_cooldown = maxf(0.0, attack_cooldown - delta)
+    weapon_skill_cooldown = maxf(0.0, weapon_skill_cooldown - delta)
     if health <= 0.0:
         return
+    combat_energy = minf(100.0, combat_energy + ENERGY_REGEN_PER_SECOND * maxf(0.0, delta))
     hunger = maxf(0.0, hunger - 0.24 * delta)
     thirst = maxf(0.0, thirst - 0.38 * delta)
     if hunger <= 0.0 or thirst <= 0.0:
@@ -84,6 +90,8 @@ func _physics_process(delta: float) -> void:
 
     if Input.is_action_just_pressed("attack"):
         perform_attack()
+    if Input.is_action_just_pressed("weapon_skill"):
+        perform_weapon_skill()
     if Input.is_action_just_pressed("craft_spear"):
         craft_recipe("rusty_spear")
     if Input.is_action_just_pressed("craft_vest"):
@@ -254,6 +262,36 @@ func perform_attack() -> bool:
     attack_cooldown = 0.65
     attack_requested.emit(get_attack_damage(), 2.7)
     return true
+
+
+func perform_weapon_skill() -> bool:
+    # Classless abilities are granted by owned/equipped gear, never a class ID.
+    # Validate everything before consuming energy or starting cooldowns.
+    if health <= 0.0 or attack_cooldown > 0.0 or weapon_skill_cooldown > 0.0:
+        return false
+    var skill: Dictionary = WEAPON_SKILLS.for_weapon(equipped_weapon)
+    if skill.is_empty() or get_item_count(equipped_weapon) < 1:
+        return false
+    var energy_cost: float = float(skill["energy_cost"])
+    if combat_energy < energy_cost:
+        last_message = "Недостаточно боевой энергии для приёма."
+        return false
+    combat_energy -= energy_cost
+    attack_cooldown = float(skill["attack_lock"])
+    weapon_skill_cooldown = float(skill["cooldown"])
+    var damage: float = WEAPON_SKILLS.damage_for(equipped_weapon, get_attack_damage())
+    attack_requested.emit(damage, float(skill["range"]))
+    last_message = "Особая атака: %s (%d урона)." % [str(skill["name"]), roundi(damage)]
+    return true
+
+
+func get_weapon_skill_status() -> String:
+    var skill: Dictionary = WEAPON_SKILLS.for_weapon(equipped_weapon)
+    if skill.is_empty() or get_item_count(equipped_weapon) < 1:
+        return "Q: нужен экипированный меч/копьё"
+    if weapon_skill_cooldown > 0.0:
+        return "%s: %.1f сек" % [str(skill["name"]), weapon_skill_cooldown]
+    return "%s: готово (энергия %d)" % [str(skill["name"]), int(skill["energy_cost"])]
 
 
 func take_damage(raw_amount: float) -> void:

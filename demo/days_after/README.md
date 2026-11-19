@@ -107,3 +107,26 @@ world containers, crafting cooldowns and multiplayer state are not persisted.
 ```sh
 ./bin/godot.linuxbsd.editor.x86_64 --headless --path demo/days_after --script res://smoke_test_saves.gd
 ```
+
+## Classless weapon active skill (Q)
+
+Each equipped spear grants an active thrust skill. The character has no
+mandatory fixed combat class; its skill depends on the equipped item.
+
+- **Rusty spear:** Heavy Thrust, 1.5× its normal damage, 3.1 m range,
+  25 combat energy, 6-second cooldown.
+- **Reinforced spear:** Piercing Thrust, 1.75× its normal damage, 3.4 m range,
+  35 combat energy, 8-second cooldown.
+- Combat energy regenerates at 9 per second while alive (maximum 100).
+- The ability uses the **same existing melee targeting signal** as the
+  ordinary attack, so it respects the same target selection and will use
+  the existing line-of-sight rules when those are merged.
+- A character without a currently owned and equipped spear cannot use Q.
+  Failed actions do not spend energy or start cooldowns.
+- This is a local/offline combat prototype. Server-side cooldown
+  enforcement, animation, latency compensation and anti-cheat are future work.
+
+Test:
+```sh
+./bin/godot.linuxbsd.editor.x86_64 --headless --path demo/days_after --script res://smoke_test_weapon_skills.gd
+```
