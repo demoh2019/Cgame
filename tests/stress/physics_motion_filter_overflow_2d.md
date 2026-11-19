@@ -12,9 +12,13 @@ In a dense or multi-layer scene, irrelevant proxies could occupy **all**
 2048 positions and hide the one relevant collider. This is particularly
 likely with thousands of monitoring areas overlapping a CharacterBody2D.
 
-## Implementation
+## Existing implementation and new regression
 
-`_cull_aabb_for_body()` now uses the existing `GodotBroadPhase2D::visit_aabb()`
+The early-filtering code was **already merged into develop concurrently**;
+this patch adds independent performance/correctness checks for it rather
+than replacing the working implementation.
+
+`_cull_aabb_for_body()` uses the existing `GodotBroadPhase2D::visit_aabb()`
 visitor. It rejects non-body proxies, the moving body itself, query exclusions,
 collision-mask mismatches, and exceptions before appending a candidate to the
 scratch arrays.
@@ -34,7 +38,7 @@ consuming the cap; it does not remove the cap for an extreme overlap of
 is required for that case, especially because the 2D one-way platform and
 recovery logic shares per-phase state.
 
-The same patch also avoids dividing by zero when `motion_length == 0`.
+The previously merged 2D implementation also avoids dividing by zero when `motion_length == 0`.
 This preserves a zero displacement vector for stationary recovery queries
 without changing the collision solver's iteration counts.
 
