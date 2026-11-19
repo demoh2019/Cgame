@@ -1494,6 +1494,14 @@ GodotSpace3D::GodotSpace3D() {
 	fluid_angular_drag = MAX(real_t(0.0), (real_t)GLOBAL_GET("physics/3d/solver/fluid_angular_drag"));
 	fluid_buoyancy = MAX(real_t(0.0), (real_t)GLOBAL_GET("physics/3d/solver/fluid_buoyancy"));
 	fluid_flow_velocity = GLOBAL_GET("physics/3d/solver/fluid_flow_velocity");
+	const real_t configured_convex_pressure = GLOBAL_GET("physics/3d/solver/rigid_convex_aero_pressure_coefficient");
+	rigid_convex_aero_pressure_coefficient = Math::is_finite(configured_convex_pressure) ? CLAMP(configured_convex_pressure, real_t(0.0), real_t(10.0)) : real_t(0.0);
+	const real_t configured_convex_skin = GLOBAL_GET("physics/3d/solver/rigid_convex_aero_skin_coefficient");
+	rigid_convex_aero_skin_coefficient = Math::is_finite(configured_convex_skin) ? CLAMP(configured_convex_skin, real_t(0.0), real_t(10.0)) : real_t(0.0);
+	const real_t configured_convex_density = GLOBAL_GET("physics/3d/solver/rigid_convex_aero_density");
+	rigid_convex_aero_density = Math::is_finite(configured_convex_density) ? CLAMP(configured_convex_density, real_t(0.0), real_t(2000.0)) : real_t(1.225);
+	const Vector3 configured_convex_wind = GLOBAL_GET("physics/3d/solver/rigid_convex_aero_wind_velocity");
+	rigid_convex_aero_wind_velocity = configured_convex_wind.is_finite() ? configured_convex_wind : Vector3();
 	fluid_plane_enabled = GLOBAL_GET("physics/3d/fluid_plane/enabled");
 	fluid_plane_surface_height = GLOBAL_GET("physics/3d/fluid_plane/surface_height");
 	fluid_plane_density = MAX(real_t(0.0), (real_t)GLOBAL_GET("physics/3d/fluid_plane/density"));
