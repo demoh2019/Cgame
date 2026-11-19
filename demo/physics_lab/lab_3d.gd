@@ -255,6 +255,27 @@ func _build_fem_convex_cube() -> ArrayMesh:
     return result
 
 
+# Five welded surface vertices and exactly two explicitly authored volume
+# tetrahedra. Their union is NONCONVEX: a convex fan would reject this mesh.
+# The imported connectivity is validated against the six oriented faces.
+func _build_fem_concave_doubletet() -> ArrayMesh:
+    var vertices := PackedVector3Array([
+        Vector3(0, 0, 0), Vector3(1.6, 0, 0), Vector3(0, 1.6, 0),
+        Vector3(0, 0, 1.6), Vector3(0.96, 1.28, -0.4)
+    ])
+    var indices := PackedInt32Array([
+        1, 2, 3, 0, 3, 2, 0, 1, 3,
+        2, 1, 4, 0, 4, 1, 0, 2, 4
+    ])
+    var arrays := []
+    arrays.resize(Mesh.ARRAY_MAX)
+    arrays[Mesh.ARRAY_VERTEX] = vertices
+    arrays[Mesh.ARRAY_INDEX] = indices
+    var mesh := ArrayMesh.new()
+    mesh.add_surface_from_arrays(Mesh.PRIMITIVE_TRIANGLES, arrays)
+    return mesh
+
+
 func _make_soft_body() -> void:
     var soft := SoftBody3D.new()
     soft.name = "DeformableMesh"
@@ -281,7 +302,18 @@ func _make_soft_body() -> void:
     fem_cube.total_mass = 4.0
     fem_cube.material_override = _material(Color("#82dae7"))
     add_child(fem_cube)
-    _static_box("SoftBodyObstacle", Vector3(14, 0.75, -11), Vector3(8.5, 1.5, 6), Color("#b3a9ce"))
+
+    var imported := SoftBody3D.new()
+    imported.name = "FEMConcaveImportedTwoTets"
+    # Imported order refers to visual mesh vertex IDs, not welded Node IDs.
+    imported.tetrahedral_indices = PackedInt32Array([0, 1, 2, 3, 0, 2, 1, 4])
+    imported.mesh = _build_fem_concave_doubletet()
+    imported.position = Vector3(19.3, 6.4, -11)
+    imported.simulation_precision = 12
+    imported.total_mass = 2.5
+    imported.material_override = _material(Color("#f7b476"))
+    add_child(imported)
+    _static_box("SoftBodyObstacle", Vector3(14.5, 0.75, -11), Vector3(12.5, 1.5, 6), Color("#b3a9ce"))
 
 
 func _make_ccd_station() -> void:
