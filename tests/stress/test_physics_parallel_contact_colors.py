@@ -66,7 +66,7 @@ class ParallelContactColorsContracts(unittest.TestCase):
                 self.assertIn("!p_constraint_island[i]->permits_parallel_immovable_body_sharing()", step)
                 self.assertIn("contact_only_island = false;", step)
                 self.assertLess(step.index("bool contact_only_island = true;"),
-                                step.index("occupied_colors;"))
+                                step.index("if (occupied_colors.get_capacity()"))
 
     def test_coloring_skips_immovable_bodies_only_for_contact_islands(self):
         for dim, source in self.source.items():
