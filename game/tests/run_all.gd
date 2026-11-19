@@ -19,6 +19,7 @@ const SUITES := [
 	"res://tests/test_zone_risk.gd",
 	"res://tests/test_secure_stash.gd",
 	"res://tests/test_barricades.gd",
+	"res://tests/test_world_persistence.gd",
 	"res://tests/test_vendor.gd",
 	"res://tests/test_save_validation.gd",
 ]
