@@ -36,6 +36,9 @@ TEST_FORCE_LINK(test_audio_stream_wav)
 #include "core/io/marshalls.h"
 #include "core/math/math_defs.h"
 #include "core/math/math_funcs.h"
+#include "scene/audio/audio_stream_player.h"
+#include "scene/2d/audio_stream_player_2d.h"
+#include "scene/3d/audio_stream_player_3d.h"
 #include "scene/resources/audio/audio_stream_wav.h"
 #include "tests/test_utils.h"
 
@@ -346,6 +349,72 @@ TEST_CASE("[Audio][AudioStreamWAV] empty sample buffers remain valid") {
 	CHECK(empty.is_empty());
 	stream->set_data(Vector<uint8_t>());
 	CHECK(stream->get_data().is_empty());
+}
+
+
+TEST_CASE("[AudioSetterFastPath] AudioStreamPlayer avoids redundant volume and pitch updates") {
+	AudioStreamPlayer *player = memnew(AudioStreamPlayer);
+	CHECK_EQ(player->get_volume_db(), 0.0f);
+	player->set_volume_db(-12.5f);
+	CHECK_EQ(player->get_volume_db(), -12.5f);
+	for (int i = 0; i < 128; i++) {
+		player->set_volume_db(-12.5f);
+		CHECK_EQ(player->get_volume_db(), -12.5f);
+	}
+	player->set_pitch_scale(1.75f);
+	CHECK_EQ(player->get_pitch_scale(), 1.75f);
+	for (int i = 0; i < 128; i++) {
+		player->set_pitch_scale(1.75f);
+		CHECK_EQ(player->get_pitch_scale(), 1.75f);
+	}
+	memdelete(player);
+}
+
+TEST_CASE("[AudioSetterFastPath] exact small volume changes remain observable") {
+	AudioStreamPlayer *player = memnew(AudioStreamPlayer);
+	player->set_volume_db(-6.0f);
+	player->set_volume_db(-6.0001f);
+	CHECK_EQ(player->get_volume_db(), -6.0001f);
+	player->set_volume_db(-6.0f);
+	CHECK_EQ(player->get_volume_db(), -6.0f);
+	memdelete(player);
+}
+
+TEST_CASE("[AudioSetterFastPath] pitch changes still apply after repeated identical values") {
+	AudioStreamPlayer *player = memnew(AudioStreamPlayer);
+	player->set_pitch_scale(1.25f);
+	player->set_pitch_scale(1.25f);
+	player->set_pitch_scale(0.75f);
+	CHECK_EQ(player->get_pitch_scale(), 0.75f);
+	ERR_PRINT_OFF;
+	player->set_pitch_scale(0.0f);
+	ERR_PRINT_ON;
+	CHECK_EQ(player->get_pitch_scale(), 0.75f);
+	memdelete(player);
+}
+
+TEST_CASE("[AudioSetterFastPath] AudioStreamPlayer2D shares the guarded pitch update path") {
+	AudioStreamPlayer2D *player = memnew(AudioStreamPlayer2D);
+	player->set_pitch_scale(1.5f);
+	for (int i = 0; i < 128; i++) {
+		player->set_pitch_scale(1.5f);
+	}
+	CHECK_EQ(player->get_pitch_scale(), 1.5f);
+	player->set_pitch_scale(0.5f);
+	CHECK_EQ(player->get_pitch_scale(), 0.5f);
+	memdelete(player);
+}
+
+TEST_CASE("[AudioSetterFastPath] AudioStreamPlayer3D shares the guarded pitch update path") {
+	AudioStreamPlayer3D *player = memnew(AudioStreamPlayer3D);
+	player->set_pitch_scale(1.5f);
+	for (int i = 0; i < 128; i++) {
+		player->set_pitch_scale(1.5f);
+	}
+	CHECK_EQ(player->get_pitch_scale(), 1.5f);
+	player->set_pitch_scale(0.5f);
+	CHECK_EQ(player->get_pitch_scale(), 0.5f);
+	memdelete(player);
 }
 
 } // namespace TestAudioStreamWAV
