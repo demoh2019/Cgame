@@ -9,7 +9,7 @@ GDScript callback overhead, so compare only paired runs, not absolute numbers.
 ```
 
 The script filters 50,000 integers using three callbacks (reject-all,
-even-only, accept-all), with five warm-up runs and 80 timed runs each.
+even-only, accept-last, accept-all), with five warm-up runs and 80 timed runs each.
 Alternate base/patched binaries and report median timings across several
 process launches. This optimization is expected to improve the reject-all
 case's allocations and allocation pressure, not necessarily every filter case.
