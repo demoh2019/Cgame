@@ -8,6 +8,7 @@ extends RefCounted
 
 const MAX_QUEUE: int = 8192
 const MAX_DELAY_MS: int = 60000
+const MAX_SAFE_TIME_MS: int = 9223372036854775807 - MAX_DELAY_MS * 2
 
 var _latency_ms: int = 0
 var _jitter_ms: int = 0
@@ -54,7 +55,7 @@ func get_delivered_count() -> int:
 
 
 func schedule(payload: Dictionary, now_ms: int) -> Dictionary:
-	if now_ms < 0:
+	if now_ms < 0 or now_ms > MAX_SAFE_TIME_MS:
 		return {"ok": false, "status": "invalid_time"}
 	if _pending.size() >= MAX_QUEUE:
 		return {"ok": false, "status": "queue_full"}
