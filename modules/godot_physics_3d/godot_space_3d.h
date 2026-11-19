@@ -129,6 +129,9 @@ private:
 	real_t soft_body_link_damping = 0.0; // Optional longitudinal dashpot rate, 1/s.
 	real_t soft_body_xpbd_area_compliance = 0.0;
 	real_t soft_body_xpbd_dihedral_compliance = 0.0; // Opt-in angle-based cloth bending.
+	real_t soft_body_self_collision_thickness = 0.0; // 0: no self-contact work or buffers.
+	real_t soft_body_self_collision_compliance = 0.000001;
+	int soft_body_self_collision_max_contacts_per_vertex = 8;
 	real_t soft_body_xpbd_tether_compliance = 0.0; // Zero bypasses tether setup and solver.
 	real_t soft_body_xpbd_tether_slack = 0.05; // Opt-in triangle area preservation.
 	real_t soft_body_xpbd_volume_compliance = 0.0; // Opt-in enclosed volume preservation.
