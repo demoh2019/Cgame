@@ -1282,6 +1282,8 @@ static void resolve_soft_body_self_edge_contacts(JPH::Body &p_body, const JoltSo
 	const float radius_sq = radius * radius;
 	const float recovery = JoltProjectSettings::soft_body_soft_contact_recovery / p_step;
 	const float friction = JoltProjectSettings::soft_body_soft_contact_friction;
+	const bool use_edge_bvh = JoltProjectSettings::soft_body_self_edge_bvh &&
+			prepare_soft_self_edge_bvh(edges, vertices, r_scratch.edge_bvh, r_budget);
 
 	// Query each unordered pair once: avoids doubling impulses on the
 	// very same self-contact. Topological exclusion also skips edges
@@ -1294,8 +1296,18 @@ static void resolve_soft_body_self_edge_contacts(JPH::Body &p_body, const JoltSo
 		const JPH::Vec3 p1 = a1.mPosition;
 		const JPH::Vec3 p_min = JPH::Vec3::sMin(p0, p1);
 		const JPH::Vec3 p_max = JPH::Vec3::sMax(p0, p1);
-		for (uint32_t j = i + 1; j < edge_count && r_budget > 0; ++j) {
-			--r_budget; // Every candidate, including topology rejects.
+		if (use_edge_bvh) {
+			query_soft_self_edge_bvh(p_min, p_max, radius, r_scratch.edge_bvh, r_budget);
+		}
+		const uint32_t candidate_count = use_edge_bvh ? uint32_t(r_scratch.edge_bvh.candidates.size()) : edge_count;
+		for (uint32_t candidate = 0; candidate < candidate_count && r_budget > 0; ++candidate) {
+			// The tree permutes entries, but preserves each original
+			// edge index. Retain j > i to evaluate unordered pairs once.
+			const uint32_t j = use_edge_bvh ? r_scratch.edge_bvh.candidates[candidate] : candidate;
+			if (j <= i) {
+				continue;
+			}
+			--r_budget; // Every tested candidate, including topology rejects.
 			const uint64_t key_b = edges[j];
 			if (soft_self_edges_are_neighbors(key_a, key_b, edges)) {
 				continue;
@@ -1306,9 +1318,7 @@ static void resolve_soft_body_self_edge_contacts(JPH::Body &p_body, const JoltSo
 			const JPH::Vec3 q1 = b1.mPosition;
 			const JPH::Vec3 q_min = JPH::Vec3::sMin(q0, q1);
 			const JPH::Vec3 q_max = JPH::Vec3::sMax(q0, q1);
-			if (p_max.GetX() + radius < q_min.GetX() || q_max.GetX() + radius < p_min.GetX() ||
-					p_max.GetY() + radius < q_min.GetY() || q_max.GetY() + radius < p_min.GetY() ||
-					p_max.GetZ() + radius < q_min.GetZ() || q_max.GetZ() + radius < p_min.GetZ()) {
+			if (!soft_self_edge_bounds_overlap(p_min, p_max, q_min, q_max, radius)) {
 				continue;
 			}
 
