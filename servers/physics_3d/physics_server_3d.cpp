@@ -578,6 +578,8 @@ PhysicsServer3D::PhysicsServer3D() {
 	GLOBAL_DEF(PropertyInfo(Variant::FLOAT, "physics/3d/solver/max_contact_push_speed", PROPERTY_HINT_RANGE, "0,1000,1,or_greater,suffix:m/s"), 0.0);
 	// Rapier-style cached contact impulse reuse, opt-in damping (1.0 is legacy).
 	GLOBAL_DEF(PropertyInfo(Variant::FLOAT, "physics/3d/solver/warm_start_coefficient", PROPERTY_HINT_RANGE, "0,1,0.01"), 1.0);
+	// Box2D-style Pade damping remains opt-in for backwards-compatible motion.
+	GLOBAL_DEF(PropertyInfo(Variant::BOOL, "physics/3d/solver/implicit_damping"), false);
 	// Optional Bullet-style rolling and torsional contact friction, off by default.
 	GLOBAL_DEF(PropertyInfo(Variant::FLOAT, "physics/3d/solver/rolling_friction", PROPERTY_HINT_RANGE, "0,1,0.01,or_greater"), 0.0);
 	GLOBAL_DEF(PropertyInfo(Variant::FLOAT, "physics/3d/solver/spinning_friction", PROPERTY_HINT_RANGE, "0,1,0.01,or_greater"), 0.0);
