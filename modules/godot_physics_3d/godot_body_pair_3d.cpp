@@ -311,6 +311,18 @@ bool GodotBodyPair3D::setup(real_t p_step) {
 
 	offset_B = B->get_transform().get_origin() - A->get_transform().get_origin();
 
+	// Recycle an unchanged contact manifold without executing SAT/GJK.
+	// The per-object version also changes when a shape's geometry or local
+	// transform changes; CCD always runs the original narrow phase.
+	const bool ccd_enabled = A->is_continuous_collision_detection_enabled() || B->is_continuous_collision_detection_enabled();
+	const uint64_t geometry_version_a = A->get_collision_geometry_version();
+	const uint64_t geometry_version_b = B->get_collision_geometry_version();
+	if (contact_recycling.can_reuse(geometry_version_a, geometry_version_b, collided, contact_count, ccd_enabled)) {
+		// Previous contacts still have their used flags set. pre_solve will
+		// recompute masses, bias, friction and velocities for this step.
+		return true;
+	}
+
 	validate_contacts();
 
 	const Vector3 &offset_A = A->get_transform().get_origin();
@@ -325,6 +337,7 @@ bool GodotBodyPair3D::setup(real_t p_step) {
 	GodotShape3D *shape_B_ptr = B->get_shape(shape_B);
 
 	collided = GodotCollisionSolver3D::solve_static(shape_A_ptr, xform_A, shape_B_ptr, xform_B, _contact_added_callback, this, &sep_axis);
+	contact_recycling.remember(geometry_version_a, geometry_version_b);
 
 	if (!collided) {
 		if (A->is_continuous_collision_detection_enabled() && collide_A) {
