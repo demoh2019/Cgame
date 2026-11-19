@@ -39,7 +39,7 @@ def validate_path(value):
         raise ManifestError(f"Non-portable file path: {value!r}")
     for component in value.split("/"):
         if (not component or component in {".", ".."} or component.endswith((" ", "."))
-                or any(ord(c) < 32 or ord(c) == 127 for c in component)
+                or any(c in '<>"|?*' or ord(c) < 32 or ord(c) == 127 or 0xD800 <= ord(c) <= 0xDFFF for c in component)
                 or component.split(".", 1)[0].upper() in WINDOWS_RESERVED):
             raise ManifestError(f"Unsafe file path: {value!r}")
     return value
