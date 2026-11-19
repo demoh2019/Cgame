@@ -1295,6 +1295,11 @@ GodotSpace3D::GodotSpace3D() {
 	soft_body_xpbd_area_compliance = Math::is_finite(configured_area_compliance) ? MAX(real_t(0.0), configured_area_compliance) : real_t(0.0);
 	const real_t configured_dihedral_compliance = GLOBAL_GET("physics/3d/solver/soft_body_xpbd_dihedral_compliance");
 	soft_body_xpbd_dihedral_compliance = Math::is_finite(configured_dihedral_compliance) ? MAX(real_t(0.0), configured_dihedral_compliance) : real_t(0.0);
+	const real_t configured_self_thickness = GLOBAL_GET("physics/3d/solver/soft_body_self_collision_thickness");
+	soft_body_self_collision_thickness = Math::is_finite(configured_self_thickness) ? MAX(real_t(0.0), configured_self_thickness) : real_t(0.0);
+	const real_t configured_self_compliance = GLOBAL_GET("physics/3d/solver/soft_body_self_collision_compliance");
+	soft_body_self_collision_compliance = Math::is_finite(configured_self_compliance) ? MAX(real_t(0.0), configured_self_compliance) : real_t(0.000001);
+	soft_body_self_collision_max_contacts_per_vertex = CLAMP((int)GLOBAL_GET("physics/3d/solver/soft_body_self_collision_max_contacts_per_vertex"), 1, 32);
 	const real_t configured_tether_compliance = GLOBAL_GET("physics/3d/solver/soft_body_xpbd_tether_compliance");
 	soft_body_xpbd_tether_compliance = Math::is_finite(configured_tether_compliance) ? MAX(real_t(0.0), configured_tether_compliance) : real_t(0.0);
 	const real_t configured_tether_slack = GLOBAL_GET("physics/3d/solver/soft_body_xpbd_tether_slack");
