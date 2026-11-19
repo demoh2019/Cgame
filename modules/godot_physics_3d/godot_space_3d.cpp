@@ -1285,6 +1285,9 @@ GodotSpace3D::GodotSpace3D() {
 	speculative_sphere_distance = MAX(real_t(0.0), (real_t)GLOBAL_GET("physics/3d/solver/speculative_sphere_distance"));
 	const real_t configured_xpbd_compliance = GLOBAL_GET("physics/3d/solver/soft_body_xpbd_compliance");
 	soft_body_xpbd_compliance = Math::is_finite(configured_xpbd_compliance) ? MAX(real_t(0.0), configured_xpbd_compliance) : real_t(0.0);
+	soft_body_xpbd_fiber_axis = CLAMP((int)GLOBAL_GET("physics/3d/solver/soft_body_xpbd_fiber_axis"), 0, 3);
+	const real_t configured_fiber_ratio = GLOBAL_GET("physics/3d/solver/soft_body_xpbd_fiber_compliance_ratio");
+	soft_body_xpbd_fiber_compliance_ratio = Math::is_finite(configured_fiber_ratio) ? CLAMP(configured_fiber_ratio, real_t(0.1), real_t(10.0)) : real_t(1.0);
 	const real_t configured_plastic_yield = GLOBAL_GET("physics/3d/solver/soft_body_plastic_yield_strain");
 	soft_body_plastic_yield_strain = Math::is_finite(configured_plastic_yield) ? CLAMP(configured_plastic_yield, real_t(0.0), real_t(1.0)) : real_t(0.1);
 	const real_t configured_plastic_creep_rate = GLOBAL_GET("physics/3d/solver/soft_body_plastic_creep_rate");
