@@ -270,7 +270,6 @@ static void resolve_soft_soft_vertex_face_direction(JPH::Body &p_point_body, JPH
 	for (uint32_t i = 0; i < point_count && r_contact_budget > 0; ++i) {
 		JPH::SoftBodyVertex &point = points[i];
 		const JPH::Vec3 point_position = point_rotation * point.mPosition;
-		const JPH::Vec3 point_velocity = point_rotation * point.mVelocity;
 		for (const JPH::SoftBodySharedSettings::Face &face : faces) {
 			if (r_contact_budget == 0) {
 				return;
@@ -302,7 +301,7 @@ static void resolve_soft_soft_vertex_face_direction(JPH::Body &p_point_body, JPH
 				continue;
 			}
 			const JPH::Vec3 face_velocity = face_rotation * (u * v0.mVelocity + v * v1.mVelocity + w * v2.mVelocity);
-			const JPH::Vec3 relative_velocity = point_velocity - face_velocity;
+			const JPH::Vec3 relative_velocity = point_rotation * point.mVelocity - face_velocity;
 			const float distance = Math::sqrt(MAX(distance_sq, 0.0f));
 			// Both sides of a triangle can collide; at exact coincidence,
 			// choose the normal opposing the current normal approach.
