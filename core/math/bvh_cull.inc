@@ -140,6 +140,9 @@ int cull_point(CullParams &r_params, bool p_translate_hits = true) {
 		}
 
 		_cull_point_iterative(_root_node_id[n], r_params);
+		if (_cull_hits_full(r_params)) {
+			break;
+		}
 	}
 
 	if (p_translate_hits) {
@@ -312,6 +315,9 @@ bool _cull_point_iterative(uint32_t p_node_id, CullParams &r_params) {
 
 					// register hit
 					_cull_hit(child_id, r_params);
+					if (_cull_hits_full(r_params)) {
+						return false;
+					}
 				}
 			}
 		} else {
@@ -394,9 +400,9 @@ bool _cull_aabb_iterative(uint32_t p_node_id, CullParams &r_params, bool p_fully
 
 						// register hit
 						_cull_hit(child_id, r_params);
-					if (_cull_hits_full(r_params)) {
-						return false;
-					}
+						if (_cull_hits_full(r_params)) {
+							return false;
+						}
 					}
 				}
 
