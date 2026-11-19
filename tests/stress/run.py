@@ -30,6 +30,7 @@ CASES = (
     "file_io", "threads", "physics_2d", "physics_3d",
     "memory_churn", "astar_grid", "tweens", "audio_buffers",
     "variant_codec", "render_2d", "render_3d",
+    "astar_graph", "compression", "regex", "resource_io", "animation_tracks", "ui_layout",
     "node_paths", "regex", "compression", "hashing",
     "resource_io", "astar_3d", "ui_layout", "thread_contention",
 )
