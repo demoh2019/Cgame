@@ -328,6 +328,26 @@ func _build() -> void:
 		else:
 			client.outpost_fortify(int(nearest["id"])))
 	inventory_box.add_child(fortify_button)
+	var breach_button := Button.new()
+	breach_button.name = "BreachOutpost"
+	breach_button.text = "Breach enemy outpost (2 planks T2 + 2 bars T2)"
+	breach_button.tooltip_text = "Two living attackers in one party must be near the enemy flag. Reduces one fortification tier; 45s cooldown."
+	breach_button.pressed.connect(func() -> void:
+		var here: Vector3 = client.display_position()
+		var nearest: Dictionary = {}
+		var distance := INF
+		for site in client.outposts:
+			var delta: float = Vector2(here.x, here.z).distance_to(
+				Vector2(float(site["x"]), float(site["z"])))
+			if delta < distance:
+				distance = delta
+				nearest = site
+		if nearest.is_empty() or distance > 4.0:
+			say("Breach: move within 4m of an enemy outpost")
+		else:
+			client.outpost_breach(int(nearest["id"])))
+	inventory_box.add_child(breach_button)
+
 	var kick_member := Button.new()
 	kick_member.text = "Kick"
 	kick_member.pressed.connect(func() -> void:
@@ -651,6 +671,12 @@ func _on_result(kind: String, data: Dictionary) -> void:
 		say("Raid loot is reserved for its contributors (%ds remaining)." % [
 			int(ceil(float(data.get("remaining", 0.0))))])
 		return
+	if kind == "outpost_breach":
+		if bool(data.get("ok", false)):
+			say("Siege breach successful: enemy fortification now T%d." % int(data.get("level", 0)))
+		else:
+			say("Siege breach: " + str(data.get("reason", "rejected")))
+		return
 	if kind == "outpost_fortify":
 		if bool(data.get("ok", false)):
 			say("Outpost fortified to T%d; spent %s" % [
@@ -815,6 +841,8 @@ func _process(_delta: float) -> void:
 		elif int(closest["challenger"]) != 0:
 			status += " | Capture %d%%" % int(100.0 * float(closest["progress"]) / maxf(1.0, float(closest.get("capture_target", 30.0))))
 		status += " | Fort T%d" % int(closest.get("fortification", 0))
+		if float(closest.get("breach_cooldown", 0.0)) > 0.0:
+			status += " | Breach CD %ds" % int(ceil(float(closest["breach_cooldown"])))
 		status += " | Supplies %d/5" % int(closest.get("supplies_left", 0))
 		_info_label.text += "\nSiege outpost #%d at (%d, %d): %.0f m | %s" % [
 			int(closest["id"]), int(closest["x"]), int(closest["z"]), best_distance, status

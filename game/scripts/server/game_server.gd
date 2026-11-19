@@ -14,6 +14,7 @@ const LootRights = preload("res://scripts/shared/loot_rights.gd")
 const PartyAid = preload("res://scripts/shared/party_aid.gd")
 const TerritoryControl = preload("res://scripts/shared/territory_control.gd")
 const OutpostFortification = preload("res://scripts/shared/outpost_fortification.gd")
+const OutpostBreach = preload("res://scripts/shared/outpost_breach.gd")
 const MarketBoard = preload("res://scripts/shared/market_board.gd")
 const Contracts = preload("res://scripts/shared/contracts.gd")
 const SaveValidation = preload("res://scripts/shared/save_validation.gd")
@@ -44,6 +45,7 @@ const TRADE_RANGE := 6.0
 const TRADE_TIMEOUT := 45.0
 const MARKET_MAX_REQUEST_ID := 2_147_483_647
 const FORTIFY_MAX_REQUEST_ID := 2_147_483_647
+const BREACH_MAX_REQUEST_ID := 2_147_483_647
 const ZOMBIE_ACTIVE_RADIUS := 130.0 # Zombies farther than this from every player are put to sleep.
 const ZOMBIE_PACK_ALERT_RADIUS := 18.0
 const ZOMBIE_PACK_BUCKET_SIZE := 18.0
@@ -116,6 +118,7 @@ var trade_by_player: Dictionary = {} # peer -> active trade
 var parties = Party.new() # Server-only session groups and short-lived invitations.
 var territory # Session outposts generated from this world seed.
 var outpost_fortify_requests: Dictionary = {} # Peer -> last request and cached result.
+var outpost_breach_requests: Dictionary = {} # Peer -> last command and cached result.
 var world_structure_revision: int = 0
 var bags: Dictionary = {} # Session loot; optional server-owned PvE reservations
 var events: Array = [] # Things that happened this tick, for the network layer to announce.
@@ -295,6 +298,7 @@ func valid_character_data(data: Dictionary) -> bool:
 func remove_player(peer_id: int) -> void:
 	market_buy_requests.erase(peer_id)
 	outpost_fortify_requests.erase(peer_id)
+	outpost_breach_requests.erase(peer_id)
 	_cancel_market_seller(peer_id)
 	_cancel_player_trade(peer_id, "disconnected")
 	parties.disconnect(peer_id)
@@ -623,6 +627,52 @@ func _execute_outpost_fortify(peer_id: int, site_id: int) -> Dictionary:
 		events.append({
 			"type": "outpost_fortified", "id": site_id, "level": result["level"],
 			"x": site["x"], "z": site["z"], "owner": group_id,
+		})
+	return result
+
+
+# --- Siege breaches. A hostile party can spend crafted T2 materials to
+# dismantle defensive tiers, countering the permanent defender time bonus.
+# Request IDs are monotonic per peer and never accepted twice with new terms.
+func cmd_outpost_breach(peer_id: int, site_id: int, request_id: int) -> Dictionary:
+	if not players.has(peer_id):
+		return {"ok": false, "reason": "unknown_player"}
+	if request_id < 1 or request_id > BREACH_MAX_REQUEST_ID:
+		return {"ok": false, "reason": "invalid_request_id"}
+	var last: Dictionary = outpost_breach_requests.get(peer_id, {})
+	if not last.is_empty():
+		if request_id < int(last["id"]):
+			return {"ok": false, "reason": "stale_request"}
+		if request_id == int(last["id"]):
+			if site_id != int(last["site"]):
+				return {"ok": false, "reason": "request_conflict"}
+			return (last["result"] as Dictionary).duplicate(true)
+	var result: Dictionary = _execute_outpost_breach(peer_id, site_id)
+	result["request_id"] = request_id
+	outpost_breach_requests[peer_id] = {
+		"id": request_id, "site": site_id, "result": result.duplicate(true),
+	}
+	return result
+
+
+func _execute_outpost_breach(peer_id: int, site_id: int) -> Dictionary:
+	var player: Player = players.get(peer_id)
+	if player == null or not _alive(player):
+		return {"ok": false, "reason": "dead"}
+	var site: Dictionary = territory.site_by_id(site_id)
+	if site.is_empty():
+		return {"ok": false, "reason": "unknown_outpost"}
+	var attacker_group: int = parties.group_of(peer_id)
+	var occupied: Dictionary = territory._occupied_groups(site, players, parties)
+	var ally_count: int = int(occupied.get(attacker_group, 0)) if attacker_group > 0 else 0
+	var result: Dictionary = OutpostBreach.breach(
+		site, player.inventory, attacker_group, player.position, ally_count, time)
+	if result.get("ok", false):
+		player.dirty_inventory = true
+		player.dirty_character = true
+		events.append({
+			"type": "outpost_breached", "id": site_id, "level": result["level"],
+			"x": site["x"], "z": site["z"], "by_group": attacker_group,
 		})
 	return result
 

@@ -243,6 +243,16 @@ func outpost_fortify(site_id: int) -> void:
 	net.c_outpost_fortify.rpc_id(1, site_id, _outpost_fortify_request_id)
 
 
+var _outpost_breach_request_id: int = 0
+
+
+func outpost_breach(site_id: int) -> void:
+	if _outpost_breach_request_id >= 2_147_483_647:
+		return # Reconnect instead of wrapping a session-specific request ID.
+	_outpost_breach_request_id += 1
+	net.c_outpost_breach.rpc_id(1, site_id, _outpost_breach_request_id)
+
+
 func trade_invite(target_id: int) -> void:
 	net.c_trade_invite.rpc_id(1, target_id)
 

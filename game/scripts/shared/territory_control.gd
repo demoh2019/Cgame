@@ -6,6 +6,7 @@ extends RefCounted
 const Defs = preload("res://scripts/shared/defs.gd")
 const ZoneRisk = preload("res://scripts/shared/zone_risk.gd")
 const OutpostFortification = preload("res://scripts/shared/outpost_fortification.gd")
+const OutpostBreach = preload("res://scripts/shared/outpost_breach.gd")
 const OutpostSupplies = preload("res://scripts/shared/outpost_supplies.gd")
 
 const MAX_SITES := 3
@@ -43,6 +44,7 @@ func _init(world) -> void:
 				"id": index + 1, "x": position.x, "z": position.y,
 				"owner": 0, "until": 0.0, "challenger": 0,
 				"progress": 0.0, "contested": false, "fortification": 0,
+				"breach_ready_at": 0.0,
 				"supplies_left": 0, "supply_epoch": 0,
 				"supply_claims": {},
 			})
@@ -58,6 +60,7 @@ func public_state(now: float) -> Array:
 			"progress": float(site["progress"]), "contested": bool(site["contested"]),
 			"fortification": int(site["fortification"]),
 			"capture_target": capture_target(site),
+			"breach_cooldown": maxf(0.0, float(site.get("breach_ready_at", 0.0)) - now),
 			"expires_in": maxf(0.0, float(site["until"]) - now),
 			"supplies_left": int(site.get("supplies_left", 0)),
 		})
@@ -111,6 +114,7 @@ func tick(delta: float, now: float, players: Dictionary, parties) -> Array:
 			site["supplies_left"] = 0
 			site["fortification"] = 0
 			site["supply_claims"] = {}
+			site["breach_ready_at"] = 0.0
 			changed.append({"type": "outpost_lost", "id": site["id"], "x": site["x"], "z": site["z"]})
 		var occupants: Dictionary = _occupied_groups(site, players, parties)
 		site["contested"] = occupants.size() > 1
@@ -134,6 +138,7 @@ func tick(delta: float, now: float, players: Dictionary, parties) -> Array:
 			site["until"] = now + HOLD_SECONDS
 			OutpostSupplies.initialize_capture(site)
 			site["fortification"] = 0 # Previous defenders lose their walls.
+			site["breach_ready_at"] = 0.0 # Siege timer belongs to former owner.
 			site["challenger"] = 0
 			site["progress"] = 0.0
 			changed.append({

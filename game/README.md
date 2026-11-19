@@ -1506,3 +1506,35 @@ left the inventory. PvP remains unaffected by the PvE bonus.
 The existing `tests/test_purifier_maul.gd` is updated for Focused Shot
 coexistence and re-registered in `tests/run_all.gd`; both the regular
 `test_ranged_skills.gd` and relic tests must run together.
+
+
+## Attacker siege breaches (crafting x dangerous-zone PvP)
+
+The defenders' T1–T3 outpost walls now have a resource-paid counterplay
+mechanic. **Two living members of the same attacking party** must be within
+the outpost's 12-metre capture radius; the player performing the breach must
+be within 4 metres. The target must have an active enemy owner and at least
+one fortification tier. Each successful breach consumes **2 Planks T2 and
+2 Metal Bars T2** from the attacker's backpack, destroys one fortification
+tier and shortens the remaining capture requirement by 10 seconds. These
+materials are produced through the existing gathering/refining economy.
+
+An individual outpost has a server-owned **45-second breach cooldown**,
+visible in the regular world snapshot and outpost HUD. The timer resets
+when the outpost changes hands or becomes neutral. Attackers can fight
+defenders while attempting a breach, but are exposed to full-loot PvP.
+Owners cannot break their own defenses through this command.
+
+The server authenticates the sending player, derives party membership and
+number of nearby living attackers, checks backpack supplies and commits
+both item removal and fortification reduction synchronously. Client RPCs
+have monotonic request IDs, with cached receipts preventing repeat spends
+and repeat siege damage. A breach emits a nearby-only network event.
+Tests in `tests/test_outpost_breach.gd` cover ownership, group size,
+distance, consumption, replays, cooldown, character dirty flags and
+restoring defenses.
+
+Outposts still belong to session-based parties, not persistent guilds.
+This patch does not claim crash-atomic cross-character transactions or
+durable territory ownership. The current engine already supports its
+server-side simulation and reliable RPCs; no native Cgame change is required.
