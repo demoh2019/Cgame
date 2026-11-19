@@ -1032,3 +1032,24 @@ python3 tests/stress/run.py --godot ./bin/godot.linuxbsd.editor.dev.x86_64 \
 
 A successful correctness check is **not** proof of million-body throughput;
 measure both execution time and peak process RSS separately.
+
+### Stationary broadphase filter toggles (2D / 3D)
+
+The `physics_filter_toggle_2d` and `physics_filter_toggle_3d` workloads create
+`16 * scale` overlapping Area/StaticBody pairs. They repeatedly switch only
+the area's collision mask while all transforms and collider shapes remain
+stationary, checking that monitoring results lose and regain the correct pairs.
+These cases catch stale BVH pair membership after mask/layer changes and measure
+the synchronous filter-update cost without mixing in rigid-body motion.
+
+```bash
+python3 tests/stress/run.py \\
+  --godot ./bin/godot.linuxbsd.editor.dev.x86_64 \\
+  --case physics_filter_toggle_2d,physics_filter_toggle_3d \\
+  --scale 4 --frames 12 --repeats 5 --rss-limit-mib 4096 \\
+  --output out/physics-filter-toggle.json
+```
+
+For performance comparisons use the same hardware and build settings. A
+successfully registered workload is not proof that native regression tests or
+large-scale performance targets have passed.
