@@ -1,0 +1,38 @@
+name: CodeEdit completion buffer reuse regressions
+
+on:
+  pull_request:
+    paths:
+      - 'scene/gui/code_edit.cpp'
+      - 'tests/scene/test_code_edit.cpp'
+      - '.github/workflows/codeedit-completion-buffer-perf.yml'
+  push:
+    branches: [develop]
+    paths:
+      - 'scene/gui/code_edit.cpp'
+      - 'tests/scene/test_code_edit.cpp'
+      - '.github/workflows/codeedit-completion-buffer-perf.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  native-codeedit-completion:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+      - uses: ./.github/actions/godot-deps
+      - name: Compile native editor tests
+        uses: ./.github/actions/godot-build
+        with:
+          platform: linuxbsd
+          target: editor
+          scons-flags: dev_build=yes tests=yes debug_symbols=no module_mono_enabled=no module_text_server_fb_enabled=yes accesskit=no -j2
+      - name: Check 512 completion candidates
+        run: ./bin/godot.linuxbsd.editor.dev.x86_64 --headless --test --test-case="*[SceneTree][CodeEdit] Large completion candidate buffers preserve every suggestion*"
+      - name: Check subsequence matching rank stays stable
+        run: ./bin/godot.linuxbsd.editor.dev.x86_64 --headless --test --test-case="*[SceneTree][CodeEdit] Completion matching keeps case and contiguous ranking*"
