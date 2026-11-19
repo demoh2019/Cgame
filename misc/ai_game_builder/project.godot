@@ -1,0 +1,8 @@
+; Minimal test and development project for the packaged addon.
+config_version=5
+
+[application]
+config/name="AI Game Builder Test Project"
+
+[editor_plugins]
+enabled=PackedStringArray("res://addons/ai_game_builder/plugin.cfg")
