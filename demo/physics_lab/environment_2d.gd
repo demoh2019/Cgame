@@ -301,7 +301,7 @@ func _update_status() -> void:
         "ON" if _magnet_on else "OFF", _gravity_scale, "ON" if _waves else "OFF"
     ]
     if is_instance_valid(_held):
-        _status.text += "\\nВыбрано: %s | масса %.1f | %s" % [
+        _status.text += "\nВыбрано: %s | масса %.1f | %s" % [
             _held.name, _held.mass, "заморожено" if _held.freeze else "активно"
         ]
 
