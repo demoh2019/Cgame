@@ -8,6 +8,7 @@ on:
       - 'core/object/method_bind.cpp'
       - 'core/variant/variant_call.cpp'
       - 'tests/core/math/test_astar.cpp'
+      - 'tests/core/math/test_astar_2d.cpp'
       - '.github/workflows/astar-known-size-results.yml'
   push:
     branches: [develop]
@@ -17,6 +18,7 @@ on:
       - 'core/object/method_bind.cpp'
       - 'core/variant/variant_call.cpp'
       - 'tests/core/math/test_astar.cpp'
+      - 'tests/core/math/test_astar_2d.cpp'
       - '.github/workflows/astar-known-size-results.yml'
   workflow_dispatch:
 
@@ -42,3 +44,6 @@ jobs:
         run: |
           ./bin/godot.linuxbsd.editor.dev.x86_64 --headless --test --test-case="*[AStar3D] Known-size point IDs and connections preserve all entries*"
           ./bin/godot.linuxbsd.editor.dev.x86_64 --headless --test --test-case="*[AStarGrid2D] Pre-sized region data respects grid intersections and order*"
+          ./bin/godot.linuxbsd.editor.dev.x86_64 --headless --test --test-case="*[AStar3D] Start heuristic evaluated once per search*"
+          ./bin/godot.linuxbsd.editor.dev.x86_64 --headless --test --test-case="*[AStar2D] Start heuristic evaluated once per search*"
+          ./bin/godot.linuxbsd.editor.dev.x86_64 --headless --test --test-case="*[AStarGrid2D] Start heuristic evaluated once per search*"
