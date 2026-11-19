@@ -457,6 +457,23 @@ TEST_CASE("[SceneTree][WorldPartition3D] Replacing a cell loads a different auth
 	CHECK(DirAccess::remove_absolute(second_path) == OK);
 }
 
+TEST_CASE("[SceneTree][WorldPartition3D] Observer position is measured in partition local space") {
+	const String path = make_cell_scene("translated_partition", Vector3(1, 0, -2));
+	{
+		WorldFixture fixture;
+		fixture.world->set_position(Vector3(100, 0, 50));
+		fixture.observer->set_position(Vector3(84, 0, 34));
+		fixture.world->set_cell_scene(Vector2i(-1, -1), path);
+		REQUIRE(wait_for_cell(fixture.world, Vector2i(-1, -1)));
+		REQUIRE(fixture.world->get_child_count() == 1);
+		Node3D *inst = Object::cast_to<Node3D>(fixture.world->get_child(0));
+		REQUIRE(inst != nullptr);
+		CHECK(inst->get_position() == Vector3(-15, 0, -18));
+		CHECK(inst->get_global_position() == Vector3(85, 0, 32));
+	}
+	CHECK(DirAccess::remove_absolute(path) == OK);
+}
+
 TEST_CASE("[SceneTree][WorldPartition3D] One background scene request serves multiple cells") {
 	const String path = make_cell_scene("shared_resources");
 	{
