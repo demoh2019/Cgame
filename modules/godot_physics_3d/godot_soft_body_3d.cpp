@@ -1579,6 +1579,11 @@ void GodotSoftBody3D::solve_constraints(real_t p_delta) {
 			Math::is_finite(area_alpha_double) && area_alpha_double > 0.0;
 	const real_t alpha = use_xpbd ? real_t(MIN(alpha_double, double(std::numeric_limits<real_t>::max()))) : real_t(0.0);
 	const real_t area_alpha = use_area_xpbd ? real_t(MIN(area_alpha_double, double(std::numeric_limits<real_t>::max()))) : real_t(0.0);
+	const double dihedral_compliance = get_space() ? double(get_space()->get_soft_body_xpbd_dihedral_compliance()) : 0.0;
+	const double dihedral_alpha_double = p_delta > 0.0 ? dihedral_compliance / (double(p_delta) * double(p_delta)) : 0.0;
+	const bool use_dihedral_xpbd = dihedral_compliance > 0.0 && !xpbd_dihedral_hinges.is_empty() &&
+			Math::is_finite(dihedral_alpha_double) && dihedral_alpha_double > 0.0;
+	const real_t dihedral_alpha = use_dihedral_xpbd ? real_t(MIN(dihedral_alpha_double, double(std::numeric_limits<real_t>::max()))) : real_t(0.0);
 	const double volume_compliance = get_space() ? double(get_space()->get_soft_body_xpbd_volume_compliance()) : 0.0;
 	const double volume_alpha = p_delta > 0.0 ? volume_compliance / (double(p_delta) * double(p_delta)) : 0.0;
 	const bool use_volume_xpbd = xpbd_volume_closed && volume_compliance > 0.0 &&
@@ -1625,6 +1630,15 @@ void GodotSoftBody3D::solve_constraints(real_t p_delta) {
 		xpbd_area_lambdas.reset();
 	}
 
+	if (use_dihedral_xpbd) {
+		xpbd_dihedral_lambdas.resize(xpbd_dihedral_hinges.size());
+		for (real_t &lambda : xpbd_dihedral_lambdas) {
+			lambda = real_t(0.0);
+		}
+	} else if (!xpbd_dihedral_lambdas.is_empty()) {
+		xpbd_dihedral_lambdas.reset();
+	}
+
 	if (use_volume_xpbd) {
 		// Reuse scratch at every iteration; one volume scalar lambda per step.
 		xpbd_volume_gradients.resize(nodes.size());
@@ -1654,6 +1668,18 @@ void GodotSoftBody3D::solve_constraints(real_t p_delta) {
 				physics_xpbd_solve_triangle_area(face.n[0]->x, face.n[1]->x, face.n[2]->x,
 						face.n[0]->im, face.n[1]->im, face.n[2]->im,
 						face.ra, area_alpha, xpbd_area_lambdas[face_index]);
+			}
+		}
+		if (use_dihedral_xpbd) {
+			for (uint32_t hinge_index = 0; hinge_index < xpbd_dihedral_hinges.size(); ++hinge_index) {
+				const DihedralHinge &hinge = xpbd_dihedral_hinges[hinge_index];
+				Node &a = nodes[hinge.a];
+				Node &b = nodes[hinge.b];
+				Node &c = nodes[hinge.c];
+				Node &d = nodes[hinge.d];
+				physics_xpbd_solve_dihedral(a.x, b.x, c.x, d.x,
+						a.im, b.im, c.im, d.im, hinge.rest_angle,
+						dihedral_alpha, xpbd_dihedral_lambdas[hinge_index]);
 			}
 		}
 		if (use_volume_xpbd) {
