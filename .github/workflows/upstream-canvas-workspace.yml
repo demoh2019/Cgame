@@ -1,0 +1,40 @@
+name: Canvas workspace upstream regression checks
+
+on:
+  push:
+    branches: [develop]
+    paths:
+      - 'editor/scene/canvas_item_editor_plugin.cpp'
+      - 'misc/scripts/tests/test_upstream_canvas_workspace.py'
+      - 'misc/scripts/README_upstream_canvas_workspace.md'
+      - '.github/workflows/upstream-canvas-workspace.yml'
+  pull_request:
+    branches: [develop]
+    paths:
+      - 'editor/scene/canvas_item_editor_plugin.cpp'
+      - 'misc/scripts/tests/test_upstream_canvas_workspace.py'
+      - 'misc/scripts/README_upstream_canvas_workspace.md'
+      - '.github/workflows/upstream-canvas-workspace.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  source-regressions:
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 10
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+        python-version: ['3.10', '3.13']
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+      - name: Python syntax
+        run: python -m py_compile misc/scripts/tests/test_upstream_canvas_workspace.py
+      - name: Canvas workspace and selection contracts
+        run: python -m unittest discover -s misc/scripts/tests -p test_upstream_canvas_workspace.py -v
