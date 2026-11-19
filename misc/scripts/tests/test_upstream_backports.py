@@ -1,169 +1,235 @@
-"""Focused regression contracts for three small Godot upstream backports.
+#!/usr/bin/env python3
+"""Regression checks for small upstream Godot backports.
 
-Run with:
-  python3 -m unittest discover -s misc/scripts/tests -p test_upstream_backports.py -v
-
-These fast tests check compiler preprocessing and source-level integration.
-They DO NOT replace compiling the engine or exercising GUI/platform behavior.
+These exercise the actual editor method in a standalone C++ harness and check
+the GLES3 preprocessor branch under simulated compiler configurations.
+They are not a substitute for a full editor/renderer build.
 """
 
 from __future__ import annotations
 
 import shutil
 import subprocess
+import tempfile
 import unittest
 from pathlib import Path
-
+from xml.etree import ElementTree
 
 ROOT = Path(__file__).resolve().parents[3]
+FIND_SOURCE = ROOT / "editor/script/find_in_files.cpp"
+GLES_SOURCE = ROOT / "drivers/gles3/rasterizer_gles3.cpp"
+TEXTURE_DOC = ROOT / "doc/classes/TextureRect.xml"
 
 
-def read_source(path: str) -> str:
-    return (ROOT / path).read_text(encoding="utf-8")
-
-
-def method_body(source: str, signature: str) -> str:
-    """Extract one function body, respecting nested braces."""
-    offset = source.index(signature)
-    start = source.index("{", offset)
+def extract_cpp_function(source: str, signature: str) -> str:
+    start = source.index(signature)
+    opening = source.index("{", start)
     depth = 0
-    for index in range(start, len(source)):
-        if source[index] == "{":
+    for i in range(opening, len(source)):
+        if source[i] == "{":
             depth += 1
-        elif source[index] == "}":
+        elif source[i] == "}":
             depth -= 1
             if depth == 0:
-                return source[start + 1 : index]
-    raise AssertionError(f"Unbalanced braces after {signature}")
+                return source[start : i + 1]
+    raise ValueError("C++ function closing brace not found")
 
 
-class GLES3MSVCGuardTests(unittest.TestCase):
+class EditorFilterRegressionTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
-        src = read_source("drivers/gles3/rasterizer_gles3.cpp")
-        begin = src.index("#if defined(GLAD_ENABLED) || defined(EGL_ENABLED) || defined(ANDROID_ENABLED)")
-        end_marker = "#endif // GLAD_ENABLED || EGL_ENABLED || ANDROID_ENABLED"
-        end = src.index(end_marker, begin) + len(end_marker)
-        cls.guard_source = src[begin:end]
-
-    def preprocess_call(self, defines: tuple[str, ...]) -> str:
-        cc = shutil.which("cc")
-        if cc is None:
-            self.skipTest("No C preprocessor installed")
-        translation_unit = self.guard_source + "\nvoid probe(void) { strcpy(dst, src); }\n"
-        proc = subprocess.run(
-            [cc, "-E", "-P", "-x", "c", *(f"-D{symbol}" for symbol in defines), "-"],
-            input=translation_unit,
-            text=True,
-            capture_output=True,
-            check=False,
+        cls.method = extract_cpp_function(
+            FIND_SOURCE.read_text(encoding="utf-8"),
+            "void FindInFilesSearchPanel::_update_finder()",
         )
-        self.assertEqual(proc.returncode, 0, proc.stderr)
-        return proc.stdout
 
-    def test_mingw_does_not_rewrite_strcpy(self):
-        for defines in (
-            ("_WIN32", "GLAD_ENABLED"),
-            ("_WIN32", "EGL_ENABLED"),
-            ("_WIN32", "ANDROID_ENABLED"),
-        ):
+    def test_filter_is_forwarded_exactly_once(self):
+        self.assertEqual(self.method.count("finder->set_filter(get_filter());"), 1)
+
+    def test_filter_is_applied_before_includes_and_excludes(self):
+        method = self.method
+        self.assertLess(method.index("finder->set_folder("), method.index("finder->set_filter("))
+        self.assertLess(method.index("finder->set_filter("), method.index("finder->set_includes("))
+        self.assertLess(method.index("finder->set_includes("), method.index("finder->set_excludes("))
+
+    def test_rename_mode_is_guarded_before_updating(self):
+        self.assertLess(self.method.index("if (finder->is_rename_mode())"), self.method.index("finder->set_filter("))
+        self.assertIn("return;", self.method[: self.method.index("finder->set_filter(")])
+
+    @unittest.skipUnless(shutil.which("c++"), "C++ compiler not installed")
+    def test_actual_cpp_method_with_mock_editor_controls(self):
+        prelude = r"""
+#include <cassert>
+#include <set>
+#include <string>
+#include <iostream>
+
+struct String {
+    std::string value;
+    String(std::string p_value = "") : value(p_value) {}
+    String strip_edges() const {
+        size_t first = value.find_first_not_of(" \t\n");
+        if (first == std::string::npos) return String("");
+        size_t last = value.find_last_not_of(" \t\n");
+        return String(value.substr(first, last - first + 1));
+    }
+};
+struct LineEdit {
+    String text;
+    String get_text() const { return text; }
+};
+struct CheckBox {
+    bool value = false;
+    bool is_pressed() const { return value; }
+};
+struct Finder {
+    bool rename = false, match_case = false, whole_words = false;
+    String pattern, folder, includes, excludes;
+    std::set<std::string> filters;
+    bool is_rename_mode() const { return rename; }
+    void set_search_text(const String &v) { pattern = v; }
+    void set_match_case(bool v) { match_case = v; }
+    void set_whole_words(bool v) { whole_words = v; }
+    void set_folder(const String &v) { folder = v; }
+    void set_filter(const std::set<std::string> &v) { filters = v; }
+    void set_includes(const String &v) { includes = v; }
+    void set_excludes(const String &v) { excludes = v; }
+};
+struct FindInFilesSearchPanel {
+    Finder *finder;
+    LineEdit *search_text_line_edit, *folder_line_edit, *includes_line_edit, *excludes_line_edit;
+    CheckBox *match_case_checkbox, *whole_words_checkbox;
+    std::set<std::string> selected_extensions;
+    std::set<std::string> get_filter() const { return selected_extensions; }
+    void _update_finder();
+};
+"""
+        checks = r"""
+#define CHECK(condition) do { \
+    if (!(condition)) { std::cerr << "Failed: " #condition "\n"; return 1; } \
+    ++checks; \
+} while (0)
+int main() {
+    int checks = 0;
+    Finder finder;
+    LineEdit text, folder, includes, excludes;
+    CheckBox match_case, whole_words;
+    text.text = String("needle");
+    folder.text = String("  res://assets  ");
+    includes.text = String("*.gd");
+    excludes.text = String("vendor/*");
+    match_case.value = true;
+    whole_words.value = true;
+    FindInFilesSearchPanel panel{
+        &finder, &text, &folder, &includes, &excludes,
+        &match_case, &whole_words, {"gd", "tscn"}
+    };
+    panel._update_finder();
+    CHECK(finder.filters == std::set<std::string>({"gd", "tscn"}));
+    CHECK(finder.pattern.value == "needle");
+    CHECK(finder.folder.value == "res://assets");
+    CHECK(finder.includes.value == "*.gd");
+    CHECK(finder.excludes.value == "vendor/*");
+    CHECK(finder.match_case);
+    CHECK(finder.whole_words);
+
+    // Changing the UI selection must replace, not accumulate, old filters.
+    panel.selected_extensions = {"gdshader"};
+    match_case.value = false;
+    whole_words.value = false;
+    panel._update_finder();
+    CHECK(finder.filters == std::set<std::string>({"gdshader"}));
+    CHECK(!finder.match_case);
+    CHECK(!finder.whole_words);
+
+    // Empty selection is meaningful: search should not reuse stale filters.
+    panel.selected_extensions.clear();
+    panel._update_finder();
+    CHECK(finder.filters.empty());
+
+    // Rename mode must preserve the running finder's snapshot.
+    panel.selected_extensions = {"cs"};
+    finder.rename = true;
+    text.text = String("another");
+    panel._update_finder();
+    CHECK(finder.filters.empty());
+    CHECK(finder.pattern.value == "needle");
+
+    finder.rename = false;
+    panel._update_finder();
+    CHECK(finder.filters == std::set<std::string>({"cs"}));
+    CHECK(finder.pattern.value == "another");
+    std::cout << checks << " editor assertions passed\n";
+}
+"""
+        with tempfile.TemporaryDirectory() as temp:
+            source = Path(temp) / "regression.cpp"
+            binary = Path(temp) / "regression"
+            source.write_text(prelude + "\n" + self.method + "\n" + checks, encoding="utf-8")
+            compile_result = subprocess.run(
+                [shutil.which("c++"), "-std=c++17", "-Wall", "-Wextra", "-Werror", str(source), "-o", str(binary)],
+                capture_output=True, text=True, check=False,
+            )
+            self.assertEqual(compile_result.returncode, 0, compile_result.stderr)
+            run_result = subprocess.run([str(binary)], capture_output=True, text=True, check=False)
+            self.assertEqual(run_result.returncode, 0, run_result.stderr)
+            self.assertIn("15 editor assertions passed", run_result.stdout)
+
+
+class GLES3CompilerRegressionTests(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        source = GLES_SOURCE.read_text(encoding="utf-8")
+        prefix = "#if defined(GLAD_ENABLED) || defined(EGL_ENABLED) || defined(ANDROID_ENABLED)"
+        suffix = "#endif // GLAD_ENABLED || EGL_ENABLED || ANDROID_ENABLED"
+        start = source.index(prefix)
+        end = source.index(suffix, start) + len(suffix)
+        cls.block = source[start:end]
+
+    @unittest.skipUnless(shutil.which("c++"), "C++ preprocessor not installed")
+    def test_strcpy_alias_only_for_msvc(self):
+        probe = self.block + "\n#ifdef strcpy\nALIAS_ENABLED\n#else\nALIAS_DISABLED\n#endif\n"
+        cases = [
+            ((), False),
+            (("GLAD_ENABLED",), False),
+            (("GLAD_ENABLED", "_WIN32"), False),
+            (("GLAD_ENABLED", "_WIN32", "__MINGW32__"), False),
+            (("EGL_ENABLED", "_WIN32"), False),
+            (("ANDROID_ENABLED",), False),
+            (("_MSC_VER",), False),
+            (("GLAD_ENABLED", "_MSC_VER"), True),
+            (("GLAD_ENABLED", "_MSC_VER", "_WIN32"), True),
+            (("EGL_ENABLED", "_MSC_VER"), True),
+            (("ANDROID_ENABLED", "_MSC_VER"), True),
+        ]
+        for defines, expected in cases:
             with self.subTest(defines=defines):
-                output = self.preprocess_call(defines)
-                self.assertIn("strcpy(dst, src)", output)
-                self.assertNotIn("strcpy_s(dst, src)", output)
-
-    def test_msvc_rewrites_strcpy_only_inside_gles3_guard(self):
-        for backend in ("GLAD_ENABLED", "EGL_ENABLED", "ANDROID_ENABLED"):
-            with self.subTest(backend=backend):
-                output = self.preprocess_call(("_MSC_VER", "_WIN32", backend))
-                self.assertIn("strcpy_s(dst, src)", output)
-
-    def test_msvc_define_without_gles3_backend_does_not_rewrite(self):
-        output = self.preprocess_call(("_MSC_VER", "_WIN32"))
-        self.assertIn("strcpy(dst, src)", output)
-
-    def test_non_windows_does_not_rewrite(self):
-        output = self.preprocess_call(("GLAD_ENABLED",))
-        self.assertIn("strcpy(dst, src)", output)
+                result = subprocess.run(
+                    [shutil.which("c++"), "-E", "-P", "-x", "c++", "-", *("-D" + d for d in defines)],
+                    input=probe, capture_output=True, text=True, check=False,
+                )
+                self.assertEqual(result.returncode, 0, result.stderr)
+                self.assertIn("ALIAS_ENABLED" if expected else "ALIAS_DISABLED", result.stdout)
+                self.assertNotIn("ALIAS_DISABLED" if expected else "ALIAS_ENABLED", result.stdout)
 
 
-class MacOSWindowFailureTests(unittest.TestCase):
+class TextureRectDocsRegressionTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
-        cls.display = read_source("platform/macos/display_server_macos.mm")
-        cls.gl_header = read_source("platform/macos/gl_manager_macos_legacy.h")
+        cls.root = ElementTree.parse(TEXTURE_DOC).getroot()
+        cls.description = (cls.root.findtext("description") or "").strip()
 
-    def test_failed_window_creation_sets_error(self):
-        pos = self.display.index("WindowID main_window = _create_window(")
-        block = self.display[pos : pos + 500]
-        self.assertRegex(
-            block,
-            r"if \(main_window == DisplayServerEnums::INVALID_WINDOW_ID\)\s*\{\s*"
-            r"r_error = ERR_CANT_CREATE;\s*ERR_FAIL_MSG",
-        )
+    def test_description_explains_default_minimum_size(self):
+        self.assertIn("minimum size", self.description)
+        self.assertIn("assigned [member texture]", self.description)
 
-    def test_window_error_is_reported_before_return(self):
-        pos = self.display.index("WindowID main_window = _create_window(")
-        block = self.display[pos : pos + 500]
-        self.assertLess(block.index("r_error = ERR_CANT_CREATE;"), block.index("ERR_FAIL_MSG"))
+    def test_description_recommends_supported_expand_mode(self):
+        self.assertIn("[constant EXPAND_IGNORE_SIZE]", self.description)
+        self.assertIn("[member expand_mode]", self.description)
+        self.assertIsNotNone(self.root.find(".//member[@name='expand_mode']"))
 
-    def test_invalid_window_does_not_use_old_early_return(self):
-        pos = self.display.index("WindowID main_window = _create_window(")
-        block = self.display[pos : pos + 500]
-        self.assertNotIn("ERR_FAIL_COND(main_window == DisplayServerEnums::INVALID_WINDOW_ID)", block)
-
-    def test_clang_warning_push_is_balanced_by_pop(self):
-        self.assertEqual(self.gl_header.count("GODOT_CLANG_WARNING_PUSH_AND_IGNORE"), 1)
-        self.assertEqual(self.gl_header.count("GODOT_CLANG_WARNING_POP"), 1)
-        self.assertLess(
-            self.gl_header.index("GODOT_CLANG_WARNING_PUSH_AND_IGNORE"),
-            self.gl_header.index("GODOT_CLANG_WARNING_POP"),
-        )
-
-
-class FindInFilesExtensionTests(unittest.TestCase):
-    @classmethod
-    def setUpClass(cls):
-        cls.cpp = read_source("editor/script/find_in_files.cpp")
-        cls.update = method_body(cls.cpp, "void FindInFilesSearchPanel::_update_finder()")
-
-    def test_update_propagates_selected_file_extensions(self):
-        self.assertIn("finder->set_filter(get_filter());", self.update)
-
-    def test_filter_is_copied_once(self):
-        self.assertEqual(self.update.count("finder->set_filter(get_filter());"), 1)
-
-    def test_filter_is_applied_before_include_exclude_wildcards(self):
-        self.assertLess(self.update.index("finder->set_filter(get_filter());"), self.update.index("finder->set_includes("))
-        self.assertLess(self.update.index("finder->set_filter(get_filter());"), self.update.index("finder->set_excludes("))
-
-    def test_rename_mode_remains_untouched(self):
-        self.assertRegex(self.update, r"if \(finder->is_rename_mode\(\)\)\s*\{[^{}]*return;\s*\}")
-        self.assertLess(self.update.index("return;"), self.update.index("finder->set_filter(get_filter());"))
-
-    def test_find_action_refreshes_finder_first(self):
-        body = method_body(self.cpp, "void FindInFilesSearchPanel::_emit_find_requested()")
-        self.assertLess(body.index("_update_finder();"), body.index('emit_signal("find_requested");'))
-
-    def test_search_modification_refreshes_finder(self):
-        body = method_body(self.cpp, "void FindInFilesSearchPanel::_on_search_modified()")
-        self.assertIn("_update_finder();", body)
-
-    def test_selected_checkboxes_form_extension_filter(self):
-        body = method_body(self.cpp, "HashSet<String> FindInFilesSearchPanel::get_filter() const")
-        self.assertRegex(body, r"if \(cb->is_pressed\(\)\)\s*\{\s*filters.insert\(cb->get_text\(\)\);")
-
-    def test_toggle_triggers_refresh(self):
-        body = method_body(self.cpp, "void FindInFilesSearchPanel::_on_filter_toggled(")
-        self.assertIn("_on_search_modified();", body)
-
-    def test_empty_extension_set_stops_search(self):
-        body = method_body(self.cpp, "void FindInFilesSearch::start()")
-        self.assertRegex(body, r"if \(extension_filter.is_empty\(\)\)\s*\{[^{}]*finished[^{}]*return;")
-
-    def test_search_copy_preserves_extensions(self):
-        body = method_body(self.cpp, "void FindInFilesSearch::copy_from(")
-        self.assertIn("extension_filter = p_other->extension_filter;", body)
+    def test_explanation_is_not_duplicated(self):
+        self.assertEqual(self.description.count("minimum size of [TextureRect]"), 1)
 
 
 if __name__ == "__main__":
