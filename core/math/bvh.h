@@ -386,6 +386,16 @@ public:
 		return params.result_count_overall;
 	}
 
+	// Stream segment candidates directly to the narrowphase callback. Unlike
+	// cull_segment(), this does not stop after a fixed-size result buffer is full.
+	// Callback returns a new ray fraction in [0, p_max_fraction], clipping
+	// subsequent BVH traversal after a closer exact hit.
+	using SegmentCastCallback = real_t (*)(T *, int, real_t, void *);
+	void cast_segment(const POINT &p_from, const POINT &p_to, SegmentCastCallback p_callback, void *p_userdata, uint32_t p_tree_collision_mask = 0xFFFFFFFF, const T *p_tester = nullptr) {
+		BVH_LOCKED_FUNCTION
+		tree.cast_segment(p_from, p_to, p_callback, p_userdata, p_tree_collision_mask, p_tester);
+	}
+
 	int cull_point(const POINT &p_point, T **p_result_array, int p_result_max, const T *p_tester, uint32_t p_tree_collision_mask = 0xFFFFFFFF, int *p_subindex_array = nullptr) {
 		BVH_LOCKED_FUNCTION
 		typename BVHTREE_CLASS::CullParams params;
