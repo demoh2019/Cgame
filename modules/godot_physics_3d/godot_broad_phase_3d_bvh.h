@@ -31,6 +31,7 @@
 #pragma once
 
 #include "godot_broad_phase_3d.h"
+#include "godot_body_3d.h"
 
 #include "core/math/bvh.h"
 
@@ -39,8 +40,20 @@ class GodotBroadPhase3DBVH : public GodotBroadPhase3D {
 	class UserPairTestFunction {
 	public:
 		static bool user_pair_check(const T *p_a, const T *p_b) {
-			// return false if no collision, decided by masks etc
-			return p_a->interacts_with(p_b);
+			// Reject invalid pairs before allocating constraint records or
+			// touching the narrowphase. Area monitoring is unaffected.
+			if (!p_a->interacts_with(p_b)) {
+				return false;
+			}
+			if (p_a->get_type() == GodotCollisionObject3D::TYPE_BODY &&
+					p_b->get_type() == GodotCollisionObject3D::TYPE_BODY) {
+				const GodotBody3D *body_a = static_cast<const GodotBody3D *>(p_a);
+				const GodotBody3D *body_b = static_cast<const GodotBody3D *>(p_b);
+				// Either endpoint can exclude the pair (including joint exceptions).
+				return !body_a->has_exception(body_b->get_self()) &&
+						!body_b->has_exception(body_a->get_self());
+			}
+			return true;
 		}
 	};
 
