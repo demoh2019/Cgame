@@ -59,23 +59,26 @@ private:
 	Vector<Vector3> vertices;
 
 	struct BVHCmpX {
-		bool operator()(const BVH *p_left, const BVH *p_right) const {
-			return p_left->center.x < p_right->center.x;
+		const BVH *nodes = nullptr;
+		bool operator()(int p_left, int p_right) const {
+			return nodes[p_left].center.x < nodes[p_right].center.x;
 		}
 	};
 
 	struct BVHCmpY {
-		bool operator()(const BVH *p_left, const BVH *p_right) const {
-			return p_left->center.y < p_right->center.y;
+		const BVH *nodes = nullptr;
+		bool operator()(int p_left, int p_right) const {
+			return nodes[p_left].center.y < nodes[p_right].center.y;
 		}
 	};
 	struct BVHCmpZ {
-		bool operator()(const BVH *p_left, const BVH *p_right) const {
-			return p_left->center.z < p_right->center.z;
+		const BVH *nodes = nullptr;
+		bool operator()(int p_left, int p_right) const {
+			return nodes[p_left].center.z < nodes[p_right].center.z;
 		}
 	};
 
-	int _create_bvh(BVH *p_bvh, BVH **p_bb, int p_from, int p_size, int p_depth, int &r_max_depth, int &r_max_alloc);
+	int _create_bvh(BVH *p_bvh, int *p_bb, int p_from, int p_size, int p_depth, int &r_max_depth, int &r_max_alloc);
 
 	Vector<BVH> bvh;
 	int max_depth = 0;

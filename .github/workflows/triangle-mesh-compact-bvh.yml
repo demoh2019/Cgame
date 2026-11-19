@@ -1,0 +1,39 @@
+name: Compact TriangleMesh BVH allocation and topology
+
+on:
+  pull_request:
+    branches: [develop]
+    paths:
+      - "core/math/triangle_mesh.h"
+      - "core/math/triangle_mesh.cpp"
+      - "tests/core/math/test_triangle_mesh.cpp"
+      - ".github/workflows/triangle-mesh-compact-bvh.yml"
+  push:
+    branches: [develop]
+    paths:
+      - "core/math/triangle_mesh.h"
+      - "core/math/triangle_mesh.cpp"
+      - "tests/core/math/test_triangle_mesh.cpp"
+      - ".github/workflows/triangle-mesh-compact-bvh.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  triangle-mesh-native-regressions:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+      - uses: ./.github/actions/godot-deps
+      - uses: ./.github/actions/godot-build
+        with:
+          platform: linuxbsd
+          target: editor
+          scons-flags: dev_build=yes tests=yes debug_symbols=no module_mono_enabled=no accesskit=no
+      - name: Verify TriangleMesh BVH structure, ray hits and memory sizing
+        run: |
+          timeout 300s ./bin/godot.linuxbsd.editor.dev.x86_64 --headless --test --test-case="*[TriangleMesh]*" --no-colors

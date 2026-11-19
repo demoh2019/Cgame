@@ -82,6 +82,81 @@ TEST_CASE("[SceneTree][TriangleMesh] BVH creation and intersection") {
 	}
 }
 
+
+TEST_CASE("[TriangleMesh][Performance] Compact BVH allocation and topology") {
+	// Exercise odd, even, singleton, and multi-level BVH trees. Every face is
+	// a disjoint triangle in the XY plane, so ray hits identify their leaf.
+	const int face_counts[] = { 1, 2, 3, 4, 5, 16, 31, 64, 128, 257 };
+	for (int face_count : face_counts) {
+		Vector<Vector3> faces;
+		faces.resize(face_count * 3);
+		Vector3 *vertices = faces.ptrw();
+		Vector<int32_t> surfaces;
+		surfaces.resize(face_count * 3);
+		int32_t *surface_ids = surfaces.ptrw();
+		for (int i = 0; i < face_count; i++) {
+			const real_t x = real_t(i * 2);
+			vertices[3 * i] = Vector3(x, 0, 0);
+			vertices[3 * i + 1] = Vector3(x + 1, 0, 0);
+			vertices[3 * i + 2] = Vector3(x, 1, 0);
+			for (int j = 0; j < 3; j++) {
+				surface_ids[3 * i + j] = i % 7;
+			}
+		}
+
+		Ref<TriangleMesh> mesh;
+		mesh.instantiate();
+		mesh->create(faces, surfaces);
+		REQUIRE(mesh->is_valid());
+		REQUIRE(mesh->get_triangles().size() == face_count);
+		const Vector<TriangleMesh::BVH> &nodes = mesh->get_bvh();
+		REQUIRE(nodes.size() == 2 * face_count - 1);
+
+		Vector<int> face_visits;
+		face_visits.resize(face_count);
+		for (int i = 0; i < face_count; i++) {
+			face_visits.write[i] = 0;
+		}
+		int leaf_count = 0;
+		int inner_count = 0;
+		for (int node_index = 0; node_index < nodes.size(); node_index++) {
+			const TriangleMesh::BVH &node = nodes[node_index];
+			if (node.face_index >= 0) {
+				CHECK(node.face_index < face_count);
+				REQUIRE(node.face_index < face_count);
+				face_visits.write[node.face_index]++;
+				leaf_count++;
+			} else {
+				CHECK(node.left >= 0);
+				CHECK(node.right >= 0);
+				CHECK(node.left < node_index);
+				CHECK(node.right < node_index);
+				inner_count++;
+			}
+		}
+		CHECK(leaf_count == face_count);
+		CHECK(inner_count == face_count - 1);
+		for (int i = 0; i < face_count; i++) {
+			CHECK(face_visits[i] == 1);
+		}
+
+		// Each ray intersects exactly one triangle, including near the
+		// partition boundaries for highly unbalanced face counts.
+		for (int i = 0; i < face_count; i++) {
+			const Vector3 origin(real_t(i * 2) + real_t(0.25), real_t(0.25), 2);
+			const Vector3 hit(real_t(i * 2) + real_t(0.25), real_t(0.25), 0);
+			Vector3 point;
+			Vector3 normal;
+			int32_t surface_index = -1;
+			int32_t face_index = -1;
+			CHECK(mesh->intersect_ray(origin, Vector3(0, 0, -1), point, normal, &surface_index, &face_index));
+			CHECK(point.is_equal_approx(hit));
+			CHECK(face_index == i);
+			CHECK(surface_index == i % 7);
+		}
+	}
+}
+
 } // namespace TestTriangleMesh
 
 #endif // _3D_DISABLED
