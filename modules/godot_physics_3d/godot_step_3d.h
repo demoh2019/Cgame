@@ -49,6 +49,8 @@ class GodotStep3D {
 	// Reused only by the opt-in large rigid-body island coloring path.
 	LocalVector<GodotConstraint3D *> colored_constraints;
 	uint32_t color_batch_offset = 0;
+	// Read by workers only while processing one graph color; barrier after each color.
+	uint32_t color_batch_count = 0;
 	// Read only while other islands run in worker jobs. The colored solver
 	// starts only after those jobs have completed.
 	uint32_t deferred_large_island_index = UINT32_MAX;
