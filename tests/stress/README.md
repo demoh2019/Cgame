@@ -453,6 +453,77 @@ finite body states both with the option disabled and enabled. It is a smoke
 regression, not a measured performance benefit or a guarantee that all
 possible overfull manifolds are exercised.
 
+## Nonlinear rotation-only capsule CCD (Rapier-inspired 2D / 3D)
+
+Rapier's nonlinear shape cast follows an object's rotational as well as
+linear motion to compute the first contact time. The built-in Cgame
+GodotPhysics2D/3D cast-ray CCD previously returned immediately if
+the CCD body's **linear velocity was exactly zero**, even for a long
+capsule rotating rapidly through a nearby static circle or sphere.
+A capsule can start and end the step separated from its target while
+still striking it during the rotation.
+
+Cgame now supports a narrow **opt-in nonlinear angular TOI** for this
+case. Enable the existing conservative rotational CCD broadphase:
+
+```ini
+[physics]
+2d/solver/ccd_rotational_bounds=true
+3d/solver/ccd_rotational_bounds=true
+```
+
+Set the moving rigid body's CCD mode to cast-ray in 2D, or enable CCD
+in 3D. The new TOI applies **only** when:
+
+- The moving body has zero linear motion and nonzero angular velocity.
+- Its shape is a uniformly scaled, unsheared **capsule**.
+- The other body is **static**, with a uniformly scaled circle (2D)
+  or sphere (3D).
+- The original broadphase has already supplied the pair.
+
+The algorithm follows the capsule's curved motion **around the body's
+world-space center of mass**, including an offset shape transform.
+Its capsule centerline is rotated in 2D or around the 3D angular
+velocity axis. The earliest contact is approached using a conservative
+speed bound for every centerline point and exact point-to-segment
+distance. At most **48 deterministic advancement evaluations** run,
+using only stack values, no heap allocations or persistent state.
+A conclusive miss leaves the body unchanged. A hit limits angular
+velocity so the next frame's normal contact solver can resolve a
+slight overlap (a small 0.5% angular allowance).
+
+As with existing velocity-clamping cast-ray CCD, this alters momentum
+and does **not** generate a separate impact impulse within the step.
+If geometry is invalid, already intersecting or advancement fails to
+converge, the solver returns to the previous narrowphase behavior.
+It does not yet solve generic moving-and-spinning convex/concave shapes,
+capsule/capsule arcs or pure rotation against a triangle mesh. This
+is a real, limited nonlinear TOI, **not** a complete Rapier-equivalent
+nonlinear casting API. The feature is disabled by default.
+
+Seven native C++ test cases check 2D/3D first impacts, return to a
+separated endpoint after passing through the target, an offset
+center of mass, distant misses, initial penetration and invalid
+inputs. Seven Python source/reference tests include 3,500 seeded
+random rotations with densely sampled intermediate poses to catch
+false conclusive MISS outcomes. A Godot runtime smoke regression spins
+a capsule by 180 degrees within one physics step; with the rotational
+bounds enabled, its angular velocity must be clipped by the TOI,
+while the disabled control should retain its starting speed.
+
+```bash
+python3 -m unittest discover -s tests/stress \
+  -p 'test_physics_ccd_rotating_capsule_toi.py' -v
+
+./bin/godot.macos.editor.arm64 --headless \
+  --path tests/stress \
+  --script res://physics_ccd_rotating_capsule_toi_regression.gd
+```
+
+The native C++ build, real runtime collisions and frame time must be
+checked before enabling in production. Unit/reference tests cannot
+demonstrate a successful build or measured performance benefit.
+
 ## Conservative rotating-CCD candidate culling (Rapier/Jolt-style)
 
 The existing opt-in `physics/2d/solver/ccd_rotational_bounds` and
