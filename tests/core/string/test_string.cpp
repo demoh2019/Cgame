@@ -1145,11 +1145,14 @@ TEST_CASE("[String] Split maxsplit tail hotpath regressions") {
 	{
 		const String tail = String("abcdefghijklmnopqrstuvwxyz").repeat(400);
 		const String input = "header:" + tail;
-		for (const Vector<String> &output : { input.split(String(":"), true, 1), input.split(":", true, 1) }) {
-			REQUIRE(output.size() == 2);
-			CHECK(output[0] == "header");
-			CHECK(output[1] == tail);
-		}
+		const Vector<String> output = input.split(String(":"), true, 1);
+		const Vector<String> output_cstr = input.split(":", true, 1);
+		REQUIRE(output.size() == 2);
+		REQUIRE(output_cstr.size() == 2);
+		CHECK(output[0] == "header");
+		CHECK(output[1] == tail);
+		CHECK(output_cstr[0] == "header");
+		CHECK(output_cstr[1] == tail);
 	}
 }
 
