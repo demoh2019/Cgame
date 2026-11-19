@@ -515,6 +515,17 @@ func _on_event(event: Dictionary) -> void:
 				say("Evaded an infected attack!")
 		"siege_started":
 			say("Night siege! %d infected are attacking a T%d barricade." % [int(event.get("count", 0)), int(event.get("tier", 1))])
+		"raid_started":
+			say("RAID BOSS nearby! A mutant warlord entered the dangerous zone.")
+		"raid_warning":
+			say("RAID SLAM in %.1f seconds! Evade the marked %dm circle." % [
+				float(event.get("seconds", 2.0)), int(event.get("radius", 5))])
+		"raid_slam":
+			say("Raid boss slam struck. Dodge or retreat from the next circle.")
+		"raid_defeated":
+			say("RAID VICTORY! The warlord dropped one shared loot bag.")
+		"raid_expired":
+			say("Raid boss retreated. The encounter is over.")
 		"scavenging":
 			if event.get("peer", -1) == client.peer_id:
 				say("+%d scavenging XP (rank %d)" % [
