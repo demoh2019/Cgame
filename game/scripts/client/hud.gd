@@ -278,6 +278,11 @@ func _build() -> void:
 	claim_contract.text = "Turn in mission"
 	claim_contract.pressed.connect(func() -> void: client.contract("claim"))
 	contract_actions.add_child(claim_contract)
+	var daily_claim := Button.new()
+	daily_claim.text = "Turn in UTC daily bounty"
+	daily_claim.tooltip_text = "One repeatable camp bounty each UTC day. Collect only at the camp workbench."
+	daily_claim.pressed.connect(func() -> void: client.contract("daily_claim"))
+	contract_actions.add_child(daily_claim)
 
 	var cache_heading := Label.new()
 	cache_heading.text = "Frontier cache (capture a red/black outpost)"
@@ -942,6 +947,7 @@ func _process(_delta: float) -> void:
 		]
 	var journal: Variant = client.you.get("contract", Contracts.empty_state())
 	_contract_label.text = Contracts.description(journal if journal is Dictionary else Contracts.empty_state())
+	_contract_label.text += "\n" + str(client.you.get("daily_description", "Daily bounty pending server"))
 	_info_label.text += "  Rest %.0fs" % float(client.you.get("rest_cooldown", 0.0))
 	_info_label.text += "\nPvP victories %d | Honor %d | %s" % [
 		int(client.you.get("pvp_kills", 0)), int(client.you.get("pvp_honor", 0)),
