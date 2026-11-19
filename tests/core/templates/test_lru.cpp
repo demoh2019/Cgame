@@ -209,4 +209,63 @@ TEST_CASE("[LRU] Single-map cache preserves recency, pointer stability, and evic
 	CHECK_FALSE(cache.has(255));
 }
 
+struct CountingLRUHasher {
+	static inline int calls = 0;
+	static uint32_t hash(const int &p_key) {
+		calls++;
+		return HashMapHasherDefault::hash(p_key);
+	}
+};
+
+TEST_CASE("[LRU] Zero-capacity cache avoids hashing and transient entries") {
+	CountingLRUHasher::calls = 0;
+	LRUCache<int, int, CountingLRUHasher> cache(0);
+	CHECK(cache.get_capacity() == 0);
+	for (int i = 0; i < 2048; i++) {
+		CHECK_FALSE(cache.insert(i, i * 3));
+	}
+	CHECK(cache.get_size() == 0);
+	CHECK(CountingLRUHasher::calls == 0);
+
+	cache.set_capacity(3);
+	CHECK(cache.get_capacity() == 3);
+	cache.insert(10, 100);
+	cache.insert(11, 110);
+	CHECK(cache.get_size() == 2);
+	CHECK(CountingLRUHasher::calls > 0);
+	cache.set_capacity(0);
+	CHECK(cache.get_size() == 0);
+	CHECK(cache.get_capacity() == 0);
+	const int calls_before = CountingLRUHasher::calls;
+	for (int i = 0; i < 256; i++) {
+		CHECK_FALSE(cache.insert(i, i));
+	}
+	CHECK(cache.get_size() == 0);
+	CHECK(CountingLRUHasher::calls == calls_before);
+}
+
+static int disabled_cache_evictions = 0;
+static void on_disabled_cache_evict(const int &, int &p_value) {
+	disabled_cache_evictions++;
+	p_value = -1;
+}
+
+TEST_CASE("[LRU] Hook-enabled zero-capacity cache still invokes eviction") {
+	disabled_cache_evictions = 0;
+	LRUCache<int, int, HashMapHasherDefault, HashMapComparatorDefault<int>, on_disabled_cache_evict> cache(0);
+	CHECK_FALSE(cache.insert(5, 50));
+	CHECK(cache.get_size() == 0);
+	CHECK(disabled_cache_evictions == 1);
+	CHECK_FALSE(cache.insert(6, 60));
+	CHECK(cache.get_size() == 0);
+	CHECK(disabled_cache_evictions == 2);
+	cache.set_capacity(1);
+	cache.insert(7, 70);
+	CHECK(cache.get_size() == 1);
+	cache.insert(8, 80);
+	CHECK(disabled_cache_evictions == 3);
+	CHECK(cache.has(8));
+	CHECK_FALSE(cache.has(7));
+}
+
 } // namespace TestLRU
