@@ -634,6 +634,15 @@ void GodotBody2D::integrate_velocities(real_t p_step) {
 	real_t total_angular_velocity = angular_velocity + biased_angular_velocity;
 	Vector2 total_linear_velocity = linear_velocity + biased_linear_velocity;
 
+	// Active bodies with no motion need neither a transform rebuild nor a
+	// matrix inverse. Preserve CCD's previous-transform bookkeeping.
+	if (total_angular_velocity == 0.0 && total_linear_velocity == Vector2()) {
+		if (continuous_cd_mode != PS2DE::CCD_MODE_DISABLED) {
+			new_transform = get_transform();
+		}
+		return;
+	}
+
 	real_t angle_delta = total_angular_velocity * p_step;
 	real_t angle = get_transform().get_rotation() + angle_delta;
 	Vector2 pos = get_transform().get_origin() + total_linear_velocity * p_step;
