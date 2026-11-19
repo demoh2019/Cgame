@@ -1,0 +1,28 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<class name="BehaviorTreeRunner" inherits="Node" api_type="core" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="../../../doc/class.xsd">
+	<brief_description>Runs behavior tree resources for one AI agent.</brief_description>
+	<description>Assign a [BehaviorTreeTask] as [member root_task], configure the optional [member blackboard], then call [method tick] manually or enable [member auto_tick] to update every process frame. On success or failure the runner stops, emits [signal tree_finished], and caches the terminal status. Call [method reset] to run the tree again. Runners maintain independent execution cursors even when sharing the same task resources.</description>
+	<methods>
+		<method name="tick"><return type="int" enum="BehaviorTreeTask.Status" /><param index="0" name="delta" type="float" /><description>Advances the behavior tree using nonnegative [param delta] time. Once completed, returns the cached result without invoking tasks again until reset.</description></method>
+		<method name="reset"><return type="void" /><description>Clears execution state and restarts the tree on the next tick. The blackboard is preserved.</description></method>
+		<method name="is_finished" qualifiers="const"><return type="bool" /><description>Returns true after the root returns success or failure.</description></method>
+		<method name="get_last_status" qualifiers="const"><return type="int" enum="BehaviorTreeTask.Status" /><description>Returns the latest status or [constant BehaviorTreeTask.RUNNING] before the first tick.</description></method>
+		<method name="set_root_task"><return type="void" /><param index="0" name="task" type="BehaviorTreeTask" /><description>Replaces the root task and resets the execution state.</description></method>
+		<method name="get_root_task" qualifiers="const"><return type="BehaviorTreeTask" /><description>Returns the root resource.</description></method>
+		<method name="set_blackboard"><return type="void" /><param index="0" name="blackboard" type="Dictionary" /><description>Sets the shared blackboard dictionary for this agent.</description></method>
+		<method name="get_blackboard" qualifiers="const"><return type="Dictionary" /><description>Returns the shared blackboard.</description></method>
+		<method name="set_auto_tick"><return type="void" /><param index="0" name="enabled" type="bool" /><description>Enables or disables automatic processing.</description></method>
+		<method name="is_auto_tick_enabled" qualifiers="const"><return type="bool" /><description>Returns whether automatic ticking is enabled.</description></method>
+	</methods>
+	<members>
+		<member name="root_task" type="BehaviorTreeTask">Root task resource to execute.</member>
+		<member name="blackboard" type="Dictionary" default="{}">Agent-specific shared state available to task scripts.</member>
+		<member name="auto_tick" type="bool" default="false">Process the root task every frame while it is running.</member>
+	</members>
+	<signals>
+		<signal name="tree_finished">
+			<param index="0" name="status" type="int" enum="BehaviorTreeTask.Status" />
+			<description>Emitted once when the root reaches a terminal status.</description>
+		</signal>
+	</signals>
+</class>
