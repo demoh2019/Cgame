@@ -73,8 +73,8 @@ Run `--list-cases` for supported identifiers.
 Timeout and RSS caps are per workload process. These are *failure containment*,
 not a promise that your host cannot run out of memory: RSS is sampled, and very
 short-lived spikes can be missed. The host also needs RAM for the OS and drivers.
-No workload deletes or modifies project source files; `file_io` only writes and
-deletes its own test file in the project's `user://` data directory.
+No workload modifies project source files; IO workloads write and remove only
+files they generate in the project's `user://` data directory.
 
 `all` omits render cases in headless mode. Headless rendering uses a dummy
 server: physics and object allocation remain useful, GPU performance does not.
@@ -189,3 +189,22 @@ The physics query timer isolates ray traversal; overall duration also includes
 collider construction and cleanup. Compare like-for-like workloads on the same
 hardware using `--baseline`. Use `--summary-md` to rank expensive runs, while
 remembering that raw time across different cases is not a normalized benchmark.
+
+## Cross-metric bottleneck diagnosis
+
+New cases: `resource_load` benchmarks cache-bypassed PackedScene reads,
+`input_map` exercises input action registration/lookup/removal, and
+`transform_hierarchy` stresses 3D transform propagation.
+
+The built-in `--summary-md` provides a compact overview; the separate
+diagnostic script ranks engine time, peak RSS and frame spikes independently,
+and highlights per-case changes relative to a compatible baseline:
+
+```bash
+python3 tests/stress/diagnose.py out/stress.json --top 15 --output out/bottlenecks.md
+python3 tests/stress/diagnose.py out/current.json --baseline out/baseline.json --output out/regressions.md
+```
+
+Do not compare raw timings of different scenarios as if they performed equal
+work. Compare the *same* workload on the same host, with matching build,
+graphics driver, seed and resource limits, then profile recurring regressions.
