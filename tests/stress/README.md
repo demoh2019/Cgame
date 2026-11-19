@@ -203,6 +203,39 @@ manifolds, compare the existing `physics_contacts_friction_2d`,
 `physics_contact_manifolds_2d`, and `physics_3d` stress cases with the same
 hardware and engine build.
 
+## Rigid/soft 3D contact throughput and stability
+
+The built-in GodotPhysics rigid/soft contact solver now skips expensive
+tangent-velocity and inertia calculations when friction is zero, while
+preserving normal collision impulses. It also guards singular normal and
+tangent effective masses, discards stale tangential warm-start impulses after
+the friction material changes to zero, and projects retained tangent impulses
+into the new contact plane when a soft surface rotates.
+
+For persisted rigid/soft contacts, warm-start impulses follow the same
+time-step ratio and `physics/3d/solver/warm_start_coefficient` policy as
+rigid/rigid contacts. Cached tangent impulses are clamped to the current
+material's friction cone.
+
+Use the new **two 3D stress cases** for before/after throughput and
+numerical-stability comparisons. Each creates 16 soft spheres and 16 rigid
+spheres per scale, in isolated lanes, with otherwise identical geometry:
+
+```bash
+python3 tests/stress/run.py \
+  --godot ./bin/godot.linuxbsd.editor.dev.x86_64 \
+  --case physics_soft_contacts_zero_friction_3d,physics_soft_contacts_friction_3d \
+  --scale 1 --frames 120 --repeats 3 --timeout 360 \
+  --output out/soft-contacts-3d.json
+```
+
+The benchmarks report physics time, frame intervals, and collision pairs,
+and fail if no pairs are generated or sampled body states become non-finite.
+Use the built-in GodotPhysics 3D backend; another backend does not exercise
+this solver. Benchmark identical builds on the same machine, and separate
+sparse-body tests from expensive soft contact workloads. These new cases do
+not constitute a completed performance measurement until run.
+
 ## Contact restitution stability (Jolt / Box2D-style threshold)
 
 Built-in GodotPhysics now suppresses contact restitution when the approaching
