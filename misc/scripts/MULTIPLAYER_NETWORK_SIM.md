@@ -47,6 +47,38 @@ clients get separate backend UDP sockets to preserve ENet session identities.
 Use `--help` to see all options. Defaults are intentionally zero-impairment
 and bound to `127.0.0.1` (loopback only). No packet payload is logged.
 
+## Ready-made network profiles
+
+Use `--preset` to reproduce a synthetic connection scenario with one command
+(the default `clean` profile preserves the existing zero-impairment behavior):
+
+```sh
+python3 misc/scripts/multiplayer_network_sim.py \
+  --target-host 127.0.0.1 --target-port 2456 --listen-port 2457 --preset mobile
+```
+
+| Preset | One-way delay | Jitter (+/-) | Loss | Duplicate |
+| --- | ---: | ---: | ---: | ---: |
+| clean | 0 ms | 0 ms | 0% | 0% |
+| fiber | 10 ms | 2 ms | 0% | 0% |
+| wifi | 32 ms | 12 ms | 2% | 0% |
+| mobile | 100 ms | 40 ms | 4% | 0.5% |
+| satellite | 300 ms | 50 ms | 1% | 0% |
+| severe | 250 ms | 100 ms | 12% | 2% |
+
+These are illustrative testing profiles, **not measurements of actual services**.
+The profile is applied **independently in both directions**; a packet travelling
+through the proxy receives the configured one-way delay at each hop.
+Explicit CLI arguments override only the selected direction, including zero:
+
+```sh
+python3 misc/scripts/multiplayer_network_sim.py \
+  --target-port 2456 --preset severe --up-loss 0 --down-latency-ms 30
+```
+
+Use `--help` to see available profiles. Both the UDP proxy suite and the
+preset regression suite run as CI checks.
+
 ## Safety, limits and semantics
 
 - Tests should run against **local test servers** with explicit permission.

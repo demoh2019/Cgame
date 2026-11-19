@@ -4,12 +4,16 @@ on:
   push:
     paths:
       - 'misc/scripts/multiplayer_network_sim.py'
+      - 'misc/scripts/network_sim_presets.py'
+      - 'misc/scripts/tests/test_network_sim_presets.py'
       - 'misc/scripts/tests/test_multiplayer_network_sim.py'
       - 'misc/scripts/MULTIPLAYER_NETWORK_SIM.md'
       - '.github/workflows/multiplayer-network-sim-tests.yml'
   pull_request:
     paths:
       - 'misc/scripts/multiplayer_network_sim.py'
+      - 'misc/scripts/network_sim_presets.py'
+      - 'misc/scripts/tests/test_network_sim_presets.py'
       - 'misc/scripts/tests/test_multiplayer_network_sim.py'
       - 'misc/scripts/MULTIPLAYER_NETWORK_SIM.md'
       - '.github/workflows/multiplayer-network-sim-tests.yml'
@@ -33,6 +37,7 @@ jobs:
         with:
           python-version: ${{ matrix.python-version }}
       - name: Syntax check
-        run: python3 -m py_compile misc/scripts/multiplayer_network_sim.py misc/scripts/tests/test_multiplayer_network_sim.py
+        run: python3 -m py_compile misc/scripts/multiplayer_network_sim.py misc/scripts/network_sim_presets.py misc/scripts/tests/test_multiplayer_network_sim.py misc/scripts/tests/test_network_sim_presets.py
       - name: Run UDP integration tests
         run: python3 -m unittest discover -s misc/scripts/tests -p 'test_multiplayer_network_sim.py' -v
+          python3 -m unittest discover -s misc/scripts/tests -p 'test_network_sim_presets.py' -v
