@@ -96,7 +96,7 @@ func _init():
 TEST_CASE("[GDScriptPropertyListFastPath] exported properties preserve declaration order") {
 	GDScriptLanguage::get_singleton()->init();
 	Ref<GDScript> script = memnew(GDScript);
-	script->set_source_code("extends RefCounted\\n@export var first: int = 1\\n@export var second: float = 2.0\\n@export var third: String = \\"ok\\"\\n");
+	script->set_source_code("extends RefCounted\n@export var first: int = 1\n@export var second: float = 2.0\n@export var third: String = \"ok\"\n");
 	ERR_PRINT_OFF;
 	const Error err = script->reload();
 	ERR_PRINT_ON;
@@ -166,7 +166,7 @@ func _get_property_list() -> Array[Dictionary]:
 TEST_CASE("[GDScriptPropertyListFastPath] repeated enumeration preserves property order") {
 	GDScriptLanguage::get_singleton()->init();
 	Ref<GDScript> script = memnew(GDScript);
-	script->set_source_code("extends RefCounted\\n@export var x: int = 1\\n@export var y: int = 2\\n");
+	script->set_source_code("extends RefCounted\n@export var x: int = 1\n@export var y: int = 2\n");
 	ERR_PRINT_OFF;
 	const Error err = script->reload();
 	ERR_PRINT_ON;
