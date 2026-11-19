@@ -36,6 +36,7 @@
 #include "core/object/class_db.h"
 #include "core/os/os.h"
 #include "core/profiling/profiling.h"
+#include "core/variant/container_type_validate.h"
 
 #ifdef DEBUG_ENABLED
 
@@ -545,7 +546,20 @@ Variant GDScriptFunction::call(GDScriptInstance *p_instance, const Variant **p_a
 
 		const int non_vararg_arg_count = MIN(p_argcount, _argument_count);
 		for (int i = 0; i < non_vararg_arg_count; i++) {
-			if (!argument_types[i].has_type()) {
+			const GDScriptDataType &arg_type = argument_types[i];
+			if (!arg_type.has_type()) {
+				memnew_placement(&stack[i + FIXED_ADDRESSES_MAX], Variant(*p_args[i]));
+				continue;
+			}
+			// Most typed arguments are ordinary built-in values. Their Variant
+			// type tag is sufficient to accept the argument without a full type
+			// validation dispatch. Typed arrays/dictionaries must still check
+			// their element/key/value types before taking this fast path.
+			const Variant::Type supplied_type = p_args[i]->get_type();
+			if (arg_type.kind == GDScriptDataType::BUILTIN &&
+					arg_type.builtin_type == supplied_type &&
+					(supplied_type != Variant::ARRAY || !arg_type.has_container_element_type(0)) &&
+					(supplied_type != Variant::DICTIONARY || !arg_type.has_container_element_types())) {
 				memnew_placement(&stack[i + FIXED_ADDRESSES_MAX], Variant(*p_args[i]));
 				continue;
 			}
@@ -566,11 +580,11 @@ Variant GDScriptFunction::call(GDScriptInstance *p_instance, const Variant **p_a
 				if (argument_types[i].builtin_type == Variant::DICTIONARY && argument_types[i].has_container_element_types()) {
 					const GDScriptDataType &arg_key_type = argument_types[i].get_container_element_type_or_variant(0);
 					const GDScriptDataType &arg_value_type = argument_types[i].get_container_element_type_or_variant(1);
-					Dictionary dict(p_args[i]->operator Dictionary(), arg_key_type.builtin_type, arg_key_type.native_type, arg_key_type.script_type, arg_value_type.builtin_type, arg_value_type.native_type, arg_value_type.script_type);
+					Dictionary dict(p_args[i]->operator Dictionary(), arg_key_type.builtin_type, arg_key_type.native_type, Ref<Script>(arg_key_type.script_type), arg_value_type.builtin_type, arg_value_type.native_type, Ref<Script>(arg_value_type.script_type));
 					memnew_placement(&stack[i + FIXED_ADDRESSES_MAX], Variant(dict));
 				} else if (argument_types[i].builtin_type == Variant::ARRAY && argument_types[i].has_container_element_type(0)) {
 					const GDScriptDataType &arg_type = argument_types[i].container_element_types[0];
-					Array array(p_args[i]->operator Array(), arg_type.builtin_type, arg_type.native_type, arg_type.script_type);
+					Array array(p_args[i]->operator Array(), arg_type.builtin_type, arg_type.native_type, Ref<Script>(arg_type.script_type));
 					memnew_placement(&stack[i + FIXED_ADDRESSES_MAX], Variant(array));
 				} else {
 					Variant variant;
@@ -845,7 +859,7 @@ Variant GDScriptFunction::call(GDScriptInstance *p_instance, const Variant **p_a
 				GET_VARIANT_PTR(dst, 0);
 				GET_VARIANT_PTR(value, 1);
 
-				GET_VARIANT_PTR(script_type, 2);
+				GET_VARIANT_PTR(type, 2);
 				Variant::Type builtin_type = (Variant::Type)_code_ptr[ip + 4];
 				int native_type_idx = _code_ptr[ip + 5];
 				GD_ERR_BREAK(native_type_idx < 0 || native_type_idx >= _global_names_count);
@@ -854,7 +868,9 @@ Variant GDScriptFunction::call(GDScriptInstance *p_instance, const Variant **p_a
 				bool result = false;
 				if (value->get_type() == Variant::ARRAY) {
 					Array *array = VariantInternal::get_array(value);
-					result = array->get_typed_builtin() == ((uint32_t)builtin_type) && array->get_typed_class_name() == native_type && array->get_typed_script() == *script_type;
+					Script *script_type = Object::cast_to<Script>(type->operator Object *());
+					const ContainerType &array_type = array->get_element_type();
+					result = array_type.variant_type == builtin_type && array_type.class_name == native_type && array_type.script == script_type;
 				}
 
 				*dst = result;
@@ -868,13 +884,13 @@ Variant GDScriptFunction::call(GDScriptInstance *p_instance, const Variant **p_a
 				GET_VARIANT_PTR(dst, 0);
 				GET_VARIANT_PTR(value, 1);
 
-				GET_VARIANT_PTR(key_script_type, 2);
+				GET_VARIANT_PTR(key_type, 2);
 				Variant::Type key_builtin_type = (Variant::Type)_code_ptr[ip + 5];
 				int key_native_type_idx = _code_ptr[ip + 6];
 				GD_ERR_BREAK(key_native_type_idx < 0 || key_native_type_idx >= _global_names_count);
 				const StringName &key_native_type = _global_names_ptr[key_native_type_idx];
 
-				GET_VARIANT_PTR(value_script_type, 3);
+				GET_VARIANT_PTR(value_type, 3);
 				Variant::Type value_builtin_type = (Variant::Type)_code_ptr[ip + 7];
 				int value_native_type_idx = _code_ptr[ip + 8];
 				GD_ERR_BREAK(value_native_type_idx < 0 || value_native_type_idx >= _global_names_count);
@@ -883,8 +899,12 @@ Variant GDScriptFunction::call(GDScriptInstance *p_instance, const Variant **p_a
 				bool result = false;
 				if (value->get_type() == Variant::DICTIONARY) {
 					Dictionary *dictionary = VariantInternal::get_dictionary(value);
-					result = dictionary->get_typed_key_builtin() == ((uint32_t)key_builtin_type) && dictionary->get_typed_key_class_name() == key_native_type && dictionary->get_typed_key_script() == *key_script_type &&
-							dictionary->get_typed_value_builtin() == ((uint32_t)value_builtin_type) && dictionary->get_typed_value_class_name() == value_native_type && dictionary->get_typed_value_script() == *value_script_type;
+					Script *key_script_type = Object::cast_to<Script>(key_type->operator Object *());
+					Script *value_script_type = Object::cast_to<Script>(value_type->operator Object *());
+					const ContainerType &key_dict_type = dictionary->get_key_type();
+					const ContainerType &value_dict_type = dictionary->get_value_type();
+					result = key_dict_type.variant_type == key_builtin_type && key_dict_type.class_name == key_native_type && key_dict_type.script == key_script_type &&
+							value_dict_type.variant_type == value_builtin_type && value_dict_type.class_name == value_native_type && value_dict_type.script == value_script_type;
 				}
 
 				*dst = result;
@@ -1444,7 +1464,8 @@ Variant GDScriptFunction::call(GDScriptInstance *p_instance, const Variant **p_a
 				GET_VARIANT_PTR(dst, 0);
 				GET_VARIANT_PTR(src, 1);
 
-				GET_VARIANT_PTR(script_type, 2);
+				GET_VARIANT_PTR(type, 2);
+				Script *script_type = Object::cast_to<Script>(type->operator Object *());
 				Variant::Type builtin_type = (Variant::Type)_code_ptr[ip + 4];
 				int native_type_idx = _code_ptr[ip + 5];
 				GD_ERR_BREAK(native_type_idx < 0 || native_type_idx >= _global_names_count);
@@ -1453,17 +1474,18 @@ Variant GDScriptFunction::call(GDScriptInstance *p_instance, const Variant **p_a
 				if (src->get_type() != Variant::ARRAY) {
 #ifdef DEBUG_ENABLED
 					err_text = vformat(R"(Trying to assign a value of type "%s" to a variable of type "Array[%s]".)",
-							_get_var_type(src), _get_element_type(builtin_type, native_type, *script_type));
+							_get_var_type(src), _get_element_type(builtin_type, native_type, script_type));
 #endif // DEBUG_ENABLED
 					OPCODE_BREAK;
 				}
 
 				Array *array = VariantInternal::get_array(src);
+				const ContainerType &array_type = array->get_element_type();
 
-				if (array->get_typed_builtin() != ((uint32_t)builtin_type) || array->get_typed_class_name() != native_type || array->get_typed_script() != *script_type) {
+				if (array_type.variant_type != builtin_type || array_type.class_name != native_type || array_type.script != script_type) {
 #ifdef DEBUG_ENABLED
 					err_text = vformat(R"(Trying to assign an array of type "%s" to a variable of type "Array[%s]".)",
-							_get_var_type(src), _get_element_type(builtin_type, native_type, *script_type));
+							_get_var_type(src), _get_element_type(builtin_type, native_type, script_type));
 #endif // DEBUG_ENABLED
 					OPCODE_BREAK;
 				}
@@ -1479,13 +1501,15 @@ Variant GDScriptFunction::call(GDScriptInstance *p_instance, const Variant **p_a
 				GET_VARIANT_PTR(dst, 0);
 				GET_VARIANT_PTR(src, 1);
 
-				GET_VARIANT_PTR(key_script_type, 2);
+				GET_VARIANT_PTR(key_type, 2);
+				Script *key_script_type = Object::cast_to<Script>(key_type->operator Object *());
 				Variant::Type key_builtin_type = (Variant::Type)_code_ptr[ip + 5];
 				int key_native_type_idx = _code_ptr[ip + 6];
 				GD_ERR_BREAK(key_native_type_idx < 0 || key_native_type_idx >= _global_names_count);
 				const StringName &key_native_type = _global_names_ptr[key_native_type_idx];
 
-				GET_VARIANT_PTR(value_script_type, 3);
+				GET_VARIANT_PTR(value_type, 3);
+				Script *value_script_type = Object::cast_to<Script>(value_type->operator Object *());
 				Variant::Type value_builtin_type = (Variant::Type)_code_ptr[ip + 7];
 				int value_native_type_idx = _code_ptr[ip + 8];
 				GD_ERR_BREAK(value_native_type_idx < 0 || value_native_type_idx >= _global_names_count);
@@ -1494,20 +1518,22 @@ Variant GDScriptFunction::call(GDScriptInstance *p_instance, const Variant **p_a
 				if (src->get_type() != Variant::DICTIONARY) {
 #ifdef DEBUG_ENABLED
 					err_text = vformat(R"(Trying to assign a value of type "%s" to a variable of type "Dictionary[%s, %s]".)",
-							_get_var_type(src), _get_element_type(key_builtin_type, key_native_type, *key_script_type),
-							_get_element_type(value_builtin_type, value_native_type, *value_script_type));
+							_get_var_type(src), _get_element_type(key_builtin_type, key_native_type, key_script_type),
+							_get_element_type(value_builtin_type, value_native_type, value_script_type));
 #endif // DEBUG_ENABLED
 					OPCODE_BREAK;
 				}
 
 				Dictionary *dictionary = VariantInternal::get_dictionary(src);
+				const ContainerType &key_dict_type = dictionary->get_key_type();
+				const ContainerType &value_dict_type = dictionary->get_value_type();
 
-				if (dictionary->get_typed_key_builtin() != ((uint32_t)key_builtin_type) || dictionary->get_typed_key_class_name() != key_native_type || dictionary->get_typed_key_script() != *key_script_type ||
-						dictionary->get_typed_value_builtin() != ((uint32_t)value_builtin_type) || dictionary->get_typed_value_class_name() != value_native_type || dictionary->get_typed_value_script() != *value_script_type) {
+				if (key_dict_type.variant_type != key_builtin_type || key_dict_type.class_name != key_native_type || key_dict_type.script != key_script_type ||
+						value_dict_type.variant_type != value_builtin_type || value_dict_type.class_name != value_native_type || value_dict_type.script != value_script_type) {
 #ifdef DEBUG_ENABLED
 					err_text = vformat(R"(Trying to assign a dictionary of type "%s" to a variable of type "Dictionary[%s, %s]".)",
-							_get_var_type(src), _get_element_type(key_builtin_type, key_native_type, *key_script_type),
-							_get_element_type(value_builtin_type, value_native_type, *value_script_type));
+							_get_var_type(src), _get_element_type(key_builtin_type, key_native_type, key_script_type),
+							_get_element_type(value_builtin_type, value_native_type, value_script_type));
 #endif // DEBUG_ENABLED
 					OPCODE_BREAK;
 				}
@@ -1779,8 +1805,13 @@ Variant GDScriptFunction::call(GDScriptInstance *p_instance, const Variant **p_a
 				Array array;
 				array.resize(argc);
 
-				for (int i = 0; i < argc; i++) {
-					array[i] = *(instruction_args[i]);
+				// The newly allocated untyped Array is exclusively owned and the
+				// destination slots are initialized. Walk them linearly instead of
+				// calling Array::operator[] (read-only check + COW write proxy)
+				// and repeating the indexed lookup for every literal element.
+				Array::Iterator write = array.begin();
+				for (int i = 0; i < argc; i++, ++write) {
+					*write = *instruction_args[i];
 				}
 
 				GET_INSTRUCTION_ARG(dst, argc);
@@ -2845,7 +2876,8 @@ Variant GDScriptFunction::call(GDScriptInstance *p_instance, const Variant **p_a
 				CHECK_SPACE(5);
 				GET_VARIANT_PTR(r, 0);
 
-				GET_VARIANT_PTR(script_type, 1);
+				GET_VARIANT_PTR(type, 1);
+				Script *script_type = Object::cast_to<Script>(type->operator Object *());
 				Variant::Type builtin_type = (Variant::Type)_code_ptr[ip + 3];
 				int native_type_idx = _code_ptr[ip + 4];
 				GD_ERR_BREAK(native_type_idx < 0 || native_type_idx >= _global_names_count);
@@ -2860,11 +2892,12 @@ Variant GDScriptFunction::call(GDScriptInstance *p_instance, const Variant **p_a
 				}
 
 				Array *array = VariantInternal::get_array(r);
+				const ContainerType &array_type = array->get_element_type();
 
-				if (array->get_typed_builtin() != ((uint32_t)builtin_type) || array->get_typed_class_name() != native_type || array->get_typed_script() != *script_type) {
+				if (array_type.variant_type != builtin_type || array_type.class_name != native_type || array_type.script != script_type) {
 #ifdef DEBUG_ENABLED
 					err_text = vformat(R"(Trying to return a value of type "%s" from a function whose return type is "Array[%s]".)",
-							_get_var_type(r), _get_element_type(builtin_type, native_type, *script_type));
+							_get_var_type(r), _get_element_type(builtin_type, native_type, script_type));
 #endif // DEBUG_ENABLED
 					OPCODE_BREAK;
 				}
@@ -2881,13 +2914,15 @@ Variant GDScriptFunction::call(GDScriptInstance *p_instance, const Variant **p_a
 				CHECK_SPACE(8);
 				GET_VARIANT_PTR(r, 0);
 
-				GET_VARIANT_PTR(key_script_type, 1);
+				GET_VARIANT_PTR(key_type, 1);
+				Script *key_script_type = Object::cast_to<Script>(key_type->operator Object *());
 				Variant::Type key_builtin_type = (Variant::Type)_code_ptr[ip + 4];
 				int key_native_type_idx = _code_ptr[ip + 5];
 				GD_ERR_BREAK(key_native_type_idx < 0 || key_native_type_idx >= _global_names_count);
 				const StringName &key_native_type = _global_names_ptr[key_native_type_idx];
 
-				GET_VARIANT_PTR(value_script_type, 2);
+				GET_VARIANT_PTR(value_type, 2);
+				Script *value_script_type = Object::cast_to<Script>(value_type->operator Object *());
 				Variant::Type value_builtin_type = (Variant::Type)_code_ptr[ip + 6];
 				int value_native_type_idx = _code_ptr[ip + 7];
 				GD_ERR_BREAK(value_native_type_idx < 0 || value_native_type_idx >= _global_names_count);
@@ -2896,20 +2931,22 @@ Variant GDScriptFunction::call(GDScriptInstance *p_instance, const Variant **p_a
 				if (r->get_type() != Variant::DICTIONARY) {
 #ifdef DEBUG_ENABLED
 					err_text = vformat(R"(Trying to return a value of type "%s" from a function whose return type is "Dictionary[%s, %s]".)",
-							_get_var_type(r), _get_element_type(key_builtin_type, key_native_type, *key_script_type),
-							_get_element_type(value_builtin_type, value_native_type, *value_script_type));
+							_get_var_type(r), _get_element_type(key_builtin_type, key_native_type, key_script_type),
+							_get_element_type(value_builtin_type, value_native_type, value_script_type));
 #endif // DEBUG_ENABLED
 					OPCODE_BREAK;
 				}
 
 				Dictionary *dictionary = VariantInternal::get_dictionary(r);
+				const ContainerType &key_dict_type = dictionary->get_key_type();
+				const ContainerType &value_dict_type = dictionary->get_value_type();
 
-				if (dictionary->get_typed_key_builtin() != ((uint32_t)key_builtin_type) || dictionary->get_typed_key_class_name() != key_native_type || dictionary->get_typed_key_script() != *key_script_type ||
-						dictionary->get_typed_value_builtin() != ((uint32_t)value_builtin_type) || dictionary->get_typed_value_class_name() != value_native_type || dictionary->get_typed_value_script() != *value_script_type) {
+				if (key_dict_type.variant_type != key_builtin_type || key_dict_type.class_name != key_native_type || key_dict_type.script != key_script_type ||
+						value_dict_type.variant_type != value_builtin_type || value_dict_type.class_name != value_native_type || value_dict_type.script != value_script_type) {
 #ifdef DEBUG_ENABLED
 					err_text = vformat(R"(Trying to return a value of type "%s" from a function whose return type is "Dictionary[%s, %s]".)",
-							_get_var_type(r), _get_element_type(key_builtin_type, key_native_type, *key_script_type),
-							_get_element_type(value_builtin_type, value_native_type, *value_script_type));
+							_get_var_type(r), _get_element_type(key_builtin_type, key_native_type, key_script_type),
+							_get_element_type(value_builtin_type, value_native_type, value_script_type));
 #endif // DEBUG_ENABLED
 					OPCODE_BREAK;
 				}
@@ -3152,7 +3189,7 @@ Variant GDScriptFunction::call(GDScriptInstance *p_instance, const Variant **p_a
 
 				Vector2i *bounds = VariantInternal::get_vector2i(container);
 
-				VariantInternal::initialize(counter, Variant::FLOAT);
+				VariantInternal::initialize(counter, Variant::INT);
 				*VariantInternal::get_int(counter) = bounds->x;
 
 				if (bounds->x < bounds->y) {
@@ -3271,7 +3308,8 @@ Variant GDScriptFunction::call(GDScriptInstance *p_instance, const Variant **p_a
 				Dictionary *dict = VariantInternal::get_dictionary(container);
 				const Variant *next = dict->next(nullptr);
 
-				if (!dict->is_empty()) {
+				// next(nullptr) already tests emptiness; do not probe the hash map twice.
+				if (next) {
 					GET_VARIANT_PTR(iterator, 2);
 					*counter = *next;
 					*iterator = *next;
@@ -3325,7 +3363,7 @@ Variant GDScriptFunction::call(GDScriptInstance *p_instance, const Variant **p_a
 			GET_VARIANT_PTR(iterator, 2); \
 			VariantInternal::initialize(iterator, Variant::m_var_ret_type); \
 			m_ret_type *it = VariantInternal::m_ret_get_func(iterator); \
-			*it = array->get(0); \
+			*it = array->ptr()[0]; \
 			ip += 5; \
 		} else { \
 			int jumpto = _code_ptr[ip + 4]; \
@@ -3625,7 +3663,17 @@ Variant GDScriptFunction::call(GDScriptInstance *p_instance, const Variant **p_a
 					ip = jumpto;
 				} else {
 					GET_VARIANT_PTR(iterator, 2);
-					*VariantInternal::get_string(iterator) = str->substr(*idx, 1);
+					String *character = VariantInternal::get_string(iterator);
+					const char32_t codepoint = str->ptr()[*idx];
+					if (likely(character->length() == 1)) {
+						// Reuse the existing single-character buffer instead
+						// of allocating a substring for each loop iteration.
+						// ptrw() detaches if a previous character was saved
+						// elsewhere, preserving String's COW value semantics.
+						character->ptrw()[0] = codepoint;
+					} else {
+						*character = str->substr(*idx, 1);
+					}
 
 					ip += 5; // Loop again.
 				}
@@ -3686,13 +3734,14 @@ Variant GDScriptFunction::call(GDScriptInstance *p_instance, const Variant **p_a
 		const Vector<m_elem_type> *array = VariantInternal::m_get_func((const Variant *)container); \
 		int64_t *idx = VariantInternal::get_int(counter); \
 		(*idx)++; \
-		if (*idx >= array->size()) { \
+		/* Unsigned comparison also rejects negative or overflowed indices. */ \
+		if (uint64_t(*idx) >= uint64_t(array->size())) { \
 			int jumpto = _code_ptr[ip + 4]; \
 			GD_ERR_BREAK(jumpto < 0 || jumpto > _code_size); \
 			ip = jumpto; \
 		} else { \
 			GET_VARIANT_PTR(iterator, 2); \
-			*VariantInternal::m_ret_get_func(iterator) = array->get(*idx); \
+			*VariantInternal::m_ret_get_func(iterator) = array->ptr()[*idx]; \
 			ip += 5; \
 		} \
 	} \
@@ -3804,7 +3853,11 @@ Variant GDScriptFunction::call(GDScriptInstance *p_instance, const Variant **p_a
 				int globalname_idx = _code_ptr[ip + 2];
 				GD_ERR_BREAK(globalname_idx < 0 || globalname_idx >= _global_names_count);
 				const StringName *globalname = &_global_names_ptr[globalname_idx];
-				if (unlikely(!GDScriptLanguage::get_singleton()->get_named_globals_map().has(*globalname))) {
+				// Autoload references are frequently read from script hot loops.
+				// Resolve the named global with one hash lookup instead of has()
+				// followed by operator[] (which probes the same table twice).
+				const Variant *global_value = GDScriptLanguage::get_singleton()->get_named_globals_map().getptr(*globalname);
+				if (unlikely(global_value == nullptr)) {
 #ifdef DEBUG_ENABLED
 					err_text = vformat(R"(Trying to access non-existent autoload singleton "%s".)", *globalname);
 #endif
@@ -3812,7 +3865,7 @@ Variant GDScriptFunction::call(GDScriptInstance *p_instance, const Variant **p_a
 				}
 
 				GET_VARIANT_PTR(dst, 0);
-				*dst = GDScriptLanguage::get_singleton()->get_named_globals_map()[*globalname];
+				*dst = *global_value;
 
 				ip += 3;
 			}

@@ -32,11 +32,43 @@
 
 #include "godot_collision_object_3d.h"
 
+#include "core/config/project_settings.h"
+
 GodotBroadPhase3DBVH::ID GodotBroadPhase3DBVH::create(GodotCollisionObject3D *p_object, int p_subindex, const AABB &p_aabb, bool p_static) {
 	uint32_t tree_id = p_static ? TREE_STATIC : TREE_DYNAMIC;
 	uint32_t tree_collision_mask = p_static ? TREE_FLAG_DYNAMIC : (TREE_FLAG_STATIC | TREE_FLAG_DYNAMIC);
-	ID oid = bvh.create(p_object, true, tree_id, tree_collision_mask, p_aabb, p_subindex); // Pair everything, don't care?
+	ID oid = bvh.create(p_object, true, tree_id, tree_collision_mask, p_aabb, p_subindex, batch_depth > 0); // Pair everything, don't care?
 	return oid + 1;
+}
+
+GodotBroadPhase3DBVH::ID GodotBroadPhase3DBVH::create_deferred(GodotCollisionObject3D *p_object, int p_subindex, const AABB &p_aabb, bool p_static) {
+	const uint32_t tree_id = p_static ? TREE_STATIC : TREE_DYNAMIC;
+	const uint32_t tree_collision_mask = p_static ? TREE_FLAG_DYNAMIC : (TREE_FLAG_STATIC | TREE_FLAG_DYNAMIC);
+	const ID oid = bvh.create(p_object, true, tree_id, tree_collision_mask, p_aabb, p_subindex, true);
+	return oid + 1;
+}
+
+void GodotBroadPhase3DBVH::flush_pending_pairs() {
+	if (batch_depth == 0) {
+		bvh.flush_pending_pairs();
+	}
+}
+
+void GodotBroadPhase3DBVH::begin_batch() {
+	++batch_depth;
+}
+
+void GodotBroadPhase3DBVH::end_batch() {
+	ERR_FAIL_COND(batch_depth == 0);
+	if (--batch_depth == 0) {
+		bvh.flush_pending_pairs();
+	}
+}
+
+void GodotBroadPhase3DBVH::force_collision_check(ID p_id) {
+	ERR_FAIL_COND(!p_id);
+	// A compound object's filters are updated in a single BVH batch.
+	bvh.force_collision_check(p_id - 1, batch_depth > 0);
 }
 
 void GodotBroadPhase3DBVH::move(ID p_id, const AABB &p_aabb) {
@@ -78,8 +110,20 @@ int GodotBroadPhase3DBVH::cull_point(const Vector3 &p_point, GodotCollisionObjec
 	return bvh.cull_point(p_point, p_results, p_max_results, nullptr, 0xFFFFFFFF, p_result_indices);
 }
 
+void GodotBroadPhase3DBVH::cast_segment(const Vector3 &p_from, const Vector3 &p_to, SegmentCastCallback p_callback, void *p_userdata) {
+	bvh.cast_segment(p_from, p_to, p_callback, p_userdata);
+}
+
 int GodotBroadPhase3DBVH::cull_segment(const Vector3 &p_from, const Vector3 &p_to, GodotCollisionObject3D **p_results, int p_max_results, int *p_result_indices) {
 	return bvh.cull_segment(p_from, p_to, p_results, p_max_results, nullptr, 0xFFFFFFFF, p_result_indices);
+}
+
+void GodotBroadPhase3DBVH::visit_point(const Vector3 &p_point, QueryVisitor p_visitor, void *p_userdata) {
+	bvh.visit_point(p_point, p_visitor, p_userdata);
+}
+
+void GodotBroadPhase3DBVH::visit_aabb(const AABB &p_aabb, QueryVisitor p_visitor, void *p_userdata) {
+	bvh.visit_aabb(p_aabb, p_visitor, p_userdata);
 }
 
 int GodotBroadPhase3DBVH::cull_aabb(const AABB &p_aabb, GodotCollisionObject3D **p_results, int p_max_results, int *p_result_indices) {
@@ -125,4 +169,10 @@ GodotBroadPhase3D *GodotBroadPhase3DBVH::_create() {
 GodotBroadPhase3DBVH::GodotBroadPhase3DBVH() {
 	bvh.set_pair_callback(_pair_callback, this);
 	bvh.set_unpair_callback(_unpair_callback, this);
+	// Without an expanded broadphase, separated spheres would never reach
+	// the predictive-contact narrowphase. Zero preserves the legacy BVH.
+	const real_t speculative_distance = MAX(real_t(0.0), (real_t)GLOBAL_GET("physics/3d/solver/speculative_sphere_distance"));
+	if (speculative_distance > 0.0) {
+		bvh.params_set_pairing_expansion(speculative_distance);
+	}
 }

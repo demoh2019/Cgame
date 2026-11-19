@@ -1,0 +1,36 @@
+name: GDScript tokenizer buffer fastpath regressions
+
+on:
+  push:
+    branches: [develop]
+    paths:
+      - 'modules/gdscript/gdscript_tokenizer_buffer.cpp'
+      - 'modules/gdscript/tests/test_tokenizer_buffer_hotpath.cpp'
+      - '.github/workflows/gdscript-tokenizer-buffer-perf.yml'
+  pull_request:
+    paths:
+      - 'modules/gdscript/gdscript_tokenizer_buffer.cpp'
+      - 'modules/gdscript/tests/test_tokenizer_buffer_hotpath.cpp'
+      - '.github/workflows/gdscript-tokenizer-buffer-perf.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  tokenizer-native-regressions:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+      - uses: ./.github/actions/godot-deps
+      - name: Build native editor with GDScript tests
+        uses: ./.github/actions/godot-build
+        with:
+          platform: linuxbsd
+          target: editor
+          scons-flags: dev_build=yes tests=yes debug_symbols=no module_mono_enabled=no module_text_server_fb_enabled=yes accesskit=no -j2
+      - name: Compare GDScript text and binary tokenizer output (raw + zstd)
+        run: ./bin/godot.linuxbsd.editor.dev.x86_64 --headless --test --test-case="*[GDScriptTokenizerHotpath]*" --no-colors

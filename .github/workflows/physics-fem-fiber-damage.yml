@@ -1,0 +1,29 @@
+name: SoftBody FEM damaged fiber coupling regression
+
+on:
+  pull_request:
+    paths:
+      - "modules/godot_physics_3d/godot_soft_body_3d.cpp"
+      - "servers/physics_fem_tetra_damage.h"
+      - "servers/physics_fem_tetra_fiber.h"
+      - "tests/servers/test_physics_fem_tetra_fiber_damage.cpp"
+      - "tests/stress/test_physics_fem_tetra_fiber_damage.py"
+      - ".github/workflows/physics-fem-fiber-damage.yml"
+  push:
+    branches: [develop]
+    paths:
+      - "modules/godot_physics_3d/godot_soft_body_3d.cpp"
+      - "tests/stress/test_physics_fem_tetra_fiber_damage.py"
+      - ".github/workflows/physics-fem-fiber-damage.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  numerical-regressions:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Check damaged FEM fiber softening and engine wiring
+        run: python3 -m unittest discover -s tests/stress -p test_physics_fem_tetra_fiber_damage.py -v

@@ -1,0 +1,29 @@
+name: PCK directory index performance
+
+on:
+  pull_request:
+    branches: [develop]
+    paths:
+      - "core/io/file_access_pack.cpp"
+      - "tests/core/io/test_pck_packer.cpp"
+      - "misc/scripts/tests/test_pck_directory_index_perf.py"
+      - ".github/workflows/pck-directory-index-perf.yml"
+  push:
+    branches: [develop]
+    paths:
+      - "core/io/file_access_pack.cpp"
+      - "tests/core/io/test_pck_packer.cpp"
+      - "misc/scripts/tests/test_pck_directory_index_perf.py"
+      - ".github/workflows/pck-directory-index-perf.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  index-lookup-contracts:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - run: python3 -m unittest discover -s misc/scripts/tests -p test_pck_directory_index_perf.py -v

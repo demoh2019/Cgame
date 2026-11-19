@@ -1,0 +1,58 @@
+name: Node exact-name lookup performance guards
+
+on:
+  push:
+    branches: [develop]
+    paths:
+      - 'scene/main/node.cpp'
+      - 'tests/scene/test_node_find_children_fast.cpp'
+      - 'misc/scripts/tests/test_node_exact_lookup_perf.py'
+      - '.github/workflows/node-exact-lookup-perf.yml'
+  pull_request:
+    paths:
+      - 'scene/main/node.cpp'
+      - 'tests/scene/test_node_find_children_fast.cpp'
+      - 'misc/scripts/tests/test_node_exact_lookup_perf.py'
+      - '.github/workflows/node-exact-lookup-perf.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  structural-regressions:
+    runs-on: ubuntu-24.04
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ['3.10', '3.13']
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+      - name: Verify exact name and wildcard lookup invariants
+        run: python -m unittest discover -s misc/scripts/tests -p test_node_exact_lookup_perf.py -v
+
+  native-engine-tests:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install native editor build prerequisites
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libwayland-bin
+      - uses: ./.github/actions/godot-deps
+      - name: Build Cgame editor with tests
+        uses: ./.github/actions/godot-build
+        with:
+          platform: linuxbsd
+          target: editor
+          scons-flags: dev_build=yes debug_symbols=no tests=yes module_text_server_fb_enabled=yes -j2
+      - name: Exercise Node exact lookup and wildcard compatibility
+        shell: bash
+        run: |
+          set -euo pipefail
+          BIN=./bin/godot.linuxbsd.editor.dev.x86_64
+          "$BIN" --headless --test --test-case='*[NodeFindChildrenFast]*' --no-colors

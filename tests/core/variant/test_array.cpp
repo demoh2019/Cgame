@@ -34,6 +34,8 @@ TEST_FORCE_LINK(test_array)
 
 #include "core/object/callable_mp.h"
 #include "core/variant/array.h"
+#include "core/variant/container_type_validate.h"
+#include "core/variant/typed_dictionary.h"
 #include "core/variant/typed_array.h"
 #include "tests/test_tools.h"
 
@@ -138,6 +140,125 @@ TEST_CASE("[Array] append_array()") {
 	CHECK(arr1.size() == 2);
 	CHECK(int(arr1[0]) == 1);
 	CHECK(int(arr1[1]) == 2);
+}
+
+TEST_CASE("[Array] typed append_array avoids conversion for compatible elements") {
+	TypedArray<double> target;
+	Array source = { 1.25, 2.5, 3.75 };
+	target.append_array(source);
+
+	CHECK_EQ(target.size(), 3);
+	for (int i = 0; i < 3; i++) {
+		CHECK_EQ(double(target[i]), double(source[i]));
+	}
+	// The source remains intact and later changes must not affect the destination.
+	source[0] = 11.5;
+	CHECK_EQ(double(target[0]), 1.25);
+
+	// Nothing should change when the source is empty.
+	Array empty;
+	target.append_array(empty);
+	CHECK_EQ(target.size(), 3);
+}
+
+TEST_CASE("[Array] typed append_array converts only incompatible elements") {
+	TypedArray<double> target;
+	Array mixed = { 1.5, 2, 3.25, 4, 5.5 };
+	target.append_array(mixed);
+
+	CHECK_EQ(target.size(), 5);
+	CHECK_EQ(double(target[0]), 1.5);
+	CHECK_EQ(double(target[1]), 2.0);
+	CHECK_EQ(double(target[2]), 3.25);
+	CHECK_EQ(double(target[3]), 4.0);
+	CHECK_EQ(double(target[4]), 5.5);
+
+	// Repeated appends preserve ordering and do not modify the source.
+	target.append_array(mixed);
+	CHECK_EQ(target.size(), 10);
+	for (int i = 0; i < mixed.size(); i++) {
+		CHECK_EQ(double(target[i]), double(target[5 + i]));
+	}
+	CHECK_EQ(mixed[1], Variant(2));
+}
+
+TEST_CASE("[Array] typed append_array rejects invalid elements atomically") {
+	TypedArray<double> target = { 7.0 };
+	Array invalid = { 1.25, "invalid", 3.25 };
+
+	ERR_PRINT_OFF;
+	target.append_array(invalid);
+	ERR_PRINT_ON;
+
+	CHECK_EQ(target.size(), 1);
+	CHECK_EQ(double(target[0]), 7.0);
+}
+
+TEST_CASE("[Array] typed append_array accepts compatible untyped values") {
+	TypedArray<int> destination = { 8 };
+	Array source = { 1, 2, 3, 4 };
+	destination.append_array(source);
+	REQUIRE_EQ(destination.size(), 5);
+	CHECK_EQ(destination[0], Variant(8));
+	for (int i = 0; i < 4; ++i) {
+		CHECK_EQ(destination[i + 1], Variant(i + 1));
+	}
+	source[0] = 99;
+	CHECK_EQ(destination[1], Variant(1));
+}
+
+TEST_CASE("[Array] typed append_array handles empty untyped sources") {
+	TypedArray<int> destination = { 8 };
+	Array source;
+	destination.append_array(source);
+	CHECK_EQ(destination.size(), 1);
+	CHECK_EQ(destination[0], Variant(8));
+}
+
+TEST_CASE("[Array] typed append_array converts mixed numeric values") {
+	TypedArray<double> destination = { 9.0 };
+	Array source = { 1, 2.5, 3, 4.5 };
+	destination.append_array(source);
+	REQUIRE_EQ(destination.size(), 5);
+	CHECK_EQ(destination[0], Variant(9.0));
+	CHECK_EQ(destination[1], Variant(1.0));
+	CHECK_EQ(destination[2], Variant(2.5));
+	CHECK_EQ(destination[3], Variant(3.0));
+	CHECK_EQ(destination[4], Variant(4.5));
+	for (int i = 0; i < destination.size(); ++i) {
+		CHECK_EQ(Variant(destination[i]).get_type(), Variant::FLOAT);
+	}
+}
+
+TEST_CASE("[Array] typed append_array preserves compatible prefix") {
+	TypedArray<double> destination;
+	Array source = { 1.25, 2.5, 3, 4.75, 5 };
+	destination.append_array(source);
+	REQUIRE_EQ(destination.size(), 5);
+	CHECK_EQ(destination[0], Variant(1.25));
+	CHECK_EQ(destination[1], Variant(2.5));
+	CHECK_EQ(destination[2], Variant(3.0));
+	CHECK_EQ(destination[3], Variant(4.75));
+	CHECK_EQ(destination[4], Variant(5.0));
+	source[2] = -3;
+	CHECK_EQ(destination[2], Variant(3.0));
+}
+
+TEST_CASE("[Array] typed append_array handles repeated appends and aliases") {
+	TypedArray<int> destination = { 4, 5, 6 };
+	for (int repeat = 0; repeat < 3; ++repeat) {
+		Array source = { 1, 2 };
+		destination.append_array(source);
+	}
+	REQUIRE_EQ(destination.size(), 9);
+	CHECK_EQ(destination[7], Variant(1));
+	CHECK_EQ(destination[8], Variant(2));
+	TypedArray<int> aliased = { 4, 5 };
+	Array alias = aliased;
+	aliased.append_array(alias);
+	REQUIRE_EQ(aliased.size(), 4);
+	CHECK_EQ(aliased[2], Variant(4));
+	CHECK_EQ(aliased[3], Variant(5));
 }
 
 TEST_CASE("[Array] resize(), insert(), and erase()") {
@@ -788,6 +909,153 @@ TEST_CASE("[Array] Test typed arrays") {
 	Array arr3;
 	arr3.set_typed(Variant::OBJECT, "Node", Variant());
 	CHECK_EQ(arr3.get_typed_class_name(), "Node");
+}
+
+
+TEST_CASE("[TypeConvertFastPath] strict conversions preserve constructor semantics") {
+	const Variant samples[] = {
+		Variant(true),
+		Variant(int64_t(27)),
+		Variant(3.75),
+		Variant(StringName("typed_example")),
+		Variant(NodePath("Root/Player")),
+		Variant(Vector2i(4, -7)),
+		Variant(Vector2(2.5, -3.75)),
+		Variant(Vector3i(6, 8, -11)),
+		Variant(Vector3(1.25, 2.5, -4.75)),
+		Variant(Rect2i(1, 2, 3, 4))
+	};
+	const Variant::Type targets[] = {
+		Variant::BOOL, Variant::INT, Variant::FLOAT, Variant::STRING,
+		Variant::STRING_NAME, Variant::NODE_PATH, Variant::VECTOR2,
+		Variant::VECTOR2I, Variant::VECTOR3, Variant::VECTOR3I,
+		Variant::RECT2, Variant::RECT2I
+	};
+	int checked = 0;
+	for (const Variant &sample : samples) {
+		for (Variant::Type type : targets) {
+			if (sample.get_type() == type || !Variant::can_convert_strict(sample.get_type(), type)) {
+				continue;
+			}
+			ContainerTypeValidate validator;
+			validator.variant_type = type;
+			Variant converted;
+			const Variant *result = validator.validate(sample, converted);
+			REQUIRE(result == &converted);
+
+			Variant reference;
+			const Variant *args[] = { &sample };
+			Callable::CallError err;
+			Variant::construct(type, reference, args, 1, err);
+			REQUIRE_EQ(err.error, Callable::CallError::CALL_OK);
+			CHECK_EQ(*result, reference);
+			CHECK_EQ(result->get_type(), type);
+			checked++;
+		}
+	}
+	CHECK(checked >= 12);
+}
+
+TEST_CASE("[TypeConvertFastPath] passing an already correct type does not allocate conversion temporary") {
+	ContainerTypeValidate validator;
+	validator.variant_type = Variant::INT;
+	const Variant source = 123;
+	Variant temporary = String("keep");
+	const Variant *result = validator.validate(source, temporary);
+	CHECK(result == &source);
+	CHECK_EQ(temporary, Variant("keep"));
+}
+
+TEST_CASE("[TypeConvertFastPath] incompatible strict conversion is rejected") {
+	ContainerTypeValidate validator;
+	validator.variant_type = Variant::FLOAT;
+	CHECK_FALSE(validator.test_validate(Variant("not a float")));
+	CHECK(validator.test_validate(Variant(42)));
+}
+
+TEST_CASE("[TypeConvertFastPath] repeated integer to float conversions are stable") {
+	ContainerTypeValidate validator;
+	validator.variant_type = Variant::FLOAT;
+	const Variant value = 13579;
+	Variant temporary;
+	for (int i = 0; i < 512; ++i) {
+		const Variant *result = validator.validate(value, temporary);
+		REQUIRE(result == &temporary);
+		CHECK_EQ(result->get_type(), Variant::FLOAT);
+		CHECK_EQ(double(*result), 13579.0);
+	}
+	CHECK_EQ(value.get_type(), Variant::INT);
+}
+
+TEST_CASE("[TypeConvertFastPath] typed array append retains numeric coercion and source") {
+	TypedArray<double> destination;
+	Array input = { 1, 2, 3.25, 4 };
+	destination.append_array(input);
+	REQUIRE_EQ(destination.size(), 4);
+	CHECK_EQ(double(destination[0]), 1.0);
+	CHECK_EQ(double(destination[1]), 2.0);
+	CHECK_EQ(double(destination[2]), 3.25);
+	CHECK_EQ(double(destination[3]), 4.0);
+	CHECK_EQ(input[0].get_type(), Variant::INT);
+}
+
+TEST_CASE("[TypeConvertFastPath] typed dictionary stores coerced numeric keys") {
+	TypedDictionary<double, double> dict;
+	dict[Variant(7)] = Variant(2);
+	REQUIRE_EQ(dict.size(), 1);
+	CHECK_EQ(dict[Variant(7.0)], Variant(2.0));
+}
+
+TEST_CASE("[TypedContainer] Array Ref<Script> fast path retains Variant compatibility") {
+	Array legacy;
+	legacy.set_typed(Variant::INT, StringName(), Variant());
+	Array direct;
+	direct.set_typed(Variant::INT, StringName(), Ref<Script>());
+	REQUIRE(direct.is_same_typed(legacy));
+
+	Array source = { 5, 10, 15 };
+	Array typed_from_ref(source, Variant::INT, StringName(), Ref<Script>());
+	Array typed_from_variant(source, Variant::INT, StringName(), Variant());
+	REQUIRE(typed_from_ref.is_same_typed(typed_from_variant));
+	REQUIRE_EQ(typed_from_ref.size(), 3);
+	for (int i = 0; i < 3; i++) {
+		CHECK_EQ(typed_from_ref[i], source[i]);
+		CHECK_EQ(typed_from_variant[i], source[i]);
+	}
+
+	for (int i = 0; i < 512; i++) {
+		TypedArray<int> typed;
+		REQUIRE_EQ(typed.get_typed_builtin(), Variant::INT);
+		typed.push_back(i);
+		CHECK_EQ(typed[0], Variant(i));
+	}
+}
+
+
+TEST_CASE("[Array] Sequential iterator assignment matches indexed literal filling") {
+	for (int count : { 0, 1, 2, 7, 8, 17, 64, 128 }) {
+		Array array;
+		REQUIRE_EQ(array.resize(count), OK);
+		Array::Iterator write = array.begin();
+		for (int i = 0; i < count; ++i, ++write) {
+			*write = i * 17;
+		}
+		REQUIRE_EQ(array.size(), count);
+		for (int i = 0; i < count; ++i) {
+			CHECK_EQ(array[i], Variant(i * 17));
+		}
+	}
+	Array nested;
+	REQUIRE_EQ(nested.resize(3), OK);
+	Array::Iterator write = nested.begin();
+	*write = String("text");
+	++write;
+	*write = Vector2(3, 4);
+	++write;
+	*write = Array({ 1, 2, 3 });
+	CHECK_EQ(nested[0], Variant("text"));
+	CHECK_EQ(nested[1], Variant(Vector2(3, 4)));
+	CHECK_EQ(Array(nested[2]), Array({ 1, 2, 3 }));
 }
 
 } // namespace TestArray

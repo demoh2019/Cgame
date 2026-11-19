@@ -1,0 +1,31 @@
+name: macOS window error regression
+
+on:
+  pull_request:
+    branches: [develop]
+    paths:
+      - "platform/macos/display_server_macos.mm"
+      - "platform/macos/gl_manager_macos_legacy.h"
+      - "misc/scripts/tests/test_macos_window_error.py"
+      - ".github/workflows/macos-window-error-regression.yml"
+  push:
+    branches: [develop]
+    paths:
+      - "platform/macos/display_server_macos.mm"
+      - "platform/macos/gl_manager_macos_legacy.h"
+      - "misc/scripts/tests/test_macos_window_error.py"
+      - ".github/workflows/macos-window-error-regression.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  test-error-branch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Compile and run macOS failure guard tests with GCC and Clang
+        run: |
+          CXX=g++ python3 -m unittest discover -s misc/scripts/tests -p test_macos_window_error.py -v
+          CXX=clang++ python3 -m unittest discover -s misc/scripts/tests -p test_macos_window_error.py -v

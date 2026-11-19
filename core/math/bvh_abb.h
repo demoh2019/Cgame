@@ -199,10 +199,50 @@ struct BVH_ABB {
 		return true;
 	}
 
-	bool intersects_segment(const Segment &p_s) const {
-		BOUNDS bb;
-		to(bb);
-		return bb.intersects_segment(p_s.from, p_s.to);
+	// Ray/AABB slab test directly on the packed BVH bounds. Returning the
+	// entry fraction also lets ray traversal order child nodes without doing
+	// a second ray/AABB calculation. The segment uses [0, 1] inclusive and
+	// accepts rays starting inside the box (entry fraction 0).
+	bool intersects_segment(const Segment &p_s, real_t *r_entry_fraction = nullptr) const {
+		real_t entry = 0.0;
+		real_t exit = 1.0;
+		for (int axis = 0; axis < POINT::AXIS_COUNT; ++axis) {
+			const real_t from = p_s.from[axis];
+			const real_t to = p_s.to[axis];
+			const real_t lower = min[axis];
+			const real_t upper = -neg_max[axis];
+
+			real_t axis_entry;
+			real_t axis_exit;
+			if (from < to) {
+				if (from > upper || to < lower) {
+					return false;
+				}
+				const real_t length = to - from;
+				axis_entry = from < lower ? (lower - from) / length : 0.0;
+				axis_exit = to > upper ? (upper - from) / length : 1.0;
+			} else {
+				if (to > upper || from < lower) {
+					return false;
+				}
+				const real_t length = to - from;
+				axis_entry = from > upper ? (upper - from) / length : 0.0;
+				axis_exit = to < lower ? (lower - from) / length : 1.0;
+			}
+			if (axis_entry > entry) {
+				entry = axis_entry;
+			}
+			if (axis_exit < exit) {
+				exit = axis_exit;
+			}
+			if (exit < entry) {
+				return false;
+			}
+		}
+		if (r_entry_fraction) {
+			*r_entry_fraction = entry;
+		}
+		return true;
 	}
 
 	bool intersects_point(const POINT &p_pt) const {

@@ -1,0 +1,36 @@
+name: GodotPhysics3D velocity-dependent Stribeck friction
+
+on:
+  push:
+    branches: [develop]
+    paths:
+      - "servers/physics_contact_velocity_friction.h"
+      - "modules/godot_physics_3d/godot_body_pair_3d.cpp"
+      - "modules/godot_physics_3d/godot_space_3d.h"
+      - "modules/godot_physics_3d/godot_space_3d.cpp"
+      - "servers/physics_3d/physics_server_3d.cpp"
+      - "tests/servers/test_godot_physics_stribeck_friction.cpp"
+      - "tests/stress/test_physics_stribeck_friction.py"
+      - ".github/workflows/physics-stribeck-friction.yml"
+  pull_request:
+    paths:
+      - "servers/physics_contact_velocity_friction.h"
+      - "modules/godot_physics_3d/godot_body_pair_3d.cpp"
+      - "modules/godot_physics_3d/godot_space_3d.h"
+      - "modules/godot_physics_3d/godot_space_3d.cpp"
+      - "servers/physics_3d/physics_server_3d.cpp"
+      - "tests/servers/test_godot_physics_stribeck_friction.cpp"
+      - "tests/stress/test_physics_stribeck_friction.py"
+      - ".github/workflows/physics-stribeck-friction.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  numerical-contracts:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Friction weakening, finite inputs, and source wiring
+        run: python3 -m unittest discover -s tests/stress -p 'test_physics_stribeck_friction.py' -v

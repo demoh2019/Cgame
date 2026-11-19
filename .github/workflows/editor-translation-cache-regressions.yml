@@ -1,0 +1,53 @@
+name: Upstream editor translation cache regressions
+
+on:
+  pull_request:
+    branches: [develop]
+    paths:
+      - "editor/editor_node.cpp"
+      - "misc/scripts/tests/test_editor_translation_cache_backport.py"
+      - ".github/workflows/editor-translation-cache-regressions.yml"
+  push:
+    branches: [develop]
+    paths:
+      - "editor/editor_node.cpp"
+      - "misc/scripts/tests/test_editor_translation_cache_backport.py"
+      - ".github/workflows/editor-translation-cache-regressions.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  translation-contracts:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - name: Validate source contracts
+        run: |
+          python3 -m py_compile misc/scripts/tests/test_editor_translation_cache_backport.py
+          python3 -m unittest discover -s misc/scripts/tests -p 'test_editor_translation_cache_backport.py' -v
+
+  editor-headless-smoke:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+      - uses: ./.github/actions/godot-deps
+      - name: Compile test-enabled editor
+        uses: ./.github/actions/godot-build
+        with:
+          platform: linuxbsd
+          target: editor
+          scons-flags: dev_build=yes tests=yes debug_symbols=no module_mono_enabled=no accesskit=no
+      - name: Launch headless editor
+        shell: bash
+        run: |
+          set -euo pipefail
+          project="$RUNNER_TEMP/translation-ui-test-project"
+          mkdir -p "$project"
+          printf '[application]\nconfig/name="Translation cache regression"\n' > "$project/project.godot"
+          timeout 120s ./bin/godot.linuxbsd.editor.dev.x86_64 --headless --editor --path "$project" --quit

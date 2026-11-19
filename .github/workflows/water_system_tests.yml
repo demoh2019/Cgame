@@ -1,0 +1,33 @@
+name: Water System integration tests
+on:
+  pull_request:
+    paths:
+      - 'misc/water_system/**'
+      - '.github/workflows/water_system_tests.yml'
+  push:
+    paths:
+      - 'misc/water_system/**'
+      - '.github/workflows/water_system_tests.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  water-headless:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+      - name: Fetch official Godot 4.7.2 release and verify digest
+        shell: bash
+        run: |
+          set -euo pipefail
+          curl --retry 4 --retry-delay 3 -fL -o godot.zip https://github.com/godotengine/godot-builds/releases/download/4.7.2-stable/Godot_v4.7.2-stable_linux.x86_64.zip
+          echo 'cadd3204e728a35d3f13adb7fd0d7902636b79f6b95c40c265eb73b6c35329e4  godot.zip' | sha256sum -c -
+          unzip -q godot.zip
+          chmod +x Godot_v4.7.2-stable_linux.x86_64
+          mv Godot_v4.7.2-stable_linux.x86_64 godot
+      - name: Import project and compile shaders and scripts
+        run: ./godot --headless --path misc/water_system --editor --import --quit
+      - name: Run CPU/GPU synchronization and buoyancy integration tests
+        run: ./godot --headless --path misc/water_system --script res://tests/test_water_system.gd

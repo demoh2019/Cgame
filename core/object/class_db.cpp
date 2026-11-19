@@ -190,11 +190,6 @@ public:
 		// Construct a placeholder.
 		Object *obj = native_parent->creation_func(static_cast<bool>(p_notify_postinitialize));
 
-		// Classes descending from RefCounted are expected to be returned with a refcount of 1.
-		if (RefCounted *ref_counted = Object::cast_to<RefCounted>(obj)) {
-			ref_counted->init_ref();
-		}
-
 		// ClassDB::set_object_extension_instance() won't be called for placeholders.
 		// We need need to make sure that all the things it would have done (even if
 		// done in a different way to support placeholders) will also be done here.
@@ -634,10 +629,10 @@ Object *ClassDB::_instantiate_internal(const StringName &p_class, bool p_require
 #endif // DISABLE_DEPRECATED
 	else {
 		Object *object = ti->creation_func(p_notify_postinitialize);
-		if (p_with_refcount && object != nullptr && object->is_ref_counted()) {
-			// creation_func creates the object with an (effective) refcount of 1,
-			// so establish the expected refcount=1 now.
-			((RefCounted *)object)->init_ref();
+		if (!p_with_refcount && object != nullptr && object->is_ref_counted()) {
+			// memnew() now already transfers its initial refcount to its creator.
+			// Legacy callers explicitly requesting a raw pointer need effective zero.
+			((RefCounted *)object)->deinit_ref();
 		}
 		return object;
 	}
@@ -907,8 +902,11 @@ static MethodInfo info_from_bind(const MethodBind *p_method) {
 	minfo.name = p_method->get_name();
 	minfo.id = p_method->get_method_id();
 
-	for (int i = 0; i < p_method->get_argument_count(); i++) {
-		minfo.arguments.push_back(p_method->get_argument_info(i));
+	const int argument_count = p_method->get_argument_count();
+	minfo.arguments.resize(argument_count);
+	PropertyInfo *arguments = minfo.arguments.ptrw();
+	for (int i = 0; i < argument_count; i++) {
+		arguments[i] = p_method->get_argument_info(i);
 	}
 
 	minfo.return_val = p_method->get_return_info();
@@ -975,7 +973,7 @@ void ClassDB::get_method_list_with_compatibility(const StringName &p_class, List
 		}
 #endif
 		for (const KeyValue<StringName, LocalVector<MethodBind *, unsigned int, false, false>> &E : type->gdtype->get_self_compatibility_method_map()) {
-			LocalVector<MethodBind *> compat(E.value);
+			const LocalVector<MethodBind *> &compat = E.value;
 			for (MethodBind *method : compat) {
 				MethodInfo minfo = info_from_bind(method);
 
@@ -1342,6 +1340,10 @@ void ClassDB::add_property(const StringName &p_class, const PropertyInfo &p_pinf
 	ClassInfo *type = classes.getptr(p_class);
 	ERR_FAIL_NO_CLASS(type, p_class);
 	type->gdtype->add_property(p_pinfo, p_setter, p_getter, p_index);
+}
+
+void ClassDB::add_property(const StringName &p_class, const PropertyInfo &p_pinfo, const char *p_setter, const char *p_getter, int p_index) {
+	add_property(p_class, p_pinfo, StringName(p_setter), StringName(p_getter), p_index);
 }
 
 void ClassDB::set_property_default_value(const StringName &p_class, const StringName &p_name, const Variant &p_default) {
@@ -1765,11 +1767,16 @@ void ClassDB::add_extension_class_virtual_method(const StringName &p_class, cons
 	mi.return_val = PropertyInfo(p_method_info->return_value);
 	mi.return_val_metadata = p_method_info->return_value_metadata;
 	mi.flags = p_method_info->method_flags;
-	for (int i = 0; i < (int)p_method_info->argument_count; i++) {
+	const int size = p_method_info->argument_count;
+	arg_names.resize(size);
+	mi.arguments.resize(size);
+	mi.arguments_metadata.resize(size);
+	PropertyInfo *arguments = mi.arguments.ptrw();
+	for (int i = 0; i < size; i++) {
 		PropertyInfo arg(p_method_info->arguments[i]);
-		mi.arguments.push_back(arg);
-		mi.arguments_metadata.push_back(p_method_info->arguments_metadata[i]);
-		arg_names.push_back(arg.name);
+		arguments[i] = arg;
+		mi.arguments_metadata.set(i, p_method_info->arguments_metadata[i]);
+		arg_names.set(i, arg.name);
 	}
 
 	add_virtual_method(p_class, mi, true, arg_names);

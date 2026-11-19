@@ -1,0 +1,47 @@
+name: Asset Reference Viewer (Godot addon)
+
+on:
+  push:
+    branches: [develop]
+    paths:
+      - 'misc/asset_reference_viewer/**'
+      - '.github/workflows/asset-reference-viewer.yml'
+  pull_request:
+    paths:
+      - 'misc/asset_reference_viewer/**'
+      - '.github/workflows/asset-reference-viewer.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  addon-tests:
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    steps:
+      - name: Checkout standalone test project
+        uses: actions/checkout@v4
+        with:
+          sparse-checkout: |
+            misc/asset_reference_viewer
+          sparse-checkout-cone-mode: true
+      - name: Install Godot 4.8 beta 4 (same runtime as AI Game Builder)
+        shell: bash
+        run: |
+          set -euo pipefail
+          curl --fail --location --retry 3 -o /tmp/godot.zip \
+            https://github.com/godotengine/godot-builds/releases/download/4.8-beta4/Godot_v4.8-beta4_linux.x86_64.zip
+          unzip -q /tmp/godot.zip -d /tmp/
+          chmod +x /tmp/Godot_v4.8-beta4_linux.x86_64
+          /tmp/Godot_v4.8-beta4_linux.x86_64 --version
+      - name: Native GDScript regression tests
+        run: /tmp/Godot_v4.8-beta4_linux.x86_64 --headless --path misc/asset_reference_viewer --script res://tests/test_graph_index.gd
+      - name: Editor plugin startup smoke test
+        shell: bash
+        run: |
+          set -euo pipefail
+          /tmp/Godot_v4.8-beta4_linux.x86_64 --headless --editor --path misc/asset_reference_viewer --quit 2>&1 | tee /tmp/viewer-editor.log
+          if grep -Ei 'SCRIPT ERROR:|Parse Error:|Failed to load script' /tmp/viewer-editor.log; then
+            exit 1
+          fi

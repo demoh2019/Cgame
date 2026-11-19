@@ -1,0 +1,29 @@
+config_version=5
+
+[application]
+
+config/name="Cgame Discrete Rod Curvature Lab"
+run/main_scene="res://main.tscn"
+
+[display]
+
+window/size/viewport_width=1300
+window/size/viewport_height=760
+
+[rendering]
+
+renderer/rendering_method="gl_compatibility"
+renderer/rendering_method.mobile="gl_compatibility"
+
+[physics]
+
+3d/physics_engine="GodotPhysics3D"
+# Use angular rod constraints along nearly collinear mesh-edge chains.
+# Set compliance=0 to A/B compare against standard soft-body spring links.
+3d/solver/soft_body_xpbd_rod_bend_compliance=0.000003
+# Signed angle between consecutive bend planes of a nonplanar centerline.
+# This is not independent segment-frame twist; set 0 for A/B comparison.
+3d/solver/soft_body_xpbd_rod_torsion_compliance=0.000004
+3d/solver/soft_body_xpbd_rod_straightness=0.93
+3d/solver/soft_body_xpbd_compliance=0.00002
+3d/solver/soft_body_xpbd_dihedral_compliance=0.00001

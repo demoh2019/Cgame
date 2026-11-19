@@ -14,6 +14,13 @@
 		<link title="2D Isometric Demo">https://godotengine.org/asset-library/asset/2718</link>
 	</tutorials>
 	<methods>
+		<method name="add_trauma">
+			<return type="void" />
+			<param index="0" name="amount" type="float" />
+			<description>
+				Adds [param amount] of trauma, clamped so the total stays within [code]0[/code] to [code]1[/code], and starts shaking the camera. Trauma based shake (like Unity Cinemachine impulses). Add trauma from game events with [method add_trauma]; it decays by [member shake_decay] per second, and the visible shake is trauma raised to [member shake_trauma_exponent] times smooth noise, so small hits are subtle and large ones violent.
+			</description>
+		</method>
 		<method name="align">
 			<return type="void" />
 			<description>
@@ -55,11 +62,29 @@
 				[b]Note:[/b] The screen rotation can be different from [member Node2D.global_rotation] if the camera is rotating smoothly due to [member rotation_smoothing_enabled].
 			</description>
 		</method>
+		<method name="get_shake_offset" qualifiers="const">
+			<return type="Vector2" />
+			<description>
+				Returns the displacement, in screen pixels, that the shake currently applies to the view.
+			</description>
+		</method>
+		<method name="get_shake_rotation" qualifiers="const">
+			<return type="float" />
+			<description>
+				Returns the rotation, in radians, that the shake currently applies to the view.
+			</description>
+		</method>
 		<method name="get_target_position" qualifiers="const">
 			<return type="Vector2" />
 			<description>
 				Returns this camera's target position, in global coordinates.
 				[b]Note:[/b] The returned value is not the same as [member Node2D.global_position], as it is affected by the drag properties. It is also not the same as the current position if [member position_smoothing_enabled] is [code]true[/code] (see [method get_screen_center_position]).
+			</description>
+		</method>
+		<method name="get_trauma" qualifiers="const">
+			<return type="float" />
+			<description>
+				Returns the current trauma in the range [code]0[/code] to [code]1[/code]. It decreases over time, see [member shake_decay].
 			</description>
 		</method>
 		<method name="is_current" qualifiers="const">
@@ -95,6 +120,13 @@
 			<param index="1" name="limit" type="int" />
 			<description>
 				Sets the camera limit for the specified [enum Side]. See also [member limit_bottom], [member limit_top], [member limit_left], and [member limit_right].
+			</description>
+		</method>
+		<method name="set_trauma">
+			<return type="void" />
+			<param index="0" name="trauma" type="float" />
+			<description>
+				Sets the trauma directly (clamped to [code]0[/code] to [code]1[/code]). Setting [code]0[/code] stops the shake immediately.
 			</description>
 		</method>
 	</methods>
@@ -185,6 +217,21 @@
 		</member>
 		<member name="rotation_smoothing_speed" type="float" setter="set_rotation_smoothing_speed" getter="get_rotation_smoothing_speed" default="5.0">
 			The angular, asymptotic speed of the camera's rotation smoothing effect when [member rotation_smoothing_enabled] is [code]true[/code].
+		</member>
+		<member name="shake_decay" type="float" setter="set_shake_decay" getter="get_shake_decay" default="1.5">
+			How much trauma is lost per second. [code]1.5[/code] means full trauma fades out in about two thirds of a second.
+		</member>
+		<member name="shake_frequency" type="float" setter="set_shake_frequency" getter="get_shake_frequency" default="25.0">
+			Speed of the shake noise in cycles per second. Higher values feel more frantic.
+		</member>
+		<member name="shake_max_offset" type="Vector2" setter="set_shake_max_offset" getter="get_shake_max_offset" default="Vector2(32, 32)">
+			Maximum displacement of the view, in screen pixels, at full trauma.
+		</member>
+		<member name="shake_max_rotation" type="float" setter="set_shake_max_rotation" getter="get_shake_max_rotation" default="0.0698132">
+			Maximum rotation of the view at full trauma, in radians, around the center of the view.
+		</member>
+		<member name="shake_trauma_exponent" type="float" setter="set_shake_trauma_exponent" getter="get_shake_trauma_exponent" default="2.0">
+			The shake strength is [code]trauma ^ shake_trauma_exponent[/code]. [code]1[/code] is linear, [code]2[/code] (default) makes light trauma much gentler than heavy trauma.
 		</member>
 		<member name="zoom" type="Vector2" setter="set_zoom" getter="get_zoom" default="Vector2(1, 1)">
 			The camera's zoom. Higher values are more zoomed in. For example, a zoom of [code]Vector2(2.0, 2.0)[/code] will be twice as zoomed in on each axis (the view covers an area four times smaller). In contrast, a zoom of [code]Vector2(0.5, 0.5)[/code] will be twice as zoomed out on each axis (the view covers an area four times larger). The X and Y components should generally always be set to the same value, unless you wish to stretch the camera view.

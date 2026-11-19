@@ -41,11 +41,12 @@
 #include "core/templates/hash_set.h"
 #include "core/templates/list.h"
 #include "core/templates/safe_refcount.h"
+#include "core/templates/value_ptr.h"
 #include "core/variant/variant.h"
 
 #define ADD_SIGNAL(m_signal) get_gdtype_static_mutable().add_signal(m_signal)
-#define ADD_PROPERTY(m_property, m_setter, m_getter) ::ClassDB::add_property(get_class_static(), m_property, StringName(m_setter), StringName(m_getter))
-#define ADD_PROPERTYI(m_property, m_setter, m_getter, m_index) ::ClassDB::add_property(get_class_static(), m_property, StringName(m_setter), StringName(m_getter), m_index)
+#define ADD_PROPERTY(m_property, m_setter, m_getter) ::ClassDB::add_property(get_class_static(), m_property, m_setter, m_getter)
+#define ADD_PROPERTYI(m_property, m_setter, m_getter, m_index) ::ClassDB::add_property(get_class_static(), m_property, m_setter, m_getter, m_index)
 #define ADD_PROPERTY_DEFAULT(m_property, m_default) ::ClassDB::set_property_default_value(get_class_static(), m_property, m_default)
 #define ADD_GROUP(m_name, m_prefix) ::ClassDB::add_property_group(get_class_static(), m_name, m_prefix)
 #define ADD_GROUP_INDENT(m_name, m_prefix, m_depth) ::ClassDB::add_property_group(get_class_static(), m_name, m_prefix, m_depth)
@@ -240,6 +241,12 @@ protected: \
 \
 private:
 
+// Compare class method bind functions at compile time.
+template <void (*A)(), void (*B)()>
+inline constexpr bool _is_same_bind_function = false;
+template <void (*A)()>
+inline constexpr bool _is_same_bind_function<A, A> = true;
+
 /// Provides `Object` functionality, such as being able to use `Object::cast_to()`, and `ClassDB` integration.
 /// Use this for `Object` subclasses that are registered in `ClassDB` (use `GDSOFTCLASS` otherwise).
 #define GDCLASS(m_class, m_inherits) \
@@ -278,10 +285,10 @@ public: \
 	} \
 \
 protected: \
-	_FORCE_INLINE_ static void (*_get_bind_methods())() { \
+	static constexpr void (*_get_bind_methods())() { \
 		return &m_class::_bind_methods; \
 	} \
-	_FORCE_INLINE_ static void (*_get_bind_compatibility_methods())() { \
+	static constexpr void (*_get_bind_compatibility_methods())() { \
 		return &m_class::_bind_compatibility_methods; \
 	} \
 \
@@ -291,7 +298,11 @@ public: \
 		if (likely(initialized.is_set())) { \
 			return; \
 		} \
+		_initialize_class_cold(initialized); \
+	} \
 \
+private: \
+	_NO_INLINE_ _COLD_ static void _initialize_class_cold(SafeFlag &initialized) { \
 		static BinaryMutex __init_mutex; \
 		MutexLock lock(__init_mutex); \
 		if (initialized.is_set()) { \
@@ -300,10 +311,10 @@ public: \
 		m_inherits::initialize_class(); \
 		_add_class_to_classdb(get_gdtype_static_mutable(), &super_type::get_gdtype_static()); \
 		get_gdtype_static_mutable().initialize(); \
-		if (m_class::_get_bind_methods() != m_inherits::_get_bind_methods()) { \
+		if constexpr (!_is_same_bind_function<m_class::_get_bind_methods(), m_inherits::_get_bind_methods()>) { \
 			_bind_methods(); \
 		} \
-		if (m_class::_get_bind_compatibility_methods() != m_inherits::_get_bind_compatibility_methods()) { \
+		if constexpr (!_is_same_bind_function<m_class::_get_bind_compatibility_methods(), m_inherits::_get_bind_compatibility_methods()>) { \
 			_bind_compatibility_methods(); \
 		} \
 		initialized.set(); \
@@ -407,6 +418,9 @@ private:
 	friend bool predelete_handler(Object *);
 	friend void postinitialize_handler(Object *);
 
+	// Used for thread-safe behavior, such as instance bindings and signals.
+	mutable Mutex _control_mutex;
+
 	ObjectGDExtension *_extension = nullptr;
 	GDExtensionClassInstancePtr _extension_instance = nullptr;
 
@@ -417,11 +431,10 @@ private:
 			List<Connection>::Element *cE = nullptr;
 		};
 
-		MethodInfo user;
+		ValuePtr<MethodInfo> user_signal_info;
 		HashMap<Callable, Slot> slot_map;
 		bool removable = false;
 	};
-	mutable Mutex *signal_mutex = nullptr;
 	HashMap<StringName, SignalData> signal_map;
 	List<Connection> connections;
 #ifdef DEBUG_ENABLED
@@ -488,7 +501,6 @@ private:
 
 	friend class RefCounted;
 
-	BinaryMutex _instance_binding_mutex;
 	struct InstanceBinding {
 		void *binding = nullptr;
 		void *token = nullptr;
@@ -503,20 +515,7 @@ private:
 protected:
 	StringName _translation_domain;
 
-	_FORCE_INLINE_ bool _instance_binding_reference(bool p_reference) {
-		bool can_die = true;
-		if (_instance_bindings) {
-			MutexLock instance_binding_lock(_instance_binding_mutex);
-			for (uint32_t i = 0; i < _instance_binding_count; i++) {
-				if (_instance_bindings[i].reference_callback) {
-					if (!_instance_bindings[i].reference_callback(_instance_bindings[i].token, _instance_bindings[i].binding, p_reference)) {
-						can_die = false;
-					}
-				}
-			}
-		}
-		return can_die;
-	}
+	bool _instance_binding_reference(bool p_reference);
 
 	// Used in gdvirtual.gen.h
 	void _gdvirtual_init_method_ptr(uint32_t p_compat_hash, void *&r_fn_ptr, const StringName &p_fn_name, bool p_compat) const;
@@ -551,10 +550,10 @@ protected:
 	// Out-lined helper function to save on binary space.
 	_NO_INLINE_ void _get_property_list_inner(List<PropertyInfo> *p_list, const StringName &p_class_name) const;
 
-	_FORCE_INLINE_ static void (*_get_bind_methods())() {
+	static constexpr void (*_get_bind_methods())() {
 		return &Object::_bind_methods;
 	}
-	_FORCE_INLINE_ static void (*_get_bind_compatibility_methods())() {
+	static constexpr void (*_get_bind_compatibility_methods())() {
 		return &Object::_bind_compatibility_methods;
 	}
 	_FORCE_INLINE_ bool (Object::*_get_get() const)(const StringName &p_name, Variant &r_ret) const {
@@ -602,8 +601,6 @@ protected:
 	void _define_ancestry(AncestralClass p_class) { _ancestry |= (uint32_t)p_class; }
 	// Prefer using derives_from.
 	bool _has_ancestry(AncestralClass p_class) const { return _ancestry & (uint32_t)p_class; }
-
-	virtual bool _uses_signal_mutex() const;
 
 	// Internal helper to get the current locale, taking into account the translation domain.
 	String _get_locale() const;

@@ -72,6 +72,9 @@ class JoltJobSystem final : public JPH::JobSystemWithBarrier {
 #ifdef DEBUG_ENABLED
 	// We use `const void*` here to avoid the cost of hashing the actual string, since the job names
 	// are always literals and as such will point to the same address every time.
+	// Sample once per physics step; worker jobs only pay profiling overhead
+	// while the Servers profiler is actually collecting data.
+	inline static std::atomic<bool> timings_enabled = false;
 	inline static HashMap<const void *, uint64_t> timings_by_job;
 
 	// TODO: Check whether the usage of SpinLock is justified or if this should be a mutex instead.

@@ -387,4 +387,117 @@ TEST_CASE("[SceneTree][GridContainer] RTL placement") {
 	memdelete(grid_container);
 }
 
+TEST_CASE("[SceneTree][GridContainer] Dense minimum size handles hidden and non-Control children") {
+	GridContainer *grid = memnew(GridContainer);
+	SceneTree::get_singleton()->get_root()->add_child(grid);
+	grid->add_theme_constant_override("h_separation", 0);
+	grid->add_theme_constant_override("v_separation", 0);
+	grid->set_columns(3);
+
+	const Size2 sizes[] = {
+		Size2(10, 5), Size2(20, 8), Size2(30, 3),
+		Size2(12, 13), Size2(5, 7),
+	};
+	Control *controls[5];
+	for (int i = 0; i < 5; i++) {
+		controls[i] = memnew(Control);
+		controls[i]->set_custom_minimum_size(sizes[i]);
+		grid->add_child(controls[i]);
+	}
+	Node *ignored = memnew(Node);
+	grid->add_child(ignored);
+	SceneTree::get_singleton()->process(0);
+	CHECK(grid->get_minimum_size().is_equal_approx(Size2(62, 21)));
+
+	// Hidden controls are skipped, shifting later cells to the left.
+	controls[2]->hide();
+	SceneTree::get_singleton()->process(0);
+	CHECK(grid->get_minimum_size().is_equal_approx(Size2(42, 20)));
+
+	// A large configured column count must not reserve one entry per
+	// nominal column; only actual controls contribute dimensions.
+	grid->set_columns(64);
+	SceneTree::get_singleton()->process(0);
+	CHECK(grid->get_minimum_size().is_equal_approx(Size2(47, 13)));
+
+	for (Control *control : controls) {
+		control->hide();
+	}
+	SceneTree::get_singleton()->process(0);
+	CHECK(grid->get_minimum_size() == Size2());
+
+	memdelete(ignored);
+	for (Control *control : controls) {
+		memdelete(control);
+	}
+	memdelete(grid);
+}
+
+TEST_CASE("[SceneTree][GridContainer] Reflow honors expansion and maximum sizes") {
+	GridContainer *grid = memnew(GridContainer);
+	Window *root = SceneTree::get_singleton()->get_root();
+	root->add_child(grid);
+	grid->set_columns(4);
+	grid->set_size(Size2(150, 32));
+	grid->add_theme_constant_override("h_separation", 0);
+	grid->add_theme_constant_override("v_separation", 0);
+
+	Control *controls[4];
+	for (int i = 0; i < 4; i++) {
+		controls[i] = memnew(Control);
+		controls[i]->set_custom_minimum_size(Size2(10, 12));
+		grid->add_child(controls[i]);
+		if (i != 1) {
+			controls[i]->set_h_size_flags(Control::SIZE_EXPAND_FILL);
+		}
+	}
+	controls[0]->set_custom_maximum_size(Size2(50, -1));
+	controls[2]->set_custom_maximum_size(Size2(20, -1));
+	SceneTree::get_singleton()->process(0);
+
+	// Columns 0 and 2 are capped; the remaining expandable column gets
+	// the remainder. This exercises both max-cap redistribution passes.
+	CHECK(controls[0]->get_size().x == doctest::Approx(50));
+	CHECK(controls[1]->get_size().x == doctest::Approx(10));
+	CHECK(controls[2]->get_size().x == doctest::Approx(20));
+	CHECK(controls[3]->get_size().x == doctest::Approx(70));
+
+	// Trailing empty columns are considered expanded but have no stored
+	// minimum-size entry. They must not index outside the dense arrays.
+	grid->set_columns(64);
+	SceneTree::get_singleton()->process(0);
+	CHECK(grid->get_minimum_size().is_equal_approx(Size2(40, 12)));
+
+	for (Control *c : controls) {
+		memdelete(c);
+	}
+	memdelete(grid);
+}
+
+TEST_CASE("[SceneTree][GridContainer] Many empty columns use constant scratch storage") {
+	GridContainer *grid = memnew(GridContainer);
+	Window *root = SceneTree::get_singleton()->get_root();
+	root->add_child(grid);
+	grid->add_theme_constant_override("h_separation", 0);
+	grid->add_theme_constant_override("v_separation", 0);
+	grid->set_size(Size2(128, 32));
+
+	Control *child = memnew(Control);
+	child->set_custom_minimum_size(Size2(10, 12));
+	child->set_h_size_flags(Control::SIZE_EXPAND_FILL);
+	grid->add_child(child);
+
+	// The old implementation allocated nearly a million RBSet nodes and
+	// iterated over every nominal column, even with only one visible child.
+	grid->set_columns(1000000);
+	SceneTree::get_singleton()->process(0);
+
+	CHECK(grid->get_minimum_size().is_equal_approx(Size2(10, 12)));
+	CHECK(child->get_size().x == doctest::Approx(10));
+	CHECK(child->get_position().x == doctest::Approx(0));
+
+	memdelete(child);
+	memdelete(grid);
+}
+
 } // namespace TestGridContainer

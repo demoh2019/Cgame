@@ -1,0 +1,40 @@
+name: Bresenham zero-allocation iterator regressions
+
+on:
+  pull_request:
+    paths:
+      - 'core/math/geometry_2d.h'
+      - 'editor/import/editor_atlas_packer.cpp'
+      - 'editor/scene/curve_editor_plugin.cpp'
+      - 'tests/core/math/test_geometry_2d.cpp'
+      - '.github/workflows/bresenham-iterator-performance.yml'
+  push:
+    branches: [develop]
+    paths:
+      - 'core/math/geometry_2d.h'
+      - 'editor/import/editor_atlas_packer.cpp'
+      - 'editor/scene/curve_editor_plugin.cpp'
+      - 'tests/core/math/test_geometry_2d.cpp'
+      - '.github/workflows/bresenham-iterator-performance.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  native-geometry-regressions:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+      - uses: ./.github/actions/godot-deps
+      - name: Compile editor and geometry tests
+        uses: ./.github/actions/godot-build
+        with:
+          platform: linuxbsd
+          target: editor
+          scons-flags: dev_build=yes tests=yes debug_symbols=no module_mono_enabled=no module_text_server_fb_enabled=yes accesskit=no -j2
+      - name: Validate all Bresenham line orientations
+        run: ./bin/godot.linuxbsd.editor.dev.x86_64 --headless --test --test-case="*[Geometry2D] Bresenham*"

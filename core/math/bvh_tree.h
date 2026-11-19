@@ -167,6 +167,7 @@ public:
 
 template <typename T, int NUM_TREES, int MAX_CHILDREN, int MAX_ITEMS, typename USER_PAIR_TEST_FUNCTION = BVH_DummyPairTestFunction<T>, typename USER_CULL_TEST_FUNCTION = BVH_DummyCullTestFunction<T>, bool USE_PAIRS = false, typename BOUNDS = AABB, typename POINT = Vector3>
 class BVH_Tree {
+	static_assert(NUM_TREES > 0 && NUM_TREES <= 32, "BVH tree masks support between 1 and 32 layers.");
 	friend class BVH;
 
 #include "core/math/bvh_pair.inc"

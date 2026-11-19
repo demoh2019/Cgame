@@ -9,14 +9,40 @@
 	<tutorials>
 	</tutorials>
 	<methods>
+		<method name="get_reaction_force" qualifiers="const">
+			<return type="Vector2" />
+			<description>
+				Returns the force the joint exerted on the second body during the last physics step in which it was solved, in world space. If the second body is static or kinematic, the negated force on the first body is returned instead. Returns a zero vector for sleeping joints or physics backends other than Godot Physics.
+			</description>
+		</method>
+		<method name="get_reaction_torque" qualifiers="const">
+			<return type="float" />
+			<description>
+				Returns the torque the joint applied to the second body about its center of mass during the last solved physics step. This includes the moment of the reaction force when the joint is anchored away from the center of mass. Same fallback and backend limitations as [method get_reaction_force].
+			</description>
+		</method>
 		<method name="get_rid" qualifiers="const">
 			<return type="RID" />
 			<description>
 				Returns the joint's internal [RID] from the [PhysicsServer2D].
 			</description>
 		</method>
+		<method name="is_broken" qualifiers="const">
+			<return type="bool" />
+			<description>
+				Returns [code]true[/code] if the joint was torn apart because its reaction exceeded [member break_force] or [member break_torque]. Changing the connected nodes reconfigures the joint and clears this state.
+			</description>
+		</method>
 	</methods>
 	<members>
+		<member name="break_force" type="float" setter="set_break_force" getter="get_break_force" default="0.0">
+			The force above which the joint breaks and releases both bodies. [code]0[/code] makes the joint unbreakable. Emits [signal broken].
+			[b]Note:[/b] Only supported by Godot Physics.
+		</member>
+		<member name="break_torque" type="float" setter="set_break_torque" getter="get_break_torque" default="0.0">
+			The torque above which the joint breaks and releases both bodies. [code]0[/code] makes the joint unbreakable. Emits [signal broken].
+			[b]Note:[/b] Only supported by Godot Physics.
+		</member>
 		<member name="bias" type="float" setter="set_bias" getter="get_bias" default="0.0">
 			When [member node_a] and [member node_b] move in different directions the [member bias] controls how fast the joint pulls them back to their original position. The lower the [member bias] the more the two bodies can pull on the joint.
 			When set to [code]0[/code], the default value from [member ProjectSettings.physics/2d/solver/default_constraint_bias] is used.
@@ -31,4 +57,11 @@
 			Path to the second body (B) attached to the joint. The node must inherit [PhysicsBody2D].
 		</member>
 	</members>
+	<signals>
+		<signal name="broken">
+			<description>
+				Emitted after the joint broke because it exceeded [member break_force] or [member break_torque]. It is emitted on the main thread, deferred from the physics step.
+			</description>
+		</signal>
+	</signals>
 </class>

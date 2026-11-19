@@ -1,0 +1,56 @@
+name: Audio input reference hotpath regressions
+
+on:
+  push:
+    branches: [develop]
+    paths:
+      - 'servers/audio/audio_driver.h'
+      - 'servers/audio/audio_server.cpp'
+      - 'scene/resources/audio/audio_stream_microphone.cpp'
+      - 'tests/servers/test_audio_input_cow.cpp'
+      - 'misc/scripts/tests/test_audio_input_ref_fastpath.py'
+      - 'misc/scripts/README_perf_audio_input_cow.md'
+      - '.github/workflows/perf-audio-input-cow.yml'
+  pull_request:
+    paths:
+      - 'servers/audio/audio_driver.h'
+      - 'servers/audio/audio_server.cpp'
+      - 'scene/resources/audio/audio_stream_microphone.cpp'
+      - 'tests/servers/test_audio_input_cow.cpp'
+      - 'misc/scripts/tests/test_audio_input_ref_fastpath.py'
+      - 'misc/scripts/README_perf_audio_input_cow.md'
+      - '.github/workflows/perf-audio-input-cow.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  source-contracts:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ['3.9', '3.13']
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+      - run: python -m unittest discover -s misc/scripts/tests -p test_audio_input_ref_fastpath.py -v
+
+  native-audio:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+      - uses: ./.github/actions/godot-deps
+      - uses: ./.github/actions/godot-build
+        with:
+          platform: linuxbsd
+          target: editor
+          scons-flags: dev_build=yes tests=yes debug_symbols=no module_mono_enabled=no accesskit=no
+      - name: Native audio tests
+        run: ./bin/godot.linuxbsd.editor.dev.x86_64 --headless --test --test-case='[Audio]*' --force-colors

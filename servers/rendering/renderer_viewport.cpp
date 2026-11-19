@@ -1037,6 +1037,9 @@ void RendererViewport::viewport_set_use_xr(RID p_viewport, bool p_use_xr) {
 
 	viewport->use_xr = p_use_xr;
 
+	// XR targets get a swapchain override every frame, so they need no color buffer of their own.
+	RSG::texture_storage->render_target_set_expect_override(viewport->render_target, p_use_xr);
+
 	// Re-configure the 3D render buffers when disabling XR. They'll get
 	// re-configured when enabling XR in draw_viewports().
 	if (!p_use_xr) {
@@ -1667,6 +1670,18 @@ RID RendererViewport::viewport_find_from_screen_attachment(DisplayServerEnums::W
 void RendererViewport::viewport_set_vrs_mode(RID p_viewport, RSE::ViewportVRSMode p_mode) {
 	Viewport *viewport = viewport_owner.get_or_null(p_viewport);
 	ERR_FAIL_NULL(viewport);
+
+	// No interface can supply the density map while XR is explicitly disabled.
+	// Do not allocate an attachment that would contain uninitialized shading rates.
+	if (p_mode == RSE::VIEWPORT_VRS_XR) {
+		bool xr_possible = false;
+#ifndef XR_DISABLED
+		xr_possible = XRServer::get_xr_mode() != XRServer::XRMODE_OFF;
+#endif // XR_DISABLED
+		if (!xr_possible) {
+			p_mode = RSE::VIEWPORT_VRS_DISABLED;
+		}
+	}
 
 	RSG::texture_storage->render_target_set_vrs_mode(viewport->render_target, p_mode);
 	_configure_3d_render_buffers(viewport);

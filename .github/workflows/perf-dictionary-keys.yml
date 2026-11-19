@@ -1,0 +1,47 @@
+name: Dictionary key hotpath regressions
+on:
+  push:
+    branches: [develop]
+    paths:
+      - 'core/variant/dictionary.cpp'
+      - 'tests/core/variant/test_dictionary.cpp'
+      - 'misc/scripts/tests/test_dictionary_key_fastpath.py'
+      - 'misc/scripts/README_perf_dictionary_keys.md'
+      - '.github/workflows/perf-dictionary-keys.yml'
+  pull_request:
+    paths:
+      - 'core/variant/dictionary.cpp'
+      - 'tests/core/variant/test_dictionary.cpp'
+      - 'misc/scripts/tests/test_dictionary_key_fastpath.py'
+      - 'misc/scripts/README_perf_dictionary_keys.md'
+      - '.github/workflows/perf-dictionary-keys.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  python-contracts:
+    runs-on: ubuntu-24.04
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ['3.9', '3.13']
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+      - run: python -m unittest discover -s misc/scripts/tests -p test_dictionary_key_fastpath.py -v
+  native-core:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+      - uses: ./.github/actions/godot-deps
+      - uses: ./.github/actions/godot-build
+        with:
+          platform: linuxbsd
+          target: editor
+          scons-flags: dev_build=yes tests=yes debug_symbols=no module_mono_enabled=no accesskit=no
+      - run: ./bin/godot.linuxbsd.editor.dev.x86_64 --headless --test --test-case='[DictionaryFastPath]*'

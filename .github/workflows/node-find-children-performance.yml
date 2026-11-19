@@ -1,0 +1,50 @@
+name: Low-allocation Node.find_children regressions
+
+on:
+  pull_request:
+    branches: [develop]
+    paths:
+      - "scene/main/node.cpp"
+      - "tests/scene/test_node.cpp"
+      - "misc/scripts/tests/test_find_children_iterative.py"
+      - "misc/scripts/benchmarks/benchmark_node_find_children.gd"
+      - ".github/workflows/node-find-children-performance.yml"
+  push:
+    branches: [develop]
+    paths:
+      - "scene/main/node.cpp"
+      - "tests/scene/test_node.cpp"
+      - "misc/scripts/tests/test_find_children_iterative.py"
+      - "misc/scripts/benchmarks/benchmark_node_find_children.gd"
+      - ".github/workflows/node-find-children-performance.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  source-contracts:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - run: |
+          python3 -m py_compile misc/scripts/tests/test_find_children_iterative.py
+          python3 -m unittest discover -s misc/scripts/tests -p test_find_children_iterative.py -v
+
+  native-scene-tests:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+      - uses: ./.github/actions/godot-deps
+      - uses: ./.github/actions/godot-build
+        with:
+          platform: linuxbsd
+          target: editor
+          scons-flags: dev_build=yes tests=yes debug_symbols=no module_mono_enabled=no accesskit=no
+      - name: Run iterative traversal regression tests
+        run: |
+          timeout 300s ./bin/godot.linuxbsd.editor.dev.x86_64 --headless --test --test-case="*find_children iterative traversal*" --no-colors

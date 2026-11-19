@@ -1,0 +1,33 @@
+name: WebAssembly post-link size optimization regressions
+
+on:
+  push:
+    branches: [develop]
+    paths:
+      - "platform/web/SCsub"
+      - "platform/web/detect.py"
+      - "platform/web/emscripten_helpers.py"
+      - "misc/scripts/tests/test_web_binaryen_size_opt.py"
+      - ".github/workflows/web-binaryen-size-opt.yml"
+  pull_request:
+    paths:
+      - "platform/web/SCsub"
+      - "platform/web/detect.py"
+      - "platform/web/emscripten_helpers.py"
+      - "misc/scripts/tests/test_web_binaryen_size_opt.py"
+      - ".github/workflows/web-binaryen-size-opt.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  contracts:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - name: Test packaging and wasm-opt argument behavior
+        run: |
+          python3 -m py_compile platform/web/detect.py platform/web/emscripten_helpers.py misc/scripts/tests/test_web_binaryen_size_opt.py
+          python3 -m unittest discover -s misc/scripts/tests -p test_web_binaryen_size_opt.py -v

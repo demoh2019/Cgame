@@ -1,0 +1,36 @@
+name: Advanced fluid physics (Godot 4.6.1)
+
+on:
+  pull_request:
+    paths:
+      - "misc/advanced_physics/**"
+      - ".github/workflows/advanced-fluid-physics.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  fluid-math-and-smoke:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          sparse-checkout: |
+            misc/advanced_physics
+      - name: Download pinned official Godot Linux editor
+        run: |
+          set -euo pipefail
+          curl -fL --retry 3 -o godot.zip \
+            https://github.com/godotengine/godot/releases/download/4.6.1-stable/Godot_v4.6.1-stable_linux.x86_64.zip
+          printf '%s  %s\n' cecd0cb6b55e931318a9d7237dc4197d69ea914966787a454808523626e2789f godot.zip | sha256sum --check
+          unzip -q godot.zip
+          chmod +x Godot_v4.6.1-stable_linux.x86_64
+          mv Godot_v4.6.1-stable_linux.x86_64 godot
+      - name: Import scripts and resolve class_name registrations
+        run: ./godot --headless --path misc/advanced_physics --import
+      - name: Verify spherical clipping and force mathematics
+        run: ./godot --headless --path misc/advanced_physics --script res://tests/test_fluid_math.gd
+      - name: Verify water and wind Area3D integration
+        run: ./godot --headless --path misc/advanced_physics --script res://tests/test_fluid_scene.gd

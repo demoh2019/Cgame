@@ -111,63 +111,169 @@ TEST_CASE("[WebSocketPeer] Interleaved Ping preserves fragmented message bytes")
 				server_peer->get_ready_state() == WebSocketPeer::STATE_OPEN;
 	}));
 
-
-	// Control frames are permitted between data fragments, but their payload
-	// must never end up in the reassembled application message.
-	constexpr uint8_t text_ping[] = { 0x01, 0x01, 'A', 0x89, 0x01, '!', 0x80, 0x01, 'B' };
-	constexpr uint8_t text_pong[] = { 0x01, 0x01, 'C', 0x8A, 0x01, '?', 0x80, 0x01, 'D' };
-	constexpr uint8_t binary_ping[] = { 0x02, 0x02, 0x00, 0xFE, 0x89, 0x01, '!', 0x80, 0x02, 0x80, 0xFF };
-	constexpr uint8_t multiple_pings[] = { 0x01, 0x01, 'E', 0x89, 0x01, '!', 0x89, 0x01, '?', 0x80, 0x01, 'F' };
-	constexpr uint8_t empty_ping[] = { 0x01, 0x01, 'I', 0x89, 0x00, 0x80, 0x01, 'J' };
-	constexpr uint8_t ping_and_pong[] = { 0x01, 0x01, 'K', 0x8A, 0x00, 0x89, 0x01, '!', 0x80, 0x01, 'L' };
-	constexpr uint8_t normal_text[] = { 0x81, 0x02, 'G', 'H' };
-	constexpr uint8_t expected_ab[] = { 'A', 'B' };
-	constexpr uint8_t expected_cd[] = { 'C', 'D' };
-	constexpr uint8_t expected_binary[] = { 0x00, 0xFE, 0x80, 0xFF };
-	constexpr uint8_t expected_ef[] = { 'E', 'F' };
-	constexpr uint8_t expected_ij[] = { 'I', 'J' };
-	constexpr uint8_t expected_kl[] = { 'K', 'L' };
-	constexpr uint8_t expected_gh[] = { 'G', 'H' };
-
-	struct FrameCase {
-		const char *name;
-		const uint8_t *frames;
-		size_t frames_size;
-		const uint8_t *expected;
-		size_t expected_size;
-		bool is_text;
+	constexpr uint8_t frames[] = {
+		0x01,
+		0x01,
+		'A', // Text frame, FIN clear.
+		0x89,
+		0x01,
+		'!', // Ping frame, FIN set.
+		0x80,
+		0x01,
+		'B', // Continuation of initial "A" Text frame, FIN set.
 	};
-	const FrameCase cases[] = {
-		{ "Ping inside text", text_ping, sizeof(text_ping), expected_ab, sizeof(expected_ab), true },
-		{ "Pong inside text", text_pong, sizeof(text_pong), expected_cd, sizeof(expected_cd), true },
-		{ "Ping inside binary", binary_ping, sizeof(binary_ping), expected_binary, sizeof(expected_binary), false },
-		{ "Multiple Pings", multiple_pings, sizeof(multiple_pings), expected_ef, sizeof(expected_ef), true },
-		{ "Empty Ping", empty_ping, sizeof(empty_ping), expected_ij, sizeof(expected_ij), true },
-		{ "Ping and Pong", ping_and_pong, sizeof(ping_and_pong), expected_kl, sizeof(expected_kl), true },
-		{ "Unfragmented text", normal_text, sizeof(normal_text), expected_gh, sizeof(expected_gh), true },
+	REQUIRE_EQ(connection->put_data(frames, sizeof(frames)), OK);
+
+	REQUIRE(wait_for_condition([&]() {
+		client->poll();
+		return client->get_available_packet_count() > 0;
+	}));
+
+	Vector<uint8_t> packet;
+	REQUIRE_EQ(client->get_packet_buffer(packet), OK);
+	CHECK_EQ(String::utf8(reinterpret_cast<const char *>(packet.ptr()), packet.size()), "AB");
+	CHECK(client->was_string_packet());
+	CHECK_EQ(client->get_available_packet_count(), 0);
+
+	// Control frames must never contaminate a message, even when several
+	// Ping/Pong frames arrive between continuation frames.
+	constexpr uint8_t interleaved_control_frames[] = {
+		0x01, 0x01, 'C', // Non-final text.
+		0x89, 0x01, '!', // Ping carrying a payload.
+		0x8A, 0x01, '?', // Pong carrying a payload.
+		0x00, 0x01, 'D', // Non-final continuation.
+		0x89, 0x00, // Empty Ping.
+		0x80, 0x01, 'E', // Final continuation.
 	};
+	REQUIRE_EQ(connection->put_data(interleaved_control_frames, sizeof(interleaved_control_frames)), OK);
+	REQUIRE(wait_for_condition([&]() {
+		client->poll();
+		return client->get_available_packet_count() > 0;
+	}));
+	REQUIRE_EQ(client->get_packet_buffer(packet), OK);
+	CHECK_EQ(String::utf8(reinterpret_cast<const char *>(packet.ptr()), packet.size()), "CDE");
 
-	for (const FrameCase &test_case : cases) {
-		INFO("Frame case: ", test_case.name);
-		REQUIRE_EQ(connection->put_data(test_case.frames, test_case.frames_size), OK);
-		REQUIRE(wait_for_condition([&]() {
-			client->poll();
-			server_peer->poll();
-			return client->get_available_packet_count() > 0;
-		}));
+	// Binary frames exercise the same reassembly path, including NUL bytes.
+	constexpr uint8_t interleaved_binary_frames[] = {
+		0x02, 0x02, 0x00, 0xFF, // Non-final binary, 2 payload bytes.
+		0x89, 0x01, 0x33, // Ping, excluded from binary payload.
+		0x80, 0x02, 0x01, 0x02, // Final continuation.
+	};
+	REQUIRE_EQ(connection->put_data(interleaved_binary_frames, sizeof(interleaved_binary_frames)), OK);
+	REQUIRE(wait_for_condition([&]() {
+		client->poll();
+		return client->get_available_packet_count() > 0;
+	}));
+	REQUIRE_EQ(client->get_packet_buffer(packet), OK);
+	REQUIRE_EQ(packet.size(), 4);
+	CHECK_EQ(packet[0], 0);
+	CHECK_EQ(packet[1], 0xFF);
+	CHECK_EQ(packet[2], 1);
+	CHECK_EQ(packet[3], 2);
 
-		Vector<uint8_t> packet;
-		REQUIRE_EQ(client->get_packet_buffer(packet), OK);
-		CHECK_EQ(packet.size(), test_case.expected_size);
-		if (packet.size() == test_case.expected_size) {
-			for (int i = 0; i < packet.size(); i++) {
-				CHECK_EQ(packet[i], test_case.expected[i]);
-			}
-		}
-		CHECK_EQ(client->was_string_packet(), test_case.is_text);
-		CHECK_EQ(client->get_available_packet_count(), 0);
+	// Control frames must not pollute binary messages either, including zero bytes.
+	constexpr uint8_t binary_frames[] = {
+		0x02, 0x01, 0x00, // Binary frame, FIN clear.
+		0x89, 0x03, 'P', 'I', 'N', // Ping control frame.
+		0x80, 0x02, 0xFF, 0x7F, // Final binary continuation.
+	};
+	REQUIRE_EQ(connection->put_data(binary_frames, sizeof(binary_frames)), OK);
+	REQUIRE(wait_for_condition([&]() {
+		client->poll();
+		return client->get_available_packet_count() > 0;
+	}));
+	REQUIRE_EQ(client->get_packet_buffer(packet), OK);
+	REQUIRE_EQ(packet.size(), 3);
+	CHECK_EQ(packet[0], 0);
+	CHECK_EQ(packet[1], 0xFF);
+	CHECK_EQ(packet[2], 0x7F);
+	CHECK_FALSE(client->was_string_packet());
+	CHECK_EQ(client->get_available_packet_count(), 0);
+
+	// Unsolicited Pong is also a control frame and must not be appended to text.
+	constexpr uint8_t pong_frames[] = {
+		0x01, 0x01, 'C',
+		0x8A, 0x03, 'x', 'y', 'z',
+		0x80, 0x01, 'D',
+	};
+	REQUIRE_EQ(connection->put_data(pong_frames, sizeof(pong_frames)), OK);
+	REQUIRE(wait_for_condition([&]() {
+		client->poll();
+		return client->get_available_packet_count() > 0;
+	}));
+	REQUIRE_EQ(client->get_packet_buffer(packet), OK);
+	CHECK_EQ(String::utf8(reinterpret_cast<const char *>(packet.ptr()), packet.size()), "CD");
+	CHECK(client->was_string_packet());
+	CHECK_EQ(client->get_available_packet_count(), 0);
+
+	// Multiple Ping frames can be received while a single fragmented message is open.
+	constexpr uint8_t multiple_pings[] = {
+		0x01, 0x01, 'E',
+		0x89, 0x01, '1',
+		0x89, 0x01, '2',
+		0x80, 0x01, 'F',
+	};
+	REQUIRE_EQ(connection->put_data(multiple_pings, sizeof(multiple_pings)), OK);
+	REQUIRE(wait_for_condition([&]() {
+		client->poll();
+		return client->get_available_packet_count() > 0;
+	}));
+	REQUIRE_EQ(client->get_packet_buffer(packet), OK);
+	CHECK_EQ(String::utf8(reinterpret_cast<const char *>(packet.ptr()), packet.size()), "EF");
+	CHECK_EQ(client->get_available_packet_count(), 0);
+
+	// An intermediate continuation frame must retain the original message,
+	// even when a Ping arrives before the final continuation.
+	constexpr uint8_t intermediate_continuation[] = {
+		0x01, 0x01, 'G',
+		0x00, 0x01, 'H',
+		0x89, 0x02, 'x', 'x',
+		0x80, 0x01, 'I',
+	};
+	REQUIRE_EQ(connection->put_data(intermediate_continuation, sizeof(intermediate_continuation)), OK);
+	REQUIRE(wait_for_condition([&]() {
+		client->poll();
+		return client->get_available_packet_count() > 0;
+	}));
+	REQUIRE_EQ(client->get_packet_buffer(packet), OK);
+	CHECK_EQ(String::utf8(reinterpret_cast<const char *>(packet.ptr()), packet.size()), "GHI");
+	CHECK_EQ(client->get_available_packet_count(), 0);
+
+	// The first fragment and Ping can be processed in a different poll() call
+	// from the final continuation without producing an early packet.
+	constexpr uint8_t first_fragment_and_ping[] = {
+		0x01, 0x01, 'J',
+		0x89, 0x01, '?',
+	};
+	REQUIRE_EQ(connection->put_data(first_fragment_and_ping, sizeof(first_fragment_and_ping)), OK);
+	for (int i = 0; i < 5; i++) {
+		client->poll();
+		OS::get_singleton()->delay_usec(SLEEP_DURATION);
 	}
+	CHECK_EQ(client->get_available_packet_count(), 0);
+	constexpr uint8_t final_continuation[] = { 0x80, 0x01, 'K' };
+	REQUIRE_EQ(connection->put_data(final_continuation, sizeof(final_continuation)), OK);
+	REQUIRE(wait_for_condition([&]() {
+		client->poll();
+		return client->get_available_packet_count() > 0;
+	}));
+	REQUIRE_EQ(client->get_packet_buffer(packet), OK);
+	CHECK_EQ(String::utf8(reinterpret_cast<const char *>(packet.ptr()), packet.size()), "JK");
+	CHECK_EQ(client->get_available_packet_count(), 0);
 
+	// A control frame outside fragmentation is never delivered as a user packet.
+	constexpr uint8_t ping_and_text[] = {
+		0x89, 0x01, '!',
+		0x81, 0x01, 'L',
+	};
+	REQUIRE_EQ(connection->put_data(ping_and_text, sizeof(ping_and_text)), OK);
+	REQUIRE(wait_for_condition([&]() {
+		client->poll();
+		return client->get_available_packet_count() > 0;
+	}));
+	REQUIRE_EQ(client->get_packet_buffer(packet), OK);
+	CHECK_EQ(String::utf8(reinterpret_cast<const char *>(packet.ptr()), packet.size()), "L");
+	CHECK_EQ(client->get_available_packet_count(), 0);
 }
 
 } // namespace TestWebSocketPeer

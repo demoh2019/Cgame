@@ -59,14 +59,13 @@ public:
 int cull_convex(CullParams &r_params, bool p_translate_hits = true) {
 	_cull_hits.clear();
 	r_params.result_count = 0;
-
-	uint32_t tree_test_mask = 0;
+	// No matching tree or no output capacity: avoid traversing the BVH.
+	if (r_params.tree_collision_mask == 0 || r_params.result_max <= 0) {
+		return 0;
+	}
 
 	for (int n = 0; n < NUM_TREES; n++) {
-		tree_test_mask <<= 1;
-		if (!tree_test_mask) {
-			tree_test_mask = 1;
-		}
+		const uint32_t tree_test_mask = uint32_t(1) << n;
 
 		if (_root_node_id[n] == BVHCommon::INVALID) {
 			continue;
@@ -77,6 +76,9 @@ int cull_convex(CullParams &r_params, bool p_translate_hits = true) {
 		}
 
 		_cull_convex_iterative(_root_node_id[n], r_params);
+		if (_cull_hits_full(r_params)) {
+			break;
+		}
 	}
 
 	if (p_translate_hits) {
@@ -89,14 +91,13 @@ int cull_convex(CullParams &r_params, bool p_translate_hits = true) {
 int cull_segment(CullParams &r_params, bool p_translate_hits = true) {
 	_cull_hits.clear();
 	r_params.result_count = 0;
-
-	uint32_t tree_test_mask = 0;
+	// No matching tree or no output capacity: avoid traversing the BVH.
+	if (r_params.tree_collision_mask == 0 || r_params.result_max <= 0) {
+		return 0;
+	}
 
 	for (int n = 0; n < NUM_TREES; n++) {
-		tree_test_mask <<= 1;
-		if (!tree_test_mask) {
-			tree_test_mask = 1;
-		}
+		const uint32_t tree_test_mask = uint32_t(1) << n;
 
 		if (_root_node_id[n] == BVHCommon::INVALID) {
 			continue;
@@ -107,6 +108,9 @@ int cull_segment(CullParams &r_params, bool p_translate_hits = true) {
 		}
 
 		_cull_segment_iterative(_root_node_id[n], r_params);
+		if (_cull_hits_full(r_params)) {
+			break;
+		}
 	}
 
 	if (p_translate_hits) {
@@ -116,17 +120,246 @@ int cull_segment(CullParams &r_params, bool p_translate_hits = true) {
 	return r_params.result_count;
 }
 
+// Walk the BVH without accumulating candidates into _cull_hits. The exact
+// shape callback can shorten the ray; both inner nodes and leaves recheck the
+// clipped segment as they are reached. This prevents false nearest hits when
+// a segment crosses more than INTERSECTION_QUERY_MAX physics shapes.
+using SegmentCastCallback = real_t (*)(T *, int, real_t, void *);
+void cast_segment(const POINT &p_from, const POINT &p_to, SegmentCastCallback p_callback, void *p_userdata, uint32_t p_tree_collision_mask, const T *p_tester = nullptr) {
+	if (!p_callback || p_tree_collision_mask == 0) {
+		return;
+	}
+
+	// Visit the tree whose bounds are nearest to the ray origin first.
+	// A near hit can clip away the other tree before any narrowphase work.
+	typename BVHABB_CLASS::Segment segment;
+	segment.from = p_from;
+	segment.to = p_to;
+	uint32_t roots[NUM_TREES];
+	real_t entry_fractions[NUM_TREES];
+	int root_count = 0;
+	for (int n = 0; n < NUM_TREES; n++) {
+		const uint32_t tree_test_mask = uint32_t(1) << n;
+		const uint32_t root_id = _root_node_id[n];
+		if (root_id == BVHCommon::INVALID || !(p_tree_collision_mask & tree_test_mask)) {
+			continue;
+		}
+		real_t entry_fraction;
+		if (!_nodes[root_id].aabb.intersects_segment(segment, &entry_fraction)) {
+			continue;
+		}
+		// NUM_TREES is tiny (two for physics), so insertion sort is cheaper
+		// than allocating a priority queue for a single ray cast.
+		int insertion = root_count;
+		while (insertion > 0 && entry_fractions[insertion - 1] > entry_fraction) {
+			roots[insertion] = roots[insertion - 1];
+			entry_fractions[insertion] = entry_fractions[insertion - 1];
+			insertion--;
+		}
+		roots[insertion] = root_id;
+		entry_fractions[insertion] = entry_fraction;
+		root_count++;
+	}
+
+	real_t max_fraction = 1.0;
+	for (int n = 0; n < root_count; n++) {
+		// Roots are sorted by their entry along the ORIGINAL segment.
+		// No subsequent tree can contain a closer hit once this entry is
+		// farther away than the clipped ray.
+		if (entry_fractions[n] > max_fraction + CMP_EPSILON) {
+			break;
+		}
+		_cast_segment_iterative(roots[n], entry_fractions[n], p_from, p_to, p_callback, p_userdata, p_tester, max_fraction);
+		if (max_fraction <= 0.0) {
+			return;
+		}
+	}
+}
+
+// Stream query candidates directly to a caller-supplied narrowphase filter.
+// Unlike cull_point/cull_aabb these visitors cannot discard valid results
+// when a fixed-size candidate buffer is filled by filtered-out objects.
+// Return false from a visitor to stop traversal once enough actual hits exist.
+using QueryVisitor = bool (*)(T *, int, void *);
+using RefQueryVisitor = bool (*)(uint32_t, void *);
+
+bool visit_point(const POINT &p_point, QueryVisitor p_visitor, void *p_userdata, uint32_t p_tree_collision_mask = 0xFFFFFFFF, const T *p_tester = nullptr) {
+	if (!p_visitor || !p_tree_collision_mask) {
+		return true;
+	}
+	for (int tree_index = 0; tree_index < NUM_TREES; ++tree_index) {
+		if (!(p_tree_collision_mask & (uint32_t(1) << tree_index))) {
+			continue;
+		}
+		const uint32_t root = _root_node_id[tree_index];
+		if (root != BVHCommon::INVALID && !_visit_point_iterative(root, p_point, p_visitor, p_userdata, p_tester)) {
+			return false;
+		}
+	}
+	return true;
+}
+
+bool visit_aabb(const BOUNDS &p_aabb, QueryVisitor p_visitor, void *p_userdata, uint32_t p_tree_collision_mask = 0xFFFFFFFF, const T *p_tester = nullptr) {
+	if (!p_visitor || !p_tree_collision_mask) {
+		return true;
+	}
+	BVHABB_CLASS query;
+	query.from(p_aabb);
+	for (int tree_index = 0; tree_index < NUM_TREES; ++tree_index) {
+		if (!(p_tree_collision_mask & (uint32_t(1) << tree_index))) {
+			continue;
+		}
+		const uint32_t root = _root_node_id[tree_index];
+		if (root != BVHCommon::INVALID && !_visit_aabb_iterative<false>(root, query, p_visitor, p_userdata, p_tester)) {
+			return false;
+		}
+	}
+	return true;
+}
+
+ 
+// Pairing uses stable BVH reference IDs rather than object pointers. Traverse
+// directly to the callback so dense overlap scenes do not allocate one
+// temporary ID per candidate before building contacts.
+bool visit_aabb_refs(const BOUNDS &p_aabb, RefQueryVisitor p_visitor, void *p_userdata, uint32_t p_tree_collision_mask = 0xFFFFFFFF, const T *p_tester = nullptr) {
+	if (!p_visitor || !p_tree_collision_mask) {
+		return true;
+	}
+	BVHABB_CLASS query;
+	query.from(p_aabb);
+	for (int tree_index = 0; tree_index < NUM_TREES; ++tree_index) {
+		if (!(p_tree_collision_mask & (uint32_t(1) << tree_index))) {
+			continue;
+		}
+		const uint32_t root = _root_node_id[tree_index];
+		if (root != BVHCommon::INVALID && !_visit_aabb_iterative<true>(root, query, nullptr, p_userdata, p_tester, p_visitor)) {
+			return false;
+		}
+	}
+	return true;
+}
+
+private:
+// Unlike the fixed-capacity cull variants, these routines apply the callback
+// immediately, without storing any candidate ids or making heap allocations.
+bool _visit_point_iterative(uint32_t p_node_id, const POINT &p_point, QueryVisitor p_visitor, void *p_userdata, const T *p_tester) {
+	// Each child is tested before being pushed; do not test it again on pop.
+	// The root is the only node without a parent that has prefiltered it.
+	if (!_nodes[p_node_id].aabb.intersects_point(p_point)) {
+		return true;
+	}
+	struct StackItem {
+		uint32_t node_id;
+	};
+	BVH_IterativeInfo<StackItem> stack;
+	stack.stack = (StackItem *)alloca(stack.get_alloca_stacksize());
+	stack.get_first()->node_id = p_node_id;
+
+	StackItem next;
+	while (stack.pop(next)) {
+		TNode &node = _nodes[next.node_id];
+		if (node.is_leaf()) {
+			TLeaf &leaf = _node_get_leaf(node);
+			for (int i = 0; i < leaf.num_items; ++i) {
+				if (!leaf.get_aabb(i).intersects_point(p_point)) {
+					continue;
+				}
+				const ItemExtra &extra = _extra[leaf.get_item_ref_id(i)];
+				if (USE_PAIRS && !USER_CULL_TEST_FUNCTION::user_cull_check(p_tester, extra.userdata)) {
+					continue;
+				}
+				if (!p_visitor(extra.userdata, extra.subindex, p_userdata)) {
+					return false;
+				}
+			}
+		} else {
+			for (int i = 0; i < node.num_children; ++i) {
+				const uint32_t child_id = node.children[i];
+				if (_nodes[child_id].aabb.intersects_point(p_point)) {
+					stack.request()->node_id = child_id;
+				}
+			}
+		}
+	}
+	return true;
+}
+
+template <bool RETURN_REF_IDS>
+bool _visit_aabb_iterative(uint32_t p_node_id, const BVHABB_CLASS &p_query, QueryVisitor p_visitor, void *p_userdata, const T *p_tester, RefQueryVisitor p_ref_visitor = nullptr) {
+	// Mirror bounded cull_aabb's fully-within shortcut for streaming queries.
+	// Once a subtree is contained in the query, none of its descendants need
+	// per-proxy AABB tests; keep invoking the visitor to honor exact filters.
+	const BVHABB_CLASS &root_bounds = _nodes[p_node_id].aabb;
+	if (!root_bounds.intersects(p_query)) {
+		return true;
+	}
+
+	struct StackItem {
+		uint32_t node_id;
+		bool fully_within;
+	};
+	BVH_IterativeInfo<StackItem> stack;
+	stack.stack = (StackItem *)alloca(stack.get_alloca_stacksize());
+	stack.get_first()->node_id = p_node_id;
+	stack.get_first()->fully_within = p_query.is_other_within(root_bounds);
+
+	// Pre-swizzling the query avoids two negations for each partially
+	// intersecting item in dense leaves. Fully covered leaves skip this test.
+	BVHABB_CLASS swizzled_query;
+	swizzled_query.min = -p_query.neg_max;
+	swizzled_query.neg_max = -p_query.min;
+
+	StackItem next;
+	while (stack.pop(next)) {
+		TNode &node = _nodes[next.node_id];
+		if (node.is_leaf()) {
+			TLeaf &leaf = _node_get_leaf(node);
+			for (int i = 0; i < leaf.num_items; ++i) {
+				if (!next.fully_within && !swizzled_query.intersects_swizzled(leaf.get_aabb(i))) {
+					continue;
+				}
+				const uint32_t ref_id = leaf.get_item_ref_id(i);
+				const ItemExtra &extra = _extra[ref_id];
+				if (USE_PAIRS && !USER_CULL_TEST_FUNCTION::user_cull_check(p_tester, extra.userdata)) {
+					continue;
+				}
+				if constexpr (RETURN_REF_IDS) {
+					if (!p_ref_visitor(ref_id, p_userdata)) {
+						return false;
+					}
+				} else {
+					if (!p_visitor(extra.userdata, extra.subindex, p_userdata)) {
+						return false;
+					}
+				}
+			}
+		} else {
+			for (int i = 0; i < node.num_children; ++i) {
+				const uint32_t child_id = node.children[i];
+				const BVHABB_CLASS &child_bounds = _nodes[child_id].aabb;
+				if (!next.fully_within && !child_bounds.intersects(p_query)) {
+					continue;
+				}
+				StackItem *child = stack.request();
+				child->node_id = child_id;
+				child->fully_within = next.fully_within || p_query.is_other_within(child_bounds);
+			}
+		}
+	}
+	return true;
+}
+
+public:
 int cull_point(CullParams &r_params, bool p_translate_hits = true) {
 	_cull_hits.clear();
 	r_params.result_count = 0;
-
-	uint32_t tree_test_mask = 0;
+	// No matching tree or no output capacity: avoid traversing the BVH.
+	if (r_params.tree_collision_mask == 0 || r_params.result_max <= 0) {
+		return 0;
+	}
 
 	for (int n = 0; n < NUM_TREES; n++) {
-		tree_test_mask <<= 1;
-		if (!tree_test_mask) {
-			tree_test_mask = 1;
-		}
+		const uint32_t tree_test_mask = uint32_t(1) << n;
 
 		if (_root_node_id[n] == BVHCommon::INVALID) {
 			continue;
@@ -137,6 +370,9 @@ int cull_point(CullParams &r_params, bool p_translate_hits = true) {
 		}
 
 		_cull_point_iterative(_root_node_id[n], r_params);
+		if (_cull_hits_full(r_params)) {
+			break;
+		}
 	}
 
 	if (p_translate_hits) {
@@ -149,14 +385,13 @@ int cull_point(CullParams &r_params, bool p_translate_hits = true) {
 int cull_aabb(CullParams &r_params, bool p_translate_hits = true) {
 	_cull_hits.clear();
 	r_params.result_count = 0;
-
-	uint32_t tree_test_mask = 0;
+	// No matching tree or no output capacity: avoid traversing the BVH.
+	if (r_params.tree_collision_mask == 0 || r_params.result_max <= 0) {
+		return 0;
+	}
 
 	for (int n = 0; n < NUM_TREES; n++) {
-		tree_test_mask <<= 1;
-		if (!tree_test_mask) {
-			tree_test_mask = 1;
-		}
+		const uint32_t tree_test_mask = uint32_t(1) << n;
 
 		if (_root_node_id[n] == BVHCommon::INVALID) {
 			continue;
@@ -168,6 +403,9 @@ int cull_aabb(CullParams &r_params, bool p_translate_hits = true) {
 		}
 
 		_cull_aabb_iterative(_root_node_id[n], r_params);
+		if (_cull_hits_full(r_params)) {
+			break;
+		}
 	}
 
 	if (p_translate_hits) {
@@ -201,7 +439,152 @@ void _cull_hit(uint32_t p_ref_id, CullParams &r_params) {
 	_cull_hits.push_back(p_ref_id);
 }
 
+void _cast_segment_iterative(uint32_t p_node_id, real_t p_root_entry, const POINT &p_from, const POINT &p_to, SegmentCastCallback p_callback, void *p_userdata, const T *p_tester, real_t &r_max_fraction) {
+	struct StackItem {
+		uint32_t node_id;
+		real_t entry_fraction;
+	};
+	BVH_IterativeInfo<StackItem> stack;
+	stack.stack = (StackItem *)alloca(stack.get_alloca_stacksize());
+	stack.get_first()->node_id = p_node_id;
+	stack.get_first()->entry_fraction = p_root_entry;
+
+	// Keep all entry fractions normalized to the SAME original segment.
+	// Clipping the Segment::to here would invalidate entries cached in the
+	// traversal stack; the current closest hit is held in r_max_fraction.
+	typename BVHABB_CLASS::Segment segment;
+	segment.from = p_from;
+	segment.to = p_to;
+
+	StackItem next;
+	while (stack.pop(next)) {
+		// Child AABB intersections were tested before the node was pushed.
+		// A closer exact hit may have shortened the ray since then. Prune
+		// using the cached earliest entry instead of a second slab test.
+		// Keep a small tolerance to retain grazing contacts at clip bounds.
+		if (next.entry_fraction > r_max_fraction + CMP_EPSILON) {
+			continue;
+		}
+		TNode &node = _nodes[next.node_id];
+		if (node.is_leaf()) {
+			TLeaf &leaf = _node_get_leaf(node);
+
+			// Dense leaves still prioritize their nearest proxy. Evaluate
+			// leaf AABBs against the original ray, then reject entries after
+			// the currently clipped fraction.
+			int nearest_item = -1;
+			const bool dense_leaf = leaf.num_items >= 16;
+			// Cache entry fractions for dense leaves to avoid testing each
+			// proxy's ray/AABB slabs twice. Entries use the original ray
+			// and are invalidated only by rejecting at the current clip.
+			real_t dense_entry[MAX_ITEMS];
+			if (dense_leaf) {
+				real_t nearest_entry = Math::INF;
+				for (int i = 0; i < leaf.num_items; i++) {
+					const BVHABB_CLASS &aabb = leaf.get_aabb(i);
+					real_t entry;
+					if (!aabb.intersects_segment(segment, &entry) || entry > r_max_fraction + CMP_EPSILON) {
+						dense_entry[i] = Math::INF;
+						continue;
+					}
+					dense_entry[i] = entry;
+					if (nearest_item == -1 || entry < nearest_entry) {
+						nearest_entry = entry;
+						nearest_item = i;
+					}
+				}
+				if (nearest_item == -1) {
+					continue;
+				}
+			}
+
+			for (int i = nearest_item >= 0 ? -1 : 0; i < leaf.num_items; i++) {
+				const int item_index = i < 0 ? nearest_item : i;
+				if (i >= 0 && i == nearest_item) {
+					continue;
+				}
+				if (dense_leaf) {
+					// A nearer exact hit can clip the ray after the first
+					// scan; compare cached entries without another slab test.
+					if (dense_entry[item_index] > r_max_fraction + CMP_EPSILON) {
+						continue;
+					}
+				} else {
+					// Small leaves still use a single-pass no-cache path.
+					real_t entry;
+					if (!leaf.get_aabb(item_index).intersects_segment(segment, &entry) || entry > r_max_fraction + CMP_EPSILON) {
+						continue;
+					}
+				}
+				const ItemExtra &extra = _extra[leaf.get_item_ref_id(item_index)];
+				if (USE_PAIRS && !USER_CULL_TEST_FUNCTION::user_cull_check(p_tester, extra.userdata)) {
+					continue;
+				}
+				const real_t fraction = p_callback(extra.userdata, extra.subindex, r_max_fraction, p_userdata);
+				if (fraction >= 0.0 && fraction < r_max_fraction) {
+					r_max_fraction = fraction;
+					if (r_max_fraction == 0.0) {
+						return;
+					}
+				}
+			}
+		} else if (node.num_children == 2) {
+			// LIFO: process the child with the smaller original-ray entry first.
+			const uint32_t child_a = node.children[0];
+			const uint32_t child_b = node.children[1];
+			const BVHABB_CLASS &bounds_a = _nodes[child_a].aabb;
+			const BVHABB_CLASS &bounds_b = _nodes[child_b].aabb;
+			real_t entry_a;
+			real_t entry_b;
+			const bool hit_a = bounds_a.intersects_segment(segment, &entry_a) && entry_a <= r_max_fraction + CMP_EPSILON;
+			const bool hit_b = bounds_b.intersects_segment(segment, &entry_b) && entry_b <= r_max_fraction + CMP_EPSILON;
+			if (hit_a && hit_b) {
+				if (entry_a <= entry_b) {
+					StackItem *far_item = stack.request();
+					far_item->node_id = child_b;
+					far_item->entry_fraction = entry_b;
+					StackItem *near_item = stack.request();
+					near_item->node_id = child_a;
+					near_item->entry_fraction = entry_a;
+				} else {
+					StackItem *far_item = stack.request();
+					far_item->node_id = child_a;
+					far_item->entry_fraction = entry_a;
+					StackItem *near_item = stack.request();
+					near_item->node_id = child_b;
+					near_item->entry_fraction = entry_b;
+				}
+			} else if (hit_a) {
+				StackItem *child = stack.request();
+				child->node_id = child_a;
+				child->entry_fraction = entry_a;
+			} else if (hit_b) {
+				StackItem *child = stack.request();
+				child->node_id = child_b;
+				child->entry_fraction = entry_b;
+			}
+		} else {
+			// Preserve support for BVH configurations with more than two
+			// children without falling back to a redundant node slab check.
+			for (int i = 0; i < node.num_children; i++) {
+				const uint32_t child_id = node.children[i];
+				real_t entry;
+				if (_nodes[child_id].aabb.intersects_segment(segment, &entry) && entry <= r_max_fraction + CMP_EPSILON) {
+					StackItem *child = stack.request();
+					child->node_id = child_id;
+					child->entry_fraction = entry;
+				}
+			}
+		}
+	}
+}
+
 bool _cull_segment_iterative(uint32_t p_node_id, CullParams &r_params) {
+	// A query completely outside this tree must not allocate a traversal
+	// stack or inspect its children. The root has no parent to reject it.
+	if (!_nodes[p_node_id].aabb.intersects_segment(r_params.segment)) {
+		return true;
+	}
 	// our function parameters to keep on a stack
 	struct CullSegParams {
 		uint32_t node_id;
@@ -240,6 +623,9 @@ bool _cull_segment_iterative(uint32_t p_node_id, CullParams &r_params) {
 
 					// register hit
 					_cull_hit(child_id, r_params);
+					if (_cull_hits_full(r_params)) {
+						return false;
+					}
 				}
 			}
 		} else {
@@ -263,6 +649,11 @@ bool _cull_segment_iterative(uint32_t p_node_id, CullParams &r_params) {
 }
 
 bool _cull_point_iterative(uint32_t p_node_id, CullParams &r_params) {
+	// Reject a miss before allocating the traversal stack; descendants
+	// cannot contain the point if the root bounds do not contain it.
+	if (!_nodes[p_node_id].aabb.intersects_point(r_params.point)) {
+		return true;
+	}
 	// our function parameters to keep on a stack
 	struct CullPointParams {
 		uint32_t node_id;
@@ -282,11 +673,9 @@ bool _cull_point_iterative(uint32_t p_node_id, CullParams &r_params) {
 
 	// while there are still more nodes on the stack
 	while (ii.pop(cpp)) {
+		// Every enqueued node is already known to contain the point;
+		// testing children before pushing avoids needless stack work.
 		TNode &tnode = _nodes[cpp.node_id];
-		// no hit with this node?
-		if (!tnode.aabb.intersects_point(r_params.point)) {
-			continue;
-		}
 
 		if (tnode.is_leaf()) {
 			// lazy check for hits full up condition
@@ -303,16 +692,18 @@ bool _cull_point_iterative(uint32_t p_node_id, CullParams &r_params) {
 
 					// register hit
 					_cull_hit(child_id, r_params);
+					if (_cull_hits_full(r_params)) {
+						return false;
+					}
 				}
 			}
 		} else {
-			// test children individually
+			// Pretest children: stack entries only contain matching subtrees.
 			for (int n = 0; n < tnode.num_children; n++) {
-				uint32_t child_id = tnode.children[n];
-
-				// add to the stack
-				CullPointParams *child = ii.request();
-				child->node_id = child_id;
+				const uint32_t child_id = tnode.children[n];
+				if (_nodes[child_id].aabb.intersects_point(r_params.point)) {
+					ii.request()->node_id = child_id;
+				}
 			}
 		}
 
@@ -324,6 +715,16 @@ bool _cull_point_iterative(uint32_t p_node_id, CullParams &r_params) {
 
 // Note: This is a very hot loop profiling wise. Take care when changing this and profile.
 bool _cull_aabb_iterative(uint32_t p_node_id, CullParams &r_params, bool p_fully_within = false) {
+	// The root is the only node whose bounds are not tested by a parent.
+	// Quickly reject outside queries, or mark an entirely covered tree so
+	// neither its branches nor its leaf proxies require overlap tests.
+	if (!p_fully_within) {
+		const BVHABB_CLASS &root_bounds = _nodes[p_node_id].aabb;
+		if (!root_bounds.intersects(r_params.abb)) {
+			return true;
+		}
+		p_fully_within = r_params.abb.is_other_within(root_bounds);
+	}
 	// our function parameters to keep on a stack
 	struct CullAABBParams {
 		uint32_t node_id;
@@ -363,6 +764,9 @@ bool _cull_aabb_iterative(uint32_t p_node_id, CullParams &r_params, bool p_fully
 
 					// register hit
 					_cull_hit(child_id, r_params);
+					if (_cull_hits_full(r_params)) {
+						return false;
+					}
 				}
 			} else {
 				// This section is the hottest area in profiling, so
@@ -382,6 +786,9 @@ bool _cull_aabb_iterative(uint32_t p_node_id, CullParams &r_params, bool p_fully
 
 						// register hit
 						_cull_hit(child_id, r_params);
+						if (_cull_hits_full(r_params)) {
+							return false;
+						}
 					}
 				}
 
@@ -427,6 +834,16 @@ bool _cull_aabb_iterative(uint32_t p_node_id, CullParams &r_params, bool p_fully
 
 // returns full up with results
 bool _cull_convex_iterative(uint32_t p_node_id, CullParams &r_params, bool p_fully_within = false) {
+	// Classify the root before allocating traversal storage. In the common
+	// frustum-miss case this avoids the stack and plane-ID allocations.
+	if (!p_fully_within) {
+		const typename BVHABB_CLASS::IntersectResult root_result = _nodes[p_node_id].aabb.intersects_convex(r_params.hull);
+		if (root_result == BVHABB_CLASS::IR_MISS) {
+			return true;
+		}
+		p_fully_within = root_result == BVHABB_CLASS::IR_FULL;
+	}
+
 	// our function parameters to keep on a stack
 	struct CullConvexParams {
 		uint32_t node_id;
@@ -452,23 +869,10 @@ bool _cull_convex_iterative(uint32_t p_node_id, CullParams &r_params, bool p_ful
 
 	// while there are still more nodes on the stack
 	while (ii.pop(ccp)) {
+		// Every queued node was already tested by its parent. Propagating
+		// IR_FULL avoids retesting entire contained subtrees, while rejecting
+		// IR_MISS children here avoids pushing and popping dead branches.
 		const TNode &tnode = _nodes[ccp.node_id];
-
-		if (!ccp.fully_within) {
-			typename BVHABB_CLASS::IntersectResult res = tnode.aabb.intersects_convex(r_params.hull);
-
-			switch (res) {
-				default: {
-					continue; // miss, just move on to the next node in the stack
-				} break;
-				case BVHABB_CLASS::IR_PARTIAL: {
-				} break;
-				case BVHABB_CLASS::IR_FULL: {
-					ccp.fully_within = true;
-				} break;
-			}
-
-		} // if not fully within already
 
 		if (tnode.is_leaf()) {
 			// lazy check for hits full up condition
@@ -486,6 +890,9 @@ bool _cull_convex_iterative(uint32_t p_node_id, CullParams &r_params, bool p_ful
 
 					// register hit
 					_cull_hit(child_id, r_params);
+					if (_cull_hits_full(r_params)) {
+						return false;
+					}
 				}
 
 			} else {
@@ -519,6 +926,9 @@ bool _cull_convex_iterative(uint32_t p_node_id, CullParams &r_params, bool p_ful
 
 						// register hit
 						_cull_hit(child_id, r_params);
+						if (_cull_hits_full(r_params)) {
+							return false;
+						}
 					}
 				}
 
@@ -547,7 +957,8 @@ bool _cull_convex_iterative(uint32_t p_node_id, CullParams &r_params, bool p_ful
 						uint32_t child_id = leaf.get_item_ref_id(n);
 
 						// full up with results? exit early, no point in further testing
-						if (!_cull_hit(child_id, r_params)) {
+						_cull_hit(child_id, r_params);
+						if (_cull_hits_full(r_params)) {
 							return false;
 						}
 					}
@@ -556,14 +967,20 @@ bool _cull_convex_iterative(uint32_t p_node_id, CullParams &r_params, bool p_ful
 			} // if not fully within
 		} else {
 			for (int n = 0; n < tnode.num_children; n++) {
-				uint32_t child_id = tnode.children[n];
+				const uint32_t child_id = tnode.children[n];
+				bool child_fully_within = ccp.fully_within;
+				if (!child_fully_within) {
+					const typename BVHABB_CLASS::IntersectResult child_result = _nodes[child_id].aabb.intersects_convex(r_params.hull);
+					if (child_result == BVHABB_CLASS::IR_MISS) {
+						continue;
+					}
+					child_fully_within = child_result == BVHABB_CLASS::IR_FULL;
+				}
 
-				// add to the stack
+				// Keep the existing child order, result limit, and cull masks.
 				CullConvexParams *child = ii.request();
-
-				// should always return valid child
 				child->node_id = child_id;
-				child->fully_within = ccp.fully_within;
+				child->fully_within = child_fully_within;
 			}
 		}
 

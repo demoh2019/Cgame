@@ -1,0 +1,64 @@
+name: GridContainer dense sizing performance and native tests
+
+on:
+  push:
+    branches: [develop]
+    paths:
+      - 'scene/gui/grid_container.cpp'
+      - 'scene/gui/grid_container.h'
+      - 'tests/scene/test_grid_container.cpp'
+      - '.github/workflows/grid-container-minsize-perf.yml'
+  pull_request:
+    paths:
+      - 'scene/gui/grid_container.cpp'
+      - 'scene/gui/grid_container.h'
+      - 'tests/scene/test_grid_container.cpp'
+      - '.github/workflows/grid-container-minsize-perf.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: grid-container-minsize-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  native-grid-and-ui-stress:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ./.github/actions/godot-deps
+      - name: Build Cgame with C++ regression tests
+        uses: ./.github/actions/godot-build
+        with:
+          platform: linuxbsd
+          target: editor
+          scons-flags: dev_build=yes tests=yes debug_symbols=no module_text_server_fb_enabled=yes -j2
+      - name: Run GridContainer native correctness and layout tests
+        shell: bash
+        run: |
+          set -euo pipefail
+          BIN=./bin/godot.linuxbsd.editor.dev.x86_64
+          timeout 180s "$BIN" --headless --test --test-suite="*GridContainer*" --no-colors
+      - name: Check stress script and measure large UI relayout
+        shell: bash
+        run: |
+          set -euo pipefail
+          BIN=./bin/godot.linuxbsd.editor.dev.x86_64
+          "$BIN" --headless --path tests/stress --script res://stress.gd --check-only
+          python3 tests/stress/run.py \
+            --godot "$BIN" --case ui_layout,grid_reflow --preset standard \
+            --repeats 5 --timeout 300 --rss-limit-mib 4096 \
+            --output grid-layout-results.json --summary-md grid-layout-hotspots.md
+      - name: Archive actual engine workload measurements
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: cgame-grid-layout
+          path: |
+            grid-layout-results.json
+            grid-layout-hotspots.md
+          if-no-files-found: ignore
+          retention-days: 14

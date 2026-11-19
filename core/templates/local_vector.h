@@ -36,6 +36,8 @@
 #include "core/templates/sort_array.h"
 #include "core/templates/vector.h"
 
+#include <cstring>
+#include <functional>
 #include <initializer_list>
 #include <type_traits>
 
@@ -126,8 +128,15 @@ public:
 	void remove_at(U p_index) {
 		ERR_FAIL_UNSIGNED_INDEX(p_index, count);
 		count--;
-		for (U i = p_index; i < count; i++) {
-			data[i] = std::move(data[i + 1]);
+		if constexpr (std::is_trivially_copyable_v<T>) {
+			if (p_index < count) {
+				// Shift the surviving POD values in one optimized bulk move.
+				std::memmove(data + p_index, data + p_index + 1, size_t(count - p_index) * sizeof(T));
+			}
+		} else {
+			for (U i = p_index; i < count; i++) {
+				data[i] = std::move(data[i + 1]);
+			}
 		}
 		data[count].~T();
 	}
@@ -165,13 +174,25 @@ public:
 		U from = 0;
 		U occurrences = 0;
 		while (true) {
-			int64_t idx = find(p_val, from);
-
+			const int64_t idx = find(p_val, from);
 			if (idx == -1) {
 				break;
 			}
-			remove_at_unordered(idx);
-			from = idx;
+
+			const U at = U(idx);
+			// Remove matching tail values before swapping a survivor into the hole.
+			// This avoids move assignments when many matches cluster at the end,
+			// while keeping find()'s fast scanning for sparse matches.
+			while (count > at && data[count - 1] == p_val) {
+				data[--count].~T();
+				occurrences++;
+			}
+			if (at == count) {
+				break;
+			}
+
+			remove_at_unordered(at);
+			from = at; // Inspect the value moved into the deleted slot.
 			occurrences++;
 		}
 		return occurrences;
@@ -197,6 +218,35 @@ public:
 	}
 	_FORCE_INLINE_ bool is_empty() const { return count == 0; }
 	_FORCE_INLINE_ U get_capacity() const { return capacity; }
+
+	// Unlike reserve(), this allocates exactly the requested initial capacity.
+	// Subsequent growth through push_back() still uses geometric expansion.
+	// Useful for the common case of tiny lists that rarely grow past one item.
+	void reserve_exact(U p_size) {
+		if (p_size > capacity) {
+			T *new_data = (T *)memrealloc(data, size_t(p_size) * sizeof(T));
+			CRASH_COND_MSG(!new_data, "Out of memory");
+			data = new_data;
+			capacity = p_size;
+		}
+	}
+
+	// Reclaim excess capacity explicitly without changing the number or order
+	// of elements. The caller controls the threshold to avoid resize churn.
+	void shrink_to(U p_capacity) {
+		if (p_capacity < count || p_capacity >= capacity) {
+			return;
+		}
+		if (p_capacity == 0) {
+			reset();
+			return;
+		}
+		T *new_data = (T *)memrealloc(data, size_t(p_capacity) * sizeof(T));
+		CRASH_COND_MSG(!new_data, "Out of memory");
+		data = new_data;
+		capacity = p_capacity;
+	}
+
 	void reserve(U p_size) {
 		if (p_size > capacity) {
 			if (tight) {
@@ -312,9 +362,20 @@ public:
 		if (p_pos == count) {
 			push_back(std::move(p_val));
 		} else {
-			resize(count + 1);
-			for (U i = count - 1; i > p_pos; i--) {
-				data[i] = std::move(data[i - 1]);
+			if constexpr (std::is_trivially_copyable_v<T>) {
+				resize(count + 1);
+				// The last slot already exists; shift in place without per-element assignments.
+				std::memmove(data + p_pos + 1, data + p_pos, size_t(count - p_pos - 1) * sizeof(T));
+			} else {
+				// Construct the new tail by moving the old tail, avoiding a potentially
+				// expensive default construction and an extra move assignment.
+				// This also allows insertion of non-default-constructible types.
+				reserve(count + 1);
+				memnew_placement(&data[count], T(std::move(data[count - 1])));
+				++count;
+				for (U i = count - 2; i > p_pos; i--) {
+					data[i] = std::move(data[i - 1]);
+				}
 			}
 			data[p_pos] = std::move(p_val);
 		}
@@ -327,7 +388,12 @@ public:
 		if (p_from < 0 || p_from >= size()) {
 			return -1;
 		}
-		return span().find(p_val, p_from);
+		if constexpr (std::is_integral_v<T> && sizeof(T) == 1 && !std::is_same_v<T, bool>) {
+			const T *const found = static_cast<const T *>(std::memchr(data + p_from, static_cast<unsigned char>(p_val), size_t(size() - p_from)));
+			return found ? int64_t(found - data) : -1;
+		} else {
+			return span().find(p_val, p_from);
+		}
 	}
 
 	bool has(const T &p_val) const {
@@ -350,7 +416,12 @@ public:
 	}
 
 	void ordered_insert(T p_val) {
-		U idx = span().bisect(p_val, false);
+		// Appending sorted or equal values avoids the binary search entirely.
+		if (count == 0 || !Comparator<T>()(p_val, data[count - 1])) {
+			push_back(std::move(p_val));
+			return;
+		}
+		const U idx = span().bisect(p_val, false);
 		insert(idx, std::move(p_val));
 	}
 
@@ -394,9 +465,39 @@ public:
 	}
 
 	void operator=(Span<T> p_from) {
+		const T *const source = p_from.ptr();
+		if (source == data) {
+			// A full self-assignment needs no work. For a prefix, only destroy
+			// the removed tail; avoid reassigning every surviving element.
+			resize(p_from.size());
+			return;
+		}
+		// A span into our tail must be copied before shrinking: for
+		// nontrivial T, resize() would destroy the source elements first.
+		// std::less provides a total pointer order even for unrelated buffers.
+		if (data != nullptr && source != nullptr &&
+				std::less<const T *>()(data, source) &&
+				std::less<const T *>()(source, data + count)) {
+			if constexpr (std::is_trivially_copyable_v<T>) {
+				std::memmove(data, source, size_t(p_from.size()) * sizeof(T));
+			} else {
+				// Copying left to right preserves still-unread source elements.
+				for (size_t i = 0; i < p_from.size(); i++) {
+					data[i] = source[i];
+				}
+			}
+			resize(p_from.size());
+			return;
+		}
 		resize(p_from.size());
-		for (size_t i = 0; i < p_from.size(); i++) {
-			data[i] = p_from[i];
+		if constexpr (std::is_trivially_copyable_v<T>) {
+			if (count > 0) {
+				std::memmove(data, source, size_t(count) * sizeof(T));
+			}
+		} else {
+			for (size_t i = 0; i < p_from.size(); i++) {
+				data[i] = source[i];
+			}
 		}
 	}
 	void operator=(const LocalVector &p_vector) { operator=(p_vector.span()); }
@@ -416,8 +517,14 @@ public:
 	}
 	void operator=(Vector<T> &&p_from) {
 		resize(p_from.size());
-		for (U i = 0; i < count; i++) {
-			data[i] = std::move(p_from[i]);
+		if constexpr (std::is_trivially_copyable_v<T>) {
+			if (count > 0) {
+				std::memcpy(data, p_from.ptr(), size_t(count) * sizeof(T));
+			}
+		} else {
+			for (U i = 0; i < count; i++) {
+				data[i] = std::move(p_from[i]);
+			}
 		}
 	}
 
