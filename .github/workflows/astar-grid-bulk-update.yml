@@ -54,3 +54,8 @@ jobs:
             --case astar_grid_jps --scale 1 --frames 12 \
             --repeats 1 --timeout 120 --rss-limit-mib 3072 \
             --output /tmp/astar-grid-jps.json
+          python3 tests/stress/run.py \
+            --godot ./bin/godot.linuxbsd.editor.dev.x86_64 \
+            --case astar_grid_fill --scale 1 --frames 12 \
+            --repeats 1 --timeout 120 --rss-limit-mib 3072 \
+            --output /tmp/astar-grid-fill.json
