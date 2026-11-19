@@ -4857,52 +4857,74 @@ String String::uri_encode() const {
 	return _uri_encode_bytes(source, len);
 }
 
-String String::uri_decode() const {
-	CharString src = utf8();
-	CharString res;
-	for (int i = 0; i < src.length(); ++i) {
-		if (src[i] == '%' && i + 2 < src.length()) {
-			char ord1 = src[i + 1];
-			if (is_hex_digit(ord1)) {
-				char ord2 = src[i + 2];
-				if (is_hex_digit(ord2)) {
-					char bytes[3] = { (char)ord1, (char)ord2, 0 };
-					res += (char)strtol(bytes, nullptr, 16);
-					i += 2;
-				}
-			} else {
-				res += src[i];
-			}
-		} else if (src[i] == '+') {
-			res += ' ';
-		} else {
-			res += src[i];
+static _FORCE_INLINE_ int _uri_hex_nibble(char p_char) {
+	if (p_char >= '0' && p_char <= '9') {
+		return p_char - '0';
+	}
+	if (p_char >= 'a' && p_char <= 'f') {
+		return p_char - 'a' + 10;
+	}
+	if (p_char >= 'A' && p_char <= 'F') {
+		return p_char - 'A' + 10;
+	}
+	return -1;
+}
+
+static String _uri_decode_single_buffer(const String &p_source, bool p_decode_plus) {
+	const int input_length = p_source.length();
+	const char32_t *source = p_source.ptr();
+
+	// Leave already-decoded ASCII paths in their existing COW allocation.
+	bool is_plain_ascii = true;
+	for (int i = 0; i < input_length; i++) {
+		const char32_t c = source[i];
+		if (c >= 128 || c == '%' || (p_decode_plus && c == '+')) {
+			is_plain_ascii = false;
+			break;
 		}
 	}
-	return String::utf8(res);
+	if (is_plain_ascii) {
+		return p_source;
+	}
+
+	// Percent decoding cannot increase the byte count; allocate its maximum once.
+	const CharString src = p_source.utf8();
+	const int length = src.length();
+	const char *read = src.ptr();
+	CharString decoded;
+	decoded.resize_uninitialized(int64_t(length) + 1);
+	char *dest = decoded.ptrw();
+	int written = 0;
+	for (int i = 0; i < length; i++) {
+		if (read[i] == '%' && i + 2 < length) {
+			const int hi = _uri_hex_nibble(read[i + 1]);
+			if (hi >= 0) {
+				const int lo = _uri_hex_nibble(read[i + 2]);
+				if (lo >= 0) {
+					dest[written++] = char((hi << 4) | lo);
+					i += 2;
+				}
+				// Preserve legacy semantics: a valid first nibble followed by
+				// an invalid second nibble drops only the leading percent sign.
+			} else {
+				dest[written++] = '%';
+			}
+		} else if (p_decode_plus && read[i] == '+') {
+			dest[written++] = ' ';
+		} else {
+			dest[written++] = read[i];
+		}
+	}
+	dest[written] = 0;
+	return String::utf8(Span<char>(decoded.ptr(), written));
+}
+
+String String::uri_decode() const {
+	return _uri_decode_single_buffer(*this, true);
 }
 
 String String::uri_file_decode() const {
-	CharString src = utf8();
-	CharString res;
-	for (int i = 0; i < src.length(); ++i) {
-		if (src[i] == '%' && i + 2 < src.length()) {
-			char ord1 = src[i + 1];
-			if (is_hex_digit(ord1)) {
-				char ord2 = src[i + 2];
-				if (is_hex_digit(ord2)) {
-					char bytes[3] = { (char)ord1, (char)ord2, 0 };
-					res += (char)strtol(bytes, nullptr, 16);
-					i += 2;
-				}
-			} else {
-				res += src[i];
-			}
-		} else {
-			res += src[i];
-		}
-	}
-	return String::utf8(res);
+	return _uri_decode_single_buffer(*this, false);
 }
 
 String String::c_unescape() const {
