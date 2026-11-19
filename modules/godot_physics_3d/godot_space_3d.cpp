@@ -1293,6 +1293,8 @@ GodotSpace3D::GodotSpace3D() {
 	soft_body_link_damping = Math::is_finite(configured_link_damping) ? MAX(real_t(0.0), configured_link_damping) : real_t(0.0);
 	const real_t configured_lift_coefficient = GLOBAL_GET("physics/3d/solver/soft_body_lift_coefficient");
 	soft_body_lift_coefficient = Math::is_finite(configured_lift_coefficient) ? MAX(real_t(0.0), configured_lift_coefficient) : real_t(0.0);
+	const real_t configured_tangential_drag = GLOBAL_GET("physics/3d/solver/soft_body_tangential_drag_ratio");
+	soft_body_tangential_drag_ratio = Math::is_finite(configured_tangential_drag) ? MAX(real_t(0.0), configured_tangential_drag) : real_t(0.0);
 	const real_t configured_area_compliance = GLOBAL_GET("physics/3d/solver/soft_body_xpbd_area_compliance");
 	soft_body_xpbd_area_compliance = Math::is_finite(configured_area_compliance) ? MAX(real_t(0.0), configured_area_compliance) : real_t(0.0);
 	const real_t configured_shear_compliance = GLOBAL_GET("physics/3d/solver/soft_body_xpbd_shear_compliance");
