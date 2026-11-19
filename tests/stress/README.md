@@ -2428,6 +2428,87 @@ by itself evidence of faster total frame time. C++ compilation, native
 headless regression and measured resource usage are required for
 production validation.
 
+### Uniform fluid buoyancy, flow and quadratic drag for rigid bodies (Jolt-inspired)
+
+Cgame now supports an **opt-in, fully submerged uniform fluid medium** in
+both GodotPhysics2D and GodotPhysics3D. This is inspired by Jolt's
+`Body::ApplyBuoyancyImpulse` and is a deliberately smaller, compatible
+model, **not** a port of its shape-submersion algorithm.
+
+The fluid model combines four optional effects, separately configurable
+under `physics/2d/solver/` and `physics/3d/solver/`:
+
+- `fluid_buoyancy` (default `0.0`): fraction of gravity counteracted
+  by Archimedes-style buoyancy. `1.0` is neutrally buoyant, values above
+  `1.0` float against gravity, and `0` exactly retains legacy gravity
+  even if other fluid effects are enabled. Uses the body's **actual
+  area-overridden gravity** and `gravity_scale`, not a hard-coded down axis.
+- `fluid_linear_drag` (default `0.0`): mass-normalized quadratic
+  resistance coefficient, `k = density * Cd * cross_section / (2 * mass)`.
+  In 3D the velocity is in m/s and `k` is in 1/m; in 2D, the analogous
+  units are pixels/s and 1/pixel.
+- `fluid_angular_drag` (default `0.0`): inertia-normalized quadratic
+  rotational resistance, acting on the scalar angular velocity in 2D
+  or the full angular-velocity vector in 3D.
+- `fluid_flow_velocity` (default zero Vector2/Vector3): constant world-space
+  velocity of the medium, allowing flowing water or wind-like drag.
+  Its value matters only while `fluid_linear_drag` is nonzero.
+
+For constant ambient flow `u`, relative velocity `w = v - u` and
+quadratic resistance `dw/dt = -k |w| w`, Cgame applies the **closed-form
+solution of the drag-only substep**:
+
+```text
+v_next = u + (v - u) / (1 + k * dt * |v - u|)
+omega_next = omega / (1 + angular_k * dt * |omega|)
+```
+
+This prevents high-drag explicit-Euler overshoot and never reverses
+velocity relative to the flow. Normal gravity/external forces are
+integrated first; drag is then split off in the same step. Buoyancy
+adds `-fluid_buoyancy * mass * gravity` to external force. The model
+adds no per-step heap allocations and does not modify kinematic bodies,
+custom-integrated bodies or Godot's normal contact response. Project
+settings are cached when each PhysicsSpace is created; create a new
+space (or restart the scene/project) after changing the settings.
+
+**Limitations:** the entire body is treated as fully immersed in a
+single uniform medium. This model does **not** compute a liquid surface,
+partial displaced volume, center-of-buoyancy torque, waves, turbulent
+vortices, hydrodynamic pressure, per-shape cross-sections or soft-body
+fluid interactions. Sleeping bodies are not automatically woken by a
+new flow. Those require a separate geometry-based water-volume/CFD
+implementation; they should not be assumed from these settings.
+
+Python math/source tests validate 20,000 randomized 2D/3D drag samples,
+4,000 timestep-splitting cases, angular drag stability and buoyancy
+balance, plus 2D/3D setting/solver wiring. The headless physics server
+regression checks drag towards a current, angular resistance and
+neutral buoyancy for rigid bodies in both dimensions:
+
+```bash
+python3 -m unittest discover -s tests/stress -p 'test_physics_uniform_fluid.py' -v
+./bin/godot.macos.editor.arm64 --headless --path tests/stress \
+  --script res://physics_uniform_fluid_regression.gd
+```
+
+Four stress cases create 256 fully dynamic, non-sleeping rigid bodies
+per scale in 2D and 3D, with an off baseline and a buoyancy/flow/drag
+run. Use identical builds and hardware to compare physics time, p95,
+process RSS and CPU profiler results:
+
+```bash
+python3 tests/stress/run.py --godot ./bin/godot.macos.editor.arm64 \
+  --case physics_fluid_2d_disabled,physics_fluid_2d_enabled,physics_fluid_3d_disabled,physics_fluid_3d_enabled \
+  --scale 4 --frames 90 --repeats 5 --rss-limit-mib 4096 \
+  --output out/physics-uniform-fluid.json
+```
+
+The fluid-on scene physically differs from the fluid-off baseline;
+these comparisons primarily quantify the **cost of enabling** the
+model, not an algorithm-only speedup. Real C++ compilation and Godot
+headless execution remain required before declaring production-ready.
+
 ### Cached clip-plane distances for 3D face manifolds (Box2D-style)
 
 GodotPhysics3D generates face/face contacts by clipping one convex
