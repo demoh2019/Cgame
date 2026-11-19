@@ -2869,6 +2869,57 @@ TEST_CASE("[String] Repeat") {
 	CHECK(t == s);
 }
 
+TEST_CASE("[String] Repeat creates one independent output and preserves shared source") {
+	const String original = U"тест🙂";
+	const String shared = original;
+	const char32_t *original_ptr = original.ptr();
+	const String repeated = original.repeat(73);
+	REQUIRE_EQ(repeated.length(), original.length() * 73);
+	CHECK(original.ptr() == original_ptr);
+	CHECK(shared.ptr() == original_ptr);
+	CHECK(repeated.ptr() != original_ptr);
+	for (int i = 0; i < 73; i++) {
+		CHECK_EQ(repeated.substr(i * original.length(), original.length()), original);
+	}
+	CHECK_EQ(repeated[repeated.length()], char32_t(0));
+}
+
+TEST_CASE("[String] Repeat handles non power-of-two boundaries and long output") {
+	const String token = "abcdEFGH";
+	const String result = token.repeat(10001);
+	REQUIRE_EQ(result.length(), token.length() * 10001);
+	for (int i = 0; i < 10001; i += 137) {
+		CHECK_EQ(result.substr(i * token.length(), token.length()), token);
+	}
+	CHECK_EQ(result.substr(result.length() - token.length()), token);
+	CHECK_EQ(result[result.length()], char32_t(0));
+}
+
+TEST_CASE("[String] Repeat rejects signed overflow without allocating") {
+	const String original = "abcdef";
+	ERR_PRINT_OFF;
+	CHECK(original.repeat(0x7fffffff).is_empty());
+	CHECK(original.repeat(-1).is_empty());
+	ERR_PRINT_ON;
+	CHECK(original == "abcdef");
+	CHECK(original.repeat(0).is_empty());
+	CHECK(original.repeat(1).ptr() == original.ptr());
+	CHECK(String().repeat(100000).is_empty());
+}
+
+TEST_CASE("[String] Repeat matches incremental concatenation over varied inputs") {
+	const String cases[] = { "x", "hello", U"Ω", "a\nb", "0123456789ABCDEF" };
+	for (const String &input : cases) {
+		for (int count = 0; count < 81; count++) {
+			String expected;
+			for (int i = 0; i < count; i++) {
+				expected += input;
+			}
+			CHECK(input.repeat(count) == expected);
+		}
+	}
+}
+
 TEST_CASE("[String] Reverse") {
 	String s = "Abcd";
 	CHECK(s.reverse() == "dcbA");
