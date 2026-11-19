@@ -65,6 +65,10 @@ public:
 	// Independently budgeted segment-segment soft-body contacts.
 	// Requires both soft_body_soft_contacts and vertex_face_contacts.
 	inline static bool soft_body_soft_edge_edge_contacts = false;
+	// Approximate linear swept point-vs-face prediction, only in VF mode.
+	inline static bool soft_body_soft_speculative_ccd = false;
+	inline static float soft_body_soft_ccd_max_sweep = 1.0f;
+	inline static float soft_body_soft_ccd_max_correction_speed = 128.0f;
 	inline static float soft_body_soft_contact_radius = 0.1f;
 	inline static float soft_body_soft_contact_recovery = 0.2f;
 	inline static float soft_body_soft_contact_friction = 0.2f;
