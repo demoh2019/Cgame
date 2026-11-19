@@ -554,4 +554,51 @@ TEST_CASE("[Curve][Performance] Linear tangents reuse direct segment slope") {
 	}
 }
 
+
+TEST_CASE("[Curve] Cleaning duplicates retains strictly increasing points") {
+	Ref<Curve> curve = memnew(Curve);
+	for (int i = 0; i <= 128; i++) {
+		const real_t x = real_t(i) / real_t(128);
+		curve->add_point(Vector2(x, real_t(i % 7) / real_t(7)));
+	}
+
+	curve->clean_dupes();
+	REQUIRE(curve->get_point_count() == 129);
+	for (int i = 0; i <= 128; i++) {
+		CHECK(curve->get_point_position(i).x == doctest::Approx(real_t(i) / real_t(128)));
+	}
+	// Normalized clean curves should remain stable across repeated calls.
+	curve->clean_dupes();
+	CHECK(curve->get_point_count() == 129);
+}
+
+TEST_CASE("[Curve] Cleaning thousands of duplicate points preserves first values") {
+	Ref<Curve> curve = memnew(Curve);
+	const int unique_count = 2048;
+	Array packed_points;
+	packed_points.resize(unique_count * 2 * 5);
+	for (int i = 0; i < unique_count; i++) {
+		const real_t x = real_t(i) / real_t(2048);
+		for (int duplicate = 0; duplicate < 2; duplicate++) {
+			const int offset = (i * 2 + duplicate) * 5;
+			packed_points[offset] = Vector2(x, duplicate ? real_t(0.75) : real_t(0.25));
+			packed_points[offset + 1] = 0.0;
+			packed_points[offset + 2] = 0.0;
+			packed_points[offset + 3] = int(Curve::TANGENT_FREE);
+			packed_points[offset + 4] = int(Curve::TANGENT_FREE);
+		}
+	}
+	curve->set_data(packed_points);
+	REQUIRE(curve->get_point_count() == unique_count * 2);
+	curve->clean_dupes();
+	REQUIRE(curve->get_point_count() == unique_count);
+	for (int i = 0; i < unique_count; i++) {
+		const Vector2 point = curve->get_point_position(i);
+		CHECK(point.x == doctest::Approx(real_t(i) / real_t(2048)));
+		CHECK(point.y == doctest::Approx(real_t(0.25)));
+	}
+	curve->clean_dupes();
+	CHECK(curve->get_point_count() == unique_count);
+}
+
 } // namespace TestCurve
