@@ -250,7 +250,12 @@ public:
 
 	void remove_at_unordered(uint64_t p_index) {
 		ERR_FAIL_UNSIGNED_INDEX(p_index, count);
-		(*this)[p_index] = (*this)[count - 1];
+		if (p_index != count - 1) {
+			// Avoid unnecessary self-assignment when removing the last element.
+			const uint32_t dst_page = p_index >> page_size_shift;
+			const uint32_t src_page = (count - 1) >> page_size_shift;
+			page_data[dst_page][p_index & page_size_mask] = page_data[src_page][(count - 1) & page_size_mask];
+		}
 		pop_back();
 	}
 
@@ -303,24 +308,18 @@ public:
 
 		count -= remainder;
 
-		uint32_t src_page_index = 0;
-		uint32_t page_size = page_size_mask + 1;
-
-		while (p_array.count > 0) {
-			uint32_t page_count = _get_pages_in_use();
-			uint32_t new_page_count = page_count + 1;
-
-			if (unlikely(new_page_count > max_pages_used)) {
-				_grow_page_array(); //keep out of inline
+		const uint32_t page_size = page_size_mask + 1;
+		const uint32_t src_pages = p_array._get_pages_in_use();
+		if (src_pages > 0) {
+			// Ownership of the source's pages can be transferred in bulk.
+			const uint32_t dst_pages = _get_pages_in_use();
+			while (dst_pages + uint64_t(src_pages) > max_pages_used) {
+				_grow_page_array();
 			}
-
-			page_data[page_count] = p_array.page_data[src_page_index];
-			page_ids[page_count] = p_array.page_ids[src_page_index];
-
-			uint32_t take = MIN(p_array.count, page_size); //pages to take away
-			p_array.count -= take;
-			count += take;
-			src_page_index++;
+			std::memcpy(page_data + dst_pages, p_array.page_data, size_t(src_pages) * sizeof(T *));
+			std::memcpy(page_ids + dst_pages, p_array.page_ids, size_t(src_pages) * sizeof(uint32_t));
+			count += p_array.count;
+			p_array.count = 0;
 		}
 
 		//handle the remainder page if exists
