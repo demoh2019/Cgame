@@ -33,6 +33,7 @@
 #include "godot_body_3d.h"
 #include "godot_constraint_3d.h"
 #include "godot_soft_body_3d.h"
+#include "godot_soft_contact_index_3d.h"
 
 #include "core/templates/local_vector.h"
 
@@ -125,6 +126,7 @@ class GodotBodySoftBodyPair3D : public GodotBodyContact3D {
 	bool report_contacts_only = false;
 
 	LocalVector<Contact> contacts;
+	GodotSoftContactIndex3D contact_index;
 
 	static void _contact_added_callback(const Vector3 &p_point_A, int p_index_A, const Vector3 &p_point_B, int p_index_B, const Vector3 &normal, void *p_userdata);
 
