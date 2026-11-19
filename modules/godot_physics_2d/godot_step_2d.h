@@ -73,6 +73,7 @@ class GodotStep2D {
 	uint32_t color_batch_offset = 0;
 	uint32_t color_batch_count = 0;
 	uint32_t color_batch_size = 8; // Adaptive per-color worker chunk; stable until the barrier.
+	uint32_t setup_batch_size = 16; // Stable while the setup worker group is running.
 	// Read-only during worker dispatch. Used only when one large island is
 	// graph-colored while the remaining islands use normal island jobs.
 	uint32_t deferred_large_island_index = UINT32_MAX;
@@ -87,6 +88,7 @@ class GodotStep2D {
 
 	void _populate_island(GodotBody2D *p_body, LocalVector<GodotBody2D *> &p_body_island, LocalVector<GodotConstraint2D *> &p_constraint_island);
 	void _setup_constraint(uint32_t p_constraint_index, void *p_userdata = nullptr);
+	void _setup_constraint_batch(uint32_t p_batch_index, void *p_userdata = nullptr);
 	void _integrate_forces_block(uint32_t p_block_index, void *p_userdata = nullptr);
 	void _pre_solve_island(LocalVector<GodotConstraint2D *> &p_constraint_island) const;
 	void _solve_island(uint32_t p_island_index, void *p_userdata = nullptr) const;
