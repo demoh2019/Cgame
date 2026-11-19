@@ -1131,6 +1131,75 @@ static void _collision_capsule_capsule(const GodotShape2D *p_a, const Transform2
 	const GodotCapsuleShape2D *capsule_A = static_cast<const GodotCapsuleShape2D *>(p_a);
 	const GodotCapsuleShape2D *capsule_B = static_cast<const GodotCapsuleShape2D *>(p_b);
 
+	// Box2D-style closest-segment test: avoid SAT projections and support queries
+	// for separated capsules, and directly resolve unambiguous end-cap contacts.
+	// Parallel/overlapping segment contacts still use SAT for a stable manifold.
+	const real_t half_A = capsule_A->get_height() * real_t(0.5) - capsule_A->get_radius();
+	const real_t half_B = capsule_B->get_height() * real_t(0.5) - capsule_B->get_radius();
+	if (!p_cast_A && !p_cast_B && p_margin_A >= 0.0 && p_margin_B >= 0.0 &&
+			capsule_A->get_radius() >= 0.0 && capsule_B->get_radius() >= 0.0 &&
+			half_A > 0.0 && half_B > 0.0 &&
+			_is_unit_orthogonal_transform(p_transform_a) && _is_unit_orthogonal_transform(p_transform_b)) {
+		const Vector2 start_A = p_transform_a.get_origin() - p_transform_a.columns[1] * half_A;
+		const Vector2 start_B = p_transform_b.get_origin() - p_transform_b.columns[1] * half_B;
+		const Vector2 direction_A = p_transform_a.columns[1] * (real_t(2.0) * half_A);
+		const Vector2 direction_B = p_transform_b.columns[1] * (real_t(2.0) * half_B);
+		const Vector2 between = start_A - start_B;
+		const real_t length_squared_A = direction_A.length_squared();
+		const real_t length_squared_B = direction_B.length_squared();
+		const real_t dot_AB = direction_A.dot(direction_B);
+		const real_t dot_A_between = direction_A.dot(between);
+		const real_t dot_B_between = direction_B.dot(between);
+		const real_t denominator = length_squared_A * length_squared_B - dot_AB * dot_AB;
+
+		// Closest points of finite segments, including clamping to both endcaps.
+		// For nearly parallel segments the SAT fallback provides the manifold.
+		real_t fraction_A = 0.0;
+		if (denominator > length_squared_A * length_squared_B * real_t(0.0001)) {
+			fraction_A = CLAMP((dot_AB * dot_B_between - dot_A_between * length_squared_B) / denominator, real_t(0.0), real_t(1.0));
+		}
+		real_t fraction_B = (dot_AB * fraction_A + dot_B_between) / length_squared_B;
+		if (fraction_B < 0.0) {
+			fraction_B = 0.0;
+			fraction_A = CLAMP(-dot_A_between / length_squared_A, real_t(0.0), real_t(1.0));
+		} else if (fraction_B > 1.0) {
+			fraction_B = 1.0;
+			fraction_A = CLAMP((dot_AB - dot_A_between) / length_squared_A, real_t(0.0), real_t(1.0));
+		}
+
+		const Vector2 closest_A = start_A + direction_A * fraction_A;
+		const Vector2 closest_B = start_B + direction_B * fraction_B;
+		const Vector2 separation = closest_A - closest_B;
+		const real_t distance_squared = separation.length_squared();
+		const real_t radius_A = capsule_A->get_radius() + p_margin_A;
+		const real_t radius_B = capsule_B->get_radius() + p_margin_B;
+		const real_t combined_radius = radius_A + radius_B;
+
+		if (distance_squared > combined_radius * combined_radius) {
+			if (p_collector->sep_axis) {
+				*p_collector->sep_axis = separation / Math::sqrt(distance_squared);
+			}
+			return;
+		}
+
+		// Endpoint contacts have a single well-defined normal. For side-side
+		// contacts, parallelism or coincident centerlines preserve SAT clipping.
+		if (denominator > length_squared_A * length_squared_B * real_t(0.0001) &&
+				distance_squared > 0.0 &&
+				(fraction_A == 0.0 || fraction_A == 1.0 || fraction_B == 0.0 || fraction_B == 1.0)) {
+			p_collector->collided = true;
+			if (p_collector->callback) {
+				const Vector2 normal = separation / Math::sqrt(distance_squared);
+				p_collector->normal = normal;
+				p_collector->call(closest_A - normal * radius_A, closest_B + normal * radius_B);
+			}
+			if (p_collector->sep_axis) {
+				*p_collector->sep_axis = Vector2();
+			}
+			return;
+		}
+	}
+
 	SeparatorAxisTest2D<GodotCapsuleShape2D, GodotCapsuleShape2D> separator(capsule_A, p_transform_a, capsule_B, p_transform_b, p_collector, p_motion_a, p_motion_b, p_cast_A, p_cast_B, p_with_margin, p_margin_A, p_margin_B);
 
 	if (!separator.test_previous_axis()) {
