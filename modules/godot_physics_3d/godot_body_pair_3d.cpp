@@ -596,13 +596,16 @@ void GodotBodyPair3D::solve(real_t p_step) {
 			real_t jbnOld = c.acc_bias_impulse;
 			c.acc_bias_impulse = MAX(jbnOld + jbn, 0.0f);
 
-			Vector3 jb = c.normal * (c.acc_bias_impulse - jbnOld);
-
-			if (collide_A) {
-				A->apply_bias_impulse(-jb, c.rA + A->get_center_of_mass(), max_bias_av);
-			}
-			if (collide_B) {
-				B->apply_bias_impulse(jb, c.rB + B->get_center_of_mass(), max_bias_av);
+			// Most warm-started contacts have no further bias correction.
+			const real_t bias_delta = c.acc_bias_impulse - jbnOld;
+			if (bias_delta != 0.0) {
+				const Vector3 jb = c.normal * bias_delta;
+				if (collide_A) {
+					A->apply_bias_impulse(-jb, c.rA + A->get_center_of_mass(), max_bias_av);
+				}
+				if (collide_B) {
+					B->apply_bias_impulse(jb, c.rB + B->get_center_of_mass(), max_bias_av);
+				}
 			}
 
 			crbA = A->get_biased_angular_velocity().cross(c.rA);
@@ -611,8 +614,9 @@ void GodotBodyPair3D::solve(real_t p_step) {
 
 			vbn = dbv.dot(c.normal);
 
-			if (Math::abs(-vbn + c.bias) > MIN_VELOCITY) {
-				real_t jbn_com = (-vbn + c.bias) / (inv_mass_A + inv_mass_B);
+			const real_t total_inverse_mass = inv_mass_A + inv_mass_B;
+			if (total_inverse_mass > 0.0 && Math::abs(-vbn + c.bias) > MIN_VELOCITY) {
+				real_t jbn_com = (-vbn + c.bias) / total_inverse_mass;
 				real_t jbnOld_com = c.acc_bias_impulse_center_of_mass;
 				c.acc_bias_impulse_center_of_mass = MAX(jbnOld_com + jbn_com, 0.0f);
 
@@ -641,15 +645,16 @@ void GodotBodyPair3D::solve(real_t p_step) {
 			real_t jnOld = c.acc_normal_impulse;
 			c.acc_normal_impulse = MAX(jnOld + jn, 0.0f);
 
-			Vector3 j = c.normal * (c.acc_normal_impulse - jnOld);
-
-			if (collide_A) {
-				A->apply_impulse(-j, c.rA + A->get_center_of_mass());
+			const Vector3 j = c.normal * (c.acc_normal_impulse - jnOld);
+			if (j != Vector3()) {
+				if (collide_A) {
+					A->apply_impulse(-j, c.rA + A->get_center_of_mass());
+				}
+				if (collide_B) {
+					B->apply_impulse(j, c.rB + B->get_center_of_mass());
+				}
+				c.acc_impulse -= j;
 			}
-			if (collide_B) {
-				B->apply_impulse(j, c.rB + B->get_center_of_mass());
-			}
-			c.acc_impulse -= j;
 
 			c.active = true;
 		}
@@ -680,7 +685,12 @@ void GodotBodyPair3D::solve(real_t p_step) {
 			Vector3 temp1 = inv_inertia_tensor_A.xform(c.rA.cross(tv));
 			Vector3 temp2 = inv_inertia_tensor_B.xform(c.rB.cross(tv));
 
-			real_t t = -tvl / (inv_mass_A + inv_mass_B + tv.dot(temp1.cross(c.rA) + temp2.cross(c.rB)));
+			// Degenerate or locked contacts cannot sustain a tangent impulse.
+			const real_t tangent_mass = inv_mass_A + inv_mass_B + tv.dot(temp1.cross(c.rA) + temp2.cross(c.rB));
+			if (tangent_mass <= 0.0) {
+				continue;
+			}
+			const real_t t = -tvl / tangent_mass;
 
 			Vector3 jt = t * tv;
 
@@ -696,14 +706,15 @@ void GodotBodyPair3D::solve(real_t p_step) {
 			}
 
 			jt = c.acc_tangent_impulse - jtOld;
-
-			if (collide_A) {
-				A->apply_impulse(-jt, c.rA + A->get_center_of_mass());
+			if (jt != Vector3()) {
+				if (collide_A) {
+					A->apply_impulse(-jt, c.rA + A->get_center_of_mass());
+				}
+				if (collide_B) {
+					B->apply_impulse(jt, c.rB + B->get_center_of_mass());
+				}
+				c.acc_impulse -= jt;
 			}
-			if (collide_B) {
-				B->apply_impulse(jt, c.rB + B->get_center_of_mass());
-			}
-			c.acc_impulse -= jt;
 
 			c.active = true;
 		}
@@ -1041,13 +1052,15 @@ void GodotBodySoftBodyPair3D::solve(real_t p_step) {
 			real_t jbnOld = c.acc_bias_impulse;
 			c.acc_bias_impulse = MAX(jbnOld + jbn, 0.0f);
 
-			Vector3 jb = c.normal * (c.acc_bias_impulse - jbnOld);
-
-			if (body_collides) {
-				body->apply_bias_impulse(-jb, c.rA + body->get_center_of_mass(), max_bias_av);
-			}
-			if (soft_body_collides) {
-				soft_body->apply_node_bias_impulse(c.index_B, jb);
+			const real_t bias_delta = c.acc_bias_impulse - jbnOld;
+			if (bias_delta != 0.0) {
+				const Vector3 jb = c.normal * bias_delta;
+				if (body_collides) {
+					body->apply_bias_impulse(-jb, c.rA + body->get_center_of_mass(), max_bias_av);
+				}
+				if (soft_body_collides) {
+					soft_body->apply_node_bias_impulse(c.index_B, jb);
+				}
 			}
 
 			crbA = body->get_biased_angular_velocity().cross(c.rA);
@@ -1055,8 +1068,9 @@ void GodotBodySoftBodyPair3D::solve(real_t p_step) {
 
 			vbn = dbv.dot(c.normal);
 
-			if (Math::abs(-vbn + c.bias) > MIN_VELOCITY) {
-				real_t jbn_com = (-vbn + c.bias) / (body_inv_mass + node_inv_mass);
+			const real_t total_inverse_mass = body_inv_mass + node_inv_mass;
+			if (total_inverse_mass > 0.0 && Math::abs(-vbn + c.bias) > MIN_VELOCITY) {
+				real_t jbn_com = (-vbn + c.bias) / total_inverse_mass;
 				real_t jbnOld_com = c.acc_bias_impulse_center_of_mass;
 				c.acc_bias_impulse_center_of_mass = MAX(jbnOld_com + jbn_com, 0.0f);
 
@@ -1084,15 +1098,16 @@ void GodotBodySoftBodyPair3D::solve(real_t p_step) {
 			real_t jnOld = c.acc_normal_impulse;
 			c.acc_normal_impulse = MAX(jnOld + jn, 0.0f);
 
-			Vector3 j = c.normal * (c.acc_normal_impulse - jnOld);
-
-			if (body_collides) {
-				body->apply_impulse(-j, c.rA + body->get_center_of_mass());
+			const Vector3 j = c.normal * (c.acc_normal_impulse - jnOld);
+			if (j != Vector3()) {
+				if (body_collides) {
+					body->apply_impulse(-j, c.rA + body->get_center_of_mass());
+				}
+				if (soft_body_collides) {
+					soft_body->apply_node_impulse(c.index_B, j);
+				}
+				c.acc_impulse -= j;
 			}
-			if (soft_body_collides) {
-				soft_body->apply_node_impulse(c.index_B, j);
-			}
-			c.acc_impulse -= j;
 
 			c.active = true;
 		}
@@ -1142,14 +1157,15 @@ void GodotBodySoftBodyPair3D::solve(real_t p_step) {
 			}
 
 			jt = c.acc_tangent_impulse - jtOld;
-
-			if (body_collides) {
-				body->apply_impulse(-jt, c.rA + body->get_center_of_mass());
+			if (jt != Vector3()) {
+				if (body_collides) {
+					body->apply_impulse(-jt, c.rA + body->get_center_of_mass());
+				}
+				if (soft_body_collides) {
+					soft_body->apply_node_impulse(c.index_B, jt);
+				}
+				c.acc_impulse -= jt;
 			}
-			if (soft_body_collides) {
-				soft_body->apply_node_impulse(c.index_B, jt);
-			}
-			c.acc_impulse -= jt;
 
 			c.active = true;
 		}
