@@ -211,6 +211,20 @@ void GodotSoftBody3D::set_mesh(RID p_mesh) {
 	}
 }
 
+void GodotSoftBody3D::set_tetrahedral_indices(const PackedInt32Array &p_indices) {
+	ERR_FAIL_COND_MSG(p_indices.size() > 16384 || p_indices.size() % 4 != 0,
+			"Explicit tetrahedra must consist of at most 4096 index quadruplets.");
+	for (int index : p_indices) {
+		ERR_FAIL_COND_MSG(index < 0, "Explicit tetra vertex indices must be nonnegative.");
+	}
+	// Store visual indices, not welded particle indices: the mesh can be
+	// replaced or restored without making the binding point at stale nodes.
+	xpbd_explicit_tetra_visual_indices = p_indices;
+	if (!nodes.is_empty() && get_space()) {
+		initialize_fem_tetra();
+	}
+}
+
 void GodotSoftBody3D::update_rendering_server(PhysicsServer3DRenderingServerHandler *p_rendering_server_handler) {
 	if (soft_mesh.is_null()) {
 		return;
@@ -542,8 +556,39 @@ void GodotSoftBody3D::initialize_fem_tetra() {
 			triangle.c = face.n[2]->index;
 			triangles.push_back(triangle);
 		}
-		physics_fem_build_convex_star_tetrahedra(
-				positions, triangles, xpbd_volume_rest, xpbd_fem_tetrahedra);
+		if (!xpbd_explicit_tetra_visual_indices.is_empty()) {
+			// Imported entries reference visual vertex indices, which may
+			// contain seams. Resolve them against the welded physical nodes.
+			LocalVector<uint32_t> tet_indices;
+			const int index_count = xpbd_explicit_tetra_visual_indices.size();
+			bool valid = index_count % 4 == 0 && index_count <= 16384;
+			if (valid) {
+				tet_indices.reserve(index_count);
+				for (int i = 0; i < index_count; ++i) {
+					const int visual = xpbd_explicit_tetra_visual_indices[i];
+					if (visual < 0 || visual >= int(map_visual_to_physics.size())) {
+						valid = false;
+						break;
+					}
+					const uint32_t welded = map_visual_to_physics[visual];
+					if (welded >= nodes.size()) {
+						valid = false;
+						break;
+					}
+					tet_indices.push_back(welded);
+				}
+			}
+			if (valid) {
+				physics_fem_build_explicit_tetrahedra(
+						positions, triangles, tet_indices,
+						xpbd_volume_rest, xpbd_fem_tetrahedra);
+			}
+			// Malformed explicit connectivity never falls back to an
+			// unrelated convex tesselation or replaces any other solver.
+		} else {
+			physics_fem_build_convex_star_tetrahedra(
+					positions, triangles, xpbd_volume_rest, xpbd_fem_tetrahedra);
+		}
 		// Element histories are allocated only if elastic FEM and damage are enabled.
 		if (!xpbd_fem_tetrahedra.is_empty() &&
 				get_space()->get_soft_body_tetra_fem_compliance() > 0.0 &&
