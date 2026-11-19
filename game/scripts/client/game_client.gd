@@ -20,6 +20,7 @@ var stash = Inventory.new(Defs.STASH_SLOTS)
 var you: Dictionary = {}
 var players: Dictionary = {} # id -> entity from the latest snapshot
 var zombies: Dictionary = {}
+var barricades: Dictionary = {} # Nearby authoritative player-built defenses.
 var bags: Dictionary = {}
 var depleted: Dictionary = {}
 var crates_used: Dictionary = {}
@@ -83,6 +84,15 @@ func on_snapshot(snapshot: Dictionary) -> void:
 	bags.clear()
 	for entity in snapshot["bags"]:
 		bags[entity["id"]] = entity
+	# The client predicts movement against the same structure circles as the
+	# server, but only the server can create or damage them.
+	if snapshot.has("barricades"):
+		barricades.clear()
+		world.dynamic_blockers.clear()
+		for entity in snapshot["barricades"]:
+			var id: int = int(entity["id"])
+			barricades[id] = entity
+			world.add_dynamic_blocker(id, float(entity["x"]), float(entity["z"]), 0.85)
 	depleted.clear()
 	for id in snapshot["depleted"]:
 		depleted[id] = true
@@ -192,6 +202,15 @@ func attack(direction: Vector2) -> void:
 
 func loot(entity_id: int) -> void:
 	net.c_loot.rpc_id(1, entity_id)
+
+
+func build(point: Vector2) -> void:
+	if point.is_finite():
+		net.c_build.rpc_id(1, point.x, point.y)
+
+
+func repair(id: int) -> void:
+	net.c_repair.rpc_id(1, id)
 
 
 func drink() -> void:
