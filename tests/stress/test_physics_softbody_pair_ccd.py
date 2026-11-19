@@ -82,10 +82,14 @@ class TestSoftPairCCD(unittest.TestCase):
             remaining = signed_normal * ((end_vertex+displacements[0]) -
                                          (end_face+face_correction))
             self.assertGreaterEqual(remaining, thickness - 1e-9)
-            momentum_delta = sum(displacements[i] / inverse_masses[i]
-                                 for i in range(4) if inverse_masses[i])
-            max_error = max(max_error, abs(momentum_delta))
-            self.assertAlmostEqual(momentum_delta, 0., delta=1e-9)
+            # Pins introduce EXTERNAL reaction impulses. Linear momentum is
+            # conserved by the four free particles only if all four move.
+            # The zero-inverse-mass cases are checked for exact pinning below.
+            if all(inv_mass > 0. for inv_mass in inverse_masses):
+                momentum_delta = sum(displacements[i] / inverse_masses[i]
+                                     for i in range(4))
+                max_error = max(max_error, abs(momentum_delta))
+                self.assertAlmostEqual(momentum_delta, 0., delta=1e-9)
             for index, inv_mass in enumerate(inverse_masses):
                 self.assertAlmostEqual(velocities[index] * dt,
                                        displacements[index], delta=1e-9)
