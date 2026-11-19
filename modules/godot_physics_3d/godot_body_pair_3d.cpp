@@ -33,6 +33,7 @@
 #include "godot_collision_solver_3d.h"
 #include "godot_contact_normal_3d.h"
 #include "godot_space_3d.h"
+#include "servers/physics_contact_angular_friction.h"
 #include "servers/physics_manifold_reduction_3d.h"
 #include "servers/physics_ccd_sphere_toi.h"
 
@@ -623,6 +624,87 @@ bool GodotBodyPair3D::pre_solve(real_t p_step) {
 			// Suppress low-speed restitution: resting stacks should not keep
 			// bouncing due to tiny solver corrections or contact jitter.
 			c.bounce = normal_velocity < -space->get_restitution_velocity_threshold() ? c.bounce * normal_velocity : 0.0;
+		}
+	}
+
+	// Bullet-style rolling resistance (torque tangent to the contact
+	// normal) and spinning friction (torque along the normal). These are
+	// applied once per step after warm starting: the angular impulse budget
+	// is independent of the number of solver iterations, with no per-contact
+	// persistent state or extra allocations.
+	const real_t rolling_coefficient = space->get_rolling_friction();
+	const real_t spinning_coefficient = space->get_spinning_friction();
+	if (do_process && (rolling_coefficient > 0.0 || spinning_coefficient > 0.0)) {
+		real_t normal_load_impulse = 0.0;
+		real_t contact_radius = 0.0;
+		Vector3 contact_normal;
+		bool have_normal = false;
+		bool normals_compatible = true;
+		for (int i = 0; i < contact_count; i++) {
+			const Contact &c = contacts[i];
+			if (!c.active || c.acc_normal_impulse <= 0.0) {
+				continue;
+			}
+			if (!have_normal) {
+				contact_normal = c.normal;
+				have_normal = true;
+			} else if (contact_normal.dot(c.normal) < real_t(0.98)) {
+				// One pair can contain contacts on different faces.
+				// Do not apply a fictitious torque around an arbitrary axis.
+				normals_compatible = false;
+				break;
+			}
+			const real_t radius = collide_A && collide_B ? MIN(c.rA.length(), c.rB.length()) :
+					(collide_A ? c.rA.length() : c.rB.length());
+			if (normal_load_impulse == 0.0 || radius < contact_radius) {
+				contact_radius = radius;
+			}
+			normal_load_impulse += c.acc_normal_impulse;
+		}
+
+		if (have_normal && normals_compatible && normal_load_impulse > 0.0 && contact_radius > 0.0) {
+			if (spinning_coefficient > 0.0) {
+				const real_t inv_spin_inertia = contact_normal.dot(
+						inv_inertia_tensor_A.xform(contact_normal) + inv_inertia_tensor_B.xform(contact_normal));
+				const real_t relative_spin = (B->get_angular_velocity() - A->get_angular_velocity()).dot(contact_normal);
+				const real_t spin_impulse = GodotPhysicsContactAngularFriction::clamped_impulse(
+						relative_spin, inv_spin_inertia, normal_load_impulse, spinning_coefficient, contact_radius);
+				if (spin_impulse != 0.0) {
+					const Vector3 torque = contact_normal * spin_impulse;
+					if (collide_A) {
+						A->apply_torque_impulse(-torque);
+					}
+					if (collide_B) {
+						B->apply_torque_impulse(torque);
+					}
+				}
+			}
+
+			if (rolling_coefficient > 0.0) {
+				// Use the new angular velocities after the spin correction.
+				// This makes each directional projection dissipative even
+				// for bodies with anisotropic inertia tensors.
+				const Vector3 relative_omega = B->get_angular_velocity() - A->get_angular_velocity();
+				const Vector3 tangent_omega = relative_omega - contact_normal * relative_omega.dot(contact_normal);
+				const real_t tangent_length_squared = tangent_omega.length_squared();
+				if (tangent_length_squared > CMP_EPSILON * CMP_EPSILON) {
+					const real_t tangent_speed = Math::sqrt(tangent_length_squared);
+					const Vector3 axis = tangent_omega / tangent_speed;
+					const real_t inv_roll_inertia = axis.dot(
+							inv_inertia_tensor_A.xform(axis) + inv_inertia_tensor_B.xform(axis));
+					const real_t roll_impulse = GodotPhysicsContactAngularFriction::clamped_impulse(
+							tangent_speed, inv_roll_inertia, normal_load_impulse, rolling_coefficient, contact_radius);
+					if (roll_impulse != 0.0) {
+						const Vector3 torque = axis * roll_impulse;
+						if (collide_A) {
+							A->apply_torque_impulse(-torque);
+						}
+						if (collide_B) {
+							B->apply_torque_impulse(torque);
+						}
+					}
+				}
+			}
 		}
 	}
 
