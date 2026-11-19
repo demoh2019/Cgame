@@ -421,10 +421,14 @@ func cmd_trade_invite(peer_id: int, target_id: int) -> Dictionary:
 	var trade_id := new_id()
 	var trade := {
 		"id": trade_id, "a": peer_id, "b": target_id,
-		"offers": {peer_id: {}, target_id: {}},
-		"accepted": {peer_id: false, target_id: false},
+		"offers": {}, "accepted": {},
 		"revision": 0, "expires": time + TRADE_TIMEOUT,
 	}
+	# Explicit integer keys: identifiers in dictionary literals can be string keys.
+	trade["offers"][peer_id] = {}
+	trade["offers"][target_id] = {}
+	trade["accepted"][peer_id] = false
+	trade["accepted"][target_id] = false
 	trades[trade_id] = trade
 	trade_by_player[peer_id] = trade_id
 	trade_by_player[target_id] = trade_id
