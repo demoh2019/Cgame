@@ -4,6 +4,7 @@ extends Node3D
 ## call GameServer. Multiplayer transport will be wired to this presentation separately.
 
 const Defs = preload("res://scripts/shared/defs.gd")
+const PvpInfamy = preload("res://scripts/shared/pvp_infamy.gd")
 const QuickCooking = preload("res://scripts/shared/quick_cooking.gd")
 const FishingDisplay = preload("res://scripts/shared/fishing_display.gd")
 const WorldGen = preload("res://scripts/shared/world_gen.gd")
@@ -820,4 +821,6 @@ func _update_hud() -> void:
 		_instructions.text += "\n" + fishing_status
 	_instructions.text += "\nM tactical radar: red infected, yellow resources, green loot, gold defenses"
 	_instructions.text += "\nZ rest at hub (2 wood + food + water; 90s cooldown), remaining %.0fs" % survivor.rest_cooldown
+	_instructions.text += "\nPvP infamy: %d/100 | %s" % [
+		ceili(survivor.pvp_infamy), "OUTLAW" if PvpInfamy.is_outlaw(survivor.pvp_infamy) else "neutral"]
 	_update_bank_hud()

@@ -56,7 +56,8 @@ func _touch(key: String, kind: String, entity: Dictionary, seen: Dictionary) -> 
 				"ELITE " if bool(entity.get("elite", false)) else "")),
 				str(entity["type"]), int(entity["hp"])]
 		elif kind == "player":
-			label.text = str(entity["name"]) if entity["alive"] else "%s (dead)" % entity["name"]
+			label.text = ("%s%s" % [
+				"OUTLAW " if bool(entity.get("outlaw", false)) else "", str(entity["name"])]) if entity["alive"] else "%s (dead)" % entity["name"]
 		elif kind == "bag":
 			label.text = LootLabel.for_bag(entity)
 			label.visible = not label.text.is_empty()
