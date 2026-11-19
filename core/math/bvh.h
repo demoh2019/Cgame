@@ -229,6 +229,17 @@ public:
 		force_collision_check(p_handle);
 	}
 
+	// Refresh cached pair metadata without recreating contacts or changing
+	// collision filters. Pair-check callbacks may replace userdata; both
+	// endpoints are kept synchronized through their reciprocal indices.
+	void refresh_pair_userdata(BVHHandle p_handle) {
+		DEV_ASSERT(!p_handle.is_invalid());
+		BVH_LOCKED_FUNCTION
+		if (USE_PAIRS && check_pair_callback) {
+			_recheck_pairs(p_handle);
+		}
+	}
+
 	void erase(BVHHandle p_handle) {
 		DEV_ASSERT(!p_handle.is_invalid());
 		BVH_LOCKED_FUNCTION
