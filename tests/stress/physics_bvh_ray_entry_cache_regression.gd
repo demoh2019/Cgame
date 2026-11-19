@@ -6,8 +6,7 @@ extends SceneTree
 
 const BODY_COUNT := 4096
 const STEP := 3.0
-const END_X := float(BODY_COUNT) * STEP + 5.0
-const LAST_X := float(BODY_COUNT - 1) * STEP
+const END_X := BODY_COUNT * STEP + 5.0
 const REPEATS := 24
 
 
