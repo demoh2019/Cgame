@@ -145,19 +145,42 @@ static func apply_plan(raw: Variant, allow_overwrite: bool = false) -> Dictionar
 	var written: Array[String] = []
 	for item in files:
 		var path: String = item["path"]
-		var file := FileAccess.open("res://" + path, FileAccess.WRITE)
+		var destination := "res://" + path
+		# Recheck after every preceding write in case the filesystem changed.
+		if _is_symlink_path(path):
+			return _write_failed(path + " became a symlink", written, replaced, backup_root)
+		if FileAccess.file_exists(destination) and not replaced.has(path):
+			return _write_failed(path + " appeared unexpectedly", written, replaced, backup_root)
+		var file := FileAccess.open(destination, FileAccess.WRITE)
 		if file == null:
-			return {
-				"ok": false,
-				"error": "Cannot write %s. Already written: %s" % [path, ", ".join(written)],
-				"written": written,
-				"backup_root": backup_root
-			}
-		file.store_string(item["content"])
-		file.close()
+			return _write_failed("Cannot open " + path, written, replaced, backup_root)
 		written.append(path)
+		file.store_string(item["content"])
+		file.flush()
+		var write_error := file.get_error()
+		file.close()
+		if write_error != OK:
+			return _write_failed("Cannot finish writing " + path, written, replaced, backup_root)
 	return {"ok": true, "written": written, "backup_root": backup_root}
 
+
+static func _write_failed(reason: String, written: Array[String], replaced: Array[String], backup_root: String) -> Dictionary:
+	var restored := true
+	for path in written:
+		var destination := "res://" + path
+		if replaced.has(path):
+			var backup := backup_root.path_join(path)
+			if DirAccess.copy_absolute(backup, destination) != OK:
+				restored = false
+		elif FileAccess.file_exists(destination) and DirAccess.remove_absolute(destination) != OK:
+			restored = false
+	return {
+		"ok": false,
+		"error": reason + (". Files restored." if restored else ". ROLLBACK INCOMPLETE: restore from backups."),
+		"rolled_back": restored,
+		"written": ([] if restored else written),
+		"backup_root": backup_root
+	}
 
 static func _is_symlink_path(relative: String) -> bool:
 	var directory := DirAccess.open("res://")
