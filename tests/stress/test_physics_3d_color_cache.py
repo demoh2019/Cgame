@@ -121,5 +121,24 @@ class Physics3DColorCacheTests(unittest.TestCase):
         self.assertIn("cached_color_valid = false;", body)
 
 
+    def test_live_joint_rebinding_registered_in_stress_runner(self):
+        workload = (ROOT / "tests/stress/physics_large_island_3d.gd").read_text(encoding="utf-8")
+        runner = (ROOT / "tests/stress/run.py").read_text(encoding="utf-8")
+        script = (ROOT / "tests/stress/stress.gd").read_text(encoding="utf-8")
+        runtime = (ROOT / "tests/stress/physics_large_island_3d_topology_cache_regression.gd").read_text(encoding="utf-8")
+        self.assertIn("topology_churn: bool = false", workload)
+        self.assertIn("if frame == 8:", workload)
+        self.assertIn("elif frame == 18:", workload)
+        self.assertIn("PhysicsServer3D.joint_make_pin(joints[100]", workload)
+        self.assertIn("PhysicsServer3D.joint_set_solver_priority(joints[10], 2)", workload)
+        self.assertIn("PhysicsServer3D.joint_set_solver_priority(joints[10], 1)", workload)
+        for name in ("physics_large_island_3d_topology_serial", "physics_large_island_3d_topology_parallel"):
+            self.assertIn(f'"{name}"', runner)
+            self.assertIn(f'"{name}":', script)
+        self.assertIn("for parallel in [false, true]", runtime)
+        self.assertIn("self, 1, 52, parallel, false, 0, 16, true", runtime)
+        self.assertIn("result.has(\"error\")", runtime)
+
+
 if __name__ == "__main__":
     unittest.main()
