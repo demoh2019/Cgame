@@ -1,0 +1,38 @@
+name: String case-conversion COW fast paths
+
+on:
+  pull_request:
+    branches: [develop]
+    paths:
+      - "core/string/ustring.cpp"
+      - "tests/core/string/test_string.cpp"
+      - ".github/workflows/string-case-cow-noop.yml"
+  push:
+    branches: [develop]
+    paths:
+      - "core/string/ustring.cpp"
+      - "tests/core/string/test_string.cpp"
+      - ".github/workflows/string-case-cow-noop.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  native-strings:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+      - uses: ./.github/actions/godot-deps
+      - name: Build editor and native tests
+        uses: ./.github/actions/godot-build
+        with:
+          platform: linuxbsd
+          target: editor
+          scons-flags: dev_build=yes tests=yes debug_symbols=no module_mono_enabled=no accesskit=no
+      - name: Run full String doctest suite
+        run: |
+          ./bin/godot.linuxbsd.editor.dev.x86_64 --headless --test --tc="*[String]*"
