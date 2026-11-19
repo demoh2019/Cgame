@@ -28,6 +28,11 @@ class CaseSelectionTests(unittest.TestCase):
         self.assertEqual(stress.choose_cases([",".join(cases)], "headless"), list(cases))
         self.assertTrue(set(cases).issubset(stress.choose_cases(["all"], "headless")))
 
+    def test_astar_grid_neighbor_stress_is_headless(self):
+        self.assertEqual(stress.choose_cases(["astar_grid_neighbors"], "headless"),
+                         ["astar_grid_neighbors"])
+        self.assertIn("astar_grid_neighbors", stress.choose_cases(["all"], "headless"))
+
     def test_packet_batch_scenarios_available(self):
         names = ["packet_tx_batch", "packet_rx_batch", "packet_variant_reuse"]
         self.assertEqual(stress.choose_cases([",".join(names)], "headless"), names)
