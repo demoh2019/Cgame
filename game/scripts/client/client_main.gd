@@ -37,6 +37,7 @@ func _ready() -> void:
 	survivor = sim.add_player(LOCAL_PLAYER_ID, "Survivor")
 	_make_light_and_camera()
 	_make_avatar()
+	_make_workbench()
 	_make_hud()
 	_stream_chunks()
 	_update_hud()
@@ -110,6 +111,17 @@ func _make_avatar() -> void:
 	_avatar = _mesh(Vector3(0.8, 1.7, 0.8), Color(0.25, 0.69, 0.84))
 	_avatar.name = "Survivor"
 	add_child(_avatar)
+
+
+## A visible landmark for the station validation enforced by GameServer.
+func _make_workbench() -> void:
+	var bench := _mesh(Vector3(2.8, 1.0, 1.6), Color(0.88, 0.68, 0.26))
+	bench.name = "Workbench"
+	bench.position = Vector3(
+			GameServer.WORKBENCH_POSITION.x,
+			world.height_at(GameServer.WORKBENCH_POSITION.x, GameServer.WORKBENCH_POSITION.y) + 0.5,
+			GameServer.WORKBENCH_POSITION.y)
+	add_child(bench)
 
 
 func _make_hud() -> void:
