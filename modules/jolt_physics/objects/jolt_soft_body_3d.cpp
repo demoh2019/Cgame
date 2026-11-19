@@ -45,6 +45,8 @@
 
 #include <Jolt/Physics/SoftBody/SoftBodyMotionProperties.h>
 
+#include <cfloat>
+
 namespace {
 
 template <typename TJoltVertex>
@@ -139,6 +141,16 @@ JPH::SoftBodySharedSettings *JoltSoftBody3D::_create_shared_settings() {
 	const PackedVector3Array mesh_vertices = mesh_data[RSE::ARRAY_VERTEX];
 	ERR_FAIL_COND_V(mesh_vertices.is_empty(), nullptr);
 
+	// Validate mesh topology before allocating Jolt settings. Invalid indices
+	// must not reach mesh_to_physics or the Jolt constraint generator.
+	// A truncated final triangle would also read past mesh_indices.
+	const int mesh_index_count = mesh_indices.size();
+	const int mesh_vertex_count = mesh_vertices.size();
+	ERR_FAIL_COND_V_MSG(mesh_index_count % 3 != 0, nullptr, "Soft body mesh index count must be a multiple of three.");
+	for (int mesh_index : mesh_indices) {
+		ERR_FAIL_COND_V_MSG(mesh_index < 0 || mesh_index >= mesh_vertex_count, nullptr, "Soft body mesh contains an out-of-range vertex index.");
+	}
+
 	JPH::SoftBodySharedSettings *settings = new JPH::SoftBodySharedSettings();
 	JPH::Array<JPH::SoftBodySharedSettings::Vertex> &physics_vertices = settings->mVertices;
 	JPH::Array<JPH::SoftBodySharedSettings::Face> &physics_faces = settings->mFaces;
@@ -146,9 +158,6 @@ JPH::SoftBodySharedSettings *JoltSoftBody3D::_create_shared_settings() {
 	// Position deduplication is only needed for the first use of each mesh
 	// vertex index. AHashMap avoids node allocations for large cloth meshes.
 	AHashMap<Vector3, int> vertex_to_physics;
-
-	const int mesh_vertex_count = mesh_vertices.size();
-	const int mesh_index_count = mesh_indices.size();
 
 	mesh_to_physics.resize(mesh_vertex_count);
 	for (int &index : mesh_to_physics) {
@@ -222,14 +231,20 @@ JPH::SoftBodySharedSettings *JoltSoftBody3D::_create_shared_settings() {
 	// which simplifies to:
 	// compliance = dt^2 * (1 / k - 1) * (w1 + w2)
 
-	// Assuming that the vertices have the same mass:
-	const float w1_plus_w2 = 2.0f * physics_vertices.size() / mass;
+	// Assuming that the vertices have the same mass. Use double here as
+	// a tiny but positive mass can overflow the float intermediate.
+	const double w1_plus_w2 = 2.0 * double(physics_vertices.size()) / double(mass);
 
 	// Calculate time step of a single XPBD iteration
 	const float dt = 1.0f / Engine::get_singleton()->get_user_physics_ticks_per_second() / simulation_precision;
 
-	// Now calculate the compliance
-	const float inverse_stiffness = dt * dt * (1.0f / stiffness_coefficient - 1.0f) * w1_plus_w2;
+	// Jolt uses FLT_MAX to disable an edge constraint. At zero stiffness,
+	// calculating 1 / k would produce infinity (and potentially NaNs in the
+	// constraint solver). Saturate in double precision for very small k.
+	const double inverse_stiffness_unbounded = double(dt) * double(dt) *
+			(1.0 / double(MAX(stiffness_coefficient, FLT_MIN)) - 1.0) * w1_plus_w2;
+	const float inverse_stiffness = stiffness_coefficient <= 0.0f ?
+			FLT_MAX : float(MIN(inverse_stiffness_unbounded, double(FLT_MAX)));
 
 	JPH::SoftBodySharedSettings::VertexAttributes vertex_attrib;
 	vertex_attrib.mCompliance = vertex_attrib.mShearCompliance = inverse_stiffness;
@@ -597,17 +612,20 @@ void JoltSoftBody3D::set_is_sleep_allowed(bool p_enabled) {
 }
 
 void JoltSoftBody3D::set_simulation_precision(int p_precision) {
-	if (unlikely(simulation_precision == p_precision)) {
+	// XPBD computes a per-iteration timestep by dividing by this number.
+	// Zero iterations would create a non-finite compliance at mesh creation.
+	const int precision = MAX(p_precision, 1);
+	if (unlikely(simulation_precision == precision)) {
 		return;
 	}
 
-	simulation_precision = MAX(p_precision, 0);
+	simulation_precision = precision;
 
 	_simulation_precision_changed();
 }
 
 void JoltSoftBody3D::set_mass(float p_mass) {
-	ERR_FAIL_COND(p_mass <= 0.0); // A mass of zero would result in infinite inverse mass.
+	ERR_FAIL_COND(p_mass <= 0.0f || !Math::is_finite(p_mass)); // Avoid infinite or non-finite inverse mass.
 
 	if (unlikely(mass == p_mass)) {
 		return;
@@ -623,6 +641,7 @@ float JoltSoftBody3D::get_stiffness_coefficient() const {
 }
 
 void JoltSoftBody3D::set_stiffness_coefficient(float p_coefficient) {
+	ERR_FAIL_COND(!Math::is_finite(p_coefficient));
 	stiffness_coefficient = CLAMP(p_coefficient, 0.0f, 1.0f);
 }
 
