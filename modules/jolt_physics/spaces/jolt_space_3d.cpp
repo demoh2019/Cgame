@@ -865,18 +865,25 @@ void JoltSpace3D::_pre_step(float p_step) {
 	if (JoltProjectSettings::soft_body_soft_contacts && active_soft_body_count > 1 &&
 			JoltProjectSettings::soft_body_soft_contact_radius > 0.0f && Math::is_finite(p_step) && p_step > 0.0f) {
 		uint32_t particle_budget = (uint32_t)JoltProjectSettings::soft_body_soft_contact_max_particle_pairs;
+		// Edge contacts share the *same* user work cap, but have their own
+		// reserved portion so dense VF work cannot starve edge crossings.
+		const bool edge_contacts = JoltProjectSettings::soft_body_soft_vertex_face_contacts &&
+				JoltProjectSettings::soft_body_soft_edge_edge_contacts;
+		uint32_t edge_budget = edge_contacts ? particle_budget / 2 : 0;
+		particle_budget -= edge_budget;
 		uint32_t checked_body_pairs = 0;
 		SoftFaceBVHScratch bvh_scratch; // No allocations when disabled.
+		SoftEdgeContactScratch edge_scratch; // Reused for every tested body pair.
 		const float radius = JoltProjectSettings::soft_body_soft_contact_radius;
 
-		for (JPH::uint32 i = 0; i < active_soft_body_count && particle_budget > 0 && checked_body_pairs < MAX_SOFT_SOFT_BODY_PAIR_CHECKS; ++i) {
+		for (JPH::uint32 i = 0; i < active_soft_body_count && (particle_budget > 0 || edge_budget > 0) && checked_body_pairs < MAX_SOFT_SOFT_BODY_PAIR_CHECKS; ++i) {
 			JPH::Body *jolt_a = lock_iface.TryGetBody(active_soft_bodies[i]);
 			if (jolt_a == nullptr) {
 				continue;
 			}
 			JoltSoftBody3D *object_a = reinterpret_cast<JoltObject3D *>(jolt_a->GetUserData())->as_soft_body();
 			const AABB bounds_a = object_a->get_bounds().grow(radius);
-			for (JPH::uint32 j = i + 1; j < active_soft_body_count && particle_budget > 0 && checked_body_pairs < MAX_SOFT_SOFT_BODY_PAIR_CHECKS; ++j) {
+			for (JPH::uint32 j = i + 1; j < active_soft_body_count && (particle_budget > 0 || edge_budget > 0) && checked_body_pairs < MAX_SOFT_SOFT_BODY_PAIR_CHECKS; ++j) {
 				++checked_body_pairs;
 				JPH::Body *jolt_b = lock_iface.TryGetBody(active_soft_bodies[j]);
 				if (jolt_b == nullptr) {
@@ -886,10 +893,15 @@ void JoltSpace3D::_pre_step(float p_step) {
 				if (!object_a->can_interact_with(*object_b) || !bounds_a.intersects(object_b->get_bounds().grow(radius))) {
 					continue;
 				}
-				if (JoltProjectSettings::soft_body_soft_vertex_face_contacts) {
-					resolve_soft_soft_vertex_face_contacts(*jolt_a, *jolt_b, *object_a, *object_b, p_step, particle_budget, bvh_scratch);
-				} else {
-					resolve_soft_soft_particle_contacts(*jolt_a, *jolt_b, *object_a, *object_b, p_step, particle_budget);
+				if (particle_budget > 0) {
+					if (JoltProjectSettings::soft_body_soft_vertex_face_contacts) {
+						resolve_soft_soft_vertex_face_contacts(*jolt_a, *jolt_b, *object_a, *object_b, p_step, particle_budget, bvh_scratch);
+					} else {
+						resolve_soft_soft_particle_contacts(*jolt_a, *jolt_b, *object_a, *object_b, p_step, particle_budget);
+					}
+				}
+				if (edge_contacts && edge_budget > 0) {
+					resolve_soft_soft_edge_edge_contacts(*jolt_a, *jolt_b, p_step, edge_budget, edge_scratch);
 				}
 			}
 		}
