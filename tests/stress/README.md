@@ -41,6 +41,21 @@ python3 tests/stress/run.py --godot /path/to/godot --case memory_churn --max-ret
 
 Run `--list-cases` for supported identifiers.
 
+To compare curve optimizations independently on the same machine and build
+configuration:
+
+```bash
+python3 tests/stress/run.py --godot ./bin/godot.linuxbsd.editor.dev.x86_64 \
+  --case curve_bake,curve_nearest --scale 8 --repeats 7 \
+  --rss-limit-mib 4096 --output out/curves.json
+```
+
+These scenarios separately report `bake_ms`, `sample_ms`,
+`closest_point_ms`, `closest_offset_ms`, and `sample_baked_ms`.
+They are CPU work, not a GPU benchmark. Compare medians against an old-engine
+baseline on identical hardware; the checksum and baked-point counts also catch
+obvious changes in workload behavior.
+
 | Area | Case | Loads applied |
 | --- | --- | --- |
 | Containers | `containers` | Typed Array, Dictionary, random indexed reads, large allocations |
@@ -60,6 +75,8 @@ Run `--list-cases` for supported identifiers.
 | Geometry / meshes | `geometry_2d`, `mesh_build` | Convex hulls, triangulation and SurfaceTool mesh construction |
 | Input / scene groups | `input_dispatch`, `group_calls` | Dispatch input actions and bulk group method calls |
 | Image codec | `image_codec` | Repeated PNG encode/decode and size validation |
+| Curve baking | `curve_bake` | 1000-sample baking after edits and cached interpolation across hundreds of control points |
+| Path projection | `curve_nearest` | Curve2D/3D closest-point and offset searches plus baked-distance sampling, with separate timings |
 
 ## Presets and safety
 
