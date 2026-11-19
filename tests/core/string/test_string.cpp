@@ -1682,6 +1682,60 @@ TEST_CASE("[String] is_lowercase") {
 	CHECK(!String("abc_ABC").is_lowercase());
 }
 
+TEST_CASE("[String] compound word case conversion linear-path regression") {
+	const String inputs[] = {
+		String(""),
+		String("   "),
+		String("a___b"),
+		String("a--b"),
+		String("HTTPServer2D"),
+		String("  hi---there__WORLD  "),
+		String("abCD123Digits"),
+		String(U"Über_name"),
+		String(U"Äpfel_Öl"),
+		String(U"Язык_Программирования"),
+	};
+	// Reconstruct the previous slice-by-slice assembly as a reference using
+	// the normalized snake-case output, including its collapsed-space behavior.
+	for (const String &input : inputs) {
+		const String normalized = input.to_snake_case().replace_char('_', ' ').strip_edges();
+		String reference_title;
+		String reference_camel;
+		String reference_pascal;
+		for (int i = 0; i < normalized.get_slice_count(" "); ++i) {
+			String slice = normalized.get_slicec(' ', i);
+			if (slice.is_empty()) {
+				continue;
+			}
+			String upper = slice;
+			upper[0] = String::char_uppercase(upper[0]);
+			if (i > 0) {
+				reference_title += " ";
+			}
+			reference_title += upper;
+			reference_pascal += upper;
+			slice[0] = i == 0 ? String::char_lowercase(slice[0]) : String::char_uppercase(slice[0]);
+			reference_camel += slice;
+		}
+		CHECK(input.capitalize() == reference_title);
+		CHECK(input.to_camel_case() == reference_camel);
+		CHECK(input.to_pascal_case() == reference_pascal);
+	}
+
+	CHECK(String("HTTPRequest2D").to_snake_case() == "http_request_2d");
+	CHECK(String(U"Über_name").to_snake_case() == U"über_name");
+	CHECK(String(U"Über_name").capitalize() == U"Über Name");
+	CHECK(String(U"Über_name").to_camel_case() == U"überName");
+	CHECK(String(U"Über_name").to_pascal_case() == U"ÜberName");
+
+	// Large separator-heavy input exercised without intermediate slice allocations.
+	const String many = String("a_").repeat(256) + "end";
+	CHECK(many.capitalize() == String("A ").repeat(256) + "End");
+	CHECK(many.to_camel_case() == "a" + String("A").repeat(255) + "End");
+	CHECK(many.to_pascal_case() == String("A").repeat(256) + "End");
+	CHECK(many.to_snake_case() == String("a_").repeat(256) + "end");
+}
+
 TEST_CASE("[String] match") {
 	CHECK(String("img1.png").match("*.png"));
 	CHECK(!String("img1.jpeg").match("*.png"));
