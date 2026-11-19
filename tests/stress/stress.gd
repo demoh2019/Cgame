@@ -15,7 +15,7 @@ const CanvasScenePerf := preload("res://canvas_scene_perf.gd")
 const CASES := [
 	"containers", "array_literals", "dictionary_snapshot", "strings", "script_vm", "math", "signals",
 	"scene_tree", "packed_scene", "images", "json", "stream", "stream_bulk",
-	"file_io", "threads", "physics_2d", "physics_3d", "physics_ccd_3d", "physics_joint_chain_2d", "physics_joint_chain_3d", "physics_sparse_2d", "physics_sparse_3d", "physics_proxies_2d", "physics_proxies_3d", "physics_rid_sparse_2d", "physics_rid_sparse_3d", "physics_rid_moving_2d", "physics_rid_moving_3d",
+	"file_io", "threads", "physics_2d", "physics_3d", "physics_ccd_3d", "physics_joint_chain_2d", "physics_joint_chain_3d", "physics_sparse_2d", "physics_sparse_3d", "physics_proxies_2d", "physics_proxies_3d", "physics_rid_sparse_2d", "physics_rid_sparse_3d", "physics_rid_moving_2d", "physics_rid_moving_3d", "physics_restitution_2d", "physics_restitution_3d",
 	"object_churn", "memory_churn", "astar_grid", "astar_grid_neighbors", "astar_grid_jps", "astar_grid_fill", "astar_grid_rebuild", "astar_relax_2d", "astar_relax_3d", "astar_graph", "tweens", "audio_buffers",
 	"variant_codec", "packet_stream", "packet_tx_batch", "packet_rx_batch", "packet_variant_reuse", "ui_layout", "grid_reflow", "box_reflow", "flow_reflow", "render_2d", "render_3d", "render_ellipse_2d", "render_light_culling_3d",
 	"resource_load",
@@ -281,6 +281,10 @@ func _run_case(test_case: String, scale: int, frames: int, seed: int) -> Diction
 			return await _physics_rid_sparse_2d(scale, frames, true)
 		"physics_rid_moving_3d":
 			return await _physics_rid_sparse_3d(scale, frames, true)
+		"physics_restitution_2d":
+			return await _physics_restitution_2d()
+		"physics_restitution_3d":
+			return await _physics_restitution_3d()
 		"memory_churn":
 			return await _memory_churn(scale)
 		"render_2d":
@@ -937,6 +941,103 @@ func _physics_proxies_3d(scale: int) -> Dictionary:
 		return {"error": "3D proxy raycasts returned incorrect nearest hits"}
 	return {"bodies": count, "create_ms": create_ms, "free_ms": free_ms, "query_ms": query_ms,
 		"collision_pairs": collision_pairs, "engine_memory_bytes": engine_memory_bytes}
+
+
+
+# The restitution tests use two equal-mass bodies with zero gravity.
+# Below the configured threshold they should settle instead of rebounding;
+# above it, their x velocities should reverse after impact.
+func _restitution_trial_2d(speed: float, steps: int) -> float:
+	var server := PhysicsServer2D
+	var space := server.space_create()
+	var circle := server.circle_shape_create()
+	server.shape_set_data(circle, 1.0)
+	var a := server.body_create()
+	var b := server.body_create()
+	for body in [a, b]:
+		server.body_add_shape(body, circle)
+		server.body_set_param(body, server.BODY_PARAM_GRAVITY_SCALE, 0.0)
+		server.body_set_param(body, server.BODY_PARAM_BOUNCE, 1.0)
+		server.body_set_state(body, server.BODY_STATE_CAN_SLEEP, false)
+	server.body_set_state(a, server.BODY_STATE_TRANSFORM, Transform2D(0.0, Vector2(-3.0, 0.0)))
+	server.body_set_state(b, server.BODY_STATE_TRANSFORM, Transform2D(0.0, Vector2(3.0, 0.0)))
+	server.body_set_state(a, server.BODY_STATE_LINEAR_VELOCITY, Vector2(speed, 0.0))
+	server.body_set_state(b, server.BODY_STATE_LINEAR_VELOCITY, Vector2(-speed, 0.0))
+	server.space_set_active(space, true)
+	server.body_set_space(a, space)
+	server.body_set_space(b, space)
+	for i in range(steps):
+		await physics_frame
+	var final_velocity: Vector2 = server.body_get_state(a, server.BODY_STATE_LINEAR_VELOCITY)
+	server.space_set_active(space, false)
+	server.free_rid(a)
+	server.free_rid(b)
+	server.free_rid(circle)
+	server.free_rid(space)
+	return final_velocity.x
+
+
+func _physics_restitution_2d() -> Dictionary:
+	var threshold := float(ProjectSettings.get_setting("physics/2d/solver/restitution_velocity_threshold", 30.0))
+	if threshold <= 0.0:
+		return {"error": "Restitution test requires a positive 2D velocity threshold"}
+	var slow_speed := threshold * 0.25
+	var fast_speed := threshold * 2.0
+	var low_vx: float = await _restitution_trial_2d(slow_speed, 90)
+	var high_vx: float = await _restitution_trial_2d(fast_speed, 90)
+	if low_vx < -slow_speed * 0.25:
+		return {"error": "Low-speed 2D impact unexpectedly rebounded", "vx": low_vx}
+	if high_vx >= -fast_speed * 0.25:
+		return {"error": "High-speed 2D impact failed to rebound", "vx": high_vx}
+	return {"threshold": threshold, "low_speed": slow_speed, "high_speed": fast_speed,
+			"low_final_x_velocity": low_vx, "high_final_x_velocity": high_vx}
+
+
+func _restitution_trial_3d(speed: float, steps: int) -> float:
+	var server := PhysicsServer3D
+	var space := server.space_create()
+	var sphere := server.sphere_shape_create()
+	server.shape_set_data(sphere, 0.5)
+	var a := server.body_create()
+	var b := server.body_create()
+	for body in [a, b]:
+		server.body_add_shape(body, sphere)
+		server.body_set_param(body, server.BODY_PARAM_GRAVITY_SCALE, 0.0)
+		server.body_set_param(body, server.BODY_PARAM_BOUNCE, 1.0)
+		server.body_set_state(body, server.BODY_STATE_CAN_SLEEP, false)
+	server.body_set_state(a, server.BODY_STATE_TRANSFORM, Transform3D(Basis(), Vector3(-1.0, 0.0, 0.0)))
+	server.body_set_state(b, server.BODY_STATE_TRANSFORM, Transform3D(Basis(), Vector3(1.0, 0.0, 0.0)))
+	server.body_set_state(a, server.BODY_STATE_LINEAR_VELOCITY, Vector3(speed, 0.0, 0.0))
+	server.body_set_state(b, server.BODY_STATE_LINEAR_VELOCITY, Vector3(-speed, 0.0, 0.0))
+	server.space_set_active(space, true)
+	server.body_set_space(a, space)
+	server.body_set_space(b, space)
+	for i in range(steps):
+		await physics_frame
+	var final_velocity: Vector3 = server.body_get_state(a, server.BODY_STATE_LINEAR_VELOCITY)
+	server.space_set_active(space, false)
+	server.free_rid(a)
+	server.free_rid(b)
+	server.free_rid(sphere)
+	server.free_rid(space)
+	return final_velocity.x
+
+
+func _physics_restitution_3d() -> Dictionary:
+	var threshold := float(ProjectSettings.get_setting("physics/3d/solver/restitution_velocity_threshold", 1.0))
+	if threshold <= 0.0:
+		return {"error": "Restitution test requires a positive 3D velocity threshold"}
+	var slow_speed := threshold * 0.25
+	var fast_speed := threshold * 2.0
+	var low_vx: float = await _restitution_trial_3d(slow_speed, 180)
+	var high_vx: float = await _restitution_trial_3d(fast_speed, 180)
+	if low_vx < -slow_speed * 0.25:
+		return {"error": "Low-speed 3D impact unexpectedly rebounded", "vx": low_vx}
+	if high_vx >= -fast_speed * 0.25:
+		return {"error": "High-speed 3D impact failed to rebound", "vx": high_vx}
+	return {"threshold": threshold, "low_speed": slow_speed, "high_speed": fast_speed,
+			"low_final_x_velocity": low_vx, "high_final_x_velocity": high_vx}
+
 
 
 func _physics_sparse_2d(scale: int, frames: int) -> Dictionary:
