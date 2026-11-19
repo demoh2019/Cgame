@@ -43,6 +43,7 @@
 #include "servers/physics_fluid_buoyancy_3d.h"
 #include "servers/physics_fluid_convex_hull_3d.h"
 #include "servers/physics_fluid_box_3d.h"
+#include "servers/physics_fluid_capsule_3d.h"
 
 void GodotBody3D::_mass_properties_changed() {
 	if (get_space() && !mass_properties_update_list.in_list()) {
@@ -701,21 +702,25 @@ void GodotBody3D::integrate_forces(real_t p_step, bool p_defer_motion) {
 							const GodotSphereShape3D *sphere = static_cast<const GodotSphereShape3D *>(shape);
 							sample = godot_physics_fluid_sphere_sample_3d(shape_world.origin,
 									sphere->get_radius() * uniform_scale, shape_volume, water_height);
-						} else if (godot_physics_fluid_capsule_vertical_3d(shape_world.basis, uniform_scale)) {
+						} else {
 							const GodotCapsuleShape3D *capsule = static_cast<const GodotCapsuleShape3D *>(shape);
-							// Raw PhysicsServer shapes can specify height < 2*radius,
-							// which is not a cylinder plus hemispheres. Keep the
-							// AABB behavior rather than returning zero displaced volume.
+							// Invalid PhysicsServer shapes retain the AABB fallback;
+							// otherwise integrate the true circular cross sections.
 							if (capsule->get_radius() > 0.0 && capsule->get_height() >= real_t(2.0) * capsule->get_radius()) {
-								sample = godot_physics_fluid_vertical_capsule_sample_3d(shape_world.origin,
-										capsule->get_radius() * uniform_scale,
-										capsule->get_height() * uniform_scale, shape_volume, water_height);
+								const real_t world_radius = capsule->get_radius() * uniform_scale;
+								const real_t world_height = capsule->get_height() * uniform_scale;
+								if (godot_physics_fluid_capsule_vertical_3d(shape_world.basis, uniform_scale)) {
+									sample = godot_physics_fluid_vertical_capsule_sample_3d(
+											shape_world.origin, world_radius, world_height, shape_volume, water_height);
+								} else if (!godot_physics_fluid_tilted_capsule_sample_3d(
+												   shape_world.origin, shape_world.basis.get_column(1) / uniform_scale,
+												   world_radius, world_height, shape_volume, water_height, sample)) {
+									// Safe fallback for nonfinite or degenerate geometry.
+									sample = godot_physics_fluid_sample_3d(bounds, shape_volume, water_height);
+								}
 							} else {
 								sample = godot_physics_fluid_sample_3d(bounds, shape_volume, water_height);
 							}
-						} else {
-							// A tilted capsule has noncircular horizontal slices.
-							sample = godot_physics_fluid_sample_3d(bounds, shape_volume, water_height);
 						}
 					} else if (shape_type == PS3DE::SHAPE_BOX) {
 						// The world AABB overstates the immersed volume of a tilted
