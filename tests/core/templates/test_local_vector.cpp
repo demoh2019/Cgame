@@ -348,6 +348,61 @@ TEST_CASE("[LocalVector] Nontrivial inserted elements retain normal move semanti
 	CHECK(values[12].value == 77);
 }
 
+struct CountedLocalAssignment {
+	int value = 0;
+	static inline int assignments = 0;
+
+	CountedLocalAssignment() = default;
+	explicit CountedLocalAssignment(int p_value) :
+			value(p_value) {}
+	CountedLocalAssignment(const CountedLocalAssignment &) = default;
+	CountedLocalAssignment(CountedLocalAssignment &&) = default;
+	CountedLocalAssignment &operator=(const CountedLocalAssignment &p_other) {
+		value = p_other.value;
+		assignments++;
+		return *this;
+	}
+	CountedLocalAssignment &operator=(CountedLocalAssignment &&p_other) {
+		value = p_other.value;
+		assignments++;
+		return *this;
+	}
+	~CountedLocalAssignment() { value = -999; }
+};
+
+TEST_CASE("[LocalVector] Self and overlapping nontrivial Span assignments avoid wasted copies") {
+	LocalVector<CountedLocalAssignment> items;
+	for (int i = 0; i < 8; i++) {
+		items.push_back(CountedLocalAssignment(i));
+	}
+	CountedLocalAssignment::assignments = 0;
+	items = items.span();
+	CHECK(CountedLocalAssignment::assignments == 0);
+	CHECK(items.size() == 8);
+
+	// The source lives in the tail that resize() would otherwise destroy.
+	items = Span<CountedLocalAssignment>(items.ptr() + 3, 5);
+	CHECK(items.size() == 5);
+	CHECK(CountedLocalAssignment::assignments == 5);
+	for (int i = 0; i < 5; i++) {
+		CHECK(items[uint32_t(i)].value == i + 3);
+	}
+
+	CountedLocalAssignment::assignments = 0;
+	items = Span<CountedLocalAssignment>(items.ptr(), 3);
+	CHECK(items.size() == 3);
+	CHECK(CountedLocalAssignment::assignments == 0);
+	CHECK(items[0].value == 3);
+	CHECK(items[1].value == 4);
+	CHECK(items[2].value == 5);
+
+	CountedLocalAssignment::assignments = 0;
+	const LocalVector<CountedLocalAssignment> &self = items;
+	items = self;
+	CHECK(CountedLocalAssignment::assignments == 0);
+	CHECK(items.size() == 3);
+}
+
 TEST_CASE("[LocalVector] Trivial edge shifts preserve zero and last slot") {
 	LocalVector<uint64_t> values;
 	values.insert(0, uint64_t(0x101));
