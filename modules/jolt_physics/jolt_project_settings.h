@@ -67,6 +67,9 @@ public:
 	inline static bool soft_body_soft_edge_edge_contacts = false;
 	// Approximate linear swept point-vs-face prediction, only in VF mode.
 	inline static bool soft_body_soft_speculative_ccd = false;
+	// Optional conservative-advancement CCD for deformable segment pairs;
+	// requires the existing soft-soft edge-edge collision pass.
+	inline static bool soft_body_soft_speculative_edge_ccd = false;
 	inline static float soft_body_soft_ccd_max_sweep = 1.0f;
 	inline static float soft_body_soft_ccd_max_correction_speed = 128.0f;
 	inline static float soft_body_soft_contact_radius = 0.1f;
