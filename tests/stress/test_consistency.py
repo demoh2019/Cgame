@@ -11,6 +11,7 @@ import run as stress
 HERE = Path(__file__).resolve().parent
 ENGINE_SCRIPT = HERE / "stress.gd"
 EXTRA_SCRIPT = HERE / "extra_stress.gd"
+PRESSURE_SCRIPT = HERE / "pressure_scenarios.gd"
 
 
 def registered_cases(source: str) -> list[str]:
@@ -71,6 +72,19 @@ class WorkloadConsistencyTests(unittest.TestCase):
         self.assertTrue(EXTRA_SCRIPT.is_file())
         self.assertIn('preload("res://extra_stress.gd")', self.engine)
         self.assertIn("func run(", EXTRA_SCRIPT.read_text(encoding="utf-8"))
+
+    def test_pressure_scenarios_registered_and_loaded(self):
+        self.assertTrue(PRESSURE_SCRIPT.is_file())
+        self.assertIn('preload("res://pressure_scenarios.gd")', self.engine)
+        source = PRESSURE_SCRIPT.read_text(encoding="utf-8")
+        expected = ("scene_reparent", "resource_roundtrip", "audio_bus_churn")
+        cases = registered_cases(self.engine)
+        for name in expected:
+            self.assertIn(name, cases)
+            self.assertIn(name, stress.CASES)
+            self.assertIn("func " + name + "(", source)
+        functions = re.findall(r"(?m)^func ([A-Za-z0-9_]+)\(", source)
+        self.assertEqual(duplicate_values(functions), set())
 
     def test_project_entrypoint_is_available(self):
         self.assertTrue((HERE / "project.godot").is_file())
