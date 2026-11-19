@@ -789,16 +789,16 @@ This exercises the fast path that skips 3D tangential impulse and inertia
 work while preserving normal, bias and restitution impulses.
 
 ```bash
-python3 tests/stress/run.py --godot ./bin/godot.linuxbsd.editor.dev.x86_64 \\
-  --case physics_3d,physics_frictionless_3d --scale 4 --frames 90 \\
-  --repeats 3 --timeout 600 --rss-limit-mib 6144 \\
+python3 tests/stress/run.py --godot ./bin/godot.linuxbsd.editor.dev.x86_64 \
+  --case physics_3d,physics_frictionless_3d --scale 4 --frames 90 \
+  --repeats 3 --timeout 600 --rss-limit-mib 6144 \
   --output out/frictionless-3d.json
 ```
 
 For contact correctness, run the independent 3D material-switch test:
 
 ```bash
-./bin/godot.linuxbsd.editor.dev.x86_64 --headless --path tests/stress \\
+./bin/godot.linuxbsd.editor.dev.x86_64 --headless --path tests/stress \
   --script res://physics_frictionless_3d_regression.gd
 ```
 
