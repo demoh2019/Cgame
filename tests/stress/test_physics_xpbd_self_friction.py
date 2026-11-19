@@ -55,10 +55,12 @@ class XPBDSelfContactFrictionTests(unittest.TestCase):
             displacement = rng.uniform(-8, 8)
             mu, normal_lambda = rng.uniform(0, 2), rng.uniform(0, 3)
             corrections = reference_tangent_impulse(displacement, masses, mu, normal_lambda)
-            # Equal-and-opposite impulse, weighted by barycentric face influences.
-            momentum = sum(delta / w for delta, w in zip(corrections, masses) if w > 0)
-            # Face impulses must be barycentrically weighted, so conserve total.
-            self.assertAlmostEqual(momentum, 0.0, places=10)
+            # Linear momentum is conserved by internal contacts only when
+            # every participant can move. Pinned vertices transfer reaction
+            # to an external attachment and do not conserve free-node momentum.
+            if all(w > 0 for w in masses):
+                momentum = sum(delta / w for delta, w in zip(corrections, masses))
+                self.assertAlmostEqual(momentum, 0.0, places=10)
             self.assertLessEqual(abs(corrections[0]) / masses[0] if masses[0] else 0.0,
                                  mu * normal_lambda + 1e-9)
             # Relative normal-plane displacement after friction is reduced.
