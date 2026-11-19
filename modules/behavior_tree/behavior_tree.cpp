@@ -223,6 +223,66 @@ BehaviorTreeTask::Status BehaviorTreeInverter::execute(const Dictionary &p_black
 	return RUNNING;
 }
 
+void BehaviorTreeBlackboardCheck::_bind_methods() {
+	ClassDB::bind_method(D_METHOD("set_key", "key"), &BehaviorTreeBlackboardCheck::set_key);
+	ClassDB::bind_method(D_METHOD("get_key"), &BehaviorTreeBlackboardCheck::get_key);
+	ClassDB::bind_method(D_METHOD("set_expected_value", "value"), &BehaviorTreeBlackboardCheck::set_expected_value);
+	ClassDB::bind_method(D_METHOD("get_expected_value"), &BehaviorTreeBlackboardCheck::get_expected_value);
+
+	ADD_PROPERTY(PropertyInfo(Variant::STRING_NAME, "key"), "set_key", "get_key");
+	ADD_PROPERTY(PropertyInfo(Variant::NIL, "expected_value", PROPERTY_HINT_NONE, "", PROPERTY_USAGE_DEFAULT | PROPERTY_USAGE_NIL_IS_VARIANT), "set_expected_value", "get_expected_value");
+}
+
+BehaviorTreeTask::Status BehaviorTreeBlackboardCheck::execute(const Dictionary &p_blackboard, Dictionary &r_memory, const String &p_path, double p_delta) {
+	if (key.is_empty() || !p_blackboard.has(key)) {
+		return FAILURE;
+	}
+	return p_blackboard[key] == expected_value ? SUCCESS : FAILURE;
+}
+
+void BehaviorTreeBlackboardSet::_bind_methods() {
+	ClassDB::bind_method(D_METHOD("set_key", "key"), &BehaviorTreeBlackboardSet::set_key);
+	ClassDB::bind_method(D_METHOD("get_key"), &BehaviorTreeBlackboardSet::get_key);
+	ClassDB::bind_method(D_METHOD("set_value", "value"), &BehaviorTreeBlackboardSet::set_value);
+	ClassDB::bind_method(D_METHOD("get_value"), &BehaviorTreeBlackboardSet::get_value);
+
+	ADD_PROPERTY(PropertyInfo(Variant::STRING_NAME, "key"), "set_key", "get_key");
+	ADD_PROPERTY(PropertyInfo(Variant::NIL, "value", PROPERTY_HINT_NONE, "", PROPERTY_USAGE_DEFAULT | PROPERTY_USAGE_NIL_IS_VARIANT), "set_value", "get_value");
+}
+
+BehaviorTreeTask::Status BehaviorTreeBlackboardSet::execute(const Dictionary &p_blackboard, Dictionary &r_memory, const String &p_path, double p_delta) {
+	if (key.is_empty()) {
+		return FAILURE;
+	}
+	// Dictionary is reference counted, so this updates the runner's blackboard
+	// without allowing the task to replace the blackboard instance.
+	Dictionary writable_blackboard = p_blackboard;
+	writable_blackboard[key] = value;
+	return SUCCESS;
+}
+
+void BehaviorTreeWait::_bind_methods() {
+	ClassDB::bind_method(D_METHOD("set_duration", "duration"), &BehaviorTreeWait::set_duration);
+	ClassDB::bind_method(D_METHOD("get_duration"), &BehaviorTreeWait::get_duration);
+	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "duration", PROPERTY_HINT_RANGE, "0,3600,0.01,or_greater,suffix:s"), "set_duration", "get_duration");
+}
+
+void BehaviorTreeWait::set_duration(double p_duration) {
+	ERR_FAIL_COND_MSG(p_duration < 0.0, "BehaviorTreeWait.duration must be nonnegative.");
+	duration = p_duration;
+	emit_changed();
+}
+
+BehaviorTreeTask::Status BehaviorTreeWait::execute(const Dictionary &p_blackboard, Dictionary &r_memory, const String &p_path, double p_delta) {
+	const double elapsed = static_cast<double>(r_memory.get(p_path, 0.0)) + MAX(0.0, p_delta);
+	if (elapsed >= duration) {
+		r_memory.erase(p_path);
+		return SUCCESS;
+	}
+	r_memory[p_path] = elapsed;
+	return RUNNING;
+}
+
 void BehaviorTreeRunner::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("set_root_task", "task"), &BehaviorTreeRunner::set_root_task);
 	ClassDB::bind_method(D_METHOD("get_root_task"), &BehaviorTreeRunner::get_root_task);
