@@ -402,12 +402,23 @@ Vector<Ref<FuzzySearchMatch>> FuzzySearch::search_all(const String &p_query, con
 	Vector<Ref<FuzzySearchMatch>> results;
 	const Vector<FuzzySearchToken> tokens = _get_tokens(p_query);
 
+	// Most candidates do not match. Reuse the temporary match object instead of allocating
+	// a RefCounted object (and freeing it) for every rejected target.
+	Ref<FuzzySearchMatch> result;
 	for (int i = 0; i < p_targets.size(); i++) {
-		Ref<FuzzySearchMatch> result;
-		result.instantiate();
+		if (result.is_null()) {
+			result.instantiate();
+		} else {
+			// A failed search may have added partial token matches and a nonzero score.
+			result->score = 0;
+			result->match_interval = Vector2i(-1, -1);
+			result->token_matches.clear();
+		}
 		result->original_index = i;
 		if (_search_tokens(tokens, p_targets[i], result)) {
 			results.append(result);
+			// Successful results must never be mutated while processing later targets.
+			result.unref();
 		}
 	}
 
