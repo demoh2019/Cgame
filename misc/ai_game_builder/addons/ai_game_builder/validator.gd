@@ -32,6 +32,13 @@ static func is_safe_relative_path(path: String) -> bool:
 			return false
 		if segment.contains(" "):
 			return false
+		# Reserved Windows device names are invalid even with an extension.
+		# Reject them on every component to keep plans portable across hosts.
+		var device_name := segment.get_slice(".", 0).to_upper()
+		if device_name in ["CON", "PRN", "AUX", "NUL"]:
+			return false
+		if device_name.length() == 4 and device_name.substr(0, 3) in ["COM", "LPT"] and device_name.substr(3, 1) in ["1", "2", "3", "4", "5", "6", "7", "8", "9"]:
+			return false
 		for character in segment:
 			var code := character.unicode_at(0)
 			if not ((code >= 48 and code <= 57) or (code >= 65 and code <= 90) or (code >= 97 and code <= 122) or code == 45 or code == 46 or code == 95):
@@ -65,9 +72,15 @@ static func validate_payload(payload: Variant) -> Dictionary:
 			return _failure("Unsafe or unsupported relative path.")
 		if not content is String or content.is_empty():
 			return _failure("Each generated file must have nonempty text content.")
-		if seen.has(path.to_lower()):
+		var lower_path := path.to_lower()
+		if seen.has(lower_path):
 			return _failure("Duplicate path: %s" % path)
-		seen[path.to_lower()] = true
+		# A file cannot be an ancestor of another file. Catch these before
+		# writing, independently of the order returned by the model.
+		for previous_path in seen:
+			if lower_path.begins_with(previous_path + "/") or previous_path.begins_with(lower_path + "/"):
+				return _failure("File/directory path conflict: %s" % path)
+		seen[lower_path] = true
 		var file_bytes := content.to_utf8_buffer().size()
 		total_bytes += file_bytes
 		if file_bytes > MAX_FILE_BYTES or total_bytes > MAX_TOTAL_BYTES:
