@@ -36,6 +36,7 @@
 #include "servers/physics_3d/physics_server_3d_rendering_server_handler.h"
 #include "servers/physics_softbody_bending_plasticity.h"
 #include "servers/physics_softbody_link_damping.h"
+#include "servers/physics_softbody_membrane_damping.h"
 #include "servers/physics_softbody_dihedral_damping.h"
 #include "servers/physics_softbody_aero_lift.h"
 #include "servers/physics_softbody_adiabatic_gas.h"
@@ -500,8 +501,8 @@ void GodotSoftBody3D::solve_shape_matching_clusters(real_t p_strength) {
 void GodotSoftBody3D::initialize_membrane_constraints() {
 	xpbd_membrane_rest.reset();
 	xpbd_membrane_lambdas.reset();
-	if (!get_space() || get_space()->get_soft_body_xpbd_membrane_compliance() <= 0.0 ||
-			faces.is_empty()) {
+	if (!get_space() || (get_space()->get_soft_body_xpbd_membrane_compliance() <= 0.0 &&
+			get_space()->get_soft_body_membrane_damping_rate() <= 0.0) || faces.is_empty()) {
 		return;
 	}
 	xpbd_membrane_rest.resize(faces.size());
@@ -2227,6 +2228,30 @@ void GodotSoftBody3D::predict_motion(real_t p_delta) {
 	add_velocity(gravity * p_delta);
 	if ((pressure_coefficient > CMP_EPSILON && Math::is_finite(pressure_coefficient)) || !wind_areas.is_empty() || drag_coefficient > 0.0 || get_space()->get_soft_body_lift_coefficient() > 0.0) {
 		apply_forces(wind_areas, p_delta);
+	}
+
+	// An objective surface dashpot damps deformation rates rather than
+	// world-space translation or rotation. Reuse the cached membrane rest
+	// metrics even if StVK elasticity itself is disabled. No per-step
+	// scratch is allocated. Pins remain unchanged by the mass-weighted pass.
+	const real_t membrane_damping_rate = get_space()->get_soft_body_membrane_damping_rate();
+	if (membrane_damping_rate > 0.0 && xpbd_membrane_rest.size() == faces.size() &&
+			p_delta > 0.0) {
+		const double fraction = 1.0 - Math::exp(-double(membrane_damping_rate) * double(p_delta));
+		if (Math::is_finite(fraction) && fraction > 0.0 && fraction <= 1.0) {
+			for (uint32_t face_index = 0; face_index < faces.size(); ++face_index) {
+				const PhysicsXPBDMembraneRest &rest = xpbd_membrane_rest[face_index];
+				if (!(rest.area > 0.0)) {
+					continue;
+				}
+				Face &face = faces[face_index];
+				physics_softbody_damp_membrane(
+						face.n[0]->x, face.n[1]->x, face.n[2]->x,
+						face.n[0]->v, face.n[1]->v, face.n[2]->v,
+						face.n[0]->im, face.n[1]->im, face.n[2]->im,
+						rest, fraction);
+			}
+		}
 	}
 
 	// Avoid soft body from 'exploding' so use some upper threshold of maximum motion
