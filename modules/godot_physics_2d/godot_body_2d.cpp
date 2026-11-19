@@ -34,6 +34,7 @@
 #include "godot_body_direct_state_2d.h"
 #include "godot_constraint_2d.h"
 #include "godot_space_2d.h"
+#include "godot_velocity_limit_2d.h"
 
 void GodotBody2D::add_constraint(GodotConstraint2D *p_constraint, int p_pos) {
 	p_constraint->set_body_slot(p_pos, constraint_list.size());
@@ -622,6 +623,11 @@ void GodotBody2D::integrate_forces(real_t p_step, bool p_defer_motion) {
 			angular_velocity += _inv_inertia * torque * p_step;
 		}
 
+		// Limit the force-integrated speed before computing the swept CCD bounds.
+		const real_t velocity_limit = get_space()->get_max_linear_velocity();
+		if (velocity_limit > 0.0) {
+			linear_velocity = godot_physics_2d_limit_linear_velocity(linear_velocity, velocity_limit);
+		}
 		if (continuous_cd_mode != PS2DE::CCD_MODE_DISABLED) {
 			motion = linear_velocity * p_step;
 			do_motion = true;
@@ -666,6 +672,12 @@ void GodotBody2D::integrate_velocities(real_t p_step) {
 		return;
 	}
 
+	// Contact and joint impulses can accelerate the body after force integration.
+	// Clamp its physical velocity again, but never clamp bias recovery motion.
+	const real_t velocity_limit = get_space()->get_max_linear_velocity();
+	if (velocity_limit > 0.0) {
+		linear_velocity = godot_physics_2d_limit_linear_velocity(linear_velocity, velocity_limit);
+	}
 	real_t total_angular_velocity = angular_velocity + biased_angular_velocity;
 	Vector2 total_linear_velocity = linear_velocity + biased_linear_velocity;
 
