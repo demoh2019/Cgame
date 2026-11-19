@@ -664,4 +664,60 @@ TEST_CASE("[Image][NormalMipmap] Mipmap renormalization is deterministic for rep
 	}
 }
 
+
+TEST_CASE("[Image] optimize_from_channels reduces uncompressed grayscale storage") {
+	Ref<Image> image = memnew(Image(8, 8, false, Image::FORMAT_RGBA8));
+	image->fill(Color(0.5, 0.5, 0.5, 1.0));
+	CHECK_EQ(image->get_data_size(), 8 * 8 * 4);
+	image->optimize_from_channels(Image::USED_CHANNELS_L);
+	CHECK_EQ(image->get_format(), Image::FORMAT_L8);
+	CHECK_EQ(image->get_data_size(), 8 * 8);
+	const Color result = image->get_pixel(0, 0);
+	CHECK(Math::abs(result.r - 0.5) < 0.01);
+	CHECK(Math::abs(result.g - 0.5) < 0.01);
+	CHECK(Math::abs(result.b - 0.5) < 0.01);
+}
+
+TEST_CASE("[Image] optimize_from_channels keeps grayscale alpha") {
+	Ref<Image> image = memnew(Image(8, 8, false, Image::FORMAT_RGBA8));
+	image->fill(Color(0.5, 0.5, 0.5, 0.25));
+	image->optimize_from_channels(Image::USED_CHANNELS_LA);
+	CHECK_EQ(image->get_format(), Image::FORMAT_LA8);
+	CHECK_EQ(image->get_data_size(), 8 * 8 * 2);
+	const Color result = image->get_pixel(0, 0);
+	CHECK(Math::abs(result.r - 0.5) < 0.01);
+	CHECK(Math::abs(result.a - 0.25) < 0.01);
+}
+
+TEST_CASE("[Image] optimize_from_channels removes unused RGB8 and RG8 channels") {
+	Ref<Image> image = memnew(Image(8, 8, false, Image::FORMAT_RGBA8));
+	image->fill(Color(0.2, 0.4, 0.6, 1.0));
+	image->optimize_from_channels(Image::USED_CHANNELS_RGB);
+	CHECK_EQ(image->get_format(), Image::FORMAT_RGB8);
+	CHECK_EQ(image->get_data_size(), 8 * 8 * 3);
+	CHECK(Math::abs(image->get_pixel(0, 0).r - 0.2) < 0.01);
+
+	Ref<Image> normal = memnew(Image(8, 8, false, Image::FORMAT_RGBA8));
+	normal->fill(Color(0.3, 0.7, 0.0, 1.0));
+	normal->optimize_from_channels(Image::USED_CHANNELS_RG);
+	CHECK_EQ(normal->get_format(), Image::FORMAT_RG8);
+	CHECK_EQ(normal->get_data_size(), 8 * 8 * 2);
+	CHECK(Math::abs(normal->get_pixel(0, 0).g - 0.7) < 0.01);
+}
+
+TEST_CASE("[Image] optimize_from_channels preserves HDR precision") {
+	Ref<Image> hdr = memnew(Image(4, 4, false, Image::FORMAT_RGBAF));
+	hdr->fill(Color(2.0, 2.0, 2.0, 1.0));
+	hdr->optimize_from_channels(Image::USED_CHANNELS_L);
+	CHECK_EQ(hdr->get_format(), Image::FORMAT_RGBF);
+	CHECK(Math::abs(hdr->get_pixel(0, 0).r - 2.0) < 0.001);
+	CHECK_EQ(hdr->get_data_size(), 4 * 4 * 3 * 4);
+
+	Ref<Image> half = memnew(Image(4, 4, false, Image::FORMAT_RGBAH));
+	half->fill(Color(1.5, 1.5, 1.5, 1.0));
+	half->optimize_from_channels(Image::USED_CHANNELS_L);
+	CHECK_EQ(half->get_format(), Image::FORMAT_RGBH);
+	CHECK(Math::abs(half->get_pixel(0, 0).g - 1.5) < 0.01);
+}
+
 } // namespace TestImage
