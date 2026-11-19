@@ -606,13 +606,12 @@ void GodotBodyPair3D::solve(real_t p_step) {
 				if (collide_B) {
 					B->apply_bias_impulse(jb, c.rB + B->get_center_of_mass(), max_bias_av);
 				}
+				// Re-evaluate the bias velocity only when the impulse changed it.
+				crbA = A->get_biased_angular_velocity().cross(c.rA);
+				crbB = B->get_biased_angular_velocity().cross(c.rB);
+				dbv = B->get_biased_linear_velocity() + crbB - A->get_biased_linear_velocity() - crbA;
+				vbn = dbv.dot(c.normal);
 			}
-
-			crbA = A->get_biased_angular_velocity().cross(c.rA);
-			crbB = B->get_biased_angular_velocity().cross(c.rB);
-			dbv = B->get_biased_linear_velocity() + crbB - A->get_biased_linear_velocity() - crbA;
-
-			vbn = dbv.dot(c.normal);
 
 			const real_t total_inverse_mass = inv_mass_A + inv_mass_B;
 			if (total_inverse_mass > 0.0 && Math::abs(-vbn + c.bias) > MIN_VELOCITY) {
@@ -1062,12 +1061,11 @@ void GodotBodySoftBodyPair3D::solve(real_t p_step) {
 				if (soft_body_collides) {
 					soft_body->apply_node_bias_impulse(c.index_B, jb);
 				}
+				// Avoid rereading soft-body node velocities when no bias changed.
+				crbA = body->get_biased_angular_velocity().cross(c.rA);
+				dbv = soft_body->get_node_biased_velocity(c.index_B) - body->get_biased_linear_velocity() - crbA;
+				vbn = dbv.dot(c.normal);
 			}
-
-			crbA = body->get_biased_angular_velocity().cross(c.rA);
-			dbv = soft_body->get_node_biased_velocity(c.index_B) - body->get_biased_linear_velocity() - crbA;
-
-			vbn = dbv.dot(c.normal);
 
 			const real_t total_inverse_mass = body_inv_mass + node_inv_mass;
 			if (total_inverse_mass > 0.0 && Math::abs(-vbn + c.bias) > MIN_VELOCITY) {
