@@ -341,5 +341,77 @@ TEST_CASE("[BVH] Deferred 3D insertion and removal before flush") {
 	tree.erase(ha);
 	CHECK(removed == 1);
 }
+struct StreamCastStats {
+	int callbacks = 0;
+	int nearest_item = -1;
+	real_t ray_length = 0.0;
+};
+
+static real_t _stream_all_casts(Item *, int, real_t p_max_fraction, void *p_userdata) {
+	static_cast<StreamCastStats *>(p_userdata)->callbacks++;
+	return p_max_fraction;
+}
+
+static real_t _stream_nearest_cast(Item *p_item, int, real_t p_max_fraction, void *p_userdata) {
+	StreamCastStats &stats = *static_cast<StreamCastStats *>(p_userdata);
+	stats.callbacks++;
+	// The exact hit is at the middle of this item's unit-width AABB.
+	const real_t fraction = (p_item->value * 4.0 + 2.5) / stats.ray_length;
+	if (fraction <= p_max_fraction && (stats.nearest_item < 0 || fraction < (stats.nearest_item * 4.0 + 2.5) / stats.ray_length)) {
+		stats.nearest_item = p_item->value;
+		return fraction;
+	}
+	return p_max_fraction;
+}
+
+TEST_CASE("[BVH] Streaming segment ray visits more than 2048 2D candidates and clips closest") {
+	using Tree = BVH_Manager<Item, 2, false, 16, PairTest, CullTest, Rect2, Vector2, false>;
+	Tree tree;
+	constexpr int COUNT = 4096;
+	Item items[COUNT];
+	for (int i = 0; i < COUNT; i++) {
+		items[i].value = i;
+		tree.create(&items[i], true, uint32_t(i & 1), 3, Rect2(i * 4, 0, 1, 1), i & 3);
+	}
+
+	const Vector2 from(-2, 0.5);
+	const Vector2 to(COUNT * 4 + 2, 0.5);
+	StreamCastStats stats;
+	tree.cast_segment(from, to, _stream_all_casts, &stats);
+	CHECK(stats.callbacks == COUNT);
+
+	stats = StreamCastStats();
+	tree.cast_segment(from, to, _stream_all_casts, &stats, 1);
+	CHECK(stats.callbacks == COUNT / 2);
+
+	stats = StreamCastStats();
+	stats.ray_length = to.x - from.x;
+	tree.cast_segment(from, to, _stream_nearest_cast, &stats);
+	CHECK(stats.nearest_item == 0);
+	CHECK(stats.callbacks > 0);
+}
+
+TEST_CASE("[BVH] Streaming 3D segment ray spans multiple trees and preserves closest hit") {
+	using Tree = BVH_Manager<Item, 2, false, 16, PairTest, CullTest, AABB, Vector3, false>;
+	Tree tree;
+	constexpr int COUNT = 4096;
+	Item items[COUNT];
+	for (int i = 0; i < COUNT; i++) {
+		items[i].value = i;
+		tree.create(&items[i], true, uint32_t(i & 1), 3, AABB(Vector3(i * 4, 0, 0), Vector3(1, 1, 1)));
+	}
+
+	const Vector3 from(-2, 0.5, 0.5);
+	const Vector3 to(COUNT * 4 + 2, 0.5, 0.5);
+	StreamCastStats stats;
+	tree.cast_segment(from, to, _stream_all_casts, &stats);
+	CHECK(stats.callbacks == COUNT);
+
+	stats = StreamCastStats();
+	stats.ray_length = to.x - from.x;
+	tree.cast_segment(from, to, _stream_nearest_cast, &stats);
+	CHECK(stats.nearest_item == 0);
+	CHECK(stats.callbacks > 0);
+}
 
 } // namespace TestBVH
