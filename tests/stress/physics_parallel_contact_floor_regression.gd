@@ -57,7 +57,9 @@ func _test_floor_2d(parallel: bool) -> Dictionary:
 		var body: RID = PhysicsServer2D.body_create()
 		PhysicsServer2D.body_set_mode(body, PhysicsServer2D.BODY_MODE_RIGID)
 		PhysicsServer2D.body_add_shape(body, box_shape)
-		PhysicsServer2D.body_set_param(body, PhysicsServer2D.BODY_PARAM_GRAVITY_SCALE, -1.0)
+# PhysicsServer2D gravity is +Y; keep the boxes pressed against
+		# the floor rather than accelerating away from it.
+				PhysicsServer2D.body_set_param(body, PhysicsServer2D.BODY_PARAM_GRAVITY_SCALE, 1.0)
 		PhysicsServer2D.body_set_state(body, PhysicsServer2D.BODY_STATE_CAN_SLEEP, false)
 		# Neighbors touch one another AND each box touches the same static floor.
 		# The static floor cannot itself connect otherwise unrelated islands.
