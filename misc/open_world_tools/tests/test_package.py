@@ -102,6 +102,89 @@ class PackageContractTests(unittest.TestCase):
         self.assertFalse((ROOT / '.sconsign.dblite').exists())
         self.assertFalse((ROOT / 'modules').exists())
 
+    def test_invalid_brush_modes_are_rejected_before_iteration(self):
+        code = self.terrain.split('func apply_brush(', 1)[1]
+        self.assertLess(code.index('mode < BrushMode.RAISE'), code.index('for z in range('))
+        self.assertLess(code.index('layer_index < 0 or layer_index > 3'), code.index('for z in range('))
+
+    def test_streaming_zero_size_cell_is_guarded(self):
+        code = self.streamer.split('func update_streaming()', 1)[1]
+        self.assertLess(code.index('cell_size <= 0.0'), code.index('local_focus.x / cell_size'))
+        self.assertIn('is_instance_valid(focus)', code)
+
+    def test_foliage_rejects_invalid_dependencies(self):
+        self.assertIn('if terrain == null or foliage_mesh == null:', self.foliage)
+        self.assertIn('multimesh = null', self.foliage)
+        self.assertIn('return 0', self.foliage)
+
+    def test_sampling_handles_noninteger_coordinates(self):
+        self.assertIn('var grid_x: float = clampf(', self.terrain)
+        self.assertIn('var grid_z: float = clampf(', self.terrain)
+        self.assertIn('var x1: int = mini(x0 + 1, resolution - 1)', self.terrain)
+        self.assertIn('var z1: int = mini(z0 + 1, resolution - 1)', self.terrain)
+
+    def test_storage_repair_is_bounded(self):
+        self.assertIn('resolution = clampi(resolution, 3, 513)', self.terrain)
+        self.assertIn('cell_size = maxf(cell_size, 0.01)', self.terrain)
+        self.assertIn('chunk_cells = clampi(chunk_cells, 2, 128)', self.terrain)
+        for name in ('height_data', 'color_data', 'weight_data'):
+            self.assertIn(f'if {name}.size() != needed:', self.terrain)
+
+    def test_smooth_uses_pre_stroke_snapshot(self):
+        self.assertIn('var previous: PackedFloat32Array = height_data.duplicate()', self.terrain)
+        self.assertIn('total += previous[sample_index(nx, nz)]', self.terrain)
+        self.assertIn('lerpf(previous[index], total / float(count)', self.terrain)
+
+    def test_brush_radius_is_bounded_in_grid_coordinates(self):
+        self.assertIn('var left: int = maxi(0, floori(center_x - steps))', self.terrain)
+        self.assertIn('var right: int = mini(resolution - 1, ceili(center_x + steps))', self.terrain)
+        self.assertIn('var top: int = maxi(0, floori(center_z - steps))', self.terrain)
+        self.assertIn('var bottom: int = mini(resolution - 1, ceili(center_z + steps))', self.terrain)
+
+    def test_streaming_duplicate_grid_prevention(self):
+        self.assertIn('wanted[key] = true', self.streamer)
+        self.assertIn('if _loaded.has(key):', self.streamer)
+        self.assertIn('if not wanted.has(key):', self.streamer)
+
+    def test_foliage_placement_attempts_bounded(self):
+        self.assertIn('for attempt in range(12):', self.foliage)
+        self.assertIn('slope_threshold: float = cos(', self.foliage)
+        self.assertIn('terrain.get_normal_at(x, z).dot(Vector3.UP)', self.foliage)
+
+    def test_heightmap_invalid_inputs_are_rejected(self):
+        self.assertIn('if image == null or image.is_empty() or max_height < 0.0:', self.terrain)
+        self.assertIn('image.get_pixel(image_x, image_y).get_luminance()', self.terrain)
+
+    def test_collision_only_uses_static_shape(self):
+        self.assertIn('var body: StaticBody3D = StaticBody3D.new()', self.terrain)
+        self.assertIn('shape.shape = mesh.create_trimesh_shape()', self.terrain)
+        self.assertNotIn('RigidBody3D.new()', self.terrain)
+
+    def test_runtime_tests_include_edge_cases(self):
+        names = [
+            '_test_storage_and_mesh_invariants', '_test_invalid_brush_and_snapshots',
+            '_test_erosion_extremes', '_test_foliage_world_space_and_slope',
+            '_test_streamer_boundaries',
+        ]
+        for name in names:
+            self.assertIn(f'func {name}()', self.godot_tests)
+            self.assertIn(f'\t{name}()', self.godot_tests)
+        self.assertGreaterEqual(self.godot_tests.count('_check('), 120)
+
+    def test_brush_invalid_input_does_not_commit_undo(self):
+        code = self.plugin.split('func _finish_stroke()', 1)[1]
+        self.assertIn('if not _stroke_changed or not is_instance_valid(_selected):', code)
+
+    def test_runtime_suite_exits_nonzero_on_failure(self):
+        self.assertIn('quit(0 if failures == 0 else 1)', self.godot_tests)
+        self.assertIn('push_error("TEST FAILED: " + message)', self.godot_tests)
+
+    def test_no_remote_code_execution_in_addon(self):
+        for path in ADDON.glob('*.gd'):
+            source = path.read_text()
+            for forbidden in ('OS.execute(', 'Expression.execute(', 'HTTPRequest.new(', 'JavaScriptBridge.'):
+                self.assertNotIn(forbidden, source, f'{path}: {forbidden}')
+
 
 if __name__ == '__main__':
     unittest.main()
