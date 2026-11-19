@@ -2,6 +2,7 @@ extends CanvasLayer
 ## All of the interface, built in code: vitals, zone, inventory, crafting and a message log.
 
 const Defs = preload("res://scripts/shared/defs.gd")
+const Combat = preload("res://scripts/shared/combat.gd")
 const QuickCooking = preload("res://scripts/shared/quick_cooking.gd")
 const FishingDisplay = preload("res://scripts/shared/fishing_display.gd")
 const WorldCycle = preload("res://scripts/shared/world_cycle.gd")
@@ -825,14 +826,20 @@ func _process(_delta: float) -> void:
 	var weapon: String = client.you.get("weapon", "")
 	var levels: Dictionary = client.you.get("gathering_levels", {})
 	var weapon_levels: Dictionary = client.you.get("combat_levels", {})
-	_equipped.text = "Weapon: %s | Craft L%d (%d XP)\nWood L%d | Stone L%d | Ore L%d | Fiber L%d | Fishing L%d | Scavenging L%d (%d XP)\nMastery: Melee L%d | Ranged L%d" % [
+	var active: Dictionary = Combat.active_skill(weapon)
+	var skill_name: String = "None"
+	if not active.is_empty():
+		skill_name = "Focused Shot (G)" if str(active["id"]) == "focused_shot" else "Heavy Strike (G)"
+	_equipped.text = "Weapon: %s | Craft L%d (%d XP)\nWood L%d | Stone L%d | Ore L%d | Fiber L%d | Fishing L%d | Scavenging L%d (%d XP)\nMastery: Melee L%d | Ranged L%d\nSkill: %s  Energy %d/%d  Cooldown %.1fs" % [
 		(Defs.item(weapon).get("name", weapon) if weapon != "" else "fists"),
 		int(client.you.get("crafting_level", 1)), int(client.you.get("crafting_xp", 0)),
 		int(levels.get("wood", 1)), int(levels.get("stone", 1)),
 		int(levels.get("ore", 1)), int(levels.get("fiber", 1)),
 		int(levels.get("fishing", 1)),
 		int(client.you.get("scavenging_level", 1)), int(client.you.get("scavenging_xp", 0)),
-		int(weapon_levels.get("melee", 1)), int(weapon_levels.get("ranged", 1))
+		int(weapon_levels.get("melee", 1)), int(weapon_levels.get("ranged", 1)),
+		skill_name, int(client.you.get("combat_energy", 0)), int(Defs.COMBAT_ENERGY_MAX),
+		float(client.you.get("skill_cooldown", 0.0))
 	]
 	_party_frames.text = PartyFrames.describe(client.you.get("party", {}), client.peer_id)
 	_party_frames.visible = not _party_frames.text.is_empty()
