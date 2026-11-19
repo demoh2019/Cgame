@@ -11,6 +11,7 @@ const JUMP_VELOCITY := 5.0
 const GRAVITY := 18.0
 const MOUSE_SENSITIVITY := 0.0025
 const XP_PER_LEVEL := 60
+const SAVE_STATE = preload("res://save_state.gd")
 
 const RECIPES := {
     "field_bandage": {"fiber_t1": 2},
@@ -51,6 +52,10 @@ func _unhandled_input(event: InputEvent) -> void:
     elif event is InputEventKey and event.pressed and not event.echo:
         if event.keycode == KEY_ESCAPE:
             Input.mouse_mode = Input.MOUSE_MODE_VISIBLE
+        elif event.keycode == KEY_F5:
+            last_message = "Игра сохранена." if SAVE_STATE.save_player(self) else "Не удалось сохранить игру."
+        elif event.keycode == KEY_F9:
+            last_message = "Сохранение загружено." if SAVE_STATE.load_player(self) else "Нет корректного сохранения."
     elif event is InputEventMouseButton and event.pressed:
         if event.button_index == MOUSE_BUTTON_LEFT:
             Input.mouse_mode = Input.MOUSE_MODE_CAPTURED
