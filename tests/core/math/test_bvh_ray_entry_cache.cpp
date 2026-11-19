@@ -24,16 +24,19 @@
 /* MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. */
 /* IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY   */
 /* CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT,   */
-/* TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONTRACT, TORT OR        */
-/* OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR  */
-/* THE USE OR OTHER DEALINGS IN THE SOFTWARE.                             */
+/* TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE       */
+/* SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.                 */
 /**************************************************************************/
 
 #include "tests/test_macros.h"
 
 TEST_FORCE_LINK(test_bvh_ray_entry_cache)
 
+#include "core/math/aabb.h"
 #include "core/math/bvh.h"
+#include "core/math/rect2.h"
+#include "core/math/vector2.h"
+#include "core/math/vector3.h"
 
 namespace TestBVHRayEntryCache {
 
