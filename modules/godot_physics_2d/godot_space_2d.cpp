@@ -1203,6 +1203,7 @@ GodotSpace2D::GodotSpace2D() {
 	body_time_to_sleep = GLOBAL_GET("physics/2d/time_before_sleep");
 	solver_iterations = GLOBAL_GET("physics/2d/solver/solver_iterations");
 	block_solver_enabled = GLOBAL_GET("physics/2d/solver/block_solver_enabled");
+	parallel_large_islands = GLOBAL_GET("physics/2d/solver/parallel_large_islands");
 	contact_recycle_radius = GLOBAL_GET("physics/2d/solver/contact_recycle_radius");
 	contact_max_separation = GLOBAL_GET("physics/2d/solver/contact_max_separation");
 	contact_max_allowed_penetration = GLOBAL_GET("physics/2d/solver/contact_max_allowed_penetration");
