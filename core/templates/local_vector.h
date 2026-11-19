@@ -173,13 +173,25 @@ public:
 		U from = 0;
 		U occurrences = 0;
 		while (true) {
-			int64_t idx = find(p_val, from);
-
+			const int64_t idx = find(p_val, from);
 			if (idx == -1) {
 				break;
 			}
-			remove_at_unordered(idx);
-			from = idx;
+
+			const U at = U(idx);
+			// Remove matching tail values before swapping a survivor into the hole.
+			// This avoids move assignments when many matches cluster at the end,
+			// while keeping find()'s fast scanning for sparse matches.
+			while (count > at && data[count - 1] == p_val) {
+				data[--count].~T();
+				occurrences++;
+			}
+			if (at == count) {
+				break;
+			}
+
+			remove_at_unordered(at);
+			from = at; // Inspect the value moved into the deleted slot.
 			occurrences++;
 		}
 		return occurrences;
