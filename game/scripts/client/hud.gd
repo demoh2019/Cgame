@@ -247,7 +247,7 @@ func _refresh_inventory() -> void:
 		var button := Button.new()
 		button.custom_minimum_size = Vector2(90, 44)
 		button.add_theme_font_size_override("font_size", 11)
-		button.text = "%s\\nx%d" % [Defs.item(item_id).get("name", item_id), slot["count"]]
+		button.text = "%s\nx%d" % [Defs.item(item_id).get("name", item_id), slot["count"]]
 		button.tooltip_text = "Withdraw one item (at hub workbench)"
 		button.pressed.connect(func() -> void: client.move_stash(item_id, 1, false))
 		_stash_grid.add_child(button)
