@@ -5,6 +5,7 @@ const Validator = preload("res://addons/ai_game_builder/validator.gd")
 const Context = preload("res://addons/ai_game_builder/context.gd")
 const Quality = preload("res://addons/ai_game_builder/quality.gd")
 const RepairPolicy = preload("res://addons/ai_game_builder/repair_policy.gd")
+const Starter = preload("res://addons/ai_game_builder/starter.gd")
 const ENDPOINT := "https://api.openai.com/v1/chat/completions"
 const GENERATED_ROOT := "res://ai_generated/"
 
@@ -91,6 +92,11 @@ func _ready() -> void:
 	_generate.pressed.connect(_generate_files)
 	add_child(_generate)
 
+	var offline_starter := Button.new()
+	offline_starter.text = "Preview offline 2D starter (no API key)"
+	offline_starter.pressed.connect(_preview_offline_starter)
+	add_child(offline_starter)
+
 	_feedback = LineEdit.new()
 	_feedback.placeholder_text = "What should AI improve in this draft?"
 	add_child(_feedback)
@@ -125,6 +131,7 @@ func _ready() -> void:
 
 	_request = HTTPRequest.new()
 	_request.timeout = 120.0
+	_request.body_size_limit = 1048576
 	add_child(_request)
 	_request.request_completed.connect(_on_request_completed)
 
@@ -149,6 +156,36 @@ func _system_prompt() -> String:
 		"On refinement, output the complete replacement draft file list, not just a diff. " +
 		"Return a COMPLETE, syntactically consistent set of files, not markdown code fences."
 	)
+
+
+
+func _preview_offline_starter() -> void:
+	if _generate.disabled:
+		_status.text = "Finish the active request before loading a starter."
+		return
+	var draft := Starter.create_draft()
+	if not draft["ok"]:
+		_status.text = draft["error"]
+		return
+	var review := Quality.review_payload(draft, "2D game")
+	if not review["ok"]:
+		_status.text = "; ".join(PackedStringArray(review["errors"]))
+		return
+	_pending_files = draft["files"]
+	_pending_summary = draft["summary"]
+	_draft_task = "Build upon the bundled 2D arcade starter."
+	_draft_mode = "2D game"
+	_draft_version = 1
+	_repair_attempts = 0
+	_file_picker.clear()
+	for entry in _pending_files:
+		_file_picker.add_item(entry["path"])
+	_file_picker.select(0)
+	_file_picker.disabled = false
+	_show_file(0)
+	_refine.disabled = false
+	_apply.disabled = false
+	_status.text = "Offline starter ready: review %d files, then Apply or Improve." % _pending_files.size()
 
 
 func _generate_files() -> void:

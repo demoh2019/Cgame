@@ -2,6 +2,12 @@
 
 An optional Godot editor addon for generating **small game prototypes, scenes, scripts, shaders and design documents** from natural-language requests. A single model request proposes a set of source files; **nothing is written until the developer reviews and clicks Apply**.
 
+## Instant offline arcade starter
+
+The editor dock includes **Preview offline 2D starter (no API key)**. Click it to load a bundled, working-style Godot 2D arcade game into the regular review panel without contacting any model. Inspect the files and click Apply to create them under `res://ai_generated/`. Open the main scene and press F6 to play. Move with WASD/arrows, collect ten green squares in 60 seconds, and press R to restart. You can use **Improve current draft** to send the starter to AI for further development, after entering an API key.
+
+The CI workflow includes a standalone smoke-test project that copies the bundled game to a clean temporary folder and runs the generated scene headlessly. This does not execute untrusted model output.
+
 ## Setup
 
 1. Copy `addons/ai_game_builder` into your Godot project's `res://addons/ai_game_builder`.
@@ -58,6 +64,7 @@ Project context sharing is **disabled by default**. Enable the checkbox and expl
 godot --headless --path misc/ai_game_builder --script res://tests/test_validator.gd
 godot --headless --path misc/ai_game_builder --script res://tests/test_context.gd
 godot --headless --path misc/ai_game_builder --script res://tests/test_quality.gd
+godot --headless --path misc/ai_game_builder --script res://tests/test_starter.gd
 godot --headless --editor --path misc/ai_game_builder --quit
 ```
 
