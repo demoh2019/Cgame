@@ -21,6 +21,7 @@ const OutpostFortification = preload("res://scripts/shared/outpost_fortification
 const OutpostBreach = preload("res://scripts/shared/outpost_breach.gd")
 const MarketBoard = preload("res://scripts/shared/market_board.gd")
 const Contracts = preload("res://scripts/shared/contracts.gd")
+const DailyBounties = preload("res://scripts/shared/daily_bounties.gd")
 const SaveValidation = preload("res://scripts/shared/save_validation.gd")
 const Reputation = preload("res://scripts/shared/reputation.gd")
 const Crafting = preload("res://scripts/shared/crafting.gd")
@@ -78,6 +79,7 @@ class Player:
 	var survival
 	var progression # Permanent skills; gear is lost on death, not experience.
 	var contract_state: Dictionary = {} # Server-owned persistent camp contract journal.
+	var daily_bounty: Dictionary = {} # Account-persisted UTC daily bounty, never set by clients.
 	var renown: int = 0 # Permanent survivor reputation, validated on Nakama loads.
 	var rest_cooldown: float = 0.0 # Per-survivor seconds until next camp recovery.
 	var party_aid_timer: float = 0.0 # Temporary medical support cooldown.
@@ -191,6 +193,7 @@ func add_player(peer_id: int, p_name: String, p_user_id: String = "", saved: Dic
 	player.survival = Survival.new()
 	player.progression = Progression.new()
 	player.contract_state = Contracts.empty_state()
+	player.daily_bounty = DailyBounties.empty_state()
 	player.renown = 0
 	players[peer_id] = player
 	# Bind restored account-owned structures to this authenticated session.
@@ -224,6 +227,7 @@ func character_data(player: Player) -> Dictionary:
 		"stash": player.stash.to_dict(),
 		"progression": player.progression.to_dict(),
 		"contracts": player.contract_state.duplicate(true),
+		"daily_bounty": player.daily_bounty.duplicate(true),
 		"renown": player.renown,
 		"rest_cooldown": player.rest_cooldown, "lake_drink_cooldown": player.lake_drink_cooldown,
 	}
@@ -317,6 +321,10 @@ func apply_character(player: Player, data: Dictionary) -> bool:
 	var loaded_contracts: Variant = data.get("contracts", Contracts.empty_state())
 	if not Contracts.valid_state(loaded_contracts):
 		return false
+	var loaded_daily: Variant = data.get("daily_bounty", DailyBounties.empty_state())
+	if not DailyBounties.valid_state(loaded_daily) \
+			or int(loaded_daily["day"]) > DailyBounties.utc_day():
+		return false
 	# Old version-one characters predate renown and begin at rank zero.
 	var loaded_renown: Variant = data.get("renown", 0)
 	if not Reputation.valid_points(loaded_renown):
@@ -326,6 +334,7 @@ func apply_character(player: Player, data: Dictionary) -> bool:
 	# inventory, protected stash, progression or survival state.
 	player.progression = loaded_progression
 	player.contract_state = (loaded_contracts as Dictionary).duplicate(true)
+	player.daily_bounty = (loaded_daily as Dictionary).duplicate(true)
 	player.renown = int(loaded_renown)
 	player.pvp_infamy = float(data.get("pvp_infamy", 0.0))
 	player.pvp_kills = int(data.get("pvp_kills", 0))
@@ -1184,6 +1193,15 @@ func cmd_rest(peer_id: int) -> Dictionary:
 		"health": player.survival.health, "stamina": player.survival.stamina}
 
 
+## UTC day changes happen inside the server before any bounty contribution
+## or claim; refreshing updates persistent state, including on reconnect.
+func _refresh_daily(player: Player) -> int:
+	var today: int = DailyBounties.utc_day()
+	if DailyBounties.refresh(player.daily_bounty, today):
+		player.dirty_character = true
+	return today
+
+
 func cmd_contract(peer_id: int, action: String) -> Dictionary:
 	var player: Player = players.get(peer_id)
 	if player == null or not _alive(player):
@@ -1195,12 +1213,18 @@ func cmd_contract(peer_id: int, action: String) -> Dictionary:
 	match action:
 		"accept": result = Contracts.accept(player.contract_state)
 		"claim": result = Contracts.claim(player.inventory, player.contract_state)
+		"daily_claim":
+			var today: int = _refresh_daily(player)
+			result = DailyBounties.claim(player.inventory, player.daily_bounty, today)
 		_: return {"ok": false, "reason": "unknown_action"}
 	if bool(result.get("ok", false)):
 		player.dirty_character = true
 		if action == "claim":
 			player.dirty_inventory = true
 			_earn_renown(player, Reputation.CONTRACT_RENOWN, "contract")
+		elif action == "daily_claim":
+			player.dirty_inventory = true
+			_earn_renown(player, int(result.get("renown", 0)), "daily_bounty")
 	return result
 
 
@@ -1836,6 +1860,8 @@ func cmd_loot(peer_id: int, entity_id: int) -> Dictionary:
 				"level": player.progression.scavenging_level()})
 		if Contracts.record_crate(player.contract_state, entity_id):
 			player.dirty_character = true
+		if DailyBounties.record_crate(player.daily_bounty, _refresh_daily(player), entity_id):
+			player.dirty_character = true
 		events.append({"type": "crate", "peer": peer_id, "id": entity_id})
 		return {"ok": true, "scavenging_xp": gained_xp}
 	return {"ok": false, "reason": "nothing_there"}
@@ -1992,6 +2018,8 @@ func _damage_target(attacker: Player, hit: Dictionary, damage: float) -> void:
 						"xp": mastery_xp})
 			_party_award_assists(attacker, zombie)
 			if Contracts.record_kill(attacker.contract_state):
+				attacker.dirty_character = true
+			if DailyBounties.record_kill(attacker.daily_bounty, _refresh_daily(attacker)):
 				attacker.dirty_character = true
 			_on_zombie_death(zombie, attacker)
 	else:
@@ -2775,6 +2803,9 @@ func snapshot_for(peer_id: int) -> Dictionary:
 			"scavenging_xp": player.progression.scavenging_xp,
 			"combat_levels": player.progression.combat_levels(),
 			"contract": player.contract_state.duplicate(true),
+			"daily_bounty": player.daily_bounty.duplicate(true),
+			"daily_description": DailyBounties.description(player.daily_bounty, _refresh_daily(player)),
+			"daily_utc_day": DailyBounties.utc_day(),
 			"renown": player.renown,
 			"renown_rank": Reputation.title(player.renown),
 			"vendor_discount": Reputation.discount_percent(player.renown),
