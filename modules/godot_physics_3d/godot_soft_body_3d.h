@@ -125,6 +125,17 @@ class GodotSoftBody3D : public GodotCollisionObject3D {
 		real_t bend_compliance_ratio = 1.0;
 	};
 	LocalVector<DihedralHinge> xpbd_dihedral_hinges;
+	// XPBD centerline bend triplets selected from original triangle edges.
+	// Unlike a two-hop spring, this constrains the local bend angle.
+	// Zero rod compliance allocates no rod constraints.
+	struct RodBendConstraint {
+		uint32_t a = 0;
+		uint32_t middle = 0;
+		uint32_t c = 0;
+		real_t rest_angle = 0.0;
+		real_t lambda = 0.0;
+	};
+	LocalVector<RodBendConstraint> xpbd_rod_bends;
 	LocalVector<real_t> xpbd_dihedral_lambdas;
 	// Optional per-particle reference offsets for meshless rigid shape fitting.
 	// Zero stiffness allocates no additional per-node data.
@@ -375,6 +386,7 @@ private:
 	real_t get_unpinned_node_inverse_mass(uint32_t p_node_index) const;
 	void initialize_shear_constraints();
 	void initialize_dihedral_constraints();
+	void initialize_rod_bend_constraints();
 	void initialize_shape_matching();
 	void solve_shape_matching(real_t p_strength);
 	void solve_shape_matching_clusters(real_t p_strength);
