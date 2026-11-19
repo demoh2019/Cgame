@@ -357,10 +357,33 @@ Error ResourceUID::load_from_cache(bool p_reset) {
 		unique_ids.clear();
 	}
 
-	uint32_t entry_count = f->get_32();
+	const uint64_t file_length = f->get_length();
+	ERR_FAIL_COND_V_MSG(file_length < 4, ERR_FILE_CORRUPT, "Resource UID cache is too short.");
+
+	const uint32_t entry_count = f->get_32();
+	// Every entry needs at least an 8-byte ID and a 4-byte path length.
+	// Validate the count before allocating hash-table backing storage.
+	ERR_FAIL_COND_V_MSG(uint64_t(entry_count) > (file_length - 4) / 12, ERR_FILE_CORRUPT, "Resource UID cache has an invalid entry count.");
+
+	// Pre-size both hash tables once, including any previously loaded entries
+	// when p_reset is false. Account for the 75% maximum table occupancy.
+	// This avoids repeated rehashes and temporary peak-memory spikes when
+	// loading resource-heavy projects with many cache entries.
+	const uint64_t target_size = uint64_t(unique_ids.size()) + entry_count;
+	if (entry_count > 0 && target_size <= (uint64_t(UINT32_MAX) * 3) / 4) {
+		const uint32_t required_capacity = uint32_t((target_size * 4 + 2) / 3);
+		unique_ids.reserve(required_capacity);
+		if (use_reverse_cache) {
+			const uint64_t reverse_size = uint64_t(reverse_cache.size()) + entry_count;
+			if (reverse_size <= (uint64_t(UINT32_MAX) * 3) / 4) {
+				reverse_cache.reserve(uint32_t((reverse_size * 4 + 2) / 3));
+			}
+		}
+	}
 	for (uint32_t i = 0; i < entry_count; i++) {
 		int64_t id = f->get_64();
 		int32_t len = f->get_32();
+		ERR_FAIL_COND_V_MSG(len < 0 || f->get_position() > file_length || uint64_t(len) > file_length - f->get_position(), ERR_FILE_CORRUPT, "Resource UID cache has an invalid path length.");
 		Cache c;
 		c.cs.resize_uninitialized(len + 1);
 		ERR_FAIL_COND_V(c.cs.size() != len + 1, ERR_FILE_CORRUPT); // Out of memory.
