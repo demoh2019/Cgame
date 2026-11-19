@@ -168,6 +168,12 @@ _FORCE_INLINE_ static bool physics_softbody_hydrodynamic_drag_face(
 	double power = 0.0;
 	double quadratic = 0.0;
 	for (int node = 0; node < 3; ++node) {
+		// A pinned vertex has no kinetic-energy degree of freedom. Including
+		// its reaction impulse in the linear energy term would falsely permit
+		// the free vertices to gain energy from an immobile pin.
+		if (!(p_inverse_mass[node] > real_t(0.0))) {
+			continue;
+		}
 		for (int component = 0; component < 3; ++component) {
 			const double impulse = impulses[node][component];
 			power += impulse * (velocity[node][component] - fluid[component]);
