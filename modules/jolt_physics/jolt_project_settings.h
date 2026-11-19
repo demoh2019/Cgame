@@ -76,6 +76,9 @@ public:
 	// Optional nonlocal self edge/edge collisions, separate quota within
 	// the existing global self-contact budget. Requires self_contacts=true.
 	inline static bool soft_body_self_edge_contacts = false;
+	// Experimental time-swept nonlocal self edge-edge contact prediction.
+	// Requires self_contacts and self_edge_contacts; off by default.
+	inline static bool soft_body_self_speculative_edge_ccd = false;
 	// Rebuild a bounded local-space BVH of deformed edges when self EE is on.
 	// Disabled by default, preserving the original linear edge-pair scan.
 	inline static bool soft_body_self_edge_bvh = false;
