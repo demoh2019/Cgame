@@ -1,0 +1,30 @@
+name: AI Game Builder tests
+
+on:
+  pull_request:
+    paths:
+      - 'misc/ai_game_builder/**'
+      - '.github/workflows/ai-game-builder.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  godot-headless:
+    runs-on: ubuntu-latest
+    container:
+      image: barichello/godot-ci:4.7.2
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          filter: blob:none
+          sparse-checkout: |
+            misc/ai_game_builder
+          sparse-checkout-cone-mode: true
+      - name: Engine version
+        run: godot --version
+      - name: Plan validation and filesystem regression tests
+        run: godot --headless --path misc/ai_game_builder --script res://tests/test_plan.gd
+      - name: Editor plugin smoke test
+        run: godot --headless --editor --path misc/ai_game_builder --quit
