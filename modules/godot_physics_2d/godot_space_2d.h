@@ -140,6 +140,7 @@ private:
 	real_t rolling_friction = 0.0;
 	real_t constraint_bias = 0.0;
 	real_t restitution_velocity_threshold = 0.0;
+	real_t static_friction_multiplier = 1.0; // PhysX-style stiction; 1 = legacy friction.
 	int friction_combine_mode = 0; // 0: legacy, 1: geometric, 2: average, 3: maximum
 	int restitution_combine_mode = 0; // 0: legacy sum, 1: max, 2: average, 3: min, 4: multiply, 5: geometric
 
@@ -207,6 +208,7 @@ public:
 	_FORCE_INLINE_ real_t get_max_angular_velocity() const { return max_angular_velocity; }
 	_FORCE_INLINE_ bool is_implicit_damping_enabled() const { return implicit_damping; }
 	_FORCE_INLINE_ real_t get_rolling_friction() const { return rolling_friction; }
+	_FORCE_INLINE_ real_t get_static_friction_multiplier() const { return static_friction_multiplier; }
 	_FORCE_INLINE_ real_t get_restitution_velocity_threshold() const { return restitution_velocity_threshold; }
 	_FORCE_INLINE_ real_t mix_restitution(real_t p_a, real_t p_b) const { return godot_physics_combine_restitution(p_a, p_b, restitution_combine_mode); }
 	// Match Box2D's geometric mean when explicitly selected, while keeping

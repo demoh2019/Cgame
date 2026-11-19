@@ -33,6 +33,7 @@
 #include "godot_collision_solver_3d.h"
 #include "godot_contact_normal_3d.h"
 #include "godot_space_3d.h"
+#include "servers/physics_contact_static_friction.h"
 #include "servers/physics_contact_angular_friction.h"
 #include "servers/physics_manifold_reduction_3d.h"
 #include "servers/physics_ccd_sphere_toi.h"
@@ -643,7 +644,7 @@ bool GodotBodyPair3D::pre_solve(real_t p_step) {
 		// cone. Otherwise lowering friction can still apply a too-large
 		// tangential impulse during the warm start.
 		if (has_friction) {
-			const real_t cached_tangent_limit = mixed_friction * c.acc_normal_impulse;
+			const real_t cached_tangent_limit = mixed_friction * space->get_static_friction_multiplier() * c.acc_normal_impulse;
 			if (cached_tangent_limit <= 0.0) {
 				// No normal impulse means no admissible tangent impulse.
 				c.acc_tangent_impulse = Vector3();
@@ -805,6 +806,7 @@ void GodotBodyPair3D::solve(real_t p_step) {
 	real_t inv_mass_B = collide_B ? B->get_inv_mass() : 0.0;
 	// Mixing is independent of contact point; compute once per solver pass.
 	const real_t friction = mixed_friction;
+	const real_t static_friction_multiplier = space->get_static_friction_multiplier();
 
 	// Box2D's two-contact block LCP generalized to 3D tensor inertia.
 	// Only solve a well-conditioned pair with nearly parallel contact normals;
@@ -1032,8 +1034,12 @@ void GodotBodyPair3D::solve(real_t p_step) {
 			const real_t fi_len_squared = c.acc_tangent_impulse.length_squared();
 			const real_t jtMax = c.acc_normal_impulse * friction;
 
-			// Only compute sqrt for impulses outside the friction cone.
-			if (fi_len_squared > CMP_EPSILON * CMP_EPSILON && fi_len_squared > jtMax * jtMax) {
+			// PhysX-style static cone can hold a resting contact. Exceeding it
+			// switches to the smaller dynamic-friction cone. Keep the old math
+			// exactly when the multiplier is disabled (1.0).
+			if (static_friction_multiplier > real_t(1.0)) {
+				c.acc_tangent_impulse = godot_physics_clamp_static_friction_3d(c.acc_tangent_impulse, jtMax, static_friction_multiplier);
+			} else if (fi_len_squared > CMP_EPSILON * CMP_EPSILON && fi_len_squared > jtMax * jtMax) {
 				c.acc_tangent_impulse *= jtMax / Math::sqrt(fi_len_squared);
 			}
 
@@ -1302,7 +1308,7 @@ bool GodotBodySoftBodyPair3D::pre_solve(real_t p_step) {
 		} else if (friction > 0.0) {
 			// Material changes must shrink the cached friction impulse to the
 			// current Coulomb cone before it is applied to either body.
-			const real_t tangent_limit = friction * c.acc_normal_impulse;
+			const real_t tangent_limit = friction * space->get_static_friction_multiplier() * c.acc_normal_impulse;
 			const real_t tangent_length_squared = c.acc_tangent_impulse.length_squared();
 			if (tangent_length_squared > tangent_limit * tangent_limit) {
 				c.acc_tangent_impulse *= tangent_limit / Math::sqrt(tangent_length_squared);
@@ -1357,6 +1363,7 @@ void GodotBodySoftBodyPair3D::solve(real_t p_step) {
 	const real_t max_bias_av = MAX_BIAS_ROTATION / p_step;
 	// Material friction is constant during the constraint solve.
 	const real_t friction = body->get_friction();
+	const real_t static_friction_multiplier = space->get_static_friction_multiplier();
 
 	Basis zero_basis;
 	zero_basis.set_zero();
@@ -1486,8 +1493,11 @@ void GodotBodySoftBodyPair3D::solve(real_t p_step) {
 			const real_t fi_len_squared = c.acc_tangent_impulse.length_squared();
 			const real_t jtMax = c.acc_normal_impulse * friction;
 
-			// Only compute sqrt for impulses outside the friction cone.
-			if (fi_len_squared > CMP_EPSILON * CMP_EPSILON && (jtMax < 0.0 || fi_len_squared > jtMax * jtMax)) {
+			// Use the static cone when it can hold the soft-body node;
+			// otherwise fall back to dynamic friction.
+			if (static_friction_multiplier > real_t(1.0) && jtMax > real_t(0.0)) {
+				c.acc_tangent_impulse = godot_physics_clamp_static_friction_3d(c.acc_tangent_impulse, jtMax, static_friction_multiplier);
+			} else if (fi_len_squared > CMP_EPSILON * CMP_EPSILON && (jtMax < 0.0 || fi_len_squared > jtMax * jtMax)) {
 				c.acc_tangent_impulse *= jtMax / Math::sqrt(fi_len_squared);
 			}
 
