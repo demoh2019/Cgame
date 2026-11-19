@@ -48,6 +48,18 @@ const REFINED_PRIORITY := ["bar_4", "bar_3", "bar_2", "bar_1",
 	"cloth_4", "cloth_3", "cloth_2", "cloth_1"]
 
 
+## Prefer the rarest fish first so returning fishers can cash out valuable
+## catches without affecting the existing material-salvage shortcut.
+const FISH_PRIORITY := ["raw_fish_4", "raw_fish_3", "raw_fish_2", "raw_fish"]
+
+
+static func first_fish(carried) -> String:
+	for item_id in FISH_PRIORITY:
+		if carried.count(item_id) > 0:
+			return item_id
+	return ""
+
+
 static func first_sellable(carried) -> String:
 	for item_id in REFINED_PRIORITY:
 		if carried.count(item_id) > 0:
