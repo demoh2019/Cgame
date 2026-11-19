@@ -5352,54 +5352,78 @@ String String::xml_unescape() const {
 }
 
 String String::pad_decimals(int p_digits) const {
-	String s = *this;
-	int c = s.find_char('.');
-
-	if (c == -1) {
-		if (p_digits <= 0) {
-			return s;
-		}
-		s += ".";
-		c = s.length() - 1;
-	} else {
-		if (p_digits <= 0) {
-			return s.substr(0, c);
-		}
+	const int source_length = length();
+	const int dot_position = find_char('.');
+	if (p_digits <= 0) {
+		return dot_position < 0 ? *this : substr(0, dot_position);
 	}
 
-	if (s.length() - (c + 1) > p_digits) {
-		return s.substr(0, c + p_digits + 1);
-	} else {
-		int zeros_to_add = p_digits - s.length() + (c + 1);
-		return s + String("0").repeat(zeros_to_add);
+	const int decimal_count = dot_position < 0 ? 0 : source_length - dot_position - 1;
+	if (decimal_count > p_digits) {
+		return substr(0, dot_position + p_digits + 1);
 	}
+	if (dot_position >= 0 && decimal_count == p_digits) {
+		return *this;
+	}
+
+	const int missing_zeros = p_digits - decimal_count;
+	const int64_t result_length = int64_t(source_length) + missing_zeros + (dot_position < 0 ? 1 : 0);
+	ERR_FAIL_COND_V_MSG(result_length >= INT32_MAX, *this, "Padded decimal string is too long.");
+
+	String result;
+	result.resize_uninitialized(int(result_length) + 1);
+	char32_t *write = result.ptrw();
+	if (source_length > 0) {
+		memcpy(write, ptr(), size_t(source_length) * sizeof(char32_t));
+		write += source_length;
+	}
+	if (dot_position < 0) {
+		*write++ = '.';
+	}
+	for (int i = 0; i < missing_zeros; i++) {
+		*write++ = '0';
+	}
+	*write = 0;
+	return result;
 }
 
 String String::pad_zeros(int p_digits) const {
-	String s = *this;
-	int end = s.find_char('.');
-
+	const int source_length = length();
+	int end = find_char('.');
 	if (end == -1) {
-		end = s.length();
+		end = source_length;
 	}
-
 	if (end == 0) {
-		return s;
+		return *this;
 	}
 
+	const char32_t *source = ptr();
 	int begin = 0;
-
-	while (begin < end && !is_digit(s[begin])) {
+	while (begin < end && !is_digit(source[begin])) {
 		begin++;
 	}
-
-	int zeros_to_add = p_digits - (end - begin);
-
-	if (zeros_to_add <= 0) {
-		return s;
-	} else {
-		return s.insert(begin, String("0").repeat(zeros_to_add));
+	const int64_t missing_zeros = int64_t(p_digits) - (end - begin);
+	if (missing_zeros <= 0) {
+		return *this;
 	}
+
+	const int64_t result_length = int64_t(source_length) + missing_zeros;
+	ERR_FAIL_COND_V_MSG(result_length >= INT32_MAX, *this, "Padded zero string is too long.");
+
+	String result;
+	result.resize_uninitialized(int(result_length) + 1);
+	char32_t *write = result.ptrw();
+	if (begin > 0) {
+		memcpy(write, source, size_t(begin) * sizeof(char32_t));
+	}
+	for (int64_t i = 0; i < missing_zeros; i++) {
+		write[begin + i] = '0';
+	}
+	if (source_length > begin) {
+		memcpy(write + begin + missing_zeros, source + begin, size_t(source_length - begin) * sizeof(char32_t));
+	}
+	write[result_length] = 0;
+	return result;
 }
 
 String String::trim_prefix(const String &p_prefix) const {
@@ -5882,23 +5906,48 @@ String rtoss(double p_val) {
 }
 
 // Right-pad with a character.
-String String::rpad(int p_min_length, const String &p_character) const {
-	String s = *this;
-	int padding = p_min_length - s.length();
-	if (padding > 0) {
-		s += p_character.repeat(padding);
+// Build the padded result once rather than materializing a repeated padding
+// string and then allocating a second buffer for concatenation.
+static String _pad_string(const String &p_source, int p_min_length, const String &p_character, bool p_left) {
+	const int source_length = p_source.length();
+	const int character_length = p_character.length();
+	const int64_t repetitions = int64_t(p_min_length) - source_length;
+	if (repetitions <= 0 || character_length == 0) {
+		return p_source;
 	}
-	return s;
+
+	const int64_t result_length = source_length + repetitions * character_length;
+	ERR_FAIL_COND_V_MSG(result_length >= INT32_MAX, p_source, "Padded string is too long.");
+
+	String result;
+	result.resize_uninitialized(int(result_length) + 1);
+	char32_t *write = result.ptrw();
+	const char32_t *source = p_source.ptr();
+	const char32_t *characters = p_character.ptr();
+
+	if (!p_left && source_length > 0) {
+		memcpy(write, source, size_t(source_length) * sizeof(char32_t));
+		write += source_length;
+	}
+	for (int64_t i = 0; i < repetitions; i++) {
+		memcpy(write, characters, size_t(character_length) * sizeof(char32_t));
+		write += character_length;
+	}
+	if (p_left && source_length > 0) {
+		memcpy(write, source, size_t(source_length) * sizeof(char32_t));
+		write += source_length;
+	}
+	*write = 0;
+	return result;
+}
+
+String String::rpad(int p_min_length, const String &p_character) const {
+	return _pad_string(*this, p_min_length, p_character, false);
 }
 
 // Left-pad with a character.
 String String::lpad(int p_min_length, const String &p_character) const {
-	String s = *this;
-	int padding = p_min_length - s.length();
-	if (padding > 0) {
-		s = p_character.repeat(padding) + s;
-	}
-	return s;
+	return _pad_string(*this, p_min_length, p_character, true);
 }
 
 // sprintf is implemented in GDScript via:
