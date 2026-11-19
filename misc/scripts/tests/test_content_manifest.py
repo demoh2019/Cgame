@@ -201,6 +201,31 @@ class ContentManifestTests(unittest.TestCase):
             with self.subTest(path=path), self.assertRaises(cm.ManifestError):
                 cm.validate_path(path)
 
+    def test_rejects_windows_forbidden_characters(self):
+        for path in ["a<b", "a>b", 'quote".tscn', "broken|name", "glob?.txt",
+                     "star*.gd", "sub/file?.png", "sub/a<b.tres"]:
+            with self.subTest(path=path), self.assertRaises(cm.ManifestError):
+                cm.validate_path(path)
+
+    def test_rejects_surrogate_unicode_in_paths(self):
+        for path in ["surrogate\\ud800.tscn", "sub/\\udfff.txt"]:
+            with self.subTest(path=path), self.assertRaises(cm.ManifestError):
+                cm.validate_path(path)
+
+    def test_rejects_malicious_windows_names_in_loaded_manifest(self):
+        for path in ["asset?.png", "scripts/a|b.gd", 'asset"name.tres', "a\\ud800.txt"]:
+            with self.subTest(path=path):
+                self.error({"format": 1, "files": [{"path": path, "bytes": 0, "sha256": "a" * 64}]})
+
+    def test_rejects_nonportable_file_found_during_inventory(self):
+        filename = "texture?.png"
+        try:
+            self.put(filename)
+        except OSError:
+            self.skipTest("Host file system disallows this filename")
+        with self.assertRaises(cm.ManifestError):
+            self.build()
+
     def test_accepts_normal_portable_paths(self):
         for path in ["a.txt", "sub/floor.tscn", "spaces allowed/file 1.tres", "ä/雪.png", ".hidden"]:
             with self.subTest(path=path):
