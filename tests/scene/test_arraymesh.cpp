@@ -117,6 +117,62 @@ TEST_CASE("[ImporterMeshFastPath] multiple surfaces share vertices without dropp
 	CHECK_EQ(navmesh->get_vertices().size(), 3);
 }
 
+
+TEST_CASE("[ImporterMeshFastPath] merging a translated mesh does not mutate the source buffers") {
+	const PackedVector3Array positions = { Vector3(0, 0, 0), Vector3(1, 0, 0), Vector3(0, 1, 0) };
+	const PackedInt32Array triangle = { 0, 1, 2 };
+	Ref<ImporterMesh> original = _make_mesh_for_navigation_fastpath(positions, triangle);
+	TypedArray<ImporterMesh> input_meshes;
+	input_meshes.push_back(original);
+	TypedArray<Transform3D> transforms;
+	transforms.push_back(Transform3D(Basis(), Vector3(5, -2, 3)));
+	Ref<ImporterMesh> merged = ImporterMesh::merge_importer_meshes(input_meshes, transforms, false);
+	REQUIRE(merged.is_valid());
+	REQUIRE_EQ(merged->get_surface_count(), 1);
+	const Array merged_arrays = merged->get_surface_arrays(0);
+	const PackedVector3Array translated = merged_arrays[Mesh::ARRAY_VERTEX];
+	REQUIRE_EQ(translated.size(), 3);
+	CHECK(translated[0].is_equal_approx(Vector3(5, -2, 3)));
+	CHECK(translated[1].is_equal_approx(Vector3(6, -2, 3)));
+	CHECK(translated[2].is_equal_approx(Vector3(5, -1, 3)));
+	const Array original_arrays = original->get_surface_arrays(0);
+	const PackedVector3Array unchanged = original_arrays[Mesh::ARRAY_VERTEX];
+	REQUIRE_EQ(unchanged.size(), 3);
+	CHECK(unchanged[0].is_equal_approx(Vector3(0, 0, 0)));
+	CHECK(unchanged[1].is_equal_approx(Vector3(1, 0, 0)));
+	CHECK(unchanged[2].is_equal_approx(Vector3(0, 1, 0)));
+}
+
+TEST_CASE("[ImporterMeshFastPath] merging matching surfaces remaps indices and keeps original") {
+	const PackedVector3Array positions = { Vector3(0, 0, 0), Vector3(1, 0, 0), Vector3(0, 1, 0) };
+	const PackedInt32Array triangle = { 0, 1, 2 };
+	Ref<ImporterMesh> source = _make_mesh_for_navigation_fastpath(positions, triangle);
+	TypedArray<ImporterMesh> inputs;
+	inputs.push_back(source);
+	inputs.push_back(source);
+	TypedArray<Transform3D> transforms;
+	transforms.push_back(Transform3D());
+	transforms.push_back(Transform3D(Basis(), Vector3(3, 0, 0)));
+	Ref<ImporterMesh> merged = ImporterMesh::merge_importer_meshes(inputs, transforms, true);
+	REQUIRE(merged.is_valid());
+	REQUIRE_EQ(merged->get_surface_count(), 1);
+	const Array arrays = merged->get_surface_arrays(0);
+	const PackedInt32Array indices = arrays[Mesh::ARRAY_INDEX];
+	const PackedVector3Array vertices = arrays[Mesh::ARRAY_VERTEX];
+	REQUIRE_EQ(indices.size(), 6);
+	REQUIRE_EQ(vertices.size(), 6);
+	for (int i = 0; i < 6; ++i) {
+		CHECK_EQ(indices[i], i);
+	}
+	CHECK(vertices[3].is_equal_approx(Vector3(3, 0, 0)));
+	CHECK(vertices[4].is_equal_approx(Vector3(4, 0, 0)));
+	const PackedInt32Array source_indices = source->get_surface_arrays(0)[Mesh::ARRAY_INDEX];
+	REQUIRE_EQ(source_indices.size(), 3);
+	CHECK_EQ(source_indices[0], 0);
+	CHECK_EQ(source_indices[1], 1);
+	CHECK_EQ(source_indices[2], 2);
+}
+
 #ifdef MODULE_XATLAS_UNWRAP_ENABLED
 TEST_CASE("[SceneTree][ImporterMesh] Lightmap unwrap preserves attribute compression") {
 	for (bool compressed : { false, true }) {
