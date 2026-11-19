@@ -37,8 +37,8 @@
 
 void GridContainer::_resort() {
 	// Dense scratch buffers avoid per-cell tree allocations during reflow.
-	// The valid column and row indices are contiguous; only the expanded
-	// flags still need sparse storage for trailing empty columns.
+	// Real column and row indices are contiguous. Trailing empty
+	// columns are represented by a count rather than allocated entries.
 	const int child_count = get_child_count();
 	const int col_capacity = MIN(columns, child_count);
 	const int row_capacity = child_count == 0 ? 0 : (child_count - 1) / columns + 1;
