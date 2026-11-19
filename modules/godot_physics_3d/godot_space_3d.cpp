@@ -1345,6 +1345,8 @@ GodotSpace3D::GodotSpace3D() {
 	soft_body_tetra_fem_compliance = Math::is_finite(configured_tetra_compliance) ? MAX(real_t(0.0), configured_tetra_compliance) : real_t(0.0);
 	const real_t configured_tetra_poisson = GLOBAL_GET("physics/3d/solver/soft_body_tetra_fem_poisson_ratio");
 	soft_body_tetra_fem_poisson_ratio = Math::is_finite(configured_tetra_poisson) ? CLAMP(configured_tetra_poisson, real_t(0.0), real_t(0.49)) : real_t(0.3);
+	const real_t configured_tetra_damping = GLOBAL_GET("physics/3d/solver/soft_body_tetra_fem_damping_rate");
+	soft_body_tetra_fem_damping_rate = Math::is_finite(configured_tetra_damping) ? MAX(real_t(0.0), configured_tetra_damping) : real_t(0.0);
 	const real_t configured_tetra_viscosity = GLOBAL_GET("physics/3d/solver/soft_body_tetra_fem_viscosity");
 	soft_body_tetra_fem_viscosity = Math::is_finite(configured_tetra_viscosity) ? MAX(real_t(0.0), configured_tetra_viscosity) : real_t(0.0);
 	const real_t configured_membrane_damping = GLOBAL_GET("physics/3d/solver/soft_body_membrane_damping_rate");
