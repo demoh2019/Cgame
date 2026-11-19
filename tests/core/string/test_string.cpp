@@ -35,6 +35,8 @@ TEST_FORCE_LINK(test_string)
 #include "core/string/char_utils.h"
 #include "core/string/ustring.h"
 
+#include <cstdlib>
+
 namespace TestString {
 
 int u32scmp(const char32_t *l, const char32_t *r) {
@@ -2824,6 +2826,76 @@ TEST_CASE("[String] uri_encode randomized byte-for-byte equivalence") {
 			}
 		}
 		CHECK(input.uri_encode() == expected);
+		CHECK(input.length() == len);
+	}
+}
+
+TEST_CASE("[String] URI decoding preserves ASCII COW and legacy edge cases") {
+	const String unchanged = "res://folder/file_name.123~";
+	const char32_t *original = unchanged.ptr();
+	CHECK(unchanged.uri_decode().ptr() == original);
+	CHECK(unchanged.uri_file_decode().ptr() == original);
+
+	const String with_plus = "one+two+three";
+	CHECK(with_plus.uri_decode() == "one two three");
+	CHECK(with_plus.uri_file_decode().ptr() == with_plus.ptr());
+	CHECK(String("%2F%20%41%7a").uri_decode() == "/ Az");
+	CHECK(String("foo%2fbar").uri_file_decode() == "foo/bar");
+	CHECK(String("%GG").uri_decode() == "%GG");
+	CHECK(String("%A!").uri_decode() == "A!");
+	CHECK(String("%%41").uri_decode() == "%A");
+	CHECK(String("trailing%").uri_decode() == "trailing%");
+	CHECK(String("short%F").uri_decode() == "short%F");
+	CHECK(String("x%00y").uri_decode().length() == 3);
+	CHECK(String("x%00y").uri_decode()[1] == 0);
+	CHECK(String(U"路徑%20😄").uri_decode() == U"路徑 😄");
+}
+
+TEST_CASE("[String] URI decoding matches the original strtol implementation") {
+	const auto legacy = [](const String &p_input, bool p_decode_plus) {
+		const CharString src = p_input.utf8();
+		CharString result;
+		for (int i = 0; i < src.length(); i++) {
+			if (src[i] == '%' && i + 2 < src.length()) {
+				const char hex1 = src[i + 1];
+				if (is_hex_digit(hex1)) {
+					const char hex2 = src[i + 2];
+					if (is_hex_digit(hex2)) {
+						char bytes[3] = { hex1, hex2, 0 };
+						result += char(strtol(bytes, nullptr, 16));
+						i += 2;
+					}
+				} else {
+					result += src[i];
+				}
+			} else if (p_decode_plus && src[i] == '+') {
+				result += ' ';
+			} else {
+				result += src[i];
+			}
+		}
+		return String::utf8(result);
+	};
+
+	uint32_t seed = 0x7308AC99;
+	static constexpr char32_t alphabet[] = U"abCDEF0123456789%+ !?/_-α😀";
+	for (int trial = 0; trial < 512; trial++) {
+		seed ^= seed << 13;
+		seed ^= seed >> 17;
+		seed ^= seed << 5;
+		const int len = int(seed % 192);
+		String input;
+		input.resize_uninitialized(len + 1);
+		char32_t *chars = input.ptrw();
+		for (int i = 0; i < len; i++) {
+			seed ^= seed << 13;
+			seed ^= seed >> 17;
+			seed ^= seed << 5;
+			chars[i] = alphabet[seed % (sizeof(alphabet) / sizeof(alphabet[0]) - 1)];
+		}
+		chars[len] = 0;
+		CHECK(input.uri_decode() == legacy(input, true));
+		CHECK(input.uri_file_decode() == legacy(input, false));
 		CHECK(input.length() == len);
 	}
 }
