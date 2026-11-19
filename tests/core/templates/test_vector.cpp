@@ -448,6 +448,45 @@ TEST_CASE("[Vector] Slice") {
 	ERR_PRINT_ON;
 }
 
+TEST_CASE("[Vector] Full slice reuses COW storage and detaches on mutation") {
+	Vector<uint8_t> bytes;
+	REQUIRE(bytes.resize(8192) == OK);
+	for (int i = 0; i < bytes.size(); i++) {
+		bytes.write[i] = uint8_t(i * 17);
+	}
+
+	const uint8_t *original_ptr = bytes.ptr();
+	Vector<uint8_t> full = bytes.slice(0, bytes.size());
+	CHECK(full.size() == bytes.size());
+	CHECK(full.ptr() == original_ptr); // No allocation or bulk copy.
+
+	// Mutating either owner must preserve the other's values.
+	full.write[0] = 251;
+	CHECK(full.ptr() != bytes.ptr());
+	CHECK(bytes[0] == 0);
+	CHECK(full[0] == 251);
+	CHECK(bytes[7000] == uint8_t(7000 * 17));
+
+	Vector<uint8_t> clamped = bytes.slice(-8192, 999999);
+	CHECK(clamped.ptr() == bytes.ptr());
+	bytes.write[1] = 252;
+	CHECK(clamped[1] == uint8_t(17));
+	CHECK(bytes[1] == 252);
+
+	Vector<String> words;
+	words.push_back("alpha");
+	words.push_back("beta");
+	words.push_back("gamma");
+	Vector<String> copied = words.slice(0);
+	CHECK(copied.ptr() == words.ptr());
+	words.write[0] = "changed";
+	CHECK(copied[0] == "alpha");
+	CHECK(words[0] == "changed");
+	copied.write[1] = "modified";
+	CHECK(words[1] == "beta");
+	CHECK(copied[1] == "modified");
+}
+
 TEST_CASE("[Vector] Slice large trivial arrays without aliasing") {
 	Vector<uint8_t> values;
 	REQUIRE(values.resize(8192) == OK);
