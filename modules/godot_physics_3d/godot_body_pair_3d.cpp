@@ -497,7 +497,9 @@ bool GodotBodyPair3D::pre_solve(real_t p_step) {
 			kNormal += c.normal.dot(inertia_A.cross(c.rA)) + c.normal.dot(inertia_B.cross(c.rB));
 			c.mass_normal = kNormal > 0.0 ? 1.0f / kNormal : 0.0f;
 
-			c.bias = -bias * inv_dt * MIN(0.0f, -depth + max_penetration);
+			// Cap deep-overlap recovery so embedded bodies cannot be violently
+			// pushed out in a single tick (Box2D-style contact tuning).
+			c.bias = space->limit_contact_bias(-bias * inv_dt * MIN(0.0f, -depth + max_penetration));
 		}
 
 		c.depth = depth;
@@ -970,7 +972,8 @@ bool GodotBodySoftBodyPair3D::pre_solve(real_t p_step) {
 		// Degenerate or locked contacts must not generate infinite impulses.
 		c.mass_normal = kNormal > 0.0 ? 1.0f / kNormal : 0.0f;
 
-		c.bias = -bias * inv_dt * MIN(0.0f, -depth + max_penetration);
+		// Soft-body node contacts use the same recovery-speed cap as rigid contacts.
+		c.bias = space->limit_contact_bias(-bias * inv_dt * MIN(0.0f, -depth + max_penetration));
 		c.depth = depth;
 
 		// The material can become frictionless after a contact was cached.

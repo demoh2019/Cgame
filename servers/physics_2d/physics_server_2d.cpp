@@ -371,6 +371,8 @@ PhysicsServer2D::PhysicsServer2D() {
 	GLOBAL_DEF(PropertyInfo(Variant::FLOAT, "physics/2d/solver/contact_max_separation", PROPERTY_HINT_RANGE, "0,10,0.01,or_greater,suffix:m"), 1.5);
 	GLOBAL_DEF(PropertyInfo(Variant::FLOAT, "physics/2d/solver/contact_max_allowed_penetration", PROPERTY_HINT_RANGE, "0.01,10,0.01,or_greater,suffix:m"), 0.3);
 	GLOBAL_DEF(PropertyInfo(Variant::FLOAT, "physics/2d/solver/default_contact_bias", PROPERTY_HINT_RANGE, "0,1,0.01"), 0.8);
+	// Zero disables the clamp for backwards-compatible penetration recovery.
+	GLOBAL_DEF(PropertyInfo(Variant::FLOAT, "physics/2d/solver/max_contact_push_speed", PROPERTY_HINT_RANGE, "0,1000,1,or_greater,suffix:px/s"), 0.0);
 	// Like Rapier's warmstart coefficient: scale cached contact impulses
 	// on each step (0 disables warm starting, 1 preserves legacy behavior).
 	GLOBAL_DEF(PropertyInfo(Variant::FLOAT, "physics/2d/solver/warm_start_coefficient", PROPERTY_HINT_RANGE, "0,1,0.01"), 1.0);

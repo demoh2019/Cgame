@@ -604,7 +604,9 @@ bool GodotBodyPair2D::pre_solve(real_t p_step) {
 		}
 
 		if (!report_contacts_only) {
-			c.bias = -bias * inv_dt * MIN(0.0f, -depth + max_penetration);
+			// Cap deep-overlap recovery so embedded bodies cannot be violently
+			// pushed out in a single tick (Box2D-style contact tuning).
+			c.bias = space->limit_contact_bias(-bias * inv_dt * MIN(0.0f, -depth + max_penetration));
 		}
 		c.depth = depth;
 
