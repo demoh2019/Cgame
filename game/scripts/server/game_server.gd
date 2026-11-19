@@ -10,6 +10,7 @@ const Inventory = preload("res://scripts/shared/inventory.gd")
 const Vendor = preload("res://scripts/shared/vendor.gd")
 const PlayerTrade = preload("res://scripts/shared/player_trade.gd")
 const Party = preload("res://scripts/shared/party.gd")
+const PartyAid = preload("res://scripts/shared/party_aid.gd")
 const TerritoryControl = preload("res://scripts/shared/territory_control.gd")
 const MarketBoard = preload("res://scripts/shared/market_board.gd")
 const Contracts = preload("res://scripts/shared/contracts.gd")
@@ -62,6 +63,7 @@ class Player:
 	var progression # Permanent skills; gear is lost on death, not experience.
 	var contract_state: Dictionary = {} # Server-owned persistent camp contract journal.
 	var rest_cooldown: float = 0.0 # Per-survivor seconds until next camp recovery.
+	var party_aid_timer: float = 0.0 # Temporary medical support cooldown.
 	var lake_drink_cooldown: float = 0.0 # Prevents lake hydration spam and relog bypass.
 	var input_budget: float = 0.0
 	var last_input_seq: int = 0
@@ -320,6 +322,7 @@ func _spawn_player(player: Player) -> void:
 	player.skill_timer = 0.0
 	player.dodge_timer = 0.0
 	player.dodge_immunity = 0.0
+	player.party_aid_timer = 0.0
 	player.combat_energy = Defs.COMBAT_ENERGY_MAX
 	player.noise_radius = 0.0
 	player.noise_timer = 0.0
@@ -496,6 +499,51 @@ func cmd_party_leave(peer_id: int) -> Dictionary:
 
 func cmd_party_kick(peer_id: int, target_id: int) -> Dictionary:
 	return parties.kick(peer_id, target_id)
+
+
+## Item-powered cooperative healing, resolved only by the authoritative server.
+func cmd_party_aid(peer_id: int, target_id: int, item_id: String) -> Dictionary:
+	var source: Player = players.get(peer_id)
+	var recipient: Player = players.get(target_id)
+	if source == null or not _alive(source):
+		return {"ok": false, "reason": "dead"}
+	if peer_id == target_id:
+		return {"ok": false, "reason": "self"}
+	if recipient == null:
+		return {"ok": false, "reason": "invalid_target"}
+	if not _alive(recipient):
+		return {"ok": false, "reason": "dead"}
+	var group: int = parties.group_of(peer_id)
+	if group == 0 or parties.group_of(target_id) != group:
+		return {"ok": false, "reason": "not_in_party"}
+	if not PartyAid.can_reach(source.position, recipient.position):
+		return {"ok": false, "reason": "too_far"}
+	if source.party_aid_timer > 0.0:
+		return {"ok": false, "reason": "cooldown"}
+	var data: Dictionary = Defs.item(item_id)
+	if str(data.get("kind", "")) != "medical":
+		return {"ok": false, "reason": "not_medical"}
+	if source.inventory.count(item_id) < 1:
+		return {"ok": false, "reason": "not_carried"}
+	if not PartyAid.has_effect(data, recipient.survival.health, recipient.survival.infection):
+		return {"ok": false, "reason": "no_effect"}
+	var hp_before: float = recipient.survival.health
+	var infection_before: float = recipient.survival.infection
+	if not source.inventory.remove(item_id, 1):
+		return {"ok": false, "reason": "not_carried"}
+	recipient.survival.heal(float(data.get("heal", 0.0)))
+	recipient.survival.treat_infection(float(data.get("cure", 0.0)))
+	source.party_aid_timer = PartyAid.COOLDOWN
+	source.action = {}
+	source.dirty_inventory = true
+	source.dirty_character = true
+	recipient.dirty_character = true
+	var healed: float = recipient.survival.health - hp_before
+	var cured: float = infection_before - recipient.survival.infection
+	events.append({"type": "party_aid", "peer": target_id, "by": peer_id,
+		"item": item_id, "heal": healed, "cure": cured})
+	return {"ok": true, "peer": target_id, "item": item_id,
+		"heal": healed, "cure": cured}
 
 
 func cmd_party_rally(peer_id: int) -> Dictionary:
@@ -1681,6 +1729,7 @@ func _tick_players(delta: float) -> void:
 	for player in players.values():
 		player.input_budget = minf(player.input_budget + delta, 0.25)
 		player.rest_cooldown = maxf(0.0, player.rest_cooldown - maxf(0.0, delta))
+		player.party_aid_timer = maxf(0.0, player.party_aid_timer - maxf(0.0, delta))
 		player.lake_drink_cooldown = maxf(0.0, player.lake_drink_cooldown - maxf(0.0, delta))
 		player.attack_timer = maxf(player.attack_timer - delta, 0.0)
 		player.skill_timer = maxf(player.skill_timer - delta, 0.0)
@@ -2126,6 +2175,7 @@ func snapshot_for(peer_id: int) -> Dictionary:
 			"combat_energy": player.combat_energy, "skill_cooldown": player.skill_timer,
 			"dodge_cooldown": player.dodge_timer, "dodge_immunity": player.dodge_immunity,
 			"rest_cooldown": player.rest_cooldown,
+			"party_aid_cooldown": player.party_aid_timer,
 			"weapon": player.inventory.weapon, "armor": player.inventory.armor,
 			"last_death_full_loot": player.last_death_full_loot,
 			"is_night": WorldCycle.is_night(time),
