@@ -27,6 +27,12 @@ static func apply(plan: Dictionary) -> Dictionary:
 		if directory_error != OK:
 			_rollback(created)
 			return {"ok": false, "error": "Unable to create output directory for %s." % target}
+		# Filesystem contents can change between the full-plan preflight and
+		# each write. Recheck here to avoid ordinary concurrent collisions.
+		# This is not atomic against a malicious racing process.
+		if _path_has_symlink(target) or FileAccess.file_exists(target) or DirAccess.dir_exists_absolute(ProjectSettings.globalize_path(target)):
+			_rollback(created)
+			return {"ok": false, "error": "Output path changed since preflight: %s" % target}
 		var output := FileAccess.open(target, FileAccess.WRITE)
 		if output == null:
 			_rollback(created)
