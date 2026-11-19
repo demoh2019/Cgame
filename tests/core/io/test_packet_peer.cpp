@@ -270,8 +270,9 @@ TEST_CASE("[PacketPeer][PacketPeerStream] Incremental packet counting survives r
 	Vector<uint8_t> wire;
 	for (int i = 0; i < 512; i++) {
 		const uint8_t frame[] = { 1, 0, 0, 0, uint8_t(i) };
-		CHECK(wire.append_array(Span<uint8_t>(frame, 5)) == OK);
+		wire.append_array(Span<uint8_t>(frame, 5));
 	}
+	REQUIRE_EQ(wire.size(), 512 * 5);
 	stream->set_data_array(wire);
 	for (int i = 0; i < 128; i++) {
 		CHECK_EQ(peer->get_available_packet_count(), 512);
