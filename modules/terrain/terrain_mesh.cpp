@@ -34,7 +34,7 @@
 #include "core/object/class_db.h"
 
 TerrainMesh::TerrainMesh() {
-	heights.resize(grid_size.x * grid_size.y);
+	heights.resize_initialized(grid_size.x * grid_size.y);
 }
 
 void TerrainMesh::_bind_methods() {
@@ -67,7 +67,7 @@ void TerrainMesh::set_grid_size(const Vector2i &p_grid_size) {
 	}
 
 	PackedFloat32Array resized;
-	resized.resize(p_grid_size.x * p_grid_size.y);
+	resized.resize_initialized(p_grid_size.x * p_grid_size.y);
 	float *dst = resized.ptrw();
 	const float *src = heights.ptr();
 	for (int z = 0; z < MIN(grid_size.y, p_grid_size.y); z++) {
