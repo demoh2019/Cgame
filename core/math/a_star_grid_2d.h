@@ -118,9 +118,11 @@ private:
 		_FORCE_INLINE_ Point *top() const { return items[0]; }
 	};
 
-	LocalVector<bool> solid_mask;
-	// All cells share one allocation instead of a separate allocation per row.
-	LocalVector<Point> points;
+	// Both buffers have a known exact size on every rebuild. Disable the
+	// default 1.5x growth factor so increasing a map does not retain unused
+	// capacity (potentially millions of Point objects worth of memory).
+	LocalVector<bool, uint32_t, false, true> solid_mask;
+	LocalVector<Point, uint32_t, false, true> points;
 	Point *end = nullptr;
 	Point *last_closest_point = nullptr;
 
