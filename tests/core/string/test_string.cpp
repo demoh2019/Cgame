@@ -789,6 +789,53 @@ TEST_CASE("[String] Erasing") {
 	CHECK(s == "Josephine is such a girl!");
 }
 
+TEST_CASE("[String] Erase preserves Unicode and shares storage on no-op") {
+	const String source = U"αβ😀γδ";
+	const char32_t *original = source.ptr();
+
+	CHECK(source.erase(0, 2) == U"😀γδ");
+	CHECK(source.erase(2, 1) == U"αβγδ");
+	CHECK(source.erase(4, 1) == U"αβ😀γ");
+	CHECK(source.erase(1, 100) == U"α");
+	CHECK(source.erase(0, 100) == "");
+	CHECK(source.erase(0, 0).ptr() == original);
+	CHECK(source.erase(source.length(), 3).ptr() == original);
+	CHECK(source.erase(100000, 3).ptr() == original);
+	CHECK(source.erase(3, 0).ptr() == original);
+	CHECK(source.erase(2, 0x7fffffff) == U"αβ");
+	CHECK(source == U"αβ😀γδ");
+	CHECK(source.ptr() == original);
+
+	const String empty;
+	CHECK(empty.erase(0, 0).is_empty());
+	CHECK(empty.erase(0, 100).is_empty());
+}
+
+TEST_CASE("[String] Erase randomized equivalence with substring semantics") {
+	uint32_t seed = 0xA1C3B529;
+	for (int trial = 0; trial < 512; trial++) {
+		seed ^= seed << 13;
+		seed ^= seed >> 17;
+		seed ^= seed << 5;
+		const int len = int(seed % 256);
+
+		String input;
+		input.resize_uninitialized(len + 1);
+		char32_t *chars = input.ptrw();
+		for (int i = 0; i < len; i++) {
+			chars[i] = (i % 11 == 0) ? U'λ' : char32_t('a' + ((seed + uint32_t(i)) % 26));
+		}
+		chars[len] = 0;
+
+		const int pos = int((seed >> 8) % uint32_t(len + 17));
+		const int count = (trial % 7 == 0) ? 0x7fffffff : int((seed >> 16) % 330);
+		const int clamped_count = pos < len ? MIN(count, len - pos) : 0;
+		const String expected = input.left(pos) + input.substr(pos + clamped_count);
+		CHECK(input.erase(pos, count) == expected);
+		CHECK(input.length() == len);
+	}
+}
+
 TEST_CASE("[String] remove_char") {
 	String s = "Banana";
 	CHECK(s.remove_char('a') == "Bnn");
