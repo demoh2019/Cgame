@@ -70,6 +70,22 @@ func _run() -> void:
 	_check(Client.extract_text({"choices": [{"message": {"content": "{}"}}]}) == "{}", "extract text")
 	_check(Client.extract_text({"choices": []}).is_empty(), "empty choices")
 	_check(not Context.describe().is_empty(), "context builds")
+	_check(not Context._is_selected_path_safe("res://project.godot"), "reject project settings context")
+	_check(not Context._is_selected_path_safe("user://secrets.gd"), "reject external directory context")
+	_check(not Context._is_selected_path_safe("res://../secrets.gd"), "reject traversal in context")
+	_check(Context._is_selected_path_safe("res://tests/selected.gd"), "allow selected GDScript path")
+	_check(Context.describe_selected(PackedStringArray(["res://project.godot"])).contains("no readable"), "do not share project settings")
+	var selected_file := "res://ai_generated/_ai_builder_selected_context.gd"
+	DirAccess.make_dir_recursive_absolute("res://ai_generated")
+	var selected_stream := FileAccess.open(selected_file, FileAccess.WRITE)
+	_check(selected_stream != null, "create selected context fixture")
+	if selected_stream != null:
+		selected_stream.store_string("extends Node\nconst CONTEXT_MARKER = 42\n")
+		selected_stream.close()
+		var selection := Context.describe_selected(PackedStringArray([selected_file, "res://project.godot"]))
+		_check(selection.contains("CONTEXT_MARKER = 42"), "include explicitly selected content")
+		_check(not selection.contains("config_version"), "exclude other file types")
+		DirAccess.remove_absolute(selected_file)
 
 	var output := "res://ai_generated/_ai_builder_regression_test.gd"
 	if FileAccess.file_exists(output):

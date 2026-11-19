@@ -14,7 +14,9 @@ It ships as a source addon in the fork (not as a built-in engine feature).
    - Local Ollama OpenAI-compatible endpoint:
      `http://127.0.0.1:11434/v1/chat/completions`, using your installed model,
      with the key field left empty.
-4. Describe a game (e.g. "Make a playable 2D platformer with a score and menu").
+4. Optionally select up to four scene/script files in FileSystem and enable the
+   explicit **send selected file contents** checkbox; it is OFF by default.
+   Then describe a game (e.g. "Make a playable 2D platformer with a score and menu").
    Click **Generate** and **review the complete proposed file contents**.
 5. Click **Apply** to create files, then **Open scene** to inspect the result.
    Set a main scene manually if desired.
@@ -32,7 +34,10 @@ kept only in the dock's password field; it is not written to disk by the plugin.
 - Generated JSON is parsed, generated scene/resource references are checked for missing output files, and generated `@tool` GDScript is rejected.
 - API access is HTTPS only except for localhost HTTP. Redirects are disabled.
 - The provider receives the user prompt, project name, main scene, and at most
-  80 relevant **file paths**. The plugin does **not** send file contents.
+  80 relevant **file paths**. It does not share project file contents by default.
+- With the opt-in checkbox, only explicitly selected `.gd` and `.tscn` files are
+  included in the API request: at most 4 files, at most 6,000 characters per
+  file, and 20,000 characters total. Avoid selecting files containing secrets.
 - The model does not have shell access, direct filesystem tools, or automatic
   permission to modify existing project assets.
 - Generated code is untrusted until reviewed; avoid executing generated code

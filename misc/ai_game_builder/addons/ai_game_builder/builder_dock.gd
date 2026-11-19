@@ -10,6 +10,7 @@ var _endpoint: LineEdit
 var _model: LineEdit
 var _key: LineEdit
 var _prompt: TextEdit
+var _include_selected_files: CheckBox
 var _preview: TextEdit
 var _status: Label
 var _generate_button: Button
@@ -47,6 +48,12 @@ func _ready() -> void:
 	_prompt.custom_minimum_size = Vector2(0, 120)
 	_prompt.size_flags_vertical = Control.SIZE_EXPAND_FILL
 	add_child(_prompt)
+
+	_include_selected_files = CheckBox.new()
+	_include_selected_files.text = "Отправить содержимое выбранных .gd/.tscn файлов модели"
+	_include_selected_files.button_pressed = false
+	_include_selected_files.tooltip_text = "Необязательно: только выбранные файлы, до 4 файлов и 20 000 символов суммарно. Код уходит выбранному API-провайдеру."
+	add_child(_include_selected_files)
 
 	var actions := HBoxContainer.new()
 	add_child(actions)
@@ -95,7 +102,11 @@ func _on_generate_pressed() -> void:
 	_preview.text = ""
 	_generate_button.disabled = true
 	_status.text = "Генерация... Запрос отправлен модели."
-	_client.generate(_endpoint.text, _model.text, _key.text, _prompt.text, ProjectContext.describe())
+	var context := ProjectContext.describe()
+	if _include_selected_files.button_pressed:
+		context += "\nSelected source files (explicitly shared by the user):\n"
+		context += ProjectContext.describe_selected(EditorInterface.get_selected_paths())
+	_client.generate(_endpoint.text, _model.text, _key.text, _prompt.text, context)
 
 
 func _on_generated(response: String) -> void:

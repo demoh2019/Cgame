@@ -41,3 +41,54 @@ static func _walk(directory: String, depth: int, paths: Array[String]) -> void:
 		if subdir in SKIP_DIRS or subdir.begins_with("."):
 			continue
 		_walk(directory + subdir + "/", depth + 1, paths)
+
+
+# File contents are shared only after explicit user opt-in in the dock.
+const MAX_SELECTED_FILES = 4
+const MAX_SELECTED_CHARS = 6000
+const MAX_SELECTED_TOTAL_CHARS = 20000
+const SELECTED_EXTENSIONS = ["gd", "tscn"]
+
+
+static func describe_selected(paths: PackedStringArray) -> String:
+	var snippets := PackedStringArray()
+	var count := 0
+	var remaining := MAX_SELECTED_TOTAL_CHARS
+	for path in paths:
+		if count >= MAX_SELECTED_FILES or remaining <= 0:
+			break
+		if not _is_selected_path_safe(path):
+			continue
+		if not FileAccess.file_exists(path):
+			continue
+		var data := FileAccess.get_file_as_string(path)
+		if data.is_empty():
+			continue
+		var limit := mini(MAX_SELECTED_CHARS, remaining)
+		var excerpt := data.left(limit)
+		remaining -= excerpt.length()
+		count += 1
+		var truncated := " [truncated]" if data.length() > excerpt.length() else ""
+		snippets.append("=== %s%s ===\n%s\n=== END ===" % [path, truncated, excerpt])
+
+	if snippets.is_empty():
+		return "(no readable selected .gd or .tscn files)"
+	return "\n\n".join(snippets)
+
+
+static func _is_selected_path_safe(path: String) -> bool:
+	if not path.begins_with("res://") or path.contains("\\"):
+		return false
+	if not (path.get_extension().to_lower() in SELECTED_EXTENSIONS):
+		return false
+	var root := DirAccess.open("res://")
+	if root == null:
+		return false
+	var current := ""
+	for segment in path.trim_prefix("res://").split("/"):
+		if segment.is_empty() or segment == "." or segment == "..":
+			return false
+		current = segment if current.is_empty() else current + "/" + segment
+		if root.is_link(current):
+			return false
+	return true
