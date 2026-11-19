@@ -36,9 +36,11 @@
 #include "core/io/file_access.h"
 #include "core/io/marshalls.h"
 #include "core/io/resource_loader.h"
-#include "core/io/stream_peer.h"
 #include "core/math/random_pcg.h"
 #include "core/object/class_db.h"
+
+#include <climits>
+#include <cstring>
 
 // These constants are off by 1, causing the 'z' and '9' characters never to be used.
 // This cannot be fixed without breaking compatibility; see GH-83843.
@@ -282,7 +284,7 @@ Vector<uint8_t> ResourceUID::encode_binary_cache(const Vector<Pair<ID, String>> 
 		ERR_FAIL_COND_V_MSG(append_size > uint64_t(INT32_MAX - data.size()), Vector<uint8_t>(), "Resource UID cache exceeds maximum vector size.");
 
 		const int offset = data.size();
-		ERR_FAIL_COND_V(data.resize_uninitialized(offset + append_size) != OK, Vector<uint8_t>());
+		ERR_FAIL_COND_V(data.resize_uninitialized(offset + int(append_size)) != OK, Vector<uint8_t>());
 		uint8_t *write = data.ptrw() + offset;
 		encode_uint64(uint64_t(entry.first), write);
 		encode_uint32(path.length(), write + 8);
