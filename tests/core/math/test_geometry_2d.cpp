@@ -817,6 +817,56 @@ TEST_CASE("[Geometry2D] Convex hull") {
 	}
 }
 
+TEST_CASE("[Geometry2D] Bresenham allocation-free iterator matches reference in every octant") {
+	const Vector2i from(3, -4);
+	// Use the original integer algorithm as an independent reference, including tie-breaking.
+	for (int dx = -9; dx <= 9; dx++) {
+		for (int dy = -9; dy <= 9; dy++) {
+			const Vector2i to = from + Vector2i(dx, dy);
+			Vector<Vector2i> expected;
+			Vector2i delta = (to - from).abs() * 2;
+			Vector2i step = (to - from).sign();
+			Vector2i current = from;
+
+			if (delta.x > delta.y) {
+				int err = delta.x / 2;
+				for (; current.x != to.x; current.x += step.x) {
+					expected.push_back(current);
+					err -= delta.y;
+					if (err < 0) {
+						current.y += step.y;
+						err += delta.x;
+					}
+				}
+			} else {
+				int err = delta.y / 2;
+				for (; current.y != to.y; current.y += step.y) {
+					expected.push_back(current);
+					err -= delta.x;
+					if (err < 0) {
+						current.x += step.x;
+						err += delta.y;
+					}
+				}
+			}
+			expected.push_back(current);
+
+			int idx = 0;
+			for (const Vector2i &point : Geometry2D::bresenham_iter(from, to)) {
+				REQUIRE(idx < expected.size());
+				CHECK_EQ(point, expected[idx]);
+				idx++;
+			}
+			CHECK_EQ(idx, expected.size());
+			const Vector<Vector2i> materialized = Geometry2D::bresenham_line(from, to);
+			REQUIRE_EQ(materialized.size(), expected.size());
+			for (int i = 0; i < expected.size(); i++) {
+				CHECK_EQ(materialized[i], expected[i]);
+			}
+		}
+	}
+}
+
 TEST_CASE("[Geometry2D] Bresenham line") {
 	Vector<Vector2i> r;
 
