@@ -34,6 +34,8 @@
 #include "core/object/class_db.h"
 #include "core/variant/typed_array.h"
 
+#include <algorithm>
+
 void AStarGrid2D::OpenList::_sift_up(uint32_t p_hole, Point *p_point) {
 	SortPoints worse;
 	while (p_hole > 0) {
@@ -330,13 +332,20 @@ void AStarGrid2D::fill_solid_region(const Rect2i &p_region, bool p_solid) {
 	ERR_FAIL_COND_MSG(dirty, "Grid is not initialized. Call the update method.");
 
 	const Rect2i safe_region = p_region.intersection(region);
-	const int32_t end_x = safe_region.get_end().x;
-	const int32_t end_y = safe_region.get_end().y;
+	if (safe_region.size.x <= 0 || safe_region.size.y <= 0) {
+		return;
+	}
 
-	for (int32_t y = safe_region.position.y; y < end_y; y++) {
-		for (int32_t x = safe_region.position.x; x < end_x; x++) {
-			_set_solid_unchecked(x, y, p_solid);
-		}
+	// Consecutive cells share one contiguous span in each padded mask row.
+	// Resolve the first index once instead of multiplying the 2D coordinates
+	// for every cell in a bulk edit.
+	bool *mask = solid_mask.ptr();
+	const size_t stride = size_t(region.size.x) + 2;
+	size_t row = _to_mask_index(safe_region.position.x, safe_region.position.y);
+	const size_t count = size_t(safe_region.size.x);
+	for (int32_t y = 0; y < safe_region.size.y; ++y) {
+		std::fill_n(mask + row, count, p_solid);
+		row += stride;
 	}
 }
 
@@ -345,12 +354,20 @@ void AStarGrid2D::fill_weight_scale_region(const Rect2i &p_region, real_t p_weig
 	ERR_FAIL_COND_MSG(p_weight_scale < 0.0, vformat("Can't set point's weight scale less than 0.0: %f.", p_weight_scale));
 
 	const Rect2i safe_region = p_region.intersection(region);
-	const int32_t end_x = safe_region.get_end().x;
-	const int32_t end_y = safe_region.get_end().y;
+	if (safe_region.size.x <= 0 || safe_region.size.y <= 0) {
+		return;
+	}
 
-	for (int32_t y = safe_region.position.y; y < end_y; y++) {
-		for (int32_t x = safe_region.position.x; x < end_x; x++) {
-			_get_point_unchecked(x, y)->weight_scale = p_weight_scale;
+	// Points are row-major and the row stride is fixed for the entire grid.
+	// Walk adjacent Point objects directly, keeping each write contiguous.
+	Point *row = _get_point_unchecked(safe_region.position.x, safe_region.position.y);
+	const int32_t stride = region.size.x;
+	for (int32_t y = 0; y < safe_region.size.y; ++y) {
+		for (int32_t x = 0; x < safe_region.size.x; ++x) {
+			row[x].weight_scale = p_weight_scale;
+		}
+		if (y + 1 < safe_region.size.y) {
+			row += stride; // Do not form a pointer beyond one-past the last Point.
 		}
 	}
 }

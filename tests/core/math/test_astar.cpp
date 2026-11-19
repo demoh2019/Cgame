@@ -919,4 +919,48 @@ TEST_CASE("[AStarGrid2D][Performance] JPS indexed mask scans preserve obstacle r
 	}
 }
 
+
+TEST_CASE("[AStarGrid2D][Performance] Row-wise region fills retain clipping and weights") {
+	AStarGrid2D grid;
+	const Rect2i region(-17, 23, 33, 19);
+	grid.set_region(region);
+	grid.update();
+
+	const Rect2i rectangles[] = {
+		Rect2i(-100, 20, 200, 5), // Top edge.
+		Rect2i(-100, 39, 200, 10), // Bottom edge.
+		Rect2i(-22, 22, 8, 40), // Left edge.
+		Rect2i(13, 22, 8, 40), // Right edge.
+		Rect2i(-9, 27, 15, 11), // Interior.
+		Rect2i(0, 0, 2, 2), // Completely outside.
+		Rect2i(-17, 23, 0, 5), // Empty width.
+		Rect2i(-17, 23, 7, 0), // Empty height.
+		Rect2i(-17, 23, 33, 19), // Exact coverage.
+		Rect2i(-16, 24, 1, 1), // Single cell.
+	};
+
+	for (const Rect2i &rect : rectangles) {
+		grid.fill_solid_region(rect, true);
+		grid.fill_weight_scale_region(rect, 2.25);
+		const Rect2i intersection = rect.intersection(region);
+		for (int y = 0; y < region.size.y; ++y) {
+			for (int x = 0; x < region.size.x; ++x) {
+				const Vector2i id = region.position + Vector2i(x, y);
+				const bool expected = intersection.has_point(id);
+				CHECK_EQ(grid.is_point_solid(id), expected);
+				CHECK(grid.get_point_weight_scale(id) == doctest::Approx(expected ? 2.25 : 1.0));
+			}
+		}
+		grid.fill_solid_region(rect, false);
+		grid.fill_weight_scale_region(rect, 1.0);
+		for (int y = 0; y < region.size.y; ++y) {
+			for (int x = 0; x < region.size.x; ++x) {
+				const Vector2i id = region.position + Vector2i(x, y);
+				CHECK_FALSE(grid.is_point_solid(id));
+				CHECK(grid.get_point_weight_scale(id) == doctest::Approx(1.0));
+			}
+		}
+	}
+}
+
 } // namespace TestAStar
