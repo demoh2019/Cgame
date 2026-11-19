@@ -14,6 +14,9 @@ const RECIPES := {
     "field_bandage": {"fiber_t1": 2},
     "scavenger_tool": {"wood_t1": 2, "stone_t1": 1},
     "reinforced_bandage": {"fiber_t2": 2, "fiber_t1": 1},
+    "scrap_spear": {"wood_t1": 2, "stone_t1": 2},
+    "reinforced_spear": {"wood_t2": 2, "stone_t2": 1, "fiber_t2": 1},
+    "padded_vest": {"fiber_t1": 2, "wood_t1": 1},
 }
 
 var health: float = 100.0
@@ -23,6 +26,10 @@ var inventory: Dictionary = {}
 var gathering_xp: Dictionary = {"wood": 0, "stone": 0, "fiber": 0}
 var crafting_xp: int = 0
 var equipped_tool: String = ""
+var equipped_weapon: String = ""
+var equipped_armor: String = ""
+var combat_xp: int = 0
+var attack_cooldown: float = 0.0
 var last_message: String = "Ищите припасы, сырьё и создавайте снаряжение."
 
 @onready var camera: Camera3D = $Head/Camera3D
@@ -48,6 +55,7 @@ func _unhandled_input(event: InputEvent) -> void:
 
 
 func _physics_process(delta: float) -> void:
+    attack_cooldown = maxf(0.0, attack_cooldown - delta)
     if not is_on_floor():
         velocity.y -= GRAVITY * delta
     elif health > 0.0 and Input.is_action_just_pressed("jump"):
@@ -85,6 +93,14 @@ func _physics_process(delta: float) -> void:
         craft_recipe("reinforced_bandage")
     if Input.is_action_just_pressed("use_advanced_bandage"):
         use_bandage("reinforced_bandage")
+    if Input.is_action_just_pressed("craft_spear"):
+        craft_recipe("scrap_spear")
+    if Input.is_action_just_pressed("craft_vest"):
+        craft_recipe("padded_vest")
+    if Input.is_action_just_pressed("craft_reinforced_spear"):
+        craft_recipe("reinforced_spear")
+    if Input.is_action_just_pressed("attack"):
+        attack_target()
 
 
 func get_aimed_pickup() -> Node:
@@ -173,6 +189,10 @@ func craft_recipe(recipe_id: String) -> bool:
     crafting_xp += 20
     if recipe_id == "scavenger_tool":
         equipped_tool = recipe_id
+    elif recipe_id == "scrap_spear" or recipe_id == "reinforced_spear":
+        equipped_weapon = recipe_id
+    elif recipe_id == "padded_vest":
+        equipped_armor = recipe_id
     last_message = "Создано: %s | опыт ремесла: %d" % [recipe_id, crafting_xp]
     return true
 
@@ -187,4 +207,48 @@ func use_bandage(item_id: String) -> bool:
     inventory[item_id] = get_item_count(item_id) - 1
     health = minf(100.0, health + (60.0 if item_id == "reinforced_bandage" else 30.0))
     last_message = "Раны обработаны: %s." % item_id
+    return true
+
+
+func combat_level() -> int:
+    return 1 + floori(float(combat_xp) / float(XP_PER_LEVEL))
+
+
+func melee_damage() -> float:
+    match equipped_weapon:
+        "reinforced_spear":
+            return 45.0
+        "scrap_spear":
+            return 24.0
+        _:
+            return 9.0
+
+
+func receive_damage(amount: float) -> void:
+    if health <= 0.0 or not is_finite(amount) or amount <= 0.0:
+        return
+    var mitigation := 0.25 if equipped_armor == "padded_vest" else 0.0
+    health = maxf(0.0, health - amount * (1.0 - mitigation))
+    last_message = "Получен урон. Укрывайтесь или используйте бинты."
+
+
+func attack_target() -> bool:
+    if health <= 0.0 or attack_cooldown > 0.0 or aim_ray == null:
+        return false
+    attack_cooldown = 0.55
+    aim_ray.force_raycast_update()
+    var target := aim_ray.get_collider() as Node
+    if target == null or not target.has_method("receive_hit"):
+        last_message = "Цель не в зоне ближнего боя."
+        return false
+    var result := int(target.call("receive_hit", melee_damage()))
+    if result <= 0:
+        return false
+    combat_xp += 12
+    if result == 2:
+        combat_xp += 30
+        add_item("infected_sample", 1)
+        last_message = "Заражённый уничтожен. Образец получен; опыт боя: %d." % combat_xp
+    else:
+        last_message = "Удар по заражённому. Урон: %d." % roundi(melee_damage())
     return true
