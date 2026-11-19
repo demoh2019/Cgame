@@ -18,6 +18,7 @@ var _ticks: int = 0
 var _max_tick_ms: float = 0.0
 var _quit_after: float = 0.0
 var _uptime: float = 0.0
+var _shutting_down := false
 
 
 func _initialize() -> void:
@@ -83,6 +84,8 @@ func _initialize() -> void:
 
 
 func _physics_process(delta: float) -> bool:
+	if _shutting_down:
+		return false
 	var started := Time.get_ticks_usec()
 	net.server_tick(delta)
 	_max_tick_ms = maxf(_max_tick_ms, (Time.get_ticks_usec() - started) / 1000.0)
@@ -94,6 +97,16 @@ func _physics_process(delta: float) -> bool:
 		_stats_clock = 0.0
 		_max_tick_ms = 0.0
 	if _quit_after > 0.0 and _uptime >= _quit_after:
-		print("SERVER stopping after %.0f s" % _uptime)
-		return true
+		print("SERVER stopping after %.0f s; flushing character saves" % _uptime)
+		_shutting_down = true
+		call_deferred("_finish_shutdown")
 	return false
+
+
+func _finish_shutdown() -> void:
+	var saved: bool = await net.shutdown()
+	if not saved:
+		printerr("SERVER shutdown: at least one character could not be persisted.")
+		quit(1)
+		return
+	quit(0)

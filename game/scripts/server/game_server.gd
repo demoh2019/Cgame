@@ -176,6 +176,16 @@ func apply_character(player: Player, data: Dictionary) -> bool:
 	return true
 
 
+## Check a complete saved character without modifying a live player or the spawn RNG.
+## The loader refuses corrupt existing accounts instead of minting a new starter kit.
+func valid_character_data(data: Dictionary) -> bool:
+	var previous_state: int = rng.state
+	var probe := Player.new()
+	var valid := apply_character(probe, data)
+	rng.state = previous_state
+	return valid
+
+
 func remove_player(peer_id: int) -> void:
 	players.erase(peer_id)
 

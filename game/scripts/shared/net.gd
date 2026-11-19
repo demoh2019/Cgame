@@ -9,6 +9,7 @@ signal join_refused(reason: String)
 signal result_received(kind: String, data: Dictionary)
 
 var role: String = "client" # "server" or "client"
+var shutting_down := false
 var sim # GameServer, on the server.
 var client # GameClient, on the client.
 var allow_debug: bool = false
@@ -18,8 +19,12 @@ const MAX_COMMANDS_PER_SECOND := 80
 var snapshot_accumulator: float = 0.0
 var gateway # NakamaGateway, or null in offline mode.
 var user_to_peer: Dictionary = {}
-var _joining: Dictionary = {}
-var _saving: Dictionary = {}
+var _joining: Dictionary = {} # Peer -> true, until authentication and loading finish.
+var _joining_users: Dictionary = {} # Account -> peer; prevents overlapping sign-ins.
+var _departing_accounts: Dictionary = {} # Account -> true, until final save finishes.
+var _saving: Dictionary = {} # Account -> true; serialize ALL writes for that account.
+var _pending_saves: Dictionary = {} # Account -> final state when Nakama is temporarily unavailable.
+var _autosave_running := false
 var _save_clock: float = 0.0
 const SAVE_INTERVAL := 30.0
 
@@ -43,43 +48,80 @@ func _allowed(peer_id: int) -> bool:
 
 @rpc("any_peer", "reliable")
 func c_join(player_name: String, token: String = "", refresh: String = "") -> void:
-	if role != "server":
+	if role != "server" or shutting_down:
 		return
 	var peer := multiplayer.get_remote_sender_id()
 	if sim.players.has(peer) or _joining.has(peer):
 		return
 	if gateway == null or not gateway.enabled:
-		# Offline mode (tests, local play): no accounts, nothing is saved.
+		# Offline mode: no accounts, nothing is saved.
 		sim.add_player(peer, str(player_name))
 		s_welcome.rpc_id(peer, sim.world.world_seed, Defs.TICK_RATE)
 		return
 	_joining[peer] = true
 	var identity: Dictionary = await gateway.verify(str(token), str(refresh))
-	if not identity["ok"]:
+	if not identity.get("ok", false):
 		_joining.erase(peer)
-		s_join_refused.rpc_id(peer, "Sign in failed: %s" % identity["reason"])
-		_disconnect_later(peer)
+		if multiplayer.get_peers().has(peer):
+			s_join_refused.rpc_id(peer, "Sign in failed: %s" % identity.get("reason", "rejected"))
+			_disconnect_later(peer)
 		return
-	var user_id: String = identity["user_id"]
-	# One session per account: a second login replaces the first, which is saved before it goes.
+	var user_id: String = str(identity.get("user_id", ""))
+	if user_id.is_empty() or _joining_users.has(user_id):
+		_joining.erase(peer)
+		if multiplayer.get_peers().has(peer):
+			s_join_refused.rpc_id(peer, "This account is already signing in.")
+			_disconnect_later(peer)
+		return
+	_joining_users[user_id] = peer
+	# The previous character must be fully saved before a new session loads it.
 	if user_to_peer.has(user_id):
 		var old_peer: int = user_to_peer[user_id]
-		await leave(old_peer)
+		var saved_ok: bool = await leave(old_peer)
 		_disconnect_later(old_peer)
+		if not saved_ok:
+			_refuse_join(peer, user_id, "Character save failed. Please retry.")
+			return
+	# The former peer may have disconnected by itself, leaving a save in progress.
+	while _departing_accounts.has(user_id):
+		await get_tree().process_frame
+	if not multiplayer.get_peers().has(peer):
+		_joining_users.erase(user_id)
+		_joining.erase(peer)
+		return
+	# Never load an older character while the last logout is unsaved.
+	if _pending_saves.has(user_id):
+		var pending: Dictionary = _pending_saves[user_id]
+		if not (await _save_serial(user_id, pending)):
+			_refuse_join(peer, user_id, "Character storage is unavailable. Please retry.")
+			return
+		_pending_saves.erase(user_id)
 	var loaded: Dictionary = await gateway.load_character(user_id)
 	if not multiplayer.get_peers().has(peer):
+		_joining_users.erase(user_id)
 		_joining.erase(peer)
-		return # Gone while we were loading.
-	if not loaded["ok"]:
-		_joining.erase(peer)
-		s_join_refused.rpc_id(peer, "The character could not be loaded, try again later.")
-		_disconnect_later(peer)
+		return
+	if not loaded.get("ok", false):
+		_refuse_join(peer, user_id, "The character could not be loaded. Please retry.")
 		return
 	var saved: Dictionary = loaded.get("data", {}) if loaded.get("exists", false) else {}
+	# Existing but malformed storage must not silently become a new starter kit.
+	if loaded.get("exists", false) and not sim.valid_character_data(saved):
+		_refuse_join(peer, user_id, "Stored character is invalid. Contact an administrator.")
+		return
 	user_to_peer[user_id] = peer
 	sim.add_player(peer, str(identity["username"]), user_id, saved)
+	_joining_users.erase(user_id)
 	_joining.erase(peer)
 	s_welcome.rpc_id(peer, sim.world.world_seed, Defs.TICK_RATE)
+
+
+func _refuse_join(peer: int, user_id: String, reason: String) -> void:
+	_joining_users.erase(user_id)
+	_joining.erase(peer)
+	if multiplayer.get_peers().has(peer):
+		s_join_refused.rpc_id(peer, reason)
+		_disconnect_later(peer)
 
 
 func _disconnect_later(peer: int) -> void:
@@ -88,36 +130,80 @@ func _disconnect_later(peer: int) -> void:
 		multiplayer.multiplayer_peer.disconnect_peer(peer)
 
 
-## Saves a player's character and removes them from the world. Safe to call for unknown peers.
-func leave(peer: int) -> void:
+## Save writes are serialized by account: an older autosave cannot finish after logout.
+func _save_serial(user_id: String, data: Dictionary) -> bool:
+	while _saving.has(user_id):
+		await get_tree().process_frame
+	_saving[user_id] = true
+	var ok: bool = await gateway.save_character(user_id, data)
+	_saving.erase(user_id)
+	return ok
+
+
+## Removes the disconnected player immediately but waits for all older saves before persisting
+## the final state. Failed final saves are retained for retry and block a stale character load.
+func leave(peer: int) -> bool:
 	var player = sim.players.get(peer)
 	if player == null:
-		return
+		return true
 	var user_id: String = player.user_id
 	var data: Dictionary = sim.character_data(player)
-	# Leaving removes the player from the world first, so nothing can still change their character.
-	sim.remove_player(peer)
 	if user_id != "":
-		user_to_peer.erase(user_id)
-		if gateway != null and gateway.enabled:
-			await gateway.save_character(user_id, data)
-			await gateway.submit_score(user_id, player.name, int(data["kills"]), int(data["deaths"]))
+		_departing_accounts[user_id] = true
+		if user_to_peer.get(user_id, -1) == peer:
+			user_to_peer.erase(user_id)
+	sim.remove_player(peer)
+	if user_id == "" or gateway == null or not gateway.enabled:
+		return true
+	var ok: bool = await _save_serial(user_id, data)
+	if ok:
+		_pending_saves.erase(user_id)
+		await gateway.submit_score(user_id, player.name, int(data["kills"]), int(data["deaths"]))
+	else:
+		_pending_saves[user_id] = data
+		push_warning("Character save failed for account %s; the session will stay locked until retry." % user_id)
+	_departing_accounts.erase(user_id)
+	return ok
 
 
 func _save_all() -> void:
-	if gateway == null or not gateway.enabled:
+	if gateway == null or not gateway.enabled or _autosave_running:
 		return
+	_autosave_running = true
 	for peer in sim.players.keys():
-		var player = sim.players[peer]
-		if player.user_id == "" or _saving.has(peer):
+		# A disconnect may occur while waiting for a different player's database write.
+		var player = sim.players.get(peer)
+		if player == null or player.user_id == "" or _departing_accounts.has(player.user_id):
 			continue
-		_saving[peer] = true
 		var data: Dictionary = sim.character_data(player)
-		var ok: bool = await gateway.save_character(player.user_id, data)
+		var ok: bool = await _save_serial(player.user_id, data)
 		if ok and data["kills"] > 0:
 			await gateway.submit_score(player.user_id, player.name, int(data["kills"]), int(data["deaths"]))
-		_saving.erase(peer)
+	# Retry failed logout saves even when nobody is currently logged into that account.
+	for user_id in _pending_saves.keys():
+		if _departing_accounts.has(user_id) or _joining_users.has(user_id):
+			continue
+		var pending: Dictionary = _pending_saves[user_id]
+		if await _save_serial(user_id, pending):
+			_pending_saves.erase(user_id)
+	_autosave_running = false
 
+
+## Called for an orderly server stop, including --quit-after.
+func shutdown() -> bool:
+	shutting_down = true
+	var all_saved := true
+	for peer in sim.players.keys():
+		var ok: bool = await leave(peer)
+		if not ok:
+			all_saved = false
+	for user_id in _pending_saves.keys():
+		var pending: Dictionary = _pending_saves[user_id]
+		if await _save_serial(user_id, pending):
+			_pending_saves.erase(user_id)
+		else:
+			all_saved = false
+	return all_saved
 
 @rpc("any_peer", "unreliable_ordered")
 func c_input(seq: int, move_x: float, move_z: float, sprint: bool, yaw: float, dt: float) -> void:
@@ -145,6 +231,7 @@ func c_stash(item_id: String, count: int, deposit: bool) -> void:
 	var peer := multiplayer.get_remote_sender_id()
 	if _allowed(peer):
 		s_result.rpc_id(peer, "stash", sim.cmd_stash(peer, str(item_id), count, deposit))
+
 
 
 @rpc("any_peer", "reliable")

@@ -81,3 +81,19 @@ empty ammunition, sound expiry and server-to-AI detection. Run all suites with:
 ```sh
 godot --headless --path game --script res://tests/run_all.gd
 ```
+
+## Reconnect and persistence ordering
+
+With Nakama enabled, account writes are serialized by user ID, and a second
+login cannot reload an old snapshot until the previous session has been
+saved. Simultaneous logins for the same account are gated while verification
+and restoration are in progress. Failed disconnect saves remain in memory;
+a player cannot rejoin from an older storage snapshot until a retry succeeds.
+Existing corrupt character saves are refused rather than replaced with a
+fresh starter kit. An orderly `--quit-after` stop flushes online accounts.
+
+**Production limitation:** this protects a single running world server, not
+multiple servers sharing an account store. In-memory pending saves are lost
+on process crash, and periodic autosaves can lose progress after abrupt exit.
+Before enabling real-money markets or cross-server trading, implement durable
+transaction journals and optimistic storage versions at the backend.

@@ -80,6 +80,15 @@ func run(t) -> void:
 	t.eq(player.stash.count("silver"), original_silver, "invalid restore kept bank")
 	t.eq(player.survival.health, original_health, "invalid restore kept survival")
 
+	t.current = "reconnect validation is side-effect free"
+	var seed_before: int = server.rng.state
+	t.check(server.valid_character_data(saved), "existing valid save is allowed to reconnect")
+	t.eq(server.rng.state, seed_before, "validation must not change the spawn RNG")
+	var broken: Dictionary = saved.duplicate(true)
+	broken["inventory"]["slots"][0] = {"id": "silver", "count": "99"}
+	t.check(not server.valid_character_data(broken), "corrupt existing save is not treated as a new player")
+	t.eq(player.stash.count("silver"), original_silver, "validation does not change a live player's protected bank")
+
 	t.current = "numeric bounds"
 	t.check(SaveValidation.valid_counter(0), "zero counter accepted")
 	t.check(SaveValidation.valid_counter(12.0), "integral JSON float counter accepted")
