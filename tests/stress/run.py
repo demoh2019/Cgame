@@ -247,7 +247,7 @@ def markdown_hotspots(report: dict[str, Any]) -> str:
         cap = report.get("configuration", {}).get("rss_limit_mib")
         if rss is not None and isinstance(cap, (int, float)) and cap > 0 and rss >= cap * 0.8:
             note.append("near RSS limit")
-        if engine is not None and wall > 0 and wall - engine / 1000.0 > max(1.0, wall * 0.5):
+        if engine is not None and wall > 0 and wall - engine / 1000.0 > max(0.25, wall * 0.5):
             note.append("startup/teardown dominates")
         rows.append((case, wall, p95, rss, engine, "; ".join(note)))
     rows.sort(key=lambda item: item[1], reverse=True)
