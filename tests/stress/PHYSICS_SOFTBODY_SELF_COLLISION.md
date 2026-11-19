@@ -53,8 +53,8 @@ Select `GodotPhysics3D` and set in Project Settings -> Physics -> 3D -> Solver:
    than the thickness according to the *true* closest point on the
    triangle (including vertices/edges, not just its infinite plane).
 4. Retain the **four closest nonadjacent triangles per vertex**, sorted
-   by (squared distance, face ID). This avoids dependence on BVH
-   traversal order when the tree is incrementally rebalanced.
+   by (squared distance, face ID) among visited faces. With a saturated
+   search budget, a BVH rebalance can change which faces were visited.
    Gather candidates for the whole mesh **before** moving any vertex;
    that way all candidate queries observe a consistent snapshot.
 5. Apply a one-pass, **two-sided, inverse-mass-weighted position
@@ -108,9 +108,14 @@ prevent unbounded candidate storage or narrowphase leaf tests, but do
 not guarantee a constant-time BVH traversal.
 
 The finite candidate budget is a **quality/performance compromise**:
-on scenes with extreme self-overlap it may skip some contacts. Do not
-assume every overlapping pair is resolved in a single step. Other
-structural constraints are left unchanged.
+on scenes with extreme self-overlap it may skip some contacts. Sorting
+by distance/edge key makes selection repeatable **for the candidates
+that were visited**, but when the inspection budget is exhausted the
+set of visited BVH leaves (and therefore selected contacts) can change
+after BVH rebalancing. Do not assume every overlapping pair is
+resolved in a single step, or that saturated scenes are bitwise
+deterministic across tree rebuilds. Other structural constraints are
+left unchanged.
 
 ## Physical limitations
 
