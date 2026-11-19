@@ -33,5 +33,7 @@ jobs:
         run: godot --headless --path misc/ai_game_builder --script res://tests/test_plan.gd
       - name: Opt-in context and credential-leak regression tests
         run: godot --headless --path misc/ai_game_builder --script res://tests/test_context.gd
+      - name: OpenAI-compatible response parser tests
+        run: godot --headless --path misc/ai_game_builder --script res://tests/test_provider.gd
       - name: Editor plugin smoke test
         run: godot --headless --editor --path misc/ai_game_builder --quit
