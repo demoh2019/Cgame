@@ -117,10 +117,29 @@ jobs:
             --script res://physics_pbf_particle_fluid_3d_regression.gd \
             2>&1 | tee physics-pbf-runtime.log
           grep -Fq 'Native PBF particle fluid passed' physics-pbf-runtime.log
+      - name: Native PBF two-way rigid momentum and rotational effective-mass tests
+        shell: bash
+        run: |
+          set -euo pipefail
+          timeout 120s ./bin/godot.linuxbsd.editor.dev.x86_64 \
+            --headless --test --test-case="*[PhysicsPBFContact]*" \
+            --success=true --no-colors 2>&1 | tee physics-pbf-rigid-native.log
+          grep -Fq '[PhysicsPBFContact]' physics-pbf-rigid-native.log
+      - name: Headless PBF impulse reaction vs one-way rigid control
+        shell: bash
+        run: |
+          set -euo pipefail
+          timeout 120s ./bin/godot.linuxbsd.editor.dev.x86_64 \
+            --headless --path tests/stress \
+            --script res://physics_pbf_rigid_coupling_3d_regression.gd \
+            2>&1 | tee physics-pbf-rigid-runtime.log
+          grep -Fq 'Native PBF two-way rigid contact passed' physics-pbf-rigid-runtime.log
       - name: Syntax-check physics stress scripts
         shell: bash
         run: |
           set -euo pipefail
+          ./bin/godot.linuxbsd.editor.dev.x86_64 --headless --path tests/stress \
+            --script res://physics_pbf_rigid_coupling_3d_regression.gd --check-only
           ./bin/godot.linuxbsd.editor.dev.x86_64 --headless --path tests/stress \
             --script res://physics_pbf_particle_fluid_3d_regression.gd --check-only
           ./bin/godot.linuxbsd.editor.dev.x86_64 --headless --path tests/stress \
