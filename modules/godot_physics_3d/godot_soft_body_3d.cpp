@@ -1555,6 +1555,9 @@ void GodotSoftBody3D::solve_self_collisions(real_t p_thickness, real_t p_alpha_t
 
 	constexpr uint32_t MAX_CONTACTS_PER_VERTEX = 4;
 	constexpr uint32_t MAX_TOTAL_CONTACTS = 65536;
+	constexpr uint32_t MAX_FACES_PER_VERTEX = 128;
+	constexpr uint32_t MAX_NARROWPHASE_FACES_PER_STEP = 1048576;
+	uint32_t remaining_face_tests = MAX_NARROWPHASE_FACES_PER_STEP;
 	const real_t thickness_sq = p_thickness * p_thickness;
 	if (!(thickness_sq > 0.0) || !Math::is_finite(thickness_sq)) {
 		return;
@@ -1571,8 +1574,15 @@ void GodotSoftBody3D::solve_self_collisions(real_t p_thickness, real_t p_alpha_t
 		uint32_t indices[MAX_CONTACTS_PER_VERTEX] = {};
 		real_t distances[MAX_CONTACTS_PER_VERTEX] = {};
 		uint32_t count = 0;
+		uint32_t examined = 0;
+		uint32_t *remaining_tests = nullptr;
 
 		bool operator()(void *p_data) {
+			if (examined >= MAX_FACES_PER_VERTEX || *remaining_tests == 0) {
+				return true; // Stop BVH traversal at the deterministic CPU budget.
+			}
+			++examined;
+			--(*remaining_tests);
 			const Face *face = static_cast<const Face *>(p_data);
 			for (int i = 0; i < 3; ++i) {
 				const uint32_t adjacent = face->n[i]->index;
@@ -1612,13 +1622,14 @@ void GodotSoftBody3D::solve_self_collisions(real_t p_thickness, real_t p_alpha_t
 	};
 
 	for (const Node &node : nodes) {
-		if (self_collision_contacts.size() >= MAX_TOTAL_CONTACTS) {
+		if (self_collision_contacts.size() >= MAX_TOTAL_CONTACTS || remaining_face_tests == 0) {
 			break; // Deterministic global memory/work ceiling.
 		}
 		CandidateQuery query;
 		query.vertex = &node;
 		query.structural_edges = &self_collision_structural_edges;
 		query.thickness_sq = thickness_sq;
+		query.remaining_tests = &remaining_face_tests;
 		face_tree.aabb_query(AABB(node.x - reach, reach * real_t(2.0)), query);
 		for (uint32_t i = 0; i < query.count &&
 				self_collision_contacts.size() < MAX_TOTAL_CONTACTS; ++i) {
