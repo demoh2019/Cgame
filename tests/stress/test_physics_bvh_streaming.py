@@ -26,7 +26,7 @@ class BVHStreamingPairContracts(unittest.TestCase):
         end = self.manager.index("\npublic:\n\tvoid item_get_AABB(", start)
         body = self.manager[start:end]
         self.assertIn("tree.visit_aabb_refs(", body)
-        self.assertIn("_find_leavers(h, abb, p_full_check);", body)
+        self.assertIn("_find_leavers(h, abb, full_check);", body)
         self.assertIn("_collide(query.changed, candidate);", body)
         self.assertIn("_reset();", body)
         self.assertIn("const BOUNDS expanded_aabb =", body)
