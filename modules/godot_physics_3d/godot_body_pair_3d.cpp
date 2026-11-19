@@ -704,22 +704,18 @@ void GodotBodySoftBodyPair3D::_contact_added_callback(const Vector3 &p_point_A, 
 }
 
 void GodotBodySoftBodyPair3D::contact_added_callback(const Vector3 &p_point_A, int, const Vector3 &p_point_B, int p_index_B, const Vector3 &normal) {
-	Vector3 local_A = body->get_inv_transform().xform(p_point_A);
-	Vector3 local_B = p_point_B - soft_body->get_node_position(p_index_B);
+	const Vector3 local_A = body->get_inv_transform().xform(p_point_A);
+	const Vector3 local_B = p_point_B - soft_body->get_node_position(p_index_B);
 
 	Contact contact;
-
 	contact.index_B = p_index_B;
 	contact.local_A = local_A;
 	contact.local_B = local_B;
 	contact.normal = (normal.dot((p_point_A - p_point_B)) < 0 ? -normal : normal);
 	contact.used = true;
 
-	// Attempt to determine if the contact will be reused.
-	real_t contact_recycle_radius = space->get_contact_recycle_radius();
-
-	// Match by soft-body node ID. Above 64 contacts, this becomes a
-	// hash lookup instead of a full scan for every manifold point.
+	// Direct node-ID lookup for dense soft-body contact patches. Below the
+	// threshold, a linear scan avoids allocating the hash table entirely.
 	const uint32_t contact_count = contacts.size();
 	contact_index.maybe_build(contacts);
 	int existing_index = contact_index.find(p_index_B);
@@ -731,22 +727,23 @@ void GodotBodySoftBodyPair3D::contact_added_callback(const Vector3 &p_point_A, i
 			}
 		}
 	}
+
 	if (existing_index != -1) {
-		Contact &c = contacts[existing_index];
-		{
-			if (c.local_A.distance_squared_to(local_A) < (contact_recycle_radius * contact_recycle_radius) &&
-					c.local_B.distance_squared_to(local_B) < (contact_recycle_radius * contact_recycle_radius) &&
-					c.normal.dot(contact.normal) >= real_t(0.98)) {
-				contact.acc_normal_impulse = c.acc_normal_impulse;
-				contact.acc_bias_impulse = c.acc_bias_impulse;
-				contact.acc_bias_impulse_center_of_mass = c.acc_bias_impulse_center_of_mass;
-				// A rotating soft-body surface changes the contact normal. Reproject
-				// the cached friction so it never injects a normal impulse.
-				contact.acc_tangent_impulse = c.acc_tangent_impulse - contact.normal * c.acc_tangent_impulse.dot(contact.normal);
-			}
-			c = contact;
-			return;
+		Contact &previous = contacts[existing_index];
+		const real_t recycle_radius = space->get_contact_recycle_radius();
+		const real_t recycle_radius_squared = recycle_radius * recycle_radius;
+		if (previous.local_A.distance_squared_to(local_A) < recycle_radius_squared &&
+				previous.local_B.distance_squared_to(local_B) < recycle_radius_squared &&
+				previous.normal.dot(contact.normal) >= real_t(0.98)) {
+			contact.acc_normal_impulse = previous.acc_normal_impulse;
+			contact.acc_bias_impulse = previous.acc_bias_impulse;
+			contact.acc_bias_impulse_center_of_mass = previous.acc_bias_impulse_center_of_mass;
+			// A rotating soft-body surface changes the contact normal. Reproject
+			// the cached friction so it never injects a normal impulse.
+			contact.acc_tangent_impulse = previous.acc_tangent_impulse - contact.normal * previous.acc_tangent_impulse.dot(contact.normal);
 		}
+		previous = contact;
+		return;
 	}
 
 	contacts.push_back(contact);
