@@ -3078,6 +3078,38 @@ TEST_CASE("[String] xml_unescape") {
 	CHECK(input.xml_unescape() == input);
 }
 
+TEST_CASE("[String] xml_unescape keeps COW storage when no entity changes") {
+	const String plain = U"plain text: Привет 世界 😀 — <tag> 'quotes' and symbols";
+	const String unchanged = plain.xml_unescape();
+	CHECK(unchanged == plain);
+	CHECK(unchanged.ptr() == plain.ptr());
+	CHECK(plain.xml_unescape().ptr() == plain.ptr());
+
+	// Unknown and malformed entities must not spuriously allocate or disappear.
+	const String unknown = "&unknown; &#66 &#x41SomeIrrelevantText; &#xFFFFFFFFF;";
+	const String ignored = unknown.xml_unescape();
+	CHECK(ignored == unknown);
+	CHECK(ignored.ptr() == unknown.ptr());
+
+	String empty;
+	CHECK(empty.xml_unescape().ptr() == empty.ptr());
+
+	// Actual entities must still be decoded into newly allocated storage.
+	const String encoded = U"Привет &amp; 世界 &lt;tag&gt; &#x1F600;";
+	const String decoded = encoded.xml_unescape();
+	CHECK(decoded == U"Привет & 世界 <tag> 😀");
+	CHECK(decoded.ptr() != encoded.ptr());
+	CHECK(encoded.xml_unescape() == decoded);
+}
+
+TEST_CASE("[String] xml_unescape no-op fast path handles long strings") {
+	const String plain = String(U"данные/plain/abcdef1234567890").repeat(4096);
+	const String result = plain.xml_unescape();
+	CHECK(result.length() == plain.length());
+	CHECK(result.ptr() == plain.ptr());
+	CHECK(result == plain);
+}
+
 TEST_CASE("[String] Strip escapes") {
 	String s = "\t\tTest Test\r\n Test";
 	CHECK(s.strip_escapes() == "Test Test Test");
