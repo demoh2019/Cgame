@@ -358,6 +358,66 @@ finite body states both with the option disabled and enabled. It is a smoke
 regression, not a measured performance benefit or a guarantee that all
 possible overfull manifolds are exercised.
 
+## Rapier-style CCD per-step angular motion cap (opt-in 2D / 3D)
+
+Fast rotation can pass a long, thin rigid shape through nearby obstacles
+between physics steps, even when CCD is enabled. Box2D and Jolt document
+this limitation for swept/linear-cast CCD; Rapier uses an angular rotation
+cap per substep (~45 degrees) to keep rotation from skipping too much of
+the trajectory. Cgame already supports optional rotationally expanded
+broadphase bounds. Those bounds find candidate pairs but **do not**
+alone guarantee an exact nonlinear time-of-impact calculation.
+
+To mitigate this without slowing all rigid bodies, the built-in Cgame
+GodotPhysics2D and GodotPhysics3D now support an **optional maximum
+physical rotation angle per CCD physics step**:
+
+```ini
+[physics]
+2d/solver/ccd_max_angular_motion=0.7853981633974483
+3d/solver/ccd_max_angular_motion=0.7853981633974483
+```
+
+The number is **radians**; `0.785398...` is 45 degrees. Both settings
+default to **0 (disabled)**. Only dynamic bodies with **CCD enabled**
+have their angular velocity capped to `max_angle / physics_delta`.
+Bodies without CCD and kinematic bodies preserve their requested
+angular motion. This is independent of the existing global
+`max_angular_velocity` (radians/s) control: if both are enabled, the
+more restrictive cap wins. A zero, negative or non-finite physics
+delta is ignored rather than divided by. No per-body storage or heap
+allocations are introduced. Settings are cached once per physics space.
+
+The cap is evaluated **twice**: after force/torque/gyroscopic integration
+and before CCD broadphase sweep bounds are updated, then again after
+contact/joint impulses before pose integration. It only limits
+*physical angular velocity*; penetration-correction bias angular
+velocity remains untouched to avoid weakening position correction.
+The latter can still add to the total orientation change. This
+feature is **not full nonlinear CCD** and cannot guarantee no
+rotational tunneling, particularly with high bias corrections or
+complex concave/compound geometry.
+
+Native regression tests exercise 2D scalar and 3D vector limits,
+variable timesteps, degenerate dt and composition with the existing
+angular speed limit. Python contracts check the integration points
+and a seeded 12,000-case reference model. The runtime scene compares
+CCD on/off, in both dimensions, for isolated thin fast-spinning boxes:
+
+```bash
+python3 -m unittest discover -s tests/stress \
+  -p 'test_physics_ccd_angular_motion.py' -v
+
+./bin/godot.macos.editor.arm64 --headless \
+  --path tests/stress \
+  --script res://physics_ccd_angular_motion_regression.gd
+```
+
+Use the same physics tick rate, identical collision shapes and
+release build when benchmarking CCD. Measure both missed rotational
+contacts and CPU cost; no speedup or collision-proof guarantee is
+claimed before compiled engine tests.
+
 ## Jolt-style 3D gyroscopic free-rotation dynamics (opt-in)
 
 Asymmetric rigid bodies do not maintain a constant angular velocity in
