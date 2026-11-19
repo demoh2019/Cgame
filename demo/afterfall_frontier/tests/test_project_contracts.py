@@ -59,7 +59,7 @@ class AfterfallFrontierContracts(unittest.TestCase):
         self.assertIn('"full_loot": true', rules)
         self.assertIn('"pvp": false', rules)
         self.assertIn('"pvp": true', rules)
-        self.assertIn("real player market", readme)
+        self.assertIn("player-driven market", readme)
         self.assertIn("no network PvP", readme)
         self.assertIn("dedicated server", readme)
         self.assertIn("original", readme.lower())
