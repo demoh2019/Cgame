@@ -1325,31 +1325,34 @@ TEST_CASE("[SceneTree][Control] Grow direction") {
 
 
 TEST_CASE("[LineEditCaretIdle] an unfocused LineEdit never schedules caret ticks") {
-	LineEdit edit;
-	edit.set_caret_blink_enabled(true);
-	CHECK_FALSE(edit.is_processing_internal());
-	edit.set_caret_blink_enabled(false);
-	CHECK_FALSE(edit.is_processing_internal());
+	LineEdit *edit = memnew(LineEdit);
+	edit->set_caret_blink_enabled(true);
+	CHECK_FALSE(edit->is_processing_internal());
+	edit->set_caret_blink_enabled(false);
+	CHECK_FALSE(edit->is_processing_internal());
+	memdelete(edit);
 }
 
 TEST_CASE("[LineEditCaretIdle] forcing the caret enables ticks and undoing the force disables them") {
-	LineEdit edit;
-	edit.set_caret_blink_enabled(true);
-	CHECK_FALSE(edit.is_processing_internal());
-	edit.set_caret_force_displayed(true);
-	CHECK(edit.is_processing_internal());
-	edit.set_caret_force_displayed(false);
-	CHECK_FALSE(edit.is_processing_internal());
+	LineEdit *edit = memnew(LineEdit);
+	edit->set_caret_blink_enabled(true);
+	CHECK_FALSE(edit->is_processing_internal());
+	edit->set_caret_force_displayed(true);
+	CHECK(edit->is_processing_internal());
+	edit->set_caret_force_displayed(false);
+	CHECK_FALSE(edit->is_processing_internal());
+	memdelete(edit);
 }
 
 TEST_CASE("[LineEditCaretIdle] forced caret does not schedule ticks if blink is disabled") {
-	LineEdit edit;
-	edit.set_caret_force_displayed(true);
-	CHECK_FALSE(edit.is_processing_internal());
-	edit.set_caret_blink_enabled(true);
-	CHECK(edit.is_processing_internal());
-	edit.set_caret_blink_enabled(false);
-	CHECK_FALSE(edit.is_processing_internal());
+	LineEdit *edit = memnew(LineEdit);
+	edit->set_caret_force_displayed(true);
+	CHECK_FALSE(edit->is_processing_internal());
+	edit->set_caret_blink_enabled(true);
+	CHECK(edit->is_processing_internal());
+	edit->set_caret_blink_enabled(false);
+	CHECK_FALSE(edit->is_processing_internal());
+	memdelete(edit);
 }
 
 TEST_CASE("[LineEditCaretIdle] many idle inputs do not register per-frame processing") {
