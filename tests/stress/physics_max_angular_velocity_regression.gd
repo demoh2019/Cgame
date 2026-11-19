@@ -96,7 +96,14 @@ func _check_3d() -> Dictionary:
 
 	var raw: Vector3 = PhysicsServer3D.body_get_state(bodies[0], PhysicsServer3D.BODY_STATE_ANGULAR_VELOCITY)
 	var capped: Vector3 = PhysicsServer3D.body_get_state(bodies[1], PhysicsServer3D.BODY_STATE_ANGULAR_VELOCITY)
-	var passed: bool = raw.length() > 50.0 and capped.is_finite() and capped.length() <= 12.01 			and capped.length() > 0.1 and capped.y > 0.0 and capped.z < 0.0
+	var passed: bool = (
+		raw.length() > 50.0
+		and capped.is_finite()
+		and capped.length() <= 12.01
+		and capped.length() > 0.1
+		and capped.y > 0.0
+		and capped.z < 0.0
+	)
 
 	for space in spaces:
 		PhysicsServer3D.space_set_active(space, false)
