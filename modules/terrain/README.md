@@ -27,7 +27,7 @@ terrain.paint_color(Vector2(32, 32), 8.0, Color.DARK_GREEN, 0.5)
 add_child(terrain)
 ```
 
-The `import_heightmap(image, minimum, maximum)` method takes an uncompressed
+The `erode_thermal(iterations, talus, strength)` method applies a four-neighbor\nthermal erosion algorithm with simultaneous updates. This is not hydraulic erosion.\n\nThe `import_heightmap(image, minimum, maximum)` method takes an uncompressed
 Image and maps its luminance into the supplied height range.
 
 ## Run tests
