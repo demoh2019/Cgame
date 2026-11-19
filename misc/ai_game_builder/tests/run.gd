@@ -4,6 +4,8 @@ const Validator = preload("res://addons/ai_game_builder/validator.gd")
 const Planner = preload("res://addons/ai_game_builder/planner.gd")
 const Writer = preload("res://addons/ai_game_builder/writer.gd")
 const Inspector = preload("res://addons/ai_game_builder/inspector.gd")
+const Dock = preload("res://addons/ai_game_builder/dock.gd")
+const Plugin = preload("res://addons/ai_game_builder/plugin.gd")
 
 var _total := 0
 var _failed := 0
@@ -11,6 +13,8 @@ var _failed := 0
 
 func _initialize() -> void:
 	_run()
+	_check(Dock != null, "Editor dock script loads")
+	_check(Plugin != null, "Editor plugin script loads")
 	print("AI Game Builder: %d tests, %d failed" % [_total, _failed])
 	quit(0 if _failed == 0 else 1)
 
