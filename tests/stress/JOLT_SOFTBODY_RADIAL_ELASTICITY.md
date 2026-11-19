@@ -21,7 +21,9 @@ Enable both options in Project Settings > Physics > Jolt Physics 3D > Simulation
 - `soft_body_volume_radial_compliance = 0.0001` (default)
 
 Lower compliance means stronger resistance to deformation. Both compliance
-settings are clamped to finite nonnegative values, and can be zero.
+settings require finite nonnegative values and can be zero. Radial
+compliance is additionally capped at 1.0 to prevent oversized
+constraint denominators in the iterative solver.
 
 When enabled on a valid convex closed mesh with V physics vertices and F
 triangles, the feature adds V radial springs and F tetrahedral volume
