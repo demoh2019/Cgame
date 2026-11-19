@@ -30,8 +30,48 @@
 #pragma once
 
 #include "core/math/math_funcs.h"
+#include "core/math/transform_2d.h"
+#include "core/math/transform_3d.h"
 #include "core/math/vector2.h"
 #include "core/math/vector3.h"
+
+
+// An affine transform preserves a circle/sphere only when its basis is
+ // orthogonal with equal axis lengths. Return zero for ellipses/ellipsoids:
+ // they must continue through the general support-ray CCD path.
+_FORCE_INLINE_ double physics_ccd_uniform_sphere_scale(const Transform2D &p_transform) {
+	const Vector2 &x = p_transform.columns[0];
+	const Vector2 &y = p_transform.columns[1];
+	const double sx = Math::sqrt(double(x.x) * x.x + double(x.y) * x.y);
+	const double sy = Math::sqrt(double(y.x) * y.x + double(y.y) * y.y);
+	if (!(sx > 0.0 && sy > 0.0) || !Math::is_equal_approx(sx, sy)) {
+		return 0.0;
+	}
+	if (Math::abs(double(x.x) * y.x + double(x.y) * y.y) > double(CMP_EPSILON) * sx * sy) {
+		return 0.0;
+	}
+	return sx;
+}
+
+_FORCE_INLINE_ double physics_ccd_uniform_sphere_scale(const Transform3D &p_transform) {
+	const Vector3 x = p_transform.basis.get_column(0);
+	const Vector3 y = p_transform.basis.get_column(1);
+	const Vector3 z = p_transform.basis.get_column(2);
+	const double sx = Math::sqrt(double(x.x) * x.x + double(x.y) * x.y + double(x.z) * x.z);
+	const double sy = Math::sqrt(double(y.x) * y.x + double(y.y) * y.y + double(y.z) * y.z);
+	const double sz = Math::sqrt(double(z.x) * z.x + double(z.y) * z.y + double(z.z) * z.z);
+	if (!(sx > 0.0 && sy > 0.0 && sz > 0.0) ||
+			!Math::is_equal_approx(sx, sy) || !Math::is_equal_approx(sx, sz)) {
+		return 0.0;
+	}
+	const double tol = double(CMP_EPSILON) * sx * sx;
+	if (Math::abs(double(x.x) * y.x + double(x.y) * y.y + double(x.z) * y.z) > tol ||
+			Math::abs(double(x.x) * z.x + double(x.y) * z.y + double(x.z) * z.z) > tol ||
+			Math::abs(double(y.x) * z.x + double(y.y) * z.y + double(y.z) * z.z) > tol) {
+		return 0.0;
+	}
+	return sx;
+}
 
 // First linear time of impact of two spheres with combined radius p_radius.
 // Positions are relative (center A minus center B), and motion is the
