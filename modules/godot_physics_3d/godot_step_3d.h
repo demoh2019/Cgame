@@ -32,6 +32,7 @@
 
 #include "godot_space_3d.h"
 
+#include "core/templates/a_hash_map.h"
 #include "core/templates/local_vector.h"
 
 class GodotStep3D {
@@ -48,6 +49,10 @@ class GodotStep3D {
 	LocalVector<uint32_t> solve_island_indices;
 	// Reused only by the opt-in large rigid-body island coloring path.
 	LocalVector<GodotConstraint3D *> colored_constraints;
+	// Persistent scratch avoids rebuilding maps and allocations for every step
+	// of a large, connected island. Cleared before each use, or freed on shrink.
+	LocalVector<uint8_t> constraint_colors;
+	AHashMap<GodotBody3D *, uint32_t> occupied_colors;
 	uint32_t color_batch_offset = 0;
 	// Read by workers only while processing one graph color; barrier after each color.
 	uint32_t color_batch_count = 0;
