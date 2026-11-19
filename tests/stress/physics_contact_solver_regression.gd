@@ -8,10 +8,9 @@ func _initialize() -> void:
 
 
 func _run() -> void:
+	# The new space has its own default area, initialized with the project's
+	# 2D gravity. PhysicsServer2D does not expose a default-area RID getter.
 	var space := PhysicsServer2D.space_create()
-	var default_area := PhysicsServer2D.space_get_default_area(space)
-	PhysicsServer2D.area_set_param(default_area, PhysicsServer2D.AREA_PARAM_GRAVITY, 100.0)
-	PhysicsServer2D.area_set_param(default_area, PhysicsServer2D.AREA_PARAM_GRAVITY_VECTOR, Vector2.DOWN)
 
 	var floor_shape := PhysicsServer2D.rectangle_shape_create()
 	var ball_shape := PhysicsServer2D.circle_shape_create()
