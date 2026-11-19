@@ -105,4 +105,42 @@ TEST_CASE("[GodotPhysics3D] Invalid geometry or timestep never produces a TOI") 
 	CHECK(fraction == -1.0);
 }
 
+
+TEST_CASE("[GodotPhysics2D] Rotating off-center capsule TOI is invariant under translation") {
+	const Vector2 center(2.0, 0.0);
+	const Vector2 pivot(0.0, 0.0);
+	const Vector2 target(0.0, 2.0);
+	const Vector2 offset(2048.0, -4096.0);
+	double base_fraction = -1.0;
+	double translated_fraction = -1.0;
+	CHECK(physics_ccd_rotating_capsule_toi(
+			center, Vector2(0.0, 1.0), pivot, target,
+			real_t(Math::PI / 2.0), real_t(1.0), 0.5, 0.3, base_fraction) ==
+			PhysicsCCDRotatingCapsuleTOIResult::HIT);
+	CHECK(physics_ccd_rotating_capsule_toi(
+			center + offset, Vector2(0.0, 1.0), pivot + offset, target + offset,
+			real_t(Math::PI / 2.0), real_t(1.0), 0.5, 0.3, translated_fraction) ==
+			PhysicsCCDRotatingCapsuleTOIResult::HIT);
+	CHECK(Math::abs(base_fraction - translated_fraction) < 0.003);
+}
+
+TEST_CASE("[GodotPhysics3D] Rotating off-center capsule TOI is invariant under translation") {
+	const Vector3 center(2.0, 0.0, 0.0);
+	const Vector3 pivot(0.0, 0.0, 0.0);
+	const Vector3 target(0.0, 2.0, 0.0);
+	const Vector3 offset(2048.0, -4096.0, 1024.0);
+	const Vector3 angular_velocity(0.0, 0.0, real_t(Math::PI / 2.0));
+	double base_fraction = -1.0;
+	double translated_fraction = -1.0;
+	CHECK(physics_ccd_rotating_capsule_toi(
+			center, Vector3(0.0, 1.0, 0.0), pivot, target,
+			angular_velocity, real_t(1.0), 0.5, 0.3, base_fraction) ==
+			PhysicsCCDRotatingCapsuleTOIResult::HIT);
+	CHECK(physics_ccd_rotating_capsule_toi(
+			center + offset, Vector3(0.0, 1.0, 0.0), pivot + offset, target + offset,
+			angular_velocity, real_t(1.0), 0.5, 0.3, translated_fraction) ==
+			PhysicsCCDRotatingCapsuleTOIResult::HIT);
+	CHECK(Math::abs(base_fraction - translated_fraction) < 0.003);
+}
+
 } // namespace TestGodotPhysicsCCDRotatingCapsuleTOI
