@@ -33,6 +33,7 @@
 #include "../world_partition_3d.h"
 
 #include "core/io/dir_access.h"
+#include "core/io/resource_loader.h"
 #include "core/io/resource_saver.h"
 #include "core/os/os.h"
 #include "scene/main/scene_tree.h"
@@ -453,6 +454,55 @@ TEST_CASE("[SceneTree][WorldPartition3D] Replacing a cell loads a different auth
 	}
 	CHECK(DirAccess::remove_absolute(first_path) == OK);
 	CHECK(DirAccess::remove_absolute(second_path) == OK);
+}
+
+TEST_CASE("[SceneTree][WorldPartition3D] One background scene request serves multiple cells") {
+	const String path = make_cell_scene("shared_resources");
+	{
+		WorldFixture fixture;
+		fixture.world->set_load_radius(1);
+		fixture.world->set_max_new_requests_per_frame(1);
+		fixture.world->set_max_instances_per_frame(1);
+		fixture.world->set_cell_scene(Vector2i(0, 0), path);
+		fixture.world->set_cell_scene(Vector2i(1, 0), path);
+		REQUIRE(wait_for_cell(fixture.world, Vector2i(0, 0)));
+		REQUIRE(wait_for_cell(fixture.world, Vector2i(1, 0)));
+		CHECK(fixture.world->get_loaded_cell_count() == 2);
+		CHECK(fixture.world->get_loaded_cells().has(Vector2i(0, 0)));
+		CHECK(fixture.world->get_loaded_cells().has(Vector2i(1, 0)));
+	}
+	CHECK(DirAccess::remove_absolute(path) == OK);
+}
+
+TEST_CASE("[SceneTree][WorldPartition3D] Destroying streamer collects in-flight user load token") {
+	const String path = make_cell_scene("pending_destruction");
+	{
+		WorldFixture fixture;
+		fixture.world->set_cell_scene(Vector2i(0, 0), path);
+		fixture.world->update_streaming();
+		// Deliberately do not wait: the destructor must collect even an in-flight load.
+	}
+	CHECK(ResourceLoader::load_threaded_get_status(path) == ResourceLoader::THREAD_LOAD_INVALID_RESOURCE);
+	CHECK(DirAccess::remove_absolute(path) == OK);
+}
+
+TEST_CASE("[SceneTree][WorldPartition3D] Failed resources leave no user load tokens") {
+	const String missing_path = "user://partition_missing_" + itos(OS::get_singleton()->get_process_id()) + ".tscn";
+	{
+		WorldFixture fixture;
+		fixture.world->set_cell_scene(Vector2i(0, 0), missing_path);
+		ERR_PRINT_OFF;
+		for (int i = 0; i < 100; i++) {
+			fixture.world->update_streaming();
+			if (ResourceLoader::load_threaded_get_status(missing_path) == ResourceLoader::THREAD_LOAD_INVALID_RESOURCE) {
+				break;
+			}
+			OS::get_singleton()->delay_usec(1000);
+		}
+		ERR_PRINT_ON;
+		CHECK_FALSE(fixture.world->is_cell_loaded(Vector2i(0, 0)));
+	}
+	CHECK(ResourceLoader::load_threaded_get_status(missing_path) == ResourceLoader::THREAD_LOAD_INVALID_RESOURCE);
 }
 
 TEST_CASE("[SceneTree][WorldPartition3D] No observer prevents resource requests") {
