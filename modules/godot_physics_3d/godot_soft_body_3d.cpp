@@ -46,6 +46,7 @@
 #include "servers/physics_xpbd_dihedral.h"
 #include "servers/physics_xpbd_shear.h"
 #include "servers/physics_xpbd_self_collision.h"
+#include "servers/physics_softbody_shape_matching.h"
 #include "servers/physics_xpbd_soft_ccd.h"
 #include "servers/physics_xpbd_self_friction.h"
 #include "servers/physics_xpbd_edge_collision.h"
@@ -2151,6 +2152,21 @@ void GodotSoftBody3D::solve_constraints(real_t p_delta) {
 			}
 		}
 	}
+	// Optional global corotational shape memory. A single best-fit rigid
+	// pose captures solid-like elasticity while leaving freely translated/
+	// rotated bodies unchanged. The exponential fraction is invariant to
+	// physics-timestep subdivision for a constant deformation. Unlike a
+	// tetrahedral FEM solver this requires only the existing surface nodes.
+	// Applied after other material rows, before self contacts and velocity
+	// reconstruction. Default rate=0 adds no per-step node traversal.
+	const real_t shape_matching_rate = get_space()->get_soft_body_shape_matching_rate();
+	if (shape_matching_rate > real_t(0.0) && p_delta > real_t(0.0) && nodes.size() >= 4) {
+		const double rate_fraction = 1.0 - Math::exp(-double(shape_matching_rate) * double(p_delta));
+		if (Math::is_finite(rate_fraction) && rate_fraction > 0.0) {
+			physics_softbody_project_shape_matching(nodes, real_t(MIN(1.0, rate_fraction)));
+		}
+	}
+
 	// Run non-adjacent fold self-contacts after all material projections.
 	solve_self_collisions(p_delta);
 	const real_t vc = (1.0 - damping_coefficient) * inv_delta;
