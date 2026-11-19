@@ -369,28 +369,52 @@ bool NodePath::is_empty() const {
 }
 
 void NodePath::simplify() {
-	if (!data) {
+	if (!data || data->path.size() <= 1) {
 		return;
 	}
-	_copy_on_write();
-	for (int i = 0; i < data->path.size(); i++) {
-		if (data->path.size() == 1) {
+
+	// Common case: an already normalized path. Do not detach shared data,
+	// discard cached hashes, or write to its COW vector just to do nothing.
+	const int count = data->path.size();
+	const StringName *source = data->path.ptr();
+	bool needs_simplifying = false;
+	for (int i = 0; i < count; i++) {
+		const String &part = source[i].string();
+		if (part == "." || (part == ".." && i > 0 && source[i - 1].string() != "." && source[i - 1].string() != "..")) {
+			needs_simplifying = true;
 			break;
 		}
-		if (data->path[i].string() == ".") {
-			data->path.remove_at(i);
-			i--;
-		} else if (i > 0 && data->path[i].string() == ".." && data->path[i - 1].string() != "." && data->path[i - 1].string() != "..") {
-			//remove both
-			data->path.remove_at(i - 1);
-			data->path.remove_at(i - 1);
-			i -= 2;
-			if (data->path.is_empty()) {
-				data->path.push_back(".");
-				break;
-			}
-		}
 	}
+	if (!needs_simplifying) {
+		return;
+	}
+
+	_copy_on_write();
+	// Compact in place using the already allocated array as a stack.
+	// Unlike repeated remove_at(), every surviving name moves at most once.
+	StringName *names = data->path.ptrw();
+	int write = 0;
+	for (int read = 0; read < count; read++) {
+		const String &part = names[read].string();
+		if (part == ".") {
+			continue;
+		}
+		if (part == ".." && write > 0 && names[write - 1].string() != "." && names[write - 1].string() != "..") {
+			--write;
+			continue;
+		}
+		if (read != write) {
+			names[write] = names[read];
+		}
+		++write;
+	}
+
+	// Keep the original semantics: a completely cancelled path is ".".
+	if (write == 0) {
+		names[0] = ".";
+		write = 1;
+	}
+	data->path.resize(write);
 	data->concatenated_path = StringName();
 	data->hash_cache_valid = false;
 }
