@@ -955,38 +955,46 @@ void GodotSoftBody3D::apply_forces(const LocalVector<GodotArea3D *> &p_wind_area
 		return;
 	}
 
-	int32_t j;
+	const bool apply_pressure = pressure_coefficient > CMP_EPSILON;
+	const bool apply_wind = !p_wind_areas.is_empty();
+	if (!apply_pressure && !apply_wind) {
+		return;
+	}
 
 	real_t volume = 0.0;
 	const Vector3 &org = nodes[0].x;
 
-	// Iterate over faces (try not to iterate elsewhere if possible).
+	// Wind needs face forces but not volume. Skip three vector differences /
+	// a cross product per face when pressure is disabled.
 	for (const Face &face : faces) {
-		Vector3 wind_force(0, 0, 0);
+		if (apply_pressure) {
+			volume += vec3_dot(face.n[0]->x - org, vec3_cross(face.n[1]->x - org, face.n[2]->x - org));
+		}
 
-		// Compute volume.
-		volume += vec3_dot(face.n[0]->x - org, vec3_cross(face.n[1]->x - org, face.n[2]->x - org));
-
-		// Compute nodal forces from area winds.
-		if (!p_wind_areas.is_empty()) {
+		if (apply_wind) {
+			Vector3 wind_force;
 			for (const GodotArea3D *area : p_wind_areas) {
 				wind_force += _compute_area_windforce(area, &face);
 			}
 
-			for (j = 0; j < 3; j++) {
-				Node *current_node = face.n[j];
-				current_node->f += wind_force;
+			for (int j = 0; j < 3; j++) {
+				face.n[j]->f += wind_force;
 			}
 		}
 	}
-	volume /= 6.0;
 
-	// Apply nodal pressure forces.
-	if (pressure_coefficient > CMP_EPSILON) {
-		real_t ivolumetp = 1.0 / Math::abs(volume) * pressure_coefficient;
+	if (apply_pressure) {
+		volume /= 6.0;
+		const real_t absolute_volume = Math::abs(volume);
+		// An open, flattened or degenerate mesh has no enclosed volume.
+		// Never divide by zero (or propagate NaNs) when applying pressure.
+		if (!(absolute_volume > CMP_EPSILON)) {
+			return;
+		}
+		const real_t pressure_scale = pressure_coefficient / absolute_volume;
 		for (Node &node : nodes) {
 			if (node.im > 0) {
-				node.f += node.n * (node.area * ivolumetp);
+				node.f += node.n * (node.area * pressure_scale);
 			}
 		}
 	}
@@ -1105,11 +1113,8 @@ void GodotSoftBody3D::predict_motion(real_t p_delta) {
 void GodotSoftBody3D::solve_constraints(real_t p_delta) {
 	const real_t inv_delta = 1.0 / p_delta;
 
-	for (Link &link : links) {
-		link.c3 = link.n[1]->q - link.n[0]->q;
-		link.c2 = 1 / (link.c3.length_squared() * link.c0);
-	}
-
+	// The old c2/c3 link-gradient prepass was unused by solve_links().
+	// Avoid a full O(links) traversal and its potential division by zero.
 	// Solve velocities.
 	for (Node &node : nodes) {
 		node.x = node.q + node.v * p_delta;
