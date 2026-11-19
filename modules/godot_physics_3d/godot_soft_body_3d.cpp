@@ -501,20 +501,34 @@ void GodotSoftBody3D::solve_shape_matching_clusters(real_t p_strength) {
 	}
 }
 
-// This first volumetric FEM path intentionally supports only a single,
-// closed, four-vertex tetrahedron. Arbitrary render surface meshes are not
-// tetrahedral finite-element meshes: silently fanning them to a centroid
-// would make nonconvex shapes fold and produce invalid material stresses.
-// Mesh-to-tet cooking and surface embedding will be added separately.
+// Cook a conservative fan of tetrahedra from a closed CONVEX surface.
+// The existing oriented-edge validator runs first; nonconvex or unsuitable
+// meshes are rejected without changing any other soft-body physics.
+// Rest matrices, node indices and per-step XPBD multipliers remain cached.
 void GodotSoftBody3D::initialize_fem_tetra() {
-	xpbd_fem_tetra_valid = false;
+	xpbd_fem_tetrahedra.reset();
 	if (!get_space() ||
 			!(get_space()->get_soft_body_tetra_fem_compliance() > 0.0) ||
-			!xpbd_volume_closed || nodes.size() != 4 || faces.size() != 4) {
+			!xpbd_volume_closed || nodes.size() < 4 || nodes.size() > 2048 ||
+			faces.size() < 4 || faces.size() > 4096) {
 		return;
 	}
-	xpbd_fem_tetra_valid = physics_fem_tetra_make_rest(
-			nodes[0].x, nodes[1].x, nodes[2].x, nodes[3].x, xpbd_fem_tetra_rest);
+	LocalVector<Vector3> positions;
+	positions.resize(nodes.size());
+	for (uint32_t i = 0; i < nodes.size(); ++i) {
+		positions[i] = nodes[i].x;
+	}
+	LocalVector<PhysicsFEMConvexFace> triangles;
+	triangles.reserve(faces.size());
+	for (const Face &face : faces) {
+		PhysicsFEMConvexFace triangle;
+		triangle.a = face.n[0]->index;
+		triangle.b = face.n[1]->index;
+		triangle.c = face.n[2]->index;
+		triangles.push_back(triangle);
+	}
+	physics_fem_build_convex_star_tetrahedra(
+			positions, triangles, xpbd_volume_rest, xpbd_fem_tetrahedra);
 }
 
 // Cache undeformed triangle angles only for opt-in shear constraints.
@@ -2857,7 +2871,7 @@ void GodotSoftBody3D::solve_constraints(real_t p_delta) {
 	const real_t dihedral_alpha = use_dihedral_xpbd ? real_t(MIN(dihedral_alpha_double, double(std::numeric_limits<real_t>::max()))) : real_t(0.0);
 	const double fem_compliance = get_space() ? double(get_space()->get_soft_body_tetra_fem_compliance()) : 0.0;
 	const double fem_alpha = p_delta > 0.0 ? fem_compliance / (double(p_delta) * double(p_delta)) : 0.0;
-	const bool use_fem = xpbd_fem_tetra_valid && fem_compliance > 0.0 && p_delta > 0.0 &&
+	const bool use_fem = !xpbd_fem_tetrahedra.is_empty() && fem_compliance > 0.0 && p_delta > 0.0 &&
 			Math::is_finite(fem_alpha) && fem_alpha > 0.0;
 	const double fem_poisson = get_space() ? double(get_space()->get_soft_body_tetra_fem_poisson_ratio()) : 0.3;
 	const double volume_compliance = get_space() ? double(get_space()->get_soft_body_xpbd_volume_compliance()) : 0.0;
@@ -2994,7 +3008,13 @@ void GodotSoftBody3D::solve_constraints(real_t p_delta) {
 		xpbd_volume_gradients.reset();
 	}
 	double volume_lambda = 0.0;
-	double fem_lambda = 0.0;
+	// Each FEM tetrahedron owns its XPBD multiplier. Reset once per
+	// physics tick; retain it across all nonlinear solver iterations.
+	if (use_fem) {
+		for (PhysicsFEMConvexTetra &tetra : xpbd_fem_tetrahedra) {
+			tetra.lambda = 0.0;
+		}
+	}
 
 	// Distribute frame-level shape stiffness over solver iterations. For a
 	// fixed total stiffness, increasing iteration_count should not multiply
@@ -3080,9 +3100,15 @@ void GodotSoftBody3D::solve_constraints(real_t p_delta) {
 			solve_shape_matching(shape_matching_iteration_strength);
 		}
 		if (use_fem) {
-			physics_fem_tetra_solve(nodes[0].x, nodes[1].x, nodes[2].x, nodes[3].x,
-					nodes[0].im, nodes[1].im, nodes[2].im, nodes[3].im,
-					xpbd_fem_tetra_rest, fem_poisson, fem_alpha, fem_lambda);
+			for (PhysicsFEMConvexTetra &tetra : xpbd_fem_tetrahedra) {
+				Node &a = nodes[tetra.a];
+				Node &b = nodes[tetra.b];
+				Node &c = nodes[tetra.c];
+				Node &d = nodes[tetra.d];
+				physics_fem_tetra_solve(a.x, b.x, c.x, d.x,
+						a.im, b.im, c.im, d.im,
+						tetra.rest, fem_poisson, fem_alpha, tetra.lambda);
+			}
 		}
 		if (use_volume_xpbd) {
 			solve_volume_constraint(volume_alpha, volume_lambda);
@@ -3353,7 +3379,7 @@ void GodotSoftBody3D::destroy() {
 	xpbd_volume_closed = false;
 	xpbd_volume_rest = 0.0;
 	xpbd_volume_original_rest = 0.0;
-	xpbd_fem_tetra_valid = false;
+	xpbd_fem_tetrahedra.reset();
 	nodes.clear();
 	links.clear();
 	faces.clear();
