@@ -124,6 +124,7 @@ private:
 	real_t ccd_max_angular_motion = 0.0; // Opt-in maximum CCD rotation per physics step, radians.
 	real_t warm_start_coefficient = 1.0;
 	bool ccd_rotational_bounds = false; // Optional conservative angular sweep broadphase.
+	bool ccd_tight_rotational_bounds = false; // Analytical swept arc AABB; opt-in.
 	bool implicit_damping = false; // Box2D-style time-step-stable damping; disabled by default.
 	bool gyroscopic_forces = false; // Jolt-style asymmetric rigid-body rotation; opt-in.
 	int gyroscopic_integration_mode = 0; // 0: normalized Euler, 1: implicit midpoint.
@@ -206,6 +207,7 @@ public:
 	_FORCE_INLINE_ real_t get_max_angular_velocity() const { return max_angular_velocity; }
 	_FORCE_INLINE_ real_t get_ccd_max_angular_motion() const { return ccd_max_angular_motion; }
 	_FORCE_INLINE_ bool is_ccd_rotational_bounds_enabled() const { return ccd_rotational_bounds; }
+	_FORCE_INLINE_ bool is_ccd_tight_rotational_bounds_enabled() const { return ccd_tight_rotational_bounds; }
 	_FORCE_INLINE_ bool is_implicit_damping_enabled() const { return implicit_damping; }
 	_FORCE_INLINE_ bool are_gyroscopic_forces_enabled() const { return gyroscopic_forces; }
 	_FORCE_INLINE_ int get_gyroscopic_integration_mode() const { return gyroscopic_integration_mode; }
