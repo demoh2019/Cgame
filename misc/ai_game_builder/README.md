@@ -32,6 +32,15 @@ Godot project. `misc/ai_game_builder/project.godot` is a minimal test project.
    is outside your project and is not automatically pruned.
 6. If a main scene is proposed, the plugin will change the project's startup scene
    after confirmation. You can then run and test the game.
+7. If Godot reports errors, paste them into the **Godot error log** field and
+   click **Generate repair proposal from errors**. The diagnostics and up to 12
+   small generated files (48,000 characters maximum) are sent to your selected
+   provider when clicked. Inspect and explicitly approve the repair as usual.
+
+Generated proposals receive **basic preflight checks** for JSON, scene/resource
+headers, empty scripts, shader headers, and SVG roots. These are not a substitute
+for parsing or running the whole project. If a file changes between proposal
+preview and confirmation, the plugin refuses to overwrite it; regenerate instead.
 
 The addon sends data directly from the editor to the configured endpoint.
 Plain HTTP is restricted to loopback hosts to protect credentials.
@@ -49,13 +58,14 @@ godot --headless --path misc/ai_game_builder --script res://tests/test_ai_change
 ```
 
 The test suite exercises response parsing, path safety, payload limits,
-duplicate detection, and endpoint policy. It does *not* validate actual model
+duplicate detection, lightweight content preflight, repair prompt structure,
+preview hashes, and endpoint policy. It does *not* validate actual model
 quality; model requests and editor UI require separate integration tests.
 
 ## Roadmap
 
 - Project-aware multi-stage planning and selective context retrieval.
-- Syntax validation for generated scenes and scripts before applying.
-- Iterative repair loops using Godot's headless diagnostics and project test suite.
+- Full Godot parser validation for generated scenes and scripts before applying.
+- Automated, explicitly approved repair loops using Godot's headless diagnostics and project test suite.
 - Diffs, one-click undo, provider presets, locally generated 2D/3D assets.
 - Agent actions for editing nodes and resources, with explicit user confirmation.

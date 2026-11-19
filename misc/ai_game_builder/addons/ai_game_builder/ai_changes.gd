@@ -93,12 +93,41 @@ static func has_symlink(path: String) -> bool:
 	return false
 
 
-static func apply_changes(change_set: Dictionary) -> Dictionary:
+# A proposal must not silently overwrite a file changed since preview.
+static func file_fingerprint(path: String) -> String:
+	if not is_safe_path(path) or has_symlink(path):
+		return "__invalid__"
+	if not FileAccess.file_exists(path):
+		return "__missing__"
+	var hash := FileAccess.get_sha256(path)
+	return "sha256:" + hash if not hash.is_empty() else "__invalid__"
+
+
+static func preview_snapshot(change_set: Dictionary) -> Dictionary:
+	var checked := validate_response(change_set)
+	if not checked["ok"]:
+		return checked
+	var states := {}
+	for entry in checked["files"]:
+		var path: String = entry["path"]
+		var fingerprint := file_fingerprint(path)
+		if fingerprint == "__invalid__":
+			return {"ok": false, "error": "Cannot inspect file safely: " + path}
+		states[path] = fingerprint
+	return {"ok": true, "states": states}
+
+
+static func apply_changes(change_set: Dictionary, expected_states: Dictionary = {}) -> Dictionary:
 	# Revalidate even when the caller already showed a preview.
 	var checked := validate_response(change_set)
 	if not checked["ok"]:
 		return checked
 	var files: Array = checked["files"]
+	if not expected_states.is_empty():
+		for entry in files:
+			var path: String = entry["path"]
+			if not expected_states.has(path) or file_fingerprint(path) != expected_states[path]:
+				return {"ok": false, "error": "File changed since proposal preview: " + path}
 	var scene: String = checked["main_scene"]
 	if not scene.is_empty() and not FileAccess.file_exists(scene):
 		var in_proposal := false

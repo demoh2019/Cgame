@@ -2,6 +2,8 @@ extends SceneTree
 
 const Changes = preload("res://addons/ai_game_builder/ai_changes.gd")
 const Protocol = preload("res://addons/ai_game_builder/ai_protocol.gd")
+const Preflight = preload("res://addons/ai_game_builder/ai_preflight.gd")
+const Repair = preload("res://addons/ai_game_builder/ai_repair.gd")
 var failures := 0
 
 
@@ -48,5 +50,24 @@ func _run_tests() -> void:
 	_assert_true(Protocol.is_allowed_endpoint("https://api.openai.com/v1/chat/completions"), "TLS permitted")
 	_assert_true(Protocol.is_allowed_endpoint("http://localhost:11434/v1/chat/completions"), "Ollama permitted")
 	_assert_true(not Protocol.is_allowed_endpoint("http://remote-host:1234/v1/chat/completions"), "remote plaintext refused")
+	_assert_true(not Protocol.is_allowed_endpoint("http://localhost:11434@evil.example/v1/chat/completions"), "userinfo host injection refused")
+	_assert_true(not Protocol.is_allowed_endpoint("http://localhost:70000/v1/chat/completions"), "out of range port refused")
+	_assert_true(not Protocol.is_allowed_endpoint("http://localhost:1234?evil=1"), "query-only authority refused")
+	_assert_true(Protocol.is_allowed_endpoint("http://127.0.0.1:11434/v1/chat/completions"), "IPv4 loopback allowed")
+	_assert_true(Protocol.is_allowed_endpoint("http://[::1]:11434/v1/chat/completions"), "IPv6 loopback allowed")
 	var request: Variant = JSON.parse_string(Protocol.request_body("test-model", "Make a game", ""))
 	_assert_true(request is Dictionary and request["model"] == "test-model", "request construction")
+	_assert_true(Preflight.check(_proposal("res://example.gd"))["ok"], "script preflight passes")
+	_assert_true(not Preflight.check(_proposal("res://editor.gd", "@tool\nextends Node"))["ok"], "@tool scripts blocked")
+	_assert_true(not Preflight.check(_proposal("res://example.gd", ""))["ok"], "empty script rejected")
+	_assert_true(Preflight.check(_proposal("res://data.json", JSON.stringify({"ok": true})))["ok"], "valid json accepted")
+	_assert_true(not Preflight.check(_proposal("res://data.json", "{broken}"))["ok"], "invalid json rejected")
+	_assert_true(Preflight.check(_proposal("res://game.tscn", "[gd_scene format=3]\\n"))["ok"], "valid scene header")
+	_assert_true(not Preflight.check(_proposal("res://game.tscn", "not a scene"))["ok"], "invalid scene header")
+	_assert_true(not Preflight.check(_proposal("res://asset.gdshader", "bad shader"))["ok"], "invalid shader rejected")
+	var repair_request: Variant = JSON.parse_string(Protocol.repair_request_body("model", "Make game", "Parser Error at line 3", "(no files)"))
+	_assert_true(repair_request is Dictionary and repair_request["messages"][1]["content"].contains("Parser Error"), "repair request includes diagnostics")
+	_assert_true(Repair.collect_context([]).contains("No eligible"), "empty repair context")
+	var state := Changes.preview_snapshot(_proposal("res://tests/newfile_never_created_123.gd"))
+	_assert_true(state["ok"] and state["states"]["res://tests/newfile_never_created_123.gd"] == "__missing__", "snapshot records absent files")
+

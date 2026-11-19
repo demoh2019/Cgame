@@ -40,6 +40,15 @@ func _run() -> void:
 	_expect(not backup.is_empty(), "existing file was backed up")
 	_expect(FileAccess.get_file_as_string(backup.path_join("tests/generated_ai_test.txt")) == "new text", "backup preserves original bytes")
 
+	var snapshot := Changes.preview_snapshot(_make_set(target, "model changes"))
+	_expect(snapshot["ok"], "preview snapshot generated")
+	var manual := FileAccess.open(target, FileAccess.WRITE)
+	manual.store_string("manual edit")
+	manual.close()
+	var conflict := Changes.apply_changes(_make_set(target, "model changes"), snapshot["states"])
+	_expect(not conflict.get("ok", true), "concurrent edits must stop apply")
+	_expect(FileAccess.get_file_as_string(target) == "manual edit", "manual edits survive stale proposal")
+
 	var invalid := Changes.apply_changes(_make_set("res://../outside.txt", "never"))
 	_expect(not invalid.get("ok", true), "unsafe proposal cannot be applied")
 

@@ -3,6 +3,8 @@ extends VBoxContainer
 
 const Changes = preload("res://addons/ai_game_builder/ai_changes.gd")
 const Protocol = preload("res://addons/ai_game_builder/ai_protocol.gd")
+const Preflight = preload("res://addons/ai_game_builder/ai_preflight.gd")
+const Repair = preload("res://addons/ai_game_builder/ai_repair.gd")
 
 var _endpoint: LineEdit
 var _model: LineEdit
@@ -11,6 +13,8 @@ var _task: TextEdit
 var _include_context: CheckBox
 var _generate_button: Button
 var _apply_button: Button
+var _repair_button: Button
+var _diagnostics: TextEdit
 var _status: Label
 var _summary: Label
 var _file_list: ItemList
@@ -18,6 +22,11 @@ var _preview: TextEdit
 var _http: HTTPRequest
 var _confirmation: ConfirmationDialog
 var _proposal: Dictionary = {}
+var _preview_states: Dictionary = {}
+var _last_applied_paths: Array[String] = []
+var _last_original_task := ""
+var _request_is_repair := false
+var _proposal_is_repair := false
 
 
 func _ready() -> void:
@@ -88,6 +97,18 @@ func _ready() -> void:
 	_apply_button.pressed.connect(_request_apply)
 	add_child(_apply_button)
 
+	add_child(_label("Godot error log (sent only when Generate repair is clicked):"))
+	_diagnostics = TextEdit.new()
+	_diagnostics.custom_minimum_size = Vector2(0, 75)
+	_diagnostics.placeholder_text = "Paste parser errors, test failures or a crash log here."
+	add_child(_diagnostics)
+
+	_repair_button = Button.new()
+	_repair_button.text = "Generate repair proposal from errors"
+	_repair_button.disabled = true
+	_repair_button.pressed.connect(_generate_repair)
+	add_child(_repair_button)
+
 	_confirmation = ConfirmationDialog.new()
 	_confirmation.title = "Apply AI-generated files?"
 	_confirmation.confirmed.connect(_apply)
@@ -107,8 +128,9 @@ func _label(value: String) -> Label:
 	return result
 
 
-func _generate() -> void:
+func _generate(is_repair: bool = false) -> void:
 	_proposal = {}
+	_preview_states = {}
 	_apply_button.disabled = true
 	_file_list.clear()
 	_preview.text = ""
@@ -116,31 +138,54 @@ func _generate() -> void:
 	var endpoint := _endpoint.text.strip_edges()
 	var model := _model.text.strip_edges()
 	var task := _task.text.strip_edges()
-	if task.is_empty() or model.is_empty():
+	if (task.is_empty() and not is_repair) or model.is_empty():
 		_status.text = "Provide both a task and a model."
+		return
+	if is_repair and (_last_applied_paths.is_empty() or _diagnostics.text.strip_edges().is_empty()):
+		_status.text = "Apply a proposal first, then paste errors to request a repair."
 		return
 	if not Protocol.is_allowed_endpoint(endpoint):
 		_status.text = "Use HTTPS, or loopback HTTP for a local model."
 		return
 	_generate_button.disabled = true
+	_repair_button.disabled = true
+	_request_is_repair = is_repair
 	var secret := _api_key.text.strip_edges()
 	if secret.is_empty():
 		secret = OS.get_environment("GODOT_AI_API_KEY")
+	if secret.contains("\r") or secret.contains("\n"):
+		_generate_button.disabled = false
+		_repair_button.disabled = _last_applied_paths.is_empty()
+		_status.text = "API key must not contain line breaks."
+		return
 	var headers := PackedStringArray(["Content-Type: application/json"])
 	if not secret.is_empty():
 		headers.append("Authorization: Bearer " + secret)
-	var content := _project_context() if _include_context.button_pressed else "(not shared)"
-	var body := Protocol.request_body(model, task, content)
+	# Repair only shares explicitly submitted diagnostics and previously generated files.
+	var body := ""
+	if is_repair:
+		var generated_context := Repair.collect_context(_last_applied_paths)
+		body = Protocol.repair_request_body(model, _last_original_task, _diagnostics.text.strip_edges(), generated_context)
+	else:
+		var project_context := _project_context() if _include_context.button_pressed else "(not shared)"
+		body = Protocol.request_body(model, task, project_context)
+
 	var error := _http.request(endpoint, headers, HTTPClient.METHOD_POST, body)
 	if error != OK:
 		_generate_button.disabled = false
+		_repair_button.disabled = _last_applied_paths.is_empty()
 		_status.text = "Could not start request (error %d)." % error
 	else:
 		_status.text = "Contacting the model; nothing will be written automatically."
 
 
+func _generate_repair() -> void:
+	_generate(true)
+
+
 func _on_request_completed(result: int, status_code: int, _headers: PackedStringArray, bytes: PackedByteArray) -> void:
 	_generate_button.disabled = false
+	_repair_button.disabled = _last_applied_paths.is_empty()
 	if result != HTTPRequest.RESULT_SUCCESS:
 		_status.text = "Connection failed (result %d)." % result
 		return
@@ -152,15 +197,26 @@ func _on_request_completed(result: int, status_code: int, _headers: PackedString
 		_status.text = "Cannot use this response: " + parsed["error"]
 		return
 	_proposal = parsed
+	_proposal_is_repair = _request_is_repair
 	_summary.text = parsed["summary"]
+	var snapshot := Changes.preview_snapshot(_proposal)
+	if not snapshot["ok"]:
+		_status.text = "Cannot preview safely: " + snapshot["error"]
+		_proposal = {}
+		return
+	_preview_states = snapshot["states"]
+	var preflight := Preflight.check(_proposal)
 	for item in _proposal["files"]:
 		var path: String = item["path"]
 		var status := "OVERWRITE " if FileAccess.file_exists(path) else "NEW "
 		_file_list.add_item(status + path)
 	_file_list.select(0)
 	_preview_file(0)
-	_apply_button.disabled = false
-	_status.text = "%d proposed files. Review contents before applying." % _proposal["files"].size()
+	_apply_button.disabled = not preflight["ok"]
+	if preflight["ok"]:
+		_status.text = "%d proposed files. Review contents before applying." % _proposal["files"].size()
+	else:
+		_status.text = "Basic preflight blocked apply: " + "; ".join(PackedStringArray(preflight["errors"]))
 
 
 func _preview_file(index: int) -> void:
@@ -193,13 +249,21 @@ func _request_apply() -> void:
 func _apply() -> void:
 	if _proposal.is_empty():
 		return
-	var result := Changes.apply_changes(_proposal)
+	var result := Changes.apply_changes(_proposal, _preview_states)
 	if not result["ok"]:
 		_status.text = "Apply failed: " + result["error"]
 		return
 	_status.text = "Applied %d files. Backup folder: %s. Run and test your game." % [result["written"], result["backup_dir"] if not result["backup_dir"].is_empty() else "(no overwrites)"]
 	_apply_button.disabled = true
+	if not _proposal_is_repair:
+		_last_original_task = _task.text.strip_edges()
+	for entry in _proposal["files"]:
+		var path: String = entry["path"]
+		if not _last_applied_paths.has(path):
+			_last_applied_paths.append(path)
+	_repair_button.disabled = false
 	_proposal = {}
+	_preview_states = {}
 	EditorInterface.get_resource_filesystem().scan()
 
 
