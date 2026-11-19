@@ -89,8 +89,10 @@ func _test_floor_2d(parallel: bool) -> Dictionary:
 	PhysicsServer2D.free_rid(box_shape)
 	PhysicsServer2D.free_rid(floor_shape)
 	PhysicsServer2D.free_rid(space)
-	return {"finite": finite, "peak_pairs": peak_pairs, "bodies": BODY_COUNT,
-			"error": "" if peak_pairs >= BODY_COUNT else "Too few contact pairs"}
+	var result := {"finite": finite, "peak_pairs": peak_pairs, "bodies": BODY_COUNT}
+	if peak_pairs < BODY_COUNT:
+		result["error"] = "Too few contact pairs: connected island not exercised"
+	return result
 
 
 func _test_floor_3d(parallel: bool) -> Dictionary:
@@ -145,5 +147,7 @@ func _test_floor_3d(parallel: bool) -> Dictionary:
 	PhysicsServer3D.free_rid(box_shape)
 	PhysicsServer3D.free_rid(floor_shape)
 	PhysicsServer3D.free_rid(space)
-	return {"finite": finite, "peak_pairs": peak_pairs, "bodies": BODY_COUNT,
-			"error": "" if peak_pairs >= BODY_COUNT else "Too few contact pairs"}
+	var result := {"finite": finite, "peak_pairs": peak_pairs, "bodies": BODY_COUNT}
+	if peak_pairs < BODY_COUNT:
+		result["error"] = "Too few contact pairs: connected island not exercised"
+	return result
