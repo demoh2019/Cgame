@@ -415,15 +415,34 @@ TEST_CASE("[BVH] Streaming 3D segment ray spans multiple trees and preserves clo
 }
 
 
+struct BatchAdjacentPairRecorder {
+	int total = 0;
+	int non_adjacent = 0;
+	int adjacent[95] = {};
+};
+
+static void *record_adjacent_pair(void *p_userdata, uint32_t, Item *p_a, int, uint32_t, Item *p_b, int) {
+	BatchAdjacentPairRecorder *recorder = static_cast<BatchAdjacentPairRecorder *>(p_userdata);
+	const int first = MIN(p_a->value, p_b->value);
+	const int last = MAX(p_a->value, p_b->value);
+	recorder->total++;
+	if (last - first == 1 && first >= 0 && first < 95) {
+		recorder->adjacent[first]++;
+	} else {
+		recorder->non_adjacent++;
+	}
+	return nullptr;
+}
+
 TEST_CASE("[BVH] Bulk insertion of independent 2D bodies preserves every adjacent pair") {
 	using Tree = BVH_Manager<Item, 2, true, 16, PairTest, CullTest, Rect2, Vector2, false>;
 	Tree tree;
 	constexpr int COUNT = 96;
 	Item items[COUNT];
 	BVHHandle handles[COUNT];
-	int created = 0;
+	BatchAdjacentPairRecorder recorder;
 	int removed = 0;
-	tree.set_pair_callback(count_pair, &created);
+	tree.set_pair_callback(record_adjacent_pair, &recorder);
 	tree.set_unpair_callback(count_unpair, &removed);
 
 	// Every adjacent pair overlaps; all more distant pairs are separated.
@@ -433,11 +452,15 @@ TEST_CASE("[BVH] Bulk insertion of independent 2D bodies preserves every adjacen
 		handles[i] = tree.create(&items[i], true, uint32_t(i & 1), 3,
 				Rect2(real_t(i) * real_t(1.5), 0, 2, 2), 0, true);
 	}
-	CHECK(created == 0);
+	CHECK(recorder.total == 0);
 	tree.flush_pending_pairs();
-	CHECK(created == COUNT - 1);
+	CHECK(recorder.total == COUNT - 1);
+	CHECK(recorder.non_adjacent == 0);
+	for (int i = 0; i < COUNT - 1; i++) {
+		CHECK(recorder.adjacent[i] == 1);
+	}
 	tree.update();
-	CHECK(created == COUNT - 1);
+	CHECK(recorder.total == COUNT - 1);
 
 	for (int i = 0; i < COUNT; i++) {
 		tree.erase(handles[i]);
