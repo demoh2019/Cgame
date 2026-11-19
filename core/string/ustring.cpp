@@ -4921,42 +4921,78 @@ String String::c_unescape() const {
 	return escaped;
 }
 
-String String::c_escape() const {
-	String escaped = *this;
-	escaped = escaped.replace("\\", "\\\\");
-	escaped = escaped.replace("\a", "\\a");
-	escaped = escaped.replace("\b", "\\b");
-	escaped = escaped.replace("\f", "\\f");
-	escaped = escaped.replace("\n", "\\n");
-	escaped = escaped.replace("\r", "\\r");
-	escaped = escaped.replace("\t", "\\t");
-	escaped = escaped.replace("\v", "\\v");
-	escaped = escaped.replace("\'", "\\'");
-	escaped = escaped.replace("\"", "\\\"");
+enum class _StringEscapeMode {
+	C,
+	C_MULTILINE,
+	JSON,
+};
 
-	return escaped;
+static _FORCE_INLINE_ char32_t _escape_sequence_suffix(char32_t p_char, _StringEscapeMode p_mode) {
+	switch (p_char) {
+		case '\\':
+			return '\\';
+		case '"':
+			return '"';
+		case '\'':
+			return p_mode == _StringEscapeMode::C ? '\'' : 0;
+		case '\a':
+			return p_mode == _StringEscapeMode::C ? 'a' : 0;
+		case '\b':
+			return p_mode != _StringEscapeMode::C_MULTILINE ? 'b' : 0;
+		case '\f':
+			return p_mode != _StringEscapeMode::C_MULTILINE ? 'f' : 0;
+		case '\n':
+			return p_mode != _StringEscapeMode::C_MULTILINE ? 'n' : 0;
+		case '\r':
+			return p_mode != _StringEscapeMode::C_MULTILINE ? 'r' : 0;
+		case '\t':
+			return p_mode != _StringEscapeMode::C_MULTILINE ? 't' : 0;
+		case '\v':
+			return p_mode != _StringEscapeMode::C_MULTILINE ? 'v' : 0;
+		default:
+			return 0;
+	}
+}
+
+static String _escape_string_single_buffer(const String &p_source, _StringEscapeMode p_mode) {
+	const int length = p_source.length();
+	const char32_t *source = p_source.ptr();
+	int64_t escaped_length = length;
+
+	for (int i = 0; i < length; i++) {
+		escaped_length += _escape_sequence_suffix(source[i], p_mode) != 0;
+	}
+	if (escaped_length == length) {
+		return p_source; // Keep COW sharing for strings requiring no escaping.
+	}
+	ERR_FAIL_COND_V_MSG(escaped_length >= INT32_MAX, "", "Escaped string is too large.");
+
+	String result;
+	result.resize_uninitialized(int(escaped_length) + 1);
+	char32_t *dest = result.ptrw();
+	for (int i = 0; i < length; i++) {
+		const char32_t suffix = _escape_sequence_suffix(source[i], p_mode);
+		if (suffix != 0) {
+			*dest++ = '\\';
+			*dest++ = suffix;
+		} else {
+			*dest++ = source[i];
+		}
+	}
+	*dest = 0;
+	return result;
+}
+
+String String::c_escape() const {
+	return _escape_string_single_buffer(*this, _StringEscapeMode::C);
 }
 
 String String::c_escape_multiline() const {
-	String escaped = *this;
-	escaped = escaped.replace("\\", "\\\\");
-	escaped = escaped.replace("\"", "\\\"");
-
-	return escaped;
+	return _escape_string_single_buffer(*this, _StringEscapeMode::C_MULTILINE);
 }
 
 String String::json_escape() const {
-	String escaped = *this;
-	escaped = escaped.replace("\\", "\\\\");
-	escaped = escaped.replace("\b", "\\b");
-	escaped = escaped.replace("\f", "\\f");
-	escaped = escaped.replace("\n", "\\n");
-	escaped = escaped.replace("\r", "\\r");
-	escaped = escaped.replace("\t", "\\t");
-	escaped = escaped.replace("\v", "\\v");
-	escaped = escaped.replace("\"", "\\\"");
-
-	return escaped;
+	return _escape_string_single_buffer(*this, _StringEscapeMode::JSON);
 }
 
 String String::xml_escape(bool p_escape_quotes) const {
