@@ -82,7 +82,8 @@ TEST_CASE("[PhysicsXPBDFiber] Isotropic default and zero compliance preserve leg
 }
 
 TEST_CASE("[PhysicsXPBDFiber] Extreme finite rest lengths avoid squared-length overflow") {
-	for (real_t scale : { real_t(1e-12), real_t(1e20) }) {
+	const real_t scales[] = { real_t(1e-12), real_t(1e20) };
+	for (real_t scale : scales) {
 		const real_t diagonal = physics_xpbd_fiber_alpha(Vector3(), Vector3(scale, scale, 0),
 				real_t(0.1), 0, real_t(4.0));
 		CHECK(diagonal == doctest::Approx(0.25).epsilon(1e-5));
