@@ -1843,6 +1843,60 @@ also have different contact depths, so their absolute timings are not a
 direct algorithm-only speed ratio. Compiled Godot headless tests and real
 benchmarks remain necessary before claiming production speedups.
 
+### 3D box–capsule / box–cylinder radial SAT axes (relative-origin fix)
+
+In GodotPhysics3D's narrowphase, both box–capsule and box–cylinder SAT
+calculations used to form a radial separating axis with
+`Plane(cylinder_axis).project(box_vertex)`. This projects the vertex onto a
+plane through the **world origin**, not onto a plane through the
+capsule/cylinder's own axis. As a result, the candidate SAT directions and
+the selected contact feature could change when the entire scene moved.
+
+The new calculation uses a **relative** vertex offset and projects out the
+component along the cylinder's unit axis:
+
+```text
+relative = box_vertex - capsule_or_cylinder_origin
+radial = relative - axis * dot(relative, axis)
+```
+
+Only nonzero radial vectors are tested; a box vertex lying on the axis
+does not contribute a unique separating direction. This avoids a temporary
+`Plane` per vertex, produces translation-invariant axes, and reduces the
+chance of large-world numerical problems. The existing face, edge, end-cap
+rim, penetration and manifold procedures remain active; there is no
+physics setting to enable.
+
+Source contract tests include 5,000 deterministic random axis/vertex
+configurations, plus a check showing that the old world-origin projection
+changes after translation. The headless regression tests box–capsule and
+box–cylinder overlap, separation and contact direction for translated
+and rotated geometry at multiple world positions:
+
+```bash
+python3 -m unittest discover -s tests/stress -p 'test_physics_3d_box_radial_axes.py' -v
+./bin/godot.macos.editor.arm64 --headless --path tests/stress \
+  --script res://physics_box_radial_axis_translation_regression.gd
+```
+
+Four stress cases compare identical 256 box/rounded-shape pairs per
+scale near and far from the world origin. They exercise fresh narrowphase
+contacts on every step and collect CPU frame p95, physics time, contact
+pairs and peak process RSS (from the Python runner):
+
+```bash
+python3 tests/stress/run.py --godot ./bin/godot.macos.editor.arm64 \
+  --case physics_box_capsule_near_3d,physics_box_capsule_far_3d,physics_box_cylinder_near_3d,physics_box_cylinder_far_3d \
+  --scale 4 --frames 90 --repeats 5 --rss-limit-mib 4096 \
+  --output out/physics-box-radial-sat.json
+```
+
+Run each workload against both the previous and updated engine builds.
+A translation-invariant SAT direction is a correctness improvement, not
+by itself evidence of faster total frame time. C++ compilation, native
+headless regression and measured resource usage are required for
+production validation.
+
 ### Optimized 3D sphere-box closest-point detection
 
 Cgame now specializes GodotPhysics3D's sphere-versus-box narrow phase
