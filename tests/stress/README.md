@@ -260,8 +260,9 @@ when measuring target-hardware graphics performance.
 
 ## Reliable macOS RSS sampling
 
-On macOS without `psutil`, the Python watchdog uses `ps -o rss=`
-to read resident memory (KiB). The preferred low-overhead path for
+On macOS without `psutil`, the active process-tree watchdog uses one
+`ps -axo pid=,ppid=,rss=,time=` snapshot to aggregate RAM and CPU for Godot
+and its child processes (RSS is reported by BSD ps in KiB). The preferred low-overhead path for
 long stress runs is to install `psutil`:
 
 ```bash
