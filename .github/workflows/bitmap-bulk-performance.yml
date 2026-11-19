@@ -1,0 +1,75 @@
+name: BitMap packed-byte hotpaths and native regression tests
+
+on:
+  push:
+    branches: [develop]
+    paths:
+      - 'scene/resources/bit_map.cpp'
+      - 'scene/resources/bit_map.h'
+      - 'tests/scene/test_bit_map.cpp'
+      - 'tests/stress/stress.gd'
+      - 'tests/stress/run.py'
+      - '.github/workflows/bitmap-bulk-performance.yml'
+  pull_request:
+    paths:
+      - 'scene/resources/bit_map.cpp'
+      - 'scene/resources/bit_map.h'
+      - 'tests/scene/test_bit_map.cpp'
+      - 'tests/stress/stress.gd'
+      - 'tests/stress/run.py'
+      - '.github/workflows/bitmap-bulk-performance.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: bitmap-bulk-perf-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  bitmap-native-and-stress:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ./.github/actions/godot-deps
+      - name: Build current Cgame with native tests
+        uses: ./.github/actions/godot-build
+        with:
+          platform: linuxbsd
+          target: editor
+          scons-flags: dev_build=yes tests=yes debug_symbols=no module_text_server_fb_enabled=yes -j2
+      - name: Run BitMap native correctness tests
+        shell: bash
+        run: |
+          set -euo pipefail
+          BIN=./bin/godot.linuxbsd.editor.dev.x86_64
+          "$BIN" --version
+          timeout 180s "$BIN" --headless --test --test-suite="*BitMap*" --no-colors
+      - name: Verify stress script and workload registry
+        shell: bash
+        run: |
+          set -euo pipefail
+          BIN=./bin/godot.linuxbsd.editor.dev.x86_64
+          "$BIN" --headless --path tests/stress --script res://stress.gd --check-only
+          python3 -m unittest discover -s tests/stress -p 'test_*.py' -v
+      - name: Measure BitMap bulk rectangular updates and popcount
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 tests/stress/run.py \
+            --godot ./bin/godot.linuxbsd.editor.dev.x86_64 \
+            --case bitmap_rects --scale 1 --frames 12 --repeats 5 \
+            --timeout 120 --rss-limit-mib 2048 \
+            --output bitmap-bulk-results.json --summary-md bitmap-bulk-hotspots.md
+      - name: Upload performance measurements
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: bitmap-native-performance
+          path: |
+            bitmap-bulk-results.json
+            bitmap-bulk-hotspots.md
+          if-no-files-found: ignore
+          retention-days: 14
