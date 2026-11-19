@@ -62,6 +62,22 @@ func run(tree: SceneTree, scale: int, frames: int, parallel: bool, high_priority
 		if error != "":
 			break
 
+	# Joint anchors begin three meters apart. Large drift would indicate a
+	# solver regression even when values remain finite.
+	var max_joint_spacing := 0.0
+	if error == "":
+		for i in range(1, count):
+			var previous: Transform3D = PhysicsServer3D.body_get_state(
+					bodies[i - 1], PhysicsServer3D.BODY_STATE_TRANSFORM)
+			var current: Transform3D = PhysicsServer3D.body_get_state(
+					bodies[i], PhysicsServer3D.BODY_STATE_TRANSFORM)
+			if not previous.origin.is_finite() or not current.origin.is_finite():
+				error = "Non-finite 3D joint positions"
+				break
+			max_joint_spacing = maxf(max_joint_spacing, previous.origin.distance_to(current.origin))
+		if max_joint_spacing > 11.0:
+			error = "Connected 3D island diverged (joint spacing > 11)"
+
 	PhysicsServer3D.space_set_active(space, false)
 	for joint in joints:
 		PhysicsServer3D.free_rid(joint)
@@ -78,4 +94,5 @@ func run(tree: SceneTree, scale: int, frames: int, parallel: bool, high_priority
 	return {"bodies": count, "joints": count - 1, "parallel_large_islands": parallel,
 			"high_priority_fallback": high_priority, "physics_frames": frames,
 			"creation_ms": creation_ms, "peak_physics_ms": peak_physics_ms,
+			"max_joint_spacing": max_joint_spacing,
 			"frame_interval_ms": stats, "frame_p95_ms": stats["p95"]}
