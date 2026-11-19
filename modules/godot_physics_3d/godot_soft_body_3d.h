@@ -179,6 +179,9 @@ class GodotSoftBody3D : public GodotCollisionObject3D {
 	// Tetra rest matrices and XPBD multipliers are retained across iterations.
 	// Empty unless tetra FEM compliance is explicitly enabled.
 	LocalVector<PhysicsFEMConvexTetra> xpbd_fem_tetrahedra;
+	// Normalized FEM rest-volume fractions; only populated with opt-in lumped mass.
+	// Includes pinned nodes so unpin and mass changes restore their physical mass.
+	LocalVector<double> xpbd_fem_mass_fractions;
 	// Allocated only when tension-only tetra material fibers are enabled.
 	// One XPBD multiplier per cooked tetra, reused across solver iterations.
 	LocalVector<double> xpbd_fem_fiber_lambdas;
@@ -347,6 +350,7 @@ private:
 	void update_area();
 	void initialize_membrane_constraints();
 	void initialize_fem_tetra();
+	real_t get_unpinned_node_inverse_mass(uint32_t p_node_index) const;
 	void initialize_shear_constraints();
 	void initialize_dihedral_constraints();
 	void initialize_shape_matching();
