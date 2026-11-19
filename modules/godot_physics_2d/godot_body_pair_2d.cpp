@@ -63,12 +63,17 @@ void GodotBodyPair2D::_contact_added_callback(const Vector2 &p_point_A, const Ve
 
 	for (int i = 0; i < contact_count; i++) {
 		Contact &c = contacts[i];
-		if (c.local_A.distance_squared_to(local_A) < (recycle_radius_2) &&
-				c.local_B.distance_squared_to(local_B) < (recycle_radius_2)) {
-			contact.acc_normal_impulse = c.acc_normal_impulse;
-			contact.acc_tangent_impulse = c.acc_tangent_impulse;
-			contact.acc_bias_impulse = c.acc_bias_impulse;
-			contact.acc_bias_impulse_center_of_mass = c.acc_bias_impulse_center_of_mass;
+		if (c.local_A.distance_squared_to(local_A) < recycle_radius_2 &&
+				c.local_B.distance_squared_to(local_B) < recycle_radius_2) {
+			// Retain warm-start impulses only if the contact normal is still
+			// compatible with the previous frame. Contacts close to a corner
+			// can keep their anchors while the normal changes abruptly.
+			if (c.normal.dot(contact.normal) >= real_t(0.98)) {
+				contact.acc_normal_impulse = c.acc_normal_impulse;
+				contact.acc_tangent_impulse = c.acc_tangent_impulse;
+				contact.acc_bias_impulse = c.acc_bias_impulse;
+				contact.acc_bias_impulse_center_of_mass = c.acc_bias_impulse_center_of_mass;
+			}
 			c = contact;
 			return;
 		}
@@ -417,6 +422,7 @@ bool GodotBodyPair2D::pre_solve(real_t p_step) {
 
 	real_t inv_mass_A = collide_A ? A->get_inv_mass() : 0.0;
 	real_t inv_mass_B = collide_B ? B->get_inv_mass() : 0.0;
+	const bool has_friction = combine_friction(A, B) > 0.0;
 
 	for (int i = 0; i < contact_count; i++) {
 		Contact &c = contacts[i];
@@ -449,17 +455,24 @@ bool GodotBodyPair2D::pre_solve(real_t p_step) {
 		kNormal += inv_inertia_A * (c.rA.dot(c.rA) - rnA * rnA) + inv_inertia_B * (c.rB.dot(c.rB) - rnB * rnB);
 		c.mass_normal = 1.0f / kNormal;
 
-		Vector2 tangent = c.normal.orthogonal();
-		real_t rtA = c.rA.dot(tangent);
-		real_t rtB = c.rB.dot(tangent);
-		real_t kTangent = inv_mass_A + inv_mass_B;
-		kTangent += inv_inertia_A * (c.rA.dot(c.rA) - rtA * rtA) + inv_inertia_B * (c.rB.dot(c.rB) - rtB * rtB);
-		c.mass_tangent = 1.0f / kTangent;
+		Vector2 P = c.acc_normal_impulse * c.normal;
+		if (has_friction) {
+			const Vector2 tangent = c.normal.orthogonal();
+			const real_t rtA = c.rA.dot(tangent);
+			const real_t rtB = c.rB.dot(tangent);
+			real_t kTangent = inv_mass_A + inv_mass_B;
+			kTangent += inv_inertia_A * (c.rA.dot(c.rA) - rtA * rtA) + inv_inertia_B * (c.rB.dot(c.rB) - rtB * rtB);
+			c.mass_tangent = 1.0f / kTangent;
+			P += c.acc_tangent_impulse * tangent;
+		} else {
+			// Friction may have changed since the previous step. Drop cached
+			// tangential impulses instead of applying then cancelling them.
+			c.mass_tangent = 0.0;
+			c.acc_tangent_impulse = 0.0;
+		}
 
 		c.bias = -bias * inv_dt * MIN(0.0f, -depth + max_penetration);
 		c.depth = depth;
-
-		Vector2 P = c.acc_normal_impulse * c.normal + c.acc_tangent_impulse * tangent;
 
 		c.acc_impulse -= P;
 
@@ -515,6 +528,8 @@ void GodotBodyPair2D::solve(real_t p_step) {
 
 	real_t inv_mass_A = collide_A ? A->get_inv_mass() : 0.0;
 	real_t inv_mass_B = collide_B ? B->get_inv_mass() : 0.0;
+	// Material properties are constant during this constraint solve.
+	const real_t friction = combine_friction(A, B);
 
 	for (int i = 0; i < contact_count; ++i) {
 		Contact &c = contacts[i];
@@ -535,9 +550,6 @@ void GodotBodyPair2D::solve(real_t p_step) {
 
 		real_t vn = dv.dot(c.normal);
 		real_t vbn = dbv.dot(c.normal);
-
-		Vector2 tangent = c.normal.orthogonal();
-		real_t vt = dv.dot(tangent);
 
 		real_t jbn = (c.bias - vbn) * c.mass_normal;
 		real_t jbnOld = c.acc_bias_impulse;
@@ -577,14 +589,18 @@ void GodotBodyPair2D::solve(real_t p_step) {
 		real_t jnOld = c.acc_normal_impulse;
 		c.acc_normal_impulse = MAX(jnOld + jn, 0.0f);
 
-		real_t friction = combine_friction(A, B);
-
-		real_t jtMax = friction * c.acc_normal_impulse;
-		real_t jt = -vt * c.mass_tangent;
-		real_t jtOld = c.acc_tangent_impulse;
-		c.acc_tangent_impulse = CLAMP(jtOld + jt, -jtMax, jtMax);
-
-		Vector2 j = c.normal * (c.acc_normal_impulse - jnOld) + tangent * (c.acc_tangent_impulse - jtOld);
+		Vector2 j = c.normal * (c.acc_normal_impulse - jnOld);
+		if (friction > 0.0) {
+			const Vector2 tangent = c.normal.orthogonal();
+			const real_t vt = dv.dot(tangent);
+			const real_t jt_max = friction * c.acc_normal_impulse;
+			const real_t jt = -vt * c.mass_tangent;
+			const real_t jt_old = c.acc_tangent_impulse;
+			c.acc_tangent_impulse = CLAMP(jt_old + jt, -jt_max, jt_max);
+			j += tangent * (c.acc_tangent_impulse - jt_old);
+		} else {
+			c.acc_tangent_impulse = 0.0;
+		}
 
 		if (collide_A) {
 			A->apply_impulse(-j, c.rA + A->get_center_of_mass());
