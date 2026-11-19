@@ -108,10 +108,19 @@ jobs:
             --headless --test --test-case="*[PhysicsEdgeCCD]*" \
             --success=true --no-colors 2>&1 | tee physics-edge-ccd.log
           grep -Fq '[PhysicsEdgeCCD]' physics-edge-ccd.log
+      - name: Verify one-frame cloth edge tunneling in actual GodotPhysics3D
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 tests/stress/run.py \
+            --godot ./bin/godot.linuxbsd.editor.dev.x86_64 \
+            --preset smoke --case physics_soft_body_edge_ccd_3d \
+            --output physics-edge-ccd-runtime.json
       - name: Syntax-check physics stress scripts
         shell: bash
         run: |
           set -euo pipefail
+          ./bin/godot.linuxbsd.editor.dev.x86_64 --headless --path tests/stress --script res://physics_soft_body_edge_ccd_3d.gd --check-only
           ./bin/godot.linuxbsd.editor.dev.x86_64 --headless --path tests/stress --script res://stress.gd --check-only
           ./bin/godot.linuxbsd.editor.dev.x86_64 --headless --path tests/stress --script res://physics_dense.gd --check-only
           ./bin/godot.linuxbsd.editor.dev.x86_64 --headless --path tests/stress --script res://physics_pending_reuse_stress.gd --check-only
