@@ -472,17 +472,17 @@ func _run_headless_gate_tests() -> void:
 	var dangerous_script := FileAccess.open(script_path, FileAccess.WRITE)
 	_check(dangerous_script != null, "headless guard fixture can edit approved script")
 	if dangerous_script != null:
-		dangerous_script.store_string("@tool\\nextends Node\\n")
+		dangerous_script.store_string("@tool\nextends Node\n")
 		dangerous_script.close()
 		_check(not SmokeGate.validate_targets(good).ok, "headless preflight blocks newly added editor tool script")
 		var process_script := FileAccess.open(script_path, FileAccess.WRITE)
 		if process_script != null:
-			process_script.store_string("extends Node\\nfunc run():\\n\\tOS.execute(\\\"sh\\\", [])\\n")
+			process_script.store_string("extends Node\nfunc run():\n\tOS.execute(\\"sh\\", [])\n")
 			process_script.close()
 			_check(not SmokeGate.validate_targets(good).ok, "headless preflight blocks process launches")
 		var restored_script := FileAccess.open(script_path, FileAccess.WRITE)
 		if restored_script != null:
-			restored_script.store_string("extends Node\\nfunc answer() -> int:\\n\\treturn 42\\n")
+			restored_script.store_string("extends Node\nfunc answer() -> int:\n\treturn 42\n")
 			restored_script.close()
 			_check(SmokeGate.validate_targets(good).ok, "restored safe script accepted")
 
