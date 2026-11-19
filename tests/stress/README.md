@@ -774,6 +774,30 @@ python3 tests/stress/run.py --godot ./bin/godot.linuxbsd.editor.dev.x86_64 \\
 Use `scale=1` first; `scale=1000` creates 64,000 dynamic and 64,000 static
 bodies and should only be attempted on an isolated high-memory machine.
 
+### 2D CCD edge-support coverage
+
+The `physics_ccd_2d` workload repeatedly fires wide rectangles at small
+targets intersecting only the **second** leading support ray. This catches the
+cost of the multi-support ray CCD path; use the dedicated runtime regression
+below to check correctness (not just contact throughput).
+
+```bash
+python3 tests/stress/run.py --godot ./bin/godot.macos.editor.arm64 \
+  --case physics_ccd_2d --scale 4 --frames 90 --repeats 5 \
+  --rss-limit-mib 4096 --output out/physics-ccd-2d.json
+
+./bin/godot.macos.editor.arm64 --headless --path tests/stress \
+  --script res://physics_ccd_edge_2d_regression.gd
+
+python3 -m unittest discover -s tests/stress -p 'test_physics_ccd_2d_supports.py' -v
+```
+
+The stress result records frame p95 and peak physics time and can be compared
+only between equivalent builds on identical hardware. The regression checks
+that a projectile is stopped by the lower box corner rather than tunnelling
+through a small obstacle. Two support rays are not equivalent to a full shape
+cast: use `CCD_MODE_CAST_SHAPE` for more demanding collision geometry.
+
 ### 2D contact warm-start and friction regression
 
 The standalone `physics_contact_solver_regression.gd` script uses three
