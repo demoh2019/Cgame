@@ -115,6 +115,7 @@ jobs:
           ./bin/godot.linuxbsd.editor.dev.x86_64 --headless --path tests/stress --script res://physics_jolt_softbody_constraint_bounds_regression.gd --check-only
           ./bin/godot.linuxbsd.editor.dev.x86_64 --headless --path tests/stress --script res://physics_jolt_softbody_wind_fastpath_regression.gd --check-only
           ./bin/godot.linuxbsd.editor.dev.x86_64 --headless --path tests/stress --script res://physics_jolt_layer_filter_regression.gd --check-only
+          ./bin/godot.linuxbsd.editor.dev.x86_64 --headless --path tests/stress --script res://physics_jolt_broadphase_filter_regression.gd --check-only
           ./bin/godot.linuxbsd.editor.dev.x86_64 --headless --path tests/stress --script res://physics_jolt_process_info_regression.gd --check-only
       - name: Verify dense contacts, pending cleanup and fast CCD
         shell: bash
@@ -300,6 +301,22 @@ jobs:
             --script res://physics_jolt_softbody_wind_fastpath_regression.gd \
             2>&1 | tee physics-jolt-softbody-wind-fastpath.log
           grep -Fq 'Jolt soft-body wind fast path regression passed.' physics-jolt-softbody-wind-fastpath.log
+      - name: Regression-test constexpr Jolt broadphase layer matrix
+        shell: bash
+        run: |
+          set -euo pipefail
+          PROJECT="$RUNNER_TEMP/cgame-jolt-broadphase-matrix"
+          mkdir -p "$PROJECT"
+          cp -a tests/stress/. "$PROJECT/"
+          # Replace the project's existing default backend; never rely on
+          # an appended duplicate project.godot [physics] section.
+          sed -i 's|^3d/physics_engine="GodotPhysics3D"$|3d/physics_engine="Jolt Physics"|' "$PROJECT/project.godot"
+          grep -Fqx '3d/physics_engine="Jolt Physics"' "$PROJECT/project.godot"
+          timeout 180s ./bin/godot.linuxbsd.editor.dev.x86_64 \
+            --headless --path "$PROJECT" \
+            --script res://physics_jolt_broadphase_filter_regression.gd \
+            2>&1 | tee physics-jolt-broadphase-filter.log
+          grep -Fq 'Jolt broadphase filter regression passed.' physics-jolt-broadphase-filter.log
       - name: Verify Jolt packed object-layer filtering
         shell: bash
         run: |
@@ -351,6 +368,7 @@ jobs:
             physics-jolt-softbody-constraint-bounds.log
             physics-jolt-softbody-wind-fastpath.log
             physics-jolt-layer-filter.log
+            physics-jolt-broadphase-filter.log
             physics-jolt-process-info.log
           if-no-files-found: warn
           retention-days: 30
