@@ -81,6 +81,74 @@ TEST_CASE("[ProceduralWorld] Heightmap inputs are bounded") {
 	ERR_PRINT_ON;
 }
 
+TEST_CASE("[ProceduralWorld] Sculpting brush changes only samples within radius") {
+	Ref<ProceduralWorld> world;
+	world.instantiate();
+	PackedFloat32Array flat;
+	flat.resize(25);
+	PackedFloat32Array raised = world->paint_heightmap(flat, 5, 5, Vector2(2, 2), 1.1f, 4.0f);
+	REQUIRE(raised.size() == 25);
+	CHECK(raised[2 + 2 * 5] == doctest::Approx(4.0f));
+	CHECK(raised[1 + 2 * 5] > 0);
+	CHECK(raised[2 + 1 * 5] > 0);
+	CHECK(raised[1 + 1 * 5] == 0.0f); // Diagonal outside radius.
+	CHECK(raised[0] == 0.0f);
+	CHECK(flat[12] == 0.0f); // Brush never edits original data.
+	const PackedFloat32Array lowered = world->paint_heightmap(raised, 5, 5, Vector2(2, 2), 1.1f, -4.0f);
+	CHECK(Math::is_zero_approx(lowered[12]));
+}
+
+TEST_CASE("[ProceduralWorld] Sculpting brush validates dimensions and radius") {
+	Ref<ProceduralWorld> world;
+	world.instantiate();
+	PackedFloat32Array heights;
+	heights.resize(4);
+	ERR_PRINT_OFF;
+	CHECK(world->paint_heightmap(heights, 3, 3, Vector2(1, 1), 1.0f, 1.0f).is_empty());
+	CHECK(world->paint_heightmap(heights, 2, 2, Vector2(0, 0), 0.0f, 1.0f).is_empty());
+	ERR_PRINT_ON;
+}
+
+TEST_CASE("[ProceduralWorld] Terrain mesh has correct geometry, UV and orientation") {
+	Ref<ProceduralWorld> world;
+	world.instantiate();
+	PackedFloat32Array heights;
+	heights.resize(9);
+	heights.set(4, 2.0f);
+	Ref<ArrayMesh> mesh = world->create_terrain_mesh(heights, 3, 3, 2.0f, 2.0f);
+	REQUIRE(mesh.is_valid());
+	REQUIRE(mesh->get_surface_count() == 1);
+	Array surface = mesh->surface_get_arrays(0);
+	const PackedVector3Array vertices = surface[Mesh::ARRAY_VERTEX];
+	const PackedVector3Array normals = surface[Mesh::ARRAY_NORMAL];
+	const PackedVector2Array uvs = surface[Mesh::ARRAY_TEX_UV];
+	const PackedInt32Array indices = surface[Mesh::ARRAY_INDEX];
+	REQUIRE(vertices.size() == 9);
+	REQUIRE(normals.size() == 9);
+	REQUIRE(uvs.size() == 9);
+	REQUIRE(indices.size() == 24);
+	CHECK(vertices[0] == Vector3(0, 0, 0));
+	CHECK(vertices[4] == Vector3(2, 4, 2));
+	CHECK(vertices[8] == Vector3(4, 0, 4));
+	CHECK(uvs[0] == Vector2(0, 0));
+	CHECK(uvs[8] == Vector2(1, 1));
+	CHECK(normals[4].y == doctest::Approx(1.0f));
+	const Vector3 front = (vertices[indices[1]] - vertices[indices[0]]).cross(vertices[indices[2]] - vertices[indices[0]]);
+	CHECK(front.y > 0.0f);
+}
+
+TEST_CASE("[ProceduralWorld] Terrain mesh input validation") {
+	Ref<ProceduralWorld> world;
+	world.instantiate();
+	PackedFloat32Array wrong;
+	wrong.resize(3);
+	ERR_PRINT_OFF;
+	CHECK(world->create_terrain_mesh(wrong, 2, 2).is_null());
+	CHECK(world->create_terrain_mesh(wrong, 1, 3).is_null());
+	CHECK(world->create_terrain_mesh(wrong, 2, 2, 0.0f).is_null());
+	ERR_PRINT_ON;
+}
+
 TEST_CASE("[ProceduralWorld] Thermal erosion conserves material") {
 	Ref<ProceduralWorld> world;
 	world.instantiate();

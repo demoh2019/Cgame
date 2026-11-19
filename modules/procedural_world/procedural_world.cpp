@@ -87,6 +87,90 @@ PackedFloat32Array ProceduralWorld::generate_heightmap(int p_width, int p_height
 	return heights;
 }
 
+PackedFloat32Array ProceduralWorld::paint_heightmap(const PackedFloat32Array &p_heights, int p_width, int p_height, const Vector2 &p_center, float p_radius, float p_delta, float p_falloff) const {
+	ERR_FAIL_COND_V_MSG(p_width <= 0 || p_height <= 0 || p_width > 2048 || p_height > 2048 || int64_t(p_width) * p_height != p_heights.size(), PackedFloat32Array(), "Heightmap dimensions are invalid.");
+	ERR_FAIL_COND_V_MSG(!p_center.is_finite() || !Math::is_finite(p_radius) || p_radius <= 0 || !Math::is_finite(p_delta) || !Math::is_finite(p_falloff) || p_falloff < 0 || p_falloff > 8, PackedFloat32Array(), "Invalid brush parameters.");
+	for (float sample : p_heights) {
+		ERR_FAIL_COND_V_MSG(!Math::is_finite(sample), PackedFloat32Array(), "Heightmap samples must be finite.");
+	}
+	PackedFloat32Array result = p_heights;
+	float *dst = result.ptrw();
+	for (int y = 0; y < p_height; y++) {
+		for (int x = 0; x < p_width; x++) {
+			const float distance = Vector2(x, y).distance_to(p_center);
+			if (distance >= p_radius) {
+				continue;
+			}
+			const float weight = Math::pow(1.0f - distance / p_radius, p_falloff);
+			const int index = y * p_width + x;
+			dst[index] += weight * p_delta;
+		}
+	}
+	return result;
+}
+
+Ref<ArrayMesh> ProceduralWorld::create_terrain_mesh(const PackedFloat32Array &p_heights, int p_width, int p_height, float p_cell_size, float p_height_scale) const {
+	ERR_FAIL_COND_V_MSG(p_width < 2 || p_height < 2 || p_width > 513 || p_height > 513 || int64_t(p_width) * p_height != p_heights.size(), Ref<ArrayMesh>(), "Terrain mesh requires at least 2x2 and at most 513x513 height samples.");
+	ERR_FAIL_COND_V_MSG(!Math::is_finite(p_cell_size) || p_cell_size <= 0 || p_cell_size > 100000.0f || !Math::is_finite(p_height_scale) || Math::abs(p_height_scale) > 100000.0f, Ref<ArrayMesh>(), "Cell and height scaling must be finite.");
+	for (float sample : p_heights) {
+		ERR_FAIL_COND_V_MSG(!Math::is_finite(sample) || !Math::is_finite(sample * p_height_scale), Ref<ArrayMesh>(), "Heightmap samples must produce finite heights.");
+	}
+
+	PackedVector3Array vertices;
+	PackedVector3Array normals;
+	PackedVector2Array uvs;
+	PackedInt32Array indices;
+	vertices.resize(p_width * p_height);
+	normals.resize(p_width * p_height);
+	uvs.resize(p_width * p_height);
+	indices.resize((p_width - 1) * (p_height - 1) * 6);
+
+	for (int z = 0; z < p_height; z++) {
+		for (int x = 0; x < p_width; x++) {
+			const int index = z * p_width + x;
+			const int left = MAX(0, x - 1);
+			const int right = MIN(p_width - 1, x + 1);
+			const int up = MAX(0, z - 1);
+			const int down = MIN(p_height - 1, z + 1);
+			const float slope_x = (p_heights[z * p_width + right] - p_heights[z * p_width + left]) * p_height_scale / ((right - left) * p_cell_size);
+			const float slope_z = (p_heights[down * p_width + x] - p_heights[up * p_width + x]) * p_height_scale / ((down - up) * p_cell_size);
+			vertices.set(index, Vector3(float(x) * p_cell_size, p_heights[index] * p_height_scale, float(z) * p_cell_size));
+			normals.set(index, Vector3(-slope_x, 1.0f, -slope_z).normalized());
+			uvs.set(index, Vector2(float(x) / float(p_width - 1), float(z) / float(p_height - 1)));
+		}
+	}
+
+	int *triangles = indices.ptrw();
+	int offset = 0;
+	for (int z = 0; z < p_height - 1; z++) {
+		for (int x = 0; x < p_width - 1; x++) {
+			const int a = z * p_width + x;
+			const int b = a + 1;
+			const int c = a + p_width;
+			const int d = c + 1;
+			// Counterclockwise winding from above (positive Y normal).
+			triangles[offset++] = a;
+			triangles[offset++] = c;
+			triangles[offset++] = b;
+			triangles[offset++] = b;
+			triangles[offset++] = c;
+			triangles[offset++] = d;
+		}
+	}
+
+	Array arrays;
+	arrays.resize(Mesh::ARRAY_MAX);
+	arrays[Mesh::ARRAY_VERTEX] = vertices;
+	arrays[Mesh::ARRAY_NORMAL] = normals;
+	arrays[Mesh::ARRAY_TEX_UV] = uvs;
+	arrays[Mesh::ARRAY_INDEX] = indices;
+
+	Ref<ArrayMesh> result;
+	result.instantiate();
+	result->add_surface_from_arrays(Mesh::PRIMITIVE_TRIANGLES, arrays);
+	return result;
+}
+
 PackedFloat32Array ProceduralWorld::erode_heightmap(const PackedFloat32Array &p_heights, int p_width, int p_height, int p_iterations, float p_talus, float p_strength) const {
 	ERR_FAIL_COND_V_MSG(p_width <= 0 || p_height <= 0 || p_width > 2048 || p_height > 2048 || int64_t(p_width) * p_height != p_heights.size(), PackedFloat32Array(), "The heightmap must have exactly width * height samples.");
 	ERR_FAIL_COND_V_MSG(p_iterations < 0 || p_iterations > 256 || !Math::is_finite(p_talus) || p_talus < 0 || !Math::is_finite(p_strength) || p_strength < 0 || p_strength > 1, PackedFloat32Array(), "Invalid erosion parameters.");
@@ -201,6 +285,8 @@ Array ProceduralWorld::get_chunk_coordinates(const Rect2 &p_world_area, int p_ch
 
 void ProceduralWorld::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("generate_heightmap", "width", "height", "seed", "scale", "amplitude", "octaves", "origin"), &ProceduralWorld::generate_heightmap, DEFVAL(64.0f), DEFVAL(32.0f), DEFVAL(4), DEFVAL(Vector2i()));
+	ClassDB::bind_method(D_METHOD("paint_heightmap", "heights", "width", "height", "center", "radius", "delta", "falloff"), &ProceduralWorld::paint_heightmap, DEFVAL(1.0f));
+	ClassDB::bind_method(D_METHOD("create_terrain_mesh", "heights", "width", "height", "cell_size", "height_scale"), &ProceduralWorld::create_terrain_mesh, DEFVAL(1.0f), DEFVAL(1.0f));
 	ClassDB::bind_method(D_METHOD("erode_heightmap", "heights", "width", "height", "iterations", "talus", "strength"), &ProceduralWorld::erode_heightmap, DEFVAL(8), DEFVAL(1.0f), DEFVAL(0.5f));
 	ClassDB::bind_method(D_METHOD("scatter_points", "area", "min_distance", "seed", "max_points", "attempts_per_point"), &ProceduralWorld::scatter_points, DEFVAL(1024), DEFVAL(30));
 	ClassDB::bind_method(D_METHOD("get_chunk_coordinates", "world_area", "chunk_size"), &ProceduralWorld::get_chunk_coordinates, DEFVAL(64));

@@ -31,6 +31,7 @@
 #include "core/math/rect2.h"
 #include "core/object/ref_counted.h"
 #include "core/variant/variant.h"
+#include "scene/resources/mesh.h"
 
 class ProceduralWorld : public RefCounted {
 	GDCLASS(ProceduralWorld, RefCounted);
@@ -44,6 +45,8 @@ protected:
 public:
 	// Row-major height map: index = y * width + x.
 	PackedFloat32Array generate_heightmap(int p_width, int p_height, int p_seed, float p_scale = 64.0f, float p_amplitude = 32.0f, int p_octaves = 4, const Vector2i &p_origin = Vector2i()) const;
+	PackedFloat32Array paint_heightmap(const PackedFloat32Array &p_heights, int p_width, int p_height, const Vector2 &p_center, float p_radius, float p_delta, float p_falloff = 1.0f) const;
+	Ref<ArrayMesh> create_terrain_mesh(const PackedFloat32Array &p_heights, int p_width, int p_height, float p_cell_size = 1.0f, float p_height_scale = 1.0f) const;
 	PackedFloat32Array erode_heightmap(const PackedFloat32Array &p_heights, int p_width, int p_height, int p_iterations = 8, float p_talus = 1.0f, float p_strength = 0.5f) const;
 
 	// Rejection-based blue-noise-inspired scatter; never returns points closer than min_distance.
