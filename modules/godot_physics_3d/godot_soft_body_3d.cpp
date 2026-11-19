@@ -2172,6 +2172,7 @@ void GodotSoftBody3D::solve_constraints(real_t p_delta) {
 		self_collision_contacts.reset();
 		self_collision_edges.reset();
 		self_collision_edge_contacts.reset();
+		self_collision_ccd_fractions.reset();
 		self_collision_edges_built = false;
 		self_collision_adjacency_built = false;
 	}
@@ -2329,6 +2330,7 @@ void GodotSoftBody3D::destroy() {
 	self_collision_structural_edges.reset();
 	self_collision_edges.reset();
 	self_collision_edge_contacts.reset();
+	self_collision_ccd_fractions.reset();
 	self_collision_edges_built = false;
 	self_collision_adjacency_built = false;
 	xpbd_volume_closed = false;
