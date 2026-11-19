@@ -1197,51 +1197,50 @@ static void _collision_capsule_capsule(const GodotShape2D *p_a, const Transform2
 		const real_t dot_B_between = direction_B.dot(between);
 		const real_t denominator = length_squared_A * length_squared_B - dot_AB * dot_AB;
 
-		// Closest points of finite segments, including clamping to both endcaps.
-		// For nearly parallel segments the SAT fallback provides the manifold.
-		real_t fraction_A = 0.0;
+		// Skip the shortcut entirely for nearly parallel axes: picking the
+		// first endpoint as a closest-point seed can miss long shallow crossings.
 		if (denominator > length_squared_A * length_squared_B * real_t(0.0001)) {
-			fraction_A = CLAMP((dot_AB * dot_B_between - dot_A_between * length_squared_B) / denominator, real_t(0.0), real_t(1.0));
-		}
-		real_t fraction_B = (dot_AB * fraction_A + dot_B_between) / length_squared_B;
-		if (fraction_B < 0.0) {
-			fraction_B = 0.0;
-			fraction_A = CLAMP(-dot_A_between / length_squared_A, real_t(0.0), real_t(1.0));
-		} else if (fraction_B > 1.0) {
-			fraction_B = 1.0;
-			fraction_A = CLAMP((dot_AB - dot_A_between) / length_squared_A, real_t(0.0), real_t(1.0));
-		}
-
-		const Vector2 closest_A = start_A + direction_A * fraction_A;
-		const Vector2 closest_B = start_B + direction_B * fraction_B;
-		const Vector2 separation = closest_A - closest_B;
-		const real_t distance_squared = separation.length_squared();
-		const real_t radius_A = capsule_A->get_radius() + p_margin_A;
-		const real_t radius_B = capsule_B->get_radius() + p_margin_B;
-		const real_t combined_radius = radius_A + radius_B;
-
-		if (distance_squared > combined_radius * combined_radius) {
-			if (p_collector->sep_axis) {
-				*p_collector->sep_axis = separation / Math::sqrt(distance_squared);
+			// Closest points on two finite center segments.
+			real_t fraction_A = CLAMP((dot_AB * dot_B_between - dot_A_between * length_squared_B) / denominator, real_t(0.0), real_t(1.0));
+				real_t fraction_B = (dot_AB * fraction_A + dot_B_between) / length_squared_B;
+			if (fraction_B < 0.0) {
+				fraction_B = 0.0;
+				fraction_A = CLAMP(-dot_A_between / length_squared_A, real_t(0.0), real_t(1.0));
+			} else if (fraction_B > 1.0) {
+				fraction_B = 1.0;
+				fraction_A = CLAMP((dot_AB - dot_A_between) / length_squared_A, real_t(0.0), real_t(1.0));
 			}
-			return;
-		}
 
-		// Endpoint contacts have a single well-defined normal. For side-side
-		// contacts, parallelism or coincident centerlines preserve SAT clipping.
-		if (denominator > length_squared_A * length_squared_B * real_t(0.0001) &&
-				distance_squared > 0.0 &&
-				(fraction_A == 0.0 || fraction_A == 1.0 || fraction_B == 0.0 || fraction_B == 1.0)) {
-			p_collector->collided = true;
-			if (p_collector->callback) {
-				const Vector2 normal = separation / Math::sqrt(distance_squared);
-				p_collector->normal = normal;
-				p_collector->call(closest_A - normal * radius_A, closest_B + normal * radius_B);
+			const Vector2 closest_A = start_A + direction_A * fraction_A;
+			const Vector2 closest_B = start_B + direction_B * fraction_B;
+			const Vector2 separation = closest_A - closest_B;
+			const real_t distance_squared = separation.length_squared();
+			const real_t radius_A = capsule_A->get_radius() + p_margin_A;
+			const real_t radius_B = capsule_B->get_radius() + p_margin_B;
+			const real_t combined_radius = radius_A + radius_B;
+
+			if (distance_squared > combined_radius * combined_radius) {
+				if (p_collector->sep_axis) {
+					*p_collector->sep_axis = separation / Math::sqrt(distance_squared);
+				}
+				return;
 			}
-			if (p_collector->sep_axis) {
-				*p_collector->sep_axis = Vector2();
+
+			// Endpoint contacts have a single well-defined normal. For side-side
+			// contacts, parallelism or coincident centerlines preserve SAT clipping.
+			if (distance_squared > 0.0 &&
+					(fraction_A == 0.0 || fraction_A == 1.0 || fraction_B == 0.0 || fraction_B == 1.0)) {
+				p_collector->collided = true;
+				if (p_collector->callback) {
+					const Vector2 normal = separation / Math::sqrt(distance_squared);
+					p_collector->normal = normal;
+					p_collector->call(closest_A - normal * radius_A, closest_B + normal * radius_B);
+				}
+				if (p_collector->sep_axis) {
+					*p_collector->sep_axis = Vector2();
+				}
+				return;
 			}
-			return;
 		}
 	}
 
