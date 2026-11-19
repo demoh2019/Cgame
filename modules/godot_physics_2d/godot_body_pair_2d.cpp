@@ -718,16 +718,26 @@ void GodotBodyPair2D::solve(real_t p_step) {
 			const Vector2 impulse1 = normal * delta1;
 			c0.acc_normal_impulse = next0;
 			c1.acc_normal_impulse = next1;
-			if (collide_A) {
-				A->apply_impulse(-impulse0, c0.rA + A->get_center_of_mass());
-				A->apply_impulse(-impulse1, c1.rA + A->get_center_of_mass());
+			// After convergence the block LCP often returns the previous
+			// impulse for either or both points. Do not invoke no-op transforms.
+			if (delta0 != 0.0) {
+				if (collide_A) {
+					A->apply_impulse(-impulse0, c0.rA + A->get_center_of_mass());
+				}
+				if (collide_B) {
+					B->apply_impulse(impulse0, c0.rB + B->get_center_of_mass());
+				}
+				c0.acc_impulse -= impulse0;
 			}
-			if (collide_B) {
-				B->apply_impulse(impulse0, c0.rB + B->get_center_of_mass());
-				B->apply_impulse(impulse1, c1.rB + B->get_center_of_mass());
+			if (delta1 != 0.0) {
+				if (collide_A) {
+					A->apply_impulse(-impulse1, c1.rA + A->get_center_of_mass());
+				}
+				if (collide_B) {
+					B->apply_impulse(impulse1, c1.rB + B->get_center_of_mass());
+				}
+				c1.acc_impulse -= impulse1;
 			}
-			c0.acc_impulse -= impulse0;
-			c1.acc_impulse -= impulse1;
 			block_solved = true;
 		}
 	}
@@ -781,13 +791,14 @@ void GodotBodyPair2D::solve(real_t p_step) {
 			real_t jbnOld_com = c.acc_bias_impulse_center_of_mass;
 			c.acc_bias_impulse_center_of_mass = MAX(jbnOld_com + jbn_com, 0.0f);
 
-			Vector2 jb_com = c.normal * (c.acc_bias_impulse_center_of_mass - jbnOld_com);
-
-			if (collide_A) {
-				A->apply_bias_impulse(-jb_com, A->get_center_of_mass(), 0.0f);
-			}
-			if (collide_B) {
-				B->apply_bias_impulse(jb_com, B->get_center_of_mass(), 0.0f);
+			const Vector2 jb_com = c.normal * (c.acc_bias_impulse_center_of_mass - jbnOld_com);
+			if (jb_com != Vector2()) {
+				if (collide_A) {
+					A->apply_bias_impulse(-jb_com, A->get_center_of_mass(), 0.0f);
+				}
+				if (collide_B) {
+					B->apply_bias_impulse(jb_com, B->get_center_of_mass(), 0.0f);
+				}
 			}
 		}
 
