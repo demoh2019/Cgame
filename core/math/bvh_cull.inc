@@ -122,6 +122,33 @@ int cull_segment(CullParams &r_params, bool p_translate_hits = true) {
 	return r_params.result_count;
 }
 
+// Walk the BVH without accumulating candidates into _cull_hits. The exact
+// shape callback can shorten the ray; both inner nodes and leaves recheck the
+// clipped segment as they are reached. This prevents false nearest hits when
+// a segment crosses more than INTERSECTION_QUERY_MAX physics shapes.
+using SegmentCastCallback = real_t (*)(T *, int, real_t, void *);
+void cast_segment(const POINT &p_from, const POINT &p_to, SegmentCastCallback p_callback, void *p_userdata, uint32_t p_tree_collision_mask, const T *p_tester = nullptr) {
+	if (!p_callback) {
+		return;
+	}
+
+	real_t max_fraction = 1.0;
+	uint32_t tree_test_mask = 0;
+	for (int n = 0; n < NUM_TREES; n++) {
+		tree_test_mask <<= 1;
+		if (!tree_test_mask) {
+			tree_test_mask = 1;
+		}
+		if (_root_node_id[n] == BVHCommon::INVALID || !(p_tree_collision_mask & tree_test_mask)) {
+			continue;
+		}
+		_cast_segment_iterative(_root_node_id[n], p_from, p_to, p_callback, p_userdata, p_tester, max_fraction);
+		if (max_fraction <= 0.0) {
+			return;
+		}
+	}
+}
+
 int cull_point(CullParams &r_params, bool p_translate_hits = true) {
 	_cull_hits.clear();
 	r_params.result_count = 0;
@@ -211,6 +238,56 @@ void _cull_hit(uint32_t p_ref_id, CullParams &r_params) {
 	}
 
 	_cull_hits.push_back(p_ref_id);
+}
+
+void _cast_segment_iterative(uint32_t p_node_id, const POINT &p_from, const POINT &p_to, SegmentCastCallback p_callback, void *p_userdata, const T *p_tester, real_t &r_max_fraction) {
+	struct StackItem {
+		uint32_t node_id;
+	};
+	BVH_IterativeInfo<StackItem> stack;
+	stack.stack = (StackItem *)alloca(stack.get_alloca_stacksize());
+	stack.get_first()->node_id = p_node_id;
+
+	const POINT motion = p_to - p_from;
+	typename BVHABB_CLASS::Segment segment;
+	segment.from = p_from;
+	segment.to = p_to;
+
+	StackItem next;
+	while (stack.pop(next)) {
+		TNode &node = _nodes[next.node_id];
+		if (!node.aabb.intersects_segment(segment)) {
+			continue;
+		}
+
+		if (node.is_leaf()) {
+			TLeaf &leaf = _node_get_leaf(node);
+			for (int i = 0; i < leaf.num_items; i++) {
+				if (!leaf.get_aabb(i).intersects_segment(segment)) {
+					continue;
+				}
+				const ItemExtra &extra = _extra[leaf.get_item_ref_id(i)];
+				if (USE_PAIRS && !USER_CULL_TEST_FUNCTION::user_cull_check(p_tester, extra.userdata)) {
+					continue;
+				}
+				const real_t fraction = p_callback(extra.userdata, extra.subindex, r_max_fraction, p_userdata);
+				if (fraction >= 0.0 && fraction < r_max_fraction) {
+					r_max_fraction = fraction;
+					if (r_max_fraction == 0.0) {
+						return;
+					}
+					segment.to = p_from + motion * r_max_fraction;
+				}
+			}
+		} else {
+			for (int i = 0; i < node.num_children; i++) {
+				const uint32_t child_id = node.children[i];
+				if (_nodes[child_id].aabb.intersects_segment(segment)) {
+					stack.request()->node_id = child_id;
+				}
+			}
+		}
+	}
 }
 
 bool _cull_segment_iterative(uint32_t p_node_id, CullParams &r_params) {
