@@ -34,6 +34,7 @@ TEST_FORCE_LINK(test_file_access)
 
 #include "core/io/dir_access.h"
 #include "core/io/file_access.h"
+#include "core/io/file_access_compressed.h"
 #include "core/io/file_access_memory.h"
 #include "core/io/file_access_packed_byte_array.h"
 #include "tests/test_utils.h"
@@ -611,6 +612,50 @@ TEST_CASE("[FileAccess] Memory empty files and custom buffers retain correct ope
 	CHECK(external[0] == 9);
 	file->close();
 	CHECK_FALSE(file->is_open());
+}
+
+TEST_CASE("[FileAccess][Performance] Compressed block tables preserve large roundtrip and seek") {
+	// Use a small block size to exercise many table entries without keeping a
+	// large decompressed asset resident in memory.
+	const String path = TestUtils::get_temp_path("compressed_block_table_perf.bin");
+	const int block_size = 64;
+	const int byte_count = block_size * 97 + 23;
+	Vector<uint8_t> payload;
+	REQUIRE(payload.resize(byte_count) == OK);
+	uint8_t *payload_bytes = payload.ptrw();
+	for (int i = 0; i < byte_count; i++) {
+		payload_bytes[i] = uint8_t((i * 37 + (i / block_size) * 19) & 0xff);
+	}
+
+	for (Compression::Mode mode : { Compression::MODE_FASTLZ, Compression::MODE_ZSTD }) {
+		Ref<FileAccessCompressed> writer;
+		writer.instantiate();
+		writer->configure("GCPF", mode, block_size);
+		REQUIRE(writer->open_internal(path, FileAccess::WRITE) == OK);
+		CHECK(writer->store_buffer(payload.ptr(), payload.size()));
+		writer->close();
+
+		Ref<FileAccessCompressed> reader;
+		reader.instantiate();
+		reader->configure("GCPF", mode, block_size);
+		REQUIRE(reader->open_internal(path, FileAccess::READ) == OK);
+		CHECK(reader->get_length() == byte_count);
+
+		Vector<uint8_t> restored;
+		REQUIRE(restored.resize(byte_count) == OK);
+		CHECK(reader->get_buffer(restored.ptrw(), byte_count) == uint64_t(byte_count));
+		CHECK(restored == payload);
+
+		// Cross a compression block boundary with an unaligned seek.
+		reader->seek(block_size * 36 - 7);
+		uint8_t subsection[29] = {};
+		CHECK(reader->get_buffer(subsection, sizeof(subsection)) == sizeof(subsection));
+		for (int i = 0; i < int(sizeof(subsection)); i++) {
+			CHECK(subsection[i] == payload[block_size * 36 - 7 + i]);
+		}
+		reader->close();
+	}
+	DirAccess::remove_file_or_error(path);
 }
 
 } // namespace TestFileAccess
