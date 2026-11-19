@@ -32,6 +32,7 @@ static func validate(raw: Variant) -> Dictionary:
 
 	var seen := {}
 	var total_chars := 0
+	var tool_pattern := RegEx.create_from_string(r'(?m)^\s*@tool\b')
 	for i in range(source_files.size()):
 		var entry: Variant = source_files[i]
 		if not (entry is Dictionary):
@@ -55,6 +56,9 @@ static func validate(raw: Variant) -> Dictionary:
 			continue
 
 		seen[path_value] = true
+		if path_value.get_extension().to_lower() == "gd" and tool_pattern.search(content_value) != null:
+			errors.append("%s: @tool scripts are not accepted because they can execute in the editor." % path_value)
+			continue
 		if content_value.is_empty() or content_value.length() > MAX_FILE_CHARS:
 			errors.append("File %d must contain 1 to %d characters." % [i + 1, MAX_FILE_CHARS])
 			continue
@@ -78,6 +82,8 @@ static func apply(raw: Variant) -> Dictionary:
 	var originals := {}
 	for item in plan["files"]:
 		var path: String = item["path"]
+		if _has_unsafe_links(path):
+			return {"ok": false, "error": "Refusing to follow a symbolic link: %s" % path, "written": []}
 		var exists := FileAccess.file_exists(path)
 		if item["operation"] == "create" and exists:
 			return {"ok": false, "error": "File already exists: %s" % path, "written": []}
@@ -98,6 +104,9 @@ static func apply(raw: Variant) -> Dictionary:
 		if DirAccess.make_dir_recursive_absolute(dir_path) != OK:
 			_rollback(written, originals)
 			return {"ok": false, "error": "Cannot create directory for: %s" % path, "written": []}
+		if _has_unsafe_links(path):
+			_rollback(written, originals)
+			return {"ok": false, "error": "Refusing to follow a symbolic link: %s" % path, "written": []}
 
 		var output := FileAccess.open(path, FileAccess.WRITE)
 		if output == null:
@@ -128,6 +137,19 @@ static func _rollback(written: Array[String], originals: Dictionary) -> void:
 				restore.store_string(previous)
 				restore.flush()
 				restore.close()
+
+
+static func _has_unsafe_links(path: String) -> bool:
+	var root := DirAccess.open("res://")
+	if root == null:
+		return true
+	var relative := path.trim_prefix("res://")
+	var partial := ""
+	for component in relative.split("/"):
+		partial = partial.path_join(component)
+		if root.is_link(partial):
+			return true
+	return false
 
 
 static func _safe_path(path: String) -> bool:
