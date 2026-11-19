@@ -79,13 +79,13 @@ func _test_survival_economy_and_death() -> void:
 	_check(s.health == 67.0, "Equipped armor mitigates incoming damage")
 	_check(s.attack_damage() == 9.0, "No class: weapon determines combat")
 
-	var protected = Survivor.new()
-	var safe_bag: Dictionary = protected.inventory.duplicate(true)
-	protected.zone = 0
-	_check(protected.respawn().is_empty(), "Safe-zone death does not drop items")
-	_check(protected.inventory == safe_bag, "Safe inventory survives death")
-	protected.zone = 1
-	_check(not protected.respawn().is_empty(), "Contested death drops partial loot")
+	var safe_model = Survivor.new()
+	var safe_bag: Dictionary = safe_model.inventory.duplicate(true)
+	safe_model.zone = 0
+	_check(safe_model.respawn().is_empty(), "Safe-zone death does not drop items")
+	_check(safe_model.inventory == safe_bag, "Safe inventory survives death")
+	safe_model.zone = 1
+	_check(not safe_model.respawn().is_empty(), "Contested death drops partial loot")
 
 	var high_risk = Survivor.new()
 	high_risk.shelter_level = 1
@@ -151,6 +151,22 @@ func _run() -> void:
 		for frame in range(3):
 			await physics_frame
 		_check(world.survivor.zone == 2, "Movement updates high-risk zone")
+		# Verify that the live world really creates the recoverable
+		# full-loot death bag, then lets the player take those items back.
+		var carried_before: Dictionary = world.survivor.inventory.duplicate(true)
+		world._handle_death()
+		_check(world.survivor.zone == 0, "Real death respawns in Haven")
+		_check(world.player_position == Vector2(240.0, 525.0),
+				"Real death restores settlement spawn location")
+		_check(world.lost_bags.size() == 1, "Full-loot zone creates dropped bag")
+		_check(world.survivor.inventory.is_empty(), "Real full-loot death empties bag")
+		if world.lost_bags.size() == 1:
+			world.player_position = world.lost_bags[0]["pos"]
+			world.survivor.zone = 2
+			world._gather_or_recover()
+			_check(world.lost_bags.is_empty(), "Interaction can recover death bag")
+			_check(world.survivor.inventory == carried_before,
+					"Recovered backpack restores dropped loot without duplication")
 		world.queue_free()
 
 	if failures.is_empty():
