@@ -618,11 +618,11 @@ static void _collision_circle_circle(const GodotShape2D *p_a, const Transform2D 
 	// support-point generation for stationary, rigidly transformed circles.
 	// Non-uniform scale, shear and swept shapes retain the original SAT path.
 	if (!p_cast_A && !p_cast_B &&
-			Math::is_equal_approx(p_transform_a.columns[0].length_squared(), 1.0) &&
-			Math::is_equal_approx(p_transform_a.columns[1].length_squared(), 1.0) &&
+			Math::is_equal_approx(p_transform_a.columns[0].length_squared(), real_t(1.0)) &&
+			Math::is_equal_approx(p_transform_a.columns[1].length_squared(), real_t(1.0)) &&
 			Math::is_zero_approx(p_transform_a.columns[0].dot(p_transform_a.columns[1])) &&
-			Math::is_equal_approx(p_transform_b.columns[0].length_squared(), 1.0) &&
-			Math::is_equal_approx(p_transform_b.columns[1].length_squared(), 1.0) &&
+			Math::is_equal_approx(p_transform_b.columns[0].length_squared(), real_t(1.0)) &&
+			Math::is_equal_approx(p_transform_b.columns[1].length_squared(), real_t(1.0)) &&
 			Math::is_zero_approx(p_transform_b.columns[0].dot(p_transform_b.columns[1]))) {
 		const real_t radius_A = circle_A->get_radius() + p_margin_A;
 		const real_t radius_B = circle_B->get_radius() + p_margin_B;
