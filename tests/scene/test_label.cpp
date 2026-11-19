@@ -207,6 +207,8 @@ TEST_CASE("[SceneTree][Label] Sizing") {
 	test_label->set_text("This is a long text that should be wrapped and exceeds minimum size.");
 	SceneTree::get_singleton()->process(0);
 
+	real_t label_height = test_label->get_size().height;
+
 	CHECK_MESSAGE(
 			test_label->get_size().width <= max_width,
 			"Label width will increase up to the custom maximum width with AUTOWRAP_OFF.");
@@ -223,6 +225,9 @@ TEST_CASE("[SceneTree][Label] Sizing") {
 	CHECK_MESSAGE(
 			test_label->get_size().width > min_width,
 			"Label width will increase beyond the custom minimum width with AUTOWRAP_ARBITRARY.");
+	CHECK_MESSAGE(
+			test_label->get_size().height > label_height,
+			"Label height will increase with AUTOWRAP_ARBITRARY.");
 
 	test_label->set_autowrap_mode(TextServer::AUTOWRAP_WORD);
 	SceneTree::get_singleton()->process(0);
@@ -233,6 +238,9 @@ TEST_CASE("[SceneTree][Label] Sizing") {
 	CHECK_MESSAGE(
 			test_label->get_size().width > min_width,
 			"Label width will increase beyond the custom minimum width with AUTOWRAP_WORD.");
+	CHECK_MESSAGE(
+			test_label->get_size().height > label_height,
+			"Label height will increase with AUTOWRAP_WORD.");
 
 	test_label->set_autowrap_mode(TextServer::AUTOWRAP_WORD_SMART);
 	SceneTree::get_singleton()->process(0);
@@ -243,6 +251,9 @@ TEST_CASE("[SceneTree][Label] Sizing") {
 	CHECK_MESSAGE(
 			test_label->get_size().width > min_width,
 			"Label width will increase beyond the custom minimum width with AUTOWRAP_WORD_SMART.");
+	CHECK_MESSAGE(
+			test_label->get_size().height > label_height,
+			"Label height will increase with AUTOWRAP_WORD_SMART.");
 
 	test_label->set_autowrap_mode(TextServer::AUTOWRAP_OFF);
 	test_label->set_clip_text(true);
@@ -254,6 +265,9 @@ TEST_CASE("[SceneTree][Label] Sizing") {
 	CHECK_MESSAGE(
 			test_label->get_size().width > min_width,
 			"Label width will increase beyond the custom minimum width with clip_text.");
+	CHECK_MESSAGE(
+			test_label->get_size().height == label_height,
+			"Label height will not increase with clip_text.");
 
 	test_label->set_clip_text(false);
 	test_label->set_text_overrun_behavior(TextServer::OVERRUN_TRIM_CHAR);
@@ -265,6 +279,9 @@ TEST_CASE("[SceneTree][Label] Sizing") {
 	CHECK_MESSAGE(
 			test_label->get_size().width > min_width,
 			"Label width will increase beyond the custom minimum width with OVERRUN_TRIM_CHAR.");
+	CHECK_MESSAGE(
+			test_label->get_size().height == label_height,
+			"Label height will not increase with OVERRUN_TRIM_CHAR.");
 
 	test_label->set_text_overrun_behavior(TextServer::OVERRUN_TRIM_WORD);
 	SceneTree::get_singleton()->process(0);
@@ -275,6 +292,9 @@ TEST_CASE("[SceneTree][Label] Sizing") {
 	CHECK_MESSAGE(
 			test_label->get_size().width > min_width,
 			"Label width will increase beyond the custom minimum width with OVERRUN_TRIM_WORD.");
+	CHECK_MESSAGE(
+			test_label->get_size().height == label_height,
+			"Label height will not increase with OVERRUN_TRIM_WORD.");
 
 	test_label->set_text_overrun_behavior(TextServer::OVERRUN_TRIM_ELLIPSIS);
 	SceneTree::get_singleton()->process(0);
@@ -285,6 +305,9 @@ TEST_CASE("[SceneTree][Label] Sizing") {
 	CHECK_MESSAGE(
 			test_label->get_size().width > min_width,
 			"Label width will increase beyond the custom minimum width with OVERRUN_TRIM_ELLIPSIS.");
+	CHECK_MESSAGE(
+			test_label->get_size().height == label_height,
+			"Label height will not increase with OVERRUN_TRIM_ELLIPSIS.");
 
 	test_label->set_text_overrun_behavior(TextServer::OVERRUN_TRIM_WORD_ELLIPSIS);
 	SceneTree::get_singleton()->process(0);
@@ -295,6 +318,9 @@ TEST_CASE("[SceneTree][Label] Sizing") {
 	CHECK_MESSAGE(
 			test_label->get_size().width > min_width,
 			"Label width will increase beyond the custom minimum width with OVERRUN_TRIM_WORD_ELLIPSIS.");
+	CHECK_MESSAGE(
+			test_label->get_size().height == label_height,
+			"Label height will not increase with OVERRUN_TRIM_WORD_ELLIPSIS.");
 
 	test_label->set_text_overrun_behavior(TextServer::OVERRUN_TRIM_ELLIPSIS_FORCE);
 	SceneTree::get_singleton()->process(0);
@@ -305,6 +331,9 @@ TEST_CASE("[SceneTree][Label] Sizing") {
 	CHECK_MESSAGE(
 			test_label->get_size().width > min_width,
 			"Label width will increase beyond the custom minimum width with OVERRUN_TRIM_ELLIPSIS_FORCE.");
+	CHECK_MESSAGE(
+			test_label->get_size().height == label_height,
+			"Label height will not increase with OVERRUN_TRIM_ELLIPSIS_FORCE.");
 
 	test_label->set_text_overrun_behavior(TextServer::OVERRUN_TRIM_WORD_ELLIPSIS_FORCE);
 	SceneTree::get_singleton()->process(0);
@@ -315,6 +344,9 @@ TEST_CASE("[SceneTree][Label] Sizing") {
 	CHECK_MESSAGE(
 			test_label->get_size().width > min_width,
 			"Label width will increase beyond the custom minimum width with OVERRUN_TRIM_WORD_ELLIPSIS_FORCE.");
+	CHECK_MESSAGE(
+			test_label->get_size().height == label_height,
+			"Label height will not increase with OVERRUN_TRIM_WORD_ELLIPSIS_FORCE.");
 
 	memdelete(test_label);
 }
