@@ -388,7 +388,10 @@ TEST_CASE("[BVH] Streaming segment ray visits more than 2048 2D candidates and c
 	stats.ray_length = to.x - from.x;
 	tree.cast_segment(from, to, _stream_nearest_cast, &stats);
 	CHECK(stats.nearest_item == 0);
+	// Spatially ordered branches should avoid invoking the narrowphase on
+	// thousands of farther objects before finding the closest body.
 	CHECK(stats.callbacks > 0);
+	CHECK(stats.callbacks < COUNT / 4);
 }
 
 TEST_CASE("[BVH] Streaming 3D segment ray spans multiple trees and preserves closest hit") {
@@ -411,7 +414,10 @@ TEST_CASE("[BVH] Streaming 3D segment ray spans multiple trees and preserves clo
 	stats.ray_length = to.x - from.x;
 	tree.cast_segment(from, to, _stream_nearest_cast, &stats);
 	CHECK(stats.nearest_item == 0);
+	// Spatially ordered branches should avoid invoking the narrowphase on
+	// thousands of farther objects before finding the closest body.
 	CHECK(stats.callbacks > 0);
+	CHECK(stats.callbacks < COUNT / 4);
 }
 
 
@@ -499,6 +505,80 @@ TEST_CASE("[BVH] Bulk insertion of independent 3D bodies preserves adjacent pair
 		tree.erase(handles[i]);
 	}
 	CHECK(removed == COUNT - 1);
+}
+
+
+struct RayCallbackOrder {
+	int count = 0;
+	int first = -1;
+};
+
+static real_t _record_stream_order(Item *p_item, int, real_t p_max_fraction, void *p_userdata) {
+	RayCallbackOrder &stats = *static_cast<RayCallbackOrder *>(p_userdata);
+	if (stats.count++ == 0) {
+		stats.first = p_item->value;
+	}
+	return p_max_fraction;
+}
+
+TEST_CASE("[BVH] Ray casts visit the nearer of two separate BVH trees first") {
+	// The far proxy is in tree 0 and the near proxy in tree 1.
+	// Both roots overlap the long ray but an arbitrary tree order would
+	// trigger expensive shape tests on the far proxy first.
+	using Tree2D = BVH_Manager<Item, 2, false, 16, PairTest, CullTest, Rect2, Vector2, false>;
+	Tree2D tree2d;
+	Item far_item;
+	far_item.value = 1;
+	Item near_item;
+	near_item.value = 2;
+	tree2d.create(&far_item, true, 0, 3, Rect2(100, 0, 2, 2));
+	tree2d.create(&near_item, true, 1, 3, Rect2(1, 0, 2, 2));
+	RayCallbackOrder order;
+	tree2d.cast_segment(Vector2(0, 1), Vector2(104, 1), _record_stream_order, &order);
+	CHECK(order.count == 2);
+	CHECK(order.first == 2);
+
+	using Tree3D = BVH_Manager<Item, 2, false, 16, PairTest, CullTest, AABB, Vector3, false>;
+	Tree3D tree3d;
+	tree3d.create(&far_item, true, 0, 3, AABB(Vector3(100, 0, 0), Vector3(2, 2, 2)));
+	tree3d.create(&near_item, true, 1, 3, AABB(Vector3(1, 0, 0), Vector3(2, 2, 2)));
+	order = RayCallbackOrder();
+	tree3d.cast_segment(Vector3(0, 1, 1), Vector3(104, 1, 1), _record_stream_order, &order);
+	CHECK(order.count == 2);
+	CHECK(order.first == 2);
+}
+
+TEST_CASE("[BVH] Axis-aligned and reversed streaming rays retain intersection results") {
+	using Tree2D = BVH_Manager<Item, 2, false, 16, PairTest, CullTest, Rect2, Vector2, false>;
+	Tree2D tree2d;
+	Item central;
+	central.value = 7;
+	Item outside;
+	outside.value = 9;
+	tree2d.create(&central, true, 0, 3, Rect2(-1, -1, 2, 2));
+	tree2d.create(&outside, true, 1, 3, Rect2(10, 10, 2, 2));
+
+	RayCallbackOrder order;
+	tree2d.cast_segment(Vector2(0, -5), Vector2(0, 5), _record_stream_order, &order);
+	CHECK(order.count == 1);
+	CHECK(order.first == 7);
+	order = RayCallbackOrder();
+	tree2d.cast_segment(Vector2(0, 5), Vector2(0, -5), _record_stream_order, &order);
+	CHECK(order.count == 1);
+	CHECK(order.first == 7);
+
+	using Tree3D = BVH_Manager<Item, 2, false, 16, PairTest, CullTest, AABB, Vector3, false>;
+	Tree3D tree3d;
+	tree3d.create(&central, true, 0, 3, AABB(Vector3(-1, -1, -1), Vector3(2, 2, 2)));
+	tree3d.create(&outside, true, 1, 3, AABB(Vector3(10, 10, 10), Vector3(2, 2, 2)));
+	order = RayCallbackOrder();
+	tree3d.cast_segment(Vector3(0, -5, 0), Vector3(0, 5, 0), _record_stream_order, &order);
+	CHECK(order.count == 1);
+	CHECK(order.first == 7);
+	order = RayCallbackOrder();
+	tree3d.cast_segment(Vector3(0, 5, 0), Vector3(0, -5, 0), _record_stream_order, &order);
+	CHECK(order.count == 1);
+	CHECK(order.first == 7);
 }
 
 } // namespace TestBVH
