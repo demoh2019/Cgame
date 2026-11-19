@@ -221,7 +221,9 @@ def dedup_key(obj: dict) -> tuple[str, int] | None:
 def load_existing(api: GitHub, db: sqlite3.Connection) -> int:
     """Reconcile real destination records before creating anything; handles interrupted POST."""
     found = 0
-    for obj in api.list_pages(f"/repos/{TARGET}/issues", params={"state": "open", "sort": "created", "direction": "asc"}):
+    # Include closed destination items: a prior import can be closed manually,
+    # and losing the SQLite database must not cause it to be recreated.
+    for obj in api.list_pages(f"/repos/{TARGET}/issues", params={"state": "all", "sort": "created", "direction": "asc"}):
         key = dedup_key(obj)
         if key is None:
             continue
@@ -346,12 +348,15 @@ def create_code_pr(api: GitHub, obj: dict, git_root: Path) -> dict:
 
 
 def synchronize(api: GitHub, db: sqlite3.Connection, *, kind: str = "all", limit: int = 50,
-                apply: bool = False, replay_open_prs: bool = False, git_root: Path | None = None) -> dict:
+                apply: bool = False, replay_open_prs: bool = False, git_root: Path | None = None,
+                retry_failures: bool = False) -> dict:
     """Only import records that are still OPEN on upstream at time of creation.
 
     Open Pull Requests always require a real code replay into a draft PR;
     never turn a PR into a misleading plain Issue.
     """
+    if limit < 0:
+        raise MirrorError("--limit must be >= 0")
     if apply:
         info = api.request("GET", f"/repos/{TARGET}")
         if not info.get("has_issues") and kind in ("all", "issues"):
@@ -359,6 +364,10 @@ def synchronize(api: GitHub, db: sqlite3.Connection, *, kind: str = "all", limit
         load_existing(api, db)
 
     filters = ["m.number IS NULL", "s.state='open'"]
+    if not retry_failures:
+        # Keep deterministic failed items from permanently starving the rest
+        # of a limited batch. Operators can explicitly retry after fixing them.
+        filters.append("f.number IS NULL")
     if kind == "issues":
         filters.append("s.kind='issue'")
     elif kind == "prs":
@@ -369,6 +378,7 @@ def synchronize(api: GitHub, db: sqlite3.Connection, *, kind: str = "all", limit
         pass
     q = ("SELECT s.kind,s.number,s.raw FROM source_records s "
          "LEFT JOIN mirrored m ON m.kind=s.kind AND m.number=s.number "
+         "LEFT JOIN failures f ON f.kind=s.kind AND f.number=s.number "
          f"WHERE {' AND '.join(filters)} ORDER BY s.number ASC")
     items = db.execute(q + (" LIMIT ?" if limit else ""), (limit,) if limit else ()).fetchall()
     outcome = {"candidates": len(items), "created_issues": 0, "created_prs": 0,
@@ -433,12 +443,17 @@ def main(argv: list[str] | None = None):
     b.add_argument("--kind", choices=("all", "issues", "prs"), default="all")
     b.add_argument("--limit", type=int, default=50, help="Items per run; 0 = all (may take many days)")
     b.add_argument("--apply", action="store_true", help="Actually create GitHub issues/PRs; default dry-run")
+    b.add_argument("--retry-failures", action="store_true", help="Include previously failed items again")
     b.add_argument("--replay-open-prs", action="store_true", help="Use git patch replay and create draft PRs for open PRs")
     b.add_argument("--git-root", type=Path, help="Checked-out fork for patch replay")
     c = cmd.add_parser("status", help="Show inventory and migration totals")
     args = p.parse_args(argv)
     if args.min_write_seconds < 1:
         p.error("--min-write-seconds must be >= 1 to avoid GitHub secondary limits")
+    if args.command == "sync" and args.limit < 0:
+        p.error("--limit must be >= 0")
+    if args.command == "scan" and args.max_pages < 0:
+        p.error("--max-pages must be >= 0")
     api = GitHub(os.environ.get("GH_TOKEN") or os.environ.get("GITHUB_TOKEN") or "",
                  min_write_seconds=args.min_write_seconds)
     with connect(args.db) as db:
@@ -448,7 +463,8 @@ def main(argv: list[str] | None = None):
             if args.replay_open_prs and not args.git_root:
                 p.error("--replay-open-prs requires --git-root")
             result = synchronize(api, db, kind=args.kind, limit=args.limit, apply=args.apply,
-                                 replay_open_prs=args.replay_open_prs, git_root=args.git_root)
+                                 replay_open_prs=args.replay_open_prs, git_root=args.git_root,
+                                 retry_failures=args.retry_failures)
         else:
             result = {"inventory": dict(db.execute("SELECT kind,COUNT(*) FROM source_records WHERE state='open' GROUP BY kind")),
                       "mirrored": [dict(kind=k, dest_kind=d, count=n) for k,d,n in db.execute(
