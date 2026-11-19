@@ -363,7 +363,7 @@ bool GDScript::has_method(const StringName &p_method) const {
 }
 
 bool GDScript::has_static_method(const StringName &p_method) const {
-	const GDScriptFunction *const *function = member_functions.getptr(p_method);
+	GDScriptFunction *const *function = member_functions.getptr(p_method);
 	return function != nullptr && (*function)->is_static();
 }
 
