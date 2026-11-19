@@ -2,6 +2,7 @@ extends Node3D
 ## Draws the moving things: other players, zombies and loot bags, smoothed between snapshots.
 
 const Defs = preload("res://scripts/shared/defs.gd")
+const Structures = preload("res://scripts/shared/structures.gd")
 const Meshes = preload("res://scripts/client/meshes.gd")
 const CharacterModel = preload("res://scripts/client/character_model.gd")
 
@@ -49,7 +50,9 @@ func _touch(key: String, kind: String, entity: Dictionary, seen: Dictionary) -> 
 	if kind == "barricade":
 		var barricade_mesh: MeshInstance3D = _nodes[key].get_child(0)
 		var barricade_material: StandardMaterial3D = barricade_mesh.material_override
-		barricade_material.albedo_color = Color(0.26, 0.19, 0.16).lerp(Color(0.6, 0.45, 0.27), clampf(float(entity.get("hp", 0.0)) / 120.0, 0.0, 1.0))
+		var tier: int = Structures.tier_of(entity)
+		var fraction: float = clampf(float(entity.get("hp", 0.0)) / maxf(1.0, Structures.max_health(tier)), 0.0, 1.0)
+		barricade_material.albedo_color = Color(0.20, 0.18, 0.18).lerp(Structures.color_for_tier(tier), fraction)
 	if kind == "zombie":
 		# A zombie that has locked on to someone flushes red.
 		var model: Node3D = _nodes[key].get_node("Model")
