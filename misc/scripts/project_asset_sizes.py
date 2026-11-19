@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import argparse
 import json
+from heapq import nsmallest
 import math
 import os
 from pathlib import Path
@@ -73,20 +74,26 @@ def scan(root: Path, top: int = 20, max_total: int | None = None,
             item["files"] += 1
             item["bytes"] += size
 
-    ranked = sorted(files, key=lambda item: (-item[1], item[0]))
+    # Limit the selection heap to requested output size instead of sorting
+    # every asset when the usual report needs only a small top-N.
+    rank_key = lambda item: (-item[1], item[0])
+    largest = nsmallest(top, files, key=rank_key)
     violations: list[dict] = []
     if max_total is not None and total > max_total:
         violations.append({"kind": "total", "bytes": total, "limit_bytes": max_total})
     if max_file is not None:
+        # The violation list remains globally ranked, but only over entries
+        # that exceed the limit (no full-sort allocation for passing files).
+        over_limit = ((path, size) for path, size in files if size > max_file)
         violations.extend({"kind": "file", "path": path, "bytes": size, "limit_bytes": max_file}
-                          for path, size in ranked if size > max_file)
+                          for path, size in sorted(over_limit, key=rank_key))
 
     return {
         "format": 1,
         "summary": {"files": len(files), "total_bytes": total},
         "by_extension": dict(sorted(extensions.items())),
         "by_directory": dict(sorted(directories.items())),
-        "largest": [{"path": path, "bytes": size} for path, size in ranked[:top]],
+        "largest": [{"path": path, "bytes": size} for path, size in largest],
         "violations": violations,
     }
 
