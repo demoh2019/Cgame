@@ -212,15 +212,26 @@ void AStarGrid2D::update() {
 	points.reserve(uint32_t(total_points));
 	solid_mask.reserve(uint32_t(mask_cells));
 
+	// All interior cells are initially passable. Construct and zero the mask
+	// once, then touch only the border (O(width + height) extra stores).
+	solid_mask.resize_initialized(uint32_t(mask_cells));
+	bool *mask = solid_mask.ptr();
+	const uint32_t width = uint32_t(padded_width);
+	const uint32_t height = uint32_t(padded_height);
+	const uint32_t bottom_row = (height - 1) * width;
+	for (uint32_t x = 0; x < width; x++) {
+		mask[x] = true;
+		mask[bottom_row + x] = true;
+	}
+	for (uint32_t y = 1; y < height - 1; y++) {
+		mask[y * width] = true;
+		mask[(y + 1) * width - 1] = true;
+	}
+
 	const int32_t end_x = region.get_end().x;
 	const int32_t end_y = region.get_end().y;
 	const Vector2 half_cell_size = cell_size / 2;
-	for (int32_t x = region.position.x; x < end_x + 2; x++) {
-		solid_mask.push_back(true);
-	}
-
 	for (int32_t y = region.position.y; y < end_y; y++) {
-		solid_mask.push_back(true);
 		for (int32_t x = region.position.x; x < end_x; x++) {
 			Vector2 v = offset;
 			switch (cell_shape) {
@@ -237,13 +248,7 @@ void AStarGrid2D::update() {
 					break;
 			}
 			points.push_back(Point(Vector2i(x, y), v));
-			solid_mask.push_back(false);
 		}
-		solid_mask.push_back(true);
-	}
-
-	for (int32_t x = region.position.x; x < end_x + 2; x++) {
-		solid_mask.push_back(true);
 	}
 
 	dirty = false;
