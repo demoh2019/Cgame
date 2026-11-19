@@ -152,6 +152,21 @@ jobs:
             --script res://physics_large_island_3d_regression.gd \
             2>&1 | tee physics3d-colored-islands.log
           grep -Fq '3D large island regression passed.' physics3d-colored-islands.log
+      - name: Regression-test native 3D CCD with relative body motion
+        shell: bash
+        run: |
+          set -euo pipefail
+          # Use the native 3D solver; the default project may use Jolt.
+          BIN=./bin/godot.linuxbsd.editor.dev.x86_64
+          PROJECT="$RUNNER_TEMP/cgame-native-3d-relative-ccd"
+          mkdir -p "$PROJECT"
+          cp -a tests/stress/. "$PROJECT/"
+          printf '\n[physics]\n3d/physics_engine="GodotPhysics3D"\n' >> "$PROJECT/project.godot"
+          timeout 120s "$BIN" --headless --path "$PROJECT" \
+            --script res://physics_ccd_relative_motion_3d_regression.gd \
+            2>&1 | tee physics3d-ccd-relative.log
+          grep -Fq '3D relative-motion CCD regression passed.' physics3d-ccd-relative.log
+
       - name: Stress Jolt reported-contact buffers after dense bursts
         shell: bash
         run: |
@@ -187,6 +202,7 @@ jobs:
             physics2d-ccd-edge.log
             physics2d-ccd-relative.log
             physics3d-colored-islands.log
+            physics3d-ccd-relative.log
             physics-jolt-contact-scratch.log
             physics-jolt-layer-filter.log
           if-no-files-found: warn
