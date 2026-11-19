@@ -2007,6 +2007,34 @@ bool Node::has_node(const NodePath &p_path) const {
 Node *Node::find_child(const String &p_pattern, bool p_recursive, bool p_owned) const {
 	ERR_THREAD_GUARD_V(nullptr);
 	ERR_FAIL_COND_V(p_pattern.is_empty(), nullptr);
+
+	// Exact names are the common case in scripts and editor tooling. Avoid
+	// wildcard matching for every candidate and use the child-name hash for
+	// nonrecursive lookups. Recursive searches retain depth-first ordering.
+	if (!p_pattern.contains_char('*') && !p_pattern.contains_char('?')) {
+		const StringName exact_name(p_pattern);
+		if (!p_recursive) {
+			Node *child = _get_child_by_name(exact_name);
+			return child && (!p_owned || child->data.owner) ? child : nullptr;
+		}
+		auto find_exact = [&](auto &&self, const Node *p_parent) -> Node * {
+			p_parent->_update_children_cache();
+			for (Node *child : p_parent->data.children_cache) {
+				if (p_owned && !child->data.owner) {
+					continue;
+				}
+				if (child->data.name == exact_name) {
+					return child;
+				}
+				if (Node *match = self(self, child)) {
+					return match;
+				}
+			}
+			return nullptr;
+		};
+		return find_exact(find_exact, this);
+	}
+
 	_update_children_cache();
 	Node *const *cptr = data.children_cache.ptr();
 	int ccount = data.children_cache.size();
@@ -2043,12 +2071,17 @@ TypedArray<Node> Node::find_children(const String &p_pattern, const String &p_ty
 		return ret;
 	}
 
+	// Match literal names using their interned StringName rather than running
+	// the wildcard matcher once for every node in large scene trees.
+	const bool exact_name_match = !p_pattern.is_empty() && !p_pattern.contains_char('*') && !p_pattern.contains_char('?');
+	const StringName exact_name = exact_name_match ? StringName(p_pattern) : StringName();
+
 	// Resolve the global script type once, rather than once for each matching child.
 	const bool is_global_type = !p_type.is_empty() && ScriptServer::is_global_class(p_type);
 	const String global_type_path = is_global_type ? ScriptServer::get_global_class_path(p_type) : String();
 
 	auto append_match = [&](Node *p_node) {
-		if (!p_pattern.is_empty() && !p_node->data.name.string().match(p_pattern)) {
+		if (!p_pattern.is_empty() && !(exact_name_match ? p_node->data.name == exact_name : p_node->data.name.string().match(p_pattern))) {
 			return;
 		}
 		if (p_type.is_empty() || p_node->is_class(p_type)) {
@@ -2071,6 +2104,15 @@ TypedArray<Node> Node::find_children(const String &p_pattern, const String &p_ty
 	};
 
 	if (!p_recursive) {
+		// A unique direct child name needs only one hash lookup, even when a
+		// type filter is also supplied. Keep ownership/type checks unchanged.
+		if (exact_name_match) {
+			Node *child = _get_child_by_name(exact_name);
+			if (child && (!p_owned || child->data.owner)) {
+				append_match(child);
+			}
+			return ret;
+		}
 		// Avoid allocating a traversal stack for a non-recursive query.
 		for (Node *child : data.children_cache) {
 			if (!p_owned || child->data.owner) {
@@ -2171,14 +2213,18 @@ Node *Node::get_parent() const {
 
 Node *Node::find_parent(const String &p_pattern) const {
 	ERR_THREAD_GUARD_V(nullptr);
+	if (p_pattern.is_empty()) {
+		return nullptr;
+	}
+	const bool exact_name_match = !p_pattern.contains_char('*') && !p_pattern.contains_char('?');
+	const StringName exact_name = exact_name_match ? StringName(p_pattern) : StringName();
 	Node *p = data.parent;
 	while (p) {
-		if (p->data.name.string().match(p_pattern)) {
+		if (exact_name_match ? p->data.name == exact_name : p->data.name.string().match(p_pattern)) {
 			return p;
 		}
 		p = p->data.parent;
 	}
-
 	return nullptr;
 }
 

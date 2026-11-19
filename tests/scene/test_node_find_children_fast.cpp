@@ -161,4 +161,131 @@ TEST_CASE("[NodeFindChildrenFast] Repeated queries and mutations are independent
 	memdelete(root);
 }
 
+
+TEST_CASE("[NodeFindChildrenFast] Literal direct child lookup preserves name and ownership semantics") {
+	Node *root = memnew(Node);
+	for (int i = 0; i < 256; i++) {
+		Node *child = memnew(Node);
+		child->set_name(String("Sib") + itos(i));
+		root->add_child(child);
+	}
+	Node *target = memnew(Node);
+	target->set_name("Target");
+	root->add_child(target);
+
+	CHECK_EQ(root->find_child("Target", false, false), target);
+	CHECK_EQ(root->find_child("Missing", false, false), nullptr);
+	CHECK_EQ(root->find_child("Target", false, true), nullptr);
+	CHECK_EQ(root->find_child("Sib255", false, false), root->get_child(255));
+	CHECK_EQ(root->find_child("Target", true, false), target);
+	target->set_owner(root);
+	CHECK_EQ(root->find_child("Target", false, true), target);
+	memdelete(root);
+}
+
+TEST_CASE("[NodeFindChildrenFast] Literal recursive lookup keeps depth-first precedence") {
+	Node *root = memnew(Node);
+	Node *left = memnew(Node);
+	Node *nested = memnew(Node);
+	Node *direct = memnew(Node);
+	left->set_name("Left");
+	nested->set_name("Target");
+	direct->set_name("Target");
+	root->add_child(left);
+	left->add_child(nested);
+	root->add_child(direct);
+
+	CHECK_EQ(root->find_child("Target", true, false), nested);
+	CHECK_EQ(root->find_child("Target", false, false), direct);
+	TypedArray<Node> matches = root->find_children("Target", "", true, false);
+	REQUIRE_EQ(matches.size(), 2);
+	CHECK_EQ(Object::cast_to<Node>(matches[0]), nested);
+	CHECK_EQ(Object::cast_to<Node>(matches[1]), direct);
+	CHECK_EQ(nested->find_parent("Left"), left);
+	memdelete(root);
+}
+
+TEST_CASE("[NodeFindChildrenFast] Literal find_children honors type and direct-child filtering") {
+	Node *root = memnew(Node);
+	Node2D *direct = memnew(Node2D);
+	Node2D *nested = memnew(Node2D);
+	Node *container = memnew(Node);
+	direct->set_name("Target");
+	nested->set_name("Target");
+	container->set_name("Container");
+	root->add_child(direct);
+	root->add_child(container);
+	container->add_child(nested);
+
+	TypedArray<Node> direct_type = root->find_children("Target", "Node2D", false, false);
+	REQUIRE_EQ(direct_type.size(), 1);
+	CHECK_EQ(Object::cast_to<Node>(direct_type[0]), direct);
+	TypedArray<Node> direct_wrong_type = root->find_children("Target", "Control", false, false);
+	CHECK(direct_wrong_type.is_empty());
+	TypedArray<Node> recursive_type = root->find_children("Target", "Node2D", true, false);
+	REQUIRE_EQ(recursive_type.size(), 2);
+	CHECK_EQ(Object::cast_to<Node>(recursive_type[1]), nested);
+	memdelete(root);
+}
+
+TEST_CASE("[NodeFindChildrenFast] Literal ownership excludes entire unowned branches") {
+	Node *root = memnew(Node);
+	Node *unowned = memnew(Node);
+	Node *nested = memnew(Node);
+	Node *owned = memnew(Node);
+	unowned->set_name("Unowned");
+	nested->set_name("Hidden");
+	owned->set_name("Owned");
+	root->add_child(unowned);
+	unowned->add_child(nested);
+	root->add_child(owned);
+	owned->set_owner(root);
+
+	CHECK_EQ(root->find_child("Hidden", true, false), nested);
+	CHECK_EQ(root->find_child("Hidden", true, true), nullptr);
+	CHECK_EQ(root->find_child("Owned", false, true), owned);
+	CHECK_EQ(root->find_child("Unowned", false, true), nullptr);
+	CHECK(root->find_children("Hidden", "", true, true).is_empty());
+	memdelete(root);
+}
+
+TEST_CASE("[NodeFindChildrenFast] Wildcard and question mark patterns remain supported") {
+	Node *root = memnew(Node);
+	Node *enemy_one = memnew(Node);
+	Node *enemy_two = memnew(Node);
+	Node *friend_node = memnew(Node);
+	enemy_one->set_name("Enemy1");
+	enemy_two->set_name("Enemy2");
+	friend_node->set_name("Friendly");
+	root->add_child(enemy_one);
+	root->add_child(enemy_two);
+	root->add_child(friend_node);
+
+	CHECK_EQ(root->find_child("Enemy*", false, false), enemy_one);
+	CHECK_EQ(root->find_child("Enemy?", false, false), enemy_one);
+	TypedArray<Node> all = root->find_children("Enemy?", "", false, false);
+	REQUIRE_EQ(all.size(), 2);
+	CHECK_EQ(Object::cast_to<Node>(all[0]), enemy_one);
+	CHECK_EQ(Object::cast_to<Node>(all[1]), enemy_two);
+	memdelete(root);
+}
+
+TEST_CASE("[NodeFindChildrenFast] Parent literal and wildcard paths agree") {
+	Node *root = memnew(Node);
+	Node *branch = memnew(Node);
+	Node *leaf = memnew(Node);
+	root->set_name("Root");
+	branch->set_name("Branch");
+	leaf->set_name("Leaf");
+	root->add_child(branch);
+	branch->add_child(leaf);
+	CHECK_EQ(leaf->find_parent("Branch"), branch);
+	CHECK_EQ(leaf->find_parent("Root"), root);
+	CHECK_EQ(leaf->find_parent("Br*"), branch);
+	CHECK_EQ(leaf->find_parent("R??t"), root);
+	CHECK_EQ(leaf->find_parent(""), nullptr);
+	CHECK_EQ(leaf->find_parent("Missing"), nullptr);
+	memdelete(root);
+}
+
 } // namespace TestNodeFindChildrenFast
