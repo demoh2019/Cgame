@@ -33,6 +33,7 @@
 #include "godot_collision_solver_2d.h"
 #include "godot_contact_normal_2d.h"
 #include "godot_space_2d.h"
+#include "servers/physics_rolling_resistance.h"
 #include "servers/physics_ccd_sphere_toi.h"
 
 #define ACCUMULATE_IMPULSES
@@ -490,6 +491,8 @@ bool GodotBodyPair2D::setup(real_t p_step) {
 
 bool GodotBodyPair2D::pre_solve(real_t p_step) {
 	block_normal_valid = false;
+	rolling_impulse = 0.0;
+	rolling_impulse_scale = 0.0;
 	if (oneway_disabled) {
 		return false;
 	}
@@ -553,6 +556,29 @@ bool GodotBodyPair2D::pre_solve(real_t p_step) {
 	// per constraint setup, not once per contact point.
 	const real_t mixed_restitution = space->mix_restitution(A->get_bounce(), B->get_bounce());
 	const bool has_friction = mixed_friction > 0.0;
+
+	// Opt-in Box2D-style resistance to rolling. Only angularly dynamic
+	// circles contribute a rolling radius; boxes cannot receive this drag.
+	const real_t rolling_resistance = space->get_rolling_resistance();
+	if (rolling_resistance > 0.0 && !report_contacts_only) {
+		real_t radius = 0.0;
+		if (inv_inertia_A > 0.0 && shape_A_ptr->get_type() == PS2DE::SHAPE_CIRCLE) {
+			const Transform2D xform = transform_A * A->get_shape_transform(shape_A);
+			const double scale = physics_ccd_uniform_sphere_scale(xform);
+			if (scale > 0.0) {
+				radius = static_cast<GodotCircleShape2D *>(shape_A_ptr)->get_radius() * real_t(scale);
+			}
+		}
+		if (inv_inertia_B > 0.0 && shape_B_ptr->get_type() == PS2DE::SHAPE_CIRCLE) {
+			const Transform2D xform = transform_B * B->get_shape_transform(shape_B);
+			const double scale = physics_ccd_uniform_sphere_scale(xform);
+			if (scale > 0.0) {
+				const real_t radius_B = static_cast<GodotCircleShape2D *>(shape_B_ptr)->get_radius() * real_t(scale);
+				radius = radius > 0.0 ? MIN(radius, radius_B) : radius_B;
+			}
+		}
+		rolling_impulse_scale = rolling_resistance * radius;
+	}
 
 	// A cached impulse has force*time units. Preserve its equivalent force
 	// when the physics tick rate changes, rather than reusing the old impulse.
@@ -899,6 +925,36 @@ void GodotBodyPair2D::solve(real_t p_step) {
 				B->apply_impulse(j, c.rB + B->get_center_of_mass());
 			}
 			c.acc_impulse -= j;
+		}
+	}
+
+	// Solve one Coulomb-limited angular constraint for the entire manifold.
+	// Use the summed normal impulse so neither extra contacts nor solver
+	// iterations multiply the resistance torque.
+	if (rolling_impulse_scale > 0.0) {
+		const real_t inverse_inertia_A = collide_A ? A->get_inv_inertia() : 0.0;
+		const real_t inverse_inertia_B = collide_B ? B->get_inv_inertia() : 0.0;
+		const real_t inverse_angular_mass = inverse_inertia_A + inverse_inertia_B;
+		if (inverse_angular_mass > 0.0) {
+			real_t normal_impulse = 0.0;
+			for (int i = 0; i < contact_count; ++i) {
+				if (contacts[i].active) {
+					normal_impulse += contacts[i].acc_normal_impulse;
+				}
+			}
+			const real_t previous_impulse = rolling_impulse;
+			rolling_impulse = godot_physics_accumulate_rolling_impulse(
+					rolling_impulse, B->get_angular_velocity() - A->get_angular_velocity(),
+					inverse_angular_mass, normal_impulse, rolling_impulse_scale);
+			const real_t delta_impulse = rolling_impulse - previous_impulse;
+			if (delta_impulse != 0.0) {
+				if (collide_A) {
+					A->apply_torque_impulse(-delta_impulse);
+				}
+				if (collide_B) {
+					B->apply_torque_impulse(delta_impulse);
+				}
+			}
 		}
 	}
 }
