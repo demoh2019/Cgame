@@ -311,6 +311,19 @@ bool GodotBodyPair2D::setup(real_t p_step) {
 	//use local A coordinates to avoid numerical issues on collision detection
 	offset_B = B->get_transform().get_origin() - A->get_transform().get_origin();
 
+	// Recycle an unchanged contact manifold without executing SAT/GJK.
+	// The per-object version also changes when a shape's geometry or local
+	// transform changes; CCD always runs the original narrow phase.
+	const bool ccd_enabled = A->get_continuous_collision_detection_mode() != PS2DE::CCD_MODE_DISABLED ||
+			B->get_continuous_collision_detection_mode() != PS2DE::CCD_MODE_DISABLED;
+	const uint64_t geometry_version_a = A->get_collision_geometry_version();
+	const uint64_t geometry_version_b = B->get_collision_geometry_version();
+	if (contact_recycling.can_reuse(geometry_version_a, geometry_version_b, collided, contact_count, ccd_enabled)) {
+		// Previous contacts still have their used flags set. pre_solve will
+		// recompute masses, bias, friction and velocities for this step.
+		return true;
+	}
+
 	_validate_contacts();
 
 	const Vector2 &offset_A = A->get_transform().get_origin();
@@ -336,6 +349,7 @@ bool GodotBodyPair2D::setup(real_t p_step) {
 	bool prev_collided = collided;
 
 	collided = GodotCollisionSolver2D::solve(shape_A_ptr, xform_A, motion_A, shape_B_ptr, xform_B, motion_B, _add_contact, this, &sep_axis);
+	contact_recycling.remember(geometry_version_a, geometry_version_b);
 	if (!collided) {
 		oneway_disabled = false;
 
