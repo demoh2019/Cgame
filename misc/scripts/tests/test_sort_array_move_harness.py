@@ -106,6 +106,37 @@ int main() {
     for (int i = 0; i < 5; ++i) {
         assert(bounded[i].key == (i == 0 ? 9 : (i == 4 ? 8 : i)));
     }
+
+    // Exercise unbalanced partitions, repeated keys and large arrays against
+    // std::sort with the *actual* SortArray header on both compilers.
+    assert(SortArray<int>().bitlog(0) == 0);
+    assert(SortArray<int>().bitlog(1) == 0);
+    assert(SortArray<int>().bitlog(2) == 1);
+    assert(SortArray<int>().bitlog((int64_t(1) << 40)) == 40);
+    for (int length : {17, 18, 31, 32, 33, 256, 1023, 65536}) {
+        for (int pattern = 0; pattern < 7; ++pattern) {
+            std::vector<int> data(length);
+            for (int i = 0; i < length; ++i) {
+                switch (pattern) {
+                    case 0: data[i] = i; break;
+                    case 1: data[i] = length - i; break;
+                    case 2: data[i] = i & 3; break;
+                    case 3: data[i] = std::min(i, length - 1 - i); break;
+                    case 4: data[i] = i % 257; break;
+                    case 5: data[i] = (i & 1) ? -1000 : 1000; break;
+                    default: data[i] = (i * 7793) % 65521; break;
+                }
+            }
+            const auto expected = [&]() {
+                auto result = data;
+                std::sort(result.begin(), result.end());
+                return result;
+            }();
+            SortArray<int>().sort(data.data(), data.size());
+            assert(data == expected);
+            ++count;
+        }
+    }
     std::cout << count << " production-header cases passed\\n";
 }
 """

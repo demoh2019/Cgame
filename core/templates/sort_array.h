@@ -78,11 +78,20 @@ public:
 	}
 
 	inline int64_t bitlog(int64_t p_n) const {
-		int64_t k;
-		for (k = 0; p_n != 1; p_n >>= 1) {
-			++k;
+		if (p_n <= 1) {
+			return 0;
 		}
-		return k;
+#if defined(__GNUC__) || defined(__clang__)
+		// Depth budget is floor(log2(n)); avoid a shift loop per sort call.
+		return 63 - __builtin_clzll(static_cast<unsigned long long>(p_n));
+#else
+		int64_t result = 0;
+		while (p_n > 1) {
+			p_n >>= 1;
+			result++;
+		}
+		return result;
+#endif
 	}
 
 	/* Heap / Heapsort functions */
@@ -216,8 +225,20 @@ public:
 					median_of_3_index(p_array, p_first, p_first + (p_last - p_first) / 2, p_last - 1),
 					p_array);
 
-			introsort(cut, p_last, p_array, p_max_depth);
-			p_last = cut;
+			// Recurse only into the smaller partition. The larger partition is
+			// handled by the loop, keeping stack usage logarithmic even when
+			// pivot splits are highly unbalanced.
+			if (cut - p_first < p_last - cut) {
+				if (cut - p_first > INTROSORT_THRESHOLD) {
+					introsort(p_first, cut, p_array, p_max_depth);
+				}
+				p_first = cut;
+			} else {
+				if (p_last - cut > INTROSORT_THRESHOLD) {
+					introsort(cut, p_last, p_array, p_max_depth);
+				}
+				p_last = cut;
+			}
 		}
 	}
 
