@@ -15,6 +15,7 @@ SPACE_H = ROOT / "modules/godot_physics_3d/godot_space_3d.h"
 SOFT_CPP = ROOT / "modules/godot_physics_3d/godot_soft_body_3d.cpp"
 SOFT_H = ROOT / "modules/godot_physics_3d/godot_soft_body_3d.h"
 MATH = ROOT / "servers/physics_softbody_self_collision.h"
+CCD = ROOT / "servers/physics_softbody_ccd.h"
 NATIVE = ROOT / "tests/servers/test_physics_softbody_self_collision.cpp"
 STANDALONE = ROOT / "tests/stress/physics_softbody_edge_standalone.cpp"
 VECTOR3_MOCK = ROOT / "tests/stress/mock_physics/core/math/vector3.h"
@@ -29,6 +30,7 @@ class SoftBodySelfCollisionSourceContracts(unittest.TestCase):
         cls.soft_cpp = SOFT_CPP.read_text(encoding="utf-8")
         cls.soft_h = SOFT_H.read_text(encoding="utf-8")
         cls.math = MATH.read_text(encoding="utf-8")
+        cls.ccd = CCD.read_text(encoding="utf-8")
         cls.native = NATIVE.read_text(encoding="utf-8")
         cls.standalone = STANDALONE.read_text(encoding="utf-8")
         cls.vector3_mock = VECTOR3_MOCK.read_text(encoding="utf-8")
@@ -43,6 +45,9 @@ class SoftBodySelfCollisionSourceContracts(unittest.TestCase):
         self.assertIn('Math::is_finite(configured_self_compliance)', self.space_cpp)
         self.assertIn("get_soft_body_self_collision_thickness()", self.space_h)
         self.assertIn("get_soft_body_self_collision_compliance()", self.space_h)
+        self.assertIn('"physics/3d/solver/soft_body_self_collision_ccd"), false)', self.defs)
+        self.assertIn('GLOBAL_GET("physics/3d/solver/soft_body_self_collision_ccd")', self.space_cpp)
+        self.assertIn("is_soft_body_self_collision_ccd_enabled()", self.space_h)
         self.assertIn('"physics/3d/solver/soft_body_self_collision_edge_contacts"), false)', self.defs)
         self.assertIn('GLOBAL_GET("physics/3d/solver/soft_body_self_collision_edge_contacts")', self.space_cpp)
         self.assertIn("are_soft_body_self_collision_edge_contacts_enabled()", self.space_h)
@@ -98,7 +103,7 @@ class SoftBodySelfCollisionSourceContracts(unittest.TestCase):
         self.assertIn("LocalVector<SelfCollisionEdge> self_collision_edges;", self.soft_h)
         self.assertIn("LocalVector<SelfEdgeContact> self_collision_edge_contacts;", self.soft_h)
         self.assertIn("if (get_space()->are_soft_body_self_collision_edge_contacts_enabled())", source)
-        self.assertIn("solve_self_edge_contacts(p_thickness, p_alpha_tilde);", source)
+        self.assertIn("solve_self_edge_contacts(p_thickness, p_alpha_tilde, use_ccd);", source)
         self.assertIn("self_collision_edges_built = include_edges;", source)
         self.assertIn("if (!self_collision_structural_edges.has(key))", source)
         self.assertIn("face_tree.aabb_query(query_aabb, query);", source)
@@ -141,8 +146,43 @@ class SoftBodySelfCollisionSourceContracts(unittest.TestCase):
         self.assertIn("physics_softbody_closest_segment_points(", self.standalone)
         self.assertIn("physics_softbody_project_edge_contact(", self.standalone)
         self.assertIn("physics_softbody_project_self_contact(", self.standalone)
+        self.assertIn('#include "servers/physics_softbody_ccd.h"', self.standalone)
+        self.assertIn("physics_softbody_ccd_point_triangle(", self.standalone)
+        self.assertIn("physics_softbody_ccd_edge_edge(", self.standalone)
         self.assertIn("struct Vector3", self.vector3_mock)
         self.assertIn("constexpr Vector3", self.vector3_mock)
+
+    def test_swept_ccd_is_optional_and_both_broadphases_include_previous_positions(self):
+        self.assertIn('#include "servers/physics_softbody_ccd.h"', self.soft_cpp)
+        self.assertIn("void GodotSoftBody3D::update_self_collision_swept_face_tree()", self.soft_cpp)
+        self.assertIn("swept.expand_to(face.n[i]->q);", self.soft_cpp)
+        self.assertIn("swept.expand_to(face.n[i]->x);", self.soft_cpp)
+        self.assertIn("swept.expand_to(node.x);", self.soft_cpp)
+        self.assertIn("query_aabb.expand_to(nodes[edge.a].q);", self.soft_cpp)
+        self.assertIn("query_aabb.expand_to(nodes[edge.b].q);", self.soft_cpp)
+        self.assertIn("MAX_CCD_FACE_TESTS_PER_STEP = 8192", self.soft_cpp)
+        self.assertIn("MAX_CCD_EDGE_TESTS_PER_STEP = 8192", self.soft_cpp)
+        self.assertIn("physics_softbody_ccd_point_triangle(", self.soft_cpp)
+        self.assertIn("physics_softbody_ccd_edge_edge(", self.soft_cpp)
+        self.assertIn("contact.toi = query.times[i];", self.soft_cpp)
+        self.assertIn("apply_self_collision_ccd_rewinds();", self.soft_cpp)
+        self.assertIn("node.im > 0.0 && self_collision_ccd_fractions[i] < 1.0", self.soft_cpp)
+        self.assertIn("self_collision_ccd_fractions.reset();", self.soft_cpp)
+        self.assertIn("LocalVector<real_t> self_collision_ccd_fractions;", self.soft_h)
+        self.assertIn("real_t toi = 1.0;", self.soft_h)
+
+    def test_ccd_uses_bounded_lipschitz_advancement_not_fixed_time_samples(self):
+        self.assertIn("physics_softbody_ccd_conservative_advance(", self.ccd)
+        self.assertIn("for (int iteration = 0; iteration < 48; ++iteration)", self.ccd)
+        self.assertIn("0.9 * gap / bound", self.ccd)
+        self.assertIn("point_motion - (p_new_a - p_old_a)", self.ccd)
+        self.assertIn("MAX((va - vc).length(), (va - vd).length())", self.ccd)
+        self.assertIn("iteration == 0 && double(distance) <= thickness", self.ccd)
+        self.assertIn("r_t = real_t(t);", self.ccd)
+        self.assertIn("Failed CCD does not clobber output", self.native)
+        self.assertIn("Swept soft-body CCD catches vertex crossing a static triangle", self.native)
+        self.assertIn("Swept soft-body CCD supports a moving triangle and crossing edges", self.native)
+        self.assertIn("Swept soft-body CCD preserves Galilean motion invariance", self.native)
 
 
 if __name__ == "__main__":
