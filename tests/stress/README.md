@@ -61,13 +61,13 @@ be checked against the previous buffered implementation.
 ```bash
 python3 tests/stress/run.py --godot ./bin/godot.macos.editor.arm64 \
   --case physics_motion_exclusions_2d,physics_motion_exclusions_3d \
-  --scales 1,2,4 --repeats 5 --frames 90 --rss-limit-mib 6144 \
+  --scale 4 --repeats 5 --frames 90 --rss-limit-mib 6144 \
   --output out/motion-stream.json
 ```
 
 These cases test explicit exclusions, more than 2048 eligible colliders,
 nearest-hit selection, zero-motion recovery and compound-body sweeps.
-Report p50/p95 query latency and peak *process* RSS on identical hardware
+Compare per-scenario duration distributions and peak *process* RSS on identical hardware
 before attributing performance wins to this refactor. The tests do not
 replace a full 2D one-way platform or 3D soft-body regression suite.
 
