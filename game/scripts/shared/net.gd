@@ -141,6 +141,13 @@ func c_craft(recipe: String, times: int) -> void:
 
 
 @rpc("any_peer", "reliable")
+func c_stash(item_id: String, count: int, deposit: bool) -> void:
+	var peer := multiplayer.get_remote_sender_id()
+	if _allowed(peer):
+		s_result.rpc_id(peer, "stash", sim.cmd_stash(peer, str(item_id), count, deposit))
+
+
+@rpc("any_peer", "reliable")
 func c_use(item_id: String) -> void:
 	var peer := multiplayer.get_remote_sender_id()
 	if _allowed(peer):
