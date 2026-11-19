@@ -212,12 +212,16 @@ _FORCE_INLINE_ bool godot_physics_fluid_convex_hull_sample_3d(const Geometry3D::
 	}
 	const double world_total = total.volume * jacobian;
 	const double world_wet = MIN(MAX(submerged.volume, 0.0), total.volume) * jacobian;
-	if (!Math::is_finite(world_total) || !Math::is_finite(world_wet) ||
-			world_total <= 0.0 || world_total > double(Math::INF)) {
+	if (!Math::is_finite(world_total) || !Math::is_finite(world_wet) || world_total <= 0.0) {
 		return false;
 	}
 	r_total_volume = real_t(world_total);
 	r_sample.submerged_volume = real_t(world_wet);
+	// In single-precision builds a finite double can still overflow when
+	// converted to real_t; never feed infinities to rigid-body forces.
+	if (!Math::is_finite(r_total_volume) || !Math::is_finite(r_sample.submerged_volume) || !(r_total_volume > 0.0)) {
+		return false;
+	}
 	r_sample.submerged_fraction = real_t(MIN(MAX(submerged.volume / total.volume, 0.0), 1.0));
 	if (submerged.volume > 0.0) {
 		const Vector3 local_center(
