@@ -117,6 +117,7 @@ private:
 	bool locked = false;
 
 	real_t last_step = 0.001;
+	real_t previous_step = 0.0; // Shared by all contacts; no per-pair timestep storage.
 
 	int island_count = 0;
 	int active_objects = 0;
@@ -196,7 +197,11 @@ public:
 	void unlock();
 
 	real_t get_last_step() const { return last_step; }
-	void set_last_step(real_t p_step) { last_step = p_step; }
+	real_t get_previous_step() const { return previous_step; }
+	void set_last_step(real_t p_step) {
+		previous_step = last_step;
+		last_step = p_step;
+	}
 
 	void set_param(PS2DE::SpaceParameter p_param, real_t p_value);
 	real_t get_param(PS2DE::SpaceParameter p_param) const;
