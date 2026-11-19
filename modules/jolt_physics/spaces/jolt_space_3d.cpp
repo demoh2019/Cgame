@@ -83,7 +83,9 @@ static void ensure_pending_index(const LocalVector<JPH::BodyID> &p_bodies, AHash
 	if (p_bodies.size() < 128 || !r_indices.is_empty()) {
 		return;
 	}
-	r_indices.reserve(p_bodies.size());
+	// AHashMap starts growing at roughly 75% load: reserve spare slots
+	// up front to avoid a second allocation while building the index.
+	r_indices.reserve(p_bodies.size() + p_bodies.size() / 2 + 1);
 	for (uint32_t i = 0; i < p_bodies.size(); ++i) {
 		r_indices.insert(p_bodies[i].GetIndexAndSequenceNumber(), i);
 	}
@@ -122,7 +124,7 @@ bool JoltSpace3D::_pending_erase(LocalVector<JPH::BodyID> &p_bodies, AHashMap<ui
 	}
 	r_indices.erase(key);
 	if (p_bodies.is_empty()) {
-		// Do not retain a potentially huge index table after a bulk removal.
+		// Keep a small index cache for the next batch, but drop large peaks.
 		clear_pending_index(r_indices);
 	}
 	return true;
