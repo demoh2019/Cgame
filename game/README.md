@@ -531,3 +531,35 @@ uses server elapsed time; it restarts with the game server rather than being
 persisted as a calendar. Run the full suite, which includes
 `game/tests/test_world_cycle.gd` (clock boundaries, detection, safe hub,
 network snapshots).
+
+
+## Server-authoritative dodge / sidestep (Space)
+
+**Space** performs a short 2.56 m tactical dodge in the movement direction,
+or facing direction when standing still. This is implemented in the canonical
+`game/` simulation, not in the separate `demo/` prototypes.
+
+- Costs **24 stamina**, has a **3-second** cooldown and shares a short
+  0.32-second lock with normal attacks.
+- Grants **0.30 seconds of protection against infected melee wounds**,
+  including associated infection; it does **not** prevent PvP damage.
+- A valid dodge interrupts gathering and makes footstep noise that may
+  alert infected. It is unavailable while overencumbered, severely hungry,
+  dehydrated, exhausted or dead.
+- The server owns direction validation, travel distance, stamina, cooldown,
+  collision checks and protection. The client supplies only a direction.
+  Four 0.08-second collision steps reuse `Movement.move`; barricades,
+  terrain obstacles and deep water stop the motion, without charging
+  stamina when completely blocked.
+- The local scene uses `GameServer.cmd_dodge`; online clients use
+  `Net.c_dodge` and normal authoritative position reconciliation.
+  Owner snapshots include `dodge_cooldown` and `dodge_immunity`.
+  The local and multiplayer HUDs display the cooldown.
+
+Run `godot --headless --path game --script res://tests/run_all.gd`
+to exercise `test_evasion.gd` alongside combat, movement, encumbrance,
+PvP-risk, zombie infection and save regressions.
+
+All mechanics use existing Cgame movement and networking capabilities.
+A native engine change is unnecessary until a reusable engine limitation
+is demonstrated.
