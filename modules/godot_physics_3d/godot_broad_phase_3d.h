@@ -52,6 +52,8 @@ public:
 		return create(p_object, p_subindex, p_aabb, p_static);
 	}
 	virtual void flush_pending_pairs() {}
+	// Recheck layer/mask filters without invalidating stationary AABBs.
+	virtual void force_collision_check(ID p_id) = 0;
 
 	// Group insertions for many independent bodies belonging to one physics
 	// space. Implementations without batching may keep their normal behavior.
