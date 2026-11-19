@@ -76,6 +76,47 @@ struct ZstdDecompressorContext {
 };
 } //namespace
 
+Compression::ZstdCompressionContext::~ZstdCompressionContext() {
+	if (context) {
+		ZSTD_freeCCtx(context);
+	}
+}
+
+int64_t Compression::ZstdCompressionContext::compress(uint8_t *p_dst, const uint8_t *p_src, int64_t p_src_size) {
+	ERR_FAIL_COND_V(p_src_size < 0, -1);
+
+	if (!context) {
+		context = ZSTD_createCCtx();
+		ERR_FAIL_NULL_V(context, -1);
+	}
+
+	// Reset parameters only when settings change. ZSTD_compressCCtx() ends
+	// each independent frame and reuses the context's existing workspace.
+	if (configured_level != Compression::zstd_level ||
+			configured_long_distance_matching != Compression::zstd_long_distance_matching ||
+			configured_window_log_size != Compression::zstd_window_log_size) {
+		size_t result = ZSTD_CCtx_reset(context, ZSTD_reset_parameters);
+		ERR_FAIL_COND_V(ZSTD_isError(result), -1);
+		result = ZSTD_CCtx_setParameter(context, ZSTD_c_compressionLevel, Compression::zstd_level);
+		ERR_FAIL_COND_V(ZSTD_isError(result), -1);
+		if (Compression::zstd_long_distance_matching) {
+			result = ZSTD_CCtx_setParameter(context, ZSTD_c_enableLongDistanceMatching, 1);
+			ERR_FAIL_COND_V(ZSTD_isError(result), -1);
+			result = ZSTD_CCtx_setParameter(context, ZSTD_c_windowLog, Compression::zstd_window_log_size);
+			ERR_FAIL_COND_V(ZSTD_isError(result), -1);
+		}
+		configured_level = Compression::zstd_level;
+		configured_long_distance_matching = Compression::zstd_long_distance_matching;
+		configured_window_log_size = Compression::zstd_window_log_size;
+	}
+
+	const int64_t max_dst_size = Compression::get_max_compressed_buffer_size(p_src_size, MODE_ZSTD);
+	ERR_FAIL_COND_V(max_dst_size < 0, -1);
+	const size_t result = ZSTD_compressCCtx(context, p_dst, max_dst_size, p_src, p_src_size, Compression::zstd_level);
+	ERR_FAIL_COND_V(ZSTD_isError(result), -1);
+	return int64_t(result);
+}
+
 int64_t Compression::compress(uint8_t *p_dst, const uint8_t *p_src, int64_t p_src_size, Mode p_mode) {
 	switch (p_mode) {
 		case MODE_BROTLI: {
@@ -120,16 +161,8 @@ int64_t Compression::compress(uint8_t *p_dst, const uint8_t *p_src, int64_t p_sr
 
 		} break;
 		case MODE_ZSTD: {
-			ZSTD_CCtx *cctx = ZSTD_createCCtx();
-			ZSTD_CCtx_setParameter(cctx, ZSTD_c_compressionLevel, zstd_level);
-			if (zstd_long_distance_matching) {
-				ZSTD_CCtx_setParameter(cctx, ZSTD_c_enableLongDistanceMatching, 1);
-				ZSTD_CCtx_setParameter(cctx, ZSTD_c_windowLog, zstd_window_log_size);
-			}
-			const int64_t max_dst_size = get_max_compressed_buffer_size(p_src_size, MODE_ZSTD);
-			const size_t ret = ZSTD_compressCCtx(cctx, p_dst, max_dst_size, p_src, p_src_size, zstd_level);
-			ZSTD_freeCCtx(cctx);
-			return (int64_t)ret;
+			ZstdCompressionContext context;
+			return context.compress(p_dst, p_src, p_src_size);
 		} break;
 	}
 
