@@ -3,6 +3,7 @@ extends ScrollContainer
 
 const Plan = preload("res://addons/ai_game_builder/plan.gd")
 const Context = preload("res://addons/ai_game_builder/context.gd")
+const Provider = preload("res://addons/ai_game_builder/provider.gd")
 
 const SYSTEM_PROMPT := """
 You are an experienced Godot 4 game developer. Produce a complete, runnable,
@@ -271,25 +272,11 @@ func _on_request_completed(result: int, status: int, _headers: PackedStringArray
 		_set_status("Network error: " + str(result))
 		return
 
-	var response: Variant = JSON.parse_string(body.get_string_from_utf8())
-	if typeof(response) != TYPE_DICTIONARY:
-		_set_status("Provider returned invalid JSON (HTTP %d)." % status)
+	var parsed: Dictionary = Provider.extract_text(status, body)
+	if not parsed["ok"]:
+		_set_status(parsed["error"])
 		return
-	if status < 200 or status >= 300:
-		var api_error: Variant = response.get("error", {})
-		var message := str(api_error.get("message", "Request failed")) if typeof(api_error) == TYPE_DICTIONARY else "Request failed"
-		_set_status("Provider HTTP %d: %s" % [status, message.substr(0, 300)])
-		return
-
-	var choices: Variant = response.get("choices", [])
-	if typeof(choices) != TYPE_ARRAY or choices.is_empty() or typeof(choices[0]) != TYPE_DICTIONARY:
-		_set_status("Provider response has no chat choices.")
-		return
-	var message: Variant = choices[0].get("message", {})
-	if typeof(message) != TYPE_DICTIONARY or typeof(message.get("content")) != TYPE_STRING:
-		_set_status("Provider did not return textual content.")
-		return
-	var validated: Dictionary = Plan.parse_response(message["content"])
+	var validated: Dictionary = Plan.parse_response(parsed["content"])
 	if not validated["ok"]:
 		_set_status("Generated plan rejected: " + validated["error"])
 		return
