@@ -1,0 +1,66 @@
+name: Canvas Z-range culling performance guards
+on:
+  push:
+    branches: [develop]
+    paths:
+      - 'servers/rendering/renderer_canvas_cull.cpp'
+      - 'servers/rendering/renderer_canvas_cull.h'
+      - 'misc/scripts/tests/test_canvas_zrange_perf.py'
+      - 'misc/scripts/tests/bench_canvas_zrange.cpp'
+      - '.github/workflows/canvas-zrange-perf.yml'
+  pull_request:
+    paths:
+      - 'servers/rendering/renderer_canvas_cull.cpp'
+      - 'servers/rendering/renderer_canvas_cull.h'
+      - 'misc/scripts/tests/test_canvas_zrange_perf.py'
+      - 'misc/scripts/tests/bench_canvas_zrange.cpp'
+      - '.github/workflows/canvas-zrange-perf.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  contracts:
+    runs-on: ubuntu-24.04
+    strategy:
+      fail-fast: false
+      matrix:
+        compiler: [g++, clang++]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+      - name: Source regression contracts
+        run: python -m unittest discover -s misc/scripts/tests -p test_canvas_zrange_perf.py -v
+      - name: Differential correctness and scan/clear counters
+        shell: bash
+        run: |
+          set -euo pipefail
+          "${{ matrix.compiler }}" -std=c++17 -O2 -Wall -Wextra -Werror misc/scripts/tests/bench_canvas_zrange.cpp -o /tmp/cgame_canvas_zrange
+          /tmp/cgame_canvas_zrange
+  engine-build:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libwayland-bin
+      - uses: ./.github/actions/godot-deps
+      - name: Compile Cgame native editor
+        uses: ./.github/actions/godot-build
+        with:
+          platform: linuxbsd
+          target: editor
+          scons-flags: dev_build=yes debug_symbols=no tests=yes module_text_server_fb_enabled=yes -j2
+      - name: Smoke import with native editor
+        shell: bash
+        run: |
+          set -euo pipefail
+          ROOT="$(mktemp -d)"
+          trap 'rm -rf "$ROOT"' EXIT
+          printf 'config_version=5\n[application]\nconfig/name="Canvas Z Perf Smoke"\n' > "$ROOT/project.godot"
+          GODOT=./bin/godot.linuxbsd.editor.dev.x86_64
+          "$GODOT" --version
+          timeout 45s "$GODOT" --headless --editor --path "$ROOT" --import --quit

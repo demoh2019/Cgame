@@ -76,8 +76,15 @@ void RendererCanvasCull::_render_canvas_item_tree(RID p_to_render_target, Canvas
 	// transform is normally concatenated with the item global transform.
 	_current_camera_transform = p_transform;
 
-	memset(z_list, 0, z_range * sizeof(RendererCanvasRender::Item *));
-	memset(z_last_list, 0, z_range * sizeof(RendererCanvasRender::Item *));
+	// Clear only the interval touched by the previous cull. Both arrays were
+	// initialized to null in the constructor, including the first render.
+	if (z_min_used <= z_max_used) {
+		const int count = z_max_used - z_min_used + 1;
+		memset(z_list + z_min_used, 0, count * sizeof(*z_list));
+		memset(z_last_list + z_min_used, 0, count * sizeof(*z_last_list));
+	}
+	z_min_used = z_range;
+	z_max_used = -1;
 
 	for (int i = 0; i < p_child_item_count; i++) {
 		_cull_canvas_item(p_child_items[i].item, p_transform, p_clip_rect, Color(1, 1, 1, 1), 0, z_list, z_last_list, nullptr, nullptr, false, p_canvas_cull_mask, Point2(), 1, nullptr);
@@ -86,7 +93,7 @@ void RendererCanvasCull::_render_canvas_item_tree(RID p_to_render_target, Canvas
 	RendererCanvasRender::Item *list = nullptr;
 	RendererCanvasRender::Item *list_end = nullptr;
 
-	for (int i = 0; i < z_range; i++) {
+	for (int i = z_min_used; i <= z_max_used; i++) {
 		if (!z_list[i]) {
 			continue;
 		}
@@ -280,6 +287,8 @@ void RendererCanvasCull::_attach_canvas_item_for_draw(RendererCanvasCull::Item *
 			} else {
 				r_z_list[zidx] = ci;
 				r_z_last_list[zidx] = ci;
+				z_min_used = MIN(z_min_used, zidx);
+				z_max_used = MAX(z_max_used, zidx);
 			}
 
 			ci->z_final = p_z;
@@ -2828,6 +2837,9 @@ RendererCanvasCull::RendererCanvasCull() {
 
 	z_list = (RendererCanvasRender::Item **)memalloc(z_range * sizeof(RendererCanvasRender::Item *));
 	z_last_list = (RendererCanvasRender::Item **)memalloc(z_range * sizeof(RendererCanvasRender::Item *));
+	// Full initialization happens once; subsequent passes clear touched slots only.
+	memset(z_list, 0, z_range * sizeof(*z_list));
+	memset(z_last_list, 0, z_range * sizeof(*z_last_list));
 
 	disable_scale = false;
 
