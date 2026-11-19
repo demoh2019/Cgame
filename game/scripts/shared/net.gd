@@ -213,6 +213,13 @@ func c_input(seq: int, move_x: float, move_z: float, sprint: bool, yaw: float, d
 
 
 @rpc("any_peer", "reliable")
+func c_fish() -> void:
+	var peer := multiplayer.get_remote_sender_id()
+	if _allowed(peer):
+		s_result.rpc_id(peer, "fish", sim.cmd_fish(peer))
+
+
+@rpc("any_peer", "reliable")
 func c_gather(node_id: int) -> void:
 	var peer := multiplayer.get_remote_sender_id()
 	if _allowed(peer):
