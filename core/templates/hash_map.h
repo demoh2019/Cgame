@@ -178,6 +178,26 @@ private:
 		}
 	}
 
+	// Remove one bucket by shifting the following Robin Hood probe chain into
+	// the hole. The evicted node is returned so callers can unlink or re-key it
+	// without copying it through every displaced bucket.
+	_FORCE_INLINE_ HashMapElement<TKey, TValue> *_remove_bucket(uint32_t p_idx) {
+		const uint32_t capacity = hash_table_size_primes[_capacity_idx];
+		const uint64_t capacity_inv = hash_table_size_primes_inv[_capacity_idx];
+		HashMapElement<TKey, TValue> *removed = _elements[p_idx];
+
+		uint32_t next_idx = p_idx;
+		_increment_mod(next_idx, capacity);
+		while (_hashes[next_idx] != EMPTY_HASH && next_idx != fastmod(_hashes[next_idx], capacity_inv, capacity)) {
+			_hashes[p_idx] = _hashes[next_idx];
+			_elements[p_idx] = _elements[next_idx];
+			p_idx = next_idx;
+			_increment_mod(next_idx, capacity);
+		}
+		_hashes[p_idx] = EMPTY_HASH;
+		return removed;
+	}
+
 	void _resize_and_rehash(uint32_t p_new_capacity_idx) {
 		uint32_t old_capacity = hash_table_size_primes[_capacity_idx];
 		const uint32_t old_size = _size;
@@ -384,37 +404,20 @@ public:
 			return false;
 		}
 
-		const uint32_t capacity = hash_table_size_primes[_capacity_idx];
-		const uint64_t capacity_inv = hash_table_size_primes_inv[_capacity_idx];
-
-		uint32_t next_idx = idx;
-		_increment_mod(next_idx, capacity);
-		while (_hashes[next_idx] != EMPTY_HASH && next_idx != fastmod(_hashes[next_idx], capacity_inv, capacity)) {
-			SWAP(_hashes[next_idx], _hashes[idx]);
-			SWAP(_elements[next_idx], _elements[idx]);
-			idx = next_idx;
-			_increment_mod(next_idx, capacity);
+		HashMapElement<TKey, TValue> *removed = _remove_bucket(idx);
+		if (_head_element == removed) {
+			_head_element = removed->next;
 		}
-
-		_hashes[idx] = EMPTY_HASH;
-
-		if (_head_element == _elements[idx]) {
-			_head_element = _elements[idx]->next;
+		if (_tail_element == removed) {
+			_tail_element = removed->prev;
 		}
-
-		if (_tail_element == _elements[idx]) {
-			_tail_element = _elements[idx]->prev;
+		if (removed->prev) {
+			removed->prev->next = removed->next;
 		}
-
-		if (_elements[idx]->prev) {
-			_elements[idx]->prev->next = _elements[idx]->next;
+		if (removed->next) {
+			removed->next->prev = removed->prev;
 		}
-
-		if (_elements[idx]->next) {
-			_elements[idx]->next->prev = _elements[idx]->prev;
-		}
-
-		Allocator::delete_allocation(_elements[idx]);
+		Allocator::delete_allocation(removed);
 
 		_size--;
 		return true;
@@ -458,22 +461,7 @@ public:
 		uint32_t idx = 0;
 		ERR_FAIL_COND_V(_lookup_idx_unchecked(p_new_key, new_hash, idx), false);
 		ERR_FAIL_COND_V(!_lookup_idx(p_old_key, idx), false);
-		HashMapElement<TKey, TValue> *element = _elements[idx];
-
-		// Delete the old entries in _hashes and _elements.
-		const uint32_t capacity = hash_table_size_primes[_capacity_idx];
-		const uint64_t capacity_inv = hash_table_size_primes_inv[_capacity_idx];
-
-		uint32_t next_idx = idx;
-		_increment_mod(next_idx, capacity);
-		while (_hashes[next_idx] != EMPTY_HASH && next_idx != fastmod(_hashes[next_idx], capacity_inv, capacity)) {
-			SWAP(_hashes[next_idx], _hashes[idx]);
-			SWAP(_elements[next_idx], _elements[idx]);
-			idx = next_idx;
-			_increment_mod(next_idx, capacity);
-		}
-
-		_hashes[idx] = EMPTY_HASH;
+		HashMapElement<TKey, TValue> *element = _remove_bucket(idx);
 
 		// _insert_element will increment this again.
 		_size--;
