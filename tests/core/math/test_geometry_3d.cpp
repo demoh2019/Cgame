@@ -316,7 +316,7 @@ TEST_CASE("[Geometry3D][Performance] MeshData dense remapping preserves first-us
 
 	mesh.optimize_vertices();
 
-	REQUIRE(mesh.vertices.size() == 5);
+	REQUIRE(mesh.vertices.size() == 4);
 	CHECK(mesh.vertices[0] == Vector3(7, 21, -7));
 	CHECK(mesh.vertices[1] == Vector3(3, 9, -3));
 	CHECK(mesh.vertices[2] == Vector3(0, 0, 0));
@@ -336,10 +336,48 @@ TEST_CASE("[Geometry3D][Performance] MeshData dense remapping preserves first-us
 
 	// Applying the pass to an already-compacted mesh must be idempotent.
 	mesh.optimize_vertices();
-	CHECK(mesh.vertices.size() == 5);
+	CHECK(mesh.vertices.size() == 4);
 	CHECK(mesh.vertices[3] == Vector3(11, 33, -11));
 	CHECK(mesh.faces[0].indices[0] == 0);
 	CHECK(mesh.edges[1].vertex_a == 3);
+}
+
+TEST_CASE("[Geometry3D][Performance] MeshData retains five first-use vertices") {
+	Geometry3D::MeshData mesh;
+	mesh.vertices.resize(32);
+	for (int i = 0; i < 32; i++) {
+		mesh.vertices[i] = Vector3(i, i * 2, i * 3);
+	}
+	Geometry3D::MeshData::Face face;
+	face.indices.push_back(9);
+	face.indices.push_back(4);
+	face.indices.push_back(20);
+	mesh.faces.push_back(std::move(face));
+
+	Geometry3D::MeshData::Edge edge;
+	edge.vertex_a = 17;
+	edge.vertex_b = 4;
+	edge.face_a = -1;
+	edge.face_b = -1;
+	mesh.edges.push_back(edge);
+	edge.vertex_a = 31;
+	edge.vertex_b = 9;
+	mesh.edges.push_back(edge);
+
+	mesh.optimize_vertices();
+	REQUIRE(mesh.vertices.size() == 5);
+	const int expected_original_indices[] = { 9, 4, 20, 17, 31 };
+	for (int i = 0; i < 5; i++) {
+		const int original = expected_original_indices[i];
+		CHECK(mesh.vertices[i] == Vector3(original, original * 2, original * 3));
+	}
+	CHECK(mesh.faces[0].indices[0] == 0);
+	CHECK(mesh.faces[0].indices[1] == 1);
+	CHECK(mesh.faces[0].indices[2] == 2);
+	CHECK(mesh.edges[0].vertex_a == 3);
+	CHECK(mesh.edges[0].vertex_b == 1);
+	CHECK(mesh.edges[1].vertex_a == 4);
+	CHECK(mesh.edges[1].vertex_b == 0);
 }
 
 TEST_CASE("[Geometry3D][Performance] MeshData remapping preserves large shared meshes") {
