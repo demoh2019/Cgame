@@ -1294,6 +1294,10 @@ GodotSpace3D::GodotSpace3D() {
 	ccd_rotational_bounds = GLOBAL_GET("physics/3d/solver/ccd_rotational_bounds");
 	ccd_tight_rotational_bounds = GLOBAL_GET("physics/3d/solver/ccd_tight_rotational_bounds");
 	implicit_damping = GLOBAL_GET("physics/3d/solver/implicit_damping");
+	fluid_linear_drag = MAX(real_t(0.0), (real_t)GLOBAL_GET("physics/3d/solver/fluid_linear_drag"));
+	fluid_angular_drag = MAX(real_t(0.0), (real_t)GLOBAL_GET("physics/3d/solver/fluid_angular_drag"));
+	fluid_buoyancy = MAX(real_t(0.0), (real_t)GLOBAL_GET("physics/3d/solver/fluid_buoyancy"));
+	fluid_flow_velocity = GLOBAL_GET("physics/3d/solver/fluid_flow_velocity");
 	gyroscopic_forces = GLOBAL_GET("physics/3d/solver/gyroscopic_forces");
 	gyroscopic_integration_mode = CLAMP((int)GLOBAL_GET("physics/3d/solver/gyroscopic_integration_mode"), 0, 1);
 	rolling_friction = MAX(real_t(0.0), (real_t)GLOBAL_GET("physics/3d/solver/rolling_friction"));
