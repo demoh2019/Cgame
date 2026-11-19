@@ -572,6 +572,12 @@ bool GodotSoftBody3D::solve_edge_self_collisions(real_t p_delta) {
 	if (!(thickness > 0.0)) {
 		return false;
 	}
+	const bool swept_ccd = get_space()->is_soft_body_self_collision_ccd_enabled();
+	if (!swept_ccd) {
+		// Returning to discrete mode must not retain optional CCD buffers.
+		xpbd_self_edge_ccd_contacts.reset();
+		xpbd_self_edge_ccd_min_time.reset();
+	}
 	const double alpha_double = double(get_space()->get_soft_body_self_collision_compliance()) /
 			(double(p_delta) * double(p_delta));
 	if (!Math::is_finite(alpha_double) || alpha_double < 0.0) {
@@ -582,19 +588,27 @@ bool GodotSoftBody3D::solve_edge_self_collisions(real_t p_delta) {
 	const uint32_t global_limit = uint32_t(MIN(uint64_t(65536),
 			uint64_t(xpbd_self_edges.size()) * uint64_t(per_edge_limit)));
 	xpbd_self_edge_contacts.clear();
+	xpbd_self_edge_ccd_contacts.clear();
+	constexpr uint32_t MAX_SWEPT_EDGE_TESTS_PER_STEP = 8192;
+	uint32_t remaining_swept_tests = MAX_SWEPT_EDGE_TESTS_PER_STEP;
 
 	// All material and vertex/face corrections have completed. Refit once
 	// BEFORE queries; do not mutate the tree inside any callback.
 	for (const SelfCollisionEdge &edge : xpbd_self_edges) {
 		AABB edge_bounds(nodes[edge.a].x, Vector3());
 		edge_bounds.expand_to(nodes[edge.b].x);
+		if (swept_ccd) {
+			// Each BVH leaf encloses both ends of each edge trajectory.
+			edge_bounds.expand_to(nodes[edge.a].q);
+			edge_bounds.expand_to(nodes[edge.b].q);
+		}
 		edge_bounds.grow_by(thickness);
 		xpbd_self_edge_tree.update(edge.leaf, edge_bounds);
 	}
 	xpbd_self_edge_tree.optimize_incremental(1);
 
 	for (const SelfCollisionEdge &edge : xpbd_self_edges) {
-		if (xpbd_self_edge_contacts.size() >= global_limit) {
+		if (xpbd_self_edge_contacts.size() + xpbd_self_edge_ccd_contacts.size() >= global_limit) {
 			break;
 		}
 		const Node &a = nodes[edge.a];
@@ -604,6 +618,13 @@ bool GodotSoftBody3D::solve_edge_self_collisions(real_t p_delta) {
 		}
 		AABB query(a.x, Vector3());
 		query.expand_to(b.x);
+		if (swept_ccd) {
+			if (!a.q.is_finite() || !b.q.is_finite()) {
+				continue;
+			}
+			query.expand_to(a.q);
+			query.expand_to(b.q);
+		}
 		query.grow_by(thickness);
 		uint32_t hits = 0;
 		auto visit_edge = [&](void *p_userdata) -> bool {
