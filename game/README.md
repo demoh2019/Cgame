@@ -24,7 +24,7 @@ The camera, environment, streaming terrain and entities use native Godot/Cgame
 rendering. This **local preview is not multiplayer**; remote networking and
 account persistence must be wired into this scene before claiming an MMO.
 
-Controls: WASD movement, Shift sprint, E gather, Q loot, F attack,
+Controls: G build, H repair (outside hub); B opens the protected bank. WASD movement, Shift sprint, E gather, Q loot, F attack,
 Tab choose recipe, C craft, 1 food, 2 water, 3 bandage,
 4 equip club, 5 equip jacket, R drink from natural water.
 
@@ -203,3 +203,42 @@ death, unless stored in the protected stash.
 The test suite covers all offer rules, distance checks, buy/sell amounts,
 capacity rollback and dead-player rejection using `tests/test_market.gd`.
 This is an NPC vendor, not yet a player auction market.
+
+## Defensive construction in the canonical game
+
+The shared GameServer owns player-built barricades. Outside the Haven safe hub,
+survivors can build up to 12 wooden/stone barricades by spending **4 wood T1
+and 2 stone T1**. Placement requests include a position, but the server
+validates real player range, water depth, terrain slope, existing world geometry,
+other players and enemies, and material stacks before spending anything.
+
+The shared WorldGen movement blocker index immediately prevents survivors and
+infected from walking through a structure, including in the local playable
+preview. The preview renders a `StaticBody3D` and a box collision shape at each
+structure; the server's **authoritative gameplay collision** is a lightweight
+circular blocker and does not claim to be full mesh/rigid-body simulation.
+Infected who get stuck while chasing survivors gradually damage a nearby wall.
+
+Owner-only repairs restore up to 40 of 120 durability for 1 wood T1; full-health
+repairs and invalid attempts are free. Destroyed barriers disappear from
+movement collision and proximity-filtered network snapshots. The server
+exposes rate-limited `c_build` and `c_repair` requests, and the client can
+replicate the same visual wall/HP state. The world imposes a 300-wall cap for
+this experimental gameplay slice.
+
+**Scope:** barricades currently survive only while the server/session is
+running. They are not included in Nakama character saves, and do not yet have
+guild ownership, decay, mesh damage, server-sharded persistence, or siege tools.
+These are planned for a future unified world-building milestone.
+
+To run all game tests, including terrain collision, resources, construction,
+repairs, enemy impacts, and save compatibility:
+
+```sh
+godot --headless --path game --script res://tests/run_all.gd
+```
+
+CI: `.github/workflows/game-barricades.yml`. Cgame-native full-engine
+testing is still required after any upstream physics API changes.
+
+
