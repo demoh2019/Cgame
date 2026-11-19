@@ -34,9 +34,13 @@
 
 class FileAccessMemory : public FileAccess {
 	GDSOFTCLASS(FileAccessMemory, FileAccess);
-	uint8_t *data = nullptr;
+	const uint8_t *data = nullptr;
+	uint8_t *writable_data = nullptr;
+	// Keep read-only snapshots alive even if a registered file is replaced or rewritten.
+	Vector<uint8_t> read_snapshot;
 	uint64_t length = 0;
 	mutable uint64_t pos = 0;
+	bool opened = false;
 
 	static Ref<FileAccess> create();
 
