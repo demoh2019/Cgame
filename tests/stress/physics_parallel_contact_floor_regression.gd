@@ -69,8 +69,13 @@ func _test_floor_2d(parallel: bool) -> Dictionary:
 	PhysicsServer2D.space_set_active(space, true)
 	var finite := true
 	var peak_pairs := 0
+	var peak_physics_ms := 0.0
+	var accumulated_physics_ms := 0.0
 	for frame in range(FRAMES):
 		await physics_frame
+		var frame_physics_ms := float(Performance.get_monitor(Performance.TIME_PHYSICS_PROCESS)) * 1000.0
+		peak_physics_ms = maxf(peak_physics_ms, frame_physics_ms)
+		accumulated_physics_ms += frame_physics_ms
 		peak_pairs = maxi(peak_pairs, int(Performance.get_monitor(Performance.PHYSICS_2D_COLLISION_PAIRS)))
 		for index in [0, int(BODY_COUNT / 2), BODY_COUNT - 1]:
 			var body: RID = bodies[index]
@@ -89,9 +94,12 @@ func _test_floor_2d(parallel: bool) -> Dictionary:
 	PhysicsServer2D.free_rid(box_shape)
 	PhysicsServer2D.free_rid(floor_shape)
 	PhysicsServer2D.free_rid(space)
-	var result := {"finite": finite, "peak_pairs": peak_pairs, "bodies": BODY_COUNT}
-	if peak_pairs < BODY_COUNT:
-		result["error"] = "Too few contact pairs: connected island not exercised"
+	var result := {"finite": finite, "peak_pairs": peak_pairs, "bodies": BODY_COUNT,
+			"peak_physics_ms": peak_physics_ms, "mean_physics_ms": accumulated_physics_ms / float(FRAMES)}
+	# Floor contact alone does not connect bodies into an island. Require
+	# many extra dynamic/dynamic contacts to exercise the large-island path.
+	if peak_pairs < BODY_COUNT + int(BODY_COUNT / 2):
+		result["error"] = "Too few dynamic/dynamic contact pairs for a large island"
 	return result
 
 
@@ -127,8 +135,13 @@ func _test_floor_3d(parallel: bool) -> Dictionary:
 	PhysicsServer3D.space_set_active(space, true)
 	var finite := true
 	var peak_pairs := 0
+	var peak_physics_ms := 0.0
+	var accumulated_physics_ms := 0.0
 	for frame in range(FRAMES):
 		await physics_frame
+		var frame_physics_ms := float(Performance.get_monitor(Performance.TIME_PHYSICS_PROCESS)) * 1000.0
+		peak_physics_ms = maxf(peak_physics_ms, frame_physics_ms)
+		accumulated_physics_ms += frame_physics_ms
 		peak_pairs = maxi(peak_pairs, int(Performance.get_monitor(Performance.PHYSICS_3D_COLLISION_PAIRS)))
 		for index in [0, int(BODY_COUNT / 2), BODY_COUNT - 1]:
 			var body: RID = bodies[index]
@@ -147,7 +160,10 @@ func _test_floor_3d(parallel: bool) -> Dictionary:
 	PhysicsServer3D.free_rid(box_shape)
 	PhysicsServer3D.free_rid(floor_shape)
 	PhysicsServer3D.free_rid(space)
-	var result := {"finite": finite, "peak_pairs": peak_pairs, "bodies": BODY_COUNT}
-	if peak_pairs < BODY_COUNT:
-		result["error"] = "Too few contact pairs: connected island not exercised"
+	var result := {"finite": finite, "peak_pairs": peak_pairs, "bodies": BODY_COUNT,
+			"peak_physics_ms": peak_physics_ms, "mean_physics_ms": accumulated_physics_ms / float(FRAMES)}
+	# Floor contact alone does not connect bodies into an island. Require
+	# many extra dynamic/dynamic contacts to exercise the large-island path.
+	if peak_pairs < BODY_COUNT + int(BODY_COUNT / 2):
+		result["error"] = "Too few dynamic/dynamic contact pairs for a large island"
 	return result
