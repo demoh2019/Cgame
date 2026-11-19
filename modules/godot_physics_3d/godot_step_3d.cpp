@@ -244,7 +244,7 @@ bool GodotStep3D::_solve_large_island(const LocalVector<GodotConstraint3D *> &p_
 			const uint32_t bit = uint32_t(1) << color;
 			for (int body_idx = 0; body_idx < body_count; ++body_idx) {
 				GodotBody3D *body = bodies[body_idx];
-				if (body == nullptr) {
+				if (body == nullptr || (contact_only_island && body->get_mode() <= PS3DE::BODY_MODE_KINEMATIC)) {
 					continue;
 				}
 				uint32_t *mask = occupied_colors.getptr(body);
