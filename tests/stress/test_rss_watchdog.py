@@ -39,7 +39,7 @@ class MacOSResidentMemoryTests(unittest.TestCase):
 
 class WatchdogEnforcementTests(unittest.TestCase):
     def test_missing_rss_monitor_fails_long_running_child(self):
-        with patch.object(stress, "rss_mib", return_value=None):
+        with patch.object(stress, "sample_process_tree", return_value=(None, None, 0)):
             result = stress.run_once(
                 [sys.executable, "-c", "import time; time.sleep(3)"],
                 5.0, 1024.0, "containers", 1, 12, 12345)
@@ -47,7 +47,7 @@ class WatchdogEnforcementTests(unittest.TestCase):
         self.assertEqual(result["failure"], "rss_monitor_unavailable")
 
     def test_excessive_rss_fails_immediately(self):
-        with patch.object(stress, "rss_mib", return_value=2048.0):
+        with patch.object(stress, "sample_process_tree", return_value=(2048.0, 1.0, 1)):
             result = stress.run_once(
                 [sys.executable, "-c", "import time; time.sleep(3)"],
                 5.0, 1024.0, "containers", 1, 12, 12345)
