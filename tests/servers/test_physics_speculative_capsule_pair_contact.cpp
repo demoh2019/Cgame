@@ -125,7 +125,7 @@ TEST_CASE("[PhysicsSpeculativeCapsulePair] Randomized 2D early cull agrees with 
 		const Vector2 center_a(real_t(-3) + random(), random());
 		const Vector2 center_b(0, 0);
 		const Vector2 axis_a(0, 1);
-		const Vector2 axis_b(real_t(1), real_t(0.15) + random());
+		const Vector2 axis_b = Vector2(real_t(1), real_t(0.15) + random()).normalized();
 		const Vector2 motion(real_t(8) * random() - real_t(1),
 				real_t(4) * random() - real_t(2));
 		Vector2 a, b;
@@ -156,7 +156,7 @@ TEST_CASE("[PhysicsSpeculativeCapsulePair] Randomized 3D early cull agrees with 
 		const Vector3 center_a(real_t(-3) + random(), random(), random() - real_t(0.5));
 		const Vector3 center_b(0, 0, 0);
 		const Vector3 axis_a(0, 1, 0);
-		const Vector3 axis_b(real_t(1), real_t(0.15) + random(), random());
+		const Vector3 axis_b = Vector3(real_t(1), real_t(0.15) + random(), random()).normalized();
 		const Vector3 motion(real_t(8) * random() - real_t(1),
 				real_t(4) * random() - real_t(2), real_t(4) * random() - real_t(2));
 		Vector3 a, b;
