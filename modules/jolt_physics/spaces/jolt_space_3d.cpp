@@ -714,15 +714,24 @@ static void resolve_soft_soft_edge_edge_contacts(JPH::Body &p_body_a, JPH::Body 
 				normal = separation / distance;
 			} else {
 				const JPH::Vec3 crossing = (p1 - p0).Cross(q1 - q0);
+				bool orientation_ambiguous = true;
 				if (crossing.LengthSq() > SOFT_EDGE_EPSILON) {
 					normal = crossing.Normalized();
-					if (normal.Dot(center_delta) < 0.0f) {
-						normal = -normal;
+					const float center_projection = normal.Dot(center_delta);
+					if (Math::abs(center_projection) > 1.0e-6f) {
+						orientation_ambiguous = false;
+						if (center_projection < 0.0f) {
+							normal = -normal;
+						}
 					}
 				} else {
 					normal = center_delta.LengthSq() > SOFT_EDGE_EPSILON ? center_delta.Normalized() : JPH::Vec3::sAxisY();
+					orientation_ambiguous = center_delta.LengthSq() <= SOFT_EDGE_EPSILON;
 				}
-				if (normal.Dot(relative_velocity) > 0.0f) {
+				// Use velocity to break ties ONLY when world-space separation
+				// offers no direction. Otherwise don't reverse a contact normal
+				// just because the segments are already moving apart.
+				if (orientation_ambiguous && normal.Dot(relative_velocity) > 0.0f) {
 					normal = -normal;
 				}
 			}
