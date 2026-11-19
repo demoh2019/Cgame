@@ -102,6 +102,22 @@ void BitMap::set_bit_rect(const Rect2i &p_rect, bool p_value) {
 	}
 
 	uint8_t *data = bitmask.ptrw();
+	if (current.position == Point2i() && current.size == Size2i(width, height)) {
+		// A full-map rectangle is a single contiguous bit range. Replace
+		// one row-at-a-time memset with one bulk fill, while preserving
+		// padding bits in a partially filled final byte.
+		const int bytes = bitmask.size();
+		const int tail_bits = (width * height) & 7;
+		if (tail_bits == 0) {
+			memset(data, p_value ? 0xff : 0, bytes);
+		} else {
+			const uint8_t tail_mask = uint8_t((1u << tail_bits) - 1);
+			const uint8_t old_padding = data[bytes - 1] & uint8_t(~tail_mask);
+			memset(data, p_value ? 0xff : 0, bytes - 1);
+			data[bytes - 1] = old_padding | (p_value ? tail_mask : 0);
+		}
+		return;
+	}
 	// BitMap rows share bytes when the width is not a multiple of eight.
 	// Keep the boundary bits intact and fill whole interior bytes at once.
 	int64_t start_bit = int64_t(width) * current.position.y + current.position.x;
