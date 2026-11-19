@@ -644,6 +644,9 @@ PhysicsServer3D::PhysicsServer3D() {
 	// Hinge-local viscous bend damping; requires XPBD dihedral constraints.
 	// Zero skips the O(hinges) velocity pass and preserves legacy results.
 	GLOBAL_DEF(PropertyInfo(Variant::FLOAT, "physics/3d/solver/soft_body_dihedral_damping", PROPERTY_HINT_RANGE, "0,1000,0.1,or_greater,suffix:1/s"), 0.0);
+	// Kelvin-Voigt-style triangle area-rate dashpots for deformable surfaces.
+	// Independent of XPBD area/membrane stiffness; zero skips the entire pass.
+	GLOBAL_DEF(PropertyInfo(Variant::FLOAT, "physics/3d/solver/soft_body_area_rate_damping", PROPERTY_HINT_RANGE, "0,1000,0.1,or_greater,suffix:1/s"), 0.0);
 	// Optional permanent cloth creases after bending beyond an angular yield.
 	// Zero rate disables the pass, even when the XPBD hinge solver is enabled.
 	GLOBAL_DEF(PropertyInfo(Variant::FLOAT, "physics/3d/solver/soft_body_bending_plastic_yield_angle", PROPERTY_HINT_RANGE, "0,3.14159265,0.01,suffix:rad"), 0.2);
