@@ -956,7 +956,7 @@ execute `tests/test_scavenging.gd` along with the existing server suites.
 
 ## Extinguishing a field campfire
 
-A survivor can now extinguish a **fire they own** by pressing **0** near it,
+A survivor can now extinguish a **fire they own** by pressing **-** near it,
 or by choosing **Extinguish my nearby campfire** from the online inventory.
 The command is validated by the dedicated server: the fire must still be
 burning, the owner must be alive and within 3.2 metres, and account ownership
@@ -1126,3 +1126,10 @@ PvE hunts with the survival and player-economy loops.
 exclusion, stat isolation, server visibility, one-time loot rewards and
 the trophy crafting recipe. It is included in the main `game/` test suite.
 No native Cgame engine change is required for this game-layer feature.
+
+### Non-overlapping survival hotkeys
+
+**0** remains quick-cook fish in both offline and connected clients; **-**
+(minus) now extinguishes the nearest owned campfire. These actions previously
+shared key 0, causing ambiguous/unreachable behaviour. The inventory buttons
+remain available as alternative controls.

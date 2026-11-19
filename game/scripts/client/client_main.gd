@@ -96,7 +96,7 @@ func _setup_actions() -> void:
 	_bind_key("survive_build", KEY_U)
 	_bind_key("survive_campfire", KEY_O)
 	_bind_key("survive_refuel", KEY_9)
-	_bind_key("survive_extinguish", KEY_0)
+	_bind_key("survive_extinguish", KEY_MINUS)
 	_bind_key("survive_repair", KEY_H)
 	_bind_key("survive_upgrade", KEY_Y)
 	_bind_key("survive_dismantle", KEY_X)
@@ -785,7 +785,7 @@ func _update_hud() -> void:
 	var station_status: String = "WORKBENCH" if near_bench else "workbench at x=9, z=0"
 	if recipe.get("station", "") == "campfire":
 		station_status = "FIRE READY" if nearby_fire else ("WORKBENCH" if near_bench else "need lit fire or workbench")
-	_instructions.text = "WASD move | Shift sprint | E gather | Q loot | F attack | G heavy strike | Space dodge | U build | O campfire | 9 refuel | 0 cook fish | 0 extinguish | H repair | Y upgrade | X dismantle\nTab / Shift+Tab recipes | C craft | B stash | 1 food 2 water 3 heal 4 weapon 5 armor 6 antiseptic 7 antibiotics 8 heat pack R lake (filter prevents infection)\nN buy water / V sell materials / Shift+V sell fish | T fish near shore | P accept / Shift+P turn in (hub)\nCRAFT %s -> %s x%d | %s | inputs %s\n%s" % [
+	_instructions.text = "WASD move | Shift sprint | E gather | Q loot | F attack | G heavy strike | Space dodge | U build | O campfire | 9 refuel | 0 cook fish | - extinguish | H repair | Y upgrade | X dismantle\nTab / Shift+Tab recipes | C craft | B stash | 1 food 2 water 3 heal 4 weapon 5 armor 6 antiseptic 7 antibiotics 8 heat pack R lake (filter prevents infection)\nN buy water / V sell materials / Shift+V sell fish | T fish near shore | P accept / Shift+P turn in (hub)\nCRAFT %s -> %s x%d | %s | inputs %s\n%s" % [
 		recipe_id, str(recipe.get("output", "")), int(recipe.get("count", 0)),
 		station_status,
 		str(recipe.get("inputs", {})), _feedback

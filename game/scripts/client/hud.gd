@@ -172,7 +172,7 @@ func _build() -> void:
 	inventory_box.add_child(refuel_button)
 	var extinguish_button := Button.new()
 	extinguish_button.name = "ExtinguishCampfire"
-	extinguish_button.text = "Extinguish my nearby campfire (no refund; 0)"
+	extinguish_button.text = "Extinguish my nearby campfire (no refund; -)"
 	extinguish_button.pressed.connect(func() -> void:
 		var fire_id: int = client.nearest_campfire(client.display_position())
 		if fire_id == -1:

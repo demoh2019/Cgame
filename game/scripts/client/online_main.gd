@@ -496,7 +496,7 @@ func _unhandled_input(event: InputEvent) -> void:
 					if dodge_direction.length_squared() < 0.0001:
 						dodge_direction = Vector2(sin(client.yaw), cos(client.yaw))
 					client.dodge(dodge_direction.normalized())
-			KEY_0:
+			KEY_MINUS:
 				if not hud.is_menu_open() and bool(client.you.get("alive", false)):
 					var fire_id: int = client.nearest_campfire(client.display_position())
 					if fire_id != -1:
