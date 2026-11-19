@@ -92,6 +92,40 @@ TEST_CASE("[GodotPhysics2D] Closest segment casts work far from the world origin
 	CHECK(point.is_equal_approx(Vector2(near_x, 0.0)));
 }
 
+static bool count_bvh_segments(void *p_userdata, GodotShape2D *) {
+	int *count = static_cast<int *>(p_userdata);
+	++*count;
+	return false;
+}
+
+TEST_CASE("[GodotPhysics2D] Median-partition BVH preserves nearest hits and culling") {
+	PackedVector2Array edges;
+	for (int j = 0; j < 512; ++j) {
+		// Alternate low and high coordinates to exercise an unsorted BVH.
+		const int i = (j & 1) ? 511 - (j / 2) : j / 2;
+		const real_t x = real_t(i);
+		edges.push_back(Vector2(x, -2.0));
+		edges.push_back(Vector2(x + real_t(0.5), 2.0));
+	}
+	GodotConcavePolygonShape2D shape;
+	shape.set_data(edges);
+
+	Vector2 hit, normal;
+	CHECK(shape.intersect_segment(Vector2(-10.0, 0.0), Vector2(600.0, 0.0), hit, normal));
+	CHECK(hit.distance_to(Vector2(0.25, 0.0)) < real_t(0.0002));
+
+	CHECK(shape.intersect_segment(Vector2(600.0, 0.0), Vector2(-10.0, 0.0), hit, normal));
+	CHECK(hit.distance_to(Vector2(511.25, 0.0)) < real_t(0.0002));
+
+	int broad_count = 0;
+	shape.cull(Rect2(Vector2(-1.0, -3.0), Vector2(514.0, 6.0)), count_bvh_segments, &broad_count);
+	CHECK(broad_count == 512);
+
+	int narrow_count = 0;
+	shape.cull(Rect2(Vector2(100.25, -3.0), Vector2(10.5, 6.0)), count_bvh_segments, &narrow_count);
+	CHECK(narrow_count == 11);
+}
+
 } // namespace TestGodotPhysics2DClosestSegment
 
 #endif // MODULE_GODOT_PHYSICS_2D_ENABLED

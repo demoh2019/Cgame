@@ -983,16 +983,17 @@ int GodotConcavePolygonShape2D::_generate_bvh(BVH *p_bvh, int p_len, int p_depth
 		global_aabb = global_aabb.merge(p_bvh[i].aabb);
 	}
 
+	// Only the median partition matters for BVH construction.
+	// Selecting it instead of fully sorting every level reduces expected
+	// build complexity from O(n log^2 n) to O(n log n).
+	const int median = p_len / 2;
 	if (global_aabb.size.x > global_aabb.size.y) {
-		SortArray<BVH, BVH_CompareX> sort;
-		sort.sort(p_bvh, p_len);
-
+		SortArray<BVH, BVH_CompareX> select;
+		select.nth_element(0, p_len, median, p_bvh);
 	} else {
-		SortArray<BVH, BVH_CompareY> sort;
-		sort.sort(p_bvh, p_len);
+		SortArray<BVH, BVH_CompareY> select;
+		select.nth_element(0, p_len, median, p_bvh);
 	}
-
-	int median = p_len / 2;
 
 	BVH node;
 	node.aabb = global_aabb;
