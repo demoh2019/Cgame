@@ -675,7 +675,10 @@ void GodotConvexPolygonShape2D::set_data(const Variant &p_data) {
 			mixed_xy += (2.0 * ax * ay + ax * by + bx * ay + 2.0 * bx * by) * cross;
 		}
 
-		if (Math::abs(twice_area) > 1.0e-14) {
+		// An absolute threshold incorrectly rejects physically valid tiny shapes.
+		// Use the local AABB area as a scale reference instead.
+		const double area_scale = double(aabb_new.size.x) * double(aabb_new.size.y);
+		if (Math::abs(twice_area) > 1.0e-12 * area_scale) {
 			const double cx = first_x / (3.0 * twice_area);
 			const double cy = first_y / (3.0 * twice_area);
 			const double vx = second_x / (6.0 * twice_area) - cx * cx;

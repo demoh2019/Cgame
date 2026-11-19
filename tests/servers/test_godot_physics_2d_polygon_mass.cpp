@@ -127,7 +127,7 @@ TEST_CASE("[GodotPhysics2D] Convex polygon inertia accounts for full affine cova
 	CHECK(Math::is_equal_approx(triangle.get_moment_of_inertia_transformed(real_t(9.0), shear), real_t(8.0)));
 	CHECK(Math::is_equal_approx(triangle.get_moment_of_inertia_transformed(real_t(9.0), reflection), real_t(16.0)));
 }
- 
+
 TEST_CASE("[GodotPhysics2D] Physical shape areas ignore broadphase padding and affine shear") {
 	GodotCircleShape2D circle;
 	circle.set_data(real_t(1.0));
@@ -159,6 +159,20 @@ TEST_CASE("[GodotPhysics2D] Physical shape areas ignore broadphase padding and a
 	reversed.push_back(corners[0]);
 	polygon.set_data(reversed);
 	CHECK(Math::is_equal_approx(polygon.get_mass_area(), real_t(2.0)));
+}
+
+TEST_CASE("[GodotPhysics2D] Tiny convex polygon has nonzero area and a valid centroid") {
+	const real_t side = real_t(1.0e-8);
+	PackedVector2Array corners;
+	corners.push_back(Vector2());
+	corners.push_back(Vector2(side, 0.0));
+	corners.push_back(Vector2(0.0, side));
+	GodotConvexPolygonShape2D triangle;
+	triangle.set_data(corners);
+
+	CHECK(triangle.get_mass_area() / (side * side) == doctest::Approx(0.5));
+	CHECK(triangle.get_center_of_mass().x / side == doctest::Approx(1.0 / 3.0));
+	CHECK(triangle.get_center_of_mass().y / side == doctest::Approx(1.0 / 3.0));
 }
 
 } // namespace TestGodotPhysics2DPolygonMass
