@@ -650,3 +650,33 @@ food recovery and backward-compatible progression saves.
 **Not included yet:** multiplayer fishing parties, boats, fish shoals,
 bait, weather-dependent catches, T2–T4 rods or regional fish prices.
 These can be added through shared game rules without duplicating an engine.
+
+## Online player market (server-authoritative prototype)
+
+The shared hub now has an **online sale listing board** alongside direct player
+barter and the NPC vendor. Open the inventory panel, select an item in the barter
+item selector, choose the listing quantity and silver price, then click
+**List item**. Use **Refresh** to browse, **Buy** to purchase selected stock
+or **Cancel mine** to remove your own advert. The buyer and seller must both
+be alive and at the hub workbench. A listing expires after 30 minutes, when
+the seller leaves the hub, disconnects, dies or no longer has the promised stock.
+
+Posting a listing does **not** remove or reserve goods. At purchase time the
+authoritative server rechecks the seller's inventory, buyer's silver, both
+capacities, listing ownership and remaining quantity. Goods and silver move
+atomically within the simulation, with partial purchases supported. Failed
+settlements change neither backpack, and filled listings are removed so an
+old request cannot be replayed. Maximum: 4 listings per seller, 80 global,
+40 units per listing and 2,000 silver per item. Only online players can sell.
+
+**Not a persistent auction house yet.** Active listings and the bounded
+session receipts are in RAM. Crash/restart clears adverts, but does not
+strand escrow because nothing was pre-debited. A successful purchase marks
+both character states dirty for existing Nakama saves; those two saves are
+not one database transaction. For persistent offline orders, add backend
+escrow, atomic settlement across accounts and a crash-recovery journal
+before enabling them in production.
+
+The core tests live in `tests/test_market_board.gd`, included in
+`tests/run_all.gd`. Existing Cgame/Godot networking supports the feature,
+so it requires no native engine modifications.

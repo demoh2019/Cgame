@@ -35,6 +35,13 @@ var _trade_quantity: SpinBox
 var _trade_status: Label
 var _trade_peer_signature: String = ""
 var _trade_item_signature: String = ""
+var _market_select: OptionButton
+var _market_quantity: SpinBox
+var _market_price: SpinBox
+var _market_status: Label
+var _market_listings: Array = []
+
+
 
 
 
@@ -251,6 +258,57 @@ func _build() -> void:
 			client.trade_cancel(int(_trade_state["id"])))
 	trade_buttons.add_child(cancel_trade)
 
+	var market_title := Label.new()
+	market_title.text = "Survivor market - ONLINE listings (hub)"
+	inventory_box.add_child(market_title)
+	_market_status = Label.new()
+	_market_status.text = "Refresh to browse listings. Stock is checked on purchase."
+	inventory_box.add_child(_market_status)
+	_market_select = OptionButton.new()
+	_market_select.custom_minimum_size.x = 320.0
+	inventory_box.add_child(_market_select)
+	var market_row := HBoxContainer.new()
+	inventory_box.add_child(market_row)
+	_market_quantity = SpinBox.new()
+	_market_quantity.min_value = 1.0
+	_market_quantity.max_value = 40.0
+	_market_quantity.value = 1.0
+	market_row.add_child(_market_quantity)
+	_market_price = SpinBox.new()
+	_market_price.min_value = 1.0
+	_market_price.max_value = 2000.0
+	_market_price.value = 5.0
+	market_row.add_child(_market_price)
+	var refresh_market := Button.new()
+	refresh_market.text = "Refresh"
+	refresh_market.pressed.connect(func() -> void: client.market_list())
+	market_row.add_child(refresh_market)
+	var post_market := Button.new()
+	post_market.text = "List item"
+	post_market.pressed.connect(func() -> void:
+		if _trade_item.selected < 0:
+			say("Market: choose an inventory item in the barter selector")
+		else:
+			var id: String = str(_trade_item.get_item_metadata(_trade_item.selected))
+			client.market_create(id, int(_market_quantity.value), int(_market_price.value)))
+	market_row.add_child(post_market)
+	var buy_market := Button.new()
+	buy_market.text = "Buy"
+	buy_market.pressed.connect(func() -> void:
+		if _market_select.selected < 0:
+			say("Market: select an active listing")
+		else:
+			var listing_id: int = int(_market_select.get_item_metadata(_market_select.selected))
+			client.market_buy(listing_id, int(_market_quantity.value)))
+	market_row.add_child(buy_market)
+	var cancel_market := Button.new()
+	cancel_market.text = "Cancel mine"
+	cancel_market.pressed.connect(func() -> void:
+		if _market_select.selected >= 0:
+			var listing_id: int = int(_market_select.get_item_metadata(_market_select.selected))
+			client.market_cancel(listing_id))
+	market_row.add_child(cancel_market)
+
 	_craft_panel = PanelContainer.new()
 	_craft_panel.set_anchors_preset(Control.PRESET_CENTER_LEFT)
 	_craft_panel.position = Vector2(14, -220)
@@ -288,6 +346,8 @@ func _unhandled_input(event: InputEvent) -> void:
 
 func toggle_inventory() -> void:
 	_inventory_panel.visible = not _inventory_panel.visible
+	if _inventory_panel.visible:
+		client.market_list()
 
 
 func toggle_crafting() -> void:
@@ -362,6 +422,16 @@ func _on_result(kind: String, data: Dictionary) -> void:
 		return
 	if kind == "fish":
 		say("Fishing: casting..." if bool(data.get("ok", false)) else "Fishing: %s" % str(data.get("reason", "denied")))
+		return
+	if kind == "market":
+		if not bool(data.get("ok", false)):
+			say("Market: " + str(data.get("reason", "rejected")))
+		elif str(data.get("action", "")) == "list":
+			_market_listings = data.get("orders", [])
+			_refresh_market_options()
+		else:
+			say("Market: %s %s" % [str(data.get("action", "updated")), str(data.get("item", ""))])
+			client.market_list()
 		return
 	if kind == "trade":
 		if not bool(data.get("ok", false)):
@@ -456,6 +526,26 @@ func _process(_delta: float) -> void:
 		_refresh_trade_controls()
 	if _craft_panel.visible:
 		_refresh_crafting()
+
+
+func _refresh_market_options() -> void:
+	var selected_id := -1
+	if _market_select.selected >= 0:
+		selected_id = int(_market_select.get_item_metadata(_market_select.selected))
+	_market_select.clear()
+	for order in _market_listings:
+		var item_id: String = str(order["item"])
+		var label: String = "%s ×%d | %d silver/item | %s%s" % [
+			str(Defs.item(item_id).get("name", item_id)),
+			int(order["quantity"]), int(order["price"]),
+			str(order["seller_name"]), " (yours)" if bool(order["own"]) else "",
+		]
+		_market_select.add_item(label)
+		var index: int = _market_select.item_count - 1
+		_market_select.set_item_metadata(index, int(order["id"]))
+		if int(order["id"]) == selected_id:
+			_market_select.select(index)
+	_market_status.text = "%d listings | quantity & price inputs below | inventory item from barter selector" % _market_listings.size()
 
 
 func _refresh_trade_controls() -> void:

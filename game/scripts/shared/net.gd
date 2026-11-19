@@ -305,6 +305,34 @@ func c_trade_cancel(trade_id: int) -> void:
 
 
 @rpc("any_peer", "reliable")
+func c_market_list() -> void:
+	var peer := multiplayer.get_remote_sender_id()
+	if _allowed(peer):
+		s_result.rpc_id(peer, "market", sim.cmd_market_list(peer))
+
+
+@rpc("any_peer", "reliable")
+func c_market_create(item_id: String, quantity: int, price: int) -> void:
+	var peer := multiplayer.get_remote_sender_id()
+	if _allowed(peer):
+		s_result.rpc_id(peer, "market", sim.cmd_market_create(peer, item_id, quantity, price))
+
+
+@rpc("any_peer", "reliable")
+func c_market_buy(listing_id: int, quantity: int) -> void:
+	var peer := multiplayer.get_remote_sender_id()
+	if _allowed(peer):
+		s_result.rpc_id(peer, "market", sim.cmd_market_buy(peer, listing_id, quantity))
+
+
+@rpc("any_peer", "reliable")
+func c_market_cancel(listing_id: int) -> void:
+	var peer := multiplayer.get_remote_sender_id()
+	if _allowed(peer):
+		s_result.rpc_id(peer, "market", sim.cmd_market_cancel(peer, listing_id))
+
+
+@rpc("any_peer", "reliable")
 func c_vendor(item_id: String, quantity: int, buy: bool) -> void:
 	var peer := multiplayer.get_remote_sender_id()
 	if _allowed(peer):
