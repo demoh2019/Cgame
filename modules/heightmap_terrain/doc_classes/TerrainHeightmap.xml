@@ -51,7 +51,7 @@
             <param index="1" name="min_height" type="float" />
             <param index="2" name="max_height" type="float" />
             <description>
-                Sets the grid dimensions from the supplied uncompressed grayscale image and converts luminance into a height between [param min_height] and [param max_height]. Images must be between 2 and 513 pixels on each axis.
+                Sets grid dimensions from the supplied uncompressed image. Grayscale or single-channel images use the red channel; RGB images use luminance. Values are clamped to [code]0.0[/code]–[code]1.0[/code] and mapped between [param min_height] and [param max_height]. Images must be between 2 and 513 pixels on each axis.
             </description>
         </method>
         <method name="sample_height" qualifiers="const">
