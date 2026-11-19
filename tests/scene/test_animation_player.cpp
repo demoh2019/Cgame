@@ -187,4 +187,39 @@ TEST_CASE("[AnimationPlayer] Assigning a new animation after completion leaves i
 	memdelete(player);
 }
 
+
+TEST_CASE("[AnimationPlayer] Completion remains inactive across further advances") {
+	AnimationPlayer *player = create_player_with_animations();
+	player->play("first");
+	player->advance(0.6);
+	CHECK_FALSE(player->is_playing());
+	CHECK_FALSE(player->is_valid());
+
+	for (int i = 0; i < 3; i++) {
+		player->advance(0.1);
+		CHECK_FALSE(player->is_playing());
+		CHECK_FALSE(player->is_valid());
+		CHECK(player->get_current_animation().is_empty());
+		CHECK(player->get_assigned_animation() == StringName("first"));
+	}
+	memdelete(player);
+}
+
+TEST_CASE("[AnimationPlayer] A finished animation can transition to reverse playback") {
+	AnimationPlayer *player = create_player_with_animations();
+	player->play("first");
+	player->advance(0.6);
+	CHECK_FALSE(player->is_valid());
+
+	player->play_backwards("second");
+	CHECK(player->is_playing());
+	CHECK(player->is_valid());
+	CHECK(player->get_current_animation() == StringName("second"));
+	player->advance(0.6);
+	CHECK_FALSE(player->is_playing());
+	CHECK_FALSE(player->is_valid());
+	CHECK(player->get_assigned_animation() == StringName("second"));
+	memdelete(player);
+}
+
 } // namespace TestAnimationPlayer
