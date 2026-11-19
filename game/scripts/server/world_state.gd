@@ -75,7 +75,7 @@ static func parse_state(world, data: Variant) -> Dictionary:
 			return {"ok": false, "reason": "bad_entry"}
 		if not _whole_number(record.get("id")) or int(record["id"]) <= FIRST_STRUCTURE_ID:
 			return {"ok": false, "reason": "bad_id"}
-		var id: int = record["id"]
+		var id: int = int(record["id"])
 		if seen.has(id):
 			return {"ok": false, "reason": "duplicate_id"}
 		seen[id] = true
