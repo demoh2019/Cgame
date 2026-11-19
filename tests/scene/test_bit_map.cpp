@@ -552,4 +552,56 @@ TEST_CASE("[BitMap] Rect byte ranges match an independent per-pixel reference") 
 	}
 }
 
+TEST_CASE("[BitMap] Direct L8 image conversion preserves pixels and odd-width rows") {
+	BitMap bit_map;
+	const int width = 37;
+	const int height = 19;
+	bit_map.create(Size2i(width, height));
+
+	for (int y = 0; y < height; y++) {
+		for (int x = 0; x < width; x++) {
+			if ((x * 13 + y * 7) % 5 < 2) {
+				bit_map.set_bit(x, y, true);
+			}
+		}
+	}
+
+	const Ref<Image> image = bit_map.convert_to_image();
+	REQUIRE(image.is_valid());
+	CHECK(image->get_size() == Size2i(width, height));
+	CHECK(image->get_format() == Image::FORMAT_L8);
+	for (int y = 0; y < height; y++) {
+		for (int x = 0; x < width; x++) {
+			const float expected_value = bit_map.get_bit(x, y) ? 1.0f : 0.0f;
+			CHECK(image->get_pixel(x, y).r == expected_value);
+		}
+	}
+}
+
+TEST_CASE("[BitMap] LA8 alpha import does not alter source image") {
+	const int width = 19;
+	const int height = 9;
+	Ref<Image> image = Image::create_empty(width, height, false, Image::FORMAT_LA8);
+	for (int y = 0; y < height; y++) {
+		for (int x = 0; x < width; x++) {
+			const float alpha = float((x + 2 * y) % 4) / 3.0f;
+			image->set_pixel(x, y, Color(0.5, 0.5, 0.5, alpha));
+		}
+	}
+	const Vector<uint8_t> source_bytes = image->get_data();
+
+	BitMap bit_map;
+	bit_map.create_from_image_alpha(image, 0.4f);
+
+	CHECK(image->get_format() == Image::FORMAT_LA8);
+	CHECK(image->get_data() == source_bytes);
+	CHECK(bit_map.get_size() == Size2i(width, height));
+	for (int y = 0; y < height; y++) {
+		for (int x = 0; x < width; x++) {
+			const bool expected = image->get_pixel(x, y).a > 0.4f;
+			CHECK(bit_map.get_bit(x, y) == expected);
+		}
+	}
+}
+
 } // namespace TestBitMap
