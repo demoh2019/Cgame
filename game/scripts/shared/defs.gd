@@ -177,6 +177,17 @@ static func _build_items() -> void:
 		_add_item("jacket_%d" % t, {"name": "Jacket T%d" % t, "kind": "armor", "tier": t, "armor": 0.08 + 0.07 * (t - 1), "value": 35 * t})
 		_add_recipe("jacket_%d" % t, "jacket_%d" % t, 1, {"cloth_%d" % t: 4}, "workbench", 5.0)
 	# Consumables.
+	# Shore fishing: scavenging food supports the classless artisan loop.
+	_add_item("fishing_rod", {"name": "Fishing Rod", "kind": "tool", "tool": "fishing",
+		"tier": 1, "value": 24, "weight": 1.2})
+	_add_recipe("fishing_rod", "fishing_rod", 1, {"plank_1": 2, "fiber_1": 3},
+		"workbench", 4.0)
+	_add_item("raw_fish", {"name": "Raw Fish", "kind": "resource", "tier": 1,
+		"stack": 20, "value": 5, "weight": 0.7})
+	_add_item("cooked_fish", {"name": "Cooked Fish", "kind": "food", "food": 35.0,
+		"stack": 10, "value": 13, "weight": 0.5})
+	_add_recipe("cooked_fish", "cooked_fish", 1, {"raw_fish": 1, "wood_1": 1},
+		"workbench", 3.0)
 	_add_item("berries", {"name": "Berries", "kind": "food", "food": 12.0, "stack": 20, "value": 2})
 	_add_item("canned_food", {"name": "Canned Food", "kind": "food", "food": 42.0, "stack": 10, "value": 12})
 	_add_item("water_bottle", {"name": "Water Bottle", "kind": "drink", "drink": 45.0, "stack": 10, "value": 8})
