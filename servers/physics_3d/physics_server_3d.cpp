@@ -576,6 +576,8 @@ PhysicsServer3D::PhysicsServer3D() {
 	GLOBAL_DEF(PropertyInfo(Variant::FLOAT, "physics/3d/solver/default_contact_bias", PROPERTY_HINT_RANGE, "0,1,0.01"), 0.8);
 	// Zero disables the clamp for backwards-compatible penetration recovery.
 	GLOBAL_DEF(PropertyInfo(Variant::FLOAT, "physics/3d/solver/max_contact_push_speed", PROPERTY_HINT_RANGE, "0,1000,1,or_greater,suffix:m/s"), 0.0);
+	// Rapier-style bounded dynamic linear speed; legacy behavior is unlimited.
+	GLOBAL_DEF(PropertyInfo(Variant::FLOAT, "physics/3d/solver/max_linear_velocity", PROPERTY_HINT_RANGE, "0,10000,1,or_greater,suffix:m/s"), 0.0);
 	// Rapier-style cached contact impulse reuse, opt-in damping (1.0 is legacy).
 	GLOBAL_DEF(PropertyInfo(Variant::FLOAT, "physics/3d/solver/warm_start_coefficient", PROPERTY_HINT_RANGE, "0,1,0.01"), 1.0);
 	// Box2D-style Pade damping remains opt-in for backwards-compatible motion.
