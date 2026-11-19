@@ -36,6 +36,8 @@
 #include "scene/resources/surface_tool.h"
 #include "servers/rendering/rendering_server.h"
 
+#include <cstring>
+
 #ifndef PHYSICS_3D_DISABLED
 #include "scene/resources/3d/concave_polygon_shape_3d.h"
 #include "scene/resources/3d/convex_polygon_shape_3d.h"
@@ -318,11 +320,12 @@ Ref<TriangleMesh> Mesh::generate_triangle_mesh() const {
 	}
 
 	Vector<Vector3> faces;
-	faces.resize(faces_size);
-	Vector<int32_t> surface_indices;
-	surface_indices.resize(faces_size / 3);
+	// Every generated vertex is immediately overwritten by its source.
+	// The old per-triangle surface_indices buffer was fully populated but
+	// never passed to TriangleMesh::create(), so omit its allocation and
+	// the extra O(triangle_count) writes entirely.
+	ERR_FAIL_COND_V(faces.resize_uninitialized(faces_size) != OK, Ref<TriangleMesh>());
 	Vector3 *facesw = faces.ptrw();
-	int32_t *surface_indicesw = surface_indices.ptrw();
 
 	int widx = 0;
 
@@ -346,8 +349,6 @@ Ref<TriangleMesh> Mesh::generate_triangle_mesh() const {
 		Vector<Vector3> vertices = a[ARRAY_VERTEX];
 		ERR_FAIL_COND_V(vertices.is_empty(), Ref<TriangleMesh>());
 		const Vector3 *vr = vertices.ptr();
-
-		int32_t from_index = widx / 3;
 
 		if (surface_get_format(i) & ARRAY_FORMAT_INDEX) {
 			int ic = surface_get_array_index_len(i);
@@ -376,9 +377,9 @@ Ref<TriangleMesh> Mesh::generate_triangle_mesh() const {
 
 		} else {
 			if (primitive == PRIMITIVE_TRIANGLES) {
-				for (int j = 0; j < vc; j++) {
-					facesw[widx++] = vr[j];
-				}
+				// Unindexed triangle vertices are already contiguous.
+				memcpy(facesw + widx, vr, size_t(vc) * sizeof(Vector3));
+				widx += vc;
 			} else { // PRIMITIVE_TRIANGLE_STRIP
 				for (int j = 2; j < vc; j++) {
 					if (j % 2 == 0) {
@@ -394,11 +395,6 @@ Ref<TriangleMesh> Mesh::generate_triangle_mesh() const {
 			}
 		}
 
-		int32_t to_index = widx / 3;
-
-		for (int j = from_index; j < to_index; j++) {
-			surface_indicesw[j] = i;
-		}
 	}
 
 	triangle_mesh.instantiate();
@@ -431,7 +427,7 @@ Ref<TriangleMesh> Mesh::generate_surface_triangle_mesh(int p_surface) const {
 	}
 
 	Vector<Vector3> faces;
-	faces.resize(facecount);
+	ERR_FAIL_COND_V(faces.resize_uninitialized(facecount) != OK, Ref<TriangleMesh>());
 	Vector3 *facesw = faces.ptrw();
 
 	Array a = surface_get_arrays(p_surface);
@@ -453,9 +449,8 @@ Ref<TriangleMesh> Mesh::generate_surface_triangle_mesh(int p_surface) const {
 		}
 
 	} else {
-		for (int j = 0; j < vc; j++) {
-			facesw[widx++] = vr[j];
-		}
+		memcpy(facesw, vr, size_t(vc) * sizeof(Vector3));
+		widx = vc;
 	}
 
 	Ref<TriangleMesh> tr_mesh = Ref<TriangleMesh>(memnew(TriangleMesh));
