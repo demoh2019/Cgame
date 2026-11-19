@@ -187,6 +187,19 @@ private:
 
 		uint32_t capacity = hash_table_size_primes[_capacity_idx];
 
+		// All occupied slots have already been cleared. When an empty but
+		// allocated map grows after clear(), there is no need to allocate a
+		// second table and rehash anything. Reuse both buffers, zeroing
+		// only the newly added hash slots. This avoids copying and
+		// zeroing the old hash array twice and reduces peak allocations.
+		if (_elements != nullptr && _size == 0 && capacity > old_capacity) {
+			_hashes = reinterpret_cast<uint32_t *>(Memory::realloc_static(_hashes, sizeof(uint32_t) * capacity));
+			_elements = reinterpret_cast<HashMapElement<TKey, TValue> **>(
+					Memory::realloc_static(_elements, sizeof(HashMapElement<TKey, TValue> *) * capacity));
+			memset(_hashes + old_capacity, EMPTY_HASH, (capacity - old_capacity) * sizeof(uint32_t));
+			return;
+		}
+
 		HashMapElement<TKey, TValue> **old_elements = _elements;
 		uint32_t *old_hashes = _hashes;
 
