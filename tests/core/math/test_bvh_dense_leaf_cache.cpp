@@ -112,7 +112,7 @@ TEST_CASE("[BVH] Dense 2D leaf caches entries with filtering, clipping and tree 
 	Item items[COUNT];
 	for (int i = COUNT - 1; i >= 0; --i) {
 		items[i].id = i;
-		items[i].rect = Rect2(real_t(i * 3), 0, 1, 1);
+		items[i].rect = Rect2(real_t(i * 3), i % 11 == 0 ? real_t(5) : real_t(0), 1, 1);
 		tree.create(&items[i], true, uint32_t(i & 1), 3, items[i].rect);
 	}
 	for (int mask = 0; mask < 4; ++mask) {
@@ -124,7 +124,7 @@ TEST_CASE("[BVH] Dense 2D leaf caches entries with filtering, clipping and tree 
 			tree.cast_segment(probe.from, probe.to, collect_2d, &probe, uint32_t(mask));
 			int expected_id = -1;
 			for (int i = reject; i < COUNT; ++i) {
-				if (mask & (1 << (i & 1))) {
+				if (i % 11 != 0 && (mask & (1 << (i & 1)))) {
 					expected_id = i;
 					break;
 				}
@@ -145,7 +145,7 @@ TEST_CASE("[BVH] Dense 3D leaf caches entries with filtering, clipping and tree 
 	Item items[COUNT];
 	for (int i = COUNT - 1; i >= 0; --i) {
 		items[i].id = i;
-		items[i].box = AABB(Vector3(real_t(i * 3), 0, 0), Vector3(1, 1, 1));
+		items[i].box = AABB(Vector3(real_t(i * 3), i % 11 == 0 ? real_t(5) : real_t(0), 0), Vector3(1, 1, 1));
 		tree.create(&items[i], true, uint32_t(i & 1), 3, items[i].box);
 	}
 	for (int mask = 0; mask < 4; ++mask) {
@@ -157,7 +157,7 @@ TEST_CASE("[BVH] Dense 3D leaf caches entries with filtering, clipping and tree 
 			tree.cast_segment(probe.from, probe.to, collect_3d, &probe, uint32_t(mask));
 			int expected_id = -1;
 			for (int i = reject; i < COUNT; ++i) {
-				if (mask & (1 << (i & 1))) {
+				if (i % 11 != 0 && (mask & (1 << (i & 1)))) {
 					expected_id = i;
 					break;
 				}
