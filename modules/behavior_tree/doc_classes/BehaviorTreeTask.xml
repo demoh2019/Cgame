@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<class name="BehaviorTreeTask" inherits="Resource" api_type="core" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="../../../doc/class.xsd">
+	<brief_description>Base resource for AI behavior tree tasks.</brief_description>
+	<description>Subclass this resource in GDScript and implement [method _tick] to create custom conditions and actions. Return [constant SUCCESS], [constant FAILURE], or [constant RUNNING]. A [BehaviorTreeRunner] supplies a shared per-agent [Dictionary] blackboard and [code]delta[/code] time. Built-in task resources can be assembled without scripts. A task resource must not store agent-specific execution cursors: it may be shared by multiple runners.</description>
+	<methods>
+		<method name="_tick" qualifiers="virtual">
+			<return type="int" enum="BehaviorTreeTask.Status" />
+			<param index="0" name="blackboard" type="Dictionary" />
+			<param index="1" name="delta" type="float" />
+			<description>Returns the current execution status for the task. Implement this method in a GDScript subclass. Modify [param blackboard] to share state with other tasks in the same agent.</description>
+		</method>
+	</methods>
+	<constants>
+		<constant name="SUCCESS" value="0" enum="Status">The task finished successfully.</constant>
+		<constant name="FAILURE" value="1" enum="Status">The task finished unsuccessfully.</constant>
+		<constant name="RUNNING" value="2" enum="Status">The task needs another update.</constant>
+	</constants>
+</class>
