@@ -709,4 +709,30 @@ TEST_CASE("[LocalVector] Exact initial reserve keeps single-entry lists compact"
 	}
 }
 
+TEST_CASE("[LocalVector] Capacity trimming preserves live values and handles rejected shrinks") {
+	LocalVector<uint64_t> values;
+	values.reserve_exact(128);
+	for (uint64_t i = 0; i < 16; ++i) {
+		values.push_back(i * 17);
+	}
+	CHECK(values.get_capacity() == 128);
+	values.shrink_to(32);
+	CHECK(values.get_capacity() == 32);
+	CHECK(values.size() == 16);
+	for (uint64_t i = 0; i < 16; ++i) {
+		CHECK(values[i] == i * 17);
+	}
+
+	// The caller may not discard live elements by requesting less capacity.
+	values.shrink_to(8);
+	CHECK(values.get_capacity() == 32);
+	CHECK(values.size() == 16);
+	values.shrink_to(32);
+	CHECK(values.get_capacity() == 32);
+	values.clear();
+	values.shrink_to(0);
+	CHECK(values.is_empty());
+	CHECK(values.get_capacity() == 0);
+}
+
 } // namespace TestLocalVector
