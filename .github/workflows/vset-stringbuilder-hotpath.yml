@@ -1,0 +1,50 @@
+name: VSet and StringBuilder hotpath regressions
+
+on:
+  pull_request:
+    branches: [develop]
+    paths:
+      - 'core/templates/vset.h'
+      - 'core/string/string_builder.cpp'
+      - 'tests/core/templates/test_vset.cpp'
+      - 'tests/core/string/test_string_builder.cpp'
+      - '.github/workflows/vset-stringbuilder-hotpath.yml'
+  push:
+    branches: [develop]
+    paths:
+      - 'core/templates/vset.h'
+      - 'core/string/string_builder.cpp'
+      - 'tests/core/templates/test_vset.cpp'
+      - 'tests/core/string/test_string_builder.cpp'
+      - '.github/workflows/vset-stringbuilder-hotpath.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: vset-stringbuilder-hotpath-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  native-hotpath-regressions:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+      - uses: ./.github/actions/godot-deps
+      - name: Build Godot editor with native regression tests
+        uses: ./.github/actions/godot-build
+        with:
+          platform: linuxbsd
+          target: editor
+          scons-flags: dev_build=yes tests=yes debug_symbols=no module_mono_enabled=no module_text_server_fb_enabled=yes accesskit=no -j2
+      - name: Run VSet and StringBuilder regression suites
+        shell: bash
+        run: |
+          set -euo pipefail
+          BIN=./bin/godot.linuxbsd.editor.dev.x86_64
+          "$BIN" --headless --test --test-case="*[VSet]*" --no-colors
+          "$BIN" --headless --test --test-case="*[StringBuilder]*" --no-colors
