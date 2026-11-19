@@ -4,6 +4,7 @@ extends VBoxContainer
 const Planner = preload("res://addons/ai_game_builder/planner.gd")
 const Writer = preload("res://addons/ai_game_builder/writer.gd")
 const Inspector = preload("res://addons/ai_game_builder/inspector.gd")
+const EndpointPolicy = preload("res://addons/ai_game_builder/endpoint_policy.gd")
 
 var _http: HTTPRequest
 var _endpoint: LineEdit
@@ -158,6 +159,9 @@ func _request_plan(prompt: String, is_repair: bool) -> void:
 
 	var headers := PackedStringArray(["Content-Type: application/json"])
 	var key := _api_key.text.strip_edges()
+	if not EndpointPolicy.is_valid_bearer_token(key):
+		_status.text = "The API key contains unsupported characters."
+		return
 	if not key.is_empty():
 		headers.append("Authorization: Bearer " + key)
 	var request_error := _http.request(endpoint, headers, HTTPClient.METHOD_POST, Planner.make_request(model, prompt))
@@ -174,10 +178,7 @@ func _request_plan(prompt: String, is_repair: bool) -> void:
 	_status.text = "Requesting revised game files..." if is_repair else "Generating a reviewable game plan..."
 
 func _allowed_endpoint(endpoint: String) -> bool:
-	var lower := endpoint.to_lower()
-	if lower.begins_with("https://"):
-		return true
-	return lower.begins_with("http://127.0.0.1:") or lower.begins_with("http://localhost:") or lower.begins_with("http://[::1]:")
+	return EndpointPolicy.is_allowed(endpoint)
 
 
 func _cancel() -> void:
