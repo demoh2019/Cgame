@@ -3,8 +3,8 @@
 This is a lightweight, native **spatial query** for game AI. It ranks candidate
 world positions without allocating nodes, mutating the game scene, or accessing
 PhysicsServer/NavigationServer. Each query is deterministic and can be
-serialized as a `Resource`; the same query resource can be reused by multiple
-AI controllers by changing its candidates/origin before querying.
+serialized as a `Resource`; a query resource can be reused sequentially by multiple AI controllers,
+but callers must not mutate shared query properties concurrently.
 
 ## Example (GDScript)
 
