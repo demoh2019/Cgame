@@ -1091,7 +1091,8 @@ static void resolve_soft_body_self_contacts(JPH::Body &p_body, const JoltSoftBod
 		return;
 	}
 
-	if (!prepare_soft_self_topology(faces, uint32_t(vertices.size()), r_scratch.one_ring_edges, r_budget)) {
+	if (!ensure_soft_self_topology(faces, uint32_t(vertices.size()), r_scratch, r_budget,
+			JoltProjectSettings::soft_body_self_persistent_bvh)) {
 		return;
 	}
 	r_scratch.bvh.clear();
@@ -1372,11 +1373,10 @@ static void resolve_soft_body_self_edge_contacts(JPH::Body &p_body, const JoltSo
 		return;
 	}
 
-	// If the preceding VF self-contact pass successfully prepared topology,
-	// reuse it at zero extra allocation/sort cost. Otherwise rebuild it
-	// using the *edge* portion of the same global work budget.
-	if (r_scratch.one_ring_edges.empty() &&
-			!prepare_soft_self_topology(faces, uint32_t(vertices.size()), r_scratch.one_ring_edges, r_budget)) {
+	// Persistent mode reuses immutable mesh topology across physics frames;
+	// the default linear/BVH modes still share the list within this step.
+	if (!ensure_soft_self_topology(faces, uint32_t(vertices.size()), r_scratch, r_budget,
+			JoltProjectSettings::soft_body_self_persistent_bvh)) {
 		return;
 	}
 	const JPH::Array<uint64_t> &edges = r_scratch.one_ring_edges;
@@ -1389,8 +1389,29 @@ static void resolve_soft_body_self_edge_contacts(JPH::Body &p_body, const JoltSo
 	const float radius_sq = radius * radius;
 	const float recovery = JoltProjectSettings::soft_body_soft_contact_recovery / p_step;
 	const float friction = JoltProjectSettings::soft_body_soft_contact_friction;
-	const bool use_edge_bvh = JoltProjectSettings::soft_body_self_edge_bvh &&
-			prepare_soft_self_edge_bvh(edges, vertices, r_scratch.edge_bvh, r_budget);
+	bool use_edge_bvh = false;
+	if (JoltProjectSettings::soft_body_self_edge_bvh) {
+		const bool persistent = JoltProjectSettings::soft_body_self_persistent_bvh;
+		// Refit stable leaf-to-edge mappings, but rebuild periodically to
+		// restore BVH quality after extensive folding/unfolding.
+		if (persistent && r_scratch.edge_bvh_ready &&
+				r_scratch.edge_bvh_edge_count == edge_count && r_scratch.edge_bvh_refits < 120) {
+			use_edge_bvh = refit_soft_self_edge_bvh(edges, vertices, r_scratch.edge_bvh, r_budget);
+			if (use_edge_bvh) {
+				++r_scratch.edge_bvh_refits;
+			}
+		}
+		if (!use_edge_bvh) {
+			use_edge_bvh = prepare_soft_self_edge_bvh(edges, vertices, r_scratch.edge_bvh, r_budget);
+			if (use_edge_bvh) {
+				r_scratch.edge_bvh_refits = 0;
+			}
+		}
+		if (persistent) {
+			r_scratch.edge_bvh_ready = use_edge_bvh;
+			r_scratch.edge_bvh_edge_count = use_edge_bvh ? edge_count : 0;
+		}
+	}
 
 	// Query each unordered pair once: avoids doubling impulses on the
 	// very same self-contact. Topological exclusion also skips edges
