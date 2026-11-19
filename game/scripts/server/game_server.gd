@@ -898,6 +898,21 @@ func cmd_vendor(peer_id: int, item_id: String, quantity: int, buy: bool) -> Dict
 	return outcome
 
 
+## Captured frontier outpost supplies: authenticated server-owned ownership,
+## exact on-site position, live enemy contest, one account claim per capture.
+## No client may specify the reward, party, token, or cache contents.
+func cmd_outpost_supplies(peer_id: int, site_id: int) -> Dictionary:
+	var player: Player = players.get(peer_id)
+	if player == null or not _alive(player):
+		return {"ok": false, "reason": "dead"}
+	var result: Dictionary = territory.claim_supplies(site_id, player,
+		players, parties, world, time)
+	if bool(result.get("ok", false)):
+		player.dirty_inventory = true
+		player.dirty_character = true
+	return result
+
+
 ## Camp contracts use the same real hub distance check as the vendor and bank.
 ## The only client input is accept/claim, never rewards, progress or prices.
 ## Camp recovery is an authoritative, resource-paid sanctuary action.
