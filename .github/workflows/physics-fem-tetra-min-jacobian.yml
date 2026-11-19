@@ -1,0 +1,33 @@
+name: SoftBody3D tetra minimum-Jacobian inversion recovery
+
+on:
+  pull_request:
+    paths:
+      - "servers/physics_fem_tetra_min_jacobian.h"
+      - "servers/physics_3d/physics_server_3d.cpp"
+      - "modules/godot_physics_3d/godot_space_3d.cpp"
+      - "modules/godot_physics_3d/godot_space_3d.h"
+      - "modules/godot_physics_3d/godot_soft_body_3d.cpp"
+      - "modules/godot_physics_3d/godot_soft_body_3d.h"
+      - "tests/servers/test_physics_fem_tetra_min_jacobian.cpp"
+      - "tests/stress/test_physics_fem_tetra_min_jacobian.py"
+      - ".github/workflows/physics-fem-tetra-min-jacobian.yml"
+  push:
+    branches: [develop]
+    paths:
+      - "servers/physics_fem_tetra_min_jacobian.h"
+      - "modules/godot_physics_3d/godot_soft_body_3d.cpp"
+      - "tests/stress/test_physics_fem_tetra_min_jacobian.py"
+      - ".github/workflows/physics-fem-tetra-min-jacobian.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  numerical-contracts:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Check signed tetra Jacobian and GodotPhysics3D anti-collapse integration
+        run: python3 -m unittest discover -s tests/stress -p test_physics_fem_tetra_min_jacobian.py -v

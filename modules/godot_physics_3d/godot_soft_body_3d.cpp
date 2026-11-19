@@ -43,6 +43,7 @@
 #include "servers/physics_softbody_adiabatic_gas.h"
 #include "servers/physics_softbody_shape_matching.h"
 #include "servers/physics_fem_tetra_neo_hookean.h"
+#include "servers/physics_fem_tetra_min_jacobian.h"
 #include "servers/physics_fem_lumped_mass.h"
 #include "servers/physics_fem_tetra_fiber.h"
 #include "servers/physics_fem_tetra_viscosity.h"
@@ -517,13 +518,15 @@ void GodotSoftBody3D::initialize_fem_tetra() {
 	const bool previously_lumped = !xpbd_fem_mass_fractions.is_empty();
 	xpbd_fem_tetrahedra.reset();
 	xpbd_fem_fiber_lambdas.reset();
+	xpbd_fem_min_jacobian_lambdas.reset();
 	xpbd_fem_damage.reset();
 	xpbd_fem_mass_fractions.reset();
 
 	if (get_space() &&
 			(get_space()->get_soft_body_tetra_fem_compliance() > 0.0 ||
 					get_space()->get_soft_body_tetra_fem_viscosity() > 0.0 ||
-					get_space()->get_soft_body_tetra_fiber_compliance() > 0.0) &&
+					get_space()->get_soft_body_tetra_fiber_compliance() > 0.0 ||
+					get_space()->get_soft_body_tetra_min_jacobian() > 0.0) &&
 			xpbd_volume_closed && nodes.size() >= 4 && nodes.size() <= 2048 &&
 			faces.size() >= 4 && faces.size() <= 4096) {
 		LocalVector<Vector3> positions;
@@ -662,6 +665,7 @@ void GodotSoftBody3D::initialize_volume_constraint() {
 					get_space()->get_soft_body_tetra_fem_compliance() <= 0.0 &&
 					get_space()->get_soft_body_tetra_fem_viscosity() <= 0.0 &&
 					get_space()->get_soft_body_tetra_fiber_compliance() <= 0.0 &&
+					get_space()->get_soft_body_tetra_min_jacobian() <= 0.0 &&
 					get_space()->get_soft_body_volume_damping_rate() <= 0.0) ||
 			nodes.size() < 4 || faces.size() < 4) {
 		// Neither XPBD nor gas mode needs the volume for ordinary cloth.
@@ -3122,6 +3126,11 @@ void GodotSoftBody3D::solve_constraints(real_t p_delta) {
 	const bool use_fem = !xpbd_fem_tetrahedra.is_empty() && fem_compliance > 0.0 && p_delta > 0.0 &&
 			Math::is_finite(fem_alpha) && fem_alpha > 0.0;
 	const double fem_poisson = get_space() ? double(get_space()->get_soft_body_tetra_fem_poisson_ratio()) : 0.3;
+	const real_t min_jacobian = get_space()->get_soft_body_tetra_min_jacobian();
+	const double min_j_compliance = double(get_space()->get_soft_body_tetra_min_jacobian_compliance());
+	const double min_j_alpha = p_delta > 0.0 ? min_j_compliance / (double(p_delta) * double(p_delta)) : 0.0;
+	const bool use_min_jacobian = min_jacobian > 0.0 && p_delta > 0.0 &&
+			!xpbd_fem_tetrahedra.is_empty() && Math::is_finite(min_j_alpha) && min_j_alpha >= 0.0;
 	const double fem_fiber_compliance = get_space() ? double(get_space()->get_soft_body_tetra_fiber_compliance()) : 0.0;
 	const double fem_fiber_alpha = p_delta > 0.0 ? fem_fiber_compliance / (double(p_delta) * double(p_delta)) : 0.0;
 	const bool use_fem_fiber = use_fem && fem_fiber_compliance > 0.0 &&
@@ -3312,6 +3321,17 @@ void GodotSoftBody3D::solve_constraints(real_t p_delta) {
 		xpbd_fem_fiber_lambdas.reset();
 	}
 
+	// A unilateral XPBD multiplier is reset once per step and persists
+	// across iterations, independent of the Neo-Hookean energy lambda.
+	if (use_min_jacobian) {
+		xpbd_fem_min_jacobian_lambdas.resize(xpbd_fem_tetrahedra.size());
+		for (double &lambda : xpbd_fem_min_jacobian_lambdas) {
+			lambda = 0.0;
+		}
+	} else if (!xpbd_fem_min_jacobian_lambdas.is_empty()) {
+		xpbd_fem_min_jacobian_lambdas.reset();
+	}
+
 	// Distribute frame-level shape stiffness over solver iterations. For a
 	// fixed total stiffness, increasing iteration_count should not multiply
 	// the corrective strength by that many times.
@@ -3457,6 +3477,22 @@ void GodotSoftBody3D::solve_constraints(real_t p_delta) {
 				}
 				physics_xpbd_solve_tether(nodes[node_index].x, nodes[tether.anchor].x,
 						nodes[node_index].im, tether.max_length, tether_alpha, tether.lambda);
+			}
+		}
+		// Run the unilateral minimum-Jacobian constraint after the other
+		// material projections. Neo-Hookean log(J) cannot recover an inverted
+		// element on its own. This remains defined at J <= 0; contacts or
+		// later external impulses may still violate the requested threshold.
+		if (use_min_jacobian) {
+			for (uint32_t t = 0; t < xpbd_fem_tetrahedra.size(); ++t) {
+				const PhysicsFEMConvexTetra &tetra = xpbd_fem_tetrahedra[t];
+				Node &a = nodes[tetra.a];
+				Node &b = nodes[tetra.b];
+				Node &c = nodes[tetra.c];
+				Node &d = nodes[tetra.d];
+				physics_fem_tetra_solve_min_jacobian(a.x, b.x, c.x, d.x,
+						a.im, b.im, c.im, d.im, tetra.rest,
+						min_jacobian, min_j_alpha, xpbd_fem_min_jacobian_lambdas[t]);
 			}
 		}
 	}
@@ -3719,6 +3755,7 @@ void GodotSoftBody3D::destroy() {
 	xpbd_fem_fiber_lambdas.reset();
 	xpbd_fem_damage.reset();
 	xpbd_fem_mass_fractions.reset();
+	xpbd_fem_min_jacobian_lambdas.reset();
 	nodes.clear();
 	links.clear();
 	faces.clear();
