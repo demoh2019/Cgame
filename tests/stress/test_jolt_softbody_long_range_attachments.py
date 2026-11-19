@@ -66,7 +66,7 @@ class JoltLongRangeAttachmentTests(unittest.TestCase):
             self.project,
         )
         self.assertIn(
-            '"physics/jolt_physics_3d/simulation/soft_body_lra_max_distance_multiplier", PROPERTY_HINT_RANGE, "1,2,0.001,or_greater"), 1.0f)',
+            '"physics/jolt_physics_3d/simulation/soft_body_lra_max_distance_multiplier", PROPERTY_HINT_RANGE, "1,10,0.001"), 1.0f)',
             self.project,
         )
 
@@ -76,13 +76,14 @@ class JoltLongRangeAttachmentTests(unittest.TestCase):
             self.project,
         )
         self.assertIn("Math::is_finite(lra_multiplier)", self.project)
-        self.assertIn("MAX(lra_multiplier, 1.0f) : 1.0f;", self.project)
+        self.assertIn("CLAMP(lra_multiplier, 1.0f, 10.0f) : 1.0f;", self.project)
         for value, expected in ((-3, 0), (0, 0), (1, 1), (2, 2), (10, 2)):
             self.assertEqual(min(max(value, 0), 2), expected)
-        for raw in (0.0, 0.2, 1.0, 1.01, 2.0, float('nan'), float('inf')):
-            corrected = max(raw, 1.0) if math.isfinite(raw) else 1.0
+        for raw in (0.0, 0.2, 1.0, 1.01, 2.0, 1000.0, float('nan'), float('inf')):
+            corrected = min(max(raw, 1.0), 10.0) if math.isfinite(raw) else 1.0
             self.assertTrue(math.isfinite(corrected))
             self.assertGreaterEqual(corrected, 1.0)
+            self.assertLessEqual(corrected, 10.0)
 
     def test_jolt_lra_uses_pinned_vertices_before_constraints(self):
         setup = self.vertex_setup
