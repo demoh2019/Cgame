@@ -1,0 +1,39 @@
+name: Jolt convex soft-body volume contracts
+
+on:
+  pull_request:
+    branches: [develop]
+    paths:
+      - "modules/jolt_physics/objects/jolt_soft_body_3d.cpp"
+      - "modules/jolt_physics/jolt_project_settings.cpp"
+      - "modules/jolt_physics/jolt_project_settings.h"
+      - "tests/stress/test_jolt_softbody_volume.py"
+      - "tests/stress/jolt_volume/**"
+      - ".github/workflows/jolt-softbody-convex-volume.yml"
+  push:
+    branches: [develop]
+    paths:
+      - "modules/jolt_physics/objects/jolt_soft_body_3d.cpp"
+      - "modules/jolt_physics/jolt_project_settings.cpp"
+      - "modules/jolt_physics/jolt_project_settings.h"
+      - "tests/stress/test_jolt_softbody_volume.py"
+      - "tests/stress/jolt_volume/**"
+      - ".github/workflows/jolt-softbody-convex-volume.yml"
+  workflow_dispatch:
+
+jobs:
+  geometry-and-source-contracts:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Validate convexity, manifold and tetrahedral volume math
+        run: python3 -m unittest tests/stress/test_jolt_softbody_volume.py -v
+      - name: Check fixture and Python source
+        run: |
+          python3 -m py_compile tests/stress/test_jolt_softbody_volume.py
+          test -f tests/stress/jolt_volume/project.godot
+          test -f tests/stress/jolt_volume/convex_volume_regression.gd
