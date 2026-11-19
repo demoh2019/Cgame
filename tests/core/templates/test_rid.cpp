@@ -291,6 +291,26 @@ static void test_chunk_enumeration() {
 	}
 	CHECK(owner.get_rid_count() == 0);
 	CHECK(owner.get_owned_list().is_empty());
+
+	// Keep just the first RID after allocating many chunks. Both enumeration
+	// APIs must stop as soon as their one expected result is found.
+	RID_Owner<int, THREAD_SAFE> sparse_owner(sizeof(int) * 3, 600);
+	LocalVector<RID> sparse_handles;
+	for (int i = 0; i < 512; i++) {
+		sparse_handles.push_back(sparse_owner.make_rid(i));
+	}
+	for (uint32_t i = 1; i < sparse_handles.size(); i++) {
+		sparse_owner.free(sparse_handles[i]);
+	}
+	CHECK(sparse_owner.get_rid_count() == 1);
+	const LocalVector<RID> sparse_list = sparse_owner.get_owned_list();
+	REQUIRE(sparse_list.size() == 1);
+	CHECK(sparse_list[0] == sparse_handles[0]);
+	RID single_buffer[1];
+	sparse_owner.fill_owned_buffer(single_buffer);
+	CHECK(single_buffer[0] == sparse_handles[0]);
+	sparse_owner.free(sparse_handles[0]);
+	CHECK(sparse_owner.get_owned_list().is_empty());
 }
 
 TEST_CASE("[RID_Owner] Enumerate many chunks with exact memory reservation") {
