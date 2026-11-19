@@ -262,4 +262,49 @@ TEST_CASE("[StreamPeerGZIP] Megabyte input streams through bounded temporary sto
 	CHECK(decoded == input);
 }
 
+
+TEST_CASE("[StreamPeerGZIP] Incompressible data finishes in bounded output chunks") {
+	// zlib can buffer almost the entire incompressible input until Z_FINISH.
+	// A single 1024-byte finish call is therefore insufficient.
+	for (bool deflate_mode : { false, true }) {
+		for (int count : { 0, 1, 511, 1024, 1536, 2048 }) {
+			Vector<uint8_t> payload;
+			REQUIRE(payload.resize_uninitialized(count) == OK);
+			uint8_t *bytes = payload.ptrw();
+			uint32_t seed = uint32_t(0xa5f7d34b + count);
+			for (int i = 0; i < count; ++i) {
+				seed ^= seed << 13;
+				seed ^= seed >> 17;
+				seed ^= seed << 5;
+				bytes[i] = uint8_t(seed);
+			}
+
+			Ref<StreamPeerGZIP> compressor;
+			compressor.instantiate();
+			REQUIRE(compressor->start_compression(deflate_mode, 32767) == OK);
+			if (count > 0) {
+				REQUIRE(compressor->put_data(payload.ptr(), payload.size()) == OK);
+			}
+			REQUIRE(compressor->finish() == OK);
+			const int compressed_len = compressor->get_available_bytes();
+			REQUIRE(compressed_len > 0);
+			Vector<uint8_t> encoded;
+			REQUIRE(encoded.resize_uninitialized(compressed_len) == OK);
+			REQUIRE(compressor->get_data(encoded.ptrw(), compressed_len) == OK);
+
+			Ref<StreamPeerGZIP> decoder;
+			decoder.instantiate();
+			REQUIRE(decoder->start_decompression(deflate_mode, 32767) == OK);
+			REQUIRE(decoder->put_data(encoded.ptr(), encoded.size()) == OK);
+			CHECK_EQ(decoder->get_available_bytes(), count);
+			Vector<uint8_t> restored;
+			REQUIRE(restored.resize_uninitialized(count) == OK);
+			if (count > 0) {
+				REQUIRE(decoder->get_data(restored.ptrw(), count) == OK);
+			}
+			CHECK(restored == payload);
+		}
+	}
+}
+
 } // namespace TestStreamPeerGZIP
