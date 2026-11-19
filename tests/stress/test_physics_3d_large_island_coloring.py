@@ -47,7 +47,12 @@ class LargeIsland3DColoringContracts(unittest.TestCase):
         self.assertIn("uint32_t color_batch_offset = 0;", header)
         self.assertIn("bool _solve_large_island(", header)
         self.assertIn("colored_constraints.resize(constraint_count);", self.coloring)
-        self.assertIn("HashMap<GodotBody3D *, uint32_t> occupied_colors;", self.coloring)
+        self.assertIn("AHashMap<GodotBody3D *, uint32_t> occupied_colors;", header)
+        self.assertIn("LocalVector<uint8_t> constraint_colors;", header)
+        self.assertNotIn("HashMap<GodotBody3D *, uint32_t> occupied_colors;", self.coloring)
+        self.assertIn("occupied_colors.clear();", self.coloring)
+        self.assertIn("occupied_colors.reset();", self.coloring)
+        self.assertIn("constraint_colors.resize(constraint_count);", self.coloring)
         self.assertIn("MIN_PARALLEL_COLOR_CONSTRAINTS", self.coloring)
         self.assertIn("MIN_PARALLEL_LARGE_ISLAND", self.coloring)
 
@@ -78,6 +83,17 @@ class LargeIsland3DColoringContracts(unittest.TestCase):
         self.assertIn("!p_constraint_island[i]->permits_parallel_immovable_body_sharing()", block)
         self.assertIn("(!contact_only_island || body->get_mode() > PS3DE::BODY_MODE_KINEMATIC)", block)
         self.assertIn("(contact_only_island && body->get_mode() <= PS3DE::BODY_MODE_KINEMATIC)", block)
+
+    def test_color_scratch_released_after_leaving_large_island_mode(self):
+        source = self.source
+        self.assertIn(
+            "if (large_island_count != 1 && (!colored_constraints.is_empty()",
+            source,
+        )
+        self.assertIn("colored_constraints.reset();", source)
+        self.assertIn("constraint_colors.reset();", source)
+        self.assertIn("occupied_colors.reset();", source)
+        self.assertIn("constraint_count * uint32_t(4)", self.coloring)
 
     def test_parallel_colors_dispatch_bounded_contiguous_batches(self):
         source = self.source
