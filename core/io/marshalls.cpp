@@ -1010,23 +1010,28 @@ Error decode_variant(Variant &r_variant, const uint8_t *p_buffer, int p_len, int
 		} break;
 		case Variant::PACKED_STRING_ARRAY: {
 			ERR_FAIL_COND_V(len < 4, ERR_INVALID_DATA);
-			int32_t count = decode_uint32(buf);
-
-			Vector<String> strings;
+			const int32_t count = decode_uint32(buf);
 			buf += 4;
 			len -= 4;
+
+			// Every encoded string needs at least a four-byte length header.
+			// Reject impossible counts before allocating the output array.
+			ERR_FAIL_COND_V(count < 0 || count > len / 4, ERR_INVALID_DATA);
+
+			Vector<String> strings;
+			if (count > 0) {
+				// The element count is known: allocate once, then decode directly
+				// into writable slots without repeated growth and COW checks.
+				ERR_FAIL_COND_V(strings.resize(count) != OK, ERR_OUT_OF_MEMORY);
+				String *const write = strings.ptrw();
+				for (int32_t i = 0; i < count; i++) {
+					RETURN_IF_ERROR(_decode_string(buf, len, r_len, write[i]));
+				}
+			}
 
 			if (r_len) {
 				(*r_len) += 4; // Size of count number.
 			}
-
-			for (int32_t i = 0; i < count; i++) {
-				String str;
-				RETURN_IF_ERROR(_decode_string(buf, len, r_len, str));
-
-				strings.push_back(str);
-			}
-
 			r_variant = strings;
 
 		} break;
@@ -1952,7 +1957,8 @@ Error encode_variant(const Variant &p_variant, uint8_t *p_buffer, int &r_len, bo
 		} break;
 		case Variant::PACKED_STRING_ARRAY: {
 			Vector<String> data = p_variant;
-			int len = data.size();
+			const int len = data.size();
+			const String *const strings = data.ptr();
 
 			if (buf) {
 				encode_uint32(len, buf);
@@ -1962,7 +1968,8 @@ Error encode_variant(const Variant &p_variant, uint8_t *p_buffer, int &r_len, bo
 			r_len += 4;
 
 			for (int i = 0; i < len; i++) {
-				CharString utf8 = data.get(i).utf8();
+				// Read the string in place: non-const Vector::get() copies it.
+				CharString utf8 = strings[i].utf8();
 
 				if (buf) {
 					encode_uint32(utf8.length() + 1, buf);
