@@ -91,6 +91,7 @@ private:
 	GodotArea3D *area = nullptr;
 
 	int solver_iterations = 0;
+	bool parallel_large_islands = false;
 
 	real_t contact_recycle_radius = 0.0;
 	real_t contact_max_separation = 0.0;
@@ -162,6 +163,7 @@ public:
 	const HashSet<GodotCollisionObject3D *> &get_objects() const;
 
 	_FORCE_INLINE_ int get_solver_iterations() const { return solver_iterations; }
+	_FORCE_INLINE_ bool is_parallel_large_islands_enabled() const { return parallel_large_islands; }
 	_FORCE_INLINE_ real_t get_contact_recycle_radius() const { return contact_recycle_radius; }
 	_FORCE_INLINE_ real_t get_contact_max_separation() const { return contact_max_separation; }
 	_FORCE_INLINE_ real_t get_contact_max_allowed_penetration() const { return contact_max_allowed_penetration; }
