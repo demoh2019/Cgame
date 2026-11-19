@@ -2480,6 +2480,30 @@ void GodotSoftBody3D::set_total_mass(real_t p_val) {
 	// and ultimately corrupt per-vertex velocities / positions.
 	ERR_FAIL_COND_MSG(!(p_val > 0.0) || !Math::is_finite(p_val), "Soft body mass must be positive and finite.");
 
+	// With a cooked FEM mass distribution, recompute inverse masses from
+	// the fixed rest-volume fractions rather than repeatedly multiplying
+	// float32 values. Validate ALL nodes before mutating total_mass, so
+	// invalid extreme mass edits cannot leave a partially updated body.
+	if (xpbd_fem_mass_fractions.size() == nodes.size() &&
+			!xpbd_fem_mass_fractions.is_empty()) {
+		LocalVector<real_t> updated_inverse;
+		updated_inverse.resize(nodes.size());
+		for (uint32_t i = 0; i < nodes.size(); ++i) {
+			ERR_FAIL_COND_MSG(!physics_fem_unpinned_inverse_mass(
+						xpbd_fem_mass_fractions, i, p_val, updated_inverse[i]),
+					"FEM mass is outside the finite representable inverse-mass range.");
+		}
+		inv_total_mass = 1.0 / p_val;
+		total_mass = p_val;
+		for (uint32_t i = 0; i < nodes.size(); ++i) {
+			if (nodes[i].im > 0.0) {
+				nodes[i].im = updated_inverse[i];
+			}
+		}
+		update_link_constants();
+		return;
+	}
+
 	inv_total_mass = 1.0 / p_val;
 	real_t mass_factor = total_mass * inv_total_mass;
 	total_mass = p_val;
