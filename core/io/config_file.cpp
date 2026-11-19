@@ -122,13 +122,15 @@ String ConfigFile::encode_to_text() const {
 			sb.append("\n");
 		}
 		if (!E.key.is_empty()) {
-			sb.append("[" + E.key + "]\n\n");
+			// Append segments directly; concatenating would allocate two
+			// transient strings per section before the builder can store them.
+			sb.append("[").append(E.key).append("]\n\n");
 		}
 
 		for (const KeyValue<String, Variant> &F : E.value) {
 			String vstr;
 			VariantWriter::write_to_string(F.value, vstr, true);
-			sb.append(F.key.property_name_encode() + "=" + vstr + "\n");
+			sb.append(F.key.property_name_encode()).append("=").append(vstr).append("\n");
 		}
 	}
 	return sb.as_string();
