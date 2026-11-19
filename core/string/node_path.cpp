@@ -232,19 +232,39 @@ NodePath::operator String() const {
 		return String();
 	}
 
-	String ret;
+	const StringName joined_names = get_concatenated_names();
+	const StringName joined_subnames = get_concatenated_subnames();
+	const String &names = joined_names.string();
+	const String &subnames = joined_subnames.string();
+	const bool has_subnames = !subnames.is_empty();
+
+	// The most common relative node paths already have their complete
+	// representation interned. Share the buffer instead of allocating one.
+	if (!data->absolute && !has_subnames) {
+		return names;
+	}
+
+	// Write the entire path to a single buffer: avoid intermediate "/" and
+	// ":" strings and re-copying the growing output on each concatenation.
+	const int64_t result_length = int64_t(data->absolute) + names.length() + int64_t(has_subnames) + subnames.length();
+	String result;
+	ERR_FAIL_COND_V(result.resize_uninitialized(result_length + 1) != OK, String());
+	char32_t *write = result.ptrw();
+	int64_t offset = 0;
 	if (data->absolute) {
-		ret = "/";
+		write[offset++] = '/';
 	}
-
-	ret += get_concatenated_names();
-
-	String subpath = get_concatenated_subnames();
-	if (!subpath.is_empty()) {
-		ret += ":" + subpath;
+	if (!names.is_empty()) {
+		memcpy(write + offset, names.ptr(), size_t(names.length()) * sizeof(char32_t));
+		offset += names.length();
 	}
-
-	return ret;
+	if (has_subnames) {
+		write[offset++] = ':';
+		memcpy(write + offset, subnames.ptr(), size_t(subnames.length()) * sizeof(char32_t));
+		offset += subnames.length();
+	}
+	write[offset] = 0;
+	return result;
 }
 
 Vector<StringName> NodePath::get_names() const {
