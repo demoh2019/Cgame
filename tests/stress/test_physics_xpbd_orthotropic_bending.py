@@ -82,14 +82,18 @@ class TestXPBDOrthotropicBending(unittest.TestCase):
                 value, bend_alpha(tuple(-c for c in crease), axis, base, ratio),
                 delta=1e-12*(1+value))
 
-    def test_hinge_stiffness_depends_on_crease_not_live_fold(self):
-        # Two independently deformed cloth patches with the same original
-        # shared edge must keep the same bend compliance while folding.
-        original_crease = (2, 1, 0)
-        alpha = bend_alpha(original_crease, (1, 0, 0), 0.5, 0.2)
-        for folded in ((3, -4, 5), (-7, 8, 2), (0.1, 0.1, 8)):
-            self.assertEqual(alpha, bend_alpha(original_crease, (1, 0, 0), 0.5, 0.2))
-            self.assertIsNotNone(folded)
+    def test_hinge_stiffness_depends_on_rest_crease_not_live_fold(self):
+        # When the fold rotates the shared edge toward another direction,
+        # material stiffness must remain tied to the original edge.
+        rest_crease = (2, 1, 0)
+        axis = (1, 0, 0)
+        rest_alpha = bend_alpha(rest_crease, axis, 0.5, 0.2)
+        for current_crease in ((0, 1, 2), (0, 1, -2), (0.01, 1, 3)):
+            current_alpha = bend_alpha(current_crease, axis, 0.5, 0.2)
+            self.assertNotAlmostEqual(current_alpha, rest_alpha, places=3)
+            # Hinge initialization computes from rest only; deformations
+            # must not update the cached material ratio.
+            self.assertEqual(bend_alpha(rest_crease, axis, 0.5, 0.2), rest_alpha)
 
     def test_stiffer_bending_reduces_linearized_angular_error(self):
         before = math.pi/5
