@@ -243,8 +243,6 @@ bool GodotPhysicsDirectSpaceState3D::cast_motion(const PS3DT::ShapeParameters &p
 	aabb = aabb.merge(AABB(aabb.position + p_parameters.motion, aabb.size)); //motion
 	aabb = aabb.grow(p_parameters.margin);
 
-	int amount = space->broadphase->cull_aabb(aabb, space->intersection_query_results, GodotSpace3D::INTERSECTION_QUERY_MAX, space->intersection_query_subindex_results);
-
 	real_t best_safe = 1;
 	real_t best_unsafe = 1;
 
@@ -259,32 +257,53 @@ bool GodotPhysicsDirectSpaceState3D::cast_motion(const PS3DT::ShapeParameters &p
 
 	Vector3 closest_A, closest_B;
 
-	for (int i = 0; i < amount; i++) {
-		if (!_can_collide_with(space->intersection_query_results[i], p_parameters.collision_mask, p_parameters.collide_with_bodies, p_parameters.collide_with_areas)) {
-			continue;
+	// Jolt/Box2D-style streaming traversal: rejected proxies must not exhaust
+	// the fixed-size candidate array before we find the nearest collision.
+	struct CastMotionData {
+		const PS3DT::ShapeParameters &params;
+		const AABB &query_aabb;
+		GodotMotionShape3D &motion_shape;
+		const Transform3D &xform_inv;
+		const Vector3 &motion_normal;
+		Vector3 full_motion;
+		real_t &best_safe;
+		real_t &best_unsafe;
+		bool &best_first;
+		Vector3 &closest_A;
+		Vector3 &closest_B;
+		PS3DT::ShapeRestInfo *info;
+	};
+	CastMotionData data = { p_parameters, aabb, mshape, xform_inv, motion_normal, mshape.motion,
+		best_safe, best_unsafe, best_first, closest_A, closest_B, r_info };
+	auto visitor = [](GodotCollisionObject3D *p_object, int p_shape, void *p_userdata) -> bool {
+		CastMotionData &data = *static_cast<CastMotionData *>(p_userdata);
+		if (!_can_collide_with(p_object, data.params.collision_mask, data.params.collide_with_bodies, data.params.collide_with_areas)) {
+			return true;
 		}
 
-		if (p_parameters.exclude.has(space->intersection_query_results[i]->get_self())) {
-			continue; //ignore excluded
+		if (data.params.exclude.has(p_object->get_self())) {
+			return true; //ignore excluded
 		}
 
-		const GodotCollisionObject3D *col_obj = space->intersection_query_results[i];
-		int shape_idx = space->intersection_query_subindex_results[i];
+		const GodotCollisionObject3D *col_obj = p_object;
+		int shape_idx = p_shape;
 
 		Vector3 point_A, point_B;
-		Vector3 sep_axis = motion_normal;
+		Vector3 sep_axis = data.motion_normal;
 
 		Transform3D col_obj_xform = col_obj->get_transform() * col_obj->get_shape_transform(shape_idx);
+		// Binary-search fractions modify the sweep; restore full motion for each new candidate.
+		data.motion_shape.motion = data.full_motion;
 		//test initial overlap, does it collide if going all the way?
-		if (GodotCollisionSolver3D::solve_distance(&mshape, p_parameters.transform, col_obj->get_shape(shape_idx), col_obj_xform, point_A, point_B, aabb, &sep_axis)) {
-			continue;
+		if (GodotCollisionSolver3D::solve_distance(&data.motion_shape, data.params.transform, col_obj->get_shape(shape_idx), col_obj_xform, point_A, point_B, data.query_aabb, &sep_axis)) {
+			return true;
 		}
 
 		//test initial overlap, ignore objects it's inside of.
-		sep_axis = motion_normal;
+		sep_axis = data.motion_normal;
 
-		if (!GodotCollisionSolver3D::solve_distance(shape, p_parameters.transform, col_obj->get_shape(shape_idx), col_obj_xform, point_A, point_B, aabb, &sep_axis)) {
-			continue;
+		if (!GodotCollisionSolver3D::solve_distance(shape, data.params.transform, col_obj->get_shape(shape_idx), col_obj_xform, point_A, point_B, data.query_aabb, &sep_axis)) {
+			return true;
 		}
 
 		//just do kinematic solving
@@ -294,11 +313,11 @@ bool GodotPhysicsDirectSpaceState3D::cast_motion(const PS3DT::ShapeParameters &p
 		for (int j = 0; j < 8; j++) { //steps should be customizable..
 			real_t fraction = low + (hi - low) * fraction_coeff;
 
-			mshape.motion = xform_inv.basis.xform(p_parameters.motion * fraction);
+			data.motion_shape.motion = data.xform_inv.basis.xform(data.params.motion * fraction);
 
 			Vector3 lA, lB;
-			Vector3 sep = motion_normal; //important optimization for this to work fast enough
-			bool collided = !GodotCollisionSolver3D::solve_distance(&mshape, p_parameters.transform, col_obj->get_shape(shape_idx), col_obj_xform, lA, lB, aabb, &sep);
+			Vector3 sep = data.motion_normal; //important optimization for this to work fast enough
+			bool collided = !GodotCollisionSolver3D::solve_distance(&data.motion_shape, data.params.transform, col_obj->get_shape(shape_idx), col_obj_xform, lA, lB, data.query_aabb, &sep);
 
 			if (collided) {
 				hi = fraction;
@@ -325,28 +344,30 @@ bool GodotPhysicsDirectSpaceState3D::cast_motion(const PS3DT::ShapeParameters &p
 			}
 		}
 
-		if (low < best_safe) {
-			best_first = true; //force reset
-			best_safe = low;
-			best_unsafe = hi;
+		if (low < data.best_safe) {
+			data.best_first = true; //force reset
+			data.best_safe = low;
+			data.best_unsafe = hi;
 		}
 
-		if (r_info && (best_first || (point_A.distance_squared_to(point_B) < closest_A.distance_squared_to(closest_B) && low <= best_safe))) {
-			closest_A = point_A;
-			closest_B = point_B;
-			r_info->collider_id = col_obj->get_instance_id();
-			r_info->rid = col_obj->get_self();
-			r_info->shape = shape_idx;
-			r_info->point = closest_B;
-			r_info->normal = (closest_A - closest_B).normalized();
-			best_first = false;
+		if (data.info && (data.best_first || (point_A.distance_squared_to(point_B) < data.closest_A.distance_squared_to(data.closest_B) && low <= data.best_safe))) {
+			data.closest_A = point_A;
+			data.closest_B = point_B;
+			data.info->collider_id = col_obj->get_instance_id();
+			data.info->rid = col_obj->get_self();
+			data.info->shape = shape_idx;
+			data.info->point = data.closest_B;
+			data.info->normal = (data.closest_A - data.closest_B).normalized();
+			data.best_first = false;
 			if (col_obj->get_type() == GodotCollisionObject3D::TYPE_BODY) {
 				const GodotBody3D *body = static_cast<const GodotBody3D *>(col_obj);
-				Vector3 rel_vec = closest_B - (body->get_transform().origin + body->get_center_of_mass());
-				r_info->linear_velocity = body->get_linear_velocity() + (body->get_angular_velocity()).cross(rel_vec);
+				Vector3 rel_vec = data.closest_B - (body->get_transform().origin + body->get_center_of_mass());
+				data.info->linear_velocity = body->get_linear_velocity() + (body->get_angular_velocity()).cross(rel_vec);
 			}
 		}
-	}
+		return true;
+	};
+	space->broadphase->visit_aabb(aabb, visitor, &data);
 
 	p_closest_safe = best_safe;
 	p_closest_unsafe = best_unsafe;
