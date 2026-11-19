@@ -63,6 +63,11 @@ void GodotBroadPhase3DBVH::end_batch() {
 	}
 }
 
+void GodotBroadPhase3DBVH::force_collision_check(ID p_id) {
+	ERR_FAIL_COND(!p_id);
+	bvh.force_collision_check(p_id - 1);
+}
+
 void GodotBroadPhase3DBVH::move(ID p_id, const AABB &p_aabb) {
 	ERR_FAIL_COND(!p_id);
 	bvh.move(p_id - 1, p_aabb);

@@ -269,6 +269,21 @@ void GodotCollisionObject3D::_set_space(GodotSpace3D *p_space) {
 	}
 }
 
+void GodotCollisionObject3D::_collision_filter_changed() {
+	// Layer/mask changes do not alter shape geometry or AABBs.
+	if (space) {
+		GodotBroadPhase3D *broadphase = space->get_broadphase();
+		for (int i = 0; i < shapes.size(); i++) {
+			const Shape &shape = shapes[i];
+			if (shape.bpid != 0) {
+				broadphase->force_collision_check(shape.bpid);
+			}
+		}
+	}
+	// Preserve wake-up and area monitoring semantics.
+	_shapes_changed();
+}
+
 void GodotCollisionObject3D::_shape_changed() {
 	_update_shapes();
 	_shapes_changed();

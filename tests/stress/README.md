@@ -1143,3 +1143,24 @@ python3 tests/stress/run.py --godot ./bin/godot.linuxbsd.editor.dev.x86_64 \
 
 Compare query time and process RSS to an otherwise identical baseline build.
 No specific CPU/latency speedup is claimed without measured results.
+
+### Stationary broadphase collision-filter regression
+
+`physics_filter_toggle_2d` and `physics_filter_toggle_3d` create
+`16 * scale` overlapping Area/RigidBody pairs with zero gravity and no
+velocity. Areas are in the static broadphase tree, so a dynamic RigidBody
+is needed to exercise pairing with an unmoving Area. Each phase switches
+the area's collision mask while preserving all shape AABBs, then verifies
+that the overlap membership disappears and reappears correctly. The suite
+also records synchronous filter update costs in milliseconds.
+
+```bash
+python3 tests/stress/run.py --godot ./bin/godot.linuxbsd.editor.dev.x86_64 \\
+  --case physics_filter_toggle_2d,physics_filter_toggle_3d \\
+  --scale 4 --frames 12 --repeats 5 --rss-limit-mib 4096 \\
+  --output out/physics-filter-toggle.json
+```
+
+Use identical hardware, binary configuration and background load for
+comparative performance numbers. The native engine must be built and run
+to verify this workload; source-level checks alone cannot certify behavior.
