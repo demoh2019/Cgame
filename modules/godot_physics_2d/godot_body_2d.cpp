@@ -624,6 +624,14 @@ void GodotBody2D::integrate_forces(real_t p_step, bool p_defer_motion) {
 		// Limit dynamic angular speed after damping, torque and optional gyro
 		// integration. Kinematic bodies retain their requested target rotation.
 		angular_velocity = godot_physics_clamp_angular_velocity(angular_velocity, get_space()->get_max_angular_velocity());
+		// Rapier-style CCD safeguard: limit the *physical* rotation across
+		// one step, not the penetration-correction bias. A joint/contact may
+		// change angular velocity after force integration, so apply at both
+		// integration boundaries. Disabled by default and for non-CCD bodies.
+		if (continuous_cd_mode != PS2DE::CCD_MODE_DISABLED) {
+			angular_velocity = godot_physics_clamp_ccd_angular_velocity(
+					angular_velocity, get_space()->get_ccd_max_angular_motion(), p_step);
+		}
 
 		// Bound physical velocity before calculating the broadphase CCD sweep.
 		// This is skipped by static and kinematic bodies.
@@ -679,6 +687,11 @@ void GodotBody2D::integrate_velocities(real_t p_step) {
 	// Contacts and joints can increase angular velocity after force integration.
 	// Limit physical rotation, leaving penetration-correction bias untouched.
 	angular_velocity = godot_physics_clamp_angular_velocity(angular_velocity, get_space()->get_max_angular_velocity());
+	// Reapply the CCD-only per-step cap after contact/joint impulses.
+	if (continuous_cd_mode != PS2DE::CCD_MODE_DISABLED) {
+		angular_velocity = godot_physics_clamp_ccd_angular_velocity(
+				angular_velocity, get_space()->get_ccd_max_angular_motion(), p_step);
+	}
 	real_t total_angular_velocity = angular_velocity + biased_angular_velocity;
 	Vector2 total_linear_velocity = linear_velocity + biased_linear_velocity;
 
