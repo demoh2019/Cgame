@@ -400,6 +400,40 @@ PackedVector3Array PBFParticleFluid3D::get_particle_velocities() const {
 	return result;
 }
 
+int PBFParticleFluid3D::add_velocity_pulse(const Vector3 &p_center, real_t p_radius, const Vector3 &p_delta_velocity) {
+	// Script-accessible stirring / splash interaction. Smooth compact
+	// falloff; capped total speed so one bad gameplay input cannot make
+	// the next density solve overflow or cross the entire tank in one tick.
+	if (!p_center.is_finite() || !p_delta_velocity.is_finite() ||
+			!(p_radius > 0.0) || !Math::is_finite(p_radius) ||
+			p_radius > 1000.0 || p_delta_velocity.length_squared() > real_t(10000.0)) {
+		return 0;
+	}
+	const double radius2 = double(p_radius) * double(p_radius);
+	const Vector3 *p = positions.ptr();
+	Vector3 *v = velocities.ptrw();
+	int affected = 0;
+	for (int i = 0; i < positions.size(); ++i) {
+		const Vector3 d = p[i] - p_center;
+		const double d2 = double(d.x) * double(d.x) +
+				double(d.y) * double(d.y) + double(d.z) * double(d.z);
+		if (d2 >= radius2 || !Math::is_finite(d2)) {
+			continue;
+		}
+		const double falloff = 1.0 - d2 / radius2;
+		Vector3 updated = v[i] + p_delta_velocity * real_t(falloff * falloff);
+		if (!updated.is_finite()) {
+			continue;
+		}
+		if (updated.length_squared() > real_t(6400.0)) {
+			updated = updated.normalized() * real_t(80.0);
+		}
+		v[i] = updated;
+		++affected;
+	}
+	return affected;
+}
+
 void PBFParticleFluid3D::clear_particles() {
 	_resize_buffers(0);
 	average_density = 0.0;
@@ -534,6 +568,7 @@ void PBFParticleFluid3D::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("get_particle_positions"), &PBFParticleFluid3D::get_particle_positions);
 	ClassDB::bind_method(D_METHOD("get_particle_velocities"), &PBFParticleFluid3D::get_particle_velocities);
 	ClassDB::bind_method(D_METHOD("clear_particles"), &PBFParticleFluid3D::clear_particles);
+	ClassDB::bind_method(D_METHOD("add_velocity_pulse", "local_center", "radius", "delta_velocity"), &PBFParticleFluid3D::add_velocity_pulse);
 	ClassDB::bind_method(D_METHOD("get_particle_count"), &PBFParticleFluid3D::get_particle_count);
 	ClassDB::bind_method(D_METHOD("get_average_density"), &PBFParticleFluid3D::get_average_density);
 	ClassDB::bind_method(D_METHOD("get_last_neighbor_evaluations"), &PBFParticleFluid3D::get_last_neighbor_evaluations);
