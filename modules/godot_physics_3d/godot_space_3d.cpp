@@ -1313,6 +1313,15 @@ GodotSpace3D::GodotSpace3D() {
 	const real_t configured_tension_yield = GLOBAL_GET("physics/3d/solver/soft_body_xpbd_tension_yield_strain");
 	soft_body_xpbd_tension_yield_strain = Math::is_finite(configured_tension_yield) ? MAX(real_t(0.0), configured_tension_yield) : real_t(0.1);
 	const real_t configured_compression_yield = GLOBAL_GET("physics/3d/solver/soft_body_xpbd_compression_yield_strain");
+	const real_t configured_fatigue_rate = GLOBAL_GET("physics/3d/solver/soft_body_fatigue_damage_rate");
+	soft_body_fatigue_damage_rate = Math::is_finite(configured_fatigue_rate) ?
+			MAX(real_t(0.0), configured_fatigue_rate) : real_t(0.0);
+	const real_t configured_fatigue_yield = GLOBAL_GET("physics/3d/solver/soft_body_fatigue_yield_strain");
+	soft_body_fatigue_yield_strain = Math::is_finite(configured_fatigue_yield) ?
+			MAX(real_t(0.0), configured_fatigue_yield) : real_t(0.3);
+	const real_t configured_fatigue_cap = GLOBAL_GET("physics/3d/solver/soft_body_fatigue_max_damage");
+	soft_body_fatigue_max_damage = Math::is_finite(configured_fatigue_cap) ?
+			CLAMP(configured_fatigue_cap, real_t(0.0), real_t(0.99)) : real_t(0.9);
 	soft_body_xpbd_compression_yield_strain = Math::is_finite(configured_compression_yield) ?
 			CLAMP(configured_compression_yield, real_t(0.0), real_t(1.0)) : real_t(0.1);
 	const real_t configured_plastic_yield = GLOBAL_GET("physics/3d/solver/soft_body_plastic_yield_strain");
