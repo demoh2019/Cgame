@@ -592,6 +592,9 @@ PhysicsServer3D::PhysicsServer3D() {
 	// Zero thickness disables BVH candidate generation and all buffers.
 	GLOBAL_DEF(PropertyInfo(Variant::FLOAT, "physics/3d/solver/soft_body_self_collision_thickness", PROPERTY_HINT_RANGE, "0,1,0.001,or_greater,suffix:m"), 0.0);
 	GLOBAL_DEF(PropertyInfo(Variant::FLOAT, "physics/3d/solver/soft_body_self_collision_compliance", PROPERTY_HINT_RANGE, "0,0.01,0.000001,or_greater"), 0.000001);
+	// Optional mass-weighted tangential friction of non-adjacent cloth folds.
+	// Disabled by default and evaluated only for already-gathered contacts.
+	GLOBAL_DEF(PropertyInfo(Variant::FLOAT, "physics/3d/solver/soft_body_self_collision_friction", PROPERTY_HINT_RANGE, "0,2,0.01,or_greater"), 0.0);
 	GLOBAL_DEF(PropertyInfo(Variant::INT, "physics/3d/solver/soft_body_self_collision_max_contacts_per_vertex", PROPERTY_HINT_RANGE, "1,32,1"), 8);
 	// Optional edge/edge contacts for folds missed by vertex/triangle contacts.
 	GLOBAL_DEF(PropertyInfo(Variant::BOOL, "physics/3d/solver/soft_body_self_collision_edge_edge"), false);
