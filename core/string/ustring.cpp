@@ -5205,6 +5205,12 @@ String String::xml_unescape() const {
 	String str;
 	int l = length();
 	int len = _xml_unescape(get_data(), l, nullptr);
+	// Every recognized XML entity contracts multiple source characters into
+	// one code point. If the length is unchanged, no replacement occurred:
+	// reuse the original COW buffer without another scan or allocation.
+	if (len == l) {
+		return *this;
+	}
 	if (len == 0) {
 		return String();
 	}
