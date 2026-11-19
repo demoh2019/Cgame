@@ -2,7 +2,7 @@
 
 Source: `godotengine/godot` → destination: `demoh2019/Cgame`.
 
-This repository is already a fork with matching `master` history, so **merged upstream PR code should not be cherry-picked again**. A GitHub PR must have a diff against its target branch: historical merged/closed upstream PRs cannot be faithfully recreated as ordinary open PRs in the fork. They can be archived as **closed issues** or exported to JSONL. Open PRs with clean patches can be submitted as **draft PRs** for review and CI.
+This repository is already a fork with matching upstream `master` history, so **merged upstream PR code should not be cherry-picked again**. Backports to this fork target `develop`, while source PRs are selected from upstream `master`. A GitHub PR must have a diff against its target branch: historical merged/closed upstream PRs cannot be faithfully recreated as ordinary open PRs in the fork. They can be archived as **closed issues** or exported to JSONL. Open PRs with clean patches can be submitted as **draft PRs** for review and CI.
 
 ## Prerequisites
 
@@ -52,7 +52,7 @@ python3 misc/upstream_migration/migrate_upstream.py prs --apply --archive-path u
 
 - Issue titles, descriptions, current open/closed state, labels (created in the destination on demand), and optional comments with visible original authors and timestamps.
 - Direct links to the original issue or PR, including attachments and review discussion still hosted upstream.
-- Draft PR code as a patch against the destination `master` only when application is clean and nonempty; original PR author credited in description.
+- Draft PR code as a patch against the destination `develop` only when application is clean and nonempty; original PR author credited in description.
 - Duplicates are detected by scanning destination records and exact origin references, including existing manual backports that mention upstream PRs.
 
 ### Limits and safeguards
