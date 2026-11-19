@@ -50,6 +50,8 @@ class JoltSoftBody3D final : public JoltObject3D {
 
 	LocalVector<int> mesh_to_physics;
 	LocalVector<JoltArea3D *> areas;
+	// Reused by pre_step() only; avoids reallocation each wind-affected frame.
+	LocalVector<JoltArea3D *> wind_areas_scratch;
 	LocalVector<Vector3> normals;
 	LocalVector<RID> exceptions;
 
