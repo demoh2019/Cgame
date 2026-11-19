@@ -23,6 +23,7 @@ const ZoneRisk = preload("res://scripts/shared/zone_risk.gd")
 const Weather = preload("res://scripts/shared/weather.gd")
 const Progression = preload("res://scripts/shared/progression.gd")
 const CampRest = preload("res://scripts/shared/camp_rest.gd")
+const FieldCampfire = preload("res://scripts/shared/field_campfire.gd")
 const Fishing = preload("res://scripts/shared/fishing.gd")
 const FieldWater = preload("res://scripts/shared/field_water.gd")
 
@@ -82,6 +83,7 @@ var depleted: Dictionary = {} # node id -> time it comes back
 var opened_crates: Dictionary = {} # crate id -> time it refills
 var spawn_state: Dictionary = {} # spawn id -> {"zombie": id or -1, "next": time}
 var barricades: Dictionary = {} # Server-owned structures; authenticated walls may persist.
+var campfires: Dictionary = {} # Temporary shared warmth, never checkpointed.
 var trades: Dictionary = {} # trade id -> offer/accept/expiry
 var market_orders: Dictionary = {} # id -> advertised online stock (not escrow).
 var market_sales: Array = [] # Bounded session-only receipts, NOT durable settlement.
@@ -138,6 +140,7 @@ func character_data(player: Player) -> Dictionary:
 		"health": player.survival.health, "hunger": player.survival.hunger, "thirst": player.survival.thirst,
 		"stamina": player.survival.stamina, "infection": player.survival.infection,
 		"exposure": player.survival.exposure, "warmth_seconds": player.survival.warmth_seconds,
+			"campfire_warm": FieldCampfire.has_warmth(campfires, player.position, time),
 		"alive": alive, "kills": player.kills, "deaths": player.deaths,
 		"x": player.position.x, "z": player.position.z,
 		"inventory": player.inventory.to_dict(),
@@ -796,6 +799,45 @@ func cmd_stash(peer_id: int, item_id: String, count: int, deposit: bool) -> Dict
 
 ## Validate and build entirely on the authority. Clients only request a location.
 ## Building is intentionally forbidden inside the town sanctuary.
+## The client requests coordinates, but cannot claim warmth, time or a free
+## fire. All placement and inventory costs are validated by the server.
+func cmd_light_campfire(peer_id: int, x: float, z: float) -> Dictionary:
+	var player: Player = players.get(peer_id)
+	if player == null or not _alive(player):
+		return {"ok": false, "reason": "dead"}
+	if campfires.size() >= FieldCampfire.MAX_GLOBAL:
+		return {"ok": false, "reason": "world_limit"}
+	var owned := 0
+	for fire in campfires.values():
+		if int(fire["owner"]) == peer_id:
+			owned += 1
+	if owned >= FieldCampfire.MAX_PER_OWNER:
+		return {"ok": false, "reason": "owner_limit"}
+	var position := Vector2(x, z)
+	var origin := Vector2(player.position.x, player.position.z)
+	var reason: String = FieldCampfire.valid_site(world, position, origin, campfires)
+	if reason != "":
+		return {"ok": false, "reason": reason}
+	for other in players.values():
+		if _alive(other) and position.distance_to(Vector2(other.position.x, other.position.z)) < (
+				FieldCampfire.CAMP_RADIUS + Defs.PLAYER_RADIUS + 0.15):
+			return {"ok": false, "reason": "blocked"}
+	for infected in zombies.values():
+		if infected.is_alive() and position.distance_to(
+				Vector2(infected.position.x, infected.position.z)) < FieldCampfire.CAMP_RADIUS + 0.7:
+			return {"ok": false, "reason": "blocked"}
+	if not player.inventory.has_all(FieldCampfire.COST):
+		return {"ok": false, "reason": "missing_materials"}
+	for item_id in FieldCampfire.COST:
+		player.inventory.remove(str(item_id), int(FieldCampfire.COST[item_id]))
+	var id := new_id()
+	campfires[id] = {"id": id, "x": x, "y": world.height_at(x, z), "z": z,
+		"owner": peer_id, "expires": time + FieldCampfire.DURATION}
+	player.dirty_inventory = true
+	player.dirty_character = true
+	return {"ok": true, "id": id, "seconds": FieldCampfire.DURATION}
+
+
 func cmd_build(peer_id: int, x: float, z: float) -> Dictionary:
 	var player: Player = players.get(peer_id)
 	if player == null or not _alive(player):
@@ -1379,8 +1421,10 @@ func _tick_players(delta: float) -> void:
 		player.combat_energy = minf(Defs.COMBAT_ENERGY_MAX, player.combat_energy + Defs.COMBAT_ENERGY_REGEN * delta)
 		var damage: float = player.survival.tick(delta)
 		var conditions: Dictionary = Weather.conditions(world, player.position.x, player.position.z, time)
-		damage += player.survival.weather_tick(delta,
-				Weather.effective_severity(conditions, player.inventory.armor))
+		var weather_severity: float = Weather.effective_severity(conditions, player.inventory.armor)
+		if FieldCampfire.has_warmth(campfires, player.position, time):
+			weather_severity = 0.0
+		damage += player.survival.weather_tick(delta, weather_severity)
 		if player.survival.exposure > 0.0 or player.survival.warmth_seconds > 0.0:
 			player.dirty_character = true
 		if player.survival.infection > 0.0:
@@ -1562,6 +1606,9 @@ func _nearest_player_distance(point: Vector2) -> float:
 
 
 func _tick_world(_delta: float) -> void:
+	for id in campfires.keys():
+		if time >= float(campfires[id]["expires"]):
+			campfires.erase(id)
 	for id in depleted.keys():
 		if time >= float(depleted[id]):
 			depleted.erase(id)
@@ -1604,6 +1651,8 @@ func snapshot_for(peer_id: int) -> Dictionary:
 	for wall in barricades.values():
 		if Structures.within_range(here, Vector2(float(wall["x"]), float(wall["z"])), Defs.INTEREST_RADIUS):
 			nearby_barricades.append(Structures.public_state(wall))
+	var nearby_campfires: Array = FieldCampfire.visible(campfires,
+			player.position, time, Defs.INTEREST_RADIUS)
 	var nearby_bags: Array = []
 	for bag in bags.values():
 		if here.distance_to(Vector2(bag["x"], bag["z"])) <= Defs.INTEREST_RADIUS:
@@ -1641,7 +1690,7 @@ func snapshot_for(peer_id: int) -> Dictionary:
 			"cargo_factor": player.inventory.movement_factor(),
 		},
 		"players": nearby_players, "zombies": nearby_zombies, "bags": nearby_bags,
-		"barricades": nearby_barricades,
+		"barricades": nearby_barricades, "campfires": nearby_campfires,
 		"depleted": gone_nodes, "crates_used": used_crates,
 	}
 	if player.dirty_inventory:
