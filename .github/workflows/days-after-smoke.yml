@@ -1,0 +1,83 @@
+name: Days After survival + RPG slice smoke
+
+on:
+  pull_request:
+    paths:
+      - 'demo/days_after/**'
+      - '.github/workflows/days-after-smoke.yml'
+  push:
+    branches: [develop]
+    paths:
+      - 'demo/days_after/**'
+      - '.github/workflows/days-after-smoke.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: days-after-smoke-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  gameplay-logic:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - name: Download and verify official Godot 4.7.2 baseline editor
+        shell: bash
+        run: |
+          set -euo pipefail
+          curl --retry 4 --retry-delay 3 -fL -o godot.zip https://github.com/godotengine/godot-builds/releases/download/4.7.2-stable/Godot_v4.7.2-stable_linux.x86_64.zip
+          echo 'cadd3204e728a35d3f13adb7fd0d7902636b79f6b95c40c265eb73b6c35329e4  godot.zip' | sha256sum --check --status
+          unzip -q godot.zip
+          chmod +x Godot_v4.7.2-stable_linux.x86_64
+          mv Godot_v4.7.2-stable_linux.x86_64 godot
+          ./godot --version
+      - name: Import project and check GDScript parsing
+        shell: bash
+        run: |
+          set -euo pipefail
+          ./godot --headless --path demo/days_after --editor --import --quit 2>&1 | tee days-after-import.log
+          if grep -Ei 'SCRIPT ERROR:|Parse Error:|Failed to load script' days-after-import.log; then
+            exit 1
+          fi
+      - name: Run inventory and survival regression
+        shell: bash
+        run: |
+          set -euo pipefail
+          ./godot --headless --path demo/days_after --script res://tests/test_survival_state.gd 2>&1 | tee days-after-survival.log
+          grep -F 'Days After survival state: PASS' days-after-survival.log
+          if grep -Ei 'SCRIPT ERROR:|Parse Error:|Assertion failed' days-after-survival.log; then
+            exit 1
+          fi
+      - name: Run crafting and progression regression
+        shell: bash
+        run: |
+          set -euo pipefail
+          ./godot --headless --path demo/days_after --script res://tests/test_progression.gd 2>&1 | tee days-after-progression.log
+          grep -F 'Days After gathering, crafting and progression: PASS' days-after-progression.log
+          if grep -Ei 'SCRIPT ERROR:|Parse Error:|Assertion failed' days-after-progression.log; then
+            exit 1
+          fi
+      - name: Run playable-scene integration smoke
+        shell: bash
+        run: |
+          set -euo pipefail
+          timeout 90s ./godot --headless --path demo/days_after --script res://tests/test_scene_smoke.gd 2>&1 | tee days-after-scene.log
+          grep -F 'Days After playable scene smoke: PASS' days-after-scene.log
+          if grep -Ei 'SCRIPT ERROR:|Parse Error:|Assertion failed' days-after-scene.log; then
+            exit 1
+          fi
+      - name: Upload logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: days-after-smoke-logs
+          if-no-files-found: ignore
+          path: |
+            days-after-import.log
+            days-after-survival.log
+            days-after-progression.log
+            days-after-scene.log

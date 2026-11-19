@@ -36,10 +36,11 @@ From the Cgame repository root (replace `godot` with the built Cgame binary path
 godot --path demo/days_after --editor
 godot --headless --path demo/days_after --script res://tests/test_survival_state.gd
 godot --headless --path demo/days_after --script res://tests/test_progression.gd
+godot --headless --path demo/days_after --script res://tests/test_scene_smoke.gd
 godot --headless --path demo/days_after --quit-after 30
 ```
 
-The pure survival-state regression runs without graphics. The headless scene launch is a separate smoke test, not a claim that rendering or gameplay have been tested.
+The pure survival/progression tests run without graphics. The dedicated scene smoke validates startup, player and deposits. GitHub Actions runs the tests with an official Godot 4.7.2 compatibility baseline; successful completion still must be separately verified on the custom Cgame binary.
 
 ## Architecture
 
