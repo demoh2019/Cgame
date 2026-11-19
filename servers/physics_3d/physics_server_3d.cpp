@@ -590,6 +590,10 @@ PhysicsServer3D::PhysicsServer3D() {
 	// Zero selects the legacy Bullet-style projection; nonzero compliance
 	// enables a per-link Lagrange multiplier across iterations of each step.
 	GLOBAL_DEF(PropertyInfo(Variant::FLOAT, "physics/3d/solver/soft_body_xpbd_compliance", PROPERTY_HINT_RANGE, "0,0.01,0.000001,or_greater"), 0.0);
+	// Orthotropic fabric: ratio 1 retains isotropic XPBD stretch.
+	// <1 gives stiffer warp fibers; >1 softer fibers than the cross direction.
+	GLOBAL_DEF(PropertyInfo(Variant::FLOAT, "physics/3d/solver/soft_body_fiber_compliance_ratio", PROPERTY_HINT_RANGE, "0,100,0.05,or_greater"), 1.0);
+	GLOBAL_DEF(PropertyInfo(Variant::VECTOR3, "physics/3d/solver/soft_body_fiber_axis"), Vector3(1, 0, 0));
 	// Optional nonlinear tensile XPBD springs for deformable cloth/ropes.
 	// Stiffen beyond yield; zero preserves the original linear XPBD solver.
 	GLOBAL_DEF(PropertyInfo(Variant::FLOAT, "physics/3d/solver/soft_body_xpbd_tension_hardening", PROPERTY_HINT_RANGE, "0,100,0.1,or_greater"), 0.0);
