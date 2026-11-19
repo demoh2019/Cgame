@@ -52,6 +52,10 @@ void JoltProjectSettings::register_settings() {
 	// Applies when creating/rebuilding a soft body, not retroactively.
 	GLOBAL_DEF(PropertyInfo(Variant::INT, "physics/jolt_physics_3d/simulation/soft_body_bend_mode", PROPERTY_HINT_ENUM, "Disabled,Distance,Dihedral"), 0);
 	GLOBAL_DEF(PropertyInfo(Variant::FLOAT, "physics/jolt_physics_3d/simulation/soft_body_bend_compliance", PROPERTY_HINT_RANGE, "0,1,0.000001,or_greater"), 0.001f);
+	// Long-range attachments reduce excessive cloth stretch from pinned points.
+	// Geodesic distances follow the mesh rather than cutting through folds.
+	GLOBAL_DEF(PropertyInfo(Variant::INT, "physics/jolt_physics_3d/simulation/soft_body_lra_mode", PROPERTY_HINT_ENUM, "Disabled,Euclidean,Geodesic"), 0);
+	GLOBAL_DEF(PropertyInfo(Variant::FLOAT, "physics/jolt_physics_3d/simulation/soft_body_lra_max_distance_multiplier", PROPERTY_HINT_RANGE, "1,10,0.01"), 1.05f);
 	GLOBAL_DEF(PropertyInfo(Variant::FLOAT, "physics/jolt_physics_3d/simulation/bounce_velocity_threshold", PROPERTY_HINT_RANGE, U"0,1,0.001,or_greater,suffix:m/s"), 1.0f);
 	GLOBAL_DEF(PropertyInfo(Variant::BOOL, "physics/jolt_physics_3d/simulation/allow_sleep"), true);
 	GLOBAL_DEF(PropertyInfo(Variant::FLOAT, "physics/jolt_physics_3d/simulation/sleep_velocity_threshold", PROPERTY_HINT_RANGE, U"0,1,0.001,or_greater,suffix:m/s"), 0.03f);
@@ -105,6 +109,9 @@ void JoltProjectSettings::read_settings() {
 	soft_body_bend_mode = CLAMP((int)GLOBAL_GET("physics/jolt_physics_3d/simulation/soft_body_bend_mode"), 0, 2);
 	const float bend_compliance = GLOBAL_GET("physics/jolt_physics_3d/simulation/soft_body_bend_compliance");
 	soft_body_bend_compliance = Math::is_finite(bend_compliance) ? MAX(bend_compliance, 0.0f) : 0.001f;
+	soft_body_lra_mode = CLAMP((int)GLOBAL_GET("physics/jolt_physics_3d/simulation/soft_body_lra_mode"), 0, 2);
+	const float lra_multiplier = GLOBAL_GET("physics/jolt_physics_3d/simulation/soft_body_lra_max_distance_multiplier");
+	soft_body_lra_max_distance_multiplier = Math::is_finite(lra_multiplier) ? CLAMP(lra_multiplier, 1.0f, 10.0f) : 1.05f;
 	bounce_velocity_threshold = GLOBAL_GET("physics/jolt_physics_3d/simulation/bounce_velocity_threshold");
 	sleep_allowed = GLOBAL_GET("physics/jolt_physics_3d/simulation/allow_sleep");
 	sleep_velocity_threshold = GLOBAL_GET("physics/jolt_physics_3d/simulation/sleep_velocity_threshold");
