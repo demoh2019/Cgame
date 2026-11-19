@@ -32,6 +32,8 @@
 
 #include "core/templates/hash_map.h"
 
+#include <limits>
+
 void Geometry3D::get_closest_points_between_segments(const Vector3 &p_p0, const Vector3 &p_p1, const Vector3 &p_q0, const Vector3 &p_q1, Vector3 &r_ps, Vector3 &r_qt) {
 	// Based on David Eberly's Computation of Distance Between Line Segments algorithm.
 
@@ -743,7 +745,9 @@ Vector<Plane> Geometry3D::build_cylinder_planes(real_t p_radius, real_t p_height
 	Vector<Plane> planes;
 
 	const double sides_step = Math::TAU / p_sides;
-	planes.resize(MAX(p_sides, 0) + 2);
+	const uint64_t plane_count = uint64_t(MAX(p_sides, 0)) + 2;
+	ERR_FAIL_COND_V(plane_count > std::numeric_limits<int>::max(), Vector<Plane>());
+	ERR_FAIL_COND_V(planes.resize(int(plane_count)) != OK, Vector<Plane>());
 	Plane *plane_data = planes.ptrw();
 	int idx = 0;
 	for (int i = 0; i < p_sides; i++) {
@@ -778,7 +782,9 @@ Vector<Plane> Geometry3D::build_sphere_planes(real_t p_radius, int p_lats, int p
 	axis_neg[p_axis] = -1.0;
 
 	const double lon_step = Math::TAU / p_lons;
-	planes.resize(MAX(p_lons, 0) * (1 + 2 * MAX(p_lats, 0)));
+	const uint64_t plane_count = uint64_t(MAX(p_lons, 0)) * (1 + uint64_t(2) * uint64_t(MAX(p_lats, 0)));
+	ERR_FAIL_COND_V(plane_count > std::numeric_limits<int>::max(), Vector<Plane>());
+	ERR_FAIL_COND_V(planes.resize(int(plane_count)) != OK, Vector<Plane>());
 	Plane *plane_data = planes.ptrw();
 	int idx = 0;
 	for (int i = 0; i < p_lons; i++) {
@@ -812,7 +818,9 @@ Vector<Plane> Geometry3D::build_capsule_planes(real_t p_radius, real_t p_height,
 	axis_neg[p_axis] = -1.0;
 
 	const double sides_step = Math::TAU / p_sides;
-	planes.resize(MAX(p_sides, 0) * (1 + 2 * MAX(p_lats, 0)));
+	const uint64_t plane_count = uint64_t(MAX(p_sides, 0)) * (1 + uint64_t(2) * uint64_t(MAX(p_lats, 0)));
+	ERR_FAIL_COND_V(plane_count > std::numeric_limits<int>::max(), Vector<Plane>());
+	ERR_FAIL_COND_V(planes.resize(int(plane_count)) != OK, Vector<Plane>());
 	Plane *plane_data = planes.ptrw();
 	int idx = 0;
 	for (int i = 0; i < p_sides; i++) {
