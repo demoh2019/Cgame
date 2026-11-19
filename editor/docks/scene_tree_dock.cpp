@@ -1406,17 +1406,24 @@ void SceneTreeDock::_tool_selected(int p_tool, bool p_confirm_override) {
 				placeholder_editable_instance_remove_dialog->set_text(TTR("Enabling \"Load as Placeholder\" will disable \"Editable Children\" and cause all properties of the node to be reverted to their default."));
 				placeholder_editable_instance_remove_dialog->popup_centered();
 			} else {
-				placeholder = !placeholder;
+				EditorUndoRedoManager *undo_redo = EditorUndoRedoManager::get_singleton();
+				undo_redo->create_action(TTR("Toggle Load as Placeholder"));
+
+				Node *root = EditorNode::get_singleton()->get_edited_scene();
 				for (Node *node : selection) {
 					if (node) {
-						if (placeholder) {
-							EditorNode::get_singleton()->get_edited_scene()->set_editable_instance(node, false);
+						if (!placeholder && root->is_editable_instance(node)) {
+							root->set_editable_instance(node, false);
 						}
 
-						node->set_scene_instance_load_placeholder(placeholder);
+						undo_redo->add_do_method(node, "set_scene_instance_load_placeholder", !placeholder);
+						undo_redo->add_undo_method(node, "set_scene_instance_load_placeholder", placeholder);
 					}
 				}
-				scene_tree->update_tree();
+
+				undo_redo->add_do_method(scene_tree, "update_tree");
+				undo_redo->add_undo_method(scene_tree, "update_tree");
+				undo_redo->commit_action();
 			}
 		} break;
 		case TOOL_SCENE_MAKE_LOCAL: {
@@ -2779,16 +2786,26 @@ void SceneTreeDock::_toggle_placeholder_from_selection() {
 	List<Node *> selection = editor_selection->get_full_selected_node_list();
 	ItemCheckState placeholder_state = _is_placeholder(selection);
 	bool placeholder = placeholder_state != STATE_CHECKED;
-	if (placeholder) {
-		_toggle_editable_children(selection, STATE_CHECKED);
-	}
+
+	EditorUndoRedoManager *undo_redo = EditorUndoRedoManager::get_singleton();
+	// Explicit context is needed to workaround a bug with nesting actions in the undo manager.
+	undo_redo->create_action(TTR("Toggle Load as Placeholder"), UndoRedo::MERGE_DISABLE, edited_scene);
 
 	for (Node *node : selection) {
 		if (node) {
-			node->set_scene_instance_load_placeholder(placeholder);
+			undo_redo->add_do_method(node, "set_scene_instance_load_placeholder", placeholder);
+			undo_redo->add_undo_method(node, "set_scene_instance_load_placeholder", !placeholder);
 		}
 	}
-	scene_tree->update_tree();
+
+	if (placeholder) {
+		_toggle_editable_children(selection, STATE_CHECKED);
+	} else {
+		undo_redo->add_undo_method(scene_tree, "update_tree");
+		undo_redo->add_do_method(scene_tree, "update_tree");
+	}
+
+	undo_redo->commit_action();
 }
 
 void SceneTreeDock::_reparent_nodes_to_root(Node *p_root, const Array &p_nodes, Node *p_owner) {
