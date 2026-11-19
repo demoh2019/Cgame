@@ -36,6 +36,7 @@ TEST_FORCE_LINK(test_godot_physics_2d_solver)
 #ifdef MODULE_GODOT_PHYSICS_2D_ENABLED
 
 #include "modules/godot_physics_2d/godot_body_2d.h"
+#include "modules/godot_physics_2d/godot_constraint_2d.h"
 #include "modules/godot_physics_2d/godot_physics_server_2d.h"
 #include "servers/physics_2d/physics_server_2d.h"
 
@@ -286,6 +287,58 @@ TEST_CASE("[SceneTree][GodotPhysics2D] Large islands are solved in parallel dete
 	}
 	CHECK(mismatches == 0);
 	CHECK(escaped == 0);
+}
+
+class PairStub2D : public GodotConstraint2D {
+	GodotBody2D *bodies[2] = { nullptr, nullptr };
+
+public:
+	virtual bool setup(real_t p_step) override { return false; }
+	virtual bool pre_solve(real_t p_step) override { return false; }
+	virtual void solve(real_t p_step) override {}
+
+	PairStub2D(GodotBody2D *p_a, GodotBody2D *p_b) :
+			GodotConstraint2D(bodies, 2) {
+		bodies[0] = p_a;
+		bodies[1] = p_b;
+		p_a->add_constraint(this, 0);
+		p_b->add_constraint(this, 1);
+	}
+	~PairStub2D() {
+		bodies[0]->remove_constraint(this, 0);
+		bodies[1]->remove_constraint(this, 1);
+	}
+};
+
+TEST_CASE("[GodotPhysics2D] Body constraint slots survive removal in any order") {
+	const int count = 257;
+	GodotBody2D shared;
+	LocalVector<GodotBody2D> others;
+	others.resize(count);
+
+	Vector<PairStub2D *> constraints;
+	for (int i = 0; i < count; i++) {
+		constraints.push_back(memnew(PairStub2D(&shared, &others[i])));
+	}
+	CHECK(shared.get_constraint_list().size() == uint32_t(count));
+
+	// 37 is coprime with 257, so every constraint is removed once, in scrambled order.
+	for (int i = 0; i < count; i++) {
+		const int victim = (i * 37) % count;
+		memdelete(constraints[victim]);
+		constraints.write[victim] = nullptr;
+		uint32_t alive = 0;
+		for (PairStub2D *c : constraints) {
+			if (!c) {
+				continue;
+			}
+			alive++;
+			REQUIRE(c->get_body_slot(0) < shared.get_constraint_list().size());
+			CHECK(shared.get_constraint_list()[c->get_body_slot(0)].first == c);
+		}
+		CHECK(shared.get_constraint_list().size() == alive);
+	}
+	CHECK(shared.get_constraint_list().is_empty());
 }
 
 } // namespace TestGodotPhysics2DSolver
