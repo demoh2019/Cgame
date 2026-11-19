@@ -1,0 +1,33 @@
+name: Camera decode and iOS shader size regressions
+
+on:
+  push:
+    branches: [develop]
+    paths:
+      - 'modules/camera/buffer_decoder.cpp'
+      - 'modules/camera/buffer_decoder.h'
+      - 'editor/export/shader_baker/shader_baker_export_plugin.cpp'
+      - 'misc/scripts/tests/test_camera_shader_export_performance.py'
+      - '.github/workflows/camera-shader-export-performance.yml'
+  pull_request:
+    paths:
+      - 'modules/camera/buffer_decoder.cpp'
+      - 'modules/camera/buffer_decoder.h'
+      - 'editor/export/shader_baker/shader_baker_export_plugin.cpp'
+      - 'misc/scripts/tests/test_camera_shader_export_performance.py'
+      - '.github/workflows/camera-shader-export-performance.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  source-regressions:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    steps:
+      - uses: actions/checkout@v4
+      - name: Syntax and semantic source invariants
+        run: |
+          python3 -m py_compile misc/scripts/tests/test_camera_shader_export_performance.py
+          python3 -m unittest discover -s misc/scripts/tests -p test_camera_shader_export_performance.py -v
