@@ -15,11 +15,12 @@ Requires Python 3.10+ and a directory containing `project.godot`. Default exit s
 
 ## Checks
 
-- `MISSING_RESOURCE`: explicitly referenced `res://` path does not exist.
+- `MISSING_RESOURCE`: explicitly referenced `res://` path does not exist, including a dangling symlink.
 - `CASE_MISMATCH`: resource exists but its file name has different case than in the reference. This is a common cross-platform regression.
 - `CASE_COLLISION`: two different assets map to the same case-folded path.
 - `INVALID_URI`: empty, parent-traversing, non-canonical or Windows-style `res://` path.
 - `OUTSIDE_PROJECT`: a symlink would resolve an asset reference outside the project directory.
+- `UNRESOLVABLE_RESOURCE`: a resource path cannot be resolved (for example, a symlink loop).
 - `DEPENDENCY_CYCLE`: a static resource/script dependency cycle spanning multiple files (warning, because some cycles may be intentional).
 - `UNREADABLE_TEXT`: a text resource could not be decoded (warning).
 
