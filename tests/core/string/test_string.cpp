@@ -2652,6 +2652,31 @@ TEST_CASE("[String] Linear path normalization preserves prefixes and parent trav
 	CHECK((String("res://") + parents).simplify_path() == "res://file.tscn");
 }
 
+TEST_CASE("[String] Canonical paths reuse the original COW allocation") {
+	const String relative = "folder/assets/scene.tscn";
+	const String resource = U"res://\u041f\u0430\u043f\u043a\u0430/\u0444\u0430\u0439\u043b_\U0001F600.tscn";
+	const String user = "user://saves/slot1.dat";
+	const String unix_absolute = "/var/data/level.tscn";
+	const String unc = "//server/share/file.tscn";
+	for (const String &path : { relative, resource, user, unix_absolute, unc }) {
+		const String normalized = path.simplify_path();
+		CHECK(normalized == path);
+		CHECK(normalized.ptr() == path.ptr());
+	}
+
+	// Non-canonical paths must still use the normalizer rather than the shortcut.
+	CHECK(String("dir//file").simplify_path() == "dir/file");
+	CHECK(String("dir\\file").simplify_path() == "dir/file");
+	CHECK(String("dir/./file").simplify_path() == "dir/file");
+	CHECK(String("dir/../file").simplify_path() == "file");
+	CHECK(String("res://../file").simplify_path() == "res://../file");
+
+	const String long_canonical = String("folder/").repeat(4096) + "file.tscn";
+	const String long_result = long_canonical.simplify_path();
+	CHECK(long_result == long_canonical);
+	CHECK(long_result.ptr() == long_canonical.ptr());
+}
+
 TEST_CASE("[String] Similarity indexed bigram branch matches quadratic reference") {
 	auto reference = [](const String &p_source, const String &p_target) -> float {
 		if (p_source == p_target) {
