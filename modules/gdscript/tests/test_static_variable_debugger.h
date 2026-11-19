@@ -29,10 +29,14 @@
 
 #pragma once
 
+#include "core/io/dir_access.h"
+#include "core/io/file_access.h"
+#include "core/io/resource_loader.h"
 #include "core/object/script_backtrace.h"
 #include "modules/gdscript/gdscript.h"
 #include "modules/gdscript/gdscript_cache.h"
 #include "tests/test_macros.h"
+#include "tests/test_utils.h"
 
 namespace TestGDScriptStaticDebugger {
 
@@ -94,6 +98,56 @@ TEST_CASE("[GDScriptStaticDebugger] Backtrace includes statics only when capture
 		CHECK_FALSE(result_name.is_empty());
 		CHECK(result_name.contains("/"));
 	}
+}
+
+TEST_CASE("[GDScriptStaticDebugger] Compiled static value appears in debugger and captured backtrace") {
+	GDScriptLanguage *lang = GDScriptLanguage::get_singleton();
+	REQUIRE(lang != nullptr);
+	lang->init();
+
+	const String path = TestUtils::get_temp_path("gdscript_static_debugger_test.gd");
+	Ref<FileAccess> output = FileAccess::open(path, FileAccess::WRITE);
+	REQUIRE(output.is_valid());
+	output->store_string("extends RefCounted\\nstatic var ai_score: int = 42\\n");
+	output->close();
+
+	Ref<GDScript> script = ResourceLoader::load(path);
+	REQUIRE(script.is_valid());
+	CHECK(script->is_script_valid());
+	REQUIRE(script->debug_get_static_member_indices().has(SNAME("ai_score")));
+
+	const String key = script->get_fully_qualified_name();
+	GDScriptCache::add_static_script(script);
+	List<String> names;
+	List<Variant> values;
+	lang->debug_get_static_variables(&names, &values);
+	REQUIRE_EQ(names.size(), values.size());
+
+	bool found = false;
+	const List<String>::Element *name = names.front();
+	const List<Variant>::Element *value = values.front();
+	while (name && value) {
+		if (name->get().ends_with("/ai_score")) {
+			CHECK_EQ(value->get(), Variant(42));
+			found = true;
+		}
+		name = name->next();
+		value = value->next();
+	}
+	CHECK(found);
+
+	ScriptBacktrace captured(lang, true);
+	bool captured_value = false;
+	for (int i = 0; i < captured.get_static_variable_count(); i++) {
+		if (captured.get_static_variable_name(i).ends_with("/ai_score")) {
+			CHECK_EQ(captured.get_static_variable_value(i), Variant(42));
+			captured_value = true;
+		}
+	}
+	CHECK(captured_value);
+
+	GDScriptCache::remove_static_script(key);
+	CHECK_EQ(DirAccess::remove_absolute(path), OK);
 }
 
 } // namespace TestGDScriptStaticDebugger
