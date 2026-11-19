@@ -63,6 +63,9 @@ class TerrainEditorPlugin : public EditorPlugin {
 	bool _apply_brush(Camera3D *p_camera, const Vector2 &p_screen_position);
 	void _finish_stroke();
 	void _paint_toggled(bool p_enabled);
+#ifndef PHYSICS_3D_DISABLED
+	void _create_collision();
+#endif
 
 protected:
 	void _notification(int p_what);
