@@ -297,6 +297,71 @@ finite body states both with the option disabled and enabled. It is a smoke
 regression, not a measured performance benefit or a guarantee that all
 possible overfull manifolds are exercised.
 
+## Bullet-style rolling and spinning resistance (opt-in 2D/3D)
+
+Bullet Physics includes rolling resistance for round shapes and torsional
+spinning friction for angular motion along the contact normal. GodotPhysics
+already implements ordinary Coulomb sliding friction, but that alone does
+not stop a perfectly rolling sphere on flat ground or a spinning disc on a
+static support. The built-in Cgame solver now offers inexpensive **optional**
+pure-angular contact resistance without changing existing material friction.
+
+```ini
+[physics]
+2d/solver/rolling_friction=0.2
+3d/solver/rolling_friction=0.2
+3d/solver/spinning_friction=0.2
+```
+
+All three settings default to **0**, preserving existing projects and
+third-party backends. They are read and clamped once per GodotPhysics space
+at construction time; changing them does not retroactively affect an
+existing space. No per-contact state is allocated.
+
+The solver uses the previous frame's *warm-started normal impulse* as the
+contact load. For an angular direction with effective inverse inertia
+`K`, the torque impulse is `clamp(-relative_angular_speed / K,
+-coefficient * load * radius, +coefficient * load * radius)`.
+The effective radius is the smaller distance from a participating dynamic
+body's center of mass to the loaded contact; a static body's lever arm
+does not limit the rolling radius of a dynamic sphere.
+
+The angular correction is applied **once per timestep** in the contact
+pre-solve, after restoring cached normal impulses. It does not execute on
+every PGS iteration and cannot multiply its budget by the iteration
+count. In 3D, spinning acts *along* the contact normal; rolling acts
+*in its tangent plane*. The rolling axis is recalculated after any spin
+correction to handle anisotropic inertia. Mixed-face manifolds with normals
+more than approximately 11 degrees apart skip the extra angular torque
+rather than choose an arbitrary axis. Contacts without load or with
+singular/invalid effective inertia never receive extra torque. The
+correction acts only on rigid-rigid contact pairs, not rigid/soft pairs.
+
+This is a conservative approximation rather than a full warm-started
+rolling-friction constraint: it begins acting after the first normal
+impulse has been cached. The coefficient is dimensionless; the physical
+torque cap also depends on contact radius, which uses the world's length
+unit (pixels in 2D, meters in 3D).
+
+Native unit tests cover missing load, singular mass, impulse limits, radius
+scaling and dissipativity. The standalone reference regression includes
+5,000 random speed/inertia/load combinations, and the Godot runtime
+smoke scene compares a rolling 2D circle and a spinning 3D sphere before
+and after enabling the feature:
+
+```bash
+python3 -m unittest discover -s tests/stress \
+  -p 'test_physics_angular_contact_friction.py' -v
+
+./bin/godot.macos.editor.arm64 --headless \
+  --path tests/stress \
+  --script res://physics_angular_friction_regression.gd
+```
+
+Validate angular decay, energy behavior, sleeping transitions, CPU time and
+RAM on representative scenes before enabling in production; no measured
+speedup or stability benefit is asserted solely from these source tests.
+
 ## Converged-contact zero-impulse fast path and singular-mass guards
 
 Built-in GodotPhysics 2D and 3D now skip the **body update**, but not the
