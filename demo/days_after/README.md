@@ -36,6 +36,8 @@ or third-party plugins are required.
 | 7 | Use reinforced bandage |
 | 8 | Craft and equip a rusty spear |
 | 9 | Craft and equip a scrap vest |
+| 0 | Craft and equip a reinforced spear (T2 wood + T2 stone + T1 fiber) |
+| Q | Active skill from currently owned and equipped spear |
 | F | Melee attack (forward hit arc) |
 | R | Restart the scene |
 

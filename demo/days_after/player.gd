@@ -94,6 +94,8 @@ func _physics_process(delta: float) -> void:
         perform_weapon_skill()
     if Input.is_action_just_pressed("craft_spear"):
         craft_recipe("rusty_spear")
+    if Input.is_action_just_pressed("craft_reinforced_spear"):
+        craft_recipe("reinforced_spear")
     if Input.is_action_just_pressed("craft_vest"):
         craft_recipe("scrap_vest")
     if Input.is_action_just_pressed("interact"):
@@ -288,7 +290,7 @@ func perform_weapon_skill() -> bool:
 func get_weapon_skill_status() -> String:
     var skill: Dictionary = WEAPON_SKILLS.for_weapon(equipped_weapon)
     if skill.is_empty() or get_item_count(equipped_weapon) < 1:
-        return "Q: нужен экипированный меч/копьё"
+        return "Q: требуется экипированное копьё"
     if weapon_skill_cooldown > 0.0:
         return "%s: %.1f сек" % [str(skill["name"]), weapon_skill_cooldown]
     return "%s: готово (энергия %d)" % [str(skill["name"]), int(skill["energy_cost"])]

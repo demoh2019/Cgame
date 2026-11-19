@@ -43,8 +43,8 @@ func _run() -> void:
     # Put a real infected just outside normal range, but within spear skill range.
     infected.global_position = survivor.global_position - survivor.global_transform.basis.z * 2.9
     var infected_health: float = float(infected.get("health"))
-    if not InputMap.has_action("weapon_skill"):
-        _fail("Q action not installed by main game")
+    if not InputMap.has_action("weapon_skill") or not InputMap.has_action("craft_reinforced_spear"):
+        _fail("Q or reinforced spear craft action not installed by main game")
         return
     if survivor.call("perform_weapon_skill"):
         _fail("Unarmed player used a weapon skill")
@@ -87,9 +87,17 @@ func _run() -> void:
         _fail("Failed skill spent energy")
         return
 
-    survivor.call("add_item", "reinforced_spear", 1)
-    if not survivor.call("equip_item", "weapon", "reinforced_spear"):
-        _fail("Cannot change equipped weapon")
+    survivor.call("add_item", "wood_t2", 2)
+    survivor.call("add_item", "stone_t2", 2)
+    survivor.call("add_item", "fiber_t1", 1)
+    if not survivor.call("craft_recipe", "reinforced_spear"):
+        _fail("Cannot craft the reinforced spear from gathered tiered materials")
+        return
+    if int(survivor.call("get_item_count", "wood_t2")) != 0 or int(survivor.call("get_item_count", "stone_t2")) != 0:
+        _fail("Reinforced crafting failed to consume both tier 2 resources")
+        return
+    if str(survivor.get("equipped_weapon")) != "reinforced_spear":
+        _fail("Crafted reinforced spear was not auto-equipped")
         return
     survivor.set("combat_energy", 100.0)
     if not survivor.call("perform_weapon_skill"):

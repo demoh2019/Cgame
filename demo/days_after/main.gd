@@ -45,6 +45,7 @@ func _configure_controls() -> void:
     _bind_key("weapon_skill", KEY_Q)
     _bind_key("craft_spear", KEY_8)
     _bind_key("craft_vest", KEY_9)
+    _bind_key("craft_reinforced_spear", KEY_0)
 
 
 func _bind_key(action_name: String, key_code: int) -> void:
@@ -259,7 +260,7 @@ func _build_hud() -> void:
     var help_label := Label.new()
     help_label.text = "WASD движение | Shift бег | Space прыжок | F удар\n" + \
         "E сбор | 1 еда | 2 вода | 3 бинт | 4 инструмент | 5 лечение\n" + \
-        "6 улучшенный бинт | 7 лечение | 8 копьё | 9 броня\n" + \
+        "6 улучшенный бинт | 7 лечение | 8 копьё | 9 броня | 0 усиленное копьё\n" + \
         "F обычная атака | Q особый удар копьём | Esc мышь | R перезапуск"
     column.add_child(help_label)
 
