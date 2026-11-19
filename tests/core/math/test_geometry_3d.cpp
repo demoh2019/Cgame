@@ -202,4 +202,87 @@ TEST_CASE("[Geometry3D] Triangle and Sphere Intersect") {
 	CHECK(Geometry3D::triangle_sphere_intersection_test(triangle_a, triangle_b, triangle_c, Vector3(0, 1, 0), Vector3(20, 0, 0), 5, triangle_contact, sphere_contact) == false);
 }
 
+TEST_CASE("[Geometry3D] Preallocated plane arrays preserve reference formulas and ordering") {
+	const int segment_counts[] = { 1, 3, 8, 32, 256 };
+	const int latitude_counts[] = { 0, 1, 3, 9 };
+	for (int axis_index = 0; axis_index < 3; axis_index++) {
+		const Vector3::Axis axis_index_3d = static_cast<Vector3::Axis>(axis_index);
+		Vector3 axis;
+		axis[axis_index_3d] = 1.0;
+		Vector3 axis_neg;
+		axis_neg[(axis_index_3d + 1) % 3] = 1.0;
+		axis_neg[(axis_index_3d + 2) % 3] = 1.0;
+		axis_neg[axis_index_3d] = -1.0;
+
+		for (int segments : segment_counts) {
+			const real_t radius = 2.75;
+			const real_t height = 9.25;
+			const double step = Math::TAU / segments;
+
+			Vector<Plane> cylinder_expected;
+			for (int i = 0; i < segments; i++) {
+				Vector3 normal;
+				normal[(axis_index_3d + 1) % 3] = Math::cos(i * step);
+				normal[(axis_index_3d + 2) % 3] = Math::sin(i * step);
+				cylinder_expected.push_back(Plane(normal, radius));
+			}
+			cylinder_expected.push_back(Plane(axis, height * 0.5f));
+			cylinder_expected.push_back(Plane(-axis, height * 0.5f));
+
+			const Vector<Plane> cylinder_actual = Geometry3D::build_cylinder_planes(radius, height, segments, axis_index_3d);
+			REQUIRE_EQ(cylinder_actual.size(), cylinder_expected.size());
+			for (int j = 0; j < cylinder_actual.size(); j++) {
+				CHECK(cylinder_actual[j].is_equal_approx(cylinder_expected[j]));
+			}
+
+			for (int lats : latitude_counts) {
+				Vector<Plane> sphere_expected;
+				Vector<Plane> capsule_expected;
+				for (int i = 0; i < segments; i++) {
+					Vector3 normal;
+					normal[(axis_index_3d + 1) % 3] = Math::cos(i * step);
+					normal[(axis_index_3d + 2) % 3] = Math::sin(i * step);
+					sphere_expected.push_back(Plane(normal, radius));
+					capsule_expected.push_back(Plane(normal, radius));
+					for (int j = 1; j <= lats; j++) {
+						Vector3 plane_normal = normal.lerp(axis, j / (real_t)lats).normalized();
+						sphere_expected.push_back(Plane(plane_normal, radius));
+						sphere_expected.push_back(Plane(plane_normal * axis_neg, radius));
+						Vector3 position = axis * height * 0.5f + plane_normal * radius;
+						capsule_expected.push_back(Plane(plane_normal, position));
+						capsule_expected.push_back(Plane(plane_normal * axis_neg, position * axis_neg));
+					}
+				}
+
+				const Vector<Plane> sphere_actual = Geometry3D::build_sphere_planes(radius, lats, segments, axis_index_3d);
+				const Vector<Plane> capsule_actual = Geometry3D::build_capsule_planes(radius, height, segments, lats, axis_index_3d);
+				REQUIRE_EQ(sphere_actual.size(), sphere_expected.size());
+				REQUIRE_EQ(capsule_actual.size(), capsule_expected.size());
+				for (int j = 0; j < sphere_actual.size(); j++) {
+					CHECK(sphere_actual[j].is_equal_approx(sphere_expected[j]));
+				}
+				for (int j = 0; j < capsule_actual.size(); j++) {
+					CHECK(capsule_actual[j].is_equal_approx(capsule_expected[j]));
+				}
+			}
+		}
+	}
+}
+
+TEST_CASE("[Geometry3D] Known-size builders handle zero and negative dimensions") {
+	const Vector<Plane> cylinder = Geometry3D::build_cylinder_planes(1.0, 2.0, -1);
+	REQUIRE_EQ(cylinder.size(), 2);
+	CHECK(cylinder[0].is_equal_approx(Plane(Vector3(0, 0, 1), 1.0)));
+	CHECK(cylinder[1].is_equal_approx(Plane(Vector3(0, 0, -1), 1.0)));
+
+	const Vector<Plane> sphere_empty = Geometry3D::build_sphere_planes(1.0, 2, -1);
+	CHECK_EQ(sphere_empty.size(), 0);
+	const Vector<Plane> sphere_flat = Geometry3D::build_sphere_planes(1.0, -1, 3);
+	CHECK_EQ(sphere_flat.size(), 3);
+	const Vector<Plane> capsule_empty = Geometry3D::build_capsule_planes(1.0, 2.0, -1, 3);
+	CHECK_EQ(capsule_empty.size(), 0);
+	const Vector<Plane> capsule_flat = Geometry3D::build_capsule_planes(1.0, 2.0, 3, -1);
+	CHECK_EQ(capsule_flat.size(), 3);
+}
+
 } // namespace TestGeometry3D

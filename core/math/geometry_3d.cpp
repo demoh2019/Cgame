@@ -32,6 +32,8 @@
 
 #include "core/templates/hash_map.h"
 
+#include <limits>
+
 void Geometry3D::get_closest_points_between_segments(const Vector3 &p_p0, const Vector3 &p_p1, const Vector3 &p_q0, const Vector3 &p_q1, Vector3 &r_ps, Vector3 &r_qt) {
 	// Based on David Eberly's Computation of Distance Between Line Segments algorithm.
 
@@ -743,19 +745,25 @@ Vector<Plane> Geometry3D::build_cylinder_planes(real_t p_radius, real_t p_height
 	Vector<Plane> planes;
 
 	const double sides_step = Math::TAU / p_sides;
+	const uint64_t plane_count = uint64_t(MAX(p_sides, 0)) + 2;
+	ERR_FAIL_COND_V(plane_count > std::numeric_limits<int>::max(), Vector<Plane>());
+	ERR_FAIL_COND_V(planes.resize(int(plane_count)) != OK, Vector<Plane>());
+	Plane *plane_data = planes.ptrw();
+	int idx = 0;
 	for (int i = 0; i < p_sides; i++) {
 		Vector3 normal;
 		normal[(p_axis + 1) % 3] = Math::cos(i * sides_step);
 		normal[(p_axis + 2) % 3] = Math::sin(i * sides_step);
 
-		planes.push_back(Plane(normal, p_radius));
+		plane_data[idx++] = Plane(normal, p_radius);
 	}
 
 	Vector3 axis;
 	axis[p_axis] = 1.0;
+	real_t half_height = p_height * 0.5f;
 
-	planes.push_back(Plane(axis, p_height * 0.5f));
-	planes.push_back(Plane(-axis, p_height * 0.5f));
+	plane_data[idx++] = Plane(axis, half_height);
+	plane_data[idx++] = Plane(-axis, half_height);
 
 	return planes;
 }
@@ -774,17 +782,22 @@ Vector<Plane> Geometry3D::build_sphere_planes(real_t p_radius, int p_lats, int p
 	axis_neg[p_axis] = -1.0;
 
 	const double lon_step = Math::TAU / p_lons;
+	const uint64_t plane_count = uint64_t(MAX(p_lons, 0)) * (1 + uint64_t(2) * uint64_t(MAX(p_lats, 0)));
+	ERR_FAIL_COND_V(plane_count > std::numeric_limits<int>::max(), Vector<Plane>());
+	ERR_FAIL_COND_V(planes.resize(int(plane_count)) != OK, Vector<Plane>());
+	Plane *plane_data = planes.ptrw();
+	int idx = 0;
 	for (int i = 0; i < p_lons; i++) {
 		Vector3 normal;
 		normal[(p_axis + 1) % 3] = Math::cos(i * lon_step);
 		normal[(p_axis + 2) % 3] = Math::sin(i * lon_step);
 
-		planes.push_back(Plane(normal, p_radius));
+		plane_data[idx++] = Plane(normal, p_radius);
 
 		for (int j = 1; j <= p_lats; j++) {
 			Vector3 plane_normal = normal.lerp(axis, j / (real_t)p_lats).normalized();
-			planes.push_back(Plane(plane_normal, p_radius));
-			planes.push_back(Plane(plane_normal * axis_neg, p_radius));
+			plane_data[idx++] = Plane(plane_normal, p_radius);
+			plane_data[idx++] = Plane(plane_normal * axis_neg, p_radius);
 		}
 	}
 
@@ -805,18 +818,23 @@ Vector<Plane> Geometry3D::build_capsule_planes(real_t p_radius, real_t p_height,
 	axis_neg[p_axis] = -1.0;
 
 	const double sides_step = Math::TAU / p_sides;
+	const uint64_t plane_count = uint64_t(MAX(p_sides, 0)) * (1 + uint64_t(2) * uint64_t(MAX(p_lats, 0)));
+	ERR_FAIL_COND_V(plane_count > std::numeric_limits<int>::max(), Vector<Plane>());
+	ERR_FAIL_COND_V(planes.resize(int(plane_count)) != OK, Vector<Plane>());
+	Plane *plane_data = planes.ptrw();
+	int idx = 0;
 	for (int i = 0; i < p_sides; i++) {
 		Vector3 normal;
 		normal[(p_axis + 1) % 3] = Math::cos(i * sides_step);
 		normal[(p_axis + 2) % 3] = Math::sin(i * sides_step);
 
-		planes.push_back(Plane(normal, p_radius));
+		plane_data[idx++] = Plane(normal, p_radius);
 
 		for (int j = 1; j <= p_lats; j++) {
 			Vector3 plane_normal = normal.lerp(axis, j / (real_t)p_lats).normalized();
 			Vector3 position = axis * p_height * 0.5f + plane_normal * p_radius;
-			planes.push_back(Plane(plane_normal, position));
-			planes.push_back(Plane(plane_normal * axis_neg, position * axis_neg));
+			plane_data[idx++] = Plane(plane_normal, position);
+			plane_data[idx++] = Plane(plane_normal * axis_neg, position * axis_neg);
 		}
 	}
 
