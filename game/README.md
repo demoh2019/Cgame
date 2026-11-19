@@ -1713,3 +1713,16 @@ Run `godot --headless --path game --script res://tests/run_all.gd`:
 safe-zone/PvE immunity, privacy, pricing, atomic vendor trades, decay,
 legacy saves, invalid values and death retention. No new native engine
 capability is required.
+
+## Spear piercing attacks
+
+The existing T1-T4 Survival Spear's **Piercing Thrust (G)** now hits up to
+three distinct valid targets along its forward **4.5 m** line. It retains
+its original 25-energy cost, 5.5-second cooldown and 1.45x damage. The
+server enforces all existing party-friendly-fire and PvP zone protections.
+Clubs and firearms retain single-target active skills.
+
+The canonical local preview already cycles through owned weapons with **4**;
+the online HUD names the currently equipped ability. Test coverage:
+`game/tests/test_piercing_thrust.gd` within `game/tests/run_all.gd`.
+No additional native engine APIs are required for this gameplay feature.

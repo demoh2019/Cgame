@@ -78,7 +78,7 @@ static func active_skill(weapon_id: String) -> Dictionary:
 	if weapon_id.begins_with("spear_") and str(info.get("weapon", "")) == "melee":
 		return {"id": "piercing_thrust", "energy_cost": 25.0, "cooldown": 5.5,
 			"attack_lock": 0.9, "range": weapon_reach(weapon_id) + 1.0,
-			"damage": weapon_damage(weapon_id) * 1.45,
+			"pierce_targets": 3, "damage": weapon_damage(weapon_id) * 1.45,
 			"ranged": false}
 	if weapon_id.begins_with("club_") and str(info.get("weapon", "")) == "melee":
 		return {"id": "heavy_strike", "energy_cost": 30.0, "cooldown": 6.0,

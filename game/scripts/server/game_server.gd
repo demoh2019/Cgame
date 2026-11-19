@@ -1587,13 +1587,28 @@ func cmd_skill(peer_id: int, dir_x: float, dir_z: float) -> Dictionary:
 		player.noise_radius = maxf(player.noise_radius, Defs.GUNSHOT_NOISE_RADIUS)
 		player.noise_timer = maxf(player.noise_timer, Defs.GUNSHOT_NOISE_SECONDS)
 	var origin := Vector2(player.position.x, player.position.z)
-	var hit := _find_hit(player, origin, direction, float(skill["range"]), ranged)
 	events.append({"type": "attack", "peer": peer_id, "dir": direction, "ranged": ranged, "skill": skill["id"], "x": player.position.x, "z": player.position.z})
-	if hit.is_empty():
-		return {"ok": true, "hit": false, "energy": player.combat_energy}
+	# Spear attacks can pierce a narrow forward line. The server selects
+	# distinct enemies and retains party / PvP protection for every hit.
+	var max_hits: int = clampi(int(skill.get("pierce_targets", 1)), 1, 3)
+	var use_line: bool = ranged or max_hits > 1
+	var ignored: Dictionary = {}
+	var count := 0
+	var first_target: String = ""
 	var skilled_damage: float = float(skill["damage"]) * player.progression.combat_damage_multiplier(weapon)
-	_damage_target(player, hit, skilled_damage)
-	return {"ok": true, "hit": true, "target": hit["kind"], "energy": player.combat_energy}
+	for i in max_hits:
+		var hit: Dictionary = _find_hit(player, origin, direction, float(skill["range"]), use_line, ignored)
+		if hit.is_empty():
+			break
+		ignored[str(hit["kind"]) + ":" + str(hit["id"])] = true
+		if count == 0:
+			first_target = str(hit["kind"])
+		_damage_target(player, hit, skilled_damage)
+		count += 1
+	if count == 0:
+		return {"ok": true, "hit": false, "hits": 0, "energy": player.combat_energy}
+	return {"ok": true, "hit": true, "target": first_target,
+		"hits": count, "energy": player.combat_energy}
 
 
 ## Classless evasion: no client-supplied distance, speed, stamina or invulnerability.
@@ -1750,13 +1765,14 @@ func _make_bag(position: Vector3, items: Dictionary, owner_peer: int = -1) -> in
 	return bag_id
 
 
-func _find_hit(attacker: Player, origin: Vector2, direction: Vector2, reach: float, ranged: bool) -> Dictionary:
+func _find_hit(attacker: Player, origin: Vector2, direction: Vector2, reach: float,
+		ranged: bool, ignored: Dictionary = {}) -> Dictionary:
 	var best: Dictionary = {}
 	var best_distance := INF
 	var attacker_zone: int = world.zone_at(attacker.position.x, attacker.position.z)
 	# Zombies.
 	for zombie in zombies.values():
-		if not zombie.is_alive():
+		if not zombie.is_alive() or ignored.has("zombie:" + str(zombie.id)):
 			continue
 		var distance := _hit_distance(origin, direction, Vector2(zombie.position.x, zombie.position.z), reach, ranged, 0.55)
 		if distance >= 0.0 and distance < best_distance:
@@ -1765,7 +1781,7 @@ func _find_hit(attacker: Player, origin: Vector2, direction: Vector2, reach: flo
 	# Red/black PvP only; zone borders do not permit attacking protected players.
 	if ZoneRisk.allows_pvp(attacker_zone):
 		for other in players.values():
-			if other.id == attacker.id or not _alive(other):
+			if other.id == attacker.id or not _alive(other) or ignored.has("player:" + str(other.id)):
 				continue
 			# Friendly party members do not intercept attacks aimed at enemies.
 			var group_id: int = parties.group_of(attacker.id)
