@@ -33,6 +33,7 @@
 #include "gjk_epa.h"
 #include "godot_collision_solver_3d_sat.h"
 #include "godot_soft_body_3d.h"
+#include "godot_concave_query_3d.h"
 
 #define collision_solver sat_calculate_penetration
 //#define collision_solver gjk_epa_calculate_penetration
@@ -254,20 +255,13 @@ bool GodotCollisionSolver3D::solve_soft_body(const GodotShape3D *p_shape_A, cons
 		AABB soft_body_aabb = soft_body->get_bounds();
 		soft_body_aabb.grow_by(collision_margin);
 
-		// Calculate AABB for internal concave shape query (in local space).
+		// Soft-body node bounds are world-space. Map them through the
+		// full inverse affine transform of the concave mesh; normalizing
+		// its basis columns misses triangles under shear or translation.
 		AABB local_aabb;
-		for (int i = 0; i < 3; i++) {
-			Vector3 axis(p_transform_A.basis.get_column(i));
-			real_t axis_scale = 1.0 / axis.length();
-
-			real_t smin = soft_body_aabb.position[i];
-			real_t smax = smin + soft_body_aabb.size[i];
-
-			smin *= axis_scale;
-			smax *= axis_scale;
-
-			local_aabb.position[i] = smin;
-			local_aabb.size[i] = smax - smin;
+		if (!godot_physics_3d_concave_query_aabb(nullptr, Transform3D(), p_transform_A,
+				local_aabb, 0.0, 0.0, &soft_body_aabb)) {
+			local_aabb = concave_shape_A->get_aabb().grow(real_t(CMP_EPSILON));
 		}
 
 		concave_shape_A->cull(local_aabb, soft_body_concave_callback, &query_cinfo, true);
@@ -331,26 +325,15 @@ bool GodotCollisionSolver3D::solve_concave(const GodotShape3D *p_shape_A, const 
 
 	cinfo.aabb_tests = 0;
 
-	Transform3D rel_transform = p_transform_A;
-	rel_transform.origin -= p_transform_B.origin;
-
-	//quickly compute a local AABB
-
+	// Query triangles in the mesh's actual local coordinate system. The
+	// former projection onto normalized mesh basis columns missed overlaps
+	// under shear and misestimated bounds under non-uniform scale.
 	AABB local_aabb;
-	for (int i = 0; i < 3; i++) {
-		Vector3 axis(p_transform_B.basis.get_column(i));
-		real_t axis_scale = 1.0 / axis.length();
-		axis *= axis_scale;
-
-		real_t smin = 0.0, smax = 0.0;
-		p_shape_A->project_range(axis, rel_transform, smin, smax);
-		smin -= p_margin_A;
-		smax += p_margin_A;
-		smin *= axis_scale;
-		smax *= axis_scale;
-
-		local_aabb.position[i] = smin;
-		local_aabb.size[i] = smax - smin;
+	if (!godot_physics_3d_concave_query_aabb(p_shape_A, p_transform_A, p_transform_B,
+			local_aabb, p_margin_A, p_margin_B)) {
+		// Singular meshes cannot be inverted: visit all triangles rather
+		// than silently discarding an actual contact.
+		local_aabb = concave_B->get_aabb().grow(real_t(CMP_EPSILON));
 	}
 
 	concave_B->cull(local_aabb, concave_callback, &cinfo, false);
@@ -543,37 +526,15 @@ bool GodotCollisionSolver3D::solve_distance(const GodotShape3D *p_shape_A, const
 		cinfo.aabb_tests = 0;
 		cinfo.tested = false;
 
-		Transform3D rel_transform = p_transform_A;
-		rel_transform.origin -= p_transform_B.origin;
-
-		//quickly compute a local AABB
-
-		bool use_cc_hint = p_concave_hint != AABB();
-		AABB cc_hint_aabb;
-		if (use_cc_hint) {
-			cc_hint_aabb = p_concave_hint;
-			cc_hint_aabb.position -= p_transform_B.origin;
-		}
-
+		// The hint is a swept world-space AABB. Convert it (or the convex
+		// shape projections) through the full inverse affine mesh basis.
+		// A column-based approximation could skip a triangle under shear.
+		const bool use_cc_hint = p_concave_hint != AABB();
 		AABB local_aabb;
-		for (int i = 0; i < 3; i++) {
-			Vector3 axis(p_transform_B.basis.get_column(i));
-			real_t axis_scale = ((real_t)1.0) / axis.length();
-			axis *= axis_scale;
-
-			real_t smin, smax;
-
-			if (use_cc_hint) {
-				cc_hint_aabb.project_range_in_plane(Plane(axis), smin, smax);
-			} else {
-				p_shape_A->project_range(axis, rel_transform, smin, smax);
-			}
-
-			smin *= axis_scale;
-			smax *= axis_scale;
-
-			local_aabb.position[i] = smin;
-			local_aabb.size[i] = smax - smin;
+		const AABB *world_hint = use_cc_hint ? &p_concave_hint : nullptr;
+		if (!godot_physics_3d_concave_query_aabb(p_shape_A, p_transform_A, p_transform_B,
+				local_aabb, 0.0, 0.0, world_hint)) {
+			local_aabb = concave_B->get_aabb().grow(real_t(CMP_EPSILON));
 		}
 
 		concave_B->cull(local_aabb, concave_distance_callback, &cinfo, false);
