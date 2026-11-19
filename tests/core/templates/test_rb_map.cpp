@@ -107,4 +107,78 @@ TEST_CASE("[RBMap] Leaf insertion avoids redundant parent comparison") {
 	CHECK(map.find({ 20 })->value() == 1);
 }
 
+
+TEST_CASE("[RBMap] find_closest returns greatest equivalent or smaller key") {
+	RBMap<int, int> map;
+	CHECK(map.find_closest(1) == nullptr);
+	for (int key : { 10, 20, 30, 40 }) {
+		map.insert(key, key * 3);
+	}
+	const int queries[] = { -1, 0, 9, 10, 11, 19, 20, 21, 39, 40, 41, 100 };
+	const int answers[] = { -1, -1, -1, 10, 10, 10, 20, 20, 30, 40, 40, 40 };
+	for (int i = 0; i < 12; i++) {
+		const auto *found = map.find_closest(queries[i]);
+		if (answers[i] == -1) {
+			CHECK(found == nullptr);
+		} else {
+			REQUIRE(found != nullptr);
+			CHECK(found->key() == answers[i]);
+		}
+	}
+	map.erase(20);
+	CHECK(map.find_closest(21)->key() == 10);
+	map.erase(10);
+	CHECK(map.find_closest(21) == nullptr);
+}
+
+TEST_CASE("[RBMap] find_closest compares once per visited level") {
+	RBMap<CountedKey, int> map;
+	for (int i = 0; i < 2048; i++) {
+		map.insert({ i * 2 }, i);
+	}
+	const int depth = map.calculate_depth();
+	for (int query = -1; query <= 4100; query += 37) {
+		CountedKey::comparisons = 0;
+		const auto *found = map.find_closest({ query });
+		CHECK(CountedKey::comparisons <= depth + 1);
+		if (query < 0) {
+			CHECK(found == nullptr);
+		} else {
+			REQUIRE(found != nullptr);
+			CHECK(found->key().value == (query >= 4094 ? 4094 : (query / 2) * 2));
+		}
+	}
+}
+
+TEST_CASE("[RBMap] find_closest matches std::map upper_bound after random mutations") {
+	RBMap<int, int> map;
+	std::map<int, int> reference;
+	uint32_t seed = 0xe52991cdu;
+	for (int i = 0; i < 4000; i++) {
+		seed = seed * 1664525u + 1013904223u;
+		const int value = int((seed >> 8) % 2048u) - 1024;
+		if (i % 7 == 0) {
+			map.erase(value);
+			reference.erase(value);
+		} else {
+			map.insert(value, i);
+			reference[value] = i;
+		}
+		if ((i & 31) == 0) {
+			for (int query = -1200; query <= 1200; query += 53) {
+				auto it = reference.upper_bound(query);
+				const auto *actual = map.find_closest(query);
+				if (it == reference.begin()) {
+					CHECK(actual == nullptr);
+				} else {
+					--it;
+					REQUIRE(actual != nullptr);
+					CHECK(actual->key() == it->first);
+					CHECK(actual->value() == it->second);
+				}
+			}
+		}
+	}
+}
+
 } // namespace TestRBMap

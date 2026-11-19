@@ -341,30 +341,22 @@ private:
 
 	Element *_find_closest(const K &p_key) const {
 		Element *node = _data._root->left;
-		Element *prev = nullptr;
+		Element *result = nullptr;
 		C less;
 
+		// Find the greatest key <= p_key in one comparison per tree level.
+		// Keep a candidate instead of performing a post-search predecessor
+		// walk, and honor strict weak ordering for equivalent keys.
 		while (node != _data._nil) {
-			prev = node;
-
-			if (less(p_key, node->_data.key)) {
-				node = node->left;
-			} else if (less(node->_data.key, p_key)) {
+			if (!less(p_key, node->_data.key)) {
+				result = node;
 				node = node->right;
 			} else {
-				return node; // found
+				node = node->left;
 			}
 		}
 
-		if (prev == nullptr) {
-			return nullptr; // tree empty
-		}
-
-		if (less(p_key, prev->_data.key)) {
-			prev = prev->_prev;
-		}
-
-		return prev;
+		return result;
 	}
 
 	Element *_lower_bound(const K &p_key) const {
