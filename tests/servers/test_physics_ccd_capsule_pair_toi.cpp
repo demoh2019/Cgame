@@ -127,4 +127,27 @@ TEST_CASE("[Physics][CapsulePairTOI] Large linear sweeps maintain first contact 
 	CHECK(Math::abs(fraction - 0.5) < 0.00000002);
 }
 
+
+TEST_CASE("[Physics][CapsulePairTOI] Swept cross-axis separation rejects distant skew 3D capsules") {
+	// These axes are not aligned to any world coordinate axis. Their
+	// common perpendicular is (1,-1,1) / sqrt(3), so the separating
+	// gap is not detectable by a single world-axis interval test.
+	const Vector3 axis_a = Vector3(1.0, 1.0, 0.0).normalized();
+	const Vector3 axis_b = Vector3(0.0, 1.0, 1.0).normalized();
+	double fraction = -1.0;
+	CHECK(physics_ccd_capsule_pair_toi(
+			Vector3(1.2, -1.2, 1.2), Vector3(1.0, 1.0, 0.0),
+			axis_a, axis_b, 3.0, 3.0, 1.0, fraction) ==
+			PhysicsCCDCapsulePairTOIResult::MISS);
+
+	// Crossing the separating plane should *not* be rejected, even if
+	// the initial and final configurations are both separated.
+	CHECK(physics_ccd_capsule_pair_toi(
+			Vector3(1.2, -1.2, 1.2), Vector3(-2.4, 2.4, -2.4),
+			axis_a, axis_b, 3.0, 3.0, 1.0, fraction) ==
+			PhysicsCCDCapsulePairTOIResult::HIT);
+	CHECK(fraction > 0.0);
+	CHECK(fraction < 0.5);
+}
+
 } // namespace TestPhysicsCCDSkewCapsuleTOI
