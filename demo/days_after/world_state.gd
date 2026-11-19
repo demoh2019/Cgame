@@ -26,7 +26,7 @@ static func validate_snapshot(data: Variant) -> bool:
     if not (data is Dictionary):
         return false
     var version: Variant = data.get("version")
-    if not (version is int) or (version != 1 and version != VERSION):
+    if not (version is int or version is float) or (version != 1 and version != VERSION):
         return false
     if not PLAYER_SAVE.validate_snapshot(data.get("player")):
         return false
