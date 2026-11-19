@@ -39,6 +39,7 @@
 #include "jolt_group_filter.h"
 
 #include "core/config/engine.h"
+#include "core/templates/a_hash_map.h"
 #include "servers/physics_3d/physics_server_3d_rendering_server_handler.h"
 #include "servers/rendering/rendering_server.h"
 
@@ -142,7 +143,9 @@ JPH::SoftBodySharedSettings *JoltSoftBody3D::_create_shared_settings() {
 	JPH::Array<JPH::SoftBodySharedSettings::Vertex> &physics_vertices = settings->mVertices;
 	JPH::Array<JPH::SoftBodySharedSettings::Face> &physics_faces = settings->mFaces;
 
-	HashMap<Vector3, int> vertex_to_physics;
+	// Position deduplication is only needed for the first use of each mesh
+	// vertex index. AHashMap avoids node allocations for large cloth meshes.
+	AHashMap<Vector3, int> vertex_to_physics;
 
 	const int mesh_vertex_count = mesh_vertices.size();
 	const int mesh_index_count = mesh_indices.size();
@@ -152,7 +155,10 @@ JPH::SoftBodySharedSettings *JoltSoftBody3D::_create_shared_settings() {
 		index = -1;
 	}
 	physics_vertices.reserve(mesh_vertex_count);
-	vertex_to_physics.reserve(mesh_vertex_count);
+	// The map has a ~75% load factor. Reserve enough slots for the upper
+	// bound of unique referenced vertices to avoid growing mid-conversion.
+	const uint32_t max_referenced_vertices = MIN(uint32_t(mesh_vertex_count), uint32_t(mesh_index_count));
+	vertex_to_physics.reserve(max_referenced_vertices + max_referenced_vertices / 2 + 1);
 
 	int physics_index_count = 0;
 
@@ -163,17 +169,25 @@ JPH::SoftBodySharedSettings *JoltSoftBody3D::_create_shared_settings() {
 
 		for (int j = 0; j < 3; ++j) {
 			const int mesh_index = mesh_indices[i + j];
-			const Vector3 vertex = mesh_vertices[mesh_index];
+			int physics_index = mesh_to_physics[mesh_index];
 
-			HashMap<Vector3, int>::Iterator iter_physics_index = vertex_to_physics.find(vertex);
-
-			if (iter_physics_index == vertex_to_physics.end()) {
-				physics_vertices.emplace_back(JPH::Float3((float)(vertex.x - body_position.GetX()), (float)(vertex.y - body_position.GetY()), (float)(vertex.z - body_position.GetZ())), JPH::Float3(0.0f, 0.0f, 0.0f), 1.0f);
-				iter_physics_index = vertex_to_physics.insert(vertex, physics_index_count++);
+			// Triangle indices repeatedly reference the same mesh vertex.
+			// Bypass the position hash entirely after its first occurrence.
+			if (physics_index == -1) {
+				const Vector3 vertex = mesh_vertices[mesh_index];
+				const int *existing_index = vertex_to_physics.getptr(vertex);
+				if (existing_index != nullptr) {
+					// Distinct mesh indices can still refer to the same position.
+					physics_index = *existing_index;
+				} else {
+					physics_index = physics_index_count++;
+					physics_vertices.emplace_back(JPH::Float3((float)(vertex.x - body_position.GetX()), (float)(vertex.y - body_position.GetY()), (float)(vertex.z - body_position.GetZ())), JPH::Float3(0.0f, 0.0f, 0.0f), 1.0f);
+					vertex_to_physics.insert(vertex, physics_index);
+				}
+				mesh_to_physics[mesh_index] = physics_index;
 			}
 
-			physics_face[j] = iter_physics_index->value;
-			mesh_to_physics[mesh_index] = iter_physics_index->value;
+			physics_face[j] = physics_index;
 		}
 
 		if (physics_face[0] == physics_face[1] || physics_face[0] == physics_face[2] || physics_face[1] == physics_face[2]) {

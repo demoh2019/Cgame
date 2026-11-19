@@ -9,6 +9,7 @@ on:
       - 'modules/godot_physics_3d/godot_step_3d.cpp'
       - 'modules/godot_physics_3d/godot_step_3d.h'
       - 'modules/jolt_physics/spaces/jolt_space_3d.cpp'
+      - 'modules/jolt_physics/objects/jolt_soft_body_3d.cpp'
       - 'modules/jolt_physics/jolt_physics_server_3d.cpp'
       - 'modules/jolt_physics/jolt_physics_server_3d.h'
       - 'modules/jolt_physics/spaces/jolt_layers.cpp'
@@ -29,6 +30,7 @@ on:
       - 'modules/godot_physics_3d/godot_step_3d.cpp'
       - 'modules/godot_physics_3d/godot_step_3d.h'
       - 'modules/jolt_physics/spaces/jolt_space_3d.cpp'
+      - 'modules/jolt_physics/objects/jolt_soft_body_3d.cpp'
       - 'modules/jolt_physics/jolt_physics_server_3d.cpp'
       - 'modules/jolt_physics/jolt_physics_server_3d.h'
       - 'modules/jolt_physics/spaces/jolt_layers.cpp'
@@ -109,6 +111,7 @@ jobs:
           ./bin/godot.linuxbsd.editor.dev.x86_64 --headless --path tests/stress --script res://physics_jolt_pending_broadphase_regression.gd --check-only
           ./bin/godot.linuxbsd.editor.dev.x86_64 --headless --path tests/stress --script res://physics_jolt_contact_scratch_regression.gd --check-only
           ./bin/godot.linuxbsd.editor.dev.x86_64 --headless --path tests/stress --script res://physics_jolt_softbody_area_overlap_regression.gd --check-only
+          ./bin/godot.linuxbsd.editor.dev.x86_64 --headless --path tests/stress --script res://physics_jolt_softbody_vertex_dedup_regression.gd --check-only
           ./bin/godot.linuxbsd.editor.dev.x86_64 --headless --path tests/stress --script res://physics_jolt_layer_filter_regression.gd --check-only
           ./bin/godot.linuxbsd.editor.dev.x86_64 --headless --path tests/stress --script res://physics_jolt_process_info_regression.gd --check-only
       - name: Verify dense contacts, pending cleanup and fast CCD
@@ -247,6 +250,19 @@ jobs:
             --script res://physics_jolt_softbody_area_overlap_regression.gd \
             2>&1 | tee physics-jolt-softbody-area-overlap.log
           grep -Fq 'Jolt soft-body area overlap regression passed.' physics-jolt-softbody-area-overlap.log
+      - name: Regression-test Jolt soft-body cloth index caching
+        shell: bash
+        run: |
+          set -euo pipefail
+          PROJECT="$RUNNER_TEMP/cgame-jolt-softbody-vertices"
+          mkdir -p "$PROJECT"
+          cp -a tests/stress/. "$PROJECT/"
+          printf '\n[physics]\n3d/physics_engine="Jolt Physics"\n' >> "$PROJECT/project.godot"
+          timeout 180s ./bin/godot.linuxbsd.editor.dev.x86_64 \
+            --headless --path "$PROJECT" \
+            --script res://physics_jolt_softbody_vertex_dedup_regression.gd \
+            2>&1 | tee physics-jolt-softbody-vertices.log
+          grep -Fq 'Jolt soft-body vertex dedup regression passed.' physics-jolt-softbody-vertices.log
       - name: Verify Jolt packed object-layer filtering
         shell: bash
         run: |
@@ -293,6 +309,7 @@ jobs:
             physics-capsule-toi.log
             physics-jolt-contact-scratch.log
             physics-jolt-softbody-area-overlap.log
+            physics-jolt-softbody-vertices.log
             physics-jolt-layer-filter.log
             physics-jolt-process-info.log
           if-no-files-found: warn
