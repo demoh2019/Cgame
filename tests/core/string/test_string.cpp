@@ -2387,6 +2387,38 @@ TEST_CASE("[String] c-escape/unescape") {
 	CHECK(s.c_escape().c_unescape() == s);
 }
 
+TEST_CASE("[String] indent linear-time empty lines and Unicode") {
+	CHECK(String().indent("  ").is_empty());
+	CHECK(String("\n\n").indent("  ") == "\n\n");
+	CHECK(String("a\n\nb\n").indent("  ") == "  a\n\n  b\n");
+	CHECK(String("a\n\nb").indent("  ") == "  a\n\n  b");
+	CHECK(String("\r\n\n").indent("\t") == "\t\r\n\n");
+	CHECK(String(U"α\nβ\n").indent(U"▸") == U"▸α\n▸β\n");
+	CHECK(String(U"α\nβ").indent(U"\n") == U"\nα\n\nβ");
+	const String original = U"α\n\nβ";
+	const String same = original.indent("");
+	CHECK(same.ptr() == original.ptr());
+	CHECK(same == original);
+	const String blank = "\n\n";
+	CHECK(blank.indent("\t").ptr() == blank.ptr());
+}
+
+TEST_CASE("[String] indent linear-time large multiline input") {
+	String input;
+	String expected;
+	for (int i = 0; i < 4096; i++) {
+		if (i % 3 == 0) {
+			input += "\n";
+			expected += "\n";
+		} else {
+			input += U"script α\n";
+			expected += U"  script α\n";
+		}
+	}
+	CHECK(input.indent("  ") == expected);
+	CHECK(input.indent("") == input);
+}
+
 TEST_CASE("[String] indent") {
 	static const char *input[] = {
 		"",

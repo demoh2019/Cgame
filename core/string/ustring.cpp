@@ -4256,26 +4256,51 @@ char32_t String::unicode_at(int p_idx) const {
 }
 
 String String::indent(const String &p_prefix) const {
-	String new_string;
-	int line_start = 0;
+	// Calculate the result size before writing, so large script blocks need one
+	// allocation rather than allocating and copying on every line.
+	if (is_empty() || p_prefix.is_empty()) {
+		return *this;
+	}
 
-	for (int i = 0; i < length(); i++) {
-		const char32_t c = operator[](i);
-		if (c == '\n') {
-			if (i == line_start) {
-				new_string += c; // Leave empty lines empty.
-			} else {
-				new_string += p_prefix + substr(line_start, i - line_start + 1);
-			}
-			line_start = i + 1;
+	const char32_t *read = ptr();
+	const char32_t *prefix = p_prefix.ptr();
+	const int text_length = length();
+	const int prefix_length = p_prefix.length();
+
+	int nonempty_lines = 0;
+	bool at_line_start = true;
+	for (int i = 0; i < text_length; i++) {
+		const char32_t c = read[i];
+		if (at_line_start && c != '\n') {
+			nonempty_lines++;
 		}
+		at_line_start = c == '\n';
 	}
-	if (line_start != length()) {
-		new_string += p_prefix + substr(line_start);
+	if (nonempty_lines == 0) {
+		return *this; // Only empty lines: no prefix is written.
 	}
+
+	const int64_t result_length = int64_t(text_length) + int64_t(nonempty_lines) * prefix_length;
+	ERR_FAIL_COND_V_MSG(result_length >= INT32_MAX, *this, "Indented string is too long.");
+
+	String new_string;
+	new_string.resize_uninitialized(int(result_length) + 1);
+	char32_t *write = new_string.ptrw();
+	int written = 0;
+	at_line_start = true;
+
+	for (int i = 0; i < text_length; i++) {
+		const char32_t c = read[i];
+		if (at_line_start && c != '\n') {
+			memcpy(write + written, prefix, prefix_length * sizeof(char32_t));
+			written += prefix_length;
+		}
+		write[written++] = c;
+		at_line_start = c == '\n';
+	}
+	write[written] = 0;
 	return new_string;
 }
-
 String String::dedent() const {
 	String new_string;
 	String indent;
