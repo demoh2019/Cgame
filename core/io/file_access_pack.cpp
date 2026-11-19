@@ -80,14 +80,17 @@ void PackedData::add_path(const String &p_pkg_path, const String &p_path, uint64
 			Vector<String> ds = simplified_path.get_base_dir().split("/");
 
 			for (int j = 0; j < ds.size(); j++) {
-				if (!cd->subdirs.has(ds[j])) {
+				// The common case is a directory shared by many packed files.
+				// Reuse the lookup result instead of hashing twice (has + []).
+				HashMap<String, PackedDir *>::Iterator child = cd->subdirs.find(ds[j]);
+				if (child) {
+					cd = child->value;
+				} else {
 					PackedDir *pd = memnew(PackedDir);
 					pd->name = ds[j];
 					pd->parent = cd;
 					cd->subdirs[pd->name] = pd;
 					cd = pd;
-				} else {
-					cd = cd->subdirs[ds[j]];
 				}
 			}
 		}
@@ -113,11 +116,11 @@ void PackedData::remove_path(const String &p_path) {
 		Vector<String> ds = simplified_path.get_base_dir().split("/");
 
 		for (int j = 0; j < ds.size(); j++) {
-			if (!cd->subdirs.has(ds[j])) {
+			HashMap<String, PackedDir *>::Iterator child = cd->subdirs.find(ds[j]);
+			if (!child) {
 				return; // Subdirectory does not exist, do not bother creating.
-			} else {
-				cd = cd->subdirs[ds[j]];
 			}
+			cd = child->value;
 		}
 	}
 
