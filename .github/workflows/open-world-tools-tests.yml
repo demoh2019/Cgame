@@ -1,0 +1,33 @@
+name: Open World Tools prototype tests
+
+on:
+  pull_request:
+    paths:
+      - "misc/open_world_tools/**"
+      - ".github/workflows/open-world-tools-tests.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  headless-and-static:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          sparse-checkout: |
+            misc/open_world_tools
+          sparse-checkout-cone-mode: true
+      - uses: chickensoft-games/setup-godot@v2
+        with:
+          version: 4.7.2
+          use-dotnet: false
+          include-templates: false
+      - name: Verify Python static contracts
+        run: python3 -m unittest discover -s misc/open_world_tools/tests -p 'test_*.py' -v
+      - name: Import plugin and register global scripts
+        run: godot --headless --path misc/open_world_tools --import --quit
+      - name: Run GDScript headless regression tests
+        run: godot --headless --path misc/open_world_tools --script res://tests/test_world_tools.gd
