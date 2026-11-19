@@ -51,7 +51,8 @@ class FakeAPI:
             return {"has_issues": self.issues_enabled}
         if method == "GET" and path == "/repos/godotengine/godot":
             return {"id": 15634981}
-        if method == "GET" and path.startswith("/repos/godotengine/godot/issues?"):
+        if method == "GET" and (path.startswith("/repos/godotengine/godot/issues?") or
+                                path.startswith("/repositories/15634981/issues?")):
             return (self.source, None) if with_links else self.source
         if method == "GET" and "/pulls/" in path:
             return {"state": "open", "body": "Proposed patch", "merged_at": None}
@@ -221,6 +222,21 @@ class MirrorTests(unittest.TestCase):
             stats = m.Mirror(api, apply=True).run(max_items=2, checkpoint=checkpoint)
             self.assertEqual(stats["created_issues"], 2)
             self.assertEqual(__import__("json").loads(checkpoint.read_text())["next_offset"], 2)
+
+    def test_large_unicode_body_preserves_valid_utf8_and_source_link(self):
+        data = issue(5, body="🔧" * 25000)
+        original = m.format_body(m.SOURCE_DEFAULT, data, "issues")
+        self.assertLessEqual(len(original.encode("utf-8")), 60000)
+        self.assertIn("Original content truncated", original)
+        self.assertTrue(original.endswith("https://github.com/godotengine/godot/issues/5]"))
+
+    def test_resume_by_repository_id_cursor(self):
+        api = FakeAPI([issue(4)])
+        mirror = m.Mirror(api)
+        cursor = "/repositories/15634981/issues?after=opaque123&per_page=100"
+        stats = mirror.run(start_page=700, start_cursor=cursor, max_items=1)
+        self.assertEqual(stats["dry_run"], 1)
+        self.assertTrue(any(x[1] == cursor for x in api.calls))
 
     def test_cursor_link_parsing_and_host_check(self):
         header = ('<https://api.github.com/repos/godotengine/godot/issues?after=opaque123&per_page=100>; rel="next", '
