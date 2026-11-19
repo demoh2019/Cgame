@@ -1427,7 +1427,7 @@ func cmd_loot(peer_id: int, entity_id: int) -> Dictionary:
 		if not RaidLoot.can_open(bag, player, time):
 			return {"ok": false, "reason": "raid_reserved",
 				"remaining": RaidLoot.remaining(bag, time)}
-		if not LootRights.can_loot(bag, peer_id, time):
+		if not LootRights.can_loot(bag, player, time):
 			return {"ok": false, "reason": "reserved"}
 		var left := _give_items(player, bag["items"])
 		if left.is_empty():
@@ -1519,7 +1519,12 @@ func _make_bag(position: Vector3, items: Dictionary, owner_peer: int = -1) -> in
 	# Ordinary infected and crate overflow belong to the killer/scavenger's
 	# party for a brief window. PvP full-loot and raid bags use other rules.
 	if owner_peer > 0 and players.has(owner_peer):
-		bag.merge(LootRights.reservation(owner_peer, parties.members_of(owner_peer), time))
+		var participants: Array = [players[owner_peer]]
+		for member_id in parties.members_of(owner_peer):
+			var member = players.get(int(member_id))
+			if member != null:
+				participants.append(member)
+		bag.merge(LootRights.reservation(participants, time))
 	bags[bag_id] = bag
 	events.append({"type": "bag", "id": bag_id})
 	return bag_id
@@ -2157,7 +2162,7 @@ func snapshot_for(peer_id: int) -> Dictionary:
 	var nearby_bags: Array = []
 	for bag in bags.values():
 		if here.distance_to(Vector2(bag["x"], bag["z"])) <= Defs.INTEREST_RADIUS:
-			var bag_view: Dictionary = LootRights.visible_state(bag, peer_id, time)
+			var bag_view: Dictionary = LootRights.visible_state(bag, player, time)
 			bag_view["raid"] = bag.has("raid_reserved_until")
 			if bool(bag_view["raid"]):
 				# Raid contribution entitlement supersedes ordinary party looting.
