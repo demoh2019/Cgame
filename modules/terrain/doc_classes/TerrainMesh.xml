@@ -72,7 +72,7 @@
 		<member name="height_scale" type="float" setter="set_height_scale" getter="get_height_scale" default="1.0">
 			The positive multiplier applied to stored heights to obtain rendered Y coordinates.
 		</member>
-		<member name="heights" type="PackedFloat32Array" setter="set_heights" getter="get_heights" default="PackedFloat32Array()">
+		<member name="heights" type="PackedFloat32Array" setter="set_heights" getter="get_heights">
 			Row-major height samples. Its length must equal [code]grid_size.x * grid_size.y[/code]. Individual samples may be negative, but all must be finite.
 		</member>
 	</members>
