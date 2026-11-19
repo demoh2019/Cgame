@@ -40,6 +40,18 @@ TEST_FORCE_LINK(test_object)
 
 namespace TestObject {
 
+// Compile-time checks for inherited and distinct method binding pointers.
+static void _test_bind_function_one() {}
+static void _test_bind_function_two() {}
+static_assert(_is_same_bind_function<&_test_bind_function_one, &_test_bind_function_one>);
+static_assert(!_is_same_bind_function<&_test_bind_function_one, &_test_bind_function_two>);
+
+TEST_CASE("[Object] Class binding pointer comparisons are constexpr") {
+	CHECK((_is_same_bind_function<&_test_bind_function_one, &_test_bind_function_one>));
+	CHECK_FALSE((_is_same_bind_function<&_test_bind_function_one, &_test_bind_function_two>));
+}
+
+
 class _TestDerivedObject : public Object {
 	GDCLASS(_TestDerivedObject, Object);
 

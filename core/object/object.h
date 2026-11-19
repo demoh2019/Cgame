@@ -241,6 +241,12 @@ protected: \
 \
 private:
 
+// Compare class method bind functions at compile time.
+template <void (*A)(), void (*B)()>
+inline constexpr bool _is_same_bind_function = false;
+template <void (*A)()>
+inline constexpr bool _is_same_bind_function<A, A> = true;
+
 /// Provides `Object` functionality, such as being able to use `Object::cast_to()`, and `ClassDB` integration.
 /// Use this for `Object` subclasses that are registered in `ClassDB` (use `GDSOFTCLASS` otherwise).
 #define GDCLASS(m_class, m_inherits) \
@@ -279,10 +285,10 @@ public: \
 	} \
 \
 protected: \
-	_FORCE_INLINE_ static void (*_get_bind_methods())() { \
+	static constexpr void (*_get_bind_methods())() { \
 		return &m_class::_bind_methods; \
 	} \
-	_FORCE_INLINE_ static void (*_get_bind_compatibility_methods())() { \
+	static constexpr void (*_get_bind_compatibility_methods())() { \
 		return &m_class::_bind_compatibility_methods; \
 	} \
 \
@@ -305,10 +311,10 @@ private: \
 		m_inherits::initialize_class(); \
 		_add_class_to_classdb(get_gdtype_static_mutable(), &super_type::get_gdtype_static()); \
 		get_gdtype_static_mutable().initialize(); \
-		if (m_class::_get_bind_methods() != m_inherits::_get_bind_methods()) { \
+		if constexpr (!_is_same_bind_function<m_class::_get_bind_methods(), m_inherits::_get_bind_methods()>) { \
 			_bind_methods(); \
 		} \
-		if (m_class::_get_bind_compatibility_methods() != m_inherits::_get_bind_compatibility_methods()) { \
+		if constexpr (!_is_same_bind_function<m_class::_get_bind_compatibility_methods(), m_inherits::_get_bind_compatibility_methods()>) { \
 			_bind_compatibility_methods(); \
 		} \
 		initialized.set(); \
@@ -544,10 +550,10 @@ protected:
 	// Out-lined helper function to save on binary space.
 	_NO_INLINE_ void _get_property_list_inner(List<PropertyInfo> *p_list, const StringName &p_class_name) const;
 
-	_FORCE_INLINE_ static void (*_get_bind_methods())() {
+	static constexpr void (*_get_bind_methods())() {
 		return &Object::_bind_methods;
 	}
-	_FORCE_INLINE_ static void (*_get_bind_compatibility_methods())() {
+	static constexpr void (*_get_bind_compatibility_methods())() {
 		return &Object::_bind_compatibility_methods;
 	}
 	_FORCE_INLINE_ bool (Object::*_get_get() const)(const StringName &p_name, Variant &r_ret) const {

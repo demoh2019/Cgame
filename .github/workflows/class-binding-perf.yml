@@ -1,0 +1,37 @@
+name: GDCLASS binding fast path
+
+on:
+  push:
+    branches: [develop]
+    paths:
+      - 'core/object/object.h'
+      - 'tests/core/object/test_object.cpp'
+      - 'misc/scripts/tests/test_class_binding_perf.py'
+      - '.github/workflows/class-binding-perf.yml'
+  pull_request:
+    branches: [develop]
+    paths:
+      - 'core/object/object.h'
+      - 'tests/core/object/test_object.cpp'
+      - 'misc/scripts/tests/test_class_binding_perf.py'
+      - '.github/workflows/class-binding-perf.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  regression:
+    runs-on: ubuntu-24.04
+    strategy:
+      matrix:
+        python-version: ['3.9', '3.13']
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+      - name: Compile C++ constexpr checks and validate GDCLASS
+        run: |
+          python -m py_compile misc/scripts/tests/test_class_binding_perf.py
+          python -m unittest discover -s misc/scripts/tests -p test_class_binding_perf.py -v
