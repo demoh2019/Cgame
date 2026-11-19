@@ -43,7 +43,7 @@ private:
 	RingBuffer<uint8_t> rb;
 	Vector<uint8_t> buffer;
 
-	Error _process(uint8_t *p_dst, int p_dst_size, const uint8_t *p_src, int p_src_size, int &r_consumed, int &r_out, bool p_close = false);
+	Error _process(uint8_t *p_dst, int p_dst_size, const uint8_t *p_src, int p_src_size, int &r_consumed, int &r_out);
 	void _close();
 	Error _start(bool p_compress, bool p_is_deflate, int p_buffer_size = 65535);
 
