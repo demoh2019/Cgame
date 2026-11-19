@@ -157,6 +157,13 @@ class BaselineTests(unittest.TestCase):
         self.assertTrue(any("object_lifecycle" in error for error in errors))
         self.assertTrue(any("scene_churn" in error for error in errors))
 
+    def test_rss_scope_mismatch_rejected(self):
+        baseline = self.make_report()
+        current = self.make_report()
+        current["configuration"]["rss_scope"] = "process_tree"
+        with self.assertRaisesRegex(ValueError, "rss_scope"):
+            stress.compare_baseline(current, baseline, 20.0, None)
+
     def test_memory_churn_threshold(self):
         current = self.make_report()
         current["cases"]["memory_churn"] = {"status": "passed", "runs": [
