@@ -1,0 +1,40 @@
+name: Project Manager Incremental Scan Regressions
+on:
+  pull_request:
+    paths:
+      - "editor/project_manager/project_list.cpp"
+      - "misc/tests/test_project_manager_incremental_scan.py"
+      - ".github/workflows/project-manager-incremental-scan.yml"
+  workflow_dispatch:
+
+jobs:
+  source-contracts:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+      - run: python -m unittest discover -s misc/tests -p test_project_manager_incremental_scan.py -v
+  editor-build:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          submodules: recursive
+      - uses: ./.github/actions/godot-cache-restore
+        with:
+          cache-name: project-manager-incremental-editor
+        continue-on-error: true
+      - uses: ./.github/actions/godot-deps
+      - name: Compile editor
+        uses: ./.github/actions/godot-build
+        with:
+          platform: linuxbsd
+          target: editor
+          scons-flags: module_text_server_fb_enabled=yes -j2
+      - uses: ./.github/actions/godot-cache-save
+        with:
+          cache-name: project-manager-incremental-editor
+        continue-on-error: true
