@@ -11,7 +11,7 @@ HEADER = (ROOT / "modules/mono/editor/bindings_generator.h").read_text(encoding=
 class MonoMaterialRenderPriorityTests(unittest.TestCase):
     def test_whitelist_only_targets_material_render_priority_limits(self):
         match = re.search(
-            r"const Vector<String> constants_with_int32_type\\s*=\\s*\\{([^}]+)\\};",
+            r"const Vector<String> constants_with_int32_type\s*=\s*\{([^}]+)\};",
             SOURCE, re.S)
         self.assertIsNotNone(match)
         values = re.findall(r'"([^"]+)"', match.group(1))
