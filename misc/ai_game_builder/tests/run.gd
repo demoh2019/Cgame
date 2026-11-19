@@ -3,6 +3,7 @@ extends SceneTree
 const Validator = preload("res://addons/ai_game_builder/validator.gd")
 const Planner = preload("res://addons/ai_game_builder/planner.gd")
 const Writer = preload("res://addons/ai_game_builder/writer.gd")
+const Inspector = preload("res://addons/ai_game_builder/inspector.gd")
 
 var _total := 0
 var _failed := 0
@@ -107,6 +108,68 @@ func _run() -> void:
 	var payload: Variant = JSON.parse_string(Planner.make_request("test-model", "Build a game"))
 	_check(typeof(payload) == TYPE_DICTIONARY and payload.model == "test-model", "request format")
 	_check(payload.messages.size() == 2, "system and user prompts")
+
+	# Static, non-executing validation of the generated game.
+	var clean_scene := _plan()
+	var clean_inspection := Inspector.inspect(clean_scene)
+	_check(clean_inspection.ok, "valid entry scene is accepted")
+	_check(clean_inspection.errors.is_empty(), "valid entry scene has no errors")
+	_check(clean_inspection.warnings.is_empty(), "simple entry scene has no warnings")
+
+	var no_entry := Inspector.inspect(_plan("player.gd", "extends Node\n"))
+	_check(not no_entry.ok, "missing main scene rejected")
+	_check(no_entry.errors.size() == 1, "missing main scene reports one error")
+	_check(no_entry.errors[0].contains("main.tscn"), "missing entry named in diagnostic")
+	_check(not Inspector.inspect(_plan("main.tscn", "hello")).ok, "invalid scene header rejected")
+	_check(not Inspector.inspect({"files": []}).ok, "malformed plan fails static inspection")
+
+	var linked_plan := {"files": [
+		{"path": "main.tscn", "content": "[gd_scene load_steps=2 format=3]\n[ext_resource type=\"Script\" path=\"res://ai_generated/scripts/player.gd\" id=\"1\"]\n"},
+		{"path": "scripts/player.gd", "content": "extends Node\n"}
+	]}
+	_check(Inspector.inspect(linked_plan).ok, "generated local resource reference passes")
+	var linked = Inspector.inspect(linked_plan)
+	_check(linked.errors.is_empty(), "generated resource reference has no errors")
+	_check(linked.warnings.is_empty(), "generated script has no warnings")
+
+	var missing_dependency := _plan("main.tscn", "[gd_scene format=3]\n[ext_resource path=\"res://ai_generated/player.gd\" id=\"1\"]\n")
+	_check(not Inspector.inspect(missing_dependency).ok, "missing dependency rejected")
+	_check(Inspector.inspect(missing_dependency).errors[0].contains("player.gd"), "missing resource named")
+	var duplicated_reference := _plan("main.tscn", "[gd_scene format=3]\n# res://ai_generated/bad.gd res://ai_generated/bad.gd\n")
+	_check(Inspector.inspect(duplicated_reference).errors.size() == 1, "duplicate diagnostics deduplicated")
+
+	var outside := _plan("main.tscn", "[gd_scene format=3]\n[ext_resource path=\"res://addons/evil.gd\" id=\"1\"]\n")
+	_check(not Inspector.inspect(outside).ok, "external addon dependency rejected")
+	_check(Inspector.inspect(outside).errors[0].contains("external resource"), "outside dependency explained")
+	var outside_script := {"files": [
+		{"path": "main.tscn", "content": "[gd_scene format=3]\n"},
+		{"path": "player.gd", "content": "extends Node\nconst X = preload(\"res://outside.gd\")\n"}
+	]}
+	_check(not Inspector.inspect(outside_script).ok, "external script preload rejected")
+	var outside_shader := {"files": [
+		{"path": "main.tscn", "content": "[gd_scene format=3]\n"},
+		{"path": "s.gdshader", "content": "shader_type canvas_item; // res://outside/file.gdshader"}
+	]}
+	_check(not Inspector.inspect(outside_shader).ok, "external shader resource rejected")
+	var harmless_docs := {"files": [
+		{"path": "main.tscn", "content": "[gd_scene format=3]\n"},
+		{"path": "notes.md", "content": "This docs file mentions res://other/project.gd"}
+	]}
+	_check(Inspector.inspect(harmless_docs).ok, "resource examples in documentation ignored")
+	var risky_script := {"files": [
+		{"path": "main.tscn", "content": "[gd_scene format=3]\n"},
+		{"path": "script.gd", "content": "@tool\nextends Node\nfunc run():\n\tOS.execute(\"x\", [])\n"}
+	]}
+	var warnings := Inspector.inspect(risky_script)
+	_check(warnings.ok, "code warnings do not prevent review")
+	_check(warnings.warnings.size() == 2, "tool and OS execution trigger warnings")
+	_check(warnings.errors.is_empty(), "warning-only plan has no hard error")
+	var repair_text := Inspector.repair_prompt("Create a platformer", missing_dependency, Inspector.inspect(missing_dependency).errors)
+	_check(repair_text.contains("Create a platformer"), "repair includes original request")
+	_check(repair_text.contains("player.gd"), "repair includes missing dependency")
+	_check(repair_text.contains("main.tscn"), "repair includes previous scene")
+	_check(repair_text.contains("COMPLETE replacement JSON"), "repair asks for complete plan")
+
 
 	# Writer integration runs only in the disposable test project.
 	var output := "res://ai_generated/tests/generated.txt"
