@@ -3360,6 +3360,37 @@ void Image::blit_rect_mask(const Ref<Image> &p_src, const Ref<Image> &p_mask, co
 		return;
 	}
 
+	// Other uncompressed mask formats still fell back to get_pixel() on
+	// every pixel, followed by an individual byte-wise source copy. Read
+	// their alpha directly from the mask buffer and batch adjacent visible
+	// pixels into a single memcpy. Preserve the scalar fallback for image
+	// aliasing, where writes can affect later reads.
+	if (!is_compressed() && !p_mask->is_compressed() &&
+			p_mask.ptr() != this && p_src.ptr() != this) {
+		const uint8_t *const mask_data = p_mask->data.ptr();
+		const int row_width = dest_rect.size.x;
+		for (int y = 0; y < dest_rect.size.y; y++) {
+			const size_t source_pixel = size_t(src_rect.position.y + y) * p_src->width + src_rect.position.x;
+			const size_t dest_pixel = size_t(dest_rect.position.y + y) * width + dest_rect.position.x;
+			int run_start = -1;
+			for (int x = 0; x <= row_width; x++) {
+				const bool visible = x < row_width &&
+						p_mask->_get_color_at_ofs(mask_data, uint32_t(source_pixel + x)).a != 0;
+				if (visible) {
+					if (run_start == -1) {
+						run_start = x;
+					}
+				} else if (run_start != -1) {
+					memcpy(dst_data_ptr + (dest_pixel + run_start) * pixel_size,
+							src_data_ptr + (source_pixel + run_start) * pixel_size,
+							size_t(x - run_start) * pixel_size);
+					run_start = -1;
+				}
+			}
+		}
+		return;
+	}
+
 	Ref<Image> msk = p_mask;
 
 	for (int i = 0; i < dest_rect.size.y; i++) {

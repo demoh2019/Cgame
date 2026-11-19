@@ -1098,4 +1098,67 @@ TEST_CASE("[Image][Performance] Self-blit overlapping rectangles preserve source
 	}
 }
 
+
+TEST_CASE("[Image][Performance] Masked blits batch non-RGBA8 mask formats") {
+	// Reference the original scalar get_pixel()/set_pixel() semantics,
+	// including nonzero fractional alpha and source/destination clipping.
+	const Rect2i source_rects[] = {
+		Rect2i(0, 0, 48, 32),
+		Rect2i(5, 4, 38, 25),
+		Rect2i(16, 7, 45, 40),
+	};
+	const Point2i destinations[] = {
+		Point2i(0, 0),
+		Point2i(7, 2),
+		Point2i(-9, -4),
+	};
+
+	for (Image::Format mask_format : {
+				Image::FORMAT_L8, Image::FORMAT_LA8, Image::FORMAT_RGBAF, Image::FORMAT_RGBA16 }) {
+		Ref<Image> source = Image::create_empty(48, 32, false, Image::FORMAT_RGBA8);
+		Ref<Image> mask = Image::create_empty(48, 32, false, mask_format);
+		Ref<Image> destination = Image::create_empty(48, 32, false, Image::FORMAT_RGBA8);
+		REQUIRE(source.is_valid());
+		REQUIRE(mask.is_valid());
+		REQUIRE(destination.is_valid());
+
+		for (int y = 0; y < 32; y++) {
+			for (int x = 0; x < 48; x++) {
+				source->set_pixel(x, y, Color(float(x) / 47, float(y) / 31, 0.75f, 0.6f));
+				destination->set_pixel(x, y, Color(0.2f, 0.3f, 0.4f, 0.5f));
+				const float alpha = (x + 3 * y) % 7 == 0 ? 0.0f :
+						((x + y) % 3 == 0 ? 0.5f : 1.0f);
+				mask->set_pixel(x, y, Color(0.25f, 0.5f, 0.75f, alpha));
+			}
+		}
+		const Vector<uint8_t> original_source = source->get_data();
+		const Vector<uint8_t> original_mask = mask->get_data();
+		for (int test = 0; test < 3; test++) {
+			Ref<Image> actual = destination->duplicate();
+			Ref<Image> expected = destination->duplicate();
+			REQUIRE(actual.is_valid());
+			REQUIRE(expected.is_valid());
+			actual->blit_rect_mask(source, mask, source_rects[test], destinations[test]);
+
+			const Rect2i &rect = source_rects[test];
+			for (int y = rect.position.y; y < rect.position.y + rect.size.y; y++) {
+				for (int x = rect.position.x; x < rect.position.x + rect.size.x; x++) {
+					const int dx = destinations[test].x + x - rect.position.x;
+					const int dy = destinations[test].y + y - rect.position.y;
+					if (x < 0 || x >= 48 || y < 0 || y >= 32 ||
+							dx < 0 || dx >= 48 || dy < 0 || dy >= 32) {
+						continue;
+					}
+					if (mask->get_pixel(x, y).a != 0) {
+						expected->set_pixel(dx, dy, source->get_pixel(x, y));
+					}
+				}
+			}
+			CHECK(actual->get_data() == expected->get_data());
+			CHECK(source->get_data() == original_source);
+			CHECK(mask->get_data() == original_mask);
+		}
+	}
+}
+
 } // namespace TestImage
