@@ -4,6 +4,7 @@ extends RefCounted
 ## client could not know (another player is not an obstacle here) intervenes.
 
 const Defs = preload("res://scripts/shared/defs.gd")
+const Encumbrance = preload("res://scripts/shared/encumbrance.gd")
 
 const MAX_DELTA := 0.1 # A longer step is clamped, so a lag spike cannot teleport a player.
 
@@ -11,14 +12,16 @@ const MAX_DELTA := 0.1 # A longer step is clamped, so a lag spike cannot telepor
 ## `input` has "x", "z" (a move direction, any length up to 1) and "sprint". Returns the new position
 ## (y follows the ground). Water that is too deep and solid objects stop the player, and sliding
 ## along them keeps the movement smooth.
-static func step(world, position: Vector3, input: Dictionary, delta: float) -> Vector3:
+static func step(world, position: Vector3, input: Dictionary, delta: float, carried_grams: int = 0) -> Vector3:
 	delta = clampf(delta, 0.0, MAX_DELTA)
 	var direction := Vector2(float(input.get("x", 0.0)), float(input.get("z", 0.0)))
 	if direction.length_squared() > 1.0:
 		direction = direction.normalized()
 	if direction == Vector2.ZERO or delta == 0.0:
 		return Vector3(position.x, world.height_at(position.x, position.z), position.z)
-	var speed := Defs.SPRINT_SPEED if bool(input.get("sprint", false)) else Defs.WALK_SPEED
+	var may_sprint := bool(input.get("sprint", false)) and Encumbrance.sprint_allowed(carried_grams)
+	var speed := Defs.SPRINT_SPEED if may_sprint else Defs.WALK_SPEED
+	speed *= Encumbrance.speed_factor(carried_grams)
 	return move(world, position, direction, speed, delta)
 
 
