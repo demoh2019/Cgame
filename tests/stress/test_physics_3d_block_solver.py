@@ -134,6 +134,8 @@ class CoupledContact3DTests(unittest.TestCase):
             "contacts[0].normal.dot(contacts[1].normal) > real_t(0.9999)",
             "const real_t det = k00 * k11 - k01 * k01;",
             "largest * largest < real_t(100.0) * det",
+            "Math::is_finite(det)",
+            "Math::is_finite(next0) && Math::is_finite(next1)",
             "valid = b0 >= 0.0 && b1 >= 0.0;",
             "if (block_solved)",
             "c0.acc_impulse -= impulse;",
