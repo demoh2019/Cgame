@@ -325,5 +325,71 @@ class SmokeTests(unittest.TestCase):
 
 
 
+
+    @unittest.skipIf(os.name == "nt", "fake executable requires POSIX shebang")
+    def test_structured_inline_error_has_resource_and_line(self):
+        exe = self.fake_godot("print('ERROR: res://ai_generated/scenes/main.tscn:18 - Invalid node')")
+        report = smoke.check_project(self.project, godot=exe)
+        self.assertFalse(report["ok"])
+        stage = report["checks"][0]
+        self.assertEqual(stage["error_count"], 1)
+        self.assertEqual(stage["diagnostics"][0]["resource"], "res://ai_generated/scenes/main.tscn")
+        self.assertEqual(stage["diagnostics"][0]["line"], 18)
+        self.assertEqual(stage["diagnostics"][0]["severity"], "error")
+        json.dumps(report)
+
+    @unittest.skipIf(os.name == "nt", "fake executable requires POSIX shebang")
+    def test_structured_multiline_script_diagnostic_for_repair(self):
+        exe = self.fake_godot(
+            "print('SCRIPT ERROR: Parse Error: Unexpected token')\n"
+            "print(' at: GDScript::reload (res://ai_generated/scripts/hero.gd:27)')")
+        report = smoke.check_project(self.project, godot=exe)
+        self.assertFalse(report["ok"])
+        self.assertEqual(report["checks"][0]["diagnostics"][0]["resource"], "res://ai_generated/scripts/hero.gd")
+        self.assertEqual(report["checks"][0]["diagnostics"][0]["line"], 27)
+
+    @unittest.skipIf(os.name == "nt", "fake executable requires POSIX shebang")
+    def test_structured_warning_never_fails_smoke(self):
+        exe = self.fake_godot("print('WARNING: res://visuals/effect.gdshader:9 shader warning')")
+        report = smoke.check_project(self.project, godot=exe)
+        self.assertTrue(report["ok"])
+        self.assertEqual(report["checks"][0]["warning_count"], 1)
+        self.assertEqual(report["checks"][0]["diagnostics"][0]["severity"], "warning")
+        self.assertEqual(report["checks"][0]["diagnostics"][0]["line"], 9)
+
+    @unittest.skipIf(os.name == "nt", "fake executable requires POSIX shebang")
+    def test_structured_middle_error_found_in_oversized_log(self):
+        exe = self.fake_godot(
+            "print('normal output\\n' * 12000)\n"
+            "print('ERROR: res://ai_generated/scripts/main.gd:52 parse error')\n"
+            "print('normal output\\n' * 12000)")
+        report = smoke.check_project(self.project, godot=exe)
+        self.assertFalse(report["ok"])
+        stage = report["checks"][0]
+        self.assertTrue(stage["output_truncated"])
+        self.assertEqual(stage["error_count"], 1)
+        self.assertEqual(stage["diagnostics"][0]["line"], 52)
+
+    @unittest.skipIf(os.name == "nt", "fake executable requires POSIX shebang")
+    def test_diagnostic_cap_preserves_total_count(self):
+        exe = self.fake_godot("print('ERROR: repeated\\n' * 100)")
+        report = smoke.check_project(self.project, godot=exe)
+        stage = report["checks"][0]
+        self.assertEqual(stage["error_count"], 100)
+        self.assertEqual(len(stage["errors"]), smoke.MAX_DIAGNOSTICS)
+        self.assertEqual(len(stage["diagnostics"]), smoke.MAX_DIAGNOSTICS)
+        self.assertTrue(stage["diagnostics_truncated"])
+
+    @unittest.skipIf(os.name == "nt", "fake executable requires POSIX shebang")
+    def test_structured_error_does_not_include_staging_directory(self):
+        exe = self.fake_godot(
+            "import sys\n"
+            "print('ERROR: ' + sys.argv[sys.argv.index('--path')+1] + '/secret.gd unavailable')")
+        report = smoke.check_project(self.project, godot=exe)
+        self.assertFalse(report["ok"])
+        raw = json.dumps(report, ensure_ascii=False)
+        self.assertIn("<STAGED_PROJECT>/secret.gd", raw)
+        self.assertNotIn("godot-ai-smoke-", raw)
+
 if __name__ == "__main__":
     unittest.main()

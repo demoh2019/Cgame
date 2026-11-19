@@ -11,18 +11,16 @@ import argparse
 import json
 import os
 from pathlib import Path
-import re
 import shutil
 import stat
 import subprocess
 import sys
 import tempfile
 
+from ai_diagnostics import MAX_DIAGNOSTICS, scan_log, scan_text
+
 MIB = 1024 * 1024
 SKIP_DIRS = frozenset({".git", ".godot", ".import", ".hg", ".svn", "__pycache__"})
-ERROR_LINE = re.compile(r"^\s*(?:SCRIPT ERROR|ERROR|Parse Error)\s*:", re.IGNORECASE)
-WARNING_LINE = re.compile(r"^\s*WARNING\s*:", re.IGNORECASE)
-MAX_DIAGNOSTICS = 30
 MAX_LOG_BYTES = 64 * 1024
 
 
@@ -128,49 +126,16 @@ def _sample_output(logfile, max_bytes: int) -> tuple[str, bool]:
 
 
 def _diagnostics(text: str, stage: Path) -> tuple[list[str], list[str]]:
-    errors, warnings = [], []
-    for raw in text.splitlines():
-        line = raw.replace(str(stage), "<STAGED_PROJECT>")[:500]
-        if ERROR_LINE.match(line) and len(errors) < MAX_DIAGNOSTICS:
-            errors.append(line)
-        elif WARNING_LINE.match(line) and len(warnings) < MAX_DIAGNOSTICS:
-            warnings.append(line)
-    return errors, warnings
+    """Compatibility API for callers that need only bounded text messages."""
+    findings = scan_text(text, stage)
+    return findings["errors"], findings["warnings"]
 
 
 def _scan_log_diagnostics(logfile, stage: Path) -> tuple[list[str], list[str], int, int]:
-    """Inspect the entire output file without loading unbounded logs into RAM.
-
-    A sampled head/tail log can omit a parser error in its middle. Read each
-    line in bounded chunks instead, and keep counts even after the report cap.
-    """
-    errors: list[str] = []
-    warnings: list[str] = []
-    error_count = 0
-    warning_count = 0
-    logfile.seek(0)
-    while True:
-        prefix = logfile.readline(8192)
-        if not prefix:
-            break
-        # Discard the remainder of a very long line in bounded reads.
-        # The diagnostic prefix is all we need for classification.
-        if not prefix.endswith(b"\n"):
-            while True:
-                remainder = logfile.readline(8192)
-                if not remainder or remainder.endswith(b"\n"):
-                    break
-        line = prefix.decode("utf-8", errors="replace").rstrip("\r\n").replace(
-            str(stage), "<STAGED_PROJECT>")[:500]
-        if ERROR_LINE.match(line):
-            error_count += 1
-            if len(errors) < MAX_DIAGNOSTICS:
-                errors.append(line)
-        elif WARNING_LINE.match(line):
-            warning_count += 1
-            if len(warnings) < MAX_DIAGNOSTICS:
-                warnings.append(line)
-    return errors, warnings, error_count, warning_count
+    """Backward-compatible full-file scanner; share parsing with repair reports."""
+    findings = scan_log(logfile, stage)
+    return (findings["errors"], findings["warnings"],
+            findings["error_count"], findings["warning_count"])
 
 
 def _run_stage(godot: str, stage: Path, name: str, timeout: float,
@@ -191,12 +156,17 @@ def _run_stage(godot: str, stage: Path, name: str, timeout: float,
             process.kill()
             process.wait()
         _, truncated = _sample_output(logfile, max_log_bytes)
-        errors, warnings, error_count, warning_count = _scan_log_diagnostics(logfile, stage)
-    return {"name": name, "ok": not timed_out and process.returncode == 0 and error_count == 0,
+        # Read the entire log: a relevant error may lie outside the sampled head/tail.
+        findings = scan_log(logfile, stage)
+    return {"name": name,
+            "ok": not timed_out and process.returncode == 0 and findings["error_count"] == 0,
             "exit_code": process.returncode, "timed_out": timed_out,
-            "output_truncated": truncated, "errors": errors, "warnings": warnings,
-            "error_count": error_count, "warning_count": warning_count,
-            "diagnostics_truncated": (error_count > len(errors) or warning_count > len(warnings))}
+            "output_truncated": truncated,
+            "errors": findings["errors"], "warnings": findings["warnings"],
+            "error_count": findings["error_count"], "warning_count": findings["warning_count"],
+            "diagnostics_truncated": (findings["error_count"] > len(findings["errors"]) or
+                                      findings["warning_count"] > len(findings["warnings"])),
+            "diagnostics": findings["diagnostics"]}
 
 
 def check_project(source: Path, *, godot: str = "godot", timeout: float = 90,
