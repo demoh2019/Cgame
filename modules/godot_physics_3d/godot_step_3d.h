@@ -75,6 +75,7 @@ class GodotStep3D {
 	void _populate_island(GodotBody3D *p_body, LocalVector<GodotBody3D *> &p_body_island, LocalVector<GodotConstraint3D *> &p_constraint_island);
 	void _populate_island_soft_body(GodotSoftBody3D *p_soft_body, LocalVector<GodotBody3D *> &p_body_island, LocalVector<GodotConstraint3D *> &p_constraint_island);
 	void _setup_constraint(uint32_t p_constraint_index, void *p_userdata = nullptr);
+	void _setup_constraint_batch(uint32_t p_batch_index, void *p_userdata = nullptr);
 	void _integrate_forces_block(uint32_t p_block_index, void *p_userdata = nullptr);
 	void _pre_solve_island(LocalVector<GodotConstraint3D *> &p_constraint_island) const;
 	void _solve_island(uint32_t p_island_index, void *p_userdata = nullptr);
