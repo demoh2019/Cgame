@@ -12,6 +12,11 @@ import run as stress
 
 
 class MacOSResidentMemoryTests(unittest.TestCase):
+    def test_ps_sampling_is_rate_limited(self):
+        self.assertEqual(stress.sampling_interval_seconds("darwin", False), 0.25)
+        self.assertEqual(stress.sampling_interval_seconds("darwin", True), 0.05)
+        self.assertEqual(stress.sampling_interval_seconds("linux", False), 0.05)
+
     def test_ps_kib_is_converted_to_mib(self):
         result = subprocess.CompletedProcess(["ps"], 0, "65536\n", "")
         with patch.object(stress.subprocess, "run", return_value=result) as call:
