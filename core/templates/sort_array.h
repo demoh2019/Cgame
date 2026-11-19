@@ -334,6 +334,27 @@ public:
 
 	inline void sort_range(int64_t p_first, int64_t p_last, T *p_array) const {
 		if (p_first != p_last) {
+			// Sorting long runs of equivalent keys only creates useless moves.
+			// A linear check is much cheaper than partitioning an all-equal
+			// range, and leaves expensive objects completely untouched. For
+			// ordinary input, reject the fast path after a few comparisons.
+			if (p_last - p_first >= 64) {
+				const T &first = p_array[p_first];
+				const int64_t middle = p_first + (p_last - p_first) / 2;
+				if (!compare(first, p_array[middle]) && !compare(p_array[middle], first) &&
+						!compare(first, p_array[p_last - 1]) && !compare(p_array[p_last - 1], first)) {
+					bool all_equivalent = true;
+					for (int64_t i = p_first + 1; i < p_last - 1; i++) {
+						if (compare(first, p_array[i]) || compare(p_array[i], first)) {
+							all_equivalent = false;
+							break;
+						}
+					}
+					if (all_equivalent) {
+						return;
+					}
+				}
+			}
 			introsort(p_first, p_last, p_array, bitlog(p_last - p_first) * 2);
 			final_insertion_sort(p_first, p_last, p_array);
 		}
