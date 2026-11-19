@@ -720,4 +720,40 @@ TEST_CASE("[AStarGrid2D] Flat cells preserve routes across row boundaries") {
 	CHECK_EQ(grid.get_region(), Rect2i());
 }
 
+
+TEST_CASE("[AStarGrid2D] Bulk border mask initialization preserves obstacle semantics") {
+	AStarGrid2D grid;
+	const Rect2i regions[] = {
+		Rect2i(0, 0, 1, 1),
+		Rect2i(-3, 7, 19, 1),
+		Rect2i(-5, -11, 1, 19),
+		Rect2i(100, -100, 19, 11),
+		Rect2i(0, 0, 0, 7),
+		Rect2i(0, 0, 7, 0),
+	};
+	for (const Rect2i &region : regions) {
+		grid.set_region(region);
+		grid.update();
+		TypedArray<Dictionary> cells = grid.get_point_data_in_region(region);
+		REQUIRE_EQ(cells.size(), region.size.x * region.size.y);
+		for (int y = 0; y < region.size.y; ++y) {
+			for (int x = 0; x < region.size.x; ++x) {
+				const Vector2i id = region.position + Vector2i(x, y);
+				CHECK_FALSE(grid.is_point_solid(id));
+			}
+		}
+		if (!cells.is_empty()) {
+			const Vector2i first = region.position;
+			grid.set_point_solid(first, true);
+			CHECK(grid.is_point_solid(first));
+			grid.update(); // A clean grid must keep the obstacle.
+			CHECK(grid.is_point_solid(first));
+			// A forced reconstruction must reset the occupancy mask.
+			grid.set_offset(Vector2(float(region.position.x), 1.0));
+			grid.update();
+			CHECK_FALSE(grid.is_point_solid(first));
+		}
+	}
+}
+
 } // namespace TestAStar
