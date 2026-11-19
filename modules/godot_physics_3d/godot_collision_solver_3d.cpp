@@ -69,8 +69,10 @@ bool GodotCollisionSolver3D::solve_static_world_boundary(const GodotShape3D *p_s
 	bool found = false;
 
 	for (int i = 0; i < support_count; i++) {
-		supports[i] += p_margin * supports[i].normalized();
-		supports[i] = p_transform_B.xform(supports[i]);
+		// The margin expands the contact envelope along the world-space plane
+		// normal. Offsetting a local vertex radially from its origin gives the
+		// wrong contact distance for translated vertices, shear and scale.
+		supports[i] = p_transform_B.xform(supports[i]) - p.normal * p_margin;
 		if (p.distance_to(supports[i]) >= 0) {
 			continue;
 		}
