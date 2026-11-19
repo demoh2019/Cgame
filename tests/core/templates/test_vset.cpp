@@ -96,4 +96,58 @@ TEST_CASE("[VSet] _find and _find_exact correctness.") {
 	CHECK(exact == false);
 }
 
+struct ComparisonCountedInt {
+	int value = 0;
+	static inline int comparisons = 0;
+
+	bool operator<(const ComparisonCountedInt &p_other) const {
+		comparisons++;
+		return value < p_other.value;
+	}
+};
+
+TEST_CASE("[VSet] Membership and insertion use one comparison after lower bound") {
+	TestClass<ComparisonCountedInt> set;
+	for (int i = 1; i <= 5; i++) {
+		set.insert({ i * 10 });
+	}
+
+	ComparisonCountedInt::comparisons = 0;
+	CHECK(set.find({ 30 }) == 2);
+	// Two lower-bound comparisons plus one equivalence comparison.
+	CHECK(ComparisonCountedInt::comparisons <= 3);
+
+	ComparisonCountedInt::comparisons = 0;
+	CHECK(!set.has({ 25 }));
+	CHECK(ComparisonCountedInt::comparisons <= 3);
+
+	ComparisonCountedInt::comparisons = 0;
+	set.insert({ 30 });
+	CHECK(set.size() == 5);
+	CHECK(ComparisonCountedInt::comparisons <= 3);
+}
+
+struct DecadeOrderedInt {
+	int value = 0;
+
+	bool operator<(const DecadeOrderedInt &p_other) const {
+		return value / 10 < p_other.value / 10;
+	}
+};
+
+TEST_CASE("[VSet] Equivalent keys use strict weak ordering rather than equality") {
+	VSet<DecadeOrderedInt> set;
+	set.insert({ 12 });
+	set.insert({ 19 });
+	set.insert({ 25 });
+	CHECK(set.size() == 2);
+	CHECK(set.find({ 11 }) == 0);
+	CHECK(set.has({ 18 }));
+	CHECK(set.find({ 29 }) == 1);
+	CHECK(!set.has({ 35 }));
+	set.erase({ 17 });
+	CHECK(set.size() == 1);
+	CHECK(set[0].value == 25);
+}
+
 } // namespace TestVSet
