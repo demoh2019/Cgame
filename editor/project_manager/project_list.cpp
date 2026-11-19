@@ -721,17 +721,22 @@ void ProjectList::_scan_finished() {
 		scan_progress->hide();
 	}
 
+	// A single hash index replaces O(found_projects * registered_projects)
+	// linear scans. This also filters duplicate paths discovered in the same scan.
+	HashSet<String> known_paths;
+	if (!scan_data->found_projects.is_empty()) {
+		known_paths.reserve(_projects.size() + scan_data->found_projects.size());
+		for (const Item &project : _projects) {
+			known_paths.insert(project.path);
+		}
+	}
+
 	bool edited = false;
 	for (const String &path : scan_data->found_projects) {
-		// Keep existing controls, selections, icons, and project metadata intact.
-		bool already_exists = false;
-		for (const Item &project : _projects) {
-			if (project.path == path) {
-				already_exists = true;
-				break;
-			}
-		}
-		if (already_exists) {
+		// Insert performs one hash probe and tells us whether the path is new.
+		const uint32_t previous_count = known_paths.size();
+		known_paths.insert(path);
+		if (known_paths.size() == previous_count) {
 			continue;
 		}
 
