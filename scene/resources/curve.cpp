@@ -135,11 +135,15 @@ int Curve::get_index(real_t p_offset) const {
 	while (imax - imin > 1) {
 		int m = (imin + imax) / 2;
 
-		real_t a = _points[m].position.x;
-		real_t b = _points[m + 1].position.x;
-
-		if (a < p_offset && b < p_offset) {
-			imin = m;
+		// Read the next point only when the midpoint is to the left.
+		// This avoids a second cache-line access on right-half searches.
+		const real_t a = _points[m].position.x;
+		if (a < p_offset) {
+			if (_points[m + 1].position.x < p_offset) {
+				imin = m;
+			} else {
+				return m;
+			}
 		} else if (a > p_offset) {
 			imax = m;
 		} else {

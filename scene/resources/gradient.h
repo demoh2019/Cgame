@@ -192,14 +192,13 @@ public:
 		}
 		const Point &point1 = points[first];
 		const Point &point2 = points[second];
-		float weight = (p_offset - point1.offset) / (point2.offset - point1.offset);
-
 		switch (interpolation_mode) {
 			case GRADIENT_INTERPOLATE_CONSTANT: {
 				return point1.color;
 			}
 			case GRADIENT_INTERPOLATE_LINEAR:
 			default: { // Fallback to linear interpolation.
+				const float weight = (p_offset - point1.offset) / (point2.offset - point1.offset);
 				Color color1 = transform_color_space(point1.color);
 				Color color2 = transform_color_space(point2.color);
 
@@ -207,6 +206,7 @@ public:
 				return inv_transform_color_space(interpolated);
 			}
 			case GRADIENT_INTERPOLATE_CUBIC: {
+				const float weight = (p_offset - point1.offset) / (point2.offset - point1.offset);
 				int p0 = first - 1;
 				int p3 = second + 1;
 				if (p3 >= (int)points.size()) {
