@@ -317,7 +317,7 @@ func _update_prompt() -> void:
 			if Defs.tier_of(tool_id) < int(node["tier"]) and not (tool_id == "" and node["tier"] == 1):
 				text = "Needs a tier %d %s" % [node["tier"], needed]
 	elif Vector2(p.x, p.z).distance_to(Vector2(9.0, 0.0)) < 6.0:
-		text = "Workbench: press C to craft"
+		text = "Hub workbench: C craft | I inventory/stash (right-click store)"
 	elif _near_water(p):
 		text = "[F] Drink"
 	if not client.you.get("action", {}).is_empty():

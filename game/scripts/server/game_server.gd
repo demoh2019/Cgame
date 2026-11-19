@@ -30,6 +30,7 @@ class Player:
 	var position: Vector3
 	var yaw: float = 0.0
 	var inventory
+	var stash # Account-bound safe storage; isolated from full-loot death drops.
 	var survival
 	var input_budget: float = 0.0
 	var last_input_seq: int = 0
@@ -40,6 +41,7 @@ class Player:
 	var deaths: int = 0
 	var zone_notice: int = -1
 	var dirty_inventory: bool = true
+	var dirty_stash: bool = true
 	var user_id: String = "" # Nakama account, empty in offline mode.
 	var dirty_character: bool = false # Something worth saving changed.
 
@@ -73,6 +75,7 @@ func add_player(peer_id: int, p_name: String, p_user_id: String = "", saved: Dic
 	if player.name == "":
 		player.name = "Survivor%d" % (peer_id % 1000)
 	player.inventory = Inventory.new()
+	player.stash = Inventory.new(Defs.STASH_SLOTS)
 	player.survival = Survival.new()
 	players[peer_id] = player
 	if saved.is_empty() or not apply_character(player, saved):
@@ -91,6 +94,7 @@ func character_data(player: Player) -> Dictionary:
 		"alive": alive, "kills": player.kills, "deaths": player.deaths,
 		"x": player.position.x, "z": player.position.z,
 		"inventory": player.inventory.to_dict(),
+		"stash": player.stash.to_dict(),
 	}
 
 
@@ -118,7 +122,37 @@ func apply_character(player: Player, data: Dictionary) -> bool:
 	var armor := str(data["inventory"].get("armor", ""))
 	inventory.weapon = weapon if weapon != "" and inventory.count(weapon) > 0 else ""
 	inventory.armor = armor if armor != "" and inventory.count(armor) > 0 else ""
+	# Pre-existing version-1 Nakama characters have no stash; restore an
+	# empty one without changing the save schema. Reject invalid new saves
+	# before mutating any part of the player.
+	var stash = Inventory.new(Defs.STASH_SLOTS)
+	if data.has("stash"):
+		var stored: Variant = data["stash"]
+		if not (stored is Dictionary):
+			return false
+		var saved_slots: Variant = stored.get("slots")
+		if not (saved_slots is Array) or saved_slots.size() != Defs.STASH_SLOTS:
+			return false
+		var clean_stash: Array = []
+		for slot in saved_slots:
+			if not (slot is Dictionary):
+				return false
+			if slot.is_empty():
+				clean_stash.append({})
+				continue
+			var item_id: Variant = slot.get("id")
+			var raw_count: Variant = slot.get("count")
+			if not (item_id is String) or not Defs.is_item(item_id):
+				return false
+			if not (raw_count is int or raw_count is float):
+				return false
+			var quantity: float = float(raw_count)
+			if not is_finite(quantity) or quantity < 1.0 or quantity > float(Defs.stack_size(item_id)) or quantity != floor(quantity):
+				return false
+			clean_stash.append({"id": item_id, "count": int(quantity)})
+		stash.slots = clean_stash
 	player.inventory = inventory
+	player.stash = stash
 	player.kills = maxi(int(data.get("kills", 0)), 0)
 	player.deaths = maxi(int(data.get("deaths", 0)), 0)
 	var survival = Survival.new()
@@ -136,6 +170,7 @@ func apply_character(player: Player, data: Dictionary) -> bool:
 		var spot := Vector2.from_angle(angle) * rng.randf_range(10.0, 22.0)
 		player.position = Vector3(spot.x, world.height_at(spot.x, spot.y), spot.y)
 	player.dirty_inventory = true
+	player.dirty_stash = true
 	player.dirty_character = true
 	return true
 
@@ -228,6 +263,41 @@ func cmd_craft(peer_id: int, recipe_id: String, times: int = 1) -> Dictionary:
 		player.dirty_character = true
 		return {"ok": true}
 	return {"ok": false, "reason": ["ok", "unknown_recipe", "missing_inputs", "no_station", "no_space"][status]}
+
+
+## Authoritative hub bank: move a bounded item stack only when the actual
+## server position is near the workbench. A failed operation changes nothing.
+func cmd_stash(peer_id: int, item_id: String, count: int, deposit: bool) -> Dictionary:
+	var player: Player = players.get(peer_id)
+	if player == null or not _alive(player):
+		return {"ok": false, "reason": "dead"}
+	var distance: float = Vector2(player.position.x, player.position.z).distance_to(WORKBENCH_POSITION)
+	if not is_finite(distance) or distance > WORKBENCH_RANGE:
+		return {"ok": false, "reason": "no_station"}
+	if not Defs.is_item(item_id) or count < 1 or count > Defs.stack_size(item_id):
+		return {"ok": false, "reason": "invalid_stack"}
+	var source = player.inventory if deposit else player.stash
+	var destination = player.stash if deposit else player.inventory
+	if source.count(item_id) < count:
+		return {"ok": false, "reason": "missing_items"}
+	if destination.free_space_for(item_id) < count:
+		return {"ok": false, "reason": "no_space"}
+	# Source and destination are exclusively server-owned. The destination
+	# has been capacity-checked so these operations cannot partially succeed.
+	if not source.remove(item_id, count):
+		return {"ok": false, "reason": "missing_items"}
+	var left: int = destination.add(item_id, count)
+	if left != 0:
+		# Defensive rollback if future inventory implementations change.
+		destination.remove(item_id, count - left)
+		source.add(item_id, count)
+		return {"ok": false, "reason": "transaction_failed"}
+	if deposit:
+		player.inventory.unequip_missing()
+	player.dirty_inventory = true
+	player.dirty_stash = true
+	player.dirty_character = true
+	return {"ok": true, "item": item_id, "count": count, "deposit": deposit}
 
 
 func cmd_use(peer_id: int, item_id: String) -> Dictionary:
@@ -658,4 +728,7 @@ func snapshot_for(peer_id: int) -> Dictionary:
 	if player.dirty_inventory:
 		snapshot["inventory"] = player.inventory.to_dict()
 		player.dirty_inventory = false
+	if player.dirty_stash:
+		snapshot["stash"] = player.stash.to_dict()
+		player.dirty_stash = false
 	return snapshot

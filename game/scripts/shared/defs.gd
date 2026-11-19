@@ -26,6 +26,7 @@ const HUNGER_PER_SECOND := 0.045
 const THIRST_PER_SECOND := 0.07
 const STARVE_DAMAGE_PER_SECOND := 1.2
 const INVENTORY_SLOTS := 24
+const STASH_SLOTS := 48 # Account-bound safe-settlement storage; never dropped on death.
 const RESPAWN_SECONDS := 4.0
 
 # --- Zombies ---------------------------------------------------------------------------------------

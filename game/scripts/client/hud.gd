@@ -12,6 +12,7 @@ var _prompt: Label
 var _log: Label
 var _inventory_panel: PanelContainer
 var _inventory_grid: GridContainer
+var _stash_grid: GridContainer
 var _craft_panel: PanelContainer
 var _craft_list: VBoxContainer
 var _death: Label
@@ -24,6 +25,7 @@ var _inventory_signature: String = ""
 func setup(p_client) -> void:
 	client = p_client
 	client.event_received.connect(_on_event)
+	client.net.result_received.connect(_on_result)
 	_build()
 
 
@@ -93,11 +95,20 @@ func _build() -> void:
 	var inventory_box := VBoxContainer.new()
 	_inventory_panel.add_child(inventory_box)
 	var inventory_title := Label.new()
-	inventory_title.text = "Inventory (click to use or equip)"
+	inventory_title.text = "Inventory: click = use/equip, right-click = bank one (at hub workbench)"
 	inventory_box.add_child(inventory_title)
 	_inventory_grid = GridContainer.new()
 	_inventory_grid.columns = 4
 	inventory_box.add_child(_inventory_grid)
+	var stash_title := Label.new()
+	stash_title.text = "Protected stash: click an item to withdraw one at the workbench"
+	inventory_box.add_child(stash_title)
+	var stash_scroll := ScrollContainer.new()
+	stash_scroll.custom_minimum_size = Vector2(400, 110)
+	inventory_box.add_child(stash_scroll)
+	_stash_grid = GridContainer.new()
+	_stash_grid.columns = 4
+	stash_scroll.add_child(_stash_grid)
 
 	_craft_panel = PanelContainer.new()
 	_craft_panel.set_anchors_preset(Control.PRESET_CENTER_LEFT)
@@ -168,6 +179,23 @@ func _on_event(event: Dictionary) -> void:
 			say("You search the crate...")
 
 
+func _on_result(kind: String, data: Dictionary) -> void:
+	if kind != "stash":
+		return
+	if bool(data.get("ok", false)):
+		say("%s %d × %s" % ["Stored" if data.get("deposit", false) else "Withdrawn", data.get("count", 0), data.get("item", "")])
+	else:
+		var reason: String = data.get("reason", "rejected")
+		var reasons := {
+			"no_station": "Stash: travel to the hub workbench",
+			"missing_items": "Stash: item not available",
+			"no_space": "Stash: destination is full",
+			"dead": "Stash: unavailable while dead",
+			"invalid_stack": "Stash: invalid amount"
+		}
+		say(reasons.get(reason, "Stash: " + reason))
+
+
 func _process(_delta: float) -> void:
 	if client == null or not client.you.has("health"):
 		return
@@ -188,7 +216,7 @@ func _process(_delta: float) -> void:
 
 
 func _refresh_inventory() -> void:
-	var signature := str(client.inventory.to_dict())
+	var signature := str(client.inventory.to_dict()) + "|" + str(client.stash.to_dict())
 	if signature == _inventory_signature:
 		return
 	_inventory_signature = signature
@@ -206,7 +234,23 @@ func _refresh_inventory() -> void:
 			var equipped: bool = item_id == client.inventory.weapon or item_id == client.inventory.armor
 			button.text = "%s\nx%d%s" % [Defs.item(item_id).get("name", item_id), slot["count"], "  [on]" if equipped else ""]
 			button.pressed.connect(func() -> void: client.use_item(item_id))
+			button.gui_input.connect(func(event: InputEvent) -> void:
+				if event is InputEventMouseButton and event.pressed and event.button_index == MOUSE_BUTTON_RIGHT:
+					client.move_stash(item_id, 1, true))
 		_inventory_grid.add_child(button)
+	for child in _stash_grid.get_children():
+		child.queue_free()
+	for slot in client.stash.slots:
+		if slot.is_empty():
+			continue
+		var item_id: String = slot["id"]
+		var button := Button.new()
+		button.custom_minimum_size = Vector2(90, 44)
+		button.add_theme_font_size_override("font_size", 11)
+		button.text = "%s\nx%d" % [Defs.item(item_id).get("name", item_id), slot["count"]]
+		button.tooltip_text = "Withdraw one item (at hub workbench)"
+		button.pressed.connect(func() -> void: client.move_stash(item_id, 1, false))
+		_stash_grid.add_child(button)
 
 
 func _refresh_crafting() -> void:
