@@ -208,7 +208,7 @@ IPAddress IP::get_resolve_item_address(ResolverID p_id) const {
 		return IPAddress();
 	}
 
-	List<IPAddress> res(resolver->queue[p_id].response);
+	const List<IPAddress> &res = resolver->queue[p_id].response;
 
 	for (const IPAddress &E : res) {
 		if (E.is_valid()) {
@@ -227,7 +227,7 @@ Array IP::get_resolve_item_addresses(ResolverID p_id) const {
 		return Array();
 	}
 
-	List<IPAddress> res(resolver->queue[p_id].response);
+	const List<IPAddress> &res = resolver->queue[p_id].response;
 
 	Array result;
 	for (const IPAddress &E : res) {
