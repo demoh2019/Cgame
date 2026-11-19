@@ -974,6 +974,51 @@ python3 tests/stress/run.py --godot ./bin/godot.macos.editor.arm64 \
   --output out/physics-contact-manifolds-2d.json
 ```
 
+### Experimental 2D two-point block solver
+
+Box2D's two-point velocity solver uses a small linear complementarity
+problem (LCP) to solve two normal contact impulses together. Cgame exposes
+an **opt-in** counterpart in the built-in GodotPhysics2D backend:
+
+`physics/2d/solver/block_solver_enabled = true`
+
+The default is **false** until real engine builds, platform tests and
+same-hardware benchmarks confirm both stability and performance. Existing
+simulations are unchanged by default. A new physics space reads the
+setting when it is created; changing it does not affect existing spaces.
+
+The block path runs only for two active manifold points with almost
+identical normals and a well-conditioned 2x2 effective-mass matrix.
+It enumerates all complementarity solutions (both constraints active,
+either point active, or neither). Singular or inconsistent cases fall
+back to the existing sequential per-point solver. Position-bias and
+friction remain unchanged. No per-contact storage or heap allocation is
+added by this feature.
+
+The standalone regression creates eight independent stacks of four boxes.
+It runs 240 physics frames each with block solving disabled/enabled,
+checking collision pairs, finite velocities, runaway motion and settling:
+
+```bash
+./bin/godot.macos.editor.arm64 --headless \
+  --path tests/stress --script res://physics_block_solver_regression.gd
+```
+
+To compare performance fairly, the benchmark cases have identical
+geometry and workloads and only change the block-solver flag. Each run
+creates a fresh physics space and restores its ProjectSettings override:
+
+```bash
+python3 tests/stress/run.py --godot ./bin/godot.macos.editor.arm64 \
+  --case physics_contact_manifolds_2d,physics_contact_block_solver_2d \
+  --scale 4 --frames 120 --repeats 5 --rss-limit-mib 4096 \
+  --output out/physics-block-solver-comparison.json
+```
+
+Compare runtime, collision pair count, stability and RSS across modes.
+Enabling block solving does not guarantee higher throughput: the 2x2
+system adds work per iteration and can instead improve convergence.
+
 ## 3D contact warm-start timestep and material stability
 
 Built-in GodotPhysics3D now scales cached normal, friction, and bias impulses
