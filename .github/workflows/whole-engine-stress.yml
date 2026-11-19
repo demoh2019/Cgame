@@ -196,6 +196,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+          python3 tests/stress/test_physics_ccd_nonlinear_capsule_toi.py
           timeout 120s ./bin/godot.linuxbsd.editor.dev.x86_64 \
             --headless --test --test-case="*MixedCapsuleTOI*" \
             --success=true --no-colors 2>&1 | tee physics-mixed-capsule-toi.log
