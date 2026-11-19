@@ -43,6 +43,7 @@
 #include "servers/physics_softbody_adiabatic_gas.h"
 #include "servers/physics_softbody_shape_matching.h"
 #include "servers/physics_fem_tetra_neo_hookean.h"
+#include "servers/physics_fem_tetra_viscosity.h"
 #include "servers/physics_softbody_shape_clusters.h"
 #include "servers/physics_softbody_aerodynamic_drag.h"
 #include "servers/physics_softbody_plasticity.h"
@@ -2860,6 +2861,29 @@ void GodotSoftBody3D::solve_constraints(real_t p_delta) {
 	if (volume_damping_rate > real_t(0.0) && p_delta > real_t(0.0) && xpbd_volume_closed) {
 		const double fraction = 1.0 - Math::exp(-double(volume_damping_rate) * double(p_delta));
 		damp_volume_rate(fraction);
+	}
+
+	// Tetrahedral Kelvin-Voigt-like viscosity damps ALL six objective
+	// material strain-rate modes (including volumetric and shear), not just
+	// structural link stretching. Unlike global damping it preserves rigid
+	// translation/rotation. Run before x=q+v*dt; later projection restores
+	// velocities from positions and would otherwise erase late damping.
+	const real_t fem_damping_rate = get_space()->get_soft_body_tetra_fem_damping_rate();
+	if (fem_damping_rate > real_t(0.0) &&
+			get_space()->get_soft_body_tetra_fem_compliance() > real_t(0.0) &&
+			!xpbd_fem_tetrahedra.is_empty() && p_delta > real_t(0.0)) {
+		const double fraction = 1.0 - Math::exp(-double(fem_damping_rate) * double(p_delta));
+		if (Math::is_finite(fraction) && fraction > 0.0) {
+			for (const PhysicsFEMConvexTetra &tetra : xpbd_fem_tetrahedra) {
+				Node &a = nodes[tetra.a];
+				Node &b = nodes[tetra.b];
+				Node &c = nodes[tetra.c];
+				Node &d = nodes[tetra.d];
+				physics_fem_tetra_damp_strain_rate(a.x, b.x, c.x, d.x,
+						a.v, b.v, c.v, d.v,
+						a.im, b.im, c.im, d.im, tetra.rest, fraction);
+			}
+		}
 	}
 
 	// The old c2/c3 link-gradient prepass was unused by solve_links().
