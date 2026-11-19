@@ -290,7 +290,15 @@ bool GodotBodyPair2D::_test_ccd(real_t p_step, GodotBody2D *p_A, int p_shape_A, 
 	// penetration allowance. Preserve B's velocity when converting this
 	// relative motion back to the world frame.
 	const real_t newlen = CLAMP(best_hit_distance + (max - min) * real_t(0.01), real_t(0.0), mlen);
-	p_A->set_linear_velocity(p_B->get_linear_velocity() + mnormal * (newlen / p_step));
+	const Vector2 corrected_velocity = p_B->get_linear_velocity() + mnormal * (newlen / p_step);
+	// This CCD mode is a velocity clamp, not an impulse solver. Do not
+	// reverse or accelerate A just because B is approaching quickly.
+	// B's own CCD handles fast inbound motion when enabled.
+	const Vector2 velocity_A = p_A->get_linear_velocity();
+	const real_t initial_speed = velocity_A.length();
+	const Vector2 travel_direction = velocity_A / initial_speed;
+	const real_t clamped_speed = CLAMP(corrected_velocity.dot(travel_direction), real_t(0.0), initial_speed);
+	p_A->set_linear_velocity(travel_direction * clamped_speed);
 
 	return true;
 }
