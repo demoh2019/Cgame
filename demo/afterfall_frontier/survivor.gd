@@ -163,7 +163,7 @@ func sell(item_id: String, quantity: int, at_settlement: bool) -> String:
 func buy(item_id: String, quantity: int, at_settlement: bool) -> String:
 	if not at_settlement:
 		last_message = "Trade only at the Haven market"
-	elif not item_id in ["water", "food", "fiber", "herb"]:
+	elif not (item_id in ["water", "food", "fiber", "herb"]):
 		last_message = "This vendor only sells essential supplies"
 	elif quantity <= 0:
 		last_message = "Invalid quantity"
@@ -259,7 +259,7 @@ func snapshot() -> Dictionary:
 static func _read_bounded_int(data: Dictionary, key: String,
 		default_value: int, lower: int, upper: int) -> int:
 	var raw: Variant = data.get(key, default_value)
-	if typeof(raw) not in [TYPE_INT, TYPE_FLOAT]:
+	if not (typeof(raw) in [TYPE_INT, TYPE_FLOAT]):
 		return default_value
 	var number: float = float(raw)
 	if not is_finite(number):
@@ -270,7 +270,7 @@ static func _read_bounded_int(data: Dictionary, key: String,
 static func _read_bounded_float(data: Dictionary, key: String,
 		default_value: float, lower: float, upper: float) -> float:
 	var raw: Variant = data.get(key, default_value)
-	if typeof(raw) not in [TYPE_INT, TYPE_FLOAT]:
+	if not (typeof(raw) in [TYPE_INT, TYPE_FLOAT]):
 		return default_value
 	var number: float = float(raw)
 	return clampf(number, lower, upper) if is_finite(number) else default_value
