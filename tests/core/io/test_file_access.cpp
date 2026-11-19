@@ -175,6 +175,81 @@ TEST_CASE("[FileAccess][Performance] CSV randomized quoted fields round trip") {
 	}
 }
 
+TEST_CASE("[FileAccess][Performance] CSV writer matches the legacy byte representation") {
+	Ref<FileAccessMemory> file;
+	file.instantiate();
+	uint32_t seed = 0x5D21C9A7;
+	static constexpr char32_t alphabet[] = U"abcXYZ 123,\"é😀\n";
+
+	for (int trial = 0; trial < 192; trial++) {
+		seed ^= seed << 13;
+		seed ^= seed >> 17;
+		seed ^= seed << 5;
+		const int count = int(seed % 16);
+		const String delimiter = (trial & 1) ? "," : "~";
+		Vector<String> values;
+		String legacy;
+		for (int i = 0; i < count; i++) {
+			seed ^= seed << 13;
+			seed ^= seed >> 17;
+			seed ^= seed << 5;
+			const int len = int(seed % 120);
+			String value;
+			value.resize_uninitialized(len + 1);
+			char32_t *write = value.ptrw();
+			for (int j = 0; j < len; j++) {
+				seed ^= seed << 13;
+				seed ^= seed >> 17;
+				seed ^= seed << 5;
+				write[j] = alphabet[seed % (sizeof(alphabet) / sizeof(alphabet[0]) - 1)];
+			}
+			write[len] = 0;
+			values.push_back(value);
+
+			// Independent oracle: exactly the original ordered operations.
+			String old_field = value;
+			if (old_field.contains_char('"') || old_field.contains(delimiter) || old_field.contains_char('\n')) {
+				old_field = "\"" + old_field.replace("\"", "\"\"") + "\"";
+			}
+			if (i < count - 1) {
+				old_field += delimiter;
+			}
+			legacy += old_field;
+		}
+
+		const CharString expected = (legacy + "\n").utf8();
+		Vector<uint8_t> storage;
+		REQUIRE(storage.resize_uninitialized(expected.length()) == OK);
+		REQUIRE(file->open_custom(storage.ptrw(), storage.size()) == OK);
+		REQUIRE(file->store_csv_line(values, delimiter));
+		CHECK(file->get_position() == uint64_t(expected.length()));
+		CHECK(memcmp(storage.ptr(), expected.ptr(), expected.length()) == 0);
+	}
+}
+
+TEST_CASE("[FileAccess][Performance] CSV large quoted writer round trips with one buffer") {
+	Vector<String> values;
+	for (int i = 0; i < 64; i++) {
+		values.push_back(String(U"🇵🇱é,\"abc\n").repeat(64) + String::num_int64(i));
+	}
+	// A generous backing storage for this file avoids any filesystem dependency.
+	Vector<uint8_t> storage;
+	REQUIRE(storage.resize_initialized(262144) == OK);
+	Ref<FileAccessMemory> file;
+	file.instantiate();
+	REQUIRE(file->open_custom(storage.ptrw(), storage.size()) == OK);
+	REQUIRE(file->store_csv_line(values));
+
+	const uint64_t written = file->get_position();
+	CHECK(written > 50000);
+	file->seek(0);
+	const Vector<String> parsed = file->get_csv_line();
+	REQUIRE(parsed.size() == values.size());
+	for (int i = 0; i < values.size(); i++) {
+		CHECK(parsed[i] == values[i]);
+	}
+}
+
 TEST_CASE("[FileAccess] Get as UTF-8 String") {
 	SUBCASE("Newline == \\n (Unix)") {
 		Ref<FileAccess> f_lf = FileAccess::open(TestUtils::get_data_path("line_endings_lf.test.txt"), FileAccess::READ);
