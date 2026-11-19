@@ -34,6 +34,18 @@ add_child(terrain)
 
 The image must be uncompressed and 2–513 pixels along each dimension. Single-channel grayscale/R images use the red channel as height; RGB images use luminance. Values are clamped to 0–1 before mapping into the requested height range.
 
+## Thermal erosion (additional PR)
+
+Use the **Thermal Erosion** button in the terrain editor toolbar to apply 8 iterations with talus `0.1` and strength `0.15`. The operation is undoable. Scripts can run custom settings on the [TerrainHeightmap] resource:
+
+```gdscript
+terrain.heightmap.erode_thermal(32, 0.2, 0.125)
+```
+
+The erosion algorithm visits each horizontal and vertical grid edge exactly once, transferring equal amounts of height from steeper to lower neighbors. It preserves total sample height (aside from floating-point rounding), does not use randomness, and validates the iteration count, strength and talus inputs.
+
+This is **thermal relaxation**, not full hydraulic erosion. It does not model water flow, sediment transport, river deposition or time-varying weather, and the 513×513 terrain still rebuilds its full mesh on every operation.
+
 ## Design choices and limitations
 
 - Uses one continuous triangle mesh with **correct winding**, computed normals, UVs, and vertex colors.
