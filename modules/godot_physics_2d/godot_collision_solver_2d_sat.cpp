@@ -902,7 +902,7 @@ static void _collision_circle_convex_polygon(const GodotShape2D *p_a, const Tran
 
 		if (!convex_B->contains_point(center_local)) {
 			const int point_count = convex_B->get_point_count();
-			real_t closest_distance_squared = Math_INF;
+			real_t closest_distance_squared = real_t(Math::INF);
 			Vector2 closest_local;
 			bool valid_edges = true;
 
