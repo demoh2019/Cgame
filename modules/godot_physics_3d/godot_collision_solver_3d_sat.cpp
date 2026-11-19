@@ -844,7 +844,8 @@ static void _collision_sphere_box(const GodotShape3D *p_a, const Transform3D &p_
 
 	// Find the point on the box nearest to the center of the sphere.
 
-	Vector3 center = p_transform_b.affine_inverse().xform(p_transform_a.origin);
+	const Transform3D box_inverse = p_transform_b.affine_inverse();
+	Vector3 center = box_inverse.xform(p_transform_a.origin);
 	Vector3 extents = box_B->get_half_extents();
 	Vector3 nearest(MIN(MAX(center.x, -extents.x), extents.x),
 			MIN(MAX(center.y, -extents.y), extents.y),
@@ -867,8 +868,29 @@ static void _collision_sphere_box(const GodotShape3D *p_a, const Transform3D &p_
 	const real_t length = Math::sqrt(distance_squared);
 	Vector3 axis;
 	if (length == 0) {
-		// The box passes through the sphere center.  Select an axis based on the box's center.
-		axis = (p_transform_b.origin - nearest).normalized();
+		// The sphere center is inside (or on) the box. The clamped closest
+		// point is its own center, so the old center-to-center normal can be
+		// zero. Find the nearest exit face, using world-space face distances
+		// so rotated and non-uniformly scaled boxes select the right face.
+		const Basis face_normal_basis = box_inverse.basis.transposed();
+		real_t nearest_face_distance = 1e30;
+		Vector3 exit_normal(1.0, 0.0, 0.0);
+		for (int i = 0; i < 3; i++) {
+			const Vector3 face_normal = face_normal_basis.get_column(i);
+			const real_t normal_length = face_normal.length();
+			if (normal_length <= CMP_EPSILON) {
+				continue;
+			}
+			const real_t face_distance = (extents[i] - Math::abs(center[i])) / normal_length;
+			if (face_distance < nearest_face_distance) {
+				nearest_face_distance = face_distance;
+				exit_normal = face_normal * ((center[i] < 0.0 ? -1.0 : 1.0) / normal_length);
+			}
+		}
+		// Use the opposite sphere support point so the solver pushes a
+		// completely contained sphere *out* of the box, not further inside.
+		axis = -exit_normal;
+		nearest = p_transform_a.origin + exit_normal * nearest_face_distance;
 	} else {
 		axis = delta / length;
 	}
