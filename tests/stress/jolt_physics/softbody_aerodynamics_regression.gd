@@ -54,7 +54,7 @@ func _run() -> void:
 		PhysicsServer3D.soft_body_set_simulation_precision(body, 7)
 		PhysicsServer3D.soft_body_set_damping_coefficient(body, 0.0)
 		PhysicsServer3D.soft_body_set_drag_coefficient(body, DRAGS[i])
-		PhysicsServer3D.soft_body_set_collision_layer(body, 0)
+		PhysicsServer3D.soft_body_set_collision_layer(body, 1 << i)
 		PhysicsServer3D.soft_body_set_collision_mask(body, 0)
 		PhysicsServer3D.soft_body_set_state(body, PhysicsServer3D.BODY_STATE_CAN_SLEEP, false)
 		PhysicsServer3D.soft_body_set_space(body, space)
