@@ -1400,6 +1400,9 @@ GodotSpace3D::GodotSpace3D() {
 	soft_body_xpbd_shear_compliance = Math::is_finite(configured_shear_compliance) ? MAX(real_t(0.0), configured_shear_compliance) : real_t(0.0);
 	const real_t configured_dihedral_compliance = GLOBAL_GET("physics/3d/solver/soft_body_xpbd_dihedral_compliance");
 	soft_body_xpbd_dihedral_compliance = Math::is_finite(configured_dihedral_compliance) ? MAX(real_t(0.0), configured_dihedral_compliance) : real_t(0.0);
+	const real_t configured_bend_parallel_ratio = GLOBAL_GET("physics/3d/solver/soft_body_xpbd_bend_parallel_compliance_ratio");
+	soft_body_xpbd_bend_parallel_compliance_ratio = Math::is_finite(configured_bend_parallel_ratio) ?
+			CLAMP(configured_bend_parallel_ratio, real_t(0.01), real_t(100.0)) : real_t(1.0);
 	const real_t configured_shape_stiffness = GLOBAL_GET("physics/3d/solver/soft_body_shape_matching_stiffness");
 	soft_body_shape_matching_stiffness = Math::is_finite(configured_shape_stiffness) ? CLAMP(configured_shape_stiffness, real_t(0.0), real_t(1.0)) : real_t(0.0);
 	const int configured_shape_cluster_size = GLOBAL_GET("physics/3d/solver/soft_body_shape_matching_cluster_size");
