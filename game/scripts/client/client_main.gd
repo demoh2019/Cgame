@@ -14,6 +14,7 @@ const Structures = preload("res://scripts/shared/structures.gd")
 const Vendor = preload("res://scripts/shared/vendor.gd")
 const SurvivalRadar = preload("res://scripts/client/survival_radar.gd")
 const Contracts = preload("res://scripts/shared/contracts.gd")
+const Reputation = preload("res://scripts/shared/reputation.gd")
 const CampRest = preload("res://scripts/shared/camp_rest.gd")
 const Weather = preload("res://scripts/shared/weather.gd")
 const FieldCampfire = preload("res://scripts/shared/field_campfire.gd")
@@ -736,7 +737,9 @@ func _unhandled_input(event: InputEvent) -> void:
 	elif event.is_action_pressed("survive_rest"):
 		_result("Camp rest", sim.cmd_rest(LOCAL_PLAYER_ID))
 	elif event.is_action_pressed("survive_vendor_buy"):
-		_result("Buy water (12 silver)", sim.cmd_vendor(LOCAL_PLAYER_ID, "water_bottle", 1, true))
+		_result("Buy water (%d silver)" % Reputation.buy_price(
+			int(Vendor.BUY_PRICES["water_bottle"]), 1, survivor.renown),
+			sim.cmd_vendor(LOCAL_PLAYER_ID, "water_bottle", 1, true))
 	elif event.is_action_pressed("survive_vendor_sell"):
 		var fish_only: bool = Input.is_key_pressed(KEY_SHIFT)
 		var salvage_id: String = Vendor.first_fish(survivor.inventory) if fish_only else Vendor.first_sellable(survivor.inventory)
@@ -778,6 +781,10 @@ func _update_hud() -> void:
 		weight, speed_pct, survivor.inventory.count("silver"),
 		Contracts.description(survivor.contract_state), ", ".join(rows)
 	]
+	_stats.text += "\nSURVIVOR RENOWN %s %d / %d | Hub supply discount %d%%" % [
+		Reputation.title(survivor.renown), survivor.renown,
+		Reputation.next_threshold(survivor.renown),
+		Reputation.discount_percent(survivor.renown)]
 	var recipe_id: String = _recipes[_recipe_index] if not _recipes.is_empty() else "bandage"
 	var recipe: Dictionary = Defs.recipes().get(recipe_id, {})
 	var near_bench: bool = Vector2(position.x, position.z).distance_to(GameServer.WORKBENCH_POSITION) < GameServer.WORKBENCH_RANGE
