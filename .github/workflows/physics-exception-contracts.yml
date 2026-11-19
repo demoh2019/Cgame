@@ -1,0 +1,36 @@
+name: Physics broadphase source contracts
+
+on:
+  push:
+    branches: [develop]
+    paths:
+      - ".github/workflows/physics-exception-contracts.yml"
+      - "modules/godot_physics_2d/**"
+      - "modules/godot_physics_3d/**"
+      - "tests/stress/physics_exception_pairs_*.gd"
+      - "tests/stress/physics_motion_exclusions_*.gd"
+      - "tests/stress/stress.gd"
+      - "tests/stress/run.py"
+      - "tests/stress/project.godot"
+      - "tests/stress/test_physics_early_pair_filter.py"
+      - "tests/stress/test_physics_motion_shape_pruning.py"
+  pull_request:
+    branches: [develop]
+    paths:
+      - "modules/godot_physics_2d/**"
+      - "modules/godot_physics_3d/**"
+      - "tests/stress/**"
+      - ".github/workflows/physics-exception-contracts.yml"
+  workflow_dispatch:
+
+jobs:
+  source-contracts:
+    name: Python physics source contracts
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - name: Check early pair filtering and shape-level BVH query contracts
+        run: |
+          python3 -m unittest discover -s tests/stress -p 'test_physics_early_pair_filter.py' -v
+          python3 -m unittest discover -s tests/stress -p 'test_physics_motion_shape_pruning.py' -v
