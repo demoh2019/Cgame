@@ -73,7 +73,9 @@ public:
 
 private:
 	struct ExcludedShapeSW {
-		GodotShape2D *local_shape = nullptr;
+		// A compound body may reuse the same Shape2D resource multiple times.
+		// Match the individual local shape slot, not the shared shape pointer.
+		int local_shape_index = 0;
 		const GodotCollisionObject2D *against_object = nullptr;
 		int against_shape_index = 0;
 	};
