@@ -1,0 +1,44 @@
+name: Selected upstream backports regressions
+
+on:
+  pull_request:
+    paths:
+      - "scene/resources/3d/importer_mesh.cpp"
+      - "scene/resources/surface_tool.h"
+      - "servers/rendering/renderer_viewport.cpp"
+      - "scene/main/canvas_item.cpp"
+      - "scene/3d/visual_instance_3d.cpp"
+      - "servers/rendering/instance_uniforms.cpp"
+      - "tests/scene/test_instance_shader_parameters.cpp"
+      - "misc/scripts/tests/test_selected_upstream_backports.py"
+      - ".github/workflows/selected-upstream-backports.yml"
+  push:
+    branches: [develop]
+    paths:
+      - "scene/resources/3d/importer_mesh.cpp"
+      - "scene/resources/surface_tool.h"
+      - "servers/rendering/renderer_viewport.cpp"
+      - "scene/main/canvas_item.cpp"
+      - "scene/3d/visual_instance_3d.cpp"
+      - "servers/rendering/instance_uniforms.cpp"
+      - "tests/scene/test_instance_shader_parameters.cpp"
+      - "misc/scripts/tests/test_selected_upstream_backports.py"
+      - ".github/workflows/selected-upstream-backports.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  fast-contracts:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - name: Check test syntax
+        run: python3 -m py_compile misc/scripts/tests/test_selected_upstream_backports.py
+      - name: Run 19 source-contract regressions
+        run: python3 -m unittest discover -s misc/scripts/tests -p "test_selected_upstream_backports.py" -v
+      - name: Validate C++ source formatting
+        run: |
+          python3 misc/scripts/file_format.py --help >/dev/null
