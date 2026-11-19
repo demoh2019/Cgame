@@ -74,6 +74,9 @@ void JoltProjectSettings::register_settings() {
 	// Self-collision operates on non-adjacent vertex/face pairs only; the
 	// topology-aware CPU pass is separately budgeted and disabled by default.
 	GLOBAL_DEF(PropertyInfo(Variant::BOOL, "physics/jolt_physics_3d/simulation/soft_body_self_contacts"), false);
+	// Capture narrow cloth folds where two nonadjacent edges cross even
+	// though no point comes close to an opposing triangle.
+	GLOBAL_DEF(PropertyInfo(Variant::BOOL, "physics/jolt_physics_3d/simulation/soft_body_self_edge_contacts"), false);
 	GLOBAL_DEF(PropertyInfo(Variant::INT, "physics/jolt_physics_3d/simulation/soft_body_self_contact_max_checks", PROPERTY_HINT_RANGE, "1024,65536,1024"), 16384);
 	GLOBAL_DEF(PropertyInfo(Variant::FLOAT, "physics/jolt_physics_3d/simulation/soft_body_soft_ccd_max_sweep", PROPERTY_HINT_RANGE, "0,4,0.01,suffix:m"), 1.0f);
 	GLOBAL_DEF(PropertyInfo(Variant::FLOAT, "physics/jolt_physics_3d/simulation/soft_body_soft_ccd_max_correction_speed", PROPERTY_HINT_RANGE, "1,256,1,suffix:m/s"), 128.0f);
@@ -189,6 +192,7 @@ void JoltProjectSettings::read_settings() {
 	soft_body_soft_speculative_ccd = GLOBAL_GET("physics/jolt_physics_3d/simulation/soft_body_soft_speculative_ccd");
 	soft_body_soft_speculative_edge_ccd = GLOBAL_GET("physics/jolt_physics_3d/simulation/soft_body_soft_speculative_edge_ccd");
 	soft_body_self_contacts = GLOBAL_GET("physics/jolt_physics_3d/simulation/soft_body_self_contacts");
+	soft_body_self_edge_contacts = GLOBAL_GET("physics/jolt_physics_3d/simulation/soft_body_self_edge_contacts");
 	soft_body_self_contact_max_checks = CLAMP((int)GLOBAL_GET("physics/jolt_physics_3d/simulation/soft_body_self_contact_max_checks"), 1024, 65536);
 	const float ccd_sweep = GLOBAL_GET("physics/jolt_physics_3d/simulation/soft_body_soft_ccd_max_sweep");
 	soft_body_soft_ccd_max_sweep = Math::is_finite(ccd_sweep) ? CLAMP(ccd_sweep, 0.0f, 4.0f) : 1.0f;

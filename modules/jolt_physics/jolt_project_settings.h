@@ -73,6 +73,9 @@ public:
 	// Opt-in soft body self collision: non-neighboring vertices against the
 	// body's own deformable triangles. Uses a separate per-space CPU budget.
 	inline static bool soft_body_self_contacts = false;
+	// Optional nonlocal self edge/edge collisions, separate quota within
+	// the existing global self-contact budget. Requires self_contacts=true.
+	inline static bool soft_body_self_edge_contacts = false;
 	inline static int soft_body_self_contact_max_checks = 16384;
 	inline static float soft_body_soft_ccd_max_sweep = 1.0f;
 	inline static float soft_body_soft_ccd_max_correction_speed = 128.0f;
