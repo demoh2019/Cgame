@@ -144,7 +144,7 @@ private:
 
 	friend class GodotPhysicsDirectSpaceState3D;
 
-	int _cull_aabb_for_body(GodotBody3D *p_body, const AABB &p_aabb);
+	int _cull_aabb_for_body(GodotBody3D *p_body, const AABB &p_aabb, const PS3DT::MotionParameters &p_parameters);
 
 public:
 	_FORCE_INLINE_ void set_self(const RID &p_self) { self = p_self; }
