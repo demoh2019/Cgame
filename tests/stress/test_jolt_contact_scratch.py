@@ -63,6 +63,30 @@ class JoltContactScratchContracts(unittest.TestCase):
         self.assertNotIn("area_overlaps.reset();", self.area)
         self.assertNotIn("area_soft_body_overlaps.reset();", self.area)
 
+    def test_duplicate_area_exits_cannot_overflow_reservation(self):
+        # Event callbacks can produce redundant exits after a subshape shift.
+        # The estimate must remain signed and reserve only for growth.
+        area = self.area
+        self.assertIn("int64_t estimated_overlap_count = area_overlaps.size();", area)
+        self.assertIn(
+            "estimated_overlap_count += int64_t(tl.area_enters.size()) - int64_t(tl.area_exits.size());",
+            area,
+        )
+        self.assertIn(
+            "if (estimated_overlap_count > int64_t(area_overlaps.size())) {", area
+        )
+        self.assertIn(
+            "area_overlaps.reserve(uint32_t(MIN(estimated_overlap_count, int64_t(UINT32_MAX))));",
+            area,
+        )
+        self.assertNotIn("new_overlap_count -= tl.area_exits.size();", area)
+        for active, enters, exits in (
+            (0, 0, 1), (1, 0, 4), (1, 1, 6), (1, 2, 1),
+            (1024, 4096, 8192), (4096, 8192, 32),
+        ):
+            expected = active + enters - exits
+            self.assertGreaterEqual(min(max(0, expected), 2**32 - 1), 0)
+
     def test_persistent_high_water_mark_and_quiet_scene(self):
         for minimum in (2048, 4096):
             self.assertFalse(should_release(minimum * 2, minimum, minimum))
