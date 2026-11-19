@@ -694,6 +694,10 @@ PhysicsServer3D::PhysicsServer3D() {
 	// Jolt-style per-shape buoyancy: approximate partial immersion below a
 	// horizontal liquid surface; opt-in and independent from legacy damping.
 	GLOBAL_DEF(PropertyInfo(Variant::BOOL, "physics/3d/fluid_plane/enabled"), false);
+	// Surface-clipped, per-face soft-body hydrodynamic drag against the fluid
+	// flow velocity. Independent of buoyancy; works for open cloth as well.
+	GLOBAL_DEF(PropertyInfo(Variant::BOOL, "physics/3d/fluid_plane/soft_body_water_drag"), false);
+	GLOBAL_DEF(PropertyInfo(Variant::FLOAT, "physics/3d/fluid_plane/soft_body_water_tangential_ratio", PROPERTY_HINT_RANGE, "0,5,0.01,or_greater"), 0.0);
 	GLOBAL_DEF(PropertyInfo(Variant::FLOAT, "physics/3d/fluid_plane/surface_height", PROPERTY_HINT_RANGE, "-100000,100000,0.01,or_less,or_greater,suffix:m"), 0.0);
 	GLOBAL_DEF(PropertyInfo(Variant::FLOAT, "physics/3d/fluid_plane/density", PROPERTY_HINT_RANGE, "0,2000,1,or_greater,suffix:kg/m³"), 1000.0);
 	GLOBAL_DEF(PropertyInfo(Variant::FLOAT, "physics/3d/fluid_plane/drag_coefficient", PROPERTY_HINT_RANGE, "0,5,0.01,or_greater"), 0.8);
