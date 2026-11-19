@@ -391,6 +391,64 @@ rigid bodies; actual stability and frame-time gains must be measured
 on the same scene and hardware. External physics backends are not
 modified.
 
+### Experimental energy-preserving gyroscopic midpoint mode
+
+The previous opt-in gyroscopic solver uses a normalized explicit Euler
+update. This is fast and preserves angular momentum **magnitude**, but
+can gradually gain or lose **rotational kinetic energy** when inertia is
+asymmetric. For more demanding tumbling scenes, Cgame now provides a
+second opt-in method inspired by geometric integrators:
+
+```ini
+[physics]
+3d/solver/gyroscopic_forces=true
+3d/solver/gyroscopic_integration_mode=1
+```
+
+Mode `0` (default): existing Jolt-style normalized Euler gyroscope.
+Mode `1`: **implicit midpoint** on the torque-free angular momentum
+equation, solved by at most eight Newton iterations with an analytical
+3×3 Jacobian. Once the residual converges, the update approximately
+preserves **both** angular momentum magnitude and rotational energy.
+If inertia is singular, the inputs are invalid, or an extreme timestep
+prevents Newton convergence, it safely falls back to the existing
+normalized Euler update. No persistent body state or heap allocations
+are introduced. Isotropic bodies and principal-axis rotation remain
+fast no-op cases.
+
+Both settings are read when the 3D physics space is created.
+The original `gyroscopic_forces=false` default remains unchanged;
+the midpoint mode is intentionally **not enabled by default** because
+it costs extra cross products and matrix inversions on active asymmetric
+rigid bodies. The midpoint law applies to the torque-free component
+after the regular force and damping update; it does not claim energy
+conservation in scenes with applied torques, damping or impacts.
+
+Verification includes five native C++ unit tests, eight source/reference
+tests including 2,000 seeded asymmetric-inertia cases, and a 600-step
+numerical spin trajectory. The runtime regression compares the
+energy and angular momentum drift between normalized Euler and midpoint
+on the same torque-free asymmetric rigid body:
+
+```bash
+python3 -m unittest discover -s tests/stress \
+  -p 'test_physics_gyroscopic_midpoint_3d.py' -v
+
+./bin/godot.macos.editor.arm64 --headless \
+  --path tests/stress \
+  --script res://physics_gyroscopic_midpoint_3d_regression.gd
+```
+
+The corrected 2D angular-friction and contact-floor regressions now
+use gravity towards the supporting floor; their earlier negative gravity
+moved bodies away from it, preventing sustained contact. PhysicsServer2D
+rectangle shape data is **half-extents**, so their existing half-size
+geometry was correct and was intentionally left unchanged.
+
+Use the same hardware and release configuration for any performance
+comparison. These reference cases do not demonstrate a successful C++
+build or end-to-end physics execution until the native tests are run.
+
 ## Bullet-style rolling and spinning resistance (opt-in 2D/3D)
 
 Bullet Physics includes rolling resistance for round shapes and torsional
