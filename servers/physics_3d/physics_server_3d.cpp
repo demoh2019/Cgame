@@ -647,7 +647,8 @@ PhysicsServer3D::PhysicsServer3D() {
 	// Both buffers and work are disabled by default with zero compliance.
 	GLOBAL_DEF(PropertyInfo(Variant::FLOAT, "physics/3d/solver/soft_body_xpbd_membrane_compliance", PROPERTY_HINT_RANGE, "0,0.01,0.000001,or_greater"), 0.0);
 	GLOBAL_DEF(PropertyInfo(Variant::FLOAT, "physics/3d/solver/soft_body_membrane_poisson_ratio", PROPERTY_HINT_RANGE, "-0.49,0.49,0.01"), 0.3);
-	// Experimental volumetric Neo-Hookean FEM for a single closed tetrahedron.
+	// Experimental convex closed-shell Neo-Hookean FEM, cooked into multiple
+	// tetrahedra; arbitrary concave/imported tetra networks require a separate API.
 	GLOBAL_DEF(PropertyInfo(Variant::FLOAT, "physics/3d/solver/soft_body_tetra_fem_compliance", PROPERTY_HINT_RANGE, "0,0.01,0.000001,or_greater"), 0.0);
 	// Mass-lump the *rest tetra volume* to its four vertices, instead of
 	// the legacy equal-per-vertex soft-body mass. Disabled for compatibility.
