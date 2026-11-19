@@ -1,0 +1,54 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<class name="BehaviorTree" inherits="RefCounted" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="https://raw.githubusercontent.com/godotengine/godot/master/doc/class.xsd">
+	<brief_description>Small deterministic behavior-tree runtime with sequence, selector, inverter, condition, set and wait nodes.</brief_description>
+	<description>
+		BehaviorTree evaluates a nested Dictionary description. Each BehaviorTree instance owns its execution memory and blackboard, so separate agents should instantiate separate trees. The runtime supports six node types: [code]sequence[/code], [code]selector[/code], [code]inverter[/code], [code]condition[/code], [code]set[/code], and [code]wait[/code]. It does not yet contain a visual graph editor, GDScript callback tasks or an editor inspector.
+	</description>
+	<tutorials>
+	</tutorials>
+	<methods>
+		<method name="set_tree">
+			<return type="bool" />
+			<param index="0" name="description" type="Dictionary" />
+			<description>Validates and deep-copies a nested node Dictionary. Returns false without replacing the previous tree on malformed data. A sequence or selector has a non-empty [code]children[/code] Array, an inverter has one [code]child[/code], condition uses [code]key[/code] and [code]equals[/code], set uses [code]key[/code] and [code]value[/code], and wait uses a nonnegative [code]ticks[/code] integer.</description>
+		</method>
+		<method name="get_tree" qualifiers="const">
+			<return type="Dictionary" />
+			<description>Returns a deep copy of the current tree definition.</description>
+		</method>
+		<method name="tick">
+			<return type="int" enum="BehaviorTree.Status" />
+			<description>Advances the tree by one logical tick and returns FAILURE, SUCCESS or RUNNING. Wait nodes count ticks, not elapsed wall-clock time.</description>
+		</method>
+		<method name="reset">
+			<return type="void" />
+			<description>Clears execution memory without modifying the blackboard.</description>
+		</method>
+		<method name="clear_blackboard">
+			<return type="void" />
+			<description>Removes all blackboard values.</description>
+		</method>
+		<method name="set_blackboard_value">
+			<return type="void" />
+			<param index="0" name="key" type="String" />
+			<param index="1" name="value" type="Variant" />
+			<description>Sets a key in this instance's blackboard.</description>
+		</method>
+		<method name="get_blackboard_value" qualifiers="const">
+			<return type="Variant" />
+			<param index="0" name="key" type="String" />
+			<param index="1" name="default" type="Variant" default="null" />
+			<description>Returns the stored value or the specified fallback.</description>
+		</method>
+		<method name="has_blackboard_value" qualifiers="const">
+			<return type="bool" />
+			<param index="0" name="key" type="String" />
+			<description>Returns whether the blackboard contains the specified key.</description>
+		</method>
+	</methods>
+	<constants>
+		<constant name="FAILURE" value="0" enum="Status">The node failed.</constant>
+		<constant name="SUCCESS" value="1" enum="Status">The node succeeded.</constant>
+		<constant name="RUNNING" value="2" enum="Status">The node has unfinished work.</constant>
+	</constants>
+</class>
