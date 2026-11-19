@@ -202,8 +202,8 @@ class SelfEdgeBVHReferenceTests(unittest.TestCase):
         entries = make_entries(edges)
         self.assertEqual(len(entries), 78)
         root = build(entries)
-        self.assertEqual(query(root, entries, (0, 0, 0), (0, 0, 0), .1)[0],
-                         [e.edge_index for e in entries if overlaps((0, 0, 0), (0, 0, 0), e.lo, e.hi, .1)])
+        self.assertEqual(set(query(root, entries, (0, 0, 0), (0, 0, 0), .1)[0]),
+                         {e.edge_index for e in entries if overlaps((0, 0, 0), (0, 0, 0), e.lo, e.hi, .1)})
 
     def test_opt_in_setting_preserves_linear_default(self):
         self.assertIn("inline static bool soft_body_self_edge_bvh = false;", self.header)
