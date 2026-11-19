@@ -2165,6 +2165,31 @@ void GodotSoftBody3D::update_face_tree(real_t p_delta) {
 	}
 }
 
+// Continuous self-contact broadphase: union of previous (q) and current
+// (x) triangle endpoints, expanded by the collision thickness. Even when
+// a vertex and face are far apart at the END of a frame, their swept
+// volumes can intersect. This is conservative for linear trajectories.
+void GodotSoftBody3D::update_swept_face_tree(real_t p_thickness) {
+	const real_t margin = MAX(real_t(0.0), collision_margin) + p_thickness;
+	for (const Face &face : faces) {
+		const Node *a = face.n[0];
+		const Node *b = face.n[1];
+		const Node *c = face.n[2];
+		if (!a->q.is_finite() || !b->q.is_finite() || !c->q.is_finite() ||
+				!a->x.is_finite() || !b->x.is_finite() || !c->x.is_finite()) {
+			continue;
+		}
+		AABB swept(a->q, Vector3());
+		swept.expand_to(b->q);
+		swept.expand_to(c->q);
+		swept.expand_to(a->x);
+		swept.expand_to(b->x);
+		swept.expand_to(c->x);
+		swept.grow_by(margin);
+		face_tree.update(face.leaf, swept);
+	}
+}
+
 void GodotSoftBody3D::initialize_shape(bool p_force_move) {
 	if (get_shape_count() == 0) {
 		GodotSoftBodyShape3D *soft_body_shape = memnew(GodotSoftBodyShape3D(this));
