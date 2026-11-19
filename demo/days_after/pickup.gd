@@ -1,5 +1,7 @@
 extends Area3D
 
+signal collected_once(pickup_id: String)
+
 ## A single-use scavenging pickup. The world owns the instance and the player
 ## owns the inventory; the pickup only transfers an item once.
 
@@ -32,6 +34,9 @@ func interact(player: Node) -> void:
         return
     if item_type != "food" and item_type != "water":
         return
+    # Never consume the pickup if the survivor could not accept the item.
+    if not bool(player.call("collect_item", item_type, quantity)):
+        return
     collected = true
-    player.call("collect_item", item_type, quantity)
+    collected_once.emit(name)
     queue_free()
