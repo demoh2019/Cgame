@@ -74,7 +74,11 @@ def _matches_exclusion(relative: str, patterns: tuple[str, ...]) -> bool:
 
 def _iterate_entries(root: Path, patterns: tuple[str, ...]):
     """List entries deterministically and prune generated/vendor directories."""
-    for base, dirs, files in os.walk(root, topdown=True, followlinks=False):
+    def fail_walk(error: OSError) -> None:
+        # An inaccessible subtree must not silently produce a clean audit.
+        raise ValueError(f"Cannot enumerate project files: {error}") from error
+
+    for base, dirs, files in os.walk(root, topdown=True, followlinks=False, onerror=fail_walk):
         here = Path(base)
         dirs[:] = sorted(d for d in dirs if d not in IGNORED_DIRS
                          and not _matches_exclusion((here / d).relative_to(root).as_posix(), patterns))
@@ -149,7 +153,13 @@ def scan_project(root: Path, max_text_bytes: int = 8 * 1024 * 1024,
     for path, rel in entries:
         if path.is_symlink():
             try:
-                path.resolve().relative_to(root)
+                resolved_link = path.resolve(strict=True)
+            except (OSError, RuntimeError):
+                findings.append(Finding("error", "UNRESOLVABLE_SYMLINK", rel, 0,
+                                        "Symlink target is missing or contains a loop."))
+                continue
+            try:
+                resolved_link.relative_to(root)
             except ValueError:
                 findings.append(Finding("warning", "EXTERNAL_SYMLINK", rel, 0,
                                         "Symlink targets a location outside the project."))
@@ -205,13 +215,25 @@ def scan_project(root: Path, max_text_bytes: int = 8 * 1024 * 1024,
                 continue
 
             candidate = root.joinpath(*parts)
+            try:
+                resolved_candidate = candidate.resolve()
+            except (OSError, RuntimeError):
+                findings.append(Finding("error", "UNRESOLVABLE_RESOURCE", rel, lineno,
+                                        "Resource path contains an unresolvable symlink.", original))
+                continue
+            try:
+                resolved_candidate.relative_to(root)
+            except ValueError:
+                findings.append(Finding("error", "RESOURCE_OUTSIDE_PROJECT", rel, lineno,
+                                        "Resource reference resolves outside the project.", original))
+                continue
             if candidate.exists():
                 if candidate.is_dir():
                     findings.append(Finding("error", "RESOURCE_IS_DIRECTORY", rel, lineno,
                                             "Resource reference points to a directory, not a file.", original))
                 continue
             possible = index.get(portability_key(PurePosixPath(target).as_posix()), [])
-            if len(possible) == 1:
+            if len(possible) == 1 and possible[0] != PurePosixPath(target).as_posix():
                 findings.append(Finding("error", "CASE_MISMATCH", rel, lineno,
                                         f"Resource path case does not match existing file: {possible[0]}", original))
             else:
