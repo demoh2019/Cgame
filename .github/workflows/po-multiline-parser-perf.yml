@@ -1,0 +1,37 @@
+name: PO translation multiline parser performance regressions
+
+on:
+  pull_request:
+    branches: [develop]
+    paths:
+      - 'core/io/translation_loader_po.cpp'
+      - 'tests/core/io/test_translation_loader_po.cpp'
+      - '.github/workflows/po-multiline-parser-perf.yml'
+  push:
+    branches: [develop]
+    paths:
+      - 'core/io/translation_loader_po.cpp'
+      - 'tests/core/io/test_translation_loader_po.cpp'
+      - '.github/workflows/po-multiline-parser-perf.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  native-po-parser:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+      - uses: ./.github/actions/godot-deps
+      - name: Build editor with native tests
+        uses: ./.github/actions/godot-build
+        with:
+          platform: linuxbsd
+          target: editor
+          scons-flags: dev_build=yes tests=yes debug_symbols=no module_mono_enabled=no module_text_server_fb_enabled=yes accesskit=no -j2
+      - name: Verify multiline PO, contexts and plural translations
+        run: ./bin/godot.linuxbsd.editor.dev.x86_64 --headless --test --test-case="*[TranslationLoaderPO]*" --no-colors

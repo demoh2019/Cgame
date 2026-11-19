@@ -300,7 +300,10 @@ Ref<Resource> TranslationLoaderPO::load_translation(Ref<FileAccess> r_file, Erro
 				msg_context += l;
 			} else if (status == STATUS_READING_PLURAL && plural_index >= 0) {
 				ERR_FAIL_COND_V_MSG(plural_index >= plural_forms, Ref<Resource>(), vformat("Unexpected plural form while parsing: %s:%d.", path, line));
-				msgs_plural.write[plural_index] = msgs_plural[plural_index] + l;
+				// Update the existing String in place. Building a temporary
+				// (old + fragment) forks the COW buffer on every line and
+				// repeatedly copies its whole prefix for multiline plurals.
+				msgs_plural.write[plural_index] += l;
 			}
 
 			line++;
