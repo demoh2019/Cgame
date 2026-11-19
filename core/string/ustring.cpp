@@ -4484,6 +4484,10 @@ String String::strip_escapes() const {
 // lookup table avoids searching the entire set for every stripped code point.
 // Non-ASCII code points still use the full Unicode String lookup.
 static _FORCE_INLINE_ bool _trim_char_in_set(char32_t p_char, const String &p_chars, const uint64_t p_ascii_mask[2]) {
+	// The first trim character is often repeated (e.g. leading spaces).
+	if (p_char == p_chars.ptr()[0]) {
+		return true;
+	}
 	const uint32_t codepoint = uint32_t(p_char);
 	if (codepoint < 128) {
 		return (p_ascii_mask[codepoint >> 6] & (uint64_t(1) << (codepoint & 63))) != 0;
