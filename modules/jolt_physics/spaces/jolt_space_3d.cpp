@@ -978,6 +978,7 @@ constexpr uint32_t MAX_SOFT_SELF_CONTACT_FACES = 1024;
 
 struct SoftSelfContactScratch {
 	SoftFaceBVHScratch bvh;
+	SoftFaceBVHScratch edge_bvh; // Reused across active soft bodies.
 	JPH::Array<uint64_t> one_ring_edges;
 };
 
@@ -1161,6 +1162,97 @@ static bool soft_self_edges_are_neighbors(uint64_t p_a, uint64_t p_b, const JPH:
 	return false;
 }
 
+// Self-edge BVH reuses the established median-split face BVH node/entry
+// storage: entry.face_index is the *original self-edge key index* here.
+// The tree is rebuilt from current local-space segment AABBs, because a
+// soft-body's vertices deform at every step. This is a broadphase only:
+// exact segment distances and topology exclusions remain unchanged.
+constexpr uint32_t MIN_SOFT_SELF_EDGE_BVH_EDGES = 32;
+constexpr uint32_t MAX_SOFT_SELF_EDGE_BVH_EDGES = 3072;
+
+static bool prepare_soft_self_edge_bvh(const JPH::Array<uint64_t> &p_edges,
+		const JPH::Array<JPH::SoftBodyVertex> &p_vertices, SoftFaceBVHScratch &r_bvh, uint32_t &r_budget) {
+	r_bvh.clear();
+	const uint32_t edge_count = uint32_t(p_edges.size());
+	if (edge_count < MIN_SOFT_SELF_EDGE_BVH_EDGES || edge_count > MAX_SOFT_SELF_EDGE_BVH_EDGES) {
+		return false;
+	}
+	// Median partition scans every level and the bounds pass scans each
+	// segment. Charge a conservative O(E log E) work cost in advance.
+	uint32_t levels = 0;
+	for (uint32_t count = edge_count; count > 1; count = (count + 1) / 2) {
+		++levels;
+	}
+	const uint32_t build_cost = edge_count * (levels + 2);
+	if (r_budget <= build_cost) {
+		return false; // Preserve at least one work unit for contact queries.
+	}
+	r_budget -= build_cost;
+	r_bvh.entries.reserve(edge_count);
+	for (uint32_t i = 0; i < edge_count; ++i) {
+		const uint64_t edge = p_edges[i];
+		const uint32_t a = uint32_t(edge >> 32), b = uint32_t(edge);
+		if (a >= p_vertices.size() || b >= p_vertices.size() || a == b) {
+			continue;
+		}
+		const JPH::Vec3 p0 = p_vertices[a].mPosition;
+		const JPH::Vec3 p1 = p_vertices[b].mPosition;
+		const JPH::Vec3 min_bound = JPH::Vec3::sMin(p0, p1);
+		const JPH::Vec3 max_bound = JPH::Vec3::sMax(p0, p1);
+		if (!Math::is_finite(min_bound.GetX()) || !Math::is_finite(min_bound.GetY()) || !Math::is_finite(min_bound.GetZ()) ||
+				!Math::is_finite(max_bound.GetX()) || !Math::is_finite(max_bound.GetY()) || !Math::is_finite(max_bound.GetZ())) {
+			continue;
+		}
+		SoftFaceBVHEntry entry;
+		entry.min = min_bound;
+		entry.max = max_bound;
+		entry.face_index = i;
+		r_bvh.entries.push_back(entry);
+	}
+	if (r_bvh.entries.empty()) {
+		return false;
+	}
+	r_bvh.nodes.reserve(2 * r_bvh.entries.size());
+	build_soft_face_bvh(r_bvh.entries, r_bvh.nodes, 0, uint32_t(r_bvh.entries.size()));
+	r_bvh.candidates.reserve(r_bvh.entries.size());
+	r_bvh.stack.reserve(32); // Median split: depth <= 12 for 3072 edges.
+	return true;
+}
+
+static bool soft_self_edge_bounds_overlap(JPH::Vec3Arg p_min_a, JPH::Vec3Arg p_max_a,
+		JPH::Vec3Arg p_min_b, JPH::Vec3Arg p_max_b, float p_radius) {
+	return p_max_a.GetX() + p_radius >= p_min_b.GetX() && p_max_b.GetX() + p_radius >= p_min_a.GetX() &&
+			p_max_a.GetY() + p_radius >= p_min_b.GetY() && p_max_b.GetY() + p_radius >= p_min_a.GetY() &&
+			p_max_a.GetZ() + p_radius >= p_min_b.GetZ() && p_max_b.GetZ() + p_radius >= p_min_a.GetZ();
+}
+
+static void query_soft_self_edge_bvh(JPH::Vec3Arg p_min, JPH::Vec3Arg p_max, float p_radius,
+		SoftFaceBVHScratch &r_bvh, uint32_t &r_budget) {
+	r_bvh.candidates.clear();
+	r_bvh.stack.clear();
+	r_bvh.stack.push_back(0);
+	while (!r_bvh.stack.empty() && r_budget > 0) {
+		const uint32_t node_index = r_bvh.stack.back();
+		r_bvh.stack.pop_back();
+		--r_budget; // Every visited node consumes the global EE work quota.
+		const SoftFaceBVHNode &node = r_bvh.nodes[node_index];
+		if (!soft_self_edge_bounds_overlap(p_min, p_max, node.min, node.max, p_radius)) {
+			continue;
+		}
+		if (node.end - node.begin <= SOFT_FACE_BVH_LEAF_SIZE) {
+			for (uint32_t i = node.begin; i < node.end; ++i) {
+				const SoftFaceBVHEntry &entry = r_bvh.entries[i];
+				if (soft_self_edge_bounds_overlap(p_min, p_max, entry.min, entry.max, p_radius)) {
+					r_bvh.candidates.push_back(entry.face_index);
+				}
+			}
+		} else {
+			r_bvh.stack.push_back(node.right);
+			r_bvh.stack.push_back(node.left);
+		}
+	}
+}
+
 // Supplement vertex-face self contacts with segment-segment impulses.
 // A single body does not have a pair of COM transforms, so all positions,
 // velocities, and impulse corrections stay in its local coordinate frame.
@@ -1190,6 +1282,8 @@ static void resolve_soft_body_self_edge_contacts(JPH::Body &p_body, const JoltSo
 	const float radius_sq = radius * radius;
 	const float recovery = JoltProjectSettings::soft_body_soft_contact_recovery / p_step;
 	const float friction = JoltProjectSettings::soft_body_soft_contact_friction;
+	const bool use_edge_bvh = JoltProjectSettings::soft_body_self_edge_bvh &&
+			prepare_soft_self_edge_bvh(edges, vertices, r_scratch.edge_bvh, r_budget);
 
 	// Query each unordered pair once: avoids doubling impulses on the
 	// very same self-contact. Topological exclusion also skips edges
@@ -1202,8 +1296,18 @@ static void resolve_soft_body_self_edge_contacts(JPH::Body &p_body, const JoltSo
 		const JPH::Vec3 p1 = a1.mPosition;
 		const JPH::Vec3 p_min = JPH::Vec3::sMin(p0, p1);
 		const JPH::Vec3 p_max = JPH::Vec3::sMax(p0, p1);
-		for (uint32_t j = i + 1; j < edge_count && r_budget > 0; ++j) {
-			--r_budget; // Every candidate, including topology rejects.
+		if (use_edge_bvh) {
+			query_soft_self_edge_bvh(p_min, p_max, radius, r_scratch.edge_bvh, r_budget);
+		}
+		const uint32_t candidate_count = use_edge_bvh ? uint32_t(r_scratch.edge_bvh.candidates.size()) : edge_count;
+		for (uint32_t candidate = 0; candidate < candidate_count && r_budget > 0; ++candidate) {
+			// The tree permutes entries, but preserves each original
+			// edge index. Retain j > i to evaluate unordered pairs once.
+			const uint32_t j = use_edge_bvh ? r_scratch.edge_bvh.candidates[candidate] : candidate;
+			if (j <= i) {
+				continue;
+			}
+			--r_budget; // Every tested candidate, including topology rejects.
 			const uint64_t key_b = edges[j];
 			if (soft_self_edges_are_neighbors(key_a, key_b, edges)) {
 				continue;
@@ -1214,9 +1318,7 @@ static void resolve_soft_body_self_edge_contacts(JPH::Body &p_body, const JoltSo
 			const JPH::Vec3 q1 = b1.mPosition;
 			const JPH::Vec3 q_min = JPH::Vec3::sMin(q0, q1);
 			const JPH::Vec3 q_max = JPH::Vec3::sMax(q0, q1);
-			if (p_max.GetX() + radius < q_min.GetX() || q_max.GetX() + radius < p_min.GetX() ||
-					p_max.GetY() + radius < q_min.GetY() || q_max.GetY() + radius < p_min.GetY() ||
-					p_max.GetZ() + radius < q_min.GetZ() || q_max.GetZ() + radius < p_min.GetZ()) {
+			if (!soft_self_edge_bounds_overlap(p_min, p_max, q_min, q_max, radius)) {
 				continue;
 			}
 

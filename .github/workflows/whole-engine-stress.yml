@@ -236,6 +236,18 @@ jobs:
             --script res://physics_jolt_pending_broadphase_regression.gd \
             2>&1 | tee physics-jolt-pending-broadphase.log
           grep -Fq 'Jolt pending broadphase regression passed.' physics-jolt-pending-broadphase.log
+      - name: Regression-test Jolt BVH dense self edge collision stability
+        shell: bash
+        run: |
+          set -euo pipefail
+          BIN=./bin/godot.linuxbsd.editor.dev.x86_64
+          PROJECT=tests/stress/jolt_soft_self_edge_bvh
+          timeout 120s "$BIN" --headless --path "$PROJECT" \
+            --script res://bvh_self_edges_regression.gd --check-only
+          timeout 180s "$BIN" --headless --path "$PROJECT" \
+            --script res://bvh_self_edges_regression.gd \
+            2>&1 | tee jolt-self-edge-bvh.log
+          grep -Fq 'PASS: Jolt BVH accelerated self edge collisions' jolt-self-edge-bvh.log
       - name: Regression-test Jolt nonadjacent self edge-edge contacts
         shell: bash
         run: |

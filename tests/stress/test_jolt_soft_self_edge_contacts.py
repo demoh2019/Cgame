@@ -120,7 +120,8 @@ class SoftSelfEdgeTests(unittest.TestCase):
         pairs = [(edges[i], edges[j]) for i in range(len(edges)) for j in range(i+1, len(edges))]
         self.assertEqual(len(pairs), 15)
         self.assertEqual(len(set(pairs)), len(pairs))
-        self.assertIn("for (uint32_t j = i + 1; j < edge_count", self.solver)
+        self.assertIn("for (uint32_t candidate = 0; candidate < candidate_count", self.solver)
+        self.assertIn("if (j <= i)", self.solver)
 
     def test_inverse_mass_weights_conserve_momentum(self):
         s, t = .3, .6
@@ -159,7 +160,7 @@ class SoftSelfEdgeTests(unittest.TestCase):
         self.assertIn("self_scratch.one_ring_edges.clear();", self.pre)
         self.assertIn("r_scratch.one_ring_edges.empty()", self.solver)
         self.assertIn("prepare_soft_self_topology(", self.solver)
-        self.assertIn("--r_budget; // Every candidate", self.solver)
+        self.assertIn("--r_budget; // Every tested candidate", self.solver)
         self.assertIn("r_scratch.one_ring_edges", self.solver)
 
     def test_does_not_require_inter_body_master_and_default_off(self):
