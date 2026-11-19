@@ -64,7 +64,7 @@ TEST_CASE("[PhysicsVolume] Triangle gradients match the oriented cross-product")
 }
 
 TEST_CASE("[PhysicsVolume] Double gradient differences keep extreme finite float coordinates") {
-	const real_t large = real_t(1e38);
+	const real_t large = real_t(2e38);
 	const real_t tiny = real_t(1e-10);
 	Vector3 grad_a, grad_b, grad_c;
 	CHECK(physics_softbody_volume_face_gradients(
