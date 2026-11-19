@@ -1379,4 +1379,88 @@ TEST_CASE("[SceneTree][Node] find_children stackless handles deep branches") {
 	memdelete(root);
 }
 
+
+TEST_CASE("[SceneTree][Node] Large mixed-mode children cache preserves index order") {
+	Node *root = memnew(Node);
+	Vector<Node *> front;
+	Vector<Node *> regular;
+	Vector<Node *> back;
+
+	// Interleave additions to force the cache to be rebuilt while each
+	// internal-mode index range remains dense.
+	for (int i = 0; i < 128; i++) {
+		Node *ordinary = memnew(Node);
+		ordinary->set_name("Regular" + itos(i));
+		root->add_child(ordinary);
+		regular.push_back(ordinary);
+
+		if (i < 32) {
+			Node *internal_front = memnew(Node);
+			internal_front->set_name("Front" + itos(i));
+			root->add_child(internal_front, false, Node::INTERNAL_MODE_FRONT);
+			front.push_back(internal_front);
+		}
+		if (i < 24) {
+			Node *internal_back = memnew(Node);
+			internal_back->set_name("Back" + itos(i));
+			root->add_child(internal_back, false, Node::INTERNAL_MODE_BACK);
+			back.push_back(internal_back);
+		}
+	}
+
+	REQUIRE_EQ(root->get_child_count(true), 184);
+	REQUIRE_EQ(root->get_child_count(false), 128);
+	for (int i = 0; i < front.size(); i++) {
+		CHECK_EQ(root->get_child(i, true), front[i]);
+		CHECK_EQ(front[i]->get_index(), i);
+	}
+	for (int i = 0; i < regular.size(); i++) {
+		CHECK_EQ(root->get_child(front.size() + i, true), regular[i]);
+		CHECK_EQ(root->get_child(i, false), regular[i]);
+		CHECK_EQ(regular[i]->get_index(), i);
+	}
+	for (int i = 0; i < back.size(); i++) {
+		CHECK_EQ(root->get_child(front.size() + regular.size() + i, true), back[i]);
+		CHECK_EQ(back[i]->get_index(), i);
+	}
+
+	// Removing middle nodes creates index gaps and triggers the legacy
+	// comparison-based fallback, which must compact each mode correctly.
+	for (int mode = 0; mode < 3; mode++) {
+		Vector<Node *> *group = mode == 0 ? &front : (mode == 1 ? &regular : &back);
+		const int middle = group->size() / 2;
+		Node *removed = (*group)[middle];
+		root->remove_child(removed);
+		memdelete(removed);
+		group->remove_at(middle);
+	}
+	REQUIRE_EQ(root->get_child_count(true), 181);
+	REQUIRE_EQ(root->get_child_count(false), 127);
+	for (int i = 0; i < front.size(); i++) {
+		CHECK_EQ(root->get_child(i, true), front[i]);
+	}
+	for (int i = 0; i < regular.size(); i++) {
+		CHECK_EQ(root->get_child(i, false), regular[i]);
+		CHECK_EQ(root->get_child(front.size() + i, true), regular[i]);
+	}
+	for (int i = 0; i < back.size(); i++) {
+		CHECK_EQ(root->get_child(front.size() + regular.size() + i, true), back[i]);
+	}
+
+	// A cache rebuild after new front-internal nodes should reuse the linear
+	// path. Explicit moves continue to respect the public child ordering.
+	Node *new_front = memnew(Node);
+	new_front->set_name("FrontAppended");
+	root->add_child(new_front, false, Node::INTERNAL_MODE_FRONT);
+	front.push_back(new_front);
+	Node *moved = regular[70];
+	root->move_child(moved, 0);
+	CHECK_EQ(root->get_child(0, false), moved);
+	CHECK_EQ(root->get_child(front.size(), true), moved);
+	CHECK_EQ(root->get_child(front.size() + 1, true), regular[0]);
+	CHECK_EQ(root->get_child(root->get_child_count(true) - 1, true), back[back.size() - 1]);
+
+	memdelete(root);
+}
+
 } // namespace TestNode
