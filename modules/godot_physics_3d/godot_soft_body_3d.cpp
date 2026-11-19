@@ -572,15 +572,18 @@ void GodotSoftBody3D::initialize_fem_tetra() {
 	xpbd_fem_tetrahedra.reset();
 	xpbd_fem_sls_states.reset();
 	xpbd_fem_fiber_lambdas.reset();
+	xpbd_fem_fiber_secondary_lambdas.reset();
 	xpbd_fem_principal_lambdas.reset();
 	xpbd_fem_fiber_plastic_rest_stretches.reset();
+	xpbd_fem_fiber_secondary_plastic_rest_stretches.reset();
 	xpbd_fem_damage.reset();
 	xpbd_fem_mass_fractions.reset();
 
 	if (get_space() &&
 			(get_space()->get_soft_body_tetra_fem_compliance() > 0.0 ||
 					get_space()->get_soft_body_tetra_fem_viscosity() > 0.0 ||
-					get_space()->get_soft_body_tetra_fiber_compliance() > 0.0) &&
+					get_space()->get_soft_body_tetra_fiber_compliance() > 0.0 ||
+					get_space()->get_soft_body_tetra_fiber_secondary_compliance() > 0.0) &&
 			xpbd_volume_closed && nodes.size() >= 4 && nodes.size() <= 2048 &&
 			faces.size() >= 4 && faces.size() <= 4096) {
 		LocalVector<Vector3> positions;
@@ -3576,6 +3579,45 @@ void GodotSoftBody3D::solve_constraints(real_t p_delta) {
 		}
 	}
 
+	// The second material fiber family accumulates its own permanent
+	// reference elongation before projection. Each family can have a
+	// different oblique axis, creep rate, yield point and stretch cap.
+	// With zero secondary creep rate no extra positions are inspected.
+	const real_t secondary_fiber_creep = get_space()->get_soft_body_tetra_fiber_secondary_plastic_creep_rate();
+	const real_t secondary_fiber_max_stretch = get_space()->get_soft_body_tetra_fiber_secondary_plastic_max_stretch();
+	const bool use_secondary_fiber_plasticity = secondary_fiber_creep > real_t(0.0) &&
+			secondary_fiber_max_stretch > real_t(1.0) && p_delta > real_t(0.0) &&
+			get_space()->get_soft_body_tetra_fem_compliance() > real_t(0.0) &&
+			get_space()->get_soft_body_tetra_fiber_secondary_compliance() > real_t(0.0) &&
+			!xpbd_fem_tetrahedra.is_empty();
+	if (use_secondary_fiber_plasticity) {
+		if (xpbd_fem_fiber_secondary_plastic_rest_stretches.size() != xpbd_fem_tetrahedra.size()) {
+			xpbd_fem_fiber_secondary_plastic_rest_stretches.resize(xpbd_fem_tetrahedra.size());
+			for (real_t &rest_stretch : xpbd_fem_fiber_secondary_plastic_rest_stretches) {
+				rest_stretch = real_t(1.0);
+			}
+		}
+		const Vector3 material_axis = get_space()->get_soft_body_tetra_fiber_secondary_axis();
+		const double plastic_yield = double(get_space()->get_soft_body_tetra_fiber_secondary_plastic_yield_ratio());
+		for (uint32_t i = 0; i < xpbd_fem_tetrahedra.size(); ++i) {
+			const PhysicsFEMConvexTetra &tetra = xpbd_fem_tetrahedra[i];
+			const Vector3 points[4] = {
+				nodes[tetra.a].x, nodes[tetra.b].x,
+				nodes[tetra.c].x, nodes[tetra.d].x
+			};
+			double stretch = 0.0;
+			if (physics_fem_tetra_fiber_measure_stretch(
+						points, tetra.rest, material_axis, stretch)) {
+				physics_fem_tetra_fiber_creep_rest_stretch(
+						stretch, plastic_yield, double(secondary_fiber_creep),
+						double(p_delta), double(secondary_fiber_max_stretch),
+						xpbd_fem_fiber_secondary_plastic_rest_stretches[i]);
+			}
+		}
+	} else if (!xpbd_fem_fiber_secondary_plastic_rest_stretches.is_empty()) {
+		xpbd_fem_fiber_secondary_plastic_rest_stretches.reset();
+	}
+
 	// Local scalar continuum damage is evaluated on predicted positions
 	// BEFORE the elastic XPBD projection removes the over-yield strain.
 	// The strength history is updated once per fixed physics tick, not
@@ -3770,6 +3812,15 @@ void GodotSoftBody3D::solve_constraints(real_t p_delta) {
 	const bool use_fem_fiber = use_fem && fem_fiber_compliance > 0.0 &&
 			Math::is_finite(fem_fiber_alpha) && fem_fiber_alpha > 0.0;
 	const Vector3 fem_fiber_axis = get_space() ? get_space()->get_soft_body_tetra_fiber_axis() : Vector3(1, 0, 0);
+	// Family two is optional, independent of the primary fiber family.
+	const double fem_secondary_fiber_compliance = get_space() ?
+			double(get_space()->get_soft_body_tetra_fiber_secondary_compliance()) : 0.0;
+	const double fem_secondary_fiber_alpha = p_delta > 0.0 ?
+			fem_secondary_fiber_compliance / (double(p_delta) * double(p_delta)) : 0.0;
+	const bool use_fem_secondary_fiber = use_fem && fem_secondary_fiber_compliance > 0.0 &&
+			Math::is_finite(fem_secondary_fiber_alpha) && fem_secondary_fiber_alpha > 0.0;
+	const Vector3 fem_secondary_fiber_axis = get_space() ?
+			get_space()->get_soft_body_tetra_fiber_secondary_axis() : Vector3(0, 1, 0);
 	const bool use_fem_inversion_recovery = use_fem && get_space()->is_soft_body_tetra_inversion_recovery_enabled();
 	const double fem_inversion_min_j = double(get_space()->get_soft_body_tetra_inversion_min_j());
 	const double volume_compliance = get_space() ? double(get_space()->get_soft_body_xpbd_volume_compliance()) : 0.0;
@@ -3981,6 +4032,17 @@ void GodotSoftBody3D::solve_constraints(real_t p_delta) {
 		xpbd_fem_fiber_lambdas.reset();
 	}
 
+	// Separate lambda per tetra for the second unilateral material axis.
+	// This family cannot inherit the first family's active tension.
+	if (use_fem_secondary_fiber) {
+		xpbd_fem_fiber_secondary_lambdas.resize(xpbd_fem_tetrahedra.size());
+		for (double &lambda : xpbd_fem_fiber_secondary_lambdas) {
+			lambda = 0.0;
+		}
+	} else if (!xpbd_fem_fiber_secondary_lambdas.is_empty()) {
+		xpbd_fem_fiber_secondary_lambdas.reset();
+	}
+
 	// Distribute frame-level shape stiffness over solver iterations. For a
 	// fixed total stiffness, increasing iteration_count should not multiply
 	// the corrective strength by that many times.
@@ -4144,7 +4206,9 @@ void GodotSoftBody3D::solve_constraints(real_t p_delta) {
 				}
 			}
 		}
-		if (use_fem_fiber) {
+		if (use_fem_fiber || use_fem_secondary_fiber) {
+			// Both fiber families share damage, but their axes, plastic
+			// rest stretches and unilateral XPBD multipliers are separate.
 			// A damaged tetrahedron must also lose reinforcement strength:
 			// leaving its fiber stiffness untouched makes the apparent
 			// fracture yield anisotropically inconsistent. The per-tetra
@@ -4157,18 +4221,34 @@ void GodotSoftBody3D::solve_constraints(real_t p_delta) {
 				Node &b = nodes[tetra.b];
 				Node &c = nodes[tetra.c];
 				Node &d = nodes[tetra.d];
-				double local_fiber_alpha = fem_fiber_alpha;
-				if (fibers_have_damage) {
-					PhysicsFEMTetraDamage::effective_compliance(
-							fem_fiber_alpha, xpbd_fem_damage[tet_index], local_fiber_alpha);
+				if (use_fem_fiber) {
+					double local_fiber_alpha = fem_fiber_alpha;
+					if (fibers_have_damage) {
+						PhysicsFEMTetraDamage::effective_compliance(
+								fem_fiber_alpha, xpbd_fem_damage[tet_index], local_fiber_alpha);
+					}
+					const real_t plastic_rest_stretch =
+							xpbd_fem_fiber_plastic_rest_stretches.size() == xpbd_fem_tetrahedra.size() ?
+							xpbd_fem_fiber_plastic_rest_stretches[tet_index] : real_t(1.0);
+					physics_fem_tetra_solve_fiber(a.x, b.x, c.x, d.x,
+							a.im, b.im, c.im, d.im, tetra.rest,
+							fem_fiber_axis, local_fiber_alpha, xpbd_fem_fiber_lambdas[tet_index],
+							double(plastic_rest_stretch));
 				}
-				const real_t plastic_rest_stretch =
-						xpbd_fem_fiber_plastic_rest_stretches.size() == xpbd_fem_tetrahedra.size() ?
-						xpbd_fem_fiber_plastic_rest_stretches[tet_index] : real_t(1.0);
-				physics_fem_tetra_solve_fiber(a.x, b.x, c.x, d.x,
-						a.im, b.im, c.im, d.im, tetra.rest,
-						fem_fiber_axis, local_fiber_alpha, xpbd_fem_fiber_lambdas[tet_index],
-						double(plastic_rest_stretch));
+				if (use_fem_secondary_fiber) {
+					double secondary_alpha = fem_secondary_fiber_alpha;
+					if (fibers_have_damage) {
+						PhysicsFEMTetraDamage::effective_compliance(
+								fem_secondary_fiber_alpha, xpbd_fem_damage[tet_index], secondary_alpha);
+					}
+					const real_t secondary_rest_stretch =
+							xpbd_fem_fiber_secondary_plastic_rest_stretches.size() == xpbd_fem_tetrahedra.size() ?
+							xpbd_fem_fiber_secondary_plastic_rest_stretches[tet_index] : real_t(1.0);
+					physics_fem_tetra_solve_fiber(a.x, b.x, c.x, d.x,
+							a.im, b.im, c.im, d.im, tetra.rest,
+							fem_secondary_fiber_axis, secondary_alpha,
+							xpbd_fem_fiber_secondary_lambdas[tet_index], double(secondary_rest_stretch));
+				}
 			}
 		}
 		if (use_volume_xpbd) {
@@ -4445,8 +4525,10 @@ void GodotSoftBody3D::destroy() {
 	xpbd_fem_tetrahedra.reset();
 	xpbd_fem_sls_states.reset();
 	xpbd_fem_fiber_lambdas.reset();
+	xpbd_fem_fiber_secondary_lambdas.reset();
 	xpbd_fem_principal_lambdas.reset();
 	xpbd_fem_fiber_plastic_rest_stretches.reset();
+	xpbd_fem_fiber_secondary_plastic_rest_stretches.reset();
 	xpbd_fem_damage.reset();
 	xpbd_fem_mass_fractions.reset();
 	xpbd_surface_node_count = 0;
