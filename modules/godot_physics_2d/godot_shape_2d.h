@@ -137,14 +137,14 @@ public:
 		project_range_cast(p_cast, p_normal, p_transform, r_min, r_max); \
 	} \
 	_FORCE_INLINE_ void project_range_cast(const Vector2 &p_cast, const Vector2 &p_normal, const Transform2D &p_transform, real_t &r_min, real_t &r_max) const { \
-		real_t mina, maxa; \
-		real_t minb, maxb; \
-		Transform2D ofsb = p_transform; \
-		ofsb.columns[2] += p_cast; \
-		project_range(p_normal, p_transform, mina, maxa); \
-		project_range(p_normal, ofsb, minb, maxb); \
-		r_min = MIN(mina, minb); \
-		r_max = MAX(maxa, maxb); \
+		project_range(p_normal, p_transform, r_min, r_max); \
+		/* A translated shape's projection is shifted by the motion's projection. */ \
+		const real_t cast_offset = p_normal.dot(p_cast); \
+		if (cast_offset < 0.0) { \
+			r_min += cast_offset; \
+		} else { \
+			r_max += cast_offset; \
+		} \
 	}
 
 class GodotWorldBoundaryShape2D : public GodotShape2D {
