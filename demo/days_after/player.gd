@@ -12,6 +12,7 @@ const GRAVITY := 18.0
 const MOUSE_SENSITIVITY := 0.0025
 const XP_PER_LEVEL := 60
 const SAVE_STATE = preload("res://save_state.gd")
+const EquipmentDurability = preload("res://equipment_durability.gd")
 
 const RECIPES := {
     "field_bandage": {"fiber_t1": 2},
@@ -26,6 +27,7 @@ var health: float = 100.0
 var hunger: float = 80.0
 var thirst: float = 80.0
 var inventory: Dictionary = {}
+var durability: Dictionary = {}
 var gathering_xp: Dictionary = {"wood": 0, "stone": 0, "fiber": 0}
 var crafting_xp: int = 0
 var equipped_tool: String = ""
@@ -56,6 +58,12 @@ func _unhandled_input(event: InputEvent) -> void:
             last_message = "Игра сохранена." if SAVE_STATE.save_player(self) else "Не удалось сохранить игру."
         elif event.keycode == KEY_F9:
             last_message = "Сохранение загружено." if SAVE_STATE.load_player(self) else "Нет корректного сохранения."
+        elif event.keycode == KEY_F6:
+            repair_equipped("tool")
+        elif event.keycode == KEY_F7:
+            repair_equipped("weapon")
+        elif event.keycode == KEY_F8:
+            repair_equipped("armor")
     elif event is InputEventMouseButton and event.pressed:
         if event.button_index == MOUSE_BUTTON_LEFT:
             Input.mouse_mode = Input.MOUSE_MODE_CAPTURED
@@ -167,12 +175,14 @@ func try_gather(resource_kind: String, tier: int, quantity: int) -> bool:
     if gathering_level(resource_kind) < tier:
         last_message = "Нужен навык добычи %s уровня %d." % [resource_kind, tier]
         return false
-    if tier >= 2 and equipped_tool != "scavenger_tool":
-        last_message = "Для ресурсов T2 требуется экипированный инструмент."
+    if tier >= 2 and (equipped_tool != "scavenger_tool" or get_item_condition(equipped_tool) <= 0):
+        last_message = "Для ресурсов T2 требуется исправный инструмент."
         return false
 
     add_item("%s_t%d" % [resource_kind, tier], quantity)
     gathering_xp[resource_kind] = int(gathering_xp[resource_kind]) + 25 * tier * quantity
+    if equipped_tool == "scavenger_tool" and get_item_condition(equipped_tool) > 0:
+        EquipmentDurability.wear(durability, equipped_tool, 3)
     last_message = "Добыто: %s T%d × %d | навык %d" % [
         resource_kind, tier, quantity, gathering_level(resource_kind)
     ]
@@ -190,7 +200,12 @@ func craft_recipe(recipe_id: String) -> bool:
 
     for item_id in ingredients:
         inventory[item_id] = get_item_count(str(item_id)) - int(ingredients[item_id])
+    var owned_before := get_item_count(recipe_id)
     add_item(recipe_id, 1)
+    # A newly crafted equipment type starts at full condition; crafting a
+    # duplicate does not magically restore a damaged existing stack.
+    if EquipmentDurability.is_equipment(recipe_id) and owned_before == 0:
+        durability[recipe_id] = EquipmentDurability.MAX_CONDITION
     crafting_xp += 20
     match recipe_id:
         "scavenger_tool":
@@ -219,6 +234,8 @@ func use_bandage(item_id: String) -> bool:
 func equip_item(slot: String, item_id: String) -> bool:
     if get_item_count(item_id) <= 0 or health <= 0.0:
         return false
+    if EquipmentDurability.is_equipment(item_id) and get_item_condition(item_id) <= 0:
+        return false
     match slot:
         "tool":
             if item_id != "scavenger_tool":
@@ -239,6 +256,8 @@ func equip_item(slot: String, item_id: String) -> bool:
 
 
 func get_attack_damage() -> float:
+    if not equipped_weapon.is_empty() and get_item_condition(equipped_weapon) <= 0:
+        return 12.0
     match equipped_weapon:
         "rusty_spear":
             return 32.0
@@ -252,15 +271,21 @@ func perform_attack() -> bool:
     if health <= 0.0 or attack_cooldown > 0.0:
         return false
     attack_cooldown = 0.65
-    attack_requested.emit(get_attack_damage(), 2.7)
+    var damage := get_attack_damage()
+    attack_requested.emit(damage, 2.7)
+    if not equipped_weapon.is_empty() and get_item_condition(equipped_weapon) > 0:
+        EquipmentDurability.wear(durability, equipped_weapon, 2)
     return true
 
 
 func take_damage(raw_amount: float) -> void:
     if health <= 0.0 or raw_amount <= 0.0:
         return
-    var reduction: float = 0.25 if equipped_armor == "scrap_vest" else 0.0
+    var armor_active := equipped_armor == "scrap_vest" and get_item_condition(equipped_armor) > 0
+    var reduction: float = 0.25 if armor_active else 0.0
     health = maxf(0.0, health - raw_amount * (1.0 - reduction))
+    if armor_active:
+        EquipmentDurability.wear(durability, equipped_armor, maxi(1, ceili(raw_amount * 0.5)))
     if health <= 0.0:
         last_message = "Вы погибли. Нажмите R для перезапуска."
 
@@ -268,3 +293,33 @@ func take_damage(raw_amount: float) -> void:
 func gain_combat_xp(amount: int) -> void:
     if amount > 0:
         combat_xp += amount
+
+
+func get_item_condition(item_id: String) -> int:
+    if get_item_count(item_id) <= 0:
+        return 0
+    return EquipmentDurability.condition_of(durability, item_id)
+
+
+func repair_item(item_id: String) -> bool:
+    if health <= 0.0:
+        return false
+    if not EquipmentDurability.repair(durability, inventory, item_id):
+        last_message = "Недостаточно материалов или ремонт не требуется: " + item_id
+        return false
+    last_message = "Снаряжение отремонтировано: " + item_id
+    return true
+
+
+func repair_equipped(slot: String) -> bool:
+    var item_id := ""
+    match slot:
+        "tool":
+            item_id = equipped_tool
+        "weapon":
+            item_id = equipped_weapon
+        "armor":
+            item_id = equipped_armor
+        _:
+            return false
+    return repair_item(item_id)
