@@ -1206,6 +1206,93 @@ static bool soft_self_is_neighbor(uint32_t p_point, const JPH::SoftBodySharedSet
 	return false;
 }
 
+// Opt-in self vertex/face CCD for linearly moving, independently deforming
+// triangle corners. Unlike the cheap inter-body mean-plane predictor above,
+// this repeatedly measures the *actual distance to the moving triangle*
+// and bounds its closing speed by max(|v_point-v_a|,|v_point-v_b|,
+// |v_point-v_c|). The bound remains conservative under linear per-vertex
+// motion, even when the triangle rotates/shears or the nearest feature
+// switches between its face, edges and corners.
+// Actual Jolt XPBD motion can accelerate within a step: this does not
+// provide exact nonlinear deformable CCD or a TOI rewind.
+constexpr uint32_t MAX_SOFT_SELF_VERTEX_FACE_SWEEP_ITERATIONS = 16;
+constexpr float SOFT_SELF_VERTEX_FACE_SWEEP_TOLERANCE = 1.0e-4f;
+
+static bool predict_soft_self_vertex_face_sweep(
+		JPH::Vec3Arg p_point, JPH::Vec3Arg p_point_velocity,
+		JPH::Vec3Arg p_a, JPH::Vec3Arg p_b, JPH::Vec3Arg p_c,
+		JPH::Vec3Arg p_va, JPH::Vec3Arg p_vb, JPH::Vec3Arg p_vc,
+		float p_step, float p_radius, float p_max_sweep, uint32_t &r_budget,
+		float &r_u, float &r_v, float &r_w, JPH::Vec3 &r_normal) {
+	if (!Math::is_finite(p_step) || !Math::is_finite(p_radius) || !Math::is_finite(p_max_sweep) ||
+			p_step <= 0.0f || p_radius <= 0.0f || p_max_sweep <= 0.0f) {
+		return false;
+	}
+	const float max_relative_speed_sq = MAX(
+			(p_point_velocity - p_va).LengthSq(),
+			MAX((p_point_velocity - p_vb).LengthSq(), (p_point_velocity - p_vc).LengthSq()));
+	if (!Math::is_finite(max_relative_speed_sq) || max_relative_speed_sq <= 1.0e-12f) {
+		return false;
+	}
+	const float speed_bound = Math::sqrt(max_relative_speed_sq);
+	const float travel_bound = speed_bound * p_step;
+	if (!Math::is_finite(travel_bound) || travel_bound > p_max_sweep) {
+		return false;
+	}
+
+	float time = 0.0f;
+	for (uint32_t iteration = 0; iteration < MAX_SOFT_SELF_VERTEX_FACE_SWEEP_ITERATIONS && r_budget > 0; ++iteration) {
+		--r_budget; // One extra face distance evaluation per advancement.
+		const JPH::Vec3 point_at_time = p_point + p_point_velocity * time;
+		const JPH::Vec3 a_at_time = p_a + p_va * time;
+		const JPH::Vec3 b_at_time = p_b + p_vb * time;
+		const JPH::Vec3 c_at_time = p_c + p_vc * time;
+		JPH::Vec3 nearest = JPH::Vec3::sZero();
+		float u = 0.0f, v = 0.0f, w = 0.0f;
+		if (!closest_soft_triangle_point(point_at_time, a_at_time, b_at_time, c_at_time, nearest, u, v, w)) {
+			return false;
+		}
+		const JPH::Vec3 separation = point_at_time - nearest;
+		const float distance_sq = separation.LengthSq();
+		if (!Math::is_finite(distance_sq)) {
+			return false;
+		}
+		const float distance = Math::sqrt(MAX(distance_sq, 0.0f));
+		if (time > 0.0f && distance <= p_radius + SOFT_SELF_VERTEX_FACE_SWEEP_TOLERANCE) {
+			const JPH::Vec3 face_velocity = u * p_va + v * p_vb + w * p_vc;
+			const JPH::Vec3 relative_velocity = p_point_velocity - face_velocity;
+			if (distance > 1.0e-6f) {
+				r_normal = separation / distance;
+			} else {
+				// Exact coincidence has no geometric orientation; choose
+				// the normal opposing velocity rather than face winding.
+				const float velocity_sq = relative_velocity.LengthSq();
+				if (!Math::is_finite(velocity_sq) || velocity_sq <= 1.0e-12f) {
+					return false;
+				}
+				r_normal = -relative_velocity / Math::sqrt(velocity_sq);
+			}
+			const float approach_speed = relative_velocity.Dot(r_normal);
+			if (!Math::is_finite(approach_speed) || approach_speed >= -1.0e-6f) {
+				return false; // Avoid speculative impulses on outgoing contacts.
+			}
+			r_u = u;
+			r_v = v;
+			r_w = w;
+			return true;
+		}
+		if (distance <= p_radius) {
+			return false; // Initial overlap belongs to the discrete solver.
+		}
+		const float advance = (distance - p_radius) / speed_bound;
+		if (!Math::is_finite(advance) || advance <= 1.0e-8f * p_step || time + advance > p_step) {
+			return false;
+		}
+		time += advance;
+	}
+	return false; // Iteration cap and shared contact work budget.
+}
+
 static void resolve_soft_body_self_contacts(JPH::Body &p_body, const JoltSoftBody3D &p_object,
 		float p_step, uint32_t &r_budget, SoftSelfContactScratch &r_scratch) {
 	JPH::SoftBodyMotionProperties &props = static_cast<JPH::SoftBodyMotionProperties &>(*p_body.GetMotionPropertiesUnchecked());
