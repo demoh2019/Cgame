@@ -696,13 +696,14 @@ void GodotSoftBody3D::solve_self_collisions(real_t p_delta) {
 	xpbd_self_contacts.clear();
 	xpbd_self_ccd_contacts.clear();
 	const bool swept_ccd = get_space()->is_soft_body_self_collision_ccd_enabled();
-	if (face_tree.is_empty()) {
+	const bool face_tree_new = face_tree.is_empty();
+	if (face_tree_new) {
 		initialize_face_tree();
 	}
 	if (swept_ccd) {
 		// Previous/current face positions bound full per-step trajectories.
 		update_swept_face_tree(thickness);
-	} else {
+	} else if (!face_tree_new) {
 		// Material constraints may have moved the face after predict_motion().
 		update_face_tree(real_t(0.0));
 	}
