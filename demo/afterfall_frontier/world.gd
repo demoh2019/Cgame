@@ -217,8 +217,9 @@ func _update_infected(delta: float) -> void:
 		var distance: float = pos.distance_to(player_position)
 		if survivor.zone > 0 and distance < (280.0 if _is_night() else 220.0):
 			var direction := (player_position - pos).normalized()
-			z["pos"] = pos + direction * (105.0 if bool(z["high_risk"]) else 80.0) *
-					(1.15 if _is_night() else 1.0) * delta
+			z["pos"] = pos + direction * (
+					(105.0 if bool(z["high_risk"]) else 80.0) *
+					(1.15 if _is_night() else 1.0) * delta)
 			if distance < 33.0 and float(z["cooldown"]) <= 0.0:
 				z["cooldown"] = 1.35
 				var base_damage := 16.0 if bool(z["high_risk"]) else 10.0
