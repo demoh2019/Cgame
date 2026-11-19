@@ -3372,6 +3372,26 @@ void Image::blend_rect(const Ref<Image> &p_src, const Rect2i &p_src_rect, const 
 		return;
 	}
 
+	// Hoist copy-on-write detachment and pointer lookups out of the pixel loop.
+	// Keep the established scalar traversal for self-overlapping blits and
+	// compressed formats where pixel offsets are not directly addressable.
+	if (p_src.ptr() != this && !is_compressed()) {
+		uint8_t *dst_pixels = data.ptrw();
+		const uint8_t *src_pixels = p_src->data.ptr();
+		for (int y = 0; y < dest_rect.size.y; y++) {
+			const uint32_t src_row = (src_rect.position.y + y) * p_src->width + src_rect.position.x;
+			const uint32_t dst_row = (dest_rect.position.y + y) * width + dest_rect.position.x;
+			for (int x = 0; x < dest_rect.size.x; x++) {
+				const Color sc = p_src->_get_color_at_ofs(src_pixels, src_row + x);
+				if (sc.a != 0) {
+					const uint32_t dst_offset = dst_row + x;
+					_set_color_at_ofs(dst_pixels, dst_offset, _get_color_at_ofs(dst_pixels, dst_offset).blend(sc));
+				}
+			}
+		}
+		return;
+	}
+
 	Ref<Image> img = p_src;
 
 	for (int i = 0; i < dest_rect.size.y; i++) {
@@ -3409,6 +3429,31 @@ void Image::blend_rect_mask(const Ref<Image> &p_src, const Ref<Image> &p_mask, c
 	Rect2i dest_rect;
 	_get_clipped_src_and_dest_rects(p_src, p_src_rect, p_dest, src_rect, dest_rect);
 	if (!src_rect.has_area() || !dest_rect.has_area()) {
+		return;
+	}
+
+	// Read RGBA8 alpha bytes directly, and detach the destination's COW
+	// buffer only once. Exclude self-blits and destination-mask aliasing:
+	// their scalar behavior depends on preceding writes within the same call.
+	if (p_mask->format == FORMAT_RGBA8 && !is_compressed() && p_src.ptr() != this && p_mask.ptr() != this) {
+		uint8_t *dst_pixels = data.ptrw();
+		const uint8_t *src_pixels = p_src->data.ptr();
+		const uint8_t *mask_pixels = p_mask->data.ptr();
+		for (int y = 0; y < dest_rect.size.y; y++) {
+			const uint32_t src_row = (src_rect.position.y + y) * p_src->width + src_rect.position.x;
+			const uint32_t dst_row = (dest_rect.position.y + y) * width + dest_rect.position.x;
+			for (int x = 0; x < dest_rect.size.x; x++) {
+				const uint32_t src_offset = src_row + x;
+				if (mask_pixels[size_t(src_offset) * 4 + 3] == 0) {
+					continue;
+				}
+				const Color sc = p_src->_get_color_at_ofs(src_pixels, src_offset);
+				if (sc.a != 0) {
+					const uint32_t dst_offset = dst_row + x;
+					_set_color_at_ofs(dst_pixels, dst_offset, _get_color_at_ofs(dst_pixels, dst_offset).blend(sc));
+				}
+			}
+		}
 		return;
 	}
 
