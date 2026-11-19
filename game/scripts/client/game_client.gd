@@ -190,6 +190,10 @@ func attack(direction: Vector2) -> void:
 	net.c_attack.rpc_id(1, direction.x, direction.y)
 
 
+func skill(direction: Vector2) -> void:
+	net.c_skill.rpc_id(1, direction.x, direction.y)
+
+
 func loot(entity_id: int) -> void:
 	net.c_loot.rpc_id(1, entity_id)
 

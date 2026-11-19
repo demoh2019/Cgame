@@ -62,6 +62,7 @@ func _setup_actions() -> void:
 	_bind_key("survive_gather", KEY_E)
 	_bind_key("survive_loot", KEY_Q)
 	_bind_key("survive_attack", KEY_F)
+	_bind_key("survive_skill", KEY_G)
 	_bind_key("survive_craft", KEY_C)
 	_bind_key("survive_next_recipe", KEY_TAB)
 	_bind_key("survive_food", KEY_1)
@@ -484,6 +485,8 @@ func _unhandled_input(event: InputEvent) -> void:
 			_result("Loot", sim.cmd_loot(LOCAL_PLAYER_ID, target["id"]))
 	elif event.is_action_pressed("survive_attack"):
 		_result("Attack", sim.cmd_attack(LOCAL_PLAYER_ID, _facing.x, _facing.y))
+	elif event.is_action_pressed("survive_skill"):
+		_result("Heavy Strike", sim.cmd_skill(LOCAL_PLAYER_ID, _facing.x, _facing.y))
 	elif event.is_action_pressed("survive_next_recipe"):
 		if not _recipes.is_empty():
 			var step: int = -1 if Input.is_key_pressed(KEY_SHIFT) else 1
@@ -528,8 +531,10 @@ func _update_hud() -> void:
 	var weight: float = survivor.inventory.total_weight()
 	var speed_pct: int = int(round(survivor.inventory.movement_factor() * 100.0))
 	var risk: String = "SAFE HUB" if world.is_safe(position.x, position.z) else "PVP + FULL LOOT"
-	_stats.text = "ALBION AFTER | SURVIVAL SANDBOX\nHP %d HUNGER %d THIRST %d STAMINA %d KILLS %d\nZONE %s (T%d) %s POS %d,%d ZOMBIES %d\nPROFESSIONS Wood T%d Stone T%d Ore T%d Fiber T%d Craft T%d\nCARRY %.1f kg MOVEMENT %d%% SILVER %d\nINVENTORY %s" % [
+	_stats.text = "ALBION AFTER | SURVIVAL SANDBOX\nHP %d HUNGER %d THIRST %d STAMINA %d KILLS %d\nCOMBAT ENERGY %d/%d SKILL CD %.1fs WEAPON %s\nZONE %s (T%d) %s POS %d,%d ZOMBIES %d\nPROFESSIONS Wood T%d Stone T%d Ore T%d Fiber T%d Craft T%d\nCARRY %.1f kg MOVEMENT %d%% SILVER %d\nINVENTORY %s" % [
 		int(vitals.health), int(vitals.hunger), int(vitals.thirst), int(vitals.stamina), survivor.kills,
+		int(survivor.combat_energy), int(Defs.COMBAT_ENERGY_MAX), survivor.skill_timer,
+		survivor.inventory.weapon if not survivor.inventory.weapon.is_empty() else "unarmed",
 		Defs.ZONE_NAMES[zone], WorldGen.tier_for_zone(zone), risk, int(position.x), int(position.z), sim.zombies.size(),
 		int(levels["wood"]), int(levels["stone"]), int(levels["ore"]), int(levels["fiber"]),
 		survivor.progression.crafting_level(), weight, speed_pct, survivor.inventory.count("silver"),
@@ -538,7 +543,7 @@ func _update_hud() -> void:
 	var recipe_id: String = _recipes[_recipe_index] if not _recipes.is_empty() else "bandage"
 	var recipe: Dictionary = Defs.recipes().get(recipe_id, {})
 	var near_bench: bool = Vector2(position.x, position.z).distance_to(GameServer.WORKBENCH_POSITION) < GameServer.WORKBENCH_RANGE
-	_instructions.text = "WASD move | Shift sprint | E gather | Q loot | F attack\nTab / Shift+Tab recipes | C craft | B stash | 1 food 2 water 3 heal 4 weapon 5 armor R lake\nN buy water / V sell salvage at hub\nCRAFT %s -> %s x%d | %s | inputs %s\n%s" % [
+	_instructions.text = "WASD move | Shift sprint | E gather | Q loot | F attack | G heavy strike\nTab / Shift+Tab recipes | C craft | B stash | 1 food 2 water 3 heal 4 weapon 5 armor R lake\nN buy water / V sell salvage at hub\nCRAFT %s -> %s x%d | %s | inputs %s\n%s" % [
 		recipe_id, str(recipe.get("output", "")), int(recipe.get("count", 0)),
 		"WORKBENCH" if near_bench else "workbench at x=9, z=0",
 		str(recipe.get("inputs", {})), _feedback
