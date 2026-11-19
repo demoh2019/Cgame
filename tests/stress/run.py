@@ -44,7 +44,7 @@ CASES = (
     "bitmap_rects", "bitmap_pipeline", "bitmap_morphology",
     "curve_tessellation_2d", "curve_tessellation_3d", "curve_bake", "curve_nearest",
     "canvas_transform_2d", "process_dispatch",
-    "physics_filter_toggle_2d", "physics_filter_toggle_3d", "physics_motion_filter_overflow_2d", "physics_motion_filter_overflow_3d", "physics_motion_exclusions_3d", "physics_motion_exclusions_2d", "physics_one_way_overflow_2d",
+    "physics_filter_toggle_2d", "physics_filter_toggle_3d", "physics_motion_filter_overflow_2d", "physics_motion_filter_overflow_3d", "physics_motion_exclusions_3d", "physics_motion_exclusions_2d", "physics_exception_pairs_2d", "physics_exception_pairs_3d", "physics_one_way_overflow_2d",
 )
 RENDER_CASES = frozenset(("render_2d", "render_3d", "render_ellipse_2d", "render_light_culling_3d", "render_multimesh_3d"))
 # Each scenario runs in a fresh process. No preset has unlimited RSS or wall time.
