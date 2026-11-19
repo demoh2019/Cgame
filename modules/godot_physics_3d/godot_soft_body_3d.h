@@ -35,6 +35,7 @@
 #include "servers/physics_softbody_shape_clusters.h"
 #include "servers/physics_xpbd_membrane.h"
 #include "servers/physics_fem_convex_star.h"
+#include "servers/physics_fem_tetra_standard_linear_solid.h"
 #include "servers/physics_fem_explicit_tetra.h"
 #include "servers/physics_fem_tetra_principal_limits.h"
 #include "servers/physics_xpbd_strain_limit.h"
@@ -186,6 +187,7 @@ class GodotSoftBody3D : public GodotCollisionObject3D {
 	// Tetra rest matrices and XPBD multipliers are retained across iterations.
 	// Empty unless tetra FEM compliance is explicitly enabled.
 	LocalVector<PhysicsFEMConvexTetra> xpbd_fem_tetrahedra;
+	LocalVector<PhysicsFEMTetraSLSState> xpbd_fem_sls_states; // Optional persistent transient material strain.
 	// Optional imported tet indices referencing original visual mesh vertices.
 	// Preserved across mesh rebuilds, recooked into welded particle indices.
 	PackedInt32Array xpbd_explicit_tetra_visual_indices;

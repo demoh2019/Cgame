@@ -702,6 +702,10 @@ PhysicsServer3D::PhysicsServer3D() {
 	// Objective Kelvin-Voigt strain-rate stress for each tetrahedral FEM element.
 	// Independent from the global breathing-mode viscosity, off by default.
 	GLOBAL_DEF(PropertyInfo(Variant::FLOAT, "physics/3d/solver/soft_body_tetra_fem_viscosity", PROPERTY_HINT_RANGE, "0,1000,0.1,or_greater"), 0.0);
+	// One-arm finite Green-strain Standard Linear Solid: exponential
+	// material memory and a transient Maxwell spring parallel to the base FEM.
+	GLOBAL_DEF(PropertyInfo(Variant::FLOAT, "physics/3d/solver/soft_body_tetra_sls_compliance", PROPERTY_HINT_RANGE, "0,0.01,0.000001,or_greater"), 0.0);
+	GLOBAL_DEF(PropertyInfo(Variant::FLOAT, "physics/3d/solver/soft_body_tetra_sls_relaxation_time", PROPERTY_HINT_RANGE, "0.001,10,0.001,or_greater,suffix:s"), 0.25);
 	// Optional local isotropic volume viscoplasticity for tetrahedral FEM.
 	// Modifies each element rest matrix (not mesh connectivity); disabled by
 	// default. Distinct from the global closed-shell volume creep setting.
