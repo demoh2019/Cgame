@@ -71,6 +71,7 @@
 #include "servers/physics_xpbd_area.h"
 #include "servers/physics_xpbd_dihedral.h"
 #include "servers/physics_xpbd_rod_bend.h"
+#include "servers/physics_xpbd_rod_torsion.h"
 #include "servers/physics_xpbd_shear.h"
 #include "servers/physics_xpbd_self_collision.h"
 #include "servers/physics_softbody_pair_contact.h"
@@ -181,6 +182,7 @@ void GodotSoftBody3D::set_space(GodotSpace3D *p_space) {
 	initialize_shear_constraints();
 	initialize_dihedral_constraints();
 	initialize_rod_bend_constraints();
+	initialize_rod_torsion_constraints();
 	initialize_shape_matching();
 	initialize_self_collision_topology();
 
@@ -345,6 +347,7 @@ void GodotSoftBody3D::update_constants() {
 	initialize_shear_constraints();
 	initialize_dihedral_constraints();
 	initialize_rod_bend_constraints();
+	initialize_rod_torsion_constraints();
 	initialize_shape_matching();
 	initialize_self_collision_topology();
 }
@@ -1145,7 +1148,8 @@ void GodotSoftBody3D::initialize_dihedral_constraints() {
 // translational particles and no torsional/director DOFs.
 void GodotSoftBody3D::initialize_rod_bend_constraints() {
 	xpbd_rod_bends.reset();
-	if (!get_space() || get_space()->get_soft_body_xpbd_rod_bend_compliance() <= 0.0 ||
+	if (!get_space() || (get_space()->get_soft_body_xpbd_rod_bend_compliance() <= 0.0 &&
+			get_space()->get_soft_body_xpbd_rod_torsion_compliance() <= 0.0) ||
 			faces.is_empty() || nodes.size() < 3) {
 		return;
 	}
@@ -1242,6 +1246,60 @@ void GodotSoftBody3D::initialize_rod_bend_constraints() {
 			}
 			consumed[consumed_count++] = adjacent[best_i];
 			consumed[consumed_count++] = adjacent[best_j];
+		}
+	}
+}
+
+// Combine adjacent rod-bend triplets into four-particle centerline
+// torsion segments a--b--c--d. The signed dihedral is between the two
+// bending planes, around the shared segment (b,c). Each topology segment
+// is produced once (a<d) despite visiting both forward and reverse rod
+// directions. Exact collinearity has no bending-plane normal and is
+// intentionally skipped: positions cannot encode material-frame twist.
+void GodotSoftBody3D::initialize_rod_torsion_constraints() {
+	xpbd_rod_torsions.reset();
+	if (!get_space() || !(get_space()->get_soft_body_xpbd_rod_torsion_compliance() > 0.0) ||
+			xpbd_rod_bends.size() < 2 || nodes.size() < 4) {
+		return;
+	}
+	// Per-center indexing avoids scanning all rods for each candidate.
+	// It is transient topology setup memory, not per-frame scratch.
+	LocalVector<LocalVector<uint32_t>> rods_by_center;
+	rods_by_center.resize(nodes.size());
+	for (uint32_t i = 0; i < xpbd_rod_bends.size(); ++i) {
+		rods_by_center[xpbd_rod_bends[i].middle].push_back(i);
+	}
+	for (const RodBendConstraint &first : xpbd_rod_bends) {
+		for (int direction = 0; direction < 2; ++direction) {
+			const uint32_t a = direction == 0 ? first.a : first.c;
+			const uint32_t b = first.middle;
+			const uint32_t c = direction == 0 ? first.c : first.a;
+			for (uint32_t second_index : rods_by_center[c]) {
+				const RodBendConstraint &second = xpbd_rod_bends[second_index];
+				// The second centerline bend must continue the SAME edge
+				// b--c rather than jumping to a crossing warp/weft strand.
+				uint32_t d;
+				if (second.a == b) {
+					d = second.c;
+				} else if (second.c == b) {
+					d = second.a;
+				} else {
+					continue;
+				}
+				if (d == a || d == b || d == c || a >= d) {
+					continue;
+				}
+				RodTorsionConstraint torsion;
+				torsion.a = a;
+				torsion.b = b;
+				torsion.c = c;
+				torsion.d = d;
+				if (physics_xpbd_rod_geometric_torsion_angle(
+							nodes[a].s, nodes[b].s, nodes[c].s, nodes[d].s,
+							torsion.rest_angle)) {
+					xpbd_rod_torsions.push_back(torsion);
+				}
+			}
 		}
 	}
 }
