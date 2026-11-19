@@ -128,6 +128,7 @@ private:
 	real_t soft_body_plastic_creep_rate = 0.0; // 1/second; 0 keeps elastic behavior.
 	real_t soft_body_link_damping = 0.0; // Optional longitudinal dashpot rate, 1/s.
 	real_t soft_body_lift_coefficient = 0.0; // Two-sided aerodynamic cloth lift, opt-in.
+	real_t soft_body_gas_pressure_gamma = 0.0; // 0: legacy pressure, >0: sealed gas EOS.
 	real_t soft_body_tangential_drag_ratio = 0.0; // Optional skin friction on cloth faces.
 	real_t soft_body_xpbd_area_compliance = 0.0;
 	real_t soft_body_xpbd_shear_compliance = 0.0; // Opt-in angular shear preservation.
@@ -247,6 +248,7 @@ public:
 	_FORCE_INLINE_ real_t get_soft_body_plastic_creep_rate() const { return soft_body_plastic_creep_rate; }
 	_FORCE_INLINE_ real_t get_soft_body_link_damping() const { return soft_body_link_damping; }
 	_FORCE_INLINE_ real_t get_soft_body_lift_coefficient() const { return soft_body_lift_coefficient; }
+	_FORCE_INLINE_ real_t get_soft_body_gas_pressure_gamma() const { return soft_body_gas_pressure_gamma; }
 	_FORCE_INLINE_ real_t get_soft_body_tangential_drag_ratio() const { return soft_body_tangential_drag_ratio; }
 	_FORCE_INLINE_ real_t get_soft_body_xpbd_area_compliance() const { return soft_body_xpbd_area_compliance; }
 	_FORCE_INLINE_ real_t get_soft_body_xpbd_shear_compliance() const { return soft_body_xpbd_shear_compliance; }
