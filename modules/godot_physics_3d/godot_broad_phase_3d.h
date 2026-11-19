@@ -52,6 +52,8 @@ public:
 		return create(p_object, p_subindex, p_aabb, p_static);
 	}
 	virtual void flush_pending_pairs() {}
+	// A mask/layer update needs a full pair check even for unchanged bounds.
+	virtual void force_collision_check(ID p_id) = 0;
 
 	// Group insertions for many independent bodies belonging to one physics
 	// space. Implementations without batching may keep their normal behavior.
