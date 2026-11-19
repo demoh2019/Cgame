@@ -63,8 +63,11 @@ public:
 	// Opt-in convex, closed-mesh tetrahedral volume constraints.
 	inline static bool soft_body_volume_preservation = false;
 	inline static float soft_body_volume_compliance = 0.00001f;
-	// Opt-in isotropic volumetric expansion/contraction; otherwise keep rest volume.
+	// Keep rest volume by default; opt into isotropic volumetric scaling.
 	inline static bool soft_body_volume_follow_shrinking_factor = false;
+	// Adds center-to-surface XPBD stretch springs to the convex tetra fan.
+	inline static bool soft_body_volume_radial_springs = false;
+	inline static float soft_body_volume_radial_compliance = 0.0001f;
 	inline static float bounce_velocity_threshold;
 	inline static bool sleep_allowed;
 	inline static float sleep_velocity_threshold;
