@@ -140,7 +140,7 @@ def existing_upstream_pr_numbers(pulls):
         body = pr.get("body") or ""
         for n in UPSTREAM_PR_LINK.findall(body):
             result[int(n)] = {"number": pr["number"], "url": pr["html_url"],
-                              "existing": True, "done": True}
+                              "existing": True, "done": True, "comments_complete": True}
     return result
 
 
