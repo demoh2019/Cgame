@@ -255,7 +255,7 @@ func _attack() -> void:
         if accepted_scrap > 0:
             status_message = "Infected defeated! +1 scrap, combat XP +20."
         else:
-            status_message = "Infected defeated! Scrap left behind: backpack full."
+            status_message = "Infected defeated! Scrap could not be collected: backpack full."
     else:
         status_message = "Hit infected for %d damage, combat XP +3." % int(damage)
 

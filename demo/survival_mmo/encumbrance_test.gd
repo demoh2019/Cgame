@@ -51,6 +51,18 @@ func _run() -> void:
     _check(is_equal_approx(state.get_carry_weight(), 40.0), "Fractional weights should be accurate.")
     _check(state.item_capacity("missing") == 0, "Unknown item capacity must be zero.")
 
+    var trained = StateScript.new()
+    trained.award_experience("logging", 40)
+    trained.add_item("stone", 16)
+    _check(trained.collect_resource("wood") == 1,
+        "Level-3 gathering should accept only what fits, even if yield is two.")
+    _check(int(trained.experience["logging"]) == 45,
+        "Partially accepted collection should award experience once.")
+    _check(trained.collect_resource("wood") == 0,
+        "A full pack must reject further level-3 gathering.")
+    _check(int(trained.experience["logging"]) == 45,
+        "Full-pack gathering must not be farmable for skill experience.")
+
     var player = PlayerScript.new()
     _check(is_equal_approx(player.movement_speed(false), 5.0), "Base walk speed unchanged.")
     _check(is_equal_approx(player.movement_speed(true), 7.5), "Base sprint speed unchanged.")
@@ -83,7 +95,7 @@ func _run() -> void:
         "Overloaded world gathering must not deplete resource nodes.")
     _check(int(world_state.experience["logging"]) == xp_world_before,
         "Overloaded gathering must not award profession XP.")
-    _check("Backpack full" in str(game.status_message), "HUD should report full backpack.")
+    _check(str(game.status_message).contains("Backpack full"), "HUD should report full backpack.")
     game._process(0.016)
     _check(is_equal_approx(survivor.cargo_speed_factor, 0.5),
         "Game loop must propagate cargo factor to character controller.")
