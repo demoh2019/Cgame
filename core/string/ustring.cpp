@@ -726,103 +726,130 @@ signed char String::filenocasecmp_to(const String &p_str) const {
 	return naturalnocasecmp_to_base(this_str, that_str);
 }
 
+// Split only at the original compound-word boundaries. Both conversion passes
+// use this predicate to avoid allocating a temporary list of word offsets.
+static _FORCE_INLINE_ bool _compound_word_boundary(const char32_t *p_chars, int p_length, int p_index) {
+	const char32_t previous = p_chars[p_index - 1];
+	const char32_t current = p_chars[p_index];
+	const bool prev_upper = is_unicode_upper_case(previous);
+	const bool prev_lower = is_unicode_lower_case(previous);
+	const bool prev_digit = is_digit(previous);
+	const bool curr_upper = is_unicode_upper_case(current);
+	const bool curr_lower = is_unicode_lower_case(current);
+	const bool curr_digit = is_digit(current);
+	const bool next_lower = p_index + 1 < p_length && is_unicode_lower_case(p_chars[p_index + 1]);
+
+	return (prev_lower && curr_upper) ||
+			((prev_upper || prev_digit) && curr_upper && next_lower) ||
+			(prev_digit && curr_lower && next_lower) ||
+			((prev_upper || prev_lower) && curr_digit);
+}
+
 String String::_separate_compound_words() const {
-	if (length() == 0) {
+	const int len = length();
+	if (len == 0) {
 		return *this;
 	}
+	const char32_t *src = get_data();
 
-	const char32_t *cstr = get_data();
-	int start_index = 0;
-	String new_string;
-
-	bool is_prev_upper = is_unicode_upper_case(cstr[0]);
-	bool is_prev_lower = is_unicode_lower_case(cstr[0]);
-	bool is_prev_digit = is_digit(cstr[0]);
-
-	for (int i = 1; i < length(); i++) {
-		const bool is_curr_upper = is_unicode_upper_case(cstr[i]);
-		const bool is_curr_lower = is_unicode_lower_case(cstr[i]);
-		const bool is_curr_digit = is_digit(cstr[i]);
-
-		bool is_next_lower = false;
-		if (i + 1 < length()) {
-			is_next_lower = is_unicode_lower_case(cstr[i + 1]);
-		}
-
-		const bool cond_a = is_prev_lower && is_curr_upper; // aA
-		const bool cond_b = (is_prev_upper || is_prev_digit) && is_curr_upper && is_next_lower; // AAa, 2Aa
-		const bool cond_c = is_prev_digit && is_curr_lower && is_next_lower; // 2aa
-		const bool cond_d = (is_prev_upper || is_prev_lower) && is_curr_digit; // A2, a2
-
-		if (cond_a || cond_b || cond_c || cond_d) {
-			new_string += substr(start_index, i - start_index) + " ";
-			start_index = i;
-		}
-
-		is_prev_upper = is_curr_upper;
-		is_prev_lower = is_curr_lower;
-		is_prev_digit = is_curr_digit;
+	// Count inserted spaces once, then allocate exactly one output buffer.
+	int separators = 0;
+	for (int i = 1; i < len; ++i) {
+		separators += _compound_word_boundary(src, len, i);
 	}
+	ERR_FAIL_COND_V_MSG(separators >= INT32_MAX - len, String(), "Compound word conversion result is too large.");
 
-	new_string += substr(start_index, size() - start_index);
-
-	for (int i = 0; i < new_string.size(); i++) {
-		const bool whitespace = is_whitespace(new_string[i]);
-		const bool underscore = is_underscore(new_string[i]);
-		const bool hyphen = is_hyphen(new_string[i]);
-
-		if (whitespace || underscore || hyphen) {
-			new_string[i] = ' ';
+	String result;
+	result.resize_uninitialized(len + separators + 1);
+	char32_t *dst = result.ptrw();
+	int written = 0;
+	for (int i = 0; i < len; ++i) {
+		if (i > 0 && _compound_word_boundary(src, len, i)) {
+			dst[written++] = ' ';
+		}
+		const char32_t ch = src[i];
+		if (is_whitespace(ch) || is_underscore(ch) || is_hyphen(ch)) {
+			dst[written++] = ' ';
+		} else {
+			dst[written++] = String::char_lowercase(ch);
 		}
 	}
+	dst[written] = 0;
+	return result;
+}
 
-	return new_string.to_lower();
+enum class _CompoundWordCase {
+	CAPITALIZE,
+	CAMEL,
+	PASCAL,
+};
+
+// The normalized words contain only space delimiters; scan them twice to
+// determine output size and then write each codepoint exactly once. This avoids
+// get_slice_count/get_slicec's repeated scans, per-slice String allocations and
+// repeated concatenation of growing output.
+static String _convert_compound_words(const String &p_words, _CompoundWordCase p_style) {
+	const int len = p_words.length();
+	const char32_t *src = p_words.get_data();
+	int output_len = 0;
+	int word_count = 0;
+	bool at_word_start = true;
+	for (int i = 0; i < len; ++i) {
+		if (src[i] == ' ') {
+			at_word_start = true;
+		} else {
+			if (at_word_start) {
+				if (p_style == _CompoundWordCase::CAPITALIZE && word_count > 0) {
+					output_len++;
+				}
+				++word_count;
+			}
+			++output_len;
+			at_word_start = false;
+		}
+	}
+	if (output_len == 0) {
+		return String();
+	}
+
+	String result;
+	result.resize_uninitialized(output_len + 1);
+	char32_t *dst = result.ptrw();
+	int written = 0;
+	at_word_start = true;
+	bool has_word = false;
+	for (int i = 0; i < len; ++i) {
+		const char32_t ch = src[i];
+		if (ch == ' ') {
+			at_word_start = true;
+			continue;
+		}
+		if (at_word_start) {
+			if (p_style == _CompoundWordCase::CAPITALIZE && has_word) {
+				dst[written++] = ' ';
+			}
+			dst[written++] = (p_style == _CompoundWordCase::CAMEL && !has_word) ?
+					String::char_lowercase(ch) : String::char_uppercase(ch);
+			has_word = true;
+			at_word_start = false;
+		} else {
+			dst[written++] = ch;
+		}
+	}
+	dst[written] = 0;
+	return result;
 }
 
 String String::capitalize() const {
-	String words = _separate_compound_words().strip_edges();
-	String ret;
-	for (int i = 0; i < words.get_slice_count(" "); i++) {
-		String slice = words.get_slicec(' ', i);
-		if (slice.length() > 0) {
-			slice[0] = _find_upper(slice[0]);
-			if (i > 0) {
-				ret += " ";
-			}
-			ret += slice;
-		}
-	}
-	return ret;
+	return _convert_compound_words(_separate_compound_words().strip_edges(), _CompoundWordCase::CAPITALIZE);
 }
 
 String String::to_camel_case() const {
-	String words = _separate_compound_words().strip_edges();
-	String ret;
-	for (int i = 0; i < words.get_slice_count(" "); i++) {
-		String slice = words.get_slicec(' ', i);
-		if (slice.length() > 0) {
-			if (i == 0) {
-				slice[0] = _find_lower(slice[0]);
-			} else {
-				slice[0] = _find_upper(slice[0]);
-			}
-			ret += slice;
-		}
-	}
-	return ret;
+	return _convert_compound_words(_separate_compound_words().strip_edges(), _CompoundWordCase::CAMEL);
 }
 
 String String::to_pascal_case() const {
-	String words = _separate_compound_words().strip_edges();
-	String ret;
-	for (int i = 0; i < words.get_slice_count(" "); i++) {
-		String slice = words.get_slicec(' ', i);
-		if (slice.length() > 0) {
-			slice[0] = _find_upper(slice[0]);
-			ret += slice;
-		}
-	}
-	return ret;
+	return _convert_compound_words(_separate_compound_words().strip_edges(), _CompoundWordCase::PASCAL);
 }
 
 String String::to_snake_case() const {
