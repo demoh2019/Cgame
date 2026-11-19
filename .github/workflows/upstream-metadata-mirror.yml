@@ -1,0 +1,47 @@
+name: Mirror upstream Godot issue and PR metadata (opt-in)
+
+on:
+  workflow_dispatch:
+    inputs:
+      max_items:
+        description: Max upstream entries to mirror in this run
+        type: number
+        default: 100
+        required: true
+      dry_run:
+        description: Preview only (no GitHub writes)
+        type: boolean
+        default: true
+        required: true
+  schedule:
+    - cron: '17 */3 * * *'
+
+permissions:
+  contents: write
+  issues: write
+
+concurrency:
+  group: godot-upstream-metadata-mirror
+  cancel-in-progress: false
+
+jobs:
+  mirror:
+    if: github.event_name == 'workflow_dispatch' || vars.UPSTREAM_MIRROR_ENABLED == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Run unit tests
+        run: python -m unittest discover -s tools -p 'test_upstream_mirror.py' -v
+      - name: Mirror next upstream batch
+        env:
+          GH_TOKEN: ${{ github.token }}
+          INPUT_MAX_ITEMS: ${{ inputs.max_items || 100 }}
+          INPUT_DRY_RUN: ${{ github.event_name != 'workflow_dispatch' || inputs.dry_run != false }}
+        run: |
+          ARGS=(--max-items "$INPUT_MAX_ITEMS" --checkpoint-every 20 --delay 1.5)
+          if [[ "$INPUT_DRY_RUN" == "true" ]]; then ARGS+=(--dry-run); fi
+          python tools/upstream_mirror.py "${ARGS[@]}"
