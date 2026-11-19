@@ -719,6 +719,11 @@ PhysicsServer3D::PhysicsServer3D() {
 	// Opt-in XPBD hinge dihedral bending for adjacent cloth triangles.
 	// Zero disables setup, solver work and all persistent hinge buffers.
 	GLOBAL_DEF(PropertyInfo(Variant::FLOAT, "physics/3d/solver/soft_body_xpbd_dihedral_compliance", PROPERTY_HINT_RANGE, "0,0.01,0.000001,or_greater"), 0.0);
+	// Independent orthotropic fold compliance about the rest-mesh material
+	// fiber direction. Reuses soft_body_xpbd_material_axis (mesh-local).
+	// <1 makes creases aligned with the fiber harder to bend, >1 softer;
+	// 1 is the unchanged isotropic XPBD hinge model.
+	GLOBAL_DEF(PropertyInfo(Variant::FLOAT, "physics/3d/solver/soft_body_xpbd_bend_parallel_compliance_ratio", PROPERTY_HINT_RANGE, "0.01,100,0.01,or_greater"), 1.0);
 	// Meshless shape matching fits a proper rigid rotation to the entire soft
 	// mesh and pulls movable vertices toward the fitted rest shape. Unlike
 	// volumetric FEM, this is a global visual-elasticity constraint.

@@ -119,6 +119,9 @@ class GodotSoftBody3D : public GodotCollisionObject3D {
 		uint32_t c = 0;
 		uint32_t d = 0;
 		real_t rest_angle = 0.0;
+		// Precomputed at mesh construction from the undeformed edge and fiber.
+		// Used only by optional orthotropic XPBD hinge compliance.
+		real_t bend_compliance_ratio = 1.0;
 	};
 	LocalVector<DihedralHinge> xpbd_dihedral_hinges;
 	LocalVector<real_t> xpbd_dihedral_lambdas;
