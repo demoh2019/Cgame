@@ -35,6 +35,7 @@
 #include "core/object/worker_thread_pool.h"
 #include "core/templates/a_hash_map.h"
 #include "core/os/os.h"
+#include "servers/physics_island_storage.h"
 
 #define BODY_ISLAND_COUNT_RESERVE 128
 #define ISLAND_COUNT_RESERVE 128
@@ -688,6 +689,13 @@ void GodotStep2D::step(GodotSpace2D *p_space, real_t p_delta) {
 	}
 
 	all_constraints.clear();
+
+	// All work that borrows island vectors has finished (including sleeping
+	// and soft-body constraints). Free an old peak of empty island buffers
+	// gradually, rather than retaining scene-change RAM forever or causing
+	// a one-frame heap-free spike.
+	godot_physics_reclaim_idle_island_storage(body_islands, body_island_count, body_island_idle_steps);
+	godot_physics_reclaim_idle_island_storage(constraint_islands, island_count, constraint_island_idle_steps);
 
 	p_space->unlock();
 	_step++;
