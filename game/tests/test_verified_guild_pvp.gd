@@ -37,6 +37,15 @@ func run(t) -> void:
 		"guild founders have verified leader role")
 	t.eq(GuildIdentity.normalize(_guild(RAVENS, "Ravens", 2))["guild_id"], RAVENS,
 		"normal accepted members are recognized")
+	t.eq(GuildIdentity.normalize({
+		"ok": true, "guild_id": RAVENS, "guild_name": "Ravens", "rank": 2.0,
+	})["rank"], 2, "integer-valued JSON floats map to accepted Nakama roles")
+	t.eq(GuildIdentity.normalize({
+		"ok": true, "guild_id": RAVENS, "guild_name": "Ravens", "rank": 1.5,
+	}), {}, "fractional role numbers are invalid")
+	t.eq(GuildIdentity.normalize({
+		"ok": true, "guild_id": RAVENS, "guild_name": "Ravens", "rank": INF,
+	}), {}, "nonfinite role numbers are invalid")
 
 	t.current = "authenticated guildmates protected outside their party"
 	var world := WorldGen.new(410)
