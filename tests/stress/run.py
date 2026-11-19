@@ -129,7 +129,8 @@ def build_command(binary: str, project: Path, case: str, scale: int, frames: int
 
 
 def run_once(cmd: list[str], timeout: float, rss_limit_mib: float,
-             case: str, scale: int, frames: int, seed: int) -> dict[str, Any]:
+             case: str, scale: int, frames: int, seed: int,
+             require_marker: bool = True) -> dict[str, Any]:
     start = time.monotonic()
     maximum_rss: float | None = None
     latest_cpu: float | None = None
@@ -172,7 +173,7 @@ def run_once(cmd: list[str], timeout: float, rss_limit_mib: float,
         failure = "engine_exit_%d" % process.returncode
     if failure is None and ENGINE_ERROR.search(log):
         failure = "engine_error_log"
-    if failure is None:
+    if failure is None and require_marker:
         try:
             result["engine"] = parse_result(log, case, scale, frames, seed)
         except (ValueError, json.JSONDecodeError) as exc:
