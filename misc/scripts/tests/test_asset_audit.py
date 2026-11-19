@@ -322,6 +322,43 @@ class AssetAuditTest(unittest.TestCase):
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual(json.loads(result.stdout)["summary"]["errors"], 0)
 
+    def test_cli_invalid_root_exits_with_usage(self):
+        (self.root / "project.godot").unlink()
+        with contextlib.redirect_stderr(io.StringIO()):
+            with self.assertRaises(SystemExit) as result:
+                audit.main([str(self.root)])
+        self.assertEqual(result.exception.code, 2)
+
+    def test_excludes_one_file_but_keeps_directory(self):
+        self.put("files/one.tscn", 'path="res://missing.tres"')
+        self.put("files/two.tscn", "[gd_scene]")
+        report = self.report(exclude=["files/one.tscn"])
+        self.assertEqual(report.findings, [])
+        self.assertIn("files/two.tscn", report.graph)
+
+    def test_function_inside_string_does_not_count_as_reference(self):
+        self.put("x.gd", 'var message = "load(\'res://missing.tres\')"\n')
+        self.assertEqual(self.report().findings, [])
+
+    def test_escaped_quote_inside_literal_does_not_end_string(self):
+        line = 'print("escaped \\" still inside load(\'res://missing.tres\')")'
+        self.assertFalse(audit._outside_quotes(line, line.index("load(")))
+
+    def test_uri_requires_resource_scheme(self):
+        self.assertIn("res://", audit._validate_uri("uid://test"))
+
+    def test_cycle_algorithm_shared_sibling_node(self):
+        self.assertEqual(audit.find_cycles({"a": ["b", "c"], "b": ["c"], "c": []}), [])
+
+    def test_script_main_entrypoint(self):
+        import runpy
+        from unittest.mock import patch
+        with patch.object(sys, "argv", [str(audit.__file__), str(self.root)]):
+            with contextlib.redirect_stdout(io.StringIO()):
+                with self.assertRaises(SystemExit) as result:
+                    runpy.run_path(str(audit.__file__), run_name="__main__")
+        self.assertEqual(result.exception.code, 0)
+
 
 if __name__ == "__main__":
     unittest.main()
