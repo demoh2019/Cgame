@@ -109,6 +109,7 @@ public:
 	virtual bool setup(real_t p_step) override;
 	virtual bool pre_solve(real_t p_step) override;
 	virtual void solve(real_t p_step) override;
+	virtual bool permits_parallel_immovable_body_sharing() const override { return true; }
 
 	GodotBodyPair3D(GodotBody3D *p_A, int p_shape_A, GodotBody3D *p_B, int p_shape_B);
 	~GodotBodyPair3D();
