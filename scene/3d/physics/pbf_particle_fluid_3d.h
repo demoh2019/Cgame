@@ -31,10 +31,10 @@
 #include "core/variant/variant.h"
 #include "scene/3d/node_3d.h"
 #include "servers/physics_pbf_3d.h"
+#include "servers/physics_pbf_density_pressure_3d.h"
+#include "servers/physics_pbf_divergence_3d.h"
 #include "servers/physics_pbf_rigid_coupling_3d.h"
 #include "servers/physics_pbf_vorticity_3d.h"
-#include "servers/physics_pbf_divergence_3d.h"
-#include "servers/physics_pbf_density_pressure_3d.h"
 
 // Experimental CPU PBF fluid: a scene node (not a PhysicsServer3D backend
 // replacement) using density constraints, finite-support SPH kernels and
