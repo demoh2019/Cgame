@@ -652,6 +652,9 @@ func _on_event(event: Dictionary) -> void:
 			say("RAID VICTORY! The warlord dropped one shared loot bag.")
 		"raid_expired":
 			say("Raid boss retreated. The encounter is over.")
+		"pvp_honor":
+			say("PvP: +%d honor | %d total (%s)" % [int(event.get("earned", 0)),
+				int(event.get("honor", 0)), str(event.get("rank", "Wanderer"))])
 		"raid_reinforcements":
 			say("RAID PHASE %d! %d additional infected appeared." % [
 				int(event.get("phase", 1)), int(event.get("count", 0))])
@@ -916,6 +919,10 @@ func _process(_delta: float) -> void:
 	var journal: Variant = client.you.get("contract", Contracts.empty_state())
 	_contract_label.text = Contracts.description(journal if journal is Dictionary else Contracts.empty_state())
 	_info_label.text += "  Rest %.0fs" % float(client.you.get("rest_cooldown", 0.0))
+	_info_label.text += "\nPvP victories %d | Honor %d | %s" % [
+		int(client.you.get("pvp_kills", 0)), int(client.you.get("pvp_honor", 0)),
+		str(client.you.get("pvp_rank", "Wanderer"))
+	]
 	# A lightweight compass for siege outposts; all coordinates, owners and
 	# progress originate in the authoritative snapshot, not client commands.
 	var closest: Dictionary = {}

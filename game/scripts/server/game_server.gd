@@ -9,6 +9,7 @@ const WorldGen = preload("res://scripts/shared/world_gen.gd")
 const Inventory = preload("res://scripts/shared/inventory.gd")
 const Vendor = preload("res://scripts/shared/vendor.gd")
 const PvpInfamy = preload("res://scripts/shared/pvp_infamy.gd")
+const PvPHonor = preload("res://scripts/shared/pvp_honor.gd")
 const PlayerTrade = preload("res://scripts/shared/player_trade.gd")
 const Party = preload("res://scripts/shared/party.gd")
 const LootRights = preload("res://scripts/shared/loot_rights.gd")
@@ -99,6 +100,8 @@ class Player:
 	var kills: int = 0
 	var deaths: int = 0
 	var pvp_infamy: float = 0.0 # Persistent server-only criminal reputation.
+	var pvp_kills: int = 0
+	var pvp_honor: int = 0
 	var zone_notice: int = -1
 	var dirty_inventory: bool = true
 	var dirty_stash: bool = true
@@ -133,6 +136,7 @@ var territory # Session outposts generated from this world seed.
 var siege_contracts = SiegeContracts.new() # Session-only declared siege windows and honor.
 var outpost_fortify_requests: Dictionary = {} # Peer -> last request and cached result.
 var outpost_breach_requests: Dictionary = {} # Peer -> last command and cached result.
+var pvp_honor_ledger: Dictionary = {} # Bounded server-only account/guest kill cooldowns.
 var siege_declare_requests: Dictionary = {} # Peer -> last declared request and cached result.
 var world_structure_revision: int = 0
 var bags: Dictionary = {} # Session loot; optional server-owned PvE reservations
@@ -192,6 +196,7 @@ func character_data(player: Player) -> Dictionary:
 			"campfire_warm": FieldCampfire.has_warmth(campfires, player.position, time),
 		"alive": alive, "kills": player.kills, "deaths": player.deaths,
 		"pvp_infamy": player.pvp_infamy,
+		"pvp_kills": player.pvp_kills, "pvp_honor": player.pvp_honor,
 		"x": player.position.x, "z": player.position.z,
 		"inventory": player.inventory.to_dict(),
 		"stash": player.stash.to_dict(),
@@ -243,6 +248,10 @@ func apply_character(player: Player, data: Dictionary) -> bool:
 		return false
 	if not PvpInfamy.valid(data.get("pvp_infamy", 0.0)):
 		return false
+	for key in ["pvp_kills", "pvp_honor"]:
+		if not SaveValidation.valid_counter(data.get(key, 0)) or \
+				float(data.get(key, 0)) > PvPHonor.MAX_POINTS:
+			return false
 	if not SaveValidation.finite_number(data.get("rest_cooldown", 0.0), 0.0, CampRest.COOLDOWN):
 		return false
 	if not SaveValidation.finite_number(data.get("lake_drink_cooldown", 0.0), 0.0, FieldWater.COOLDOWN_SECONDS):
@@ -297,6 +306,8 @@ func apply_character(player: Player, data: Dictionary) -> bool:
 	player.contract_state = (loaded_contracts as Dictionary).duplicate(true)
 	player.renown = int(loaded_renown)
 	player.pvp_infamy = float(data.get("pvp_infamy", 0.0))
+	player.pvp_kills = int(data.get("pvp_kills", 0))
+	player.pvp_honor = int(data.get("pvp_honor", 0))
 	player.rest_cooldown = float(data.get("rest_cooldown", 0.0))
 	player.lake_drink_cooldown = float(data.get("lake_drink_cooldown", 0.0))
 	player.inventory = parsed_bag["inventory"]
@@ -1980,6 +1991,14 @@ func _damage_target(attacker: Player, hit: Dictionary, damage: float) -> void:
 				events.append({"type": "infamy", "peer": attacker.id,
 					"score": attacker.pvp_infamy,
 					"outlaw": PvpInfamy.is_outlaw(attacker.pvp_infamy)})
+			var honor_result: Dictionary = PvPHonor.record(attacker, victim,
+				world.zone_at(victim.position.x, victim.position.z), time, pvp_honor_ledger)
+			if bool(honor_result.get("ok", false)):
+				attacker.dirty_character = true
+				events.append({"type": "pvp_honor", "peer": attacker.id,
+					"earned": int(honor_result["awarded"]),
+					"honor": attacker.pvp_honor,
+					"rank": str(honor_result["rank"])})
 			_on_player_death(victim, attacker.id)
 
 
@@ -2608,7 +2627,8 @@ func snapshot_for(peer_id: int) -> Dictionary:
 		if here.distance_to(Vector2(p.x, p.z)) <= Defs.INTEREST_RADIUS:
 			nearby_players.append({"id": other.id, "name": other.name, "x": p.x, "y": p.y, "z": p.z, "yaw": other.yaw,
 				"alive": _alive(other), "weapon": other.inventory.weapon,
-				"outlaw": PvpInfamy.is_outlaw(other.pvp_infamy)})
+				"outlaw": PvpInfamy.is_outlaw(other.pvp_infamy),
+				"pvp_rank": PvPHonor.rank(other.pvp_honor)})
 	var nearby_zombies: Array = []
 	for zombie in zombies.values():
 		var p: Vector3 = zombie.position
@@ -2657,6 +2677,8 @@ func snapshot_for(peer_id: int) -> Dictionary:
 			"stamina": player.survival.stamina,
 			"alive": _alive(player), "kills": player.kills, "deaths": player.deaths, "zone": player.zone_notice,
 			"pvp_infamy": player.pvp_infamy, "outlaw": PvpInfamy.is_outlaw(player.pvp_infamy),
+			"pvp_kills": player.pvp_kills, "pvp_honor": player.pvp_honor,
+			"pvp_rank": PvPHonor.rank(player.pvp_honor),
 			"action": player.action.duplicate(),
 			"infection": player.survival.infection, "bleeding": player.survival.bleeding,
 			"exposure": player.survival.exposure,
