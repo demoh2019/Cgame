@@ -1452,6 +1452,10 @@ func _find_hit(attacker: Player, origin: Vector2, direction: Vector2, reach: flo
 		for other in players.values():
 			if other.id == attacker.id or not _alive(other):
 				continue
+			# Friendly party members do not intercept attacks aimed at enemies.
+			var group_id: int = parties.group_of(attacker.id)
+			if group_id != 0 and parties.group_of(other.id) == group_id:
+				continue
 			if not ZoneRisk.can_pvp(attacker_zone, world.zone_at(other.position.x, other.position.z)):
 				continue
 			var distance := _hit_distance(origin, direction, Vector2(other.position.x, other.position.z), reach, ranged, 0.5)
@@ -1534,15 +1538,20 @@ func _party_award_assists(killer: Player, zombie) -> void:
 	var group: Array = parties.members_of(killer.id)
 	if group.size() < 2:
 		return
-	var source := Vector2(zombie.position.x, zombie.position.z)
+	var encounter_zone: int = world.zone_at(zombie.position.x, zombie.position.z)
+	var shared_xp: int = Party.assist_xp(int(zombie.data.get("xp", 0)))
+	if shared_xp <= 0:
+		return
 	for member_id in group:
 		if int(member_id) == killer.id:
 			continue
 		var participant: Player = players.get(int(member_id))
 		if participant == null or not _alive(participant):
 			continue
-		var at := Vector2(participant.position.x, participant.position.z)
-		if not at.is_finite() or not source.is_finite() or at.distance_to(source) > Party.ASSIST_RANGE:
+		if not Party.in_assist_range(participant.position, zombie.position):
+			continue
+		# Prevent XP being shared across green/red risk zone borders.
+		if world.zone_at(participant.position.x, participant.position.z) != encounter_zone:
 			continue
 		var hit: Dictionary = zombie.contributors.get(int(member_id), {})
 		if hit.is_empty() or time - float(hit.get("time", -INF)) > Party.ASSIST_WINDOW:
@@ -1550,8 +1559,7 @@ func _party_award_assists(killer: Player, zombie) -> void:
 		var used_weapon: String = str(hit.get("weapon", ""))
 		if used_weapon.is_empty() or participant.inventory.count(used_weapon) < 1:
 			continue
-		var amount: int = maxi(1, int(floor(float(zombie.data.get("xp", 0)) * Party.ASSIST_XP_RATE)))
-		var actual: int = participant.progression.award_combat(used_weapon, amount)
+		var actual: int = participant.progression.award_combat(used_weapon, shared_xp)
 		if actual > 0:
 			participant.dirty_character = true
 			events.append({"type": "mastery", "peer": participant.id,
