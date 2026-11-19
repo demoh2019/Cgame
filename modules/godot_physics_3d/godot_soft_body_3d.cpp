@@ -129,6 +129,7 @@ void GodotSoftBody3D::set_space(GodotSpace3D *p_space) {
 	}
 
 	_set_space(p_space);
+	xpbd_tethers_dirty = true;
 	// A mesh may have been assigned before the space was created. Validate
 	// its rest volume only after space-level compliance is available.
 	initialize_volume_constraint();
@@ -243,6 +244,7 @@ void GodotSoftBody3D::update_bounds() {
 
 void GodotSoftBody3D::update_constants() {
 	reset_link_rest_lengths();
+	xpbd_tethers_dirty = true;
 	update_link_constants();
 	update_area();
 	initialize_volume_constraint();
@@ -555,6 +557,7 @@ void GodotSoftBody3D::pin_vertex(int p_index) {
 	}
 
 	pinned_vertices.push_back(p_index);
+	xpbd_tethers_dirty = true;
 	if (!soft_mesh.is_null()) {
 		Node &node = nodes[node_index];
 		if (node.im > 0.0) {
@@ -578,6 +581,7 @@ void GodotSoftBody3D::unpin_vertex(int p_index) {
 	for (uint32_t i = 0; i < pinned_count; ++i) {
 		if (p_index == pinned_vertices[i]) {
 			pinned_vertices.remove_at(i);
+			xpbd_tethers_dirty = true;
 
 			if (!soft_mesh.is_null()) {
 				ERR_FAIL_COND(p_index >= (int)map_visual_to_physics.size());
@@ -627,6 +631,7 @@ void GodotSoftBody3D::unpin_all_vertices() {
 	}
 
 	pinned_vertices.clear();
+	xpbd_tethers_dirty = true;
 }
 
 bool GodotSoftBody3D::is_vertex_pinned(int p_index) const {
@@ -837,6 +842,9 @@ bool GodotSoftBody3D::create_from_trimesh(const Vector<int> &p_indices, const Ve
 		node.im = 0.0;
 	}
 
+	// The prefix excludes generated bending diagonals from tether paths.
+	xpbd_tether_structural_links = links.size();
+	xpbd_tethers_dirty = true;
 	generate_bending_constraints(2);
 	reoptimize_link_order();
 
@@ -1369,6 +1377,40 @@ void GodotSoftBody3D::predict_motion(real_t p_delta) {
 	face_tree.optimize_incremental(1);
 }
 
+// Rebuild on pin/mesh/rest-length changes only. The multi-source shortest
+// paths use structural links, not the generated two-hop bending diagonals,
+// so folded cloth retains enough slack for physically plausible motion.
+void GodotSoftBody3D::rebuild_xpbd_tethers(real_t p_slack) {
+	xpbd_tethers_dirty = false;
+	if (nodes.is_empty() || xpbd_tether_structural_links == 0 ||
+			xpbd_tether_structural_links > links.size() || dynamic_node_count >= nodes.size()) {
+		xpbd_tethers.reset();
+		return;
+	}
+	LocalVector<uint32_t> pins;
+	pins.reserve(pinned_vertices.size());
+	for (uint32_t i = 0; i < nodes.size(); ++i) {
+		if (nodes[i].im == real_t(0.0)) {
+			pins.push_back(i);
+		}
+	}
+	if (pins.is_empty()) {
+		xpbd_tethers.reset();
+		return;
+	}
+	LocalVector<PhysicsXPBDTetherEdge> edges;
+	edges.reserve(xpbd_tether_structural_links);
+	for (uint32_t i = 0; i < xpbd_tether_structural_links; ++i) {
+		const Link &link = links[i];
+		if (link.n[0] && link.n[1]) {
+			edges.push_back({ link.n[0]->index, link.n[1]->index, link.rl });
+		}
+	}
+	if (!physics_xpbd_build_tethers(nodes.size(), edges, pins, p_slack, xpbd_tethers)) {
+		xpbd_tethers.reset();
+	}
+}
+
 void GodotSoftBody3D::solve_constraints(real_t p_delta) {
 	const real_t inv_delta = 1.0 / p_delta;
 
@@ -1412,6 +1454,7 @@ void GodotSoftBody3D::solve_constraints(real_t p_delta) {
 						physics_softbody_creep_rest_length(real_t(length), yield_strain, creep_fraction, link.rl)) {
 					// Legacy PBD uses squared rest length; XPBD reads link.rl.
 					link.c1 = link.rl * link.rl;
+					xpbd_tethers_dirty = true;
 				}
 			}
 		}
@@ -1624,6 +1667,9 @@ void GodotSoftBody3D::deinitialize_shape() {
 
 void GodotSoftBody3D::destroy() {
 	link_constants_dirty = false;
+	xpbd_tethers.reset();
+	xpbd_tethers_dirty = true;
+	xpbd_tether_structural_links = 0;
 	dynamic_node_count = 0;
 	soft_mesh = RID();
 
