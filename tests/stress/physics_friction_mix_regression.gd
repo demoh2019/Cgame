@@ -17,7 +17,7 @@ func _run() -> void:
 
 
 func _compare_friction_2d() -> Dictionary:
-	const SETTING := "physics/2d/solver/friction_combine_mode"
+	const SETTING = "physics/2d/solver/friction_combine_mode"
 	var original: Variant = ProjectSettings.get_setting(SETTING, 0)
 	var spaces: Array[RID] = []
 	var bodies: Array[RID] = []
@@ -48,6 +48,7 @@ func _compare_friction_2d() -> Dictionary:
 
 		var body := PhysicsServer2D.body_create()
 		PhysicsServer2D.body_add_shape(body, circle_shape)
+		PhysicsServer2D.body_set_mode(body, PhysicsServer2D.BODY_MODE_RIGID_LINEAR)
 		PhysicsServer2D.body_set_param(body, PhysicsServer2D.BODY_PARAM_FRICTION, 0.25)
 		PhysicsServer2D.body_set_param(body, PhysicsServer2D.BODY_PARAM_BOUNCE, 0.0)
 		PhysicsServer2D.body_set_state(body, PhysicsServer2D.BODY_STATE_CAN_SLEEP, false)
@@ -83,7 +84,7 @@ func _compare_friction_2d() -> Dictionary:
 
 
 func _compare_friction_3d() -> Dictionary:
-	const SETTING := "physics/3d/solver/friction_combine_mode"
+	const SETTING = "physics/3d/solver/friction_combine_mode"
 	var original: Variant = ProjectSettings.get_setting(SETTING, 0)
 	var spaces: Array[RID] = []
 	var bodies: Array[RID] = []
@@ -112,6 +113,7 @@ func _compare_friction_3d() -> Dictionary:
 
 		var body := PhysicsServer3D.body_create()
 		PhysicsServer3D.body_add_shape(body, sphere_shape)
+		PhysicsServer3D.body_set_mode(body, PhysicsServer3D.BODY_MODE_RIGID_LINEAR)
 		PhysicsServer3D.body_set_param(body, PhysicsServer3D.BODY_PARAM_FRICTION, 0.25)
 		PhysicsServer3D.body_set_param(body, PhysicsServer3D.BODY_PARAM_BOUNCE, 0.0)
 		PhysicsServer3D.body_set_state(body, PhysicsServer3D.BODY_STATE_CAN_SLEEP, false)
