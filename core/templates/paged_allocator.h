@@ -45,6 +45,7 @@ class PagedAllocator {
 	T **page_pool = nullptr;
 	T ***available_pool = nullptr;
 	uint32_t pages_allocated = 0;
+	uint32_t pages_capacity = 0;
 	uint32_t allocs_available = 0;
 
 	uint32_t page_shift = 0;
@@ -61,9 +62,18 @@ public:
 		if (unlikely(allocs_available == 0)) {
 			uint32_t pages_used = pages_allocated;
 
+			// A page gets its own payload allocation, but the two metadata
+			// arrays can grow geometrically to avoid per-page reallocations.
+			if (pages_allocated == pages_capacity) {
+				uint32_t next_capacity = pages_capacity ? pages_capacity + (pages_capacity >> 1) : 4;
+				if (next_capacity < pages_capacity) {
+					next_capacity = UINT32_MAX;
+				}
+				page_pool = (T **)memrealloc(page_pool, sizeof(T *) * next_capacity);
+				available_pool = (T ***)memrealloc(available_pool, sizeof(T **) * next_capacity);
+				pages_capacity = next_capacity;
+			}
 			pages_allocated++;
-			page_pool = (T **)memrealloc(page_pool, sizeof(T *) * pages_allocated);
-			available_pool = (T ***)memrealloc(available_pool, sizeof(T **) * pages_allocated);
 
 			page_pool[pages_used] = (T *)memalloc(sizeof(T) * page_size);
 			available_pool[pages_used] = (T **)memalloc(sizeof(T *) * page_size);
@@ -114,6 +124,7 @@ private:
 			page_pool = nullptr;
 			available_pool = nullptr;
 			pages_allocated = 0;
+			pages_capacity = 0;
 			allocs_available = 0;
 		}
 	}
