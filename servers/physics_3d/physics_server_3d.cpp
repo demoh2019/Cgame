@@ -642,6 +642,12 @@ PhysicsServer3D::PhysicsServer3D() {
 	// Optional swept vertex/triangle tests for fast motion through thin cloth.
 	// Off by default: the swept BVH and cubic narrowphase are more expensive.
 	GLOBAL_DEF(PropertyInfo(Variant::BOOL, "physics/3d/solver/soft_body_self_collision_ccd"), false);
+	// Experimental Bullet-style TWO-WAY soft-body vertex/triangle contacts.
+	// Zero thickness disables the pair stage and all its extra runtime work.
+	GLOBAL_DEF(PropertyInfo(Variant::FLOAT, "physics/3d/solver/soft_body_pair_collision_thickness", PROPERTY_HINT_RANGE, "0,1,0.001,or_greater,suffix:m"), 0.0);
+	GLOBAL_DEF(PropertyInfo(Variant::FLOAT, "physics/3d/solver/soft_body_pair_collision_compliance", PROPERTY_HINT_RANGE, "0,0.01,0.000001,or_greater"), 0.000001);
+	GLOBAL_DEF(PropertyInfo(Variant::INT, "physics/3d/solver/soft_body_pair_max_contacts", PROPERTY_HINT_RANGE, "1,2048,1"), 256);
+	GLOBAL_DEF(PropertyInfo(Variant::INT, "physics/3d/solver/soft_body_pair_max_pairs", PROPERTY_HINT_RANGE, "1,512,1"), 128);
 	// Jolt-style long-range cloth tethers limit distance from pinned
 	// particles along the original structural mesh. 0 keeps them off.
 	GLOBAL_DEF(PropertyInfo(Variant::FLOAT, "physics/3d/solver/soft_body_xpbd_tether_compliance", PROPERTY_HINT_RANGE, "0,0.01,0.000001,or_greater"), 0.0);
