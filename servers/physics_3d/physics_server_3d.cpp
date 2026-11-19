@@ -741,6 +741,14 @@ PhysicsServer3D::PhysicsServer3D() {
 	// Scalar material damage is irreversible; it does not split topology.
 	GLOBAL_DEF(PropertyInfo(Variant::FLOAT, "physics/3d/solver/soft_body_tetra_damage_yield_strain", PROPERTY_HINT_RANGE, "0,5,0.01,or_greater"), 0.25);
 	GLOBAL_DEF(PropertyInfo(Variant::FLOAT, "physics/3d/solver/soft_body_tetra_damage_rate", PROPERTY_HINT_RANGE, "0,1000,0.1,or_greater,suffix:1/s"), 0.0);
+	// Experimental per-tetra cycle-dependent fatigue, independent of static
+	// overload rate. Counts principal-strain reversals, with Miner-style
+	// S-N accumulation, not full rainflow or dynamic fracture.
+	GLOBAL_DEF(PropertyInfo(Variant::FLOAT, "physics/3d/solver/soft_body_tetra_fatigue_endurance_amplitude", PROPERTY_HINT_RANGE, "0,2,0.005,or_greater"), 0.05);
+	GLOBAL_DEF(PropertyInfo(Variant::FLOAT, "physics/3d/solver/soft_body_tetra_fatigue_reference_amplitude", PROPERTY_HINT_RANGE, "0.01,5,0.01,or_greater"), 0.3);
+	GLOBAL_DEF(PropertyInfo(Variant::FLOAT, "physics/3d/solver/soft_body_tetra_fatigue_reference_cycles", PROPERTY_HINT_RANGE, "0,100000,1,or_greater"), 0.0);
+	GLOBAL_DEF(PropertyInfo(Variant::FLOAT, "physics/3d/solver/soft_body_tetra_fatigue_exponent", PROPERTY_HINT_RANGE, "1,10,0.1"), 3.0);
+	GLOBAL_DEF(PropertyInfo(Variant::FLOAT, "physics/3d/solver/soft_body_tetra_fatigue_reversal_deadband", PROPERTY_HINT_RANGE, "0,1,0.0005,or_greater"), 0.002);
 	// Intrinsic membrane viscoelastic damping of normal and shear strain rates.
 	// Zero disables the extra face pass, all other projects remain unchanged.
 	GLOBAL_DEF(PropertyInfo(Variant::FLOAT, "physics/3d/solver/soft_body_membrane_damping_rate", PROPERTY_HINT_RANGE, "0,1000,0.1,or_greater,suffix:1/s"), 0.0);

@@ -1441,6 +1441,21 @@ GodotSpace3D::GodotSpace3D() {
 			CLAMP(configured_tetra_min_j, real_t(0.001), real_t(0.5)) : real_t(0.05);
 	const real_t damage_rate = GLOBAL_GET("physics/3d/solver/soft_body_tetra_damage_rate");
 	soft_body_tetra_damage_rate = Math::is_finite(damage_rate) ? MAX(real_t(0.0), damage_rate) : real_t(0.0);
+	const real_t fatigue_endurance = GLOBAL_GET("physics/3d/solver/soft_body_tetra_fatigue_endurance_amplitude");
+	soft_body_tetra_fatigue_endurance_amplitude = Math::is_finite(fatigue_endurance) ?
+			MAX(real_t(0.0), fatigue_endurance) : real_t(0.05);
+	const real_t fatigue_reference = GLOBAL_GET("physics/3d/solver/soft_body_tetra_fatigue_reference_amplitude");
+	soft_body_tetra_fatigue_reference_amplitude = Math::is_finite(fatigue_reference) ?
+			MAX(real_t(0.0), fatigue_reference) : real_t(0.3);
+	const real_t fatigue_cycles = GLOBAL_GET("physics/3d/solver/soft_body_tetra_fatigue_reference_cycles");
+	soft_body_tetra_fatigue_reference_cycles = Math::is_finite(fatigue_cycles) ?
+			MAX(real_t(0.0), fatigue_cycles) : real_t(0.0);
+	const real_t fatigue_exponent = GLOBAL_GET("physics/3d/solver/soft_body_tetra_fatigue_exponent");
+	soft_body_tetra_fatigue_exponent = Math::is_finite(fatigue_exponent) ?
+			CLAMP(fatigue_exponent, real_t(1.0), real_t(10.0)) : real_t(3.0);
+	const real_t fatigue_deadband = GLOBAL_GET("physics/3d/solver/soft_body_tetra_fatigue_reversal_deadband");
+	soft_body_tetra_fatigue_reversal_deadband = Math::is_finite(fatigue_deadband) ?
+			MAX(real_t(0.0), fatigue_deadband) : real_t(0.002);
 	const real_t damage_yield = GLOBAL_GET("physics/3d/solver/soft_body_tetra_damage_yield_strain");
 	soft_body_tetra_damage_yield_strain = Math::is_finite(damage_yield) ? MAX(real_t(0.0), damage_yield) : real_t(0.25);
 	const real_t configured_membrane_damping = GLOBAL_GET("physics/3d/solver/soft_body_membrane_damping_rate");
