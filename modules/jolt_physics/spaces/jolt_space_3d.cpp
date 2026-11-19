@@ -1240,6 +1240,24 @@ void JoltSpace3D::_pre_step(float p_step) {
 		object->pre_step(p_step);
 	}
 
+	// Optional cloth/soft-body self collision: one-ring topology exclusion
+	// prevents neighboring triangles from repelling their own mesh edges.
+	// This budget is separate from inter-body soft contacts and applies
+	// across all active soft bodies in this physics space per step.
+	if (JoltProjectSettings::soft_body_self_contacts && active_soft_body_count > 0 &&
+			JoltProjectSettings::soft_body_soft_contact_radius > 0.0f && Math::is_finite(p_step) && p_step > 0.0f) {
+		uint32_t self_budget = (uint32_t)JoltProjectSettings::soft_body_self_contact_max_checks;
+		SoftSelfContactScratch self_scratch;
+		for (JPH::uint32 i = 0; i < active_soft_body_count && self_budget > 0; ++i) {
+			JPH::Body *jolt_body = lock_iface.TryGetBody(active_soft_bodies[i]);
+			if (jolt_body == nullptr) {
+				continue;
+			}
+			const JoltSoftBody3D *object = reinterpret_cast<JoltObject3D *>(jolt_body->GetUserData())->as_soft_body();
+			resolve_soft_body_self_contacts(*jolt_body, *object, p_step, self_budget, self_scratch);
+		}
+	}
+
 	// Jolt's native soft-body collision path only handles rigid bodies. The
 	// CPU approximation runs before Jolt's parallel physics Update(), which
 	// makes mutable particle velocities safe to access here.
