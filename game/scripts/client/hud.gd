@@ -264,6 +264,14 @@ func _build() -> void:
 	claim_contract.pressed.connect(func() -> void: client.contract("claim"))
 	contract_actions.add_child(claim_contract)
 
+	var cache_heading := Label.new()
+	cache_heading.text = "Frontier cache (capture a red/black outpost)"
+	inventory_box.add_child(cache_heading)
+	var claim_cache_button := Button.new()
+	claim_cache_button.text = "Collect nearest captured outpost supplies"
+	claim_cache_button.pressed.connect(_claim_nearest_outpost_cache)
+	inventory_box.add_child(claim_cache_button)
+
 	var party_title := Label.new()
 	party_title.text = "Survivor party (nearby invites, up to 5 players)"
 	inventory_box.add_child(party_title)
@@ -600,7 +608,32 @@ func _sell_one_material() -> void:
 	client.vendor(item_id, 1, false)
 
 
+func _claim_nearest_outpost_cache() -> void:
+	if client.you.is_empty():
+		return
+	var position := Vector2(float(client.you.get("x", 0.0)),
+		float(client.you.get("z", 0.0)))
+	var nearest_id: int = -1
+	var distance: float = 5.0
+	for site in client.outposts:
+		var at := Vector2(float(site["x"]), float(site["z"]))
+		var separation: float = position.distance_to(at)
+		if separation < distance:
+			nearest_id = int(site["id"])
+			distance = separation
+	if nearest_id < 0:
+		say("Outpost cache: move within 4 metres of a captured flag.")
+	else:
+		client.outpost_supplies(nearest_id)
+
+
 func _on_result(kind: String, data: Dictionary) -> void:
+	if kind == "outpost_supplies":
+		if bool(data.get("ok", false)):
+			say("Outpost supplies collected! %d cache shares left. Inventory updated." % int(data.get("remaining", 0)))
+		else:
+			say("Outpost cache: " + str(data.get("reason", "rejected")))
+		return
 	if kind == "party_aid":
 		if bool(data.get("ok", false)):
 			say("Field aid: +%d HP, -%d infection, -%d bleeding." % [
