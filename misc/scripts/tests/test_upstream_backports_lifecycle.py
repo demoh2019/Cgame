@@ -82,9 +82,11 @@ class DisplayFailureCleanupTests(unittest.TestCase):
     def setUpClass(cls):
         src = read_source("main/main.cpp")
         cls.finalize = function_body(src, "void finalize_display()")
-        setup = function_body(src, "Error Main::setup2(")
-        failure_start = setup.rindex("if (err != OK || display_server == nullptr) {")
-        cls.failure = function_body(setup[failure_start:], "if (err != OK || display_server == nullptr)")
+        marker = src.index('ERR_PRINT("Unable to create DisplayServer, all display drivers failed.')
+        failure_start = src.rfind("if (err != OK || display_server == nullptr) {", 0, marker)
+        if failure_start < 0:
+            raise AssertionError("Could not locate final DisplayServer failure branch")
+        cls.failure = function_body(src[failure_start:], "if (err != OK || display_server == nullptr)")
 
     def test_rendering_server_finishes_before_deletion(self):
         self.assertLess(self.finalize.index("rendering_server->finish();"), self.finalize.index("memdelete(rendering_server);"))
