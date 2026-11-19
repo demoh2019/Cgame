@@ -255,4 +255,111 @@ TEST_CASE("[HashSet] Equality") {
 	CHECK(HashSet<int>{ 1, 2, 3 } != HashSet<int>{ 1, 2, 8 });
 }
 
+
+TEST_CASE("[HashSet] Relocating last string on middle erase preserves ownership") {
+	HashSet<String> set;
+	for (int i = 0; i < 160; i++) {
+		set.insert("entry_" + itos(i) + String("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"));
+	}
+	CHECK(set.erase("entry_4" + String("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa")));
+	CHECK(set.size() == 159);
+	CHECK_FALSE(set.has("entry_4" + String("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa")));
+	CHECK(set.has("entry_159" + String("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa")));
+	CHECK(set.has("entry_0" + String("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa")));
+}
+
+TEST_CASE("[HashSet] Relocation after erase retains all unrelated values") {
+	HashSet<int> set;
+	for (int i = 0; i < 300; i++) {
+		set.insert(i);
+	}
+	for (int i = 0; i < 300; i += 3) {
+		CHECK(set.erase(i));
+	}
+	CHECK(set.size() == 200);
+	for (int i = 0; i < 300; i++) {
+		CHECK(set.has(i) == (i % 3 != 0));
+	}
+}
+
+TEST_CASE("[HashSet] Erase last key and erase middle key both work") {
+	HashSet<int> set;
+	set.insert(1);
+	set.insert(2);
+	set.insert(3);
+	CHECK(set.erase(3));
+	CHECK(set.erase(1));
+	CHECK(set.size() == 1);
+	CHECK(set.has(2));
+	CHECK(set.erase(2));
+	CHECK(set.is_empty());
+}
+
+TEST_CASE("[HashSet] Alternating insert and erase retains lookup correctness") {
+	HashSet<int> set;
+	bool present[257] = {};
+	uint32_t state = 0x12345678;
+	for (int i = 0; i < 15000; i++) {
+		state = 1664525U * state + 1013904223U;
+		int key = state % 257;
+		if ((state & 0x100U) != 0) {
+			set.insert(key);
+			present[key] = true;
+		} else {
+			set.erase(key);
+			present[key] = false;
+		}
+		if ((i % 257) == 0) {
+			uint32_t expected_size = 0;
+			for (int j = 0; j < 257; j++) {
+				CHECK(set.has(j) == present[j]);
+				expected_size += present[j] ? 1 : 0;
+			}
+			CHECK(set.size() == expected_size);
+		}
+	}
+}
+
+TEST_CASE("[HashSet] Erase while entries contain heap-backed strings") {
+	uint64_t start_usage = Memory::get_mem_usage();
+	{
+		HashSet<String> set;
+		for (int round = 0; round < 4; round++) {
+			for (int i = 0; i < 512; i++) {
+				set.insert("large key " + itos(i) + String("zzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz"));
+			}
+			for (int i = 0; i < 512; i += 2) {
+				CHECK(set.erase("large key " + itos(i) + String("zzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz")));
+			}
+			for (int i = 1; i < 512; i += 2) {
+				CHECK(set.has("large key " + itos(i) + String("zzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz")));
+			}
+			set.clear();
+		}
+	}
+	CHECK(Memory::get_mem_usage() == start_usage);
+}
+
+TEST_CASE("[HashSet] Iteration after interleaved relocation visits each retained key") {
+	HashSet<int> set;
+	for (int i = 0; i < 128; i++) {
+		set.insert(i);
+	}
+	for (int i = 0; i < 128; i += 2) {
+		set.erase(i);
+	}
+	bool encountered[128] = {};
+	int count = 0;
+	for (int key : set) {
+		CHECK(key % 2 == 1);
+		CHECK_FALSE(encountered[key]);
+		encountered[key] = true;
+		count++;
+	}
+	CHECK(count == 64);
+	for (int i = 1; i < 128; i += 2) {
+		CHECK(encountered[i]);
+	}
+}
+
 } // namespace TestHashSet
