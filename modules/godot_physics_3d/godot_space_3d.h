@@ -127,6 +127,7 @@ private:
 	real_t soft_body_plastic_yield_strain = 0.1; // Relative elastic yield limit.
 	real_t soft_body_plastic_creep_rate = 0.0; // 1/second; 0 keeps elastic behavior.
 	real_t soft_body_xpbd_area_compliance = 0.0; // Opt-in triangle area preservation.
+	real_t soft_body_xpbd_volume_compliance = 0.0; // Opt-in enclosed volume preservation.
 	real_t contact_max_allowed_penetration = 0.0;
 	real_t contact_bias = 0.0;
 	real_t max_contact_push_speed = 0.0; // 0: unlimited (legacy behavior).
