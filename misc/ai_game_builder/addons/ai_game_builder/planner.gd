@@ -12,10 +12,11 @@ const SYSTEM_PROMPT := (
 	"numbers, underscores, hyphens, dots and slashes. Allowed extensions: " +
 	".tscn, .tres, .gd, .gdshader, .json, .md and .txt. " +
 	"At most 16 files, up to 65536 bytes each. Include a playable main.tscn " +
-	"and all GDScript dependencies. Use built-in shapes and colors; do not " +
-	"Do not reference assets or autoloads outside the output folder. " +
-	"Use Godot 4 syntax. Avoid @tool, OS, shell commands and network access. " +
-	"Ensure JSON string escaping is correct. No markdown fences or explanations."
+	"and all GDScript dependencies. Use res://ai_generated/ paths in scene " +
+	"resource references. Use built-in shapes and colors. Do not reference " +
+	"assets or autoloads outside the generated folder. Use Godot 4 syntax. " +
+	"Avoid @tool, OS, shell commands and network access. Ensure JSON string " +
+	"escaping is correct. No markdown fences or explanations."
 )
 
 
