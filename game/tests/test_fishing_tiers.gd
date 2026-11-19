@@ -99,6 +99,17 @@ func run(t) -> void:
 		"cooked fish uses the existing authoritative food path")
 	t.check(survivor.survival.hunger > 20.0, "T4 meal actually restores survival hunger")
 
+	var preview := Inventory.new()
+	preview.add("raw_fish_2", 1)
+	preview.add("raw_fish_4", 1)
+	t.eq(Vendor.first_fish(preview), "raw_fish_4",
+		"sell-fish UI chooses highest-value caught fish, not arbitrary salvage")
+	preview.remove("raw_fish_4", 1)
+	t.eq(Vendor.first_fish(preview), "raw_fish_2",
+		"fish sale falls back to remaining catch")
+	preview.remove("raw_fish_2", 1)
+	t.eq(Vendor.first_fish(preview), "", "empty backpack cannot offer fake catches")
+
 	var silver_before: int = survivor.inventory.count("silver")
 	t.check(bool(server.cmd_vendor(925, "raw_fish_4", 2, false).get("ok", false)),
 		"fisher sells coastal catch through the existing camp vendor")
