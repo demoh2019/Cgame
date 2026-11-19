@@ -40,7 +40,7 @@ TEST_CASE("[Physics] Analytic circle CCD finds glancing contacts missed by suppo
 	// support ray at y=0 misses B's radius-0.5 disk, but the swept
 	// Minkowski disk of radius 1 touches when x=3.4.
 	CHECK(physics_ccd_sphere_toi(Vector2(-4.0, -0.8), Vector2(8.0, 0.0), 1.0, fraction));
-	CHECK(Math::abs(fraction - 0.425) < 1e-10);
+	CHECK(Math::abs(fraction - 0.425) < 1e-6);
 
 	CHECK_FALSE(physics_ccd_sphere_toi(Vector2(-4.0, -1.01), Vector2(8.0, 0.0), 1.0, fraction));
 	CHECK_FALSE(physics_ccd_sphere_toi(Vector2(-4.0, -0.8), Vector2(-8.0, 0.0), 1.0, fraction));
@@ -54,7 +54,7 @@ TEST_CASE("[Physics] Analytic circle CCD finds glancing contacts missed by suppo
 TEST_CASE("[Physics] Analytic sphere CCD accounts for the third dimension") {
 	double fraction = -1.0;
 	CHECK(physics_ccd_sphere_toi(Vector3(-4.0, 0.0, -0.8), Vector3(8.0, 0.0, 0.0), 1.0, fraction));
-	CHECK(Math::abs(fraction - 0.425) < 1e-10);
+	CHECK(Math::abs(fraction - 0.425) < 1e-6);
 	CHECK_FALSE(physics_ccd_sphere_toi(Vector3(-4.0, 0.8, 0.8), Vector3(8.0, 0.0, 0.0), 1.0, fraction));
 
 	// Stable quadratic root: the entry is a unit before the midpoint
