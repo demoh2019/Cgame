@@ -32,8 +32,16 @@ Godot project. `misc/ai_game_builder/project.godot` is a minimal test project.
    is outside your project and is not automatically pruned.
 6. If a main scene is proposed, the plugin will change the project's startup scene
    after confirmation. You can then run and test the game.
-7. If Godot reports errors, paste them into the **Godot error log** field and
-   click **Generate repair proposal from errors**. The diagnostics and up to 12
+7. To capture diagnostics without copying logs manually, press **Check project
+   with Godot (headless)** and explicitly confirm launching the separate Godot
+   process. The editor runs `--headless --recovery-mode --import` using its own
+   executable and writes a local log into `user://ai_game_builder/diagnostics/`.
+   It stops waiting after 90 seconds, and a Cancel button can terminate it.
+   This checks imports and some parsing errors, **not game behavior**. Recovery
+   mode avoids many tool scripts but is not a security sandbox. Run only trusted
+   projects; the import process may update local import caches.
+8. If Godot reports errors, review the captured log (or paste your own) in the
+   **Godot error log** field and click **Generate repair proposal from errors**. The diagnostics and up to 12
    small generated files (48,000 characters maximum) are sent to your selected
    provider when clicked. Inspect and explicitly approve the repair as usual.
 
@@ -59,13 +67,15 @@ godot --headless --path misc/ai_game_builder --script res://tests/test_ai_change
 
 The test suite exercises response parsing, path safety, payload limits,
 duplicate detection, lightweight content preflight, repair prompt structure,
-preview hashes, and endpoint policy. It does *not* validate actual model
+preview hashes, endpoint policy, and deterministic CLI argument generation.
+Headless diagnostics are an opt-in local process; no logs are sent to a
+provider without a subsequent explicit repair request. It does *not* validate actual model
 quality; model requests and editor UI require separate integration tests.
 
 ## Roadmap
 
 - Project-aware multi-stage planning and selective context retrieval.
 - Full Godot parser validation for generated scenes and scripts before applying.
-- Automated, explicitly approved repair loops using Godot's headless diagnostics and project test suite.
+- Integrate diagnostics with project test suites and an optionally automated, explicitly approved multi-step repair loop.
 - Diffs, one-click undo, provider presets, locally generated 2D/3D assets.
 - Agent actions for editing nodes and resources, with explicit user confirmation.

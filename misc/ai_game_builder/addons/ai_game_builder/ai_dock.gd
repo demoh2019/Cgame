@@ -5,6 +5,7 @@ const Changes = preload("res://addons/ai_game_builder/ai_changes.gd")
 const Protocol = preload("res://addons/ai_game_builder/ai_protocol.gd")
 const Preflight = preload("res://addons/ai_game_builder/ai_preflight.gd")
 const Repair = preload("res://addons/ai_game_builder/ai_repair.gd")
+const Diagnostics = preload("res://addons/ai_game_builder/ai_diagnostics.gd")
 
 var _endpoint: LineEdit
 var _model: LineEdit
@@ -14,6 +15,9 @@ var _include_context: CheckBox
 var _generate_button: Button
 var _apply_button: Button
 var _repair_button: Button
+var _check_button: Button
+var _cancel_check_button: Button
+var _check_confirmation: ConfirmationDialog
 var _diagnostics: TextEdit
 var _status: Label
 var _summary: Label
@@ -27,6 +31,9 @@ var _last_applied_paths: Array[String] = []
 var _last_original_task := ""
 var _request_is_repair := false
 var _proposal_is_repair := false
+var _check_pid := -1
+var _check_started := 0
+var _check_log_path := ""
 
 
 func _ready() -> void:
@@ -97,11 +104,28 @@ func _ready() -> void:
 	_apply_button.pressed.connect(_request_apply)
 	add_child(_apply_button)
 
-	add_child(_label("Godot error log (sent only when Generate repair is clicked):"))
+	add_child(_label("Godot error log (paste or capture; sent to AI only with Generate repair):"))
 	_diagnostics = TextEdit.new()
 	_diagnostics.custom_minimum_size = Vector2(0, 75)
 	_diagnostics.placeholder_text = "Paste parser errors, test failures or a crash log here."
 	add_child(_diagnostics)
+
+	_check_button = Button.new()
+	_check_button.text = "Check project with Godot (headless)"
+	_check_button.pressed.connect(_confirm_project_check)
+	add_child(_check_button)
+
+	_cancel_check_button = Button.new()
+	_cancel_check_button.text = "Cancel headless check"
+	_cancel_check_button.disabled = true
+	_cancel_check_button.pressed.connect(_cancel_project_check)
+	add_child(_cancel_check_button)
+
+	_check_confirmation = ConfirmationDialog.new()
+	_check_confirmation.title = "Launch a separate Godot editor process?"
+	_check_confirmation.dialog_text = "This starts Godot --headless --recovery-mode --import on this project. It may write an import cache and process project resources. Recovery mode disables many editor addons, but it is not a security sandbox. Only run checks on trusted projects. The error log will be shown locally and not sent to AI until you explicitly request a repair."
+	_check_confirmation.confirmed.connect(_start_project_check)
+	add_child(_check_confirmation)
 
 	_repair_button = Button.new()
 	_repair_button.text = "Generate repair proposal from errors"
@@ -120,6 +144,70 @@ func _ready() -> void:
 	_http.body_size_limit = 2 * 1024 * 1024
 	_http.request_completed.connect(_on_request_completed)
 	add_child(_http)
+
+
+func _exit_tree() -> void:
+	# Do not leave a child editor process running after disabling the addon.
+	if _check_pid > 0 and OS.is_process_running(_check_pid):
+		OS.kill(_check_pid)
+
+
+func _process(_delta: float) -> void:
+	if _check_pid <= 0:
+		return
+	if Time.get_ticks_msec() - _check_started > Diagnostics.TIMEOUT_MSEC:
+		if OS.is_process_running(_check_pid):
+			OS.kill(_check_pid)
+		_finish_project_check(true)
+	elif not OS.is_process_running(_check_pid):
+		_finish_project_check(false)
+
+
+func _confirm_project_check() -> void:
+	if _check_pid > 0:
+		return
+	_check_confirmation.popup_centered()
+
+
+func _start_project_check() -> void:
+	if _check_pid > 0:
+		return
+	_check_log_path = Diagnostics.log_file_path()
+	if DirAccess.make_dir_recursive_absolute(_check_log_path.get_base_dir()) != OK:
+		_status.text = "Could not create a folder for diagnostic logs."
+		return
+	var project_dir := ProjectSettings.globalize_path("res://")
+	var arguments := Diagnostics.command_arguments(project_dir, _check_log_path)
+	var pid := OS.create_process(OS.get_executable_path(), arguments)
+	if pid <= 0:
+		_status.text = "Could not launch a separate Godot process on this platform."
+		return
+	_check_pid = pid
+	_check_started = Time.get_ticks_msec()
+	_check_button.disabled = true
+	_cancel_check_button.disabled = false
+	_status.text = "Headless import check running; the project is not being sent to AI."
+
+
+func _cancel_project_check() -> void:
+	if _check_pid <= 0:
+		return
+	if OS.is_process_running(_check_pid):
+		OS.kill(_check_pid)
+	_finish_project_check(true)
+	_status.text = "Headless check cancelled; a partial log (if any) is shown below."
+
+
+func _finish_project_check(stopped: bool) -> void:
+	var exit_code := OS.get_process_exit_code(_check_pid)
+	var log_text := Diagnostics.read_log(_check_log_path)
+	_check_pid = -1
+	_check_button.disabled = false
+	_cancel_check_button.disabled = true
+	_diagnostics.text = log_text
+	_status.text = Diagnostics.result_label(exit_code, stopped, log_text)
+	if log_text.is_empty():
+		_diagnostics.text = "(No diagnostic log captured; inspect the editor Output panel.)"
 
 
 func _label(value: String) -> Label:

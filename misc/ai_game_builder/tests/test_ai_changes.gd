@@ -4,6 +4,7 @@ const Changes = preload("res://addons/ai_game_builder/ai_changes.gd")
 const Protocol = preload("res://addons/ai_game_builder/ai_protocol.gd")
 const Preflight = preload("res://addons/ai_game_builder/ai_preflight.gd")
 const Repair = preload("res://addons/ai_game_builder/ai_repair.gd")
+const Diagnostics = preload("res://addons/ai_game_builder/ai_diagnostics.gd")
 var failures := 0
 
 
@@ -69,6 +70,32 @@ func _run_tests() -> void:
 	_assert_true(repair_request is Dictionary and repair_request["messages"][1]["content"].contains("Parser Error"), "repair request includes diagnostics")
 	var no_paths: Array[String] = []
 	_assert_true(Repair.collect_context(no_paths).contains("No eligible"), "empty repair context")
+	var cmd := Diagnostics.command_arguments("/tmp/godot sample project", "/tmp/godot-validation.log")
+	_assert_true(cmd.find("--headless") >= 0, "headless argument")
+	_assert_true(cmd.find("--import") >= 0, "import-only check")
+	_assert_true(cmd.find("--recovery-mode") >= 0, "check uses recovery mode")
+	_assert_true(cmd[cmd.find("--path") + 1] == "/tmp/godot sample project", "path kept as single argument")
+	_assert_true(not cmd.has("--script"), "no dynamic script execution")
+	_assert_true(Diagnostics.has_errors("SCRIPT ERROR: Parse Error"), "Godot parser failure recognized")
+	_assert_true(Diagnostics.has_errors("ERROR: Failed to load scene"), "asset load error recognized")
+	_assert_true(not Diagnostics.has_errors("Godot Engine editor started."), "successful log not considered error")
+	_assert_true(Diagnostics.result_label(1, false, "").contains("code 1"), "non-zero exit handled")
+	_assert_true(Diagnostics.result_label(-1, true, "").contains("timed out"), "timeout reported")
+	_assert_true(Diagnostics.result_label(0, false, "").contains("inconclusive"), "empty output is inconclusive")
+	var log_path := "user://ai_game_builder/tests/diagnostic_tail_%d.log" % Time.get_ticks_usec()
+	_assert_true(Diagnostics.read_log(log_path).is_empty(), "missing diagnostic log returns empty")
+	_assert_true(DirAccess.make_dir_recursive_absolute(log_path.get_base_dir()) == OK, "diagnostics test folder created")
+	var log_file := FileAccess.open(log_path, FileAccess.WRITE)
+	_assert_true(log_file != null, "diagnostics test log opened")
+	if log_file != null:
+		log_file.store_string("A".repeat(Diagnostics.MAX_LOG_BYTES + 100) + "ERROR: test failure")
+		log_file.close()
+		var captured := Diagnostics.read_log(log_path)
+		_assert_true(captured.length() <= Diagnostics.MAX_LOG_BYTES, "large logs are bounded")
+		_assert_true(captured.contains("ERROR: test failure"), "tail retains latest error")
+		_assert_true(Diagnostics.has_errors(captured), "captured error detected")
+		DirAccess.remove_absolute(log_path)
+
 	var state := Changes.preview_snapshot(_proposal("res://tests/newfile_never_created_123.gd"))
 	_assert_true(state["ok"] and state["states"]["res://tests/newfile_never_created_123.gd"] == "__missing__", "snapshot records absent files")
 
