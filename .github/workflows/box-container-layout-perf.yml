@@ -1,0 +1,70 @@
+name: BoxContainer dense layout and native performance
+
+on:
+  push:
+    branches: [develop]
+    paths:
+      - 'scene/gui/box_container.cpp'
+      - 'scene/gui/box_container.h'
+      - 'tests/scene/test_box_container.cpp'
+      - 'tests/stress/box_reflow.gd'
+      - 'tests/stress/stress.gd'
+      - 'tests/stress/run.py'
+      - '.github/workflows/box-container-layout-perf.yml'
+  pull_request:
+    paths:
+      - 'scene/gui/box_container.cpp'
+      - 'scene/gui/box_container.h'
+      - 'tests/scene/test_box_container.cpp'
+      - 'tests/stress/box_reflow.gd'
+      - 'tests/stress/stress.gd'
+      - 'tests/stress/run.py'
+      - '.github/workflows/box-container-layout-perf.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: box-container-perf-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  native-box-stress:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ./.github/actions/godot-deps
+      - name: Build native Cgame and tests
+        uses: ./.github/actions/godot-build
+        with:
+          platform: linuxbsd
+          target: editor
+          scons-flags: dev_build=yes tests=yes debug_symbols=no module_text_server_fb_enabled=yes -j2
+      - name: Verify BoxContainer regression tests
+        shell: bash
+        run: |
+          set -euo pipefail
+          BIN=./bin/godot.linuxbsd.editor.dev.x86_64
+          timeout 180s "$BIN" --headless --test --test-suite="*BoxContainer*" --no-colors
+      - name: Profile mixed HBox and VBox layout pressure
+        shell: bash
+        run: |
+          set -euo pipefail
+          BIN=./bin/godot.linuxbsd.editor.dev.x86_64
+          "$BIN" --headless --path tests/stress --script res://stress.gd --check-only
+          python3 tests/stress/run.py \
+            --godot "$BIN" --case box_reflow --scale 3 \
+            --frames 90 --repeats 3 --timeout 300 --rss-limit-mib 4096 \
+            --output box-reflow-results.json --summary-md box-reflow-hotspots.md
+      - name: Upload performance reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: box-container-perf
+          path: |
+            box-reflow-results.json
+            box-reflow-hotspots.md
+          if-no-files-found: ignore
+          retention-days: 14
