@@ -7,6 +7,7 @@ const PLAYER_SCRIPT = preload("res://player.gd")
 const PICKUP_SCRIPT = preload("res://pickup.gd")
 const RESOURCE_SCRIPT = preload("res://resource_node.gd")
 const ZOMBIE_SCRIPT = preload("res://zombie.gd")
+const COMBAT_SIGHT = preload("res://combat_sight.gd")
 
 var player
 var hud_label: Label
@@ -222,6 +223,16 @@ func _on_player_attacked(damage: float, range_meters: float) -> void:
         if distance <= 0.01 or distance > best_distance:
             continue
         if forward.dot(to_enemy / distance) < 0.28:
+            continue
+        var target_body := candidate as CollisionObject3D
+        if target_body == null:
+            continue
+        # Do not allow a spear to hit infected through walls or cover.
+        if not COMBAT_SIGHT.clear(
+                get_world_3d().direct_space_state,
+                player.global_position + Vector3.UP * 0.65,
+                candidate.global_position + Vector3.UP * 0.65,
+                player, target_body):
             continue
         closest = candidate
         best_distance = distance
