@@ -144,7 +144,7 @@ func _run_case(test_case: String, scale: int, frames: int, seed: int) -> Diction
 			for i in range(200 * scale):
 				var img := Image.create(128, 128, false, Image.FORMAT_RGBA8)
 				img.fill(Color(float(i & 255) / 255.0, 0.5, 0.25, 1.0))
-				img.set_pixel(i % 128, (i / 128) % 128, Color.WHITE)
+				img.set_pixel(i % 128, int(i / 128) % 128, Color.WHITE)
 				checksum += img.get_data().size()
 			return {"images": 200 * scale, "checksum": checksum}
 		"json":
@@ -320,8 +320,8 @@ func _render_3d(scale: int, frames: int) -> Dictionary:
 	root.add_child(world)
 	var camera := Camera3D.new()
 	camera.position = Vector3(0, 30, 60)
-	camera.look_at(Vector3.ZERO)
 	world.add_child(camera)
+	camera.look_at(Vector3.ZERO)
 	camera.current = true
 	var light := DirectionalLight3D.new()
 	world.add_child(light)
