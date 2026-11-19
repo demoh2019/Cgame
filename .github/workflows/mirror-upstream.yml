@@ -1,0 +1,67 @@
+name: Mirror upstream Godot issues and pull requests
+on:
+  workflow_dispatch:
+    inputs:
+      kind:
+        description: 'What to mirror'
+        type: choice
+        options: [issues, prs, all]
+        default: all
+        required: true
+      state:
+        description: 'Only open or entire history (including closed/merged)'
+        type: choice
+        options: [open, all]
+        default: open
+        required: true
+      start_page:
+        description: 'Upstream issues REST page (100 items/page; includes PRs)'
+        required: true
+        default: '1'
+      limit:
+        description: 'Number of new records per execution (0 = unbounded)'
+        required: true
+        default: '25'
+      apply:
+        description: 'Actually create issues and PRs; false = dry run'
+        type: boolean
+        required: true
+        default: false
+
+permissions:
+  contents: write
+  issues: write
+  pull-requests: write
+
+concurrency:
+  group: godot-upstream-mirror
+  cancel-in-progress: false
+
+jobs:
+  import:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: true
+          fetch-depth: 1
+      - name: Check Python unit tests
+        run: python3 -m unittest discover -s scripts/upstream_sync/tests -v
+      - name: Mirror selected batch
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          KIND: ${{ inputs.kind }}
+          STATE: ${{ inputs.state }}
+          START_PAGE: ${{ inputs.start_page }}
+          LIMIT: ${{ inputs.limit }}
+          APPLY: ${{ inputs.apply }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          flags=()
+          if [ "$APPLY" = "true" ]; then flags+=(--apply); fi
+          python3 scripts/upstream_sync/sync_upstream.py \
+            --source godotengine/godot --target "$GITHUB_REPOSITORY" \
+            --kind "$KIND" --state "$STATE" \
+            --start-page "$START_PAGE" --limit "$LIMIT" "${flags[@]}"
