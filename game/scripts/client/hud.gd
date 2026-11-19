@@ -309,6 +309,11 @@ func _build() -> void:
 	rally_button.tooltip_text = "Leader only: signal your current server position for 45 seconds"
 	rally_button.pressed.connect(func() -> void: client.party_rally())
 	party_buttons.add_child(rally_button)
+	var guardian_button := Button.new()
+	guardian_button.text = "Guardian taunt (F1)"
+	guardian_button.tooltip_text = "Melee weapon, party, 25 combat energy, 20s cooldown; defend nearby allies"
+	guardian_button.pressed.connect(func() -> void: client.guardian_taunt())
+	inventory_box.add_child(guardian_button)
 	var fortify_button := Button.new()
 	fortify_button.name = "FortifyOutpost"
 	fortify_button.text = "Fortify controlled outpost (4m, wood + stone)"
@@ -592,6 +597,8 @@ func _on_event(event: Dictionary) -> void:
 				say("Evaded an infected attack!")
 		"siege_started":
 			say("Night siege! %d infected are attacking a T%d barricade." % [int(event.get("count", 0)), int(event.get("tier", 1))])
+		"guardian_taunt":
+			say("Frontline guardian draws %d infected away from teammates!" % int(event.get("count", 0)))
 		"raid_started":
 			say("RAID BOSS nearby! A mutant warlord entered the dangerous zone.")
 		"raid_enraged":
@@ -652,6 +659,12 @@ func _claim_nearest_outpost_cache() -> void:
 
 
 func _on_result(kind: String, data: Dictionary) -> void:
+	if kind == "guardian_taunt":
+		if bool(data.get("ok", false)):
+			say("Guardian: drew %d infected from your party for 3 seconds." % int(data.get("count", 0)))
+		else:
+			say("Guardian: " + str(data.get("reason", "rejected")))
+		return
 	if kind == "outpost_supplies":
 		if bool(data.get("ok", false)):
 			say("Outpost supplies collected! %d cache shares left. Inventory updated." % int(data.get("remaining", 0)))
@@ -806,10 +819,11 @@ func _process(_delta: float) -> void:
 	var zone: int = clampi(int(client.you.get("zone", 0)), 0, 3)
 	_zone_label.text = "%s zone (T%d)\n%s" % [Defs.ZONE_NAMES[zone].capitalize(), zone + 1, ZoneRisk.description(zone)]
 	_zone_label.add_theme_color_override("font_color", [Color(0.4, 0.9, 0.4), Color(0.95, 0.85, 0.3), Color(0.95, 0.45, 0.3), Color(0.8, 0.3, 0.9)][zone])
-	_info_label.text = "%s | FPS %d  kills %d  deaths %d  Load %.1f kg  Speed %.0f%%  Stamina %d  Dodge %.1fs" % [
+	_info_label.text = "%s | FPS %d  kills %d  deaths %d  Load %.1f kg  Speed %.0f%%  Stamina %d  Dodge %.1fs  Guardian %.1fs" % [
 		"NIGHT" if WorldCycle.is_night(client.server_time) else "DAY", Engine.get_frames_per_second(), client.you.get("kills", 0), client.you.get("deaths", 0),
 		float(client.you.get("carry_kg", 0.0)), 100.0 * float(client.you.get("cargo_factor", 1.0)),
-		int(client.you.get("stamina", Defs.MAX_STAMINA)), float(client.you.get("dodge_cooldown", 0.0))
+		int(client.you.get("stamina", Defs.MAX_STAMINA)), float(client.you.get("dodge_cooldown", 0.0)),
+		float(client.you.get("guardian_cooldown", 0.0))
 	]
 	var weather: Dictionary = client.you.get("weather", {})
 	if not weather.is_empty():

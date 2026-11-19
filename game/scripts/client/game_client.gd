@@ -316,6 +316,11 @@ func skill(direction: Vector2) -> void:
 	net.c_skill.rpc_id(1, direction.x, direction.y)
 
 
+func guardian_taunt() -> void:
+	# The server selects all targets; the client sends no enemy IDs.
+	net.c_guardian_taunt.rpc_id(1)
+
+
 func dodge(direction: Vector2) -> void:
 	# Server owns the travel distance and cooldown; reconciliation handles positioning.
 	net.c_dodge.rpc_id(1, direction.x, direction.y)

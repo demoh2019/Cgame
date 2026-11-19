@@ -486,6 +486,9 @@ func _unhandled_input(event: InputEvent) -> void:
 				_interact()
 			KEY_F:
 				client.drink()
+			KEY_F1:
+				if not hud.is_menu_open() and bool(client.you.get("alive", false)):
+					client.guardian_taunt()
 			KEY_G:
 				if not hud.is_menu_open() and bool(client.you.get("alive", false)):
 					var skill_direction: Vector2 = _aim_direction()

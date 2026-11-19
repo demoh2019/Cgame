@@ -1538,3 +1538,24 @@ Outposts still belong to session-based parties, not persistent guilds.
 This patch does not claim crash-atomic cross-character transactions or
 durable territory ownership. The current engine already supports its
 server-side simulation and reliable RPCs; no native Cgame change is required.
+
+## Guardian frontliner — classless group tanking
+
+A party survivor carrying an equipped **melee weapon** can press **F1**
+or select **Guardian taunt** in the online **I** inventory/party panel.
+The ability costs **25 combat energy**, has a **20-second cooldown**,
+and briefly redirects up to **three nearby infected already chasing
+teammates** toward the guardian. Forced focus lasts **3 seconds** within
+12 metres. Aggro is released early when the guardian enters the safe
+hub, dies, disconnects or runs beyond the infected pursuit leash.
+
+This is a PvE role rather than a PvP stun or class lock: it does not
+change other players' targeting, steal solo players' engagements, pull
+neutral enemies or award fake damage/mastery. The dedicated server derives
+party membership, current infected targets, range, equipped weapon and
+energy from authoritative state. The client sends only a request and
+shows its own cooldown. Rejected casts consume nothing. The offline
+single-character preview has no party to protect, so this is an online
+party-only ability. Regression coverage lives in
+`game/tests/test_guardian_taunt.gd`, registered in `run_all.gd`.
+No new C++ engine primitive was needed.
