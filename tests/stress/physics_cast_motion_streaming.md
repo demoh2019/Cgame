@@ -12,7 +12,8 @@ motion fraction of `1.0` (no collision).
 
 ## Implementation
 
-- Reuse the `GodotBroadPhase2D/3D::visit_aabb()` callback to traverse
+- Use `GodotBroadPhase2D::visit_aabb()` for 2D and retain the independently
+  introduced 3D `GodotBroadPhase3D::visit_aabb()` traversal. Both scan
   all proxies overlapping the existing swept AABB.
 - Apply `collision_mask`, `collide_with_bodies`,
   `collide_with_areas`, and RID exclusions before narrowphase.
@@ -21,13 +22,14 @@ motion fraction of `1.0` (no collision).
 - Preserve optional 3D rest/collider information selection; unlike
   `intersect_shape()`, the sweep cannot stop on the first collider
   because a later candidate may be encountered earlier along the motion.
-- **Fix a 3D sweep-state bug:** the 3D motion shape was shortened to a
-  binary-search fraction and previously reused as the initial sweep for
-  the next candidate. It is now reset to the full motion at the start of
-  each exact candidate check.
-- Compute the 3D motion transformed to local coordinates only once and
-  multiply that cached vector by each binary-search fraction, avoiding
-  repeated `Basis::xform()` on a hot path.
+- Preserve the separately merged 3D sweep-state correction: the motion
+  shape is reset to the full sweep for each exact candidate check instead
+  of carrying forward the previous object's binary-search fraction.
+- Reuse the 3D motion vector already transformed to local coordinates:
+  multiply it by each binary-search fraction instead of invoking
+  `Basis::xform()` again in the inner loop. Fix a callback compile issue
+  by referencing `data.motion_shape.shape` rather than an uncaptured
+  outer-scope `shape` variable.
 
 Uses the existing iterative BVH stack; no per-body memory or unbounded
 candidate-array allocation is added. A deep, unusually unbalanced BVH can
