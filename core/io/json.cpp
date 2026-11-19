@@ -799,8 +799,9 @@ Variant JSON::_from_native(const Variant &p_variant, bool p_full_objects, int p_
 
 				Variant value;
 				if (pi.name == CoreStringName(script)) {
-					const Ref<Script> script = obj->get_script();
-					if (script.is_valid()) {
+					const ScriptInstance *instance = obj->get_script_instance();
+					const Script *script = instance != nullptr ? instance->get_script() : nullptr;
+					if (script != nullptr) {
 						const String path = script->get_path();
 						ERR_FAIL_COND_V_MSG(path.is_empty() || !path.begins_with("res://"), Variant(), "Failed to encode a path to a custom script.");
 						value = path;

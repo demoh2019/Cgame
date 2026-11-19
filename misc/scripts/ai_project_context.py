@@ -3,6 +3,7 @@
 
 import argparse
 import json
+from itertools import islice
 import os
 from pathlib import Path
 import re
@@ -30,14 +31,27 @@ def _outline(relative, content):
     kind = KINDS[Path(relative).suffix.lower()]
     item = {"path": relative, "kind": kind}
     if kind == "scene":
+        # Avoid materializing every node in a large generated scene when the
+        # context format includes at most the first 64 nodes.
         item["nodes"] = [
             {key: attrs[key] for key in ("name", "type", "parent") if key in attrs}
-            for attrs in (_attributes(match.group(1)) for match in NODE.finditer(content))
-        ][:64]
+            for attrs in (_attributes(match.group(1)) for match in islice(NODE.finditer(content), 64))
+        ]
     elif kind == "resource":
         item["resource_types"] = sorted(set(re.findall(r'^\[sub_resource\s+type="([A-Za-z0-9_]{1,64})"', content, re.MULTILINE)))[:32]
     elif kind == "script":
-        item["functions"] = list(dict.fromkeys(FUNCTION.findall(content)))[:64]
+        # Preserve first-occurrence order, but stop after 64 distinct names
+        # instead of allocating a full match list for very large scripts.
+        functions = []
+        seen_functions = set()
+        for match in FUNCTION.finditer(content):
+            name = match.group(1)
+            if name not in seen_functions:
+                seen_functions.add(name)
+                functions.append(name)
+                if len(functions) == 64:
+                    break
+        item["functions"] = functions
         for field, pattern in (
             ("class_name", r"^\s*class_name\s+([A-Za-z_]\w*)\b"),
             ("extends", r"^\s*extends\s+([A-Za-z_]\w*)\b"),
@@ -94,6 +108,9 @@ def build_context(project, max_files=128, max_file_bytes=65536, max_output_bytes
                 raise ContextError("Too many candidate files (limit: 20000)")
     candidates.sort(key=lambda pair: (pair[0].casefold(), pair[0]))
     result = {"schema": SCHEMA, "files": [], "truncated": False, "scanned_files": len(candidates), "skipped_files": 0}
+    # Account for encoded list entries incrementally. Re-encoding the whole
+    # accepted list at each step otherwise causes O(files^2) JSON work.
+    accepted_payload_bytes = 0
     for relative, path in candidates:
         if len(result["files"]) >= max_files:
             result["skipped_files"] += 1
@@ -108,11 +125,19 @@ def build_context(project, max_files=128, max_file_bytes=65536, max_output_bytes
             result["truncated"] = True
             continue
         item = _outline(relative, content)
-        result["files"].append(item)
-        if len(json.dumps(result, ensure_ascii=False, separators=(",", ":")).encode("utf-8")) > max_output_bytes:
-            result["files"].pop()
+        encoded_item_bytes = len(json.dumps(item, ensure_ascii=False, separators=(",", ":")).encode("utf-8"))
+        # Only reserialize constant-size metadata so the current skip count
+        # and truncated flag retain the exact original JSON byte accounting.
+        envelope_bytes = len(json.dumps({**result, "files": []},
+                                        ensure_ascii=False, separators=(",", ":")).encode("utf-8"))
+        separator_bytes = 1 if result["files"] else 0
+        added_bytes = separator_bytes + encoded_item_bytes
+        if envelope_bytes + accepted_payload_bytes + added_bytes > max_output_bytes:
             result["skipped_files"] += 1
             result["truncated"] = True
+            continue
+        result["files"].append(item)
+        accepted_payload_bytes += added_bytes
     return result
 
 

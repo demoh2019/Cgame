@@ -375,6 +375,96 @@ TEST_CASE("[String] Case function test") {
 	CHECK(a.to_lower() == "momonga");
 }
 
+TEST_CASE("[String] ASCII case conversion fast path") {
+	// Exhaustive ASCII coverage, including control characters and punctuation.
+	for (char32_t ch = 0; ch < 128; ch++) {
+		const char32_t expected_lower = ch >= U'A' && ch <= U'Z' ? ch + (U'a' - U'A') : ch;
+		const char32_t expected_upper = ch >= U'a' && ch <= U'z' ? ch - (U'a' - U'A') : ch;
+		CHECK(String::char_lowercase(ch) == expected_lower);
+		CHECK(String::char_uppercase(ch) == expected_upper);
+	}
+}
+
+TEST_CASE("[String] Mixed Unicode and ASCII case conversion") {
+	CHECK(String::char_lowercase(U'Ä') == U'ä');
+	CHECK(String::char_uppercase(U'ä') == U'Ä');
+	CHECK(String::char_lowercase(U'Ω') == U'ω');
+	CHECK(String::char_uppercase(U'ω') == U'Ω');
+	CHECK(String::char_lowercase(U'Я') == U'я');
+	CHECK(String::char_uppercase(U'я') == U'Я');
+	CHECK(String::char_lowercase(U'😀') == U'😀');
+	CHECK(String::char_uppercase(U'😀') == U'😀');
+	CHECK(String(U"AbC-ÄΩЯ").to_lower() == U"abc-äωя");
+	CHECK(String(U"abc-äωя").to_upper() == U"ABC-ÄΩЯ");
+	CHECK(String().to_lower().is_empty());
+	CHECK(String().to_upper().is_empty());
+}
+
+TEST_CASE("[String] ASCII case conversion matches character mapping") {
+	for (char32_t c = 1; c < 128; ++c) {
+		const String source = String::chr(c);
+		const String uppercase = source.to_upper();
+		const String lowercase = source.to_lower();
+		CHECK(uppercase.length() == 1);
+		CHECK(lowercase.length() == 1);
+		CHECK(uppercase[0] == String::char_uppercase(c));
+		CHECK(lowercase[0] == String::char_lowercase(c));
+	}
+}
+
+TEST_CASE("[String] Case conversion preserves Unicode mapping") {
+	const String source = U"\u0416\u03A3\u00C4\u212A";
+	CHECK(source.to_lower() == String(U"\u0436\u03C3\u00E4k"));
+	CHECK(source.to_upper() == source);
+	CHECK(String(U"\u0436\u03C3\u00E4k").to_upper() == String(U"\u0416\u03A3\u00C4K"));
+
+	String mixed = "hello WORLD ";
+	mixed += String(U"\u0416\u03A3");
+	CHECK(mixed.to_lower() == String(U"hello world \u0436\u03C3"));
+	CHECK(mixed.to_upper() == String(U"HELLO WORLD \u0416\u03A3"));
+}
+
+TEST_CASE("[String] Already normalized case conversion shares original allocation") {
+	String lowercase;
+	String uppercase;
+	for (int i = 0; i < 1024; ++i) {
+		lowercase += "the quick brown fox 123 ";
+		uppercase += "THE QUICK BROWN FOX 123 ";
+	}
+	lowercase += String(U"\u0436\u03C3\u00E4");
+	uppercase += String(U"\u0416\u03A3\u00C4");
+
+	const char32_t *lower_ptr = lowercase.ptr();
+	const char32_t *upper_ptr = uppercase.ptr();
+	const String same_lower = lowercase.to_lower();
+	const String same_upper = uppercase.to_upper();
+	CHECK(same_lower == lowercase);
+	CHECK(same_upper == uppercase);
+	CHECK(same_lower.ptr() == lower_ptr);
+	CHECK(same_upper.ptr() == upper_ptr);
+	CHECK(lowercase.ptr() == lower_ptr);
+	CHECK(uppercase.ptr() == upper_ptr);
+}
+
+TEST_CASE("[String] Case conversion works at start middle end and with embedded NUL") {
+	CHECK(String("abcdefgh").to_upper() == "ABCDEFGH");
+	CHECK(String("ABCDEFGH").to_lower() == "abcdefgh");
+	CHECK(String("111X111").to_lower() == "111x111");
+	CHECK(String("111x111").to_upper() == "111X111");
+	CHECK(String("111111X").to_lower() == "111111x");
+	CHECK(String("111111x").to_upper() == "111111X");
+
+	String embedded = "xQ";
+	embedded.resize_uninitialized(5);
+	embedded[2] = 0;
+	embedded[3] = 'Z';
+	embedded[4] = 0;
+	CHECK(embedded.to_lower()[1] == 'q');
+	CHECK(embedded.to_lower()[2] == 0);
+	CHECK(embedded.to_upper()[1] == 'Q');
+	CHECK(embedded.to_upper()[2] == 0);
+}
+
 TEST_CASE("[String] Case compare function test") {
 	String a = "MoMoNgA";
 
@@ -467,6 +557,55 @@ TEST_CASE("[String] Find case insensitive") {
 	MULTICHECK_STRING_INT_EQ(s, rfindn, "WHA", -1, 13);
 }
 
+TEST_CASE("[String] Find case insensitive ASCII fast path") {
+	const String s = "xxaBcDyyABCDzz";
+	CHECK(s.findn(String("abcd")) == 2);
+	CHECK(s.findn("ABcd") == 2);
+	CHECK(s.findn(String("abCd"), 3) == 8);
+	CHECK(s.findn("aBcD", 3) == 8);
+	CHECK(s.rfindn(String("ABcD")) == 8);
+	CHECK(s.rfindn("aBcD") == 8);
+	CHECK(s.rfindn(String("aBcD"), 7) == 2);
+	CHECK(s.rfindn("abCd", 7) == 2);
+	CHECK(s.findn("abCe") == -1);
+	CHECK(s.findn(String("abCe")) == -1);
+	CHECK(s.findn("ABCDz", 9) == -1);
+
+	String repeated;
+	for (int i = 0; i < 128; ++i) {
+		repeated += "aBcD";
+	}
+	CHECK(repeated.findn("ABCD") == 0);
+	CHECK(repeated.rfindn("abcd") == 127 * 4);
+	CHECK(repeated.findn("abce") == -1);
+}
+
+TEST_CASE("[String] Find case insensitive ASCII exhaustive pairs") {
+	for (char32_t a = 32; a < 127; ++a) {
+		for (char32_t b = 32; b < 127; ++b) {
+			const char32_t folded_a = (a >= 'A' && a <= 'Z') ? a + ('a' - 'A') : a;
+			const char32_t folded_b = (b >= 'A' && b <= 'Z') ? b + ('a' - 'A') : b;
+			const int expected = folded_a == folded_b ? 0 : -1;
+			const String source = String::chr(a);
+			const String needle = String::chr(b);
+			CHECK(source.findn(needle) == expected);
+			CHECK(source.rfindn(needle) == expected);
+		}
+	}
+}
+
+TEST_CASE("[String] Find case insensitive Unicode fallback") {
+	const String s = U"xx\u212A\u03A3\u00C4yy\u0416\u0423\u041A";
+	CHECK(s.findn(String(U"k\u03C3\u00E4")) == 2);
+	CHECK(s.rfindn(String(U"k\u03C3\u00E4")) == 2);
+	CHECK(s.findn(String(U"\u0436\u0443\u043A")) == 7);
+	CHECK(s.rfindn(String(U"\u0436\u0443\u043A")) == 7);
+	CHECK(s.findn("k") == 2);
+	CHECK(s.rfindn("K") == 2);
+	CHECK(s.findn(String(U"k\u03C3\u00E5")) == -1);
+	CHECK(s.findn(String(U"\u0436\u0443\u043A"), 8) == -1);
+}
+
 TEST_CASE("[String] Find MK") {
 	Vector<String> keys;
 	keys.push_back("sty");
@@ -554,6 +693,65 @@ TEST_CASE("[String] remove_chars") {
 	CHECK(s.remove_chars(String()) == "Banana");
 	CHECK(s.remove_chars("xy") == "Banana");
 	CHECK(s.remove_chars(String("xy")) == "Banana");
+}
+
+TEST_CASE("[String] remove_chars long ASCII membership mask") {
+	String input;
+	String expected;
+	for (int i = 0; i < 256; ++i) {
+		input += "A\tB\nC D\rE-F_";
+		expected += "ABCDEF";
+	}
+	const String original = input;
+	CHECK(input.remove_chars(" \t\n\r-_") == expected);
+	CHECK(input.remove_chars(String(" \t\n\r-_")) == expected);
+	CHECK(input == original);
+	CHECK(input.remove_chars("xyz~") == original);
+
+	String only_removed;
+	for (int i = 0; i < 100; ++i) {
+		only_removed += "@_~ ";
+	}
+	CHECK(only_removed.remove_chars("@_~ ") == "");
+}
+
+TEST_CASE("[String] remove_chars ASCII bit boundary and exhaustive printable input") {
+	const String remove_set = String("@_~") + String::chr(127);
+	String input;
+	String expected;
+	for (int repeat = 0; repeat < 4; ++repeat) {
+		for (char32_t c = 32; c < 128; ++c) {
+			input += String::chr(c);
+			if (c != '@' && c != '_' && c != '~' && c != 127) {
+				expected += String::chr(c);
+			}
+		}
+	}
+	CHECK(input.remove_chars(remove_set) == expected);
+
+	String repeated;
+	String kept;
+	for (int i = 0; i < 128; ++i) {
+		repeated += "@a_b~c";
+		repeated += String::chr(127);
+		kept += "abc";
+	}
+	CHECK(repeated.remove_chars(remove_set) == kept);
+}
+
+TEST_CASE("[String] remove_chars preserves Unicode with ASCII set and Unicode fallback") {
+	String input;
+	String ascii_expected;
+	String unicode_expected;
+	for (int i = 0; i < 32; ++i) {
+		input += String(U"\u0416 \u03A3\t\u212A \u00C4");
+		ascii_expected += String(U"\u0416\u03A3\u212A\u00C4");
+		unicode_expected += String(U"\u212A\u00C4");
+	}
+	CHECK(input.remove_chars(" \t\r\n") == ascii_expected);
+	CHECK(input.remove_chars(String(" \t\r\n")) == ascii_expected);
+	CHECK(input.remove_chars(String(U" \u0416\u03A3\t")) == unicode_expected);
+	CHECK(String("A B").remove_chars(" \t-_") == "AB");
 }
 
 TEST_CASE("[String] Number to string") {

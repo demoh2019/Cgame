@@ -151,12 +151,27 @@ def compare_projects(before_project: Path, after_project: Path, scene_uri: str,
         return len(json.dumps(result, ensure_ascii=False, sort_keys=True,
                               separators=(",", ":")).encode("utf-8"))
 
-    while result["changes"] and size() > max_output_bytes:
-        result["changes"].pop()
-        result["truncated"] = True
-        summary["changes_reported"] = len(result["changes"])
     if size() > max_output_bytes:
-        raise SceneDiffError("Scene diff metadata exceeds output byte limit")
+        # The serialized byte length grows monotonically with the number of
+        # displayed changes. Binary search avoids serializing the whole list
+        # once for every removed change on large AI-generated scene diffs.
+        available_changes = result["changes"]
+        result["truncated"] = True
+        low, high = 0, len(available_changes) - 1
+        best = -1
+        while low <= high:
+            mid = (low + high) // 2
+            result["changes"] = available_changes[:mid]
+            summary["changes_reported"] = mid
+            if size() <= max_output_bytes:
+                best = mid
+                low = mid + 1
+            else:
+                high = mid - 1
+        if best < 0:
+            raise SceneDiffError("Scene diff metadata exceeds output byte limit")
+        result["changes"] = available_changes[:best]
+        summary["changes_reported"] = best
     return result
 
 

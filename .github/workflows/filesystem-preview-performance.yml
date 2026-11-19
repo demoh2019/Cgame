@@ -1,0 +1,37 @@
+name: Filesystem dock preview performance regressions
+
+on:
+  push:
+    branches: [develop]
+    paths:
+      - "editor/docks/filesystem_dock.cpp"
+      - "editor/docks/filesystem_dock.h"
+      - "misc/scripts/tests/test_filesystem_preview_performance.py"
+      - ".github/workflows/filesystem-preview-performance.yml"
+  pull_request:
+    paths:
+      - "editor/docks/filesystem_dock.cpp"
+      - "editor/docks/filesystem_dock.h"
+      - "misc/scripts/tests/test_filesystem_preview_performance.py"
+      - ".github/workflows/filesystem-preview-performance.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  preview-regressions:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    strategy:
+      fail-fast: false
+      matrix:
+        compiler: [g++, clang++]
+    steps:
+      - uses: actions/checkout@v4
+      - name: Check Python regression syntax
+        run: python3 -m py_compile misc/scripts/tests/test_filesystem_preview_performance.py
+      - name: Verify thumbnail batching and compile visibility helper
+        env:
+          CXX: ${{ matrix.compiler }}
+        run: python3 -m unittest discover -s misc/scripts/tests -p 'test_filesystem_preview_performance.py' -v

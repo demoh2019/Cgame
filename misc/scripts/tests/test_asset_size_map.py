@@ -218,6 +218,46 @@ class AssetSizeMapTests(unittest.TestCase):
         with self.assertRaises(size_map.AssetSizeError):
             self.scan()
 
+    def test_top_k_matches_full_sort_on_large_deterministic_dataset(self):
+        entries = [
+            {"path": f"assets/{i:05d}.png", "extension": ".png",
+             "bytes": (i * 37 + i // 17) % 1009}
+            for i in range(6000)
+        ]
+        baseline = sorted(entries, key=lambda a: (-a["bytes"], a["path"]))
+        for k in (0, 1, 7, 100, 999, 1000):
+            with self.subTest(top=k):
+                expected = [{"path": item["path"], "bytes": item["bytes"]}
+                            for item in baseline[:k]]
+                self.assertEqual(size_map.build_report(entries, top=k)["largest_files"],
+                                 expected)
+
+    def test_deep_directory_paths_are_scanned_and_sorted(self):
+        for i in range(80):
+            self.put(f"scenes/levels/rooms/room_{i:03d}.tscn", bytes([i]) * (i % 7))
+        self.assertEqual(self.report()["file_count"], 81)
+        self.assertEqual(len(self.report(top=10)["largest_files"]), 10)
+
+    def test_empty_directory_case_collision_is_detected(self):
+        (self.root / "EmptyFolder").mkdir()
+        (self.root / "emptyfolder").mkdir(exist_ok=True)
+        if len([p for p in self.root.iterdir() if p.name.casefold() == "emptyfolder"]) < 2:
+            self.skipTest("Case-insensitive filesystem")
+        with self.assertRaises(size_map.AssetSizeError):
+            self.scan()
+
+    def test_file_and_directory_name_collision(self):
+        self.put("folder", b"x")
+        try:
+            (self.root / "FOLDER").mkdir()
+        except FileExistsError:
+            self.skipTest("Case-insensitive filesystem")
+        if not (self.root / "folder").is_file() or not (self.root / "FOLDER").is_dir():
+            self.skipTest("Case-insensitive filesystem")
+        with self.assertRaises(size_map.AssetSizeError):
+            self.scan()
+
+
 
 if __name__ == "__main__":
     unittest.main()

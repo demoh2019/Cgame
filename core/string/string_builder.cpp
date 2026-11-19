@@ -59,6 +59,12 @@ String StringBuilder::as_string() const {
 		return "";
 	}
 
+	// A single existing String can be returned by reference-counted copy,
+	// avoiding a new UTF-32 buffer and copying all of its characters.
+	if (appended_strings.size() == 1 && appended_strings[0] == -1) {
+		return strings[0];
+	}
+
 	String string;
 	string.resize_uninitialized(string_length + 1);
 	char32_t *buffer = string.ptrw();

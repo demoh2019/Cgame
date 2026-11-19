@@ -1,0 +1,30 @@
+name: SortArray move-insertion regressions
+
+on:
+  pull_request:
+    branches: [develop]
+    paths:
+      - 'core/templates/sort_array.h'
+      - 'tests/core/templates/test_sort_array.cpp'
+      - 'misc/scripts/tests/test_sort_array_move.py'
+      - '.github/workflows/sort-array-move-regression.yml'
+  push:
+    branches: [develop]
+    paths:
+      - 'core/templates/sort_array.h'
+      - 'tests/core/templates/test_sort_array.cpp'
+      - 'misc/scripts/tests/test_sort_array_move.py'
+      - '.github/workflows/sort-array-move-regression.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  portable-cxx-regressions:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - name: Compile the production SortArray header and exercise 2 compilers / 2 build modes
+        run: python3 -m unittest discover -s misc/scripts/tests -p 'test_sort_array_move.py' -v

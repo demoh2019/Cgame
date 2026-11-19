@@ -220,4 +220,65 @@ TEST_CASE("[Audio][AudioStreamWAV] Saving IMA ADPCM is not supported") {
 	ERR_PRINT_ON;
 }
 
+TEST_CASE("[Audio][AudioStreamWAV] WAV loop negative offsets are end-relative") {
+	const String path = TestUtils::get_temp_path("upstream_wav_loop_negative.wav");
+	Ref<AudioStreamWAV> original;
+	original.instantiate();
+	original->set_format(AudioStreamWAV::FORMAT_16_BITS);
+	original->set_mix_rate(44100);
+	original->set_data(gen_pcm16_test(44100, 64, false));
+	REQUIRE(original->save_to_wav(path) == OK);
+
+	struct LoopCase {
+		int64_t begin;
+		int64_t end;
+		int64_t expected_begin;
+		int64_t expected_end;
+	};
+	const LoopCase cases[] = {
+		{ -1, -1, 64, 64 },
+		{ -2, -1, 63, 64 },
+		{ -64, -3, 1, 62 },
+		{ -65, -66, 0, 0 },
+		{ 0, -1, 0, 64 },
+		{ 8, 1000, 8, 64 },
+	};
+	for (const LoopCase &test : cases) {
+		INFO("Begin: ", test.begin, ", end: ", test.end);
+		Dictionary options;
+		options["edit/loop_mode"] = 2; // Loop forward (import enum).
+		options["edit/loop_begin"] = test.begin;
+		options["edit/loop_end"] = test.end;
+		Ref<AudioStreamWAV> imported = AudioStreamWAV::load_from_file(path, options);
+		REQUIRE(imported.is_valid());
+		CHECK(imported->get_loop_mode() == AudioStreamWAV::LOOP_FORWARD);
+		CHECK(imported->get_loop_begin() == test.expected_begin);
+		CHECK(imported->get_loop_end() == test.expected_end);
+	}
+}
+
+TEST_CASE("[Audio][AudioStreamWAV] WAV explicit loop endpoints preserve last-frame boundary") {
+	const String path = TestUtils::get_temp_path("upstream_wav_loop_boundary.wav");
+	Ref<AudioStreamWAV> original;
+	original.instantiate();
+	original->set_format(AudioStreamWAV::FORMAT_8_BITS);
+	original->set_mix_rate(22050);
+	original->set_data(gen_pcm8_test(22050, 32, false));
+	REQUIRE(original->save_to_wav(path) == OK);
+
+	for (int loop_mode : { 2, 3, 4 }) {
+		INFO("Loop import mode: ", loop_mode);
+		Dictionary options;
+		options["edit/loop_mode"] = loop_mode;
+		options["edit/loop_begin"] = 2;
+		options["edit/loop_end"] = -1;
+		Ref<AudioStreamWAV> imported = AudioStreamWAV::load_from_file(path, options);
+		REQUIRE(imported.is_valid());
+		CHECK(imported->get_loop_mode() == AudioStreamWAV::LoopMode(loop_mode - 1));
+		CHECK(imported->get_loop_begin() == 2);
+		CHECK(imported->get_loop_end() == 32);
+		CHECK(imported->get_length() == doctest::Approx(32.0 / 22050.0));
+	}
+}
+
 } // namespace TestAudioStreamWAV

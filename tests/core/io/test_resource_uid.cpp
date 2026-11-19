@@ -33,6 +33,7 @@
 TEST_FORCE_LINK(test_resource_uid)
 
 #include "core/io/resource_uid.h"
+#include "core/io/stream_peer.h"
 
 namespace TestResourceUID {
 
@@ -61,6 +62,42 @@ TEST_CASE("[ResourceUID] Must encode and decode various UIDs correctly") {
 
 	CHECK_MESSAGE(rid->id_to_text(8060368642360689600) == "uid://dm3rdgs30kfci", "A normal UID must encode correctly.");
 	CHECK_MESSAGE(rid->text_to_id("uid://dm3rdgs30kfci") == 8060368642360689600, "A normal UID must decode correctly.");
+}
+
+TEST_CASE("[ResourceUID] Binary cache serialization preserves StreamPeerBuffer format") {
+	Vector<Pair<ResourceUID::ID, String>> entries;
+	entries.push_back(Pair<ResourceUID::ID, String>(0, ""));
+	entries.push_back(Pair<ResourceUID::ID, String>(1, "res://levels/scene.tscn"));
+	entries.push_back(Pair<ResourceUID::ID, String>(0x7fffffffffffffff, "res://assets/текстуры/файл.png"));
+	entries.push_back(Pair<ResourceUID::ID, String>(-1, "res://negative-id.tres"));
+
+	for (int i = 0; i < 1024; i++) {
+		entries.push_back(Pair<ResourceUID::ID, String>(i + 1234, "res://long_folder_name/asset_" + itos(i) + ".tres"));
+	}
+
+	Ref<StreamPeerBuffer> reference;
+	reference.instantiate();
+	reference->put_u32(entries.size());
+	for (const Pair<ResourceUID::ID, String> &entry : entries) {
+		reference->put_u64(uint64_t(entry.first));
+		CharString path = entry.second.utf8();
+		reference->put_u32(path.length());
+		reference->put_data((const uint8_t *)path.ptr(), path.length());
+	}
+
+	const Vector<uint8_t> encoded = ResourceUID::encode_binary_cache(entries);
+	const Vector<uint8_t> expected = reference->get_data_array();
+	REQUIRE(encoded.size() == expected.size());
+	for (int i = 0; i < encoded.size(); i++) {
+		CHECK(encoded[i] == expected[i]);
+	}
+
+	Vector<Pair<ResourceUID::ID, String>> empty;
+	const Vector<uint8_t> empty_bytes = ResourceUID::encode_binary_cache(empty);
+	CHECK(empty_bytes.size() == 4);
+	for (int i = 0; i < empty_bytes.size(); i++) {
+		CHECK(empty_bytes[i] == 0);
+	}
 }
 
 } // namespace TestResourceUID

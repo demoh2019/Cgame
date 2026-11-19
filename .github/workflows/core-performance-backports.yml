@@ -1,0 +1,51 @@
+name: Core performance backport regressions
+
+on:
+  push:
+    branches: [develop]
+    paths:
+      - "core/variant/array.cpp"
+      - "core/os/spin_lock.h"
+      - "drivers/vulkan/rendering_device_driver_vulkan.cpp"
+      - "misc/scripts/tests/test_qualcomm_ubershader_perf.py"
+      - "tests/core/variant/test_array.cpp"
+      - "misc/scripts/tests/test_core_performance_backports.py"
+      - ".github/workflows/core-performance-backports.yml"
+  pull_request:
+    paths:
+      - "core/variant/array.cpp"
+      - "core/os/spin_lock.h"
+      - "drivers/vulkan/rendering_device_driver_vulkan.cpp"
+      - "misc/scripts/tests/test_qualcomm_ubershader_perf.py"
+      - "tests/core/variant/test_array.cpp"
+      - "misc/scripts/tests/test_core_performance_backports.py"
+      - ".github/workflows/core-performance-backports.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: core-performance-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  regression-tests:
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    strategy:
+      fail-fast: false
+      matrix:
+        compiler: [g++, clang++]
+    steps:
+      - uses: actions/checkout@v4
+      - name: Check Python test syntax
+        run: python3 -m py_compile misc/scripts/tests/test_core_performance_backports.py misc/scripts/tests/test_qualcomm_ubershader_perf.py
+      - name: Validate actual Array and SpinLock C++ methods
+        env:
+          CXX: ${{ matrix.compiler }}
+        run: python3 -m unittest discover -s misc/scripts/tests -p 'test_core_performance_backports.py' -v
+      - name: Check Adreno ubershader workaround vendor gating
+        env:
+          CXX: ${{ matrix.compiler }}
+        run: python3 -m unittest discover -s misc/scripts/tests -p 'test_qualcomm_ubershader_perf.py' -v

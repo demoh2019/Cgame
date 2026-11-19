@@ -6,6 +6,7 @@ Scope: quoted res:// literals in Godot text resources, not runtime dependencies.
 
 import argparse
 import json
+import re
 from pathlib import Path
 import sys
 
@@ -14,6 +15,16 @@ from asset_size_map import AssetSizeError, scan_project
 TEXT_EXTENSIONS = frozenset({".tscn", ".tres", ".gd", ".cs", ".gdshader", ".gdshaderinc", ".shader", ".gdextension"})
 MAX_TEXT_BYTES = 8 * 1024 * 1024
 MAX_ROOTS = 100
+# Search for meaningful lexer tokens in C instead of walking every ordinary
+# source character in Python. Patterns preserve the scanner's comment rules.
+_HASH_TOKENS = re.compile(r"""[#'"]""")
+_CPP_TOKENS = re.compile(r"""[/'"]""")
+_QUOTE_TOKENS = re.compile(r"""['"]""")
+_RESERVED_STEMS = frozenset(
+    {"CON", "PRN", "AUX", "NUL"}
+    | {"COM" + str(i) for i in range(1, 10)}
+    | {"LPT" + str(i) for i in range(1, 10)}
+)
 
 
 class ReferenceMapError(ValueError):
@@ -31,6 +42,7 @@ def _references(text, suffix):
     block_comment = False
     hash_comments = suffix in {".gd", ".tscn", ".tres"}
     cpp_comments = suffix in {".cs", ".gdshader", ".gdshaderinc", ".shader"}
+    tokens = _HASH_TOKENS if hash_comments else (_CPP_TOKENS if cpp_comments else _QUOTE_TOKENS)
     while index < length:
         if block_comment:
             closing = text.find("*/", index)
@@ -39,6 +51,10 @@ def _references(text, suffix):
             block_comment = False
             index = closing + 2
             continue
+        token = tokens.search(text, index)
+        if token is None:
+            break
+        index = token.start()
         char = text[index]
         if hash_comments and char == "#":
             ending = text.find("\n", index)
@@ -89,9 +105,7 @@ def _portable_path(path):
     for component in path.split('/'):
         stem = component.split('.', 1)[0].upper()
         if (component in ('', '.', '..') or component.endswith((' ', '.'))
-                or stem in {"CON", "PRN", "AUX", "NUL"}
-                or stem in {"COM" + str(i) for i in range(1, 10)}
-                or stem in {"LPT" + str(i) for i in range(1, 10)}
+                or stem in _RESERVED_STEMS
                 or any(ord(c) < 32 or c in '<>"|?*' for c in component)):
             raise ReferenceMapError("Non-portable resource path component")
     return path

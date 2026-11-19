@@ -94,4 +94,56 @@ TEST_CASE("[LRU] Resize and clear") {
 	CHECK(!lru.has(4));
 }
 
+
+static int replacement_eviction_count = 0;
+static int replacement_evicted_value = 0;
+
+static void on_replacement_eviction(int &p_key, int &p_value) {
+	++replacement_eviction_count;
+	replacement_evicted_value = p_value;
+	p_value = -42;
+}
+
+TEST_CASE("[LRU] Repeated insert reuses the existing node and remains most recent") {
+	LRUCache<int, int> lru(2);
+	const auto *first = lru.insert(1, 10);
+	lru.insert(2, 20);
+	const auto *replacement = lru.insert(1, 11);
+	CHECK(first == replacement);
+	CHECK(lru.get_size() == 2);
+	CHECK(lru.get(1) == 11);
+	lru.insert(3, 30);
+	CHECK(lru.has(1));
+	CHECK(!lru.has(2));
+	CHECK(lru.has(3));
+
+	for (int i = 0; i < 100; i++) {
+		CHECK(lru.insert(1, i)->data == i);
+	}
+	CHECK(lru.get_size() == 2);
+}
+
+TEST_CASE("[LRU] Replacement hook observes the old value once") {
+	replacement_eviction_count = 0;
+	replacement_evicted_value = 0;
+	LRUCache<int, int, HashMapHasherDefault, HashMapComparatorDefault<int>, on_replacement_eviction> lru(2);
+	lru.insert(1, 30);
+	const auto *replacement = lru.insert(1, 50);
+	CHECK(replacement_eviction_count == 1);
+	CHECK(replacement_evicted_value == 30);
+	CHECK(replacement->data == 50);
+	CHECK(lru.get_size() == 1);
+}
+
+TEST_CASE("[LRU] Aliased replacement survives an eviction hook") {
+	replacement_eviction_count = 0;
+	LRUCache<int, int, HashMapHasherDefault, HashMapComparatorDefault<int>, on_replacement_eviction> lru(2);
+	lru.insert(7, 77);
+	const int &value = lru.get(7);
+	const auto *replacement = lru.insert(7, value);
+	CHECK(replacement->data == 77);
+	CHECK(replacement_eviction_count == 1);
+	CHECK(replacement_evicted_value == 77);
+}
+
 } // namespace TestLRU
