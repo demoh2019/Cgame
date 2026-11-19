@@ -735,11 +735,8 @@ TEST_CASE("[FileAccess][Performance] Small UTF-8 loads avoid a transient heap bu
 		}
 		REQUIRE(file->open_custom(source.ptr(), source.size()) == OK);
 
-		String expected;
-		expected.resize(size);
-		for (int i = 0; i < size; i++) {
-			expected[i] = char32_t('a' + (i % 26));
-		}
+		const String expected = String::utf8(reinterpret_cast<const char *>(source.ptr()), size);
+		CHECK(expected.length() == size);
 		CHECK(file->get_as_utf8_string() == expected);
 		CHECK(file->get_position() == uint64_t(size));
 
