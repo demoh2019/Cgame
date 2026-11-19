@@ -52,6 +52,8 @@ static func validate_plan(raw: Variant) -> Dictionary:
 		var bytes := file_content.to_utf8_buffer().size()
 		if bytes > MAX_FILE_BYTES or file_content.contains("\u0000"):
 			return _error("File too large or contains NUL: " + path)
+		if path.get_extension().to_lower() == "gd" and file_content.contains("@tool"):
+			return _error("Generated editor-executed @tool scripts are not supported: " + path)
 		total_bytes += bytes
 		if total_bytes > MAX_TOTAL_BYTES:
 			return _error("Plan exceeds the 1 MiB size limit.")
