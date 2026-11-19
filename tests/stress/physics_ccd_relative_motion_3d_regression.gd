@@ -27,12 +27,16 @@ func _make_body(space: RID, shape: RID, x: float, velocity: float, ccd: bool, st
 
 
 func _run_case(label: String, target_x: float, velocity_a: float, velocity_b: float,
-		min_speed: float, max_speed: float, static_target: bool = false, target_ccd: bool = false, target_y: float = 0.0, capsule_target: bool = false) -> int:
+		min_speed: float, max_speed: float, static_target: bool = false, target_ccd: bool = false, target_y: float = 0.0, capsule_target: bool = false, source_y: float = 0.0, capsule_source: bool = false) -> int:
 	var space: RID = PhysicsServer3D.space_create()
 	var sphere: RID = PhysicsServer3D.sphere_shape_create()
 	PhysicsServer3D.shape_set_data(sphere, 0.5)
 
-	var a: RID = _make_body(space, sphere, 0.0, velocity_a, true)
+	var source_shape: RID = sphere
+	if capsule_source:
+		source_shape = PhysicsServer3D.capsule_shape_create()
+		PhysicsServer3D.shape_set_data(source_shape, {"radius": 0.5, "height": 4.0})
+	var a: RID = _make_body(space, source_shape, 0.0, velocity_a, true, false, source_y)
 	var target_shape: RID = sphere
 	if capsule_target:
 		target_shape = PhysicsServer3D.capsule_shape_create()
@@ -64,6 +68,8 @@ func _run_case(label: String, target_x: float, velocity_a: float, velocity_b: fl
 	PhysicsServer3D.free_rid(sphere)
 	if capsule_target:
 		PhysicsServer3D.free_rid(target_shape)
+	if capsule_source:
+		PhysicsServer3D.free_rid(source_shape)
 	PhysicsServer3D.free_rid(space)
 	return 0 if passed else 1
 
@@ -89,6 +95,9 @@ func _run() -> void:
 	# A point ray at y=0 misses the capsule's lower cap (center y=0.7,
 	# radius 0.5), but the swept radius-0.5 sphere intersects it.
 	failures += await _run_case("glancing capsule CCD", 4.0, 480.0, 0.0, 0.0, 470.0, true, false, 2.2, true)
+	# Reversed order: A is a capsule centered at y=2.2 and sweeps
+	# into the static circle/sphere B at x=4, y=0.
+	failures += await _run_case("moving capsule CCD", 4.0, 480.0, 0.0, 0.0, 470.0, true, false, 0.0, false, 2.2, true)
 
 	if failures:
 		printerr("3D relative-motion CCD regression failed: %d" % failures)
