@@ -129,6 +129,19 @@ func run(t) -> void:
 	t.eq(impossible["reason"], "no_space", "ranked NPC cannot partially sell into a full backpack")
 	t.eq(roomless.to_dict(), full_before, "failed ranked purchase preserves all silver")
 
+	t.current = "criminal notoriety never bypasses reputation price rules"
+	var criminal_bag := Inventory.new(3)
+	criminal_bag.add("silver", 100)
+	var crime_buy: Dictionary = Vendor.transact(criminal_bag,
+		"water_bottle", 1, true, 51, 50.0)
+	t.check(bool(crime_buy.get("ok", false)), "outlaw may still buy necessary supplies")
+	t.eq(int(crime_buy["silver_delta"]), -14,
+		"server first discounts earned renown, then applies criminal 25% markup")
+	t.eq(criminal_bag.count("silver"), 86, "crime-adjusted price is actually debited")
+	t.eq(int(crime_buy["unit_price"]), 14, "UI and server may display exact unit price")
+	t.eq(int(Vendor.transact(criminal_bag, "invalid_item", 1, true,
+		51, 50.0).get("silver_delta", 0)), 0, "unlisted items never mint payout")
+
 	t.current = "completed real camp contracts grant once-only renown"
 	t.eq(server.cmd_contract(player.id, "claim")["reason"], "no_active",
 		"claim without an accepted objective is rejected")
