@@ -38,6 +38,7 @@
 #include "servers/physics_manifold_reduction_2d.h"
 #include "servers/physics_ccd_sphere_toi.h"
 #include "servers/physics_ccd_rotating_capsule_toi.h"
+#include "servers/physics_ccd_nonlinear_capsule_toi.h"
 #include "servers/physics_ccd_rotating_capsule_segment_toi.h"
 #include "servers/physics_speculative_sphere_contact.h"
 #include "servers/physics_speculative_capsule_contact.h"
@@ -243,6 +244,45 @@ bool GodotBodyPair2D::_test_ccd(real_t p_step, GodotBody2D *p_A, int p_shape_A, 
 		return false;
 	}
 	const Vector2 motion_A = p_A->get_linear_velocity() * p_step;
+	// The existing pure-rotation path does not cover simultaneous travel
+	// and spin. A support ray follows a straight line and can tunnel
+	// through a sphere struck by the capsule's turning end cap. Use a
+	// conservative nonlinear volume sweep before linear CCD early-outs.
+	if (motion_A.length_squared() > 0.0 &&
+			space->is_ccd_rotational_bounds_enabled() &&
+			p_A->get_angular_velocity() != 0.0 &&
+			p_B->get_mode() == PS2DE::BODY_MODE_STATIC &&
+			p_A->get_shape(p_shape_A)->get_type() == PS2DE::SHAPE_CAPSULE &&
+			p_B->get_shape(p_shape_B)->get_type() == PS2DE::SHAPE_CIRCLE &&
+			!p_B->is_shape_set_as_one_way_collision(p_shape_B)) {
+		const double scale_A = physics_ccd_uniform_sphere_scale(p_xform_A);
+		const double scale_B = physics_ccd_uniform_sphere_scale(p_xform_B);
+		if (scale_A > 0.0 && scale_B > 0.0) {
+			const GodotCapsuleShape2D *capsule = static_cast<GodotCapsuleShape2D *>(p_A->get_shape(p_shape_A));
+			const GodotCircleShape2D *sphere = static_cast<GodotCircleShape2D *>(p_B->get_shape(p_shape_B));
+			const double half_segment = double(capsule->get_height()) * 0.5 - double(capsule->get_radius());
+			const double radius = double(capsule->get_radius()) * scale_A + double(sphere->get_radius()) * scale_B;
+			double impact_fraction = 0.0;
+			const PhysicsCCDRotatingCapsuleTOIResult result = physics_ccd_nonlinear_capsule_toi(
+					p_xform_A.get_origin(), p_xform_A.columns[1],
+					p_A->get_transform().get_origin() + p_A->get_center_of_mass(), p_xform_B.get_origin(),
+					motion_A, p_A->get_angular_velocity(), p_step,
+					half_segment * scale_A, radius, impact_fraction);
+			if (result == PhysicsCCDRotatingCapsuleTOIResult::MISS) {
+				return false;
+			}
+			if (result == PhysicsCCDRotatingCapsuleTOIResult::HIT) {
+				// This is a velocity clamp, not a contact impulse. Scaling
+				// both velocities preserves the nonlinear trajectory up to TOI,
+				// allowing the discrete solver to resolve the actual contact.
+				const real_t fraction = CLAMP(real_t(impact_fraction) + real_t(0.005), real_t(0.0), real_t(1.0));
+				p_A->set_linear_velocity(p_A->get_linear_velocity() * fraction);
+				p_A->set_angular_velocity(p_A->get_angular_velocity() * fraction);
+				return true;
+			}
+			// Nonconvergence or initial contact: retain the legacy CCD.
+		}
+	}
 	if (motion_A.length_squared() == 0.0) {
 		// Rapier-style nonlinear CCD for pure rotation of a dynamic capsule
 		// against a stationary circle. A leading support ray sees no linear
