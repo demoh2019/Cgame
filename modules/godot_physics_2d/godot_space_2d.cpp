@@ -234,38 +234,40 @@ bool GodotPhysicsDirectSpaceState2D::cast_motion(const PS2DT::ShapeParameters &p
 	ERR_FAIL_NULL_V(shape, false);
 
 	Rect2 aabb = p_parameters.transform.xform(shape->get_aabb());
-	aabb = aabb.merge(Rect2(aabb.position + p_parameters.motion, aabb.size)); //motion
+	aabb = aabb.merge(Rect2(aabb.position + p_parameters.motion, aabb.size));
 	aabb = aabb.grow(p_parameters.margin);
 
-	int amount = space->broadphase->cull_aabb(aabb, space->intersection_query_results, GodotSpace2D::INTERSECTION_QUERY_MAX, space->intersection_query_subindex_results);
-
-	real_t best_safe = 1;
-	real_t best_unsafe = 1;
-
-	for (int i = 0; i < amount; i++) {
-		if (!_can_collide_with(space->intersection_query_results[i], p_parameters.collision_mask, p_parameters.collide_with_bodies, p_parameters.collide_with_areas)) {
-			continue;
+	// Stream every overlapping broadphase proxy and reject nonmatching
+	// layers/exclusions before the expensive swept-shape solver. A bounded
+	// 2048-candidate buffer could previously miss the first valid obstacle.
+	struct CastQuery {
+		const PS2DT::ShapeParameters &params;
+		GodotShape2D *shape;
+		Vector2 motion_normal;
+		real_t best_safe = 1.0;
+		real_t best_unsafe = 1.0;
+	};
+	CastQuery data = { p_parameters, shape, p_parameters.motion.normalized() };
+	auto visitor = [](GodotCollisionObject2D *p_object, int p_shape, void *p_userdata) -> bool {
+		CastQuery &data = *static_cast<CastQuery *>(p_userdata);
+		if (!_can_collide_with(p_object, data.params.collision_mask, data.params.collide_with_bodies, data.params.collide_with_areas) ||
+				data.params.exclude.has(p_object->get_self())) {
+			return true;
 		}
 
-		if (p_parameters.exclude.has(space->intersection_query_results[i]->get_self())) {
-			continue; //ignore excluded
-		}
-
-		const GodotCollisionObject2D *col_obj = space->intersection_query_results[i];
-		int shape_idx = space->intersection_query_subindex_results[i];
-
+		const GodotCollisionObject2D *col_obj = p_object;
+		const int shape_idx = p_shape;
 		Transform2D col_obj_xform = col_obj->get_transform() * col_obj->get_shape_transform(shape_idx);
 		//test initial overlap, does it collide if going all the way?
-		if (!GodotCollisionSolver2D::solve(shape, p_parameters.transform, p_parameters.motion, col_obj->get_shape(shape_idx), col_obj_xform, Vector2(), nullptr, nullptr, nullptr, p_parameters.margin)) {
-			continue;
+		if (!GodotCollisionSolver2D::solve(data.shape, data.params.transform, data.params.motion, col_obj->get_shape(shape_idx), col_obj_xform, Vector2(), nullptr, nullptr, nullptr, data.params.margin)) {
+			return true;
 		}
 
 		//test initial overlap, ignore objects it's inside of.
-		if (GodotCollisionSolver2D::solve(shape, p_parameters.transform, Vector2(), col_obj->get_shape(shape_idx), col_obj_xform, Vector2(), nullptr, nullptr, nullptr, p_parameters.margin)) {
-			continue;
+		if (GodotCollisionSolver2D::solve(data.shape, data.params.transform, Vector2(), col_obj->get_shape(shape_idx), col_obj_xform, Vector2(), nullptr, nullptr, nullptr, data.params.margin)) {
+			return true;
 		}
 
-		Vector2 mnormal = p_parameters.motion.normalized();
 
 		//just do kinematic solving
 		real_t low = 0.0;
@@ -274,8 +276,8 @@ bool GodotPhysicsDirectSpaceState2D::cast_motion(const PS2DT::ShapeParameters &p
 		for (int j = 0; j < 8; j++) { //steps should be customizable..
 			real_t fraction = low + (hi - low) * fraction_coeff;
 
-			Vector2 sep = mnormal; //important optimization for this to work fast enough
-			bool collided = GodotCollisionSolver2D::solve(shape, p_parameters.transform, p_parameters.motion * fraction, col_obj->get_shape(shape_idx), col_obj_xform, Vector2(), nullptr, nullptr, &sep, p_parameters.margin);
+			Vector2 sep = data.motion_normal; //important optimization for this to work fast enough
+			bool collided = GodotCollisionSolver2D::solve(data.shape, data.params.transform, data.params.motion * fraction, col_obj->get_shape(shape_idx), col_obj_xform, Vector2(), nullptr, nullptr, &sep, data.params.margin);
 
 			if (collided) {
 				hi = fraction;
@@ -300,15 +302,18 @@ bool GodotPhysicsDirectSpaceState2D::cast_motion(const PS2DT::ShapeParameters &p
 			}
 		}
 
-		if (low < best_safe) {
-			best_safe = low;
-			best_unsafe = hi;
+		if (low < data.best_safe) {
+			data.best_safe = low;
+			data.best_unsafe = hi;
 		}
-	}
+		return true;
+	};
 
-	p_closest_safe = best_safe;
-	p_closest_unsafe = best_unsafe;
-
+	// All valid candidates must participate in the minimum time-of-impact
+	// calculation; only the BVH traversal is changed, not solver iterations.
+	space->broadphase->visit_aabb(aabb, visitor, &data);
+	p_closest_safe = data.best_safe;
+	p_closest_unsafe = data.best_unsafe;
 	return true;
 }
 
