@@ -546,9 +546,11 @@ bool GodotBodyPair3D::setup(real_t p_step) {
 			Vector3 point_A, point_B, normal;
 			const real_t radius_A = real_t(double(static_cast<GodotSphereShape3D *>(shape_A_ptr)->get_radius()) * scale_A);
 			const real_t radius_B = real_t(double(static_cast<GodotSphereShape3D *>(shape_B_ptr)->get_radius()) * scale_B);
+			// Ignore static-body surface velocities when predicting geometry motion.
+			const Vector3 velocity_A = A->get_mode() == PS3DE::BODY_MODE_STATIC ? Vector3() : A->get_linear_velocity();
 			const Vector3 velocity_B = B->get_mode() == PS3DE::BODY_MODE_STATIC ? Vector3() : B->get_linear_velocity();
 			if (physics_speculative_sphere_contact(xform_A.origin, radius_A, xform_B.origin, radius_B,
-					A->get_linear_velocity(), velocity_B, p_step, space->get_speculative_sphere_distance(), point_A, point_B, normal)) {
+					velocity_A, velocity_B, p_step, space->get_speculative_sphere_distance(), point_A, point_B, normal)) {
 				Contact speculative;
 				speculative.local_A = A->get_inv_transform().basis.xform(point_A);
 				speculative.local_B = B->get_inv_transform().basis.xform(point_B - offset_B);
