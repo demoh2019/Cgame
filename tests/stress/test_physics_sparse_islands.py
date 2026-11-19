@@ -37,7 +37,9 @@ class SparsePhysicsIslandTests(unittest.TestCase):
                 self.assertIn("else if (solve_island_count < MIN_PARALLEL_SOLVE_ISLANDS)", source)
                 self.assertIn("_solve_island(island_index, nullptr);", source)
                 if dimension == "3d":
-                    self.assertIn("_solve_island(0, nullptr);", source)
+                    # Dominant-island fallback is now indexed through the
+                    # solver job map because other islands may be present.
+                    self.assertIn("_solve_island(large_island_job_index, nullptr);", source)
                 # Larger workloads still reach the parallel thread pool.
                 self.assertIn("add_template_group_task", source)
                 self.assertIn("wait_for_group_task_completion(group_task)", source)
