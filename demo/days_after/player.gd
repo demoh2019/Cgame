@@ -107,13 +107,14 @@ func add_item(item_id: String, quantity: int) -> void:
     inventory[item_id] = get_item_count(item_id) + quantity
 
 
-func collect_item(item_type: String, quantity: int) -> void:
+func collect_item(item_type: String, quantity: int) -> bool:
     if health <= 0.0 or quantity <= 0:
-        return
+        return false
     if item_type != "food" and item_type != "water":
-        return
+        return false
     add_item(item_type, quantity)
     last_message = "Найдены припасы: %s × %d" % [item_type, quantity]
+    return true
 
 
 func consume_food() -> void:
