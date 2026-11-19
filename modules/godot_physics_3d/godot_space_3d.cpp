@@ -1294,6 +1294,10 @@ GodotSpace3D::GodotSpace3D() {
 			MAX(real_t(0.0), configured_strain_compliance) : real_t(0.0);
 	const real_t configured_xpbd_compliance = GLOBAL_GET("physics/3d/solver/soft_body_xpbd_compliance");
 	soft_body_xpbd_compliance = Math::is_finite(configured_xpbd_compliance) ? MAX(real_t(0.0), configured_xpbd_compliance) : real_t(0.0);
+	const real_t configured_fiber_ratio = GLOBAL_GET("physics/3d/solver/soft_body_fiber_compliance_ratio");
+	soft_body_fiber_compliance_ratio = Math::is_finite(configured_fiber_ratio) ? CLAMP(configured_fiber_ratio, real_t(0.0), real_t(100.0)) : real_t(1.0);
+	const Vector3 configured_fiber_axis = GLOBAL_GET("physics/3d/solver/soft_body_fiber_axis");
+	soft_body_fiber_axis = configured_fiber_axis.is_finite() && configured_fiber_axis.length_squared() > CMP_EPSILON * CMP_EPSILON ? configured_fiber_axis.normalized() : Vector3(1, 0, 0);
 	const real_t configured_tension_hardening = GLOBAL_GET("physics/3d/solver/soft_body_xpbd_tension_hardening");
 	soft_body_xpbd_tension_hardening = Math::is_finite(configured_tension_hardening) ? MAX(real_t(0.0), configured_tension_hardening) : real_t(0.0);
 	const real_t configured_tension_yield = GLOBAL_GET("physics/3d/solver/soft_body_xpbd_tension_yield_strain");
