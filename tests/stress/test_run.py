@@ -1,0 +1,153 @@
+"""Standard-library unit tests for the stress orchestration layer."""
+import json
+from pathlib import Path
+import sys
+import tempfile
+import unittest
+
+import run as stress
+
+
+def result_payload(case="containers", scale=1, frames=12, seed=12345, detail=None):
+    return {
+        "case": case, "scale": scale, "frames": frames, "seed": seed,
+        "duration_ms": 13.2, "detail": {} if detail is None else detail,
+    }
+
+
+class CaseSelectionTests(unittest.TestCase):
+    def test_headless_all_skips_render_but_includes_physics(self):
+        selected = stress.choose_cases([], "headless")
+        self.assertIn("physics_2d", selected)
+        self.assertIn("physics_3d", selected)
+        self.assertNotIn("render_2d", selected)
+
+    def test_display_all_includes_render(self):
+        self.assertEqual(stress.choose_cases(["all"], "display"), list(stress.CASES))
+
+    def test_duplicates_and_comma_syntax(self):
+        self.assertEqual(stress.choose_cases(["math,stream", "math"], "headless"), ["math", "stream"])
+
+    def test_unavailable_render_is_error(self):
+        with self.assertRaisesRegex(ValueError, "requires --render-mode display"):
+            stress.choose_cases(["render_3d"], "headless")
+
+    def test_unknown_case_is_error(self):
+        with self.assertRaisesRegex(ValueError, "Unknown"):
+            stress.choose_cases(["missing"], "display")
+
+    def test_command_passes_user_arguments_after_delimiter(self):
+        cmd = stress.build_command("godot", Path("/tmp/project"), "math", 3, 4, 5, "headless", [])
+        self.assertIn("--headless", cmd)
+        self.assertEqual(cmd[cmd.index("--") + 1:], [
+            "--case=math", "--scale=3", "--frames=4", "--seed=5"])
+        self.assertNotIn("--headless", stress.build_command(
+            "godot", Path("/tmp/project"), "render_2d", 1, 1, 1, "display", []))
+
+
+class ResultsTests(unittest.TestCase):
+    def test_valid_marker(self):
+        payload = result_payload()
+        text = "Godot Engine\n" + stress.PREFIX + json.dumps(payload) + "\n"
+        self.assertEqual(stress.parse_result(text, "containers", 1, 12, 12345), payload)
+
+    def test_reject_missing_or_duplicate_marker(self):
+        with self.assertRaisesRegex(ValueError, "exactly one"):
+            stress.parse_result("not a marker", "containers", 1, 12, 12345)
+        marker = stress.PREFIX + json.dumps(result_payload())
+        with self.assertRaisesRegex(ValueError, "exactly one"):
+            stress.parse_result(marker + "\n" + marker, "containers", 1, 12, 12345)
+
+    def test_reject_wrong_seed_and_engine_error(self):
+        marker = stress.PREFIX + json.dumps(result_payload())
+        with self.assertRaisesRegex(ValueError, "seed"):
+            stress.parse_result(marker, "containers", 1, 12, 99)
+        error = stress.PREFIX + json.dumps(result_payload(detail={"error": "corrupt"}))
+        with self.assertRaisesRegex(ValueError, "failed"):
+            stress.parse_result(error, "containers", 1, 12, 12345)
+
+    def test_reject_bad_duration(self):
+        payload = result_payload()
+        payload["duration_ms"] = -1.0
+        with self.assertRaisesRegex(ValueError, "Negative"):
+            stress.parse_result(stress.PREFIX + json.dumps(payload), "containers", 1, 12, 12345)
+
+    def test_p95_and_failed_runs(self):
+        rows = [{"status": "passed", "wall_seconds": v, "peak_rss_mib": 10.0} for v in (1., 2., 3., 4., 5.)]
+        stats = stress.summarize(rows)
+        self.assertEqual(stats["median_wall_seconds"], 3.)
+        self.assertEqual(stats["p95_wall_seconds"], 5.)
+        rows.append({"status": "failed", "wall_seconds": 0.5, "peak_rss_mib": 15.})
+        stats = stress.summarize(rows)
+        self.assertEqual(stats["status"], "failed")
+        self.assertEqual(stats["max_rss_mib"], 15.)
+
+    def test_empty_measurements(self):
+        self.assertIsNone(stress.summarize([{"status": "failed", "peak_rss_mib": None}])["median_wall_seconds"])
+
+
+class BaselineTests(unittest.TestCase):
+    def make_report(self, time_value=1.0, rss=100.0):
+        return {
+            "configuration": {"preset": "smoke", "scale": 1, "frames": 12, "render_mode": "headless"},
+            "cases": {"math": {
+                "status": "passed", "median_wall_seconds": time_value, "max_rss_mib": rss,
+                "runs": [],
+            }},
+        }
+
+    def test_regression_flags_wall_and_memory(self):
+        old = self.make_report()
+        new = self.make_report(1.5, 140.0)
+        failures = stress.compare_baseline(new, old, 20., None)
+        self.assertEqual(len(failures), 2)
+
+    def test_small_variance_passes(self):
+        self.assertEqual(stress.compare_baseline(
+            self.make_report(1.10, 110.), self.make_report(), 20., None), [])
+
+    def test_configuration_must_match(self):
+        old = self.make_report()
+        new = self.make_report()
+        new["configuration"]["scale"] = 5
+        with self.assertRaisesRegex(ValueError, "mismatch"):
+            stress.compare_baseline(new, old, 20., None)
+
+    def test_memory_churn_threshold(self):
+        current = self.make_report()
+        current["cases"]["memory_churn"] = {"status": "passed", "runs": [
+            {"status": "passed", "engine": {"detail": {"retained_growth_bytes": 4 * 1048576}}},
+        ]}
+        failures = stress.compare_baseline(current, self.make_report(), 20., 2.)
+        self.assertEqual(len(failures), 1)
+
+
+class ProcessIsolationTests(unittest.TestCase):
+    def test_valid_child_output(self):
+        payload = json.dumps(result_payload())
+        script = "print(" + repr(stress.PREFIX + payload) + ")"
+        actual = stress.run_once([sys.executable, "-c", script], 5., 1024.,
+                                 "containers", 1, 12, 12345)
+        self.assertEqual(actual["status"], "passed", actual)
+        self.assertEqual(actual["engine"]["duration_ms"], 13.2)
+
+    def test_child_crash(self):
+        actual = stress.run_once([sys.executable, "-c", "import sys;sys.exit(7)"],
+                                 5., 1024., "containers", 1, 12, 12345)
+        self.assertEqual(actual["status"], "failed")
+        self.assertEqual(actual["failure"], "engine_exit_7")
+
+    def test_timeout_watchdog(self):
+        actual = stress.run_once([sys.executable, "-c", "import time;time.sleep(2)"],
+                                 0.15, 1024., "containers", 1, 12, 12345)
+        self.assertEqual(actual["failure"], "timeout")
+
+    def test_missing_binary_is_reported(self):
+        actual = stress.run_once(["/definitely/missing/stress-engine"], 1., 1024.,
+                                 "containers", 1, 12, 12345)
+        self.assertEqual(actual["status"], "failed")
+        self.assertIn("launch", actual["failure"])
+
+
+if __name__ == "__main__":
+    unittest.main()
