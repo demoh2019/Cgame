@@ -52,7 +52,8 @@ TEST_CASE("[DeltaEncoding] Chained patches reuse buffers and preserve contents")
 	const int sizes[] = { 65536, 65536, 65536, 131072, 98304, 32768, 65536 };
 	for (int patch_idx = 0; patch_idx < 7; patch_idx++) {
 		Vector<uint8_t> target;
-		CHECK(target.resize(sizes[patch_idx]) == OK);
+		// The payload can grow across patches: initialize newly added bytes.
+		CHECK(target.resize_initialized(sizes[patch_idx]) == OK);
 		const int common = MIN(current.size(), target.size());
 		if (common > 0) {
 			memcpy(target.ptrw(), current.ptr(), common);
