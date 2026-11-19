@@ -4,6 +4,7 @@ extends Node3D
 ## call GameServer. Multiplayer transport will be wired to this presentation separately.
 
 const Defs = preload("res://scripts/shared/defs.gd")
+const QuickCooking = preload("res://scripts/shared/quick_cooking.gd")
 const FishingDisplay = preload("res://scripts/shared/fishing_display.gd")
 const WorldGen = preload("res://scripts/shared/world_gen.gd")
 const WorldCycle = preload("res://scripts/shared/world_cycle.gd")
@@ -81,6 +82,7 @@ func _setup_actions() -> void:
 	_bind_key("survive_skill", KEY_G)
 	_bind_key("survive_dodge", KEY_SPACE)
 	_bind_key("survive_craft", KEY_C)
+	_bind_key("survive_quick_cook", KEY_0)
 	_bind_key("survive_next_recipe", KEY_TAB)
 	_bind_key("survive_food", KEY_1)
 	_bind_key("survive_water", KEY_2)
@@ -657,6 +659,13 @@ func _unhandled_input(event: InputEvent) -> void:
 	elif event.is_action_pressed("survive_craft"):
 		if not _recipes.is_empty():
 			_result("Craft", sim.cmd_craft(LOCAL_PLAYER_ID, _recipes[_recipe_index]))
+	elif event.is_action_pressed("survive_quick_cook"):
+		var cook_recipe: String = QuickCooking.best_recipe(
+			survivor.inventory, survivor.progression.crafting_level())
+		if cook_recipe.is_empty():
+			_feedback = "Cooking: need fish, matching wood and crafting mastery."
+		else:
+			_result("Quick cook", sim.cmd_craft(LOCAL_PLAYER_ID, cook_recipe))
 	elif event.is_action_pressed("survive_food"):
 		_result("Eat", sim.cmd_use(LOCAL_PLAYER_ID, "canned_food"))
 	elif event.is_action_pressed("survive_water"):
@@ -774,7 +783,7 @@ func _update_hud() -> void:
 	var station_status: String = "WORKBENCH" if near_bench else "workbench at x=9, z=0"
 	if recipe.get("station", "") == "campfire":
 		station_status = "FIRE READY" if nearby_fire else ("WORKBENCH" if near_bench else "need lit fire or workbench")
-	_instructions.text = "WASD move | Shift sprint | E gather | Q loot | F attack | G heavy strike | Space dodge | U build | O campfire | 9 refuel | 0 extinguish | H repair | Y upgrade | X dismantle\nTab / Shift+Tab recipes | C craft | B stash | 1 food 2 water 3 heal 4 weapon 5 armor 6 antiseptic 7 antibiotics 8 heat pack R lake (filter prevents infection)\nN buy water / V sell materials / Shift+V sell fish | T fish near shore | P accept / Shift+P turn in (hub)\nCRAFT %s -> %s x%d | %s | inputs %s\n%s" % [
+	_instructions.text = "WASD move | Shift sprint | E gather | Q loot | F attack | G heavy strike | Space dodge | U build | O campfire | 9 refuel | 0 cook fish | 0 extinguish | H repair | Y upgrade | X dismantle\nTab / Shift+Tab recipes | C craft | B stash | 1 food 2 water 3 heal 4 weapon 5 armor 6 antiseptic 7 antibiotics 8 heat pack R lake (filter prevents infection)\nN buy water / V sell materials / Shift+V sell fish | T fish near shore | P accept / Shift+P turn in (hub)\nCRAFT %s -> %s x%d | %s | inputs %s\n%s" % [
 		recipe_id, str(recipe.get("output", "")), int(recipe.get("count", 0)),
 		station_status,
 		str(recipe.get("inputs", {})), _feedback

@@ -464,6 +464,9 @@ func _unhandled_input(event: InputEvent) -> void:
 					var fire_id: int = client.nearest_campfire(client.display_position())
 					if fire_id != -1:
 						client.extinguish_campfire(fire_id)
+			KEY_0:
+				if not hud.is_menu_open() and bool(client.you.get("alive", false)):
+					hud.quick_cook()
 			KEY_9:
 				if bool(client.you.get("alive", false)):
 					var fire_id: int = client.nearest_campfire(client.display_position())

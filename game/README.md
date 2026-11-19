@@ -971,3 +971,21 @@ remain server-only and are never replicated to nearby players. A separate
 `tests/test_campfire_extinguish.gd` suite covers authorization, distance,
 reconnect ownership, no refunds and replay resistance. No engine C++ change
 was necessary for these game rules.
+
+
+## Quick-cooking fish in field expeditions
+
+Press **0** (zero) in either the local or connected game to quick-cook the
+highest-tier meal for which the survivor has **fish, matching-tier wood and
+crafting mastery**. The online inventory panel also has a quick-cook button,
+so players need not search the full workbench recipe list after fishing.
+
+Recipe choice is shared client-side logic only. The ordinary server command
+still rejects cooking without a live campfire within range or the permanent
+hub workbench. Higher-tier crafting restrictions, ingredient costs, failure
+atomicity and granted experience are unchanged. Other workbench-only recipes
+can never be chosen by this shortcut.
+
+`game/tests/test_quick_cooking.gd` checks tier priority, lower-tier
+fallback, skill prerequisites, lack of side effects and station validation.
+No Cgame engine additions or network protocol changes are required.

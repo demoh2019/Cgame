@@ -2,6 +2,7 @@ extends CanvasLayer
 ## All of the interface, built in code: vitals, zone, inventory, crafting and a message log.
 
 const Defs = preload("res://scripts/shared/defs.gd")
+const QuickCooking = preload("res://scripts/shared/quick_cooking.gd")
 const FishingDisplay = preload("res://scripts/shared/fishing_display.gd")
 const WorldCycle = preload("res://scripts/shared/world_cycle.gd")
 const Crafting = preload("res://scripts/shared/crafting.gd")
@@ -240,6 +241,10 @@ func _build() -> void:
 	fish_button.text = "Cast fishing rod (near shoreline; 5 seconds)"
 	fish_button.pressed.connect(func() -> void: client.fish())
 	inventory_box.add_child(fish_button)
+	var cook_button := Button.new()
+	cook_button.text = "0: Quick-cook best carried fish (fire or hub)"
+	cook_button.pressed.connect(quick_cook)
+	inventory_box.add_child(cook_button)
 	var accept_contract := Button.new()
 	accept_contract.text = "Accept next mission"
 	accept_contract.pressed.connect(func() -> void: client.contract("accept"))
@@ -382,6 +387,16 @@ func _unhandled_input(event: InputEvent) -> void:
 	if event is InputEventKey and event.pressed and not event.echo:
 		if event.physical_keycode == KEY_M and _radar != null:
 			_radar.visible = not _radar.visible
+
+
+## Invoked from the online '0' key and inventory button.
+func quick_cook() -> void:
+	var recipe_id: String = QuickCooking.best_recipe(
+		client.inventory, int(client.you.get("crafting_level", 1)))
+	if recipe_id.is_empty():
+		say("Cooking: need fish, matching wood and sufficient crafting mastery")
+	else:
+		client.craft(recipe_id, 1)
 
 
 func toggle_inventory() -> void:
