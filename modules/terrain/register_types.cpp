@@ -33,7 +33,7 @@
 void initialize_terrain_module(ModuleInitializationLevel p_level) {
     if (p_level == MODULE_INITIALIZATION_LEVEL_SCENE) {
         GDREGISTER_CLASS(TerrainHeightmap);
-        GDREGISTER_CLASS(Terrain3D);
+        GDREGISTER_CLASS(HeightmapTerrain3D);
     }
 }
 
