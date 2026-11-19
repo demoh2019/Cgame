@@ -420,7 +420,9 @@ func cmd_craft(peer_id: int, recipe_id: String, times: int = 1) -> Dictionary:
 	if not player.progression.can_craft_tier(recipe_tier):
 		return {"ok": false, "reason": "need_skill", "skill": "crafting", "tier": recipe_tier}
 	var at_bench: bool = Vector2(player.position.x, player.position.z).distance_to(WORKBENCH_POSITION) <= WORKBENCH_RANGE
-	var status: int = Crafting.craft(player.inventory, recipe_id, at_bench, times)
+	var at_fire: bool = String(recipe["station"]) == "campfire" and FieldCampfire.has_warmth(
+			campfires, player.position, time)
+	var status: int = Crafting.craft(player.inventory, recipe_id, at_bench, times, at_fire)
 	if status == Crafting.Result.OK:
 		player.progression.award_craft(recipe_tier, times)
 		player.dirty_inventory = true

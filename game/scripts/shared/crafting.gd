@@ -7,21 +7,30 @@ const Defs = preload("res://scripts/shared/defs.gd")
 enum Result { OK, UNKNOWN_RECIPE, MISSING_INPUTS, NO_STATION, NO_SPACE }
 
 
-static func can_craft(inventory, recipe_id: String, at_workbench: bool) -> int:
+static func can_craft(inventory, recipe_id: String, at_workbench: bool, at_campfire: bool = false) -> int:
 	var recipe: Dictionary = Defs.recipes().get(recipe_id, {})
 	if recipe.is_empty():
 		return Result.UNKNOWN_RECIPE
-	if recipe["station"] == "workbench" and not at_workbench:
-		return Result.NO_STATION
+	match String(recipe["station"]):
+		"workbench":
+			if not at_workbench:
+				return Result.NO_STATION
+		"campfire":
+			if not (at_workbench or at_campfire):
+				return Result.NO_STATION
+		"":
+			pass
+		_:
+			return Result.NO_STATION
 	if not inventory.has_all(recipe["inputs"]):
 		return Result.MISSING_INPUTS
 	return Result.OK
 
 
 ## Crafts `times` batches. Returns a Result. Atomic: either everything happens or nothing does.
-static func craft(inventory, recipe_id: String, at_workbench: bool, times: int = 1) -> int:
+static func craft(inventory, recipe_id: String, at_workbench: bool, times: int = 1, at_campfire: bool = false) -> int:
 	times = maxi(times, 1)
-	var status := can_craft(inventory, recipe_id, at_workbench)
+	var status := can_craft(inventory, recipe_id, at_workbench, at_campfire)
 	if status != Result.OK:
 		return status
 	var recipe: Dictionary = Defs.recipes()[recipe_id]

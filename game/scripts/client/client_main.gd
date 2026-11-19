@@ -700,7 +700,7 @@ func _unhandled_input(event: InputEvent) -> void:
 		else:
 			_result("Upgrade barricade", sim.cmd_upgrade(LOCAL_PLAYER_ID, wall_id))
 		_update_hud()
-		elif event.is_action_pressed("survive_dismantle"):
+	elif event.is_action_pressed("survive_dismantle"):
 		var wall_id := _nearest_barricade()
 		if wall_id == -1:
 			_feedback = "Dismantle: aim toward your nearby barricade"
@@ -763,9 +763,13 @@ func _update_hud() -> void:
 	var recipe_id: String = _recipes[_recipe_index] if not _recipes.is_empty() else "bandage"
 	var recipe: Dictionary = Defs.recipes().get(recipe_id, {})
 	var near_bench: bool = Vector2(position.x, position.z).distance_to(GameServer.WORKBENCH_POSITION) < GameServer.WORKBENCH_RANGE
+	var nearby_fire: bool = FieldCampfire.has_warmth(sim.campfires, position, sim.time)
+	var station_status: String = "WORKBENCH" if near_bench else "workbench at x=9, z=0"
+	if recipe.get("station", "") == "campfire":
+		station_status = "FIRE READY" if nearby_fire else ("WORKBENCH" if near_bench else "need lit fire or workbench")
 	_instructions.text = "WASD move | Shift sprint | E gather | Q loot | F attack | G heavy strike | Space dodge | U build | O campfire | 9 refuel | H repair | Y upgrade | X dismantle\nTab / Shift+Tab recipes | C craft | B stash | 1 food 2 water 3 heal 4 weapon 5 armor 6 antiseptic 7 antibiotics 8 heat pack R lake (filter prevents infection)\nN buy water / V sell materials / Shift+V sell fish | T fish near shore | P accept / Shift+P turn in (hub)\nCRAFT %s -> %s x%d | %s | inputs %s\n%s" % [
 		recipe_id, str(recipe.get("output", "")), int(recipe.get("count", 0)),
-		"WORKBENCH" if near_bench else "workbench at x=9, z=0",
+		station_status,
 		str(recipe.get("inputs", {})), _feedback
 	]
 	var fishing_status: String = FishingDisplay.progress(survivor.action)

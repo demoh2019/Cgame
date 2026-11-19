@@ -190,7 +190,7 @@ static func _build_items() -> void:
 	_add_item("cooked_fish", {"name": "Cooked Fish", "kind": "food", "food": 35.0,
 		"stack": 10, "value": 13, "weight": 0.5})
 	_add_recipe("cooked_fish", "cooked_fish", 1, {"raw_fish": 1, "wood_1": 1},
-		"workbench", 3.0)
+		"campfire", 3.0)
 	# T2-T4 coastal professions: stronger rods and valuable fish require
 	# matching crafting/gathering mastery and higher-risk shorelines.
 	for tier in range(2, MAX_TIER + 1):
@@ -212,7 +212,7 @@ static func _build_items() -> void:
 		})
 		_add_recipe("cooked_fish_%d" % tier, "cooked_fish_%d" % tier, 1,
 			{"raw_fish_%d" % tier: 1, "wood_%d" % tier: 1},
-			"workbench", 2.0 + float(tier))
+			"campfire", 2.0 + float(tier))
 
 	# No permanent class or spell: craft and carry insulation for expeditions.
 	_add_item("thermal_wrap", {"name": "Emergency Heat Pack", "kind": "thermal",

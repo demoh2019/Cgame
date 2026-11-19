@@ -28,6 +28,7 @@ const SUITES := [
 	"res://tests/test_world_cycle.gd",
 	"res://tests/test_camp_rest.gd",
 	"res://tests/test_field_campfire.gd",
+	"res://tests/test_field_cooking.gd",
 	"res://tests/test_zombie_pack.gd",
 	"res://tests/test_sound.gd",
 	"res://tests/test_game_server.gd",

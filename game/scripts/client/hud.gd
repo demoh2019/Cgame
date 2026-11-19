@@ -726,7 +726,8 @@ func _refresh_crafting() -> void:
 		for input in recipe["inputs"]:
 			needs.append("%dx %s" % [recipe["inputs"][input], Defs.item(input).get("name", input)])
 		var button := Button.new()
-		button.text = "%s  <-  %s%s" % [Defs.item(recipe["output"]).get("name", recipe["output"]), ", ".join(needs), "  [bench]" if recipe["station"] == "workbench" else ""]
+		var station_note := "  [bench]" if recipe["station"] == "workbench" else ("  [fire or bench]" if recipe["station"] == "campfire" else "")
+		button.text = "%s  <-  %s%s" % [Defs.item(recipe["output"]).get("name", recipe["output"]), ", ".join(needs), station_note]
 		button.alignment = HORIZONTAL_ALIGNMENT_LEFT
 		var required_tier: int = maxi(1, Defs.tier_of(String(recipe["output"])))
 		var skill_locked: bool = required_tier > int(client.you.get("crafting_level", 1))
