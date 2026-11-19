@@ -107,3 +107,25 @@ world containers, crafting cooldowns and multiplayer state are not persisted.
 ```sh
 ./bin/godot.linuxbsd.editor.x86_64 --headless --path demo/days_after --script res://smoke_test_saves.gd
 ```
+
+## Persistent scavenging world (save schema v2)
+
+The existing **F5 save / F9 load** now also snapshots named supply crates and
+harvest deposits. Collected loot stays collected after reload; depleted resource
+deposits resume with their remaining (paused offline) respawn time. The survivor
+snapshot still stores stats, gear, professions and position.
+
+An older schema-v1 save remains loadable: it restores the character only and
+leaves the current world's resources unchanged. Unknown scene object IDs,
+negative respawn times and malformed save data are rejected before changing
+the survivor or the world. Enemy spawns, territory ownership, shared server
+progress and economy transactions are **not** persisted by this offline format.
+
+Run the dedicated regression test:
+
+```sh
+./bin/godot.linuxbsd.editor.x86_64 --headless --path demo/days_after --script res://smoke_test_world_saves.gd
+```
+
+For eventual multiplayer, the dedicated server must own all world changes and
+snapshots. Local files must never become an authoritative networked inventory.

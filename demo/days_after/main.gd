@@ -273,6 +273,47 @@ func _build_hud() -> void:
     crosshair.set_anchors_and_offsets_preset(Control.PRESET_CENTER)
 
 
+
+## Stable names connect the game's offline snapshot to the current scene.
+## Only direct child loot/resource nodes are persisted; enemies are temporary.
+func world_snapshot() -> Dictionary:
+    var pickups: Dictionary = {}
+    var resources: Dictionary = {}
+    for child in get_children():
+        if child.get_script() == PICKUP_SCRIPT:
+            pickups[str(child.name)] = bool(child.get("collected"))
+        elif child.get_script() == RESOURCE_SCRIPT:
+            var depleted: bool = bool(child.get("depleted"))
+            var timer := child.get_node_or_null("RespawnTimer") as Timer
+            var remaining: float = timer.time_left if depleted and timer != null else 0.0
+            resources[str(child.name)] = {
+                "depleted": depleted,
+                "remaining": remaining
+            }
+    return {"pickups": pickups, "resources": resources}
+
+
+func can_apply_world_snapshot(data: Dictionary) -> bool:
+    for name in data["pickups"]:
+        var node := get_node_or_null(NodePath(str(name)))
+        if node == null or node.get_parent() != self or node.get_script() != PICKUP_SCRIPT:
+            return false
+    for name in data["resources"]:
+        var node := get_node_or_null(NodePath(str(name)))
+        if node == null or node.get_parent() != self or node.get_script() != RESOURCE_SCRIPT:
+            return false
+    return true
+
+
+func apply_world_snapshot(data: Dictionary) -> void:
+    # Caller validates the complete versioned save and object references first.
+    for name in data["pickups"]:
+        get_node(NodePath(str(name))).call("set_collected_state", bool(data["pickups"][name]))
+    for name in data["resources"]:
+        var entry: Dictionary = data["resources"][name]
+        get_node(NodePath(str(name))).call("set_depleted_state", bool(entry["depleted"]), float(entry["remaining"]))
+
+
 func _process(_delta: float) -> void:
     if player == null or hud_label == null:
         return

@@ -2,7 +2,8 @@ extends RefCounted
 ## Versioned offline survivor snapshot. Game state belongs to the game layer.
 ## Future online servers must own authoritative progression and inventory.
 
-const VERSION := 1
+# v1 stored only the survivor; v2 includes stable world pickup/deposit IDs.
+const VERSION := 2
 const SAVE_PATH := "user://days_after_player.json"
 const MAX_ITEMS := 1000000
 const MAX_XP := 100000000
@@ -11,7 +12,7 @@ const MAX_COORDINATE := 100000.0
 
 static func snapshot(player: Node3D) -> Dictionary:
     var location := player.global_position
-    return {
+    var data: Dictionary = {
         "version": VERSION,
         "stats": {
             "health": float(player.get("health")),
@@ -29,8 +30,13 @@ static func snapshot(player: Node3D) -> Dictionary:
             "weapon": str(player.get("equipped_weapon")),
             "armor": str(player.get("equipped_armor"))
         },
-        "position": [location.x, location.y, location.z]
+        "position": [location.x, location.y, location.z],
+        "world": {"pickups": {}, "resources": {}}
     }
+    var world_root := player.get_parent()
+    if world_root != null and world_root.has_method("world_snapshot"):
+        data["world"] = world_root.call("world_snapshot")
+    return data
 
 
 static func _valid_count(value: Variant, upper_bound: int) -> bool:
@@ -53,8 +59,43 @@ static func _valid_stack_map(values: Variant, max_quantity: int) -> bool:
     return true
 
 
+static func _valid_world_snapshot(world: Variant) -> bool:
+    if not (world is Dictionary) or world.size() != 2:
+        return false
+    var pickups: Variant = world.get("pickups")
+    var resources: Variant = world.get("resources")
+    if not (pickups is Dictionary) or not (resources is Dictionary):
+        return false
+    if pickups.size() > 512 or resources.size() > 512:
+        return false
+    for name in pickups:
+        if not (name is String) or name.is_empty() or name.length() > 128:
+            return false
+        if not (pickups[name] is bool):
+            return false
+    for name in resources:
+        if not (name is String) or name.is_empty() or name.length() > 128:
+            return false
+        var state: Variant = resources[name]
+        if not (state is Dictionary) or state.size() != 2:
+            return false
+        if not (state.get("depleted") is bool):
+            return false
+        var remaining: Variant = state.get("remaining")
+        if not (remaining is int or remaining is float):
+            return false
+        if not (float(remaining) >= 0.0 and float(remaining) <= 600.0):
+            return false
+    return true
+
+
 static func validate_snapshot(data: Variant) -> bool:
-    if not (data is Dictionary) or data.get("version") != VERSION:
+    if not (data is Dictionary):
+        return false
+    var version: Variant = data.get("version")
+    if version != 1 and version != VERSION:
+        return false
+    if version == VERSION and not _valid_world_snapshot(data.get("world")):
         return false
     var stats: Variant = data.get("stats")
     var inventory: Variant = data.get("inventory")
@@ -98,6 +139,15 @@ static func apply_snapshot(player: Node3D, data: Variant) -> bool:
     # Validate the *whole* snapshot before making a single player change.
     if not validate_snapshot(data):
         return false
+    # Reject unknown world object IDs BEFORE touching the survivor or the world.
+    var world_root := player.get_parent()
+    var has_world: bool = int(data["version"]) == VERSION
+    if has_world:
+        var world: Dictionary = data["world"]
+        var has_objects: bool = not world["pickups"].is_empty() or not world["resources"].is_empty()
+        if has_objects and (world_root == null or not world_root.has_method("can_apply_world_snapshot")
+                or not bool(world_root.call("can_apply_world_snapshot", world))):
+            return false
     var stats: Dictionary = data["stats"]
     var experience: Dictionary = data["experience"]
     var equipped: Dictionary = data["equipped"]
@@ -113,6 +163,8 @@ static func apply_snapshot(player: Node3D, data: Variant) -> bool:
     player.set("equipped_weapon", str(equipped["weapon"]))
     player.set("equipped_armor", str(equipped["armor"]))
     player.global_position = Vector3(float(coordinates[0]), float(coordinates[1]), float(coordinates[2]))
+    if has_world and world_root != null and world_root.has_method("apply_world_snapshot"):
+        world_root.call("apply_world_snapshot", data["world"])
     return true
 
 
