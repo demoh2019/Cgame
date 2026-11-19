@@ -29,7 +29,8 @@ CASES = (
     "scene_tree", "packed_scene", "images", "json", "stream",
     "file_io", "threads", "physics_2d", "physics_3d",
     "memory_churn", "astar_grid", "tweens", "audio_buffers",
-    "variant_codec", "packet_stream", "ui_layout", "render_2d", "render_3d",
+    "variant_codec", "render_2d", "render_3d",
+    "resource_load", "input_map", "transform_hierarchy",
     "node_paths", "regex", "compression", "hashing",
     "resource_io", "astar_3d", "ui_layout", "thread_contention",
     "geometry_2d", "mesh_build", "input_dispatch", "image_codec", "group_calls",
@@ -192,6 +193,8 @@ def summarize(runs: list[dict[str, Any]]) -> dict[str, Any]:
     memories = [r["peak_rss_mib"] for r in runs if r["peak_rss_mib"] is not None]
     cpu_times = [r["cpu_seconds"] for r in passed if r.get("cpu_seconds") is not None]
     engine_times = sorted(r["engine"]["duration_ms"] for r in passed if r.get("engine"))
+    engine_memory = [r["engine"]["engine_memory_after_bytes"] for r in passed
+                     if isinstance(r.get("engine"), dict) and isinstance(r["engine"].get("engine_memory_after_bytes"), (int, float))]
     return {
         "status": "passed" if len(passed) == len(runs) else "failed",
         "median_wall_seconds": round(statistics.median(wall), 6) if wall else None,
@@ -200,6 +203,7 @@ def summarize(runs: list[dict[str, Any]]) -> dict[str, Any]:
         "median_cpu_seconds": round(statistics.median(cpu_times), 6) if cpu_times else None,
         "median_engine_ms": round(statistics.median(engine_times), 6) if engine_times else None,
         "p95_engine_ms": round(engine_times[math.ceil(0.95 * len(engine_times)) - 1], 6) if engine_times else None,
+        "max_engine_memory_bytes": max(engine_memory) if engine_memory else None,
         "runs": runs,
     }
 
@@ -207,7 +211,7 @@ def summarize(runs: list[dict[str, Any]]) -> dict[str, Any]:
 def compare_baseline(current: dict[str, Any], baseline: dict[str, Any],
                      percent: float, memory_growth_limit_mib: float | None) -> list[str]:
     errors: list[str] = []
-    keys = ("preset", "scale", "frames", "render_mode")
+    keys = ("preset", "scale", "frames", "render_mode", "seed")
     for key in keys:
         if current.get("configuration", {}).get(key) != baseline.get("configuration", {}).get(key):
             raise ValueError("Baseline configuration mismatch: %s" % key)
@@ -215,7 +219,7 @@ def compare_baseline(current: dict[str, Any], baseline: dict[str, Any],
         previous = baseline.get("cases", {}).get(name)
         if not previous or data["status"] != "passed":
             continue
-        for field in ("median_wall_seconds", "median_cpu_seconds", "median_engine_ms", "max_rss_mib"):
+        for field in ("median_wall_seconds", "median_cpu_seconds", "median_engine_ms", "p95_engine_ms", "max_rss_mib"):
             new, old = data.get(field), previous.get(field)
             if new is not None and old is not None and old > 0 and new > old * (1 + percent / 100.0):
                 errors.append("%s %s: %.3f > %.3f (baseline + %.1f%%)" %

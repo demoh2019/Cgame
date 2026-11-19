@@ -45,7 +45,7 @@ jobs:
         with:
           python-version: '3.11'
       - name: Syntax-check runner and tests
-        run: python3 -m py_compile tests/stress/run.py tests/stress/test_run.py tests/stress/scale_sweep.py tests/stress/test_scale_sweep.py
+        run: python3 -m py_compile tests/stress/run.py tests/stress/test_run.py tests/stress/diagnose.py tests/stress/test_diagnose.py tests/stress/scale_sweep.py tests/stress/test_scale_sweep.py
       - name: Run harness unit tests
         run: python3 -m unittest discover -s tests/stress -p 'test_*.py' -v
 
@@ -105,6 +105,13 @@ jobs:
             --textures 128 --scenes 512 --repeats 3 \
             --timeout 900 --rss-limit-mib 4096 \
             --output whole-engine-import.json
+      - name: Analyze resource and timing hotspots
+        if: always()
+        shell: bash
+        run: |
+          if [[ -f whole-engine-stress.json ]]; then
+            python3 tests/stress/diagnose.py whole-engine-stress.json --output whole-engine-bottlenecks.md
+          fi
       - name: Archive per-scenario performance and failure reports
         if: always()
         uses: actions/upload-artifact@v4
@@ -113,6 +120,7 @@ jobs:
           path: |
             whole-engine-stress.json
             whole-engine-stress.md
+            whole-engine-bottlenecks.md
             whole-engine-native-tests.log
             whole-engine-import.json
           if-no-files-found: warn
