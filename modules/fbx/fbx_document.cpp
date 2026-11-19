@@ -738,6 +738,7 @@ Error FBXDocument::_parse_meshes(Ref<FBXState> p_state) {
 							bones.write[index] = 0; // TODO: What should this be padded with?
 							weights.write[index] = 0.0f;
 						}
+
 						// Keep unweighted vertices in place using the neutral bone, whose bind is
 						// appended after the skin clusters and does not follow any animated bones.
 						if (!(total_weight > 0.0f)) {
