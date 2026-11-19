@@ -33,8 +33,6 @@
 #include "core/object/class_db.h"
 #include "core/variant/typed_array.h"
 
-static const String boundary_chars = "/\\-_. ";
-
 static bool _is_valid_interval(const Vector2i &p_interval) {
 	// Empty intervals are represented as (-1, -1).
 	return p_interval.x >= 0 && p_interval.y >= p_interval.x;
@@ -54,7 +52,19 @@ static bool _is_word_boundary(const String &p_str, int p_index) {
 	if (p_index == -1 || p_index == p_str.length()) {
 		return true;
 	}
-	return boundary_chars.find_char(p_str[p_index]) != -1;
+	// Called repeatedly while scoring candidates. Avoid searching a
+	// String for these six ASCII word delimiters.
+	switch (p_str[p_index]) {
+		case '/':
+		case '\\':
+		case '-':
+		case '_':
+		case '.':
+		case ' ':
+			return true;
+		default:
+			return false;
+	}
 }
 
 bool FuzzySearchToken::try_exact_match(FuzzyTokenMatch &p_match, const String &p_target, int p_offset) const {
