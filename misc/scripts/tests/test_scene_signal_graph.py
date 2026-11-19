@@ -135,12 +135,18 @@ class SignalTests(unittest.TestCase):
             with self.subTest(path=x),self.assertRaises(g.SceneContextError):g.build_graph(self.root,(x,))
 
     def test_symlink_file(self):
-        (self.root/'alias.tscn').symlink_to(self.root/'main.tscn')
+        try:
+            (self.root/'alias.tscn').symlink_to(self.root/'main.tscn')
+        except (OSError, NotImplementedError):
+            self.skipTest('Symlinks unavailable on this platform')
         with self.assertRaises(g.SceneContextError):g.build_graph(self.root,('res://alias.tscn',))
 
     def test_symlink_dir(self):
         (self.root/'scenes').mkdir()
-        (self.root/'alias').symlink_to(self.root/'scenes',target_is_directory=True)
+        try:
+            (self.root/'alias').symlink_to(self.root/'scenes',target_is_directory=True)
+        except (OSError, NotImplementedError):
+            self.skipTest('Directory symlinks unavailable on this platform')
         with self.assertRaises(g.SceneContextError):g.build_graph(self.root,all_scenes=True)
 
     def test_scene_file_size_limit(self):
