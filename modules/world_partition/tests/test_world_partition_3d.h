@@ -32,10 +32,9 @@
 
 #include "../world_partition_3d.h"
 
-#include "core/config/project_settings.h"
-#include "core/math/math_funcs.h"
 #include "core/io/dir_access.h"
 #include "core/io/resource_saver.h"
+#include "core/math/math_funcs.h"
 #include "core/os/os.h"
 #include "scene/main/scene_tree.h"
 #include "scene/main/window.h"
@@ -308,6 +307,8 @@ TEST_CASE("[SceneTree][WorldPartition3D] Stream one authored PackedScene and unl
 	CHECK(partition->is_cell_loaded(Vector2i(0, 0)));
 	CHECK(partition->get_loaded_cell_count() == 1);
 	CHECK(partition->get_child_count() == 2);
+	Node *streamed_child = partition->get_child(1);
+	CHECK(streamed_child != authored_child);
 
 	// Hysteresis: do not unload a cell when it has left the load radius
 	// but is still within the larger unload radius.
@@ -320,8 +321,10 @@ TEST_CASE("[SceneTree][WorldPartition3D] Stream one authored PackedScene and unl
 	partition->update_streaming();
 	CHECK_FALSE(partition->is_cell_loaded(Vector2i(0, 0)));
 	CHECK(partition->get_loaded_cell_count() == 0);
-	CHECK(partition->get_child_count() == 1);
-	CHECK(partition->get_child(0) == authored_child);
+	// queue_free() defers removal until the end of the frame.
+	CHECK(streamed_child->is_queued_for_deletion());
+	CHECK_FALSE(authored_child->is_queued_for_deletion());
+	CHECK(authored_child->get_parent() == partition);
 
 	SceneTree::get_singleton()->get_root()->remove_child(partition);
 	SceneTree::get_singleton()->get_root()->remove_child(observer);
@@ -329,7 +332,6 @@ TEST_CASE("[SceneTree][WorldPartition3D] Stream one authored PackedScene and unl
 	memdelete(observer);
 	CHECK(DirAccess::remove_absolute(path) == OK);
 }
-
 
 TEST_CASE("[SceneTree][WorldPartition3D] Automatic streaming respects transforms and authored offsets") {
 	Node3D *template_root = memnew(Node3D);
