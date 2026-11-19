@@ -23,6 +23,11 @@ on:
         type: boolean
         required: true
         default: false
+      allow_untrusted_pr_import:
+        description: "I reviewed Actions and secrets and accept the risk of importing untrusted PR branches"
+        type: boolean
+        required: true
+        default: false
 
 permissions:
   contents: write
@@ -49,10 +54,12 @@ jobs:
           IMPORT_MODE: ${{ inputs.mode }}
           MAX_NEW: ${{ inputs.max_new }}
           SKIP_COMMENTS: ${{ inputs.skip_comments }}
+          ALLOW_UNTRUSTED: ${{ inputs.allow_untrusted_pr_import }}
         shell: bash
         run: |
           args=(--mode "$IMPORT_MODE" --max-new "$MAX_NEW" --state .github/upstream-mirror-state.json)
           if [[ "$SKIP_COMMENTS" == "true" ]]; then args+=(--skip-comments); fi
+          if [[ "$ALLOW_UNTRUSTED" == "true" ]]; then args+=(--allow-untrusted-pr-import); fi
           python3 misc/scripts/mirror_upstream_github.py "${args[@]}"
 
       - name: Save checkpoint even after partial failures
