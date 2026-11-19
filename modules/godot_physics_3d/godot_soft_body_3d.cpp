@@ -48,6 +48,7 @@
 #include "servers/physics_softbody_plasticity.h"
 #include "servers/physics_softbody_volume_plasticity.h"
 #include "servers/physics_softbody_volume_safe.h"
+#include "servers/physics_softbody_volume_damping.h"
 #include "servers/physics_xpbd_distance.h"
 #include "servers/physics_xpbd_tension_hardening.h"
 #include "servers/physics_xpbd_anisotropic_stretch.h"
@@ -594,7 +595,8 @@ void GodotSoftBody3D::initialize_volume_constraint() {
 	if (!get_space() ||
 			(get_space()->get_soft_body_xpbd_volume_compliance() <= 0.0 &&
 					get_space()->get_soft_body_gas_pressure_gamma() <= 0.0 &&
-					get_space()->get_soft_body_tetra_fem_compliance() <= 0.0) ||
+					get_space()->get_soft_body_tetra_fem_compliance() <= 0.0 &&
+					get_space()->get_soft_body_volume_damping_rate() <= 0.0) ||
 			nodes.size() < 4 || faces.size() < 4) {
 		// Neither XPBD nor gas mode needs the volume for ordinary cloth.
 		if (!xpbd_volume_gradients.is_empty()) {
@@ -662,6 +664,92 @@ void GodotSoftBody3D::initialize_volume_constraint() {
 	// fixed even after permanent crushing of its enclosing soft-body shell.
 	xpbd_volume_original_rest = volume;
 	xpbd_volume_closed = true;
+}
+
+// Momentum-conserving bulk viscosity for closed SoftBody3D surfaces.
+//
+// For the signed enclosed volume V, its instantaneous derivative is
+// Vdot = sum_i dot(grad(V)_i, v_i). A mass-weighted velocity impulse
+// removes fraction f of ONLY this breathing mode:
+//   lambda = -f * Vdot / sum_i(w_i * |grad(V)_i|^2)
+//   v_i' = v_i + w_i * grad(V)_i * lambda.
+//
+// Closed-surface gradients sum to zero; their torque sum is also zero.
+// Thus free bodies preserve both linear and angular momentum. For pins,
+// the attachment supplies the reaction. Kinetic energy cannot increase:
+// delta(E) = -f(2-f)*Vdot^2 / (2*K) <= 0 for 0<=f<=1.
+//
+// Uses the XPBD volume-gradient scratch and a two-phase commit to avoid
+// leaving velocities partially modified by invalid mesh coordinates.
+void GodotSoftBody3D::damp_volume_rate(double p_fraction) {
+	if (!xpbd_volume_closed || !(p_fraction > 0.0 && p_fraction <= 1.0) ||
+			!Math::is_finite(p_fraction) || nodes.size() < 4 || faces.size() < 4) {
+		return;
+	}
+	xpbd_volume_gradients.resize(nodes.size());
+	for (Vector3 &gradient : xpbd_volume_gradients) {
+		gradient = Vector3();
+	}
+	const Vector3 &origin = nodes[0].x;
+	for (const Face &face : faces) {
+		Vector3 grad_a, grad_b, grad_c;
+		if (!physics_softbody_volume_face_gradients(
+					face.n[0]->x, face.n[1]->x, face.n[2]->x, origin,
+					grad_a, grad_b, grad_c)) {
+			return;
+		}
+		xpbd_volume_gradients[face.n[0]->index] += grad_a;
+		xpbd_volume_gradients[face.n[1]->index] += grad_b;
+		xpbd_volume_gradients[face.n[2]->index] += grad_c;
+	}
+
+	double volume_rate = 0.0;
+	double inverse_mass_gradient = 0.0;
+	for (uint32_t i = 0; i < nodes.size(); ++i) {
+		const Node &node = nodes[i];
+		if (!node.v.is_finite() || !xpbd_volume_gradients[i].is_finite()) {
+			return;
+		}
+		if (node.im == 0.0) {
+			continue;
+		}
+		if (!(node.im > 0.0) || !Math::is_finite(node.im)) {
+			return;
+		}
+		const Vector3 &g = xpbd_volume_gradients[i];
+		volume_rate += double(g.x) * double(node.v.x) +
+				double(g.y) * double(node.v.y) + double(g.z) * double(node.v.z);
+		inverse_mass_gradient += double(node.im) *
+				(double(g.x) * double(g.x) + double(g.y) * double(g.y) + double(g.z) * double(g.z));
+	}
+
+	double impulse = 0.0;
+	if (!physics_softbody_bulk_viscosity_impulse(volume_rate, inverse_mass_gradient,
+				p_fraction, impulse)) {
+		return;
+	}
+	// Preflight every candidate before writing ANY velocity.
+	for (uint32_t i = 0; i < nodes.size(); ++i) {
+		const Node &node = nodes[i];
+		if (node.im == 0.0) {
+			continue; // Pins remain exactly pinned.
+		}
+		Vector3 next;
+		if (!physics_softbody_bulk_viscosity_velocity(
+					node.v, xpbd_volume_gradients[i], node.im, impulse, next)) {
+			return;
+		}
+	}
+	for (uint32_t i = 0; i < nodes.size(); ++i) {
+		Node &node = nodes[i];
+		if (node.im == 0.0) {
+			continue;
+		}
+		Vector3 next;
+		physics_softbody_bulk_viscosity_velocity(
+				node.v, xpbd_volume_gradients[i], node.im, impulse, next);
+		node.v = next;
+	}
 }
 
 // Global closed-surface XPBD volume projection. Gradients for a face
@@ -2764,6 +2852,16 @@ void GodotSoftBody3D::solve_constraints(real_t p_delta) {
 		}
 	}
 
+	// Bulk (volumetric) viscosity removes rapid closed-shell breathing,
+	// independently of link, bending and membrane shear damping. Apply at
+	// velocity level BEFORE prediction, or post-solve reconstruction would
+	// overwrite it. A zero rate avoids any face traversal or scratch work.
+	const real_t volume_damping_rate = get_space()->get_soft_body_volume_damping_rate();
+	if (volume_damping_rate > real_t(0.0) && p_delta > real_t(0.0) && xpbd_volume_closed) {
+		const double fraction = 1.0 - Math::exp(-double(volume_damping_rate) * double(p_delta));
+		damp_volume_rate(fraction);
+	}
+
 	// The old c2/c3 link-gradient prepass was unused by solve_links().
 	// Avoid a full O(links) traversal and its potential division by zero.
 	// Solve velocities.
@@ -3014,7 +3112,8 @@ void GodotSoftBody3D::solve_constraints(real_t p_delta) {
 	if (use_volume_xpbd) {
 		// Reuse scratch at every iteration; one volume scalar lambda per step.
 		xpbd_volume_gradients.resize(nodes.size());
-	} else if (!xpbd_volume_gradients.is_empty()) {
+	} else if (!xpbd_volume_gradients.is_empty() && get_space()->get_soft_body_volume_damping_rate() <= 0.0) {
+		// Keep bulk-viscosity scratch across steps without reallocation.
 		xpbd_volume_gradients.reset();
 	}
 	double volume_lambda = 0.0;
