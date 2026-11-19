@@ -39,3 +39,10 @@ jobs:
           ./bin/godot.linuxbsd.editor.dev.x86_64 --headless --test --test-case="*[AStarGrid2D] Repeated grid rebuild preserves padded mask and point coordinates*"
           ./bin/godot.linuxbsd.editor.dev.x86_64 --headless --test --test-case="*[AStarGrid2D] Fixed-capacity neighbors preserve corner policies and paths*"
           ./bin/godot.linuxbsd.editor.dev.x86_64 --headless --test --test-case="*[AStarGrid2D][Performance] Row-major neighbor offsets preserve all diagonal policies*"
+      - name: Verify cardinal/diagonal navigation stress smoke
+        run: |
+          python3 tests/stress/run.py \
+            --godot ./bin/godot.linuxbsd.editor.dev.x86_64 \
+            --case astar_grid_neighbors --scale 1 --frames 12 \
+            --repeats 1 --timeout 120 --rss-limit-mib 3072 \
+            --output /tmp/astar-grid-neighbors.json
