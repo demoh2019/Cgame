@@ -65,6 +65,7 @@ static void clear_contact_scratch(LocalVector<T> &r_buffer, uint32_t p_min_cache
 } // namespace
 
 void JoltContactListener3D::OnContactAdded(const JPH::Body &p_body1, const JPH::Body &p_body2, const JPH::ContactManifold &p_manifold, JPH::ContactSettings &p_settings) {
+	++_get_thread_locals().contact_manifold_callbacks;
 	_try_override_collision_response(p_body1, p_body2, p_settings);
 	_try_apply_surface_velocities(p_body1, p_body2, p_settings);
 	_try_add_contacts(p_body1, p_body2, p_manifold, p_settings);
@@ -76,6 +77,7 @@ void JoltContactListener3D::OnContactAdded(const JPH::Body &p_body1, const JPH::
 }
 
 void JoltContactListener3D::OnContactPersisted(const JPH::Body &p_body1, const JPH::Body &p_body2, const JPH::ContactManifold &p_manifold, JPH::ContactSettings &p_settings) {
+	++_get_thread_locals().contact_manifold_callbacks;
 	_try_override_collision_response(p_body1, p_body2, p_settings);
 	_try_apply_surface_velocities(p_body1, p_body2, p_settings);
 	_try_add_contacts(p_body1, p_body2, p_manifold, p_settings);
@@ -610,6 +612,7 @@ void JoltContactListener3D::_dispatch_area_exit(const JPH::SubShapeIDPair &p_sha
 }
 
 void JoltContactListener3D::pre_step() {
+	contact_manifold_count = 0;
 #ifdef DEBUG_ENABLED
 	debug_contact_count = 0;
 #endif
@@ -621,4 +624,15 @@ void JoltContactListener3D::post_step() {
 	_flush_contacts();
 	_flush_area_soft_body_events();
 	_flush_area_body_events();
+
+	// Jolt invokes contact callbacks concurrently. Fold per-thread counters
+	// after the step, reusing the lock already held to flush contact events.
+	// This counts callbacks/manifolds, not necessarily unique body pairs:
+	// compound subshapes and CCD substeps can generate multiple callbacks.
+	uint64_t total_callbacks = 0;
+	for (ThreadLocals &tl : ThreadLocals::instances) {
+		total_callbacks += tl.contact_manifold_callbacks;
+		tl.contact_manifold_callbacks = 0;
+	}
+	contact_manifold_count = int(MIN(total_callbacks, uint64_t(INT32_MAX)));
 }
