@@ -34,6 +34,7 @@
 #include "core/crypto/crypto_core.h"
 #include "core/io/dir_access.h"
 #include "core/io/file_access.h"
+#include "core/io/marshalls.h"
 #include "core/io/resource_loader.h"
 #include "core/io/stream_peer.h"
 #include "core/math/random_pcg.h"
@@ -268,18 +269,29 @@ String ResourceUID::ensure_path_nocheck(const String &p_uid_or_path) {
 }
 
 Vector<uint8_t> ResourceUID::encode_binary_cache(const Vector<Pair<ID, String>> &p_entries) {
-	Ref<StreamPeerBuffer> buffer;
-	buffer.instantiate();
-	buffer->put_u32(p_entries.size());
+	// The cache is written in little-endian order: entry count, then each UID,
+	// UTF-8 byte length and path. Build it directly instead of growing a
+	// StreamPeerBuffer with three separate writes per entry.
+	Vector<uint8_t> data;
+	ERR_FAIL_COND_V(data.resize_uninitialized(4) != OK, Vector<uint8_t>());
+	encode_uint32(p_entries.size(), data.ptrw());
 
 	for (const Pair<ID, String> &entry : p_entries) {
-		buffer->put_u64(uint64_t(entry.first));
-		CharString cs = entry.second.utf8();
-		buffer->put_u32(cs.length());
-		buffer->put_data((const uint8_t *)cs.ptr(), cs.length());
+		CharString path = entry.second.utf8();
+		const uint64_t append_size = 12 + uint64_t(path.length());
+		ERR_FAIL_COND_V_MSG(append_size > uint64_t(INT32_MAX - data.size()), Vector<uint8_t>(), "Resource UID cache exceeds maximum vector size.");
+
+		const int offset = data.size();
+		ERR_FAIL_COND_V(data.resize_uninitialized(offset + append_size) != OK, Vector<uint8_t>());
+		uint8_t *write = data.ptrw() + offset;
+		encode_uint64(uint64_t(entry.first), write);
+		encode_uint32(path.length(), write + 8);
+		if (path.length() > 0) {
+			memcpy(write + 12, path.ptr(), path.length());
+		}
 	}
 
-	return buffer->get_data_array();
+	return data;
 }
 
 Error ResourceUID::save_to_cache() {
