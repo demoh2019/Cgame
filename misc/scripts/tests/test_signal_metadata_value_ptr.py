@@ -36,7 +36,7 @@ class SignalMetadataTests(unittest.TestCase):
         if compiler is None:
             self.skipTest("C++ compiler unavailable")
 
-        header = HEADER.read_text().replace(
+        header = HEADER.read_text().replace("#pragma once", "").replace(
             '#include "core/os/memory.h"',
             '#define _FORCE_INLINE_ inline\n'
             '#define memnew(x) new x\n#define memdelete(x) delete x\n',

@@ -759,7 +759,7 @@ TEST_CASE("[Object] Rare user signal metadata survives many registrations") {
 	List<MethodInfo> before;
 	object.get_signal_list(&before);
 	for (int i = 0; i < 128; i++) {
-		StringName signal_name("dynamic_signal_" + itos(i));
+		StringName signal_name(String("dynamic_signal_") + itos(i));
 		object.add_user_signal(MethodInfo(signal_name));
 		CHECK(object.has_signal(signal_name));
 	}
