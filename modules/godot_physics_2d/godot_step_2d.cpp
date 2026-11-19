@@ -494,6 +494,15 @@ void GodotStep2D::step(GodotSpace2D *p_space, real_t p_delta) {
 		}
 	}
 
+	if (large_island_count != 1 && !colored_constraints.is_empty()) {
+		// Island-level jobs need no graph-color scratch. Free peak buffers
+		// when a previously dominating island disappears or separates into
+		// multiple independent islands, keeping idle RAM bounded.
+		colored_constraints.reset();
+		constraint_colors.reset();
+		occupied_colors.reset();
+	}
+
 	if (large_island_count == 1) {
 		// Keep small islands on the existing scheduler, then solve the large
 		// island by colors. No worker group overlaps the color solver, so
