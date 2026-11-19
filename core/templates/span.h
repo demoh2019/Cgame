@@ -331,6 +331,66 @@ constexpr int64_t Span<T>::rfind_sequence(const Span<T1> &p_span, uint64_t p_fro
 			if (needle_size == 1) {
 				return rfind(needle[0], p_from);
 			}
+			// When both endpoints are frequent, every offset may otherwise
+			// trigger a full pattern comparison. For large repetitive buffers,
+			// scan a rarer internal byte eight candidates at a time instead.
+			// A short local sample keeps random buffers on the usual fast path.
+			if (needle_size >= 8 && p_from >= 8192 && needle[0] == needle[needle_size - 1]) {
+				if (haystack[p_from] == needle[0] && std::memcmp(haystack + p_from, needle, size_t(needle_size)) == 0) {
+					return int64_t(p_from);
+				}
+				uint64_t anchor = 0;
+				const uint64_t limit = needle_size > 33 ? needle_size - 33 : 0;
+				for (uint64_t i = needle_size - 1; i > limit;) {
+					--i;
+					if (needle[i] != needle[0]) {
+						anchor = i;
+						break;
+					}
+				}
+				if (anchor != 0) {
+					uint32_t first_hits = 0;
+					uint32_t anchor_hits = 0;
+					for (uint64_t j = 0; j < 128; j++) {
+						first_hits += haystack[p_from - j] == needle[0];
+						anchor_hits += haystack[p_from - j + anchor] == needle[anchor];
+					}
+					if (first_hits >= 16 && anchor_hits * 4 < first_hits) {
+						constexpr uint64_t ONE_PER_BYTE = 0x0101010101010101ULL;
+						constexpr uint64_t HIGH_BIT_PER_BYTE = 0x8080808080808080ULL;
+						const uint64_t anchor_pattern = uint64_t(uint8_t(needle[anchor])) * ONE_PER_BYTE;
+						uint64_t remaining = p_from + 1;
+						while (remaining >= sizeof(uint64_t)) {
+							remaining -= sizeof(uint64_t);
+							uint64_t word;
+							std::memcpy(&word, haystack + remaining + anchor, sizeof(word));
+							const uint64_t diff = word ^ anchor_pattern;
+							if (((diff - ONE_PER_BYTE) & ~diff & HIGH_BIT_PER_BYTE) == 0) {
+								continue;
+							}
+							// Borrowing can produce false matches: verify each lane.
+							for (uint64_t j = sizeof(uint64_t); j > 0;) {
+								--j;
+								const uint64_t pos = remaining + j;
+								if (haystack[pos + anchor] == needle[anchor] && haystack[pos] == needle[0] &&
+										haystack[pos + needle_size - 1] == needle[needle_size - 1] &&
+										std::memcmp(haystack + pos, needle, size_t(needle_size)) == 0) {
+									return int64_t(pos);
+								}
+							}
+						}
+						while (remaining > 0) {
+							--remaining;
+							if (haystack[remaining + anchor] == needle[anchor] && haystack[remaining] == needle[0] &&
+									haystack[remaining + needle_size - 1] == needle[needle_size - 1] &&
+									std::memcmp(haystack + remaining, needle, size_t(needle_size)) == 0) {
+								return int64_t(remaining);
+							}
+						}
+						return -1;
+					}
+				}
+			}
 			// When the endpoints differ, check eight candidate starts at once.
 			// If both endpoints are the same, the scalar path avoids overhead
 			// for extremely frequent candidates in repeated-byte buffers.

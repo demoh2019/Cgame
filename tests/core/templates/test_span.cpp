@@ -240,6 +240,82 @@ TEST_CASE("[Span] Reverse sequence word scan handles sparse and dense byte candi
 	CHECK_EQ(Span<int8_t>(signed_data).rfind_sequence(Span<int8_t>(signed_pattern), 2), 0);
 }
 
+TEST_CASE("[Span] Reverse rare internal-byte search handles long repeated buffers") {
+	std::vector<uint8_t> buffer(16384, uint8_t('a'));
+	std::vector<uint8_t> pattern(32, uint8_t('a'));
+	pattern[30] = uint8_t('b');
+	const Span<uint8_t> needle(pattern.data(), pattern.size());
+
+	CHECK(Span<uint8_t>(buffer.data(), buffer.size()).rfind_sequence(needle) == -1);
+	const size_t last = buffer.size() - pattern.size();
+	for (size_t pos : { size_t(63), size_t(8193), last }) {
+		std::copy(pattern.begin(), pattern.end(), buffer.begin() + pos);
+	}
+	const Span<uint8_t> hay(buffer.data(), buffer.size());
+	CHECK(hay.rfind_sequence(needle) == int64_t(last));
+	CHECK(hay.rfind_sequence(needle, last - 1) == 8193);
+	CHECK(hay.rfind_sequence(needle, 8192) == 63);
+	CHECK(hay.rfind_sequence(needle, 62) == -1);
+
+	// An unaligned span must preserve its relative indices.
+	CHECK(Span<uint8_t>(buffer.data() + 1, buffer.size() - 1).rfind_sequence(needle) == int64_t(last - 1));
+
+	// Signed-byte comparisons must use the same byte values as memcmp.
+	std::vector<int8_t> signed_buffer(16384, int8_t(-7));
+	std::vector<int8_t> signed_pattern(32, int8_t(-7));
+	signed_pattern[29] = int8_t(-128);
+	std::copy(signed_pattern.begin(), signed_pattern.end(), signed_buffer.begin() + 12000);
+	CHECK(Span<int8_t>(signed_buffer.data(), signed_buffer.size()).rfind_sequence(
+				Span<int8_t>(signed_pattern.data(), signed_pattern.size())) == 12000);
+
+	// Equal-byte patterns still find the rightmost match.
+	std::fill(buffer.begin(), buffer.end(), uint8_t('a'));
+	std::fill(pattern.begin(), pattern.end(), uint8_t('a'));
+	CHECK(Span<uint8_t>(buffer.data(), buffer.size()).rfind_sequence(
+				Span<uint8_t>(pattern.data(), pattern.size())) == int64_t(last));
+}
+
+TEST_CASE("[Span] Adaptive reverse sequence search agrees with scalar reference") {
+	uint32_t seed = 0x7ae34f29u;
+	for (int trial = 0; trial < 96; trial++) {
+		std::vector<uint8_t> buffer(16384 + (trial % 7) * 131);
+		std::vector<uint8_t> pattern(8 + (trial % 39), uint8_t('a'));
+		for (uint8_t &value : buffer) {
+			seed = seed * 1664525u + 1013904223u;
+			value = trial % 3 == 0 || (trial % 3 == 1 && (seed & 31u) != 0) ? uint8_t('a') : uint8_t(seed >> 24);
+		}
+		if (trial % 4 == 0) {
+			pattern[pattern.size() - 2] = uint8_t('b');
+		} else if (trial % 4 == 1) {
+			pattern[pattern.size() / 2] = uint8_t('b');
+		} else if (trial % 4 == 2) {
+			for (uint8_t &value : pattern) {
+				seed = seed * 1664525u + 1013904223u;
+				value = uint8_t(seed >> 24);
+			}
+		}
+		if (trial % 5 == 0) {
+			std::copy(pattern.begin(), pattern.end(), buffer.begin() + 127);
+		}
+		if (trial % 7 == 0) {
+			std::copy(pattern.begin(), pattern.end(), buffer.end() - pattern.size());
+		}
+		const Span<uint8_t> hay(buffer.data(), buffer.size());
+		const Span<uint8_t> needle(pattern.data(), pattern.size());
+		for (size_t from : { size_t(0), size_t(127), size_t(8192), buffer.size() / 2, buffer.size() - pattern.size() }) {
+			int64_t expected = -1;
+			for (size_t i = from + 1; i > 0;) {
+				--i;
+				if (std::equal(pattern.begin(), pattern.end(), buffer.begin() + i)) {
+					expected = int64_t(i);
+					break;
+				}
+			}
+			CHECK(hay.rfind_sequence(needle, from) == expected);
+		}
+	}
+}
+
 TEST_CASE("[Span] Reverse sequence randomized differential regression") {
 	uint8_t data[160];
 	uint8_t pattern[7];
