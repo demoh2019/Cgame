@@ -1037,4 +1037,32 @@ TEST_CASE("[DictionaryFastPath] randomized insertion and removal retain exact ke
 	}
 }
 
+TEST_CASE("[TypedContainer] Dictionary Ref<Script> fast path retains Variant compatibility") {
+	Dictionary legacy;
+	legacy.set_typed(Variant::STRING, StringName(), Variant(), Variant::INT, StringName(), Variant());
+	Dictionary direct;
+	direct.set_typed(Variant::STRING, StringName(), Ref<Script>(), Variant::INT, StringName(), Ref<Script>());
+	REQUIRE(direct.is_same_typed(legacy));
+
+	Dictionary source;
+	source["first"] = 11;
+	source["second"] = 22;
+	Dictionary via_ref(source, Variant::STRING, StringName(), Ref<Script>(), Variant::INT, StringName(), Ref<Script>());
+	Dictionary via_variant(source, Variant::STRING, StringName(), Variant(), Variant::INT, StringName(), Variant());
+	REQUIRE(via_ref.is_same_typed(via_variant));
+	REQUIRE_EQ(via_ref.size(), 2);
+	CHECK_EQ(via_ref["first"], Variant(11));
+	CHECK_EQ(via_ref["second"], Variant(22));
+	CHECK_EQ(via_ref["first"], via_variant["first"]);
+	CHECK_EQ(via_ref["second"], via_variant["second"]);
+
+	for (int i = 0; i < 512; i++) {
+		TypedDictionary<String, int> typed;
+		REQUIRE_EQ(typed.get_typed_key_builtin(), Variant::STRING);
+		REQUIRE_EQ(typed.get_typed_value_builtin(), Variant::INT);
+		typed[String("item")] = i;
+		CHECK_EQ(typed[String("item")], Variant(i));
+	}
+}
+
 } // namespace TestDictionary
