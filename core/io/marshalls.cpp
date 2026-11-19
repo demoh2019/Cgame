@@ -30,8 +30,6 @@
 
 #include "marshalls.h"
 
-#include <utility>
-
 #include "core/io/resource_loader.h"
 #include "core/object/class_db.h"
 #include "core/object/ref_counted.h"
@@ -39,7 +37,9 @@
 #include "core/variant/container_type_validate.h"
 
 #include <climits>
+#include <cstdint>
 #include <cstdio>
+#include <utility>
 
 void EncodedObjectAsID::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("set_object_id", "id"), &EncodedObjectAsID::set_object_id);
