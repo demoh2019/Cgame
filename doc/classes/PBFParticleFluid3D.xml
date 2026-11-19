@@ -1,0 +1,126 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<class name="PBFParticleFluid3D" inherits="Node3D" api_type="core" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="../class.xsd">
+	<brief_description>
+		Experimental native CPU particle fluid with position-based density constraints.
+	</brief_description>
+	<description>
+		Simulates up to 2048 particles using Position Based Fluids (PBF): a compactly supported SPH kernel, iterative density constraints, deterministic sorted-cell neighbor lookup, artificial pressure and optional XSPH velocity smoothing. Unlike static fluid-plane buoyancy, particles move independently and can form a deforming free surface.
+		Particle positions, velocities, box bounds, gravity and impulses are all in this node's [b]local coordinate system[/b]. The node does not create a visible mesh: render particles yourself with [MultiMeshInstance3D], a custom shader or a fluid surface renderer. See the Cgame Physics Lab sample for GPU-instanced sphere visualization.
+		[b]Experimental:[/b] This is a bounded CPU demonstration of PBF, not a fully incompressible Navier-Stokes solver. The density constraint is one-sided (it prevents compression rather than forcing dilute free surfaces to expand). It does not implement viscosity between fluid and rigid bodies, surface reconstruction, GPU compute, two-way rigid-body impulses or thermal/multiphase effects.
+		[b]Note:[/b] By default [member simulation_enabled] and [member collide_with_bodies] are [code]false[/code], so the class does no per-frame work. For manual stepping, use [method step] while simulation is disabled. The internal simulation tick runs in the regular physics frame. Parameters are intentionally capped to protect memory, runtime cost and numerical stability.
+	</description>
+	<methods>
+		<method name="add_velocity_pulse">
+			<return type="int" />
+			<param index="0" name="local_center" type="Vector3" />
+			<param index="1" name="radius" type="float" />
+			<param index="2" name="delta_velocity" type="Vector3" />
+			<description>
+				Adds a bounded, smooth radial impulse to particle velocities. Returns the number of affected particles. This is a velocity change, not a conserved Newton-second impulse, so it is intended for scripted stirring or splashes.
+			</description>
+		</method>
+		<method name="clear_particles">
+			<return type="void" />
+			<description>
+				Clears the fluid's particle state and reusable neighbor-grid storage.
+			</description>
+		</method>
+		<method name="create_block">
+			<return type="bool" />
+			<param index="0" name="origin" type="Vector3" />
+			<param index="1" name="dimensions" type="Vector3i" />
+			<param index="2" name="spacing" type="float" />
+			<description>
+				Creates a regularly spaced local-coordinate cuboid of liquid particles with zero initial velocities. The result is clamped to [member box_min] and [member box_max]. Returns [code]false[/code] without changing the previous particle state on invalid arguments or when the total count exceeds 2048.
+			</description>
+		</method>
+		<method name="get_average_density" qualifiers="const">
+			<return type="float" />
+			<description>
+				Returns the mean SPH density measured in the latest PBF constraint pass. Zero before the first successful simulation step.
+			</description>
+		</method>
+		<method name="get_last_neighbor_evaluations" qualifiers="const">
+			<return type="int" />
+			<description>
+				Returns the bounded number of neighbor interactions in the most recent substep. Useful for performance profiling; a particle can visit at most 128 neighbors during each solver iteration.
+			</description>
+		</method>
+		<method name="get_particle_count" qualifiers="const">
+			<return type="int" />
+			<description>
+				Returns the number of live fluid particles (maximum 2048).
+			</description>
+		</method>
+		<method name="get_particle_positions" qualifiers="const">
+			<return type="PackedVector3Array" />
+			<description>
+				Returns a copy of the local-coordinate particle positions. Intended for rendering or inspection; avoid calling repeatedly for large batches.
+			</description>
+		</method>
+		<method name="get_particle_velocities" qualifiers="const">
+			<return type="PackedVector3Array" />
+			<description>
+				Returns a copy of the local-coordinate particle velocities.
+			</description>
+		</method>
+		<method name="set_particle_positions">
+			<return type="bool" />
+			<param index="0" name="positions" type="PackedVector3Array" />
+			<description>
+				Replaces all particles with these local positions and zero velocities, allocating reusable simulation buffers once. Rejects more than 2048 particles, nonfinite values, or out-of-range coordinates without mutating the current fluid state.
+			</description>
+		</method>
+		<method name="step">
+			<return type="bool" />
+			<param index="0" name="delta" type="float" />
+			<description>
+				Advances the native fluid solver manually for [param delta] seconds. The step subdivides into at most eight segments of at most 1/60 second each. Returns [code]false[/code] for invalid or too-large timesteps. Do not also call this method while [member simulation_enabled] is enabled unless intentionally advancing the fluid twice.
+			</description>
+		</method>
+	</methods>
+	<members>
+		<member name="artificial_pressure" type="float" setter="set_artificial_pressure" getter="get_artificial_pressure" default="0.002">
+			Small negative particle correction that reduces clustering and tensile instability.
+		</member>
+		<member name="boundary_restitution" type="float" setter="set_boundary_restitution" getter="get_boundary_restitution" default="0.1">
+			Rebound fraction of outward velocity components at box or solid collision boundaries.
+		</member>
+		<member name="box_max" type="Vector3" setter="set_box_max" getter="get_box_max" default="Vector3(2, 4, 2)">
+			Maximum local coordinates of the confining liquid tank.
+		</member>
+		<member name="box_min" type="Vector3" setter="set_box_min" getter="get_box_min" default="Vector3(-2, 0, -2)">
+			Minimum local coordinates of the confining liquid tank.
+		</member>
+		<member name="collide_with_bodies" type="bool" setter="set_collide_with_bodies" getter="is_collide_with_bodies_enabled" default="false">
+			Enables one-way swept point-to-body ray collision for particles. Does not apply a reaction impulse to the hit rigid body and is disabled by default.
+		</member>
+		<member name="collision_mask" type="int" setter="set_collision_mask" getter="get_collision_mask" default="1">
+			Physics layers queried by the optional body collision sweep.
+		</member>
+		<member name="gravity" type="Vector3" setter="set_gravity" getter="get_gravity" default="Vector3(0, -9.8, 0)">
+			Fluid acceleration in the node's local space, in metres per second squared.
+		</member>
+		<member name="particle_mass" type="float" setter="set_particle_mass" getter="get_particle_mass" default="6.0">
+			Particle mass for the SPH kernel and PBF density constraints.
+		</member>
+		<member name="particle_radius" type="float" setter="set_particle_radius" getter="get_particle_radius" default="0.055">
+			Offset from tank walls and rigid-body hit points. This does not create individual sphere collision objects.
+		</member>
+		<member name="rest_density" type="float" setter="set_rest_density" getter="get_rest_density" default="1000.0">
+			Target density for the unilateral PBF compression constraint.
+		</member>
+		<member name="simulation_enabled" type="bool" setter="set_simulation_enabled" getter="is_simulation_enabled" default="false">
+			Enables automatic native physics-frame stepping.
+		</member>
+		<member name="smoothing_radius" type="float" setter="set_smoothing_radius" getter="get_smoothing_radius" default="0.32">
+			SPH smoothing radius, also used as the width of each spatial grid cell.
+		</member>
+		<member name="solver_iterations" type="int" setter="set_solver_iterations" getter="get_solver_iterations" default="4">
+			Number of PBF density projection iterations per substep, clamped to 1–12.
+		</member>
+		<member name="xsph_viscosity" type="float" setter="set_xsph_viscosity" getter="get_xsph_viscosity" default="0.015">
+			Blends neighboring particle velocities using an XSPH-style smoothing filter.
+		</member>
+	</members>
+</class>
