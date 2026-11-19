@@ -1299,6 +1299,8 @@ GodotSpace3D::GodotSpace3D() {
 	soft_body_self_collision_thickness = Math::is_finite(configured_self_thickness) ? MAX(real_t(0.0), configured_self_thickness) : real_t(0.0);
 	const real_t configured_self_compliance = GLOBAL_GET("physics/3d/solver/soft_body_self_collision_compliance");
 	soft_body_self_collision_compliance = Math::is_finite(configured_self_compliance) ? MAX(real_t(0.0), configured_self_compliance) : real_t(0.000001);
+	const real_t configured_self_friction = GLOBAL_GET("physics/3d/solver/soft_body_self_collision_friction");
+	soft_body_self_collision_friction = Math::is_finite(configured_self_friction) ? MAX(real_t(0.0), configured_self_friction) : real_t(0.0);
 	soft_body_self_collision_max_contacts_per_vertex = CLAMP((int)GLOBAL_GET("physics/3d/solver/soft_body_self_collision_max_contacts_per_vertex"), 1, 32);
 	soft_body_self_collision_edge_edge = GLOBAL_GET("physics/3d/solver/soft_body_self_collision_edge_edge");
 	const real_t configured_tether_compliance = GLOBAL_GET("physics/3d/solver/soft_body_xpbd_tether_compliance");
