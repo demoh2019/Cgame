@@ -111,6 +111,33 @@ python3 tests/stress/scale_sweep.py \
 | 2D transform propagation | `canvas_transform_2d` | Wide CanvasItem subtree; separate parent transform mutation and descendant global-transform rebuild times |
 | SceneTree notification dispatch | `process_dispatch` | Thousands of native Nodes with mixed ordinary/internal process flags and frame/physics time monitors |
 
+## Contact restitution stability (Jolt / Box2D-style threshold)
+
+Built-in GodotPhysics now suppresses contact restitution when the approaching
+speed along the contact normal is below a configurable per-space cutoff:
+
+- `physics/2d/solver/restitution_velocity_threshold`: default **30 px/s**
+- `physics/3d/solver/restitution_velocity_threshold`: default **1 m/s**
+
+Setting the cutoff to `0` disables low-speed suppression. These settings are
+read when a GodotPhysics space is created; they do not affect third-party
+physics backends and do not retroactively change existing spaces. This changes
+low-speed rebound behavior intentionally, while preserving higher-speed bounce.
+
+The low-level `physics_restitution_2d` and `physics_restitution_3d` stress
+cases check that two equal-mass, zero-gravity bodies settle after a slow
+head-on impact, but rebound after a faster impact:
+
+```bash
+python3 tests/stress/run.py --godot ./bin/godot.linuxbsd.editor.dev.x86_64 \
+  --case physics_restitution_2d,physics_restitution_3d \
+  --scale 1 --frames 12 --repeats 3 --timeout 120 \
+  --output out/restitution-regression.json
+```
+
+Run these with the built-in GodotPhysics server selected. Record results before
+and after changes, and verify build/test status independently.
+
 ## Million-body sparse physics benchmark (opt-in)
 
 `physics_rid_sparse_2d` and `physics_rid_sparse_3d` construct collision-shaped
