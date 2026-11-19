@@ -148,7 +148,9 @@ void BoxContainer::_resort() {
 
 		ERR_FAIL_COND(get_child_count() != child_count);
 		for (int i = 0; i < child_count; i++) {
-			Control *c = as_sortable_control(get_child(i), SortableVisibilityMode::VISIBLE);
+			// Locally visible controls outside the tree never entered the
+			// first-pass cache, and contributed no sizes in the old map.
+			Control *c = as_sortable_control(get_child(i));
 			if (!c) {
 				continue;
 			}
@@ -289,12 +291,12 @@ void BoxContainer::_resort() {
 	}
 
 	for (int i = start; i != end; i += delta) {
+		ERR_FAIL_COND(get_child_count() != child_count);
 		Control *c = as_sortable_control(get_child(i));
 		if (!c) {
 			continue;
 		}
 
-		ERR_FAIL_COND(get_child_count() != child_count);
 		ERR_FAIL_COND(min_size_cache[i].control != c);
 		_MinSizeCache &msc = min_size_cache[i].size;
 
