@@ -210,6 +210,8 @@ class GodotSoftBody3D : public GodotCollisionObject3D {
 	LocalVector<Vector3> xpbd_volume_gradients;
 	double xpbd_volume_rest = 0.0; // May change via plastic creep.
 	double xpbd_volume_original_rest = 0.0; // Frozen gas reference and damage baseline.
+	// Remaining enclosed gas mass; a scalar per body, no particle buffers.
+	double gas_mass_fraction = 1.0;
 	bool xpbd_volume_closed = false;
 	// Optional convex closed-shell mesh cooked into a fan of real tetrahedra.
 	// Tetra rest matrices and XPBD multipliers are retained across iterations.

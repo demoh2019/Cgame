@@ -156,6 +156,7 @@ private:
 	real_t soft_body_strain_rate_yield = 0.0; // Minimum relative link strain rate [1/s].
 	real_t soft_body_lift_coefficient = 0.0; // Two-sided aerodynamic cloth lift, opt-in.
 	real_t soft_body_gas_pressure_gamma = 0.0; // 0: legacy pressure, >0: sealed gas EOS.
+	real_t soft_body_gas_leak_rate = 0.0; // Optional pressure-driven gas loss, 1/s.
 	bool soft_body_hydrostatic_pressure = false; // Opt-in hydrostatic loading on closed meshes.
 	bool soft_body_hydrodynamic_drag = false; // Opt-in immersed drag on open or closed SoftBody3D surfaces.
 	real_t soft_body_hydrodynamic_tangent_ratio = 0.25; // Fraction of normal drag in tangential direction.
@@ -404,6 +405,7 @@ public:
 	_FORCE_INLINE_ real_t get_soft_body_strain_rate_yield() const { return soft_body_strain_rate_yield; }
 	_FORCE_INLINE_ real_t get_soft_body_lift_coefficient() const { return soft_body_lift_coefficient; }
 	_FORCE_INLINE_ real_t get_soft_body_gas_pressure_gamma() const { return soft_body_gas_pressure_gamma; }
+	_FORCE_INLINE_ real_t get_soft_body_gas_leak_rate() const { return soft_body_gas_leak_rate; }
 	_FORCE_INLINE_ bool is_soft_body_hydrostatic_pressure_enabled() const { return soft_body_hydrostatic_pressure; }
 	_FORCE_INLINE_ bool is_soft_body_hydrodynamic_drag_enabled() const { return soft_body_hydrodynamic_drag; }
 	_FORCE_INLINE_ real_t get_soft_body_hydrodynamic_tangent_ratio() const { return soft_body_hydrodynamic_tangent_ratio; }

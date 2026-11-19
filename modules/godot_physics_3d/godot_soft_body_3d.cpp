@@ -43,6 +43,7 @@
 #include "servers/physics_softbody_area_rate_damping.h"
 #include "servers/physics_softbody_aero_lift.h"
 #include "servers/physics_softbody_adiabatic_gas.h"
+#include "servers/physics_softbody_gas_leak.h"
 #include "servers/physics_softbody_shape_matching.h"
 #include "servers/physics_fem_tetra_neo_hookean.h"
 #include "servers/physics_fem_tetra_standard_linear_solid.h"
@@ -841,6 +842,8 @@ static _FORCE_INLINE_ double _soft_body_signed_face_volume(const Vector3 &p_a, c
 void GodotSoftBody3D::initialize_volume_constraint() {
 	xpbd_volume_closed = false;
 	xpbd_volume_rest = 0.0;
+	// Reinitializing the closed rest shell starts a new gas charge.
+	gas_mass_fraction = 1.0;
 	xpbd_volume_original_rest = 0.0;
 	if (!get_space() ||
 			(get_space()->get_soft_body_xpbd_volume_compliance() <= 0.0 &&
@@ -3012,8 +3015,22 @@ void GodotSoftBody3D::apply_forces(const LocalVector<GodotArea3D *> &p_wind_area
 		for (const Face &face : faces) {
 			signed_volume += _soft_body_signed_face_volume(face.n[0]->x, face.n[1]->x, face.n[2]->x, origin);
 		}
-		physics_softbody_adiabatic_pressure(xpbd_volume_original_rest, signed_volume,
-				double(pressure_coefficient), double(gas_gamma), gas_pressure);
+		// At the default zero leak rate, preserve the *original*
+		// adiabatic path and its arithmetic cost (no extra power/exponential).
+		// The persistent per-body charge changes only in explicitly vented
+		// closed shells, once per predict_motion() physics step.
+		const real_t leak_rate = get_space()->get_soft_body_gas_leak_rate();
+		if (leak_rate == real_t(0.0) && gas_mass_fraction == 1.0) {
+			physics_softbody_adiabatic_pressure(xpbd_volume_original_rest, signed_volume,
+					double(pressure_coefficient), double(gas_gamma), gas_pressure);
+		} else {
+			// If geometry inverts, the helper rejects it and neither gas
+			// charge nor applied gas pressure is mutated.
+			physics_softbody_gas_leak_step(xpbd_volume_original_rest, signed_volume,
+					double(pressure_coefficient), double(gas_gamma),
+					double(leak_rate), double(p_delta),
+					gas_mass_fraction, gas_pressure);
+		}
 	}
 	const bool apply_wind = !p_wind_areas.is_empty();
 	const bool apply_drag = drag_coefficient > 0.0;

@@ -120,6 +120,23 @@ jobs:
           platform: linuxbsd
           target: editor
           scons-flags: dev_build=yes tests=yes debug_symbols=no module_text_server_fb_enabled=yes -j2
+      - name: Verify sealed gas leak native EOS and mass-loss regressions
+        shell: bash
+        run: |
+          set -euo pipefail
+          timeout 120s ./bin/godot.linuxbsd.editor.dev.x86_64 \
+            --headless --test --test-case="*[PhysicsGasLeak]*" \
+            --success=true --no-colors 2>&1 | tee physics-softbody-gas-leak-native.log
+          grep -Fq '[PhysicsGasLeak]' physics-softbody-gas-leak-native.log
+      - name: Runtime vented versus sealed SoftBody balloon regression
+        shell: bash
+        run: |
+          set -euo pipefail
+          timeout 120s ./bin/godot.linuxbsd.editor.dev.x86_64 \
+            --headless --path tests/stress \
+            --script res://physics_softbody_gas_leak_3d_regression.gd \
+            2>&1 | tee physics-softbody-gas-leak-runtime.log
+          grep -Fq 'SoftBody sealed gas discharge passed' physics-softbody-gas-leak-runtime.log
       - name: Native tilted capsule hydrostatic integration regressions
         shell: bash
         run: |
@@ -841,6 +858,8 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+          ./bin/godot.linuxbsd.editor.dev.x86_64 --headless --path tests/stress \
+            --script res://physics_softbody_gas_leak_3d_regression.gd --check-only
           ./bin/godot.linuxbsd.editor.dev.x86_64 --headless --path tests/stress --script res://stress.gd --check-only
           ./bin/godot.linuxbsd.editor.dev.x86_64 --headless --path tests/stress --script res://memory_soak.gd --check-only
       - name: Run the complete native C++ test suite
