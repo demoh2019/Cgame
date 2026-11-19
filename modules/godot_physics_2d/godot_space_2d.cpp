@@ -118,7 +118,9 @@ bool GodotPhysicsDirectSpaceState2D::intersect_ray(const PS2DT::RayParameters &p
 	const Vector2 begin = p_parameters.from;
 	const Vector2 end = p_parameters.to;
 	const Vector2 motion = end - begin;
-	const real_t length_squared = motion.length_squared();
+	const double motion_x = double(motion.x);
+	const double motion_y = double(motion.y);
+	const double length_squared = motion_x * motion_x + motion_y * motion_y;
 	if (length_squared == 0.0) {
 		return false;
 	}
@@ -130,10 +132,12 @@ bool GodotPhysicsDirectSpaceState2D::intersect_ray(const PS2DT::RayParameters &p
 		PS2DT::RayResult &result;
 		Vector2 from;
 		Vector2 motion;
-		real_t inv_motion_length_squared;
+		double motion_x;
+		double motion_y;
+		double inv_motion_length_squared;
 		bool hit = false;
 	};
-	RayCastData state = { p_parameters, r_result, begin, motion, 1.0 / length_squared };
+	RayCastData state = { p_parameters, r_result, begin, motion, motion_x, motion_y, 1.0 / length_squared };
 
 	auto visitor = [] (GodotCollisionObject2D *object, int p_shape, real_t p_max_fraction, void *p_userdata) -> real_t {
 		RayCastData &data = *static_cast<RayCastData *>(p_userdata);
@@ -169,12 +173,17 @@ bool GodotPhysicsDirectSpaceState2D::intersect_ray(const PS2DT::RayParameters &p
 			const Transform2D xform = object->get_transform() * object->get_shape_transform(p_shape);
 			world_point = xform.xform(shape_point);
 			world_normal = inv_xform.basis_xform_inv(shape_normal).normalized();
-			fraction = data.motion.dot(world_point - data.from) * data.inv_motion_length_squared;
+			// Calculate the ray fraction in double precision. Squaring even a
+			// finite 1e19-unit float ray overflows real_t, and a 0 * INF
+			// fraction would corrupt near-hit clipping in the BVH traversal.
+			const double hit_x = double(world_point.x) - double(data.from.x);
+			const double hit_y = double(world_point.y) - double(data.from.y);
+			fraction = real_t((data.motion_x * hit_x + data.motion_y * hit_y) * data.inv_motion_length_squared);
 		}
 
 		// The broadphase may visit objects in any order. A closer exact hit
 		// controls both the result and the clipped ray for subsequent nodes.
-		if (fraction < 0.0 || fraction > p_max_fraction || (data.hit && fraction >= p_max_fraction)) {
+		if (!(fraction >= 0.0 && fraction <= p_max_fraction) || (data.hit && fraction >= p_max_fraction)) {
 			return p_max_fraction;
 		}
 		data.hit = true;
