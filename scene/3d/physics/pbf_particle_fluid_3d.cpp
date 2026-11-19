@@ -239,7 +239,7 @@ void PBFParticleFluid3D::_apply_vorticity_confinement(real_t p_delta) {
 	for (int i = 0; i < count; ++i) {
 		double density = double(self_density);
 		_pbf_for_neighbors(grid, points, count, i, smoothing_radius, MAX_NEIGHBORS,
-				[&](int p_j, const Vector3 &p_displacement, double p_d2) {
+				[&](int, const Vector3 &, double p_d2) {
 					density += double(particle_mass) *
 							double(PhysicsPBFKernel3D::poly6(p_d2, smoothing_radius));
 					++last_vorticity_neighbor_evaluations;
