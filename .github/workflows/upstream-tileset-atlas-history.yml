@@ -1,0 +1,36 @@
+name: Upstream TileSet atlas history regression
+
+on:
+  pull_request:
+    branches: [develop]
+    paths:
+      - modules/tilemap/editor/tile_set_editor.cpp
+      - modules/tilemap/editor/tile_set_atlas_source_editor.cpp
+      - modules/gdscript/register_types.cpp
+      - misc/scripts/tests/test_upstream_tileset_atlas_history.py
+      - .github/workflows/upstream-tileset-atlas-history.yml
+  push:
+    branches: [develop]
+    paths:
+      - modules/tilemap/editor/tile_set_editor.cpp
+      - modules/tilemap/editor/tile_set_atlas_source_editor.cpp
+      - modules/gdscript/register_types.cpp
+      - misc/scripts/tests/test_upstream_tileset_atlas_history.py
+      - .github/workflows/upstream-tileset-atlas-history.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  source-regression:
+    name: Python source regression guards
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Check TileSet resource ownership and UndoRedo calls
+        run: python3 -m unittest discover -s misc/scripts/tests -p test_upstream_tileset_atlas_history.py -v
