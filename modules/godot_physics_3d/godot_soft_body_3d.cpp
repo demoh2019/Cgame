@@ -33,10 +33,12 @@
 #include "godot_space_3d.h"
 
 #include "core/math/geometry_3d.h"
+#include "core/templates/hash_map.h"
 #include "servers/physics_3d/physics_server_3d_rendering_server_handler.h"
 #include "servers/physics_softbody_plasticity.h"
 #include "servers/physics_xpbd_distance.h"
 #include "servers/physics_xpbd_area.h"
+#include "servers/physics_xpbd_volume.h"
 #include "servers/rendering/rendering_server.h"
 
 #include <limits>
@@ -242,6 +244,8 @@ void GodotSoftBody3D::update_constants() {
 	reset_link_rest_lengths();
 	update_link_constants();
 	update_area();
+	// Rest shape / mesh updates require topology and volume re-validation.
+	xpbd_volume_topology_checked = false;
 }
 
 void GodotSoftBody3D::update_area() {
@@ -311,6 +315,150 @@ void GodotSoftBody3D::update_link_constants() {
 	for (Link &link : links) {
 		link.c0 = (link.n[0]->im + link.n[1]->im) * inv_linear_stiffness;
 	}
+}
+
+// Only a watertight, coherently oriented 2-manifold surface encloses a
+// usable signed volume. An open cloth or a broken triangle winding must not
+// receive a global volume constraint (it would pull particles arbitrarily).
+void GodotSoftBody3D::rebuild_xpbd_volume_rest_state() {
+	xpbd_volume_topology_checked = true;
+	xpbd_volume_valid = false;
+	xpbd_rest_volume = 0.0;
+	xpbd_volume_lambda = 0.0;
+	if (nodes.size() < 4 || faces.size() < 4) {
+		xpbd_volume_gradients.reset();
+		return;
+	}
+
+	struct EdgeUse {
+		uint8_t count = 0;
+		int8_t winding = 0;
+	};
+	HashMap<uint64_t, EdgeUse> edges;
+	for (const Face &face : faces) {
+		for (int j = 0; j < 3; ++j) {
+			const uint32_t a = face.n[j]->index;
+			const uint32_t b = face.n[(j + 1) % 3]->index;
+			if (a == b) {
+				return;
+			}
+			const uint64_t key = _soft_body_edge_key(a, b);
+			EdgeUse *usage = edges.getptr(key);
+			if (usage) {
+				if (usage->count >= 2) {
+					return; // Non-manifold edge.
+				}
+				++usage->count;
+				usage->winding += a < b ? 1 : -1;
+			} else {
+				EdgeUse new_usage;
+				new_usage.count = 1;
+				new_usage.winding = a < b ? 1 : -1;
+				edges.insert(key, new_usage);
+			}
+		}
+	}
+	for (const KeyValue<uint64_t, EdgeUse> &E : edges) {
+		if (E.value.count != 2 || E.value.winding != 0) {
+			return; // Boundary edge or inconsistent face orientation.
+		}
+	}
+
+	// Center the scalar triple products about a simulated node to reduce
+	// cancellation errors in large-world coordinates.
+	// Pre-prediction positions q hold the undeformed configuration at
+	// the start of this step. Gravity must not redefine the rest volume.
+	const Vector3 origin = nodes[0].q;
+	real_t signed_volume = 0.0;
+	for (const Face &face : faces) {
+		const Vector3 a = face.n[0]->q - origin;
+		const Vector3 b = face.n[1]->q - origin;
+		const Vector3 c = face.n[2]->q - origin;
+		Vector3 grad_a, grad_b, grad_c;
+		signed_volume += physics_xpbd_triangle_volume_terms(a, b, c, grad_a, grad_b, grad_c);
+	}
+	if (!Math::is_finite(signed_volume) || Math::abs(signed_volume) <= CMP_EPSILON) {
+		return;
+	}
+	xpbd_rest_volume = signed_volume;
+	xpbd_volume_gradients.resize(nodes.size()); // Allocated once at mesh build.
+	xpbd_volume_valid = true;
+}
+
+void GodotSoftBody3D::solve_xpbd_volume_constraint(real_t p_alpha_tilde) {
+	if (!xpbd_volume_valid || dynamic_node_count == 0) {
+		return;
+	}
+
+	for (Vector3 &gradient : xpbd_volume_gradients) {
+		gradient = Vector3();
+	}
+	const Vector3 origin = nodes[0].x;
+	// The face terms are only meaningful if all intermediate values stay
+	// finite. Invalid geometry must leave all particle positions unchanged.
+	double signed_volume = 0.0;
+	for (const Face &face : faces) {
+		const Vector3 a = face.n[0]->x - origin;
+		const Vector3 b = face.n[1]->x - origin;
+		const Vector3 c = face.n[2]->x - origin;
+		Vector3 ga, gb, gc;
+		const real_t term = physics_xpbd_triangle_volume_terms(a, b, c, ga, gb, gc);
+		if (!Math::is_finite(term) || !ga.is_finite() || !gb.is_finite() || !gc.is_finite()) {
+			return;
+		}
+		signed_volume += double(term);
+		xpbd_volume_gradients[face.n[0]->index] += ga;
+		xpbd_volume_gradients[face.n[1]->index] += gb;
+		xpbd_volume_gradients[face.n[2]->index] += gc;
+	}
+	if (!Math::is_finite(signed_volume)) {
+		return;
+	}
+	const double error = signed_volume - double(xpbd_rest_volume);
+	if (!Math::is_finite(error) || Math::abs(error) > double(std::numeric_limits<real_t>::max())) {
+		return;
+	}
+
+	double weighted_norm = 0.0;
+	for (uint32_t i = 0; i < nodes.size(); ++i) {
+		if (!xpbd_volume_gradients[i].is_finite()) {
+			return;
+		}
+		weighted_norm += double(nodes[i].im) * double(xpbd_volume_gradients[i].length_squared());
+	}
+	if (!(weighted_norm > 0.0) || !Math::is_finite(weighted_norm) ||
+			weighted_norm > double(std::numeric_limits<real_t>::max())) {
+		return;
+	}
+
+	// Stage the multiplier. If any proposed vertex coordinate overflows,
+	// neither the multiplier nor any particle position is modified.
+	real_t proposed_lambda = xpbd_volume_lambda;
+	real_t delta_lambda;
+	if (!physics_xpbd_volume_delta(real_t(error), real_t(weighted_norm),
+				p_alpha_tilde, proposed_lambda, delta_lambda)) {
+		return;
+	}
+	for (int pass = 0; pass < 2; ++pass) {
+		for (uint32_t i = 0; i < nodes.size(); ++i) {
+			if (!(nodes[i].im > real_t(0.0))) {
+				continue; // Pinned vertex.
+			}
+			const Vector3 &gradient = xpbd_volume_gradients[i];
+			const Vector3 &position = nodes[i].x;
+			const double factor = double(nodes[i].im) * double(delta_lambda);
+			const Vector3 next(real_t(double(position.x) + double(gradient.x) * factor),
+					real_t(double(position.y) + double(gradient.y) * factor),
+					real_t(double(position.z) + double(gradient.z) * factor));
+			if (!next.is_finite()) {
+				return;
+			}
+			if (pass == 1) {
+				nodes[i].x = next;
+			}
+		}
+	}
+	xpbd_volume_lambda = proposed_lambda;
 }
 
 void GodotSoftBody3D::apply_nodes_transform(const Transform3D &p_transform) {
