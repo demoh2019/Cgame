@@ -15,7 +15,7 @@ const CanvasScenePerf := preload("res://canvas_scene_perf.gd")
 const CASES := [
 	"containers", "array_literals", "dictionary_snapshot", "strings", "script_vm", "math", "signals",
 	"scene_tree", "packed_scene", "images", "json", "stream", "stream_bulk",
-	"file_io", "threads", "physics_2d", "physics_contacts_zero_friction_2d", "physics_contacts_friction_2d", "physics_3d", "physics_frictionless_3d", "physics_ccd_3d", "physics_joint_chain_2d", "physics_joint_chain_3d", "physics_sparse_2d", "physics_sparse_3d", "physics_proxies_2d", "physics_proxies_3d", "physics_rid_sparse_2d", "physics_rid_sparse_3d", "physics_rid_moving_2d", "physics_rid_moving_3d", "physics_restitution_2d", "physics_restitution_3d",
+	"file_io", "threads", "physics_2d", "physics_contacts_zero_friction_2d", "physics_contacts_friction_2d", "physics_contact_manifolds_2d", "physics_3d", "physics_frictionless_3d", "physics_ccd_3d", "physics_joint_chain_2d", "physics_joint_chain_3d", "physics_sparse_2d", "physics_sparse_3d", "physics_proxies_2d", "physics_proxies_3d", "physics_rid_sparse_2d", "physics_rid_sparse_3d", "physics_rid_moving_2d", "physics_rid_moving_3d", "physics_restitution_2d", "physics_restitution_3d",
 	"object_churn", "memory_churn", "astar_grid", "astar_grid_neighbors", "astar_grid_jps", "astar_grid_fill", "astar_grid_rebuild", "astar_relax_2d", "astar_relax_3d", "astar_graph", "tweens", "audio_buffers",
 	"variant_codec", "packet_stream", "packet_tx_batch", "packet_rx_batch", "packet_variant_reuse", "ui_layout", "grid_reflow", "box_reflow", "flow_reflow", "render_2d", "render_3d", "render_ellipse_2d", "render_light_culling_3d",
 	"resource_load",
@@ -261,6 +261,8 @@ func _run_case(test_case: String, scale: int, frames: int, seed: int) -> Diction
 			return await _physics_contacts_2d(scale, frames, 0.0)
 		"physics_contacts_friction_2d":
 			return await _physics_contacts_2d(scale, frames, 1.0)
+		"physics_contact_manifolds_2d":
+			return await _physics_contact_manifolds_2d(scale, frames)
 		"physics_3d":
 			return await _physics_3d(scale, frames)
 		"physics_frictionless_3d":
@@ -681,6 +683,71 @@ func _physics_contacts_2d(scale: int, frames: int, friction: float) -> Dictionar
 
 	var stats := _frame_statistics(frame_intervals)
 	return {"bodies": count, "friction": friction, "physics_frames": frames,
+		"peak_physics_ms": peak_physics_ms, "peak_collision_pairs": peak_pairs,
+		"frame_interval_ms": stats, "frame_p95_ms": stats["p95"], "state_valid": state_valid}
+
+
+# Persistent 2-point box manifolds. This case complements the circle stress
+# scenarios: contact point order can change as boxes rotate and slide.
+func _physics_contact_manifolds_2d(scale: int, frames: int) -> Dictionary:
+	var space := PhysicsServer2D.space_create()
+	var floor_shape := PhysicsServer2D.rectangle_shape_create()
+	var box_shape := PhysicsServer2D.rectangle_shape_create()
+	PhysicsServer2D.shape_set_data(floor_shape, Vector2(60.0, 0.7))
+	PhysicsServer2D.shape_set_data(box_shape, Vector2(0.7, 0.45))
+
+	var floor := PhysicsServer2D.body_create()
+	PhysicsServer2D.body_set_mode(floor, PhysicsServer2D.BODY_MODE_STATIC)
+	PhysicsServer2D.body_add_shape(floor, floor_shape)
+	PhysicsServer2D.body_set_param(floor, PhysicsServer2D.BODY_PARAM_FRICTION, 0.8)
+	PhysicsServer2D.body_set_space(floor, space)
+
+	var count := 128 * scale
+	var bodies: Array[RID] = []
+	bodies.resize(count)
+	for i in range(count):
+		var body := PhysicsServer2D.body_create()
+		PhysicsServer2D.body_set_mode(body, PhysicsServer2D.BODY_MODE_RIGID)
+		PhysicsServer2D.body_add_shape(body, box_shape)
+		PhysicsServer2D.body_set_param(body, PhysicsServer2D.BODY_PARAM_FRICTION, 0.8)
+		PhysicsServer2D.body_set_state(body, PhysicsServer2D.BODY_STATE_CAN_SLEEP, false)
+		PhysicsServer2D.body_set_state(body, PhysicsServer2D.BODY_STATE_TRANSFORM,
+				Transform2D(0.0, Vector2(float(i % 64) * 1.65 - 52.0, -1.20 - float(int(i / 64)) * 0.94)))
+		if i % 2 == 0:
+			PhysicsServer2D.body_set_state(body, PhysicsServer2D.BODY_STATE_ANGULAR_VELOCITY, 0.1)
+			PhysicsServer2D.body_set_state(body, PhysicsServer2D.BODY_STATE_LINEAR_VELOCITY, Vector2(0.06, 0.0))
+		else:
+			PhysicsServer2D.body_set_state(body, PhysicsServer2D.BODY_STATE_ANGULAR_VELOCITY, -0.1)
+			PhysicsServer2D.body_set_state(body, PhysicsServer2D.BODY_STATE_LINEAR_VELOCITY, Vector2(-0.06, 0.0))
+		PhysicsServer2D.body_set_space(body, space)
+		bodies[i] = body
+
+	PhysicsServer2D.space_set_active(space, true)
+	var peak_physics_ms := 0.0
+	var peak_pairs := 0
+	var frame_intervals: Array[float] = []
+	var last_tick := Time.get_ticks_usec()
+	for i in range(frames):
+		await physics_frame
+		var now := Time.get_ticks_usec()
+		frame_intervals.append(float(now - last_tick) / 1000.0)
+		last_tick = now
+		peak_physics_ms = maxf(peak_physics_ms, Performance.get_monitor(Performance.TIME_PHYSICS_PROCESS) * 1000.0)
+		peak_pairs = maxi(peak_pairs, int(Performance.get_monitor(Performance.PHYSICS_2D_COLLISION_PAIRS)))
+
+	var probe: Transform2D = PhysicsServer2D.body_get_state(bodies[0], PhysicsServer2D.BODY_STATE_TRANSFORM)
+	var state_valid := probe.origin.is_finite()
+	PhysicsServer2D.space_set_active(space, false)
+	for body in bodies:
+		PhysicsServer2D.free_rid(body)
+	bodies.clear()
+	PhysicsServer2D.free_rid(floor)
+	PhysicsServer2D.free_rid(box_shape)
+	PhysicsServer2D.free_rid(floor_shape)
+	PhysicsServer2D.free_rid(space)
+
+	var stats := _frame_statistics(frame_intervals)
+	return {"bodies": count, "physics_frames": frames,
 		"peak_physics_ms": peak_physics_ms, "peak_collision_pairs": peak_pairs,
 		"frame_interval_ms": stats, "frame_p95_ms": stats["p95"], "state_valid": state_valid}
 
