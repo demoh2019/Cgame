@@ -121,6 +121,7 @@ private:
 	real_t max_contact_push_speed = 0.0; // 0: unlimited (legacy behavior).
 	real_t max_linear_velocity = 0.0; // Opt-in rigid speed limit, 0 disables.
 	real_t max_angular_velocity = 0.0; // Opt-in angular speed limit, rad/s; 0 disables.
+	real_t ccd_max_angular_motion = 0.0; // Opt-in maximum CCD rotation per physics step, radians.
 	real_t warm_start_coefficient = 1.0;
 	bool ccd_rotational_bounds = false; // Optional conservative angular sweep broadphase.
 	bool implicit_damping = false; // Box2D-style time-step-stable damping; disabled by default.
@@ -203,6 +204,7 @@ public:
 	_FORCE_INLINE_ real_t get_warm_start_coefficient() const { return warm_start_coefficient; }
 	_FORCE_INLINE_ real_t get_max_linear_velocity() const { return max_linear_velocity; }
 	_FORCE_INLINE_ real_t get_max_angular_velocity() const { return max_angular_velocity; }
+	_FORCE_INLINE_ real_t get_ccd_max_angular_motion() const { return ccd_max_angular_motion; }
 	_FORCE_INLINE_ bool is_ccd_rotational_bounds_enabled() const { return ccd_rotational_bounds; }
 	_FORCE_INLINE_ bool is_implicit_damping_enabled() const { return implicit_damping; }
 	_FORCE_INLINE_ bool are_gyroscopic_forces_enabled() const { return gyroscopic_forces; }
