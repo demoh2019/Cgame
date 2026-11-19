@@ -384,4 +384,53 @@ TEST_CASE("[RingBuffer] Bulk wrapped resize preserves sequence") {
 	}
 }
 
+TEST_CASE("[RingBuffer] Byte search covers wrapped storage and offsets") {
+	RingBuffer<uint8_t> rb(3);
+	const uint8_t first[] = { 10, 20, 30, 40, 50, 60 };
+	CHECK(rb.write(first, 6) == 6);
+	CHECK(rb.advance_read(5) == 5);
+	const uint8_t second[] = { 70, 80, 90, 100, 110 };
+	CHECK(rb.write(second, 5) == 5);
+
+	CHECK(rb.find(uint8_t(60), 0, 6) == 0);
+	CHECK(rb.find(uint8_t(70), 0, 6) == 1);
+	CHECK(rb.find(uint8_t(90), 0, 6) == 3);
+	CHECK(rb.find(uint8_t(110), 0, 6) == 5);
+	CHECK(rb.find(uint8_t(90), 2, 4) == 1);
+	CHECK(rb.find(uint8_t(90), 4, 2) == -1);
+	CHECK(rb.find(uint8_t(10), 0, 6) == -1);
+	CHECK(rb.data_left() == 6);
+}
+
+TEST_CASE("[RingBuffer] Signed byte searches match raw byte values") {
+	RingBuffer<int8_t> rb(3);
+	const int8_t data[] = { -128, -7, 0, 42, 127 };
+	CHECK(rb.write(data, 5) == 5);
+	CHECK(rb.find(int8_t(-128), 0, 5) == 0);
+	CHECK(rb.find(int8_t(-7), 0, 5) == 1);
+	CHECK(rb.find(int8_t(127), 1, 4) == 3);
+	CHECK(rb.find(int8_t(5), 0, 5) == -1);
+}
+
+TEST_CASE("[RingBuffer] Invalid byte search ranges do not access memory") {
+	RingBuffer<uint8_t> rb(3);
+	const uint8_t data[] = { 1, 2, 3 };
+	CHECK(rb.write(data, 3) == 3);
+	CHECK(rb.find(uint8_t(1), -1, 2) == -1);
+	CHECK(rb.find(uint8_t(1), 0, -1) == -1);
+	CHECK(rb.find(uint8_t(1), 0, 0) == -1);
+	CHECK(rb.find(uint8_t(1), 3, 1) == -1);
+	CHECK(rb.find(uint8_t(2), 1, 2147483647) == 0);
+	CHECK(rb.data_left() == 3);
+}
+
+TEST_CASE("[RingBuffer] Nontrivial element search keeps equality semantics") {
+	RingBuffer<std::string> rb(3);
+	const std::string values[] = { "one", "two", "three", "four" };
+	CHECK(rb.write(values, 4) == 4);
+	CHECK(rb.find(std::string("three"), 0, 4) == 2);
+	CHECK(rb.find(std::string("two"), 1, 2) == 0);
+	CHECK(rb.find(std::string("absent"), 0, 4) == -1);
+}
+
 } //namespace TestRingBuffer

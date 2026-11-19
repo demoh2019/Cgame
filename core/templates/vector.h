@@ -35,7 +35,9 @@
 #include "core/templates/sort_array.h"
 #include "core/typedefs.h"
 
+#include <cstring>
 #include <initializer_list>
+#include <type_traits>
 
 template <typename T>
 class Vector;
@@ -236,13 +238,23 @@ public:
 
 		ERR_FAIL_COND_V(begin > end, result);
 
-		Size result_size = end - begin;
-		result.resize(result_size);
+		const Size result_size = end - begin;
+		if (result_size == 0) {
+			return result;
+		}
+		if (result.resize(result_size) != OK) {
+			return Vector<T>();
+		}
 
-		const T *const r = ptr();
+		const T *const r = ptr() + begin;
 		T *const w = result.ptrw();
-		for (Size i = 0; i < result_size; ++i) {
-			w[i] = r[begin + i];
+		if constexpr (std::is_trivially_copyable_v<T>) {
+			// Typed element loops can inhibit bulk copies in debug and non-vectorizing builds.
+			std::memcpy(w, r, size_t(result_size) * sizeof(T));
+		} else {
+			for (Size i = 0; i < result_size; ++i) {
+				w[i] = r[i];
+			}
 		}
 
 		return result;

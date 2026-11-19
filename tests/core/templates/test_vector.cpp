@@ -444,6 +444,50 @@ TEST_CASE("[Vector] Slice") {
 	ERR_PRINT_ON;
 }
 
+TEST_CASE("[Vector] Slice large trivial arrays without aliasing") {
+	Vector<uint8_t> values;
+	REQUIRE(values.resize(8192) == OK);
+	uint8_t *const data = values.ptrw();
+	for (int i = 0; i < 8192; i++) {
+		data[i] = uint8_t(i * 37);
+	}
+
+	// The source is shared, but the slice must own independent storage.
+	Vector<uint8_t> shared = values;
+	Vector<uint8_t> slice = values.slice(31, 8191);
+	REQUIRE(slice.size() == 8160);
+	for (int i = 0; i < slice.size(); i++) {
+		CHECK(slice[i] == uint8_t((i + 31) * 37));
+	}
+	slice.write[0] = 255;
+	CHECK(values[31] == uint8_t(31 * 37));
+	CHECK(shared[31] == uint8_t(31 * 37));
+
+	Vector<uint8_t> empty_slice = values.slice(100, 100);
+	CHECK(empty_slice.is_empty());
+}
+
+TEST_CASE("[Vector] Slice nontrivial strings preserve independent values") {
+	Vector<String> words;
+	words.push_back("alpha");
+	words.push_back("beta");
+	words.push_back("gamma");
+	words.push_back("delta");
+
+	Vector<String> slice = words.slice(1, 3);
+	REQUIRE(slice.size() == 2);
+	CHECK(slice[0] == "beta");
+	CHECK(slice[1] == "gamma");
+	words.write[1] = "changed";
+	CHECK(slice[0] == "beta");
+	slice.write[1] = "updated";
+	CHECK(words[2] == "gamma");
+
+	Vector<String> empty;
+	CHECK(empty.slice(0, 0).is_empty());
+	CHECK(words.slice(-1, -1).is_empty());
+}
+
 TEST_CASE("[Vector] Find, has") {
 	Vector<int> vector;
 	vector.push_back(3);

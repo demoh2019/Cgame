@@ -120,24 +120,29 @@ public:
 	}
 
 	int find(const T &p_value, int p_offset, int p_max_size) const {
-		int left = data_left();
-		if ((p_offset + p_max_size) > left) {
-			p_max_size = left - p_offset;
-			if (p_max_size <= 0) {
-				return 0;
-			}
+		const int left = data_left();
+		if (p_offset < 0 || p_max_size <= 0 || p_offset >= left) {
+			return -1;
 		}
-		p_max_size = MIN(left, p_max_size);
+		// Subtract instead of adding sizes to avoid signed integer overflow.
+		p_max_size = MIN(left - p_offset, p_max_size);
 		int pos = read_pos;
 		inc(pos, p_offset);
 		int to_read = p_max_size;
 		while (to_read) {
-			int end = pos + to_read;
-			end = MIN(end, size());
-			int total = end - pos;
-			for (int i = 0; i < total; i++) {
-				if (data[pos + i] == p_value) {
-					return i + (p_max_size - to_read);
+			const int total = MIN(to_read, size() - pos);
+			if constexpr (std::is_integral_v<T> && sizeof(T) == 1 && !std::is_same_v<T, bool>) {
+				// Byte buffers (network/audio/streaming) can use optimized libc scanning.
+				const T *const begin = data.ptr() + pos;
+				const T *const found = static_cast<const T *>(std::memchr(begin, static_cast<unsigned char>(p_value), size_t(total)));
+				if (found) {
+					return p_max_size - to_read + int(found - begin);
+				}
+			} else {
+				for (int i = 0; i < total; i++) {
+					if (data[pos + i] == p_value) {
+						return i + (p_max_size - to_read);
+					}
 				}
 			}
 			to_read -= total;
