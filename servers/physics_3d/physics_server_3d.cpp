@@ -593,6 +593,10 @@ PhysicsServer3D::PhysicsServer3D() {
 	// Optional nonlinear tensile XPBD springs for deformable cloth/ropes.
 	// Stiffen beyond yield; zero preserves the original linear XPBD solver.
 	GLOBAL_DEF(PropertyInfo(Variant::FLOAT, "physics/3d/solver/soft_body_xpbd_tension_hardening", PROPERTY_HINT_RANGE, "0,100,0.1,or_greater"), 0.0);
+	// Additional compression-only edge stiffening for foams and crushable solids.
+	// Only applies to the XPBD stretch solver; 0 is bit-for-bit legacy behavior.
+	GLOBAL_DEF(PropertyInfo(Variant::FLOAT, "physics/3d/solver/soft_body_xpbd_compression_hardening", PROPERTY_HINT_RANGE, "0,100,0.1,or_greater"), 0.0);
+	GLOBAL_DEF(PropertyInfo(Variant::FLOAT, "physics/3d/solver/soft_body_xpbd_compression_yield_strain", PROPERTY_HINT_RANGE, "0,1,0.01"), 0.1);
 	GLOBAL_DEF(PropertyInfo(Variant::FLOAT, "physics/3d/solver/soft_body_xpbd_tension_yield_strain", PROPERTY_HINT_RANGE, "0,3,0.01,or_greater"), 0.1);
 	// Independent unilateral XPBD limits prevent excessively stretching or
 	// compressing a soft-body link while permitting normal elastic motion
@@ -608,6 +612,11 @@ PhysicsServer3D::PhysicsServer3D() {
 	// Zero preserves legacy behavior; finite positive rates use exponential
 	// relaxation while conserving link momentum and keeping pins fixed.
 	GLOBAL_DEF(PropertyInfo(Variant::FLOAT, "physics/3d/solver/soft_body_link_damping", PROPERTY_HINT_RANGE, "0,1000,0.1,or_greater,suffix:1/s"), 0.0);
+	// Nonlinear viscous dashpot for fast link compression/stretching, which
+	// reacts to strain rate rather than applying the same damping at all speeds.
+	// 0 keeps the legacy simulation and avoids extra O(links) work.
+	GLOBAL_DEF(PropertyInfo(Variant::FLOAT, "physics/3d/solver/soft_body_strain_rate_damping", PROPERTY_HINT_RANGE, "0,100,0.1,or_greater"), 0.0);
+	GLOBAL_DEF(PropertyInfo(Variant::FLOAT, "physics/3d/solver/soft_body_strain_rate_yield", PROPERTY_HINT_RANGE, "0,100,0.1,or_greater,suffix:1/s"), 0.0);
 	// Optional Bullet-style aerodynamic lift for deformable surfaces.
 	// Computed from mean face velocity through still air; disabled by default.
 	GLOBAL_DEF(PropertyInfo(Variant::FLOAT, "physics/3d/solver/soft_body_lift_coefficient", PROPERTY_HINT_RANGE, "0,10,0.01,or_greater"), 0.0);
