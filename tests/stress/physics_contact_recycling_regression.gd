@@ -32,6 +32,7 @@ func _run() -> void:
 		PhysicsServer2D.body_add_shape(box, box_shape)
 		PhysicsServer2D.body_set_param(box, PhysicsServer2D.BODY_PARAM_FRICTION, 0.8)
 		PhysicsServer2D.body_set_state(box, PhysicsServer2D.BODY_STATE_CAN_SLEEP, false)
+		PhysicsServer2D.body_set_param(box, PhysicsServer2D.BODY_PARAM_GRAVITY_SCALE, -1.0)
 		var angle: float = 0.12 if i % 2 == 0 else -0.12
 		PhysicsServer2D.body_set_state(box, PhysicsServer2D.BODY_STATE_TRANSFORM, Transform2D(angle, Vector2(x, -2.5)))
 		PhysicsServer2D.body_set_state(box, PhysicsServer2D.BODY_STATE_LINEAR_VELOCITY, Vector2(0.35 if i % 2 == 0 else -0.35, 0.0))
