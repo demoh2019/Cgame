@@ -2280,8 +2280,14 @@ void Node::reparent(RequiredParam<Node> p_parent, bool p_keep_global_transform) 
 			Node *check = to_visit[to_visit.size() - 1];
 			to_visit.resize(to_visit.size() - 1);
 
-			for (int i = 0; i < check->get_child_count(false); i++) {
-				Node *child = check->get_child(i, false);
+			// Read the ordered cache once. get_child_count() followed by
+			// get_child() for every child repeats guards and cache checks,
+			// which adds up when reparenting owned scenes with many nodes.
+			check->_update_children_cache();
+			const int first = check->data.internal_children_front_count_cache;
+			const int past_end = check->data.children_cache.size() - check->data.internal_children_back_count_cache;
+			for (int i = first; i < past_end; i++) {
+				Node *child = check->data.children_cache[i];
 				to_visit.push_back(child);
 				if (child->data.owner == owner_temp) {
 					common_parents.push_back(child);
