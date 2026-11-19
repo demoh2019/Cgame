@@ -1,0 +1,25 @@
+name: Physics swept structural edge CCD contracts
+
+on:
+  pull_request:
+    branches: [develop]
+    paths:
+      - "servers/physics_xpbd_edge_ccd.h"
+      - "servers/physics_xpbd_edge_collision.h"
+      - "modules/godot_physics_3d/godot_soft_body_3d.cpp"
+      - "modules/godot_physics_3d/godot_soft_body_3d.h"
+      - "tests/servers/test_physics_xpbd_edge_ccd.cpp"
+      - "tests/stress/test_physics_xpbd_edge_ccd.py"
+      - ".github/workflows/physics-xpbd-edge-ccd.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  contracts:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Check swept edge CCD numerical and source invariants
+        run: python3 -m unittest discover -s tests/stress -p test_physics_xpbd_edge_ccd.py -v
