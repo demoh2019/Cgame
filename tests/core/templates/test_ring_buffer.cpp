@@ -34,6 +34,8 @@ TEST_FORCE_LINK(test_ring_buffer)
 
 #include "core/templates/ring_buffer.h"
 
+#include <string>
+
 namespace TestRingBuffer {
 
 TEST_CASE("[RingBuffer] Initialization") {
@@ -304,6 +306,82 @@ TEST_CASE("[RingBuffer] Resize 2") {
 	CHECK(rb1.size() == 1 << 1);
 	CHECK(rb1.data_left() == (1 << 1) - 1);
 	CHECK(rb1.space_left() == 0);
+}
+
+
+TEST_CASE("[RingBuffer] Bulk trivial copy across wrap") {
+	RingBuffer<uint8_t> rb(3);
+	const uint8_t first[] = { 1, 2, 3, 4, 5, 6 };
+	CHECK(rb.write(first, 6) == 6);
+	uint8_t drop[5] = {};
+	CHECK(rb.read(drop, 5) == 5);
+	for (int i = 0; i < 5; i++) {
+		CHECK(drop[i] == first[i]);
+	}
+	const uint8_t second[] = { 7, 8, 9, 10, 11, 12 };
+	CHECK(rb.write(second, 6) == 6);
+	CHECK(rb.data_left() == 7);
+	uint8_t peek[7] = {};
+	CHECK(rb.copy(peek, 0, 7) == 7);
+	CHECK(peek[0] == 6);
+	for (int i = 1; i < 7; i++) {
+		CHECK(peek[i] == second[i - 1]);
+	}
+	uint8_t popped[7] = {};
+	CHECK(rb.read(popped, 7) == 7);
+	for (int i = 0; i < 7; i++) {
+		CHECK(popped[i] == peek[i]);
+	}
+}
+
+TEST_CASE("[RingBuffer] Bulk nontrivial strings preserve values") {
+	RingBuffer<std::string> rb(3);
+	const std::string first[] = { "alpha", "beta", "gamma", "delta", "epsilon", "zeta" };
+	CHECK(rb.write(first, 6) == 6);
+	std::string prefix[4];
+	CHECK(rb.read(prefix, 4) == 4);
+	for (int i = 0; i < 4; i++) {
+		CHECK(prefix[i] == first[i]);
+	}
+	const std::string second[] = { "eta", "theta", "iota", "kappa" };
+	CHECK(rb.write(second, 4) == 4);
+	std::string values[6];
+	CHECK(rb.read(values, 6, false) == 6);
+	CHECK(values[0] == "epsilon");
+	CHECK(values[1] == "zeta");
+	for (int i = 0; i < 4; i++) {
+		CHECK(values[i + 2] == second[i]);
+	}
+	CHECK(rb.data_left() == 6);
+	CHECK(rb.read(values, 6) == 6);
+}
+
+TEST_CASE("[RingBuffer] Empty and invalid bulk lengths do not change state") {
+	RingBuffer<int> rb(3);
+	const int values[] = { 1, 2, 3 };
+	int out[] = { 99, 99, 99 };
+	CHECK(rb.write(values, 0) == 0);
+	CHECK(rb.write(values, -2) == 0);
+	CHECK(rb.read(out, 0) == 0);
+	CHECK(rb.read(out, -2) == 0);
+	CHECK(rb.data_left() == 0);
+	CHECK(out[0] == 99);
+}
+
+TEST_CASE("[RingBuffer] Bulk wrapped resize preserves sequence") {
+	RingBuffer<uint8_t> rb(3);
+	const uint8_t first[] = { 1, 2, 3, 4, 5, 6 };
+	CHECK(rb.write(first, 6) == 6);
+	CHECK(rb.advance_read(5) == 5);
+	const uint8_t second[] = { 7, 8, 9, 10, 11 };
+	CHECK(rb.write(second, 5) == 5);
+	rb.resize(4);
+	uint8_t output[6] = {};
+	CHECK(rb.read(output, 6) == 6);
+	CHECK(output[0] == 6);
+	for (int i = 1; i < 6; i++) {
+		CHECK(output[i] == second[i - 1]);
+	}
 }
 
 } //namespace TestRingBuffer
