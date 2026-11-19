@@ -34,6 +34,8 @@ const ExceptionPairs2D := preload("res://physics_exception_pairs_2d.gd")
 const ExceptionPairs3D := preload("res://physics_exception_pairs_3d.gd")
 const BVHStreaming2D := preload("res://physics_bvh_streaming_2d.gd")
 const BVHStreaming3D := preload("res://physics_bvh_streaming_3d.gd")
+const CompoundBatch2D := preload("res://physics_compound_filter_batch_2d.gd")
+const CompoundBatch3D := preload("res://physics_compound_filter_batch_3d.gd")
 const OneWayOverflow2D := preload("res://physics_one_way_overflow_2d.gd")
 const CachedAABBStress := preload("res://physics_proxy_same_aabb.gd")
 const CanvasScenePerf := preload("res://canvas_scene_perf.gd")
@@ -56,7 +58,7 @@ const CASES := [
 	"bitmap_rects", "bitmap_pipeline", "bitmap_morphology",
 	"curve_tessellation_2d", "curve_tessellation_3d", "curve_bake", "curve_nearest",
 	"canvas_transform_2d", "process_dispatch",
-	"physics_filter_toggle_2d", "physics_filter_toggle_3d", "physics_motion_filter_overflow_2d", "physics_motion_filter_overflow_3d", "physics_motion_exclusions_3d", "physics_motion_exclusions_2d", "physics_exception_pairs_2d", "physics_exception_pairs_3d", "physics_bvh_streaming_2d", "physics_bvh_streaming_3d", "physics_one_way_overflow_2d",
+	"physics_filter_toggle_2d", "physics_filter_toggle_3d", "physics_motion_filter_overflow_2d", "physics_motion_filter_overflow_3d", "physics_motion_exclusions_3d", "physics_motion_exclusions_2d", "physics_exception_pairs_2d", "physics_exception_pairs_3d", "physics_bvh_streaming_2d", "physics_bvh_streaming_3d", "physics_compound_filter_batch_2d", "physics_compound_filter_batch_3d", "physics_one_way_overflow_2d",
 ]
 
 var signal_total: int = 0
@@ -505,6 +507,10 @@ func _run_case(test_case: String, scale: int, frames: int, seed: int) -> Diction
 			return await BVHStreaming2D.new().run(self, scale, frames)
 		"physics_bvh_streaming_3d":
 			return await BVHStreaming3D.new().run(self, scale, frames)
+		"physics_compound_filter_batch_2d":
+			return await CompoundBatch2D.new().run(self, scale, frames)
+		"physics_compound_filter_batch_3d":
+			return await CompoundBatch3D.new().run(self, scale, frames)
 		"physics_one_way_overflow_2d":
 			return await OneWayOverflow2D.new().run(self, scale, frames)
 	return {"error": "Unhandled case"}
