@@ -1814,12 +1814,22 @@ void JoltSpace3D::_pre_step(float p_step) {
 				// sharing, never reuse a different body's adjacency.
 				scratch->one_ring_edges.clear();
 			}
+			// Charge clearing and applying the Jacobi buffer against the
+			// existing per-space VF budget. Both self VF and EE accumulate
+			// into the same stable-position snapshot, so all BVH queries
+			// use unchanged vertex positions during the contact loops.
+			scratch->position_projection_ready = false;
+			if (JoltProjectSettings::soft_body_self_position_projection && self_budget > 0) {
+				JPH::SoftBodyMotionProperties &props = static_cast<JPH::SoftBodyMotionProperties &>(*jolt_body->GetMotionPropertiesUnchecked());
+				prepare_soft_self_position_projection(props.GetVertices(), self_budget, *scratch);
+			}
 			if (self_budget > 0) {
 				resolve_soft_body_self_contacts(*jolt_body, *object, p_step, self_budget, *scratch);
 			}
 			if (self_edges && self_edge_budget > 0) {
 				resolve_soft_body_self_edge_contacts(*jolt_body, *object, p_step, self_edge_budget, *scratch);
 			}
+			apply_soft_self_position_projection(*jolt_body, *scratch);
 		}
 	}
 
