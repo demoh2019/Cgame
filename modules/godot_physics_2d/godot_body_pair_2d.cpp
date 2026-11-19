@@ -1070,44 +1070,44 @@ void GodotBodyPair2D::solve(real_t p_step) {
 		real_t vbn = dbv.dot(c.normal);
 
 		if (c.depth > 0.0) {
-		const real_t jbn = (c.bias - vbn) * c.mass_normal;
-		const real_t jbnOld = c.acc_bias_impulse;
-		c.acc_bias_impulse = MAX(jbnOld + jbn, 0.0f);
+			const real_t jbn = (c.bias - vbn) * c.mass_normal;
+			const real_t jbnOld = c.acc_bias_impulse;
+			c.acc_bias_impulse = MAX(jbnOld + jbn, 0.0f);
 
-		// Once the accumulated bias impulse converges, avoid two no-op
-		// body updates (especially expensive for dense resting contacts).
-		const real_t bias_delta = c.acc_bias_impulse - jbnOld;
-		if (bias_delta != 0.0) {
-			const Vector2 jb = c.normal * bias_delta;
-			if (collide_A) {
-				A->apply_bias_impulse(-jb, c.rA + A->get_center_of_mass(), max_bias_av);
-			}
-			if (collide_B) {
-				B->apply_bias_impulse(jb, c.rB + B->get_center_of_mass(), max_bias_av);
-			}
-			// Bias velocity is unchanged when no incremental impulse was applied.
-			crbA = Vector2(-A->get_biased_angular_velocity() * c.rA.y, A->get_biased_angular_velocity() * c.rA.x);
-			crbB = Vector2(-B->get_biased_angular_velocity() * c.rB.y, B->get_biased_angular_velocity() * c.rB.x);
-			dbv = B->get_biased_linear_velocity() + crbB - A->get_biased_linear_velocity() - crbA;
-			vbn = dbv.dot(c.normal);
-		}
-
-		const real_t total_inverse_mass = inv_mass_A + inv_mass_B;
-		if (total_inverse_mass > 0.0 && Math::abs(-vbn + c.bias) > MIN_VELOCITY) {
-			real_t jbn_com = (-vbn + c.bias) / total_inverse_mass;
-			real_t jbnOld_com = c.acc_bias_impulse_center_of_mass;
-			c.acc_bias_impulse_center_of_mass = MAX(jbnOld_com + jbn_com, 0.0f);
-
-			const Vector2 jb_com = c.normal * (c.acc_bias_impulse_center_of_mass - jbnOld_com);
-			if (jb_com != Vector2()) {
+			// Once the accumulated bias impulse converges, avoid two no-op
+			// body updates (especially expensive for dense resting contacts).
+			const real_t bias_delta = c.acc_bias_impulse - jbnOld;
+			if (bias_delta != 0.0) {
+				const Vector2 jb = c.normal * bias_delta;
 				if (collide_A) {
-					A->apply_bias_impulse(-jb_com, A->get_center_of_mass(), 0.0f);
+					A->apply_bias_impulse(-jb, c.rA + A->get_center_of_mass(), max_bias_av);
 				}
 				if (collide_B) {
-					B->apply_bias_impulse(jb_com, B->get_center_of_mass(), 0.0f);
+					B->apply_bias_impulse(jb, c.rB + B->get_center_of_mass(), max_bias_av);
+				}
+				// Bias velocity is unchanged when no incremental impulse was applied.
+				crbA = Vector2(-A->get_biased_angular_velocity() * c.rA.y, A->get_biased_angular_velocity() * c.rA.x);
+				crbB = Vector2(-B->get_biased_angular_velocity() * c.rB.y, B->get_biased_angular_velocity() * c.rB.x);
+				dbv = B->get_biased_linear_velocity() + crbB - A->get_biased_linear_velocity() - crbA;
+				vbn = dbv.dot(c.normal);
+			}
+
+			const real_t total_inverse_mass = inv_mass_A + inv_mass_B;
+			if (total_inverse_mass > 0.0 && Math::abs(-vbn + c.bias) > MIN_VELOCITY) {
+				real_t jbn_com = (-vbn + c.bias) / total_inverse_mass;
+				real_t jbnOld_com = c.acc_bias_impulse_center_of_mass;
+				c.acc_bias_impulse_center_of_mass = MAX(jbnOld_com + jbn_com, 0.0f);
+
+				const Vector2 jb_com = c.normal * (c.acc_bias_impulse_center_of_mass - jbnOld_com);
+				if (jb_com != Vector2()) {
+					if (collide_A) {
+						A->apply_bias_impulse(-jb_com, A->get_center_of_mass(), 0.0f);
+					}
+					if (collide_B) {
+						B->apply_bias_impulse(jb_com, B->get_center_of_mass(), 0.0f);
+					}
 				}
 			}
-		}
 
 		}
 		Vector2 j;
