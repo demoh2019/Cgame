@@ -1,0 +1,43 @@
+name: AI scene diff preview regressions
+
+on:
+  push:
+    branches: [develop]
+    paths:
+      - 'misc/scripts/ai_scene_diff.py'
+      - 'misc/scripts/scene_context_export.py'
+      - 'misc/scripts/tests/test_ai_scene_diff.py'
+      - 'misc/scripts/tests/test_scene_context_export.py'
+      - 'misc/scripts/README_ai_scene_diff.md'
+      - '.github/workflows/ai-scene-diff.yml'
+  pull_request:
+    paths:
+      - 'misc/scripts/ai_scene_diff.py'
+      - 'misc/scripts/scene_context_export.py'
+      - 'misc/scripts/tests/test_ai_scene_diff.py'
+      - 'misc/scripts/tests/test_scene_context_export.py'
+      - 'misc/scripts/README_ai_scene_diff.md'
+      - '.github/workflows/ai-scene-diff.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  offline-regressions:
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+        python-version: ['3.9', '3.13']
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+      - name: Compile and run read-only scene preview tests
+        run: |
+          python -m py_compile misc/scripts/ai_scene_diff.py misc/scripts/scene_context_export.py misc/scripts/tests/test_ai_scene_diff.py misc/scripts/tests/test_scene_context_export.py
+          python -m unittest discover -s misc/scripts/tests -p test_ai_scene_diff.py -v
+          python -m unittest discover -s misc/scripts/tests -p test_scene_context_export.py -v
