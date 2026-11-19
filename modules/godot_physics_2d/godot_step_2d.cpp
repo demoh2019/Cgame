@@ -279,15 +279,23 @@ void GodotStep2D::step(GodotSpace2D *p_space, real_t p_delta) {
 		}
 	}
 
-	// Avoid an extra index buffer when all islands have work. For sparse
-	// scenes, compact only active indices, not the island vectors themselves.
+	// A compact index list pays for itself only when many jobs would be
+	// empty. For dense scenes with just a few empty islands, dispatching
+	// the no-op jobs is cheaper than allocating and indirection per task.
 	solve_island_indices.clear();
-	if (solve_island_count != island_count) {
+	const uint32_t empty_island_count = island_count - solve_island_count;
+	if (solve_island_count == 0) {
+		// Nothing to dispatch, irrespective of how many islands existed.
+	} else if (empty_island_count >= 32 && empty_island_count >= island_count / 4) {
 		for (uint32_t island_index = 0; island_index < island_count; ++island_index) {
 			if (!constraint_islands[island_index].is_empty()) {
 				solve_island_indices.push_back(island_index);
 			}
 		}
+	} else {
+		// Keep direct indexing and avoid retaining a large index allocation
+		// to skip only a handful of empty islands.
+		solve_island_count = island_count;
 	}
 
 	/* SOLVE CONSTRAINT ISLANDS */
