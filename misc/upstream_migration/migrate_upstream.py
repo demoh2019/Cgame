@@ -23,6 +23,7 @@ from urllib.request import Request, urlopen
 
 SOURCE = "godotengine/godot"
 TARGET = "demoh2019/Cgame"
+TARGET_BASE = "develop"
 API_ROOT = "https://api.github.com"
 ISSUE_RE = re.compile(r"(?:https://github\.com/)?godotengine/godot/issues/(\d+)")
 PR_RE = re.compile(r"(?:https://github\.com/)?godotengine/godot/pull/(\d+)")
@@ -286,18 +287,18 @@ def backport_pr(api: GitHub, item: dict, repo_path: str) -> str:
     # Verify expected repository checkout and existence of git remotes.
     remotes = git("remote", "-v", cwd=path).stdout.decode("utf-8", "replace")
     if SOURCE not in remotes or TARGET not in remotes:
-        raise ValueError("Checkout needs remotes for both godotengine/godot and demoh2019/godot")
+        raise ValueError(f"Checkout needs remotes for both {SOURCE} and {TARGET}")
     git("fetch", "--no-tags", "upstream", "refs/heads/master:refs/remotes/upstream/master", cwd=path)
     git("fetch", "--no-tags", "upstream", f"refs/pull/{n}/head", cwd=path)
     pr_head = git("rev-parse", "FETCH_HEAD", cwd=path).stdout.decode().strip()
-    git("fetch", "--no-tags", "origin", "refs/heads/master:refs/remotes/origin/master", cwd=path)
+    git("fetch", "--no-tags", "origin", f"refs/heads/{TARGET_BASE}:refs/remotes/origin/{TARGET_BASE}", cwd=path)
     merge_base = git("merge-base", "upstream/master", pr_head, cwd=path).stdout.decode().strip()
     patch = git("diff", "--binary", merge_base, pr_head, cwd=path).stdout
     if not patch:
         return "empty"
     with tempfile.TemporaryDirectory(prefix=f"godot-pr-{n}-") as tmp:
         worktree = str(Path(tmp) / "tree")
-        git("worktree", "add", "--detach", worktree, "origin/master", cwd=path)
+        git("worktree", "add", "--detach", worktree, f"origin/{TARGET_BASE}", cwd=path)
         try:
             try:
                 git("apply", "--3way", "--index", "-", cwd=worktree, input_data=patch)
@@ -318,7 +319,7 @@ def backport_pr(api: GitHub, item: dict, repo_path: str) -> str:
             "**Migration notice:** AI/automation-assisted patch application; review and run the full CI/test suite before merge. "
             "The original source PR may still change.")
     result = api.post(f"/repos/{TARGET}/pulls", {
-        "title": f"[Upstream #{n}] {item['title']}", "head": branch, "base": "master",
+        "title": f"[Upstream #{n}] {item['title']}", "head": branch, "base": TARGET_BASE,
         "draft": True, "body": body,
     })
     return result.get("html_url", "created")
