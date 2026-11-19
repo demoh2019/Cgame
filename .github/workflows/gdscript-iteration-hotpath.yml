@@ -1,0 +1,43 @@
+name: GDScript VM iteration hotpath native regressions
+
+on:
+  pull_request:
+    branches: [develop]
+    paths:
+      - 'modules/gdscript/gdscript_vm.cpp'
+      - 'modules/gdscript/tests/scripts/runtime/features/vm_iteration_hotpath.gd'
+      - 'modules/gdscript/tests/scripts/runtime/features/vm_iteration_hotpath.out'
+      - '.github/workflows/gdscript-iteration-hotpath.yml'
+  push:
+    branches: [develop]
+    paths:
+      - 'modules/gdscript/gdscript_vm.cpp'
+      - 'modules/gdscript/tests/scripts/runtime/features/vm_iteration_hotpath.gd'
+      - 'modules/gdscript/tests/scripts/runtime/features/vm_iteration_hotpath.out'
+      - '.github/workflows/gdscript-iteration-hotpath.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: gdscript-iteration-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  gdscript-native-regressions:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+      - uses: ./.github/actions/godot-deps
+      - name: Build Cgame GDScript VM and native integration tests
+        uses: ./.github/actions/godot-build
+        with:
+          platform: linuxbsd
+          target: editor
+          scons-flags: dev_build=yes tests=yes debug_symbols=no module_mono_enabled=no module_text_server_fb_enabled=yes accesskit=no -j2
+      - name: Run full native and scripted GDScript regression suite
+        run: timeout 600s ./bin/godot.linuxbsd.editor.dev.x86_64 --headless --test --test-suite="*GDScript*" --no-colors
