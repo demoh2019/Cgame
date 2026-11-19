@@ -45,9 +45,12 @@ For each fixed-time substep:
    `s_corr = -k[W(r)/W(0.3h)]⁴`.
 
 6. Repeat the density projection 1–12 times (default four).
-7. Infer velocities from corrected positions. Apply optional one-way
-   sweeps against rigid collision shapes and reflect outward velocity
-   components at the tank boundary.
+7. Infer velocities from corrected positions. Apply optional ray sweeps
+   against rigid collision shapes and reflect outward velocity components
+   at the tank boundary. If the two-way rigid coupling flag is enabled,
+   dynamic rigid bodies receive a paired, equal-and-opposite impulse at
+   the actual impact point (including torque), instead of only bouncing
+   the fluid particle.
 8. Apply an optional XSPH velocity filter using the neighborhood grid.
 
 The solver splits user timesteps into up to eight substeps of at most
@@ -90,6 +93,8 @@ mesh for its 245-particle fluid station at approximately
 - `U`: refill/restart the tank
 - `I`: pause/resume the PBF solver
 - `O`: add a velocity impulse that visibly stirs the water
+- `P`: enable/disable two-way rigid collision impulses and ray sweeps
+  against a small real `RigidBody3D` sphere inside the water tank
 
 The rest of the engine runs unchanged. No particle buffers are
 allocated and no physics tick runs until the class is explicitly
@@ -116,6 +121,35 @@ registration/integration source checks.
   --headless --test --test-case="*[PhysicsPBF3D]*" \
   --success=true --no-colors
 ```
+
+**Paired PBF/rigid contact tests (new):**
+
+```bash
+python3 -m unittest discover -s tests/stress \
+  -p test_physics_pbf_rigid_coupling_3d.py -v
+
+./bin/godot.linuxbsd.editor.dev.x86_64 \
+  --headless --test --test-case="*[PhysicsPBFContact]*" \
+  --success=true --no-colors
+
+./bin/godot.linuxbsd.editor.dev.x86_64 --headless \
+  --path tests/stress \
+  --script res://physics_pbf_rigid_coupling_3d_regression.gd
+```
+
+The independent reference runs **5000 random impact configurations** and
+checks equal/opposite linear and angular impulses, normal restitution
+and that kinetic energy does not increase for physically permitted
+restitution. The native C++ tests cover moving/spinning obstacles,
+rotational effective mass, impulse saturation and invalid states. The
+headless scene strikes two identical dynamic boxes, one with coupling
+enabled and one one-way baseline, and checks that **only the coupled
+box receives fluid impact momentum**.
+
+The actual native contact helper is also compile-smoked with
+`g++ -std=c++17` in both float and double precision using minimal
+Vector3/Basis stubs. No copied physics algorithm is substituted in
+these compiler checks.
 
 **Native engine SceneTree regression:**
 
@@ -161,11 +195,24 @@ This is **stage one of a native dynamic liquid solver**:
 - The PBF constraint is unilateral. At the free surface this avoids
   forcing all low-density particles to fill artificial volume, but is
   not a perfect incompressible volume conservation solver.
-- Rigid-body collision sweeps are **one-way**, disabled by default,
-  and currently use a ray for the particle center with a contact
-  offset. The code does not apply reaction impulses to rigid bodies,
-  so there is no two-way momentum conservation. Deep starting
-  overlaps or rapidly rotating obstacles may escape the ray.
+- Rigid-body collision sweeps are **one-way by default**. Optional
+  `collide_with_bodies=true` plus `two_way_rigid_coupling=true` transfers
+  a pair of equal-and-opposite impulses between a fluid particle and a
+  *dynamic* RigidBody3D. It uses rigid inverse mass, world inverse inertia,
+  contact-point angular velocity and restitution. `max_rigid_impulse`
+  (default 20 N·s) caps each pair symmetrically, retaining momentum
+  conservation without huge impulses. With this cap, some impacts may
+  remain closing after a step.
+- This rigid-body coupling is still a **point ray contact**, not continuous
+  fluid pressure, fluid boundary particles or full Navier–Stokes reaction
+  force. Deep starting overlaps, grazing/rotating obstacles and
+  stationary particles struck by moving solids can be missed by a ray.
+  Only the impact impulse pair conserves linear/angular momentum;
+  approximate XSPH smoothing, capped neighbor lists, density projection
+  and external gravity can change whole-system energy or momentum.
+- Static, kinematic and unsupported bodies still use the original one-way
+  bounce. Two-way coupling depends on a physics-backend DirectBodyState
+  being available during native physics-frame processing.
 - Local AABB box walls are rigid and axis-aligned. They do not
   simulate fluid-solid boundary particles or pressure on a curved
   immersed obstacle.
@@ -179,9 +226,11 @@ This is **stage one of a native dynamic liquid solver**:
 - Does not automatically interact with GodotPhysics3D's existing
   horizontal water plane; both systems are optional and independent.
 
-Future integration steps: two-way rigid boundary particles with
-momentum transfer, DFSPH divergence correction, dynamically reconstructed
-liquid surface and GPU compute acceleration.
+Future integration steps: continuous two-way rigid boundary
+**pressure** forces (with fluid boundary particles), DFSPH divergence
+correction, dynamically reconstructed liquid surface and GPU compute
+acceleration. The current paired impulses implement discrete collision
+reaction only, not bulk buoyancy or fluid-solid pressure coupling.
 
 **Production-readiness has not been established.** Native C++ build,
 headless runtime, finite-check stress, memory/CPU profiling and
