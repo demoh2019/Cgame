@@ -133,25 +133,41 @@ def marker(source: str, kind: str, number: int):
     return f"<!-- upstream-mirror: {source}/{kind}/{number} -->"
 
 
+def capped_body(body: str, original_url: str, max_bytes=60000):
+    """Fit GitHub body limits without splitting UTF-8 or losing provenance."""
+    raw = body.encode("utf-8")
+    if len(raw) <= max_bytes:
+        return body
+    suffix = f"\n\n[Original content truncated. Full text: {original_url}]"
+    budget = max_bytes - len(suffix.encode("utf-8"))
+    return raw[:budget].decode("utf-8", "ignore") + suffix
+
+
 def format_body(source: str, item: dict, kind: str, detail: dict | None = None):
     num = item["number"]
     author = (item.get("user") or {}).get("login", "unknown")
     labels = ", ".join("[" + l["name"] + "]" for l in item.get("labels", [])) or "(none)"
+    assignees = ", ".join(a["login"] for a in item.get("assignees") or []) or "(none)"
+    milestone = (item.get("milestone") or {}).get("title") or "(none)"
     data = detail or item
     original_body = data.get("body") or "(no description)"
     merged = f"\nOriginal merged-at: {detail.get('merged_at') or '(not merged)'}" if detail and kind == "pull" else ""
-    return (
+    body = (
         f"{marker(source, kind, num)}\n"
         f"Original: {source_url(source, kind, num)}\n\n"
         f"Original author: {author}\n"
         f"Original state: {item['state']}\n"
         f"Created: {item.get('created_at')}\n"
         f"Updated: {item.get('updated_at')}\n"
-        f"Original labels: {labels}{merged}\n\n"
+        f"Original labels: {labels}{merged}\n"
+        f"Original assignees: {assignees}\n"
+        f"Original milestone: {milestone}\n"
+        f"Closed: {item.get('closed_at')}\n\n"
         "> Historical context: bare issue/PR references below refer to the upstream project.\n\n"
         "---\n\n"
         + original_body
     )
+    return capped_body(body, source_url(source, kind, num))
 
 
 def existing_keys(items, source=SOURCE_DEFAULT):
@@ -263,6 +279,7 @@ class Mirror:
             body = (f"<!-- upstream-comment: {item['id']} -->\n"
                     f"From {item['html_url']} by {login} at {item['created_at']}:\n\n"
                     f"{item.get('body') or '(empty)'}")
+            body = capped_body(body, item["html_url"])
             self.api.request("POST", f"/repos/{self.dest}/issues/{destination_num}/comments",
                              {"body": body})
 
