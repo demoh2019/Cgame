@@ -887,7 +887,7 @@ func cmd_dodge(peer_id: int, dir_x: float, dir_z: float) -> Dictionary:
 	if player.attack_timer > 0.0:
 		return {"ok": false, "reason": "attack_lock"}
 	var direction := Vector2(dir_x, dir_z)
-	if not direction.is_finite() or direction.length_squared() < 0.0001:
+	if not direction.is_finite() or not is_finite(direction.length_squared()) or direction.length_squared() < 0.0001:
 		return {"ok": false, "reason": "no_direction"}
 	if player.inventory.movement_factor() < 0.9999:
 		return {"ok": false, "reason": "overweight"}
