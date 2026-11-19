@@ -117,6 +117,23 @@ void LineBuilder::build() {
 		return;
 	}
 
+	// A regular polyline needs at least two vertices per point and six
+	// indices per segment. Reserve that common-case working set up front to
+	// avoid repeated CoW-buffer growth and copying during dynamic redraws.
+	// Round/bevel joins can append more geometry and still grow as needed.
+	// Guard the multiplications to avoid overflowing Vector's signed sizes.
+	if (point_count <= INT32_MAX / 6) {
+		const int base_vertex_count = point_count * 2;
+		vertices.reserve(base_vertex_count);
+		indices.reserve((point_count - 1) * 6);
+		if (_interpolate_color) {
+			colors.reserve(base_vertex_count);
+		}
+		if (texture_mode != Line2D::LINE_TEXTURE_NONE) {
+			uvs.reserve(base_vertex_count);
+		}
+	}
+
 	if (_interpolate_color) {
 		color0 = gradient->get_color(0);
 	} else {
