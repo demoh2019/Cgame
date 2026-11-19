@@ -7,6 +7,11 @@ on:
         required: true
         default: "1"
         type: string
+      start_path:
+        description: "Optional next_path from previous checkpoint; overrides start_page pagination"
+        required: false
+        default: ""
+        type: string
       pages:
         description: "Number of source pages to visit; 0 means all remaining"
         required: true
@@ -52,6 +57,7 @@ jobs:
     env:
       GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       START_PAGE: ${{ inputs.start_page }}
+      START_PATH: ${{ inputs.start_path }}
       PAGES: ${{ inputs.pages }}
       MAX_ITEMS: ${{ inputs.max_items }}
       PR_MODE: ${{ inputs.pr_mode }}
@@ -71,6 +77,7 @@ jobs:
             --start-page "$START_PAGE" --pages "$PAGES"
             --max-items "$MAX_ITEMS" --pr-mode "$PR_MODE"
             --checkpoint mirror-checkpoint.json)
+          if [ -n "$START_PATH" ]; then args+=(--start-path "$START_PATH"); fi
           if [ "$INCLUDE_COMMENTS" = "true" ]; then args+=(--include-comments); fi
           if [ "$APPLY" = "true" ]; then args+=(--apply); fi
           python3 .github/scripts/mirror_upstream.py "${args[@]}"
