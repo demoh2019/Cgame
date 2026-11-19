@@ -43,6 +43,10 @@ TEST_CASE("[PhysicsCCDSweep] 2D rejects misses without rejecting border touches"
 	CHECK(physics_ccd_swept_bounds_may_overlap(moving, target, Vector2(6, 0)));
 	CHECK(physics_ccd_swept_bounds_may_overlap(moving, target, Vector2(10, 0)));
 	CHECK_FALSE(physics_ccd_swept_bounds_may_overlap(moving, target, Vector2(-10, 0)));
+	// Legacy support rays extend 10 percent behind the moving shape.
+	const Rect2 behind(Vector2(-1.5, 0), Vector2(1, 1));
+	CHECK_FALSE(physics_ccd_swept_bounds_may_overlap(moving, behind, Vector2(10, 0)));
+	CHECK(physics_ccd_swept_bounds_may_overlap(moving, behind, Vector2(10, 0), real_t(0.1)));
 	CHECK_FALSE(physics_ccd_swept_bounds_may_overlap(moving,
 			Rect2(Vector2(4, 5), Vector2(2, 2)), Vector2(10, 0)));
 	CHECK(physics_ccd_swept_bounds_may_overlap(moving,
@@ -60,6 +64,9 @@ TEST_CASE("[PhysicsCCDSweep] 3D rejects misses along any coordinate") {
 	CHECK(physics_ccd_swept_bounds_may_overlap(moving, target, Vector3(6, 0, 0)));
 	CHECK(physics_ccd_swept_bounds_may_overlap(moving, target, Vector3(10, 0, 0)));
 	CHECK_FALSE(physics_ccd_swept_bounds_may_overlap(moving, target, Vector3(-10, 0, 0)));
+	const AABB behind(Vector3(-1.5, 0, 0), Vector3(1, 1, 1));
+	CHECK_FALSE(physics_ccd_swept_bounds_may_overlap(moving, behind, Vector3(10, 0, 0)));
+	CHECK(physics_ccd_swept_bounds_may_overlap(moving, behind, Vector3(10, 0, 0), real_t(0.1)));
 	CHECK_FALSE(physics_ccd_swept_bounds_may_overlap(moving,
 			AABB(Vector3(8, 0, 4), Vector3(2, 2, 2)), Vector3(10, 0, 0)));
 }
