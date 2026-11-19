@@ -647,6 +647,65 @@ TEST_CASE("[Dictionary] assign()") {
 	CHECK(typed.size() == 2);
 }
 
+
+TEST_CASE("[Dictionary] assign converts large untyped dictionaries without temp arrays") {
+	Dictionary source;
+	for (int i = 0; i < 512; ++i) {
+		source[i] = i * 2;
+	}
+	TypedDictionary<double, double> target;
+	target.assign(source);
+	REQUIRE_EQ(target.size(), 512);
+	for (int i = 0; i < 512; ++i) {
+		CHECK_EQ(target[double(i)], Variant(double(i * 2)));
+	}
+	source[0] = 100;
+	CHECK_EQ(target[0.0], Variant(0.0));
+}
+
+TEST_CASE("[Dictionary] assign rejects invalid values without partially modifying target") {
+	TypedDictionary<int, int> target;
+	target[77] = 99;
+	Dictionary source;
+	source[0] = 2;
+	source[1] = "invalid";
+	ERR_PRINT_OFF;
+	target.assign(source);
+	ERR_PRINT_ON;
+	CHECK_EQ(target.size(), 1);
+	CHECK_EQ(target[77], Variant(99));
+	CHECK_EQ(source.size(), 2);
+}
+
+TEST_CASE("[Dictionary] assign supports same-typed fast path and empty input") {
+	TypedDictionary<int, int> source;
+	source[1] = 10;
+	source[2] = 20;
+	TypedDictionary<int, int> target;
+	target[3] = 30;
+	target.assign(source);
+	CHECK_EQ(target.size(), 2);
+	CHECK_EQ(target[1], Variant(10));
+	CHECK_EQ(target[2], Variant(20));
+	source[1] = 99;
+	CHECK_EQ(target[1], Variant(10));
+	Dictionary empty;
+	target.assign(empty);
+	CHECK(target.is_empty());
+}
+
+TEST_CASE("[Dictionary] assign rejects colliding or incompatible numeric keys atomically") {
+	Dictionary source;
+	source[1.1] = 2;
+	source[1.2] = 4;
+	TypedDictionary<int, int> target;
+	target[7] = 70;
+	ERR_PRINT_OFF;
+	target.assign(source);
+	ERR_PRINT_ON;
+	CHECK_EQ(target.size(), 1);
+	CHECK_EQ(target[7], Variant(70));
+}
 TEST_CASE("[Dictionary] Typed copying") {
 	TypedDictionary<int, int> d1;
 	d1[0] = 1;
