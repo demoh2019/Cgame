@@ -291,6 +291,16 @@ class InteriorFEMContracts(unittest.TestCase):
         self.assertIn('"FEMConcaveImportedTwoTets": [2, 0]', smoke)
         self.assertIn('"FEMInteriorNodeTwelveTets": [12, 1]', smoke)
 
+    def test_disabled_fem_preserves_surface_mass_and_freezes_internal_particles(self):
+        body = (ROOT / "modules/godot_physics_3d/godot_soft_body_3d.cpp").read_text()
+        self.assertIn("if (xpbd_fem_tetrahedra.is_empty() &&", body)
+        self.assertIn("const real_t surface_inverse = real_t(xpbd_surface_node_count) * inv_total_mass;", body)
+        self.assertIn("for (uint32_t i = xpbd_surface_node_count; i < nodes.size(); ++i)", body)
+        self.assertIn("node.im = 0.0;", body)
+        self.assertIn("++dynamic_node_count;", body)
+        self.assertIn("--dynamic_node_count;", body)
+        self.assertIn("if (!xpbd_fem_tetrahedra.is_empty()) {", body)
+
     def test_no_surface_change_for_default_empty_interior_positions(self):
         body = (ROOT / "modules/godot_physics_3d/godot_soft_body_3d.cpp").read_text()
         self.assertIn("if (extra_count > 0)", body)
