@@ -227,6 +227,20 @@ func c_craft(recipe: String, times: int) -> void:
 
 
 @rpc("any_peer", "reliable")
+func c_build(x: float, z: float) -> void:
+	var peer := multiplayer.get_remote_sender_id()
+	if _allowed(peer):
+		s_result.rpc_id(peer, "build", sim.cmd_build(peer, x, z))
+
+
+@rpc("any_peer", "reliable")
+func c_repair(structure_id: int) -> void:
+	var peer := multiplayer.get_remote_sender_id()
+	if _allowed(peer):
+		s_result.rpc_id(peer, "repair", sim.cmd_repair(peer, structure_id))
+
+
+@rpc("any_peer", "reliable")
 func c_stash(item_id: String, count: int, deposit: bool) -> void:
 	var peer := multiplayer.get_remote_sender_id()
 	if _allowed(peer):
