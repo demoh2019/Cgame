@@ -22,7 +22,7 @@ func _run() -> void:
     var game := scene.instantiate()
     root.add_child(game)
 
-    var survivor = game.get_node_or_null("Player")
+    var survivor := game.get_node_or_null("Player") as CharacterBody3D
     var food = game.get_node_or_null("FoodCrate")
     var water = game.get_node_or_null("WaterCan")
     var ground = game.get_node_or_null("Ground")
