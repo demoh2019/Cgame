@@ -40,7 +40,7 @@ CASES = (
     "geometry_2d", "mesh_build", "input_dispatch", "image_codec", "group_calls",
     "packed_arrays", "sorting", "animation_tracks", "physics_raycast_2d", "physics_raycast_3d", "render_multimesh_3d",
     "object_lifecycle", "scene_churn",
-    "scene_reparent", "resource_roundtrip", "audio_bus_churn",
+    "scene_reparent", "scene_move", "resource_roundtrip", "audio_bus_churn",
     "bitmap_rects", "bitmap_pipeline", "bitmap_morphology",
     "curve_tessellation_2d", "curve_tessellation_3d", "curve_bake", "curve_nearest",
 )
