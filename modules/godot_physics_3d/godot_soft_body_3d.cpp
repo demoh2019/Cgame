@@ -34,6 +34,7 @@
 
 #include "core/math/geometry_3d.h"
 #include "servers/physics_3d/physics_server_3d_rendering_server_handler.h"
+#include "servers/physics_softbody_link_damping.h"
 #include "servers/physics_softbody_plasticity.h"
 #include "servers/physics_softbody_volume_safe.h"
 #include "servers/physics_xpbd_distance.h"
@@ -1522,6 +1523,22 @@ void GodotSoftBody3D::solve_constraints(real_t p_delta) {
 
 	if (link_constants_dirty) {
 		update_link_constants();
+	}
+
+	// An optional link-aligned dashpot dissipates longitudinal spring
+	// oscillation without damping rigid translation, rotation or tangential
+	// motion. The exponential fraction is computed once per physics tick.
+	// The default rate is zero, skipping the entire O(links) pass.
+	const real_t link_damping = get_space()->get_soft_body_link_damping();
+	if (link_damping > real_t(0.0) && p_delta > real_t(0.0)) {
+		const double fraction = 1.0 - Math::exp(-double(link_damping) * double(p_delta));
+		if (fraction > 0.0) {
+			for (Link &link : links) {
+				Node &a = *link.n[0];
+				Node &b = *link.n[1];
+				physics_softbody_damp_link(a.x, b.x, a.v, b.v, a.im, b.im, fraction);
+			}
+		}
 	}
 
 	// The old c2/c3 link-gradient prepass was unused by solve_links().

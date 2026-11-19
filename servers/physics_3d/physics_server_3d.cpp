@@ -578,6 +578,10 @@ PhysicsServer3D::PhysicsServer3D() {
 	// Yield is the allowed elastic strain; creep rate 0 keeps legacy behavior.
 	GLOBAL_DEF(PropertyInfo(Variant::FLOAT, "physics/3d/solver/soft_body_plastic_yield_strain", PROPERTY_HINT_RANGE, "0,1,0.001"), 0.1);
 	GLOBAL_DEF(PropertyInfo(Variant::FLOAT, "physics/3d/solver/soft_body_plastic_creep_rate", PROPERTY_HINT_RANGE, "0,100,0.1,or_greater,suffix:1/s"), 0.0);
+	// Longitudinal viscous damping of relative soft-body link velocities.
+	// Zero preserves legacy behavior; finite positive rates use exponential
+	// relaxation while conserving link momentum and keeping pins fixed.
+	GLOBAL_DEF(PropertyInfo(Variant::FLOAT, "physics/3d/solver/soft_body_link_damping", PROPERTY_HINT_RANGE, "0,1000,0.1,or_greater,suffix:1/s"), 0.0);
 	// Optional per-triangle surface-area preservation for deformable cloth.
 	// Zero disables all extra area constraints and associated lambda buffers.
 	GLOBAL_DEF(PropertyInfo(Variant::FLOAT, "physics/3d/solver/soft_body_xpbd_area_compliance", PROPERTY_HINT_RANGE, "0,0.01,0.000001,or_greater"), 0.0);
