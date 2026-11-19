@@ -126,6 +126,14 @@ public:
 			// force a collision check no matter the AABB
 			if (p_active) {
 				_add_changed_item(h, p_aabb, false);
+				// A new item's leaf is not padded (see item_add), so with BVH_EXPAND_LEAF_AABBS the
+				// pair search would use the exact bounds. Use the same padded bounds that later
+				// moves use, so speculative margins also pair neighbours at creation.
+				{
+					BOUNDS &padded = tree._pairs[h.id()].expanded_aabb;
+					padded = p_aabb;
+					padded.grow_by(tree._pairing_expansion);
+				}
 				if (!p_defer_pairing) {
 					_check_for_collisions(true);
 				}
