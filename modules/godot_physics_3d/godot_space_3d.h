@@ -182,6 +182,10 @@ private:
 	real_t soft_body_tetra_fem_viscosity = 0.0; // Objective Kelvin-Voigt material damping.
 	real_t soft_body_tetra_sls_compliance = 0.0; // Zener/Maxwell branch is disabled by default.
 	real_t soft_body_tetra_sls_relaxation_time = 0.25; // SLS material memory timescale, seconds.
+	real_t soft_body_tetra_prony_fast_compliance = 0.0; // Disable fast arm by default.
+	real_t soft_body_tetra_prony_fast_relaxation_time = 0.04;
+	real_t soft_body_tetra_prony_slow_compliance = 0.0; // Disable slow arm by default.
+	real_t soft_body_tetra_prony_slow_relaxation_time = 2.0;
 	real_t soft_body_tetra_volume_plastic_rate = 0.0; // 1/s, opt-in per-tet isotropic plastic rest deformation.
 	real_t soft_body_tetra_volume_plastic_yield = 0.15; // Elastic volume strain window in |ln(J)|.
 	real_t soft_body_tetra_shear_plastic_rate = 0.0; // 1/s, opt-in J2-like deviatoric rest creep.
@@ -386,6 +390,10 @@ public:
 	_FORCE_INLINE_ real_t get_soft_body_tetra_fem_viscosity() const { return soft_body_tetra_fem_viscosity; }
 	_FORCE_INLINE_ real_t get_soft_body_tetra_sls_compliance() const { return soft_body_tetra_sls_compliance; }
 	_FORCE_INLINE_ real_t get_soft_body_tetra_sls_relaxation_time() const { return soft_body_tetra_sls_relaxation_time; }
+	_FORCE_INLINE_ real_t get_soft_body_tetra_prony_fast_compliance() const { return soft_body_tetra_prony_fast_compliance; }
+	_FORCE_INLINE_ real_t get_soft_body_tetra_prony_fast_relaxation_time() const { return soft_body_tetra_prony_fast_relaxation_time; }
+	_FORCE_INLINE_ real_t get_soft_body_tetra_prony_slow_compliance() const { return soft_body_tetra_prony_slow_compliance; }
+	_FORCE_INLINE_ real_t get_soft_body_tetra_prony_slow_relaxation_time() const { return soft_body_tetra_prony_slow_relaxation_time; }
 	_FORCE_INLINE_ real_t get_soft_body_tetra_volume_plastic_rate() const { return soft_body_tetra_volume_plastic_rate; }
 	_FORCE_INLINE_ real_t get_soft_body_tetra_volume_plastic_yield() const { return soft_body_tetra_volume_plastic_yield; }
 	_FORCE_INLINE_ real_t get_soft_body_tetra_shear_plastic_rate() const { return soft_body_tetra_shear_plastic_rate; }
