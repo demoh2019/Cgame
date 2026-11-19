@@ -1,0 +1,55 @@
+name: Days After infected steering regression
+
+on:
+  pull_request:
+    paths:
+      - 'demo/days_after/zombie.gd'
+      - 'demo/days_after/test_target_probe.gd'
+      - 'demo/days_after/smoke_test_zombie_steering.gd'
+      - '.github/workflows/days-after-infected-steering.yml'
+  push:
+    branches: [develop]
+    paths:
+      - 'demo/days_after/zombie.gd'
+      - 'demo/days_after/test_target_probe.gd'
+      - 'demo/days_after/smoke_test_zombie_steering.gd'
+      - '.github/workflows/days-after-infected-steering.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  infected-steering:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - name: Download verified Godot 4.7.2 compatibility editor
+        shell: bash
+        run: |
+          set -euo pipefail
+          curl --retry 4 --retry-delay 3 -fL -o godot.zip https://github.com/godotengine/godot-builds/releases/download/4.7.2-stable/Godot_v4.7.2-stable_linux.x86_64.zip
+          echo 'cadd3204e728a35d3f13adb7fd0d7902636b79f6b95c40c265eb73b6c35329e4  godot.zip' | sha256sum --check --status
+          unzip -q godot.zip
+          chmod +x Godot_v4.7.2-stable_linux.x86_64
+          mv Godot_v4.7.2-stable_linux.x86_64 godot
+      - name: Import scripts
+        run: |
+          set -euo pipefail
+          ./godot --headless --path demo/days_after --editor --import --quit 2>&1 | tee steering-import.log
+          if grep -Ei 'SCRIPT ERROR:|Parse Error:|Failed to load script' steering-import.log; then exit 1; fi
+      - name: Run infected steering and occlusion smoke
+        run: |
+          set -euo pipefail
+          timeout 120s ./godot --headless --path demo/days_after --script res://smoke_test_zombie_steering.gd 2>&1 | tee steering-smoke.log
+          grep -F 'PASS: infected local obstacle steering and line-of-sight melee checks.' steering-smoke.log
+          if grep -Ei 'SCRIPT ERROR:|Parse Error:|Assertion failed' steering-smoke.log; then exit 1; fi
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: infected-steering-logs
+          if-no-files-found: ignore
+          path: |
+            steering-import.log
+            steering-smoke.log
