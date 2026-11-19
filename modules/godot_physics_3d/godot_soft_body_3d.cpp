@@ -46,6 +46,7 @@
 #include "servers/physics_xpbd_soft_ccd.h"
 #include "servers/physics_xpbd_self_friction.h"
 #include "servers/physics_xpbd_edge_collision.h"
+#include "servers/physics_xpbd_edge_ccd.h"
 #include "servers/rendering/rendering_server.h"
 
 #include <limits>
@@ -536,6 +537,7 @@ void GodotSoftBody3D::initialize_self_collision_topology() {
 	xpbd_self_contacts.reset();
 	xpbd_self_ccd_contacts.reset();
 	xpbd_self_edge_contacts.reset();
+	xpbd_self_edge_ccd_contacts.reset();
 	xpbd_self_edge_tree.clear();
 	xpbd_self_edges.reset();
 	if (!get_space() || !(get_space()->get_soft_body_self_collision_thickness() > 0.0)) {
@@ -597,32 +599,45 @@ bool GodotSoftBody3D::solve_edge_self_collisions(real_t p_delta) {
 		return false;
 	}
 	const real_t alpha = real_t(MIN(alpha_double, double(std::numeric_limits<real_t>::max())));
+	const bool swept_ccd = get_space()->is_soft_body_self_collision_ccd_enabled();
 	const uint32_t per_edge_limit = uint32_t(get_space()->get_soft_body_self_collision_max_contacts_per_vertex());
 	const uint32_t global_limit = uint32_t(MIN(uint64_t(65536),
 			uint64_t(xpbd_self_edges.size()) * uint64_t(per_edge_limit)));
 	xpbd_self_edge_contacts.clear();
+	xpbd_self_edge_ccd_contacts.clear();
 
-	// All material and vertex/face corrections have completed. Refit once
-	// BEFORE queries; do not mutate the tree inside any callback.
+	// Update all leaves before traversing; never mutate the BVH in a callback.
+	// With swept CCD off, preserve the original current-AABB-only fast path.
 	for (const SelfCollisionEdge &edge : xpbd_self_edges) {
-		AABB edge_bounds(nodes[edge.a].x, Vector3());
-		edge_bounds.expand_to(nodes[edge.b].x);
+		const Node &a = nodes[edge.a];
+		const Node &b = nodes[edge.b];
+		AABB edge_bounds(a.x, Vector3());
+		edge_bounds.expand_to(b.x);
+		if (swept_ccd) {
+			edge_bounds.expand_to(a.q);
+			edge_bounds.expand_to(b.q);
+		}
 		edge_bounds.grow_by(thickness);
 		xpbd_self_edge_tree.update(edge.leaf, edge_bounds);
 	}
 	xpbd_self_edge_tree.optimize_incremental(1);
 
 	for (const SelfCollisionEdge &edge : xpbd_self_edges) {
-		if (xpbd_self_edge_contacts.size() >= global_limit) {
+		if (xpbd_self_edge_contacts.size() + xpbd_self_edge_ccd_contacts.size() >= global_limit) {
 			break;
 		}
 		const Node &a = nodes[edge.a];
 		const Node &b = nodes[edge.b];
-		if (!a.x.is_finite() || !b.x.is_finite()) {
+		if (!a.x.is_finite() || !b.x.is_finite() ||
+				(swept_ccd && (!a.q.is_finite() || !b.q.is_finite()))) {
 			continue;
 		}
 		AABB query(a.x, Vector3());
 		query.expand_to(b.x);
+		if (swept_ccd) {
+			query.expand_to(a.q);
+			query.expand_to(b.q);
+		}
 		query.grow_by(thickness);
 		uint32_t hits = 0;
 		auto visit_edge = [&](void *p_userdata) -> bool {
@@ -630,8 +645,8 @@ bool GodotSoftBody3D::solve_edge_self_collisions(real_t p_delta) {
 			if (other.index <= edge.index) {
 				return false;
 			}
-			// Same/one-ring topology is handled by the cloth material rows;
-			// its edges must not produce fictitious self-collision resistance.
+			// Shared vertices and original one-ring edges belong to the
+			// cloth material constraints, not self-collision.
 			if (edge.a == other.a || edge.a == other.b ||
 					edge.b == other.a || edge.b == other.b ||
 					xpbd_self_neighbor_edges.has(_soft_body_edge_key(edge.a, other.a)) ||
@@ -642,36 +657,56 @@ bool GodotSoftBody3D::solve_edge_self_collisions(real_t p_delta) {
 			}
 			const Node &c = nodes[other.a];
 			const Node &d = nodes[other.b];
-			if ((a.im + b.im + c.im + d.im) <= 0.0) {
+			if ((a.im + b.im + c.im + d.im) <= 0.0 ||
+					!c.x.is_finite() || !d.x.is_finite() ||
+					(swept_ccd && (!c.q.is_finite() || !d.q.is_finite()))) {
 				return false;
 			}
-			real_t s, t, distance;
+			real_t s = 0.0, t = 0.0, distance = 0.0;
 			Vector3 normal;
-			if (!physics_xpbd_closest_edges(a.x, b.x, c.x, d.x, s, t, normal, distance) ||
-					distance >= thickness) {
+			const bool discrete_contact = physics_xpbd_closest_edges(
+					a.x, b.x, c.x, d.x, s, t, normal, distance) &&
+					distance < thickness;
+			if (discrete_contact) {
+				// Preserve the prior side when an edge already penetrated
+				// slightly, without triggering the expensive swept test.
+				const Vector3 previous_a = a.q + (b.q - a.q) * s;
+				const Vector3 previous_b = c.q + (d.q - c.q) * t;
+				const Vector3 previous_separation = previous_a - previous_b;
+				if (previous_separation.is_finite() &&
+						previous_separation.length_squared() > CMP_EPSILON * CMP_EPSILON &&
+						previous_separation.dot(normal) < 0.0) {
+					normal = -normal;
+				}
+				SelfEdgeContact contact;
+				contact.first = edge.index;
+				contact.second = other.index;
+				contact.normal = normal;
+				contact.lambda = 0.0;
+				xpbd_self_edge_contacts.push_back(contact);
+			} else if (swept_ccd) {
+				PhysicsXPBDEdgeCCDHit hit;
+				if (!physics_xpbd_swept_edges(a.q, a.x, b.q, b.x,
+							c.q, c.x, d.q, d.x, thickness, hit)) {
+					return false;
+				}
+				SelfEdgeCCDContact contact;
+				contact.first = edge.index;
+				contact.second = other.index;
+				contact.first_weight = hit.first_weight;
+				contact.second_weight = hit.second_weight;
+				contact.separating_normal = hit.separating_normal;
+				xpbd_self_edge_ccd_contacts.push_back(contact);
+			} else {
 				return false;
 			}
-			// Maintain the normal's side from last frame, even if the
-			// current edges crossed through each other this frame.
-			const Vector3 previous_a = a.q + (b.q - a.q) * s;
-			const Vector3 previous_b = c.q + (d.q - c.q) * t;
-			const Vector3 previous_separation = previous_a - previous_b;
-			if (previous_separation.is_finite() && previous_separation.length_squared() > CMP_EPSILON * CMP_EPSILON &&
-					previous_separation.dot(normal) < 0.0) {
-				normal = -normal;
-			}
-			SelfEdgeContact contact;
-			contact.first = edge.index;
-			contact.second = other.index;
-			contact.normal = normal;
-			contact.lambda = 0.0;
-			xpbd_self_edge_contacts.push_back(contact);
 			++hits;
-			return hits >= per_edge_limit || xpbd_self_edge_contacts.size() >= global_limit;
+			return hits >= per_edge_limit ||
+					xpbd_self_edge_contacts.size() + xpbd_self_edge_ccd_contacts.size() >= global_limit;
 		};
 		xpbd_self_edge_tree.aabb_query(query, visit_edge);
 	}
-	if (xpbd_self_edge_contacts.is_empty()) {
+	if (xpbd_self_edge_contacts.is_empty() && xpbd_self_edge_ccd_contacts.is_empty()) {
 		return false;
 	}
 	const int contact_iterations = MIN(MAX(iteration_count, 1), 4);
@@ -685,6 +720,20 @@ bool GodotSoftBody3D::solve_edge_self_collisions(real_t p_delta) {
 			Node &d = nodes[second.b];
 			physics_xpbd_solve_edge_collision(a.x, b.x, c.x, d.x,
 					a.im, b.im, c.im, d.im, thickness, alpha, contact.normal, contact.lambda);
+		}
+		for (SelfEdgeCCDContact &contact : xpbd_self_edge_ccd_contacts) {
+			const SelfCollisionEdge &first = xpbd_self_edges[contact.first];
+			const SelfCollisionEdge &second = xpbd_self_edges[contact.second];
+			Node &a = nodes[first.a];
+			Node &b = nodes[first.b];
+			Node &c = nodes[second.a];
+			Node &d = nodes[second.b];
+			PhysicsXPBDEdgeCCDHit hit;
+			hit.first_weight = contact.first_weight;
+			hit.second_weight = contact.second_weight;
+			hit.separating_normal = contact.separating_normal;
+			physics_xpbd_solve_swept_edges(a.x, b.x, c.x, d.x,
+					a.im, b.im, c.im, d.im, thickness, alpha, hit, contact.lambda);
 		}
 	}
 	return true;
@@ -2301,6 +2350,7 @@ void GodotSoftBody3D::destroy() {
 	xpbd_self_edge_tree.clear();
 	xpbd_self_edges.reset();
 	xpbd_self_edge_contacts.reset();
+	xpbd_self_edge_ccd_contacts.reset();
 	xpbd_volume_gradients.reset();
 	xpbd_volume_closed = false;
 	xpbd_volume_rest = 0.0;
