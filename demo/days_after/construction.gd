@@ -1,4 +1,6 @@
 extends Node3D
+signal layout_changed
+
 ## Three predefined pads keep the first construction slice deterministic.
 ## All rules and prices live in the game; Cgame needs no new engine API.
 
@@ -96,10 +98,12 @@ func _spawn(slot: int, life: float) -> void:
     barrier.destroyed.connect(_on_destroyed)
     add_child(barrier)
     defenses[slot] = barrier
+    layout_changed.emit()
 
 
 func _on_destroyed(slot: int) -> void:
     defenses.erase(slot)
+    layout_changed.emit()
 
 
 func get_built_count() -> int:
@@ -148,4 +152,5 @@ func restore_snapshot(data: Variant) -> bool:
     defenses.clear()
     for entry in data:
         _spawn(int(entry["slot"]), float(entry["health"]))
+    layout_changed.emit()
     return true

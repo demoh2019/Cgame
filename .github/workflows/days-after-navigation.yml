@@ -1,0 +1,43 @@
+name: Days After infected navigation
+
+on:
+  push:
+    paths:
+      - 'demo/days_after/**'
+      - '.github/workflows/days-after-navigation.yml'
+  pull_request:
+    paths:
+      - 'demo/days_after/**'
+      - '.github/workflows/days-after-navigation.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  headless-nav:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install pinned Godot 4.7.2 editor
+        shell: bash
+        run: |
+          set -euo pipefail
+          curl --retry 4 --retry-delay 3 -fL -o godot.zip https://github.com/godotengine/godot-builds/releases/download/4.7.2-stable/Godot_v4.7.2-stable_linux.x86_64.zip
+          echo 'cadd3204e728a35d3f13adb7fd0d7902636b79f6b95c40c265eb73b6c35329e4  godot.zip' | sha256sum -c -
+          unzip -q godot.zip
+          chmod +x Godot_v4.7.2-stable_linux.x86_64
+          mv Godot_v4.7.2-stable_linux.x86_64 godot
+      - name: Import and exercise navigation + construction
+        shell: bash
+        run: |
+          set -euo pipefail
+          ./godot --headless --path demo/days_after --editor --import --quit 2>&1 | tee import.log
+          for test in smoke_test_navigation.gd smoke_test_construction.gd smoke_test_stash.gd; do
+            ./godot --headless --path demo/days_after --script "res://$test" 2>&1 | tee "$test.log"
+            grep -F 'PASS:' "$test.log"
+          done
+          if grep -Ei 'SCRIPT ERROR:|Parse Error:|Failed to load script|Failed loading resource' import.log smoke_test*.gd.log; then
+            exit 1
+          fi
