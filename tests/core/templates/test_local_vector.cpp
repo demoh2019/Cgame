@@ -446,7 +446,10 @@ TEST_CASE("[LocalVector] Bulk unordered erase matches reference across determini
 		CHECK(values.size() == expected.size());
 		CHECK(values.erase_multiple_unordered(needle) == 0);
 
-		std::vector<uint32_t> survivors(values.begin(), values.end());
+		std::vector<uint32_t> survivors;
+		for (uint32_t value : values) {
+			survivors.push_back(value);
+		}
 		std::sort(survivors.begin(), survivors.end());
 		std::sort(expected.begin(), expected.end());
 		CHECK(survivors == expected);
@@ -457,9 +460,13 @@ TEST_CASE("[LocalVector] Bulk unordered erase destroys nontrivial matching eleme
 	LocalVector<std::string> values{ "alpha", "drop", "beta", "drop", "drop", "gamma", "drop" };
 	CHECK(values.erase_multiple_unordered(std::string("drop")) == 4);
 	CHECK(values.size() == 3);
-	std::vector<std::string> survivors(values.begin(), values.end());
+	std::vector<std::string> survivors;
+	for (const std::string &value : values) {
+		survivors.push_back(value);
+	}
 	std::sort(survivors.begin(), survivors.end());
-	CHECK(survivors == std::vector<std::string>{ "alpha", "beta", "gamma" });
+	const std::vector<std::string> expected{ "alpha", "beta", "gamma" };
+	CHECK(survivors == expected);
 	CHECK(values.erase_multiple_unordered(std::string("drop")) == 0);
 }
 
