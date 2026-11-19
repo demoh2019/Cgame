@@ -309,12 +309,17 @@ TEST_CASE("[BVH] 3D convex traversal prunes sparse subtrees without losing hits"
 
 	// The five bodies at x=-16,-8,0,8,16 intersect the partial hull.
 	CountingCullTest::calls = 0;
-	CHECK(tree.cull_convex(hull_between_x(-20, 20), results, COUNT, nullptr) == 5);
+	REQUIRE(tree.cull_convex(hull_between_x(-20, 20), results, COUNT, nullptr) == 5);
 	CHECK(CountingCullTest::calls == 5);
+	uint32_t hit_mask = 0;
 	for (int i = 0; i < 5; ++i) {
-		CHECK(results[i]->value >= 46);
-		CHECK(results[i]->value <= 50);
+		REQUIRE(results[i] != nullptr);
+		const int hit_index = results[i]->value - 46;
+		REQUIRE(hit_index >= 0);
+		REQUIRE(hit_index < 5);
+		hit_mask |= uint32_t(1) << hit_index;
 	}
+	CHECK(hit_mask == 0x1F);
 
 	// A slanted clipping plane exercises partial nodes and cutting-plane
 	// optimization, not only axis-aligned box/frustum classification.
