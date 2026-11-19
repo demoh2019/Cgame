@@ -72,6 +72,7 @@ class GodotStep2D {
 	bool cached_color_valid = false;
 	uint32_t color_batch_offset = 0;
 	uint32_t color_batch_count = 0;
+	uint32_t color_batch_size = 8; // Adaptive per-color worker chunk; stable until the barrier.
 	// Read-only during worker dispatch. Used only when one large island is
 	// graph-colored while the remaining islands use normal island jobs.
 	uint32_t deferred_large_island_index = UINT32_MAX;
