@@ -275,4 +275,71 @@ TEST_CASE("[BVH] 3D convex culls stop at requested result capacity") {
 	CHECK(CountingCullTest::calls == 0);
 }
 
+
+TEST_CASE("[BVH] Deferred compound insertion reports pairs on flush") {
+	using Tree = BVH_Manager<Item, 2, true, 16, CountingPairTest, CullTest, Rect2, Vector2, false>;
+	Tree tree;
+	CountingPairTest::allow = true;
+	CountingPairTest::calls = 0;
+	int created = 0;
+	int removed = 0;
+	tree.set_pair_callback(count_pair, &created);
+	tree.set_unpair_callback(count_unpair, &removed);
+
+	Item a, b, distant;
+	// Static A versus dynamic B; both participate in spatial queries even
+	// before pairing is finalized.
+	const BVHHandle ha = tree.create(&a, true, 0, 2, Rect2(0, 0, 2, 2), 0, true);
+	const BVHHandle hb = tree.create(&b, true, 1, 3, Rect2(1, 0, 2, 2), 0, true);
+	const BVHHandle hc = tree.create(&distant, true, 1, 3, Rect2(30, 0, 2, 2), 0, true);
+	CHECK(created == 0);
+	CHECK(CountingPairTest::calls == 0);
+	Item *results[3] = {};
+	CHECK(tree.cull_aabb(Rect2(-1, -1, 8, 8), results, 3, nullptr) == 2);
+
+	tree.flush_pending_pairs();
+	CHECK(created == 1);
+	CHECK(CountingPairTest::calls == 1);
+	tree.flush_pending_pairs();
+	CHECK(created == 1);
+
+	// A normal (nondeferred) insertion still triggers callbacks immediately.
+	Item immediate;
+	const BVHHandle hd = tree.create(&immediate, true, 1, 3, Rect2(1.5, 0, 2, 2));
+	CHECK(created == 3);
+	tree.erase(hd);
+	CHECK(removed == 2);
+	tree.erase(hb);
+	CHECK(removed == 3);
+	tree.erase(hc);
+	tree.erase(ha);
+}
+
+TEST_CASE("[BVH] Deferred 3D insertion and removal before flush") {
+	using Tree = BVH_Manager<Item, 2, true, 16, PairTest, CullTest, AABB, Vector3, false>;
+	Tree tree;
+	int created = 0;
+	int removed = 0;
+	tree.set_pair_callback(count_pair, &created);
+	tree.set_unpair_callback(count_unpair, &removed);
+
+	Item a, b, c;
+	const BVHHandle ha = tree.create(&a, true, 0, 2, AABB(Vector3(0, 0, 0), Vector3(2, 2, 2)), 0, true);
+	const BVHHandle hb = tree.create(&b, true, 1, 3, AABB(Vector3(1, 0, 0), Vector3(2, 2, 2)), 0, true);
+	CHECK(created == 0);
+	tree.flush_pending_pairs();
+	CHECK(created == 1);
+
+	// A deferred item may be erased without leaving a stale changed handle.
+	const BVHHandle hc = tree.create(&c, true, 1, 3, AABB(Vector3(1, 0, 0), Vector3(2, 2, 2)), 0, true);
+	CHECK(created == 1);
+	tree.erase(hc);
+	CHECK(created == 1);
+	tree.flush_pending_pairs();
+	CHECK(created == 1);
+	tree.erase(hb);
+	tree.erase(ha);
+	CHECK(removed == 1);
+}
+
 } // namespace TestBVH
