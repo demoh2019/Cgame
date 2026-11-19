@@ -371,6 +371,7 @@
 #include "scene/3d/physics/spring_arm_3d.h"
 #include "scene/3d/physics/static_body_3d.h"
 #include "scene/3d/physics/vehicle_body_3d.h"
+#include "scene/3d/physics/vehicle_drivetrain_3d.h"
 #include "scene/resources/3d/box_shape_3d.h"
 #include "scene/resources/3d/capsule_shape_3d.h"
 #include "scene/resources/3d/concave_polygon_shape_3d.h"
@@ -767,6 +768,7 @@ void register_scene_types() {
 
 #ifndef PHYSICS_3D_DISABLED
 	GDREGISTER_CLASS(VehicleBody3D);
+	GDREGISTER_CLASS(VehicleDrivetrain3D);
 	GDREGISTER_CLASS(VehicleWheel3D);
 	GDREGISTER_CLASS(Area3D);
 	GDREGISTER_CLASS(CollisionShape3D);
