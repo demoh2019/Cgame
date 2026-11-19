@@ -175,9 +175,9 @@ func _completed(result: int, response_code: int, _headers: PackedStringArray, bo
 	_last_errors = inspection.errors
 	_preview.text = JSON.stringify(_pending_plan, "\t")
 	if not inspection.errors.is_empty():
-		_preview.text = "STATIC ERRORS (not yet applied):\n" + "\n".join(inspection.errors) + "\n\n" + _preview.text
+		_preview.text = "STATIC ERRORS (not yet applied):\n" + "\n".join(PackedStringArray(inspection.errors)) + "\n\n" + _preview.text
 	if not inspection.warnings.is_empty():
-		_preview.text = "REVIEW WARNINGS:\n" + "\n".join(inspection.warnings) + "\n\n" + _preview.text
+		_preview.text = "REVIEW WARNINGS:\n" + "\n".join(PackedStringArray(inspection.warnings)) + "\n\n" + _preview.text
 	_apply_button.disabled = not inspection.ok
 	_repair_button.disabled = inspection.ok
 	if inspection.ok:
