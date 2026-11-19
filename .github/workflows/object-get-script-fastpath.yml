@@ -3,6 +3,8 @@ on:
   pull_request:
     paths:
       - "core/object/object.cpp"
+      - "core/io/json.cpp"
+      - "core/io/marshalls.cpp"
       - "tests/core/object/test_placeholder_script_instance.cpp"
       - ".github/workflows/object-get-script-fastpath.yml"
   workflow_dispatch:
@@ -20,3 +22,5 @@ jobs:
         run: scons platform=linuxbsd target=editor tests=yes module_text_server_fb_enabled=yes -j2
       - name: Run object script fast-path regression tests
         run: ./bin/godot.linuxbsd.editor.x86_64 --headless --test --test-case="*[ObjectGetScript]*"
+      - name: Run script serialization fast-path regression tests
+        run: ./bin/godot.linuxbsd.editor.x86_64 --headless --test --test-case="*[ScriptSerializationFastPath]*"
