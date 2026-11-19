@@ -1645,13 +1645,24 @@ void JoltPhysicsServer3D::step(real_t p_step) {
 		return;
 	}
 
+	// Sample after each space's physics step. Jolt exposes O(1) active-body
+	// counts; never call GetBodyStats(), which scans all registered bodies.
+	uint64_t active_count = 0;
+	uint64_t manifold_count = 0;
 	for (JoltSpace3D *active_space : active_spaces) {
 		job_system->pre_step();
 
 		active_space->step((float)p_step);
 
 		job_system->post_step();
+
+		JPH::PhysicsSystem &physics_system = active_space->get_physics_system();
+		active_count += physics_system.GetNumActiveBodies(JPH::EBodyType::RigidBody);
+		active_count += physics_system.GetNumActiveBodies(JPH::EBodyType::SoftBody);
+		manifold_count += uint32_t(active_space->get_contact_manifold_count());
 	}
+	active_body_count = int(MIN(active_count, uint64_t(INT32_MAX)));
+	collision_manifold_count = int(MIN(manifold_count, uint64_t(INT32_MAX)));
 }
 
 void JoltPhysicsServer3D::sync() {
@@ -1685,6 +1696,20 @@ bool JoltPhysicsServer3D::is_flushing_queries() const {
 }
 
 int JoltPhysicsServer3D::get_process_info(PS3DE::ProcessInfo p_process_info) {
+	switch (p_process_info) {
+		case PS3DE::INFO_ACTIVE_OBJECTS:
+			return active_body_count;
+		case PS3DE::INFO_COLLISION_PAIRS:
+			// Jolt does not expose the broadphase pair count directly.
+			// Use the count of contact manifold callbacks as an inexpensive
+			// collision-activity proxy; compound shapes and CCD may count more
+			// than once per unique body pair.
+			return collision_manifold_count;
+		case PS3DE::INFO_ISLAND_COUNT:
+			// Jolt's island builder count is not available through its
+			// public PhysicsSystem interface.
+			return 0;
+	}
 	return 0;
 }
 
