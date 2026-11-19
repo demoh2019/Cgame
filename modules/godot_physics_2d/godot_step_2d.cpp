@@ -206,7 +206,9 @@ void GodotStep2D::step(GodotSpace2D *p_space, real_t p_delta) {
 	while (b) {
 		GodotBody2D *body = b->self();
 
-		if (body->get_island_step() != _step) {
+		// Unconnected active bodies need no constraint islands.
+		// Avoid a heap allocation per body in large sparse simulations.
+		if (body->get_island_step() != _step && !body->get_constraint_list().is_empty()) {
 			++body_island_count;
 			if (body_islands.size() < body_island_count) {
 				body_islands.resize(body_island_count);
@@ -293,7 +295,17 @@ void GodotStep2D::step(GodotSpace2D *p_space, real_t p_delta) {
 	b = body_list->first();
 	while (b) {
 		const SelfList<GodotBody2D> *n = b->next();
-		b->self()->integrate_velocities(p_delta);
+		GodotBody2D *body = b->self();
+		body->integrate_velocities(p_delta);
+		// An unconnected rigid body is a one-body island. Evaluate its sleep
+		// state without keeping a separate island allocation for it.
+		// Constrained bodies still sleep together in _check_suspend().
+		if (body->get_island_step() != _step && body->get_mode() > PS2DE::BODY_MODE_KINEMATIC && body->get_constraint_list().is_empty()) {
+			const bool can_sleep = body->sleep_test(p_delta);
+			if (body->is_active() == can_sleep) {
+				body->set_active(!can_sleep);
+			}
+		}
 		b = n; // in case it shuts itself down
 	}
 
