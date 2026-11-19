@@ -27,13 +27,17 @@ func _make_body(space: RID, shape: RID, x: float, velocity: float, ccd: bool, st
 
 
 func _run_case(label: String, target_x: float, velocity_a: float, velocity_b: float,
-		min_speed: float, max_speed: float, static_target: bool = false, target_ccd: bool = false, target_y: float = 0.0) -> int:
+		min_speed: float, max_speed: float, static_target: bool = false, target_ccd: bool = false, target_y: float = 0.0, capsule_target: bool = false) -> int:
 	var space: RID = PhysicsServer3D.space_create()
 	var sphere: RID = PhysicsServer3D.sphere_shape_create()
 	PhysicsServer3D.shape_set_data(sphere, 0.5)
 
 	var a: RID = _make_body(space, sphere, 0.0, velocity_a, true)
-	var b: RID = _make_body(space, sphere, target_x, velocity_b, target_ccd, static_target, target_y)
+	var target_shape: RID = sphere
+	if capsule_target:
+		target_shape = PhysicsServer3D.capsule_shape_create()
+		PhysicsServer3D.shape_set_data(target_shape, {"radius": 0.5, "height": 4.0})
+	var b: RID = _make_body(space, target_shape, target_x, velocity_b, target_ccd, static_target, target_y)
 	PhysicsServer3D.space_set_active(space, true)
 	await physics_frame
 	await physics_frame
@@ -58,6 +62,8 @@ func _run_case(label: String, target_x: float, velocity_a: float, velocity_b: fl
 	PhysicsServer3D.free_rid(a)
 	PhysicsServer3D.free_rid(b)
 	PhysicsServer3D.free_rid(sphere)
+	if capsule_target:
+		PhysicsServer3D.free_rid(target_shape)
 	PhysicsServer3D.free_rid(space)
 	return 0 if passed else 1
 
@@ -80,6 +86,9 @@ func _run() -> void:
 	# obstacle at y=0.8. A swept radius-one Minkowski sphere does hit it.
 	# Analytic circle/sphere TOI must catch this glancing collision.
 	failures += await _run_case("glancing sphere CCD", 4.0, 480.0, 0.0, 0.0, 440.0, true, false, 0.8)
+	# A point ray at y=0 misses the capsule's lower cap (center y=0.7,
+	# radius 0.5), but the swept radius-0.5 sphere intersects it.
+	failures += await _run_case("glancing capsule CCD", 4.0, 480.0, 0.0, 0.0, 470.0, true, false, 2.2, true)
 
 	if failures:
 		printerr("3D relative-motion CCD regression failed: %d" % failures)
