@@ -236,6 +236,18 @@ jobs:
             --script res://physics_jolt_pending_broadphase_regression.gd \
             2>&1 | tee physics-jolt-pending-broadphase.log
           grep -Fq 'Jolt pending broadphase regression passed.' physics-jolt-pending-broadphase.log
+      - name: Regression-test Jolt crossing soft-body edge-edge contacts
+        shell: bash
+        run: |
+          set -euo pipefail
+          BIN=./bin/godot.linuxbsd.editor.dev.x86_64
+          PROJECT=tests/stress/jolt_soft_soft_edges
+          timeout 120s "$BIN" --headless --path "$PROJECT" \
+            --script res://edge_edge_regression.gd --check-only
+          timeout 180s "$BIN" --headless --path "$PROJECT" \
+            --script res://edge_edge_regression.gd \
+            2>&1 | tee jolt-soft-soft-edge-edge.log
+          grep -Fq 'PASS: Jolt crossing soft-body edges collide with mask control' jolt-soft-soft-edge-edge.log
       - name: Regression-test Jolt BVH soft-soft deforming-grid contacts
         shell: bash
         run: |
