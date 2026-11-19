@@ -31,6 +31,7 @@
 #include "terrain_mesh.h"
 
 #include "core/math/math_funcs.h"
+#include "core/math/face3.h"
 #include "core/object/class_db.h"
 
 TerrainMesh::TerrainMesh() {
@@ -145,6 +146,50 @@ float TerrainMesh::sample_height(const Vector2 &p_grid_position) const {
 	const float top = Math::lerp(get_height(x0, z0), get_height(x1, z0), tx);
 	const float bottom = Math::lerp(get_height(x0, z1), get_height(x1, z1), tx);
 	return Math::lerp(top, bottom, tz);
+}
+
+bool TerrainMesh::intersect_segment(const Vector3 &p_from, const Vector3 &p_to, Vector3 &r_hit) const {
+	// Local-space segment against actual triangles, not an approximation of the grid surface.
+	// The X/Z sweep bounds exclude unrelated cells for short and vertical brush rays.
+	if (!p_from.is_finite() || !p_to.is_finite() || p_from == p_to) {
+		return false;
+	}
+	const float x_min = MIN(p_from.x, p_to.x) / cell_size;
+	const float x_max = MAX(p_from.x, p_to.x) / cell_size;
+	const float z_min = MIN(p_from.z, p_to.z) / cell_size;
+	const float z_max = MAX(p_from.z, p_to.z) / cell_size;
+	if (x_max < 0.0f || z_max < 0.0f || x_min > grid_size.x - 1 || z_min > grid_size.y - 1) {
+		return false;
+	}
+	const int min_x = MAX(0, int(Math::floor(x_min)) - 1);
+	const int max_x = MIN(grid_size.x - 2, int(Math::ceil(x_max)));
+	const int min_z = MAX(0, int(Math::floor(z_min)) - 1);
+	const int max_z = MIN(grid_size.y - 2, int(Math::ceil(z_max)));
+	const Vector3 a = p_from;
+	real_t best_distance_sq = p_from.distance_squared_to(p_to);
+	bool hit = false;
+	for (int z = min_z; z <= max_z; z++) {
+		for (int x = min_x; x <= max_x; x++) {
+			const Vector3 p00(x * cell_size, get_height(x, z) * height_scale, z * cell_size);
+			const Vector3 p10((x + 1) * cell_size, get_height(x + 1, z) * height_scale, z * cell_size);
+			const Vector3 p01(x * cell_size, get_height(x, z + 1) * height_scale, (z + 1) * cell_size);
+			const Vector3 p11((x + 1) * cell_size, get_height(x + 1, z + 1) * height_scale, (z + 1) * cell_size);
+			const Face3 faces[2] = { Face3(p00, p01, p10), Face3(p10, p01, p11) };
+			for (const Face3 &face : faces) {
+				Vector3 candidate;
+				if (!face.intersects_segment(p_from, p_to, &candidate)) {
+					continue;
+				}
+				const real_t distance_sq = a.distance_squared_to(candidate);
+				if (distance_sq <= best_distance_sq) {
+					best_distance_sq = distance_sq;
+					r_hit = candidate;
+					hit = true;
+				}
+			}
+		}
+	}
+	return hit;
 }
 
 void TerrainMesh::sculpt(const Vector2 &p_grid_position, float p_radius, float p_amount) {
