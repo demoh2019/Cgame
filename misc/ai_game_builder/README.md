@@ -6,7 +6,25 @@ An optional Godot editor addon for generating **small game prototypes, scenes, s
 
 The editor dock includes **Preview offline 2D starter (no API key)**. Click it to load a bundled, working-style Godot 2D arcade game into the regular review panel without contacting any model. Inspect the files and click Apply to create them under `res://ai_generated/`. Open the main scene and press F6 to play. Move with WASD/arrows, collect ten green squares in 60 seconds, and press R to restart. You can use **Improve current draft** to send the starter to AI for further development, after entering an API key.
 
-The CI workflow includes a standalone smoke-test project that copies the bundled game to a clean temporary folder and runs the generated scene headlessly. This does not execute untrusted model output.
+## Instant offline 3D arena starter
+
+Click **Preview offline 3D starter (no API key)** in the dock. It produces three
+reviewable files: a Node3D entry scene, a standalone GDScript controller, and a
+README. Apply only after inspecting the proposed files, then open
+`res://ai_generated/scenes/main.tscn` and press **F6**.
+
+The starter builds a visible 3D arena from BoxMesh primitives, sunlight and
+an overhead camera. Move with WASD or arrow keys and collect six green targets
+within 90 seconds; R restarts a completed round. It does not require imported
+assets, a custom InputMap, an API key, networking or any other plugin. As with
+the 2D starter, nothing is automatically written or executed during preview.
+Applying either starter does **not** overwrite existing generated files, so a
+new starter is best applied to a clean project.
+
+CI stages both offline starters into **separate clean projects** and runs Godot
+headlessly to check scene imports and runtime script errors. The 3D tests also
+instantiate the scene and check procedural objects, scoring, victory and timeout.
+These are bundled trusted templates, **not** unreviewed model output.
 
 ## Setup
 
@@ -65,10 +83,15 @@ godot --headless --path misc/ai_game_builder --script res://tests/test_validator
 godot --headless --path misc/ai_game_builder --script res://tests/test_context.gd
 godot --headless --path misc/ai_game_builder --script res://tests/test_quality.gd
 godot --headless --path misc/ai_game_builder --script res://tests/test_starter.gd
+godot --headless --path misc/ai_game_builder --script res://tests/test_starter_3d.gd
 godot --headless --editor --path misc/ai_game_builder --quit
 ```
 
-GitHub Actions runs both headless suites and a Godot 4.8-beta4 editor-startup smoke check when this addon or its workflow changes. No API key is required in CI.
+GitHub Actions runs validator, context, quality and starter headless suites, a
+Godot 4.8-beta4 editor-startup smoke check, and separate clean-project 2D/3D
+scene imports and runtime tests when this addon or its workflow changes.
+The 3D runtime test (`tests/test_runtime_3d.gd`) runs only inside the staged
+project where `res://ai_generated/` is present. No API key is required in CI.
 
 ## Next steps
 
