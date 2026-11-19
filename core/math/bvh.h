@@ -106,7 +106,7 @@ public:
 		check_pair_callback_userdata = p_userdata;
 	}
 
-	BVHHandle create(T *p_userdata, bool p_active = true, uint32_t p_tree_id = 0, uint32_t p_tree_collision_mask = 1, const BOUNDS &p_aabb = BOUNDS(), int p_subindex = 0) {
+	BVHHandle create(T *p_userdata, bool p_active = true, uint32_t p_tree_id = 0, uint32_t p_tree_collision_mask = 1, const BOUNDS &p_aabb = BOUNDS(), int p_subindex = 0, bool p_defer_pairing = false) {
 		BVH_LOCKED_FUNCTION
 
 		// not sure if absolutely necessary to flush collisions here. It will cost performance to, instead
@@ -126,11 +126,22 @@ public:
 			// force a collision check no matter the AABB
 			if (p_active) {
 				_add_changed_item(h, p_aabb, false);
-				_check_for_collisions(true);
+				if (!p_defer_pairing) {
+					_check_for_collisions(true);
+				}
 			}
 		}
 
 		return h;
+	}
+
+	// Flush explicitly deferred insertions once all shapes in a batch are
+	// registered. Normal create() calls retain their synchronous pair callbacks.
+	void flush_pending_pairs() {
+		BVH_LOCKED_FUNCTION
+		if (USE_PAIRS) {
+			_check_for_collisions(true);
+		}
 	}
 
 	////////////////////////////////////////////////////
