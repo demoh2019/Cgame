@@ -48,6 +48,26 @@ class CapsuleTimeOfImpactContracts(unittest.TestCase):
         self.assertIn("PS3DE::SHAPE_CAPSULE && shape_B_ptr->get_type() == PS3DE::SHAPE_SPHERE", source)
         self.assertIn("const Vector3 local_motion = -inverse_A.basis.xform(relative_motion)", source)
 
+    def test_parallel_2d_capsules_use_axial_minkowski_sum(self):
+        source = (ROOT / "modules" / "godot_physics_2d" / "godot_body_pair_2d.cpp").read_text(encoding="utf-8")
+        self.assertIn("PS2DE::SHAPE_CAPSULE && shape_B_ptr->get_type() == PS2DE::SHAPE_CAPSULE", source)
+        self.assertIn("p_A->get_angular_velocity() == 0.0 && p_B->get_angular_velocity() == 0.0", source)
+        self.assertIn("Math::abs(double(axis_A.cross(axis_B)))", source)
+        self.assertIn("const double ratio = scale_A / scale_B;", source)
+        self.assertIn("radius_B + radius_A * ratio, half_B + half_A * ratio", source)
+        self.assertIn("const Vector2 local_motion = inverse_B.basis_xform(relative_motion)", source)
+        self.assertIn("Vector2 supports_A[2]", source)
+
+    def test_parallel_3d_capsules_use_axial_minkowski_sum(self):
+        source = (ROOT / "modules" / "godot_physics_3d" / "godot_body_pair_3d.cpp").read_text(encoding="utf-8")
+        self.assertIn("PS3DE::SHAPE_CAPSULE && shape_B_ptr->get_type() == PS3DE::SHAPE_CAPSULE", source)
+        self.assertIn("p_A->get_angular_velocity() == Vector3() && p_B->get_angular_velocity() == Vector3()", source)
+        self.assertIn("axis_A.cross(axis_B).length()", source)
+        self.assertIn("const double ratio = scale_A / scale_B;", source)
+        self.assertIn("radius_B + radius_A * ratio, half_B + half_A * ratio", source)
+        self.assertIn("const Vector3 local_motion = inverse_B.basis.xform(relative_motion)", source)
+        self.assertIn("Vector3 supports[MAX_CCD_SUPPORTS]", source)
+
     def test_cpp_and_native_coverage_reachable_from_ci(self):
         cpp = CPP_TEST.read_text(encoding="utf-8")
         self.assertIn("TEST_FORCE_LINK(test_physics_ccd_capsule_toi)", cpp)
@@ -60,6 +80,7 @@ class CapsuleTimeOfImpactContracts(unittest.TestCase):
             script = (ROOT / "tests" / "stress" / script_name).read_text(encoding="utf-8")
             self.assertIn("glancing capsule CCD", script)
             self.assertIn("moving capsule CCD", script)
+            self.assertIn("parallel capsules CCD", script)
             self.assertIn(script_name, workflow)
 
 
