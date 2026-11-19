@@ -14,7 +14,8 @@ func _run() -> void:
 	# Compare equal geometry in serial/parallel modes. The last case has
 	# two large islands and must use ordinary island-level workers.
 	for parameters in [[false, false, 0, 16], [true, false, 0, 16], [true, true, 0, 16],
-			[false, false, 20, 16], [true, false, 20, 16], [true, false, 1, 320]]:
+			[false, false, 20, 16], [true, false, 20, 16], [true, true, 20, 16],
+			[true, false, 1, 320]]:
 		var parallel: bool = parameters[0]
 		var priority_fallback: bool = parameters[1]
 		var extra_islands: int = parameters[2]
