@@ -260,4 +260,40 @@ TEST_CASE("[PhysicsSpeculative] overflowed relative speed can have finite short-
 			Vector2(speed, 0), Vector2(-speed, 0), real_t(1e-30), unit, a2, b2, n2));
 }
 
+
+TEST_CASE("[PhysicsSpeculative] Ordinary sphere manifolds keep positive cache reuse") {
+	GodotPhysicsContactRecycling recycling;
+	recycling.remember(101, 202, true);
+
+	// Even with speculative contacts enabled for this shape pair, a
+	// genuinely penetrating manifold remains safe to reuse with unchanged
+	// geometry. Velocity alone cannot change existing contact anchors.
+	bool previous_speculative = recycling.speculative_contact;
+	CHECK_FALSE(previous_speculative);
+	CHECK(recycling.can_reuse(101, 202, true, 1, false, previous_speculative));
+
+	// A predicted (separated) manifold is velocity-sensitive and must not
+	// be mistaken for a positive narrowphase result on the next frame.
+	recycling.speculative_contact = true;
+	previous_speculative = recycling.speculative_contact;
+	recycling.speculative_contact = false;
+	CHECK(previous_speculative);
+	CHECK_FALSE(recycling.can_reuse(101, 202, true, 1, false, previous_speculative));
+
+	// Once the actual surfaces touch, ordinary manifold caching is restored.
+	recycling.remember(101, 202, true);
+	CHECK_FALSE(recycling.speculative_contact);
+	CHECK(recycling.can_reuse(101, 202, true, 1, false, recycling.speculative_contact));
+}
+
+TEST_CASE("[PhysicsSpeculative] Negative circle-pair cache still bypasses stale separation") {
+	GodotPhysicsContactRecycling recycling;
+	recycling.remember(111, 222, false);
+	CHECK(recycling.can_reuse_separation(111, 222, false, false));
+	// Velocity-dependent prediction requires a TOI calculation even when
+	// both shape revisions and relative positions remain identical.
+	CHECK_FALSE(recycling.can_reuse_separation(111, 222, false, true));
+	CHECK_FALSE(recycling.can_reuse_separation(111, 222, true, false));
+}
+
 } // namespace TestPhysicsSpeculativeSphereContact
