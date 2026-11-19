@@ -13,6 +13,7 @@ import math
 import os
 from pathlib import Path
 import platform
+import re
 import statistics
 import subprocess
 import sys
@@ -21,6 +22,8 @@ import time
 from typing import Any
 
 PREFIX = "STRESS_RESULT:"
+# A zero exit status is not enough: the engine can log script/runtime errors.
+ENGINE_ERROR = re.compile(r"(?m)^(?:SCRIPT ERROR:|ERROR:|E\\s+\\d+:)")
 CASES = (
     "containers", "strings", "script_vm", "math", "signals",
     "scene_tree", "packed_scene", "images", "json", "stream",
@@ -165,6 +168,8 @@ def run_once(cmd: list[str], timeout: float, rss_limit_mib: float,
     }
     if failure is None and process.returncode != 0:
         failure = "engine_exit_%d" % process.returncode
+    if failure is None and ENGINE_ERROR.search(log):
+        failure = "engine_error_log"
     if failure is None:
         try:
             result["engine"] = parse_result(log, case, scale, frames, seed)
