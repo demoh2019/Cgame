@@ -28,7 +28,7 @@ CASES = (
     "containers", "strings", "script_vm", "math", "signals",
     "scene_tree", "packed_scene", "images", "json", "stream",
     "file_io", "threads", "physics_2d", "physics_3d",
-    "memory_churn", "astar_grid", "tweens", "audio_buffers",
+    "memory_churn", "astar_grid", "astar_graph", "tweens", "audio_buffers",
     "variant_codec", "packet_stream", "ui_layout", "render_2d", "render_3d",
     "resource_load",
     "input_map",

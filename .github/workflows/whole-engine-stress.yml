@@ -27,6 +27,11 @@ on:
         type: choice
         options: [headless, display]
         default: headless
+      scaling_sweep:
+        description: Run all headless/display workloads at three load scales (slow)
+        required: false
+        type: boolean
+        default: false
 
 permissions:
   contents: read
@@ -45,7 +50,7 @@ jobs:
         with:
           python-version: '3.11'
       - name: Syntax-check runner and tests
-        run: python3 -m py_compile tests/stress/run.py tests/stress/test_run.py tests/stress/diagnose.py tests/stress/test_diagnose.py tests/stress/scale_sweep.py tests/stress/test_scale_sweep.py
+        run: python3 -m py_compile tests/stress/run.py tests/stress/test_run.py tests/stress/diagnose.py tests/stress/test_diagnose.py tests/stress/scale_sweep.py tests/stress/test_scale_sweep.py tests/stress/test_registry.py
       - name: Run harness unit tests
         run: python3 -m unittest discover -s tests/stress -p 'test_*.py' -v
 
@@ -112,6 +117,17 @@ jobs:
           if [[ -f whole-engine-stress.json ]]; then
             python3 tests/stress/diagnose.py whole-engine-stress.json --output whole-engine-bottlenecks.md
           fi
+      - name: Find nonlinear engine bottlenecks at three load levels
+        if: github.event_name == 'workflow_dispatch' && inputs.scaling_sweep
+        shell: bash
+        run: |
+          set -euo pipefail
+          BIN=./bin/godot.linuxbsd.editor.dev.x86_64
+          if [[ "$RENDER_MODE" == "display" ]]; then
+            xvfb-run -a python3 tests/stress/scale_sweep.py --godot "$BIN" --render-mode display --case all --scales 1,2,4 --frames 30 --repeats 2 --output whole-engine-scale-sweep.json --summary-md whole-engine-scale-sweep.md
+          else
+            python3 tests/stress/scale_sweep.py --godot "$BIN" --render-mode headless --case all --scales 1,2,4 --frames 30 --repeats 2 --output whole-engine-scale-sweep.json --summary-md whole-engine-scale-sweep.md
+          fi
       - name: Archive per-scenario performance and failure reports
         if: always()
         uses: actions/upload-artifact@v4
@@ -123,5 +139,7 @@ jobs:
             whole-engine-bottlenecks.md
             whole-engine-native-tests.log
             whole-engine-import.json
+            whole-engine-scale-sweep.json
+            whole-engine-scale-sweep.md
           if-no-files-found: warn
           retention-days: 30

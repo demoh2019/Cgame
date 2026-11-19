@@ -208,3 +208,10 @@ python3 tests/stress/diagnose.py out/current.json --baseline out/baseline.json -
 Do not compare raw timings of different scenarios as if they performed equal
 work. Compare the *same* workload on the same host, with matching build,
 graphics driver, seed and resource limits, then profile recurring regressions.
+
+## Dense 2D A* graph stress
+
+`astar_graph` covers point-graph construction and repeated checked shortest-path
+queries on a connected 32x32 AStar2D grid, complementing the existing
+`astar_grid` and `astar_3d` workloads. Sweep this case using
+`tests/stress/scale_sweep.py --case astar_graph --scales 1,2,4,8`.

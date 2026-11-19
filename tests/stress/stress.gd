@@ -10,7 +10,7 @@ const CASES := [
 	"containers", "strings", "script_vm", "math", "signals",
 	"scene_tree", "packed_scene", "images", "json", "stream",
 	"file_io", "threads", "physics_2d", "physics_3d",
-	"memory_churn", "astar_grid", "tweens", "audio_buffers",
+	"memory_churn", "astar_grid", "astar_graph", "tweens", "audio_buffers",
 	"variant_codec", "packet_stream", "ui_layout", "render_2d", "render_3d",
 	"resource_load",
 	"input_map",
@@ -188,6 +188,8 @@ func _run_case(test_case: String, scale: int, frames: int, seed: int) -> Diction
 			return _threads(scale, seed)
 		"astar_grid":
 			return _astar_grid(scale)
+		"astar_graph":
+			return _astar_graph(scale)
 		"audio_buffers":
 			return _audio_buffers(scale)
 		"variant_codec":
@@ -930,3 +932,24 @@ func _transform_hierarchy(scale: int) -> Dictionary:
 			checksum += node.global_position.x
 	world.free()
 	return {"nodes": count, "transform_reads": count * 3, "checksum": checksum}
+
+func _astar_graph(scale: int) -> Dictionary:
+	var graph := AStar2D.new()
+	const WIDTH = 32
+	for y in range(WIDTH):
+		for x in range(WIDTH):
+			var id := y * WIDTH + x
+			graph.add_point(id, Vector2(x, y))
+			if x > 0:
+				graph.connect_points(id, id - 1)
+			if y > 0:
+				graph.connect_points(id, id - WIDTH)
+	var checksum := 0
+	for i in range(40 * scale):
+		var start := i % WIDTH
+		var finish := WIDTH * WIDTH - 1 - (i % WIDTH)
+		var path := graph.get_id_path(start, finish)
+		if path.is_empty() or path[0] != start or path[path.size() - 1] != finish:
+			return {"error": "AStar graph path mismatch"}
+		checksum += path.size()
+	return {"vertices": WIDTH * WIDTH, "searches": 40 * scale, "checksum": checksum}
