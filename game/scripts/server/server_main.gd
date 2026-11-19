@@ -70,8 +70,8 @@ func _initialize() -> void:
 	sim = GameServer.new(WorldGen.new(world_seed), world_seed)
 	if not disable_world_save:
 		_world_save_path = world_save_override if not world_save_override.is_empty() else "user://albion_after_world_%d.json" % world_seed
-		if not _world_save_path.begins_with("user://"):
-			printerr("SERVER world checkpoint must reside under user://")
+		if not WorldPersistence.valid_world_path(_world_save_path):
+			printerr("SERVER world checkpoint must be a normalized file within user://")
 			quit(2)
 			return
 		if FileAccess.file_exists(_world_save_path):
