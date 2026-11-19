@@ -45,6 +45,8 @@ TEST_FORCE_LINK(test_gltf_document)
 #include "modules/gltf/extensions/gltf_light.h"
 #include "modules/gltf/structures/gltf_accessor.h"
 #include "scene/3d/light_3d.h"
+#include "scene/3d/mesh_instance_3d.h"
+#include "scene/resources/mesh.h"
 
 namespace TestGLTFDocument {
 
@@ -366,6 +368,72 @@ TEST_CASE("[SceneTree][GLTFDocument] Equal glTF spotlight cone angles avoid divi
 	REQUIRE(spot != nullptr);
 	CHECK(spot->get_param(SpotLight3D::PARAM_SPOT_ATTENUATION) == 0.0f);
 	memdelete(node);
+}
+
+
+TEST_CASE("[GLTFAttributeFastPath] mesh tangent and normal buffers preserve geometry across export") {
+	Node3D *root = memnew(Node3D);
+	root->set_name("GLTFAttributeRoot");
+	MeshInstance3D *mesh_node = memnew(MeshInstance3D);
+	root->add_child(mesh_node);
+	mesh_node->set_owner(root);
+	mesh_node->set_name("AttributeTriangle");
+
+	Ref<ArrayMesh> mesh;
+	mesh.instantiate();
+	Array arrays;
+	arrays.resize(Mesh::ARRAY_MAX);
+	const PackedVector3Array vertices = { Vector3(0, 0, 0), Vector3(1, 0, 0), Vector3(0, 1, 0) };
+	const PackedVector3Array normals = { Vector3(0, 0, 1), Vector3(0, 0, 1), Vector3(0, 0, 1) };
+	PackedFloat32Array tangents;
+	for (int i = 0; i < 3; ++i) {
+		tangents.push_back(1.0f);
+		tangents.push_back(0.0f);
+		tangents.push_back(0.0f);
+		tangents.push_back(1.0f);
+	}
+	const PackedInt32Array indices = { 0, 1, 2 };
+	arrays[Mesh::ARRAY_VERTEX] = vertices;
+	arrays[Mesh::ARRAY_NORMAL] = normals;
+	arrays[Mesh::ARRAY_TANGENT] = tangents;
+	arrays[Mesh::ARRAY_INDEX] = indices;
+	mesh->add_surface_from_arrays(Mesh::PRIMITIVE_TRIANGLES, arrays);
+	mesh_node->set_mesh(mesh);
+
+	Ref<GLTFDocument> exporter;
+	exporter.instantiate();
+	Ref<GLTFState> state;
+	state.instantiate();
+	const String path = TestUtils::get_temp_path("mesh_attribute_fastpath.glb");
+	REQUIRE_EQ(exporter->append_from_scene(root, state), OK);
+	REQUIRE_EQ(exporter->write_to_filesystem(state, path), OK);
+
+	Ref<GLTFDocument> importer;
+	importer.instantiate();
+	Ref<GLTFState> loaded;
+	loaded.instantiate();
+	REQUIRE_EQ(importer->append_from_file(path, loaded), OK);
+	Node *loaded_scene = importer->generate_scene(loaded);
+	REQUIRE(loaded_scene != nullptr);
+	CHECK(loaded_scene->get_child_count() > 0);
+	MeshInstance3D *imported_node = loaded_scene->get_child_count() > 0 ? Object::cast_to<MeshInstance3D>(loaded_scene->get_child(0)) : nullptr;
+	REQUIRE(imported_node != nullptr);
+	Ref<Mesh> imported_mesh = imported_node->get_mesh();
+	REQUIRE(imported_mesh.is_valid());
+	const Array imported_arrays = imported_mesh->surface_get_arrays(0);
+	const PackedVector3Array imported_normals = imported_arrays[Mesh::ARRAY_NORMAL];
+	const PackedFloat32Array imported_tangents = imported_arrays[Mesh::ARRAY_TANGENT];
+	REQUIRE_EQ(imported_normals.size(), 3);
+	REQUIRE_EQ(imported_tangents.size(), 12);
+	for (int i = 0; i < 3; ++i) {
+		CHECK(imported_normals[i].is_equal_approx(Vector3(0, 0, 1)));
+		CHECK(Math::is_equal_approx(imported_tangents[i * 4 + 0], 1.0f));
+		CHECK(Math::is_zero_approx(imported_tangents[i * 4 + 1]));
+		CHECK(Math::is_zero_approx(imported_tangents[i * 4 + 2]));
+		CHECK(Math::is_equal_approx(imported_tangents[i * 4 + 3], 1.0f));
+	}
+	memdelete(loaded_scene);
+	memdelete(root);
 }
 
 } // namespace TestGLTFDocument
