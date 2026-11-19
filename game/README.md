@@ -712,6 +712,36 @@ The core tests live in `tests/test_market_board.gd`, included in
 `tests/run_all.gd`. Existing Cgame/Godot networking supports the feature,
 so it requires no native engine modifications.
 
+## Night infected sieges against player defenses
+
+While a survivor is **outside the safe Haven settlement** and remains within
+26 meters of an owned or allied barricade, the authoritative game simulation
+may start a small infected siege **at night**. The threat grows with the tier
+of the defended barricade: T1 starts with two walkers, rising to a bounded
+five-enemy mixed wave at T4 (walkers, runners and a brute).
+
+Waves spawn only on traversable, dry ground **10–28 meters from the active
+survivor**, outside the protected hub and away from existing terrain or
+structure collision. They enter the established server-owned chase AI, where
+obstacles stop their movement and infected chip away at barricades. The world
+sends a nearby-player warning; the connected HUD displays it.
+
+The scheduler permits at most one wave per check, imposes a **45-second
+global interval**, a **180-second per-wall interval**, and refuses spawns once
+the live world has **90 active infected**. Distant, dead or safe-zone players
+cannot trigger a wave, and the server removes wall cooldowns when a structure
+is dismantled or destroyed. Players cannot invoke waves via an RPC.
+
+Waves are live-world events, not a persisted loot farm or a new dungeon
+instance. Barricades, durability and tier remain in the existing persistent
+world checkpoint; temporary raid timers and spawned infected do not.
+
+The server rule regression `game/tests/test_base_sieges.gd` checks daytime
+safety, valid placement, server-owned target pursuit, cooldowns, T4 wave
+limits, the global population cap and deletion of destroyed bases. No
+engine changes were necessary: Cgame's collision and enemy simulation already
+support this gameplay logic.
+
 ## Upgradable bases: four defensive tiers
 
 The canonical `game/` server now upgrades existing barricades **T1 → T4**
