@@ -262,7 +262,7 @@ bool GodotBodyPair2D::_test_ccd(real_t p_step, GodotBody2D *p_A, int p_shape_A, 
 				double impact_fraction = 0.0;
 				const PhysicsCCDRotatingCapsuleTOIResult result = physics_ccd_rotating_capsule_toi(
 						p_xform_A.get_origin(), p_xform_A.columns[1],
-						p_A->get_center_of_mass(), p_xform_B.get_origin(),
+						p_A->get_transform().get_origin() + p_A->get_center_of_mass(), p_xform_B.get_origin(),
 						p_A->get_angular_velocity(), p_step, half_segment * scale_A, radius, impact_fraction);
 				if (result == PhysicsCCDRotatingCapsuleTOIResult::HIT) {
 					// The existing CCD response also clips velocity instead of
