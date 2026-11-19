@@ -400,6 +400,32 @@ walls and defense against recycled connection IDs. This is not yet a
 multi-shard world database: crash recovery is limited to the last successful
 autosave, and account-based ownership requires an authenticated identity.
 
+### Checkpoint backups and operator recovery
+
+Each **second or later** successful checkpoint save now keeps the previous
+complete snapshot in a sibling `.bak` file, while the new checkpoint is
+written through a temporary file and renamed. The first save has no backup.
+Invalid existing JSON or a snapshot belonging to another seed is **not
+overwritten** during backup rotation. Save failures leave the server world
+marked dirty for a later retry and are reported on graceful shutdown.
+
+The dedicated server **never automatically loads the backup**. Falling back
+silently could resurrect a dismantled barricade and duplicate salvaged
+materials. If the primary file becomes corrupted, stop the server, preserve
+both files, investigate, then deliberately copy the verified backup over
+the primary world file before restarting. Any changes since that backup will
+be lost. Keep independent offsite backups for valuable worlds.
+
+The `--world-save` path is normalized and must remain inside Cgame's
+`user://` data directory; paths that escape using `../` are refused.
+Nested directories under `user://` are created when saving. This is not a
+substitute for filesystem permissions or protection against attacker-controlled
+symbolic links on the host.
+
+Run `game/tests/test_world_backup.gd` through
+`godot --headless --path game --script res://tests/run_all.gd` to check disk
+rotation, manual recovery, invalid primary handling and path confinement.
+
 
 ## Ruin recovery: fourth outpost contract
 
