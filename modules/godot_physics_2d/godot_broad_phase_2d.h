@@ -52,6 +52,8 @@ public:
 		return create(p_object, p_subindex, p_aabb, p_static);
 	}
 	virtual void flush_pending_pairs() {}
+	// Re-evaluate object layer/mask filters without moving unchanged AABBs.
+	virtual void force_collision_check(ID p_id) = 0;
 	virtual void move(ID p_id, const Rect2 &p_aabb) = 0;
 	virtual void set_static(ID p_id, bool p_static) = 0;
 	virtual void remove(ID p_id) = 0;
