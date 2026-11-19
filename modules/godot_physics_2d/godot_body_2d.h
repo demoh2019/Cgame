@@ -108,6 +108,11 @@ class GodotBody2D : public GodotCollisionObject2D {
 	virtual void _shapes_changed() override;
 	Transform2D new_transform;
 
+	// Swept shape motion computed by a parallel `integrate_forces`, applied to
+	// the broadphase afterwards on the stepping thread.
+	Vector2 deferred_motion;
+	bool has_deferred_motion = false;
+
 	List<Pair<GodotConstraint2D *, int>> constraint_list;
 
 	struct AreaCMP {
@@ -320,7 +325,15 @@ public:
 	_FORCE_INLINE_ real_t get_friction() const { return friction; }
 	_FORCE_INLINE_ real_t get_bounce() const { return bounce; }
 
-	void integrate_forces(real_t p_step);
+	// With `p_defer_motion`, the broadphase is not touched and the call is safe to
+	// run concurrently for different bodies; call `apply_deferred_motion` afterwards.
+	void integrate_forces(real_t p_step, bool p_defer_motion = false);
+	_FORCE_INLINE_ void apply_deferred_motion() {
+		if (has_deferred_motion) {
+			has_deferred_motion = false;
+			_update_shapes_with_motion(deferred_motion);
+		}
+	}
 	void integrate_velocities(real_t p_step);
 
 	_FORCE_INLINE_ Vector2 get_velocity_in_local_point(const Vector2 &rel_pos) const {

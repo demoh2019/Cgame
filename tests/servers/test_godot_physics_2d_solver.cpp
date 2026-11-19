@@ -211,6 +211,83 @@ TEST_CASE("[SceneTree][GodotPhysics2D] Coulomb friction stops a sliding box at t
 	server->free_rid(space);
 }
 
+static Vector<Vector2> simulate_pile(PhysicsServer2D *p_server, int p_side, int p_steps, real_t &r_floor_y, real_t &r_wall_x) {
+	const real_t step = 1.0 / 60.0;
+	const real_t radius = 5.0;
+	const real_t spacing = 10.0;
+	RID space = create_space(p_server, 980.0);
+	p_server->space_set_param(space, PS2DE::SPACE_PARAM_BODY_TIME_TO_SLEEP, 1000.0);
+
+	const real_t width = p_side * spacing;
+	r_floor_y = 0.0;
+	r_wall_x = width;
+
+	RID wall_shape = p_server->rectangle_shape_create();
+	p_server->shape_set_data(wall_shape, Vector2(width, width));
+	RID walls = p_server->body_create();
+	p_server->body_set_mode(walls, PS2DE::BODY_MODE_STATIC);
+	p_server->body_add_shape(walls, wall_shape, Transform2D(0.0, Vector2(width * 0.5, width))); // Floor.
+	p_server->body_add_shape(walls, wall_shape, Transform2D(0.0, Vector2(-width, -width * 0.5))); // Left wall.
+	p_server->body_add_shape(walls, wall_shape, Transform2D(0.0, Vector2(width * 2.0, -width * 0.5))); // Right wall.
+	p_server->body_set_space(walls, space);
+
+	RID circle = p_server->circle_shape_create();
+	p_server->shape_set_data(circle, radius);
+	Vector<RID> bodies;
+	for (int y = 0; y < p_side; y++) {
+		for (int x = 0; x < p_side; x++) {
+			// Slightly overlapping rows keep every body in a single contact island.
+			const Vector2 position(radius + x * spacing + (y % 2) * 0.5, -radius - y * (spacing - 0.25));
+			bodies.push_back(create_body(p_server, space, circle, PS2DE::BODY_MODE_RIGID, position));
+		}
+	}
+
+	for (int i = 0; i < p_steps; i++) {
+		p_server->step(step);
+	}
+
+	Vector<Vector2> positions;
+	for (const RID &body : bodies) {
+		positions.push_back(Transform2D(p_server->body_get_state(body, PS2DE::BODY_STATE_TRANSFORM)).get_origin());
+		p_server->free_rid(body);
+	}
+	p_server->free_rid(walls);
+	p_server->free_rid(circle);
+	p_server->free_rid(wall_shape);
+	p_server->free_rid(space);
+	return positions;
+}
+
+TEST_CASE("[SceneTree][GodotPhysics2D] Large islands are solved in parallel deterministically") {
+	PhysicsServer2D *server = PhysicsServer2D::get_singleton();
+	REQUIRE(server != nullptr);
+
+	// 40x40 bodies form one island with thousands of contacts, which is
+	// solved through the graph-colored parallel path.
+	const int side = 40;
+	real_t floor_y = 0.0;
+	real_t wall_x = 0.0;
+	const Vector<Vector2> first = simulate_pile(server, side, 45, floor_y, wall_x);
+	const Vector<Vector2> second = simulate_pile(server, side, 45, floor_y, wall_x);
+
+	REQUIRE(first.size() == side * side);
+	REQUIRE(second.size() == side * side);
+
+	int mismatches = 0;
+	int escaped = 0;
+	for (int i = 0; i < first.size(); i++) {
+		if (first[i] != second[i]) {
+			mismatches++;
+		}
+		// Nothing tunnels through the floor or the walls of the container.
+		if (first[i].y > floor_y || first[i].x < 0.0 || first[i].x > wall_x) {
+			escaped++;
+		}
+	}
+	CHECK(mismatches == 0);
+	CHECK(escaped == 0);
+}
+
 } // namespace TestGodotPhysics2DSolver
 
 #endif // MODULE_GODOT_PHYSICS_2D_ENABLED

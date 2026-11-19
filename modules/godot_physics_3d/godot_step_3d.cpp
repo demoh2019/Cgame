@@ -132,6 +132,15 @@ void GodotStep3D::_populate_island_soft_body(GodotSoftBody3D *p_soft_body, Local
 	_populate_island_graph(nullptr, p_soft_body, p_body_island, p_constraint_island);
 }
 
+void GodotStep3D::_integrate_forces_block(uint32_t p_block_index, void *p_userdata) {
+	const uint32_t begin = p_block_index * PARALLEL_INTEGRATE_BLOCK_SIZE;
+	const uint32_t end = MIN(begin + PARALLEL_INTEGRATE_BLOCK_SIZE, active_bodies.size());
+	for (uint32_t body_index = begin; body_index < end; ++body_index) {
+		// Broadphase updates for swept shapes are deferred: the broadphase is not thread safe.
+		active_bodies[body_index]->integrate_forces(delta, true);
+	}
+}
+
 void GodotStep3D::_setup_constraint(uint32_t p_constraint_index, void *p_userdata) {
 	GodotConstraint3D *constraint = all_constraints[p_constraint_index];
 	constraint->setup(delta);
@@ -382,10 +391,24 @@ void GodotStep3D::step(GodotSpace3D *p_space, real_t p_delta) {
 	int active_count = 0;
 
 	const SelfList<GodotBody3D> *b = body_list->first();
+	active_bodies.clear();
 	while (b) {
-		b->self()->integrate_forces(p_delta);
+		active_bodies.push_back(b->self());
 		b = b->next();
 		active_count++;
+	}
+
+	if (active_bodies.size() < PARALLEL_INTEGRATE_MIN_BODIES) {
+		for (GodotBody3D *body : active_bodies) {
+			body->integrate_forces(p_delta);
+		}
+	} else {
+		const uint32_t block_count = (active_bodies.size() + PARALLEL_INTEGRATE_BLOCK_SIZE - 1) / PARALLEL_INTEGRATE_BLOCK_SIZE;
+		WorkerThreadPool::GroupID group_task = WorkerThreadPool::get_singleton()->add_template_group_task(this, &GodotStep3D::_integrate_forces_block, nullptr, block_count, -1, true, SNAME("Physics3DIntegrateForces"));
+		WorkerThreadPool::get_singleton()->wait_for_group_task_completion(group_task);
+		for (GodotBody3D *body : active_bodies) {
+			body->apply_deferred_motion();
+		}
 	}
 
 	/* UPDATE SOFT BODY MOTION */

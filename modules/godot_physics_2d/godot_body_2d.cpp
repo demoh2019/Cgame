@@ -413,7 +413,7 @@ void GodotBody2D::_update_transform_dependent() {
 	center_of_mass = get_transform().basis_xform(center_of_mass_local);
 }
 
-void GodotBody2D::integrate_forces(real_t p_step) {
+void GodotBody2D::integrate_forces(real_t p_step, bool p_defer_motion) {
 	if (mode == PS2DE::BODY_MODE_STATIC) {
 		return;
 	}
@@ -599,7 +599,12 @@ void GodotBody2D::integrate_forces(real_t p_step) {
 	biased_linear_velocity = Vector2();
 
 	if (do_motion) { //shapes temporarily extend for raycast
-		_update_shapes_with_motion(motion);
+		if (p_defer_motion) {
+			deferred_motion = motion;
+			has_deferred_motion = true;
+		} else {
+			_update_shapes_with_motion(motion);
+		}
 	}
 
 	contact_count = 0;

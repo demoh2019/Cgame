@@ -474,7 +474,7 @@ bool GodotBody3D::is_axis_locked(PS3DE::BodyAxis p_axis) const {
 	return locked_axis & p_axis;
 }
 
-void GodotBody3D::integrate_forces(real_t p_step) {
+void GodotBody3D::integrate_forces(real_t p_step, bool p_defer_motion) {
 	if (mode == PS3DE::BODY_MODE_STATIC) {
 		return;
 	}
@@ -665,7 +665,12 @@ void GodotBody3D::integrate_forces(real_t p_step) {
 	biased_linear_velocity = Vector3();
 
 	if (do_motion) { //shapes temporarily extend for raycast
-		_update_shapes_with_motion(motion);
+		if (p_defer_motion) {
+			deferred_motion = motion;
+			has_deferred_motion = true;
+		} else {
+			_update_shapes_with_motion(motion);
+		}
 	}
 
 	contact_count = 0;

@@ -112,6 +112,11 @@ class GodotBody3D : public GodotCollisionObject3D {
 	virtual void _shapes_changed() override;
 	Transform3D new_transform;
 
+	// Swept shape motion computed by a parallel `integrate_forces`, applied to
+	// the broadphase afterwards on the stepping thread.
+	Vector3 deferred_motion;
+	bool has_deferred_motion = false;
+
 	HashMap<GodotConstraint3D *, int> constraint_map;
 
 	Vector<AreaCMP> areas;
@@ -317,7 +322,15 @@ public:
 	void set_axis_lock(PS3DE::BodyAxis p_axis, bool lock);
 	bool is_axis_locked(PS3DE::BodyAxis p_axis) const;
 
-	void integrate_forces(real_t p_step);
+	// With `p_defer_motion`, the broadphase is not touched and the call is safe to
+	// run concurrently for different bodies; call `apply_deferred_motion` afterwards.
+	void integrate_forces(real_t p_step, bool p_defer_motion = false);
+	_FORCE_INLINE_ void apply_deferred_motion() {
+		if (has_deferred_motion) {
+			has_deferred_motion = false;
+			_update_shapes_with_motion(deferred_motion);
+		}
+	}
 	void integrate_velocities(real_t p_step);
 
 	_FORCE_INLINE_ Vector3 get_velocity_in_local_point(const Vector3 &rel_pos) const {

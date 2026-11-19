@@ -63,10 +63,19 @@ class GodotStep3D {
 	};
 	LocalVector<IslandTask> pending_island_tasks; // Reused across bodies and spaces.
 
+	// Force integration is independent per body and runs on worker threads once
+	// there are enough active bodies to amortize the dispatch.
+	enum {
+		PARALLEL_INTEGRATE_MIN_BODIES = 2048,
+		PARALLEL_INTEGRATE_BLOCK_SIZE = 128,
+	};
+	LocalVector<GodotBody3D *> active_bodies;
+
 	void _populate_island_graph(GodotBody3D *p_body, GodotSoftBody3D *p_soft_body, LocalVector<GodotBody3D *> &p_body_island, LocalVector<GodotConstraint3D *> &p_constraint_island);
 	void _populate_island(GodotBody3D *p_body, LocalVector<GodotBody3D *> &p_body_island, LocalVector<GodotConstraint3D *> &p_constraint_island);
 	void _populate_island_soft_body(GodotSoftBody3D *p_soft_body, LocalVector<GodotBody3D *> &p_body_island, LocalVector<GodotConstraint3D *> &p_constraint_island);
 	void _setup_constraint(uint32_t p_constraint_index, void *p_userdata = nullptr);
+	void _integrate_forces_block(uint32_t p_block_index, void *p_userdata = nullptr);
 	void _pre_solve_island(LocalVector<GodotConstraint3D *> &p_constraint_island) const;
 	void _solve_island(uint32_t p_island_index, void *p_userdata = nullptr);
 	void _solve_island_except_large(uint32_t p_island_index, void *p_userdata = nullptr);
