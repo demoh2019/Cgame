@@ -22,7 +22,7 @@ const CASES := [
 	"physics_raycast_3d", "render_multimesh_3d",
 	"object_lifecycle", "scene_churn",
 	"bitmap_rects", "bitmap_pipeline",
-	"curve_tessellation_2d", "curve_tessellation_3d",
+	"curve_tessellation_2d", "curve_tessellation_3d", "curve_bake", "curve_nearest",
 ]
 
 var signal_total: int = 0
@@ -271,6 +271,10 @@ func _run_case(test_case: String, scale: int, frames: int, seed: int) -> Diction
 			return _curve_tessellation_2d(scale)
 		"curve_tessellation_3d":
 			return _curve_tessellation_3d(scale)
+		"curve_bake":
+			return _curve_bake(scale)
+		"curve_nearest":
+			return _curve_nearest(scale)
 	return {"error": "Unhandled case"}
 
 
@@ -1393,3 +1397,89 @@ func _curve_tessellation_3d(scale: int) -> Dictionary:
 	return {"control_points": count, "closed": true, "passes": 6,
 		"construction_ms": construction_ms, "adaptive_ms": adaptive_ms,
 		"even_ms": even_ms, "bake_ms": bake_ms, "checksum": checksum}
+
+
+# Separate scalar bake, baked distance search, and projection timings.
+# Run in the existing isolated process/RSS watchdog, with deterministic input.
+func _curve_bake(scale: int) -> Dictionary:
+	var curve := Curve.new()
+	curve.set_bake_resolution(1000)
+	var points_count := mini(32 * scale, 512)
+	for i in range(points_count):
+		var x := float(i) / float(points_count - 1)
+		var y := float((i * 73) % 257) / 257.0
+		curve.add_point(Vector2(x, y))
+
+	var initial_count := curve.get_point_count()
+	curve.clean_dupes()
+	if initial_count != points_count or curve.get_point_count() != points_count:
+		return {"error": "Curve clean_dupes removed distinct points"}
+
+	var bake_usec := 0
+	var sample_usec := 0
+	var checksum := 0.0
+	var iterations := mini(12 * scale, 1200)
+	for i in range(iterations):
+		var index := i % points_count
+		curve.set_point_value(index, float((i * 37) % 251) / 251.0)
+		var start := Time.get_ticks_usec()
+		curve.bake()
+		bake_usec += Time.get_ticks_usec() - start
+		start = Time.get_ticks_usec()
+		for sample in range(16):
+			checksum += curve.sample_baked(float((i * 17 + sample * 23) % 997) / 997.0)
+		sample_usec += Time.get_ticks_usec() - start
+	if is_nan(checksum) or is_inf(checksum):
+		return {"error": "Non-finite Curve sample checksum"}
+	return {"control_points": points_count, "rebakes": iterations, "samples": iterations * 16,
+			"bake_ms": float(bake_usec) / 1000.0, "sample_ms": float(sample_usec) / 1000.0,
+			"checksum": checksum}
+
+
+func _curve_nearest(scale: int) -> Dictionary:
+	var path2 := Curve2D.new()
+	var path3 := Curve3D.new()
+	path2.set_bake_interval(2.0)
+	path3.set_bake_interval(2.0)
+	path3.set_up_vector_enabled(false)
+	for i in range(16):
+		var x := float(i) * 20.0
+		var y := float((i * 37) % 41)
+		path2.add_point(Vector2(x, y))
+		path3.add_point(Vector3(x, y, float((i * 29) % 31)))
+	var len2 := path2.get_baked_length()
+	var len3 := path3.get_baked_length()
+	if len2 <= 0.0 or len3 <= 0.0:
+		return {"error": "Curve2D/3D baking produced invalid lengths"}
+
+	var queries := mini(500 * scale, 100000)
+	var checksum := 0.0
+	var started := Time.get_ticks_usec()
+	for i in range(queries):
+		var point2 := Vector2(float((i * 17) % 310), float((i * 19) % 100 - 30))
+		var point3 := Vector3(point2.x, point2.y, float((i * 31) % 67))
+		checksum += path2.get_closest_offset(point2)
+		checksum += path3.get_closest_offset(point3)
+	var offsets_ms := float(Time.get_ticks_usec() - started) / 1000.0
+
+	started = Time.get_ticks_usec()
+	for i in range(queries):
+		var point2 := Vector2(float((i * 17) % 310), float((i * 19) % 100 - 30))
+		var point3 := Vector3(point2.x, point2.y, float((i * 31) % 67))
+		checksum += path2.get_closest_point(point2).x
+		checksum += path3.get_closest_point(point3).x
+	var points_ms := float(Time.get_ticks_usec() - started) / 1000.0
+
+	started = Time.get_ticks_usec()
+	for i in range(queries):
+		var fraction := float((i * 37) % 997) / 997.0
+		checksum += path2.sample_baked(fraction * len2).x
+		checksum += path3.sample_baked(fraction * len3).x
+	var sample_ms := float(Time.get_ticks_usec() - started) / 1000.0
+
+	if is_nan(checksum) or is_inf(checksum):
+		return {"error": "Non-finite Curve2D/3D projection checksum"}
+	return {"queries_per_operation": queries, "baked_points_2d": path2.get_baked_points().size(),
+			"baked_points_3d": path3.get_baked_points().size(),
+			"closest_offset_ms": offsets_ms, "closest_point_ms": points_ms,
+			"sample_baked_ms": sample_ms, "checksum": checksum}

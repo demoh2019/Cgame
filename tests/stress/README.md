@@ -41,6 +41,19 @@ python3 tests/stress/run.py --godot /path/to/godot --case memory_churn --max-ret
 
 Run `--list-cases` for supported identifiers.
 
+Profile curve changes with repeatable workloads on the same CPU and engine build:
+
+```bash
+python3 tests/stress/run.py --godot ./bin/godot.linuxbsd.editor.dev.x86_64 \
+  --case curve_bake,curve_nearest --scale 8 --repeats 7 \
+  --rss-limit-mib 4096 --output out/curves.json
+```
+
+The scenarios separately report `bake_ms`, `sample_ms`,
+`closest_point_ms`, `closest_offset_ms`, and `sample_baked_ms`.
+These measure CPU code, not the GPU. Compare against baseline medians from
+identical hardware; checksum and baked-point counts help spot semantic drift.
+
 ### Curve tessellation CPU/RAM scaling
 
 The headless `curve_tessellation_2d` and `curve_tessellation_3d` workloads measure
@@ -77,6 +90,8 @@ python3 tests/stress/scale_sweep.py \
 | Geometry / meshes | `geometry_2d`, `mesh_build` | Convex hulls, triangulation and SurfaceTool mesh construction |
 | Input / scene groups | `input_dispatch`, `group_calls` | Dispatch input actions and bulk group method calls |
 | Image codec | `image_codec` | Repeated PNG encode/decode and size validation |
+| Curve baking | `curve_bake` | 1000-sample rebakes after edits, cached interpolation across hundreds of control points |
+| Path projection | `curve_nearest` | Curve2D/3D closest-point and offset searches plus baked-distance sampling with separate timings |
 
 ## Presets and safety
 
