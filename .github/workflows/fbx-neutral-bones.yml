@@ -23,9 +23,13 @@ jobs:
   neutral-bone-regression:
     runs-on: ubuntu-24.04
     timeout-minutes: 10
+    strategy:
+      fail-fast: false
+      matrix:
+        compiler: [g++, clang++]
     steps:
       - uses: actions/checkout@v4
       - name: Compile and exercise actual FBX weight assignment (4/8 weights)
         run: |
           python3 -m py_compile misc/scripts/tests/test_fbx_neutral_bones.py
-          python3 -m unittest discover -s misc/scripts/tests -p 'test_fbx_neutral_bones.py' -v
+          CXX=${{ matrix.compiler }} python3 -m unittest discover -s misc/scripts/tests -p 'test_fbx_neutral_bones.py' -v
