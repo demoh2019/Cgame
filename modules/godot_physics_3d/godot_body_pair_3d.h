@@ -99,6 +99,9 @@ class GodotBodyPair3D : public GodotBodyContact3D {
 	Contact contacts[MAX_CONTACTS];
 	int contact_count = 0;
 	GodotPhysicsContactRecycling contact_recycling;
+	// Explicit provenance: a SAT contact with a small negative separation is
+	// not necessarily a speculative contact. Set only by the TOI fallback.
+	bool speculative_contact = false;
 	real_t mixed_friction = 0.0; // Recomputed in pre_solve, reused across solver iterations.
 
 	static void _contact_added_callback(const Vector3 &p_point_A, int p_index_A, const Vector3 &p_point_B, int p_index_B, const Vector3 &normal, void *p_userdata);
