@@ -16,7 +16,7 @@ The root of this directory is also a minimal Godot project, so you can open it d
 ## Safety and limitations
 
 - The API key is held in the dock's masked input for the current session, **not saved** in Godot project files. Network requests go only to `https://api.openai.com/v1/chat/completions`. The task text and system instructions go to the provider; existing project files are **not uploaded**.
-- Output is JSON validated before preview and before application: at most 20 text files, allowed resource extensions, ASCII safe relative paths, size limits, case-insensitive duplicate rejection, no `@tool` scripts.
+- Output is JSON validated before preview and before application, including checks for references to missing generated resources (static paths only): at most 20 text files, allowed resource extensions, ASCII safe relative paths, size limits, case-insensitive duplicate rejection, no `@tool` scripts.
 - Output goes only under `res://ai_generated/`; existing files are not overwritten. A directory/write failure rolls back newly written files where possible. Generated code should still be reviewed before running: it is **not sandboxed**.
 - This prototype creates code, scenes and simple procedural visuals, **not** trained AI models, 3D meshes, voices, audio recordings or production-quality game assets.
 - The model may produce incorrect code or references. There is currently no automatic syntax repair, compiler feedback loop, scene execution, model-switching router, offline local model, multi-file refactoring or image generation.

@@ -76,7 +76,28 @@ static func validate_payload(payload: Variant) -> Dictionary:
 		if path.get_extension().to_lower() == "gd" and content.contains("@tool"):
 			return _failure("Generated @tool scripts are not allowed.")
 		checked.append({"path": path, "content": content})
+	var missing_references := find_missing_generated_references(checked)
+	if not missing_references.is_empty():
+		return _failure("Missing generated resource: %s" % missing_references[0])
 	return {"ok": true, "error": "", "files": checked, "summary": summary}
+
+
+static func find_missing_generated_references(files: Array[Dictionary]) -> Array[String]:
+	# Cheap deterministic consistency check, without loading or executing untrusted code.
+	var present := {}
+	for entry in files:
+		present[entry["path"]] = true
+	var expression := RegEx.create_from_string("res://ai_generated/[A-Za-z0-9_./-]+")
+	var missing: Array[String] = []
+	for entry in files:
+		var extension: String = entry["path"].get_extension().to_lower()
+		if not extension in ["gd", "tscn", "tres", "gdshader"]:
+			continue
+		for occurrence in expression.search_all(entry["content"]):
+			var resource_path := occurrence.get_string().trim_prefix("res://ai_generated/")
+			if not present.has(resource_path) and not missing.has(resource_path):
+				missing.append(resource_path)
+	return missing
 
 
 static func parse_model_response(body: String) -> Dictionary:

@@ -35,6 +35,37 @@ func _initialize() -> void:
 	_test("reject non-JSON completion content", not Validator.parse_model_response(JSON.stringify({"choices": [{"message": {"content": "garbage"}}]}))["ok"])
 	_test("reject invalid API body", not Validator.parse_model_response("garbage")["ok"])
 
+
+	_test("accept uppercase extension", Validator.is_safe_relative_path("scripts/Player.GD"))
+	_test("reject dot segment", not Validator.is_safe_relative_path("scripts/./player.gd"))
+	_test("reject hidden path", not Validator.is_safe_relative_path("files/.settings/file.gd"))
+	_test("reject Unicode path", not Validator.is_safe_relative_path("мир.tscn"))
+	_test("reject excessively long path", not Validator.is_safe_relative_path("a".repeat(180) + ".gd"))
+	_test("reject empty path", not Validator.is_safe_relative_path(""))
+	_test("reject unsupported binary", not Validator.is_safe_relative_path("sound.wav"))
+	_test("reject missing content field", not Validator.validate_payload({"files": [{"path": "x.gd"}]})["ok"])
+	_test("reject non-string content", not Validator.validate_payload({"files": [{"path": "x.gd", "content": 10}]})["ok"])
+	_test("reject non-array files", not Validator.validate_payload({"files": {"path": "a.gd"}})["ok"])
+	_test("reject invalid summary length", not Validator.validate_payload({"files": _valid()["files"], "summary": "x".repeat(4001)})["ok"])
+	_test("reject malformed choice", not Validator.parse_model_response(JSON.stringify({"choices": ["x"]}))["ok"])
+	_test("reject missing message", not Validator.parse_model_response(JSON.stringify({"choices": [{}]}))["ok"])
+	_test("reject non-string message", not Validator.parse_model_response(JSON.stringify({"choices": [{"message": {"content": []}}]}))["ok"])
+	_test("reject embedded traversal in path", not Validator.validate_payload({"files": [{"path": "scenes/../../secret.gd", "content": "extends Node"}]})["ok"])
+	_test("no missing references", Validator.find_missing_generated_references(_valid()["files"]).is_empty())
+	_test("references to generated files accepted", Validator.validate_payload({"files": [
+		{"path": "scripts/child.gd", "content": "extends Node"},
+		{"path": "scenes/main.tscn", "content": "[gd_scene load_steps=2 format=3]\n[ext_resource type=\"Script\" path=\"res://ai_generated/scripts/child.gd\" id=\"1_a\"]\n[node name=\"Main\" type=\"Node\"]\nscript = ExtResource(\"1_a\")"},
+	]})["ok"])
+	_test("missing generated dependency rejected", not Validator.validate_payload({"files": [
+		{"path": "scripts/player.gd", "content": "extends Node\nconst CHILD = preload(\"res://ai_generated/scripts/missing.gd\")"},
+	]})["ok"])
+	_test("missing script dependency reported", Validator.find_missing_generated_references([
+		{"path": "scripts/player.gd", "content": "const CHILD = preload(\"res://ai_generated/scripts/missing.gd\")"},
+	]).size() == 1)
+	_test("ignore README resource mentions", Validator.validate_payload({"files": [
+		{"path": "README.md", "content": "Open res://ai_generated/scenes/main.tscn when ready."},
+	]})["ok"])
+
 	print("AI Game Builder validator tests: %d passed, %d failed" % [_passed, _failed])
 	quit(1 if _failed > 0 else 0)
 
