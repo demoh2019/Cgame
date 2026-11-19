@@ -684,9 +684,35 @@ void GodotBody3D::integrate_forces(real_t p_step, bool p_defer_motion) {
 					if (get_shape_aabb(i).position.y >= water_height) {
 						continue;
 					}
-					const AABB bounds = (get_transform() * get_shape_transform(i)).xform(get_shape(i)->get_aabb());
-					const GodotPhysicsFluidSample3D sample = godot_physics_fluid_sample_3d(
-							bounds, shape_volume, water_height);
+					const GodotShape3D *shape = get_shape(i);
+					const Transform3D shape_world = get_transform() * get_shape_transform(i);
+					const AABB bounds = shape_world.xform(shape->get_aabb());
+					GodotPhysicsFluidSample3D sample;
+					const PS3DE::ShapeType shape_type = shape->get_type();
+					real_t uniform_scale;
+					// Unlike the AABB approximation, these primitive integrals
+					// recover the actual volume and first hydrostatic moment.
+					// Only similarity transforms preserve spherical sections.
+					if ((shape_type == PS3DE::SHAPE_SPHERE || shape_type == PS3DE::SHAPE_CAPSULE) &&
+							godot_physics_fluid_uniform_scale_3d(shape_world.basis, uniform_scale)) {
+						if (shape_type == PS3DE::SHAPE_SPHERE) {
+							const GodotSphereShape3D *sphere = static_cast<const GodotSphereShape3D *>(shape);
+							sample = godot_physics_fluid_sphere_sample_3d(shape_world.origin,
+									sphere->get_radius() * uniform_scale, shape_volume, water_height);
+						} else if (godot_physics_fluid_capsule_vertical_3d(shape_world.basis, uniform_scale)) {
+							const GodotCapsuleShape3D *capsule = static_cast<const GodotCapsuleShape3D *>(shape);
+							sample = godot_physics_fluid_vertical_capsule_sample_3d(shape_world.origin,
+									capsule->get_radius() * uniform_scale,
+									capsule->get_height() * uniform_scale, shape_volume, water_height);
+						} else {
+							// A tilted capsule has noncircular horizontal slices.
+							sample = godot_physics_fluid_sample_3d(bounds, shape_volume, water_height);
+						}
+					} else {
+							// Nonuniform scales, shear and complex shapes keep the
+							// existing low-cost AABB approximation.
+						sample = godot_physics_fluid_sample_3d(bounds, shape_volume, water_height);
+					}
 					if (!(sample.submerged_volume > 0.0)) {
 						continue;
 					}
