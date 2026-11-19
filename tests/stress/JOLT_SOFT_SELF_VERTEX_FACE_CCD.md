@@ -53,7 +53,8 @@ For a particle at `p` and its velocity `v_p`, and a face
 5. Starting at `t=0`, compute the **seven-region closest point to
    the triangle after moving all four particles to time t**. Advance
    by `(current_distance - radius)/max_speed`. Stop at the shell, the
-   end of the physics step, or **16 iterations**. Every evaluation
+   end of the physics step, or **16 iterations** (the limit is
+   `MAX_SOFT_SELF_VERTEX_FACE_SWEEP_ITERATIONS`). Every evaluation
    is charged to the existing *self vertex-face* budget, on top of
    the initial candidate test. No per-contact memory allocation.
 6. At a predicted contact, use the impact-time barycentric weights and
