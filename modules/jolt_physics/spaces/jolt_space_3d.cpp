@@ -128,7 +128,7 @@ static void resolve_soft_soft_particle_contacts(JPH::Body &p_body_a, JPH::Body &
 			--r_particle_budget; // Includes non-contact pairs: hard work bound.
 			JPH::SoftBodyVertex &b = particles_b[j];
 			const float inverse_mass_sum = a.mInvMass + b.mInvMass;
-			if (inverse_mass_sum <= 0.0f) {
+			if (!Math::is_finite(inverse_mass_sum) || inverse_mass_sum <= 0.0f) {
 				continue;
 			}
 			const JPH::Vec3 separation = center_delta + rotation_b * b.mPosition - offset_a;
@@ -143,6 +143,9 @@ static void resolve_soft_soft_particle_contacts(JPH::Body &p_body_a, JPH::Body &
 			const JPH::Vec3 normal = distance > 1.0e-6f ? separation / distance :
 					(center_delta.LengthSq() > 1.0e-12f ? center_delta.Normalized() : JPH::Vec3::sAxisY());
 			const float normal_speed = relative_velocity.Dot(normal);
+			if (!Math::is_finite(normal_speed)) {
+				continue; // Never spread a corrupt velocity to the other body.
+			}
 			const float penetration = radius - distance;
 			const float recovery_speed = MIN(penetration * bias_per_step, MAX_SOFT_SOFT_PENETRATION_BIAS);
 			const float normal_speed_correction = MIN(MAX(recovery_speed - normal_speed, 0.0f), MAX_SOFT_SOFT_CONTACT_SPEED_CORRECTION);
@@ -158,7 +161,7 @@ static void resolve_soft_soft_particle_contacts(JPH::Body &p_body_a, JPH::Body &
 			// Coulomb-limited sliding friction in the tangential plane.
 			const JPH::Vec3 tangent_velocity = relative_velocity - normal * normal_speed;
 			const float tangent_speed_sq = tangent_velocity.LengthSq();
-			if (friction > 0.0f && tangent_speed_sq > 1.0e-12f) {
+			if (friction > 0.0f && Math::is_finite(tangent_speed_sq) && tangent_speed_sq > 1.0e-12f) {
 				const float tangent_speed = Math::sqrt(tangent_speed_sq);
 				const float tangent_impulse = MIN(tangent_speed / inverse_mass_sum, friction * normal_impulse);
 				impulse -= tangent_velocity * (tangent_impulse / tangent_speed);
