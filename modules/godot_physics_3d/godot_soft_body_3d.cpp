@@ -731,27 +731,48 @@ void GodotSoftBody3D::solve_self_collisions(real_t p_delta) {
 			}
 			Vector3 face_normal, barycentric;
 			real_t signed_distance = 0.0;
-			if (!physics_xpbd_self_collision_face_projection(node.x,
-						face.n[0]->x, face.n[1]->x, face.n[2]->x,
-						face_normal, barycentric, signed_distance) ||
-					Math::abs(signed_distance) >= thickness) {
+			const bool discrete_contact = physics_xpbd_self_collision_face_projection(
+					node.x, face.n[0]->x, face.n[1]->x, face.n[2]->x,
+					face_normal, barycentric, signed_distance) &&
+					Math::abs(signed_distance) < thickness;
+			if (discrete_contact) {
+				// Preserve the previous side for short-range contacts.
+				const Vector3 previous_normal = (face.n[1]->q - face.n[0]->q).cross(face.n[2]->q - face.n[0]->q);
+				const real_t previous_dot = (node.q - face.n[0]->q).dot(previous_normal);
+				const bool has_previous_side = Math::is_finite(previous_dot) &&
+						Math::is_finite(previous_normal.length_squared()) &&
+						Math::abs(previous_dot) > CMP_EPSILON * previous_normal.length();
+				SelfCollisionContact contact;
+				contact.vertex = node_id;
+				contact.face = face.index;
+				contact.side = (has_previous_side ? previous_dot : signed_distance) >= 0.0 ? 1 : -1;
+				contact.lambda = 0.0;
+				xpbd_self_contacts.push_back(contact);
+			} else if (swept_ccd) {
+				// Find the FIRST crossing of the moving triangle within [0,1].
+				// A point ending far across the plane is invisible to the
+				// discrete thickness-only vertex/face narrowphase.
+				PhysicsXPBDSoftCCDSweepHit hit;
+				if (!physics_xpbd_swept_vertex_triangle(
+						node.q, node.x,
+						face.n[0]->q, face.n[0]->x,
+						face.n[1]->q, face.n[1]->x,
+						face.n[2]->q, face.n[2]->x, hit)) {
+					return false;
+				}
+				SelfCCDContact contact;
+				contact.vertex = node_id;
+				contact.face = face.index;
+				contact.barycentric = hit.barycentric;
+				contact.separating_normal = hit.separating_normal;
+				contact.lambda = 0.0;
+				xpbd_self_ccd_contacts.push_back(contact);
+			} else {
 				return false;
 			}
-			// When a vertex crosses a face inside a single step, push it back
-			// toward its previous side instead of continuing penetration.
-			const Vector3 previous_normal = (face.n[1]->q - face.n[0]->q).cross(face.n[2]->q - face.n[0]->q);
-			const real_t previous_dot = (node.q - face.n[0]->q).dot(previous_normal);
-			const bool has_previous_side = Math::is_finite(previous_dot) &&
-					Math::is_finite(previous_normal.length_squared()) &&
-					Math::abs(previous_dot) > CMP_EPSILON * previous_normal.length();
-			SelfCollisionContact contact;
-			contact.vertex = node_id;
-			contact.face = face.index;
-			contact.side = (has_previous_side ? previous_dot : signed_distance) >= 0.0 ? 1 : -1;
-			contact.lambda = 0.0;
-			xpbd_self_contacts.push_back(contact);
 			++hits;
-			return hits >= per_vertex_limit || xpbd_self_contacts.size() >= global_limit;
+			return hits >= per_vertex_limit ||
+					(xpbd_self_contacts.size() + xpbd_self_ccd_contacts.size()) >= global_limit;
 		};
 		if (swept_ccd) {
 			AABB swept_query(node.q, Vector3());
@@ -762,7 +783,7 @@ void GodotSoftBody3D::solve_self_collisions(real_t p_delta) {
 			face_tree.aabb_query(AABB(node.x - padding, padding * real_t(2.0)), visit_face);
 		}
 	}
-	const bool vertex_contacts = !xpbd_self_contacts.is_empty();
+	const bool vertex_contacts = !xpbd_self_contacts.is_empty() || !xpbd_self_ccd_contacts.is_empty();
 	if (vertex_contacts) {
 		const int contact_iterations = MIN(MAX(iteration_count, 1), 4);
 		for (int iteration = 0; iteration < contact_iterations; ++iteration) {
@@ -774,6 +795,17 @@ void GodotSoftBody3D::solve_self_collisions(real_t p_delta) {
 						node.im, face.n[0]->im, face.n[1]->im, face.n[2]->im,
 						thickness, alpha, contact.side, contact.lambda);
 			}
+			for (SelfCCDContact &contact : xpbd_self_ccd_contacts) {
+				Node &node = nodes[contact.vertex];
+				Face &face = faces[contact.face];
+				PhysicsXPBDSoftCCDSweepHit hit;
+				hit.barycentric = contact.barycentric;
+				hit.separating_normal = contact.separating_normal;
+				physics_xpbd_solve_swept_vertex_face(node.x,
+						face.n[0]->x, face.n[1]->x, face.n[2]->x,
+						node.im, face.n[0]->im, face.n[1]->im, face.n[2]->im,
+						thickness, alpha, hit, contact.lambda);
+			}
 		}
 	}
 	const bool edge_contacts = solve_edge_self_collisions(p_delta);
@@ -781,7 +813,7 @@ void GodotSoftBody3D::solve_self_collisions(real_t p_delta) {
 	// Coulomb-limited tangential friction to vertex/face self contacts.
 	// This must act on positions: velocities are reconstructed from x-q.
 	const real_t friction = get_space()->get_soft_body_self_collision_friction();
-	if (friction > real_t(0.0) && vertex_contacts) {
+	if (friction > real_t(0.0) && !xpbd_self_contacts.is_empty()) {
 		for (const SelfCollisionContact &contact : xpbd_self_contacts) {
 			if (!(contact.lambda > real_t(0.0))) {
 				continue; // Without a normal reaction there is no friction budget.
