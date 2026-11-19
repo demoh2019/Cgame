@@ -1,0 +1,46 @@
+name: RBSet and RBMap tree hot-path regression tests
+
+on:
+  push:
+    branches: [develop]
+    paths:
+      - 'core/templates/rb_set.h'
+      - 'core/templates/rb_map.h'
+      - 'tests/core/templates/test_rb_set.cpp'
+      - 'tests/core/templates/test_rb_map.cpp'
+      - '.github/workflows/rb-tree-hotpath-perf.yml'
+  pull_request:
+    paths:
+      - 'core/templates/rb_set.h'
+      - 'core/templates/rb_map.h'
+      - 'tests/core/templates/test_rb_set.cpp'
+      - 'tests/core/templates/test_rb_map.cpp'
+      - '.github/workflows/rb-tree-hotpath-perf.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: rb-tree-hotpaths-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  native-rb-tree-regressions:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+      - uses: ./.github/actions/godot-deps
+      - name: Build Cgame editor with native tests
+        uses: ./.github/actions/godot-build
+        with:
+          platform: linuxbsd
+          target: editor
+          scons-flags: dev_build=yes tests=yes debug_symbols=no module_mono_enabled=no module_text_server_fb_enabled=yes accesskit=no -j2
+      - name: Verify RBSet lower-bound, linked order, and comparator budget
+        run: ./bin/godot.linuxbsd.editor.dev.x86_64 --headless --test --test-case="*[RBSet]*" --no-colors
+      - name: Verify RBMap floor lookup, insert links, and differential map behavior
+        run: ./bin/godot.linuxbsd.editor.dev.x86_64 --headless --test --test-case="*[RBMap]*" --no-colors
