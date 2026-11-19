@@ -54,6 +54,16 @@ func _touch(key: String, kind: String, entity: Dictionary, seen: Dictionary) -> 
 				str(entity["type"]), int(entity["hp"])]
 		elif kind == "player":
 			label.text = str(entity["name"]) if entity["alive"] else "%s (dead)" % entity["name"]
+	if kind == "bag":
+		# Gold = available to your party, grey = reserved, brown = public.
+		var loot_mesh: MeshInstance3D = _nodes[key].get_child(0)
+		var loot_material: StandardMaterial3D = loot_mesh.material_override
+		if bool(entity.get("reserved", false)):
+			loot_material.albedo_color = (
+				Color(0.96, 0.69, 0.22) if bool(entity.get("can_loot", false))
+				else Color(0.43, 0.47, 0.51))
+		else:
+			loot_material.albedo_color = Color(0.64, 0.42, 0.23)
 	if kind == "barricade":
 		var barricade_mesh: MeshInstance3D = _nodes[key].get_child(0)
 		var barricade_material: StandardMaterial3D = barricade_mesh.material_override
@@ -139,6 +149,7 @@ func _make(kind: String, entity: Dictionary) -> Node3D:
 	if kind == "bag":
 		var mesh := MeshInstance3D.new()
 		mesh.mesh = Meshes.get_mesh("bag")
+		mesh.material_override = StandardMaterial3D.new()
 		root.add_child(mesh)
 		return root
 	var model := CharacterModel.new()

@@ -1292,3 +1292,27 @@ The `albion-after-raid-boss.yml` GitHub Actions workflow invokes the
 same tests. Successful Godot/Cgame execution must be checked before a
 production deployment. No additional C++ engine primitive was needed
 for this gameplay feature.
+
+
+## Party-first PvE loot and public full-loot drops
+
+An infected kill creates a loot bag exclusively available to the **actual
+server-confirmed killer and the party members present at the moment of death**
+for the first 18 seconds. After that, the bag is public for the remainder of
+its normal five-minute lifetime. Players who join the party after the kill
+cannot retroactively gain rights to earlier bags. Loose items left over after
+scavenging a crate have the same short protection for that scavenger's party.
+
+The server validates every `cmd_loot` against the original eligibility
+snapshot, including distance checks and inventory limits. Unauthorized
+attempts return `reserved` without transferring or deleting items. Clients
+see their own `can_loot` flag and remaining timer, but **never receive the
+server's owner/party ID list**. Online world bags are gold for eligible party
+members, grey when reserved by someone else, and brown once public.
+
+**Player-death bags in red and black zones are always public immediately.**
+This feature does not weaken the full-loot PvP risk. No native engine additions
+are necessary: the server owns access control, and the existing snapshot and
+Godot 3D rendering APIs handle the client. Test via
+`godot --headless --path game --script res://tests/run_all.gd`
+(`game/tests/test_loot_rights.gd`).
