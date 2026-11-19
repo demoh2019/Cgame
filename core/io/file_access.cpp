@@ -41,6 +41,7 @@
 #include "core/object/class_db.h"
 #include "core/os/os.h"
 #include "core/os/time.h"
+#include "core/templates/local_vector.h"
 
 Ref<FileAccess> FileAccess::create(AccessType p_access) {
 	ERR_FAIL_INDEX_V(p_access, ACCESS_MAX, nullptr);
@@ -509,61 +510,105 @@ String FileAccess::get_line() const {
 	return String::utf8(line.get_data());
 }
 
+// Build one CSV field in a single allocation. Most unquoted fields can use a
+// bulk copy; quoted fields need to remove quote delimiters and doubled quotes.
+static String _csv_extract_field(const char32_t *p_data, int p_begin, int p_end, int p_output_length) {
+	if (p_output_length == 0) {
+		return String();
+	}
+	String field;
+	ERR_FAIL_COND_V(field.resize_uninitialized(p_output_length + 1) != OK, String());
+	char32_t *write = field.ptrw();
+
+	if (p_output_length == p_end - p_begin) {
+		memcpy(write, p_data + p_begin, size_t(p_output_length) * sizeof(char32_t));
+	} else {
+		bool in_quote = false;
+		int written = 0;
+		for (int i = p_begin; i < p_end; i++) {
+			const char32_t c = p_data[i];
+			if (c == '"') {
+				if (in_quote && i + 1 < p_end && p_data[i + 1] == '"') {
+					write[written++] = '"';
+					i++;
+				} else {
+					in_quote = !in_quote;
+				}
+			} else {
+				write[written++] = c;
+			}
+		}
+	}
+	write[p_output_length] = 0;
+	return field;
+}
+
 Vector<String> FileAccess::get_csv_line(const String &p_delim) const {
 	ERR_FAIL_COND_V_MSG(p_delim.length() != 1, Vector<String>(), "Only single character delimiters are supported to parse CSV lines.");
 	ERR_FAIL_COND_V_MSG(p_delim[0] == '"', Vector<String>(), "The double quotation mark character (\") is not supported as a delimiter for CSV lines.");
 
-	String line;
-
-	// CSV can support entries with line breaks as long as they are enclosed
-	// in double quotes. So our "line" might be more than a single line in the
-	// text file.
-	int qc = 0;
+	// Collect multiline quoted records with amortized growth. Count only new
+	// characters so a long quoted record is not rescanned after every newline.
+	LocalVector<char32_t> line;
+	bool odd_quotes = false;
 	do {
 		if (eof_reached()) {
 			break;
 		}
-		line += get_line() + "\n";
-		qc = 0;
-		for (int i = 0; i < line.length(); i++) {
-			if (line[i] == '"') {
-				qc++;
+		const String segment = get_line();
+		const int segment_length = segment.length();
+		const uint64_t needed = uint64_t(line.size()) + uint64_t(segment_length) + 1;
+		ERR_FAIL_COND_V_MSG(needed >= INT32_MAX, Vector<String>(), "CSV record is too large.");
+
+		const uint32_t old_size = line.size();
+		line.resize_uninitialized(uint32_t(needed));
+		if (segment_length > 0) {
+			const char32_t *source = segment.ptr();
+			memcpy(line.ptr() + old_size, source, size_t(segment_length) * sizeof(char32_t));
+			for (int i = 0; i < segment_length; i++) {
+				if (source[i] == '"') {
+					odd_quotes = !odd_quotes;
+				}
 			}
 		}
-	} while (qc % 2);
+		line[uint32_t(needed - 1)] = '\n';
+	} while (odd_quotes);
 
-	// Remove the extraneous newline we've added above.
-	line = line.substr(0, line.length() - 1);
+	// The newline was only used to join physical lines of one CSV record.
+	if (!line.is_empty()) {
+		line.resize_uninitialized(line.size() - 1);
+	}
 
 	Vector<String> strings;
-
+	const char32_t *read = line.ptr();
+	const int line_length = int(line.size());
+	const char32_t delim = p_delim[0];
 	bool in_quote = false;
-	String current;
-	for (int i = 0; i < line.length(); i++) {
-		char32_t c = line[i];
-		// A delimiter ends the current entry, unless it's in a quoted string.
-		if (!in_quote && c == p_delim[0]) {
-			strings.push_back(current);
-			current = String();
+	int field_begin = 0;
+	int field_length = 0;
+	for (int i = 0; i < line_length; i++) {
+		const char32_t c = read[i];
+		if (!in_quote && c == delim) {
+			strings.push_back(_csv_extract_field(read, field_begin, i, field_length));
+			field_begin = i + 1;
+			field_length = 0;
 		} else if (c == '"') {
-			// Doubled quotes are escapes for intentional quotes in the string.
-			if (line[i + 1] == '"' && in_quote) {
-				current += '"';
+			// A pair inside quotes contributes one literal quote to the field.
+			if (in_quote && i + 1 < line_length && read[i + 1] == '"') {
+				field_length++;
 				i++;
 			} else {
 				in_quote = !in_quote;
 			}
 		} else {
-			current += c;
+			field_length++;
 		}
 	}
 
 	if (in_quote) {
 		WARN_PRINT(vformat("Reached end of file before closing '\"' in CSV file '%s'.", get_path()));
 	}
-
-	strings.push_back(current);
-
+	strings.push_back(_csv_extract_field(read, field_begin, line_length, field_length));
 	return strings;
 }
 
