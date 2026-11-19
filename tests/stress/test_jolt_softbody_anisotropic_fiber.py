@@ -88,7 +88,7 @@ class JoltSoftBodyAnisotropicFiberTests(unittest.TestCase):
         self.assertIn("const double alignment_sq = parallel * parallel / length_sq;", code)
         self.assertIn("edge.mCompliance = float(MIN(adjusted, double(FLT_MAX)));", code)
         self.assertLess(code.index("settings->CreateConstraints(&vertex_attrib"), code.index("if (fiber_multiplier != 1.0f)"))
-        self.assertLess(code.index("if (fiber_multiplier != 1.0f)"), code.index("try_build_convex_volume_fan(*settings"))
+        self.assertLess(code.index("if (fiber_multiplier != 1.0f)"), code.index("append_volume_radial_springs(*settings"))
         self.assertLess(code.index("if (fiber_multiplier != 1.0f)"), code.index("settings->Optimize();"))
         self.assertIn("append_volume_radial_springs(*settings", self.source)
         self.assertLess(code.index("if (fiber_multiplier != 1.0f)"),
