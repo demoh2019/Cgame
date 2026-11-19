@@ -22,8 +22,8 @@ class ObjImporterGuards(unittest.TestCase):
         cls.obj = read("editor/import/3d/resource_importer_obj.cpp")
         cls.tests = read("tests/scene/test_arraymesh.cpp")
 
-    def test_kd_color_uses_linear_to_srgb(self):
-        self.assertIn("current->set_albedo(c.linear_to_srgb());", self.obj)
+    def test_kd_color_conversion_is_conditional(self):
+        self.assertIn("current->set_albedo(p_linear_diffuse_color ? c.linear_to_srgb() : c);", self.obj)
 
     def test_kd_reads_three_material_color_components(self):
         block = self.obj.split('} else if (l.begins_with("Kd ")) {', 1)[1].split('} else if (l.begins_with("Ks ")) {', 1)[0]
@@ -35,12 +35,27 @@ class ObjImporterGuards(unittest.TestCase):
         self.assertIn('} else if (l.begins_with("d ")) {', self.obj)
         self.assertIn('} else if (l.begins_with("Tr ")) {', self.obj)
 
+    def test_linear_import_option_defaults_to_legacy(self):
+        self.assertIn('ImportOption(PropertyInfo(Variant::BOOL, "materials/mtl_diffuse_is_linear"), false)', self.obj)
+
+    def test_missing_import_option_defaults_to_false(self):
+        self.assertEqual(self.obj.count('linear_option && bool(*linear_option)'), 2)
+
+    def test_both_import_entry_points_forward_mode(self):
+        self.assertIn('_parse_material_library(lib_path, lib, r_missing_deps, p_linear_diffuse_color);', self.obj)
+        self.assertIn('mesh_lightmap_caches, r_missing_deps, linear_diffuse_color);', self.obj)
+        self.assertIn('mesh_lightmap_caches, nullptr, linear_diffuse_color);', self.obj)
+
+    def test_native_obj_fixture_checks_legacy_and_linear_modes(self):
+        self.assertIn("for (int mode = 0; mode < 3; mode++)", self.tests)
+        self.assertIn('options[StringName("materials/mtl_diffuse_is_linear")] = (mode == 2);', self.tests)
+
     def test_native_obj_import_fixture_is_present(self):
-        self.assertIn("MTL diffuse color is converted from linear to sRGB", self.tests)
+        self.assertIn("MTL diffuse color defaults to legacy and supports linear opt-in", self.tests)
         self.assertIn("EditorOBJImporter *importer = memnew(EditorOBJImporter);", self.tests)
 
     def test_native_obj_fixture_checks_color(self):
-        self.assertIn("Color(0.5f, 0.25f, 1.0f).linear_to_srgb()", self.tests)
+        self.assertIn("const Color expected = mode == 2 ? stored_color.linear_to_srgb() : stored_color;", self.tests)
         self.assertIn("material->get_albedo().is_equal_approx(expected)", self.tests)
 
     def test_obj_fixture_is_multiline(self):
