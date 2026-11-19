@@ -142,6 +142,13 @@ left unchanged.
 # Source contracts (does not replace a native build)
 python3 -m unittest discover -s tests/stress -p 'test_physics_softbody_self_collision.py' -v
 
+# Fast standalone C++ header check (uses a test-only Vector3 stub,
+# compiles the actual contact helper with GCC or Clang; not the engine).
+g++ -std=c++17 -O2 -Wall -Wextra -Werror -pedantic \
+  -Itests/stress/mock_physics -I. \
+  tests/stress/physics_softbody_edge_standalone.cpp -o /tmp/cgame-edge-smoke
+/tmp/cgame-edge-smoke
+
 # Native helper regression (requires editor built with tests=yes)
 ./bin/godot.linuxbsd.editor.dev.x86_64 --headless --test \
   --test-case="[Physics] Self-collision triangle closest point covers all Voronoi regions"
@@ -160,6 +167,13 @@ python3 -m unittest discover -s tests/stress -p 'test_physics_softbody_self_coll
 ./bin/godot.linuxbsd.editor.dev.x86_64 --headless --test \
   --test-case="[Physics] Self-collision edge contact ignores degeneracy and invalid inputs"
 ```
+
+The dedicated `.github/workflows/physics-softbody-self-collision.yml`
+compiles the actual math header with GCC and Clang (a minimal test-only
+Vector3 substitute), checks previous vertex/face math and exercises
+20,000 seeded segment pairs. This checks C++ syntax and pure geometry,
+**not** integration with Godot's real Vector3 or a built physics engine.
+Both native C++ tests and full engine CI are still required.
 
 Before merging, test a small folded cloth, a hanging pinned sheet, an
 open sheet and a non-manifold triangle mesh under identical scene
