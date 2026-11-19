@@ -433,4 +433,45 @@ TEST_CASE("[SceneTree][GridContainer] Dense minimum size handles hidden and non-
 	memdelete(grid);
 }
 
+TEST_CASE("[SceneTree][GridContainer] Reflow honors expansion and maximum sizes") {
+	GridContainer *grid = memnew(GridContainer);
+	Window *root = SceneTree::get_singleton()->get_root();
+	root->add_child(grid);
+	grid->set_columns(4);
+	grid->set_size(Size2(150, 32));
+	grid->add_theme_constant_override("h_separation", 0);
+	grid->add_theme_constant_override("v_separation", 0);
+
+	Control *controls[4];
+	for (int i = 0; i < 4; i++) {
+		controls[i] = memnew(Control);
+		controls[i]->set_custom_minimum_size(Size2(10, 12));
+		grid->add_child(controls[i]);
+		if (i != 1) {
+			controls[i]->set_h_size_flags(Control::SIZE_EXPAND_FILL);
+		}
+	}
+	controls[0]->set_custom_maximum_size(Size2(50, -1));
+	controls[2]->set_custom_maximum_size(Size2(20, -1));
+	SceneTree::get_singleton()->process(0);
+
+	// Columns 0 and 2 are capped; the remaining expandable column gets
+	// the remainder. This exercises both max-cap redistribution passes.
+	CHECK(controls[0]->get_size().x == doctest::Approx(50));
+	CHECK(controls[1]->get_size().x == doctest::Approx(10));
+	CHECK(controls[2]->get_size().x == doctest::Approx(20));
+	CHECK(controls[3]->get_size().x == doctest::Approx(70));
+
+	// Trailing empty columns are considered expanded but have no stored
+	// minimum-size entry. They must not index outside the dense arrays.
+	grid->set_columns(64);
+	SceneTree::get_singleton()->process(0);
+	CHECK(grid->get_minimum_size().is_equal_approx(Size2(40, 12)));
+
+	for (Control *c : controls) {
+		memdelete(c);
+	}
+	memdelete(grid);
+}
+
 } // namespace TestGridContainer
