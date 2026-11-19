@@ -40,4 +40,6 @@ jobs:
           target: editor
           scons-flags: dev_build=yes tests=yes debug_symbols=no module_mono_enabled=no module_text_server_fb_enabled=yes accesskit=no -j2
       - name: Run Curve2D and Curve3D native test suites
-        run: timeout 600s ./bin/godot.linuxbsd.editor.dev.x86_64 --headless --test --test-case="*[Curve2D]*,*[Curve3D]*" --no-colors
+        run: |
+          timeout 600s ./bin/godot.linuxbsd.editor.dev.x86_64 --headless --test --test-case="*[Curve2D]*" --no-colors
+          timeout 600s ./bin/godot.linuxbsd.editor.dev.x86_64 --headless --test --test-case="*[Curve3D]*" --no-colors
