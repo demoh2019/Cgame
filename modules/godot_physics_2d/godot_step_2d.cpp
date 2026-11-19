@@ -47,9 +47,9 @@ static constexpr uint32_t MIN_PARALLEL_SOLVE_ISLANDS = 16;
 // inline to avoid a thread-pool barrier per color and solver iteration.
 static constexpr uint32_t MIN_PARALLEL_LARGE_ISLAND = 256;
 static constexpr uint32_t MIN_PARALLEL_COLOR_CONSTRAINTS = 64;
-// Each worker processes a short contiguous run within one color. All
-// constraints in a color have disjoint bodies, so batching is race-free.
-static constexpr uint32_t PARALLEL_COLOR_BATCH_SIZE = 8;
+// All constraints in a color have disjoint bodies. Keep at least 8 per
+// worker invocation and increase the chunk size for very large colors.
+static constexpr uint32_t MIN_PARALLEL_COLOR_BATCH_SIZE = 8;
 static constexpr uint32_t MAX_LARGE_ISLAND_COLORS = 16;
 
 void GodotStep2D::_populate_island(GodotBody2D *p_body, LocalVector<GodotBody2D *> &p_body_island, LocalVector<GodotConstraint2D *> &p_constraint_island) {
@@ -142,8 +142,10 @@ void GodotStep2D::_solve_island_except_large(uint32_t p_island_index, void *p_us
 }
 
 void GodotStep2D::_solve_colored_constraint(uint32_t p_constraint_index, void *p_userdata) const {
-	const uint32_t first = p_constraint_index * PARALLEL_COLOR_BATCH_SIZE;
-	const uint32_t end = MIN(first + PARALLEL_COLOR_BATCH_SIZE, color_batch_count);
+	const uint32_t first = p_constraint_index * color_batch_size;
+	// Work out the end relative to the remaining elements; this also avoids
+	// overflowing a 32-bit index at extreme constraint counts.
+	const uint32_t end = first + MIN(color_batch_size, color_batch_count - first);
 	for (uint32_t i = first; i < end; ++i) {
 		colored_constraints[color_batch_offset + i]->solve(delta);
 	}
@@ -184,6 +186,12 @@ bool GodotStep2D::_can_reuse_color_cache(const LocalVector<GodotConstraint2D *> 
 }
 
 void GodotStep2D::_run_colored_batches(const uint32_t *p_sizes, const uint32_t *p_starts) {
+	WorkerThreadPool *pool = WorkerThreadPool::get_singleton();
+	const uint32_t worker_count = static_cast<uint32_t>(MAX(1, pool->get_thread_count()));
+	// Limit scheduling to roughly four chunks per pool worker. The upper
+	// bound prevents massive colors from producing thousands of tiny jobs
+	// and keeps queue pressure bounded on machines with many logical CPUs.
+	const uint32_t target_tasks = MIN(worker_count, uint32_t(32)) * 4;
 	for (int iteration = 0; iteration < iterations; ++iteration) {
 		for (uint32_t color = 0; color <= MAX_LARGE_ISLAND_COLORS; ++color) {
 			const uint32_t count = p_sizes[color];
@@ -191,13 +199,16 @@ void GodotStep2D::_run_colored_batches(const uint32_t *p_sizes, const uint32_t *
 				continue;
 			}
 			const uint32_t start = p_starts[color];
-			if (color != MAX_LARGE_ISLAND_COLORS && count >= MIN_PARALLEL_COLOR_CONSTRAINTS) {
+			if (color != MAX_LARGE_ISLAND_COLORS && count >= MIN_PARALLEL_COLOR_CONSTRAINTS && worker_count > 1) {
 				color_batch_offset = start;
 				color_batch_count = count;
-				const uint32_t task_count = (count + PARALLEL_COLOR_BATCH_SIZE - 1) / PARALLEL_COLOR_BATCH_SIZE;
-				WorkerThreadPool::GroupID group = WorkerThreadPool::get_singleton()->add_template_group_task(
+				// Ceiling division without count + divisor - 1 overflow.
+				const uint32_t desired_batch_size = count / target_tasks + uint32_t(count % target_tasks != 0);
+				color_batch_size = MAX(MIN_PARALLEL_COLOR_BATCH_SIZE, desired_batch_size);
+				const uint32_t task_count = count / color_batch_size + uint32_t(count % color_batch_size != 0);
+				WorkerThreadPool::GroupID group = pool->add_template_group_task(
 						this, &GodotStep2D::_solve_colored_constraint, nullptr, task_count, -1, true, SNAME("Physics2DLargeIslandColor"));
-				WorkerThreadPool::get_singleton()->wait_for_group_task_completion(group);
+				pool->wait_for_group_task_completion(group);
 			} else {
 				for (uint32_t i = start; i < start + count; ++i) {
 					colored_constraints[i]->solve(delta);
