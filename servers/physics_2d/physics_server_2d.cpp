@@ -361,6 +361,9 @@ PhysicsServer2D::PhysicsServer2D() {
 	GLOBAL_DEF(PropertyInfo(Variant::FLOAT, "physics/2d/sleep_threshold_angular", PROPERTY_HINT_RANGE, U"0,90,0.1,radians_as_degrees,suffix:°/s"), Math::deg_to_rad(8.0));
 	GLOBAL_DEF(PropertyInfo(Variant::FLOAT, "physics/2d/time_before_sleep", PROPERTY_HINT_RANGE, "0,5,0.01,or_greater,suffix:s"), 0.5);
 	GLOBAL_DEF(PropertyInfo(Variant::INT, "physics/2d/solver/solver_iterations", PROPERTY_HINT_RANGE, "1,32,1,or_greater"), 16);
+	// Box2D-style coupled two-point normal contact solve. Experimental: opt in
+	// until stack and cross-platform benchmarks verify the behavior.
+	GLOBAL_DEF(PropertyInfo(Variant::BOOL, "physics/2d/solver/block_solver_enabled"), false);
 	GLOBAL_DEF(PropertyInfo(Variant::FLOAT, "physics/2d/solver/contact_recycle_radius", PROPERTY_HINT_RANGE, "0,10,0.01,or_greater,suffix:m"), 1.0);
 	GLOBAL_DEF(PropertyInfo(Variant::FLOAT, "physics/2d/solver/contact_max_separation", PROPERTY_HINT_RANGE, "0,10,0.01,or_greater,suffix:m"), 1.5);
 	GLOBAL_DEF(PropertyInfo(Variant::FLOAT, "physics/2d/solver/contact_max_allowed_penetration", PROPERTY_HINT_RANGE, "0.01,10,0.01,or_greater,suffix:m"), 0.3);
