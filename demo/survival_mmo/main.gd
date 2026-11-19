@@ -215,7 +215,9 @@ func _harvest() -> void:
     if remaining <= 0:
         nearest.queue_free()
     else:
-        nearest.get_node("Visual").scale *= 0.83
+        var visual := nearest.get_node("Visual") as MeshInstance3D
+        if visual != null:
+            visual.scale *= 0.83
     status_message = "Gathered 1 %s." % kind
 
 
