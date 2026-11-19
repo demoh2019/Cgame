@@ -30,6 +30,8 @@
 
 #include "godot_body_pair_3d.h"
 
+#include "core/math/physics_contact.h"
+
 #include "godot_collision_solver_3d.h"
 #include "godot_space_3d.h"
 
@@ -340,6 +342,11 @@ bool GodotBodyPair3D::pre_solve(real_t p_step) {
 		return false;
 	}
 
+	// Combine material coefficients once per physics step, not on every contact iteration.
+	friction = combine_friction(A, B);
+	const real_t bounce_coefficient = combine_bounce(A, B);
+	const real_t restitution_threshold = space->get_restitution_velocity_threshold();
+
 	real_t max_penetration = space->get_contact_max_allowed_penetration();
 
 	real_t bias = 0.8;
@@ -443,12 +450,12 @@ bool GodotBodyPair3D::pre_solve(real_t p_step) {
 			B->apply_impulse(j_vec, c.rB + B->get_center_of_mass());
 		}
 
-		c.bounce = combine_bounce(A, B);
-		if (c.bounce) {
+		c.bounce = 0.0;
+		if (bounce_coefficient > 0.0) {
 			Vector3 crA = A->get_prev_angular_velocity().cross(c.rA);
 			Vector3 crB = B->get_prev_angular_velocity().cross(c.rB);
 			Vector3 dv = B->get_prev_linear_velocity() + crB - A->get_prev_linear_velocity() - crA;
-			c.bounce = c.bounce * dv.dot(c.normal);
+			c.bounce = GodotPhysicsContact::restitution_velocity(bounce_coefficient, dv.dot(c.normal), restitution_threshold);
 		}
 	}
 
@@ -551,8 +558,6 @@ void GodotBodyPair3D::solve(real_t p_step) {
 		}
 
 		//friction impulse
-
-		real_t friction = combine_friction(A, B);
 
 		Vector3 lvA = A->get_linear_velocity() + A->get_angular_velocity().cross(c.rA);
 		Vector3 lvB = B->get_linear_velocity() + B->get_angular_velocity().cross(c.rB);
