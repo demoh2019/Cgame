@@ -83,6 +83,11 @@ public:
 	// Requires self and self-edge collisions + the edge BVH. Default false.
 	inline static bool soft_body_self_persistent_bvh = false;
 	inline static int soft_body_self_contact_max_checks = 16384;
+	// Opt-in Jacobi XPBD-style position projection of nonadjacent
+	// vertex-face and edge-edge self contacts. Velocity impulses remain.
+	inline static bool soft_body_self_position_projection = false;
+	inline static float soft_body_self_position_compliance = 0.000001f;
+	inline static float soft_body_self_position_max_correction = 0.02f;
 	inline static float soft_body_soft_ccd_max_sweep = 1.0f;
 	inline static float soft_body_soft_ccd_max_correction_speed = 128.0f;
 	inline static float soft_body_soft_contact_radius = 0.1f;
