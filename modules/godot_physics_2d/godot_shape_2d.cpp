@@ -259,33 +259,41 @@ bool GodotCircleShape2D::contains_point(const Vector2 &p_point) const {
 
 bool GodotCircleShape2D::intersect_segment(const Vector2 &p_begin, const Vector2 &p_end, Vector2 &r_point, Vector2 &r_normal) const {
 	const Vector2 direction = p_end - p_begin;
-	const real_t direction_length_squared = direction.length_squared();
+	const double dx = double(direction.x);
+	const double dy = double(direction.y);
+	const double length_squared = dx * dx + dy * dy;
+	if (length_squared == 0.0) {
+		return false; // A zero-length ray cannot enter a circle.
+	}
 
-	// A zero-length ray has no entering surface. Avoid 0 / 0 in the
-	// quadratic formula, which would otherwise report a false hit.
-	if (direction_length_squared == 0.0) {
+	const double bx = double(p_begin.x);
+	const double by = double(p_begin.y);
+	const double radius_squared = double(radius) * double(radius);
+	if (bx * bx + by * by < radius_squared) {
+		return false; // Preserve entry-only semantics for a ray starting inside.
+	}
+
+	const double projection = -(bx * dx + by * dy) / length_squared;
+	if (projection < 0.0) {
+		return false; // The ray points away from the circle.
+	}
+
+	// Use closest approach, not a difference of squared terms or roots.
+	// Those suffer catastrophic cancellation when the ray is very long.
+	const double closest_x = bx + dx * projection;
+	const double closest_y = by + dy * projection;
+	const double closest_dist_sq = closest_x * closest_x + closest_y * closest_y;
+	if (closest_dist_sq > radius_squared) {
 		return false;
 	}
 
-	// Solve a*t^2 + 2*b*t + c = 0, only for the first entry.
-	// Using half-b removes two multiplications from the discriminant.
-	const real_t half_b = p_begin.dot(direction);
-	const real_t c = p_begin.length_squared() - radius * radius;
-	if (c > 0.0 && half_b >= 0.0) {
-		return false; // Ray starts outside and points away from the circle.
-	}
-
-	const real_t discriminant = half_b * half_b - direction_length_squared * c;
-	if (discriminant < 0.0) {
-		return false;
-	}
-
-	const real_t fraction = (-half_b - Math::sqrt(discriminant)) / direction_length_squared;
+	const double fraction = projection - Math::sqrt((radius_squared - closest_dist_sq) / length_squared);
 	if (fraction < 0.0 || fraction > 1.0 + CMP_EPSILON) {
 		return false;
 	}
 
-	r_point = p_begin + direction * fraction;
+	// Avoid rounding the fraction to real_t before computing a long-ray hit.
+	r_point = Vector2(real_t(bx + dx * fraction), real_t(by + dy * fraction));
 	r_normal = r_point.normalized();
 	return true;
 }
