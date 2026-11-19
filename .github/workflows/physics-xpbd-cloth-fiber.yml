@@ -1,0 +1,46 @@
+name: Physics orthotropic XPBD cloth fibers
+
+on:
+  pull_request:
+    paths:
+      - "servers/physics_xpbd_cloth_fiber.h"
+      - "servers/physics_3d/physics_server_3d.cpp"
+      - "modules/godot_physics_3d/godot_space_3d.h"
+      - "modules/godot_physics_3d/godot_space_3d.cpp"
+      - "modules/godot_physics_3d/godot_soft_body_3d.cpp"
+      - "tests/servers/test_physics_xpbd_cloth_fiber.cpp"
+      - "tests/stress/test_physics_xpbd_cloth_fiber.py"
+      - "tests/stress/physics_xpbd_cloth_fiber_standalone.cpp"
+      - "tests/stress/mock_xpbd_cloth_fiber/core/math/vector3.h"
+      - ".github/workflows/physics-xpbd-cloth-fiber.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  orthotropic-fibers:
+    name: Fiber C++ math (${{ matrix.compiler }}, ${{ matrix.precision }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        compiler: [g++, clang++]
+        precision: [float, double]
+    steps:
+      - uses: actions/checkout@v4
+      - name: Validate Cgame solver wiring and default-isotropic semantics
+        run: python3 -m unittest discover -s tests/stress -p 'test_physics_xpbd_cloth_fiber.py' -v
+      - name: Compile actual fiber math header with C++17
+        env:
+          CXX: ${{ matrix.compiler }}
+          REAL_T: ${{ matrix.precision }}
+        run: |
+          EXTRA_ARGS=""
+          if [ "$REAL_T" = "double" ]; then EXTRA_ARGS="-DTEST_REAL_T_DOUBLE"; fi
+          "$CXX" -std=c++17 -O2 -Wall -Wextra -Werror -pedantic \
+            $EXTRA_ARGS -Itests/stress/mock_xpbd_cloth_fiber -I. \
+            tests/stress/physics_xpbd_cloth_fiber_standalone.cpp \
+            -o "$RUNNER_TEMP/physics-xpbd-cloth-fiber"
+      - name: Test 25k warp/weft numerical cases and extreme ratios
+        run: "$RUNNER_TEMP/physics-xpbd-cloth-fiber"
