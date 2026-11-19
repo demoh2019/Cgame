@@ -63,7 +63,24 @@ def rss_mib(pid: int) -> float | None:
                 return int(line.split()[1]) / 1024.0
     except (OSError, ValueError, IndexError):
         pass
+    if sys.platform == "darwin":
+        return macos_ps_rss_mib(pid)
     return None
+
+
+def macos_ps_rss_mib(pid: int) -> float | None:
+    """Get resident KiB from ps on macOS when psutil is unavailable."""
+    try:
+        result = subprocess.run(
+            ["ps", "-o", "rss=", "-p", str(pid)],
+            capture_output=True, text=True, timeout=1.0, check=False,
+        )
+        if result.returncode != 0:
+            return None
+        kib = result.stdout.strip()
+        return int(kib) / 1024.0 if kib else None
+    except (OSError, ValueError, subprocess.TimeoutExpired):
+        return None
 
 
 def cpu_seconds(pid: int) -> float | None:
@@ -159,6 +176,9 @@ def run_once(cmd: list[str], timeout: float, rss_limit_mib: float,
                     failure = "rss_limit_exceeded"
             if elapsed > timeout:
                 failure = "timeout"
+            elif elapsed > 1.0 and maximum_rss is None:
+                # Do not report an enforced RAM limit if monitoring is absent.
+                failure = "rss_monitor_unavailable"
             if failure is not None:
                 process.kill()
                 break
