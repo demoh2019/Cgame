@@ -160,7 +160,7 @@ def _scan_log_diagnostics(logfile, stage: Path) -> tuple[list[str], list[str], i
                 remainder = logfile.readline(8192)
                 if not remainder or remainder.endswith(b"\n"):
                     break
-        line = prefix.decode("utf-8", errors="replace").replace(
+        line = prefix.decode("utf-8", errors="replace").rstrip("\r\n").replace(
             str(stage), "<STAGED_PROJECT>")[:500]
         if ERROR_LINE.match(line):
             error_count += 1
