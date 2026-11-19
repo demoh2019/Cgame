@@ -1196,3 +1196,27 @@ members, truncates/sanitizes names and clamps malformed health values.
 The `tests/test_party_frames.gd` regression checks leader identity,
 health, death state, sanitization and empty-party behavior. No engine
 modifications are required.
+
+## Bleeding wounds and first aid
+
+Real zombie strikes and eligible player melee hits outside protected areas can cause
+persistent bleeding. Bleeding gradually clots but drains health while active;
+its severity is computed only by the authoritative server. Zombies still cause
+infection independently, and dodged strikes cannot wound the survivor.
+
+Bandages and crafted field antiseptic now **stop bleeding** as well as retaining
+their original healing / infection effects. A bandage is usable even at full
+health if a wound is bleeding; no medicine is spent on a completely healthy
+survivor. The wound severity appears in both the local HUD and networked UI,
+is saved with existing version-1 character data, defaults to zero in legacy
+saves, and rejects corrupt values during restore.
+
+The implementation uses existing Cgame APIs, so this change does not need
+modifications to the native engine. Run:
+
+```bash
+godot --headless --path game --script res://tests/run_all.gd
+```
+
+The `test_bleeding.gd` suite verifies bleed damage/decay, cure rules, zombie
+strikes, PvP protection, persistence and invalid save rejection.

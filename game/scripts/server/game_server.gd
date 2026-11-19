@@ -158,6 +158,7 @@ func character_data(player: Player) -> Dictionary:
 		"version": 1,
 		"health": player.survival.health, "hunger": player.survival.hunger, "thirst": player.survival.thirst,
 		"stamina": player.survival.stamina, "infection": player.survival.infection,
+		"bleeding": player.survival.bleeding,
 		"exposure": player.survival.exposure, "warmth_seconds": player.survival.warmth_seconds,
 			"campfire_warm": FieldCampfire.has_warmth(campfires, player.position, time),
 		"alive": alive, "kills": player.kills, "deaths": player.deaths,
@@ -199,6 +200,8 @@ func apply_character(player: Player, data: Dictionary) -> bool:
 		return false
 	if not SaveValidation.finite_number(data.get("infection", 0.0), 0.0, Defs.INFECTION_MAX):
 		return false
+	if not SaveValidation.finite_number(data.get("bleeding", 0.0), 0.0, Defs.BLEEDING_MAX):
+		return false
 	if not SaveValidation.finite_number(data.get("exposure", 0.0), 0.0, 100.0):
 		return false
 	if not SaveValidation.finite_number(data.get("warmth_seconds", 0.0), 0.0, Defs.THERMAL_WRAP_SECONDS):
@@ -222,6 +225,8 @@ func apply_character(player: Player, data: Dictionary) -> bool:
 	survival.stamina = float(data.get("stamina", Defs.MAX_STAMINA))
 	# Older version-1 saves without infection remain compatible.
 	survival.infection = float(data.get("infection", 0.0))
+	# Legacy version-1 accounts predate the persistent wound mechanic.
+	survival.bleeding = float(data.get("bleeding", 0.0))
 	# Legacy survivors predating regional climate start with no exposure.
 	survival.exposure = float(data.get("exposure", 0.0))
 	survival.warmth_seconds = float(data.get("warmth_seconds", 0.0))
@@ -1201,12 +1206,16 @@ func cmd_use(peer_id: int, item_id: String) -> Dictionary:
 		"medical":
 			var healing: float = float(data.get("heal", 0.0))
 			var curing: float = float(data.get("cure", 0.0))
+			var staunch: bool = bool(data.get("stop_bleeding", false))
 			if (healing <= 0.0 or player.survival.health >= Defs.MAX_HEALTH) and (
-					curing <= 0.0 or player.survival.infection <= 0.0):
+					curing <= 0.0 or player.survival.infection <= 0.0) and (
+					not staunch or player.survival.bleeding <= 0.0):
 				return {"ok": false, "reason": "no_effect"}
 			player.inventory.remove(item_id, 1)
 			player.survival.heal(healing)
 			player.survival.treat_infection(curing)
+			if staunch:
+				player.survival.stop_bleeding()
 		"weapon", "armor":
 			player.inventory.equip(item_id)
 		_:
@@ -1543,7 +1552,14 @@ func _damage_target(attacker: Player, hit: Dictionary, damage: float) -> void:
 				world.zone_at(victim.position.x, victim.position.z)):
 			return
 		var final_damage: float = Combat.apply_armor(damage, victim.inventory.armor)
-		victim.survival.hurt(final_damage)
+		var applied: float = victim.survival.hurt(final_damage)
+		var wielded: String = attacker.inventory.weapon
+		if applied > 0.0 and _alive(victim) and wielded != "" and attacker.inventory.count(wielded) > 0 \
+				and str(Defs.item(wielded).get("weapon", "")) == "melee":
+			if victim.survival.add_bleeding(Defs.PVP_MELEE_BLEEDING_PER_HIT):
+				victim.dirty_character = true
+				events.append({"type": "bleeding", "peer": victim.id,
+					"severity": victim.survival.bleeding, "source": "pvp"})
 		events.append({"type": "hit", "kind": "player", "id": victim.id, "damage": final_damage, "by": attacker.id})
 		if not _alive(victim):
 			attacker.kills += 1
@@ -1683,7 +1699,7 @@ func _tick_players(delta: float) -> void:
 		damage += player.survival.weather_tick(delta, weather_severity)
 		if player.survival.exposure > 0.0 or player.survival.warmth_seconds > 0.0:
 			player.dirty_character = true
-		if player.survival.infection > 0.0:
+		if player.survival.infection > 0.0 or player.survival.bleeding > 0.0:
 			player.dirty_character = true
 		if damage > 0.0 and not _alive(player):
 			_on_player_death(player, -1)
@@ -1916,7 +1932,12 @@ func _tick_zombies(delta: float) -> void:
 					events.append({"type": "evaded", "peer": victim.id, "zombie": zombie.id})
 					continue
 				var damage: float = Combat.apply_armor(float(result["damage"]), victim.inventory.armor)
-				victim.survival.hurt(damage)
+				var applied: float = victim.survival.hurt(damage)
+				if applied > 0.0 and _alive(victim) and victim.survival.add_bleeding(
+						float(Defs.ZOMBIE_BLEEDING_PER_HIT.get(zombie.type, 0.0))):
+					victim.dirty_character = true
+					events.append({"type": "bleeding", "peer": victim.id,
+						"severity": victim.survival.bleeding, "source": zombie.type})
 				if victim.survival.add_infection(float(Defs.ZOMBIE_INFECTION_PER_HIT.get(zombie.type, 0.0))):
 					victim.dirty_character = true
 					events.append({"type": "infection", "peer": victim.id,
@@ -2081,7 +2102,8 @@ func snapshot_for(peer_id: int) -> Dictionary:
 			"stamina": player.survival.stamina,
 			"alive": _alive(player), "kills": player.kills, "deaths": player.deaths, "zone": player.zone_notice,
 			"action": player.action.duplicate(),
-			"infection": player.survival.infection, "exposure": player.survival.exposure,
+			"infection": player.survival.infection, "bleeding": player.survival.bleeding,
+			"exposure": player.survival.exposure,
 			"warmth_seconds": player.survival.warmth_seconds,
 			"weather": Weather.conditions(world, player.position.x, player.position.z, time),
 			"lake_drink_cooldown": player.lake_drink_cooldown,
