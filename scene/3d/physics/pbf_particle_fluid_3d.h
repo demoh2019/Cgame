@@ -33,6 +33,7 @@
 #include "servers/physics_pbf_3d.h"
 #include "servers/physics_pbf_rigid_coupling_3d.h"
 #include "servers/physics_pbf_vorticity_3d.h"
+#include "servers/physics_pbf_divergence_3d.h"
 
 // Experimental CPU PBF fluid: a scene node (not a PhysicsServer3D backend
 // replacement) using density constraints, finite-support SPH kernels and
@@ -54,6 +55,8 @@ class PBFParticleFluid3D : public Node3D {
 	Vector<Vector3> smoothed_velocities;
 	Vector<Vector3> vorticities;
 	Vector<Vector3> confinement_updates;
+	Vector<Vector3> divergence_velocity_changes;
+	Vector<real_t> divergence_multipliers;
 	Vector<real_t> lambdas;
 	Vector<real_t> densities;
 	Vector<PhysicsPBFCell3D> cells;
@@ -74,6 +77,13 @@ class PBFParticleFluid3D : public Node3D {
 	real_t vorticity_confinement = 0.0;
 	real_t vorticity_max_velocity_change = 0.12;
 	real_t average_vorticity = 0.0;
+	int divergence_iterations = 0;
+	real_t divergence_tolerance = 0.01;
+	real_t divergence_relaxation = 0.8;
+	real_t divergence_max_velocity_change = 0.12;
+	real_t average_positive_density_rate = 0.0;
+	int last_divergence_iterations = 0;
+	uint64_t last_divergence_neighbor_evaluations = 0;
 	uint64_t last_vorticity_neighbor_evaluations = 0;
 	real_t boundary_restitution = 0.1;
 	Vector3 gravity = Vector3(0, -9.8, 0);
@@ -89,6 +99,8 @@ class PBFParticleFluid3D : public Node3D {
 	void _apply_density_corrections();
 	void _apply_xsph_viscosity();
 	void _apply_vorticity_confinement(real_t p_delta);
+	void _project_velocity_divergence();
+	real_t _measure_positive_density_rate();
 	void _resolve_world_collisions(const Vector3 &p_old, Vector3 &r_predicted, Vector3 &r_velocity);
 	void _step_once(real_t p_delta);
 protected:
@@ -123,6 +135,17 @@ public:
 	real_t get_artificial_pressure() const { return artificial_pressure; }
 	void set_xsph_viscosity(real_t p_viscosity);
 	real_t get_xsph_viscosity() const { return xsph_viscosity; }
+	void set_divergence_iterations(int p_iterations);
+	int get_divergence_iterations() const { return divergence_iterations; }
+	void set_divergence_tolerance(real_t p_tolerance);
+	real_t get_divergence_tolerance() const { return divergence_tolerance; }
+	void set_divergence_relaxation(real_t p_relaxation);
+	real_t get_divergence_relaxation() const { return divergence_relaxation; }
+	void set_divergence_max_velocity_change(real_t p_maximum);
+	real_t get_divergence_max_velocity_change() const { return divergence_max_velocity_change; }
+	real_t get_average_positive_density_rate() const { return average_positive_density_rate; }
+	int get_last_divergence_iterations() const { return last_divergence_iterations; }
+	int get_last_divergence_neighbor_evaluations() const { return int(MIN(last_divergence_neighbor_evaluations, uint64_t(2147483647))); }
 	void set_vorticity_confinement(real_t p_strength);
 	real_t get_vorticity_confinement() const { return vorticity_confinement; }
 	void set_vorticity_max_velocity_change(real_t p_maximum);
