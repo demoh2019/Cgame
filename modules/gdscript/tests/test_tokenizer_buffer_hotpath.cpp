@@ -162,4 +162,53 @@ TEST_CASE("[GDScriptTokenizerHotpath] Unicode identifiers and punctuation decode
 	compare_text_and_buffer(code, GDScriptTokenizerBuffer::COMPRESS_ZSTD);
 }
 
+
+TEST_CASE("[GDScriptTokenizerHotpath] Binary token scan preserves line and indentation streams") {
+	StringBuilder source;
+	for (int i = 0; i < 450; i++) {
+		source += vformat("func action_%d():\n\tif true:\n\t\tvar value = %d\n\t\tvalue += 1\n\treturn value\n", i, i);
+	}
+	const String code = source.as_string();
+
+	GDScriptTokenizerBuffer raw;
+	const Vector<uint8_t> raw_bytes = GDScriptTokenizerBuffer::parse_code_string(code, GDScriptTokenizerBuffer::COMPRESS_NONE);
+	REQUIRE(raw.set_code_buffer(raw_bytes) == OK);
+	raw.set_multiline_mode(false);
+
+	GDScriptTokenizerBuffer compressed;
+	const Vector<uint8_t> compressed_bytes = GDScriptTokenizerBuffer::parse_code_string(code, GDScriptTokenizerBuffer::COMPRESS_ZSTD);
+	REQUIRE(compressed.set_code_buffer(compressed_bytes) == OK);
+	compressed.set_multiline_mode(false);
+
+	int indents = 0;
+	int dedents = 0;
+	int newlines = 0;
+	int scanned = 0;
+	while (scanned < 100000) {
+		const GDScriptTokenizer::Token first = raw.scan();
+		const GDScriptTokenizer::Token second = compressed.scan();
+		REQUIRE(first.type == second.type);
+		CHECK(first.start_line == second.start_line);
+		CHECK(first.end_line == second.end_line);
+		if (first.type == GDScriptTokenizer::Token::IDENTIFIER ||
+				first.type == GDScriptTokenizer::Token::ANNOTATION ||
+				first.type == GDScriptTokenizer::Token::LITERAL ||
+				first.type == GDScriptTokenizer::Token::ERROR) {
+			CHECK(first.literal == second.literal);
+		}
+		indents += first.type == GDScriptTokenizer::Token::INDENT;
+		dedents += first.type == GDScriptTokenizer::Token::DEDENT;
+		newlines += first.type == GDScriptTokenizer::Token::NEWLINE;
+		scanned++;
+		if (first.type == GDScriptTokenizer::Token::TK_EOF) {
+			break;
+		}
+	}
+	CHECK(scanned > 10000);
+	CHECK(scanned < 100000);
+	CHECK(indents == 900);
+	CHECK(dedents == 900);
+	CHECK(newlines >= 2250);
+}
+
 } // namespace TestGDScriptTokenizerHotpath
