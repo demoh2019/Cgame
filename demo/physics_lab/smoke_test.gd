@@ -10,13 +10,13 @@ func _check_both_labs() -> void:
     var checks := [
         {
             "scene": "res://lab_3d.tscn",
-            "nodes": ["Ground", "ThinTarget", "DeformableMesh", "SuspensionVehicle", "BodyEnterSensor", "DownwardQuery"],
+            "nodes": ["Ground", "ThinTarget", "DeformableMesh", "SuspensionVehicle", "BodyEnterSensor", "DownwardQuery", "DownwardShapeCast", "HingeBase", "SliderBase"],
             "group": "demo_dynamic",
             "minimum": 25
         },
         {
             "scene": "res://lab_2d.tscn",
-            "nodes": ["2D Ground", "Thin CCD Target", "AutonomousCharacterBody2D", "UpwardGravityZone"],
+            "nodes": ["2D Ground", "Thin CCD Target", "AutonomousCharacterBody2D", "UpwardGravityZone", "ThinWallShapeCast", "GrooveSupport"],
             "group": "demo_dynamic_2d",
             "minimum": 25
         }
