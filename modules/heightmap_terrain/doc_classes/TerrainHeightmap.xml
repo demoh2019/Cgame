@@ -45,6 +45,15 @@
                 Returns the height at the integer sample position.
             </description>
         </method>
+        <method name="erode_thermal">
+            <return type="void" />
+            <param index="0" name="iterations" type="int" />
+            <param index="1" name="talus" type="float" />
+            <param index="2" name="strength" type="float" />
+            <description>
+                Simulates deterministic thermal erosion by transferring material from higher grid cells to adjacent lower ones when the height difference exceeds [param talus]. Applies 0–128 iterations with strength in the interval 0–0.25. Each transfer conserves the sum of heights, apart from floating-point rounding. The editor exposes a one-click preset with Undo/Redo.
+            </description>
+        </method>
         <method name="import_height_image">
             <return type="void" />
             <param index="0" name="image" type="Image" />
