@@ -305,5 +305,75 @@ class SmokeTests(unittest.TestCase):
         self.assertIn("ERROR: bad <&", suite.find("testcase/failure").text)
 
 
+    def test_exact_selection_restricts_scene_execution(self):
+        self.scene("broken.tscn")
+        self.scene("scenes/healthy.tscn")
+        code, report, _ = self.cli("--scene", "res://scenes/healthy.tscn", "--require-scenes")
+        self.assertEqual(code, 0)
+        self.assertEqual([item["scene"] for item in report["results"]], ["scenes/healthy.tscn"])
+
+    def test_relative_path_selection_is_supported(self):
+        self.scene("broken.tscn")
+        self.scene("healthy.tscn")
+        code, report, _ = self.cli("--scene", "healthy.tscn")
+        self.assertEqual(code, 0)
+        self.assertEqual([item["scene"] for item in report["results"]], ["healthy.tscn"])
+
+    def test_repeat_selection_does_not_duplicate_tests(self):
+        self.scene("healthy.tscn")
+        code, report, _ = self.cli("--scene", "healthy.tscn", "--scene", "res://healthy.tscn")
+        self.assertEqual(code, 0)
+        self.assertEqual(len(report["results"]), 1)
+
+    def test_multiple_explicit_scenes_keep_sorted_order(self):
+        self.scene("z.tscn")
+        self.scene("a.tscn")
+        code, report, _ = self.cli("--scene", "z.tscn", "--scene", "a.tscn")
+        self.assertEqual(code, 0)
+        self.assertEqual([x["scene"] for x in report["results"]], ["a.tscn", "z.tscn"])
+
+    def test_selected_scene_missing_is_error(self):
+        self.scene("healthy.tscn")
+        code, report, stderr = self.cli("--scene", "res://missing.tscn")
+        self.assertEqual(code, 2)
+        self.assertIsNone(report)
+        self.assertIn("not found", stderr)
+
+    def test_selected_scene_excluded_is_error(self):
+        self.scene("healthy.tscn")
+        code, _, stderr = self.cli("--scene", "healthy.tscn", "--exclude", "*.tscn")
+        self.assertEqual(code, 2)
+        self.assertIn("not found", stderr)
+
+    def test_malformed_explicit_scene_paths_are_rejected(self):
+        self.scene("healthy.tscn")
+        for name in ("", "res://", "/healthy.tscn", "res://../healthy.tscn",
+                     "res://foo/../healthy.tscn", "./healthy.tscn", "res://./healthy.tscn",
+                     "res://foo//bar.tscn", "C:/healthy.tscn", "res://foo\\bar.tscn"):
+            with self.subTest(name=name):
+                code, _, stderr = self.cli("--scene", name)
+                self.assertEqual(code, 2)
+                self.assertIn("Invalid scene selection", stderr)
+
+    def test_scene_selection_is_case_sensitive(self):
+        self.scene("MyScene.tscn")
+        code, _, stderr = self.cli("--scene", "myscene.tscn")
+        self.assertEqual(code, 2)
+        self.assertIn("not found", stderr)
+
+    def test_require_scenes_rejects_empty_project(self):
+        code, report, stderr = self.cli("--require-scenes")
+        self.assertEqual(code, 2)
+        self.assertIsNone(report)
+        self.assertIn("No scenes selected", stderr)
+
+    def test_require_scenes_rejects_all_excluded(self):
+        self.scene("healthy.tscn")
+        code, _, stderr = self.cli("--exclude", "*.tscn", "--require-scenes")
+        self.assertEqual(code, 2)
+        self.assertIn("No scenes selected", stderr)
+
+
+
 if __name__ == "__main__":
     unittest.main()
