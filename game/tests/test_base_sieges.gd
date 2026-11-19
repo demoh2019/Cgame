@@ -82,7 +82,7 @@ func run(t) -> void:
 	t.current = "strong walls, active cap and daylight controls"
 	server.barricades[id]["tier"] = 4 # Trusted test setup, never an RPC
 	server.barricades[id]["hp"] = Structures.max_health(4)
-	server.time += SiegeWaves.WALL_COOLDOWN + 1.0
+	server.time = WorldCycle.DAY_LENGTH + WorldCycle.DAY_LENGTH * 0.75
 	server._tick_siege_waves()
 	t.eq(server.siege_waves_started, 2, "another raid is possible after cooldown")
 	var second_count: int = server.zombies.size()
