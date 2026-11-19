@@ -77,6 +77,8 @@ class GodotBroadPhase2DBVH : public GodotBroadPhase2D {
 public:
 	// 0 is an invalid ID
 	virtual ID create(GodotCollisionObject2D *p_object, int p_subindex = 0, const Rect2 &p_aabb = Rect2(), bool p_static = false) override;
+	virtual ID create_deferred(GodotCollisionObject2D *p_object, int p_subindex, const Rect2 &p_aabb, bool p_static) override;
+	virtual void flush_pending_pairs() override;
 	virtual void move(ID p_id, const Rect2 &p_aabb) override;
 	virtual void set_static(ID p_id, bool p_static) override;
 	virtual void remove(ID p_id) override;
