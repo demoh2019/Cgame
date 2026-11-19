@@ -61,6 +61,26 @@ TEST_CASE("[PhysicsSoftSoftFriction] High friction removes tangential relative v
 	CHECK(a.z == doctest::Approx(0.0));
 }
 
+TEST_CASE("[PhysicsSoftSoftFriction] Unequal masses conserve momentum and dissipate energy") {
+	Vector3 v(6, 2, 1), a, b, c;
+	const real_t inv_a = 2.0, inv_b = 0.5, inv_c = 3.0;
+	const Vector3 momentum_before = v + a / inv_a + b / inv_b + c / inv_c;
+	const double energy_before = double(v.length_squared()) +
+			double(a.length_squared()) / double(inv_a) +
+			double(b.length_squared()) / double(inv_b) +
+			double(c.length_squared()) / double(inv_c);
+	CHECK(physics_softbody_solve_pair_friction(POINT, A, B, C, v, a, b, c,
+			1.0, inv_a, inv_b, inv_c, 1.0, 2.0, 0.1, 0.1));
+	CHECK((v + a / inv_a + b / inv_b + c / inv_c).is_equal_approx(momentum_before));
+	CHECK(relative_tangent(v, a, b, c).length() < real_t(1e-5));
+	const double energy_after = double(v.length_squared()) +
+			double(a.length_squared()) / double(inv_a) +
+			double(b.length_squared()) / double(inv_b) +
+			double(c.length_squared()) / double(inv_c);
+	CHECK(energy_after <= energy_before + 1e-5);
+	CHECK(v.z == doctest::Approx(1.0));
+}
+
 TEST_CASE("[PhysicsSoftSoftFriction] Coulomb cap limits impulse and reduces slip") {
 	Vector3 v(3, 4, 5), a, b, c;
 	const real_t initial_speed = relative_tangent(v, a, b, c).length();
