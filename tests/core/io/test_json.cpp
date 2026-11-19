@@ -701,4 +701,63 @@ TEST_CASE("[JSON] Deep nested native arrays stringify repeatedly without corrupt
 		}
 	}
 }
+
+template <typename T>
+static void check_packed_array_json_equivalent(const T &p_values) {
+	// Previous stringify behavior converted every packed element to a Variant
+	// by constructing a full Array. Keep that conversion as the test oracle.
+	const Variant packed(p_values);
+	const Array reference = packed;
+	CHECK_EQ(JSON::stringify(packed), JSON::stringify(reference));
+	CHECK_EQ(JSON::stringify(packed, "\t", false, true), JSON::stringify(reference, "\t", false, true));
+}
+
+TEST_CASE("[JSON] Packed arrays stream with the same formatting as an Array") {
+	PackedInt32Array int32_values;
+	PackedInt64Array int64_values;
+	PackedFloat32Array float32_values;
+	PackedFloat64Array float64_values;
+	PackedStringArray string_values;
+
+	check_packed_array_json_equivalent(int32_values);
+	check_packed_array_json_equivalent(int64_values);
+	check_packed_array_json_equivalent(float32_values);
+	check_packed_array_json_equivalent(float64_values);
+	check_packed_array_json_equivalent(string_values);
+
+	for (int i = 0; i < 1024; i++) {
+		int32_values.push_back((i % 2 == 0 ? 1 : -1) * i);
+		int64_values.push_back((int64_t(1) << 42) + i);
+		float32_values.push_back((i % 7) * 0.5f);
+		float64_values.push_back((i % 9) * -0.125);
+		string_values.push_back(String(U"ресурс/雪/") + itos(i));
+	}
+	check_packed_array_json_equivalent(int32_values);
+	check_packed_array_json_equivalent(int64_values);
+	check_packed_array_json_equivalent(float32_values);
+	check_packed_array_json_equivalent(float64_values);
+	check_packed_array_json_equivalent(string_values);
+
+	const Array parsed = JSON::parse_string(JSON::stringify(Variant(int32_values)));
+	REQUIRE_EQ(parsed.size(), int32_values.size());
+	CHECK_EQ(parsed[0], Variant(0));
+	CHECK_EQ(parsed[1], Variant(-1));
+	CHECK_EQ(parsed[1023], Variant(-1023));
+}
+
+TEST_CASE("[JSON] Large packed primitive arrays do not lose elements or ordering") {
+	PackedInt32Array values;
+	REQUIRE_EQ(values.resize(16384), OK);
+	int32_t *ptr = values.ptrw();
+	for (int i = 0; i < values.size(); i++) {
+		ptr[i] = i * 7 - 1234;
+	}
+	const String encoded = JSON::stringify(Variant(values));
+	const Array decoded = JSON::parse_string(encoded);
+	REQUIRE_EQ(decoded.size(), values.size());
+	for (int i = 0; i < values.size(); i += 113) {
+		CHECK_EQ(decoded[i], Variant(i * 7 - 1234));
+	}
+}
+
 } // namespace TestJSON
