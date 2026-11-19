@@ -90,9 +90,11 @@ def simulate(godot: str, scenario: str, mode: int) -> float:
 
 
 class JoltMaterialRuntime(unittest.TestCase):
-    @unittest.skipUnless(os.environ.get("CGAME_GODOT_BINARY"), "Requires CGAME_GODOT_BINARY or --godot")
     def test_all_material_modes_with_isolated_real_jolt_spaces(self):
-        godot = os.path.abspath(os.environ["CGAME_GODOT_BINARY"])
+        binary = os.environ.get("CGAME_GODOT_BINARY")
+        if not binary:
+            self.skipTest("Requires CGAME_GODOT_BINARY or --godot")
+        godot = os.path.abspath(binary)
         self.assertTrue(Path(godot).is_file(), godot)
         friction = [simulate(godot, "friction", mode) for mode in range(4)]
         bounce = [simulate(godot, "bounce", mode) for mode in range(6)]
