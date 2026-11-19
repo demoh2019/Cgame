@@ -28,5 +28,6 @@ func _initialize() -> void:
 		source[i] = i
 	_run_case(source, func(_value: int) -> bool: return false, "reject_all")
 	_run_case(source, func(value: int) -> bool: return value % 2 == 0, "accept_even")
+	_run_case(source, func(value: int) -> bool: return value == ELEMENTS - 1, "accept_last")
 	_run_case(source, func(_value: int) -> bool: return true, "accept_all")
 	quit()
