@@ -210,7 +210,9 @@ tangent-velocity and inertia calculations when friction is zero, while
 preserving normal collision impulses. It also guards singular normal and
 tangent effective masses, discards stale tangential warm-start impulses after
 the friction material changes to zero, and projects retained tangent impulses
-into the new contact plane when a soft surface rotates.
+into the new contact plane when a soft surface rotates. Both 3D rigid/rigid and
+rigid/soft friction solvers check squared tangential speed before taking a
+square root, skipping it for stationary or nearly stationary contacts.
 
 For persisted rigid/soft contacts, warm-start impulses follow the same
 time-step ratio and `physics/3d/solver/warm_start_coefficient` policy as
