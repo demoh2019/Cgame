@@ -1,8 +1,15 @@
 extends SceneTree
+
+# This laboratory deliberately tests the Cgame GodotPhysics3D native solver,
+# which is not selected by default when Jolt is included.
 ## Run with:
 ## godot --headless --path demo/physics_lab --script res://smoke_test.gd
 
 func _initialize() -> void:
+    if str(ProjectSettings.get_setting("physics/3d/physics_engine", "")) != "GodotPhysics3D":
+        push_error("Physics Lab must explicitly select GodotPhysics3D to test the Cgame soft-body solver.")
+        quit(1)
+        return
     call_deferred("_check_both_labs")
 
 
