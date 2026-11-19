@@ -79,6 +79,18 @@ func _run() -> void:
 	valid = valid and displacement_free > 0.001
 	valid = valid and displacement_pinned > displacement_free * 1.4
 
+	# Fully pin the second sphere. Even a large requested impulse must be
+	# ignored without dividing by zero or moving its kinematic particles.
+	for i in range(pinned_count, unique_indices.size()):
+		PhysicsServer3D.soft_body_pin_point(half_pinned, unique_indices[i], true)
+	var fully_pinned_before := PhysicsServer3D.soft_body_get_point_global_position(half_pinned, probe_index)
+	PhysicsServer3D.soft_body_apply_central_impulse(half_pinned, Vector3(100.0, 0.0, 0.0))
+	PhysicsServer3D.soft_body_apply_central_force(half_pinned, Vector3(100.0, 0.0, 0.0))
+	await physics_frame
+	var fully_pinned_after := PhysicsServer3D.soft_body_get_point_global_position(half_pinned, probe_index)
+	valid = valid and fully_pinned_after.is_finite()
+	valid = valid and fully_pinned_before.distance_squared_to(fully_pinned_after) < 0.000001
+
 	scene.queue_free()
 	await process_frame
 	if not valid:
