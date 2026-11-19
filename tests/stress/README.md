@@ -941,6 +941,39 @@ python3 tests/stress/run.py --godot ./bin/godot.macos.editor.arm64 \
   --output out/physics-contact-manifolds-2d.json
 ```
 
+## 3D contact warm-start timestep and material stability
+
+Built-in GodotPhysics3D now scales cached normal, friction, and bias impulses
+by `current_delta / previous_delta` when the physics tick rate changes.
+Timestep ratios outside `[0.5, 2.0]` discard those impulses rather than
+injecting stale forces. Cached friction is also clamped to the **current**
+Coulomb limit `mixed_friction * cached_normal_impulse` before warm starting,
+including when an existing material's friction is reduced.
+
+The optional project setting `physics/3d/solver/warm_start_coefficient`
+follows Rapier's contact warm-start scaling: `1.0` is the default and
+preserves existing fixed-timestep behavior; `0.0` disables cached impulse
+reuse; intermediate values damp it. This setting is read once when a
+GodotPhysics3D space is created, not on every contact or every frame.
+Changing it does not retroactively affect already created spaces. This
+setting does not modify a third-party physics backend.
+
+Run both structural and simulation-level regressions with a freshly
+compiled engine:
+
+```bash
+python3 -m unittest discover -s tests/stress -p 'test_physics_3d_warmstart_timestep.py' -v
+
+./bin/godot.macos.editor.arm64 --headless --path tests/stress \
+  --script res://physics_warmstart_timestep_3d_regression.gd
+```
+
+The simulation test switches physics tick rates from 60 to 120 to 30 to
+60 Hz and lowers friction while contacts persist. It checks finite
+velocities/transforms, bounds runaway motion, and requires at least one
+collision pair. This is a **stability regression**, not evidence of better
+performance or a proof of physically exact contact impulses.
+
 ## 3D frictionless contact solver regression
 
 The `physics_frictionless_3d` workload is identical in topology to
