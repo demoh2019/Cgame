@@ -31,7 +31,10 @@
 #include "bit_map.h"
 
 #include "core/object/class_db.h"
+#include "core/templates/local_vector.h"
 #include "core/variant/typed_array.h"
+
+#include <cmath>
 
 void BitMap::create(const Size2i &p_size) {
 	ERR_FAIL_COND(p_size.width < 1);
@@ -50,66 +53,154 @@ void BitMap::create(const Size2i &p_size) {
 
 void BitMap::create_from_image_alpha(const Ref<Image> &p_image, float p_threshold) {
 	ERR_FAIL_COND(p_image.is_null() || p_image->is_empty());
-	Ref<Image> img = p_image->duplicate();
-	img->convert(Image::FORMAT_LA8);
+	// Already-LA8 images can be read directly. Only duplicate before a
+	// format conversion, which must never mutate the caller's Image.
+	Ref<Image> img = p_image;
+	if (img->get_format() != Image::FORMAT_LA8) {
+		img = img->duplicate();
+		img->convert(Image::FORMAT_LA8);
+	}
 	ERR_FAIL_COND(img->get_format() != Image::FORMAT_LA8);
 
 	create(Size2i(img->get_width(), img->get_height()));
 
 	const uint8_t *r = img->get_data().ptr();
 	uint8_t *w = bitmask.ptrw();
+	const int pixels = width * height;
 
-	for (int i = 0; i < width * height; i++) {
-		int bbyte = i / 8;
-		int bbit = i % 8;
-		if (r[i * 2 + 1] / 255.0 > p_threshold) {
-			w[bbyte] |= (1 << bbit);
+	// Small alpha masks avoid the cutoff setup and are often used for
+	// tiny collision and navigation resources.
+	if (pixels < 256) {
+		for (int i = 0; i < pixels; i++) {
+			if (r[i * 2 + 1] / 255.0 > p_threshold) {
+				w[i >> 3] |= uint8_t(1u << (i & 7));
+			}
 		}
+		return;
+	}
+
+	// Alpha has only 256 discrete values. Find the first value satisfying
+	// the original floating-point comparison once, rather than dividing
+	// every pixel by 255. This also preserves NaN/negative thresholds.
+	int first_opaque_alpha = 0;
+	while (first_opaque_alpha < 256 && !(first_opaque_alpha / 255.0 > p_threshold)) {
+		first_opaque_alpha++;
+	}
+
+	// All transparent and all opaque inputs can be handled in one fill.
+	// Preserve the zeroed padding bits in the final partial byte.
+	const int full_bytes = pixels >> 3;
+	const int remaining = pixels & 7;
+	if (first_opaque_alpha == 256) {
+		return;
+	}
+	if (first_opaque_alpha == 0) {
+		memset(w, 0xff, full_bytes);
+		if (remaining > 0) {
+			w[full_bytes] = uint8_t((1u << remaining) - 1);
+		}
+		return;
+	}
+
+	// Assemble eight destination bits at a time, using sequential reads
+	// of the LA8 image.
+	for (int byte_index = 0; byte_index < full_bytes; byte_index++) {
+		const uint8_t *alpha = r + (byte_index << 4) + 1;
+		uint8_t packed = 0;
+		for (int bit = 0; bit < 8; bit++) {
+			packed |= uint8_t((alpha[bit << 1] >= first_opaque_alpha) << bit);
+		}
+		w[byte_index] = packed;
+	}
+	if (remaining > 0) {
+		const uint8_t *alpha = r + (full_bytes << 4) + 1;
+		uint8_t packed = 0;
+		for (int bit = 0; bit < remaining; bit++) {
+			packed |= uint8_t((alpha[bit << 1] >= first_opaque_alpha) << bit);
+		}
+		w[full_bytes] = packed;
 	}
 }
 
 void BitMap::set_bit_rect(const Rect2i &p_rect, bool p_value) {
-	Rect2i current = Rect2i(0, 0, width, height).intersection(p_rect);
+	const Rect2i current = Rect2i(0, 0, width, height).intersection(p_rect);
+	if (current.size.x <= 0 || current.size.y <= 0) {
+		return;
+	}
+
 	uint8_t *data = bitmask.ptrw();
-
-	for (int i = current.position.x; i < current.position.x + current.size.x; i++) {
-		for (int j = current.position.y; j < current.position.y + current.size.y; j++) {
-			int ofs = width * j + i;
-			int bbyte = ofs / 8;
-			int bbit = ofs % 8;
-
-			uint8_t b = data[bbyte];
-
-			if (p_value) {
-				b |= (1 << bbit);
-			} else {
-				b &= ~(1 << bbit);
-			}
-
-			data[bbyte] = b;
+	if (current.position == Point2i() && current.size == Size2i(width, height)) {
+		// A full-map rectangle is a single contiguous bit range. Replace
+		// one row-at-a-time memset with one bulk fill, while preserving
+		// padding bits in a partially filled final byte.
+		const int bytes = bitmask.size();
+		const int tail_bits = (width * height) & 7;
+		if (tail_bits == 0) {
+			memset(data, p_value ? 0xff : 0, bytes);
+		} else {
+			const uint8_t tail_mask = uint8_t((1u << tail_bits) - 1);
+			const uint8_t old_padding = data[bytes - 1] & uint8_t(~tail_mask);
+			memset(data, p_value ? 0xff : 0, bytes - 1);
+			data[bytes - 1] = old_padding | (p_value ? tail_mask : 0);
 		}
+		return;
+	}
+	// BitMap rows share bytes when the width is not a multiple of eight.
+	// Keep the boundary bits intact and fill whole interior bytes at once.
+	int64_t start_bit = int64_t(width) * current.position.y + current.position.x;
+	for (int row = 0; row < current.size.y; row++) {
+		const int64_t end_bit = start_bit + current.size.x - 1;
+		const int first_byte = int(start_bit >> 3);
+		const int last_byte = int(end_bit >> 3);
+		const uint8_t first_mask = uint8_t(0xffu << (start_bit & 7));
+		const uint8_t last_mask = uint8_t(0xffu >> (7 - (end_bit & 7)));
+
+		if (first_byte == last_byte) {
+			const uint8_t mask = first_mask & last_mask;
+			if (p_value) {
+				data[first_byte] |= mask;
+			} else {
+				data[first_byte] &= uint8_t(~mask);
+			}
+		} else {
+			if (p_value) {
+				data[first_byte] |= first_mask;
+				data[last_byte] |= last_mask;
+			} else {
+				data[first_byte] &= uint8_t(~first_mask);
+				data[last_byte] &= uint8_t(~last_mask);
+			}
+			if (last_byte - first_byte > 1) {
+				memset(data + first_byte + 1, p_value ? 0xff : 0, last_byte - first_byte - 1);
+			}
+		}
+		start_bit += width;
 	}
 }
 
 int BitMap::get_true_bit_count() const {
-	int ds = bitmask.size();
-	const uint8_t *d = bitmask.ptr();
-	int c = 0;
+	const int size = bitmask.size();
+	const uint8_t *data = bitmask.ptr();
+	int count = 0;
+	int i = 0;
 
-	// Fast, almost branchless version.
-
-	for (int i = 0; i < ds; i++) {
-		c += (d[i] & (1 << 7)) >> 7;
-		c += (d[i] & (1 << 6)) >> 6;
-		c += (d[i] & (1 << 5)) >> 5;
-		c += (d[i] & (1 << 4)) >> 4;
-		c += (d[i] & (1 << 3)) >> 3;
-		c += (d[i] & (1 << 2)) >> 2;
-		c += (d[i] & (1 << 1)) >> 1;
-		c += d[i] & 1;
+	// Count eight packed bytes per iteration without alignment assumptions,
+	// platform-specific intrinsics, or an auxiliary lookup table.
+	for (; i + 8 <= size; i += 8) {
+		uint64_t bits;
+		memcpy(&bits, data + i, sizeof(bits));
+		bits -= (bits >> 1) & 0x5555555555555555ULL;
+		bits = (bits & 0x3333333333333333ULL) + ((bits >> 2) & 0x3333333333333333ULL);
+		bits = (bits + (bits >> 4)) & 0x0f0f0f0f0f0f0f0fULL;
+		count += int((bits * 0x0101010101010101ULL) >> 56);
 	}
-
-	return c;
+	for (; i < size; i++) {
+		uint32_t bits = data[i];
+		bits -= (bits >> 1) & 0x55u;
+		bits = (bits & 0x33u) + ((bits >> 2) & 0x33u);
+		count += (bits + (bits >> 4)) & 0x0fu;
+	}
+	return count;
 }
 
 void BitMap::set_bitv(const Point2i &p_pos, bool p_value) {
@@ -555,56 +646,173 @@ void BitMap::grow_mask(int p_pixels, const Rect2i &p_rect) {
 	if (p_pixels == 0) {
 		return;
 	}
+	ERR_FAIL_COND(p_pixels == INT32_MIN);
 
-	bool bit_value = p_pixels > 0;
-	p_pixels = Math::abs(p_pixels);
-	const int pixels2 = p_pixels * p_pixels;
+	// A radius of one can only reach the four cardinal neighbors.
+	// Avoid creating a temporary BitMap, the quadratic neighborhood loop,
+	// repeated bounds checks and floating-point distance calculations.
+	if (p_pixels == 1 || p_pixels == -1) {
+		const Rect2i current = Rect2i(0, 0, width, height).intersection(p_rect);
+		if (current.size.x <= 0 || current.size.y <= 0) {
+			return;
+		}
+		const bool bit_value = p_pixels > 0;
+		const int64_t left = p_rect.position.x;
+		const int64_t top = p_rect.position.y;
+		const int64_t right = left + p_rect.size.x;
+		const int64_t bottom = top + p_rect.size.y;
+		// A shared immutable view retains the pre-operation mask; ptrw()
+		// detaches it once for the updates instead of building a BitMap.
+		const Vector<uint8_t> original = bitmask;
+		uint8_t *destination = bitmask.ptrw();
+		const uint8_t *source = original.ptr();
 
-	Rect2i r = Rect2i(0, 0, width, height).intersection(p_rect);
+		auto matches = [&](int64_t x, int64_t y) -> bool {
+			// Grow ignores outside-rectangle pixels. Shrink treats them as
+			// unset, exactly as the generic neighborhood implementation.
+			if (x < left || x >= right || y < top || y >= bottom) {
+				return !bit_value;
+			}
+			if (x < 0 || x >= width || y < 0 || y >= height) {
+				return !bit_value;
+			}
+			const int bit = int(y) * width + int(x);
+			const bool set = (source[bit >> 3] & (1u << (bit & 7))) != 0;
+			return set == bit_value;
+		};
 
-	Ref<BitMap> copy;
-	copy.instantiate();
-	copy->create(get_size());
-	copy->bitmask = bitmask;
+		for (int y = current.position.y; y < current.position.y + current.size.y; y++) {
+			for (int x = current.position.x; x < current.position.x + current.size.x; x++) {
+				const int bit = y * width + x;
+				const uint8_t mask = uint8_t(1u << (bit & 7));
+				const bool original_bit = (source[bit >> 3] & mask) != 0;
+				if (original_bit == bit_value) {
+					continue;
+				}
+				if (matches(int64_t(x) - 1, y) || matches(int64_t(x) + 1, y) ||
+						matches(x, int64_t(y) - 1) || matches(x, int64_t(y) + 1)) {
+					if (bit_value) {
+						destination[bit >> 3] |= mask;
+					} else {
+						destination[bit >> 3] &= uint8_t(~mask);
+					}
+				}
+			}
+		}
+		return;
+	}
 
-	for (int i = r.position.y; i < r.position.y + r.size.height; i++) {
-		for (int j = r.position.x; j < r.position.x + r.size.width; j++) {
-			if (bit_value == get_bit(j, i)) {
+	const bool bit_value = p_pixels > 0;
+	const int radius = Math::abs(p_pixels);
+	const int64_t radius_squared = int64_t(radius) * radius;
+	const Rect2i current = Rect2i(0, 0, width, height).intersection(p_rect);
+	if (current.size.x <= 0 || current.size.y <= 0) {
+		return;
+	}
+
+	// If every pixel can reach a transparent point outside this rectangle,
+	// erosion clears the entire intersection with one bulk write.
+	const int64_t furthest_from_border = MIN((int64_t(current.size.x) + 1) / 2,
+			(int64_t(current.size.y) + 1) / 2);
+	if (!bit_value && radius >= furthest_from_border) {
+		set_bit_rect(current, false);
+		return;
+	}
+
+	// If the radius spans the diagonal, any single opaque source pixel
+	// reaches the entire rectangle. Scan once and fill with byte spans,
+	// avoiding both the COW snapshot and all neighborhood searches.
+	const int64_t dx = int64_t(current.size.x) - 1;
+	const int64_t dy = int64_t(current.size.y) - 1;
+	if (bit_value && radius_squared >= dx * dx + dy * dy) {
+		const uint8_t *source = bitmask.ptr();
+		bool has_opaque = false;
+		for (int y = current.position.y; y < current.position.y + current.size.y && !has_opaque; y++) {
+			for (int x = current.position.x; x < current.position.x + current.size.x; x++) {
+				const int bit = y * width + x;
+				if (source[bit >> 3] & (1u << (bit & 7))) {
+					has_opaque = true;
+					break;
+				}
+			}
+		}
+		if (has_opaque) {
+			set_bit_rect(current, true);
+		}
+		return;
+	}
+
+	// Keep the pre-operation bits in a COW snapshot. No temporary Resource,
+	// second zero-initialized buffer, or get_bit/set_bit calls are needed.
+	const Vector<uint8_t> original = bitmask;
+	uint8_t *destination = bitmask.ptrw();
+	const uint8_t *source = original.ptr();
+	// Only source pixels inside the intersection of image and p_rect can
+	// contribute to growth. For shrinking, stepping outside that region is
+	// already a transparent neighbor, so an entire border band is known.
+	const int64_t left = current.position.x;
+	const int64_t top = current.position.y;
+	const int64_t right = left + current.size.x;
+	const int64_t bottom = top + current.size.y;
+
+	// Cache each disk scanline's half-width once instead of testing every
+	// candidate in the surrounding square against the radius.
+	const int max_delta_y = MIN(radius, current.size.y - 1);
+	LocalVector<int> horizontal_extents;
+	horizontal_extents.resize_uninitialized(max_delta_y + 1);
+	for (int dy = 0; dy <= max_delta_y; dy++) {
+		const int64_t dy_squared = int64_t(dy) * dy;
+		int64_t extent = int64_t(std::sqrt(double(radius_squared - dy_squared)));
+		// Correct possible floating-point rounding at the exact boundary.
+		while (extent * extent + dy_squared > radius_squared) {
+			extent--;
+		}
+		while ((extent + 1) * (extent + 1) + dy_squared <= radius_squared) {
+			extent++;
+		}
+		horizontal_extents[dy] = int(extent);
+	}
+
+	for (int y = current.position.y; y < current.position.y + current.size.y; y++) {
+		for (int x = current.position.x; x < current.position.x + current.size.x; x++) {
+			const int bit = y * width + x;
+			const uint8_t mask = uint8_t(1u << (bit & 7));
+			if (((source[bit >> 3] & mask) != 0) == bit_value) {
+				continue;
+			}
+
+			// A radius reaching past the image/p_rect intersection always
+			// encounters an unset pixel, so erosion can clear it immediately.
+			if (!bit_value && (int64_t(x) - left < radius || right - x <= radius ||
+					int64_t(y) - top < radius || bottom - y <= radius)) {
+				destination[bit >> 3] &= uint8_t(~mask);
 				continue;
 			}
 
 			bool found = false;
-
-			for (int y = i - p_pixels; y <= i + p_pixels; y++) {
-				for (int x = j - p_pixels; x <= j + p_pixels; x++) {
-					bool outside = false;
-
-					if ((x < p_rect.position.x) || (x >= p_rect.position.x + p_rect.size.x) || (y < p_rect.position.y) || (y >= p_rect.position.y + p_rect.size.y)) {
-						// Outside of rectangle counts as bit not set.
-						if (!bit_value) {
-							outside = true;
-						} else {
-							continue;
-						}
-					}
-
-					float d = Point2(j, i).distance_squared_to(Point2(x, y)) - CMP_EPSILON2;
-					if (d > pixels2) {
-						continue;
-					}
-
-					if (outside || (bit_value == copy->get_bit(x, y))) {
+			const int64_t first_y = MAX(top, int64_t(y) - radius);
+			const int64_t last_y = MIN(bottom - 1, int64_t(y) + radius);
+			for (int64_t candidate_y = first_y; candidate_y <= last_y && !found; candidate_y++) {
+				const int dy = Math::abs(int(candidate_y - y));
+				const int half_width = horizontal_extents[dy];
+				const int64_t first_x = MAX(left, int64_t(x) - half_width);
+				const int64_t last_x = MIN(right - 1, int64_t(x) + half_width);
+				const int source_row = int(candidate_y) * width;
+				for (int64_t candidate_x = first_x; candidate_x <= last_x; candidate_x++) {
+					const int neighbor_bit = source_row + int(candidate_x);
+					const bool neighbor = (source[neighbor_bit >> 3] & (1u << (neighbor_bit & 7))) != 0;
+					if (neighbor == bit_value) {
 						found = true;
 						break;
 					}
 				}
-				if (found) {
-					break;
-				}
 			}
-
 			if (found) {
-				set_bit(j, i, bit_value);
+				if (bit_value) {
+					destination[bit >> 3] |= mask;
+				} else {
+					destination[bit >> 3] &= uint8_t(~mask);
+				}
 			}
 		}
 	}
@@ -649,57 +857,133 @@ void BitMap::resize(const Size2i &p_new_size) {
 	Ref<BitMap> new_bitmap;
 	new_bitmap.instantiate();
 	new_bitmap->create(p_new_size);
-	// also allow for upscaling
-	int lw = (width == 0) ? 0 : p_new_size.width;
-	int lh = (height == 0) ? 0 : p_new_size.height;
-
-	float scale_x = ((float)width / p_new_size.width);
-	float scale_y = ((float)height / p_new_size.height);
-	for (int x = 0; x < lw; x++) {
-		for (int y = 0; y < lh; y++) {
-			bool new_bit = get_bit(x * scale_x, y * scale_y);
-			new_bitmap->set_bit(x, y, new_bit);
+	if (new_bitmap->get_size() == p_new_size && p_new_size.width > 0 && p_new_size.height > 0 && width > 0 && height > 0) {
+		// Match the original nearest-neighbor sampling and float precision,
+		// but traverse destination rows in order. The destination is zeroed
+		// by create(), so only the set source bits need to be written.
+		const float scale_x = float(width) / p_new_size.width;
+		const float scale_y = float(height) / p_new_size.height;
+		const uint8_t *source = bitmask.ptr();
+		uint8_t *destination = new_bitmap->bitmask.ptrw();
+		for (int y = 0; y < p_new_size.height; y++) {
+			const int source_y = int(y * scale_y);
+			if (source_y < 0 || source_y >= height) {
+				continue;
+			}
+			const int source_row = source_y * width;
+			const int dest_row = y * p_new_size.width;
+			for (int x = 0; x < p_new_size.width; x++) {
+				const int source_x = int(x * scale_x);
+				if (source_x < 0 || source_x >= width) {
+					continue;
+				}
+				const int source_bit = source_row + source_x;
+				if (source[source_bit >> 3] & (1u << (source_bit & 7))) {
+					const int dest_bit = dest_row + x;
+					destination[dest_bit >> 3] |= uint8_t(1u << (dest_bit & 7));
+				}
+			}
 		}
 	}
-
 	width = new_bitmap->width;
 	height = new_bitmap->height;
 	bitmask = new_bitmap->bitmask;
 }
 
 Ref<Image> BitMap::convert_to_image() const {
-	Ref<Image> image = Image::create_empty(width, height, false, Image::FORMAT_L8);
-
-	for (int i = 0; i < width; i++) {
-		for (int j = 0; j < height; j++) {
-			image->set_pixel(i, j, get_bit(i, j) ? Color(1, 1, 1) : Color(0, 0, 0));
-		}
+	if (width == 0 || height == 0) {
+		return Image::create_empty(width, height, false, Image::FORMAT_L8);
 	}
 
-	return image;
+	// FORMAT_L8 is one byte per pixel. Avoid per-pixel Color conversion,
+	// bounds checks and image updates; the packed mask is already row-major.
+	Vector<uint8_t> image_data;
+	image_data.resize(width * height);
+	uint8_t *dst = image_data.ptrw();
+	const uint8_t *src = bitmask.ptr();
+	const int pixels = width * height;
+	for (int i = 0; i < pixels; i++) {
+		dst[i] = (src[i >> 3] & (1u << (i & 7))) ? 0xff : 0;
+	}
+	return Image::create_from_data(width, height, false, Image::FORMAT_L8, image_data);
 }
 
 void BitMap::blit(const Vector2i &p_pos, const Ref<BitMap> &p_bitmap) {
 	ERR_FAIL_COND_MSG(p_bitmap.is_null(), "It's not a reference to a valid BitMap object.");
 
-	int x = p_pos.x;
-	int y = p_pos.y;
-	int w = p_bitmap->get_size().width;
-	int h = p_bitmap->get_size().height;
+	const int source_width = p_bitmap->width;
+	const int source_height = p_bitmap->height;
 
-	for (int i = 0; i < w; i++) {
-		for (int j = 0; j < h; j++) {
-			int px = x + i;
-			int py = y + j;
-			if (px < 0 || px >= width) {
-				continue;
+	if (p_bitmap.ptr() == this) {
+		// Preserve the existing column-major behavior for overlapping
+		// self-blits, where writes can affect subsequent source reads.
+		for (int x = 0; x < source_width; x++) {
+			for (int y = 0; y < source_height; y++) {
+				const int px = p_pos.x + x;
+				const int py = p_pos.y + y;
+				if (px >= 0 && px < width && py >= 0 && py < height && get_bit(x, y)) {
+					set_bit(px, py, true);
+				}
 			}
-			if (py < 0 || py >= height) {
-				continue;
+		}
+		return;
+	}
+
+	// Clip before copying. Using 64-bit coordinates prevents addition
+	// overflow if the caller passes a position near the integer limits.
+	const int64_t x_begin = MAX(int64_t(0), int64_t(p_pos.x));
+	const int64_t y_begin = MAX(int64_t(0), int64_t(p_pos.y));
+	const int64_t x_end = MIN(int64_t(width), int64_t(p_pos.x) + source_width);
+	const int64_t y_end = MIN(int64_t(height), int64_t(p_pos.y) + source_height);
+	if (x_begin >= x_end || y_begin >= y_end) {
+		return;
+	}
+
+	// OR full destination bytes instead of testing each source pixel.
+	// The source and destination bit rows can be unaligned (including when
+	// their widths are not multiples of eight), so combine adjacent source
+	// bytes to form each aligned destination byte.
+	uint8_t *destination = bitmask.ptrw();
+	const uint8_t *source = p_bitmap->bitmask.ptr();
+	const int bits_per_row = int(x_end - x_begin);
+	for (int64_t y = y_begin; y < y_end; y++) {
+		int source_bit = int(y - p_pos.y) * source_width + int(x_begin - p_pos.x);
+		int dest_bit = int(y) * width + int(x_begin);
+		int remaining_bits = bits_per_row;
+
+		// Preserve the bits preceding the covered region in the first byte.
+		while (remaining_bits > 0 && (dest_bit & 7)) {
+			destination[dest_bit >> 3] |= uint8_t(((source[source_bit >> 3] >> (source_bit & 7)) & 1u) << (dest_bit & 7));
+			source_bit++;
+			dest_bit++;
+			remaining_bits--;
+		}
+
+		// The common case is a long run of complete destination bytes.
+		const int whole_bytes = remaining_bits >> 3;
+		const int source_shift = source_bit & 7;
+		const uint8_t *src = source + (source_bit >> 3);
+		uint8_t *dst = destination + (dest_bit >> 3);
+		if (source_shift == 0) {
+			for (int byte = 0; byte < whole_bytes; byte++) {
+				dst[byte] |= src[byte];
 			}
-			if (p_bitmap->get_bit(i, j)) {
-				set_bit(px, py, true);
+		} else {
+			for (int byte = 0; byte < whole_bytes; byte++) {
+				dst[byte] |= uint8_t((src[byte] >> source_shift) | (src[byte + 1] << (8 - source_shift)));
 			}
+		}
+		const int bulk_bits = whole_bytes << 3;
+		source_bit += bulk_bits;
+		dest_bit += bulk_bits;
+		remaining_bits -= bulk_bits;
+
+		// Preserve the bits following the covered region in the final byte.
+		while (remaining_bits > 0) {
+			destination[dest_bit >> 3] |= uint8_t(((source[source_bit >> 3] >> (source_bit & 7)) & 1u) << (dest_bit & 7));
+			source_bit++;
+			dest_bit++;
+			remaining_bits--;
 		}
 	}
 }

@@ -1,0 +1,48 @@
+name: COW String and Vector equality performance regressions
+
+on:
+  push:
+    branches: [develop]
+    paths:
+      - 'core/string/ustring.cpp'
+      - 'core/templates/vector.h'
+      - 'tests/core/string/test_string.cpp'
+      - 'tests/core/templates/test_vector.cpp'
+      - 'misc/scripts/tests/test_cow_shared_equality.py'
+      - '.github/workflows/cow-shared-equality.yml'
+  pull_request:
+    paths:
+      - 'core/string/ustring.cpp'
+      - 'core/templates/vector.h'
+      - 'tests/core/string/test_string.cpp'
+      - 'tests/core/templates/test_vector.cpp'
+      - 'misc/scripts/tests/test_cow_shared_equality.py'
+      - '.github/workflows/cow-shared-equality.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  source-regressions:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - run: python3 -m unittest discover -s misc/scripts/tests -p test_cow_shared_equality.py -v
+
+  native:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+      - uses: ./.github/actions/godot-deps
+      - uses: ./.github/actions/godot-build
+        with:
+          platform: linuxbsd
+          target: editor
+          scons-flags: dev_build=yes tests=yes debug_symbols=no module_mono_enabled=no accesskit=no -j2
+      - run: |
+          ./bin/godot.linuxbsd.editor.dev.x86_64 --headless --test --test-case="*[Vector] shared*"
+          ./bin/godot.linuxbsd.editor.dev.x86_64 --headless --test --test-case="*[String] shared UTF32*"

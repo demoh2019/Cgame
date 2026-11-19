@@ -1,0 +1,50 @@
+name: GDScript named global single-probe fast path
+
+on:
+  pull_request:
+    branches: [develop]
+    paths:
+      - 'modules/gdscript/gdscript_vm.cpp'
+      - 'modules/gdscript/tests/gdscript_test_runner_suite.h'
+      - 'misc/scripts/tests/test_gdscript_named_global_single_probe.py'
+      - '.github/workflows/gdscript-named-global-single-probe.yml'
+  push:
+    branches: [develop]
+    paths:
+      - 'modules/gdscript/gdscript_vm.cpp'
+      - 'modules/gdscript/tests/gdscript_test_runner_suite.h'
+      - 'misc/scripts/tests/test_gdscript_named_global_single_probe.py'
+      - '.github/workflows/gdscript-named-global-single-probe.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  source-regressions:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - name: Verify VM only resolves each named global once
+        run: |
+          python3 -m py_compile misc/scripts/tests/test_gdscript_named_global_single_probe.py
+          python3 -m unittest discover -s misc/scripts/tests -p test_gdscript_named_global_single_probe.py -v
+
+  native-gdscript:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+      - uses: ./.github/actions/godot-deps
+      - name: Compile native Godot tests
+        uses: ./.github/actions/godot-build
+        with:
+          platform: linuxbsd
+          target: editor
+          scons-flags: dev_build=yes tests=yes debug_symbols=no module_mono_enabled=no module_text_server_fb_enabled=yes accesskit=no -j2
+      - name: Run native and scripted GDScript regressions
+        run: |
+          timeout 600s ./bin/godot.linuxbsd.editor.dev.x86_64 --headless --test --test-suite="*GDScript*" --no-colors

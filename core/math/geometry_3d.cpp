@@ -30,7 +30,8 @@
 
 #include "geometry_3d.h"
 
-#include "core/templates/hash_map.h"
+#include <limits>
+#include <utility>
 
 void Geometry3D::get_closest_points_between_segments(const Vector3 &p_p0, const Vector3 &p_p1, const Vector3 &p_q0, const Vector3 &p_q1, Vector3 &r_ps, Vector3 &r_qt) {
 	// Based on David Eberly's Computation of Distance Between Line Segments algorithm.
@@ -138,44 +139,55 @@ real_t Geometry3D::get_closest_distance_between_segments(const Vector3 &p_p0, co
 }
 
 void Geometry3D::MeshData::optimize_vertices() {
-	HashMap<int, int> vtx_remap;
+	// Indices refer directly to the current vertex array. A dense remap uses
+	// just four bytes per original vertex and replaces multiple hash-table
+	// probes (and hash allocations) with indexed array reads and writes.
+	const uint32_t vertex_count = vertices.size();
+	LocalVector<int> remap;
+	remap.resize_uninitialized(vertex_count);
+	int *const remap_ptr = remap.ptr();
+	for (uint32_t i = 0; i < vertex_count; i++) {
+		remap_ptr[i] = -1;
+	}
 
+	uint32_t compact_count = 0;
 	for (MeshData::Face &face : faces) {
 		for (int &index : face.indices) {
-			if (!vtx_remap.has(index)) {
-				int ni = vtx_remap.size();
-				vtx_remap[index] = ni;
+			ERR_FAIL_INDEX(index, vertex_count);
+			int &mapped = remap_ptr[index];
+			if (mapped == -1) {
+				mapped = compact_count++;
 			}
-			index = vtx_remap[index];
+			index = mapped;
 		}
 	}
 
 	for (MeshData::Edge &edge : edges) {
-		int a = edge.vertex_a;
-		int b = edge.vertex_b;
-
-		if (!vtx_remap.has(a)) {
-			int ni = vtx_remap.size();
-			vtx_remap[a] = ni;
+		ERR_FAIL_INDEX(edge.vertex_a, vertex_count);
+		ERR_FAIL_INDEX(edge.vertex_b, vertex_count);
+		int &a = remap_ptr[edge.vertex_a];
+		if (a == -1) {
+			a = compact_count++;
 		}
-		if (!vtx_remap.has(b)) {
-			int ni = vtx_remap.size();
-			vtx_remap[b] = ni;
+		edge.vertex_a = a;
+		int &b = remap_ptr[edge.vertex_b];
+		if (b == -1) {
+			b = compact_count++;
 		}
-
-		edge.vertex_a = vtx_remap[a];
-		edge.vertex_b = vtx_remap[b];
+		edge.vertex_b = b;
 	}
 
+	// Build exactly the referenced vertex count, retaining the first-use
+	// ordering across faces and edge-only vertices.
 	LocalVector<Vector3> new_vertices;
-	new_vertices.resize(vtx_remap.size());
-
-	for (uint32_t i = 0; i < vertices.size(); i++) {
-		if (vtx_remap.has(i)) {
-			new_vertices[vtx_remap[i]] = vertices[i];
+	new_vertices.resize(compact_count);
+	for (uint32_t i = 0; i < vertex_count; i++) {
+		if (remap_ptr[i] != -1) {
+			new_vertices[remap_ptr[i]] = vertices[i];
 		}
 	}
-	vertices = new_vertices;
+	// Transfer ownership instead of copying every compacted Vector3 back.
+	vertices = std::move(new_vertices);
 }
 
 struct _FaceClassify {
@@ -743,19 +755,25 @@ Vector<Plane> Geometry3D::build_cylinder_planes(real_t p_radius, real_t p_height
 	Vector<Plane> planes;
 
 	const double sides_step = Math::TAU / p_sides;
+	const uint64_t plane_count = uint64_t(MAX(p_sides, 0)) + 2;
+	ERR_FAIL_COND_V(plane_count > std::numeric_limits<int>::max(), Vector<Plane>());
+	ERR_FAIL_COND_V(planes.resize(int(plane_count)) != OK, Vector<Plane>());
+	Plane *plane_data = planes.ptrw();
+	int idx = 0;
 	for (int i = 0; i < p_sides; i++) {
 		Vector3 normal;
 		normal[(p_axis + 1) % 3] = Math::cos(i * sides_step);
 		normal[(p_axis + 2) % 3] = Math::sin(i * sides_step);
 
-		planes.push_back(Plane(normal, p_radius));
+		plane_data[idx++] = Plane(normal, p_radius);
 	}
 
 	Vector3 axis;
 	axis[p_axis] = 1.0;
+	real_t half_height = p_height * 0.5f;
 
-	planes.push_back(Plane(axis, p_height * 0.5f));
-	planes.push_back(Plane(-axis, p_height * 0.5f));
+	plane_data[idx++] = Plane(axis, half_height);
+	plane_data[idx++] = Plane(-axis, half_height);
 
 	return planes;
 }
@@ -774,17 +792,22 @@ Vector<Plane> Geometry3D::build_sphere_planes(real_t p_radius, int p_lats, int p
 	axis_neg[p_axis] = -1.0;
 
 	const double lon_step = Math::TAU / p_lons;
+	const uint64_t plane_count = uint64_t(MAX(p_lons, 0)) * (1 + uint64_t(2) * uint64_t(MAX(p_lats, 0)));
+	ERR_FAIL_COND_V(plane_count > std::numeric_limits<int>::max(), Vector<Plane>());
+	ERR_FAIL_COND_V(planes.resize(int(plane_count)) != OK, Vector<Plane>());
+	Plane *plane_data = planes.ptrw();
+	int idx = 0;
 	for (int i = 0; i < p_lons; i++) {
 		Vector3 normal;
 		normal[(p_axis + 1) % 3] = Math::cos(i * lon_step);
 		normal[(p_axis + 2) % 3] = Math::sin(i * lon_step);
 
-		planes.push_back(Plane(normal, p_radius));
+		plane_data[idx++] = Plane(normal, p_radius);
 
 		for (int j = 1; j <= p_lats; j++) {
 			Vector3 plane_normal = normal.lerp(axis, j / (real_t)p_lats).normalized();
-			planes.push_back(Plane(plane_normal, p_radius));
-			planes.push_back(Plane(plane_normal * axis_neg, p_radius));
+			plane_data[idx++] = Plane(plane_normal, p_radius);
+			plane_data[idx++] = Plane(plane_normal * axis_neg, p_radius);
 		}
 	}
 
@@ -805,18 +828,23 @@ Vector<Plane> Geometry3D::build_capsule_planes(real_t p_radius, real_t p_height,
 	axis_neg[p_axis] = -1.0;
 
 	const double sides_step = Math::TAU / p_sides;
+	const uint64_t plane_count = uint64_t(MAX(p_sides, 0)) * (1 + uint64_t(2) * uint64_t(MAX(p_lats, 0)));
+	ERR_FAIL_COND_V(plane_count > std::numeric_limits<int>::max(), Vector<Plane>());
+	ERR_FAIL_COND_V(planes.resize(int(plane_count)) != OK, Vector<Plane>());
+	Plane *plane_data = planes.ptrw();
+	int idx = 0;
 	for (int i = 0; i < p_sides; i++) {
 		Vector3 normal;
 		normal[(p_axis + 1) % 3] = Math::cos(i * sides_step);
 		normal[(p_axis + 2) % 3] = Math::sin(i * sides_step);
 
-		planes.push_back(Plane(normal, p_radius));
+		plane_data[idx++] = Plane(normal, p_radius);
 
 		for (int j = 1; j <= p_lats; j++) {
 			Vector3 plane_normal = normal.lerp(axis, j / (real_t)p_lats).normalized();
 			Vector3 position = axis * p_height * 0.5f + plane_normal * p_radius;
-			planes.push_back(Plane(plane_normal, position));
-			planes.push_back(Plane(plane_normal * axis_neg, position * axis_neg));
+			plane_data[idx++] = Plane(plane_normal, position);
+			plane_data[idx++] = Plane(plane_normal * axis_neg, position * axis_neg);
 		}
 	}
 

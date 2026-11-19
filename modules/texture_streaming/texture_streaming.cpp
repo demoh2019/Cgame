@@ -29,6 +29,7 @@
 /**************************************************************************/
 
 #include "texture_streaming.h"
+#include "feedback_buffer_policy.h"
 
 #include "core/config/project_settings.h"
 #include "core/math/math_funcs.h"
@@ -70,11 +71,14 @@ void TextureStreaming::MaterialFeedbackBuffer::clear() {
 }
 
 void TextureStreaming::MaterialFeedbackBuffer::resize() {
-	uint32_t material_info_count = TextureStreaming::get_singleton()->material_info_owner.get_count();
-	uint32_t material_info_count_bytes = material_info_count * 4;
-	if (buffer_size >= material_info_count_bytes && material_info_count_bytes > 0) {
+	const uint32_t material_info_count = TextureStreaming::get_singleton()->material_info_owner.get_count();
+	// The next-power-of-two capacity calculation uses uint32_t; reject sizes
+	// which cannot be rounded up without overflow.
+	ERR_FAIL_COND(material_info_count > TextureStreamingFeedbackPolicy::MAX_MATERIAL_COUNT);
+	if (!TextureStreamingFeedbackPolicy::needs_resize(buffer_size, buffer.is_valid(), material_info_count)) {
 		return;
 	}
+	const uint32_t material_info_count_bytes = material_info_count * sizeof(uint32_t);
 
 	// Free the old buffer before creating a new one to avoid RID leaks.
 	if (buffer.is_valid()) {
@@ -148,6 +152,7 @@ void TextureStreaming::_texture_configure_streaming_impl(Completion<RID> *p_comp
 	state.format = p_format;
 	state.width = p_width;
 	state.height = p_height;
+	state.mip_count = TextureStreamingFeedbackPolicy::mip_level_count(state.width, state.height);
 	state.min_lod_override = uint8_t(CLAMP(p_min_lod, int(LOD_NO_OVERRIDE), int(MAX_LOD_OVERRIDE)));
 	state.max_lod_override = uint8_t(CLAMP(p_max_lod, int(LOD_NO_OVERRIDE), int(MAX_LOD_OVERRIDE)));
 	state.reload_callable = p_reload_callable;
@@ -192,6 +197,7 @@ void TextureStreaming::_texture_update_impl(CompletionVoid *p_completion, RID p_
 	if (state) {
 		state->width = p_width;
 		state->height = p_height;
+		state->mip_count = TextureStreamingFeedbackPolicy::mip_level_count(state->width, state->height);
 		state->min_lod_override = uint8_t(CLAMP(p_min_lod, int(LOD_NO_OVERRIDE), int(MAX_LOD_OVERRIDE)));
 		state->max_lod_override = uint8_t(CLAMP(p_max_lod, int(LOD_NO_OVERRIDE), int(MAX_LOD_OVERRIDE)));
 	}
@@ -492,11 +498,13 @@ void TextureStreaming::_feedback_handle_data(const PackedByteArray &p_array, RID
 }
 
 void TextureStreaming::_process_material_feedback_buffer(MaterialFeedbackBuffer *p_mb, uint64_t p_ticks_msec) {
-	uint32_t *data_ptr = (uint32_t *)p_mb->data.ptrw();
+	// Read-only access keeps the PackedByteArray shared with the RD readback.
+	// ptrw() would detach its copy-on-write storage on every feedback pass.
+	const uint8_t *data_ptr = p_mb->data.ptr();
 	ERR_FAIL_NULL(data_ptr);
 
-	// Distribute feedback to materials and their associated textures
-	const uint32_t *p_data = (uint32_t *)data_ptr;
+	// Distribute feedback to materials and their associated textures.
+	const uint32_t *p_data = reinterpret_cast<const uint32_t *>(data_ptr);
 	{
 		MutexLock lock(material_mutex);
 		for (uint32_t i = 0; i < p_mb->rid_map.size(); i++) {
@@ -532,12 +540,9 @@ void TextureStreaming::_process_material_feedback_buffer(MaterialFeedbackBuffer 
 				float min_dim = MIN(float(state->width), float(state->height));
 				float texel_coverage = min_uv_len * min_dim;
 
-				// Guard against invalid values that would cause undefined behavior in log2.
-				// If texel_coverage is <= 0, request highest quality (mip 0).
-				int required_mip = (texel_coverage > 0.0f) ? int(Math::floor(Math::log2(texel_coverage))) : 0;
-
-				// Clamp to valid mip range for this texture.
-				uint8_t clamped_mip = uint8_t(CLAMP(required_mip, 0, int(state->get_mip_count()) - 1));
+				// The exponent yields floor(log2) without a libm call.
+				// Saturate NaNs, infinities and out-of-range values safely.
+				const uint8_t clamped_mip = TextureStreamingFeedbackPolicy::mip_from_coverage(texel_coverage, state->get_mip_count());
 
 				// Update feedback if this is a better (lower) mip level than previously recorded
 				// Lower mip = higher quality needed
@@ -592,6 +597,13 @@ void TextureStreaming::_feedback_buffer_process(uint64_t p_ticks_msec) {
 	fit_candidates.clear();
 	fit_candidates.reserve(buffers.size());
 
+	// Project-wide limits do not change per texture. Preserve the previous
+	// clamping behavior when min/max settings are reversed.
+	const uint8_t configured_min_lod = _get_system_min_lod();
+	const uint8_t configured_max_lod = _get_system_max_lod();
+	const uint8_t system_min_lod = MIN(configured_min_lod, configured_max_lod);
+	const uint8_t system_max_lod = MAX(system_min_lod, configured_max_lod);
+
 	// Phase 1: Build candidate list with initial target mip levels.
 	uint64_t total_requested_bytes = 0;
 	for (uint32_t i = 0; i < buffers.size(); i++) {
@@ -603,14 +615,10 @@ void TextureStreaming::_feedback_buffer_process(uint64_t p_ticks_msec) {
 		// Compute effective best/worst mip (0 = highest quality).
 		// Per-texture overrides are hard bounds. System overrides/project settings
 		// are intersected with those bounds rather than replacing them.
-		uint8_t system_min_lod = _get_system_min_lod();
-		uint8_t system_max_lod = _get_system_max_lod();
 		uint8_t texture_min_lod = state->min_lod_override != LOD_NO_OVERRIDE ? state->min_lod_override - 1 : MIN_LOD_LEVEL;
 		uint8_t texture_max_lod = state->max_lod_override != LOD_NO_OVERRIDE ? state->max_lod_override - 1 : MAX_LOD_LEVEL;
 
 		// Ensure weird settings where max is larger than min do something more sane.
-		system_min_lod = MIN(system_min_lod, system_max_lod);
-		system_max_lod = MAX(system_min_lod, system_max_lod);
 		texture_min_lod = MIN(texture_min_lod, texture_max_lod);
 		texture_max_lod = MAX(texture_min_lod, texture_max_lod);
 

@@ -40,7 +40,26 @@
 #include "tests/test_macros.h"
 #include "tests/test_utils.h"
 
+#include <type_traits>
+#include <utility>
+
 namespace TestSceneMultiplayer {
+
+static_assert(std::is_same_v<
+		decltype(std::declval<const SceneMultiplayer &>().get_connected_peers()),
+		const HashSet<int> &>,
+		"Internal SceneMultiplayer peer queries must not clone the peer HashSet.");
+
+TEST_CASE("[Multiplayer][SceneMultiplayer] Connected peers getter borrows storage") {
+	Ref<SceneMultiplayer> scene_multiplayer;
+	scene_multiplayer.instantiate();
+	const HashSet<int> *peers = &scene_multiplayer->get_connected_peers();
+	CHECK(peers->is_empty());
+	// No intermediate HashSet should be constructed on repeated reads.
+	CHECK(&scene_multiplayer->get_connected_peers() == peers);
+}
+
+
 TEST_CASE("[Multiplayer][SceneMultiplayer] Defaults") {
 	Ref<SceneMultiplayer> scene_multiplayer;
 	scene_multiplayer.instantiate();

@@ -43,6 +43,8 @@ class Joint2D : public Node2D {
 	NodePath a;
 	NodePath b;
 	real_t bias = 0.0;
+	real_t break_force = 0.0;
+	real_t break_torque = 0.0;
 
 	bool exclude_from_collision = true;
 	bool configured = false;
@@ -52,6 +54,8 @@ protected:
 	void _disconnect_signals();
 	void _body_exit_tree();
 	void _update_joint(bool p_only_free = false);
+	void _on_joint_broken(RID p_joint);
+	void _emit_broken();
 
 	void _notification(int p_what);
 	virtual void _configure_joint(RID p_joint, PhysicsBody2D *body_a, PhysicsBody2D *body_b) = 0;
@@ -74,6 +78,14 @@ public:
 
 	void set_exclude_nodes_from_collision(bool p_enable);
 	bool get_exclude_nodes_from_collision() const;
+
+	void set_break_force(real_t p_force);
+	real_t get_break_force() const;
+	void set_break_torque(real_t p_torque);
+	real_t get_break_torque() const;
+	bool is_broken() const;
+	Vector2 get_reaction_force() const;
+	real_t get_reaction_torque() const;
 
 	RID get_rid() const { return joint; }
 	Joint2D();

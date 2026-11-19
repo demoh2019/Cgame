@@ -1,0 +1,15 @@
+config_version=5
+
+[application]
+
+config/name="Cgame Stress Suite"
+
+[physics]
+
+3d/physics_engine="GodotPhysics3D"
+2d/physics_engine="GodotPhysics2D"
+
+[rendering]
+
+renderer/rendering_method="gl_compatibility"
+renderer/rendering_method.mobile="gl_compatibility"

@@ -1,0 +1,36 @@
+name: Asset Size Map regression tests
+
+on:
+  push:
+    paths:
+      - 'misc/scripts/asset_size_map.py'
+      - 'misc/scripts/tests/test_asset_size_map.py'
+      - 'misc/scripts/ASSET_SIZE_MAP.md'
+      - '.github/workflows/asset-size-map.yml'
+  pull_request:
+    paths:
+      - 'misc/scripts/asset_size_map.py'
+      - 'misc/scripts/tests/test_asset_size_map.py'
+      - 'misc/scripts/ASSET_SIZE_MAP.md'
+      - '.github/workflows/asset-size-map.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  python-tests:
+    runs-on: ubuntu-24.04
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ['3.9', '3.13']
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+      - name: Compile and run size map regression suite
+        run: |
+          python -m py_compile misc/scripts/asset_size_map.py misc/scripts/tests/test_asset_size_map.py
+          python -m unittest discover -s misc/scripts/tests -p test_asset_size_map.py -v

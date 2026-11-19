@@ -1,0 +1,35 @@
+name: SortArray move regression (production header)
+
+on:
+  pull_request:
+    paths:
+      - "core/templates/sort_array.h"
+      - "tests/core/templates/test_sort_array_moves.cpp"
+      - "misc/scripts/tests/test_sort_array_move_harness.py"
+      - ".github/workflows/perf-sort-array.yml"
+  push:
+    branches: [develop]
+    paths:
+      - "core/templates/sort_array.h"
+      - "tests/core/templates/test_sort_array_moves.cpp"
+      - "misc/scripts/tests/test_sort_array_move_harness.py"
+      - ".github/workflows/perf-sort-array.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  sort-array-runtime:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    strategy:
+      fail-fast: false
+      matrix:
+        compiler: [g++, clang++]
+    steps:
+      - uses: actions/checkout@v4
+      - name: Compile production SortArray header and execute 36k runtime cases
+        env:
+          CXX: ${{ matrix.compiler }}
+        run: python3 misc/scripts/tests/test_sort_array_move_harness.py

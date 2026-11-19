@@ -1572,13 +1572,15 @@ Ref<AnimationNode> AnimationNodeBlendTree::get_node(const StringName &p_name) co
 }
 
 void AnimationNodeBlendTree::set_node_position(const StringName &p_node, const Vector2 &p_position) {
-	ERR_FAIL_COND(!nodes.has(p_node));
-	nodes[p_node].position = p_position;
+	Node *node = nodes.getptr(p_node);
+	ERR_FAIL_NULL(node);
+	node->position = p_position;
 }
 
 Vector2 AnimationNodeBlendTree::get_node_position(const StringName &p_node) const {
-	ERR_FAIL_COND_V(!nodes.has(p_node), Vector2());
-	return nodes[p_node].position;
+	const Node *node = nodes.getptr(p_node);
+	ERR_FAIL_NULL_V(node, Vector2());
+	return node->position;
 }
 
 void AnimationNodeBlendTree::get_child_nodes(LocalVector<ChildNode> *r_child_nodes) {
@@ -1601,11 +1603,12 @@ const LocalVector<StringName> *AnimationNodeBlendTree::get_node_connection_array
 }
 
 void AnimationNodeBlendTree::remove_node(const StringName &p_name) {
-	ERR_FAIL_COND(!nodes.has(p_name));
+	Node *entry = nodes.getptr(p_name);
+	ERR_FAIL_NULL(entry);
 	ERR_FAIL_COND(p_name == SceneStringName(output)); //can't delete output
 
 	{
-		Ref<AnimationNode> node = nodes[p_name].node;
+		Ref<AnimationNode> node = entry->node;
 		_remove_node(node);
 		node->disconnect_changed(callable_mp(this, &AnimationNodeBlendTree::_child_node_changed));
 	}
@@ -1655,12 +1658,13 @@ void AnimationNodeBlendTree::rename_node(const StringName &p_name, const StringN
 
 void AnimationNodeBlendTree::connect_node(const StringName &p_input_node, int p_input_index, const StringName &p_output_node) {
 	ERR_FAIL_COND(!nodes.has(p_output_node));
-	ERR_FAIL_COND(!nodes.has(p_input_node));
+	Node *input_entry = nodes.getptr(p_input_node);
+	ERR_FAIL_NULL(input_entry);
 	ERR_FAIL_COND(p_output_node == SceneStringName(output));
 	ERR_FAIL_COND(p_input_node == p_output_node);
 
-	Ref<AnimationNode> input = nodes[p_input_node].node;
-	ERR_FAIL_INDEX(p_input_index, (int)nodes[p_input_node].connections.size());
+	Ref<AnimationNode> input = input_entry->node;
+	ERR_FAIL_INDEX(p_input_index, (int)input_entry->connections.size());
 
 	for (KeyValue<StringName, Node> &E : nodes) {
 		for (uint32_t i = 0; i < E.value.connections.size(); i++) {
@@ -1669,19 +1673,20 @@ void AnimationNodeBlendTree::connect_node(const StringName &p_input_node, int p_
 		}
 	}
 
-	nodes[p_input_node].connections[p_input_index] = p_output_node;
+	input_entry->connections[p_input_index] = p_output_node;
 
 	emit_changed();
 	_node_updated(input->get_instance_id());
 }
 
 void AnimationNodeBlendTree::disconnect_node(const StringName &p_node, int p_input_index) {
-	ERR_FAIL_COND(!nodes.has(p_node));
+	Node *input_entry = nodes.getptr(p_node);
+	ERR_FAIL_NULL(input_entry);
 
-	Ref<AnimationNode> input = nodes[p_node].node;
-	ERR_FAIL_INDEX(p_input_index, (int)nodes[p_node].connections.size());
+	Ref<AnimationNode> input = input_entry->node;
+	ERR_FAIL_INDEX(p_input_index, (int)input_entry->connections.size());
 
-	nodes[p_node].connections[p_input_index] = StringName();
+	input_entry->connections[p_input_index] = StringName();
 	_node_updated(input->get_instance_id());
 }
 
@@ -1690,7 +1695,8 @@ AnimationNodeBlendTree::ConnectionError AnimationNodeBlendTree::can_connect_node
 		return CONNECTION_ERROR_NO_OUTPUT;
 	}
 
-	if (!nodes.has(p_input_node)) {
+	const Node *input_entry = nodes.getptr(p_input_node);
+	if (input_entry == nullptr) {
 		return CONNECTION_ERROR_NO_INPUT;
 	}
 
@@ -1698,13 +1704,11 @@ AnimationNodeBlendTree::ConnectionError AnimationNodeBlendTree::can_connect_node
 		return CONNECTION_ERROR_SAME_NODE;
 	}
 
-	Ref<AnimationNode> input = nodes[p_input_node].node;
-
-	if (p_input_index < 0 || p_input_index >= (int)nodes[p_input_node].connections.size()) {
+	if (p_input_index < 0 || p_input_index >= (int)input_entry->connections.size()) {
 		return CONNECTION_ERROR_NO_INPUT_INDEX;
 	}
 
-	if (nodes[p_input_node].connections[p_input_index] != StringName()) {
+	if (input_entry->connections[p_input_index] != StringName()) {
 		return CONNECTION_ERROR_CONNECTION_EXISTS;
 	}
 
@@ -1796,8 +1800,8 @@ bool AnimationNodeBlendTree::_set(const StringName &p_name, const Variant &p_val
 		}
 
 		if (what == "position") {
-			if (nodes.has(node_name)) {
-				nodes[node_name].position = p_value;
+			if (Node *entry = nodes.getptr(node_name)) {
+				entry->position = p_value;
 			}
 			return true;
 		}
@@ -1821,15 +1825,15 @@ bool AnimationNodeBlendTree::_get(const StringName &p_name, Variant &r_ret) cons
 		String what = prop_name.get_slicec('/', 2);
 
 		if (what == "node") {
-			if (nodes.has(node_name)) {
-				r_ret = nodes[node_name].node;
+			if (const Node *entry = nodes.getptr(node_name)) {
+				r_ret = entry->node;
 				return true;
 			}
 		}
 
 		if (what == "position") {
-			if (nodes.has(node_name)) {
-				r_ret = nodes[node_name].position;
+			if (const Node *entry = nodes.getptr(node_name)) {
+				r_ret = entry->position;
 				return true;
 			}
 		}
@@ -1924,8 +1928,9 @@ void AnimationNodeBlendTree::validate_node(const AnimationTree *p_tree, const St
 }
 
 void AnimationNodeBlendTree::_child_node_changed(const StringName &p_node) {
-	ERR_FAIL_COND(!nodes.has(p_node));
-	nodes[p_node].connections.resize(nodes[p_node].node->get_input_count());
+	Node *entry = nodes.getptr(p_node);
+	ERR_FAIL_NULL(entry);
+	entry->connections.resize(entry->node->get_input_count());
 	emit_signal(SNAME("node_changed"), p_node);
 }
 

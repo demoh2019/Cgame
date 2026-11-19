@@ -1,0 +1,33 @@
+name: AI project patch staging tests
+
+on:
+  push:
+    paths:
+      - 'misc/scripts/ai_project_patch.py'
+      - 'misc/scripts/tests/test_ai_project_patch.py'
+      - 'misc/scripts/README_ai_project_patch.md'
+      - '.github/workflows/ai-project-patch.yml'
+  pull_request:
+    paths:
+      - 'misc/scripts/ai_project_patch.py'
+      - 'misc/scripts/tests/test_ai_project_patch.py'
+      - 'misc/scripts/README_ai_project_patch.md'
+      - '.github/workflows/ai-project-patch.yml'
+
+jobs:
+  patch-tests:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+        python-version: ['3.9', '3.13']
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+      - name: Compile
+        run: python -m py_compile misc/scripts/ai_project_patch.py misc/scripts/tests/test_ai_project_patch.py
+      - name: Verify 38 regression cases
+        run: python -m unittest discover -s misc/scripts/tests -p test_ai_project_patch.py -v

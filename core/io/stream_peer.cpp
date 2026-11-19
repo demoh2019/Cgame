@@ -33,6 +33,30 @@
 #include "core/io/marshalls.h"
 #include "core/object/class_db.h"
 
+// Most StreamPeer messages are small (strings, Variant RPC arguments, and
+// metadata). Use stack storage for these, retaining the heap fallback for
+// larger payloads so transient reads/writes do not allocate every time.
+class StreamPeerScratchBuffer {
+	static constexpr int STACK_CAPACITY = 512;
+	uint8_t stack[STACK_CAPACITY];
+	Vector<uint8_t> heap;
+
+public:
+	uint8_t *allocate(int p_size) {
+		if (p_size < 0) {
+			return nullptr;
+		}
+		if (p_size <= STACK_CAPACITY) {
+			return stack;
+		}
+		if (heap.resize(p_size) != OK) {
+			return nullptr;
+		}
+		return heap.ptrw();
+	}
+};
+
+
 Error StreamPeer::_put_data(const Vector<uint8_t> &p_data) {
 	int len = p_data.size();
 	if (len == 0) {
@@ -229,12 +253,15 @@ void StreamPeer::put_utf8_string(const String &p_string) {
 
 void StreamPeer::put_var(const Variant &p_variant, bool p_full_objects) {
 	int len = 0;
-	Vector<uint8_t> buf;
 	encode_variant(p_variant, nullptr, len, p_full_objects);
-	buf.resize(len);
+
+	StreamPeerScratchBuffer scratch;
+	uint8_t *data = scratch.allocate(len);
+	ERR_FAIL_NULL(data);
+
 	put_32(len);
-	encode_variant(p_variant, buf.ptrw(), len, p_full_objects);
-	put_data(buf.ptr(), buf.size());
+	encode_variant(p_variant, data, len, p_full_objects);
+	put_data(data, len);
 }
 
 uint8_t StreamPeer::get_u8() {
@@ -361,15 +388,15 @@ String StreamPeer::get_string(int p_bytes) {
 	if (p_bytes < 0) {
 		p_bytes = get_32();
 	}
-	ERR_FAIL_COND_V(p_bytes < 0, String());
+	ERR_FAIL_COND_V(p_bytes < 0 || p_bytes == INT32_MAX, String());
 
-	Vector<char> buf;
-	Error err = buf.resize(p_bytes + 1);
+	StreamPeerScratchBuffer scratch;
+	uint8_t *data = scratch.allocate(p_bytes + 1); // Include the terminating NUL.
+	ERR_FAIL_NULL_V(data, String());
+	const Error err = get_data(data, p_bytes);
 	ERR_FAIL_COND_V(err != OK, String());
-	err = get_data((uint8_t *)&buf[0], p_bytes);
-	ERR_FAIL_COND_V(err != OK, String());
-	buf.write[p_bytes] = 0;
-	return buf.ptr();
+	data[p_bytes] = 0;
+	return reinterpret_cast<const char *>(data);
 }
 
 String StreamPeer::get_utf8_string(int p_bytes) {
@@ -378,25 +405,27 @@ String StreamPeer::get_utf8_string(int p_bytes) {
 	}
 	ERR_FAIL_COND_V(p_bytes < 0, String());
 
-	Vector<uint8_t> buf;
-	Error err = buf.resize(p_bytes);
-	ERR_FAIL_COND_V(err != OK, String());
-	err = get_data(buf.ptrw(), p_bytes);
+	StreamPeerScratchBuffer scratch;
+	uint8_t *data = scratch.allocate(p_bytes);
+	ERR_FAIL_NULL_V(data, String());
+	const Error err = get_data(data, p_bytes);
 	ERR_FAIL_COND_V(err != OK, String());
 
-	return String::utf8((const char *)buf.ptr(), buf.size());
+	return String::utf8(reinterpret_cast<const char *>(data), p_bytes);
 }
 
 Variant StreamPeer::get_var(bool p_allow_objects) {
-	int len = get_32();
-	Vector<uint8_t> var;
-	Error err = var.resize(len);
-	ERR_FAIL_COND_V(err != OK, Variant());
-	err = get_data(var.ptrw(), len);
+	const int len = get_32();
+	ERR_FAIL_COND_V(len < 0, Variant());
+
+	StreamPeerScratchBuffer scratch;
+	uint8_t *data = scratch.allocate(len);
+	ERR_FAIL_NULL_V(data, Variant());
+	Error err = get_data(data, len);
 	ERR_FAIL_COND_V(err != OK, Variant());
 
 	Variant ret;
-	err = decode_variant(ret, var.ptr(), len, nullptr, p_allow_objects);
+	err = decode_variant(ret, data, len, nullptr, p_allow_objects);
 	ERR_FAIL_COND_V_MSG(err != OK, Variant(), "Error when trying to decode Variant.");
 
 	return ret;
@@ -515,54 +544,65 @@ Error StreamPeerBuffer::put_data(const uint8_t *p_data, int p_bytes) {
 		return OK;
 	}
 
-	if (pointer + p_bytes > data.size()) {
-		data.resize(pointer + p_bytes);
+	// Compute the end without signed overflow, even for untrusted stream lengths.
+	if (p_bytes > INT32_MAX - pointer) {
+		return ERR_INVALID_PARAMETER;
+	}
+	const int end = pointer + p_bytes;
+	if (end > data.size()) {
+		const Error err = data.resize(end);
+		if (err != OK) {
+			return err;
+		}
 	}
 
-	uint8_t *w = data.ptrw();
-	memcpy(&w[pointer], p_data, p_bytes);
-
-	pointer += p_bytes;
+	memcpy(data.ptrw() + pointer, p_data, p_bytes);
+	pointer = end;
 	return OK;
 }
 
 Error StreamPeerBuffer::put_partial_data(const uint8_t *p_data, int p_bytes, int &r_sent) {
-	r_sent = p_bytes;
-	return put_data(p_data, p_bytes);
+	const Error err = put_data(p_data, p_bytes);
+	r_sent = err == OK ? MAX(p_bytes, 0) : 0;
+	return err;
 }
 
 Error StreamPeerBuffer::get_data(uint8_t *p_buffer, int p_bytes) {
-	int recv;
-	get_partial_data(p_buffer, p_bytes, recv);
-	if (recv != p_bytes) {
+	// A failed full read still consumes any available bytes (legacy contract).
+	// Avoid an extra virtual get_partial_data() roundtrip for every primitive.
+	if (p_bytes < 0 || (p_bytes > 0 && !p_buffer)) {
 		return ERR_INVALID_PARAMETER;
 	}
-
-	return OK;
-}
-
-Error StreamPeerBuffer::get_partial_data(uint8_t *p_buffer, int p_bytes, int &r_received) {
-	if (!p_bytes) {
-		r_received = 0;
+	if (p_bytes == 0) {
 		return OK;
 	}
 
-	if (pointer + p_bytes > data.size()) {
-		r_received = data.size() - pointer;
-		if (r_received <= 0) {
-			r_received = 0;
-			return OK; //you got 0
-		}
-	} else {
-		r_received = p_bytes;
+	const int available = data.size() - pointer;
+	if (available <= 0) {
+		return ERR_INVALID_PARAMETER;
 	}
+	const int received = MIN(p_bytes, available);
+	memcpy(p_buffer, data.ptr() + pointer, received);
+	pointer += received;
+	return received == p_bytes ? OK : ERR_INVALID_PARAMETER;
+}
 
-	const uint8_t *r = data.ptr();
-	memcpy(p_buffer, r + pointer, r_received);
-
+Error StreamPeerBuffer::get_partial_data(uint8_t *p_buffer, int p_bytes, int &r_received) {
+	r_received = 0;
+	if (p_bytes < 0 || (p_bytes > 0 && !p_buffer)) {
+		return ERR_INVALID_PARAMETER;
+	}
+	if (p_bytes == 0) {
+		return OK;
+	}
+	// Subtract before comparing so a giant request cannot overflow pointer + bytes.
+	const int available = data.size() - pointer;
+	if (available <= 0) {
+		return OK;
+	}
+	r_received = MIN(p_bytes, available);
+	memcpy(p_buffer, data.ptr() + pointer, r_received);
 	pointer += r_received;
-	// FIXME: return what? OK or ERR_*
-	// return OK for now so we don't maybe return garbage
 	return OK;
 }
 

@@ -68,6 +68,7 @@ void FileDialog::_focus_file_text() {
 }
 
 void FileDialog::_native_popup() {
+	_update_option_controls();
 	// Show native dialog directly.
 	String root;
 	if (!root_prefix.is_empty()) {
@@ -165,7 +166,18 @@ void FileDialog::_native_dialog_cb_with_options(bool p_ok, const Vector<String> 
 			file_name = ProjectSettings::get_singleton()->localize_path(file_name);
 		}
 	}
-	selected_options = p_selected_options;
+	// Native dialogs use translated labels as option identifiers. Restore the
+	// original names, which are part of FileDialog's public API.
+	selected_options.clear();
+	for (int i = 0; i < options.size(); i++) {
+		const String &original_name = options[i].name;
+		const String &display_name = translated_options.size() == options.size() ? translated_options[i].name : original_name;
+		if (p_selected_options.has(display_name)) {
+			selected_options[original_name] = p_selected_options[display_name];
+		} else if (p_selected_options.has(original_name)) {
+			selected_options[original_name] = p_selected_options[original_name];
+		}
+	}
 
 	String f = files[0];
 	filter->select(p_filter);
@@ -278,6 +290,7 @@ void FileDialog::_notification(int p_what) {
 
 		case NOTIFICATION_TRANSLATION_CHANGED: {
 			update_filters();
+			_update_option_translations();
 			[[fallthrough]];
 		}
 
@@ -1932,10 +1945,13 @@ bool FileDialog::_path_matches_access(const String &p_path) const {
 
 TypedArray<Dictionary> FileDialog::_get_options() const {
 	TypedArray<Dictionary> out;
-	for (const FileDialog::Option &opt : options) {
+	for (int i = 0; i < options.size(); i++) {
+		const Option &opt = options[i];
+		const Option &display_opt = translated_options.size() == options.size() ? translated_options[i] : opt;
 		Dictionary dict;
-		dict["name"] = opt.name;
-		dict["values"] = opt.values;
+		dict["name"] = display_opt.name;
+		dict["values"] = display_opt.values;
+		// Selection state is keyed by the untranslated option name.
 		dict["default"] = (int)selected_options.get(opt.name, opt.default_idx);
 		out.push_back(dict);
 	}
@@ -1996,6 +2012,22 @@ void FileDialog::_update_option_controls() {
 			ob->connect(SceneStringName(item_selected), callable_mp(this, &FileDialog::_option_changed_item_selected).bind(opt.name));
 			selected_options[opt.name] = opt.default_idx;
 		}
+	}
+	_update_option_translations();
+}
+
+void FileDialog::_update_option_translations() {
+	translated_options.clear();
+	translated_options.reserve_exact(options.size());
+	for (const Option &option : options) {
+		Option translated_option;
+		translated_option.name = atr(option.name);
+		translated_option.default_idx = option.default_idx;
+		translated_option.values.reserve_exact(option.values.size());
+		for (const String &value : option.values) {
+			translated_option.values.append(atr(value));
+		}
+		translated_options.append(translated_option);
 	}
 }
 
@@ -2321,6 +2353,9 @@ void FileDialog::set_get_thumbnail_callback(const Callable &p_callback) {
 
 void FileDialog::set_use_native_dialog(bool p_native) {
 	use_native_dialog = p_native;
+	if (use_native_dialog) {
+		_update_option_translations();
+	}
 
 #ifdef TOOLS_ENABLED
 	if (is_part_of_edited_scene()) {

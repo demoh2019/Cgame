@@ -1,0 +1,37 @@
+name: GPU vertex FMA hotpath regressions
+
+on:
+  pull_request:
+    paths:
+      - "servers/rendering/renderer_rd/shaders/forward_clustered/scene_forward_clustered.glsl"
+      - "servers/rendering/renderer_rd/shaders/forward_mobile/scene_forward_mobile.glsl"
+      - "misc/scripts/tests/test_gpu_vertex_fma_hotpath.py"
+      - ".github/workflows/gpu-vertex-fma-hotpath.yml"
+  push:
+    branches: [develop]
+    paths:
+      - "servers/rendering/renderer_rd/shaders/forward_clustered/scene_forward_clustered.glsl"
+      - "servers/rendering/renderer_rd/shaders/forward_mobile/scene_forward_mobile.glsl"
+      - "misc/scripts/tests/test_gpu_vertex_fma_hotpath.py"
+      - ".github/workflows/gpu-vertex-fma-hotpath.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  matrix-algebra-contracts:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          sparse-checkout: |
+            servers/rendering/renderer_rd/shaders/forward_clustered/scene_forward_clustered.glsl
+            servers/rendering/renderer_rd/shaders/forward_mobile/scene_forward_mobile.glsl
+            misc/scripts/tests/test_gpu_vertex_fma_hotpath.py
+          sparse-checkout-cone-mode: false
+      - name: Syntax and 22 GPU vertex math regression tests
+        run: |
+          python3 -m py_compile misc/scripts/tests/test_gpu_vertex_fma_hotpath.py
+          python3 -m unittest discover -s misc/scripts/tests -p 'test_gpu_vertex_fma_hotpath.py' -v

@@ -1,0 +1,47 @@
+name: Tetra FEM cycle fatigue and Miner damage contracts
+
+on:
+  push:
+    branches: [develop]
+    paths:
+      - "servers/physics_fem_tetra_cycle_fatigue.h"
+      - "tests/servers/test_physics_fem_tetra_cycle_fatigue.cpp"
+      - "tests/stress/test_physics_fem_tetra_cycle_fatigue_compiler.cpp"
+      - "modules/godot_physics_3d/godot_soft_body_3d.cpp"
+      - "modules/godot_physics_3d/godot_soft_body_3d.h"
+      - "modules/godot_physics_3d/godot_space_3d.cpp"
+      - "modules/godot_physics_3d/godot_space_3d.h"
+      - "servers/physics_3d/physics_server_3d.cpp"
+      - ".github/workflows/physics-fem-cycle-fatigue.yml"
+  pull_request:
+    paths:
+      - "servers/physics_fem_tetra_cycle_fatigue.h"
+      - "tests/servers/test_physics_fem_tetra_cycle_fatigue.cpp"
+      - "tests/stress/test_physics_fem_tetra_cycle_fatigue_compiler.cpp"
+      - "modules/godot_physics_3d/godot_soft_body_3d.cpp"
+      - "modules/godot_physics_3d/godot_soft_body_3d.h"
+      - "modules/godot_physics_3d/godot_space_3d.cpp"
+      - "modules/godot_physics_3d/godot_space_3d.h"
+      - "servers/physics_3d/physics_server_3d.cpp"
+      - ".github/workflows/physics-fem-cycle-fatigue.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  cycle-fatigue:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Compile and run real cycle-fatigue FEM C++ under float and double
+        run: |
+          for precision in float double; do
+            flags=""
+            if [ "$precision" = "double" ]; then flags="-DCGAME_USE_DOUBLE"; fi
+            g++ -std=c++17 -O2 -Wall -Wextra -Werror $flags \
+              -Itests/stress/physics_cpp_stubs -I. \
+              tests/stress/test_physics_fem_tetra_cycle_fatigue_compiler.cpp \
+              -o "/tmp/fem_cycle_fatigue_$precision"
+            "/tmp/fem_cycle_fatigue_$precision"
+          done

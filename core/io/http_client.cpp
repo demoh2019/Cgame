@@ -31,6 +31,7 @@
 #include "http_client.h"
 
 #include "core/object/class_db.h"
+#include "core/string/string_builder.h"
 
 const char *HTTPClient::_methods[METHOD_MAX] = {
 	"GET",
@@ -71,31 +72,42 @@ Error HTTPClient::_request(Method p_method, const String &p_url, const Vector<St
 }
 
 String HTTPClient::query_string_from_dict(const Dictionary &p_dict) {
-	String query = "";
+	// Repeated concatenations allocate and copy the growing query for every
+	// entry. Build segments once and avoid an extra substring for the first &.
+	StringBuilder query;
+	bool first = true;
+	auto append_key = [&](const String &p_encoded_key) {
+		if (!first) {
+			query.append("&");
+		}
+		first = false;
+		query.append(p_encoded_key);
+	};
+
 	for (const KeyValue<Variant, Variant> &kv : p_dict) {
-		String encoded_key = String(kv.key).uri_encode();
+		const String encoded_key = String(kv.key).uri_encode();
 		const Variant &value = kv.value;
 		switch (value.get_type()) {
 			case Variant::ARRAY: {
-				// Repeat the key with every values
+				// Repeat the key for every array element, including duplicates.
 				Array values = value;
 				for (int j = 0; j < values.size(); ++j) {
-					query += "&" + encoded_key + "=" + String(values[j]).uri_encode();
+					append_key(encoded_key);
+					query.append("=").append(String(values[j]).uri_encode());
 				}
 				break;
 			}
 			case Variant::NIL: {
-				// Add the key with no value
-				query += "&" + encoded_key;
+				append_key(encoded_key);
 				break;
 			}
 			default: {
-				// Add the key-value pair
-				query += "&" + encoded_key + "=" + String(value).uri_encode();
+				append_key(encoded_key);
+				query.append("=").append(String(value).uri_encode());
 			}
 		}
 	}
-	return query.substr(1);
+	return query.as_string();
 }
 
 Error HTTPClient::verify_headers(const Vector<String> &p_headers) {

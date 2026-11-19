@@ -33,8 +33,29 @@
 #include "core/templates/vector.h"
 #include "core/typedefs.h"
 
+// Forward-declare Zstandard's compressor to keep its third-party header out of
+// public engine includes.
+struct ZSTD_CCtx_s;
+
 class Compression {
 public:
+	// A reusable, bounded-lifetime Zstandard context. It owns its workspace
+	// only for the duration of a batch; no thread-local RAM is retained.
+	class ZstdCompressionContext {
+		ZSTD_CCtx_s *context = nullptr;
+		int configured_level = INT32_MIN;
+		bool configured_long_distance_matching = false;
+		int configured_window_log_size = 0;
+
+	public:
+		ZstdCompressionContext() = default;
+		~ZstdCompressionContext();
+		ZstdCompressionContext(const ZstdCompressionContext &) = delete;
+		ZstdCompressionContext &operator=(const ZstdCompressionContext &) = delete;
+
+		int64_t compress(uint8_t *p_dst, const uint8_t *p_src, int64_t p_src_size);
+	};
+
 	static inline int zlib_level = -1; // Z_DEFAULT_COMPRESSION.
 	static inline int gzip_level = -1; // Z_DEFAULT_COMPRESSION.
 	static inline int zstd_level = 3;

@@ -39,7 +39,7 @@
 #include "scene/resources/mesh.h"
 #include "scene/resources/surface_tool.h"
 
-static Error _parse_material_library(const String &p_path, HashMap<String, Ref<StandardMaterial3D>> &material_map, List<String> *r_missing_deps) {
+static Error _parse_material_library(const String &p_path, HashMap<String, Ref<StandardMaterial3D>> &material_map, List<String> *r_missing_deps, bool p_linear_diffuse_color) {
 	Ref<FileAccess> f = FileAccess::open(p_path, FileAccess::READ);
 	ERR_FAIL_COND_V_MSG(f.is_null(), ERR_CANT_OPEN, vformat("Couldn't open MTL file '%s', it may not exist or not be readable.", p_path));
 
@@ -68,7 +68,7 @@ static Error _parse_material_library(const String &p_path, HashMap<String, Ref<S
 			c.r = v[1].to_float();
 			c.g = v[2].to_float();
 			c.b = v[3].to_float();
-			current->set_albedo(c);
+			current->set_albedo(p_linear_diffuse_color ? c.linear_to_srgb() : c);
 		} else if (l.begins_with("Ks ")) {
 			// Specular color.
 			ERR_FAIL_COND_V(current.is_null(), ERR_FILE_CORRUPT);
@@ -218,7 +218,7 @@ static Error _parse_material_library(const String &p_path, HashMap<String, Ref<S
 	return OK;
 }
 
-static Error _parse_obj(const String &p_path, List<Ref<ImporterMesh>> &r_meshes, bool p_single_mesh, bool p_generate_tangents, bool p_generate_lods, bool p_generate_shadow_mesh, bool p_generate_lightmap_uv2, float p_generate_lightmap_uv2_texel_size, const PackedByteArray &p_src_lightmap_cache, Vector3 p_scale_mesh, Vector3 p_offset_mesh, bool p_disable_compression, Vector<Vector<uint8_t>> &r_lightmap_caches, List<String> *r_missing_deps) {
+static Error _parse_obj(const String &p_path, List<Ref<ImporterMesh>> &r_meshes, bool p_single_mesh, bool p_generate_tangents, bool p_generate_lods, bool p_generate_shadow_mesh, bool p_generate_lightmap_uv2, float p_generate_lightmap_uv2_texel_size, const PackedByteArray &p_src_lightmap_cache, Vector3 p_scale_mesh, Vector3 p_offset_mesh, bool p_disable_compression, Vector<Vector<uint8_t>> &r_lightmap_caches, List<String> *r_missing_deps, bool p_linear_diffuse_color) {
 	Ref<FileAccess> f = FileAccess::open(p_path, FileAccess::READ);
 	ERR_FAIL_COND_V_MSG(f.is_null(), ERR_CANT_OPEN, vformat("Couldn't open OBJ file '%s', it may not exist or not be readable.", p_path));
 
@@ -526,7 +526,7 @@ static Error _parse_obj(const String &p_path, List<Ref<ImporterMesh>> &r_meshes,
 				if (lib_path.is_relative_path()) {
 					lib_path = p_path.get_base_dir().path_join(current_material_library);
 				}
-				Error err = _parse_material_library(lib_path, lib, r_missing_deps);
+				Error err = _parse_material_library(lib_path, lib, r_missing_deps, p_linear_diffuse_color);
 				if (err == OK) {
 					material_map[current_material_library] = lib;
 				}
@@ -586,7 +586,10 @@ Node *EditorOBJImporter::import_scene(const String &p_path, uint32_t p_flags, co
 	// LOD, shadow mesh and lightmap UV2 generation are handled by ResourceImporterScene in this case,
 	// so disable it within the OBJ mesh import.
 	Vector<Vector<uint8_t>> mesh_lightmap_caches;
-	Error err = _parse_obj(p_path, meshes, false, p_flags & IMPORT_GENERATE_TANGENT_ARRAYS, false, false, false, 0.2, PackedByteArray(), Vector3(1, 1, 1), Vector3(0, 0, 0), p_flags & IMPORT_FORCE_DISABLE_MESH_COMPRESSION, mesh_lightmap_caches, r_missing_deps);
+	// Keep legacy MTL interpretation unless the caller explicitly opts in to linear colors.
+	const Variant *linear_option = p_options.getptr(StringName("materials/mtl_diffuse_is_linear"));
+	const bool linear_diffuse_color = linear_option && bool(*linear_option);
+	Error err = _parse_obj(p_path, meshes, false, p_flags & IMPORT_GENERATE_TANGENT_ARRAYS, false, false, false, 0.2, PackedByteArray(), Vector3(1, 1, 1), Vector3(0, 0, 0), p_flags & IMPORT_FORCE_DISABLE_MESH_COMPRESSION, mesh_lightmap_caches, r_missing_deps, linear_diffuse_color);
 
 	if (err != OK) {
 		if (r_err) {
@@ -659,6 +662,9 @@ void ResourceImporterOBJ::get_import_options(const String &p_path, List<ImportOp
 	r_options->push_back(ImportOption(PropertyInfo(Variant::VECTOR3, "scale_mesh"), Vector3(1, 1, 1)));
 	r_options->push_back(ImportOption(PropertyInfo(Variant::VECTOR3, "offset_mesh"), Vector3(0, 0, 0)));
 	r_options->push_back(ImportOption(PropertyInfo(Variant::BOOL, "force_disable_mesh_compression"), false));
+	// The MTL format does not specify a universal RGB transfer function.
+	// Preserve legacy OBJ appearance unless the source exporter is known to use linear Kd.
+	r_options->push_back(ImportOption(PropertyInfo(Variant::BOOL, "materials/mtl_diffuse_is_linear"), false));
 }
 
 bool ResourceImporterOBJ::get_option_visibility(const String &p_path, const String &p_option, const HashMap<StringName, Variant> &p_options) const {
@@ -684,7 +690,9 @@ Error ResourceImporterOBJ::import(ResourceUID::ID p_source_id, const String &p_s
 		}
 	}
 
-	err = _parse_obj(p_source_file, meshes, true, p_options["generate_tangents"], p_options["generate_lods"], p_options["generate_shadow_mesh"], p_options["generate_lightmap_uv2"], p_options["generate_lightmap_uv2_texel_size"], src_lightmap_cache, p_options["scale_mesh"], p_options["offset_mesh"], p_options["force_disable_mesh_compression"], mesh_lightmap_caches, nullptr);
+	const Variant *linear_option = p_options.getptr(StringName("materials/mtl_diffuse_is_linear"));
+	const bool linear_diffuse_color = linear_option && bool(*linear_option);
+	err = _parse_obj(p_source_file, meshes, true, p_options["generate_tangents"], p_options["generate_lods"], p_options["generate_shadow_mesh"], p_options["generate_lightmap_uv2"], p_options["generate_lightmap_uv2_texel_size"], src_lightmap_cache, p_options["scale_mesh"], p_options["offset_mesh"], p_options["force_disable_mesh_compression"], mesh_lightmap_caches, nullptr, linear_diffuse_color);
 
 	if (mesh_lightmap_caches.size()) {
 		Ref<FileAccess> f = FileAccess::open(p_source_file + ".unwrap_cache", FileAccess::WRITE);

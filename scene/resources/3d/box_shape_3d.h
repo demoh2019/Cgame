@@ -35,6 +35,9 @@
 class BoxShape3D : public Shape3D {
 	GDCLASS(BoxShape3D, Shape3D);
 	Vector3 size;
+	// Keep only the latest fill mesh; changes to geometry or color invalidate it.
+	mutable Ref<ArrayMesh> debug_faces_cache;
+	mutable Color debug_faces_cache_color;
 
 protected:
 	static void _bind_methods();

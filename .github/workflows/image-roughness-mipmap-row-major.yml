@@ -1,0 +1,37 @@
+name: Image roughness mipmap row-major sampling regression
+
+on:
+  pull_request:
+    branches: [develop]
+    paths:
+      - "core/io/image.cpp"
+      - "tests/core/io/test_image.cpp"
+      - ".github/workflows/image-roughness-mipmap-row-major.yml"
+  push:
+    branches: [develop]
+    paths:
+      - "core/io/image.cpp"
+      - "tests/core/io/test_image.cpp"
+      - ".github/workflows/image-roughness-mipmap-row-major.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  native-roughness-mipmaps:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+      - uses: ./.github/actions/godot-deps
+      - uses: ./.github/actions/godot-build
+        with:
+          platform: linuxbsd
+          target: editor
+          scons-flags: dev_build=yes tests=yes debug_symbols=no module_mono_enabled=no accesskit=no
+      - name: Validate normal-map source and roughness mipmaps
+        run: |
+          timeout 300s ./bin/godot.linuxbsd.editor.dev.x86_64 --headless --test --test-case="*Roughness mipmaps*" --no-colors

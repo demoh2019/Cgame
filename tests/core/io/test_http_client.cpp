@@ -66,6 +66,50 @@ TEST_CASE("[HTTPClient] query_string_from_dict") {
 			"The query should return key=value for every string in the dictionary. Pairs should be separated by &, arrays should be have a query for every element, and variants should have empty values");
 }
 
+TEST_CASE("[HTTPClient] Query string preserves empty arrays and large mixed dictionaries") {
+	Ref<HTTPClient> client = HTTPClient::create();
+	REQUIRE(client.is_valid());
+
+	Dictionary no_values;
+	no_values["empty"] = Array();
+	CHECK(client->query_string_from_dict(no_values).is_empty());
+
+	Dictionary inputs;
+	inputs["key with spaces"] = "special&value";
+	inputs["empty-array"] = Array();
+	inputs["null"] = Variant();
+	for (int i = 0; i < 256; i++) {
+		const String key = "item_" + itos(i);
+		if ((i & 7) == 0) {
+			Array values;
+			values.push_back(i);
+			values.push_back(i + 1);
+			inputs[key] = values;
+		} else {
+			inputs[key] = "value " + itos(i);
+		}
+	}
+
+	// The old concatenation algorithm is used as a reference to verify that
+	// URL encoding, dictionary order, NIL entries, and repeated keys match.
+	String reference;
+	for (const KeyValue<Variant, Variant> &entry : inputs) {
+		const String key = String(entry.key).uri_encode();
+		const Variant &value = entry.value;
+		if (value.get_type() == Variant::ARRAY) {
+			const Array values = value;
+			for (int i = 0; i < values.size(); i++) {
+				reference += "&" + key + "=" + String(values[i]).uri_encode();
+			}
+		} else if (value.get_type() == Variant::NIL) {
+			reference += "&" + key;
+		} else {
+			reference += "&" + key + "=" + String(value).uri_encode();
+		}
+	}
+	CHECK(client->query_string_from_dict(inputs) == reference.substr(1));
+}
+
 TEST_CASE("[HTTPClient] verify_headers") {
 	Ref<HTTPClient> client = HTTPClient::create();
 	Vector<String> headers = { "Accept: text/html", "Content-Type: application/json", "Authorization: Bearer abc123" };

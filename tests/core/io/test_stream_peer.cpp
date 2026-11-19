@@ -306,4 +306,75 @@ TEST_CASE("[StreamPeer] Get UTF8 string when there is no string") {
 	ERR_PRINT_ON;
 }
 
+TEST_CASE("[StreamPeer][Performance] Small payloads use identical wire format") {
+	Ref<StreamPeerBuffer> stream;
+	stream.instantiate();
+
+	// Exercise the inline/heap crossover, the empty-string case, and large data.
+	const int sizes[] = { 0, 1, 15, 255, 511, 512, 513, 2048, 16384 };
+	for (int size : sizes) {
+		const String value = String("x").repeat(size);
+		stream->clear();
+		stream->put_string(value);
+		CHECK(stream->get_size() == size + 4);
+		stream->seek(0);
+		CHECK(stream->get_string() == value);
+		CHECK(stream->get_available_bytes() == 0);
+
+		stream->seek(4);
+		CHECK(stream->get_string(size) == value);
+		CHECK(stream->get_available_bytes() == 0);
+
+		stream->clear();
+		stream->put_utf8_string(value);
+		CHECK(stream->get_size() == size + 4);
+		stream->seek(0);
+		CHECK(stream->get_utf8_string() == value);
+		CHECK(stream->get_available_bytes() == 0);
+	}
+
+	const String unicode = String(U"Привет 🌍").repeat(128);
+	stream->clear();
+	stream->put_utf8_string(unicode);
+	stream->seek(0);
+	CHECK(stream->get_utf8_string() == unicode);
+
+	// Every encoded Variant must round-trip, including values whose serialized
+	// form exceeds the inline buffer and nested container payloads.
+	Array array;
+	array.push_back(String("payload").repeat(128));
+	array.push_back(123456);
+	Dictionary dictionary;
+	dictionary["items"] = array;
+	dictionary["empty"] = String();
+	const Variant values[] = {
+		Variant(0),
+		Variant(42),
+		Variant(true),
+		Variant(String()),
+		Variant(String("tiny")),
+		Variant(String("y").repeat(512)),
+		Variant(String("z").repeat(16384)),
+		Variant(array),
+		Variant(dictionary),
+	};
+	for (const Variant &value : values) {
+		stream->clear();
+		stream->put_var(value);
+		CHECK(stream->get_size() >= 4);
+		stream->seek(0);
+		CHECK(stream->get_var() == value);
+		CHECK(stream->get_available_bytes() == 0);
+	}
+
+	// A truncated payload must not read uninitialized scratch bytes.
+	stream->clear();
+	stream->put_u8('x');
+	stream->seek(0);
+	ERR_PRINT_OFF;
+	CHECK(stream->get_string(5).is_empty());
+	CHECK(stream->get_utf8_string(5).is_empty());
+	ERR_PRINT_ON;
+}
+
 } // namespace TestStreamPeer

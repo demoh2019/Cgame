@@ -1,0 +1,35 @@
+name: Animation Mixer Audio Map Fast Path
+on:
+  pull_request:
+    paths:
+      - "scene/animation/animation_mixer.cpp"
+      - "tests/core/templates/test_hash_map.cpp"
+      - "tests/core/templates/test_a_hash_map.cpp"
+      - ".github/workflows/animation-mixer-audio-hash-fastpath.yml"
+  workflow_dispatch:
+
+jobs:
+  native-tests:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          submodules: recursive
+      - uses: ./.github/actions/godot-cache-restore
+        with:
+          cache-name: linux-animation-audio-hash-fastpath
+        continue-on-error: true
+      - uses: ./.github/actions/godot-deps
+      - name: Compile native editor tests
+        uses: ./.github/actions/godot-build
+        with:
+          platform: linuxbsd
+          target: editor
+          scons-flags: tests=yes module_text_server_fb_enabled=yes -j2
+      - uses: ./.github/actions/godot-cache-save
+        with:
+          cache-name: linux-animation-audio-hash-fastpath
+        continue-on-error: true
+      - name: Verify both audio hash map fast paths
+        run: ./bin/godot.linuxbsd.editor.x86_64 --headless --test --test-case="*[AnimationAudioMapFastPath]*"

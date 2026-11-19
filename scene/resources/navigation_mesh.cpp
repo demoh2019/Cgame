@@ -32,6 +32,8 @@
 
 #include "core/object/class_db.h"
 
+#include <utility> // std::move
+
 #ifdef DEBUG_ENABLED
 #include "servers/navigation_3d/navigation_server_3d.h"
 #endif // DEBUG_ENABLED
@@ -58,18 +60,24 @@ void NavigationMesh::create_from_mesh(const Ref<Mesh> &p_mesh) {
 			continue;
 		}
 
-		int from = vertices.size();
-		vertices.append_array(varr);
-		int rlen = iarr.size();
-		const int *r = iarr.ptr();
+		const int rlen = iarr.size();
+		ERR_CONTINUE_MSG(rlen % 3 != 0, vformat("A mesh surface was skipped when creating a NavigationMesh due to an invalid triangle index count: %d.", rlen));
 
-		Vector<int> polygon;
+		const int from = vertices.size();
+		vertices.append_array(varr);
+		const int *indices = iarr.ptr();
+		// Reserve once per valid surface, rather than growing the outer vector
+		// for every triangle (and repeatedly detaching its shared payload).
+		polygons.reserve_exact(polygons.size() + rlen / 3);
+
 		for (int j = 0; j < rlen; j += 3) {
+			Vector<int> polygon;
 			polygon.resize(3);
-			polygon.write[0] = r[j + 0] + from;
-			polygon.write[1] = r[j + 1] + from;
-			polygon.write[2] = r[j + 2] + from;
-			polygons.push_back(polygon);
+			int *triangle = polygon.ptrw();
+			triangle[0] = indices[j + 0] + from;
+			triangle[1] = indices[j + 1] + from;
+			triangle[2] = indices[j + 2] + from;
+			polygons.push_back(std::move(polygon));
 		}
 	}
 }
@@ -400,81 +408,81 @@ Ref<ArrayMesh> NavigationMesh::get_debug_mesh() {
 		debug_mesh->clear_surfaces();
 	}
 
+	RWLockRead read_lock(rwlock);
 	if (vertices.is_empty()) {
 		return debug_mesh;
 	}
 
-	RWLockRead read_lock(rwlock);
-
-	int polygon_count = get_polygon_count();
-
+	const int polygon_count = polygons.size();
 	if (polygon_count < 1) {
 		// no face, no play
 		return debug_mesh;
 	}
 
-	// build geometry face surface
+	// Exactly three vertices per triangle: resize and write, never resize and
+	// then append (which doubled the buffer and inserted zero-filled geometry).
 	Vector<Vector3> face_vertex_array;
 	face_vertex_array.resize(polygon_count * 3);
+	Vector3 *face_write = face_vertex_array.ptrw();
+	const Vector3 *vertex_data = vertices.ptr();
 
 	for (int i = 0; i < polygon_count; i++) {
-		Vector<int> polygon = get_polygon(i);
-
-		face_vertex_array.push_back(vertices[polygon[0]]);
-		face_vertex_array.push_back(vertices[polygon[1]]);
-		face_vertex_array.push_back(vertices[polygon[2]]);
+		const Vector<int> &polygon = polygons[i];
+		const int base = i * 3;
+		face_write[base + 0] = vertex_data[polygon[0]];
+		face_write[base + 1] = vertex_data[polygon[1]];
+		face_write[base + 2] = vertex_data[polygon[2]];
 	}
 
 	Array face_mesh_array;
 	face_mesh_array.resize(Mesh::ARRAY_MAX);
 	face_mesh_array[Mesh::ARRAY_VERTEX] = face_vertex_array;
 
-	// if enabled add vertex colors to colorize each face individually
-	bool enabled_geometry_face_random_color = NavigationServer3D::get_singleton()->get_debug_navigation_enable_geometry_face_random_color();
+	const bool enabled_geometry_face_random_color = NavigationServer3D::get_singleton()->get_debug_navigation_enable_geometry_face_random_color();
 	if (enabled_geometry_face_random_color) {
-		Color debug_navigation_geometry_face_color = NavigationServer3D::get_singleton()->get_debug_navigation_geometry_face_color();
-		Color polygon_color = debug_navigation_geometry_face_color;
-
+		const Color debug_navigation_geometry_face_color = NavigationServer3D::get_singleton()->get_debug_navigation_geometry_face_color();
 		Vector<Color> face_color_array;
 		face_color_array.resize(polygon_count * 3);
-
+		Color *color_write = face_color_array.ptrw();
 		for (int i = 0; i < polygon_count; i++) {
-			polygon_color = debug_navigation_geometry_face_color * (Color(Math::randf(), Math::randf(), Math::randf()));
-
-			face_color_array.push_back(polygon_color);
-			face_color_array.push_back(polygon_color);
-			face_color_array.push_back(polygon_color);
+			const Color polygon_color = debug_navigation_geometry_face_color * Color(Math::randf(), Math::randf(), Math::randf());
+			const int base = i * 3;
+			color_write[base + 0] = polygon_color;
+			color_write[base + 1] = polygon_color;
+			color_write[base + 2] = polygon_color;
 		}
 		face_mesh_array[Mesh::ARRAY_COLOR] = face_color_array;
 	}
 
 	debug_mesh->add_surface_from_arrays(Mesh::PRIMITIVE_TRIANGLES, face_mesh_array);
-	Ref<StandardMaterial3D> debug_geometry_face_material = NavigationServer3D::get_singleton()->get_debug_navigation_geometry_face_material();
+	const Ref<StandardMaterial3D> debug_geometry_face_material = NavigationServer3D::get_singleton()->get_debug_navigation_geometry_face_material();
 	debug_mesh->surface_set_material(0, debug_geometry_face_material);
 
-	// if enabled build geometry edge line surface
-	bool enabled_edge_lines = NavigationServer3D::get_singleton()->get_debug_navigation_enable_edge_lines();
-
+	const bool enabled_edge_lines = NavigationServer3D::get_singleton()->get_debug_navigation_enable_edge_lines();
 	if (enabled_edge_lines) {
 		Vector<Vector3> line_vertex_array;
 		line_vertex_array.resize(polygon_count * 6);
+		Vector3 *line_write = line_vertex_array.ptrw();
 
 		for (int i = 0; i < polygon_count; i++) {
-			Vector<int> polygon = get_polygon(i);
-
-			line_vertex_array.push_back(vertices[polygon[0]]);
-			line_vertex_array.push_back(vertices[polygon[1]]);
-			line_vertex_array.push_back(vertices[polygon[1]]);
-			line_vertex_array.push_back(vertices[polygon[2]]);
-			line_vertex_array.push_back(vertices[polygon[2]]);
-			line_vertex_array.push_back(vertices[polygon[0]]);
+			const Vector<int> &polygon = polygons[i];
+			const Vector3 &v0 = vertex_data[polygon[0]];
+			const Vector3 &v1 = vertex_data[polygon[1]];
+			const Vector3 &v2 = vertex_data[polygon[2]];
+			const int base = i * 6;
+			line_write[base + 0] = v0;
+			line_write[base + 1] = v1;
+			line_write[base + 2] = v1;
+			line_write[base + 3] = v2;
+			line_write[base + 4] = v2;
+			line_write[base + 5] = v0;
 		}
 
 		Array line_mesh_array;
 		line_mesh_array.resize(Mesh::ARRAY_MAX);
 		line_mesh_array[Mesh::ARRAY_VERTEX] = line_vertex_array;
 		debug_mesh->add_surface_from_arrays(Mesh::PRIMITIVE_LINES, line_mesh_array);
-		Ref<StandardMaterial3D> debug_geometry_edge_material = NavigationServer3D::get_singleton()->get_debug_navigation_geometry_edge_material();
+		const Ref<StandardMaterial3D> debug_geometry_edge_material = NavigationServer3D::get_singleton()->get_debug_navigation_geometry_edge_material();
 		debug_mesh->surface_set_material(1, debug_geometry_edge_material);
 	}
 

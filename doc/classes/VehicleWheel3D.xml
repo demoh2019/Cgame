@@ -87,6 +87,12 @@
 			This determines how much grip this wheel has. It is combined with the friction setting of the surface the wheel is in contact with. 0.0 means no grip, 1.0 is normal grip. For a drift car setup, try setting the grip of the rear wheels slightly lower than the front wheels, or use a lower value to simulate tire wear.
 			It's best to set this to 1.0 when starting out.
 		</member>
+		<member name="wheel_lateral_grip" type="float" setter="set_lateral_grip" getter="get_lateral_grip" default="1.0">
+			Scales the lateral tire impulse capacity relative to [member wheel_friction_slip], from [code]0.0[/code] (no lateral grip) to [code]4.0[/code]. The default [code]1.0[/code] preserves the legacy side-force limit. Longitudinal and lateral impulses are coupled through a combined-slip friction ellipse, so heavy acceleration/braking reduces available cornering grip.
+		</member>
+		<member name="wheel_longitudinal_grip" type="float" setter="set_longitudinal_grip" getter="get_longitudinal_grip" default="1.0">
+			Scales available forward/backward tire impulse capacity, from [code]0.0[/code] (no drive/braking grip) to [code]4.0[/code]. The default [code]1.0[/code] retains the original longitudinal weighting. Pure forward slip is limited even with no side impulse. Useful to simulate tires with different acceleration and cornering characteristics, but this is not a full tire slip curve or drivetrain model.
+		</member>
 		<member name="wheel_radius" type="float" setter="set_radius" getter="get_radius" default="0.5">
 			The radius of the wheel in meters.
 		</member>

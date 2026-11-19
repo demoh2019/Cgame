@@ -124,6 +124,7 @@ struct EditorProgress {
 
 class EditorNode : public Node {
 	GDCLASS(EditorNode, Node);
+	friend class SceneTreeEditor;
 
 public:
 	enum SceneNameCasing {
@@ -447,7 +448,7 @@ private:
 	Tree *disk_changed_list = nullptr;
 	HashSet<String> disk_changed_scenes;
 	bool disk_changed_project = false;
-	ConfirmationDialog *disk_changed = nullptr;
+	ObjectID disk_changed;
 	ConfirmationDialog *project_data_missing = nullptr;
 
 	bool scene_distraction_free = false;
@@ -475,7 +476,17 @@ private:
 
 	Ref<Resource> saving_resource;
 	HashSet<Ref<Resource>> saving_resources_in_path;
-	HashMap<Ref<Resource>, List<Node *>> resource_count; // Keeps track of linked Resources from a Scene.
+
+	// Lazily built index of scene-internal Resources used by each edited-scene Node.
+	// The forward snapshots make removals cheap and allow dirty Nodes to be reconciled
+	// without rescanning the entire scene.
+	HashMap<ObjectID, HashSet<Ref<Resource>>> node_resource_usage;
+	HashMap<Ref<Resource>, HashSet<ObjectID>> resource_node_usage;
+	HashSet<ObjectID> dirty_resource_usage_nodes;
+	ObjectID resource_usage_scene_id;
+	bool resource_usage_initialized = false;
+	bool resource_usage_invalid = false;
+	bool resource_usage_updating = false;
 
 	uint64_t update_spinner_step_msec = 0;
 	uint64_t update_spinner_step_frame = 0;
@@ -606,6 +617,17 @@ private:
 
 	void _update_undo_redo_allowed();
 
+	void _reset_resource_usage_cache();
+	void _ensure_resource_usage_cache();
+	void _rebuild_resource_usage_cache();
+	void _reconcile_node_resource_usage(Node *p_node);
+	void _collect_node_resource_usage(Node *p_node, HashSet<Ref<Resource>> &r_resources);
+	void _remove_resource_usage_snapshot(ObjectID p_node_id);
+	void _mark_resource_usage_subtree_dirty(Node *p_node);
+	void _resource_usage_changed(ObjectID p_resource_id);
+	void _undo_redo_resource_usage_changed();
+	bool _is_node_in_resource_usage_scope(Node *p_node) const;
+
 	int _save_external_resources(bool p_also_save_external_data = false);
 	void _save_scene_silently();
 
@@ -706,7 +728,9 @@ private:
 	void _update_update_spinner();
 
 	void _resources_changed(const Vector<String> &p_resources);
+	ConfirmationDialog *_create_disk_changed_dialog();
 	void _scan_external_changes();
+	void _restore_disk_changed_dialog_parent();
 	void _reload_modified_scenes();
 	void _reload_project_settings();
 	void _resave_externally_modified_scenes(String p_str);
@@ -853,11 +877,10 @@ public:
 	void save_resource_as(const Ref<Resource> &p_resource, const String &p_at_path = String());
 	bool is_resource_internal_to_scene(Ref<Resource> p_resource);
 	void gather_resources(const Variant &p_variant, List<Ref<Resource>> &r_list, HashSet<Object *> &r_scanned_objects, bool p_subresources = false, bool p_allow_external = false);
-	void update_resource_count(Node *p_node, bool p_remove = false);
-	void update_node_reference(const Variant &p_value, Node *p_node, bool p_remove = false);
-	void clear_node_reference(Ref<Resource> p_res);
+	void invalidate_resource_usage_cache();
+	void mark_node_resource_usage_dirty(Node *p_node);
+	void remove_node_from_resource_usage_cache(Node *p_node);
 	int get_resource_count(Ref<Resource> p_res);
-	List<Node *> get_resource_node_list(Ref<Resource> p_res);
 
 	void show_about() { _menu_option_confirm(HELP_ABOUT, false); }
 
@@ -947,6 +970,7 @@ public:
 	HashMap<int, SceneModificationsEntry> scenes_modification_table;
 	List<String> scenes_reimported;
 	List<String> resources_reimported;
+	List<String> uninstanced_scenes_reimported;
 
 	void update_node_from_node_modification_entry(Node *p_node, ModificationNodeEntry &p_node_modification);
 
@@ -1027,6 +1051,7 @@ public:
 	void find_all_instances_inheriting_path_in_node(Node *p_root, Node *p_node, const String &p_instance_path, HashSet<Node *> &p_instance_list);
 	void preload_reimporting_with_path_in_edited_scenes(const List<String> &p_scenes);
 	void reload_instances_with_path_in_edited_scenes();
+	void reload_uninstanced_scenes();
 
 	bool is_exiting() const { return exiting; }
 

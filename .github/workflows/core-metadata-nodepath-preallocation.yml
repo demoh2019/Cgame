@@ -1,0 +1,58 @@
+name: Core metadata and binary NodePath preallocation regressions
+
+on:
+  pull_request:
+    paths:
+      - 'core/config/project_settings.cpp'
+      - 'core/io/resource_loader.cpp'
+      - 'core/io/resource_format_binary.cpp'
+      - 'core/object/class_db.cpp'
+      - 'core/variant/callable.cpp'
+      - 'core/variant/variant_construct.cpp'
+      - 'tests/core/object/test_class_db.cpp'
+      - 'tests/core/object/test_object.cpp'
+      - 'tests/core/variant/test_variant.cpp'
+      - 'tests/core/io/test_resource.cpp'
+      - '.github/workflows/core-metadata-nodepath-preallocation.yml'
+  push:
+    branches: [develop]
+    paths:
+      - 'core/config/project_settings.cpp'
+      - 'core/io/resource_loader.cpp'
+      - 'core/io/resource_format_binary.cpp'
+      - 'core/object/class_db.cpp'
+      - 'core/variant/callable.cpp'
+      - 'core/variant/variant_construct.cpp'
+      - 'tests/core/object/test_class_db.cpp'
+      - 'tests/core/object/test_object.cpp'
+      - 'tests/core/variant/test_variant.cpp'
+      - 'tests/core/io/test_resource.cpp'
+      - '.github/workflows/core-metadata-nodepath-preallocation.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  native-core-metadata:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+      - uses: ./.github/actions/godot-deps
+      - name: Build native core regression tests
+        uses: ./.github/actions/godot-build
+        with:
+          platform: linuxbsd
+          target: editor
+          scons-flags: dev_build=yes tests=yes debug_symbols=no module_mono_enabled=no module_text_server_fb_enabled=yes accesskit=no -j2
+      - name: Validate ClassDB argument preallocation
+        run: ./bin/godot.linuxbsd.editor.dev.x86_64 --headless --test --test-case="*[ClassDB] Preallocated reflection arguments match registered MethodBind signatures*"
+      - name: Validate all Variant constructor metadata
+        run: ./bin/godot.linuxbsd.editor.dev.x86_64 --headless --test --test-case="*[Variant] Constructor reflection preserves argument metadata after bulk resizing*"
+      - name: Validate signal export without Array reallocations
+        run: ./bin/godot.linuxbsd.editor.dev.x86_64 --headless --test --test-case="*[Object] Signal connection bulk export preserves unique callable targets*"
+      - name: Verify binary loader with long NodePath metadata
+        run: ./bin/godot.linuxbsd.editor.dev.x86_64 --headless --test --test-case="*[Resource] Binary NodePath arrays preserve long name and subname sequences*"

@@ -32,6 +32,7 @@
 
 #include "http_client_tcp.h"
 
+#include "core/io/http_header_utils.h"
 #include "core/io/stream_peer_tcp.h"
 #include "core/io/stream_peer_tls.h"
 #include "core/object/class_db.h"
@@ -482,7 +483,6 @@ Error HTTPClientTCP::poll() {
 						(rs >= 2 && response_str[rs - 2] == '\n' && response_str[rs - 1] == '\n') ||
 						(rs >= 4 && response_str[rs - 4] == '\r' && response_str[rs - 3] == '\n' && response_str[rs - 2] == '\r' && response_str[rs - 1] == '\n')) {
 					// End of response, parse.
-					response_str.push_back(0);
 					String response = String::utf8((const char *)response_str.ptr(), response_str.size());
 					Vector<String> responses = response.split("\n");
 					body_size = -1;
@@ -502,20 +502,26 @@ Error HTTPClientTCP::poll() {
 
 					for (int i = 0; i < responses.size(); i++) {
 						String header = responses[i].strip_edges();
-						String s = header.to_lower();
-						if (s.length() == 0) {
+						if (header.is_empty()) {
 							continue;
 						}
-						if (s.begins_with("content-length:")) {
-							body_size = s.substr(s.find_char(':') + 1).strip_edges().to_int();
+						// Compare ASCII HTTP header names directly in the original buffer.
+						// Lowercasing the whole line previously allocated for every header.
+						if (HTTPHeaderUtils::matches_ascii_case_insensitive(header.span(), "content-length:")) {
+							constexpr int prefix_length = sizeof("content-length:") - 1;
+							Span<char32_t> value(header.ptr() + prefix_length, header.length() - prefix_length);
+							value = String::strip_edges_span(value, true, true);
+							body_size = String::to_int(value.ptr(), value.size());
 							body_left = body_size;
 
-						} else if (s.begins_with("transfer-encoding:")) {
-							String encoding = header.substr(header.find_char(':') + 1).strip_edges();
-							if (encoding == "chunked") {
+						} else if (HTTPHeaderUtils::matches_ascii_case_insensitive(header.span(), "transfer-encoding:")) {
+							constexpr int prefix_length = sizeof("transfer-encoding:") - 1;
+							Span<char32_t> value(header.ptr() + prefix_length, header.length() - prefix_length);
+							value = String::strip_edges_span(value, true, true);
+							if (HTTPHeaderUtils::matches_ascii_case_insensitive(value, "chunked", true)) {
 								chunked = true;
 							}
-						} else if (s.begins_with("connection: close")) {
+						} else if (HTTPHeaderUtils::matches_ascii_case_insensitive(header.span(), "connection: close")) {
 							keep_alive = false;
 						}
 

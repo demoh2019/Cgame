@@ -31,6 +31,7 @@
 #pragma once
 
 #include "core/io/resource.h"
+#include "core/templates/pair.h"
 
 class PackedDataContainer : public Resource {
 	GDCLASS(PackedDataContainer, Resource);
@@ -42,7 +43,10 @@ class PackedDataContainer : public Resource {
 
 	struct DictKey {
 		uint32_t hash;
-		Variant key;
+		// Dictionary's HashMap nodes remain stable throughout packing.
+		// Refer to each entry instead of copying a Variant key and looking
+		// up its value again after the sort.
+		const KeyValue<Variant, Variant> *entry;
 		bool operator<(const DictKey &p_key) const { return hash < p_key.hash; }
 	};
 

@@ -34,6 +34,7 @@
 #include "godot_collision_object_2d.h"
 
 #include "core/templates/list.h"
+#include "core/templates/local_vector.h"
 #include "core/templates/pair.h"
 #include "core/templates/vset.h"
 #include "core/variant/variant.h"
@@ -107,7 +108,15 @@ class GodotBody2D : public GodotCollisionObject2D {
 	virtual void _shapes_changed() override;
 	Transform2D new_transform;
 
-	List<Pair<GodotConstraint2D *, int>> constraint_list;
+	// Swept shape motion computed by a parallel `integrate_forces`, applied to
+	// the broadphase afterwards on the stepping thread.
+	Vector2 deferred_motion;
+	bool has_deferred_motion = false;
+
+	// Constraints touching this body. Each constraint caches its index here
+	// (see `GodotConstraint2D::get_body_slot`), so removal is O(1) even for a
+	// static body shared by thousands of contacts.
+	LocalVector<Pair<GodotConstraint2D *, int>> constraint_list;
 
 	struct AreaCMP {
 		GodotArea2D *area = nullptr;
@@ -121,7 +130,7 @@ class GodotBody2D : public GodotCollisionObject2D {
 		}
 	};
 
-	Vector<AreaCMP> areas;
+	LocalVector<AreaCMP> areas;
 
 	struct Contact {
 		Vector2 local_pos;
@@ -137,7 +146,7 @@ class GodotBody2D : public GodotCollisionObject2D {
 		Vector2 impulse;
 	};
 
-	Vector<Contact> contacts; //no contacts by default
+	LocalVector<Contact> contacts; // No contacts by default.
 	int contact_count = 0;
 
 	Callable body_state_callback;
@@ -152,6 +161,15 @@ class GodotBody2D : public GodotCollisionObject2D {
 	GodotPhysicsDirectBodyState2D *direct_state = nullptr;
 
 	uint64_t island_step = 0;
+	// Contacts touching this body are solved `solver_priority` times as many iterations (Unity
+	// Rigidbody.solverIterations analogue). 1 is the normal cost.
+	int solver_priority = 1;
+	// Per-body limits; 0 falls back to the project-wide value (Unity maxLinearVelocity,
+	// maxAngularVelocity and maxDepenetrationVelocity).
+	real_t max_linear_velocity = 0.0;
+	real_t max_angular_velocity = 0.0;
+	real_t max_depenetration_velocity = 0.0;
+	inline static uint32_t high_priority_body_count = 0;
 
 	void _update_transform_dependent();
 
@@ -166,7 +184,7 @@ public:
 	_FORCE_INLINE_ void add_area(GodotArea2D *p_area) {
 		int index = areas.find(AreaCMP(p_area));
 		if (index > -1) {
-			areas.write[index].refCount += 1;
+			areas[index].refCount += 1;
 		} else {
 			areas.ordered_insert(AreaCMP(p_area));
 		}
@@ -175,7 +193,7 @@ public:
 	_FORCE_INLINE_ void remove_area(GodotArea2D *p_area) {
 		int index = areas.find(AreaCMP(p_area));
 		if (index > -1) {
-			areas.write[index].refCount -= 1;
+			areas[index].refCount -= 1;
 			if (areas[index].refCount < 1) {
 				areas.remove_at(index);
 			}
@@ -202,11 +220,33 @@ public:
 	_FORCE_INLINE_ const VSet<RID> &get_exceptions() const { return exceptions; }
 
 	_FORCE_INLINE_ uint64_t get_island_step() const { return island_step; }
+	_FORCE_INLINE_ int get_solver_priority() const { return solver_priority; }
+	_FORCE_INLINE_ void set_max_linear_velocity(real_t p_value) { max_linear_velocity = MAX(p_value, real_t(0.0)); }
+	_FORCE_INLINE_ real_t get_max_linear_velocity() const { return max_linear_velocity; }
+	_FORCE_INLINE_ void set_max_angular_velocity(real_t p_value) { max_angular_velocity = MAX(p_value, real_t(0.0)); }
+	_FORCE_INLINE_ real_t get_max_angular_velocity() const { return max_angular_velocity; }
+	_FORCE_INLINE_ void set_max_depenetration_velocity(real_t p_value) { max_depenetration_velocity = MAX(p_value, real_t(0.0)); }
+	_FORCE_INLINE_ real_t get_max_depenetration_velocity() const { return max_depenetration_velocity; }
+	// Effective limits: the body value when set, otherwise the space default.
+	_FORCE_INLINE_ real_t get_effective_max_linear_velocity(real_t p_space_default) const { return max_linear_velocity > 0.0 ? max_linear_velocity : p_space_default; }
+	_FORCE_INLINE_ real_t get_effective_max_angular_velocity(real_t p_space_default) const { return max_angular_velocity > 0.0 ? max_angular_velocity : p_space_default; }
+	void set_solver_priority(int p_priority) {
+		const int clamped = CLAMP(p_priority, 1, 8);
+		if (solver_priority <= 1 && clamped > 1) {
+			high_priority_body_count++;
+		} else if (solver_priority > 1 && clamped <= 1) {
+			high_priority_body_count--;
+		}
+		solver_priority = clamped;
+	}
+	// True while any body requests extra solver iterations; lets the stepper skip a scan of every
+	// constraint in the common case where none does.
+	static bool has_high_priority_bodies() { return high_priority_body_count > 0; }
 	_FORCE_INLINE_ void set_island_step(uint64_t p_step) { island_step = p_step; }
 
-	_FORCE_INLINE_ void add_constraint(GodotConstraint2D *p_constraint, int p_pos) { constraint_list.push_back({ p_constraint, p_pos }); }
-	_FORCE_INLINE_ void remove_constraint(GodotConstraint2D *p_constraint, int p_pos) { constraint_list.erase({ p_constraint, p_pos }); }
-	const List<Pair<GodotConstraint2D *, int>> &get_constraint_list() const { return constraint_list; }
+	void add_constraint(GodotConstraint2D *p_constraint, int p_pos);
+	void remove_constraint(GodotConstraint2D *p_constraint, int p_pos);
+	const LocalVector<Pair<GodotConstraint2D *, int>> &get_constraint_list() const { return constraint_list; }
 	_FORCE_INLINE_ void clear_constraint_list() { constraint_list.clear(); }
 
 	_FORCE_INLINE_ void set_omit_force_integration(bool p_omit_force_integration) { omit_force_integration = p_omit_force_integration; }
@@ -244,8 +284,10 @@ public:
 		biased_linear_velocity += p_impulse * _inv_mass;
 		if (p_max_delta_av != 0.0) {
 			real_t delta_av = _inv_inertia * (p_position - center_of_mass).cross(p_impulse);
-			if (p_max_delta_av > 0 && delta_av > p_max_delta_av) {
-				delta_av = p_max_delta_av;
+			// Clamp the magnitude in both rotation directions, as in 3D. Clamping only
+			// positive values made penetration recovery rotate mirrored bodies differently.
+			if (p_max_delta_av > 0) {
+				delta_av = CLAMP(delta_av, -p_max_delta_av, p_max_delta_av);
 			}
 			biased_angular_velocity += delta_av;
 		}
@@ -317,7 +359,15 @@ public:
 	_FORCE_INLINE_ real_t get_friction() const { return friction; }
 	_FORCE_INLINE_ real_t get_bounce() const { return bounce; }
 
-	void integrate_forces(real_t p_step);
+	// With `p_defer_motion`, the broadphase is not touched and the call is safe to
+	// run concurrently for different bodies; call `apply_deferred_motion` afterwards.
+	void integrate_forces(real_t p_step, bool p_defer_motion = false);
+	_FORCE_INLINE_ void apply_deferred_motion(real_t p_step) {
+		if (has_deferred_motion) {
+			has_deferred_motion = false;
+			_update_shapes_with_motion(deferred_motion, angular_velocity * p_step, get_transform().get_origin() + center_of_mass);
+		}
+	}
 	void integrate_velocities(real_t p_step);
 
 	_FORCE_INLINE_ Vector2 get_velocity_in_local_point(const Vector2 &rel_pos) const {
@@ -351,7 +401,7 @@ void GodotBody2D::add_contact(const Vector2 &p_local_pos, const Vector2 &p_local
 		return;
 	}
 
-	Contact *c = contacts.ptrw();
+	Contact *c = contacts.ptr();
 
 	int idx = -1;
 
