@@ -651,6 +651,12 @@ PhysicsServer3D::PhysicsServer3D() {
 	// Objective Kelvin-Voigt strain-rate stress for each tetrahedral FEM element.
 	// Independent from the global breathing-mode viscosity, off by default.
 	GLOBAL_DEF(PropertyInfo(Variant::FLOAT, "physics/3d/solver/soft_body_tetra_fem_viscosity", PROPERTY_HINT_RANGE, "0,1000,0.1,or_greater"), 0.0);
+	// Progressive, irreversible material damage driven by local tetrahedral
+	// Neo-Hookean strain-energy density. Decreases local FEM/fiber stiffness,
+	// but does not disconnect vertices or fracture triangle topology.
+	// Zero rate leaves FEM solver identical to its original elastic form.
+	GLOBAL_DEF(PropertyInfo(Variant::FLOAT, "physics/3d/solver/soft_body_tetra_damage_yield_energy", PROPERTY_HINT_RANGE, "0.000001,10,0.001,or_greater"), 0.1);
+	GLOBAL_DEF(PropertyInfo(Variant::FLOAT, "physics/3d/solver/soft_body_tetra_damage_rate", PROPERTY_HINT_RANGE, "0,100,0.1,or_greater,suffix:1/s"), 0.0);
 	// Intrinsic membrane viscoelastic damping of normal and shear strain rates.
 	// Zero disables the extra face pass, all other projects remain unchanged.
 	GLOBAL_DEF(PropertyInfo(Variant::FLOAT, "physics/3d/solver/soft_body_membrane_damping_rate", PROPERTY_HINT_RANGE, "0,1000,0.1,or_greater,suffix:1/s"), 0.0);

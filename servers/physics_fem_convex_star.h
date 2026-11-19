@@ -66,6 +66,7 @@ struct PhysicsFEMConvexTetra {
 	uint32_t d = 0;
 	PhysicsFEMTetraRest rest;
 	double lambda = 0.0;
+	double damage = 0.0; // Irreversible local stiffness reduction, 0..0.95.
 };
 
 // The normal orientation is inferred from the already validated signed

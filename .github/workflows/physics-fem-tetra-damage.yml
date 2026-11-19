@@ -1,0 +1,51 @@
+name: FEM tetrahedral continuum damage and compiler contracts
+
+on:
+  push:
+    branches: [develop]
+    paths:
+      - "servers/physics_fem_tetra_damage.h"
+      - "servers/physics_fem_convex_star.h"
+      - "modules/godot_physics_3d/godot_soft_body_3d.cpp"
+      - "modules/godot_physics_3d/godot_space_3d.cpp"
+      - "modules/godot_physics_3d/godot_space_3d.h"
+      - "servers/physics_3d/physics_server_3d.cpp"
+      - "tests/servers/test_physics_fem_tetra_damage.cpp"
+      - "tests/stress/test_physics_fem_tetra_damage_compiler.cpp"
+      - "tests/stress/test_physics_fem_tetra_damage.py"
+      - ".github/workflows/physics-fem-tetra-damage.yml"
+  pull_request:
+    paths:
+      - "servers/physics_fem_tetra_damage.h"
+      - "servers/physics_fem_convex_star.h"
+      - "modules/godot_physics_3d/godot_soft_body_3d.cpp"
+      - "modules/godot_physics_3d/godot_space_3d.cpp"
+      - "modules/godot_physics_3d/godot_space_3d.h"
+      - "servers/physics_3d/physics_server_3d.cpp"
+      - "tests/servers/test_physics_fem_tetra_damage.cpp"
+      - "tests/stress/test_physics_fem_tetra_damage_compiler.cpp"
+      - "tests/stress/test_physics_fem_tetra_damage.py"
+      - ".github/workflows/physics-fem-tetra-damage.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  numerical-and-compiler:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: 40k randomized damage and FEM source-wiring tests
+        run: python3 -m unittest discover -s tests/stress -p 'test_physics_fem_tetra_damage.py' -v
+      - name: Compile and run FEM material damage float32 and float64
+        run: |
+          for precision in float double; do
+            flags=""
+            if [ "$precision" = "double" ]; then flags="-DCGAME_USE_DOUBLE"; fi
+            g++ -std=c++17 -O2 -Wall -Wextra -Werror $flags \
+              -Itests/stress/physics_cpp_stubs -I. \
+              tests/stress/test_physics_fem_tetra_damage_compiler.cpp \
+              -o "/tmp/physics_fem_tetra_damage_$precision"
+            "/tmp/physics_fem_tetra_damage_$precision"
+          done

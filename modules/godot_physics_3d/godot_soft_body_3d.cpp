@@ -45,6 +45,7 @@
 #include "servers/physics_fem_tetra_neo_hookean.h"
 #include "servers/physics_fem_tetra_fiber.h"
 #include "servers/physics_fem_tetra_viscosity.h"
+#include "servers/physics_fem_tetra_damage.h"
 #include "servers/physics_softbody_shape_clusters.h"
 #include "servers/physics_softbody_aerodynamic_drag.h"
 #include "servers/physics_softbody_plasticity.h"
@@ -3012,6 +3013,26 @@ void GodotSoftBody3D::solve_constraints(real_t p_delta) {
 	const bool use_fem_fiber = use_fem && fem_fiber_compliance > 0.0 &&
 			Math::is_finite(fem_fiber_alpha) && fem_fiber_alpha > 0.0;
 	const Vector3 fem_fiber_axis = get_space() ? get_space()->get_soft_body_tetra_fiber_axis() : Vector3(1, 0, 0);
+	// FEM damage samples predicted deformation ONCE per physics tick before
+	// XPBD projects strain away. The damage is local to each cooked tetra;
+	// irreversible and capped so every element keeps some stiffness.
+	const real_t fem_damage_rate = get_space() ? get_space()->get_soft_body_tetra_damage_rate() : real_t(0.0);
+	if (use_fem && fem_damage_rate > real_t(0.0)) {
+		const double yield_energy_density = double(get_space()->get_soft_body_tetra_damage_yield_energy());
+		for (PhysicsFEMConvexTetra &tetra : xpbd_fem_tetrahedra) {
+			const Node &a = nodes[tetra.a];
+			const Node &b = nodes[tetra.b];
+			const Node &c = nodes[tetra.c];
+			const Node &d = nodes[tetra.d];
+			double energy = 0.0;
+			Vector3 ga, gb, gc, gd;
+			if (physics_fem_tetra_energy_gradient(a.x, b.x, c.x, d.x,
+						tetra.rest, fem_poisson, energy, ga, gb, gc, gd)) {
+				physics_fem_tetra_accumulate_damage(energy / tetra.rest.volume,
+							yield_energy_density, double(fem_damage_rate), double(p_delta), tetra.damage);
+			}
+		}
+	}
 	const double volume_compliance = get_space() ? double(get_space()->get_soft_body_xpbd_volume_compliance()) : 0.0;
 	const double volume_alpha = p_delta > 0.0 ? volume_compliance / (double(p_delta) * double(p_delta)) : 0.0;
 	const bool use_volume_xpbd = xpbd_volume_closed && volume_compliance > 0.0 &&
@@ -3263,7 +3284,8 @@ void GodotSoftBody3D::solve_constraints(real_t p_delta) {
 				Node &d = nodes[tetra.d];
 				physics_fem_tetra_solve(a.x, b.x, c.x, d.x,
 						a.im, b.im, c.im, d.im,
-						tetra.rest, fem_poisson, fem_alpha, tetra.lambda);
+						tetra.rest, fem_poisson,
+						physics_fem_tetra_damage_alpha(fem_alpha, tetra.damage), tetra.lambda);
 			}
 		}
 		if (use_fem_fiber) {
@@ -3275,7 +3297,9 @@ void GodotSoftBody3D::solve_constraints(real_t p_delta) {
 				Node &d = nodes[tetra.d];
 				physics_fem_tetra_solve_fiber(a.x, b.x, c.x, d.x,
 						a.im, b.im, c.im, d.im, tetra.rest,
-						fem_fiber_axis, fem_fiber_alpha, xpbd_fem_fiber_lambdas[tet_index]);
+						fem_fiber_axis,
+						physics_fem_tetra_damage_alpha(fem_fiber_alpha, tetra.damage),
+						xpbd_fem_fiber_lambdas[tet_index]);
 			}
 		}
 		if (use_volume_xpbd) {

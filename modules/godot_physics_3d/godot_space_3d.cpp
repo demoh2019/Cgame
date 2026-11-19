@@ -1351,6 +1351,12 @@ GodotSpace3D::GodotSpace3D() {
 	soft_body_tetra_fiber_axis = configured_fem_fiber_axis.is_finite() && configured_fem_fiber_axis.length_squared() > real_t(0.0) ? configured_fem_fiber_axis : Vector3(1, 0, 0);
 	const real_t configured_tetra_viscosity = GLOBAL_GET("physics/3d/solver/soft_body_tetra_fem_viscosity");
 	soft_body_tetra_fem_viscosity = Math::is_finite(configured_tetra_viscosity) ? MAX(real_t(0.0), configured_tetra_viscosity) : real_t(0.0);
+	const real_t configured_tetra_damage_yield = GLOBAL_GET("physics/3d/solver/soft_body_tetra_damage_yield_energy");
+	soft_body_tetra_damage_yield_energy = Math::is_finite(configured_tetra_damage_yield) ?
+			MAX(real_t(0.000001), configured_tetra_damage_yield) : real_t(0.1);
+	const real_t configured_tetra_damage_rate = GLOBAL_GET("physics/3d/solver/soft_body_tetra_damage_rate");
+	soft_body_tetra_damage_rate = Math::is_finite(configured_tetra_damage_rate) ?
+			MAX(real_t(0.0), configured_tetra_damage_rate) : real_t(0.0);
 	const real_t configured_membrane_damping = GLOBAL_GET("physics/3d/solver/soft_body_membrane_damping_rate");
 	soft_body_membrane_damping_rate = Math::is_finite(configured_membrane_damping) ?
 			MAX(real_t(0.0), configured_membrane_damping) : real_t(0.0);
