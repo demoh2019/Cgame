@@ -443,7 +443,7 @@ func _apply_snapshot(snapshot: Dictionary) -> bool:
     state.hunger = float(stats["hunger"])
     state.equipped_weapon = str(stats["weapon"])
     state.weapon_condition = int(stats.get("weapon_condition",
-            state.MAX_WEAPON_CONDITION[state.equipped_weapon]))
+            StateScript.MAX_WEAPON_CONDITION[state.equipped_weapon]))
     state.changed.emit()
     player.global_position = _list_to_vec3(snapshot["player"])
     player.velocity = Vector3.ZERO
