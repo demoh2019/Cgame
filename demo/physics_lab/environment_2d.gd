@@ -10,6 +10,7 @@ const MAGNET_POSITION := Vector2(765.0, 140.0)
 var _water: Area2D
 var _water_shape: RectangleShape2D
 var _water_visual: Polygon2D
+var _water_line: Line2D
 var _status: Label
 var _water_depth := 245.0
 var _fluid_density := 0.001
@@ -63,6 +64,12 @@ func _make_pool() -> void:
     _water_visual = Polygon2D.new()
     _water_visual.color = Color(0.14, 0.62, 0.94, 0.30)
     _water.add_child(_water_visual)
+    _water_line = Line2D.new()
+    _water_line.name = "AnimatedSurface"
+    _water_line.width = 4.0
+    _water_line.default_color = Color(0.42, 0.89, 1.0, 0.93)
+    _water_line.z_index = 2
+    add_child(_water_line)
     _set_depth(_water_depth)
     _static_wall("PoolWallLeft", Vector2(POOL_X - POOL_WIDTH / 2.0, 270), Vector2(12, 295))
     _static_wall("PoolWallRight", Vector2(POOL_X + POOL_WIDTH / 2.0, 270), Vector2(12, 295))
@@ -355,6 +362,7 @@ func _pick_body() -> RigidBody2D:
 
 func _physics_process(delta: float) -> void:
     _wave_phase += delta
+    _update_water_line()
     if _request_pick and _dragging:
         _request_pick = false
         _held = _pick_body()
@@ -414,6 +422,15 @@ func _body_properties(body: RigidBody2D) -> Vector2:
     body.set_meta("lab_area", area)
     body.set_meta("lab_half_height", half_height)
     return Vector2(area, half_height)
+
+
+func _update_water_line() -> void:
+    _water_line.clear_points()
+    var top := POOL_BOTTOM - _water_depth
+    for index in range(31):
+        var x := POOL_X - POOL_WIDTH * 0.5 + float(index) * POOL_WIDTH / 30.0
+        var y := top + (10.0 * sin(_wave_phase * 2.0 + x * 0.025) if _waves else 0.0)
+        _water_line.add_point(Vector2(x, y))
 
 
 func _apply_water() -> void:
