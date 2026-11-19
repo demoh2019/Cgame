@@ -768,7 +768,7 @@ func _physics_rid_sparse_3d(scale: int, frames: int, moving: bool = false) -> Di
 	if state_error:
 		return {"error": "Sparse 3D RID bodies drifted or slept unexpectedly"}
 	var frame_statistics := _frame_statistics(frame_intervals)
-	return {"bodies": count, "physics_frames": frames, "creation_ms": creation_ms, "cleanup_ms": cleanup_ms,
+	return {"bodies": count, "moving": moving, "physics_frames": frames, "creation_ms": creation_ms, "cleanup_ms": cleanup_ms,
 			"peak_physics_ms": peak_physics_ms, "peak_collision_pairs": peak_pairs,
 			"frame_interval_ms": frame_statistics, "frame_p95_ms": frame_statistics["p95"]}
 
