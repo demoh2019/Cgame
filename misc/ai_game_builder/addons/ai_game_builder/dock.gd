@@ -10,9 +10,11 @@ var _endpoint: LineEdit
 var _model: LineEdit
 var _api_key: LineEdit
 var _prompt: TextEdit
+var _refinement: LineEdit
 var _preview: TextEdit
 var _generate_button: Button
 var _repair_button: Button
+var _refine_button: Button
 var _apply_button: Button
 var _cancel_button: Button
 var _status: Label
@@ -42,6 +44,14 @@ func _ready() -> void:
 	_prompt.placeholder_text = "Create a 2D arcade game with movement, enemies and a score."
 	add_child(_prompt)
 
+	var refine_label := Label.new()
+	refine_label.text = "Change the current preview (optional)"
+	add_child(refine_label)
+	_refinement = LineEdit.new()
+	_refinement.placeholder_text = "Add a menu, jump button or another enemy..."
+	_refinement.max_length = 800
+	add_child(_refinement)
+
 	var controls := HBoxContainer.new()
 	add_child(controls)
 	_generate_button = Button.new()
@@ -59,11 +69,21 @@ func _ready() -> void:
 	_cancel_button.disabled = true
 	_cancel_button.pressed.connect(_cancel)
 	controls.add_child(_cancel_button)
+
+	var review_controls := HBoxContainer.new()
+	add_child(review_controls)
+	_refine_button = Button.new()
+	_refine_button.text = "Refine"
+	_refine_button.tooltip_text = "Ask the model to update the current preview. Uses another API request."
+	_refine_button.disabled = true
+	_refine_button.pressed.connect(_refine)
+	review_controls.add_child(_refine_button)
+
 	_apply_button = Button.new()
 	_apply_button.text = "Apply files..."
 	_apply_button.disabled = true
 	_apply_button.pressed.connect(_confirm_apply)
-	controls.add_child(_apply_button)
+	review_controls.add_child(_apply_button)
 
 	_status = Label.new()
 	_status.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
@@ -113,6 +133,17 @@ func _repair() -> void:
 	_request_plan(repair_text, true)
 
 
+func _refine() -> void:
+	if _pending_plan.is_empty() or _busy:
+		return
+	var change := _refinement.text.strip_edges()
+	if change.is_empty():
+		_status.text = "Describe a change to the current preview first."
+		return
+	var refine_text := Inspector.refine_prompt(_prompt.text.strip_edges(), change, _pending_plan)
+	_request_plan(refine_text, true)
+
+
 func _request_plan(prompt: String, is_repair: bool) -> void:
 	if _busy:
 		return
@@ -138,8 +169,9 @@ func _request_plan(prompt: String, is_repair: bool) -> void:
 		_last_errors.clear()
 		_preview.text = ""
 	_apply_button.disabled = true
+	_refine_button.disabled = true
 	_set_busy(true)
-	_status.text = "Requesting a repaired plan..." if is_repair else "Generating a reviewable game plan..."
+	_status.text = "Requesting revised game files..." if is_repair else "Generating a reviewable game plan..."
 
 func _allowed_endpoint(endpoint: String) -> bool:
 	var lower := endpoint.to_lower()
@@ -180,6 +212,7 @@ func _completed(result: int, response_code: int, _headers: PackedStringArray, bo
 		_preview.text = "REVIEW WARNINGS:\n" + "\n".join(PackedStringArray(inspection.warnings)) + "\n\n" + _preview.text
 	_apply_button.disabled = not inspection.ok
 	_repair_button.disabled = inspection.ok
+	_refine_button.disabled = false
 	if inspection.ok:
 		_status.text = "Review passed for %d files. Inspect the code before applying." % _pending_plan.files.size()
 	else:
@@ -191,6 +224,8 @@ func _set_busy(value: bool) -> void:
 	_generate_button.disabled = value
 	_cancel_button.disabled = not value
 	_repair_button.disabled = value or _last_errors.is_empty()
+	_refine_button.disabled = value or _pending_plan.is_empty()
+	_refinement.editable = not value
 	_endpoint.editable = not value
 	_model.editable = not value
 	_prompt.editable = not value
@@ -220,6 +255,7 @@ func _apply() -> void:
 	_status.text = "Created %d files in res://ai_generated/. Open main.tscn to play." % result.paths.size()
 	_apply_button.disabled = true
 	_repair_button.disabled = true
+	_refine_button.disabled = true
 	_pending_plan.clear()
 	_last_errors.clear()
 	EditorInterface.get_resource_filesystem().scan()
