@@ -83,7 +83,10 @@ int GodotPhysicsDirectSpaceState2D::intersect_point(const PS2DT::PointParameters
 		}
 
 		GodotShape2D *shape = p_object->get_shape(p_shape);
-		const Vector2 local_point = (p_object->get_transform() * p_object->get_shape_transform(p_shape)).affine_inverse().xform(data.params.position);
+		// Inverses are cached by the collision object and updated when the
+		// body/area or shape transform changes. Avoid an affine matrix inverse
+		// for every BVH candidate in this hot point-query path.
+		const Vector2 local_point = p_object->get_shape_inv_transform(p_shape).xform(p_object->get_inv_transform().xform(data.params.position));
 		if (!shape->contains_point(local_point)) {
 			return true;
 		}
