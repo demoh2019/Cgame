@@ -33,6 +33,7 @@
 TEST_FORCE_LINK(test_instance_shader_parameters)
 
 #include "scene/2d/sprite_2d.h"
+#include "scene/resources/image_texture.h"
 #include "scene/resources/packed_scene.h"
 #include "scene/resources/texture.h"
 
