@@ -33,7 +33,7 @@ _FORCE_INLINE_ static real_t godot_physics_ccd_rotational_factor(real_t p_angle)
 	if (!(Math::abs(p_angle) > real_t(0.0)) || !Math::is_finite(p_angle)) {
 		return real_t(0.0);
 	}
-	return real_t(2.0) * Math::sin(MIN(Math::abs(p_angle), real_t(Math_PI)) * real_t(0.5));
+	return real_t(2.0) * Math::sin(MIN(Math::abs(p_angle), real_t(Math::PI)) * real_t(0.5));
 }
 
 // All corners of an axis-aligned box are bounded by the farthest absolute
