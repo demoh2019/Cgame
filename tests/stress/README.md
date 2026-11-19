@@ -668,3 +668,38 @@ python3 tests/stress/scale_sweep.py \
   --output out/astar-jps-bulk.json \
   --summary-md out/astar-jps-bulk.md
 ```
+
+
+## Million-proxy broadphase pressure (opt-in)
+
+The `physics_proxies_2d` and `physics_proxies_3d` scenarios create **1,000 × scale**
+non-overlapping static bodies directly through `PhysicsServer2D/3D`, using one
+shared shape RID per dimension. This excludes the scene-tree overhead of
+`Node2D/Node3D` and isolates broadphase allocation, insertion, teardown and
+the correctness of nearest-hit raycasts at both edges of the populated area.
+Engine static-memory samples are diagnostics; process RSS is recorded by
+`run.py` and subject to its hard limit.
+
+Start with a small sweep to establish a per-machine baseline:
+
+```bash
+python3 tests/stress/run.py --godot ./bin/godot.linuxbsd.editor.dev.x86_64 \
+  --case physics_proxies_2d,physics_proxies_3d --scale 10 \
+  --repeats 3 --frames 12 --timeout 600 --rss-limit-mib 6144 \
+  --output out/physics-proxies-10k.json
+```
+
+**Explicitly opt in** to one million bodies per dimension, in separate
+processes on a dedicated host with enough RAM. The watchdog terminates
+processes that exceed the per-run time/RSS limits:
+
+```bash
+python3 tests/stress/run.py --godot ./bin/godot.linuxbsd.editor.dev.x86_64 \
+  --case physics_proxies_2d,physics_proxies_3d --scale 1000 \
+  --repeats 1 --frames 12 --timeout 1800 --rss-limit-mib 12288 \
+  --output out/physics-proxies-1m.json
+```
+
+These measure *sparse static proxies*, **not** one million interacting dynamic
+rigid bodies at 60 FPS. Dynamic islands, narrowphase, constraint solving and
+sleeping require separate performance and accuracy measurements.

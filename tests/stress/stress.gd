@@ -15,7 +15,7 @@ const CanvasScenePerf := preload("res://canvas_scene_perf.gd")
 const CASES := [
 	"containers", "array_literals", "dictionary_snapshot", "strings", "script_vm", "math", "signals",
 	"scene_tree", "packed_scene", "images", "json", "stream", "stream_bulk",
-	"file_io", "threads", "physics_2d", "physics_3d", "physics_joint_chain_2d", "physics_joint_chain_3d", "physics_sparse_2d", "physics_sparse_3d", "physics_rid_sparse_2d", "physics_rid_sparse_3d", "physics_rid_moving_2d", "physics_rid_moving_3d",
+	"file_io", "threads", "physics_2d", "physics_3d", "physics_joint_chain_2d", "physics_joint_chain_3d", "physics_sparse_2d", "physics_sparse_3d", "physics_proxies_2d", "physics_proxies_3d", "physics_rid_sparse_2d", "physics_rid_sparse_3d", "physics_rid_moving_2d", "physics_rid_moving_3d",
 	"object_churn", "memory_churn", "astar_grid", "astar_grid_neighbors", "astar_grid_jps", "astar_grid_fill", "astar_grid_rebuild", "astar_relax_2d", "astar_relax_3d", "astar_graph", "tweens", "audio_buffers",
 	"variant_codec", "packet_stream", "packet_tx_batch", "packet_rx_batch", "packet_variant_reuse", "ui_layout", "grid_reflow", "box_reflow", "flow_reflow", "render_2d", "render_3d", "render_ellipse_2d", "render_light_culling_3d",
 	"resource_load",
@@ -263,6 +263,10 @@ func _run_case(test_case: String, scale: int, frames: int, seed: int) -> Diction
 			return await _physics_joint_chain_2d(scale, frames)
 		"physics_joint_chain_3d":
 			return await _physics_joint_chain_3d(scale, frames)
+		"physics_proxies_2d":
+			return await _physics_proxies_2d(scale)
+		"physics_proxies_3d":
+			return await _physics_proxies_3d(scale)
 		"physics_sparse_2d":
 			return await _physics_sparse_2d(scale, frames)
 		"physics_sparse_3d":
@@ -772,6 +776,103 @@ func _physics_rid_sparse_3d(scale: int, frames: int, moving: bool = false) -> Di
 			"peak_physics_ms": peak_physics_ms, "peak_collision_pairs": peak_pairs,
 			"frame_interval_ms": frame_statistics, "frame_p95_ms": frame_statistics["p95"]}
 
+
+
+func _physics_proxies_2d(scale: int) -> Dictionary:
+	# A million simple broadphase proxies without a million scene-tree Nodes.
+	# Static bodies deliberately have no overlapping shapes.
+	var count := 1000 * scale
+	var body_rids: Array[RID] = []
+	body_rids.resize(count)
+	var shape_rid := PhysicsServer2D.circle_shape_create()
+	PhysicsServer2D.shape_set_data(shape_rid, 0.5)
+	var space_rid := root.get_world_2d().space
+	var create_start := Time.get_ticks_usec()
+	for i in range(count):
+		var pos := Vector2(float(i & 1023) * 8.0, float(i >> 10) * 8.0)
+		var body_rid := PhysicsServer2D.body_create()
+		PhysicsServer2D.body_set_mode(body_rid, PhysicsServer2D.BODY_MODE_STATIC)
+		PhysicsServer2D.body_add_shape(body_rid, shape_rid)
+		PhysicsServer2D.body_set_state(body_rid, PhysicsServer2D.BODY_STATE_TRANSFORM, Transform2D(0.0, pos))
+		PhysicsServer2D.body_set_space(body_rid, space_rid)
+		body_rids[i] = body_rid
+	var create_ms := float(Time.get_ticks_usec() - create_start) / 1000.0
+
+	await physics_frame
+	await process_frame
+	var engine_memory_bytes := int(Performance.get_monitor(Performance.MEMORY_STATIC))
+	var collision_pairs := int(Performance.get_monitor(Performance.PHYSICS_2D_COLLISION_PAIRS))
+	var last_position := Vector2(float((count - 1) & 1023) * 8.0, float((count - 1) >> 10) * 8.0)
+	var state := root.get_world_2d().direct_space_state
+	var query_start := Time.get_ticks_usec()
+	var first_hit := state.intersect_ray(PhysicsRayQueryParameters2D.create(Vector2(-4.0, 0.0), Vector2(4.0, 0.0)))
+	var last_hit := state.intersect_ray(PhysicsRayQueryParameters2D.create(
+		last_position + Vector2(-4.0, 0.0), last_position + Vector2(4.0, 0.0)))
+	var query_ms := float(Time.get_ticks_usec() - query_start) / 1000.0
+	var valid_hits := not first_hit.is_empty() and not last_hit.is_empty()
+	if valid_hits:
+		valid_hits = absf(first_hit.position.x + 0.5) < 0.05 and absf(last_hit.position.x - (last_position.x - 0.5)) < 0.05
+
+	var free_start := Time.get_ticks_usec()
+	for body_rid in body_rids:
+		PhysicsServer2D.free_rid(body_rid)
+	PhysicsServer2D.free_rid(shape_rid)
+	body_rids.clear()
+	var free_ms := float(Time.get_ticks_usec() - free_start) / 1000.0
+	if collision_pairs != 0:
+		return {"error": "Sparse 2D proxies unexpectedly collided", "pairs": collision_pairs}
+	if not valid_hits:
+		return {"error": "2D proxy raycasts returned incorrect nearest hits"}
+	return {"bodies": count, "create_ms": create_ms, "free_ms": free_ms, "query_ms": query_ms,
+		"collision_pairs": collision_pairs, "engine_memory_bytes": engine_memory_bytes}
+
+
+func _physics_proxies_3d(scale: int) -> Dictionary:
+	# Exercise the 3D BVH itself rather than the cost of creating Node3D objects.
+	var count := 1000 * scale
+	var body_rids: Array[RID] = []
+	body_rids.resize(count)
+	var shape_rid := PhysicsServer3D.sphere_shape_create()
+	PhysicsServer3D.shape_set_data(shape_rid, 0.5)
+	var space_rid := root.get_world_3d().space
+	var create_start := Time.get_ticks_usec()
+	for i in range(count):
+		var pos := Vector3(float(i & 1023) * 8.0, 0.0, float(i >> 10) * 8.0)
+		var body_rid := PhysicsServer3D.body_create()
+		PhysicsServer3D.body_set_mode(body_rid, PhysicsServer3D.BODY_MODE_STATIC)
+		PhysicsServer3D.body_add_shape(body_rid, shape_rid)
+		PhysicsServer3D.body_set_state(body_rid, PhysicsServer3D.BODY_STATE_TRANSFORM, Transform3D(Basis(), pos))
+		PhysicsServer3D.body_set_space(body_rid, space_rid)
+		body_rids[i] = body_rid
+	var create_ms := float(Time.get_ticks_usec() - create_start) / 1000.0
+
+	await physics_frame
+	await process_frame
+	var engine_memory_bytes := int(Performance.get_monitor(Performance.MEMORY_STATIC))
+	var collision_pairs := int(Performance.get_monitor(Performance.PHYSICS_3D_COLLISION_PAIRS))
+	var last_position := Vector3(float((count - 1) & 1023) * 8.0, 0.0, float((count - 1) >> 10) * 8.0)
+	var state := root.get_world_3d().direct_space_state
+	var query_start := Time.get_ticks_usec()
+	var first_hit := state.intersect_ray(PhysicsRayQueryParameters3D.create(Vector3(-4.0, 0.0, 0.0), Vector3(4.0, 0.0, 0.0)))
+	var last_hit := state.intersect_ray(PhysicsRayQueryParameters3D.create(
+		last_position + Vector3(-4.0, 0.0, 0.0), last_position + Vector3(4.0, 0.0, 0.0)))
+	var query_ms := float(Time.get_ticks_usec() - query_start) / 1000.0
+	var valid_hits := not first_hit.is_empty() and not last_hit.is_empty()
+	if valid_hits:
+		valid_hits = absf(first_hit.position.x + 0.5) < 0.05 and absf(last_hit.position.x - (last_position.x - 0.5)) < 0.05
+
+	var free_start := Time.get_ticks_usec()
+	for body_rid in body_rids:
+		PhysicsServer3D.free_rid(body_rid)
+	PhysicsServer3D.free_rid(shape_rid)
+	body_rids.clear()
+	var free_ms := float(Time.get_ticks_usec() - free_start) / 1000.0
+	if collision_pairs != 0:
+		return {"error": "Sparse 3D proxies unexpectedly collided", "pairs": collision_pairs}
+	if not valid_hits:
+		return {"error": "3D proxy raycasts returned incorrect nearest hits"}
+	return {"bodies": count, "create_ms": create_ms, "free_ms": free_ms, "query_ms": query_ms,
+		"collision_pairs": collision_pairs, "engine_memory_bytes": engine_memory_bytes}
 
 
 func _physics_sparse_2d(scale: int, frames: int) -> Dictionary:
