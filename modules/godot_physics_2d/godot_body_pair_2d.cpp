@@ -44,6 +44,7 @@
 #include "servers/physics_ccd_capsule_toi.h"
 #include "servers/physics_ccd_capsule_pair_toi.h"
 #include "servers/physics_ccd_circle_segment_toi.h"
+#include "servers/physics_ccd_capsule_segment_toi.h"
 #include "servers/physics_ccd_swept_bounds.h"
 #include "servers/physics_ccd_rotational_sphere_cull.h"
 
@@ -390,6 +391,48 @@ bool GodotBodyPair2D::_test_ccd(real_t p_step, GodotBody2D *p_A, int p_shape_A, 
 				return true;
 			}
 			// Initial overlap or unusable input: preserve the old solver.
+		}
+	}
+
+	// Capsule versus finite segment is a volume sweep of its entire
+	// axial center segment, expanded by the capsule radius. Unlike
+	// casting its leading support points, this catches grazes against
+	// either segment endpoint or the rounded end of the capsule.
+	// This is exact for fixed orientations, including affine transforms
+	// of the zero-radius target segment. Handle both shape orders.
+	if (((shape_A_ptr->get_type() == PS2DE::SHAPE_CAPSULE && shape_B_ptr->get_type() == PS2DE::SHAPE_SEGMENT) ||
+			(shape_A_ptr->get_type() == PS2DE::SHAPE_SEGMENT && shape_B_ptr->get_type() == PS2DE::SHAPE_CAPSULE)) &&
+			p_A->get_angular_velocity() == 0.0 && p_B->get_angular_velocity() == 0.0) {
+		const bool capsule_is_A = shape_A_ptr->get_type() == PS2DE::SHAPE_CAPSULE;
+		const GodotCapsuleShape2D *capsule = static_cast<GodotCapsuleShape2D *>(capsule_is_A ? shape_A_ptr : shape_B_ptr);
+		const GodotSegmentShape2D *segment = static_cast<GodotSegmentShape2D *>(capsule_is_A ? shape_B_ptr : shape_A_ptr);
+		const Transform2D &capsule_transform = capsule_is_A ? p_xform_A : p_xform_B;
+		const Transform2D &segment_transform = capsule_is_A ? p_xform_B : p_xform_A;
+		const double capsule_scale = physics_ccd_uniform_sphere_scale(capsule_transform);
+		if (capsule_scale > 0.0) {
+			const double capsule_radius = double(capsule->get_radius());
+			const double capsule_half_segment = double(capsule->get_height()) * 0.5 - capsule_radius;
+			double impact_fraction = 0.0;
+			const PhysicsCCDCapsulePairTOIResult result = physics_ccd_capsule_segment_toi(
+					capsule_transform.get_origin(), capsule_is_A ? relative_motion : -relative_motion,
+					capsule_transform.columns[1], capsule_half_segment * capsule_scale,
+					capsule_radius * capsule_scale,
+					segment_transform.xform(segment->get_a()), segment_transform.xform(segment->get_b()),
+					impact_fraction);
+			if (result == PhysicsCCDCapsulePairTOIResult::MISS) {
+				return false;
+			}
+			if (result == PhysicsCCDCapsulePairTOIResult::HIT) {
+				const real_t allowed_distance = CLAMP(real_t(impact_fraction * double(mlen)) + (max - min) * real_t(0.01), real_t(0.0), mlen);
+				const Vector2 desired_velocity = velocity_B + mnormal * (allowed_distance / p_step);
+				const Vector2 velocity_A = p_A->get_linear_velocity();
+				const real_t initial_speed = velocity_A.length();
+				const Vector2 travel_direction = velocity_A / initial_speed;
+				const real_t clipped_speed = CLAMP(desired_velocity.dot(travel_direction), real_t(0.0), initial_speed);
+				p_A->set_linear_velocity(travel_direction * clipped_speed);
+				return true;
+			}
+			// Starting overlap/invalid data: retain legacy contact handling.
 		}
 	}
 
