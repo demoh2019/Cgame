@@ -217,6 +217,7 @@ public:
 	_FORCE_INLINE_ real_t get_contact_max_separation() const { return contact_max_separation; }
 	_FORCE_INLINE_ real_t get_speculative_sphere_distance() const { return speculative_sphere_distance; }
 	_FORCE_INLINE_ real_t get_soft_body_xpbd_compliance() const { return soft_body_xpbd_compliance; }
+	_FORCE_INLINE_ real_t get_soft_body_xpbd_area_compliance() const { return soft_body_xpbd_area_compliance; }
 	_FORCE_INLINE_ real_t get_contact_max_allowed_penetration() const { return contact_max_allowed_penetration; }
 	_FORCE_INLINE_ real_t get_contact_bias() const { return contact_bias; }
 	_FORCE_INLINE_ real_t limit_contact_bias(real_t p_bias) const { return godot_physics_limit_contact_bias(p_bias, max_contact_push_speed); }
