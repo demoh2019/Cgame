@@ -2012,6 +2012,14 @@ void GodotSoftBody3D::solve_constraints(real_t p_delta) {
 	const double compliance = linear_stiffness > 0.0 ? double(configured_compliance) / double(linear_stiffness) : 0.0;
 	const double alpha_double = p_delta > 0.0 ? compliance / (double(p_delta) * p_delta) : 0.0;
 	const bool use_xpbd = compliance > 0.0 && Math::is_finite(alpha_double) && alpha_double > 0.0;
+	// Unilateral strain limits supplement (rather than replace) the elastic
+	// stretch solver. No extra per-link scratch or work with both ratios 0.
+	const real_t strain_max_ratio = get_space() ? get_space()->get_soft_body_xpbd_strain_max_stretch_ratio() : real_t(0.0);
+	const real_t strain_min_ratio = get_space() ? get_space()->get_soft_body_xpbd_strain_min_compression_ratio() : real_t(0.0);
+	const double strain_compliance = get_space() ? double(get_space()->get_soft_body_xpbd_strain_limit_compliance()) : 0.0;
+	const double strain_alpha = p_delta > 0.0 ? strain_compliance / (double(p_delta) * double(p_delta)) : 0.0;
+	const bool use_strain_limits = (strain_min_ratio > 0.0 || strain_max_ratio > 0.0) &&
+			!links.is_empty() && p_delta > 0.0 && Math::is_finite(strain_alpha);
 	const real_t configured_area_compliance = get_space() ? get_space()->get_soft_body_xpbd_area_compliance() : real_t(0.0);
 	const double area_alpha_double = p_delta > 0.0 ? double(configured_area_compliance) / (double(p_delta) * p_delta) : 0.0;
 	const bool use_area_xpbd = configured_area_compliance > 0.0 && !faces.is_empty() &&
@@ -2063,6 +2071,16 @@ void GodotSoftBody3D::solve_constraints(real_t p_delta) {
 		}
 	} else if (!xpbd_link_lambdas.is_empty()) {
 		xpbd_link_lambdas.reset();
+	}
+
+	if (use_strain_limits) {
+		xpbd_strain_lambdas.resize(links.size());
+		for (PhysicsXPBDStrainLimitLambdas &multipliers : xpbd_strain_lambdas) {
+			multipliers.stretch = 0.0;
+			multipliers.compression = 0.0;
+		}
+	} else if (!xpbd_strain_lambdas.is_empty()) {
+		xpbd_strain_lambdas.reset();
 	}
 
 	if (use_area_xpbd) {
@@ -2134,6 +2152,15 @@ void GodotSoftBody3D::solve_constraints(real_t p_delta) {
 			// Preserve the legacy link solver when XPBD stretch is disabled.
 			const real_t ti = isolve / (real_t)iteration_count;
 			solve_links(1.0, ti);
+		}
+		if (use_strain_limits) {
+			for (uint32_t link_index = 0; link_index < links.size(); ++link_index) {
+				Link &link = links[link_index];
+				physics_xpbd_solve_strain_limits(link.n[0]->x, link.n[1]->x,
+						link.n[0]->im, link.n[1]->im, link.rl,
+						strain_min_ratio, strain_max_ratio, strain_alpha,
+						xpbd_strain_lambdas[link_index]);
+			}
 		}
 		if (use_area_xpbd) {
 			for (uint32_t face_index = 0; face_index < faces.size(); ++face_index) {
@@ -2355,6 +2382,7 @@ void GodotSoftBody3D::destroy() {
 	face_tree.clear();
 
 	xpbd_link_lambdas.reset();
+	xpbd_strain_lambdas.reset();
 	xpbd_area_lambdas.reset();
 	xpbd_shear_rest_cosines.reset();
 	xpbd_shear_lambdas.reset();
