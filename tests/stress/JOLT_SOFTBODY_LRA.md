@@ -15,7 +15,7 @@ implementing another solver or adding per-vertex work to every frame.
 | Project setting | Default | Values |
 | --- | --- | --- |
 | `physics/jolt_physics_3d/simulation/soft_body_lra_mode` | `0` | `0` Disabled, `1` Euclidean, `2` Geodesic |
-| `physics/jolt_physics_3d/simulation/soft_body_lra_max_distance_multiplier` | `1.0` | At least `1.0`, e.g. `1.05` for 5% slack |
+| `physics/jolt_physics_3d/simulation/soft_body_lra_max_distance_multiplier` | `1.0` | From `1.0` to `10.0`, e.g. `1.05` for 5% slack |
 
 **Euclidean** LRA uses the straight-line distance from a vertex to the
 nearest pinned point in the rest mesh. **Geodesic** LRA measures distance
@@ -37,7 +37,7 @@ project mode is enabled, avoiding Jolt's nearest-kinematic search.
 - Modes `Euclidean` and `Geodesic` require additional constraints and
   can increase CPU and memory consumption. Geodesic also performs more
   graph-related work during creation; use it when mesh topology matters.
-- The multiplier is clamped to at least 1, and NaN/infinity is replaced by
+- The multiplier is clamped to the finite range [1, 10], and NaN/infinity is replaced by
   1.0, so settings never create negative or nonfinite tether lengths.
 - This feature can be used together with the already available optional
   XPBD `Distance`/`Dihedral` bending and quadratic aerodynamic drag.
