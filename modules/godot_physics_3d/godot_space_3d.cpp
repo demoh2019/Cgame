@@ -119,12 +119,11 @@ bool GodotPhysicsDirectSpaceState3D::intersect_ray(const PS3DT::RayParameters &p
 		const PS3DT::RayParameters &params;
 		PS3DT::RayResult &result;
 		Vector3 from;
-		Vector3 to;
 		Vector3 motion;
 		real_t inv_motion_length_squared;
 		bool hit = false;
 	};
-	RayCastData state = { p_parameters, r_result, begin, end, motion, 1.0 / length_squared };
+	RayCastData state = { p_parameters, r_result, begin, motion, 1.0 / length_squared };
 
 	auto visitor = [] (GodotCollisionObject3D *object, int p_shape, real_t p_max_fraction, void *p_userdata) -> real_t {
 		RayCastData &data = *static_cast<RayCastData *>(p_userdata);
@@ -140,7 +139,7 @@ bool GodotPhysicsDirectSpaceState3D::intersect_ray(const PS3DT::RayParameters &p
 
 		const Transform3D inv_xform = object->get_shape_inv_transform(p_shape) * object->get_inv_transform();
 		const Vector3 local_from = inv_xform.xform(data.from);
-		const Vector3 local_to = inv_xform.xform(data.to);
+		const Vector3 local_to = inv_xform.xform(data.from + data.motion * p_max_fraction);
 		const GodotShape3D *shape = object->get_shape(p_shape);
 
 		Vector3 world_point;
