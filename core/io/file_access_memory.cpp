@@ -56,6 +56,7 @@ void FileAccessMemory::cleanup() {
 	}
 
 	memdelete(files);
+	files = nullptr;
 }
 
 Ref<FileAccess> FileAccessMemory::create() {
@@ -70,9 +71,13 @@ bool FileAccessMemory::file_exists(const String &p_name) {
 }
 
 Error FileAccessMemory::open_custom(const uint8_t *p_data, uint64_t p_len) {
-	data = (uint8_t *)p_data;
+	read_snapshot.clear();
+	data = p_data;
+	// Preserve the existing open_custom() writing contract; callers own this storage.
+	writable_data = const_cast<uint8_t *>(p_data);
 	length = p_len;
 	pos = 0;
+	opened = true;
 	return OK;
 }
 
@@ -85,36 +90,48 @@ Error FileAccessMemory::open_internal(const String &p_path, int p_mode_flags) {
 	HashMap<String, Vector<uint8_t>>::Iterator E = files->find(name);
 	ERR_FAIL_COND_V_MSG(!E, ERR_FILE_NOT_FOUND, vformat("Can't find file '%s'.", p_path));
 
-	data = E->value.ptrw();
+	if (p_mode_flags & FileAccess::WRITE) {
+		// Only writable opens need to detach copy-on-write storage.
+		read_snapshot.clear();
+		writable_data = E->value.ptrw();
+		data = writable_data;
+	} else {
+		// Share the registered bytes without copying. Keep our own Vector reference,
+		// so a later write or replacement cannot invalidate the reader's raw pointer.
+		read_snapshot = E->value;
+		writable_data = nullptr;
+		data = read_snapshot.ptr();
+	}
 	length = E->value.size();
 	pos = 0;
+	opened = true;
 
 	return OK;
 }
 
 bool FileAccessMemory::is_open() const {
-	return data != nullptr;
+	return opened;
 }
 
 void FileAccessMemory::seek(uint64_t p_position) {
-	ERR_FAIL_NULL(data);
+	ERR_FAIL_COND(!opened);
 	ERR_FAIL_COND(p_position > length);
 	pos = p_position;
 }
 
 void FileAccessMemory::seek_end(int64_t p_position) {
-	ERR_FAIL_NULL(data);
+	ERR_FAIL_COND(!opened);
 	ERR_FAIL_COND((int64_t)length + p_position < 0);
 	seek(length + p_position);
 }
 
 uint64_t FileAccessMemory::get_position() const {
-	ERR_FAIL_NULL_V(data, 0);
+	ERR_FAIL_COND_V(!opened, 0);
 	return pos;
 }
 
 uint64_t FileAccessMemory::get_length() const {
-	ERR_FAIL_NULL_V(data, 0);
+	ERR_FAIL_COND_V(!opened, 0);
 	return length;
 }
 
@@ -128,7 +145,7 @@ uint64_t FileAccessMemory::get_buffer(uint8_t *p_dst, uint64_t p_length) const {
 	}
 
 	ERR_FAIL_NULL_V(p_dst, -1);
-	ERR_FAIL_NULL_V(data, -1);
+	ERR_FAIL_COND_V(!opened, -1);
 
 	uint64_t left = length - pos;
 	uint64_t read = MIN(p_length, left);
@@ -137,8 +154,11 @@ uint64_t FileAccessMemory::get_buffer(uint8_t *p_dst, uint64_t p_length) const {
 		WARN_PRINT("Reading less data than requested");
 	}
 
-	memcpy(p_dst, &data[pos], read);
-	pos += read;
+	if (read > 0) {
+		ERR_FAIL_NULL_V(data, -1);
+		memcpy(p_dst, data + pos, read);
+		pos += read;
+	}
 
 	return read;
 }
@@ -148,7 +168,7 @@ Error FileAccessMemory::get_error() const {
 }
 
 void FileAccessMemory::flush() {
-	ERR_FAIL_NULL(data);
+	ERR_FAIL_COND(!opened);
 }
 
 bool FileAccessMemory::store_buffer(const uint8_t *p_src, uint64_t p_length) {
@@ -157,12 +177,17 @@ bool FileAccessMemory::store_buffer(const uint8_t *p_src, uint64_t p_length) {
 	}
 
 	ERR_FAIL_NULL_V(p_src, false);
+	ERR_FAIL_COND_V(!opened, false);
+	// Read-only views must never modify a shared Vector or detach its COW storage.
+	ERR_FAIL_NULL_V_MSG(writable_data, false, "Cannot write to a read-only memory file.");
 
 	uint64_t left = length - pos;
 	uint64_t write = MIN(p_length, left);
 
-	memcpy(&data[pos], p_src, write);
-	pos += write;
+	if (write > 0) {
+		memcpy(writable_data + pos, p_src, write);
+		pos += write;
+	}
 
 	ERR_FAIL_COND_V_MSG(write < p_length, false, "Writing less data than requested.");
 
