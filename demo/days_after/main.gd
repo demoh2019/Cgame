@@ -5,6 +5,7 @@ extends Node3D
 
 const PLAYER_SCRIPT = preload("res://player.gd")
 const PICKUP_SCRIPT = preload("res://pickup.gd")
+const RESOURCE_SCRIPT = preload("res://resource_node.gd")
 
 var player
 var hud_label: Label
@@ -16,6 +17,7 @@ func _ready() -> void:
     _build_world()
     _build_player()
     _build_pickups()
+    _build_resources()
     _build_hud()
 
 
@@ -29,6 +31,11 @@ func _configure_controls() -> void:
     _bind_key("interact", KEY_E)
     _bind_key("consume_food", KEY_1)
     _bind_key("consume_water", KEY_2)
+    _bind_key("craft_bandage", KEY_3)
+    _bind_key("craft_tool", KEY_4)
+    _bind_key("use_bandage", KEY_5)
+    _bind_key("craft_advanced_bandage", KEY_6)
+    _bind_key("use_advanced_bandage", KEY_7)
     _bind_key("restart", KEY_R)
 
 
@@ -149,6 +156,30 @@ func _add_pickup(node_name: String, kind: String, title: String,
     add_child(pickup)
 
 
+## Resource progression uses the gameplay-level gathering rules in player.gd.
+## Tier 2 nodes deliberately exist from the start, but require skill + tool.
+func _build_resources() -> void:
+    _add_resource("WoodPileA", "wood", 1, 2, "Дерево T1", Vector3(-2.0, 0.6, 5.0))
+    _add_resource("WoodPileB", "wood", 1, 2, "Дерево T1", Vector3(2.0, 0.6, 4.0))
+    _add_resource("StonePileA", "stone", 1, 2, "Камень T1", Vector3(5.0, 0.6, 3.0))
+    _add_resource("FiberPatchA", "fiber", 1, 2, "Волокно T1", Vector3(-3.0, 0.6, 2.0))
+    _add_resource("FiberPatchB", "fiber", 1, 2, "Волокно T1", Vector3(-4.0, 0.6, 5.0))
+    _add_resource("WoodTier2", "wood", 2, 2, "Дерево T2", Vector3(6.0, 0.6, -3.0))
+    _add_resource("FiberTier2", "fiber", 2, 2, "Волокно T2", Vector3(7.0, 0.6, 1.0))
+
+
+func _add_resource(node_name: String, kind: String, resource_tier: int,
+        count: int, title: String, location: Vector3) -> void:
+    var resource = RESOURCE_SCRIPT.new()
+    resource.name = node_name
+    resource.resource_kind = kind
+    resource.tier = resource_tier
+    resource.yield_count = count
+    resource.display_name = title
+    resource.position = location
+    add_child(resource)
+
+
 func _build_hud() -> void:
     var ui := CanvasLayer.new()
     ui.name = "HUD"
@@ -170,12 +201,14 @@ func _build_hud() -> void:
 
     var help_label := Label.new()
     help_label.text = "WASD — ходьба | Shift — бег | Space — прыжок\n" + \
-        "E — подобрать | 1 — съесть | 2 — выпить\n" + \
-        "Esc — освободить мышь | ЛКМ — вернуть | R — заново"
+        "E — подобрать/добыть | 1 — еда | 2 — вода\n" + \
+        "3 — бинт | 4 — инструмент | 5 — лечиться\n" + \
+        "6 — усиленный бинт | 7 — использовать его\n" + \
+        "Esc — мышь | ЛКМ — вернуть | R — заново"
     column.add_child(help_label)
 
     prompt_label = Label.new()
-    prompt_label.position = Vector2(18, 170)
+    prompt_label.position = Vector2(18, 295)
     ui.add_child(prompt_label)
 
     var crosshair := Label.new()
@@ -188,18 +221,31 @@ func _build_hud() -> void:
 func _process(_delta: float) -> void:
     if player == null or hud_label == null:
         return
-    hud_label.text = "DAYS AFTER — ПРОТОТИП\n" + \
-        "Здоровье: %d   Голод: %d   Жажда: %d\n" % [
+    hud_label.text = "DAYS AFTER × ALBION | выживание и профессии\n" + \
+        "Здоровье: %d | Голод: %d | Жажда: %d\n" % [
             roundi(player.health), roundi(player.hunger), roundi(player.thirst)
-        ] + "Рюкзак: еда × %d   вода × %d" % [
-            player.food_count, player.water_count
+        ] + \
+        "Еда: %d | Вода: %d | Дерево T1: %d | Камень T1: %d | Волокно T1: %d\n" % [
+            player.get_item_count("food"), player.get_item_count("water"),
+            player.get_item_count("wood_t1"), player.get_item_count("stone_t1"),
+            player.get_item_count("fiber_t1")
+        ] + \
+        "T2: дерево %d | волокно %d | навыки: дерево %d, камень %d, волокно %d\n" % [
+            player.get_item_count("wood_t2"), player.get_item_count("fiber_t2"),
+            player.gathering_level("wood"), player.gathering_level("stone"),
+            player.gathering_level("fiber")
+        ] + \
+        "Инструмент: %s | Бинты: %d/%d | XP крафта: %d" % [
+            ("есть" if player.equipped_tool == "scavenger_tool" else "нет"),
+            player.get_item_count("field_bandage"),
+            player.get_item_count("reinforced_bandage"), player.crafting_xp
         ]
     if player.health <= 0.0:
-        prompt_label.text = "Вы погибли от истощения. Нажмите R, чтобы начать заново."
+        prompt_label.text = "Вы погибли. Нажмите R, чтобы начать заново."
     else:
         var target: Node = player.get_aimed_pickup()
-        prompt_label.text = ("[E] Подобрать: " + str(target.get("display_name"))
-            if target != null else "Исследуйте руины и найдите припасы.")
+        prompt_label.text = ("[E] Взаимодействовать: " + str(target.get("display_name"))
+            if target != null else player.last_message)
 
     if Input.is_action_just_pressed("restart"):
         get_tree().reload_current_scene()
