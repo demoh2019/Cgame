@@ -83,7 +83,7 @@ func run(tree: SceneTree, scale: int, frames: int) -> Dictionary:
 
 	# No material tangent friction or body damping: only the new angular
 	# contact rows can slow a sphere spinning around the contact normal.
-	var pass := (
+	var passed := (
 		baseline_spin.finite and loaded_spin.finite and
 		baseline_roll.finite and loaded_roll.finite and in_air.finite and
 		baseline_spin.paired and loaded_spin.paired and
@@ -94,7 +94,7 @@ func run(tree: SceneTree, scale: int, frames: int) -> Dictionary:
 		loaded_roll.final_speed + 0.1 < baseline_roll.final_speed and
 		in_air.final_speed > 18.0
 	)
-	if not pass:
+	if not passed:
 		return {"error": "Iterative 3D angular contact friction lost load-dependent resistance",
 			"baseline_spin": baseline_spin, "loaded_spin": loaded_spin,
 			"baseline_roll": baseline_roll, "loaded_roll": loaded_roll,
