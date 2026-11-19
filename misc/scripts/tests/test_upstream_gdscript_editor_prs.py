@@ -254,5 +254,53 @@ class GDScriptUnreachableContracts(unittest.TestCase):
 
 
 
+
+class Path3DGizmoContracts(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        cpp = source("editor/scene/3d/path_3d_editor_plugin.cpp")
+        cls.fn = cpp.split("void Path3DGizmo::_update_transform_gizmo() {", 1)[1].split(
+            "EditorPlugin::AfterGUIInput Path3DEditorPlugin::forward_3d_gui_input(", 1
+        )[0]
+        cls.header = source("editor/scene/3d/path_3d_editor_plugin.h")
+
+    def test_cached_point_count_is_declared(self):
+        self.assertIn("int cached_point_count = 0;", self.header)
+
+    def test_constructor_caches_initial_curve_point_count(self):
+        self.assertIn("cached_point_count = curve.is_valid() ? curve->get_point_count() : 0;", self.fn)
+
+    def test_stale_selection_is_cleared_on_null_curve(self):
+        self.assertIn("curve.is_null() || point_count != cached_point_count", self.fn)
+        self.assertIn("clear_subgizmo_selection(path);", self.fn)
+
+    def test_point_count_is_updated_before_clearing_selection(self):
+        self.assertLess(self.fn.index("cached_point_count = point_count;"),
+                        self.fn.index("clear_subgizmo_selection(path);"))
+
+    def test_existing_transform_refresh_remains(self):
+        self.assertIn("Node3DEditor::get_singleton()->update_transform_gizmo();", self.fn)
+
+
+class Audio3DMixCountContracts(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        cpp = source("scene/3d/audio_stream_player_3d.cpp")
+        cls.fn = cpp.split("case NOTIFICATION_INTERNAL_PHYSICS_PROCESS:", 1)[1].split(
+            "if (setplayback.is_valid()", 1
+        )[0]
+
+    def test_zero_time_playback_triggers_panning(self):
+        self.assertIn("setplay.get() >= 0", self.fn)
+
+    def test_panning_refreshes_mix_count(self):
+        self.assertIn("last_mix_count = AudioServer::get_singleton()->get_mix_count();", self.fn)
+
+    def test_mix_count_is_refreshed_after_panning(self):
+        self.assertLess(self.fn.index("volume_vector = _update_panning();"),
+                        self.fn.index("last_mix_count = AudioServer::get_singleton()->get_mix_count();"))
+
+
+
 if __name__ == "__main__":
     unittest.main()
