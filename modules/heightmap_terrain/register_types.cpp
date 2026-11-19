@@ -30,6 +30,7 @@
 #include "register_types.h"
 
 #ifndef _3D_DISABLED
+#include "heightmap_foliage_3d.h"
 #include "heightmap_terrain_3d.h"
 #include "terrain_heightmap.h"
 
@@ -43,6 +44,7 @@ void initialize_heightmap_terrain_module(ModuleInitializationLevel p_level) {
     if (p_level == MODULE_INITIALIZATION_LEVEL_SCENE) {
         GDREGISTER_CLASS(TerrainHeightmap);
         GDREGISTER_CLASS(HeightmapTerrain3D);
+        GDREGISTER_CLASS(HeightmapFoliage3D);
     }
 #ifdef TOOLS_ENABLED
     if (p_level == MODULE_INITIALIZATION_LEVEL_EDITOR) {

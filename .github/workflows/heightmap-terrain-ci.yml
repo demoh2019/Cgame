@@ -40,6 +40,9 @@ jobs:
       - name: Run terrain module unit tests
         run: |
           ./bin/godot.linuxbsd.editor.x86_64 --headless --test --test-case='*[Terrain]*' --force-colors
+      - name: Run foliage module unit tests
+        run: |
+          ./bin/godot.linuxbsd.editor.x86_64 --headless --test --test-case='*[Foliage]*' --force-colors
       - name: Run full core test suite
         run: |
           ./bin/godot.linuxbsd.editor.x86_64 --headless --test --force-colors

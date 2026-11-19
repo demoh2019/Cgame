@@ -34,6 +34,22 @@ add_child(terrain)
 
 The image must be uncompressed and 2–513 pixels along each dimension. Single-channel grayscale/R images use the red channel as height; RGB images use luminance. Values are clamped to 0–1 before mapping into the requested height range.
 
+## Foliage placement (experimental)
+
+Add a `HeightmapFoliage3D` node and set its **Heightmap** to the same resource as your `HeightmapTerrain3D` (use a unique/subresource path or drag the resource in the Inspector). Assign a **Foliage Mesh** (e.g. a grass clump or tree model), then choose the **Instance Count**, **Random Seed**, **Minimum Scale**, **Maximum Scale**, and **Maximum Slope Degrees**. Set its **Terrain Cell Size** to the heightmap terrain node's `cell_size`. Put both nodes under the same transform.
+
+This uses `MultiMesh` instancing rather than individual nodes; the placement is deterministic for the same seed and data. When the heightmap is sculpted, the foliage positions are regenerated. It does not include painted density masks, obstacle exclusion, individual instance collisions, or distance-based LOD.
+
+```gdscript
+var foliage := HeightmapFoliage3D.new()
+foliage.heightmap = terrain.heightmap
+foliage.foliage_mesh = preload("res://grass_mesh.tres")
+foliage.instance_count = 2000
+foliage.random_seed = 42
+foliage.terrain_cell_size = terrain.cell_size
+add_child(foliage)
+```
+
 ## Design choices and limitations
 
 - Uses one continuous triangle mesh with **correct winding**, computed normals, UVs, and vertex colors.
@@ -60,7 +76,7 @@ A dedicated GitHub Actions workflow builds the full editor and runs targeted plu
 
 1. **Terrain MVP (this PR):** heightmap resource, mesh generation, basic sculpt/color brush.
 2. **Terrain painting:** proper multi-layer splat maps, material blending, textured brush previews.
-3. **Foliage:** GPU-instanced placement with density masks and deterministic scattering.
+3. **Foliage (dependent PR):** deterministic GPU-instanced placement with slope filtering and scale ranges. Density masks and interactive vegetation painting remain future work.
 4. **Terrain scalability:** chunk rebuilds, LOD transitions, streaming, origin rebasing and HLOD.
 5. **PCG:** deterministic asset graphs that consume heightmaps and scatter points with dependency-aware caching.
 6. **Water and erosion:** interoperable terrain height modifiers and water masks.
