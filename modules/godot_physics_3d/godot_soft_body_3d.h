@@ -287,6 +287,8 @@ public:
 	void set_mesh(RID p_mesh);
 	void set_tetrahedral_indices(const PackedInt32Array &p_indices);
 	void set_tetrahedral_interior_positions(const PackedVector3Array &p_positions);
+	uint32_t get_fem_tetrahedron_count() const { return xpbd_fem_tetrahedra.size(); }
+	uint32_t get_fem_interior_node_count() const { return nodes.size() - xpbd_surface_node_count; }
 
 	void update_rendering_server(PhysicsServer3DRenderingServerHandler *p_rendering_server_handler);
 
