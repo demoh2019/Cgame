@@ -30,6 +30,8 @@
 
 #include "godot_body_pair_2d.h"
 
+#include "core/math/physics_contact.h"
+
 #include "godot_collision_solver_2d.h"
 #include "godot_space_2d.h"
 
@@ -387,6 +389,11 @@ bool GodotBodyPair2D::pre_solve(real_t p_step) {
 		return false;
 	}
 
+	// Combine material coefficients once per physics step, not on every contact iteration.
+	friction = combine_friction(A, B);
+	const real_t bounce_coefficient = combine_bounce(A, B);
+	const real_t restitution_threshold = space->get_restitution_velocity_threshold();
+
 	real_t max_penetration = space->get_contact_max_allowed_penetration();
 
 	real_t bias = space->get_contact_bias();
@@ -491,12 +498,12 @@ bool GodotBodyPair2D::pre_solve(real_t p_step) {
 		}
 #endif
 
-		c.bounce = combine_bounce(A, B);
-		if (c.bounce) {
+		c.bounce = 0.0;
+		if (bounce_coefficient > 0.0) {
 			Vector2 crA(-A->get_prev_angular_velocity() * c.rA.y, A->get_prev_angular_velocity() * c.rA.x);
 			Vector2 crB(-B->get_prev_angular_velocity() * c.rB.y, B->get_prev_angular_velocity() * c.rB.x);
 			Vector2 dv = B->get_prev_linear_velocity() + crB - A->get_prev_linear_velocity() - crA;
-			c.bounce = c.bounce * dv.dot(c.normal);
+			c.bounce = GodotPhysicsContact::restitution_velocity(bounce_coefficient, dv.dot(c.normal), restitution_threshold);
 		}
 
 		c.active = true;
@@ -576,8 +583,6 @@ void GodotBodyPair2D::solve(real_t p_step) {
 		real_t jn = -(c.bounce + vn) * c.mass_normal;
 		real_t jnOld = c.acc_normal_impulse;
 		c.acc_normal_impulse = MAX(jnOld + jn, 0.0f);
-
-		real_t friction = combine_friction(A, B);
 
 		real_t jtMax = friction * c.acc_normal_impulse;
 		real_t jt = -vt * c.mass_tangent;
