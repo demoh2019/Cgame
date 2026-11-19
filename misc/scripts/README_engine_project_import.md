@@ -9,7 +9,7 @@ that a migrated scene looks or behaves like the original.
 
 | Source | Detected from | Current migration |
 | --- | --- | --- |
-| Unity | `Assets/` + `ProjectSettings/` | Portable resources; basic text `.unity` and `.prefab` 3D `GameObject`/`Transform` hierarchies to Godot `.tscn` placeholder Node3Ds |
+| Unity | `Assets/` + `ProjectSettings/` | Portable resources; text `.unity` and `.prefab` 3D hierarchies, limited `SpriteRenderer` and `Camera` nodes in `.tscn` |
 | Unreal Engine | `*.uproject` | Portable exports under `Content/`; **not** `.uasset` / `.umap` binaries |
 | GameMaker | `*.yyp` | Portable resource files, not `.yy` rooms / GML scripts |
 | Defold | `game.project` | Portable resource files, not Lua scripts / collections |
@@ -45,10 +45,27 @@ back on a failed partial copy. Source assets are never modified.
 
 Unity text conversion preserves basic object names, active state, local positions,
 rotations and scales, converting Z axis to Godot's right-handed coordinates.
-It preserves supported parent-child hierarchy but intentionally makes only
-`Node3D` placeholders: materials, cameras, mesh renderers, physics, prefabs
-with overrides, animation, lighting, UI and `MonoBehaviour` scripts **are not
-converted**. Components not handled are reported by Unity class ID.
+It preserves supported parent-child hierarchy and creates `Node3D` objects,
+with two limited Unity component conversions:
+
+- **SpriteRenderer** (Unity class ID 212) creates a child Godot `Sprite3D` when
+  `m_Sprite` references a simple texture file with a unique GUID in its Unity
+  `.meta` file. This retains texture reference, enabled state, flip X/Y,
+  valid RGBA modulation and per-texture `spritePixelsToUnits` (pixel size).
+  Multi-sprite atlases and unresolved/duplicate GUIDs are deliberately skipped.
+  Sorting order, sliced/tiled draw modes, sprite pivots, sprite material effects,
+  and custom render pipelines still need manual adjustments.
+- **Camera** (Unity class ID 20) creates a child Godot `Camera3D` and maps
+  perspective FOV or orthographic height, near/far clipping and a disabled
+  camera's inactive status. Unity-specific viewport, clear flags, render
+  settings and camera stacking are not reproduced.
+
+Scene conversion is still **not** faithful gameplay migration: materials,
+mesh renderers, physics, prefab overrides, animations, lighting, Unity UI,
+`MonoBehaviour`/C# scripts, and compiled games are **not converted**.
+Components not handled are reported by Unity class ID. Unity 2D `SpriteRenderer`
+is represented as a 3D plane, not a full Godot `Node2D`/`CanvasItem`
+scene, so camera settings and layering may need manual changes.
 Binary Unity scenes and unsupported YAML shapes are skipped and reported.
 For Unreal, export models as `.glb`/`.gltf` or `.fbx` before migration.
 
@@ -68,11 +85,12 @@ python3 -m unittest discover -s misc/scripts/tests -p 'test_engine_project_impor
 
 Tests cover engine detection, Unity hierarchy/transforms, portable assets,
 glTF dependencies, security paths, dry runs, conflict preflight, idempotency,
+Unity SpriteRenderer GUID resolution/PPU/colors/flips, camera projections,
 and CLI failures. See `.github/workflows/engine-project-import.yml`.
 
 ### Follow-on work
 
 Add a Godot EditorPlugin import wizard and AI migration assistant for unsupported
-scripts/components, then implement a limited Unity 2D SpriteRenderer converter,
-material/shader conversion, prefab overrides, animation and physics mappings.
+scripts/components, then improve Unity 2D `Node2D`/Canvas mapping, texture atlas
+slicing, material/shader conversion, prefab overrides, animation and physics.
 Treat each supported Unity version and renderer as a separate compatibility target.

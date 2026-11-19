@@ -338,5 +338,330 @@ class ImportTests(unittest.TestCase):
         self.assertIn("detect", err)
 
 
+    def unity_sprite(self, guid="0123456789abcdef0123456789abcdef", extra="", game_id="100", component="401"):
+        return (f"--- !u!212 &{component}\nSpriteRenderer:\n"
+                f"  m_GameObject: {{fileID: {game_id}}}\n"
+                f"  m_Sprite: {{fileID: 21300000, guid: {guid}, type: 3}}\n"
+                f"{extra}")
+
+    def unity_meta(self, name="Assets/Art/hero.png", guid="0123456789abcdef0123456789abcdef", extra=""):
+        self.write(name + ".meta", f"fileFormatVersion: 2\nguid: {guid}\n{extra}")
+
+    def test_sprite_renderer_ext_resource_generated(self):
+        img = "res://imported/unity/Art/hero.png"
+        data, nodes, warnings = convert_unity_scene(
+            UNITY_SCENE + self.unity_sprite(), {"0123456789abcdef0123456789abcdef": img})
+        scene = data.decode()
+        self.assertEqual(nodes, 2)
+        self.assertIn('[gd_scene load_steps=2 format=3]', scene)
+        self.assertIn(f'path="{img}"', scene)
+        self.assertIn('[node name="Sprite" type="Sprite3D" parent="Parent"]', scene)
+        self.assertIn('texture = ExtResource("1")', scene)
+        self.assertNotIn("SpriteRenderer 401", " ".join(warnings))
+
+    def test_unity_sprite_meta_resolves_in_manifest(self):
+        self.unity()
+        self.write("Assets/Art/hero.png", b"PNG_BYTES")
+        self.unity_meta()
+        self.write("Assets/Scene.unity", UNITY_SCENE + self.unity_sprite())
+        result = plan(self.source, self.target)
+        assets = result["report"]["assets"]
+        self.assertEqual([a["source"] for a in assets], ["Art/hero.png", "Scene.tscn"])
+        self.assertTrue(all(".meta" not in a["target"] for a in assets))
+        count, skipped = apply_plan(result, self.target)
+        self.assertEqual((count, skipped), (3, 0))
+        scene = (self.target / "imported/unity/Scene.tscn").read_text()
+        self.assertIn('path="res://imported/unity/Art/hero.png"', scene)
+        self.assertEqual(len(result["report"]["assets"]), 2)
+
+    def test_unity_sprite_missing_guid_warns_and_skips(self):
+        self.unity()
+        self.write("Assets/Art/hero.png", b"image")
+        self.write("Assets/Scene.unity", UNITY_SCENE + self.unity_sprite())
+        result = plan(self.source, self.target)
+        scene = next(e for e in result["entries"] if e.destination.endswith(".tscn"))
+        self.assertNotIn("Sprite3D", scene.content.decode())
+        self.assertIn("GUID unavailable", " ".join(result["report"]["warnings"]))
+
+    def test_unity_sprite_disabled_renderer(self):
+        scene, _, _ = convert_unity_scene(UNITY_SCENE + self.unity_sprite(extra="  m_Enabled: 0\n"),
+                       {"0123456789abcdef0123456789abcdef": "res://imported/unity/a.png"})
+        self.assertIn('[node name="Sprite" type="Sprite3D" parent="Parent"]\ntexture = ExtResource("1")\nvisible = false', scene.decode())
+
+    def test_unity_sprite_flip(self):
+        scene, _, _ = convert_unity_scene(UNITY_SCENE + self.unity_sprite(extra="  m_FlipX: 1\n  m_FlipY: 1\n"),
+                       {"0123456789abcdef0123456789abcdef": "res://imported/unity/a.png"})
+        self.assertIn("flip_h = true", scene.decode())
+        self.assertIn("flip_v = true", scene.decode())
+
+    def test_unity_sprite_color(self):
+        scene, _, _ = convert_unity_scene(UNITY_SCENE + self.unity_sprite(extra="  m_Color: {r: 0.25, g: 1, b: 0.75, a: 0.5}\n"),
+                       {"0123456789abcdef0123456789abcdef": "res://imported/unity/a.png"})
+        self.assertIn("modulate = Color(0.25, 1, 0.75, 0.5)", scene.decode())
+
+    def test_unity_sprite_invalid_color_uses_default(self):
+        scene, _, _ = convert_unity_scene(UNITY_SCENE + self.unity_sprite(extra="  m_Color: {r: nan, g: 1, b: 1, a: 1}\n"),
+                       {"0123456789abcdef0123456789abcdef": "res://imported/unity/a.png"})
+        self.assertNotIn("modulate =", scene.decode())
+
+    def test_unity_sprite_empty_asset_does_not_warn(self):
+        contents = (UNITY_SCENE + self.unity_sprite().replace("fileID: 21300000", "fileID: 0"))
+        _, _, messages = convert_unity_scene(contents)
+        self.assertNotIn("GUID unavailable", " ".join(messages))
+
+    def test_unity_sprite_unknown_texture_not_referenced(self):
+        scene, _, messages = convert_unity_scene(UNITY_SCENE + self.unity_sprite())
+        self.assertNotIn("ext_resource", scene.decode())
+        self.assertIn("GUID unavailable", " ".join(messages))
+
+    def test_unity_sprite_duplicate_references_share_single_ext_resource(self):
+        contents = UNITY_SCENE + self.unity_sprite() + self.unity_sprite(game_id="101", component="402")
+        scene, _, _ = convert_unity_scene(contents,
+                     {"0123456789abcdef0123456789abcdef": "res://imported/unity/hero.png"})
+        text = scene.decode()
+        self.assertEqual(text.count("[ext_resource"), 1)
+        self.assertEqual(text.count('texture = ExtResource("1")'), 2)
+        self.assertIn('parent="Parent/Child"', text)
+
+    def test_unity_sprite_renderer_name_collision(self):
+        contents = UNITY_SCENE.replace('m_Name: Child', 'm_Name: Sprite') + self.unity_sprite()
+        scene, _, _ = convert_unity_scene(contents, {"0123456789abcdef0123456789abcdef": "res://imported/unity/hero.png"})
+        txt = scene.decode()
+        self.assertEqual(txt.count('parent="Parent"'), 2)
+        self.assertIn('name="Sprite_401_1"', txt)
+
+    def test_unity_sprite_renderer_missing_gameobject_warns(self):
+        _, _, warnings = convert_unity_scene(UNITY_SCENE + self.unity_sprite(game_id="999"))
+        self.assertIn("no converted Transform", " ".join(warnings))
+
+    def test_unity_sprite_draw_mode_warns(self):
+        _, _, warnings = convert_unity_scene(UNITY_SCENE + self.unity_sprite(extra="  m_DrawMode: 2\n  m_SortingOrder: 7\n"),
+                         {"0123456789abcdef0123456789abcdef": "res://imported/unity/hero.png"})
+        self.assertTrue(any("sliced/tiled" in w for w in warnings))
+        self.assertTrue(any("sorting order" in w for w in warnings))
+
+    def test_unity_multi_sprite_atlas_is_not_imported_as_whole(self):
+        self.unity()
+        self.write("Assets/Art/hero.png", b"image")
+        self.unity_meta(extra="  spriteMode: 2\n")
+        self.write("Assets/Scene.unity", UNITY_SCENE + self.unity_sprite())
+        result = plan(self.source, self.target)
+        self.assertIn("atlas", " ".join(result["report"]["warnings"]))
+        self.assertIn("GUID unavailable", " ".join(result["report"]["warnings"]))
+        scene = next(e for e in result["entries"] if e.destination.endswith(".tscn"))
+        self.assertNotIn("Sprite3D", scene.content.decode())
+
+    def test_unity_duplicate_guids_rejected(self):
+        self.unity()
+        self.write("Assets/Art/hero.png", b"one")
+        self.write("Assets/Art/enemy.png", b"two")
+        self.unity_meta("Assets/Art/hero.png")
+        self.unity_meta("Assets/Art/enemy.png")
+        self.write("Assets/Scene.unity", UNITY_SCENE + self.unity_sprite())
+        result = plan(self.source, self.target)
+        self.assertIn("duplicate Unity texture GUID", " ".join(result["report"]["warnings"]))
+        scene = next(e for e in result["entries"] if e.destination.endswith(".tscn"))
+        self.assertNotIn("Sprite3D", scene.content.decode())
+
+    def test_unity_invalid_guid_is_not_used(self):
+        self.unity()
+        self.write("Assets/Art/hero.png", b"image")
+        self.unity_meta(guid="not-a-guid")
+        self.write("Assets/Scene.unity", UNITY_SCENE + self.unity_sprite())
+        result = plan(self.source, self.target)
+        self.assertIn("invalid Unity texture GUID", " ".join(result["report"]["warnings"]))
+        scene = next(e for e in result["entries"] if e.destination.endswith(".tscn"))
+        self.assertNotIn("Sprite3D", scene.content.decode())
+
+    def test_unity_oversized_meta_is_skipped(self):
+        self.unity()
+        self.write("Assets/Art/hero.png")
+        self.write("Assets/Art/hero.png.meta", "guid: " + "f" * 32 + "\n" + "X" * (256 * 1024))
+        result = plan(self.source, self.target)
+        self.assertIn("oversized", " ".join(result["report"]["warnings"]))
+
+    @unittest.skipUnless(hasattr(os, "symlink"), "symlinks unavailable")
+    def test_unity_symlinked_meta_is_ignored(self):
+        self.unity()
+        self.write("Assets/Art/hero.png")
+        outside = self.write("secret.txt", "guid: " + "f" * 32)
+        try:
+            (self.source / "Assets/Art/hero.png.meta").symlink_to(outside)
+        except OSError:
+            self.skipTest("Symlinks restricted")
+        result = plan(self.source, self.target)
+        self.assertEqual([a["source"] for a in result["report"]["assets"]], ["Art/hero.png"])
+
+    def test_unity_sprite_extension_not_supported(self):
+        self.unity()
+        self.write("Assets/Art/hero.exr")
+        self.unity_meta("Assets/Art/hero.exr")
+        self.write("Assets/Scene.unity", UNITY_SCENE + self.unity_sprite())
+        result = plan(self.source, self.target)
+        scene = next(e for e in result["entries"] if e.destination.endswith(".tscn"))
+        self.assertNotIn("Sprite3D", scene.content.decode())
+
+    def test_unity_camera_perspective(self):
+        contents = UNITY_SCENE + '''--- !u!20 &500
+Camera:
+  m_GameObject: {fileID: 100}
+  orthographic: 0
+  field of view: 65
+  near clip plane: 0.2
+  far clip plane: 500
+'''
+        scene, count, warnings = convert_unity_scene(contents)
+        self.assertEqual(count, 2)
+        txt = scene.decode()
+        self.assertIn('[node name="Camera" type="Camera3D" parent="Parent"]', txt)
+        self.assertIn('fov = 65', txt)
+        self.assertIn('near = 0.2', txt)
+        self.assertIn('far = 500', txt)
+        self.assertIn("render settings", " ".join(warnings))
+
+    def test_unity_camera_orthographic_size_doubled(self):
+        contents = UNITY_SCENE + '''--- !u!20 &500
+Camera:
+  m_GameObject: {fileID: 101}
+  orthographic: 1
+  orthographic size: 4
+'''
+        scene, _, _ = convert_unity_scene(contents)
+        txt = scene.decode()
+        self.assertIn('parent="Parent/Child"', txt)
+        self.assertIn('projection = 1', txt)
+        self.assertIn('size = 8', txt)
+        self.assertNotIn('fov = ', txt)
+
+    def test_unity_camera_disabled(self):
+        contents = UNITY_SCENE + '''--- !u!20 &500
+Camera:
+  m_GameObject: {fileID: 101}
+  m_Enabled: 0
+'''
+        scene, _, _ = convert_unity_scene(contents)
+        self.assertIn('current = false', scene.decode())
+
+    def test_unity_camera_unknown_gameobject_warns(self):
+        contents = UNITY_SCENE + '''--- !u!20 &500
+Camera:
+  m_GameObject: {fileID: 999}
+'''
+        scene, _, warnings = convert_unity_scene(contents)
+        self.assertNotIn('Camera3D', scene.decode())
+        self.assertIn("no converted Transform", " ".join(warnings))
+
+    def test_unity_camera_inactive_gameobject(self):
+        contents = UNITY_SCENE.replace("m_IsActive: 1", "m_IsActive: 0", 1) + '''--- !u!20 &500
+Camera:
+  m_GameObject: {fileID: 100}
+'''
+        scene, _, _ = convert_unity_scene(contents)
+        self.assertIn("current = false", scene.decode())
+
+    def test_unity_camera_invalid_clip_is_omitted(self):
+        contents = UNITY_SCENE + '''--- !u!20 &500
+Camera:
+  m_GameObject: {fileID: 100}
+  near clip plane: 10
+  far clip plane: 1
+'''
+        scene, _, _ = convert_unity_scene(contents)
+        self.assertNotIn('near = ', scene.decode())
+        self.assertNotIn('far = ', scene.decode())
+
+    def test_unity_camera_invalid_fov_not_emitted(self):
+        contents = UNITY_SCENE + '''--- !u!20 &500
+Camera:
+  m_GameObject: {fileID: 100}
+  field of view: nan
+'''
+        scene, _, _ = convert_unity_scene(contents)
+        self.assertIn('fov = 75', scene.decode())
+
+    def test_unity_both_camera_and_sprite_on_same_gameobject(self):
+        contents = UNITY_SCENE + self.unity_sprite() + '''--- !u!20 &500
+Camera:
+  m_GameObject: {fileID: 100}
+'''
+        scene, _, _ = convert_unity_scene(contents,
+                      {"0123456789abcdef0123456789abcdef": "res://imported/unity/hero.png"})
+        txt = scene.decode()
+        self.assertIn('type="Camera3D"', txt)
+        self.assertIn('type="Sprite3D"', txt)
+        self.assertEqual(txt.count('parent="Parent"'), 3)
+
+    def test_unity_asset_apply_idempotency_with_sprite_scene(self):
+        self.unity()
+        self.write("Assets/Art/hero.png", b"image")
+        self.unity_meta()
+        self.write("Assets/Scene.unity", UNITY_SCENE + self.unity_sprite())
+        result = plan(self.source, self.target)
+        self.assertEqual(apply_plan(result, self.target), (3, 0))
+        self.assertEqual(apply_plan(result, self.target), (0, 3))
+
+    def test_unity_asset_changed_does_not_overwrite_sprite_scene(self):
+        self.unity()
+        self.write("Assets/Art/hero.png", b"first")
+        self.unity_meta()
+        self.write("Assets/Scene.unity", UNITY_SCENE + self.unity_sprite())
+        first = plan(self.source, self.target)
+        apply_plan(first, self.target)
+        self.write("Assets/Art/hero.png", b"different")
+        with self.assertRaisesRegex(ImportErrorDetail, "overwrite"):
+            apply_plan(plan(self.source, self.target), self.target)
+        self.assertEqual((self.target / "imported/unity/Art/hero.png").read_bytes(), b"first")
+
+
+    def test_unity_sprite_custom_pixels_per_unit(self):
+        self.unity()
+        self.write("Assets/Art/hero.png", b"image")
+        self.unity_meta(extra="TextureImporter:\n  spritePixelsToUnits: 32\n")
+        self.write("Assets/Scene.unity", UNITY_SCENE + self.unity_sprite())
+        result = plan(self.source, self.target)
+        scene = next(e for e in result["entries"] if e.destination.endswith(".tscn"))
+        self.assertIn("pixel_size = 0.03125", scene.content.decode())
+
+    def test_unity_sprite_default_pixels_per_unit(self):
+        self.unity()
+        self.write("Assets/Art/hero.png", b"image")
+        self.unity_meta(extra="TextureImporter:\n  spritePixelsToUnits: 100\n")
+        self.write("Assets/Scene.unity", UNITY_SCENE + self.unity_sprite())
+        result = plan(self.source, self.target)
+        scene = next(e for e in result["entries"] if e.destination.endswith(".tscn"))
+        self.assertNotIn("pixel_size =", scene.content.decode())
+
+    def test_unity_sprite_invalid_pixels_per_unit_falls_back(self):
+        self.unity()
+        self.write("Assets/Art/hero.png", b"image")
+        self.unity_meta(extra="TextureImporter:\n  spritePixelsToUnits: 0\n")
+        self.write("Assets/Scene.unity", UNITY_SCENE + self.unity_sprite())
+        result = plan(self.source, self.target)
+        self.assertIn("invalid sprite pixels-per-unit", " ".join(result["report"]["warnings"]))
+        scene = next(e for e in result["entries"] if e.destination.endswith(".tscn"))
+        self.assertNotIn("pixel_size =", scene.content.decode())
+
+    def test_unity_sprite_atlas_order_prevents_duplicate_guid_fallback(self):
+        self.unity()
+        self.write("Assets/Art/a.png", b"one")
+        self.write("Assets/Art/b.png", b"two")
+        self.unity_meta("Assets/Art/a.png", extra="spriteMode: 2\n")
+        self.unity_meta("Assets/Art/b.png")
+        self.write("Assets/Scene.unity", UNITY_SCENE + self.unity_sprite())
+        result = plan(self.source, self.target)
+        scene = next(e for e in result["entries"] if e.destination.endswith(".tscn"))
+        self.assertNotIn('Sprite3D', scene.content.decode())
+
+    def test_unity_sprite_case_insensitive_guid(self):
+        self.unity()
+        self.write("Assets/Art/hero.png", b"image")
+        self.unity_meta(guid="ABCDEF0123456789ABCDEF0123456789")
+        self.write("Assets/Scene.unity", UNITY_SCENE +
+                   self.unity_sprite(guid="abcdef0123456789abcdef0123456789"))
+        result = plan(self.source, self.target)
+        scene = next(e for e in result["entries"] if e.destination.endswith(".tscn"))
+        self.assertIn("Sprite3D", scene.content.decode())
+
+
 if __name__ == "__main__":
     unittest.main()
