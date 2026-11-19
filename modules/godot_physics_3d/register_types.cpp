@@ -54,6 +54,13 @@ void initialize_godot_physics_3d_module(ModuleInitializationLevel p_level) {
 	if (p_level != MODULE_INITIALIZATION_LEVEL_SERVERS) {
 		return;
 	}
+	// Optional advanced soft-body dynamics. Existing projects continue to
+	// use the legacy Bullet-derived link solver until explicitly enabled.
+	GLOBAL_DEF(PropertyInfo(Variant::BOOL, "physics/3d/soft_body/xpbd_distance_constraints"), false);
+	GLOBAL_DEF(PropertyInfo(Variant::FLOAT, "physics/3d/soft_body/xpbd_distance_compliance", PROPERTY_HINT_RANGE, "0,0.01,0.000001,or_greater"), 0.00001);
+	GLOBAL_DEF(PropertyInfo(Variant::BOOL, "physics/3d/soft_body/xpbd_volume_preservation"), false);
+	GLOBAL_DEF(PropertyInfo(Variant::FLOAT, "physics/3d/soft_body/xpbd_volume_compliance", PROPERTY_HINT_RANGE, "0,0.001,0.000001,or_greater"), 0.000001);
+
 	PhysicsServer3DManager::get_singleton()->register_server(PhysicsServer3DManager::GODOT_PHYSICS_3D_NAME, callable_mp_static(_createGodotPhysics3DCallback));
 	PhysicsServer3DManager::get_singleton()->set_default_server(PhysicsServer3DManager::GODOT_PHYSICS_3D_NAME);
 }
