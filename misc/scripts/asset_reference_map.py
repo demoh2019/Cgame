@@ -183,15 +183,15 @@ def build_reference_map(project, roots, max_text_bytes=MAX_TEXT_BYTES, max_total
     per_root = []
     combined = set()
     for root in root_paths:
-        seen = set()
+        # Mark at enqueue time: on dense shared-dependency graphs the old
+        # pop-time check could schedule the same resource thousands of times.
+        seen = {root}
         pending = [root]
         while pending:
             path = pending.pop()
-            if path in seen:
-                continue
-            seen.add(path)
             for target in direct(path):
                 if target not in seen:
+                    seen.add(target)
                     pending.append(target)
         per_root.append({"root": "res://" + root, "file_count": len(seen),
                          "total_bytes": sum(index[path] for path in seen)})
@@ -212,7 +212,7 @@ def build_reference_map(project, roots, max_text_bytes=MAX_TEXT_BYTES, max_total
                      "files": [{"path": path, "bytes": index[path]} for path in sorted(combined)]},
         "references": {"res://" + source: ["res://" + target for target in graph[source]]
                        for source in sorted(combined)},
-        "referenced_by": {"res://" + path: ["res://" + source for source in sorted(referenced_by[path])]
+        "referenced_by": {"res://" + path: ["res://" + source for source in referenced_by[path]]
                           for path in sorted(combined)},
         "problems": problems,
         "budget": {"limit_bytes": max_total_bytes, "exceeded": max_total_bytes is not None and total > max_total_bytes},
