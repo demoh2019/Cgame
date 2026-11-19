@@ -61,6 +61,10 @@ void JoltProjectSettings::register_settings() {
 	// Geodesic distances follow the mesh rather than cutting through folds.
 	GLOBAL_DEF(PropertyInfo(Variant::INT, "physics/jolt_physics_3d/simulation/soft_body_lra_mode", PROPERTY_HINT_ENUM, "Disabled,Euclidean,Geodesic"), 0);
 	GLOBAL_DEF(PropertyInfo(Variant::FLOAT, "physics/jolt_physics_3d/simulation/soft_body_lra_max_distance_multiplier", PROPERTY_HINT_RANGE, "1,10,0.01"), 1.05f);
+	// Generate an interior particle and tetrahedral volume constraints only for
+	// small, closed, consistently wound convex soft-body surface meshes.
+	GLOBAL_DEF(PropertyInfo(Variant::BOOL, "physics/jolt_physics_3d/simulation/soft_body_volume_preservation"), false);
+	GLOBAL_DEF(PropertyInfo(Variant::FLOAT, "physics/jolt_physics_3d/simulation/soft_body_volume_compliance", PROPERTY_HINT_RANGE, "0,0.01,0.000001,or_greater"), 0.00001f);
 	GLOBAL_DEF(PropertyInfo(Variant::FLOAT, "physics/jolt_physics_3d/simulation/bounce_velocity_threshold", PROPERTY_HINT_RANGE, U"0,1,0.001,or_greater,suffix:m/s"), 1.0f);
 	GLOBAL_DEF(PropertyInfo(Variant::BOOL, "physics/jolt_physics_3d/simulation/allow_sleep"), true);
 	GLOBAL_DEF(PropertyInfo(Variant::FLOAT, "physics/jolt_physics_3d/simulation/sleep_velocity_threshold", PROPERTY_HINT_RANGE, U"0,1,0.001,or_greater,suffix:m/s"), 0.03f);
@@ -125,6 +129,9 @@ void JoltProjectSettings::read_settings() {
 	soft_body_lra_mode = CLAMP((int)GLOBAL_GET("physics/jolt_physics_3d/simulation/soft_body_lra_mode"), 0, 2);
 	const float lra_multiplier = GLOBAL_GET("physics/jolt_physics_3d/simulation/soft_body_lra_max_distance_multiplier");
 	soft_body_lra_max_distance_multiplier = Math::is_finite(lra_multiplier) ? CLAMP(lra_multiplier, 1.0f, 10.0f) : 1.05f;
+	soft_body_volume_preservation = GLOBAL_GET("physics/jolt_physics_3d/simulation/soft_body_volume_preservation");
+	const float volume_compliance = GLOBAL_GET("physics/jolt_physics_3d/simulation/soft_body_volume_compliance");
+	soft_body_volume_compliance = Math::is_finite(volume_compliance) ? MAX(volume_compliance, 0.0f) : 0.00001f;
 	bounce_velocity_threshold = GLOBAL_GET("physics/jolt_physics_3d/simulation/bounce_velocity_threshold");
 	sleep_allowed = GLOBAL_GET("physics/jolt_physics_3d/simulation/allow_sleep");
 	sleep_velocity_threshold = GLOBAL_GET("physics/jolt_physics_3d/simulation/sleep_velocity_threshold");
