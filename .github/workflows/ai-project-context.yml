@@ -1,0 +1,35 @@
+name: AI project context smoke and unit tests
+
+on:
+  pull_request:
+    paths:
+      - 'misc/scripts/ai_project_context.py'
+      - 'misc/scripts/tests/test_ai_project_context.py'
+      - 'misc/scripts/README_ai_project_context.md'
+      - '.github/workflows/ai-project-context.yml'
+  push:
+    branches: [develop]
+    paths:
+      - 'misc/scripts/ai_project_context.py'
+      - 'misc/scripts/tests/test_ai_project_context.py'
+      - 'misc/scripts/README_ai_project_context.md'
+      - '.github/workflows/ai-project-context.yml'
+  workflow_dispatch:
+
+jobs:
+  unit:
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+        python: ['3.10', '3.12']
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python }}
+      - name: Syntax check
+        run: python -m py_compile misc/scripts/ai_project_context.py misc/scripts/tests/test_ai_project_context.py
+      - name: Unit tests
+        run: python -m unittest discover -s misc/scripts/tests -p test_ai_project_context.py -v
