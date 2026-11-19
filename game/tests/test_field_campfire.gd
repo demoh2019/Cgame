@@ -76,10 +76,51 @@ func run(t) -> void:
 		"fire shelter lowers existing cold exposure")
 	var checkpoint: Dictionary = Persist.capture(sim)
 	t.check(not checkpoint.has("campfires"), "short-lived fire is not persisted as an account wall")
+	t.current = "server-authoritative cooperative refueling"
+	var prior_expiry: float = float(sim.campfires[id]["expires"])
+	t.eq(sim.cmd_refuel_campfire(999, id).get("reason"), "dead",
+			"unregistered peer cannot spend fuel")
+	t.eq(sim.cmd_refuel_campfire(93, -1).get("reason"), "no_fire",
+			"unknown fire cannot consume inventory")
+	distant.inventory.add("wood_1", 4)
+	var far_wood: int = distant.inventory.count("wood_1")
+	t.eq(sim.cmd_refuel_campfire(95, id).get("reason"), "out_of_range",
+			"remote player cannot refuel a campfire")
+	t.eq(distant.inventory.count("wood_1"), far_wood,
+			"distance rejection leaves source items untouched")
+	var refuel_wood: int = camper.inventory.count("wood_1")
+	var fueled: Dictionary = sim.cmd_refuel_campfire(93, id)
+	t.check(bool(fueled.get("ok", false)), "living owner can add wood")
+	t.eq(camper.inventory.count("wood_1"), refuel_wood - 2,
+			"two wood units consumed exactly once")
+	t.near(float(sim.campfires[id]["expires"]), prior_expiry + FieldCampfire.REFUEL_SECONDS,
+			0.001, "burn time extends by 120 seconds")
+	t.eq(sim.cmd_refuel_campfire(94, id).get("reason"), "missing_materials",
+			"other survivor cannot refuel without timber")
+	second.inventory.add("wood_1", 3)
+	var second_wood: int = second.inventory.count("wood_1")
+	t.check(bool(sim.cmd_refuel_campfire(94, id).get("ok", false)),
+			"another survivor can cooperatively refuel the same fire")
+	t.eq(second.inventory.count("wood_1"), second_wood - 2,
+			"contributing player pays their own fuel")
+	t.near(float(sim.campfires[id]["expires"]), prior_expiry + 2.0 * FieldCampfire.REFUEL_SECONDS,
+			0.001, "two refuels extend time twice")
+	t.eq(sim.cmd_refuel_campfire(93, id).get("reason"), "full_duration",
+			"burn-duration cap rejects extra fuel")
+	t.eq(camper.inventory.count("wood_1"), refuel_wood - 2,
+			"refused fuel does not destroy more inventory")
+	var public: Dictionary = sim.snapshot_for(94)
+	t.check(float(public["campfires"][0]["remaining"]) > FieldCampfire.DURATION,
+			"both clients receive the updated remaining time")
+	t.check(not public["campfires"][0].has("owner"),
+			"refueled fire still does not expose account or peer")
+
 	t.current = "expiry and no replay"
-	sim.time = FieldCampfire.DURATION + 0.01
+	sim.time = float(sim.campfires[id]["expires"]) + 0.01
 	t.check(not FieldCampfire.has_warmth(sim.campfires, camper.position, sim.time),
 		"expired fire does not keep giving warmth before cleanup")
+	t.eq(sim.cmd_refuel_campfire(93, id).get("reason"), "expired",
+			"expired fire cannot be refueled after deadline")
 	sim._tick_world(0.01)
 	t.eq(sim.campfires.size(), 0, "expired fire cleaned up")
 	t.eq(sim.snapshot_for(93)["campfires"].size(), 0, "expired fire leaves snapshots")

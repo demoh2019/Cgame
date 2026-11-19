@@ -876,6 +876,29 @@ func cmd_light_campfire(peer_id: int, x: float, z: float) -> Dictionary:
 	return {"ok": true, "id": id, "seconds": FieldCampfire.DURATION}
 
 
+## Nearby survivors may cooperatively fuel an existing fire. The server
+## validates its deadline and charges the correct backpack before extending it.
+func cmd_refuel_campfire(peer_id: int, id: int) -> Dictionary:
+	var player: Player = players.get(peer_id)
+	if player == null or not _alive(player):
+		return {"ok": false, "reason": "dead"}
+	var camp: Dictionary = campfires.get(id, {})
+	var reason: String = FieldCampfire.refuel_reason(camp, player.position, time)
+	if reason != "":
+		return {"ok": false, "reason": reason}
+	if not player.inventory.has_all(FieldCampfire.REFUEL_COST):
+		return {"ok": false, "reason": "missing_materials"}
+	for item_id in FieldCampfire.REFUEL_COST:
+		player.inventory.remove(str(item_id), int(FieldCampfire.REFUEL_COST[item_id]))
+	camp["expires"] = minf(time + FieldCampfire.MAX_REMAINING_SECONDS,
+			float(camp["expires"]) + FieldCampfire.REFUEL_SECONDS)
+	campfires[id] = camp
+	player.dirty_inventory = true
+	player.dirty_character = true
+	events.append({"type": "campfire_refueled", "id": id, "peer": peer_id})
+	return {"ok": true, "id": id, "remaining": float(camp["expires"]) - time}
+
+
 func cmd_build(peer_id: int, x: float, z: float) -> Dictionary:
 	var player: Player = players.get(peer_id)
 	if player == null or not _alive(player):

@@ -291,6 +291,23 @@ func dismantle(id: int) -> void:
 	net.c_dismantle.rpc_id(1, id)
 
 
+func nearest_campfire(point: Vector3, radius: float = 3.2) -> int:
+	var closest: int = -1
+	var best_squared: float = radius * radius
+	for fire in campfires.values():
+		var offset := Vector2(point.x - float(fire["x"]), point.z - float(fire["z"]))
+		var distance_squared: float = offset.length_squared()
+		if distance_squared <= best_squared:
+			closest = int(fire["id"])
+			best_squared = distance_squared
+	return closest
+
+
+func refuel_campfire(id: int) -> void:
+	if id >= 0:
+		net.c_refuel_campfire.rpc_id(1, id)
+
+
 func nearest_barricade(point: Vector3, radius: float = 3.0) -> int:
 	var nearest := -1
 	var best := radius

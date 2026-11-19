@@ -156,6 +156,16 @@ func _build() -> void:
 		var direction := Vector2(sin(client.yaw), cos(client.yaw))
 		client.light_campfire(Vector2(pos.x, pos.z) + direction * 2.8))
 	inventory_box.add_child(campfire_button)
+	var refuel_button := Button.new()
+	refuel_button.name = "RefuelCampfire"
+	refuel_button.text = "Refuel nearest campfire (+2 min, 2 wood T1; 9)"
+	refuel_button.pressed.connect(func() -> void:
+		var fire_id: int = client.nearest_campfire(client.display_position())
+		if fire_id == -1:
+			say("No burning campfire nearby.")
+		else:
+			client.refuel_campfire(fire_id))
+	inventory_box.add_child(refuel_button)
 	_inventory_grid = GridContainer.new()
 	_inventory_grid.columns = 4
 	inventory_box.add_child(_inventory_grid)
@@ -393,6 +403,9 @@ func _on_event(event: Dictionary) -> void:
 	match event["type"]:
 		"gathered":
 			say("+%d %s" % [event["amount"], Defs.item(event["item"]).get("name", event["item"])])
+		"campfire_refueled":
+			if int(event.get("peer", -1)) == client.peer_id:
+				say("You added wood to the shared campfire.")
 		"fished":
 			if int(event.get("peer", -1)) == client.peer_id:
 				var catch_id: String = str(event.get("item", "raw_fish"))
@@ -446,6 +459,12 @@ func _sell_one_material() -> void:
 
 
 func _on_result(kind: String, data: Dictionary) -> void:
+	if kind == "refuel":
+		if bool(data.get("ok", false)):
+			say("Campfire fueled: %d seconds of warmth remain." % int(ceil(float(data.get("remaining", 0.0)))))
+		else:
+			say("Refuel denied: " + str(data.get("reason", "rejected")))
+		return
 	if kind == "campfire":
 		if bool(data.get("ok", false)):
 			say("Campfire lit: shared warmth for 5 minutes.")

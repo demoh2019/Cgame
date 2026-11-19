@@ -902,3 +902,27 @@ does not grow with the number of purchases.
 A new higher ID is an intentionally new purchase. Server crashes can still
 lose unsaved balances; durable cross-account transaction storage in Nakama
 remains necessary for an offline auction house and crash-safe markets.
+
+## Shared campfire refueling
+
+Temporary wilderness campfires (already part of the main world simulation)
+can now be **refueled cooperatively**. Any living survivor standing within
+3.2 metres can spend **2 T1 wood** to add **120 seconds** of warmth for
+everyone nearby. The total remaining burn time is capped at **600 seconds**;
+a refill is rejected rather than consuming wood if a full 120-second
+extension would exceed that cap. Expired fires cannot be restarted by
+refueling and must be rebuilt using the normal campfire recipe.
+
+The authority is entirely in `GameServer.cmd_refuel_campfire`: actual
+distance, survival status, authoritative inventory, current deadline,
+and fuel limit are all checked before changing either items or burn time.
+This does **not** create a PvP-safe zone, checkpointed structure or new
+instance of an existing fire.
+
+Controls: **9** while standing near a burning campfire in either local or
+multiplayer play; the online inventory also contains a **Refuel Campfire**
+button. A refueled fire's remaining lifetime is replicated to nearby peers.
+Tests in `test_field_campfire.gd` cover resource conservation, shared
+contributions, denial of remote/unknown/expired attempts, duration caps
+and replication. This uses the existing Cgame inventory, network and
+rendering APIs; no engine source change is necessary.

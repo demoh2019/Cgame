@@ -4,6 +4,10 @@ extends RefCounted
 
 const Structures = preload("res://scripts/shared/structures.gd")
 const COST := {"wood_1": 3, "stone_1": 1}
+const REFUEL_COST := {"wood_1": 2}
+const REFUEL_SECONDS := 120.0
+const MAX_REMAINING_SECONDS := 600.0
+const REFUEL_RANGE := 3.2
 const DURATION := 300.0
 const WARM_RADIUS := 5.0
 const BUILD_RANGE := 4.0
@@ -32,6 +36,25 @@ static func valid_site(world, point: Vector2, from: Vector2, campfires: Dictiona
 		var at := Vector2(float(camp["x"]), float(camp["z"]))
 		if point.distance_to(at) < MIN_SEPARATION:
 			return "blocked"
+	return ""
+
+
+## Any living survivor can contribute wood to a nearby shared campfire.
+## Refusing when fewer than two minutes fit prevents charging for almost no heat.
+static func refuel_reason(camp: Dictionary, position: Vector3, now: float) -> String:
+	if camp.is_empty():
+		return "no_fire"
+	if not position.is_finite() or not is_finite(now):
+		return "invalid_position"
+	var expiry: float = float(camp.get("expires", -1.0))
+	if not is_finite(expiry) or expiry <= now:
+		return "expired"
+	var point := Vector2(position.x, position.z)
+	var site := Vector2(float(camp["x"]), float(camp["z"]))
+	if point.distance_squared_to(site) > REFUEL_RANGE * REFUEL_RANGE:
+		return "out_of_range"
+	if expiry - now > MAX_REMAINING_SECONDS - REFUEL_SECONDS:
+		return "full_duration"
 	return ""
 
 
