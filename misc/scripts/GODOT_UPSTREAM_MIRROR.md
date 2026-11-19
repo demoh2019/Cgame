@@ -22,14 +22,17 @@ python3 mirror_godot_tracker.py sync --kind all --limit 50
 export GH_TOKEN='YOUR_GITHUB_TOKEN'
 python3 mirror_godot_tracker.py sync --kind issues --limit 50 --apply
 
-# Archive historical closed PRs; for open PRs, try reapplying code as drafts.
+# Try open code PRs first (no archived/closed PR import).
+python3 mirror_godot_tracker.py sync --kind prs --skip-closed-prs --limit 50 --apply --replay-open-prs --git-root /path/to/your/fork
+
+# Then archive historical closed PRs as Issues while processing remaining records.
 python3 mirror_godot_tracker.py sync --kind prs --limit 50 --apply --replay-open-prs --git-root /path/to/your/fork
 
 # Repeat the sync command; the SQLite database prevents re-importing mapped items.
 python3 -m unittest -v test_mirror_godot_tracker.py
 ```
 
-Use `--limit 0` only if you understand that 123,000+ records will require many requests and multiple days, likely longer. The script defaults to **at least 9 seconds between content-changing requests**, with responses to GitHub rate-limit errors and no automatic retry for ambiguous writes. Lower limits, review a batch, then continue. A new full scan can refresh upstream metadata: `scan --reset`.
+Use `--limit 0` only if you understand that 123,000+ records will require many requests and multiple days, likely longer. The script defaults to **at least 9 seconds between content-changing requests**, with responses to GitHub rate-limit errors and no automatic retry for ambiguous writes. Lower limits, review a batch, then continue. A new full scan can refresh upstream metadata: `scan --reset`. Failed attempts to close imported Issues are journaled and repaired on the next `sync --apply`.
 
 ## Limitations and safeguards
 
