@@ -1,7 +1,7 @@
 extends Node3D
 
-## Procedural ribbon with three-node XPBD curvature constraints along its
-## original structural edges. This is rod-like BENDING, not Cosserat twist.
+## Procedural nonplanar ribbon with three-node centerline curvature and
+## four-node geometric torsion constraints. Neither encodes material twist.
 
 const SEGMENTS := 20
 const LENGTH := 6.0
@@ -49,9 +49,12 @@ func _create_ribbon_mesh() -> ArrayMesh:
     for i in range(SEGMENTS + 1):
         var t := float(i) / float(SEGMENTS)
         var bend := sin(t * PI) * 0.65
+        # Make the rest centerline genuinely nonplanar, so neighboring
+        # bend planes define a signed geometric torsion angle.
+        var depth := sin(t * PI * 2.0) * 0.24
         for side in range(2):
             var x := bend + (-0.5 if side == 0 else 0.5) * WIDTH
-            verts.append(Vector3(x, 1.8 - LENGTH * t, 0))
+            verts.append(Vector3(x, 1.8 - LENGTH * t, depth))
             normals.append(Vector3(0, 0, 1))
     for i in range(SEGMENTS):
         var a := 2 * i
@@ -120,7 +123,7 @@ func _add_hud() -> void:
     margin.add_theme_constant_override("margin_bottom", 12)
     panel.add_child(margin)
     var label := Label.new()
-    label.text = "Cgame Discrete Rod Curvature Lab\nCurved soft ribbon: XPBD centerline angle + stretch\nSpace: launch blue impact ball | R: restart | Esc: quit\nCompare rod_bend_compliance=0 and 0.000003 in project.godot\nRod bending is native C++, not GDScript. No twist directors yet."
+    label.text = "Cgame Discrete Rod Curvature + Torsion Lab\nNonplanar soft ribbon: XPBD bend + geometric torsion\nSpace: launch blue impact ball | R: restart | Esc: quit\nA/B: rod_torsion_compliance=0 or 0.000004 in project.godot\nRod bending is native C++, not GDScript. No twist directors yet."
     margin.add_child(label)
 
 
