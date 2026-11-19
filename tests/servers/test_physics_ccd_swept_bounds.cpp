@@ -111,4 +111,59 @@ TEST_CASE("[PhysicsCCDSweep] Overflow and invalid bounds never reject casts") {
 			AABB(Vector3(), Vector3(-1, 1, 1)), target3d, Vector3(10, 0, 0)));
 }
 
+
+TEST_CASE("[PhysicsCCDSweep] Sampled 2D trajectories are never culled while overlapping") {
+	uint32_t state = 0x13579BDFU;
+	auto next = [&]() -> real_t {
+		state = state * 1664525U + 1013904223U;
+		return real_t(int((state >> 8) % 4001U) - 2000) * real_t(0.01);
+	};
+	for (int sample = 0; sample < 2048; ++sample) {
+		const Rect2 moving(Vector2(next(), next()),
+				Vector2(real_t(0.25) + Math::abs(next()) * real_t(0.1), real_t(0.25) + Math::abs(next()) * real_t(0.1)));
+		const Rect2 target(Vector2(next(), next()),
+				Vector2(real_t(0.25) + Math::abs(next()) * real_t(0.1), real_t(0.25) + Math::abs(next()) * real_t(0.1)));
+		const Vector2 motion(next(), next());
+		const bool possible = physics_ccd_swept_bounds_may_overlap(moving, target, motion, real_t(0.1));
+		for (int tick = 0; tick <= 11; ++tick) {
+			const real_t fraction = real_t(-0.1) + real_t(tick) * real_t(0.1);
+			const Rect2 at_time(moving.position + motion * fraction, moving.size);
+			if (at_time.intersects(target, true)) {
+				CHECK(possible);
+			}
+		}
+	}
+}
+
+TEST_CASE("[PhysicsCCDSweep] Sampled 3D trajectories are never culled while overlapping") {
+	uint32_t state = 0x2468ACE0U;
+	auto next = [&]() -> real_t {
+		state = state * 1664525U + 1013904223U;
+		return real_t(int((state >> 8) % 4001U) - 2000) * real_t(0.01);
+	};
+	for (int sample = 0; sample < 2048; ++sample) {
+		const AABB moving(Vector3(next(), next(), next()),
+				Vector3(real_t(0.25) + Math::abs(next()) * real_t(0.1),
+						real_t(0.25) + Math::abs(next()) * real_t(0.1),
+						real_t(0.25) + Math::abs(next()) * real_t(0.1)));
+		const AABB target(Vector3(next(), next(), next()),
+				Vector3(real_t(0.25) + Math::abs(next()) * real_t(0.1),
+						real_t(0.25) + Math::abs(next()) * real_t(0.1),
+						real_t(0.25) + Math::abs(next()) * real_t(0.1)));
+		const Vector3 motion(next(), next(), next());
+		const bool possible = physics_ccd_swept_bounds_may_overlap(moving, target, motion, real_t(0.1));
+		for (int tick = 0; tick <= 11; ++tick) {
+			const real_t fraction = real_t(-0.1) + real_t(tick) * real_t(0.1);
+			const Vector3 lo = moving.position + motion * fraction;
+			const Vector3 hi = lo + moving.size;
+			const Vector3 target_hi = target.get_end();
+			if (lo.x <= target_hi.x && hi.x >= target.position.x &&
+					lo.y <= target_hi.y && hi.y >= target.position.y &&
+					lo.z <= target_hi.z && hi.z >= target.position.z) {
+				CHECK(possible);
+			}
+		}
+	}
+}
+
 } // namespace TestPhysicsCCDSweptBounds
