@@ -23,7 +23,7 @@ class RegistryConsistencyTests(unittest.TestCase):
         dispatcher = self.script.split("func _run_case(", 1)[1].split("\n\nfunc ", 1)[0]
         dispatched = []
         for line in dispatcher.splitlines():
-            if line.startswith('\\t\\t"') and line.rstrip().endswith(":"):
+            if line.startswith('\t\t"') and line.rstrip().endswith(":"):
                 dispatched.extend(re.findall(r'"([a-z0-9_]+)"', line))
         self.assertEqual(len(declared), len(set(declared)))
         self.assertEqual(len(dispatched), len(set(dispatched)))
