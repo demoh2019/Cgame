@@ -58,7 +58,9 @@ func generate() -> bool:
 	new_node.multimesh = instances
 	clear_generated()
 	add_child(new_node)
-	# Editor-generated instances must be part of the saved scene.
-	if Engine.is_editor_hint() and owner != null:
-		new_node.owner = owner
+	# Save generated instances even when this spawner is the edited scene root.
+	if Engine.is_editor_hint() and get_tree() != null:
+		var edited_root := get_tree().edited_scene_root
+		if edited_root != null and (edited_root == self or edited_root.is_ancestor_of(self)):
+			new_node.owner = edited_root
 	return true
