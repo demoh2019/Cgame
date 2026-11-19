@@ -4960,20 +4960,73 @@ String String::json_escape() const {
 }
 
 String String::xml_escape(bool p_escape_quotes) const {
-	String str = *this;
-	str = str.replace("&", "&amp;");
-	str = str.replace("<", "&lt;");
-	str = str.replace(">", "&gt;");
-	if (p_escape_quotes) {
-		str = str.replace("'", "&apos;");
-		str = str.replace("\"", "&quot;");
+	const char32_t *source = ptr();
+	const int len = length();
+	int64_t result_length = len;
+
+	// Count the extra characters needed for XML entities before allocating.
+	for (int i = 0; i < len; i++) {
+		switch (source[i]) {
+			case '&':
+				result_length += 4; // &amp;
+				break;
+			case '<':
+			case '>':
+				result_length += 3; // &lt; / &gt;
+				break;
+			case '\'':
+			case '"':
+				result_length += p_escape_quotes ? 5 : 0;
+				break;
+		}
 	}
-	/*
-for (int i=1;i<32;i++) {
-	char chr[2]={i,0};
-	str=str.replace(chr,"&#"+String::num(i)+";");
-}*/
-	return str;
+	if (result_length == len) {
+		return *this; // No entities: keep the existing COW buffer.
+	}
+	ERR_FAIL_COND_V_MSG(result_length >= INT32_MAX, "", "XML escaped string is too large.");
+
+	String result;
+	result.resize_uninitialized(int(result_length) + 1);
+	char32_t *write = result.ptrw();
+	for (int i = 0; i < len; i++) {
+		const char32_t c = source[i];
+		const char32_t *entity = nullptr;
+		int entity_length = 0;
+		switch (c) {
+			case '&':
+				entity = U"&amp;";
+				entity_length = 5;
+				break;
+			case '<':
+				entity = U"&lt;";
+				entity_length = 4;
+				break;
+			case '>':
+				entity = U"&gt;";
+				entity_length = 4;
+				break;
+			case '\'':
+				if (p_escape_quotes) {
+					entity = U"&apos;";
+					entity_length = 6;
+				}
+				break;
+			case '"':
+				if (p_escape_quotes) {
+					entity = U"&quot;";
+					entity_length = 6;
+				}
+				break;
+		}
+		if (entity != nullptr) {
+			memcpy(write, entity, size_t(entity_length) * sizeof(char32_t));
+			write += entity_length;
+		} else {
+			*write++ = c;
+		}
+	}
+	*write = 0;
+	return result;
 }
 
 static _FORCE_INLINE_ int _xml_unescape(const char32_t *p_src, int p_src_len, char32_t *p_dst) {
