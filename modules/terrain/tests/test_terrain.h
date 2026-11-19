@@ -261,4 +261,74 @@ TEST_CASE("[Terrain3D] Importing an invalid image leaves existing geometry intac
 	memdelete(terrain);
 }
 
+
+TEST_CASE("[Terrain3D] Thermal erosion conserves height and spreads a peak") {
+	HeightmapTerrain3D *terrain = memnew(HeightmapTerrain3D);
+	terrain->set_grid_size(Vector2i(5, 5));
+	terrain->set_height_at(2, 2, 16);
+	terrain->erode_thermal(1, 0, 1);
+	CHECK(terrain->get_height_at(2, 2) < 16);
+	CHECK(terrain->get_height_at(1, 2) > 0);
+	CHECK(terrain->get_height_at(3, 2) > 0);
+	CHECK(terrain->get_height_at(2, 1) > 0);
+	CHECK(terrain->get_height_at(2, 3) > 0);
+	real_t total = 0;
+	for (float height : terrain->get_height_data()) {
+		total += height;
+	}
+	CHECK(Math::abs(total - 16.0) < 0.0001);
+	memdelete(terrain);
+}
+
+TEST_CASE("[Terrain3D] Thermal erosion preserves constant fields") {
+	HeightmapTerrain3D *terrain = memnew(HeightmapTerrain3D);
+	terrain->set_grid_size(Vector2i(8, 4));
+	PackedFloat32Array original = terrain->get_height_data();
+	original.fill(4);
+	terrain->set_height_data(original);
+	terrain->erode_thermal(20, 0, 1);
+	CHECK(terrain->get_height_data() == original);
+	memdelete(terrain);
+}
+
+TEST_CASE("[Terrain3D] Thermal erosion respects talus and zero strength") {
+	HeightmapTerrain3D *terrain = memnew(HeightmapTerrain3D);
+	terrain->set_grid_size(Vector2i(3, 3));
+	terrain->set_height_at(1, 1, 1);
+	const PackedFloat32Array original = terrain->get_height_data();
+	terrain->erode_thermal(10, 2, 1);
+	terrain->erode_thermal(0, 0, 1);
+	terrain->erode_thermal(10, 0, 0);
+	CHECK(terrain->get_height_data() == original);
+	memdelete(terrain);
+}
+
+TEST_CASE("[Terrain3D] Erosion at the grid edge never wraps") {
+	HeightmapTerrain3D *terrain = memnew(HeightmapTerrain3D);
+	terrain->set_grid_size(Vector2i(4, 4));
+	terrain->set_height_at(0, 0, 8);
+	terrain->erode_thermal(1, 0, 1);
+	CHECK(terrain->get_height_at(0, 0) < 8);
+	CHECK(terrain->get_height_at(1, 0) > 0);
+	CHECK(terrain->get_height_at(0, 1) > 0);
+	CHECK(terrain->get_height_at(3, 3) == 0);
+	memdelete(terrain);
+}
+
+TEST_CASE("[Terrain3D] Invalid erosion parameters never alter the heightfield") {
+	HeightmapTerrain3D *terrain = memnew(HeightmapTerrain3D);
+	terrain->set_height_at(3, 3, 5);
+	const PackedFloat32Array original = terrain->get_height_data();
+	ERR_PRINT_OFF
+	terrain->erode_thermal(-1, 0, 1);
+	terrain->erode_thermal(129, 0, 1);
+	terrain->erode_thermal(1, -1, 1);
+	terrain->erode_thermal(1, 0, -1);
+	terrain->erode_thermal(1, 0, 2);
+	terrain->erode_thermal(1, Math::INF, 1);
+	ERR_PRINT_ON
+	CHECK(terrain->get_height_data() == original);
+	memdelete(terrain);
+}
+
 } // namespace TestTerrain3D

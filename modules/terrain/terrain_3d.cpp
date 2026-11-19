@@ -48,6 +48,7 @@ void HeightmapTerrain3D::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("sculpt", "grid_position", "radius", "delta"), &HeightmapTerrain3D::sculpt);
 	ClassDB::bind_method(D_METHOD("smooth", "grid_position", "radius", "strength"), &HeightmapTerrain3D::smooth);
 	ClassDB::bind_method(D_METHOD("paint_color", "grid_position", "radius", "color", "opacity"), &HeightmapTerrain3D::paint_color);
+	ClassDB::bind_method(D_METHOD("erode_thermal", "iterations", "talus", "strength"), &HeightmapTerrain3D::erode_thermal);
 	ClassDB::bind_method(D_METHOD("import_heightmap", "image", "min_height", "max_height"), &HeightmapTerrain3D::import_heightmap);
 
 	ADD_PROPERTY(PropertyInfo(Variant::VECTOR2I, "grid_size"), "set_grid_size", "get_grid_size");
@@ -256,6 +257,62 @@ void HeightmapTerrain3D::paint_color(const Vector2 &p_grid_position, real_t p_ra
 			real_t weight = opacity * (1.0 - distance / p_radius);
 			int i = _index(x, z);
 			color_data.set(i, color_data[i].lerp(p_color, weight));
+		}
+	}
+	_rebuild_mesh();
+}
+
+
+void HeightmapTerrain3D::erode_thermal(int p_iterations, real_t p_talus, real_t p_strength) {
+	ERR_FAIL_COND_MSG(p_iterations < 0 || p_iterations > 128, "Thermal erosion requires 0 to 128 iterations.");
+	ERR_FAIL_COND_MSG(!Math::is_finite(p_talus) || p_talus < 0.0, "Talus must be finite and nonnegative.");
+	ERR_FAIL_COND_MSG(!Math::is_finite(p_strength) || p_strength < 0.0 || p_strength > 1.0, "Strength must be between 0 and 1.");
+	if (p_iterations == 0 || p_strength == 0.0) {
+		return;
+	}
+
+	const int dx[4] = { 1, -1, 0, 0 };
+	const int dz[4] = { 0, 0, 1, -1 };
+	for (int iteration = 0; iteration < p_iterations; iteration++) {
+		PackedFloat32Array changes;
+		changes.resize(height_data.size());
+		changes.fill(0);
+		for (int z = 0; z < grid_size.y; z++) {
+			for (int x = 0; x < grid_size.x; x++) {
+				const int source = _index(x, z);
+				real_t drops[4] = {};
+				real_t max_drop = 0.0;
+				real_t total_drop = 0.0;
+				for (int side = 0; side < 4; side++) {
+					const int nx = x + dx[side];
+					const int nz = z + dz[side];
+					if (nx < 0 || nz < 0 || nx >= grid_size.x || nz >= grid_size.y) {
+						continue;
+					}
+					const real_t drop = real_t(height_data[source]) - real_t(height_data[_index(nx, nz)]) - p_talus;
+					if (drop > 0.0) {
+						drops[side] = drop;
+						total_drop += drop;
+						max_drop = MAX(max_drop, drop);
+					}
+				}
+				if (total_drop <= 0.0) {
+					continue;
+				}
+				// Every downhill contribution is balanced by an equal source removal.
+				const real_t transfer = max_drop * p_strength * 0.25;
+				changes.set(source, changes[source] - transfer);
+				for (int side = 0; side < 4; side++) {
+					if (drops[side] <= 0.0) {
+						continue;
+					}
+					int target = _index(x + dx[side], z + dz[side]);
+					changes.set(target, changes[target] + transfer * drops[side] / total_drop);
+				}
+			}
+		}
+		for (int i = 0; i < height_data.size(); i++) {
+			height_data.set(i, height_data[i] + changes[i]);
 		}
 	}
 	_rebuild_mesh();

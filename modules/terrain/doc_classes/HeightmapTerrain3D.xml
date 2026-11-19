@@ -11,6 +11,15 @@
 		[b]Limitations:[/b] There is no LOD, chunk streaming, automatic collision, foliage system, texture splatmap, or advanced erosion in this initial implementation. Each edit currently regenerates the full mesh. For very large worlds, split the terrain into several nodes until chunked streaming is implemented.
 	</description>
 	<methods>
+		<method name="erode_thermal">
+			<return type="void" />
+			<param index="0" name="iterations" type="int" />
+			<param index="1" name="talus" type="float" />
+			<param index="2" name="strength" type="float" />
+			<description>
+				Redistributes excess height to four downhill neighbors by thermal erosion. A talus threshold can prevent flow on gentle slopes. Uses 0–128 iterations and strength from 0 to 1.
+			</description>
+		</method>
 		<method name="get_height_at" qualifiers="const">
 			<return type="float" />
 			<param index="0" name="x" type="int" />
