@@ -34,6 +34,7 @@
 
 #include "core/object/worker_thread_pool.h"
 #include "core/os/os.h"
+#include "servers/physics_constraint_color.h"
 
 #define BODY_ISLAND_COUNT_RESERVE 128
 #define ISLAND_COUNT_RESERVE 128
@@ -348,13 +349,9 @@ bool GodotStep3D::_solve_large_island(const LocalVector<GodotConstraint3D *> &p_
 			}
 		}
 
-		uint32_t color = MAX_LARGE_ISLAND_COLORS;
-		for (uint32_t candidate = 0; candidate < MAX_LARGE_ISLAND_COLORS; ++candidate) {
-			if ((forbidden & (uint32_t(1) << candidate)) == 0) {
-				color = candidate;
-				break;
-			}
-		}
+		// Match the previous greedy color ordering with one bit scan.
+		// The sentinel is unchanged when all 16 colors are occupied.
+		const uint32_t color = godot_physics_first_available_constraint_color<MAX_LARGE_ISLAND_COLORS>(forbidden);
 		if (color < MAX_LARGE_ISLAND_COLORS) {
 			const uint32_t bit = uint32_t(1) << color;
 			for (int body_idx = 0; body_idx < body_count; ++body_idx) {
