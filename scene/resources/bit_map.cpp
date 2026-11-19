@@ -63,13 +63,35 @@ void BitMap::create_from_image_alpha(const Ref<Image> &p_image, float p_threshol
 
 	const uint8_t *r = img->get_data().ptr();
 	uint8_t *w = bitmask.ptrw();
+	const int pixels = width * height;
 
-	for (int i = 0; i < width * height; i++) {
-		int bbyte = i / 8;
-		int bbit = i % 8;
-		if (r[i * 2 + 1] / 255.0 > p_threshold) {
-			w[bbyte] |= (1 << bbit);
+	// Alpha has only 256 discrete values. Find the first value satisfying
+	// the original floating-point comparison once, rather than dividing
+	// every pixel by 255. This also preserves NaN/negative thresholds.
+	int first_opaque_alpha = 0;
+	while (first_opaque_alpha < 256 && !(first_opaque_alpha / 255.0 > p_threshold)) {
+		first_opaque_alpha++;
+	}
+
+	// Assemble eight destination bits at a time, using sequential reads
+	// of the LA8 image. The final partial byte was zeroed by create().
+	const int full_bytes = pixels >> 3;
+	for (int byte_index = 0; byte_index < full_bytes; byte_index++) {
+		const uint8_t *alpha = r + (byte_index << 4) + 1;
+		uint8_t packed = 0;
+		for (int bit = 0; bit < 8; bit++) {
+			packed |= uint8_t((alpha[bit << 1] >= first_opaque_alpha) << bit);
 		}
+		w[byte_index] = packed;
+	}
+	const int remaining = pixels & 7;
+	if (remaining > 0) {
+		const uint8_t *alpha = r + (full_bytes << 4) + 1;
+		uint8_t packed = 0;
+		for (int bit = 0; bit < remaining; bit++) {
+			packed |= uint8_t((alpha[bit << 1] >= first_opaque_alpha) << bit);
+		}
+		w[full_bytes] = packed;
 	}
 }
 
