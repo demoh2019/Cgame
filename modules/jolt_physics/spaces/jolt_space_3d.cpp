@@ -1265,6 +1265,67 @@ static bool prepare_soft_self_edge_bvh(const JPH::Array<uint64_t> &p_edges,
 	return true;
 }
 
+// Refit in O(E + N) without modifying the median partitions or leaf
+// indices. Children always follow their parent in build_soft_face_bvh(),
+// so walking nodes backwards guarantees children have fresh bounds first.
+// This refits *exact* AABBs: no speculative motion margin is cached.
+static bool refit_soft_self_edge_bvh(const JPH::Array<uint64_t> &p_edges,
+		const JPH::Array<JPH::SoftBodyVertex> &p_vertices,
+		SoftFaceBVHScratch &r_bvh, uint32_t &r_budget) {
+	const uint32_t entry_count = uint32_t(r_bvh.entries.size());
+	const uint32_t node_count = uint32_t(r_bvh.nodes.size());
+	if (entry_count == 0 || node_count == 0) {
+		return false;
+	}
+	// Each segment is read, its leaf is combined, and each internal node
+	// gets one union. Reserve enough work up front, or use linear fallback.
+	const uint32_t refit_cost = 2 * entry_count + node_count;
+	if (r_budget <= refit_cost) {
+		return false;
+	}
+	r_budget -= refit_cost;
+	for (SoftFaceBVHEntry &entry : r_bvh.entries) {
+		if (entry.face_index >= p_edges.size()) {
+			return false;
+		}
+		const uint64_t key = p_edges[entry.face_index];
+		const uint32_t a = uint32_t(key >> 32), b = uint32_t(key);
+		if (a == b || a >= p_vertices.size() || b >= p_vertices.size()) {
+			return false;
+		}
+		const JPH::Vec3 p0 = p_vertices[a].mPosition;
+		const JPH::Vec3 p1 = p_vertices[b].mPosition;
+		entry.min = JPH::Vec3::sMin(p0, p1);
+		entry.max = JPH::Vec3::sMax(p0, p1);
+		if (!Math::is_finite(entry.min.GetX()) || !Math::is_finite(entry.min.GetY()) || !Math::is_finite(entry.min.GetZ()) ||
+				!Math::is_finite(entry.max.GetX()) || !Math::is_finite(entry.max.GetY()) || !Math::is_finite(entry.max.GetZ())) {
+			return false;
+		}
+	}
+	for (uint32_t i = node_count; i > 0; --i) {
+		SoftFaceBVHNode &node = r_bvh.nodes[i - 1];
+		if (node.end <= node.begin || node.end > entry_count) {
+			return false;
+		}
+		if (node.end - node.begin <= SOFT_FACE_BVH_LEAF_SIZE) {
+			node.min = r_bvh.entries[node.begin].min;
+			node.max = r_bvh.entries[node.begin].max;
+			for (uint32_t j = node.begin + 1; j < node.end; ++j) {
+				node.min = JPH::Vec3::sMin(node.min, r_bvh.entries[j].min);
+				node.max = JPH::Vec3::sMax(node.max, r_bvh.entries[j].max);
+			}
+		} else {
+			if (node.left <= i - 1 || node.right <= i - 1 ||
+					node.left >= node_count || node.right >= node_count) {
+				return false;
+			}
+			node.min = JPH::Vec3::sMin(r_bvh.nodes[node.left].min, r_bvh.nodes[node.right].min);
+			node.max = JPH::Vec3::sMax(r_bvh.nodes[node.left].max, r_bvh.nodes[node.right].max);
+		}
+	}
+	return true;
+}
+
 static bool soft_self_edge_bounds_overlap(JPH::Vec3Arg p_min_a, JPH::Vec3Arg p_max_a,
 		JPH::Vec3Arg p_min_b, JPH::Vec3Arg p_max_b, float p_radius) {
 	return p_max_a.GetX() + p_radius >= p_min_b.GetX() && p_max_b.GetX() + p_radius >= p_min_a.GetX() &&
