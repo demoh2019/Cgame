@@ -885,4 +885,38 @@ TEST_CASE("[AStarGrid2D][Performance] JPS straight scans preserve boundary and s
 	CHECK_FALSE(grid.get_id_path(Vector2i(33, 45), Vector2i(33, 13)).is_empty());
 }
 
+
+TEST_CASE("[AStarGrid2D][Performance] JPS indexed mask scans preserve obstacle routing") {
+	AStarGrid2D grid;
+	grid.set_region(Rect2i(-9, -15, 41, 35));
+	grid.update();
+
+	// Walkable straight corridors of varying lengths are separated by
+	// obstacles, making JPS scan past sidewalls and padded boundaries.
+	for (int x = -8; x < 31; ++x) {
+		if (x != 8) {
+			grid.set_point_solid(Vector2i(x, 0), true);
+		}
+	}
+
+	// Both endpoints lie on the same unobstructed outer corridor.
+	for (int mode = 0; mode < AStarGrid2D::DIAGONAL_MODE_MAX; ++mode) {
+		grid.set_diagonal_mode(static_cast<AStarGrid2D::DiagonalMode>(mode));
+		const Vector2i a(-9, -15);
+		const Vector2i b(31, -15);
+		grid.set_jumping_enabled(false);
+		const TypedArray<Vector2i> reference = grid.get_id_path(a, b);
+		REQUIRE_FALSE(reference.is_empty());
+
+		grid.set_jumping_enabled(true);
+		for (int i = 0; i < 5; ++i) {
+			const TypedArray<Vector2i> path = grid.get_id_path(a, b);
+			REQUIRE_FALSE(path.is_empty());
+			CHECK_EQ(Vector2i(path[0]), a);
+			CHECK_EQ(Vector2i(path[path.size() - 1]), b);
+			CHECK(path.size() <= reference.size());
+		}
+	}
+}
+
 } // namespace TestAStar

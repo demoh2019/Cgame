@@ -356,26 +356,36 @@ void AStarGrid2D::fill_weight_scale_region(const Rect2i &p_region, real_t p_weig
 }
 
 AStarGrid2D::Point *AStarGrid2D::_jump(Point *p_from, Point *p_to) {
-	int32_t from_x = p_from->id.x;
-	int32_t from_y = p_from->id.y;
-
+	const int32_t from_x = p_from->id.x;
+	const int32_t from_y = p_from->id.y;
 	int32_t to_x = p_to->id.x;
 	int32_t to_y = p_to->id.y;
+	const int32_t dx = to_x - from_x;
+	const int32_t dy = to_y - from_y;
 
-	int32_t dx = to_x - from_x;
-	int32_t dy = to_y - from_y;
+	// JPS advances along one fixed direction. All obstacle probes can use
+	// constant offsets from the current mask cell rather than recalculating
+	// the row-major index for each 2D coordinate.
+	const ptrdiff_t stride = ptrdiff_t(region.size.x) + 2;
+	const ptrdiff_t step_x = dx;
+	const ptrdiff_t step_y = ptrdiff_t(dy) * stride;
+	const ptrdiff_t step = step_x + step_y;
+	const bool *mask = solid_mask.ptr();
+	ptrdiff_t index = (ptrdiff_t(to_y) - region.position.y + 1) * stride + ptrdiff_t(to_x) - region.position.x + 1;
+	const auto walkable = [&](ptrdiff_t p_offset) { return !mask[index + p_offset]; };
 
 	if (diagonal_mode == DIAGONAL_MODE_ALWAYS || diagonal_mode == DIAGONAL_MODE_AT_LEAST_ONE_WALKABLE) {
 		if (dx == 0 || dy == 0) {
 			return _forced_successor(to_x, to_y, dx, dy);
 		}
 
-		while (_is_walkable(to_x, to_y) && (diagonal_mode == DIAGONAL_MODE_ALWAYS || _is_walkable(to_x, to_y - dy) || _is_walkable(to_x - dx, to_y))) {
+		const bool always = diagonal_mode == DIAGONAL_MODE_ALWAYS;
+		while (walkable(0) && (always || walkable(-step_y) || walkable(-step_x))) {
 			if (end->id.x == to_x && end->id.y == to_y) {
 				return end;
 			}
 
-			if ((_is_walkable(to_x - dx, to_y + dy) && !_is_walkable(to_x - dx, to_y)) || (_is_walkable(to_x + dx, to_y - dy) && !_is_walkable(to_x, to_y - dy))) {
+			if ((walkable(-step_x + step_y) && !walkable(-step_x)) || (walkable(step_x - step_y) && !walkable(-step_y))) {
 				return _get_point_unchecked(to_x, to_y);
 			}
 
@@ -383,6 +393,7 @@ AStarGrid2D::Point *AStarGrid2D::_jump(Point *p_from, Point *p_to) {
 				return _get_point_unchecked(to_x, to_y);
 			}
 
+			index += step;
 			to_x += dx;
 			to_y += dy;
 		}
@@ -392,12 +403,12 @@ AStarGrid2D::Point *AStarGrid2D::_jump(Point *p_from, Point *p_to) {
 			return _forced_successor(from_x, from_y, dx, dy, true);
 		}
 
-		while (_is_walkable(to_x, to_y) && _is_walkable(to_x, to_y - dy) && _is_walkable(to_x - dx, to_y)) {
+		while (walkable(0) && walkable(-step_y) && walkable(-step_x)) {
 			if (end->id.x == to_x && end->id.y == to_y) {
 				return end;
 			}
 
-			if ((_is_walkable(to_x + dx, to_y + dy) && !_is_walkable(to_x, to_y + dy)) || !_is_walkable(to_x + dx, to_y)) {
+			if ((walkable(step) && !walkable(step_y)) || !walkable(step_x)) {
 				return _get_point_unchecked(to_x, to_y);
 			}
 
@@ -405,6 +416,7 @@ AStarGrid2D::Point *AStarGrid2D::_jump(Point *p_from, Point *p_to) {
 				return _get_point_unchecked(to_x, to_y);
 			}
 
+			index += step;
 			to_x += dx;
 			to_y += dy;
 		}
@@ -414,12 +426,12 @@ AStarGrid2D::Point *AStarGrid2D::_jump(Point *p_from, Point *p_to) {
 			return _forced_successor(from_x, from_y, dx, 0, true);
 		}
 
-		while (_is_walkable(to_x, to_y)) {
+		while (walkable(0)) {
 			if (end->id.x == to_x && end->id.y == to_y) {
 				return end;
 			}
 
-			if ((_is_walkable(to_x - 1, to_y) && !_is_walkable(to_x - 1, to_y - dy)) || (_is_walkable(to_x + 1, to_y) && !_is_walkable(to_x + 1, to_y - dy))) {
+			if ((walkable(-1) && !walkable(-1 - step_y)) || (walkable(1) && !walkable(1 - step_y))) {
 				return _get_point_unchecked(to_x, to_y);
 			}
 
@@ -427,10 +439,10 @@ AStarGrid2D::Point *AStarGrid2D::_jump(Point *p_from, Point *p_to) {
 				return _get_point_unchecked(to_x, to_y);
 			}
 
+			index += step_y;
 			to_y += dy;
 		}
 	}
-
 	return nullptr;
 }
 
