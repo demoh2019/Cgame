@@ -1414,4 +1414,85 @@ TEST_CASE("[BVH] Large changed-proxy queues are released after idle frames") {
 	CHECK(tree.get_changed_queue_capacity() <= 4096);
 }
 
+TEST_CASE("[BVH] 3D convex traversal prunes sparse subtrees without losing hits") {
+	using Tree = BVH_Manager<Item, 2, true, 16, PairTest, CountingCullTest, AABB, Vector3, false>;
+	Tree tree;
+	constexpr int COUNT = 96;
+	Item items[COUNT];
+	BVHHandle handles[COUNT];
+
+	// Split the bodies between two trees. Every box is far from its neighbors,
+	// exercising rejection of branches rather than just scanning a dense leaf.
+	for (int i = 0; i < COUNT; ++i) {
+		items[i].value = i;
+		handles[i] = tree.create(&items[i], true, uint32_t(i & 1), 3,
+				AABB(Vector3((i - 48) * 8, 0, 0), Vector3(1, 1, 1)));
+	}
+
+	const auto hull_between_x = [](real_t p_min_x, real_t p_max_x) {
+		Vector<Plane> hull;
+		hull.push_back(Plane(Vector3(1, 0, 0), p_max_x));
+		hull.push_back(Plane(Vector3(-1, 0, 0), -p_min_x));
+		hull.push_back(Plane(Vector3(0, 1, 0), 5));
+		hull.push_back(Plane(Vector3(0, -1, 0), 5));
+		hull.push_back(Plane(Vector3(0, 0, 1), 5));
+		hull.push_back(Plane(Vector3(0, 0, -1), 5));
+		return hull;
+	};
+
+	Item *results[COUNT] = {};
+	CountingCullTest::calls = 0;
+	CHECK(tree.cull_convex(hull_between_x(1000, 1100), results, COUNT, nullptr) == 0);
+	CHECK(CountingCullTest::calls == 0);
+
+	// The five bodies at x=-16,-8,0,8,16 intersect the partial hull.
+	CountingCullTest::calls = 0;
+	REQUIRE(tree.cull_convex(hull_between_x(-20, 20), results, COUNT, nullptr) == 5);
+	CHECK(CountingCullTest::calls == 5);
+	uint32_t hit_mask = 0;
+	for (int i = 0; i < 5; ++i) {
+		REQUIRE(results[i] != nullptr);
+		const int hit_index = results[i]->value - 46;
+		REQUIRE(hit_index >= 0);
+		REQUIRE(hit_index < 5);
+		hit_mask |= uint32_t(1) << hit_index;
+	}
+	CHECK(hit_mask == 0x1F);
+
+	// A slanted clipping plane exercises partial nodes and cutting-plane
+	// optimization, not only axis-aligned box/frustum classification.
+	Vector<Plane> slanted_hull = hull_between_x(-20, 20);
+	slanted_hull.push_back(Plane(Vector3(1, 1, 0).normalized(), 6.0));
+	CountingCullTest::calls = 0;
+	CHECK(tree.cull_convex(slanted_hull, results, COUNT, nullptr) == 4);
+	CHECK(CountingCullTest::calls == 4);
+
+	// Child pruning cannot change tree-mask filtering or output caps.
+	CountingCullTest::calls = 0;
+	CHECK(tree.cull_convex(hull_between_x(-20, 20), results, COUNT, nullptr, 1) == 3);
+	CHECK(CountingCullTest::calls == 3);
+	CountingCullTest::calls = 0;
+	CHECK(tree.cull_convex(hull_between_x(-20, 20), results, COUNT, nullptr, 2) == 2);
+	CHECK(CountingCullTest::calls == 2);
+	CountingCullTest::calls = 0;
+	CHECK(tree.cull_convex(hull_between_x(-20, 20), results, 1, nullptr) == 1);
+	CHECK(CountingCullTest::calls == 1);
+
+	// Fully covered roots should propagate the contained flag to every leaf.
+	CountingCullTest::calls = 0;
+	CHECK(tree.cull_convex(hull_between_x(-600, 600), results, COUNT, nullptr) == COUNT);
+	CHECK(CountingCullTest::calls == COUNT);
+
+	// Updates and removals must still expose the correct leaf bounds.
+	tree.move(handles[0], AABB(Vector3(0.5, 0, 0), Vector3(1, 1, 1)));
+	tree.update();
+	CountingCullTest::calls = 0;
+	CHECK(tree.cull_convex(hull_between_x(-20, 20), results, COUNT, nullptr) == 6);
+	CHECK(CountingCullTest::calls == 6);
+	tree.erase(handles[48]);
+	CountingCullTest::calls = 0;
+	CHECK(tree.cull_convex(hull_between_x(-20, 20), results, COUNT, nullptr) == 5);
+	CHECK(CountingCullTest::calls == 5);
+}
+
 } // namespace TestBVH
