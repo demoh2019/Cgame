@@ -389,4 +389,64 @@ TEST_CASE("[SortList] Reverse a strict subrange and restore outer links") {
 	CHECK(item == nullptr);
 }
 
+struct CountingSparseRehashHasher {
+	static inline int hashes = 0;
+	static uint32_t hash(int p_key) {
+		hashes++;
+		return uint32_t((p_key & 3) + 1); // Deliberate collision clusters.
+	}
+};
+
+TEST_CASE("[HashMap] Sparse rehash visits live nodes and preserves value addresses") {
+	HashMap<int, int, CountingSparseRehashHasher> map;
+	map.reserve(16384);
+	const uint32_t old_capacity = map.get_capacity();
+	int *pointers[24];
+	for (int i = 0; i < 24; i++) {
+		map.insert(i, i * 13);
+		pointers[i] = map.getptr(i);
+		REQUIRE(pointers[i] != nullptr);
+	}
+	CountingSparseRehashHasher::hashes = 0;
+	map.reserve(old_capacity + 1000);
+	CHECK(map.get_capacity() > old_capacity);
+	CHECK(map.size() == 24);
+	// One hash for each live node; no walk across the old bucket array.
+	CHECK(CountingSparseRehashHasher::hashes == 24);
+	for (int i = 0; i < 24; i++) {
+		CHECK(map.getptr(i) == pointers[i]);
+		CHECK(map.get(i) == i * 13);
+	}
+
+	int expected_key = 0;
+	for (const KeyValue<int, int> &entry : map) {
+		CHECK(entry.key == expected_key);
+		expected_key++;
+	}
+	CHECK(expected_key == 24);
+	for (int i = 0; i < 24; i += 2) {
+		CHECK(map.erase(i));
+	}
+	for (int i = 0; i < 24; i++) {
+		CHECK(map.has(i) == ((i & 1) != 0));
+	}
+	map.clear();
+	CHECK(map.is_empty());
+	map.insert(200, 987);
+	CHECK(map.get(200) == 987);
+}
+
+TEST_CASE("[HashMap] Dense rehash retains original cached hashes") {
+	HashMap<int, int, CountingSparseRehashHasher> map;
+	for (int i = 0; i < 96; i++) {
+		map.insert(i, i + 100);
+	}
+	CountingSparseRehashHasher::hashes = 0;
+	map.reserve(map.get_capacity() + 100);
+	CHECK(CountingSparseRehashHasher::hashes == 0);
+	for (int i = 0; i < 96; i++) {
+		CHECK(map.get(i) == i + 100);
+	}
+}
+
 } // namespace TestHashMap
