@@ -266,9 +266,10 @@ func toggle_stash(stash: Node) -> void:
 
 
 func _unhandled_input(event: InputEvent) -> void:
-    if not (event is InputEventKey) or not event.pressed or event.echo:
+    var key_event := event as InputEventKey
+    if key_event == null or not key_event.pressed or key_event.echo:
         return
-    match event.keycode:
+    match key_event.keycode:
         KEY_F6:
             player.last_message = "Убежище и герой сохранены." if WORLD_SAVE.save_world(self) else "Не удалось сохранить мир."
         KEY_F10:
@@ -295,7 +296,7 @@ func _transfer_stash(deposit_item: bool) -> void:
         stash_open = false
         return
     var item_id: String = STASH_ITEMS[stash_selected]
-    var successful: bool = shelter_stash.deposit(player, item_id, 1) if deposit_item else shelter_stash.withdraw(player, item_id, 1)
+    var successful: bool = bool(shelter_stash.call("deposit", player, item_id, 1)) if deposit_item else bool(shelter_stash.call("withdraw", player, item_id, 1))
     player.last_message = (
         ("Положено: " if deposit_item else "Забрано: ") + item_id
         if successful else "Операция невозможна: " + item_id
@@ -390,7 +391,7 @@ func _process(_delta: float) -> void:
                 "СКЛАД УБЕЖИЩА | Tab: предмет | G: +1 | H: -1 | Esc: закрыть\n" +
                 "%s   Рюкзак: %d   Склад: %d" % [
                     item_id, player.get_item_count(item_id),
-                    shelter_stash.get_storage_count(item_id)
+                    int(shelter_stash.call("get_storage_count", item_id))
                 ]
             )
     if Input.is_action_just_pressed("restart"):
