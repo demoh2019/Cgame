@@ -815,4 +815,52 @@ TEST_CASE("[BVH] Dense 3D contact churn preserves pair userdata") {
 	CHECK(counts.invalid_userdata == 0);
 }
 
+template <typename Pairs>
+static void _exercise_compact_pair_links() {
+	Pairs pairs;
+	int payload = 42;
+	CHECK(pairs.extended_pairs.get_capacity() == 0);
+
+	BVHHandle first;
+	first.set_id(7);
+	pairs.add_pair_to(first, &payload);
+	CHECK(pairs.extended_pairs.size() == 1);
+	CHECK(pairs.extended_pairs.get_capacity() == 1);
+	CHECK(pairs.contains_pair_to(first));
+	CHECK(pairs.remove_pair_at(0) == &payload);
+	CHECK(pairs.extended_pairs.is_empty());
+	// Retain the single-slot allocation for low-degree contact churn.
+	CHECK(pairs.extended_pairs.get_capacity() == 1);
+
+	// Dense, temporary contact clusters release their large retained buffers
+	// once the last link is removed.
+	constexpr uint32_t DENSE_COUNT = 32;
+	for (uint32_t i = 0; i < DENSE_COUNT; ++i) {
+		BVHHandle h;
+		h.set_id(i + 10);
+		pairs.add_pair_to(h, &payload);
+	}
+	CHECK(pairs.extended_pairs.size() == DENSE_COUNT);
+	CHECK(pairs.extended_pairs.get_capacity() > 8);
+	for (uint32_t i = 0; i < DENSE_COUNT; ++i) {
+		CHECK(pairs.remove_pair_at(0) == &payload);
+	}
+	CHECK(pairs.extended_pairs.is_empty());
+	CHECK(pairs.extended_pairs.get_capacity() == 0);
+
+	pairs.add_pair_to(first, &payload);
+	CHECK(pairs.extended_pairs.get_capacity() == 1);
+	CHECK(pairs.remove_pair_to(first) == &payload);
+	CHECK(pairs.extended_pairs.is_empty());
+	pairs.clear();
+	CHECK(pairs.extended_pairs.get_capacity() == 0);
+}
+
+TEST_CASE("[BVH] Sparse and dense adjacency buffers use adaptive contact storage") {
+	using Pairs2D = BVH_Tree<Item, 2, 2, 16, PairTest, CullTest, true, Rect2, Vector2>::ItemPairs;
+	using Pairs3D = BVH_Tree<Item, 2, 2, 16, PairTest, CullTest, true, AABB, Vector3>::ItemPairs;
+	_exercise_compact_pair_links<Pairs2D>();
+	_exercise_compact_pair_links<Pairs3D>();
+}
+
 } // namespace TestBVH
