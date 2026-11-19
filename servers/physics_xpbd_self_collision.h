@@ -93,8 +93,8 @@ _FORCE_INLINE_ bool physics_xpbd_self_collision_face_projection(
 		return false; // Footprint lies outside the triangular face.
 	}
 
-	const Vector3 normal(real_t(nx), real_t(ny), real_t(nz));
-	const Vector3 barycentric(real_t(u), real_t(v), real_t(w));
+	const Vector3 normal{ real_t(nx), real_t(ny), real_t(nz) };
+	const Vector3 barycentric{ real_t(u), real_t(v), real_t(w) };
 	const real_t distance = real_t(signed_distance);
 	if (!normal.is_finite() || !barycentric.is_finite() || !Math::is_finite(distance)) {
 		return false;
