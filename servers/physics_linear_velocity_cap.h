@@ -33,12 +33,26 @@ _FORCE_INLINE_ static TVector godot_physics_clamp_linear_velocity(const TVector 
 	}
 	const real_t speed_squared = p_velocity.length_squared();
 	const real_t max_squared = p_max_speed * p_max_speed;
-	if (speed_squared <= max_squared) {
+	// Fast path for almost all physical velocities: no sqrt and no copies.
+	if (speed_squared <= max_squared && Math::is_finite(max_squared)) {
 		return p_velocity;
 	}
-	// Preserve invalid input without generating new NaN values during scaling.
-	if (!p_velocity.is_finite() || !Math::is_finite(speed_squared)) {
+	// Preserve malformed input instead of manufacturing NaNs by scaling it.
+	if (!p_velocity.is_finite()) {
 		return p_velocity;
 	}
-	return p_velocity * (p_max_speed / Math::sqrt(speed_squared));
+	if (Math::is_finite(speed_squared) && Math::is_finite(max_squared)) {
+		return p_velocity * (p_max_speed / Math::sqrt(speed_squared));
+	}
+	// Rare large-value path: float builds can overflow v.length_squared()
+	// although every velocity component is finite. Scale by the greatest
+	// absolute component first, so the normalization cannot overflow.
+	const TVector absolute = p_velocity.abs();
+	const real_t greatest = absolute[absolute.max_axis_index()];
+	if (!(greatest > real_t(0.0))) {
+		return p_velocity;
+	}
+	const TVector scaled = p_velocity / greatest;
+	const real_t ratio = (p_max_speed / greatest) / Math::sqrt(scaled.length_squared());
+	return ratio >= real_t(1.0) ? p_velocity : p_velocity * ratio;
 }
