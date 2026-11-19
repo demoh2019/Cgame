@@ -407,6 +407,19 @@ public:
 		tree.cast_segment(p_from, p_to, p_callback, p_userdata, p_tree_collision_mask, p_tester);
 	}
 
+	// Stream point/AABB candidates instead of returning a fixed number of
+	// unfiltered proxies. A false visitor result stops traversal immediately.
+	using QueryVisitor = bool (*)(T *, int, void *);
+	bool visit_point(const POINT &p_point, QueryVisitor p_visitor, void *p_userdata, uint32_t p_tree_collision_mask = 0xFFFFFFFF, const T *p_tester = nullptr) {
+		BVH_LOCKED_FUNCTION
+		return tree.visit_point(p_point, p_visitor, p_userdata, p_tree_collision_mask, p_tester);
+	}
+
+	bool visit_aabb(const BOUNDS &p_aabb, QueryVisitor p_visitor, void *p_userdata, uint32_t p_tree_collision_mask = 0xFFFFFFFF, const T *p_tester = nullptr) {
+		BVH_LOCKED_FUNCTION
+		return tree.visit_aabb(p_aabb, p_visitor, p_userdata, p_tree_collision_mask, p_tester);
+	}
+
 	int cull_point(const POINT &p_point, T **p_result_array, int p_result_max, const T *p_tester, uint32_t p_tree_collision_mask = 0xFFFFFFFF, int *p_subindex_array = nullptr) {
 		BVH_LOCKED_FUNCTION
 		typename BVHTREE_CLASS::CullParams params;
