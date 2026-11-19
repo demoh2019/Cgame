@@ -29,8 +29,7 @@
 
 #pragma once
 
-#include "core/math/math_funcs.h"
-#include "core/math/vector3.h"
+#include "servers/physics_softbody_fluid_clipping.h"
 
 #include <limits>
 
@@ -53,13 +52,6 @@
 // must act in world -Y; p_pressure_gradient is rho * |gravity.y| [N/m^3].
 // Uses fixed stack storage, double intermediate calculations, and a
 // two-phase commit so invalid/overflowing faces never corrupt node forces.
-struct PhysicsSoftBodyHydrostaticVertex {
-    double x = 0.0;
-    double y = 0.0;
-    double z = 0.0;
-    double bary[3] = { 0.0, 0.0, 0.0 };
-};
-
 _FORCE_INLINE_ static bool physics_softbody_hydrostatic_face_forces(
         const Vector3 &p_a, const Vector3 &p_b, const Vector3 &p_c,
         double p_surface_y, double p_pressure_gradient, int p_orientation,
@@ -70,58 +62,18 @@ _FORCE_INLINE_ static bool physics_softbody_hydrostatic_face_forces(
         return false;
     }
 
-    PhysicsSoftBodyHydrostaticVertex tri[3];
-    const Vector3 points[3] = { p_a, p_b, p_c };
-    for (int i = 0; i < 3; ++i) {
-        tri[i].x = double(points[i].x);
-        tri[i].y = double(points[i].y);
-        tri[i].z = double(points[i].z);
-        tri[i].bary[i] = 1.0;
-    }
-
-    // Sutherland-Hodgman clipping of a triangle by a single plane.
-    // The clipped convex polygon has at most four vertices.
-    PhysicsSoftBodyHydrostaticVertex clipped[4];
+    PhysicsSoftBodyFluidVertex clipped[4];
     int clipped_count = 0;
-    for (int i = 0; i < 3; ++i) {
-        const PhysicsSoftBodyHydrostaticVertex &a = tri[i];
-        const PhysicsSoftBodyHydrostaticVertex &b = tri[(i + 1) % 3];
-        const double depth_a = p_surface_y - a.y;
-        const double depth_b = p_surface_y - b.y;
-        const bool inside_a = depth_a >= 0.0;
-        const bool inside_b = depth_b >= 0.0;
-
-        if (inside_a != inside_b) {
-            const double denominator = depth_a - depth_b;
-            if (!Math::is_finite(denominator) || denominator == 0.0) {
-                return false;
-            }
-            const double t = CLAMP(depth_a / denominator, 0.0, 1.0);
-            PhysicsSoftBodyHydrostaticVertex intersection;
-            intersection.x = a.x + (b.x - a.x) * t;
-            intersection.y = a.y + (b.y - a.y) * t;
-            intersection.z = a.z + (b.z - a.z) * t;
-            for (int j = 0; j < 3; ++j) {
-                intersection.bary[j] = a.bary[j] + (b.bary[j] - a.bary[j]) * t;
-            }
-            if (clipped_count >= 4) {
-                return false;
-            }
-            clipped[clipped_count++] = intersection;
-        }
-        if (inside_b) {
-            if (clipped_count >= 4) {
-                return false;
-            }
-            clipped[clipped_count++] = b;
-        }
+    if (!physics_softbody_clip_fluid_triangle(
+            p_a, p_b, p_c, p_surface_y, clipped, clipped_count)) {
+        return false;
     }
 
     double accumulated[3][3] = {};
     for (int triangle = 1; triangle + 1 < clipped_count; ++triangle) {
-        const PhysicsSoftBodyHydrostaticVertex &a = clipped[0];
-        const PhysicsSoftBodyHydrostaticVertex &b = clipped[triangle];
-        const PhysicsSoftBodyHydrostaticVertex &c = clipped[triangle + 1];
+        const PhysicsSoftBodyFluidVertex &a = clipped[0];
+        const PhysicsSoftBodyFluidVertex &b = clipped[triangle];
+        const PhysicsSoftBodyFluidVertex &c = clipped[triangle + 1];
 
         const double ax = b.x - a.x, ay = b.y - a.y, az = b.z - a.z;
         const double bx = c.x - a.x, by = c.y - a.y, bz = c.z - a.z;
@@ -135,7 +87,7 @@ _FORCE_INLINE_ static bool physics_softbody_hydrostatic_face_forces(
             MAX(0.0, p_surface_y - b.y),
             MAX(0.0, p_surface_y - c.y),
         };
-        const PhysicsSoftBodyHydrostaticVertex *vertices[3] = { &a, &b, &c };
+        const PhysicsSoftBodyFluidVertex *vertices[3] = { &a, &b, &c };
         const double depth_sum = depth[0] + depth[1] + depth[2];
         if (!Math::is_finite(depth_sum)) {
             return false;
