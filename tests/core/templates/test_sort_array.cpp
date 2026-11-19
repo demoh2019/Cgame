@@ -35,7 +35,36 @@ TEST_FORCE_LINK(test_sort_array)
 #include "core/templates/sort_array.h"
 #include "core/templates/vector.h"
 
+#include <memory>
+
 namespace TestSortArray {
+
+TEST_CASE("[SortArray] Moving insertion sort works with noncopyable keys") {
+	struct MoveKey {
+		std::unique_ptr<int> key;
+		explicit MoveKey(int v) : key(std::make_unique<int>(v)) {}
+		MoveKey(const MoveKey &) = delete;
+		MoveKey &operator=(const MoveKey &) = delete;
+		MoveKey(MoveKey &&) = default;
+		MoveKey &operator=(MoveKey &&) = default;
+	};
+	struct Less {
+		bool operator()(const MoveKey &a, const MoveKey &b) const {
+			return *a.key < *b.key;
+		}
+	};
+	MoveKey values[] = { MoveKey(7), MoveKey(2), MoveKey(6), MoveKey(0), MoveKey(5), MoveKey(1) };
+	SortArray<MoveKey, Less> sorter;
+	sorter.insertion_sort(0, 6, values);
+	for (int i = 0; i < 6; i++) {
+		CHECK(values[i].key != nullptr);
+		if (i > 0) {
+			CHECK(*values[i - 1].key <= *values[i].key);
+		}
+	}
+}
+
+
 
 TEST_CASE("[SortArray] Sort Sorted") {
 	constexpr int size = 128;
