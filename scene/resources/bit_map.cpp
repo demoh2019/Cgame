@@ -646,6 +646,7 @@ void BitMap::grow_mask(int p_pixels, const Rect2i &p_rect) {
 	if (p_pixels == 0) {
 		return;
 	}
+	ERR_FAIL_COND(p_pixels == INT32_MIN);
 
 	// A radius of one can only reach the four cardinal neighbors.
 	// Avoid creating a temporary BitMap, the quadratic neighborhood loop,
@@ -706,6 +707,38 @@ void BitMap::grow_mask(int p_pixels, const Rect2i &p_rect) {
 	const int64_t radius_squared = int64_t(radius) * radius;
 	const Rect2i current = Rect2i(0, 0, width, height).intersection(p_rect);
 	if (current.size.x <= 0 || current.size.y <= 0) {
+		return;
+	}
+
+	// If every pixel can reach a transparent point outside this rectangle,
+	// erosion clears the entire intersection with one bulk write.
+	const int64_t furthest_from_border = MIN((int64_t(current.size.x) + 1) / 2,
+			(int64_t(current.size.y) + 1) / 2);
+	if (!bit_value && radius >= furthest_from_border) {
+		set_bit_rect(current, false);
+		return;
+	}
+
+	// If the radius spans the diagonal, any single opaque source pixel
+	// reaches the entire rectangle. Scan once and fill with byte spans,
+	// avoiding both the COW snapshot and all neighborhood searches.
+	const int64_t dx = int64_t(current.size.x) - 1;
+	const int64_t dy = int64_t(current.size.y) - 1;
+	if (bit_value && radius_squared >= dx * dx + dy * dy) {
+		const uint8_t *source = bitmask.ptr();
+		bool has_opaque = false;
+		for (int y = current.position.y; y < current.position.y + current.size.y && !has_opaque; y++) {
+			for (int x = current.position.x; x < current.position.x + current.size.x; x++) {
+				const int bit = y * width + x;
+				if (source[bit >> 3] & (1u << (bit & 7))) {
+					has_opaque = true;
+					break;
+				}
+			}
+		}
+		if (has_opaque) {
+			set_bit_rect(current, true);
+		}
 		return;
 	}
 
