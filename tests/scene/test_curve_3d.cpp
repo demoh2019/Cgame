@@ -379,4 +379,25 @@ TEST_CASE("[Curve3D][Performance] Recursive midpoint reuse preserves closed and 
 	CHECK(baked[0] == baked[baked.size() - 1]);
 }
 
+
+TEST_CASE("[Curve3D] Baked interval lookup preserves every sample boundary") {
+	Ref<Curve3D> curve = memnew(Curve3D);
+	curve->set_bake_interval(1.5);
+	curve->set_up_vector_enabled(false);
+	curve->add_point(Vector3(0, 0, 0));
+	curve->add_point(Vector3(100, 25, -50));
+	const PackedVector3Array points = curve->get_baked_points();
+	REQUIRE(points.size() > 16);
+
+	real_t offset = 0;
+	for (int i = 0; i < points.size(); i++) {
+		if (i != 0) {
+			offset += points[i - 1].distance_to(points[i]);
+		}
+		CHECK((curve->sample_baked(offset) - points[i]).length() < real_t(0.002));
+	}
+	CHECK(curve->sample_baked(-100).is_equal_approx(points[0]));
+	CHECK(curve->sample_baked(offset + 100).is_equal_approx(points[points.size() - 1]));
+}
+
 } // namespace TestCurve3D
