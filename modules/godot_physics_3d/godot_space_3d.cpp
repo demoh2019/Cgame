@@ -1289,6 +1289,8 @@ GodotSpace3D::GodotSpace3D() {
 	soft_body_plastic_yield_strain = Math::is_finite(configured_plastic_yield) ? CLAMP(configured_plastic_yield, real_t(0.0), real_t(1.0)) : real_t(0.1);
 	const real_t configured_plastic_creep_rate = GLOBAL_GET("physics/3d/solver/soft_body_plastic_creep_rate");
 	soft_body_plastic_creep_rate = Math::is_finite(configured_plastic_creep_rate) ? MAX(real_t(0.0), configured_plastic_creep_rate) : real_t(0.0);
+	const real_t configured_link_damping = GLOBAL_GET("physics/3d/solver/soft_body_link_damping");
+	soft_body_link_damping = Math::is_finite(configured_link_damping) ? MAX(real_t(0.0), configured_link_damping) : real_t(0.0);
 	const real_t configured_area_compliance = GLOBAL_GET("physics/3d/solver/soft_body_xpbd_area_compliance");
 	soft_body_xpbd_area_compliance = Math::is_finite(configured_area_compliance) ? MAX(real_t(0.0), configured_area_compliance) : real_t(0.0);
 	const real_t configured_dihedral_compliance = GLOBAL_GET("physics/3d/solver/soft_body_xpbd_dihedral_compliance");
