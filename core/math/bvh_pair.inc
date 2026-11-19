@@ -3,11 +3,15 @@ public:
 // depends which works best for cache.
 struct ItemPairs {
 	struct Link {
-		void set(BVHHandle p_handle, void *p_userdata) {
+		void set(BVHHandle p_handle, void *p_userdata, uint32_t p_reverse_index) {
 			handle = p_handle;
+			reverse_index = p_reverse_index;
 			userdata = p_userdata;
 		}
 		BVHHandle handle;
+		// Position of the matching link in the other object's adjacency list.
+		// Fits in existing pointer-alignment padding on 64-bit systems.
+		uint32_t reverse_index;
 		void *userdata;
 	};
 
@@ -21,14 +25,14 @@ struct ItemPairs {
 	// The vector's size is the sole pair count, avoiding per-object duplication.
 	LocalVector<Link> extended_pairs;
 
-	void add_pair_to(BVHHandle p_handle, void *p_userdata) {
+	void add_pair_to(BVHHandle p_handle, void *p_userdata, uint32_t p_reverse_index = BVHCommon::INVALID) {
 		// Most objects have only a few neighbors. Reserve exactly one link
 		// on first contact rather than eagerly allocating room for two.
 		if (extended_pairs.get_capacity() == 0) {
 			extended_pairs.reserve_exact(1);
 		}
 		Link temp;
-		temp.set(p_handle, p_userdata);
+		temp.set(p_handle, p_userdata, p_reverse_index);
 
 		extended_pairs.push_back(temp);
 	}
