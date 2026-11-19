@@ -2583,6 +2583,81 @@ TEST_CASE("[String] Escape single-buffer algorithms match ordered replacements")
 	}
 }
 
+TEST_CASE("[String] c_unescape zero-copy no-op and ordered escape compatibility") {
+	const String plain = U"ASCII данные 😀 / path [brackets] \\unknown";
+	CHECK(plain.c_unescape() == plain);
+	CHECK(plain.c_unescape().ptr() == plain.ptr());
+	CHECK(String().c_unescape().is_empty());
+
+	// A literal backslash is folded only after all the C escape substitutions.
+	const String tricky = "\\\\n\\t\\\\\\q\\'\\\"\\a\\b\\f\\r\\v";
+	const String expected = tricky.replace("\\a", "\a")
+								   .replace("\\b", "\b")
+								   .replace("\\f", "\f")
+								   .replace("\\n", "\n")
+								   .replace("\\r", "\r")
+								   .replace("\\t", "\t")
+								   .replace("\\v", "\v")
+								   .replace("\\'", "'")
+								   .replace("\\\"", "\"")
+								   .replace("\\\\", "\\");
+	CHECK(tricky.c_unescape() == expected);
+	CHECK(tricky.c_unescape().length() < tricky.length());
+
+	const String long_plain = String(U"long/неизменённый/строка😀").repeat(4096);
+	CHECK(long_plain.c_unescape().ptr() == long_plain.ptr());
+	const String long_escaped = String("\\\\n\\t\\\\\\q\\'\\\"").repeat(4096);
+	CHECK(long_escaped.c_unescape() ==
+			long_escaped.replace("\\a", "\a")
+					.replace("\\b", "\b")
+					.replace("\\f", "\f")
+					.replace("\\n", "\n")
+					.replace("\\r", "\r")
+					.replace("\\t", "\t")
+					.replace("\\v", "\v")
+					.replace("\\'", "'")
+					.replace("\\\"", "\"")
+					.replace("\\\\", "\\"));
+}
+
+TEST_CASE("[String] c_unescape matches ten ordered substitutions on randomized inputs") {
+	uint32_t seed = 0xC0FFEE41;
+	static constexpr char32_t alphabet[] = U"xyz12ABC \\abfnrtv'\"q!ά😀-";
+
+	for (int trial = 0; trial < 2048; trial++) {
+		seed ^= seed << 13;
+		seed ^= seed >> 17;
+		seed ^= seed << 5;
+		const int len = int(seed % 192);
+		String input;
+		REQUIRE(input.resize_uninitialized(len + 1) == OK);
+		char32_t *buffer = input.ptrw();
+		for (int i = 0; i < len; i++) {
+			seed ^= seed << 13;
+			seed ^= seed >> 17;
+			seed ^= seed << 5;
+			buffer[i] = alphabet[seed % (sizeof(alphabet) / sizeof(char32_t) - 1)];
+		}
+		buffer[len] = 0;
+
+		const String expected = input.replace("\\a", "\a")
+										.replace("\\b", "\b")
+										.replace("\\f", "\f")
+										.replace("\\n", "\n")
+										.replace("\\r", "\r")
+										.replace("\\t", "\t")
+										.replace("\\v", "\v")
+										.replace("\\'", "'")
+										.replace("\\\"", "\"")
+										.replace("\\\\", "\\");
+		const String result = input.c_unescape();
+		CHECK(result == expected);
+		if (result.length() == input.length()) {
+			CHECK(result.ptr() == input.ptr());
+		}
+	}
+}
+
 TEST_CASE("[String] c-escape/unescape") {
 	String s = "\\1\a2\b\f3\n45\r6\t7\v8\'9\?0\"";
 	CHECK(s.c_escape().c_unescape() == s);
