@@ -63,6 +63,20 @@ _FORCE_INLINE_ bool physics_speculative_sphere_capsule_contact(
 		return false;
 	}
 
+	// A capsule is convex. The supporting plane through its closest
+	// surface point must be reached before a linear sweep can hit it.
+	// Reject slow/receding motion before the more expensive TOI evaluation.
+	// A tolerance keeps almost-tangent boundary contacts eligible.
+	const Vector normal = towards_capsule / distance;
+	const real_t radial_travel = p_relative_motion.dot(normal);
+	if (Math::is_finite(radial_travel)) {
+		const double travel = double(radial_travel);
+		const double slack = double(CMP_EPSILON) * MAX(1.0, Math::abs(travel));
+		if (travel + slack < double(gap)) {
+			return false;
+		}
+	}
+
 	// A radial approach may miss a capsule cap when moving sideways.
 	// Reuse the exact linear CCD test, not an approximate closing-speed test.
 	double impact_fraction = 0.0;
@@ -72,7 +86,6 @@ _FORCE_INLINE_ bool physics_speculative_sphere_capsule_contact(
 		return false;
 	}
 
-	const Vector normal = towards_capsule / distance;
 	const Vector sphere_point = p_sphere_center + normal * p_sphere_radius;
 	const Vector capsule_point = centerline_point - normal * p_capsule_radius;
 	if (!sphere_point.is_finite() || !capsule_point.is_finite()) {
