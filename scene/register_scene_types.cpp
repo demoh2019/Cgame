@@ -286,6 +286,7 @@
 #include "scene/resources/3d/joint_limitation_cone_3d.h"
 #include "scene/resources/3d/mesh_library.h"
 #include "scene/resources/3d/navigation_mesh_source_geometry_data_3d.h"
+#include "scene/resources/3d/heightmap_terrain_mesh.h"
 #include "scene/resources/3d/primitive_meshes.h"
 #include "scene/resources/3d/sky_material.h"
 #include "scene/resources/3d/world_3d.h"
@@ -912,6 +913,7 @@ void register_scene_types() {
 	GDREGISTER_CLASS(CapsuleMesh);
 	GDREGISTER_CLASS(CylinderMesh);
 	GDREGISTER_CLASS(PlaneMesh);
+	GDREGISTER_CLASS(HeightmapTerrainMesh);
 	GDREGISTER_CLASS(PrismMesh);
 	GDREGISTER_CLASS(QuadMesh);
 	GDREGISTER_CLASS(SphereMesh);

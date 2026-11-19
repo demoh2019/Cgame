@@ -1,0 +1,76 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<class name="HeightmapTerrainMesh" inherits="PrimitiveMesh" api_type="core" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="../class.xsd">
+	<brief_description>
+		Editable heightfield mesh with sculpting and four vertex-color layer masks.
+	</brief_description>
+	<description>
+		[HeightmapTerrainMesh] generates an X/Z triangle grid with stored heights, computed normals and vertex-color material masks. Add it as a mesh in [MeshInstance3D]. Call brush methods using local X/Z coordinates. [method raise_brush], [method flatten_brush] and [method smooth_brush] change heights; [method paint_layer] blends four material weights in the [code]COLOR.rgba[/code] channels.
+		This is a CPU heightfield and brush API, not yet a complete terrain editor. It has no viewport brush UI, clipmap LOD, runtime collision, hydraulic erosion or vegetation spawning. Mesh geometry is rebuilt after edits. Changing [member grid_size] resets the saved height and layer arrays.
+	</description>
+	<tutorials>
+	</tutorials>
+	<methods>
+		<method name="flatten_brush">
+			<return type="void" />
+			<param index="0" name="local_xz" type="Vector2" />
+			<param index="1" name="radius" type="float" />
+			<param index="2" name="height" type="float" />
+			<param index="3" name="strength" type="float" />
+			<description>Blends heights toward the specified height using strength from 0 to 1.</description>
+		</method>
+		<method name="get_grid_height" qualifiers="const">
+			<return type="float" />
+			<param index="0" name="x" type="int" />
+			<param index="1" name="z" type="int" />
+			<description>Returns one grid height sample.</description>
+		</method>
+		<method name="get_local_height" qualifiers="const">
+			<return type="float" />
+			<param index="0" name="local_xz" type="Vector2" />
+			<description>Interpolates height in local X/Z coordinates, clamped at mesh edges.</description>
+		</method>
+		<method name="paint_layer">
+			<return type="void" />
+			<param index="0" name="local_xz" type="Vector2" />
+			<param index="1" name="radius" type="float" />
+			<param index="2" name="layer" type="int" />
+			<param index="3" name="strength" type="float" />
+			<description>Paints one vertex-color layer: 0 is red, 1 is green, 2 is blue and 3 is alpha.</description>
+		</method>
+		<method name="raise_brush">
+			<return type="void" />
+			<param index="0" name="local_xz" type="Vector2" />
+			<param index="1" name="radius" type="float" />
+			<param index="2" name="delta" type="float" />
+			<description>Raises or lowers heights using linear radial falloff.</description>
+		</method>
+		<method name="set_grid_height">
+			<return type="void" />
+			<param index="0" name="x" type="int" />
+			<param index="1" name="z" type="int" />
+			<param index="2" name="height" type="float" />
+			<description>Sets one vertex height.</description>
+		</method>
+		<method name="smooth_brush">
+			<return type="void" />
+			<param index="0" name="local_xz" type="Vector2" />
+			<param index="1" name="radius" type="float" />
+			<param index="2" name="strength" type="float" />
+			<description>Smooths heights with neighbors, reading from the original array in each pass.</description>
+		</method>
+	</methods>
+	<members>
+		<member name="grid_size" type="Vector2i" setter="set_grid_size" getter="get_grid_size" default="Vector2i(17, 17)">
+			Vertex dimensions, each from 2 to 512. Resizing resets heights and layer masks.
+		</member>
+		<member name="height_data" type="PackedFloat32Array" setter="set_height_data" getter="get_height_data">
+			Row-major height samples persisted with the mesh; hidden from the Inspector for performance.
+		</member>
+		<member name="layer_weights" type="PackedColorArray" setter="set_layer_weights" getter="get_layer_weights">
+			Normalized RGBA material weights for each vertex, defaulting to layer zero.
+		</member>
+		<member name="terrain_size" type="Vector2" setter="set_terrain_size" getter="get_terrain_size" default="Vector2(16, 16)">
+			Horizontal extent in local X/Z units.
+		</member>
+	</members>
+</class>
