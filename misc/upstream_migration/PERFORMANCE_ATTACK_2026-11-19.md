@@ -15,9 +15,10 @@ Target: `demoh2019/Cgame`, **develop**. Scope: CPU hot paths, avoidable allocati
 ## Validation
 
 - `misc/scripts/tests/test_engine_hotpath_perf.py` contains **24 new test methods** covering source-contracts, randomized directional shadow output equivalence and a standalone C++ harness compiled from the **actual** GDScriptInstance::notification() function on supported CI compilers.
-- An additional local C++ test using equivalent code and mocks passed 7 inheritance depths x 2 traversal directions on both GCC and Clang. This does not prove the full Godot binary compiled.
+- `misc/scripts/tests/test_editor_file_path_perf.py` adds **7** more source/compiled-helper tests for the actual Cgame resource-path and string-span fast-path functions; the new suite is included in the GCC/Clang matrix (31 regression test methods across the two new suites).
+- An additional local C++ test using equivalent code and mocks passed 7 inheritance depths x 2 traversal directions on both GCC and Clang. A second local C++ test verified 10 resource-path cases and 3 span-comparison cases on both compilers (after correctly treating `.hidden` as a valid file name). These are isolated tests, not a full engine build.
 - `.github/workflows/engine-hotpath-performance.yml`: Python source/model/compiled C++ regressions on GCC and Clang; Cgame native Linux editor build with tests=yes, headless GDScript and animation tests; three real subprocess samples each of editor import and scene execution, recording wall time, user/system CPU and **peak RSS (KiB)** with GNU time, as a CSV artifact.
-- The initial [workflow run](https://github.com/demoh2019/Cgame/actions/runs/44439559558) was **queued** when checked. The native editor build and measurements are *not yet confirmed*.
+- The [latest workflow run](https://github.com/demoh2019/Cgame/actions/runs/44439968341) was **queued** when checked. The native editor build and measurements are *not yet confirmed*.
 
 ## Performance interpretation and next steps
 
