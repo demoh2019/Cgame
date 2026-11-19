@@ -285,6 +285,15 @@ static void resolve_soft_soft_vertex_face_direction(JPH::Body &p_point_body, JPH
 			const JPH::Vec3 a = face_relative_to_point + face_rotation * v0.mPosition;
 			const JPH::Vec3 b = face_relative_to_point + face_rotation * v1.mPosition;
 			const JPH::Vec3 c = face_relative_to_point + face_rotation * v2.mPosition;
+			// Conservative per-triangle AABB rejection before the relatively
+			// expensive seven-region closest-point calculations. No heap/BVH.
+			const JPH::Vec3 tri_min = JPH::Vec3::sMin(a, JPH::Vec3::sMin(b, c));
+			const JPH::Vec3 tri_max = JPH::Vec3::sMax(a, JPH::Vec3::sMax(b, c));
+			if (point_position.GetX() < tri_min.GetX() - radius || point_position.GetX() > tri_max.GetX() + radius ||
+					point_position.GetY() < tri_min.GetY() - radius || point_position.GetY() > tri_max.GetY() + radius ||
+					point_position.GetZ() < tri_min.GetZ() - radius || point_position.GetZ() > tri_max.GetZ() + radius) {
+				continue;
+			}
 
 			JPH::Vec3 nearest = JPH::Vec3::sZero();
 			float u = 0.0f, v = 0.0f, w = 0.0f;
