@@ -163,7 +163,13 @@ void cast_segment(const POINT &p_from, const POINT &p_to, SegmentCastCallback p_
 
 	real_t max_fraction = 1.0;
 	for (int n = 0; n < root_count; n++) {
-		_cast_segment_iterative(roots[n], p_from, p_to, p_callback, p_userdata, p_tester, max_fraction);
+		// Roots are sorted by their entry along the ORIGINAL segment.
+		// No subsequent tree can contain a closer hit once this entry is
+		// farther away than the clipped ray.
+		if (entry_fractions[n] > max_fraction + CMP_EPSILON) {
+			break;
+		}
+		_cast_segment_iterative(roots[n], entry_fractions[n], p_from, p_to, p_callback, p_userdata, p_tester, max_fraction);
 		if (max_fraction <= 0.0) {
 			return;
 		}
@@ -402,41 +408,46 @@ void _cull_hit(uint32_t p_ref_id, CullParams &r_params) {
 	_cull_hits.push_back(p_ref_id);
 }
 
-void _cast_segment_iterative(uint32_t p_node_id, const POINT &p_from, const POINT &p_to, SegmentCastCallback p_callback, void *p_userdata, const T *p_tester, real_t &r_max_fraction) {
+void _cast_segment_iterative(uint32_t p_node_id, real_t p_root_entry, const POINT &p_from, const POINT &p_to, SegmentCastCallback p_callback, void *p_userdata, const T *p_tester, real_t &r_max_fraction) {
 	struct StackItem {
 		uint32_t node_id;
+		real_t entry_fraction;
 	};
 	BVH_IterativeInfo<StackItem> stack;
 	stack.stack = (StackItem *)alloca(stack.get_alloca_stacksize());
 	stack.get_first()->node_id = p_node_id;
+	stack.get_first()->entry_fraction = p_root_entry;
 
-	const POINT motion = p_to - p_from;
+	// Keep all entry fractions normalized to the SAME original segment.
+	// Clipping the Segment::to here would invalidate entries cached in the
+	// traversal stack; the current closest hit is held in r_max_fraction.
 	typename BVHABB_CLASS::Segment segment;
 	segment.from = p_from;
 	segment.to = p_to;
 
 	StackItem next;
 	while (stack.pop(next)) {
-		TNode &node = _nodes[next.node_id];
-		if (!node.aabb.intersects_segment(segment)) {
+		// Child AABB intersections were tested before the node was pushed.
+		// A closer exact hit may have shortened the ray since then. Prune
+		// using the cached earliest entry instead of a second slab test.
+		// Keep a small tolerance to retain grazing contacts at clip bounds.
+		if (next.entry_fraction > r_max_fraction + CMP_EPSILON) {
 			continue;
 		}
-
+		TNode &node = _nodes[next.node_id];
 		if (node.is_leaf()) {
 			TLeaf &leaf = _node_get_leaf(node);
 
-			// The BVH can store up to MAX_ITEMS shapes in each leaf. On dense
-			// leaves, visit the closest *bounding box* first so an exact hit
-			// can clip the segment before expensive shape tests on far items.
-			// A single scan avoids sorting and allocates no additional memory.
-			// Small leaves retain their existing one-pass fast path.
+			// Dense leaves still prioritize their nearest proxy. Evaluate
+			// leaf AABBs against the original ray, then reject entries after
+			// the currently clipped fraction.
 			int nearest_item = -1;
 			if (leaf.num_items >= 16) {
 				real_t nearest_entry = Math::INF;
 				for (int i = 0; i < leaf.num_items; i++) {
 					const BVHABB_CLASS &aabb = leaf.get_aabb(i);
 					real_t entry;
-					if (!aabb.intersects_segment(segment, &entry)) {
+					if (!aabb.intersects_segment(segment, &entry) || entry > r_max_fraction + CMP_EPSILON) {
 						continue;
 					}
 					if (nearest_item == -1 || entry < nearest_entry) {
@@ -449,17 +460,17 @@ void _cast_segment_iterative(uint32_t p_node_id, const POINT &p_from, const POIN
 				}
 			}
 
-			// Visit the selected candidate first, then the remaining items
-			// in their original order. This is a traversal *hint*, not a
-			// correctness filter: every other possible hit is still tested.
 			for (int i = nearest_item >= 0 ? -1 : 0; i < leaf.num_items; i++) {
 				const int item_index = i < 0 ? nearest_item : i;
 				if (i >= 0 && i == nearest_item) {
 					continue;
 				}
-				if (i >= 0 && !leaf.get_aabb(item_index).intersects_segment(segment)) {
-					continue;
-				}
+				if (i >= 0) {
+					real_t entry;
+					if (!leaf.get_aabb(item_index).intersects_segment(segment, &entry) || entry > r_max_fraction + CMP_EPSILON) {
+						continue;
+					}
+			}
 				const ItemExtra &extra = _extra[leaf.get_item_ref_id(item_index)];
 				if (USE_PAIRS && !USER_CULL_TEST_FUNCTION::user_cull_check(p_tester, extra.userdata)) {
 					continue;
@@ -470,40 +481,53 @@ void _cast_segment_iterative(uint32_t p_node_id, const POINT &p_from, const POIN
 					if (r_max_fraction == 0.0) {
 						return;
 					}
-					segment.to = p_from + motion * r_max_fraction;
 				}
 			}
 		} else if (node.num_children == 2) {
-			// The stack is LIFO: push the farther intersecting child first,
-			// so the nearer child can shorten the ray before it is visited.
+			// LIFO: process the child with the smaller original-ray entry first.
 			const uint32_t child_a = node.children[0];
 			const uint32_t child_b = node.children[1];
 			const BVHABB_CLASS &bounds_a = _nodes[child_a].aabb;
 			const BVHABB_CLASS &bounds_b = _nodes[child_b].aabb;
 			real_t entry_a;
 			real_t entry_b;
-			const bool hit_a = bounds_a.intersects_segment(segment, &entry_a);
-			const bool hit_b = bounds_b.intersects_segment(segment, &entry_b);
+			const bool hit_a = bounds_a.intersects_segment(segment, &entry_a) && entry_a <= r_max_fraction + CMP_EPSILON;
+			const bool hit_b = bounds_b.intersects_segment(segment, &entry_b) && entry_b <= r_max_fraction + CMP_EPSILON;
 			if (hit_a && hit_b) {
 				if (entry_a <= entry_b) {
-					stack.request()->node_id = child_b;
-					stack.request()->node_id = child_a;
+					StackItem *far_item = stack.request();
+					far_item->node_id = child_b;
+					far_item->entry_fraction = entry_b;
+					StackItem *near_item = stack.request();
+					near_item->node_id = child_a;
+					near_item->entry_fraction = entry_a;
 				} else {
-					stack.request()->node_id = child_a;
-					stack.request()->node_id = child_b;
+					StackItem *far_item = stack.request();
+					far_item->node_id = child_a;
+					far_item->entry_fraction = entry_a;
+					StackItem *near_item = stack.request();
+					near_item->node_id = child_b;
+					near_item->entry_fraction = entry_b;
 				}
 			} else if (hit_a) {
-				stack.request()->node_id = child_a;
+				StackItem *child = stack.request();
+				child->node_id = child_a;
+				child->entry_fraction = entry_a;
 			} else if (hit_b) {
-				stack.request()->node_id = child_b;
+				StackItem *child = stack.request();
+				child->node_id = child_b;
+				child->entry_fraction = entry_b;
 			}
 		} else {
-			// The current BVH has binary nodes; preserve the generic
-			// fallback for other MAX_CHILDREN configurations.
+			// Preserve support for BVH configurations with more than two
+			// children without falling back to a redundant node slab check.
 			for (int i = 0; i < node.num_children; i++) {
 				const uint32_t child_id = node.children[i];
-				if (_nodes[child_id].aabb.intersects_segment(segment)) {
-					stack.request()->node_id = child_id;
+				real_t entry;
+				if (_nodes[child_id].aabb.intersects_segment(segment, &entry) && entry <= r_max_fraction + CMP_EPSILON) {
+					StackItem *child = stack.request();
+					child->node_id = child_id;
+					child->entry_fraction = entry;
 				}
 			}
 		}
