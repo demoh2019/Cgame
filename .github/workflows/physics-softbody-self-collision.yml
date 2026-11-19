@@ -1,4 +1,4 @@
-name: Physics soft-body self-collision source contracts
+name: Physics soft-body self-collision contracts
 
 on:
   pull_request:
@@ -11,6 +11,8 @@ on:
       - "modules/godot_physics_3d/godot_soft_body_3d.h"
       - "tests/servers/test_physics_softbody_self_collision.cpp"
       - "tests/stress/test_physics_softbody_self_collision.py"
+      - "tests/stress/physics_softbody_edge_standalone.cpp"
+      - "tests/stress/mock_physics/core/math/vector3.h"
       - ".github/workflows/physics-softbody-self-collision.yml"
   workflow_dispatch:
 
@@ -18,10 +20,24 @@ permissions:
   contents: read
 
 jobs:
-  softbody-self-collision-contracts:
-    name: Self-collision BVH and topology source checks
+  self-contact-math:
+    name: Self-contact contracts and C++ smoke (${{ matrix.compiler }})
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        compiler: [g++, clang++]
     steps:
       - uses: actions/checkout@v4
-      - name: Check opt-in configuration, BVH budgets and helper test coverage
+      - name: Check opt-in settings, BVH budgets and native test coverage
         run: python3 -m unittest discover -s tests/stress -p 'test_physics_softbody_self_collision.py' -v
+      - name: Compile exact self-contact math header with C++17
+        env:
+          CXX: ${{ matrix.compiler }}
+        run: |
+          "$CXX" -std=c++17 -O2 -Wall -Wextra -Werror -pedantic \
+            -Itests/stress/mock_physics -I. \
+            tests/stress/physics_softbody_edge_standalone.cpp \
+            -o "$RUNNER_TEMP/physics-soft-edge-smoke"
+      - name: Exercise vertex/face and 20000 seeded edge-pair cases
+        run: "$RUNNER_TEMP/physics-soft-edge-smoke"
