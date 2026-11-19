@@ -10,6 +10,7 @@ const Inventory = preload("res://scripts/shared/inventory.gd")
 const Vendor = preload("res://scripts/shared/vendor.gd")
 const PlayerTrade = preload("res://scripts/shared/player_trade.gd")
 const Party = preload("res://scripts/shared/party.gd")
+const LootRights = preload("res://scripts/shared/loot_rights.gd")
 const PartyAid = preload("res://scripts/shared/party_aid.gd")
 const TerritoryControl = preload("res://scripts/shared/territory_control.gd")
 const MarketBoard = preload("res://scripts/shared/market_board.gd")
@@ -110,7 +111,7 @@ var trade_by_player: Dictionary = {} # peer -> active trade
 var parties = Party.new() # Server-only session groups and short-lived invitations.
 var territory # Session outposts generated from this world seed.
 var world_structure_revision: int = 0
-var bags: Dictionary = {} # bag id -> {"id", "x","y","z", "items": {id: n}, "expires": t}
+var bags: Dictionary = {} # Session loot; optional server-owned PvE reservations
 var events: Array = [] # Things that happened this tick, for the network layer to announce.
 var _next_id: int = 5_000_000_000
 
@@ -1426,6 +1427,8 @@ func cmd_loot(peer_id: int, entity_id: int) -> Dictionary:
 		if not RaidLoot.can_open(bag, player, time):
 			return {"ok": false, "reason": "raid_reserved",
 				"remaining": RaidLoot.remaining(bag, time)}
+		if not LootRights.can_loot(bag, peer_id, time):
+			return {"ok": false, "reason": "reserved"}
 		var left := _give_items(player, bag["items"])
 		if left.is_empty():
 			bags.erase(entity_id)
@@ -1448,7 +1451,7 @@ func cmd_loot(peer_id: int, entity_id: int) -> Dictionary:
 		var left: Dictionary = _give_items(player, loot)
 		if not left.is_empty():
 			# Whatever does not fit stays on the ground next to the crate.
-			_make_bag(Vector3(crate["x"], crate["y"], crate["z"]), left)
+			_make_bag(Vector3(crate["x"], crate["y"], crate["z"]), left, peer_id)
 		opened_crates[entity_id] = time + 600.0
 		var gained_xp: int = player.progression.award_scavenge(zone)
 		if gained_xp > 0:
@@ -1507,11 +1510,17 @@ func _give_items(player: Player, items: Dictionary) -> Dictionary:
 	return left
 
 
-func _make_bag(position: Vector3, items: Dictionary) -> int:
+func _make_bag(position: Vector3, items: Dictionary, owner_peer: int = -1) -> int:
 	if items.is_empty():
 		return -1
 	var bag_id := new_id()
-	bags[bag_id] = {"id": bag_id, "x": position.x, "y": position.y, "z": position.z, "items": items.duplicate(), "expires": time + BAG_LIFETIME}
+	var bag: Dictionary = {"id": bag_id, "x": position.x, "y": position.y, "z": position.z,
+		"items": items.duplicate(), "expires": time + BAG_LIFETIME}
+	# Ordinary infected and crate overflow belong to the killer/scavenger's
+	# party for a brief window. PvP full-loot and raid bags use other rules.
+	if owner_peer > 0 and players.has(owner_peer):
+		bag.merge(LootRights.reservation(owner_peer, parties.members_of(owner_peer), time))
+	bags[bag_id] = bag
 	events.append({"type": "bag", "id": bag_id})
 	return bag_id
 
@@ -1674,7 +1683,7 @@ func _on_zombie_death(zombie, killer: Player) -> void:
 		raid_pending_slam = {}
 		events.append({"type": "raid_defeated", "id": zombie.id,
 			"x": zombie.position.x, "z": zombie.position.z})
-	var loot_bag_id: int = _make_bag(zombie.position, loot)
+	var loot_bag_id: int = _make_bag(zombie.position, loot, -1 if zombie.raid_boss else killer.id)
 	if zombie.raid_boss and loot_bag_id >= 0:
 		# Entitlements are frozen at the confirmed kill; guests use object
 		# identity, accounts survive reconnect. No client-authored loot rights.
@@ -2148,9 +2157,14 @@ func snapshot_for(peer_id: int) -> Dictionary:
 	var nearby_bags: Array = []
 	for bag in bags.values():
 		if here.distance_to(Vector2(bag["x"], bag["z"])) <= Defs.INTEREST_RADIUS:
-			nearby_bags.append({"id": bag["id"], "x": bag["x"], "y": bag["y"], "z": bag["z"],
-				"raid": bag.has("raid_reserved_until"),
-				"reserved_seconds": RaidLoot.remaining(bag, time)})
+			var bag_view: Dictionary = LootRights.visible_state(bag, peer_id, time)
+			bag_view["raid"] = bag.has("raid_reserved_until")
+			if bool(bag_view["raid"]):
+				# Raid contribution entitlement supersedes ordinary party looting.
+				bag_view["reserved_seconds"] = RaidLoot.remaining(bag, time)
+				bag_view["reserved"] = float(bag_view["reserved_seconds"]) > 0.0
+				bag_view["can_loot"] = RaidLoot.can_open(bag, player, time)
+			nearby_bags.append(bag_view)
 	var gone_nodes: Array = []
 	for id in depleted:
 		gone_nodes.append(id)
