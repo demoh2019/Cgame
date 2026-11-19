@@ -55,6 +55,33 @@ TEST_CASE("[GodotPhysics] Static and dynamic Coulomb friction cones") {
 		CHECK(godot_physics_clamp_static_friction_3d(Vector3(0.0, 0.9, 0.0), real_t(0.5), real_t(2.0)) ==
 				Vector3(0.0, 0.9, 0.0));
 	}
+	SUBCASE("3D large finite slip keeps a nonzero kinetic friction impulse") {
+		// float32 length_squared(1e20, -1e20, 0) is infinite.
+		// Projection must still have exactly the requested kinetic magnitude.
+		const Vector3 slip = godot_physics_clamp_static_friction_3d(
+				Vector3(real_t(1e20), real_t(-1e20), real_t(0.0)),
+				real_t(5.0), real_t(2.0));
+		CHECK(slip.is_finite());
+		CHECK(slip.x / real_t(5.0) == doctest::Approx(0.70710678118).epsilon(1e-5));
+		CHECK(slip.y / real_t(5.0) == doctest::Approx(-0.70710678118).epsilon(1e-5));
+		CHECK(slip.z == real_t(0.0));
+		CHECK(slip.length() == doctest::Approx(5.0));
+	}
+	SUBCASE("3D large finite impulse stays inside large static cone") {
+		const Vector3 candidate(real_t(1e20), real_t(-1e20), real_t(0.0));
+		CHECK(godot_physics_clamp_static_friction_3d(
+					candidate, real_t(1e20), real_t(2.0)) == candidate);
+	}
+	SUBCASE("3D large impulse and tiny kinetic limit do not underflow scale") {
+		const Vector3 slip = godot_physics_clamp_static_friction_3d(
+				Vector3(real_t(1e38), real_t(-1e38), real_t(0.0)),
+				real_t(1e-10), real_t(1.0));
+		CHECK(slip.is_finite());
+		CHECK(slip.x / real_t(1e-10) == doctest::Approx(0.70710678118).epsilon(1e-5));
+		CHECK(slip.y / real_t(1e-10) == doctest::Approx(-0.70710678118).epsilon(1e-5));
+		CHECK(godot_physics_clamp_static_friction_3d(
+					Vector3(real_t(1e20), 0, 0), real_t(0.0), real_t(2.0)) == Vector3());
+	}
 	SUBCASE("Multiplier cannot weaken normal kinetic friction") {
 		CHECK(godot_physics_clamp_static_friction_2d(real_t(0.6), real_t(0.5), real_t(-2.0)) == doctest::Approx(0.5));
 		CHECK(godot_physics_clamp_static_friction_3d(Vector3(0.0, 0.0, 0.6), real_t(0.5), real_t(-2.0)).length() ==
