@@ -231,8 +231,9 @@ JPH::SoftBodySharedSettings *JoltSoftBody3D::_create_shared_settings() {
 	// which simplifies to:
 	// compliance = dt^2 * (1 / k - 1) * (w1 + w2)
 
-	// Assuming that the vertices have the same mass:
-	const float w1_plus_w2 = 2.0f * physics_vertices.size() / mass;
+	// Assuming that the vertices have the same mass. Use double here as
+	// a tiny but positive mass can overflow the float intermediate.
+	const double w1_plus_w2 = 2.0 * double(physics_vertices.size()) / double(mass);
 
 	// Calculate time step of a single XPBD iteration
 	const float dt = 1.0f / Engine::get_singleton()->get_user_physics_ticks_per_second() / simulation_precision;
@@ -241,7 +242,7 @@ JPH::SoftBodySharedSettings *JoltSoftBody3D::_create_shared_settings() {
 	// calculating 1 / k would produce infinity (and potentially NaNs in the
 	// constraint solver). Saturate in double precision for very small k.
 	const double inverse_stiffness_unbounded = double(dt) * double(dt) *
-			(1.0 / double(MAX(stiffness_coefficient, FLT_MIN)) - 1.0) * double(w1_plus_w2);
+			(1.0 / double(MAX(stiffness_coefficient, FLT_MIN)) - 1.0) * w1_plus_w2;
 	const float inverse_stiffness = stiffness_coefficient <= 0.0f ?
 			FLT_MAX : float(MIN(inverse_stiffness_unbounded, double(FLT_MAX)));
 
