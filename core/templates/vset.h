@@ -52,7 +52,9 @@ protected:
 
 		int64_t pos = _data.span().bisect(p_val, true);
 
-		if (pos < _data.size() && !(p_val < _data[pos]) && !(_data[pos] < p_val)) {
+		// bisect(..., true) already guarantees !(_data[pos] < p_val).
+		// Only the reverse comparison is needed to detect equivalence.
+		if (pos < _data.size() && !(p_val < _data[pos])) {
 			r_exact = true;
 		}
 		return pos;
@@ -65,7 +67,9 @@ protected:
 
 		int64_t pos = _data.span().bisect(p_val, true);
 
-		if (pos < _data.size() && !(p_val < _data[pos]) && !(_data[pos] < p_val)) {
+		// bisect(..., true) already guarantees !(_data[pos] < p_val).
+		// Only the reverse comparison is needed to detect equivalence.
+		if (pos < _data.size() && !(p_val < _data[pos])) {
 			return pos;
 		}
 		return -1;
@@ -73,6 +77,21 @@ protected:
 
 public:
 	void insert(const T &p_val) {
+		// Ordered insertions and repeated maximum keys are both common.
+		// Check the tail before running binary search. Comparison is based on
+		// strict weak ordering, not operator==, to preserve VSet semantics.
+		if (!_data.is_empty()) {
+			const T &last = _data[_data.size() - 1];
+			Comparator<T> compare;
+			if (compare(last, p_val)) {
+				_data.push_back(p_val);
+				return;
+			}
+			if (!compare(p_val, last)) {
+				return; // Already equivalent to the last element.
+			}
+		}
+
 		bool exact;
 		int pos = _find(p_val, exact);
 		if (exact) {

@@ -214,7 +214,7 @@ bool GodotHingeJoint3D::setup(real_t p_step) {
 	return true;
 }
 
-void GodotHingeJoint3D::solve(real_t p_step) {
+void GodotHingeJoint3D::_solve_joint(real_t p_step) {
 	Vector3 pivotAInW = A->get_transform().xform(m_rbAFrame.origin);
 	Vector3 pivotBInW = B->get_transform().xform(m_rbBFrame.origin);
 

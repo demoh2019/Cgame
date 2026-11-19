@@ -1,0 +1,46 @@
+name: GPU texture channel packing and HDR preservation
+
+on:
+  push:
+    branches: [develop]
+    paths:
+      - 'core/io/image.cpp'
+      - 'core/io/image.h'
+      - 'editor/import/resource_importer_texture.cpp'
+      - 'tests/core/io/test_image.cpp'
+      - 'misc/scripts/tests/test_uncompressed_texture_channel_packing.py'
+      - '.github/workflows/uncompressed-texture-channels.yml'
+  pull_request:
+    paths:
+      - 'core/io/image.cpp'
+      - 'core/io/image.h'
+      - 'editor/import/resource_importer_texture.cpp'
+      - 'tests/core/io/test_image.cpp'
+      - 'misc/scripts/tests/test_uncompressed_texture_channel_packing.py'
+      - '.github/workflows/uncompressed-texture-channels.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  source:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - run: python3 -m unittest discover -s misc/scripts/tests -p test_uncompressed_texture_channel_packing.py -v
+
+  native:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+      - uses: ./.github/actions/godot-deps
+      - uses: ./.github/actions/godot-build
+        with:
+          platform: linuxbsd
+          target: editor
+          scons-flags: dev_build=yes tests=yes debug_symbols=no module_mono_enabled=no accesskit=no -j2
+      - run: ./bin/godot.linuxbsd.editor.dev.x86_64 --headless --test --test-case="*[Image] optimize_from_channels*"

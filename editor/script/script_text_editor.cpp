@@ -369,12 +369,12 @@ bool ScriptTextEditor::_warning_clicked(const Variant &p_line) {
 
 		CodeEdit *text_editor = code_editor->get_text_editor();
 		String prev_line = line > 0 ? text_editor->get_line(line - 1) : "";
-		if (prev_line.contains("@warning_ignore")) {
+		const int indent = text_editor->get_indent_level(line) / text_editor->get_indent_size();
+		if (prev_line.contains("@warning_ignore") && !text_editor->is_in_comment(line - 1, indent)) {
 			const int closing_bracket_idx = prev_line.find_char(')');
 			const String text_to_insert = ", " + code.quote(quote_style);
 			text_editor->insert_text(text_to_insert, line - 1, closing_bracket_idx);
 		} else {
-			const int indent = text_editor->get_indent_level(line) / text_editor->get_indent_size();
 			String annotation_indent;
 			if (!text_editor->is_indent_using_spaces()) {
 				annotation_indent = String("\t").repeat(indent);
@@ -1495,8 +1495,33 @@ void ScriptTextEditor::_show_symbol_tooltip(const String &p_symbol, int p_row, i
 		}
 	}
 
+	String static_prefix;
+	if (lc_error == OK && result.type == EditorLanguage::LookupResult::Type::CLASS_PROPERTY) {
+		const Ref<Script> result_script = ResourceLoader::load(result.script_path);
+		if (result_script.is_valid()) {
+			// Invalid or missing scripts must not be dereferenced for debugger tooltips.
+			const String script_global_name = result_script->get_global_name();
+			bool is_static_variable = false;
+			result_script->get(result.class_member, &is_static_variable);
+
+			if (is_static_variable) {
+				if (script_global_name.is_empty()) {
+					static_prefix = result_script->get_path();
+				} else {
+					static_prefix = script_global_name;
+				}
+			}
+		}
+	}
+
+	String result_symbol = p_symbol;
+	if (!static_prefix.is_empty()) {
+		result_symbol = static_prefix + "/" + result_symbol;
+		result_symbol = result_symbol.uri_encode().replace(".", "%2E");
+	}
+
 	// NOTE: See also `ScriptEditor::_get_debug_tooltip()` for documentation tooltips disabled.
-	String debug_value = EditorDebuggerNode::get_singleton()->get_var_value(p_symbol);
+	String debug_value = EditorDebuggerNode::get_singleton()->get_var_value(result_symbol);
 	if (!debug_value.is_empty()) {
 		constexpr int DISPLAY_LIMIT = 1024;
 		if (debug_value.size() > DISPLAY_LIMIT) {

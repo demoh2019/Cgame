@@ -124,6 +124,45 @@ TEST_CASE("[Dictionary] get_key_at_index()") {
 	CHECK(int(val) == 3);
 }
 
+TEST_CASE("[Dictionary] indexed pair traversal from both ends") {
+	Dictionary map;
+	for (int i = 0; i < 1024; i++) {
+		map[i] = i * 3;
+	}
+	REQUIRE_EQ(map.size(), 1024);
+
+	for (int i = 0; i < 1024; i++) {
+		const KeyValue<Variant, Variant> *pair = map.get_key_value_at_index(i);
+		REQUIRE(pair != nullptr);
+		CHECK_EQ(pair->key, Variant(i));
+		CHECK_EQ(pair->value, Variant(i * 3));
+		CHECK_EQ(map.get_key_at_index(i), pair->key);
+		CHECK_EQ(map.get_value_at_index(i), pair->value);
+
+		const KeyValue<Variant, Variant> *negative = map.get_key_value_at_index(i - 1024);
+		REQUIRE(negative != nullptr);
+		CHECK_EQ(negative->key, pair->key);
+		CHECK_EQ(negative->value, pair->value);
+	}
+
+	CHECK(map.get_key_value_at_index(-1025) == nullptr);
+	CHECK(map.get_key_value_at_index(1024) == nullptr);
+	CHECK_EQ(map.get_key_at_index(-1025), Variant());
+	CHECK_EQ(map.get_value_at_index(1024), Variant());
+	CHECK_EQ(map.size(), 1024);
+
+	map.erase(0);
+	map.erase(1023);
+	REQUIRE_EQ(map.size(), 1022);
+	CHECK_EQ(map.get_key_at_index(0), Variant(1));
+	CHECK_EQ(map.get_key_at_index(-1), Variant(1022));
+	CHECK_EQ(map.get_value_at_index(-1), Variant(1022 * 3));
+
+	map.clear();
+	CHECK(map.get_key_value_at_index(0) == nullptr);
+	CHECK(map.get_key_value_at_index(-1) == nullptr);
+}
+
 TEST_CASE("[Dictionary] getptr()") {
 	Dictionary map;
 	map[1] = 3;
@@ -647,6 +686,65 @@ TEST_CASE("[Dictionary] assign()") {
 	CHECK(typed.size() == 2);
 }
 
+
+TEST_CASE("[Dictionary] assign converts large untyped dictionaries without temp arrays") {
+	Dictionary source;
+	for (int i = 0; i < 512; ++i) {
+		source[i] = i * 2;
+	}
+	TypedDictionary<double, double> target;
+	target.assign(source);
+	REQUIRE_EQ(target.size(), 512);
+	for (int i = 0; i < 512; ++i) {
+		CHECK_EQ(target[double(i)], Variant(double(i * 2)));
+	}
+	source[0] = 100;
+	CHECK_EQ(target[0.0], Variant(0.0));
+}
+
+TEST_CASE("[Dictionary] assign rejects invalid values without partially modifying target") {
+	TypedDictionary<int, int> target;
+	target[77] = 99;
+	Dictionary source;
+	source[0] = 2;
+	source[1] = "invalid";
+	ERR_PRINT_OFF;
+	target.assign(source);
+	ERR_PRINT_ON;
+	CHECK_EQ(target.size(), 1);
+	CHECK_EQ(target[77], Variant(99));
+	CHECK_EQ(source.size(), 2);
+}
+
+TEST_CASE("[Dictionary] assign supports same-typed fast path and empty input") {
+	TypedDictionary<int, int> source;
+	source[1] = 10;
+	source[2] = 20;
+	TypedDictionary<int, int> target;
+	target[3] = 30;
+	target.assign(source);
+	CHECK_EQ(target.size(), 2);
+	CHECK_EQ(target[1], Variant(10));
+	CHECK_EQ(target[2], Variant(20));
+	source[1] = 99;
+	CHECK_EQ(target[1], Variant(10));
+	Dictionary empty;
+	target.assign(empty);
+	CHECK(target.is_empty());
+}
+
+TEST_CASE("[Dictionary] assign rejects colliding or incompatible numeric keys atomically") {
+	Dictionary source;
+	source[1.1] = 2;
+	source[1.2] = 4;
+	TypedDictionary<int, int> target;
+	target[7] = 70;
+	ERR_PRINT_OFF;
+	target.assign(source);
+	ERR_PRINT_ON;
+	CHECK_EQ(target.size(), 1);
+	CHECK_EQ(target[7], Variant(70));
+}
 TEST_CASE("[Dictionary] Typed copying") {
 	TypedDictionary<int, int> d1;
 	d1[0] = 1;
@@ -748,6 +846,257 @@ TEST_CASE("[Dictionary] RefCounted value init") {
 	};
 	CHECK_EQ(tdict[0.0], Variant(a));
 	CHECK_EQ(tdict[5.0], Variant(b));
+}
+
+
+TEST_CASE("[DictionaryFastPath] untyped lookup preserves heterogeneous keys") {
+	Dictionary dict;
+	dict[42] = "integer";
+	dict[StringName("alpha")] = 12;
+	dict[Vector2(1, 2)] = 99;
+	dict[false] = "boolean";
+	CHECK_EQ(dict.size(), 4);
+	CHECK(dict.has(42));
+	CHECK(dict.has(String("alpha")));
+	CHECK(dict.has(Vector2(1, 2)));
+	CHECK(dict.has(false));
+	CHECK_FALSE(dict.has(43));
+	CHECK_EQ(dict.get(42, Variant()), Variant("integer"));
+	CHECK_EQ(dict.get("alpha", Variant()), Variant(12));
+	CHECK_EQ(dict.get(Vector2(1, 2), Variant()), Variant(99));
+	CHECK_EQ(dict.get(false, Variant()), Variant("boolean"));
+}
+
+TEST_CASE("[DictionaryFastPath] untyped get returns defaults without inserting") {
+	Dictionary dict;
+	dict["set"] = 8;
+	const int initial_size = dict.size();
+	CHECK_EQ(dict.get("absent", Variant(91)), Variant(91));
+	CHECK_EQ(dict.get_valid("absent").get_type(), Variant::NIL);
+	CHECK_EQ(dict.get_valid("set"), Variant(8));
+	CHECK_EQ(dict.size(), initial_size);
+}
+
+TEST_CASE("[DictionaryFastPath] const pointers reference existing values only") {
+	Dictionary dict;
+	dict[StringName("key")] = "value";
+	const Dictionary &read_only_view = dict;
+	const Variant *value = read_only_view.getptr(String("key"));
+	REQUIRE(value != nullptr);
+	CHECK_EQ(*value, Variant("value"));
+	CHECK(read_only_view.getptr("not_found") == nullptr);
+	CHECK_EQ(dict.size(), 1);
+}
+
+TEST_CASE("[DictionaryFastPath] bulk has_all short-circuits on missing keys") {
+	Dictionary dict;
+	dict[10] = true;
+	dict[StringName("key")] = false;
+	CHECK(dict.has_all(Array()));
+	Array keys = { 10, String("key") };
+	Array missing = { 10, "missing" };
+	CHECK(dict.has_all(keys));
+	CHECK_FALSE(dict.has_all(missing));
+	CHECK_EQ(dict.size(), 2);
+}
+
+TEST_CASE("[DictionaryFastPath] untyped lookup remains correct on read-only dictionaries") {
+	Dictionary dict;
+	dict["present"] = 42;
+	dict.make_read_only();
+	CHECK(dict.has("present"));
+	CHECK_FALSE(dict.has("absent"));
+	CHECK_EQ(dict.get("present", Variant()), Variant(42));
+	CHECK_EQ(dict.get("absent", 88), Variant(88));
+	const Dictionary &view = dict;
+	const Variant *value = view.getptr("present");
+	REQUIRE(value != nullptr);
+	CHECK_EQ(*value, Variant(42));
+}
+
+TEST_CASE("[DictionaryFastPath] typed keys still validate and coerce") {
+	TypedDictionary<double, int64_t> dict;
+	dict[Variant(3)] = 12;
+	CHECK(dict.has(Variant(3.0)));
+	CHECK_EQ(dict.get(Variant(3), Variant()), Variant(12));
+	ERR_PRINT_OFF;
+	CHECK_FALSE(dict.has(Variant(String("not numeric"))));
+	ERR_PRINT_ON;
+	CHECK_EQ(dict.get(Variant(4), Variant(42)), Variant(42));
+	CHECK_EQ(dict.size(), 1);
+}
+
+TEST_CASE("[DictionaryFastPath] repeat untyped reads preserve size and values") {
+	Dictionary dict;
+	for (int i = 0; i < 256; ++i) {
+		dict[i] = i * 3;
+	}
+	const Dictionary &view = dict;
+	for (int round = 0; round < 32; ++round) {
+		for (int i = 0; i < 256; ++i) {
+			CHECK(view.has(i));
+			CHECK_EQ(view.get(i, Variant()), Variant(i * 3));
+			const Variant *value = view.getptr(i);
+			REQUIRE(value != nullptr);
+			CHECK_EQ(*value, Variant(i * 3));
+		}
+	}
+	CHECK_EQ(dict.size(), 256);
+}
+
+TEST_CASE("[DictionaryFastPath] untyped lookup and mutable pointer") {
+	Dictionary dict;
+	dict[StringName("alpha")] = 10;
+	const Dictionary &read_view = dict;
+	CHECK_EQ(read_view[Variant(String("alpha"))], Variant(10));
+	Variant *stored = dict.getptr(Variant(String("alpha")));
+	REQUIRE(stored != nullptr);
+	*stored = 23;
+	CHECK_EQ(read_view[Variant(StringName("alpha"))], Variant(23));
+	CHECK(dict.getptr(Variant("missing")) == nullptr);
+	CHECK_EQ(dict.size(), 1);
+}
+
+TEST_CASE("[DictionaryFastPath] untyped set, erase and get_or_add") {
+	Dictionary dict;
+	CHECK(dict.set(Variant(StringName("key")), Variant(5)));
+	CHECK_EQ(dict.get_or_add(Variant(String("key")), Variant(99)), Variant(5));
+	CHECK_EQ(dict.get_or_add(Variant("new"), Variant(77)), Variant(77));
+	CHECK_EQ(dict.get(Variant("new"), Variant()), Variant(77));
+	CHECK_EQ(dict.size(), 2);
+	CHECK(dict.erase(Variant(StringName("key"))));
+	CHECK_FALSE(dict.erase(Variant(String("key"))));
+	CHECK_EQ(dict.size(), 1);
+}
+
+TEST_CASE("[DictionaryFastPath] typed dictionary retains key coercion") {
+	TypedDictionary<double, int64_t> dict;
+	CHECK(dict.set(Variant(4), Variant(91)));
+	CHECK_EQ(dict.get(Variant(4.0), Variant()), Variant(91));
+	CHECK_EQ(dict.get_or_add(Variant(4), Variant(99)), Variant(91));
+	CHECK_EQ(dict.get_or_add(Variant(5), Variant(12)), Variant(12));
+	const Dictionary &view = dict;
+	CHECK_EQ(view[Variant(5.0)], Variant(12));
+	CHECK(dict.erase(Variant(4)));
+	CHECK_FALSE(dict.has(Variant(4.0)));
+	CHECK_EQ(dict.size(), 1);
+}
+
+TEST_CASE("[DictionaryFastPath] read-only dictionary keeps writable view isolated") {
+	Dictionary dict;
+	CHECK(dict.set(Variant("stored"), Variant(11)));
+	dict.make_read_only();
+	Variant *read_only_ptr = dict.getptr(Variant("stored"));
+	REQUIRE(read_only_ptr != nullptr);
+	*read_only_ptr = 999;
+	CHECK_EQ(dict.get(Variant("stored"), Variant()), Variant(11));
+	const Dictionary &view = dict;
+	CHECK_EQ(view[Variant("stored")], Variant(11));
+	ERR_PRINT_OFF;
+	CHECK_FALSE(dict.set(Variant("second"), Variant(2)));
+	CHECK_FALSE(dict.erase(Variant("stored")));
+	ERR_PRINT_ON;
+	CHECK_EQ(dict.size(), 1);
+}
+
+TEST_CASE("[DictionaryFastPath] untyped keys with typed values remain checked") {
+	TypedDictionary<Variant, int64_t> dict;
+	CHECK(dict.set(Variant("valid"), Variant(42)));
+	CHECK_EQ(dict.get(Variant("valid"), Variant()), Variant(42));
+	ERR_PRINT_OFF;
+	CHECK_FALSE(dict.set(Variant("invalid"), Variant(Vector2(1, 2))));
+	ERR_PRINT_ON;
+	CHECK_FALSE(dict.has(Variant("invalid")));
+	CHECK_EQ(dict.get_or_add(Variant("new"), Variant(2)), Variant(2));
+	CHECK_EQ(dict.size(), 2);
+}
+
+TEST_CASE("[DictionaryFastPath] randomized insertion and removal retain exact keys") {
+	Dictionary dict;
+	bool present[127] = {};
+	uint32_t state = 0x13579BDF;
+	for (int i = 0; i < 4096; i++) {
+		state = 1664525u * state + 1013904223u;
+		const int key = state % 127;
+		if (state & 256u) {
+			CHECK(dict.set(Variant(key), Variant(i)));
+			present[key] = true;
+		} else {
+			dict.erase(Variant(key));
+			present[key] = false;
+		}
+		CHECK_EQ(dict.has(Variant(key)), present[key]);
+		if (i % 127 == 0) {
+			int expected_size = 0;
+			for (int j = 0; j < 127; j++) {
+				CHECK_EQ(dict.has(Variant(j)), present[j]);
+				expected_size += present[j] ? 1 : 0;
+			}
+			CHECK_EQ(dict.size(), expected_size);
+		}
+	}
+}
+
+TEST_CASE("[TypedContainer] Dictionary Ref<Script> fast path retains Variant compatibility") {
+	Dictionary legacy;
+	legacy.set_typed(Variant::STRING, StringName(), Variant(), Variant::INT, StringName(), Variant());
+	Dictionary direct;
+	direct.set_typed(Variant::STRING, StringName(), Ref<Script>(), Variant::INT, StringName(), Ref<Script>());
+	REQUIRE(direct.is_same_typed(legacy));
+
+	Dictionary source;
+	source["first"] = 11;
+	source["second"] = 22;
+	Dictionary via_ref(source, Variant::STRING, StringName(), Ref<Script>(), Variant::INT, StringName(), Ref<Script>());
+	Dictionary via_variant(source, Variant::STRING, StringName(), Variant(), Variant::INT, StringName(), Variant());
+	REQUIRE(via_ref.is_same_typed(via_variant));
+	REQUIRE_EQ(via_ref.size(), 2);
+	CHECK_EQ(via_ref["first"], Variant(11));
+	CHECK_EQ(via_ref["second"], Variant(22));
+	CHECK_EQ(via_ref["first"], via_variant["first"]);
+	CHECK_EQ(via_ref["second"], via_variant["second"]);
+
+	for (int i = 0; i < 512; i++) {
+		TypedDictionary<String, int> typed;
+		REQUIRE_EQ(typed.get_typed_key_builtin(), Variant::STRING);
+		REQUIRE_EQ(typed.get_typed_value_builtin(), Variant::INT);
+		typed[String("item")] = i;
+		CHECK_EQ(typed[String("item")], Variant(i));
+	}
+}
+
+
+TEST_CASE("[Dictionary] keys and values preserve typed storage and entry alignment") {
+	TypedDictionary<String, int> typed;
+	for (int i = 0; i < 4096; ++i) {
+		typed[String::num_int64(i)] = i * 3;
+	}
+	Array keys = typed.keys();
+	Array values = typed.values();
+	REQUIRE_EQ(keys.size(), 4096);
+	REQUIRE_EQ(values.size(), 4096);
+	CHECK_EQ(keys.get_typed_builtin(), Variant::STRING);
+	CHECK_EQ(values.get_typed_builtin(), Variant::INT);
+	for (int i = 0; i < keys.size(); ++i) {
+		const Variant &key = keys[i];
+		CHECK_EQ(typed[key], values[i]);
+	}
+
+	Dictionary untyped;
+	untyped["s"] = String("value");
+	untyped[42] = Vector2(3, 5);
+	untyped[true] = 7;
+	keys = untyped.keys();
+	values = untyped.values();
+	REQUIRE_EQ(keys.size(), untyped.size());
+	REQUIRE_EQ(values.size(), untyped.size());
+	for (int i = 0; i < keys.size(); ++i) {
+		CHECK_EQ(untyped[keys[i]], values[i]);
+	}
+
+	Dictionary empty;
+	CHECK_EQ(empty.keys().size(), 0);
+	CHECK_EQ(empty.values().size(), 0);
 }
 
 } // namespace TestDictionary

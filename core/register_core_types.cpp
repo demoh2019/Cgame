@@ -75,6 +75,7 @@
 #include "core/math/a_star_grid_2d.h"
 #include "core/math/expression.h"
 #include "core/math/random_number_generator.h"
+#include "core/math/smooth_damp.h"
 #include "core/math/triangle_mesh.h"
 #include "core/object/class_db.h"
 #include "core/object/script_backtrace.h"
@@ -288,6 +289,7 @@ void register_core_types() {
 	GDREGISTER_CLASS(AStarGrid2D);
 	GDREGISTER_CLASS(EncodedObjectAsID);
 	GDREGISTER_CLASS(RandomNumberGenerator);
+	GDREGISTER_CLASS(SmoothDamp);
 #ifndef DISABLE_DEPRECATED
 	GDREGISTER_CLASS(PackedDataContainer);
 	GDREGISTER_ABSTRACT_CLASS(PackedDataContainerRef);

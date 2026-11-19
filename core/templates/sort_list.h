@@ -43,6 +43,34 @@ public:
 			return;
 		}
 
+		// A strictly descending range is already sorted in reverse.
+		// Relink nodes in O(N) instead of running the merge sort. Only
+		// use this for strictly ordered keys: reversing equal keys would
+		// violate the existing stable ordering of SortList.
+		if (sorted_until == r_head && _is_strictly_reverse_sorted(r_head, r_tail)) {
+			Element *head_prev = r_head->*prev;
+			Element *tail_next = r_tail->*next;
+			Element *current = r_head;
+			while (current != tail_next) {
+				Element *following = current->*next;
+				current->*next = current->*prev;
+				current->*prev = following;
+				current = following;
+			}
+			SWAP(r_head, r_tail);
+			if (head_prev) {
+				_connect(head_prev, r_head);
+			} else {
+				r_head->*prev = nullptr;
+			}
+			if (tail_next) {
+				_connect(r_tail, tail_next);
+			} else {
+				r_tail->*next = nullptr;
+			}
+			return;
+		}
+
 		// In case we're sorting only part of a larger list.
 		Element *head_prev = r_head->*prev;
 		r_head->*prev = nullptr;
@@ -65,6 +93,19 @@ public:
 	}
 
 private:
+	bool _is_strictly_reverse_sorted(Element *p_head, Element *p_tail) {
+		// The first adjacent pair has already been checked by _is_sorted().
+		Element *current = p_head->*next;
+		while (current != p_tail) {
+			Element *following = current->*next;
+			if (!compare(following->*value, current->*value)) {
+				return false;
+			}
+			current = following;
+		}
+		return true;
+	}
+
 	bool _is_sorted(Element *p_head, Element *p_tail, Element *&r_sorted_until) {
 		r_sorted_until = p_head;
 		while (r_sorted_until != p_tail) {

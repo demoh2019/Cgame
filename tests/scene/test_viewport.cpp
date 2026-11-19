@@ -1960,6 +1960,57 @@ TEST_CASE("[SceneTree][Viewport] Physics Picking 2D") {
 }
 #endif // PHYSICS_2D_DISABLED
 
+
+TEST_CASE("[SceneTree][SubViewportContainer] Optional property adjustment") {
+	Window *root = SceneTree::get_singleton()->get_root();
+	SubViewportContainer *container = memnew(SubViewportContainer);
+	CHECK(container->is_adjust_viewport_properties_enabled());
+	container->set_adjust_viewport_properties(false);
+	root->add_child(container);
+
+	SubViewport *viewport = memnew(SubViewport);
+	container->add_child(viewport);
+	viewport->set_update_mode(SubViewport::UPDATE_ONCE);
+	viewport->set_handle_input_locally(true);
+	SceneTree::get_singleton()->process(0);
+	CHECK(viewport->get_update_mode() == SubViewport::UPDATE_ONCE);
+	CHECK(viewport->is_handling_input_locally());
+
+	container->set_adjust_viewport_properties(true);
+	SceneTree::get_singleton()->process(0);
+	CHECK(viewport->get_update_mode() == SubViewport::UPDATE_ALWAYS);
+	CHECK_FALSE(viewport->is_handling_input_locally());
+
+	container->set_adjust_viewport_properties(false);
+	viewport->set_update_mode(SubViewport::UPDATE_ONCE);
+	viewport->set_handle_input_locally(true);
+	container->hide();
+	SceneTree::get_singleton()->process(0);
+	CHECK(viewport->get_update_mode() == SubViewport::UPDATE_ONCE);
+	CHECK(viewport->is_handling_input_locally());
+
+	container->set_adjust_viewport_properties(true);
+	SceneTree::get_singleton()->process(0);
+	CHECK(viewport->get_update_mode() == SubViewport::UPDATE_DISABLED);
+	CHECK_FALSE(viewport->is_handling_input_locally());
+	memdelete(container);
+}
+
+TEST_CASE("[SceneTree][SubViewportContainer] Disable cancels queued adjustments") {
+	Window *root = SceneTree::get_singleton()->get_root();
+	SubViewportContainer *container = memnew(SubViewportContainer);
+	root->add_child(container);
+	SubViewport *viewport = memnew(SubViewport);
+	container->add_child(viewport);
+	container->set_adjust_viewport_properties(false);
+	viewport->set_update_mode(SubViewport::UPDATE_ONCE);
+	viewport->set_handle_input_locally(true);
+	SceneTree::get_singleton()->process(0);
+	CHECK(viewport->get_update_mode() == SubViewport::UPDATE_ONCE);
+	CHECK(viewport->is_handling_input_locally());
+	memdelete(container);
+}
+
 TEST_CASE("[SceneTree][Viewport] Embedded Windows") {
 	Window *root = SceneTree::get_singleton()->get_root();
 	Window *w = memnew(Window);

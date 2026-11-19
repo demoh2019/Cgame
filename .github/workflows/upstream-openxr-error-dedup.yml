@@ -1,0 +1,41 @@
+name: OpenXR frame error dedup regression
+
+on:
+  pull_request:
+    branches: [develop]
+    paths:
+      - modules/openxr/openxr_api.cpp
+      - modules/openxr/openxr_api.h
+      - misc/scripts/tests/test_upstream_openxr_error_dedup.py
+      - .github/workflows/upstream-openxr-error-dedup.yml
+  push:
+    branches: [develop]
+    paths:
+      - modules/openxr/openxr_api.cpp
+      - modules/openxr/openxr_api.h
+      - misc/scripts/tests/test_upstream_openxr_error_dedup.py
+      - .github/workflows/upstream-openxr-error-dedup.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  isolated-cpp-regression:
+    name: ${{ matrix.compiler }} Python ${{ matrix.python-version }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    strategy:
+      fail-fast: false
+      matrix:
+        compiler: [g++, clang++]
+        python-version: ["3.11", "3.13"]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+      - name: Exercise production OpenXR C++ log throttling helper
+        env:
+          CXX: ${{ matrix.compiler }}
+        run: python3 -m unittest discover -s misc/scripts/tests -p test_upstream_openxr_error_dedup.py -v

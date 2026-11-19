@@ -33,6 +33,8 @@
 #include "godot_body_2d.h"
 #include "godot_constraint_2d.h"
 
+#include "servers/physics_contact_recycling.h"
+
 class GodotBodyPair2D : public GodotConstraint2D {
 	enum {
 		MAX_CONTACTS = 2
@@ -55,7 +57,7 @@ class GodotBodyPair2D : public GodotConstraint2D {
 	GodotSpace2D *space = nullptr;
 
 	struct Contact {
-		Vector2 position;
+		// Contact points are stored as local anchors; no unused world position.
 		Vector2 normal;
 		Vector2 local_A, local_B;
 		Vector2 acc_impulse; // accumulated impulse
@@ -78,6 +80,15 @@ class GodotBodyPair2D : public GodotConstraint2D {
 	Vector2 sep_axis;
 	Contact contacts[MAX_CONTACTS];
 	int contact_count = 0;
+	GodotPhysicsContactRecycling contact_recycling;
+	real_t mixed_friction = 0.0; // Recomputed in pre_solve, reused across solver iterations.
+	// Box2D-style two-point normal block matrix, assembled once in pre_solve.
+	// Solving iterations only update the right-hand side from current velocities.
+	real_t block_k00 = 0.0;
+	real_t block_k01 = 0.0;
+	real_t block_k11 = 0.0;
+	real_t block_inv_determinant = 0.0;
+	bool block_normal_valid = false;
 	bool collided = false;
 	bool check_ccd = false;
 	bool oneway_disabled = false;
@@ -92,6 +103,7 @@ public:
 	virtual bool setup(real_t p_step) override;
 	virtual bool pre_solve(real_t p_step) override;
 	virtual void solve(real_t p_step) override;
+	virtual bool permits_parallel_immovable_body_sharing() const override { return true; }
 
 	GodotBodyPair2D(GodotBody2D *p_A, int p_shape_A, GodotBody2D *p_B, int p_shape_B);
 	~GodotBodyPair2D();

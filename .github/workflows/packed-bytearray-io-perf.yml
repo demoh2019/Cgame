@@ -1,0 +1,30 @@
+name: PackedByteArray I/O hot-path regressions
+
+on:
+  pull_request:
+    branches: [develop]
+    paths:
+      - "core/io/file_access_packed_byte_array.cpp"
+      - "tests/core/io/test_file_access.cpp"
+      - "misc/scripts/tests/test_packed_bytearray_io_perf.py"
+      - ".github/workflows/packed-bytearray-io-perf.yml"
+  push:
+    branches: [develop]
+    paths:
+      - "core/io/file_access_packed_byte_array.cpp"
+      - "tests/core/io/test_file_access.cpp"
+      - "misc/scripts/tests/test_packed_bytearray_io_perf.py"
+      - ".github/workflows/packed-bytearray-io-perf.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  contracts:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - name: Run zero-copy, EOF and COW guards
+        run: python3 -m unittest discover -s misc/scripts/tests -p test_packed_bytearray_io_perf.py -v

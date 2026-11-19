@@ -429,6 +429,7 @@ class DocumentEditorContainer : public MarginContainer {
 	HashSet<String> textfile_extensions;
 	Ref<TextFile> _load_text_file(const String &p_path, Error *r_error) const;
 	Error _save_text_file(Ref<TextFile> p_text_file, const String &p_path);
+	void _saved_reimport(const String &p_path);
 
 	void _set_script_zoom_factor(float p_zoom_factor);
 	void _update_code_editor_zoom_factor(CodeTextEditor *p_code_text_editor);
@@ -471,6 +472,7 @@ public:
 	void save_current_script();
 	void save_all_scripts();
 	void update_script_times();
+	void auto_format_all_scripts();
 	void sort_document_editors();
 
 	void set_window_layout(Ref<ConfigFile> p_layout);
@@ -558,6 +560,7 @@ public:
 	void save_current_script() { script_container->save_current_script(); }
 	void save_all_scripts() { script_container->save_all_scripts(); }
 	void update_script_times() { script_container->update_script_times(); }
+	void auto_format_all_scripts() { script_container->auto_format_all_scripts(); }
 
 	void set_scene_root_script(const Ref<Script> &p_script);
 	Vector<Ref<Script>> get_open_scripts() const { return script_container->get_open_scripts(); }

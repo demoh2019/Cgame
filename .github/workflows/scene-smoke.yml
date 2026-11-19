@@ -1,0 +1,115 @@
+name: Scene smoke runner tests
+
+on:
+  push:
+    branches: [develop]
+    paths:
+      - 'misc/scripts/scene_smoke.py'
+      - 'misc/scripts/tests/test_scene_smoke.py'
+      - 'misc/scripts/tests/fixtures/scene_smoke/**'
+      - 'misc/scripts/README_scene_smoke.md'
+      - '.github/workflows/scene-smoke.yml'
+  pull_request:
+    paths:
+      - 'misc/scripts/scene_smoke.py'
+      - 'misc/scripts/tests/test_scene_smoke.py'
+      - 'misc/scripts/tests/fixtures/scene_smoke/**'
+      - 'misc/scripts/README_scene_smoke.md'
+      - '.github/workflows/scene-smoke.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  python-tests:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ['3.9', '3.13']
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+      - name: Check syntax and run offline regression tests
+        run: |
+          python -m py_compile misc/scripts/scene_smoke.py misc/scripts/tests/test_scene_smoke.py
+          python -m unittest discover -s misc/scripts/tests -p test_scene_smoke.py -v
+
+  real-godot-headless:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install SHA-256 authenticated official Godot 4.7.2 editor
+        shell: bash
+        run: |
+          set -euo pipefail
+          curl --retry 4 --retry-delay 3 -fL -o godot.zip https://github.com/godotengine/godot-builds/releases/download/4.7.2-stable/Godot_v4.7.2-stable_linux.x86_64.zip
+          echo 'cadd3204e728a35d3f13adb7fd0d7902636b79f6b95c40c265eb73b6c35329e4  godot.zip' | sha256sum --check --status
+          unzip -q godot.zip
+          chmod +x Godot_v4.7.2-stable_linux.x86_64
+          mv Godot_v4.7.2-stable_linux.x86_64 godot
+          ./godot --version
+      - name: Verify real scene execution and rejected parse errors
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          import json
+          from pathlib import Path
+          import subprocess
+          import sys
+
+          root = Path.cwd()
+          runner = root / "misc/scripts/scene_smoke.py"
+          godot = root / "godot"
+          fixtures = root / "misc/scripts/tests/fixtures/scene_smoke"
+          cases = (("valid", True, True), ("invalid", False, False))
+          for name, expected_ok, import_first in cases:
+              command = [
+                  sys.executable, str(runner), str(fixtures / name), "--godot",
+                  str(godot), "--format", "json", "--timeout", "60",
+                  "--frames", "3", "--scene", "res://scenes/" +
+                  ("healthy.tscn" if expected_ok else "broken.tscn"),
+                  "--require-scenes",
+              ]
+              if import_first:
+                  command.append("--import-first")
+              completed = subprocess.run(command, capture_output=True, text=True,
+                                         check=False, timeout=180)
+              print("{} return={} stdout={} stderr={}".format(
+                  name, completed.returncode, completed.stdout, completed.stderr), flush=True)
+              if completed.returncode != (0 if expected_ok else 1):
+                  raise AssertionError("Unexpected CLI status for " + name)
+              report = json.loads(completed.stdout)
+              if report["ok"] != expected_ok or len(report["results"]) != 1:
+                  raise AssertionError("Unexpected test count or success for " + name)
+              result = report["results"][0]
+              if result["status"] != ("pass" if expected_ok else "fail"):
+                  raise AssertionError("Unexpected scene result for " + name)
+              if not expected_ok and not any(
+                      marker in result["log"] for marker in ("SCRIPT ERROR:", "ERROR:")):
+                  raise AssertionError("Missing Godot parser diagnostic")
+              junit_command = ["junit" if arg == "json" else arg for arg in command]
+              junit = subprocess.run(junit_command, capture_output=True, text=True,
+                                     check=False, timeout=180)
+              if junit.returncode != completed.returncode:
+                  raise AssertionError("JUnit and JSON status mismatch for " + name)
+              from xml.etree import ElementTree as ET
+              suite = ET.fromstring(junit.stdout)
+              if suite.get("tests") != "1" or suite.get("failures") != ("0" if expected_ok else "1"):
+                  raise AssertionError("Incorrect JUnit XML results for " + name)
+              (root / ("scene-smoke-" + name + ".xml")).write_text(
+                  junit.stdout, encoding="utf-8")
+          print("REAL GODOT SMOKE: valid and deliberately invalid scenes confirmed")
+          PY
+      - name: Upload JUnit XML results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: scene-smoke-junit
+          path: scene-smoke-*.xml
+          if-no-files-found: ignore

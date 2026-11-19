@@ -1,0 +1,42 @@
+name: ImporterMesh CPU and RAM Fast Paths
+on:
+  pull_request:
+    paths:
+      - "scene/resources/3d/importer_mesh.cpp"
+      - "tests/scene/test_arraymesh.cpp"
+      - "misc/tests/test_mesh_importer_fastpath.py"
+      - ".github/workflows/mesh-importer-fastpath.yml"
+  workflow_dispatch:
+
+jobs:
+  source-contracts:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: python -m unittest discover -s misc/tests -p test_mesh_importer_fastpath.py -v
+  native-tests:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+      - uses: ./.github/actions/godot-cache-restore
+        with:
+          cache-name: linux-importer-mesh-fastpath
+        continue-on-error: true
+      - uses: ./.github/actions/godot-deps
+      - uses: ./.github/actions/godot-build
+        with:
+          platform: linuxbsd
+          target: editor
+          scons-flags: tests=yes module_text_server_fb_enabled=yes -j2
+      - uses: ./.github/actions/godot-cache-save
+        with:
+          cache-name: linux-importer-mesh-fastpath
+        continue-on-error: true
+      - name: Run navigation-mesh and merged-geometry tests
+        run: ./bin/godot.linuxbsd.editor.x86_64 --headless --test --test-case="*[ImporterMeshFastPath]*"

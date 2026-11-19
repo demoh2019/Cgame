@@ -150,8 +150,10 @@ PackedStringArray IP::resolve_hostname_addresses(const String &p_hostname, Type 
 	}
 
 	PackedStringArray result;
+	result.resize(res.size());
+	int idx = 0;
 	for (const IPAddress &E : res) {
-		result.push_back(String(E));
+		result.set(idx++, String(E));
 	}
 	return result;
 }
@@ -206,7 +208,7 @@ IPAddress IP::get_resolve_item_address(ResolverID p_id) const {
 		return IPAddress();
 	}
 
-	List<IPAddress> res(resolver->queue[p_id].response);
+	const List<IPAddress> &res = resolver->queue[p_id].response;
 
 	for (const IPAddress &E : res) {
 		if (E.is_valid()) {
@@ -225,7 +227,7 @@ Array IP::get_resolve_item_addresses(ResolverID p_id) const {
 		return Array();
 	}
 
-	List<IPAddress> res(resolver->queue[p_id].response);
+	const List<IPAddress> &res = resolver->queue[p_id].response;
 
 	Array result;
 	for (const IPAddress &E : res) {
@@ -256,11 +258,13 @@ void IP::clear_cache(const String &p_hostname) {
 }
 
 PackedStringArray IP::_get_local_addresses() const {
-	PackedStringArray addresses;
 	List<IPAddress> ip_addresses;
 	get_local_addresses(&ip_addresses);
+	PackedStringArray addresses;
+	addresses.resize(ip_addresses.size());
+	int idx = 0;
 	for (const IPAddress &E : ip_addresses) {
-		addresses.push_back(String(E));
+		addresses.set(idx++, String(E));
 	}
 
 	return addresses;

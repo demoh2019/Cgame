@@ -1,0 +1,31 @@
+name: GLB 64-bit chunk alignment regression
+
+on:
+  pull_request:
+    branches: [develop]
+    paths:
+      - "modules/gltf/gltf_document.cpp"
+      - "misc/scripts/tests/test_glb_chunk_alignment.py"
+      - ".github/workflows/glb-chunk-alignment.yml"
+  push:
+    branches: [develop]
+    paths:
+      - "modules/gltf/gltf_document.cpp"
+      - "misc/scripts/tests/test_glb_chunk_alignment.py"
+      - ".github/workflows/glb-chunk-alignment.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  chunk-alignment-tests:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Python syntax
+        run: python3 -m py_compile misc/scripts/tests/test_glb_chunk_alignment.py
+      - name: GCC and Clang 64-bit boundary regressions
+        run: |
+          CXX=g++ python3 -m unittest discover -s misc/scripts/tests -p test_glb_chunk_alignment.py -v
+          CXX=clang++ python3 -m unittest discover -s misc/scripts/tests -p test_glb_chunk_alignment.py -v

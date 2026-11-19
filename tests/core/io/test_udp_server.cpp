@@ -217,4 +217,65 @@ TEST_CASE("[UDPServer] Should not accept new connections after stop") {
 	CHECK_FALSE(server->is_connection_available());
 }
 
+TEST_CASE("[UDPServer][Performance] Batched UDP queue framing preserves packet data on ring wrap") {
+	const IPAddress source_address("127.0.0.1");
+	Ref<PacketPeerUDP> receiver;
+	receiver.instantiate();
+	REQUIRE(receiver->bind(0, source_address, 1024) == OK);
+
+	// Repeated enqueue/dequeue cycles force the ring read/write cursors
+	// across its physical boundary without ever sending network packets.
+	uint8_t payload[384] = {};
+	const int sizes[] = { 0, 1, 15, 24, 31, 63, 127, 255, 383 };
+	for (int iteration = 0; iteration < 90; iteration++) {
+		const int size = sizes[iteration % 9];
+		for (int i = 0; i < size; i++) {
+			payload[i] = uint8_t((iteration * 7 + i * 13) & 255);
+		}
+		const uint32_t source_port = 10001 + iteration;
+		REQUIRE(receiver->store_packet(source_address, source_port, payload, size) == OK);
+		CHECK(receiver->get_available_packet_count() == 1);
+		const uint8_t *received = nullptr;
+		int received_size = -1;
+		REQUIRE(receiver->get_packet(&received, received_size) == OK);
+		REQUIRE(received_size == size);
+		CHECK(receiver->get_packet_address() == source_address);
+		CHECK(receiver->get_packet_port() == int(source_port));
+		for (int i = 0; i < size; i++) {
+			CHECK(received[i] == payload[i]);
+		}
+		CHECK(receiver->get_available_packet_count() == 0);
+	}
+
+	// Multiple frames can coexist in the queue; boundaries must remain
+	// intact when the ring wraps between header and payload bytes.
+	for (int packet = 0; packet < 4; packet++) {
+		const int size = 24 + packet * 17;
+		for (int i = 0; i < size; i++) {
+			payload[i] = uint8_t(i + packet);
+		}
+		REQUIRE(receiver->store_packet(source_address, 22000 + packet, payload, size) == OK);
+	}
+	CHECK(receiver->get_available_packet_count() == 4);
+	for (int packet = 0; packet < 4; packet++) {
+		const uint8_t *received = nullptr;
+		int received_size = -1;
+		REQUIRE(receiver->get_packet(&received, received_size) == OK);
+		REQUIRE(received_size == 24 + packet * 17);
+		CHECK(receiver->get_packet_port() == 22000 + packet);
+		for (int i = 0; i < received_size; i++) {
+			CHECK(received[i] == uint8_t(i + packet));
+		}
+	}
+
+	// Malformed sizes and pointer/size pairs must not alter queue state.
+	ERR_PRINT_OFF;
+	CHECK(receiver->store_packet(source_address, 42, payload, -1) == ERR_INVALID_PARAMETER);
+	CHECK(receiver->store_packet(source_address, 42, payload, 65537) == ERR_INVALID_PARAMETER);
+	CHECK(receiver->store_packet(source_address, 42, nullptr, 1) == ERR_INVALID_PARAMETER);
+	ERR_PRINT_ON;
+	CHECK(receiver->get_available_packet_count() == 0);
+	receiver->close();
+}
+
 } // namespace TestUDPServer

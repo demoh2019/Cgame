@@ -1,0 +1,53 @@
+name: SoftBody3D XPBD discrete rod curvature contracts
+
+on:
+  pull_request:
+    paths:
+      - 'servers/physics_xpbd_rod_bend.h'
+      - 'modules/godot_physics_3d/godot_soft_body_3d.h'
+      - 'modules/godot_physics_3d/godot_soft_body_3d.cpp'
+      - 'modules/godot_physics_3d/godot_space_3d.h'
+      - 'modules/godot_physics_3d/godot_space_3d.cpp'
+      - 'servers/physics_3d/physics_server_3d.cpp'
+      - 'tests/servers/test_physics_xpbd_rod_bend.cpp'
+      - 'tests/stress/test_physics_xpbd_rod_bend.py'
+      - 'demo/rod_curvature_lab/**'
+      - '.github/workflows/physics-xpbd-rod-bend.yml'
+  push:
+    branches: [develop]
+    paths:
+      - 'servers/physics_xpbd_rod_bend.h'
+      - 'modules/godot_physics_3d/godot_soft_body_3d.h'
+      - 'modules/godot_physics_3d/godot_soft_body_3d.cpp'
+      - 'modules/godot_physics_3d/godot_space_3d.h'
+      - 'modules/godot_physics_3d/godot_space_3d.cpp'
+      - 'servers/physics_3d/physics_server_3d.cpp'
+      - 'tests/servers/test_physics_xpbd_rod_bend.cpp'
+      - 'tests/stress/test_physics_xpbd_rod_bend.py'
+      - 'demo/rod_curvature_lab/**'
+      - '.github/workflows/physics-xpbd-rod-bend.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: xpbd-rod-centerline-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  rod-centerline-numerical:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - name: Validate Python contract syntax
+        run: |
+          python3 -m py_compile tests/stress/test_physics_xpbd_rod_bend.py
+      - name: Three-point rod bend, analytical gradient, topology and legacy controls
+        run: |
+          python3 -m unittest discover -s tests/stress -p 'test_physics_xpbd_rod_bend.py' -v
+      - name: Preserve existing XPBD bending and cloth contracts
+        run: |
+          python3 -m unittest discover -s tests/stress -p 'test_physics_xpbd_dihedral.py' -v
+          python3 -m unittest discover -s tests/stress -p 'test_physics_xpbd_orthotropic_bending.py' -v

@@ -31,6 +31,7 @@
 #pragma once
 
 #include "scene/2d/node_2d.h"
+#include "scene/main/camera_shake.h"
 
 class Camera2D : public Node2D {
 	GDCLASS(Camera2D, Node2D);
@@ -69,6 +70,17 @@ protected:
 	bool position_smoothing_enabled = false;
 
 	real_t camera_angle = 0.0;
+
+	// Trauma based shake, see CameraShake.
+	CameraShake shake;
+	Vector2 shake_max_offset = Vector2(32, 32);
+	real_t shake_max_rotation = Math::deg_to_rad(real_t(4.0));
+	real_t shake_decay = 1.5;
+	real_t shake_frequency = 25.0;
+	real_t shake_trauma_exponent = 2.0;
+	Vector2 shake_offset_current;
+	real_t shake_rotation_current = 0.0;
+	void _advance_shake(double p_delta);
 	real_t rotation_smoothing_speed = 5.0;
 	bool rotation_smoothing_enabled = false;
 
@@ -178,6 +190,24 @@ public:
 
 	void set_enabled(bool p_enabled);
 	bool is_enabled() const;
+
+	void add_trauma(real_t p_amount);
+	void set_trauma(real_t p_trauma);
+	real_t get_trauma() const;
+
+	void set_shake_max_offset(const Vector2 &p_offset);
+	Vector2 get_shake_max_offset() const;
+	void set_shake_max_rotation(real_t p_radians);
+	real_t get_shake_max_rotation() const;
+	void set_shake_decay(real_t p_decay);
+	real_t get_shake_decay() const;
+	void set_shake_frequency(real_t p_frequency);
+	real_t get_shake_frequency() const;
+	void set_shake_trauma_exponent(real_t p_exponent);
+	real_t get_shake_trauma_exponent() const;
+	// Current shake displacement (in screen pixels) and rotation (radians) applied to the view.
+	Vector2 get_shake_offset() const { return shake_offset_current; }
+	real_t get_shake_rotation() const { return shake_rotation_current; }
 
 	void make_current();
 	void clear_current();

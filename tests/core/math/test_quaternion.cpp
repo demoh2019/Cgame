@@ -406,6 +406,73 @@ void test_quat_vec_rotate(Vector3 euler_yzx, Vector3 v_in) {
 	CHECK(v_rot.is_equal_approx(v_compare));
 }
 
+TEST_CASE("[Quaternion] Normalize") {
+	ERR_PRINT_OFF;
+
+	// Exact zero quaternion should fall back to identity.
+	Quaternion q_zero(0.0, 0.0, 0.0, 0.0);
+	Quaternion q_zero_norm = q_zero.normalized();
+	CHECK(q_zero_norm.is_finite());
+	CHECK(q_zero_norm.is_normalized());
+	CHECK(q_zero_norm == Quaternion());
+
+	q_zero.normalize();
+	CHECK(q_zero == q_zero_norm);
+
+	// Near-zero input where length_squared() underflows / falls below CMP_EPSILON2.
+	Quaternion q_tiny(1e-160, 0.0, 0.0, 0.0);
+	Quaternion q_tiny_norm = q_tiny.normalized();
+	CHECK(q_tiny_norm.is_finite());
+	CHECK(q_tiny_norm.is_normalized());
+	CHECK(q_tiny_norm == Quaternion());
+
+	// Non-finite input should also fall back safely rather than returning NaN.
+	Quaternion q_nan(NAN, 0.0, 0.0, 1.0);
+	Quaternion q_nan_norm = q_nan.normalized();
+	CHECK(q_nan_norm.is_finite());
+	CHECK(q_nan_norm.is_normalized());
+	CHECK(q_nan_norm == Quaternion());
+
+	ERR_PRINT_ON;
+}
+
+TEST_CASE("[Quaternion] Normalize preserves valid rotations and guards non-finite components") {
+	ERR_PRINT_OFF;
+	Quaternion value(1, 2, 3, 4);
+	const Quaternion normalized = value.normalized();
+	CHECK(normalized.is_finite());
+	CHECK(normalized.is_normalized());
+	CHECK(normalized.length() == doctest::Approx(1.0));
+	CHECK(normalized.x == doctest::Approx(1.0 / Math::sqrt(30.0)));
+	CHECK(normalized.y == doctest::Approx(2.0 / Math::sqrt(30.0)));
+	CHECK(normalized.z == doctest::Approx(3.0 / Math::sqrt(30.0)));
+	CHECK(normalized.w == doctest::Approx(4.0 / Math::sqrt(30.0)));
+	CHECK(normalized.normalized().is_equal_approx(normalized));
+	value.normalize();
+	CHECK(value.is_equal_approx(normalized));
+
+	Quaternion negative(0, 0, 0, -5);
+	CHECK(negative.normalized() == Quaternion(0, 0, 0, -1));
+	negative.normalize();
+	CHECK(negative == Quaternion(0, 0, 0, -1));
+
+	for (int i = 0; i < 4; i++) {
+		Quaternion invalid(1, 2, 3, 4);
+		invalid[i] = Math::NaN;
+		CHECK(invalid.normalized() == Quaternion());
+		invalid.normalize();
+		CHECK(invalid == Quaternion());
+		CHECK(invalid.is_finite());
+	}
+
+	Quaternion infinite(Math::INF, 0, 0, 0);
+	CHECK(infinite.normalized() == Quaternion());
+	infinite.normalize();
+	CHECK(infinite.is_finite());
+	CHECK(infinite.is_normalized());
+	ERR_PRINT_ON;
+}
+
 TEST_CASE("[Quaternion] Finite number checks") {
 	constexpr real_t x = Math::NaN;
 

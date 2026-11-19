@@ -29,6 +29,7 @@
 /**************************************************************************/
 
 #include "vehicle_body_3d.h"
+#include "servers/physics_vehicle_combined_tire_grip.h"
 
 #include "core/config/engine.h"
 #include "core/object/class_db.h"
@@ -244,6 +245,22 @@ real_t VehicleWheel3D::get_friction_slip() const {
 	return m_frictionSlip;
 }
 
+void VehicleWheel3D::set_longitudinal_grip(real_t p_value) {
+	m_longitudinalGrip = Math::is_finite(p_value) ? CLAMP(p_value, real_t(0.0), real_t(4.0)) : real_t(1.0);
+}
+
+real_t VehicleWheel3D::get_longitudinal_grip() const {
+	return m_longitudinalGrip;
+}
+
+void VehicleWheel3D::set_lateral_grip(real_t p_value) {
+	m_lateralGrip = Math::is_finite(p_value) ? CLAMP(p_value, real_t(0.0), real_t(4.0)) : real_t(1.0);
+}
+
+real_t VehicleWheel3D::get_lateral_grip() const {
+	return m_lateralGrip;
+}
+
 void VehicleWheel3D::set_roll_influence(real_t p_value) {
 	m_rollInfluence = p_value;
 }
@@ -298,6 +315,10 @@ void VehicleWheel3D::_bind_methods() {
 
 	ClassDB::bind_method(D_METHOD("set_friction_slip", "length"), &VehicleWheel3D::set_friction_slip);
 	ClassDB::bind_method(D_METHOD("get_friction_slip"), &VehicleWheel3D::get_friction_slip);
+	ClassDB::bind_method(D_METHOD("set_longitudinal_grip", "grip"), &VehicleWheel3D::set_longitudinal_grip);
+	ClassDB::bind_method(D_METHOD("get_longitudinal_grip"), &VehicleWheel3D::get_longitudinal_grip);
+	ClassDB::bind_method(D_METHOD("set_lateral_grip", "grip"), &VehicleWheel3D::set_lateral_grip);
+	ClassDB::bind_method(D_METHOD("get_lateral_grip"), &VehicleWheel3D::get_lateral_grip);
 
 	ClassDB::bind_method(D_METHOD("is_in_contact"), &VehicleWheel3D::is_in_contact);
 	ClassDB::bind_method(D_METHOD("get_contact_body"), &VehicleWheel3D::get_contact_body);
@@ -332,6 +353,8 @@ void VehicleWheel3D::_bind_methods() {
 	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "wheel_radius", PROPERTY_HINT_NONE, "suffix:m"), "set_radius", "get_radius");
 	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "wheel_rest_length", PROPERTY_HINT_NONE, "suffix:m"), "set_suspension_rest_length", "get_suspension_rest_length");
 	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "wheel_friction_slip"), "set_friction_slip", "get_friction_slip");
+	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "wheel_longitudinal_grip", PROPERTY_HINT_RANGE, "0,4,0.01"), "set_longitudinal_grip", "get_longitudinal_grip");
+	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "wheel_lateral_grip", PROPERTY_HINT_RANGE, "0,4,0.01"), "set_lateral_grip", "get_lateral_grip");
 	ADD_GROUP("Suspension", "suspension_");
 	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "suspension_travel", PROPERTY_HINT_NONE, "suffix:m"), "set_suspension_travel", "get_suspension_travel");
 	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "suspension_stiffness", PROPERTY_HINT_NONE, U"suffix:N/mm"), "set_suspension_stiffness", "get_suspension_stiffness");
@@ -773,69 +796,41 @@ void VehicleBody3D::_update_friction(PhysicsDirectBodyState3D *s) {
 		}
 	}
 
-	real_t sideFactor = real_t(1.);
-	real_t fwdFactor = 0.5;
-
-	bool sliding = false;
-	{
-		for (int wheel = 0; wheel < wheels.size(); wheel++) {
-			VehicleWheel3D &wheelInfo = *wheels[wheel];
-
-			//class btRigidBody* groundObject = (class btRigidBody*) wheelInfo.m_raycastInfo.m_groundObject;
-
-			real_t rollingFriction = 0.f;
-
-			if (wheelInfo.m_raycastInfo.m_isInContact) {
-				if (wheelInfo.m_engineForce != 0.f) {
-					rollingFriction = -wheelInfo.m_engineForce * s->get_step();
-				} else {
-					real_t defaultRollingFrictionImpulse = 0.f;
-					real_t maxImpulse = wheelInfo.m_brake ? wheelInfo.m_brake : defaultRollingFrictionImpulse;
-					btVehicleWheelContactPoint contactPt(s, wheelInfo.m_raycastInfo.m_groundObject, wheelInfo.m_raycastInfo.m_contactPointWS, m_forwardWS[wheel], maxImpulse);
-					rollingFriction = _calc_rolling_friction(contactPt);
-				}
-			}
-
-			//switch between active rolling (throttle), braking and non-active rolling friction (no throttle/break)
-
-			m_forwardImpulse.write[wheel] = real_t(0.);
-			wheelInfo.m_skidInfo = real_t(1.);
-
-			if (wheelInfo.m_raycastInfo.m_isInContact) {
-				wheelInfo.m_skidInfo = real_t(1.);
-
-				real_t maximp = wheelInfo.m_wheelsSuspensionForce * s->get_step() * wheelInfo.m_frictionSlip;
-				real_t maximpSide = maximp;
-
-				real_t maximpSquared = maximp * maximpSide;
-
-				m_forwardImpulse.write[wheel] = rollingFriction; //wheelInfo.m_engineForce* timeStep;
-
-				real_t x = (m_forwardImpulse[wheel]) * fwdFactor;
-				real_t y = (m_sideImpulse[wheel]) * sideFactor;
-
-				real_t impulseSquared = (x * x + y * y);
-
-				if (impulseSquared > maximpSquared) {
-					sliding = true;
-
-					real_t factor = maximp / Math::sqrt(impulseSquared);
-
-					wheelInfo.m_skidInfo *= factor;
-				}
-			}
+	// One friction ellipse per wheel, combining longitudinal engine/brake
+	// demand and lateral tire correction. The legacy longitudinal weighting
+	// is preserved at the default 1.0/1.0 grip multipliers. Unlike the old
+	// "if side impulse != 0" skid path, pure forward slip is also capped.
+	for (int wheel = 0; wheel < wheels.size(); wheel++) {
+		VehicleWheel3D &wheelInfo = *wheels[wheel];
+		real_t rollingFriction = 0.0;
+		wheelInfo.m_skidInfo = real_t(1.0);
+		if (!wheelInfo.m_raycastInfo.m_isInContact) {
+			continue;
 		}
-	}
-
-	if (sliding) {
-		for (int wheel = 0; wheel < wheels.size(); wheel++) {
-			if (m_sideImpulse[wheel] != real_t(0.)) {
-				if (wheels[wheel]->m_skidInfo < real_t(1.)) {
-					m_forwardImpulse.write[wheel] *= wheels[wheel]->m_skidInfo;
-					m_sideImpulse.write[wheel] *= wheels[wheel]->m_skidInfo;
-				}
-			}
+		if (wheelInfo.m_engineForce != real_t(0.0)) {
+			rollingFriction = -wheelInfo.m_engineForce * s->get_step();
+		} else {
+			const real_t maxImpulse = wheelInfo.m_brake;
+			btVehicleWheelContactPoint contactPt(s, wheelInfo.m_raycastInfo.m_groundObject,
+					wheelInfo.m_raycastInfo.m_contactPointWS, m_forwardWS[wheel], maxImpulse);
+			rollingFriction = _calc_rolling_friction(contactPt);
 		}
+		double next_forward = 0.0, next_side = 0.0, next_skid = 1.0;
+		if (!physics_vehicle_project_combined_tire_impulses(
+					double(rollingFriction), double(m_sideImpulse[wheel]),
+					double(wheelInfo.m_wheelsSuspensionForce) * double(s->get_step()),
+					double(wheelInfo.m_frictionSlip),
+					double(wheelInfo.m_longitudinalGrip), double(wheelInfo.m_lateralGrip),
+					next_forward, next_side, next_skid)) {
+			// Invalid inputs must never send NaNs/Infs into the body solver.
+			m_forwardImpulse.write[wheel] = real_t(0.0);
+			m_sideImpulse.write[wheel] = real_t(0.0);
+			wheelInfo.m_skidInfo = real_t(0.0);
+			continue;
+		}
+		m_forwardImpulse.write[wheel] = real_t(next_forward);
+		m_sideImpulse.write[wheel] = real_t(next_side);
+		wheelInfo.m_skidInfo = real_t(next_skid);
 	}
 
 	// apply the impulses

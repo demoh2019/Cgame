@@ -1,0 +1,11 @@
+; Engine configuration file.
+; Cgame advanced fluid physics demo project.
+config_version=5
+
+[application]
+config/name="Cgame Advanced Fluid Physics"
+run/main_scene="res://demo.tscn"
+
+[rendering]
+renderer/rendering_method="gl_compatibility"
+renderer/rendering_method.mobile="gl_compatibility"
