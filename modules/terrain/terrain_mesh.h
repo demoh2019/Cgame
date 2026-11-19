@@ -63,6 +63,7 @@ public:
 	void set_height(int p_x, int p_z, float p_height);
 	float get_height(int p_x, int p_z) const;
 	float sample_height(const Vector2 &p_grid_position) const;
+	bool intersect_segment(const Vector3 &p_from, const Vector3 &p_to, Vector3 &r_hit) const;
 
 	void sculpt(const Vector2 &p_grid_position, float p_radius, float p_amount);
 	void smooth(const Vector2 &p_grid_position, float p_radius, float p_strength);
