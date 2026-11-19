@@ -221,4 +221,21 @@ TEST_CASE("[BVH] Culls stop at result capacity inside densely populated leaves")
 	CHECK(CountingCullTest::calls == 1);
 }
 
+TEST_CASE("[BVH] 3D point culls stop at result capacity") {
+	using Tree = BVH_Manager<Item, 2, true, 16, PairTest, CountingCullTest, AABB, Vector3, false>;
+	Tree tree;
+	constexpr int COUNT = 48;
+	Item items[COUNT];
+	for (int i = 0; i < COUNT; i++) {
+		items[i].value = i;
+		tree.create(&items[i], true, uint32_t(i & 1), 3, AABB(Vector3(0, 0, 0), Vector3(4, 4, 4)));
+	}
+
+	Item *result[1] = { nullptr };
+	CountingCullTest::calls = 0;
+	CHECK(tree.cull_point(Vector3(2, 2, 2), result, 1, nullptr) == 1);
+	CHECK(result[0] != nullptr);
+	CHECK(CountingCullTest::calls == 1);
+}
+
 } // namespace TestBVH
