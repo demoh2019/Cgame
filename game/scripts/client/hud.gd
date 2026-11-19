@@ -815,6 +815,7 @@ func _process(_delta: float) -> void:
 		elif int(closest["challenger"]) != 0:
 			status += " | Capture %d%%" % int(100.0 * float(closest["progress"]) / maxf(1.0, float(closest.get("capture_target", 30.0))))
 		status += " | Fort T%d" % int(closest.get("fortification", 0))
+		status += " | Supplies %d/5" % int(closest.get("supplies_left", 0))
 		_info_label.text += "\nSiege outpost #%d at (%d, %d): %.0f m | %s" % [
 			int(closest["id"]), int(closest["x"]), int(closest["z"]), best_distance, status
 		]
