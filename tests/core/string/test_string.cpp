@@ -2518,6 +2518,76 @@ TEST_CASE("[String] Strip escapes") {
 	CHECK(s.strip_escapes() == "Test Test Test");
 }
 
+TEST_CASE("[String] Strip escapes single allocation and unchanged COW") {
+	const String plain = U"ASCII \u041f\u0440\u0438\u0432\u0435\u0442 \U0001F600";
+	const String unchanged = plain.strip_escapes();
+	CHECK(unchanged == plain);
+	CHECK(unchanged.ptr() == plain.ptr());
+
+	CHECK(String("").strip_escapes() == "");
+	CHECK(String("\r\n\t").strip_escapes() == "");
+	CHECK(String("A\x01""B\tC\r\nD").strip_escapes() == "ABCD");
+	CHECK(String(U"\u041f\t\u0440\n\u0438").strip_escapes() == U"\u041f\u0440\u0438");
+	CHECK(String("\x7f").strip_escapes() == "\x7f"); // DEL is not a C0 control character.
+
+	const String input = String("a\t").repeat(8192) + "z";
+	CHECK(input.strip_escapes() == String("a").repeat(8192) + "z");
+	CHECK(input.length() == 16385); // The original COW source remains intact.
+}
+
+TEST_CASE("[String] Linear path normalization preserves prefixes and parent traversal") {
+	static const char *const paths[] = {
+		"a////b/./c/../d",
+		"a/../../b",
+		"res://a/../../b",
+		"user://a/../../b",
+		"/../../a///b",
+		"a/..",
+		"a/../..",
+		"./a/./b/",
+		"a\\b\\\\c\\..\\end",
+		"a///b///c",
+		"res://folder/../file",
+		"",
+		".",
+		"..",
+		"../..",
+		"//server///share/../file",
+	};
+	static const char *const expected[] = {
+		"a/b/d",
+		"../b",
+		"res://../b",
+		"user://b",
+		"/a/b",
+		"",
+		"..",
+		"a/b",
+		"a/b/end",
+		"a/b/c",
+		"res://file",
+		"",
+		"",
+		"..",
+		"../..",
+		"//server/file",
+	};
+	static_assert(sizeof(paths) / sizeof(paths[0]) == sizeof(expected) / sizeof(expected[0]));
+	for (unsigned int i = 0; i < sizeof(paths) / sizeof(paths[0]); i++) {
+		CHECK(String(paths[i]).simplify_path() == expected[i]);
+	}
+
+	// Long runs of separators and parent-directory components previously
+	// performed multiple full-string replacements and O(n^2) vector shifts.
+	const String separators = String("dir////").repeat(2048) + "file.tscn";
+	CHECK(separators.simplify_path() == String("dir/").repeat(2048) + "file.tscn");
+
+	const String parents = String("dir/").repeat(2048) + String("../").repeat(2048) + "file.tscn";
+	CHECK(parents.simplify_path() == "file.tscn");
+	CHECK((String("/") + parents).simplify_path() == "/file.tscn");
+	CHECK((String("res://") + parents).simplify_path() == "res://file.tscn");
+}
+
 TEST_CASE("[String] Similarity indexed bigram branch matches quadratic reference") {
 	auto reference = [](const String &p_source, const String &p_target) -> float {
 		if (p_source == p_target) {

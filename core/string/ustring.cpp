@@ -4337,16 +4337,31 @@ String String::strip_edges(bool p_left, bool p_right) const {
 }
 
 String String::strip_escapes() const {
-	String new_string;
-	for (int i = 0; i < length(); i++) {
-		// Escape characters on first page of the ASCII table, before 32 (Space).
-		if (operator[](i) < 32) {
-			continue;
-		}
-		new_string += operator[](i);
+	const char32_t *source = ptr();
+	const int source_length = length();
+	int kept_length = 0;
+
+	// Count first to allocate exactly one buffer of the required size.
+	for (int i = 0; i < source_length; i++) {
+		kept_length += source[i] >= 32;
+	}
+	if (kept_length == source_length) {
+		return *this; // Nothing to strip; keep the existing COW allocation.
+	}
+	if (kept_length == 0) {
+		return String();
 	}
 
-	return new_string;
+	String stripped;
+	stripped.resize_uninitialized(kept_length + 1);
+	char32_t *destination = stripped.ptrw();
+	for (int i = 0; i < source_length; i++) {
+		if (source[i] >= 32) {
+			*destination++ = source[i];
+		}
+	}
+	*destination = 0;
+	return stripped;
 }
 
 String String::lstrip(const String &p_chars) const {
@@ -4430,47 +4445,69 @@ String String::simplify_path() const {
 		}
 	}
 
+	// split("/", false) already ignores repeated separators. Replacing "//"
+	// in a loop allocates new strings and repeatedly scans the entire path.
 	s = s.replace_char('\\', '/');
-	while (true) { // in case of using 2 or more slash
-		String compare = s.replace("//", "/");
-		if (s == compare) {
-			break;
-		} else {
-			s = compare;
-		}
-	}
 	Vector<String> dirs = s.split("/", false);
-	bool absolute_path = is_absolute_path();
+	const bool absolute_path = is_absolute_path() && !begins_with("res://"); // See GLTF importer compatibility note below.
+	// For res://, preserve leading ".." components as before. Some GLTF
+	// importers depend on traversing above the res:// root.
 
-	absolute_path = absolute_path && !begins_with("res://"); // FIXME: Some code (GLTF importer) rely on accessing files up from `res://`, this probably should be disabled in the future.
-
+	// Resolve dot components in-place. A write index avoids repeated vector
+	// element shifts (quadratic work for many ".." segments).
+	int kept = 0;
 	for (int i = 0; i < dirs.size(); i++) {
-		String d = dirs[i];
-		if (d == ".") {
-			dirs.remove_at(i);
-			i--;
-		} else if (d == "..") {
-			if (i != 0 && dirs[i - 1] != "..") {
-				dirs.remove_at(i);
-				dirs.remove_at(i - 1);
-				i -= 2;
-			} else if (absolute_path && i == 0) {
-				dirs.remove_at(i);
-				i--;
+		const String &dir = dirs[i];
+		if (dir == ".") {
+			continue;
+		}
+		if (dir == "..") {
+			if (kept > 0 && dirs[kept - 1] != "..") {
+				--kept;
+				continue;
+			}
+			if (absolute_path && kept == 0) {
+				continue;
 			}
 		}
-	}
-
-	s = "";
-
-	for (int i = 0; i < dirs.size(); i++) {
-		if (i > 0) {
-			s += "/";
+		if (kept != i) {
+			dirs.write[kept] = dir;
 		}
-		s += dirs[i];
+		kept++;
 	}
 
-	return drive + s;
+	// Allocate the final path once, including its drive or protocol prefix.
+	// Building the result through repeated += causes quadratic copying.
+	int result_length = drive.length();
+	for (int i = 0; i < kept; i++) {
+		result_length += dirs[i].length();
+		if (i > 0) {
+			result_length++;
+		}
+	}
+	if (result_length == 0) {
+		return String();
+	}
+
+	String result;
+	result.resize_uninitialized(result_length + 1);
+	char32_t *destination = result.ptrw();
+	if (!drive.is_empty()) {
+		memcpy(destination, drive.ptr(), drive.length() * sizeof(char32_t));
+		destination += drive.length();
+	}
+	for (int i = 0; i < kept; i++) {
+		if (i > 0) {
+			*destination++ = '/';
+		}
+		const String &dir = dirs[i];
+		if (!dir.is_empty()) {
+			memcpy(destination, dir.ptr(), dir.length() * sizeof(char32_t));
+			destination += dir.length();
+		}
+	}
+	*destination = 0;
+	return result;
 }
 
 static int _humanize_digits(int p_num) {
