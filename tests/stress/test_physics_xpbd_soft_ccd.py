@@ -163,7 +163,7 @@ class XPBDSoftCCDContracts(unittest.TestCase):
         # Two physical plane crossings can occur even if both ENDPOINTS
         # have the same signed plane distance for a moving/deforming face.
         # (t-0.2)*(t-0.6)*(t-1.2) has roots at 0.2 and 0.6 in [0,1].
-        roots = cubic_roots_in_step((-.144, 1.2, -2., 1.))
+        roots = cubic_roots_in_step((-.144, 1.08, -2., 1.))
         self.assertEqual(len(roots), 2)
         self.assertAlmostEqual(roots[0], .2, delta=1e-6)
         self.assertAlmostEqual(roots[1], .6, delta=1e-6)
