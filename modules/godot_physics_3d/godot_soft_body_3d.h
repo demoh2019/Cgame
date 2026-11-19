@@ -108,6 +108,9 @@ class GodotSoftBody3D : public GodotCollisionObject3D {
 	};
 	LocalVector<DihedralHinge> xpbd_dihedral_hinges;
 	LocalVector<real_t> xpbd_dihedral_lambdas;
+	// Optional per-particle reference offsets for meshless rigid shape fitting.
+	// Zero stiffness allocates no additional per-node data.
+	LocalVector<Vector3> xpbd_shape_rest_offsets;
 	// Optional vertex/non-adjacent-face self contacts. Never allocate when
 	// the space's self-collision thickness is zero.
 	struct SelfCollisionContact {
@@ -311,6 +314,8 @@ private:
 	void update_area();
 	void initialize_shear_constraints();
 	void initialize_dihedral_constraints();
+	void initialize_shape_matching();
+	void solve_shape_matching(real_t p_strength);
 	void initialize_self_collision_topology();
 	void solve_self_collisions(real_t p_delta);
 	bool solve_edge_self_collisions(real_t p_delta);
