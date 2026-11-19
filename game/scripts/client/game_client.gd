@@ -192,6 +192,23 @@ func move_stash(item_id: String, count: int, deposit: bool) -> void:
 	net.c_stash.rpc_id(1, item_id, count, deposit)
 
 
+## Trade ids and revisions originate from server events. No client-side inventory mutation.
+func trade_invite(target_id: int) -> void:
+	net.c_trade_invite.rpc_id(1, target_id)
+
+
+func trade_offer(trade_id: int, item_id: String, quantity: int) -> void:
+	net.c_trade_offer.rpc_id(1, trade_id, item_id, quantity)
+
+
+func trade_accept(trade_id: int, revision: int) -> void:
+	net.c_trade_accept.rpc_id(1, trade_id, revision)
+
+
+func trade_cancel(trade_id: int) -> void:
+	net.c_trade_cancel.rpc_id(1, trade_id)
+
+
 func vendor(item_id: String, quantity: int, buy: bool) -> void:
 	net.c_vendor.rpc_id(1, item_id, quantity, buy)
 

@@ -26,6 +26,15 @@ var _equipped: Label
 var _log_lines: Array[String] = []
 var _craft_signature: String = ""
 var _inventory_signature: String = ""
+var _trade_state: Dictionary = {}
+var _trade_target: OptionButton
+var _trade_item: OptionButton
+var _trade_quantity: SpinBox
+var _trade_status: Label
+var _trade_peer_signature: String = ""
+var _trade_item_signature: String = ""
+
+
 
 
 func setup(p_client) -> void:
@@ -181,6 +190,55 @@ func _build() -> void:
 	claim_contract.pressed.connect(func() -> void: client.contract("claim"))
 	contract_actions.add_child(claim_contract)
 
+	var trade_title := Label.new()
+	trade_title.text = "Player barter (safe hub, within 6 metres)"
+	inventory_box.add_child(trade_title)
+	_trade_status = Label.new()
+	_trade_status.text = "Invite a nearby survivor, set an offer and both confirm."
+	inventory_box.add_child(_trade_status)
+	_trade_target = OptionButton.new()
+	inventory_box.add_child(_trade_target)
+	var trade_buttons := HBoxContainer.new()
+	inventory_box.add_child(trade_buttons)
+	var invite_trade := Button.new()
+	invite_trade.text = "Invite"
+	invite_trade.pressed.connect(func() -> void:
+		var peer_id: int = _trade_target.get_selected_id()
+		if peer_id >= 0:
+			client.trade_invite(peer_id)
+		else:
+			say("Trade: no nearby survivor selected"))
+	trade_buttons.add_child(invite_trade)
+	_trade_item = OptionButton.new()
+	trade_buttons.add_child(_trade_item)
+	_trade_quantity = SpinBox.new()
+	_trade_quantity.min_value = 0.0
+	_trade_quantity.max_value = 9999.0
+	_trade_quantity.step = 1.0
+	_trade_quantity.value = 1.0
+	trade_buttons.add_child(_trade_quantity)
+	var offer_trade := Button.new()
+	offer_trade.text = "Offer"
+	offer_trade.pressed.connect(func() -> void:
+		if _trade_state.is_empty() or _trade_item.selected < 0:
+			say("Trade: invite someone and choose an item first")
+		else:
+			var id: String = str(_trade_item.get_item_metadata(_trade_item.selected))
+			client.trade_offer(int(_trade_state["id"]), id, int(_trade_quantity.value)))
+	trade_buttons.add_child(offer_trade)
+	var accept_trade := Button.new()
+	accept_trade.text = "Accept"
+	accept_trade.pressed.connect(func() -> void:
+		if not _trade_state.is_empty():
+			client.trade_accept(int(_trade_state["id"]), int(_trade_state["revision"])))
+	trade_buttons.add_child(accept_trade)
+	var cancel_trade := Button.new()
+	cancel_trade.text = "Cancel"
+	cancel_trade.pressed.connect(func() -> void:
+		if not _trade_state.is_empty():
+			client.trade_cancel(int(_trade_state["id"])))
+	trade_buttons.add_child(cancel_trade)
+
 	_craft_panel = PanelContainer.new()
 	_craft_panel.set_anchors_preset(Control.PRESET_CENTER_LEFT)
 	_craft_panel.position = Vector2(14, -220)
@@ -259,6 +317,14 @@ func _on_event(event: Dictionary) -> void:
 				say("Infected wound: severity %d. Use antiseptic or antibiotics." % int(event.get("severity", 0)))
 		"crate":
 			say("You search the crate...")
+		"trade":
+			var phase: String = str(event.get("phase", ""))
+			if phase == "completed" or phase == "cancelled":
+				_trade_state = {}
+				say("Trade %s: %s" % [phase, str(event.get("reason", ""))])
+			else:
+				_trade_state = event.duplicate(true)
+				say("Trade %s (#%d, revision %d)" % [phase, int(event["id"]), int(event["revision"])])
 
 
 func _sell_one_material() -> void:
@@ -270,6 +336,10 @@ func _sell_one_material() -> void:
 
 
 func _on_result(kind: String, data: Dictionary) -> void:
+	if kind == "trade":
+		if not bool(data.get("ok", false)):
+			say("Trade rejected: " + str(data.get("reason", "unknown")))
+		return
 	if kind == "dismantle":
 		if bool(data.get("ok", false)):
 			say("Barricade dismantled; recovered %s" % str(data.get("salvage", {})))
@@ -345,8 +415,56 @@ func _process(_delta: float) -> void:
 	_death.text = "YOU DIED\n%s" % ("All carried items dropped." if bool(client.you.get("last_death_full_loot", false)) else "Carried equipment retained.")
 	if _inventory_panel.visible:
 		_refresh_inventory()
+		_refresh_trade_controls()
 	if _craft_panel.visible:
 		_refresh_crafting()
+
+
+func _refresh_trade_controls() -> void:
+	var peers: Array = []
+	for peer in client.players.values():
+		peers.append([int(peer["id"]), str(peer.get("name", "Survivor"))])
+	peers.sort_custom(func(a, b): return a[0] < b[0])
+	var peer_signature := str(peers)
+	if peer_signature != _trade_peer_signature:
+		var selected_peer: int = _trade_target.get_selected_id()
+		_trade_peer_signature = peer_signature
+		_trade_target.clear()
+		for peer in peers:
+			_trade_target.add_item("%s (#%d)" % [peer[1], peer[0]], peer[0])
+			if peer[0] == selected_peer:
+				_trade_target.select(_trade_target.item_count - 1)
+	var ids: Array[String] = []
+	for slot in client.inventory.slots:
+		if not slot.is_empty() and not ids.has(str(slot["id"])):
+			ids.append(str(slot["id"]))
+	ids.sort()
+	var item_signature := str(ids)
+	if item_signature != _trade_item_signature:
+		var selected_item: String = ""
+		if _trade_item.selected >= 0:
+			selected_item = str(_trade_item.get_item_metadata(_trade_item.selected))
+		_trade_item_signature = item_signature
+		_trade_item.clear()
+		for id in ids:
+			_trade_item.add_item(str(Defs.item(id).get("name", id)))
+			_trade_item.set_item_metadata(_trade_item.item_count - 1, id)
+			if id == selected_item:
+				_trade_item.select(_trade_item.item_count - 1)
+	if _trade_state.is_empty():
+		_trade_status.text = "No active exchange. Trades require two players in the safe hub."
+	else:
+		var a: int = int(_trade_state["a"])
+		var ours: bool = a == client.peer_id
+		var my_offer: Dictionary = _trade_state["offer_a"] if ours else _trade_state["offer_b"]
+		var their_offer: Dictionary = _trade_state["offer_b"] if ours else _trade_state["offer_a"]
+		var my_accepted: bool = bool(_trade_state["accepted_a"] if ours else _trade_state["accepted_b"])
+		var their_accepted: bool = bool(_trade_state["accepted_b"] if ours else _trade_state["accepted_a"])
+		_trade_status.text = "Trade #%d rev %d | You: %s (%s) | Them: %s (%s)" % [
+			int(_trade_state["id"]), int(_trade_state["revision"]),
+			str(my_offer), "accepted" if my_accepted else "pending",
+			str(their_offer), "accepted" if their_accepted else "pending"
+		]
 
 
 func _refresh_inventory() -> void:

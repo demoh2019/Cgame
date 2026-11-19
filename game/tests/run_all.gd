@@ -25,6 +25,7 @@ const SUITES := [
 	"res://tests/test_world_backup.gd",
 	"res://tests/test_dismantle.gd",
 	"res://tests/test_vendor.gd",
+	"res://tests/test_player_trade.gd",
 	"res://tests/test_contracts.gd",
 	"res://tests/test_survival_radar.gd",
 	"res://tests/test_save_validation.gd",

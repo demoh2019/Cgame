@@ -484,3 +484,32 @@ This uses existing Cgame scripting, inventory and networking APIs; no
 native engine change was required. Regression tests in
 `game/tests/test_infection.gd` run with
 `godot --headless --path game --script res://tests/run_all.gd`.
+
+## Direct survivor-to-survivor barter (authoritative multiplayer)
+
+In the networked client inventory panel, invite a nearby survivor, select an
+item and quantity, click **Offer**, then both players click **Accept**.
+The event shows the current trade ID, offer revision and both accept states.
+Every offer change invalidates previous approvals.
+
+Trades work only while both players are alive, in the safe hub and within
+6 metres of each other. Up to four item types per participant are supported;
+silver can be offered like any other inventory item. No item moves at the
+proposal stage. Only after both players approve the **same revision** does the
+server recheck counts and capacity, simulate both inventories independently,
+and commit both transfers together. A failed check commits neither side.
+Timeout (45 seconds), death, leaving the safe hub, exceeding range, cancel
+or disconnect all invalidate the trade. Completed trade IDs cannot be replayed.
+
+The rules live in `scripts/shared/player_trade.gd` and the
+`GameServer.cmd_trade_*` family, exposed via `scripts/shared/net.gd`.
+`tests/test_player_trade.gd` checks conservation of silver and materials,
+inventory capacity rollback, stale approvals, cancellation and replay.
+
+**Persistence limitation:** this is an authoritative *single-world-session*
+exchange. Trade results become dirty character snapshots and use existing
+Nakama save mechanics, but two separate character saves are **not yet one
+durable database transaction**. Do not use for production cross-server markets
+until a backend transactional ledger or transactional character write is added.
+No Cgame engine changes were needed; the current networking API supports
+these commands and reliable events.
