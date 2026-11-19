@@ -129,6 +129,9 @@ void GodotSoftBody3D::set_space(GodotSpace3D *p_space) {
 	}
 
 	_set_space(p_space);
+	// A mesh may have been assigned before the space was created. Validate
+	// its rest volume only after space-level compliance is available.
+	initialize_volume_constraint();
 
 	if (get_space()) {
 		get_space()->soft_body_add_to_active_list(&active_list);
@@ -1427,6 +1430,10 @@ void GodotSoftBody3D::solve_constraints(real_t p_delta) {
 			Math::is_finite(area_alpha_double) && area_alpha_double > 0.0;
 	const real_t alpha = use_xpbd ? real_t(MIN(alpha_double, double(std::numeric_limits<real_t>::max()))) : real_t(0.0);
 	const real_t area_alpha = use_area_xpbd ? real_t(MIN(area_alpha_double, double(std::numeric_limits<real_t>::max()))) : real_t(0.0);
+	const double volume_compliance = get_space() ? double(get_space()->get_soft_body_xpbd_volume_compliance()) : 0.0;
+	const double volume_alpha = p_delta > 0.0 ? volume_compliance / (double(p_delta) * double(p_delta)) : 0.0;
+	const bool use_volume_xpbd = xpbd_volume_closed && volume_compliance > 0.0 &&
+			Math::is_finite(volume_alpha) && volume_alpha > 0.0;
 
 	if (use_xpbd) {
 		xpbd_link_lambdas.resize(links.size());
@@ -1446,6 +1453,14 @@ void GodotSoftBody3D::solve_constraints(real_t p_delta) {
 		// The default zero-compliance setting consumes no per-face scratch.
 		xpbd_area_lambdas.reset();
 	}
+
+	if (use_volume_xpbd) {
+		// Reuse scratch at every iteration; one volume scalar lambda per step.
+		xpbd_volume_gradients.resize(nodes.size());
+	} else if (!xpbd_volume_gradients.is_empty()) {
+		xpbd_volume_gradients.reset();
+	}
+	double volume_lambda = 0.0;
 
 	for (int isolve = 0; isolve < iteration_count; ++isolve) {
 		if (use_xpbd) {
@@ -1469,6 +1484,9 @@ void GodotSoftBody3D::solve_constraints(real_t p_delta) {
 						face.n[0]->im, face.n[1]->im, face.n[2]->im,
 						face.ra, area_alpha, xpbd_area_lambdas[face_index]);
 			}
+		}
+		if (use_volume_xpbd) {
+			solve_volume_constraint(volume_alpha, volume_lambda);
 		}
 	}
 	const real_t vc = (1.0 - damping_coefficient) * inv_delta;
@@ -1616,6 +1634,9 @@ void GodotSoftBody3D::destroy() {
 
 	xpbd_link_lambdas.reset();
 	xpbd_area_lambdas.reset();
+	xpbd_volume_gradients.reset();
+	xpbd_volume_closed = false;
+	xpbd_volume_rest = 0.0;
 	nodes.clear();
 	links.clear();
 	faces.clear();
