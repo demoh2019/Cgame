@@ -269,6 +269,13 @@ public:
 	}
 
 	inline void unguarded_linear_insert(int64_t p_last, T *p_array) const {
+		// Most elements in introsort's final insertion pass are already in
+		// order. Avoid two moves (and potential heap work in T) for those
+		// entries. This method is only called with a valid predecessor.
+		if (!compare(p_array[p_last], p_array[p_last - 1])) {
+			return;
+		}
+
 		T val = std::move(p_array[p_last]);
 		int64_t next = p_last - 1;
 		while (compare(val, p_array[next])) {
@@ -284,6 +291,11 @@ public:
 	}
 
 	inline void linear_insert(int64_t p_first, int64_t p_last, T *p_array) const {
+		// Already sorted (including equal neighbors): skip all object moves
+		// and the potentially more expensive comparison with the first item.
+		if (!compare(p_array[p_last], p_array[p_last - 1])) {
+			return;
+		}
 		if (compare(p_array[p_last], p_array[p_first])) {
 			T val = std::move(p_array[p_last]);
 			for (int64_t i = p_last; i > p_first; i--) {
