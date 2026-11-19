@@ -106,6 +106,60 @@ TEST_CASE("[Projection] determinant()") {
 	CHECK(proj.determinant() == -12);
 }
 
+TEST_CASE("[Projection] cofactor determinant matches independent permutation expansion") {
+	// Integer-valued matrices keep both calculations exact in single and double precision.
+	auto reference = [](const Projection &p_matrix) -> real_t {
+		real_t total = 0;
+		for (int a = 0; a < 4; a++) {
+			for (int b = 0; b < 4; b++) {
+				if (b == a) {
+					continue;
+				}
+				for (int c = 0; c < 4; c++) {
+					if (c == a || c == b) {
+						continue;
+					}
+					for (int d = 0; d < 4; d++) {
+						if (d == a || d == b || d == c) {
+							continue;
+						}
+						const int permutation[4] = { a, b, c, d };
+						int inversions = 0;
+						for (int i = 0; i < 4; i++) {
+							for (int j = i + 1; j < 4; j++) {
+								inversions += permutation[i] > permutation[j] ? 1 : 0;
+							}
+						}
+						real_t term = p_matrix[0][a] * p_matrix[1][b] * p_matrix[2][c] * p_matrix[3][d];
+						total += (inversions & 1) ? -term : term;
+					}
+				}
+			}
+		}
+		return total;
+	};
+
+	Projection identity;
+	identity.set_identity();
+	CHECK_EQ(identity.determinant(), real_t(1));
+	Projection singular;
+	singular.set_zero();
+	CHECK_EQ(singular.determinant(), real_t(0));
+
+	// Fixed seed ensures reproducible coverage, including singular and negative determinants.
+	uint32_t state = 0xA17C3E5Du;
+	for (int sample = 0; sample < 512; sample++) {
+		Projection p;
+		for (int column = 0; column < 4; column++) {
+			for (int row = 0; row < 4; row++) {
+				state = state * 1664525u + 1013904223u;
+				p[column][row] = static_cast<real_t>(int((state >> 16) % 9) - 4);
+			}
+		}
+		CHECK_EQ(p.determinant(), reference(p));
+	}
+}
+
 TEST_CASE("[Projection] Inverse and invert") {
 	SUBCASE("[Projection] Arbitrary projection matrix inversion") {
 		Projection proj(
