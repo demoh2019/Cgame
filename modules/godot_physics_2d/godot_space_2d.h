@@ -97,6 +97,7 @@ private:
 	real_t contact_recycle_radius = 0.0;
 	real_t contact_max_separation = 0.0;
 	real_t contact_max_allowed_penetration = 0.0;
+	real_t restitution_velocity_threshold = 0.0;
 	real_t contact_bias = 0.0;
 	real_t constraint_bias = 0.0;
 
@@ -158,6 +159,7 @@ public:
 	_FORCE_INLINE_ real_t get_contact_recycle_radius() const { return contact_recycle_radius; }
 	_FORCE_INLINE_ real_t get_contact_max_separation() const { return contact_max_separation; }
 	_FORCE_INLINE_ real_t get_contact_max_allowed_penetration() const { return contact_max_allowed_penetration; }
+	_FORCE_INLINE_ real_t get_restitution_velocity_threshold() const { return restitution_velocity_threshold; }
 	_FORCE_INLINE_ real_t get_contact_bias() const { return contact_bias; }
 	_FORCE_INLINE_ real_t get_constraint_bias() const { return constraint_bias; }
 	_FORCE_INLINE_ real_t get_body_linear_velocity_sleep_threshold() const { return body_linear_velocity_sleep_threshold; }
