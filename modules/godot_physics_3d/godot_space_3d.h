@@ -138,6 +138,13 @@ private:
 	real_t fluid_angular_drag = 0.0; // Uniform-medium quadratic angular resistance.
 	real_t fluid_buoyancy = 0.0; // 0 = off; 1 = neutral in the fully submerged model.
 	Vector3 fluid_flow_velocity; // Constant ambient current or wind, in world space.
+	// Advanced, opt-in flat water plane: displacement per partly submerged shape.
+	bool fluid_plane_enabled = false;
+	real_t fluid_plane_surface_height = 0.0;
+	real_t fluid_plane_density = 1000.0;
+	real_t fluid_plane_drag_coefficient = 0.8;
+	real_t fluid_plane_angular_drag = 0.1;
+	Vector3 fluid_plane_flow_velocity;
 	bool gyroscopic_forces = false; // Jolt-style asymmetric rigid-body rotation; opt-in.
 	int gyroscopic_integration_mode = 0; // 0: normalized Euler, 1: implicit midpoint.
 	// Bullet-style resistance about and perpendicular to the contact normal.
@@ -230,6 +237,12 @@ public:
 	_FORCE_INLINE_ real_t get_fluid_angular_drag() const { return fluid_angular_drag; }
 	_FORCE_INLINE_ real_t get_fluid_buoyancy() const { return fluid_buoyancy; }
 	_FORCE_INLINE_ const Vector3 &get_fluid_flow_velocity() const { return fluid_flow_velocity; }
+	_FORCE_INLINE_ bool is_fluid_plane_enabled() const { return fluid_plane_enabled; }
+	_FORCE_INLINE_ real_t get_fluid_plane_surface_height() const { return fluid_plane_surface_height; }
+	_FORCE_INLINE_ real_t get_fluid_plane_density() const { return fluid_plane_density; }
+	_FORCE_INLINE_ real_t get_fluid_plane_drag_coefficient() const { return fluid_plane_drag_coefficient; }
+	_FORCE_INLINE_ real_t get_fluid_plane_angular_drag() const { return fluid_plane_angular_drag; }
+	_FORCE_INLINE_ const Vector3 &get_fluid_plane_flow_velocity() const { return fluid_plane_flow_velocity; }
 	_FORCE_INLINE_ bool are_gyroscopic_forces_enabled() const { return gyroscopic_forces; }
 	_FORCE_INLINE_ int get_gyroscopic_integration_mode() const { return gyroscopic_integration_mode; }
 	_FORCE_INLINE_ real_t get_rolling_friction() const { return rolling_friction; }
