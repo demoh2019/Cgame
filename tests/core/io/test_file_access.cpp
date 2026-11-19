@@ -360,4 +360,121 @@ TEST_CASE("[FileAccess] PackedByteArray page-aligned and empty buffer reads") {
 	CHECK(block[4095] == 11);
 }
 
+
+// Regression coverage for the packed byte-array I/O hot path.
+TEST_CASE("[FileAccess] PackedByteArray shrink clamps cursor and prevents overflow") {
+	Ref<FileAccessPackedByteArray> f;
+	f.instantiate();
+	PackedByteArray bytes;
+	bytes.resize_initialized(16);
+	bytes.set(0, 7);
+	bytes.set(7, 23);
+	REQUIRE(f->open_custom(bytes) == OK);
+	f->seek(16);
+	REQUIRE(f->resize(8) == OK);
+	CHECK(f->get_length() == 8);
+	CHECK(f->get_position() == 8);
+	CHECK(f->eof_reached());
+
+	uint8_t sentinel = 0x5a;
+	CHECK(f->get_buffer(&sentinel, 1) == 0);
+	CHECK(sentinel == 0x5a);
+	CHECK(f->get_position() == 8);
+
+	f->seek(0);
+	uint8_t copied[8] = {};
+	CHECK(f->get_buffer(copied, 8) == 8);
+	CHECK(copied[0] == 7);
+	CHECK(copied[7] == 23);
+	CHECK(f->get_position() == 8);
+}
+
+TEST_CASE("[FileAccess] PackedByteArray COW stays shared after a failed EOF write") {
+	Ref<FileAccessPackedByteArray> f;
+	f.instantiate();
+	PackedByteArray original;
+	original.resize_initialized(4);
+	original.set(0, 3);
+	original.set(3, 8);
+	REQUIRE(f->open_custom(original) == OK);
+	f->seek(4);
+	const uint8_t value = 19;
+	CHECK_FALSE(f->store_buffer(&value, 1));
+	CHECK(f->get_position() == 4);
+	CHECK(original[0] == 3);
+	CHECK(original[3] == 8);
+
+	// A successful write must detach from the original shared input.
+	f->seek(0);
+	CHECK(f->store_buffer(&value, 1));
+	CHECK(original[0] == 3);
+	uint8_t result = 0;
+	f->seek(0);
+	CHECK(f->get_buffer(&result, 1) == 1);
+	CHECK(result == 19);
+}
+
+TEST_CASE("[FileAccess] PackedByteArray partial block I/O preserves bounds") {
+	Ref<FileAccessPackedByteArray> f;
+	f.instantiate();
+	PackedByteArray bytes;
+	bytes.resize_initialized(8);
+	REQUIRE(f->open_custom(bytes) == OK);
+	f->seek(6);
+	const uint8_t payload[4] = { 10, 20, 30, 40 };
+	CHECK_FALSE(f->store_buffer(payload, 4));
+	CHECK(f->get_position() == 8);
+
+	f->seek(5);
+	uint8_t output[5] = { 0xa5, 0xa5, 0xa5, 0xa5, 0xa5 };
+	CHECK(f->get_buffer(output, 5) == 3);
+	CHECK(output[0] == 0);
+	CHECK(output[1] == 10);
+	CHECK(output[2] == 20);
+	CHECK(output[3] == 0xa5);
+	CHECK(output[4] == 0xa5);
+	CHECK(f->get_position() == 8);
+}
+
+TEST_CASE("[FileAccess] PackedByteArray resize failure preserves position") {
+	Ref<FileAccessPackedByteArray> f;
+	f.instantiate();
+	PackedByteArray bytes;
+	bytes.resize_initialized(4);
+	REQUIRE(f->open_custom(bytes) == OK);
+	f->seek(3);
+	CHECK(f->resize(-1) != OK);
+	CHECK(f->get_position() == 3);
+	CHECK(f->get_length() == 4);
+}
+
+TEST_CASE("[FileAccess] PackedByteArray reads and writes never cross EOF") {
+	Ref<FileAccessPackedByteArray> f;
+	f.instantiate();
+	PackedByteArray bytes;
+	bytes.resize_initialized(257);
+	REQUIRE(f->open_custom(bytes) == OK);
+
+	for (int size = 0; size <= 257; size++) {
+		REQUIRE(f->resize(size) == OK);
+		CHECK(f->get_length() == uint64_t(size));
+		f->seek(size);
+		uint8_t marker = 0xde;
+		CHECK(f->get_buffer(&marker, 1) == 0);
+		CHECK_FALSE(f->store_buffer(&marker, 1));
+		CHECK(marker == 0xde);
+		CHECK(f->get_position() == uint64_t(size));
+
+		if (size > 0) {
+			f->seek(size - 1);
+			CHECK(f->store_buffer(&marker, 1));
+			CHECK(f->get_position() == uint64_t(size));
+			f->seek(size - 1);
+			uint8_t value = 0;
+			CHECK(f->get_buffer(&value, 1) == 1);
+			CHECK(value == 0xde);
+		}
+	}
+}
+
 } // namespace TestFileAccess
