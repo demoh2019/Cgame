@@ -263,7 +263,8 @@ bool GodotBodyPair3D::_test_ccd(real_t p_step, GodotBody3D *p_A, int p_shape_A, 
 	// A ray through the leading sphere support can miss an oblique
 	// sphere/sphere collision, even though the swept volumes overlap.
 	// For true spheres (not ellipsoids), solve the exact linear TOI first.
-	if (shape_A_ptr->get_type() == PS3DE::SHAPE_SPHERE && shape_B_ptr->get_type() == PS3DE::SHAPE_SPHERE) {
+	if (shape_A_ptr->get_type() == PS3DE::SHAPE_SPHERE && shape_B_ptr->get_type() == PS3DE::SHAPE_SPHERE &&
+			p_A->get_angular_velocity() == Vector3() && p_B->get_angular_velocity() == Vector3()) {
 		const double scale_A = physics_ccd_uniform_sphere_scale(p_xform_A);
 		const double scale_B = physics_ccd_uniform_sphere_scale(p_xform_B);
 		if (scale_A > 0.0 && scale_B > 0.0) {
