@@ -618,7 +618,7 @@ func _claim_nearest_outpost_cache() -> void:
 	var position := Vector2(float(client.you.get("x", 0.0)),
 		float(client.you.get("z", 0.0)))
 	var nearest_id: int = -1
-	var distance: float = 5.0
+	var distance: float = 4.01
 	for site in client.outposts:
 		var at := Vector2(float(site["x"]), float(site["z"]))
 		var separation: float = position.distance_to(at)
