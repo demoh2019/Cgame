@@ -53,8 +53,7 @@ func run(tree: SceneTree, scale: int, frames: int) -> Dictionary:
 	var begin := Time.get_ticks_usec()
 	for i in range(trials):
 		var collided := PhysicsServer2D.body_test_motion(mover, query, result)
-		if not collided or result.get_collider_rid() != near_body \
-				or result.get_collision_safe_fraction() >= 0.2:
+		if not collided or result.get_collider_rid() != near_body or result.get_collision_safe_fraction() >= 0.2:
 			errors += 1
 	var query_ms := float(Time.get_ticks_usec() - begin) / 1000.0
 	var near_fraction := result.get_collision_safe_fraction()
@@ -77,6 +76,19 @@ func run(tree: SceneTree, scale: int, frames: int) -> Dictionary:
 		and result.get_remainder().is_finite()
 	)
 
+	# All decoys now become valid broadphase candidates (>2048 shapes).
+	# The nearest real collision must still win the exact narrowphase search.
+	query.exclude_bodies = []
+	query.motion = Vector2(4.0, 0.0)
+	query.recovery_as_collision = false
+	var dense_started := Time.get_ticks_usec()
+	var dense_hit := PhysicsServer2D.body_test_motion(mover, query, result)
+	var dense_query_ms := float(Time.get_ticks_usec() - dense_started) / 1000.0
+	var dense_valid := (
+		dense_hit and result.get_collider_rid() == near_body
+		and result.get_collision_safe_fraction() < 0.2
+	)
+
 	PhysicsServer2D.space_set_active(space, false)
 	for body in excluded_bodies:
 		if body != near_body:
@@ -87,10 +99,12 @@ func run(tree: SceneTree, scale: int, frames: int) -> Dictionary:
 	PhysicsServer2D.free_rid(circle)
 	PhysicsServer2D.free_rid(space)
 
-	if errors != 0 or not far_valid or not stationary_valid:
+	if errors != 0 or not far_valid or not stationary_valid or not dense_valid:
 		return {"error": "2D motion exclusions, nearest obstacle or stationary sweep regressed",
 				"failures": errors, "near_fraction": near_fraction, "far_fraction": far_fraction,
-				"far_valid": far_valid, "stationary_valid": stationary_valid}
+				"far_valid": far_valid, "stationary_valid": stationary_valid,
+				"dense_valid": dense_valid}
 	return {"excluded_bodies": count, "queries": trials, "creation_ms": creation_ms,
 			"motion_queries_ms": query_ms, "near_fraction": near_fraction, "far_fraction": far_fraction,
-			"stationary_valid": true}
+			"stationary_valid": true, "dense_candidate_count": count + 2,
+			"dense_query_ms": dense_query_ms, "dense_nearest_hit_verified": dense_valid}
