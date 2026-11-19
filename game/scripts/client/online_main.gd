@@ -3,6 +3,7 @@ extends Node3D
 ## network state and what is drawn.
 
 const Defs = preload("res://scripts/shared/defs.gd")
+const Structures = preload("res://scripts/shared/structures.gd")
 const WorldCycle = preload("res://scripts/shared/world_cycle.gd")
 const WorldGen = preload("res://scripts/shared/world_gen.gd")
 const Net = preload("res://scripts/shared/net.gd")
@@ -402,7 +403,15 @@ func _update_prompt() -> void:
 			var tool_id: String = client.inventory.best_tool(needed)
 			if Defs.tier_of(tool_id) < int(node["tier"]) and not (tool_id == "" and node["tier"] == 1):
 				text = "Needs a tier %d %s" % [node["tier"], needed]
-	elif Vector2(p.x, p.z).distance_to(Vector2(9.0, 0.0)) < 6.0:
+	elif client.nearest_barricade(p) != -1:
+		var wall: Dictionary = client.barricades[client.nearest_barricade(p)]
+		var level: int = Structures.tier_of(wall)
+		var hp: int = roundi(float(wall["hp"]))
+		var max_hp: int = roundi(Structures.max_health(level))
+		text = "Wall T%d (%d/%d HP) | H repair | Y upgrade | X dismantle" % [level, hp, max_hp]
+		if level < Structures.MAX_TIER:
+			text += " | next: " + str(Structures.upgrade_cost(level + 1))
+		elif Vector2(p.x, p.z).distance_to(Vector2(9.0, 0.0)) < 6.0:
 		text = "Workbench: press C to craft"
 	elif _near_water(p):
 		text = "[F] Drink"
@@ -437,6 +446,23 @@ func _unhandled_input(event: InputEvent) -> void:
 				hud.toggle_inventory()
 			KEY_C:
 				hud.toggle_crafting()
+			KEY_U:
+				var direction: Vector2 = _aim_direction()
+				if direction.length_squared() > 0.001:
+					var target: Vector2 = Vector2(client.predicted.x, client.predicted.z) + direction * 2.8
+					client.build(target)
+			KEY_H:
+				var id: int = client.nearest_barricade(client.predicted)
+				if id != -1:
+					client.repair(id)
+			KEY_Y:
+				var id: int = client.nearest_barricade(client.predicted)
+				if id != -1:
+					client.upgrade(id)
+			KEY_X:
+				var id: int = client.nearest_barricade(client.predicted)
+				if id != -1:
+					client.dismantle(id)
 	if event is InputEventMouseButton and event.pressed:
 		if event.button_index == MOUSE_BUTTON_WHEEL_UP:
 			_zoom = clampf(_zoom - 0.1, 0.55, 1.8)
