@@ -698,55 +698,68 @@ void BitMap::grow_mask(int p_pixels, const Rect2i &p_rect) {
 		return;
 	}
 
-	bool bit_value = p_pixels > 0;
-	p_pixels = Math::abs(p_pixels);
-	const int pixels2 = p_pixels * p_pixels;
+	const bool bit_value = p_pixels > 0;
+	const int radius = Math::abs(p_pixels);
+	const int64_t radius_squared = int64_t(radius) * radius;
+	const Rect2i current = Rect2i(0, 0, width, height).intersection(p_rect);
+	if (current.size.x <= 0 || current.size.y <= 0) {
+		return;
+	}
 
-	Rect2i r = Rect2i(0, 0, width, height).intersection(p_rect);
+	// Keep the pre-operation bits in a COW snapshot. No temporary Resource,
+	// second zero-initialized buffer, or get_bit/set_bit calls are needed.
+	const Vector<uint8_t> original = bitmask;
+	uint8_t *destination = bitmask.ptrw();
+	const uint8_t *source = original.ptr();
+	const int64_t left = p_rect.position.x;
+	const int64_t right = left + p_rect.size.x;
+	const int64_t top = p_rect.position.y;
+	const int64_t bottom = top + p_rect.size.y;
 
-	Ref<BitMap> copy;
-	copy.instantiate();
-	copy->create(get_size());
-	copy->bitmask = bitmask;
-
-	for (int i = r.position.y; i < r.position.y + r.size.height; i++) {
-		for (int j = r.position.x; j < r.position.x + r.size.width; j++) {
-			if (bit_value == get_bit(j, i)) {
+	for (int y = current.position.y; y < current.position.y + current.size.y; y++) {
+		for (int x = current.position.x; x < current.position.x + current.size.x; x++) {
+			const int bit = y * width + x;
+			const uint8_t mask = uint8_t(1u << (bit & 7));
+			if (((source[bit >> 3] & mask) != 0) == bit_value) {
 				continue;
 			}
 
 			bool found = false;
-
-			for (int y = i - p_pixels; y <= i + p_pixels; y++) {
-				for (int x = j - p_pixels; x <= j + p_pixels; x++) {
-					bool outside = false;
-
-					if ((x < p_rect.position.x) || (x >= p_rect.position.x + p_rect.size.x) || (y < p_rect.position.y) || (y >= p_rect.position.y + p_rect.size.y)) {
-						// Outside of rectangle counts as bit not set.
-						if (!bit_value) {
-							outside = true;
-						} else {
-							continue;
-						}
-					}
-
-					float d = Point2(j, i).distance_squared_to(Point2(x, y)) - CMP_EPSILON2;
-					if (d > pixels2) {
+			for (int64_t candidate_y = int64_t(y) - radius; candidate_y <= int64_t(y) + radius && !found; candidate_y++) {
+				const int64_t delta_y = candidate_y - y;
+				const int64_t delta_y_squared = delta_y * delta_y;
+				for (int64_t candidate_x = int64_t(x) - radius; candidate_x <= int64_t(x) + radius; candidate_x++) {
+					const int64_t delta_x = candidate_x - x;
+					if (delta_x * delta_x + delta_y_squared > radius_squared) {
 						continue;
 					}
-
-					if (outside || (bit_value == copy->get_bit(x, y))) {
+					const bool outside = candidate_x < left || candidate_x >= right ||
+							candidate_y < top || candidate_y >= bottom;
+					if (outside) {
+						if (!bit_value) {
+							found = true;
+							break;
+						}
+						continue;
+					}
+					// get_bit() returned false for points outside the image.
+					bool neighbor = false;
+					if (candidate_x >= 0 && candidate_x < width && candidate_y >= 0 && candidate_y < height) {
+						const int neighbor_bit = int(candidate_y) * width + int(candidate_x);
+						neighbor = (source[neighbor_bit >> 3] & (1u << (neighbor_bit & 7))) != 0;
+					}
+					if (neighbor == bit_value) {
 						found = true;
 						break;
 					}
 				}
-				if (found) {
-					break;
-				}
 			}
-
 			if (found) {
-				set_bit(j, i, bit_value);
+				if (bit_value) {
+					destination[bit >> 3] |= mask;
+				} else {
+					destination[bit >> 3] &= uint8_t(~mask);
+				}
 			}
 		}
 	}
