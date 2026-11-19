@@ -949,5 +949,4 @@ TEST_CASE("[Image] Decompressing images") {
 	}
 }
 
-
 } // namespace TestImage
