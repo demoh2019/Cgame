@@ -951,6 +951,77 @@ TEST_CASE("[SceneTree][OBJ] MTL diffuse color defaults to legacy and supports li
 }
 #endif // TOOLS_ENABLED
 
+TEST_CASE("[Mesh][Performance] Triangle mesh generation avoids unused surface metadata") {
+	Ref<ArrayMesh> mesh;
+	mesh.instantiate();
+
+	// Many unindexed faces exercise the bulk contiguous Vector3 copy.
+	PackedVector3Array original;
+	REQUIRE(original.resize_uninitialized(384) == OK);
+	Vector3 *const original_write = original.ptrw();
+	for (int i = 0; i < original.size(); i++) {
+		original_write[i] = Vector3(real_t(i * 2), real_t(i % 5), real_t(i % 17));
+	}
+	Array unindexed;
+	unindexed.resize(Mesh::ARRAY_MAX);
+	unindexed[Mesh::ARRAY_VERTEX] = original;
+	mesh->add_surface_from_arrays(Mesh::PRIMITIVE_TRIANGLES, unindexed);
+
+	// A second indexed surface verifies that face ordering and expansion
+	// remain unchanged when sources have different index representations.
+	const PackedVector3Array quad = {
+		Vector3(1000, 0, 0), Vector3(1001, 0, 0),
+		Vector3(1001, 1, 0), Vector3(1000, 1, 0)
+	};
+	const PackedInt32Array quad_indices = { 0, 1, 2, 0, 2, 3 };
+	Array indexed;
+	indexed.resize(Mesh::ARRAY_MAX);
+	indexed[Mesh::ARRAY_VERTEX] = quad;
+	indexed[Mesh::ARRAY_INDEX] = quad_indices;
+	mesh->add_surface_from_arrays(Mesh::PRIMITIVE_TRIANGLES, indexed);
+
+	const PackedVector3Array strip = {
+		Vector3(2000, 0, 0), Vector3(2001, 0, 0),
+		Vector3(2000, 1, 0), Vector3(2001, 1, 0)
+	};
+	Array strip_arrays;
+	strip_arrays.resize(Mesh::ARRAY_MAX);
+	strip_arrays[Mesh::ARRAY_VERTEX] = strip;
+	mesh->add_surface_from_arrays(Mesh::PRIMITIVE_TRIANGLE_STRIP, strip_arrays);
+
+	Ref<TriangleMesh> all = mesh->generate_triangle_mesh();
+	REQUIRE(all.is_valid());
+	const Vector<Face3> faces = all->get_faces();
+	REQUIRE(faces.size() == 132);
+	for (int i = 0; i < 128; i++) {
+		for (int j = 0; j < 3; j++) {
+			CHECK(faces[i].vertex[j] == original[i * 3 + j]);
+		}
+	}
+	const int expected_quad[] = { 0, 1, 2, 0, 2, 3 };
+	for (int i = 0; i < 6; i++) {
+		CHECK(faces[128 + i / 3].vertex[i % 3] == quad[expected_quad[i]]);
+	}
+	CHECK(faces[130].vertex[0] == strip[0]);
+	CHECK(faces[130].vertex[1] == strip[1]);
+	CHECK(faces[130].vertex[2] == strip[2]);
+	CHECK(faces[131].vertex[0] == strip[1]);
+	CHECK(faces[131].vertex[1] == strip[3]);
+	CHECK(faces[131].vertex[2] == strip[2]);
+
+	// The single-surface routine uses the same zero-init-free bulk transfer.
+	Ref<TriangleMesh> only_first = mesh->generate_surface_triangle_mesh(0);
+	REQUIRE(only_first.is_valid());
+	const Vector<Face3> first_faces = only_first->get_faces();
+	REQUIRE(first_faces.size() == 128);
+	for (int i = 0; i < 128; i++) {
+		for (int j = 0; j < 3; j++) {
+			CHECK(first_faces[i].vertex[j] == original[i * 3 + j]);
+		}
+	}
+	CHECK(mesh->generate_triangle_mesh() == all); // Cached geometry is preserved.
+}
+
 } // namespace TestArrayMesh
 
 #endif // _3D_DISABLED
