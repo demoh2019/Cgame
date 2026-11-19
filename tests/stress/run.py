@@ -23,7 +23,7 @@ from typing import Any
 
 PREFIX = "STRESS_RESULT:"
 # A zero exit status is not enough: the engine can log script/runtime errors.
-ENGINE_ERROR = re.compile(r"(?m)^(?:SCRIPT ERROR:|ERROR:|E\\s+\\d+:)")
+ENGINE_ERROR = re.compile(r"(?m)^(?:SCRIPT ERROR:|ERROR:|E\s+\d+:)")
 CASES = (
     "containers", "strings", "script_vm", "math", "signals",
     "scene_tree", "packed_scene", "images", "json", "stream",
