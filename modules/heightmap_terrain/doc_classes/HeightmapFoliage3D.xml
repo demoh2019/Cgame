@@ -1,0 +1,53 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<class name="HeightmapFoliage3D" inherits="MultiMeshInstance3D" api_type="core" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="../../../doc/class.xsd">
+    <brief_description>
+        Deterministically scatters large numbers of mesh instances over a terrain heightmap.
+    </brief_description>
+    <description>
+        Places up to 100000 instances of [member foliage_mesh] on the [member heightmap] using a seeded random distribution and renders them through a single [MultiMesh].
+        Instances are sampled at the interpolated height of the terrain, randomly rotated around the up axis, and uniformly scaled. A slope filter prevents placement on steep ground. When the heightmap changes, placement is regenerated.
+        [b]Note:[/b] This is a basic instance scatterer, not a full vegetation painter. It does not provide biome masks, physics collision, LOD/HLOD, procedural meshes, or streaming. The parent node should have the same transform and [member terrain_cell_size] as the corresponding [HeightmapTerrain3D].
+    </description>
+    <tutorials>
+    </tutorials>
+    <methods>
+        <method name="get_generated_count" qualifiers="const">
+            <return type="int" />
+            <description>
+                Returns the number of instances that passed the slope filter.
+            </description>
+        </method>
+        <method name="regenerate">
+            <return type="void" />
+            <description>
+                Rebuilds all instances from the current seed and settings. Calling this repeatedly with unchanged inputs produces identical placements.
+            </description>
+        </method>
+    </methods>
+    <members>
+        <member name="foliage_mesh" type="Mesh" setter="set_foliage_mesh" getter="get_foliage_mesh">
+            Mesh to place for each instance.
+        </member>
+        <member name="heightmap" type="TerrainHeightmap" setter="set_heightmap" getter="get_heightmap">
+            Elevation resource used to sample instance positions.
+        </member>
+        <member name="instance_count" type="int" setter="set_instance_count" getter="get_instance_count" default="128">
+            Requested number of random instances. Fewer may be visible if too few positions pass the slope filter.
+        </member>
+        <member name="maximum_scale" type="float" setter="set_maximum_scale" getter="get_maximum_scale" default="1.2">
+            Upper bound for uniformly randomized instance scale.
+        </member>
+        <member name="maximum_slope_degrees" type="float" setter="set_maximum_slope_degrees" getter="get_maximum_slope_degrees" default="60.0">
+            Maximum allowed terrain slope in degrees. Zero permits flat ground only.
+        </member>
+        <member name="minimum_scale" type="float" setter="set_minimum_scale" getter="get_minimum_scale" default="0.8">
+            Lower bound for uniformly randomized instance scale.
+        </member>
+        <member name="random_seed" type="int" setter="set_random_seed" getter="get_random_seed" default="1">
+            Seed for reproducible placement.
+        </member>
+        <member name="terrain_cell_size" type="float" setter="set_terrain_cell_size" getter="get_terrain_cell_size" default="1.0">
+            World-unit distance between terrain samples, matching [member HeightmapTerrain3D.cell_size].
+        </member>
+    </members>
+</class>

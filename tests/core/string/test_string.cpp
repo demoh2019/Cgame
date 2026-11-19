@@ -1182,6 +1182,48 @@ TEST_CASE("[String] String to float") {
 	ERR_PRINT_ON
 }
 
+
+TEST_CASE("[String] String to float ignores leading zeros for significant digits") {
+	struct Input {
+		const char *value;
+		double expected;
+	};
+	const Input values[] = {
+		{ "00000000000000000001.5", 1.5 },
+		{ "-00000000000000000001.5", -1.5 },
+		{ "+00000000000000000042", 42.0 },
+		{ "00000000000000000012.25", 12.25 },
+		{ "00000000000000000000.5", 0.5 },
+		{ "00000000000000000001.25e+2", 125.0 },
+		{ "-00000000000000000007.5e-1", -0.75 },
+		{ "00000000000000000000", 0.0 },
+		{ "00000000000000000000.000000", 0.0 },
+		{ "00000.25", 0.25 },
+		{ "00000.00000", 0.0 },
+	};
+	for (const Input &input : values) {
+		CHECK(String(input.value).to_float() == doctest::Approx(input.expected));
+	}
+}
+
+TEST_CASE("[String] String to float preserves very small fractional values") {
+	struct Input {
+		const char *value;
+		double expected;
+	};
+	const Input values[] = {
+		{ "0.0000000000000000271", 2.71e-17 },
+		{ "0000000000000000000.0000000000000000271", 2.71e-17 },
+		{ "0000000000.0000000000000000042", 4.2e-18 },
+		{ "0.00000000000000000001", 1e-20 },
+		{ "0.00000000000000005e3", 5e-14 },
+		{ "0000.00000000000000010e2", 1e-14 },
+	};
+	for (const Input &input : values) {
+		CHECK(String(input.value).to_float() == doctest::Approx(input.expected).scale(0));
+	}
+}
+
 TEST_CASE("[String] Slicing") {
 	String s = "Mars,Jupiter,Saturn,Uranus";
 	const char *slices[4] = { "Mars", "Jupiter", "Saturn", "Uranus" };

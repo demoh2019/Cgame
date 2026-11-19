@@ -1,0 +1,56 @@
+name: GodotPhysics3D soft-body fatigue damage contracts
+
+on:
+  pull_request:
+    paths:
+      - 'servers/physics_softbody_fatigue_damage.h'
+      - 'modules/godot_physics_3d/godot_soft_body_3d.cpp'
+      - 'modules/godot_physics_3d/godot_soft_body_3d.h'
+      - 'modules/godot_physics_3d/godot_space_3d.cpp'
+      - 'modules/godot_physics_3d/godot_space_3d.h'
+      - 'servers/physics_3d/physics_server_3d.cpp'
+      - 'tests/servers/test_physics_softbody_fatigue_damage.cpp'
+      - 'tests/stress/test_physics_softbody_fatigue_damage.py'
+      - 'tests/stress/test_physics_softbody_nonlinear_materials.py'
+      - 'tests/stress/test_physics_xpbd_tension_hardening.py'
+      - 'tests/stress/test_physics_xpbd_anisotropic_stretch.py'
+      - '.github/workflows/physics-softbody-fatigue-damage.yml'
+  push:
+    branches: [develop]
+    paths:
+      - 'servers/physics_softbody_fatigue_damage.h'
+      - 'modules/godot_physics_3d/godot_soft_body_3d.cpp'
+      - 'modules/godot_physics_3d/godot_soft_body_3d.h'
+      - 'modules/godot_physics_3d/godot_space_3d.cpp'
+      - 'modules/godot_physics_3d/godot_space_3d.h'
+      - 'servers/physics_3d/physics_server_3d.cpp'
+      - 'tests/servers/test_physics_softbody_fatigue_damage.cpp'
+      - 'tests/stress/test_physics_softbody_fatigue_damage.py'
+      - 'tests/stress/test_physics_softbody_nonlinear_materials.py'
+      - 'tests/stress/test_physics_xpbd_tension_hardening.py'
+      - 'tests/stress/test_physics_xpbd_anisotropic_stretch.py'
+      - '.github/workflows/physics-softbody-fatigue-damage.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: physics-softbody-fatigue-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  numerical-and-source-contracts:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - name: Validate regression script syntax
+        run: |
+          python3 -m py_compile tests/stress/test_physics_softbody_fatigue_damage.py tests/stress/test_physics_softbody_nonlinear_materials.py tests/stress/test_physics_xpbd_tension_hardening.py tests/stress/test_physics_xpbd_anisotropic_stretch.py
+      - name: Numerical damage, alpha, and legacy XPBD contracts
+        run: |
+          python3 -m unittest discover -s tests/stress -p 'test_physics_softbody_fatigue_damage.py' -v
+          python3 -m unittest discover -s tests/stress -p 'test_physics_softbody_nonlinear_materials.py' -v
+          python3 -m unittest discover -s tests/stress -p 'test_physics_xpbd_tension_hardening.py' -v
+          python3 -m unittest discover -s tests/stress -p 'test_physics_xpbd_anisotropic_stretch.py' -v

@@ -3,7 +3,8 @@ extends Node3D
 ## installed into the editor or enabled in other games.
 
 const LAB_2D := "res://lab_2d.tscn"
-const BUOYANT_BOX = preload("res://buoyant_box.gd")
+const INTERACTIVE_ENV_3D = preload("res://environment_3d.gd")
+const ADVANCED_PHYSICS_3D = preload("res://advanced_3d.gd")
 const ZONES_X := [-28.0, -14.0, 0.0, 14.0, 28.0]
 
 var _camera: Camera3D
@@ -17,6 +18,7 @@ var _pitch := 0.0
 var _stat_timer := 0.0
 var _projectile_index := 0
 var _sensor_hits := 0
+var _camera_station := -1
 
 
 func _ready() -> void:
@@ -26,13 +28,20 @@ func _ready() -> void:
     _make_ramp()
     _make_joints()
     _make_soft_body()
-    _make_water_station()
     _make_ccd_station()
     _make_material_station()
     _make_vehicle()
     _make_sensor_station()
     _make_camera()
     _make_hud()
+    var interactions = INTERACTIVE_ENV_3D.new()
+    interactions.name = "Environment3D"
+    add_child(interactions)
+    interactions.setup(_camera)
+    var advanced = ADVANCED_PHYSICS_3D.new()
+    advanced.name = "AdvancedPhysics3D"
+    add_child(advanced)
+    advanced.setup()
 
 
 func _make_environment() -> void:
@@ -140,9 +149,9 @@ func _make_floor_and_zones() -> void:
     _static_box("Ground", Vector3(0, -0.5, 0), Vector3(94, 1, 62), Color(0.11, 0.14, 0.18))
     var names := [
         "01  Rigid stacks", "02  Ramps / rolling", "03  Joints / pendulums",
-        "04  SoftBody3D", "05  Buoyancy approximation",
+        "04  SoftBody3D", "05  Interactive water pool",
         "06  CCD projectiles", "07  Friction / restitution", "08  Vehicle suspension",
-        "09  Area / ray query", "10  Stress test [X]"
+        "09  Area / ray query", "10  Magnet / wind / stress"
     ]
     var colors := [
         Color("#23455a"), Color("#284b45"), Color("#4b4059"), Color("#4c425e"), Color("#235166"),
@@ -215,6 +224,73 @@ func _make_joints() -> void:
     slider.node_b = slider.get_path_to(sliding_weight)
 
 
+# An indexed, watertight cube with eight SHARED vertices. A BoxMesh
+# duplicates vertices per face and is unsuitable for tetra FEM cooking.
+# The new conservative star tetrahedralizer produces six actual tets.
+func _build_fem_convex_cube() -> ArrayMesh:
+    var vertices := PackedVector3Array([
+        Vector3(-1.2, -1.2, -1.2), Vector3(1.2, -1.2, -1.2),
+        Vector3(1.2, 1.2, -1.2), Vector3(-1.2, 1.2, -1.2),
+        Vector3(-1.2, -1.2, 1.2), Vector3(1.2, -1.2, 1.2),
+        Vector3(1.2, 1.2, 1.2), Vector3(-1.2, 1.2, 1.2)
+    ])
+    var indices := PackedInt32Array([
+        0, 2, 1, 0, 3, 2,
+        4, 5, 6, 4, 6, 7,
+        0, 1, 5, 0, 5, 4,
+        3, 7, 6, 3, 6, 2,
+        0, 4, 7, 0, 7, 3,
+        1, 2, 6, 1, 6, 5
+    ])
+    var normals := PackedVector3Array()
+    for vertex in vertices:
+        normals.append(vertex.normalized())
+    var arrays := []
+    arrays.resize(Mesh.ARRAY_MAX)
+    arrays[Mesh.ARRAY_VERTEX] = vertices
+    arrays[Mesh.ARRAY_NORMAL] = normals
+    arrays[Mesh.ARRAY_INDEX] = indices
+    var result := ArrayMesh.new()
+    result.add_surface_from_arrays(Mesh.PRIMITIVE_TRIANGLES, arrays)
+    return result
+
+
+# Five welded surface vertices and exactly two explicitly authored volume
+# tetrahedra. Their union is NONCONVEX: a convex fan would reject this mesh.
+# The imported connectivity is validated against the six oriented faces.
+func _build_fem_concave_doubletet() -> ArrayMesh:
+    var vertices := PackedVector3Array([
+        Vector3(0, 0, 0), Vector3(1.6, 0, 0), Vector3(0, 1.6, 0),
+        Vector3(0, 0, 1.6), Vector3(0.96, 1.28, -0.4)
+    ])
+    var indices := PackedInt32Array([
+        1, 2, 3, 0, 3, 2, 0, 1, 3,
+        2, 1, 4, 0, 4, 1, 0, 2, 4
+    ])
+    # SoftBodyRenderingServerHandler updates normals every frame. Supply
+    # an initial packed normal attribute to keep the vertex layout valid.
+    var normals := PackedVector3Array()
+    normals.resize(vertices.size())
+    for i in range(0, indices.size(), 3):
+        var a := indices[i]
+        var b := indices[i + 1]
+        var c := indices[i + 2]
+        var normal := (vertices[b] - vertices[a]).cross(vertices[c] - vertices[a])
+        normals[a] = normals[a] + normal
+        normals[b] = normals[b] + normal
+        normals[c] = normals[c] + normal
+    for i in range(normals.size()):
+        normals[i] = normals[i].normalized()
+    var arrays := []
+    arrays.resize(Mesh.ARRAY_MAX)
+    arrays[Mesh.ARRAY_VERTEX] = vertices
+    arrays[Mesh.ARRAY_NORMAL] = normals
+    arrays[Mesh.ARRAY_INDEX] = indices
+    var mesh := ArrayMesh.new()
+    mesh.add_surface_from_arrays(Mesh.PRIMITIVE_TRIANGLES, arrays)
+    return mesh
+
+
 func _make_soft_body() -> void:
     var soft := SoftBody3D.new()
     soft.name = "DeformableMesh"
@@ -224,32 +300,57 @@ func _make_soft_body() -> void:
     mesh.radial_segments = 16
     mesh.rings = 8
     soft.mesh = mesh
-    soft.position = Vector3(14, 6, -11)
+    soft.position = Vector3(11.7, 6, -11)
     soft.simulation_precision = 9
     soft.total_mass = 3.0
     soft.material_override = _material(Color("#cf9aef"))
     add_child(soft)
-    _static_box("SoftBodyObstacle", Vector3(14, 0.75, -11), Vector3(6, 1.5, 6), Color("#b3a9ce"))
 
+    # Unlike the sphere above, this indexed, closed, convex mesh has a
+    # deterministic six-tetrahedral FEM interior. Other physics engines
+    # may ignore the experimental GodotPhysics3D FEM extension.
+    var fem_cube := SoftBody3D.new()
+    fem_cube.name = "FEMConvexCubeSixTets"
+    fem_cube.mesh = _build_fem_convex_cube()
+    fem_cube.position = Vector3(16.6, 6, -11)
+    fem_cube.simulation_precision = 12
+    fem_cube.total_mass = 4.0
+    fem_cube.material_override = _material(Color("#82dae7"))
+    add_child(fem_cube)
 
-func _make_water_station() -> void:
-    var volume := Node3D.new()
-    volume.position = Vector3(28, 1.3, -11)
-    _visual_box(volume, Vector3(11.5, 2.6, 14.4), Color(0.17, 0.7, 0.94, 0.28))
-    add_child(volume)
-    for i in range(2):
-        var body = BUOYANT_BOX.new()
-        body.name = "LightFloater" if i == 0 else "HeavySinker"
-        body.position = Vector3(25.5 + i * 4.5, 5.3, -11)
-        body.mass = 2.5 if i == 0 else 9.0
-        body.water_surface_y = 2.6
-        body.box_height = 1.4
-        body.displaced_volume = 1.4 * 1.4 * 1.4
-        body.fluid_density = 1.5
-        _box_collision(body, Vector3.ONE * 1.4)
-        _visual_box(body, Vector3.ONE * 1.4, Color("#a1f3d2") if i == 0 else Color("#f2b192"))
-        add_child(body)
-        body.add_to_group("demo_dynamic")
+    var imported := SoftBody3D.new()
+    imported.name = "FEMConcaveImportedTwoTets"
+    # Imported order refers to visual mesh vertex IDs, not welded Node IDs.
+    imported.tetrahedral_indices = PackedInt32Array([0, 1, 2, 3, 0, 2, 1, 4])
+    imported.mesh = _build_fem_concave_doubletet()
+    imported.position = Vector3(19.3, 6.4, -11)
+    imported.simulation_precision = 12
+    imported.total_mass = 2.5
+    imported.material_override = _material(Color("#f7b476"))
+    add_child(imported)
+
+    # The FEM simulation has 9 nodes: 8 on the surface + 1 interior.
+    # Build 12 tetrahedra linking the interior node to each cube face.
+    # The center is integrated by FEM and mass-lumping but has no BVH
+    # point collider or rendering vertex.
+    var inner_cube := SoftBody3D.new()
+    inner_cube.name = "FEMInteriorNodeTwelveTets"
+    inner_cube.tetrahedral_interior_positions = PackedVector3Array([Vector3.ZERO])
+    var interior_mesh := _build_fem_convex_cube()
+    var shell_triangles: PackedInt32Array = interior_mesh.surface_get_arrays(0)[Mesh.ARRAY_INDEX]
+    var tetra_indices := PackedInt32Array()
+    for i in range(0, shell_triangles.size(), 3):
+        tetra_indices.append_array(PackedInt32Array([
+            8, shell_triangles[i], shell_triangles[i + 1], shell_triangles[i + 2]
+        ]))
+    inner_cube.tetrahedral_indices = tetra_indices
+    inner_cube.mesh = interior_mesh
+    inner_cube.position = Vector3(22.3, 6, -11)
+    inner_cube.simulation_precision = 12
+    inner_cube.total_mass = 4.0
+    inner_cube.material_override = _material(Color("#92e4ae"))
+    add_child(inner_cube)
+    _static_box("SoftBodyObstacle", Vector3(16.5, 0.75, -11), Vector3(17.5, 1.5, 6), Color("#b3a9ce"))
 
 
 func _make_ccd_station() -> void:
@@ -369,7 +470,7 @@ func _make_hud() -> void:
     title.add_theme_font_size_override("font_size", 21)
     content.add_child(title)
     var instructions := Label.new()
-    instructions.text = "ПКМ: обзор камерой  |  WASD + Q/E: полёт  |  Shift: быстро\nB: бросить куб  |  C: две CCD-пули  |  Space: импульс\nX: +100 тел (стресс)  |  R: сброс  |  F1: физика 2D\nEsc: освободить курсор"
+    instructions.text = "ПКМ: обзор камерой  |  WASD + Q/E: полёт  |  Shift: быстро\nB: бросить куб  |  C: две CCD-пули  |  Space: импульс\nX: +100 тел | стрелки: машина | Ctrl: тормоз\nF1: 2D | R: сброс\nEsc: освободить курсор"
     content.add_child(instructions)
     _hud_stats = Label.new()
     content.add_child(_hud_stats)
@@ -430,6 +531,8 @@ func _input(event: InputEvent) -> void:
         _camera.rotation = Vector3(_pitch, _yaw, 0)
     if event is InputEventKey and event.pressed and not event.echo:
         match event.keycode:
+            KEY_TAB:
+                _cycle_camera_station()
             KEY_ESCAPE:
                 Input.mouse_mode = Input.MOUSE_MODE_VISIBLE
             KEY_F1:
@@ -474,3 +577,30 @@ func _process(delta: float) -> void:
         var count := get_tree().get_nodes_in_group("demo_dynamic").size()
         var hit := str(_ray.get_collider().name) if _ray.is_colliding() else "нет"
         _hud_stats.text = "FPS: %d | Bodies: %d | Ray: %s | ShapeCast: %s" % [Engine.get_frames_per_second(), count, hit, str(_shape_cast.is_colliding())]
+
+
+func _cycle_camera_station() -> void:
+    var targets := [
+        Vector3(0, 2.0, -11.0),
+        Vector3(28, 2.0, -11.0),
+        Vector3(-21, 2.5, 24.0),
+        Vector3(4, 3.0, 24.0),
+        Vector3(28, 2.5, 11.0)
+    ]
+    _camera_station = (_camera_station + 1) % targets.size()
+    var at: Vector3 = targets[_camera_station]
+    _camera.position = at + Vector3(11, 13, 19)
+    _camera.look_at(at, Vector3.UP)
+    _yaw = _camera.rotation.y
+    _pitch = _camera.rotation.x
+
+
+func _physics_process(delta: float) -> void:
+    # Keyboard drive only affects the demo vehicle (and does not touch camera keys).
+    if _vehicle == null:
+        return
+    var throttle := (1.0 if Input.is_key_pressed(KEY_UP) else 0.0) - (1.0 if Input.is_key_pressed(KEY_DOWN) else 0.0)
+    var steering_target := ((1.0 if Input.is_key_pressed(KEY_LEFT) else 0.0) - (1.0 if Input.is_key_pressed(KEY_RIGHT) else 0.0)) * 0.4
+    _vehicle.engine_force = throttle * 1100.0
+    _vehicle.steering = move_toward(_vehicle.steering, steering_target, delta * 1.7)
+    _vehicle.brake = 90.0 if Input.is_key_pressed(KEY_CTRL) else 0.0

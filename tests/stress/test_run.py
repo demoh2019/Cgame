@@ -385,5 +385,33 @@ class ImportProjectTests(unittest.TestCase):
             self.assertEqual(result["status"], "passed", result)
 
 
+class SmallFileIoCoverageTests(unittest.TestCase):
+    def test_small_file_io_case_registration(self):
+        project = Path(__file__).parent
+        script = (project / "stress.gd").read_text(encoding="utf-8")
+        helper = (project / "extra_cases.gd").read_text(encoding="utf-8")
+        self.assertIn("small_file_io", stress.CASES)
+        self.assertIn('"small_file_io":', script)
+        self.assertIn("func _small_file_io(", helper)
+
+
+class RampStressIntegrationTests(unittest.TestCase):
+    def test_geometric_scales_bounded(self):
+        self.assertEqual(stress.ramp_scales(1, 4, 2), [1, 2, 4, 8])
+        self.assertEqual(stress.ramp_scales(800, 4, 2), [800])
+        self.assertEqual(stress.ramp_scales(250, 4, 2), [250, 500, 1000])
+        with self.assertRaises(ValueError):
+            stress.ramp_scales(0, 3, 2)
+        with self.assertRaises(ValueError):
+            stress.ramp_scales(2, 11, 2)
+
+    def test_ranking_ignores_failed_and_missing_values(self):
+        report = {"cases": {"a": {"status": "passed", "median_wall_seconds": 1.0},
+                            "b": {"status": "passed", "median_wall_seconds": 2.0},
+                            "c": {"status": "failed", "median_wall_seconds": 100.0}}}
+        self.assertEqual(stress.ranking(report)["median_wall_seconds"],
+                         [{"case": "b", "value": 2.0}, {"case": "a", "value": 1.0}])
+
+
 if __name__ == "__main__":
     unittest.main()

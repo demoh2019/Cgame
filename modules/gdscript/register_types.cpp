@@ -52,6 +52,9 @@
 #ifdef TESTS_ENABLED
 #include "tests/test_gdscript.h"
 #include "tests/test_script_language_api.h"
+#ifdef TOOLS_ENABLED
+#include "tests/test_gdscript_editor_reload.h"
+#endif
 #endif
 
 #include "core/io/file_access.h"

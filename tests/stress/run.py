@@ -29,7 +29,7 @@ ENGINE_ERROR = re.compile(r"(?m)^(?:SCRIPT ERROR:|ERROR:|E\s+\d+:)")
 CASES = (
     "containers", "array_literals", "dictionary_snapshot", "strings", "script_vm", "math", "signals",
     "scene_tree", "packed_scene", "images", "json", "stream", "stream_bulk",
-    "file_io", "threads", "physics_2d", "physics_contacts_zero_friction_2d", "physics_contacts_friction_2d", "physics_contact_manifolds_2d", "physics_contact_block_solver_2d", "physics_3d", "physics_damping_legacy_2d", "physics_damping_implicit_2d", "physics_damping_legacy_3d", "physics_damping_implicit_3d", "physics_box_box_axis_aligned_3d", "physics_box_box_rotated_3d", "physics_box_box_misaligned_3d", "physics_face_clip_dense_3d", "physics_face_clip_rotated_3d", "physics_sphere_box_identity_3d", "physics_sphere_box_rotated_3d", "physics_circle_rectangle_embedded_2d", "physics_circle_rectangle_exterior_2d", "physics_circles_coincident_2d", "physics_circles_offset_2d", "physics_fluid_2d_disabled", "physics_fluid_2d_enabled", "physics_fluid_3d_disabled", "physics_fluid_3d_enabled", "physics_rect_sat_axis_aligned_2d", "physics_rect_sat_shared_rotation_2d", "physics_rect_sat_misaligned_2d", "physics_box_capsule_near_3d", "physics_box_capsule_far_3d", "physics_box_cylinder_near_3d", "physics_box_cylinder_far_3d", "physics_block_solver_sequential_3d", "physics_block_solver_coupled_3d", "physics_frictionless_3d", "physics_soft_contacts_zero_friction_3d", "physics_soft_contacts_friction_3d", "physics_ccd_2d", "physics_ccd_rotational_radial_2d", "physics_ccd_rotational_tight_2d", "physics_ccd_rotational_radial_3d", "physics_ccd_rotational_tight_3d", "physics_separated_pairs_2d", "physics_separated_pairs_3d", "physics_dense_2d", "physics_dense_3d", "physics_pending_3d", "physics_ccd_3d", "physics_joint_chain_2d", "physics_large_island_serial_2d", "physics_large_island_parallel_2d", "physics_multi_island_serial_2d", "physics_multi_island_parallel_2d", "physics_joint_chain_3d", "physics_large_island_3d_serial", "physics_large_island_3d_parallel", "physics_large_island_3d_priority", "physics_large_island_3d_topology_serial", "physics_large_island_3d_topology_parallel", "physics_multi_island_3d_serial", "physics_multi_island_3d_parallel", "physics_multi_island_3d_two_large", "physics_sparse_2d", "physics_sparse_3d", "physics_proxy_same_aabb_2d", "physics_proxy_same_aabb_3d", "physics_proxies_2d", "physics_proxies_3d", "physics_rid_sparse_2d", "physics_rid_sparse_3d", "physics_rid_moving_2d", "physics_rid_moving_3d", "physics_restitution_2d", "physics_restitution_3d",
+    "file_io", "threads", "physics_2d", "physics_contacts_zero_friction_2d", "physics_contacts_friction_2d", "physics_contact_manifolds_2d", "physics_contact_block_solver_2d", "physics_3d", "physics_damping_legacy_2d", "physics_damping_implicit_2d", "physics_damping_legacy_3d", "physics_damping_implicit_3d", "physics_box_box_axis_aligned_3d", "physics_box_box_rotated_3d", "physics_box_box_misaligned_3d", "physics_face_clip_dense_3d", "physics_face_clip_rotated_3d", "physics_sphere_box_identity_3d", "physics_sphere_box_rotated_3d", "physics_circle_rectangle_embedded_2d", "physics_circle_rectangle_exterior_2d", "physics_circles_coincident_2d", "physics_circles_offset_2d", "physics_fluid_2d_disabled", "physics_fluid_2d_enabled", "physics_fluid_3d_disabled", "physics_fluid_3d_enabled", "physics_cylinder_fluid_3d_disabled", "physics_cylinder_fluid_3d_enabled", "physics_ellipsoid_fluid_3d_disabled", "physics_ellipsoid_fluid_3d_enabled", "physics_rect_sat_axis_aligned_2d", "physics_rect_sat_shared_rotation_2d", "physics_rect_sat_misaligned_2d", "physics_box_capsule_near_3d", "physics_box_capsule_far_3d", "physics_box_cylinder_near_3d", "physics_box_cylinder_far_3d", "physics_block_solver_sequential_3d", "physics_block_solver_coupled_3d", "physics_frictionless_3d", "physics_soft_contacts_zero_friction_3d", "physics_soft_contacts_friction_3d", "physics_ccd_2d", "physics_ccd_rotational_radial_2d", "physics_ccd_rotational_tight_2d", "physics_ccd_rotational_radial_3d", "physics_ccd_rotational_tight_3d", "physics_separated_pairs_2d", "physics_separated_pairs_3d", "physics_dense_2d", "physics_dense_3d", "physics_pending_3d", "physics_ccd_3d", "physics_joint_chain_2d", "physics_large_island_serial_2d", "physics_large_island_parallel_2d", "physics_multi_island_serial_2d", "physics_multi_island_parallel_2d", "physics_joint_chain_3d", "physics_large_island_3d_serial", "physics_large_island_3d_parallel", "physics_large_island_3d_priority", "physics_large_island_3d_topology_serial", "physics_large_island_3d_topology_parallel", "physics_multi_island_3d_serial", "physics_multi_island_3d_parallel", "physics_multi_island_3d_two_large", "physics_sparse_2d", "physics_sparse_3d", "physics_proxy_same_aabb_2d", "physics_proxy_same_aabb_3d", "physics_proxies_2d", "physics_proxies_3d", "physics_rid_sparse_2d", "physics_rid_sparse_3d", "physics_rid_moving_2d", "physics_rid_moving_3d", "physics_restitution_2d", "physics_restitution_3d",
     "object_churn", "memory_churn", "astar_grid", "astar_grid_neighbors", "astar_grid_jps", "astar_grid_fill", "astar_grid_rebuild", "astar_relax_2d", "astar_relax_3d", "astar_graph", "tweens", "audio_buffers",
     "variant_codec", "packet_stream", "packet_tx_batch", "packet_rx_batch", "packet_variant_reuse", "ui_layout", "grid_reflow", "box_reflow", "flow_reflow", "render_2d", "render_3d", "render_ellipse_2d", "render_light_culling_3d",
     "resource_load",
@@ -44,7 +44,7 @@ CASES = (
     "bitmap_rects", "bitmap_pipeline", "bitmap_morphology",
     "curve_tessellation_2d", "curve_tessellation_3d", "curve_bake", "curve_nearest",
     "canvas_transform_2d", "process_dispatch",
-    "physics_filter_toggle_2d", "physics_filter_toggle_3d", "physics_motion_filter_overflow_2d", "physics_motion_filter_overflow_3d", "physics_motion_exclusions_3d", "physics_motion_exclusions_2d", "physics_exception_pairs_2d", "physics_exception_pairs_3d", "physics_bvh_streaming_2d", "physics_bvh_streaming_3d", "physics_compound_filter_batch_2d", "physics_compound_filter_batch_3d", "physics_soft_body_xpbd_area_3d", "physics_soft_body_xpbd_volume_3d", "physics_soft_body_xpbd_dihedral_3d", "physics_soft_body_self_collision_3d", "physics_soft_body_edge_collision_3d", "physics_soft_body_ccd_3d", "physics_contact_angular_friction_3d", "physics_one_way_overflow_2d",
+    "physics_filter_toggle_2d", "physics_filter_toggle_3d", "physics_motion_filter_overflow_2d", "physics_motion_filter_overflow_3d", "physics_motion_exclusions_3d", "physics_motion_exclusions_2d", "physics_exception_pairs_2d", "physics_exception_pairs_3d", "physics_bvh_streaming_2d", "physics_bvh_streaming_3d", "physics_compound_filter_batch_2d", "physics_compound_filter_batch_3d", "physics_soft_body_xpbd_area_3d", "physics_soft_body_xpbd_volume_3d", "physics_soft_body_xpbd_dihedral_3d", "physics_soft_body_self_collision_3d", "physics_soft_body_edge_collision_3d", "physics_soft_body_ccd_3d", "physics_contact_angular_friction_3d", "physics_one_way_overflow_2d", "small_file_io",
 )
 RENDER_CASES = frozenset(("render_2d", "render_3d", "render_ellipse_2d", "render_light_culling_3d", "render_multimesh_3d"))
 # Each scenario runs in a fresh process. No preset has unlimited RSS or wall time.
@@ -309,6 +309,8 @@ def compare_baseline(current: dict[str, Any], baseline: dict[str, Any],
                      percent: float, memory_growth_limit_mib: float | None) -> list[str]:
     errors: list[str] = []
     keys = ("preset", "scale", "frames", "render_mode", "seed", "rss_scope")
+    if current.get("configuration", {}).get("ramp", False) != baseline.get("configuration", {}).get("ramp", False):
+        raise ValueError("Baseline configuration mismatch: ramp")
     for key in keys:
         if current.get("configuration", {}).get(key) != baseline.get("configuration", {}).get(key):
             raise ValueError("Baseline configuration mismatch: %s" % key)
@@ -343,6 +345,32 @@ def compare_baseline(current: dict[str, Any], baseline: dict[str, Any],
                                   (case_name, growth, memory_growth_limit_mib))
     return errors
 
+
+
+def ramp_scales(initial: int, steps: int, factor: int) -> list[int]:
+    """Bounded geometrically increasing workload scales, with a fresh process per scale."""
+    if initial < 1 or initial > 1000 or steps < 1 or steps > 10 or factor < 2:
+        raise ValueError("Invalid ramp parameters")
+    values = [initial]
+    for _ in range(steps - 1):
+        if values[-1] > 1000 // factor:
+            break
+        values.append(values[-1] * factor)
+    return values
+
+
+def ranking(report: dict[str, Any]) -> dict[str, list[dict[str, Any]]]:
+    """Top absolute costs; different cases are not normalized to work units."""
+    results = {}
+    for metric in ("median_wall_seconds", "median_cpu_seconds", "median_engine_ms",
+                   "max_rss_mib", "p99_wall_seconds"):
+        rows = ((name, data.get(metric)) for name, data in report["cases"].items()
+                if data.get("status") == "passed")
+        top = sorted(((name, value) for name, value in rows
+                      if isinstance(value, (int, float)) and math.isfinite(value)),
+                     key=lambda item: item[1], reverse=True)[:10]
+        results[metric] = [{"case": name, "value": value} for name, value in top]
+    return results
 
 
 def markdown_hotspots(report: dict[str, Any]) -> str:
@@ -416,6 +444,9 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--case", action="append", default=[], help="Repeat or use a comma-separated list; default: all")
     parser.add_argument("--render-mode", choices=("headless", "display"), default="headless")
     parser.add_argument("--repeats", type=int)
+    parser.add_argument("--ramp", action="store_true", help="Bounded ramp-to-failure in fresh processes")
+    parser.add_argument("--ramp-steps", type=int, default=4)
+    parser.add_argument("--ramp-factor", type=int, default=2)
     parser.add_argument("--scale", type=int)
     parser.add_argument("--frames", type=int)
     parser.add_argument("--timeout", type=float, help="Seconds per scenario process")
@@ -447,6 +478,7 @@ def main(argv: list[str] | None = None) -> int:
             or config["timeout"] <= 0 or config["rss_mib"] <= 0
             or any(value is not None and value < 0 for value in (
                 args.max_frame_ms, args.max_physics_ms, args.max_vram_mib))
+            or args.ramp_steps < 1 or args.ramp_steps > 10 or args.ramp_factor < 2
             or args.max_regression_pct < 0
             or (args.max_retained_growth_mib is not None and args.max_retained_growth_mib < 0)):
         parser.error("All limits and iterations must be positive and within engine bounds")
@@ -469,25 +501,33 @@ def main(argv: list[str] | None = None) -> int:
                           "frames": config["frames"], "repeats": config["repeats"],
                           "render_mode": args.render_mode, "rss_scope": "process_tree",
                           "timeout_seconds": config["timeout"],
-                          "rss_limit_mib": config["rss_mib"], "seed": args.seed},
+                          "rss_limit_mib": config["rss_mib"], "seed": args.seed,
+                          "ramp": args.ramp, "ramp_steps": args.ramp_steps,
+                          "ramp_factor": args.ramp_factor},
         "cases": {},
         "failures": [],
     }
     for case in selected:
-        runs = []
-        for repetition in range(config["repeats"]):
-            cmd = build_command(binary, project, case, config["scale"], config["frames"],
-                                args.seed, args.render_mode, args.godot_arg)
-            print("[%s] %s run %d/%d" % (args.preset, case, repetition + 1, config["repeats"]), flush=True)
-            run = run_once(cmd, config["timeout"], config["rss_mib"],
-                           case, config["scale"], config["frames"], args.seed)
-            runs.append(run)
-            print("  %s: %.3fs; RSS %s MiB" % (
-                run["status"], run["wall_seconds"], run["peak_rss_mib"]), flush=True)
-            if run["status"] != "passed":
-                report["failures"].append("%s #%d: %s" %
-                                          (case, repetition + 1, run.get("failure", "failed")))
-        report["cases"][case] = summarize(runs)
+        scales = ramp_scales(config["scale"], args.ramp_steps, args.ramp_factor) if args.ramp else [config["scale"]]
+        for level in scales:
+            name = "%s@%d" % (case, level) if args.ramp else case
+            runs = []
+            for repetition in range(config["repeats"]):
+                cmd = build_command(binary, project, case, level, config["frames"],
+                                    args.seed, args.render_mode, args.godot_arg)
+                print("[%s] %s run %d/%d" % (args.preset, name, repetition + 1, config["repeats"]), flush=True)
+                run = run_once(cmd, config["timeout"], config["rss_mib"],
+                               case, level, config["frames"], args.seed)
+                runs.append(run)
+                print("  %s: %.3fs; RSS %s MiB" % (
+                    run["status"], run["wall_seconds"], run["peak_rss_mib"]), flush=True)
+                if run["status"] != "passed":
+                    report["failures"].append("%s #%d: %s" %
+                                              (name, repetition + 1, run.get("failure", "failed")))
+                    break
+            report["cases"][name] = summarize(runs)
+            if report["cases"][name]["status"] != "passed":
+                break
 
     report["failures"].extend(check_absolute_limits(
         report["cases"], args.max_frame_ms, args.max_physics_ms, args.max_vram_mib))
@@ -497,6 +537,7 @@ def main(argv: list[str] | None = None) -> int:
                               args.max_regression_pct, args.max_retained_growth_mib))
     except (ValueError, OSError, KeyError, TypeError) as exc:
         report["failures"].append("baseline_error: %s" % exc)
+    report["rankings"] = ranking(report)
     report["status"] = "failed" if report["failures"] else "passed"
     args.output.parent.mkdir(parents=True, exist_ok=True)
     temp = args.output.with_name(args.output.name + ".tmp")

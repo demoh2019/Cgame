@@ -75,6 +75,8 @@ private:
 	real_t max_linear_velocity = 0.0;
 	real_t max_angular_velocity = 0.0;
 	real_t max_depenetration_velocity = 0.0;
+	real_t wind_drag_coefficient = 0.0;
+	real_t wind_reference_area = 0.0;
 
 	DampMode linear_damp_mode = DAMP_MODE_COMBINE;
 	DampMode angular_damp_mode = DAMP_MODE_COMBINE;
@@ -204,6 +206,10 @@ public:
 	real_t get_max_angular_velocity() const;
 	void set_max_depenetration_velocity(real_t p_value);
 	real_t get_max_depenetration_velocity() const;
+	void set_wind_drag_coefficient(real_t p_value);
+	real_t get_wind_drag_coefficient() const;
+	void set_wind_reference_area(real_t p_value);
+	real_t get_wind_reference_area() const;
 
 	void set_linear_damp_mode(DampMode p_mode);
 	DampMode get_linear_damp_mode() const;

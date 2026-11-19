@@ -794,9 +794,11 @@ void GodotStep3D::step(GodotSpace3D *p_space, real_t p_delta) {
 	// Limit not only successful contacts but also AABB pair checks: many
 	// separated soft bodies must never cause unbounded quadratic CPU work.
 	const real_t pair_thickness = p_space->get_soft_body_pair_collision_thickness();
+	const bool pair_ccd = p_space->is_soft_body_pair_collision_ccd_enabled();
 	if (pair_thickness > real_t(0.0) && soft_body_list->first() != nullptr &&
 			soft_body_list->first()->next() != nullptr) {
 		const real_t pair_compliance = p_space->get_soft_body_pair_collision_compliance();
+		const real_t pair_friction = p_space->get_soft_body_pair_collision_friction();
 		const uint32_t max_contacts = uint32_t(p_space->get_soft_body_pair_max_contacts());
 		const uint32_t max_pairs = uint32_t(p_space->get_soft_body_pair_max_pairs());
 		const uint32_t max_pair_checks = 16384;
@@ -820,14 +822,14 @@ void GodotStep3D::step(GodotSpace3D *p_space, real_t p_delta) {
 						a->has_exception(b->get_self()) || b->has_exception(a->get_self())) {
 					continue;
 				}
-				AABB expanded = a->get_bounds();
+				AABB expanded = pair_ccd ? a->get_pair_swept_bounds() : a->get_bounds();
 				expanded.grow_by(pair_thickness);
-				if (!expanded.intersects(b->get_bounds())) {
+				if (!expanded.intersects(pair_ccd ? b->get_pair_swept_bounds() : b->get_bounds())) {
 					continue;
 				}
 				++candidate_pairs;
 				a->solve_pair_contacts(*b, p_delta, pair_thickness,
-						pair_compliance, max_contacts, max_contacts_per_vertex);
+						pair_compliance, pair_friction, max_contacts, max_contacts_per_vertex);
 			}
 			first = first->next();
 		}

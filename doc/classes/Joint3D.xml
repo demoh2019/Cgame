@@ -10,6 +10,13 @@
 		<link title="3D Truck Town Demo">https://store.godotengine.org/asset/godot-foundation/truck-town-demo/</link>
 	</tutorials>
 	<methods>
+		<method name="get_fatigue_damage" qualifiers="const">
+			<return type="float" />
+			<description>
+				Returns the accumulated structural fatigue of the joint between [code]0.0[/code] (undamaged) and [code]1.0[/code] (broken). Fatigue damage increases while the joint reaction exceeds [member fatigue_yield_ratio] of the configured break limit, provided [member fatigue_rate] is nonzero. Damage does not heal, and replacing/rebuilding a joint resets its history.
+				[b]Note:[/b] Only implemented by Godot Physics. Other backends return [code]0.0[/code].
+			</description>
+		</method>
 		<method name="get_reaction_force" qualifiers="const">
 			<return type="Vector3" />
 			<description>
@@ -32,7 +39,7 @@
 		<method name="is_broken" qualifiers="const">
 			<return type="bool" />
 			<description>
-				Returns [code]true[/code] if the joint was torn apart because its reaction exceeded [member break_force] or [member break_torque]. Changing the connected nodes reconfigures the joint and clears this state.
+				Returns [code]true[/code] if the joint was torn apart because its reaction exceeded [member break_force] or [member break_torque], or because its accumulated [method get_fatigue_damage] reached [code]1.0[/code]. Changing the connected nodes reconfigures the joint and clears this state.
 			</description>
 		</method>
 	</methods>
@@ -47,6 +54,13 @@
 		</member>
 		<member name="exclude_nodes_from_collision" type="bool" setter="set_exclude_nodes_from_collision" getter="get_exclude_nodes_from_collision" default="true">
 			If [code]true[/code], the two bodies bound together do not collide with each other.
+		</member>
+		<member name="fatigue_rate" type="float" setter="set_fatigue_rate" getter="get_fatigue_rate" default="0.0">
+			Damage accumulation rate per second when a joint is exposed to sustained or repeated high loads. [code]0.0[/code] (default) disables fatigue damage and preserves the original instant-break behavior. Requires a positive [member break_force] or [member break_torque].
+			This is a simple cumulative load model, not a material-specific fatigue curve. Only implemented by Godot Physics.
+		</member>
+		<member name="fatigue_yield_ratio" type="float" setter="set_fatigue_yield_ratio" getter="get_fatigue_yield_ratio" default="0.5">
+			Combined normalized reaction load below which no fatigue damage accumulates. In the range [code]0.0[/code] to [code]0.99[/code], measured relative to the nonzero [member break_force] and [member break_torque] limits. The instant-break checks remain active regardless of this value.
 		</member>
 		<member name="node_a" type="NodePath" setter="set_node_a" getter="get_node_a" default="NodePath(&quot;&quot;)">
 			Path to the first node (A) attached to the joint. The node must inherit [PhysicsBody3D].
@@ -66,7 +80,7 @@
 	<signals>
 		<signal name="broken">
 			<description>
-				Emitted after the joint broke because it exceeded [member break_force] or [member break_torque]. It is emitted on the main thread, deferred from the physics step.
+				Emitted after the joint broke because it exceeded [member break_force] or [member break_torque], or because accumulated structural fatigue reached [code]1.0[/code]. It is emitted on the main thread, deferred from the physics step.
 			</description>
 		</signal>
 	</signals>

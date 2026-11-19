@@ -224,6 +224,11 @@ Transform2D Camera2D::get_camera_transform() {
 		screen_offset = screen_offset.rotated(camera_angle);
 	}
 
+	if (shake_rotation_current != 0.0) {
+		// Rotate about the view center, not about its top-left corner.
+		screen_offset = screen_offset.rotated(shake_rotation_current);
+	}
+
 	Rect2 screen_rect(-screen_offset + ret_camera_pos, screen_size * zoom_scale);
 
 	if (limit_enabled && (!position_smoothing_enabled || !limit_smoothing_enabled)) {
@@ -257,10 +262,17 @@ Transform2D Camera2D::get_camera_transform() {
 		screen_rect.position += offset;
 	}
 
+	if (shake_offset_current != Vector2()) {
+		// Shake is specified in screen pixels, so scale it like the zoom does.
+		screen_rect.position += shake_offset_current * zoom_scale;
+	}
+
 	Transform2D xform;
 	xform.scale_basis(zoom_scale);
 	if (!ignore_rotation) {
-		xform.set_rotation(camera_angle);
+		xform.set_rotation(camera_angle + shake_rotation_current);
+	} else if (shake_rotation_current != 0.0) {
+		xform.set_rotation(shake_rotation_current);
 	}
 	xform.set_origin(screen_rect.position);
 
@@ -297,10 +309,14 @@ void Camera2D::_notification(int p_what) {
 #endif
 
 		case NOTIFICATION_INTERNAL_PROCESS: {
+			if (!is_physics_interpolated_and_enabled()) {
+				_advance_shake(get_process_delta_time());
+			}
 			_update_scroll();
 		} break;
 
 		case NOTIFICATION_INTERNAL_PHYSICS_PROCESS: {
+			_advance_shake(get_physics_process_delta_time());
 			if (is_physics_interpolated_and_enabled()) {
 				_ensure_update_interpolation_data();
 				_interpolation_data.xform_curr = get_camera_transform();
@@ -453,6 +469,80 @@ void Camera2D::_notification(int p_what) {
 		} break;
 #endif
 	}
+}
+
+void Camera2D::_advance_shake(double p_delta) {
+	const bool was_shaking = shake_offset_current != Vector2() || shake_rotation_current != 0.0;
+	if (!(shake.trauma > 0.0)) {
+		if (was_shaking) {
+			shake_offset_current = Vector2();
+			shake_rotation_current = 0.0;
+		}
+		return;
+	}
+	shake.advance(p_delta, shake_decay, shake_frequency);
+	const real_t intensity = shake.get_intensity(shake_trauma_exponent);
+	const Vector3 translation = shake.get_translation_unit();
+	const Vector3 rotation = shake.get_rotation_unit();
+	shake_offset_current = Vector2(translation.x, translation.y) * shake_max_offset * intensity;
+	shake_rotation_current = rotation.z * shake_max_rotation * intensity;
+}
+
+void Camera2D::add_trauma(real_t p_amount) {
+	shake.add_trauma(p_amount);
+}
+
+void Camera2D::set_trauma(real_t p_trauma) {
+	shake.set_trauma(p_trauma);
+	if (!(shake.trauma > 0.0)) {
+		shake_offset_current = Vector2();
+		shake_rotation_current = 0.0;
+		_update_scroll();
+	}
+}
+
+real_t Camera2D::get_trauma() const {
+	return shake.trauma;
+}
+
+void Camera2D::set_shake_max_offset(const Vector2 &p_offset) {
+	shake_max_offset = p_offset;
+}
+
+Vector2 Camera2D::get_shake_max_offset() const {
+	return shake_max_offset;
+}
+
+void Camera2D::set_shake_max_rotation(real_t p_radians) {
+	shake_max_rotation = p_radians;
+}
+
+real_t Camera2D::get_shake_max_rotation() const {
+	return shake_max_rotation;
+}
+
+void Camera2D::set_shake_decay(real_t p_decay) {
+	shake_decay = MAX(p_decay, real_t(0.0));
+}
+
+real_t Camera2D::get_shake_decay() const {
+	return shake_decay;
+}
+
+void Camera2D::set_shake_frequency(real_t p_frequency) {
+	shake_frequency = MAX(p_frequency, real_t(0.0));
+}
+
+real_t Camera2D::get_shake_frequency() const {
+	return shake_frequency;
+}
+
+void Camera2D::set_shake_trauma_exponent(real_t p_exponent) {
+	shake_trauma_exponent = MAX(p_exponent, real_t(0.0));
+}
+
+real_t Camera2D::get_shake_trauma_exponent() const {
+	return shake_trauma_exponent;
 }
 
 void Camera2D::set_offset(const Vector2 &p_offset) {
@@ -879,6 +969,21 @@ bool Camera2D::is_margin_drawing_enabled() const {
 }
 
 void Camera2D::_bind_methods() {
+	ClassDB::bind_method(D_METHOD("add_trauma", "amount"), &Camera2D::add_trauma);
+	ClassDB::bind_method(D_METHOD("set_trauma", "trauma"), &Camera2D::set_trauma);
+	ClassDB::bind_method(D_METHOD("get_trauma"), &Camera2D::get_trauma);
+	ClassDB::bind_method(D_METHOD("get_shake_offset"), &Camera2D::get_shake_offset);
+	ClassDB::bind_method(D_METHOD("get_shake_rotation"), &Camera2D::get_shake_rotation);
+	ClassDB::bind_method(D_METHOD("set_shake_max_offset", "offset"), &Camera2D::set_shake_max_offset);
+	ClassDB::bind_method(D_METHOD("get_shake_max_offset"), &Camera2D::get_shake_max_offset);
+	ClassDB::bind_method(D_METHOD("set_shake_max_rotation", "radians"), &Camera2D::set_shake_max_rotation);
+	ClassDB::bind_method(D_METHOD("get_shake_max_rotation"), &Camera2D::get_shake_max_rotation);
+	ClassDB::bind_method(D_METHOD("set_shake_decay", "decay"), &Camera2D::set_shake_decay);
+	ClassDB::bind_method(D_METHOD("get_shake_decay"), &Camera2D::get_shake_decay);
+	ClassDB::bind_method(D_METHOD("set_shake_frequency", "frequency"), &Camera2D::set_shake_frequency);
+	ClassDB::bind_method(D_METHOD("get_shake_frequency"), &Camera2D::get_shake_frequency);
+	ClassDB::bind_method(D_METHOD("set_shake_trauma_exponent", "exponent"), &Camera2D::set_shake_trauma_exponent);
+	ClassDB::bind_method(D_METHOD("get_shake_trauma_exponent"), &Camera2D::get_shake_trauma_exponent);
 	ClassDB::bind_method(D_METHOD("set_offset", "offset"), &Camera2D::set_offset);
 	ClassDB::bind_method(D_METHOD("get_offset"), &Camera2D::get_offset);
 
@@ -983,6 +1088,13 @@ void Camera2D::_bind_methods() {
 	ADD_GROUP("Rotation Smoothing", "rotation_smoothing_");
 	ADD_PROPERTY(PropertyInfo(Variant::BOOL, "rotation_smoothing_enabled", PROPERTY_HINT_GROUP_ENABLE), "set_rotation_smoothing_enabled", "is_rotation_smoothing_enabled");
 	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "rotation_smoothing_speed"), "set_rotation_smoothing_speed", "get_rotation_smoothing_speed");
+
+	ADD_GROUP("Shake", "shake_");
+	ADD_PROPERTY(PropertyInfo(Variant::VECTOR2, "shake_max_offset", PROPERTY_HINT_NONE, "suffix:px"), "set_shake_max_offset", "get_shake_max_offset");
+	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "shake_max_rotation", PROPERTY_HINT_RANGE, "0,180,0.1,radians_as_degrees"), "set_shake_max_rotation", "get_shake_max_rotation");
+	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "shake_decay", PROPERTY_HINT_RANGE, "0,10,0.01,or_greater,suffix:/s"), "set_shake_decay", "get_shake_decay");
+	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "shake_frequency", PROPERTY_HINT_RANGE, "0,100,0.1,or_greater,suffix:Hz"), "set_shake_frequency", "get_shake_frequency");
+	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "shake_trauma_exponent", PROPERTY_HINT_RANGE, "0,5,0.01,or_greater"), "set_shake_trauma_exponent", "get_shake_trauma_exponent");
 
 	ADD_GROUP("Drag", "drag_");
 	ADD_PROPERTY(PropertyInfo(Variant::BOOL, "drag_horizontal_enabled"), "set_drag_horizontal_enabled", "is_drag_horizontal_enabled");

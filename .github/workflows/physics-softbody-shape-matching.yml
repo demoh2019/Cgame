@@ -1,0 +1,42 @@
+name: Physics softbody corotational shape matching
+
+on:
+  pull_request:
+    paths:
+      - "servers/physics_softbody_shape_matching.h"
+      - "servers/physics_3d/physics_server_3d.cpp"
+      - "modules/godot_physics_3d/godot_space_3d.cpp"
+      - "modules/godot_physics_3d/godot_space_3d.h"
+      - "modules/godot_physics_3d/godot_soft_body_3d.cpp"
+      - "tests/servers/test_physics_softbody_shape_matching.cpp"
+      - "tests/stress/test_physics_softbody_shape_matching.py"
+      - "tests/stress/physics_softbody_shape_matching_standalone.cpp"
+      - "tests/stress/mock_shape_matching/core/math/vector3.h"
+      - ".github/workflows/physics-softbody-shape-matching.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  shape-matching-contracts:
+    name: Shape matching C++ smoke (${{ matrix.compiler }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        compiler: [g++, clang++]
+    steps:
+      - uses: actions/checkout@v4
+      - name: Check opt-in solver integration and test coverage
+        run: python3 -m unittest discover -s tests/stress -p 'test_physics_softbody_shape_matching.py' -v
+      - name: Compile exact corotational shape matching header with C++17
+        env:
+          CXX: ${{ matrix.compiler }}
+        run: |
+          "$CXX" -std=c++17 -O2 -Wall -Wextra -Werror -pedantic \
+            -Itests/stress/mock_shape_matching -I. \
+            tests/stress/physics_softbody_shape_matching_standalone.cpp \
+            -o "$RUNNER_TEMP/physics-softbody-shape"
+      - name: Exercise 6000 rigid poses, shear, collapse, pinned and invalid tests
+        run: "$RUNNER_TEMP/physics-softbody-shape"

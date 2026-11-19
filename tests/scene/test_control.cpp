@@ -80,6 +80,130 @@ TEST_CASE("[SceneTree][Control] Moving preserves the size before constraints") {
 	}
 }
 
+TEST_CASE("[SceneTree][Control] Moving a stretched control preserves the size before constraints") {
+	for (bool keep_offsets : { false, true }) {
+		for (bool maximum : { false, true }) {
+			INFO("Keep offsets: ", keep_offsets, ", maximum: ", maximum);
+			Control *parent = memnew(Control);
+			parent->set_size(Size2(200, 200));
+			SceneTree::get_singleton()->get_root()->add_child(parent);
+			Control *child = memnew(Control);
+			parent->add_child(child);
+			child->set_anchors_and_offsets_preset(Control::PRESET_FULL_RECT);
+			child->set_size(Size2(60, 70));
+			CHECK(child->get_size().is_equal_approx(Size2(60, 70)));
+			if (maximum) {
+				child->set_custom_maximum_size(Size2(30, 40));
+			} else {
+				child->set_custom_minimum_size(Size2(90, 100));
+			}
+			SceneTree::get_singleton()->process(0);
+			child->set_position(Point2(17, 19), keep_offsets);
+			CHECK(child->get_position().is_equal_approx(Point2(17, 19)));
+			if (maximum) {
+				child->set_custom_maximum_size(Size2(-1, -1));
+			} else {
+				child->set_custom_minimum_size(Size2());
+			}
+			SceneTree::get_singleton()->process(0);
+			CHECK(child->get_size().is_equal_approx(Size2(60, 70)));
+			memdelete(parent);
+		}
+	}
+}
+
+TEST_CASE("[SceneTree][Control] Repeated moves do not preserve temporary size constraints") {
+	for (bool maximum : { false, true }) {
+		Control *parent = memnew(Control);
+		parent->set_size(Size2(400, 300));
+		SceneTree::get_singleton()->get_root()->add_child(parent);
+
+		Control *child = memnew(Control);
+		parent->add_child(child);
+		child->set_size(Size2(64, 48));
+
+		for (int i = 0; i < 4; i++) {
+			INFO("Maximum constraint: ", maximum, ", move iteration: ", i);
+			if (maximum) {
+				child->set_custom_maximum_size(Size2(24 + i * 2, 20 + i * 3));
+			} else {
+				child->set_custom_minimum_size(Size2(100 + i * 10, 90 + i * 10));
+			}
+			SceneTree::get_singleton()->process(0);
+
+			Point2 target_position(20 + i * 7, 30 + i * 4);
+			child->set_position(target_position, i % 2 != 0);
+			CHECK(child->get_position().is_equal_approx(target_position));
+
+			if (maximum) {
+				child->set_custom_maximum_size(Size2(-1, -1));
+			} else {
+				child->set_custom_minimum_size(Size2());
+			}
+			SceneTree::get_singleton()->process(0);
+			CHECK(child->get_size().is_equal_approx(Size2(64, 48)));
+		}
+		memdelete(parent);
+	}
+}
+
+TEST_CASE("[SceneTree][Control] Global movement preserves size after temporary constraints") {
+	for (bool maximum : { false, true }) {
+		Control *parent = memnew(Control);
+		parent->set_position(Point2(12, 18));
+		parent->set_size(Size2(200, 200));
+		SceneTree::get_singleton()->get_root()->add_child(parent);
+		Control *child = memnew(Control);
+		parent->add_child(child);
+		child->set_size(Size2(60, 70));
+		if (maximum) {
+			child->set_custom_maximum_size(Size2(30, 40));
+		} else {
+			child->set_custom_minimum_size(Size2(90, 100));
+		}
+		SceneTree::get_singleton()->process(0);
+		child->set_global_position(Point2(110, 120));
+		if (maximum) {
+			child->set_custom_maximum_size(Size2(-1, -1));
+		} else {
+			child->set_custom_minimum_size(Size2());
+		}
+		SceneTree::get_singleton()->process(0);
+		CHECK(child->get_size().is_equal_approx(Size2(60, 70)));
+		CHECK(child->get_global_position().is_equal_approx(Point2(110, 120)));
+		memdelete(parent);
+	}
+}
+
+TEST_CASE("[SceneTree][Control] Stretched anchors preserve the unconstrained size on move") {
+	for (bool keep_offsets : { false, true }) {
+		for (bool maximum : { false, true }) {
+			Control *parent = memnew(Control);
+			parent->set_size(Size2(200, 200));
+			SceneTree::get_singleton()->get_root()->add_child(parent);
+			Control *child = memnew(Control);
+			parent->add_child(child);
+			child->set_anchors_and_offsets_preset(Control::PRESET_FULL_RECT);
+			child->set_size(Size2(60, 70));
+			if (maximum) {
+				child->set_custom_maximum_size(Size2(30, 40));
+			} else {
+				child->set_custom_minimum_size(Size2(90, 100));
+			}
+			SceneTree::get_singleton()->process(0);
+			child->set_position(Point2(17, 19), keep_offsets);
+			if (maximum) {
+				child->set_custom_maximum_size(Size2(-1, -1));
+			} else {
+				child->set_custom_minimum_size(Size2());
+			}
+			SceneTree::get_singleton()->process(0);
+			CHECK(child->get_size().is_equal_approx(Size2(60, 70)));
+			memdelete(parent);
+		}
+	}
+}
+
 TEST_CASE("[SceneTree][Control] Transforms") {
 	SUBCASE("[Control][Global Transform] Global Transform should be accessible while not in SceneTree.") { // GH-79453
 		Control *test_node = memnew(Control);

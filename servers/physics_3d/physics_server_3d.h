@@ -208,6 +208,10 @@ public:
 	virtual int body_get_solver_priority(RID p_body) const { return 1; }
 	virtual void body_set_max_depenetration_velocity(RID p_body, real_t p_value) {}
 	virtual real_t body_get_max_depenetration_velocity(RID p_body) const { return 0.0; }
+	virtual void body_set_wind_area(RID p_body, real_t p_value) {}
+	virtual real_t body_get_wind_area(RID p_body) const { return 0.0; }
+	virtual void body_set_wind_drag_coefficient(RID p_body, real_t p_value) {}
+	virtual real_t body_get_wind_drag_coefficient(RID p_body) const { return 0.0; }
 	virtual void body_set_max_angular_velocity(RID p_body, real_t p_value) {}
 	virtual real_t body_get_max_angular_velocity(RID p_body) const { return 0.0; }
 	virtual void body_set_max_linear_velocity(RID p_body, real_t p_value) {}
@@ -278,6 +282,15 @@ public:
 	virtual RID soft_body_get_space(RID p_body) const = 0;
 
 	virtual void soft_body_set_mesh(RID p_body, RID p_mesh) = 0;
+
+	// Optional pre-cooked tetra FEM connectivity for the soft body's welded
+	// surface nodes. An unsupported physics backend may ignore the extension.
+	virtual void soft_body_set_tetrahedral_indices(RID, const PackedInt32Array &) {}
+	// Optional interior FEM rest nodes, following all visual-vertex indices.
+	virtual void soft_body_set_tetrahedral_interior_positions(RID, const PackedVector3Array &) {}
+	// Optional diagnostics: zero for backends without volumetric FEM.
+	virtual int soft_body_get_tetrahedron_count(RID) const { return 0; }
+	virtual int soft_body_get_tetrahedral_interior_node_count(RID) const { return 0; }
 
 	virtual AABB soft_body_get_bounds(RID p_body) const = 0;
 
@@ -350,6 +363,13 @@ public:
 	virtual void joint_set_break_force(RID p_joint, real_t p_force) {}
 	virtual real_t joint_get_break_force(RID p_joint) const { return 0.0; }
 	virtual void joint_set_break_torque(RID p_joint, real_t p_torque) {}
+	// Optional progressive fatigue fracture under sustained subcritical loads.
+	// Requires at least one nonzero instantaneous break-force/torque threshold.
+	virtual void joint_set_fatigue_rate(RID p_joint, real_t p_rate) {}
+	virtual real_t joint_get_fatigue_rate(RID p_joint) const { return 0.0; }
+	virtual void joint_set_fatigue_yield_ratio(RID p_joint, real_t p_ratio) {}
+	virtual real_t joint_get_fatigue_yield_ratio(RID p_joint) const { return 0.5; }
+	virtual real_t joint_get_fatigue_damage(RID p_joint) const { return 0.0; }
 	virtual real_t joint_get_break_torque(RID p_joint) const { return 0.0; }
 	virtual Vector3 joint_get_reaction_force(RID p_joint) const { return Vector3(); }
 	virtual Vector3 joint_get_reaction_torque(RID p_joint) const { return Vector3(); }

@@ -34,6 +34,8 @@
 #include "godot_contact_normal_3d.h"
 #include "godot_space_3d.h"
 #include "servers/physics_contact_static_friction.h"
+#include "servers/physics_contact_anisotropic_friction.h"
+#include "servers/physics_contact_velocity_friction.h"
 #include "servers/physics_contact_angular_friction.h"
 #include "servers/physics_manifold_reduction_3d.h"
 #include "servers/physics_ccd_sphere_toi.h"
@@ -971,6 +973,13 @@ bool GodotBodyPair3D::pre_solve(real_t p_step) {
 			if (cached_tangent_limit <= 0.0) {
 				// No normal impulse means no admissible tangent impulse.
 				c.acc_tangent_impulse = Vector3();
+			} else if (space->get_friction_anisotropy_ratio() < real_t(1.0)) {
+				// Shrink stale cached impulses into the CURRENT anisotropic
+				// static ellipse, before applying any warm-start forces.
+				c.acc_tangent_impulse = godot_physics_clamp_anisotropic_friction_3d(
+						c.acc_tangent_impulse, c.normal, space->get_friction_anisotropy_axis(),
+						mixed_friction * c.acc_normal_impulse, space->get_static_friction_multiplier(),
+						space->get_friction_anisotropy_ratio());
 			} else {
 				// Most warm-start contacts already lie inside the Coulomb cone.
 				// Avoid a square root unless a cached impulse must be clamped.
@@ -1088,6 +1097,9 @@ void GodotBodyPair3D::solve(real_t p_step) {
 	// Mixing is independent of contact point; compute once per solver pass.
 	const real_t friction = mixed_friction;
 	const real_t static_friction_multiplier = space->get_static_friction_multiplier();
+	const real_t stribeck_velocity = space->get_stribeck_transition_velocity();
+	const real_t friction_anisotropy_ratio = space->get_friction_anisotropy_ratio();
+	const Vector3 &friction_anisotropy_axis = space->get_friction_anisotropy_axis();
 
 	// Box2D's two-contact block LCP generalized to 3D tensor inertia.
 	// Only solve a well-conditioned pair with nearly parallel contact normals;
@@ -1317,12 +1329,24 @@ void GodotBodyPair3D::solve(real_t p_step) {
 			c.acc_tangent_impulse += jt;
 
 			const real_t fi_len_squared = c.acc_tangent_impulse.length_squared();
-			const real_t jtMax = c.acc_normal_impulse * friction;
+			const bool use_stribeck = stribeck_velocity > real_t(0.0) && static_friction_multiplier > real_t(1.0);
+			const real_t effective_friction = use_stribeck ? godot_physics_stribeck_friction_coefficient(
+					friction, static_friction_multiplier, tvl, stribeck_velocity) : friction;
+			const real_t jtMax = c.acc_normal_impulse * effective_friction;
 
-			// PhysX-style static cone can hold a resting contact. Exceeding it
-			// switches to the smaller dynamic-friction cone. Keep the old math
-			// exactly when the multiplier is disabled (1.0).
-			if (static_friction_multiplier > real_t(1.0)) {
+			// Anisotropy applies the SAME ellipse to static, kinetic and
+			// Stribeck contact friction. Never count the static multiplier twice.
+			if (friction_anisotropy_ratio < real_t(1.0)) {
+				c.acc_tangent_impulse = godot_physics_clamp_anisotropic_friction_3d(
+						c.acc_tangent_impulse, c.normal, friction_anisotropy_axis, jtMax,
+						use_stribeck ? real_t(1.0) : static_friction_multiplier,
+						friction_anisotropy_ratio);
+			// Stribeck: one smooth speed-dependent cone; do not double-count
+			// its static friction multiplier.
+			} else if (use_stribeck) {
+				c.acc_tangent_impulse = godot_physics_clamp_static_friction_3d(c.acc_tangent_impulse, jtMax, real_t(1.0));
+			// Legacy: retain distinct static and kinetic cones unchanged.
+			} else if (static_friction_multiplier > real_t(1.0)) {
 				c.acc_tangent_impulse = godot_physics_clamp_static_friction_3d(c.acc_tangent_impulse, jtMax, static_friction_multiplier);
 			} else if (fi_len_squared > CMP_EPSILON * CMP_EPSILON && fi_len_squared > jtMax * jtMax) {
 				c.acc_tangent_impulse *= jtMax / Math::sqrt(fi_len_squared);
@@ -1671,9 +1695,16 @@ bool GodotBodySoftBodyPair3D::pre_solve(real_t p_step) {
 			// Material changes must shrink the cached friction impulse to the
 			// current Coulomb cone before it is applied to either body.
 			const real_t tangent_limit = friction * space->get_static_friction_multiplier() * c.acc_normal_impulse;
-			const real_t tangent_length_squared = c.acc_tangent_impulse.length_squared();
-			if (tangent_length_squared > tangent_limit * tangent_limit) {
-				c.acc_tangent_impulse *= tangent_limit / Math::sqrt(tangent_length_squared);
+			if (space->get_friction_anisotropy_ratio() < real_t(1.0)) {
+				c.acc_tangent_impulse = godot_physics_clamp_anisotropic_friction_3d(
+						c.acc_tangent_impulse, c.normal, space->get_friction_anisotropy_axis(),
+						friction * c.acc_normal_impulse, space->get_static_friction_multiplier(),
+						space->get_friction_anisotropy_ratio());
+			} else {
+				const real_t tangent_length_squared = c.acc_tangent_impulse.length_squared();
+				if (tangent_length_squared > tangent_limit * tangent_limit) {
+					c.acc_tangent_impulse *= tangent_limit / Math::sqrt(tangent_length_squared);
+				}
 			}
 		}
 		Vector3 j_vec = c.normal * c.acc_normal_impulse + c.acc_tangent_impulse;
@@ -1726,6 +1757,9 @@ void GodotBodySoftBodyPair3D::solve(real_t p_step) {
 	// Material friction is constant during the constraint solve.
 	const real_t friction = body->get_friction();
 	const real_t static_friction_multiplier = space->get_static_friction_multiplier();
+	const real_t stribeck_velocity = space->get_stribeck_transition_velocity();
+	const real_t friction_anisotropy_ratio = space->get_friction_anisotropy_ratio();
+	const Vector3 &friction_anisotropy_axis = space->get_friction_anisotropy_axis();
 
 	Basis zero_basis;
 	zero_basis.set_zero();
@@ -1853,11 +1887,22 @@ void GodotBodySoftBodyPair3D::solve(real_t p_step) {
 			c.acc_tangent_impulse += jt;
 
 			const real_t fi_len_squared = c.acc_tangent_impulse.length_squared();
-			const real_t jtMax = c.acc_normal_impulse * friction;
+			const bool use_stribeck = stribeck_velocity > real_t(0.0) && static_friction_multiplier > real_t(1.0);
+			const real_t effective_friction = use_stribeck ? godot_physics_stribeck_friction_coefficient(
+					friction, static_friction_multiplier, tvl, stribeck_velocity) : friction;
+			const real_t jtMax = c.acc_normal_impulse * effective_friction;
 
-			// Use the static cone when it can hold the soft-body node;
-			// otherwise fall back to dynamic friction.
-			if (static_friction_multiplier > real_t(1.0) && jtMax > real_t(0.0)) {
+			// Soft/rigid contacts share the same anisotropic ellipse and
+			// Stribeck transition as rigid/rigid contacts.
+			if (friction_anisotropy_ratio < real_t(1.0)) {
+				c.acc_tangent_impulse = godot_physics_clamp_anisotropic_friction_3d(
+						c.acc_tangent_impulse, c.normal, friction_anisotropy_axis, jtMax,
+						use_stribeck ? real_t(1.0) : static_friction_multiplier,
+						friction_anisotropy_ratio);
+		} else if (use_stribeck) {
+				c.acc_tangent_impulse = godot_physics_clamp_static_friction_3d(c.acc_tangent_impulse, jtMax, real_t(1.0));
+			// Preserve the original static/kinetic switch when disabled.
+			} else if (static_friction_multiplier > real_t(1.0) && jtMax > real_t(0.0)) {
 				c.acc_tangent_impulse = godot_physics_clamp_static_friction_3d(c.acc_tangent_impulse, jtMax, static_friction_multiplier);
 			} else if (fi_len_squared > CMP_EPSILON * CMP_EPSILON && (jtMax < 0.0 || fi_len_squared > jtMax * jtMax)) {
 				c.acc_tangent_impulse *= jtMax / Math::sqrt(fi_len_squared);

@@ -58,6 +58,7 @@ class JoltObject3D;
 class JoltPhysicsDirectSpaceState3D;
 class JoltShapedObject3D;
 class JoltSoftBody3D;
+struct JoltSelfCollisionCache;
 
 class JoltSpace3D {
 	Mutex pending_objects_mutex;
@@ -90,6 +91,10 @@ class JoltSpace3D {
 	JoltArea3D *default_area = nullptr;
 
 	float last_step = 0.0f;
+
+	// Lazily allocated only in experimental persistent self-BVH mode.
+	// Owned by this space, so independent worlds never share soft meshes.
+	JoltSelfCollisionCache *self_collision_cache = nullptr;
 
 	uint16_t default_area_changed_count = 0;
 

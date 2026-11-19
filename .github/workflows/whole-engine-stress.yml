@@ -64,6 +64,26 @@ on:
         required: false
         type: boolean
         default: false
+      cases:
+        description: Comma-separated stress cases or all
+        required: false
+        type: string
+        default: all
+      ramp:
+        description: Bounded ramp to failure (manual only)
+        required: false
+        type: boolean
+        default: false
+      ramp_steps:
+        description: Maximum scale levels
+        required: false
+        type: number
+        default: 4
+      ramp_factor:
+        description: Geometric scale factor
+        required: false
+        type: number
+        default: 2
 
 permissions:
   contents: read
@@ -117,12 +137,72 @@ jobs:
             --script res://physics_softbody_gas_leak_3d_regression.gd \
             2>&1 | tee physics-softbody-gas-leak-runtime.log
           grep -Fq 'SoftBody sealed gas discharge passed' physics-softbody-gas-leak-runtime.log
+      - name: Native tilted capsule hydrostatic integration regressions
+        shell: bash
+        run: |
+          set -euo pipefail
+          timeout 120s ./bin/godot.linuxbsd.editor.dev.x86_64 \
+            --headless --test --test-case="*[PhysicsTiltedCapsule]*" \
+            --success=true --no-colors 2>&1 | tee physics-fluid-tilted-capsule-native.log
+          grep -Fq '[PhysicsTiltedCapsule]' physics-fluid-tilted-capsule-native.log
+      - name: Runtime tilted capsule restoring torque and symmetry
+        shell: bash
+        run: |
+          set -euo pipefail
+          timeout 120s ./bin/godot.linuxbsd.editor.dev.x86_64 \
+            --headless --path tests/stress \
+            --script res://physics_tilted_capsule_buoyancy_3d_regression.gd \
+            2>&1 | tee physics-fluid-tilted-capsule-runtime.log
+          grep -Fq 'Tilted capsule restoring torque passed' physics-fluid-tilted-capsule-runtime.log
+      - name: Native tilted cylinder exact displaced-volume regressions
+        shell: bash
+        run: |
+          set -euo pipefail
+          timeout 120s ./bin/godot.linuxbsd.editor.dev.x86_64 \
+            --headless --test --test-case="*[PhysicsCylinderFluid]*" \
+            --success=true --no-colors 2>&1 | tee physics-fluid-cylinder-native.log
+          grep -Fq '[PhysicsCylinderFluid]' physics-fluid-cylinder-native.log
+      - name: Runtime exact cylinder immersion and restoring torque
+        shell: bash
+        run: |
+          set -euo pipefail
+          timeout 120s ./bin/godot.linuxbsd.editor.dev.x86_64 \
+            --headless --path tests/stress \
+            --script res://physics_cylinder_buoyancy_3d_regression.gd \
+            2>&1 | tee physics-fluid-cylinder-runtime.log
+          grep -Fq 'Exact cylinder buoyancy passed' physics-fluid-cylinder-runtime.log
+          ./bin/godot.linuxbsd.editor.dev.x86_64 --headless --path tests/stress \
+            --script res://physics_cylinder_buoyancy_3d_regression.gd --check-only
+          ./bin/godot.linuxbsd.editor.dev.x86_64 --headless --path tests/stress \
+            --script res://physics_cylinder_fluid_stress.gd --check-only
+      - name: Native exact affine ellipsoid hydrostatics regressions
+        shell: bash
+        run: |
+          set -euo pipefail
+          timeout 120s ./bin/godot.linuxbsd.editor.dev.x86_64 \
+            --headless --test --test-case="*[PhysicsEllipsoid]*" \
+            --success=true --no-colors 2>&1 | tee physics-fluid-ellipsoid-native.log
+          grep -Fq '[PhysicsEllipsoid]' physics-fluid-ellipsoid-native.log
+      - name: Runtime ellipsoid buoyancy versus matched sphere control
+        shell: bash
+        run: |
+          set -euo pipefail
+          timeout 120s ./bin/godot.linuxbsd.editor.dev.x86_64 \
+            --headless --path tests/stress \
+            --script res://physics_ellipsoid_buoyancy_3d_regression.gd \
+            2>&1 | tee physics-fluid-ellipsoid-runtime.log
+          grep -Fq 'Affine ellipsoid buoyancy passed' physics-fluid-ellipsoid-runtime.log
       - name: Syntax-check physics stress scripts
         shell: bash
         run: |
           set -euo pipefail
+          ./bin/godot.linuxbsd.editor.dev.x86_64 --headless --path tests/stress --script res://physics_tilted_capsule_buoyancy_3d_regression.gd --check-only
           ./bin/godot.linuxbsd.editor.dev.x86_64 --headless --path tests/stress \
-            --script res://physics_softbody_gas_leak_3d_regression.gd --check-only
+            --script res://physics_cylinder_buoyancy_3d_regression.gd --check-only
+          ./bin/godot.linuxbsd.editor.dev.x86_64 --headless --path tests/stress \
+            --script res://physics_cylinder_fluid_stress.gd --check-only
+          ./bin/godot.linuxbsd.editor.dev.x86_64 --headless --path tests/stress \
+            --script res://physics_ellipsoid_buoyancy_3d_regression.gd --check-only
           ./bin/godot.linuxbsd.editor.dev.x86_64 --headless --path tests/stress --script res://stress.gd --check-only
           ./bin/godot.linuxbsd.editor.dev.x86_64 --headless --path tests/stress --script res://physics_dense.gd --check-only
           ./bin/godot.linuxbsd.editor.dev.x86_64 --headless --path tests/stress --script res://physics_pending_reuse_stress.gd --check-only
@@ -255,6 +335,102 @@ jobs:
             --script res://physics_jolt_pending_broadphase_regression.gd \
             2>&1 | tee physics-jolt-pending-broadphase.log
           grep -Fq 'Jolt pending broadphase regression passed.' physics-jolt-pending-broadphase.log
+      - name: Regression-test conservative self vertex-face CCD
+        shell: bash
+        run: |
+          set -euo pipefail
+          BIN=./bin/godot.linuxbsd.editor.dev.x86_64
+          PROJECT=tests/stress/jolt_soft_self_vf_sweep
+          timeout 120s "$BIN" --headless --path "$PROJECT" \
+            --script res://swept_self_triangle_regression.gd --check-only
+          timeout 180s "$BIN" --headless --path "$PROJECT" \
+            --script res://swept_self_triangle_regression.gd \
+            2>&1 | tee jolt-soft-self-vf-ccd.log
+          grep -Fq 'PASS: Jolt swept self vertex-face CCD versus unopposed control' jolt-soft-self-vf-ccd.log
+      - name: Regression-test speculative self edge-edge CCD
+        shell: bash
+        run: |
+          set -euo pipefail
+          BIN=./bin/godot.linuxbsd.editor.dev.x86_64
+          PROJECT=tests/stress/jolt_soft_self_edge_sweep
+          timeout 120s "$BIN" --headless --path "$PROJECT" \
+            --script res://swept_self_edges_regression.gd --check-only
+          timeout 180s "$BIN" --headless --path "$PROJECT" \
+            --script res://swept_self_edges_regression.gd \
+            2>&1 | tee jolt-soft-self-edge-sweep.log
+          grep -Fq 'PASS: Jolt swept self edge-edge CCD versus unopposed control' jolt-soft-self-edge-sweep.log
+      - name: Regression-test Jolt compliant self-contact position projection
+        shell: bash
+        run: |
+          set -euo pipefail
+          BIN=./bin/godot.linuxbsd.editor.dev.x86_64
+          PROJECT=tests/stress/jolt_soft_self_position
+          timeout 120s "$BIN" --headless --path "$PROJECT" \
+            --script res://position_projection_regression.gd --check-only
+          timeout 180s "$BIN" --headless --path "$PROJECT" \
+            --script res://position_projection_regression.gd \
+            2>&1 | tee jolt-soft-self-position.log
+          grep -Fq 'PASS: Jolt compliant Jacobi self-contact position projection' jolt-soft-self-position.log
+      - name: Regression-test persistent Jolt self-face BVH refit and cache eviction
+        shell: bash
+        run: |
+          set -euo pipefail
+          BIN=./bin/godot.linuxbsd.editor.dev.x86_64
+          PROJECT=tests/stress/jolt_soft_self_face_bvh
+          timeout 120s "$BIN" --headless --path "$PROJECT" \
+            --script res://persistent_face_bvh_regression.gd --check-only
+          timeout 180s "$BIN" --headless --path "$PROJECT" \
+            --script res://persistent_face_bvh_regression.gd \
+            2>&1 | tee jolt-self-face-bvh-refit.log
+          grep -Fq 'PASS: Jolt persistent self-face BVH refit and body recreation' jolt-self-face-bvh-refit.log
+      - name: Regression-test persistent Jolt self-edge BVH refit and cache eviction
+        shell: bash
+        run: |
+          set -euo pipefail
+          BIN=./bin/godot.linuxbsd.editor.dev.x86_64
+          PROJECT=tests/stress/jolt_soft_self_persistent_bvh
+          timeout 120s "$BIN" --headless --path "$PROJECT" \
+            --script res://persistent_refit_regression.gd --check-only
+          timeout 180s "$BIN" --headless --path "$PROJECT" \
+            --script res://persistent_refit_regression.gd \
+            2>&1 | tee jolt-self-persistent-bvh.log
+          grep -Fq 'PASS: Jolt persistent self-edge BVH refit and body recreation' jolt-self-persistent-bvh.log
+      - name: Regression-test Jolt BVH dense self edge collision stability
+        shell: bash
+        run: |
+          set -euo pipefail
+          BIN=./bin/godot.linuxbsd.editor.dev.x86_64
+          PROJECT=tests/stress/jolt_soft_self_edge_bvh
+          timeout 120s "$BIN" --headless --path "$PROJECT" \
+            --script res://bvh_self_edges_regression.gd --check-only
+          timeout 180s "$BIN" --headless --path "$PROJECT" \
+            --script res://bvh_self_edges_regression.gd \
+            2>&1 | tee jolt-self-edge-bvh.log
+          grep -Fq 'PASS: Jolt BVH accelerated self edge collisions' jolt-self-edge-bvh.log
+      - name: Regression-test Jolt nonadjacent self edge-edge contacts
+        shell: bash
+        run: |
+          set -euo pipefail
+          BIN=./bin/godot.linuxbsd.editor.dev.x86_64
+          PROJECT=tests/stress/jolt_soft_self_edges
+          timeout 120s "$BIN" --headless --path "$PROJECT" \
+            --script res://self_edges_regression.gd --check-only
+          timeout 180s "$BIN" --headless --path "$PROJECT" \
+            --script res://self_edges_regression.gd \
+            2>&1 | tee jolt-soft-self-edges.log
+          grep -Fq 'PASS: Jolt self edge-edge contacts suppress one-ring adjacency' jolt-soft-self-edges.log
+      - name: Regression-test Jolt folded soft-body self collision
+        shell: bash
+        run: |
+          set -euo pipefail
+          BIN=./bin/godot.linuxbsd.editor.dev.x86_64
+          PROJECT=tests/stress/jolt_soft_self
+          timeout 120s "$BIN" --headless --path "$PROJECT" \
+            --script res://self_collision_regression.gd --check-only
+          timeout 180s "$BIN" --headless --path "$PROJECT" \
+            --script res://self_collision_regression.gd \
+            2>&1 | tee jolt-soft-self-collision.log
+          grep -Fq 'PASS: Jolt nonlocal soft self collision and one-ring suppression' jolt-soft-self-collision.log
       - name: Regression-test conservative swept soft-body edge-edge contacts
         shell: bash
         run: |
@@ -654,13 +830,17 @@ jobs:
   native-stress:
     # Build and benchmark the actual fork, not an unrelated downloaded Godot release.
     # Never run the enormous brutal preset automatically.
-    if: github.event_name == 'workflow_dispatch' || github.event_name == 'schedule'
+    if: github.event_name == 'workflow_dispatch' || github.event_name == 'schedule' || github.event_name == 'pull_request'
     needs: harness-tests
     runs-on: ubuntu-24.04
     timeout-minutes: 360
     env:
       PRESET: ${{ github.event_name == 'workflow_dispatch' && inputs.preset || 'smoke' }}
       RENDER_MODE: ${{ github.event_name == 'workflow_dispatch' && inputs.render_mode || 'headless' }}
+      RUN_CASES: ${{ github.event_name == 'workflow_dispatch' && inputs.cases || 'all' }}
+      RUN_RAMP: ${{ github.event_name == 'workflow_dispatch' && inputs.ramp || false }}
+      RUN_RAMP_STEPS: ${{ github.event_name == 'workflow_dispatch' && inputs.ramp_steps || 4 }}
+      RUN_RAMP_FACTOR: ${{ github.event_name == 'workflow_dispatch' && inputs.ramp_factor || 2 }}
     steps:
       - uses: actions/checkout@v4
       - name: Install Xvfb and software GL for optional display tests
@@ -678,6 +858,8 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+          ./bin/godot.linuxbsd.editor.dev.x86_64 --headless --path tests/stress \
+            --script res://physics_softbody_gas_leak_3d_regression.gd --check-only
           ./bin/godot.linuxbsd.editor.dev.x86_64 --headless --path tests/stress --script res://stress.gd --check-only
           ./bin/godot.linuxbsd.editor.dev.x86_64 --headless --path tests/stress --script res://memory_soak.gd --check-only
       - name: Run the complete native C++ test suite
@@ -692,11 +874,15 @@ jobs:
           set -euo pipefail
           BIN=./bin/godot.linuxbsd.editor.dev.x86_64
           "$BIN" --version
+          RUN_ARGS=(--case "$RUN_CASES")
+          if [[ "$RUN_RAMP" == "true" ]]; then
+            RUN_ARGS+=(--ramp --ramp-steps "$RUN_RAMP_STEPS" --ramp-factor "$RUN_RAMP_FACTOR")
+          fi
           if [[ "$RENDER_MODE" == "display" ]]; then
             # Software GL only: results must NOT be compared with discrete-GPU measurements.
-            xvfb-run -a python3 tests/stress/run.py --godot "$BIN" --preset "$PRESET" --render-mode display --output whole-engine-stress.json --summary-md whole-engine-stress.md
+            xvfb-run -a python3 tests/stress/run.py --godot "$BIN" --preset "$PRESET" --render-mode display "${RUN_ARGS[@]}" --output whole-engine-stress.json --summary-md whole-engine-stress.md
           else
-            python3 tests/stress/run.py --godot "$BIN" --preset "$PRESET" --render-mode headless --output whole-engine-stress.json --summary-md whole-engine-stress.md
+            python3 tests/stress/run.py --godot "$BIN" --preset "$PRESET" --render-mode headless "${RUN_ARGS[@]}" --output whole-engine-stress.json --summary-md whole-engine-stress.md
           fi
       - name: Benchmark cold and warm asset import, script scanning and scene indexing
         if: success() || failure()
