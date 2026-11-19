@@ -2092,9 +2092,14 @@ The optimized loop caches the end-vertex distance to reuse as the
 next edge's start distance and reuses the first distance when closing
 the polygon. This reduces `2 * vertex_count` signed-distance
 evaluations to `vertex_count` for every nonempty clipping stage.
-It additionally exits immediately if a clipping stage produces zero
-vertices: subsequent half-plane intersections cannot make an empty
-convex polygon nonempty.
+For an edge that crosses the plane, the already cached start-vertex
+distance also replaces a repeated dot product in the intersection
+fraction. It additionally exits immediately if a clipping stage
+produces zero vertices: subsequent half-plane intersections cannot
+make an empty convex polygon nonempty. A deterministic 10,000-case
+reference exercise produced 388,696 signed-distance evaluations for
+the old algorithm versus 194,348 for the cached implementation;
+these are **mathematical operation counts**, not a measured CPU speedup.
 
 This is only an evaluation-order optimization: the clipping planes,
 intersection equations, edge handling and contact callback are
