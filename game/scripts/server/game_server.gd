@@ -13,6 +13,7 @@ const SaveValidation = preload("res://scripts/shared/save_validation.gd")
 const Crafting = preload("res://scripts/shared/crafting.gd")
 const Survival = preload("res://scripts/shared/survival.gd")
 const Movement = preload("res://scripts/shared/movement.gd")
+const Evasion = preload("res://scripts/shared/evasion.gd")
 const Combat = preload("res://scripts/shared/combat.gd")
 const Structures = preload("res://scripts/shared/structures.gd")
 const Zombie = preload("res://scripts/shared/zombie.gd")
@@ -49,6 +50,8 @@ class Player:
 	var last_input_seq: int = 0
 	var attack_timer: float = 0.0
 	var skill_timer: float = 0.0
+	var dodge_timer: float = 0.0
+	var dodge_immunity: float = 0.0
 	var combat_energy: float = 100.0
 	var noise_radius: float = 0.0
 	var noise_timer: float = 0.0
@@ -258,6 +261,8 @@ func _spawn_player(player: Player) -> void:
 	player.action = {}
 	player.attack_timer = 0.0
 	player.skill_timer = 0.0
+	player.dodge_timer = 0.0
+	player.dodge_immunity = 0.0
 	player.combat_energy = Defs.COMBAT_ENERGY_MAX
 	player.noise_radius = 0.0
 	player.noise_timer = 0.0
@@ -838,6 +843,44 @@ func cmd_skill(peer_id: int, dir_x: float, dir_z: float) -> Dictionary:
 	return {"ok": true, "hit": true, "target": hit["kind"], "energy": player.combat_energy}
 
 
+## Classless evasion: no client-supplied distance, speed, stamina or invulnerability.
+## Reuse swept-in-small-steps world collision and restrict zombie immunity to 0.30 s.
+func cmd_dodge(peer_id: int, dir_x: float, dir_z: float) -> Dictionary:
+	var player: Player = players.get(peer_id)
+	if player == null or not _alive(player):
+		return {"ok": false, "reason": "dead"}
+	if player.dodge_timer > 0.0:
+		return {"ok": false, "reason": "cooldown"}
+	if player.attack_timer > 0.0:
+		return {"ok": false, "reason": "attack_lock"}
+	var direction := Vector2(dir_x, dir_z)
+	if not direction.is_finite() or direction.length_squared() < 0.0001:
+		return {"ok": false, "reason": "no_direction"}
+	if player.inventory.movement_factor() < 0.9999:
+		return {"ok": false, "reason": "overweight"}
+	if player.survival.hunger <= 5.0 or player.survival.thirst <= 5.0:
+		return {"ok": false, "reason": "exhausted"}
+	if player.survival.stamina < Evasion.STAMINA_COST:
+		return {"ok": false, "reason": "no_stamina"}
+	var new_position: Vector3 = Evasion.destination(world, player.position, direction)
+	if Evasion.moved_distance(player.position, new_position) < Evasion.MIN_DISPLACEMENT:
+		return {"ok": false, "reason": "blocked"}
+	player.position = new_position
+	player.yaw = atan2(direction.x, direction.y)
+	player.survival.stamina -= Evasion.STAMINA_COST
+	player.survival.stamina_recovery_delay = Defs.STAMINA_RECOVERY_DELAY
+	player.dodge_timer = Evasion.COOLDOWN
+	player.dodge_immunity = Evasion.INVULNERABLE_TO_INFECTED
+	player.attack_timer = maxf(player.attack_timer, Evasion.ATTACK_LOCK)
+	player.action = {}
+	player.noise_radius = Defs.SPRINT_NOISE_RADIUS
+	player.noise_timer = Defs.SPRINT_NOISE_SECONDS
+	player.dirty_character = true
+	events.append({"type": "dodge", "peer": peer_id, "x": new_position.x, "z": new_position.z})
+	return {"ok": true, "x": new_position.x, "y": new_position.y,
+		"z": new_position.z, "stamina": player.survival.stamina}
+
+
 func cmd_loot(peer_id: int, entity_id: int) -> Dictionary:
 	var player: Player = players.get(peer_id)
 	if player == null or not _alive(player):
@@ -1015,6 +1058,7 @@ func _on_player_death(victim: Player, killer: int) -> void:
 	victim.deaths += 1
 	victim.dirty_character = true
 	victim.action = {}
+	victim.dodge_immunity = 0.0
 	var zone: int = world.zone_at(victim.position.x, victim.position.z)
 	var drops_gear: bool = ZoneRisk.full_loot(zone)
 	victim.last_death_full_loot = drops_gear
@@ -1046,6 +1090,8 @@ func _tick_players(delta: float) -> void:
 		player.input_budget = minf(player.input_budget + delta, 0.25)
 		player.attack_timer = maxf(player.attack_timer - delta, 0.0)
 		player.skill_timer = maxf(player.skill_timer - delta, 0.0)
+		player.dodge_timer = maxf(player.dodge_timer - delta, 0.0)
+		player.dodge_immunity = maxf(player.dodge_immunity - delta, 0.0)
 		player.noise_timer = maxf(player.noise_timer - delta, 0.0)
 		if player.noise_timer <= 0.0:
 			player.noise_radius = 0.0
@@ -1118,6 +1164,10 @@ func _tick_zombies(delta: float) -> void:
 		if not result.is_empty():
 			var victim: Player = players.get(result["hit"])
 			if victim != null and _alive(victim):
+				# An active dodge avoids infected wounds; normal PvP attacks still land.
+				if victim.dodge_immunity > 0.0:
+					events.append({"type": "evaded", "peer": victim.id, "zombie": zombie.id})
+					continue
 				var damage: float = Combat.apply_armor(float(result["damage"]), victim.inventory.armor)
 				victim.survival.hurt(damage)
 				if victim.survival.add_infection(float(Defs.ZOMBIE_INFECTION_PER_HIT.get(zombie.type, 0.0))):
@@ -1272,6 +1322,7 @@ func snapshot_for(peer_id: int) -> Dictionary:
 			"action": player.action.duplicate(),
 			"infection": player.survival.infection,
 			"combat_energy": player.combat_energy, "skill_cooldown": player.skill_timer,
+			"dodge_cooldown": player.dodge_timer, "dodge_immunity": player.dodge_immunity,
 			"weapon": player.inventory.weapon, "armor": player.inventory.armor,
 			"last_death_full_loot": player.last_death_full_loot,
 			"gathering_levels": player.progression.levels(), "crafting_level": player.progression.crafting_level(),
