@@ -426,3 +426,35 @@ python3 tests/stress/scale_sweep.py \
   --case astar_grid_rebuild --scales 1,2,4,8,16 --repeats 5 \
   --output out/astar-grid-rebuild.json --summary-md out/astar-grid-rebuild.md
 ```
+
+## Grid reflow: dense and sparse column stress
+
+`grid_reflow` separately exercises GridContainer's reflow algorithm:
+hundreds/thousands of Controls with varying minimum sizes, expandable
+rows and columns, and an extreme case with one million **declared**
+columns but only a small number of actual children. The engine now
+stores per-cell scratch measurements in dense `LocalVector` buffers,
+and represents trailing empty columns by an integer count rather than
+allocating one RBSet node for every empty column. Regression tests check
+capped expansion, minimum sizes, hidden Controls, and sparse columns.
+
+```bash
+python3 tests/stress/run.py \
+  --godot ./bin/godot.macos.editor.arm64 \
+  --case ui_layout,grid_reflow --scale 8 --frames 180 --repeats 5 \
+  --timeout 600 --rss-limit-mib 6144 \
+  --output out/grid-reflow.json --summary-md out/grid-reflow.md
+```
+
+The scenario reports p95 reflow, maximum reflow, sparse reflow, and
+engine process duration. The measured reflow duration includes the
+wait for the next frame and must **not** be interpreted as raw
+GridContainer C++ function execution time. Compare identical builds,
+hardware and settings for useful regressions; it does not measure GPU
+frame presentation. These workloads are resource limited via the
+shared Python watchdog.
+
+Native BitMap hotpaths now also specialize full-map fill/clear,
+small alpha images, and constant alpha masks, while retaining
+byte-precise tests for non-multiple-of-eight widths and alpha
+threshold boundaries.
