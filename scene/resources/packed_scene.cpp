@@ -853,22 +853,46 @@ bool SceneState::has_local_resource(const Array &p_array) const {
 	return false;
 }
 
+bool SceneState::has_local_resource(const Dictionary &p_dictionary) const {
+	// Probe dictionary entries in-place rather than allocating keys() and values() arrays.
+	// Scene-local Resource objects may occur in either keys or values.
+	for (const KeyValue<Variant, Variant> &entry : p_dictionary) {
+		if (entry.key.get_type() == Variant::OBJECT) {
+			Ref<Resource> key_resource = entry.key;
+			if (key_resource.is_valid() && key_resource->is_local_to_scene()) {
+				return true;
+			}
+		}
+		if (entry.value.get_type() == Variant::OBJECT) {
+			Ref<Resource> value_resource = entry.value;
+			if (value_resource.is_valid() && value_resource->is_local_to_scene()) {
+				return true;
+			}
+		}
+	}
+	return false;
+}
+
 static int _nm_get_string(const String &p_string, HashMap<StringName, int> &name_map) {
-	if (name_map.has(p_string)) {
-		return name_map[p_string];
+	// Intern the name once and probe the table once for the common existing-name case.
+	const StringName name(p_string);
+	const int *existing = name_map.getptr(name);
+	if (existing != nullptr) {
+		return *existing;
 	}
 
-	int idx = name_map.size();
-	name_map[p_string] = idx;
+	const int idx = name_map.size();
+	name_map[name] = idx;
 	return idx;
 }
 
 static int _vm_get_variant(const Variant &p_variant, HashMap<Variant, int> &variant_map) {
-	if (variant_map.has(p_variant)) {
-		return variant_map[p_variant];
+	const int *existing = variant_map.getptr(p_variant);
+	if (existing != nullptr) {
+		return *existing;
 	}
 
-	int idx = variant_map.size();
+	const int idx = variant_map.size();
 	variant_map[p_variant] = idx;
 	return idx;
 }
@@ -1070,7 +1094,7 @@ Error SceneState::_parse_node(Node *p_owner, Node *p_node, int p_parent_idx, Has
 					// Save anyway
 				} else if (value.get_type() == Variant::DICTIONARY) {
 					Dictionary dictionary = value;
-					if (!has_local_resource(dictionary.values()) && !has_local_resource(dictionary.keys())) {
+					if (!has_local_resource(dictionary)) {
 						continue;
 					}
 				} else {
