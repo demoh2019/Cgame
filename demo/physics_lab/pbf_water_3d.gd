@@ -53,7 +53,7 @@ func _ready() -> void:
 
 	label = Label3D.new()
 	label.name = "StationLabel"
-	label.text = "NATIVE CPU PBF FLUID | %d particles | U: reset | I: pause" % fluid.get_particle_count()
+	label.text = "NATIVE CPU PBF FLUID | %d particles | U: reset | I: pause | O: stir" % fluid.get_particle_count()
 	label.position = Vector3(0, 3.65, 0)
 	label.font_size = 40
 	label.pixel_size = 0.006
@@ -95,3 +95,7 @@ func _unhandled_key_input(event: InputEvent) -> void:
 			label.text = "NATIVE CPU PBF FLUID | %d particles | %s" % [
 				fluid.get_particle_count(), "RUNNING" if fluid.simulation_enabled else "PAUSED"
 			]
+		KEY_O:
+			# Stir the free surface with an upward/lateral velocity pulse.
+			# This is a native kernel call; no per-particle GDScript loop.
+			fluid.add_velocity_pulse(Vector3(0, 1.0, 0), 1.8, Vector3(3.0, 4.5, 0))
