@@ -40,6 +40,54 @@ concurrent filesystem races require operating-system sandboxing.
 The standalone test suite includes endpoint policy, credentials/header,
 reserved filename, and multi-file no-overwrite regression cases.
 
+## Check approved games with Godot (headless)
+
+After you click **Apply files...** and explicitly approve the generated files,
+the AI Game Builder dock offers **Check Game (Headless)**. This is an
+**opt-in** quality check — it does not run when a plan is generated or saved.
+
+The editor launches its own Godot executable as a separate headless process
+and asks it to inspect **only the newly approved files**. The check:
+
+- Confirms paths are limited to `res://ai_generated/`, files are present
+  and readable, filenames are portable, and files are within size limits.
+- Uses Godot's actual resource loader on approved GDScript, `.tscn`,
+  `.tres` and shader resources; checks JSON game data with Godot's JSON parser.
+- Does **not** instantiate the generated `PackedScene`, start gameplay,
+  or automatically ask the provider to fix or overwrite files.
+- Displays a bounded error list in the dock; the user can use it as context
+  for a subsequent AI repair request. The first version does not yet
+  automatically apply repairs to already-created files.
+- Runs outside the editor process and has a **30-second timeout**,
+  a Cancel action, and automatic cleanup of the JSON report saved under
+  `user://ai_game_builder/`. No shell invocation or extra API request is used.
+
+**Trust boundary:** loading game resources can still trigger parsing,
+importers or dependencies, and a malicious script might have side effects.
+Review the AI-generated files first and use an OS sandbox or VM for fully
+untrusted content. Timeout is not a full process/security sandbox.
+This check verifies *loading and compilation*, not game mechanics,
+playability, performance, physics, networking, or visual correctness.
+
+The headless checker is also available from the command line, after you
+have explicitly reviewed and created a game in a disposable project:
+
+```sh
+godot --headless --path /path/to/project \
+  --script res://addons/ai_game_builder/smoke_check.gd \
+  -- --report user://ai_game_builder/manual_report.json \
+  --paths '["res://ai_generated/main.tscn","res://ai_generated/player.gd"]'
+```
+
+Exit code 0 means loaded successfully, 1 reports resource/validation errors,
+and 2 reports invocation or diagnostic-write errors. The report file is
+JSON with `ok`, `checked` and `errors` fields. An exit code of 0 is not
+a guarantee of a working game.
+
+CI executes both this real subprocess check and headless tests of the
+validation rules, after creating disposable fixtures. No generated game is
+published or distributed by these tests.
+
 ## Safety limits
 
 - AI only returns candidate text files. It cannot execute commands, edit existing files, install packages, or make arbitrary changes to engine settings.
