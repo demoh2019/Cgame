@@ -92,6 +92,105 @@ func _init():
 	CHECK_MESSAGE(int(ref_counted->get_meta("result")) == 42, "The script should assign object metadata successfully.");
 }
 
+
+TEST_CASE("[GDScriptPropertyListFastPath] exported properties preserve declaration order") {
+	GDScriptLanguage::get_singleton()->init();
+	Ref<GDScript> script = memnew(GDScript);
+	script->set_source_code("extends RefCounted\n@export var first: int = 1\n@export var second: float = 2.0\n@export var third: String = \"ok\"\n");
+	ERR_PRINT_OFF;
+	const Error err = script->reload();
+	ERR_PRINT_ON;
+	REQUIRE_EQ(err, OK);
+
+	Ref<RefCounted> object = memnew(RefCounted);
+	object->set_script(script);
+	List<PropertyInfo> properties;
+	object->get_property_list(&properties);
+
+	int pos = 0;
+	int first = -1;
+	int second = -1;
+	int third = -1;
+	for (const PropertyInfo &info : properties) {
+		if (info.name == StringName("first")) { first = pos; CHECK_EQ(info.type, Variant::INT); }
+		if (info.name == StringName("second")) { second = pos; CHECK_EQ(info.type, Variant::FLOAT); }
+		if (info.name == StringName("third")) { third = pos; CHECK_EQ(info.type, Variant::STRING); }
+		pos++;
+	}
+	REQUIRE(first >= 0);
+	REQUIRE(second >= 0);
+	REQUIRE(third >= 0);
+	CHECK(first < second);
+	CHECK(second < third);
+}
+
+TEST_CASE("[GDScriptPropertyListFastPath] dynamic properties follow exported properties") {
+	GDScriptLanguage::get_singleton()->init();
+	Ref<GDScript> script = memnew(GDScript);
+	script->set_source_code(R"GD(extends RefCounted
+@export var exported: int = 1
+
+func _get_property_list() -> Array[Dictionary]:
+	return [
+		{"name": "dynamic_a", "type": TYPE_INT},
+		{"name": "dynamic_b", "type": TYPE_STRING}
+	]
+)GD");
+	ERR_PRINT_OFF;
+	const Error err = script->reload();
+	ERR_PRINT_ON;
+	REQUIRE_EQ(err, OK);
+
+	Ref<RefCounted> object = memnew(RefCounted);
+	object->set_script(script);
+	List<PropertyInfo> properties;
+	object->get_property_list(&properties);
+
+	int idx = 0;
+	int exported = -1;
+	int dynamic_a = -1;
+	int dynamic_b = -1;
+	for (const PropertyInfo &info : properties) {
+		if (info.name == StringName("exported")) { exported = idx; }
+		if (info.name == StringName("dynamic_a")) { dynamic_a = idx; CHECK_EQ(info.type, Variant::INT); }
+		if (info.name == StringName("dynamic_b")) { dynamic_b = idx; CHECK_EQ(info.type, Variant::STRING); }
+		idx++;
+	}
+	REQUIRE(exported >= 0);
+	REQUIRE(dynamic_a >= 0);
+	REQUIRE(dynamic_b >= 0);
+	CHECK(exported < dynamic_a);
+	CHECK(dynamic_a < dynamic_b);
+}
+
+TEST_CASE("[GDScriptPropertyListFastPath] repeated enumeration preserves property order") {
+	GDScriptLanguage::get_singleton()->init();
+	Ref<GDScript> script = memnew(GDScript);
+	script->set_source_code("extends RefCounted\n@export var x: int = 1\n@export var y: int = 2\n");
+	ERR_PRINT_OFF;
+	const Error err = script->reload();
+	ERR_PRINT_ON;
+	REQUIRE_EQ(err, OK);
+
+	Ref<RefCounted> object = memnew(RefCounted);
+	object->set_script(script);
+	List<PropertyInfo> original;
+	object->get_property_list(&original);
+	for (int i = 0; i < 64; i++) {
+		List<PropertyInfo> again;
+		object->get_property_list(&again);
+		REQUIRE_EQ(again.size(), original.size());
+		const List<PropertyInfo>::Element *lhs = original.front();
+		const List<PropertyInfo>::Element *rhs = again.front();
+		while (lhs != nullptr && rhs != nullptr) {
+			CHECK_EQ(lhs->get().name, rhs->get().name);
+			CHECK_EQ(lhs->get().type, rhs->get().type);
+			lhs = lhs->next();
+			rhs = rhs->next();
+		}
+	}
+}
+
 TEST_CASE("[Modules][GDScript] Loading keeps ResourceCache and GDScriptCache in sync") {
 	GDScriptLanguage::get_singleton()->init();
 	const String path = TestUtils::get_temp_path("gdscript_load_test.gd");
