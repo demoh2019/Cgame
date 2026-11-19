@@ -8,6 +8,7 @@ const WorldCycle = preload("res://scripts/shared/world_cycle.gd")
 const WorldGen = preload("res://scripts/shared/world_gen.gd")
 const Inventory = preload("res://scripts/shared/inventory.gd")
 const Vendor = preload("res://scripts/shared/vendor.gd")
+const PvpInfamy = preload("res://scripts/shared/pvp_infamy.gd")
 const PlayerTrade = preload("res://scripts/shared/player_trade.gd")
 const Party = preload("res://scripts/shared/party.gd")
 const LootRights = preload("res://scripts/shared/loot_rights.gd")
@@ -92,6 +93,7 @@ class Player:
 	var last_death_full_loot: bool = false
 	var kills: int = 0
 	var deaths: int = 0
+	var pvp_infamy: float = 0.0 # Persistent server-only criminal reputation.
 	var zone_notice: int = -1
 	var dirty_inventory: bool = true
 	var dirty_stash: bool = true
@@ -181,6 +183,7 @@ func character_data(player: Player) -> Dictionary:
 		"exposure": player.survival.exposure, "warmth_seconds": player.survival.warmth_seconds,
 			"campfire_warm": FieldCampfire.has_warmth(campfires, player.position, time),
 		"alive": alive, "kills": player.kills, "deaths": player.deaths,
+		"pvp_infamy": player.pvp_infamy,
 		"x": player.position.x, "z": player.position.z,
 		"inventory": player.inventory.to_dict(),
 		"stash": player.stash.to_dict(),
@@ -229,6 +232,8 @@ func apply_character(player: Player, data: Dictionary) -> bool:
 	if not SaveValidation.valid_counter(data.get("kills", 0)):
 		return false
 	if not SaveValidation.valid_counter(data.get("deaths", 0)):
+		return false
+	if not PvpInfamy.valid(data.get("pvp_infamy", 0.0)):
 		return false
 	if not SaveValidation.finite_number(data.get("rest_cooldown", 0.0), 0.0, CampRest.COOLDOWN):
 		return false
@@ -283,6 +288,7 @@ func apply_character(player: Player, data: Dictionary) -> bool:
 	player.progression = loaded_progression
 	player.contract_state = (loaded_contracts as Dictionary).duplicate(true)
 	player.renown = int(loaded_renown)
+	player.pvp_infamy = float(data.get("pvp_infamy", 0.0))
 	player.rest_cooldown = float(data.get("rest_cooldown", 0.0))
 	player.lake_drink_cooldown = float(data.get("lake_drink_cooldown", 0.0))
 	player.inventory = parsed_bag["inventory"]
@@ -1008,7 +1014,7 @@ func cmd_vendor(peer_id: int, item_id: String, quantity: int, buy: bool) -> Dict
 	if not location.is_finite() or location.distance_to(WORKBENCH_POSITION) > WORKBENCH_RANGE:
 		return {"ok": false, "reason": "no_station"}
 	var outcome: Dictionary = Vendor.transact(player.inventory, item_id, quantity, buy,
-		player.renown)
+		player.renown, player.pvp_infamy)
 	if outcome.get("ok", false):
 		player.dirty_inventory = true
 		player.dirty_character = true
@@ -1852,6 +1858,13 @@ func _damage_target(attacker: Player, hit: Dictionary, damage: float) -> void:
 		events.append({"type": "hit", "kind": "player", "id": victim.id, "damage": final_damage, "by": attacker.id})
 		if not _alive(victim):
 			attacker.kills += 1
+			var old_score: float = attacker.pvp_infamy
+			attacker.pvp_infamy = PvpInfamy.gain_for_kill(old_score)
+			if attacker.pvp_infamy > old_score:
+				attacker.dirty_character = true
+				events.append({"type": "infamy", "peer": attacker.id,
+					"score": attacker.pvp_infamy,
+					"outlaw": PvpInfamy.is_outlaw(attacker.pvp_infamy)})
 			_on_player_death(victim, attacker.id)
 
 
@@ -1966,6 +1979,10 @@ func tick(delta: float) -> void:
 func _tick_players(delta: float) -> void:
 	for player in players.values():
 		player.input_budget = minf(player.input_budget + delta, 0.25)
+		var old_infamy: float = player.pvp_infamy
+		player.pvp_infamy = PvpInfamy.decay(old_infamy, delta)
+		if player.pvp_infamy < old_infamy:
+			player.dirty_character = true
 		player.rest_cooldown = maxf(0.0, player.rest_cooldown - maxf(0.0, delta))
 		player.party_aid_timer = maxf(0.0, player.party_aid_timer - maxf(0.0, delta))
 		player.guardian_timer = maxf(0.0, player.guardian_timer - maxf(0.0, delta))
@@ -2449,7 +2466,9 @@ func snapshot_for(peer_id: int) -> Dictionary:
 			continue
 		var p: Vector3 = other.position
 		if here.distance_to(Vector2(p.x, p.z)) <= Defs.INTEREST_RADIUS:
-			nearby_players.append({"id": other.id, "name": other.name, "x": p.x, "y": p.y, "z": p.z, "yaw": other.yaw, "alive": _alive(other), "weapon": other.inventory.weapon})
+			nearby_players.append({"id": other.id, "name": other.name, "x": p.x, "y": p.y, "z": p.z, "yaw": other.yaw,
+				"alive": _alive(other), "weapon": other.inventory.weapon,
+				"outlaw": PvpInfamy.is_outlaw(other.pvp_infamy)})
 	var nearby_zombies: Array = []
 	for zombie in zombies.values():
 		var p: Vector3 = zombie.position
@@ -2490,6 +2509,7 @@ func snapshot_for(peer_id: int) -> Dictionary:
 			"health": player.survival.health, "hunger": player.survival.hunger, "thirst": player.survival.thirst,
 			"stamina": player.survival.stamina,
 			"alive": _alive(player), "kills": player.kills, "deaths": player.deaths, "zone": player.zone_notice,
+			"pvp_infamy": player.pvp_infamy, "outlaw": PvpInfamy.is_outlaw(player.pvp_infamy),
 			"action": player.action.duplicate(),
 			"infection": player.survival.infection, "bleeding": player.survival.bleeding,
 			"exposure": player.survival.exposure,

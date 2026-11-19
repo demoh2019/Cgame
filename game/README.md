@@ -1678,3 +1678,38 @@ remaining seconds alongside the existing guardian cooldown. A new
 `tests/test_guardian_brace.gd` suite covers damage, expiry, equipment
 and group invalidation, server snapshots and death cleanup. No changes
 to engine C++ are necessary for this mechanic.
+
+
+## PvP infamy and outlaw reputation (classless frontier)
+
+The canonical `game/` tracks **server-owned PvP infamy** (0–100).
+Only an actual lethal attack on another survivor in an existing **red/black**
+PvP zone adds 25 points. Hits, missed attacks, infected kills, protected-zone
+attacks and damage to party members grant nothing. Two confirmed PvP kills
+mark a character **OUTLAW** at 50 points.
+
+Notoriety persists in the version-1 character account record; older saves
+missing the field start at zero. Invalid, negative, non-numeric, non-finite
+or over-cap values reject restoration atomically. Infamy decays one point
+per **three minutes of online server simulation** and is not erased by death,
+logout or respawn.
+
+The safe-hub NPC first applies existing **survivor renown discounts**, then adjusts its own transaction prices using infamy:
+up to **50% extra** for purchased survival supplies and up to **25% less**
+for materials sold to the merchant. The unit cost is calculated by the
+server before debiting or crediting real items; quantity splitting cannot
+evade the per-unit price. The player market and private trades keep their
+original negotiated prices.
+
+The owner sees the exact score and outlaw flag in the multiplayer HUD.
+Other nearby survivors see only an **OUTLAW** nameplate marker, not the
+private score. The local preview also displays current reputation.
+This system **does not change** safe-zone PvP protection or the
+red/black full-loot policy. No automatic bounties or guild penalties
+are added in this iteration.
+
+Run `godot --headless --path game --script res://tests/run_all.gd`:
+`game/tests/test_pvp_infamy.gd` covers red-zone kills, anti-replay,
+safe-zone/PvE immunity, privacy, pricing, atomic vendor trades, decay,
+legacy saves, invalid values and death retention. No new native engine
+capability is required.

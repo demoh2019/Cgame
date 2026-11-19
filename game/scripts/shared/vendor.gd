@@ -6,6 +6,7 @@ extends RefCounted
 
 const Inventory = preload("res://scripts/shared/inventory.gd")
 const Reputation = preload("res://scripts/shared/reputation.gd")
+const PvpInfamy = preload("res://scripts/shared/pvp_infamy.gd")
 
 const MAX_QUANTITY := 50
 
@@ -72,17 +73,20 @@ static func first_sellable(carried) -> String:
 
 
 static func transact(carried, item_id: String, quantity: int, buy: bool,
-		renown: int = 0) -> Dictionary:
+		renown: int = 0, infamy: float = 0.0) -> Dictionary:
 	if quantity < 1 or quantity > MAX_QUANTITY:
 		return {"ok": false, "reason": "invalid_quantity"}
 	var prices: Dictionary = BUY_PRICES if buy else SELL_PRICES
 	var unit_price: int = int(prices.get(item_id, 0))
 	if unit_price < 1:
 		return {"ok": false, "reason": "not_traded"}
-	# The rank comes from the server-owned Player. Discounts never change
-	# proceeds from selling resources or player-market pricing.
-	var total_price: int = Reputation.buy_price(unit_price, quantity, renown) \
-		if buy else unit_price * quantity
+	# Apply server-owned renown discount before outlaw penalty. Prices are
+	# per-unit, independent of order splitting, and trades stay atomic.
+	if not PvpInfamy.valid(infamy):
+		return {"ok": false, "reason": "invalid_infamy"}
+	var discounted_unit: int = Reputation.buy_price(unit_price, 1, renown) if buy else unit_price
+	unit_price = PvpInfamy.vendor_unit_price(discounted_unit, infamy, buy)
+	var total_price: int = unit_price * quantity
 
 	# Never commit a partial payment or a partial item transfer. The same
 	# validation works even if the backpack is at its stack/slot limit.
@@ -106,4 +110,5 @@ static func transact(carried, item_id: String, quantity: int, buy: bool,
 	return {
 		"ok": true, "item": item_id, "quantity": quantity,
 		"buy": buy, "silver_delta": -total_price if buy else total_price,
+		"unit_price": unit_price,
 	}
