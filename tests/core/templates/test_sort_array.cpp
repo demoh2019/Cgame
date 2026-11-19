@@ -291,4 +291,142 @@ TEST_CASE("[SortArray] Nth Element Random") {
 	}
 }
 
+struct MoveCountedSortValue {
+	int value = 0;
+	static inline int copies = 0;
+	static inline int moves = 0;
+
+	MoveCountedSortValue() = default;
+	explicit MoveCountedSortValue(int p_value) : value(p_value) {}
+
+	MoveCountedSortValue(const MoveCountedSortValue &p_other) : value(p_other.value) {
+		copies++;
+	}
+
+	MoveCountedSortValue(MoveCountedSortValue &&p_other) noexcept : value(p_other.value) {
+		moves++;
+		p_other.value = -1000;
+	}
+
+	MoveCountedSortValue &operator=(const MoveCountedSortValue &p_other) {
+		value = p_other.value;
+		copies++;
+		return *this;
+	}
+
+	MoveCountedSortValue &operator=(MoveCountedSortValue &&p_other) noexcept {
+		value = p_other.value;
+		moves++;
+		p_other.value = -1000;
+		return *this;
+	}
+
+	bool operator<(const MoveCountedSortValue &p_other) const {
+		return value < p_other.value;
+	}
+
+	static void reset_counters() {
+		copies = 0;
+		moves = 0;
+	}
+};
+
+TEST_CASE("[SortArray] Move-based insertion avoids copies on small reverse-sorted arrays") {
+	MoveCountedSortValue data[16];
+	for (int i = 0; i < 16; i++) {
+		data[i].value = 15 - i;
+	}
+
+	MoveCountedSortValue::reset_counters();
+	SortArray<MoveCountedSortValue> sorter;
+	sorter.sort(data, 16);
+
+	CHECK(MoveCountedSortValue::copies == 0);
+	CHECK(MoveCountedSortValue::moves > 0);
+	for (int i = 0; i < 16; i++) {
+		CHECK(data[i].value == i);
+	}
+}
+
+TEST_CASE("[SortArray] Move-based insertion avoids copies on sorted and duplicate values") {
+	SortArray<MoveCountedSortValue> sorter;
+	for (int pattern = 0; pattern < 2; pattern++) {
+		MoveCountedSortValue data[16];
+		for (int i = 0; i < 16; i++) {
+			data[i].value = pattern == 0 ? i : (15 - i) / 3;
+		}
+		MoveCountedSortValue::reset_counters();
+		sorter.sort(data, 16);
+		CHECK(MoveCountedSortValue::copies == 0);
+		for (int i = 1; i < 16; i++) {
+			CHECK(data[i - 1].value <= data[i].value);
+		}
+	}
+}
+
+TEST_CASE("[SortArray] Move-based insertion preserves value multiplicities over threshold") {
+	SortArray<MoveCountedSortValue> sorter;
+	for (int size = 1; size <= 64; size++) {
+		MoveCountedSortValue data[64];
+		int before[17] = {};
+		int after[17] = {};
+		for (int i = 0; i < size; i++) {
+			data[i].value = (i * 37 + size * 5) % 17;
+			before[data[i].value]++;
+		}
+		sorter.sort(data, size);
+		for (int i = 0; i < size; i++) {
+			CHECK(data[i].value >= 0);
+			CHECK(data[i].value < 17);
+			after[data[i].value]++;
+			if (i > 0) {
+				CHECK(data[i - 1].value <= data[i].value);
+			}
+		}
+		for (int i = 0; i < 17; i++) {
+			CHECK(before[i] == after[i]);
+		}
+	}
+}
+
+TEST_CASE("[SortArray] Move-based insertion respects sort_range boundaries") {
+	MoveCountedSortValue data[12];
+	for (int i = 0; i < 12; i++) {
+		data[i].value = 11 - i;
+	}
+
+	MoveCountedSortValue::reset_counters();
+	SortArray<MoveCountedSortValue> sorter;
+	sorter.sort_range(2, 10, data);
+
+	CHECK(MoveCountedSortValue::copies == 0);
+	CHECK(data[0].value == 11);
+	CHECK(data[1].value == 10);
+	CHECK(data[10].value == 1);
+	CHECK(data[11].value == 0);
+	for (int i = 3; i < 10; i++) {
+		CHECK(data[i - 1].value <= data[i].value);
+	}
+}
+
+TEST_CASE("[SortArray] Move-based nth_element maintains partition for short and long arrays") {
+	SortArray<MoveCountedSortValue> sorter;
+	for (int size : { 3, 7, 16, 17, 32 }) {
+		for (int nth : { 0, size / 2, size - 1 }) {
+			MoveCountedSortValue data[32];
+			for (int i = 0; i < size; i++) {
+				data[i].value = (i * 19 + size * 3) % 23;
+			}
+			sorter.nth_element(0, size, nth, data);
+			for (int i = 0; i < size; i++) {
+				if (i < nth) {
+					CHECK(data[i].value <= data[nth].value);
+				} else if (i > nth) {
+					CHECK(data[i].value >= data[nth].value);
+				}
+			}
+		}
+	}
+}
+
 } // namespace TestSortArray
