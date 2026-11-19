@@ -30,6 +30,7 @@
 TEST_FORCE_LINK(test_physics_softbody_self_collision)
 
 #include "servers/physics_softbody_self_collision.h"
+#include "servers/physics_softbody_ccd.h"
 
 #include <limits>
 
@@ -231,6 +232,82 @@ TEST_CASE("[Physics] Self-collision edge contact ignores degeneracy and invalid 
 			std::numeric_limits<real_t>::infinity(), a, b, c, d));
 	CHECK(a == old_a);
 	CHECK(c == Vector3(0, -1, 0));
+}
+
+TEST_CASE("[Physics] Swept soft-body CCD catches vertex crossing a static triangle") {
+	const Vector3 a(0, 0, 0), b(2, 0, 0), c(0, 2, 0);
+	const Vector3 before(0.5, 0.5, 1), after(0.5, 0.5, -1);
+	const real_t thickness = real_t(0.05);
+	// Both endpoints are far outside the discrete thickness and would
+	// be missed by a single end-of-step vertex/triangle proximity test.
+	Vector3 closest, bary;
+	REQUIRE(physics_softbody_closest_triangle_point(after, a, b, c, closest, bary));
+	CHECK(after.distance_to(closest) > thickness);
+
+	real_t toi = -1.0;
+	CHECK(physics_softbody_ccd_point_triangle(before, after,
+			a, a, b, b, c, c, thickness, toi));
+	CHECK(toi > real_t(0.45));
+	CHECK(toi < real_t(0.5));
+	CHECK(before.lerp(after, toi).z > real_t(0.0));
+	CHECK(before.lerp(after, toi).z < real_t(0.051));
+}
+
+TEST_CASE("[Physics] Swept soft-body CCD supports a moving triangle and crossing edges") {
+	const Vector3 point(0.5, 0.5, 0);
+	const Vector3 a(0, 0, 1), b(2, 0, 1), c(0, 2, 1);
+	const Vector3 shift(0, 0, -2);
+	real_t toi = -1.0;
+	CHECK(physics_softbody_ccd_point_triangle(point, point,
+			a, a + shift, b, b + shift, c, c + shift,
+			real_t(0.05), toi));
+	CHECK(toi > real_t(0.45));
+	CHECK(toi < real_t(0.5));
+
+	// The endpoints of each long edge remain far from the other edge,
+	// so a vertex/face discrete test cannot detect this middle crossing.
+	const Vector3 p(-1, 0, 0), q(1, 0, 0);
+	const Vector3 r(0, -1, 1), s(0, 1, 1);
+	toi = -1.0;
+	CHECK(physics_softbody_ccd_edge_edge(p, p, q, q,
+			r, r + shift, s, s + shift, real_t(0.05), toi));
+	CHECK(toi > real_t(0.45));
+	CHECK(toi < real_t(0.5));
+}
+
+TEST_CASE("[Physics] Swept soft-body CCD rejects near misses and zero relative motion") {
+	const Vector3 a(0, 0, 0), b(2, 0, 0), c(0, 2, 0);
+	real_t toi = real_t(0.75);
+	CHECK_FALSE(physics_softbody_ccd_point_triangle(
+			Vector3(0.5, 0.5, 0.5), Vector3(0.5, 0.5, 0.3),
+			a, a, b, b, c, c, real_t(0.05), toi));
+	CHECK(toi == real_t(0.75)); // Failed CCD does not clobber output.
+	CHECK_FALSE(physics_softbody_ccd_point_triangle(
+			Vector3(0.5, 0.5, 0), Vector3(0.5, 0.5, 0.2),
+			a, a, b, b, c, c, real_t(0.05), toi)); // Initially penetrating.
+	CHECK_FALSE(physics_softbody_ccd_point_triangle(
+			Vector3(0.5, 0.5, 0.5), Vector3(0.5, 0.5, 0.5),
+			a, a, b, b, c, c, real_t(0.05), toi)); // Stationary.
+	const Vector3 p(-1, 0, 0), q(1, 0, 0);
+	CHECK_FALSE(physics_softbody_ccd_edge_edge(p, p, q, q,
+			Vector3(0, -1, 0.3), Vector3(0, -1, 0.15),
+			Vector3(0, 1, 0.3), Vector3(0, 1, 0.15), real_t(0.05), toi));
+	CHECK(toi == real_t(0.75));
+}
+
+TEST_CASE("[Physics] Swept soft-body CCD preserves Galilean motion invariance") {
+	const Vector3 a(0, 0, 0), b(2, 0, 0), c(0, 2, 0);
+	const Vector3 shift(100, -30, 20);
+	const Vector3 motion(1, 2, -3);
+	real_t reference_t = -1, translated_t = -1;
+	const Vector3 before(0.5, 0.5, 1), after(0.5, 0.5, -1);
+	REQUIRE(physics_softbody_ccd_point_triangle(before, after,
+			a, a, b, b, c, c, real_t(0.05), reference_t));
+	REQUIRE(physics_softbody_ccd_point_triangle(before + shift, after + shift + motion,
+			a + shift, a + shift + motion,
+			b + shift, b + shift + motion,
+			c + shift, c + shift + motion, real_t(0.05), translated_t));
+	CHECK(Math::abs(reference_t - translated_t) < real_t(0.001));
 }
 
 } // namespace TestPhysicsSoftBodySelfCollision
