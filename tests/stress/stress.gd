@@ -13,7 +13,7 @@ const CASES := [
 	"scene_tree", "packed_scene", "images", "json", "stream", "stream_bulk",
 	"file_io", "threads", "physics_2d", "physics_3d", "physics_sparse_2d", "physics_sparse_3d",
 	"object_churn", "memory_churn", "astar_grid", "astar_grid_rebuild", "astar_relax_2d", "astar_relax_3d", "astar_graph", "tweens", "audio_buffers",
-	"variant_codec", "packet_stream", "ui_layout", "grid_reflow", "render_2d", "render_3d",
+	"variant_codec", "packet_stream", "packet_tx_batch", "packet_rx_batch", "packet_variant_reuse", "ui_layout", "grid_reflow", "render_2d", "render_3d",
 	"resource_load",
 	"input_map",
 	"transform_hierarchy",
@@ -224,6 +224,12 @@ func _run_case(test_case: String, scale: int, frames: int, seed: int) -> Diction
 			return await _tweens(scale, frames)
 		"packet_stream":
 			return _packet_stream(scale)
+		"packet_tx_batch":
+			return _packet_tx_batch(scale)
+		"packet_rx_batch":
+			return _packet_rx_batch(scale)
+		"packet_variant_reuse":
+			return _packet_variant_reuse(scale)
 		"ui_layout":
 			return await _ui_layout(scale, frames)
 		"grid_reflow":
@@ -1547,3 +1553,84 @@ func _astar_grid_rebuild(scale: int) -> Dictionary:
 		"static_memory_after_clear_delta_bytes": mem_after_clear - mem_before,
 		"checksum": checksum,
 	}
+
+
+# Isolate send throughput from packet parsing and incoming stream polling.
+func _packet_tx_batch(scale: int) -> Dictionary:
+	var stream := StreamPeerBuffer.new()
+	var packets := PacketPeerStream.new()
+	packets.set_stream_peer(stream)
+	packets.set_output_buffer_max_size(32768)
+	var payload := PackedByteArray([0, 2, 3, 4, 5, 6, 7, 8])
+	var count := 1200 * scale
+	var started := Time.get_ticks_usec()
+	for i in range(count):
+		payload[0] = i & 255
+		if packets.put_packet(payload) != OK:
+			return {"error": "Packet transmit batch write failed"}
+	var elapsed := float(Time.get_ticks_usec() - started) / 1000.0
+	var expected_bytes := count * (payload.size() + 4)
+	if stream.get_size() != expected_bytes:
+		return {"error": "Packet transmit batch changed framing lengths"}
+	var wire := stream.get_data_array()
+	if wire[0] != payload.size() or wire[4] != 0 or wire[expected_bytes - payload.size()] != ((count - 1) & 255):
+		return {"error": "Packet transmit batch corrupted framing payload"}
+	return {"packets": count, "wire_bytes": expected_bytes,
+		"send_ms": elapsed, "checksum": int(wire[4]) + int(wire[expected_bytes - payload.size()])}
+
+
+# Isolate receive throughput by constructing all complete frames outside timing.
+func _packet_rx_batch(scale: int) -> Dictionary:
+	var count := 1200 * scale
+	var wire := PackedByteArray()
+	wire.resize(count * 5)
+	for i in range(count):
+		var offset := i * 5
+		wire[offset] = 1
+		wire[offset + 1] = 0
+		wire[offset + 2] = 0
+		wire[offset + 3] = 0
+		wire[offset + 4] = i & 255
+	var stream := StreamPeerBuffer.new()
+	stream.set_data_array(wire)
+	var packets := PacketPeerStream.new()
+	packets.set_input_buffer_max_size(32768)
+	packets.set_stream_peer(stream)
+	var checksum := 0
+	var started := Time.get_ticks_usec()
+	for i in range(count):
+		var payload := packets.get_packet()
+		if packets.get_packet_error() != OK or payload.size() != 1 or payload[0] != (i & 255):
+			return {"error": "Packet receive batch lost frame %d" % i}
+		checksum += int(payload[0])
+	var elapsed := float(Time.get_ticks_usec() - started) / 1000.0
+	return {"packets": count, "wire_bytes": wire.size(),
+		"receive_ms": elapsed, "checksum": checksum}
+
+
+# Alternate small and large variants to expose scratch allocation churn.
+func _packet_variant_reuse(scale: int) -> Dictionary:
+	var stream := StreamPeerBuffer.new()
+	var packets := PacketPeerStream.new()
+	packets.set_stream_peer(stream)
+	packets.set_encode_buffer_max_size(32768)
+	packets.set_input_buffer_max_size(32768)
+	packets.set_output_buffer_max_size(32768)
+	var inputs: Array[String] = ["x".repeat(16), "y".repeat(256),
+			"z".repeat(4096), "q".repeat(32), "r".repeat(8192)]
+	var checksum := 0
+	var count := 250 * scale
+	var started := Time.get_ticks_usec()
+	for i in range(count):
+		stream.clear()
+		var original := inputs[i % inputs.size()]
+		if packets.put_var(original) != OK:
+			return {"error": "Packet Variant encode failed"}
+		stream.seek(0)
+		var decoded = packets.get_var()
+		if not (decoded is String) or decoded != original:
+			return {"error": "Packet Variant roundtrip failed at %d" % i}
+		checksum += original.length()
+	var elapsed := float(Time.get_ticks_usec() - started) / 1000.0
+	return {"packets": count, "variant_characters": checksum,
+		"roundtrip_ms": elapsed, "checksum": checksum}

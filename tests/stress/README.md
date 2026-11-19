@@ -458,3 +458,19 @@ Native BitMap hotpaths now also specialize full-map fill/clear,
 small alpha images, and constant alpha masks, while retaining
 byte-precise tests for non-multiple-of-eight widths and alpha
 threshold boundaries.
+
+### PacketPeer batch CPU/RAM profiling
+
+The headless `packet_tx_batch`, `packet_rx_batch` and `packet_variant_reuse`
+workloads separate transmit framing, buffered receive and alternating
+small/large Variant encoding. They report `send_ms`, `receive_ms` and
+`roundtrip_ms` along with packet counts and checksums.
+
+```bash
+python3 tests/stress/scale_sweep.py \
+  --godot ./bin/godot.linuxbsd.editor.dev.x86_64 \
+  --case packet_tx_batch,packet_rx_batch,packet_variant_reuse \
+  --scales 1,2,4,8,16 --repeats 5 --frames 90 \
+  --output out/packet-scale.json --summary-md out/packet-scale.md
+```
+
