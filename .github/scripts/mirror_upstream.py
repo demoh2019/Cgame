@@ -60,7 +60,7 @@ class GitHub:
         self.last_write = 0.0
 
     def request(self, method: str, path: str, payload=None, with_links=False):
-        if not path.startswith("/repos/"):
+        if not (path.startswith("/repos/") or path.startswith("/repositories/")):
             raise ValueError("Only repository API paths are accepted")
         url = "https://api.github.com" + path
         headers = {
@@ -328,7 +328,11 @@ class Mirror:
         path = (start_cursor or
                 f"/repos/{self.source}/issues"
                 "?state=all&sort=created&direction=asc&per_page=100")
-        if not path.startswith(f"/repos/{self.source}/issues?"):
+        source_metadata = self.api.request("GET", f"/repos/{self.source}")
+        source_repo_id = str(source_metadata["id"])
+        allowed = (path.startswith(f"/repos/{self.source}/issues?") or
+                   path.startswith(f"/repositories/{source_repo_id}/issues?"))
+        if not allowed:
             raise ValueError("Checkpoint cursor must target the source issue list")
         # Starting by page number is supported, but walking GitHub's cursor
         # links is mandatory. Random page=N access fails on large repositories.
