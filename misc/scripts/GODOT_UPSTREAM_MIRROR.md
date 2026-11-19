@@ -32,11 +32,17 @@ python3 mirror_godot_tracker.py sync --kind prs --limit 20
 python3 mirror_godot_tracker.py sync --kind prs --limit 20 --apply \
     --replay-open-prs --git-root /path/to/your/fork
 
+# Previously failed items do not block subsequent batches. Retry them
+# after resolving the reported errors:
+python3 mirror_godot_tracker.py sync --kind issues --limit 20 --apply --retry-failures
+python3 mirror_godot_tracker.py sync --kind prs --limit 5 --apply \
+    --replay-open-prs --git-root /path/to/your/fork --retry-failures
+
 # Repeat the sync commands. Existing mappings are skipped on each run.
 # Re-scan (and prune closed items from the inventory) periodically.
 python3 mirror_godot_tracker.py scan --reset
 
-# Run regression tests (currently 25 cases).
+# Run regression tests (currently 36 cases).
 python3 -m unittest -v test_mirror_godot_tracker.py
 ```
 
@@ -49,5 +55,6 @@ Do not pass `--apply` for a mixed `--kind all` batch that contains PRs without `
 - Importing an open PR requires valid fetchable Git refs, a clean dedicated Git worktree and an applicable patch against the fork's target branch. Conflicts or inaccessible bases are failures to be reviewed, not metadata-only surrogate Issues. Check results and run CI before merging any imported PR.
 - Original author names, source URLs, timestamps, and labels are included in the description as attribution. This script cannot recreate authorship, comments, reviews, reactions, notifications, assignees, milestones, or original GitHub IDs/history. It does not impersonate users.
 - The imported items are a **snapshot**. The script does not automatically close a destination item if upstream closes later. Pagination over a changing set of open items can shift; repeat `scan --reset` before completion to reduce omissions.
-- A full 19,088-record import needs many API requests and time; request throttling defaults to at least nine seconds between content-changing API calls. The importer guards ambiguous mutation retries, records failures, and defaults to dry-run.
+- A full 19,088-record import needs many API requests and time; request throttling defaults to at least nine seconds between content-changing API calls. The importer guards ambiguous mutation retries, records failures, and defaults to dry-run. Failed items are skipped in the next normal batch so a deterministic failure cannot block thousands of later items; run with `--retry-failures` after repairing the root cause.
+- The importer rejects negative `--limit` and `--max-pages` values. Already-closed destination copies are also reindexed so a lost SQLite database cannot recreate them.
 - This PR contains the importer, **not a completed migration**. Do not claim successful import of all records or completed CI builds on the Godot engine.
