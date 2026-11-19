@@ -49,7 +49,7 @@ jobs:
           BIN=./bin/godot.linuxbsd.editor.dev.x86_64
           "$BIN" --headless --path tests/stress --script res://stress.gd --check-only
           python3 tests/stress/run.py \
-            --godot "$BIN" --case ui_layout --preset standard \
+            --godot "$BIN" --case ui_layout,grid_reflow --preset standard \
             --repeats 5 --timeout 300 --rss-limit-mib 4096 \
             --output grid-layout-results.json --summary-md grid-layout-hotspots.md
       - name: Archive actual engine workload measurements
