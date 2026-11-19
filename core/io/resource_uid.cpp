@@ -34,10 +34,13 @@
 #include "core/crypto/crypto_core.h"
 #include "core/io/dir_access.h"
 #include "core/io/file_access.h"
+#include "core/io/marshalls.h"
 #include "core/io/resource_loader.h"
-#include "core/io/stream_peer.h"
 #include "core/math/random_pcg.h"
 #include "core/object/class_db.h"
+
+#include <climits>
+#include <cstring>
 
 // These constants are off by 1, causing the 'z' and '9' characters never to be used.
 // This cannot be fixed without breaking compatibility; see GH-83843.
@@ -268,18 +271,29 @@ String ResourceUID::ensure_path_nocheck(const String &p_uid_or_path) {
 }
 
 Vector<uint8_t> ResourceUID::encode_binary_cache(const Vector<Pair<ID, String>> &p_entries) {
-	Ref<StreamPeerBuffer> buffer;
-	buffer.instantiate();
-	buffer->put_u32(p_entries.size());
+	// The cache is written in little-endian order: entry count, then each UID,
+	// UTF-8 byte length and path. Build it directly instead of growing a
+	// StreamPeerBuffer with three separate writes per entry.
+	Vector<uint8_t> data;
+	ERR_FAIL_COND_V(data.resize_uninitialized(4) != OK, Vector<uint8_t>());
+	encode_uint32(p_entries.size(), data.ptrw());
 
 	for (const Pair<ID, String> &entry : p_entries) {
-		buffer->put_u64(uint64_t(entry.first));
-		CharString cs = entry.second.utf8();
-		buffer->put_u32(cs.length());
-		buffer->put_data((const uint8_t *)cs.ptr(), cs.length());
+		CharString path = entry.second.utf8();
+		const uint64_t append_size = 12 + uint64_t(path.length());
+		ERR_FAIL_COND_V_MSG(append_size > uint64_t(INT32_MAX - data.size()), Vector<uint8_t>(), "Resource UID cache exceeds maximum vector size.");
+
+		const int offset = data.size();
+		ERR_FAIL_COND_V(data.resize_uninitialized(offset + int(append_size)) != OK, Vector<uint8_t>());
+		uint8_t *write = data.ptrw() + offset;
+		encode_uint64(uint64_t(entry.first), write);
+		encode_uint32(path.length(), write + 8);
+		if (path.length() > 0) {
+			memcpy(write + 12, path.ptr(), path.length());
+		}
 	}
 
-	return buffer->get_data_array();
+	return data;
 }
 
 Error ResourceUID::save_to_cache() {
@@ -296,17 +310,33 @@ Error ResourceUID::save_to_cache() {
 
 	MutexLock l(mutex);
 
-	Vector<Pair<ID, String>> entries;
-	entries.reserve(unique_ids.size());
-	cache_entries = 0;
+	// Paths are already stored as UTF-8. Writing them directly avoids building
+	// a temporary list of Strings and converting every path back to UTF-8.
+	uint64_t encoded_size = 4;
+	for (const KeyValue<ID, Cache> &E : unique_ids) {
+		encoded_size += 12 + uint64_t(E.value.cs.length());
+		ERR_FAIL_COND_V_MSG(encoded_size > INT32_MAX, ERR_OUT_OF_MEMORY, "Resource UID cache is too large.");
+	}
 
+	Vector<uint8_t> data;
+	ERR_FAIL_COND_V(data.resize_uninitialized(int(encoded_size)) != OK, ERR_OUT_OF_MEMORY);
+	uint8_t *write = data.ptrw();
+	encode_uint32(unique_ids.size(), write);
+	write += 4;
+
+	cache_entries = 0;
 	for (KeyValue<ID, Cache> &E : unique_ids) {
-		entries.push_back(Pair<ID, String>(E.key, String::utf8(E.value.cs.ptr(), E.value.cs.length())));
+		const uint32_t path_length = E.value.cs.length();
+		encode_uint64(uint64_t(E.key), write);
+		encode_uint32(path_length, write + 8);
+		if (path_length > 0) {
+			memcpy(write + 12, E.value.cs.ptr(), path_length);
+		}
+		write += 12 + path_length;
 		E.value.saved_to_cache = true;
 		cache_entries++;
 	}
 
-	Vector<uint8_t> data = encode_binary_cache(entries);
 	f->store_buffer(data.ptr(), data.size());
 
 	changed = false;
@@ -327,10 +357,34 @@ Error ResourceUID::load_from_cache(bool p_reset) {
 		unique_ids.clear();
 	}
 
-	uint32_t entry_count = f->get_32();
+	const uint64_t file_length = f->get_length();
+	ERR_FAIL_COND_V_MSG(file_length < 4, ERR_FILE_CORRUPT, "Resource UID cache is too short.");
+
+	const uint32_t entry_count = f->get_32();
+	// Every entry needs at least an 8-byte ID and a 4-byte path length.
+	// Validate the count before allocating hash-table backing storage.
+	ERR_FAIL_COND_V_MSG(uint64_t(entry_count) > (file_length - 4) / 12, ERR_FILE_CORRUPT, "Resource UID cache has an invalid entry count.");
+
+	// Pre-size both hash tables once, including any previously loaded entries
+	// when p_reset is false. Account for the 75% maximum table occupancy.
+	// This avoids repeated rehashes and temporary peak-memory spikes when
+	// loading resource-heavy projects with many cache entries.
+	const uint64_t target_size = uint64_t(unique_ids.size()) + entry_count;
+	if (entry_count > 0 && target_size <= (uint64_t(UINT32_MAX) * 3) / 4) {
+		const uint32_t required_capacity = uint32_t((target_size * 4 + 2) / 3);
+		unique_ids.reserve(required_capacity);
+		if (use_reverse_cache) {
+			const uint64_t reverse_size = uint64_t(reverse_cache.size()) + entry_count;
+			if (reverse_size <= (uint64_t(UINT32_MAX) * 3) / 4) {
+				reverse_cache.reserve(uint32_t((reverse_size * 4 + 2) / 3));
+			}
+		}
+	}
 	for (uint32_t i = 0; i < entry_count; i++) {
 		int64_t id = f->get_64();
 		int32_t len = f->get_32();
+		const uint64_t path_position = f->get_position();
+		ERR_FAIL_COND_V_MSG(len < 0 || path_position > file_length || uint64_t(len) > file_length - path_position, ERR_FILE_CORRUPT, "Resource UID cache has an invalid path length.");
 		Cache c;
 		c.cs.resize_uninitialized(len + 1);
 		ERR_FAIL_COND_V(c.cs.size() != len + 1, ERR_FILE_CORRUPT); // Out of memory.

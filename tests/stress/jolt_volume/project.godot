@@ -1,0 +1,16 @@
+config_version=5
+
+[application]
+
+config/name="Cgame Jolt Convex Volume Regression"
+
+[physics]
+
+3d/physics_engine="Jolt Physics"
+jolt_physics_3d/simulation/soft_body_volume_preservation=true
+jolt_physics_3d/simulation/soft_body_volume_compliance=0.00001
+
+[rendering]
+
+renderer/rendering_method="gl_compatibility"
+renderer/rendering_method.mobile="gl_compatibility"

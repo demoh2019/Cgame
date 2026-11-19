@@ -1,0 +1,36 @@
+name: Clustered fragment subgroup dispatch regressions
+
+on:
+  push:
+    branches: [develop]
+    paths:
+      - 'servers/rendering/renderer_rd/shaders/forward_clustered/scene_forward_clustered.glsl'
+      - 'misc/scripts/tests/test_fragment_subgroup_dispatch_perf.py'
+      - '.github/workflows/fragment-subgroup-perf.yml'
+  pull_request:
+    branches: [develop]
+    paths:
+      - 'servers/rendering/renderer_rd/shaders/forward_clustered/scene_forward_clustered.glsl'
+      - 'misc/scripts/tests/test_fragment_subgroup_dispatch_perf.py'
+      - '.github/workflows/fragment-subgroup-perf.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  source-and-subgroup-model:
+    runs-on: ubuntu-24.04
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ['3.9', '3.13']
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+      - name: Validate source and mixed-subgroup dispatch semantics
+        run: |
+          python -m py_compile misc/scripts/tests/test_fragment_subgroup_dispatch_perf.py
+          python -m unittest discover -s misc/scripts/tests -p test_fragment_subgroup_dispatch_perf.py -v

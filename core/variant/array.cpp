@@ -296,16 +296,38 @@ void Array::append_array(const Array &p_array) {
 	// Pin the source against reentrant mutation during conversion
 	const Vector<Variant> source = p_array._p->array;
 	const Variant *read = source.ptr();
+	const int count = source.size();
 
-	Vector<Variant> validated_array;
-	validated_array.resize(source.size());
-	Variant *write = validated_array.ptrw();
-
-	for (int i = 0; i < validated_array.size(); ++i) {
-		const Variant *value = _p->typed.validate(read[i], write[i], "append_array");
+	// Find the first element that needs converting.
+	int i = 0;
+	Variant tmp;
+	for (; i < count; ++i) {
+		const Variant *value = _p->typed.validate(read[i], tmp, "append_array");
 		ERR_FAIL_NULL(value);
-		if (value != &write[i]) {
-			write[i] = *value;
+		if (value == &tmp) {
+			break;
+		}
+	}
+
+	// If nothing needs converting, append the shared source directly.
+	if (i == count) {
+		_p->array.append_array(source);
+		return;
+	}
+
+	// Copy the compatible values validated so far, then convert the rest.
+	Vector<Variant> validated_array;
+	validated_array.resize(count);
+	Variant *write = validated_array.ptrw();
+	for (int j = 0; j < i; ++j) {
+		write[j] = read[j];
+	}
+	write[i] = std::move(tmp);
+	for (int j = i + 1; j < count; ++j) {
+		const Variant *value = _p->typed.validate(read[j], write[j], "append_array");
+		ERR_FAIL_NULL(value);
+		if (value != &write[j]) {
+			write[j] = *value;
 		}
 	}
 
@@ -620,12 +642,10 @@ Array Array::slice(int p_begin, int p_end, int p_step, bool p_deep) const {
 
 Array Array::filter(const Callable &p_callable) const {
 	Array new_arr;
-	new_arr.resize(size());
-	new_arr._p->typed = _p->typed;
 	int accepted_count = 0;
+	Variant *write = nullptr;
 
 	const Variant *argptrs[1];
-	Variant *write = new_arr._p->array.ptrw();
 	for (int i = 0; i < size(); i++) {
 		argptrs[0] = &get(i);
 
@@ -637,13 +657,31 @@ Array Array::filter(const Callable &p_callable) const {
 		}
 
 		if (result.operator bool()) {
-			write[accepted_count] = get(i);
-			accepted_count++;
+			if (write == nullptr) {
+				// Most filtering to an empty result needs no element buffer at all.
+				// Allocate only after the first accepted item, preserving one allocation
+				// for common nonempty results and the original callback order.
+				// Earlier elements were rejected, so the maximum possible result
+				// is the remaining suffix rather than the entire source.
+				new_arr.resize(size() - i);
+				write = new_arr._p->array.ptrw();
+			}
+			// Callbacks may mutate the source, so fetch the value after the call.
+			// Grow if callbacks extended the source after the initial allocation.
+			if (accepted_count == new_arr.size()) {
+				new_arr.resize(accepted_count + 1);
+				write = new_arr._p->array.ptrw();
+			}
+			write[accepted_count++] = get(i);
 		}
 	}
 
-	new_arr.resize(accepted_count);
-
+	if (write != nullptr) {
+		new_arr.resize(accepted_count);
+	}
+	// Apply the source's type after resizing to avoid initializing every
+	// temporary slot as a typed Variant.
+	new_arr._p->typed = _p->typed;
 	return new_arr;
 }
 
@@ -904,22 +942,34 @@ Array::Array(const Array &p_from, uint32_t p_type, const StringName &p_class_nam
 	assign(p_from);
 }
 
+Array::Array(const Array &p_from, uint32_t p_type, const StringName &p_class_name, const Ref<Script> &p_script) {
+	_p = memnew(ArrayPrivate);
+	_p->refcount.init();
+	set_typed(p_type, p_class_name, p_script);
+	assign(p_from);
+}
+
 void Array::set_typed(const ContainerType &p_element_type) {
 	set_typed(p_element_type.variant_type, p_element_type.class_name, p_element_type.script);
 }
 
 void Array::set_typed(uint32_t p_type, const StringName &p_class_name, const Variant &p_script) {
+	// Preserve the existing Variant-based API for scripts and extensions.
+	Ref<Script> script = p_script;
+	set_typed(p_type, p_class_name, script);
+}
+
+void Array::set_typed(uint32_t p_type, const StringName &p_class_name, const Ref<Script> &p_script) {
 	ERR_FAIL_COND_MSG(_p->read_only, "Array is in read-only state.");
 	ERR_FAIL_COND_MSG(_p->array.size() > 0, "Type can only be set when array is empty.");
 	ERR_FAIL_COND_MSG(_p->refcount.get() > 1, "Type can only be set when array has no more than one user.");
 	ERR_FAIL_COND_MSG(_p->typed.variant_type != Variant::NIL, "Type can only be set once.");
 	ERR_FAIL_COND_MSG(p_class_name != StringName() && p_type != Variant::OBJECT, "Class names can only be set for type OBJECT");
-	Ref<Script> script = p_script;
-	ERR_FAIL_COND_MSG(script.is_valid() && p_class_name == StringName(), "Script class can only be set together with base class name");
+	ERR_FAIL_COND_MSG(p_script.is_valid() && p_class_name == StringName(), "Script class can only be set together with base class name");
 
 	_p->typed.variant_type = Variant::Type(p_type);
 	_p->typed.class_name = p_class_name;
-	_p->typed.script = script;
+	_p->typed.script = p_script;
 	_p->typed.where = "TypedArray";
 }
 

@@ -1,0 +1,59 @@
+name: HTTP header zero-allocation ASCII parsing
+
+on:
+  pull_request:
+    paths:
+      - "core/io/http_client_tcp.cpp"
+      - "core/io/http_header_utils.h"
+      - "tests/core/io/test_http_header_utils.cpp"
+      - "misc/scripts/tests/test_http_header_ascii.py"
+      - ".github/workflows/perf-http-header-ascii.yml"
+  push:
+    branches: [develop]
+    paths:
+      - "core/io/http_client_tcp.cpp"
+      - "core/io/http_header_utils.h"
+      - "tests/core/io/test_http_header_utils.cpp"
+      - "misc/scripts/tests/test_http_header_ascii.py"
+      - ".github/workflows/perf-http-header-ascii.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  production-header-compile:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    strategy:
+      fail-fast: false
+      matrix:
+        compiler: [g++, clang++]
+    steps:
+      - uses: actions/checkout@v4
+      - name: Compile and exercise the production ASCII matcher
+        env:
+          CXX: ${{ matrix.compiler }}
+        run: python3 -m unittest discover -s misc/scripts/tests -p 'test_http_header_ascii.py' -v
+
+  native-engine:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install native build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libwayland-bin
+      - uses: ./.github/actions/godot-deps
+      - name: Build Cgame Linux editor with tests
+        uses: ./.github/actions/godot-build
+        with:
+          platform: linuxbsd
+          target: editor
+          scons-flags: dev_build=yes debug_symbols=no tests=yes module_text_server_fb_enabled=yes -j2
+      - name: Run HTTP header case-folding and token regressions
+        shell: bash
+        run: |
+          set -euo pipefail
+          timeout 240s ./bin/godot.linuxbsd.editor.dev.x86_64 --headless --test --test-suite="*[HTTPHeaderFast]*" --no-colors

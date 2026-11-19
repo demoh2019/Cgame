@@ -1,0 +1,40 @@
+name: Node3D visibility-cache regression tests
+
+on:
+  pull_request:
+    paths:
+      - "scene/3d/node_3d.cpp"
+      - "scene/3d/node_3d.h"
+      - "tests/scene/test_node_3d.cpp"
+      - "misc/scripts/tests/test_upstream_node3d_visibility.py"
+      - ".github/workflows/upstream-node3d-visibility.yml"
+  push:
+    branches: [develop]
+    paths:
+      - "scene/3d/node_3d.cpp"
+      - "scene/3d/node_3d.h"
+      - "tests/scene/test_node_3d.cpp"
+      - "misc/scripts/tests/test_upstream_node3d_visibility.py"
+      - ".github/workflows/upstream-node3d-visibility.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  fast-contracts:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          sparse-checkout: |
+            scene/3d/node_3d.cpp
+            scene/3d/node_3d.h
+            tests/scene/test_node_3d.cpp
+            misc/scripts/tests/test_upstream_node3d_visibility.py
+          sparse-checkout-cone-mode: false
+      - name: Check test syntax
+        run: python3 -m py_compile misc/scripts/tests/test_upstream_node3d_visibility.py
+      - name: Run Node3D visibility source regressions
+        run: python3 -m unittest discover -s misc/scripts/tests -p 'test_upstream_node3d_visibility.py' -v

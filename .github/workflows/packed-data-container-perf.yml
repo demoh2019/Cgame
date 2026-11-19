@@ -1,0 +1,38 @@
+name: PackedDataContainer zero-copy and dictionary search regressions
+
+on:
+  push:
+    branches: [develop]
+    paths:
+      - 'core/io/packed_data_container.cpp'
+      - 'core/io/packed_data_container.h'
+      - 'tests/core/io/test_packed_data_container.cpp'
+      - '.github/workflows/packed-data-container-perf.yml'
+  pull_request:
+    paths:
+      - 'core/io/packed_data_container.cpp'
+      - 'core/io/packed_data_container.h'
+      - 'tests/core/io/test_packed_data_container.cpp'
+      - '.github/workflows/packed-data-container-perf.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  native-packed-data-regressions:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+      - uses: ./.github/actions/godot-deps
+      - name: Build native editor with unit tests
+        uses: ./.github/actions/godot-build
+        with:
+          platform: linuxbsd
+          target: editor
+          scons-flags: dev_build=yes tests=yes debug_symbols=no module_mono_enabled=no module_text_server_fb_enabled=yes accesskit=no -j2
+      - name: Run packed data round-trip and hash index regressions
+        run: ./bin/godot.linuxbsd.editor.dev.x86_64 --headless --test --test-case="*[PackedDataContainer]*" --no-colors

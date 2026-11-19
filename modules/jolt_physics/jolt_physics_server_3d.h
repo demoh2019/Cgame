@@ -64,6 +64,10 @@ class JoltPhysicsServer3D final : public PhysicsServer3D {
 	bool flushing_queries = false;
 	bool doing_sync = false;
 
+	// Cached after physics step; readers never traverse live Jolt body lists.
+	int active_body_count = 0;
+	int collision_manifold_count = 0;
+
 public:
 	enum HingeJointParamJolt {
 		HINGE_JOINT_LIMIT_SPRING_FREQUENCY = 100,

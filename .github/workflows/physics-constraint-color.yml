@@ -1,0 +1,38 @@
+name: Physics constraint color bit-scan regression
+
+on:
+  pull_request:
+    paths:
+      - "servers/physics_constraint_color.h"
+      - "modules/godot_physics_2d/godot_step_2d.cpp"
+      - "modules/godot_physics_3d/godot_step_3d.cpp"
+      - "tests/servers/test_physics_constraint_color.cpp"
+      - "tests/stress/test_physics_constraint_color.py"
+      - "tests/stress/benchmark_physics_constraint_color.cpp"
+      - ".github/workflows/physics-constraint-color.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  color-contracts:
+    name: Color selection contracts (${{ matrix.compiler }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        compiler: [g++, clang++]
+    steps:
+      - uses: actions/checkout@v4
+      - name: Source wiring contracts
+        run: python3 -m unittest discover -s tests/stress -p 'test_physics_constraint_color.py' -v
+      - name: Build standalone parity test and microbenchmark
+        env:
+          CXX: ${{ matrix.compiler }}
+        run: |
+          "$CXX" -std=c++17 -O3 -Wall -Wextra -Werror -pedantic -I. \
+            tests/stress/benchmark_physics_constraint_color.cpp \
+            -o "$RUNNER_TEMP/physics-color-bench"
+      - name: Check all 65536 color masks and time hot loop
+        run: "$RUNNER_TEMP/physics-color-bench"

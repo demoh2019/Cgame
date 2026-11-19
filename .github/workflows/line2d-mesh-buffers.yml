@@ -1,0 +1,35 @@
+name: Line2D mesh buffer reservation regressions
+
+on:
+  pull_request:
+    paths:
+      - 'scene/2d/line_builder.cpp'
+      - 'tests/scene/test_line_builder.cpp'
+      - '.github/workflows/line2d-mesh-buffers.yml'
+  push:
+    branches: [develop]
+    paths:
+      - 'scene/2d/line_builder.cpp'
+      - 'tests/scene/test_line_builder.cpp'
+      - '.github/workflows/line2d-mesh-buffers.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  native-line-builder:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+      - uses: ./.github/actions/godot-deps
+      - uses: ./.github/actions/godot-build
+        with:
+          platform: linuxbsd
+          target: editor
+          scons-flags: dev_build=yes tests=yes debug_symbols=no module_mono_enabled=no accesskit=no -j2
+      - name: Validate Line2D mesh generation
+        run: ./bin/godot.linuxbsd.editor.dev.x86_64 --headless --test --test-case="*[LineBuilder]*"

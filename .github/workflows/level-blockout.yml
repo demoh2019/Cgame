@@ -1,0 +1,38 @@
+name: Godot level blockout regression tests
+
+on:
+  push:
+    paths:
+      - 'misc/scripts/level_blockout.py'
+      - 'misc/scripts/tests/test_level_blockout.py'
+      - 'misc/scripts/README_level_blockout.md'
+      - 'misc/level_blockout/**'
+      - '.github/workflows/level-blockout.yml'
+  pull_request:
+    paths:
+      - 'misc/scripts/level_blockout.py'
+      - 'misc/scripts/tests/test_level_blockout.py'
+      - 'misc/scripts/README_level_blockout.md'
+      - 'misc/level_blockout/**'
+      - '.github/workflows/level-blockout.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  python-tests:
+    runs-on: ubuntu-24.04
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ['3.9', '3.13']
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+      - name: Validate generator syntax and run tests
+        run: |
+          python -m py_compile misc/scripts/level_blockout.py misc/scripts/tests/test_level_blockout.py
+          python -m unittest discover -s misc/scripts/tests -p test_level_blockout.py -v

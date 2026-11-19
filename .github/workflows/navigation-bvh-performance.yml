@@ -1,0 +1,54 @@
+name: Fast navigation BVH regression
+
+on:
+  pull_request:
+    branches: [develop]
+    paths:
+      - "modules/navigation_2d/**"
+      - "modules/navigation_3d/**"
+      - "tests/servers/test_navigation_polygon_bvh.cpp"
+      - "tests/servers/test_nav_polygon_bvh.cpp"
+      - "misc/scripts/tests/test_navigation_bvh_upstream.py"
+      - ".github/workflows/navigation-bvh-performance.yml"
+  push:
+    branches: [develop]
+    paths:
+      - "modules/navigation_2d/**"
+      - "modules/navigation_3d/**"
+      - "tests/servers/test_navigation_polygon_bvh.cpp"
+      - "tests/servers/test_nav_polygon_bvh.cpp"
+      - "misc/scripts/tests/test_navigation_bvh_upstream.py"
+      - ".github/workflows/navigation-bvh-performance.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  source-contracts:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - name: Run integration contracts
+        run: |
+          python3 -m py_compile misc/scripts/tests/test_navigation_bvh_upstream.py
+          python3 -m unittest discover -s misc/scripts/tests -p 'test_navigation_bvh_upstream.py' -v
+
+  native-navigation:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+      - uses: ./.github/actions/godot-deps
+      - uses: ./.github/actions/godot-build
+        with:
+          platform: linuxbsd
+          target: editor
+          scons-flags: dev_build=yes tests=yes debug_symbols=no module_mono_enabled=no accesskit=no
+      - name: Validate exact BVH nearest-polygon queries in both dimensions
+        run: |
+          timeout 300s ./bin/godot.linuxbsd.editor.dev.x86_64 --headless --test --test-case="*[NavigationBVH2D]*" --no-colors
+          timeout 300s ./bin/godot.linuxbsd.editor.dev.x86_64 --headless --test --test-case="*[NavigationBVH3D]*" --no-colors

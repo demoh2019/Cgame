@@ -155,51 +155,66 @@ public:
 
 		_update_sorting();
 
-		// Binary search.
-		int low = 0;
-		int high = points.size() - 1;
-		int middle = 0;
+		int first;
+		int second;
+		if (likely(points.size() == 2)) {
+			// Most gradients have the default two stops. No binary search or
+			// midpoint reads are needed; keep the existing interpolation below.
+			// Negated comparisons preserve the old behavior for NaN offsets.
+			if (!(p_offset > points[0].offset)) {
+				return points[0].color;
+			}
+			if (!(p_offset < points[1].offset)) {
+				return points[1].color;
+			}
+			first = 0;
+			second = 1;
+		} else {
+			// Binary search.
+			int low = 0;
+			int high = points.size() - 1;
+			int middle = 0;
 
 #ifdef DEBUG_ENABLED
-		if (low > high) {
-			ERR_PRINT("low > high, this may be a bug");
-		}
+			if (low > high) {
+				ERR_PRINT("low > high, this may be a bug");
+			}
 #endif
 
-		while (low <= high) {
-			middle = (low + high) / 2;
-			const Point &point = points[middle];
-			if (point.offset > p_offset) {
-				high = middle - 1; //search low end of array
-			} else if (point.offset < p_offset) {
-				low = middle + 1; //search high end of array
-			} else {
-				return point.color;
+			while (low <= high) {
+				middle = (low + high) / 2;
+				const Point &point = points[middle];
+				if (point.offset > p_offset) {
+					high = middle - 1; //search low end of array
+				} else if (point.offset < p_offset) {
+					low = middle + 1; //search high end of array
+				} else {
+					return point.color;
+				}
 			}
-		}
 
-		// Return sampled value.
-		if (points[middle].offset > p_offset) {
-			middle--;
-		}
-		int first = middle;
-		int second = middle + 1;
-		if (second >= (int)points.size()) {
-			return points[points.size() - 1].color;
-		}
-		if (first < 0) {
-			return points[0].color;
+			// Return sampled value.
+			if (points[middle].offset > p_offset) {
+				middle--;
+			}
+			first = middle;
+			second = middle + 1;
+			if (second >= (int)points.size()) {
+				return points[points.size() - 1].color;
+			}
+			if (first < 0) {
+				return points[0].color;
+			}
 		}
 		const Point &point1 = points[first];
 		const Point &point2 = points[second];
-		float weight = (p_offset - point1.offset) / (point2.offset - point1.offset);
-
 		switch (interpolation_mode) {
 			case GRADIENT_INTERPOLATE_CONSTANT: {
 				return point1.color;
 			}
 			case GRADIENT_INTERPOLATE_LINEAR:
 			default: { // Fallback to linear interpolation.
+				const float weight = (p_offset - point1.offset) / (point2.offset - point1.offset);
 				Color color1 = transform_color_space(point1.color);
 				Color color2 = transform_color_space(point2.color);
 
@@ -207,6 +222,7 @@ public:
 				return inv_transform_color_space(interpolated);
 			}
 			case GRADIENT_INTERPOLATE_CUBIC: {
+				const float weight = (p_offset - point1.offset) / (point2.offset - point1.offset);
 				int p0 = first - 1;
 				int p3 = second + 1;
 				if (p3 >= (int)points.size()) {

@@ -243,7 +243,8 @@ Error RemoteFilesystemClient::_synchronize_with_server(const String &p_host, int
 
 	Vector<FileCache> temp_file_cache;
 
-	HashSet<String> files_processed;
+	// Limit eager allocation for server-provided counts while keeping ordinary syncs fast.
+	HashSet<String> files_processed(MIN(file_count, 65536u));
 	for (uint32_t i = 0; i < file_count; i++) {
 		String file = tcp_client->get_utf8_string();
 		ERR_FAIL_COND_V_MSG(file == String(), ERR_CONNECTION_ERROR, "Invalid file name received from remote filesystem.");

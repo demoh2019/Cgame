@@ -1,0 +1,34 @@
+name: Jolt soft-body aerodynamics and bending
+
+on:
+  pull_request:
+    paths:
+      - "modules/jolt_physics/objects/jolt_soft_body_3d.cpp"
+      - "modules/jolt_physics/objects/jolt_soft_body_3d.h"
+      - "modules/jolt_physics/jolt_project_settings.cpp"
+      - "modules/jolt_physics/jolt_project_settings.h"
+      - "tests/stress/test_jolt_softbody_aerodynamics.py"
+      - ".github/workflows/jolt-softbody-aerodynamics-bending.yml"
+  push:
+    paths:
+      - "modules/jolt_physics/objects/jolt_soft_body_3d.cpp"
+      - "modules/jolt_physics/objects/jolt_soft_body_3d.h"
+      - "modules/jolt_physics/jolt_project_settings.cpp"
+      - "modules/jolt_physics/jolt_project_settings.h"
+      - "tests/stress/test_jolt_softbody_aerodynamics.py"
+      - ".github/workflows/jolt-softbody-aerodynamics-bending.yml"
+  workflow_dispatch:
+
+jobs:
+  source-contracts:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Validate numerical invariants and code wiring
+        run: python3 -m unittest tests/stress/test_jolt_softbody_aerodynamics.py -v
+      - name: Check fixture paths
+        run: test -f tests/stress/jolt_physics/project.godot && test -f tests/stress/jolt_physics/softbody_aerodynamics_regression.gd

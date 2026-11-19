@@ -1,0 +1,36 @@
+name: Upstream mobile pipeline prewarm regression tests
+
+on:
+  pull_request:
+    paths:
+      - "servers/rendering/renderer_rd/forward_mobile/render_forward_mobile.cpp"
+      - "servers/rendering/renderer_rd/forward_mobile/render_forward_mobile.h"
+      - "misc/scripts/tests/test_upstream_mobile_pipelines.py"
+      - ".github/workflows/upstream-mobile-pipelines.yml"
+  push:
+    branches: [develop]
+    paths:
+      - "servers/rendering/renderer_rd/forward_mobile/render_forward_mobile.cpp"
+      - "servers/rendering/renderer_rd/forward_mobile/render_forward_mobile.h"
+      - "misc/scripts/tests/test_upstream_mobile_pipelines.py"
+      - ".github/workflows/upstream-mobile-pipelines.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  source-contracts:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          sparse-checkout: |
+            misc/scripts/tests/test_upstream_mobile_pipelines.py
+            servers/rendering/renderer_rd/forward_mobile
+          sparse-checkout-cone-mode: false
+      - name: Validate Python test syntax
+        run: python3 -m py_compile misc/scripts/tests/test_upstream_mobile_pipelines.py
+      - name: Run 26 mobile pipeline scheduling and configuration regression contracts
+        run: python3 -m unittest discover -s misc/scripts/tests -p 'test_upstream_mobile_pipelines.py' -v

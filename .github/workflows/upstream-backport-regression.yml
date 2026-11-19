@@ -1,0 +1,37 @@
+name: Upstream Backport Invariants
+
+on:
+  push:
+    branches: [develop]
+    paths:
+      - 'editor/docks/filesystem_dock.cpp'
+      - 'scene/3d/audio_stream_player_3d.cpp'
+      - 'modules/gdscript/gdscript_editor.cpp'
+      - 'servers/rendering/rendering_server_default.h'
+      - 'tests/core/io/test_image.cpp'
+      - 'misc/scripts/tests/test_upstream_backports_20261119.py'
+      - '.github/workflows/upstream-backport-regression.yml'
+  pull_request:
+    paths:
+      - 'editor/docks/filesystem_dock.cpp'
+      - 'scene/3d/audio_stream_player_3d.cpp'
+      - 'modules/gdscript/gdscript_editor.cpp'
+      - 'servers/rendering/rendering_server_default.h'
+      - 'tests/core/io/test_image.cpp'
+      - 'misc/scripts/tests/test_upstream_backports_20261119.py'
+      - '.github/workflows/upstream-backport-regression.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  backport-source-guards:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+      - name: Check source invariants for selected upstream backports
+        run: python3 -m unittest discover -s misc/scripts/tests -p test_upstream_backports_20261119.py -v

@@ -178,13 +178,47 @@ private:
 		}
 	}
 
+	// Remove one bucket by shifting the following Robin Hood probe chain into
+	// the hole. The evicted node is returned so callers can unlink or re-key it
+	// without copying it through every displaced bucket.
+	_FORCE_INLINE_ HashMapElement<TKey, TValue> *_remove_bucket(uint32_t p_idx) {
+		const uint32_t capacity = hash_table_size_primes[_capacity_idx];
+		const uint64_t capacity_inv = hash_table_size_primes_inv[_capacity_idx];
+		HashMapElement<TKey, TValue> *removed = _elements[p_idx];
+
+		uint32_t next_idx = p_idx;
+		_increment_mod(next_idx, capacity);
+		while (_hashes[next_idx] != EMPTY_HASH && next_idx != fastmod(_hashes[next_idx], capacity_inv, capacity)) {
+			_hashes[p_idx] = _hashes[next_idx];
+			_elements[p_idx] = _elements[next_idx];
+			p_idx = next_idx;
+			_increment_mod(next_idx, capacity);
+		}
+		_hashes[p_idx] = EMPTY_HASH;
+		return removed;
+	}
+
 	void _resize_and_rehash(uint32_t p_new_capacity_idx) {
 		uint32_t old_capacity = hash_table_size_primes[_capacity_idx];
+		const uint32_t old_size = _size;
 
 		// Capacity can't be 0.
 		_capacity_idx = MAX((uint32_t)MIN_CAPACITY_INDEX, p_new_capacity_idx);
 
 		uint32_t capacity = hash_table_size_primes[_capacity_idx];
+
+		// All occupied slots have already been cleared. When an empty but
+		// allocated map grows after clear(), there is no need to allocate a
+		// second table and rehash anything. Reuse both buffers, zeroing
+		// only the newly added hash slots. This avoids copying and
+		// zeroing the old hash array twice and reduces peak allocations.
+		if (_elements != nullptr && _size == 0 && capacity > old_capacity) {
+			_hashes = reinterpret_cast<uint32_t *>(Memory::realloc_static(_hashes, sizeof(uint32_t) * capacity));
+			_elements = reinterpret_cast<HashMapElement<TKey, TValue> **>(
+					Memory::realloc_static(_elements, sizeof(HashMapElement<TKey, TValue> *) * capacity));
+			memset(_hashes + old_capacity, EMPTY_HASH, (capacity - old_capacity) * sizeof(uint32_t));
+			return;
+		}
 
 		HashMapElement<TKey, TValue> **old_elements = _elements;
 		uint32_t *old_hashes = _hashes;
@@ -200,12 +234,23 @@ private:
 			return;
 		}
 
-		for (uint32_t i = 0; i < old_capacity; i++) {
-			if (old_hashes[i] == EMPTY_HASH) {
-				continue;
+		// Rehashing a sparsely populated, heavily reserved table should
+		// not scan all its empty buckets. Hash the live linked-list nodes
+		// directly when they are far fewer than the available slots.
+		// For dense tables, keep the cached hashes and linear bucket scan:
+		// it avoids potentially expensive key hashing.
+		if (old_capacity >= 4096 && old_size <= old_capacity / 64) {
+			for (HashMapElement<TKey, TValue> *entry = _head_element; entry != nullptr; entry = entry->next) {
+				_insert_element(_hash(entry->data.key), entry);
 			}
+		} else {
+			for (uint32_t i = 0; i < old_capacity; i++) {
+				if (old_hashes[i] == EMPTY_HASH) {
+					continue;
+				}
 
-			_insert_element(old_hashes[i], old_elements[i]);
+				_insert_element(old_hashes[i], old_elements[i]);
+			}
 		}
 
 		Memory::free_static(old_elements);
@@ -270,8 +315,27 @@ public:
 			return;
 		}
 
-		_clear_data();
-		memset(_hashes, EMPTY_HASH, get_capacity() * sizeof(uint32_t));
+		const uint32_t capacity = get_capacity();
+		if (_size <= 64 && capacity >= 4096 && _size <= capacity / 256) {
+			// For a mostly empty, highly reserved table, a full memset can
+			// touch megabytes of unused hash slots. Collect occupied indices
+			// before destroying any entries so Robin Hood lookups remain valid.
+			// This stays on the stack and does not change reserved capacity.
+			uint32_t occupied_slots[64];
+			uint32_t occupied_count = 0;
+			for (HashMapElement<TKey, TValue> *entry = _head_element; entry != nullptr; entry = entry->next) {
+				uint32_t index = 0;
+				CRASH_COND(!_lookup_idx_unchecked(entry->data.key, _hash(entry->data.key), index));
+				occupied_slots[occupied_count++] = index;
+			}
+			_clear_data();
+			for (uint32_t i = 0; i < occupied_count; i++) {
+				_hashes[occupied_slots[i]] = EMPTY_HASH;
+			}
+		} else {
+			_clear_data();
+			memset(_hashes, EMPTY_HASH, capacity * sizeof(uint32_t));
+		}
 
 		_tail_element = nullptr;
 		_head_element = nullptr;
@@ -340,40 +404,50 @@ public:
 			return false;
 		}
 
-		const uint32_t capacity = hash_table_size_primes[_capacity_idx];
-		const uint64_t capacity_inv = hash_table_size_primes_inv[_capacity_idx];
-
-		uint32_t next_idx = idx;
-		_increment_mod(next_idx, capacity);
-		while (_hashes[next_idx] != EMPTY_HASH && next_idx != fastmod(_hashes[next_idx], capacity_inv, capacity)) {
-			SWAP(_hashes[next_idx], _hashes[idx]);
-			SWAP(_elements[next_idx], _elements[idx]);
-			idx = next_idx;
-			_increment_mod(next_idx, capacity);
+		HashMapElement<TKey, TValue> *removed = _remove_bucket(idx);
+		if (_head_element == removed) {
+			_head_element = removed->next;
 		}
-
-		_hashes[idx] = EMPTY_HASH;
-
-		if (_head_element == _elements[idx]) {
-			_head_element = _elements[idx]->next;
+		if (_tail_element == removed) {
+			_tail_element = removed->prev;
 		}
-
-		if (_tail_element == _elements[idx]) {
-			_tail_element = _elements[idx]->prev;
+		if (removed->prev) {
+			removed->prev->next = removed->next;
 		}
-
-		if (_elements[idx]->prev) {
-			_elements[idx]->prev->next = _elements[idx]->next;
+		if (removed->next) {
+			removed->next->prev = removed->prev;
 		}
-
-		if (_elements[idx]->next) {
-			_elements[idx]->next->prev = _elements[idx]->prev;
-		}
-
-		Allocator::delete_allocation(_elements[idx]);
+		Allocator::delete_allocation(removed);
 
 		_size--;
 		return true;
+	}
+
+	// Mark an existing entry as most recently used without reallocating it.
+	// The HashMap's stable node address keeps cached values and userdata pointers valid.
+	TValue *renew_key(const TKey &p_key) {
+		uint32_t idx = 0;
+		if (!_lookup_idx(p_key, idx)) {
+			return nullptr;
+		}
+
+		HashMapElement<TKey, TValue> *entry = _elements[idx];
+		if (entry == _tail_element) {
+			return &entry->data.value;
+		}
+
+		if (entry->prev != nullptr) {
+			entry->prev->next = entry->next;
+		} else {
+			_head_element = entry->next;
+		}
+		// A non-tail entry always has a successor.
+		entry->next->prev = entry->prev;
+		entry->prev = _tail_element;
+		entry->next = nullptr;
+		_tail_element->next = entry;
+		_tail_element = entry;
+		return &entry->data.value;
 	}
 
 	// Replace the key of an entry in-place, without invalidating iterators or changing the entries position during iteration.
@@ -387,22 +461,7 @@ public:
 		uint32_t idx = 0;
 		ERR_FAIL_COND_V(_lookup_idx_unchecked(p_new_key, new_hash, idx), false);
 		ERR_FAIL_COND_V(!_lookup_idx(p_old_key, idx), false);
-		HashMapElement<TKey, TValue> *element = _elements[idx];
-
-		// Delete the old entries in _hashes and _elements.
-		const uint32_t capacity = hash_table_size_primes[_capacity_idx];
-		const uint64_t capacity_inv = hash_table_size_primes_inv[_capacity_idx];
-
-		uint32_t next_idx = idx;
-		_increment_mod(next_idx, capacity);
-		while (_hashes[next_idx] != EMPTY_HASH && next_idx != fastmod(_hashes[next_idx], capacity_inv, capacity)) {
-			SWAP(_hashes[next_idx], _hashes[idx]);
-			SWAP(_elements[next_idx], _elements[idx]);
-			idx = next_idx;
-			_increment_mod(next_idx, capacity);
-		}
-
-		_hashes[idx] = EMPTY_HASH;
+		HashMapElement<TKey, TValue> *element = _remove_bucket(idx);
 
 		// _insert_element will increment this again.
 		_size--;

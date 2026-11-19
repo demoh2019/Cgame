@@ -1,0 +1,53 @@
+name: Array filter lazy allocation
+
+on:
+  pull_request:
+    paths:
+      - "core/variant/array.cpp"
+      - "tests/core/variant/test_array_filter_lazy.cpp"
+      - "misc/scripts/tests/test_array_filter_lazy.py"
+      - "misc/benchmarks/array_filter/**"
+      - ".github/workflows/perf-array-filter-lazy.yml"
+  push:
+    branches: [develop]
+    paths:
+      - "core/variant/array.cpp"
+      - "tests/core/variant/test_array_filter_lazy.cpp"
+      - "misc/scripts/tests/test_array_filter_lazy.py"
+      - "misc/benchmarks/array_filter/**"
+      - ".github/workflows/perf-array-filter-lazy.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  source-contracts:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - name: Run allocation and semantics source contracts
+        run: python3 -m unittest discover -s misc/scripts/tests -p test_array_filter_lazy.py -v
+
+  native-editor:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libwayland-bin
+      - uses: ./.github/actions/godot-deps
+      - name: Compile Cgame Linux editor with native tests
+        uses: ./.github/actions/godot-build
+        with:
+          platform: linuxbsd
+          target: editor
+          scons-flags: dev_build=yes debug_symbols=no tests=yes module_text_server_fb_enabled=yes -j2
+      - name: Run Array.filter allocation and behavior regressions
+        shell: bash
+        run: |
+          set -euo pipefail
+          timeout 240s ./bin/godot.linuxbsd.editor.dev.x86_64 --headless --test --test-suite="*[ArrayFilterLazy]*" --no-colors

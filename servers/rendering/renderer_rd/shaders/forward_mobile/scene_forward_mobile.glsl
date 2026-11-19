@@ -166,8 +166,6 @@ ivec2 multiview_uv(ivec2 uv) {
 layout(location = 14) out vec2 point_coord_interp;
 #endif
 
-invariant gl_Position;
-
 #GLOBALS
 
 #define scene_data scene_data_block.data
@@ -1979,6 +1977,7 @@ void main() {
 		ambient_light *= cc_attenuation;
 		indirect_specular_light *= cc_attenuation;
 
+		// Clearcoat Layer
 		// We don't need a BRDF approximation for clearcoat, so we can use the fresnel directly.
 		indirect_specular_light += cc_specular_light * F;
 #endif

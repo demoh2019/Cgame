@@ -1,0 +1,51 @@
+name: Jolt compliant self contact position projection math and source
+
+on:
+  pull_request:
+    branches: [develop]
+    paths:
+      - "modules/jolt_physics/spaces/jolt_space_3d.cpp"
+      - "modules/jolt_physics/jolt_project_settings.cpp"
+      - "modules/jolt_physics/jolt_project_settings.h"
+      - "tests/stress/test_jolt_soft_self_position_projection.py"
+      - "tests/stress/jolt_soft_self_position/**"
+      - ".github/workflows/jolt-soft-self-position-projection.yml"
+  push:
+    branches: [develop]
+    paths:
+      - "modules/jolt_physics/spaces/jolt_space_3d.cpp"
+      - "modules/jolt_physics/jolt_project_settings.cpp"
+      - "modules/jolt_physics/jolt_project_settings.h"
+      - "tests/stress/test_jolt_soft_self_position_projection.py"
+      - "tests/stress/jolt_soft_self_position/**"
+      - ".github/workflows/jolt-soft-self-position-projection.yml"
+  workflow_dispatch:
+
+jobs:
+  compliance-and-jacobi-contracts:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Check compliant self contact, topology, BVH and previous soft physics
+        run: |
+          python3 -m unittest \
+            tests/stress/test_jolt_soft_self_position_projection.py \
+            tests/stress/test_jolt_soft_self_persistent_bvh.py \
+            tests/stress/test_jolt_soft_self_edge_bvh.py \
+            tests/stress/test_jolt_soft_self_edge_contacts.py \
+            tests/stress/test_jolt_soft_self_contacts.py \
+            tests/stress/test_jolt_soft_soft_edge_sweep.py \
+            tests/stress/test_jolt_soft_soft_speculative_ccd.py \
+            tests/stress/test_jolt_soft_soft_edge_edge.py \
+            tests/stress/test_jolt_soft_soft_vertex_face.py \
+            tests/stress/test_jolt_softsoft_face_bvh.py \
+            tests/stress/test_jolt_soft_soft_particle_contacts.py -v
+      - name: Check test syntax and native fixture
+        run: |
+          python3 -m py_compile tests/stress/test_jolt_soft_self_position_projection.py
+          test -f tests/stress/jolt_soft_self_position/project.godot
+          test -f tests/stress/jolt_soft_self_position/position_projection_regression.gd

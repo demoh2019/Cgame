@@ -10,6 +10,13 @@
 		<link title="Third Person Shooter (TPS) Demo">https://godotengine.org/asset-library/asset/2710</link>
 	</tutorials>
 	<methods>
+		<method name="add_trauma">
+			<return type="void" />
+			<param index="0" name="amount" type="float" />
+			<description>
+				Adds [param amount] of trauma, clamped so the total stays within [code]0[/code] to [code]1[/code], and starts shaking the camera. Trauma based shake (like Unity Cinemachine impulses). Add trauma from game events with [method add_trauma]; it decays by [member shake_decay] per second, and the visible shake is trauma raised to [member shake_trauma_exponent] times smooth noise, so small hits are subtle and large ones violent.
+			</description>
+		</method>
 		<method name="clear_current">
 			<return type="void" />
 			<param index="0" name="enable_next" type="bool" default="true" />
@@ -52,6 +59,24 @@
 			<return type="RID" />
 			<description>
 				Returns the RID of a pyramid shape encompassing the camera's view frustum, ignoring the camera's near plane. The tip of the pyramid represents the position of the camera.
+			</description>
+		</method>
+		<method name="get_shake_rotation" qualifiers="const">
+			<return type="Vector3" />
+			<description>
+				Returns the Euler rotation, in radians and in the camera's local space, that the shake currently applies to the rendered view.
+			</description>
+		</method>
+		<method name="get_shake_translation" qualifiers="const">
+			<return type="Vector3" />
+			<description>
+				Returns the displacement, in meters and in the camera's local space, that the shake currently applies to the rendered view.
+			</description>
+		</method>
+		<method name="get_trauma" qualifiers="const">
+			<return type="float" />
+			<description>
+				Returns the current trauma in the range [code]0[/code] to [code]1[/code]. It decreases over time, see [member shake_decay].
 			</description>
 		</method>
 		<method name="is_position_behind" qualifiers="const">
@@ -141,6 +166,13 @@
 				Sets the camera projection to perspective mode (see [constant PROJECTION_PERSPECTIVE]), by specifying a [param fov] (field of view) angle in degrees, and the [param z_near] and [param z_far] clip planes in world space units.
 			</description>
 		</method>
+		<method name="set_trauma">
+			<return type="void" />
+			<param index="0" name="trauma" type="float" />
+			<description>
+				Sets the trauma directly (clamped to [code]0[/code] to [code]1[/code]). Setting [code]0[/code] stops the shake immediately.
+			</description>
+		</method>
 		<method name="unproject_position" qualifiers="const">
 			<return type="Vector2" />
 			<param index="0" name="world_point" type="Vector3" />
@@ -206,6 +238,21 @@
 		</member>
 		<member name="projection" type="int" setter="set_projection" getter="get_projection" enum="Camera3D.ProjectionType" default="0">
 			The camera's projection mode. In [constant PROJECTION_PERSPECTIVE] mode, objects' Z distance from the camera's local space scales their perceived size.
+		</member>
+		<member name="shake_decay" type="float" setter="set_shake_decay" getter="get_shake_decay" default="1.5">
+			How much trauma is lost per second. [code]1.5[/code] means full trauma fades out in about two thirds of a second.
+		</member>
+		<member name="shake_frequency" type="float" setter="set_shake_frequency" getter="get_shake_frequency" default="25.0">
+			Speed of the shake noise in cycles per second. Higher values feel more frantic.
+		</member>
+		<member name="shake_max_offset" type="Vector3" setter="set_shake_max_offset" getter="get_shake_max_offset" default="Vector3(0.15, 0.15, 0.15)">
+			Maximum displacement of the view, in meters along each local axis, at full trauma.
+		</member>
+		<member name="shake_max_rotation" type="float" setter="set_shake_max_rotation" getter="get_shake_max_rotation" default="0.0523599">
+			Maximum rotation of the view around each local axis at full trauma, in radians.
+		</member>
+		<member name="shake_trauma_exponent" type="float" setter="set_shake_trauma_exponent" getter="get_shake_trauma_exponent" default="2.0">
+			The shake strength is [code]trauma ^ shake_trauma_exponent[/code]. [code]1[/code] is linear, [code]2[/code] (default) makes light trauma much gentler than heavy trauma.
 		</member>
 		<member name="size" type="float" setter="set_size" getter="get_size" default="1.0">
 			The camera's size in meters measured as the diameter of the width or height, depending on [member keep_aspect]. Only applicable in orthogonal and frustum modes.

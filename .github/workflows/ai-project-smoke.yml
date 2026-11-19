@@ -1,0 +1,40 @@
+name: AI project smoke tool tests
+
+on:
+  push:
+    paths:
+      - 'misc/scripts/ai_project_smoke.py'
+      - 'misc/scripts/ai_diagnostics.py'
+      - 'misc/scripts/tests/test_ai_diagnostics.py'
+      - 'misc/scripts/tests/test_ai_project_smoke.py'
+      - 'misc/scripts/README_ai_project_smoke.md'
+      - '.github/workflows/ai-project-smoke.yml'
+  pull_request:
+    paths:
+      - 'misc/scripts/ai_project_smoke.py'
+      - 'misc/scripts/ai_diagnostics.py'
+      - 'misc/scripts/tests/test_ai_diagnostics.py'
+      - 'misc/scripts/tests/test_ai_project_smoke.py'
+      - 'misc/scripts/README_ai_project_smoke.md'
+      - '.github/workflows/ai-project-smoke.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  smoke-tool-tests:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ['3.10', '3.13']
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+      - name: Compile and run isolated checker tests
+        run: |
+          python -m py_compile misc/scripts/ai_project_smoke.py misc/scripts/ai_diagnostics.py misc/scripts/tests/test_ai_project_smoke.py misc/scripts/tests/test_ai_diagnostics.py
+          python -m unittest discover -s misc/scripts/tests -p test_ai_project_smoke.py -v
+          python -m unittest discover -s misc/scripts/tests -p test_ai_diagnostics.py -v

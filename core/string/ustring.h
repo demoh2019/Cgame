@@ -302,6 +302,8 @@ class [[nodiscard]] _WARN_UNUSED_ String {
 	bool _base_is_subsequence_of(const String &p_string, bool p_case_insensitive) const;
 	int _count(const String &p_string, int p_from, int p_to, bool p_case_insensitive) const;
 	int _count(const char *p_string, int p_from, int p_to, bool p_case_insensitive) const;
+	static char32_t _char_uppercase_table(char32_t p_char);
+	static char32_t _char_lowercase_table(char32_t p_char);
 	String _separate_compound_words() const;
 
 public:
@@ -324,6 +326,9 @@ public:
 
 	_FORCE_INLINE_ operator Span<char32_t>() const _LIFETIME_BOUND_ { return Span(ptr(), length()); }
 	_FORCE_INLINE_ Span<char32_t> span() const _LIFETIME_BOUND_ { return Span(ptr(), length()); }
+
+	// Returns a non-owning trimmed view; never allocates or detaches a String.
+	static Span<char32_t> strip_edges_span(Span<char32_t> p_span, bool p_left, bool p_right);
 
 	void remove_at(int p_index) { _cowdata.remove_at(p_index); }
 
@@ -417,9 +422,15 @@ public:
 	bool ends_with(const String &p_string) const;
 	bool ends_with(const char *p_string) const;
 	bool is_enclosed_in(const String &p_string) const;
+	bool is_enclosed_in(char32_t p_left, char32_t p_right) const {
+		const int len = length();
+		return len >= 2 && ptr()[0] == p_left && ptr()[len - 1] == p_right;
+	}
 	bool is_subsequence_of(const String &p_string) const;
 	bool is_subsequence_ofn(const String &p_string) const;
-	bool is_quoted() const;
+	bool is_quoted() const {
+		return is_enclosed_in('"', '"') || is_enclosed_in('\'', '\'');
+	}
 	bool is_lowercase() const;
 	Vector<String> bigrams() const;
 	float similarity(const String &p_string) const;
@@ -508,8 +519,18 @@ public:
 
 	String join(const Vector<String> &p_parts) const;
 
-	static char32_t char_uppercase(char32_t p_char);
-	static char32_t char_lowercase(char32_t p_char);
+	static _FORCE_INLINE_ char32_t char_uppercase(char32_t p_char) {
+		if (p_char < 128) {
+			return is_ascii_lower_case(p_char) ? p_char - ('a' - 'A') : p_char;
+		}
+		return _char_uppercase_table(p_char);
+	}
+	static _FORCE_INLINE_ char32_t char_lowercase(char32_t p_char) {
+		if (p_char < 128) {
+			return is_ascii_upper_case(p_char) ? p_char + ('a' - 'A') : p_char;
+		}
+		return _char_lowercase_table(p_char);
+	}
 	String to_upper() const;
 	String to_lower() const;
 

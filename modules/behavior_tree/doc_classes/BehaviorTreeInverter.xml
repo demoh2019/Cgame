@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<class name="BehaviorTreeInverter" inherits="BehaviorTreeTask" api_type="core" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="../../../doc/class.xsd">
+	<brief_description>Inverts a child task's success and failure.</brief_description>
+	<description>Returns [constant BehaviorTreeTask.FAILURE] when its child succeeds, and vice versa. The [constant BehaviorTreeTask.RUNNING] status is passed through unchanged. Null child resources fail.</description>
+	<methods>
+		<method name="get_task" qualifiers="const"><return type="BehaviorTreeTask" /><description>Returns the wrapped task.</description></method>
+		<method name="set_task"><return type="void" /><param index="0" name="task" type="BehaviorTreeTask" /><description>Sets the wrapped task, rejecting cycles.</description></method>
+	</methods>
+	<members><member name="task" type="BehaviorTreeTask">Child task.</member></members>
+</class>

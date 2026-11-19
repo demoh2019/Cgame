@@ -132,9 +132,44 @@ TEST_CASE("[WebSocketPeer] Interleaved Ping preserves fragmented message bytes")
 	Vector<uint8_t> packet;
 	REQUIRE_EQ(client->get_packet_buffer(packet), OK);
 	CHECK_EQ(String::utf8(reinterpret_cast<const char *>(packet.ptr()), packet.size()), "AB");
-
 	CHECK(client->was_string_packet());
 	CHECK_EQ(client->get_available_packet_count(), 0);
+
+	// Control frames must never contaminate a message, even when several
+	// Ping/Pong frames arrive between continuation frames.
+	constexpr uint8_t interleaved_control_frames[] = {
+		0x01, 0x01, 'C', // Non-final text.
+		0x89, 0x01, '!', // Ping carrying a payload.
+		0x8A, 0x01, '?', // Pong carrying a payload.
+		0x00, 0x01, 'D', // Non-final continuation.
+		0x89, 0x00, // Empty Ping.
+		0x80, 0x01, 'E', // Final continuation.
+	};
+	REQUIRE_EQ(connection->put_data(interleaved_control_frames, sizeof(interleaved_control_frames)), OK);
+	REQUIRE(wait_for_condition([&]() {
+		client->poll();
+		return client->get_available_packet_count() > 0;
+	}));
+	REQUIRE_EQ(client->get_packet_buffer(packet), OK);
+	CHECK_EQ(String::utf8(reinterpret_cast<const char *>(packet.ptr()), packet.size()), "CDE");
+
+	// Binary frames exercise the same reassembly path, including NUL bytes.
+	constexpr uint8_t interleaved_binary_frames[] = {
+		0x02, 0x02, 0x00, 0xFF, // Non-final binary, 2 payload bytes.
+		0x89, 0x01, 0x33, // Ping, excluded from binary payload.
+		0x80, 0x02, 0x01, 0x02, // Final continuation.
+	};
+	REQUIRE_EQ(connection->put_data(interleaved_binary_frames, sizeof(interleaved_binary_frames)), OK);
+	REQUIRE(wait_for_condition([&]() {
+		client->poll();
+		return client->get_available_packet_count() > 0;
+	}));
+	REQUIRE_EQ(client->get_packet_buffer(packet), OK);
+	REQUIRE_EQ(packet.size(), 4);
+	CHECK_EQ(packet[0], 0);
+	CHECK_EQ(packet[1], 0xFF);
+	CHECK_EQ(packet[2], 1);
+	CHECK_EQ(packet[3], 2);
 
 	// Control frames must not pollute binary messages either, including zero bytes.
 	constexpr uint8_t binary_frames[] = {

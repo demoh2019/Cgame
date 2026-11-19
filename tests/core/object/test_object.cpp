@@ -40,6 +40,18 @@ TEST_FORCE_LINK(test_object)
 
 namespace TestObject {
 
+// Compile-time checks for inherited and distinct method binding pointers.
+static void _test_bind_function_one() {}
+static void _test_bind_function_two() {}
+static_assert(_is_same_bind_function<&_test_bind_function_one, &_test_bind_function_one>);
+static_assert(!_is_same_bind_function<&_test_bind_function_one, &_test_bind_function_two>);
+
+TEST_CASE("[Object] Class binding pointer comparisons are constexpr") {
+	CHECK((_is_same_bind_function<&_test_bind_function_one, &_test_bind_function_one>));
+	CHECK_FALSE((_is_same_bind_function<&_test_bind_function_one, &_test_bind_function_two>));
+}
+
+
 class _TestDerivedObject : public Object {
 	GDCLASS(_TestDerivedObject, Object);
 
@@ -689,6 +701,166 @@ TEST_CASE("[Object] RequiredResult") {
 
 	CHECK_EQ(ref, unpacked);
 	CHECK_EQ(ref, var);
+}
+
+
+TEST_CASE("[Object] ValuePtr keeps rare metadata pointer-sized") {
+	static_assert(sizeof(ValuePtr<MethodInfo>) == sizeof(void *));
+
+	ValuePtr<MethodInfo> empty;
+	CHECK_FALSE(empty);
+	CHECK(empty == nullptr);
+	CHECK(nullptr == empty);
+
+	ValuePtr<MethodInfo> p = ValuePtr<MethodInfo>::make(MethodInfo("custom_signal"));
+	REQUIRE(p);
+	CHECK(p != nullptr);
+	CHECK_EQ(p->name, StringName("custom_signal"));
+
+	ValuePtr<MethodInfo> copy = p;
+	REQUIRE(copy);
+	CHECK(copy.ptr() != p.ptr());
+	CHECK_EQ(copy->name, p->name);
+	copy->name = "renamed_signal";
+	CHECK_EQ(p->name, StringName("custom_signal"));
+	CHECK_EQ(copy->name, StringName("renamed_signal"));
+}
+
+TEST_CASE("[Object] ValuePtr deep copy, self assignment and move") {
+	struct Tracked {
+		int *live = nullptr;
+		int value = 0;
+		Tracked(int *p_live, int p_value) : live(p_live), value(p_value) { ++*live; }
+		Tracked(const Tracked &p) : live(p.live), value(p.value) { ++*live; }
+		~Tracked() { --*live; }
+	};
+	int live = 0;
+	{
+		ValuePtr<Tracked> value = ValuePtr<Tracked>::make(&live, 7);
+		CHECK_EQ(live, 1);
+		ValuePtr<Tracked> copy = value;
+		CHECK_EQ(live, 2);
+		CHECK(copy.ptr() != value.ptr());
+		CHECK_EQ(copy->value, 7);
+		copy->value = 12;
+		CHECK_EQ(value->value, 7);
+		copy = copy;
+		CHECK_EQ(live, 2);
+		CHECK_EQ(copy->value, 12);
+
+		ValuePtr<Tracked> assigned;
+		assigned = value;
+		CHECK_EQ(live, 3);
+		CHECK_EQ(assigned->value, 7);
+		assigned = std::move(copy);
+		CHECK_EQ(live, 2);
+		CHECK_FALSE(copy);
+		CHECK_EQ(assigned->value, 12);
+		assigned = std::move(assigned);
+		CHECK_EQ(live, 2);
+		CHECK_EQ(assigned->value, 12);
+		assigned.reset();
+		CHECK_EQ(live, 1);
+		CHECK_FALSE(assigned);
+	}
+	CHECK_EQ(live, 0);
+}
+
+TEST_CASE("[Object] Rare user signal metadata survives many registrations") {
+	Object object;
+	List<MethodInfo> before;
+	object.get_signal_list(&before);
+	for (int i = 0; i < 128; i++) {
+		StringName signal_name(String("dynamic_signal_") + itos(i));
+		object.add_user_signal(MethodInfo(signal_name));
+		CHECK(object.has_signal(signal_name));
+	}
+	List<MethodInfo> after;
+	object.get_signal_list(&after);
+	CHECK_EQ(after.size(), before.size() + 128);
+}
+
+TEST_CASE("[ObjectSingleProbe] existing metadata reads return exact stored variants") {
+	Object object;
+	object.set_meta("_perf_meta_value", Vector3(1, 2, 3));
+	for (int i = 0; i < 128; ++i) {
+		CHECK_EQ(object.get_meta("_perf_meta_value"), Variant(Vector3(1, 2, 3)));
+		CHECK(object.has_meta("_perf_meta_value"));
+	}
+	CHECK_EQ(object.get_meta("_perf_meta_value", Variant(99)), Variant(Vector3(1, 2, 3)));
+}
+
+TEST_CASE("[ObjectSingleProbe] missing metadata defaults never create map entries") {
+	Object object;
+	CHECK_FALSE(object.has_meta("_perf_absent"));
+	for (int i = 0; i < 128; ++i) {
+		CHECK_EQ(object.get_meta("_perf_absent", Variant(78)), Variant(78));
+		CHECK_FALSE(object.has_meta("_perf_absent"));
+	}
+	ERR_PRINT_OFF;
+	CHECK_EQ(object.get_meta("_perf_absent").get_type(), Variant::NIL);
+	ERR_PRINT_ON;
+	CHECK_FALSE(object.has_meta("_perf_absent"));
+}
+
+TEST_CASE("[ObjectSingleProbe] erasing an absent key leaves metadata unchanged") {
+	Object object;
+	object.set_meta("_perf_existing", 7);
+	object.remove_meta("_perf_absent");
+	CHECK_EQ(object.get_meta("_perf_existing"), Variant(7));
+	object.remove_meta("_perf_existing");
+	CHECK_FALSE(object.has_meta("_perf_existing"));
+	object.remove_meta("_perf_existing");
+	CHECK_FALSE(object.has_meta("_perf_existing"));
+}
+
+TEST_CASE("[ObjectSingleProbe] dynamic user signals remain visible and distinct") {
+	Object object;
+	const StringName custom_signal = SNAME("cgame_user_signal_fastpath");
+	CHECK_FALSE(object.has_signal(custom_signal));
+	object.add_user_signal(MethodInfo(custom_signal));
+	for (int i = 0; i < 128; ++i) {
+		CHECK(object.has_signal(custom_signal));
+		CHECK_FALSE(object.has_signal(SNAME("nonexistent_user_signal_fastpath")));
+	}
+	List<MethodInfo> signals;
+	object.get_signal_list(&signals);
+	bool found = false;
+	for (const MethodInfo &signal : signals) {
+		if (signal.name == custom_signal) {
+			found = true;
+		}
+	}
+	CHECK(found);
+}
+
+TEST_CASE("[Object] Signal connection bulk export preserves unique callable targets") {
+	Object emitter;
+	emitter.add_user_signal(MethodInfo("bulk_signal"));
+	Object targets[128];
+
+	for (int i = 0; i < 128; i++) {
+		const Callable callback = callable_mp(&targets[i], &Object::notify_property_list_changed);
+		REQUIRE_EQ(emitter.connect("bulk_signal", callback), OK);
+	}
+
+	const Signal signal(&emitter, "bulk_signal");
+	const Array exported = signal.get_connections();
+	REQUIRE_EQ(exported.size(), 128);
+	HashSet<ObjectID> visited;
+	for (int i = 0; i < exported.size(); i++) {
+		const Dictionary entry = exported[i];
+		REQUIRE(entry.has("callable"));
+		const Callable callback = entry["callable"];
+		Object *target = callback.get_object();
+		REQUIRE(target != nullptr);
+		CHECK_FALSE(visited.has(target->get_instance_id()));
+		visited.insert(target->get_instance_id());
+	}
+	REQUIRE_EQ(visited.size(), 128);
+	for (const Object &target : targets) {
+		CHECK(visited.has(target.get_instance_id()));
+	}
 }
 
 } // namespace TestObject

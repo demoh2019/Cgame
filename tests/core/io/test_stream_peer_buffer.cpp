@@ -180,4 +180,69 @@ TEST_CASE("[StreamPeerBuffer] Get data with invalid size returns an error") {
 	CHECK_EQ(spb->get_position(), 1);
 }
 
+
+TEST_CASE("[StreamPeerBuffer] Bulk reads preserve partial-consumption semantics") {
+	Ref<StreamPeerBuffer> spb;
+	spb.instantiate();
+	const uint8_t source[] = { 11, 22, 33, 44 };
+	REQUIRE_EQ(spb->put_data(source, 4), OK);
+	spb->seek(0);
+
+	uint8_t output[] = { 0, 0, 0, 0, 0, 0 };
+	CHECK_EQ(spb->get_data(output, 6), ERR_INVALID_PARAMETER);
+	CHECK_EQ(spb->get_position(), 4);
+	for (int i = 0; i < 4; ++i) {
+		CHECK_EQ(output[i], source[i]);
+	}
+	CHECK_EQ(output[4], 0);
+	CHECK_EQ(output[5], 0);
+
+	spb->seek(0);
+	CHECK_EQ(spb->get_data(output, 4), OK);
+	CHECK_EQ(spb->get_position(), 4);
+	spb->seek(0);
+	int received = -1;
+	CHECK_EQ(spb->get_partial_data(output, INT32_MAX, received), OK);
+	CHECK_EQ(received, 4);
+	CHECK_EQ(spb->get_position(), 4);
+}
+
+TEST_CASE("[StreamPeerBuffer] Negative lengths and null pointers never corrupt the buffer") {
+	Ref<StreamPeerBuffer> spb;
+	spb.instantiate();
+	const uint8_t source[] = { 3, 5, 7, 9 };
+	REQUIRE_EQ(spb->put_data(source, 4), OK);
+	const int before = spb->get_position();
+	uint8_t output = 0;
+	int received = -1;
+	CHECK_EQ(spb->get_data(&output, -1), ERR_INVALID_PARAMETER);
+	CHECK_EQ(spb->get_partial_data(&output, -1, received), ERR_INVALID_PARAMETER);
+	CHECK_EQ(received, 0);
+	CHECK_EQ(spb->get_data(nullptr, 1), ERR_INVALID_PARAMETER);
+	CHECK_EQ(spb->get_partial_data(nullptr, 1, received), ERR_INVALID_PARAMETER);
+	CHECK_EQ(received, 0);
+	CHECK_EQ(spb->get_data(nullptr, 0), OK);
+	CHECK_EQ(spb->get_position(), before);
+	CHECK_EQ(spb->get_size(), 4);
+}
+
+TEST_CASE("[StreamPeerBuffer] Overflowing write is rejected before resizing") {
+	Ref<StreamPeerBuffer> spb;
+	spb.instantiate();
+	const uint8_t source[] = { 1, 2, 3, 4 };
+	REQUIRE_EQ(spb->put_data(source, 4), OK);
+	CHECK_EQ(spb->put_data(source, INT32_MAX), ERR_INVALID_PARAMETER);
+	CHECK_EQ(spb->get_size(), 4);
+	CHECK_EQ(spb->get_position(), 4);
+	int sent = -1;
+	CHECK_EQ(spb->put_partial_data(source, INT32_MAX, sent), ERR_INVALID_PARAMETER);
+	CHECK_EQ(sent, 0);
+	spb->seek(0);
+	uint8_t output[4] = {};
+	CHECK_EQ(spb->get_data(output, 4), OK);
+	for (int i = 0; i < 4; ++i) {
+		CHECK_EQ(output[i], source[i]);
+	}
+}
+
 } // namespace TestStreamPeerBuffer

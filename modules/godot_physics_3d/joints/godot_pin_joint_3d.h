@@ -76,7 +76,7 @@ public:
 	virtual PS3DE::JointType get_type() const override { return PS3DE::JOINT_TYPE_PIN; }
 
 	virtual bool setup(real_t p_step) override;
-	virtual void solve(real_t p_step) override;
+	virtual void _solve_joint(real_t p_step) override;
 
 	void set_param(PS3DE::PinJointParam p_param, real_t p_value);
 	real_t get_param(PS3DE::PinJointParam p_param) const;

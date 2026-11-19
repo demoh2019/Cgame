@@ -42,13 +42,15 @@ def find_files_in_folder(folder, sub_folder, include_list, extension, sought_exc
         print_error(f'SCU: "{abs_folder}" not found.')
         return include_list, found_exceptions
 
-    os.chdir(abs_folder)
+    # Glob by absolute path instead of changing the process-wide working
+    # directory for every section. This is faster and safe for other builders.
 
     sub_folder_slashed = ""
     if sub_folder != "":
         sub_folder_slashed = sub_folder + "/"
 
-    for file in glob.glob("*." + extension):
+    for file_path in glob.iglob(os.path.join(abs_folder, "*." + extension)):
+        file = os.path.basename(file_path)
         simple_name = Path(file).stem
 
         if file.endswith(".gen.cpp"):
@@ -76,13 +78,8 @@ def write_output_file(file_count, include_list, start_line, end_line, output_fol
         if _verbose:
             print(f"SCU: Creating folder: {output_folder}")
 
-    file_text = ""
-
-    for i in range(start_line, end_line):
-        if i < len(include_list):
-            line = include_list[i]
-            li = line + "\n"
-            file_text += li
+    # Join once instead of repeatedly reallocating the growing string.
+    file_text = "".join(line + "\n" for line in include_list[start_line:end_line])
 
     num_string = ""
     if file_count > 0:
@@ -433,6 +430,8 @@ def generate_scu_files(max_includes_per_scu):
             "/core/templates",
             "/core/threads",
             "/core/variant",
+            "/editor",
+            "/editor/file_system",
             "/scene",
             "/servers",
             "/servers/rendering",

@@ -61,6 +61,12 @@ class GodotPhysicsServer3D : public PhysicsServer3D {
 	mutable RID_PtrOwner<GodotBody3D, true> body_owner{ 65536, 1048576 };
 	mutable RID_PtrOwner<GodotSoftBody3D, true> soft_body_owner;
 	mutable RID_PtrOwner<GodotJoint3D, true> joint_owner;
+	// Joints with a break threshold are checked after every step; broken ones are queued so
+	// their callbacks run from flush_queries(), outside the solver.
+	HashSet<RID> breakable_joints;
+	LocalVector<RID> broken_joint_queue;
+	void _update_breakable(RID p_joint, GodotJoint3D *p_joint_ptr);
+	void _process_joint_breaks(real_t p_step);
 
 	//void _clear_query(QuerySW *p_query);
 	friend class GodotCollisionObject3D;
@@ -203,6 +209,19 @@ public:
 	virtual void body_set_param(RID p_body, PS3DE::BodyParameter p_param, const Variant &p_value) override;
 	virtual Variant body_get_param(RID p_body, PS3DE::BodyParameter p_param) const override;
 
+	virtual void body_set_solver_priority(RID p_body, int p_priority) override;
+	virtual int body_get_solver_priority(RID p_body) const override;
+	virtual void body_set_max_depenetration_velocity(RID p_body, real_t p_value) override;
+	virtual real_t body_get_max_depenetration_velocity(RID p_body) const override;
+	virtual void body_set_wind_area(RID p_body, real_t p_value) override;
+	virtual real_t body_get_wind_area(RID p_body) const override;
+	virtual void body_set_wind_drag_coefficient(RID p_body, real_t p_value) override;
+	virtual real_t body_get_wind_drag_coefficient(RID p_body) const override;
+	virtual void body_set_max_angular_velocity(RID p_body, real_t p_value) override;
+	virtual real_t body_get_max_angular_velocity(RID p_body) const override;
+	virtual void body_set_max_linear_velocity(RID p_body, real_t p_value) override;
+	virtual real_t body_get_max_linear_velocity(RID p_body) const override;
+
 	virtual void body_reset_mass_properties(RID p_body) override;
 
 	virtual void body_set_state(RID p_body, PS3DE::BodyState p_state, const Variant &p_variant) override;
@@ -307,6 +326,10 @@ public:
 	virtual real_t soft_body_get_drag_coefficient(RID p_body) const override;
 
 	virtual void soft_body_set_mesh(RID p_body, RID p_mesh) override;
+	virtual void soft_body_set_tetrahedral_indices(RID p_body, const PackedInt32Array &p_indices) override;
+	virtual void soft_body_set_tetrahedral_interior_positions(RID p_body, const PackedVector3Array &p_positions) override;
+	virtual int soft_body_get_tetrahedron_count(RID p_body) const override;
+	virtual int soft_body_get_tetrahedral_interior_node_count(RID p_body) const override;
 
 	virtual AABB soft_body_get_bounds(RID p_body) const override;
 
@@ -371,6 +394,20 @@ public:
 
 	virtual void joint_disable_collisions_between_bodies(RID p_joint, bool p_disable) override;
 	virtual bool joint_is_disabled_collisions_between_bodies(RID p_joint) const override;
+
+	virtual void joint_set_break_force(RID p_joint, real_t p_force) override;
+	virtual real_t joint_get_break_force(RID p_joint) const override;
+	virtual void joint_set_break_torque(RID p_joint, real_t p_torque) override;
+	virtual void joint_set_fatigue_rate(RID p_joint, real_t p_rate) override;
+	virtual real_t joint_get_fatigue_rate(RID p_joint) const override;
+	virtual void joint_set_fatigue_yield_ratio(RID p_joint, real_t p_ratio) override;
+	virtual real_t joint_get_fatigue_yield_ratio(RID p_joint) const override;
+	virtual real_t joint_get_fatigue_damage(RID p_joint) const override;
+	virtual real_t joint_get_break_torque(RID p_joint) const override;
+	virtual Vector3 joint_get_reaction_force(RID p_joint) const override;
+	virtual Vector3 joint_get_reaction_torque(RID p_joint) const override;
+	virtual bool joint_is_broken(RID p_joint) const override;
+	virtual void joint_set_break_callback(RID p_joint, const Callable &p_callable) override;
 
 	/* MISC */
 

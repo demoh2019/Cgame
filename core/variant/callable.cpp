@@ -575,6 +575,8 @@ Array Signal::get_connections() const {
 	obj->get_signal_connection_list(name, &connections);
 
 	Array arr;
+	// Avoid default-constructing every Variant before storing connections.
+	arr.reserve(connections.size());
 	for (const Object::Connection &E : connections) {
 		arr.push_back(E);
 	}

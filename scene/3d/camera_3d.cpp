@@ -183,6 +183,80 @@ void Camera3D::_physics_interpolated_changed() {
 	_update_process_mode();
 }
 
+void Camera3D::_advance_shake(double p_delta) {
+	const bool was_shaking = shake_translation_current != Vector3() || shake_rotation_current != Vector3();
+	if (!(shake.trauma > 0.0)) {
+		if (was_shaking) {
+			shake_translation_current = Vector3();
+			shake_rotation_current = Vector3();
+		}
+		return;
+	}
+	shake.advance(p_delta, shake_decay, shake_frequency);
+	const real_t intensity = shake.get_intensity(shake_trauma_exponent);
+	shake_translation_current = shake.get_translation_unit() * shake_max_offset * intensity;
+	shake_rotation_current = shake.get_rotation_unit() * shake_max_rotation * intensity;
+}
+
+void Camera3D::add_trauma(real_t p_amount) {
+	shake.add_trauma(p_amount);
+	_update_process_mode();
+}
+
+void Camera3D::set_trauma(real_t p_trauma) {
+	shake.set_trauma(p_trauma);
+	if (!(shake.trauma > 0.0)) {
+		shake_translation_current = Vector3();
+		shake_rotation_current = Vector3();
+		_update_camera();
+	}
+	_update_process_mode();
+}
+
+real_t Camera3D::get_trauma() const {
+	return shake.trauma;
+}
+
+void Camera3D::set_shake_max_offset(const Vector3 &p_offset) {
+	shake_max_offset = p_offset;
+}
+
+Vector3 Camera3D::get_shake_max_offset() const {
+	return shake_max_offset;
+}
+
+void Camera3D::set_shake_max_rotation(real_t p_radians) {
+	shake_max_rotation = p_radians;
+}
+
+real_t Camera3D::get_shake_max_rotation() const {
+	return shake_max_rotation;
+}
+
+void Camera3D::set_shake_decay(real_t p_decay) {
+	shake_decay = MAX(p_decay, real_t(0.0));
+}
+
+real_t Camera3D::get_shake_decay() const {
+	return shake_decay;
+}
+
+void Camera3D::set_shake_frequency(real_t p_frequency) {
+	shake_frequency = MAX(p_frequency, real_t(0.0));
+}
+
+real_t Camera3D::get_shake_frequency() const {
+	return shake_frequency;
+}
+
+void Camera3D::set_shake_trauma_exponent(real_t p_exponent) {
+	shake_trauma_exponent = MAX(p_exponent, real_t(0.0));
+}
+
+real_t Camera3D::get_shake_trauma_exponent() const {
+	return shake_trauma_exponent;
+}
+
 void Camera3D::set_desired_process_modes(bool p_process_internal, bool p_physics_process_internal) {
 	_desired_process_internal = p_process_internal;
 	_desired_physics_process_internal = p_physics_process_internal;
@@ -190,7 +264,9 @@ void Camera3D::set_desired_process_modes(bool p_process_internal, bool p_physics
 }
 
 void Camera3D::_update_process_mode() {
-	set_process_internal(_desired_process_internal);
+	// A shaking camera needs a per-frame tick even if nothing else asked for one.
+	const bool shaking = shake.trauma > 0.0 || shake_translation_current != Vector3() || shake_rotation_current != Vector3();
+	set_process_internal(_desired_process_internal || shaking);
 	set_physics_process_internal(_desired_physics_process_internal);
 }
 
@@ -213,6 +289,16 @@ void Camera3D::_notification(int p_what) {
 				viewport->connect(SNAME("size_changed"), callable_mp((Node3D *)this, &Camera3D::update_gizmos));
 			}
 #endif
+		} break;
+
+		case NOTIFICATION_INTERNAL_PROCESS: {
+			if (shake.trauma > 0.0 || shake_translation_current != Vector3() || shake_rotation_current != Vector3()) {
+				_advance_shake(get_process_delta_time());
+				_update_camera();
+				if (!(shake.trauma > 0.0)) {
+					_update_process_mode();
+				}
+			}
 		} break;
 
 		case NOTIFICATION_TRANSFORM_CHANGED: {
@@ -271,6 +357,10 @@ Transform3D Camera3D::_get_adjusted_camera_transform(const Transform3D &p_xform)
 	Transform3D tr = p_xform.orthonormalized();
 	tr.origin += tr.basis.get_column(1) * v_offset;
 	tr.origin += tr.basis.get_column(0) * h_offset;
+	if (shake_translation_current != Vector3() || shake_rotation_current != Vector3()) {
+		tr.origin += tr.basis.xform(shake_translation_current);
+		tr.basis = tr.basis * Basis::from_euler(shake_rotation_current);
+	}
 	return tr;
 }
 
@@ -713,6 +803,21 @@ void Camera3D::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("set_near", "near"), &Camera3D::set_near);
 	ClassDB::bind_method(D_METHOD("get_projection"), &Camera3D::get_projection);
 	ClassDB::bind_method(D_METHOD("set_projection", "mode"), &Camera3D::set_projection);
+	ClassDB::bind_method(D_METHOD("add_trauma", "amount"), &Camera3D::add_trauma);
+	ClassDB::bind_method(D_METHOD("set_trauma", "trauma"), &Camera3D::set_trauma);
+	ClassDB::bind_method(D_METHOD("get_trauma"), &Camera3D::get_trauma);
+	ClassDB::bind_method(D_METHOD("get_shake_translation"), &Camera3D::get_shake_translation);
+	ClassDB::bind_method(D_METHOD("get_shake_rotation"), &Camera3D::get_shake_rotation);
+	ClassDB::bind_method(D_METHOD("set_shake_max_offset", "offset"), &Camera3D::set_shake_max_offset);
+	ClassDB::bind_method(D_METHOD("get_shake_max_offset"), &Camera3D::get_shake_max_offset);
+	ClassDB::bind_method(D_METHOD("set_shake_max_rotation", "radians"), &Camera3D::set_shake_max_rotation);
+	ClassDB::bind_method(D_METHOD("get_shake_max_rotation"), &Camera3D::get_shake_max_rotation);
+	ClassDB::bind_method(D_METHOD("set_shake_decay", "decay"), &Camera3D::set_shake_decay);
+	ClassDB::bind_method(D_METHOD("get_shake_decay"), &Camera3D::get_shake_decay);
+	ClassDB::bind_method(D_METHOD("set_shake_frequency", "frequency"), &Camera3D::set_shake_frequency);
+	ClassDB::bind_method(D_METHOD("get_shake_frequency"), &Camera3D::get_shake_frequency);
+	ClassDB::bind_method(D_METHOD("set_shake_trauma_exponent", "exponent"), &Camera3D::set_shake_trauma_exponent);
+	ClassDB::bind_method(D_METHOD("get_shake_trauma_exponent"), &Camera3D::get_shake_trauma_exponent);
 	ClassDB::bind_method(D_METHOD("set_h_offset", "offset"), &Camera3D::set_h_offset);
 	ClassDB::bind_method(D_METHOD("get_h_offset"), &Camera3D::get_h_offset);
 	ClassDB::bind_method(D_METHOD("set_v_offset", "offset"), &Camera3D::set_v_offset);
@@ -756,6 +861,13 @@ void Camera3D::_bind_methods() {
 	ADD_PROPERTY(PropertyInfo(Variant::VECTOR2, "frustum_offset", PROPERTY_HINT_NONE, "suffix:m"), "set_frustum_offset", "get_frustum_offset");
 	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "near", PROPERTY_HINT_RANGE, "0.001,10,0.001,or_greater,exp,suffix:m"), "set_near", "get_near");
 	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "far", PROPERTY_HINT_RANGE, "0.01,4000,0.01,or_greater,exp,suffix:m"), "set_far", "get_far");
+
+	ADD_GROUP("Shake", "shake_");
+	ADD_PROPERTY(PropertyInfo(Variant::VECTOR3, "shake_max_offset", PROPERTY_HINT_NONE, "suffix:m"), "set_shake_max_offset", "get_shake_max_offset");
+	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "shake_max_rotation", PROPERTY_HINT_RANGE, "0,180,0.1,radians_as_degrees"), "set_shake_max_rotation", "get_shake_max_rotation");
+	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "shake_decay", PROPERTY_HINT_RANGE, "0,10,0.01,or_greater,suffix:/s"), "set_shake_decay", "get_shake_decay");
+	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "shake_frequency", PROPERTY_HINT_RANGE, "0,100,0.1,or_greater,suffix:Hz"), "set_shake_frequency", "get_shake_frequency");
+	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "shake_trauma_exponent", PROPERTY_HINT_RANGE, "0,5,0.01,or_greater"), "set_shake_trauma_exponent", "get_shake_trauma_exponent");
 
 	BIND_ENUM_CONSTANT(PROJECTION_PERSPECTIVE);
 	BIND_ENUM_CONSTANT(PROJECTION_ORTHOGONAL);

@@ -32,6 +32,9 @@
 
 #include "core/io/marshalls.h"
 #include "core/object/class_db.h"
+#include "core/templates/local_vector.h"
+
+#include <utility>
 
 Variant PackedDataContainer::getvar(const Variant &p_key, bool *r_valid) const {
 	bool err = false;
@@ -181,23 +184,30 @@ Variant PackedDataContainer::_key_at_ofs(uint32_t p_ofs, const Variant &p_key, b
 		uint32_t hash = p_key.hash();
 		uint32_t len = decode_uint32(r + 4);
 
-		bool found = false;
-		for (uint32_t i = 0; i < len; i++) {
-			uint32_t khash = decode_uint32(r + 8 + i * 12 + 0);
-			if (khash == hash) {
-				Variant key = _get_at_ofs(decode_uint32(r + 8 + i * 12 + 4), rd, r_err);
-				if (r_err) {
-					return Variant();
-				}
-				if (key == p_key) {
-					//key matches, return value
-					return _get_at_ofs(decode_uint32(r + 8 + i * 12 + 8), rd, r_err);
-				}
-				found = true;
+		// Packed dictionary hashes are sorted. Use lower_bound to find the
+		// matching hash group in O(log n), then compare full keys only for
+		// genuine hash collisions instead of scanning all entries.
+		uint32_t low = 0;
+		uint32_t high = len;
+		while (low < high) {
+			const uint32_t mid = low + ((high - low) >> 1);
+			const uint32_t entry_hash = decode_uint32(r + 8 + mid * 12);
+			if (entry_hash < hash) {
+				low = mid + 1;
 			} else {
-				if (found) {
-					break;
-				}
+				high = mid;
+			}
+		}
+		for (uint32_t i = low; i < len; i++) {
+			if (decode_uint32(r + 8 + i * 12) != hash) {
+				break;
+			}
+			Variant key = _get_at_ofs(decode_uint32(r + 8 + i * 12 + 4), rd, r_err);
+			if (r_err) {
+				return Variant();
+			}
+			if (key == p_key) {
+				return _get_at_ofs(decode_uint32(r + 8 + i * 12 + 8), rd, r_err);
 			}
 		}
 
@@ -214,8 +224,9 @@ uint32_t PackedDataContainer::_pack(const Variant &p_data, Vector<uint8_t> &r_tm
 	switch (p_data.get_type()) {
 		case Variant::STRING: {
 			String s = p_data;
-			if (r_string_cache.has(s)) {
-				return r_string_cache[s];
+			// A single lookup avoids hashing and probing this string twice.
+			if (const uint32_t *existing_offset = r_string_cache.getptr(s)) {
+				return *existing_offset;
 			}
 
 			r_string_cache[s] = r_tmpdata.size();
@@ -269,12 +280,14 @@ uint32_t PackedDataContainer::_pack(const Variant &p_data, Vector<uint8_t> &r_tm
 			encode_uint32(TYPE_DICT, &r_tmpdata.write[pos + 0]);
 			encode_uint32(len, &r_tmpdata.write[pos + 4]);
 
-			List<DictKey> sortk;
-
+			// Contiguous storage avoids a heap allocation per dictionary key
+			// and improves cache locality while sorting hash groups.
+			LocalVector<DictKey> sortk;
+			sortk.reserve(len);
 			for (const KeyValue<Variant, Variant> &kv : d) {
 				DictKey dk;
 				dk.hash = kv.key.hash();
-				dk.key = kv.key;
+				dk.entry = &kv;
 				sortk.push_back(dk);
 			}
 
@@ -283,9 +296,9 @@ uint32_t PackedDataContainer::_pack(const Variant &p_data, Vector<uint8_t> &r_tm
 			int idx = 0;
 			for (const DictKey &E : sortk) {
 				encode_uint32(E.hash, &r_tmpdata.write[pos + 8 + idx * 12 + 0]);
-				uint32_t ofs = _pack(E.key, r_tmpdata, r_string_cache);
+				uint32_t ofs = _pack(E.entry->key, r_tmpdata, r_string_cache);
 				encode_uint32(ofs, &r_tmpdata.write[pos + 8 + idx * 12 + 4]);
-				ofs = _pack(d[E.key], r_tmpdata, r_string_cache);
+				ofs = _pack(E.entry->value, r_tmpdata, r_string_cache);
 				encode_uint32(ofs, &r_tmpdata.write[pos + 8 + idx * 12 + 8]);
 				idx++;
 			}
@@ -324,10 +337,10 @@ Error PackedDataContainer::pack(const Variant &p_data) {
 	Vector<uint8_t> tmpdata;
 	HashMap<String, uint32_t> string_cache;
 	_pack(p_data, tmpdata, string_cache);
-	datalen = tmpdata.size();
-	data.resize(tmpdata.size());
-	uint8_t *w = data.ptrw();
-	memcpy(w, tmpdata.ptr(), tmpdata.size());
+	// Steal the completed COW buffer instead of allocating a second
+	// equally-sized buffer and copying its entire contents.
+	data = std::move(tmpdata);
+	datalen = data.size();
 
 	return OK;
 }

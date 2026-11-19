@@ -1,0 +1,37 @@
+name: ConfigFile single-hash-lookup performance regressions
+
+on:
+  pull_request:
+    branches: [develop]
+    paths:
+      - "core/io/config_file.cpp"
+      - "tests/core/io/test_config_file.cpp"
+      - ".github/workflows/config-file-lookup-performance.yml"
+  push:
+    branches: [develop]
+    paths:
+      - "core/io/config_file.cpp"
+      - "tests/core/io/test_config_file.cpp"
+      - ".github/workflows/config-file-lookup-performance.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  native-config-regressions:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+      - uses: ./.github/actions/godot-deps
+      - uses: ./.github/actions/godot-build
+        with:
+          platform: linuxbsd
+          target: editor
+          scons-flags: dev_build=yes tests=yes debug_symbols=no module_mono_enabled=no accesskit=no
+      - name: Run native ConfigFile tests including large lookup and roundtrip cases
+        run: |
+          timeout 300s ./bin/godot.linuxbsd.editor.dev.x86_64 --headless --test --test-case="*[ConfigFile]*" --no-colors

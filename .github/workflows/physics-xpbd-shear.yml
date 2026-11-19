@@ -1,0 +1,32 @@
+name: XPBD SoftBody triangle shear numerical contracts
+
+on:
+  push:
+    branches: [develop]
+    paths:
+      - "servers/physics_xpbd_shear.h"
+      - "modules/godot_physics_3d/godot_soft_body_3d.cpp"
+      - "modules/godot_physics_3d/godot_soft_body_3d.h"
+      - "modules/godot_physics_3d/godot_space_3d.cpp"
+      - "tests/servers/test_physics_xpbd_shear.cpp"
+      - "tests/stress/test_physics_xpbd_shear.py"
+      - ".github/workflows/physics-xpbd-shear.yml"
+  pull_request:
+    paths:
+      - "servers/physics_xpbd_shear.h"
+      - "modules/godot_physics_3d/godot_soft_body_3d.cpp"
+      - "tests/servers/test_physics_xpbd_shear.cpp"
+      - "tests/stress/test_physics_xpbd_shear.py"
+      - ".github/workflows/physics-xpbd-shear.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  numeric-contracts:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Check XPBD shear gradients, scale stability and integration
+        run: python3 -m unittest discover -s tests/stress -p test_physics_xpbd_shear.py -v
