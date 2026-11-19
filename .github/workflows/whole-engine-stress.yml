@@ -72,7 +72,18 @@ jobs:
           platform: linuxbsd
           target: editor
           scons-flags: dev_build=yes tests=yes debug_symbols=no module_text_server_fb_enabled=yes -j2
+      - name: Verify GDScript workload parses
+        shell: bash
+        run: |
+          set -euo pipefail
+          ./bin/godot.linuxbsd.editor.dev.x86_64 --headless --path tests/stress --script res://stress.gd --check-only
+      - name: Run the complete native C++ test suite
+        shell: bash
+        run: |
+          set -euo pipefail
+          timeout 1800s ./bin/godot.linuxbsd.editor.dev.x86_64 --headless --test --no-colors 2>&1 | tee whole-engine-native-tests.log
       - name: Run actual engine workloads under memory and timeout watchdogs
+        if: success() || failure()
         shell: bash
         run: |
           set -euo pipefail
@@ -89,6 +100,8 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: cgame-stress-${{ env.PRESET }}-${{ env.RENDER_MODE }}
-          path: whole-engine-stress.json
+          path: |
+            whole-engine-stress.json
+            whole-engine-native-tests.log
           if-no-files-found: warn
           retention-days: 30
