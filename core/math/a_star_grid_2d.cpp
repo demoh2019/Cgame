@@ -474,109 +474,84 @@ AStarGrid2D::Point *AStarGrid2D::_forced_successor(int32_t p_x, int32_t p_y, int
 }
 
 void AStarGrid2D::_get_nbors(Point *p_point, FixedVector<Point *, 8> &r_nbors) {
-	bool ts0 = false, td0 = false,
-		 ts1 = false, td1 = false,
-		 ts2 = false, td2 = false,
-		 ts3 = false, td3 = false;
+	// Points are stored in row-major order. Relative pointer offsets avoid
+	// recomputing the flattened grid index for every neighbor visited by A*.
+	const int32_t x = p_point->id.x - region.position.x;
+	const int32_t y = p_point->id.y - region.position.y;
+	const int32_t width = region.size.x;
+	const int32_t height = region.size.y;
+	Point *left = x > 0 ? p_point - 1 : nullptr;
+	Point *right = x + 1 < width ? p_point + 1 : nullptr;
+	Point *top = y > 0 ? p_point - width : nullptr;
+	Point *bottom = y + 1 < height ? p_point + width : nullptr;
 
-	Point *left = nullptr;
-	Point *right = nullptr;
-	Point *top = nullptr;
-	Point *bottom = nullptr;
+	// The occupancy bitmap has a one-cell border. Locate the center just
+	// once, then check all neighbors with fixed offsets into the same row.
+	const bool *mask = solid_mask.ptr();
+	const size_t mask_stride = size_t(width) + 2;
+	const size_t mask_pos = (size_t(y) + 1) * mask_stride + size_t(x) + 1;
 
-	Point *top_left = nullptr;
-	Point *top_right = nullptr;
-	Point *bottom_left = nullptr;
-	Point *bottom_right = nullptr;
+	const bool walk_top = top && !mask[mask_pos - mask_stride];
+	const bool walk_right = right && !mask[mask_pos + 1];
+	const bool walk_bottom = bottom && !mask[mask_pos + mask_stride];
+	const bool walk_left = left && !mask[mask_pos - 1];
 
-	{
-		bool has_left = false;
-		bool has_right = false;
-
-		if (p_point->id.x - 1 >= region.position.x) {
-			left = _get_point_unchecked(p_point->id.x - 1, p_point->id.y);
-			has_left = true;
-		}
-		if (p_point->id.x + 1 < region.position.x + region.size.width) {
-			right = _get_point_unchecked(p_point->id.x + 1, p_point->id.y);
-			has_right = true;
-		}
-		if (p_point->id.y - 1 >= region.position.y) {
-			top = _get_point_unchecked(p_point->id.x, p_point->id.y - 1);
-			if (has_left) {
-				top_left = _get_point_unchecked(p_point->id.x - 1, p_point->id.y - 1);
-			}
-			if (has_right) {
-				top_right = _get_point_unchecked(p_point->id.x + 1, p_point->id.y - 1);
-			}
-		}
-		if (p_point->id.y + 1 < region.position.y + region.size.height) {
-			bottom = _get_point_unchecked(p_point->id.x, p_point->id.y + 1);
-			if (has_left) {
-				bottom_left = _get_point_unchecked(p_point->id.x - 1, p_point->id.y + 1);
-			}
-			if (has_right) {
-				bottom_right = _get_point_unchecked(p_point->id.x + 1, p_point->id.y + 1);
-			}
-		}
-	}
-
-	if (top && !_get_solid_unchecked(top->id)) {
+	if (walk_top) {
 		r_nbors.push_back(top);
-		ts0 = true;
 	}
-	if (right && !_get_solid_unchecked(right->id)) {
+	if (walk_right) {
 		r_nbors.push_back(right);
-		ts1 = true;
 	}
-	if (bottom && !_get_solid_unchecked(bottom->id)) {
+	if (walk_bottom) {
 		r_nbors.push_back(bottom);
-		ts2 = true;
 	}
-	if (left && !_get_solid_unchecked(left->id)) {
+	if (walk_left) {
 		r_nbors.push_back(left);
-		ts3 = true;
 	}
 
+	// A common pathfinding mode is cardinal-only. Avoid resolving, testing
+	// or allocating any diagonal neighbors on this hot path.
+	if (diagonal_mode == DIAGONAL_MODE_NEVER) {
+		return;
+	}
+
+	bool d0 = false;
+	bool d1 = false;
+	bool d2 = false;
+	bool d3 = false;
 	switch (diagonal_mode) {
 		case DIAGONAL_MODE_ALWAYS: {
-			td0 = true;
-			td1 = true;
-			td2 = true;
-			td3 = true;
-		} break;
-		case DIAGONAL_MODE_NEVER: {
+			d0 = d1 = d2 = d3 = true;
 		} break;
 		case DIAGONAL_MODE_AT_LEAST_ONE_WALKABLE: {
-			td0 = ts3 || ts0;
-			td1 = ts0 || ts1;
-			td2 = ts1 || ts2;
-			td3 = ts2 || ts3;
+			d0 = walk_left || walk_top;
+			d1 = walk_top || walk_right;
+			d2 = walk_right || walk_bottom;
+			d3 = walk_bottom || walk_left;
 		} break;
 		case DIAGONAL_MODE_ONLY_IF_NO_OBSTACLES: {
-			td0 = ts3 && ts0;
-			td1 = ts0 && ts1;
-			td2 = ts1 && ts2;
-			td3 = ts2 && ts3;
+			d0 = walk_left && walk_top;
+			d1 = walk_top && walk_right;
+			d2 = walk_right && walk_bottom;
+			d3 = walk_bottom && walk_left;
 		} break;
 		default:
 			break;
 	}
 
-	if (td0 && (top_left && !_get_solid_unchecked(top_left->id))) {
-		r_nbors.push_back(top_left);
+	if (d0 && top && left && !mask[mask_pos - mask_stride - 1]) {
+		r_nbors.push_back(top - 1);
 	}
-	if (td1 && (top_right && !_get_solid_unchecked(top_right->id))) {
-		r_nbors.push_back(top_right);
+	if (d1 && top && right && !mask[mask_pos - mask_stride + 1]) {
+		r_nbors.push_back(top + 1);
 	}
-	if (td2 && (bottom_right && !_get_solid_unchecked(bottom_right->id))) {
-		r_nbors.push_back(bottom_right);
+	if (d2 && bottom && right && !mask[mask_pos + mask_stride + 1]) {
+		r_nbors.push_back(bottom + 1);
 	}
-	if (td3 && (bottom_left && !_get_solid_unchecked(bottom_left->id))) {
-		r_nbors.push_back(bottom_left);
+	if (d3 && bottom && left && !mask[mask_pos + mask_stride - 1]) {
+		r_nbors.push_back(bottom - 1);
 	}
 }
-
 bool AStarGrid2D::_solve(Point *p_begin_point, Point *p_end_point, bool p_allow_partial_path) {
 	last_closest_point = nullptr;
 	pass++;

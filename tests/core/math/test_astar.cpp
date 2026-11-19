@@ -756,4 +756,91 @@ TEST_CASE("[AStarGrid2D] Bulk border mask initialization preserves obstacle sema
 	}
 }
 
+
+
+TEST_CASE("[AStarGrid2D][Performance] Row-major neighbor offsets preserve all diagonal policies") {
+	AStarGrid2D grid;
+	const Rect2i region(-17, 31, 43, 23);
+	grid.set_region(region);
+	grid.update();
+
+	// Include shifted origins, multiple rows and cells at each edge.
+	const Vector2i starts[] = {
+		Vector2i(-17, 31),
+		Vector2i(25, 31),
+		Vector2i(-17, 53),
+		Vector2i(25, 53),
+		Vector2i(-13, 45),
+	};
+	const Vector2i targets[] = {
+		Vector2i(25, 53),
+		Vector2i(-17, 53),
+		Vector2i(25, 31),
+		Vector2i(-17, 31),
+		Vector2i(19, 34),
+	};
+
+	for (int mode = 0; mode < AStarGrid2D::DIAGONAL_MODE_MAX; ++mode) {
+		grid.set_diagonal_mode(static_cast<AStarGrid2D::DiagonalMode>(mode));
+		for (int repeat = 0; repeat < 3; ++repeat) {
+			for (int pair = 0; pair < 5; ++pair) {
+				const TypedArray<Vector2i> route = grid.get_id_path(starts[pair], targets[pair]);
+				REQUIRE_FALSE(route.is_empty());
+				CHECK(Vector2i(route[0]) == starts[pair]);
+				CHECK(Vector2i(route[route.size() - 1]) == targets[pair]);
+				const int dx = ABS(targets[pair].x - starts[pair].x);
+				const int dy = ABS(targets[pair].y - starts[pair].y);
+				CHECK(route.size() == (mode == AStarGrid2D::DIAGONAL_MODE_NEVER ? dx + dy : MAX(dx, dy)) + 1);
+
+				for (int i = 1; i < route.size(); ++i) {
+					const Vector2i a = Vector2i(route[i - 1]);
+					const Vector2i b = Vector2i(route[i]);
+					const int sx = ABS(a.x - b.x);
+					const int sy = ABS(a.y - b.y);
+					CHECK(sx <= 1);
+					CHECK(sy <= 1);
+					CHECK(sx + sy >= 1);
+					if (mode == AStarGrid2D::DIAGONAL_MODE_NEVER) {
+						CHECK(sx + sy == 1);
+					}
+				}
+			}
+		}
+	}
+
+	// A thin obstacle corridor tests the padded occupancy mask and corner
+	// restrictions without changing the size of the row-major point array.
+	for (int y = 32; y <= 52; ++y) {
+		grid.set_point_solid(Vector2i(3, y), true);
+	}
+	grid.set_point_solid(Vector2i(3, 42), false);
+	for (int mode = 0; mode < AStarGrid2D::DIAGONAL_MODE_MAX; ++mode) {
+		grid.set_diagonal_mode(static_cast<AStarGrid2D::DiagonalMode>(mode));
+		const TypedArray<Vector2i> route = grid.get_id_path(Vector2i(-17, 31), Vector2i(25, 53));
+		REQUIRE_FALSE(route.is_empty());
+		CHECK(Vector2i(route[0]) == Vector2i(-17, 31));
+		CHECK(Vector2i(route[route.size() - 1]) == Vector2i(25, 53));
+		for (int i = 1; i < route.size(); ++i) {
+			const Vector2i a = Vector2i(route[i - 1]);
+			const Vector2i b = Vector2i(route[i]);
+			CHECK_FALSE(grid.is_point_solid(b));
+			const int sx = b.x - a.x;
+			const int sy = b.y - a.y;
+			CHECK(ABS(sx) <= 1);
+			CHECK(ABS(sy) <= 1);
+			if (sx && sy) {
+				const bool along_x = !grid.is_point_solid(Vector2i(a.x + sx, a.y));
+				const bool along_y = !grid.is_point_solid(Vector2i(a.x, a.y + sy));
+				if (mode == AStarGrid2D::DIAGONAL_MODE_AT_LEAST_ONE_WALKABLE) {
+					CHECK(along_x || along_y);
+				} else if (mode == AStarGrid2D::DIAGONAL_MODE_ONLY_IF_NO_OBSTACLES) {
+					CHECK(along_x && along_y);
+				} else if (mode == AStarGrid2D::DIAGONAL_MODE_NEVER) {
+					CHECK_FALSE(sx && sy);
+				}
+			}
+		}
+	}
+}
+
 } // namespace TestAStar
