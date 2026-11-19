@@ -46,7 +46,7 @@ class SoftBodyVolumeScaleContracts(unittest.TestCase):
         self.assertFalse(valid_volume(1.0, float("inf")))
 
     def test_float32_coordinate_difference_overflow_repro(self):
-        high = f32(1e38)
+        high = f32(2e38)
         tiny = f32(1e-10)
         self.assertTrue(math.isinf(f32(high - (-high))))
         # A cross-product of those finite vertices still has a
