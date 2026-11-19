@@ -528,11 +528,12 @@ RID RendererSceneCull::scenario_get_environment(RID p_scenario) {
 void RendererSceneCull::scenario_remove_viewport_visibility_mask(RID p_scenario, RID p_viewport) {
 	Scenario *scenario = scenario_owner.get_or_null(p_scenario);
 	ERR_FAIL_NULL(scenario);
-	if (!scenario->viewport_visibility_masks.has(p_viewport)) {
+	const uint64_t *viewport_mask = scenario->viewport_visibility_masks.getptr(p_viewport);
+	if (viewport_mask == nullptr) {
 		return;
 	}
 
-	uint64_t mask = scenario->viewport_visibility_masks[p_viewport];
+	const uint64_t mask = *viewport_mask;
 	scenario->used_viewport_visibility_bits &= ~mask;
 	scenario->viewport_visibility_masks.erase(p_viewport);
 }
@@ -3350,17 +3351,23 @@ void RendererSceneCull::_render_scene(const RendererSceneRender::CameraData *p_c
 
 	RENDER_TIMESTAMP("Update Visibility Dependencies");
 
-	if (scenario->instance_visibility.get_bin_count() > 0) {
-		if (!scenario->viewport_visibility_masks.has(p_viewport)) {
-			scenario_add_viewport_visibility_mask(scenario->self, p_viewport);
-		}
+	// Use one lookup for the viewport mask throughout visibility and geometry culling.
+	// Only consult the HashMap again if this is a newly registered viewport.
+	const int visibility_bin_count = scenario->instance_visibility.get_bin_count();
+	const uint64_t *mask_ptr = scenario->viewport_visibility_masks.getptr(p_viewport);
+	if (visibility_bin_count > 0 && mask_ptr == nullptr) {
+		scenario_add_viewport_visibility_mask(scenario->self, p_viewport);
+		mask_ptr = scenario->viewport_visibility_masks.getptr(p_viewport);
+	}
+	const uint64_t visibility_viewport_mask = mask_ptr != nullptr ? *mask_ptr : 0;
 
+	if (visibility_bin_count > 0) {
 		VisibilityCullData visibility_cull_data;
 		visibility_cull_data.scenario = scenario;
-		visibility_cull_data.viewport_mask = scenario->viewport_visibility_masks[p_viewport];
+		visibility_cull_data.viewport_mask = visibility_viewport_mask;
 		visibility_cull_data.camera_position = camera_position;
 
-		for (int i = scenario->instance_visibility.get_bin_count() - 1; i > 0; i--) { // We skip bin 0
+		for (int i = visibility_bin_count - 1; i > 0; i--) { // We skip bin 0
 			visibility_cull_data.cull_offset = scenario->instance_visibility.get_bin_start(i);
 			visibility_cull_data.cull_count = scenario->instance_visibility.get_bin_size(i);
 
@@ -3464,7 +3471,7 @@ void RendererSceneCull::_render_scene(const RendererSceneRender::CameraData *p_c
 		cull_data.render_reflection_probe = render_reflection_probe;
 		cull_data.occlusion_buffer = RendererSceneOcclusionCull::get_singleton()->buffer_get_ptr(p_viewport);
 		cull_data.camera_matrix = &p_camera_data->main_projection;
-		cull_data.visibility_viewport_mask = scenario->viewport_visibility_masks.has(p_viewport) ? scenario->viewport_visibility_masks[p_viewport] : 0;
+		cull_data.visibility_viewport_mask = visibility_viewport_mask;
 #ifdef DEBUG_CULL_TIME
 		uint64_t time_from = OS::get_singleton()->get_ticks_usec();
 #endif
