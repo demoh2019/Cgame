@@ -10,6 +10,9 @@ on:
       - "tests/servers/test_physics_fluid_ellipsoid_3d.cpp"
       - "tests/stress/test_physics_fluid_ellipsoid_3d.py"
       - "tests/stress/physics_ellipsoid_buoyancy_3d_regression.gd"
+      - "tests/stress/physics_ellipsoid_fluid_stress.gd"
+      - "tests/stress/run.py"
+      - "tests/stress/stress.gd"
       - ".github/workflows/physics-fluid-ellipsoid.yml"
   workflow_dispatch:
 
