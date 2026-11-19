@@ -1592,4 +1592,40 @@ TEST_CASE("[SceneTree][Node] Human-readable names carry long numeric suffixes") 
 	memdelete(root);
 }
 
+
+TEST_CASE("[SceneTree][Node] Borrowed multi-component NodePath lookup preserves resolution") {
+	Node *root = memnew(Node);
+	root->set_name("LookupRoot");
+	Node *parent = root;
+	String relative_path;
+
+	for (int i = 0; i < 96; i++) {
+		Node *child = memnew(Node);
+		const String name = i == 48 ? String(U"Unicode雪") : "Segment" + itos(i);
+		child->set_name(name);
+		parent->add_child(child);
+		if (i != 0) {
+			relative_path += "/";
+		}
+		relative_path += name;
+		parent = child;
+	}
+	Node *leaf = parent;
+	const NodePath deep_path(relative_path);
+	const NodePath with_subname(relative_path + ":custom_property");
+	const NodePath missing_path(relative_path + "/DoesNotExist");
+
+	for (int repeat = 0; repeat < 256; repeat++) {
+		CHECK_EQ(root->get_node_or_null(deep_path), leaf);
+		CHECK_EQ(root->get_node_or_null(with_subname), leaf);
+		CHECK_EQ(root->get_node_or_null(missing_path), nullptr);
+	}
+	CHECK_EQ(root->get_node_or_null(NodePath("Segment0")), root->get_child(0));
+	CHECK_EQ(leaf->get_node_or_null(NodePath("..")), leaf->get_parent());
+	CHECK_EQ(leaf->get_node_or_null(NodePath("../.")), leaf->get_parent());
+	CHECK_EQ(root->get_node_or_null(NodePath(".")), root);
+
+	memdelete(root);
+}
+
 } // namespace TestNode
