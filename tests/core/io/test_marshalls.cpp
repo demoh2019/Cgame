@@ -490,4 +490,71 @@ TEST_CASE("[Marshalls] Typed dictionary decoding") {
 	CHECK(dictionary[Variant(uint64_t(0x0f123456789abcdef))] == Variant(uint64_t(0x0f123456789abcdef)));
 }
 
+TEST_CASE("[Marshalls] PackedStringArray roundtrip handles large Unicode and repeated values") {
+	Vector<String> source;
+	for (int i = 0; i < 2048; i++) {
+		if ((i % 11) == 0) {
+			source.push_back(String());
+		} else if ((i % 7) == 0) {
+			source.push_back("é_日本_🌍");
+		} else {
+			source.push_back(vformat("entry_%d_élève_日本", i % 293));
+		}
+	}
+
+	const Variant input = source;
+	int encoded_size = 0;
+	REQUIRE(encode_variant(input, nullptr, encoded_size) == OK);
+	REQUIRE(encoded_size > 8);
+	Vector<uint8_t> encoded;
+	REQUIRE(encoded.resize(encoded_size) == OK);
+	int written = 0;
+	REQUIRE(encode_variant(input, encoded.ptrw(), written) == OK);
+	CHECK(written == encoded_size);
+
+	Variant decoded;
+	int consumed = 0;
+	REQUIRE(decode_variant(decoded, encoded.ptr(), encoded.size(), &consumed) == OK);
+	CHECK(consumed == encoded_size);
+	CHECK(decoded.get_type() == Variant::PACKED_STRING_ARRAY);
+	const Vector<String> actual = decoded;
+	CHECK(actual.size() == source.size());
+	for (int i = 0; i < source.size(); i++) {
+		CHECK(actual[i] == source[i]);
+	}
+}
+
+TEST_CASE("[Marshalls] PackedStringArray empty and malformed counts avoid speculative allocations") {
+	const Variant source = Vector<String>();
+	int size = 0;
+	REQUIRE(encode_variant(source, nullptr, size) == OK);
+	CHECK(size == 8);
+	uint8_t bytes[12] = {};
+	int written = 0;
+	REQUIRE(encode_variant(source, bytes, written) == OK);
+	CHECK(written == 8);
+
+	Variant decoded;
+	int consumed = 0;
+	REQUIRE(decode_variant(decoded, bytes, 8, &consumed) == OK);
+	CHECK(consumed == 8);
+	const Vector<String> empty = decoded;
+	CHECK(empty.is_empty());
+
+	ERR_PRINT_OFF;
+	// A bogus count must not allocate millions of String objects.
+	encode_uint32(0x7fffffffu, bytes + 4);
+	CHECK(decode_variant(decoded, bytes, 8, &consumed) == ERR_INVALID_DATA);
+	encode_uint32(0xffffffffu, bytes + 4);
+	CHECK(decode_variant(decoded, bytes, 8, &consumed) == ERR_INVALID_DATA);
+	// Even one string needs a four-byte length header after the count.
+	encode_uint32(1u, bytes + 4);
+	CHECK(decode_variant(decoded, bytes, 8, &consumed) == ERR_INVALID_DATA);
+	// A well-formed count with an invalid string length is still rejected.
+	encode_uint32(1u, bytes + 4);
+	encode_uint32(32u, bytes + 8);
+	CHECK(decode_variant(decoded, bytes, 12, &consumed) != OK);
+	ERR_PRINT_ON;
+}
+
 } // namespace TestMarshalls
