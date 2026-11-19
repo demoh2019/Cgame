@@ -1035,8 +1035,15 @@ identical normals and a well-conditioned 2x2 effective-mass matrix.
 It enumerates all complementarity solutions (both constraints active,
 either point active, or neither). Singular or inconsistent cases fall
 back to the existing sequential per-point solver. Position-bias and
-friction remain unchanged. No per-contact storage or heap allocation is
-added by this feature.
+friction remain unchanged. The four scalar entries of the conditioned
+contact matrix are now cached **once per pair per simulation step** in
+`pre_solve`, instead of recomputing the matrix and determinant on every
+solver iteration (typically 16). This trades a small, fixed amount of
+per-pair memory for fewer arithmetic operations; it performs no new heap
+allocation. Retained 2D tangential warm-start impulses are also projected
+into the rotated contact tangent to avoid stale friction when a manifold
+normal changes. The cached matrix is invalidated on every pre-solve pass,
+and ill-conditioned or incomplete manifolds still use scalar PGS.
 
 The standalone regression creates eight independent stacks of four boxes.
 It runs 240 physics frames each with block solving disabled/enabled,
