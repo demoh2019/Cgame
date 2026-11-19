@@ -30,6 +30,8 @@
 
 #include "json.h"
 
+#include "core/string/string_builder.h"
+
 #include "core/io/resource_loader.h"
 #include "core/object/class_db.h"
 #include "core/object/script_language.h"
@@ -48,13 +50,13 @@ const char *JSON::tk_name[TK_MAX] = {
 	"EOF",
 };
 
-void JSON::_add_indent(String &r_result, const String &p_indent, int p_size) {
+void JSON::_add_indent(StringBuilder &r_result, const String &p_indent, int p_size) {
 	for (int i = 0; i < p_size; i++) {
 		r_result += p_indent;
 	}
 }
 
-void JSON::_stringify(String &r_result, const Variant &p_var, const String &p_indent, int p_cur_indent, bool p_sort_keys, HashSet<const void *> &p_markers, bool p_full_precision) {
+void JSON::_stringify(StringBuilder &r_result, const Variant &p_var, const String &p_indent, int p_cur_indent, bool p_sort_keys, HashSet<const void *> &p_markers, bool p_full_precision) {
 	if (p_cur_indent > Variant::MAX_RECURSION_DEPTH) {
 		r_result += "...";
 		ERR_FAIL_MSG("JSON structure is too deep. Bailing.");
@@ -126,7 +128,7 @@ void JSON::_stringify(String &r_result, const Variant &p_var, const String &p_in
 				return;
 			}
 
-			r_result += '[';
+			r_result += "[";
 			r_result += end_statement;
 
 			p_markers.insert(a.id());
@@ -136,7 +138,7 @@ void JSON::_stringify(String &r_result, const Variant &p_var, const String &p_in
 				if (first) {
 					first = false;
 				} else {
-					r_result += ',';
+					r_result += ",";
 					r_result += end_statement;
 				}
 				_add_indent(r_result, p_indent, p_cur_indent + 1);
@@ -144,7 +146,7 @@ void JSON::_stringify(String &r_result, const Variant &p_var, const String &p_in
 			}
 			r_result += end_statement;
 			_add_indent(r_result, p_indent, p_cur_indent);
-			r_result += ']';
+			r_result += "]";
 			p_markers.erase(a.id());
 			return;
 		}
@@ -160,7 +162,7 @@ void JSON::_stringify(String &r_result, const Variant &p_var, const String &p_in
 				return;
 			}
 
-			r_result += '{';
+			r_result += "{";
 			r_result += end_statement;
 			p_markers.insert(d.id());
 
@@ -175,7 +177,7 @@ void JSON::_stringify(String &r_result, const Variant &p_var, const String &p_in
 				if (first_key) {
 					first_key = false;
 				} else {
-					r_result += ',';
+					r_result += ",";
 					r_result += end_statement;
 				}
 				_add_indent(r_result, p_indent, p_cur_indent + 1);
@@ -186,14 +188,14 @@ void JSON::_stringify(String &r_result, const Variant &p_var, const String &p_in
 
 			r_result += end_statement;
 			_add_indent(r_result, p_indent, p_cur_indent);
-			r_result += '}';
+			r_result += "}";
 			p_markers.erase(d.id());
 			return;
 		}
 		default:
-			r_result += '"';
+			r_result += "\"";
 			r_result += String(p_var).json_escape();
-			r_result += '"';
+			r_result += "\"";
 			return;
 	}
 }
@@ -588,10 +590,12 @@ String JSON::get_parsed_text() const {
 }
 
 String JSON::stringify(const Variant &p_var, const String &p_indent, bool p_sort_keys, bool p_full_precision) {
-	String result;
+	// Collect pieces once and assemble a single UTF-32 buffer at the end.
+	// Growing String on every nested field repeatedly copies the preceding JSON.
+	StringBuilder result;
 	HashSet<const void *> markers;
 	_stringify(result, p_var, p_indent, 0, p_sort_keys, markers, p_full_precision);
-	return result;
+	return result.as_string();
 }
 
 Variant JSON::parse_string(const String &p_json_string) {
