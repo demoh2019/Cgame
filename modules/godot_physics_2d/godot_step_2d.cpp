@@ -494,7 +494,7 @@ void GodotStep2D::step(GodotSpace2D *p_space, real_t p_delta) {
 		}
 	}
 
-	if (large_island_count != 1 && !colored_constraints.is_empty()) {
+	if (large_island_count != 1 && (!colored_constraints.is_empty() || !constraint_colors.is_empty() || !occupied_colors.is_empty())) {
 		// Island-level jobs need no graph-color scratch. Free peak buffers
 		// when a previously dominating island disappears or separates into
 		// multiple independent islands, keeping idle RAM bounded.
