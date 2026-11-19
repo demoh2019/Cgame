@@ -1523,12 +1523,27 @@ void GodotSoftBody3D::rebuild_xpbd_tethers(real_t p_slack) {
 void GodotSoftBody3D::initialize_self_collision_adjacency() {
 	self_collision_adjacency_built = true;
 	self_collision_structural_edges.clear();
+	const bool include_edges = get_space() && get_space()->are_soft_body_self_collision_edge_contacts_enabled();
+	self_collision_edges_built = include_edges;
+	if (!self_collision_edges.is_empty()) {
+		self_collision_edges.reset();
+	}
 	for (const Face &face : faces) {
 		for (int i = 0; i < 3; ++i) {
 			const uint32_t a = face.n[i]->index;
 			const uint32_t b = face.n[(i + 1) % 3]->index;
-			if (a != b) {
-				self_collision_structural_edges.insert(_soft_body_edge_key(a, b));
+			if (a == b) {
+				continue;
+			}
+			const uint64_t key = _soft_body_edge_key(a, b);
+			if (!self_collision_structural_edges.has(key)) {
+				self_collision_structural_edges.insert(key);
+				if (include_edges) {
+					SelfCollisionEdge edge;
+					edge.a = MIN(a, b);
+					edge.b = MAX(a, b);
+					self_collision_edges.push_back(edge);
+				}
 			}
 		}
 	}
@@ -1651,6 +1666,15 @@ void GodotSoftBody3D::solve_self_collisions(real_t p_thickness, real_t p_alpha_t
 	if (!self_collision_contacts.is_empty()) {
 		// Keep ray queries and the next prediction phase's BVH coherent.
 		update_face_tree(0.0);
+	}
+	if (get_space()->are_soft_body_self_collision_edge_contacts_enabled()) {
+		solve_self_edge_contacts(p_thickness, p_alpha_tilde);
+	} else if (self_collision_edges_built) {
+		// The body may have moved to another world where edge contacts are
+		// disabled while vertex/face contacts are still active.
+		self_collision_edges.reset();
+		self_collision_edge_contacts.reset();
+		self_collision_edges_built = false;
 	}
 }
 
@@ -1849,6 +1873,9 @@ void GodotSoftBody3D::solve_constraints(real_t p_delta) {
 		// collisions disabled. Reclaim the optional topology and contacts.
 		self_collision_structural_edges.reset();
 		self_collision_contacts.reset();
+		self_collision_edges.reset();
+		self_collision_edge_contacts.reset();
+		self_collision_edges_built = false;
 		self_collision_adjacency_built = false;
 	}
 	const real_t vc = (1.0 - damping_coefficient) * inv_delta;
@@ -2003,6 +2030,9 @@ void GodotSoftBody3D::destroy() {
 	xpbd_volume_gradients.reset();
 	self_collision_contacts.reset();
 	self_collision_structural_edges.reset();
+	self_collision_edges.reset();
+	self_collision_edge_contacts.reset();
+	self_collision_edges_built = false;
 	self_collision_adjacency_built = false;
 	xpbd_volume_closed = false;
 	xpbd_volume_rest = 0.0;
