@@ -517,41 +517,71 @@ void JoltContactListener3D::_flush_area_body_events() {
 }
 
 void JoltContactListener3D::_flush_area_soft_body_events() {
-	int current_count = area_soft_body_overlaps.size();
-	int persisting_count = 0;
-	int entered_count = 0;
+	// Jolt can report the same area/soft-body shape pair multiple times in one
+	// physics step (for example via multiple sensor contacts). Stamp the pair
+	// once per step so duplicate callbacks neither emit duplicate enters nor
+	// make the old persisting_count exceed the number of stored overlaps.
+	if (++area_soft_body_overlap_epoch == 0) {
+		// Correct even after the unsigned frame counter wraps: invalidate every
+		// old stamp so none can coincide with the new generation.
+		for (KeyValue<JPH::SubShapeIDPair, uint32_t> &overlap : area_soft_body_overlaps) {
+			overlap.value = 0;
+		}
+		area_soft_body_overlap_epoch = 1;
+	}
+
+	const uint32_t previous_count = area_soft_body_overlaps.size();
+	uint32_t persisting_count = 0;
+
 	for (const ThreadLocals &tl : ThreadLocals::instances) {
 		for (const JPH::SubShapeIDPair &shape_pair : tl.area_soft_body_overlaps) {
-			if (area_soft_body_overlaps.has(shape_pair)) {
-				persisting_count += 1;
+			uint32_t *last_seen = area_soft_body_overlaps.getptr(shape_pair);
+			if (last_seen != nullptr) {
+				if (*last_seen != area_soft_body_overlap_epoch) {
+					*last_seen = area_soft_body_overlap_epoch;
+					++persisting_count;
+				}
 			} else {
-				area_soft_body_overlaps.insert(shape_pair);
+				area_soft_body_overlaps.insert(shape_pair, area_soft_body_overlap_epoch);
 				_dispatch_area_enter(shape_pair);
-				entered_count += 1;
 			}
 		}
 	}
 
-	int exited_count = current_count - persisting_count;
-	if (exited_count > 0) {
-		HashSet<JPH::SubShapeIDPair, ShapePairHasher> new_overlaps;
-		new_overlaps.reserve(persisting_count + entered_count);
-
-		for (const ThreadLocals &tl : ThreadLocals::instances) {
-			for (const JPH::SubShapeIDPair &shape_pair : tl.area_soft_body_overlaps) {
-				new_overlaps.insert(shape_pair);
+	// Do not scan/rebuild the persistent overlap map while all old pairs
+	// persist. When some pairs disappear, delete only those entries in place.
+	// AHashMap compacts by moving the last entry into the erased slot, so
+	// keep the same index after an erase to inspect the moved entry as well.
+	if (persisting_count < previous_count) {
+		for (uint32_t index = 0; index < area_soft_body_overlaps.size();) {
+			const KeyValue<JPH::SubShapeIDPair, uint32_t> &entry = area_soft_body_overlaps.get_by_index(index);
+			if (entry.value != area_soft_body_overlap_epoch) {
+				const JPH::SubShapeIDPair exited_pair = entry.key;
+				area_soft_body_overlaps.erase_by_index(index);
+				_dispatch_area_exit(exited_pair);
+			} else {
+				++index;
 			}
 		}
+	}
 
-		for (const JPH::SubShapeIDPair &shape_pair : area_soft_body_overlaps) {
-			if (!new_overlaps.has(shape_pair)) {
-				_dispatch_area_exit(shape_pair);
+	// Retain capacity under steady load, but don't pin a scene's peak
+	// sensor-overlap memory forever after the majority of bodies disappear.
+	constexpr uint32_t MIN_CACHED_SOFT_BODY_OVERLAP_SLOTS = 4096;
+	const uint32_t live_count = area_soft_body_overlaps.size();
+	const uint32_t target_capacity = MAX(MIN_CACHED_SOFT_BODY_OVERLAP_SLOTS,
+			live_count > UINT32_MAX / 4 ? UINT32_MAX : live_count * 4);
+	if (area_soft_body_overlaps.get_capacity() > target_capacity) {
+		if (live_count == 0) {
+			area_soft_body_overlaps.reset();
+		} else {
+			AHashMap<JPH::SubShapeIDPair, uint32_t, ShapePairHasher> compacted;
+			compacted.reserve(live_count + live_count / 2 + 1);
+			for (const KeyValue<JPH::SubShapeIDPair, uint32_t> &entry : area_soft_body_overlaps) {
+				compacted.insert(entry.key, entry.value);
 			}
+			area_soft_body_overlaps = std::move(compacted);
 		}
-
-		area_soft_body_overlaps = std::move(new_overlaps);
-	} else if (unlikely(exited_count < 0)) {
-		ERR_PRINT_ONCE("Duplicate area soft body overlaps found. This should not happen. Please report this.");
 	}
 
 	for (ThreadLocals &tl : ThreadLocals::instances) {

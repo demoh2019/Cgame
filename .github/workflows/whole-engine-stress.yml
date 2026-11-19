@@ -108,6 +108,7 @@ jobs:
           ./bin/godot.linuxbsd.editor.dev.x86_64 --headless --path tests/stress --script res://physics_jolt_pending_index_churn.gd --check-only
           ./bin/godot.linuxbsd.editor.dev.x86_64 --headless --path tests/stress --script res://physics_jolt_pending_broadphase_regression.gd --check-only
           ./bin/godot.linuxbsd.editor.dev.x86_64 --headless --path tests/stress --script res://physics_jolt_contact_scratch_regression.gd --check-only
+          ./bin/godot.linuxbsd.editor.dev.x86_64 --headless --path tests/stress --script res://physics_jolt_softbody_area_overlap_regression.gd --check-only
           ./bin/godot.linuxbsd.editor.dev.x86_64 --headless --path tests/stress --script res://physics_jolt_layer_filter_regression.gd --check-only
           ./bin/godot.linuxbsd.editor.dev.x86_64 --headless --path tests/stress --script res://physics_jolt_process_info_regression.gd --check-only
       - name: Verify dense contacts, pending cleanup and fast CCD
@@ -232,6 +233,20 @@ jobs:
             --script res://physics_jolt_contact_scratch_regression.gd \
             2>&1 | tee physics-jolt-contact-scratch.log
           grep -q '^JOLT_CONTACT_SCRATCH_RESULT:' physics-jolt-contact-scratch.log
+      - name: Regression-test Jolt soft-body sensor epoch overlaps
+        shell: bash
+        run: |
+          set -euo pipefail
+          # Only Jolt uses this epoch-based sensor event implementation.
+          PROJECT="$RUNNER_TEMP/cgame-jolt-softbody-sensors"
+          mkdir -p "$PROJECT"
+          cp -a tests/stress/. "$PROJECT/"
+          printf '\n[physics]\n3d/physics_engine="Jolt Physics"\n' >> "$PROJECT/project.godot"
+          timeout 180s ./bin/godot.linuxbsd.editor.dev.x86_64 \
+            --headless --path "$PROJECT" \
+            --script res://physics_jolt_softbody_area_overlap_regression.gd \
+            2>&1 | tee physics-jolt-softbody-area-overlap.log
+          grep -Fq 'Jolt soft-body area overlap regression passed.' physics-jolt-softbody-area-overlap.log
       - name: Verify Jolt packed object-layer filtering
         shell: bash
         run: |
@@ -277,6 +292,7 @@ jobs:
             physics3d-capsule-rays.log
             physics-capsule-toi.log
             physics-jolt-contact-scratch.log
+            physics-jolt-softbody-area-overlap.log
             physics-jolt-layer-filter.log
             physics-jolt-process-info.log
           if-no-files-found: warn

@@ -31,6 +31,7 @@
 #pragma once
 
 #include "core/os/mutex.h"
+#include "core/templates/a_hash_map.h"
 #include "core/templates/hash_set.h"
 #include "core/templates/hashfuncs.h"
 #include "core/templates/local_vector.h"
@@ -106,7 +107,10 @@ class JoltContactListener3D final
 	};
 
 	HashSet<JPH::SubShapeIDPair, ShapePairHasher> area_overlaps;
-	HashSet<JPH::SubShapeIDPair, ShapePairHasher> area_soft_body_overlaps;
+	// Mark each persistent soft-body/sensor pair in the frame when it was seen.
+	// A compact generation map avoids rebuilding a full overlap HashSet on exit.
+	AHashMap<JPH::SubShapeIDPair, uint32_t, ShapePairHasher> area_soft_body_overlaps;
+	uint32_t area_soft_body_overlap_epoch = 0;
 
 	JoltSpace3D *space = nullptr;
 	// Last completed step, aggregated after all worker callbacks finish.

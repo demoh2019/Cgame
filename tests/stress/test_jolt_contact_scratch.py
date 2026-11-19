@@ -61,7 +61,12 @@ class JoltContactScratchContracts(unittest.TestCase):
         self.assertIn("_dispatch_area_exit(shape_pair);", self.area)
         # Persistent overlap tracking cannot be capped like temporary scratch.
         self.assertNotIn("area_overlaps.reset();", self.area)
-        self.assertNotIn("area_soft_body_overlaps.reset();", self.area)
+        # A persistent soft-body overlap map may compact only after the
+        # live set shrinks, or reset when every soft-body overlap is gone.
+        self.assertIn("if (live_count == 0) {", self.area)
+        self.assertIn("area_soft_body_overlaps.reset();", self.area)
+        self.assertIn("area_soft_body_overlaps = std::move(compacted);", self.area)
+        self.assertIn("clear_contact_scratch(tl.area_soft_body_overlaps, MAX_CACHED_AREA_EVENTS);", self.area)
 
     def test_duplicate_area_exits_cannot_overflow_reservation(self):
         # Event callbacks can produce redundant exits after a subshape shift.
