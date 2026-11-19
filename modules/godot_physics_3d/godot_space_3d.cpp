@@ -1266,6 +1266,7 @@ GodotSpace3D::GodotSpace3D() {
 	ccd_max_angular_motion = MAX(real_t(0.0), (real_t)GLOBAL_GET("physics/3d/solver/ccd_max_angular_motion"));
 	warm_start_coefficient = CLAMP((real_t)GLOBAL_GET("physics/3d/solver/warm_start_coefficient"), real_t(0.0), real_t(1.0));
 	ccd_rotational_bounds = GLOBAL_GET("physics/3d/solver/ccd_rotational_bounds");
+	ccd_tight_rotational_bounds = GLOBAL_GET("physics/3d/solver/ccd_tight_rotational_bounds");
 	implicit_damping = GLOBAL_GET("physics/3d/solver/implicit_damping");
 	gyroscopic_forces = GLOBAL_GET("physics/3d/solver/gyroscopic_forces");
 	gyroscopic_integration_mode = CLAMP((int)GLOBAL_GET("physics/3d/solver/gyroscopic_integration_mode"), 0, 1);
