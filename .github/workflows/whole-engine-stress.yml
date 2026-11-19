@@ -197,6 +197,17 @@ jobs:
             --success=true --no-colors 2>&1 | tee physics3d-capsule-rays.log
           grep -Fq '[GodotPhysics3D] Capsule long ray' physics3d-capsule-rays.log
 
+      - name: Regression-test analytic circle/sphere versus capsule TOI
+        shell: bash
+        run: |
+          set -euo pipefail
+          # The dedicated C++ cases cover end-cap grazing, side entry,
+          # reversed rays, invalid geometry and extreme travel distances.
+          timeout 120s ./bin/godot.linuxbsd.editor.dev.x86_64 \
+            --headless --test --test-case="*CapsuleTOI*" \
+            --success=true --no-colors 2>&1 | tee physics-capsule-toi.log
+          grep -Fq '[CapsuleTOI]' physics-capsule-toi.log
+
       - name: Regression-test native 3D CCD with relative body motion
         shell: bash
         run: |
@@ -264,6 +275,7 @@ jobs:
             physics3d-colored-islands.log
             physics3d-ccd-relative.log
             physics3d-capsule-rays.log
+            physics-capsule-toi.log
             physics-jolt-contact-scratch.log
             physics-jolt-layer-filter.log
             physics-jolt-process-info.log
