@@ -1,0 +1,32 @@
+name: GDScript property list hotpath regressions
+
+on:
+  pull_request:
+    branches: [develop]
+    paths:
+      - 'modules/gdscript/gdscript.cpp'
+      - 'modules/gdscript/tests/scripts/runtime/features/property_list_instance_hotpath.gd'
+      - 'modules/gdscript/tests/scripts/runtime/features/property_list_instance_hotpath.out'
+      - 'misc/scripts/tests/test_gdscript_property_list_hotpath.py'
+      - '.github/workflows/gdscript-property-list-hotpath.yml'
+  push:
+    branches: [develop]
+    paths:
+      - 'modules/gdscript/gdscript.cpp'
+      - 'modules/gdscript/tests/scripts/runtime/features/property_list_instance_hotpath.gd'
+      - 'modules/gdscript/tests/scripts/runtime/features/property_list_instance_hotpath.out'
+      - 'misc/scripts/tests/test_gdscript_property_list_hotpath.py'
+      - '.github/workflows/gdscript-property-list-hotpath.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  source-invariants:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - name: Run 11 GDScript property list pipeline regression contracts
+        run: python3 -m unittest discover -s misc/scripts/tests -p 'test_gdscript_property_list_hotpath.py' -v
