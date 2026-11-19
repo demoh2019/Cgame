@@ -1844,6 +1844,12 @@ void GodotSoftBody3D::solve_constraints(real_t p_delta) {
 				self_alpha <= double(std::numeric_limits<real_t>::max())) {
 			solve_self_collisions(self_thickness, real_t(self_alpha));
 		}
+	} else if (self_collision_adjacency_built) {
+		// A soft body can move to a different physics space with self
+		// collisions disabled. Reclaim the optional topology and contacts.
+		self_collision_structural_edges.reset();
+		self_collision_contacts.reset();
+		self_collision_adjacency_built = false;
 	}
 	const real_t vc = (1.0 - damping_coefficient) * inv_delta;
 	for (Node &node : nodes) {
@@ -1996,7 +2002,7 @@ void GodotSoftBody3D::destroy() {
 	xpbd_dihedral_lambdas.reset();
 	xpbd_volume_gradients.reset();
 	self_collision_contacts.reset();
-	self_collision_structural_edges.clear();
+	self_collision_structural_edges.reset();
 	self_collision_adjacency_built = false;
 	xpbd_volume_closed = false;
 	xpbd_volume_rest = 0.0;
