@@ -854,8 +854,10 @@ TEST_CASE("[DictionaryFastPath] bulk has_all short-circuits on missing keys") {
 	dict[10] = true;
 	dict[StringName("key")] = false;
 	CHECK(dict.has_all(Array()));
-	CHECK(dict.has_all(Array({ 10, String("key") })));
-	CHECK_FALSE(dict.has_all(Array({ 10, "missing" })));
+	Array keys = { 10, String("key") };
+	Array missing = { 10, "missing" };
+	CHECK(dict.has_all(keys));
+	CHECK_FALSE(dict.has_all(missing));
 	CHECK_EQ(dict.size(), 2);
 }
 
@@ -878,7 +880,9 @@ TEST_CASE("[DictionaryFastPath] typed keys still validate and coerce") {
 	dict[Variant(3)] = 12;
 	CHECK(dict.has(Variant(3.0)));
 	CHECK_EQ(dict.get(Variant(3)), Variant(12));
+	ERR_PRINT_OFF;
 	CHECK_FALSE(dict.has(Variant(String("not numeric"))));
+	ERR_PRINT_ON;
 	CHECK_EQ(dict.get(Variant(4), Variant(42)), Variant(42));
 	CHECK_EQ(dict.size(), 1);
 }
