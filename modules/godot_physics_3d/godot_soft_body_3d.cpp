@@ -35,6 +35,7 @@
 #include "core/math/geometry_3d.h"
 #include "servers/physics_3d/physics_server_3d_rendering_server_handler.h"
 #include "servers/physics_xpbd_distance.h"
+#include "servers/physics_xpbd_area.h"
 #include "servers/rendering/rendering_server.h"
 
 #include <limits>
@@ -1226,25 +1227,41 @@ void GodotSoftBody3D::solve_constraints(real_t p_delta) {
 		node.x = node.q + node.v * p_delta;
 	}
 
-	// Optional XPBD distance constraints keep a compliant elastic response
-	// less dependent on iteration count or the physics step size. This also
-	// covers topology-generated bending links; only enabled for an explicit
-	// nonzero compliance, keeping the original solver byte-for-byte otherwise.
+	// Optional, independent XPBD stretch and triangle area constraints.
+	// Area preservation resists cloth shear/compression that edge lengths
+	// alone do not fully control. Each lambda persists only within one step.
 	const real_t configured_compliance = get_space() ? get_space()->get_soft_body_xpbd_compliance() : real_t(0.0);
 	const double compliance = linear_stiffness > 0.0 ? double(configured_compliance) / double(linear_stiffness) : 0.0;
 	const double alpha_double = p_delta > 0.0 ? compliance / (double(p_delta) * p_delta) : 0.0;
 	const bool use_xpbd = compliance > 0.0 && Math::is_finite(alpha_double) && alpha_double > 0.0;
+	const real_t configured_area_compliance = get_space() ? get_space()->get_soft_body_xpbd_area_compliance() : real_t(0.0);
+	const double area_alpha_double = p_delta > 0.0 ? double(configured_area_compliance) / (double(p_delta) * p_delta) : 0.0;
+	const bool use_area_xpbd = configured_area_compliance > 0.0 && !faces.is_empty() &&
+			Math::is_finite(area_alpha_double) && area_alpha_double > 0.0;
+	const real_t alpha = use_xpbd ? real_t(MIN(alpha_double, double(std::numeric_limits<real_t>::max()))) : real_t(0.0);
+	const real_t area_alpha = use_area_xpbd ? real_t(MIN(area_alpha_double, double(std::numeric_limits<real_t>::max()))) : real_t(0.0);
+
 	if (use_xpbd) {
-		// A very small but finite step can make alpha exceed float32's range.
-		// Clamp it to the largest representable compliance instead of falling
-		// back to rigid legacy PBD (which would invert the intended softness).
-		const real_t alpha = real_t(MIN(alpha_double, double(std::numeric_limits<real_t>::max())));
-		// Allocate only on the first enabled step or when the mesh changes.
 		xpbd_link_lambdas.resize(links.size());
 		for (real_t &lambda : xpbd_link_lambdas) {
 			lambda = real_t(0.0);
 		}
-		for (int isolve = 0; isolve < iteration_count; ++isolve) {
+	} else if (!xpbd_link_lambdas.is_empty()) {
+		xpbd_link_lambdas.reset();
+	}
+
+	if (use_area_xpbd) {
+		xpbd_area_lambdas.resize(faces.size());
+		for (real_t &lambda : xpbd_area_lambdas) {
+			lambda = real_t(0.0);
+		}
+	} else if (!xpbd_area_lambdas.is_empty()) {
+		// The default zero-compliance setting consumes no per-face scratch.
+		xpbd_area_lambdas.reset();
+	}
+
+	for (int isolve = 0; isolve < iteration_count; ++isolve) {
+		if (use_xpbd) {
 			for (uint32_t link_index = 0; link_index < links.size(); ++link_index) {
 				Link &link = links[link_index];
 				if (link.c0 > 0.0) {
@@ -1253,17 +1270,18 @@ void GodotSoftBody3D::solve_constraints(real_t p_delta) {
 							alpha, xpbd_link_lambdas[link_index]);
 				}
 			}
-		}
-	} else {
-		// Release the optional buffers if XPBD was switched off or a
-		// substep cannot safely use compliance; the default uses zero RAM.
-		if (!xpbd_link_lambdas.is_empty()) {
-			xpbd_link_lambdas.reset();
-		}
-		// Legacy PBD solver, unchanged when compliance is zero.
-		for (int isolve = 0; isolve < iteration_count; ++isolve) {
+		} else {
+			// Preserve the legacy link solver when XPBD stretch is disabled.
 			const real_t ti = isolve / (real_t)iteration_count;
 			solve_links(1.0, ti);
+		}
+		if (use_area_xpbd) {
+			for (uint32_t face_index = 0; face_index < faces.size(); ++face_index) {
+				Face &face = faces[face_index];
+				physics_xpbd_solve_triangle_area(face.n[0]->x, face.n[1]->x, face.n[2]->x,
+						face.n[0]->im, face.n[1]->im, face.n[2]->im,
+						face.ra, area_alpha, xpbd_area_lambdas[face_index]);
+			}
 		}
 	}
 	const real_t vc = (1.0 - damping_coefficient) * inv_delta;
@@ -1409,6 +1427,8 @@ void GodotSoftBody3D::destroy() {
 	node_tree.clear();
 	face_tree.clear();
 
+	xpbd_link_lambdas.reset();
+	xpbd_area_lambdas.reset();
 	nodes.clear();
 	links.clear();
 	faces.clear();
