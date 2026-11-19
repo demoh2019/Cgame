@@ -4927,20 +4927,87 @@ String String::uri_file_decode() const {
 	return _uri_decode_single_buffer(*this, false);
 }
 
-String String::c_unescape() const {
-	String escaped = *this;
-	escaped = escaped.replace("\\a", "\a");
-	escaped = escaped.replace("\\b", "\b");
-	escaped = escaped.replace("\\f", "\f");
-	escaped = escaped.replace("\\n", "\n");
-	escaped = escaped.replace("\\r", "\r");
-	escaped = escaped.replace("\\t", "\t");
-	escaped = escaped.replace("\\v", "\v");
-	escaped = escaped.replace("\\'", "\'");
-	escaped = escaped.replace("\\\"", "\"");
-	escaped = escaped.replace("\\\\", "\\");
+// The C escape substitutions intentionally precede backslash collapsing.
+// A run of backslashes followed by a recognized escape consumes its last
+// backslash with the escape, then collapses the remaining pairs.
+static _FORCE_INLINE_ char32_t _c_unescape_suffix(char32_t p_char) {
+	switch (p_char) {
+		case 'a':
+			return '\a';
+		case 'b':
+			return '\b';
+		case 'f':
+			return '\f';
+		case 'n':
+			return '\n';
+		case 'r':
+			return '\r';
+		case 't':
+			return '\t';
+		case 'v':
+			return '\v';
+		case '\'':
+			return '\'';
+		case '"':
+			return '"';
+		default:
+			return 0;
+	}
+}
 
-	return escaped;
+static int _c_unescape_copy(const char32_t *p_source, int p_length, char32_t *p_dest) {
+	int output_length = 0;
+	for (int pos = 0; pos < p_length;) {
+		if (p_source[pos] != '\\') {
+			if (p_dest) {
+				p_dest[output_length] = p_source[pos];
+			}
+			output_length++;
+			pos++;
+			continue;
+		}
+
+		const int run_begin = pos;
+		while (pos < p_length && p_source[pos] == '\\') {
+			pos++;
+		}
+		const char32_t escaped = pos < p_length ? _c_unescape_suffix(p_source[pos]) : 0;
+		// Reproduce ordered replace("\\a"... "\\\"" then "\\\\"), including
+		// overlapping runs such as two backslashes followed by 'n'.
+		const int remaining_slashes = pos - run_begin - (escaped != 0);
+		const int output_slashes = (remaining_slashes + 1) / 2;
+		if (p_dest) {
+			for (int i = 0; i < output_slashes; i++) {
+				p_dest[output_length + i] = '\\';
+			}
+		}
+		output_length += output_slashes;
+		if (escaped != 0) {
+			if (p_dest) {
+				p_dest[output_length] = escaped;
+			}
+			output_length++;
+			pos++;
+		}
+	}
+	return output_length;
+}
+
+String String::c_unescape() const {
+	const int source_length = length();
+	const char32_t *source = ptr();
+	const int decoded_length = _c_unescape_copy(source, source_length, nullptr);
+	if (decoded_length == source_length) {
+		// No recognized escape or repeated backslash. Keep the COW buffer.
+		return *this;
+	}
+
+	String decoded;
+	ERR_FAIL_COND_V(decoded.resize_uninitialized(decoded_length + 1) != OK, String());
+	char32_t *dest = decoded.ptrw();
+	_c_unescape_copy(source, source_length, dest);
+	dest[decoded_length] = 0;
+	return decoded;
 }
 
 enum class _StringEscapeMode {
