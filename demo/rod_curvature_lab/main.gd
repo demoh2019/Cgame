@@ -87,6 +87,9 @@ func _add_impact_ball() -> void:
     impact_ball.name = "ImpactBall"
     impact_ball.position = Vector3(-3.0, -1.2, 0)
     impact_ball.mass = 2.0
+    # Keep the probe at ribbon height; otherwise it falls below the beam
+    # before it traverses the horizontal distance to the centerline.
+    impact_ball.gravity_scale = 0.0
     impact_ball.contact_monitor = true
     impact_ball.max_contacts_reported = 6
     var collider := CollisionShape3D.new()
