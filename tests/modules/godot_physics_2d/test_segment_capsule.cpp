@@ -60,7 +60,7 @@ static bool collide(const GodotSegmentShape2D &p_segment, const Transform2D &p_s
 TEST_CASE("[GodotPhysics2D] Segment-capsule overlap-only nearest-point path") {
 	GodotSegmentShape2D segment(Vector2(-4, 0), Vector2(4, 0), Vector2(0, -1));
 	GodotCapsuleShape2D capsule;
-	capsule.set_data(Vector2(4, 1)); // Height 4, radius 1, half center segment 1.
+	capsule.set_data(Vector2(1, 4)); // Height 4, radius 1, half center segment 1.
 	const Transform2D segment_transform;
 	Transform2D capsule_transform;
 
@@ -88,7 +88,7 @@ TEST_CASE("[GodotPhysics2D] Segment-capsule overlap-only nearest-point path") {
 TEST_CASE("[GodotPhysics2D] Segment-capsule exterior grid versus distance oracle") {
 	GodotSegmentShape2D segment(Vector2(-4, 0), Vector2(4, 0), Vector2(0, -1));
 	GodotCapsuleShape2D capsule;
-	capsule.set_data(Vector2(4, 1));
+	capsule.set_data(Vector2(1, 4));
 	const Transform2D segment_transform;
 	Transform2D capsule_transform;
 
@@ -112,11 +112,11 @@ TEST_CASE("[GodotPhysics2D] Segment-capsule exterior grid versus distance oracle
 TEST_CASE("[GodotPhysics2D] Segment-capsule rotated, swept and scaled fallbacks") {
 	GodotSegmentShape2D segment(Vector2(-4, 0), Vector2(4, 0), Vector2(0, -1));
 	GodotCapsuleShape2D capsule;
-	capsule.set_data(Vector2(4, 1));
+	capsule.set_data(Vector2(1, 4));
 	const Transform2D segment_transform;
 	Transform2D capsule_transform;
 
-	const Transform2D rotated(real_t(Math::PI * 0.5), Vector2(0, real_t(1.5)));
+	const Transform2D rotated(real_t(Math::PI * 0.5), Vector2(0, real_t(0.5)));
 	CHECK(collide(segment, segment_transform, capsule, rotated));
 
 	capsule_transform.set_origin(Vector2(0, 4));
