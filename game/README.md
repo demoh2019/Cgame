@@ -1239,3 +1239,56 @@ bag location and remaining reservation time, not account identities.
 The bag is not duplicated for each player, and repeated pickups cannot
 create items. The new `tests/test_raid_loot_rights.gd` is part of the
 headless suite. Existing Cgame APIs were sufficient.
+
+
+## Cooperative dangerous-zone raid boss — Lineage-inspired PvE
+
+The canonical online game in `game/` now features a **server-scheduled
+mutant warlord encounter**. It builds on the existing survivor parties,
+zombie AI, tank threat lists, classless weapon mastery and loot-bag economy.
+
+- Assemble at least **two living members of the same party** within
+  **20 metres** of its leader in a **red or black zone**. After the world
+  has been running for 90 seconds, the dedicated scheduler can summon
+  a raid boss nearby. A lone player, strangers without a party, a safe-zone
+  group or distant teammates cannot trigger it.
+- The server chooses an accessible spawn spot **22–30 metres** from the
+  leader, away from all players, water, blocked terrain and safe-zone or
+  risk-zone boundaries. Client input cannot nominate a boss ID, position,
+  rewards or timer.
+- Only **one raid boss** can exist at a time. It has **600 HP**, uses the
+  existing brute zombie chase and threat mechanics, and retreats after
+  **4 minutes** or when no survivor remains nearby. A new encounter
+  requires **10 minutes since the previous spawn**.
+- The boss performs a **telegraphed 5-metre area slam**. The networked
+  client sees a red ground disc and a warning **2 seconds** before impact.
+  Players can move outside it or dodge. The server calculates damage,
+  armor mitigation, life state and protected-zone restrictions.
+- Defeating it produces **exactly one shared world loot bag**, with
+  silver, infected cores, high-tier metal bars and field bandages.
+  The normal zombie loot and classless combat XP still apply. Party
+  members receive bonus weapon mastery only after actual confirmed
+  contributions, not for standing idle.
+- Raid messages are distributed only to nearby observers. No reward
+  duplication, client-owned boss spawns, duplicated quest progress or
+  persistence of session timers is allowed.
+
+This is an original, small cooperative world-boss encounter — **not yet**
+an instanced dungeon, a scheduled global raid calendar, a persistent
+guild war or a fully balanced MMO boss rotation. Those systems can grow
+from the same authoritative primitives rather than creating copies
+of NPC logic in `demo/`.
+
+Run the existing test suite:
+
+```sh
+godot --headless --path game --script res://tests/run_all.gd
+```
+
+`test_raid_encounter.gd` covers safe-zone/group restrictions, 2-player
+eligibility, bounded terrain-safe spawning, private announcements, attack
+warning/dodge/damage, once-only shared loot and boss cooldown/expiry.
+The `albion-after-raid-boss.yml` GitHub Actions workflow invokes the
+same tests. Successful Godot/Cgame execution must be checked before a
+production deployment. No additional C++ engine primitive was needed
+for this gameplay feature.
