@@ -990,6 +990,27 @@
 				Returns the torque threshold set by [method joint_set_break_torque].
 			</description>
 		</method>
+		<method name="joint_get_fatigue_damage" qualifiers="const">
+			<return type="float" />
+			<param index="0" name="joint" type="RID" />
+			<description>
+				Returns accumulated progressive damage of a joint in the range [code]0.0[/code] to [code]1.0[/code]. Damage reaches [code]1.0[/code] when the joint fails. Available in Godot Physics only; other backends return [code]0.0[/code]. See [member Joint3D.fatigue_rate].
+			</description>
+		</method>
+		<method name="joint_get_fatigue_rate" qualifiers="const">
+			<return type="float" />
+			<param index="0" name="joint" type="RID" />
+			<description>
+				Returns the joint progressive-fatigue damage coefficient per second. See [method joint_set_fatigue_rate].
+			</description>
+		</method>
+		<method name="joint_get_fatigue_yield_ratio" qualifiers="const">
+			<return type="float" />
+			<param index="0" name="joint" type="RID" />
+			<description>
+				Returns the normalized load threshold below which the joint does not accumulate fatigue damage. See [method joint_set_fatigue_yield_ratio].
+			</description>
+		</method>
 		<method name="joint_get_reaction_force" qualifiers="const">
 			<return type="Vector3" />
 			<param index="0" name="joint" type="RID" />
@@ -1108,6 +1129,22 @@
 			<param index="1" name="torque" type="float" />
 			<description>
 				Sets the torque (in newton-meters) above which the joint breaks. [code]0[/code] disables torque breaking.
+			</description>
+		</method>
+		<method name="joint_set_fatigue_rate">
+			<return type="void" />
+			<param index="0" name="joint" type="RID" />
+			<param index="1" name="rate" type="float" />
+			<description>
+				Enables progressive fatigue failure under sustained reaction loads. A value of [code]0.0[/code] disables fatigue. Requires at least one nonzero break threshold and is supported by Godot Physics only.
+			</description>
+		</method>
+		<method name="joint_set_fatigue_yield_ratio">
+			<return type="void" />
+			<param index="0" name="joint" type="RID" />
+			<param index="1" name="ratio" type="float" />
+			<description>
+				Sets the fatigue accumulation yield as a fraction of the joint reaction break force/torque limits, clamped to [code]0.0[/code]..[code]0.99[/code]. Default [code]0.5[/code].
 			</description>
 		</method>
 		<method name="joint_set_solver_priority">
