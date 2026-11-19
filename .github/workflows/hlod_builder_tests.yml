@@ -1,0 +1,35 @@
+name: HLOD Builder integration tests
+on:
+  push:
+    paths:
+      - 'misc/hlod_builder/**'
+      - '.github/workflows/hlod_builder_tests.yml'
+  pull_request:
+    paths:
+      - 'misc/hlod_builder/**'
+      - '.github/workflows/hlod_builder_tests.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  hlod-headless:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+      - name: Fetch and authenticate official Godot 4.7.2 binary
+        shell: bash
+        run: |
+          set -euo pipefail
+          curl --retry 4 --retry-delay 3 -fL -o godot.zip https://github.com/godotengine/godot-builds/releases/download/4.7.2-stable/Godot_v4.7.2-stable_linux.x86_64.zip
+          echo 'cadd3204e728a35d3f13adb7fd0d7902636b79f6b95c40c265eb73b6c35329e4  godot.zip' | sha256sum -c -
+          unzip -q godot.zip
+          chmod +x Godot_v4.7.2-stable_linux.x86_64
+          mv Godot_v4.7.2-stable_linux.x86_64 godot
+      - name: Parse addon scripts and import demo project
+        run: ./godot --headless --path misc/hlod_builder --editor --import --quit
+      - name: Run HLOD mesh and scene integration tests
+        run: ./godot --headless --path misc/hlod_builder --script res://tests/test_hlod_builder.gd
+      - name: Profile HLOD CPU build and merged draw surface counts
+        run: ./godot --headless --path misc/hlod_builder --script res://tests/benchmark_hlod.gd
