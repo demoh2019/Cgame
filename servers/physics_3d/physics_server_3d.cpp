@@ -574,6 +574,9 @@ PhysicsServer3D::PhysicsServer3D() {
 	// Zero selects the legacy Bullet-style projection; nonzero compliance
 	// enables a per-link Lagrange multiplier across iterations of each step.
 	GLOBAL_DEF(PropertyInfo(Variant::FLOAT, "physics/3d/solver/soft_body_xpbd_compliance", PROPERTY_HINT_RANGE, "0,0.01,0.000001,or_greater"), 0.0);
+	// Optional per-triangle surface-area preservation for deformable cloth.
+	// Zero disables all extra area constraints and associated lambda buffers.
+	GLOBAL_DEF(PropertyInfo(Variant::FLOAT, "physics/3d/solver/soft_body_xpbd_area_compliance", PROPERTY_HINT_RANGE, "0,0.01,0.000001,or_greater"), 0.0);
 	GLOBAL_DEF(PropertyInfo(Variant::FLOAT, "physics/3d/solver/contact_recycle_radius", PROPERTY_HINT_RANGE, "0,0.1,0.001,or_greater,suffix:m"), 0.01);
 	GLOBAL_DEF(PropertyInfo(Variant::FLOAT, "physics/3d/solver/contact_max_separation", PROPERTY_HINT_RANGE, "0,0.1,0.001,or_greater,suffix:m"), 0.05);
 	// Experimental sphere-only speculative contacts for existing broadphase pairs.
