@@ -1678,6 +1678,159 @@ void GodotSoftBody3D::solve_self_collisions(real_t p_thickness, real_t p_alpha_t
 	}
 }
 
+// Detect non-adjacent crossed or nearly touching structural edges. This
+// complements vertex/face contacts: two long thin edges may intersect while
+// all four endpoints remain much farther apart than the cloth thickness.
+//
+// Reuse the existing face BVH (the source mesh's structural edges are part
+// of those faces). Every undirected pair is considered once, selected by
+// canonical 64-bit edge keys. Broadphase and closest-segment work have
+// separate per-source and total budgets, so collapsed dense cloth cannot
+// allocate or narrowphase-check an unbounded number of candidate pairs.
+void GodotSoftBody3D::solve_self_edge_contacts(real_t p_thickness, real_t p_alpha_tilde) {
+	if (!self_collision_edges_built) {
+		initialize_self_collision_adjacency(); // A world may enable edges later.
+	}
+	self_collision_edge_contacts.clear();
+	if (self_collision_edges.is_empty() || face_tree.is_empty()) {
+		return;
+	}
+	const real_t thickness_sq = p_thickness * p_thickness;
+	if (!(thickness_sq > 0.0) || !Math::is_finite(thickness_sq)) {
+		return;
+	}
+	constexpr uint32_t MAX_CONTACTS_PER_EDGE = 2;
+	constexpr uint32_t MAX_TOTAL_EDGE_CONTACTS = 32768;
+	constexpr uint32_t MAX_EDGE_TESTS_PER_SOURCE = 128;
+	constexpr uint32_t MAX_EDGE_TESTS_PER_STEP = 1048576;
+	uint32_t remaining_tests = MAX_EDGE_TESTS_PER_STEP;
+	const Vector3 reach(p_thickness, p_thickness, p_thickness);
+
+	struct EdgeCandidateQuery {
+		const LocalVector<Node> *nodes = nullptr;
+		const SelfCollisionEdge *source = nullptr;
+		const HashSet<uint64_t> *structural_edges = nullptr;
+		real_t thickness_sq = 0.0;
+		uint32_t *remaining_tests = nullptr;
+		uint32_t examined = 0;
+		uint32_t count = 0;
+		uint64_t keys[MAX_CONTACTS_PER_EDGE] = {};
+		real_t distances[MAX_CONTACTS_PER_EDGE] = {};
+
+		bool operator()(void *p_data) {
+			const Face *face = static_cast<const Face *>(p_data);
+			const uint32_t a = source->a;
+			const uint32_t b = source->b;
+			const uint64_t source_key = (uint64_t(a) << 32) | uint64_t(b);
+			for (int i = 0; i < 3; ++i) {
+				if (*remaining_tests == 0 || examined >= MAX_EDGE_TESTS_PER_SOURCE) {
+					return true; // Stop BVH at finite collision CPU budget.
+				}
+				++examined;
+				--(*remaining_tests);
+				const uint32_t v0 = face->n[i]->index;
+				const uint32_t v1 = face->n[(i + 1) % 3]->index;
+				const uint32_t c = MIN(v0, v1);
+				const uint32_t d = MAX(v0, v1);
+				const uint64_t key = (uint64_t(c) << 32) | uint64_t(d);
+				// No duplicates or contacts between the same/adjacent edges:
+				// the constraint solver already keeps their shape consistent.
+				if (key <= source_key || a == c || a == d || b == c || b == d ||
+						structural_edges->has(_soft_body_edge_key(a, c)) ||
+						structural_edges->has(_soft_body_edge_key(a, d)) ||
+						structural_edges->has(_soft_body_edge_key(b, c)) ||
+						structural_edges->has(_soft_body_edge_key(b, d))) {
+					continue;
+				}
+				bool already_selected = false;
+				for (uint32_t j = 0; j < count; ++j) {
+					if (keys[j] == key) {
+						already_selected = true;
+						break;
+					}
+				}
+				if (already_selected) {
+					continue; // This structural edge may belong to two faces.
+				}
+				Vector3 on_ab, on_cd;
+				real_t s, t;
+				if (!physics_softbody_closest_segment_points(
+							(*nodes)[a].x, (*nodes)[b].x,
+							(*nodes)[c].x, (*nodes)[d].x,
+							on_ab, on_cd, s, t)) {
+					continue;
+				}
+				const real_t distance_sq = on_ab.distance_squared_to(on_cd);
+				if (!Math::is_finite(distance_sq) || distance_sq >= thickness_sq) {
+					continue;
+				}
+				uint32_t insert = 0;
+				while (insert < count && (distance_sq > distances[insert] ||
+						(distance_sq == distances[insert] && key > keys[insert]))) {
+					++insert;
+				}
+				if (insert >= MAX_CONTACTS_PER_EDGE) {
+					continue;
+				}
+				if (count < MAX_CONTACTS_PER_EDGE) {
+					++count;
+				}
+				for (uint32_t j = count - 1; j > insert; --j) {
+					keys[j] = keys[j - 1];
+					distances[j] = distances[j - 1];
+				}
+				keys[insert] = key;
+				distances[insert] = distance_sq;
+			}
+			return false;
+		}
+	};
+
+	for (const SelfCollisionEdge &edge : self_collision_edges) {
+		if (self_collision_edge_contacts.size() >= MAX_TOTAL_EDGE_CONTACTS || remaining_tests == 0) {
+			break;
+		}
+		const Vector3 &a = nodes[edge.a].x;
+		const Vector3 &b = nodes[edge.b].x;
+		AABB query_aabb(a, Vector3());
+		query_aabb.expand_to(b);
+		query_aabb.position -= reach;
+		query_aabb.size += reach * real_t(2.0);
+		EdgeCandidateQuery query;
+		query.nodes = &nodes;
+		query.source = &edge;
+		query.structural_edges = &self_collision_structural_edges;
+		query.thickness_sq = thickness_sq;
+		query.remaining_tests = &remaining_tests;
+		face_tree.aabb_query(query_aabb, query);
+		for (uint32_t i = 0; i < query.count &&
+				self_collision_edge_contacts.size() < MAX_TOTAL_EDGE_CONTACTS; ++i) {
+			SelfEdgeContact contact;
+			contact.a = edge.a;
+			contact.b = edge.b;
+			contact.c = uint32_t(query.keys[i] >> 32);
+			contact.d = uint32_t(query.keys[i]);
+			self_collision_edge_contacts.push_back(contact);
+		}
+	}
+
+	// All edge contacts see one geometry snapshot while gathering. Resolve
+	// only afterward, then refit the shared face tree once for subsequent
+	// ray queries and the next physics step.
+	for (const SelfEdgeContact &contact : self_collision_edge_contacts) {
+		Node &a = nodes[contact.a];
+		Node &b = nodes[contact.b];
+		Node &c = nodes[contact.c];
+		Node &d = nodes[contact.d];
+		physics_softbody_project_edge_contact(a.x, b.x, c.x, d.x,
+				a.im, b.im, c.im, d.im, p_thickness, p_alpha_tilde,
+				a.q, b.q, c.q, d.q);
+	}
+	if (!self_collision_edge_contacts.is_empty()) {
+		update_face_tree(0.0);
+	}
+}
+
 void GodotSoftBody3D::solve_constraints(real_t p_delta) {
 	const real_t inv_delta = 1.0 / p_delta;
 
