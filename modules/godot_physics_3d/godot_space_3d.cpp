@@ -1296,14 +1296,25 @@ GodotSpace3D::GodotSpace3D() {
 	soft_body_xpbd_compliance = Math::is_finite(configured_xpbd_compliance) ? MAX(real_t(0.0), configured_xpbd_compliance) : real_t(0.0);
 	const real_t configured_tension_hardening = GLOBAL_GET("physics/3d/solver/soft_body_xpbd_tension_hardening");
 	soft_body_xpbd_tension_hardening = Math::is_finite(configured_tension_hardening) ? MAX(real_t(0.0), configured_tension_hardening) : real_t(0.0);
+	const real_t configured_compression_hardening = GLOBAL_GET("physics/3d/solver/soft_body_xpbd_compression_hardening");
+	soft_body_xpbd_compression_hardening = Math::is_finite(configured_compression_hardening) ? MAX(real_t(0.0), configured_compression_hardening) : real_t(0.0);
 	const real_t configured_tension_yield = GLOBAL_GET("physics/3d/solver/soft_body_xpbd_tension_yield_strain");
 	soft_body_xpbd_tension_yield_strain = Math::is_finite(configured_tension_yield) ? MAX(real_t(0.0), configured_tension_yield) : real_t(0.1);
+	const real_t configured_compression_yield = GLOBAL_GET("physics/3d/solver/soft_body_xpbd_compression_yield_strain");
+	soft_body_xpbd_compression_yield_strain = Math::is_finite(configured_compression_yield) ?
+			CLAMP(configured_compression_yield, real_t(0.0), real_t(1.0)) : real_t(0.1);
 	const real_t configured_plastic_yield = GLOBAL_GET("physics/3d/solver/soft_body_plastic_yield_strain");
 	soft_body_plastic_yield_strain = Math::is_finite(configured_plastic_yield) ? CLAMP(configured_plastic_yield, real_t(0.0), real_t(1.0)) : real_t(0.1);
 	const real_t configured_plastic_creep_rate = GLOBAL_GET("physics/3d/solver/soft_body_plastic_creep_rate");
 	soft_body_plastic_creep_rate = Math::is_finite(configured_plastic_creep_rate) ? MAX(real_t(0.0), configured_plastic_creep_rate) : real_t(0.0);
 	const real_t configured_link_damping = GLOBAL_GET("physics/3d/solver/soft_body_link_damping");
 	soft_body_link_damping = Math::is_finite(configured_link_damping) ? MAX(real_t(0.0), configured_link_damping) : real_t(0.0);
+	const real_t configured_strain_rate_damping = GLOBAL_GET("physics/3d/solver/soft_body_strain_rate_damping");
+	soft_body_strain_rate_damping = Math::is_finite(configured_strain_rate_damping) ?
+			MAX(real_t(0.0), configured_strain_rate_damping) : real_t(0.0);
+	const real_t configured_strain_rate_yield = GLOBAL_GET("physics/3d/solver/soft_body_strain_rate_yield");
+	soft_body_strain_rate_yield = Math::is_finite(configured_strain_rate_yield) ?
+			MAX(real_t(0.0), configured_strain_rate_yield) : real_t(0.0);
 	const real_t configured_lift_coefficient = GLOBAL_GET("physics/3d/solver/soft_body_lift_coefficient");
 	soft_body_lift_coefficient = Math::is_finite(configured_lift_coefficient) ? MAX(real_t(0.0), configured_lift_coefficient) : real_t(0.0);
 	const real_t configured_gas_gamma = GLOBAL_GET("physics/3d/solver/soft_body_gas_pressure_gamma");
