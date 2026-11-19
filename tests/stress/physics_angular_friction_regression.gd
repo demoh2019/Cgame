@@ -41,9 +41,11 @@ func _two(enabled: bool) -> Dictionary:
 	var ball: RID = PhysicsServer2D.body_create()
 	PhysicsServer2D.body_set_mode(ball, PhysicsServer2D.BODY_MODE_RIGID)
 	PhysicsServer2D.body_add_shape(ball, circle)
-	PhysicsServer2D.body_set_param(ball, PhysicsServer2D.BODY_PARAM_GRAVITY_SCALE, -1.0)
+# Gravity points along +Y in PhysicsServer2D. The sphere must move
+	# toward the floor to establish a normal impulse for angular friction.
+		PhysicsServer2D.body_set_param(ball, PhysicsServer2D.BODY_PARAM_GRAVITY_SCALE, 1.0)
 	PhysicsServer2D.body_set_state(ball, PhysicsServer2D.BODY_STATE_CAN_SLEEP, false)
-	PhysicsServer2D.body_set_state(ball, PhysicsServer2D.BODY_STATE_TRANSFORM, Transform2D(0.0, Vector2(0, -2)))
+	PhysicsServer2D.body_set_state(ball, PhysicsServer2D.BODY_STATE_TRANSFORM, Transform2D(0.0, Vector2(0, -1.45)))
 	PhysicsServer2D.body_set_state(ball, PhysicsServer2D.BODY_STATE_ANGULAR_VELOCITY, 12.0)
 	PhysicsServer2D.body_set_space(ball, space)
 	PhysicsServer2D.space_set_active(space, true)
