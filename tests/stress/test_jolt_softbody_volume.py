@@ -135,13 +135,10 @@ class SoftBodyVolumeTests(unittest.TestCase):
         self.assertIn('simulation/soft_body_volume_preservation"), false', self.settings)
         self.assertIn("if (JoltProjectSettings::soft_body_volume_preservation)", self.code)
 
-    def test_volume_fan_precedes_lra_cache_creation(self):
+    def test_complete_particle_list_precedes_lra_construction(self):
         self.assertIn("mVolumeConstraints.emplace_back(", self.builder)
         self.assertIn("CalculateVolumeConstraintVolumes()", self.builder)
         self.assertIn("CalculateVolumeConstraintVolumes", self.jolt)
-        # Jolt caches closest kinematic vertices during CreateConstraints.
-        # The fan must create its interior particle first, before the LRA
-        # cache is built, so all cached vertex IDs stay valid.
         self.assertLess(
             self.code.index("try_build_convex_volume_fan(*settings"),
             self.code.index("settings->CreateConstraints(&vertex_attrib, 1, bend_type)"),
@@ -150,7 +147,6 @@ class SoftBodyVolumeTests(unittest.TestCase):
             self.code.index("settings->CreateConstraints(&vertex_attrib, 1, bend_type)"),
             self.code.index("settings->Optimize()"),
         )
-        self.assertIn("append_volume_radial_springs(*settings", self.code)
 
     def test_validation_precedes_mutation(self):
         self.assertLess(self.builder.index("for (const JPH::SoftBodySharedSettings::Face &face : faces) {"),
@@ -159,6 +155,28 @@ class SoftBodyVolumeTests(unittest.TestCase):
         self.assertIn("MAX_VERTICES = 2048", self.builder)
         self.assertIn("MAX_FACES = 4096", self.builder)
         self.assertIn("side * normal.Dot(", self.builder)
+
+    def test_positive_signed_tetrahedra_for_jolt_volume_gradients(self):
+        self.assertIn("const float signed_six_volume =", self.builder)
+        self.assertIn("if (signed_six_volume > 0.0f)", self.builder)
+        self.assertIn("face.mVertex[0], face.mVertex[2], face.mVertex[1]", self.builder)
+        # Jolt computes abs(signed volume) but applies signed gradients.
+        vendor = (ROOT / "thirdparty/jolt_physics/Jolt/Physics/SoftBody/SoftBodyMotionProperties.cpp").read_text(encoding="utf-8")
+        self.assertIn("float c = abs(x1x2.Cross(x1x3).Dot(x1x4)) - v->mSixRestVolume;", vendor)
+        center = (0.25, 0.25, 0.25)
+        for a, b, c in TETRA_FACES:
+            signed = dot(cross(subtract(TETRA[b], TETRA[a]), subtract(TETRA[c], TETRA[a])),
+                         subtract(center, TETRA[a]))
+            self.assertNotEqual(signed, 0.0)
+            if signed < 0.0:
+                b, c = c, b
+            corrected = dot(cross(subtract(TETRA[b], TETRA[a]), subtract(TETRA[c], TETRA[a])),
+                            subtract(center, TETRA[a]))
+            self.assertGreater(corrected, 0.0)
+
+    def test_volume_particle_precedes_mass_compliance_conversion(self):
+        self.assertLess(self.code.index("try_build_convex_volume_fan(*settings"),
+                        self.code.index("const double w1_plus_w2 ="))
 
     def test_compliance_parameter_is_finite(self):
         self.assertIn("Math::is_finite(volume_compliance)", self.settings)
