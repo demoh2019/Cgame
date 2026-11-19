@@ -47,7 +47,7 @@ struct GodotPhysicsFluidSample3D {
 
 _FORCE_INLINE_ GodotPhysicsFluidSample3D godot_physics_fluid_sample_3d(const AABB &p_world_bounds, real_t p_volume, real_t p_surface_y) {
 	GodotPhysicsFluidSample3D sample;
-	if (!(p_volume > 0.0) || !p_world_bounds.is_finite() || !Math::is_finite(p_surface_y)) {
+	if (!(p_volume > 0.0) || !Math::is_finite(p_volume) || !p_world_bounds.is_finite() || !Math::is_finite(p_surface_y)) {
 		return sample;
 	}
 
@@ -91,7 +91,8 @@ _FORCE_INLINE_ Vector3 godot_physics_fluid_quadratic_drag_3d(const Vector3 &p_re
 	if (!(projected_area > 0.0) || !Math::is_finite(projected_area)) {
 		return Vector3();
 	}
-	return -p_relative_velocity * (real_t(0.5) * p_density * p_drag_coefficient * projected_area * p_submerged_fraction * speed);
+	const Vector3 force = -p_relative_velocity * (real_t(0.5) * p_density * p_drag_coefficient * projected_area * p_submerged_fraction * speed);
+	return force.is_finite() ? force : Vector3();
 }
 
 _FORCE_INLINE_ real_t godot_physics_fluid_angular_damping_3d(real_t p_coefficient, real_t p_submerged_fraction, real_t p_step) {
