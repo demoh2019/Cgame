@@ -16,16 +16,14 @@ class NormalMapMipmapTests(unittest.TestCase):
             self.assertIn(f"_quantize_unorm_fast<uint8_t>(n.{ch}, 255.0f)", body)
 
     def test_u16_uses_fast_unorm(self):
-        body = method("void Image::renormalize_uint16(", "
-Image::Image(")
+        body = method("void Image::renormalize_uint16(", "\nImage::Image(")
         for ch in ("x", "y", "z"):
             self.assertIn(f"_quantize_unorm_fast<uint16_t>(n.{ch}, 65535.0f)", body)
 
     def test_no_old_rounding_or_extra_scale(self):
         for body in (
             method("void Image::renormalize_uint8(", "void Image::renormalize_float("),
-            method("void Image::renormalize_uint16(", "
-Image::Image("),
+            method("void Image::renormalize_uint16(", "\nImage::Image("),
         ):
             self.assertNotIn("Math::round", body)
             self.assertNotIn("n *= 255;", body)
@@ -34,8 +32,7 @@ Image::Image("),
     def test_normalize_kept_for_u8_and_u16(self):
         for body in (
             method("void Image::renormalize_uint8(", "void Image::renormalize_float("),
-            method("void Image::renormalize_uint16(", "
-Image::Image("),
+            method("void Image::renormalize_uint16(", "\nImage::Image("),
         ):
             self.assertIn("n.normalize();", body)
             self.assertIn("n *= 0.5;", body)
