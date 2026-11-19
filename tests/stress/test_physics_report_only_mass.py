@@ -21,7 +21,7 @@ class ReportOnlyContactContracts(unittest.TestCase):
     def test_2d_guarded_effective_mass_and_bias(self):
         source = self.pre_solve("2d")
         self.assertIn("if (!report_contacts_only) {\n\t\t\t// Precompute normal mass", source)
-        self.assertIn("if (!report_contacts_only) {\n\t\t\tconst real_t rtA", source)
+        self.assertIn("if (!report_contacts_only) {\n\t\t\t\tconst real_t rtA", source)
         self.assertIn("kNormal > 0.0 ? 1.0f / kNormal : 0.0f", source)
         self.assertIn("kTangent > 0.0 ? 1.0f / kTangent : 0.0f", source)
         self.assertIn("if (!report_contacts_only) {\n\t\t\tc.bias =", source)
