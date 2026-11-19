@@ -210,7 +210,7 @@ class SelfEdgeBVHReferenceTests(unittest.TestCase):
         self.assertIn('simulation/soft_body_self_edge_bvh"), false', self.config)
         self.assertIn("soft_body_self_edge_bvh = GLOBAL_GET(", self.config)
         self.assertIn("JoltProjectSettings::soft_body_self_edge_bvh &&", self.solver)
-        self.assertIn("const bool use_edge_bvh", self.solver)
+        self.assertIn("bool use_edge_bvh = false;", self.solver)
         self.assertIn("const uint32_t candidate_count = use_edge_bvh ?", self.solver)
         self.assertIn("const uint32_t j = use_edge_bvh ?", self.solver)
         self.assertIn("if (j <= i)", self.solver)
