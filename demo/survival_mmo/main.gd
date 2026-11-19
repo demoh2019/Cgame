@@ -9,6 +9,9 @@ const SaveScript = preload("res://save_system.gd")
 
 const GATHER_DISTANCE := 2.5
 const ATTACK_DISTANCE := 2.4
+const BARRICADE_USE_DISTANCE := 3.5
+const BARRICADE_MAX_HP := 100.0
+const BARRICADE_COLOR := Color("#76583d")
 const COLOR_GROUND := Color("#344a3e")
 const RESOURCE_COLORS := {
     "wood": Color("#926d43"),
@@ -192,11 +195,15 @@ func _update_hud() -> void:
     hud.text += "Logging %d | Mining %d | Foraging %d | Combat %d | Crafting %d\n" % [
         state.get_level("logging"), state.get_level("mining"), state.get_level("foraging"),
         state.get_level("combat"), state.get_level("crafting")]
+    var condition := state.weapon_condition
+    hud.text += "Weapon condition: %d / %d | Structures: %d\n" % [
+        condition, int(StateScript.MAX_WEAPON_CONDITION[state.equipped_weapon]),
+        get_tree().get_nodes_in_group("player_building").size()]
     hud.text += "Zombies left: %d\n" % get_tree().get_nodes_in_group("infected").size()
     hud.text += "WASD move | Shift sprint | E gather | Space attack\n"
     hud.text += "Q spear (2 wood, 1 stone) | T upgrade (1 wood, 2 stone, 2 scrap, combat Lv2)\n"
-    hud.text += "H bandage (2 fiber, 1 herb)\n"
-    hud.text += "F eat herb | B build barricade (3 wood, 2 stone) | R restart\n"
+    hud.text += "H bandage (2 fiber, 1 herb) | U repair weapon (1 wood, 1 scrap)\n"
+    hud.text += "F eat herb | B build barricade | G repair wall | X dismantle wall | R restart\n"
     hud.text += "K save world | L load world (user://survival_world_v1.json)\n"
     hud.text += status_message
 
@@ -247,11 +254,14 @@ func _attack() -> void:
     var damage: float = state.weapon_damage()
     var killed: bool = nearest.take_damage(damage)
     state.report_attack(killed)
+    var broken: bool = state.damage_weapon()
     if killed:
         state.add_item("scrap")
         status_message = "Infected defeated! +1 scrap, combat XP +20."
     else:
         status_message = "Hit infected for %d damage, combat XP +3." % int(damage)
+    if broken:
+        status_message += " Your weapon broke!"
 
 
 func _can_place_barricade(at: Vector3, angle: float) -> bool:
@@ -279,12 +289,89 @@ func _build() -> void:
         return
     if not state.spend_recipe("barricade"):
         return
-    var barrier := _make_box("Barricade", pos, Vector3(2.0, 1.4, 0.6), Color("#76583d"))
-    barrier.rotation.y = angle
-    barrier.add_to_group("player_building")
+    _spawn_barricade(pos, angle)
     state.award_experience("crafting", 10)
     status_message = "Barricade built. Crafting XP +10."
 
+
+
+func _spawn_barricade(at: Vector3, angle: float, durability: float = BARRICADE_MAX_HP) -> StaticBody3D:
+    var barrier := _make_box("Barricade", at, Vector3(2.0, 1.4, 0.6), BARRICADE_COLOR)
+    barrier.rotation.y = angle
+    barrier.set_meta("hp", clampf(durability, 1.0, BARRICADE_MAX_HP))
+    barrier.add_to_group("player_building")
+    _refresh_barricade_visual(barrier)
+    return barrier
+
+
+func _refresh_barricade_visual(barrier: StaticBody3D) -> void:
+    var mesh := barrier.get_node_or_null("Visual") as MeshInstance3D
+    if mesh == null:
+        return
+    var fraction := clampf(float(barrier.get_meta("hp", BARRICADE_MAX_HP)) / BARRICADE_MAX_HP, 0.0, 1.0)
+    mesh.material_override = _material(BARRICADE_COLOR.lerp(Color("#8c2a2a"), 1.0 - fraction))
+
+
+func _nearest_barricade() -> StaticBody3D:
+    var result: StaticBody3D
+    var shortest := BARRICADE_USE_DISTANCE
+    for candidate in get_tree().get_nodes_in_group("player_building"):
+        if not is_instance_valid(candidate) or candidate.is_queued_for_deletion():
+            continue
+        var barrier := candidate as StaticBody3D
+        if barrier == null:
+            continue
+        var distance := _distance_flat(player.global_position, barrier.global_position)
+        if distance < shortest:
+            shortest = distance
+            result = barrier
+    return result
+
+
+func _repair_barricade() -> bool:
+    var barrier := _nearest_barricade()
+    if barrier == null:
+        status_message = "No barricade nearby."
+        return false
+    var hp := float(barrier.get_meta("hp", BARRICADE_MAX_HP))
+    if hp >= BARRICADE_MAX_HP:
+        status_message = "Barricade is already in good condition."
+        return false
+    if not state.spend_recipe("barricade_repair"):
+        status_message = "Repair requires 1 wood and 1 stone."
+        return false
+    barrier.set_meta("hp", minf(BARRICADE_MAX_HP, hp + 35.0))
+    _refresh_barricade_visual(barrier)
+    state.award_experience("crafting", 5)
+    status_message = "Barricade repaired for +35 HP."
+    return true
+
+
+func _salvage_barricade() -> bool:
+    var barrier := _nearest_barricade()
+    if barrier == null:
+        status_message = "No barricade nearby to dismantle."
+        return false
+    barrier.remove_from_group("player_building")
+    barrier.queue_free()
+    state.add_item("wood", 1)
+    state.add_item("stone", 1)
+    status_message = "Barricade dismantled: salvaged 1 wood and 1 stone."
+    return true
+
+
+func receive_barricade_hit(barrier: StaticBody3D, damage: float) -> bool:
+    if not is_instance_valid(barrier) or not barrier.is_in_group("player_building") or damage <= 0.0:
+        return false
+    var hp := maxf(0.0, float(barrier.get_meta("hp", BARRICADE_MAX_HP)) - damage)
+    if hp <= 0.0:
+        barrier.remove_from_group("player_building")
+        barrier.queue_free()
+        status_message = "Infected destroyed a barricade!"
+        return true
+    barrier.set_meta("hp", hp)
+    _refresh_barricade_visual(barrier)
+    return false
 
 
 func _vec3_to_list(vector: Vector3) -> Array:
@@ -318,6 +405,7 @@ func _make_snapshot() -> Dictionary:
         world["barricades"].append({
             "position": _vec3_to_list(node.global_position),
             "yaw": node.rotation.y,
+            "hp": float(node.get_meta("hp", BARRICADE_MAX_HP)),
         })
     return {
         "version": SaveScript.VERSION,
@@ -328,6 +416,7 @@ func _make_snapshot() -> Dictionary:
             "health": state.health,
             "hunger": state.hunger,
             "weapon": state.equipped_weapon,
+            "weapon_condition": state.weapon_condition,
         },
         "world": world,
     }
@@ -353,6 +442,8 @@ func _apply_snapshot(snapshot: Dictionary) -> bool:
     state.health = float(stats["health"])
     state.hunger = float(stats["hunger"])
     state.equipped_weapon = str(stats["weapon"])
+    state.weapon_condition = int(stats.get("weapon_condition",
+            StateScript.MAX_WEAPON_CONDITION[state.equipped_weapon]))
     state.changed.emit()
     player.global_position = _list_to_vec3(snapshot["player"])
     player.velocity = Vector3.ZERO
@@ -362,10 +453,8 @@ func _apply_snapshot(snapshot: Dictionary) -> bool:
     for entry in world["infected"]:
         _spawn_zombie(_list_to_vec3(entry["position"]), float(entry["health"]))
     for entry in world["barricades"]:
-        var barrier := _make_box("Barricade", _list_to_vec3(entry["position"]),
-                Vector3(2.0, 1.4, 0.6), Color("#76583d"))
-        barrier.rotation.y = float(entry["yaw"])
-        barrier.add_to_group("player_building")
+        _spawn_barricade(_list_to_vec3(entry["position"]), float(entry["yaw"]),
+                float(entry.get("hp", BARRICADE_MAX_HP)))
     return true
 
 
@@ -436,3 +525,12 @@ func _unhandled_key_input(event: InputEvent) -> void:
                 status_message = "Need a herb (and missing hunger)."
         KEY_B:
             _build()
+        KEY_G:
+            _repair_barricade()
+        KEY_X:
+            _salvage_barricade()
+        KEY_U:
+            if state.repair_weapon():
+                status_message = "Weapon repaired for +25 durability. Crafting XP +5."
+            else:
+                status_message = "Repair requires a damaged weapon, 1 wood and 1 scrap."

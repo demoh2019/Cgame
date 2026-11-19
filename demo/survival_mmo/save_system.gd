@@ -10,6 +10,7 @@ const MAX_XP := 100000000
 const ITEM_IDS := ["wood", "stone", "fiber", "herb", "scrap"]
 const SKILL_IDS := ["logging", "mining", "foraging", "combat", "crafting"]
 const WEAPON_IDS := ["hands", "spear", "reinforced_spear"]
+const WEAPON_CONDITION_MAX := {"hands": 0, "spear": 60, "reinforced_spear": 100}
 const GATHER_IDS := ["wood", "stone", "fiber", "herb"]
 
 
@@ -60,6 +61,8 @@ static func _valid_world(world: Dictionary) -> bool:
             return false
         if not _point(entry.get("position")) or not _number(entry.get("yaw"), -100.0, 100.0):
             return false
+        if entry.has("hp") and not _number(entry["hp"], 0.01, 100.0):
+            return false
     return true
 
 
@@ -79,6 +82,15 @@ static func is_valid_snapshot(snapshot: Variant) -> bool:
         return false
     if not (stats.get("weapon") is String) or not (stats["weapon"] in WEAPON_IDS):
         return false
+    # v1 saves without condition are supported: restore the weapon at full health.
+    if stats.has("weapon_condition"):
+        var maximum: int = WEAPON_CONDITION_MAX[stats["weapon"]]
+        if not _integer(stats["weapon_condition"], maximum):
+            return false
+        if maximum == 0 and int(stats["weapon_condition"]) != 0:
+            return false
+        if maximum > 0 and int(stats["weapon_condition"]) == 0:
+            return false
     var items = stats.get("items")
     var experience = stats.get("experience")
     if not (items is Dictionary) or not (experience is Dictionary):

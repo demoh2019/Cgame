@@ -41,6 +41,7 @@ func _run() -> void:
     state.add_item("stone", 3)
     state.award_experience("logging", 65)
     _check(state.craft_spear(), "Prepare crafted equipment for persistence.")
+    state.damage_weapon(21)
     state.apply_damage(21.0)
     state.tick(10.0)
 
@@ -50,9 +51,8 @@ func _run() -> void:
     resource.set_meta("remaining", 2)
     var mesh := resource.get_node("Visual") as MeshInstance3D
     mesh.scale = Vector3.ONE * pow(0.83, 2)
-    var barricade: StaticBody3D = game.call("_make_box", "Barricade",
-        Vector3(8.0, 0.72, 0.0), Vector3(2.0, 1.4, 0.6), Color("#76583d"))
-    barricade.add_to_group("player_building")
+    var barricade := game.call("_spawn_barricade", Vector3(8.0, 0.72, 0.0),
+        0.0, 66.0) as StaticBody3D
     var infected = get_nodes_in_group("infected")[0]
     infected.health = 12.0
 
@@ -65,7 +65,11 @@ func _run() -> void:
     _check(int(read_back["state"]["items"]["wood"]) == 5, "Wood count must round-trip.")
     _check(int(read_back["state"]["experience"]["logging"]) == 65, "Skill XP must round-trip.")
     _check(read_back["state"]["weapon"] == "spear", "Equipment must round-trip.")
+    _check(int(read_back["state"]["weapon_condition"]) == 39,
+        "Weapon durability must round-trip.")
     _check(read_back["world"]["barricades"].size() == 1, "Barricade must be persisted.")
+    _check(is_equal_approx(float(read_back["world"]["barricades"][0]["hp"]), 66.0),
+        "Barricade health must round-trip.")
     _check(int(read_back["world"]["resources"][0]["remaining"]) == 2,
         "Depleted resources must retain remaining charges.")
 
@@ -76,6 +80,12 @@ func _run() -> void:
     corrupted["world"]["resources"][0]["kind"] = "malicious_entity"
     _check(not SaveScript.is_valid_snapshot(corrupted), "Unknown resource kind must be rejected.")
     corrupted = original.duplicate(true)
+    corrupted["state"]["weapon_condition"] = 1000
+    _check(not SaveScript.is_valid_snapshot(corrupted), "Invalid weapon durability must be rejected.")
+    corrupted = original.duplicate(true)
+    corrupted["world"]["barricades"][0]["hp"] = -12.0
+    _check(not SaveScript.is_valid_snapshot(corrupted), "Invalid barricade health must be rejected.")
+    corrupted = original.duplicate(true)
     corrupted["version"] = 1000
     _check(not SaveScript.is_valid_snapshot(corrupted), "Future/incompatible versions must be rejected.")
     corrupted = original.duplicate(true)
@@ -85,12 +95,14 @@ func _run() -> void:
     state.items["wood"] = 0
     state.experience["logging"] = 0
     state.equipped_weapon = "hands"
+    state.weapon_condition = 0
     player.global_position = Vector3.ZERO
     game.call("_clear_dynamic_entities")
     _check(game.call("_load_game", TEST_PATH), "Load must restore the saved world.")
     _check(int(state.items["wood"]) == 5, "Inventory must be restored.")
     _check(int(state.experience["logging"]) == 65, "Professions must be restored.")
     _check(state.equipped_weapon == "spear", "Equipment must be restored.")
+    _check(int(state.weapon_condition) == 39, "Equipment durability must be restored.")
     _check(player.global_position.distance_to(Vector3(12.0, 0.95, 2.0)) < 0.01,
         "Character position must be restored.")
     _check(get_nodes_in_group("gatherable").size() == original["world"]["resources"].size(),
@@ -99,6 +111,9 @@ func _run() -> void:
         "Enemy node count must be restored.")
     _check(get_nodes_in_group("player_building").size() == 1,
         "Physical barricades must be restored.")
+    var loaded_barrier: StaticBody3D = get_nodes_in_group("player_building")[0] as StaticBody3D
+    _check(is_equal_approx(float(loaded_barrier.get_meta("hp")), 66.0),
+        "Physical barricade health must restore.")
     var first_resource: Node3D = get_nodes_in_group("gatherable")[0] as Node3D
     _check(int(first_resource.get_meta("remaining")) == 2, "Resource charges must restore.")
     _check(not game.call("_apply_snapshot", corrupted), "Applying incompatible save must fail.")
@@ -110,6 +125,17 @@ func _run() -> void:
         invalid_file.close()
     _check(not game.call("_load_game", TEST_PATH), "Unreadable JSON must not modify game state.")
     _check(state.equipped_weapon == "spear", "Failed load must preserve live state.")
+
+    # The new v1 fields are optional. Older saves restore full durability.
+    var legacy: Dictionary = original.duplicate(true)
+    legacy["state"].erase("weapon_condition")
+    legacy["world"]["barricades"][0].erase("hp")
+    _check(SaveScript.is_valid_snapshot(legacy), "Existing version-1 saves must remain readable.")
+    _check(game.call("_apply_snapshot", legacy), "Existing version-1 saves must restore.")
+    _check(int(state.weapon_condition) == 60, "Legacy weapon condition defaults to full.")
+    var legacy_barrier: StaticBody3D = get_nodes_in_group("player_building")[0] as StaticBody3D
+    _check(is_equal_approx(float(legacy_barrier.get_meta("hp")), 100.0),
+        "Legacy barricade HP defaults to full.")
 
     game.queue_free()
     await process_frame
