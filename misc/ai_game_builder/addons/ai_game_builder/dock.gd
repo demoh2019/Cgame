@@ -1,0 +1,268 @@
+@tool
+extends VBoxContainer
+
+const Plan = preload("res://addons/ai_game_builder/plan.gd")
+
+const SYSTEM_PROMPT := """
+You are an experienced Godot 4 game developer. Produce a complete, runnable,
+small game prototype or a focused modification to an existing game.
+Return ONE JSON object only; no markdown, no commentary outside JSON:
+{
+  "summary": "What was implemented and how to play",
+  "main_scene": "scenes/main.tscn",
+  "files": [{"path": "scenes/main.tscn", "content": "..."}]
+}
+Rules:
+- Use Godot 4.x GDScript. Include all referenced scripts and resources.
+- Use only text assets: .gd, .tscn, .tres, .gdshader, .shader, .json,
+  .md, .txt, .cfg, .csv. Do not depend on external images, fonts or plugins.
+- Use relative project paths without res:// prefix, leading slash, or ..
+- Never write project.godot, editor addons, .godot, .git or secret files.
+- Prioritize a playable vertical slice with input, feedback, restart and
+  clear win/lose conditions where appropriate.
+- For changes, include the full final contents of every changed file.
+- Never run external commands, install packages or make HTTP requests.
+- Return at most 24 files and keep each file under 256 KiB.
+"""
+
+var _endpoint: LineEdit
+var _model: LineEdit
+var _api_key: LineEdit
+var _request_text: TextEdit
+var _profile: OptionButton
+var _request_button: Button
+var _apply_button: Button
+var _allow_overwrite: CheckBox
+var _make_main: CheckBox
+var _summary: Label
+var _status: Label
+var _file_list: ItemList
+var _file_preview: TextEdit
+var _http: HTTPRequest
+var _pending_plan: Dictionary = {}
+
+
+func _ready() -> void:
+	name = "AI Game Builder"
+	custom_minimum_size = Vector2(330, 450)
+	size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	size_flags_vertical = Control.SIZE_EXPAND_FILL
+
+	var header := Label.new()
+	header.text = "AI Game Builder"
+	header.add_theme_font_size_override("font_size", 17)
+	add_child(header)
+
+	_endpoint = LineEdit.new()
+	_endpoint.text = "https://api.openai.com/v1/chat/completions"
+	_add_field("OpenAI-compatible chat completions URL", _endpoint)
+
+	_model = LineEdit.new()
+	_model.text = "gpt-4.1-mini"
+	_add_field("Model", _model)
+
+	_api_key = LineEdit.new()
+	_api_key.secret = true
+	_api_key.placeholder_text = "GODOT_AI_API_KEY or session key"
+	_add_field("API key (not saved to project)", _api_key)
+
+	_profile = OptionButton.new()
+	_profile.add_item("Fast: small playable prototype")
+	_profile.add_item("Quality: more complete game")
+	_add_field("Generation mode", _profile)
+
+	_request_text = TextEdit.new()
+	_request_text.custom_minimum_size = Vector2(0, 105)
+	_request_text.placeholder_text = "Example: Make a top-down 2D arena game with WASD, enemies, score and restart."
+	_add_field("Describe the game or change", _request_text)
+
+	_request_button = Button.new()
+	_request_button.text = "Generate preview"
+	_request_button.pressed.connect(_on_generate)
+	add_child(_request_button)
+
+	_summary = Label.new()
+	_summary.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	add_child(_summary)
+
+	_file_list = ItemList.new()
+	_file_list.custom_minimum_size = Vector2(0, 85)
+	_file_list.item_selected.connect(_on_file_selected)
+	_add_field("Files to write (select to inspect)", _file_list)
+
+	_file_preview = TextEdit.new()
+	_file_preview.readonly = true
+	_file_preview.custom_minimum_size = Vector2(0, 165)
+	_file_preview.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	add_child(_file_preview)
+
+	_allow_overwrite = CheckBox.new()
+	_allow_overwrite.text = "Allow overwriting existing files (backups in user://)"
+	add_child(_allow_overwrite)
+
+	_make_main = CheckBox.new()
+	_make_main.text = "Set generated scene as project main scene"
+	_make_main.disabled = true
+	add_child(_make_main)
+
+	_apply_button = Button.new()
+	_apply_button.text = "Apply reviewed files to project"
+	_apply_button.disabled = true
+	_apply_button.pressed.connect(_on_apply)
+	add_child(_apply_button)
+
+	_status = Label.new()
+	_status.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	_status.text = "Requests are sent only when you click Generate. Review generated code before applying."
+	add_child(_status)
+
+	_http = HTTPRequest.new()
+	_http.timeout = 90.0
+	_http.max_redirects = 0
+	_http.body_size_limit = 2097152
+	add_child(_http)
+	_http.request_completed.connect(_on_request_completed)
+
+
+func _add_field(caption: String, control: Control) -> void:
+	var label := Label.new()
+	label.text = caption
+	add_child(label)
+	add_child(control)
+
+
+func _on_generate() -> void:
+	var idea := _request_text.text.strip_edges()
+	var model := _model.text.strip_edges()
+	var url := _endpoint.text.strip_edges()
+	if idea.is_empty() or model.is_empty():
+		_set_status("Enter a task and model name.")
+		return
+	if not _is_valid_endpoint(url):
+		_set_status("Use an HTTPS URL, or HTTP on localhost / 127.0.0.1 only.")
+		return
+	var key := _api_key.text.strip_edges()
+	if key.is_empty():
+		key = OS.get_environment("GODOT_AI_API_KEY").strip_edges()
+	var headers := PackedStringArray(["Content-Type: application/json"])
+	if not key.is_empty():
+		headers.append("Authorization: Bearer " + key)
+
+	var scene_name := ""
+	var root := EditorInterface.get_edited_scene_root()
+	if root != null:
+		scene_name = root.scene_file_path
+
+	var instruction := "Aim for a fast, self-contained playable prototype. No more than 8 files."
+	var temperature := 0.15
+	if _profile.selected == 1:
+		instruction = "Spend effort on robust gameplay, polish, UI, and complete implementation."
+		temperature = 0.25
+	var payload := {
+		"model": model,
+		"temperature": temperature,
+		"messages": [
+			{"role": "system", "content": SYSTEM_PROMPT},
+			{"role": "user", "content": instruction + "\nCurrently edited scene path: " + scene_name + "\nTask:\n" + idea}
+		]
+	}
+
+	_pending_plan.clear()
+	_apply_button.disabled = true
+	_make_main.disabled = true
+	_file_list.clear()
+	_file_preview.text = ""
+	_summary.text = ""
+	_request_button.disabled = true
+	_set_status("Generating... No files are being changed.")
+	var err := _http.request(url, headers, HTTPClient.METHOD_POST, JSON.stringify(payload))
+	if err != OK:
+		_request_button.disabled = false
+		_set_status("Cannot start request: " + error_string(err))
+
+
+func _is_valid_endpoint(url: String) -> bool:
+	if url.contains("\n") or url.contains("\r") or url.contains("@"):
+		return false
+	if url.begins_with("https://"):
+		return true
+	return url.begins_with("http://localhost:") or url.begins_with("http://127.0.0.1:")
+
+
+func _on_request_completed(result: int, status: int, _headers: PackedStringArray, body: PackedByteArray) -> void:
+	_request_button.disabled = false
+	if result != HTTPRequest.RESULT_SUCCESS:
+		_set_status("Network error: " + str(result))
+		return
+
+	var response: Variant = JSON.parse_string(body.get_string_from_utf8())
+	if typeof(response) != TYPE_DICTIONARY:
+		_set_status("Provider returned invalid JSON (HTTP %d)." % status)
+		return
+	if status < 200 or status >= 300:
+		var api_error: Variant = response.get("error", {})
+		var message := str(api_error.get("message", "Request failed")) if typeof(api_error) == TYPE_DICTIONARY else "Request failed"
+		_set_status("Provider HTTP %d: %s" % [status, message.substr(0, 300)])
+		return
+
+	var choices: Variant = response.get("choices", [])
+	if typeof(choices) != TYPE_ARRAY or choices.is_empty() or typeof(choices[0]) != TYPE_DICTIONARY:
+		_set_status("Provider response has no chat choices.")
+		return
+	var message: Variant = choices[0].get("message", {})
+	if typeof(message) != TYPE_DICTIONARY or typeof(message.get("content")) != TYPE_STRING:
+		_set_status("Provider did not return textual content.")
+		return
+	var validated: Dictionary = Plan.parse_response(message["content"])
+	if not validated["ok"]:
+		_set_status("Generated plan rejected: " + validated["error"])
+		return
+
+	_pending_plan = validated
+	_summary.text = "%s\n%d files, %d bytes" % [
+		validated["summary"], validated["files"].size(), validated["total_bytes"]
+	]
+	for item in validated["files"]:
+		_file_list.add_item(item["path"])
+	_file_list.select(0)
+	_on_file_selected(0)
+	_make_main.disabled = validated["main_scene"].is_empty()
+	_make_main.button_pressed = false
+	_apply_button.disabled = false
+	_set_status("Preview ready. Nothing has been written; inspect the files before applying.")
+
+
+func _on_file_selected(index: int) -> void:
+	if _pending_plan.is_empty():
+		return
+	var item: Dictionary = _pending_plan["files"][index]
+	_file_preview.text = item["content"]
+
+
+func _on_apply() -> void:
+	if _pending_plan.is_empty():
+		return
+	_apply_button.disabled = true
+	var outcome: Dictionary = Plan.apply_plan(_pending_plan, _allow_overwrite.button_pressed)
+	if not outcome["ok"]:
+		_apply_button.disabled = false
+		_set_status("No safe apply: " + outcome["error"])
+		return
+
+	var extra := ""
+	if _make_main.button_pressed and not _pending_plan["main_scene"].is_empty():
+		ProjectSettings.set_setting("application/run/main_scene", "res://" + _pending_plan["main_scene"])
+		var save_error := ProjectSettings.save()
+		if save_error != OK:
+			extra = " Main scene setting could not be saved."
+	EditorInterface.get_resource_filesystem().scan()
+	var location: String = outcome["backup_root"]
+	if not location.is_empty():
+		extra += " Backups: " + ProjectSettings.globalize_path(location)
+	_set_status("Created/updated %d files.%s Review scripts, then run the scene." % [
+		outcome["written"].size(), extra
+	])
+
+
+func _set_status(message: String) -> void:
+	_status.text = message
