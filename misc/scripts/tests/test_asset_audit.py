@@ -274,6 +274,36 @@ class AssetAuditTest(unittest.TestCase):
         self.put("main.tscn", 'path="res://secret.tres"')
         self.assertIn("OUTSIDE_PROJECT", self.codes())
 
+    def test_symlink_to_existing_project_resource(self):
+        target = self.put("assets/original.tres", "[gd_resource]")
+        alias = self.root / "alias.tres"
+        try:
+            alias.symlink_to(target)
+        except (OSError, NotImplementedError):
+            self.skipTest("symlinks unavailable")
+        self.put("main.tscn", 'path="res://alias.tres"')
+        self.assertEqual(self.report().findings, [])
+
+    def test_dangling_symlink_reference_is_missing(self):
+        link = self.root / "dangling.tres"
+        try:
+            link.symlink_to(self.root / "does_not_exist.tres")
+        except (OSError, NotImplementedError):
+            self.skipTest("symlinks unavailable")
+        self.put("main.tscn", 'path="res://dangling.tres"')
+        self.assertIn("MISSING_RESOURCE", self.codes())
+
+    def test_symlink_cycle_is_reported_not_crashed(self):
+        first = self.root / "one.tres"
+        second = self.root / "two.tres"
+        try:
+            first.symlink_to(second)
+            second.symlink_to(first)
+        except (OSError, NotImplementedError):
+            self.skipTest("symlinks unavailable")
+        self.put("main.tscn", 'path="res://one.tres"')
+        self.assertIn("UNRESOLVABLE_RESOURCE", self.codes())
+
     def test_cli_text_success(self):
         buf = io.StringIO()
         with contextlib.redirect_stdout(buf):
