@@ -144,11 +144,19 @@ _FORCE_INLINE_ bool physics_xpbd_solve_edge_collision(
 			Math::abs(distance) > p_thickness * real_t(2.0)) {
 		return false;
 	}
-	const Vector3 ab = r_b - r_a;
-	const Vector3 cd = r_d - r_c;
-	const Vector3 pa = r_a + ab * s;
-	const Vector3 pb = r_c + cd * t;
-	const real_t signed_separation = (pa - pb).dot(p_normal);
+	// The closest-edge narrowphase uses double for large/tiny meshes.
+	// Keep that precision while computing the normal XPBD constraint:
+	// rounding two interpolated world points back to float32 before their
+	// subtraction can turn a tiny real gap into thousands of world units.
+	const double pa_x = double(r_a.x) + (double(r_b.x) - double(r_a.x)) * double(s);
+	const double pa_y = double(r_a.y) + (double(r_b.y) - double(r_a.y)) * double(s);
+	const double pa_z = double(r_a.z) + (double(r_b.z) - double(r_a.z)) * double(s);
+	const double pb_x = double(r_c.x) + (double(r_d.x) - double(r_c.x)) * double(t);
+	const double pb_y = double(r_c.y) + (double(r_d.y) - double(r_c.y)) * double(t);
+	const double pb_z = double(r_c.z) + (double(r_d.z) - double(r_c.z)) * double(t);
+	const double signed_separation = (pa_x - pb_x) * double(p_normal.x) +
+			(pa_y - pb_y) * double(p_normal.y) +
+			(pa_z - pb_z) * double(p_normal.z);
 	if (!Math::is_finite(signed_separation)) {
 		return false;
 	}

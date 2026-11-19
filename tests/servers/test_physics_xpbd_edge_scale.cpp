@@ -133,4 +133,29 @@ TEST_CASE("[PhysicsEdgeScale] XPBD edge correction handles large finite geometry
 	CHECK(d.z / scale == doctest::Approx(0.1).epsilon(1e-5));
 }
 
+TEST_CASE("[PhysicsEdgeScale] Wide normal constraint avoids catastrophic world-point rounding") {
+	// These float32-exact endpoints yield two almost-crossing skew segments.
+	// Their closest points are less than 1 world unit apart in double, but
+	// interpolating each closest point in float32 makes an artificial gap
+	// of tens of thousands of units. That must not become an XPBD impulse.
+	Vector3 a{ real_t(562400919552.0), real_t(-862583193600.0), real_t(958564925440.0) };
+	Vector3 b{ real_t(-327081918464.0), real_t(-797319233536.0), real_t(506280804352.0) };
+	Vector3 c{ real_t(858412285952.0), real_t(-999397326848.0), real_t(1211941519360.0) };
+	Vector3 d{ real_t(43656658944.0), real_t(-795747680256.0), real_t(669078716416.0) };
+	real_t s, t, distance;
+	Vector3 normal;
+	REQUIRE(physics_xpbd_closest_edges(a, b, c, d, s, t, normal, distance));
+	CHECK(distance < real_t(1.0));
+	real_t lambda = real_t(0.0);
+	CHECK(physics_xpbd_solve_edge_collision(a, b, c, d,
+			real_t(1.0), real_t(1.0), real_t(1.0), real_t(1.0),
+			real_t(0.5), real_t(0.0), normal, lambda));
+	CHECK(lambda > real_t(0.0));
+	CHECK(lambda < real_t(1.0)); // Original float32 interpolation produced ~47,000.
+	CHECK(a.is_finite());
+	CHECK(b.is_finite());
+	CHECK(c.is_finite());
+	CHECK(d.is_finite());
+}
+
 } // namespace TestXPBDEdgeScale
