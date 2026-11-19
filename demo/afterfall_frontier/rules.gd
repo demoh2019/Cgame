@@ -2,9 +2,9 @@ extends RefCounted
 ## Pure, deterministic gameplay data and rules for the vertical slice.
 ## All values and names are original. No assets or code from other games.
 
-const WORLD_SIZE := Vector2(1800.0, 1000.0)
+const WORLD_SIZE = Vector2(1800.0, 1000.0)
 
-const ZONES := [
+const ZONES = [
 	{"id": "haven", "name": "HAVEN / Safe settlement", "start": 0.0, "end": 520.0, "danger": 0, "pvp": false, "full_loot": false, "yield": 1},
 	{"id": "frontier", "name": "FRONTIER / Contested", "start": 520.0, "end": 1160.0, "danger": 1, "pvp": true, "full_loot": false, "yield": 2},
 	{"id": "deadlands", "name": "DEADLANDS / High risk", "start": 1160.0, "end": 1800.0, "danger": 2, "pvp": true, "full_loot": true, "yield": 3},
@@ -12,7 +12,7 @@ const ZONES := [
 
 # Compact item registry; the same IDs are used by gathering, inventory,
 # persistence, trading and crafting. All generated/loaded items are whitelisted.
-const ITEMS := {
+const ITEMS = {
 	"wood": {"name": "Wood", "weight": 1, "value": 2},
 	"stone": {"name": "Stone", "weight": 1, "value": 2},
 	"fiber": {"name": "Fiber", "weight": 1, "value": 3},
@@ -30,7 +30,7 @@ const ITEMS := {
 }
 
 # Crafting recipes have explicit station gating and profession XP.
-const RECIPES := {
+const RECIPES = {
 	"axe": {"cost": {"wood": 3, "stone": 2}, "station": false, "xp": 6},
 	"pickaxe": {"cost": {"wood": 3, "stone": 3, "scrap": 2}, "station": true, "xp": 10},
 	"spear": {"cost": {"wood": 4, "scrap": 3}, "station": true, "xp": 12},
@@ -38,10 +38,10 @@ const RECIPES := {
 	"armor": {"cost": {"scrap": 5, "fiber": 4, "alloy": 1}, "station": true, "xp": 20},
 }
 
-const BASE_WOOD := 8
-const BASE_STONE := 6
-const STACK_LIMIT := 99
-const MAX_CARRY_WEIGHT := 90
+const BASE_WOOD = 8
+const BASE_STONE = 6
+const STACK_LIMIT = 99
+const MAX_CARRY_WEIGHT = 90
 
 static func zone_index(world_x: float) -> int:
 	if world_x < float(ZONES[1]["start"]):
