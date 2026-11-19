@@ -295,16 +295,17 @@ Vector<Vector<Point2>> Geometry2D::_polypaths_do_operation(PolyBooleanOperation 
 	}
 
 	Vector<Vector<Point2>> polypaths;
-	polypaths.resize(paths.size());
-	for (PathsD::size_type i = 0; i < paths.size(); i++) {
-		const PathD &path = paths[i];
+	ERR_FAIL_COND_V(polypaths.resize(paths.size()) != OK, Vector<Vector<Point2>>());
+	Vector<Point2> *result_paths = polypaths.ptrw();
 
-		Vector<Vector2> polypath;
-		polypath.resize(path.size());
+	for (PathsD::size_type i = 0; i < paths.size(); ++i) {
+		const PathD &path = paths[i];
+		Vector<Point2> &destination = result_paths[i];
+		ERR_FAIL_COND_V(destination.resize(path.size()) != OK, Vector<Vector<Point2>>());
+		Point2 *destination_points = destination.ptrw();
 		for (PathsD::size_type j = 0; j < path.size(); ++j) {
-			polypath.set(j, Point2(static_cast<real_t>(path[j].x), static_cast<real_t>(path[j].y)));
+			destination_points[j] = Point2(static_cast<real_t>(path[j].x), static_cast<real_t>(path[j].y));
 		}
-		polypaths.set(i, polypath);
 	}
 	return polypaths;
 }
@@ -355,16 +356,17 @@ Vector<Vector<Point2>> Geometry2D::_polypath_offset(const Vector<Point2> &p_poly
 	PathsD paths = InflatePaths({ polypath }, p_delta, jt, et, 2.0, clipper_precision, 0.25);
 
 	Vector<Vector<Point2>> polypaths;
-	polypaths.resize(paths.size());
+	ERR_FAIL_COND_V(polypaths.resize(paths.size()) != OK, Vector<Vector<Point2>>());
+	Vector<Point2> *result_paths = polypaths.ptrw();
+
 	for (PathsD::size_type i = 0; i < paths.size(); ++i) {
 		const PathD &path = paths[i];
-
-		Vector<Vector2> polypath2;
-		polypath2.resize(path.size());
+		Vector<Point2> &destination = result_paths[i];
+		ERR_FAIL_COND_V(destination.resize(path.size()) != OK, Vector<Vector<Point2>>());
+		Point2 *destination_points = destination.ptrw();
 		for (PathsD::size_type j = 0; j < path.size(); ++j) {
-			polypath2.set(j, Point2(static_cast<real_t>(path[j].x), static_cast<real_t>(path[j].y)));
+			destination_points[j] = Point2(static_cast<real_t>(path[j].x), static_cast<real_t>(path[j].y));
 		}
-		polypaths.set(i, polypath2);
 	}
 	return polypaths;
 }
