@@ -40,7 +40,9 @@ TEST_CASE("[VisualShader] Serialized node property creates a new node") {
 	shader.instantiate();
 
 	Ref<VisualShaderNode> input = memnew(VisualShaderNodeInput);
-	CHECK(shader->set("nodes/vertex/19/node", input));
+	bool created = false;
+	shader->set("nodes/vertex/19/node", input, &created);
+	CHECK(created);
 	CHECK(shader->get_node(VisualShader::TYPE_VERTEX, 19) == input);
 }
 
@@ -56,7 +58,8 @@ TEST_CASE("[VisualShader] Reapplying serialized node property does not re-add an
 	// A duplicate path is ignored instead of passing into add_node, which
 	// rejects an already registered ID and emits editor errors on reload.
 	ERR_PRINT_OFF;
-	bool inserted_duplicate = shader->set("nodes/vertex/19/node", incoming);
+	bool inserted_duplicate = false;
+	shader->set("nodes/vertex/19/node", incoming, &inserted_duplicate);
 	ERR_PRINT_ON;
 	CHECK_FALSE(inserted_duplicate);
 	CHECK(shader->get_node(VisualShader::TYPE_VERTEX, 19) == input);
@@ -69,12 +72,18 @@ TEST_CASE("[VisualShader] Ignored duplicate does not prevent later node property
 	Ref<VisualShaderNode> input = memnew(VisualShaderNodeInput);
 	shader->add_node(VisualShader::TYPE_VERTEX, input, Vector2(), 21);
 
-	CHECK_FALSE(shader->set("nodes/vertex/21/node", input));
-	CHECK(shader->set("nodes/vertex/21/position", Vector2(7, 9)));
+	bool inserted_duplicate = false;
+	shader->set("nodes/vertex/21/node", input, &inserted_duplicate);
+	CHECK_FALSE(inserted_duplicate);
+	bool positioned = false;
+	shader->set("nodes/vertex/21/position", Vector2(7, 9), &positioned);
+	CHECK(positioned);
 	CHECK(shader->get_node_position(VisualShader::TYPE_VERTEX, 21) == Vector2(7, 9));
 
 	Ref<VisualShaderNode> second = memnew(VisualShaderNodeInput);
-	CHECK(shader->set("nodes/vertex/22/node", second));
+	bool second_created = false;
+	shader->set("nodes/vertex/22/node", second, &second_created);
+	CHECK(second_created);
 	CHECK(shader->get_node(VisualShader::TYPE_VERTEX, 22) == second);
 }
 
