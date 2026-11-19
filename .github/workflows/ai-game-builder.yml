@@ -1,0 +1,31 @@
+name: AI Game Builder tests
+
+on:
+  push:
+    paths:
+      - "misc/ai_game_builder/**"
+      - ".github/workflows/ai-game-builder.yml"
+  pull_request:
+    paths:
+      - "misc/ai_game_builder/**"
+      - ".github/workflows/ai-game-builder.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  gdscript-tests:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          sparse-checkout: |
+            misc/ai_game_builder
+      - name: Install standalone Godot
+        uses: solarlabyrinth/action-setup-godot@v3
+        with:
+          version: 4.7-stable
+          export-templates: false
+      - name: Run headless tests
+        run: godot --headless --path misc/ai_game_builder --script res://tests/run.gd
