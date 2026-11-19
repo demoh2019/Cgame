@@ -1,22 +1,30 @@
-name: BoxContainer dense layout and native performance
+name: Box and Flow containers dense native layout performance
 
 on:
   push:
     branches: [develop]
     paths:
       - 'scene/gui/box_container.cpp'
+      - 'scene/gui/flow_container.cpp'
+      - 'scene/gui/flow_container.h'
       - 'scene/gui/box_container.h'
       - 'tests/scene/test_box_container.cpp'
+      - 'tests/scene/test_flow_container.cpp'
       - 'tests/stress/box_reflow.gd'
+      - 'tests/stress/flow_reflow.gd'
       - 'tests/stress/stress.gd'
       - 'tests/stress/run.py'
       - '.github/workflows/box-container-layout-perf.yml'
   pull_request:
     paths:
       - 'scene/gui/box_container.cpp'
+      - 'scene/gui/flow_container.cpp'
+      - 'scene/gui/flow_container.h'
       - 'scene/gui/box_container.h'
       - 'tests/scene/test_box_container.cpp'
+      - 'tests/scene/test_flow_container.cpp'
       - 'tests/stress/box_reflow.gd'
+      - 'tests/stress/flow_reflow.gd'
       - 'tests/stress/stress.gd'
       - 'tests/stress/run.py'
       - '.github/workflows/box-container-layout-perf.yml'
@@ -48,6 +56,7 @@ jobs:
           set -euo pipefail
           BIN=./bin/godot.linuxbsd.editor.dev.x86_64
           timeout 180s "$BIN" --headless --test --test-suite="*BoxContainer*" --no-colors
+          timeout 180s "$BIN" --headless --test --test-suite="*FlowContainer*" --no-colors
       - name: Profile mixed HBox and VBox layout pressure
         shell: bash
         run: |
@@ -55,7 +64,7 @@ jobs:
           BIN=./bin/godot.linuxbsd.editor.dev.x86_64
           "$BIN" --headless --path tests/stress --script res://stress.gd --check-only
           python3 tests/stress/run.py \
-            --godot "$BIN" --case box_reflow --scale 3 \
+            --godot "$BIN" --case box_reflow,flow_reflow --scale 3 \
             --frames 90 --repeats 3 --timeout 300 --rss-limit-mib 4096 \
             --output box-reflow-results.json --summary-md box-reflow-hotspots.md
       - name: Upload performance reports
