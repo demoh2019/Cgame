@@ -13,6 +13,7 @@ const Market = preload("res://scripts/shared/market.gd")
 const Survival = preload("res://scripts/shared/survival.gd")
 const Movement = preload("res://scripts/shared/movement.gd")
 const Combat = preload("res://scripts/shared/combat.gd")
+const Structures = preload("res://scripts/shared/structures.gd")
 const Zombie = preload("res://scripts/shared/zombie.gd")
 const ZoneRisk = preload("res://scripts/shared/zone_risk.gd")
 const Progression = preload("res://scripts/shared/progression.gd")
@@ -60,6 +61,7 @@ var zombies: Dictionary = {} # zombie id -> Zombie
 var depleted: Dictionary = {} # node id -> time it comes back
 var opened_crates: Dictionary = {} # crate id -> time it refills
 var spawn_state: Dictionary = {} # spawn id -> {"zombie": id or -1, "next": time}
+var barricades: Dictionary = {} # Session-local server structures, replicated to interested peers.
 var bags: Dictionary = {} # bag id -> {"id", "x","y","z", "items": {id: n}, "expires": t}
 var events: Array = [] # Things that happened this tick, for the network layer to announce.
 var _next_id: int = 5_000_000_000
@@ -392,6 +394,101 @@ func cmd_trade(peer_id: int, item_id: String, count: int, buying: bool) -> Dicti
 	return {"ok": true, "item": item_id, "count": count, "buying": buying, "silver": silver}
 
 
+## Validate and build entirely on the authority. Clients only request a location.
+## Building is intentionally forbidden inside the town sanctuary.
+func cmd_build(peer_id: int, x: float, z: float) -> Dictionary:
+	var player: Player = players.get(peer_id)
+	if player == null or not _alive(player):
+		return {"ok": false, "reason": "dead"}
+	var point := Vector2(x, z)
+	var from := Vector2(player.position.x, player.position.z)
+	if not point.is_finite() or not from.is_finite():
+		return {"ok": false, "reason": "invalid_position"}
+	var distance := point.distance_to(from)
+	if distance < Structures.MIN_BUILD_DISTANCE or distance > Structures.BUILD_RANGE:
+		return {"ok": false, "reason": "out_of_range"}
+	if point.length() < Structures.MIN_HUB_DISTANCE:
+		return {"ok": false, "reason": "safe_zone"}
+	if world.is_water(x, z) or world.normal_at(x, z).y < Structures.MIN_SLOPE_NORMAL_Y:
+		return {"ok": false, "reason": "bad_terrain"}
+	if barricades.size() >= Structures.MAX_GLOBAL:
+		return {"ok": false, "reason": "world_limit"}
+	var owned := 0
+	for item in barricades.values():
+		if int(item["owner"]) == peer_id:
+			owned += 1
+	if owned >= Structures.MAX_PER_OWNER:
+		return {"ok": false, "reason": "owner_limit"}
+	# Check the same blockers the movement solver queries; forbid overlapping
+	# players and infected as well, before consuming building materials.
+	for blocker in world.blockers_near(x, z, Structures.RADIUS + 1.0):
+		var offset := Vector2(x - float(blocker["x"]), z - float(blocker["z"]))
+		if offset.length() < Structures.RADIUS + float(blocker["radius"]) + 0.1:
+			return {"ok": false, "reason": "blocked"}
+	for other in players.values():
+		if _alive(other) and Structures.within_range(point, Vector2(other.position.x, other.position.z), Structures.RADIUS + Defs.PLAYER_RADIUS + 0.2):
+			return {"ok": false, "reason": "blocked"}
+	for infected in zombies.values():
+		if infected.is_alive() and Structures.within_range(point, Vector2(infected.position.x, infected.position.z), Structures.RADIUS + 0.65):
+			return {"ok": false, "reason": "blocked"}
+	if not player.inventory.has_all(Structures.COST):
+		return {"ok": false, "reason": "missing_materials"}
+	# No action between cost validation and removal: server simulation single thread.
+	for item_id in Structures.COST:
+		player.inventory.remove(item_id, int(Structures.COST[item_id]))
+	var id := new_id()
+	var item := {"id": id, "x": x, "y": world.height_at(x, z), "z": z,
+		"hp": Structures.MAX_HEALTH, "owner": peer_id}
+	barricades[id] = item
+	world.add_dynamic_blocker(id, x, z, Structures.RADIUS)
+	player.dirty_inventory = true
+	player.dirty_character = true
+	events.append({"type": "barricade_built", "id": id, "peer": peer_id})
+	return {"ok": true, "id": id}
+
+
+func cmd_repair(peer_id: int, id: int) -> Dictionary:
+	var player: Player = players.get(peer_id)
+	if player == null or not _alive(player):
+		return {"ok": false, "reason": "dead"}
+	var item: Dictionary = barricades.get(id, {})
+	if item.is_empty():
+		return {"ok": false, "reason": "no_structure"}
+	if int(item["owner"]) != peer_id:
+		return {"ok": false, "reason": "not_owner"}
+	var origin := Vector2(player.position.x, player.position.z)
+	var target := Vector2(float(item["x"]), float(item["z"]))
+	if not Structures.within_range(origin, target, Structures.REPAIR_RANGE):
+		return {"ok": false, "reason": "out_of_range"}
+	if float(item["hp"]) >= Structures.MAX_HEALTH:
+		return {"ok": false, "reason": "full_health"}
+	if not player.inventory.has_all(Structures.REPAIR_COST):
+		return {"ok": false, "reason": "missing_materials"}
+	for item_id in Structures.REPAIR_COST:
+		player.inventory.remove(item_id, int(Structures.REPAIR_COST[item_id]))
+	item["hp"] = minf(Structures.MAX_HEALTH, float(item["hp"]) + Structures.REPAIR_HEALTH)
+	barricades[id] = item
+	player.dirty_inventory = true
+	player.dirty_character = true
+	return {"ok": true, "id": id, "hp": float(item["hp"])}
+
+
+func damage_barricade(id: int, damage: float) -> bool:
+	# Returns true when the structure breaks. Can be used by zombie AI or
+	# future server-side explosions. Never trusts a client-provided damage.
+	if not barricades.has(id) or not is_finite(damage) or damage <= 0.0:
+		return false
+	var item: Dictionary = barricades[id]
+	item["hp"] = maxf(0.0, float(item["hp"]) - damage)
+	if float(item["hp"]) <= 0.0:
+		barricades.erase(id)
+		world.remove_dynamic_blocker(id)
+		events.append({"type": "barricade_broken", "id": id})
+		return true
+	barricades[id] = item
+	return false
+
+
 func cmd_use(peer_id: int, item_id: String) -> Dictionary:
 	var player: Player = players.get(peer_id)
 	if player == null or not _alive(player):
@@ -722,6 +819,20 @@ func _tick_zombies(delta: float) -> void:
 		_manage_zombie_population()
 	for zombie in zombies.values():
 		var result: Dictionary = zombie.think(world, info, delta, rng)
+		# Zombies chip away at obstacles only while actually stuck pursuing
+		# a survivor. No instantaneous destruction or client damage commands.
+		if zombie.stuck_time >= 0.12 and zombie.target_id != -1 and zombies.has(zombie.id):
+			var chase_target: Player = players.get(zombie.target_id)
+			if chase_target != null and _alive(chase_target):
+				var here := Vector2(zombie.position.x, zombie.position.z)
+				var toward := Vector2(chase_target.position.x, chase_target.position.z) - here
+				if toward.length_squared() > 0.01:
+					for wall_id in barricades.keys():
+						var wall: Dictionary = barricades[wall_id]
+						var offset := Vector2(float(wall["x"]), float(wall["z"])) - here
+						if offset.length() <= Structures.ZOMBIE_REACH and offset.dot(toward) > 0.0:
+							damage_barricade(wall_id, float(zombie.data["damage"]) * delta * 2.0)
+							break
 		if not result.is_empty():
 			var victim: Player = players.get(result["hit"])
 			if victim != null and _alive(victim):
@@ -814,6 +925,10 @@ func snapshot_for(peer_id: int) -> Dictionary:
 		var p: Vector3 = zombie.position
 		if zombie.is_alive() and here.distance_to(Vector2(p.x, p.z)) <= Defs.INTEREST_RADIUS:
 			nearby_zombies.append({"id": zombie.id, "type": zombie.type, "x": p.x, "y": p.y, "z": p.z, "yaw": zombie.yaw, "hp": zombie.health, "state": zombie.state})
+	var nearby_barricades: Array = []
+	for wall in barricades.values():
+		if Structures.within_range(here, Vector2(float(wall["x"]), float(wall["z"])), Defs.INTEREST_RADIUS):
+			nearby_barricades.append(Structures.public_state(wall))
 	var nearby_bags: Array = []
 	for bag in bags.values():
 		if here.distance_to(Vector2(bag["x"], bag["z"])) <= Defs.INTEREST_RADIUS:
@@ -840,6 +955,7 @@ func snapshot_for(peer_id: int) -> Dictionary:
 			"cargo_factor": player.inventory.movement_factor(),
 		},
 		"players": nearby_players, "zombies": nearby_zombies, "bags": nearby_bags,
+		"barricades": nearby_barricades,
 		"depleted": gone_nodes, "crates_used": used_crates,
 	}
 	if player.dirty_inventory:
