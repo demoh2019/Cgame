@@ -1143,4 +1143,68 @@ TEST_CASE("[Geometry2D][Performance] Convex decomposition handles many output ve
 	CHECK(emitted_vertices >= count);
 }
 
+TEST_CASE("[Geometry2D][Performance] Moving Clipper paths preserves polygon unions") {
+	const Vector<Point2> a = {
+		Point2(0, 0), Point2(3, 0), Point2(3, 3), Point2(0, 3),
+	};
+	const Vector<Point2> b = {
+		Point2(1, 1), Point2(4, 1), Point2(4, 4), Point2(1, 4),
+	};
+	Vector<Vector<Point2>> joined;
+	Vector<Vector<Point2>> holes;
+	Geometry2D::merge_many_polygons({ a, b }, joined, holes);
+	REQUIRE(joined.size() == 1);
+	CHECK(holes.is_empty());
+
+	auto polygon_area = [](const Vector<Point2> &p_polygon) {
+		real_t area = 0;
+		for (int i = 0; i < p_polygon.size(); i++) {
+			const Point2 &a = p_polygon[i];
+			const Point2 &b = p_polygon[(i + 1) % p_polygon.size()];
+			area += a.x * b.y - b.x * a.y;
+		}
+		return Math::abs(area) / (real_t)2;
+	};
+	CHECK(Math::is_equal_approx(polygon_area(joined[0]), (real_t)14));
+
+	// Reusing the same output arrays should not retain polygons from the
+	// preceding union or detach shared COW geometry unnecessarily.
+	const Vector<Point2> single = {
+		Point2(-2, -2), Point2(2, -2), Point2(2, 2), Point2(-2, 2),
+	};
+	Geometry2D::merge_many_polygons({ single }, joined, holes);
+	REQUIRE(joined.size() == 1);
+	CHECK(holes.is_empty());
+	CHECK(Math::is_equal_approx(polygon_area(joined[0]), (real_t)16));
+}
+
+TEST_CASE("[Geometry2D][Performance] Clipper union retains many disjoint contours") {
+	Vector<Vector<Point2>> polygons;
+	for (int i = 0; i < 128; i++) {
+		const real_t x = i * 5;
+		const real_t y = (i % 16) * 8;
+		polygons.push_back({
+			Point2(x, y), Point2(x + 2, y),
+			Point2(x + 2, y + 3), Point2(x, y + 3),
+		});
+	}
+	Vector<Vector<Point2>> merged;
+	Vector<Vector<Point2>> holes;
+	Geometry2D::merge_many_polygons(polygons, merged, holes);
+	CHECK(merged.size() == 128);
+	CHECK(holes.is_empty());
+	real_t total_area = 0;
+	for (const Vector<Point2> &polygon : merged) {
+		REQUIRE(polygon.size() >= 3);
+		real_t doubled_area = 0;
+		for (int i = 0; i < polygon.size(); i++) {
+			const Point2 &a = polygon[i];
+			const Point2 &b = polygon[(i + 1) % polygon.size()];
+			doubled_area += a.x * b.y - b.x * a.y;
+		}
+		total_area += Math::abs(doubled_area) * (real_t)0.5;
+	}
+	CHECK(Math::is_equal_approx(total_area, (real_t)(128 * 6)));
+}
+
 } // namespace TestGeometry2D

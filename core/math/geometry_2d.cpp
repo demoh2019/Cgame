@@ -39,19 +39,24 @@ GODOT_GCC_WARNING_POP
 #define STB_RECT_PACK_IMPLEMENTATION
 #include <thirdparty/misc/stb_rect_pack.h>
 
+#include <utility>
+
 const int clipper_precision = 5; // Based on CMP_EPSILON.
 
 void Geometry2D::merge_many_polygons(const Vector<Vector<Vector2>> &p_polygons, Vector<Vector<Vector2>> &r_out_polygons, Vector<Vector<Vector2>> &r_out_holes) {
 	using namespace Clipper2Lib;
 
 	PathsD subjects;
+	subjects.reserve(p_polygons.size());
 	for (const Vector<Vector2> &polygon : p_polygons) {
 		PathD path(polygon.size());
+		const Vector2 *const source = polygon.ptr();
 		for (int i = 0; i < polygon.size(); i++) {
-			const Vector2 &point = polygon[i];
-			path[i] = PointD(point.x, point.y);
+			path[i] = PointD(source[i].x, source[i].y);
 		}
-		subjects.push_back(path);
+		// Clipper owns the path after insertion. Moving avoids a deep copy
+		// of all points in every input polygon.
+		subjects.push_back(std::move(path));
 	}
 
 	PathsD solution = Union(subjects, FillRule::NonZero);
@@ -60,17 +65,20 @@ void Geometry2D::merge_many_polygons(const Vector<Vector<Vector2>> &p_polygons, 
 	r_out_polygons.clear();
 	r_out_holes.clear();
 	for (PathsD::size_type i = 0; i < solution.size(); ++i) {
-		PathD &path = solution[i];
+		const PathD &path = solution[i];
 
 		Vector<Point2> output_polygon;
-		output_polygon.resize(path.size());
+		ERR_FAIL_COND(output_polygon.resize_uninitialized(path.size()) != OK);
+		Point2 *const output = output_polygon.ptrw();
 		for (PathsD::size_type j = 0; j < path.size(); ++j) {
-			output_polygon.set(j, Vector2(static_cast<real_t>(path[j].x), static_cast<real_t>(path[j].y)));
+			output[j] = Point2(static_cast<real_t>(path[j].x), static_cast<real_t>(path[j].y));
 		}
+		// Move the allocated output buffer to the owning list instead of
+		// copying/referencing it and repeatedly resolving writable storage.
 		if (IsPositive(path)) {
-			r_out_polygons.push_back(output_polygon);
+			r_out_polygons.push_back(std::move(output_polygon));
 		} else {
-			r_out_holes.push_back(output_polygon);
+			r_out_holes.push_back(std::move(output_polygon));
 		}
 	}
 }
