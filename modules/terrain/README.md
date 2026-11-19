@@ -41,7 +41,7 @@ Foliage scattering: `terrain.scatter_points(seed, spacing, jitter, max_slope, mi
 
 ### Performance and project scope
 
-This first increment is for **small-to-medium single-grid terrains**. The 1,048,576-vertex cap bounds memory consumption, but large grids may still be expensive to rebuild. Each current brush is O(width × depth), and erosion is O(iterations × width × depth). For changing many samples use a batch edit. Do not rebuild every frame. Scattering is limited to 65,536 candidate positions per call.
+This first increment is for **small-to-medium single-grid terrains**. The 1,048,576-vertex cap bounds memory consumption, but large grids may still be expensive to rebuild. Sculpt and paint brushes now visit only the clipped brush bounding box; smoothing also snapshots the full height array. Erosion remains O(iterations × width × depth). For changing many samples use a batch edit. Do not rebuild every frame. Scattering is limited to 65,536 candidate positions per call.
 
 Not yet included: viewport Terrain Editor brush UI, editor undo/redo brush integration, automatic chunk collision and seam stitching, production-grade disk streaming or partitioning, procedural tree geometry, physics collision, hydraulic erosion, procedural graph, virtual textures, or GPU-driven rendering. Those are separate features. The module alone is not a replacement for Terrain3D.
 
