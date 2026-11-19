@@ -6,12 +6,32 @@
 /*                        https://godotengine.org                         */
 /**************************************************************************/
 /* Copyright (c) 2014-present Godot Engine contributors (see AUTHORS.md). */
-/* Copyright (c) 2007-2014 Juan Linietsky, Ariel Manitzky.                */
+/* Copyright (c) 2007-2014 Juan Linietsky, Ariel Manzur.                  */
+/*                                                                        */
+/* Permission is hereby granted, free of charge, to any person obtaining  */
+/* a copy of this software and associated documentation files (the        */
+/* "Software"), to deal in the Software without restriction, including    */
+/* without limitation the rights to use, copy, modify, merge, publish,    */
+/* distribute, sublicense, and/or sell copies of the Software, and to     */
+/* permit persons to whom the Software is furnished to do so, subject to  */
+/* the following conditions:                                              */
+/*                                                                        */
+/* The above copyright notice and this permission notice shall be         */
+/* included in all copies or substantial portions of the Software.        */
+/*                                                                        */
+/* THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND,        */
+/* EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF     */
+/* MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. */
+/* IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY   */
+/* CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT,   */
+/* TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE      */
+/* SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.                 */
 /**************************************************************************/
 
 #include "terrain_editor_plugin.h"
 
 #include "core/input/input_event.h"
+#include "core/object/callable_mp.h"
 #include "editor/editor_undo_redo_manager.h"
 #include "scene/3d/camera_3d.h"
 #include "scene/gui/button.h"
@@ -27,6 +47,7 @@ void TerrainEditorPlugin::_notification(int p_what) {
 		paint_enabled->set_text("Paint Terrain");
 		paint_enabled->set_tooltip_text("Enable terrain painting in the 3D viewport. Drag the left mouse button to sculpt.");
 		paint_enabled->set_toggle_mode(true);
+		paint_enabled->connect(SNAME("toggled"), callable_mp(this, &TerrainEditorPlugin::_paint_toggled));
 		toolbar->add_child(paint_enabled);
 
 		brush_mode = memnew(OptionButton);
@@ -94,11 +115,12 @@ void TerrainEditorPlugin::edit(Object *p_object) {
 		}
 	}
 	if (toolbar != nullptr) {
-		toolbar->set_visible(terrain.is_valid());
+		toolbar->set_visible(plugin_visible && terrain.is_valid());
 	}
 }
 
 void TerrainEditorPlugin::make_visible(bool p_visible) {
+	plugin_visible = p_visible;
 	if (!p_visible) {
 		_finish_stroke();
 		if (paint_enabled != nullptr) {
@@ -107,6 +129,12 @@ void TerrainEditorPlugin::make_visible(bool p_visible) {
 	}
 	if (toolbar != nullptr) {
 		toolbar->set_visible(p_visible && terrain.is_valid());
+	}
+}
+
+void TerrainEditorPlugin::_paint_toggled(bool p_enabled) {
+	if (!p_enabled) {
+		_finish_stroke();
 	}
 }
 
@@ -147,6 +175,11 @@ bool TerrainEditorPlugin::_apply_brush(Camera3D *p_camera, const Vector2 &p_scre
 	if (!_pick_position(p_camera, p_screen_position, grid_position)) {
 		return false;
 	}
+	if (stroke_has_position && last_stroke_position.distance_to(grid_position) < 0.25f) {
+		return true;
+	}
+	last_stroke_position = grid_position;
+	stroke_has_position = true;
 	const float radius = float(brush_radius->get_value());
 	const float strength = float(brush_strength->get_value());
 	switch (brush_mode->get_selected_id()) {
@@ -168,6 +201,7 @@ void TerrainEditorPlugin::_finish_stroke() {
 		return;
 	}
 	stroke_active = false;
+	stroke_has_position = false;
 	if (stroke_terrain.is_valid()) {
 		const PackedFloat32Array after = stroke_terrain->get_heights();
 		if (after != stroke_before) {
@@ -198,6 +232,7 @@ EditorPlugin::AfterGUIInput TerrainEditorPlugin::forward_3d_gui_input(Camera3D *
 				return AFTER_GUI_INPUT_STOP;
 			}
 			stroke_terrain = terrain;
+			stroke_has_position = false;
 			stroke_before = terrain->get_heights();
 			if (_apply_brush(p_camera, click->get_position())) {
 				stroke_active = true;
