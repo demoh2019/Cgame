@@ -377,5 +377,33 @@ class ApiTests(unittest.TestCase):
         self.assertEqual(len(sleeps), 1)
 
 
+class CliSafetyTests(unittest.TestCase):
+    def test_open_prs_require_explicit_security_opt_in(self):
+        with patch("sys.argv", ["mirror", "--mode", "open-prs"]):
+            with patch.dict("os.environ", {"GH_TOKEN": "fake"}, clear=False):
+                with self.assertRaises(SystemExit) as context:
+                    mirror.main()
+        self.assertEqual(context.exception.code, 2)
+
+    def test_all_requires_explicit_security_opt_in(self):
+        with patch("sys.argv", ["mirror", "--mode", "all"]):
+            with self.assertRaises(SystemExit) as context:
+                mirror.main()
+        self.assertEqual(context.exception.code, 2)
+
+    def test_issues_mode_has_no_untrusted_pr_requirement(self):
+        with patch("sys.argv", ["mirror", "--mode", "issues", "--max-new", "1"]):
+            with patch.dict("os.environ", {"GH_TOKEN": "fake"}, clear=False):
+                with patch.object(mirror.Mirror, "run") as run:
+                    mirror.main()
+        run.assert_called_once()
+
+    def test_negative_batch_limit_rejected(self):
+        with patch("sys.argv", ["mirror", "--mode", "issues", "--max-new", "-1"]):
+            with self.assertRaises(SystemExit) as context:
+                mirror.main()
+        self.assertEqual(context.exception.code, 2)
+
+
 if __name__ == "__main__":
     unittest.main()
