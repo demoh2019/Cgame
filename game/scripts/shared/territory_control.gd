@@ -5,6 +5,7 @@ extends RefCounted
 
 const Defs = preload("res://scripts/shared/defs.gd")
 const ZoneRisk = preload("res://scripts/shared/zone_risk.gd")
+const OutpostSupplies = preload("res://scripts/shared/outpost_supplies.gd")
 
 const MAX_SITES := 3
 const CAPTURE_RADIUS := 12.0
@@ -41,6 +42,8 @@ func _init(world) -> void:
 				"id": index + 1, "x": position.x, "z": position.y,
 				"owner": 0, "until": 0.0, "challenger": 0,
 				"progress": 0.0, "contested": false,
+				"supplies_left": 0, "supply_epoch": 0,
+				"supply_claims": {},
 			})
 			break
 
@@ -53,6 +56,7 @@ func public_state(now: float) -> Array:
 			"owner": int(site["owner"]), "challenger": int(site["challenger"]),
 			"progress": float(site["progress"]), "contested": bool(site["contested"]),
 			"expires_in": maxf(0.0, float(site["until"]) - now),
+			"supplies_left": int(site.get("supplies_left", 0)),
 		})
 	return result
 
@@ -81,6 +85,8 @@ func tick(delta: float, now: float, players: Dictionary, parties) -> Array:
 		if owner != 0 and (not parties.groups.has(owner) or now >= float(site["until"])):
 			site["owner"] = 0
 			site["until"] = 0.0
+			site["supplies_left"] = 0
+			site["supply_claims"] = {}
 			changed.append({"type": "outpost_lost", "id": site["id"], "x": site["x"], "z": site["z"]})
 		var occupants: Dictionary = _occupied_groups(site, players, parties)
 		site["contested"] = occupants.size() > 1
@@ -102,6 +108,7 @@ func tick(delta: float, now: float, players: Dictionary, parties) -> Array:
 		if float(site["progress"]) >= CAPTURE_SECONDS:
 			site["owner"] = group_id
 			site["until"] = now + HOLD_SECONDS
+			OutpostSupplies.initialize_capture(site)
 			site["challenger"] = 0
 			site["progress"] = 0.0
 			changed.append({
@@ -109,6 +116,24 @@ func tick(delta: float, now: float, players: Dictionary, parties) -> Array:
 				"x": site["x"], "z": site["z"], "owner": group_id,
 			})
 	return changed
+
+
+## Server-only lookup that rechecks live occupancy rather than stale snapshot
+## contested state. A hostile player physically present blocks supply claims.
+func claim_supplies(site_id: int, player, parties, world, now: float) -> Dictionary:
+	var group_id: int = parties.group_of(player.id)
+	for site in sites:
+		if int(site["id"]) != site_id:
+			continue
+		var owner: int = int(site["owner"])
+		if owner == 0 or not parties.groups.has(owner):
+			return {"ok": false, "reason": "not_owner"}
+		var active: Dictionary = _occupied_groups(site, {player.id: player}, parties)
+		# Check every actual player at the server integration call instead.
+		var contest: bool = bool(site["contested"])
+		return OutpostSupplies.claim(site, player, group_id,
+			world.zone_at(float(site["x"]), float(site["z"])), now, contest)
+	return {"ok": false, "reason": "no_such_site"}
 
 
 func has_rally_bonus(peer_id: int, position: Vector3, parties, now: float) -> bool:
