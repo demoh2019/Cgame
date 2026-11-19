@@ -107,15 +107,17 @@ func _on_enemy_attack(raw_damage: float) -> void:
 
 
 ## Game saves use native FileAccess, with whole-snapshot validation and atomic replace.
-func save_game(path: String = SAVE_SCRIPT.DEFAULT_PATH) -> bool:
-    var success: bool = SAVE_SCRIPT.save(self, path)
+func save_game(path: String = "") -> bool:
+    var checkpoint_path: String = SAVE_SCRIPT.DEFAULT_PATH if path.is_empty() else path
+    var success: bool = SAVE_SCRIPT.save(self, checkpoint_path)
     _save_notice = "CHECKPOINT SAVED" if success else "SAVE FAILED"
     _save_notice_time = 4.0
     return success
 
 
-func load_game(path: String = SAVE_SCRIPT.DEFAULT_PATH) -> bool:
-    var success: bool = SAVE_SCRIPT.load(self, path)
+func load_game(path: String = "") -> bool:
+    var checkpoint_path: String = SAVE_SCRIPT.DEFAULT_PATH if path.is_empty() else path
+    var success: bool = SAVE_SCRIPT.load(self, checkpoint_path)
     _save_notice = "CHECKPOINT RESTORED" if success else "NO VALID CHECKPOINT"
     _save_notice_time = 4.0
     return success
