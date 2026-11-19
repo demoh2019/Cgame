@@ -62,6 +62,16 @@ func _physics_process(delta: float) -> void:
         velocity.y -= GRAVITY * delta
     move_and_slide()
 
+    # Infected can physically wear down player-built defenses that block
+    # their route; they do not damage arbitrary static world geometry.
+    if movement.length_squared() > 0.0 and strike_cooldown <= 0.0:
+        for index in range(get_slide_collision_count()):
+            var obstacle: Node3D = get_slide_collision(index).get_collider() as Node3D
+            if obstacle != null and obstacle.is_in_group("player_barricades"):
+                obstacle.call("take_damage", 18.0)
+                strike_cooldown = 1.3
+                break
+
 
 func take_damage(amount: float) -> void:
     if defeated or amount <= 0.0:
