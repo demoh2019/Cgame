@@ -23,7 +23,7 @@ func _make_body(space: RID, shape: RID, position: Vector2, moving: bool) -> RID:
 	return body
 
 
-func _run_case(label: String, moving_segment: bool, segment_y: float, expected_braking: bool) -> int:
+func _run_case(label: String, moving_segment: bool, segment_y: float, expected_braking: bool, one_way_backface: bool = false) -> int:
 	var space: RID = PhysicsServer2D.space_create()
 	var capsule: RID = PhysicsServer2D.capsule_shape_create()
 	# Radius 0.5 with centerline endpoints y = -1 and y = +1.
@@ -38,6 +38,10 @@ func _run_case(label: String, moving_segment: bool, segment_y: float, expected_b
 	var target: Vector2 = Vector2(4.0, 0.0) if moving_segment else Vector2(4.0, segment_y)
 	var a: RID = _make_body(space, moving_shape, start, true)
 	var b: RID = _make_body(space, static_shape, target, false)
+	if one_way_backface:
+		# This segment only blocks motion against its local +X normal;
+		# movement along +X enters the back face and must pass through.
+		PhysicsServer2D.body_set_shape_as_one_way_collision(b, 0, true, 0.0, Vector2(-1.0, 0.0))
 	PhysicsServer2D.space_set_active(space, true)
 	await physics_frame
 	await physics_frame
@@ -74,6 +78,7 @@ func _run() -> void:
 	failures += await _run_case("moving segment grazes static capsule", true, 1.3, true)
 	# At y=1.6, the segment stays beyond the full radius of the cap.
 	failures += await _run_case("capsule segment separated", false, 1.6, false)
+	failures += await _run_case("one-way capsule segment backface", false, 1.3, false, true)
 	if failures:
 		printerr("2D capsule-segment CCD regression failed: %d" % failures)
 		quit(1)
