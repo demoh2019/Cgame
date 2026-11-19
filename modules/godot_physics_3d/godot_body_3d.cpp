@@ -48,6 +48,7 @@
 #include "servers/physics_fluid_box_3d.h"
 #include "servers/physics_rigid_box_aero_panels_3d.h"
 #include "servers/physics_fluid_capsule_3d.h"
+#include "servers/physics_fluid_ellipsoid_3d.h"
 #include "servers/physics_fluid_cylinder_3d.h"
 
 void GodotBody3D::_mass_properties_changed() {
@@ -835,6 +836,21 @@ void GodotBody3D::integrate_forces(real_t p_step, bool p_defer_motion) {
 						} else {
 							// Shear/nonuniform scale turns the circle into an
 							// ellipse: retain the legacy conservative fallback.
+							sample = godot_physics_fluid_sample_3d(bounds, shape_volume, water_height);
+						}
+					} else if (shape_type == PS3DE::SHAPE_SPHERE) {
+						// When a transform is not a similarity, a sphere becomes
+						// an affine ellipsoid. Integrating a transformed
+						// spherical cap gives exact immersed volume AND the
+						// lateral first moment needed for hydrostatic torque.
+						// Uniform spheres retain their existing cheap path.
+						const GodotSphereShape3D *sphere = static_cast<const GodotSphereShape3D *>(shape);
+						real_t ellipsoid_total_volume = 0.0;
+						if (godot_physics_fluid_affine_ellipsoid_sample_3d(
+									shape_world, sphere->get_radius(), water_height,
+									sample, ellipsoid_total_volume)) {
+							total_fluid_shape_volume += ellipsoid_total_volume - shape_volume;
+						} else {
 							sample = godot_physics_fluid_sample_3d(bounds, shape_volume, water_height);
 						}
 					} else if (shape_type == PS3DE::SHAPE_BOX) {
