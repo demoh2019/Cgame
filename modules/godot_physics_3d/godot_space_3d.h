@@ -184,6 +184,10 @@ private:
 	real_t soft_body_tetra_damage_rate = 0.0;
 	real_t soft_body_xpbd_shear_compliance = 0.0; // Opt-in angular shear preservation.
 	real_t soft_body_xpbd_dihedral_compliance = 0.0; // Opt-in angle-based cloth bending.
+	// Optional 3-particle discrete rod centerline curvature on nearly aligned
+	// structural mesh-edge chains. Not a Cosserat rod twist/director solver.
+	real_t soft_body_xpbd_rod_bend_compliance = 0.0;
+	real_t soft_body_xpbd_rod_straightness = 0.9;
 	real_t soft_body_xpbd_bend_parallel_compliance_ratio = 1.0; // Directional bend about a rest-mesh fiber axis.
 	real_t soft_body_shape_matching_stiffness = 0.0; // Optional global shape recovery.
 	int soft_body_shape_matching_cluster_size = 0; // 0 global; 3..64 local BFS cores.
@@ -378,6 +382,8 @@ public:
 	_FORCE_INLINE_ real_t get_soft_body_membrane_damping_rate() const { return soft_body_membrane_damping_rate; }
 	_FORCE_INLINE_ real_t get_soft_body_xpbd_shear_compliance() const { return soft_body_xpbd_shear_compliance; }
 	_FORCE_INLINE_ real_t get_soft_body_xpbd_dihedral_compliance() const { return soft_body_xpbd_dihedral_compliance; }
+	_FORCE_INLINE_ real_t get_soft_body_xpbd_rod_bend_compliance() const { return soft_body_xpbd_rod_bend_compliance; }
+	_FORCE_INLINE_ real_t get_soft_body_xpbd_rod_straightness() const { return soft_body_xpbd_rod_straightness; }
 	_FORCE_INLINE_ real_t get_soft_body_xpbd_bend_parallel_compliance_ratio() const { return soft_body_xpbd_bend_parallel_compliance_ratio; }
 	_FORCE_INLINE_ real_t get_soft_body_shape_matching_stiffness() const { return soft_body_shape_matching_stiffness; }
 	_FORCE_INLINE_ int get_soft_body_shape_matching_cluster_size() const { return soft_body_shape_matching_cluster_size; }
