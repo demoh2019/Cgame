@@ -1307,7 +1307,7 @@ The server validates every `cmd_loot` against the original eligibility
 snapshot, including distance checks and inventory limits. Unauthorized
 attempts return `reserved` without transferring or deleting items. Clients
 see their own `can_loot` flag and remaining timer, but **never receive the
-server's owner/party ID list**. Online world bags are gold for eligible party
+server's owner/party identity tokens**. Authenticated accounts can reclaim their PvE loot after reconnect, while a new guest reusing a disconnected peer ID cannot inherit an old session's rights. Online world bags are gold for eligible party
 members, grey when reserved by someone else, and brown once public.
 
 **Player-death bags in red and black zones are always public immediately.**
