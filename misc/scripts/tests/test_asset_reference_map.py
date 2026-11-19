@@ -40,7 +40,7 @@ class ReferenceMapTests(unittest.TestCase):
         self.assertEqual(report['combined']['file_count'], 1)
 
     def test_scene_external_resource(self):
-        scene = '"[ext_resource type="Texture2D" path="res://art/a.png" id="1"]"'
+        scene = '[ext_resource type="Texture2D" path="res://art/a.png" id="1"]'
         self.put('level.tscn', scene)
         self.put('art/a.png', b'123')
         report = self.run_map('level.tscn')
