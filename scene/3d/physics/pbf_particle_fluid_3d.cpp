@@ -499,6 +499,99 @@ void PBFParticleFluid3D::_project_velocity_divergence() {
 	average_positive_density_rate = _measure_positive_density_rate();
 }
 
+void PBFParticleFluid3D::_apply_surface_tension(real_t p_delta) {
+	last_surface_tension_pairs = 0;
+	last_surface_tension_neighbor_evaluations = 0;
+	mean_surface_normal_magnitude = 0.0;
+	if ((surface_cohesion <= 0.0 && surface_curvature <= 0.0) ||
+			positions.size() < 2) {
+		return;
+	}
+
+	// Evaluate surface forces at the final post-PBF positions, with
+	// dedicated preallocated buffers and the existing sorted cell grid.
+	_update_grid();
+	const int count = positions.size();
+	const Vector3 *points = positions.ptr();
+	const PhysicsPBFCell3D *grid = cells.ptr();
+	const real_t mass = particle_mass;
+	const real_t h = smoothing_radius;
+	real_t *rho = surface_tension_densities.ptrw();
+
+	// Pass 1: estimate each particle density after rigid collisions/PBF.
+	const real_t self_density = mass * PhysicsPBFKernel3D::poly6(0.0, h);
+	for (int i = 0; i < count; ++i) {
+		double density = double(self_density);
+		_pbf_for_neighbors(grid, points, count, i, h, MAX_NEIGHBORS,
+				[&](int, const Vector3 &, double p_d2) {
+					density += double(mass) *
+							double(PhysicsPBFKernel3D::poly6(p_d2, h));
+					++last_surface_tension_neighbor_evaluations;
+				});
+		rho[i] = Math::is_finite(density) && density > 0.0 ?
+				real_t(density) : MAX(self_density, real_t(1.0));
+	}
+
+	// Pass 2: SPH color-field normals; no velocity changes yet.
+	Vector3 *normals = surface_tension_normals.ptrw();
+	double mean_magnitude = 0.0;
+	for (int i = 0; i < count; ++i) {
+		Vector3 normal;
+		_pbf_for_neighbors(grid, points, count, i, h, MAX_NEIGHBORS,
+				[&](int p_j, const Vector3 &p_d, double) {
+					const Vector3 gradient = PhysicsPBFKernel3D::gradient(p_d, h);
+					const real_t density_j = MAX(rho[p_j], rest_density * real_t(0.1));
+					normal += PhysicsPBFSurfaceTension3D::color_normal_pair(
+							gradient, mass / density_j, h);
+					++last_surface_tension_neighbor_evaluations;
+				});
+		normals[i] = normal.is_finite() ? normal : Vector3();
+		mean_magnitude += double(normals[i].length());
+	}
+	mean_surface_normal_magnitude = real_t(mean_magnitude / double(count));
+
+	// Pass 3: process each unordered pair ONCE and apply Newton's
+	// third law to its temporary velocity corrections. Truncated
+	// asymmetric neighborhoods only reduce the number of pairs;
+	// they cannot create a non-reciprocal accepted impulse.
+	Vector3 *corrections_ptr = surface_tension_velocity_changes.ptrw();
+	for (int i = 0; i < count; ++i) {
+		corrections_ptr[i] = Vector3();
+	}
+	for (int i = 0; i < count; ++i) {
+		_pbf_for_neighbors(grid, points, count, i, h, MAX_NEIGHBORS,
+				[&](int p_j, const Vector3 &p_d, double) {
+					++last_surface_tension_neighbor_evaluations;
+					if (p_j <= i) {
+						return;
+					}
+					const Vector3 dv = PhysicsPBFSurfaceTension3D::pair_velocity_increment(
+							p_d, normals[i], normals[p_j],
+							rho[i], rho[p_j], rest_density, mass, h,
+							surface_cohesion, surface_curvature, p_delta,
+							surface_max_pair_velocity_change);
+					if (dv.length_squared() > 0.0) {
+						corrections_ptr[i] += dv;
+						corrections_ptr[p_j] -= dv;
+						++last_surface_tension_pairs;
+					}
+				});
+	}
+	// Atomically reject a pathological entire batch rather than
+	// accepting only one side of any action/reaction pair.
+	const Vector3 *velocity = velocities.ptr();
+	for (int i = 0; i < count; ++i) {
+		if (!corrections_ptr[i].is_finite() || !(velocity[i] + corrections_ptr[i]).is_finite()) {
+			last_surface_tension_pairs = 0;
+			return;
+		}
+	}
+	Vector3 *updated = velocities.ptrw();
+	for (int i = 0; i < count; ++i) {
+		updated[i] += corrections_ptr[i];
+	}
+}
+
 void PBFParticleFluid3D::_apply_vorticity_confinement(real_t p_delta) {
 	// Explicit opt-in: no grid rebuild or additional neighbor traversals
 	// in projects that do not request vorticity restoration.
@@ -732,6 +825,7 @@ void PBFParticleFluid3D::_step_once(real_t p_delta) {
 		w[i] = next;
 	}
 	_apply_xsph_viscosity();
+	_apply_surface_tension(p_delta);
 	_apply_vorticity_confinement(p_delta);
 	_project_velocity_divergence();
 }
