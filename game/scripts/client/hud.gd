@@ -11,6 +11,7 @@ const Contracts = preload("res://scripts/shared/contracts.gd")
 const CampRest = preload("res://scripts/shared/camp_rest.gd")
 const ZoneRisk = preload("res://scripts/shared/zone_risk.gd")
 const SurvivalRadar = preload("res://scripts/client/survival_radar.gd")
+const PartyFrames = preload("res://scripts/client/party_frames.gd")
 
 var client
 var _bars: Dictionary = {}
@@ -27,6 +28,7 @@ var _craft_panel: PanelContainer
 var _craft_list: VBoxContainer
 var _death: Label
 var _equipped: Label
+var _party_frames: Label
 var _log_lines: Array[String] = []
 var _craft_signature: String = ""
 var _inventory_signature: String = ""
@@ -101,6 +103,11 @@ func _build() -> void:
 		_bars[entry[0]] = bar
 	_equipped = Label.new()
 	top_left.add_child(_equipped)
+	_party_frames = Label.new()
+	_party_frames.name = "PartyFrames"
+	_party_frames.add_theme_font_size_override("font_size", 14)
+	_party_frames.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	top_left.add_child(_party_frames)
 
 	var top_right := VBoxContainer.new()
 	top_right.mouse_filter = Control.MOUSE_FILTER_IGNORE
@@ -715,6 +722,8 @@ func _process(_delta: float) -> void:
 		int(client.you.get("scavenging_level", 1)), int(client.you.get("scavenging_xp", 0)),
 		int(weapon_levels.get("melee", 1)), int(weapon_levels.get("ranged", 1))
 	]
+	_party_frames.text = PartyFrames.describe(client.you.get("party", {}), client.peer_id)
+	_party_frames.visible = not _party_frames.text.is_empty()
 	_death.visible = not bool(client.you.get("alive", true))
 	_death.text = "YOU DIED\n%s" % ("All carried items dropped." if bool(client.you.get("last_death_full_loot", false)) else "Carried equipment retained.")
 	if _inventory_panel.visible:
