@@ -29,6 +29,7 @@
 /**************************************************************************/
 
 #include "godot_body_3d.h"
+#include "servers/physics_angular_velocity_cap.h"
 #include "servers/physics_linear_velocity_cap.h"
 
 #include "godot_area_3d.h"
@@ -673,6 +674,10 @@ void GodotBody3D::integrate_forces(real_t p_step, bool p_defer_motion) {
 			}
 		}
 
+		// Limit dynamic angular speed after damping, torque and optional gyro
+		// integration. Kinematic bodies retain their requested target rotation.
+		angular_velocity = godot_physics_clamp_angular_velocity(angular_velocity, get_space()->get_max_angular_velocity());
+
 		// Bound physical velocity before calculating the broadphase CCD sweep.
 		// This is skipped by static and kinematic bodies.
 		linear_velocity = godot_physics_clamp_linear_velocity(linear_velocity, get_space()->get_max_linear_velocity());
@@ -741,6 +746,9 @@ void GodotBody3D::integrate_velocities(real_t p_step) {
 	// Contact and joint impulses can add speed after force integration.
 	// Cap the physical component before position integration too.
 	linear_velocity = godot_physics_clamp_linear_velocity(linear_velocity, get_space()->get_max_linear_velocity());
+	// Contacts and joints can increase angular velocity after force integration.
+	// Limit physical rotation, leaving penetration-correction bias untouched.
+	angular_velocity = godot_physics_clamp_angular_velocity(angular_velocity, get_space()->get_max_angular_velocity());
 	Vector3 total_angular_velocity = angular_velocity + biased_angular_velocity;
 	Vector3 total_linear_velocity = linear_velocity + biased_linear_velocity;
 

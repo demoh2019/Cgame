@@ -578,6 +578,8 @@ PhysicsServer3D::PhysicsServer3D() {
 	GLOBAL_DEF(PropertyInfo(Variant::FLOAT, "physics/3d/solver/max_contact_push_speed", PROPERTY_HINT_RANGE, "0,1000,1,or_greater,suffix:m/s"), 0.0);
 	// Rapier-style bounded dynamic linear speed; legacy behavior is unlimited.
 	GLOBAL_DEF(PropertyInfo(Variant::FLOAT, "physics/3d/solver/max_linear_velocity", PROPERTY_HINT_RANGE, "0,10000,1,or_greater,suffix:m/s"), 0.0);
+	// Jolt-style maximum dynamic angular velocity, 0 means unlimited.
+	GLOBAL_DEF(PropertyInfo(Variant::FLOAT, "physics/3d/solver/max_angular_velocity", PROPERTY_HINT_RANGE, U"0,3600,1,radians_as_degrees,or_greater,suffix:°/s"), 0.0);
 	// Rapier-style cached contact impulse reuse, opt-in damping (1.0 is legacy).
 	GLOBAL_DEF(PropertyInfo(Variant::FLOAT, "physics/3d/solver/warm_start_coefficient", PROPERTY_HINT_RANGE, "0,1,0.01"), 1.0);
 	// Box2D-style Pade damping remains opt-in for backwards-compatible motion.

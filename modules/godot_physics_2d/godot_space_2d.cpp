@@ -1198,6 +1198,7 @@ GodotSpace2D::GodotSpace2D() {
 	// Cache the per-space push speed limit; no project-setting lookup on contacts.
 	max_contact_push_speed = MAX((real_t)0.0, (real_t)GLOBAL_GET("physics/2d/solver/max_contact_push_speed"));
 	max_linear_velocity = MAX((real_t)0.0, (real_t)GLOBAL_GET("physics/2d/solver/max_linear_velocity"));
+	max_angular_velocity = MAX((real_t)0.0, (real_t)GLOBAL_GET("physics/2d/solver/max_angular_velocity"));
 	warm_start_coefficient = CLAMP((real_t)GLOBAL_GET("physics/2d/solver/warm_start_coefficient"), real_t(0.0), real_t(1.0));
 	implicit_damping = GLOBAL_GET("physics/2d/solver/implicit_damping");
 	rolling_friction = MAX(real_t(0.0), (real_t)GLOBAL_GET("physics/2d/solver/rolling_friction"));
