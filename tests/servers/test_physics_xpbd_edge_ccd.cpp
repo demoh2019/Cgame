@@ -106,6 +106,31 @@ TEST_CASE("[PhysicsEdgeCCD] Symmetric free contact conserves linear momentum") {
 	CHECK(c.z < original_c.z);
 }
 
+TEST_CASE("[PhysicsEdgeCCD] Contact separation is stable under common world translation") {
+	Vector3 a0, a1, b0, b1, c, d;
+	crossing(a0, a1, b0, b1, c, d);
+	PhysicsXPBDEdgeCCDHit original_hit;
+	REQUIRE(physics_xpbd_swept_edges(a0, a1, b0, b1, c, c, d, d, 0.12, original_hit));
+	const Vector3 shift(100, -300, 50);
+	PhysicsXPBDEdgeCCDHit shifted_hit;
+	REQUIRE(physics_xpbd_swept_edges(a0 + shift, a1 + shift,
+			b0 + shift, b1 + shift,
+			c + shift, c + shift, d + shift, d + shift, 0.12, shifted_hit));
+	CHECK(shifted_hit.time == doctest::Approx(original_hit.time).epsilon(1e-4));
+	CHECK(shifted_hit.first_weight == doctest::Approx(original_hit.first_weight).epsilon(1e-4));
+	CHECK(shifted_hit.second_weight == doctest::Approx(original_hit.second_weight).epsilon(1e-4));
+	real_t original_lambda = 0, shifted_lambda = 0;
+	Vector3 original_c = c, original_d = d;
+	Vector3 shifted_a = a1 + shift, shifted_b = b1 + shift;
+	Vector3 shifted_c = c + shift, shifted_d = d + shift;
+	REQUIRE(physics_xpbd_solve_swept_edges(a1, b1, original_c, original_d,
+			1, 1, 0, 0, 0.12, 0, original_hit, original_lambda));
+	REQUIRE(physics_xpbd_solve_swept_edges(shifted_a, shifted_b, shifted_c, shifted_d,
+			1, 1, 0, 0, 0.12, 0, shifted_hit, shifted_lambda));
+	CHECK((shifted_a - shift).z == doctest::Approx(a1.z).epsilon(2e-3));
+	CHECK((shifted_b - shift).z == doctest::Approx(b1.z).epsilon(2e-3));
+}
+
 TEST_CASE("[PhysicsEdgeCCD] Plane crossing outside segment interiors is rejected") {
 	Vector3 a0, a1, b0, b1, c, d;
 	crossing(a0, a1, b0, b1, c, d);
