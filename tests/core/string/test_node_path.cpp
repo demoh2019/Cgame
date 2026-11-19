@@ -375,4 +375,56 @@ TEST_CASE("[NodePath] Simplify normalized shared path preserves cache and refere
 	CHECK_EQ(String(copy), "/root/parent/child:position:x");
 }
 
+
+TEST_CASE("[NodePath] Simple relative paths stringify without a new string buffer") {
+	const NodePath path(U"Сцена/Node2D/雪");
+	const StringName cached = path.get_concatenated_names();
+	const String &canonical = cached.string();
+
+	for (int i = 0; i < 128; i++) {
+		const String value = String(path);
+		CHECK_EQ(value, canonical);
+		CHECK(value.ptr() == canonical.ptr());
+	}
+}
+
+TEST_CASE("[NodePath] Stringify absolute and property paths with one output buffer") {
+	const NodePath paths[] = {
+		NodePath("/"),
+		NodePath("/root/Node2D"),
+		NodePath("/root/Node2D:position:x"),
+		NodePath("root/Node2D:position:x"),
+		NodePath(":position:x"),
+		NodePath(U"/Сцена/雪:属性:x"),
+		NodePath("."),
+		NodePath(".."),
+	};
+	const String expected[] = {
+		"/", "/root/Node2D", "/root/Node2D:position:x",
+		"root/Node2D:position:x", ":position:x",
+		U"/Сцена/雪:属性:x", ".", "..",
+	};
+	for (int i = 0; i < 8; i++) {
+		for (int repeat = 0; repeat < 16; repeat++) {
+			CHECK_EQ(String(paths[i]), expected[i]);
+		}
+	}
+}
+
+TEST_CASE("[NodePath] Long stringified paths preserve all codepoints") {
+	String source = "/";
+	for (int i = 0; i < 400; i++) {
+		if (i > 0) {
+			source += "/";
+		}
+		source += String(U"дочерний雪") + itos(i);
+	}
+	source += ":position:属性:x";
+	NodePath path(source);
+	for (int i = 0; i < 32; i++) {
+		CHECK_EQ(String(path), source);
+	}
+	CHECK_EQ(String(path.get_as_property_path()), ":" + source.substr(1));
+}
+
 } // namespace TestNodePath
