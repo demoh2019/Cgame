@@ -1,6 +1,13 @@
 name: Project asset audit tests
 
 on:
+  push:
+    branches: [develop]
+    paths:
+      - "misc/scripts/project_asset_audit.py"
+      - "misc/scripts/tests/test_project_asset_audit*.py"
+      - "misc/scripts/README_asset_audit.md"
+      - ".github/workflows/project-asset-audit.yml"
   pull_request:
     paths:
       - "misc/scripts/project_asset_audit.py"
