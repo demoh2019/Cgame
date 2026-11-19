@@ -623,18 +623,19 @@ TEST_CASE("[LocalVector] Insert move-only items without default construction") {
 		CHECK(values.size() == 36);
 		CHECK(values[0].value == 100);
 		CHECK(values[16].value == 200);
-		CHECK(values[34].value == 300);
+		CHECK(values[33].value == 300);
 		CHECK(values[35].value == 400);
 		CHECK(values[1].value == 0);
 		CHECK(values[17].value == 15);
-		CHECK(values[33].value == 31);
+		CHECK(values[34].value == 31);
 		CHECK(MoveOnlyInsertItem::live == int(values.size()));
 
 		values.remove_at(16);
 		values.remove_at(0);
 		CHECK(values.size() == 34);
 		CHECK(values[0].value == 0);
-		CHECK(values[32].value == 300);
+		CHECK(values[31].value == 300);
+		CHECK(values[32].value == 31);
 		CHECK(values[33].value == 400);
 		CHECK(MoveOnlyInsertItem::live == int(values.size()));
 	}
@@ -671,7 +672,7 @@ TEST_CASE("[LocalVector] Nontrivial insert does not create temporary default obj
 	CHECK(CostlyDefaultInsertItem::default_constructions == 0);
 	CHECK(values.size() == 40);
 	CHECK(values[0].value == "keep");
-	CHECK(values[23].value == "keep");
+	CHECK(values[22].value == "keep");
 	CHECK(values[24].value == "added");
 	CHECK(values[38].value == "added");
 	CHECK(values[39].value == "keep");
