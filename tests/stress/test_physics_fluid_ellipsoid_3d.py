@@ -158,6 +158,16 @@ class ExactEllipsoidBuoyancyTests(unittest.TestCase):
         wf=(ROOT/".github/workflows/whole-engine-stress.yml").read_text()
         self.assertIn("*[PhysicsEllipsoid]*",wf)
         self.assertIn("physics_ellipsoid_buoyancy_3d_regression.gd",wf)
+        stress = (ROOT / "tests/stress/physics_ellipsoid_fluid_stress.gd").read_text()
+        cases = (ROOT / "tests/stress/run.py").read_text()
+        runner = (ROOT / "tests/stress/stress.gd").read_text()
+        self.assertIn("PhysicsServer3D.body_add_shape(body, sphere,", stress)
+        self.assertIn("Performance.TIME_PHYSICS_PROCESS", stress)
+        self.assertIn("frame_p95_ms", stress)
+        self.assertIn('"physics_ellipsoid_fluid_3d_disabled"', cases)
+        self.assertIn('"physics_ellipsoid_fluid_3d_enabled"', cases)
+        self.assertIn("const EllipsoidFluidStress := preload(", runner)
+        self.assertIn("EllipsoidFluidStress.new().run(self, scale, frames, true)", runner)
 
 
 if __name__ == "__main__":
