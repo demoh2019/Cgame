@@ -306,3 +306,16 @@ and VM Tracker on macOS, or a native heap profiler. The RSS watchdog
 is a process safety limit, not an exact measure of transient allocation
 peaks. The growth threshold is opt-in; no threshold is a universal
 leak detector.
+
+## Process-tree resource watchdog
+
+Each workload is launched in an isolated process group. The watchdog samples
+combined resident RAM and CPU use for Godot **and its children**, not only the
+main PID. Results include `peak_processes`, use schema version 2, and record
+`configuration.rss_scope = "process_tree"`. Re-capture older baselines: parent-only
+RSS and process-tree RSS are not directly comparable.
+
+Linux requires no dependencies beyond /proc. On macOS and Windows install
+`psutil` (`python3 -m pip install psutil`) for descendant-inclusive sampling.
+A timeout or RAM overrun terminates the workload's entire process group.
+Short memory spikes shorter than the sampling interval can still be missed.
