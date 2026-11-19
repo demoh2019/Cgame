@@ -520,6 +520,10 @@ bool GodotBodyPair3D::_test_ccd(real_t p_step, GodotBody3D *p_A, int p_shape_A, 
 
 bool GodotBodyPair3D::setup(real_t p_step) {
 	check_ccd = false;
+	// Preserve the previous manifold's provenance until its cache validity
+	// has been checked. Ordinary penetrating contacts do not depend on the
+	// velocities and should keep their fast positive cache path.
+	const bool previous_speculative = contact_recycling.speculative_contact;
 	contact_recycling.speculative_contact = false;
 
 	if (!A->interacts_with(B) || A->has_exception(B->get_self()) || B->has_exception(A->get_self())) {
@@ -550,10 +554,11 @@ bool GodotBodyPair3D::setup(real_t p_step) {
 	// Geometry versions still change on local shape edits, rotation, scaling,
 	// shearing, filters and space changes. CCD always uses the narrow phase.
 	const bool ccd_enabled = A->is_continuous_collision_detection_enabled() || B->is_continuous_collision_detection_enabled();
-	// The TOI fallback depends on velocity; fixed relative poses alone do
-	// not make previous positive/negative narrowphase results reusable.
-	// Restrict this bypass to eligible primitive pairs to preserve fast
-	// manifold recycling for all other shapes.
+	// A previous separated result cannot be reused for sphere pairs when
+	// speculative contacts are enabled: a velocity change may cause impact.
+	// Positive, non-speculative manifolds remain geometry-dependent and can
+	// still be reused. Only a *previous speculative* positive result requires
+	// a fresh TOI check each frame.
 	const bool velocity_sensitive_pair = space->get_speculative_sphere_distance() > 0.0 &&
 			A->get_shape(shape_A)->get_type() == PS3DE::SHAPE_SPHERE &&
 			B->get_shape(shape_B)->get_type() == PS3DE::SHAPE_SPHERE;
@@ -566,7 +571,7 @@ bool GodotBodyPair3D::setup(real_t p_step) {
 		collided = false;
 		return false;
 	}
-	if (relative_translation_unchanged && contact_recycling.can_reuse(geometry_version_a, geometry_version_b, collided, contact_count, ccd_enabled, velocity_sensitive_pair)) {
+	if (relative_translation_unchanged && contact_recycling.can_reuse(geometry_version_a, geometry_version_b, collided, contact_count, ccd_enabled, previous_speculative)) {
 		// SAT may have emitted a new manifold with fewer points, leaving
 		// old (unused) contacts to be pruned on the next frame. Never recycle
 		// such a mixed manifold indefinitely without validating the points.
