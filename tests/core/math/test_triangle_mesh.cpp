@@ -219,6 +219,47 @@ TEST_CASE("[SceneTree][TriangleMesh][Performance] Convex containment reuses tran
 	CHECK_FALSE(single->inside_convex_shape(planes, 6, hull, 8, Vector3(10, 10, 10)));
 }
 
+
+TEST_CASE("[TriangleMesh][Regression] Compact BVH references nodes by index and preserves surface IDs") {
+	// Each face stores the same surface ID for all three of its vertices.
+	// Verify that the ID is read at face * 3, not face, while the BVH's
+	// leaves and internal nodes reference actual compact node indices.
+	const int face_count = 37;
+	Vector<Vector3> faces;
+	Vector<int32_t> metadata;
+	REQUIRE(faces.resize_uninitialized(face_count * 3) == OK);
+	REQUIRE(metadata.resize_uninitialized(face_count * 3) == OK);
+	Vector3 *const points = faces.ptrw();
+	int32_t *const surface = metadata.ptrw();
+	for (int i = 0; i < face_count; i++) {
+		const real_t x = real_t(i * 3);
+		points[i * 3] = Vector3(x, 0, 0);
+		points[i * 3 + 1] = Vector3(x + 1, 0, 0);
+		points[i * 3 + 2] = Vector3(x, 1, 0);
+		for (int vertex = 0; vertex < 3; vertex++) {
+			surface[i * 3 + vertex] = (i * 5 + 3) % 11;
+		}
+	}
+	Ref<TriangleMesh> mesh;
+	mesh.instantiate();
+	mesh->create(faces, metadata);
+	REQUIRE(mesh->is_valid());
+	REQUIRE(mesh->get_triangles().size() == face_count);
+	REQUIRE(mesh->get_bvh().size() == 2 * face_count - 1);
+	for (int i = 0; i < face_count; i++) {
+		CHECK(mesh->get_triangles()[i].surface_index == (i * 5 + 3) % 11);
+		Vector3 hit_position;
+		Vector3 hit_normal;
+		int32_t hit_surface = -1;
+		int32_t hit_face = -1;
+		const Vector3 origin(real_t(i * 3) + real_t(0.25), real_t(0.25), 10);
+		REQUIRE(mesh->intersect_ray(origin, Vector3(0, 0, -1), hit_position, hit_normal, &hit_surface, &hit_face));
+		CHECK(hit_face == i);
+		CHECK(hit_surface == (i * 5 + 3) % 11);
+		CHECK(hit_position.is_equal_approx(Vector3(origin.x, origin.y, 0)));
+	}
+}
+
 } // namespace TestTriangleMesh
 
 #endif // _3D_DISABLED

@@ -45,9 +45,9 @@ int TriangleMesh::_create_bvh(BVH *p_bvh, int *p_bb, int p_from, int p_size, int
 	}
 
 	AABB aabb;
-	aabb = p_bb[p_from]->aabb;
+	aabb = p_bvh[p_bb[p_from]].aabb;
 	for (int i = 1; i < p_size; i++) {
-		aabb.merge_with(p_bb[p_from + i]->aabb);
+		aabb.merge_with(p_bvh[p_bb[p_from + i]].aabb);
 	}
 
 	int li = aabb.get_longest_axis_index();
@@ -157,7 +157,9 @@ void TriangleMesh::create(const Vector<Vector3> &p_faces, const Vector<int32_t> 
 			}
 
 			f.normal = Face3(r[i * 3 + 0], r[i * 3 + 1], r[i * 3 + 2]).get_plane().get_normal();
-			f.surface_index = si ? si[i] : 0;
+			// Surface metadata is indexed per input vertex (three entries per
+			// triangle); use the first vertex of the current face.
+			f.surface_index = si ? si[i * 3] : 0;
 
 			bw[i].left = -1;
 			bw[i].right = -1;
