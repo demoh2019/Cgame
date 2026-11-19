@@ -1140,8 +1140,9 @@ Enable only after validating your project's behavior:
 
 The setting is `false` by default, cached when a GodotPhysics3D space is
 created and ignored by third-party physics backends. This path is attempted
-only when **one active solve island** has at least 256 constraints, all
-constraints have priority 1, and none involve soft bodies. Constraints with
+only when **exactly one large solve island** has at least 256 constraints,
+all its constraints have priority 1, and none involve soft bodies. Smaller
+independent islands may be present. Constraints with
 higher joint priorities, soft-body dependencies, null/empty body lists, or
 insufficient independent parallel work fall back to the existing sequential
 priority solver. The bounded coloring scratch buffer is reused across steps.
@@ -1177,6 +1178,38 @@ python3 tests/stress/run.py --godot ./bin/godot.macos.editor.arm64 \
 The tests check finite body states and joint spacing, not physical
 equivalence to the serial solver or measured performance improvements.
 Start with small scales and monitor CPU usage, peak RSS and frame p95.
+
+### 3D dominant-island scheduling among smaller islands
+
+The 3D scheduler now applies the graph-colored large-island path when there is
+**exactly one island with 256+ active constraints**, even if other independent
+islands are present. Small islands are solved first, using the ordinary
+serial path for fewer than 16 islands or a single worker group for 16+.
+The worker group **completes before** the large island starts its color jobs:
+the color scratch and its worker barriers cannot race with ordinary islands.
+
+If the large island has a higher-priority joint, soft-body dependency or
+insufficient independent work, the 3D scheduler calls the existing sequential
+priority solver using the original island job index (even when the island
+index list has been compacted). When **two or more large islands** exist,
+the normal island-parallel worker pool is used without nested color barriers,
+including when there are fewer than 16 islands overall.
+
+Compare identical high-priority and geometry-free chains across both modes:
+
+```bash
+python3 tests/stress/run.py --godot ./bin/godot.macos.editor.arm64 \
+  --case physics_multi_island_3d_serial,physics_multi_island_3d_parallel,physics_multi_island_3d_two_large \
+  --scale 1 --frames 90 --repeats 5 --timeout 600 \
+  --rss-limit-mib 4096 --output out/physics-multi-island-3d.json
+```
+
+The `serial` and `parallel` cases each contain one 320-body joint chain
+plus 20 isolated 16-body chains. The `two_large` case contains two
+320-body chains. The source-level and GDScript regressions also cover
+small-island scheduling, fallbacks, finite states and joint spacing.
+Runtime and numeric performance must be verified on a locally compiled Godot
+binary before enabling the setting in production.
 
 ### Contact-only large-island optimization (shared static floor, 2D and 3D)
 
