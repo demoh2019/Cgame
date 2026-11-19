@@ -15,6 +15,7 @@ on:
       - "tests/stress/physics_bvh_streaming_*.gd"
       - "tests/stress/physics_compound_filter_batch_*.gd"
       - "tests/stress/physics_soft_body_xpbd_area_3d.gd"
+      - "tests/stress/physics_soft_body_xpbd_volume_3d.gd"
       - "tests/stress/physics_contact_angular_friction_3d.gd"
       - "tests/stress/physics_motion_exclusions_*.gd"
       - "tests/stress/stress.gd"
@@ -23,6 +24,7 @@ on:
       - "tests/stress/test_physics_bvh_streaming.py"
       - "tests/stress/test_physics_compound_filter_batch.py"
       - "tests/stress/test_physics_xpbd_area.py"
+      - "tests/stress/test_physics_xpbd_volume.py"
       - "tests/stress/test_physics_contact_angular_friction.py"
       - "tests/stress/test_physics_early_pair_filter.py"
       - "tests/stress/test_physics_motion_shape_pruning.py"
@@ -53,4 +55,5 @@ jobs:
           python3 -m unittest discover -s tests/stress -p 'test_physics_bvh_streaming.py' -v
           python3 -m unittest discover -s tests/stress -p 'test_physics_compound_filter_batch.py' -v
           python3 -m unittest discover -s tests/stress -p 'test_physics_xpbd_area.py' -v
+          python3 -m unittest discover -s tests/stress -p 'test_physics_xpbd_volume.py' -v
           python3 -m unittest discover -s tests/stress -p 'test_physics_contact_angular_friction.py' -v
