@@ -126,6 +126,29 @@ TEST_CASE("[GodotPhysics2D] Median-partition BVH preserves nearest hits and cull
 	CHECK(narrow_count == 11);
 }
 
+TEST_CASE("[GodotPhysics2D] Concave BVH searches nearest hits first on dense distant segments") {
+	PackedVector2Array edges;
+	// Out-of-order segments create subtrees on both sides of the cast origin.
+	for (int i = 0; i < 257; i++) {
+		const int position = (i & 1) ? 256 - (i / 2) : i / 2;
+		edges.push_back(Vector2(real_t(position * 5 + 5), -4.0));
+		edges.push_back(Vector2(real_t(position * 5 + 5), 4.0));
+	}
+	GodotConcavePolygonShape2D shape;
+	shape.set_data(edges);
+	Vector2 point, normal;
+	CHECK(shape.intersect_segment(Vector2(0, 0), Vector2(1400, 0), point, normal));
+	CHECK(point.is_equal_approx(Vector2(5, 0)));
+	CHECK(normal.is_equal_approx(Vector2(-1, 0)));
+
+	CHECK(shape.intersect_segment(Vector2(1400, 0), Vector2(0, 0), point, normal));
+	CHECK(point.is_equal_approx(Vector2(1285, 0)));
+	CHECK(normal.is_equal_approx(Vector2(1, 0)));
+
+	CHECK_FALSE(shape.intersect_segment(Vector2(0, 0), Vector2(0, 0), point, normal));
+	CHECK_FALSE(shape.intersect_segment(Vector2(0, 8), Vector2(1400, 8), point, normal));
+}
+
 } // namespace TestGodotPhysics2DClosestSegment
 
 #endif // MODULE_GODOT_PHYSICS_2D_ENABLED

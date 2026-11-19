@@ -861,13 +861,19 @@ bool GodotConcavePolygonShape2D::intersect_segment(const Vector2 &p_begin, const
 		VISIT_LEFT_BIT = 1,
 		VISIT_RIGHT_BIT = 2,
 		VISIT_DONE_BIT = 3,
+		VISIT_RIGHT_FIRST_BIT = 4,
+		VISIT_LEFT_SECOND_BIT = 5,
 		VISITED_BIT_SHIFT = 29,
 		NODE_IDX_MASK = (1 << VISITED_BIT_SHIFT) - 1,
 		VISITED_BIT_MASK = ~NODE_IDX_MASK,
 
 	};
 
-	Vector2 n = (p_end - p_begin).normalized();
+	const Vector2 ray = p_end - p_begin;
+	if (ray.length_squared() == 0.0) {
+		return false;
+	}
+	const Vector2 n = ray.normalized();
 	real_t d = 0.0;
 	bool inters = false;
 
@@ -896,8 +902,8 @@ bool GodotConcavePolygonShape2D::intersect_segment(const Vector2 &p_begin, const
 				if (inters) {
 					const Vector2 aabb_min = bvh2.aabb.position;
 					const Vector2 aabb_max = bvh2.aabb.get_end();
-					const real_t earliest = MIN(n.x * aabb_min.x, n.x * aabb_max.x) +
-							MIN(n.y * aabb_min.y, n.y * aabb_max.y);
+					const real_t earliest = MIN(n.x * (aabb_min.x - p_begin.x), n.x * (aabb_max.x - p_begin.x)) +
+							MIN(n.y * (aabb_min.y - p_begin.y), n.y * (aabb_max.y - p_begin.y));
 					valid = earliest <= d;
 				}
 				if (valid) {
@@ -915,7 +921,7 @@ bool GodotConcavePolygonShape2D::intersect_segment(const Vector2 &p_begin, const
 						Vector2 res;
 
 						if (Geometry2D::segment_intersects_segment(p_begin, p_end, a, b, &res)) {
-							real_t nd = n.dot(res);
+							const real_t nd = n.dot(res - p_begin);
 							if (!inters || nd < d) {
 								d = nd;
 								r_point = res;
@@ -927,7 +933,14 @@ bool GodotConcavePolygonShape2D::intersect_segment(const Vector2 &p_begin, const
 						stack[level] = (VISIT_DONE_BIT << VISITED_BIT_SHIFT) | node;
 
 					} else {
-						stack[level] = (VISIT_LEFT_BIT << VISITED_BIT_SHIFT) | node;
+						// Visit the child whose AABB center is closer along the ray.
+						// This improves the chance of finding a near hit before exploring
+						// distant nodes, making the existing closest-hit pruning effective.
+						const BVH &left = bvhptr[bvh2.left];
+						const BVH &right = bvhptr[bvh2.right];
+						const Vector2 center_delta = (left.aabb.position + left.aabb.size * real_t(0.5)) -
+								(right.aabb.position + right.aabb.size * real_t(0.5));
+						stack[level] = ((n.dot(center_delta) <= 0.0 ? VISIT_LEFT_BIT : VISIT_RIGHT_FIRST_BIT) << VISITED_BIT_SHIFT) | node;
 					}
 				}
 			}
@@ -941,6 +954,18 @@ bool GodotConcavePolygonShape2D::intersect_segment(const Vector2 &p_begin, const
 			case VISIT_RIGHT_BIT: {
 				stack[level] = (VISIT_DONE_BIT << VISITED_BIT_SHIFT) | node;
 				stack[level + 1] = bvh2.right | TEST_AABB_BIT;
+				level++;
+			}
+				continue;
+			case VISIT_RIGHT_FIRST_BIT: {
+				stack[level] = (VISIT_LEFT_SECOND_BIT << VISITED_BIT_SHIFT) | node;
+				stack[level + 1] = bvh2.right | TEST_AABB_BIT;
+				level++;
+			}
+				continue;
+			case VISIT_LEFT_SECOND_BIT: {
+				stack[level] = (VISIT_DONE_BIT << VISITED_BIT_SHIFT) | node;
+				stack[level + 1] = bvh2.left | TEST_AABB_BIT;
 				level++;
 			}
 				continue;
