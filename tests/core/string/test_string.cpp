@@ -3026,7 +3026,7 @@ TEST_CASE("[String] xml_unescape keeps COW storage when no entity changes") {
 	CHECK(plain.xml_unescape().ptr() == plain.ptr());
 
 	// Unknown and malformed entities must not spuriously allocate or disappear.
-	const String unknown = "&unknown; &#66 &#x41;trailing &#xFFFFFFFFF;";
+	const String unknown = "&unknown; &#66 &#x41SomeIrrelevantText; &#xFFFFFFFFF;";
 	const String ignored = unknown.xml_unescape();
 	CHECK(ignored == unknown);
 	CHECK(ignored.ptr() == unknown.ptr());
