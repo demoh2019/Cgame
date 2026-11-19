@@ -35,6 +35,7 @@
 #include "core/math/geometry_3d.h"
 #include "servers/physics_3d/physics_server_3d_rendering_server_handler.h"
 #include "servers/physics_xpbd_distance.h"
+#include "servers/physics_xpbd_volume.h"
 #include "servers/rendering/rendering_server.h"
 
 #include <limits>
@@ -308,6 +309,111 @@ void GodotSoftBody3D::update_link_constants() {
 	const real_t inv_linear_stiffness = 1.0 / linear_stiffness;
 	for (Link &link : links) {
 		link.c0 = (link.n[0]->im + link.n[1]->im) * inv_linear_stiffness;
+	}
+}
+
+// Only a watertight, coherently oriented 2-manifold surface encloses a
+// usable signed volume. An open cloth or a broken triangle winding must not
+// receive a global volume constraint (it would pull particles arbitrarily).
+void GodotSoftBody3D::rebuild_xpbd_volume_rest_state() {
+	xpbd_volume_topology_checked = true;
+	xpbd_volume_valid = false;
+	xpbd_rest_volume = 0.0;
+	xpbd_volume_lambda = 0.0;
+	if (nodes.size() < 4 || faces.size() < 4) {
+		xpbd_volume_gradients.clear();
+		return;
+	}
+
+	struct EdgeUse {
+		uint8_t count = 0;
+		int8_t winding = 0;
+	};
+	HashMap<uint64_t, EdgeUse> edges;
+	for (const Face &face : faces) {
+		for (int j = 0; j < 3; ++j) {
+			const uint32_t a = face.n[j]->index;
+			const uint32_t b = face.n[(j + 1) % 3]->index;
+			if (a == b) {
+				return;
+			}
+			const uint64_t key = _soft_body_edge_key(a, b);
+			EdgeUse *usage = edges.getptr(key);
+			if (usage) {
+				if (usage->count >= 2) {
+					return; // Non-manifold edge.
+				}
+				++usage->count;
+				usage->winding += a < b ? 1 : -1;
+			} else {
+				EdgeUse new_usage;
+				new_usage.count = 1;
+				new_usage.winding = a < b ? 1 : -1;
+				edges.insert(key, new_usage);
+			}
+		}
+	}
+	for (const KeyValue<uint64_t, EdgeUse> &E : edges) {
+		if (E.value.count != 2 || E.value.winding != 0) {
+			return; // Boundary edge or inconsistent face orientation.
+		}
+	}
+
+	// Center the scalar triple products about a simulated node to reduce
+	// cancellation errors in large-world coordinates.
+	// Pre-prediction positions q hold the undeformed configuration at
+	// the start of this step. Gravity must not redefine the rest volume.
+	const Vector3 origin = nodes[0].q;
+	real_t signed_volume = 0.0;
+	for (const Face &face : faces) {
+		const Vector3 a = face.n[0]->q - origin;
+		const Vector3 b = face.n[1]->q - origin;
+		const Vector3 c = face.n[2]->q - origin;
+		Vector3 grad_a, grad_b, grad_c;
+		signed_volume += physics_xpbd_triangle_volume_terms(a, b, c, grad_a, grad_b, grad_c);
+	}
+	if (!Math::is_finite(signed_volume) || Math::abs(signed_volume) <= CMP_EPSILON) {
+		return;
+	}
+	xpbd_rest_volume = signed_volume;
+	xpbd_volume_gradients.resize(nodes.size()); // Allocated once at mesh build.
+	xpbd_volume_valid = true;
+}
+
+void GodotSoftBody3D::solve_xpbd_volume_constraint(real_t p_alpha_tilde) {
+	if (!xpbd_volume_valid || dynamic_node_count == 0) {
+		return;
+	}
+
+	for (Vector3 &gradient : xpbd_volume_gradients) {
+		gradient = Vector3();
+	}
+	const Vector3 origin = nodes[0].x;
+	real_t signed_volume = 0.0;
+	for (const Face &face : faces) {
+		const Vector3 a = face.n[0]->x - origin;
+		const Vector3 b = face.n[1]->x - origin;
+		const Vector3 c = face.n[2]->x - origin;
+		Vector3 grad_a, grad_b, grad_c;
+		signed_volume += physics_xpbd_triangle_volume_terms(a, b, c, grad_a, grad_b, grad_c);
+		xpbd_volume_gradients[face.n[0]->index] += grad_a;
+		xpbd_volume_gradients[face.n[1]->index] += grad_b;
+		xpbd_volume_gradients[face.n[2]->index] += grad_c;
+	}
+
+	real_t inverse_mass_gradient_sum = 0.0;
+	for (uint32_t i = 0; i < nodes.size(); ++i) {
+		inverse_mass_gradient_sum += nodes[i].im * xpbd_volume_gradients[i].length_squared();
+	}
+	real_t delta_lambda;
+	if (!physics_xpbd_volume_delta(signed_volume - xpbd_rest_volume,
+				inverse_mass_gradient_sum, p_alpha_tilde, xpbd_volume_lambda, delta_lambda)) {
+		return;
+	}
+	for (uint32_t i = 0; i < nodes.size(); ++i) {
+		if (nodes[i].im > 0.0) {
+			nodes[i].x += xpbd_volume_gradients[i] * (nodes[i].im * delta_lambda);
+		}
 	}
 }
 
