@@ -1093,6 +1093,66 @@ TEST_CASE("[String] Ends with") {
 	CHECK_MESSAGE(state, "nullptr check with empty string failed");
 }
 
+TEST_CASE("[String] Split maxsplit tail hotpath regressions") {
+	{
+		const String s = "one::two::three";
+		const char *expected[] = { "one", "two::three" };
+		MULTICHECK_SPLIT(s, split, "::", true, 1, expected, 2);
+	}
+	{
+		const String s = ",,tail";
+		const char *expected[] = { "", ",tail" };
+		MULTICHECK_SPLIT(s, split, ",", true, 1, expected, 2);
+	}
+	{
+		const String s = "head::";
+		const char *expected[] = { "head", "" };
+		MULTICHECK_SPLIT(s, split, "::", true, 1, expected, 2);
+	}
+	{
+		const String s = "head::";
+		const char *expected[] = { "head" };
+		MULTICHECK_SPLIT(s, split, "::", false, 1, expected, 1);
+	}
+	{
+		const String s = "a,,,b";
+		const char *expected[] = { "a", "b" };
+		MULTICHECK_SPLIT(s, split, ",", false, 1, expected, 2);
+	}
+	{
+		const String s = "a,b,c";
+		const char *expected[] = { "a", "b,c" };
+		MULTICHECK_SPLIT(s, split, ",", false, 1, expected, 2);
+	}
+	{
+		const String s = "abcd";
+		const char *expected[] = { "a", "bcd" };
+		MULTICHECK_SPLIT(s, split, "", true, 1, expected, 2);
+		MULTICHECK_SPLIT(s, split, "", false, 1, expected, 2);
+	}
+	{
+		const String s = "a,b,c";
+		const char *expected[] = { "a", "b", "c" };
+		MULTICHECK_SPLIT(s, split, ",", true, 0, expected, 3);
+	}
+	{
+		const String s = String(U"Ä|Ω|Я");
+		const Vector<String> output = s.split(String("|"), true, 1);
+		REQUIRE(output.size() == 2);
+		CHECK(output[0] == String(U"Ä"));
+		CHECK(output[1] == String(U"Ω|Я"));
+	}
+	{
+		const String tail = String("abcdefghijklmnopqrstuvwxyz").repeat(400);
+		const String input = "header:" + tail;
+		for (const Vector<String> &output : { input.split(String(":"), true, 1), input.split(":", true, 1) }) {
+			REQUIRE(output.size() == 2);
+			CHECK(output[0] == "header");
+			CHECK(output[1] == tail);
+		}
+	}
+}
+
 TEST_CASE("[String] Splitting") {
 	{
 		const String s = "Mars,Jupiter,Saturn,Uranus";
