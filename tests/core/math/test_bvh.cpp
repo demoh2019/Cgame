@@ -188,4 +188,37 @@ TEST_CASE("[BVH] Compound shapes avoid self-pair user filters") {
 	tree.erase(b);
 }
 
+struct CountingCullTest {
+	static inline int calls = 0;
+
+	static bool user_cull_check(const Item *, const Item *) {
+		calls++;
+		return true;
+	}
+};
+
+TEST_CASE("[BVH] Culls stop at result capacity inside densely populated leaves") {
+	using Tree = BVH_Manager<Item, 2, true, 16, PairTest, CountingCullTest, Rect2, Vector2, false>;
+	Tree tree;
+	constexpr int COUNT = 48;
+	Item items[COUNT];
+	for (int i = 0; i < COUNT; i++) {
+		items[i].value = i;
+		// A dense cluster spanning both BVH trees, with no internal filtering.
+		tree.create(&items[i], true, uint32_t(i & 1), 3, Rect2(0, 0, 4, 4));
+	}
+
+	Item *result[1] = { nullptr };
+	CountingCullTest::calls = 0;
+	CHECK(tree.cull_aabb(Rect2(-1, -1, 6, 6), result, 1, nullptr) == 1);
+	CHECK(result[0] != nullptr);
+	CHECK(CountingCullTest::calls == 1);
+
+	result[0] = nullptr;
+	CountingCullTest::calls = 0;
+	CHECK(tree.cull_segment(Vector2(-1, 2), Vector2(5, 2), result, 1, nullptr) == 1);
+	CHECK(result[0] != nullptr);
+	CHECK(CountingCullTest::calls == 1);
+}
+
 } // namespace TestBVH
