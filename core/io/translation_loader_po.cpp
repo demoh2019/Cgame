@@ -90,78 +90,94 @@ Ref<Resource> TranslationLoaderPO::load_translation(Ref<FileAccess> r_file, Erro
 			return OK;
 		};
 
-		// Read string tables.
-		for (uint32_t i = 0; i < num_strings; i++) {
-			String msg_id;
-			String msg_id_plural;
-			String msg_context;
+		// Batch both MO offset tables into bounded stack storage. This turns
+		// four tiny metadata reads and two table seeks per message into
+		// two bulk reads and two table seeks per group of 64 messages.
+		constexpr uint32_t TABLE_BATCH_SIZE = 64;
+		uint32_t original_entries[TABLE_BATCH_SIZE * 2];
+		uint32_t translated_entries[TABLE_BATCH_SIZE * 2];
+		const bool swap_table_words = r_file->is_big_endian();
+		for (uint32_t batch_start = 0; batch_start < num_strings;) {
+			const uint32_t batch_count = MIN(TABLE_BATCH_SIZE, num_strings - batch_start);
+			const uint64_t batch_bytes = uint64_t(batch_count) * 2 * sizeof(uint32_t);
+			r_file->seek(uint64_t(id_table_offset) + uint64_t(batch_start) * 8);
+			ERR_FAIL_COND_V_MSG(r_file->get_buffer(reinterpret_cast<uint8_t *>(original_entries), batch_bytes) != batch_bytes,
+					Ref<Resource>(), "Failed reading gettext MO source string table.");
+			r_file->seek(uint64_t(trans_table_offset) + uint64_t(batch_start) * 8);
+			ERR_FAIL_COND_V_MSG(r_file->get_buffer(reinterpret_cast<uint8_t *>(translated_entries), batch_bytes) != batch_bytes,
+					Ref<Resource>(), "Failed reading gettext MO translated string table.");
 
-			// Read id strings and context.
-			{
-				r_file->seek(uint64_t(id_table_offset) + uint64_t(i) * 8);
-				uint32_t str_start = 0;
-				uint32_t str_len = r_file->get_32();
-				uint32_t str_offset = r_file->get_32();
+			for (uint32_t j = 0; j < batch_count; j++) {
+				String msg_id;
+				String msg_id_plural;
+				String msg_context;
 
-				const uint8_t *data;
-				ERR_FAIL_COND_V_MSG(read_string(str_len, str_offset, data) != OK, Ref<Resource>(), "Invalid gettext MO source string.");
-
-				bool is_plural = false;
-				for (uint32_t j = 0; j < str_len + 1; j++) {
-					if (data[j] == 0x04) {
-						msg_context.clear();
-						msg_context.append_utf8((const char *)data, j);
-						str_start = j + 1;
-					}
-					if (data[j] == 0x00) {
-						if (is_plural) {
-							msg_id_plural.clear();
-							msg_id_plural.append_utf8((const char *)(data + str_start), j - str_start);
-						} else {
-							msg_id.clear();
-							msg_id.append_utf8((const char *)(data + str_start), j - str_start);
-							is_plural = true;
-						}
-						str_start = j + 1;
-					}
-				}
-			}
-
-			// Read translated strings.
-			{
-				r_file->seek(uint64_t(trans_table_offset) + uint64_t(i) * 8);
-				uint32_t str_len = r_file->get_32();
-				uint32_t str_offset = r_file->get_32();
-
-				const uint8_t *data;
-				ERR_FAIL_COND_V_MSG(read_string(str_len, str_offset, data) != OK, Ref<Resource>(), "Invalid gettext MO translated string.");
-
-				if (msg_id.is_empty()) {
-					config = String::utf8((const char *)data, str_len);
-					// Record plural rule.
-					int p_start = config.find("Plural-Forms");
-					if (p_start != -1) {
-						int p_end = config.find_char('\n', p_start);
-						translation->set_plural_rules_override(config.substr(p_start, p_end - p_start));
-					}
-				} else {
+				// Read id strings and context.
+				{
 					uint32_t str_start = 0;
-					Vector<String> plural_msg;
+					const uint32_t str_len = swap_table_words ? BSWAP32(original_entries[j * 2]) : original_entries[j * 2];
+					const uint32_t str_offset = swap_table_words ? BSWAP32(original_entries[j * 2 + 1]) : original_entries[j * 2 + 1];
+
+					const uint8_t *data;
+					ERR_FAIL_COND_V_MSG(read_string(str_len, str_offset, data) != OK, Ref<Resource>(), "Invalid gettext MO source string.");
+
+					bool is_plural = false;
 					for (uint32_t j = 0; j < str_len + 1; j++) {
+						if (data[j] == 0x04) {
+							msg_context.clear();
+							msg_context.append_utf8((const char *)data, j);
+							str_start = j + 1;
+						}
 						if (data[j] == 0x00) {
-							if (msg_id_plural.is_empty()) {
-								translation->add_message(msg_id, String::utf8((const char *)(data + str_start), j - str_start), msg_context);
+							if (is_plural) {
+								msg_id_plural.clear();
+								msg_id_plural.append_utf8((const char *)(data + str_start), j - str_start);
 							} else {
-								plural_msg.push_back(String::utf8((const char *)(data + str_start), j - str_start));
+								msg_id.clear();
+								msg_id.append_utf8((const char *)(data + str_start), j - str_start);
+								is_plural = true;
 							}
 							str_start = j + 1;
 						}
 					}
-					if (!plural_msg.is_empty()) {
-						translation->add_plural_message(msg_id, plural_msg, msg_context);
+				}
+
+				// Read translated strings.
+				{
+					const uint32_t str_len = swap_table_words ? BSWAP32(translated_entries[j * 2]) : translated_entries[j * 2];
+					const uint32_t str_offset = swap_table_words ? BSWAP32(translated_entries[j * 2 + 1]) : translated_entries[j * 2 + 1];
+
+					const uint8_t *data;
+					ERR_FAIL_COND_V_MSG(read_string(str_len, str_offset, data) != OK, Ref<Resource>(), "Invalid gettext MO translated string.");
+
+					if (msg_id.is_empty()) {
+						config = String::utf8((const char *)data, str_len);
+						// Record plural rule.
+						int p_start = config.find("Plural-Forms");
+						if (p_start != -1) {
+							int p_end = config.find_char('\n', p_start);
+							translation->set_plural_rules_override(config.substr(p_start, p_end - p_start));
+						}
+					} else {
+						uint32_t str_start = 0;
+						Vector<String> plural_msg;
+						for (uint32_t j = 0; j < str_len + 1; j++) {
+							if (data[j] == 0x00) {
+								if (msg_id_plural.is_empty()) {
+									translation->add_message(msg_id, String::utf8((const char *)(data + str_start), j - str_start), msg_context);
+								} else {
+									plural_msg.push_back(String::utf8((const char *)(data + str_start), j - str_start));
+								}
+								str_start = j + 1;
+							}
+						}
+						if (!plural_msg.is_empty()) {
+							translation->add_plural_message(msg_id, plural_msg, msg_context);
+						}
 					}
 				}
 			}
+			batch_start += batch_count;
 		}
 
 	} else {
