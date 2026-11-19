@@ -362,4 +362,57 @@ TEST_CASE("[Modules][GDScript] Validate multi-line string error positions") {
 	check_single_multiline_string_error("\\uD800\\\nx", 2, 5, 2, 7, "Invalid UTF-16 sequence in string, unpaired lead surrogate");
 }
 
+
+TEST_CASE("[GDScriptSymbolFastPath] static and instance methods remain distinguishable") {
+	GDScriptLanguage::get_singleton()->init();
+	Ref<GDScript> script = memnew(GDScript);
+	script->set_source_code("extends RefCounted\nstatic func fast_static() -> int:\n\treturn 42\nfunc normal_instance() -> int:\n\treturn 7\n");
+	ERR_PRINT_OFF;
+	const Error err = script->reload();
+	ERR_PRINT_ON;
+	REQUIRE_EQ(err, OK);
+	CHECK(script->has_method(SNAME("fast_static")));
+	CHECK(script->has_static_method(SNAME("fast_static")));
+	CHECK(script->has_method(SNAME("normal_instance")));
+	CHECK_FALSE(script->has_static_method(SNAME("normal_instance")));
+	CHECK_FALSE(script->has_static_method(SNAME("nonexistent_method")));
+}
+
+TEST_CASE("[GDScriptSymbolFastPath] named constants override indexed globals") {
+	GDScriptLanguage *lang = GDScriptLanguage::get_singleton();
+	REQUIRE(lang != nullptr);
+	lang->init();
+	const StringName name = SNAME("PI");
+	const Variant original = lang->get_any_global_constant(name);
+	CHECK_EQ(original, Variant(Math::PI));
+	lang->add_named_global_constant(name, 987.0);
+	CHECK_EQ(lang->get_any_global_constant(name), Variant(987.0));
+	lang->remove_named_global_constant(name);
+	CHECK_EQ(lang->get_any_global_constant(name), original);
+}
+
+TEST_CASE("[GDScriptSymbolFastPath] repeated reads preserve the stable indexed constant") {
+	GDScriptLanguage *lang = GDScriptLanguage::get_singleton();
+	REQUIRE(lang != nullptr);
+	lang->init();
+	const StringName name = SNAME("TAU");
+	const Variant expected = lang->get_any_global_constant(name);
+	for (int i = 0; i < 256; ++i) {
+		CHECK_EQ(lang->get_any_global_constant(name), expected);
+	}
+}
+
+TEST_CASE("[GDScriptSymbolFastPath] missing constant returns Nil without adding it") {
+	GDScriptLanguage *lang = GDScriptLanguage::get_singleton();
+	REQUIRE(lang != nullptr);
+	lang->init();
+	const StringName missing = SNAME("__cgame_symbol_fastpath_missing_constant_20261119__");
+	CHECK_FALSE(lang->has_any_global_constant(missing));
+	ERR_PRINT_OFF;
+	const Variant v = lang->get_any_global_constant(missing);
+	ERR_PRINT_ON;
+	CHECK_EQ(v.get_type(), Variant::NIL);
+	CHECK_FALSE(lang->has_any_global_constant(missing));
+}
+
 } // namespace GDScriptTests
