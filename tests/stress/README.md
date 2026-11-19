@@ -46,7 +46,7 @@ dispatch (two separate processes under the runner's RSS/time watchdogs):
 
 ```bash
 python3 tests/stress/run.py --godot ./bin/godot.linuxbsd.editor.dev.x86_64 \
-  --case canvas_transform_2d,process_dispatch --scales 1,2,4,8 \
+  --case canvas_transform_2d,process_dispatch --scale 4 \
   --repeats 7 --frames 90 --rss-limit-mib 4096 --output out/canvas-process.json
 ```
 
