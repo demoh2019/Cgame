@@ -715,7 +715,7 @@ so it requires no native engine modifications.
 ## Night infected sieges against player defenses
 
 While a survivor is **outside the safe Haven settlement** and remains within
-26 meters of an owned or allied barricade, the authoritative game simulation
+26 meters of a player-built barricade, the authoritative game simulation
 may start a small infected siege **at night**. The threat grows with the tier
 of the defended barricade: T1 starts with two walkers, rising to a bounded
 five-enemy mixed wave at T4 (walkers, runners and a brute).
