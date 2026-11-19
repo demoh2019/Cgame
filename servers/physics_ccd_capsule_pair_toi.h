@@ -170,6 +170,11 @@ _FORCE_INLINE_ PhysicsCCDCapsulePairTOIResult physics_ccd_capsule_pair_toi(
 			const double reach = p_combined_radius * Math::sqrt(normal_squared);
 			const double separation_begin = dot(normal, center);
 			const double separation_end = separation_begin + dot(normal, motion);
+			// If a projection overflows despite finite vector components,
+			// do not allow an invalid separating axis to discard a real hit.
+			if (!Math::is_finite(reach) || !Math::is_finite(separation_begin) || !Math::is_finite(separation_end)) {
+				return PhysicsCCDCapsulePairTOIResult::FALLBACK;
+			}
 			if ((separation_begin > reach && separation_end > reach) ||
 					(separation_begin < -reach && separation_end < -reach)) {
 				return PhysicsCCDCapsulePairTOIResult::MISS;
@@ -233,6 +238,9 @@ _FORCE_INLINE_ PhysicsCCDCapsulePairTOIResult physics_ccd_capsule_pair_toi(
 			const double mid = 0.5 * (low + high);
 			const Distance value = distance_at(start_delta, motion, segment_a, segment_b,
 			segment_a_squared, segment_b_squared, segment_dot, mid);
+			if (!Math::is_finite(value.squared) || !Math::is_finite(value.derivative_half)) {
+				return PhysicsCCDCapsulePairTOIResult::FALLBACK;
+			}
 			if (value.derivative_half < 0.0) {
 				low = mid;
 			} else {
@@ -259,6 +267,9 @@ _FORCE_INLINE_ PhysicsCCDCapsulePairTOIResult physics_ccd_capsule_pair_toi(
 		const double mid = 0.5 * (low + high);
 		const Distance value = distance_at(start_delta, motion, segment_a, segment_b,
 			segment_a_squared, segment_b_squared, segment_dot, mid);
+		if (!Math::is_finite(value.squared)) {
+			return PhysicsCCDCapsulePairTOIResult::FALLBACK;
+		}
 		if (value.squared > radius_sq) {
 			low = mid;
 		} else {
