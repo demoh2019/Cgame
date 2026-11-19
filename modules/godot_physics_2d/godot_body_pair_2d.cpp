@@ -33,6 +33,7 @@
 #include "godot_collision_solver_2d.h"
 #include "godot_contact_normal_2d.h"
 #include "godot_space_2d.h"
+#include "servers/physics_manifold_reduction_2d.h"
 #include "servers/physics_ccd_sphere_toi.h"
 
 #define ACCUMULATE_IMPULSES
@@ -111,6 +112,29 @@ void GodotBodyPair2D::_contact_added_callback(const Vector2 &p_point_A, const Ve
 
 	// Figure out if the contact amount must be reduced to fit the new contact.
 	if (new_index == MAX_CONTACTS) {
+		if (space->is_manifold_spread_reduction_enabled()) {
+			// When three points compete for two slots, preserve the deepest
+			// and maximize the surface span if their normals agree.
+			// Work in coordinates relative to A to avoid large-world offsets.
+			const Transform2D &transform_A = A->get_transform();
+			const Transform2D &transform_B = B->get_transform();
+			Vector2 candidate_points[MAX_CONTACTS + 1];
+			Vector2 candidate_normals[MAX_CONTACTS + 1];
+			real_t candidate_depths[MAX_CONTACTS + 1];
+			for (int i = 0; i <= MAX_CONTACTS; i++) {
+				const Contact &candidate = (i == MAX_CONTACTS) ? contact : contacts[i];
+				const Vector2 point_A = transform_A.basis_xform(candidate.local_A);
+				const Vector2 point_B = transform_B.basis_xform(candidate.local_B) + offset_B;
+				candidate_points[i] = point_A;
+				candidate_normals[i] = candidate.normal;
+				candidate_depths[i] = (point_A - point_B).dot(candidate.normal);
+			}
+			const int replacement = GodotPhysicsManifoldReduction2D::choose_replacement(candidate_points, candidate_depths, candidate_normals);
+			if (replacement >= 0) {
+				contacts[replacement] = contact;
+			}
+			return;
+		}
 		// Remove the contact with the minimum depth.
 
 		const Transform2D &transform_A = A->get_transform();
