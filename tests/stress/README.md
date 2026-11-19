@@ -581,3 +581,24 @@ pure `_resort()` C++ execution time. For actual improvement percentages,
 compare repeated runs of the same workload before and after the change
 on the same hardware. The Box/Flow GitHub Actions workflow builds the
 fork with native C++ tests and executes both targeted workloads.
+
+## Deeply connected GodotPhysics islands
+
+`physics_joint_chain_2d` and `physics_joint_chain_3d` attach many
+RigidBodies with PinJoint nodes. The entire chain forms one island,
+exercising the non-recursive island flood-fill used by GodotPhysics.
+Each scenario measures peak physics processing time, per-frame intervals
+and process RSS through the existing runner. The 2D/3D body counts are
+capped at 4096/3072 respectively, so large scale presets stay bounded.
+
+```bash
+python3 tests/stress/scale_sweep.py \
+  --godot ./bin/godot.linuxbsd.editor.dev.x86_64 \
+  --case physics_joint_chain_2d,physics_joint_chain_3d \
+  --scales 1,2,4,8,16 --repeats 5 --rss-limit-mib 6144 \
+  --output out/physics-joint-chains.json --summary-md out/physics-joint-chains.md
+```
+
+To check worst-case depth, increase the scale or use the brutal preset.
+The scenario must be run with the GodotPhysics backend, not a third-party
+physics implementation. Compare both runtime and peak resident memory.

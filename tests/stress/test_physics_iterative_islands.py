@@ -40,6 +40,16 @@ class IterativePhysicsIslandsContracts(unittest.TestCase):
         self.assertNotIn("_populate_island(other", routine)
         self.assertNotIn("_populate_island_soft_body(other", routine)
 
+    def test_joint_chain_cases_registered(self):
+        import run
+        stress_source = (Path(__file__).resolve().parent / "stress.gd").read_text(encoding="utf-8")
+        for dim in ("2d", "3d"):
+            name = f"physics_joint_chain_{dim}"
+            with self.subTest(dim=dim):
+                self.assertIn(name, run.CASES)
+                self.assertIn(f"func _{name}(", stress_source)
+                self.assertIn(f'"{name}":', stress_source)
+
     def test_stacks_mark_visits_before_queueing(self):
         for dim in ("2d", "3d"):
             cpp, _ = self._source(dim)

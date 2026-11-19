@@ -15,7 +15,7 @@ const CanvasScenePerf := preload("res://canvas_scene_perf.gd")
 const CASES := [
 	"containers", "array_literals", "dictionary_snapshot", "strings", "script_vm", "math", "signals",
 	"scene_tree", "packed_scene", "images", "json", "stream", "stream_bulk",
-	"file_io", "threads", "physics_2d", "physics_3d", "physics_sparse_2d", "physics_sparse_3d",
+	"file_io", "threads", "physics_2d", "physics_3d", "physics_joint_chain_2d", "physics_joint_chain_3d", "physics_sparse_2d", "physics_sparse_3d",
 	"object_churn", "memory_churn", "astar_grid", "astar_grid_neighbors", "astar_grid_jps", "astar_grid_rebuild", "astar_relax_2d", "astar_relax_3d", "astar_graph", "tweens", "audio_buffers",
 	"variant_codec", "packet_stream", "packet_tx_batch", "packet_rx_batch", "packet_variant_reuse", "ui_layout", "grid_reflow", "box_reflow", "flow_reflow", "render_2d", "render_3d", "render_ellipse_2d", "render_light_culling_3d",
 	"resource_load",
@@ -257,6 +257,10 @@ func _run_case(test_case: String, scale: int, frames: int, seed: int) -> Diction
 			return await _physics_2d(scale, frames)
 		"physics_3d":
 			return await _physics_3d(scale, frames)
+		"physics_joint_chain_2d":
+			return await _physics_joint_chain_2d(scale, frames)
+		"physics_joint_chain_3d":
+			return await _physics_joint_chain_3d(scale, frames)
 		"physics_sparse_2d":
 			return await _physics_sparse_2d(scale, frames)
 		"physics_sparse_3d":
@@ -1953,3 +1957,95 @@ func _astar_grid_jps(scale: int) -> Dictionary:
 		"diagonal_sweep_ms": diagonal_ms,
 		"checksum": checksum,
 	}
+
+
+# Long connected chains stress GodotPhysics island traversal depth. With a
+# recursive implementation these can exhaust the native physics thread stack.
+func _physics_joint_chain_2d(scale: int, frames: int) -> Dictionary:
+	var world := Node2D.new()
+	root.add_child(world)
+	var count := mini(64 * scale, 4096)
+	var circle := CircleShape2D.new()
+	circle.radius = 0.3
+	var previous: RigidBody2D = null
+	for i in range(count):
+		var body := RigidBody2D.new()
+		body.name = "body_%d" % i
+		body.gravity_scale = 0.0
+		body.can_sleep = false
+		body.position = Vector2(float(i) * 3.0, 0.0)
+		var shape := CollisionShape2D.new()
+		shape.shape = circle
+		body.add_child(shape)
+		world.add_child(body)
+		if previous != null:
+			var joint := PinJoint2D.new()
+			joint.position = (previous.position + body.position) * 0.5
+			world.add_child(joint)
+			joint.node_a = joint.get_path_to(previous)
+			joint.node_b = joint.get_path_to(body)
+		previous = body
+	if world.get_child_count() != count * 2 - 1:
+		world.queue_free()
+		return {"error": "2D chain construction lost joints"}
+
+	var peak_physics_ms := 0.0
+	var frame_intervals: Array[float] = []
+	var last_tick := Time.get_ticks_usec()
+	for i in range(frames):
+		await physics_frame
+		var now := Time.get_ticks_usec()
+		frame_intervals.append(float(now - last_tick) / 1000.0)
+		last_tick = now
+		peak_physics_ms = maxf(peak_physics_ms, Performance.get_monitor(Performance.TIME_PHYSICS_PROCESS) * 1000.0)
+	world.queue_free()
+	await process_frame
+	var statistics := _frame_statistics(frame_intervals)
+	return {"bodies": count, "joints": count - 1, "physics_frames": frames,
+		"peak_physics_ms": peak_physics_ms, "frame_interval_ms": statistics,
+		"frame_p95_ms": statistics["p95"]}
+
+
+func _physics_joint_chain_3d(scale: int, frames: int) -> Dictionary:
+	var world := Node3D.new()
+	root.add_child(world)
+	var count := mini(32 * scale, 3072)
+	var sphere := SphereShape3D.new()
+	sphere.radius = 0.3
+	var previous: RigidBody3D = null
+	for i in range(count):
+		var body := RigidBody3D.new()
+		body.name = "body_%d" % i
+		body.gravity_scale = 0.0
+		body.can_sleep = false
+		body.position = Vector3(float(i) * 3.0, 0.0, 0.0)
+		var shape := CollisionShape3D.new()
+		shape.shape = sphere
+		body.add_child(shape)
+		world.add_child(body)
+		if previous != null:
+			var joint := PinJoint3D.new()
+			joint.position = (previous.position + body.position) * 0.5
+			world.add_child(joint)
+			joint.node_a = joint.get_path_to(previous)
+			joint.node_b = joint.get_path_to(body)
+		previous = body
+	if world.get_child_count() != count * 2 - 1:
+		world.queue_free()
+		return {"error": "3D chain construction lost joints"}
+
+	var peak_physics_ms := 0.0
+	var frame_intervals: Array[float] = []
+	var last_tick := Time.get_ticks_usec()
+	for i in range(frames):
+		await physics_frame
+		var now := Time.get_ticks_usec()
+		frame_intervals.append(float(now - last_tick) / 1000.0)
+		last_tick = now
+		peak_physics_ms = maxf(peak_physics_ms, Performance.get_monitor(Performance.TIME_PHYSICS_PROCESS) * 1000.0)
+	world.queue_free()
+	await process_frame
+	var statistics := _frame_statistics(frame_intervals)
+	return {"bodies": count, "joints": count - 1, "physics_frames": frames,
+		"peak_physics_ms": peak_physics_ms, "frame_interval_ms": statistics,
+		"frame_p95_ms": statistics["p95"]}
