@@ -328,6 +328,9 @@ static void resolve_soft_soft_vertex_face_direction(JPH::Body &p_point_body, JPH
 				continue;
 			}
 			const float normal_impulse = correction / inverse_mass_sum;
+			if (!Math::is_finite(normal_impulse) || normal_impulse <= 0.0f) {
+				continue;
+			}
 			JPH::Vec3 impulse = normal * normal_impulse;
 
 			const JPH::Vec3 tangent_velocity = relative_velocity - normal * normal_speed;
