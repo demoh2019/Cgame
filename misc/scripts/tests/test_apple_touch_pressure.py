@@ -13,8 +13,10 @@ class IOSPressureFallbackTests(unittest.TestCase):
         self.assertIn(GUARD, SOURCE)
 
     def test_pressure_fallback_is_zero_not_nan(self):
-        self.assertRegex(SOURCE, re.compile(
-            r"\\[touch maximumPossibleForce\\] > 0\\.0 \\? \\[touch force\\] / \\[touch maximumPossibleForce\\] : 0\\.0"))
+        call = next(line for line in SOURCE.splitlines()
+                    if "touch_drag(tid, prev_point.x" in line)
+        self.assertIn(GUARD, call)
+        self.assertIn(" : 0.0, Vector2(", call)
 
     def test_touch_drag_preserves_previous_and_new_coordinates(self):
         call = next(line for line in SOURCE.splitlines()
