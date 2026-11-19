@@ -24,16 +24,16 @@ class ContactWarmStartContracts(unittest.TestCase):
 
     def test_same_normal_threshold_as_2d(self):
         block = self.reuse_block
-        self.assertIn("if (c.normal.dot(contact.normal) >= real_t(0.98)) {", block)
+        self.assertIn("normal.dot(contact.normal) >= real_t(0.98)", block)
         self.assertIn(
-            "if (c.normal.dot(contact.normal) >= real_t(0.98)) {",
+            "normal.dot(contact.normal) >= real_t(0.98)",
             SOURCE_2D.read_text(encoding="utf-8"),
         )
 
     def test_all_warmstart_impulses_are_guarded(self):
         block = self.reuse_block
-        start = block.index("if (c.normal.dot(contact.normal) >= real_t(0.98)) {")
-        end = block.index("\n\t\t\t}", start)
+        start = block.index("normal.dot(contact.normal) >= real_t(0.98)")
+        end = block.index("\n\t\t}", start)
         guarded = block[start:end]
         for member in (
             "acc_normal_impulse",
@@ -47,14 +47,14 @@ class ContactWarmStartContracts(unittest.TestCase):
     def test_reused_friction_is_projected_onto_new_contact_plane(self):
         block = self.reuse_block
         self.assertIn(
-            "c.acc_tangent_impulse - contact.normal * c.acc_tangent_impulse.dot(contact.normal)",
+            "acc_tangent_impulse - contact.normal * previous.acc_tangent_impulse.dot(contact.normal)",
             block,
         )
 
     def test_nearby_contacts_remain_matched_even_if_impulses_are_reset(self):
         block = self.reuse_block
-        gate = block.index("if (c.normal.dot(contact.normal) >= real_t(0.98)) {")
-        assignment = block.index("c = contact;", gate)
+        gate = block.index("normal.dot(contact.normal) >= real_t(0.98)")
+        assignment = block.index("previous = contact;", gate)
         ret = block.index("return;", assignment)
         self.assertLess(assignment, ret)
 
