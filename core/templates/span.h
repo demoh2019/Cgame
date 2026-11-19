@@ -42,7 +42,10 @@ bool are_spans_equal(const LHS *p_lhs, const RHS *p_rhs, size_t p_size) {
 		// is_trivially_equality_comparable would help, but it doesn't exist.
 		// memcmp requires pointer argument to be valid even on size = 0 (C11 §7.24.1(2)).
 		// Span allows ptr arguments to be invalid as long as size = 0, so only call when p_size > 0.
-		return p_size == 0 || memcmp(p_lhs, p_rhs, p_size * sizeof(LHS)) == 0;
+		// Identical storage is already byte-for-byte equal: skip the full scan.
+		// Restrict this shortcut to the bitwise-comparison branch so types with
+		// non-reflexive custom equality operators keep their existing semantics.
+		return p_size == 0 || p_lhs == p_rhs || memcmp(p_lhs, p_rhs, p_size * sizeof(LHS)) == 0;
 	} else {
 		// Normal case: Need to iterate the array manually.
 		for (size_t j = 0; j < p_size; j++) {
