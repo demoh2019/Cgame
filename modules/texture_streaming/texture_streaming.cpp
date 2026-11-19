@@ -540,12 +540,9 @@ void TextureStreaming::_process_material_feedback_buffer(MaterialFeedbackBuffer 
 				float min_dim = MIN(float(state->width), float(state->height));
 				float texel_coverage = min_uv_len * min_dim;
 
-				// Guard against invalid values that would cause undefined behavior in log2.
-				// If texel_coverage is <= 0, request highest quality (mip 0).
-				int required_mip = (texel_coverage > 0.0f) ? int(Math::floor(Math::log2(texel_coverage))) : 0;
-
-				// Clamp to valid mip range for this texture.
-				uint8_t clamped_mip = uint8_t(CLAMP(required_mip, 0, int(state->get_mip_count()) - 1));
+				// The exponent yields floor(log2) without a libm call.
+				// Saturate NaNs, infinities and out-of-range values safely.
+				const uint8_t clamped_mip = TextureStreamingFeedbackPolicy::mip_from_coverage(texel_coverage, state->get_mip_count());
 
 				// Update feedback if this is a better (lower) mip level than previously recorded
 				// Lower mip = higher quality needed

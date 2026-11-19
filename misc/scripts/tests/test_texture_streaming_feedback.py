@@ -26,6 +26,8 @@ class TextureStreamingFeedbackTests(unittest.TestCase):
 #include <cassert>
 #include <cstdint>
 #include <limits>
+#include <cmath>
+#include <cstring>
 
 using namespace TextureStreamingFeedbackPolicy;
 
@@ -59,6 +61,38 @@ int main() {
         }
         assert(mip_level_count(uint16_t(dim), 1) == expected);
         assert(mip_level_count(1, uint16_t(dim)) == expected);
+    }
+
+    assert(mip_from_coverage(0.0f, 14) == 0);
+    assert(mip_from_coverage(-1.0f, 14) == 0);
+    assert(mip_from_coverage(1.0f, 14) == 0);
+    assert(mip_from_coverage(1.9999f, 14) == 0);
+    assert(mip_from_coverage(2.0f, 14) == 1);
+    assert(mip_from_coverage(4.0f, 14) == 2);
+    assert(mip_from_coverage(8192.0f, 14) == 13);
+    assert(mip_from_coverage(std::numeric_limits<float>::infinity(), 14) == 13);
+    assert(mip_from_coverage(std::numeric_limits<float>::quiet_NaN(), 14) == 0);
+    for (int exponent = 0; exponent < 16; ++exponent) {
+        assert(mip_from_coverage(std::ldexp(1.0f, exponent), 16) == exponent);
+    }
+    uint32_t float_seed = 0x69bea4cdu;
+    for (int i = 0; i < 100000; ++i) {
+        float_seed = float_seed * 1664525u + 1013904223u;
+        float coverage;
+        memcpy(&coverage, &float_seed, sizeof(coverage));
+        const uint8_t count = uint8_t(1 + (i % 16));
+        int expected = 0;
+        if (coverage >= 1.0f) {
+            if (std::isfinite(coverage)) {
+                int exponent;
+                std::frexp(coverage, &exponent);
+                expected = exponent - 1;
+            } else {
+                expected = count - 1;
+            }
+            expected = std::min(expected, int(count) - 1);
+        }
+        assert(mip_from_coverage(coverage, count) == expected);
     }
 
     // Simulates repeated empty feedback frames; only first frame should allocate.
@@ -128,6 +162,17 @@ int main() {
         self.assertIn("mip_count = p_other.mip_count;", state)
         self.assertIn("state.mip_count = TextureStreamingFeedbackPolicy::mip_level_count(state.width, state.height);", src)
         self.assertIn("state->mip_count = TextureStreamingFeedbackPolicy::mip_level_count(state->width, state->height);", src)
+
+    def test_mip_hot_loop_avoids_log2_and_clamps_invalid_values(self):
+        src = SOURCE.read_text(encoding="utf-8")
+        feedback = src.split("void TextureStreaming::_process_material_feedback_buffer(", 1)[1].split(
+            "void TextureStreaming::_feedback_buffer_thread_func(", 1
+        )[0]
+        self.assertNotIn("Math::log2(texel_coverage)", feedback)
+        self.assertIn(
+            "TextureStreamingFeedbackPolicy::mip_from_coverage(texel_coverage, state->get_mip_count())",
+            feedback,
+        )
 
     def test_global_lod_constraints_are_read_once_per_feedback_batch(self):
         src = SOURCE.read_text(encoding="utf-8")

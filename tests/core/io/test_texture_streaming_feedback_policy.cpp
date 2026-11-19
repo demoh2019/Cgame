@@ -31,6 +31,10 @@
 #include "modules/texture_streaming/feedback_buffer_policy.h"
 #include "tests/test_macros.h"
 
+#include <cmath>
+#include <cstring>
+#include <limits>
+
 TEST_FORCE_LINK(test_texture_streaming_feedback_policy)
 
 namespace TestTextureStreamingFeedbackPolicy {
@@ -67,4 +71,45 @@ TEST_CASE("[TextureStreaming] mip level count all 16-bit dimensions") {
 		CHECK(mip_level_count(1, uint16_t(dim)) == expected);
 	}
 }
+
+TEST_CASE("[TextureStreaming] fast mip selector matches IEEE 754 logarithm boundaries") {
+	using namespace TextureStreamingFeedbackPolicy;
+	CHECK(mip_from_coverage(0.0f, 14) == 0);
+	CHECK(mip_from_coverage(-1.0f, 14) == 0);
+	CHECK(mip_from_coverage(1.0f, 14) == 0);
+	CHECK(mip_from_coverage(1.9999f, 14) == 0);
+	CHECK(mip_from_coverage(2.0f, 14) == 1);
+	CHECK(mip_from_coverage(4.0f, 14) == 2);
+	CHECK(mip_from_coverage(8192.0f, 14) == 13);
+	CHECK(mip_from_coverage(16384.0f, 14) == 13);
+	CHECK(mip_from_coverage(10.0f, 1) == 0);
+	CHECK(mip_from_coverage(10.0f, 0) == 0);
+	CHECK(mip_from_coverage(std::numeric_limits<float>::infinity(), 14) == 13);
+	CHECK(mip_from_coverage(-std::numeric_limits<float>::infinity(), 14) == 0);
+	CHECK(mip_from_coverage(std::numeric_limits<float>::quiet_NaN(), 14) == 0);
+	for (int exp = 0; exp < 16; exp++) {
+		const float exact_power = std::ldexp(1.0f, exp);
+		CHECK(mip_from_coverage(exact_power, 16) == exp);
+	}
+	uint32_t seed = 0x69bea4cdu;
+	for (int i = 0; i < 100000; i++) {
+		seed = seed * 1664525u + 1013904223u;
+		float coverage;
+		memcpy(&coverage, &seed, sizeof(coverage));
+		const uint8_t mip_count = uint8_t(1 + (i % 16));
+		int expected = 0;
+		if (coverage >= 1.0f) {
+			if (std::isfinite(coverage)) {
+				int exponent;
+				std::frexp(coverage, &exponent);
+				expected = exponent - 1;
+			} else {
+				expected = mip_count - 1;
+			}
+			expected = expected < mip_count ? expected : mip_count - 1;
+		}
+		CHECK(mip_from_coverage(coverage, mip_count) == expected);
+	}
+}
+
 } // namespace TestTextureStreamingFeedbackPolicy
