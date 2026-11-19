@@ -57,13 +57,13 @@ class LargeIslandBatchContracts(unittest.TestCase):
         self.assertIn("for (uint32_t i = start; i < start + count; ++i)", self.coloring)
 
     def test_temporary_hash_map_replaced_with_reused_member(self):
-        self.assertIn("HashMap<GodotBody3D *, uint32_t> occupied_colors;", self.header)
+        self.assertIn("AHashMap<GodotBody3D *, uint32_t> occupied_colors;", self.header)
         self.assertIn("LocalVector<uint8_t> constraint_colors;", self.header)
-        self.assertNotIn("HashMap<GodotBody3D *, uint32_t> occupied_colors;", self.coloring)
+        self.assertNotIn("AHashMap<GodotBody3D *, uint32_t> occupied_colors;", self.coloring)
         self.assertIn("occupied_colors.clear();", self.coloring)
         self.assertIn("constraint_colors.resize(constraint_count);", self.coloring)
         self.assertIn("occupied_colors.get_capacity()", self.coloring)
-        self.assertIn("occupied_colors = HashMap<GodotBody3D *, uint32_t>();", self.source)
+        self.assertIn("occupied_colors.reset();", self.source)
 
     def test_no_reused_memory_during_regular_island_dispatch(self):
         self.assertIn("large_island_count != 1", self.source)
