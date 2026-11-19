@@ -184,23 +184,30 @@ Variant PackedDataContainer::_key_at_ofs(uint32_t p_ofs, const Variant &p_key, b
 		uint32_t hash = p_key.hash();
 		uint32_t len = decode_uint32(r + 4);
 
-		bool found = false;
-		for (uint32_t i = 0; i < len; i++) {
-			uint32_t khash = decode_uint32(r + 8 + i * 12 + 0);
-			if (khash == hash) {
-				Variant key = _get_at_ofs(decode_uint32(r + 8 + i * 12 + 4), rd, r_err);
-				if (r_err) {
-					return Variant();
-				}
-				if (key == p_key) {
-					//key matches, return value
-					return _get_at_ofs(decode_uint32(r + 8 + i * 12 + 8), rd, r_err);
-				}
-				found = true;
+		// Packed dictionary hashes are sorted. Use lower_bound to find the
+		// matching hash group in O(log n), then compare full keys only for
+		// genuine hash collisions instead of scanning all entries.
+		uint32_t low = 0;
+		uint32_t high = len;
+		while (low < high) {
+			const uint32_t mid = low + ((high - low) >> 1);
+			const uint32_t entry_hash = decode_uint32(r + 8 + mid * 12);
+			if (entry_hash < hash) {
+				low = mid + 1;
 			} else {
-				if (found) {
-					break;
-				}
+				high = mid;
+			}
+		}
+		for (uint32_t i = low; i < len; i++) {
+			if (decode_uint32(r + 8 + i * 12) != hash) {
+				break;
+			}
+			Variant key = _get_at_ofs(decode_uint32(r + 8 + i * 12 + 4), rd, r_err);
+			if (r_err) {
+				return Variant();
+			}
+			if (key == p_key) {
+				return _get_at_ofs(decode_uint32(r + 8 + i * 12 + 8), rd, r_err);
 			}
 		}
 
