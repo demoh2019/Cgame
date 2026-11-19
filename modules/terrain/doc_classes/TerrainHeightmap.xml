@@ -11,6 +11,42 @@
     <tutorials>
     </tutorials>
     <methods>
+        <method name="begin_edit">
+            <return type="void" />
+            <description>
+                Starts a batch edit. Nested calls are allowed. Changes are stored immediately but [signal Resource.changed] is emitted only after the matching outermost [method end_edit]. Use this to avoid regenerating a terrain mesh after every single brush operation. Always pair this call with [method end_edit] even when an operation fails.
+            </description>
+        </method>
+        <method name="end_edit">
+            <return type="void" />
+            <description>
+                Ends a batch edit started by [method begin_edit]. The outermost call emits [signal Resource.changed] once if the resource was modified.
+            </description>
+        </method>
+        <method name="build_chunk_mesh" qualifiers="const">
+            <return type="ArrayMesh" />
+            <param index="0" name="cell_origin" type="Vector2i" />
+            <param index="1" name="cell_count" type="Vector2i" />
+            <param index="2" name="lod_stride" type="int" default="1" />
+            <param index="3" name="cell_size" type="float" default="1.0" />
+            <description>
+                Generates an indexed triangle mesh for a rectangular subset of the terrain. [param cell_origin] and [param cell_count] are measured in grid cells, not vertices. [param cell_count] must be positive, fit inside the terrain and be divisible by [param lod_stride]. The stride must be between 1 and 128; higher values result in fewer triangles. Vertex positions are local to the chunk's origin, so position the mesh instance at [code]Vector3(cell_origin.x * cell_size, 0, cell_origin.y * cell_size)[/code]. UVs and normals are calculated from the global heightmap to preserve continuity between equal-LOD neighbors.
+                This method does not automatically stitch adjacent chunks with mismatched LOD; use equal LOD at shared edges or implement skirts/stitching. No streaming or collision is generated.
+            </description>
+        </method>
+        <method name="scatter_points" qualifiers="const">
+            <return type="PackedVector3Array" />
+            <param index="0" name="seed" type="int" />
+            <param index="1" name="spacing" type="float" />
+            <param index="2" name="jitter" type="float" default="0.75" />
+            <param index="3" name="max_slope_degrees" type="float" default="45.0" />
+            <param index="4" name="min_height" type="float" default="-100000.0" />
+            <param index="5" name="max_height" type="float" default="100000.0" />
+            <param index="6" name="cell_size" type="float" default="1.0" />
+            <description>
+                Returns deterministic foliage placement candidates in terrain-local world coordinates. Locations are jittered within a regular grid with world-space [param spacing] and optionally filtered by slope and elevation. [param jitter] ranges from 0 to 1, [param max_slope_degrees] from 0 to 90. A maximum of 65,536 candidate positions is allowed per call. This is not Poisson-disk sampling and does not generate trees or instantiate meshes; use a [MultiMesh] to render large numbers of objects efficiently.
+            </description>
+        </method>
         <method name="build_mesh" qualifiers="const">
             <return type="ArrayMesh" />
             <param index="0" name="cell_size" type="float" default="1.0" />
