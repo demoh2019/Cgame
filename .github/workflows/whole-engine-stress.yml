@@ -213,6 +213,15 @@ jobs:
             --success=true --no-colors 2>&1 | tee physics-capsule-toi.log
           grep -Fq '[CapsuleTOI]' physics-capsule-toi.log
 
+      - name: Regression-test skew capsule pair TOI in native C++
+        shell: bash
+        run: |
+          set -euo pipefail
+          timeout 120s ./bin/godot.linuxbsd.editor.dev.x86_64 \
+            --headless --test --test-case="*CapsulePairTOI*" \
+            --success=true --no-colors 2>&1 | tee physics-capsule-pair-toi.log
+          grep -Fq '[CapsulePairTOI]' physics-capsule-pair-toi.log
+
       - name: Regression-test native 3D CCD with relative body motion
         shell: bash
         run: |
@@ -321,6 +330,7 @@ jobs:
             physics3d-ccd-relative.log
             physics3d-capsule-rays.log
             physics-capsule-toi.log
+            physics-capsule-pair-toi.log
             physics-jolt-contact-scratch.log
             physics-jolt-softbody-area-overlap.log
             physics-jolt-softbody-vertices.log
