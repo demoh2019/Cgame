@@ -585,6 +585,9 @@ PhysicsServer3D::PhysicsServer3D() {
 	// collision or CCD). Off by default; avoid BVH and adjacency overhead.
 	GLOBAL_DEF(PropertyInfo(Variant::FLOAT, "physics/3d/solver/soft_body_self_collision_thickness", PROPERTY_HINT_RANGE, "0,0.5,0.001,or_greater,suffix:m"), 0.0);
 	GLOBAL_DEF(PropertyInfo(Variant::FLOAT, "physics/3d/solver/soft_body_self_collision_compliance", PROPERTY_HINT_RANGE, "0,0.01,0.000001,or_greater"), 0.0);
+	// Crossing edges with no nearby endpoints need an additional narrowphase.
+	// Separate opt-in: the original vertex/triangle mode retains its cost.
+	GLOBAL_DEF(PropertyInfo(Variant::BOOL, "physics/3d/solver/soft_body_self_collision_edge_contacts"), false);
 	// Opt-in XPBD hinge dihedral bending for adjacent cloth triangles.
 	// Zero disables setup, solver work and all persistent hinge buffers.
 	GLOBAL_DEF(PropertyInfo(Variant::FLOAT, "physics/3d/solver/soft_body_xpbd_dihedral_compliance", PROPERTY_HINT_RANGE, "0,0.01,0.000001,or_greater"), 0.0);
