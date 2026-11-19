@@ -842,8 +842,7 @@ bool GodotSoftBody3D::create_from_trimesh(const Vector<int> &p_indices, const Ve
 		node.im = 0.0;
 	}
 
-	// The prefix excludes generated bending diagonals from tether paths.
-	xpbd_tether_structural_links = links.size();
+	// Rebuild nearest-pin geodesics after the mesh topology changes.
 	xpbd_tethers_dirty = true;
 	generate_bending_constraints(2);
 	reoptimize_link_order();
@@ -1377,13 +1376,13 @@ void GodotSoftBody3D::predict_motion(real_t p_delta) {
 	face_tree.optimize_incremental(1);
 }
 
-// Rebuild on pin/mesh/rest-length changes only. The multi-source shortest
-// paths use structural links, not the generated two-hop bending diagonals,
-// so folded cloth retains enough slack for physically plausible motion.
+// Rebuild on pin/mesh/rest-length changes only. Structural mesh edges are
+// identified from faces instead of relying on link ordering: the link
+// optimizer intentionally interleaves stretch and generated bending links.
 void GodotSoftBody3D::rebuild_xpbd_tethers(real_t p_slack) {
 	xpbd_tethers_dirty = false;
-	if (nodes.is_empty() || xpbd_tether_structural_links == 0 ||
-			xpbd_tether_structural_links > links.size() || dynamic_node_count >= nodes.size()) {
+	if (nodes.is_empty() || faces.is_empty() || links.is_empty() ||
+			dynamic_node_count >= nodes.size()) {
 		xpbd_tethers.reset();
 		return;
 	}
@@ -1398,12 +1397,28 @@ void GodotSoftBody3D::rebuild_xpbd_tethers(real_t p_slack) {
 		xpbd_tethers.reset();
 		return;
 	}
+	// The soft-body link optimizer reorders all links after building the
+	// two-hop bending constraints. Mark the original triangle edges once
+	// and read their rest lengths from the reordered link array.
+	HashSet<uint64_t> structural_edges;
+	for (const Face &face : faces) {
+		const uint32_t a = face.n[0]->index;
+		const uint32_t b = face.n[1]->index;
+		const uint32_t c = face.n[2]->index;
+		structural_edges.insert(_soft_body_edge_key(a, b));
+		structural_edges.insert(_soft_body_edge_key(b, c));
+		structural_edges.insert(_soft_body_edge_key(c, a));
+	}
 	LocalVector<PhysicsXPBDTetherEdge> edges;
-	edges.reserve(xpbd_tether_structural_links);
-	for (uint32_t i = 0; i < xpbd_tether_structural_links; ++i) {
-		const Link &link = links[i];
-		if (link.n[0] && link.n[1]) {
-			edges.push_back({ link.n[0]->index, link.n[1]->index, link.rl });
+	edges.reserve(structural_edges.size());
+	for (const Link &link : links) {
+		if (!link.n[0] || !link.n[1]) {
+			continue;
+		}
+		const uint32_t a = link.n[0]->index;
+		const uint32_t b = link.n[1]->index;
+		if (structural_edges.has(_soft_body_edge_key(a, b))) {
+			edges.push_back({ a, b, link.rl });
 		}
 	}
 	if (!physics_xpbd_build_tethers(nodes.size(), edges, pins, p_slack, xpbd_tethers)) {
@@ -1669,7 +1684,6 @@ void GodotSoftBody3D::destroy() {
 	link_constants_dirty = false;
 	xpbd_tethers.reset();
 	xpbd_tethers_dirty = true;
-	xpbd_tether_structural_links = 0;
 	dynamic_node_count = 0;
 	soft_mesh = RID();
 
