@@ -33,6 +33,8 @@ class CapsuleTimeOfImpactContracts(unittest.TestCase):
         self.assertIn("physics_ccd_capsule_toi(local_start, local_motion", source)
         self.assertIn("p_A->set_linear_velocity(travel_direction * clipped_speed)", source)
         self.assertIn("Vector2 supports_A[2]", source)
+        self.assertIn("PS2DE::SHAPE_CAPSULE && shape_B_ptr->get_type() == PS2DE::SHAPE_CIRCLE", source)
+        self.assertIn("const Vector2 local_motion = -inverse_A.basis_xform(relative_motion)", source)
 
     def test_native_3d_sphere_capsule_cast_has_affine_fallback(self):
         source = (ROOT / "modules" / "godot_physics_3d" / "godot_body_pair_3d.cpp").read_text(encoding="utf-8")
@@ -43,16 +45,21 @@ class CapsuleTimeOfImpactContracts(unittest.TestCase):
         self.assertIn("physics_ccd_capsule_toi(local_start, local_motion", source)
         self.assertIn("p_A->set_linear_velocity(travel_direction * clipped_speed)", source)
         self.assertIn("Vector3 supports[MAX_CCD_SUPPORTS]", source)
+        self.assertIn("PS3DE::SHAPE_CAPSULE && shape_B_ptr->get_type() == PS3DE::SHAPE_SPHERE", source)
+        self.assertIn("const Vector3 local_motion = -inverse_A.basis.xform(relative_motion)", source)
 
     def test_cpp_and_native_coverage_reachable_from_ci(self):
         cpp = CPP_TEST.read_text(encoding="utf-8")
         self.assertIn("TEST_FORCE_LINK(test_physics_ccd_capsule_toi)", cpp)
+        self.assertIn("[CapsuleTOI]", cpp)
+        self.assertIn('test-case="*CapsuleTOI*"', WORKFLOW.read_text(encoding="utf-8"))
         self.assertIn("glancing end-cap impact", cpp)
         workflow = WORKFLOW.read_text(encoding="utf-8")
         for dim in ("2d", "3d"):
             script_name = f"physics_ccd_relative_motion_{dim}_regression.gd"
             script = (ROOT / "tests" / "stress" / script_name).read_text(encoding="utf-8")
             self.assertIn("glancing capsule CCD", script)
+            self.assertIn("moving capsule CCD", script)
             self.assertIn(script_name, workflow)
 
 
