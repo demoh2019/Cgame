@@ -108,6 +108,7 @@ class GodotSoftBody3D : public GodotCollisionObject3D {
 	struct SelfCollisionContact {
 		uint32_t vertex = 0;
 		uint32_t face = 0;
+		real_t toi = 1.0; // <1 only for a swept CCD collision.
 	};
 	bool self_collision_adjacency_built = false;
 	HashSet<uint64_t> self_collision_structural_edges;
@@ -123,10 +124,13 @@ class GodotSoftBody3D : public GodotCollisionObject3D {
 		uint32_t b = 0;
 		uint32_t c = 0;
 		uint32_t d = 0;
+		real_t toi = 1.0;
 	};
 	LocalVector<SelfCollisionEdge> self_collision_edges;
 	LocalVector<SelfEdgeContact> self_collision_edge_contacts;
 	bool self_collision_edges_built = false;
+	// Reused only when swept CCD is enabled: minimum safe time per node.
+	LocalVector<real_t> self_collision_ccd_fractions;
 	// Number of particles with nonzero inverse mass. Maintained on pin,
 	// unpin and mesh rebuild for O(1) central impulse/force normalization.
 	uint32_t dynamic_node_count = 0;
@@ -283,7 +287,9 @@ private:
 	void update_area();
 	void initialize_self_collision_adjacency();
 	void solve_self_collisions(real_t p_thickness, real_t p_alpha_tilde);
-	void solve_self_edge_contacts(real_t p_thickness, real_t p_alpha_tilde);
+	void solve_self_edge_contacts(real_t p_thickness, real_t p_alpha_tilde, bool p_ccd);
+	void update_self_collision_swept_face_tree();
+	void apply_self_collision_ccd_rewinds();
 	void initialize_dihedral_constraints();
 	void initialize_volume_constraint();
 	bool solve_volume_constraint(double p_alpha, double &r_lambda);
