@@ -1269,9 +1269,16 @@ built-in GodotPhysics2D solver:
 `physics/2d/solver/parallel_large_islands = true`
 
 The default is **false** until engine builds, thread sanitizers, stability and
-performance tests validate the implementation. Only a single large active
-island in the physics step takes this path. Small islands still use the
-existing serial/parallel island dispatcher.
+performance tests validate the implementation. Scheduling is adaptive:
+
+- **One large island:** independently solve the other small islands, then
+  apply graph-colored batches to the large island.
+- **Two or more large islands:** solve independent islands using one
+  worker-task group, even when there are fewer than 16 islands. This avoids
+  the color/iteration barriers that would be required inside each island.
+- **No large islands:** preserve the existing island scheduler.
+
+The setting has no effect on third-party 2D physics backends.
 
 For a large island (at least 256 constraints), the step builds a 16-color
 greedy constraint graph: every body touched by a constraint reserves that
@@ -1282,9 +1289,11 @@ within 16 colors go to a serial overflow batch. If there is too little
 parallelizable work, the algorithm falls back to the original sequential
 solver. No additional fields are stored on bodies or contacts.
 
-The standalone regression compares 120 physics frames of the same connected
-384-body / 383-pin-joint chain with the option disabled and enabled. It checks
-joint count, representative finite states and link separation:
+The standalone regression runs matching sequential and experimental solves
+for three scenarios: one chain of 384 bodies; one 384-body chain alongside a
+48-body chain; and two independent 384-body chains alongside a 48-body chain.
+Each scenario checks chain topology, representative finite states and joint
+separation (90-120 frames per mode):
 
 ```bash
 ./bin/godot.macos.editor.arm64 --headless \
@@ -1303,11 +1312,23 @@ python3 tests/stress/run.py --godot ./bin/godot.macos.editor.arm64 \
   --output out/physics-large-island.json
 ```
 
-Both cases use identical chain geometry and initial velocities. Compare the
-median/p95 frame time, peak physics time, process RSS, and final joint
-separation. Adding thread dispatch and graph construction can make small or
-highly connected islands *slower*, and altered constraint order can affect
-numerical outcomes. This should not be enabled by default without measurements.
+For multiple large islands and a small island, compare the matched
+`physics_multi_island_serial_2d` and `physics_multi_island_parallel_2d`
+cases. They use two large chains plus one 48-body chain at each scale:
+
+```bash
+python3 tests/stress/run.py --godot ./bin/godot.macos.editor.arm64 \
+  --case physics_multi_island_serial_2d,physics_multi_island_parallel_2d \
+  --scale 4 --frames 120 --repeats 5 --rss-limit-mib 4096 \
+  --output out/physics-multiple-large-islands.json
+```
+
+These paired cases use identical chain geometry and initial velocities.
+Compare median/p95 frame time, peak physics time, process RSS, and joint
+separation. Adding thread dispatch and graph construction can make small
+or highly connected islands *slower*, and altered constraint order can
+affect numerical outcomes. Keep the feature opt-in until measurements
+and concurrency checks succeed.
 
 ## Jolt collision substepping (opt-in)
 
