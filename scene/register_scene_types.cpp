@@ -112,6 +112,7 @@
 #include "scene/main/timer.h"
 #include "scene/main/viewport.h"
 #include "scene/main/window.h"
+#include "scene/main/world_streamer.h"
 #include "scene/resources/animation_library.h"
 #include "scene/resources/atlas_texture.h"
 #include "scene/resources/audio/audio_stream.h"
@@ -242,6 +243,7 @@
 #include "scene/3d/cpu_particles_3d.h"
 #include "scene/3d/decal.h"
 #include "scene/3d/fabr_ik_3d.h"
+#include "scene/3d/floating_origin_3d.h"
 #include "scene/3d/fog_volume.h"
 #include "scene/3d/gpu_particles_3d.h"
 #include "scene/3d/gpu_particles_collision_3d.h"
@@ -650,6 +652,7 @@ void register_scene_types() {
 	GDREGISTER_VIRTUAL_CLASS(VisualInstance3D);
 	GDREGISTER_VIRTUAL_CLASS(GeometryInstance3D);
 	GDREGISTER_CLASS(Camera3D);
+	GDREGISTER_CLASS(FloatingOrigin3D);
 	GDREGISTER_CLASS(AudioListener3D);
 	GDREGISTER_CLASS(MeshInstance3D);
 #ifndef DISABLE_DEPRECATED
@@ -1431,6 +1434,7 @@ void register_scene_singletons() {
 
 	GDREGISTER_CLASS(ThemeDB);
 	GDREGISTER_CLASS(DebugDraw);
+	GDREGISTER_CLASS(WorldStreamer);
 
 	Engine::get_singleton()->add_singleton(Engine::Singleton("ThemeDB", ThemeDB::get_singleton()));
 
