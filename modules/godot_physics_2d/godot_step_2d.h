@@ -32,6 +32,7 @@
 
 #include "godot_space_2d.h"
 
+#include "core/templates/a_hash_map.h"
 #include "core/templates/local_vector.h"
 
 class GodotStep2D {
@@ -50,6 +51,8 @@ class GodotStep2D {
 
 	// Reused only for the opt-in single-large-island graph coloring path.
 	LocalVector<GodotConstraint2D *> colored_constraints;
+	LocalVector<uint8_t> constraint_colors;
+	AHashMap<GodotBody2D *, uint32_t> occupied_colors;
 	uint32_t color_batch_offset = 0;
 	uint32_t color_batch_count = 0;
 	// Read-only during worker dispatch. Used only when one large island is
