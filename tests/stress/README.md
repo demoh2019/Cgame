@@ -1,5 +1,63 @@
 # Cgame whole-engine stress and performance regression suite
 
+## Jolt broadphase work queue, manifold and large-island tuning
+
+Jolt `PhysicsSettings` exposes three controls that previously could not be
+tuned through Cgame project settings:
+
+| Project setting | Default | Effect |
+| --- | ---: | --- |
+| `physics/jolt_physics_3d/limits/max_in_flight_body_pairs` | `16384` | Pair queue between parallel broadphase discovery and narrowphase; limited to 1024–262144 entries |
+| `physics/jolt_physics_3d/simulation/use_large_island_splitter` | `true` | Jolt's parallel constraint batches in large connected islands |
+| `physics/jolt_physics_3d/simulation/use_manifold_reduction` | `true` | Group contact manifolds with similar normals, avoiding unnecessary constraints at the cost of per-subshape detail |
+
+These are the upstream Jolt defaults, preserving existing physics unless
+the user opts in. They are copied to `JPH::PhysicsSettings` **when a space is
+created**; reload/recreate the space after editing these settings.
+
+The body-pair queue belongs to Jolt's per-physics-update *temporary*
+allocator and is **not** the persistent maximum body-pair or contact limit.
+The vendored Jolt `BodyPair` size is exactly 8 bytes. The queue therefore
+occupies the following raw memory (excluding allocator overhead and other
+simulation buffers):
+
+| Body-pair queue capacity | Raw temporary storage per Jolt physics update |
+| ---: | ---: |
+| 1024 | 8 KiB |
+| 16384 (default) | 128 KiB |
+| 32768 | 256 KiB |
+| 262144 | 2 MiB |
+
+Smaller queues can reduce temporary allocator pressure but force the
+broadphase worker to handle pairs inline when its queue fills, harming
+parallelism. Larger queues can improve producer/consumer overlap at the
+cost of RAM. Jolt divides the requested total by worker concurrency to
+obtain the size of each per-worker queue; 1024 is a deliberately safe
+floor. Disabling the large-island splitter can hurt performance for large
+joint/contact networks. Disabling manifold reduction increases the number
+of contacts and can improve per-subshape reporting when needed, but
+usually increases CPU/RAM. None of these settings implies a measured
+speedup; profile under the project's actual contact density and workers.
+
+```bash
+# Source/API contract tests (do not require a Cgame binary).
+python3 -m unittest discover -s tests/stress -p test_jolt_pipeline_tuning.py -v
+
+# Native smoke matrix with a real Jolt project and 144 colliding spheres:
+# default, low-memory queue without island splitting, and high-capacity
+# queue without manifold reduction.
+python3 tests/stress/test_jolt_pipeline_tuning.py \
+  --godot ./bin/godot.linuxbsd.editor.dev.x86_64
+
+# For end-to-end stress, compare two explicit Jolt project configurations
+# with the same hardware, worker count, physics tick and collision density.
+```
+
+Do not interpret headless rendering timings as GPU benchmarks. Source
+contracts validate the configuration API; native runtime/throughput and
+steady-state RSS measurements are separate required validation steps.
+
+
 Independent, reproducible workloads for CPU, script execution, object lifetime,
 allocation churn, scene-tree mutations, physics, IO, data codecs, threads and
 render-node throughput. A Python watchdog samples *process resident RAM* and
