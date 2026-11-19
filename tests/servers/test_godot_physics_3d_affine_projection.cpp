@@ -176,6 +176,46 @@ TEST_CASE("[GodotPhysics3D] Affine cylinder SAT projections match support points
 	}
 }
 
+
+TEST_CASE("[GodotPhysics3D] Solid capsule and cylinder moments of inertia") {
+	GodotCylinderShape3D cylinder;
+	Dictionary cylinder_data;
+	cylinder_data["radius"] = 1.0;
+	cylinder_data["height"] = 4.0;
+	cylinder.set_data(cylinder_data);
+
+	const Vector3 cylinder_inertia = cylinder.get_moment_of_inertia(real_t(2.0));
+	CHECK(cylinder_inertia.is_equal_approx(Vector3(real_t(19.0 / 6.0), 1.0, real_t(19.0 / 6.0))));
+
+	GodotCapsuleShape3D capsule;
+	Dictionary capsule_data;
+	capsule_data["radius"] = 1.0;
+	capsule_data["height"] = 6.0;
+	capsule.set_data(capsule_data);
+
+	// Total mass 2 splits into cylinder mass 1.5 and hemisphere mass 0.5.
+	const Vector3 capsule_inertia = capsule.get_moment_of_inertia(real_t(2.0));
+	CHECK(capsule_inertia.is_equal_approx(Vector3(real_t(213.0 / 40.0), real_t(19.0 / 20.0), real_t(213.0 / 40.0))));
+
+	// Zero-length center segment is exactly a solid sphere.
+	capsule_data["height"] = 2.0;
+	capsule.set_data(capsule_data);
+	const Vector3 sphere_inertia = capsule.get_moment_of_inertia(real_t(5.0));
+	CHECK(sphere_inertia.is_equal_approx(Vector3(2.0, 2.0, 2.0)));
+
+	// The vanishing-radius limit is a rod (I_y = 0, I_x = I_z = m h^2 / 12).
+	capsule_data["radius"] = 0.0;
+	capsule_data["height"] = 4.0;
+	capsule.set_data(capsule_data);
+	CHECK(capsule.get_moment_of_inertia(real_t(2.0)).is_equal_approx(
+			Vector3(real_t(8.0 / 3.0), 0.0, real_t(8.0 / 3.0))));
+
+	cylinder_data["radius"] = 0.0;
+	cylinder.set_data(cylinder_data);
+	CHECK(cylinder.get_moment_of_inertia(real_t(2.0)).is_equal_approx(
+			Vector3(real_t(8.0 / 3.0), 0.0, real_t(8.0 / 3.0))));
+}
+
 } // namespace TestGodotPhysics3DAffineProjection
 
 #endif // MODULE_GODOT_PHYSICS_3D_ENABLED
