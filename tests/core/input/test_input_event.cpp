@@ -151,4 +151,77 @@ TEST_CASE("[BuiltinInputFastPath] builtin definitions do not change when runtime
 	CHECK_EQ(builtins.size(), original_size);
 }
 
+
+TEST_CASE("[InputMapSingleProbe] adding an action preserves deadzones and descriptions") {
+	InputMap *map = InputMap::get_singleton();
+	REQUIRE(map != nullptr);
+	const StringName name = SNAME("__cgame_inputmap_fast_add__");
+	REQUIRE_FALSE(map->has_action(name));
+	map->add_action(name, 0.25f);
+	CHECK(map->has_action(name));
+	CHECK(Math::is_equal_approx(map->action_get_deadzone(name), 0.25f));
+	Ref<InputEventKey> key = InputEventKey::create_reference(Key::F8);
+	map->action_add_event(name, key);
+	CHECK(map->action_has_event(name, key));
+	CHECK_FALSE(map->get_action_description(name).is_empty());
+	map->action_set_deadzone(name, 0.75f);
+	CHECK(Math::is_equal_approx(map->action_get_deadzone(name), 0.75f));
+	map->erase_action(name);
+}
+
+TEST_CASE("[InputMapSingleProbe] repeated queries do not insert extra actions or events") {
+	InputMap *map = InputMap::get_singleton();
+	REQUIRE(map != nullptr);
+	const StringName name = SNAME("__cgame_inputmap_fast_reads__");
+	REQUIRE_FALSE(map->has_action(name));
+	map->add_action(name, 0.5f);
+	Ref<InputEventKey> key = InputEventKey::create_reference(Key::F9);
+	map->action_add_event(name, key);
+	for (int i = 0; i < 256; ++i) {
+		CHECK(map->action_has_event(name, key));
+		CHECK(Math::is_equal_approx(map->action_get_deadzone(name), 0.5f));
+	}
+	const List<Ref<InputEvent>> *events = map->action_get_events(name);
+	REQUIRE(events != nullptr);
+	CHECK_EQ(events->size(), 1);
+	map->erase_action(name);
+}
+
+TEST_CASE("[InputMapSingleProbe] deleting a binding preserves other events") {
+	InputMap *map = InputMap::get_singleton();
+	REQUIRE(map != nullptr);
+	const StringName name = SNAME("__cgame_inputmap_fast_erase_one__");
+	REQUIRE_FALSE(map->has_action(name));
+	map->add_action(name);
+	Ref<InputEventKey> first = InputEventKey::create_reference(Key::F10);
+	Ref<InputEventKey> second = InputEventKey::create_reference(Key::F11);
+	map->action_add_event(name, first);
+	map->action_add_event(name, second);
+	map->action_add_event(name, first); // Duplicate must be ignored.
+	const List<Ref<InputEvent>> *events = map->action_get_events(name);
+	REQUIRE(events != nullptr);
+	CHECK_EQ(events->size(), 2);
+	map->action_erase_event(name, first);
+	CHECK_FALSE(map->action_has_event(name, first));
+	CHECK(map->action_has_event(name, second));
+	CHECK_EQ(events->size(), 1);
+	map->action_erase_events(name);
+	CHECK(events->is_empty());
+	map->erase_action(name);
+}
+
+TEST_CASE("[InputMapSingleProbe] missing action reads are non-inserting") {
+	InputMap *map = InputMap::get_singleton();
+	REQUIRE(map != nullptr);
+	const StringName missing = SNAME("__cgame_inputmap_missing_20261119__");
+	REQUIRE_FALSE(map->has_action(missing));
+	Ref<InputEventKey> key = InputEventKey::create_reference(Key::F12);
+	ERR_PRINT_OFF;
+	CHECK_EQ(map->action_get_deadzone(missing), 0.0f);
+	CHECK_FALSE(map->action_has_event(missing, key));
+	CHECK(map->get_action_description(missing).is_empty());
+	ERR_PRINT_ON;
+	CHECK_FALSE(map->has_action(missing));
+}
+
 } // namespace TestInputEvent
