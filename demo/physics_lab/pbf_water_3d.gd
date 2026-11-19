@@ -31,6 +31,9 @@ func _ready() -> void:
 	fluid.density_pressure_iterations = 0
 	fluid.density_pressure_tolerance = 0.002
 	fluid.density_pressure_max_velocity_change = 0.15
+	fluid.surface_cohesion = 0.0
+	fluid.surface_curvature = 0.0
+	fluid.surface_max_pair_velocity_change = 0.005
 	fluid.artificial_pressure = 0.002
 	fluid.boundary_restitution = 0.15
 	fluid.box_min = Vector3(-1.7, 0.0, -1.7)
@@ -63,7 +66,7 @@ func _ready() -> void:
 
 	label = Label3D.new()
 	label.name = "StationLabel"
-	label.text = "NATIVE CPU PBF FLUID | %d particles | U: reset | I: pause | O: stir | P: rigid coupling | V: vortices | G: compression guard | H: predictive pressure" % fluid.get_particle_count()
+	label.text = "NATIVE CPU PBF FLUID | %d particles | U: reset | I: pause | O: stir | P: rigid coupling | V: vortices | G: compression guard | H: predictive pressure | J: surface tension" % fluid.get_particle_count()
 	label.position = Vector3(0, 3.65, 0)
 	label.font_size = 40
 	label.pixel_size = 0.006
@@ -155,6 +158,17 @@ func _unhandled_key_input(event: InputEvent) -> void:
 			label.text = "NATIVE CPU PBF | Predictive pressure: %s | Error: %.4f" % [
 				"ON" if fluid.density_pressure_iterations > 0 else "OFF",
 				fluid.get_average_predicted_density_error()
+			]
+		KEY_J:
+			# Opt-in SPH free-surface cohesion + curvature; no pair search
+			# or extra scratch memory while both coefficients are zero.
+			var surface_on := fluid.surface_cohesion == 0.0
+			fluid.surface_cohesion = 0.06 if surface_on else 0.0
+			fluid.surface_curvature = 0.025 if surface_on else 0.0
+			label.text = "NATIVE CPU PBF | Surface tension: %s | Pairs: %d | Color normals: %.3f" % [
+				"ON" if surface_on else "OFF",
+				fluid.get_last_surface_tension_pairs(),
+				fluid.get_mean_surface_normal_magnitude()
 			]
 		KEY_P:
 			# Expensive ray sweeps and rigid-body momentum exchange are
