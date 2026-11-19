@@ -671,24 +671,30 @@ void Dictionary::set_typed(const ContainerType &p_key_type, const ContainerType 
 }
 
 void Dictionary::set_typed(uint32_t p_key_type, const StringName &p_key_class_name, const Variant &p_key_script, uint32_t p_value_type, const StringName &p_value_class_name, const Variant &p_value_script) {
+	// Keep Variant-based signatures for older callers, but route typed C++ paths
+	// directly through Ref<Script> to avoid temporary boxing.
+	Ref<Script> key_script = p_key_script;
+	Ref<Script> value_script = p_value_script;
+	set_typed(p_key_type, p_key_class_name, key_script, p_value_type, p_value_class_name, value_script);
+}
+
+void Dictionary::set_typed(uint32_t p_key_type, const StringName &p_key_class_name, const Ref<Script> &p_key_script, uint32_t p_value_type, const StringName &p_value_class_name, const Ref<Script> &p_value_script) {
 	ERR_FAIL_COND_MSG(_p->read_only, "Dictionary is in read-only state.");
 	ERR_FAIL_COND_MSG(_p->variant_map.size() > 0, "Type can only be set when dictionary is empty.");
 	ERR_FAIL_COND_MSG(_p->refcount.get() > 1, "Type can only be set when dictionary has no more than one user.");
 	ERR_FAIL_COND_MSG(_p->typed_key.variant_type != Variant::NIL || _p->typed_value.variant_type != Variant::NIL, "Type can only be set once.");
 	ERR_FAIL_COND_MSG((p_key_class_name != StringName() && p_key_type != Variant::OBJECT) || (p_value_class_name != StringName() && p_value_type != Variant::OBJECT), "Class names can only be set for type OBJECT.");
-	Ref<Script> key_script = p_key_script;
-	ERR_FAIL_COND_MSG(key_script.is_valid() && p_key_class_name == StringName(), "Script class can only be set together with base class name.");
-	Ref<Script> value_script = p_value_script;
-	ERR_FAIL_COND_MSG(value_script.is_valid() && p_value_class_name == StringName(), "Script class can only be set together with base class name.");
+	ERR_FAIL_COND_MSG(p_key_script.is_valid() && p_key_class_name == StringName(), "Script class can only be set together with base class name.");
+	ERR_FAIL_COND_MSG(p_value_script.is_valid() && p_value_class_name == StringName(), "Script class can only be set together with base class name.");
 
 	_p->typed_key.variant_type = Variant::Type(p_key_type);
 	_p->typed_key.class_name = p_key_class_name;
-	_p->typed_key.script = key_script;
+	_p->typed_key.script = p_key_script;
 	_p->typed_key.where = "TypedDictionary.Key";
 
 	_p->typed_value.variant_type = Variant::Type(p_value_type);
 	_p->typed_value.class_name = p_value_class_name;
-	_p->typed_value.script = value_script;
+	_p->typed_value.script = p_value_script;
 	_p->typed_value.where = "TypedDictionary.Value";
 }
 
@@ -779,6 +785,13 @@ Dictionary::Dictionary(const Dictionary &p_base, const ContainerType &p_key_type
 }
 
 Dictionary::Dictionary(const Dictionary &p_base, uint32_t p_key_type, const StringName &p_key_class_name, const Variant &p_key_script, uint32_t p_value_type, const StringName &p_value_class_name, const Variant &p_value_script) {
+	_p = memnew(DictionaryPrivate);
+	_p->refcount.init();
+	set_typed(p_key_type, p_key_class_name, p_key_script, p_value_type, p_value_class_name, p_value_script);
+	assign(p_base);
+}
+
+Dictionary::Dictionary(const Dictionary &p_base, uint32_t p_key_type, const StringName &p_key_class_name, const Ref<Script> &p_key_script, uint32_t p_value_type, const StringName &p_value_class_name, const Ref<Script> &p_value_script) {
 	_p = memnew(DictionaryPrivate);
 	_p->refcount.init();
 	set_typed(p_key_type, p_key_class_name, p_key_script, p_value_type, p_value_class_name, p_value_script);
