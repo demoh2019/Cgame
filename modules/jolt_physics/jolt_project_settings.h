@@ -52,6 +52,9 @@ public:
 	// Used when constructing a soft body; existing bodies retain their constraints.
 	inline static int soft_body_bend_mode = 0;
 	inline static float soft_body_bend_compliance = 0.001f;
+	// Opt-in long-range cloth attachments to pinned vertices; new meshes only.
+	inline static int soft_body_lra_mode = 0;
+	inline static float soft_body_lra_max_distance_multiplier = 1.05f;
 	inline static float bounce_velocity_threshold;
 	inline static bool sleep_allowed;
 	inline static float sleep_velocity_threshold;
