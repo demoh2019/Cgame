@@ -179,6 +179,16 @@ void GodotStep3D::_solve_island(uint32_t p_island_index, void *p_userdata) {
 }
 
 
+
+void GodotStep3D::_solve_island_except_large(uint32_t p_island_index, void *p_userdata) {
+	// Resolve the optional compact island mapping before comparing against the
+	// physical island index, so empty pre-solve islands do not break the skip.
+	const uint32_t island_index = solve_island_indices.is_empty() ? p_island_index : solve_island_indices[p_island_index];
+	if (island_index != deferred_large_island_index) {
+		_solve_island(p_island_index, p_userdata);
+	}
+}
+
 void GodotStep3D::_solve_colored_constraint(uint32_t p_constraint_index, void *p_userdata) const {
 	colored_constraints[color_batch_offset + p_constraint_index]->solve(delta);
 }
@@ -549,19 +559,52 @@ void GodotStep3D::step(GodotSpace3D *p_space, real_t p_delta) {
 
 	// WARNING: `_solve_island` modifies the constraint islands for optimization purpose,
 	// their content is not reliable after these calls and shouldn't be used anymore.
-	if (solve_island_count == 1) {
-		// A single large island can still have independent rigid-body
-		// constraints. Keep the legacy priority-aware path as a fallback.
-		const uint32_t island_index = solve_island_indices.is_empty() ? 0 : solve_island_indices[0];
-		if (!p_space->is_parallel_large_islands_enabled() ||
-				!_solve_large_island(constraint_islands[island_index])) {
-			_solve_island(0, nullptr);
+	// Schedule one dominant island by graph coloring even if other independent
+	// islands exist. Process the remaining islands first and wait for their
+	// jobs, so graph-color jobs never overlap regular island solver jobs.
+	// Multiple large islands are better scheduled directly as independent
+	// workers, avoiding per-color barriers on each one.
+	uint32_t large_island_count = 0;
+	uint32_t large_island_index = UINT32_MAX;
+	uint32_t large_island_job_index = UINT32_MAX;
+	if (p_space->is_parallel_large_islands_enabled()) {
+		for (uint32_t i = 0; i < solve_island_count; ++i) {
+			const uint32_t index = solve_island_indices.is_empty() ? i : solve_island_indices[i];
+			if (constraint_islands[index].size() >= MIN_PARALLEL_LARGE_ISLAND) {
+				if (large_island_count == 0) {
+					large_island_index = index;
+					large_island_job_index = i;
+				}
+				if (++large_island_count == 2) {
+					break; // We only need to distinguish zero, one and many.
+				}
+			}
 		}
-	} else if (solve_island_count < MIN_PARALLEL_SOLVE_ISLANDS) {
+	}
+
+	if (large_island_count == 1) {
+		deferred_large_island_index = large_island_index;
+		if (solve_island_count >= MIN_PARALLEL_SOLVE_ISLANDS) {
+			WorkerThreadPool::GroupID group_task = WorkerThreadPool::get_singleton()->add_template_group_task(
+					this, &GodotStep3D::_solve_island_except_large, nullptr, solve_island_count, -1, true, SNAME("Physics3DOtherConstraintIslands"));
+			WorkerThreadPool::get_singleton()->wait_for_group_task_completion(group_task);
+		} else {
+			for (uint32_t i = 0; i < solve_island_count; ++i) {
+				_solve_island_except_large(i, nullptr);
+			}
+		}
+		// Priority and soft-body cases retain the original sequential solver.
+		if (!_solve_large_island(constraint_islands[large_island_index])) {
+			_solve_island(large_island_job_index, nullptr);
+		}
+		deferred_large_island_index = UINT32_MAX;
+	} else if (solve_island_count < MIN_PARALLEL_SOLVE_ISLANDS && large_island_count < 2) {
 		for (uint32_t island_index = 0; island_index < solve_island_count; ++island_index) {
 			_solve_island(island_index, nullptr);
 		}
 	} else {
+		// At least two large islands have enough independent work to justify
+		// worker dispatch even when there are fewer than 16 total islands.
 		WorkerThreadPool::GroupID group_task = WorkerThreadPool::get_singleton()->add_template_group_task(this, &GodotStep3D::_solve_island, nullptr, solve_island_count, -1, true, SNAME("Physics3DConstraintSolveIslands"));
 		WorkerThreadPool::get_singleton()->wait_for_group_task_completion(group_task);
 	}
