@@ -119,8 +119,8 @@ func run(t) -> void:
 	t.eq(Daily.claim(carrying, delivery, day_delivery)["reason"], "missing_items",
 		"unfunded resource delivery is not payable")
 	var full := Inventory.new(2)
-	full.add("wood_1", 5)
-	full.add("fiber_1", 4)
+	full.add("wood_1", 6)
+	full.add("fiber_1", 5)
 	var before: Dictionary = full.to_dict()
 	t.eq(Daily.claim(full, delivery, day_delivery)["reason"], "no_space",
 		"full inventory rejects delivery and does not consume input materials")
@@ -185,7 +185,8 @@ func run(t) -> void:
 		"RPC replay cannot mint silver or renown again today")
 	var saved: Dictionary = server.character_data(survivor)
 	t.check(server.valid_character_data(saved), "Nakama validator accepts completed daily bounty")
-	var reconnect = server.add_player(7052, "Returning Survivor", "other-account", saved)
+	server.remove_player(survivor.id)
+	var reconnect = server.add_player(7052, "Returning Survivor", "account-daily", saved)
 	_at_hub(server, reconnect)
 	t.eq(reconnect.daily_bounty, survivor.daily_bounty, "new session restores completed daily state")
 	t.eq(server.cmd_contract(reconnect.id, "daily_claim").get("reason", ""), "already_claimed",
