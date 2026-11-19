@@ -656,4 +656,46 @@ TEST_CASE("[BVH] Dense contact graph survives pair deletion and handle reuse") {
 	CHECK(counts.invalid_userdata == 0);
 }
 
+
+TEST_CASE("[BVH] High-bit tree masks keep 32nd-layer pairs and culls consistent") {
+	using Tree = BVH_Manager<Item, 32, true, 16, PairTest, CullTest, Rect2, Vector2, false>;
+	Tree tree;
+	Item low_layer;
+	Item high_layer;
+	int paired = 0;
+	int unpaired = 0;
+	tree.set_pair_callback(count_pair, &paired);
+	tree.set_unpair_callback(count_unpair, &unpaired);
+
+	constexpr uint32_t HIGH_BIT = uint32_t(1) << 31;
+	const Rect2 bounds(0, 0, 4, 4);
+	const BVHHandle low = tree.create(&low_layer, true, 0, HIGH_BIT, bounds);
+	const BVHHandle high = tree.create(&high_layer, true, 31, uint32_t(1), bounds);
+	CHECK(paired == 1);
+	CHECK(unpaired == 0);
+
+	Item *hits[2] = {};
+	CHECK(tree.cull_aabb(bounds, hits, 2, nullptr, HIGH_BIT) == 1);
+	CHECK(hits[0] == &high_layer);
+	CHECK(tree.cull_aabb(bounds, hits, 2, nullptr, uint32_t(1)) == 1);
+	CHECK(hits[0] == &low_layer);
+
+	// A one-sided tree mask is still compatible; disabling both removes
+	// the pair even when one side uses the sign bit of uint32_t.
+	tree.set_tree(low, 0, 0, true);
+	CHECK(paired == 1);
+	CHECK(unpaired == 0);
+	tree.set_tree(high, 31, 0, true);
+	CHECK(unpaired == 1);
+
+	tree.set_tree(low, 0, HIGH_BIT, true);
+	CHECK(paired == 2);
+	CHECK(unpaired == 1);
+
+	tree.erase(high);
+	CHECK(unpaired == 2);
+	tree.erase(low);
+	CHECK(unpaired == 2);
+}
+
 } // namespace TestBVH
