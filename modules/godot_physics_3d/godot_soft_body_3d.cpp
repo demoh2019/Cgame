@@ -34,6 +34,7 @@
 
 #include "core/math/geometry_3d.h"
 #include "servers/physics_softbody_self_collision.h"
+#include "servers/physics_softbody_ccd.h"
 #include "servers/physics_3d/physics_server_3d_rendering_server_handler.h"
 #include "servers/physics_softbody_plasticity.h"
 #include "servers/physics_softbody_volume_safe.h"
@@ -1553,6 +1554,34 @@ void GodotSoftBody3D::initialize_self_collision_adjacency() {
 // constraints. The existing face BVH avoids O(vertices * triangles) scans.
 // Gather bounded candidates before moving any vertices, so all broadphase
 // queries see the same position snapshot. Refit the face tree afterward.
+// A transient swept BVH uses each face's pre-step and current positions.
+// Query both endpoints and everything between, then restore the normal
+// current-position BVH after the CCD pass for external ray/shape queries.
+void GodotSoftBody3D::update_self_collision_swept_face_tree() {
+	for (const Face &face : faces) {
+		AABB swept(face.n[0]->q, Vector3());
+		for (int i = 0; i < 3; ++i) {
+			swept.expand_to(face.n[i]->q);
+			swept.expand_to(face.n[i]->x);
+		}
+		swept.grow_by(collision_margin);
+		face_tree.update(face.leaf, swept);
+	}
+}
+
+// The minimum TOI from all CCD pairs is accumulated before any vertex
+// position changes. A small time safety margin leaves the surfaces
+// separated after rewinding, and avoids repeatedly re-evaluating their
+// old intersection point. The discrete solver still cleans up contact.
+void GodotSoftBody3D::apply_self_collision_ccd_rewinds() {
+	for (uint32_t i = 0; i < nodes.size(); ++i) {
+		Node &node = nodes[i];
+		if (node.im > 0.0 && self_collision_ccd_fractions[i] < 1.0) {
+			node.x = node.q.lerp(node.x, self_collision_ccd_fractions[i]);
+		}
+	}
+}
+
 void GodotSoftBody3D::solve_self_collisions(real_t p_thickness, real_t p_alpha_tilde) {
 	if (!(p_thickness > 0.0) || nodes.is_empty() || faces.is_empty()) {
 		return;
@@ -1562,9 +1591,20 @@ void GodotSoftBody3D::solve_self_collisions(real_t p_thickness, real_t p_alpha_t
 	}
 	if (face_tree.is_empty()) {
 		initialize_face_tree();
+	}
+	const bool use_ccd = get_space()->is_soft_body_self_collision_ccd_enabled();
+	if (use_ccd) {
+		update_self_collision_swept_face_tree();
+		self_collision_ccd_fractions.resize(nodes.size());
+		for (real_t &fraction : self_collision_ccd_fractions) {
+			fraction = 1.0;
+		}
 	} else {
 		// Previous XPBD passes have already moved the triangles.
 		update_face_tree(0.0);
+		if (!self_collision_ccd_fractions.is_empty()) {
+			self_collision_ccd_fractions.reset();
+		}
 	}
 	self_collision_contacts.clear();
 
@@ -1572,7 +1612,11 @@ void GodotSoftBody3D::solve_self_collisions(real_t p_thickness, real_t p_alpha_t
 	constexpr uint32_t MAX_TOTAL_CONTACTS = 65536;
 	constexpr uint32_t MAX_FACES_PER_VERTEX = 128;
 	constexpr uint32_t MAX_NARROWPHASE_FACES_PER_STEP = 1048576;
+	// CCD evaluates moving geometry repeatedly, so cap expensive sweeps
+	// independently from the existing cheap discrete narrowphase budget.
+	constexpr uint32_t MAX_CCD_FACE_TESTS_PER_STEP = 8192;
 	uint32_t remaining_face_tests = MAX_NARROWPHASE_FACES_PER_STEP;
+	uint32_t remaining_ccd_tests = MAX_CCD_FACE_TESTS_PER_STEP;
 	const real_t thickness_sq = p_thickness * p_thickness;
 	if (!(thickness_sq > 0.0) || !Math::is_finite(thickness_sq)) {
 		return;
@@ -1588,9 +1632,13 @@ void GodotSoftBody3D::solve_self_collisions(real_t p_thickness, real_t p_alpha_t
 		real_t thickness_sq = 0.0;
 		uint32_t indices[MAX_CONTACTS_PER_VERTEX] = {};
 		real_t distances[MAX_CONTACTS_PER_VERTEX] = {};
+		real_t times[MAX_CONTACTS_PER_VERTEX] = {};
 		uint32_t count = 0;
 		uint32_t examined = 0;
 		uint32_t *remaining_tests = nullptr;
+		uint32_t *remaining_ccd_tests = nullptr;
+		bool use_ccd = false;
+		real_t thickness = 0.0;
 
 		bool operator()(void *p_data) {
 			if (examined >= MAX_FACES_PER_VERTEX || *remaining_tests == 0) {
@@ -1612,12 +1660,29 @@ void GodotSoftBody3D::solve_self_collisions(real_t p_thickness, real_t p_alpha_t
 				return false;
 			}
 			const real_t d2 = vertex->x.distance_squared_to(closest);
-			if (!Math::is_finite(d2) || d2 >= thickness_sq) {
+			if (!Math::is_finite(d2)) {
 				return false;
 			}
+			real_t toi = 1.0;
+			if (d2 >= thickness_sq) {
+				if (!use_ccd || *remaining_ccd_tests == 0) {
+					return false;
+				}
+				--(*remaining_ccd_tests);
+				if (!physics_softbody_ccd_point_triangle(
+							vertex->q, vertex->x,
+							face->n[0]->q, face->n[0]->x,
+							face->n[1]->q, face->n[1]->x,
+							face->n[2]->q, face->n[2]->x, thickness, toi)) {
+					return false;
+				}
+			}
+			// Swept hits are ordered by earliest TOI; endpoint contacts
+			// retain the previous distance/face-index deterministic order.
 			uint32_t insert = 0;
-			while (insert < count && (d2 > distances[insert] ||
-						(d2 == distances[insert] && face->index > indices[insert]))) {
+			while (insert < count && (toi > times[insert] ||
+						(toi == times[insert] && (d2 > distances[insert] ||
+							(d2 == distances[insert] && face->index > indices[insert]))))) {
 				++insert;
 			}
 			if (insert >= MAX_CONTACTS_PER_VERTEX) {
@@ -1629,9 +1694,11 @@ void GodotSoftBody3D::solve_self_collisions(real_t p_thickness, real_t p_alpha_t
 			for (uint32_t j = count - 1; j > insert; --j) {
 				indices[j] = indices[j - 1];
 				distances[j] = distances[j - 1];
+				times[j] = times[j - 1];
 			}
 			indices[insert] = face->index;
 			distances[insert] = d2;
+			times[insert] = toi;
 			return false; // Continue visiting potentially closer BVH leaves.
 		}
 	};
@@ -1645,14 +1712,41 @@ void GodotSoftBody3D::solve_self_collisions(real_t p_thickness, real_t p_alpha_t
 		query.structural_edges = &self_collision_structural_edges;
 		query.thickness_sq = thickness_sq;
 		query.remaining_tests = &remaining_face_tests;
-		face_tree.aabb_query(AABB(node.x - reach, reach * real_t(2.0)), query);
+		query.remaining_ccd_tests = &remaining_ccd_tests;
+		query.use_ccd = use_ccd;
+		query.thickness = p_thickness;
+		if (use_ccd) {
+			AABB swept(node.q, Vector3());
+			swept.expand_to(node.x);
+			swept.grow_by(p_thickness);
+			face_tree.aabb_query(swept, query);
+		} else {
+			face_tree.aabb_query(AABB(node.x - reach, reach * real_t(2.0)), query);
+		}
 		for (uint32_t i = 0; i < query.count &&
 				self_collision_contacts.size() < MAX_TOTAL_CONTACTS; ++i) {
 			SelfCollisionContact contact;
 			contact.vertex = node.index;
 			contact.face = query.indices[i];
+			contact.toi = query.times[i];
 			self_collision_contacts.push_back(contact);
 		}
+	}
+
+	if (use_ccd) {
+		for (const SelfCollisionContact &contact : self_collision_contacts) {
+			if (contact.toi >= 1.0) {
+				continue;
+			}
+			const real_t safe_t = MAX(real_t(0.0), contact.toi - real_t(0.0001));
+			const Face &face = faces[contact.face];
+			self_collision_ccd_fractions[contact.vertex] = MIN(self_collision_ccd_fractions[contact.vertex], safe_t);
+			for (int i = 0; i < 3; ++i) {
+				const uint32_t vertex_index = face.n[i]->index;
+				self_collision_ccd_fractions[vertex_index] = MIN(self_collision_ccd_fractions[vertex_index], safe_t);
+			}
+		}
+		apply_self_collision_ccd_rewinds();
 	}
 
 	for (const SelfCollisionContact &contact : self_collision_contacts) {
@@ -1663,12 +1757,12 @@ void GodotSoftBody3D::solve_self_collisions(real_t p_thickness, real_t p_alpha_t
 				face.n[0]->im, face.n[1]->im, face.n[2]->im,
 				p_thickness, p_alpha_tilde, point.q);
 	}
-	if (!self_collision_contacts.is_empty()) {
+	if (use_ccd || !self_collision_contacts.is_empty()) {
 		// Keep ray queries and the next prediction phase's BVH coherent.
 		update_face_tree(0.0);
 	}
 	if (get_space()->are_soft_body_self_collision_edge_contacts_enabled()) {
-		solve_self_edge_contacts(p_thickness, p_alpha_tilde);
+		solve_self_edge_contacts(p_thickness, p_alpha_tilde, use_ccd);
 	} else if (self_collision_edges_built) {
 		// The body may have moved to another world where edge contacts are
 		// disabled while vertex/face contacts are still active.
