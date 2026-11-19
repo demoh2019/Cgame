@@ -724,7 +724,9 @@ void GodotBodySoftBodyPair3D::contact_added_callback(const Vector3 &p_point_A, i
 				contact.acc_normal_impulse = c.acc_normal_impulse;
 				contact.acc_bias_impulse = c.acc_bias_impulse;
 				contact.acc_bias_impulse_center_of_mass = c.acc_bias_impulse_center_of_mass;
-				contact.acc_tangent_impulse = c.acc_tangent_impulse;
+				// A rotating soft-body surface changes the contact normal. Reproject
+				// the cached friction so it never injects a normal impulse.
+				contact.acc_tangent_impulse = c.acc_tangent_impulse - contact.normal * c.acc_tangent_impulse.dot(contact.normal);
 			}
 			c = contact;
 			return;
