@@ -120,7 +120,8 @@ func tick(delta: float, now: float, players: Dictionary, parties) -> Array:
 
 ## Server-only lookup that rechecks live occupancy rather than stale snapshot
 ## contested state. A hostile player physically present blocks supply claims.
-func claim_supplies(site_id: int, player, parties, world, now: float) -> Dictionary:
+func claim_supplies(site_id: int, player, players: Dictionary, parties,
+		world, now: float) -> Dictionary:
 	var group_id: int = parties.group_of(player.id)
 	for site in sites:
 		if int(site["id"]) != site_id:
@@ -128,11 +129,12 @@ func claim_supplies(site_id: int, player, parties, world, now: float) -> Diction
 		var owner: int = int(site["owner"])
 		if owner == 0 or not parties.groups.has(owner):
 			return {"ok": false, "reason": "not_owner"}
-		var active: Dictionary = _occupied_groups(site, {player.id: player}, parties)
-		# Check every actual player at the server integration call instead.
-		var contest: bool = bool(site["contested"])
+		# Recompute live presence so a challenger cannot loot while an enemy
+		# is standing on the flag between two regular territory ticks.
+		var occupants: Dictionary = _occupied_groups(site, players, parties)
+		var contested_now: bool = occupants.size() > 1
 		return OutpostSupplies.claim(site, player, group_id,
-			world.zone_at(float(site["x"]), float(site["z"])), now, contest)
+			world.zone_at(float(site["x"]), float(site["z"])), now, contested_now)
 	return {"ok": false, "reason": "no_such_site"}
 
 
