@@ -215,3 +215,27 @@ graphics driver, seed and resource limits, then profile recurring regressions.
 queries on a connected 32x32 AStar2D grid, complementing the existing
 `astar_grid` and `astar_3d` workloads. Sweep this case using
 `tests/stress/scale_sweep.py --case astar_graph --scales 1,2,4,8`.
+
+## Scale sweep: detect superlinear paths
+
+Run the same isolated engine workload at increasing sizes, compute the
+median log-log time-growth exponent and inspect resident-memory growth:
+
+```bash
+python3 tests/stress/scaling.py --godot ./bin/godot.linuxbsd.editor.dev.x86_64 \
+  --case containers,script_vm,animation_tracks,physics_raycast_3d \
+  --scales 1,2,4,8 --repeats 3 --output-dir out/scaling
+
+# Optional failure threshold for sufficiently long (>50 ms) engine workloads:
+python3 tests/stress/scaling.py --godot ./bin/godot.linuxbsd.editor.dev.x86_64 \
+  --case all --scales 1,4,12,50 --flag-exponent 1.6 \
+  --rss-limit-mib 8192 --timeout 1200 --output-dir out/large-sweep
+```
+
+Inspect `sweep.md`, `sweep.json` and `scale_<n>.json` for per-scenario
+results. High exponents can indicate unexpectedly expensive algorithms, but
+are not proof of an optimization defect: each stress case has a different
+amount of fixed setup work, and tiny timings are excluded to reduce noise.
+All engine runs still use the existing per-process RSS and timeout watchdogs.
+Avoid sweeping display-only tests on dummy or software-rendered GPU backends
+when measuring target-hardware graphics performance.
