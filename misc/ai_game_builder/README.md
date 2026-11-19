@@ -7,7 +7,7 @@ An optional Godot editor plugin that builds small self-contained games from natu
 1. Copy the directory addons/ai_game_builder from this folder into YOUR Godot project's addons/ directory. The plugin config must be at res://addons/ai_game_builder/plugin.cfg.
 2. Open Project > Project Settings > Plugins and enable AI Game Builder.
 3. Find the AI Game Builder dock in the editor. Supply your chat-completions API endpoint, model name, and an API key if your provider requires one.
-4. Describe the game and click Generate.
+4. Click **Instant 2D Starter (Offline)** to prepare a playable arcade game immediately without a model or API key, or describe your own game and click **Generate** to use an AI provider.
 5. The built-in static inspector checks for a main scene and broken or external resource paths. When it flags errors, click **Repair** to request a complete replacement from the model. You can also enter a change request (for example, `Add a boss fight`) and click **Refine** to evolve the current preview without losing the original description. Each click makes another API request and can incur usage costs.
 6. Carefully read all generated files in the preview, including security warnings. Click **Apply files...** and confirm to write them.
 7. Open the scene res://ai_generated/main.tscn and run it with F6.
@@ -39,6 +39,28 @@ concurrent filesystem races require operating-system sandboxing.
 
 The standalone test suite includes endpoint policy, credentials/header,
 reserved filename, and multi-file no-overwrite regression cases.
+
+## Instant playable arcade starter (no network required)
+
+AI Game Builder includes a bundled 2D collection game under
+`addons/ai_game_builder/templates/arcade_2d/`. It reuses and adapts the
+offline template developed in Cgame PR #74 without introducing a second plugin.
+
+Use **Instant 2D Starter (Offline)** from the existing AI dock to prepare a
+3-file game plan with `main.tscn`, `scripts/arcade.gd` and `README.md`.
+The starter includes blue player movement (WASD and arrows), a moving green
+collectible, a 60-second timer, a ten-point goal, and restart with R. The
+scene and script require no external images, sound, services or downloaded
+packages. It can later be refined through the normal AI model workflow.
+
+The starter runs through exactly the same path validation, static inspection,
+review/confirmation, and file writer as an AI-generated plan. **Nothing is
+written when clicking the starter button.** Applying the files still requires
+approval, refuses overwriting files, and works best in a new/empty project.
+
+The automated suite validates its content, paths and dependencies, writes a
+temporary copy in the disposable test project, uses Godot's actual resource
+loader to check the scene and GDScript, rejects a second write and cleans up.
 
 ## Check approved games with Godot (headless)
 

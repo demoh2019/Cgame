@@ -5,6 +5,7 @@ const Planner = preload("res://addons/ai_game_builder/planner.gd")
 const Writer = preload("res://addons/ai_game_builder/writer.gd")
 const Inspector = preload("res://addons/ai_game_builder/inspector.gd")
 const EndpointPolicy = preload("res://addons/ai_game_builder/endpoint_policy.gd")
+const Starter = preload("res://addons/ai_game_builder/starter.gd")
 
 var _http: HTTPRequest
 var _endpoint: LineEdit
@@ -14,6 +15,7 @@ var _prompt: TextEdit
 var _refinement: LineEdit
 var _preview: TextEdit
 var _generate_button: Button
+var _quick_button: Button
 var _repair_button: Button
 var _refine_button: Button
 var _apply_button: Button
@@ -38,6 +40,14 @@ func _ready() -> void:
 	var heading := Label.new()
 	heading.text = "AI Game Builder"
 	add_child(heading)
+
+	var starter_row := HBoxContainer.new()
+	add_child(starter_row)
+	_quick_button = Button.new()
+	_quick_button.text = "Instant 2D Starter (Offline)"
+	_quick_button.tooltip_text = "Create an arcade game plan instantly without a model, API key, or network request. Review before applying."
+	_quick_button.pressed.connect(_create_starter)
+	starter_row.add_child(_quick_button)
 
 	_endpoint = _add_line("Chat completions endpoint", "HTTPS URL or local server", "https://api.openai.com/v1/chat/completions")
 	_model = _add_line("Model", "Model identifier", "gpt-4.1-mini")
@@ -144,6 +154,20 @@ func _add_line(label_text: String, hint: String, initial: String) -> LineEdit:
 	return line
 
 
+func _create_starter() -> void:
+	if _busy or _checking:
+		return
+	var result := Starter.create_draft()
+	if not result.ok:
+		_status.text = "Offline starter unavailable: " + String(result.error)
+		return
+	_approved_paths.clear()
+	_check_button.disabled = true
+	if _prompt.text.strip_edges().is_empty():
+		_prompt.text = "Make a small playable 2D arcade collection game with a score and restart."
+	_present_plan(result.plan)
+
+
 func _generate() -> void:
 	_request_plan(_prompt.text.strip_edges(), false)
 
@@ -229,7 +253,11 @@ func _completed(result: int, response_code: int, _headers: PackedStringArray, bo
 	if not validated.ok:
 		_status.text = "Plan rejected: " + String(validated.error)
 		return
-	_pending_plan = validated.plan
+	_present_plan(validated.plan)
+
+
+func _present_plan(plan: Dictionary) -> void:
+	_pending_plan = plan
 	var inspection := Inspector.inspect(_pending_plan)
 	_last_errors = inspection.errors
 	_preview.text = JSON.stringify(_pending_plan, "\t")
@@ -248,6 +276,7 @@ func _completed(result: int, response_code: int, _headers: PackedStringArray, bo
 
 func _set_busy(value: bool) -> void:
 	_busy = value
+	_quick_button.disabled = value or _checking
 	_generate_button.disabled = value or _checking
 	_cancel_button.disabled = not value and not _checking
 	_check_button.disabled = value or _checking or _approved_paths.is_empty()
@@ -315,6 +344,7 @@ func _check_approved_game() -> void:
 	_check_started_ms = Time.get_ticks_msec()
 	_checking = true
 	_check_button.disabled = true
+	_quick_button.disabled = true
 	_generate_button.disabled = true
 	_apply_button.disabled = true
 	_refine_button.disabled = true
@@ -370,6 +400,7 @@ func _finish_headless_check(message: String, terminate: bool) -> void:
 		DirAccess.remove_absolute(ProjectSettings.globalize_path(_check_report_path))
 	_check_report_path = ""
 	_check_button.disabled = _approved_paths.is_empty()
+	_quick_button.disabled = _busy
 	_generate_button.disabled = _busy
 	_cancel_button.disabled = not _busy
 	_refine_button.disabled = _busy or _pending_plan.is_empty()
