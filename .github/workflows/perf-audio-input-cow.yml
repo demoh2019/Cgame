@@ -53,4 +53,4 @@ jobs:
           target: editor
           scons-flags: dev_build=yes tests=yes debug_symbols=no module_mono_enabled=no accesskit=no
       - name: Native audio tests
-        run: ./bin/godot.linuxbsd.editor.dev.x86_64 --headless --test --test-case='[Audio]' --force-colors
+        run: ./bin/godot.linuxbsd.editor.dev.x86_64 --headless --test --test-case='[Audio]*' --force-colors
