@@ -1,0 +1,30 @@
+name: Upstream migration unit tests
+
+on:
+  pull_request:
+    paths:
+      - "misc/upstream_migration/**"
+      - ".github/workflows/upstream-migration-tests.yml"
+  push:
+    branches:
+      - develop
+    paths:
+      - "misc/upstream_migration/**"
+      - ".github/workflows/upstream-migration-tests.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  unittest:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Run offline migration regression tests
+        run: python -m unittest discover -v -s misc/upstream_migration -p 'test_migrate_upstream.py'
