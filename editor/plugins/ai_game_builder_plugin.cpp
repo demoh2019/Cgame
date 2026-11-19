@@ -166,6 +166,11 @@ Error AIGameBuilderPlugin::parse_plan(const String &p_json, Array &r_files, Stri
 		paths.insert(path.to_lower());
 
 		const int bytes = contents.utf8().length();
+		// Tool scripts may execute editor-side code on import. Disallow them in generated assets.
+		if (contents.contains("@tool")) {
+			r_error = "Editor-executed @tool scripts are not allowed in generated assets.";
+			return ERR_INVALID_DATA;
+		}
 		if (contents.contains_char(0) || bytes == 0 || bytes > MAX_FILE_BYTES || total_bytes > MAX_TOTAL_BYTES - bytes) {
 			r_error = "A file is empty or the plan exceeds the file-size limits.";
 			return ERR_INVALID_DATA;
@@ -235,7 +240,7 @@ void AIGameBuilderPlugin::_generate_pressed() {
 			"Generate complete compatible resources, connected scenes, valid GDScript, and no placeholders. "
 			"Use relative forward-slash paths under res://, never include res:// in the path. "
 			"Only generate new text assets with these extensions: gd, tscn, tres, gdshader, gdshaderinc, "
-			"json, txt, md, svg, csv. Do not create project.godot, plugins, binaries or hidden files. "
+			"json, txt, md, svg, csv. Do not create project.godot, plugins, binaries or hidden files. Do not use @tool scripts or run commands. "
 			"Prefer a simple, self-contained game that is playable without downloaded assets. "
 			"Limit to 64 files and 1 MiB total content. Never put explanations outside the JSON.";
 
