@@ -612,6 +612,7 @@ TEST_CASE("[LocalVector] Insert move-only items without default construction") {
 	CHECK(MoveOnlyInsertItem::live == 0);
 	{
 		LocalVector<MoveOnlyInsertItem> values;
+		values.reserve(33); // Force capacity growth during the second insert.
 		for (int i = 0; i < 32; i++) {
 			values.push_back(MoveOnlyInsertItem(i));
 		}
