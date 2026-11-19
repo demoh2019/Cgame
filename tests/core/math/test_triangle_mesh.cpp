@@ -320,6 +320,51 @@ TEST_CASE("[TriangleMesh][Performance] Repeated BVH builds overwrite uninitializ
 	}
 }
 
+
+TEST_CASE("[TriangleMesh][Performance] Face extraction fills all uninitialized destination elements") {
+	const int triangle_count = 193;
+	Vector<Vector3> input;
+	REQUIRE(input.resize_uninitialized(triangle_count * 3) == OK);
+	Vector3 *const original = input.ptrw();
+	for (int i = 0; i < triangle_count; i++) {
+		const real_t x = real_t(i * 3);
+		original[i * 3] = Vector3(x, 0, 0);
+		original[i * 3 + 1] = Vector3(x + 1, 0, 0);
+		original[i * 3 + 2] = Vector3(x, 1, 0);
+	}
+	Ref<TriangleMesh> mesh;
+	mesh.instantiate();
+	mesh->create(input);
+	REQUIRE(mesh->is_valid());
+
+	for (int repeat = 0; repeat < 3; repeat++) {
+		const Vector<Face3> faces = mesh->get_faces();
+		const Vector<Vector3> script_faces = mesh->get_faces_scriptwrap();
+		Vector<int> indices;
+		mesh->get_indices(&indices);
+		REQUIRE(faces.size() == triangle_count);
+		REQUIRE(script_faces.size() == triangle_count * 3);
+		REQUIRE(indices.size() == triangle_count * 3);
+		const Vector<Vector3> &vertices = mesh->get_vertices();
+		for (int i = 0; i < triangle_count; i++) {
+			for (int j = 0; j < 3; j++) {
+				const int at = i * 3 + j;
+				CHECK(faces[i].vertex[j] == original[at]);
+				CHECK(script_faces[at] == original[at]);
+				REQUIRE(indices[at] >= 0);
+				REQUIRE(indices[at] < vertices.size());
+				CHECK(vertices[indices[at]] == original[at]);
+			}
+		}
+	}
+
+	// Empty mesh getters remain allocation-free and return empty arrays.
+	Ref<TriangleMesh> empty;
+	empty.instantiate();
+	CHECK(empty->get_faces().is_empty());
+	CHECK(empty->get_faces_scriptwrap().is_empty());
+}
+
 } // namespace TestTriangleMesh
 
 #endif // _3D_DISABLED
