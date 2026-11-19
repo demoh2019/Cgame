@@ -620,13 +620,14 @@ void GodotBodyPair3D::solve(real_t p_step) {
 				real_t jbnOld_com = c.acc_bias_impulse_center_of_mass;
 				c.acc_bias_impulse_center_of_mass = MAX(jbnOld_com + jbn_com, 0.0f);
 
-				Vector3 jb_com = c.normal * (c.acc_bias_impulse_center_of_mass - jbnOld_com);
-
-				if (collide_A) {
-					A->apply_bias_impulse(-jb_com, A->get_center_of_mass(), 0.0f);
-				}
-				if (collide_B) {
-					B->apply_bias_impulse(jb_com, B->get_center_of_mass(), 0.0f);
+				const Vector3 jb_com = c.normal * (c.acc_bias_impulse_center_of_mass - jbnOld_com);
+				if (jb_com != Vector3()) {
+					if (collide_A) {
+						A->apply_bias_impulse(-jb_com, A->get_center_of_mass(), 0.0f);
+					}
+					if (collide_B) {
+						B->apply_bias_impulse(jb_com, B->get_center_of_mass(), 0.0f);
+					}
 				}
 			}
 
@@ -1074,13 +1075,14 @@ void GodotBodySoftBodyPair3D::solve(real_t p_step) {
 				real_t jbnOld_com = c.acc_bias_impulse_center_of_mass;
 				c.acc_bias_impulse_center_of_mass = MAX(jbnOld_com + jbn_com, 0.0f);
 
-				Vector3 jb_com = c.normal * (c.acc_bias_impulse_center_of_mass - jbnOld_com);
-
-				if (body_collides) {
-					body->apply_bias_impulse(-jb_com, body->get_center_of_mass(), 0.0f);
-				}
-				if (soft_body_collides) {
-					soft_body->apply_node_bias_impulse(c.index_B, jb_com);
+				const Vector3 jb_com = c.normal * (c.acc_bias_impulse_center_of_mass - jbnOld_com);
+				if (jb_com != Vector3()) {
+					if (body_collides) {
+						body->apply_bias_impulse(-jb_com, body->get_center_of_mass(), 0.0f);
+					}
+					if (soft_body_collides) {
+						soft_body->apply_node_bias_impulse(c.index_B, jb_com);
+					}
 				}
 			}
 
