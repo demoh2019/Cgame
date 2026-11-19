@@ -487,7 +487,8 @@ void GodotCapsuleShape2D::set_data(const Variant &p_data) {
 }
 
 Variant GodotCapsuleShape2D::get_data() const {
-	return Point2(height, radius);
+	// Match set_data(Vector2) and PhysicsServer2D's (radius, height) convention.
+	return Point2(radius, height);
 }
 
 /*********************************************************/
