@@ -33,6 +33,7 @@
 #include "godot_collision_solver_2d.h"
 #include "godot_contact_normal_2d.h"
 #include "godot_space_2d.h"
+#include "servers/physics_ccd_sphere_toi.h"
 
 #define ACCUMULATE_IMPULSES
 
@@ -240,6 +241,37 @@ bool GodotBodyPair2D::_test_ccd(real_t p_step, GodotBody2D *p_A, int p_shape_A, 
 	// a single support ray can miss a narrow obstacle hit by the other end.
 	GodotShape2D *shape_A_ptr = p_A->get_shape(p_shape_A);
 	GodotShape2D *shape_B_ptr = p_B->get_shape(p_shape_B);
+
+	// A single support ray can miss a glancing circle/circle impact.
+	// With uniform-scale transforms the Minkowski sum is another circle,
+	// so solve its first linear time of impact analytically in O(1).
+	if (shape_A_ptr->get_type() == PS2DE::SHAPE_CIRCLE && shape_B_ptr->get_type() == PS2DE::SHAPE_CIRCLE) {
+		const double scale_A = physics_ccd_uniform_sphere_scale(p_xform_A);
+		const double scale_B = physics_ccd_uniform_sphere_scale(p_xform_B);
+		if (scale_A > 0.0 && scale_B > 0.0) {
+			const double radius_A = double(static_cast<GodotCircleShape2D *>(shape_A_ptr)->get_radius()) * scale_A;
+			const double radius_B = double(static_cast<GodotCircleShape2D *>(shape_B_ptr)->get_radius()) * scale_B;
+			const Vector2 center_delta = p_xform_A.get_origin() - p_xform_B.get_origin();
+			double impact_fraction = 0.0;
+			if (!physics_ccd_sphere_toi(center_delta, relative_motion, radius_A + radius_B, impact_fraction)) {
+				return false;
+			}
+
+			// Leave the same 1% overlap allowance as the legacy support
+			// casts. CCD only limits A's speed; it never reverses or boosts it.
+			const real_t allowed_distance = CLAMP(real_t(impact_fraction * double(mlen)) + (max - min) * real_t(0.01), real_t(0.0), mlen);
+			const Vector2 desired_velocity = velocity_B + mnormal * (allowed_distance / p_step);
+			const Vector2 velocity_A = p_A->get_linear_velocity();
+			const real_t initial_speed = velocity_A.length();
+			const Vector2 travel_direction = velocity_A / initial_speed;
+			const real_t clipped_speed = CLAMP(desired_velocity.dot(travel_direction), real_t(0.0), initial_speed);
+			p_A->set_linear_velocity(travel_direction * clipped_speed);
+			return true;
+		}
+		// Nonuniform scales turn circles into ellipses; retain the existing
+		// support-ray fallback rather than applying a wrong circular TOI.
+	}
+
 	Vector2 supports_A[2];
 	int support_count_A = 0;
 	shape_A_ptr->get_supports(p_xform_A.basis_xform_inv(mnormal).normalized(), supports_A, support_count_A);
