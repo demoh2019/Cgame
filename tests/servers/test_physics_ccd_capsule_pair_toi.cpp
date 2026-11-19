@@ -150,4 +150,26 @@ TEST_CASE("[Physics][CapsulePairTOI] Swept cross-axis separation rejects distant
 	CHECK(fraction < 0.5);
 }
 
+
+TEST_CASE("[Physics][CapsulePairTOI] Nonfinite inputs return fallback rather than a false miss") {
+	double fraction = -1.0;
+	CHECK(physics_ccd_capsule_pair_toi(
+			Vector3(-5.0, 1.8, 0.0), Vector3(10.0, 0.0, 0.0),
+			Vector3(1.0, 0.0, 0.0), Vector3(0.0, 1.0, 0.0),
+			double(Math::INF), 1.0, 1.0, fraction) == PhysicsCCDCapsulePairTOIResult::FALLBACK);
+	CHECK(physics_ccd_capsule_pair_toi(
+			Vector3(-5.0, 1.8, 0.0), Vector3(10.0, 0.0, 0.0),
+			Vector3(Math::INF, 0.0, 0.0), Vector3(0.0, 1.0, 0.0),
+			1.0, 1.0, 1.0, fraction) == PhysicsCCDCapsulePairTOIResult::FALLBACK);
+	CHECK(physics_ccd_capsule_pair_toi(
+			Vector3(-5.0, 1.8, 0.0), Vector3(Math::INF, 0.0, 0.0),
+			Vector3(1.0, 0.0, 0.0), Vector3(0.0, 1.0, 0.0),
+			1.0, 1.0, 1.0, fraction) == PhysicsCCDCapsulePairTOIResult::FALLBACK);
+	CHECK(physics_ccd_capsule_pair_toi(
+			Vector3(Math::INF, 1.8, 0.0), Vector3(10.0, 0.0, 0.0),
+			Vector3(1.0, 0.0, 0.0), Vector3(0.0, 1.0, 0.0),
+			1.0, 1.0, 1.0, fraction) == PhysicsCCDCapsulePairTOIResult::FALLBACK);
+	CHECK(fraction == -1.0);
+}
+
 } // namespace TestPhysicsCCDSkewCapsuleTOI
