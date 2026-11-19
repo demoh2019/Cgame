@@ -303,7 +303,7 @@ bool GodotBodyPair2D::_test_ccd(real_t p_step, GodotBody2D *p_A, int p_shape_A, 
 	// Reject impossible linear sweeps before building support rays or
 	// inverting the target transform. Rotating bodies and unbounded shapes
 	// bypass this test so that it cannot suppress a valid CCD hit.
-	if (p_A->get_angular_velocity() == Vector2() && p_B->get_angular_velocity() == Vector2() &&
+	if (p_A->get_angular_velocity() == 0.0 && p_B->get_angular_velocity() == 0.0 &&
 			shape_A_ptr->get_type() != PS2DE::SHAPE_WORLD_BOUNDARY && shape_B_ptr->get_type() != PS2DE::SHAPE_WORLD_BOUNDARY &&
 			shape_A_ptr->get_type() != PS2DE::SHAPE_SEPARATION_RAY && shape_B_ptr->get_type() != PS2DE::SHAPE_SEPARATION_RAY &&
 			!physics_ccd_swept_bounds_may_overlap(
