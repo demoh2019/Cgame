@@ -265,6 +265,46 @@ python3 tests/stress/run.py --godot ./bin/godot.linuxbsd.editor.dev.x86_64 \
 Run these with the built-in GodotPhysics server selected. Record results before
 and after changes, and verify build/test status independently.
 
+## Conservative rigid-rigid contact recycling (2D/3D)
+
+Like Box2D's contact recycling and Jolt's body-pair contact cache, built-in
+GodotPhysics can avoid recomputing a persistent collision manifold when the
+geometry is **exactly unchanged**. For now, this is intentionally stricter
+than Box2D's relative-motion heuristic: it does not use approximate rotations
+or movement tolerances.
+
+Each collision object stores an incrementing geometry/pose generation. Shape
+replacement, resizing, local shape transform changes, collision filtering,
+body movement and one-way collision changes invalidate the generation.
+A contact pair remembers both generations after a narrowphase calculation.
+The next setup skips SAT/GJK only when:
+
+- The previous step collided and has at least one contact point.
+- Both geometry generations match the previous manifold.
+- Neither body has continuous collision detection enabled.
+- Every old contact is still marked as used (no stale points remain to prune).
+
+The solver still recomputes effective masses, material mixing, penetration
+bias and impulse clamping each frame. CCD, new collisions, geometry changes and
+changed contact manifolds use the original collision path. The extra retained
+state is two 64-bit generations per rigid contact pair and one generation per
+collision object; runtime RSS savings are **not** assumed.
+
+Native C++ regression checks are in
+`tests/servers/test_godot_physics_contact_recycling.cpp`.
+Compare equivalent release builds on the same CPU with these existing stress
+cases (dense, sparse, CCD and contact stability):
+
+```bash
+python3 tests/stress/run.py --godot ./bin/godot.linuxbsd.editor.dev.x86_64 \
+  --case physics_contact_manifolds_2d,physics_dense_2d,physics_dense_3d,physics_ccd_2d,physics_ccd_3d \
+  --frames 120 --scale 2 --repeats 5 --timeout 600 \
+  --rss-limit-mib 6144 --output out/contact-recycling.json
+```
+
+Use `--list-cases` to check supported workload IDs, and compare a baseline
+from the same host; this documentation is not a measured speedup claim.
+
 ## Cached broadphase AABB: no-op update fast path (Box2D-style)
 
 Built-in GodotPhysics 2D and 3D now check the previously submitted
