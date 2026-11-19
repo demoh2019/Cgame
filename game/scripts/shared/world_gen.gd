@@ -12,6 +12,7 @@ var _detail: FastNoiseLite
 var _temperature: FastNoiseLite
 var _moisture: FastNoiseLite
 var _cache: Dictionary = {}
+var dynamic_blockers: Dictionary = {} # Session structures shared with movement and prediction.
 var _hub_structures: Array = []
 const CACHE_LIMIT := 256
 
@@ -315,6 +316,15 @@ static func _pick_zombie(zone: int, rng: RandomNumberGenerator) -> String:
 
 
 ## Static things that block movement near a point, for both the server and client prediction.
+func add_dynamic_blocker(id: int, x: float, z: float, radius: float) -> void:
+	if is_finite(x) and is_finite(z) and is_finite(radius) and radius > 0.0:
+		dynamic_blockers[id] = {"id": id, "x": x, "z": z, "radius": radius, "blocks": true}
+
+
+func remove_dynamic_blocker(id: int) -> void:
+	dynamic_blockers.erase(id)
+
+
 func blockers_near(x: float, z: float, radius: float) -> Array:
 	var result: Array = []
 	if Vector2(x, z).length() < 60.0 + radius:
@@ -330,4 +340,8 @@ func blockers_near(x: float, z: float, radius: float) -> Array:
 				for n in data[group]:
 					if n["blocks"] and absf(n["x"] - x) < radius + n["radius"] and absf(n["z"] - z) < radius + n["radius"]:
 						result.append(n)
+	# Include built obstacles without erasing the procedural hub/terrain blockers.
+	for barricade in dynamic_blockers.values():
+		if absf(float(barricade["x"]) - x) <= radius + float(barricade["radius"]) and absf(float(barricade["z"]) - z) <= radius + float(barricade["radius"]):
+			result.append(barricade)
 	return result
