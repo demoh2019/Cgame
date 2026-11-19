@@ -16,7 +16,7 @@ const CASES := [
 	"containers", "array_literals", "dictionary_snapshot", "strings", "script_vm", "math", "signals",
 	"scene_tree", "packed_scene", "images", "json", "stream", "stream_bulk",
 	"file_io", "threads", "physics_2d", "physics_3d", "physics_sparse_2d", "physics_sparse_3d",
-	"object_churn", "memory_churn", "astar_grid", "astar_grid_neighbors", "astar_grid_rebuild", "astar_relax_2d", "astar_relax_3d", "astar_graph", "tweens", "audio_buffers",
+	"object_churn", "memory_churn", "astar_grid", "astar_grid_neighbors", "astar_grid_jps", "astar_grid_rebuild", "astar_relax_2d", "astar_relax_3d", "astar_graph", "tweens", "audio_buffers",
 	"variant_codec", "packet_stream", "packet_tx_batch", "packet_rx_batch", "packet_variant_reuse", "ui_layout", "grid_reflow", "box_reflow", "flow_reflow", "render_2d", "render_3d", "render_ellipse_2d",
 	"resource_load",
 	"input_map",
@@ -221,6 +221,8 @@ func _run_case(test_case: String, scale: int, frames: int, seed: int) -> Diction
 			return _astar_grid(scale)
 		"astar_grid_neighbors":
 			return _astar_grid_neighbors(scale)
+		"astar_grid_jps":
+			return _astar_grid_jps(scale)
 		"astar_grid_rebuild":
 			return _astar_grid_rebuild(scale)
 		"astar_relax_2d":
@@ -1835,3 +1837,64 @@ func _dictionary_snapshot(scale: int) -> Dictionary:
 	var duration_ms := float(Time.get_ticks_usec() - started) / 1000.0
 	return {"entries": count, "snapshots": rounds,
 		"snapshot_ms": duration_ms, "checksum": checksum}
+
+# Stress long Jump Point Search scans independently from ordinary grid A*.
+# An empty large grid is deliberately adversarial for JPS scanning because
+# it has few forced neighbors and requires long straight/diagonal sweeps.
+func _astar_grid_jps(scale: int) -> Dictionary:
+	var side: int = mini(48 * scale, 512)
+	var region := Rect2i(-23, 11, side, side)
+	var grid := AStarGrid2D.new()
+	var start := Time.get_ticks_usec()
+	grid.region = region
+	grid.update()
+	grid.jumping_enabled = true
+	var setup_ms := float(Time.get_ticks_usec() - start) / 1000.0
+
+	var modes: Array[int] = [
+		AStarGrid2D.DIAGONAL_MODE_NEVER,
+		AStarGrid2D.DIAGONAL_MODE_ALWAYS,
+		AStarGrid2D.DIAGONAL_MODE_AT_LEAST_ONE_WALKABLE,
+		AStarGrid2D.DIAGONAL_MODE_ONLY_IF_NO_OBSTACLES,
+	]
+	var mode_ms: Array[float] = [0.0, 0.0, 0.0, 0.0]
+	var count: int = 24 * scale
+	var checksum := 0
+
+	for mode_index in range(modes.size()):
+		grid.diagonal_mode = modes[mode_index]
+		start = Time.get_ticks_usec()
+		for q in range(count):
+			var y := region.position.y + 1 + (q * 17) % (side - 2)
+			var from := Vector2i(region.position.x + 1, y)
+			var target := Vector2i(region.position.x + side - 2, y)
+			var path := grid.get_id_path(from, target)
+			if path.is_empty() or path.front() != from or path.back() != target:
+				return {"error": "Jump Point Search horizontal path corrupted in mode %d" % mode_index}
+			checksum += path.size()
+		mode_ms[mode_index] = float(Time.get_ticks_usec() - start) / 1000.0
+
+	# Diagonal sweeps force the JPS main loop, not just the straight
+	# _forced_successor() fast path. They are not valid in cardinal-only mode.
+	grid.diagonal_mode = AStarGrid2D.DIAGONAL_MODE_ALWAYS
+	start = Time.get_ticks_usec()
+	var from_diag := region.position + Vector2i.ONE
+	var to_diag := region.position + region.size - Vector2i(2, 2)
+	for q in range(count):
+		var route := grid.get_id_path(from_diag, to_diag)
+		if route.is_empty() or route.front() != from_diag or route.back() != to_diag:
+			return {"error": "Jump Point Search diagonal path corrupted"}
+		checksum += route.size()
+	var diagonal_ms := float(Time.get_ticks_usec() - start) / 1000.0
+
+	return {
+		"cells": side * side,
+		"queries_per_mode": count,
+		"setup_ms": setup_ms,
+		"cardinal_ms": mode_ms[0],
+		"diagonal_always_ms": mode_ms[1],
+		"diagonal_one_walkable_ms": mode_ms[2],
+		"diagonal_no_obstacles_ms": mode_ms[3],
+		"diagonal_sweep_ms": diagonal_ms,
+		"checksum": checksum,
+	}
