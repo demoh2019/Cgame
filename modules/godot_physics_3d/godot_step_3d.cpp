@@ -46,10 +46,10 @@ void GodotStep3D::_populate_island_graph(GodotBody3D *p_body, GodotSoftBody3D *p
 	pending_island_tasks.clear();
 	if (p_body) {
 		p_body->set_island_step(_step);
-		pending_island_tasks.push_back({ p_body, nullptr });
+		pending_island_tasks.push_back(IslandTask{ p_body, nullptr });
 	} else {
 		p_soft_body->set_island_step(_step);
-		pending_island_tasks.push_back({ nullptr, p_soft_body });
+		pending_island_tasks.push_back(IslandTask{ nullptr, p_soft_body });
 	}
 
 	while (!pending_island_tasks.is_empty()) {
@@ -79,7 +79,7 @@ void GodotStep3D::_populate_island_graph(GodotBody3D *p_body, GodotSoftBody3D *p
 						continue;
 					}
 					other->set_island_step(_step);
-					pending_island_tasks.push_back({ other, nullptr });
+					pending_island_tasks.push_back(IslandTask{ other, nullptr });
 				}
 				for (int i = 0; i < constraint->get_soft_body_count(); i++) {
 					GodotSoftBody3D *other = constraint->get_soft_body_ptr(i);
@@ -87,7 +87,7 @@ void GodotStep3D::_populate_island_graph(GodotBody3D *p_body, GodotSoftBody3D *p
 						continue;
 					}
 					other->set_island_step(_step);
-					pending_island_tasks.push_back({ nullptr, other });
+					pending_island_tasks.push_back(IslandTask{ nullptr, other });
 				}
 			}
 		} else {
@@ -105,7 +105,7 @@ void GodotStep3D::_populate_island_graph(GodotBody3D *p_body, GodotSoftBody3D *p
 						continue;
 					}
 					other->set_island_step(_step);
-					pending_island_tasks.push_back({ other, nullptr });
+					pending_island_tasks.push_back(IslandTask{ other, nullptr });
 				}
 			}
 		}
