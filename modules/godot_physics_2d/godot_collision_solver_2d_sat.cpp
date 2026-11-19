@@ -103,8 +103,23 @@ _FORCE_INLINE_ static void _generate_contacts_edge_edge(const Vector2 *p_points_
 	dvec[3].a = false;
 	dvec[3].idx = 1;
 
-	SortArray<_generate_contacts_Pair> sa;
-	sa.sort(dvec, 4);
+	// A five-comparator sorting network for exactly four values.
+	// Avoid the generic sorting machinery in this contact hot path.
+	if (dvec[1] < dvec[0]) {
+		SWAP(dvec[0], dvec[1]);
+	}
+	if (dvec[3] < dvec[2]) {
+		SWAP(dvec[2], dvec[3]);
+	}
+	if (dvec[2] < dvec[0]) {
+		SWAP(dvec[0], dvec[2]);
+	}
+	if (dvec[3] < dvec[1]) {
+		SWAP(dvec[1], dvec[3]);
+	}
+	if (dvec[2] < dvec[1]) {
+		SWAP(dvec[1], dvec[2]);
+	}
 
 	for (int i = 1; i <= 2; i++) {
 		if (dvec[i].a) {
