@@ -137,16 +137,16 @@ class ExportDebugSymbolLoggingTests(unittest.TestCase):
         cls.mac = cpp("platform/macos/export/export_plugin.cpp")
 
     def test_pc_executable_debug_ids_are_verbose_only(self):
-        self.assertIn('print_verbose("Executable debug IDs: ", exec_debug_ids);', self.pc)
+        self.assertIn('print_verbose("Executable debug IDs: " + String(", ").join(exec_debug_ids));', self.pc)
 
     def test_pc_symbols_debug_ids_are_verbose_only(self):
-        self.assertIn('print_verbose("Symbols debug IDs: ", symb_debug_ids);', self.pc)
+        self.assertIn('print_verbose("Symbols debug IDs: " + String(", ").join(symb_debug_ids));', self.pc)
 
     def test_macos_executable_debug_ids_are_verbose_only(self):
-        self.assertIn('print_verbose("Executable debug IDs: ", exec_debug_ids);', self.mac)
+        self.assertIn('print_verbose("Executable debug IDs: " + String(", ").join(exec_debug_ids));', self.mac)
 
     def test_macos_symbols_debug_ids_are_verbose_only(self):
-        self.assertIn('print_verbose("Symbols debug IDs: ", symb_debug_ids);', self.mac)
+        self.assertIn('print_verbose("Symbols debug IDs: " + String(", ").join(symb_debug_ids));', self.mac)
 
     def test_pc_never_emits_ids_at_regular_log_level(self):
         self.assertNotIn('print_line("Executable debug IDs: ", exec_debug_ids);', self.pc)

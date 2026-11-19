@@ -793,7 +793,7 @@ void BitMap::grow_mask(int p_pixels, const Rect2i &p_rect) {
 			const int64_t first_y = MAX(top, int64_t(y) - radius);
 			const int64_t last_y = MIN(bottom - 1, int64_t(y) + radius);
 			for (int64_t candidate_y = first_y; candidate_y <= last_y && !found; candidate_y++) {
-				const int dy = ABS(int(candidate_y - y));
+				const int dy = Math::abs(int(candidate_y - y));
 				const int half_width = horizontal_extents[dy];
 				const int64_t first_x = MAX(left, int64_t(x) - half_width);
 				const int64_t last_x = MIN(right - 1, int64_t(x) + half_width);

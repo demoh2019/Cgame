@@ -487,7 +487,8 @@ Ref<ArrayMesh> NavigationMesh::get_debug_mesh() {
 	}
 
 	return debug_mesh;
-}#endif // DEBUG_ENABLED
+}
+#endif // DEBUG_ENABLED
 
 void NavigationMesh::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("set_sample_partition_type", "sample_partition_type"), &NavigationMesh::set_sample_partition_type);

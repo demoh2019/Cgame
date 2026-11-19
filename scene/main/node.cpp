@@ -1837,7 +1837,7 @@ void Node::_update_children_cache_impl() const {
 			}
 		}
 
-		Node **ordered = data.children_cache.ptrw();
+		Node **ordered = data.children_cache.ptr();
 		for (int i = 0; i < child_count; i++) {
 			ordered[i] = nullptr;
 		}

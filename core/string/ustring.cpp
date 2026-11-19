@@ -4727,7 +4727,7 @@ String String::simplify_path() const {
 	}
 
 	*dst++ = 0;
-	normalized.resize(dst - dst_start);
+	normalized.resize_uninitialized(dst - dst_start);
 	return drive + normalized;
 }
 
