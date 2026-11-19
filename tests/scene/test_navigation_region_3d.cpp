@@ -41,6 +41,7 @@ TEST_FORCE_LINK(test_navigation_region_3d)
 #include "scene/main/scene_tree.h"
 #include "scene/main/window.h"
 #include "scene/resources/3d/primitive_meshes.h"
+#include "servers/navigation_3d/navigation_server_3d.h"
 
 namespace TestNavigationRegion3D {
 
@@ -82,6 +83,87 @@ TEST_SUITE("[Navigation3D]") {
 		memdelete(node_3d);
 	}
 }
+
+
+#ifdef DEBUG_ENABLED
+TEST_CASE("[NavigationDebugFastPath] empty navigation mesh has no debug surfaces") {
+	Ref<NavigationMesh> navmesh;
+	navmesh.instantiate();
+	Ref<ArrayMesh> debug = navmesh->get_debug_mesh();
+	REQUIRE(debug.is_valid());
+	CHECK_EQ(debug->get_surface_count(), 0);
+}
+
+TEST_CASE("[NavigationDebugFastPath] a triangle produces exactly three face vertices") {
+	Ref<NavigationMesh> navmesh;
+	navmesh.instantiate();
+	const Vector<Vector3> vertices = {
+		Vector3(1, 2, 3),
+		Vector3(4, 5, 6),
+		Vector3(7, 8, 9)
+	};
+	navmesh->set_vertices(vertices);
+	navmesh->add_polygon({ 0, 1, 2 });
+
+	Ref<ArrayMesh> debug = navmesh->get_debug_mesh();
+	REQUIRE(debug.is_valid());
+	REQUIRE(debug->get_surface_count() >= 1);
+	const Array arrays = debug->surface_get_arrays(0);
+	const PackedVector3Array faces = arrays[Mesh::ARRAY_VERTEX];
+	REQUIRE_EQ(faces.size(), 3);
+	for (int i = 0; i < 3; ++i) {
+		CHECK_EQ(faces[i], vertices[i]);
+	}
+	Ref<ArrayMesh> cached = navmesh->get_debug_mesh();
+	CHECK_EQ(cached.ptr(), debug.ptr());
+}
+
+TEST_CASE("[NavigationDebugFastPath] multiple triangles contain no zero-filled prefix") {
+	Ref<NavigationMesh> navmesh;
+	navmesh.instantiate();
+	const Vector<Vector3> vertices = {
+		Vector3(1, 0, 0),
+		Vector3(2, 0, 0),
+		Vector3(1, 1, 0),
+		Vector3(3, 0, 0),
+		Vector3(3, 1, 0)
+	};
+	navmesh->set_vertices(vertices);
+	navmesh->add_polygon({ 0, 1, 2 });
+	navmesh->add_polygon({ 1, 3, 4 });
+
+	Ref<ArrayMesh> debug = navmesh->get_debug_mesh();
+	REQUIRE(debug.is_valid());
+	REQUIRE(debug->get_surface_count() >= 1);
+	const Array arrays = debug->surface_get_arrays(0);
+	const PackedVector3Array faces = arrays[Mesh::ARRAY_VERTEX];
+	REQUIRE_EQ(faces.size(), 6);
+	const int indices[] = { 0, 1, 2, 1, 3, 4 };
+	for (int i = 0; i < 6; ++i) {
+		CHECK_EQ(faces[i], vertices[indices[i]]);
+	}
+	if (NavigationServer3D::get_singleton()->get_debug_navigation_enable_edge_lines()) {
+		REQUIRE_EQ(debug->get_surface_count(), 2);
+		const Array lines = debug->surface_get_arrays(1);
+		const PackedVector3Array edges = lines[Mesh::ARRAY_VERTEX];
+		REQUIRE_EQ(edges.size(), 12);
+		CHECK_EQ(edges[0], vertices[0]);
+		CHECK_EQ(edges[1], vertices[1]);
+		CHECK_EQ(edges[2], vertices[1]);
+		CHECK_EQ(edges[3], vertices[2]);
+		CHECK_EQ(edges[4], vertices[2]);
+		CHECK_EQ(edges[5], vertices[0]);
+	}
+	if (NavigationServer3D::get_singleton()->get_debug_navigation_enable_geometry_face_random_color()) {
+		const PackedColorArray colors = arrays[Mesh::ARRAY_COLOR];
+		REQUIRE_EQ(colors.size(), 6);
+		CHECK_EQ(colors[0], colors[1]);
+		CHECK_EQ(colors[1], colors[2]);
+		CHECK_EQ(colors[3], colors[4]);
+		CHECK_EQ(colors[4], colors[5]);
+	}
+}
+#endif // DEBUG_ENABLED
 
 } // namespace TestNavigationRegion3D
 
