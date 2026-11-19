@@ -400,6 +400,8 @@ func cmd_build(peer_id: int, x: float, z: float) -> Dictionary:
 		return {"ok": false, "reason": "world_limit"}
 	var owned := 0
 	var owner_key: String = WorldState.owner_key_for(player)
+	if not WorldState._valid_owner_key(owner_key):
+		return {"ok": false, "reason": "invalid_owner"}
 	for item in barricades.values():
 		if str(item.get("owner_key", "")) == owner_key:
 			owned += 1
