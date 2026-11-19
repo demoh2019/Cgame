@@ -136,11 +136,13 @@ public:
 	}
 
 	// Flush explicitly deferred insertions once all shapes in a batch are
-	// registered. Normal create() calls retain their synchronous pair callbacks.
+	// registered. Existing pairs need only geometric checks here: set_tree()
+	// and force_collision_check() already validate changed collision filters.
+	// New pairs are filtered by _collide() when they are created.
 	void flush_pending_pairs() {
 		BVH_LOCKED_FUNCTION
 		if (USE_PAIRS) {
-			_check_for_collisions(true);
+			_check_for_collisions();
 		}
 	}
 
