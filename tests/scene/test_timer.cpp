@@ -204,4 +204,78 @@ TEST_CASE("[SceneTree][Timer] Check Timer timeout signal") {
 	memdelete(test_timer);
 }
 
+
+TEST_CASE("[SceneTreeTimerRefFastPath] Active timers hold stable references across frames") {
+	SceneTree *tree = SceneTree::get_singleton();
+	REQUIRE(tree != nullptr);
+
+	Vector<Ref<SceneTreeTimer>> timers;
+	timers.reserve(128);
+	for (int i = 0; i < 128; i++) {
+		Ref<SceneTreeTimer> timer = tree->create_timer(10.0);
+		REQUIRE(timer.is_valid());
+		timers.push_back(timer);
+	}
+
+	// The scene tree and our vector each own one strong reference.
+	for (const Ref<SceneTreeTimer> &timer : timers) {
+		CHECK_EQ(timer->get_reference_count(), 2);
+	}
+
+	for (int tick = 0; tick < 8; tick++) {
+		tree->process(0.125);
+		for (const Ref<SceneTreeTimer> &timer : timers) {
+			CHECK_EQ(timer->get_reference_count(), 2);
+			CHECK(Math::is_equal_approx(timer->get_time_left(), 10.0 - 0.125 * (tick + 1)));
+		}
+	}
+
+	// Expire all temporary timers; removing them from the tree should
+	// release exactly one strong reference without destroying our handles.
+	tree->process(11.0);
+	for (const Ref<SceneTreeTimer> &timer : timers) {
+		CHECK_EQ(timer->get_reference_count(), 1);
+		CHECK(Math::is_zero_approx(timer->get_time_left()));
+	}
+}
+
+TEST_CASE("[SceneTreeTimerRefFastPath] Timeout emitted exactly once with retained handle") {
+	SceneTree *tree = SceneTree::get_singleton();
+	REQUIRE(tree != nullptr);
+	Ref<SceneTreeTimer> timer = tree->create_timer(0.25);
+	REQUIRE(timer.is_valid());
+	CHECK_EQ(timer->get_reference_count(), 2);
+
+	SIGNAL_WATCH(timer.ptr(), SNAME("timeout"));
+	tree->process(0.1);
+	SIGNAL_CHECK_FALSE(SNAME("timeout"));
+	CHECK_EQ(timer->get_reference_count(), 2);
+
+	tree->process(0.2);
+	SIGNAL_CHECK(SNAME("timeout"), Array{ {} });
+	CHECK_EQ(timer->get_reference_count(), 1);
+	tree->process(0.2);
+	SIGNAL_CHECK_FALSE(SNAME("timeout"));
+	SIGNAL_UNWATCH(timer.ptr(), SNAME("timeout"));
+}
+
+TEST_CASE("[SceneTreeTimerRefFastPath] Physics timers ignore idle ticks") {
+	SceneTree *tree = SceneTree::get_singleton();
+	REQUIRE(tree != nullptr);
+	Ref<SceneTreeTimer> timer = tree->create_timer(0.5, true, true);
+	REQUIRE(timer.is_valid());
+
+	tree->process(0.25);
+	CHECK(Math::is_equal_approx(timer->get_time_left(), 0.5));
+	CHECK_EQ(timer->get_reference_count(), 2);
+
+	tree->physics_process(0.25);
+	CHECK(Math::is_equal_approx(timer->get_time_left(), 0.25));
+	CHECK_EQ(timer->get_reference_count(), 2);
+
+	tree->physics_process(0.25);
+	CHECK_EQ(timer->get_reference_count(), 1);
+	CHECK(Math::is_zero_approx(timer->get_time_left()));
+}
+
 } // namespace TestTimer
