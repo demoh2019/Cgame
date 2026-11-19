@@ -44,6 +44,7 @@
 #include "servers/physics_xpbd_soft_ccd.h"
 #include "servers/physics_xpbd_self_friction.h"
 #include "servers/physics_xpbd_edge_collision.h"
+#include "servers/physics_xpbd_edge_ccd.h"
 #include "servers/rendering/rendering_server.h"
 
 #include <limits>
@@ -514,6 +515,8 @@ void GodotSoftBody3D::initialize_self_collision_topology() {
 	xpbd_self_contacts.reset();
 	xpbd_self_ccd_contacts.reset();
 	xpbd_self_edge_contacts.reset();
+	xpbd_self_edge_ccd_contacts.reset();
+	xpbd_self_edge_ccd_min_time.reset();
 	xpbd_self_edge_tree.clear();
 	xpbd_self_edges.reset();
 	if (!get_space() || !(get_space()->get_soft_body_self_collision_thickness() > 0.0)) {
