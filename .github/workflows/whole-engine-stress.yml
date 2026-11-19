@@ -27,6 +27,11 @@ on:
         type: choice
         options: [headless, display]
         default: headless
+      scaling_sweep:
+        description: Also analyze performance at scales 1, 2, 4 (smoke preset)
+        required: false
+        type: boolean
+        default: false
 
 permissions:
   contents: read
@@ -45,7 +50,7 @@ jobs:
         with:
           python-version: '3.11'
       - name: Syntax-check runner and tests
-        run: python3 -m py_compile tests/stress/run.py tests/stress/test_run.py
+        run: python3 -m py_compile tests/stress/run.py tests/stress/test_run.py tests/stress/sweep.py tests/stress/test_sweep.py
       - name: Run harness unit tests
         run: python3 -m unittest discover -s tests/stress -p 'test_*.py' -v
 
@@ -95,6 +100,17 @@ jobs:
           else
             python3 tests/stress/run.py --godot "$BIN" --preset "$PRESET" --render-mode headless --output whole-engine-stress.json --summary-md whole-engine-stress.md
           fi
+      - name: Measure nonlinear scaling (opt-in)
+        if: github.event_name == 'workflow_dispatch' && inputs.scaling_sweep
+        shell: bash
+        run: |
+          set -euo pipefail
+          BIN=./bin/godot.linuxbsd.editor.dev.x86_64
+          if [[ "$RENDER_MODE" == "display" ]]; then
+            xvfb-run -a python3 tests/stress/sweep.py --godot "$BIN" --preset smoke --render-mode display --scales 1,2,4 --repeats 3 --output whole-engine-scaling.json
+          else
+            python3 tests/stress/sweep.py --godot "$BIN" --preset smoke --render-mode headless --scales 1,2,4 --repeats 3 --output whole-engine-scaling.json
+          fi
       - name: Archive per-scenario performance and failure reports
         if: always()
         uses: actions/upload-artifact@v4
@@ -103,6 +119,8 @@ jobs:
           path: |
             whole-engine-stress.json
             whole-engine-stress.md
+            whole-engine-scaling.json
+            whole-engine-scaling-runs/**
             whole-engine-native-tests.log
           if-no-files-found: warn
           retention-days: 30
