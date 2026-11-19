@@ -2799,4 +2799,43 @@ TEST_CASE("[String][URL] Parse URL") {
 #undef CHECK_URL
 }
 
+static String get_with_code_lines_reference(const String &p_source) {
+	const Vector<String> lines = p_source.split("\n");
+	String result;
+	for (int i = 0; i < lines.size(); i++) {
+		if (i > 0) {
+			result += "\n";
+		}
+		result += vformat("%4d | %s", i + 1, lines[i]);
+	}
+	return result;
+}
+
+TEST_CASE("[String] get_with_code_lines matches original formatting without per-line allocations") {
+	const String samples[] = {
+		String(),
+		"one",
+		"one\ntwo",
+		"\n",
+		"one\n",
+		"\none",
+		"one\n\ntwo\n",
+		"one\r\ntwo",
+		String::utf8("Привет\n🎮 Unicode"),
+		String("x").repeat(1200),
+	};
+	for (const String &sample : samples) {
+		CHECK(sample.get_with_code_lines() == get_with_code_lines_reference(sample));
+	}
+
+	// Above 9,999 lines, prefixes grow as needed. The legacy formatting
+	// uses four spaces of minimum width, not one global widened column.
+	const String large_source = String("x\n").repeat(10001);
+	const String expected = get_with_code_lines_reference(large_source);
+	const String actual = large_source.get_with_code_lines();
+	CHECK(actual == expected);
+	CHECK(actual.contains("10000 | x"));
+	CHECK(actual.contains("10002 | "));
+}
+
 } // namespace TestString

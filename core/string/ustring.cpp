@@ -862,15 +862,70 @@ String String::to_kebab_case() const {
 }
 
 String String::get_with_code_lines() const {
-	const Vector<String> lines = split("\n");
-	String ret;
-	for (int i = 0; i < lines.size(); i++) {
-		if (i > 0) {
-			ret += "\n";
+	// Preserve the exact formatting of "%4d | " without allocating an array
+	// of lines, intermediate formatted Strings or concatenation buffers.
+	const Span<char32_t> source = span();
+	const uint64_t source_length = source.size();
+	uint64_t line_count = 1;
+	for (const char32_t c : source) {
+		if (c == '\n') {
+			line_count++;
 		}
-		ret += vformat("%4d | %s", i + 1, lines[i]);
 	}
-	return ret;
+
+	// Most line numbers use four columns plus " | ". Once the line number
+	// reaches five digits, each larger line number adds another column.
+	uint64_t result_length = source_length + line_count * 7;
+	for (uint64_t threshold = 10000; threshold <= line_count; threshold *= 10) {
+		result_length += line_count - threshold + 1;
+	}
+	ERR_FAIL_COND_V_MSG(result_length > INT32_MAX, String(), "Code with line numbers is too large.");
+
+	String result;
+	result.resize_uninitialized(result_length);
+	char32_t *output = result.ptrw();
+	uint64_t write_pos = 0;
+	uint64_t segment_start = 0;
+	uint64_t line_number = 1;
+
+	// Emit each prefix directly into one result buffer, then bulk-copy the
+	// original UTF-32 code units. Include the final empty line after '\n'.
+	for (uint64_t pos = 0; pos <= source_length; pos++) {
+		if (pos < source_length && source[pos] != '\n') {
+			continue;
+		}
+
+		char32_t number_buffer[20];
+		int digits = 0;
+		uint64_t number = line_number;
+		do {
+			number_buffer[digits++] = char32_t(U'0' + number % 10);
+			number /= 10;
+		} while (number != 0);
+		for (int i = digits; i < 4; i++) {
+			output[write_pos++] = U' ';
+		}
+		for (int i = digits - 1; i >= 0; i--) {
+			output[write_pos++] = number_buffer[i];
+		}
+		output[write_pos++] = U' ';
+		output[write_pos++] = U'|';
+		output[write_pos++] = U' ';
+
+		const uint64_t line_length = pos - segment_start;
+		if (line_length > 0) {
+			memcpy(output + write_pos, &source[segment_start], line_length * sizeof(char32_t));
+			write_pos += line_length;
+		}
+		if (pos < source_length) {
+			output[write_pos++] = U'\n';
+		}
+		segment_start = pos + 1;
+		line_number++;
+	}
+	DEV_ASSERT(write_pos == result_length);
+	output[write_pos] = 0;
+	return result;
 }
 
 int String::get_slice_count(const String &p_splitter) const {
