@@ -413,14 +413,32 @@ static void resolve_soft_soft_vertex_face_direction(JPH::Body &p_point_body, JPH
 	const float bias_per_step = JoltProjectSettings::soft_body_soft_contact_recovery / p_step;
 	const float friction = JoltProjectSettings::soft_body_soft_contact_friction;
 
+	// Build BVH only on meaningful meshes, while honoring the global work
+	// budget. Rebuild from the current deformed geometry every simulation
+	// step. All containers live only for this body-pair direction.
+	JPH::Array<SoftFaceBVHEntry> face_entries;
+	JPH::Array<SoftFaceBVHNode> face_nodes;
+	const bool use_bvh = JoltProjectSettings::soft_body_soft_vertex_face_bvh &&
+			prepare_soft_face_bvh(faces, face_vertices, face_rotation, face_relative_to_point, face_entries, face_nodes, r_contact_budget);
+	JPH::Array<uint32_t> face_candidates;
+	JPH::Array<uint32_t> query_stack;
+	if (use_bvh) {
+		face_candidates.reserve(face_entries.size());
+		query_stack.reserve(32); // Median BVH with <= 4096 faces: <= 10 levels.
+	}
 	for (uint32_t i = 0; i < point_count && r_contact_budget > 0; ++i) {
 		JPH::SoftBodyVertex &point = points[i];
 		const JPH::Vec3 point_position = point_rotation * point.mPosition;
-		for (const JPH::SoftBodySharedSettings::Face &face : faces) {
+		if (use_bvh) {
+			query_soft_face_bvh(face_entries, face_nodes, point_position, radius, r_contact_budget, face_candidates, query_stack);
+		}
+		const uint32_t candidate_count = use_bvh ? (uint32_t)face_candidates.size() : (uint32_t)faces.size();
+		for (uint32_t candidate = 0; candidate < candidate_count; ++candidate) {
 			if (r_contact_budget == 0) {
 				return;
 			}
-			--r_contact_budget; // Includes all noncontacts: bounded runtime.
+			--r_contact_budget; // Every exact face test consumes the same budget.
+			const JPH::SoftBodySharedSettings::Face &face = faces[use_bvh ? face_candidates[candidate] : candidate];
 			const uint32_t id0 = face.mVertex[0], id1 = face.mVertex[1], id2 = face.mVertex[2];
 			if (id0 >= face_vertices.size() || id1 >= face_vertices.size() || id2 >= face_vertices.size() || face.IsDegenerate()) {
 				continue;
