@@ -7,6 +7,7 @@ const PLAYER_SCRIPT = preload("res://player.gd")
 const PICKUP_SCRIPT = preload("res://pickup.gd")
 const RESOURCE_SCRIPT = preload("res://resource_node.gd")
 const ZOMBIE_SCRIPT = preload("res://zombie.gd")
+const ZONE_SYSTEM_SCRIPT = preload("res://risk_zone_system.gd")
 
 var player
 var hud_label: Label
@@ -19,6 +20,7 @@ func _ready() -> void:
     _configure_controls()
     _build_world()
     _build_player()
+    _build_risk_zones()
     _build_pickups()
     _build_resources()
     _build_enemies()
@@ -146,6 +148,13 @@ func _build_player() -> void:
     player.attack_requested.connect(_on_player_attacked)
 
 
+func _build_risk_zones() -> void:
+    var zone_system = ZONE_SYSTEM_SCRIPT.new()
+    zone_system.name = "RiskZoneSystem"
+    zone_system.player = player
+    add_child(zone_system)
+
+
 func _build_pickups() -> void:
     _add_pickup("FoodCrate", "food", "консервы", Vector3(0.0, 1.0, 3.5), 2)
     _add_pickup("WaterCan", "water", "бутылка воды", Vector3(2.0, 1.0, 1.0), 1)
@@ -175,6 +184,9 @@ func _build_resources() -> void:
     _add_resource("FiberT2", "fiber", 2, Vector3(-4.1, 0.55, -5.5), 2)
     _add_resource("WoodT2", "wood", 2, Vector3(12.0, 0.55, 6.0), 2)
     _add_resource("StoneT2", "stone", 2, Vector3(12.0, 0.55, -6.0), 2)
+    # Exclusion-zone deposits reward high-risk exploration while retaining skill gates.
+    _add_resource("ExclusionFiber", "fiber", 1, Vector3(-1.0, 0.55, -17.5), 3)
+    _add_resource("ExclusionWood", "wood", 2, Vector3(7.0, 0.55, -16.5), 2)
 
 
 func _add_resource(node_name: String, kind: String, tier: int,

@@ -1,4 +1,5 @@
 extends CharacterBody3D
+const RISK_RULES = preload("res://risk_zone_rules.gd")
 ## Original infected enemy for the Days After survival sandbox.
 ## Navigation around obstacles is a future milestone; physical collisions are active.
 
@@ -44,7 +45,8 @@ func _physics_process(delta: float) -> void:
         return
     strike_cooldown = maxf(0.0, strike_cooldown - delta)
     var movement := Vector3.ZERO
-    if is_instance_valid(target) and float(target.get("health")) > 0.0:
+    if is_instance_valid(target) and float(target.get("health")) > 0.0 \
+            and not RISK_RULES.is_sheltered(target.global_position):
         var to_target: Vector3 = target.global_position - global_position
         to_target.y = 0.0
         var distance: float = to_target.length()
