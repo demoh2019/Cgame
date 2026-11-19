@@ -470,4 +470,59 @@ TEST_CASE("[LocalVector] Bulk unordered erase destroys nontrivial matching eleme
 	CHECK(values.erase_multiple_unordered(std::string("drop")) == 0);
 }
 
+
+struct LocalOrderedComparisonCount {
+	int value = 0;
+	static inline int comparisons = 0;
+
+	bool operator<(const LocalOrderedComparisonCount &p_other) const {
+		comparisons++;
+		return value < p_other.value;
+	}
+};
+
+TEST_CASE("[LocalVector] Ordered append skips binary search for ascending and equal values") {
+	LocalVector<LocalOrderedComparisonCount> values;
+	for (int i = 0; i < 256; i++) {
+		LocalOrderedComparisonCount::comparisons = 0;
+		values.ordered_insert({ i });
+		CHECK(LocalOrderedComparisonCount::comparisons == (i == 0 ? 0 : 1));
+	}
+	CHECK(values.size() == 256);
+	LocalOrderedComparisonCount::comparisons = 0;
+	values.ordered_insert({ 255 });
+	CHECK(LocalOrderedComparisonCount::comparisons == 1);
+	CHECK(values[255].value == 255);
+	CHECK(values[256].value == 255);
+	values.ordered_insert({ -1 });
+	CHECK(values[0].value == -1);
+}
+
+TEST_CASE("[LocalVector] Ordered insert matches upper_bound through mixed workloads") {
+	LocalVector<int> values;
+	std::vector<int> reference;
+	uint32_t seed = 0x971c5b36u;
+	for (int i = 0; i < 2048; i++) {
+		seed = seed * 1664525u + 1013904223u;
+		const int value = i < 500 ? i : (i < 1000 ? 1000 - i : int((seed >> 8) % 129u) - 64);
+		values.ordered_insert(value);
+		reference.insert(std::upper_bound(reference.begin(), reference.end(), value), value);
+	}
+	CHECK(values.size() == reference.size());
+	for (uint32_t i = 0; i < values.size(); i++) {
+		CHECK(values[i] == reference[i]);
+	}
+
+	LocalVector<std::string> strings;
+	strings.ordered_insert("zeta");
+	strings.ordered_insert("alpha");
+	strings.ordered_insert("alpha");
+	strings.ordered_insert("omega");
+	CHECK(strings.size() == 4);
+	CHECK(strings[0] == "alpha");
+	CHECK(strings[1] == "alpha");
+	CHECK(strings[2] == "omega");
+	CHECK(strings[3] == "zeta");
+}
+
 } // namespace TestLocalVector
