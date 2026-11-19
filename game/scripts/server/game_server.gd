@@ -216,7 +216,11 @@ func submit_input(peer_id: int, seq: int, move_x: float, move_z: float, sprint: 
 	player.input_budget -= allowed
 	player.yaw = yaw
 	if allowed > 0.0:
-		player.position = Movement.step(world, player.position, {"x": move_x, "z": move_z, "sprint": sprint}, allowed)
+		# No client-supplied cargo_factor: overweight players cannot forge full-speed inputs.
+		player.position = Movement.step(world, player.position, {
+			"x": move_x, "z": move_z, "sprint": sprint,
+			"cargo_factor": player.inventory.movement_factor(),
+		}, allowed)
 		# Walking away cancels gathering.
 		if not player.action.is_empty():
 			var node := _find_node(int(player.action["node"]))
@@ -721,6 +725,8 @@ func snapshot_for(peer_id: int) -> Dictionary:
 			"alive": _alive(player), "kills": player.kills, "deaths": player.deaths, "zone": player.zone_notice,
 			"action": player.action.duplicate(),
 			"weapon": player.inventory.weapon, "armor": player.inventory.armor,
+			"carry_kg": player.inventory.total_weight(),
+			"cargo_factor": player.inventory.movement_factor(),
 		},
 		"players": nearby_players, "zombies": nearby_zombies, "bags": nearby_bags,
 		"depleted": gone_nodes, "crates_used": used_crates,

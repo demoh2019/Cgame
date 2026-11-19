@@ -26,6 +26,16 @@ const HUNGER_PER_SECOND := 0.045
 const THIRST_PER_SECOND := 0.07
 const STARVE_DAMAGE_PER_SECOND := 1.2
 const INVENTORY_SLOTS := 24
+# Soft-load encumbrance: past the comfortable weight, walking slows and sprint is disabled.
+# No hard pickup cap: existing saves, market trades and full-loot bags remain compatible.
+const CARRY_COMFORT_KG := 35.0
+const CARRY_HEAVY_KG := 90.0
+const CARRY_MIN_SPEED_FACTOR := 0.5
+const ITEM_KIND_WEIGHT := {
+	"resource": 1.25, "material": 0.8, "tool": 2.5, "weapon": 3.0,
+	"armor": 4.0, "food": 0.4, "drink": 0.7, "medical": 0.2,
+	"ammo": 0.05, "currency": 0.0,
+}
 const STASH_SLOTS := 48 # Account-bound safe-settlement storage; never dropped on death.
 const RESPAWN_SECONDS := 4.0
 
@@ -68,6 +78,20 @@ static func stack_size(id: String) -> int:
 	return int(item(id).get("stack", 1))
 
 
+static func item_weight(id: String) -> float:
+	return float(item(id).get("weight", 0.0))
+
+
+static func carry_speed_factor(weight_kg: float) -> float:
+	# Saturated soft penalty. The server derives weight from its own inventory.
+	if not is_finite(weight_kg):
+		return CARRY_MIN_SPEED_FACTOR
+	if weight_kg <= CARRY_COMFORT_KG:
+		return 1.0
+	var fraction := clampf((weight_kg - CARRY_COMFORT_KG) / (CARRY_HEAVY_KG - CARRY_COMFORT_KG), 0.0, 1.0)
+	return lerpf(1.0, CARRY_MIN_SPEED_FACTOR, fraction)
+
+
 static func tier_of(id: String) -> int:
 	return int(item(id).get("tier", 0))
 
@@ -83,6 +107,16 @@ static func _add_item(id: String, data: Dictionary) -> void:
 	data["id"] = id
 	if not data.has("stack"):
 		data["stack"] = 1
+	if not data.has("weight"):
+		var kind: String = str(data.get("kind", ""))
+		var weight: float = float(ITEM_KIND_WEIGHT.get(kind, 1.0))
+		if id.begins_with("stone_") or id.begins_with("ore_"):
+			weight = 2.0
+		elif id.begins_with("fiber_"):
+			weight = 0.35
+		elif id == "scrap":
+			weight = 1.5
+		data["weight"] = weight
 	_items[id] = data
 
 

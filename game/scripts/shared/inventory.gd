@@ -23,6 +23,19 @@ func count(id: String) -> int:
 	return total
 
 
+## Equipped gear remains physically in its backpack slot, so it is counted only once.
+func total_weight() -> float:
+	var weight := 0.0
+	for slot in slots:
+		if not slot.is_empty():
+			weight += Defs.item_weight(str(slot["id"])) * float(int(slot["count"]))
+	return weight
+
+
+func movement_factor() -> float:
+	return Defs.carry_speed_factor(total_weight())
+
+
 func has_all(inputs: Dictionary) -> bool:
 	for id in inputs:
 		if count(id) < int(inputs[id]):

@@ -119,7 +119,11 @@ func send_input(move: Vector2, sprint: bool, face_yaw: float, delta: float) -> v
 		return
 	_seq += 1
 	yaw = face_yaw
-	var input := {"x": move.x, "z": move.y, "sprint": sprint}
+	# Prediction uses the same weight calculation as the authoritative server.
+	var input := {
+		"x": move.x, "z": move.y, "sprint": sprint,
+		"cargo_factor": inventory.movement_factor(),
+	}
 	predicted = Movement.step(world, predicted, input, delta)
 	_pending.append({"seq": _seq, "input": input, "dt": delta})
 	if _pending.size() > 120:

@@ -43,6 +43,15 @@ server restarts: this is not a new persistence service.
 This uses existing Godot networking and inventory APIs; it does not
 require changes in the Cgame C++ engine.
 
+## Carry load (server-authoritative)
+
+Inventory items have weights and a shared encumbrance formula. Up to 35 kg
+movement is unchanged; above 35 kg sprint is disabled and walking slows smoothly,
+reaching 50% speed at 90 kg and beyond. The server calculates movement speed from
+its own inventory, while the client uses the same rule for prediction. This
+is a soft limit: looting, market transfers and old character saves are not
+rejected solely for weight. The HUD displays carried kilograms and speed.
+
 ## Tests
 
 ```sh

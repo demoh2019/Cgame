@@ -205,7 +205,10 @@ func _process(_delta: float) -> void:
 	var zone: int = clampi(int(client.you.get("zone", 0)), 0, 3)
 	_zone_label.text = "%s zone  (tier %d)" % [Defs.ZONE_NAMES[zone].capitalize(), zone + 1]
 	_zone_label.add_theme_color_override("font_color", [Color(0.4, 0.9, 0.4), Color(0.95, 0.85, 0.3), Color(0.95, 0.45, 0.3), Color(0.8, 0.3, 0.9)][zone])
-	_info_label.text = "FPS %d   kills %d   deaths %d" % [Engine.get_frames_per_second(), client.you.get("kills", 0), client.you.get("deaths", 0)]
+	_info_label.text = "FPS %d   kills %d   deaths %d   Load %.1f kg   Speed %.0f%%" % [
+		Engine.get_frames_per_second(), client.you.get("kills", 0), client.you.get("deaths", 0),
+		float(client.you.get("carry_kg", 0.0)), 100.0 * float(client.you.get("cargo_factor", 1.0))
+	]
 	var weapon: String = client.you.get("weapon", "")
 	_equipped.text = "Weapon: %s" % (Defs.item(weapon).get("name", weapon) if weapon != "" else "fists")
 	_death.visible = not bool(client.you.get("alive", true))

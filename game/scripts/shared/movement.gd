@@ -18,7 +18,11 @@ static func step(world, position: Vector3, input: Dictionary, delta: float) -> V
 		direction = direction.normalized()
 	if direction == Vector2.ZERO or delta == 0.0:
 		return Vector3(position.x, world.height_at(position.x, position.z), position.z)
-	var speed := Defs.SPRINT_SPEED if bool(input.get("sprint", false)) else Defs.WALK_SPEED
+	# The server supplies this from its authoritative inventory, never from a network value.
+	# With no factor (legacy/test inputs), movement stays unchanged.
+	var factor := clampf(float(input.get("cargo_factor", 1.0)), Defs.CARRY_MIN_SPEED_FACTOR, 1.0)
+	var sprint := bool(input.get("sprint", false)) and factor >= 0.9999
+	var speed := (Defs.SPRINT_SPEED if sprint else Defs.WALK_SPEED) * factor
 	return move(world, position, direction, speed, delta)
 
 

@@ -6,6 +6,7 @@ const TestCase = preload("res://tests/test_case.gd")
 const SUITES := [
 	"res://tests/test_world_gen.gd",
 	"res://tests/test_inventory.gd",
+	"res://tests/test_encumbrance.gd",
 	"res://tests/test_crafting.gd",
 	"res://tests/test_survival_combat.gd",
 	"res://tests/test_movement.gd",
