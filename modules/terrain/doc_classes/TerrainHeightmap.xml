@@ -63,6 +63,16 @@
                 Performs deterministic, conservative thermal erosion over a four-neighbor grid. Each iteration moves a fraction of the height difference exceeding [param talus] toward the steepest lower neighbor. [param rate] must be between 0 and 1, and [param iterations] must be between 0 and 1000. This is not hydraulic erosion.
             </description>
         </method>
+        <method name="flatten">
+            <return type="void" />
+            <param index="0" name="center" type="Vector2" />
+            <param index="1" name="radius" type="float" />
+            <param index="2" name="height" type="float" />
+            <param index="3" name="strength" type="float" />
+            <description>
+                Blends nearby height samples toward [param height] with linear radial falloff. [param strength] must be between 0 and 1. Negative target heights are allowed.
+            </description>
+        </method>
         <method name="get_height_at" qualifiers="const">
             <return type="float" />
             <param index="0" name="x" type="int" />

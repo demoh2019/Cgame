@@ -139,6 +139,41 @@ TEST_CASE("[TerrainHeightmap] Sculpt brush outside terrain has no effect") {
 	CHECK(terrain->get_heights() == before);
 }
 
+TEST_CASE("[TerrainHeightmap] Flatten brush blends center, neighbor and edge falloff") {
+	Ref<TerrainHeightmap> terrain;
+	terrain.instantiate();
+	terrain->set_dimensions(Size2i(5, 5));
+	terrain->flatten(Vector2(2, 2), 1.5f, 6.0f, 1.0f);
+	CHECK(terrain->get_height_at(2, 2) == doctest::Approx(6.0f));
+	CHECK(terrain->get_height_at(2, 1) == doctest::Approx(2.0f));
+	CHECK(terrain->get_height_at(1, 1) > 0.0f);
+	CHECK(terrain->get_height_at(1, 1) < 2.0f);
+	CHECK(terrain->get_height_at(0, 0) == 0.0f);
+
+	const PackedFloat32Array prior = terrain->get_heights();
+	terrain->flatten(Vector2(2, 2), 2.0f, 100.0f, 0.0f);
+	CHECK(terrain->get_heights() == prior);
+}
+
+TEST_CASE("[TerrainHeightmap] Flatten supports lowering and rejects invalid parameters") {
+	Ref<TerrainHeightmap> terrain;
+	terrain.instantiate();
+	terrain->set_dimensions(Size2i(3, 3));
+	terrain->set_height_at(1, 1, 8.0f);
+	terrain->flatten(Vector2(1, 1), 0.5f, -2.0f, 0.5f);
+	CHECK(terrain->get_height_at(1, 1) == doctest::Approx(3.0f));
+	CHECK(terrain->get_height_at(0, 0) == 0.0f);
+
+	const PackedFloat32Array before = terrain->get_heights();
+	ERR_PRINT_OFF
+	terrain->flatten(Vector2(1, 1), 0.0f, 99.0f, 1.0f);
+	terrain->flatten(Vector2(1, 1), 2.0f, 99.0f, -0.1f);
+	terrain->flatten(Vector2(1, 1), 2.0f, 99.0f, 1.1f);
+	terrain->flatten(Vector2(1, 1), 2.0f, std::numeric_limits<float>::quiet_NaN(), 1.0f);
+	ERR_PRINT_ON
+	CHECK(terrain->get_heights() == before);
+}
+
 TEST_CASE("[TerrainHeightmap] Smoothing lowers a spike without changing distant cells") {
 	Ref<TerrainHeightmap> terrain;
 	terrain.instantiate();
