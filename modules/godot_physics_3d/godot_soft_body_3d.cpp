@@ -34,7 +34,10 @@
 
 #include "core/math/geometry_3d.h"
 #include "servers/physics_3d/physics_server_3d_rendering_server_handler.h"
+#include "servers/physics_xpbd_distance.h"
 #include "servers/rendering/rendering_server.h"
+
+#include <limits>
 
 // Based on Bullet soft body.
 
@@ -1223,10 +1226,38 @@ void GodotSoftBody3D::solve_constraints(real_t p_delta) {
 		node.x = node.q + node.v * p_delta;
 	}
 
-	// Solve positions.
-	for (int isolve = 0; isolve < iteration_count; ++isolve) {
-		const real_t ti = isolve / (real_t)iteration_count;
-		solve_links(1.0, ti);
+	// Optional XPBD distance constraints keep a compliant elastic response
+	// less dependent on iteration count or the physics step size. This also
+	// covers topology-generated bending links; only enabled for an explicit
+	// nonzero compliance, keeping the original solver byte-for-byte otherwise.
+	const real_t configured_compliance = get_space() ? get_space()->get_soft_body_xpbd_compliance() : real_t(0.0);
+	const double compliance = linear_stiffness > 0.0 ? double(configured_compliance) / double(linear_stiffness) : 0.0;
+	const double alpha_double = p_delta > 0.0 ? compliance / (double(p_delta) * p_delta) : 0.0;
+	const bool use_xpbd = compliance > 0.0 && Math::is_finite(alpha_double) &&
+			alpha_double > 0.0 && alpha_double <= double(std::numeric_limits<real_t>::max());
+	if (use_xpbd) {
+		const real_t alpha = real_t(alpha_double);
+		// Allocate only on the first enabled step or when the mesh changes.
+		xpbd_link_lambdas.resize(links.size());
+		for (real_t &lambda : xpbd_link_lambdas) {
+			lambda = real_t(0.0);
+		}
+		for (int isolve = 0; isolve < iteration_count; ++isolve) {
+			for (uint32_t link_index = 0; link_index < links.size(); ++link_index) {
+				Link &link = links[link_index];
+				if (link.c0 > 0.0) {
+					physics_xpbd_solve_distance(link.n[0]->x, link.n[1]->x,
+							link.n[0]->im, link.n[1]->im, link.rl,
+							alpha, xpbd_link_lambdas[link_index]);
+				}
+			}
+		}
+	} else {
+		// Legacy PBD solver, unchanged when compliance is zero.
+		for (int isolve = 0; isolve < iteration_count; ++isolve) {
+			const real_t ti = isolve / (real_t)iteration_count;
+			solve_links(1.0, ti);
+		}
 	}
 	const real_t vc = (1.0 - damping_coefficient) * inv_delta;
 	for (Node &node : nodes) {
