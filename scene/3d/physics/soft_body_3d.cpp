@@ -382,6 +382,8 @@ void SoftBody3D::_bind_methods() {
 
 	ClassDB::bind_method(D_METHOD("set_tetrahedral_indices", "indices"), &SoftBody3D::set_tetrahedral_indices);
 	ClassDB::bind_method(D_METHOD("get_tetrahedral_indices"), &SoftBody3D::get_tetrahedral_indices);
+	ClassDB::bind_method(D_METHOD("set_tetrahedral_interior_positions", "positions"), &SoftBody3D::set_tetrahedral_interior_positions);
+	ClassDB::bind_method(D_METHOD("get_tetrahedral_interior_positions"), &SoftBody3D::get_tetrahedral_interior_positions);
 
 	ClassDB::bind_method(D_METHOD("set_ray_pickable", "ray_pickable"), &SoftBody3D::set_ray_pickable);
 	ClassDB::bind_method(D_METHOD("is_ray_pickable"), &SoftBody3D::is_ray_pickable);
@@ -407,6 +409,7 @@ void SoftBody3D::_bind_methods() {
 
 	ADD_GROUP("Advanced FEM", "tetrahedral_");
 	ADD_PROPERTY(PropertyInfo(Variant::PACKED_INT32_ARRAY, "tetrahedral_indices"), "set_tetrahedral_indices", "get_tetrahedral_indices");
+	ADD_PROPERTY(PropertyInfo(Variant::PACKED_VECTOR3_ARRAY, "tetrahedral_interior_positions"), "set_tetrahedral_interior_positions", "get_tetrahedral_interior_positions");
 
 	BIND_ENUM_CONSTANT(DISABLE_MODE_REMOVE);
 	BIND_ENUM_CONSTANT(DISABLE_MODE_KEEP_ACTIVE);
@@ -658,6 +661,20 @@ void SoftBody3D::set_tetrahedral_indices(const PackedInt32Array &p_indices) {
 
 PackedInt32Array SoftBody3D::get_tetrahedral_indices() const {
 	return tetrahedral_indices;
+}
+
+void SoftBody3D::set_tetrahedral_interior_positions(const PackedVector3Array &p_positions) {
+	ERR_FAIL_COND_MSG(p_positions.size() > 1024,
+			"FEM supports at most 1024 interior simulation nodes.");
+	for (const Vector3 &point : p_positions) {
+		ERR_FAIL_COND_MSG(!point.is_finite(), "Interior FEM node positions must be finite.");
+	}
+	tetrahedral_interior_positions = p_positions;
+	PhysicsServer3D::get_singleton()->soft_body_set_tetrahedral_interior_positions(physics_rid, p_positions);
+}
+
+PackedVector3Array SoftBody3D::get_tetrahedral_interior_positions() const {
+	return tetrahedral_interior_positions;
 }
 
 void SoftBody3D::set_simulation_precision(int p_simulation_precision) {
