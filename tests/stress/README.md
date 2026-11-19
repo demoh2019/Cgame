@@ -1,5 +1,30 @@
 # Cgame whole-engine stress and performance regression suite
 
+## Box2D-style optional GodotPhysics2D maximum linear velocity
+
+The built-in GodotPhysics2D backend now supports
+`physics/2d/solver/max_linear_velocity` (pixels/s). Zero, the default,
+preserves unlimited legacy speed and avoids speed-limit math in the hot path.
+Positive values cap only rigid-body linear velocity, after force integration
+(before swept CCD bounds are calculated) and after contact/joint solving.
+Kinematic bodies and biased position recovery are not constrained. The
+setting is cached when a new physics space is created and does not affect
+existing spaces or third-party 2D physics servers. Clamping is a stability
+option, not a substitute for CCD: high-speed tunneling is still possible.
+
+```bash
+# Real runtime check (must select GodotPhysics2D):
+./bin/godot.macos.editor.arm64 --headless --path tests/stress \
+  --script res://physics_velocity_limit_2d_regression.gd
+
+# C++ math helper tests:
+./bin/godot.macos.editor.arm64 --headless --test --test-case="[GodotPhysics2D] Opt-in linear velocity limit"
+```
+
+Compare before/after physics benchmarks on the same host. No measured
+throughput improvement is claimed by this optional limit.
+
+
 Independent, reproducible workloads for CPU, script execution, object lifetime,
 allocation churn, scene-tree mutations, physics, IO, data codecs, threads and
 render-node throughput. A Python watchdog samples *process resident RAM* and
