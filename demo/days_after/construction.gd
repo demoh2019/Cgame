@@ -125,7 +125,7 @@ static func validate_snapshot(data: Variant) -> bool:
             return false
         var slot: Variant = entry.get("slot")
         var health: Variant = entry.get("health")
-        if not (slot is int) or int(slot) < 0 or int(slot) >= SLOT_POSITIONS.size():
+        if not (slot is int or slot is float) or float(slot) != floor(float(slot)) or int(slot) < 0 or int(slot) >= SLOT_POSITIONS.size():
             return false
         if seen.has(slot):
             return false
@@ -133,7 +133,7 @@ static func validate_snapshot(data: Variant) -> bool:
         if not (health is int or health is float):
             return false
         var hp := float(health)
-        if not is_finite(hp) or hp <= 0.0 or hp > BARRICADE.MAX_HEALTH:
+        if is_nan(hp) or is_inf(hp) or hp <= 0.0 or hp > BARRICADE.MAX_HEALTH:
             return false
     return true
 
