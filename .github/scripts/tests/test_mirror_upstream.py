@@ -45,12 +45,12 @@ class FakeAPI:
             return iter(self.comments)
         raise AssertionError(f"unexpected pagination path: {path}")
 
-    def request(self, method, path, payload=None):
+    def request(self, method, path, payload=None, with_links=False):
         self.calls.append((method, path, payload))
         if method == "GET" and path == "/repos/demoh2019/godot":
             return {"has_issues": self.issues_enabled}
         if method == "GET" and path.startswith("/repos/godotengine/godot/issues?"):
-            return self.source
+            return (self.source, None) if with_links else self.source
         if method == "GET" and "/pulls/" in path:
             return {"state": "open", "body": "Proposed patch", "merged_at": None}
         if method == "POST" and path == "/repos/demoh2019/godot/pulls":
@@ -200,6 +200,29 @@ class MirrorTests(unittest.TestCase):
             stats = m.Mirror(api, apply=True).run(max_items=2, checkpoint=checkpoint)
             self.assertEqual(stats["created_issues"], 2)
             self.assertEqual(__import__("json").loads(checkpoint.read_text())["next_offset"], 2)
+
+    def test_cursor_link_parsing_and_host_check(self):
+        header = ('<https://api.github.com/repos/godotengine/godot/issues?after=opaque123&per_page=100>; rel="next", '
+                  '<https://api.github.com/repos/godotengine/godot/issues?before=one>; rel="prev"')
+        self.assertEqual(m.parse_next_link(header),
+                         "/repos/godotengine/godot/issues?after=opaque123&per_page=100")
+        self.assertIsNone(m.parse_next_link(""))
+        with self.assertRaises(ValueError):
+            m.parse_next_link('<https://evil.test/steal>; rel="next"')
+
+    def test_github_pages_follow_cursor_instead_of_page_numbers(self):
+        api = m.GitHub()
+        calls = []
+        def get(method, path, payload=None, with_links=False):
+            calls.append((path, with_links))
+            if len(calls) == 1:
+                return ([{"number": 1}], "/repos/owner/repo/issues?after=cursor")
+            return ([{"number": 2}], None)
+        with patch.object(api, "request", side_effect=get):
+            records = list(api.pages("/repos/owner/repo/issues?state=all"))
+        self.assertEqual([x["number"] for x in records], [1, 2])
+        self.assertTrue(all(flag for path, flag in calls))
+        self.assertEqual(calls[1][0], "/repos/owner/repo/issues?after=cursor")
 
     def test_git_fetch_and_push_without_force(self):
         from types import SimpleNamespace
