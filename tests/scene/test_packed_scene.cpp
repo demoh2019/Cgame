@@ -282,4 +282,51 @@ TEST_CASE("[PackedScene] Recreate State") {
 	memdelete(scene);
 }
 
+TEST_CASE("[PackedScene] Bulk scene pack and instantiate preserves names, groups, and dictionaries") {
+	Node *root = memnew(Node);
+	root->set_name("BulkRoot");
+
+	for (int i = 0; i < 128; i++) {
+		Node *child = memnew(Node);
+		child->set_name(String("Node_") + itos(i));
+		root->add_child(child);
+		child->set_owner(root);
+		child->add_to_group("batch", true);
+		child->add_to_group(StringName(String("lane_") + itos(i % 8)), true);
+
+		Dictionary payload;
+		payload["index"] = i;
+		payload["lane"] = i % 8;
+		payload["label"] = String("payload_") + itos(i);
+		child->set_meta("payload", payload);
+	}
+
+	Ref<PackedScene> packed;
+	packed.instantiate();
+	REQUIRE_EQ(packed->pack(root), OK);
+	Ref<SceneState> state = packed->get_state();
+	REQUIRE(state.is_valid());
+	CHECK_EQ(state->get_node_count(), 129);
+
+	Node *instance = packed->instantiate();
+	REQUIRE(instance != nullptr);
+	REQUIRE_EQ(instance->get_child_count(), 128);
+
+	for (int i = 0; i < 128; i++) {
+		Node *child = instance->get_child(i);
+		REQUIRE(child != nullptr);
+		CHECK_EQ(child->get_name(), StringName(String("Node_") + itos(i)));
+		CHECK(child->is_in_group("batch"));
+		CHECK(child->is_in_group(StringName(String("lane_") + itos(i % 8))));
+		REQUIRE(child->has_meta("payload"));
+		Dictionary payload = child->get_meta("payload");
+		CHECK_EQ(payload["index"], Variant(i));
+		CHECK_EQ(payload["lane"], Variant(i % 8));
+		CHECK_EQ(payload["label"], Variant(String("payload_") + itos(i)));
+	}
+
+	memdelete(instance);
+	memdelete(root);
+}
+
 } // namespace TestPackedScene
