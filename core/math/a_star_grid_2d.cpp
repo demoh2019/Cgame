@@ -528,7 +528,7 @@ bool AStarGrid2D::_solve(Point *p_begin_point, Point *p_end_point, bool p_allow_
 	p_begin_point->g_score = 0;
 	p_begin_point->f_score = _estimate_cost(p_begin_point->id, p_end_point->id);
 	p_begin_point->abs_g_score = 0;
-	p_begin_point->abs_f_score = _estimate_cost(p_begin_point->id, p_end_point->id);
+	p_begin_point->abs_f_score = p_begin_point->f_score;
 	open_list.push_back(p_begin_point);
 	end = p_end_point;
 
