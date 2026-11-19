@@ -108,11 +108,12 @@ real_t HeightmapFoliage3D::get_terrain_cell_size() const {
 }
 
 void HeightmapFoliage3D::set_minimum_scale(real_t p_scale) {
-    ERR_FAIL_COND_MSG(!Math::is_finite(p_scale) || p_scale <= 0 || p_scale > maximum_scale, "Minimum foliage scale must be positive and <= maximum scale.");
+    ERR_FAIL_COND_MSG(!Math::is_finite(p_scale) || p_scale <= 0, "Minimum foliage scale must be positive.");
     if (minimum_scale == p_scale) {
         return;
     }
     minimum_scale = p_scale;
+    maximum_scale = MAX(maximum_scale, minimum_scale);
     regenerate();
 }
 
@@ -121,11 +122,12 @@ real_t HeightmapFoliage3D::get_minimum_scale() const {
 }
 
 void HeightmapFoliage3D::set_maximum_scale(real_t p_scale) {
-    ERR_FAIL_COND_MSG(!Math::is_finite(p_scale) || p_scale < minimum_scale, "Maximum foliage scale cannot be below minimum scale.");
+    ERR_FAIL_COND_MSG(!Math::is_finite(p_scale) || p_scale <= 0, "Maximum foliage scale must be positive.");
     if (maximum_scale == p_scale) {
         return;
     }
     maximum_scale = p_scale;
+    minimum_scale = MIN(minimum_scale, maximum_scale);
     regenerate();
 }
 
@@ -230,7 +232,7 @@ void HeightmapFoliage3D::_bind_methods() {
     ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "terrain_cell_size", PROPERTY_HINT_RANGE, "0.01,100,0.01"), "set_terrain_cell_size", "get_terrain_cell_size");
     ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "minimum_scale", PROPERTY_HINT_RANGE, "0.01,10,0.01"), "set_minimum_scale", "get_minimum_scale");
     ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "maximum_scale", PROPERTY_HINT_RANGE, "0.01,10,0.01"), "set_maximum_scale", "get_maximum_scale");
-    ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "maximum_slope_degrees", PROPERTY_HINT_RANGE, "0,90,1,radians_as_degrees"), "set_maximum_slope_degrees", "get_maximum_slope_degrees");
+    ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "maximum_slope_degrees", PROPERTY_HINT_RANGE, "0,90,1,suffix:°"), "set_maximum_slope_degrees", "get_maximum_slope_degrees");
 }
 
 HeightmapFoliage3D::~HeightmapFoliage3D() {
