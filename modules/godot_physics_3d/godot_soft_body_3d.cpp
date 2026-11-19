@@ -47,6 +47,7 @@
 #include "servers/physics_fem_tetra_ogden.h"
 #include "servers/physics_fem_lumped_mass.h"
 #include "servers/physics_fem_tetra_fiber.h"
+#include "servers/physics_fem_tetra_fiber_plasticity.h"
 #include "servers/physics_fem_tetra_viscosity.h"
 #include "servers/physics_fem_tetra_volume_plasticity.h"
 #include "servers/physics_fem_tetra_damage.h"
@@ -535,6 +536,7 @@ void GodotSoftBody3D::initialize_fem_tetra() {
 	const bool previously_lumped = !xpbd_fem_mass_fractions.is_empty();
 	xpbd_fem_tetrahedra.reset();
 	xpbd_fem_fiber_lambdas.reset();
+	xpbd_fem_fiber_plastic_rest_stretches.reset();
 	xpbd_fem_damage.reset();
 	xpbd_fem_mass_fractions.reset();
 
@@ -3124,6 +3126,46 @@ void GodotSoftBody3D::solve_constraints(real_t p_delta) {
 		}
 	}
 
+	// Tension-only viscoplastic remodeling of the REST material fiber
+	// length. Measure the predicted over-yield stretch BEFORE any XPBD
+	// elastic correction, once per tick. Permanent rest stretches survive
+	// subsequent iterations/steps but never alter the shared FEM rest
+	// matrix, collision mesh or Neo-Hookean elastic reference shape.
+	const real_t fem_fiber_creep_rate = get_space()->get_soft_body_tetra_fiber_plastic_creep_rate();
+	const real_t fem_fiber_plastic_max_stretch = get_space()->get_soft_body_tetra_fiber_plastic_max_stretch();
+	const bool use_fem_fiber_plasticity = fem_fiber_creep_rate > real_t(0.0) &&
+			fem_fiber_plastic_max_stretch > real_t(1.0) && p_delta > real_t(0.0) &&
+			get_space()->get_soft_body_tetra_fem_compliance() > real_t(0.0) &&
+			get_space()->get_soft_body_tetra_fiber_compliance() > real_t(0.0) &&
+			!xpbd_fem_tetrahedra.is_empty();
+	if (use_fem_fiber_plasticity) {
+		if (xpbd_fem_fiber_plastic_rest_stretches.size() != xpbd_fem_tetrahedra.size()) {
+			xpbd_fem_fiber_plastic_rest_stretches.resize(xpbd_fem_tetrahedra.size());
+			for (real_t &rest_stretch : xpbd_fem_fiber_plastic_rest_stretches) {
+				rest_stretch = real_t(1.0);
+			}
+		}
+		const Vector3 material_axis = get_space()->get_soft_body_tetra_fiber_axis();
+		const double plastic_yield = double(get_space()->get_soft_body_tetra_fiber_plastic_yield_ratio());
+		for (uint32_t i = 0; i < xpbd_fem_tetrahedra.size(); ++i) {
+			const PhysicsFEMConvexTetra &tetra = xpbd_fem_tetrahedra[i];
+			const Vector3 vertices[4] = {
+				nodes[tetra.a].x, nodes[tetra.b].x,
+				nodes[tetra.c].x, nodes[tetra.d].x
+			};
+			double stretch = 0.0;
+			if (physics_fem_tetra_fiber_measure_stretch(
+						vertices, tetra.rest, material_axis, stretch)) {
+				physics_fem_tetra_fiber_creep_rest_stretch(
+						stretch, plastic_yield, double(fem_fiber_creep_rate),
+						double(p_delta), double(fem_fiber_plastic_max_stretch),
+						xpbd_fem_fiber_plastic_rest_stretches[i]);
+			}
+		}
+	} else if (!xpbd_fem_fiber_plastic_rest_stretches.is_empty()) {
+		xpbd_fem_fiber_plastic_rest_stretches.reset();
+	}
+
 	// Local scalar continuum damage is evaluated on predicted positions
 	// BEFORE the elastic XPBD projection removes the over-yield strain.
 	// The strength history is updated once per fixed physics tick, not
@@ -3623,9 +3665,13 @@ void GodotSoftBody3D::solve_constraints(real_t p_delta) {
 					PhysicsFEMTetraDamage::effective_compliance(
 							fem_fiber_alpha, xpbd_fem_damage[tet_index], local_fiber_alpha);
 				}
+				const real_t plastic_rest_stretch =
+						xpbd_fem_fiber_plastic_rest_stretches.size() == xpbd_fem_tetrahedra.size() ?
+						xpbd_fem_fiber_plastic_rest_stretches[tet_index] : real_t(1.0);
 				physics_fem_tetra_solve_fiber(a.x, b.x, c.x, d.x,
 						a.im, b.im, c.im, d.im, tetra.rest,
-						fem_fiber_axis, local_fiber_alpha, xpbd_fem_fiber_lambdas[tet_index]);
+						fem_fiber_axis, local_fiber_alpha, xpbd_fem_fiber_lambdas[tet_index],
+						double(plastic_rest_stretch));
 			}
 		}
 		if (use_volume_xpbd) {
@@ -3900,6 +3946,7 @@ void GodotSoftBody3D::destroy() {
 	xpbd_volume_original_rest = 0.0;
 	xpbd_fem_tetrahedra.reset();
 	xpbd_fem_fiber_lambdas.reset();
+	xpbd_fem_fiber_plastic_rest_stretches.reset();
 	xpbd_fem_damage.reset();
 	xpbd_fem_mass_fractions.reset();
 	nodes.clear();
