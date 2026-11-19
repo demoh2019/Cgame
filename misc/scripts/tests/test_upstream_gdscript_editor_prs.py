@@ -136,5 +136,123 @@ class AnimationGroupingContracts(unittest.TestCase):
             "editor/animation/animation_track_editor.cpp"))
 
 
+
+class VisualShaderGroupContracts(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        whole = source("modules/visual_shader/editor/visual_shader_editor_plugin.cpp")
+        cls.fn = whole.split("bool VisualShaderEditor::_is_type_disallowed_in_group_context(", 1)[1].split(
+            "bool VisualShaderEditor::_group_would_create_cycle(", 1
+        )[0]
+
+    def test_builtin_input_not_allowed_in_groups(self):
+        self.assertIn("p_type_name == VisualShaderNodeInput::get_class_static()", self.fn)
+
+    def test_builtin_block_is_inside_group_condition(self):
+        inside, outside = self.fn.split("} else {", 1)
+        self.assertIn("if (p_is_inside_group)", inside)
+        self.assertIn("VisualShaderNodeInput::get_class_static()", inside)
+        self.assertNotIn("VisualShaderNodeInput::get_class_static()", outside)
+
+    def test_group_ports_still_disallowed_outside_group(self):
+        self.assertIn("p_type_name == VisualShaderNodeGroupInput::get_class_static()", self.fn)
+        self.assertIn("p_type_name == VisualShaderNodeGroupOutput::get_class_static()", self.fn)
+
+
+class ResourceSaveAsContracts(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        whole = source("editor/editor_node.cpp")
+        cls.fn = whole.split("void EditorNode::save_resource_as(", 1)[1].split(
+            "bool EditorNode::is_resource_internal_to_scene(", 1
+        )[0]
+
+    def test_existing_resource_path_is_initialized(self):
+        self.assertIn("String path = resource_path;", self.fn)
+
+    def test_corrected_extension_is_applied_to_path(self):
+        self.assertIn('path = resource_path.replacen("." + ext, "." + extensions.front()->get());', self.fn)
+
+    def test_existing_resource_always_prefills_dialog(self):
+        self.assertIn("file->set_current_path(path);", self.fn)
+        self.assertLess(self.fn.index("String path = resource_path;"),
+                        self.fn.index("file->set_current_path(path);"))
+
+    def test_original_name_is_used_when_no_path(self):
+        self.assertIn("file->set_current_file(new_resource_name_snake_case);", self.fn)
+
+
+class EmbeddedWindowAlwaysOnTopContracts(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        whole = source("scene/main/window.cpp")
+        cls.fn = whole.split("void Window::set_flag(", 1)[1].split("bool Window::get_flag(", 1)[0]
+
+    def test_subwindow_is_updated(self):
+        self.assertIn("embedder->_sub_window_update(this);", self.fn)
+
+    def test_always_on_top_reorders_embedded_windows(self):
+        self.assertRegex(self.fn, re.compile(
+            r"if \(p_flag == FLAG_ALWAYS_ON_TOP\) \{\s*"
+            r"embedder->_sub_window_update_order\(\);", re.S))
+
+    def test_reorder_occurs_after_update(self):
+        self.assertLess(self.fn.index("embedder->_sub_window_update(this);"),
+                        self.fn.index("embedder->_sub_window_update_order();"))
+
+
+class GDScriptUnreachableContracts(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        whole = source("modules/gdscript/gdscript_parser.cpp")
+        cls.statement = whole.split("GDScriptParser::Node *GDScriptParser::parse_statement() {", 1)[1].split(
+            "GDScriptParser::AssertNode *GDScriptParser::parse_assert()", 1
+        )[0]
+        cls.parse_break = whole.split("GDScriptParser::BreakNode *GDScriptParser::parse_break() {", 1)[1].split(
+            "GDScriptParser::ContinueNode *GDScriptParser::parse_continue()", 1
+        )[0]
+        cls.parse_if = whole.split("GDScriptParser::IfNode *GDScriptParser::parse_if(", 1)[1].split(
+            "GDScriptParser::MatchNode *GDScriptParser::parse_match()", 1
+        )[0]
+
+    def test_break_and_continue_trigger_unreachable_detection(self):
+        self.assertIn("current_suite->has_continue || current_suite->has_break", self.statement)
+        self.assertIn("current_suite->has_break = true;", self.parse_break)
+
+    def test_warning_identifies_terminator(self):
+        for word in ("return", "continue", "break"):
+            self.assertIn('end_statement_name = "\\"' + word + '\\"";', self.statement)
+
+    def test_conditional_continue_does_not_poison_parent_block(self):
+        self.assertNotIn("current_suite->has_continue = true;", self.parse_if)
+
+    def test_updated_warning_message_accepts_two_symbols(self):
+        warn = source("modules/gdscript/gdscript_warning.cpp")
+        item = warn.split("case UNREACHABLE_CODE:", 1)[1].split("case UNREACHABLE_PATTERN:", 1)[0]
+        self.assertIn("CHECK_SYMBOLS(2)", item)
+        self.assertIn("symbols[0], symbols[1]", item)
+
+    def test_gdscript_fixtures_have_expected_outputs(self):
+        base = "modules/gdscript/tests/scripts/parser/warnings/"
+        names = (
+            "unreachable_code_after_break",
+            "unreachable_code_after_continue",
+            "unreachable_code_conditional_continue",
+            "unreachable_code_conditional_break",
+            "unreachable_code_once_per_block",
+        )
+        for name in names:
+            with self.subTest(name=name):
+                gd = source(base + name + ".gd")
+                out = source(base + name + ".out")
+                self.assertIn("func test():", gd)
+                self.assertTrue(out.startswith("GDTEST_OK\n"))
+                if name.startswith("unreachable_code_conditional"):
+                    self.assertNotIn("UNREACHABLE_CODE", out)
+                else:
+                    self.assertEqual(out.count("UNREACHABLE_CODE"), 1)
+
+
+
 if __name__ == "__main__":
     unittest.main()
