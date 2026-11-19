@@ -103,8 +103,10 @@ TEST_CASE("[PhysicsFEMDeviatoricPlastic] Material hardening reduces subsequent s
 	double soft_strain = 0.0, hard_strain = 0.0;
 	REQUIRE(physics_fem_tetra_creep_deviatoric_rest(
 			points, 0.1, 0.0, 0.5, 4.0, soft, soft_strain));
+	// Same raw rate*dt with H=2: (1-(1-0.5)^3)/3.
+	const double hardened_relaxation = (1.0 - 0.125) / 3.0;
 	REQUIRE(physics_fem_tetra_creep_deviatoric_rest(
-			points, 0.1, 2.0, 0.5, 4.0, hardened, hard_strain));
+			points, 0.1, 2.0, hardened_relaxation, 4.0, hardened, hard_strain));
 	CHECK(hard_strain < soft_strain);
 	CHECK(hardened.inv_dm[0][0] > soft.inv_dm[0][0]);
 }
