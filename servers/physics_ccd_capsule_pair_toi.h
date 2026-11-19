@@ -157,6 +157,12 @@ _FORCE_INLINE_ PhysicsCCDCapsulePairTOIResult physics_ccd_capsule_pair_toi(
 		return PhysicsCCDCapsulePairTOIResult::MISS; // Squared distance is convex.
 	}
 
+	// Raycast fractions are ultimately stored as real_t. A float32
+	// build needs fewer bisections than a double build to get a result
+	// well below one representable time fraction. Do not pay for double
+	// precision in every default-precision physics pair.
+	const int search_iterations = sizeof(real_t) == sizeof(float) ? 32 : 48;
+
 	// Find the unique time of minimum squared distance, or the end of
 	// the sweep when the distance is still decreasing. No allocations.
 	double minimum_fraction = 1.0;
@@ -165,7 +171,7 @@ _FORCE_INLINE_ PhysicsCCDCapsulePairTOIResult physics_ccd_capsule_pair_toi(
 	if (end.derivative_half > 0.0) {
 		double low = 0.0;
 		double high = 1.0;
-		for (int i = 0; i < 48; ++i) {
+		for (int i = 0; i < search_iterations; ++i) {
 			const double mid = 0.5 * (low + high);
 			const Distance value = distance_at(start_delta, motion, segment_a, segment_b,
 			segment_a_squared, segment_b_squared, segment_dot, mid);
@@ -188,7 +194,7 @@ _FORCE_INLINE_ PhysicsCCDCapsulePairTOIResult physics_ccd_capsule_pair_toi(
 	// Bracket its first crossing of the capsule radius and bisect it.
 	double low = 0.0;
 	double high = minimum_fraction;
-	for (int i = 0; i < 48; ++i) {
+	for (int i = 0; i < search_iterations; ++i) {
 		const double mid = 0.5 * (low + high);
 		const Distance value = distance_at(start_delta, motion, segment_a, segment_b,
 			segment_a_squared, segment_b_squared, segment_dot, mid);
