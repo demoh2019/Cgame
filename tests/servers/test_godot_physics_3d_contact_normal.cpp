@@ -66,6 +66,34 @@ TEST_CASE("[GodotPhysics3D] Degenerate contact normal fallback") {
 	}
 }
 
+
+TEST_CASE("[GodotPhysics3D] Soft body contacts use robust unit normals") {
+	SUBCASE("Unit narrowphase normal preserves direction") {
+		const Vector3 result = godot_physics_3d_soft_contact_normal(Vector3(0.0, -2.0, 0.0), Vector3(), Vector3(0.0, -1.0, 0.0));
+		CHECK(result.is_equal_approx(Vector3(0.0, -1.0, 0.0)));
+	}
+	SUBCASE("Opposite narrowphase normal is reoriented") {
+		const Vector3 result = godot_physics_3d_soft_contact_normal(Vector3(0.0, -2.0, 0.0), Vector3(), Vector3(0.0, 2.0, 0.0));
+		CHECK(result.is_equal_approx(Vector3(0.0, -1.0, 0.0)));
+	}
+	SUBCASE("Non-unit normal is normalized") {
+		const Vector3 result = godot_physics_3d_soft_contact_normal(Vector3(2.0, 0.0, 0.0), Vector3(), Vector3(5.0, 0.0, 0.0));
+		CHECK(result.is_equal_approx(Vector3(1.0, 0.0, 0.0)));
+	}
+	SUBCASE("Zero narrowphase normal falls back to separation axis") {
+		const Vector3 result = godot_physics_3d_soft_contact_normal(Vector3(0.0, 3.0, 0.0), Vector3(), Vector3());
+		CHECK(result.is_equal_approx(Vector3(0.0, 1.0, 0.0)));
+	}
+	SUBCASE("Coincident points with zero normal give deterministic direction") {
+		const Vector3 result = godot_physics_3d_soft_contact_normal(Vector3(), Vector3(), Vector3());
+		CHECK(result.is_equal_approx(Vector3(0.0, 1.0, 0.0)));
+	}
+	SUBCASE("Coincident points preserve valid narrowphase normal") {
+		const Vector3 result = godot_physics_3d_soft_contact_normal(Vector3(), Vector3(), Vector3(0.0, 0.0, 1.0));
+		CHECK(result.is_equal_approx(Vector3(0.0, 0.0, 1.0)));
+	}
+}
+
 } // namespace TestGodotPhysics3DContactNormal
 
 #endif // MODULE_GODOT_PHYSICS_3D_ENABLED

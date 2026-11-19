@@ -52,3 +52,29 @@ _FORCE_INLINE_ static Vector3 godot_physics_3d_contact_normal(const Vector3 &p_p
 	// A fully degenerate manifold still needs a deterministic, unit normal.
 	return Vector3(0.0, 1.0, 0.0);
 }
+
+// Rigid/soft contacts conventionally use the narrowphase normal rather than
+// the separation direction. Preserve that convention, but reject degenerate
+// or non-unit normals before using them in effective-mass calculations.
+_FORCE_INLINE_ static Vector3 godot_physics_3d_soft_contact_normal(const Vector3 &p_point_a, const Vector3 &p_point_b, const Vector3 &p_narrowphase_normal) {
+	const real_t min_squared = real_t(CMP_EPSILON) * real_t(CMP_EPSILON);
+	const real_t normal_squared = p_narrowphase_normal.length_squared();
+	if (p_narrowphase_normal.is_finite() && normal_squared > min_squared) {
+		const Vector3 separation = p_point_a - p_point_b;
+		const Vector3 oriented = p_narrowphase_normal.dot(separation) < 0.0 ? -p_narrowphase_normal : p_narrowphase_normal;
+		// Narrowphase normally supplies unit normals. Avoid sqrt in the
+		// common case, normalize only badly scaled inputs.
+		if (Math::abs(normal_squared - real_t(1.0)) <= real_t(CMP_EPSILON)) {
+			return oriented;
+		}
+		return oriented / Math::sqrt(normal_squared);
+	}
+	// If the normal is degenerate, derive an axis from the contact points.
+	// This is intentionally unit length, even at exact tangency.
+	const Vector3 separation = p_point_a - p_point_b;
+	const real_t separation_squared = separation.length_squared();
+	if (separation.is_finite() && separation_squared > min_squared) {
+		return separation / Math::sqrt(separation_squared);
+	}
+	return Vector3(0.0, 1.0, 0.0);
+}

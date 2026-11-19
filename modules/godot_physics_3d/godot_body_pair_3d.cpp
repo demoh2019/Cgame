@@ -768,7 +768,9 @@ void GodotBodySoftBodyPair3D::contact_added_callback(const Vector3 &p_point_A, i
 	contact.index_B = p_index_B;
 	contact.local_A = local_A;
 	contact.local_B = local_B;
-	contact.normal = (normal.dot((p_point_A - p_point_B)) < 0 ? -normal : normal);
+	// Soft-body contacts need a unit, nonzero normal even for degenerate
+	// triangle/vertex data or coincident narrowphase support points.
+	contact.normal = godot_physics_3d_soft_contact_normal(p_point_A, p_point_B, normal);
 	contact.used = true;
 
 	// Direct node-ID lookup for dense soft-body contact patches. Below the
