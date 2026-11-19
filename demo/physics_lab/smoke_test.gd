@@ -40,7 +40,10 @@ func _check_both_labs() -> void:
         # Also exercise newly exposed physics interactions (no UI required).
         var controller_name := "Environment3D" if check["group"] == "demo_dynamic" else "Environment2D"
         var controller: Node = lab.get_node(controller_name)
-        controller.call("spawn_water_object", false) if controller_name == "Environment3D" else controller.call("spawn_water_body", false)
+        if controller_name == "Environment3D":
+            controller.call("spawn_water_object", false)
+        else:
+            controller.call("spawn_water_body", false)
         controller.call("_toggle_wind")
         controller.call("_toggle_magnet")
         controller.call("_cycle_gravity")
