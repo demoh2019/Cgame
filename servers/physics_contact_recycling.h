@@ -29,10 +29,11 @@
 
 #include <cstdint>
 
-// A deliberately conservative first step toward Box2D-style manifold
-// recycling. Exact shape/pose generations allow the narrow phase to be
-// skipped without approximating rotation, surface separation or contact
-// normals. Revision 0 is reserved for a not-yet-computed manifold.
+// Conservative Box2D-style manifold recycling. Generation keys track
+// shape geometry, orientation and collision filtering, while the calling
+// body pair separately checks exact relative translation. A shared rigid
+// translation leaves local contact anchors and world normals unchanged.
+// Revision 0 is reserved for a not-yet-computed manifold.
 struct GodotPhysicsContactRecycling {
 	uint64_t geometry_version_a = 0;
 	uint64_t geometry_version_b = 0;

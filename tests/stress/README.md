@@ -269,18 +269,20 @@ and after changes, and verify build/test status independently.
 
 Like Box2D's contact recycling and Jolt's body-pair contact cache, built-in
 GodotPhysics can avoid recomputing a persistent collision manifold when the
-geometry is **exactly unchanged**. For now, this is intentionally stricter
-than Box2D's relative-motion heuristic: it does not use approximate rotations
-or movement tolerances.
+shapes' orientations and **relative translation** are exactly unchanged.
+This includes two bodies translating together, for example objects resting
+inside a uniformly moving train. No movement or rotation tolerances are used.
 
-Each collision object stores an incrementing geometry/pose generation. Shape
-replacement, resizing, local shape transform changes, collision filtering,
-body movement and one-way collision changes invalidate the generation.
-A contact pair remembers both generations after a narrowphase calculation.
+Each collision object stores an incrementing geometry/orientation generation.
+Shape replacement, resizing, local shape transform edits, rotation, scale,
+shear, collision filtering and 2D one-way settings invalidate the generation.
+Pure world translation does not: rigid-rigid pairs separately compare their
+current relative position against the previous frame's cached `offset_B`.
 The next setup skips SAT/GJK only when:
 
 - The previous step collided and has at least one contact point.
-- Both geometry generations match the previous manifold.
+- The current relative center-to-center offset is exactly unchanged.
+- Both geometry/orientation generations match the previous manifold.
 - Neither body has continuous collision detection enabled.
 - Every old contact is still marked as used (no stale points remain to prune).
 - The 2D pair has not been rejected as a one-way collision.
@@ -289,7 +291,9 @@ The solver still recomputes effective masses, material mixing, penetration
 bias and impulse clamping each frame. CCD, new collisions, geometry changes and
 changed contact manifolds use the original collision path. The extra retained
 state is two 64-bit generations per rigid contact pair and one generation per
-collision object; runtime RSS savings are **not** assumed.
+collision object; the existing relative-offset vector is reused. This
+extension allocates **zero additional bytes per pair** compared with the
+previous exact-world-pose cache. Runtime speedups and RSS savings are **not** assumed.
 
 Native C++ regression checks are in
 `tests/servers/test_godot_physics_contact_recycling.cpp`.

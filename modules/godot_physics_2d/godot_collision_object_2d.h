@@ -67,7 +67,8 @@ private:
 	Vector<Shape> shapes;
 	GodotSpace2D *space = nullptr;
 	Transform2D transform;
-	// Invalidates the exact-pose manifold cache when geometry or transforms change.
+	// Invalidates contact recycling on geometry, filter or orientation changes.
+	// Translation is checked separately using the pair's relative offset.
 	uint64_t collision_geometry_version = 1;
 	Transform2D inv_transform;
 	uint32_t collision_mask = 1;
@@ -85,7 +86,9 @@ protected:
 	void _unregister_shapes();
 
 	_FORCE_INLINE_ void _set_transform(const Transform2D &p_transform, bool p_update_shapes = true) {
-		if (transform != p_transform) {
+		// Pure translation preserves shape orientations. A contact pair also
+		// checks the exact relative center offset before recycling its manifold.
+		if (transform.columns[0] != p_transform.columns[0] || transform.columns[1] != p_transform.columns[1]) {
 			++collision_geometry_version;
 		}
 		transform = p_transform;
