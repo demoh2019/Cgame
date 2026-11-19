@@ -276,9 +276,17 @@ JPH::SoftBodySharedSettings *JoltSoftBody3D::_create_shared_settings() {
 	const int bend_mode = JoltProjectSettings::soft_body_bend_mode;
 	const BendType bend_type = bend_mode == 1 ? BendType::Distance : (bend_mode == 2 ? BendType::Dihedral : BendType::None);
 	settings->CreateConstraints(&vertex_attrib, 1, bend_type);
-	float multiplier = 1.0f - shrinking_factor;
+	const float multiplier = 1.0f - shrinking_factor;
 	for (JPH::SoftBodySharedSettings::Edge &e : settings->mEdgeConstraints) {
 		e.mRestLength *= multiplier;
+	}
+	// Long-range tethers are also rest-length constraints. Without scaling
+	// their maximum distance, a shrinking cloth would shorten its springs
+	// while still allowing free vertices to stretch to the *old* anchor
+	// distance. Scale both Euclidean and geodesic tethers consistently.
+	// This loop is empty when LRA is disabled (the default).
+	for (JPH::SoftBodySharedSettings::LRA &tether : settings->mLRAConstraints) {
+		tether.mMaxDistance *= multiplier;
 	}
 	settings->Optimize();
 
