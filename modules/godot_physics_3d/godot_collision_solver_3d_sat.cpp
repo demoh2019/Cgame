@@ -932,7 +932,8 @@ static void _collision_sphere_capsule(const GodotShape3D *p_a, const Transform3D
 static void analytic_sphere_cylinder_collision(real_t p_radius_a, real_t p_radius_b, real_t p_height_b, const Transform3D &p_transform_a, const Transform3D &p_transform_b, _CollectorCallback *p_collector, bool p_with_margin, real_t p_margin_a, real_t p_margin_b) {
 	// Find the point on the cylinder nearest to the center of the sphere.
 
-	Vector3 center = p_transform_b.affine_inverse().xform(p_transform_a.origin);
+	const Transform3D cylinder_inverse = p_transform_b.affine_inverse();
+	Vector3 center = cylinder_inverse.xform(p_transform_a.origin);
 	Vector3 nearest = center;
 	real_t scale_A = p_transform_a.basis[0].length();
 	real_t r = Math::sqrt(center.x * center.x + center.z * center.z);
@@ -942,6 +943,7 @@ static void analytic_sphere_cylinder_collision(real_t p_radius_a, real_t p_radiu
 		nearest.z *= scale;
 	}
 	real_t half_height = p_height_b / 2;
+	const bool center_inside = r <= p_radius_b && Math::abs(center.y) <= half_height;
 	nearest.y = MIN(MAX(center.y, -half_height), half_height);
 	nearest = p_transform_b.xform(nearest);
 
@@ -959,9 +961,33 @@ static void analytic_sphere_cylinder_collision(real_t p_radius_a, real_t p_radiu
 	}
 	const real_t length = Math::sqrt(distance_squared);
 	Vector3 axis;
-	if (length == 0) {
-		// The cylinder passes through the sphere center.  Select an axis based on the cylinder's center.
-		axis = (p_transform_b.origin - nearest).normalized();
+	if (center_inside) {
+		// When the sphere center is inside a cylinder, the nearest point
+		// returned by clamping is its own center. Select the closest exit
+		// surface instead of producing a zero contact normal. The local
+		// radial and cap distances are converted to world-space distances
+		// through the inverse-transposed transform basis.
+		const Basis normal_basis = cylinder_inverse.basis.transposed();
+		const Vector3 radial_axis = r > CMP_EPSILON ? Vector3(center.x / r, 0.0, center.z / r) : Vector3(1.0, 0.0, 0.0);
+		const Vector3 radial_normal = normal_basis.xform(radial_axis);
+		const Vector3 cap_normal = normal_basis.get_column(1);
+		const real_t radial_normal_length = radial_normal.length();
+		const real_t cap_normal_length = cap_normal.length();
+		const real_t radial_clearance = radial_normal_length > CMP_EPSILON ? (p_radius_b - r) / radial_normal_length : real_t(1e30);
+		const real_t cap_clearance = cap_normal_length > CMP_EPSILON ? (half_height - Math::abs(center.y)) / cap_normal_length : real_t(1e30);
+		Vector3 exit_normal;
+		real_t exit_distance;
+		if (radial_clearance <= cap_clearance) {
+			exit_normal = radial_normal_length > CMP_EPSILON ? radial_normal / radial_normal_length : Vector3(1.0, 0.0, 0.0);
+			exit_distance = radial_clearance < real_t(1e30) ? radial_clearance : 0.0;
+		} else {
+			exit_normal = cap_normal * ((center.y < 0.0 ? -1.0 : 1.0) / cap_normal_length);
+			exit_distance = cap_clearance;
+		}
+		// The opposite sphere support point creates a separating contact
+		// normal that pushes the contained sphere toward the exit surface.
+		axis = -exit_normal;
+		nearest = p_transform_a.origin + exit_normal * exit_distance;
 	} else {
 		axis = delta / length;
 	}
