@@ -769,3 +769,34 @@ Run the common suite including `test_field_water.gd` to check shore
 validation, dose, filter spending, server cooldown, atomic crafting,
 serialization and save corruption. The contamination model is a fictional
 risk/reward mechanic, not medical or water-safety advice.
+
+
+## Classless weapon mastery (melee / ranged)
+
+Victories against infected now build *equipment-family* expertise in the
+canonical `game/` project, alongside existing gathering, crafting and fishing
+professions. This is a persistent progression feature, not a character class.
+
+- A confirmed infected kill with an **owned and equipped club** grants melee XP;
+  a kill with an **owned and equipped pistol** grants ranged XP.
+- Walker, runner and brute XP values come from the server's existing infected
+  definitions (5 / 8 / 25). Missed attacks, nonlethal hits, corpses, and unarmed
+  kills do **not** grant mastery XP.
+- Each family starts at **level 1**. Every **80 XP** unlocks another level,
+  capped at **level 5**. Each level above 1 adds **3% damage**, up to **+12%**,
+  including the equipped club's special Heavy Strike.
+- The server decides the kill, weapon ownership, awarded experience and damage
+  multiplier; clients cannot submit mastery XP or damage. PvP kills currently
+  award **no mastery XP**, avoiding easy farming with colluding players.
+- Combat XP is saved with existing character progression, is retained through
+  full-loot deaths, and is present in owner snapshots and both game HUDs.
+  Older character saves without a `combat` subtree migrate to zero XP; malformed,
+  fractional, negative, nonfinite or foreign mastery entries reject the entire
+  load before touching live state.
+
+Run `godot --headless --path game --script res://tests/run_all.gd` and inspect
+`game/tests/test_combat_mastery.gd` for server hit, kill, damage, save and
+anti-exploit regression coverage.
+
+No Cgame native engine change was needed; this extends the existing
+server-authoritative game progression and combat APIs.
