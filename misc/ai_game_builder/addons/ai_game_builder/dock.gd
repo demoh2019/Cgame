@@ -37,6 +37,8 @@ var _refinement_text: TextEdit
 var _refine_button: Button
 var _request_button: Button
 var _apply_button: Button
+var _play_button: Button
+var _last_applied_scene := ""
 var _allow_overwrite: CheckBox
 var _make_main: CheckBox
 var _summary: Label
@@ -135,6 +137,12 @@ func _ready() -> void:
 	_apply_button.disabled = true
 	_apply_button.pressed.connect(_on_apply)
 	add_child(_apply_button)
+
+	_play_button = Button.new()
+	_play_button.text = "Play approved game scene (runs generated scripts)"
+	_play_button.disabled = true
+	_play_button.pressed.connect(_on_play_generated)
+	add_child(_play_button)
 
 	_status = Label.new()
 	_status.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
@@ -283,6 +291,8 @@ func _on_request_completed(result: int, status: int, _headers: PackedStringArray
 		return
 
 	_pending_plan = validated
+	_last_applied_scene = ""
+	_play_button.disabled = true
 	_file_list.clear()
 	_file_preview.text = ""
 	_make_main.disabled = true
@@ -333,12 +343,26 @@ func _on_apply() -> void:
 		if save_error != OK:
 			extra = " Main scene setting could not be saved."
 	EditorInterface.get_resource_filesystem().scan()
+	_last_applied_scene = _pending_plan["main_scene"]
+	_play_button.disabled = _last_applied_scene.is_empty()
 	var location: String = outcome["backup_root"]
 	if not location.is_empty():
 		extra += " Backups: " + ProjectSettings.globalize_path(location)
 	_set_status("Created/updated %d files.%s Review scripts, then run the scene." % [
 		outcome["written"].size(), extra
 	])
+
+
+func _on_play_generated() -> void:
+	if _last_applied_scene.is_empty() or not Plan.validate_path(_last_applied_scene).is_empty():
+		_set_status("No generated scene has been approved for running.")
+		return
+	var scene_path := "res://" + _last_applied_scene
+	if not FileAccess.file_exists(scene_path):
+		_set_status("Generated scene no longer exists: " + scene_path)
+		return
+	EditorInterface.play_custom_scene(scene_path)
+	_set_status("Playing generated scene. Check the Godot Debugger for errors.")
 
 
 func _set_status(message: String) -> void:
