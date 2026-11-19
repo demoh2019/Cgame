@@ -32,6 +32,7 @@
 
 #include "godot_collision_solver_3d.h"
 #include "godot_contact_normal_3d.h"
+#include "godot_contact_warmstart_3d.h"
 #include "godot_space_3d.h"
 
 #include <cfloat> // FLT_MAX
@@ -94,12 +95,12 @@ void GodotBodyPair3D::contact_added_callback(const Vector3 &p_point_A, int, cons
 	if (best_match != -1) {
 		Contact &previous = contacts[best_match];
 		// Do not reuse impulses after the normal changes sharply at an edge.
-		if (previous.normal.dot(contact.normal) >= real_t(0.98)) {
+		if (godot_physics_3d_can_reuse_contact_impulses(previous.normal, contact.normal)) {
 			contact.acc_normal_impulse = previous.acc_normal_impulse;
 			contact.acc_bias_impulse = previous.acc_bias_impulse;
 			contact.acc_bias_impulse_center_of_mass = previous.acc_bias_impulse_center_of_mass;
 			// Friction must remain tangent when the manifold normal rotates.
-			contact.acc_tangent_impulse = previous.acc_tangent_impulse - contact.normal * previous.acc_tangent_impulse.dot(contact.normal);
+			contact.acc_tangent_impulse = godot_physics_3d_reproject_contact_friction(previous.acc_tangent_impulse, contact.normal);
 		}
 		previous = contact;
 		return;
@@ -712,21 +713,24 @@ void GodotBodySoftBodyPair3D::contact_added_callback(const Vector3 &p_point_A, i
 	contact.normal = (normal.dot((p_point_A - p_point_B)) < 0 ? -normal : normal);
 	contact.used = true;
 
-	// Attempt to determine if the contact will be reused.
-	real_t contact_recycle_radius = space->get_contact_recycle_radius();
+	// Recycle impulses only for nearby node anchors with a compatible
+	// surface normal. A folded cloth can keep the same node index while
+	// reversing its normal, invalidating normal and bias impulses.
+	const real_t contact_recycle_radius = space->get_contact_recycle_radius();
+	const real_t contact_recycle_radius_squared = contact_recycle_radius * contact_recycle_radius;
 
 	uint32_t contact_count = contacts.size();
 	for (uint32_t contact_index = 0; contact_index < contact_count; ++contact_index) {
 		Contact &c = contacts[contact_index];
 		if (c.index_B == p_index_B) {
-			if (c.local_A.distance_squared_to(local_A) < (contact_recycle_radius * contact_recycle_radius) &&
-					c.local_B.distance_squared_to(local_B) < (contact_recycle_radius * contact_recycle_radius)) {
+			if (c.local_A.distance_squared_to(local_A) < contact_recycle_radius_squared &&
+					c.local_B.distance_squared_to(local_B) < contact_recycle_radius_squared &&
+					godot_physics_3d_can_reuse_contact_impulses(c.normal, contact.normal)) {
 				contact.acc_normal_impulse = c.acc_normal_impulse;
 				contact.acc_bias_impulse = c.acc_bias_impulse;
 				contact.acc_bias_impulse_center_of_mass = c.acc_bias_impulse_center_of_mass;
-				// A rotating soft-body surface changes the contact normal. Reproject
-				// the cached friction so it never injects a normal impulse.
-				contact.acc_tangent_impulse = c.acc_tangent_impulse - contact.normal * c.acc_tangent_impulse.dot(contact.normal);
+				// Preserve only the tangential part of the old friction impulse.
+				contact.acc_tangent_impulse = godot_physics_3d_reproject_contact_friction(c.acc_tangent_impulse, contact.normal);
 			}
 			c = contact;
 			return;
