@@ -90,4 +90,55 @@ TEST_CASE("[FuzzySearch] Test fuzzy search results") {
 	}
 }
 
+TEST_CASE("[FuzzySearch] Reuse failed candidates without leaking token scores or matches") {
+	FuzzySearch search;
+	search.set_use_exact_tokens(true);
+	search.set_filter_low_scores(false);
+
+	Vector<String> targets;
+	for (int i = 0; i < 256; i++) {
+		targets.append("unrelated_" + itos(i) + ".gd");
+	}
+	// The first token matches but the second fails; this must not contaminate
+	// the score, intervals or token matches of subsequent candidates.
+	targets.append("alpha_only.gd");
+	targets.append("beta_only.gd");
+	targets.append("prefix_alpha_beta.gd");
+	targets.append("alpha_without_second.gd");
+	targets.append("prefix_beta_alpha.tscn");
+	targets.append("alpha_beta_02.tscn");
+
+	for (int i = 0; i < 256; i++) {
+		targets.append("irrelevant_" + itos(i) + ".tscn");
+	}
+
+	Vector<Ref<FuzzySearchMatch>> results = search.search_all("alpha beta", targets);
+	REQUIRE(results.size() == 3);
+
+	bool seen[3] = { false, false, false };
+	const int expected_indices[3] = { 258, 260, 261 };
+	for (const Ref<FuzzySearchMatch> &result : results) {
+		const int index = result->get_original_index();
+		int expected_pos = -1;
+		for (int i = 0; i < 3; i++) {
+			if (expected_indices[i] == index) {
+				expected_pos = i;
+				break;
+			}
+		}
+		REQUIRE(expected_pos != -1);
+		CHECK_FALSE(seen[expected_pos]);
+		seen[expected_pos] = true;
+
+		Ref<FuzzySearchMatch> independent = search.search("alpha beta", targets[index]);
+		REQUIRE(independent.is_valid());
+		CHECK_EQ(result->get_target(), independent->get_target());
+		CHECK_EQ(result->get_score(), independent->get_score());
+		CHECK_EQ(result->get_matched_substrings().size(), independent->get_matched_substrings().size());
+	}
+	for (bool found : seen) {
+		CHECK(found);
+	}
+}
+
 } // namespace TestFuzzySearch
