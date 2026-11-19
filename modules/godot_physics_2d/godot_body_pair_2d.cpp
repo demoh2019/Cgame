@@ -286,10 +286,6 @@ real_t combine_bounce(GodotBody2D *A, GodotBody2D *B) {
 	return CLAMP(A->get_bounce() + B->get_bounce(), 0, 1);
 }
 
-real_t combine_friction(GodotBody2D *A, GodotBody2D *B) {
-	return Math::abs(MIN(A->get_friction(), B->get_friction()));
-}
-
 bool GodotBodyPair2D::setup(real_t p_step) {
 	check_ccd = false;
 
@@ -459,7 +455,10 @@ bool GodotBodyPair2D::pre_solve(real_t p_step) {
 
 	real_t inv_mass_A = collide_A ? A->get_inv_mass() : 0.0;
 	real_t inv_mass_B = collide_B ? B->get_inv_mass() : 0.0;
-	const bool has_friction = combine_friction(A, B) > 0.0;
+	// Materials may change between frames. Compute once before warm starting,
+	// instead of re-mixing them for every solver iteration.
+	mixed_friction = space->mix_friction(A->get_friction(), B->get_friction());
+	const bool has_friction = mixed_friction > 0.0;
 
 	for (int i = 0; i < contact_count; i++) {
 		Contact &c = contacts[i];
@@ -570,7 +569,7 @@ void GodotBodyPair2D::solve(real_t p_step) {
 	real_t inv_mass_A = collide_A ? A->get_inv_mass() : 0.0;
 	real_t inv_mass_B = collide_B ? B->get_inv_mass() : 0.0;
 	// Material properties are constant during this constraint solve.
-	const real_t friction = combine_friction(A, B);
+	const real_t friction = mixed_friction;
 
 	for (int i = 0; i < contact_count; ++i) {
 		Contact &c = contacts[i];
