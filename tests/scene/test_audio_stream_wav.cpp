@@ -286,8 +286,9 @@ TEST_CASE("[Audio][AudioStreamWAV] copy-on-write get_data shares the original la
 	Ref<AudioStreamWAV> stream = memnew(AudioStreamWAV);
 	Vector<uint8_t> original;
 	original.resize(256 * 1024);
+	uint8_t *original_write = original.ptrw();
 	for (int i = 0; i < original.size(); i++) {
-		original.ptrw()[i] = uint8_t(i % 251);
+		original_write[i] = uint8_t(i % 251);
 	}
 	stream->set_data(original);
 
@@ -303,8 +304,9 @@ TEST_CASE("[Audio][AudioStreamWAV] mutating a returned buffer detaches without c
 	Ref<AudioStreamWAV> stream = memnew(AudioStreamWAV);
 	Vector<uint8_t> raw;
 	raw.resize(64 * 1024);
+	uint8_t *raw_write = raw.ptrw();
 	for (int i = 0; i < raw.size(); i++) {
-		raw.ptrw()[i] = uint8_t(i % 239);
+		raw_write[i] = uint8_t(i % 239);
 	}
 	stream->set_data(raw);
 
