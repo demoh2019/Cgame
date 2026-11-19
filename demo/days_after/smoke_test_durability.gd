@@ -34,7 +34,7 @@ func _run() -> void:
     if player.call("get_item_condition", "rusty_spear") != 100:
         _fail("New spear must start fully repaired.")
         return
-    if not Durability.wear(player.durability, "rusty_spear", 100):
+    if not Durability.wear(player.get("durability") as Dictionary, "rusty_spear", 100):
         _fail("Wear should accept owned equipment.")
         return
     if player.call("get_attack_damage") != 12.0:
@@ -64,8 +64,8 @@ func _run() -> void:
 
     player.call("add_item", "scavenger_tool", 1)
     player.call("equip_item", "tool", "scavenger_tool")
-    player.gathering_xp["wood"] = 100
-    Durability.wear(player.durability, "scavenger_tool", 100)
+    (player.get("gathering_xp") as Dictionary)["wood"] = 100
+    Durability.wear(player.get("durability") as Dictionary, "scavenger_tool", 100)
     if player.call("try_gather", "wood", 2, 1):
         _fail("Broken tool must not harvest tier 2.")
         return
@@ -85,14 +85,14 @@ func _run() -> void:
 
     player.call("add_item", "scrap_vest", 1)
     player.call("equip_item", "armor", "scrap_vest")
-    Durability.wear(player.durability, "scrap_vest", 99)
-    player.health = 100.0
+    Durability.wear(player.get("durability") as Dictionary, "scrap_vest", 99)
+    player.set("health", 100.0)
     player.call("take_damage", 20.0)
-    if player.health != 85.0 or player.call("get_item_condition", "scrap_vest") != 0:
+    if float(player.get("health")) != 85.0 or player.call("get_item_condition", "scrap_vest") != 0:
         _fail("Armor must mitigate the final hit and then break.")
         return
     player.call("take_damage", 20.0)
-    if player.health != 65.0:
+    if float(player.get("health")) != 65.0:
         _fail("Broken armor must not mitigate damage.")
         return
 
@@ -100,7 +100,7 @@ func _run() -> void:
     if not SaveState.validate_snapshot(data):
         _fail("Current character snapshot rejected.")
         return
-    player.durability.clear()
+    (player.get("durability") as Dictionary).clear()
     if not SaveState.apply_snapshot(player, data):
         _fail("Couldn't restore saved condition.")
         return
