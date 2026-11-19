@@ -132,7 +132,7 @@ TEST_CASE("[TranslationLoaderPO][Performance] Binary MO catalogs decode small an
 	translated.reserve(count);
 
 	originals.emplace_back();
-	translated.emplace_back("Language: en\nPlural-Forms: nplurals=2; plural=(n != 1);\n");
+	translated.emplace_back("Language: en\nContent-Type: text/plain; charset=UTF-8\nPlural-Forms: nplurals=2; plural=(n != 1);\n");
 	for (uint32_t i = 1; i < count - 2; i++) {
 		if (i % 57 == 0) {
 			// Exercise the grow-only heap fallback, including multiple sizes.
