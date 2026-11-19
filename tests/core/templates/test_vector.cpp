@@ -400,6 +400,65 @@ TEST_CASE("[Vector] To byte array") {
 	CHECK(byte_array[15] == 59);
 }
 
+struct GreaterVectorComparator {
+	bool operator()(const int &p_a, const int &p_b) const {
+		return p_a > p_b;
+	}
+};
+
+TEST_CASE("[Vector] Sorting large shared ordered data preserves COW storage") {
+	Vector<int> original;
+	REQUIRE(original.reserve_exact(8192) == OK);
+	for (int i = 0; i < 512; ++i) {
+		original.push_back(i / 2);
+	}
+	const int *const original_storage = original.ptr();
+	Vector<int> sorted_copy = original;
+	sorted_copy.sort();
+	CHECK(sorted_copy.ptr() == original_storage);
+	CHECK(original.ptr() == original_storage);
+	CHECK(sorted_copy.size() == 512);
+	CHECK(sorted_copy[0] == 0);
+	CHECK(sorted_copy[511] == 255);
+
+	// A comparator with descending ordering must use the same fast path.
+	Vector<int> descending;
+	for (int i = 255; i >= 0; --i) {
+		descending.push_back(i);
+	}
+	Vector<int> descending_copy = descending;
+	const int *const descending_storage = descending.ptr();
+	descending_copy.sort_custom<GreaterVectorComparator>();
+	CHECK(descending_copy.ptr() == descending_storage);
+	CHECK(descending.ptr() == descending_storage);
+
+	// Real reordering must detach and leave the shared original intact.
+	Vector<int> reversed;
+	for (int i = 255; i >= 0; --i) {
+		reversed.push_back(i);
+	}
+	Vector<int> reversed_copy = reversed;
+	reversed_copy.sort();
+	CHECK(reversed_copy.ptr() != reversed.ptr());
+	for (int i = 0; i < 256; i++) {
+		CHECK(reversed_copy[i] == i);
+		CHECK(reversed[i] == 255 - i);
+	}
+
+	// No-op sorting of shared nontrivial values must also avoid COW.
+	Vector<String> strings;
+	for (int i = 0; i < 128; i++) {
+		strings.push_back("same");
+	}
+	const String *const string_storage = strings.ptr();
+	Vector<String> strings_copy = strings;
+	strings_copy.sort();
+	CHECK(strings_copy.ptr() == string_storage);
+	strings_copy.write[0] = "changed";
+	CHECK(strings[0] == "same");
+	CHECK(strings_copy[0] == "changed");
+}
+
 TEST_CASE("[Vector] No-op operations do not detach shared COW storage") {
 	// An empty vector can still own a large reserved allocation.
 	Vector<int> empty;
