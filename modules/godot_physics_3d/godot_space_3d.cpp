@@ -1332,6 +1332,22 @@ GodotSpace3D::GodotSpace3D() {
 	soft_body_plastic_creep_rate = Math::is_finite(configured_plastic_creep_rate) ? MAX(real_t(0.0), configured_plastic_creep_rate) : real_t(0.0);
 	const real_t configured_link_damping = GLOBAL_GET("physics/3d/solver/soft_body_link_damping");
 	soft_body_link_damping = Math::is_finite(configured_link_damping) ? MAX(real_t(0.0), configured_link_damping) : real_t(0.0);
+	const real_t thermal_conduction = GLOBAL_GET("physics/3d/solver/soft_body_thermal_conduction_rate");
+	soft_body_thermal_conduction_rate = Math::is_finite(thermal_conduction) ? CLAMP(thermal_conduction, real_t(0.0), real_t(1000.0)) : real_t(0.0);
+	const real_t thermal_ambient_exchange = GLOBAL_GET("physics/3d/solver/soft_body_thermal_ambient_exchange_rate");
+	soft_body_thermal_ambient_exchange_rate = Math::is_finite(thermal_ambient_exchange) ? CLAMP(thermal_ambient_exchange, real_t(0.0), real_t(1000.0)) : real_t(0.0);
+	const real_t thermal_ambient = GLOBAL_GET("physics/3d/solver/soft_body_thermal_ambient_temperature");
+	soft_body_thermal_ambient_temperature = Math::is_finite(thermal_ambient) ? CLAMP(thermal_ambient, real_t(-273.0), real_t(2000.0)) : real_t(20.0);
+	const real_t thermal_source_rate = GLOBAL_GET("physics/3d/solver/soft_body_thermal_source_rate");
+	soft_body_thermal_source_rate = Math::is_finite(thermal_source_rate) ? CLAMP(thermal_source_rate, real_t(0.0), real_t(1000.0)) : real_t(0.0);
+	const real_t thermal_source_temperature = GLOBAL_GET("physics/3d/solver/soft_body_thermal_source_temperature");
+	soft_body_thermal_source_temperature = Math::is_finite(thermal_source_temperature) ? CLAMP(thermal_source_temperature, real_t(-273.0), real_t(2000.0)) : real_t(100.0);
+	const Vector3 configured_thermal_source_center = GLOBAL_GET("physics/3d/solver/soft_body_thermal_source_center");
+	soft_body_thermal_source_center = configured_thermal_source_center.is_finite() ? configured_thermal_source_center : Vector3();
+	const real_t configured_thermal_source_radius = GLOBAL_GET("physics/3d/solver/soft_body_thermal_source_radius");
+	soft_body_thermal_source_radius = Math::is_finite(configured_thermal_source_radius) ? CLAMP(configured_thermal_source_radius, real_t(0.0), real_t(10000.0)) : real_t(0.0);
+	const real_t configured_thermal_expansion = GLOBAL_GET("physics/3d/solver/soft_body_thermal_expansion_coefficient");
+	soft_body_thermal_expansion_coefficient = Math::is_finite(configured_thermal_expansion) ? CLAMP(configured_thermal_expansion, real_t(-0.01), real_t(0.01)) : real_t(0.0);
 	const real_t configured_strain_rate_damping = GLOBAL_GET("physics/3d/solver/soft_body_strain_rate_damping");
 	soft_body_strain_rate_damping = Math::is_finite(configured_strain_rate_damping) ?
 			MAX(real_t(0.0), configured_strain_rate_damping) : real_t(0.0);

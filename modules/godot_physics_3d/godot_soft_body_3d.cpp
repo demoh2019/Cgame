@@ -36,6 +36,7 @@
 #include "servers/physics_3d/physics_server_3d_rendering_server_handler.h"
 #include "servers/physics_softbody_bending_plasticity.h"
 #include "servers/physics_softbody_link_damping.h"
+#include "servers/physics_softbody_thermal_material.h"
 #include "servers/physics_softbody_strain_rate_damping.h"
 #include "servers/physics_softbody_membrane_damping.h"
 #include "servers/physics_softbody_dihedral_damping.h"
@@ -3449,6 +3450,86 @@ void GodotSoftBody3D::rebuild_xpbd_tethers(real_t p_slack) {
 	}
 }
 
+// Experimental thermomechanical XPBD material: heat is transported on the
+// existing structural link graph, not on a separate thermal mesh. Equal
+// nodal heat capacities and fixed baths are intentional simplifications.
+// The entire update is ONCE per physics step; thermal rest lengths then
+// stay frozen across XPBD lambda iterations, including under nonlinear
+// hardening and strain limits. Never change Link::rl or Link::c1.
+void GodotSoftBody3D::advance_thermal_material(real_t p_delta, bool p_xpbd_enabled) {
+	if (!get_space() || !Math::is_finite(p_delta) || !(p_delta > 0.0) || nodes.is_empty()) {
+		return;
+	}
+	const real_t conduction = get_space()->get_soft_body_thermal_conduction_rate();
+	const real_t ambient_rate = get_space()->get_soft_body_thermal_ambient_exchange_rate();
+	const real_t ambient = get_space()->get_soft_body_thermal_ambient_temperature();
+	const real_t source_rate = get_space()->get_soft_body_thermal_source_rate();
+	const real_t source_temp = get_space()->get_soft_body_thermal_source_temperature();
+	const real_t source_radius = get_space()->get_soft_body_thermal_source_radius();
+	const Vector3 &source_center = get_space()->get_soft_body_thermal_source_center();
+	const real_t expansion = get_space()->get_soft_body_thermal_expansion_coefficient();
+	const bool use_source = source_rate > 0.0 && source_radius > 0.0;
+	const bool use_thermal = conduction > 0.0 || ambient_rate > 0.0 ||
+			use_source || expansion != 0.0;
+	if (!use_thermal) {
+		thermal_node_temperatures.reset();
+		thermal_link_rest_lengths.reset();
+		return;
+	}
+	if (thermal_node_temperatures.size() != nodes.size()) {
+		thermal_node_temperatures.resize(nodes.size());
+		for (real_t &temp : thermal_node_temperatures) {
+			temp = ambient;
+		}
+	}
+
+	// External sources can add/remove heat; conduction alone is locally
+	// conservative (equal heat capacity per node). Pinned nodes still
+	// conduct, because pinning changes mobility, not heat capacity.
+	if (ambient_rate > 0.0 || use_source) {
+		for (uint32_t i = 0; i < nodes.size(); ++i) {
+			real_t &temp = thermal_node_temperatures[i];
+			if (ambient_rate > 0.0) {
+				physics_softbody_thermal_relax(temp, ambient, ambient_rate, p_delta);
+			}
+			if (use_source && physics_softbody_thermal_in_source(
+						nodes[i].x, source_center, source_radius)) {
+				physics_softbody_thermal_relax(temp, source_temp, source_rate, p_delta);
+			}
+		}
+	}
+	if (conduction > 0.0) {
+		for (const Link &link : links) {
+			const uint32_t ia = link.n[0]->index;
+			const uint32_t ib = link.n[1]->index;
+			if (ia != ib && ia < thermal_node_temperatures.size() &&
+					ib < thermal_node_temperatures.size()) {
+				physics_softbody_thermal_exchange_pair(
+						thermal_node_temperatures[ia],
+						thermal_node_temperatures[ib], conduction, p_delta);
+			}
+		}
+	}
+
+	// Heating/cooling changes the elastic target, not permanent creep.
+	// Per-link effective rest lengths are computed ONCE per tick, after
+	// viscoplasticity and heat diffusion, and reused by all XPBD passes.
+	if (p_xpbd_enabled && expansion != 0.0 && !links.is_empty()) {
+		thermal_link_rest_lengths.resize(links.size());
+		for (uint32_t i = 0; i < links.size(); ++i) {
+			const Link &link = links[i];
+			real_t rest = link.rl;
+			physics_softbody_thermal_expanded_rest_length(
+					link.rl, thermal_node_temperatures[link.n[0]->index],
+					thermal_node_temperatures[link.n[1]->index],
+					ambient, expansion, rest);
+			thermal_link_rest_lengths[i] = rest;
+		}
+	} else if (!thermal_link_rest_lengths.is_empty()) {
+		thermal_link_rest_lengths.reset();
+	}
+}
+
 void GodotSoftBody3D::solve_constraints(real_t p_delta) {
 	const real_t inv_delta = 1.0 / p_delta;
 
@@ -3873,6 +3954,11 @@ void GodotSoftBody3D::solve_constraints(real_t p_delta) {
 	const double compliance = linear_stiffness > 0.0 ? double(configured_compliance) / double(linear_stiffness) : 0.0;
 	const double alpha_double = p_delta > 0.0 ? compliance / (double(p_delta) * p_delta) : 0.0;
 	const bool use_xpbd = compliance > 0.0 && Math::is_finite(alpha_double) && alpha_double > 0.0;
+	// Opt-in thermal conduction, heating/cooling and reversible edge rest
+	// lengths. Disable all thermal storage/work with the default settings.
+	advance_thermal_material(p_delta, use_xpbd);
+	const bool use_thermal_rest = use_xpbd && !thermal_link_rest_lengths.is_empty() &&
+			thermal_link_rest_lengths.size() == links.size();
 	const real_t tension_hardening = get_space() ? get_space()->get_soft_body_xpbd_tension_hardening() : real_t(0.0);
 	const bool use_tension_hardening = use_xpbd && tension_hardening > real_t(0.0);
 	const real_t compression_hardening = get_space() ? get_space()->get_soft_body_xpbd_compression_hardening() : real_t(0.0);
@@ -4033,6 +4119,7 @@ void GodotSoftBody3D::solve_constraints(real_t p_delta) {
 		const real_t fatigue_yield = use_fatigue ? get_space()->get_soft_body_fatigue_yield_strain() : real_t(0.0);
 		for (uint32_t link_index = 0; link_index < links.size(); ++link_index) {
 			const Link &link = links[link_index];
+			const real_t link_rest = use_thermal_rest ? thermal_link_rest_lengths[link_index] : link.rl;
 			real_t link_alpha = alpha;
 			if (use_anisotropic_stretch) {
 				// Use undeformed mesh coordinates, not live world-space link
@@ -4042,20 +4129,20 @@ void GodotSoftBody3D::solve_constraints(real_t p_delta) {
 			}
 			if (use_tension_hardening) {
 				physics_xpbd_tension_hardening_alpha(link.n[0]->x, link.n[1]->x,
-						link.rl, link_alpha, yield_strain, tension_hardening, link_alpha);
+						link_rest, link_alpha, yield_strain, tension_hardening, link_alpha);
 			}
 			if (use_compression_hardening) {
 				// Tension and compression are disjoint. Preserve the alpha set
 				// above if this link happens to be in tension.
 				physics_xpbd_compression_hardening_alpha(link.n[0]->x, link.n[1]->x,
-						link.rl, link_alpha, compression_yield, compression_hardening, link_alpha);
+						link_rest, link_alpha, compression_yield, compression_hardening, link_alpha);
 			}
 			if (use_fatigue) {
 				// Use predicted deformation, before distance projection.
 				// Damage evolves once per simulation step, never per iteration.
 				real_t &damage = xpbd_link_fatigue_damage[link_index];
 				physics_softbody_accumulate_fatigue_damage(link.n[0]->x, link.n[1]->x,
-						link.rl, fatigue_yield, fatigue_rate, fatigue_max, double(p_delta), damage);
+						link_rest, fatigue_yield, fatigue_rate, fatigue_max, double(p_delta), damage);
 				physics_softbody_fatigue_compliance_alpha(link_alpha, damage, link_alpha);
 			}
 			xpbd_link_hardening_alphas[link_index] = link_alpha;
@@ -4224,7 +4311,8 @@ void GodotSoftBody3D::solve_constraints(real_t p_delta) {
 				Link &link = links[link_index];
 				if (link.c0 > 0.0) {
 					physics_xpbd_solve_distance(link.n[0]->x, link.n[1]->x,
-							link.n[0]->im, link.n[1]->im, link.rl,
+							link.n[0]->im, link.n[1]->im,
+							use_thermal_rest ? thermal_link_rest_lengths[link_index] : link.rl,
 							(use_tension_hardening || use_compression_hardening || use_anisotropic_stretch || use_fatigue) ? xpbd_link_hardening_alphas[link_index] : alpha,
 							xpbd_link_lambdas[link_index]);
 				}
@@ -4238,7 +4326,8 @@ void GodotSoftBody3D::solve_constraints(real_t p_delta) {
 			for (uint32_t link_index = 0; link_index < links.size(); ++link_index) {
 				Link &link = links[link_index];
 				physics_xpbd_solve_strain_limits(link.n[0]->x, link.n[1]->x,
-						link.n[0]->im, link.n[1]->im, link.rl,
+						link.n[0]->im, link.n[1]->im,
+						use_thermal_rest ? thermal_link_rest_lengths[link_index] : link.rl,
 						strain_min_ratio, strain_max_ratio, strain_alpha,
 						xpbd_strain_lambdas[link_index]);
 			}
@@ -4692,6 +4781,8 @@ void GodotSoftBody3D::destroy() {
 	xpbd_link_lambdas.reset();
 	xpbd_link_hardening_alphas.reset();
 	xpbd_link_fatigue_damage.reset();
+	thermal_node_temperatures.reset();
+	thermal_link_rest_lengths.reset();
 	xpbd_strain_lambdas.reset();
 	xpbd_area_lambdas.reset();
 	xpbd_shear_rest_cosines.reset();

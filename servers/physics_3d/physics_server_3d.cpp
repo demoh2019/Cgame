@@ -637,6 +637,17 @@ PhysicsServer3D::PhysicsServer3D() {
 	// Zero preserves legacy behavior; finite positive rates use exponential
 	// relaxation while conserving link momentum and keeping pins fixed.
 	GLOBAL_DEF(PropertyInfo(Variant::FLOAT, "physics/3d/solver/soft_body_link_damping", PROPERTY_HINT_RANGE, "0,1000,0.1,or_greater,suffix:1/s"), 0.0);
+	// Optional thermal graph diffusion and reversible link expansion for XPBD
+	// soft bodies. All rates and expansion default to 0 (legacy physics).
+	// Mesh vertices have equal lumped heat capacity; ambient/source are baths.
+	GLOBAL_DEF(PropertyInfo(Variant::FLOAT, "physics/3d/solver/soft_body_thermal_conduction_rate", PROPERTY_HINT_RANGE, "0,1000,0.1,or_greater,suffix:1/s"), 0.0);
+	GLOBAL_DEF(PropertyInfo(Variant::FLOAT, "physics/3d/solver/soft_body_thermal_ambient_exchange_rate", PROPERTY_HINT_RANGE, "0,1000,0.1,or_greater,suffix:1/s"), 0.0);
+	GLOBAL_DEF(PropertyInfo(Variant::FLOAT, "physics/3d/solver/soft_body_thermal_ambient_temperature", PROPERTY_HINT_RANGE, "-273,2000,1,or_greater"), 20.0);
+	GLOBAL_DEF(PropertyInfo(Variant::FLOAT, "physics/3d/solver/soft_body_thermal_source_rate", PROPERTY_HINT_RANGE, "0,1000,0.1,or_greater,suffix:1/s"), 0.0);
+	GLOBAL_DEF(PropertyInfo(Variant::FLOAT, "physics/3d/solver/soft_body_thermal_source_temperature", PROPERTY_HINT_RANGE, "-273,2000,1,or_greater"), 100.0);
+	GLOBAL_DEF(PropertyInfo(Variant::VECTOR3, "physics/3d/solver/soft_body_thermal_source_center"), Vector3());
+	GLOBAL_DEF(PropertyInfo(Variant::FLOAT, "physics/3d/solver/soft_body_thermal_source_radius", PROPERTY_HINT_RANGE, "0,10000,0.1,or_greater,suffix:m"), 0.0);
+	GLOBAL_DEF(PropertyInfo(Variant::FLOAT, "physics/3d/solver/soft_body_thermal_expansion_coefficient", PROPERTY_HINT_RANGE, "-0.01,0.01,0.00001,or_greater"), 0.0);
 	// Nonlinear viscous dashpot for fast link compression/stretching, which
 	// reacts to strain rate rather than applying the same damping at all speeds.
 	// 0 keeps the legacy simulation and avoids extra O(links) work.
