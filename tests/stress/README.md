@@ -1,5 +1,34 @@
 # Cgame whole-engine stress and performance regression suite
 
+## Bounded idle BVH changed-proxy queue retention
+
+The shared Cgame BVH used by GodotPhysics2D/3D and other spatial clients
+stores changed proxy handles in a reusable transient vector. After a large
+spawn/move burst, it may retain much more capacity than an idle world needs.
+
+When `BVH_Manager::update()` sees 16 consecutive idle updates and capacity is
+above 4096 handles, it resets that transient vector. Any busy update restarts
+the counter; routine updates keep their capacity to avoid allocation churn.
+Collision pairs and callbacks continue unchanged.
+
+A native test inserts 5000 separated proxies, checks deferred-pair processing,
+idle retention, capacity reclamation, and subsequent collision callbacks.
+
+```bash
+# Build Cgame with tests=yes, then run:
+./bin/godot.linuxbsd.editor.dev.x86_64 --headless --test --test-case="[BVH] Large changed-proxy queues are released after idle frames"
+
+# Compare baseline and patched builds on the same hardware:
+python3 tests/stress/run.py \
+  --godot ./bin/godot.linuxbsd.editor.dev.x86_64 \
+  --case physics_proxies_2d,physics_proxies_3d,physics_pending_3d \
+  --scale 16 --repeats 5 --frames 120 --output out/bvh-idle-reclaim.json
+```
+
+**Note:** freeing a temporary vector does not by itself prove lower process
+RSS or faster frames. Native runtime and before/after measurements are required.
+
+
 Independent, reproducible workloads for CPU, script execution, object lifetime,
 allocation churn, scene-tree mutations, physics, IO, data codecs, threads and
 render-node throughput. A Python watchdog samples *process resident RAM* and
