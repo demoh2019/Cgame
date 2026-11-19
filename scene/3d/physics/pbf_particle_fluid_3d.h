@@ -32,6 +32,7 @@
 #include "scene/3d/node_3d.h"
 #include "servers/physics_pbf_3d.h"
 #include "servers/physics_pbf_rigid_coupling_3d.h"
+#include "servers/physics_pbf_vorticity_3d.h"
 
 // Experimental CPU PBF fluid: a scene node (not a PhysicsServer3D backend
 // replacement) using density constraints, finite-support SPH kernels and
@@ -51,6 +52,8 @@ class PBFParticleFluid3D : public Node3D {
 	Vector<Vector3> predicted;
 	Vector<Vector3> corrections;
 	Vector<Vector3> smoothed_velocities;
+	Vector<Vector3> vorticities;
+	Vector<Vector3> confinement_updates;
 	Vector<real_t> lambdas;
 	Vector<real_t> densities;
 	Vector<PhysicsPBFCell3D> cells;
@@ -68,6 +71,10 @@ class PBFParticleFluid3D : public Node3D {
 	real_t particle_radius = 0.055;
 	real_t artificial_pressure = 0.002;
 	real_t xsph_viscosity = 0.015;
+	real_t vorticity_confinement = 0.0;
+	real_t vorticity_max_velocity_change = 0.12;
+	real_t average_vorticity = 0.0;
+	uint64_t last_vorticity_neighbor_evaluations = 0;
 	real_t boundary_restitution = 0.1;
 	Vector3 gravity = Vector3(0, -9.8, 0);
 	Vector3 box_min = Vector3(-2, 0, -2);
@@ -81,6 +88,7 @@ class PBFParticleFluid3D : public Node3D {
 	void _solve_density_constraints();
 	void _apply_density_corrections();
 	void _apply_xsph_viscosity();
+	void _apply_vorticity_confinement(real_t p_delta);
 	void _resolve_world_collisions(const Vector3 &p_old, Vector3 &r_predicted, Vector3 &r_velocity);
 	void _step_once(real_t p_delta);
 protected:
@@ -115,6 +123,10 @@ public:
 	real_t get_artificial_pressure() const { return artificial_pressure; }
 	void set_xsph_viscosity(real_t p_viscosity);
 	real_t get_xsph_viscosity() const { return xsph_viscosity; }
+	void set_vorticity_confinement(real_t p_strength);
+	real_t get_vorticity_confinement() const { return vorticity_confinement; }
+	void set_vorticity_max_velocity_change(real_t p_maximum);
+	real_t get_vorticity_max_velocity_change() const { return vorticity_max_velocity_change; }
 	void set_boundary_restitution(real_t p_restitution);
 	real_t get_boundary_restitution() const { return boundary_restitution; }
 	void set_gravity(const Vector3 &p_gravity);
@@ -132,6 +144,8 @@ public:
 	int add_velocity_pulse(const Vector3 &p_center, real_t p_radius, const Vector3 &p_delta_velocity);
 	int get_particle_count() const { return positions.size(); }
 	real_t get_average_density() const { return average_density; }
+	real_t get_average_vorticity() const { return average_vorticity; }
+	int get_last_vorticity_neighbor_evaluations() const { return int(MIN(last_vorticity_neighbor_evaluations, uint64_t(2147483647))); }
 	int get_last_neighbor_evaluations() const { return int(MIN(last_neighbor_evaluations, uint64_t(2147483647))); }
 
 	bool step(real_t p_delta);
