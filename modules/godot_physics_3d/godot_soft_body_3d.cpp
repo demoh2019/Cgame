@@ -1025,6 +1025,15 @@ void GodotSoftBody3D::initialize_dihedral_constraints() {
 		hinge.c = edge.c;
 		hinge.d = edge.d;
 		hinge.rest_angle = rest_angle;
+		// The crease edge is the bend axis. Determine its material response
+		// from the undeformed, mesh-local direction, not the world-space
+		// direction after the soft body moves or folds.
+		const real_t bend_ratio = get_space()->get_soft_body_xpbd_bend_parallel_compliance_ratio();
+		if (bend_ratio != real_t(1.0)) {
+			physics_xpbd_anisotropic_stretch_alpha(nodes[edge.a].s, nodes[edge.b].s,
+					get_space()->get_soft_body_xpbd_material_axis(), real_t(1.0),
+					bend_ratio, hinge.bend_compliance_ratio);
+		}
 		xpbd_dihedral_hinges.push_back(hinge);
 	}
 }
@@ -3671,9 +3680,17 @@ void GodotSoftBody3D::solve_constraints(real_t p_delta) {
 				Node &b = nodes[hinge.b];
 				Node &c = nodes[hinge.c];
 				Node &d = nodes[hinge.d];
+				// No change to legacy alpha for the default isotropic setting.
+				// For directional bending, clamp the double intermediate before
+				// converting to real_t to avoid overflowing large timesteps.
+				const double scaled_alpha = double(dihedral_alpha) * double(hinge.bend_compliance_ratio);
+				const real_t hinge_alpha = hinge.bend_compliance_ratio == real_t(1.0) ?
+						dihedral_alpha : real_t(Math::is_finite(scaled_alpha) ?
+								MIN(scaled_alpha, double(std::numeric_limits<real_t>::max())) :
+								double(std::numeric_limits<real_t>::max()));
 				physics_xpbd_solve_dihedral(a.x, b.x, c.x, d.x,
 						a.im, b.im, c.im, d.im, hinge.rest_angle,
-						dihedral_alpha, xpbd_dihedral_lambdas[hinge_index]);
+						hinge_alpha, xpbd_dihedral_lambdas[hinge_index]);
 			}
 		}
 		if (shape_matching_iteration_strength > 0.0) {
