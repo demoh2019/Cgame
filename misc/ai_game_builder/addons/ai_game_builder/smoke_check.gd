@@ -39,8 +39,9 @@ func _check() -> void:
 		return
 	file.store_string(JSON.stringify(report))
 	file.close()
+	var reported_errors: Array = report.get("errors", [])
 	print("AI Game Builder headless check: %d resources, %d errors" % [
-		int(report.get("checked", 0)), Array(report.get("errors", [])).size()
+		int(report.get("checked", 0)), reported_errors.size()
 	])
 	quit(0 if report.ok else 1)
 
