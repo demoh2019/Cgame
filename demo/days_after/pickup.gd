@@ -30,6 +30,8 @@ func _ready() -> void:
 func interact(player: Node) -> void:
     if collected or quantity <= 0 or not player.has_method("collect_item"):
         return
+    if quantity <= 0 or float(player.get("health")) <= 0.0:
+        return
     if item_type != "food" and item_type != "water":
         return
     collected = true
