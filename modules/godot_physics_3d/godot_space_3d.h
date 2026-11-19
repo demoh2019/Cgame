@@ -147,6 +147,8 @@ private:
 	real_t soft_body_tetra_fem_poisson_ratio = 0.3;
 	real_t soft_body_xpbd_shear_compliance = 0.0; // Opt-in angular shear preservation.
 	real_t soft_body_xpbd_dihedral_compliance = 0.0; // Opt-in angle-based cloth bending.
+	real_t soft_body_xpbd_bend_weft_ratio = 1.0; // 1: isotropic, zero extra buffers.
+	Vector3 soft_body_xpbd_bend_warp_axis = Vector3(1, 0, 0); // Mesh-local warp axis.
 	real_t soft_body_shape_matching_stiffness = 0.0; // Optional global shape recovery.
 	int soft_body_shape_matching_cluster_size = 0; // 0 global; 3..64 local BFS cores.
 	real_t soft_body_dihedral_damping = 0.0; // Opt-in angular dashpot rate, 1/s.
@@ -296,6 +298,8 @@ public:
 	_FORCE_INLINE_ real_t get_soft_body_membrane_damping_rate() const { return soft_body_membrane_damping_rate; }
 	_FORCE_INLINE_ real_t get_soft_body_xpbd_shear_compliance() const { return soft_body_xpbd_shear_compliance; }
 	_FORCE_INLINE_ real_t get_soft_body_xpbd_dihedral_compliance() const { return soft_body_xpbd_dihedral_compliance; }
+	_FORCE_INLINE_ real_t get_soft_body_xpbd_bend_weft_ratio() const { return soft_body_xpbd_bend_weft_ratio; }
+	_FORCE_INLINE_ Vector3 get_soft_body_xpbd_bend_warp_axis() const { return soft_body_xpbd_bend_warp_axis; }
 	_FORCE_INLINE_ real_t get_soft_body_shape_matching_stiffness() const { return soft_body_shape_matching_stiffness; }
 	_FORCE_INLINE_ int get_soft_body_shape_matching_cluster_size() const { return soft_body_shape_matching_cluster_size; }
 	_FORCE_INLINE_ real_t get_soft_body_dihedral_damping() const { return soft_body_dihedral_damping; }
