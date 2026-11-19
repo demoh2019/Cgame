@@ -356,6 +356,13 @@ public:
 	virtual void joint_set_break_force(RID p_joint, real_t p_force) {}
 	virtual real_t joint_get_break_force(RID p_joint) const { return 0.0; }
 	virtual void joint_set_break_torque(RID p_joint, real_t p_torque) {}
+	// Optional progressive fatigue fracture under sustained subcritical loads.
+	// Requires at least one nonzero instantaneous break-force/torque threshold.
+	virtual void joint_set_fatigue_rate(RID p_joint, real_t p_rate) {}
+	virtual real_t joint_get_fatigue_rate(RID p_joint) const { return 0.0; }
+	virtual void joint_set_fatigue_yield_ratio(RID p_joint, real_t p_ratio) {}
+	virtual real_t joint_get_fatigue_yield_ratio(RID p_joint) const { return 0.5; }
+	virtual real_t joint_get_fatigue_damage(RID p_joint) const { return 0.0; }
 	virtual real_t joint_get_break_torque(RID p_joint) const { return 0.0; }
 	virtual Vector3 joint_get_reaction_force(RID p_joint) const { return Vector3(); }
 	virtual Vector3 joint_get_reaction_torque(RID p_joint) const { return Vector3(); }

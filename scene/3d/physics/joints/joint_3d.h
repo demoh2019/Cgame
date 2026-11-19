@@ -47,6 +47,8 @@ class Joint3D : public Node3D {
 	bool exclude_from_collision = true;
 	real_t break_force = 0.0;
 	real_t break_torque = 0.0;
+	real_t fatigue_rate = 0.0;
+	real_t fatigue_yield_ratio = 0.5;
 	String warning;
 	bool configured = false;
 
@@ -84,6 +86,11 @@ public:
 	real_t get_break_force() const;
 	void set_break_torque(real_t p_torque);
 	real_t get_break_torque() const;
+	void set_fatigue_rate(real_t p_rate);
+	real_t get_fatigue_rate() const;
+	void set_fatigue_yield_ratio(real_t p_ratio);
+	real_t get_fatigue_yield_ratio() const;
+	real_t get_fatigue_damage() const;
 	bool is_broken() const;
 	Vector3 get_reaction_force() const;
 	Vector3 get_reaction_torque() const;
