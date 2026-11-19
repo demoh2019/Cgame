@@ -601,18 +601,19 @@ GodotPhysicsDirectSpaceState3D::GodotPhysicsDirectSpaceState3D() {
 
 int GodotSpace3D::_cull_aabb_for_body(GodotBody3D *p_body, const AABB &p_aabb, const PS3DT::MotionParameters &p_parameters) {
 	// Jolt-style early filtering: unrelated areas, soft bodies and collision
-	// exceptions must not consume the fixed-size motion candidate buffer.
-	// In dense worlds, filtering only AFTER cull_aabb() could discard the
-	// first 2048 results and miss a valid obstacle later in the BVH.
+	// exceptions must not consume the motion query results.
+	// In dense worlds, filtering before collection avoids unnecessary
+	// narrowphase work, while the buffers grow to fit all valid candidates.
 	struct MotionCullData {
 		GodotBody3D *body;
 		const PS3DT::MotionParameters &params;
-		GodotCollisionObject3D **results;
-		int *subindices;
-		int capacity;
-		int count = 0;
+		LocalVector<GodotCollisionObject3D *> &results;
+		LocalVector<int> &subindices;
 	};
-	MotionCullData data = { p_body, p_parameters, intersection_query_results, intersection_query_subindex_results, INTERSECTION_QUERY_MAX };
+	// Retain capacity across queries; newly allocated pages are paid for only when needed.
+	intersection_query_results.clear();
+	intersection_query_subindex_results.clear();
+	MotionCullData data = { p_body, p_parameters, intersection_query_results, intersection_query_subindex_results };
 
 	auto visitor = [](GodotCollisionObject3D *p_object, int p_subindex, void *p_userdata) -> bool {
 		MotionCullData &query = *static_cast<MotionCullData *>(p_userdata);
@@ -633,14 +634,13 @@ int GodotSpace3D::_cull_aabb_for_body(GodotBody3D *p_body, const AABB &p_aabb, c
 			return true;
 		}
 
-		query.results[query.count] = p_object;
-		query.subindices[query.count] = p_subindex;
-		++query.count;
-		return query.count < query.capacity;
+		query.results.push_back(p_object);
+		query.subindices.push_back(p_subindex);
+		return true;
 	};
 
 	broadphase->visit_aabb(p_aabb, visitor, &data);
-	return data.count;
+	return intersection_query_results.size();
 }
 
 bool GodotSpace3D::test_body_motion(GodotBody3D *p_body, const PS3DT::MotionParameters &p_parameters, PS3DT::MotionResult *r_result) {
