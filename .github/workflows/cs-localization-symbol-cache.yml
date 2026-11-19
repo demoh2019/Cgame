@@ -1,0 +1,48 @@
+name: C# localization symbol cache performance regressions
+
+on:
+  pull_request:
+    branches: [develop]
+    paths:
+      - "doc/classes/EditorTranslationParserPlugin.xml"
+      - "editor/translations/**"
+      - "modules/mono/editor/GodotTools/GodotTools/CsTranslationParserPlugin.cs"
+      - "misc/scripts/tests/test_cs_localization_symbols_cache.py"
+      - ".github/workflows/cs-localization-symbol-cache.yml"
+  push:
+    branches: [develop]
+    paths:
+      - "doc/classes/EditorTranslationParserPlugin.xml"
+      - "editor/translations/**"
+      - "modules/mono/editor/GodotTools/GodotTools/CsTranslationParserPlugin.cs"
+      - "misc/scripts/tests/test_cs_localization_symbols_cache.py"
+      - ".github/workflows/cs-localization-symbol-cache.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  source-contracts:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - name: Verify project-symbol cache contract
+        run: |
+          python3 -m py_compile misc/scripts/tests/test_cs_localization_symbols_cache.py
+          python3 -m unittest discover -s misc/scripts/tests -p test_cs_localization_symbols_cache.py -v
+
+  editor-mono-compile:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+      - uses: ./.github/actions/godot-deps
+      - uses: ./.github/actions/godot-build
+        with:
+          platform: linuxbsd
+          target: editor
+          scons-flags: dev_build=yes tests=yes debug_symbols=no module_mono_enabled=yes accesskit=no
