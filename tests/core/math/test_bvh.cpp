@@ -316,6 +316,14 @@ TEST_CASE("[BVH] 3D convex traversal prunes sparse subtrees without losing hits"
 		CHECK(results[i]->value <= 50);
 	}
 
+	// A slanted clipping plane exercises partial nodes and cutting-plane
+	// optimization, not only axis-aligned box/frustum classification.
+	Vector<Plane> slanted_hull = hull_between_x(-20, 20);
+	slanted_hull.push_back(Plane(Vector3(1, 1, 0).normalized(), 6.0));
+	CountingCullTest::calls = 0;
+	CHECK(tree.cull_convex(slanted_hull, results, COUNT, nullptr) == 4);
+	CHECK(CountingCullTest::calls == 4);
+
 	// Child pruning cannot change tree-mask filtering or output caps.
 	CountingCullTest::calls = 0;
 	CHECK(tree.cull_convex(hull_between_x(-20, 20), results, COUNT, nullptr, 1) == 3);
