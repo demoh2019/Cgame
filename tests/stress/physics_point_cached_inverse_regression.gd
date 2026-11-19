@@ -5,6 +5,7 @@
 extends SceneTree
 
 const COUNT := 256
+const REPEATS := 32
 const GRID := 16
 const SPACING := 14.0
 
@@ -51,11 +52,12 @@ func _test_2d() -> Dictionary:
 	var state := PhysicsServer2D.space_get_direct_state(space)
 	var begin := Time.get_ticks_usec()
 	var failures := 0
-	for i in range(COUNT):
-		query.position = world_points[i]
-		var hits := state.intersect_point(query, 2)
-		if hits.size() != 1 or hits[0].rid != bodies[i]:
-			failures += 1
+	for repetition in range(REPEATS):
+		for i in range(COUNT):
+			query.position = world_points[i]
+			var hits := state.intersect_point(query, 2)
+			if hits.size() != 1 or hits[0].rid != bodies[i]:
+				failures += 1
 	var elapsed := Time.get_ticks_usec() - begin
 
 	query.position = world_points[0]
@@ -88,7 +90,7 @@ func _test_2d() -> Dictionary:
 	if failures != 0 or not mask_ok or not exclude_ok or not move_ok or not old_position_empty:
 		return {"error": "2D cached point inverse changed hit results", "failures": failures,
 				"mask": mask_ok, "exclude": exclude_ok, "moved": move_ok, "old_empty": old_position_empty}
-	return {"bodies": COUNT, "query_us": elapsed, "moved_and_updated": true}
+	return {"bodies": COUNT, "queries": COUNT * REPEATS, "query_us": elapsed, "moved_and_updated": true}
 
 
 func _test_3d() -> Dictionary:
@@ -118,11 +120,12 @@ func _test_3d() -> Dictionary:
 	var state := PhysicsServer3D.space_get_direct_state(space)
 	var begin := Time.get_ticks_usec()
 	var failures := 0
-	for i in range(COUNT):
-		query.position = world_points[i]
-		var hits := state.intersect_point(query, 2)
-		if hits.size() != 1 or hits[0].rid != bodies[i]:
-			failures += 1
+	for repetition in range(REPEATS):
+		for i in range(COUNT):
+			query.position = world_points[i]
+			var hits := state.intersect_point(query, 2)
+			if hits.size() != 1 or hits[0].rid != bodies[i]:
+				failures += 1
 	var elapsed := Time.get_ticks_usec() - begin
 
 	query.position = world_points[0]
@@ -155,4 +158,4 @@ func _test_3d() -> Dictionary:
 	if failures != 0 or not mask_ok or not exclude_ok or not move_ok or not old_position_empty:
 		return {"error": "3D cached point inverse changed hit results", "failures": failures,
 				"mask": mask_ok, "exclude": exclude_ok, "moved": move_ok, "old_empty": old_position_empty}
-	return {"bodies": COUNT, "query_us": elapsed, "moved_and_updated": true}
+	return {"bodies": COUNT, "queries": COUNT * REPEATS, "query_us": elapsed, "moved_and_updated": true}
