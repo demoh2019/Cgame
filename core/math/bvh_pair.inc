@@ -54,8 +54,16 @@ struct ItemPairs {
 		extended_pairs.remove_at_unordered(p_index);
 		// Avoid pinning a large allocation to an object after a temporary
 		// high-density contact event. Keep small buffers for contact churn.
-		if (extended_pairs.is_empty() && extended_pairs.get_capacity() > 8) {
-			extended_pairs.reset();
+		const uint32_t capacity = extended_pairs.get_capacity();
+		const uint32_t count = extended_pairs.size();
+		if (count == 0) {
+			if (capacity > 8) {
+				extended_pairs.reset();
+			}
+		} else if (capacity >= 64 && count <= capacity / 8) {
+			// Dense clusters may dissolve without reaching zero contacts.
+			// Keep twice the live count to provide hysteresis for new pairs.
+			extended_pairs.shrink_to(MAX(uint32_t(8), count * 2));
 		}
 		return userdata;
 	}
