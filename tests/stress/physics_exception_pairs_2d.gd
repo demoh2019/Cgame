@@ -3,69 +3,68 @@ extends RefCounted
 ## Removing an exception must restore a contact without moving either body.
 
 func run(tree: SceneTree, scale: int, frames: int) -> Dictionary:
-	var server := PhysicsServer2D
-	var space := server.space_create()
-	var shape := server.circle_shape_create()
-	server.shape_set_data(shape, 0.5)
-	var mover := server.body_create()
-	server.body_set_mode(mover, server.BODY_MODE_KINEMATIC)
-	server.body_add_shape(mover, shape)
-	server.body_set_state(mover, server.BODY_STATE_TRANSFORM, Transform2D.IDENTITY)
-	server.body_set_space(mover, space)
+	var space := PhysicsServer2D.space_create()
+	var shape := PhysicsServer2D.circle_shape_create()
+	PhysicsServer2D.shape_set_data(shape, 0.5)
+	var mover := PhysicsServer2D.body_create()
+	PhysicsServer2D.body_set_mode(mover, PhysicsServer2D.BODY_MODE_KINEMATIC)
+	PhysicsServer2D.body_add_shape(mover, shape)
+	PhysicsServer2D.body_set_state(mover, PhysicsServer2D.BODY_STATE_TRANSFORM, Transform2D.IDENTITY)
+	PhysicsServer2D.body_set_space(mover, space)
 	var count := 128 * mini(scale, 8)
 	var obstacles: Array[RID] = []
 	obstacles.resize(count)
 	var begin := Time.get_ticks_usec()
 	for i in range(count):
-		var obstacle := server.body_create()
-		server.body_set_mode(obstacle, server.BODY_MODE_STATIC)
-		server.body_add_shape(obstacle, shape)
-		server.body_set_state(obstacle, server.BODY_STATE_TRANSFORM, Transform2D(0.0, Vector2(0.25, 0.0)))
-		server.body_set_space(obstacle, space)
+		var obstacle := PhysicsServer2D.body_create()
+		PhysicsServer2D.body_set_mode(obstacle, PhysicsServer2D.BODY_MODE_STATIC)
+		PhysicsServer2D.body_add_shape(obstacle, shape)
+		PhysicsServer2D.body_set_state(obstacle, PhysicsServer2D.BODY_STATE_TRANSFORM, Transform2D(0.0, Vector2(0.25, 0.0)))
+		PhysicsServer2D.body_set_space(obstacle, space)
 		obstacles[i] = obstacle
-	server.space_set_active(space, true)
+	PhysicsServer2D.space_set_active(space, true)
 	await tree.physics_frame
 	await tree.physics_frame
 	var creation_ms := float(Time.get_ticks_usec() - begin) / 1000.0
-	var pairs_initial := server.get_process_info(server.INFO_COLLISION_PAIRS)
+	var pairs_initial := PhysicsServer2D.get_process_info(PhysicsServer2D.INFO_COLLISION_PAIRS)
 
 	# A BVH pair must be discarded even if the bodies never move.
 	var exclude_start := Time.get_ticks_usec()
 	for obstacle in obstacles:
-		server.body_add_collision_exception(mover, obstacle)
+		PhysicsServer2D.body_add_collision_exception(mover, obstacle)
 	await tree.physics_frame
 	await tree.physics_frame
 	var exclude_ms := float(Time.get_ticks_usec() - exclude_start) / 1000.0
-	var pairs_excluded := server.get_process_info(server.INFO_COLLISION_PAIRS)
+	var pairs_excluded := PhysicsServer2D.get_process_info(PhysicsServer2D.INFO_COLLISION_PAIRS)
 
 	var restore_start := Time.get_ticks_usec()
 	for obstacle in obstacles:
-		server.body_remove_collision_exception(mover, obstacle)
+		PhysicsServer2D.body_remove_collision_exception(mover, obstacle)
 	await tree.physics_frame
 	await tree.physics_frame
 	var restore_ms := float(Time.get_ticks_usec() - restore_start) / 1000.0
-	var pairs_restored := server.get_process_info(server.INFO_COLLISION_PAIRS)
+	var pairs_restored := PhysicsServer2D.get_process_info(PhysicsServer2D.INFO_COLLISION_PAIRS)
 
 	# After repopulating, check the reverse direction of the exception.
 	var reverse_start := Time.get_ticks_usec()
 	for obstacle in obstacles:
-		server.body_add_collision_exception(obstacle, mover)
+		PhysicsServer2D.body_add_collision_exception(obstacle, mover)
 	await tree.physics_frame
 	await tree.physics_frame
-	var pairs_reverse_excluded := server.get_process_info(server.INFO_COLLISION_PAIRS)
+	var pairs_reverse_excluded := PhysicsServer2D.get_process_info(PhysicsServer2D.INFO_COLLISION_PAIRS)
 	for obstacle in obstacles:
-		server.body_remove_collision_exception(obstacle, mover)
+		PhysicsServer2D.body_remove_collision_exception(obstacle, mover)
 	await tree.physics_frame
 	await tree.physics_frame
 	var reverse_ms := float(Time.get_ticks_usec() - reverse_start) / 1000.0
-	var pairs_reverse_restored := server.get_process_info(server.INFO_COLLISION_PAIRS)
+	var pairs_reverse_restored := PhysicsServer2D.get_process_info(PhysicsServer2D.INFO_COLLISION_PAIRS)
 
-	server.space_set_active(space, false)
+	PhysicsServer2D.space_set_active(space, false)
 	for obstacle in obstacles:
-		server.free_rid(obstacle)
-	server.free_rid(mover)
-	server.free_rid(shape)
-	server.free_rid(space)
+		PhysicsServer2D.free_rid(obstacle)
+	PhysicsServer2D.free_rid(mover)
+	PhysicsServer2D.free_rid(shape)
+	PhysicsServer2D.free_rid(space)
 
 	# Other active spaces, if any, add a constant baseline. Compare deltas.
 	var passed := (
