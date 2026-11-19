@@ -8,7 +8,7 @@ const SaveValidation = preload("res://scripts/shared/save_validation.gd")
 const MAX_RENOWN := 10000
 const RANK_POINTS := [0, 40, 160, 500]
 const RANK_NAMES := ["Newcomer", "Settler", "Ranger", "Warden"]
-const SHOP_DISCOUNTS := [0, 5, 10, 15]
+const SHOP_DISCOUNTS := [0, 10, 15, 20]
 const CONTRACT_RENOWN := 8
 
 
