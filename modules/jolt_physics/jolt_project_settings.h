@@ -52,6 +52,10 @@ public:
 	// Used when constructing a soft body; existing bodies retain their constraints.
 	inline static int soft_body_bend_mode = 0;
 	inline static float soft_body_bend_compliance = 0.001f;
+	// Optional tether constraints between pinned and dynamic cloth vertices.
+	// The expensive geodesic distance computation runs only during creation.
+	inline static int soft_body_lra_mode = 0;
+	inline static float soft_body_lra_max_distance_multiplier = 1.0f;
 	inline static float bounce_velocity_threshold;
 	inline static bool sleep_allowed;
 	inline static float sleep_velocity_threshold;
