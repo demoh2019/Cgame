@@ -197,8 +197,10 @@ Vector<String> ResourceSaver::get_recognized_extensions(RequiredParam<Resource> 
 	List<String> exts;
 	::ResourceSaver::get_recognized_extensions(resource, &exts);
 	Vector<String> ret;
+	ret.resize(exts.size());
+	int idx = 0;
 	for (const String &E : exts) {
-		ret.push_back(E);
+		ret.set(idx++, E);
 	}
 	return ret;
 }
@@ -1753,9 +1755,11 @@ TypedArray<Dictionary> ClassDB::class_get_method_list(const StringName &p_class,
 	List<MethodInfo> methods;
 	::ClassDB::get_method_list(p_class, &methods, p_no_inheritance);
 	TypedArray<Dictionary> ret;
+	ret.resize(methods.size());
+	int idx = 0;
 
 	for (const MethodInfo &method : methods) {
-		ret.push_back(method.operator Dictionary());
+		ret.set(idx++, method.operator Dictionary());
 	}
 
 	return ret;
