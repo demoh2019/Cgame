@@ -1294,6 +1294,18 @@ GodotSpace3D::GodotSpace3D() {
 			MAX(real_t(0.0), configured_strain_compliance) : real_t(0.0);
 	const real_t configured_xpbd_compliance = GLOBAL_GET("physics/3d/solver/soft_body_xpbd_compliance");
 	soft_body_xpbd_compliance = Math::is_finite(configured_xpbd_compliance) ? MAX(real_t(0.0), configured_xpbd_compliance) : real_t(0.0);
+	const real_t configured_parallel_ratio = GLOBAL_GET("physics/3d/solver/soft_body_xpbd_parallel_compliance_ratio");
+	soft_body_xpbd_parallel_compliance_ratio = Math::is_finite(configured_parallel_ratio) ?
+			CLAMP(configured_parallel_ratio, real_t(0.01), real_t(100.0)) : real_t(1.0);
+	const Vector3 configured_material_axis = GLOBAL_GET("physics/3d/solver/soft_body_xpbd_material_axis");
+	// Do not normalize in float32 when inputs could overflow the squared length.
+	const double material_ax = double(configured_material_axis.x);
+	const double material_ay = double(configured_material_axis.y);
+	const double material_az = double(configured_material_axis.z);
+	const double material_axis_sq = material_ax * material_ax + material_ay * material_ay + material_az * material_az;
+	soft_body_xpbd_material_axis = configured_material_axis.is_finite() &&
+			Math::is_finite(material_axis_sq) && material_axis_sq > 1e-24 ?
+			configured_material_axis : Vector3(1, 0, 0);
 	const real_t configured_tension_hardening = GLOBAL_GET("physics/3d/solver/soft_body_xpbd_tension_hardening");
 	soft_body_xpbd_tension_hardening = Math::is_finite(configured_tension_hardening) ? MAX(real_t(0.0), configured_tension_hardening) : real_t(0.0);
 	const real_t configured_compression_hardening = GLOBAL_GET("physics/3d/solver/soft_body_xpbd_compression_hardening");
