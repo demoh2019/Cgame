@@ -7,6 +7,7 @@ signal sample_signal(value: int)
 const PREFIX := "STRESS_RESULT:"
 const ExtraStress := preload("res://extra_stress.gd")
 const GridReflowStress := preload("res://grid_reflow.gd")
+const BoxReflowStress := preload("res://box_reflow.gd")
 const BitMapMorphologyStress := preload("res://bitmap_morphology.gd")
 const PressureStress := preload("res://pressure_scenarios.gd")
 const CASES := [
@@ -14,7 +15,7 @@ const CASES := [
 	"scene_tree", "packed_scene", "images", "json", "stream", "stream_bulk",
 	"file_io", "threads", "physics_2d", "physics_3d", "physics_sparse_2d", "physics_sparse_3d",
 	"object_churn", "memory_churn", "astar_grid", "astar_grid_neighbors", "astar_grid_rebuild", "astar_relax_2d", "astar_relax_3d", "astar_graph", "tweens", "audio_buffers",
-	"variant_codec", "packet_stream", "packet_tx_batch", "packet_rx_batch", "packet_variant_reuse", "ui_layout", "grid_reflow", "render_2d", "render_3d", "render_ellipse_2d",
+	"variant_codec", "packet_stream", "packet_tx_batch", "packet_rx_batch", "packet_variant_reuse", "ui_layout", "grid_reflow", "box_reflow", "render_2d", "render_3d", "render_ellipse_2d",
 	"resource_load",
 	"input_map",
 	"transform_hierarchy",
@@ -239,6 +240,8 @@ func _run_case(test_case: String, scale: int, frames: int, seed: int) -> Diction
 			return await _ui_layout(scale, frames)
 		"grid_reflow":
 			return await GridReflowStress.new().run(self, scale, frames)
+		"box_reflow":
+			return await BoxReflowStress.new().run(self, scale, frames)
 		"physics_2d":
 			return await _physics_2d(scale, frames)
 		"physics_3d":
