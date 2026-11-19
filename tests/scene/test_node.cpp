@@ -858,6 +858,180 @@ TEST_CASE("[SceneTree][Node] Test the processing") {
 	memdelete(node);
 }
 
+static Node *make_node(const StringName &p_name, Node *p_parent, Node *p_owner = nullptr) {
+	Node *n = memnew(Node);
+	n->set_name(p_name);
+	if (p_parent) {
+		p_parent->add_child(n);
+	}
+	if (p_owner) {
+		n->set_owner(p_owner);
+	}
+	return n;
+}
+
+TEST_CASE("[SceneTree][Node] get_path_to") {
+	/*
+		root              Scene 1 [   C0
+		 |                        [   |
+		 A1         B1            [   C1
+		 |          |             [   |
+		 A2         B2            [   %C2
+		/  \       /  \           [  /  \
+	   A3  A4     B3  B4          [ C3  C4 ] Scene 2
+	   |    |     |    |          [ |    | ]
+	   A5  A6     B5  B6          [ %C5 C6 ]
+	*/
+	Node *a1 = make_node("A1", SceneTree::get_singleton()->get_root());
+	Node *a2 = make_node("A2", a1);
+	Node *a3 = make_node("A3", a2);
+	Node *a4 = make_node("A4", a2);
+	Node *a5 = make_node("A5", a3);
+	Node *a6 = make_node("A6", a4);
+
+	Node *b1 = make_node("B1", nullptr);
+	Node *b2 = make_node("B2", b1);
+	Node *b3 = make_node("B3", b2);
+	Node *b4 = make_node("B4", b2);
+	Node *b5 = make_node("B5", b3);
+	Node *b6 = make_node("B6", b4);
+
+	Node *c0 = make_node("C0", nullptr);
+	Node *c1 = make_node("C1", c0, c0);
+	Node *c2 = make_node("C2", c1, c0);
+	c2->set_unique_name_in_owner(true);
+	Node *c3 = make_node("C3", c2, c0);
+	Node *c4 = make_node("C4", c2, c0);
+	Node *c5 = make_node("C5", c3, c0);
+	c5->set_unique_name_in_owner(true);
+	Node *c6 = make_node("C6", c4, c4);
+
+	SUBCASE("Path to self") {
+		CHECK_EQ(a1->get_path_to(a1), NodePath("."));
+		CHECK_EQ(b3->get_path_to(b3), NodePath("."));
+		CHECK_EQ(c6->get_path_to(c6, true), NodePath("."));
+		CHECK_EQ(c2->get_path_to(c2, true), NodePath("."));
+	}
+
+	SUBCASE("Path to child") {
+		CHECK_EQ(b1->get_path_to(b5), NodePath("B2/B3/B5"));
+		CHECK_EQ(b2->get_path_to(b6), NodePath("B4/B6"));
+		CHECK_EQ(b4->get_path_to(b6), NodePath("B6"));
+
+		CHECK_EQ(a1->get_path_to(a5), NodePath("A2/A3/A5"));
+		CHECK_EQ(a2->get_path_to(a6), NodePath("A4/A6"));
+		CHECK_EQ(a4->get_path_to(a6), NodePath("A6"));
+
+		CHECK_EQ(c1->get_path_to(c3, true), NodePath("%C2/C3"));
+		CHECK_EQ(c1->get_path_to(c6, true), NodePath("%C2/C4/C6"));
+
+		CHECK_EQ(c1->get_path_to(c5, true), NodePath("%C5"));
+		CHECK_EQ(c2->get_path_to(c5, true), NodePath("%C5"));
+		CHECK_EQ(c3->get_path_to(c5, true), NodePath("%C5"));
+	}
+
+	SUBCASE("Path to parent") {
+		CHECK_EQ(b5->get_path_to(b1), NodePath("../../.."));
+		CHECK_EQ(b6->get_path_to(b2), NodePath("../.."));
+		CHECK_EQ(b6->get_path_to(b4), NodePath(".."));
+
+		CHECK_EQ(a5->get_path_to(a1), NodePath("../../.."));
+		CHECK_EQ(a6->get_path_to(a2), NodePath("../.."));
+		CHECK_EQ(a6->get_path_to(a4), NodePath(".."));
+
+		// Questionable behavior, but that's how it was originally implemented.
+		CHECK_EQ(c5->get_path_to(c2, true), NodePath("%C5/../.."));
+		CHECK_EQ(c5->get_path_to(c3, true), NodePath("%C5/.."));
+
+		CHECK_EQ(c6->get_path_to(c2, true), NodePath("../.."));
+	}
+
+	SUBCASE("Path to sibling") {
+		CHECK_EQ(b3->get_path_to(b4), NodePath("../B4"));
+		CHECK_EQ(b4->get_path_to(b5), NodePath("../B3/B5"));
+		CHECK_EQ(b5->get_path_to(b6), NodePath("../../B4/B6"));
+		CHECK_EQ(b5->get_path_to(b4), NodePath("../../B4"));
+
+		CHECK_EQ(a3->get_path_to(a4), NodePath("../A4"));
+		CHECK_EQ(a4->get_path_to(a5), NodePath("../A3/A5"));
+		CHECK_EQ(a5->get_path_to(a6), NodePath("../../A4/A6"));
+		CHECK_EQ(a5->get_path_to(a4), NodePath("../../A4"));
+
+		// Questionable behavior, but that's how it was originally implemented.
+		CHECK_EQ(c5->get_path_to(c6, true), NodePath("%C5/../../C4/C6"));
+
+		CHECK_EQ(c6->get_path_to(c5, true), NodePath("../../C3/C5"));
+		CHECK_EQ(c3->get_path_to(c4, true), NodePath("../C4"));
+		CHECK_EQ(c4->get_path_to(c3, true), NodePath("../C3"));
+		CHECK_EQ(c4->get_path_to(c5, true), NodePath("%C5"));
+	}
+
+	SUBCASE("No common ancestor") {
+		ERR_PRINT_OFF
+		CHECK_EQ(b1->get_path_to(a1), NodePath());
+		CHECK_EQ(a1->get_path_to(b2, true), NodePath());
+		CHECK_EQ(b6->get_path_to(a2), NodePath());
+		CHECK_EQ(a5->get_path_to(b1, true), NodePath());
+		CHECK_EQ(b3->get_path_to(SceneTree::get_singleton()->get_root()), NodePath());
+		CHECK_EQ(b1->get_path_to(SceneTree::get_singleton()->get_root(), true), NodePath());
+		CHECK_EQ(c1->get_path_to(b1), NodePath());
+		CHECK_EQ(b3->get_path_to(c6), NodePath());
+		ERR_PRINT_ON
+	}
+
+	memdelete(c0);
+	memdelete(a1);
+	memdelete(b1);
+}
+
+
+TEST_CASE("[SceneTree][Node] find_common_parent_with") {
+	Node *a = memnew(Node);
+	a->set_name("Root");
+	Node *left = make_node("Left", a);
+	Node *right = make_node("Right", a);
+	Node *deep = make_node("Deep", left);
+	Node *b = memnew(Node);
+	Node *different = make_node("Different", b);
+
+	CHECK(deep->find_common_parent_with(right) == a);
+	CHECK(right->find_common_parent_with(deep) == a);
+	CHECK(deep->find_common_parent_with(left) == left);
+	CHECK(left->find_common_parent_with(deep) == left);
+	CHECK(deep->find_common_parent_with(deep) == deep);
+	CHECK(deep->find_common_parent_with(different) == nullptr);
+	CHECK(different->find_common_parent_with(deep) == nullptr);
+	CHECK(a->find_common_parent_with(nullptr) == nullptr);
+	CHECK_EQ(a->calculate_depth(), 1);
+	CHECK_EQ(left->calculate_depth(), 2);
+	CHECK_EQ(deep->calculate_depth(), 3);
+	CHECK_EQ(different->calculate_depth(), 2);
+
+	memdelete(a);
+	memdelete(b);
+}
+
+TEST_CASE("[SceneTree][Node] get_path_to supports 128-level chains without HashSet") {
+	Node *root = memnew(Node);
+	root->set_name("Root");
+	Node *leaf = root;
+	String child_path;
+	String parent_path;
+	for (int i = 0; i < 128; i++) {
+		leaf = make_node("Child", leaf);
+		if (i > 0) {
+			child_path += "/";
+			parent_path += "/";
+		}
+		child_path += "Child";
+		parent_path += "..";
+	}
+	CHECK_EQ(leaf->calculate_depth(), 129);
+	CHECK_EQ(root->get_path_to(leaf), NodePath(child_path));
+	CHECK_EQ(leaf->get_path_to(root), NodePath(parent_path));
+	memdelete(root);
+}
+
 TEST_CASE("[SceneTree][Node] Test the process priority") {
 	List<Node *> process_order;
 
