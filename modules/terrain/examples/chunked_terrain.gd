@@ -31,7 +31,7 @@ func _on_terrain_changed() -> void:
 
 
 func _clear_chunks() -> void:
-    for instance: MeshInstance3D in _chunks.values():
+    for instance in _chunks.values():
         instance.queue_free()
     _chunks.clear()
     _chunk_strides.clear()
@@ -64,7 +64,7 @@ func _process(_delta: float) -> void:
                 stride = 1 if chunk_distance <= 1 else (2 if chunk_distance <= 3 else 4)
                 # Partial edge chunks may not divide evenly by the preferred stride.
                 while stride > 1 and (count.x % stride != 0 or count.y % stride != 0):
-                    stride /= 2
+                    stride = int(stride / 2)
 
             needed[key] = true
             if _chunks.has(key) and _chunk_strides[key] == stride:
@@ -85,7 +85,7 @@ func _process(_delta: float) -> void:
             _chunks[key] = instance
             _chunk_strides[key] = stride
 
-    for key: Vector2i in _chunks.keys():
+    for key in _chunks.keys():
         if not needed.has(key):
             _chunks[key].queue_free()
             _chunks.erase(key)
