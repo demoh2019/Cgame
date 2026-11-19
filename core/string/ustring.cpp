@@ -2960,59 +2960,82 @@ String String::remove_char(char32_t p_char) const {
 	return new_string;
 }
 
-template <class T>
-static String _remove_chars_common(const String &p_this, const T *p_chars, int p_chars_len) {
-	// Delegate if p_chars has a single element.
-	if (p_chars_len == 1) {
-		return p_this.remove_char(*p_chars);
-	} else if (p_chars_len == 0) {
-		return p_this;
-	}
-
-	int len = p_this.length();
-
-	if (len == 0) {
-		return p_this;
-	}
-
+template <class Predicate>
+static String _remove_chars_if(const String &p_this, Predicate p_contains) {
+	const int len = p_this.length();
 	int index = 0;
 	const char32_t *old_ptr = p_this.ptr();
 	for (; index < len; ++index) {
-		if (_contains_char(old_ptr[index], p_chars, p_chars_len)) {
+		if (p_contains(old_ptr[index])) {
 			break;
 		}
 	}
 
-	// If no occurrence of `chars` was found, return this.
+	// If no occurrence was found, return the original string.
 	if (index == len) {
 		return p_this;
 	}
 
-	// If we found at least one occurrence of `chars`, create new string, allocating enough space for the current length minus one.
 	String new_string;
 	new_string.resize_uninitialized(len);
 	char32_t *new_ptr = new_string.ptrw();
 
-	// Copy part of input before `char`.
 	memcpy(new_ptr, old_ptr, index * sizeof(char32_t));
-
 	int new_size = index;
-
-	// Copy rest, skipping `chars`.
 	for (++index; index < len; ++index) {
 		const char32_t old_char = old_ptr[index];
-		if (!_contains_char(old_char, p_chars, p_chars_len)) {
-			new_ptr[new_size] = old_char;
-			++new_size;
+		if (!p_contains(old_char)) {
+			new_ptr[new_size++] = old_char;
 		}
 	}
 
 	new_ptr[new_size] = 0;
-
-	// Shrink new string to fit.
 	new_string.resize_uninitialized(new_size + 1);
-
 	return new_string;
+}
+
+template <class T>
+static String _remove_chars_common(const String &p_this, const T *p_chars, int p_chars_len) {
+	if (p_chars_len == 1) {
+		return p_this.remove_char(*p_chars);
+	} else if (p_chars_len == 0 || p_this.is_empty()) {
+		return p_this;
+	}
+
+	// Large ASCII removal sets benefit from constant-time character tests.
+	// Keep the original Unicode/Latin-1 fallback for all other inputs.
+	if (p_this.length() >= 64 && p_chars_len >= 4) {
+		uint64_t lower_mask = 0;
+		uint64_t upper_mask = 0;
+		bool ascii_only = true;
+		for (int i = 0; i < p_chars_len; ++i) {
+			const uint32_t c = static_cast<uint32_t>(p_chars[i]);
+			if (c >= 128) {
+				ascii_only = false;
+				break;
+			}
+			if (c < 64) {
+				lower_mask |= uint64_t(1) << c;
+			} else {
+				upper_mask |= uint64_t(1) << (c - 64);
+			}
+		}
+		if (ascii_only) {
+			return _remove_chars_if(p_this, [lower_mask, upper_mask](char32_t p_char) {
+				if (p_char >= 128) {
+					return false;
+				}
+				if (p_char < 64) {
+					return (lower_mask & (uint64_t(1) << p_char)) != 0;
+				}
+				return (upper_mask & (uint64_t(1) << (p_char - 64))) != 0;
+			});
+		}
+	}
+
+	return _remove_chars_if(p_this, [p_chars, p_chars_len](char32_t p_char) {
+		return _contains_char(p_char, p_chars, p_chars_len);
+	});
 }
 
 String String::remove_chars(const String &p_chars) const {

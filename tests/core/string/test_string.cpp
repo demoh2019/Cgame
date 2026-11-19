@@ -605,6 +605,65 @@ TEST_CASE("[String] remove_chars") {
 	CHECK(s.remove_chars(String("xy")) == "Banana");
 }
 
+TEST_CASE("[String] remove_chars long ASCII membership mask") {
+	String input;
+	String expected;
+	for (int i = 0; i < 256; ++i) {
+		input += "A\tB\nC D\rE-F_";
+		expected += "ABCDEF";
+	}
+	const String original = input;
+	CHECK(input.remove_chars(" \t\n\r-_") == expected);
+	CHECK(input.remove_chars(String(" \t\n\r-_")) == expected);
+	CHECK(input == original);
+	CHECK(input.remove_chars("xyz~") == original);
+
+	String only_removed;
+	for (int i = 0; i < 100; ++i) {
+		only_removed += "@_~ ";
+	}
+	CHECK(only_removed.remove_chars("@_~ ") == "");
+}
+
+TEST_CASE("[String] remove_chars ASCII bit boundary and exhaustive printable input") {
+	const String remove_set = String("@_~") + String::chr(127);
+	String input;
+	String expected;
+	for (int repeat = 0; repeat < 4; ++repeat) {
+		for (char32_t c = 32; c < 128; ++c) {
+			input += String::chr(c);
+			if (c != '@' && c != '_' && c != '~' && c != 127) {
+				expected += String::chr(c);
+			}
+		}
+	}
+	CHECK(input.remove_chars(remove_set) == expected);
+
+	String repeated;
+	String kept;
+	for (int i = 0; i < 128; ++i) {
+		repeated += "@a_b~c";
+		repeated += String::chr(127);
+		kept += "abc";
+	}
+	CHECK(repeated.remove_chars(remove_set) == kept);
+}
+
+TEST_CASE("[String] remove_chars preserves Unicode with ASCII set and Unicode fallback") {
+	String input;
+	String ascii_expected;
+	String unicode_expected;
+	for (int i = 0; i < 32; ++i) {
+		input += String(U"\u0416 \u03A3\t\u212A \u00C4");
+		ascii_expected += String(U"\u0416\u03A3\u212A\u00C4");
+		unicode_expected += String(U"\u212A\u00C4");
+	}
+	CHECK(input.remove_chars(" \t\r\n") == ascii_expected);
+	CHECK(input.remove_chars(String(" \t\r\n")) == ascii_expected);
+	CHECK(input.remove_chars(String(U" \u0416\u03A3\t")) == unicode_expected);
+	CHECK(String("A B").remove_chars(" \t-_") == "AB");
+}
+
 TEST_CASE("[String] Number to string") {
 	CHECK(String::num(0) == "0.0"); // The method takes double, so always add zeros.
 	CHECK(String::num(0.0) == "0.0");
