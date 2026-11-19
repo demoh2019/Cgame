@@ -1789,3 +1789,29 @@ and HUD; regression checks: `tests/test_siege_contracts.gd`. This is
 ownership, cross-server match scheduling or Nakama-backed honor. Those
 features require an identity-checked guild persistence layer. No native
 Cgame engine change is required by this phase.
+
+## Clattering noise decoy — craftable stealth tactic
+
+Craft a **Clattering Decoy** from **2 Wood T1 and 1 Scrap Metal** using
+the ordinary crafting system. Press **comma (,)** in either local preview
+or dedicated multiplayer to throw it **8 metres** forward; the online
+inventory also offers a *Throw clattering decoy* button.
+
+A decoy produces **8 seconds** of sound that attracts idle infected
+within **23 metres** to investigate the landing site. It never acts as
+a fake player, interrupts an active chase or tank-generated combat threat,
+or distracts raid bosses. It does not change full-loot PvP, zombie damage,
+or experience rewards.
+
+The dedicated server checks the real player's inventory and position,
+finite input direction, terrain, water, safe zone, and every obstruction
+along the flight path. Each valid throw consumes exactly one item and
+starts a **3-second cooldown**, with a maximum of **two active decoys
+per player and 48 server-wide**. Temporary decoys are cleaned up after
+expiration and never persisted. Only their visible position and remaining
+lifetime are sent to nearby clients; both clients render a small yellow lure.
+
+`test_noise_decoy.gd` verifies placement, inventory cost, cooldown,
+zombie investigation, active combat and boss immunity, privacy, interest
+filtering, and cleanup. Existing Cgame simulation, world geometry and
+rendering APIs cover the feature without a native engine change.
