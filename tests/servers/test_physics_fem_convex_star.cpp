@@ -125,6 +125,36 @@ TEST_CASE("[PhysicsFEMConvex] Nonconvex star-shaped shell is rejected transactio
 	CHECK(cooked.size() == unchanged);
 }
 
+TEST_CASE("[PhysicsFEMConvex] Open, inconsistent and non-manifold edges are rejected") {
+	LocalVector<Vector3> points;
+	LocalVector<PhysicsFEMConvexFace> faces;
+	build_cube(points, faces);
+	LocalVector<PhysicsFEMConvexTetra> cooked;
+	REQUIRE(physics_fem_build_convex_star_tetrahedra(points, faces, 1.0, cooked));
+	const uint32_t original = cooked.size();
+
+	LocalVector<PhysicsFEMConvexFace> open_faces;
+	for (uint32_t i = 0; i + 1 < faces.size(); ++i) {
+		open_faces.push_back(faces[i]);
+	}
+	CHECK_FALSE(physics_fem_build_convex_star_tetrahedra(points, open_faces, 1.0, cooked));
+	CHECK(cooked.size() == original);
+
+	// One face reversed creates edges with duplicated orientation.
+	const uint32_t previous_b = faces[0].b;
+	faces[0].b = faces[0].c;
+	faces[0].c = previous_b;
+	CHECK_FALSE(physics_fem_build_convex_star_tetrahedra(points, faces, 1.0, cooked));
+	CHECK(cooked.size() == original);
+
+	// A third face sharing any existing edge violates manifold topology.
+	faces[0].c = faces[0].b;
+	faces[0].b = previous_b;
+	faces.push_back(faces[0]);
+	CHECK_FALSE(physics_fem_build_convex_star_tetrahedra(points, faces, 1.0, cooked));
+	CHECK(cooked.size() == original);
+}
+
 TEST_CASE("[PhysicsFEMConvex] Invalid indexing and false volume are rejected") {
 	LocalVector<Vector3> points;
 	LocalVector<PhysicsFEMConvexFace> faces;
