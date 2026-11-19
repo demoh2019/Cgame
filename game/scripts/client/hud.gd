@@ -588,6 +588,11 @@ func _on_event(event: Dictionary) -> void:
 		"bleeding":
 			if event.get("peer", -1) == client.peer_id:
 				say("Bleeding wound: %d/100. Use a bandage or antiseptic." % int(event.get("severity", 0)))
+		"renown":
+			if int(event.get("peer", -1)) == client.peer_id:
+				say("+%d renown from %s | %s (%d total)" % [
+					int(event.get("earned", 0)), str(event.get("source", "survival")),
+					str(event.get("rank", "Newcomer")), int(event.get("total", 0))])
 		"mastery":
 			if event.get("peer", -1) == client.peer_id:
 				say("+%d %s weapon mastery XP" % [int(event.get("xp", 0)),
@@ -825,6 +830,10 @@ func _process(_delta: float) -> void:
 		int(client.you.get("stamina", Defs.MAX_STAMINA)), float(client.you.get("dodge_cooldown", 0.0)),
 		float(client.you.get("guardian_cooldown", 0.0))
 	]
+	_info_label.text += "\nCAMP RENOWN %s: %d / %d | NPC buy discount %d%%" % [
+		str(client.you.get("renown_rank", "Newcomer")),
+		int(client.you.get("renown", 0)), int(client.you.get("renown_next", 40)),
+		int(client.you.get("vendor_discount", 0))]
 	var weather: Dictionary = client.you.get("weather", {})
 	if not weather.is_empty():
 		_info_label.text += "\nWeather: %s %.0fC %s | Exposure %d/100 | Heat pack %ds" % [
