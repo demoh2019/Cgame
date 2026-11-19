@@ -33,7 +33,6 @@
 #include "core/object/class_db.h"
 #include "core/templates/local_vector.h"
 #include "core/templates/rb_map.h"
-#include "core/templates/rb_set.h"
 #include "scene/theme/theme_db.h"
 
 void GridContainer::_resort() {
@@ -55,12 +54,12 @@ void GridContainer::_resort() {
 	row_minh.resize_initialized(row_capacity);
 	row_desiredh.resize_initialized(row_capacity);
 	row_maxh.resize_initialized(row_capacity);
-	RBSet<int> col_expanded;
-	RBSet<int> row_expanded;
-	// RBMap previously inserted an implicit zero for trailing empty columns.
-	auto col_minimum = [&col_minw](int p_column) -> int {
-		return p_column < int(col_minw.size()) ? col_minw[p_column] : 0;
-	};
+	LocalVector<uint8_t> col_expanded;
+	LocalVector<uint8_t> row_expanded;
+	col_expanded.resize_initialized(col_capacity);
+	row_expanded.resize_initialized(row_capacity);
+	int col_expanded_count = 0;
+	int row_expanded_count = 0;
 
 	// Compute the per-column/per-row data.
 	int valid_controls_index = 0;
@@ -91,11 +90,13 @@ void GridContainer::_resort() {
 		int max_height = int(max_size.height) >= 0 ? int(max_size.height) : (combined_max_size.height >= 0 ? combined_max_size.height : size.height);
 		row_maxh[row] = MAX(row_maxh[row], max_height);
 
-		if (c->get_h_size_flags().has_flag(SIZE_EXPAND)) {
-			col_expanded.insert(col);
+		if (c->get_h_size_flags().has_flag(SIZE_EXPAND) && !col_expanded[col]) {
+			col_expanded[col] = 1;
+			col_expanded_count++;
 		}
-		if (c->get_v_size_flags().has_flag(SIZE_EXPAND)) {
-			row_expanded.insert(row);
+		if (c->get_v_size_flags().has_flag(SIZE_EXPAND) && !row_expanded[row]) {
+			row_expanded[row] = 1;
+			row_expanded_count++;
 		}
 	}
 
@@ -108,22 +109,22 @@ void GridContainer::_resort() {
 		row_maxh[i] = MAX(row_maxh[i], row_minh[i]);
 	}
 
-	// Consider all empty columns expanded.
-	for (int i = valid_controls_index; i < columns; i++) {
-		col_expanded.insert(i);
-	}
+	// Trailing empty columns have no nodes and do not need storage.
+	// Keep their contribution to expansion as a count, not RBSet entries.
+	int empty_expanded_columns = MAX(columns - valid_controls_index, 0);
+	col_expanded_count += empty_expanded_columns;
 
 	// Evaluate the remaining space for expanded columns/rows.
 	Size2 remaining_space = get_size();
 	Size2 empty_space = remaining_space;
 	for (int i = 0; i < max_col; i++) {
-		if (!col_expanded.has(i)) {
+		if (!col_expanded[i]) {
 			remaining_space.width -= col_minw[i];
 		}
 		empty_space.width -= col_minw[i];
 	}
 	for (int i = 0; i < max_row; i++) {
-		if (!row_expanded.has(i)) {
+		if (!row_expanded[i]) {
 			remaining_space.height -= row_minh[i];
 		}
 		empty_space.height -= row_minh[i];
@@ -148,7 +149,7 @@ void GridContainer::_resort() {
 			if (desired_extra_space > 0) {
 				int desired_size_increase = floor(desired_extra_space * space_available_ratio);
 				col_minw[i] += desired_size_increase;
-				if (!col_expanded.has(i)) {
+				if (!col_expanded[i]) {
 					remaining_space.width -= desired_size_increase;
 				}
 			}
@@ -168,106 +169,106 @@ void GridContainer::_resort() {
 			if (desired_extra_space > 0) {
 				int desired_size_increase = floor(desired_extra_space * space_available_ratio);
 				row_minh[i] += desired_size_increase;
-				if (!row_expanded.has(i)) {
+				if (!row_expanded[i]) {
 					remaining_space.height -= desired_size_increase;
 				}
 			}
 		}
 	}
 
-	bool can_fit = false;
-	while (!can_fit && col_expanded.size() > 0) {
-		// Check if all minwidth constraints are OK if we use the remaining space.
-		can_fit = true;
-		int max_index = col_expanded.front()->get();
-		for (const int &E : col_expanded) {
-			if (col_minimum(E) > col_minimum(max_index)) {
-				max_index = E;
-			}
-			if (can_fit && (remaining_space.width / col_expanded.size()) < col_minimum(E)) {
-				can_fit = false;
+	// Preserve the original 'largest minimum first' constraint removal.
+	while (col_expanded_count > 0) {
+		int max_index = -1;
+		int max_minimum = 0;
+		for (int i = 0; i < max_col; i++) {
+			if (col_expanded[i] && (max_index == -1 || col_minw[i] > max_minimum)) {
+				max_index = i;
+				max_minimum = col_minw[i];
 			}
 		}
-
-		// If not, the column with maximum minwidth is not expanded.
-		if (!can_fit) {
-			col_expanded.erase(max_index);
-			remaining_space.width -= col_minimum(max_index);
+		if (empty_expanded_columns > 0 && (max_index == -1 || max_minimum < 0)) {
+			max_index = max_col;
+			max_minimum = 0;
 		}
-	}
-
-	can_fit = false;
-	while (!can_fit && row_expanded.size() > 0) {
-		// Check if all minheight constraints are OK if we use the remaining space.
-		can_fit = true;
-		int max_index = row_expanded.front()->get();
-		for (const int &E : row_expanded) {
-			if (row_minh[E] > row_minh[max_index]) {
-				max_index = E;
-			}
-			if (can_fit && (remaining_space.height / row_expanded.size()) < row_minh[E]) {
-				can_fit = false;
-			}
+		if (remaining_space.width / col_expanded_count >= max_minimum) {
+			break;
 		}
-
-		// If not, the row with maximum minheight is not expanded.
-		if (!can_fit) {
-			row_expanded.erase(max_index);
-			remaining_space.height -= row_minh[max_index];
+		if (max_index == max_col) {
+			// No empty column can reduce negative remaining space.
+			col_expanded_count -= empty_expanded_columns;
+			empty_expanded_columns = 0;
+		} else {
+			col_expanded[max_index] = 0;
+			col_expanded_count--;
+			remaining_space.width -= max_minimum;
 		}
 	}
 
-	bool max_fit = false;
-	while (!max_fit && col_expanded.size() > 0) {
-		max_fit = true;
+	while (row_expanded_count > 0) {
+		int max_index = -1;
+		int max_minimum = 0;
+		for (int i = 0; i < max_row; i++) {
+			if (row_expanded[i] && (max_index == -1 || row_minh[i] > max_minimum)) {
+				max_index = i;
+				max_minimum = row_minh[i];
+			}
+		}
+		if (remaining_space.height / row_expanded_count >= max_minimum) {
+			break;
+		}
+		row_expanded[max_index] = 0;
+		row_expanded_count--;
+		remaining_space.height -= max_minimum;
+	}
+
+	// Cap at maximum sizes, redistributing the remainder to other cells.
+	while (col_expanded_count > 0) {
 		int capped_col = -1;
-		for (const int &E : col_expanded) {
-			if (E < max_col && (remaining_space.width / col_expanded.size()) > col_maxw[E]) {
-				capped_col = E;
-				max_fit = false;
+		for (int i = 0; i < max_col; i++) {
+			if (col_expanded[i] && remaining_space.width / col_expanded_count > col_maxw[i]) {
+				capped_col = i;
 				break;
 			}
 		}
-
-		if (capped_col >= 0) {
-			col_expanded.erase(capped_col);
-			remaining_space.width -= col_maxw[capped_col];
-			col_minw[capped_col] = col_maxw[capped_col];
+		if (capped_col < 0) {
+			break;
 		}
+		col_expanded[capped_col] = 0;
+		col_expanded_count--;
+		remaining_space.width -= col_maxw[capped_col];
+		col_minw[capped_col] = col_maxw[capped_col];
 	}
 
-	max_fit = false;
-	while (!max_fit && row_expanded.size() > 0) {
-		max_fit = true;
+	while (row_expanded_count > 0) {
 		int capped_row = -1;
-		for (const int &E : row_expanded) {
-			if (E < max_row && (remaining_space.height / row_expanded.size()) > row_maxh[E]) {
-				capped_row = E;
-				max_fit = false;
+		for (int i = 0; i < max_row; i++) {
+			if (row_expanded[i] && remaining_space.height / row_expanded_count > row_maxh[i]) {
+				capped_row = i;
 				break;
 			}
 		}
-
-		if (capped_row >= 0) {
-			row_expanded.erase(capped_row);
-			remaining_space.height -= row_maxh[capped_row];
-			row_minh[capped_row] = row_maxh[capped_row];
+		if (capped_row < 0) {
+			break;
 		}
+		row_expanded[capped_row] = 0;
+		row_expanded_count--;
+		remaining_space.height -= row_maxh[capped_row];
+		row_minh[capped_row] = row_maxh[capped_row];
 	}
 
 	// Finally, fit the nodes.
 	int col_remaining_pixel = 0;
 	int col_expand = 0;
-	if (col_expanded.size() > 0) {
-		col_expand = remaining_space.width / col_expanded.size();
-		col_remaining_pixel = remaining_space.width - col_expanded.size() * col_expand;
+	if (col_expanded_count > 0) {
+		col_expand = remaining_space.width / col_expanded_count;
+		col_remaining_pixel = remaining_space.width - col_expanded_count * col_expand;
 	}
 
 	int row_remaining_pixel = 0;
 	int row_expand = 0;
-	if (row_expanded.size() > 0) {
-		row_expand = remaining_space.height / row_expanded.size();
-		row_remaining_pixel = remaining_space.height - row_expanded.size() * row_expand;
+	if (row_expanded_count > 0) {
+		row_expand = remaining_space.height / row_expanded_count;
+		row_remaining_pixel = remaining_space.height - row_expanded_count * row_expand;
 	}
 
 	bool rtl = is_layout_rtl();
@@ -281,7 +282,7 @@ void GridContainer::_resort() {
 		if (col_remaining_pixel == 0) {
 			break;
 		}
-		if (col_expanded.has(i)) {
+		if (col_expanded[i]) {
 			col_remaining_pixel_index = i + 1;
 			col_remaining_pixel--;
 		}
@@ -291,7 +292,7 @@ void GridContainer::_resort() {
 		if (row_remaining_pixel == 0) {
 			break;
 		}
-		if (row_expanded.has(i)) {
+		if (row_expanded[i]) {
 			row_remaining_pixel_index = i + 1;
 			row_remaining_pixel--;
 		}
@@ -314,9 +315,9 @@ void GridContainer::_resort() {
 				col_ofs = 0;
 			}
 			if (row > 0) {
-				row_ofs += (row_expanded.has(row - 1) ? row_expand : row_minh[row - 1]) + theme_cache.v_separation;
+				row_ofs += (row_expanded[row - 1] ? row_expand : row_minh[row - 1]) + theme_cache.v_separation;
 
-				if (row_expanded.has(row - 1) && row - 1 < row_remaining_pixel_index) {
+				if (row_expanded[row - 1] && row - 1 < row_remaining_pixel_index) {
 					// Apply the remaining pixel of the previous row.
 					row_ofs++;
 				}
@@ -324,14 +325,14 @@ void GridContainer::_resort() {
 		}
 
 		Size2 s(
-				col_expanded.has(col) ? col_expand : col_minw[col],
-				row_expanded.has(row) ? row_expand : row_minh[row]);
+				col_expanded[col] ? col_expand : col_minw[col],
+				row_expanded[row] ? row_expand : row_minh[row]);
 
 		// Add the remaining pixel to the expanding columns and rows, starting from left and top.
-		if (col_expanded.has(col) && col < col_remaining_pixel_index) {
+		if (col_expanded[col] && col < col_remaining_pixel_index) {
 			s.x++;
 		}
-		if (row_expanded.has(row) && row < row_remaining_pixel_index) {
+		if (row_expanded[row] && row < row_remaining_pixel_index) {
 			s.y++;
 		}
 
