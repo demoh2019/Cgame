@@ -69,6 +69,7 @@
 #include "servers/physics_softbody_fatigue_damage.h"
 #include "servers/physics_xpbd_area.h"
 #include "servers/physics_xpbd_dihedral.h"
+#include "servers/physics_xpbd_rod_bend.h"
 #include "servers/physics_xpbd_shear.h"
 #include "servers/physics_xpbd_self_collision.h"
 #include "servers/physics_softbody_pair_contact.h"
@@ -178,6 +179,7 @@ void GodotSoftBody3D::set_space(GodotSpace3D *p_space) {
 	initialize_membrane_constraints();
 	initialize_shear_constraints();
 	initialize_dihedral_constraints();
+	initialize_rod_bend_constraints();
 	initialize_shape_matching();
 	initialize_self_collision_topology();
 
@@ -341,6 +343,7 @@ void GodotSoftBody3D::update_constants() {
 	initialize_membrane_constraints();
 	initialize_shear_constraints();
 	initialize_dihedral_constraints();
+	initialize_rod_bend_constraints();
 	initialize_shape_matching();
 	initialize_self_collision_topology();
 }
@@ -1078,6 +1081,105 @@ void GodotSoftBody3D::initialize_dihedral_constraints() {
 					bend_ratio, hinge.bend_compliance_ratio);
 		}
 		xpbd_dihedral_hinges.push_back(hinge);
+	}
+}
+
+// Build rod-like centerline chains from the ORIGINAL triangle-edge graph,
+// excluding the synthetic two-hop spring links. Each node contributes up to
+// two non-overlapping near-opposite edge pairs: this recognizes straight
+// fiber/strand directions inside a strip or a triangulated flexible shell.
+// Unlike a full Cosserat rod, the resulting constraints have only three
+// translational particles and no torsional/director DOFs.
+void GodotSoftBody3D::initialize_rod_bend_constraints() {
+	xpbd_rod_bends.reset();
+	if (!get_space() || get_space()->get_soft_body_xpbd_rod_bend_compliance() <= 0.0 ||
+			faces.is_empty() || nodes.size() < 3) {
+		return;
+	}
+	LocalVector<LocalVector<uint32_t>> neighbors;
+	neighbors.resize(nodes.size());
+	HashSet<uint64_t> seen;
+	for (const Face &face : faces) {
+		const uint32_t ids[3] = { face.n[0]->index, face.n[1]->index, face.n[2]->index };
+		for (int side = 0; side < 3; ++side) {
+			const uint32_t a = ids[side];
+			const uint32_t b = ids[(side + 1) % 3];
+			if (a == b || a >= nodes.size() || b >= nodes.size()) {
+				continue;
+			}
+			const uint64_t edge = _soft_body_edge_key(a, b);
+			if (seen.has(edge)) {
+				continue;
+			}
+			seen.insert(edge);
+			neighbors[a].push_back(b);
+			neighbors[b].push_back(a);
+		}
+	}
+	const double straightness = double(get_space()->get_soft_body_xpbd_rod_straightness());
+	for (uint32_t middle = 0; middle < nodes.size(); ++middle) {
+		const LocalVector<uint32_t> &adjacent = neighbors[middle];
+		if (adjacent.size() < 2) {
+			continue;
+		}
+		uint32_t consumed[4] = {};
+		uint32_t consumed_count = 0;
+		for (int selection = 0; selection < 2; ++selection) {
+			int best_i = -1;
+			int best_j = -1;
+			double best_alignment = straightness;
+			for (uint32_t i = 0; i < adjacent.size(); ++i) {
+				bool used_i = false;
+				for (uint32_t k = 0; k < consumed_count; ++k) {
+					used_i |= consumed[k] == adjacent[i];
+				}
+				if (used_i) {
+					continue;
+				}
+				for (uint32_t j = i + 1; j < adjacent.size(); ++j) {
+					bool used_j = false;
+					for (uint32_t k = 0; k < consumed_count; ++k) {
+						used_j |= consumed[k] == adjacent[j];
+					}
+					if (used_j) {
+						continue;
+					}
+					const Vector3 &center = nodes[middle].s;
+					const Vector3 &pa = nodes[adjacent[i]].s;
+					const Vector3 &pc = nodes[adjacent[j]].s;
+					const double u[3] = { double(pa.x) - double(center.x),
+							double(pa.y) - double(center.y), double(pa.z) - double(center.z) };
+					const double v[3] = { double(pc.x) - double(center.x),
+							double(pc.y) - double(center.y), double(pc.z) - double(center.z) };
+					const double lu_sq = u[0] * u[0] + u[1] * u[1] + u[2] * u[2];
+					const double lv_sq = v[0] * v[0] + v[1] * v[1] + v[2] * v[2];
+					if (!(lu_sq > 1e-24) || !(lv_sq > 1e-24) ||
+							!Math::is_finite(lu_sq) || !Math::is_finite(lv_sq)) {
+						continue;
+					}
+					const double alignment = -(u[0] * v[0] + u[1] * v[1] + u[2] * v[2]) /
+							(Math::sqrt(lu_sq) * Math::sqrt(lv_sq));
+					if (Math::is_finite(alignment) && alignment > best_alignment) {
+						best_alignment = alignment;
+						best_i = int(i);
+						best_j = int(j);
+					}
+				}
+			}
+			if (best_i < 0 || best_j < 0) {
+				break;
+			}
+			RodBendConstraint constraint;
+			constraint.a = adjacent[best_i];
+			constraint.middle = middle;
+			constraint.c = adjacent[best_j];
+			if (physics_xpbd_rod_bend_angle(nodes[constraint.a].s, nodes[middle].s,
+						nodes[constraint.c].s, constraint.rest_angle)) {
+				xpbd_rod_bends.push_back(constraint);
+			}
+			consumed[consumed_count++] = adjacent[best_i];
+			consumed[consumed_count++] = adjacent[best_j];
+		}
 	}
 }
 
