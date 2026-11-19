@@ -300,6 +300,25 @@ func _build() -> void:
 	rally_button.tooltip_text = "Leader only: signal your current server position for 45 seconds"
 	rally_button.pressed.connect(func() -> void: client.party_rally())
 	party_buttons.add_child(rally_button)
+	var fortify_button := Button.new()
+	fortify_button.name = "FortifyOutpost"
+	fortify_button.text = "Fortify controlled outpost (4m, wood + stone)"
+	fortify_button.tooltip_text = "Stand next to a party-controlled outpost in a PvP zone. Each upgrade increases enemy capture time."
+	fortify_button.pressed.connect(func() -> void:
+		var here: Vector3 = client.display_position()
+		var nearest: Dictionary = {}
+		var closest_distance := INF
+		for site in client.outposts:
+			var distance: float = Vector2(here.x, here.z).distance_to(
+				Vector2(float(site["x"]), float(site["z"])))
+			if distance < closest_distance:
+				closest_distance = distance
+				nearest = site
+		if nearest.is_empty() or closest_distance > 4.0:
+			say("Fortification: move within 4m of an outpost")
+		else:
+			client.outpost_fortify(int(nearest["id"])))
+	inventory_box.add_child(fortify_button)
 	var kick_member := Button.new()
 	kick_member.text = "Kick"
 	kick_member.pressed.connect(func() -> void:
@@ -595,6 +614,13 @@ func _on_result(kind: String, data: Dictionary) -> void:
 		say("Raid loot is reserved for its contributors (%ds remaining)." % [
 			int(ceil(float(data.get("remaining", 0.0))))])
 		return
+	if kind == "outpost_fortify":
+		if bool(data.get("ok", false)):
+			say("Outpost fortified to T%d; spent %s" % [
+				int(data.get("level", 0)), str(data.get("spent", {}))])
+		else:
+			say("Outpost fortification: " + str(data.get("reason", "rejected")))
+		return
 	if kind == "rally":
 		if bool(data.get("ok", false)):
 			say("Party rally active for 45 seconds. Only teammates see the marker.")
@@ -750,7 +776,8 @@ func _process(_delta: float) -> void:
 		if bool(closest["contested"]):
 			status += " | CONTESTED"
 		elif int(closest["challenger"]) != 0:
-			status += " | Capture %d%%" % int(100.0 * float(closest["progress"]) / 30.0)
+			status += " | Capture %d%%" % int(100.0 * float(closest["progress"]) / maxf(1.0, float(closest.get("capture_target", 30.0))))
+		status += " | Fort T%d" % int(closest.get("fortification", 0))
 		_info_label.text += "\nSiege outpost #%d at (%d, %d): %.0f m | %s" % [
 			int(closest["id"]), int(closest["x"]), int(closest["z"]), best_distance, status
 		]
