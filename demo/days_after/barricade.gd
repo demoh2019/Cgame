@@ -32,7 +32,7 @@ func _ready() -> void:
 
 
 func take_damage(amount: float) -> void:
-    if health <= 0.0 or not is_finite(amount) or amount <= 0.0:
+    if health <= 0.0 or (is_nan(amount) or is_inf(amount)) or amount <= 0.0:
         return
     health = maxf(0.0, health - amount)
     if health <= 0.0:
