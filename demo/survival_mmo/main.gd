@@ -260,7 +260,9 @@ func receive_zombie_hit(damage: float) -> void:
 
 
 func _unhandled_key_input(event: InputEvent) -> void:
-    if not (event is InputEventKey) or not event.pressed or event.echo:
+    if not (event is InputEventKey):
+        return
+    if not event.pressed or event.echo:
         return
     if event.physical_keycode == KEY_R:
         get_tree().reload_current_scene()
