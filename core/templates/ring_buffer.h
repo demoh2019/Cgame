@@ -32,12 +32,27 @@
 
 #include "core/templates/local_vector.h"
 
+#include <cstring>
+#include <type_traits>
+
 template <typename T>
 class _WARN_UNUSED_ RingBuffer {
 	LocalVector<T> data;
 	int read_pos = 0;
 	int write_pos = 0;
 	int size_mask;
+
+	// Fast bulk transfers for trivially copyable bytes and audio samples.
+	// Keep assignment semantics for nontrivial resource types.
+	static _FORCE_INLINE_ void copy_block(T *p_dest, const T *p_source, int p_count) {
+		if constexpr (std::is_trivially_copyable_v<T>) {
+			std::memmove(p_dest, p_source, size_t(p_count) * sizeof(T));
+		} else {
+			for (int i = 0; i < p_count; i++) {
+				p_dest[i] = p_source[i];
+			}
+		}
+	}
 
 	inline int inc(int &p_var, int p_size) const {
 		int ret = p_var;
@@ -55,6 +70,9 @@ public:
 	int read(T *p_buf, int p_size, bool p_advance = true) {
 		int left = data_left();
 		p_size = MIN(left, p_size);
+		if (p_size <= 0) {
+			return 0;
+		}
 		int pos = read_pos;
 		int to_read = p_size;
 		int dst = 0;
@@ -62,10 +80,8 @@ public:
 			int end = pos + to_read;
 			end = MIN(end, size());
 			int total = end - pos;
-			const T *read = data.ptr();
-			for (int i = 0; i < total; i++) {
-				p_buf[dst++] = read[pos + i];
-			}
+			copy_block(p_buf + dst, data.ptr() + pos, total);
+			dst += total;
 			to_read -= total;
 			pos = 0;
 		}
@@ -84,6 +100,9 @@ public:
 			}
 		}
 		p_size = MIN(left, p_size);
+		if (p_size <= 0) {
+			return 0;
+		}
 		int pos = read_pos;
 		inc(pos, p_offset);
 		int to_read = p_size;
@@ -92,9 +111,8 @@ public:
 			int end = pos + to_read;
 			end = MIN(end, size());
 			int total = end - pos;
-			for (int i = 0; i < total; i++) {
-				p_buf[dst++] = data[pos + i];
-			}
+			copy_block(p_buf + dst, data.ptr() + pos, total);
+			dst += total;
 			to_read -= total;
 			pos = 0;
 		}
@@ -149,6 +167,9 @@ public:
 	int write(const T *p_buf, int p_size) {
 		int left = space_left();
 		p_size = MIN(left, p_size);
+		if (p_size <= 0) {
+			return 0;
+		}
 
 		int pos = write_pos;
 		int to_write = p_size;
@@ -158,9 +179,8 @@ public:
 			end = MIN(end, size());
 			int total = end - pos;
 
-			for (int i = 0; i < total; i++) {
-				data[pos + i] = p_buf[src++];
-			}
+			copy_block(data.ptr() + pos, p_buf + src, total);
+			src += total;
 			to_write -= total;
 			pos = 0;
 		}
@@ -198,8 +218,8 @@ public:
 		int mask = new_size - 1;
 		data.resize(int64_t(1) << int64_t(p_power));
 		if (old_size < new_size && read_pos > write_pos) {
-			for (int i = 0; i < write_pos; i++) {
-				data[(old_size + i) & mask] = data[i];
+			if (write_pos > 0) {
+				copy_block(data.ptr() + old_size, data.ptr(), write_pos);
 			}
 			write_pos = (old_size + write_pos) & mask;
 		} else {
