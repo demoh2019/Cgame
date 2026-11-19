@@ -29,11 +29,28 @@ or third-party plugins are required.
 | 2 | Drink one collected water item |
 | Esc | Release pointer |
 | Left mouse button | Capture pointer |
+| 3 | Craft field bandage |
+| 4 | Craft and auto-equip scavenger tool |
+| 5 | Use field bandage |
+| 6 | Craft reinforced bandage |
+| 7 | Use reinforced bandage |
 | R | Restart the scene |
 
-The HUD shows health, hunger, thirst, inventory and an interaction hint.
-Food restores 35 hunger points; water restores 45 thirst points. Depletion
-reduces health. Pickups cannot be collected twice.
+The HUD shows health, hunger, thirst, tiered inventory, profession levels,
+crafting experience and interaction hints. Food restores 35 hunger points;
+water restores 45 thirst points. Depletion reduces health. Pickups cannot be
+collected twice.
+
+Harvest wood, stone and fiber at tier 1 to raise separate gathering skills.
+Every 60 XP unlocks another tier. Craft the scavenger tool from 2 wood T1
+and 1 stone T1: it equips automatically and allows gathering tier 2 deposits
+once the relevant skill reaches level 2. Deposits restore after 45 seconds.
+Craft field bandages from 2 fiber T1 (heal 30 HP), or reinforced bandages
+from 2 fiber T2 + 1 fiber T1 (heal 60 HP). Healing cannot be wasted at full HP.
+
+These are original classless survival/RPG mechanics, not copied assets,
+economy data or gameplay code from existing games. No MMO networking, PvP,
+save/load, durability or player economy is claimed yet.
 
 ## Smoke test
 
@@ -41,8 +58,11 @@ reduces health. Pickups cannot be collected twice.
 ./bin/godot.linuxbsd.editor.x86_64 --headless --path demo/days_after --script res://smoke_test.gd
 ```
 
-The test verifies scene instantiation, collision ground, one-time scavenging,
-inventory consumption, stat recovery and finite player position over 10 frames.
+The test verifies scene instantiation, one-time scavenging, inventory consumption,
+stat recovery, resource depletion and respawn, skill tiers, tool requirements,
+advanced crafting, bandage healing and finite position over 10 physics frames.
+A separate GitHub Actions smoke job exercises the game with official Godot 4.7.2
+for compatibility; use compiled Cgame for engine-specific integration testing.
 
 ## Engine / game ownership
 
@@ -59,7 +79,7 @@ inventory consumption, stat recovery and finite player position over 10 frames.
 
 1. Persistent inventory, equipment and saving/loading.
 2. Zombie AI using navigation and combat with damage.
-3. Crafting, looting containers and resource progression.
+3. Data-driven crafting, loot containers, durability and a persistent profession tree.
 4. A larger streaming map with optimized collision and profiling.
 
 This is a foundation for iteration, **not** a complete survival game.

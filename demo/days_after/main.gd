@@ -5,6 +5,7 @@ extends Node3D
 
 const PLAYER_SCRIPT = preload("res://player.gd")
 const PICKUP_SCRIPT = preload("res://pickup.gd")
+const RESOURCE_SCRIPT = preload("res://resource_node.gd")
 
 var player
 var hud_label: Label
@@ -16,6 +17,7 @@ func _ready() -> void:
     _build_world()
     _build_player()
     _build_pickups()
+    _build_resources()
     _build_hud()
 
 
@@ -29,6 +31,11 @@ func _configure_controls() -> void:
     _bind_key("interact", KEY_E)
     _bind_key("consume_food", KEY_1)
     _bind_key("consume_water", KEY_2)
+    _bind_key("craft_bandage", KEY_3)
+    _bind_key("craft_tool", KEY_4)
+    _bind_key("use_bandage", KEY_5)
+    _bind_key("craft_advanced_bandage", KEY_6)
+    _bind_key("use_advanced_bandage", KEY_7)
     _bind_key("restart", KEY_R)
 
 
@@ -149,6 +156,29 @@ func _add_pickup(node_name: String, kind: String, title: String,
     add_child(pickup)
 
 
+func _build_resources() -> void:
+    # Tier 1 harvest unlocks skills; tier 2 requires both skill and crafted tool.
+    _add_resource("WoodA", "wood", 1, Vector3(-4.0, 0.55, 4.0), 2)
+    _add_resource("WoodB", "wood", 1, Vector3(-4.0, 0.55, -3.0), 2)
+    _add_resource("StoneA", "stone", 1, Vector3(4.0, 0.55, 4.0), 2)
+    _add_resource("StoneB", "stone", 1, Vector3(4.0, 0.55, -3.0), 2)
+    _add_resource("FiberA", "fiber", 1, Vector3(0.0, 0.55, -3.0), 2)
+    _add_resource("FiberB", "fiber", 1, Vector3(2.6, 0.55, -4.5), 2)
+    _add_resource("FiberT2", "fiber", 2, Vector3(-4.1, 0.55, -5.5), 2)
+
+
+func _add_resource(node_name: String, kind: String, tier: int,
+        location: Vector3, count: int) -> void:
+    var resource = RESOURCE_SCRIPT.new()
+    resource.name = node_name
+    resource.resource_kind = kind
+    resource.tier = tier
+    resource.yield_count = count
+    resource.display_name = "%s T%d" % [kind, tier]
+    resource.position = location
+    add_child(resource)
+
+
 func _build_hud() -> void:
     var ui := CanvasLayer.new()
     ui.name = "HUD"
@@ -169,13 +199,14 @@ func _build_hud() -> void:
     column.add_child(hud_label)
 
     var help_label := Label.new()
-    help_label.text = "WASD — ходьба | Shift — бег | Space — прыжок\n" + \
-        "E — подобрать | 1 — съесть | 2 — выпить\n" + \
-        "Esc — освободить мышь | ЛКМ — вернуть | R — заново"
+    help_label.text = "WASD / Shift / Space — движение | E — собрать\n" + \
+        "1 — съесть | 2 — выпить | 3 — бинт | 4 — инструмент\n" + \
+        "5 — использовать бинт | 6 — усиленный бинт | 7 — лечиться\n" + \
+        "Esc / ЛКМ — мышь | R — рестарт"
     column.add_child(help_label)
 
     prompt_label = Label.new()
-    prompt_label.position = Vector2(18, 170)
+    prompt_label.position = Vector2(18, 232)
     ui.add_child(prompt_label)
 
     var crosshair := Label.new()
@@ -188,12 +219,20 @@ func _build_hud() -> void:
 func _process(_delta: float) -> void:
     if player == null or hud_label == null:
         return
-    hud_label.text = "DAYS AFTER — ПРОТОТИП\n" + \
-        "Здоровье: %d   Голод: %d   Жажда: %d\n" % [
+    hud_label.text = "DAYS AFTER — ВЫЖИВАНИЕ + ПРОФЕССИИ\n" + \
+        "Здоровье %d | Голод %d | Жажда %d\n" % [
             roundi(player.health), roundi(player.hunger), roundi(player.thirst)
-        ] + "Рюкзак: еда × %d   вода × %d" % [
-            player.food_count, player.water_count
-        ]
+        ] + "Еда %d | Вода %d | Дерево %d | Камень %d | Волокно %d\n" % [
+            player.get_item_count("food"), player.get_item_count("water"),
+            player.get_item_count("wood_t1"), player.get_item_count("stone_t1"),
+            player.get_item_count("fiber_t1")
+        ] + "Волокно T2 %d | Инструмент %s | Бинты %d/%d\n" % [
+            player.get_item_count("fiber_t2"), player.equipped_tool,
+            player.get_item_count("field_bandage"), player.get_item_count("reinforced_bandage")
+        ] + "Навыки: лес %d | камень %d | волокно %d | крафт XP %d\n" % [
+            player.gathering_level("wood"), player.gathering_level("stone"),
+            player.gathering_level("fiber"), player.crafting_xp
+        ] + player.last_message
     if player.health <= 0.0:
         prompt_label.text = "Вы погибли от истощения. Нажмите R, чтобы начать заново."
     else:

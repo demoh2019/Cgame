@@ -9,6 +9,8 @@ extends Area3D
 @export var display_name: String = "Ресурсы"
 
 var depleted: bool = false
+@export_range(1.0, 600.0) var respawn_seconds: float = 45.0
+var _respawn_timer: Timer
 
 
 func _ready() -> void:
@@ -38,10 +40,25 @@ func _ready() -> void:
     visual.material_override = material
     add_child(visual)
 
+    _respawn_timer = Timer.new()
+    _respawn_timer.name = "RespawnTimer"
+    _respawn_timer.one_shot = true
+    _respawn_timer.wait_time = respawn_seconds
+    add_child(_respawn_timer)
+    _respawn_timer.timeout.connect(_restore)
+
 
 func interact(player: Node) -> void:
     if depleted or not player.has_method("try_gather"):
         return
     if bool(player.call("try_gather", resource_kind, tier, yield_count)):
         depleted = true
-        queue_free()
+        visible = false
+        set_deferred("collision_layer", 0)
+        _respawn_timer.start()
+
+
+func _restore() -> void:
+    depleted = false
+    visible = true
+    set_deferred("collision_layer", 1)
