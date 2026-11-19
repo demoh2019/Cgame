@@ -1920,3 +1920,18 @@ unchanged; this system creates no new silver, experience or loot. Online
 HUD and private network messages inform the defender and lawful hunter.
 Headless checks are registered as `tests/test_pvp_justice.gd`. Existing
 Cgame PvP simulation and RPC APIs are sufficient; no C++ work is required.
+
+## Scalable infected hearing for noise lures
+
+Temporary sound lures use a bounded, deterministic spatial hearing index
+instead of checking every active lure against every infected on each AI pass.
+Cells are one hearing radius wide, so a zombie checks only nine nearby
+cells. Among audible devices the nearest wins (ties use world ID). Expired
+or invalid sources are excluded. An infected already investigating a lure
+finishes its investigation rather than switching targets every quarter
+second; active combat and raid targeting remain unchanged.
+
+A forged very large client direction is rejected before vector normalization,
+and a lure cannot be thrown out of the protected settlement from inside it.
+The existing ordinary items, NPCs, snapshots, recipes and controls are
+unchanged. Tests: `game/tests/test_noise_decoy_grid.gd`.

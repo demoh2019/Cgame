@@ -2535,13 +2535,17 @@ func _tick_zombies(delta: float) -> void:
 ## Shares target awareness inside a bounded 2D neighborhood. Bucket lookup
 ## avoids checking every zombie against every other zombie in crowded ruins.
 func _alert_noise_decoys() -> void:
+	# One spatial index per four-times-per-second hearing pass, rather than
+	# an O(infected * all lures) loop. Never give a decoy active player aggro.
+	var buckets: Dictionary = NoiseDecoy.sound_buckets(decoys, time)
+	if buckets.is_empty():
+		return
 	for infected in zombies.values():
 		if not infected.is_alive() or infected.raid_boss:
 			continue
-		for lure in decoys.values():
-			if NoiseDecoy.is_audible(lure, infected.position, time):
-				if infected.investigate_decoy(Vector2(float(lure["x"]), float(lure["z"]))):
-					break
+		var lure: Dictionary = NoiseDecoy.closest_audible(buckets, infected.position, time)
+		if not lure.is_empty():
+			infected.investigate_decoy(Vector2(float(lure["x"]), float(lure["z"])))
 
 
 func _alert_infected_pack(player_info: Dictionary) -> void:

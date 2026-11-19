@@ -227,7 +227,9 @@ func investigate_decoy(site: Vector2) -> bool:
 		return false
 	if Vector2(position.x, position.z).distance_to(site) > float(data["lose"]):
 		return false
-	if state == State.INVESTIGATE and last_known_target.distance_to(site) < 0.25:
+	# A lure already being investigated must not redirect the zombie to
+	# another newly placed lure every AI tick (unbounded ping-pong).
+	if state == State.INVESTIGATE:
 		return false
 	target_id = -1
 	last_known_target = site
