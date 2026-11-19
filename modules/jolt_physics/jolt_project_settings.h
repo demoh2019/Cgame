@@ -60,6 +60,8 @@ public:
 	// Optional vertex-versus-triangle soft contacts; replaces the cheaper
 	// vertex-versus-vertex method when enabled. Requires soft_contacts=true.
 	inline static bool soft_body_soft_vertex_face_contacts = false;
+	// Optional bounded per-pair dynamic-face BVH; only applies in vertex-face mode.
+	inline static bool soft_body_soft_vertex_face_bvh = false;
 	inline static float soft_body_soft_contact_radius = 0.1f;
 	inline static float soft_body_soft_contact_recovery = 0.2f;
 	inline static float soft_body_soft_contact_friction = 0.2f;

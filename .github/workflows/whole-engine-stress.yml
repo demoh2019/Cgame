@@ -236,6 +236,18 @@ jobs:
             --script res://physics_jolt_pending_broadphase_regression.gd \
             2>&1 | tee physics-jolt-pending-broadphase.log
           grep -Fq 'Jolt pending broadphase regression passed.' physics-jolt-pending-broadphase.log
+      - name: Regression-test Jolt BVH soft-soft deforming-grid contacts
+        shell: bash
+        run: |
+          set -euo pipefail
+          BIN=./bin/godot.linuxbsd.editor.dev.x86_64
+          PROJECT=tests/stress/jolt_soft_soft_bvh
+          timeout 120s "$BIN" --headless --path "$PROJECT" \
+            --script res://bvh_regression.gd --check-only
+          timeout 180s "$BIN" --headless --path "$PROJECT" \
+            --script res://bvh_regression.gd \
+            2>&1 | tee jolt-soft-soft-bvh.log
+          grep -Fq 'PASS: Jolt bounded BVH soft-soft vertex-face contacts' jolt-soft-soft-bvh.log
       - name: Regression-test sparse soft-soft vertex-face collision response
         shell: bash
         run: |

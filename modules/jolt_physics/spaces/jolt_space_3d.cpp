@@ -55,6 +55,8 @@
 #include <Jolt/Physics/PhysicsScene.h>
 #include <Jolt/Physics/SoftBody/SoftBodyMotionProperties.h>
 
+#include <algorithm>
+
 namespace {
 
 constexpr double SPACE_DEFAULT_CONTACT_RECYCLE_RADIUS = 0.01;
@@ -245,8 +247,177 @@ static bool closest_soft_triangle_point(JPH::Vec3Arg p, JPH::Vec3Arg a, JPH::Vec
 // Discrete soft node vs deformable triangle. The barycentric effective mass
 // w_node + u²*w_a + v²*w_b + w²*w_c correctly accounts for which face
 // particles are pinned and conserves the total linear impulse.
+// Lightweight, per-overlapping-body-pair BVH over *deformed* soft-body
+// faces. Jolt's soft vertices move every step, so these bounds are rebuilt
+// from the current positions. Use at most 4096 faces and debit the global
+// contact-work budget for construction and traversal, not just leaf tests.
+constexpr uint32_t MAX_SOFT_FACE_BVH_FACES = 4096;
+constexpr uint32_t MIN_SOFT_FACE_BVH_FACES = 32;
+constexpr uint32_t SOFT_FACE_BVH_LEAF_SIZE = 4;
+
+struct SoftFaceBVHEntry {
+	JPH::Vec3 min;
+	JPH::Vec3 max;
+	uint32_t face_index = 0;
+};
+
+struct SoftFaceBVHNode {
+	JPH::Vec3 min;
+	JPH::Vec3 max;
+	uint32_t begin = 0;
+	uint32_t end = 0;
+	uint32_t left = 0;
+	uint32_t right = 0;
+};
+
+// The same arrays are reused across all soft-soft pairs and both query
+// directions within a space's pre-step, avoiding per-pair heap churn.
+struct SoftFaceBVHScratch {
+	JPH::Array<SoftFaceBVHEntry> entries;
+	JPH::Array<SoftFaceBVHNode> nodes;
+	JPH::Array<uint32_t> candidates;
+	JPH::Array<uint32_t> stack;
+
+	void clear() {
+		entries.clear();
+		nodes.clear();
+		candidates.clear();
+		stack.clear();
+	}
+};
+
+static bool soft_face_aabb_overlaps_point(JPH::Vec3Arg p_min, JPH::Vec3Arg p_max, JPH::Vec3Arg p_point, float p_radius) {
+	return p_point.GetX() >= p_min.GetX() - p_radius && p_point.GetX() <= p_max.GetX() + p_radius &&
+			p_point.GetY() >= p_min.GetY() - p_radius && p_point.GetY() <= p_max.GetY() + p_radius &&
+			p_point.GetZ() >= p_min.GetZ() - p_radius && p_point.GetZ() <= p_max.GetZ() + p_radius;
+}
+
+static float soft_face_bvh_midpoint(const SoftFaceBVHEntry &p_face, uint32_t p_axis) {
+	if (p_axis == 0) {
+		return 0.5f * p_face.min.GetX() + 0.5f * p_face.max.GetX();
+	}
+	if (p_axis == 1) {
+		return 0.5f * p_face.min.GetY() + 0.5f * p_face.max.GetY();
+	}
+	return 0.5f * p_face.min.GetZ() + 0.5f * p_face.max.GetZ();
+}
+
+// Median split gives a bounded recursion depth (<= 10 for 4096 faces) and
+// avoids pathological unbalanced trees even when faces occupy one plane.
+static uint32_t build_soft_face_bvh(JPH::Array<SoftFaceBVHEntry> &r_entries, JPH::Array<SoftFaceBVHNode> &r_nodes, uint32_t p_begin, uint32_t p_end) {
+	JPH::Vec3 min_bound = r_entries[p_begin].min;
+	JPH::Vec3 max_bound = r_entries[p_begin].max;
+	for (uint32_t i = p_begin + 1; i < p_end; ++i) {
+		min_bound = JPH::Vec3::sMin(min_bound, r_entries[i].min);
+		max_bound = JPH::Vec3::sMax(max_bound, r_entries[i].max);
+	}
+
+	const uint32_t node_id = (uint32_t)r_nodes.size();
+	r_nodes.emplace_back();
+	r_nodes[node_id].min = min_bound;
+	r_nodes[node_id].max = max_bound;
+	r_nodes[node_id].begin = p_begin;
+	r_nodes[node_id].end = p_end;
+	if (p_end - p_begin <= SOFT_FACE_BVH_LEAF_SIZE) {
+		return node_id;
+	}
+
+	const JPH::Vec3 extent = max_bound - min_bound;
+	const uint32_t axis = extent.GetX() >= extent.GetY() && extent.GetX() >= extent.GetZ() ? 0 :
+			(extent.GetY() >= extent.GetZ() ? 1 : 2);
+	const uint32_t mid = p_begin + (p_end - p_begin) / 2;
+	std::nth_element(r_entries.begin() + p_begin, r_entries.begin() + mid, r_entries.begin() + p_end,
+			[axis](const SoftFaceBVHEntry &a, const SoftFaceBVHEntry &b) {
+				const float ca = soft_face_bvh_midpoint(a, axis);
+				const float cb = soft_face_bvh_midpoint(b, axis);
+				return ca == cb ? a.face_index < b.face_index : ca < cb;
+			});
+	const uint32_t left = build_soft_face_bvh(r_entries, r_nodes, p_begin, mid);
+	const uint32_t right = build_soft_face_bvh(r_entries, r_nodes, mid, p_end);
+	r_nodes[node_id].left = left;
+	r_nodes[node_id].right = right;
+	return node_id;
+}
+
+static bool prepare_soft_face_bvh(const JPH::Array<JPH::SoftBodySharedSettings::Face> &p_faces,
+		const JPH::Array<JPH::SoftBodyVertex> &p_vertices, JPH::QuatArg p_rotation, JPH::Vec3Arg p_offset,
+		JPH::Array<SoftFaceBVHEntry> &r_entries, JPH::Array<SoftFaceBVHNode> &r_nodes, uint32_t &r_budget) {
+	if (p_faces.size() < MIN_SOFT_FACE_BVH_FACES || p_faces.size() > MAX_SOFT_FACE_BVH_FACES) {
+		return false; // Small/oversized workloads retain brute force.
+	}
+	// Median selection scans each face at every tree level. Debit a
+	// conservative O(F log F) build charge, so many overlapping pairs
+	// cannot bypass the same fixed global work budget as the linear path.
+	uint32_t split_levels = 0;
+	for (uint32_t count = (uint32_t)p_faces.size(); count > 1; count = (count + 1) / 2) {
+		++split_levels;
+	}
+	const uint32_t build_cost = (uint32_t)p_faces.size() * (split_levels + 1);
+	if (r_budget <= build_cost) {
+		return false; // Preserve budget for at least one contact query.
+	}
+	r_budget -= build_cost;
+	r_entries.reserve(p_faces.size());
+	for (uint32_t i = 0; i < p_faces.size(); ++i) {
+		const JPH::SoftBodySharedSettings::Face &face = p_faces[i];
+		if (face.IsDegenerate() || face.mVertex[0] >= p_vertices.size() || face.mVertex[1] >= p_vertices.size() || face.mVertex[2] >= p_vertices.size()) {
+			continue;
+		}
+		const JPH::Vec3 a = p_offset + p_rotation * p_vertices[face.mVertex[0]].mPosition;
+		const JPH::Vec3 b = p_offset + p_rotation * p_vertices[face.mVertex[1]].mPosition;
+		const JPH::Vec3 c = p_offset + p_rotation * p_vertices[face.mVertex[2]].mPosition;
+		const JPH::Vec3 min_bound = JPH::Vec3::sMin(a, JPH::Vec3::sMin(b, c));
+		const JPH::Vec3 max_bound = JPH::Vec3::sMax(a, JPH::Vec3::sMax(b, c));
+		if (!Math::is_finite(min_bound.GetX()) || !Math::is_finite(min_bound.GetY()) || !Math::is_finite(min_bound.GetZ()) ||
+				!Math::is_finite(max_bound.GetX()) || !Math::is_finite(max_bound.GetY()) || !Math::is_finite(max_bound.GetZ())) {
+			continue;
+		}
+		SoftFaceBVHEntry entry;
+		entry.min = min_bound;
+		entry.max = max_bound;
+		entry.face_index = i;
+		r_entries.push_back(entry);
+	}
+	if (r_entries.empty()) {
+		return false;
+	}
+	r_nodes.reserve(2 * r_entries.size());
+	build_soft_face_bvh(r_entries, r_nodes, 0, (uint32_t)r_entries.size());
+	return true;
+}
+
+// Node visits also consume budget, and query returns only conservative
+// candidates: no eligible triangle can be culled by the hierarchy.
+static void query_soft_face_bvh(const JPH::Array<SoftFaceBVHEntry> &p_entries,
+		const JPH::Array<SoftFaceBVHNode> &p_nodes, JPH::Vec3Arg p_point,
+		float p_radius, uint32_t &r_budget, JPH::Array<uint32_t> &r_hits, JPH::Array<uint32_t> &r_stack) {
+	r_hits.clear();
+	r_stack.clear();
+	r_stack.push_back(0);
+	while (!r_stack.empty() && r_budget > 0) {
+		const uint32_t node_id = r_stack.back();
+		r_stack.pop_back();
+		--r_budget;
+		const SoftFaceBVHNode &node = p_nodes[node_id];
+		if (!soft_face_aabb_overlaps_point(node.min, node.max, p_point, p_radius)) {
+			continue;
+		}
+		if (node.end - node.begin <= SOFT_FACE_BVH_LEAF_SIZE) {
+			for (uint32_t i = node.begin; i < node.end; ++i) {
+				const SoftFaceBVHEntry &entry = p_entries[i];
+				if (soft_face_aabb_overlaps_point(entry.min, entry.max, p_point, p_radius)) {
+					r_hits.push_back(entry.face_index);
+				}
+			}
+		} else {
+			r_stack.push_back(node.right);
+			r_stack.push_back(node.left);
+		}
+	}
+}
+
 static void resolve_soft_soft_vertex_face_direction(JPH::Body &p_point_body, JPH::Body &p_face_body,
-		const JoltSoftBody3D &p_point_object, float p_step, uint32_t &r_contact_budget) {
+		const JoltSoftBody3D &p_point_object, float p_step, uint32_t &r_contact_budget, SoftFaceBVHScratch &r_bvh_scratch) {
 	JPH::SoftBodyMotionProperties &point_props = static_cast<JPH::SoftBodyMotionProperties &>(*p_point_body.GetMotionPropertiesUnchecked());
 	JPH::SoftBodyMotionProperties &face_props = static_cast<JPH::SoftBodyMotionProperties &>(*p_face_body.GetMotionPropertiesUnchecked());
 	JPH::Array<JPH::SoftBodyVertex> &points = point_props.GetVertices();
@@ -267,14 +438,31 @@ static void resolve_soft_soft_vertex_face_direction(JPH::Body &p_point_body, JPH
 	const float bias_per_step = JoltProjectSettings::soft_body_soft_contact_recovery / p_step;
 	const float friction = JoltProjectSettings::soft_body_soft_contact_friction;
 
+	// Build BVH only on meaningful meshes, while honoring the global work
+	// budget. Rebuild from the current deformed geometry every simulation
+	// step. All containers live only for this body-pair direction.
+	r_bvh_scratch.clear();
+	const bool use_bvh = JoltProjectSettings::soft_body_soft_vertex_face_bvh &&
+			prepare_soft_face_bvh(faces, face_vertices, face_rotation, face_relative_to_point,
+					r_bvh_scratch.entries, r_bvh_scratch.nodes, r_contact_budget);
+	if (use_bvh) {
+		r_bvh_scratch.candidates.reserve(r_bvh_scratch.entries.size());
+		r_bvh_scratch.stack.reserve(32); // Median BVH <= 4096 faces: <= 10 levels.
+	}
 	for (uint32_t i = 0; i < point_count && r_contact_budget > 0; ++i) {
 		JPH::SoftBodyVertex &point = points[i];
 		const JPH::Vec3 point_position = point_rotation * point.mPosition;
-		for (const JPH::SoftBodySharedSettings::Face &face : faces) {
+		if (use_bvh) {
+			query_soft_face_bvh(r_bvh_scratch.entries, r_bvh_scratch.nodes, point_position, radius,
+					r_contact_budget, r_bvh_scratch.candidates, r_bvh_scratch.stack);
+		}
+		const uint32_t candidate_count = use_bvh ? (uint32_t)r_bvh_scratch.candidates.size() : (uint32_t)faces.size();
+		for (uint32_t candidate = 0; candidate < candidate_count; ++candidate) {
 			if (r_contact_budget == 0) {
 				return;
 			}
-			--r_contact_budget; // Includes all noncontacts: bounded runtime.
+			--r_contact_budget; // Every exact face test consumes the same budget.
+			const JPH::SoftBodySharedSettings::Face &face = faces[use_bvh ? r_bvh_scratch.candidates[candidate] : candidate];
 			const uint32_t id0 = face.mVertex[0], id1 = face.mVertex[1], id2 = face.mVertex[2];
 			if (id0 >= face_vertices.size() || id1 >= face_vertices.size() || id2 >= face_vertices.size() || face.IsDegenerate()) {
 				continue;
@@ -352,11 +540,11 @@ static void resolve_soft_soft_vertex_face_direction(JPH::Body &p_point_body, JPH
 }
 
 static void resolve_soft_soft_vertex_face_contacts(JPH::Body &p_body_a, JPH::Body &p_body_b,
-		const JoltSoftBody3D &p_object_a, const JoltSoftBody3D &p_object_b, float p_step, uint32_t &r_contact_budget) {
+		const JoltSoftBody3D &p_object_a, const JoltSoftBody3D &p_object_b, float p_step, uint32_t &r_contact_budget, SoftFaceBVHScratch &r_bvh_scratch) {
 	// Both directions are necessary: either body can be the sparse mesh.
-	resolve_soft_soft_vertex_face_direction(p_body_a, p_body_b, p_object_a, p_step, r_contact_budget);
+	resolve_soft_soft_vertex_face_direction(p_body_a, p_body_b, p_object_a, p_step, r_contact_budget, r_bvh_scratch);
 	if (r_contact_budget > 0) {
-		resolve_soft_soft_vertex_face_direction(p_body_b, p_body_a, p_object_b, p_step, r_contact_budget);
+		resolve_soft_soft_vertex_face_direction(p_body_b, p_body_a, p_object_b, p_step, r_contact_budget, r_bvh_scratch);
 	}
 }
 
@@ -468,6 +656,7 @@ void JoltSpace3D::_pre_step(float p_step) {
 			JoltProjectSettings::soft_body_soft_contact_radius > 0.0f && Math::is_finite(p_step) && p_step > 0.0f) {
 		uint32_t particle_budget = (uint32_t)JoltProjectSettings::soft_body_soft_contact_max_particle_pairs;
 		uint32_t checked_body_pairs = 0;
+		SoftFaceBVHScratch bvh_scratch; // No allocations when disabled.
 		const float radius = JoltProjectSettings::soft_body_soft_contact_radius;
 
 		for (JPH::uint32 i = 0; i < active_soft_body_count && particle_budget > 0 && checked_body_pairs < MAX_SOFT_SOFT_BODY_PAIR_CHECKS; ++i) {
@@ -488,7 +677,7 @@ void JoltSpace3D::_pre_step(float p_step) {
 					continue;
 				}
 				if (JoltProjectSettings::soft_body_soft_vertex_face_contacts) {
-					resolve_soft_soft_vertex_face_contacts(*jolt_a, *jolt_b, *object_a, *object_b, p_step, particle_budget);
+					resolve_soft_soft_vertex_face_contacts(*jolt_a, *jolt_b, *object_a, *object_b, p_step, particle_budget, bvh_scratch);
 				} else {
 					resolve_soft_soft_particle_contacts(*jolt_a, *jolt_b, *object_a, *object_b, p_step, particle_budget);
 				}
