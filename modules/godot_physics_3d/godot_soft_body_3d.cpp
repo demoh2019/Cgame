@@ -2231,8 +2231,24 @@ bool GodotSoftBody3D::create_from_trimesh(const Vector<int> &p_indices, const Ve
 	}
 
 	++node_count;
+	xpbd_surface_node_count = node_count;
+	// Extra FEM vertices are integrated with the physical solver, but have
+	// no visual vertices, triangle faces or collision point BVH leaves.
+	// Importing them BEFORE append_face()/append_link() prevents vector
+	// reallocations from invalidating stored Node* references.
+	const uint32_t extra_count = uint32_t(xpbd_explicit_tetra_interior_positions.size());
+	if (extra_count > 0) {
+		ERR_FAIL_COND_V_MSG(xpbd_surface_node_count != vertices.size() ||
+					extra_count > 2048 - xpbd_surface_node_count, false,
+				"FEM interior vertex count exceeds the supported node capacity.");
+		vertices.resize(xpbd_surface_node_count + extra_count);
+		for (uint32_t i = 0; i < extra_count; ++i) {
+			vertices[xpbd_surface_node_count + i] = xpbd_explicit_tetra_interior_positions[i];
+		}
+		node_count += extra_count;
+	}
 
-	// Create nodes from vertices.
+	// Create surface and internal simulation nodes in the same stable array.
 	nodes.resize(node_count);
 	dynamic_node_count = node_count;
 	real_t inv_node_mass = node_count * inv_total_mass;
@@ -2244,9 +2260,11 @@ bool GodotSoftBody3D::create_from_trimesh(const Vector<int> &p_indices, const Ve
 		node.q = node.s;
 		node.im = inv_node_mass;
 
-		AABB node_aabb(node.x, leaf_size);
-		node.leaf = node_tree.insert(node_aabb, &node);
-
+		// Interior FEM nodes must NOT be exposed as point colliders.
+		if (i < xpbd_surface_node_count) {
+			AABB node_aabb(node.x, leaf_size);
+			node.leaf = node_tree.insert(node_aabb, &node);
+		}
 		node.index = i;
 	}
 
@@ -4049,6 +4067,7 @@ void GodotSoftBody3D::destroy() {
 	xpbd_fem_fiber_plastic_rest_stretches.reset();
 	xpbd_fem_damage.reset();
 	xpbd_fem_mass_fractions.reset();
+	xpbd_surface_node_count = 0;
 	nodes.clear();
 	links.clear();
 	faces.clear();
