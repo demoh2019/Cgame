@@ -1072,10 +1072,12 @@ Vector<String> String::split_spaces(int p_maxsplit) const {
 		return ret;
 	}
 
+	// Include the terminating NUL, which ends the last token.
+	const char32_t *characters = ptr();
 	bool inside = false;
 
 	while (true) {
-		bool empty = operator[](i) < 33;
+		bool empty = characters[i] < 33;
 
 		if (i == 0) {
 			inside = !empty;
@@ -1116,11 +1118,18 @@ Vector<String> String::split(const String &p_splitter, bool p_allow_empty, int p
 	}
 
 	int from = 0;
-	int len = length();
+	const int len = length();
+	const int splitter_length = p_splitter.length();
 
 	while (true) {
+		// With empty tokens allowed, the split limit always applies at the
+		// current offset. Avoid searching the (possibly huge) remaining tail.
+		if (p_allow_empty && p_maxsplit > 0 && ret.size() == p_maxsplit) {
+			ret.push_back(substr(from));
+			break;
+		}
 		int end;
-		if (p_splitter.is_empty()) {
+		if (splitter_length == 0) {
 			end = from + 1;
 		} else {
 			end = find(p_splitter, from);
@@ -1147,7 +1156,7 @@ Vector<String> String::split(const String &p_splitter, bool p_allow_empty, int p
 			break;
 		}
 
-		from = end + p_splitter.length();
+		from = end + splitter_length;
 	}
 
 	return ret;
@@ -1164,10 +1173,14 @@ Vector<String> String::split(const char *p_splitter, bool p_allow_empty, int p_m
 	}
 
 	int from = 0;
-	int len = length();
+	const int len = length();
 	const int splitter_length = strlen(p_splitter);
 
 	while (true) {
+		if (p_allow_empty && p_maxsplit > 0 && ret.size() == p_maxsplit) {
+			ret.push_back(substr(from));
+			break;
+		}
 		int end;
 		if (p_splitter == nullptr || *p_splitter == '\0') {
 			end = from + 1;

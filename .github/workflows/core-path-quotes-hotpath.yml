@@ -50,3 +50,4 @@ jobs:
           ./bin/godot.linuxbsd.editor.dev.x86_64 --headless --test --test-case="*[String] Quoted strings*"
           ./bin/godot.linuxbsd.editor.dev.x86_64 --headless --test --test-case="*[String] Path functions*"
           ./bin/godot.linuxbsd.editor.dev.x86_64 --headless --test --test-case="*[String] Path extraction single-pass regressions*"
+          ./bin/godot.linuxbsd.editor.dev.x86_64 --headless --test --test-case="*[String] Split maxsplit tail hotpath regressions*"
