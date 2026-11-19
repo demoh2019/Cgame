@@ -27,7 +27,7 @@ func _make_body(space: RID, shape: RID, x: float, velocity: float, ccd: bool, st
 
 
 func _run_case(label: String, target_x: float, velocity_a: float, velocity_b: float,
-		min_speed: float, max_speed: float, static_target: bool = false, target_ccd: bool = false, target_y: float = 0.0, capsule_target: bool = false, source_y: float = 0.0, capsule_source: bool = false, reversed_target_axis: bool = false) -> int:
+		min_speed: float, max_speed: float, static_target: bool = false, target_ccd: bool = false, target_y: float = 0.0, capsule_target: bool = false, source_y: float = 0.0, capsule_source: bool = false, reversed_target_axis: bool = false, skew_source_axis: bool = false) -> int:
 	var space: RID = PhysicsServer3D.space_create()
 	var sphere: RID = PhysicsServer3D.sphere_shape_create()
 	PhysicsServer3D.shape_set_data(sphere, 0.5)
@@ -37,6 +37,8 @@ func _run_case(label: String, target_x: float, velocity_a: float, velocity_b: fl
 		source_shape = PhysicsServer3D.capsule_shape_create()
 		PhysicsServer3D.shape_set_data(source_shape, {"radius": 0.5, "height": 4.0})
 	var a: RID = _make_body(space, source_shape, 0.0, velocity_a, true, false, source_y)
+	if skew_source_axis:
+		PhysicsServer3D.body_set_state(a, PhysicsServer3D.BODY_STATE_TRANSFORM, Transform3D(Basis(Vector3(0.0, 0.0, 1.0), PI * 0.5), Vector3(0.0, source_y, 0.0)))
 	var target_shape: RID = sphere
 	if capsule_target:
 		target_shape = PhysicsServer3D.capsule_shape_create()
@@ -105,6 +107,10 @@ func _run() -> void:
 	failures += await _run_case("parallel capsules CCD", 4.0, 480.0, 0.0, 0.0, 425.0, true, false, 3.8, true, 0.0, true)
 	# Reversing a capsule axis gives the same center segment Minkowski sum.
 	failures += await _run_case("antiparallel capsules CCD", 4.0, 480.0, 0.0, 0.0, 425.0, true, false, 3.8, true, 0.0, true, true)
+	# A horizontal capsule crosses beneath a vertical capsule. A point
+	# support ray at y=0 misses its rounded end at y=0.8, although their
+	# full swept volumes intersect before A passes the target.
+	failures += await _run_case("skew capsules CCD", 4.0, 480.0, 0.0, 0.0, 400.0, true, false, 2.3, true, 0.0, true, false, true)
 
 	if failures:
 		printerr("3D relative-motion CCD regression failed: %d" % failures)
