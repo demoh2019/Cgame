@@ -331,6 +331,78 @@ void TerrainHeightmap::paint_layer(const Vector2 &p_center, float p_radius, int 
     }
 }
 
+namespace {
+uint32_t terrain_hash(uint32_t p_value) {
+    p_value ^= p_value >> 16;
+    p_value *= 0x7feb352dU;
+    p_value ^= p_value >> 15;
+    p_value *= 0x846ca68bU;
+    p_value ^= p_value >> 16;
+    return p_value;
+}
+
+float terrain_random01(uint32_t p_seed, uint32_t p_x, uint32_t p_z, uint32_t p_channel) {
+    const uint32_t value = terrain_hash(p_seed ^ (p_x * 0x9e3779b9U) ^
+            (p_z * 0x85ebca6bU) ^ (p_channel * 0xc2b2ae35U));
+    return float(value & 0xFFFFFFU) / 16777216.0f;
+}
+} // namespace
+
+PackedVector3Array TerrainHeightmap::scatter_points(int p_seed, float p_spacing, float p_jitter,
+        float p_max_slope_degrees, float p_min_height, float p_max_height, float p_cell_size) const {
+    PackedVector3Array points;
+    ERR_FAIL_COND_V_MSG(!std::isfinite(p_spacing) || p_spacing <= 0 ||
+                    !std::isfinite(p_cell_size) || p_cell_size <= 0 ||
+                    !std::isfinite(p_jitter) || p_jitter < 0 || p_jitter > 1 ||
+                    !std::isfinite(p_max_slope_degrees) || p_max_slope_degrees < 0 || p_max_slope_degrees > 90 ||
+                    !std::isfinite(p_min_height) || !std::isfinite(p_max_height) || p_min_height > p_max_height,
+            points, "Invalid terrain scatter parameters.");
+
+    const double extent_x = double(dimensions.x - 1) * p_cell_size;
+    const double extent_z = double(dimensions.y - 1) * p_cell_size;
+    const double cols_d = Math::ceil(extent_x / p_spacing);
+    const double rows_d = Math::ceil(extent_z / p_spacing);
+    // Cap the candidate grid before casting to integers to avoid overflow and
+    // unbounded allocations when processing large world coordinates.
+    ERR_FAIL_COND_V_MSG(!std::isfinite(cols_d) || !std::isfinite(rows_d) ||
+                    cols_d < 1 || rows_d < 1 || cols_d > 65536 || rows_d > 65536 ||
+                    cols_d * rows_d > 65536,
+            points, "Terrain scatter supports at most 65,536 candidate positions.");
+    const int cols = int(cols_d);
+    const int rows = int(rows_d);
+    const float max_slope_tangent = p_max_slope_degrees == 90.0f ?
+            INFINITY : Math::tan(p_max_slope_degrees * float(Math_PI) / 180.0f);
+
+    const uint32_t seed = uint32_t(p_seed);
+    for (int z = 0; z < rows; z++) {
+        for (int x = 0; x < cols; x++) {
+            const float random_x = terrain_random01(seed, x, z, 1);
+            const float random_z = terrain_random01(seed, x, z, 2);
+            const float world_x = float(CLAMP(((x + 0.5f) + (random_x - 0.5f) * p_jitter) *
+                            p_spacing, 0.0, extent_x));
+            const float world_z = float(CLAMP(((z + 0.5f) + (random_z - 0.5f) * p_jitter) *
+                            p_spacing, 0.0, extent_z));
+            const Vector2 grid_pos(world_x / p_cell_size, world_z / p_cell_size);
+            const float world_y = sample_height(grid_pos);
+            if (world_y < p_min_height || world_y > p_max_height) {
+                continue;
+            }
+            const float left = sample_height(grid_pos - Vector2(1, 0));
+            const float right = sample_height(grid_pos + Vector2(1, 0));
+            const float back = sample_height(grid_pos - Vector2(0, 1));
+            const float forward = sample_height(grid_pos + Vector2(0, 1));
+            const float grad_x = (right - left) / (2.0f * p_cell_size);
+            const float grad_z = (forward - back) / (2.0f * p_cell_size);
+            const float gradient_squared = grad_x * grad_x + grad_z * grad_z;
+            if (gradient_squared > max_slope_tangent * max_slope_tangent) {
+                continue;
+            }
+            points.push_back(Vector3(world_x, world_y, world_z));
+        }
+    }
+    return points;
+}
+
 Ref<ArrayMesh> TerrainHeightmap::build_mesh(float p_cell_size) const {
     return build_chunk_mesh(Vector2i(0, 0), dimensions - Vector2i(1, 1), 1, p_cell_size);
 }
@@ -435,6 +507,8 @@ void TerrainHeightmap::_bind_methods() {
     ClassDB::bind_method(D_METHOD("smooth", "center", "radius", "strength"), &TerrainHeightmap::smooth);
     ClassDB::bind_method(D_METHOD("erode_talus", "iterations", "talus", "rate"), &TerrainHeightmap::erode_talus);
     ClassDB::bind_method(D_METHOD("paint_layer", "center", "radius", "layer", "strength"), &TerrainHeightmap::paint_layer);
+    ClassDB::bind_method(D_METHOD("scatter_points", "seed", "spacing", "jitter", "max_slope_degrees", "min_height", "max_height", "cell_size"), &TerrainHeightmap::scatter_points,
+            DEFVAL(0.75f), DEFVAL(45.0f), DEFVAL(-100000.0f), DEFVAL(100000.0f), DEFVAL(1.0f));
     ClassDB::bind_method(D_METHOD("build_mesh", "cell_size"), &TerrainHeightmap::build_mesh, DEFVAL(1.0f));
     ClassDB::bind_method(D_METHOD("build_chunk_mesh", "cell_origin", "cell_count", "lod_stride", "cell_size"), &TerrainHeightmap::build_chunk_mesh, DEFVAL(1), DEFVAL(1.0f));
 
