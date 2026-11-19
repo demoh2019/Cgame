@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<class name="BehaviorTreeSequence" inherits="BehaviorTreeComposite" api_type="core" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="../../../doc/class.xsd">
+	<brief_description>Executes child tasks sequentially until one fails or runs.</brief_description>
+	<description>A sequence returns [constant BehaviorTreeTask.SUCCESS] only when every child returns success. It returns failure immediately if a child fails and suspends at the current child on [constant BehaviorTreeTask.RUNNING]. An empty sequence succeeds. The running-child index is stored in each [BehaviorTreeRunner], not on the shared resource.</description>
+	
+</class>
