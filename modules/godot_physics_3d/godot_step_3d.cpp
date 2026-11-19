@@ -40,6 +40,10 @@
 #define ISLAND_COUNT_RESERVE 128
 #define CONSTRAINT_COUNT_RESERVE 1024
 
+// Avoid worker pool task/wakeup overhead when the workload is smaller than a batch.
+static constexpr uint32_t MIN_PARALLEL_SETUP_CONSTRAINTS = 32;
+static constexpr uint32_t MIN_PARALLEL_SOLVE_ISLANDS = 16;
+
 // Parallel graph coloring only pays off for large connected rigid-body groups.
 static constexpr uint32_t MIN_PARALLEL_LARGE_ISLAND = 256;
 static constexpr uint32_t MIN_PARALLEL_COLOR_CONSTRAINTS = 64;
@@ -483,11 +487,11 @@ void GodotStep3D::step(GodotSpace3D *p_space, real_t p_delta) {
 	/* SETUP CONSTRAINTS / PROCESS COLLISIONS */
 
 	const uint32_t total_constraint_count = all_constraints.size();
-	if (total_constraint_count == 1) {
-		// Dispatching a thread group for a single constraint costs more than
-		// running the setup inline on the already active physics thread.
-		_setup_constraint(0, nullptr);
-	} else if (total_constraint_count > 1) {
+	if (total_constraint_count < MIN_PARALLEL_SETUP_CONSTRAINTS) {
+		for (uint32_t constraint_index = 0; constraint_index < total_constraint_count; ++constraint_index) {
+			_setup_constraint(constraint_index, nullptr);
+		}
+	} else {
 		WorkerThreadPool::GroupID group_task = WorkerThreadPool::get_singleton()->add_template_group_task(this, &GodotStep3D::_setup_constraint, nullptr, total_constraint_count, -1, true, SNAME("Physics3DConstraintSetup"));
 		WorkerThreadPool::get_singleton()->wait_for_group_task_completion(group_task);
 	}
@@ -542,7 +546,11 @@ void GodotStep3D::step(GodotSpace3D *p_space, real_t p_delta) {
 				!_solve_large_island(constraint_islands[island_index])) {
 			_solve_island(0, nullptr);
 		}
-	} else if (solve_island_count > 1) {
+	} else if (solve_island_count < MIN_PARALLEL_SOLVE_ISLANDS) {
+		for (uint32_t island_index = 0; island_index < solve_island_count; ++island_index) {
+			_solve_island(island_index, nullptr);
+		}
+	} else {
 		WorkerThreadPool::GroupID group_task = WorkerThreadPool::get_singleton()->add_template_group_task(this, &GodotStep3D::_solve_island, nullptr, solve_island_count, -1, true, SNAME("Physics3DConstraintSolveIslands"));
 		WorkerThreadPool::get_singleton()->wait_for_group_task_completion(group_task);
 	}
