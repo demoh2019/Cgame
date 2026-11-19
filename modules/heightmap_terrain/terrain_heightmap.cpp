@@ -31,6 +31,7 @@
 
 #include "core/math/math_funcs.h"
 #include "core/object/class_db.h"
+#include "core/templates/vector.h"
 #include "scene/resources/texture.h"
 
 void TerrainHeightmap::set_dimensions(int p_width, int p_depth) {
@@ -216,6 +217,67 @@ void TerrainHeightmap::apply_color_brush(const Vector2 &p_center, real_t p_radiu
     }
 }
 
+void TerrainHeightmap::erode_thermal(int p_iterations, real_t p_talus, real_t p_strength) {
+    ERR_FAIL_COND_MSG(p_iterations < 0 || p_iterations > 128, "Erosion supports 0 to 128 iterations.");
+    ERR_FAIL_COND_MSG(!Math::is_finite(p_talus) || p_talus < 0, "Erosion talus must be nonnegative and finite.");
+    ERR_FAIL_COND_MSG(!Math::is_finite(p_strength) || p_strength < 0 || p_strength > 0.25,
+            "Thermal erosion strength must be in the range 0 to 0.25.");
+    if (p_iterations == 0 || p_strength == 0) {
+        return;
+    }
+
+    // Each undirected horizontal/vertical grid edge is visited exactly once.
+    // Transferring equal amounts from the higher cell to the lower cell conserves
+    // aggregate elevation, even when several slopes meet at the same vertex.
+    bool modified = false;
+    const int count = width * depth;
+    Vector<real_t> delta;
+    delta.resize(count);
+    for (int iteration = 0; iteration < p_iterations; ++iteration) {
+        real_t *dw = delta.ptrw();
+        for (int i = 0; i < count; ++i) {
+            dw[i] = 0;
+        }
+        bool step_modified = false;
+        for (int z = 0; z < depth; ++z) {
+            for (int x = 0; x < width; ++x) {
+                const int a = z * width + x;
+                const int neighbors[2] = { x + 1 < width ? a + 1 : -1, z + 1 < depth ? a + width : -1 };
+                for (int n = 0; n < 2; ++n) {
+                    const int b = neighbors[n];
+                    if (b < 0) {
+                        continue;
+                    }
+                    const real_t difference = real_t(heights[a]) - real_t(heights[b]);
+                    const real_t excess = Math::abs(difference) - p_talus;
+                    if (excess <= 0) {
+                        continue;
+                    }
+                    const real_t transfer = excess * p_strength;
+                    const real_t signed_transfer = difference > 0 ? transfer : -transfer;
+                    dw[a] -= signed_transfer;
+                    dw[b] += signed_transfer;
+                    step_modified = true;
+                }
+            }
+        }
+        if (!step_modified) {
+            break;
+        }
+        PackedFloat32Array next = heights;
+        for (int i = 0; i < count; ++i) {
+            const real_t value = real_t(heights[i]) + dw[i];
+            ERR_FAIL_COND_MSG(!Math::is_finite(value), "Thermal erosion resulted in non-finite heights.");
+            next.set(i, value);
+        }
+        heights = next;
+        modified = true;
+    }
+    if (modified) {
+        emit_changed();
+    }
+}
+
 void TerrainHeightmap::import_height_image(const Ref<Image> &p_image, real_t p_min_height, real_t p_max_height) {
     ERR_FAIL_COND(p_image.is_null());
     ERR_FAIL_COND_MSG(p_image->is_compressed(), "Decompress the heightmap image before importing.");
@@ -262,6 +324,7 @@ void TerrainHeightmap::_bind_methods() {
     ClassDB::bind_method(D_METHOD("sample_height", "x", "z"), &TerrainHeightmap::sample_height);
     ClassDB::bind_method(D_METHOD("apply_height_brush", "center", "radius", "amount"), &TerrainHeightmap::apply_height_brush);
     ClassDB::bind_method(D_METHOD("apply_color_brush", "center", "radius", "color", "strength"), &TerrainHeightmap::apply_color_brush);
+    ClassDB::bind_method(D_METHOD("erode_thermal", "iterations", "talus", "strength"), &TerrainHeightmap::erode_thermal);
     ClassDB::bind_method(D_METHOD("import_height_image", "image", "min_height", "max_height"), &TerrainHeightmap::import_height_image);
 
     ADD_PROPERTY(PropertyInfo(Variant::INT, "width", PROPERTY_HINT_RANGE, "2,513,1"), "set_width", "get_width");
