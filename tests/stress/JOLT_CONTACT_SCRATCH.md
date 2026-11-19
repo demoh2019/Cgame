@@ -16,7 +16,9 @@ The contact listener now uses a high-water policy on **temporary** data:
   keep at least 2,048 event slots and trim capacity only after a large drop.
 
 This retains the allocation for **sustained** dense-contact simulations while
-releasing large buffers after the workload shrinks. No contact/event may be
+releasing large buffers after the workload shrinks. Event count forecasting
+also uses signed arithmetic: duplicate area exits no longer wrap the reserve
+size to a giant unsigned value and trigger an unnecessary allocation. No contact/event may be
 discarded before it is dispatched, and the **persistent** area-overlap sets
 must remain intact to produce correct enter/exit events.
 
