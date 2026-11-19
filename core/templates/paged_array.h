@@ -35,6 +35,7 @@
 #include "core/os/spin_lock.h"
 #include "core/typedefs.h"
 
+#include <cstring>
 #include <type_traits>
 
 // PagedArray is used mainly for filling a very large array from multiple threads efficiently and without causing major fragmentation
@@ -45,6 +46,7 @@ template <typename T>
 class PagedArrayPool {
 	T **page_pool = nullptr;
 	uint32_t pages_allocated = 0;
+	uint32_t pages_capacity = 0;
 
 	uint32_t *available_page_pool = nullptr;
 	uint32_t pages_available = 0;
@@ -61,23 +63,28 @@ public:
 	PageInfo alloc_page() {
 		spin_lock.lock();
 		if (unlikely(pages_available == 0)) {
-			uint32_t pages_used = pages_allocated;
+			// Grow metadata geometrically rather than reallocating both arrays
+			// for every newly allocated page.
+			if (pages_allocated == pages_capacity) {
+				uint32_t next_capacity = pages_capacity ? pages_capacity + (pages_capacity >> 1) : 4;
+				if (next_capacity < pages_capacity) {
+					next_capacity = UINT32_MAX;
+				}
+				page_pool = (T **)memrealloc(page_pool, sizeof(T *) * next_capacity);
+				available_page_pool = (uint32_t *)memrealloc(available_page_pool, sizeof(uint32_t) * next_capacity);
+				pages_capacity = next_capacity;
+			}
 
-			pages_allocated++;
-			page_pool = (T **)memrealloc(page_pool, sizeof(T *) * pages_allocated);
-			available_page_pool = (uint32_t *)memrealloc(available_page_pool, sizeof(uint32_t) * pages_allocated);
-
-			page_pool[pages_used] = (T *)memalloc(sizeof(T) * page_size);
-			available_page_pool[0] = pages_used;
-
-			pages_available++;
+			const uint32_t page_id = pages_allocated++;
+			T *page = (T *)memalloc(sizeof(T) * page_size);
+			page_pool[page_id] = page;
+			spin_lock.unlock();
+			return PageInfo{ page, page_id };
 		}
 
-		pages_available--;
-		uint32_t page_id = available_page_pool[pages_available];
+		const uint32_t page_id = available_page_pool[--pages_available];
 		T *page = page_pool[page_id];
 		spin_lock.unlock();
-
 		return PageInfo{ page, page_id };
 	}
 
@@ -85,6 +92,17 @@ public:
 		spin_lock.lock();
 		available_page_pool[pages_available] = p_page_id;
 		pages_available++;
+		spin_lock.unlock();
+	}
+
+	// Returning many pages at once avoids a lock/unlock pair per page.
+	void free_pages(const uint32_t *p_page_ids, uint32_t p_count) {
+		if (p_count == 0) {
+			return;
+		}
+		spin_lock.lock();
+		std::memcpy(available_page_pool + pages_available, p_page_ids, size_t(p_count) * sizeof(uint32_t));
+		pages_available += p_count;
 		spin_lock.unlock();
 	}
 
@@ -107,6 +125,7 @@ public:
 			page_pool = nullptr;
 			available_page_pool = nullptr;
 			pages_allocated = 0;
+			pages_capacity = 0;
 			pages_available = 0;
 		}
 	}
@@ -246,10 +265,7 @@ public:
 		}
 
 		//return the pages to the pagepool, so they can be used by another array eventually
-		uint32_t pages_used = _get_pages_in_use();
-		for (uint32_t i = 0; i < pages_used; i++) {
-			page_pool->free_page(page_ids[i]);
-		}
+		page_pool->free_pages(page_ids, _get_pages_in_use());
 
 		count = 0;
 
