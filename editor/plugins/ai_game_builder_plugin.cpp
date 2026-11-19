@@ -91,6 +91,12 @@ bool AIGameBuilderPlugin::is_safe_project_path(const String &p_path) {
 		if (component.is_empty() || component.begins_with(".") || component.ends_with(".") || component.length() > 80) {
 			return false;
 		}
+		// Reserved Windows device names are invalid even with a file extension.
+		const String stem = component.get_basename().to_upper();
+		if (stem == "CON" || stem == "PRN" || stem == "AUX" || stem == "NUL" ||
+				(stem.length() == 4 && (stem.begins_with("COM") || stem.begins_with("LPT")) && stem[3] >= '1' && stem[3] <= '9')) {
+			return false;
+		}
 	}
 
 	const String extension = p_path.get_extension().to_lower();
@@ -160,7 +166,7 @@ Error AIGameBuilderPlugin::parse_plan(const String &p_json, Array &r_files, Stri
 		paths.insert(path.to_lower());
 
 		const int bytes = contents.utf8().length();
-		if (bytes == 0 || bytes > MAX_FILE_BYTES || total_bytes > MAX_TOTAL_BYTES - bytes) {
+		if (contents.contains_char(0) || bytes == 0 || bytes > MAX_FILE_BYTES || total_bytes > MAX_TOTAL_BYTES - bytes) {
 			r_error = "A file is empty or the plan exceeds the file-size limits.";
 			return ERR_INVALID_DATA;
 		}
@@ -195,7 +201,8 @@ void AIGameBuilderPlugin::_generate_pressed() {
 
 	const String endpoint = endpoint_edit->get_text().strip_edges();
 	const bool is_https = endpoint.begins_with("https://");
-	if ((!is_https && !is_local_endpoint(endpoint)) || endpoint.contains("\n") || endpoint.contains("\r")) {
+	if ((!is_https && !is_local_endpoint(endpoint)) || endpoint.contains("@") || endpoint.contains("#") ||
+			endpoint.contains("\n") || endpoint.contains("\r")) {
 		status_label->set_text("Use HTTPS, or HTTP on localhost / 127.0.0.1 only.");
 		return;
 	}
@@ -285,11 +292,15 @@ void AIGameBuilderPlugin::_request_completed(int p_result, int p_response_code, 
 	}
 	const Dictionary response = response_variant;
 	const Variant choices_variant = response.get("choices", Variant());
-	if (choices_variant.get_type() != Variant::ARRAY || Array(choices_variant).is_empty()) {
+	if (choices_variant.get_type() != Variant::ARRAY) {
 		status_label->set_text("No response choices were returned by the AI provider.");
 		return;
 	}
 	const Array choices = choices_variant;
+	if (choices.is_empty()) {
+		status_label->set_text("No response choices were returned by the AI provider.");
+		return;
+	}
 	if (choices[0].get_type() != Variant::DICTIONARY) {
 		status_label->set_text("Unexpected AI response format.");
 		return;
@@ -379,7 +390,7 @@ void AIGameBuilderPlugin::_apply_pressed() {
 		const String full_path = root.path_join(path);
 
 		Error err = DirAccess::make_dir_recursive_absolute(full_path.get_base_dir());
-		if (err == OK) {
+		if (err == OK && !FileAccess::exists(full_path) && !filesystem->is_link(full_path)) {
 			Ref<FileAccess> output = FileAccess::open(full_path, FileAccess::WRITE, &err);
 			if (output.is_valid()) {
 				created_files.push_back(full_path);
@@ -392,6 +403,9 @@ void AIGameBuilderPlugin::_apply_pressed() {
 			}
 		}
 
+		if (err == OK) {
+			err = ERR_FILE_CANT_WRITE;
+		}
 		// This operation only creates new files, so rollback never deletes user files.
 		for (const String &created : created_files) {
 			DirAccess::remove_absolute(created);
