@@ -789,7 +789,12 @@ bool GodotBody3D::sleep_test(real_t p_step) {
 
 	ERR_FAIL_NULL_V(get_space(), true);
 
-	if (Math::abs(angular_velocity.length()) < get_space()->get_body_angular_velocity_sleep_threshold() && Math::abs(linear_velocity.length_squared()) < get_space()->get_body_linear_velocity_sleep_threshold() * get_space()->get_body_linear_velocity_sleep_threshold()) {
+	// Squared magnitude avoids a square root for every active body every step.
+	// A non-positive threshold must never make angular motion eligible for sleep.
+	const real_t angular_sleep_threshold = get_space()->get_body_angular_velocity_sleep_threshold();
+	const real_t linear_sleep_threshold = get_space()->get_body_linear_velocity_sleep_threshold();
+	if (angular_sleep_threshold > 0.0 && angular_velocity.length_squared() < angular_sleep_threshold * angular_sleep_threshold &&
+			Math::abs(linear_velocity.length_squared()) < linear_sleep_threshold * linear_sleep_threshold) {
 		still_time += p_step;
 
 		return still_time > get_space()->get_body_time_to_sleep();
