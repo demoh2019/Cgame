@@ -644,6 +644,10 @@ PhysicsServer3D::PhysicsServer3D() {
 	// Experimental volumetric Neo-Hookean FEM for a single closed tetrahedron.
 	GLOBAL_DEF(PropertyInfo(Variant::FLOAT, "physics/3d/solver/soft_body_tetra_fem_compliance", PROPERTY_HINT_RANGE, "0,0.01,0.000001,or_greater"), 0.0);
 	GLOBAL_DEF(PropertyInfo(Variant::FLOAT, "physics/3d/solver/soft_body_tetra_fem_poisson_ratio", PROPERTY_HINT_RANGE, "0,0.49,0.01"), 0.3);
+	// Experimental tension-only reinforcing fibers transported in a tetra's
+	// undeformed material frame. Independent of isotropic Neo-Hookean FEM.
+	GLOBAL_DEF(PropertyInfo(Variant::FLOAT, "physics/3d/solver/soft_body_tetra_fiber_compliance", PROPERTY_HINT_RANGE, "0,0.01,0.000001,or_greater"), 0.0);
+	GLOBAL_DEF(PropertyInfo(Variant::VECTOR3, "physics/3d/solver/soft_body_tetra_fiber_axis"), Vector3(1, 0, 0));
 	// Objective Kelvin-Voigt strain-rate stress for each tetrahedral FEM element.
 	// Independent from the global breathing-mode viscosity, off by default.
 	GLOBAL_DEF(PropertyInfo(Variant::FLOAT, "physics/3d/solver/soft_body_tetra_fem_viscosity", PROPERTY_HINT_RANGE, "0,1000,0.1,or_greater"), 0.0);

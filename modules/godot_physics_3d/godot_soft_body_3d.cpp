@@ -43,6 +43,7 @@
 #include "servers/physics_softbody_adiabatic_gas.h"
 #include "servers/physics_softbody_shape_matching.h"
 #include "servers/physics_fem_tetra_neo_hookean.h"
+#include "servers/physics_fem_tetra_fiber.h"
 #include "servers/physics_fem_tetra_viscosity.h"
 #include "servers/physics_softbody_shape_clusters.h"
 #include "servers/physics_softbody_aerodynamic_drag.h"
@@ -510,6 +511,7 @@ void GodotSoftBody3D::solve_shape_matching_clusters(real_t p_strength) {
 // Rest matrices, node indices and per-step XPBD multipliers remain cached.
 void GodotSoftBody3D::initialize_fem_tetra() {
 	xpbd_fem_tetrahedra.reset();
+	xpbd_fem_fiber_lambdas.reset();
 	if (!get_space() ||
 			!(get_space()->get_soft_body_tetra_fem_compliance() > 0.0 ||
 					get_space()->get_soft_body_tetra_fem_viscosity() > 0.0) ||
@@ -3005,6 +3007,11 @@ void GodotSoftBody3D::solve_constraints(real_t p_delta) {
 	const bool use_fem = !xpbd_fem_tetrahedra.is_empty() && fem_compliance > 0.0 && p_delta > 0.0 &&
 			Math::is_finite(fem_alpha) && fem_alpha > 0.0;
 	const double fem_poisson = get_space() ? double(get_space()->get_soft_body_tetra_fem_poisson_ratio()) : 0.3;
+	const double fem_fiber_compliance = get_space() ? double(get_space()->get_soft_body_tetra_fiber_compliance()) : 0.0;
+	const double fem_fiber_alpha = p_delta > 0.0 ? fem_fiber_compliance / (double(p_delta) * double(p_delta)) : 0.0;
+	const bool use_fem_fiber = use_fem && fem_fiber_compliance > 0.0 &&
+			Math::is_finite(fem_fiber_alpha) && fem_fiber_alpha > 0.0;
+	const Vector3 fem_fiber_axis = get_space() ? get_space()->get_soft_body_tetra_fiber_axis() : Vector3(1, 0, 0);
 	const double volume_compliance = get_space() ? double(get_space()->get_soft_body_xpbd_volume_compliance()) : 0.0;
 	const double volume_alpha = p_delta > 0.0 ? volume_compliance / (double(p_delta) * double(p_delta)) : 0.0;
 	const bool use_volume_xpbd = xpbd_volume_closed && volume_compliance > 0.0 &&
@@ -3154,6 +3161,16 @@ void GodotSoftBody3D::solve_constraints(real_t p_delta) {
 			tetra.lambda = 0.0;
 		}
 	}
+	// Fiber multipliers are per-tet and persist only within the current
+	// step. The default 0 compliance allocates no scratch or solver work.
+	if (use_fem_fiber) {
+		xpbd_fem_fiber_lambdas.resize(xpbd_fem_tetrahedra.size());
+		for (double &lambda : xpbd_fem_fiber_lambdas) {
+			lambda = 0.0;
+		}
+	} else if (!xpbd_fem_fiber_lambdas.is_empty()) {
+		xpbd_fem_fiber_lambdas.reset();
+	}
 
 	// Distribute frame-level shape stiffness over solver iterations. For a
 	// fixed total stiffness, increasing iteration_count should not multiply
@@ -3247,6 +3264,18 @@ void GodotSoftBody3D::solve_constraints(real_t p_delta) {
 				physics_fem_tetra_solve(a.x, b.x, c.x, d.x,
 						a.im, b.im, c.im, d.im,
 						tetra.rest, fem_poisson, fem_alpha, tetra.lambda);
+			}
+		}
+		if (use_fem_fiber) {
+			for (uint32_t tet_index = 0; tet_index < xpbd_fem_tetrahedra.size(); ++tet_index) {
+				const PhysicsFEMConvexTetra &tetra = xpbd_fem_tetrahedra[tet_index];
+				Node &a = nodes[tetra.a];
+				Node &b = nodes[tetra.b];
+				Node &c = nodes[tetra.c];
+				Node &d = nodes[tetra.d];
+				physics_fem_tetra_solve_fiber(a.x, b.x, c.x, d.x,
+						a.im, b.im, c.im, d.im, tetra.rest,
+						fem_fiber_axis, fem_fiber_alpha, xpbd_fem_fiber_lambdas[tet_index]);
 			}
 		}
 		if (use_volume_xpbd) {
@@ -3519,6 +3548,7 @@ void GodotSoftBody3D::destroy() {
 	xpbd_volume_rest = 0.0;
 	xpbd_volume_original_rest = 0.0;
 	xpbd_fem_tetrahedra.reset();
+	xpbd_fem_fiber_lambdas.reset();
 	nodes.clear();
 	links.clear();
 	faces.clear();
