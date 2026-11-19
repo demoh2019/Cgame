@@ -270,6 +270,22 @@ struct SoftFaceBVHNode {
 	uint32_t right = 0;
 };
 
+// The same arrays are reused across all soft-soft pairs and both query
+// directions within a space's pre-step, avoiding per-pair heap churn.
+struct SoftFaceBVHScratch {
+	JPH::Array<SoftFaceBVHEntry> entries;
+	JPH::Array<SoftFaceBVHNode> nodes;
+	JPH::Array<uint32_t> candidates;
+	JPH::Array<uint32_t> stack;
+
+	void clear() {
+		entries.clear();
+		nodes.clear();
+		candidates.clear();
+		stack.clear();
+	}
+};
+
 static bool soft_face_aabb_overlaps_point(JPH::Vec3Arg p_min, JPH::Vec3Arg p_max, JPH::Vec3Arg p_point, float p_radius) {
 	return p_point.GetX() >= p_min.GetX() - p_radius && p_point.GetX() <= p_max.GetX() + p_radius &&
 			p_point.GetY() >= p_min.GetY() - p_radius && p_point.GetY() <= p_max.GetY() + p_radius &&
@@ -401,7 +417,7 @@ static void query_soft_face_bvh(const JPH::Array<SoftFaceBVHEntry> &p_entries,
 }
 
 static void resolve_soft_soft_vertex_face_direction(JPH::Body &p_point_body, JPH::Body &p_face_body,
-		const JoltSoftBody3D &p_point_object, float p_step, uint32_t &r_contact_budget) {
+		const JoltSoftBody3D &p_point_object, float p_step, uint32_t &r_contact_budget, SoftFaceBVHScratch &r_bvh_scratch) {
 	JPH::SoftBodyMotionProperties &point_props = static_cast<JPH::SoftBodyMotionProperties &>(*p_point_body.GetMotionPropertiesUnchecked());
 	JPH::SoftBodyMotionProperties &face_props = static_cast<JPH::SoftBodyMotionProperties &>(*p_face_body.GetMotionPropertiesUnchecked());
 	JPH::Array<JPH::SoftBodyVertex> &points = point_props.GetVertices();
@@ -425,29 +441,28 @@ static void resolve_soft_soft_vertex_face_direction(JPH::Body &p_point_body, JPH
 	// Build BVH only on meaningful meshes, while honoring the global work
 	// budget. Rebuild from the current deformed geometry every simulation
 	// step. All containers live only for this body-pair direction.
-	JPH::Array<SoftFaceBVHEntry> face_entries;
-	JPH::Array<SoftFaceBVHNode> face_nodes;
+	r_bvh_scratch.clear();
 	const bool use_bvh = JoltProjectSettings::soft_body_soft_vertex_face_bvh &&
-			prepare_soft_face_bvh(faces, face_vertices, face_rotation, face_relative_to_point, face_entries, face_nodes, r_contact_budget);
-	JPH::Array<uint32_t> face_candidates;
-	JPH::Array<uint32_t> query_stack;
+			prepare_soft_face_bvh(faces, face_vertices, face_rotation, face_relative_to_point,
+					r_bvh_scratch.entries, r_bvh_scratch.nodes, r_contact_budget);
 	if (use_bvh) {
-		face_candidates.reserve(face_entries.size());
-		query_stack.reserve(32); // Median BVH with <= 4096 faces: <= 10 levels.
+		r_bvh_scratch.candidates.reserve(r_bvh_scratch.entries.size());
+		r_bvh_scratch.stack.reserve(32); // Median BVH <= 4096 faces: <= 10 levels.
 	}
 	for (uint32_t i = 0; i < point_count && r_contact_budget > 0; ++i) {
 		JPH::SoftBodyVertex &point = points[i];
 		const JPH::Vec3 point_position = point_rotation * point.mPosition;
 		if (use_bvh) {
-			query_soft_face_bvh(face_entries, face_nodes, point_position, radius, r_contact_budget, face_candidates, query_stack);
+			query_soft_face_bvh(r_bvh_scratch.entries, r_bvh_scratch.nodes, point_position, radius,
+					r_contact_budget, r_bvh_scratch.candidates, r_bvh_scratch.stack);
 		}
-		const uint32_t candidate_count = use_bvh ? (uint32_t)face_candidates.size() : (uint32_t)faces.size();
+		const uint32_t candidate_count = use_bvh ? (uint32_t)r_bvh_scratch.candidates.size() : (uint32_t)faces.size();
 		for (uint32_t candidate = 0; candidate < candidate_count; ++candidate) {
 			if (r_contact_budget == 0) {
 				return;
 			}
 			--r_contact_budget; // Every exact face test consumes the same budget.
-			const JPH::SoftBodySharedSettings::Face &face = faces[use_bvh ? face_candidates[candidate] : candidate];
+			const JPH::SoftBodySharedSettings::Face &face = faces[use_bvh ? r_bvh_scratch.candidates[candidate] : candidate];
 			const uint32_t id0 = face.mVertex[0], id1 = face.mVertex[1], id2 = face.mVertex[2];
 			if (id0 >= face_vertices.size() || id1 >= face_vertices.size() || id2 >= face_vertices.size() || face.IsDegenerate()) {
 				continue;
@@ -525,11 +540,11 @@ static void resolve_soft_soft_vertex_face_direction(JPH::Body &p_point_body, JPH
 }
 
 static void resolve_soft_soft_vertex_face_contacts(JPH::Body &p_body_a, JPH::Body &p_body_b,
-		const JoltSoftBody3D &p_object_a, const JoltSoftBody3D &p_object_b, float p_step, uint32_t &r_contact_budget) {
+		const JoltSoftBody3D &p_object_a, const JoltSoftBody3D &p_object_b, float p_step, uint32_t &r_contact_budget, SoftFaceBVHScratch &r_bvh_scratch) {
 	// Both directions are necessary: either body can be the sparse mesh.
-	resolve_soft_soft_vertex_face_direction(p_body_a, p_body_b, p_object_a, p_step, r_contact_budget);
+	resolve_soft_soft_vertex_face_direction(p_body_a, p_body_b, p_object_a, p_step, r_contact_budget, r_bvh_scratch);
 	if (r_contact_budget > 0) {
-		resolve_soft_soft_vertex_face_direction(p_body_b, p_body_a, p_object_b, p_step, r_contact_budget);
+		resolve_soft_soft_vertex_face_direction(p_body_b, p_body_a, p_object_b, p_step, r_contact_budget, r_bvh_scratch);
 	}
 }
 
@@ -641,6 +656,7 @@ void JoltSpace3D::_pre_step(float p_step) {
 			JoltProjectSettings::soft_body_soft_contact_radius > 0.0f && Math::is_finite(p_step) && p_step > 0.0f) {
 		uint32_t particle_budget = (uint32_t)JoltProjectSettings::soft_body_soft_contact_max_particle_pairs;
 		uint32_t checked_body_pairs = 0;
+		SoftFaceBVHScratch bvh_scratch; // No allocations when disabled.
 		const float radius = JoltProjectSettings::soft_body_soft_contact_radius;
 
 		for (JPH::uint32 i = 0; i < active_soft_body_count && particle_budget > 0 && checked_body_pairs < MAX_SOFT_SOFT_BODY_PAIR_CHECKS; ++i) {
@@ -661,7 +677,7 @@ void JoltSpace3D::_pre_step(float p_step) {
 					continue;
 				}
 				if (JoltProjectSettings::soft_body_soft_vertex_face_contacts) {
-					resolve_soft_soft_vertex_face_contacts(*jolt_a, *jolt_b, *object_a, *object_b, p_step, particle_budget);
+					resolve_soft_soft_vertex_face_contacts(*jolt_a, *jolt_b, *object_a, *object_b, p_step, particle_budget, bvh_scratch);
 				} else {
 					resolve_soft_soft_particle_contacts(*jolt_a, *jolt_b, *object_a, *object_b, p_step, particle_budget);
 				}
