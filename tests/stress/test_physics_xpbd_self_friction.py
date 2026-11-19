@@ -84,7 +84,9 @@ class XPBDSelfContactFrictionTests(unittest.TestCase):
         begin = src.index("void GodotSoftBody3D::solve_self_collisions(")
         end = src.index("void GodotSoftBody3D::update_area()", begin)
         code = src[begin:end]
-        self.assertIn("if (friction > real_t(0.0))", code)
+        self.assertIn("if (friction > real_t(0.0) && vertex_contacts)", code)
+        self.assertLess(code.index("solve_edge_self_collisions(p_delta)"),
+                        code.index("physics_xpbd_solve_self_friction("))
         self.assertLess(code.index("physics_xpbd_solve_self_collision("),
                         code.index("physics_xpbd_solve_self_friction("))
         self.assertLess(code.index("physics_xpbd_solve_self_friction("),
