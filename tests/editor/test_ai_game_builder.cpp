@@ -100,6 +100,8 @@ TEST_CASE("[AIGameBuilder] Portable project paths") {
 		"COM1.gd",
 		"lpt9.tres",
 		"folder/AUX/main.gd",
+		"data/CON.backup.gd",
+		"lpt1.test.tscn",
 	};
 	for (const char *path : unsafe_paths) {
 		INFO("Path: ", path);
