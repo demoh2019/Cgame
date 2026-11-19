@@ -36,6 +36,7 @@ var _screenshot_path := ""
 var _screenshot_frames := 0
 var _demo := ""
 var _frames := 0
+var _demo_frames := 0 # Frames since the first snapshot arrived.
 
 
 func _ready() -> void:
@@ -155,7 +156,7 @@ func _connect() -> void:
 	net = Net.new()
 	net.name = "Net"
 	net.role = "client"
-	get_tree().root.add_child(net) # RPC paths must match the server: /root/Net.
+	get_tree().root.add_child.call_deferred(net) # RPC paths must match the server: /root/Net.
 	client = GameClient.new(net)
 	peer = ENetMultiplayerPeer.new()
 	if peer.create_client(host, port) != OK:
@@ -369,10 +370,11 @@ func _interact() -> void:
 func _run_demo() -> void:
 	if _demo == "" or client == null:
 		return
+	_demo_frames += 1
 	var net_ref = net
 	match _demo:
 		"ruins":
-			if _frames == 40:
+			if _demo_frames == 40:
 				var site := _find_ruin()
 				net_ref.c_debug.rpc_id(1, "teleport", {"x": site.x - 16.0, "z": site.y + 10.0})
 				net_ref.c_debug.rpc_id(1, "give", {"item": "club_2", "count": 1})
@@ -380,16 +382,16 @@ func _run_demo() -> void:
 				net_ref.c_debug.rpc_id(1, "zombie", {"type": "walker", "x": site.x - 8.0, "z": site.y + 12.0})
 				net_ref.c_debug.rpc_id(1, "zombie", {"type": "runner", "x": site.x - 4.0, "z": site.y + 6.0})
 				net_ref.c_debug.rpc_id(1, "zombie", {"type": "brute", "x": site.x, "z": site.y + 14.0})
-			if _frames == 80:
+			if _demo_frames == 90:
 				client.use_item("club_2")
 				client.use_item("jacket_2")
 		"forest":
-			if _frames == 40:
+			if _demo_frames == 40:
 				var spot := _find_forest()
 				net_ref.c_debug.rpc_id(1, "teleport", {"x": spot.x, "z": spot.y})
 				net_ref.c_debug.rpc_id(1, "give", {"item": "axe_1", "count": 1})
 		"hub":
-			if _frames == 40:
+			if _demo_frames == 40:
 				net_ref.c_debug.rpc_id(1, "teleport", {"x": 14.0, "z": 6.0})
 	if _screenshot_path != "":
 		_screenshot_frames += 1

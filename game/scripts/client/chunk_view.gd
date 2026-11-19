@@ -78,7 +78,7 @@ func _build_terrain(origin: Vector2) -> void:
 		for i in SAMPLES:
 			var h: float = _world.height_at(origin.x + i * step, origin.y + j * step)
 			heights[j * SAMPLES + i] = clampf((h - HEIGHT_MIN) / HEIGHT_RANGE, 0.0, 1.0)
-	_terrain = HeightmapTerrain3D.new()
+	_terrain = ChunkedTerrain3D.new()
 	_terrain.centered = false
 	_terrain.size = Vector2(Defs.CHUNK_SIZE, Defs.CHUNK_SIZE)
 	_terrain.height_scale = HEIGHT_RANGE

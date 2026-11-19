@@ -9,7 +9,7 @@ scavenging, hunger/thirst and zombies. Isometric 3D, persistent world, dedicated
 |---|---|
 | Accounts, sessions, character storage, leaderboard, (chat, guilds, friends, market to come) | **Nakama** (Heroic Labs, Docker, Lua module `backend/modules/albion.lua`) with the official `nakama-godot` client in `addons/` |
 | Transport, RPC, ENet | Godot high-level multiplayer |
-| Terrain, streaming, LOD | the engine's own `HeightmapTerrain3D`, `WorldStreamer` (+ `chunk_generator`) from this fork |
+| Terrain, streaming, LOD | the engine's own `ChunkedTerrain3D`, `WorldStreamer` (+ `chunk_generator`) from this fork |
 | Real-time world: movement, zombies, loot | headless Godot server (`scripts/server/`), because a 20 Hz 3D world with AI does not belong in a Lua match handler |
 
 ## Run
