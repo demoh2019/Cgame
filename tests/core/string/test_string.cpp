@@ -430,9 +430,10 @@ TEST_CASE("[String] Case conversion works at start middle end and with embedded 
 	CHECK(String("111111x").to_upper() == "111111X");
 
 	String embedded = "xQ";
-	embedded.resize(4);
+	embedded.resize_uninitialized(5);
 	embedded[2] = 0;
 	embedded[3] = 'Z';
+	embedded[4] = 0;
 	CHECK(embedded.to_lower()[1] == 'q');
 	CHECK(embedded.to_lower()[2] == 0);
 	CHECK(embedded.to_upper()[1] == 'Q');
