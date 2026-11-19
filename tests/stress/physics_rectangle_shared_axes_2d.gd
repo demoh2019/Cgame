@@ -54,8 +54,8 @@ func run(tree: SceneTree, scale: int, frames: int, orientation: int) -> Dictiona
 	var error := ""
 	for frame in range(frames):
 		var update_start := Time.get_ticks_usec()
+		var offset := basis.basis_xform(Vector2(0.03 if frame % 2 == 0 else -0.03, 0.0))
 		for i in range(count):
-			var offset := basis.basis_xform(Vector2(0.03 if frame % 2 == 0 else -0.03, 0.0))
 			PhysicsServer2D.body_set_state(dynamic_bodies[i], PhysicsServer2D.BODY_STATE_TRANSFORM,
 					Transform2D(dynamic_x, dynamic_y, centers[i] + offset))
 		update_us += Time.get_ticks_usec() - update_start
