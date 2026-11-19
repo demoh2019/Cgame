@@ -614,6 +614,46 @@ static void _collision_circle_circle(const GodotShape2D *p_a, const Transform2D 
 	const GodotCircleShape2D *circle_A = static_cast<const GodotCircleShape2D *>(p_a);
 	const GodotCircleShape2D *circle_B = static_cast<const GodotCircleShape2D *>(p_b);
 
+	// Like the direct circle manifold used by Box2D, avoid general SAT and
+	// support-point generation for stationary, rigidly transformed circles.
+	// Non-uniform scale, shear and swept shapes retain the original SAT path.
+	if (!p_cast_A && !p_cast_B &&
+			Math::is_equal_approx(p_transform_a.columns[0].length_squared(), 1.0) &&
+			Math::is_equal_approx(p_transform_a.columns[1].length_squared(), 1.0) &&
+			Math::is_zero_approx(p_transform_a.columns[0].dot(p_transform_a.columns[1])) &&
+			Math::is_equal_approx(p_transform_b.columns[0].length_squared(), 1.0) &&
+			Math::is_equal_approx(p_transform_b.columns[1].length_squared(), 1.0) &&
+			Math::is_zero_approx(p_transform_b.columns[0].dot(p_transform_b.columns[1]))) {
+		const real_t radius_A = circle_A->get_radius() + p_margin_A;
+		const real_t radius_B = circle_B->get_radius() + p_margin_B;
+		const real_t combined_radius = radius_A + radius_B;
+		const Vector2 separation = p_transform_a.get_origin() - p_transform_b.get_origin();
+		const real_t distance_squared = separation.length_squared();
+
+		// Coincident centers are handled by SAT to retain its previous-axis
+		// behavior. Negative effective radii are not valid for this shortcut.
+		if (combined_radius >= 0.0 && distance_squared > 0.0) {
+			const Vector2 axis = separation / Math::sqrt(distance_squared);
+			if (distance_squared > combined_radius * combined_radius) {
+				if (p_collector->sep_axis) {
+					*p_collector->sep_axis = axis;
+				}
+				return;
+			}
+
+			p_collector->collided = true;
+			if (p_collector->callback) {
+				p_collector->normal = axis;
+				p_collector->call(p_transform_a.get_origin() - axis * radius_A,
+						p_transform_b.get_origin() + axis * radius_B);
+				if (p_collector->sep_axis && *p_collector->sep_axis != Vector2()) {
+					*p_collector->sep_axis = Vector2();
+				}
+			}
+			return;
+		}
+	}
+
 	SeparatorAxisTest2D<GodotCircleShape2D, GodotCircleShape2D> separator(circle_A, p_transform_a, circle_B, p_transform_b, p_collector, p_motion_a, p_motion_b, p_cast_A, p_cast_B, p_with_margin, p_margin_A, p_margin_B);
 
 	if (!separator.test_previous_axis()) {
