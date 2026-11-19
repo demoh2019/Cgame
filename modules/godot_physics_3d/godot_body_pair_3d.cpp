@@ -265,7 +265,7 @@ bool GodotBodyPair3D::_test_ccd(real_t p_step, GodotBody3D *p_A, int p_shape_A, 
 				double impact_fraction = 0.0;
 				const PhysicsCCDRotatingCapsuleTOIResult result = physics_ccd_rotating_capsule_toi(
 						p_xform_A.origin, p_xform_A.basis.get_column(1),
-						p_A->get_center_of_mass(), p_xform_B.origin,
+						p_A->get_transform().origin + p_A->get_center_of_mass(), p_xform_B.origin,
 						p_A->get_angular_velocity(), p_step, half_segment * scale_A, radius, impact_fraction);
 				if (result == PhysicsCCDRotatingCapsuleTOIResult::HIT) {
 					const real_t fraction = CLAMP(real_t(impact_fraction) + real_t(0.005), real_t(0.0), real_t(1.0));
