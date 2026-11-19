@@ -39,6 +39,7 @@
 #include "servers/physics_softbody_dihedral_damping.h"
 #include "servers/physics_softbody_aero_lift.h"
 #include "servers/physics_softbody_adiabatic_gas.h"
+#include "servers/physics_softbody_shape_matching.h"
 #include "servers/physics_softbody_aerodynamic_drag.h"
 #include "servers/physics_softbody_plasticity.h"
 #include "servers/physics_softbody_volume_safe.h"
@@ -150,6 +151,7 @@ void GodotSoftBody3D::set_space(GodotSpace3D *p_space) {
 	initialize_volume_constraint();
 	initialize_shear_constraints();
 	initialize_dihedral_constraints();
+	initialize_shape_matching();
 	initialize_self_collision_topology();
 
 	if (get_space()) {
@@ -268,7 +270,82 @@ void GodotSoftBody3D::update_constants() {
 	initialize_volume_constraint();
 	initialize_shear_constraints();
 	initialize_dihedral_constraints();
+	initialize_shape_matching();
 	initialize_self_collision_topology();
+}
+
+// Capture the undeformed shape after mesh creation, transform or space
+// reassignment. Other solver steps must never redefine this rest shape.
+void GodotSoftBody3D::initialize_shape_matching() {
+	xpbd_shape_rest_offsets.reset();
+	if (!get_space() || !(get_space()->get_soft_body_shape_matching_stiffness() > 0.0) ||
+			nodes.size() < 4) {
+		return;
+	}
+
+	// Uniform soft-body particle masses allow an unweighted centroid.
+	// Use double sums to retain stability for large translated scenes.
+	double sx = 0.0, sy = 0.0, sz = 0.0;
+	for (const Node &node : nodes) {
+		if (!node.x.is_finite()) {
+			return;
+		}
+		sx += double(node.x.x);
+		sy += double(node.x.y);
+		sz += double(node.x.z);
+	}
+	const double inv_count = 1.0 / double(nodes.size());
+	const Vector3 center(real_t(sx * inv_count), real_t(sy * inv_count), real_t(sz * inv_count));
+	if (!center.is_finite()) {
+		return;
+	}
+	xpbd_shape_rest_offsets.resize(nodes.size());
+	for (uint32_t i = 0; i < nodes.size(); ++i) {
+		const Vector3 offset = nodes[i].x - center;
+		if (!offset.is_finite()) {
+			xpbd_shape_rest_offsets.reset();
+			return;
+		}
+		xpbd_shape_rest_offsets[i] = offset;
+	}
+}
+
+void GodotSoftBody3D::solve_shape_matching(real_t p_strength) {
+	if (!(p_strength > 0.0) || dynamic_node_count == 0 ||
+			xpbd_shape_rest_offsets.size() != nodes.size() || nodes.size() < 4) {
+		return;
+	}
+
+	double sx = 0.0, sy = 0.0, sz = 0.0;
+	for (const Node &node : nodes) {
+		if (!node.x.is_finite()) {
+			return;
+		}
+		sx += double(node.x.x);
+		sy += double(node.x.y);
+		sz += double(node.x.z);
+	}
+	const double inv_count = 1.0 / double(nodes.size());
+	const Vector3 center(real_t(sx * inv_count), real_t(sy * inv_count), real_t(sz * inv_count));
+	if (!center.is_finite()) {
+		return;
+	}
+
+	PhysicsSoftBodyShapeMatchingCovariance covariance;
+	for (uint32_t i = 0; i < nodes.size(); ++i) {
+		covariance.add(xpbd_shape_rest_offsets[i], nodes[i].x - center);
+	}
+	Quaternion rotation;
+	if (!covariance.solve_rotation(rotation)) {
+		return;
+	}
+	for (uint32_t i = 0; i < nodes.size(); ++i) {
+		Node &node = nodes[i];
+		if (node.im > 0.0) {
+			physics_softbody_shape_matching_project(node.x,
+					xpbd_shape_rest_offsets[i], center, rotation, p_strength, node.im);
+		}
+	}
 }
 
 // Cache undeformed triangle angles only for opt-in shear constraints.
@@ -2296,6 +2373,16 @@ void GodotSoftBody3D::solve_constraints(real_t p_delta) {
 	}
 	double volume_lambda = 0.0;
 
+	// Distribute frame-level shape stiffness over solver iterations. For a
+	// fixed total stiffness, increasing iteration_count should not multiply
+	// the corrective strength by that many times.
+	const real_t shape_matching_stiffness = get_space()->get_soft_body_shape_matching_stiffness();
+	const real_t shape_matching_iteration_strength =
+			shape_matching_stiffness > 0.0 && iteration_count > 0 && !xpbd_shape_rest_offsets.is_empty() ?
+			real_t(1.0 - Math::pow(1.0 - double(shape_matching_stiffness),
+					1.0 / double(iteration_count))) :
+			real_t(0.0);
+
 	for (int isolve = 0; isolve < iteration_count; ++isolve) {
 		if (use_xpbd) {
 			for (uint32_t link_index = 0; link_index < links.size(); ++link_index) {
@@ -2352,6 +2439,9 @@ void GodotSoftBody3D::solve_constraints(real_t p_delta) {
 						a.im, b.im, c.im, d.im, hinge.rest_angle,
 						dihedral_alpha, xpbd_dihedral_lambdas[hinge_index]);
 			}
+		}
+		if (shape_matching_iteration_strength > 0.0) {
+			solve_shape_matching(shape_matching_iteration_strength);
 		}
 		if (use_volume_xpbd) {
 			solve_volume_constraint(volume_alpha, volume_lambda);
@@ -2548,6 +2638,7 @@ void GodotSoftBody3D::destroy() {
 	xpbd_shear_lambdas.reset();
 	xpbd_dihedral_hinges.reset();
 	xpbd_dihedral_lambdas.reset();
+	xpbd_shape_rest_offsets.reset();
 	xpbd_self_contacts.reset();
 	xpbd_self_ccd_contacts.reset();
 	xpbd_self_neighbor_edges.reset();
