@@ -136,6 +136,8 @@ private:
 	real_t soft_body_gas_pressure_gamma = 0.0; // 0: legacy pressure, >0: sealed gas EOS.
 	real_t soft_body_tangential_drag_ratio = 0.0; // Optional skin friction on cloth faces.
 	real_t soft_body_xpbd_area_compliance = 0.0;
+	real_t soft_body_xpbd_membrane_compliance = 0.0; // Optional StVK surface membrane energy.
+	real_t soft_body_membrane_poisson_ratio = 0.3; // Plane-stress Poisson coupling.
 	real_t soft_body_xpbd_shear_compliance = 0.0; // Opt-in angular shear preservation.
 	real_t soft_body_xpbd_dihedral_compliance = 0.0; // Opt-in angle-based cloth bending.
 	real_t soft_body_shape_matching_stiffness = 0.0; // Optional global shape recovery.
@@ -267,6 +269,8 @@ public:
 	_FORCE_INLINE_ real_t get_soft_body_gas_pressure_gamma() const { return soft_body_gas_pressure_gamma; }
 	_FORCE_INLINE_ real_t get_soft_body_tangential_drag_ratio() const { return soft_body_tangential_drag_ratio; }
 	_FORCE_INLINE_ real_t get_soft_body_xpbd_area_compliance() const { return soft_body_xpbd_area_compliance; }
+	_FORCE_INLINE_ real_t get_soft_body_xpbd_membrane_compliance() const { return soft_body_xpbd_membrane_compliance; }
+	_FORCE_INLINE_ real_t get_soft_body_membrane_poisson_ratio() const { return soft_body_membrane_poisson_ratio; }
 	_FORCE_INLINE_ real_t get_soft_body_xpbd_shear_compliance() const { return soft_body_xpbd_shear_compliance; }
 	_FORCE_INLINE_ real_t get_soft_body_xpbd_dihedral_compliance() const { return soft_body_xpbd_dihedral_compliance; }
 	_FORCE_INLINE_ real_t get_soft_body_shape_matching_stiffness() const { return soft_body_shape_matching_stiffness; }
