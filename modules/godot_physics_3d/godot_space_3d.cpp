@@ -1355,6 +1355,11 @@ GodotSpace3D::GodotSpace3D() {
 	soft_body_tetra_fem_lumped_mass = bool(GLOBAL_GET("physics/3d/solver/soft_body_tetra_fem_lumped_mass"));
 	const real_t configured_tetra_poisson = GLOBAL_GET("physics/3d/solver/soft_body_tetra_fem_poisson_ratio");
 	soft_body_tetra_fem_poisson_ratio = Math::is_finite(configured_tetra_poisson) ? CLAMP(configured_tetra_poisson, real_t(0.0), real_t(0.49)) : real_t(0.3);
+	const int configured_tetra_material_model = GLOBAL_GET("physics/3d/solver/soft_body_tetra_fem_material_model");
+	soft_body_tetra_fem_material_model = configured_tetra_material_model == 1 ? 1 : 0;
+	const real_t configured_tetra_mooney_fraction = GLOBAL_GET("physics/3d/solver/soft_body_tetra_mooney_rivlin_fraction");
+	soft_body_tetra_mooney_rivlin_fraction = Math::is_finite(configured_tetra_mooney_fraction) ?
+			CLAMP(configured_tetra_mooney_fraction, real_t(0.0), real_t(1.0)) : real_t(0.5);
 	const real_t configured_fem_fiber_compliance = GLOBAL_GET("physics/3d/solver/soft_body_tetra_fiber_compliance");
 	soft_body_tetra_fiber_compliance = Math::is_finite(configured_fem_fiber_compliance) ? MAX(real_t(0.0), configured_fem_fiber_compliance) : real_t(0.0);
 	const Vector3 configured_fem_fiber_axis = GLOBAL_GET("physics/3d/solver/soft_body_tetra_fiber_axis");
