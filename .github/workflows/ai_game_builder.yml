@@ -1,0 +1,56 @@
+name: AI Game Builder
+
+on:
+  pull_request:
+    paths:
+      - 'misc/ai_game_builder/**'
+      - '.github/workflows/ai_game_builder.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  installer-tests:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+      - name: Run Python installer regression tests
+        run: python -m unittest discover -s misc/ai_game_builder/tests -p 'test_install.py' -v
+
+  godot-headless-tests:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install official Godot 4.7 stable (Linux x86_64)
+        shell: bash
+        run: |
+          curl --fail --location --retry 3 \
+            --output godot.zip \
+            https://github.com/godotengine/godot/releases/download/4.7-stable/Godot_v4.7-stable_linux.x86_64.zip
+          unzip -q godot.zip -d godot-bin
+          chmod +x godot-bin/Godot_v4.7-stable_linux.x86_64
+      - name: Run native GDScript manifest and file-write tests
+        shell: bash
+        run: |
+          godot-bin/Godot_v4.7-stable_linux.x86_64 \
+            --headless --path misc/ai_game_builder \
+            --script res://tests/test_plan.gd
+      - name: Verify editor plugin initializes without script parse errors
+        shell: bash
+        run: |
+          sed -i 's/enabled=PackedStringArray()/enabled=PackedStringArray("res:\/\/addons\/ai_game_builder\/plugin.cfg")/' misc/ai_game_builder/project.godot
+          set +e
+          timeout 90s godot-bin/Godot_v4.7-stable_linux.x86_64 \
+            --headless --editor --path misc/ai_game_builder --quit \
+            > godot-editor.log 2>&1
+          code=$?
+          set -e
+          cat godot-editor.log
+          if grep -E 'SCRIPT ERROR|Parse Error|Failed to load script' godot-editor.log; then
+            exit 1
+          fi
+          exit "$code"
