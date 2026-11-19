@@ -162,6 +162,66 @@ time; use the same machine/configuration with an older commit to quantify
 the effects. These source-contract checks are not a compilation test,
 and runtime stress tests must still be executed on a built engine.
 
+## XPBD dihedral-angle cloth bending (3D)
+
+GodotPhysics3D now supports an **opt-in, angle-based XPBD hinge bending**
+constraint, inspired by the dihedral bending model in the open-source
+PositionBasedDynamics library. The legacy Bullet-style two-hop bending
+links constrain distances between cloth particles; the new constraint
+instead preserves the **signed rest dihedral angle** of two neighboring
+triangles. It supports non-flat rest meshes, folds and pinned cloth.
+
+Enable per-space in the project settings:
+
+```ini
+[physics]
+3d/solver/soft_body_xpbd_dihedral_compliance=0.000001
+```
+
+The default `0` disables hinge topology construction, per-step XPBD work
+and persistent hinge buffers. Lower positive compliance means stiffer
+bending; `alpha = compliance / dt²`. This is a new material response
+rather than an extra distance link: it can run even with
+`soft_body_set_linear_stiffness(body, 0.0)`. When stretch and area
+constraints are also enabled, all three are iterated together. The
+existing two-hop bending links are retained for backward compatibility.
+
+**Topology:** Each triangle edge is matched with its neighbor using
+an undirected edge key; only pairs with exactly two adjacent faces of
+opposite edge winding and distinct opposite vertices produce a hinge.
+Open boundary edges, duplicate faces, inconsistent winding and
+non-manifold edges do not create a constraint. Hinge creation is done
+once when a soft-body mesh or space is initialized, and the resulting
+solver order follows first-seen face/edge order for reproducibility.
+Transient topology-map memory is freed after building compact hinges;
+the runtime solver uses only per-hinge indices and one multiplier.
+
+**Numerical stability:** The signed angle is computed via `atan2`
+of oriented face normals and wrapped to ±π relative to the rest angle.
+Analytic gradients are checked for degeneracy/finiteness. The
+solver sums inverse-mass-weighted gradients, updates one XPBD multiplier
+per hinge across iterations **within the same frame**, and validates
+all proposed particle positions before committing any changes. Inverse
+mass zero pins remain stationary. No dynamic allocations occur inside
+each hinge projection.
+
+```bash
+python3 -m unittest discover -s tests/stress -p 'test_physics_xpbd_dihedral.py' -v
+python3 tests/stress/run.py --godot ./bin/godot.macos.editor.arm64 \
+  --case physics_soft_body_xpbd_dihedral_3d --scale 4 \
+  --repeats 5 --frames 90 --rss-limit-mib 6144 \
+  --output out/physics-xpbd-dihedral.json
+```
+
+The runtime scenario compares a deformed two-triangle cloth patch
+against a disabled baseline, using a pinned seam, zero link stiffness,
+and a malformed-winding version. The source-level Python tests compare
+the four analytic gradients against finite differences and test
+translation invariance, non-flat rest angles and pinned particles.
+This is not FEM shell bending or self-collision. Actual performance,
+C++ compilation and runtime accuracy must still be checked with a
+built engine; use identical settings for CPU/RSS comparisons.
+
 ## Closed soft-body XPBD volume preservation (3D)
 
 Cgame GodotPhysics3D now supports an opt-in global **enclosed-volume
