@@ -41,6 +41,37 @@ python3 tests/stress/run.py --godot /path/to/godot --case memory_churn --max-ret
 
 Run `--list-cases` for supported identifiers.
 
+
+## Streaming kinematic motion queries (2D and 3D)
+
+The stress project's `project.godot` explicitly selects `GodotPhysics2D`
+and `GodotPhysics3D`. This is intentional: Cgame otherwise defaults to
+Jolt for 3D, which would bypass the internal GodotPhysics code being tested.
+Choose a separate project/configuration when benchmarking Jolt; do not
+compare measurements from different physics backends as the same baseline.
+
+The `test_body_motion()` broadphase no longer retains the potentially
+huge list of candidate collision shapes in per-space dynamic vectors.
+Recovery, swept-motion tests and rest-contact collection instead consume
+filtered BVH candidates through callbacks, with no 2048-item ceiling.
+For compound moving bodies, the BVH is traversed once per enabled shape:
+the change prioritizes bounded temporary memory, while CPU overhead must
+be checked against the previous buffered implementation.
+
+```bash
+python3 tests/stress/run.py --godot ./bin/godot.macos.editor.arm64 \
+  --case physics_motion_exclusions_2d,physics_motion_exclusions_3d \
+  --scales 1,2,4 --repeats 5 --frames 90 --rss-limit-mib 6144 \
+  --output out/motion-stream.json
+```
+
+These cases test explicit exclusions, more than 2048 eligible colliders,
+nearest-hit selection, zero-motion recovery and compound-body sweeps.
+Report p50/p95 query latency and peak *process* RSS on identical hardware
+before attributing performance wins to this refactor. The tests do not
+replace a full 2D one-way platform or 3D soft-body regression suite.
+
+
 For reproducible CPU profiling of 2D hierarchy invalidation and native process
 dispatch (two separate processes under the runner's RSS/time watchdogs):
 
