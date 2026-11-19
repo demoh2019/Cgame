@@ -296,4 +296,23 @@ TEST_CASE("[Curve2D] Even length tessellation") {
 	CHECK(curve->tessellate_even_length().size() > default_size + 5);
 }
 
+
+TEST_CASE("[Curve2D][Performance] Tessellation emits strictly ordered adaptive samples") {
+	Ref<Curve2D> curve = memnew(Curve2D);
+	curve->add_point(Vector2(0, 0), Vector2(), Vector2(0, 16));
+	curve->add_point(Vector2(10, 0), Vector2(0, 16), Vector2());
+	const PackedVector2Array tess = curve->tessellate(9, 0.5);
+	REQUIRE(tess.size() > 2);
+	CHECK(tess[0] == Vector2(0, 0));
+	CHECK(tess[tess.size() - 1] == Vector2(10, 0));
+	for (int i = 1; i < tess.size(); ++i) {
+		CHECK(tess[i - 1].x < tess[i].x);
+	}
+	const PackedVector2Array repeat = curve->tessellate(9, 0.5);
+	REQUIRE(repeat.size() == tess.size());
+	for (int i = 0; i < tess.size(); ++i) {
+		CHECK(repeat[i] == tess[i]);
+	}
+}
+
 } // namespace TestCurve2D

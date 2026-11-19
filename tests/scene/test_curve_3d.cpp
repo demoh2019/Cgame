@@ -293,4 +293,23 @@ TEST_CASE("[Curve3D] Even length tessellation") {
 	CHECK(curve->tessellate_even_length().size() > default_size + 5);
 }
 
+
+TEST_CASE("[Curve3D][Performance] Tessellation preserves order and closed endpoints") {
+	Ref<Curve3D> curve = memnew(Curve3D);
+	curve->add_point(Vector3(0, 0, 0), Vector3(), Vector3(0, 16, 0));
+	curve->add_point(Vector3(10, 0, 0), Vector3(0, 16, 0), Vector3());
+	const PackedVector3Array tess = curve->tessellate(9, 0.5);
+	REQUIRE(tess.size() > 2);
+	CHECK(tess[0] == Vector3(0, 0, 0));
+	CHECK(tess[tess.size() - 1] == Vector3(10, 0, 0));
+	for (int i = 1; i < tess.size(); ++i) {
+		CHECK(tess[i - 1].x < tess[i].x);
+	}
+	curve->set_closed(true);
+	const PackedVector3Array closed_tess = curve->tessellate(9, 0.5);
+	REQUIRE(closed_tess.size() >= tess.size());
+	CHECK(closed_tess[0] == Vector3(0, 0, 0));
+	CHECK(closed_tess[closed_tess.size() - 1] == Vector3(0, 0, 0));
+}
+
 } // namespace TestCurve3D

@@ -806,7 +806,7 @@ void Curve2D::mark_dirty() {
 	emit_changed();
 }
 
-void Curve2D::_bake_segment2d(RBMap<real_t, Vector2> &r_bake, real_t p_begin, real_t p_end, const Vector2 &p_a, const Vector2 &p_out, const Vector2 &p_b, const Vector2 &p_in, int p_depth, int p_max_depth, real_t p_tol) const {
+void Curve2D::_bake_segment2d(LocalVector<Vector2> &r_bake, real_t p_begin, real_t p_end, const Vector2 &p_a, const Vector2 &p_out, const Vector2 &p_b, const Vector2 &p_in, int p_depth, int p_max_depth, real_t p_cos_threshold) const {
 	real_t mp = p_begin + (p_end - p_begin) * 0.5;
 	Vector2 beg = p_a.bezier_interpolate(p_a + p_out, p_b + p_in, p_b, p_begin);
 	Vector2 mid = p_a.bezier_interpolate(p_a + p_out, p_b + p_in, p_b, mp);
@@ -816,13 +816,15 @@ void Curve2D::_bake_segment2d(RBMap<real_t, Vector2> &r_bake, real_t p_begin, re
 	Vector2 nb = (end - mid).normalized();
 	real_t dp = na.dot(nb);
 
-	if (dp < Math::cos(Math::deg_to_rad(p_tol))) {
-		r_bake[mp] = mid;
-	}
-
+	// In-order traversal produces ascending parameter positions without a map.
 	if (p_depth < p_max_depth) {
-		_bake_segment2d(r_bake, p_begin, mp, p_a, p_out, p_b, p_in, p_depth + 1, p_max_depth, p_tol);
-		_bake_segment2d(r_bake, mp, p_end, p_a, p_out, p_b, p_in, p_depth + 1, p_max_depth, p_tol);
+		_bake_segment2d(r_bake, p_begin, mp, p_a, p_out, p_b, p_in, p_depth + 1, p_max_depth, p_cos_threshold);
+	}
+	if (dp < p_cos_threshold) {
+		r_bake.push_back(mid);
+	}
+	if (p_depth < p_max_depth) {
+		_bake_segment2d(r_bake, mp, p_end, p_a, p_out, p_b, p_in, p_depth + 1, p_max_depth, p_cos_threshold);
 	}
 }
 
@@ -1225,41 +1227,27 @@ void Curve2D::_set_data(const Dictionary &p_data) {
 
 PackedVector2Array Curve2D::tessellate(int p_max_stages, real_t p_tolerance) const {
 	PackedVector2Array tess;
-
 	if (points.is_empty()) {
 		return tess;
 	}
 
-	// The current implementation requires a sorted map.
-	Vector<RBMap<real_t, Vector2>> midpoints;
-
-	midpoints.resize(points.size() - 1);
-
-	int pc = 1;
-	for (uint32_t i = 0; i < points.size() - 1; i++) {
-		_bake_segment2d(midpoints.write[i], 0, 1, points[i].position, points[i].out, points[i + 1].position, points[i + 1].in, 0, p_max_stages, p_tolerance);
-		pc++;
-		pc += midpoints[i].size();
+	// Adaptive subdivision visits parametric midpoints in increasing order.
+	// A contiguous scratch array avoids per-midpoint tree allocations and lookup.
+	LocalVector<Vector2> result;
+	result.push_back(points[0].position);
+	const real_t cos_threshold = Math::cos(Math::deg_to_rad(p_tolerance));
+	for (uint32_t i = 0; i + 1 < points.size(); ++i) {
+		_bake_segment2d(result, 0, 1, points[i].position, points[i].out, points[i + 1].position, points[i + 1].in, 0, p_max_stages, cos_threshold);
+		result.push_back(points[i + 1].position);
 	}
 
-	tess.resize(pc);
-	Vector2 *bpw = tess.ptrw();
-	bpw[0] = points[0].position;
-	int pidx = 0;
-
-	for (uint32_t i = 0; i < points.size() - 1; i++) {
-		for (const KeyValue<real_t, Vector2> &E : midpoints[i]) {
-			pidx++;
-			bpw[pidx] = E.value;
-		}
-
-		pidx++;
-		bpw[pidx] = points[i + 1].position;
+	tess.resize(result.size());
+	Vector2 *dst = tess.ptrw();
+	for (uint32_t i = 0; i < result.size(); ++i) {
+		dst[i] = result[i];
 	}
-
 	return tess;
 }
-
 Vector<RBMap<real_t, Vector2>> Curve2D::_tessellate_even_length(int p_max_stages, real_t p_length) const {
 	Vector<RBMap<real_t, Vector2>> midpoints;
 	ERR_FAIL_COND_V_MSG(points.size() < 2, midpoints, "Curve must have at least 2 control point");
@@ -1524,7 +1512,7 @@ void Curve3D::mark_dirty() {
 	emit_changed();
 }
 
-void Curve3D::_bake_segment3d(RBMap<real_t, Vector3> &r_bake, real_t p_begin, real_t p_end, const Vector3 &p_a, const Vector3 &p_out, const Vector3 &p_b, const Vector3 &p_in, int p_depth, int p_max_depth, real_t p_tol) const {
+void Curve3D::_bake_segment3d(LocalVector<Vector3> &r_bake, real_t p_begin, real_t p_end, const Vector3 &p_a, const Vector3 &p_out, const Vector3 &p_b, const Vector3 &p_in, int p_depth, int p_max_depth, real_t p_cos_threshold) const {
 	real_t mp = p_begin + (p_end - p_begin) * 0.5;
 	Vector3 beg = p_a.bezier_interpolate(p_a + p_out, p_b + p_in, p_b, p_begin);
 	Vector3 mid = p_a.bezier_interpolate(p_a + p_out, p_b + p_in, p_b, mp);
@@ -1534,12 +1522,15 @@ void Curve3D::_bake_segment3d(RBMap<real_t, Vector3> &r_bake, real_t p_begin, re
 	Vector3 nb = (end - mid).normalized();
 	real_t dp = na.dot(nb);
 
-	if (dp < Math::cos(Math::deg_to_rad(p_tol))) {
-		r_bake[mp] = mid;
+	// In-order traversal produces ascending parameter positions without a map.
+	if (p_depth < p_max_depth) {
+		_bake_segment3d(r_bake, p_begin, mp, p_a, p_out, p_b, p_in, p_depth + 1, p_max_depth, p_cos_threshold);
+	}
+	if (dp < p_cos_threshold) {
+		r_bake.push_back(mid);
 	}
 	if (p_depth < p_max_depth) {
-		_bake_segment3d(r_bake, p_begin, mp, p_a, p_out, p_b, p_in, p_depth + 1, p_max_depth, p_tol);
-		_bake_segment3d(r_bake, mp, p_end, p_a, p_out, p_b, p_in, p_depth + 1, p_max_depth, p_tol);
+		_bake_segment3d(r_bake, mp, p_end, p_a, p_out, p_b, p_in, p_depth + 1, p_max_depth, p_cos_threshold);
 	}
 }
 
@@ -2235,49 +2226,28 @@ void Curve3D::_set_data(const Dictionary &p_data) {
 
 PackedVector3Array Curve3D::tessellate(int p_max_stages, real_t p_tolerance) const {
 	PackedVector3Array tess;
-
 	if (points.is_empty()) {
 		return tess;
 	}
-	Vector<RBMap<real_t, Vector3>> midpoints;
 
-	const int num_intervals = closed ? points.size() : points.size() - 1;
-	midpoints.resize(num_intervals);
-
-	// Point Count: Begins at 1 to account for the last point.
-	int pc = 1;
-	for (int i = 0; i < num_intervals; i++) {
-		if (!closed || i < num_intervals - 1) {
-			_bake_segment3d(midpoints.write[i], 0, 1, points[i].position, points[i].out, points[i + 1].position, points[i + 1].in, 0, p_max_stages, p_tolerance);
-		} else {
-			_bake_segment3d(midpoints.write[i], 0, 1, points[i].position, points[i].out, points[0].position, points[0].in, 0, p_max_stages, p_tolerance);
-		}
-		pc++;
-		pc += midpoints[i].size();
+	LocalVector<Vector3> result;
+	result.push_back(points[0].position);
+	const real_t cos_threshold = Math::cos(Math::deg_to_rad(p_tolerance));
+	const int point_count = points.size();
+	const int num_intervals = closed ? point_count : point_count - 1;
+	for (int i = 0; i < num_intervals; ++i) {
+		const int next = i + 1 == point_count ? 0 : i + 1;
+		_bake_segment3d(result, 0, 1, points[i].position, points[i].out, points[next].position, points[next].in, 0, p_max_stages, cos_threshold);
+		result.push_back(points[next].position);
 	}
 
-	tess.resize(pc);
-	Vector3 *bpw = tess.ptrw();
-	bpw[0] = points[0].position;
-	int pidx = 0;
-
-	for (int i = 0; i < num_intervals; i++) {
-		for (const KeyValue<real_t, Vector3> &E : midpoints[i]) {
-			pidx++;
-			bpw[pidx] = E.value;
-		}
-
-		pidx++;
-		if (!closed || i < num_intervals - 1) {
-			bpw[pidx] = points[i + 1].position;
-		} else {
-			bpw[pidx] = points[0].position;
-		}
+	tess.resize(result.size());
+	Vector3 *dst = tess.ptrw();
+	for (uint32_t i = 0; i < result.size(); ++i) {
+		dst[i] = result[i];
 	}
-
 	return tess;
 }
-
 Vector<RBMap<real_t, Vector3>> Curve3D::_tessellate_even_length(int p_max_stages, real_t p_length) const {
 	Vector<RBMap<real_t, Vector3>> midpoints;
 	ERR_FAIL_COND_V_MSG(points.size() < 2, midpoints, "Curve must have at least 2 control point");
