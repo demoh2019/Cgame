@@ -69,47 +69,68 @@ void BitMap::create_from_image_alpha(const Ref<Image> &p_image, float p_threshol
 }
 
 void BitMap::set_bit_rect(const Rect2i &p_rect, bool p_value) {
-	Rect2i current = Rect2i(0, 0, width, height).intersection(p_rect);
+	const Rect2i current = Rect2i(0, 0, width, height).intersection(p_rect);
+	if (current.size.x <= 0 || current.size.y <= 0) {
+		return;
+	}
+
 	uint8_t *data = bitmask.ptrw();
+	// BitMap rows share bytes when the width is not a multiple of eight.
+	// Keep the boundary bits intact and fill whole interior bytes at once.
+	int64_t start_bit = int64_t(width) * current.position.y + current.position.x;
+	for (int row = 0; row < current.size.y; row++) {
+		const int64_t end_bit = start_bit + current.size.x - 1;
+		const int first_byte = int(start_bit >> 3);
+		const int last_byte = int(end_bit >> 3);
+		const uint8_t first_mask = uint8_t(0xffu << (start_bit & 7));
+		const uint8_t last_mask = uint8_t(0xffu >> (7 - (end_bit & 7)));
 
-	for (int i = current.position.x; i < current.position.x + current.size.x; i++) {
-		for (int j = current.position.y; j < current.position.y + current.size.y; j++) {
-			int ofs = width * j + i;
-			int bbyte = ofs / 8;
-			int bbit = ofs % 8;
-
-			uint8_t b = data[bbyte];
-
+		if (first_byte == last_byte) {
+			const uint8_t mask = first_mask & last_mask;
 			if (p_value) {
-				b |= (1 << bbit);
+				data[first_byte] |= mask;
 			} else {
-				b &= ~(1 << bbit);
+				data[first_byte] &= uint8_t(~mask);
 			}
-
-			data[bbyte] = b;
+		} else {
+			if (p_value) {
+				data[first_byte] |= first_mask;
+				data[last_byte] |= last_mask;
+			} else {
+				data[first_byte] &= uint8_t(~first_mask);
+				data[last_byte] &= uint8_t(~last_mask);
+			}
+			if (last_byte - first_byte > 1) {
+				memset(data + first_byte + 1, p_value ? 0xff : 0, last_byte - first_byte - 1);
+			}
 		}
+		start_bit += width;
 	}
 }
 
 int BitMap::get_true_bit_count() const {
-	int ds = bitmask.size();
-	const uint8_t *d = bitmask.ptr();
-	int c = 0;
+	const int size = bitmask.size();
+	const uint8_t *data = bitmask.ptr();
+	int count = 0;
+	int i = 0;
 
-	// Fast, almost branchless version.
-
-	for (int i = 0; i < ds; i++) {
-		c += (d[i] & (1 << 7)) >> 7;
-		c += (d[i] & (1 << 6)) >> 6;
-		c += (d[i] & (1 << 5)) >> 5;
-		c += (d[i] & (1 << 4)) >> 4;
-		c += (d[i] & (1 << 3)) >> 3;
-		c += (d[i] & (1 << 2)) >> 2;
-		c += (d[i] & (1 << 1)) >> 1;
-		c += d[i] & 1;
+	// Count eight packed bytes per iteration without alignment assumptions,
+	// platform-specific intrinsics, or an auxiliary lookup table.
+	for (; i + 8 <= size; i += 8) {
+		uint64_t bits;
+		memcpy(&bits, data + i, sizeof(bits));
+		bits -= (bits >> 1) & 0x5555555555555555ULL;
+		bits = (bits & 0x3333333333333333ULL) + ((bits >> 2) & 0x3333333333333333ULL);
+		bits = (bits + (bits >> 4)) & 0x0f0f0f0f0f0f0f0fULL;
+		count += int((bits * 0x0101010101010101ULL) >> 56);
 	}
-
-	return c;
+	for (; i < size; i++) {
+		uint32_t bits = data[i];
+		bits -= (bits >> 1) & 0x55u;
+		bits = (bits & 0x33u) + ((bits >> 2) & 0x33u);
+		count += (bits + (bits >> 4)) & 0x0fu;
+	}
+	return count;
 }
 
 void BitMap::set_bitv(const Point2i &p_pos, bool p_value) {
