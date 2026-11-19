@@ -37,6 +37,8 @@ class GodotConstraint2D {
 	int _body_count;
 	uint64_t island_step = 0;
 	bool disabled_collisions_between_bodies = true;
+	// Index of this constraint in the constraint list of each body it touches.
+	uint32_t _body_slots[2] = { 0, 0 };
 
 	RID self;
 
@@ -55,6 +57,8 @@ public:
 
 	_FORCE_INLINE_ GodotBody2D **get_body_ptr() const { return _body_ptr; }
 	_FORCE_INLINE_ int get_body_count() const { return _body_count; }
+	_FORCE_INLINE_ uint32_t get_body_slot(int p_pos) const { return _body_slots[p_pos]; }
+	_FORCE_INLINE_ void set_body_slot(int p_pos, uint32_t p_slot) { _body_slots[p_pos] = p_slot; }
 
 	// Only rigid-rigid contact pairs can safely share immovable bodies across
 	// parallel constraint jobs. Joints and other constraints remain conservative.

@@ -35,6 +35,35 @@
 #include "godot_constraint_2d.h"
 #include "godot_space_2d.h"
 
+void GodotBody2D::add_constraint(GodotConstraint2D *p_constraint, int p_pos) {
+	p_constraint->set_body_slot(p_pos, constraint_list.size());
+	constraint_list.push_back({ p_constraint, p_pos });
+}
+
+void GodotBody2D::remove_constraint(GodotConstraint2D *p_constraint, int p_pos) {
+	uint32_t index = p_constraint->get_body_slot(p_pos);
+	if (index >= constraint_list.size() || constraint_list[index].first != p_constraint || constraint_list[index].second != p_pos) {
+		// The list was cleared or reordered behind the constraint's back.
+		index = UINT32_MAX;
+		for (uint32_t i = 0; i < constraint_list.size(); i++) {
+			if (constraint_list[i].first == p_constraint && constraint_list[i].second == p_pos) {
+				index = i;
+				break;
+			}
+		}
+		if (index == UINT32_MAX) {
+			return;
+		}
+	}
+
+	const uint32_t last = constraint_list.size() - 1;
+	if (index != last) {
+		constraint_list[index] = constraint_list[last];
+		constraint_list[index].first->set_body_slot(constraint_list[index].second, index);
+	}
+	constraint_list.resize(last);
+}
+
 void GodotBody2D::_mass_properties_changed() {
 	if (get_space() && !mass_properties_update_list.in_list()) {
 		get_space()->body_add_to_mass_properties_update_list(&mass_properties_update_list);

@@ -113,7 +113,10 @@ class GodotBody2D : public GodotCollisionObject2D {
 	Vector2 deferred_motion;
 	bool has_deferred_motion = false;
 
-	List<Pair<GodotConstraint2D *, int>> constraint_list;
+	// Constraints touching this body. Each constraint caches its index here
+	// (see `GodotConstraint2D::get_body_slot`), so removal is O(1) even for a
+	// static body shared by thousands of contacts.
+	LocalVector<Pair<GodotConstraint2D *, int>> constraint_list;
 
 	struct AreaCMP {
 		GodotArea2D *area = nullptr;
@@ -210,9 +213,9 @@ public:
 	_FORCE_INLINE_ uint64_t get_island_step() const { return island_step; }
 	_FORCE_INLINE_ void set_island_step(uint64_t p_step) { island_step = p_step; }
 
-	_FORCE_INLINE_ void add_constraint(GodotConstraint2D *p_constraint, int p_pos) { constraint_list.push_back({ p_constraint, p_pos }); }
-	_FORCE_INLINE_ void remove_constraint(GodotConstraint2D *p_constraint, int p_pos) { constraint_list.erase({ p_constraint, p_pos }); }
-	const List<Pair<GodotConstraint2D *, int>> &get_constraint_list() const { return constraint_list; }
+	void add_constraint(GodotConstraint2D *p_constraint, int p_pos);
+	void remove_constraint(GodotConstraint2D *p_constraint, int p_pos);
+	const LocalVector<Pair<GodotConstraint2D *, int>> &get_constraint_list() const { return constraint_list; }
 	_FORCE_INLINE_ void clear_constraint_list() { constraint_list.clear(); }
 
 	_FORCE_INLINE_ void set_omit_force_integration(bool p_omit_force_integration) { omit_force_integration = p_omit_force_integration; }
