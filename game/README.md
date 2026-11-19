@@ -1991,3 +1991,54 @@ instant recovery during combat.
 `tests/test_field_rest.gd` covers a real server-built fire, ingredient
 transactions, T2 fish fallback, cooldown, nearby infected and PvP threats,
 and expired fires. Existing Cgame APIs and RPCs support this game feature.
+
+
+## UTC daily camp bounties — repeatable MMORPG survival loop
+
+The existing four **one-time story contracts** remain unchanged. After
+finishing them, or while progressing through them, every survivor also has
+a **repeatable camp bounty** that rotates automatically at **00:00 UTC**.
+
+The authoritative server chooses the task from the UTC day number
+(`floor(unix_time / 86400) % 3`) — the client cannot choose a
+preferred task, fake its progress, or submit a different timestamp.
+
+| Rotation | Real-world objective | Reward |
+|---|---|---|
+| Infected sweep | Defeat 4 real infected | 24 silver, 1 bandage, 4 renown |
+| Ruin reconnaissance | Open 2 distinct unopened ruin crates | 30 silver, 1 water, 5 renown |
+| Camp resupply | Deliver 5 T1 wood and 4 T1 fiber | 28 silver, 1 canned food, 4 renown |
+
+Confirmed infected deaths and real crate openings advance progress using the
+**existing game server**, not a client counter. One crate cannot count twice
+even if it refills. Daily material delivery is checked only when claiming the
+reward at the camp workbench. Failed inventory capacity checks, missing
+materials, and attempts to turn in away from camp have **no payout**.
+Each character receives **at most one bounty payment per UTC day**, even
+after logout/reconnection. A backwards-moving server clock never reopens
+a previously claimed day.
+
+To check progress, open the **I** inventory panel; a daily mission line
+appears alongside the original camp contracts. Use **Turn in UTC daily
+bounty** at the settlement workbench. In the local singleplayer preview,
+the bounty is displayed in survival statistics and **Ctrl+P** turns it in
+(ordinary `P` and `Shift+P` still operate the one-time contracts).
+
+The separate `daily_bounty` record is saved alongside inventory, stash,
+contracts, professions and renown in the existing **Nakama v1 character**
+document. Older characters default safely to a new bounty. Malformed
+progress, duplicate crate IDs, impossible day values and forged completion
+states are rejected **before** any live character state is replaced.
+
+`game/tests/test_daily_bounties.gd` is included in the main Godot
+headless regression suite and covers all three rotations, one-time
+payouts, atomic delivery, daily reset, server-authorized PvE/scavenging,
+camp distance, account reconnect and save migration:
+
+```sh
+godot --headless --path game --script res://tests/run_all.gd
+```
+
+No new C++ engine feature was required: authoritative game events,
+persistent Nakama character documents, server-side UTC timestamps and
+atomic inventory transfers are already supported by Cgame.
