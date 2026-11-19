@@ -702,10 +702,6 @@ bool GodotSpace2D::test_body_motion(GodotBody2D *p_body, const PS2DT::MotionPara
 	{
 		// STEP 2 ATTEMPT MOTION
 
-		Rect2 motion_aabb = body_aabb;
-		motion_aabb.position += p_parameters.motion;
-		motion_aabb = motion_aabb.merge(body_aabb);
-
 		for (int body_shape_idx = 0; body_shape_idx < p_body->get_shape_count(); body_shape_idx++) {
 			if (p_body->is_shape_disabled(body_shape_idx)) {
 				continue;
@@ -729,8 +725,8 @@ bool GodotSpace2D::test_body_motion(GodotBody2D *p_body, const PS2DT::MotionPara
 			real_t best_safe = 1;
 			real_t best_unsafe = 1;
 
-			// Sweep the current shape's tight AABB; keep the original whole-body
-			// motion_aabb for the distance solver's conservative auxiliary bound.
+			// Sweep only the current shape's AABB. Distant siblings in a
+			// compound body must not enlarge this BVH traversal.
 			Rect2 shape_motion_aabb = body_shape_xform.xform(body_shape->get_aabb()).grow(margin);
 			Rect2 shape_end_aabb = shape_motion_aabb;
 			shape_end_aabb.position += p_parameters.motion;
