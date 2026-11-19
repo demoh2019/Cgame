@@ -159,6 +159,31 @@ local function character_pair_save(context, payload)
     version_a = acks[1].version, version_b = acks[2].version })
 end
 
+-- Resolve one accepted Nakama guild for an authenticated account.
+-- Invocation requires the server key; the ENet client never supplies its
+-- own guild identity. Pending applications (state 3+) do not count.
+local function guild_affiliation(context, payload)
+  require_server(context)
+  local request = decode(payload)
+  require_user_id(request.user_id)
+  local ok, groups = pcall(nk.user_groups_list, request.user_id, 100)
+  if not ok or type(groups) ~= "table" then
+    return nk.json_encode({ ok = false, reason = "guild_directory_unavailable" })
+  end
+  local entries = groups.user_groups or groups
+  for _, membership in ipairs(entries) do
+    local state = tonumber(membership.state)
+    local guild = membership.group
+    if state ~= nil and state >= 0 and state <= 2 and type(guild) == "table"
+      and type(guild.id) == "string" and type(guild.name) == "string" then
+      return nk.json_encode({
+        ok = true, guild_id = guild.id, guild_name = guild.name, rank = state,
+      })
+    end
+  end
+  return nk.json_encode({ ok = true, guild_id = "", guild_name = "", rank = -1 })
+end
+
 -- Records a player's lifetime kills on the leaderboard (the score is a "set" so it always reflects the total).
 local function leaderboard_submit(context, payload)
   require_server(context)
@@ -178,4 +203,5 @@ end)
 nk.register_rpc(character_load, "character_load")
 nk.register_rpc(character_save, "character_save")
 nk.register_rpc(character_pair_save, "character_pair_save")
+nk.register_rpc(guild_affiliation, "guild_affiliation")
 nk.register_rpc(leaderboard_submit, "leaderboard_submit")

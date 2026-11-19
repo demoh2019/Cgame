@@ -3,6 +3,7 @@ extends Node
 ## and on every client (Godot needs that), and `role` decides which half of it does anything.
 
 const Defs = preload("res://scripts/shared/defs.gd")
+const GuildIdentity = preload("res://scripts/shared/guild_identity.gd")
 
 signal welcomed
 signal join_refused(reason: String)
@@ -27,6 +28,9 @@ var _pending_saves: Dictionary = {} # Account -> final state when Nakama is temp
 var _autosave_running := false
 var _save_clock: float = 0.0
 const SAVE_INTERVAL := 30.0
+const GUILD_REFRESH_SECONDS := 45.0
+var _guild_refresh_clock: float = 0.0
+var _guild_refresh_running: bool = false
 
 
 func _process(delta: float) -> void:
@@ -34,6 +38,37 @@ func _process(delta: float) -> void:
 	if _count_clock >= 1.0:
 		_count_clock = 0.0
 		_command_counts.clear()
+	if role == "server" and not shutting_down and gateway != null and gateway.enabled:
+		_guild_refresh_clock += maxf(0.0, delta)
+		if _guild_refresh_clock >= GUILD_REFRESH_SECONDS and not _guild_refresh_running:
+			_guild_refresh_clock = 0.0
+			_refresh_verified_guilds()
+
+
+## Memberships can change while a character is online. Only freshly
+## authenticated Nakama account IDs are queried, never client-provided guilds.
+## On lookup failure guild privileges are cleared rather than kept stale.
+func _refresh_verified_guilds() -> void:
+	if _guild_refresh_running or gateway == null or not gateway.enabled:
+		return
+	_guild_refresh_running = true
+	for peer_id in sim.players.keys():
+		var player = sim.players.get(peer_id)
+		if player == null or player.user_id.is_empty() or _departing_accounts.has(player.user_id):
+			continue
+		var account: String = player.user_id
+		var verified: Dictionary = await gateway.lookup_guild(account)
+		# A slow RPC may complete after disconnect and peer ID reuse.
+		var current = sim.players.get(peer_id)
+		if current == null or current.user_id != account:
+			continue
+		if GuildIdentity.normalize(verified).is_empty():
+			sim.set_verified_guild(peer_id, {
+				"ok": true, "guild_id": "", "guild_name": "", "rank": -1,
+			})
+		else:
+			sim.set_verified_guild(peer_id, verified)
+	_guild_refresh_running = false
 
 
 ## False if this peer is sending too many commands (a basic flood guard).
@@ -109,8 +144,19 @@ func c_join(player_name: String, token: String = "", refresh: String = "") -> vo
 	if loaded.get("exists", false) and not sim.valid_character_data(saved):
 		_refuse_join(peer, user_id, "Stored character is invalid. Contact an administrator.")
 		return
+	# Resolve membership with the server key. An ENet client cannot invent
+	# a guild tag, and pending invitations grant no combat protection.
+	var verified_guild: Dictionary = await gateway.lookup_guild(user_id)
+	if not multiplayer.get_peers().has(peer) or _joining_users.get(user_id, -1) != peer:
+		_joining_users.erase(user_id)
+		_joining.erase(peer)
+		return
+	if GuildIdentity.normalize(verified_guild).is_empty():
+		_refuse_join(peer, user_id, "Guild verification is unavailable. Please retry.")
+		return
 	user_to_peer[user_id] = peer
 	sim.add_player(peer, str(identity["username"]), user_id, saved)
+	sim.set_verified_guild(peer, verified_guild)
 	_joining_users.erase(user_id)
 	_joining.erase(peer)
 	s_welcome.rpc_id(peer, sim.world.world_seed, Defs.TICK_RATE)

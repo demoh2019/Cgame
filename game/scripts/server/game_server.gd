@@ -12,6 +12,7 @@ const PvpInfamy = preload("res://scripts/shared/pvp_infamy.gd")
 const PvPHonor = preload("res://scripts/shared/pvp_honor.gd")
 const PlayerTrade = preload("res://scripts/shared/player_trade.gd")
 const Party = preload("res://scripts/shared/party.gd")
+const GuildIdentity = preload("res://scripts/shared/guild_identity.gd")
 const LootRights = preload("res://scripts/shared/loot_rights.gd")
 const PartyAid = preload("res://scripts/shared/party_aid.gd")
 const TerritoryControl = preload("res://scripts/shared/territory_control.gd")
@@ -109,6 +110,9 @@ class Player:
 	var dirty_inventory: bool = true
 	var dirty_stash: bool = true
 	var user_id: String = "" # Nakama account, empty in offline mode.
+	var guild_id: String = "" # Trusted Nakama group membership; session cache only.
+	var guild_name: String = "" # Public verified guild name, never loaded from character storage.
+	var guild_rank: int = -1 # Nakama rank 0/1/2; -1 means no verified membership.
 	var dirty_character: bool = false # Something worth saving changed.
 
 var players: Dictionary = {} # peer id -> Player
@@ -156,6 +160,21 @@ func _init(p_world, p_seed: int = 1) -> void:
 func new_id() -> int:
 	_next_id += 1
 	return _next_id
+
+
+## Called only by the authoritative ENet/Nakama gateway, never an RPC.
+## Membership cannot be restored from client saves or assigned to guests.
+func set_verified_guild(peer_id: int, backend_result: Dictionary) -> bool:
+	var player: Player = players.get(peer_id)
+	if player == null or player.user_id.is_empty():
+		return false
+	var checked: Dictionary = GuildIdentity.normalize(backend_result)
+	if checked.is_empty():
+		return false
+	player.guild_id = checked["guild_id"]
+	player.guild_name = checked["guild_name"]
+	player.guild_rank = checked["rank"]
+	return true
 
 
 # --- Players ---------------------------------------------------------------------------------------------
@@ -1909,6 +1928,8 @@ func _find_hit(attacker: Player, origin: Vector2, direction: Vector2, reach: flo
 			var group_id: int = parties.group_of(attacker.id)
 			if group_id != 0 and parties.group_of(other.id) == group_id:
 				continue
+			if GuildIdentity.same_guild(attacker, other):
+				continue # Verified guildmates cannot intercept PvP attacks.
 			if not ZoneRisk.can_pvp(attacker_zone, world.zone_at(other.position.x, other.position.z)):
 				continue
 			var distance := _hit_distance(origin, direction, Vector2(other.position.x, other.position.z), reach, ranged, 0.5)
@@ -1981,6 +2002,8 @@ func _damage_target(attacker: Player, hit: Dictionary, damage: float) -> void:
 		var attacker_party: int = parties.group_of(attacker.id)
 		if attacker_party != 0 and attacker_party == parties.group_of(victim.id):
 			return
+		if GuildIdentity.same_guild(attacker, victim):
+			return # Direct damage paths also obey guild alliances.
 		if not ZoneRisk.can_pvp(world.zone_at(attacker.position.x, attacker.position.z),
 				world.zone_at(victim.position.x, victim.position.z)):
 			return
@@ -2670,6 +2693,7 @@ func snapshot_for(peer_id: int) -> Dictionary:
 			nearby_players.append({"id": other.id, "name": other.name, "x": p.x, "y": p.y, "z": p.z, "yaw": other.yaw,
 				"alive": _alive(other), "weapon": other.inventory.weapon,
 				"outlaw": PvpInfamy.is_outlaw(other.pvp_infamy),
+				"guild": {"id": other.guild_id, "name": other.guild_name},
 				"pvp_rank": PvPHonor.rank(other.pvp_honor)})
 	var nearby_zombies: Array = []
 	for zombie in zombies.values():
@@ -2713,6 +2737,7 @@ func snapshot_for(peer_id: int) -> Dictionary:
 		"outposts": siege_contracts.public_state(territory.public_state(time), time),
 		"you": {
 			"party": _party_state_for(peer_id),
+			"guild": {"id": player.guild_id, "name": player.guild_name, "rank": player.guild_rank},
 			"siege_wins": int(siege_contracts.victories.get(parties.group_of(peer_id), 0)),
 			"x": player.position.x, "y": player.position.y, "z": player.position.z, "yaw": player.yaw,
 			"health": player.survival.health, "hunger": player.survival.hunger, "thirst": player.survival.thirst,

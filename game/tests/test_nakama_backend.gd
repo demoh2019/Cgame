@@ -83,6 +83,41 @@ func _run() -> void:
 		_done()
 		return
 	var other_id: String = second_session.user_id
+	# Guild membership is independently resolved using the privileged Nakama
+	# runtime; an ENet client can never assert its own membership.
+	var initial_guild: Dictionary = await gateway.lookup_guild(uid)
+	check(initial_guild.get("ok", false) and str(initial_guild.get("guild_id", "")) == "",
+		"a newly created account has no server-verified guild")
+	var guild_name := "SiegeGuild%d" % (Time.get_ticks_usec() % 1000000)
+	var created_guild = await player_client.create_group_async(
+		session, guild_name, "", null, null, true, 100)
+	check(not created_guild.is_exception(), "test leader creates a real Nakama guild")
+	if created_guild.is_exception():
+		_done()
+		return
+	var found_guild: Dictionary = await gateway.lookup_guild(uid)
+	check(found_guild.get("ok", false) and str(found_guild.get("guild_id", "")) == created_guild.id
+		and int(found_guild.get("rank", -1)) == 0,
+		"founder role is independently verified on the game server")
+	var no_other_guild: Dictionary = await gateway.lookup_guild(other_id)
+	check(no_other_guild.get("ok", false) and str(no_other_guild.get("guild_id", "")) == "",
+		"an unrelated account cannot inherit a founder's group")
+	var joined_guild = await player_client.join_group_async(second_session, created_guild.id)
+	check(not joined_guild.is_exception(), "second user joins the real open guild")
+	var verified_member: Dictionary = await gateway.lookup_guild(other_id)
+	check(verified_member.get("ok", false) and verified_member.get("guild_id", "") == created_guild.id
+		and int(verified_member.get("rank", -1)) == 2,
+		"normal member role is server-verified")
+	var guild_forgery = await player_client.rpc_async(session, "guild_affiliation",
+		JSON.stringify({"user_id": other_id}))
+	check(guild_forgery.is_exception(),
+		"player sessions cannot impersonate the backend guild verification RPC")
+	var departed = await player_client.leave_group_async(second_session, created_guild.id)
+	check(not departed.is_exception(), "guild member leaves successfully")
+	var no_membership: Dictionary = await gateway.lookup_guild(other_id)
+	check(no_membership.get("ok", false) and no_membership.get("guild_id", "invalid") == "",
+		"membership revocation is visible immediately from Nakama")
+
 	check(not (await gateway.load_character(other_id))["exists"], "second character starts empty")
 	var other_doc := {"version": 1, "kills": 1, "inventory": {"slots": [
 		{"id": "silver", "count": 70}, {"id": "wood_1", "count": 1}

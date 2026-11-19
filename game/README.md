@@ -1935,3 +1935,38 @@ A forged very large client direction is rejected before vector normalization,
 and a lure cannot be thrown out of the protected settlement from inside it.
 The existing ordinary items, NPCs, snapshots, recipes and controls are
 unchanged. Tests: `game/tests/test_noise_decoy_grid.gd`.
+
+## Verified Nakama guild identity and guild-safe PvP
+
+Authenticated ENet players now receive a **server-verified guild affiliation**.
+A server-key-only Nakama Lua RPC queries `user_groups_list`, accepts only
+full member/admin/founder roles (states 2/1/0), and returns the selected
+guild's ID, display name and role. Pending invitations and join requests do
+not count. The server loads this identity at sign-in and refreshes it
+every 45 seconds; lookup failures clear the cached privileges. Guests do
+not receive a guild. Guild IDs are **never read from client RPC parameters
+or character save documents**. The ordinary account ID is still private.
+
+Confirmed members of the **same guild cannot harm each other in PvP**, even
+when in different parties. The server skips verified guildmates when
+selecting melee/ranged hit targets, and repeats the same check at actual
+damage application, so a direct damage call cannot bypass the protection.
+Members of different guilds remain enemies in red/black zones; temporary
+party-friendly fire protection still applies separately. A leave or kick
+is reflected after the server's next guild refresh (up to 45 seconds),
+and after reconnect immediately. The HUD displays the verified guild
+name and number of guildmates nearby, while public nearby-player snapshots
+contain only guild name and ID, not account IDs or member roles.
+
+Tests: `tests/test_verified_guild_pvp.gd` covers identity validation,
+enemy targeting, damage prevention, revocation, guest isolation and
+private fields. `tests/test_nakama_backend.gd` additionally creates and
+joins a real guild, verifies role membership and proves the privileged
+identity RPC is inaccessible from normal player sessions.
+
+**This is not yet persistent guild territory ownership.** Current outpost
+control and declared sieges still use temporary parties; authenticated
+guild tags and same-guild combat rules are a safe prerequisite for
+introducing persistent Nakama guild claims and a durable war ledger.
+All functionality uses existing Nakama and Cgame network APIs; no native
+engine modification was necessary.

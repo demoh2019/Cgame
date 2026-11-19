@@ -911,6 +911,16 @@ func _process(_delta: float) -> void:
 		float(client.you.get("guardian_cooldown", 0.0)),
 		float(client.you.get("guardian_brace", 0.0))
 	]
+	var guild: Dictionary = client.you.get("guild", {})
+	if str(guild.get("id", "")) != "":
+		var nearby_mates := 0
+		for other in client.players.values():
+			var tag: Dictionary = other.get("guild", {})
+			if str(tag.get("id", "")) == str(guild["id"]):
+				nearby_mates += 1
+		_info_label.text += "\nGuild: %s | allies nearby: %d" % [
+			str(guild.get("name", "")), nearby_mates
+		]
 	if bool(client.you.get("warden_ward", false)):
 		_info_label.text += "\nWARDEN'S WARD: -15% infected wounds (nearby relic ally)"
 	_info_label.text += "\nStorm insulation %d%% (equipped armor)" % int(
@@ -962,9 +972,6 @@ func _process(_delta: float) -> void:
 			status += " | WAR %s %ds (party %d)" % [
 				"prep" if pending else "active", seconds, int(closest["siege_attacker"])
 			]
-		if float(closest.get("breach_cooldown", 0.0)) > 0.0:
-			status += " | Breach CD %ds" % int(ceil(float(closest["breach_cooldown"])))
-		status += " | Supplies %d/5" % int(closest.get("supplies_left", 0))
 		if float(closest.get("breach_cooldown", 0.0)) > 0.0:
 			status += " | Breach CD %ds" % int(ceil(float(closest["breach_cooldown"])))
 		status += " | Supplies %d/5" % int(closest.get("supplies_left", 0))

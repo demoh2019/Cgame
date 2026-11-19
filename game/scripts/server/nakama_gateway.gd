@@ -37,6 +37,21 @@ func verify(token: String, refresh: String = "") -> Dictionary:
 	return {"ok": true, "user_id": account.user.id, "username": account.user.username}
 
 
+## Server-key-only guild lookup. A session may join/leave a guild while
+## connected; the game server refreshes these values periodically.
+func lookup_guild(user_id: String) -> Dictionary:
+	if not enabled:
+		return {"ok": false, "reason": "backend_disabled"}
+	var response = await client.rpc_async_with_key(http_key, "guild_affiliation",
+		JSON.stringify({"user_id": user_id}))
+	if response.is_exception():
+		return {"ok": false, "reason": "guild_rpc_unavailable"}
+	var parsed: Variant = JSON.parse_string(response.payload)
+	if typeof(parsed) != TYPE_DICTIONARY:
+		return {"ok": false, "reason": "invalid_guild_response"}
+	return parsed
+
+
 func load_character(user_id: String) -> Dictionary:
 	var response = await client.rpc_async_with_key(http_key, "character_load", JSON.stringify({"user_id": user_id}))
 	if response.is_exception():
