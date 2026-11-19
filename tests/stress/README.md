@@ -162,6 +162,75 @@ time; use the same machine/configuration with an older commit to quantify
 the effects. These source-contract checks are not a compilation test,
 and runtime stress tests must still be executed on a built engine.
 
+## Structural cloth edge/edge self-collisions (3D)
+
+Cgame GodotPhysics3D now has an **independent opt-in structural edge/edge
+self-collision** constraint, complementing the existing vertex/triangle
+self-contacts. This addresses crossed cloth edges whose endpoints project
+outside the opposing triangles. The implementation is based on closest
+interior points of two segments and four-particle XPBD contact gradients,
+similar in spirit to edge contacts in modern PBD cloth solvers.
+
+```ini
+[physics]
+3d/solver/soft_body_self_collision_thickness=0.12
+3d/solver/soft_body_self_collision_compliance=0.000001
+3d/solver/soft_body_self_collision_edge_edge=true
+3d/solver/soft_body_self_collision_max_contacts_per_vertex=8
+```
+
+The new edge flag defaults to **false**. Both the flag and positive
+self-contact thickness are required. Existing users of vertex/face
+self-collisions keep their previous behavior unless explicitly enabling
+edge/edge contacts.
+
+When enabled, Cgame builds a dedicated DynamicBVH from the ORIGINAL
+triangle mesh's unique structural edges. Auxiliary two-hop bending
+links and virtual tether links are excluded. BVH leaves reference a
+fully constructed, non-resizing edge array; no separate broadphase
+is created for default/disabled projects. At solve time, the edge
+tree is refit after cloth material and vertex/triangle corrections.
+Each edge queries only nearby AABBs. Candidate pairs are canonicalized
+by index, and edges sharing vertices or any one-ring neighbor are
+excluded. Both a per-edge limit (using the existing max contacts per
+vertex project setting) and 65,536 global contacts per soft body and
+frame bound the total scratch memory and narrowphase work.
+
+The narrowphase rejects degenerate, nearly parallel and endpoint-only
+contacts. For interior closest points inside the thickness envelope,
+the unilateral XPBD row distributes an equal/opposite separating
+correction over all four endpoints according to barycentric line
+weights and inverse masses. The contact direction persists across the
+solver's iterations, using previous-step geometry to preserve the side
+when edges cross. Lambda resets each physics step; pinned nodes never
+move. All candidate corrected positions must be finite before any
+vertex is updated. The optional edge-tree and scratch memory are
+released when the mesh is destroyed or the feature is disabled.
+
+```bash
+python3 -m unittest discover -s tests/stress -p 'test_physics_xpbd_edge_collision.py' -v
+python3 tests/stress/run.py --godot ./bin/godot.macos.editor.arm64 \
+  --case physics_soft_body_edge_collision_3d --scale 4 \
+  --repeats 5 --frames 90 --rss-limit-mib 6144 \
+  --output out/physics-soft-edge-collision.json
+```
+
+The live workload compares intersecting **interior structural edges** in
+two disconnected surface patches: all vertices lie outside the opposing
+triangle interior, so vertex/face contacts are insufficient. The
+three vertices of the first patch are pinned. Edge BVH must separate
+the free patch with the extra flag enabled, without moving any pins.
+The Python source test checks four-point impulse distribution, the
+closest interior parameters, degenerate and parallel rejection, BVH
+pair uniqueness and bounded contacts.
+
+**Limitations:** contacts are discrete, not continuous edge/edge CCD.
+Fast tunneling, grazing near-parallel edges and endpoint-only collisions
+may still be missed. The feature handles self-collisions inside one
+soft body, not between different soft bodies. This is an experimental
+solver feature and needs compiled-engine performance and regression
+verification before being treated as production-ready.
+
 ## Opt-in cloth and soft-body vertex/triangle self-collision (3D)
 
 Cgame GodotPhysics3D adds a discrete, two-way XPBD **vertex/face
