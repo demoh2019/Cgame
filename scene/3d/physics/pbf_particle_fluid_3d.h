@@ -34,6 +34,7 @@
 #include "servers/physics_pbf_density_pressure_3d.h"
 #include "servers/physics_pbf_divergence_3d.h"
 #include "servers/physics_pbf_rigid_coupling_3d.h"
+#include "servers/physics_pbf_surface_tension_3d.h"
 #include "servers/physics_pbf_vorticity_3d.h"
 
 // Experimental CPU PBF fluid: a scene node (not a PhysicsServer3D backend
@@ -62,6 +63,9 @@ class PBFParticleFluid3D : public Node3D {
 	Vector<Vector3> density_pressure_corrections;
 	Vector<real_t> density_pressure_multipliers;
 	Vector<real_t> density_pressure_denominators;
+	Vector<Vector3> surface_tension_normals;
+	Vector<Vector3> surface_tension_velocity_changes;
+	Vector<real_t> surface_tension_densities;
 	Vector<real_t> lambdas;
 	Vector<real_t> densities;
 	Vector<PhysicsPBFCell3D> cells;
@@ -79,6 +83,12 @@ class PBFParticleFluid3D : public Node3D {
 	real_t particle_radius = 0.055;
 	real_t artificial_pressure = 0.002;
 	real_t xsph_viscosity = 0.015;
+	real_t surface_cohesion = 0.0;
+	real_t surface_curvature = 0.0;
+	real_t surface_max_pair_velocity_change = 0.005;
+	real_t mean_surface_normal_magnitude = 0.0;
+	uint64_t last_surface_tension_pairs = 0;
+	uint64_t last_surface_tension_neighbor_evaluations = 0;
 	real_t vorticity_confinement = 0.0;
 	real_t vorticity_max_velocity_change = 0.12;
 	real_t average_vorticity = 0.0;
@@ -110,6 +120,8 @@ class PBFParticleFluid3D : public Node3D {
 	void _solve_density_constraints();
 	void _apply_density_corrections();
 	void _apply_xsph_viscosity();
+	void _apply_surface_tension(real_t p_delta);
+	void _sync_surface_tension_buffers();
 	void _apply_vorticity_confinement(real_t p_delta);
 	void _project_predictive_density_pressure(real_t p_delta);
 	real_t _measure_predicted_density_error(real_t p_delta);
@@ -147,6 +159,15 @@ public:
 	real_t get_particle_radius() const { return particle_radius; }
 	void set_artificial_pressure(real_t p_strength);
 	real_t get_artificial_pressure() const { return artificial_pressure; }
+	void set_surface_cohesion(real_t p_strength);
+	real_t get_surface_cohesion() const { return surface_cohesion; }
+	void set_surface_curvature(real_t p_strength);
+	real_t get_surface_curvature() const { return surface_curvature; }
+	void set_surface_max_pair_velocity_change(real_t p_maximum);
+	real_t get_surface_max_pair_velocity_change() const { return surface_max_pair_velocity_change; }
+	real_t get_mean_surface_normal_magnitude() const { return mean_surface_normal_magnitude; }
+	int get_last_surface_tension_pairs() const { return int(MIN(last_surface_tension_pairs, uint64_t(2147483647))); }
+	int get_last_surface_tension_neighbor_evaluations() const { return int(MIN(last_surface_tension_neighbor_evaluations, uint64_t(2147483647))); }
 	void set_xsph_viscosity(real_t p_viscosity);
 	real_t get_xsph_viscosity() const { return xsph_viscosity; }
 	void set_density_pressure_iterations(int p_iterations);
