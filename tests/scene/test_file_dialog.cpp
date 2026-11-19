@@ -206,4 +206,27 @@ TEST_CASE("[SceneTree][FileDialog] Native callbacks accept untranslated option k
 	CHECK(int(Dictionary(next_options[0])["default"]) == 0);
 }
 
+TEST_CASE("[SceneTree][FileDialog] Cancelling the native dialog leaves the selection intact") {
+	NativeDialogFixture fixture;
+	fixture.install_translation();
+	fixture.translation_server->set_locale("es");
+	fixture.dialog->add_option("Quality", { "Low", "High" }, 1);
+	fixture.show_native_dialog();
+
+	// A cancelled OS dialog must not overwrite the previous selection.
+	Dictionary selected;
+	selected["Calidad"] = 0;
+	fixture.server->get_captured_native_dialog_callback().call(false, Vector<String>(), 0, selected);
+
+	Dictionary after_cancel = fixture.dialog->get_selected_options();
+	CHECK(after_cancel.has("Quality"));
+	CHECK(int(after_cancel["Quality"]) == 1);
+	CHECK_FALSE(after_cancel.has("Calidad"));
+
+	TypedArray<Dictionary> reopened = fixture.show_native_dialog();
+	REQUIRE(reopened.size() == 1);
+	CHECK(String(Dictionary(reopened[0])["name"]) == "Calidad");
+	CHECK(int(Dictionary(reopened[0])["default"]) == 1);
+}
+
 } // namespace TestFileDialog
