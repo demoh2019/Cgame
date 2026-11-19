@@ -358,13 +358,16 @@ func cmd_fish(peer_id: int) -> Dictionary:
 		return {"ok": false, "reason": "busy"}
 	if time < player.fish_next_at:
 		return {"ok": false, "reason": "cooldown"}
-	var eligibility: Dictionary = Fishing.validate_start(world, player.position, player.inventory)
+	var eligibility: Dictionary = Fishing.validate_start(world, player.position,
+		player.inventory, player.progression.gathering_level("fishing"))
 	if not bool(eligibility.get("ok", false)):
 		return eligibility
 	player.action = {"fish": true, "cast_x": player.position.x, "cast_z": player.position.z,
+		"tier": int(eligibility["tier"]), "catch_id": str(eligibility["item"]),
 		"remaining": Fishing.CAST_SECONDS, "total": Fishing.CAST_SECONDS}
 	player.fish_next_at = time + Fishing.CAST_SECONDS + Fishing.COOLDOWN_SECONDS
-	return {"ok": true, "seconds": Fishing.CAST_SECONDS}
+	return {"ok": true, "seconds": Fishing.CAST_SECONDS,
+		"tier": int(eligibility["tier"]), "item": str(eligibility["item"])}
 
 
 func cmd_gather(peer_id: int, node_id: int) -> Dictionary:
@@ -1439,7 +1442,11 @@ func _tick_players(delta: float) -> void:
 		if not player.action.is_empty():
 			if player.action.has("fish"):
 				var cast_at := Vector2(float(player.action["cast_x"]), float(player.action["cast_z"]))
-				if player.inventory.best_tool("fishing") == "" or Fishing.water_near(world, player.position) == Vector2.INF or Vector2(player.position.x, player.position.z).distance_to(cast_at) > 0.45:
+				var current_catch: Dictionary = Fishing.validate_start(world, player.position,
+					player.inventory, player.progression.gathering_level("fishing"))
+				if not bool(current_catch.get("ok", false)) \
+						or str(current_catch.get("item", "")) != str(player.action.get("catch_id", "")) \
+						or Vector2(player.position.x, player.position.z).distance_to(cast_at) > 0.45:
 					player.action = {}
 					continue
 				player.action["remaining"] = float(player.action["remaining"]) - delta
@@ -1456,14 +1463,19 @@ func _tick_players(delta: float) -> void:
 
 
 func _finish_fishing(player: Player) -> void:
+	var item_id: String = str(player.action.get("catch_id", Fishing.CATCH_ID))
+	var tier: int = int(player.action.get("tier", 1))
 	player.action = {}
+	if item_id != Fishing.catch_item(tier):
+		return # Never trust an inconsistent pending action.
 	var amount: int = 1 + (1 if rng.randf() < 0.35 else 0)
-	var added: int = amount - player.inventory.add(Fishing.CATCH_ID, amount)
+	var added: int = amount - player.inventory.add(item_id, amount)
 	if added > 0:
-		player.progression.award_gather("fishing", 1, added)
+		player.progression.award_gather("fishing", tier, added)
 		player.dirty_inventory = true
 		player.dirty_character = true
-	events.append({"type": "fished", "peer": player.id, "item": Fishing.CATCH_ID, "amount": added})
+	events.append({"type": "fished", "peer": player.id, "item": item_id,
+		"amount": added, "tier": tier})
 
 
 func _finish_gather(player: Player, node: Dictionary) -> void:
