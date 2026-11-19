@@ -416,54 +416,56 @@ bool GodotCapsuleShape2D::contains_point(const Vector2 &p_point) const {
 
 bool GodotCapsuleShape2D::intersect_segment(const Vector2 &p_begin, const Vector2 &p_end, Vector2 &r_point, Vector2 &r_normal) const {
 	const Vector2 direction = p_end - p_begin;
-	const real_t direction_length_squared = direction.length_squared();
+	const double dx = double(direction.x);
+	const double dy = double(direction.y);
+	const double direction_length_squared = dx * dx + dy * dy;
 	if (direction_length_squared == 0.0) {
 		return false;
 	}
 
-	const Vector2 n = direction / Math::sqrt(direction_length_squared);
-	real_t d = real_t(Math::INF);
+	const double radius_squared = double(radius) * double(radius);
+	double best_fraction = double(Math::INF);
 	bool collided = false;
 
-	// Check both end caps. The ray direction and its squared length do
-	// not change when translated into either cap's local coordinates.
+	// Intersect the two circular ends using closest approach. The usual
+	// quadratic discriminant loses the entry point through cancellation
+	// when a ray is very long compared to the cap's radius.
 	for (int i = 0; i < 2; i++) {
-		Vector2 begin = p_begin;
-		const real_t ofs = (i == 0) ? -height * 0.5 + radius : height * 0.5 - radius;
-		begin.y += ofs;
-
-		const real_t half_b = begin.dot(direction);
-		const real_t c = begin.length_squared() - radius * radius;
-		if (c > 0.0 && half_b >= 0.0) {
-			continue;
-		}
-		const real_t discriminant = half_b * half_b - direction_length_squared * c;
-		if (discriminant < 0.0) {
+		const double offset = (i == 0) ? -double(height) * 0.5 + double(radius) : double(height) * 0.5 - double(radius);
+		const double bx = double(p_begin.x);
+		const double by = double(p_begin.y) + offset;
+		const double projection = -(bx * dx + by * dy) / direction_length_squared;
+		if (projection < 0.0) {
 			continue;
 		}
 
-		const real_t fraction = (-half_b - Math::sqrt(discriminant)) / direction_length_squared;
-		if (fraction < 0.0 || fraction > 1.0 + CMP_EPSILON) {
+		const double closest_x = bx + dx * projection;
+		const double closest_y = by + dy * projection;
+		const double gap_squared = radius_squared - (closest_x * closest_x + closest_y * closest_y);
+		if (gap_squared < 0.0) {
 			continue;
 		}
 
-		const Vector2 point = begin + direction * fraction;
-		const Vector2 pointf(point.x, point.y - ofs);
-		const real_t pd = n.dot(pointf);
-		if (pd < d) {
-			r_point = pointf;
-			r_normal = point.normalized();
-			d = pd;
-			collided = true;
+		const double fraction = projection - Math::sqrt(gap_squared / direction_length_squared);
+		if (fraction < 0.0 || fraction > 1.0 + CMP_EPSILON || fraction >= best_fraction) {
+			continue;
 		}
+
+		const double hit_x = bx + dx * fraction;
+		const double hit_y = by + dy * fraction;
+		r_point = Vector2(real_t(hit_x), real_t(hit_y - offset));
+		r_normal = Vector2(real_t(hit_x), real_t(hit_y)).normalized();
+		best_fraction = fraction;
+		collided = true;
 	}
 
-	Vector2 rpos, rnorm;
-	if (Rect2(Point2(-radius, -height * 0.5 + radius), Size2(radius * 2.0, height - radius * 2)).intersects_segment(p_begin, p_end, &rpos, &rnorm)) {
-		const real_t pd = n.dot(rpos);
-		if (pd < d) {
-			r_point = rpos;
-			r_normal = rnorm;
+	Vector2 rect_point, rect_normal;
+	if (Rect2(Point2(-radius, -height * 0.5 + radius), Size2(radius * 2.0, height - radius * 2)).intersects_segment(p_begin, p_end, &rect_point, &rect_normal)) {
+		const double fraction = ((double(rect_point.x) - double(p_begin.x)) * dx +
+				(double(rect_point.y) - double(p_begin.y)) * dy) / direction_length_squared;
+		if (fraction < best_fraction) {
+			r_point = rect_point;
+			r_normal = rect_normal;
 			collided = true;
 		}
 	}
