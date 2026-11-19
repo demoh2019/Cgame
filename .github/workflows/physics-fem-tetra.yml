@@ -5,6 +5,8 @@ on:
     branches: [develop]
     paths:
       - "servers/physics_fem_tetra_neo_hookean.h"
+      - "servers/physics_fem_convex_tetra_fan.h"
+      - "tests/servers/test_physics_fem_convex_tetra_fan.cpp"
       - "tests/servers/test_physics_fem_tetra_neo_hookean.cpp"
       - "tests/stress/test_physics_fem_tetra_compiler.cpp"
       - "tests/stress/physics_cpp_stubs/core/math/vector3.h"
@@ -17,6 +19,8 @@ on:
   pull_request:
     paths:
       - "servers/physics_fem_tetra_neo_hookean.h"
+      - "servers/physics_fem_convex_tetra_fan.h"
+      - "tests/servers/test_physics_fem_convex_tetra_fan.cpp"
       - "tests/servers/test_physics_fem_tetra_neo_hookean.cpp"
       - "tests/stress/test_physics_fem_tetra_compiler.cpp"
       - "tests/stress/physics_cpp_stubs/core/math/vector3.h"
