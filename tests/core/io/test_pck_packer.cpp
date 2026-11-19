@@ -246,7 +246,9 @@ TEST_CASE("[PCKPacker] FileAccessPack reports physical short reads accurately") 
 	Ref<FileAccess> file(memnew(FileAccessPack("res://pck_truncated_bulk_read.bin", metadata)));
 	REQUIRE(file.is_valid());
 	uint8_t dst[12] = {};
+	ERR_PRINT_OFF; // The physical file is intentionally shorter than its PCK metadata.
 	CHECK(file->get_buffer(dst, 8) == 3);
+	ERR_PRINT_ON;
 	CHECK(file->get_position() == 3);
 	CHECK(file->eof_reached());
 	CHECK(dst[0] == 0x17);
