@@ -655,6 +655,9 @@ PhysicsServer3D::PhysicsServer3D() {
 	// Zero thickness disables the pair stage and all its extra runtime work.
 	GLOBAL_DEF(PropertyInfo(Variant::FLOAT, "physics/3d/solver/soft_body_pair_collision_thickness", PROPERTY_HINT_RANGE, "0,1,0.001,or_greater,suffix:m"), 0.0);
 	GLOBAL_DEF(PropertyInfo(Variant::FLOAT, "physics/3d/solver/soft_body_pair_collision_compliance", PROPERTY_HINT_RANGE, "0,0.01,0.000001,or_greater"), 0.000001);
+	// Coulomb-limited velocity friction between DISTINCT soft bodies.
+	// Zero is free slip; no friction pass or additional persistent storage.
+	GLOBAL_DEF(PropertyInfo(Variant::FLOAT, "physics/3d/solver/soft_body_pair_collision_friction", PROPERTY_HINT_RANGE, "0,4,0.01,or_greater"), 0.0);
 	GLOBAL_DEF(PropertyInfo(Variant::INT, "physics/3d/solver/soft_body_pair_max_contacts", PROPERTY_HINT_RANGE, "1,2048,1"), 256);
 	GLOBAL_DEF(PropertyInfo(Variant::INT, "physics/3d/solver/soft_body_pair_max_pairs", PROPERTY_HINT_RANGE, "1,512,1"), 128);
 	// Jolt-style long-range cloth tethers limit distance from pinned
