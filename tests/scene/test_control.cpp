@@ -112,6 +112,41 @@ TEST_CASE("[SceneTree][Control] Moving a stretched control preserves the size be
 	}
 }
 
+TEST_CASE("[SceneTree][Control] Repeated moves do not preserve temporary size constraints") {
+	for (bool maximum : { false, true }) {
+		Control *parent = memnew(Control);
+		parent->set_size(Size2(400, 300));
+		SceneTree::get_singleton()->get_root()->add_child(parent);
+
+		Control *child = memnew(Control);
+		parent->add_child(child);
+		child->set_size(Size2(64, 48));
+
+		for (int i = 0; i < 4; i++) {
+			INFO("Maximum constraint: ", maximum, ", move iteration: ", i);
+			if (maximum) {
+				child->set_custom_maximum_size(Size2(24 + i * 2, 20 + i * 3));
+			} else {
+				child->set_custom_minimum_size(Size2(100 + i * 10, 90 + i * 10));
+			}
+			SceneTree::get_singleton()->process(0);
+
+			Point2 target_position(20 + i * 7, 30 + i * 4);
+			child->set_position(target_position, i % 2 != 0);
+			CHECK(child->get_position().is_equal_approx(target_position));
+
+			if (maximum) {
+				child->set_custom_maximum_size(Size2(-1, -1));
+			} else {
+				child->set_custom_minimum_size(Size2());
+			}
+			SceneTree::get_singleton()->process(0);
+			CHECK(child->get_size().is_equal_approx(Size2(64, 48)));
+		}
+		memdelete(parent);
+	}
+}
+
 TEST_CASE("[SceneTree][Control] Transforms") {
 	SUBCASE("[Control][Global Transform] Global Transform should be accessible while not in SceneTree.") { // GH-79453
 		Control *test_node = memnew(Control);
