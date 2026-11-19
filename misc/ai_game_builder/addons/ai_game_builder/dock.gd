@@ -93,12 +93,14 @@ func _ready() -> void:
 	_apply_button.pressed.connect(_confirm_apply)
 	review_controls.add_child(_apply_button)
 
+	var verify_controls := HBoxContainer.new()
+	add_child(verify_controls)
 	_check_button = Button.new()
 	_check_button.text = "Check Game (Headless)"
 	_check_button.tooltip_text = "Explicitly load approved game scripts and scenes in a separate, time-limited Godot process. Generated scenes are not instantiated."
 	_check_button.disabled = true
 	_check_button.pressed.connect(_check_approved_game)
-	review_controls.add_child(_check_button)
+	verify_controls.add_child(_check_button)
 
 	_check_timer = Timer.new()
 	_check_timer.wait_time = 0.25
