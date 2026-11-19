@@ -582,12 +582,16 @@ Ref<ConcavePolygonShape3D> Mesh::create_trimesh_shape() const {
 
 	Vector<Vector3> face_points;
 	face_points.resize(faces.size() * 3);
-
-	for (int i = 0; i < face_points.size(); i += 3) {
-		Face3 f = faces.get(i / 3);
-		face_points.set(i, f.vertex[0]);
-		face_points.set(i + 1, f.vertex[1]);
-		face_points.set(i + 2, f.vertex[2]);
+	// Newly allocated buffer: one writable pointer avoids three bounds/COW
+	// checks per triangle, while const access avoids copying each Face3.
+	Vector3 *face_write = face_points.ptrw();
+	const Face3 *face_read = faces.ptr();
+	for (int i = 0; i < faces.size(); ++i) {
+		const Face3 &face = face_read[i];
+		const int offset = i * 3;
+		face_write[offset + 0] = face.vertex[0];
+		face_write[offset + 1] = face.vertex[1];
+		face_write[offset + 2] = face.vertex[2];
 	}
 
 	Ref<ConcavePolygonShape3D> shape = memnew(ConcavePolygonShape3D);
