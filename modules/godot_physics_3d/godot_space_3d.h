@@ -121,6 +121,7 @@ private:
 	real_t max_linear_velocity = 0.0; // Opt-in rigid speed limit, 0 disables.
 	real_t warm_start_coefficient = 1.0;
 	bool implicit_damping = false; // Box2D-style time-step-stable damping; disabled by default.
+	bool gyroscopic_forces = false; // Jolt-style asymmetric rigid-body rotation; opt-in.
 	// Bullet-style resistance about and perpendicular to the contact normal.
 	real_t rolling_friction = 0.0;
 	real_t spinning_friction = 0.0;
@@ -196,6 +197,7 @@ public:
 	_FORCE_INLINE_ real_t get_warm_start_coefficient() const { return warm_start_coefficient; }
 	_FORCE_INLINE_ real_t get_max_linear_velocity() const { return max_linear_velocity; }
 	_FORCE_INLINE_ bool is_implicit_damping_enabled() const { return implicit_damping; }
+	_FORCE_INLINE_ bool are_gyroscopic_forces_enabled() const { return gyroscopic_forces; }
 	_FORCE_INLINE_ real_t get_rolling_friction() const { return rolling_friction; }
 	_FORCE_INLINE_ real_t get_spinning_friction() const { return spinning_friction; }
 	_FORCE_INLINE_ real_t get_restitution_velocity_threshold() const { return restitution_velocity_threshold; }
