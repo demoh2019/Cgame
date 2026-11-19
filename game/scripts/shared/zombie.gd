@@ -12,6 +12,7 @@ enum State { IDLE, WANDER, CHASE, ATTACK, DEAD, INVESTIGATE }
 var id: int
 var type: String
 var elite: bool = false
+var raid_boss: bool = false # Session-only group encounter; never a client-spawnable type.
 var spawn_id: int
 var position: Vector3
 var yaw: float = 0.0
