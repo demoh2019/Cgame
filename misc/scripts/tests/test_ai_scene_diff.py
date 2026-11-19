@@ -191,6 +191,44 @@ class SceneDiffTest(unittest.TestCase):
         self.assertLessEqual(len(raw), 1024)
         self.assertTrue(report["truncated"])
 
+    def test_large_diff_budget_matches_pop_one_reference(self):
+        import copy
+        self.write(self.after, "main.tscn", ROOT + "".join(
+            f'[node name="Игрок_{i:03}" type="Node2D" parent="."]\n'
+            for i in range(350)))
+        complete = self.diff(max_changes=350, max_output_bytes=4 * 1024 * 1024)
+        self.assertEqual(len(complete["changes"]), 350)
+        for budget in (1024, 2048, 4096, 8192, 16384):
+            with self.subTest(budget=budget):
+                expected = copy.deepcopy(complete)
+
+                def size():
+                    return len(json.dumps(expected, ensure_ascii=False, sort_keys=True,
+                                          separators=(",", ":")).encode("utf-8"))
+
+                while expected["changes"] and size() > budget:
+                    expected["changes"].pop()
+                    expected["truncated"] = True
+                    expected["summary"]["changes_reported"] = len(expected["changes"])
+                if size() > budget:
+                    with self.assertRaises(SceneDiffError):
+                        self.diff(max_changes=350, max_output_bytes=budget)
+                else:
+                    self.assertEqual(self.diff(max_changes=350, max_output_bytes=budget),
+                                     expected)
+
+    def test_large_diff_budget_uses_logarithmic_json_checks(self):
+        from unittest import mock
+        import ai_scene_diff as diff_module
+        self.write(self.after, "main.tscn", ROOT + "".join(
+            f'[node name="N{i:03}" type="Node2D" parent="."]\n'
+            for i in range(350)))
+        original_dumps = json.dumps
+        with mock.patch.object(diff_module.json, "dumps", wraps=original_dumps) as tracked:
+            result = self.diff(max_changes=350, max_output_bytes=1024)
+        self.assertTrue(result["truncated"])
+        self.assertLessEqual(tracked.call_count, 16)
+
     def test_cli_respects_byte_budget(self):
         self.write(self.after, "main.tscn", ROOT + "".join(
             f'[node name="Node{i:03}" type="Node2D" parent="."]\n' for i in range(50)))
