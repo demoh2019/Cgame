@@ -6,7 +6,7 @@
 	<description>
 		Simulates up to 2048 particles using Position Based Fluids (PBF): a compactly supported SPH kernel, iterative density constraints, deterministic sorted-cell neighbor lookup, artificial pressure and optional XSPH velocity smoothing. Unlike static fluid-plane buoyancy, particles move independently and can form a deforming free surface.
 		Particle positions, velocities, box bounds, gravity and impulses are all in this node's [b]local coordinate system[/b]. The node does not create a visible mesh: render particles yourself with [MultiMeshInstance3D], a custom shader or a fluid surface renderer. See the Cgame Physics Lab sample for GPU-instanced sphere visualization.
-		[b]Experimental:[/b] This is a bounded CPU demonstration of PBF, not a fully incompressible Navier-Stokes solver. The density constraint is one-sided (it prevents compression rather than forcing dilute free surfaces to expand). It does not implement viscosity between fluid and rigid bodies, surface reconstruction, GPU compute, solid boundary pressure or thermal/multiphase effects. A new optional vorticity confinement post-process restores small-scale vortices lost during PBF/XSPH and is disabled by default; it is a visual turbulence model, not a fully energy-conserving Navier-Stokes solver. Simple equal-and-opposite rigid-body contact impulses can be explicitly enabled through [member two_way_rigid_coupling]; this is not a continuum fluid-solid coupling solver.
+		[b]Experimental:[/b] This is a bounded CPU demonstration of PBF, not a fully incompressible Navier-Stokes solver. The density constraint is one-sided (it prevents compression rather than forcing dilute free surfaces to expand). It does not implement viscosity between fluid and rigid bodies, surface reconstruction, GPU compute, solid boundary pressure or thermal/multiphase effects. A new optional vorticity confinement post-process restores small-scale vortices lost during PBF/XSPH and is disabled by default; it is a visual turbulence model, not a fully energy-conserving Navier-Stokes solver. An additional opt-in unilateral divergence velocity projection suppresses compressive density-rate after the PBF and vorticity passes. It is DFSPH-inspired but does not replace PBF with a complete two-stage pressure Poisson method. Simple equal-and-opposite rigid-body contact impulses can be explicitly enabled through [member two_way_rigid_coupling]; this is not a continuum fluid-solid coupling solver.
 		[b]Note:[/b] By default [member simulation_enabled], [member collide_with_bodies] and [member two_way_rigid_coupling] are [code]false[/code], so the class does no per-frame work. For manual stepping, use [method step] while simulation is disabled. The internal simulation tick runs in the regular physics frame. Parameters are intentionally capped to protect memory, runtime cost and numerical stability.
 	</description>
 	<methods>
@@ -34,6 +34,12 @@
 				Creates a regularly spaced local-coordinate cuboid of liquid particles with zero initial velocities. The result is clamped to [member box_min] and [member box_max]. Returns [code]false[/code] without changing the previous particle state on invalid arguments or when the total count exceeds 2048.
 			</description>
 		</method>
+		<method name="get_average_positive_density_rate" qualifiers="const">
+			<return type="float" />
+			<description>
+				Returns the average positive SPH density-rate divided by rest density, in inverse seconds, from the latest enabled divergence projection. Compression (positive density rate) is penalized, but expansion at free surfaces is not. Returns zero if [member divergence_iterations] is zero or if there are no particles.
+			</description>
+		</method>
 		<method name="get_average_density" qualifiers="const">
 			<return type="float" />
 			<description>
@@ -44,6 +50,18 @@
 			<return type="float" />
 			<description>
 				Returns the mean magnitude of the SPH-estimated velocity curl, in inverse seconds, from the most recent enabled vorticity post-process. Returns zero if [member vorticity_confinement] is disabled or the particle set is cleared.
+			</description>
+		</method>
+		<method name="get_last_divergence_iterations" qualifiers="const">
+			<return type="int" />
+			<description>
+				Returns the number of Jacobi velocity-projection iterations actually applied in the last substep. May be less than the configured maximum if mean positive compression rate is below [member divergence_tolerance].
+			</description>
+		</method>
+		<method name="get_last_divergence_neighbor_evaluations" qualifiers="const">
+			<return type="int" />
+			<description>
+				Returns the number of neighborhood visits from the latest velocity projection, including the final density-rate measurement. Zero when [member divergence_iterations] is zero. The count is bounded by (2 × iterations + 1) × particle_count × 128.
 			</description>
 		</method>
 		<method name="get_last_rigid_impulses" qualifiers="const">
@@ -115,6 +133,18 @@
 		</member>
 		<member name="collision_mask" type="int" setter="set_collision_mask" getter="get_collision_mask" default="1">
 			Physics layers queried by the optional body collision sweep.
+		</member>
+		<member name="divergence_iterations" type="int" setter="set_divergence_iterations" getter="get_divergence_iterations" default="0">
+			Number of optional Jacobi SPH velocity-divergence iterations per substep (0–12). Zero disables the solver completely. This DFSPH-inspired post-process is separate from the existing PBF density/position solver and does not implement two-pressure-Poisson DFSPH.
+		</member>
+		<member name="divergence_max_velocity_change" type="float" setter="set_divergence_max_velocity_change" getter="get_divergence_max_velocity_change" default="0.12">
+			Maximum length of each particle velocity correction in m/s per iteration. Bounds numerical impulses in densely packed or badly conditioned neighborhoods but may leave some compression error uncorrected.
+		</member>
+		<member name="divergence_relaxation" type="float" setter="set_divergence_relaxation" getter="get_divergence_relaxation" default="0.8">
+			Under-relaxation factor in (0, 1] used for the simultaneous Jacobi corrections. Smaller values improve stability at the cost of slower convergence.
+		</member>
+		<member name="divergence_tolerance" type="float" setter="set_divergence_tolerance" getter="get_divergence_tolerance" default="0.01">
+			Stopping threshold for mean positive relative SPH density-rate, in inverse seconds (0–10). The one-sided constraint avoids pulling apart dilute free-surface particles.
 		</member>
 		<member name="gravity" type="Vector3" setter="set_gravity" getter="get_gravity" default="Vector3(0, -9.8, 0)">
 			Fluid acceleration in the node's local space, in metres per second squared.
