@@ -505,15 +505,15 @@ TEST_CASE("[String] Find case insensitive ASCII exhaustive pairs") {
 }
 
 TEST_CASE("[String] Find case insensitive Unicode fallback") {
-	const String s = U"xx\\u212A\\u03A3\\u00C4yy\\u0416\\u0423\\u041A";
-	CHECK(s.findn(String(U"k\\u03C3\\u00E4")) == 2);
-	CHECK(s.rfindn(String(U"k\\u03C3\\u00E4")) == 2);
-	CHECK(s.findn(String(U"\\u0436\\u0443\\u043A")) == 7);
-	CHECK(s.rfindn(String(U"\\u0436\\u0443\\u043A")) == 7);
+	const String s = U"xx\u212A\u03A3\u00C4yy\u0416\u0423\u041A";
+	CHECK(s.findn(String(U"k\u03C3\u00E4")) == 2);
+	CHECK(s.rfindn(String(U"k\u03C3\u00E4")) == 2);
+	CHECK(s.findn(String(U"\u0436\u0443\u043A")) == 7);
+	CHECK(s.rfindn(String(U"\u0436\u0443\u043A")) == 7);
 	CHECK(s.findn("k") == 2);
 	CHECK(s.rfindn("K") == 2);
-	CHECK(s.findn(String(U"k\\u03C3\\u00E5")) == -1);
-	CHECK(s.findn(String(U"\\u0436\\u0443\\u043A"), 8) == -1);
+	CHECK(s.findn(String(U"k\u03C3\u00E5")) == -1);
+	CHECK(s.findn(String(U"\u0436\u0443\u043A"), 8) == -1);
 }
 
 TEST_CASE("[String] Find MK") {
