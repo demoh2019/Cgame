@@ -15,7 +15,7 @@ const CanvasScenePerf := preload("res://canvas_scene_perf.gd")
 const CASES := [
 	"containers", "array_literals", "dictionary_snapshot", "strings", "script_vm", "math", "signals",
 	"scene_tree", "packed_scene", "images", "json", "stream", "stream_bulk",
-	"file_io", "threads", "physics_2d", "physics_3d", "physics_joint_chain_2d", "physics_joint_chain_3d", "physics_sparse_2d", "physics_sparse_3d", "physics_rid_sparse_2d", "physics_rid_sparse_3d",
+	"file_io", "threads", "physics_2d", "physics_3d", "physics_joint_chain_2d", "physics_joint_chain_3d", "physics_sparse_2d", "physics_sparse_3d", "physics_rid_sparse_2d", "physics_rid_sparse_3d", "physics_rid_moving_2d", "physics_rid_moving_3d",
 	"object_churn", "memory_churn", "astar_grid", "astar_grid_neighbors", "astar_grid_jps", "astar_grid_fill", "astar_grid_rebuild", "astar_relax_2d", "astar_relax_3d", "astar_graph", "tweens", "audio_buffers",
 	"variant_codec", "packet_stream", "packet_tx_batch", "packet_rx_batch", "packet_variant_reuse", "ui_layout", "grid_reflow", "box_reflow", "flow_reflow", "render_2d", "render_3d", "render_ellipse_2d", "render_light_culling_3d",
 	"resource_load",
@@ -271,6 +271,10 @@ func _run_case(test_case: String, scale: int, frames: int, seed: int) -> Diction
 			return await _physics_rid_sparse_2d(scale, frames)
 		"physics_rid_sparse_3d":
 			return await _physics_rid_sparse_3d(scale, frames)
+		"physics_rid_moving_2d":
+			return await _physics_rid_sparse_2d(scale, frames, true)
+		"physics_rid_moving_3d":
+			return await _physics_rid_sparse_3d(scale, frames, true)
 		"memory_churn":
 			return await _memory_churn(scale)
 		"render_2d":
@@ -639,7 +643,7 @@ func _physics_3d(scale: int, frames: int) -> Dictionary:
 # Low-level sparse physics stress, without SceneTree/Node overhead.
 # Each body has a real broadphase shape, zero gravity and disabled sleeping.
 # At scale=977 there are 1,000,448 rigid bodies per workload.
-func _physics_rid_sparse_2d(scale: int, frames: int) -> Dictionary:
+func _physics_rid_sparse_2d(scale: int, frames: int, moving: bool = false) -> Dictionary:
 	var space := PhysicsServer2D.space_create()
 	PhysicsServer2D.space_set_active(space, true)
 	var circle := PhysicsServer2D.circle_shape_create()
@@ -655,6 +659,8 @@ func _physics_rid_sparse_2d(scale: int, frames: int) -> Dictionary:
 				Transform2D(0.0, Vector2(float(i % 1024) * 4.0, float(int(i / 1024)) * 4.0)))
 		PhysicsServer2D.body_set_param(body, PhysicsServer2D.BODY_PARAM_GRAVITY_SCALE, 0.0)
 		PhysicsServer2D.body_set_state(body, PhysicsServer2D.BODY_STATE_CAN_SLEEP, false)
+		if moving:
+			PhysicsServer2D.body_set_state(body, PhysicsServer2D.BODY_STATE_LINEAR_VELOCITY, Vector2(1.0, 0.0))
 		PhysicsServer2D.body_set_space(body, space)
 		bodies[i] = body
 	var creation_ms := float(Time.get_ticks_usec() - creation_started) / 1000.0
@@ -677,7 +683,10 @@ func _physics_rid_sparse_2d(scale: int, frames: int) -> Dictionary:
 	for index in [0, int(count / 2), count - 1]:
 		var probe: Transform2D = PhysicsServer2D.body_get_state(bodies[index], PhysicsServer2D.BODY_STATE_TRANSFORM)
 		var expected := Vector2(float(index % 1024) * 4.0, float(int(index / 1024)) * 4.0)
-		if not probe.origin.is_equal_approx(expected):
+		if moving:
+			if frames > 1 and index == 0 and probe.origin.x <= expected.x:
+				state_error = true
+		elif not probe.origin.is_equal_approx(expected):
 			state_error = true
 		if bool(PhysicsServer2D.body_get_state(bodies[index], PhysicsServer2D.BODY_STATE_SLEEPING)):
 			state_error = true
@@ -695,12 +704,12 @@ func _physics_rid_sparse_2d(scale: int, frames: int) -> Dictionary:
 	if state_error:
 		return {"error": "Sparse 2D RID bodies drifted or slept unexpectedly"}
 	var frame_statistics := _frame_statistics(frame_intervals)
-	return {"bodies": count, "physics_frames": frames, "creation_ms": creation_ms, "cleanup_ms": cleanup_ms,
+	return {"bodies": count, "moving": moving, "physics_frames": frames, "creation_ms": creation_ms, "cleanup_ms": cleanup_ms,
 			"peak_physics_ms": peak_physics_ms, "peak_collision_pairs": peak_pairs,
 			"frame_interval_ms": frame_statistics, "frame_p95_ms": frame_statistics["p95"]}
 
 
-func _physics_rid_sparse_3d(scale: int, frames: int) -> Dictionary:
+func _physics_rid_sparse_3d(scale: int, frames: int, moving: bool = false) -> Dictionary:
 	var space := PhysicsServer3D.space_create()
 	PhysicsServer3D.space_set_active(space, true)
 	var sphere := PhysicsServer3D.sphere_shape_create()
@@ -716,6 +725,8 @@ func _physics_rid_sparse_3d(scale: int, frames: int) -> Dictionary:
 				Transform3D(Basis(), Vector3(float(i % 128) * 4.0, float(int(i / 128) % 128) * 4.0, float(int(i / 16384)) * 4.0)))
 		PhysicsServer3D.body_set_param(body, PhysicsServer3D.BODY_PARAM_GRAVITY_SCALE, 0.0)
 		PhysicsServer3D.body_set_state(body, PhysicsServer3D.BODY_STATE_CAN_SLEEP, false)
+		if moving:
+			PhysicsServer3D.body_set_state(body, PhysicsServer3D.BODY_STATE_LINEAR_VELOCITY, Vector3(1.0, 0.0, 0.0))
 		PhysicsServer3D.body_set_space(body, space)
 		bodies[i] = body
 	var creation_ms := float(Time.get_ticks_usec() - creation_started) / 1000.0
@@ -736,7 +747,10 @@ func _physics_rid_sparse_3d(scale: int, frames: int) -> Dictionary:
 	for index in [0, int(count / 2), count - 1]:
 		var probe: Transform3D = PhysicsServer3D.body_get_state(bodies[index], PhysicsServer3D.BODY_STATE_TRANSFORM)
 		var expected := Vector3(float(index % 128) * 4.0, float(int(index / 128) % 128) * 4.0, float(int(index / 16384)) * 4.0)
-		if not probe.origin.is_equal_approx(expected):
+		if moving:
+			if frames > 1 and index == 0 and probe.origin.x <= expected.x:
+				state_error = true
+		elif not probe.origin.is_equal_approx(expected):
 			state_error = true
 		if bool(PhysicsServer3D.body_get_state(bodies[index], PhysicsServer3D.BODY_STATE_SLEEPING)):
 			state_error = true
