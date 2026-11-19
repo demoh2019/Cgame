@@ -501,7 +501,7 @@ bool GodotBodyPair3D::_test_ccd(real_t p_step, GodotBody3D *p_A, int p_shape_A, 
 
 bool GodotBodyPair3D::setup(real_t p_step) {
 	check_ccd = false;
-	speculative_contact = false;
+	contact_recycling.speculative_contact = false;
 
 	if (!A->interacts_with(B) || A->has_exception(B->get_self()) || B->has_exception(A->get_self())) {
 		collided = false;
@@ -609,7 +609,7 @@ bool GodotBodyPair3D::setup(real_t p_step) {
 				contacts[0] = speculative;
 				contact_count = 1;
 				collided = true;
-				speculative_contact = true;
+				contact_recycling.speculative_contact = true;
 			}
 		}
 	}
@@ -735,7 +735,7 @@ bool GodotBodyPair3D::pre_solve(real_t p_step) {
 		Vector3 axis = global_A - global_B;
 		real_t depth = axis.dot(c.normal);
 
-		const bool speculative = speculative_contact && depth < 0.0 && !report_contacts_only &&
+		const bool speculative = contact_recycling.speculative_contact && depth < 0.0 && !report_contacts_only &&
 				space->get_speculative_sphere_distance() >= -depth;
 		if (depth <= 0.0 && !speculative) {
 			continue;
