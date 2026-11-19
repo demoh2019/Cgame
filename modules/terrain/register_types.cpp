@@ -18,12 +18,15 @@
 #include "core/object/class_db.h"
 
 void initialize_terrain_module(ModuleInitializationLevel p_level) {
-    if (p_level == MODULE_INITIALIZATION_LEVEL_SCENE) {
-        GDREGISTER_CLASS(TerrainMesh);
-    }
+	if (p_level == MODULE_INITIALIZATION_LEVEL_SCENE) {
+		GDREGISTER_CLASS(TerrainMesh);
+	}
 }
 
 void uninitialize_terrain_module(ModuleInitializationLevel p_level) {
+	if (p_level != MODULE_INITIALIZATION_LEVEL_SCENE) {
+		return;
+	}
 }
 
 #endif // _3D_DISABLED
