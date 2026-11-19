@@ -8,6 +8,7 @@ Run:
 
 import argparse
 import json
+import math
 import os
 from pathlib import Path
 import shutil
@@ -26,9 +27,10 @@ RUNTIME = ROOT / "tests/stress/physics_jolt_pipeline_tuning_regression.gd"
 PREFIX = "JOLT_PIPELINE_RESULT:"
 
 PROFILES = [
-    (16384, True, True),  # Current default, unchanged.
-    (1024, False, True),  # Low temporary memory, no island splitting.
-    (32768, True, False),  # More queue capacity, unreduced manifolds.
+    # queue, split_large_islands, reduce_manifolds, correction_m, normal_angle_deg, warm_start_m
+    (16384, True, True, 0.2, 5.0, 0.01),  # Unmodified Jolt defaults.
+    (1024, False, True, 0.05, 30.0, 0.04),  # Tight correction, looser manifold persistence.
+    (32768, True, False, 0.5, 0.0, 0.0),  # Wider correction, no warm-start tolerance.
 ]
 
 
@@ -67,6 +69,48 @@ class JoltPipelineSettingsContracts(unittest.TestCase):
             self.assertIn(f"inline static bool simulation_{name};", self.header)
             self.assertIn(f"{upstream} = true;", self.upstream)
 
+    def test_contact_tuning_is_clamped_and_matches_upstream_defaults(self):
+        fields = [
+            (
+                "max_penetration_correction_distance",
+                "max_penetration_correction_distance",
+                "mMaxPenetrationDistance",
+                "0.2f",
+                "0.0f, 5.0f",
+            ),
+            (
+                "contact_warm_start_distance",
+                "contact_warm_start_distance_sq",
+                "mContactPointPreserveLambdaMaxDistSq",
+                "Square(0.01f)",
+                "0.0f, 0.2f",
+            ),
+            (
+                "contact_manifold_merge_angle",
+                "contact_manifold_merge_normal_cos",
+                "mContactNormalCosMaxDeltaRotation",
+                "0.99619469809174553229501040247389f",
+                "0.0f, (float)Math::PI / 2.0f",
+            ),
+        ]
+        for setting, member, jolt_field, default, limits in fields:
+            with self.subTest(setting=setting):
+                path = f"physics/jolt_physics_3d/simulation/{setting}"
+                self.assertIn(f'"{path}"', self.settings)
+                self.assertIn(f'GLOBAL_GET("{path}"), {limits})', self.settings)
+                self.assertIn(f"inline static float {member};", self.header)
+                self.assertIn(
+                    f"settings.{jolt_field} = JoltProjectSettings::{member};",
+                    self.space,
+                )
+                self.assertIn(f"{jolt_field} = {default};", self.upstream)
+
+        # Jolt consumes squared meters and cosine thresholds. Do that
+        # conversion once on project-settings read, not for every contact.
+        self.assertIn("contact_warm_start_distance * contact_warm_start_distance", self.settings)
+        self.assertIn("contact_manifold_merge_normal_cos = Math::cos(merge_angle)", self.settings)
+        self.assertNotIn("mDeterministicSimulation =", self.space)
+
     def test_temp_queue_really_allocates_from_jolt_arena_per_step(self):
         # This is a temporary queue, *not* Jolt's cached-contact capacity.
         self.assertIn(
@@ -88,9 +132,15 @@ class JoltPipelineSettingsContracts(unittest.TestCase):
         self.assertIn("PhysicsServer3D.INFO_COLLISION_PAIRS", script)
         self.assertIn("PhysicsServer3D.INFO_ACTIVE_OBJECTS", script)
         self.assertIn("JOLT_PIPELINE_RESULT:", script)
+        self.assertIn("contact_warm_start_distance", script)
+        self.assertIn("contact_manifold_merge_angle", script)
+        self.assertIn("max_penetration_correction_distance", script)
 
 
-def simulate(binary: str, queue_size: int, splitter: bool, reduction: bool) -> dict:
+def simulate(
+    binary: str, queue_size: int, splitter: bool, reduction: bool,
+    correction_distance: float, merge_angle_degrees: float, warm_start_distance: float,
+) -> dict:
     with tempfile.TemporaryDirectory(prefix="cgame-jolt-pipeline-") as temp:
         folder = Path(temp)
         config = (
@@ -103,6 +153,12 @@ def simulate(binary: str, queue_size: int, splitter: bool, reduction: bool) -> d
             f"{str(splitter).lower()}\n"
             "jolt_physics_3d/simulation/use_manifold_reduction="
             f"{str(reduction).lower()}\n"
+            "jolt_physics_3d/simulation/max_penetration_correction_distance="
+            f"{correction_distance}\n"
+            "jolt_physics_3d/simulation/contact_manifold_merge_angle="
+            f"{math.radians(merge_angle_degrees)}\n"
+            "jolt_physics_3d/simulation/contact_warm_start_distance="
+            f"{warm_start_distance}\n"
         )
         (folder / "project.godot").write_text(config, encoding="utf-8")
         shutil.copyfile(RUNTIME, folder / RUNTIME.name)
@@ -134,15 +190,29 @@ class JoltPipelineRuntime(unittest.TestCase):
             self.skipTest("Set CGAME_GODOT_BINARY or pass --godot to run native Jolt")
         binary = os.path.abspath(binary)
         self.assertTrue(Path(binary).is_file(), binary)
-        for size, splitter, reduction in PROFILES:
-            with self.subTest(size=size, splitter=splitter, reduction=reduction):
-                result = simulate(binary, size, splitter, reduction)
+        for size, splitter, reduction, correction, angle, warm_start in PROFILES:
+            with self.subTest(
+                size=size, splitter=splitter, reduction=reduction,
+                correction=correction, angle=angle, warm_start=warm_start,
+            ):
+                result = simulate(
+                    binary, size, splitter, reduction, correction, angle, warm_start
+                )
                 self.assertEqual(result["bodies"], 144)
                 self.assertGreater(result["peak_active"], 0)
                 self.assertGreater(result["peak_pairs"], 0)
                 self.assertEqual(result["max_in_flight_body_pairs"], size)
                 self.assertEqual(result["large_island_splitter"], splitter)
                 self.assertEqual(result["manifold_reduction"], reduction)
+                self.assertAlmostEqual(
+                    result["max_penetration_correction_distance"], correction, places=5
+                )
+                self.assertAlmostEqual(
+                    result["contact_manifold_merge_angle"], math.radians(angle), places=5
+                )
+                self.assertAlmostEqual(
+                    result["contact_warm_start_distance"], warm_start, places=5
+                )
 
 
 if __name__ == "__main__":
