@@ -185,6 +185,10 @@ class GodotSoftBody3D : public GodotCollisionObject3D {
 	// Optional imported tet indices referencing original visual mesh vertices.
 	// Preserved across mesh rebuilds, recooked into welded particle indices.
 	PackedInt32Array xpbd_explicit_tetra_visual_indices;
+	// Optional FEM simulation nodes that do not belong to the rendered/collision
+	// surface. Rest positions are given in the mesh's local coordinates.
+	PackedVector3Array xpbd_explicit_tetra_interior_positions;
+	uint32_t xpbd_surface_node_count = 0;
 	// Normalized FEM rest-volume fractions; only populated with opt-in lumped mass.
 	// Includes pinned nodes so unpin and mass changes restore their physical mass.
 	LocalVector<double> xpbd_fem_mass_fractions;
@@ -278,6 +282,7 @@ public:
 
 	void set_mesh(RID p_mesh);
 	void set_tetrahedral_indices(const PackedInt32Array &p_indices);
+	void set_tetrahedral_interior_positions(const PackedVector3Array &p_positions);
 
 	void update_rendering_server(PhysicsServer3DRenderingServerHandler *p_rendering_server_handler);
 
