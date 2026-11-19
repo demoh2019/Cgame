@@ -39,6 +39,7 @@
 #include "servers/physics_ccd_sphere_toi.h"
 #include "servers/physics_speculative_sphere_contact.h"
 #include "servers/physics_ccd_capsule_toi.h"
+#include "servers/physics_ccd_capsule_pair_toi.h"
 #include "servers/physics_ccd_swept_bounds.h"
 
 #include <cfloat> // FLT_MAX
@@ -396,6 +397,43 @@ bool GodotBodyPair3D::_test_ccd(real_t p_step, GodotBody3D *p_A, int p_shape_A, 
 							radius_B + radius_A * ratio, half_B + half_A * ratio, impact_fraction)) {
 						return false;
 					}
+					const real_t allowed_distance = CLAMP(real_t(impact_fraction * double(motion_length)) + extent * real_t(0.01), real_t(0.0), motion_length);
+					const Vector3 desired_velocity = velocity_B + direction * (allowed_distance / p_step);
+					const real_t initial_speed = velocity_A.length();
+					const Vector3 travel_direction = velocity_A / initial_speed;
+					const real_t clipped_speed = CLAMP(desired_velocity.dot(travel_direction), real_t(0.0), initial_speed);
+					p_A->set_linear_velocity(travel_direction * clipped_speed);
+					return true;
+				}
+			}
+		}
+	}
+
+	// Nonparallel capsules have a convex squared center-segment distance
+	// over linear relative translation. Minimize that distance and bisect
+	// the first overlap of their combined radii. This catches oblique
+	// grazing impacts missed by support rays, without temporary allocations.
+	if (shape_A_ptr->get_type() == PS3DE::SHAPE_CAPSULE && shape_B_ptr->get_type() == PS3DE::SHAPE_CAPSULE &&
+			p_A->get_angular_velocity() == Vector3() && p_B->get_angular_velocity() == Vector3()) {
+		const double scale_A = physics_ccd_uniform_sphere_scale(p_xform_A);
+		const double scale_B = physics_ccd_uniform_sphere_scale(p_xform_B);
+		if (scale_A > 0.0 && scale_B > 0.0) {
+			const GodotCapsuleShape3D *capsule_A = static_cast<GodotCapsuleShape3D *>(shape_A_ptr);
+			const GodotCapsuleShape3D *capsule_B = static_cast<GodotCapsuleShape3D *>(shape_B_ptr);
+			const double radius_A = double(capsule_A->get_radius());
+			const double radius_B = double(capsule_B->get_radius());
+			const double half_A = double(capsule_A->get_height()) * 0.5 - radius_A;
+			const double half_B = double(capsule_B->get_height()) * 0.5 - radius_B;
+			if (radius_A > 0.0 && radius_B > 0.0 && half_A >= 0.0 && half_B >= 0.0) {
+				double impact_fraction = 0.0;
+				const PhysicsCCDCapsulePairTOIResult result = physics_ccd_capsule_pair_toi(
+						p_xform_A.origin - p_xform_B.origin, relative_motion,
+						p_xform_A.basis.get_column(1), p_xform_B.basis.get_column(1),
+						half_A * scale_A, half_B * scale_B, radius_A * scale_A + radius_B * scale_B, impact_fraction);
+				if (result == PhysicsCCDCapsulePairTOIResult::MISS) {
+					return false;
+				}
+				if (result == PhysicsCCDCapsulePairTOIResult::HIT) {
 					const real_t allowed_distance = CLAMP(real_t(impact_fraction * double(motion_length)) + extent * real_t(0.01), real_t(0.0), motion_length);
 					const Vector3 desired_velocity = velocity_B + direction * (allowed_distance / p_step);
 					const real_t initial_speed = velocity_A.length();
