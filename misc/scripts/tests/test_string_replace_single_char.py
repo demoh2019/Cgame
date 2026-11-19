@@ -53,8 +53,23 @@ class StringSingleCharReplaceFastPath(unittest.TestCase):
         self.assertIn('if (p_key == p_with)', section)
         self.assertIn('return *this;', section)
 
+    def test_single_character_delete_shortcut(self):
+        section = self.section('String String::replace(const String &p_key, const String &p_with) const {')
+        self.assertIn('return remove_char(p_key.ptr()[0]);', section)
+        self.assertIn('p_with.is_empty()', section)
+
+    def test_ascii_delete_shortcut(self):
+        section = self.section('String String::replace(const char *p_key, const char *p_with) const {')
+        self.assertIn('return remove_char(p_key[0]);', section)
+        self.assertIn('p_with[0] == 0', section)
+
+    def test_repeat_empty_returns_without_allocating(self):
+        section = self.section('String String::repeat(int p_count) const {')
+        self.assertIn('if (len == 0)', section)
+        self.assertIn('return *this;', section)
+
     def test_native_tests_present(self):
-        for term in ('[String] Replace character fast path Unicode and ASCII', '[String] Replace char fast path COW and no-op', '[String] Replace preserves multi-character semantics'):
+        for term in ('[String] Replace character fast path Unicode and ASCII', '[String] Replace char fast path COW and no-op', '[String] Replace preserves multi-character semantics', '[String] Replace deletion fast path and empty repeat'):
             self.assertIn(term, self.native)
 
 if __name__ == '__main__':

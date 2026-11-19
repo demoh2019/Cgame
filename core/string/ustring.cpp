@@ -3932,6 +3932,10 @@ static String _replace_common(const String &p_this, const char *p_key, const cha
 }
 
 String String::replace(const String &p_key, const String &p_with) const {
+	// Deleting one Unicode scalar value does not need match-position storage.
+	if (p_key.length() == 1 && p_with.is_empty() && p_key.ptr()[0] != 0) {
+		return remove_char(p_key.ptr()[0]);
+	}
 	// Single-character replacement can use one pass with no match-position buffer.
 	// Keep embedded NULs on the generic path to preserve its semantics.
 	if (p_key.length() == 1 && p_with.length() == 1 && p_key.ptr()[0] != 0 && p_with.ptr()[0] != 0) {
@@ -3941,6 +3945,10 @@ String String::replace(const String &p_key, const String &p_with) const {
 }
 
 String String::replace(const char *p_key, const char *p_with) const {
+	// ASCII single-character deletion uses the streaming remove_char path.
+	if (p_key[0] != 0 && p_key[1] == 0 && p_with[0] == 0 && static_cast<unsigned char>(p_key[0]) < 128) {
+		return remove_char(p_key[0]);
+	}
 	// C strings use the generic path for non-ASCII bytes and longer strings.
 	if (p_key[0] != 0 && p_with[0] != 0 && p_key[1] == 0 && p_with[1] == 0 &&
 			static_cast<unsigned char>(p_key[0]) < 128 && static_cast<unsigned char>(p_with[0]) < 128) {
@@ -4158,6 +4166,9 @@ String String::repeat(int p_count) const {
 	}
 
 	int len = length();
+	if (len == 0) {
+		return *this; // No resize or writable COW access for an empty string.
+	}
 	String new_string = *this;
 	new_string.resize_uninitialized(p_count * len + 1);
 

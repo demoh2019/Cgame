@@ -23,3 +23,7 @@ scons platform=linuxbsd target=editor tests=yes dev_build=yes
 This is a complexity and allocation-path improvement, not a universal measured
 FPS claim. Benchmark using long strings with many one-character replacements and
 collect allocations and frame times before and after.
+
+Single-character deletion (`replace("x", "")`) uses `remove_char()` with no match
+positions buffer. Repeating an empty `String` with a positive repeat count
+returns the same empty COW buffer without a resize/write operation.

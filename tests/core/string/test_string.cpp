@@ -725,6 +725,23 @@ TEST_CASE("[String] Replace preserves multi-character semantics") {
 	CHECK(input.replace(String(""), String("z")) == input);
 }
 
+TEST_CASE("[String] Replace deletion fast path and empty repeat") {
+	const String ascii = "bananas";
+	CHECK(ascii.replace(String("a"), String()) == "bnns");
+	CHECK(ascii.replace("a", "") == "bnns");
+	CHECK(ascii.replace("as", "") == "banan");
+	CHECK(ascii == "bananas");
+	const String unicode = U"αβαα";
+	CHECK(unicode.replace(String(U"α"), String()) == U"β");
+	CHECK(unicode == U"αβαα");
+	const String empty = "";
+	const char32_t *original = empty.ptr();
+	CHECK(empty.repeat(1).ptr() == original);
+	CHECK(empty.repeat(500).ptr() == original);
+	CHECK(empty.repeat(500).is_empty());
+	CHECK(String("ab").repeat(3) == "ababab");
+}
+
 TEST_CASE("[String] replace_char") {
 	String s = "Banana";
 	CHECK(s.replace_char('n', 'x') == "Baxaxa");
