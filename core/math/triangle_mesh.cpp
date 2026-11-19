@@ -98,7 +98,7 @@ void TriangleMesh::get_indices(Vector<int> *r_triangles_indices) const {
 	// Parse vertices indices
 	const Triangle *triangles_read = triangles.ptr();
 
-	r_triangles_indices->resize(triangles_num * 3);
+	ERR_FAIL_COND(r_triangles_indices->resize_uninitialized(triangles_num * 3) != OK);
 	int *r_indices_write = r_triangles_indices->ptrw();
 
 	for (int i = 0; i < triangles_num; ++i) {
@@ -520,8 +520,10 @@ Vector<Face3> TriangleMesh::get_faces() const {
 	}
 
 	Vector<Face3> faces;
-	int ts = triangles.size();
-	faces.resize(triangles.size());
+	const int ts = triangles.size();
+	// Every Face3 vertex is copied from the indexed mesh. Avoid the
+	// default constructor pass on this fully overwritten output array.
+	ERR_FAIL_COND_V(faces.resize_uninitialized(ts) != OK, Vector<Face3>());
 
 	Face3 *w = faces.ptrw();
 	const Triangle *r = triangles.ptr();
@@ -599,8 +601,8 @@ Vector<Vector3> TriangleMesh::get_faces_scriptwrap() const {
 	}
 
 	Vector<Vector3> faces;
-	int ts = triangles.size();
-	faces.resize(triangles.size() * 3);
+	const int ts = triangles.size();
+	ERR_FAIL_COND_V(faces.resize_uninitialized(ts * 3) != OK, Vector<Vector3>());
 
 	Vector3 *w = faces.ptrw();
 	const Triangle *r = triangles.ptr();
