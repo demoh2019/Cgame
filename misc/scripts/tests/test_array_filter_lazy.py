@@ -26,6 +26,7 @@ class TestArrayFilterLazy(unittest.TestCase):
         allocation = code.index("new_arr.resize(size());")
         self.assertLess(first_predicate, allocation)
         self.assertIn("if (write == nullptr)", code[first_predicate:allocation])
+        self.assertIn("new_arr.resize(size() - i);", code)
         self.assertNotIn("new_arr.resize(", code[:first_predicate])
 
     def test_all_rejected_keeps_zero_element_storage(self):
@@ -52,11 +53,12 @@ class TestArrayFilterLazy(unittest.TestCase):
 
     def test_native_cases_cover_core_semantics(self):
         self.assertIn("TEST_FORCE_LINK(test_array_filter_lazy)", self.native)
-        self.assertEqual(self.native.count('TEST_CASE("[ArrayFilterLazy]'), 9)
+        self.assertEqual(self.native.count('TEST_CASE("[ArrayFilterLazy]'), 10)
         for term in (
             "All rejected leaves an empty result",
             "All accepted retains source order",
             "Partial acceptance keeps ordering",
+            "Late first match allocates only the remaining suffix",
             "Empty typed results",
             "Nonempty typed results",
             "Empty input does not invoke",
