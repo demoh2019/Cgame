@@ -2853,7 +2853,8 @@ TEST_CASE("[String] strip_edges_span matches String::strip_edges for empty, Unic
 		for (bool left : { false, true }) {
 			for (bool right : { false, true }) {
 				const Span<char32_t> span = String::strip_edges_span(value.span(), left, right);
-				CHECK(String(span.ptr(), span.size()) == value.strip_edges(left, right));
+				const String expected = value.strip_edges(left, right);
+				CHECK(span == expected.span());
 			}
 		}
 	}
