@@ -9,6 +9,7 @@ const Plugin = preload("res://addons/ai_game_builder/plugin.gd")
 const EndpointPolicy = preload("res://addons/ai_game_builder/endpoint_policy.gd")
 const SmokeGate = preload("res://addons/ai_game_builder/smoke_gate.gd")
 const SmokeCheck = preload("res://addons/ai_game_builder/smoke_check.gd")
+const Starter = preload("res://addons/ai_game_builder/starter.gd")
 
 var _total := 0
 var _failed := 0
@@ -19,6 +20,7 @@ func _initialize() -> void:
 	_run_security_tests()
 	_run_writer_atomic_tests()
 	_run_headless_gate_tests()
+	_run_offline_starter_tests()
 	_check(Dock != null, "Editor dock script loads")
 	_check(Plugin != null, "Editor plugin script loads")
 	print("AI Game Builder: %d tests, %d failed" % [_total, _failed])
@@ -499,3 +501,68 @@ func _run_headless_gate_tests() -> void:
 	for target in paths:
 		if FileAccess.file_exists(target):
 			_check(DirAccess.remove_absolute(ProjectSettings.globalize_path(target)) == OK, "headless test asset cleaned up")
+
+
+func _run_offline_starter_tests() -> void:
+	# The starter is part of the selected unified AI addon, not a separate
+	# competing editor plugin. It requires neither network nor API keys.
+	var draft := Starter.create_draft()
+	_check(draft.ok, "offline arcade template generates without any AI provider")
+	if not draft.ok:
+		return
+	_check(typeof(draft.plan) == TYPE_DICTIONARY, "offline starter returns the common JSON-plan schema")
+	_check(draft.plan.files.size() == 3, "offline starter contains scene, script and readme")
+	_check(String(draft.plan.summary).contains("Offline"), "offline starter explains its deterministic origin")
+
+	var contents := {}
+	for entry in draft.plan.files:
+		contents[String(entry.path)] = String(entry.content)
+	_check(contents.has("main.tscn"), "offline starter uses the canonical main scene")
+	_check(contents.has("scripts/arcade.gd"), "offline starter contains complete movement logic")
+	_check(contents.has("README.md"), "offline starter includes play instructions")
+	_check(String(contents.get("main.tscn", "")).begins_with("[gd_scene"), "offline main scene is a Godot resource")
+	_check(String(contents.get("main.tscn", "")).contains("res://ai_generated/scripts/arcade.gd"), "scene references the generated script")
+	_check(String(contents.get("scripts/arcade.gd", "")).contains("KEY_W"), "arcade supports WASD movement")
+	_check(String(contents.get("scripts/arcade.gd", "")).contains("KEY_RIGHT"), "arcade supports arrow-key movement")
+	_check(String(contents.get("scripts/arcade.gd", "")).contains("WIN_SCORE"), "arcade has win condition and scoring")
+	_check(String(contents.get("scripts/arcade.gd", "")).contains("ROUND_SECONDS"), "arcade has a round timer")
+	_check(String(contents.get("scripts/arcade.gd", "")).contains("KEY_R"), "arcade supports restart")
+	_check(String(contents.get("README.md", "")).contains("res://ai_generated/main.tscn"), "offline instructions point to the generated main scene")
+
+	var plan_valid := Validator.validate(draft.plan)
+	_check(plan_valid.ok, "offline files pass the same safety parser as AI responses")
+	var static_result := Inspector.inspect(draft.plan)
+	_check(static_result.ok, "offline template passes dependency and static security inspection")
+	_check(static_result.errors.is_empty(), "offline starter has no missing generated dependencies")
+	_check(static_result.warnings.is_empty(), "offline starter has no flagged risky code")
+	if not plan_valid.ok or not static_result.ok:
+		return
+
+	var output_paths := [
+		"res://ai_generated/main.tscn",
+		"res://ai_generated/scripts/arcade.gd",
+		"res://ai_generated/README.md"
+	]
+	for output in output_paths:
+		if FileAccess.file_exists(output):
+			DirAccess.remove_absolute(ProjectSettings.globalize_path(output))
+	var written := Writer.apply(draft.plan)
+	_check(written.ok, "offline starter can be applied by normal review-first writer")
+	if not written.ok:
+		return
+	_check(written.paths.size() == 3, "writer emits the three expected starter assets")
+	for output in output_paths:
+		_check(FileAccess.file_exists(output), "offline starter output exists: " + output)
+
+	var resource_check := SmokeGate.check(output_paths)
+	_check(resource_check.ok, "real headless Godot loader accepts offline arcade game")
+	_check(resource_check.checked == 2, "real Godot loader checked the scene and GDScript")
+	_check(resource_check.errors.is_empty(), "offline arcade compiles without loader diagnostics")
+
+	var original_script := FileAccess.get_file_as_string(output_paths[1])
+	var repeated := Writer.apply(draft.plan)
+	_check(not repeated.ok, "offline starter refuses to overwrite an existing game")
+	_check(FileAccess.get_file_as_string(output_paths[1]) == original_script, "existing starter script preserved unchanged")
+	for output in output_paths:
+		if FileAccess.file_exists(output):
+			_check(DirAccess.remove_absolute(ProjectSettings.globalize_path(output)) == OK, "offline starter fixture cleaned up")
