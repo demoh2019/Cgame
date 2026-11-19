@@ -75,10 +75,14 @@ struct Distance {
 // fraction is 2 * (closest_A - closest_B).dot(motion), including at feature
 // transitions, because squared distance to a convex set is differentiable.
 _FORCE_INLINE_ Distance distance_at(const Vec3 &p_start_delta, const Vec3 &p_motion,
-		const Vec3 &p_segment_a, const Vec3 &p_segment_b, double p_fraction) {
+		const Vec3 &p_segment_a, const Vec3 &p_segment_b,
+		double p_a, double p_e, double p_b, double p_fraction) {
 	const Vec3 r = p_start_delta + p_motion * p_fraction;
-	const double a = dot(p_segment_a, p_segment_a);
-	const double e = dot(p_segment_b, p_segment_b);
+	// The segment directions remain fixed during a linear sweep. Cache
+	// their Gram matrix instead of recomputing it at each TOI iteration.
+	const double a = p_a;
+	const double e = p_e;
+	const double b = p_b;
 	const double f = dot(p_segment_b, r);
 	double s = 0.0;
 	double t = 0.0;
@@ -90,7 +94,6 @@ _FORCE_INLINE_ Distance distance_at(const Vec3 &p_start_delta, const Vec3 &p_mot
 		if (e <= 0.0) {
 			s = CLAMP(-c / a, 0.0, 1.0);
 		} else {
-			const double b = dot(p_segment_a, p_segment_b);
 			const double denom = a * e - b * b;
 			if (denom > 0.0) {
 				s = CLAMP((b * f - c * e) / denom, 0.0, 1.0);
@@ -140,9 +143,13 @@ _FORCE_INLINE_ PhysicsCCDCapsulePairTOIResult physics_ccd_capsule_pair_toi(
 
 	const Vec3 segment_a = axis_a * (2.0 * p_half_segment_a);
 	const Vec3 segment_b = axis_b * (2.0 * p_half_segment_b);
+	const double segment_a_squared = dot(segment_a, segment_a);
+	const double segment_b_squared = dot(segment_b, segment_b);
+	const double segment_dot = dot(segment_a, segment_b);
 	const Vec3 start_delta = center - axis_a * p_half_segment_a + axis_b * p_half_segment_b;
 	const double radius_sq = p_combined_radius * p_combined_radius;
-	const Distance start = distance_at(start_delta, motion, segment_a, segment_b, 0.0);
+	const Distance start = distance_at(start_delta, motion, segment_a, segment_b,
+			segment_a_squared, segment_b_squared, segment_dot, 0.0);
 	if (!(start.squared > radius_sq)) {
 		return PhysicsCCDCapsulePairTOIResult::FALLBACK; // Initially contacting or invalid.
 	}
@@ -153,13 +160,15 @@ _FORCE_INLINE_ PhysicsCCDCapsulePairTOIResult physics_ccd_capsule_pair_toi(
 	// Find the unique time of minimum squared distance, or the end of
 	// the sweep when the distance is still decreasing. No allocations.
 	double minimum_fraction = 1.0;
-	const Distance end = distance_at(start_delta, motion, segment_a, segment_b, 1.0);
+	const Distance end = distance_at(start_delta, motion, segment_a, segment_b,
+			segment_a_squared, segment_b_squared, segment_dot, 1.0);
 	if (end.derivative_half > 0.0) {
 		double low = 0.0;
 		double high = 1.0;
 		for (int i = 0; i < 48; ++i) {
 			const double mid = 0.5 * (low + high);
-			const Distance value = distance_at(start_delta, motion, segment_a, segment_b, mid);
+			const Distance value = distance_at(start_delta, motion, segment_a, segment_b,
+			segment_a_squared, segment_b_squared, segment_dot, mid);
 			if (value.derivative_half < 0.0) {
 				low = mid;
 			} else {
@@ -169,7 +178,8 @@ _FORCE_INLINE_ PhysicsCCDCapsulePairTOIResult physics_ccd_capsule_pair_toi(
 		minimum_fraction = high;
 	}
 
-	const Distance minimum = distance_at(start_delta, motion, segment_a, segment_b, minimum_fraction);
+	const Distance minimum = distance_at(start_delta, motion, segment_a, segment_b,
+			segment_a_squared, segment_b_squared, segment_dot, minimum_fraction);
 	if (!(minimum.squared <= radius_sq)) {
 		return minimum.squared > radius_sq ? PhysicsCCDCapsulePairTOIResult::MISS : PhysicsCCDCapsulePairTOIResult::FALLBACK;
 	}
@@ -180,7 +190,8 @@ _FORCE_INLINE_ PhysicsCCDCapsulePairTOIResult physics_ccd_capsule_pair_toi(
 	double high = minimum_fraction;
 	for (int i = 0; i < 48; ++i) {
 		const double mid = 0.5 * (low + high);
-		const Distance value = distance_at(start_delta, motion, segment_a, segment_b, mid);
+		const Distance value = distance_at(start_delta, motion, segment_a, segment_b,
+			segment_a_squared, segment_b_squared, segment_dot, mid);
 		if (value.squared > radius_sq) {
 			low = mid;
 		} else {
