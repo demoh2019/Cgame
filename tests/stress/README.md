@@ -1224,12 +1224,12 @@ higher joint priorities, soft-body dependencies, null/empty body lists, or
 insufficient independent parallel work fall back to the existing sequential
 priority solver. The bounded coloring scratch buffer is reused across steps.
 
-The 3D worker dispatcher now batches **up to eight same-color constraints
-per group-task callback**, matching the existing 2D implementation. For a
-color containing `N` constraints, this reduces the number of scheduled
-callback indices from `N` to `ceil(N / 8)` while leaving the constraint
-order within a color and the barrier between colors unchanged. The last
-partial batch is bounds-checked. 3D also reuses the graph-color mapping
+The 3D and 2D graph-color solvers now use **worker-aware adaptive batches**.
+Each task handles at least eight same-color constraints, but for very large
+colors the chunk grows until there are at most four tasks per pool worker
+(capped at 128 tasks per color). A one-worker pool runs its colors inline.
+The last partial batch is bounds-checked, and the original barrier between
+colors and solver iterations remains intact. 3D also reuses the graph-color mapping
 and hash allocation between steps, with oversized tables discarded when
 the island shrinks and scratch released when coloring is no longer active.
 This trades temporary capacity for fewer allocation and scheduling calls;
@@ -1284,14 +1284,18 @@ soft-body contacts and non-default joint priorities still take the legacy
 sequential fallback. Idle scenes release cached scratch allocations.
 
 Color-mask storage now uses the more compact `AHashMap`, matching the 2D
-implementation. Independent 3D constraint setup uses **16 constraints per
-worker-pool callback** (with the previous inline threshold for tiny batches)
-instead of one callback per constraint. This preserves setup order inside each
-batch and the barrier before pre-solve, without changing constraint equations.
+implementation. Independent 2D and 3D constraint setup now groups work into
+**adaptive contiguous chunks** of at least 16 constraints. Each worker pool
+receives at most four tasks per worker and no more than 128 tasks per setup
+stage even with a million constraints. Small scenes (fewer than 32
+constraints) and one-worker configurations use inline setup. Every
+constraint is still set up exactly once before pre-solve; the constraint
+equations are unchanged.
 
 Validation commands:
 
 ```bash
+python3 -m unittest discover -s tests/stress -p 'test_physics_2d_setup_batches.py' -v
 python3 -m unittest discover -s tests/stress -p 'test_physics_3d_setup_batches.py' -v
 python3 -m unittest discover -s tests/stress -p 'test_physics_3d_color_cache.py' -v
 python3 -m unittest discover -s tests/stress -p 'test_physics_3d_large_island_coloring.py' -v
@@ -1539,9 +1543,11 @@ greedy constraint graph: every dynamic body written by a constraint reserves
 that color. Static and kinematic bodies are excluded **only if every
 constraint in the island is an ordinary rigid contact pair**. As soon as a
 joint or another constraint type is present, ALL referenced bodies reserve
-colors as before. A color with at least 64 constraints can solve in parallel; each worker
-callback processes a contiguous batch of up to eight disjoint constraints,
-reducing task dispatch overhead. A barrier separates colors and solver
+colors as before. A color with at least 64 constraints can solve in parallel on multi-worker
+systems. Worker callbacks process adaptive, contiguous batches of at least
+eight disjoint constraints, with at most four tasks per worker (128 maximum
+for any one color). This avoids a proportional explosion in scheduler
+callbacks for very large contact graphs. A barrier separates colors and solver
 iterations. Constraints that cannot be colored within 16 colors go to a
 serial overflow batch. If there is too little parallelizable work, the
 algorithm falls back to the original sequential solver. Scratch vectors
