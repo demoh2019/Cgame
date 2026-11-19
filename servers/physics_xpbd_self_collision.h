@@ -41,44 +41,70 @@ _FORCE_INLINE_ bool physics_xpbd_self_collision_face_projection(
 	if (!p_point.is_finite() || !p_a.is_finite() || !p_b.is_finite() || !p_c.is_finite()) {
 		return false;
 	}
-	const Vector3 ab = p_b - p_a;
-	const Vector3 ac = p_c - p_a;
-	const Vector3 normal = ab.cross(ac);
-	const real_t normal_sq = normal.length_squared();
-	if (!(normal_sq > CMP_EPSILON * CMP_EPSILON) || !Math::is_finite(normal_sq)) {
+
+	// Compute coordinate differences BEFORE casting to real_t. Finite
+	// float32 input edges can have an overflowing float32 cross product
+	// (side 1e20) or an underflowing squared area (side 1e-8).
+	const double ab_x = double(p_b.x) - double(p_a.x);
+	const double ab_y = double(p_b.y) - double(p_a.y);
+	const double ab_z = double(p_b.z) - double(p_a.z);
+	const double ac_x = double(p_c.x) - double(p_a.x);
+	const double ac_y = double(p_c.y) - double(p_a.y);
+	const double ac_z = double(p_c.z) - double(p_a.z);
+	const double point_x = double(p_point.x) - double(p_a.x);
+	const double point_y = double(p_point.y) - double(p_a.y);
+	const double point_z = double(p_point.z) - double(p_a.z);
+
+	const double normal_x = ab_y * ac_z - ab_z * ac_y;
+	const double normal_y = ab_z * ac_x - ab_x * ac_z;
+	const double normal_z = ab_x * ac_y - ab_y * ac_x;
+	const double normal_squared = normal_x * normal_x + normal_y * normal_y + normal_z * normal_z;
+	const double d00 = ab_x * ab_x + ab_y * ab_y + ab_z * ab_z;
+	const double d11 = ac_x * ac_x + ac_y * ac_y + ac_z * ac_z;
+	const double scale_squared = d00 * d11;
+	// A relative angle test is scale invariant. CMP_EPSILON^2 in world
+	// units previously rejected legitimate small closed/cloth triangles.
+	if (!(scale_squared > 0.0) || !Math::is_finite(scale_squared) ||
+			!Math::is_finite(normal_squared) ||
+			!(normal_squared > scale_squared * 1.0e-20)) {
 		return false;
 	}
-	r_normal = normal / Math::sqrt(normal_sq);
-	if (!r_normal.is_finite()) {
+	const double inv_normal_length = 1.0 / Math::sqrt(normal_squared);
+	const double nx = normal_x * inv_normal_length;
+	const double ny = normal_y * inv_normal_length;
+	const double nz = normal_z * inv_normal_length;
+	const double signed_distance = point_x * nx + point_y * ny + point_z * nz;
+	if (!Math::is_finite(signed_distance)) {
 		return false;
 	}
-	const Vector3 relative = p_point - p_a;
-	r_distance = relative.dot(r_normal);
-	if (!Math::is_finite(r_distance)) {
-		return false;
-	}
-	// Project onto the face plane, then use barycentric coordinates. The
-	// interior-only condition avoids false contacts with faraway extensions
-	// of a triangle plane. Near-edge cases need a separate edge/edge solver.
-	const Vector3 projected = relative - r_normal * r_distance;
-	const double d00 = double(ab.x) * ab.x + double(ab.y) * ab.y + double(ab.z) * ab.z;
-	const double d01 = double(ab.x) * ac.x + double(ab.y) * ac.y + double(ab.z) * ac.z;
-	const double d11 = double(ac.x) * ac.x + double(ac.y) * ac.y + double(ac.z) * ac.z;
-	const double d20 = double(projected.x) * ab.x + double(projected.y) * ab.y + double(projected.z) * ab.z;
-	const double d21 = double(projected.x) * ac.x + double(projected.y) * ac.y + double(projected.z) * ac.z;
-	const double denominator = d00 * d11 - d01 * d01;
-	if (!(denominator > 0.0) || !Math::is_finite(denominator)) {
-		return false;
-	}
-	const double v = (d11 * d20 - d01 * d21) / denominator;
-	const double w = (d00 * d21 - d01 * d20) / denominator;
+
+	// The triangle basis is tangent to n, so projected-to-plane and raw
+	// relative coordinates have the same dot products with each edge.
+	// Use normal_squared = |ab x ac|^2 as the Gram determinant, avoiding
+	// cancellation in (d00*d11 - d01*d01) for narrow triangles.
+	const double d01 = ab_x * ac_x + ab_y * ac_y + ab_z * ac_z;
+	const double d20 = point_x * ab_x + point_y * ab_y + point_z * ab_z;
+	const double d21 = point_x * ac_x + point_y * ac_y + point_z * ac_z;
+	const double v = (d11 * d20 - d01 * d21) / normal_squared;
+	const double w = (d00 * d21 - d01 * d20) / normal_squared;
 	const double u = 1.0 - v - w;
 	if (!Math::is_finite(u) || !Math::is_finite(v) || !Math::is_finite(w) ||
 			u < 0.0 || v < 0.0 || w < 0.0 || u > 1.0 || v > 1.0 || w > 1.0) {
+		return false; // Footprint lies outside the triangular face.
+	}
+
+	const Vector3 normal(real_t(nx), real_t(ny), real_t(nz));
+	const Vector3 barycentric(real_t(u), real_t(v), real_t(w));
+	const real_t distance = real_t(signed_distance);
+	if (!normal.is_finite() || !barycentric.is_finite() || !Math::is_finite(distance)) {
 		return false;
 	}
-	r_barycentric = Vector3(real_t(u), real_t(v), real_t(w));
-	return r_barycentric.is_finite();
+	// Atomic outputs: even an invalid face or huge point must not change
+	// any of the narrowphase's candidate normal/barycentric/distance.
+	r_normal = normal;
+	r_barycentric = barycentric;
+	r_distance = distance;
+	return true;
 }
 
 // Unilateral XPBD distance-to-face constraint with a constant collision
