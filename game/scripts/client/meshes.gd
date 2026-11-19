@@ -17,6 +17,7 @@ static func get_mesh(name: String) -> Mesh:
 			"bag": _cache[name] = _build_bag()
 			"wall": _cache[name] = _build_wall()
 			"body": _cache[name] = _build_body()
+			"workbench": _cache[name] = _build_workbench()
 			_: push_error("unknown mesh " + name)
 	return _cache[name]
 
@@ -149,3 +150,16 @@ static func _build_body() -> ArrayMesh:
 		[head, Transform3D(Basis(), Vector3(0, 1.85, 0)), Color(0.95, 0.8, 0.65)],
 		[_box(Vector3(0.12, 0.12, 0.5)), Transform3D(Basis(), Vector3(0.0, 1.0, 0.45)), Color(0.3, 0.3, 0.32)],
 	])
+
+
+static func _build_workbench() -> ArrayMesh:
+	var wood := Color(0.55, 0.38, 0.2)
+	var dark := Color(0.36, 0.25, 0.14)
+	var parts: Array = [[_box(Vector3(1.8, 0.14, 0.9)), Transform3D(Basis(), Vector3(0, 0.95, 0)), wood]]
+	for x in [-0.8, 0.8]:
+		for z in [-0.38, 0.38]:
+			parts.append([_box(Vector3(0.12, 0.9, 0.12)), Transform3D(Basis(), Vector3(x, 0.45, z)), dark])
+	parts.append([_box(Vector3(1.6, 0.08, 0.7)), Transform3D(Basis(), Vector3(0, 0.3, 0)), dark])
+	parts.append([_box(Vector3(0.5, 0.12, 0.2)), Transform3D(Basis(Vector3.UP, 0.4), Vector3(-0.4, 1.08, 0.1)), Color(0.6, 0.6, 0.64)])
+	parts.append([_box(Vector3(0.08, 0.35, 0.08)), Transform3D(Basis(Vector3(0, 0, 1), 1.2), Vector3(0.45, 1.15, -0.1)), Color(0.45, 0.3, 0.18)])
+	return _combine(parts)

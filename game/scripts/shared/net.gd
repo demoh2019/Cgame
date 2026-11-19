@@ -372,6 +372,14 @@ func server_tick(delta: float) -> void:
 				s_snapshot.rpc_id(peer, snap)
 
 
+## Combat sounds and effects are only sent to players close enough to perceive them.
+func _is_nearby(event: Dictionary, peer: int) -> bool:
+	var player = sim.players.get(peer)
+	if player == null or not event.has("x"):
+		return false
+	return Vector2(player.position.x - float(event["x"]), player.position.z - float(event["z"])).length() <= Defs.INTEREST_RADIUS
+
+
 func _event_visible_to(event: Dictionary, peer: int) -> bool:
 	match event["type"]:
 		"spawn", "zone", "gathered", "crate":
@@ -379,7 +387,7 @@ func _event_visible_to(event: Dictionary, peer: int) -> bool:
 		"death":
 			return true # Everyone hears that somebody died (no position is shared).
 		"hit":
-			return event.get("id", -1) == peer or event.get("by", 0) == peer
-		"attack":
-			return true
+			return event.get("id", -1) == peer or event.get("by", 0) == peer or _is_nearby(event, peer)
+		"attack", "zombie_died":
+			return _is_nearby(event, peer)
 	return false

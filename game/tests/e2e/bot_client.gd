@@ -256,7 +256,8 @@ func _scenario_solo() -> void:
 		client.loot(loot["id"])
 		check(await until(func() -> bool: return client.inventory.count("silver") > silver_before, 3.0), "looting the bag gave silver")
 
-	# 5. Die with items: they must be gone, and the player must come back in the hub.
+	# 5. Die with items in the red zone: they must be gone, and the player must come back in the hub.
+	await teleport(600.0, 600.0)
 	debug("give", {"item": "silver", "count": 40})
 	await until(func() -> bool: return client.inventory.count("silver") > 40, 3.0)
 	debug("hurt", {"amount": 1000.0})
@@ -268,7 +269,7 @@ func _scenario_solo() -> void:
 
 
 func _scenario_victim() -> void:
-	await teleport(400.0, 400.0)
+	await teleport(600.0, 600.0) # Red zone: PvP and full loot only apply from there.
 	debug("give", {"item": "silver", "count": 50})
 	check(await until(func() -> bool: return client.inventory.count("silver") >= 50, 4.0), "has silver to lose")
 	check(await until(func() -> bool: return not client.you.get("alive", true), 25.0), "was killed by the other player")
@@ -281,7 +282,7 @@ func _scenario_victim() -> void:
 
 
 func _scenario_killer() -> void:
-	await teleport(401.0, 400.0)
+	await teleport(601.0, 600.0)
 	debug("give", {"item": "club_3", "count": 1})
 	await until(func() -> bool: return client.inventory.count("club_3") == 1, 3.0)
 	client.use_item("club_3")

@@ -82,6 +82,8 @@ func run(t) -> void:
 	t.check(novice.progression.gathering_xp["wood"] >= 32, "actual harvest gives gathering XP")
 	t.eq(novice.progression.gathering_xp["fiber"], 0, "wood did not level fiber")
 	var saved_xp: int = int(novice.progression.gathering_xp["wood"])
+	# Full loot only applies in the red zone and beyond (yellow and green keep equipment).
+	novice.position = Vector3(600.0, server.world.height_at(600.0, 600.0), 600.0)
 	novice.survival.hurt(1000.0)
 	server._on_player_death(novice, -1)
 	server._spawn_player(novice)

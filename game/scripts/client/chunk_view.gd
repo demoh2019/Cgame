@@ -6,6 +6,7 @@ extends Node3D
 const Defs = preload("res://scripts/shared/defs.gd")
 const WorldGen = preload("res://scripts/shared/world_gen.gd")
 const Meshes = preload("res://scripts/client/meshes.gd")
+const Assets = preload("res://scripts/client/assets.gd")
 
 const SAMPLES := 33 # Heights per side: one every 2 m.
 const HEIGHT_MIN := -45.0
@@ -95,37 +96,62 @@ func _build_terrain(origin: Vector2) -> void:
 	add_child(_terrain)
 
 
+func _mesh_for(kind: String) -> Mesh:
+	if kind.begins_with("tree:"):
+		return Assets.tree_meshes()[int(kind.get_slice(":", 1))]
+	if kind.begins_with("building:"):
+		return Assets.building_mesh(int(kind.get_slice(":", 1)))
+	if kind == "wall":
+		return Assets.mesh("fps/wall-high")
+	return Meshes.get_mesh(kind)
+
+
 func _build_objects(data: Dictionary) -> void:
-	var by_kind: Dictionary = {}
-	for node in data["nodes"]:
-		by_kind.get_or_add(node["kind"], []).append(node)
-	for crate in data["crates"]:
-		by_kind.get_or_add("crate", []).append(crate)
 	var origin := WorldGen.cell_origin(cell)
 	var rng := RandomNumberGenerator.new()
 	rng.seed = WorldGen.mix(cell.x, cell.y, 99)
+	var tree_variants: int = Assets.tree_meshes().size()
+	# Group everything that shares a mesh, so each group is one draw call.
+	var by_kind: Dictionary = {}
+	for node in data["nodes"]:
+		var kind: String = node["kind"]
+		if kind == "tree":
+			kind = "tree:%d" % (WorldGen.mix(int(node["id"]), 3, 5) % tree_variants)
+		by_kind.get_or_add(kind, []).append(node)
+	for crate in data["crates"]:
+		by_kind.get_or_add("crate", []).append(crate)
+	for structure in data["structures"]:
+		var key: String = "wall" if structure["kind"] == "wall" else "building:%d" % structure["variant"]
+		by_kind.get_or_add(key, []).append(structure)
 	for kind in by_kind:
 		var list: Array = by_kind[kind]
 		var multimesh := MultiMesh.new()
 		multimesh.transform_format = MultiMesh.TRANSFORM_3D
 		multimesh.use_colors = true
-		multimesh.mesh = Meshes.get_mesh(kind)
+		multimesh.mesh = _mesh_for(kind)
 		multimesh.instance_count = list.size()
 		var index: Dictionary = {}
 		var transforms: Array = []
 		for i in list.size():
 			var node: Dictionary = list[i]
 			var size := 1.0
-			if kind == "tree":
-				size = rng.randf_range(0.8, 1.35)
+			var yaw := rng.randf() * TAU
+			if kind.begins_with("tree:"):
+				size = Assets.TREE_SCALE * rng.randf_range(0.85, 1.3)
 			elif kind in ["rock", "ore"]:
 				size = rng.randf_range(0.8, 1.3)
-			var basis := Basis(Vector3.UP, rng.randf() * TAU).scaled(Vector3.ONE * size)
-			var transform := Transform3D(basis, Vector3(node["x"] - origin.x, node["y"], node["z"] - origin.y))
+			elif kind == "wall" or kind.begins_with("building:"):
+				size = float(node["scale"])
+				yaw = float(node["yaw"])
+			var basis := Basis(Vector3.UP, yaw).scaled(Vector3.ONE * size)
+			var transform := Transform3D(basis, Vector3(node["x"] - origin.x, node["y"] - (0.05 if size > 2.0 and not kind.begins_with("tree:") else 0.0), node["z"] - origin.y))
 			multimesh.set_instance_transform(i, transform)
-			# The tier shows as a tint: higher tiers are darker and more saturated.
+			# The tier shows as a tint: higher tiers are darker and bluer.
 			var tier: int = node.get("tier", 1)
-			multimesh.set_instance_color(i, Color.WHITE.lerp(Color(0.8, 0.85, 1.0), (tier - 1) * 0.2) if kind in ["rock", "ore"] else Color.WHITE.darkened((tier - 1) * 0.06))
+			if kind in ["rock", "ore"]:
+				multimesh.set_instance_color(i, Color.WHITE.lerp(Color(0.8, 0.85, 1.0), (tier - 1) * 0.2))
+			else:
+				multimesh.set_instance_color(i, Color.WHITE.darkened((tier - 1) * 0.07) if kind.begins_with("tree:") else Color.WHITE)
 			index[node["id"]] = i
 			transforms.append(transform)
 		var instance := MultiMeshInstance3D.new()
@@ -133,21 +159,6 @@ func _build_objects(data: Dictionary) -> void:
 		instance.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
 		add_child(instance)
 		_groups[kind] = {"multimesh": multimesh, "index": index, "transforms": transforms}
-	# Ruined walls around the crates, to make the place look like somewhere people once lived.
-	if data["ruin"]:
-		var center := origin + Vector2.ONE * Defs.CHUNK_SIZE * 0.5
-		var walls := MultiMesh.new()
-		walls.transform_format = MultiMesh.TRANSFORM_3D
-		walls.mesh = Meshes.get_mesh("wall")
-		var count := rng.randi_range(6, 10)
-		walls.instance_count = count
-		for i in count:
-			var p := center + Vector2(rng.randf_range(-16.0, 16.0), rng.randf_range(-16.0, 16.0))
-			var angle := float(rng.randi_range(0, 3)) * PI * 0.5 + rng.randf_range(-0.12, 0.12)
-			walls.set_instance_transform(i, Transform3D(Basis(Vector3.UP, angle), Vector3(p.x - origin.x, _world.height_at(p.x, p.y) - 0.1, p.y - origin.y)))
-		var wall_instance := MultiMeshInstance3D.new()
-		wall_instance.multimesh = walls
-		add_child(wall_instance)
 
 
 ## Hides depleted nodes and opened crates. `hidden_ids` is the set of ids the server says are gone.

@@ -542,7 +542,7 @@ func cmd_attack(peer_id: int, dir_x: float, dir_z: float) -> Dictionary:
 		player.noise_timer = maxf(player.noise_timer, Defs.GUNSHOT_NOISE_SECONDS)
 		reach = Defs.PISTOL_RANGE
 	var hit := _find_hit(player, origin, direction, reach, kind == "ranged")
-	events.append({"type": "attack", "peer": peer_id, "dir": direction, "ranged": kind == "ranged"})
+	events.append({"type": "attack", "peer": peer_id, "dir": direction, "ranged": kind == "ranged", "x": player.position.x, "z": player.position.z})
 	if hit.is_empty():
 		return {"ok": true, "hit": false}
 	_damage_target(player, hit, damage)
@@ -574,7 +574,7 @@ func cmd_skill(peer_id: int, dir_x: float, dir_z: float) -> Dictionary:
 	player.yaw = atan2(direction.x, direction.y)
 	var origin := Vector2(player.position.x, player.position.z)
 	var hit := _find_hit(player, origin, direction, float(skill["range"]), false)
-	events.append({"type": "attack", "peer": peer_id, "dir": direction, "ranged": false, "skill": skill["id"]})
+	events.append({"type": "attack", "peer": peer_id, "dir": direction, "ranged": false, "skill": skill["id"], "x": player.position.x, "z": player.position.z})
 	if hit.is_empty():
 		return {"ok": true, "hit": false, "energy": player.combat_energy}
 	_damage_target(player, hit, float(skill["damage"]))
@@ -719,7 +719,7 @@ func _damage_target(attacker: Player, hit: Dictionary, damage: float) -> void:
 		var zombie = zombies.get(hit["id"])
 		if zombie == null:
 			return
-		events.append({"type": "hit", "kind": "zombie", "id": zombie.id, "damage": damage})
+		events.append({"type": "hit", "kind": "zombie", "id": zombie.id, "damage": damage, "x": zombie.position.x, "z": zombie.position.z})
 		if zombie.take_damage(damage):
 			attacker.kills += 1
 			_on_zombie_death(zombie)
@@ -745,7 +745,7 @@ func _on_zombie_death(zombie) -> void:
 	_make_bag(zombie.position, Combat.zombie_loot(zombie.type, zone, loot_rng))
 	if spawn_state.has(zombie.spawn_id):
 		spawn_state[zombie.spawn_id] = {"zombie": -1, "next": time + (240.0 if zone < 2 else 360.0)}
-	events.append({"type": "zombie_died", "id": zombie.id})
+	events.append({"type": "zombie_died", "id": zombie.id, "x": zombie.position.x, "z": zombie.position.z})
 
 
 ## Full-loot deaths occur in red/black. Green/yellow deaths retain gear.
