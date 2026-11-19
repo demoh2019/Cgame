@@ -149,6 +149,64 @@ void GodotStep2D::_solve_colored_constraint(uint32_t p_constraint_index, void *p
 	}
 }
 
+bool GodotStep2D::_can_reuse_color_cache(const LocalVector<GodotConstraint2D *> &p_constraint_island, bool p_contact_only) const {
+	const uint32_t count = p_constraint_island.size();
+	if (!cached_color_valid || cached_color_contact_only != p_contact_only ||
+			cached_color_topology.size() != count || colored_constraints.size() != count) {
+		return false;
+	}
+	for (uint32_t i = 0; i < count; ++i) {
+		GodotConstraint2D *constraint = p_constraint_island[i];
+		const ColorCacheEntry &entry = cached_color_topology[i];
+		if (entry.constraint != constraint) {
+			return false;
+		}
+		const int body_count = constraint->get_body_count();
+		if (body_count < 0 || body_count > 2 || entry.body_count != body_count) {
+			return false;
+		}
+		GodotBody2D **bodies = constraint->get_body_ptr();
+		if (body_count > 0 && bodies == nullptr) {
+			return false;
+		}
+		GodotBody2D *body_A = body_count > 0 ? bodies[0] : nullptr;
+		GodotBody2D *body_B = body_count > 1 ? bodies[1] : nullptr;
+		if (entry.body_A != body_A || entry.body_B != body_B) {
+			return false;
+		}
+		const uint8_t mode_A = body_A ? static_cast<uint8_t>(body_A->get_mode()) : 0;
+		const uint8_t mode_B = body_B ? static_cast<uint8_t>(body_B->get_mode()) : 0;
+		if (entry.mode_A != mode_A || entry.mode_B != mode_B) {
+			return false;
+		}
+	}
+	return true;
+}
+
+void GodotStep2D::_run_colored_batches(const uint32_t *p_sizes, const uint32_t *p_starts) {
+	for (int iteration = 0; iteration < iterations; ++iteration) {
+		for (uint32_t color = 0; color <= MAX_LARGE_ISLAND_COLORS; ++color) {
+			const uint32_t count = p_sizes[color];
+			if (count == 0) {
+				continue;
+			}
+			const uint32_t start = p_starts[color];
+			if (color != MAX_LARGE_ISLAND_COLORS && count >= MIN_PARALLEL_COLOR_CONSTRAINTS) {
+				color_batch_offset = start;
+				color_batch_count = count;
+				const uint32_t task_count = (count + PARALLEL_COLOR_BATCH_SIZE - 1) / PARALLEL_COLOR_BATCH_SIZE;
+				WorkerThreadPool::GroupID group = WorkerThreadPool::get_singleton()->add_template_group_task(
+						this, &GodotStep2D::_solve_colored_constraint, nullptr, task_count, -1, true, SNAME("Physics2DLargeIslandColor"));
+				WorkerThreadPool::get_singleton()->wait_for_group_task_completion(group);
+			} else {
+				for (uint32_t i = start; i < start + count; ++i) {
+					colored_constraints[i]->solve(delta);
+				}
+			}
+		}
+	}
+}
+
 void GodotStep2D::_solve_large_island(const LocalVector<GodotConstraint2D *> &p_constraint_island) {
 	const uint32_t constraint_count = p_constraint_island.size();
 	if (constraint_count < MIN_PARALLEL_LARGE_ISLAND) {
@@ -171,6 +229,14 @@ void GodotStep2D::_solve_large_island(const LocalVector<GodotConstraint2D *> &p_
 			break;
 		}
 	}
+
+	// Reuse the exact previous schedule when no constraint, endpoint or
+	// body mode has changed. This skips hash lookups and counting sort.
+	if (_can_reuse_color_cache(p_constraint_island, contact_only_island)) {
+		_run_colored_batches(cached_color_sizes, cached_color_starts);
+		return;
+	}
+	cached_color_valid = false;
 
 	// Greedy constraint coloring: each dynamic body may be written by at
 	// most one constraint within a color. The serial overflow handles hubs.
@@ -263,33 +329,39 @@ void GodotStep2D::_solve_large_island(const LocalVector<GodotConstraint2D *> &p_
 		colored_constraints[cursors[constraint_colors[i]]++] = p_constraint_island[i];
 	}
 
-	for (int iteration = 0; iteration < iterations; ++iteration) {
-		for (uint32_t color = 0; color <= MAX_LARGE_ISLAND_COLORS; ++color) {
-			const uint32_t count = group_sizes[color];
-			if (count == 0) {
-				continue;
-			}
-			const uint32_t start = starts[color];
-			if (color != MAX_LARGE_ISLAND_COLORS && count >= MIN_PARALLEL_COLOR_CONSTRAINTS) {
-				color_batch_offset = start;
-				color_batch_count = count;
-				// Reduce per-constraint scheduling overhead by giving each worker
-				// eight independent constraints per callback. A color barrier
-				// still completes before any other color can touch these bodies.
-				const uint32_t task_count = (count + PARALLEL_COLOR_BATCH_SIZE - 1) / PARALLEL_COLOR_BATCH_SIZE;
-				WorkerThreadPool::GroupID group = WorkerThreadPool::get_singleton()->add_template_group_task(
-						this, &GodotStep2D::_solve_colored_constraint, nullptr, task_count, -1, true, SNAME("Physics2DLargeIslandColor"));
-				// Barrier: no group may update bodies touched by another color
-				// until all jobs from the previous color have completed.
-				WorkerThreadPool::get_singleton()->wait_for_group_task_completion(group);
-			} else {
-				// Small colors and overflow have no parallel dispatch overhead.
-				for (uint32_t i = start; i < start + count; ++i) {
-					colored_constraints[i]->solve(delta);
-				}
-			}
+	// A cache hit is valid only for the exact same constraint and body
+	// topology. Avoid pointer-only equality: joint endpoints can be rebound
+	// without the constraint object itself changing.
+	bool cacheable = true;
+	cached_color_topology.resize(constraint_count);
+	for (uint32_t i = 0; i < constraint_count; ++i) {
+		GodotConstraint2D *constraint = p_constraint_island[i];
+		const int body_count = constraint->get_body_count();
+		GodotBody2D **bodies = constraint->get_body_ptr();
+		if (body_count < 0 || body_count > 2 || (body_count > 0 && bodies == nullptr)) {
+			cacheable = false;
+			break;
 		}
+		ColorCacheEntry &entry = cached_color_topology[i];
+		entry.constraint = constraint;
+		entry.body_count = static_cast<uint8_t>(body_count);
+		entry.body_A = body_count > 0 ? bodies[0] : nullptr;
+		entry.body_B = body_count > 1 ? bodies[1] : nullptr;
+		entry.mode_A = entry.body_A ? static_cast<uint8_t>(entry.body_A->get_mode()) : 0;
+		entry.mode_B = entry.body_B ? static_cast<uint8_t>(entry.body_B->get_mode()) : 0;
 	}
+	if (cacheable) {
+		cached_color_contact_only = contact_only_island;
+		for (uint32_t color = 0; color <= MAX_LARGE_ISLAND_COLORS; ++color) {
+			cached_color_sizes[color] = group_sizes[color];
+			cached_color_starts[color] = starts[color];
+		}
+		cached_color_valid = true;
+	} else {
+		cached_color_topology.clear();
+	}
+
+	_run_colored_batches(group_sizes, starts);
 }
 
 void GodotStep2D::_check_suspend(LocalVector<GodotBody2D *> &p_body_island) const {
@@ -524,6 +596,8 @@ void GodotStep2D::step(GodotSpace2D *p_space, real_t p_delta) {
 		colored_constraints.reset();
 		constraint_colors.reset();
 		occupied_colors.reset();
+		cached_color_topology.reset();
+		cached_color_valid = false;
 	}
 
 	if (large_island_count == 1) {
