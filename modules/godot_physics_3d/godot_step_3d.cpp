@@ -36,9 +36,7 @@
 #include "core/os/os.h"
 
 #define BODY_ISLAND_COUNT_RESERVE 128
-#define BODY_ISLAND_SIZE_RESERVE 512
 #define ISLAND_COUNT_RESERVE 128
-#define ISLAND_SIZE_RESERVE 512
 #define CONSTRAINT_COUNT_RESERVE 1024
 
 void GodotStep3D::_populate_island(GodotBody3D *p_body, LocalVector<GodotBody3D *> &p_body_island, LocalVector<GodotConstraint3D *> &p_constraint_island) {
@@ -274,7 +272,7 @@ void GodotStep3D::step(GodotSpace3D *p_space, real_t p_delta) {
 			}
 			LocalVector<GodotBody3D *> &body_island = body_islands[body_island_count - 1];
 			body_island.clear();
-			body_island.reserve(BODY_ISLAND_SIZE_RESERVE);
+			// Grow only when bodies are actually added; most islands are tiny.
 
 			++island_count;
 			if (constraint_islands.size() < island_count) {
@@ -282,7 +280,7 @@ void GodotStep3D::step(GodotSpace3D *p_space, real_t p_delta) {
 			}
 			LocalVector<GodotConstraint3D *> &constraint_island = constraint_islands[island_count - 1];
 			constraint_island.clear();
-			constraint_island.reserve(ISLAND_SIZE_RESERVE);
+			// Avoid preallocating hundreds of slots for islands with few constraints.
 
 			_populate_island(body, body_island, constraint_island);
 
@@ -310,7 +308,7 @@ void GodotStep3D::step(GodotSpace3D *p_space, real_t p_delta) {
 			}
 			LocalVector<GodotBody3D *> &body_island = body_islands[body_island_count - 1];
 			body_island.clear();
-			body_island.reserve(BODY_ISLAND_SIZE_RESERVE);
+			// Grow only when bodies are actually added; most islands are tiny.
 
 			++island_count;
 			if (constraint_islands.size() < island_count) {
@@ -318,7 +316,7 @@ void GodotStep3D::step(GodotSpace3D *p_space, real_t p_delta) {
 			}
 			LocalVector<GodotConstraint3D *> &constraint_island = constraint_islands[island_count - 1];
 			constraint_island.clear();
-			constraint_island.reserve(ISLAND_SIZE_RESERVE);
+			// Avoid preallocating hundreds of slots for islands with few constraints.
 
 			_populate_island_soft_body(soft_body, body_island, constraint_island);
 
