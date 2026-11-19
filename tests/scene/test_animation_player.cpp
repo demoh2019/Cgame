@@ -81,7 +81,7 @@ static AnimationPlayer *create_player_with_animations() {
 	return player;
 }
 
-TEST_CASE("[AnimationPlayer] Finishing an animation clears its active state") {
+TEST_CASE("[SceneTree][AnimationPlayer] Finishing an animation clears its active state") {
 	AnimationPlayer *player = create_player_with_animations();
 	player->play("first");
 	CHECK(player->is_playing());
@@ -101,7 +101,7 @@ TEST_CASE("[AnimationPlayer] Finishing an animation clears its active state") {
 	memdelete(player);
 }
 
-TEST_CASE("[AnimationPlayer] Finishing backwards also clears the active state") {
+TEST_CASE("[SceneTree][AnimationPlayer] Finishing backwards also clears the active state") {
 	AnimationPlayer *player = create_player_with_animations();
 	player->play_backwards("first");
 	CHECK(player->is_valid());
@@ -112,7 +112,7 @@ TEST_CASE("[AnimationPlayer] Finishing backwards also clears the active state") 
 	memdelete(player);
 }
 
-TEST_CASE("[AnimationPlayer] Pausing preserves the active animation until stopped") {
+TEST_CASE("[SceneTree][AnimationPlayer] Pausing preserves the active animation until stopped") {
 	AnimationPlayer *player = create_player_with_animations();
 	player->play("first");
 	player->advance(0.1);
@@ -128,7 +128,7 @@ TEST_CASE("[AnimationPlayer] Pausing preserves the active animation until stoppe
 	memdelete(player);
 }
 
-TEST_CASE("[AnimationPlayer] Stop with keep state also clears animation validity") {
+TEST_CASE("[SceneTree][AnimationPlayer] Stop with keep state also clears animation validity") {
 	AnimationPlayer *player = create_player_with_animations();
 	player->play("first");
 	player->advance(0.1);
@@ -140,7 +140,7 @@ TEST_CASE("[AnimationPlayer] Stop with keep state also clears animation validity
 	memdelete(player);
 }
 
-TEST_CASE("[AnimationPlayer] A completed animation can be played again") {
+TEST_CASE("[SceneTree][AnimationPlayer] A completed animation can be played again") {
 	AnimationPlayer *player = create_player_with_animations();
 	for (int i = 0; i < 3; i++) {
 		player->play("first");
@@ -153,7 +153,7 @@ TEST_CASE("[AnimationPlayer] A completed animation can be played again") {
 	memdelete(player);
 }
 
-TEST_CASE("[AnimationPlayer] Queued animation stays active until it finishes") {
+TEST_CASE("[SceneTree][AnimationPlayer] Queued animation stays active until it finishes") {
 	AnimationPlayer *player = create_player_with_animations();
 	player->play("first");
 	player->queue("second");
@@ -171,7 +171,7 @@ TEST_CASE("[AnimationPlayer] Queued animation stays active until it finishes") {
 	memdelete(player);
 }
 
-TEST_CASE("[AnimationPlayer] Assigning a new animation after completion leaves it ready but paused") {
+TEST_CASE("[SceneTree][AnimationPlayer] Assigning a new animation after completion leaves it ready but paused") {
 	AnimationPlayer *player = create_player_with_animations();
 	player->play("first");
 	player->advance(0.6);
@@ -188,7 +188,7 @@ TEST_CASE("[AnimationPlayer] Assigning a new animation after completion leaves i
 }
 
 
-TEST_CASE("[AnimationPlayer] Completion remains inactive across further advances") {
+TEST_CASE("[SceneTree][AnimationPlayer] Completion remains inactive across further advances") {
 	AnimationPlayer *player = create_player_with_animations();
 	player->play("first");
 	player->advance(0.6);
@@ -205,7 +205,7 @@ TEST_CASE("[AnimationPlayer] Completion remains inactive across further advances
 	memdelete(player);
 }
 
-TEST_CASE("[AnimationPlayer] A finished animation can transition to reverse playback") {
+TEST_CASE("[SceneTree][AnimationPlayer] A finished animation can transition to reverse playback") {
 	AnimationPlayer *player = create_player_with_animations();
 	player->play("first");
 	player->advance(0.6);
@@ -219,6 +219,25 @@ TEST_CASE("[AnimationPlayer] A finished animation can transition to reverse play
 	CHECK_FALSE(player->is_playing());
 	CHECK_FALSE(player->is_valid());
 	CHECK(player->get_assigned_animation() == StringName("second"));
+	memdelete(player);
+}
+
+TEST_CASE("[SceneTree][AnimationPlayer] Pausing and resuming does not prematurely reset animation") {
+	AnimationPlayer *player = create_player_with_animations();
+	player->play("first");
+	player->advance(0.1);
+	player->pause();
+	CHECK_FALSE(player->is_playing());
+	CHECK(player->is_valid());
+	CHECK(player->get_current_animation() == StringName("first"));
+
+	player->play();
+	CHECK(player->is_playing());
+	CHECK(player->is_valid());
+	player->advance(0.5);
+	CHECK_FALSE(player->is_playing());
+	CHECK_FALSE(player->is_valid());
+	CHECK(player->get_assigned_animation() == StringName("first"));
 	memdelete(player);
 }
 
