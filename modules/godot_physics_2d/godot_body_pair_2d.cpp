@@ -509,7 +509,11 @@ bool GodotBodyPair2D::pre_solve(real_t p_step) {
 			Vector2 crA(-A->get_prev_angular_velocity() * c.rA.y, A->get_prev_angular_velocity() * c.rA.x);
 			Vector2 crB(-B->get_prev_angular_velocity() * c.rB.y, B->get_prev_angular_velocity() * c.rB.x);
 			Vector2 dv = B->get_prev_linear_velocity() + crB - A->get_prev_linear_velocity() - crA;
-			c.bounce = c.bounce * dv.dot(c.normal);
+			const real_t normal_velocity = dv.dot(c.normal);
+			// Following Box2D/Jolt, suppress restitution for slow or separating
+			// contacts. Use pre-solve velocity so accumulated impulses do not
+			// spuriously trigger another bounce on a resting contact.
+			c.bounce = normal_velocity < -space->get_restitution_velocity_threshold() ? c.bounce * normal_velocity : 0.0;
 		}
 
 		c.active = true;
