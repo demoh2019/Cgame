@@ -106,6 +106,7 @@ class FEMLumpedMassContracts(unittest.TestCase):
         self.assertIn("physics_fem_unpinned_inverse_mass(", body)
         self.assertIn("get_unpinned_node_inverse_mass(node_index)", body)
         self.assertIn("LocalVector<double> xpbd_fem_mass_fractions;", header)
+        self.assertIn("get_soft_body_tetra_fiber_compliance() <= 0.0 &&", body)
         self.assertIn('GLOBAL_GET("physics/3d/solver/soft_body_tetra_fem_lumped_mass")', space)
         self.assertIn('"physics/3d/solver/soft_body_tetra_fem_lumped_mass"), false', settings)
 
