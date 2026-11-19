@@ -28,6 +28,7 @@
 /* SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.                 */
 /**************************************************************************/
 
+#include "modules/modules_enabled.gen.h"
 #include "tests/test_macros.h"
 
 TEST_FORCE_LINK(test_circle_collision)
