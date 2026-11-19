@@ -41,7 +41,9 @@ func _run() -> void:
 		PhysicsServer2D.body_set_mode(ball, PhysicsServer2D.BODY_MODE_RIGID)
 		PhysicsServer2D.body_add_shape(ball, ball_shape)
 		PhysicsServer2D.body_set_param(ball, PhysicsServer2D.BODY_PARAM_FRICTION, 0.0 if i == 0 else 1.0)
-		PhysicsServer2D.body_set_param(ball, PhysicsServer2D.BODY_PARAM_GRAVITY_SCALE, 1.0)
+		# Raw-space default gravity points toward -Y. Reverse it so the
+		# circles above the floor actually collide with the floor.
+		PhysicsServer2D.body_set_param(ball, PhysicsServer2D.BODY_PARAM_GRAVITY_SCALE, -1.0)
 		PhysicsServer2D.body_set_state(ball, PhysicsServer2D.BODY_STATE_TRANSFORM, Transform2D(0.0, Vector2(x, -3.0)))
 		PhysicsServer2D.body_set_state(ball, PhysicsServer2D.BODY_STATE_LINEAR_VELOCITY, Vector2(6.0, 0.0))
 		PhysicsServer2D.body_set_state(ball, PhysicsServer2D.BODY_STATE_CAN_SLEEP, false)
