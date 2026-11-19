@@ -947,4 +947,73 @@ TEST_CASE("[BVH] Star-shaped 2D contact graph retains surviving pairs during chu
 	CHECK(counts.invalid_userdata == 0);
 }
 
+TEST_CASE("[BVH] Batch flush filters only new 2D contact pairs") {
+	using Tree = BVH_Manager<Item, 2, true, 16, CountingPairTest, CullTest, Rect2, Vector2, false>;
+	CountingPairTest::calls = 0;
+	CountingPairTest::allow = true;
+	Tree tree;
+	Item a, b, c;
+	int created = 0;
+	int removed = 0;
+	tree.set_pair_callback(count_pair, &created);
+	tree.set_unpair_callback(count_unpair, &removed);
+
+	const BVHHandle ha = tree.create(&a, true, 0, 3, Rect2(0, 0, 4, 4));
+	const BVHHandle hb = tree.create(&b, true, 1, 3, Rect2(1, 0, 4, 4));
+	CHECK(created == 1);
+	const int prior_checks = CountingPairTest::calls;
+
+	// Both a moved and c was just inserted, but a-b is an existing contact.
+	tree.move(ha, Rect2(0.5, 0, 4, 4));
+	const BVHHandle hc = tree.create(&c, true, 1, 3, Rect2(2, 0, 4, 4), 0, true);
+	CHECK(created == 1);
+	tree.flush_pending_pairs();
+	CHECK(created == 3);
+	CHECK(removed == 0);
+	CHECK(CountingPairTest::calls == prior_checks + 2);
+	tree.flush_pending_pairs();
+	CHECK(CountingPairTest::calls == prior_checks + 2);
+
+	// Explicit full checks must still re-evaluate changed collision filters.
+	CountingPairTest::allow = false;
+	tree.force_collision_check(ha);
+	CHECK(removed == 2);
+	CountingPairTest::allow = true;
+	tree.force_collision_check(ha);
+	CHECK(created == 5);
+
+	tree.erase(hc);
+	tree.erase(hb);
+	tree.erase(ha);
+	CHECK(removed == created);
+}
+
+TEST_CASE("[BVH] Batch flush filters only new 3D contact pairs") {
+	using Tree = BVH_Manager<Item, 2, true, 16, CountingPairTest, CullTest, AABB, Vector3, false>;
+	CountingPairTest::calls = 0;
+	CountingPairTest::allow = true;
+	Tree tree;
+	Item a, b, c;
+	int created = 0;
+	int removed = 0;
+	tree.set_pair_callback(count_pair, &created);
+	tree.set_unpair_callback(count_unpair, &removed);
+
+	const BVHHandle ha = tree.create(&a, true, 0, 3, AABB(Vector3(0, 0, 0), Vector3(4, 4, 4)));
+	const BVHHandle hb = tree.create(&b, true, 1, 3, AABB(Vector3(1, 0, 0), Vector3(4, 4, 4)));
+	CHECK(created == 1);
+	const int prior_checks = CountingPairTest::calls;
+	tree.move(ha, AABB(Vector3(0.5, 0, 0), Vector3(4, 4, 4)));
+	const BVHHandle hc = tree.create(&c, true, 1, 3, AABB(Vector3(2, 0, 0), Vector3(4, 4, 4)), 0, true);
+	tree.flush_pending_pairs();
+	CHECK(created == 3);
+	CHECK(removed == 0);
+	CHECK(CountingPairTest::calls == prior_checks + 2);
+
+	tree.erase(hc);
+	tree.erase(hb);
+	tree.erase(ha);
+	CHECK(removed == created);
+}
+
 } // namespace TestBVH
