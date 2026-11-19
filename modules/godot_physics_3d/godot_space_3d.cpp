@@ -869,7 +869,10 @@ bool GodotSpace3D::test_body_motion(GodotBody3D *p_body, const PS3DT::MotionPara
 				for (int k = 0; k < 8; k++) { //steps should be customizable..
 					real_t fraction = low + (hi - low) * fraction_coeff;
 
-					mshape.motion = body_shape_xform_inv.basis.xform(p_parameters.motion * fraction);
+					// A basis transform is linear: reuse the swept vector already
+					// computed for this shape rather than repeating a matrix-vector
+					// multiply on every CCD/dichotomy iteration and candidate.
+					mshape.motion = full_motion_local * fraction;
 
 					Vector3 lA, lB;
 					Vector3 sep = motion_normal; //important optimization for this to work fast enough
