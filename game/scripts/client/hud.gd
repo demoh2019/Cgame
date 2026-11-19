@@ -6,11 +6,13 @@ const Crafting = preload("res://scripts/shared/crafting.gd")
 const Vendor = preload("res://scripts/shared/vendor.gd")
 const Contracts = preload("res://scripts/shared/contracts.gd")
 const ZoneRisk = preload("res://scripts/shared/zone_risk.gd")
+const SurvivalRadar = preload("res://scripts/client/survival_radar.gd")
 
 var client
 var _bars: Dictionary = {}
 var _zone_label: Label
 var _info_label: Label
+var _radar
 var _contract_label: Label
 var _prompt: Label
 var _log: Label
@@ -40,6 +42,19 @@ func _build() -> void:
 	for side in ["left", "top", "right", "bottom"]:
 		margin.add_theme_constant_override("margin_" + side, 14)
 	add_child(margin)
+
+
+	var radar := SurvivalRadar.new()
+	radar.name = "SurvivalRadar"
+	radar.client = client
+	radar.world = client.world
+	add_child(radar)
+	radar.set_anchors_preset(Control.PRESET_TOP_RIGHT)
+	radar.offset_left = -222.0
+	radar.offset_top = 16.0
+	radar.offset_right = -16.0
+	radar.offset_bottom = 222.0
+	_radar = radar
 
 	var top_left := VBoxContainer.new()
 	top_left.mouse_filter = Control.MOUSE_FILTER_IGNORE
@@ -192,6 +207,13 @@ func _build() -> void:
 	_death.size = Vector2(600, 120)
 	_death.visible = false
 	add_child(_death)
+
+
+
+func _unhandled_input(event: InputEvent) -> void:
+	if event is InputEventKey and event.pressed and not event.echo:
+		if event.physical_keycode == KEY_M and _radar != null:
+			_radar.visible = not _radar.visible
 
 
 func toggle_inventory() -> void:

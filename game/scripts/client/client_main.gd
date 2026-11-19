@@ -7,6 +7,7 @@ const Defs = preload("res://scripts/shared/defs.gd")
 const WorldGen = preload("res://scripts/shared/world_gen.gd")
 const GameServer = preload("res://scripts/server/game_server.gd")
 const Vendor = preload("res://scripts/shared/vendor.gd")
+const SurvivalRadar = preload("res://scripts/client/survival_radar.gd")
 const Contracts = preload("res://scripts/shared/contracts.gd")
 const LOCAL_PLAYER_ID := 2
 const TERRAIN_STEP := 8.0
@@ -22,6 +23,7 @@ var _camera: Camera3D
 var _avatar: MeshInstance3D
 var _stats: Label
 var _instructions: Label
+var _radar
 var _bank_panel: PanelContainer
 var _bank_label: Label
 var _bank_open: bool = false
@@ -78,6 +80,7 @@ func _setup_actions() -> void:
 	_bind_key("survive_dismantle", KEY_X)
 	_bind_key("survive_vendor_buy", KEY_N)
 	_bind_key("survive_vendor_sell", KEY_V)
+	_bind_key("survive_radar", KEY_M)
 	_bind_key("survive_bank", KEY_B)
 	_bind_key("survive_bank_next", KEY_J)
 	_bind_key("survive_bank_deposit", KEY_K)
@@ -167,6 +170,18 @@ func _make_hud() -> void:
 	_stats.position = Vector2(18, 18)
 	_stats.add_theme_font_size_override("font_size", 17)
 	layer.add_child(_stats)
+	var radar := SurvivalRadar.new()
+	radar.name = "SurvivalRadar"
+	radar.world = world
+	radar.sim = sim
+	radar.actor_id = LOCAL_PLAYER_ID
+	layer.add_child(radar)
+	radar.set_anchors_preset(Control.PRESET_TOP_RIGHT)
+	radar.offset_left = -222.0
+	radar.offset_top = 16.0
+	radar.offset_right = -16.0
+	radar.offset_bottom = 222.0
+	_radar = radar
 	_instructions = Label.new()
 	_instructions.name = "Instructions"
 	_instructions.position = Vector2(18, 202)
@@ -584,6 +599,8 @@ func _unhandled_input(event: InputEvent) -> void:
 		var action := "claim" if Input.is_key_pressed(KEY_SHIFT) else "accept"
 		var response: Dictionary = sim.cmd_contract(LOCAL_PLAYER_ID, action)
 		_feedback = ("Contract: %s" % str(response.get("title", response.get("reason", "updated"))))
+	elif event.is_action_pressed("survive_radar"):
+		_radar.visible = not _radar.visible
 	elif event.is_action_pressed("survive_vendor_buy"):
 		_result("Buy water (12 silver)", sim.cmd_vendor(LOCAL_PLAYER_ID, "water_bottle", 1, true))
 	elif event.is_action_pressed("survive_vendor_sell"):
@@ -625,4 +642,5 @@ func _update_hud() -> void:
 		"WORKBENCH" if near_bench else "workbench at x=9, z=0",
 		str(recipe.get("inputs", {})), _feedback
 	]
+	_instructions.text += "\nM tactical radar: red infected, yellow resources, green loot, gold defenses"
 	_update_bank_hud()

@@ -412,3 +412,18 @@ contract journal remain compatible. At the safe hub board, claim **60 silver
 and 10 rounds of 9mm ammunition**. The common `run_all.gd` suite now runs
 `test_contracts.gd` and covers quest progress, replay, persistence and
 validation. This is game logic and needs no Cgame engine API changes.
+
+## Tactical radar in the canonical game
+
+Press **M** to toggle the player-following, north-up 72-metre radar in the
+local survival preview or the network client's HUD. The player arrow points
+where the survivor is facing. Red = live infected, yellow = undepleted
+resource nodes, green = unopened crates/dropped bags, ochre = player-built
+barricades and blue = the safe settlement. All markers use world generation
+plus the current authoritative server simulation (local) or server snapshots
+(online); the radar never simulates enemies or generates loot. The shared
+`scripts/client/survival_radar.gd` supplies both displays.
+
+Projection and live state tests are included in `tests/test_survival_radar.gd`
+under the standard headless regression runner. Full visual verification
+still requires an engine/editor playtest.
