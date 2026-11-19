@@ -1,0 +1,40 @@
+name: CoreBind known-size API collection regressions
+
+on:
+  pull_request:
+    paths:
+      - 'core/core_bind.cpp'
+      - 'tests/core/math/test_geometry_2d.cpp'
+      - 'tests/core/object/test_class_db.cpp'
+      - '.github/workflows/corebind-known-size-results.yml'
+  push:
+    branches: [develop]
+    paths:
+      - 'core/core_bind.cpp'
+      - 'tests/core/math/test_geometry_2d.cpp'
+      - 'tests/core/object/test_class_db.cpp'
+      - '.github/workflows/corebind-known-size-results.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  native-corebind-regressions:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+      - uses: ./.github/actions/godot-deps
+      - name: Compile editor with native CoreBind tests
+        uses: ./.github/actions/godot-build
+        with:
+          platform: linuxbsd
+          target: editor
+          scons-flags: dev_build=yes tests=yes debug_symbols=no module_mono_enabled=no module_text_server_fb_enabled=yes accesskit=no -j2
+      - name: Check ClassDB method and property metadata output
+        run: ./bin/godot.linuxbsd.editor.dev.x86_64 --headless --test --test-case="*[CoreBind] Class metadata array conversion retains entries and order*"
+      - name: Check Geometry2D wrapper output
+        run: ./bin/godot.linuxbsd.editor.dev.x86_64 --headless --test --test-case="*[CoreBind] Geometry2D polygon conversion preserves native points*"
