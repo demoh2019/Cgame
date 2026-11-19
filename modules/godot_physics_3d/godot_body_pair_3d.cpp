@@ -951,84 +951,39 @@ bool GodotBodyPair3D::pre_solve(real_t p_step) {
 		}
 	}
 
-	// Bullet-style rolling resistance (torque tangent to the contact
-	// normal) and spinning friction (torque along the normal). These are
-	// applied once per step after warm starting: the angular impulse budget
-	// is independent of the number of solver iterations, with no per-contact
-	// persistent state or extra allocations.
-	const real_t rolling_coefficient = space->get_rolling_friction();
-	const real_t spinning_coefficient = space->get_spinning_friction();
-	if (do_process && (rolling_coefficient > 0.0 || spinning_coefficient > 0.0)) {
-		real_t normal_load_impulse = 0.0;
-		real_t contact_radius = 0.0;
-		Vector3 contact_normal;
-		bool have_normal = false;
-		bool normals_compatible = true;
+	// Build one valid contact patch for the iterative angular-friction solver.
+	// Do not require a warm-started normal impulse: a new contact only learns
+	// its supporting normal load during solve(), after normal impulses run.
+	angular_friction_contact_mask = 0;
+	angular_friction_radius = 0.0;
+	angular_friction_normal = Vector3();
+	accumulated_spinning_impulse = 0.0;
+	accumulated_rolling_impulse = Vector3();
+	if (do_process && (space->get_spinning_friction() > 0.0 || space->get_rolling_friction() > 0.0)) {
+		bool normal_found = false;
+		bool compatible_normals = true;
 		for (int i = 0; i < contact_count; i++) {
 			const Contact &c = contacts[i];
-			if (!c.active || c.acc_normal_impulse <= 0.0) {
+			if (!c.active || c.depth <= 0.0 || c.mass_normal <= 0.0) {
 				continue;
 			}
-			if (!have_normal) {
-				contact_normal = c.normal;
-				have_normal = true;
-			} else if (contact_normal.dot(c.normal) < real_t(0.98)) {
-				// One pair can contain contacts on different faces.
-				// Do not apply a fictitious torque around an arbitrary axis.
-				normals_compatible = false;
+			if (!normal_found) {
+				angular_friction_normal = c.normal;
+				normal_found = true;
+			} else if (angular_friction_normal.dot(c.normal) < real_t(0.98)) {
+				// Contacts on different faces do not share a torque axis.
+				compatible_normals = false;
 				break;
 			}
 			const real_t radius = collide_A && collide_B ? MIN(c.rA.length(), c.rB.length()) :
 					(collide_A ? c.rA.length() : c.rB.length());
-			if (normal_load_impulse == 0.0 || radius < contact_radius) {
-				contact_radius = radius;
+			if (angular_friction_contact_mask == 0 || radius < angular_friction_radius) {
+				angular_friction_radius = radius;
 			}
-			normal_load_impulse += c.acc_normal_impulse;
+			angular_friction_contact_mask |= uint8_t(1) << i;
 		}
-
-		if (have_normal && normals_compatible && normal_load_impulse > 0.0 && contact_radius > 0.0) {
-			if (spinning_coefficient > 0.0) {
-				const real_t inv_spin_inertia = contact_normal.dot(
-						inv_inertia_tensor_A.xform(contact_normal) + inv_inertia_tensor_B.xform(contact_normal));
-				const real_t relative_spin = (B->get_angular_velocity() - A->get_angular_velocity()).dot(contact_normal);
-				const real_t spin_impulse = GodotPhysicsContactAngularFriction::clamped_impulse(
-						relative_spin, inv_spin_inertia, normal_load_impulse, spinning_coefficient, contact_radius);
-				if (spin_impulse != 0.0) {
-					const Vector3 torque = contact_normal * spin_impulse;
-					if (collide_A) {
-						A->apply_torque_impulse(-torque);
-					}
-					if (collide_B) {
-						B->apply_torque_impulse(torque);
-					}
-				}
-			}
-
-			if (rolling_coefficient > 0.0) {
-				// Use the new angular velocities after the spin correction.
-				// This makes each directional projection dissipative even
-				// for bodies with anisotropic inertia tensors.
-				const Vector3 relative_omega = B->get_angular_velocity() - A->get_angular_velocity();
-				const Vector3 tangent_omega = relative_omega - contact_normal * relative_omega.dot(contact_normal);
-				const real_t tangent_length_squared = tangent_omega.length_squared();
-				if (tangent_length_squared > CMP_EPSILON * CMP_EPSILON) {
-					const real_t tangent_speed = Math::sqrt(tangent_length_squared);
-					const Vector3 axis = tangent_omega / tangent_speed;
-					const real_t inv_roll_inertia = axis.dot(
-							inv_inertia_tensor_A.xform(axis) + inv_inertia_tensor_B.xform(axis));
-					const real_t roll_impulse = GodotPhysicsContactAngularFriction::clamped_impulse(
-							tangent_speed, inv_roll_inertia, normal_load_impulse, rolling_coefficient, contact_radius);
-					if (roll_impulse != 0.0) {
-						const Vector3 torque = axis * roll_impulse;
-						if (collide_A) {
-							A->apply_torque_impulse(-torque);
-						}
-						if (collide_B) {
-							B->apply_torque_impulse(torque);
-						}
-					}
-				}
-			}
+		if (!compatible_normals || !normal_found || !(angular_friction_radius > 0.0)) {
+			angular_friction_contact_mask = 0;
 		}
 	}
 
@@ -1307,6 +1262,80 @@ void GodotBodyPair3D::solve(real_t p_step) {
 			c.active = true;
 		}
 	}
+	// Bullet-style torsional friction, now solved AFTER normal loads are
+	// calculated. The old pre_solve-only correction saw zero impulse on a
+	// freshly created contact and could not resist spin until a later frame.
+	// Clamp the ACCUMULATED angular impulse across iterations so increasing
+	// solver iteration count does not increase the Coulomb torque budget.
+	if (angular_friction_contact_mask != 0) {
+		const real_t rolling_coefficient = space->get_rolling_friction();
+		const real_t spinning_coefficient = space->get_spinning_friction();
+		real_t normal_load_impulse = 0.0;
+		for (int i = 0; i < contact_count; i++) {
+			if (angular_friction_contact_mask & (uint8_t(1) << i)) {
+				normal_load_impulse += contacts[i].acc_normal_impulse;
+			}
+		}
+		if (normal_load_impulse > 0.0 && Math::is_finite(normal_load_impulse)) {
+			const Vector3 &normal = angular_friction_normal;
+			const Basis &inertia_A = inv_inertia_tensor_A;
+			const Basis &inertia_B = inv_inertia_tensor_B;
+			if (spinning_coefficient > 0.0) {
+				const real_t effective_inverse_inertia = normal.dot(inertia_A.xform(normal) + inertia_B.xform(normal));
+				const real_t relative_spin = (B->get_angular_velocity() - A->get_angular_velocity()).dot(normal);
+				const real_t unconstrained_delta = GodotPhysicsContactAngularFriction::clamped_impulse(
+						relative_spin, effective_inverse_inertia, normal_load_impulse, spinning_coefficient, angular_friction_radius);
+				const real_t limit = spinning_coefficient * normal_load_impulse * angular_friction_radius;
+				if (Math::is_finite(limit) && limit > 0.0) {
+					const real_t next_impulse = CLAMP(accumulated_spinning_impulse + unconstrained_delta, -limit, limit);
+					const real_t delta = next_impulse - accumulated_spinning_impulse;
+					accumulated_spinning_impulse = next_impulse;
+					if (delta != 0.0) {
+						const Vector3 torque = normal * delta;
+						if (collide_A) {
+							A->apply_torque_impulse(-torque);
+						}
+						if (collide_B) {
+							B->apply_torque_impulse(torque);
+						}
+					}
+				}
+			}
+			if (rolling_coefficient > 0.0) {
+				// Re-evaluate angular speed after spinning friction, preserving
+				// a dissipative correction for asymmetric inertia tensors.
+				const Vector3 relative_omega = B->get_angular_velocity() - A->get_angular_velocity();
+				const Vector3 tangent = relative_omega - normal * relative_omega.dot(normal);
+				const real_t tangent_length_squared = tangent.length_squared();
+				if (tangent_length_squared > CMP_EPSILON * CMP_EPSILON) {
+					const real_t tangent_speed = Math::sqrt(tangent_length_squared);
+					const Vector3 axis = tangent / tangent_speed;
+					const real_t effective_inverse_inertia = axis.dot(inertia_A.xform(axis) + inertia_B.xform(axis));
+					const real_t candidate_delta = GodotPhysicsContactAngularFriction::clamped_impulse(
+							tangent_speed, effective_inverse_inertia, normal_load_impulse, rolling_coefficient, angular_friction_radius);
+					const real_t limit = rolling_coefficient * normal_load_impulse * angular_friction_radius;
+					if (Math::is_finite(limit) && limit > 0.0 && candidate_delta != 0.0) {
+						Vector3 next_impulse = accumulated_rolling_impulse + axis * candidate_delta;
+						const real_t length_squared = next_impulse.length_squared();
+						if (length_squared > limit * limit) {
+							next_impulse *= limit / Math::sqrt(length_squared);
+						}
+						const Vector3 delta = next_impulse - accumulated_rolling_impulse;
+						accumulated_rolling_impulse = next_impulse;
+						if (delta != Vector3()) {
+							if (collide_A) {
+								A->apply_torque_impulse(-delta);
+							}
+							if (collide_B) {
+								B->apply_torque_impulse(delta);
+							}
+						}
+					}
+				}
+			}
+		}
+	}
+
 }
 
 GodotBodyPair3D::GodotBodyPair3D(GodotBody3D *p_A, int p_shape_A, GodotBody3D *p_B, int p_shape_B) :
