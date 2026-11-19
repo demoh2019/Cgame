@@ -48,6 +48,7 @@
 #include "servers/physics_xpbd_dihedral.h"
 #include "servers/physics_xpbd_shear.h"
 #include "servers/physics_xpbd_self_collision.h"
+#include "servers/physics_xpbd_cloth_fiber.h"
 #include "servers/physics_softbody_pair_contact.h"
 #include "servers/physics_xpbd_soft_ccd.h"
 #include "servers/physics_xpbd_self_friction.h"
@@ -2167,6 +2168,11 @@ void GodotSoftBody3D::solve_constraints(real_t p_delta) {
 	const bool use_area_xpbd = configured_area_compliance > 0.0 && !faces.is_empty() &&
 			Math::is_finite(area_alpha_double) && area_alpha_double > 0.0;
 	const real_t alpha = use_xpbd ? real_t(MIN(alpha_double, double(std::numeric_limits<real_t>::max()))) : real_t(0.0);
+	// PhysX-style warp/weft stretch anisotropy. Only XPBD links participate;
+	// default ratio=1 uses the exact old isotropic fast path.
+	const real_t fiber_ratio = get_space()->get_soft_body_fiber_compliance_ratio();
+	const bool use_fiber_anisotropy = use_xpbd && fiber_ratio != real_t(1.0);
+	const Vector3 &fiber_axis = get_space()->get_soft_body_fiber_axis();
 	const real_t area_alpha = use_area_xpbd ? real_t(MIN(area_alpha_double, double(std::numeric_limits<real_t>::max()))) : real_t(0.0);
 	const real_t configured_shear_compliance = get_space() ? get_space()->get_soft_body_xpbd_shear_compliance() : real_t(0.0);
 	const double shear_alpha_double = p_delta > 0.0 ? double(configured_shear_compliance) / (double(p_delta) * double(p_delta)) : 0.0;
@@ -2215,16 +2221,28 @@ void GodotSoftBody3D::solve_constraints(real_t p_delta) {
 		xpbd_link_lambdas.reset();
 	}
 
-	// Freeze nonlinear compliance for the whole physics step. Recomputing
-	// alpha within iterations while retaining lambda causes oscillation.
-	if (use_tension_hardening) {
+	// Freeze nonlinear AND directional compliance for the whole physics
+	// step. Recompute neither during XPBD iterations while retaining lambda.
+	// Reuse the optional hardening alpha array for both modes, so enabling
+	// fiber anisotropy + tension hardening does not double per-link RAM.
+	if (use_tension_hardening || use_fiber_anisotropy) {
 		xpbd_link_hardening_alphas.resize(links.size());
-		const real_t yield_strain = get_space()->get_soft_body_xpbd_tension_yield_strain();
+		const real_t yield_strain = use_tension_hardening ?
+				get_space()->get_soft_body_xpbd_tension_yield_strain() : real_t(0.0);
 		for (uint32_t link_index = 0; link_index < links.size(); ++link_index) {
 			const Link &link = links[link_index];
 			real_t link_alpha = alpha;
-			physics_xpbd_tension_hardening_alpha(link.n[0]->x, link.n[1]->x,
-					link.rl, alpha, yield_strain, tension_hardening, link_alpha);
+			if (use_tension_hardening) {
+				physics_xpbd_tension_hardening_alpha(link.n[0]->x, link.n[1]->x,
+						link.rl, alpha, yield_strain, tension_hardening, link_alpha);
+			}
+			if (use_fiber_anisotropy) {
+				real_t directional_alpha = link_alpha;
+				if (physics_xpbd_cloth_fiber_alpha(link.n[0]->s, link.n[1]->s,
+							fiber_axis, fiber_ratio, link_alpha, directional_alpha)) {
+					link_alpha = directional_alpha;
+				}
+			}
 			xpbd_link_hardening_alphas[link_index] = link_alpha;
 		}
 	} else if (!xpbd_link_hardening_alphas.is_empty()) {
@@ -2303,7 +2321,7 @@ void GodotSoftBody3D::solve_constraints(real_t p_delta) {
 				if (link.c0 > 0.0) {
 					physics_xpbd_solve_distance(link.n[0]->x, link.n[1]->x,
 							link.n[0]->im, link.n[1]->im, link.rl,
-							use_tension_hardening ? xpbd_link_hardening_alphas[link_index] : alpha,
+							(use_tension_hardening || use_fiber_anisotropy) ? xpbd_link_hardening_alphas[link_index] : alpha,
 							xpbd_link_lambdas[link_index]);
 				}
 			}
