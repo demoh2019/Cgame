@@ -630,13 +630,28 @@ Vector3 GodotCapsuleShape3D::get_closest_point_to(const Vector3 &p_point) const 
 }
 
 Vector3 GodotCapsuleShape3D::get_moment_of_inertia(real_t p_mass) const {
-	// use bad AABB approximation
-	Vector3 extents = get_aabb().size * 0.5;
+	const real_t segment_length = height - real_t(2.0) * radius;
+	if (radius <= 0.0 || segment_length < 0.0) {
+		// Preserve the previous approximation for invalid shape dimensions.
+		const Vector3 extents = get_aabb().size * real_t(0.5);
+		return Vector3(
+				(p_mass / real_t(3.0)) * (extents.y * extents.y + extents.z * extents.z),
+				(p_mass / real_t(3.0)) * (extents.x * extents.x + extents.z * extents.z),
+				(p_mass / real_t(3.0)) * (extents.x * extents.x + extents.y * extents.y));
+	}
 
-	return Vector3(
-			(p_mass / 3.0) * (extents.y * extents.y + extents.z * extents.z),
-			(p_mass / 3.0) * (extents.x * extents.x + extents.z * extents.z),
-			(p_mass / 3.0) * (extents.x * extents.x + extents.y * extents.y));
+	// Exact inertia of a homogeneous capsule: a cylindrical center section
+	// plus two hemispheres. Their combined volume equals a full sphere.
+	// Include the hemisphere centroids via the parallel-axis theorem.
+	const real_t cylinder_mass = p_mass * segment_length / (segment_length + real_t(4.0 / 3.0) * radius);
+	const real_t hemispheres_mass = p_mass - cylinder_mass;
+	const real_t radius_squared = radius * radius;
+	const real_t segment_squared = segment_length * segment_length;
+
+	const real_t axial = radius_squared * (cylinder_mass * real_t(0.5) + hemispheres_mass * real_t(2.0 / 5.0));
+	const real_t transverse = cylinder_mass * (real_t(3.0) * radius_squared + segment_squared) / real_t(12.0) +
+			hemispheres_mass * (real_t(2.0 / 5.0) * radius_squared + segment_squared * real_t(0.25) + segment_length * radius * real_t(3.0 / 8.0));
+	return Vector3(transverse, axial, transverse);
 }
 
 void GodotCapsuleShape3D::_setup(real_t p_height, real_t p_radius) {
@@ -774,13 +789,12 @@ Vector3 GodotCylinderShape3D::get_closest_point_to(const Vector3 &p_point) const
 }
 
 Vector3 GodotCylinderShape3D::get_moment_of_inertia(real_t p_mass) const {
-	// use bad AABB approximation
-	Vector3 extents = get_aabb().size * 0.5;
-
-	return Vector3(
-			(p_mass / 3.0) * (extents.y * extents.y + extents.z * extents.z),
-			(p_mass / 3.0) * (extents.x * extents.x + extents.z * extents.z),
-			(p_mass / 3.0) * (extents.x * extents.x + extents.y * extents.y));
+	// Principal moments of inertia of a homogeneous solid cylinder about
+	// its center of mass, with the cylinder axis aligned to local Y.
+	const real_t radius_squared = radius * radius;
+	const real_t transverse = p_mass * (real_t(3.0) * radius_squared + height * height) / real_t(12.0);
+	const real_t axial = p_mass * radius_squared * real_t(0.5);
+	return Vector3(transverse, axial, transverse);
 }
 
 void GodotCylinderShape3D::_setup(real_t p_height, real_t p_radius) {
