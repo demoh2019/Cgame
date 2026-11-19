@@ -273,3 +273,36 @@ fails as `rss_monitor_unavailable` instead of silently pretending the
 RSS limit was enforced. On very short runs, a process can finish before
 the first sample. Neither `ps` nor `psutil` captures all instantaneous
 memory spikes; use Allocations and VM Tracker on macOS for deep analysis.
+
+## In-process long-lived memory soak
+
+A separate `memory_soak.gd` SceneTree runs **hundreds or thousands of
+allocation/free cycles in the same process**, rather than restarting Godot
+on each iteration. Two CPU/headless scenarios are currently supported:
+`nodes` (scene-tree creation/destruction) and `packed` (8-KiB
+PackedByteArray churn). It samples `Performance.MEMORY_STATIC` once per
+cycle and the Python watchdog independently caps actual process RSS.
+
+```bash
+# Quick first pass:
+python3 tests/stress/memory_soak.py --godot ./bin/godot.macos.editor.arm64 \
+  --cycles 300 --batch 300 --repeats 3 \
+  --output out/memory-soak.json
+
+# Opt-in deep soak, preferably on an isolated machine:
+python3 tests/stress/memory_soak.py --godot ./bin/godot.macos.editor.arm64 \
+  --cycles 3000 --batch 800 --repeats 5 \
+  --timeout 1200 --rss-limit-mib 6144 \
+  --max-retained-growth-mib 256 \
+  --output out/memory-soak-long.json
+```
+
+The analyzer discards the first 10% of cycles as warm-up and compares
+median memory samples in early and late windows. It also calculates
+a linear memory trend after warm-up. This detects **retained allocator
+memory**, which may be caching or legitimate allocator behavior rather
+than a leak. Investigate suspicious results with Instruments Allocations
+and VM Tracker on macOS, or a native heap profiler. The RSS watchdog
+is a process safety limit, not an exact measure of transient allocation
+peaks. The growth threshold is opt-in; no threshold is a universal
+leak detector.
