@@ -39,6 +39,7 @@ const CompoundBatch2D := preload("res://physics_compound_filter_batch_2d.gd")
 const CompoundBatch3D := preload("res://physics_compound_filter_batch_3d.gd")
 const SoftBodyXPBDArea3D := preload("res://physics_soft_body_xpbd_area_3d.gd")
 const SoftBodyXPBDVolume3D := preload("res://physics_soft_body_xpbd_volume_3d.gd")
+const SoftBodyXPBDDihedral3D := preload("res://physics_soft_body_xpbd_dihedral_3d.gd")
 const ContactAngularFriction3D := preload("res://physics_contact_angular_friction_3d.gd")
 const OneWayOverflow2D := preload("res://physics_one_way_overflow_2d.gd")
 const CachedAABBStress := preload("res://physics_proxy_same_aabb.gd")
@@ -62,7 +63,7 @@ const CASES := [
 	"bitmap_rects", "bitmap_pipeline", "bitmap_morphology",
 	"curve_tessellation_2d", "curve_tessellation_3d", "curve_bake", "curve_nearest",
 	"canvas_transform_2d", "process_dispatch",
-	"physics_filter_toggle_2d", "physics_filter_toggle_3d", "physics_motion_filter_overflow_2d", "physics_motion_filter_overflow_3d", "physics_motion_exclusions_3d", "physics_motion_exclusions_2d", "physics_exception_pairs_2d", "physics_exception_pairs_3d", "physics_bvh_streaming_2d", "physics_bvh_streaming_3d", "physics_compound_filter_batch_2d", "physics_compound_filter_batch_3d", "physics_soft_body_xpbd_area_3d", "physics_soft_body_xpbd_volume_3d", "physics_contact_angular_friction_3d", "physics_one_way_overflow_2d",
+	"physics_filter_toggle_2d", "physics_filter_toggle_3d", "physics_motion_filter_overflow_2d", "physics_motion_filter_overflow_3d", "physics_motion_exclusions_3d", "physics_motion_exclusions_2d", "physics_exception_pairs_2d", "physics_exception_pairs_3d", "physics_bvh_streaming_2d", "physics_bvh_streaming_3d", "physics_compound_filter_batch_2d", "physics_compound_filter_batch_3d", "physics_soft_body_xpbd_area_3d", "physics_soft_body_xpbd_volume_3d", "physics_soft_body_xpbd_dihedral_3d", "physics_contact_angular_friction_3d", "physics_one_way_overflow_2d",
 ]
 
 var signal_total: int = 0
@@ -527,6 +528,8 @@ func _run_case(test_case: String, scale: int, frames: int, seed: int) -> Diction
 			return await SoftBodyXPBDArea3D.new().run(self, scale, frames)
 		"physics_soft_body_xpbd_volume_3d":
 			return await SoftBodyXPBDVolume3D.new().run(self, scale, frames)
+		"physics_soft_body_xpbd_dihedral_3d":
+			return await SoftBodyXPBDDihedral3D.new().run(self, scale, frames)
 		"physics_contact_angular_friction_3d":
 			return await ContactAngularFriction3D.new().run(self, scale, frames)
 		"physics_one_way_overflow_2d":
