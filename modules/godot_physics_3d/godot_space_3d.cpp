@@ -1291,6 +1291,10 @@ GodotSpace3D::GodotSpace3D() {
 	soft_body_plastic_creep_rate = Math::is_finite(configured_plastic_creep_rate) ? MAX(real_t(0.0), configured_plastic_creep_rate) : real_t(0.0);
 	const real_t configured_area_compliance = GLOBAL_GET("physics/3d/solver/soft_body_xpbd_area_compliance");
 	soft_body_xpbd_area_compliance = Math::is_finite(configured_area_compliance) ? MAX(real_t(0.0), configured_area_compliance) : real_t(0.0);
+	const real_t configured_tether_compliance = GLOBAL_GET("physics/3d/solver/soft_body_xpbd_tether_compliance");
+	soft_body_xpbd_tether_compliance = Math::is_finite(configured_tether_compliance) ? MAX(real_t(0.0), configured_tether_compliance) : real_t(0.0);
+	const real_t configured_tether_slack = GLOBAL_GET("physics/3d/solver/soft_body_xpbd_tether_slack");
+	soft_body_xpbd_tether_slack = Math::is_finite(configured_tether_slack) ? MAX(real_t(0.0), configured_tether_slack) : real_t(0.05);
 	const real_t configured_volume_compliance = GLOBAL_GET("physics/3d/solver/soft_body_xpbd_volume_compliance");
 	soft_body_xpbd_volume_compliance = Math::is_finite(configured_volume_compliance) ? MAX(real_t(0.0), configured_volume_compliance) : real_t(0.0);
 	contact_max_allowed_penetration = GLOBAL_GET("physics/3d/solver/contact_max_allowed_penetration");
