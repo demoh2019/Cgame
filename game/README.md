@@ -1658,3 +1658,23 @@ notifications, discount pricing, atomic purchases, save migration and
 invalid-save rejection. This is persistent **individual reputation**,
 not yet a persistent guild ranking or shared clan treasury; those will
 require an account-owned group domain to prevent cross-account fraud.
+
+
+## Guardian brace — frontline damage mitigation
+
+A successful party **Guardian taunt** now also grants its melee-equipped
+user a short **3-second defensive brace**. While in a real party and
+still carrying the weapon, the guardian takes **30% less direct damage
+from infected**. The mitigation is applied *after armor* to both normal
+zombie melee attacks and raid boss area attacks, without changing their
+telegraphs or dodge timing. It does not protect against other players,
+bleeding, infection, thirst, or environmental damage.
+
+The server starts brace only after a successful energy-paid taunt and
+expires it using the authoritative game tick. Leaving the party, losing
+the equipped weapon, dying or respawning removes its protection;
+rejected taunts cannot create free mitigation. HUD displays **Brace**
+remaining seconds alongside the existing guardian cooldown. A new
+`tests/test_guardian_brace.gd` suite covers damage, expiry, equipment
+and group invalidation, server snapshots and death cleanup. No changes
+to engine C++ are necessary for this mechanic.

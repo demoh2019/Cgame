@@ -32,6 +32,7 @@ const SUITES := [
 	"res://tests/test_zombie_ai.gd",
 	"res://tests/test_threat_aggro.gd",
 	"res://tests/test_guardian_taunt.gd",
+	"res://tests/test_guardian_brace.gd",
 	"res://tests/test_elite_infected.gd",
 	"res://tests/test_raid_loot_rights.gd",
 	"res://tests/test_loot_labels.gd",

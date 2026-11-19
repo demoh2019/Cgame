@@ -74,6 +74,7 @@ class Player:
 	var rest_cooldown: float = 0.0 # Per-survivor seconds until next camp recovery.
 	var party_aid_timer: float = 0.0 # Temporary medical support cooldown.
 	var guardian_timer: float = 0.0 # Session-only PvE frontline cooldown.
+	var guardian_brace: float = 0.0 # Short PvE-only defensive brace after a valid taunt.
 	var lake_drink_cooldown: float = 0.0 # Prevents lake hydration spam and relog bypass.
 	var input_budget: float = 0.0
 	var last_input_seq: int = 0
@@ -347,6 +348,7 @@ func _spawn_player(player: Player) -> void:
 	player.dodge_immunity = 0.0
 	player.party_aid_timer = 0.0
 	player.guardian_timer = 0.0
+	player.guardian_brace = 0.0
 	player.combat_energy = Defs.COMBAT_ENERGY_MAX
 	player.noise_radius = 0.0
 	player.noise_timer = 0.0
@@ -1534,11 +1536,12 @@ func cmd_guardian_taunt(peer_id: int) -> Dictionary:
 		targets[index].force_taunt(peer_id, GuardianTaunt.FOCUS_SECONDS)
 	player.combat_energy -= GuardianTaunt.ENERGY_COST
 	player.guardian_timer = GuardianTaunt.COOLDOWN
+	player.guardian_brace = GuardianTaunt.GUARD_SECONDS
 	player.action = {}
 	events.append({"type": "guardian_taunt", "peer": peer_id,
 		"x": player.position.x, "z": player.position.z, "count": count})
 	return {"ok": true, "count": count, "cooldown": player.guardian_timer,
-		"energy": player.combat_energy}
+		"brace_seconds": player.guardian_brace, "energy": player.combat_energy}
 
 
 ## Resolve active combat on the server; the client supplies only aim direction.
@@ -1927,6 +1930,7 @@ func _on_player_death(victim: Player, killer: int) -> void:
 	victim.dirty_character = true
 	victim.action = {}
 	victim.dodge_immunity = 0.0
+	victim.guardian_brace = 0.0
 	var zone: int = world.zone_at(victim.position.x, victim.position.z)
 	var drops_gear: bool = ZoneRisk.full_loot(zone)
 	victim.last_death_full_loot = drops_gear
@@ -1965,6 +1969,11 @@ func _tick_players(delta: float) -> void:
 		player.rest_cooldown = maxf(0.0, player.rest_cooldown - maxf(0.0, delta))
 		player.party_aid_timer = maxf(0.0, player.party_aid_timer - maxf(0.0, delta))
 		player.guardian_timer = maxf(0.0, player.guardian_timer - maxf(0.0, delta))
+		player.guardian_brace = maxf(0.0, player.guardian_brace - maxf(0.0, delta))
+		# A disconnected teammate or removed weapon cannot prolong protection.
+		if player.guardian_brace > 0.0 and (parties.members_of(player.id).size() < 2 or
+				not GuardianTaunt.melee_equipped(player.inventory)):
+			player.guardian_brace = 0.0
 		player.lake_drink_cooldown = maxf(0.0, player.lake_drink_cooldown - maxf(0.0, delta))
 		player.attack_timer = maxf(player.attack_timer - delta, 0.0)
 		player.skill_timer = maxf(player.skill_timer - delta, 0.0)
@@ -2181,6 +2190,14 @@ func _clear_raid_minions() -> void:
 	raid_minions.clear()
 
 
+## Shared by infected melee and telegraphed boss hits, never the PvP
+## damage branch. Weapon and group are rechecked at hit time.
+func _infected_damage_for(victim: Player, armored_damage: float) -> float:
+	return GuardianTaunt.brace_damage(armored_damage, victim.guardian_brace,
+		GuardianTaunt.melee_equipped(victim.inventory),
+		parties.members_of(victim.id).size() >= 2)
+
+
 func _resolve_raid_slam(boss_id: int, center: Vector2) -> void:
 	var boss = zombies.get(boss_id)
 	if boss == null or not boss.is_alive() or not boss.raid_boss:
@@ -2194,6 +2211,7 @@ func _resolve_raid_slam(boss_id: int, center: Vector2) -> void:
 			events.append({"type": "evaded", "peer": survivor.id, "zombie": boss_id})
 			continue
 		var damage: float = Combat.apply_armor(RaidEncounter.slam_damage(boss), survivor.inventory.armor)
+		damage = _infected_damage_for(survivor, damage)
 		survivor.survival.hurt(damage)
 		events.append({"type": "hit", "kind": "player", "id": survivor.id,
 			"damage": damage, "by": -boss_id})
@@ -2287,6 +2305,7 @@ func _tick_zombies(delta: float) -> void:
 				var armor_owned: bool = armor_id != "" and victim.inventory.count(armor_id) > 0
 				var damage: float = Combat.apply_armor(float(result["damage"]),
 					armor_id if armor_owned else "")
+				damage = _infected_damage_for(victim, damage)
 				var applied: float = victim.survival.hurt(damage)
 				# Only real carried armor protects from infected secondary wounds.
 				# PvP bleeding continues to follow its ordinary rules.
@@ -2479,6 +2498,7 @@ func snapshot_for(peer_id: int) -> Dictionary:
 			"lake_drink_cooldown": player.lake_drink_cooldown,
 			"combat_energy": player.combat_energy, "skill_cooldown": player.skill_timer,
 			"guardian_cooldown": player.guardian_timer,
+			"guardian_brace": player.guardian_brace,
 			"dodge_cooldown": player.dodge_timer, "dodge_immunity": player.dodge_immunity,
 			"rest_cooldown": player.rest_cooldown,
 			"party_aid_cooldown": player.party_aid_timer,

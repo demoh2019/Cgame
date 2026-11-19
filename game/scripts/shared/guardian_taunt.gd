@@ -8,6 +8,20 @@ const MAX_TARGETS := 3
 const FOCUS_SECONDS := 3.0
 const COOLDOWN := 20.0
 const ENERGY_COST := 25.0
+# Successfully pulling infected off the party grants a short defensive
+# brace, not permanent damage resistance or PvP protection.
+const GUARD_SECONDS := FOCUS_SECONDS
+const INFECTED_DAMAGE_REDUCTION := 0.30
+
+## Apply after armor only to an active, melee-equipped group guardian.
+## No infection, bleed, poison, hunger or player-vs-player reduction.
+static func brace_damage(damage: float, seconds: float, equipped: bool, grouped: bool) -> float:
+	if not is_finite(damage) or damage <= 0.0:
+		return 0.0
+	if is_finite(seconds) and seconds > 0.0 and equipped and grouped:
+		return damage * (1.0 - INFECTED_DAMAGE_REDUCTION)
+	return damage
+
 
 
 static func melee_equipped(inventory) -> bool:
