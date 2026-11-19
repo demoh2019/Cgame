@@ -2725,6 +2725,66 @@ TEST_CASE("[String] Path functions") {
 	CHECK(String("res://../../texture.png") == String("res://../../texture.png").simplify_path());
 }
 
+TEST_CASE("[String] Path joining keeps delimiters and avoids no-op allocations") {
+	CHECK(String("").path_join("file.txt") == "file.txt");
+	CHECK(String("base").path_join("") == "base/");
+	CHECK(String("base/").path_join("") == "base/");
+	CHECK(String("base").path_join("file") == "base/file");
+	CHECK(String("base/").path_join("file") == "base/file");
+	CHECK(String("base").path_join("/file") == "base/file");
+	CHECK(String("base/").path_join("/file") == "base//file");
+	CHECK(String(U"res://θ/").path_join(U"🍀.png") == U"res://θ/🍀.png");
+
+	const String empty;
+	const String source = U"res://données/";
+	CHECK(empty.path_join(source).ptr() == source.ptr());
+	CHECK(source.path_join(empty).ptr() == source.ptr());
+	CHECK(source == U"res://données/");
+	CHECK(source.path_join(source) == U"res://données/res://données/");
+}
+
+TEST_CASE("[String] Path joining randomized equivalence to concatenation") {
+	uint32_t seed = 0xA91D5482;
+	static constexpr char32_t alphabet[] = U"abcXYZ/_\\- .é🍀";
+	for (int trial = 0; trial < 512; trial++) {
+		seed ^= seed << 13;
+		seed ^= seed >> 17;
+		seed ^= seed << 5;
+		const int base_length = int(seed % 76);
+		const int file_length = int((seed >> 9) % 76);
+
+		String base;
+		base.resize_uninitialized(base_length + 1);
+		char32_t *base_data = base.ptrw();
+		for (int i = 0; i < base_length; i++) {
+			seed ^= seed << 13;
+			seed ^= seed >> 17;
+			seed ^= seed << 5;
+			base_data[i] = alphabet[seed % (sizeof(alphabet) / sizeof(char32_t) - 1)];
+		}
+		base_data[base_length] = 0;
+
+		String file;
+		file.resize_uninitialized(file_length + 1);
+		char32_t *file_data = file.ptrw();
+		for (int i = 0; i < file_length; i++) {
+			seed ^= seed << 13;
+			seed ^= seed >> 17;
+			seed ^= seed << 5;
+			file_data[i] = alphabet[seed % (sizeof(alphabet) / sizeof(char32_t) - 1)];
+		}
+		file_data[file_length] = 0;
+
+		const String expected = base.is_empty() ? file :
+				(base[base.length() - 1] == '/' || (!file.is_empty() && file[0] == '/')
+								? base + file
+								: base + "/" + file);
+		CHECK(base.path_join(file) == expected);
+		CHECK(base.length() == base_length);
+		CHECK(file.length() == file_length);
+	}
+}
+
 TEST_CASE("[String] Path extraction single-pass regressions") {
 	struct PathCase {
 		const char *path;
