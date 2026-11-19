@@ -78,6 +78,7 @@ private:
 	SelfList<GodotCollisionObject3D> pending_shape_update_list;
 
 	void _update_shapes();
+	void _collision_filter_changed();
 
 protected:
 	void _update_shapes_with_motion(const Vector3 &p_motion);
@@ -153,14 +154,20 @@ public:
 	}
 
 	_FORCE_INLINE_ void set_collision_layer(uint32_t p_layer) {
+		if (collision_layer == p_layer) {
+			return;
+		}
 		collision_layer = p_layer;
-		_shape_changed();
+		_collision_filter_changed();
 	}
 	_FORCE_INLINE_ uint32_t get_collision_layer() const { return collision_layer; }
 
 	_FORCE_INLINE_ void set_collision_mask(uint32_t p_mask) {
+		if (collision_mask == p_mask) {
+			return;
+		}
 		collision_mask = p_mask;
-		_shape_changed();
+		_collision_filter_changed();
 	}
 	_FORCE_INLINE_ uint32_t get_collision_mask() const { return collision_mask; }
 
