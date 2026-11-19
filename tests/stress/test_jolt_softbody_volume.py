@@ -135,18 +135,22 @@ class SoftBodyVolumeTests(unittest.TestCase):
         self.assertIn('simulation/soft_body_volume_preservation"), false', self.settings)
         self.assertIn("if (JoltProjectSettings::soft_body_volume_preservation)", self.code)
 
-    def test_constraints_created_after_surface_constraints(self):
+    def test_volume_fan_precedes_lra_cache_creation(self):
         self.assertIn("mVolumeConstraints.emplace_back(", self.builder)
         self.assertIn("CalculateVolumeConstraintVolumes()", self.builder)
         self.assertIn("CalculateVolumeConstraintVolumes", self.jolt)
+        # Jolt caches closest kinematic vertices during CreateConstraints.
+        # The fan must create its interior particle first, before the LRA
+        # cache is built, so all cached vertex IDs stay valid.
+        self.assertLess(
+            self.code.index("try_build_convex_volume_fan(*settings"),
+            self.code.index("settings->CreateConstraints(&vertex_attrib, 1, bend_type)"),
+        )
         self.assertLess(
             self.code.index("settings->CreateConstraints(&vertex_attrib, 1, bend_type)"),
-            self.code.index("try_build_convex_volume_fan(*settings"),
-        )
-        self.assertLess(
-            self.code.index("try_build_convex_volume_fan(*settings"),
             self.code.index("settings->Optimize()"),
         )
+        self.assertIn("append_volume_radial_springs(*settings", self.code)
 
     def test_validation_precedes_mutation(self):
         self.assertLess(self.builder.index("for (const JPH::SoftBodySharedSettings::Face &face : faces) {"),
