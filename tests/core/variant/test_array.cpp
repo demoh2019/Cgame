@@ -34,6 +34,8 @@ TEST_FORCE_LINK(test_array)
 
 #include "core/object/callable_mp.h"
 #include "core/variant/array.h"
+#include "core/variant/container_type_validate.h"
+#include "core/variant/typed_dictionary.h"
 #include "core/variant/typed_array.h"
 #include "tests/test_tools.h"
 
@@ -907,6 +909,101 @@ TEST_CASE("[Array] Test typed arrays") {
 	Array arr3;
 	arr3.set_typed(Variant::OBJECT, "Node", Variant());
 	CHECK_EQ(arr3.get_typed_class_name(), "Node");
+}
+
+
+TEST_CASE("[TypeConvertFastPath] strict conversions preserve constructor semantics") {
+	const Variant samples[] = {
+		Variant(true),
+		Variant(int64_t(27)),
+		Variant(3.75),
+		Variant(StringName("typed_example")),
+		Variant(NodePath("Root/Player")),
+		Variant(Vector2i(4, -7)),
+		Variant(Vector2(2.5, -3.75)),
+		Variant(Vector3i(6, 8, -11)),
+		Variant(Vector3(1.25, 2.5, -4.75)),
+		Variant(Rect2i(1, 2, 3, 4))
+	};
+	const Variant::Type targets[] = {
+		Variant::BOOL, Variant::INT, Variant::FLOAT, Variant::STRING,
+		Variant::STRING_NAME, Variant::NODE_PATH, Variant::VECTOR2,
+		Variant::VECTOR2I, Variant::VECTOR3, Variant::VECTOR3I,
+		Variant::RECT2, Variant::RECT2I
+	};
+	int checked = 0;
+	for (const Variant &sample : samples) {
+		for (Variant::Type type : targets) {
+			if (sample.get_type() == type || !Variant::can_convert_strict(sample.get_type(), type)) {
+				continue;
+			}
+			ContainerTypeValidate validator;
+			validator.variant_type = type;
+			Variant converted;
+			const Variant *result = validator.validate(sample, converted);
+			REQUIRE(result == &converted);
+
+			Variant reference;
+			const Variant *args[] = { &sample };
+			Callable::CallError err;
+			Variant::construct(type, reference, args, 1, err);
+			REQUIRE_EQ(err.error, Callable::CallError::CALL_OK);
+			CHECK_EQ(*result, reference);
+			CHECK_EQ(result->get_type(), type);
+			checked++;
+		}
+	}
+	CHECK(checked >= 12);
+}
+
+TEST_CASE("[TypeConvertFastPath] passing an already correct type does not allocate conversion temporary") {
+	ContainerTypeValidate validator;
+	validator.variant_type = Variant::INT;
+	const Variant source = 123;
+	Variant temporary = String("keep");
+	const Variant *result = validator.validate(source, temporary);
+	CHECK(result == &source);
+	CHECK_EQ(temporary, Variant("keep"));
+}
+
+TEST_CASE("[TypeConvertFastPath] incompatible strict conversion is rejected") {
+	ContainerTypeValidate validator;
+	validator.variant_type = Variant::FLOAT;
+	CHECK_FALSE(validator.test_validate(Variant("not a float")));
+	CHECK(validator.test_validate(Variant(42)));
+}
+
+TEST_CASE("[TypeConvertFastPath] repeated integer to float conversions are stable") {
+	ContainerTypeValidate validator;
+	validator.variant_type = Variant::FLOAT;
+	const Variant value = 13579;
+	Variant temporary;
+	for (int i = 0; i < 512; ++i) {
+		const Variant *result = validator.validate(value, temporary);
+		REQUIRE(result == &temporary);
+		CHECK_EQ(result->get_type(), Variant::FLOAT);
+		CHECK_EQ(double(*result), 13579.0);
+	}
+	CHECK_EQ(value.get_type(), Variant::INT);
+}
+
+TEST_CASE("[TypeConvertFastPath] typed array append retains numeric coercion and source") {
+	TypedArray<double> destination;
+	Array input = { 1, 2, 3.25, 4 };
+	destination.append_array(input);
+	REQUIRE_EQ(destination.size(), 4);
+	CHECK_EQ(double(destination[0]), 1.0);
+	CHECK_EQ(double(destination[1]), 2.0);
+	CHECK_EQ(double(destination[2]), 3.25);
+	CHECK_EQ(double(destination[3]), 4.0);
+	CHECK_EQ(input[0].get_type(), Variant::INT);
+}
+
+TEST_CASE("[TypeConvertFastPath] typed dictionary stores coerced numeric keys") {
+	TypedDictionary<double, double> dict;
+	dict[Variant(7)] = Variant(2);
+	REQUIRE_EQ(dict.size(), 1);
+	CHECK_EQ(dict[Variant(7.0)], Variant(2.0));
 }
 
 } // namespace TestArray
