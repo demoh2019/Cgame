@@ -45,9 +45,11 @@
 //   M(t) = -(2/3) R^3 (1-t^2)^(3/2).
 //
 // Their ANTIDERIVATIVES as functions of t (for normalized R=1) give
-// axial volume, axial first moment and transverse first moment exactly,
-// with no per-body quadrature, mesh clipping or allocation. Cutting the
-// axial interval at t=+1 and t=-1 keeps dry/full/partial regimes distinct.
+// axial volume, axial first moment and transverse first moment exactly.
+// For nearly horizontal axes a bounded, fixed 16-point quadrature prevents
+// subtraction cancellation (a first-order expansion covers ultra-small
+// angles). No mesh clipping or allocation is required. Cutting the axial
+// interval at t=+1 and t=-1 keeps dry/full/partial regimes distinct.
 struct GodotPhysicsCylinderDiskAntiderivatives3D {
 	double area = 0.0;
 	double axial_area = 0.0;
@@ -182,6 +184,38 @@ _FORCE_INLINE_ bool godot_physics_fluid_cylinder_sample_3d(
 		axial_integral = -(ay / beta) * (4.0 / 3.0) *
 				half_length * half_length * half_length * root;
 		transverse_integral = 2.0 * half_length * godot_physics_fluid_cylinder_disk_moment_3d(t);
+	} else if (Math::abs(ay) * half_length <= 0.1 * beta &&
+			Math::abs(level / beta) <= 0.85) {
+		// For shallow slopes, subtracting near-equal antiderivatives loses
+		// significant digits in the axial moment. This rare interval uses
+		// a fixed 16-node Gauss-Legendre rule with symmetric paired samples,
+		// guaranteeing bounded O(1) work, no allocations and no drift from
+		// repeated subdivision. Both ends stay well inside the circular
+		// segment, so the integrands are smooth across the interval.
+		static constexpr double nodes[8] = {
+			0.09501250983763744, 0.2816035507792589,
+			0.45801677765722737, 0.6178762444026438,
+			0.7554044083550030, 0.8656312023878318,
+			0.9445750230732326, 0.9894009349916499
+		};
+		static constexpr double weights[8] = {
+			0.18945061045506864, 0.18260341504492364,
+			0.16915651939500265, 0.14959598881657670,
+			0.12462897125553407, 0.09515851168249260,
+			0.062253523938647456, 0.027152459411754176
+		};
+		for (int i = 0; i < 8; ++i) {
+			const double t = half_length * nodes[i];
+			const double first_t = (level - ay * t) / beta;
+			const double second_t = (level + ay * t) / beta;
+			const double first_area = godot_physics_fluid_cylinder_disk_area_3d(first_t);
+			const double second_area = godot_physics_fluid_cylinder_disk_area_3d(second_t);
+			const double first_moment = godot_physics_fluid_cylinder_disk_moment_3d(first_t);
+			const double second_moment = godot_physics_fluid_cylinder_disk_moment_3d(second_t);
+			wet_integral += half_length * weights[i] * (first_area + second_area);
+			axial_integral += half_length * weights[i] * t * (first_area - second_area);
+			transverse_integral += half_length * weights[i] * (first_moment + second_moment);
+		}
 	} else {
 		// Split at all in-range full-disk and dry-disk transitions.
 		// At most four boundaries and three intervals, on the stack.
