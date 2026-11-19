@@ -1,4 +1,4 @@
-# GodotPhysics3D soft-body vertex/triangle self-collision
+# GodotPhysics3D soft-body vertex–triangle and edge–edge self-collision
 
 This patch adds **experimental discrete self-collision of a soft mesh with
 itself**. It is intended to stop nonadjacent regions of deforming cloth
@@ -6,8 +6,8 @@ from occupying the same space, complementing Cgame's existing XPBD stretch,
 dihedral bending, triangle area, volume, and tether constraints.
 
 The implementation uses Cgame's existing **DynamicBVH triangle tree** for
-broadphase, following the vertex-triangle approach to cloth self-collision
-in the Position-Based Dynamics literature. This is intentionally a
+broadphase, following the vertex–triangle and segment–segment approach to cloth
+self-collision in the Position-Based Dynamics literature. This is intentionally a
 limited discrete contact solver rather than FEM, tearing, inter-body
 soft-soft collision, or continuous self-collision CCD.
 
@@ -20,6 +20,7 @@ Select `GodotPhysics3D` and set in Project Settings -> Physics -> 3D -> Solver:
 3d/physics_engine="GodotPhysics3D"
 3d/solver/soft_body_self_collision_thickness=0.02
 3d/solver/soft_body_self_collision_compliance=0.0
+3d/solver/soft_body_self_collision_edge_contacts=true
 ```
 
 - `soft_body_self_collision_thickness=0.0` (default) **disables** all
@@ -29,6 +30,11 @@ Select `GodotPhysics3D` and set in Project Settings -> Physics -> 3D -> Solver:
 - `soft_body_self_collision_compliance=0.0` (default) uses the rigid
   position-projection limit when self collision is enabled. Higher values
   yield softer collision response. Compliance is scaled by `1/dt²`.
+- `soft_body_self_collision_edge_contacts=false` (default) enables the
+  **additional** crossed-edge/near-edge narrowphase only when set to true
+  *and* thickness is positive. Existing vertex–triangle simulations keep
+  their previous cost and behavior unless explicitly enabled. An edge
+  crossing without any close endpoints is therefore detectable.
 - Values are sanitized as finite, nonnegative values once per
   GodotPhysics3D physics space. Recreate the world to apply changes.
 
@@ -58,10 +64,23 @@ Select `GodotPhysics3D` and set in Project Settings -> Physics -> 3D -> Solver:
    mass. Pinned particles (inverse mass 0) remain fixed. At exactly
    zero separation, use the point's previous side of the triangle or
    fall back to face winding to choose a normal.
-6. Refit the face BVH again if contacts were collected, so ray queries
-   and next-frame prediction do not use stale bounds. Reconstruct
-   particle velocities **after** contact correction, preventing a
-   spurious pop on the following step.
+6. Refit the face BVH again if vertex/face contacts were collected.
+7. **Optionally**, walk each unique structural edge against the same face
+   BVH and consider the three edges of each nearby face. Canonical
+   64-bit edge IDs avoid checking a pair twice. Skip edges sharing a
+   vertex or within the structural one-ring, preserving ordinary cloth
+   folds. Select the **two nearest distinct nonadjacent edges** in
+   deterministic (distance, edge-key) order per source edge. All
+   candidate edge pairs are gathered before any edge correction.
+8. Apply an inverse-mass-weighted edge/edge position correction. The
+   segment closest-point parameters provide linear endpoint weights.
+   At exactly crossing edges the separating normal uses the segment
+   cross product and their previous positions; collinear coincident
+   edges fall back to a deterministic perpendicular. All-pinned edges
+   and non-finite results are skipped.
+9. Refit the face BVH again after edge corrections. Reconstruct particle
+   velocities **after** both contact types, preventing spurious pops on
+   subsequent steps.
 
 ## Bounded cost and memory
 
@@ -71,11 +90,18 @@ existing BVH (no new spatial index) and apply three strict budgets:
 - at most **4 retained candidate faces per vertex**;
 - at most **65,536 total stored contacts per step**;
 - at most **128 face leaves inspected per vertex** and **1,048,576**
-  total face leaves inspected per soft-body step.
+  total face leaves inspected per soft-body step;
+- at most **2 closest edges per structural edge**, **32,768** total edge
+  contact pairs per step;
+- at most **128 candidate edges examined per source edge** and
+  **1,048,576** total edge tests per soft body step.
 
-A transient `LocalVector` stores pairs of 32-bit (vertex, face) IDs
-and is reused across frames. The adjacency set is built only after
-self collision is enabled and is cleared on mesh destruction. There is
+A transient `LocalVector` stores pairs of 32-bit (vertex, face) IDs,
+and another stores four 32-bit vertex indices per edge contact (bounded
+to 512 KiB of payload, ignoring over-allocation). Both are reused
+across frames. The unique structural edge list is allocated **only**
+when edge contacts are enabled; both it and the adjacency hash table
+are released when self collision is disabled or the mesh destroyed. There is
 no extra hot-path ProjectSettings read. CPU/RAM can increase in enabled
 mode, especially when many layers are packed closely; strict limits
 prevent unbounded candidate storage or narrowphase leaf tests, but do
@@ -91,9 +117,10 @@ structural constraints are left unchanged.
 - **Discrete only**: a vertex may tunnel completely through a triangle
   between steps. Fast/violent folds require a smaller timestep or
   future swept vertex-triangle CCD.
-- Resolves **vertex vs triangle** only. Thin crossed edges without a
-  nearby vertex, self-intersecting faces, and continuous edge-edge
-  contact are not supported.
+- Resolves **vertex vs triangle**, plus optionally **discrete edge
+  vs edge**. Continuous swept edge-edge/vertex-triangle CCD, face-face
+  interpenetration correction, and high-speed tunneling prevention are
+  not yet supported.
 - One Gauss-Seidel position-projection pass per physics step, not a
   full XPBD persistent-contact manifold or frictional self collision.
 - The one-ring exclusion is topological; close but nonadjacent
@@ -119,11 +146,20 @@ python3 -m unittest discover -s tests/stress -p 'test_physics_softbody_self_coll
   --test-case="[Physics] Self-collision mass weighting respects pinned vertices and compliant contacts"
 ./bin/godot.linuxbsd.editor.dev.x86_64 --headless --test \
   --test-case="[Physics] Self-collision rejects invalid and degenerate triangles without mutation"
+./bin/godot.linuxbsd.editor.dev.x86_64 --headless --test \
+  --test-case="[Physics] Self-collision edge pairs detect crossed segments with distant endpoints"
+./bin/godot.linuxbsd.editor.dev.x86_64 --headless --test \
+  --test-case="[Physics] Self-collision finite segments handle skew and parallel edges"
+./bin/godot.linuxbsd.editor.dev.x86_64 --headless --test \
+  --test-case="[Physics] Self-collision edge contact compliance and pinned particles"
+./bin/godot.linuxbsd.editor.dev.x86_64 --headless --test \
+  --test-case="[Physics] Self-collision edge contact ignores degeneracy and invalid inputs"
 ```
 
 Before merging, test a small folded cloth, a hanging pinned sheet, an
 open sheet and a non-manifold triangle mesh under identical scene
-conditions with self collision OFF and ON. Compare collision
+conditions with self collision OFF, vertex-only and vertex+edge contacts ON.
+Compare collision
 penetrations, frame time p50/p95/p99, peak RSS, allocator churn and
 NaN counts. The feature is **not a speedup claim**. Full native
 compilation, scene regressions and profiling remain prerequisites.
