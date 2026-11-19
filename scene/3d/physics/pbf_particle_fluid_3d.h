@@ -61,7 +61,7 @@ class PBFParticleFluid3D : public Node3D {
 	Vector<Vector3> density_pressure_velocities;
 	Vector<Vector3> density_pressure_corrections;
 	Vector<real_t> density_pressure_multipliers;
-	Vector<real_t> density_pressure_inverse_denominators;
+	Vector<real_t> density_pressure_denominators;
 	Vector<real_t> lambdas;
 	Vector<real_t> densities;
 	Vector<PhysicsPBFCell3D> cells;
