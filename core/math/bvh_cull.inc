@@ -442,14 +442,21 @@ void _cast_segment_iterative(uint32_t p_node_id, real_t p_root_entry, const POIN
 			// leaf AABBs against the original ray, then reject entries after
 			// the currently clipped fraction.
 			int nearest_item = -1;
-			if (leaf.num_items >= 16) {
+			const bool dense_leaf = leaf.num_items >= 16;
+			// Cache entry fractions for dense leaves to avoid testing each
+			// proxy's ray/AABB slabs twice. Entries use the original ray
+			// and are invalidated only by rejecting at the current clip.
+			real_t dense_entry[MAX_ITEMS];
+			if (dense_leaf) {
 				real_t nearest_entry = Math::INF;
 				for (int i = 0; i < leaf.num_items; i++) {
 					const BVHABB_CLASS &aabb = leaf.get_aabb(i);
 					real_t entry;
 					if (!aabb.intersects_segment(segment, &entry) || entry > r_max_fraction + CMP_EPSILON) {
+						dense_entry[i] = Math::INF;
 						continue;
 					}
+					dense_entry[i] = entry;
 					if (nearest_item == -1 || entry < nearest_entry) {
 						nearest_entry = entry;
 						nearest_item = i;
@@ -465,12 +472,19 @@ void _cast_segment_iterative(uint32_t p_node_id, real_t p_root_entry, const POIN
 				if (i >= 0 && i == nearest_item) {
 					continue;
 				}
-				if (i >= 0) {
+				if (dense_leaf) {
+					// A nearer exact hit can clip the ray after the first
+					// scan; compare cached entries without another slab test.
+					if (dense_entry[item_index] > r_max_fraction + CMP_EPSILON) {
+						continue;
+					}
+				} else {
+					// Small leaves still use a single-pass no-cache path.
 					real_t entry;
 					if (!leaf.get_aabb(item_index).intersects_segment(segment, &entry) || entry > r_max_fraction + CMP_EPSILON) {
 						continue;
 					}
-			}
+				}
 				const ItemExtra &extra = _extra[leaf.get_item_ref_id(item_index)];
 				if (USE_PAIRS && !USER_CULL_TEST_FUNCTION::user_cull_check(p_tester, extra.userdata)) {
 					continue;
