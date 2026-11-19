@@ -247,6 +247,7 @@ public:
 	_FORCE_INLINE_ real_t get_soft_body_self_collision_friction() const { return soft_body_self_collision_friction; }
 	_FORCE_INLINE_ int get_soft_body_self_collision_max_contacts_per_vertex() const { return soft_body_self_collision_max_contacts_per_vertex; }
 	_FORCE_INLINE_ bool is_soft_body_self_collision_edge_edge_enabled() const { return soft_body_self_collision_edge_edge; }
+	_FORCE_INLINE_ bool is_soft_body_self_collision_ccd_enabled() const { return soft_body_self_collision_ccd; }
 	_FORCE_INLINE_ real_t get_soft_body_xpbd_tether_compliance() const { return soft_body_xpbd_tether_compliance; }
 	_FORCE_INLINE_ real_t get_soft_body_xpbd_tether_slack() const { return soft_body_xpbd_tether_slack; }
 	_FORCE_INLINE_ real_t get_soft_body_xpbd_volume_compliance() const { return soft_body_xpbd_volume_compliance; }
