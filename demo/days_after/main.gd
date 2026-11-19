@@ -44,6 +44,8 @@ func _configure_controls() -> void:
     _bind_key("attack", KEY_F)
     _bind_key("craft_spear", KEY_8)
     _bind_key("craft_vest", KEY_9)
+    _bind_key("craft_antiseptic", KEY_H)
+    _bind_key("use_antiseptic", KEY_0)
 
 
 func _bind_key(action_name: String, key_code: int) -> void:
@@ -259,7 +261,7 @@ func _build_hud() -> void:
     help_label.text = "WASD движение | Shift бег | Space прыжок | F удар\n" + \
         "E сбор | 1 еда | 2 вода | 3 бинт | 4 инструмент | 5 лечение\n" + \
         "6 улучшенный бинт | 7 лечение | 8 копьё | 9 броня\n" + \
-        "Esc мышь | ЛКМ захват мыши | R перезапуск"
+        "H антисептик (крафт) | 0 применить | Esc мышь | R рестарт"
     column.add_child(help_label)
 
     prompt_label = Label.new()
@@ -278,8 +280,9 @@ func _process(_delta: float) -> void:
         return
     hud_label.text = (
         "DAYS AFTER  ×  SANDBOX SURVIVAL\n" +
-        "Здоровье %d | Голод %d | Жажда %d\n" % [
-            roundi(player.health), roundi(player.hunger), roundi(player.thirst)
+        "Здоровье %d | Голод %d | Жажда %d | Заражение %d\n" % [
+            roundi(player.health), roundi(player.hunger), roundi(player.thirst),
+            roundi(player.infection)
         ] +
         "Рюкзак: еда %d, вода %d, древесина %d, камень %d, волокно %d\n" % [
             player.get_item_count("food"), player.get_item_count("water"),
@@ -301,8 +304,9 @@ func _process(_delta: float) -> void:
             player.equipped_armor if not player.equipped_armor.is_empty() else "нет",
             player.equipped_tool if not player.equipped_tool.is_empty() else "нет"
         ] +
-        "Заражённые: %d/%d | Боевой опыт %d\n" % [
-            infected_kills, infected_total, player.combat_xp
+        "Заражённые: %d/%d | Боевой опыт %d | Антисептик %d\n" % [
+            infected_kills, infected_total, player.combat_xp,
+            player.get_item_count("antiseptic")
         ] +
         player.last_message
     )

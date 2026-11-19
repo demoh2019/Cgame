@@ -16,7 +16,8 @@ static func snapshot(player: Node3D) -> Dictionary:
         "stats": {
             "health": float(player.get("health")),
             "hunger": float(player.get("hunger")),
-            "thirst": float(player.get("thirst"))
+            "thirst": float(player.get("thirst")),
+            "infection": float(player.get("infection"))
         },
         "inventory": (player.get("inventory") as Dictionary).duplicate(true),
         "experience": {
@@ -69,6 +70,13 @@ static func validate_snapshot(data: Variant) -> bool:
         var value: Variant = stats.get(stat)
         if not (value is int or value is float) or float(value) < 0.0 or float(value) > 100.0:
             return false
+    # Old version-1 snapshots have no infection key; treat them as healthy.
+    # New snapshots store an explicitly bounded, finite infection level.
+    var infection: Variant = stats.get("infection", 0.0)
+    if not (infection is int or infection is float):
+        return false
+    if not is_finite(float(infection)) or float(infection) < 0.0 or float(infection) > 100.0:
+        return false
     if not _valid_stack_map(experience.get("gathering"), MAX_XP):
         return false
     for kind in ["wood", "stone", "fiber"]:
@@ -105,6 +113,7 @@ static func apply_snapshot(player: Node3D, data: Variant) -> bool:
     player.set("health", float(stats["health"]))
     player.set("hunger", float(stats["hunger"]))
     player.set("thirst", float(stats["thirst"]))
+    player.set("infection", float(stats.get("infection", 0.0)))
     player.set("inventory", (data["inventory"] as Dictionary).duplicate(true))
     player.set("gathering_xp", (experience["gathering"] as Dictionary).duplicate(true))
     player.set("crafting_xp", int(experience["crafting"]))

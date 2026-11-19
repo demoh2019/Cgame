@@ -12,6 +12,7 @@ const GRAVITY := 18.0
 const MOUSE_SENSITIVITY := 0.0025
 const XP_PER_LEVEL := 60
 const SAVE_STATE = preload("res://save_state.gd")
+const INFECTION_RULES = preload("res://infection.gd")
 
 const RECIPES := {
     "field_bandage": {"fiber_t1": 2},
@@ -20,11 +21,13 @@ const RECIPES := {
     "rusty_spear": {"wood_t1": 2, "stone_t1": 2},
     "scrap_vest": {"fiber_t1": 3, "stone_t1": 2},
     "reinforced_spear": {"wood_t2": 2, "stone_t2": 2, "fiber_t1": 1},
+    "antiseptic": {"fiber_t1": 2, "water": 1},
 }
 
 var health: float = 100.0
 var hunger: float = 80.0
 var thirst: float = 80.0
+var infection: float = 0.0
 var inventory: Dictionary = {}
 var gathering_xp: Dictionary = {"wood": 0, "stone": 0, "fiber": 0}
 var crafting_xp: int = 0
@@ -81,7 +84,14 @@ func _physics_process(delta: float) -> void:
     thirst = maxf(0.0, thirst - 0.38 * delta)
     if hunger <= 0.0 or thirst <= 0.0:
         health = maxf(0.0, health - 3.0 * delta)
+    var disease: Dictionary = INFECTION_RULES.advance(infection, delta)
+    infection = float(disease["infection"])
+    health = maxf(0.0, health - float(disease["damage"]))
 
+    if Input.is_action_just_pressed("craft_antiseptic"):
+        craft_recipe("antiseptic")
+    if Input.is_action_just_pressed("use_antiseptic"):
+        use_antiseptic()
     if Input.is_action_just_pressed("attack"):
         perform_attack()
     if Input.is_action_just_pressed("craft_spear"):
@@ -213,6 +223,23 @@ func use_bandage(item_id: String) -> bool:
     inventory[item_id] = get_item_count(item_id) - 1
     health = minf(100.0, health + (60.0 if item_id == "reinforced_bandage" else 30.0))
     last_message = "Раны обработаны: %s." % item_id
+    return true
+
+
+func expose_to_infection(dose: float) -> void:
+    if health <= 0.0:
+        return
+    infection = INFECTION_RULES.expose(infection, dose)
+    if infection >= INFECTION_RULES.SYMPTOM_THRESHOLD:
+        last_message = "Заражение усиливается! Нужен антисептик."
+
+
+func use_antiseptic() -> bool:
+    if health <= 0.0 or infection <= 0.0 or get_item_count("antiseptic") <= 0:
+        return false
+    inventory["antiseptic"] = get_item_count("antiseptic") - 1
+    infection = INFECTION_RULES.treat(infection)
+    last_message = "Антисептик применён. Заражение: %d." % roundi(infection)
     return true
 
 

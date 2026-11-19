@@ -8,6 +8,7 @@ const MOVE_SPEED := 2.4
 const GRAVITY := 18.0
 const AGGRO_RADIUS := 19.0
 const STRIKE_RADIUS := 1.6
+const INFECTION_DOSE := 18.0
 
 var target: Node3D
 var health: float = 72.0
@@ -52,6 +53,8 @@ func _physics_process(delta: float) -> void:
             movement = to_target.normalized()
         elif distance <= STRIKE_RADIUS and strike_cooldown <= 0.0:
             target.call("take_damage", 10.0)
+            if target.has_method("expose_to_infection"):
+                target.call("expose_to_infection", INFECTION_DOSE)
             strike_cooldown = 1.3
 
     velocity.x = movement.x * MOVE_SPEED

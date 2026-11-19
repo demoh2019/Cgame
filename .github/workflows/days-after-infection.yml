@@ -1,0 +1,54 @@
+name: Days After infection and medicine smoke
+
+on:
+  pull_request:
+    paths:
+      - 'demo/days_after/**'
+      - '.github/workflows/days-after-infection.yml'
+  push:
+    branches: [develop]
+    paths:
+      - 'demo/days_after/**'
+      - '.github/workflows/days-after-infection.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  infection:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - name: Download checksum-verified baseline Godot 4.7.2
+        shell: bash
+        run: |
+          set -euo pipefail
+          curl --retry 4 --retry-delay 3 -fL -o godot.zip https://github.com/godotengine/godot-builds/releases/download/4.7.2-stable/Godot_v4.7.2-stable_linux.x86_64.zip
+          echo 'cadd3204e728a35d3f13adb7fd0d7902636b79f6b95c40c265eb73b6c35329e4  godot.zip' | sha256sum --check --status
+          unzip -q godot.zip
+          chmod +x Godot_v4.7.2-stable_linux.x86_64
+          mv Godot_v4.7.2-stable_linux.x86_64 godot
+      - name: Parse scripts and import project
+        shell: bash
+        run: |
+          set -euo pipefail
+          ./godot --headless --path demo/days_after --editor --import --quit 2>&1 | tee infection-import.log
+          if grep -Ei 'SCRIPT ERROR:|Parse Error:|Failed to load script' infection-import.log; then exit 1; fi
+      - name: Verify infection lifecycle and save compatibility
+        shell: bash
+        run: |
+          set -euo pipefail
+          timeout 120s ./godot --headless --path demo/days_after --script res://smoke_test_infection.gd 2>&1 | tee infection-test.log
+          grep -F 'PASS: Days After infection exposure, crafting, treatment and legacy save compatibility.' infection-test.log
+          if grep -Ei 'SCRIPT ERROR:|Parse Error:|Assertion failed' infection-test.log; then exit 1; fi
+      - name: Upload logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: days-after-infection-logs
+          if-no-files-found: ignore
+          path: |
+            infection-import.log
+            infection-test.log

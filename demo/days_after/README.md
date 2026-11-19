@@ -107,3 +107,24 @@ world containers, crafting cooldowns and multiplayer state are not persisted.
 ```sh
 ./bin/godot.linuxbsd.editor.x86_64 --headless --path demo/days_after --script res://smoke_test_saves.gd
 ```
+
+## Infection and field medicine
+
+Infected melee attacks deliver a deterministic **18 infection points** in
+addition to direct damage. At **50/100** infection, untreated infection begins
+to drain 1.25 health per second. Infection recovers naturally by 0.02/sec.
+Craft an **antiseptic** using **2 fiber T1 + 1 water** (press **H**) and consume
+it with **0** to remove 55 infection points. Antiseptic cannot be wasted when
+the survivor is healthy. The existing classless crafting skill earns XP.
+
+The state is included in the existing version-1 local character save, with
+a backwards-compatible default of zero for older version-1 snapshots; invalid
+infection values reject a load *before* any player field changes. This model
+is an original fictional gameplay system, not medical guidance or a simulation
+of real infection.
+
+Regression:
+
+```sh
+./bin/godot.linuxbsd.editor.x86_64 --headless --path demo/days_after --script res://smoke_test_infection.gd
+```
