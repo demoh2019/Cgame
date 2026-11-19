@@ -435,40 +435,46 @@ AStarGrid2D::Point *AStarGrid2D::_jump(Point *p_from, Point *p_to) {
 }
 
 AStarGrid2D::Point *AStarGrid2D::_forced_successor(int32_t p_x, int32_t p_y, int32_t p_dx, int32_t p_dy, bool p_inclusive) {
-	// Remembering previous results can improve performance.
-	bool l_prev = false, r_prev = false, l = false, r = false;
+	// JPS scans a straight line. Turn 2D coordinates into an index only
+	// once, then walk the padded solid mask with constant offsets. This
+	// avoids multiple coordinate multiplications at every visited cell.
+	const ptrdiff_t stride = ptrdiff_t(region.size.x) + 2;
+	const ptrdiff_t origin = (ptrdiff_t(p_y) - region.position.y + 1) * stride + ptrdiff_t(p_x) - region.position.x + 1;
+	const ptrdiff_t step = ptrdiff_t(p_dx) + ptrdiff_t(p_dy) * stride;
+	const ptrdiff_t side = ptrdiff_t(p_dy) + ptrdiff_t(p_dx) * stride;
+	const bool *mask = solid_mask.ptr();
 
-	int32_t o_x = p_x, o_y = p_y;
-	if (p_inclusive) {
-		o_x += p_dx;
-		o_y += p_dy;
-	}
+	ptrdiff_t current = origin + (p_inclusive ? step : 0);
+	ptrdiff_t left = origin - side;
+	ptrdiff_t right = origin + side;
+	int32_t x = p_x + (p_inclusive ? p_dx : 0);
+	int32_t y = p_y + (p_inclusive ? p_dy : 0);
+	bool prev_left = false;
+	bool prev_right = false;
+	bool walk_left = false;
+	bool walk_right = false;
 
-	int32_t l_x = p_x - p_dy, l_y = p_y - p_dx;
-	int32_t r_x = p_x + p_dy, r_y = p_y + p_dx;
-
-	while (_is_walkable(o_x, o_y)) {
-		if (end->id.x == o_x && end->id.y == o_y) {
+	while (!mask[current]) {
+		if (end->id.x == x && end->id.y == y) {
 			return end;
 		}
 
-		l_prev = l || _is_walkable(l_x, l_y);
-		r_prev = r || _is_walkable(r_x, r_y);
+		// Retain the original short-circuit logic for forced neighbors:
+		// previous sides refer to the cell before advancing the scan.
+		prev_left = walk_left || !mask[left];
+		prev_right = walk_right || !mask[right];
+		left += step;
+		right += step;
+		walk_left = !mask[left];
+		walk_right = !mask[right];
 
-		l_x += p_dx;
-		l_y += p_dy;
-		r_x += p_dx;
-		r_y += p_dy;
-
-		l = _is_walkable(l_x, l_y);
-		r = _is_walkable(r_x, r_y);
-
-		if ((l && !l_prev) || (r && !r_prev)) {
-			return _get_point_unchecked(o_x, o_y);
+		if ((walk_left && !prev_left) || (walk_right && !prev_right)) {
+			return _get_point_unchecked(x, y);
 		}
 
-		o_x += p_dx;
-		o_y += p_dy;
+		current += step;
+		x += p_dx;
+		y += p_dy;
 	}
 	return nullptr;
 }

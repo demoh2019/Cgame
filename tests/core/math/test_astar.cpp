@@ -843,4 +843,46 @@ TEST_CASE("[AStarGrid2D][Performance] Row-major neighbor offsets preserve all di
 	}
 }
 
+
+TEST_CASE("[AStarGrid2D][Performance] JPS straight scans preserve boundary and shifted-grid routes") {
+	AStarGrid2D grid;
+	grid.set_region(Rect2i(-31, 13, 65, 33));
+	grid.update();
+
+	const Vector2i starts[] = {
+		Vector2i(-30, 18),
+		Vector2i(32, 18),
+		Vector2i(-30, 18),
+		Vector2i(-30, 44),
+	};
+	const Vector2i targets[] = {
+		Vector2i(32, 18),
+		Vector2i(-30, 18),
+		Vector2i(-30, 44),
+		Vector2i(-30, 18),
+	};
+	for (int mode = 0; mode < AStarGrid2D::DIAGONAL_MODE_MAX; ++mode) {
+		grid.set_diagonal_mode(static_cast<AStarGrid2D::DiagonalMode>(mode));
+		for (int index = 0; index < 4; ++index) {
+			grid.set_jumping_enabled(false);
+			const TypedArray<Vector2i> baseline = grid.get_id_path(starts[index], targets[index]);
+			REQUIRE_FALSE(baseline.is_empty());
+			grid.set_jumping_enabled(true);
+			for (int repeat = 0; repeat < 3; ++repeat) {
+				const TypedArray<Vector2i> route = grid.get_id_path(starts[index], targets[index]);
+				REQUIRE_FALSE(route.is_empty());
+				CHECK_EQ(Vector2i(route[0]), starts[index]);
+				CHECK_EQ(Vector2i(route[route.size() - 1]), targets[index]);
+				CHECK(route.size() <= baseline.size());
+			}
+		}
+	}
+
+	// The padded border stops a straight JPS scan at the actual grid edge.
+	grid.set_diagonal_mode(AStarGrid2D::DIAGONAL_MODE_NEVER);
+	grid.set_jumping_enabled(true);
+	CHECK_FALSE(grid.get_id_path(Vector2i(-31, 13), Vector2i(33, 13)).is_empty());
+	CHECK_FALSE(grid.get_id_path(Vector2i(33, 45), Vector2i(33, 13)).is_empty());
+}
+
 } // namespace TestAStar
