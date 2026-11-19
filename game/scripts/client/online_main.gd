@@ -433,6 +433,23 @@ func _unhandled_input(event: InputEvent) -> void:
 				_interact()
 			KEY_F:
 				client.drink()
+			KEY_G:
+				if not hud.is_menu_open() and bool(client.you.get("alive", false)):
+					var skill_direction: Vector2 = _aim_direction()
+					if skill_direction == Vector2.ZERO:
+						skill_direction = Vector2(sin(client.yaw), cos(client.yaw))
+					client.skill(skill_direction)
+			KEY_SPACE:
+				if not hud.is_menu_open() and bool(client.you.get("alive", false)):
+					# Move-direction dodge, or current aim/facing when stationary.
+					var dodge_direction := Vector2(
+						Input.get_axis("ui_left", "ui_right") + float(Input.is_key_pressed(KEY_D)) - float(Input.is_key_pressed(KEY_A)),
+						Input.get_axis("ui_up", "ui_down") + float(Input.is_key_pressed(KEY_S)) - float(Input.is_key_pressed(KEY_W)))
+					if dodge_direction.length_squared() < 0.0001:
+						dodge_direction = _aim_direction()
+					if dodge_direction.length_squared() < 0.0001:
+						dodge_direction = Vector2(sin(client.yaw), cos(client.yaw))
+					client.dodge(dodge_direction.normalized())
 			KEY_I, KEY_TAB:
 				hud.toggle_inventory()
 			KEY_C:
