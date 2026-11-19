@@ -283,6 +283,34 @@ this solver. Benchmark identical builds on the same machine, and separate
 sparse-body tests from expensive soft contact workloads. These new cases do
 not constitute a completed performance measurement until run.
 
+## SoftBody3D central impulse and force with pinned particles
+
+The built-in GodotPhysics3D solver now distributes `soft_body_apply_central_impulse`
+and `soft_body_apply_central_force` over **dynamic physics particles only**.
+Before this fix, each request was divided by all mesh particles; a pin-heavy
+mesh silently lost most of its requested total momentum/force because
+kinematic particles ignore forces. Meshes with zero available dynamic
+particles (all pinned or not initialized) now return without dividing by
+zero. A 32-bit per-body counter is maintained during mesh rebuild, pin,
+unpin, and welded-visual-vertex alias transitions. There is no O(vertices)
+counting scan per central force or impulse and no additional per-vertex
+memory.
+
+```bash
+python3 -m unittest discover -s tests/stress -p test_physics_soft_dynamic_force.py -v
+
+./bin/godot.macos.editor.arm64 --headless --path tests/stress \
+  --script res://physics_soft_dynamic_impulse_regression.gd
+```
+
+The runtime scene creates matched soft spheres without stretch constraints.
+One sphere has approximately half its physics particles pinned. After an
+equal central impulse, a dynamic vertex should receive a larger displacement
+than the corresponding fully dynamic vertex; subsequently, the fully pinned
+sphere must ignore both impulses and forces. The test requires a compiled
+Cgame binary and the built-in GodotPhysics3D backend, not Jolt. Source tests
+alone are not evidence of a successful native build or benchmarked speedup.
+
 ## SoftBody3D aerodynamic air drag (Bullet-style)
 
 Cgame's built-in GodotPhysics3D now implements `SoftBody3D.drag_coefficient`,
