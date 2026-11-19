@@ -3025,7 +3025,10 @@ static String _remove_chars_common(const String &p_this, const T *p_chars, int p
 				if (p_char >= 128) {
 					return false;
 				}
-				return p_char < 64 ? (lower_mask & (uint64_t(1) << p_char)) != 0 : (upper_mask & (uint64_t(1) << (p_char - 64))) != 0;
+				if (p_char < 64) {
+					return (lower_mask & (uint64_t(1) << p_char)) != 0;
+				}
+				return (upper_mask & (uint64_t(1) << (p_char - 64))) != 0;
 			});
 		}
 	}
