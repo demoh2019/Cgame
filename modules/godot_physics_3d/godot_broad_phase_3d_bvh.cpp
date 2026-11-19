@@ -78,6 +78,10 @@ int GodotBroadPhase3DBVH::cull_point(const Vector3 &p_point, GodotCollisionObjec
 	return bvh.cull_point(p_point, p_results, p_max_results, nullptr, 0xFFFFFFFF, p_result_indices);
 }
 
+void GodotBroadPhase3DBVH::cast_segment(const Vector3 &p_from, const Vector3 &p_to, SegmentCastCallback p_callback, void *p_userdata) {
+	bvh.cast_segment(p_from, p_to, p_callback, p_userdata);
+}
+
 int GodotBroadPhase3DBVH::cull_segment(const Vector3 &p_from, const Vector3 &p_to, GodotCollisionObject3D **p_results, int p_max_results, int *p_result_indices) {
 	return bvh.cull_segment(p_from, p_to, p_results, p_max_results, nullptr, 0xFFFFFFFF, p_result_indices);
 }
