@@ -1143,5 +1143,4 @@ TEST_CASE("[Geometry2D] Triangulate Polygon") {
 	}
 }
 
-
 } // namespace TestGeometry2D
