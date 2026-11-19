@@ -242,6 +242,164 @@ void GodotSoftBody3D::update_constants() {
 	reset_link_rest_lengths();
 	update_link_constants();
 	update_area();
+	initialize_volume_constraint();
+}
+
+// The enclosed volume of an oriented triangle soup is the sum of signed
+// tetrahedra against a common origin. Double intermediates keep large world
+// coordinates from overflowing the float32 cross-product while constructing
+// the rest state. Closedness is validated separately before this is used.
+static _FORCE_INLINE_ double _soft_body_signed_face_volume(const Vector3 &p_a, const Vector3 &p_b, const Vector3 &p_c, const Vector3 &p_origin) {
+	const double ax = double(p_a.x) - double(p_origin.x);
+	const double ay = double(p_a.y) - double(p_origin.y);
+	const double az = double(p_a.z) - double(p_origin.z);
+	const double bx = double(p_b.x) - double(p_origin.x);
+	const double by = double(p_b.y) - double(p_origin.y);
+	const double bz = double(p_b.z) - double(p_origin.z);
+	const double cx = double(p_c.x) - double(p_origin.x);
+	const double cy = double(p_c.y) - double(p_origin.y);
+	const double cz = double(p_c.z) - double(p_origin.z);
+	return (ax * (by * cz - bz * cy) + ay * (bz * cx - bx * cz) + az * (bx * cy - by * cx)) / 6.0;
+}
+
+void GodotSoftBody3D::initialize_volume_constraint() {
+	xpbd_volume_closed = false;
+	xpbd_volume_rest = 0.0;
+	if (!get_space() || get_space()->get_soft_body_xpbd_volume_compliance() <= 0.0 ||
+			nodes.size() < 4 || faces.size() < 4) {
+		// Never keep the per-node buffer for ordinary cloth/disabled settings.
+		if (!xpbd_volume_gradients.is_empty()) {
+			xpbd_volume_gradients.reset();
+		}
+		return;
+	}
+
+	// A volume constraint is meaningful only on a CLOSED and consistently
+	// oriented manifold. Require each undirected edge exactly twice, with
+	// opposite orientations, otherwise open cloth would be artificially
+	// inflated. 0b01/0b10 are the two possible edge directions.
+	HashMap<uint64_t, uint8_t> edge_winding;
+	for (const Face &face : faces) {
+		for (int j = 0; j < 3; ++j) {
+			const uint32_t a = face.n[j]->index;
+			const uint32_t b = face.n[(j + 1) % 3]->index;
+			if (a == b) {
+				return;
+			}
+			const uint64_t key = _soft_body_edge_key(a, b);
+			const uint8_t direction = a < b ? uint8_t(1) : uint8_t(2);
+			HashMap<uint64_t, uint8_t>::Iterator existing = edge_winding.find(key);
+			if (existing) {
+				if ((existing->value & direction) != 0) {
+					// Same orientation twice, or an edge shared by >2 faces.
+					return;
+				}
+				existing->value |= direction;
+			} else {
+				edge_winding.insert(key, direction);
+			}
+		}
+	}
+	for (const KeyValue<uint64_t, uint8_t> &entry : edge_winding) {
+		if (entry.value != uint8_t(3)) {
+			return;
+		}
+	}
+
+	// Coordinates are relative to the first node to limit cancellation in
+	// translated worlds. This signed volume supports either winding as long
+	// as it is consistent across the whole closed surface.
+	const Vector3 &origin = nodes[0].x;
+	double volume = 0.0;
+	for (const Face &face : faces) {
+		volume += _soft_body_signed_face_volume(face.n[0]->x, face.n[1]->x, face.n[2]->x, origin);
+	}
+	if (!Math::is_finite(volume) || Math::abs(volume) <= double(CMP_EPSILON)) {
+		return;
+	}
+	xpbd_volume_rest = volume;
+	xpbd_volume_closed = true;
+}
+
+// Global closed-surface XPBD volume projection. Gradients for a face
+// (u,v,w) are (v x w, w x u, u x v) / 6. For a properly oriented closed
+// surface, the sum of gradients is translation invariant. The one scalar
+// multiplier is updated across solver iterations, not across timesteps.
+bool GodotSoftBody3D::solve_volume_constraint(double p_alpha, double &r_lambda) {
+	if (!xpbd_volume_closed || !(p_alpha > 0.0) || !Math::is_finite(p_alpha)) {
+		return false;
+	}
+
+	for (Vector3 &gradient : xpbd_volume_gradients) {
+		gradient = Vector3();
+	}
+	const Vector3 &origin = nodes[0].x;
+	double volume = 0.0;
+	for (const Face &face : faces) {
+		const Vector3 u = face.n[0]->x - origin;
+		const Vector3 v = face.n[1]->x - origin;
+		const Vector3 w = face.n[2]->x - origin;
+		volume += _soft_body_signed_face_volume(face.n[0]->x, face.n[1]->x, face.n[2]->x, origin);
+		xpbd_volume_gradients[face.n[0]->index] += v.cross(w) * real_t(1.0 / 6.0);
+		xpbd_volume_gradients[face.n[1]->index] += w.cross(u) * real_t(1.0 / 6.0);
+		xpbd_volume_gradients[face.n[2]->index] += u.cross(v) * real_t(1.0 / 6.0);
+	}
+	if (!Math::is_finite(volume)) {
+		return false;
+	}
+	double inverse_mass_gradient = 0.0;
+	for (uint32_t i = 0; i < nodes.size(); ++i) {
+		const Node &node = nodes[i];
+		if (node.im == 0.0) {
+			continue;
+		}
+		const Vector3 &gradient = xpbd_volume_gradients[i];
+		if (!(node.im > 0.0) || !Math::is_finite(node.im) || !gradient.is_finite()) {
+			return false;
+		}
+		inverse_mass_gradient += double(node.im) *
+				(double(gradient.x) * double(gradient.x) + double(gradient.y) * double(gradient.y) + double(gradient.z) * double(gradient.z));
+	}
+	const double denominator = inverse_mass_gradient + p_alpha;
+	if (!(inverse_mass_gradient > 0.0) || !Math::is_finite(inverse_mass_gradient) ||
+			!(denominator > 0.0) || !Math::is_finite(denominator)) {
+		return false;
+	}
+	const double delta_lambda = -(volume - xpbd_volume_rest + p_alpha * r_lambda) / denominator;
+	const double next_lambda = r_lambda + delta_lambda;
+	if (!Math::is_finite(delta_lambda) || !Math::is_finite(next_lambda)) {
+		return false;
+	}
+
+	// Validate all displacements before writing ANY vertex: malformed meshes
+	// cannot leave a half-updated soft body after one non-finite correction.
+	for (uint32_t i = 0; i < nodes.size(); ++i) {
+		const Node &node = nodes[i];
+		if (node.im == 0.0) {
+			continue;
+		}
+		const Vector3 &g = xpbd_volume_gradients[i];
+		const double scale = double(node.im) * delta_lambda;
+		const Vector3 next(real_t(double(node.x.x) + double(g.x) * scale),
+				real_t(double(node.x.y) + double(g.y) * scale),
+				real_t(double(node.x.z) + double(g.z) * scale));
+		if (!next.is_finite()) {
+			return false;
+		}
+	}
+	for (uint32_t i = 0; i < nodes.size(); ++i) {
+		Node &node = nodes[i];
+		if (node.im == 0.0) {
+			continue;
+		}
+		const Vector3 &g = xpbd_volume_gradients[i];
+		const double scale = double(node.im) * delta_lambda;
+		node.x = Vector3(real_t(double(node.x.x) + double(g.x) * scale),
+				real_t(double(node.x.y) + double(g.y) * scale),
+				real_t(double(node.x.z) + double(g.z) * scale));
+	}
+	r_lambda = next_lambda;
+	return true;
 }
 
 void GodotSoftBody3D::update_area() {
