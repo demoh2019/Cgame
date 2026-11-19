@@ -8,7 +8,7 @@ An optional Godot editor plugin that builds small self-contained games from natu
 2. Open Project > Project Settings > Plugins and enable AI Game Builder.
 3. Find the AI Game Builder dock in the editor. Supply your chat-completions API endpoint, model name, and an API key if your provider requires one.
 4. Describe the game and click Generate.
-5. The built-in static inspector checks for a main scene and broken or external resource paths. When it flags errors, click **Repair** to request a complete replacement from the model. Each click creates another API request, so it may incur usage costs.
+5. The built-in static inspector checks for a main scene and broken or external resource paths. When it flags errors, click **Repair** to request a complete replacement from the model. You can also enter a change request (for example, `Add a boss fight`) and click **Refine** to evolve the current preview without losing the original description. Each click makes another API request and can incur usage costs.
 6. Carefully read all generated files in the preview, including security warnings. Click **Apply files...** and confirm to write them.
 7. Open the scene res://ai_generated/main.tscn and run it with F6.
 
@@ -25,7 +25,7 @@ The API key is held only in the dock's memory. This plugin does not persist it.
 - Up to 16 files, 64 KiB each, 256 KiB total, and a 1 MiB HTTP response body.
 - Only HTTPS remote providers or HTTP loopback endpoints are allowed. Redirects are disabled.
 - A non-executing static inspector blocks plans missing `main.tscn`, lacking its scene header, or using missing/external `res://` dependencies. It warns about some dangerous GDScript constructs. These are **heuristics**, not a full parser or malware sandbox, and can produce false positives or miss problems.
-- Click-to-repair requests one **complete replacement plan** from the model using current diagnostics; it never automatically loops or writes to disk. Each attempt has provider costs.
+- **Repair** requests one replacement plan from model diagnostics; **Refine** requests a replacement that follows your additional instructions. Neither action automatically loops or writes to disk. Each attempt has provider costs.
 - Generated GDScript may still be incorrect or unsafe; inspect before running. The MVP does not compile generated scripts or execute generated scenes, and cannot promise a functional game.
 
 ## Testing
@@ -34,7 +34,7 @@ Run the standalone test project (this folder) from the source checkout:
 
     godot --headless --path misc/ai_game_builder --script res://tests/run.gd
 
-The suite includes 90+ assertions for successful and rejected plans, JSON parsing, provider reply handling, path traversal prevention, size limits, duplicates, generated dependencies, repair context, script loading, creation, and overwrite prevention. The writer tests create and remove a temporary file in the standalone project. Do not execute these tests from a production Godot project.
+The suite includes up to 100 assertions for successful and rejected plans, JSON parsing, provider reply handling, path traversal prevention, size limits, duplicates, generated dependencies, repair context, script loading, creation, and overwrite prevention. The writer tests create and remove a temporary file in the standalone project. Do not execute these tests from a production Godot project.
 
 ## Suggested follow-up milestones
 
