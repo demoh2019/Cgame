@@ -35,6 +35,7 @@
 #include "core/object/worker_thread_pool.h"
 #include "core/os/os.h"
 #include "servers/physics_constraint_color.h"
+#include "servers/physics_island_storage.h"
 
 #define BODY_ISLAND_COUNT_RESERVE 128
 #define ISLAND_COUNT_RESERVE 128
@@ -794,6 +795,12 @@ void GodotStep3D::step(GodotSpace3D *p_space, real_t p_delta) {
 	}
 
 	all_constraints.clear();
+
+	// All constraint/soft-body work and parallel workers have finished.
+	// Bounded reclamation releases old peak scratch memory only during
+	// sustained low-island workloads, never from active solver workers.
+	godot_physics_reclaim_idle_island_storage(body_islands, body_island_count, body_island_idle_steps);
+	godot_physics_reclaim_idle_island_storage(constraint_islands, island_count, constraint_island_idle_steps);
 
 	p_space->unlock();
 	_step++;
