@@ -11,7 +11,7 @@ import tempfile
 
 ROOT = Path(__file__).resolve().parents[3]
 HEADER = ROOT / "core/templates/sort_array.h"
-header = HEADER.read_text(encoding="utf-8")
+header = HEADER.read_text(encoding="utf-8").replace("#pragma once", "")
 for include in ('#include "core/error/error_macros.h"', '#include "core/typedefs.h"'):
     if header.count(include) != 1:
         raise RuntimeError("Unexpected SortArray include: " + include)
