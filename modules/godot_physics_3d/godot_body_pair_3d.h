@@ -39,9 +39,9 @@
 class GodotBodyContact3D : public GodotConstraint3D {
 protected:
 	struct Contact {
-		Vector3 position;
+		// Local anchors and feature B are sufficient for both rigid and soft pairs.
 		Vector3 normal;
-		int index_A = 0, index_B = 0;
+		int index_B = 0;
 		Vector3 local_A, local_B;
 		Vector3 acc_impulse; // accumulated impulse - only one of the object's impulse is needed as impulse_a == -impulse_b
 		real_t acc_normal_impulse = 0.0; // accumulated normal impulse (Pn)
