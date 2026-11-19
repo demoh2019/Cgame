@@ -87,6 +87,13 @@ class GodotSoftBody3D : public GodotCollisionObject3D {
 	LocalVector<real_t> xpbd_link_lambdas;
 	// One compliance multiplier per triangle, allocated only in area-XPBD mode.
 	LocalVector<real_t> xpbd_area_lambdas;
+	// Optional per-triangle XPBD rest metric; no allocated memory when disabled.
+	struct ShearRestTriangle {
+		real_t dot = 0.0;
+		real_t scale = 0.0;
+	};
+	LocalVector<ShearRestTriangle> xpbd_shear_rest;
+	LocalVector<real_t> xpbd_shear_lambdas;
 	// Hinge particles are indexed, not stored as Node pointers: rebuilding
 	// the mesh cannot leave a stale pointer in the optional topology cache.
 	struct DihedralHinge {
@@ -295,6 +302,7 @@ private:
 	void update_constants();
 	void update_area();
 	void initialize_dihedral_constraints();
+	void initialize_shear_constraints();
 	void initialize_self_collision_topology();
 	void solve_self_collisions(real_t p_delta);
 	bool solve_edge_self_collisions(real_t p_delta);

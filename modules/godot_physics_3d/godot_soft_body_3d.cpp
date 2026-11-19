@@ -40,6 +40,7 @@
 #include "servers/physics_softbody_volume_safe.h"
 #include "servers/physics_xpbd_distance.h"
 #include "servers/physics_xpbd_area.h"
+#include "servers/physics_xpbd_shear.h"
 #include "servers/physics_xpbd_dihedral.h"
 #include "servers/physics_xpbd_self_collision.h"
 #include "servers/physics_xpbd_soft_ccd.h"
@@ -142,6 +143,7 @@ void GodotSoftBody3D::set_space(GodotSpace3D *p_space) {
 	// its rest volume only after space-level compliance is available.
 	initialize_volume_constraint();
 	initialize_dihedral_constraints();
+	initialize_shear_constraints();
 	initialize_self_collision_topology();
 
 	if (get_space()) {
@@ -259,6 +261,7 @@ void GodotSoftBody3D::update_constants() {
 	update_area();
 	initialize_volume_constraint();
 	initialize_dihedral_constraints();
+	initialize_shear_constraints();
 	initialize_self_collision_topology();
 }
 
@@ -277,6 +280,41 @@ static _FORCE_INLINE_ double _soft_body_signed_face_volume(const Vector3 &p_a, c
 	const double cy = double(p_c.y) - double(p_origin.y);
 	const double cz = double(p_c.z) - double(p_origin.z);
 	return (ax * (by * cz - bz * cy) + ay * (bz * cx - bx * cz) + az * (bx * cy - by * cx)) / 6.0;
+}
+
+// Cache the reference triangle's metric once instead of recalculating it
+// in every solver iteration. Degenerate rest faces have scale zero.
+// The cache is completely absent when shear constraints are disabled.
+void GodotSoftBody3D::initialize_shear_constraints() {
+	xpbd_shear_rest.reset();
+	if (!get_space() || get_space()->get_soft_body_xpbd_shear_compliance() <= 0.0 || faces.is_empty()) {
+		return;
+	}
+	xpbd_shear_rest.resize(faces.size());
+	for (uint32_t i = 0; i < faces.size(); ++i) {
+		const Face &face = faces[i];
+		const Vector3 &a = face.n[0]->x;
+		const Vector3 &b = face.n[1]->x;
+		const Vector3 &c = face.n[2]->x;
+		const double abx = double(b.x) - double(a.x);
+		const double aby = double(b.y) - double(a.y);
+		const double abz = double(b.z) - double(a.z);
+		const double acx = double(c.x) - double(a.x);
+		const double acy = double(c.y) - double(a.y);
+		const double acz = double(c.z) - double(a.z);
+		const double dot = abx * acx + aby * acy + abz * acz;
+		const double len_ab = Math::sqrt(abx * abx + aby * aby + abz * abz);
+		const double len_ac = Math::sqrt(acx * acx + acy * acy + acz * acz);
+		const double scale = len_ab * len_ac;
+		if (Math::is_finite(dot) && Math::is_finite(scale) && scale > 0.0) {
+			const real_t rest_dot = real_t(dot);
+			const real_t rest_scale = real_t(scale);
+			if (Math::is_finite(rest_dot) && Math::is_finite(rest_scale) && rest_scale > 0.0) {
+				xpbd_shear_rest[i].dot = rest_dot;
+				xpbd_shear_rest[i].scale = rest_scale;
+			}
+		}
+	}
 }
 
 void GodotSoftBody3D::initialize_volume_constraint() {
@@ -1932,6 +1970,11 @@ void GodotSoftBody3D::solve_constraints(real_t p_delta) {
 			Math::is_finite(area_alpha_double) && area_alpha_double > 0.0;
 	const real_t alpha = use_xpbd ? real_t(MIN(alpha_double, double(std::numeric_limits<real_t>::max()))) : real_t(0.0);
 	const real_t area_alpha = use_area_xpbd ? real_t(MIN(area_alpha_double, double(std::numeric_limits<real_t>::max()))) : real_t(0.0);
+	const real_t configured_shear_compliance = get_space() ? get_space()->get_soft_body_xpbd_shear_compliance() : real_t(0.0);
+	const double shear_alpha_double = p_delta > 0.0 ? double(configured_shear_compliance) / (double(p_delta) * double(p_delta)) : 0.0;
+	const bool use_shear_xpbd = configured_shear_compliance > 0.0 && xpbd_shear_rest.size() == faces.size() && !faces.is_empty() &&
+			Math::is_finite(shear_alpha_double) && shear_alpha_double > 0.0;
+	const real_t shear_alpha = use_shear_xpbd ? real_t(MIN(shear_alpha_double, double(std::numeric_limits<real_t>::max()))) : real_t(0.0);
 	const double dihedral_compliance = get_space() ? double(get_space()->get_soft_body_xpbd_dihedral_compliance()) : 0.0;
 	const double dihedral_alpha_double = p_delta > 0.0 ? dihedral_compliance / (double(p_delta) * double(p_delta)) : 0.0;
 	const bool use_dihedral_xpbd = dihedral_compliance > 0.0 && !xpbd_dihedral_hinges.is_empty() &&
@@ -2002,6 +2045,15 @@ void GodotSoftBody3D::solve_constraints(real_t p_delta) {
 		}
 	}
 
+	if (use_shear_xpbd) {
+		xpbd_shear_lambdas.resize(faces.size());
+		for (real_t &lambda : xpbd_shear_lambdas) {
+			lambda = real_t(0.0);
+		}
+	} else if (!xpbd_shear_lambdas.is_empty()) {
+		xpbd_shear_lambdas.reset();
+	}
+
 	if (use_dihedral_xpbd) {
 		xpbd_dihedral_lambdas.resize(xpbd_dihedral_hinges.size());
 		for (real_t &lambda : xpbd_dihedral_lambdas) {
@@ -2040,6 +2092,18 @@ void GodotSoftBody3D::solve_constraints(real_t p_delta) {
 				physics_xpbd_solve_triangle_area(face.n[0]->x, face.n[1]->x, face.n[2]->x,
 						face.n[0]->im, face.n[1]->im, face.n[2]->im,
 						face.ra, area_alpha, xpbd_area_lambdas[face_index]);
+			}
+		}
+		if (use_shear_xpbd) {
+			for (uint32_t face_index = 0; face_index < faces.size(); ++face_index) {
+				const ShearRestTriangle &rest = xpbd_shear_rest[face_index];
+				if (!(rest.scale > 0.0)) {
+					continue;
+				}
+				Face &face = faces[face_index];
+				physics_xpbd_solve_triangle_shear(face.n[0]->x, face.n[1]->x, face.n[2]->x,
+						face.n[0]->im, face.n[1]->im, face.n[2]->im,
+						rest.dot, rest.scale, shear_alpha, xpbd_shear_lambdas[face_index]);
 			}
 		}
 		if (use_dihedral_xpbd) {
@@ -2243,6 +2307,8 @@ void GodotSoftBody3D::destroy() {
 
 	xpbd_link_lambdas.reset();
 	xpbd_area_lambdas.reset();
+	xpbd_shear_rest.reset();
+	xpbd_shear_lambdas.reset();
 	xpbd_dihedral_hinges.reset();
 	xpbd_dihedral_lambdas.reset();
 	xpbd_self_contacts.reset();

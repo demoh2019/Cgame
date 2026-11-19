@@ -1293,6 +1293,8 @@ GodotSpace3D::GodotSpace3D() {
 	soft_body_link_damping = Math::is_finite(configured_link_damping) ? MAX(real_t(0.0), configured_link_damping) : real_t(0.0);
 	const real_t configured_area_compliance = GLOBAL_GET("physics/3d/solver/soft_body_xpbd_area_compliance");
 	soft_body_xpbd_area_compliance = Math::is_finite(configured_area_compliance) ? MAX(real_t(0.0), configured_area_compliance) : real_t(0.0);
+	const real_t configured_shear_compliance = GLOBAL_GET("physics/3d/solver/soft_body_xpbd_shear_compliance");
+	soft_body_xpbd_shear_compliance = Math::is_finite(configured_shear_compliance) ? MAX(real_t(0.0), configured_shear_compliance) : real_t(0.0);
 	const real_t configured_dihedral_compliance = GLOBAL_GET("physics/3d/solver/soft_body_xpbd_dihedral_compliance");
 	soft_body_xpbd_dihedral_compliance = Math::is_finite(configured_dihedral_compliance) ? MAX(real_t(0.0), configured_dihedral_compliance) : real_t(0.0);
 	const real_t configured_bending_yield = GLOBAL_GET("physics/3d/solver/soft_body_bending_plastic_yield_angle");
