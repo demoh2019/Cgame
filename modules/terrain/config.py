@@ -7,7 +7,7 @@ def configure(env):
 
 
 def get_doc_classes():
-    return ["TerrainMesh"]
+    return ["TerrainMesh", "TerrainCollision3D"]
 
 
 def get_doc_path():
