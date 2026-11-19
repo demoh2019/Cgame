@@ -3,6 +3,7 @@ extends RefCounted
 const WorldGen = preload("res://scripts/shared/world_gen.gd")
 const GameServer = preload("res://scripts/server/game_server.gd")
 const LootRights = preload("res://scripts/shared/loot_rights.gd")
+const RaidLoot = preload("res://scripts/shared/raid_loot.gd")
 const Zombie = preload("res://scripts/shared/zombie.gd")
 
 
@@ -11,14 +12,34 @@ func _at(world, x: float, z: float) -> Vector3:
 
 
 func run(t) -> void:
-	t.current = "loot reservation policy"
-	t.eq(LootRights.reservation(0, [2], 0.0), {}, "invalid owner never claims loot")
-	var rights: Dictionary = LootRights.reservation(11, [11, 12, 12, -1, "fake"], 3.0)
-	t.eq(rights["allowed_peers"], [11, 12], "only unique positive peer IDs are reserved")
-	t.check(LootRights.can_loot(rights, 12, 3.0), "party member can loot")
-	t.check(not LootRights.can_loot(rights, 13, 20.99), "outsider denied just before expiry")
-	t.check(LootRights.can_loot(rights, 13, 21.0), "reservation expires exactly at boundary")
-	t.check(LootRights.can_loot({}, 13, 0.0), "unreserved loot remains public")
+	t.current = "loot reservation policy and identity isolation"
+	var first = GameServer.Player.new()
+	first.id = 11
+	var second = GameServer.Player.new()
+	second.id = 12
+	var outsider = GameServer.Player.new()
+	outsider.id = 13
+	t.eq(LootRights.reservation([], 0.0), {}, "empty participation never claims loot")
+	t.eq(LootRights.reservation([null], 0.0), {}, "null participants cannot claim loot")
+	var rights: Dictionary = LootRights.reservation([first, second, first], 3.0)
+	t.eq(rights["allowed_tokens"], [RaidLoot.token(first), RaidLoot.token(second)],
+		"party eligibility is deduplicated by original session identities")
+	t.check(LootRights.can_loot(rights, second, 3.0), "party member can loot")
+	t.check(not LootRights.can_loot(rights, outsider, 20.99),
+		"outsider denied just before expiry")
+	var reused_peer = GameServer.Player.new()
+	reused_peer.id = first.id
+	t.check(not LootRights.can_loot(rights, reused_peer, 4.0),
+		"new guest with reused peer number cannot inherit earlier loot")
+	t.check(LootRights.can_loot(rights, outsider, 21.0),
+		"reservation expires exactly at boundary")
+	t.check(LootRights.can_loot({}, outsider, 0.0), "unreserved loot remains public")
+	var account = GameServer.Player.new()
+	account.user_id = "account-test-11"
+	var reconnected = GameServer.Player.new()
+	reconnected.user_id = "account-test-11"
+	t.check(LootRights.can_loot(LootRights.reservation([account], 0.0), reconnected, 1.0),
+		"same authenticated account may reclaim its protected bag after reconnect")
 
 	t.current = "authoritative group access and private snapshot"
 	var world := WorldGen.new(154)
@@ -34,11 +55,12 @@ func run(t) -> void:
 	var bag_id: int = server._make_bag(leader.position, {"silver": 9}, 11)
 	t.check(bag_id > 0, "owner receives a real bag ID")
 	var bag: Dictionary = server.bags[bag_id]
-	t.eq(bag["allowed_peers"], [11, 12], "server captures roster at the drop")
+	t.eq(bag["allowed_tokens"], [RaidLoot.token(leader), RaidLoot.token(ally)],
+		"server captures authentic party sessions at the drop")
 	var stranger_view: Dictionary = server.snapshot_for(13)["bags"][0]
 	t.check(stranger_view["reserved"] and not stranger_view["can_loot"],
 		"other players see a locked bag")
-	t.check(not stranger_view.has("allowed_peers"), "private party IDs never replicate")
+	t.check(not stranger_view.has("allowed_tokens"), "private identities never replicate")
 	t.check(stranger_view["reserved_seconds"] > 0.0, "client can show lock countdown")
 	var ally_view: Dictionary = server.snapshot_for(12)["bags"][0]
 	t.check(ally_view["reserved"] and ally_view["can_loot"], "member sees available loot")
@@ -81,7 +103,7 @@ func run(t) -> void:
 			zombie_bag_id = int(id)
 	t.check(zombie_bag_id != -1, "server-spawned PvE kill creates a bag")
 	if zombie_bag_id != -1:
-		t.eq(server.bags[zombie_bag_id]["allowed_peers"], [11],
+		t.eq(server.bags[zombie_bag_id]["allowed_tokens"], [RaidLoot.token(leader)],
 			"only the killing player owns a post-party kill")
 		t.eq(server.cmd_loot(13, zombie_bag_id)["reason"], "reserved",
 			"enemy cannot steal newly spawned zombie loot")
