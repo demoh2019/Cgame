@@ -69,7 +69,7 @@ constexpr uint32_t MAX_RETAINED_PENDING_BODY_IDS = 4096;
 // AHashMap capacity is in slots (not entries); release oversized bursts.
 constexpr uint32_t MAX_RETAINED_PENDING_INDEX_SLOTS = 4096;
 
-static void clear_pending_index(AAHashMap<uint32_t, uint32_t> &r_indices) {
+static void clear_pending_index(AHashMap<uint32_t, uint32_t> &r_indices) {
 	if (r_indices.get_capacity() > MAX_RETAINED_PENDING_INDEX_SLOTS) {
 		r_indices.reset();
 	} else {
