@@ -112,6 +112,21 @@ class GodotSoftBody3D : public GodotCollisionObject3D {
 	bool self_collision_adjacency_built = false;
 	HashSet<uint64_t> self_collision_structural_edges;
 	LocalVector<SelfCollisionContact> self_collision_contacts;
+	// Cached structural edges for optional crossed-edge narrowphase. Source
+	// mesh order is preserved; no per-step hash or topology reconstruction.
+	struct SelfCollisionEdge {
+		uint32_t a = 0;
+		uint32_t b = 0;
+	};
+	struct SelfEdgeContact {
+		uint32_t a = 0;
+		uint32_t b = 0;
+		uint32_t c = 0;
+		uint32_t d = 0;
+	};
+	LocalVector<SelfCollisionEdge> self_collision_edges;
+	LocalVector<SelfEdgeContact> self_collision_edge_contacts;
+	bool self_collision_edges_built = false;
 	// Number of particles with nonzero inverse mass. Maintained on pin,
 	// unpin and mesh rebuild for O(1) central impulse/force normalization.
 	uint32_t dynamic_node_count = 0;
@@ -268,6 +283,7 @@ private:
 	void update_area();
 	void initialize_self_collision_adjacency();
 	void solve_self_collisions(real_t p_thickness, real_t p_alpha_tilde);
+	void solve_self_edge_contacts(real_t p_thickness, real_t p_alpha_tilde);
 	void initialize_dihedral_constraints();
 	void initialize_volume_constraint();
 	bool solve_volume_constraint(double p_alpha, double &r_lambda);
