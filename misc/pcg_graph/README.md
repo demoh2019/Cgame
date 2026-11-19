@@ -37,8 +37,19 @@ successful generation.
 | JITTER | point stream | Reproducible random X/Z position offsets |
 | RANDOM_FILTER | point stream | Seeded probability to retain points |
 | NOISE_FILTER | point stream | Threshold on seeded FastNoiseLite noise |
+| HEIGHT_NOISE | point stream | Add deterministic FastNoiseLite height to Y; frequency and amplitude |
+| HEIGHT_FILTER | point stream | Keep points within an inclusive Y interval |
+| DISTANCE_FILTER | point stream | Greedy X/Z spacing filter using a spatial hash; no two retained points closer than minimum_distance |
 | OFFSET | point stream | Translate points along XYZ |
 | OUTPUT | point stream | Final stream delivered to spawner |
+
+For a simple forest placement graph, connect **GRID → JITTER → HEIGHT_NOISE → HEIGHT_FILTER → DISTANCE_FILTER → OUTPUT**.
+`HEIGHT_NOISE` produces procedural Y values rather than sampling existing terrain.
+`HEIGHT_FILTER` keeps points in a chosen elevation band, and
+`DISTANCE_FILTER` removes nearby points in input order using X/Z distance,
+regardless of Y (useful for tree spacing). The filter is deterministic,
+retains earlier points first, and handles negative and very large grid coordinates.
+These steps do not yet project instances onto an external heightmap or collision surface.
 
 The graph is saved as a native Godot Resource. GDScript code can call
 `PCGGenerator.evaluate(graph)` and receives a Dictionary containing
@@ -59,8 +70,8 @@ godot --headless --path misc/pcg_graph --editor --import --quit
 godot --headless --path misc/pcg_graph --script res://tests/test_pcg_graph.gd
 ```
 
-The suite contains 15 grouped integration test functions with 80+ individual
-checks covering topology, seeded randomness, processing, error handling,
+The suite includes additional height-noise, altitude-filter, and
+minimum-distance scatter test groups alongside the original 15 test groups and 80+ checks covering topology, seeded randomness, processing, error handling,
 resource save/load, large grids and MultiMesh generation/replacement.
 The GitHub Actions workflow downloads the official Linux editor binary and
 runs the same project in headless mode.
@@ -69,7 +80,7 @@ runs the same project in headless mode.
 
 This is a scoped **PCG Graph MVP**, not full Unreal Engine PCG parity.
 It does not yet support typed multi-input pins, procedural subgraphs, custom
-GDScript nodes, terrain/spline/volume sampling, material layers, instanced
+GDScript nodes, external terrain/spline/volume sampling, material layers, instanced
 scenes, grass LODs, streaming generation, HLOD, graph debugging or scene
 UndoRedo for generated instances.
 
