@@ -214,15 +214,18 @@ TEST_CASE("[Span] Reverse sequence randomized differential regression") {
 	}
 }
 
-TEST_CASE("[Span] Constexpr reverse sequence remains valid") {
+TEST_CASE("[Span] Reverse sequence retains empty constexpr and nonempty runtime semantics") {
 	static constexpr uint8_t data[] = { 1, 2, 3, 1, 2, 3, 4 };
 	static constexpr uint8_t pattern[] = { 1, 2, 3 };
 	static constexpr Span<uint8_t> hay(data);
 	static constexpr Span<uint8_t> needle(pattern);
-	static_assert(hay.rfind_sequence(needle) == 3);
-	static_assert(hay.rfind_sequence(needle, 2) == 0);
-	static_assert(hay.rfind_sequence(needle, 0) == 0);
+	static constexpr Span<uint8_t> empty;
+	// Nonempty matching calls are_spans_equal(), which is not constexpr.
+	static_assert(hay.rfind_sequence(empty) == hay.size());
+	static_assert(hay.rfind_sequence(empty, 0) == 0);
 	CHECK_EQ(hay.rfind_sequence(needle), 3);
+	CHECK_EQ(hay.rfind_sequence(needle, 2), 0);
+	CHECK_EQ(hay.rfind_sequence(needle, 0), 0);
 }
 
 TEST_CASE("[Span] Float sequence searches preserve bitwise comparison semantics") {
