@@ -348,4 +348,45 @@ TEST_CASE("[PacketPeer][PacketPeerStream] Switching streams drops cached parsed 
 	CHECK_EQ(packets->get_available_packet_count(), 1);
 }
 
+
+TEST_CASE("[PacketPeer][Performance] Repeated Variant encoding reuses scratch capacity") {
+	Ref<StreamPeerBuffer> stream;
+	stream.instantiate();
+	Ref<PacketPeerStream> packets;
+	packets.instantiate();
+	packets->set_stream_peer(stream);
+	packets->set_input_buffer_max_size(32768);
+	packets->set_output_buffer_max_size(32768);
+
+	// Grow repeatedly, shrink the payload, then grow again. Each packet
+	// must remain byte-for-byte decodable after scratch buffer reuse.
+	const int sizes[] = { 1, 128, 64, 1024, 256, 8192, 16, 4096, 2, 12288, 512 };
+	for (int repeat = 0; repeat < 8; ++repeat) {
+		for (int size : sizes) {
+			String payload = String("z").repeat(size);
+			stream->clear();
+			REQUIRE(packets->put_var(payload) == OK);
+			stream->seek(0);
+			Variant decoded;
+			REQUIRE(packets->get_var(decoded) == OK);
+			CHECK(String(decoded) == payload);
+			CHECK(packets->get_available_packet_count() == 0);
+		}
+	}
+
+	// Enforce the existing limit even after the scratch buffer was grown.
+	packets->set_encode_buffer_max_size(1024);
+	stream->clear();
+	ERR_PRINT_OFF;
+	CHECK(packets->put_var(String("x").repeat(2048)) == ERR_OUT_OF_MEMORY);
+	ERR_PRINT_ON;
+	CHECK_EQ(stream->get_size(), 0);
+	stream->clear();
+	REQUIRE(packets->put_var(String("ok")) == OK);
+	stream->seek(0);
+	Variant small;
+	REQUIRE(packets->get_var(small) == OK);
+	CHECK(String(small) == "ok");
+}
+
 } // namespace TestPacketPeer
