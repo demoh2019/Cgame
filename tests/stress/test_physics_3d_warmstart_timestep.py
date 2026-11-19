@@ -45,8 +45,8 @@ class WarmStartTimestep3DContracts(unittest.TestCase):
 
     def test_extreme_timestep_changes_discard_previous_impulses(self):
         block = self.pre_solve
-        self.assertIn("impulse_scale >= real_t(0.5)", block)
-        self.assertIn("impulse_scale <= real_t(2.0)", block)
+        self.assertIn("timestep_ratio >= real_t(0.5)", block)
+        self.assertIn("timestep_ratio <= real_t(2.0)", block)
         self.assertIn("if (can_scale_impulses)", block)
         for field in ("acc_normal_impulse", "acc_bias_impulse", "acc_bias_impulse_center_of_mass"):
             self.assertIn(f"c.{field} = 0.0;", block)
@@ -67,15 +67,41 @@ class WarmStartTimestep3DContracts(unittest.TestCase):
         for snippet in (
             "get_previous_step()",
             "p_step / previous_step",
-            "impulse_scale >= real_t(0.5)",
-            "impulse_scale <= real_t(2.0)",
+            "timestep_ratio >= real_t(0.5)",
+            "timestep_ratio <= real_t(2.0)",
         ):
             self.assertIn(snippet, source_2d)
             self.assertIn(snippet, self.pre_solve)
 
+    def test_3d_coefficient_is_registered_and_read_once(self):
+        registration = (
+            ROOT / "servers" / "physics_3d" / "physics_server_3d.cpp"
+        ).read_text(encoding="utf-8")
+        space_cpp = (
+            ROOT / "modules" / "godot_physics_3d" / "godot_space_3d.cpp"
+        ).read_text(encoding="utf-8")
+        space_h = SPACE_3D.read_text(encoding="utf-8")
+        self.assertIn('"physics/3d/solver/warm_start_coefficient"', registration)
+        self.assertIn('GLOBAL_GET("physics/3d/solver/warm_start_coefficient")', space_cpp)
+        self.assertIn("real_t warm_start_coefficient = 1.0;", space_h)
+        self.assertIn("get_warm_start_coefficient() const", space_h)
+
+    def test_coefficient_scales_impulses_only_during_warm_start(self):
+        block = self.pre_solve
+        self.assertIn("space->get_warm_start_coefficient()", block)
+        self.assertIn("timestep_ratio * warm_start_coefficient", block)
+        self.assertIn("step_changed || warm_start_coefficient != real_t(1.0)", block)
+        self.assertIn("if (rescale_impulses)", block)
+        self.assertLess(
+            block.index("const real_t warm_start_coefficient"),
+            block.index("for (int i = 0; i < contact_count; i++)"),
+        )
+
     def test_runtime_regression_switches_tick_rates(self):
         source = RUNTIME.read_text(encoding="utf-8")
         self.assertIn("Engine.physics_ticks_per_second = 120", source)
+        self.assertIn("ProjectSettings.set_setting(setting_path, 0.75)", source)
+        self.assertIn("ProjectSettings.set_setting(setting_path, previous_setting)", source)
         self.assertIn("Engine.physics_ticks_per_second = 30", source)
         self.assertIn("await physics_frame", source)
         self.assertIn("Engine.physics_ticks_per_second = original_ticks", source)
