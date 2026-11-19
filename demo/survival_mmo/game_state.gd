@@ -8,6 +8,8 @@ const RECIPES := {
     "reinforced_spear": {"wood": 1, "stone": 2, "scrap": 2},
     "bandage": {"fiber": 2, "herb": 1},
     "barricade": {"wood": 3, "stone": 2},
+    "weapon_repair": {"wood": 1, "scrap": 1},
+    "barricade_repair": {"wood": 1, "stone": 1},
 }
 const RESOURCE_SKILLS := {
     "wood": "logging",
@@ -19,6 +21,7 @@ const LEVEL_XP_STEP := 20
 const MAX_SKILL_LEVEL := 10
 const MAX_HEALTH := 100.0
 const MAX_HUNGER := 100.0
+const MAX_WEAPON_CONDITION := {"hands": 0, "spear": 60, "reinforced_spear": 100}
 
 var items: Dictionary = {"wood": 0, "stone": 0, "fiber": 0, "herb": 0, "scrap": 0}
 var experience: Dictionary = {
@@ -27,6 +30,7 @@ var experience: Dictionary = {
 var health := MAX_HEALTH
 var hunger := MAX_HUNGER
 var equipped_weapon := "hands"
+var weapon_condition := 0
 
 
 func add_item(kind: String, amount: int = 1) -> void:
@@ -92,6 +96,7 @@ func craft_weapon(recipe: String) -> bool:
     if not spend_recipe(recipe):
         return false
     equipped_weapon = recipe
+    weapon_condition = int(MAX_WEAPON_CONDITION[recipe])
     award_experience("crafting", 12)
     changed.emit()
     return true
@@ -99,6 +104,30 @@ func craft_weapon(recipe: String) -> bool:
 
 func craft_spear() -> bool:
     return craft_weapon("spear")
+
+
+func damage_weapon(amount: int = 1) -> bool:
+    # A successful hit wears the equipped weapon. Returns true only if it breaks.
+    if equipped_weapon == "hands" or amount <= 0:
+        return false
+    weapon_condition = maxi(0, weapon_condition - amount)
+    var broken := weapon_condition == 0
+    if broken:
+        equipped_weapon = "hands"
+    changed.emit()
+    return broken
+
+
+func repair_weapon() -> bool:
+    if equipped_weapon == "hands":
+        return false
+    var maximum: int = MAX_WEAPON_CONDITION[equipped_weapon]
+    if weapon_condition >= maximum or not spend_recipe("weapon_repair"):
+        return false
+    weapon_condition = mini(maximum, weapon_condition + 25)
+    award_experience("crafting", 5)
+    changed.emit()
+    return true
 
 
 func weapon_damage() -> float:
