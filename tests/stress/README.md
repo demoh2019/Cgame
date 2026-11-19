@@ -418,6 +418,81 @@ release build when benchmarking CCD. Measure both missed rotational
 contacts and CPU cost; no speedup or collision-proof guarantee is
 claimed before compiled engine tests.
 
+## Tighter 2D/3D rotational CCD broadphase envelopes (optional)
+
+Box2D and Jolt restrict expensive narrowphase and CCD work by first
+generating broadphase candidates from conservative swept bounds. Cgame
+already had opt-in angular broadphase bounds, but expanded each axis
+of the linear-swept AABB by the *same maximum rotation chord*.
+That is conservative yet especially costly for long thin or
+offset shapes: an unoccupied region may still generate many false
+broadphase pairs (SAT/GJK work) when the body spins.
+
+Cgame now provides an alternate **analytic arc envelope**. It models
+each corner of the shape's world-space AABB as it rotates about the
+body's center of mass. Each coordinate is `c + a cos(theta) + b
+sin(theta)`. The exact coordinate extrema over the angular interval
+occur at its endpoints or where the derivative vanishes. The resulting
+AABB is conservatively unioned with the linear translation segment;
+all intermediate orientations and translated positions are included,
+including rotations beyond a full revolution. The method handles
+negative 2D angles and arbitrary positive-axis 3D angular sweeps.
+A small numerical margin is added to protect floating point rounding.
+
+Enable both settings for the matching dimension in `project.godot`:
+
+```ini
+[physics]
+2d/solver/ccd_rotational_bounds=true
+2d/solver/ccd_tight_rotational_bounds=true
+3d/solver/ccd_rotational_bounds=true
+3d/solver/ccd_tight_rotational_bounds=true
+```
+
+All settings default to **false**. The tighter mode has an effect
+only when rotational CCD bounds are enabled and a body has angular
+motion with CCD enabled. With the mode off, the old chord-padding
+path remains unchanged. Settings are cached per physics space.
+
+This improves **candidate filtering only**: it does not itself
+implement a rotating-shape time-of-impact narrowphase, solve
+pure rotational tunneling, or change the rigid-body solver.
+The tighter bounds require trigonometric extrema evaluations for
+each AABB corner (4 in 2D, 8 in 3D); they may cost *more* than the
+legacy bound in sparse scenes. Enable based on measured results,
+not assumptions about a universal speedup.
+
+Native tests check containment of many intermediate orientations,
+mixed rotation/translation, negative angles and large turns, plus
+reduced proxy volume. Source/reference tests independently check
+900 randomized 2D sweeps and 900 3D sweeps with 21 samples for every
+initial AABB corner:
+
+```bash
+python3 -m unittest discover -s tests/stress \
+  -p 'test_physics_ccd_tight_rotational_bounds.py' -v
+```
+
+A dedicated stress suite compares the exact same rotating thin
+rigid-body workload and static near-miss blockers in both modes.
+Each scale unit creates 64 rotating bodies and 64 static blockers,
+up to 4096 of each. All spinning bodies have CCD enabled, zero
+gravity and damping, and no intended true contacts. Measure
+broadphase candidate counts, physics frame time, p95 and RSS:
+
+```bash
+python3 tests/stress/run.py \
+  --godot ./bin/godot.macos.editor.arm64 \
+  --case physics_ccd_rotational_radial_2d,physics_ccd_rotational_tight_2d,physics_ccd_rotational_radial_3d,physics_ccd_rotational_tight_3d \
+  --scale 4 --frames 120 --repeats 5 --timeout 600 \
+  --rss-limit-mib 4096 \
+  --output out/ccd-rotational-tight.json
+```
+
+The numerical reference and source checks are **not** native-build
+validation. Re-run the identical scenario on the same host and build
+configuration before enabling this optimization in production.
+
 ## Jolt-style 3D gyroscopic free-rotation dynamics (opt-in)
 
 Asymmetric rigid bodies do not maintain a constant angular velocity in
