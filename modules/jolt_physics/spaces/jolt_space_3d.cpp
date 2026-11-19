@@ -446,6 +446,10 @@ JoltSoftBody3D *JoltSpace3D::try_get_soft_body(const JPH::BodyID &p_body_id) con
 	return object->as_soft_body();
 }
 
+int JoltSpace3D::get_contact_manifold_count() const {
+	return contact_listener->get_contact_manifold_count();
+}
+
 JoltPhysicsDirectSpaceState3D *JoltSpace3D::get_direct_state() {
 	if (direct_state == nullptr) {
 		direct_state = memnew(JoltPhysicsDirectSpaceState3D(this));
