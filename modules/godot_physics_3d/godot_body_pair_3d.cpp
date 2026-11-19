@@ -718,10 +718,22 @@ void GodotBodySoftBodyPair3D::contact_added_callback(const Vector3 &p_point_A, i
 	// Attempt to determine if the contact will be reused.
 	real_t contact_recycle_radius = space->get_contact_recycle_radius();
 
-	uint32_t contact_count = contacts.size();
-	for (uint32_t contact_index = 0; contact_index < contact_count; ++contact_index) {
-		Contact &c = contacts[contact_index];
-		if (c.index_B == p_index_B) {
+	// Match by soft-body node ID. Above 64 contacts, this becomes a
+	// hash lookup instead of a full scan for every manifold point.
+	const uint32_t contact_count = contacts.size();
+	contact_index.maybe_build(contacts);
+	int existing_index = contact_index.find(p_index_B);
+	if (!contact_index.is_active()) {
+		for (uint32_t i = 0; i < contact_count; ++i) {
+			if (contacts[i].index_B == p_index_B) {
+				existing_index = int(i);
+				break;
+			}
+		}
+	}
+	if (existing_index != -1) {
+		Contact &c = contacts[existing_index];
+		{
 			if (c.local_A.distance_squared_to(local_A) < (contact_recycle_radius * contact_recycle_radius) &&
 					c.local_B.distance_squared_to(local_B) < (contact_recycle_radius * contact_recycle_radius) &&
 					c.normal.dot(contact.normal) >= real_t(0.98)) {
@@ -738,6 +750,7 @@ void GodotBodySoftBodyPair3D::contact_added_callback(const Vector3 &p_point_A, i
 	}
 
 	contacts.push_back(contact);
+	contact_index.appended(p_index_B, contact_count);
 }
 
 void GodotBodySoftBodyPair3D::validate_contacts() {
@@ -769,14 +782,17 @@ void GodotBodySoftBodyPair3D::validate_contacts() {
 		}
 
 		if (erase) {
-			// Contact no longer needed, remove.
-			if ((contact_index + 1) < contact_count) {
-				// Swap with the last one.
+			// The node map stores vector indices. Update the relocated node
+			// after swap-removal, then release the map when sparse again.
+			const int removed_node = c.index_B;
+			const bool has_moved_contact = (contact_index + 1) < contact_count;
+			const int moved_node = has_moved_contact ? contacts[contact_count - 1].index_B : removed_node;
+			if (has_moved_contact) {
 				SWAP(c, contacts[contact_count - 1]);
 			}
-
-			contact_index--;
 			contact_count--;
+			this->contact_index.swap_removed(removed_node, moved_node, contact_index, contact_count);
+			contact_index--;
 		}
 	}
 
