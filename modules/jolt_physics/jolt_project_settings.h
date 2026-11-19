@@ -49,6 +49,9 @@ public:
 	inline static float speculative_contact_distance;
 	inline static float baumgarte_stabilization_factor;
 	inline static float soft_body_point_radius;
+	// Used when constructing a soft body; existing bodies retain their constraints.
+	inline static int soft_body_bend_mode = 0;
+	inline static float soft_body_bend_compliance = 0.001f;
 	inline static float bounce_velocity_threshold;
 	inline static bool sleep_allowed;
 	inline static float sleep_velocity_threshold;

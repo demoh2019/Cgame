@@ -1,0 +1,16 @@
+config_version=5
+
+[application]
+
+config/name="Cgame Jolt Soft Body Regression"
+
+[physics]
+
+3d/physics_engine="Jolt Physics"
+jolt_physics_3d/simulation/soft_body_bend_mode=2
+jolt_physics_3d/simulation/soft_body_bend_compliance=0.001
+
+[rendering]
+
+renderer/rendering_method="gl_compatibility"
+renderer/rendering_method.mobile="gl_compatibility"

@@ -249,7 +249,13 @@ JPH::SoftBodySharedSettings *JoltSoftBody3D::_create_shared_settings() {
 	JPH::SoftBodySharedSettings::VertexAttributes vertex_attrib;
 	vertex_attrib.mCompliance = vertex_attrib.mShearCompliance = inverse_stiffness;
 
-	settings->CreateConstraints(&vertex_attrib, 1, JPH::SoftBodySharedSettings::EBendType::None);
+	// Jolt supports distance- and dihedral-based XPBD bending. Keep disabled
+	// by default for backward compatibility; enable through project settings.
+	vertex_attrib.mBendCompliance = JoltProjectSettings::soft_body_bend_compliance;
+	using BendType = JPH::SoftBodySharedSettings::EBendType;
+	const int bend_mode = JoltProjectSettings::soft_body_bend_mode;
+	const BendType bend_type = bend_mode == 1 ? BendType::Distance : (bend_mode == 2 ? BendType::Dihedral : BendType::None);
+	settings->CreateConstraints(&vertex_attrib, 1, bend_type);
 	float multiplier = 1.0f - shrinking_factor;
 	for (JPH::SoftBodySharedSettings::Edge &e : settings->mEdgeConstraints) {
 		e.mRestLength *= multiplier;
@@ -289,7 +295,9 @@ void JoltSoftBody3D::_apply_environmental_forces(float p_step) {
 	// Apply gravity to soft body. Note that this only works so long as vertices have uniform mass (excluding pinned vertices).
 	jolt_body->AddForce(to_jolt(gravity) * mass);
 
-	if (!wind_areas_scratch.is_empty()) {
+	// Aerodynamic drag needs the same triangle traversal as wind, but must
+	// also work in still air without any Area3D. Zero drag stays on the wind-only fast path.
+	if (!wind_areas_scratch.is_empty() || drag_coefficient > 0.0f) {
 		JPH::SoftBodyMotionProperties &motion_properties = static_cast<JPH::SoftBodyMotionProperties &>(*jolt_body->GetMotionPropertiesUnchecked());
 		JPH::Array<JPH::SoftBodyVertex> &physics_vertices = motion_properties.GetVertices();
 
@@ -337,8 +345,30 @@ void JoltSoftBody3D::_apply_environmental_forces(float p_step) {
 					wind_force += (force_magnitude * attenuation_over_distance * real_t(1.0 / 3.0) * normal.dot(wind_direction)) * normal;
 				}
 
-				// Apply the force as an impulse over the timestep.
-				JPH::Vec3 impulse = to_jolt(wind_force * p_step);
+				// Force and impulse are per vertex (one third of each face force).
+				Vector3 impulse_per_vertex = wind_force * p_step;
+				if (drag_coefficient > 0.0f) {
+					// Two-sided quadratic aerodynamic drag projected onto the
+					// current triangle normal. This works even without wind.
+					const Vector3 average_velocity = (to_godot(physics_vertex0.mVelocity) +
+								to_godot(physics_vertex1.mVelocity) + to_godot(physics_vertex2.mVelocity)) * real_t(1.0 / 3.0);
+					const real_t normal_speed = normal.dot(average_velocity);
+					const real_t inverse_mass_sum = physics_vertex0.mInvMass + physics_vertex1.mInvMass + physics_vertex2.mInvMass;
+					if (normal_speed != 0.0f && inverse_mass_sum > 0.0f) {
+						// Clamp to prevent a large timestep, speed or coefficient
+						// from reversing the face's average normal velocity.
+						// Double precision avoids overflow in intermediate products.
+						const double normal_speed_d = double(normal_speed);
+						const double impulse_magnitude = MIN(
+								double(drag_coefficient) * double(triangle_area) * (1.0 / 6.0) *
+										normal_speed_d * normal_speed_d * double(p_step),
+								3.0 * Math::abs(normal_speed_d) / double(inverse_mass_sum));
+						impulse_per_vertex -= normal * real_t((normal_speed > 0.0f ? 1.0 : -1.0) * impulse_magnitude);
+					}
+				}
+
+				// Apply the combined wind and drag impulse to each free vertex.
+				JPH::Vec3 impulse = to_jolt(impulse_per_vertex);
 				physics_vertex0.mVelocity += impulse * physics_vertex0.mInvMass;
 				physics_vertex1.mVelocity += impulse * physics_vertex1.mInvMass;
 				physics_vertex2.mVelocity += impulse * physics_vertex2.mInvMass;
@@ -693,12 +723,12 @@ void JoltSoftBody3D::set_linear_damping(float p_damping) {
 }
 
 float JoltSoftBody3D::get_drag() const {
-	// Drag is not a thing in Jolt, and not supported by Godot Physics either.
-	return 0.0f;
+	return drag_coefficient;
 }
 
 void JoltSoftBody3D::set_drag(float p_drag) {
-	// Drag is not a thing in Jolt, and not supported by Godot Physics either.
+	ERR_FAIL_COND_MSG(p_drag < 0.0f || !Math::is_finite(p_drag), "Soft body drag must be nonnegative and finite.");
+	drag_coefficient = p_drag;
 }
 
 Variant JoltSoftBody3D::get_state(PS3DE::BodyState p_state) const {
