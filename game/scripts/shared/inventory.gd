@@ -3,6 +3,7 @@ extends RefCounted
 ## tool in use. Pure data: no scene, so the server owns it and the client gets copies.
 
 const Defs = preload("res://scripts/shared/defs.gd")
+const Encumbrance = preload("res://scripts/shared/encumbrance.gd")
 
 var slots: Array = [] # Each is {} or {"id": String, "count": int}.
 var weapon: String = ""
@@ -13,6 +14,26 @@ func _init(p_slots: int = Defs.INVENTORY_SLOTS) -> void:
 	slots.resize(p_slots)
 	for i in p_slots:
 		slots[i] = {}
+
+
+## Live carried mass, *not* the protected stash. Equipped items already
+## exist in slots and are counted exactly once.
+func weight_grams() -> int:
+	var grams := 0
+	for slot in slots:
+		if slot.is_empty():
+			continue
+		var count_in_stack := maxi(int(slot.get("count", 0)), 0)
+		grams += Encumbrance.item_grams(str(slot.get("id", ""))) * count_in_stack
+	return grams
+
+
+func speed_factor() -> float:
+	return Encumbrance.speed_factor(weight_grams())
+
+
+func can_sprint() -> bool:
+	return Encumbrance.sprint_allowed(weight_grams())
 
 
 func count(id: String) -> int:
