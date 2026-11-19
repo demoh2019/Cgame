@@ -1,6 +1,6 @@
 # Godot upstream issue and PR migration
 
-Source: `godotengine/godot` → destination: `demoh2019/godot`.
+Source: `godotengine/godot` → destination: `demoh2019/Cgame`.
 
 This repository is already a fork with matching `master` history, so **merged upstream PR code should not be cherry-picked again**. A GitHub PR must have a diff against its target branch: historical merged/closed upstream PRs cannot be faithfully recreated as ordinary open PRs in the fork. They can be archived as **closed issues** or exported to JSONL. Open PRs with clean patches can be submitted as **draft PRs** for review and CI.
 
@@ -8,7 +8,7 @@ This repository is already a fork with matching `master` history, so **merged up
 
 1. In the destination GitHub repository, enable **Settings → General → Features → Issues**. GitHub currently returns `410: Issues has been disabled in this repository` when creating an issue. **Nothing can migrate into the Issues tab until this is changed.** This is a repository setting; creating a PR does not enable it.
 2. Use Python 3.10+ and a `GITHUB_TOKEN` with read access to upstream and **Issues: read/write**, **Pull requests: read/write**, **Contents: read/write** in the destination. Tokens should be in environment variables or GitHub Secrets, **never committed**.
-3. For applying code from open PRs, work in a local checkout of the fork with remotes `origin=https://github.com/demoh2019/godot.git` and `upstream=https://github.com/godotengine/godot.git`. Commit/push rights must work. Avoid running two migrations at the same time.
+3. For applying code from open PRs, work in a local checkout of the fork with remotes `origin=https://github.com/demoh2019/Cgame.git` and `upstream=https://github.com/godotengine/godot.git`. Commit/push rights must work. Avoid running two migrations at the same time.
 
 ## Locally
 
