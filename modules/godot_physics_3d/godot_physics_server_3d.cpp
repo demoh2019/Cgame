@@ -1787,6 +1787,17 @@ int GodotPhysicsServer3D::get_process_info(PS3DE::ProcessInfo p_info) {
 }
 
 void GodotPhysicsServer3D::_update_shapes() {
+	// Keep the common single-object path allocation-free and synchronous.
+	if (auto *single = pending_shape_update_list.first()) {
+		if (!single->next()) {
+			single->self()->_shape_changed();
+			pending_shape_update_list.remove(single);
+			if (!pending_shape_update_list.first()) {
+				return;
+			}
+		}
+	}
+
 	// The shape update list already groups edits across independent bodies.
 	// Batch BVH pair generation per space and finalize before returning to the
 	// physics step or any caller that requires up-to-date contacts.
