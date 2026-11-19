@@ -1051,6 +1051,8 @@ func _physics_restitution_2d() -> Dictionary:
 	var high_vx: float = await _restitution_trial_2d(fast_speed, 90)
 	if low_vx < -slow_speed * 0.25:
 		return {"error": "Low-speed 2D impact unexpectedly rebounded", "vx": low_vx}
+	if low_vx > slow_speed * 0.75:
+		return {"error": "Low-speed 2D impact did not reach a contact", "vx": low_vx}
 	if high_vx >= -fast_speed * 0.25:
 		return {"error": "High-speed 2D impact failed to rebound", "vx": high_vx}
 	return {"threshold": threshold, "low_speed": slow_speed, "high_speed": fast_speed,
@@ -1097,6 +1099,8 @@ func _physics_restitution_3d() -> Dictionary:
 	var high_vx: float = await _restitution_trial_3d(fast_speed, 180)
 	if low_vx < -slow_speed * 0.25:
 		return {"error": "Low-speed 3D impact unexpectedly rebounded", "vx": low_vx}
+	if low_vx > slow_speed * 0.75:
+		return {"error": "Low-speed 3D impact did not reach a contact", "vx": low_vx}
 	if high_vx >= -fast_speed * 0.25:
 		return {"error": "High-speed 3D impact failed to rebound", "vx": high_vx}
 	return {"threshold": threshold, "low_speed": slow_speed, "high_speed": fast_speed,
