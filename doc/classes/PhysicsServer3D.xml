@@ -1441,6 +1441,22 @@
 				Sets the linear stiffness of the given soft body. Higher values will result in a stiffer body, while lower values will increase the body's ability to bend. The value can be between [code]0.0[/code] and [code]1.0[/code] (inclusive).
 			</description>
 		</method>
+		<method name="soft_body_set_tetrahedral_indices">
+			<return type="void" />
+			<param index="0" name="body" type="RID" />
+			<param index="1" name="tetrahedral_indices" type="PackedInt32Array" />
+			<description>
+				Assigns explicit tetrahedral connectivity for the experimental Cgame GodotPhysics3D volumetric soft-body solver. Every four indices reference visual mesh vertices, followed by any additional FEM interior vertices specified by [method soft_body_set_tetrahedral_interior_positions]. Invalid topology disables only the FEM extension; other physics backends may ignore this method.
+			</description>
+		</method>
+		<method name="soft_body_set_tetrahedral_interior_positions">
+			<return type="void" />
+			<param index="0" name="body" type="RID" />
+			<param index="1" name="positions" type="PackedVector3Array" />
+			<description>
+				Sets additional local-space internal simulation particles for an experimental volumetric soft body. They receive physical mass and FEM forces, but do not become render vertices or separate collision particles. Recreating the simulation topology is required if the physical mesh has already been constructed.
+			</description>
+		</method>
 		<method name="soft_body_set_mesh">
 			<return type="void" />
 			<param index="0" name="body" type="RID" />
