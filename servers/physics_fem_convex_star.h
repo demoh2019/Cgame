@@ -66,6 +66,7 @@ struct PhysicsFEMConvexTetra {
 	uint32_t d = 0;
 	PhysicsFEMTetraRest rest;
 	double lambda = 0.0;
+	double plastic_volume_scale = 1.0; // Irreversible local rest-volume ratio (0.2..5), default intact.
 };
 
 // The normal orientation is inferred from the already validated signed

@@ -161,6 +161,8 @@ private:
 	real_t soft_body_tetra_fiber_compliance = 0.0; // 0: no FEM directional reinforcement.
 	Vector3 soft_body_tetra_fiber_axis = Vector3(1, 0, 0); // Undeformed material direction.
 	real_t soft_body_tetra_fem_viscosity = 0.0; // Objective Kelvin-Voigt material damping.
+	real_t soft_body_tetra_volume_plastic_rate = 0.0; // 1/s, opt-in per-tet isotropic plastic rest deformation.
+	real_t soft_body_tetra_volume_plastic_yield = 0.15; // Elastic volume strain window in |ln(J)|.
 	bool soft_body_tetra_inversion_recovery = false; // Recover inverted/collapsed FEM tetrahedra, opt-in.
 	real_t soft_body_tetra_inversion_min_j = 0.05; // Minimum positive det(F) after recovery.
 	real_t soft_body_tetra_damage_yield_strain = 0.25;
@@ -337,6 +339,8 @@ public:
 	_FORCE_INLINE_ real_t get_soft_body_tetra_fiber_compliance() const { return soft_body_tetra_fiber_compliance; }
 	_FORCE_INLINE_ const Vector3 &get_soft_body_tetra_fiber_axis() const { return soft_body_tetra_fiber_axis; }
 	_FORCE_INLINE_ real_t get_soft_body_tetra_fem_viscosity() const { return soft_body_tetra_fem_viscosity; }
+	_FORCE_INLINE_ real_t get_soft_body_tetra_volume_plastic_rate() const { return soft_body_tetra_volume_plastic_rate; }
+	_FORCE_INLINE_ real_t get_soft_body_tetra_volume_plastic_yield() const { return soft_body_tetra_volume_plastic_yield; }
 	_FORCE_INLINE_ bool is_soft_body_tetra_inversion_recovery_enabled() const { return soft_body_tetra_inversion_recovery; }
 	_FORCE_INLINE_ real_t get_soft_body_tetra_inversion_min_j() const { return soft_body_tetra_inversion_min_j; }
 	_FORCE_INLINE_ real_t get_soft_body_tetra_damage_rate() const { return soft_body_tetra_damage_rate; }

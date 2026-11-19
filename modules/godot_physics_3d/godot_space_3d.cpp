@@ -1368,6 +1368,11 @@ GodotSpace3D::GodotSpace3D() {
 	soft_body_tetra_fiber_axis = configured_fem_fiber_axis.is_finite() && configured_fem_fiber_axis.length_squared() > real_t(0.0) ? configured_fem_fiber_axis : Vector3(1, 0, 0);
 	const real_t configured_tetra_viscosity = GLOBAL_GET("physics/3d/solver/soft_body_tetra_fem_viscosity");
 	soft_body_tetra_fem_viscosity = Math::is_finite(configured_tetra_viscosity) ? MAX(real_t(0.0), configured_tetra_viscosity) : real_t(0.0);
+	const real_t configured_tetra_plastic_rate = GLOBAL_GET("physics/3d/solver/soft_body_tetra_volume_plastic_rate");
+	soft_body_tetra_volume_plastic_rate = Math::is_finite(configured_tetra_plastic_rate) ? MAX(real_t(0.0), configured_tetra_plastic_rate) : real_t(0.0);
+	const real_t configured_tetra_plastic_yield = GLOBAL_GET("physics/3d/solver/soft_body_tetra_volume_plastic_yield");
+	soft_body_tetra_volume_plastic_yield = Math::is_finite(configured_tetra_plastic_yield) ?
+			CLAMP(configured_tetra_plastic_yield, real_t(0.0), real_t(2.0)) : real_t(0.15);
 	soft_body_tetra_inversion_recovery = GLOBAL_GET("physics/3d/solver/soft_body_tetra_inversion_recovery");
 	const real_t configured_tetra_min_j = GLOBAL_GET("physics/3d/solver/soft_body_tetra_inversion_min_j");
 	soft_body_tetra_inversion_min_j = Math::is_finite(configured_tetra_min_j) ?
