@@ -1,5 +1,40 @@
 # Cgame whole-engine stress and performance regression suite
 
+## Bounded idle BVH changed-proxy queue retention
+
+The shared BVH used by GodotPhysics2D, GodotPhysics3D, and other spatial
+clients maintains a vector of proxies whose collision pairs must be checked.
+After very large one-off scene loads, the vector previously retained its peak
+capacity indefinitely even when subsequent frames had no moved proxies.
+
+On normal `BVH_Manager::update()` calls, the buffer now retains capacity
+through **15 idle updates** to avoid reallocations between intermittent busy
+frames. On the 16th consecutive idle update it releases capacity **only if
+it exceeded 4096 handles**; typical workloads retain their buffers. Active
+spawn/move frames reset the idle counter, so consecutive pressure workloads do
+not constantly allocate and free a large queue. Existing pairs, query order,
+and collision callbacks are unchanged. Other BVH allocations and process RSS
+are not guaranteed to shrink merely because this temporary buffer is freed.
+
+A native C++ regression creates 5000 separated proxies, verifies initial
+queue retention and later reclamation, and checks that insertion/movement,
+pair callbacks, and spatial queries remain valid after the queue is reset.
+
+```bash
+# Requires a Cgame editor built with tests=yes:
+./bin/godot.macos.editor.arm64 --headless --test --test-case="[BVH] Large changed-proxy queues are released after idle frames"
+
+# On matching hardware, compare process RSS under large bursts and idle periods:
+python3 tests/stress/run.py --godot ./bin/godot.macos.editor.arm64 \
+  --case physics_proxies_2d,physics_proxies_3d,physics_pending_3d \
+  --scale 16 --repeats 5 --frames 120 --output out/bvh-idle-reclaim.json
+```
+
+This is a memory-retention policy, not a claim of improved throughput or
+measured RSS reduction. The behavior applies to shared BVH users, not Jolt
+Physics's own broadphase.
+
+
 Independent, reproducible workloads for CPU, script execution, object lifetime,
 allocation churn, scene-tree mutations, physics, IO, data codecs, threads and
 render-node throughput. A Python watchdog samples *process resident RAM* and
