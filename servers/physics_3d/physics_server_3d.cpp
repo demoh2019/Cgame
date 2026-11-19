@@ -678,6 +678,10 @@ PhysicsServer3D::PhysicsServer3D() {
 	// Jolt-style per-shape buoyancy: approximate partial immersion below a
 	// horizontal liquid surface; opt-in and independent from legacy damping.
 	GLOBAL_DEF(PropertyInfo(Variant::BOOL, "physics/3d/fluid_plane/enabled"), false);
+	// For closed SoftBody3D meshes, integrate hydrostatic pressure across
+	// clipped submerged faces. Independent opt-in: existing fluid behavior
+	// and open cloth meshes are unaffected.
+	GLOBAL_DEF(PropertyInfo(Variant::BOOL, "physics/3d/fluid_plane/soft_body_hydrostatic_buoyancy"), false);
 	GLOBAL_DEF(PropertyInfo(Variant::FLOAT, "physics/3d/fluid_plane/surface_height", PROPERTY_HINT_RANGE, "-100000,100000,0.01,or_less,or_greater,suffix:m"), 0.0);
 	GLOBAL_DEF(PropertyInfo(Variant::FLOAT, "physics/3d/fluid_plane/density", PROPERTY_HINT_RANGE, "0,2000,1,or_greater,suffix:kg/m³"), 1000.0);
 	GLOBAL_DEF(PropertyInfo(Variant::FLOAT, "physics/3d/fluid_plane/drag_coefficient", PROPERTY_HINT_RANGE, "0,5,0.01,or_greater"), 0.8);
