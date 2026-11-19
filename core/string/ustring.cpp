@@ -4467,6 +4467,34 @@ String String::simplify_path() const {
 
 	const bool absolute_path = is_absolute_path() && !begins_with("res://");
 
+	// Most imported resource and project paths are already canonical. Avoid
+	// allocating and copying an output buffer when there is nothing to change.
+	// Parent components use the general path below, even when preserved.
+	const char32_t *const input = s.ptr();
+	const int input_length = s.length();
+	int component_start = 0;
+	bool needs_normalization = false;
+	for (int i = 0; i <= input_length; i++) {
+		if (i < input_length && input[i] == '\\') {
+			needs_normalization = true;
+			break;
+		}
+		if (i < input_length && input[i] != '/') {
+			continue;
+		}
+		const int component_length = i - component_start;
+		if (component_length == 0 ||
+				(component_length == 1 && input[component_start] == '.') ||
+				(component_length == 2 && input[component_start] == '.' && input[component_start + 1] == '.')) {
+			needs_normalization = true;
+			break;
+		}
+		component_start = i + 1;
+	}
+	if (!needs_normalization) {
+		return *this;
+	}
+
 	String normalized;
 	normalized.resize_uninitialized(s.size());
 	char32_t *const dst_start = normalized.ptrw();
