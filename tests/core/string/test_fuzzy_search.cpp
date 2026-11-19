@@ -291,4 +291,48 @@ TEST_CASE("[FuzzySearch] Bounded search recycles losers and preserves empty resu
 	CHECK_EQ(search.search_all("no_such_token_98765", targets).size(), 0);
 }
 
+
+TEST_CASE("[FuzzySearch] Fuzzy length feasibility preserves miss budget") {
+	FuzzySearch search;
+	search.set_case_sensitive(true);
+	search.set_filter_low_scores(false);
+	search.set_max_misses(2);
+	// Four target characters can match a six-character query with two misses.
+	CHECK(search.search("abcdef", "abcf").is_valid());
+	CHECK(search.search("abcdef", "abcx").is_null());
+	CHECK(search.search("abcdef", "abc").is_null());
+	CHECK(search.search("abcdef", "").is_null());
+
+	search.set_max_misses(3);
+	CHECK(search.search("abcde", "ab").is_valid());
+	CHECK(search.search("abcde", "a").is_null());
+	search.set_start_offset(3);
+	CHECK(search.search("abcde", "___ab").is_valid());
+	CHECK(search.search("abcde", "___a").is_null());
+}
+
+TEST_CASE("[FuzzySearch] Case sensitive scoring and empty query fast paths") {
+	FuzzySearch search;
+	search.set_case_sensitive(true);
+	search.set_use_exact_tokens(true);
+	search.set_filter_low_scores(false);
+
+	CHECK(search.search("", "res://Alpha.gd").is_null());
+	CHECK(search.search("   ", "res://Alpha.gd").is_null());
+	CHECK(search.search("Alpha", "res://alpha.gd").is_null());
+
+	Vector<String> targets;
+	targets.append("res://Alpha.gd");
+	targets.append("res://AlphaOther.gd");
+	targets.append("res://alpha.gd");
+	const Vector<Ref<FuzzySearchMatch>> results = search.search_all("Alpha", targets);
+	REQUIRE_EQ(results.size(), 2);
+	for (const Ref<FuzzySearchMatch> &match : results) {
+		const Ref<FuzzySearchMatch> direct = search.search("Alpha", match->get_target());
+		REQUIRE(direct.is_valid());
+		CHECK_EQ(match->get_score(), direct->get_score());
+		CHECK_EQ(match->get_matched_substrings().size(), direct->get_matched_substrings().size());
+	}
+}
+
 } // namespace TestFuzzySearch

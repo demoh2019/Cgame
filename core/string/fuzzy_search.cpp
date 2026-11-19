@@ -83,12 +83,25 @@ bool FuzzySearchToken::try_exact_match(FuzzyTokenMatch &p_match, const String &p
 bool FuzzySearchToken::try_fuzzy_match(FuzzyTokenMatch &p_match, const String &p_target, int p_offset, int p_miss_budget) const {
 	p_match.token_idx = idx;
 	p_match.token_length = string.length();
+	// Even a perfect subsequence cannot recover more characters than remain
+	// in the target. Reject impossible candidates before doing any character scans.
+	if (string.length() - p_miss_budget > MAX(0, p_target.length() - p_offset)) {
+		return false;
+	}
 	int run_start = -1;
 	int run_len = 0;
 
 	// Search for the subsequence string in p_target starting from p_offset, recording each substring for
 	// later scoring and display.
 	for (int i = 0; i < string.length(); i++) {
+		if (p_offset >= p_target.length()) {
+			// All remaining query characters would be misses; do not search
+			// an empty suffix once for each character.
+			if (string.length() - i > p_miss_budget) {
+				return false;
+			}
+			break;
+		}
 		int new_offset = p_target.find_char(string[i], p_offset);
 		if (new_offset < 0) {
 			p_miss_budget--;
@@ -362,7 +375,7 @@ bool FuzzySearch::_search_tokens(const Vector<FuzzySearchToken> &p_tokens, const
 				}
 			}
 			if (r_result->_can_add_token_match(match)) {
-				r_result->_score_token_match(match, match.is_case_insensitive(p_target, adjusted_target));
+				r_result->_score_token_match(match, !case_sensitive && match.is_case_insensitive(p_target, adjusted_target));
 				if (best_match.token_idx == -1 || best_match.score < match.score) {
 					best_match = match;
 				}
@@ -391,9 +404,13 @@ bool FuzzySearch::_search_tokens(const Vector<FuzzySearchToken> &p_tokens, const
 }
 
 Ref<FuzzySearchMatch> FuzzySearch::search(const String &p_query, const String &p_target) const {
+	const Vector<FuzzySearchToken> tokens = _get_tokens(p_query);
+	if (tokens.is_empty()) {
+		return nullptr;
+	}
 	Ref<FuzzySearchMatch> result;
 	result.instantiate();
-	if (_search_tokens(_get_tokens(p_query), p_target, result)) {
+	if (_search_tokens(tokens, p_target, result)) {
 		return result;
 	}
 	return nullptr;
