@@ -83,7 +83,8 @@ bool Terrain3DEditorPlugin::_pick_terrain(Camera3D *p_camera, const Vector2 &p_s
 	const int steps = MIN(4096, MAX(32, (int)Math::ceil((exit - entry) / cell_size * 4.0)));
 	const auto height_difference = [this, &origin, &direction, cell_size](real_t p_time) {
 		const Vector3 point = origin + direction * p_time;
-		return point.y - terrain->sample_height(Vector2(point.x / cell_size, point.z / cell_size));
+		const Vector2i size = terrain->get_grid_size();
+		return point.y - terrain->sample_height(Vector2(CLAMP(point.x / cell_size, 0.0, (real_t)(size.x - 1)), CLAMP(point.z / cell_size, 0.0, (real_t)(size.y - 1))));
 	};
 	real_t previous_time = entry;
 	real_t previous_difference = height_difference(previous_time);

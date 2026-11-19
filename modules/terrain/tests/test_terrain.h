@@ -12,7 +12,7 @@
 
 #include "../terrain_3d.h"
 
-#include "scene/resources/image.h"
+#include "core/io/image.h"
 #include "scene/resources/mesh.h"
 #include "tests/test_macros.h"
 

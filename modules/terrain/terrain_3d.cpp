@@ -29,7 +29,7 @@
 
 #include "core/math/math_funcs.h"
 #include "core/object/class_db.h"
-#include "scene/resources/image.h"
+#include "core/io/image.h"
 #include "scene/resources/material.h"
 #include "scene/resources/mesh.h"
 
@@ -195,7 +195,7 @@ real_t HeightmapTerrain3D::sample_height(const Vector2 &p_grid_position) const {
 }
 
 void HeightmapTerrain3D::sculpt(const Vector2 &p_grid_position, real_t p_radius, real_t p_delta) {
-	ERR_FAIL_COND(!Math::is_finite(p_radius) || !Math::is_finite(p_delta) || p_radius <= 0.0);
+	ERR_FAIL_COND(!Math::is_finite(p_grid_position.x) || !Math::is_finite(p_grid_position.y) || !Math::is_finite(p_radius) || !Math::is_finite(p_delta) || p_radius <= 0.0);
 	const int min_x = MAX(0, (int)Math::floor(p_grid_position.x - p_radius));
 	const int max_x = MIN(grid_size.x - 1, (int)Math::ceil(p_grid_position.x + p_radius));
 	const int min_z = MAX(0, (int)Math::floor(p_grid_position.y - p_radius));
@@ -214,7 +214,7 @@ void HeightmapTerrain3D::sculpt(const Vector2 &p_grid_position, real_t p_radius,
 }
 
 void HeightmapTerrain3D::smooth(const Vector2 &p_grid_position, real_t p_radius, real_t p_strength) {
-	ERR_FAIL_COND(!Math::is_finite(p_radius) || !Math::is_finite(p_strength) || p_radius <= 0.0);
+	ERR_FAIL_COND(!Math::is_finite(p_grid_position.x) || !Math::is_finite(p_grid_position.y) || !Math::is_finite(p_radius) || !Math::is_finite(p_strength) || p_radius <= 0.0);
 	const real_t strength = CLAMP(p_strength, 0.0, 1.0);
 	if (strength == 0.0) {
 		return;
@@ -245,7 +245,7 @@ void HeightmapTerrain3D::smooth(const Vector2 &p_grid_position, real_t p_radius,
 }
 
 void HeightmapTerrain3D::paint_color(const Vector2 &p_grid_position, real_t p_radius, const Color &p_color, real_t p_opacity) {
-	ERR_FAIL_COND(!Math::is_finite(p_radius) || !Math::is_finite(p_opacity) || p_radius <= 0.0);
+	ERR_FAIL_COND(!Math::is_finite(p_grid_position.x) || !Math::is_finite(p_grid_position.y) || !Math::is_finite(p_radius) || !Math::is_finite(p_opacity) || p_radius <= 0.0);
 	const real_t opacity = CLAMP(p_opacity, 0.0, 1.0);
 	for (int z = 0; z < grid_size.y; z++) {
 		for (int x = 0; x < grid_size.x; x++) {
@@ -272,7 +272,7 @@ void HeightmapTerrain3D::import_heightmap(const Ref<Image> &p_image, real_t p_mi
 	for (int z = 0; z < size.y; z++) {
 		for (int x = 0; x < size.x; x++) {
 			float grayscale = p_image->get_pixel(x, z).get_luminance();
-			imported.set(z * size.x + x, Math::lerp(p_min_height, p_max_height, (real_t)grayscale));
+			imported.set(z * size.x + x, Math::lerp(p_min_height, p_max_height, (real_t)CLAMP(grayscale, 0.0f, 1.0f)));
 		}
 	}
 	if (size != grid_size) {

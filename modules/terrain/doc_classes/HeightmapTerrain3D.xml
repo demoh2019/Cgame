@@ -1,0 +1,90 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<class name="HeightmapTerrain3D" inherits="MeshInstance3D" api_type="core" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="../../../doc/class.xsd">
+	<brief_description>
+		A heightfield terrain node with sculpting and vertex-color painting.
+	</brief_description>
+	<description>
+		HeightmapTerrain3D generates a mesh from a rectangular grid of height values. It is an initial native terrain authoring implementation for modest landscapes, not a streaming terrain system. A single surface is regenerated when data changes, with a maximum grid size of 257 by 257 vertices.
+		The terrain origin is its top-left grid corner. X and Z are horizontal, Y is height. Heightfield vertices are spaced by [member cell_size] in local units. Each grid cell has one height and one vertex color.
+		To edit in the 3D viewport, select the node and choose Raise, Lower, Smooth, or Paint Color from the terrain toolbar. The toolbar provides a brush radius in grid cells and a brush strength. Brush strokes participate in Undo/Redo.
+		Heights and vertex colors are stored with the scene; the generated mesh is not independently serialized. The default surface material displays vertex colors, and can be overridden through the inherited material override.
+		[b]Limitations:[/b] There is no LOD, chunk streaming, automatic collision, foliage system, texture splatmap, or advanced erosion in this initial implementation. Each edit currently regenerates the full mesh. For very large worlds, split the terrain into several nodes until chunked streaming is implemented.
+	</description>
+	<methods>
+		<method name="get_height_at" qualifiers="const">
+			<return type="float" />
+			<param index="0" name="x" type="int" />
+			<param index="1" name="z" type="int" />
+			<description>
+				Returns the exact height sample at integer grid coordinates.
+			</description>
+		</method>
+		<method name="set_height_at">
+			<return type="void" />
+			<param index="0" name="x" type="int" />
+			<param index="1" name="z" type="int" />
+			<param index="2" name="height" type="float" />
+			<description>
+				Sets the height at one vertex, then rebuilds the mesh.
+			</description>
+		</method>
+		<method name="sample_height" qualifiers="const">
+			<return type="float" />
+			<param index="0" name="grid_position" type="Vector2" />
+			<description>
+				Bilinearly samples the surface at a fractional grid coordinate.
+			</description>
+		</method>
+		<method name="sculpt">
+			<return type="void" />
+			<param index="0" name="grid_position" type="Vector2" />
+			<param index="1" name="radius" type="float" />
+			<param index="2" name="delta" type="float" />
+			<description>
+				Raises or lowers nearby vertices with quadratic falloff. Radius is in grid cells, delta is a height change in local Y units.
+			</description>
+		</method>
+		<method name="smooth">
+			<return type="void" />
+			<param index="0" name="grid_position" type="Vector2" />
+			<param index="1" name="radius" type="float" />
+			<param index="2" name="strength" type="float" />
+			<description>
+				Blends local heights toward a 3 by 3 neighborhood average using a snapshot to avoid update-order bias.
+			</description>
+		</method>
+		<method name="paint_color">
+			<return type="void" />
+			<param index="0" name="grid_position" type="Vector2" />
+			<param index="1" name="radius" type="float" />
+			<param index="2" name="color" type="Color" />
+			<param index="3" name="opacity" type="float" />
+			<description>
+				Paints vertex colors with radial falloff. This is vertex-color tinting, not four-layer terrain texture painting.
+			</description>
+		</method>
+		<method name="import_heightmap">
+			<return type="void" />
+			<param index="0" name="image" type="Image" />
+			<param index="1" name="min_height" type="float" />
+			<param index="2" name="max_height" type="float" />
+			<description>
+				Replaces the terrain with heights sampled from the image's grayscale luminance. Compressed images and grids larger than 257 by 257 are rejected.
+			</description>
+		</method>
+	</methods>
+	<members>
+		<member name="grid_size" type="Vector2i" setter="set_grid_size" getter="get_grid_size" default="Vector2i(33, 33)">
+			Number of vertices along X and Z. Both dimensions must be between 2 and 257. Changing the size resets existing height and color data.
+		</member>
+		<member name="cell_size" type="float" setter="set_cell_size" getter="get_cell_size" default="1.0">
+			Horizontal spacing between vertices in local coordinate units.
+		</member>
+		<member name="height_data" type="PackedFloat32Array" setter="set_height_data" getter="get_height_data">
+			Serialized row-major height values. Must contain [code]grid_size.x * grid_size.y[/code] finite values.
+		</member>
+		<member name="color_data" type="PackedColorArray" setter="set_color_data" getter="get_color_data">
+			Serialized row-major vertex colors, one color per height sample.
+		</member>
+	</members>
+</class>
