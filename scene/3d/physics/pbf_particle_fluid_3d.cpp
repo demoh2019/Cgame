@@ -31,7 +31,7 @@
 
 #include "core/object/class_db.h"
 #include "scene/resources/world_3d.h"
-#include "servers/physics_3d/physics_direct_space_state_3d.h"
+#include "servers/physics_3d/direct_states/physics_direct_space_state_3d.h"
 #include "servers/physics_3d/physics_server_3d.h"
 #include "servers/physics_pbf_rigid_coupling_3d.h"
 
