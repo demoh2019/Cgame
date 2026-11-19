@@ -215,7 +215,8 @@ static func apply_validated(game: Node3D, valid: Dictionary) -> void:
             var record: Dictionary = valid["enemies"][key]
             entity.call("restore_health", record["health"])
             entity.global_position = _array_to_position(record["position"])
-            (entity as CharacterBody3D).velocity = Vector3.ZERO
+            var enemy_body := entity as CharacterBody3D
+            enemy_body.velocity = Vector3.ZERO
 
 
 static func save(game: Node3D, path: String = DEFAULT_PATH) -> bool:
