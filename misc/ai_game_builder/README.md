@@ -72,11 +72,13 @@ With a Godot 4.6+ executable available:
 
     godot --headless --path misc/ai_game_builder --script res://tests/test_plan.gd
     godot --headless --path misc/ai_game_builder --script res://tests/test_context.gd
+    godot --headless --path misc/ai_game_builder --script res://tests/test_provider.gd
     godot --headless --editor --path misc/ai_game_builder --quit
 
 The tests cover path validation, JSON plans, size limits, filename collisions,
 opt-in overwrite, backup and rollback recovery, explicit context selection,
-UTF-8 validation, symlinks and secret-pattern rejection. CI also runs a Godot
+UTF-8 validation, symlinks, secret-pattern rejection and Chat Completions
+response decoding. The editor dock scrolls in narrow layouts. CI also runs a Godot
 headless editor smoke test. Neither suite validates live model requests,
 rendered UI, gameplay quality or full-game reliability.
 
