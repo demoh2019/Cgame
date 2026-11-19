@@ -68,6 +68,9 @@ public:
 
 	inline static float collision_margin_fraction;
 	inline static float active_edge_threshold_cos;
+	// Snapshot when a physics space is created; never mutate active Jolt callbacks.
+	inline static int friction_combine_mode = 0;
+	inline static int restitution_combine_mode = 0;
 
 	inline static JoltJointWorldNode joint_world_node;
 
