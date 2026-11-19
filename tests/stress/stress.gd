@@ -21,7 +21,7 @@ const CASES := [
 	"packed_arrays", "sorting", "animation_tracks", "physics_raycast_2d",
 	"physics_raycast_3d", "render_multimesh_3d",
 	"object_lifecycle", "scene_churn",
-	"bitmap_rects",
+	"bitmap_rects", "bitmap_pipeline",
 ]
 
 var signal_total: int = 0
@@ -258,6 +258,8 @@ func _run_case(test_case: String, scale: int, frames: int, seed: int) -> Diction
 			return await _render_multimesh_3d(scale, frames)
 		"bitmap_rects":
 			return _bitmap_rects(scale)
+		"bitmap_pipeline":
+			return _bitmap_pipeline(scale)
 	return {"error": "Unhandled case"}
 
 
@@ -1135,3 +1137,42 @@ func _astar_relax_3d(scale: int) -> Dictionary:
 			return {"error": "AStar3D decrease-key produced an incorrect route"}
 		checksum += path.size()
 	return {"nodes": count + 3, "queries": 40, "search_ms": float(Time.get_ticks_usec() - started) / 1000.0, "checksum": checksum}
+
+# Exercise BitMap blit, nearest-neighbor resize, image conversion and LA8 input.
+func _bitmap_pipeline(scale: int) -> Dictionary:
+	var source := BitMap.new()
+	source.create(Vector2i(257, 193))
+	source.set_bit_rect(Rect2i(3, 5, 250, 180), true)
+	var la8 := Image.create(257, 193, false, Image.FORMAT_LA8)
+	la8.fill(Color(0.4, 0.4, 0.4, 0.8))
+	var blit_ms := 0.0
+	var resize_ms := 0.0
+	var image_ms := 0.0
+	var alpha_ms := 0.0
+	var checksum := 0
+	var iterations := 40 * scale
+	for i in range(iterations):
+		var dest := BitMap.new()
+		dest.create(Vector2i(512, 384))
+		var started := Time.get_ticks_usec()
+		dest.blit(Vector2i((i * 7) % 50 - 25, (i * 11) % 50 - 25), source)
+		blit_ms += float(Time.get_ticks_usec() - started) / 1000.0
+		started = Time.get_ticks_usec()
+		dest.resize(Vector2i(320, 256))
+		resize_ms += float(Time.get_ticks_usec() - started) / 1000.0
+		started = Time.get_ticks_usec()
+		var image := dest.convert_to_image()
+		image_ms += float(Time.get_ticks_usec() - started) / 1000.0
+		if image.get_width() != 320 or image.get_height() != 256:
+			return {"error": "BitMap image size changed after pipeline"}
+		checksum += dest.get_true_bit_count()
+		started = Time.get_ticks_usec()
+		var alpha_mask := BitMap.new()
+		alpha_mask.create_from_image_alpha(la8, 0.5)
+		alpha_ms += float(Time.get_ticks_usec() - started) / 1000.0
+		if alpha_mask.get_true_bit_count() != 257 * 193:
+			return {"error": "BitMap LA8 import lost alpha pixels"}
+	if checksum <= 0:
+		return {"error": "BitMap clipped blit produced no pixels"}
+	return {"iterations": iterations, "blit_ms": blit_ms, "resize_ms": resize_ms,
+			"convert_ms": image_ms, "alpha_import_ms": alpha_ms, "checksum": checksum}
