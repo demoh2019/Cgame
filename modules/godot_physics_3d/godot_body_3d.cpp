@@ -366,11 +366,11 @@ void GodotBody3D::set_state(PS3DE::BodyState p_state, const Variant &p_variant) 
 				// A repeated identical transform is not a motion event. Avoid
 				// broadphase updates, matrix inversion and waking nearby bodies.
 				// Shape changes have their own update/wakeup path.
-				const Transform3D transform = p_variant;
-				if (transform == get_transform()) {
+				const Transform3D new_static_transform = p_variant;
+				if (new_static_transform == get_transform()) {
 					break;
 				}
-				_set_transform(transform);
+				_set_transform(new_static_transform);
 				_set_inv_transform(get_transform().affine_inverse());
 				wakeup_neighbours();
 			} else {
