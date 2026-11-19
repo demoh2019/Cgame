@@ -1016,4 +1016,40 @@ TEST_CASE("[BitMap] Generic-radius morphology matches independent disk reference
 	}
 }
 
+TEST_CASE("[BitMap] Large morphology radii preserve clipped source and clear semantics") {
+	BitMap bitmap;
+	bitmap.create(Size2i(9, 7));
+	bitmap.set_bit(4, 3, true);
+
+	// Even a giant radius cannot grow from a source outside the supplied
+	// rectangle: the operation is explicitly clipped to that rectangle.
+	bitmap.grow_mask(100, Rect2i(0, 0, 2, 2));
+	CHECK(bitmap.get_true_bit_count() == 1);
+	CHECK(bitmap.get_bit(4, 3));
+
+	bitmap.grow_mask(100, Rect2i(-4, -5, 18, 20));
+	CHECK(bitmap.get_true_bit_count() == 63);
+	bitmap.grow_mask(-100, Rect2i(-4, -5, 18, 20));
+	CHECK(bitmap.get_true_bit_count() == 0);
+
+	// A single seed must fill only the selected sub-rectangle when its
+	// radius spans that region's diagonal.
+	bitmap.set_bit(3, 2, true);
+	bitmap.grow_mask(100, Rect2i(2, 1, 4, 3));
+	CHECK(bitmap.get_true_bit_count() == 12);
+	CHECK(!bitmap.get_bit(1, 1));
+	CHECK(bitmap.get_bit(2, 1));
+	CHECK(bitmap.get_bit(5, 3));
+
+	bitmap.grow_mask(-100, Rect2i(2, 1, 4, 3));
+	CHECK(bitmap.get_true_bit_count() == 0);
+
+	// abs(INT32_MIN) is not representable as signed int.
+	bitmap.set_bit(3, 2, true);
+	ERR_PRINT_OFF
+	bitmap.grow_mask(INT32_MIN, Rect2i(0, 0, 9, 7));
+	ERR_PRINT_ON
+	CHECK(bitmap.get_true_bit_count() == 1);
+}
+
 } // namespace TestBitMap
