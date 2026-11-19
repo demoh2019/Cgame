@@ -383,6 +383,55 @@ python3 tests/stress/run.py --godot ./bin/godot.linuxbsd.editor.dev.x86_64 \
 Use `--list-cases` to check supported workload IDs, and compare a baseline
 from the same host; this documentation is not a measured speedup claim.
 
+### Reusing exact *negative* narrowphase results
+
+A broadphase AABB overlap does not always mean the actual shapes intersect.
+For example, two long parallel rotated boxes can have overlapping bounding
+boxes but remain separated by a small gap. Previously, these persistent
+near-miss rigid-body pairs reran expensive SAT/GJK on every physics step.
+
+Cgame now remembers whether the **actual** previous narrowphase returned
+separated. For both GodotPhysics2D and GodotPhysics3D, this permits skipping
+the next narrowphase only when the relative body translation is **exactly
+identical**, both geometry/orientation revisions match, and neither body
+uses CCD. Pure world translation shared by both bodies is allowed. Any
+relative shift, rotation, scale/shape/filter change, or CCD use invalidates
+the shortcut. A positive collision result, contact-report-only state, or
+one-way collision rejection is never mislabelled as a separated SAT result.
+
+Unlike tolerant manifold recycling, this adds **no approximation** and
+does not change the narrowphase's contact thresholds or sleeping behavior.
+The pair retains one additional boolean flag; no new per-frame heap
+allocations are required. It can reduce CPU work in persistently
+overlapping broadphase AABBs with non-touching shapes, but benefits depend
+on the scene and the memory/performance tradeoff must be benchmarked.
+
+The native unit tests cover cache initialization, positive/negative result
+transitions, geometry revision changes, and CCD exclusion. Python source
+contracts independently enforce the pair-level exact pose guard and
+the ordering of SAT/GJK and result storage:
+
+```bash
+python3 -m unittest discover -s tests/stress \
+  -p 'test_physics_negative_contact_recycling.py' -v
+```
+
+The runtime regression positions twelve 2D and twelve 3D pairs of long
+rotated boxes at a small gap: their AABBs overlap, but the shapes do not.
+After 30 stationary frames the movable boxes are translated into genuine
+contact; the test requires that narrowphase is reactivated and the
+physics solver separates them without non-finite states:
+
+```bash
+./bin/godot.macos.editor.arm64 --headless \
+  --path tests/stress \
+  --script res://physics_contact_separation_cache_regression.gd
+```
+
+Performance should be measured against the same scene on the previous
+build. These source and runtime tests are not substitutes for a complete
+engine build, thread sanitizer runs, or CPU/RSS measurements.
+
 ## Cached broadphase AABB: no-op update fast path (Box2D-style)
 
 Built-in GodotPhysics 2D and 3D now check the previously submitted
