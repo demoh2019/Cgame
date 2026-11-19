@@ -212,8 +212,9 @@ func _on_player_attacked(damage: float, range_meters: float) -> void:
     var forward: Vector3 = -player.global_transform.basis.z
     forward.y = 0.0
     forward = forward.normalized()
-    for candidate in get_tree().get_nodes_in_group("infected"):
-        if candidate.is_queued_for_deletion():
+    for candidate_node in get_tree().get_nodes_in_group("infected"):
+        var candidate := candidate_node as Node3D
+        if candidate == null or candidate.is_queued_for_deletion():
             continue
         var to_enemy: Vector3 = candidate.global_position - player.global_position
         to_enemy.y = 0.0
@@ -284,10 +285,6 @@ func _process(_delta: float) -> void:
             player.get_item_count("food"), player.get_item_count("water"),
             player.get_item_count("wood_t1"), player.get_item_count("stone_t1"),
             player.get_item_count("fiber_t1")
-        ] +
-        "T2: дерево %d, камень %d, волокно %d\n" % [
-            player.get_item_count("wood_t2"), player.get_item_count("stone_t2"),
-            player.get_item_count("fiber_t2")
         ] +
         "Добыча: древесина %d | камень %d | волокно %d | ремесло XP %d\n" % [
             player.gathering_level("wood"), player.gathering_level("stone"),
