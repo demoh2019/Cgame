@@ -138,7 +138,7 @@ void JoltProjectSettings::read_settings() {
 	soft_body_volume_compliance = Math::is_finite(volume_compliance) ? MAX(volume_compliance, 0.0f) : 0.00001f;
 	soft_body_volume_radial_springs = GLOBAL_GET("physics/jolt_physics_3d/simulation/soft_body_volume_radial_springs");
 	const float radial_compliance = GLOBAL_GET("physics/jolt_physics_3d/simulation/soft_body_volume_radial_compliance");
-	soft_body_volume_radial_compliance = Math::is_finite(radial_compliance) ? MAX(radial_compliance, 0.0f) : 0.0001f;
+	soft_body_volume_radial_compliance = Math::is_finite(radial_compliance) ? CLAMP(radial_compliance, 0.0f, 1.0f) : 0.0001f;
 	bounce_velocity_threshold = GLOBAL_GET("physics/jolt_physics_3d/simulation/bounce_velocity_threshold");
 	sleep_allowed = GLOBAL_GET("physics/jolt_physics_3d/simulation/allow_sleep");
 	sleep_velocity_threshold = GLOBAL_GET("physics/jolt_physics_3d/simulation/sleep_velocity_threshold");
