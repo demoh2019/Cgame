@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<class name="BehaviorTreeWait" inherits="BehaviorTreeTask" api_type="core" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="../../../doc/class.xsd">
+	<brief_description>Waits for a duration without blocking the main thread.</brief_description>
+	<description>Returns [constant BehaviorTreeTask.RUNNING] until cumulative tick time reaches [member duration], then returns [constant BehaviorTreeTask.SUCCESS]. Elapsed time is tracked per runner and per position in the tree, so a single resource can safely be reused. Resetting the runner discards elapsed time.</description>
+	<members><member name="duration" type="float" default="1.0">Duration to wait in seconds. Must be nonnegative.</member></members>
+</class>
