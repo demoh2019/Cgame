@@ -834,6 +834,16 @@ bool _cull_aabb_iterative(uint32_t p_node_id, CullParams &r_params, bool p_fully
 
 // returns full up with results
 bool _cull_convex_iterative(uint32_t p_node_id, CullParams &r_params, bool p_fully_within = false) {
+	// Classify the root before allocating traversal storage. In the common
+	// frustum-miss case this avoids the stack and plane-ID allocations.
+	if (!p_fully_within) {
+		const typename BVHABB_CLASS::IntersectResult root_result = _nodes[p_node_id].aabb.intersects_convex(r_params.hull);
+		if (root_result == BVHABB_CLASS::IR_MISS) {
+			return true;
+		}
+		p_fully_within = root_result == BVHABB_CLASS::IR_FULL;
+	}
+
 	// our function parameters to keep on a stack
 	struct CullConvexParams {
 		uint32_t node_id;
@@ -859,23 +869,10 @@ bool _cull_convex_iterative(uint32_t p_node_id, CullParams &r_params, bool p_ful
 
 	// while there are still more nodes on the stack
 	while (ii.pop(ccp)) {
+		// Every queued node was already tested by its parent. Propagating
+		// IR_FULL avoids retesting entire contained subtrees, while rejecting
+		// IR_MISS children here avoids pushing and popping dead branches.
 		const TNode &tnode = _nodes[ccp.node_id];
-
-		if (!ccp.fully_within) {
-			typename BVHABB_CLASS::IntersectResult res = tnode.aabb.intersects_convex(r_params.hull);
-
-			switch (res) {
-				default: {
-					continue; // miss, just move on to the next node in the stack
-				} break;
-				case BVHABB_CLASS::IR_PARTIAL: {
-				} break;
-				case BVHABB_CLASS::IR_FULL: {
-					ccp.fully_within = true;
-				} break;
-			}
-
-		} // if not fully within already
 
 		if (tnode.is_leaf()) {
 			// lazy check for hits full up condition
@@ -970,14 +967,20 @@ bool _cull_convex_iterative(uint32_t p_node_id, CullParams &r_params, bool p_ful
 			} // if not fully within
 		} else {
 			for (int n = 0; n < tnode.num_children; n++) {
-				uint32_t child_id = tnode.children[n];
+				const uint32_t child_id = tnode.children[n];
+				bool child_fully_within = ccp.fully_within;
+				if (!child_fully_within) {
+					const typename BVHABB_CLASS::IntersectResult child_result = _nodes[child_id].aabb.intersects_convex(r_params.hull);
+					if (child_result == BVHABB_CLASS::IR_MISS) {
+						continue;
+					}
+					child_fully_within = child_result == BVHABB_CLASS::IR_FULL;
+				}
 
-				// add to the stack
+				// Keep the existing child order, result limit, and cull masks.
 				CullConvexParams *child = ii.request();
-
-				// should always return valid child
 				child->node_id = child_id;
-				child->fully_within = ccp.fully_within;
+				child->fully_within = child_fully_within;
 			}
 		}
 
