@@ -119,7 +119,7 @@ struct PhysicsSoftBodyShapeMatchingCovariance {
 				best = i;
 			}
 		}
-		const Quaternion rotation(real_t(v[1][best]), real_t(v[2][best]),
+		const Quaternion rotation = Quaternion(real_t(v[1][best]), real_t(v[2][best]),
 				real_t(v[3][best]), real_t(v[0][best]));
 		const real_t norm2 = rotation.length_squared();
 		if (!(norm2 > real_t(0.0)) || !Math::is_finite(norm2)) {
