@@ -34,7 +34,9 @@ TEST_FORCE_LINK(test_local_vector)
 
 #include "core/templates/local_vector.h"
 
+#include <algorithm>
 #include <cstdint>
+#include <string>
 #include <type_traits>
 #include <vector>
 
@@ -399,6 +401,66 @@ TEST_CASE("[LocalVector] Trivial Vector move assignment copies bulk values") {
 	for (uint32_t i = 0; i < 256; i++) {
 		CHECK(values[i] == ((i << 16) ^ 0xBA5E));
 	}
+}
+
+
+TEST_CASE("[LocalVector] Bulk unordered erase handles clustered and complete matches") {
+	LocalVector<int> values{ 7, 1, 7, 2, 7, 7, 7 };
+	CHECK(values.erase_multiple_unordered(7) == 5);
+	CHECK(values.size() == 2);
+	CHECK(values.find(1) != -1);
+	CHECK(values.find(2) != -1);
+	CHECK(values.erase_multiple_unordered(7) == 0);
+	CHECK(values.size() == 2);
+
+	LocalVector<int> all_matches{ 4, 4, 4, 4 };
+	CHECK(all_matches.erase_multiple_unordered(4) == 4);
+	CHECK(all_matches.is_empty());
+	CHECK(all_matches.erase_multiple_unordered(4) == 0);
+
+	LocalVector<int> tail_matches{ 1, 2, 3, 4, 4, 4 };
+	CHECK(tail_matches.erase_multiple_unordered(4) == 3);
+	CHECK(tail_matches.size() == 3);
+	CHECK(tail_matches[0] == 1);
+	CHECK(tail_matches[1] == 2);
+	CHECK(tail_matches[2] == 3);
+}
+
+TEST_CASE("[LocalVector] Bulk unordered erase matches reference across deterministic distributions") {
+	uint32_t seed = 0xc0ffee13;
+	for (int round = 0; round < 256; round++) {
+		LocalVector<uint32_t> values;
+		std::vector<uint32_t> expected;
+		const int length = (round * 37) % 193;
+		for (int i = 0; i < length; i++) {
+			seed = seed * 1664525u + 1013904223u;
+			const uint32_t value = (seed >> 24) % 9;
+			values.push_back(value);
+			expected.push_back(value);
+		}
+		const uint32_t needle = uint32_t(round % 9);
+		const uint32_t original_capacity = values.get_capacity();
+		expected.erase(std::remove(expected.begin(), expected.end(), needle), expected.end());
+		CHECK(values.erase_multiple_unordered(needle) == uint32_t(length - expected.size()));
+		CHECK(values.get_capacity() == original_capacity);
+		CHECK(values.size() == expected.size());
+		CHECK(values.erase_multiple_unordered(needle) == 0);
+
+		std::vector<uint32_t> survivors(values.begin(), values.end());
+		std::sort(survivors.begin(), survivors.end());
+		std::sort(expected.begin(), expected.end());
+		CHECK(survivors == expected);
+	}
+}
+
+TEST_CASE("[LocalVector] Bulk unordered erase destroys nontrivial matching elements") {
+	LocalVector<std::string> values{ "alpha", "drop", "beta", "drop", "drop", "gamma", "drop" };
+	CHECK(values.erase_multiple_unordered(std::string("drop")) == 4);
+	CHECK(values.size() == 3);
+	std::vector<std::string> survivors(values.begin(), values.end());
+	std::sort(survivors.begin(), survivors.end());
+	CHECK(survivors == std::vector<std::string>{ "alpha", "beta", "gamma" });
+	CHECK(values.erase_multiple_unordered(std::string("drop")) == 0);
 }
 
 } // namespace TestLocalVector
