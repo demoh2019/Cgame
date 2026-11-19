@@ -179,7 +179,9 @@ public:
 	template <typename Comparator, bool Validate = SORT_ARRAY_VALIDATE_ENABLED, typename... Args>
 	void sort_custom(Args &&...p_args) {
 		Size len = _cowdata.size();
-		if (len == 0) {
+		// Sorting zero or one element cannot mutate the buffer.
+		// Avoid detaching a shared, possibly heavily reserved COW allocation.
+		if (len < 2) {
 			return;
 		}
 
@@ -351,6 +353,10 @@ public:
 
 template <typename T>
 void Vector<T>::reverse() {
+	const Size len = size();
+	if (len < 2) {
+		return;
+	}
 	T *p = ptrw();
 	for (Size i = 0; i < size() / 2; i++) {
 		SWAP(p[i], p[size() - i - 1]);
@@ -359,6 +365,9 @@ void Vector<T>::reverse() {
 
 template <typename T>
 void Vector<T>::fill(T p_elem) {
+	if (is_empty()) {
+		return;
+	}
 	T *p = ptrw();
 	for (Size i = 0; i < size(); i++) {
 		p[i] = p_elem;
