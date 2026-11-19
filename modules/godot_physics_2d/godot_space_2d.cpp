@@ -316,52 +316,45 @@ bool GodotPhysicsDirectSpaceState2D::collide_shape(const PS2DT::ShapeParameters 
 	if (p_result_max <= 0) {
 		return false;
 	}
-
 	GodotShape2D *shape = GodotPhysicsServer2D::godot_singleton->shape_owner.get_or_null(p_parameters.shape_rid);
 	ERR_FAIL_NULL_V(shape, false);
 
 	Rect2 aabb = p_parameters.transform.xform(shape->get_aabb());
-	aabb = aabb.merge(Rect2(aabb.position + p_parameters.motion, aabb.size)); //motion
+	aabb = aabb.merge(Rect2(aabb.position + p_parameters.motion, aabb.size)); // Motion.
 	aabb = aabb.grow(p_parameters.margin);
-
-	int amount = space->broadphase->cull_aabb(aabb, space->intersection_query_results, GodotSpace2D::INTERSECTION_QUERY_MAX, space->intersection_query_subindex_results);
-
-	bool collided = false;
-	r_result_count = 0;
 
 	GodotPhysicsServer2D::CollCbkData cbk;
 	cbk.max = p_result_max;
 	cbk.amount = 0;
 	cbk.passed = 0;
 	cbk.ptr = r_results;
-	GodotCollisionSolver2D::CallbackResult cbkres = GodotPhysicsServer2D::_shape_col_cbk;
-
-	GodotPhysicsServer2D::CollCbkData *cbkptr = &cbk;
-
-	for (int i = 0; i < amount; i++) {
-		if (!_can_collide_with(space->intersection_query_results[i], p_parameters.collision_mask, p_parameters.collide_with_bodies, p_parameters.collide_with_areas)) {
-			continue;
+	struct CollisionQuery {
+		const PS2DT::ShapeParameters &params;
+		GodotShape2D *shape;
+		GodotPhysicsServer2D::CollCbkData &callback;
+		bool collided = false;
+	};
+	CollisionQuery query = { p_parameters, shape, cbk };
+	auto visitor = [](GodotCollisionObject2D *p_object, int p_shape, void *p_userdata) -> bool {
+		CollisionQuery &data = *static_cast<CollisionQuery *>(p_userdata);
+		if (!_can_collide_with(p_object, data.params.collision_mask, data.params.collide_with_bodies, data.params.collide_with_areas) ||
+				data.params.exclude.has(p_object->get_self())) {
+			return true;
 		}
-
-		const GodotCollisionObject2D *col_obj = space->intersection_query_results[i];
-
-		if (p_parameters.exclude.has(col_obj->get_self())) {
-			continue;
+		data.callback.valid_dir = Vector2();
+		data.callback.valid_depth = 0;
+		if (GodotCollisionSolver2D::solve(data.shape, data.params.transform, data.params.motion,
+					p_object->get_shape(p_shape), p_object->get_transform() * p_object->get_shape_transform(p_shape),
+					Vector2(), GodotPhysicsServer2D::_shape_col_cbk, &data.callback, nullptr, data.params.margin)) {
+			data.collided = data.callback.amount > 0;
 		}
-
-		int shape_idx = space->intersection_query_subindex_results[i];
-
-		cbk.valid_dir = Vector2();
-		cbk.valid_depth = 0;
-
-		if (GodotCollisionSolver2D::solve(shape, p_parameters.transform, p_parameters.motion, col_obj->get_shape(shape_idx), col_obj->get_transform() * col_obj->get_shape_transform(shape_idx), Vector2(), cbkres, cbkptr, nullptr, p_parameters.margin)) {
-			collided = cbk.amount > 0;
-		}
-	}
-
+		// Once the requested contact positions are collected, processing
+		// further proxies cannot improve the public query result.
+		return data.callback.amount < data.callback.max;
+	};
+	space->broadphase->visit_aabb(aabb, visitor, &query);
 	r_result_count = cbk.amount;
-
-	return collided;
+	return query.collided;
 }
 
 struct _RestCallbackData2D {
