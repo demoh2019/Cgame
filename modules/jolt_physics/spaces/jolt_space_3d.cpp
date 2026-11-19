@@ -980,6 +980,9 @@ constexpr uint32_t MAX_SOFT_SELF_CONTACT_FACES = 1024;
 struct SoftSelfContactScratch {
 	SoftFaceBVHScratch bvh;
 	SoftFaceBVHScratch edge_bvh; // Reused across active soft bodies.
+	uint32_t face_bvh_face_count = 0;
+	uint32_t face_bvh_refits = 0;
+	bool face_bvh_ready = false;
 	JPH::Array<uint64_t> one_ring_edges;
 	// Jacobi self-contact corrections are accumulated without moving BVH
 	// geometry during a candidate query, then uniformly capped and applied.
@@ -1176,8 +1179,11 @@ static bool ensure_soft_self_topology(const JPH::Array<JPH::SoftBodySharedSettin
 		return true; // Same-step reuse between VF and EE as before.
 	}
 
-	// A changed topology invalidates both the adjacency and the edge
-	// tree's leaf-index mapping before any query can access it.
+	// A changed topology invalidates the adjacency, face and edge trees:
+	// their persistent leaf mappings must never reference an old mesh.
+	r_scratch.face_bvh_ready = false;
+	r_scratch.face_bvh_face_count = 0;
+	r_scratch.face_bvh_refits = 0;
 	r_scratch.edge_bvh_ready = false;
 	r_scratch.edge_bvh_edge_count = 0;
 	r_scratch.edge_bvh_refits = 0;
@@ -1912,10 +1918,15 @@ void JoltSpace3D::_pre_step(float p_step) {
 
 	// Reclaim all cached geometry as soon as this opt-in mode is disabled.
 	// Cache is populated lazily, and never shared across physics spaces.
-	const bool persistent_self = JoltProjectSettings::soft_body_self_contacts &&
+	const bool persistent_edges = JoltProjectSettings::soft_body_self_contacts &&
 			JoltProjectSettings::soft_body_self_edge_contacts &&
 			JoltProjectSettings::soft_body_self_edge_bvh &&
 			JoltProjectSettings::soft_body_self_persistent_bvh;
+	// Allow persistent face BVH even when the edge solver is disabled.
+	// Both modes share the existing generation-aware 64-body cache cap.
+	const bool persistent_self = persistent_edges ||
+			(JoltProjectSettings::soft_body_self_contacts &&
+					JoltProjectSettings::soft_body_self_face_bvh_refit);
 	if (!persistent_self && self_collision_cache != nullptr) {
 		delete self_collision_cache;
 		self_collision_cache = nullptr;
