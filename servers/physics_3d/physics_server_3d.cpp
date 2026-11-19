@@ -638,6 +638,9 @@ PhysicsServer3D::PhysicsServer3D() {
 	// volumetric FEM, this is a global visual-elasticity constraint.
 	// Zero skips computation and all additional per-node allocations.
 	GLOBAL_DEF(PropertyInfo(Variant::FLOAT, "physics/3d/solver/soft_body_shape_matching_stiffness", PROPERTY_HINT_RANGE, "0,1,0.01"), 0.0);
+	// 0 retains whole-body shape matching; 3..64 enables overlapping local
+	// one-ring clusters and spatially varying deformation.
+	GLOBAL_DEF(PropertyInfo(Variant::INT, "physics/3d/solver/soft_body_shape_matching_cluster_size", PROPERTY_HINT_RANGE, "0,64,1"), 0);
 	// Hinge-local viscous bend damping; requires XPBD dihedral constraints.
 	// Zero skips the O(hinges) velocity pass and preserves legacy results.
 	GLOBAL_DEF(PropertyInfo(Variant::FLOAT, "physics/3d/solver/soft_body_dihedral_damping", PROPERTY_HINT_RANGE, "0,1000,0.1,or_greater,suffix:1/s"), 0.0);
