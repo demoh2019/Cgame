@@ -83,6 +83,8 @@ func _test_file_lifecycle() -> void:
 	_check(updated["ok"], "updates an existing generated file")
 	var read := FileAccess.open(path, FileAccess.READ)
 	_check(read != null and read.get_as_text() == "extends Node2D\n", "update preserves exact text")
+	if read != null:
+		read.close()
 	_check(not Plan.apply({"files": [_file("res://ai_generated/missing_update.gd", "x", "update")]})["ok"], "rejects missing update target")
 	var rejected_batch := Plan.apply({"files": [_file("res://ai_generated/should_not_exist.gd"), _file(path)]})
 	_check(not rejected_batch["ok"], "preflight fails before a partial batch")
