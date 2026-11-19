@@ -46,6 +46,23 @@ TEST_FORCE_LINK(test_behavior_tree)
 
 namespace TestBehaviorTree {
 
+// Node-derived objects must be constructed with memnew so ObjectDB and
+// signal dispatch are initialized, even for headless/manual-tick tests.
+struct RunnerHolder {
+	BehaviorTreeRunner *node = memnew(BehaviorTreeRunner);
+
+	~RunnerHolder() {
+		memdelete(node);
+	}
+
+	void set_root_task(const Ref<BehaviorTreeTask> &p_task) { node->set_root_task(p_task); }
+	void set_blackboard(const Dictionary &p_blackboard) { node->set_blackboard(p_blackboard); }
+	Dictionary get_blackboard() const { return node->get_blackboard(); }
+	BehaviorTreeTask::Status tick(double p_delta) { return node->tick(p_delta); }
+	void reset() { node->reset(); }
+	bool is_finished() const { return node->is_finished(); }
+};
+
 static Ref<BehaviorTreeBlackboardCheck> check(const StringName &p_key, const Variant &p_expected) {
 	Ref<BehaviorTreeBlackboardCheck> task;
 	task.instantiate();
@@ -74,7 +91,7 @@ TEST_CASE("[BehaviorTree] Empty sequence succeeds and empty selector fails") {
 	seq.instantiate();
 	Ref<BehaviorTreeSelector> sel;
 	sel.instantiate();
-	BehaviorTreeRunner runner;
+	RunnerHolder runner;
 	runner.set_root_task(seq);
 	CHECK(runner.tick(0) == BehaviorTreeTask::SUCCESS);
 	runner.set_root_task(sel);
@@ -83,7 +100,7 @@ TEST_CASE("[BehaviorTree] Empty sequence succeeds and empty selector fails") {
 
 TEST_CASE("[BehaviorTree] Blackboard checks distinguish missing, false and matching values") {
 	Ref<BehaviorTreeBlackboardCheck> task = check("has_target", false);
-	BehaviorTreeRunner runner;
+	RunnerHolder runner;
 	runner.set_root_task(task);
 	CHECK(runner.tick(0) == BehaviorTreeTask::FAILURE);
 	runner.reset();
@@ -97,14 +114,14 @@ TEST_CASE("[BehaviorTree] Blackboard checks distinguish missing, false and match
 }
 
 TEST_CASE("[BehaviorTree] Blackboard setter changes the runner's shared dictionary") {
-	BehaviorTreeRunner runner;
+	RunnerHolder runner;
 	runner.set_root_task(assign("ammo", 42));
 	CHECK(runner.tick(0) == BehaviorTreeTask::SUCCESS);
 	CHECK(int(runner.get_blackboard()["ammo"]) == 42);
 }
 
 TEST_CASE("[BehaviorTree] A missing blackboard key prevents assignment") {
-	BehaviorTreeRunner runner;
+	RunnerHolder runner;
 	Ref<BehaviorTreeBlackboardSet> setter = assign("", 42);
 	runner.set_root_task(setter);
 	CHECK(runner.tick(0) == BehaviorTreeTask::FAILURE);
@@ -117,7 +134,7 @@ TEST_CASE("[BehaviorTree] Sequence evaluates children in order and short-circuit
 	seq->add_task(assign("step", 1));
 	seq->add_task(check("allowed", true));
 	seq->add_task(assign("step", 2));
-	BehaviorTreeRunner runner;
+	RunnerHolder runner;
 	runner.set_root_task(seq);
 	CHECK(runner.tick(0) == BehaviorTreeTask::FAILURE);
 	CHECK(int(runner.get_blackboard()["step"]) == 1);
@@ -130,7 +147,7 @@ TEST_CASE("[BehaviorTree] Sequence completes all tasks on success") {
 	seq->add_task(assign("item", "key"));
 	seq->add_task(check("item", "key"));
 	seq->add_task(assign("door_open", true));
-	BehaviorTreeRunner runner;
+	RunnerHolder runner;
 	runner.set_root_task(seq);
 	CHECK(runner.tick(0) == BehaviorTreeTask::SUCCESS);
 	CHECK(bool(runner.get_blackboard()["door_open"]));
@@ -142,7 +159,7 @@ TEST_CASE("[BehaviorTree] Selector skips failing branches and runs the first suc
 	sel->add_task(check("health", 1));
 	sel->add_task(assign("strategy", "retreat"));
 	sel->add_task(assign("strategy", "fight"));
-	BehaviorTreeRunner runner;
+	RunnerHolder runner;
 	runner.set_root_task(sel);
 	CHECK(runner.tick(0) == BehaviorTreeTask::SUCCESS);
 	CHECK(String(runner.get_blackboard()["strategy"]) == "retreat");
@@ -152,7 +169,7 @@ TEST_CASE("[BehaviorTree] Inverter flips success and failure") {
 	Ref<BehaviorTreeInverter> inv;
 	inv.instantiate();
 	inv->set_task(check("target_visible", true));
-	BehaviorTreeRunner runner;
+	RunnerHolder runner;
 	runner.set_root_task(inv);
 	CHECK(runner.tick(0) == BehaviorTreeTask::SUCCESS);
 	runner.reset();
@@ -166,14 +183,14 @@ TEST_CASE("[BehaviorTree] Inverter preserves RUNNING") {
 	Ref<BehaviorTreeInverter> inv;
 	inv.instantiate();
 	inv->set_task(wait(1));
-	BehaviorTreeRunner runner;
+	RunnerHolder runner;
 	runner.set_root_task(inv);
 	CHECK(runner.tick(0.5) == BehaviorTreeTask::RUNNING);
 	CHECK(runner.tick(0.5) == BehaviorTreeTask::FAILURE);
 }
 
 TEST_CASE("[BehaviorTree] A wait resumes using accumulated delta") {
-	BehaviorTreeRunner runner;
+	RunnerHolder runner;
 	runner.set_root_task(wait(1.0));
 	CHECK(runner.tick(0.25) == BehaviorTreeTask::RUNNING);
 	CHECK(runner.tick(0.3) == BehaviorTreeTask::RUNNING);
@@ -183,7 +200,7 @@ TEST_CASE("[BehaviorTree] A wait resumes using accumulated delta") {
 }
 
 TEST_CASE("[BehaviorTree] Zero-duration waits complete without advancing time") {
-	BehaviorTreeRunner runner;
+	RunnerHolder runner;
 	runner.set_root_task(wait(0));
 	CHECK(runner.tick(0) == BehaviorTreeTask::SUCCESS);
 }
@@ -194,7 +211,7 @@ TEST_CASE("[BehaviorTree] Sequence resumes a running child without replaying ear
 	seq->add_task(assign("flag", 1));
 	seq->add_task(wait(1.0));
 	seq->add_task(check("flag", 1));
-	BehaviorTreeRunner runner;
+	RunnerHolder runner;
 	runner.set_root_task(seq);
 	CHECK(runner.tick(0.4) == BehaviorTreeTask::RUNNING);
 	// A completed predecessor must not be re-executed on subsequent ticks.
@@ -210,7 +227,7 @@ TEST_CASE("[BehaviorTree] Selector resumes a running branch instead of reconside
 	sel->add_task(check("ready", true));
 	sel->add_task(wait(0.5));
 	sel->add_task(assign("fallback", true));
-	BehaviorTreeRunner runner;
+	RunnerHolder runner;
 	runner.set_root_task(sel);
 	CHECK(runner.tick(0.2) == BehaviorTreeTask::RUNNING);
 	runner.get_blackboard()["ready"] = true;
@@ -227,15 +244,15 @@ TEST_CASE("[BehaviorTree] Nested sequences and selectors compose correctly") {
 	sel->add_task(assign("found_path", true));
 	root->add_task(sel);
 	root->add_task(check("found_path", true));
-	BehaviorTreeRunner runner;
+	RunnerHolder runner;
 	runner.set_root_task(root);
 	CHECK(runner.tick(0) == BehaviorTreeTask::SUCCESS);
 }
 
 TEST_CASE("[BehaviorTree] Separate agents do not share running-state cursors") {
 	Ref<BehaviorTreeWait> shared_wait = wait(1.0);
-	BehaviorTreeRunner first;
-	BehaviorTreeRunner second;
+	RunnerHolder first;
+	RunnerHolder second;
 	first.set_root_task(shared_wait);
 	second.set_root_task(shared_wait);
 	CHECK(first.tick(0.8) == BehaviorTreeTask::RUNNING);
@@ -251,7 +268,7 @@ TEST_CASE("[BehaviorTree] The same subresource can run in separate paths") {
 	seq.instantiate();
 	seq->add_task(shared_wait);
 	seq->add_task(shared_wait);
-	BehaviorTreeRunner runner;
+	RunnerHolder runner;
 	runner.set_root_task(seq);
 	CHECK(runner.tick(0.3) == BehaviorTreeTask::RUNNING);
 	CHECK(runner.tick(0.2) == BehaviorTreeTask::RUNNING);
@@ -260,7 +277,7 @@ TEST_CASE("[BehaviorTree] The same subresource can run in separate paths") {
 }
 
 TEST_CASE("[BehaviorTree] Reset cancels a running task and restarts its elapsed time") {
-	BehaviorTreeRunner runner;
+	RunnerHolder runner;
 	runner.set_root_task(wait(1.0));
 	CHECK(runner.tick(0.9) == BehaviorTreeTask::RUNNING);
 	runner.reset();
@@ -270,7 +287,7 @@ TEST_CASE("[BehaviorTree] Reset cancels a running task and restarts its elapsed 
 }
 
 TEST_CASE("[BehaviorTree] Completed trees do not repeat side effects until reset") {
-	BehaviorTreeRunner runner;
+	RunnerHolder runner;
 	runner.set_root_task(assign("counter", 1));
 	CHECK(runner.tick(0) == BehaviorTreeTask::SUCCESS);
 	runner.get_blackboard()["counter"] = 7;
@@ -282,7 +299,7 @@ TEST_CASE("[BehaviorTree] Completed trees do not repeat side effects until reset
 }
 
 TEST_CASE("[BehaviorTree] Changing the root resets execution state") {
-	BehaviorTreeRunner runner;
+	RunnerHolder runner;
 	runner.set_root_task(wait(1.0));
 	CHECK(runner.tick(0.9) == BehaviorTreeTask::RUNNING);
 	runner.set_root_task(assign("changed", true));
@@ -291,7 +308,7 @@ TEST_CASE("[BehaviorTree] Changing the root resets execution state") {
 }
 
 TEST_CASE("[BehaviorTree] Null task roots fail without finishing the runner") {
-	BehaviorTreeRunner runner;
+	RunnerHolder runner;
 	CHECK(runner.tick(0) == BehaviorTreeTask::FAILURE);
 	CHECK_FALSE(runner.is_finished());
 	runner.set_root_task(assign("available", true));
@@ -347,7 +364,7 @@ TEST_CASE("[BehaviorTree] Removing tasks updates the composite") {
 	seq->add_task(assign("b", 2));
 	seq->remove_task(0);
 	CHECK(seq->get_task_count() == 1);
-	BehaviorTreeRunner runner;
+	RunnerHolder runner;
 	runner.set_root_task(seq);
 	CHECK(runner.tick(0) == BehaviorTreeTask::SUCCESS);
 	CHECK_FALSE(runner.get_blackboard().has("a"));
@@ -389,7 +406,7 @@ TEST_CASE("[BehaviorTree] Resources and their subresources survive a save/load r
 	Ref<BehaviorTreeSequence> loaded = ResourceLoader::load(path);
 	REQUIRE(loaded.is_valid());
 	CHECK(loaded->get_task_count() == 2);
-	BehaviorTreeRunner runner;
+	RunnerHolder runner;
 	runner.set_root_task(loaded);
 	CHECK(runner.tick(0) == BehaviorTreeTask::SUCCESS);
 	CHECK(int(runner.get_blackboard()["mode"]) == 3);
