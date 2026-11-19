@@ -253,4 +253,45 @@ TEST_CASE("[ViewportMaskFastPath] adding a viewport preserves existing mask poin
 	CHECK_EQ(*masks.getptr(1), uint64_t(1));
 }
 
+struct CollidingHash {
+	static uint32_t hash(int) {
+		return 0x13579bdu;
+	}
+};
+
+TEST_CASE("[HashMap] Clear sparse reserved table handles collision clusters") {
+	for (int count : { 1, 8, 16, 17 }) {
+		HashMap<int, int, CollidingHash> map;
+		map.reserve(16384);
+		const uint32_t capacity = map.get_capacity();
+		for (int i = 0; i < count; i++) {
+			map.insert(i, i + 100);
+		}
+		CHECK(map.size() == uint32_t(count));
+		for (int i = 0; i < count; i++) {
+			CHECK(map.has(i));
+			CHECK(map.get(i) == i + 100);
+		}
+
+		map.clear();
+		CHECK(map.is_empty());
+		CHECK(map.get_capacity() == capacity);
+		CHECK(!map.begin());
+		for (int i = 0; i < count; i++) {
+			CHECK(!map.has(i));
+			CHECK(map.getptr(i) == nullptr);
+		}
+
+		// A reused table must not retain stale probe chains.
+		for (int i = 0; i < count; i++) {
+			map.insert(i + 1000, i + 10);
+		}
+		for (int i = 0; i < count; i++) {
+			CHECK(map.get(i + 1000) == i + 10);
+		}
+		map.clear();
+		CHECK(map.is_empty());
+	}
+}
+
 } // namespace TestHashMap

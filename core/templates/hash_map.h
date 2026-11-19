@@ -270,8 +270,27 @@ public:
 			return;
 		}
 
-		_clear_data();
-		memset(_hashes, EMPTY_HASH, get_capacity() * sizeof(uint32_t));
+		const uint32_t capacity = get_capacity();
+		if (_size <= 16 && capacity >= 4096) {
+			// For a mostly empty, highly reserved table, a full memset can
+			// touch megabytes of unused hash slots. Collect occupied indices
+			// before destroying any entries so Robin Hood lookups remain valid.
+			// This stays on the stack and does not change reserved capacity.
+			uint32_t occupied_slots[16];
+			uint32_t occupied_count = 0;
+			for (HashMapElement<TKey, TValue> *entry = _head_element; entry != nullptr; entry = entry->next) {
+				uint32_t index = 0;
+				CRASH_COND(!_lookup_idx_unchecked(entry->data.key, _hash(entry->data.key), index));
+				occupied_slots[occupied_count++] = index;
+			}
+			_clear_data();
+			for (uint32_t i = 0; i < occupied_count; i++) {
+				_hashes[occupied_slots[i]] = EMPTY_HASH;
+			}
+		} else {
+			_clear_data();
+			memset(_hashes, EMPTY_HASH, capacity * sizeof(uint32_t));
+		}
 
 		_tail_element = nullptr;
 		_head_element = nullptr;
