@@ -90,6 +90,12 @@ TEST_CASE("[GodotPhysics3D] Swept world-space hint respects nonorthogonal mesh a
 		CHECK(padded.has_point(inverse.xform(world_hint.get_endpoint(i))));
 	}
 	CHECK(query.has_point(Vector3(5, 0, 0)));
+
+	// The soft-body path supplies only world-space node bounds; it has no
+	// convex support shape at this stage of the collision query.
+	AABB soft_query;
+	CHECK(godot_physics_3d_concave_query_aabb(nullptr, Transform3D(), mesh_transform, soft_query, 0.0, 0.0, &world_hint));
+	CHECK(soft_query.is_equal_approx(query));
 }
 
 TEST_CASE("[GodotPhysics3D] Singular concave basis falls back to full mesh cull") {
