@@ -1300,6 +1300,11 @@ Vector<String> String::rsplit(const char *p_splitter, bool p_allow_empty, int p_
 	return ret;
 }
 
+// The bounded parser reads directly from the UTF-32 input. Splitters do not
+// require temporarily writing NULs into a copy of the entire string.
+template <typename C, bool p_bounded = false>
+static double built_in_strtod(const C *p_string, C **r_end = nullptr, const C *p_limit = nullptr);
+
 Vector<double> String::split_floats(const String &p_splitter, bool p_allow_empty) const {
 	Vector<double> ret;
 	int from = 0;
@@ -1308,16 +1313,14 @@ Vector<double> String::split_floats(const String &p_splitter, bool p_allow_empty
 		return ret;
 	}
 
-	String buffer = *this;
+	const char32_t *const characters = get_data();
 	while (true) {
 		int end = find(p_splitter, from);
 		if (end < 0) {
 			end = len;
 		}
 		if (p_allow_empty || (end > from)) {
-			buffer[end] = 0;
-			ret.push_back(String::to_float(&buffer.get_data()[from]));
-			buffer[end] = _cowdata.get(end);
+			ret.push_back(built_in_strtod<char32_t, true>(characters + from, nullptr, characters + end));
 		}
 
 		if (end == len) {
@@ -1338,7 +1341,7 @@ Vector<float> String::split_floats_mk(const Vector<String> &p_splitters, bool p_
 		return ret;
 	}
 
-	String buffer = *this;
+	const char32_t *const characters = get_data();
 	while (true) {
 		int idx = 0;
 		int end = findmk(p_splitters, from, &idx);
@@ -1350,9 +1353,7 @@ Vector<float> String::split_floats_mk(const Vector<String> &p_splitters, bool p_
 		}
 
 		if (p_allow_empty || (end > from)) {
-			buffer[end] = 0;
-			ret.push_back(String::to_float(&buffer.get_data()[from]));
-			buffer[end] = _cowdata.get(end);
+			ret.push_back(built_in_strtod<char32_t, true>(characters + from, nullptr, characters + end));
 		}
 
 		if (end == len) {
@@ -2500,7 +2501,7 @@ bool String::is_numeric() const {
 	return true; // TODO: Use the parser below for this instead
 }
 
-template <typename C>
+template <typename C, bool p_bounded>
 static double built_in_strtod(
 		/* A decimal ASCII floating-point number,
 		 * optionally preceded by white space. Must
@@ -2516,7 +2517,7 @@ static double built_in_strtod(
 		const C *p_string,
 		/* If non-nullptr, store terminating Cacter's
 		 * address here. */
-		C **r_end = nullptr) {
+		C **r_end, const C *p_limit) {
 	/* Largest possible base 10 exponent. Any
 	 * exponent larger than this will already
 	 * produce underflow or overflow, so there's
@@ -2561,19 +2562,29 @@ static double built_in_strtod(
 	/* Temporarily holds location of exponent in string. */
 	const C *pExp;
 
+	// Treat the end of a split token exactly like the terminating NUL.
+	// The common unbounded path is resolved at compile time and remains
+	// unchanged; only split_floats() uses the extra range check.
+	const auto get_char = [p_limit](const C *p_pos) -> C {
+		if constexpr (p_bounded) {
+			return p_pos < p_limit ? *p_pos : C(0);
+		}
+		return *p_pos;
+	};
+
 	/*
 	 * Strip off leading blanks and check for a sign.
 	 */
 
 	p = p_string;
-	while (*p == ' ' || *p == '\t' || *p == '\n') {
+	while (get_char(p) == ' ' || get_char(p) == '\t' || get_char(p) == '\n') {
 		p += 1;
 	}
-	if (*p == '-') {
+	if (get_char(p) == '-') {
 		sign = true;
 		p += 1;
 	} else {
-		if (*p == '+') {
+		if (get_char(p) == '+') {
 			p += 1;
 		}
 		sign = false;
@@ -2586,7 +2597,7 @@ static double built_in_strtod(
 
 	decPt = -1;
 	for (mantSize = 0;; mantSize += 1) {
-		c = *p;
+		c = get_char(p);
 		if (!is_digit(c)) {
 			if ((c != '.') || (decPt >= 0)) {
 				break;
@@ -2625,20 +2636,20 @@ static double built_in_strtod(
 
 		frac1 = 0;
 		for (; mantSize > 9; mantSize -= 1) {
-			c = *p;
+			c = get_char(p);
 			p += 1;
 			if (c == '.') {
-				c = *p;
+				c = get_char(p);
 				p += 1;
 			}
 			frac1 = 10 * frac1 + (c - '0');
 		}
 		frac2 = 0;
 		for (; mantSize > 0; mantSize -= 1) {
-			c = *p;
+			c = get_char(p);
 			p += 1;
 			if (c == '.') {
-				c = *p;
+				c = get_char(p);
 				p += 1;
 			}
 			frac2 = 10 * frac2 + (c - '0');
@@ -2651,23 +2662,23 @@ static double built_in_strtod(
 	 */
 
 	p = pExp;
-	if ((*p == 'E') || (*p == 'e')) {
+	if ((get_char(p) == 'E') || (get_char(p) == 'e')) {
 		p += 1;
-		if (*p == '-') {
+		if (get_char(p) == '-') {
 			expSign = true;
 			p += 1;
 		} else {
-			if (*p == '+') {
+			if (get_char(p) == '+') {
 				p += 1;
 			}
 			expSign = false;
 		}
-		if (!is_digit(char32_t(*p))) {
+		if (!is_digit(char32_t(get_char(p)))) {
 			p = pExp;
 			goto done;
 		}
-		while (is_digit(char32_t(*p))) {
-			exp = exp * 10 + (*p - '0');
+		while (is_digit(char32_t(get_char(p)))) {
+			exp = exp * 10 + (get_char(p) - '0');
 			p += 1;
 		}
 	}
