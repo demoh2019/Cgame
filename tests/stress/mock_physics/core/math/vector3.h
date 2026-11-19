@@ -9,6 +9,8 @@ using real_t = float;
 inline constexpr float CMP_EPSILON = 0.00001f;
 #define _FORCE_INLINE_ inline
 #define CLAMP(value, low, high) std::max((low), std::min((value), (high)))
+#define MAX(a, b) std::max((a), (b))
+#define MIN(a, b) std::min((a), (b))
 
 namespace Math {
 template <typename T>
@@ -35,6 +37,7 @@ struct Vector3 {
 		return Vector3(y * v.z - z * v.y, z * v.x - x * v.z, x * v.y - y * v.x);
 	}
 	real_t length_squared() const { return dot(*this); }
+	real_t length() const { return std::sqrt(length_squared()); }
 	real_t distance_squared_to(const Vector3 &v) const { return (*this - v).length_squared(); }
 	real_t distance_to(const Vector3 &v) const { return std::sqrt(distance_squared_to(v)); }
 	bool is_finite() const { return Math::is_finite(x) && Math::is_finite(y) && Math::is_finite(z); }
