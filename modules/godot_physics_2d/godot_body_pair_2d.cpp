@@ -608,6 +608,89 @@ void GodotBodyPair2D::solve(real_t p_step) {
 	// Material properties are constant during this constraint solve.
 	const real_t friction = mixed_friction;
 
+	// Box2D-style 2x2 normal impulse solve for a pair of contacts sharing a
+	// normal. The LCP considers both constraints simultaneously, reducing
+	// the sequential solver's tendency to rock or sink stacked boxes.
+	// Only well-conditioned pairs take this path; all others retain the
+	// previous point-by-point projected Gauss-Seidel solver.
+	bool block_solved = false;
+	if (space->is_block_solver_enabled() && contact_count == 2 && contacts[0].active && contacts[1].active &&
+			contacts[0].normal.dot(contacts[1].normal) > real_t(0.9999)) {
+		Contact &c0 = contacts[0];
+		Contact &c1 = contacts[1];
+		const Vector2 &normal = c0.normal;
+		const real_t inv_inertia_A = collide_A ? A->get_inv_inertia() : 0.0;
+		const real_t inv_inertia_B = collide_B ? B->get_inv_inertia() : 0.0;
+		const real_t rA0 = c0.rA.cross(normal);
+		const real_t rA1 = c1.rA.cross(normal);
+		const real_t rB0 = c0.rB.cross(normal);
+		const real_t rB1 = c1.rB.cross(normal);
+		const real_t inv_mass = inv_mass_A + inv_mass_B;
+		const real_t k00 = inv_mass + inv_inertia_A * rA0 * rA0 + inv_inertia_B * rB0 * rB0;
+		const real_t k01 = inv_mass + inv_inertia_A * rA0 * rA1 + inv_inertia_B * rB0 * rB1;
+		const real_t k11 = inv_mass + inv_inertia_A * rA1 * rA1 + inv_inertia_B * rB1 * rB1;
+		const real_t determinant = k00 * k11 - k01 * k01;
+
+		// Avoid amplifying roundoff at nearly coincident contact positions.
+		// The 100x conditioning limit follows the Box2D velocity solver.
+		if (k00 > 0.0 && k11 > 0.0 && determinant > CMP_EPSILON &&
+				MAX(k00, k11) * MAX(k00, k11) < real_t(100.0) * determinant) {
+			const real_t relative_normal_velocity = (B->get_linear_velocity() - A->get_linear_velocity()).dot(normal);
+			const real_t angular_A = A->get_angular_velocity();
+			const real_t angular_B = B->get_angular_velocity();
+			const real_t vn0 = relative_normal_velocity - angular_A * rA0 + angular_B * rB0;
+			const real_t vn1 = relative_normal_velocity - angular_A * rA1 + angular_B * rB1;
+			const real_t old0 = c0.acc_normal_impulse;
+			const real_t old1 = c1.acc_normal_impulse;
+
+			// b accounts for accumulated impulses, and bounce is the pre-solve
+			// velocity bias already stored in each contact.
+			const real_t b0 = vn0 + c0.bounce - k00 * old0 - k01 * old1;
+			const real_t b1 = vn1 + c1.bounce - k01 * old0 - k11 * old1;
+			real_t next0 = -(k11 * b0 - k01 * b1) / determinant;
+			real_t next1 = -(k00 * b1 - k01 * b0) / determinant;
+			bool valid = next0 >= 0.0 && next1 >= 0.0;
+
+			// Total enumeration of the 2-contact linear complementarity
+			// problem: both active, one active, or both inactive.
+			if (!valid) {
+				next0 = 0.0;
+				next1 = -b1 / k11;
+				valid = next1 >= 0.0 && k01 * next1 + b0 >= 0.0;
+			}
+			if (!valid) {
+				next1 = 0.0;
+				next0 = -b0 / k00;
+				valid = next0 >= 0.0 && k01 * next0 + b1 >= 0.0;
+			}
+			if (!valid) {
+				next0 = 0.0;
+				next1 = 0.0;
+				valid = b0 >= 0.0 && b1 >= 0.0;
+			}
+
+			if (valid) {
+				const real_t delta0 = next0 - old0;
+				const real_t delta1 = next1 - old1;
+				const Vector2 impulse0 = normal * delta0;
+				const Vector2 impulse1 = normal * delta1;
+				c0.acc_normal_impulse = next0;
+				c1.acc_normal_impulse = next1;
+				if (collide_A) {
+					A->apply_impulse(-impulse0, c0.rA + A->get_center_of_mass());
+					A->apply_impulse(-impulse1, c1.rA + A->get_center_of_mass());
+				}
+				if (collide_B) {
+					B->apply_impulse(impulse0, c0.rB + B->get_center_of_mass());
+					B->apply_impulse(impulse1, c1.rB + B->get_center_of_mass());
+				}
+				c0.acc_impulse -= impulse0;
+				c1.acc_impulse -= impulse1;
+				block_solved = true;
+			}
+		}
+	}
+
 	for (int i = 0; i < contact_count; ++i) {
 		Contact &c = contacts[i];
 
@@ -662,11 +745,17 @@ void GodotBodyPair2D::solve(real_t p_step) {
 			}
 		}
 
-		real_t jn = -(c.bounce + vn) * c.mass_normal;
-		real_t jnOld = c.acc_normal_impulse;
-		c.acc_normal_impulse = MAX(jnOld + jn, 0.0f);
-
-		Vector2 j = c.normal * (c.acc_normal_impulse - jnOld);
+		Vector2 j;
+		if (block_solved) {
+			// Normal impulses were applied together above; solve friction
+			// against the resulting velocity and updated normal impulse.
+			j = Vector2();
+		} else {
+			const real_t jn = -(c.bounce + vn) * c.mass_normal;
+			const real_t old_normal = c.acc_normal_impulse;
+			c.acc_normal_impulse = MAX(old_normal + jn, 0.0f);
+			j = c.normal * (c.acc_normal_impulse - old_normal);
+		}
 		if (friction > 0.0) {
 			const Vector2 tangent = c.normal.orthogonal();
 			const real_t vt = dv.dot(tangent);
