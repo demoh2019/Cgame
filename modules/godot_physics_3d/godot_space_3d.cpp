@@ -200,7 +200,10 @@ int GodotPhysicsDirectSpaceState3D::intersect_shape(const PS3DT::ShapeParameters
 	GodotShape3D *shape = GodotPhysicsServer3D::godot_singleton->shape_owner.get_or_null(p_parameters.shape_rid);
 	ERR_FAIL_NULL_V(shape, 0);
 
-	const AABB aabb = p_parameters.transform.xform(shape->get_aabb());
+	// The SAT narrowphase accepts the query shape's collision margin. Its
+	// broadphase bounds must conservatively include that margin as well,
+	// otherwise near-but-disjoint shapes never reach the exact solver.
+	const AABB aabb = p_parameters.transform.xform(shape->get_aabb()).grow(MAX(p_parameters.margin, real_t(0.0)));
 
 	// Consume BVH candidates only after narrowphase has found a real hit.
 	struct ShapeQuery {
