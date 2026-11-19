@@ -32,6 +32,7 @@ CASES = (
     "variant_codec", "render_2d", "render_3d",
     "node_paths", "regex", "compression", "hashing",
     "resource_io", "astar_3d", "ui_layout", "thread_contention",
+    "object_lifecycle", "scene_churn",
 )
 RENDER_CASES = frozenset(("render_2d", "render_3d"))
 # Each scenario runs in a fresh process. No preset has unlimited RSS or wall time.
@@ -159,7 +160,10 @@ def run_once(cmd: list[str], timeout: float, rss_limit_mib: float,
             time.sleep(0.05)
         process.wait()
         elapsed = time.monotonic() - start
-        output.seek(0)
+        # Bound log memory even if the engine floods the watchdog with errors.
+        output.seek(0, os.SEEK_END)
+        log_size = output.tell()
+        output.seek(max(0, log_size - 2 * 1024 * 1024))
         log = output.read()
     result: dict[str, Any] = {
         "status": "passed",
@@ -194,6 +198,7 @@ def summarize(runs: list[dict[str, Any]]) -> dict[str, Any]:
         "status": "passed" if len(passed) == len(runs) else "failed",
         "median_wall_seconds": round(statistics.median(wall), 6) if wall else None,
         "p95_wall_seconds": round(wall[math.ceil(0.95 * len(wall)) - 1], 6) if wall else None,
+        "p99_wall_seconds": round(wall[math.ceil(0.99 * len(wall)) - 1], 6) if wall else None,
         "max_rss_mib": round(max(memories), 3) if memories else None,
         "median_cpu_seconds": round(statistics.median(cpu_times), 6) if cpu_times else None,
         "median_engine_ms": round(statistics.median(engine_times), 6) if engine_times else None,
@@ -205,7 +210,7 @@ def summarize(runs: list[dict[str, Any]]) -> dict[str, Any]:
 def compare_baseline(current: dict[str, Any], baseline: dict[str, Any],
                      percent: float, memory_growth_limit_mib: float | None) -> list[str]:
     errors: list[str] = []
-    keys = ("preset", "scale", "frames", "render_mode")
+    keys = ("preset", "scale", "frames", "render_mode", "seed")
     for key in keys:
         if current.get("configuration", {}).get(key) != baseline.get("configuration", {}).get(key):
             raise ValueError("Baseline configuration mismatch: %s" % key)

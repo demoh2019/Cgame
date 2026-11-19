@@ -82,6 +82,10 @@ class ResultsTests(unittest.TestCase):
         self.assertEqual(stats["status"], "failed")
         self.assertEqual(stats["max_rss_mib"], 15.)
 
+    def test_p99_wall_measurement(self):
+        rows = [{"status": "passed", "wall_seconds": v, "peak_rss_mib": 10.0} for v in (1., 2., 3.)]
+        self.assertEqual(stress.summarize(rows)["p99_wall_seconds"], 3.)
+
     def test_empty_measurements(self):
         self.assertIsNone(stress.summarize([{"status": "failed", "peak_rss_mib": None}])["median_wall_seconds"])
 
@@ -101,6 +105,13 @@ class BaselineTests(unittest.TestCase):
         new = self.make_report(1.5, 140.0)
         failures = stress.compare_baseline(new, old, 20., None)
         self.assertEqual(len(failures), 2)
+
+    def test_seed_mismatch_rejected(self):
+        old, new = self.make_report(), self.make_report()
+        old["configuration"]["seed"] = 10
+        new["configuration"]["seed"] = 11
+        with self.assertRaisesRegex(ValueError, "seed"):
+            stress.compare_baseline(new, old, 20., None)
 
     def test_small_variance_passes(self):
         self.assertEqual(stress.compare_baseline(

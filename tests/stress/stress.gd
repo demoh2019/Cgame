@@ -13,6 +13,7 @@ const CASES := [
 	"variant_codec", "render_2d", "render_3d",
 	"node_paths", "regex", "compression", "hashing",
 	"resource_io", "astar_3d", "ui_layout", "thread_contention",
+	"object_lifecycle", "scene_churn",
 ]
 
 var signal_total: int = 0
@@ -207,6 +208,10 @@ func _run_case(test_case: String, scale: int, frames: int, seed: int) -> Diction
 			return _hashing(scale)
 		"resource_io":
 			return _resource_io(scale)
+		"object_lifecycle":
+			return await _object_lifecycle(scale)
+		"scene_churn":
+			return await _scene_churn(scale)
 		"astar_3d":
 			return _astar_3d(scale)
 		"ui_layout":
@@ -214,6 +219,54 @@ func _run_case(test_case: String, scale: int, frames: int, seed: int) -> Diction
 		"thread_contention":
 			return _thread_contention(scale)
 	return {"error": "Unhandled case"}
+
+
+
+func _frame_statistics(samples: Array[float]) -> Dictionary:
+	if samples.is_empty():
+		return {}
+	samples.sort()
+	var count := samples.size()
+	return {
+		"count": count,
+		"p50": samples[int(float(count - 1) * 0.5)],
+		"p95": samples[clampi(ceili(float(count) * 0.95) - 1, 0, count - 1)],
+		"p99": samples[clampi(ceili(float(count) * 0.99) - 1, 0, count - 1)],
+		"max": samples.back(),
+	}
+
+
+func _object_lifecycle(scale: int) -> Dictionary:
+	var samples: Array[int] = []
+	var checksum := 0
+	for cycle in range(12):
+		var objects: Array[RefCounted] = []
+		for i in range(1000 * scale):
+			objects.append(RefCounted.new())
+		checksum += objects.size()
+		objects.clear()
+		await process_frame
+		samples.append(int(Performance.get_monitor(Performance.MEMORY_STATIC)))
+	return {"objects_created": checksum, "memory_samples_bytes": samples,
+		"retained_growth_bytes": samples.back() - samples[2]}
+
+
+func _scene_churn(scale: int) -> Dictionary:
+	var max_memory := 0
+	var checksum := 0
+	for cycle in range(30):
+		var world := Node2D.new()
+		root.add_child(world)
+		for i in range(80 * scale):
+			var child := Node2D.new()
+			child.name = "Churn%d" % i
+			world.add_child(child)
+		checksum += world.get_child_count()
+		world.free()
+		await process_frame
+		max_memory = maxi(max_memory, int(Performance.get_monitor(Performance.MEMORY_STATIC)))
+	return {"nodes_created_and_freed": checksum, "cycles": 30,
+		"peak_engine_static_bytes": max_memory}
 
 
 func _on_sample(value: int) -> void:
@@ -335,12 +388,17 @@ func _tweens(scale: int, frames: int) -> Dictionary:
 		tween.tween_property(node, "position", Vector2(float(i & 31), 20.0), 0.1)
 		tween.tween_property(node, "position", Vector2.ZERO, 0.1)
 	var peak_frame_ms := 0.0
+	var frame_intervals: Array[float] = []
+	var last_tick := Time.get_ticks_usec()
 	for i in range(frames):
 		await process_frame
+		var frame_tick := Time.get_ticks_usec()
+		frame_intervals.append(float(frame_tick - last_tick) / 1000.0)
+		last_tick = frame_tick
 		peak_frame_ms = maxf(peak_frame_ms, Performance.get_monitor(Performance.TIME_PROCESS) * 1000.0)
 	world.queue_free()
 	await process_frame
-	return {"active_tweens": count, "frames": frames, "peak_frame_ms": peak_frame_ms}
+	return {"active_tweens": count, "frames": frames, "peak_frame_ms": peak_frame_ms, "frame_interval_ms": _frame_statistics(frame_intervals)}
 
 
 func _physics_2d(scale: int, frames: int) -> Dictionary:
@@ -358,13 +416,18 @@ func _physics_2d(scale: int, frames: int) -> Dictionary:
 		world.add_child(body)
 	var peak_physics_ms := 0.0
 	var peak_pairs := 0
+	var frame_intervals: Array[float] = []
+	var last_tick := Time.get_ticks_usec()
 	for i in range(frames):
 		await physics_frame
+		var frame_tick := Time.get_ticks_usec()
+		frame_intervals.append(float(frame_tick - last_tick) / 1000.0)
+		last_tick = frame_tick
 		peak_physics_ms = maxf(peak_physics_ms, Performance.get_monitor(Performance.TIME_PHYSICS_PROCESS) * 1000.0)
 		peak_pairs = maxi(peak_pairs, int(Performance.get_monitor(Performance.PHYSICS_2D_COLLISION_PAIRS)))
 	world.queue_free()
 	await process_frame
-	return {"bodies": length, "physics_frames": frames, "peak_physics_ms": peak_physics_ms, "peak_collision_pairs": peak_pairs}
+	return {"bodies": length, "physics_frames": frames, "peak_physics_ms": peak_physics_ms, "peak_collision_pairs": peak_pairs, "frame_interval_ms": _frame_statistics(frame_intervals)}
 
 
 func _physics_3d(scale: int, frames: int) -> Dictionary:
@@ -382,13 +445,18 @@ func _physics_3d(scale: int, frames: int) -> Dictionary:
 		world.add_child(body)
 	var peak_physics_ms := 0.0
 	var peak_pairs := 0
+	var frame_intervals: Array[float] = []
+	var last_tick := Time.get_ticks_usec()
 	for i in range(frames):
 		await physics_frame
+		var frame_tick := Time.get_ticks_usec()
+		frame_intervals.append(float(frame_tick - last_tick) / 1000.0)
+		last_tick = frame_tick
 		peak_physics_ms = maxf(peak_physics_ms, Performance.get_monitor(Performance.TIME_PHYSICS_PROCESS) * 1000.0)
 		peak_pairs = maxi(peak_pairs, int(Performance.get_monitor(Performance.PHYSICS_3D_COLLISION_PAIRS)))
 	world.queue_free()
 	await process_frame
-	return {"bodies": length, "physics_frames": frames, "peak_physics_ms": peak_physics_ms, "peak_collision_pairs": peak_pairs}
+	return {"bodies": length, "physics_frames": frames, "peak_physics_ms": peak_physics_ms, "peak_collision_pairs": peak_pairs, "frame_interval_ms": _frame_statistics(frame_intervals)}
 
 
 func _memory_churn(scale: int) -> Dictionary:
@@ -421,14 +489,19 @@ func _render_2d(scale: int, frames: int) -> Dictionary:
 	var peak_frame_ms := 0.0
 	var peak_draw_calls := 0
 	var peak_video_memory := 0
+	var frame_intervals: Array[float] = []
+	var last_tick := Time.get_ticks_usec()
 	for i in range(frames):
 		await process_frame
+		var frame_tick := Time.get_ticks_usec()
+		frame_intervals.append(float(frame_tick - last_tick) / 1000.0)
+		last_tick = frame_tick
 		peak_frame_ms = maxf(peak_frame_ms, Performance.get_monitor(Performance.TIME_PROCESS) * 1000.0)
 		peak_draw_calls = maxi(peak_draw_calls, int(Performance.get_monitor(Performance.RENDER_TOTAL_DRAW_CALLS_IN_FRAME)))
 		peak_video_memory = maxi(peak_video_memory, int(Performance.get_monitor(Performance.RENDER_VIDEO_MEM_USED)))
 	world.queue_free()
 	await process_frame
-	return {"sprites": 600 * scale, "frames": frames, "peak_frame_ms": peak_frame_ms, "peak_draw_calls": peak_draw_calls, "peak_video_memory_bytes": peak_video_memory}
+	return {"sprites": 600 * scale, "frames": frames, "peak_frame_ms": peak_frame_ms, "peak_draw_calls": peak_draw_calls, "peak_video_memory_bytes": peak_video_memory, "frame_interval_ms": _frame_statistics(frame_intervals)}
 
 
 func _render_3d(scale: int, frames: int) -> Dictionary:
@@ -450,14 +523,19 @@ func _render_3d(scale: int, frames: int) -> Dictionary:
 	var peak_frame_ms := 0.0
 	var peak_draw_calls := 0
 	var peak_video_memory := 0
+	var frame_intervals: Array[float] = []
+	var last_tick := Time.get_ticks_usec()
 	for i in range(frames):
 		await process_frame
+		var frame_tick := Time.get_ticks_usec()
+		frame_intervals.append(float(frame_tick - last_tick) / 1000.0)
+		last_tick = frame_tick
 		peak_frame_ms = maxf(peak_frame_ms, Performance.get_monitor(Performance.TIME_PROCESS) * 1000.0)
 		peak_draw_calls = maxi(peak_draw_calls, int(Performance.get_monitor(Performance.RENDER_TOTAL_DRAW_CALLS_IN_FRAME)))
 		peak_video_memory = maxi(peak_video_memory, int(Performance.get_monitor(Performance.RENDER_VIDEO_MEM_USED)))
 	world.queue_free()
 	await process_frame
-	return {"meshes": 200 * scale, "frames": frames, "peak_frame_ms": peak_frame_ms, "peak_draw_calls": peak_draw_calls, "peak_video_memory_bytes": peak_video_memory}
+	return {"meshes": 200 * scale, "frames": frames, "peak_frame_ms": peak_frame_ms, "peak_draw_calls": peak_draw_calls, "peak_video_memory_bytes": peak_video_memory, "frame_interval_ms": _frame_statistics(frame_intervals)}
 
 
 ## Additional cross-subsystem workloads. Each one has an explicit integrity check.
