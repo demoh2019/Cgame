@@ -1,0 +1,32 @@
+name: Project asset size audit tests
+
+on:
+  push:
+    paths:
+      - 'misc/scripts/project_asset_sizes.py'
+      - 'misc/scripts/tests/test_project_asset_sizes.py'
+      - 'misc/scripts/README_project_asset_sizes.md'
+      - '.github/workflows/project-asset-sizes.yml'
+  pull_request:
+    paths:
+      - 'misc/scripts/project_asset_sizes.py'
+      - 'misc/scripts/tests/test_project_asset_sizes.py'
+      - 'misc/scripts/README_project_asset_sizes.md'
+      - '.github/workflows/project-asset-sizes.yml'
+
+jobs:
+  python-tests:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ['3.10', '3.13']
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+      - name: Compile and run asset size audit tests
+        run: |
+          python -m py_compile misc/scripts/project_asset_sizes.py misc/scripts/tests/test_project_asset_sizes.py
+          python -m unittest discover -s misc/scripts/tests -p test_project_asset_sizes.py -v
