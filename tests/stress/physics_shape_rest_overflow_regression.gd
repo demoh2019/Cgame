@@ -46,19 +46,20 @@ func _check_2d() -> Dictionary:
 	var started := Time.get_ticks_usec()
 	var hits := state.intersect_shape(params, 1)
 	var rest := state.get_rest_info(params)
+	var contacts := state.collide_shape(params, 2)
 	var query_us := Time.get_ticks_usec() - started
-	var ok := hits.size() == 1 and not rest.is_empty()
+	var ok := hits.size() == 1 and not rest.is_empty() and contacts.size() > 0
 	if ok:
 		ok = hits[0].rid == bodies[FILTERED_COUNT] and rest.rid == bodies[FILTERED_COUNT]
 	params.collision_mask = 4
-	ok = ok and state.intersect_shape(params, 1).is_empty() and state.get_rest_info(params).is_empty()
+	ok = ok and state.intersect_shape(params, 1).is_empty() and state.get_rest_info(params).is_empty() and state.collide_shape(params, 2).is_empty()
 	params.collision_mask = 2
 	params.collide_with_bodies = false
-	ok = ok and state.intersect_shape(params, 1).is_empty() and state.get_rest_info(params).is_empty()
+	ok = ok and state.intersect_shape(params, 1).is_empty() and state.get_rest_info(params).is_empty() and state.collide_shape(params, 2).is_empty()
 	params.collide_with_bodies = true
 	var excluded: Array[RID] = [bodies[FILTERED_COUNT]]
 	params.exclude = excluded
-	ok = ok and state.intersect_shape(params, 1).is_empty() and state.get_rest_info(params).is_empty()
+	ok = ok and state.intersect_shape(params, 1).is_empty() and state.get_rest_info(params).is_empty() and state.collide_shape(params, 2).is_empty()
 
 	for body in bodies:
 		PhysicsServer2D.free_rid(body)
@@ -92,19 +93,20 @@ func _check_3d() -> Dictionary:
 	var started := Time.get_ticks_usec()
 	var hits := state.intersect_shape(params, 1)
 	var rest := state.get_rest_info(params)
+	var contacts := state.collide_shape(params, 2)
 	var query_us := Time.get_ticks_usec() - started
-	var ok := hits.size() == 1 and not rest.is_empty()
+	var ok := hits.size() == 1 and not rest.is_empty() and contacts.size() > 0
 	if ok:
 		ok = hits[0].rid == bodies[FILTERED_COUNT] and rest.rid == bodies[FILTERED_COUNT]
 	params.collision_mask = 4
-	ok = ok and state.intersect_shape(params, 1).is_empty() and state.get_rest_info(params).is_empty()
+	ok = ok and state.intersect_shape(params, 1).is_empty() and state.get_rest_info(params).is_empty() and state.collide_shape(params, 2).is_empty()
 	params.collision_mask = 2
 	params.collide_with_bodies = false
-	ok = ok and state.intersect_shape(params, 1).is_empty() and state.get_rest_info(params).is_empty()
+	ok = ok and state.intersect_shape(params, 1).is_empty() and state.get_rest_info(params).is_empty() and state.collide_shape(params, 2).is_empty()
 	params.collide_with_bodies = true
 	var excluded: Array[RID] = [bodies[FILTERED_COUNT]]
 	params.exclude = excluded
-	ok = ok and state.intersect_shape(params, 1).is_empty() and state.get_rest_info(params).is_empty()
+	ok = ok and state.intersect_shape(params, 1).is_empty() and state.get_rest_info(params).is_empty() and state.collide_shape(params, 2).is_empty()
 
 	for body in bodies:
 		PhysicsServer3D.free_rid(body)
