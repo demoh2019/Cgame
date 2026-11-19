@@ -133,6 +133,43 @@ TEST_CASE("[SceneTree][Material3D] ORM shader includes sampler only for an assig
 	CHECK_FALSE(has_sampler(material.ptr(), "texture_orm"));
 }
 
+TEST_CASE("[SceneTree][Material3D] Each optional feature sampler tracks its texture") {
+	struct TextureCase {
+		BaseMaterial3D::Feature feature;
+		BaseMaterial3D::TextureParam param;
+		const char *uniform_name;
+	};
+	const TextureCase cases[] = {
+		{ BaseMaterial3D::FEATURE_NORMAL_MAPPING, BaseMaterial3D::TEXTURE_NORMAL, "texture_normal" },
+		{ BaseMaterial3D::FEATURE_BENT_NORMAL_MAPPING, BaseMaterial3D::TEXTURE_BENT_NORMAL, "texture_bent_normal" },
+		{ BaseMaterial3D::FEATURE_RIM, BaseMaterial3D::TEXTURE_RIM, "texture_rim" },
+		{ BaseMaterial3D::FEATURE_CLEARCOAT, BaseMaterial3D::TEXTURE_CLEARCOAT, "texture_clearcoat" },
+		{ BaseMaterial3D::FEATURE_ANISOTROPY, BaseMaterial3D::TEXTURE_FLOWMAP, "texture_flowmap" },
+		{ BaseMaterial3D::FEATURE_AMBIENT_OCCLUSION, BaseMaterial3D::TEXTURE_AMBIENT_OCCLUSION, "texture_ambient_occlusion" },
+		{ BaseMaterial3D::FEATURE_SUBSURFACE_SCATTERING, BaseMaterial3D::TEXTURE_SUBSURFACE_SCATTERING, "texture_subsurface_scattering" },
+		{ BaseMaterial3D::FEATURE_SUBSURFACE_TRANSMITTANCE, BaseMaterial3D::TEXTURE_SUBSURFACE_TRANSMITTANCE, "texture_subsurface_transmittance" },
+		{ BaseMaterial3D::FEATURE_BACKLIGHT, BaseMaterial3D::TEXTURE_BACKLIGHT, "texture_backlight" },
+		{ BaseMaterial3D::FEATURE_REFRACTION, BaseMaterial3D::TEXTURE_REFRACTION, "texture_refraction" },
+		{ BaseMaterial3D::FEATURE_DETAIL, BaseMaterial3D::TEXTURE_DETAIL_MASK, "texture_detail_mask" },
+		{ BaseMaterial3D::FEATURE_DETAIL, BaseMaterial3D::TEXTURE_DETAIL_NORMAL, "texture_detail_normal" },
+	};
+
+	Ref<ImageTexture> texture = make_test_texture();
+	REQUIRE(texture.is_valid());
+	for (const TextureCase &test_case : cases) {
+		Ref<StandardMaterial3D> material;
+		material.instantiate();
+		const StringName sampler_name(test_case.uniform_name);
+		material->set_texture(test_case.param, texture);
+		// Feature disabled: assigned but unused texture must not affect shader.
+		CHECK_FALSE(has_sampler(material.ptr(), sampler_name));
+		material->set_feature(test_case.feature, true);
+		CHECK(has_sampler(material.ptr(), sampler_name));
+		material->set_texture(test_case.param, Ref<Texture2D>());
+		CHECK_FALSE(has_sampler(material.ptr(), sampler_name));
+	}
+}
+
 } // namespace TestMaterialTextureShader
 
 #endif // _3D_DISABLED
