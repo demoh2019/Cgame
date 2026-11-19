@@ -1,0 +1,42 @@
+name: Shape3D face mesh color-cache regressions
+
+on:
+  pull_request:
+    paths:
+      - 'scene/resources/3d/box_shape_3d.cpp'
+      - 'scene/resources/3d/box_shape_3d.h'
+      - 'scene/resources/3d/sphere_shape_3d.cpp'
+      - 'scene/resources/3d/sphere_shape_3d.h'
+      - 'tests/scene/test_shape_3d_face_mesh_cache.cpp'
+      - '.github/workflows/shape3d-face-cache.yml'
+  push:
+    branches: [develop]
+    paths:
+      - 'scene/resources/3d/box_shape_3d.cpp'
+      - 'scene/resources/3d/box_shape_3d.h'
+      - 'scene/resources/3d/sphere_shape_3d.cpp'
+      - 'scene/resources/3d/sphere_shape_3d.h'
+      - 'tests/scene/test_shape_3d_face_mesh_cache.cpp'
+      - '.github/workflows/shape3d-face-cache.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  native-shape-mesh-cache:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+      - uses: ./.github/actions/godot-deps
+      - name: Build native Shape3D regressions
+        uses: ./.github/actions/godot-build
+        with:
+          platform: linuxbsd
+          target: editor
+          scons-flags: dev_build=yes tests=yes debug_symbols=no module_mono_enabled=no module_text_server_fb_enabled=yes accesskit=no -j2
+      - name: Verify BoxShape3D and SphereShape3D debug face caches
+        run: ./bin/godot.linuxbsd.editor.dev.x86_64 --headless --test --test-case="*[SceneTree][Shape3D]*"

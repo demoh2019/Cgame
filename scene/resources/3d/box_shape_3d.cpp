@@ -51,6 +51,10 @@ Vector<Vector3> BoxShape3D::get_debug_mesh_lines() const {
 }
 
 Ref<ArrayMesh> BoxShape3D::get_debug_arraymesh_faces(const Color &p_modulate) const {
+	if (debug_faces_cache.is_valid() && debug_faces_cache_color == p_modulate) {
+		return debug_faces_cache;
+	}
+
 	Array box_array;
 	box_array.resize(RSE::ARRAY_MAX);
 	BoxMesh::create_mesh_array(box_array, size);
@@ -58,13 +62,14 @@ Ref<ArrayMesh> BoxShape3D::get_debug_arraymesh_faces(const Color &p_modulate) co
 	Vector<Color> colors;
 	const PackedVector3Array &verts = box_array[RSE::ARRAY_VERTEX];
 	const int32_t verts_size = verts.size();
-	for (int i = 0; i < verts_size; i++) {
-		colors.append(p_modulate);
-	}
+	colors.resize(verts_size);
+	colors.fill(p_modulate);
 
 	Ref<ArrayMesh> box_mesh = memnew(ArrayMesh);
 	box_array[RSE::ARRAY_COLOR] = colors;
 	box_mesh->add_surface_from_arrays(Mesh::PRIMITIVE_TRIANGLES, box_array);
+	debug_faces_cache = box_mesh;
+	debug_faces_cache_color = p_modulate;
 	return box_mesh;
 }
 
@@ -73,6 +78,7 @@ real_t BoxShape3D::get_enclosing_radius() const {
 }
 
 void BoxShape3D::_update_shape() {
+	debug_faces_cache.unref();
 	PhysicsServer3D::get_singleton()->shape_set_data(get_shape(), size / 2);
 	Shape3D::_update_shape();
 }
