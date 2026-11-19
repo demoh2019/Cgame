@@ -307,7 +307,7 @@ bool GodotBodyPair2D::_test_ccd(real_t p_step, GodotBody2D *p_A, int p_shape_A, 
 			shape_A_ptr->get_type() != PS2DE::SHAPE_SEPARATION_RAY && shape_B_ptr->get_type() != PS2DE::SHAPE_SEPARATION_RAY &&
 			!physics_ccd_swept_bounds_may_overlap(
 					p_xform_A.xform(shape_A_ptr->get_aabb()),
-					p_xform_B.xform(shape_B_ptr->get_aabb()), relative_motion)) {
+					p_xform_B.xform(shape_B_ptr->get_aabb()), relative_motion, real_t(0.1))) {
 		return false;
 	}
 
