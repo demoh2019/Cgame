@@ -1805,8 +1805,13 @@ Variant GDScriptFunction::call(GDScriptInstance *p_instance, const Variant **p_a
 				Array array;
 				array.resize(argc);
 
-				for (int i = 0; i < argc; i++) {
-					array[i] = *(instruction_args[i]);
+				// The newly allocated untyped Array is exclusively owned and the
+				// destination slots are initialized. Walk them linearly instead of
+				// calling Array::operator[] (read-only check + COW write proxy)
+				// and repeating the indexed lookup for every literal element.
+				Array::Iterator write = array.begin();
+				for (int i = 0; i < argc; i++, ++write) {
+					*write = *instruction_args[i];
 				}
 
 				GET_INSTRUCTION_ARG(dst, argc);

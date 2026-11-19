@@ -1031,4 +1031,31 @@ TEST_CASE("[TypedContainer] Array Ref<Script> fast path retains Variant compatib
 	}
 }
 
+
+TEST_CASE("[Array] Sequential iterator assignment matches indexed literal filling") {
+	for (int count : { 0, 1, 2, 7, 8, 17, 64, 128 }) {
+		Array array;
+		REQUIRE_EQ(array.resize(count), OK);
+		Array::Iterator write = array.begin();
+		for (int i = 0; i < count; ++i, ++write) {
+			*write = i * 17;
+		}
+		REQUIRE_EQ(array.size(), count);
+		for (int i = 0; i < count; ++i) {
+			CHECK_EQ(array[i], Variant(i * 17));
+		}
+	}
+	Array nested;
+	REQUIRE_EQ(nested.resize(3), OK);
+	Array::Iterator write = nested.begin();
+	*write = String("text");
+	++write;
+	*write = Vector2(3, 4);
+	++write;
+	*write = Array({ 1, 2, 3 });
+	CHECK_EQ(nested[0], Variant("text"));
+	CHECK_EQ(nested[1], Variant(Vector2(3, 4)));
+	CHECK_EQ(Array(nested[2]), Array({ 1, 2, 3 }));
+}
+
 } // namespace TestArray
