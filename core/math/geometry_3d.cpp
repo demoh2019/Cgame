@@ -778,7 +778,7 @@ Vector<Plane> Geometry3D::build_sphere_planes(real_t p_radius, int p_lats, int p
 	axis_neg[p_axis] = -1.0;
 
 	const double lon_step = Math::TAU / p_lons;
-	planes.resize(p_lons * (1 + 2 * p_lats);
+	planes.resize(p_lons * (1 + 2 * p_lats));
 	Plane *plane_data = planes.ptrw();
 	int idx = 0;
 	for (int i = 0; i < p_lons; i++) {
@@ -812,7 +812,7 @@ Vector<Plane> Geometry3D::build_capsule_planes(real_t p_radius, real_t p_height,
 	axis_neg[p_axis] = -1.0;
 
 	const double sides_step = Math::TAU / p_sides;
-	planes.resize(p_sides * (1 + 2 * p_lats);
+	planes.resize(p_sides * (1 + 2 * p_lats));
 	Plane *plane_data = planes.ptrw();
 	int idx = 0;
 	for (int i = 0; i < p_sides; i++) {
