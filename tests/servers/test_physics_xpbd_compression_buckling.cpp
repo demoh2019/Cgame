@@ -28,6 +28,8 @@
 /**************************************************************************/
 
 #include "servers/physics_xpbd_compression_buckling.h"
+#include "servers/physics_xpbd_distance.h"
+#include "servers/physics_xpbd_tension_hardening.h"
 #include "tests/test_macros.h"
 
 #include <limits>
@@ -146,6 +148,47 @@ TEST_CASE("[PhysicsXPBDBuckling] Invalid input must not mutate the output") {
 	CHECK_FALSE(physics_xpbd_compression_buckling_alpha(Vector3(), Vector3(),
 			1, 1, 0.05, 0.1, nan, output));
 	CHECK(output == real_t(42.0));
+}
+
+TEST_CASE("[PhysicsXPBDBuckling] Compressive softening reduces XPBD restoring force") {
+	Vector3 pinned_linear, linear(0.5, 0, 0);
+	Vector3 pinned_soft, softened(0.5, 0, 0);
+	real_t alpha_soft = real_t(0.1);
+	CHECK(physics_xpbd_compression_buckling_alpha(pinned_soft, softened,
+			1, real_t(0.1), 0.05, 0.1, 10, alpha_soft));
+	CHECK(alpha_soft > real_t(0.1));
+	real_t lambda_linear = 0;
+	real_t lambda_soft = 0;
+	for (int i = 0; i < 16; ++i) {
+		CHECK(physics_xpbd_solve_distance(pinned_linear, linear,
+				0, 1, 1, real_t(0.1), lambda_linear));
+		CHECK(physics_xpbd_solve_distance(pinned_soft, softened,
+				0, 1, 1, alpha_soft, lambda_soft));
+	}
+	CHECK(pinned_linear == Vector3());
+	CHECK(pinned_soft == Vector3());
+	CHECK(linear.x > softened.x);
+	CHECK(softened.x > real_t(0.5));
+	CHECK(softened.x < real_t(1.0));
+}
+
+TEST_CASE("[PhysicsXPBDBuckling] Tension and compression laws compose without cross-coupling") {
+	real_t tensile = 1;
+	CHECK(physics_xpbd_tension_hardening_alpha(Vector3(), Vector3(1.5, 0, 0),
+			1, 1, 0.05, 100, tensile));
+	CHECK(tensile < 1);
+	real_t combined_tensile = tensile;
+	CHECK(physics_xpbd_compression_buckling_alpha(Vector3(), Vector3(1.5, 0, 0),
+			1, combined_tensile, 0.05, 0.1, 9, combined_tensile));
+	CHECK(combined_tensile == tensile);
+
+	real_t compressive = 1;
+	CHECK(physics_xpbd_tension_hardening_alpha(Vector3(), Vector3(0.5, 0, 0),
+			1, 1, 0.05, 100, compressive));
+	CHECK(compressive == 1);
+	CHECK(physics_xpbd_compression_buckling_alpha(Vector3(), Vector3(0.5, 0, 0),
+			1, compressive, 0.05, 0.1, 9, compressive));
+	CHECK(compressive == doctest::Approx(9.0));
 }
 
 } // namespace TestPhysicsXPBDCompressionBuckling
