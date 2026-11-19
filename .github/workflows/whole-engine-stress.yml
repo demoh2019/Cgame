@@ -146,6 +146,19 @@ jobs:
             --script res://physics_ccd_relative_motion_2d_regression.gd \
             2>&1 | tee physics2d-ccd-relative.log
           grep -Fq '2D relative-motion CCD regression passed.' physics2d-ccd-relative.log
+          timeout 120s "$BIN" --headless --path "$PROJECT" \
+            --script res://physics_ccd_circle_segment_2d_regression.gd \
+            2>&1 | tee physics2d-circle-segment-ccd.log
+          grep -Fq '2D circle-segment CCD regression passed.' physics2d-circle-segment-ccd.log
+
+      - name: Regression-test analytic circle-segment TOI in native C++
+        shell: bash
+        run: |
+          set -euo pipefail
+          timeout 120s ./bin/godot.linuxbsd.editor.dev.x86_64 \
+            --headless --test --test-case="*CircleSegmentTOI*" \
+            --success=true --no-colors 2>&1 | tee physics2d-circle-segment-toi.log
+          grep -Fq '[CircleSegmentTOI]' physics2d-circle-segment-toi.log
 
       - name: Exercise repeated Jolt pending-body batch reuse
         shell: bash
@@ -373,6 +386,8 @@ jobs:
             physics-jolt-pending-broadphase.log
             physics2d-ccd-edge.log
             physics2d-ccd-relative.log
+            physics2d-circle-segment-toi.log
+            physics2d-circle-segment-ccd.log
             physics3d-colored-islands.log
             physics3d-ccd-relative.log
             physics3d-capsule-rays.log
