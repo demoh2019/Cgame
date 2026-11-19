@@ -37,13 +37,13 @@ struct GodotPhysicsContactRecycling {
 	uint64_t geometry_version_a = 0;
 	uint64_t geometry_version_b = 0;
 
-	_FORCE_INLINE_ bool can_reuse(uint64_t p_current_a, uint64_t p_current_b, bool p_collided, int p_contact_count, bool p_ccd) const {
+	inline bool can_reuse(uint64_t p_current_a, uint64_t p_current_b, bool p_collided, int p_contact_count, bool p_ccd) const {
 		return p_collided && p_contact_count > 0 && !p_ccd &&
 				geometry_version_a != 0 && geometry_version_b != 0 &&
 				geometry_version_a == p_current_a && geometry_version_b == p_current_b;
 	}
 
-	_FORCE_INLINE_ void remember(uint64_t p_current_a, uint64_t p_current_b) {
+	inline void remember(uint64_t p_current_a, uint64_t p_current_b) {
 		geometry_version_a = p_current_a;
 		geometry_version_b = p_current_b;
 	}
