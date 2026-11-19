@@ -10,7 +10,7 @@ const CASES := [
 	"containers", "strings", "script_vm", "math", "signals",
 	"scene_tree", "packed_scene", "images", "json", "stream", "stream_bulk",
 	"file_io", "threads", "physics_2d", "physics_3d", "physics_sparse_2d", "physics_sparse_3d",
-	"object_churn", "memory_churn", "astar_grid", "astar_relax_2d", "astar_relax_3d", "astar_graph", "tweens", "audio_buffers",
+	"object_churn", "memory_churn", "astar_grid", "astar_grid_rebuild", "astar_relax_2d", "astar_relax_3d", "astar_graph", "tweens", "audio_buffers",
 	"variant_codec", "packet_stream", "ui_layout", "render_2d", "render_3d",
 	"resource_load",
 	"input_map",
@@ -199,6 +199,8 @@ func _run_case(test_case: String, scale: int, frames: int, seed: int) -> Diction
 			return _threads(scale, seed)
 		"astar_grid":
 			return _astar_grid(scale)
+		"astar_grid_rebuild":
+			return _astar_grid_rebuild(scale)
 		"astar_relax_2d":
 			return _astar_relax_2d(scale)
 		"astar_relax_3d":
@@ -1483,3 +1485,54 @@ func _curve_nearest(scale: int) -> Dictionary:
 			"baked_points_3d": path3.get_baked_points().size(),
 			"closest_offset_ms": offsets_ms, "closest_point_ms": points_ms,
 			"sample_baked_ms": sample_ms, "checksum": checksum}
+
+
+func _astar_grid_rebuild(scale: int) -> Dictionary:
+	# Alternate wide/tall layouts to stress construction and row-major indexing.
+	# Cap the dimensions for opt-in brutal presets, to avoid 4-billion-cell OOM.
+	var side := mini(64 * scale, 2048)
+	var grid := AStarGrid2D.new()
+	var builds_ms := 0.0
+	var shrinks_ms := 0.0
+	var checksum := 0
+	var mem_before := int(Performance.get_monitor(Performance.MEMORY_STATIC))
+	for cycle in range(3):
+		var region_size := Vector2i(side, side / 2) if cycle % 2 == 0 else Vector2i(side / 2, side)
+		var region := Rect2i(Vector2i(-17, -9), region_size)
+		var started := Time.get_ticks_usec()
+		grid.set_region(region)
+		grid.update()
+		builds_ms += float(Time.get_ticks_usec() - started) / 1000.0
+		var last := region.position + region.size - Vector2i.ONE
+		if grid.is_dirty() or grid.get_point_position(last) != Vector2(last):
+			return {"error": "Grid rebuild changed cell positions"}
+		if grid.is_point_solid(last):
+			return {"error": "Grid rebuild kept an obstacle in a new region"}
+		var start := region.position
+		var target := start + Vector2i(0, 3)
+		var path := grid.get_id_path(start, target)
+		if path.size() != 4 or path[0] != start or path[3] != target:
+			return {"error": "Grid rebuilt with an invalid route"}
+		grid.set_point_solid(last, true)
+		checksum += path.size() + int(grid.is_point_solid(last))
+
+		started = Time.get_ticks_usec()
+		grid.set_region(Rect2i(10, 20, 8, 8))
+		grid.update()
+		shrinks_ms += float(Time.get_ticks_usec() - started) / 1000.0
+		if grid.get_point_position(Vector2i(17, 27)) != Vector2(17, 27):
+			return {"error": "Grid shrink corrupted cell indices"}
+		if grid.is_point_solid(Vector2i(17, 27)):
+			return {"error": "Grid shrink retained a stale obstacle"}
+	var mem_after_shrink := int(Performance.get_monitor(Performance.MEMORY_STATIC))
+	grid.clear()
+	var mem_after_clear := int(Performance.get_monitor(Performance.MEMORY_STATIC))
+	return {
+		"cycles": 3,
+		"max_grid_cells": side * (side / 2),
+		"build_ms": builds_ms,
+		"shrink_ms": shrinks_ms,
+		"static_memory_after_shrink_delta_bytes": mem_after_shrink - mem_before,
+		"static_memory_after_clear_delta_bytes": mem_after_clear - mem_before,
+		"checksum": checksum,
+	}

@@ -408,3 +408,21 @@ python3 tests/stress/scale_sweep.py --godot ./bin/godot.linuxbsd.editor.dev.x86_
   --case stream,stream_bulk --scales 1,2,4,8,16 --repeats 5 \\
   --output out/stream-scaling.json --summary-md out/stream-scaling.md
 ```
+
+
+## AStarGrid2D construction, shrink and RAM pressure
+
+The `astar_grid_rebuild` workload alternates large wide/tall maps with a tiny
+8×8 region. It validates coordinate addressing, routes, occupancy reset and
+reports independent `build_ms` and `shrink_ms`, plus before/after static-memory
+deltas. This specifically exercises contiguous point storage and the
+bulk-initialized occupancy mask. The case caps its largest side at 2048 cells;
+use the OS process RSS sampler in `run.py` for actual resident memory.
+Allocator-retained RSS is not proof of a leak.
+
+```bash
+python3 tests/stress/scale_sweep.py \
+  --godot ./bin/godot.linuxbsd.editor.dev.x86_64 \
+  --case astar_grid_rebuild --scales 1,2,4,8,16 --repeats 5 \
+  --output out/astar-grid-rebuild.json --summary-md out/astar-grid-rebuild.md
+```
