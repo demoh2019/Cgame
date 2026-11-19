@@ -448,7 +448,10 @@ bool GodotBodyPair3D::pre_solve(real_t p_step) {
 			Vector3 crA = A->get_prev_angular_velocity().cross(c.rA);
 			Vector3 crB = B->get_prev_angular_velocity().cross(c.rB);
 			Vector3 dv = B->get_prev_linear_velocity() + crB - A->get_prev_linear_velocity() - crA;
-			c.bounce = c.bounce * dv.dot(c.normal);
+			const real_t normal_velocity = dv.dot(c.normal);
+			// Suppress low-speed restitution: resting stacks should not keep
+			// bouncing due to tiny solver corrections or contact jitter.
+			c.bounce = normal_velocity < -space->get_restitution_velocity_threshold() ? c.bounce * normal_velocity : 0.0;
 		}
 	}
 
