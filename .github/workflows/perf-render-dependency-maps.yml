@@ -1,0 +1,53 @@
+name: RenderingDevice compact dependency map regression
+
+on:
+  pull_request:
+    paths:
+      - "servers/rendering/rendering_device.h"
+      - "servers/rendering/rendering_device.cpp"
+      - "tests/core/templates/test_render_dependency_hash_map.cpp"
+      - "misc/scripts/tests/test_render_dependency_hash_map.py"
+      - ".github/workflows/perf-render-dependency-maps.yml"
+  push:
+    branches: [develop]
+    paths:
+      - "servers/rendering/rendering_device.h"
+      - "servers/rendering/rendering_device.cpp"
+      - "tests/core/templates/test_render_dependency_hash_map.cpp"
+      - "misc/scripts/tests/test_render_dependency_hash_map.py"
+      - ".github/workflows/perf-render-dependency-maps.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  structural-contracts:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - name: Check compact dependency layout and safe iteration contracts
+        run: python3 -m unittest discover -s misc/scripts/tests -p 'test_render_dependency_hash_map.py' -v
+
+  native-engine:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install native dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libwayland-bin
+      - uses: ./.github/actions/godot-deps
+      - name: Compile Cgame editor with tests
+        uses: ./.github/actions/godot-build
+        with:
+          platform: linuxbsd
+          target: editor
+          scons-flags: dev_build=yes debug_symbols=no tests=yes module_text_server_fb_enabled=yes -j2
+      - name: Run rendering dependency lifecycle and memory relocation tests
+        shell: bash
+        run: |
+          set -euo pipefail
+          timeout 240s ./bin/godot.linuxbsd.editor.dev.x86_64 --headless --test --test-suite="*[RenderDependencyMap]*" --no-colors

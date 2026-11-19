@@ -36,6 +36,7 @@
 #include "godot_physics_server_3d.h"
 
 #include "core/config/project_settings.h"
+#include "servers/physics_cast_motion_pruning.h"
 
 #define TEST_MOTION_MARGIN_MIN_VALUE 0.0001
 #define TEST_MOTION_MIN_CONTACT_DEPTH_FACTOR 0.05
@@ -61,140 +62,138 @@ _FORCE_INLINE_ static bool _can_collide_with(GodotCollisionObject3D *p_object, u
 }
 
 int GodotPhysicsDirectSpaceState3D::intersect_point(const PS3DT::PointParameters &p_parameters, PS3DT::ShapeResult *r_results, int p_result_max) {
-	ERR_FAIL_COND_V(space->locked, false);
-	int amount = space->broadphase->cull_point(p_parameters.position, space->intersection_query_results, GodotSpace3D::INTERSECTION_QUERY_MAX, space->intersection_query_subindex_results);
-	int cc = 0;
-
-	//Transform3D ai = p_xform.affine_inverse();
-
-	for (int i = 0; i < amount; i++) {
-		if (cc >= p_result_max) {
-			break;
-		}
-
-		if (!_can_collide_with(space->intersection_query_results[i], p_parameters.collision_mask, p_parameters.collide_with_bodies, p_parameters.collide_with_areas)) {
-			continue;
-		}
-
-		//area can't be picked by ray (default)
-
-		if (p_parameters.exclude.has(space->intersection_query_results[i]->get_self())) {
-			continue;
-		}
-
-		const GodotCollisionObject3D *col_obj = space->intersection_query_results[i];
-		int shape_idx = space->intersection_query_subindex_results[i];
-
-		Transform3D inv_xform = col_obj->get_transform() * col_obj->get_shape_transform(shape_idx);
-		inv_xform.affine_invert();
-
-		if (!col_obj->get_shape(shape_idx)->intersect_point(inv_xform.xform(p_parameters.position))) {
-			continue;
-		}
-
-		r_results[cc].collider_id = col_obj->get_instance_id();
-		r_results[cc].rid = col_obj->get_self();
-		r_results[cc].shape = shape_idx;
-
-		cc++;
+	ERR_FAIL_COND_V(space->locked, 0);
+	if (p_result_max <= 0) {
+		return 0;
 	}
 
-	return cc;
+	// The previous fixed 2048-candidate array could be filled by excluded
+	// or masked-out bodies before a matching body was ever examined.
+	struct PointQuery {
+		const PS3DT::PointParameters &params;
+		PS3DT::ShapeResult *results;
+		int max_results;
+		int count = 0;
+	};
+	PointQuery query = { p_parameters, r_results, p_result_max };
+
+	auto visitor = [](GodotCollisionObject3D *p_object, int p_shape, void *p_userdata) -> bool {
+		PointQuery &data = *static_cast<PointQuery *>(p_userdata);
+		if (!_can_collide_with(p_object, data.params.collision_mask, data.params.collide_with_bodies, data.params.collide_with_areas) ||
+				data.params.exclude.has(p_object->get_self())) {
+			return true;
+		}
+
+		// Both inverses are cached and maintained when transforms change.
+		// Transforming the point in two steps avoids recomputing the affine
+		// inverse of the composed body and shape transforms per candidate.
+		const Vector3 local_point = p_object->get_shape_inv_transform(p_shape).xform(p_object->get_inv_transform().xform(data.params.position));
+		if (!p_object->get_shape(p_shape)->intersect_point(local_point)) {
+			return true;
+		}
+
+		PS3DT::ShapeResult &result = data.results[data.count++];
+		result.collider_id = p_object->get_instance_id();
+		result.rid = p_object->get_self();
+		result.shape = p_shape;
+		return data.count < data.max_results;
+	};
+
+	space->broadphase->visit_point(p_parameters.position, visitor, &query);
+	return query.count;
 }
 
 bool GodotPhysicsDirectSpaceState3D::intersect_ray(const PS3DT::RayParameters &p_parameters, PS3DT::RayResult &r_result) {
 	ERR_FAIL_COND_V(space->locked, false);
 
-	Vector3 begin, end;
-	Vector3 normal;
-	begin = p_parameters.from;
-	end = p_parameters.to;
-	normal = (end - begin).normalized();
-
-	int amount = space->broadphase->cull_segment(begin, end, space->intersection_query_results, GodotSpace3D::INTERSECTION_QUERY_MAX, space->intersection_query_subindex_results);
-
-	//todo, create another array that references results, compute AABBs and check closest point to ray origin, sort, and stop evaluating results when beyond first collision
-
-	bool collided = false;
-	Vector3 res_point, res_normal;
-	int res_face_index = -1;
-	int res_shape = -1;
-	const GodotCollisionObject3D *res_obj = nullptr;
-	real_t min_d = 1e10;
-
-	for (int i = 0; i < amount; i++) {
-		if (!_can_collide_with(space->intersection_query_results[i], p_parameters.collision_mask, p_parameters.collide_with_bodies, p_parameters.collide_with_areas)) {
-			continue;
-		}
-
-		if (p_parameters.pick_ray && !(space->intersection_query_results[i]->is_ray_pickable())) {
-			continue;
-		}
-
-		if (p_parameters.exclude.has(space->intersection_query_results[i]->get_self())) {
-			continue;
-		}
-
-		const GodotCollisionObject3D *col_obj = space->intersection_query_results[i];
-
-		int shape_idx = space->intersection_query_subindex_results[i];
-		Transform3D inv_xform = col_obj->get_shape_inv_transform(shape_idx) * col_obj->get_inv_transform();
-
-		Vector3 local_from = inv_xform.xform(begin);
-		Vector3 local_to = inv_xform.xform(end);
-
-		const GodotShape3D *shape = col_obj->get_shape(shape_idx);
-
-		Vector3 shape_point, shape_normal;
-		int shape_face_index = -1;
-
-		if (shape->intersect_point(local_from)) {
-			if (p_parameters.hit_from_inside) {
-				// Hit shape at starting point.
-				min_d = 0;
-				res_point = begin;
-				res_normal = Vector3();
-				res_shape = shape_idx;
-				res_obj = col_obj;
-				collided = true;
-				break;
-			} else {
-				// Ignore shape when starting inside.
-				continue;
-			}
-		}
-
-		if (shape->intersect_segment(local_from, local_to, shape_point, shape_normal, shape_face_index, p_parameters.hit_back_faces)) {
-			Transform3D xform = col_obj->get_transform() * col_obj->get_shape_transform(shape_idx);
-			shape_point = xform.xform(shape_point);
-
-			real_t ld = normal.dot(shape_point);
-
-			if (ld < min_d) {
-				min_d = ld;
-				res_point = shape_point;
-				res_normal = inv_xform.basis.xform_inv(shape_normal).normalized();
-				res_face_index = shape_face_index;
-				res_shape = shape_idx;
-				res_obj = col_obj;
-				collided = true;
-			}
-		}
-	}
-
-	if (!collided) {
+	const Vector3 begin = p_parameters.from;
+	const Vector3 end = p_parameters.to;
+	const Vector3 motion = end - begin;
+	const double motion_x = double(motion.x);
+	const double motion_y = double(motion.y);
+	const double motion_z = double(motion.z);
+	const double length_squared = motion_x * motion_x + motion_y * motion_y + motion_z * motion_z;
+	if (length_squared == 0.0) {
 		return false;
 	}
-	ERR_FAIL_NULL_V(res_obj, false); // Shouldn't happen but silences warning.
 
-	r_result.collider_id = res_obj->get_instance_id();
-	r_result.normal = res_normal;
-	r_result.face_index = res_face_index;
-	r_result.position = res_point;
-	r_result.rid = res_obj->get_self();
-	r_result.shape = res_shape;
+	// Box2D/Jolt-style streaming BVH traversal. The narrowphase callback
+	// clips the segment to the nearest exact hit, without a 2048-result cap.
+	struct RayCastData {
+		const PS3DT::RayParameters &params;
+		PS3DT::RayResult &result;
+		Vector3 from;
+		Vector3 motion;
+		double motion_x;
+		double motion_y;
+		double motion_z;
+		double inv_motion_length_squared;
+		bool hit = false;
+	};
+	RayCastData state = { p_parameters, r_result, begin, motion, motion_x, motion_y, motion_z, 1.0 / length_squared };
 
-	return true;
+	auto visitor = [] (GodotCollisionObject3D *object, int p_shape, real_t p_max_fraction, void *p_userdata) -> real_t {
+		RayCastData &data = *static_cast<RayCastData *>(p_userdata);
+		if (!_can_collide_with(object, data.params.collision_mask, data.params.collide_with_bodies, data.params.collide_with_areas)) {
+			return p_max_fraction;
+		}
+		if (data.params.pick_ray && !object->is_ray_pickable()) {
+			return p_max_fraction;
+		}
+		if (data.params.exclude.has(object->get_self())) {
+			return p_max_fraction;
+		}
+
+		const Transform3D inv_xform = object->get_shape_inv_transform(p_shape) * object->get_inv_transform();
+		const Vector3 local_from = inv_xform.xform(data.from);
+		const Vector3 local_to = inv_xform.xform(data.from + data.motion * p_max_fraction);
+		const GodotShape3D *shape = object->get_shape(p_shape);
+
+		Vector3 world_point;
+		Vector3 world_normal;
+		real_t fraction = 0.0;
+		int face_index = -1;
+		if (shape->intersect_point(local_from)) {
+			if (!data.params.hit_from_inside) {
+				return p_max_fraction;
+			}
+			// Hit from inside has no well-defined surface normal or face.
+			world_point = data.from;
+			world_normal = Vector3();
+			fraction = 0.0;
+		} else {
+			Vector3 shape_point;
+			Vector3 shape_normal;
+			if (!shape->intersect_segment(local_from, local_to, shape_point, shape_normal, face_index, data.params.hit_back_faces)) {
+				return p_max_fraction;
+			}
+			const Transform3D xform = object->get_transform() * object->get_shape_transform(p_shape);
+			world_point = xform.xform(shape_point);
+			world_normal = inv_xform.basis.xform_inv(shape_normal).normalized();
+			// Calculate the nearest-hit fraction in double: a finite long ray
+			// can have a squared length that overflows float32.
+			const double hit_x = double(world_point.x) - double(data.from.x);
+			const double hit_y = double(world_point.y) - double(data.from.y);
+			const double hit_z = double(world_point.z) - double(data.from.z);
+			fraction = real_t((data.motion_x * hit_x + data.motion_y * hit_y + data.motion_z * hit_z) * data.inv_motion_length_squared);
+		}
+
+		// The broadphase may visit objects in any order. A closer exact hit
+		// controls both the result and the clipped ray for subsequent nodes.
+		if (!(fraction >= 0.0 && fraction <= p_max_fraction) || (data.hit && fraction >= p_max_fraction)) {
+			return p_max_fraction;
+		}
+		data.hit = true;
+		data.result.collider_id = object->get_instance_id();
+		data.result.normal = world_normal;
+		data.result.position = world_point;
+		data.result.rid = object->get_self();
+		data.result.shape = p_shape;
+		data.result.face_index = face_index;
+		return fraction;
+	};
+	space->broadphase->cast_segment(begin, end, visitor, &state);
+	return state.hit;
 }
 
 int GodotPhysicsDirectSpaceState3D::intersect_shape(const PS3DT::ShapeParameters &p_parameters, PS3DT::ShapeResult *r_results, int p_result_max) {
@@ -205,57 +204,51 @@ int GodotPhysicsDirectSpaceState3D::intersect_shape(const PS3DT::ShapeParameters
 	GodotShape3D *shape = GodotPhysicsServer3D::godot_singleton->shape_owner.get_or_null(p_parameters.shape_rid);
 	ERR_FAIL_NULL_V(shape, 0);
 
-	AABB aabb = p_parameters.transform.xform(shape->get_aabb());
+	// The SAT narrowphase accepts the query shape's collision margin. Its
+	// broadphase bounds must conservatively include that margin as well,
+	// otherwise near-but-disjoint shapes never reach the exact solver.
+	const AABB aabb = p_parameters.transform.xform(shape->get_aabb()).grow(MAX(p_parameters.margin, real_t(0.0)));
 
-	int amount = space->broadphase->cull_aabb(aabb, space->intersection_query_results, GodotSpace3D::INTERSECTION_QUERY_MAX, space->intersection_query_subindex_results);
-
-	int cc = 0;
-
-	//Transform3D ai = p_xform.affine_inverse();
-
-	for (int i = 0; i < amount; i++) {
-		if (cc >= p_result_max) {
-			break;
+	// Consume BVH candidates only after narrowphase has found a real hit.
+	struct ShapeQuery {
+		const PS3DT::ShapeParameters &params;
+		PS3DT::ShapeResult *results;
+		GodotShape3D *shape;
+		int max_results;
+		int count = 0;
+	};
+	ShapeQuery query = { p_parameters, r_results, shape, p_result_max };
+	auto visitor = [](GodotCollisionObject3D *p_object, int p_shape, void *p_userdata) -> bool {
+		ShapeQuery &data = *static_cast<ShapeQuery *>(p_userdata);
+		if (!_can_collide_with(p_object, data.params.collision_mask, data.params.collide_with_bodies, data.params.collide_with_areas) ||
+				data.params.exclude.has(p_object->get_self())) {
+			return true;
 		}
-
-		if (!_can_collide_with(space->intersection_query_results[i], p_parameters.collision_mask, p_parameters.collide_with_bodies, p_parameters.collide_with_areas)) {
-			continue;
+		if (!GodotCollisionSolver3D::solve_static(data.shape, data.params.transform,
+					p_object->get_shape(p_shape), p_object->get_transform() * p_object->get_shape_transform(p_shape),
+					nullptr, nullptr, nullptr, data.params.margin, 0)) {
+			return true;
 		}
-
-		//area can't be picked by ray (default)
-
-		if (p_parameters.exclude.has(space->intersection_query_results[i]->get_self())) {
-			continue;
+		if (data.results) {
+			PS3DT::ShapeResult &result = data.results[data.count];
+			result.collider_id = p_object->get_instance_id();
+			result.rid = p_object->get_self();
+			result.shape = p_shape;
 		}
-
-		const GodotCollisionObject3D *col_obj = space->intersection_query_results[i];
-		int shape_idx = space->intersection_query_subindex_results[i];
-
-		if (!GodotCollisionSolver3D::solve_static(shape, p_parameters.transform, col_obj->get_shape(shape_idx), col_obj->get_transform() * col_obj->get_shape_transform(shape_idx), nullptr, nullptr, nullptr, p_parameters.margin, 0)) {
-			continue;
-		}
-
-		if (r_results) {
-			r_results[cc].collider_id = col_obj->get_instance_id();
-			r_results[cc].rid = col_obj->get_self();
-			r_results[cc].shape = shape_idx;
-		}
-
-		cc++;
-	}
-
-	return cc;
+		data.count++;
+		return data.count < data.max_results;
+	};
+	space->broadphase->visit_aabb(aabb, visitor, &query);
+	return query.count;
 }
 
 bool GodotPhysicsDirectSpaceState3D::cast_motion(const PS3DT::ShapeParameters &p_parameters, real_t &p_closest_safe, real_t &p_closest_unsafe, PS3DT::ShapeRestInfo *r_info) {
 	GodotShape3D *shape = GodotPhysicsServer3D::godot_singleton->shape_owner.get_or_null(p_parameters.shape_rid);
 	ERR_FAIL_NULL_V(shape, false);
 
-	AABB aabb = p_parameters.transform.xform(shape->get_aabb());
-	aabb = aabb.merge(AABB(aabb.position + p_parameters.motion, aabb.size)); //motion
+	const AABB start_aabb = p_parameters.transform.xform(shape->get_aabb());
+	AABB aabb = start_aabb.merge(AABB(start_aabb.position + p_parameters.motion, start_aabb.size)); //motion
 	aabb = aabb.grow(p_parameters.margin);
-
-	int amount = space->broadphase->cull_aabb(aabb, space->intersection_query_results, GodotSpace3D::INTERSECTION_QUERY_MAX, space->intersection_query_subindex_results);
 
 	real_t best_safe = 1;
 	real_t best_unsafe = 1;
@@ -271,32 +264,63 @@ bool GodotPhysicsDirectSpaceState3D::cast_motion(const PS3DT::ShapeParameters &p
 
 	Vector3 closest_A, closest_B;
 
-	for (int i = 0; i < amount; i++) {
-		if (!_can_collide_with(space->intersection_query_results[i], p_parameters.collision_mask, p_parameters.collide_with_bodies, p_parameters.collide_with_areas)) {
-			continue;
+	// Jolt/Box2D-style streaming traversal: rejected proxies must not exhaust
+	// the fixed-size candidate array before we find the nearest collision.
+	struct CastMotionData {
+		const PS3DT::ShapeParameters &params;
+		const AABB &query_aabb;
+		const AABB &start_aabb;
+		AABB clipped_aabb;
+		GodotMotionShape3D &motion_shape;
+		const Transform3D &xform_inv;
+		const Vector3 &motion_normal;
+		Vector3 full_motion;
+		real_t &best_safe;
+		real_t &best_unsafe;
+		bool &best_first;
+		Vector3 &closest_A;
+		Vector3 &closest_B;
+		PS3DT::ShapeRestInfo *info;
+	};
+	CastMotionData data = { p_parameters, aabb, start_aabb, aabb, mshape, xform_inv, motion_normal, mshape.motion,
+		best_safe, best_unsafe, best_first, closest_A, closest_B, r_info };
+	auto visitor = [](GodotCollisionObject3D *p_object, int p_shape, void *p_userdata) -> bool {
+		CastMotionData &data = *static_cast<CastMotionData *>(p_userdata);
+		if (!_can_collide_with(p_object, data.params.collision_mask, data.params.collide_with_bodies, data.params.collide_with_areas)) {
+			return true;
 		}
 
-		if (p_parameters.exclude.has(space->intersection_query_results[i]->get_self())) {
-			continue; //ignore excluded
+		if (data.params.exclude.has(p_object->get_self())) {
+			return true; //ignore excluded
 		}
 
-		const GodotCollisionObject3D *col_obj = space->intersection_query_results[i];
-		int shape_idx = space->intersection_query_subindex_results[i];
+		// An earlier hit can only be improved by another collider inside
+		// the shortened swept bounds. The cached broadphase proxy bounds
+		// conservatively cover the current shape and any CCD expansion.
+		if (data.best_unsafe < 1.0 &&
+				!data.clipped_aabb.intersects(p_object->get_shape_aabb(p_shape))) {
+			return true;
+		}
+
+		const GodotCollisionObject3D *col_obj = p_object;
+		int shape_idx = p_shape;
 
 		Vector3 point_A, point_B;
-		Vector3 sep_axis = motion_normal;
+		Vector3 sep_axis = data.motion_normal;
 
 		Transform3D col_obj_xform = col_obj->get_transform() * col_obj->get_shape_transform(shape_idx);
+		// Binary-search fractions modify the sweep; restore full motion for each new candidate.
+		data.motion_shape.motion = data.full_motion;
 		//test initial overlap, does it collide if going all the way?
-		if (GodotCollisionSolver3D::solve_distance(&mshape, p_parameters.transform, col_obj->get_shape(shape_idx), col_obj_xform, point_A, point_B, aabb, &sep_axis)) {
-			continue;
+		if (GodotCollisionSolver3D::solve_distance(&data.motion_shape, data.params.transform, col_obj->get_shape(shape_idx), col_obj_xform, point_A, point_B, data.query_aabb, &sep_axis)) {
+			return true;
 		}
 
 		//test initial overlap, ignore objects it's inside of.
-		sep_axis = motion_normal;
+		sep_axis = data.motion_normal;
 
-		if (!GodotCollisionSolver3D::solve_distance(shape, p_parameters.transform, col_obj->get_shape(shape_idx), col_obj_xform, point_A, point_B, aabb, &sep_axis)) {
-			continue;
+		if (!GodotCollisionSolver3D::solve_distance(data.motion_shape.shape, data.params.transform, col_obj->get_shape(shape_idx), col_obj_xform, point_A, point_B, data.query_aabb, &sep_axis)) {
+			return true;
 		}
 
 		//just do kinematic solving
@@ -306,11 +330,11 @@ bool GodotPhysicsDirectSpaceState3D::cast_motion(const PS3DT::ShapeParameters &p
 		for (int j = 0; j < 8; j++) { //steps should be customizable..
 			real_t fraction = low + (hi - low) * fraction_coeff;
 
-			mshape.motion = xform_inv.basis.xform(p_parameters.motion * fraction);
+			data.motion_shape.motion = data.full_motion * fraction;
 
 			Vector3 lA, lB;
-			Vector3 sep = motion_normal; //important optimization for this to work fast enough
-			bool collided = !GodotCollisionSolver3D::solve_distance(&mshape, p_parameters.transform, col_obj->get_shape(shape_idx), col_obj_xform, lA, lB, aabb, &sep);
+			Vector3 sep = data.motion_normal; //important optimization for this to work fast enough
+			bool collided = !GodotCollisionSolver3D::solve_distance(&data.motion_shape, data.params.transform, col_obj->get_shape(shape_idx), col_obj_xform, lA, lB, data.query_aabb, &sep);
 
 			if (collided) {
 				hi = fraction;
@@ -337,28 +361,32 @@ bool GodotPhysicsDirectSpaceState3D::cast_motion(const PS3DT::ShapeParameters &p
 			}
 		}
 
-		if (low < best_safe) {
-			best_first = true; //force reset
-			best_safe = low;
-			best_unsafe = hi;
+		if (low < data.best_safe) {
+			data.best_first = true; //force reset
+			data.best_safe = low;
+			data.best_unsafe = hi;
+			data.clipped_aabb = godot_physics_cast_motion_clipped_aabb(data.start_aabb,
+					data.params.motion, data.best_unsafe, data.params.margin);
 		}
 
-		if (r_info && (best_first || (point_A.distance_squared_to(point_B) < closest_A.distance_squared_to(closest_B) && low <= best_safe))) {
-			closest_A = point_A;
-			closest_B = point_B;
-			r_info->collider_id = col_obj->get_instance_id();
-			r_info->rid = col_obj->get_self();
-			r_info->shape = shape_idx;
-			r_info->point = closest_B;
-			r_info->normal = (closest_A - closest_B).normalized();
-			best_first = false;
+		if (data.info && (data.best_first || (point_A.distance_squared_to(point_B) < data.closest_A.distance_squared_to(data.closest_B) && low <= data.best_safe))) {
+			data.closest_A = point_A;
+			data.closest_B = point_B;
+			data.info->collider_id = col_obj->get_instance_id();
+			data.info->rid = col_obj->get_self();
+			data.info->shape = shape_idx;
+			data.info->point = data.closest_B;
+			data.info->normal = (data.closest_A - data.closest_B).normalized();
+			data.best_first = false;
 			if (col_obj->get_type() == GodotCollisionObject3D::TYPE_BODY) {
 				const GodotBody3D *body = static_cast<const GodotBody3D *>(col_obj);
-				Vector3 rel_vec = closest_B - (body->get_transform().origin + body->get_center_of_mass());
-				r_info->linear_velocity = body->get_linear_velocity() + (body->get_angular_velocity()).cross(rel_vec);
+				Vector3 rel_vec = data.closest_B - (body->get_transform().origin + body->get_center_of_mass());
+				data.info->linear_velocity = body->get_linear_velocity() + (body->get_angular_velocity()).cross(rel_vec);
 			}
 		}
-	}
+		return true;
+	};
+	space->broadphase->visit_aabb(aabb, visitor, &data);
 
 	p_closest_safe = best_safe;
 	p_closest_unsafe = best_unsafe;
@@ -370,47 +398,39 @@ bool GodotPhysicsDirectSpaceState3D::collide_shape(const PS3DT::ShapeParameters 
 	if (p_result_max <= 0) {
 		return false;
 	}
-
 	GodotShape3D *shape = GodotPhysicsServer3D::godot_singleton->shape_owner.get_or_null(p_parameters.shape_rid);
 	ERR_FAIL_NULL_V(shape, false);
 
 	AABB aabb = p_parameters.transform.xform(shape->get_aabb());
 	aabb = aabb.grow(p_parameters.margin);
 
-	int amount = space->broadphase->cull_aabb(aabb, space->intersection_query_results, GodotSpace3D::INTERSECTION_QUERY_MAX, space->intersection_query_subindex_results);
-
-	bool collided = false;
-	r_result_count = 0;
-
 	GodotPhysicsServer3D::CollCbkData cbk;
 	cbk.max = p_result_max;
 	cbk.amount = 0;
 	cbk.ptr = r_results;
-	GodotCollisionSolver3D::CallbackResult cbkres = GodotPhysicsServer3D::_shape_col_cbk;
-
-	GodotPhysicsServer3D::CollCbkData *cbkptr = &cbk;
-
-	for (int i = 0; i < amount; i++) {
-		if (!_can_collide_with(space->intersection_query_results[i], p_parameters.collision_mask, p_parameters.collide_with_bodies, p_parameters.collide_with_areas)) {
-			continue;
+	struct CollisionQuery {
+		const PS3DT::ShapeParameters &params;
+		GodotShape3D *shape;
+		GodotPhysicsServer3D::CollCbkData &callback;
+		bool collided = false;
+	};
+	CollisionQuery query = { p_parameters, shape, cbk };
+	auto visitor = [](GodotCollisionObject3D *p_object, int p_shape, void *p_userdata) -> bool {
+		CollisionQuery &data = *static_cast<CollisionQuery *>(p_userdata);
+		if (!_can_collide_with(p_object, data.params.collision_mask, data.params.collide_with_bodies, data.params.collide_with_areas) ||
+				data.params.exclude.has(p_object->get_self())) {
+			return true;
 		}
-
-		const GodotCollisionObject3D *col_obj = space->intersection_query_results[i];
-
-		if (p_parameters.exclude.has(col_obj->get_self())) {
-			continue;
+		if (GodotCollisionSolver3D::solve_static(data.shape, data.params.transform,
+					p_object->get_shape(p_shape), p_object->get_transform() * p_object->get_shape_transform(p_shape),
+					GodotPhysicsServer3D::_shape_col_cbk, &data.callback, nullptr, data.params.margin)) {
+			data.collided = true;
 		}
-
-		int shape_idx = space->intersection_query_subindex_results[i];
-
-		if (GodotCollisionSolver3D::solve_static(shape, p_parameters.transform, col_obj->get_shape(shape_idx), col_obj->get_transform() * col_obj->get_shape_transform(shape_idx), cbkres, cbkptr, nullptr, p_parameters.margin)) {
-			collided = true;
-		}
-	}
-
+		return data.callback.amount < data.callback.max;
+	};
+	space->broadphase->visit_aabb(aabb, visitor, &query);
 	r_result_count = cbk.amount;
-
-	return collided;
+	return query.collided;
 }
 
 struct _RestResultData {
@@ -500,40 +520,38 @@ bool GodotPhysicsDirectSpaceState3D::rest_info(const PS3DT::ShapeParameters &p_p
 	GodotShape3D *shape = GodotPhysicsServer3D::godot_singleton->shape_owner.get_or_null(p_parameters.shape_rid);
 	ERR_FAIL_NULL_V(shape, false);
 
-	real_t margin = MAX(p_parameters.margin, TEST_MOTION_MARGIN_MIN_VALUE);
-
+	const real_t margin = MAX(p_parameters.margin, TEST_MOTION_MARGIN_MIN_VALUE);
 	AABB aabb = p_parameters.transform.xform(shape->get_aabb());
 	aabb = aabb.grow(margin);
 
-	int amount = space->broadphase->cull_aabb(aabb, space->intersection_query_results, GodotSpace3D::INTERSECTION_QUERY_MAX, space->intersection_query_subindex_results);
-
 	_RestCallbackData rcd;
-
-	// Allowed depth can't be lower than motion length, in order to handle contacts at low speed.
-	real_t motion_length = p_parameters.motion.length();
-	real_t min_contact_depth = margin * TEST_MOTION_MIN_CONTACT_DEPTH_FACTOR;
+	const real_t motion_length = p_parameters.motion.length();
+	const real_t min_contact_depth = margin * TEST_MOTION_MIN_CONTACT_DEPTH_FACTOR;
 	rcd.min_allowed_depth = MIN(motion_length, min_contact_depth);
 
-	for (int i = 0; i < amount; i++) {
-		if (!_can_collide_with(space->intersection_query_results[i], p_parameters.collision_mask, p_parameters.collide_with_bodies, p_parameters.collide_with_areas)) {
-			continue;
+	struct RestQuery {
+		const PS3DT::ShapeParameters &params;
+		GodotShape3D *shape;
+		_RestCallbackData &callback;
+		real_t margin;
+	};
+	RestQuery query = { p_parameters, shape, rcd, margin };
+	auto visitor = [](GodotCollisionObject3D *p_object, int p_shape, void *p_userdata) -> bool {
+		RestQuery &data = *static_cast<RestQuery *>(p_userdata);
+		if (!_can_collide_with(p_object, data.params.collision_mask, data.params.collide_with_bodies, data.params.collide_with_areas) ||
+				data.params.exclude.has(p_object->get_self())) {
+			return true;
 		}
-
-		const GodotCollisionObject3D *col_obj = space->intersection_query_results[i];
-
-		if (p_parameters.exclude.has(col_obj->get_self())) {
-			continue;
-		}
-
-		int shape_idx = space->intersection_query_subindex_results[i];
-
-		rcd.object = col_obj;
-		rcd.shape = shape_idx;
-		bool sc = GodotCollisionSolver3D::solve_static(shape, p_parameters.transform, col_obj->get_shape(shape_idx), col_obj->get_transform() * col_obj->get_shape_transform(shape_idx), _rest_cbk_result, &rcd, nullptr, margin);
-		if (!sc) {
-			continue;
-		}
-	}
+		data.callback.object = p_object;
+		data.callback.shape = p_shape;
+		GodotCollisionSolver3D::solve_static(data.shape, data.params.transform,
+				p_object->get_shape(p_shape), p_object->get_transform() * p_object->get_shape_transform(p_shape),
+				_rest_cbk_result, &data.callback, nullptr, data.margin);
+		return true;
+	};
+	// A rest contact is the best of ALL exact contacts, not only the first
+	// 2048 broadphase candidates (which may all be excluded by the mask).
+	space->broadphase->visit_aabb(aabb, visitor, &query);
 
 	if (rcd.best_result.len == 0 || !rcd.best_result.object) {
 		return false;
@@ -548,11 +566,9 @@ bool GodotPhysicsDirectSpaceState3D::rest_info(const PS3DT::ShapeParameters &p_p
 		const GodotBody3D *body = static_cast<const GodotBody3D *>(rcd.best_result.object);
 		Vector3 rel_vec = rcd.best_result.contact - (body->get_transform().origin + body->get_center_of_mass());
 		r_info->linear_velocity = body->get_linear_velocity() + (body->get_angular_velocity()).cross(rel_vec);
-
 	} else {
 		r_info->linear_velocity = Vector3();
 	}
-
 	return true;
 }
 
@@ -602,36 +618,34 @@ GodotPhysicsDirectSpaceState3D::GodotPhysicsDirectSpaceState3D() {
 
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////
 
-int GodotSpace3D::_cull_aabb_for_body(GodotBody3D *p_body, const AABB &p_aabb) {
-	int amount = broadphase->cull_aabb(p_aabb, intersection_query_results, INTERSECTION_QUERY_MAX, intersection_query_subindex_results);
-
-	for (int i = 0; i < amount; i++) {
-		bool keep = true;
-
-		if (intersection_query_results[i] == p_body) {
-			keep = false;
-		} else if (intersection_query_results[i]->get_type() == GodotCollisionObject3D::TYPE_AREA) {
-			keep = false;
-		} else if (intersection_query_results[i]->get_type() == GodotCollisionObject3D::TYPE_SOFT_BODY) {
-			keep = false;
-		} else if (!p_body->collides_with(static_cast<GodotBody3D *>(intersection_query_results[i]))) {
-			keep = false;
-		} else if (static_cast<GodotBody3D *>(intersection_query_results[i])->has_exception(p_body->get_self()) || p_body->has_exception(intersection_query_results[i]->get_self())) {
-			keep = false;
+template <typename Visitor>
+void GodotSpace3D::_visit_motion_candidates(GodotBody3D *p_body, const AABB &p_aabb, const PS3DT::MotionParameters &p_parameters, const Visitor &p_callback) {
+	// Traverse the broadphase directly. A dense compound shape should not
+	// require a per-space allocation proportional to the number of proxies.
+	struct MotionVisit {
+		GodotBody3D *body;
+		const PS3DT::MotionParameters &params;
+		const Visitor &callback;
+	};
+	MotionVisit data = { p_body, p_parameters, p_callback };
+	auto visitor = [](GodotCollisionObject3D *p_object, int p_subindex, void *p_userdata) -> bool {
+		MotionVisit &query = *static_cast<MotionVisit *>(p_userdata);
+		if (p_object == query.body || p_object->get_type() != GodotCollisionObject3D::TYPE_BODY) {
+			return true;
 		}
-
-		if (!keep) {
-			if (i < amount - 1) {
-				SWAP(intersection_query_results[i], intersection_query_results[amount - 1]);
-				SWAP(intersection_query_subindex_results[i], intersection_query_subindex_results[amount - 1]);
-			}
-
-			amount--;
-			i--;
+		if (query.params.exclude_bodies.has(p_object->get_self()) ||
+				query.params.exclude_objects.has(p_object->get_instance_id())) {
+			return true;
 		}
-	}
-
-	return amount;
+		GodotBody3D *other = static_cast<GodotBody3D *>(p_object);
+		if (!query.body->collides_with(other) ||
+				other->has_exception(query.body->get_self()) ||
+				query.body->has_exception(other->get_self())) {
+			return true;
+		}
+		return query.callback(p_object, p_subindex);
+	};
+	broadphase->visit_aabb(p_aabb, visitor, &data);
 }
 
 bool GodotSpace3D::test_body_motion(GodotBody3D *p_body, const PS3DT::MotionParameters &p_parameters, PS3DT::MotionResult *r_result) {
@@ -680,8 +694,9 @@ bool GodotSpace3D::test_body_motion(GodotBody3D *p_body, const PS3DT::MotionPara
 
 	real_t min_contact_depth = margin * TEST_MOTION_MIN_CONTACT_DEPTH_FACTOR;
 
-	real_t motion_length = p_parameters.motion.length();
-	Vector3 motion_normal = p_parameters.motion / motion_length;
+	const real_t motion_length = p_parameters.motion.length();
+	// Stationary recovery queries must not divide by zero.
+	const Vector3 motion_normal = motion_length > 0.0 ? p_parameters.motion / motion_length : Vector3();
 
 	Transform3D body_transform = p_parameters.from;
 
@@ -707,8 +722,6 @@ bool GodotSpace3D::test_body_motion(GodotBody3D *p_body, const PS3DT::MotionPara
 
 			bool collided = false;
 
-			int amount = _cull_aabb_for_body(p_body, body_aabb);
-
 			for (int j = 0; j < p_body->get_shape_count(); j++) {
 				if (p_body->is_shape_disabled(j)) {
 					continue;
@@ -716,17 +729,11 @@ bool GodotSpace3D::test_body_motion(GodotBody3D *p_body, const PS3DT::MotionPara
 
 				Transform3D body_shape_xform = body_transform * p_body->get_shape_transform(j);
 				GodotShape3D *body_shape = p_body->get_shape(j);
+				// Jolt/Box2D-style shape-level broadphase query: a distant shape
+				// in the same compound body must not widen this collision test.
+				const AABB shape_query_aabb = body_shape_xform.xform(body_shape->get_aabb()).grow(margin);
 
-				for (int i = 0; i < amount; i++) {
-					const GodotCollisionObject3D *col_obj = intersection_query_results[i];
-					if (p_parameters.exclude_bodies.has(col_obj->get_self())) {
-						continue;
-					}
-					if (p_parameters.exclude_objects.has(col_obj->get_instance_id())) {
-						continue;
-					}
-
-					int shape_idx = intersection_query_subindex_results[i];
+				_visit_motion_candidates(p_body, shape_query_aabb, p_parameters, [&](const GodotCollisionObject3D *col_obj, int shape_idx) -> bool {
 
 					if (GodotCollisionSolver3D::solve_static(body_shape, body_shape_xform, col_obj->get_shape(shape_idx), col_obj->get_transform() * col_obj->get_shape_transform(shape_idx), cbkres, cbkptr, nullptr, margin)) {
 						collided = cbk.amount > 0;
@@ -735,7 +742,9 @@ bool GodotSpace3D::test_body_motion(GodotBody3D *p_body, const PS3DT::MotionPara
 						priorities[priority_amount] = col_obj->get_collision_priority();
 						priority_amount++;
 					}
-				}
+				
+				return true;
+			});
 			}
 
 			if (!collided) {
@@ -787,12 +796,6 @@ bool GodotSpace3D::test_body_motion(GodotBody3D *p_body, const PS3DT::MotionPara
 	{
 		// STEP 2 ATTEMPT MOTION
 
-		AABB motion_aabb = body_aabb;
-		motion_aabb.position += p_parameters.motion;
-		motion_aabb = motion_aabb.merge(body_aabb);
-
-		int amount = _cull_aabb_for_body(p_body, motion_aabb);
-
 		for (int j = 0; j < p_body->get_shape_count(); j++) {
 			if (p_body->is_shape_disabled(j)) {
 				continue;
@@ -814,38 +817,41 @@ bool GodotSpace3D::test_body_motion(GodotBody3D *p_body, const PS3DT::MotionPara
 			Transform3D body_shape_xform_inv = body_shape_xform.affine_inverse();
 			GodotMotionShape3D mshape;
 			mshape.shape = body_shape;
-			mshape.motion = body_shape_xform_inv.basis.xform(p_parameters.motion);
+			const Vector3 full_motion_local = body_shape_xform_inv.basis.xform(p_parameters.motion);
+			mshape.motion = full_motion_local;
 
 			bool stuck = false;
 
 			real_t best_safe = 1;
 			real_t best_unsafe = 1;
 
-			for (int i = 0; i < amount; i++) {
-				const GodotCollisionObject3D *col_obj = intersection_query_results[i];
-				if (p_parameters.exclude_bodies.has(col_obj->get_self())) {
-					continue;
-				}
-				if (p_parameters.exclude_objects.has(col_obj->get_instance_id())) {
-					continue;
-				}
+			// Sweep the current shape's tight AABB and use the same conservative
+			// world-space hint for concave-mesh triangle culling in solve_distance.
+			// A large compound AABB would otherwise traverse unrelated triangles.
+			AABB shape_motion_aabb = body_shape_xform.xform(body_shape->get_aabb()).grow(margin);
+			AABB shape_end_aabb = shape_motion_aabb;
+			shape_end_aabb.position += p_parameters.motion;
+			shape_motion_aabb = shape_motion_aabb.merge(shape_end_aabb);
 
-				int shape_idx = intersection_query_subindex_results[i];
+			_visit_motion_candidates(p_body, shape_motion_aabb, p_parameters, [&](const GodotCollisionObject3D *col_obj, int shape_idx) -> bool {
 
 				//test initial overlap, does it collide if going all the way?
 				Vector3 point_A, point_B;
 				Vector3 sep_axis = motion_normal;
 
 				Transform3D col_obj_xform = col_obj->get_transform() * col_obj->get_shape_transform(shape_idx);
+				// The preceding candidate's binary search changes this sweep length.
+				// Restore the full displacement before testing the next obstacle.
+				mshape.motion = full_motion_local;
 				//test initial overlap, does it collide if going all the way?
-				if (GodotCollisionSolver3D::solve_distance(&mshape, body_shape_xform, col_obj->get_shape(shape_idx), col_obj_xform, point_A, point_B, motion_aabb, &sep_axis)) {
-					continue;
+				if (GodotCollisionSolver3D::solve_distance(&mshape, body_shape_xform, col_obj->get_shape(shape_idx), col_obj_xform, point_A, point_B, shape_motion_aabb, &sep_axis)) {
+					return true;
 				}
 				sep_axis = motion_normal;
 
-				if (!GodotCollisionSolver3D::solve_distance(body_shape, body_shape_xform, col_obj->get_shape(shape_idx), col_obj_xform, point_A, point_B, motion_aabb, &sep_axis)) {
+				if (!GodotCollisionSolver3D::solve_distance(body_shape, body_shape_xform, col_obj->get_shape(shape_idx), col_obj_xform, point_A, point_B, shape_motion_aabb, &sep_axis)) {
 					stuck = true;
-					break;
+					return false;
 				}
 
 				//just do kinematic solving
@@ -855,11 +861,14 @@ bool GodotSpace3D::test_body_motion(GodotBody3D *p_body, const PS3DT::MotionPara
 				for (int k = 0; k < 8; k++) { //steps should be customizable..
 					real_t fraction = low + (hi - low) * fraction_coeff;
 
-					mshape.motion = body_shape_xform_inv.basis.xform(p_parameters.motion * fraction);
+					// A basis transform is linear: reuse the swept vector already
+					// computed for this shape rather than repeating a matrix-vector
+					// multiply on every CCD/dichotomy iteration and candidate.
+					mshape.motion = full_motion_local * fraction;
 
 					Vector3 lA, lB;
 					Vector3 sep = motion_normal; //important optimization for this to work fast enough
-					bool collided = !GodotCollisionSolver3D::solve_distance(&mshape, body_shape_xform, col_obj->get_shape(shape_idx), col_obj_xform, lA, lB, motion_aabb, &sep);
+					bool collided = !GodotCollisionSolver3D::solve_distance(&mshape, body_shape_xform, col_obj->get_shape(shape_idx), col_obj_xform, lA, lB, shape_motion_aabb, &sep);
 
 					if (collided) {
 						hi = fraction;
@@ -890,7 +899,9 @@ bool GodotSpace3D::test_body_motion(GodotBody3D *p_body, const PS3DT::MotionPara
 					best_safe = low;
 					best_unsafe = hi;
 				}
-			}
+			
+				return true;
+			});
 
 			if (stuck) {
 				safe = 0;
@@ -931,8 +942,6 @@ bool GodotSpace3D::test_body_motion(GodotBody3D *p_body, const PS3DT::MotionPara
 		rcd.min_allowed_depth = MIN(motion_length, min_contact_depth);
 
 		body_aabb.position += p_parameters.motion * unsafe;
-		int amount = _cull_aabb_for_body(p_body, body_aabb);
-
 		int from_shape = best_shape != -1 ? best_shape : 0;
 		int to_shape = best_shape != -1 ? best_shape + 1 : p_body->get_shape_count();
 
@@ -943,26 +952,20 @@ bool GodotSpace3D::test_body_motion(GodotBody3D *p_body, const PS3DT::MotionPara
 
 			Transform3D body_shape_xform = ugt * p_body->get_shape_transform(j);
 			GodotShape3D *body_shape = p_body->get_shape(j);
+			const AABB shape_rest_aabb = body_shape_xform.xform(body_shape->get_aabb()).grow(margin);
 
-			for (int i = 0; i < amount; i++) {
-				const GodotCollisionObject3D *col_obj = intersection_query_results[i];
-				if (p_parameters.exclude_bodies.has(col_obj->get_self())) {
-					continue;
-				}
-				if (p_parameters.exclude_objects.has(col_obj->get_instance_id())) {
-					continue;
-				}
-
-				int shape_idx = intersection_query_subindex_results[i];
+			_visit_motion_candidates(p_body, shape_rest_aabb, p_parameters, [&](const GodotCollisionObject3D *col_obj, int shape_idx) -> bool {
 
 				rcd.object = col_obj;
 				rcd.shape = shape_idx;
 				rcd.local_shape = j;
 				bool sc = GodotCollisionSolver3D::solve_static(body_shape, body_shape_xform, col_obj->get_shape(shape_idx), col_obj->get_transform() * col_obj->get_shape_transform(shape_idx), _rest_cbk_result, &rcd, nullptr, margin);
 				if (!sc) {
-					continue;
+					return true;
 				}
-			}
+			
+				return true;
+			});
 		}
 
 		if (rcd.result_count > 0) {
@@ -1033,24 +1036,19 @@ void *GodotSpace3D::_broadphase_pair(GodotCollisionObject3D *A, int p_subindex_A
 		GodotArea3D *area = static_cast<GodotArea3D *>(A);
 		if (type_B == GodotCollisionObject3D::TYPE_AREA) {
 			GodotArea3D *area_b = static_cast<GodotArea3D *>(B);
-			GodotArea2Pair3D *area2_pair = memnew(GodotArea2Pair3D(area_b, p_subindex_B, area, p_subindex_A));
-			return area2_pair;
+			return self->area2_pair_pool.alloc(area_b, p_subindex_B, area, p_subindex_A);
 		} else if (type_B == GodotCollisionObject3D::TYPE_SOFT_BODY) {
 			GodotSoftBody3D *softbody = static_cast<GodotSoftBody3D *>(B);
-			GodotAreaSoftBodyPair3D *soft_area_pair = memnew(GodotAreaSoftBodyPair3D(softbody, p_subindex_B, area, p_subindex_A));
-			return soft_area_pair;
+			return self->area_soft_body_pair_pool.alloc(softbody, p_subindex_B, area, p_subindex_A);
 		} else {
 			GodotBody3D *body = static_cast<GodotBody3D *>(B);
-			GodotAreaPair3D *area_pair = memnew(GodotAreaPair3D(body, p_subindex_B, area, p_subindex_A));
-			return area_pair;
+			return self->area_pair_pool.alloc(body, p_subindex_B, area, p_subindex_A);
 		}
 	} else if (type_A == GodotCollisionObject3D::TYPE_BODY) {
 		if (type_B == GodotCollisionObject3D::TYPE_SOFT_BODY) {
-			GodotBodySoftBodyPair3D *soft_pair = memnew(GodotBodySoftBodyPair3D(static_cast<GodotBody3D *>(A), p_subindex_A, static_cast<GodotSoftBody3D *>(B)));
-			return soft_pair;
+			return self->body_soft_body_pair_pool.alloc(static_cast<GodotBody3D *>(A), p_subindex_A, static_cast<GodotSoftBody3D *>(B));
 		} else {
-			GodotBodyPair3D *b = memnew(GodotBodyPair3D(static_cast<GodotBody3D *>(A), p_subindex_A, static_cast<GodotBody3D *>(B), p_subindex_B));
-			return b;
+			return self->body_pair_pool.alloc(static_cast<GodotBody3D *>(A), p_subindex_A, static_cast<GodotBody3D *>(B), p_subindex_B);
 		}
 	} else {
 		// Soft Body/Soft Body, not supported.
@@ -1066,20 +1064,53 @@ void GodotSpace3D::_broadphase_unpair(GodotCollisionObject3D *A, int p_subindex_
 
 	GodotSpace3D *self = static_cast<GodotSpace3D *>(p_self);
 	self->collision_pairs--;
-	GodotConstraint3D *c = static_cast<GodotConstraint3D *>(p_data);
-	memdelete(c);
+
+	// Return the pair to the pool it came from; the pair type is fully
+	// determined by the object types, exactly as in `_broadphase_pair`.
+	GodotCollisionObject3D::Type type_A = A->get_type();
+	GodotCollisionObject3D::Type type_B = B->get_type();
+	if (type_A > type_B) {
+		SWAP(type_A, type_B);
+	}
+
+	if (type_A == GodotCollisionObject3D::TYPE_AREA) {
+		if (type_B == GodotCollisionObject3D::TYPE_AREA) {
+			self->area2_pair_pool.free(static_cast<GodotArea2Pair3D *>(p_data));
+		} else if (type_B == GodotCollisionObject3D::TYPE_SOFT_BODY) {
+			self->area_soft_body_pair_pool.free(static_cast<GodotAreaSoftBodyPair3D *>(p_data));
+		} else {
+			self->area_pair_pool.free(static_cast<GodotAreaPair3D *>(p_data));
+		}
+	} else if (type_B == GodotCollisionObject3D::TYPE_SOFT_BODY) {
+		self->body_soft_body_pair_pool.free(static_cast<GodotBodySoftBodyPair3D *>(p_data));
+	} else {
+		self->body_pair_pool.free(static_cast<GodotBodyPair3D *>(p_data));
+	}
 }
 
 const SelfList<GodotBody3D>::List &GodotSpace3D::get_active_body_list() const {
 	return active_list;
 }
 
+const LocalVector<GodotBody3D *> &GodotSpace3D::get_active_bodies() {
+	if (active_snapshot_version != active_list_version) {
+		active_snapshot.clear();
+		for (const SelfList<GodotBody3D> *b = active_list.first(); b; b = b->next()) {
+			active_snapshot.push_back(b->self());
+		}
+		active_snapshot_version = active_list_version;
+	}
+	return active_snapshot;
+}
+
 void GodotSpace3D::body_add_to_active_list(SelfList<GodotBody3D> *p_body) {
 	active_list.add(p_body);
+	active_list_version++;
 }
 
 void GodotSpace3D::body_remove_from_active_list(SelfList<GodotBody3D> *p_body) {
 	active_list.remove(p_body);
+	active_list_version++;
 }
 
 void GodotSpace3D::body_add_to_mass_properties_update_list(SelfList<GodotBody3D> *p_body) {
@@ -1246,10 +1277,348 @@ GodotSpace3D::GodotSpace3D() {
 	body_angular_velocity_sleep_threshold = GLOBAL_GET("physics/3d/sleep_threshold_angular");
 	body_time_to_sleep = GLOBAL_GET("physics/3d/time_before_sleep");
 	solver_iterations = GLOBAL_GET("physics/3d/solver/solver_iterations");
+	block_solver_enabled = GLOBAL_GET("physics/3d/solver/block_solver_enabled");
+	parallel_large_islands = GLOBAL_GET("physics/3d/solver/parallel_large_islands");
+	substeps = CLAMP(int(GLOBAL_GET("physics/3d/solver/substeps")), 1, 16);
+	manifold_spread_reduction = GLOBAL_GET("physics/3d/solver/manifold_spread_reduction");
 	contact_recycle_radius = GLOBAL_GET("physics/3d/solver/contact_recycle_radius");
 	contact_max_separation = GLOBAL_GET("physics/3d/solver/contact_max_separation");
+	air_density = MAX(real_t(GLOBAL_GET("physics/3d/solver/air_density")), real_t(0.0));
+	speculative_sphere_distance = MAX(real_t(0.0), (real_t)GLOBAL_GET("physics/3d/solver/speculative_sphere_distance"));
+	const real_t configured_strain_max_ratio = GLOBAL_GET("physics/3d/solver/soft_body_xpbd_strain_max_stretch_ratio");
+	soft_body_xpbd_strain_max_stretch_ratio = Math::is_finite(configured_strain_max_ratio) && configured_strain_max_ratio > 0.0 ?
+			MAX(real_t(1.0), configured_strain_max_ratio) : real_t(0.0);
+	const real_t configured_strain_min_ratio = GLOBAL_GET("physics/3d/solver/soft_body_xpbd_strain_min_compression_ratio");
+	soft_body_xpbd_strain_min_compression_ratio = Math::is_finite(configured_strain_min_ratio) ?
+			CLAMP(configured_strain_min_ratio, real_t(0.0), real_t(1.0)) : real_t(0.0);
+	const real_t configured_strain_compliance = GLOBAL_GET("physics/3d/solver/soft_body_xpbd_strain_limit_compliance");
+	soft_body_xpbd_strain_limit_compliance = Math::is_finite(configured_strain_compliance) ?
+			MAX(real_t(0.0), configured_strain_compliance) : real_t(0.0);
+	const real_t configured_xpbd_compliance = GLOBAL_GET("physics/3d/solver/soft_body_xpbd_compliance");
+	soft_body_xpbd_compliance = Math::is_finite(configured_xpbd_compliance) ? MAX(real_t(0.0), configured_xpbd_compliance) : real_t(0.0);
+	const real_t configured_parallel_ratio = GLOBAL_GET("physics/3d/solver/soft_body_xpbd_parallel_compliance_ratio");
+	soft_body_xpbd_parallel_compliance_ratio = Math::is_finite(configured_parallel_ratio) ?
+			CLAMP(configured_parallel_ratio, real_t(0.01), real_t(100.0)) : real_t(1.0);
+	const Vector3 configured_material_axis = GLOBAL_GET("physics/3d/solver/soft_body_xpbd_material_axis");
+	// Do not normalize in float32 when inputs could overflow the squared length.
+	const double material_ax = double(configured_material_axis.x);
+	const double material_ay = double(configured_material_axis.y);
+	const double material_az = double(configured_material_axis.z);
+	const double material_axis_sq = material_ax * material_ax + material_ay * material_ay + material_az * material_az;
+	soft_body_xpbd_material_axis = configured_material_axis.is_finite() &&
+			Math::is_finite(material_axis_sq) && material_axis_sq > 1e-24 ?
+			configured_material_axis : Vector3(1, 0, 0);
+	const real_t configured_tension_hardening = GLOBAL_GET("physics/3d/solver/soft_body_xpbd_tension_hardening");
+	soft_body_xpbd_tension_hardening = Math::is_finite(configured_tension_hardening) ? MAX(real_t(0.0), configured_tension_hardening) : real_t(0.0);
+	const real_t configured_compression_hardening = GLOBAL_GET("physics/3d/solver/soft_body_xpbd_compression_hardening");
+	soft_body_xpbd_compression_hardening = Math::is_finite(configured_compression_hardening) ? MAX(real_t(0.0), configured_compression_hardening) : real_t(0.0);
+	const real_t configured_tension_yield = GLOBAL_GET("physics/3d/solver/soft_body_xpbd_tension_yield_strain");
+	soft_body_xpbd_tension_yield_strain = Math::is_finite(configured_tension_yield) ? MAX(real_t(0.0), configured_tension_yield) : real_t(0.1);
+	const real_t configured_compression_yield = GLOBAL_GET("physics/3d/solver/soft_body_xpbd_compression_yield_strain");
+	const real_t configured_fatigue_rate = GLOBAL_GET("physics/3d/solver/soft_body_fatigue_damage_rate");
+	soft_body_fatigue_damage_rate = Math::is_finite(configured_fatigue_rate) ?
+			MAX(real_t(0.0), configured_fatigue_rate) : real_t(0.0);
+	const real_t configured_fatigue_yield = GLOBAL_GET("physics/3d/solver/soft_body_fatigue_yield_strain");
+	soft_body_fatigue_yield_strain = Math::is_finite(configured_fatigue_yield) ?
+			MAX(real_t(0.0), configured_fatigue_yield) : real_t(0.3);
+	const real_t configured_fatigue_cap = GLOBAL_GET("physics/3d/solver/soft_body_fatigue_max_damage");
+	soft_body_fatigue_max_damage = Math::is_finite(configured_fatigue_cap) ?
+			CLAMP(configured_fatigue_cap, real_t(0.0), real_t(0.99)) : real_t(0.9);
+	soft_body_xpbd_compression_yield_strain = Math::is_finite(configured_compression_yield) ?
+			CLAMP(configured_compression_yield, real_t(0.0), real_t(1.0)) : real_t(0.1);
+	const real_t configured_plastic_yield = GLOBAL_GET("physics/3d/solver/soft_body_plastic_yield_strain");
+	soft_body_plastic_yield_strain = Math::is_finite(configured_plastic_yield) ? CLAMP(configured_plastic_yield, real_t(0.0), real_t(1.0)) : real_t(0.1);
+	const real_t configured_plastic_creep_rate = GLOBAL_GET("physics/3d/solver/soft_body_plastic_creep_rate");
+	soft_body_plastic_creep_rate = Math::is_finite(configured_plastic_creep_rate) ? MAX(real_t(0.0), configured_plastic_creep_rate) : real_t(0.0);
+	const real_t configured_link_damping = GLOBAL_GET("physics/3d/solver/soft_body_link_damping");
+	soft_body_link_damping = Math::is_finite(configured_link_damping) ? MAX(real_t(0.0), configured_link_damping) : real_t(0.0);
+	const real_t thermal_conduction = GLOBAL_GET("physics/3d/solver/soft_body_thermal_conduction_rate");
+	soft_body_thermal_conduction_rate = Math::is_finite(thermal_conduction) ? CLAMP(thermal_conduction, real_t(0.0), real_t(1000.0)) : real_t(0.0);
+	const real_t thermal_ambient_exchange = GLOBAL_GET("physics/3d/solver/soft_body_thermal_ambient_exchange_rate");
+	soft_body_thermal_ambient_exchange_rate = Math::is_finite(thermal_ambient_exchange) ? CLAMP(thermal_ambient_exchange, real_t(0.0), real_t(1000.0)) : real_t(0.0);
+	const real_t thermal_ambient = GLOBAL_GET("physics/3d/solver/soft_body_thermal_ambient_temperature");
+	soft_body_thermal_ambient_temperature = Math::is_finite(thermal_ambient) ? CLAMP(thermal_ambient, real_t(-273.0), real_t(2000.0)) : real_t(20.0);
+	const real_t thermal_source_rate = GLOBAL_GET("physics/3d/solver/soft_body_thermal_source_rate");
+	soft_body_thermal_source_rate = Math::is_finite(thermal_source_rate) ? CLAMP(thermal_source_rate, real_t(0.0), real_t(1000.0)) : real_t(0.0);
+	const real_t thermal_source_temperature = GLOBAL_GET("physics/3d/solver/soft_body_thermal_source_temperature");
+	soft_body_thermal_source_temperature = Math::is_finite(thermal_source_temperature) ? CLAMP(thermal_source_temperature, real_t(-273.0), real_t(2000.0)) : real_t(100.0);
+	const Vector3 configured_thermal_source_center = GLOBAL_GET("physics/3d/solver/soft_body_thermal_source_center");
+	soft_body_thermal_source_center = configured_thermal_source_center.is_finite() ? configured_thermal_source_center : Vector3();
+	const real_t configured_thermal_source_radius = GLOBAL_GET("physics/3d/solver/soft_body_thermal_source_radius");
+	soft_body_thermal_source_radius = Math::is_finite(configured_thermal_source_radius) ? CLAMP(configured_thermal_source_radius, real_t(0.0), real_t(10000.0)) : real_t(0.0);
+	const real_t configured_thermal_expansion = GLOBAL_GET("physics/3d/solver/soft_body_thermal_expansion_coefficient");
+	soft_body_thermal_expansion_coefficient = Math::is_finite(configured_thermal_expansion) ? CLAMP(configured_thermal_expansion, real_t(-0.01), real_t(0.01)) : real_t(0.0);
+	const real_t configured_strain_rate_damping = GLOBAL_GET("physics/3d/solver/soft_body_strain_rate_damping");
+	soft_body_strain_rate_damping = Math::is_finite(configured_strain_rate_damping) ?
+			MAX(real_t(0.0), configured_strain_rate_damping) : real_t(0.0);
+	const real_t configured_strain_rate_yield = GLOBAL_GET("physics/3d/solver/soft_body_strain_rate_yield");
+	soft_body_strain_rate_yield = Math::is_finite(configured_strain_rate_yield) ?
+			MAX(real_t(0.0), configured_strain_rate_yield) : real_t(0.0);
+	const real_t configured_lift_coefficient = GLOBAL_GET("physics/3d/solver/soft_body_lift_coefficient");
+	soft_body_lift_coefficient = Math::is_finite(configured_lift_coefficient) ? MAX(real_t(0.0), configured_lift_coefficient) : real_t(0.0);
+	const real_t configured_gas_gamma = GLOBAL_GET("physics/3d/solver/soft_body_gas_pressure_gamma");
+	soft_body_gas_pressure_gamma = Math::is_finite(configured_gas_gamma) ? CLAMP(configured_gas_gamma, real_t(0.0), real_t(5.0)) : real_t(0.0);
+	const real_t configured_gas_leak_rate = GLOBAL_GET("physics/3d/solver/soft_body_gas_leak_rate");
+	soft_body_gas_leak_rate = Math::is_finite(configured_gas_leak_rate) ? MAX(real_t(0.0), configured_gas_leak_rate) : real_t(0.0);
+	soft_body_hydrostatic_pressure = bool(GLOBAL_GET("physics/3d/solver/soft_body_hydrostatic_pressure"));
+	soft_body_hydrodynamic_drag = bool(GLOBAL_GET("physics/3d/solver/soft_body_hydrodynamic_drag"));
+	const real_t configured_tangent_ratio = GLOBAL_GET("physics/3d/solver/soft_body_hydrodynamic_tangent_ratio");
+	soft_body_hydrodynamic_tangent_ratio = Math::is_finite(configured_tangent_ratio) ?
+			CLAMP(configured_tangent_ratio, real_t(0.0), real_t(5.0)) : real_t(0.25);
+	const real_t configured_tangential_drag = GLOBAL_GET("physics/3d/solver/soft_body_tangential_drag_ratio");
+	soft_body_tangential_drag_ratio = Math::is_finite(configured_tangential_drag) ? MAX(real_t(0.0), configured_tangential_drag) : real_t(0.0);
+	const real_t configured_area_compliance = GLOBAL_GET("physics/3d/solver/soft_body_xpbd_area_compliance");
+	soft_body_xpbd_area_compliance = Math::is_finite(configured_area_compliance) ? MAX(real_t(0.0), configured_area_compliance) : real_t(0.0);
+	const real_t configured_membrane_compliance = GLOBAL_GET("physics/3d/solver/soft_body_xpbd_membrane_compliance");
+	soft_body_xpbd_membrane_compliance = Math::is_finite(configured_membrane_compliance) ?
+			MAX(real_t(0.0), configured_membrane_compliance) : real_t(0.0);
+	const real_t configured_membrane_poisson = GLOBAL_GET("physics/3d/solver/soft_body_membrane_poisson_ratio");
+	soft_body_membrane_poisson_ratio = Math::is_finite(configured_membrane_poisson) ?
+			CLAMP(configured_membrane_poisson, real_t(-0.49), real_t(0.49)) : real_t(0.3);
+	const real_t configured_tetra_compliance = GLOBAL_GET("physics/3d/solver/soft_body_tetra_fem_compliance");
+	soft_body_tetra_fem_compliance = Math::is_finite(configured_tetra_compliance) ? MAX(real_t(0.0), configured_tetra_compliance) : real_t(0.0);
+	soft_body_tetra_fem_lumped_mass = bool(GLOBAL_GET("physics/3d/solver/soft_body_tetra_fem_lumped_mass"));
+	const real_t configured_tetra_poisson = GLOBAL_GET("physics/3d/solver/soft_body_tetra_fem_poisson_ratio");
+	soft_body_tetra_fem_poisson_ratio = Math::is_finite(configured_tetra_poisson) ? CLAMP(configured_tetra_poisson, real_t(0.0), real_t(0.49)) : real_t(0.3);
+	const real_t configured_principal_min = GLOBAL_GET("physics/3d/solver/soft_body_tetra_principal_min_stretch");
+	soft_body_tetra_principal_min_stretch = Math::is_finite(configured_principal_min) ?
+			CLAMP(configured_principal_min, real_t(0.0), real_t(1.0)) : real_t(0.0);
+	const real_t configured_principal_max = GLOBAL_GET("physics/3d/solver/soft_body_tetra_principal_max_stretch");
+	soft_body_tetra_principal_max_stretch = Math::is_finite(configured_principal_max) && configured_principal_max > 0.0 ?
+			CLAMP(configured_principal_max, real_t(1.0), real_t(16.0)) : real_t(0.0);
+	const real_t configured_principal_compliance = GLOBAL_GET("physics/3d/solver/soft_body_tetra_principal_limit_compliance");
+	soft_body_tetra_principal_limit_compliance = Math::is_finite(configured_principal_compliance) ?
+			MAX(real_t(0.0), configured_principal_compliance) : real_t(0.0);
+	const int configured_tetra_material_model = GLOBAL_GET("physics/3d/solver/soft_body_tetra_fem_material_model");
+	soft_body_tetra_fem_material_model = CLAMP(configured_tetra_material_model, 0, 2);
+	const real_t configured_tetra_ogden_exponent = GLOBAL_GET("physics/3d/solver/soft_body_tetra_ogden_exponent");
+	soft_body_tetra_ogden_exponent = Math::is_finite(configured_tetra_ogden_exponent) ? CLAMP(configured_tetra_ogden_exponent, real_t(1.0), real_t(8.0)) : real_t(3.0);
+	const real_t configured_tetra_mooney_fraction = GLOBAL_GET("physics/3d/solver/soft_body_tetra_mooney_rivlin_fraction");
+	soft_body_tetra_mooney_rivlin_fraction = Math::is_finite(configured_tetra_mooney_fraction) ?
+			CLAMP(configured_tetra_mooney_fraction, real_t(0.0), real_t(1.0)) : real_t(0.5);
+	const real_t configured_fem_fiber_compliance = GLOBAL_GET("physics/3d/solver/soft_body_tetra_fiber_compliance");
+	soft_body_tetra_fiber_compliance = Math::is_finite(configured_fem_fiber_compliance) ? MAX(real_t(0.0), configured_fem_fiber_compliance) : real_t(0.0);
+	const Vector3 configured_fem_fiber_axis = GLOBAL_GET("physics/3d/solver/soft_body_tetra_fiber_axis");
+	soft_body_tetra_fiber_axis = configured_fem_fiber_axis.is_finite() && configured_fem_fiber_axis.length_squared() > real_t(0.0) ? configured_fem_fiber_axis : Vector3(1, 0, 0);
+	const real_t secondary_compliance = GLOBAL_GET("physics/3d/solver/soft_body_tetra_fiber_secondary_compliance");
+	soft_body_tetra_fiber_secondary_compliance = Math::is_finite(secondary_compliance) ? MAX(real_t(0.0), secondary_compliance) : real_t(0.0);
+	const Vector3 secondary_axis = GLOBAL_GET("physics/3d/solver/soft_body_tetra_fiber_secondary_axis");
+	soft_body_tetra_fiber_secondary_axis = secondary_axis.is_finite() && secondary_axis.length_squared() > real_t(0.0) ? secondary_axis : Vector3(0, 1, 0);
+	const real_t fiber_plastic_yield = GLOBAL_GET("physics/3d/solver/soft_body_tetra_fiber_plastic_yield_ratio");
+	soft_body_tetra_fiber_plastic_yield_ratio = Math::is_finite(fiber_plastic_yield) ? CLAMP(fiber_plastic_yield, real_t(0.0), real_t(10.0)) : real_t(0.15);
+	const real_t fiber_plastic_creep = GLOBAL_GET("physics/3d/solver/soft_body_tetra_fiber_plastic_creep_rate");
+	soft_body_tetra_fiber_plastic_creep_rate = Math::is_finite(fiber_plastic_creep) ? MAX(real_t(0.0), fiber_plastic_creep) : real_t(0.0);
+	const real_t fiber_plastic_max_stretch = GLOBAL_GET("physics/3d/solver/soft_body_tetra_fiber_plastic_max_stretch");
+	soft_body_tetra_fiber_plastic_max_stretch = Math::is_finite(fiber_plastic_max_stretch) ? CLAMP(fiber_plastic_max_stretch, real_t(1.0), real_t(16.0)) : real_t(3.0);
+	const real_t secondary_yield = GLOBAL_GET("physics/3d/solver/soft_body_tetra_fiber_secondary_plastic_yield_ratio");
+	soft_body_tetra_fiber_secondary_plastic_yield_ratio = Math::is_finite(secondary_yield) ? CLAMP(secondary_yield, real_t(0.0), real_t(10.0)) : real_t(0.15);
+	const real_t secondary_creep = GLOBAL_GET("physics/3d/solver/soft_body_tetra_fiber_secondary_plastic_creep_rate");
+	soft_body_tetra_fiber_secondary_plastic_creep_rate = Math::is_finite(secondary_creep) ? MAX(real_t(0.0), secondary_creep) : real_t(0.0);
+	const real_t secondary_max_stretch = GLOBAL_GET("physics/3d/solver/soft_body_tetra_fiber_secondary_plastic_max_stretch");
+	soft_body_tetra_fiber_secondary_plastic_max_stretch = Math::is_finite(secondary_max_stretch) ? CLAMP(secondary_max_stretch, real_t(1.0), real_t(16.0)) : real_t(3.0);
+	const real_t configured_tetra_viscosity = GLOBAL_GET("physics/3d/solver/soft_body_tetra_fem_viscosity");
+	soft_body_tetra_fem_viscosity = Math::is_finite(configured_tetra_viscosity) ? MAX(real_t(0.0), configured_tetra_viscosity) : real_t(0.0);
+	const real_t configured_sls_compliance = GLOBAL_GET("physics/3d/solver/soft_body_tetra_sls_compliance");
+	soft_body_tetra_sls_compliance = Math::is_finite(configured_sls_compliance) ?
+			MAX(real_t(0.0), configured_sls_compliance) : real_t(0.0);
+	const real_t configured_sls_tau = GLOBAL_GET("physics/3d/solver/soft_body_tetra_sls_relaxation_time");
+	soft_body_tetra_sls_relaxation_time = Math::is_finite(configured_sls_tau) ?
+			MAX(real_t(0.001), configured_sls_tau) : real_t(0.25);
+	const real_t prony_fast_compliance = GLOBAL_GET("physics/3d/solver/soft_body_tetra_prony_fast_compliance");
+	soft_body_tetra_prony_fast_compliance = Math::is_finite(prony_fast_compliance) ?
+			MAX(real_t(0.0), prony_fast_compliance) : real_t(0.0);
+	const real_t prony_fast_time = GLOBAL_GET("physics/3d/solver/soft_body_tetra_prony_fast_relaxation_time");
+	soft_body_tetra_prony_fast_relaxation_time = Math::is_finite(prony_fast_time) ?
+			MAX(real_t(0.001), prony_fast_time) : real_t(0.04);
+	const real_t prony_slow_compliance = GLOBAL_GET("physics/3d/solver/soft_body_tetra_prony_slow_compliance");
+	soft_body_tetra_prony_slow_compliance = Math::is_finite(prony_slow_compliance) ?
+			MAX(real_t(0.0), prony_slow_compliance) : real_t(0.0);
+	const real_t prony_slow_time = GLOBAL_GET("physics/3d/solver/soft_body_tetra_prony_slow_relaxation_time");
+	soft_body_tetra_prony_slow_relaxation_time = Math::is_finite(prony_slow_time) ?
+			MAX(real_t(0.001), prony_slow_time) : real_t(2.0);
+	const real_t configured_tetra_plastic_rate = GLOBAL_GET("physics/3d/solver/soft_body_tetra_volume_plastic_rate");
+	soft_body_tetra_volume_plastic_rate = Math::is_finite(configured_tetra_plastic_rate) ? MAX(real_t(0.0), configured_tetra_plastic_rate) : real_t(0.0);
+	const real_t configured_tetra_plastic_yield = GLOBAL_GET("physics/3d/solver/soft_body_tetra_volume_plastic_yield");
+	soft_body_tetra_volume_plastic_yield = Math::is_finite(configured_tetra_plastic_yield) ?
+			CLAMP(configured_tetra_plastic_yield, real_t(0.0), real_t(2.0)) : real_t(0.15);
+	const real_t configured_tetra_shear_plastic_rate = GLOBAL_GET("physics/3d/solver/soft_body_tetra_shear_plastic_rate");
+	soft_body_tetra_shear_plastic_rate = Math::is_finite(configured_tetra_shear_plastic_rate) ?
+			MAX(real_t(0.0), configured_tetra_shear_plastic_rate) : real_t(0.0);
+	const real_t configured_tetra_shear_plastic_yield = GLOBAL_GET("physics/3d/solver/soft_body_tetra_shear_plastic_yield");
+	soft_body_tetra_shear_plastic_yield = Math::is_finite(configured_tetra_shear_plastic_yield) ?
+			CLAMP(configured_tetra_shear_plastic_yield, real_t(0.0), real_t(2.0)) : real_t(0.2);
+	const real_t configured_tetra_shear_hardening = GLOBAL_GET("physics/3d/solver/soft_body_tetra_shear_plastic_hardening");
+	soft_body_tetra_shear_plastic_hardening = Math::is_finite(configured_tetra_shear_hardening) ?
+			CLAMP(configured_tetra_shear_hardening, real_t(0.0), real_t(10.0)) : real_t(0.0);
+	const real_t configured_tetra_shear_plastic_max = GLOBAL_GET("physics/3d/solver/soft_body_tetra_shear_plastic_max_strain");
+	soft_body_tetra_shear_plastic_max_strain = Math::is_finite(configured_tetra_shear_plastic_max) ?
+			CLAMP(configured_tetra_shear_plastic_max, real_t(0.01), real_t(4.0)) : real_t(2.0);
+	soft_body_tetra_inversion_recovery = GLOBAL_GET("physics/3d/solver/soft_body_tetra_inversion_recovery");
+	const real_t configured_tetra_min_j = GLOBAL_GET("physics/3d/solver/soft_body_tetra_inversion_min_j");
+	soft_body_tetra_inversion_min_j = Math::is_finite(configured_tetra_min_j) ?
+			CLAMP(configured_tetra_min_j, real_t(0.001), real_t(0.5)) : real_t(0.05);
+	const real_t damage_rate = GLOBAL_GET("physics/3d/solver/soft_body_tetra_damage_rate");
+	soft_body_tetra_damage_rate = Math::is_finite(damage_rate) ? MAX(real_t(0.0), damage_rate) : real_t(0.0);
+	const real_t fatigue_endurance = GLOBAL_GET("physics/3d/solver/soft_body_tetra_fatigue_endurance_amplitude");
+	soft_body_tetra_fatigue_endurance_amplitude = Math::is_finite(fatigue_endurance) ?
+			MAX(real_t(0.0), fatigue_endurance) : real_t(0.05);
+	const real_t fatigue_reference = GLOBAL_GET("physics/3d/solver/soft_body_tetra_fatigue_reference_amplitude");
+	soft_body_tetra_fatigue_reference_amplitude = Math::is_finite(fatigue_reference) ?
+			MAX(real_t(0.0), fatigue_reference) : real_t(0.3);
+	const real_t fatigue_cycles = GLOBAL_GET("physics/3d/solver/soft_body_tetra_fatigue_reference_cycles");
+	soft_body_tetra_fatigue_reference_cycles = Math::is_finite(fatigue_cycles) ?
+			MAX(real_t(0.0), fatigue_cycles) : real_t(0.0);
+	const real_t fatigue_exponent = GLOBAL_GET("physics/3d/solver/soft_body_tetra_fatigue_exponent");
+	soft_body_tetra_fatigue_exponent = Math::is_finite(fatigue_exponent) ?
+			CLAMP(fatigue_exponent, real_t(1.0), real_t(10.0)) : real_t(3.0);
+	const real_t fatigue_deadband = GLOBAL_GET("physics/3d/solver/soft_body_tetra_fatigue_reversal_deadband");
+	soft_body_tetra_fatigue_reversal_deadband = Math::is_finite(fatigue_deadband) ?
+			MAX(real_t(0.0), fatigue_deadband) : real_t(0.002);
+	const real_t damage_yield = GLOBAL_GET("physics/3d/solver/soft_body_tetra_damage_yield_strain");
+	soft_body_tetra_damage_yield_strain = Math::is_finite(damage_yield) ? MAX(real_t(0.0), damage_yield) : real_t(0.25);
+	const real_t configured_membrane_damping = GLOBAL_GET("physics/3d/solver/soft_body_membrane_damping_rate");
+	soft_body_membrane_damping_rate = Math::is_finite(configured_membrane_damping) ?
+			MAX(real_t(0.0), configured_membrane_damping) : real_t(0.0);
+	const real_t configured_shear_compliance = GLOBAL_GET("physics/3d/solver/soft_body_xpbd_shear_compliance");
+	soft_body_xpbd_shear_compliance = Math::is_finite(configured_shear_compliance) ? MAX(real_t(0.0), configured_shear_compliance) : real_t(0.0);
+	const real_t configured_dihedral_compliance = GLOBAL_GET("physics/3d/solver/soft_body_xpbd_dihedral_compliance");
+	soft_body_xpbd_dihedral_compliance = Math::is_finite(configured_dihedral_compliance) ? MAX(real_t(0.0), configured_dihedral_compliance) : real_t(0.0);
+	const real_t configured_rod_bend_compliance = GLOBAL_GET("physics/3d/solver/soft_body_xpbd_rod_bend_compliance");
+	soft_body_xpbd_rod_bend_compliance = Math::is_finite(configured_rod_bend_compliance) ?
+			MAX(real_t(0.0), configured_rod_bend_compliance) : real_t(0.0);
+	const real_t configured_rod_torsion = GLOBAL_GET("physics/3d/solver/soft_body_xpbd_rod_torsion_compliance");
+	soft_body_xpbd_rod_torsion_compliance = Math::is_finite(configured_rod_torsion) ?
+			MAX(real_t(0.0), configured_rod_torsion) : real_t(0.0);
+	const real_t configured_rod_straightness = GLOBAL_GET("physics/3d/solver/soft_body_xpbd_rod_straightness");
+	soft_body_xpbd_rod_straightness = Math::is_finite(configured_rod_straightness) ?
+			CLAMP(configured_rod_straightness, real_t(0.0), real_t(0.9999)) : real_t(0.9);
+	const real_t configured_bend_parallel_ratio = GLOBAL_GET("physics/3d/solver/soft_body_xpbd_bend_parallel_compliance_ratio");
+	soft_body_xpbd_bend_parallel_compliance_ratio = Math::is_finite(configured_bend_parallel_ratio) ?
+			CLAMP(configured_bend_parallel_ratio, real_t(0.01), real_t(100.0)) : real_t(1.0);
+	const real_t configured_shape_stiffness = GLOBAL_GET("physics/3d/solver/soft_body_shape_matching_stiffness");
+	soft_body_shape_matching_stiffness = Math::is_finite(configured_shape_stiffness) ? CLAMP(configured_shape_stiffness, real_t(0.0), real_t(1.0)) : real_t(0.0);
+	const int configured_shape_cluster_size = GLOBAL_GET("physics/3d/solver/soft_body_shape_matching_cluster_size");
+	soft_body_shape_matching_cluster_size = configured_shape_cluster_size > 0 ? CLAMP(configured_shape_cluster_size, 3, 64) : 0;
+	const real_t configured_dihedral_damping = GLOBAL_GET("physics/3d/solver/soft_body_dihedral_damping");
+	soft_body_dihedral_damping = Math::is_finite(configured_dihedral_damping) ? MAX(real_t(0.0), configured_dihedral_damping) : real_t(0.0);
+	const real_t configured_area_damping = GLOBAL_GET("physics/3d/solver/soft_body_area_rate_damping");
+	soft_body_area_rate_damping = Math::is_finite(configured_area_damping) ? MAX(real_t(0.0), configured_area_damping) : real_t(0.0);
+	const real_t configured_bending_yield = GLOBAL_GET("physics/3d/solver/soft_body_bending_plastic_yield_angle");
+	soft_body_bending_plastic_yield_angle = Math::is_finite(configured_bending_yield) ? CLAMP(configured_bending_yield, real_t(0.0), real_t(Math::PI)) : real_t(0.2);
+	const real_t configured_bending_creep = GLOBAL_GET("physics/3d/solver/soft_body_bending_plastic_creep_rate");
+	soft_body_bending_plastic_creep_rate = Math::is_finite(configured_bending_creep) ? MAX(real_t(0.0), configured_bending_creep) : real_t(0.0);
+	const real_t configured_self_thickness = GLOBAL_GET("physics/3d/solver/soft_body_self_collision_thickness");
+	soft_body_self_collision_thickness = Math::is_finite(configured_self_thickness) ? MAX(real_t(0.0), configured_self_thickness) : real_t(0.0);
+	const real_t configured_self_compliance = GLOBAL_GET("physics/3d/solver/soft_body_self_collision_compliance");
+	soft_body_self_collision_compliance = Math::is_finite(configured_self_compliance) ? MAX(real_t(0.0), configured_self_compliance) : real_t(0.000001);
+	const real_t configured_self_friction = GLOBAL_GET("physics/3d/solver/soft_body_self_collision_friction");
+	soft_body_self_collision_friction = Math::is_finite(configured_self_friction) ? MAX(real_t(0.0), configured_self_friction) : real_t(0.0);
+	soft_body_self_collision_max_contacts_per_vertex = CLAMP((int)GLOBAL_GET("physics/3d/solver/soft_body_self_collision_max_contacts_per_vertex"), 1, 32);
+	soft_body_self_collision_edge_edge = GLOBAL_GET("physics/3d/solver/soft_body_self_collision_edge_edge");
+	soft_body_self_collision_ccd = GLOBAL_GET("physics/3d/solver/soft_body_self_collision_ccd");
+	const real_t configured_pair_thickness = GLOBAL_GET("physics/3d/solver/soft_body_pair_collision_thickness");
+	soft_body_pair_collision_thickness = Math::is_finite(configured_pair_thickness) ? MAX(real_t(0.0), configured_pair_thickness) : real_t(0.0);
+	const real_t configured_pair_compliance = GLOBAL_GET("physics/3d/solver/soft_body_pair_collision_compliance");
+	soft_body_pair_collision_compliance = Math::is_finite(configured_pair_compliance) ? MAX(real_t(0.0), configured_pair_compliance) : real_t(0.000001);
+	const real_t configured_pair_friction = GLOBAL_GET("physics/3d/solver/soft_body_pair_collision_friction");
+	soft_body_pair_collision_friction = Math::is_finite(configured_pair_friction) ? MAX(real_t(0.0), configured_pair_friction) : real_t(0.0);
+	soft_body_pair_collision_ccd = GLOBAL_GET("physics/3d/solver/soft_body_pair_collision_ccd");
+	soft_body_pair_collision_edge_edge = GLOBAL_GET("physics/3d/solver/soft_body_pair_collision_edge_edge");
+	soft_body_pair_collision_edge_ccd = GLOBAL_GET("physics/3d/solver/soft_body_pair_collision_edge_ccd");
+	soft_body_pair_max_contacts = CLAMP(int(GLOBAL_GET("physics/3d/solver/soft_body_pair_max_contacts")), 1, 2048);
+	soft_body_pair_max_pairs = CLAMP(int(GLOBAL_GET("physics/3d/solver/soft_body_pair_max_pairs")), 1, 512);
+	const real_t configured_tether_compliance = GLOBAL_GET("physics/3d/solver/soft_body_xpbd_tether_compliance");
+	soft_body_xpbd_tether_compliance = Math::is_finite(configured_tether_compliance) ? MAX(real_t(0.0), configured_tether_compliance) : real_t(0.0);
+	const real_t configured_tether_slack = GLOBAL_GET("physics/3d/solver/soft_body_xpbd_tether_slack");
+	soft_body_xpbd_tether_slack = Math::is_finite(configured_tether_slack) ? MAX(real_t(0.0), configured_tether_slack) : real_t(0.05);
+	const real_t configured_volume_compliance = GLOBAL_GET("physics/3d/solver/soft_body_xpbd_volume_compliance");
+	soft_body_xpbd_volume_compliance = Math::is_finite(configured_volume_compliance) ? MAX(real_t(0.0), configured_volume_compliance) : real_t(0.0);
+	const real_t configured_shape_matching_rate = GLOBAL_GET("physics/3d/solver/soft_body_shape_matching_rate");
+	soft_body_shape_matching_rate = Math::is_finite(configured_shape_matching_rate) ? MAX(real_t(0.0), configured_shape_matching_rate) : real_t(0.0);
+	const real_t configured_volume_damping = GLOBAL_GET("physics/3d/solver/soft_body_volume_damping_rate");
+	soft_body_volume_damping_rate = Math::is_finite(configured_volume_damping) ? MAX(real_t(0.0), configured_volume_damping) : real_t(0.0);
+	const real_t configured_volume_yield = GLOBAL_GET("physics/3d/solver/soft_body_volume_plastic_yield_strain");
+	soft_body_volume_plastic_yield_strain = Math::is_finite(configured_volume_yield) ? CLAMP(configured_volume_yield, real_t(0.0), real_t(0.95)) : real_t(0.15);
+	const real_t configured_volume_creep = GLOBAL_GET("physics/3d/solver/soft_body_volume_plastic_creep_rate");
+	soft_body_volume_plastic_creep_rate = Math::is_finite(configured_volume_creep) ? MAX(real_t(0.0), configured_volume_creep) : real_t(0.0);
 	contact_max_allowed_penetration = GLOBAL_GET("physics/3d/solver/contact_max_allowed_penetration");
 	contact_bias = GLOBAL_GET("physics/3d/solver/default_contact_bias");
+	// Cache the per-space push speed limit; no project-setting lookup on contacts.
+	max_contact_push_speed = MAX((real_t)0.0, (real_t)GLOBAL_GET("physics/3d/solver/max_contact_push_speed"));
+	const real_t configured_max_linear_velocity = GLOBAL_GET("physics/3d/solver/max_linear_velocity");
+	max_linear_velocity = Math::is_finite(configured_max_linear_velocity) ? MAX(real_t(0.0), configured_max_linear_velocity) : real_t(0.0);
+	max_linear_velocity = MAX((real_t)0.0, (real_t)GLOBAL_GET("physics/3d/solver/max_linear_velocity"));
+	max_angular_velocity = MAX((real_t)0.0, (real_t)GLOBAL_GET("physics/3d/solver/max_angular_velocity"));
+	ccd_max_angular_motion = MAX(real_t(0.0), (real_t)GLOBAL_GET("physics/3d/solver/ccd_max_angular_motion"));
+	warm_start_coefficient = CLAMP((real_t)GLOBAL_GET("physics/3d/solver/warm_start_coefficient"), real_t(0.0), real_t(1.0));
+	ccd_rotational_bounds = GLOBAL_GET("physics/3d/solver/ccd_rotational_bounds");
+	ccd_tight_rotational_bounds = GLOBAL_GET("physics/3d/solver/ccd_tight_rotational_bounds");
+	implicit_damping = GLOBAL_GET("physics/3d/solver/implicit_damping");
+	fluid_linear_drag = MAX(real_t(0.0), (real_t)GLOBAL_GET("physics/3d/solver/fluid_linear_drag"));
+	fluid_angular_drag = MAX(real_t(0.0), (real_t)GLOBAL_GET("physics/3d/solver/fluid_angular_drag"));
+	fluid_buoyancy = MAX(real_t(0.0), (real_t)GLOBAL_GET("physics/3d/solver/fluid_buoyancy"));
+	fluid_flow_velocity = GLOBAL_GET("physics/3d/solver/fluid_flow_velocity");
+	const real_t configured_magnus_spin = GLOBAL_GET("physics/3d/solver/sphere_magnus_spin_coefficient");
+	sphere_magnus_spin_coefficient = Math::is_finite(configured_magnus_spin) ? CLAMP(configured_magnus_spin, real_t(0.0), real_t(10.0)) : real_t(0.0);
+	const real_t configured_magnus_density = GLOBAL_GET("physics/3d/solver/sphere_magnus_medium_density");
+	sphere_magnus_medium_density = Math::is_finite(configured_magnus_density) ? CLAMP(configured_magnus_density, real_t(0.0), real_t(2000.0)) : real_t(1.225);
+	const real_t configured_magnus_max_lift = GLOBAL_GET("physics/3d/solver/sphere_magnus_max_lift_coefficient");
+	sphere_magnus_max_lift_coefficient = Math::is_finite(configured_magnus_max_lift) ? CLAMP(configured_magnus_max_lift, real_t(0.0), real_t(5.0)) : real_t(1.5);
+	const Vector3 configured_magnus_flow = GLOBAL_GET("physics/3d/solver/sphere_magnus_flow_velocity");
+	sphere_magnus_flow_velocity = configured_magnus_flow.is_finite() ? configured_magnus_flow : Vector3();
+	const real_t configured_box_pressure = GLOBAL_GET("physics/3d/solver/rigid_box_aero_pressure_coefficient");
+	rigid_box_aero_pressure_coefficient = Math::is_finite(configured_box_pressure) ? CLAMP(configured_box_pressure, real_t(0.0), real_t(10.0)) : real_t(0.0);
+	const real_t configured_box_skin = GLOBAL_GET("physics/3d/solver/rigid_box_aero_skin_coefficient");
+	rigid_box_aero_skin_coefficient = Math::is_finite(configured_box_skin) ? CLAMP(configured_box_skin, real_t(0.0), real_t(10.0)) : real_t(0.0);
+	const real_t configured_box_density = GLOBAL_GET("physics/3d/solver/rigid_box_aero_density");
+	rigid_box_aero_density = Math::is_finite(configured_box_density) ? CLAMP(configured_box_density, real_t(0.0), real_t(2000.0)) : real_t(1.225);
+	const Vector3 configured_box_wind = GLOBAL_GET("physics/3d/solver/rigid_box_aero_wind_velocity");
+	rigid_box_aero_wind_velocity = configured_box_wind.is_finite() ? configured_box_wind : Vector3();
+	const real_t configured_convex_pressure = GLOBAL_GET("physics/3d/solver/rigid_convex_aero_pressure_coefficient");
+	rigid_convex_aero_pressure_coefficient = Math::is_finite(configured_convex_pressure) ? CLAMP(configured_convex_pressure, real_t(0.0), real_t(10.0)) : real_t(0.0);
+	const real_t configured_convex_skin = GLOBAL_GET("physics/3d/solver/rigid_convex_aero_skin_coefficient");
+	rigid_convex_aero_skin_coefficient = Math::is_finite(configured_convex_skin) ? CLAMP(configured_convex_skin, real_t(0.0), real_t(10.0)) : real_t(0.0);
+	const real_t configured_convex_density = GLOBAL_GET("physics/3d/solver/rigid_convex_aero_density");
+	rigid_convex_aero_density = Math::is_finite(configured_convex_density) ? CLAMP(configured_convex_density, real_t(0.0), real_t(2000.0)) : real_t(1.225);
+	const Vector3 configured_convex_wind = GLOBAL_GET("physics/3d/solver/rigid_convex_aero_wind_velocity");
+	rigid_convex_aero_wind_velocity = configured_convex_wind.is_finite() ? configured_convex_wind : Vector3();
+	fluid_plane_enabled = GLOBAL_GET("physics/3d/fluid_plane/enabled");
+	fluid_plane_surface_height = GLOBAL_GET("physics/3d/fluid_plane/surface_height");
+	fluid_plane_density = MAX(real_t(0.0), (real_t)GLOBAL_GET("physics/3d/fluid_plane/density"));
+	fluid_plane_drag_coefficient = MAX(real_t(0.0), (real_t)GLOBAL_GET("physics/3d/fluid_plane/drag_coefficient"));
+	fluid_plane_angular_drag = MAX(real_t(0.0), (real_t)GLOBAL_GET("physics/3d/fluid_plane/angular_drag"));
+	fluid_plane_flow_velocity = GLOBAL_GET("physics/3d/fluid_plane/flow_velocity");
+	gyroscopic_forces = GLOBAL_GET("physics/3d/solver/gyroscopic_forces");
+	rotating_frame_enabled = GLOBAL_GET("physics/3d/solver/rotating_frame_enabled");
+	const Vector3 configured_frame_origin = GLOBAL_GET("physics/3d/solver/rotating_frame_origin");
+	rotating_frame_origin = configured_frame_origin.is_finite() ? configured_frame_origin : Vector3();
+	const Vector3 configured_frame_omega = GLOBAL_GET("physics/3d/solver/rotating_frame_angular_velocity");
+	rotating_frame_angular_velocity = configured_frame_omega.is_finite() ?
+			Vector3(CLAMP(configured_frame_omega.x, real_t(-100.0), real_t(100.0)),
+					CLAMP(configured_frame_omega.y, real_t(-100.0), real_t(100.0)),
+					CLAMP(configured_frame_omega.z, real_t(-100.0), real_t(100.0))) : Vector3();
+	const Vector3 configured_frame_alpha = GLOBAL_GET("physics/3d/solver/rotating_frame_angular_acceleration");
+	rotating_frame_angular_acceleration = configured_frame_alpha.is_finite() ?
+			Vector3(CLAMP(configured_frame_alpha.x, real_t(-100.0), real_t(100.0)),
+					CLAMP(configured_frame_alpha.y, real_t(-100.0), real_t(100.0)),
+					CLAMP(configured_frame_alpha.z, real_t(-100.0), real_t(100.0))) : Vector3();
+	gyroscopic_integration_mode = CLAMP((int)GLOBAL_GET("physics/3d/solver/gyroscopic_integration_mode"), 0, 1);
+	rolling_friction = MAX(real_t(0.0), (real_t)GLOBAL_GET("physics/3d/solver/rolling_friction"));
+	spinning_friction = MAX(real_t(0.0), (real_t)GLOBAL_GET("physics/3d/solver/spinning_friction"));
+	static_friction_multiplier = MAX(real_t(1.0), (real_t)GLOBAL_GET("physics/3d/solver/static_friction_multiplier"));
+	const real_t configured_stribeck_velocity = GLOBAL_GET("physics/3d/solver/stribeck_transition_velocity");
+	stribeck_transition_velocity = Math::is_finite(configured_stribeck_velocity) ? MAX(real_t(0.0), configured_stribeck_velocity) : real_t(0.0);
+	const real_t configured_anisotropy_ratio = GLOBAL_GET("physics/3d/solver/friction_anisotropy_ratio");
+	friction_anisotropy_ratio = Math::is_finite(configured_anisotropy_ratio) ? CLAMP(configured_anisotropy_ratio, real_t(0.01), real_t(1.0)) : real_t(1.0);
+	const Vector3 configured_anisotropy_axis = GLOBAL_GET("physics/3d/solver/friction_anisotropy_axis");
+	const real_t axis_length_squared = configured_anisotropy_axis.length_squared();
+	friction_anisotropy_axis = configured_anisotropy_axis.is_finite() && Math::is_finite(axis_length_squared) && axis_length_squared > real_t(1e-12) ?
+			configured_anisotropy_axis.normalized() : Vector3(1, 0, 0);
+	friction_combine_mode = CLAMP((int)GLOBAL_GET("physics/3d/solver/friction_combine_mode"), 0, 3);
+	restitution_combine_mode = CLAMP((int)GLOBAL_GET("physics/3d/solver/restitution_combine_mode"), 0, 5);
+	// Read once at space creation, avoiding ProjectSettings lookups in the hot contact loop.
+	const real_t configured_restitution_threshold = GLOBAL_GET("physics/3d/solver/restitution_velocity_threshold");
+	restitution_velocity_threshold = MAX((real_t)0.0, configured_restitution_threshold);
 
 	broadphase = GodotBroadPhase3D::create_func();
 	broadphase->set_pair_callback(_broadphase_pair, this);

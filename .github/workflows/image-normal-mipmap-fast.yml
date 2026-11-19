@@ -1,0 +1,30 @@
+name: Fast normalmap mipmap quantization regressions
+
+on:
+  pull_request:
+    branches: [develop]
+    paths:
+      - 'core/io/image.cpp'
+      - 'tests/core/io/test_image.cpp'
+      - 'misc/scripts/tests/test_image_normal_mipmap_fast.py'
+      - '.github/workflows/image-normal-mipmap-fast.yml'
+  push:
+    branches: [develop]
+    paths:
+      - 'core/io/image.cpp'
+      - 'tests/core/io/test_image.cpp'
+      - 'misc/scripts/tests/test_image_normal_mipmap_fast.py'
+      - '.github/workflows/image-normal-mipmap-fast.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  source-regression:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - name: Check quantization source contracts and native-test presence
+        run: python3 -m unittest discover -s misc/scripts/tests -p 'test_image_normal_mipmap_fast.py' -v

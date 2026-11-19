@@ -369,7 +369,7 @@ bool GodotGeneric6DOFJoint3D::setup(real_t p_timestep) {
 	return true;
 }
 
-void GodotGeneric6DOFJoint3D::solve(real_t p_timestep) {
+void GodotGeneric6DOFJoint3D::_solve_joint(real_t p_timestep) {
 	m_timeStep = p_timestep;
 
 	//calculateTransforms();

@@ -34,6 +34,7 @@
 #include "core/io/config_file.h"
 #include "core/io/file_access.h"
 #include "core/io/json.h"
+#include "core/io/resource_importer.h"
 #include "core/io/resource_loader.h"
 #include "core/io/resource_saver.h"
 #include "core/object/callable_mp.h"
@@ -2472,8 +2473,24 @@ Error DocumentEditorContainer::_save_text_file(Ref<TextFile> p_text_file, const 
 
 	EditorFileSystem::get_singleton()->update_file(p_path);
 
+	_saved_reimport(p_path);
 	_res_saved_callback(sqscr);
 	return OK;
+}
+
+void DocumentEditorContainer::_saved_reimport(const String &p_path) {
+	int order;
+	bool can_threads;
+	String importer;
+
+	Error err = ResourceFormatImporter::get_singleton()->get_import_order_threads_and_importer(p_path, order, can_threads, importer);
+	if (err != OK) {
+		return;
+	}
+
+	if (importer == "csv_translation") {
+		EditorFileSystem::get_singleton()->reimport_files({ p_path });
+	}
 }
 
 bool DocumentEditorContainer::edit(const Ref<Resource> &p_resource, int p_line, int p_col, bool p_grab_focus) {
@@ -2947,6 +2964,17 @@ void DocumentEditorContainer::_auto_format_text(ScriptEditorBase *p_seb) {
 		if (convert_indent_on_save) {
 			teb->convert_indent();
 		}
+	}
+}
+
+void DocumentEditorContainer::auto_format_all_scripts() {
+	for (int i = 0; i < tab_container->get_tab_count(); i++) {
+		ScriptEditorBase *seb = Object::cast_to<ScriptEditorBase>(tab_container->get_tab_control(i));
+		if (!seb) {
+			continue;
+		}
+
+		_auto_format_text(seb);
 	}
 }
 

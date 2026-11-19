@@ -202,4 +202,139 @@ ui_accept={
 	CHECK_MESSAGE(config_file.encode_to_text() == expected, "Object properties should be on new lines.");
 }
 
+
+TEST_CASE("[ConfigFile] encode_to_text builder preserves settings and empty sections") {
+	ConfigFile single;
+	single.set_value("", "value", 42);
+	CHECK(single.encode_to_text() == "value=42\n");
+
+	ConfigFile settings;
+	settings.set_value("display", "name", "Cgame");
+	settings.set_value("display", "quality", 3);
+	settings.set_value("display", "enabled", true);
+	settings.set_value("paths", "resource", "res://assets/model.glb");
+	const String serialized = settings.encode_to_text();
+	ConfigFile decoded;
+	CHECK(decoded.parse(serialized) == OK);
+	CHECK(decoded.get_value("display", "name") == "Cgame");
+	CHECK(decoded.get_value("display", "quality") == Variant(3));
+	CHECK(decoded.get_value("display", "enabled") == Variant(true));
+	CHECK(decoded.get_value("paths", "resource") == "res://assets/model.glb");
+
+	ConfigFile many;
+	for (int i = 0; i < 512; i++) {
+		many.set_value("values", "k_" + itos(i), i);
+	}
+	ConfigFile restored;
+	CHECK(restored.parse(many.encode_to_text()) == OK);
+	for (int i = 0; i < 512; i++) {
+		CHECK(restored.get_value("values", "k_" + itos(i)) == Variant(i));
+	}
+}
+
+TEST_CASE("[ConfigFile][Performance] Hot section and key lookups retain all semantics") {
+	ConfigFile config;
+	const int sections = 11;
+	const int keys = 128;
+	for (int section_index = 0; section_index < sections; section_index++) {
+		const String section = "group_" + itos(section_index);
+		for (int key_index = 0; key_index < keys; key_index++) {
+			config.set_value(section, "entry_" + itos(key_index), section_index * keys + key_index);
+		}
+	}
+	REQUIRE(config.get_sections().size() == sections);
+
+	for (int section_index = 0; section_index < sections; section_index++) {
+		const String section = "group_" + itos(section_index);
+		CHECK(config.has_section(section));
+		CHECK(config.get_section_keys(section).size() == keys);
+		for (int key_index = 0; key_index < keys; key_index++) {
+			const String key = "entry_" + itos(key_index);
+			CHECK(config.has_section_key(section, key));
+			CHECK(int(config.get_value(section, key)) == section_index * keys + key_index);
+		}
+	}
+
+	// Lookups for nonexistent keys must not create sections or values.
+	CHECK_FALSE(config.has_section_key("missing", "entry_1"));
+	CHECK_FALSE(config.has_section_key("group_1", "missing"));
+	CHECK(int(config.get_value("missing", "entry_1", -7)) == -7);
+	CHECK(int(config.get_value("group_1", "missing", 42)) == 42);
+	CHECK(config.get_sections().size() == sections);
+
+	// Updating existing values keeps insertion order; nil removes a key.
+	config.set_value("group_3", "entry_4", 1337);
+	CHECK(int(config.get_value("group_3", "entry_4")) == 1337);
+	config.set_value("group_3", "entry_4", Variant());
+	CHECK_FALSE(config.has_section_key("group_3", "entry_4"));
+	CHECK(config.get_section_keys("group_3").size() == keys - 1);
+	config.set_value("group_3", "entry_4", 4);
+	CHECK(int(config.get_value("group_3", "entry_4")) == 4);
+
+	// Clearing the last key removes its parent section automatically.
+	config.set_value("temporary", "only", 99);
+	config.erase_section_key("temporary", "only");
+	CHECK_FALSE(config.has_section("temporary"));
+
+	config.set_value("temporary", "only", 99);
+	config.set_value("temporary", "only", Variant());
+	CHECK_FALSE(config.has_section("temporary"));
+
+	config.erase_section("group_1");
+	CHECK_FALSE(config.has_section("group_1"));
+	CHECK(config.get_sections().size() == sections - 1);
+
+	// Section-less keys are inserted before named sections, even if late.
+	config.set_value("", "global", "ok");
+	const Vector<String> section_names = config.get_sections();
+	REQUIRE(section_names.size() == sections);
+	CHECK(section_names[0] == "");
+	CHECK(String(config.get_value("", "global")) == "ok");
+
+	const String serialized = config.encode_to_text();
+	ConfigFile restored;
+	CHECK(restored.parse(serialized) == OK);
+	CHECK(int(restored.get_value("group_3", "entry_4")) == 4);
+	CHECK(String(restored.get_value("", "global")) == "ok");
+	CHECK(restored.has_section("group_0"));
+	CHECK_FALSE(restored.has_section("group_1"));
+}
+
+TEST_CASE("[ConfigFile][Performance] Chunked large save retains exact values and encoding") {
+	ConfigFile config;
+	config.set_value("", "global", "unsectioned");
+	config.set_value("escaped]name", "bracket", 17);
+	config.set_value("unicode", String::utf8("ключ"), String::utf8("значение"));
+	const String payload = "The quick brown fox jumps over the lazy dog.";
+	for (int index = 0; index < 2300; ++index) {
+		config.set_value("bulk", "entry_" + itos(index), payload + itos(index));
+	}
+	// A single very large value must also be handled without splitting data.
+	config.set_value("bulk", "long_value", String("x").repeat(65536));
+
+#ifdef WINDOWS_ENABLED
+	const String path = OS::get_singleton()->get_environment("TEMP").path_join("config_chunked.ini");
+#else
+	const String path = "/tmp/config_chunked.ini";
+#endif
+	REQUIRE(config.save(path) == OK);
+	Ref<FileAccess> saved = FileAccess::open(path, FileAccess::READ);
+	REQUIRE(saved.is_valid());
+	const String bytes = saved->get_as_utf8_string();
+	CHECK(bytes.begins_with("global=\"unsectioned\"\n\n[escaped\\]name]\n\nbracket=17"));
+	CHECK(bytes.contains(String::utf8("ключ")));
+	CHECK(bytes.contains(String::utf8("значение")));
+	saved.unref();
+
+	ConfigFile restored;
+	REQUIRE(restored.load(path) == OK);
+	CHECK(String(restored.get_value("", "global")) == "unsectioned");
+	CHECK(int(restored.get_value("escaped]name", "bracket")) == 17);
+	CHECK(String(restored.get_value("unicode", String::utf8("ключ"))) == String::utf8("значение"));
+	CHECK(String(restored.get_value("bulk", "long_value")).length() == 65536);
+	for (int index = 0; index < 2300; ++index) {
+		CHECK(String(restored.get_value("bulk", "entry_" + itos(index))) == payload + itos(index));
+	}
+}
+
 } // namespace TestConfigFile

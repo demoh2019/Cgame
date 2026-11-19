@@ -1,0 +1,16 @@
+config_version=5
+
+[application]
+
+config/name="Cgame Jolt LRA Regression"
+
+[physics]
+
+3d/physics_engine="Jolt Physics"
+jolt_physics_3d/simulation/soft_body_lra_mode=2
+jolt_physics_3d/simulation/soft_body_lra_max_distance_multiplier=1.05
+
+[rendering]
+
+renderer/rendering_method="gl_compatibility"
+renderer/rendering_method.mobile="gl_compatibility"

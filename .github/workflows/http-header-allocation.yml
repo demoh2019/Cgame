@@ -1,0 +1,47 @@
+name: HTTP header allocation and trim regressions
+
+on:
+  pull_request:
+    branches: [develop]
+    paths:
+      - "core/io/http_client_tcp.cpp"
+      - "core/string/ustring.cpp"
+      - "core/string/ustring.h"
+      - "tests/core/string/test_string.cpp"
+      - "misc/scripts/tests/test_http_header_allocation.py"
+      - ".github/workflows/http-header-allocation.yml"
+  push:
+    branches: [develop]
+    paths:
+      - "core/io/http_client_tcp.cpp"
+      - "core/string/ustring.cpp"
+      - "core/string/ustring.h"
+      - "tests/core/string/test_string.cpp"
+      - "misc/scripts/tests/test_http_header_allocation.py"
+      - ".github/workflows/http-header-allocation.yml"
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  source-contracts:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - run: python3 -m unittest discover -s misc/scripts/tests -p test_http_header_allocation.py -v
+  native-string-tests:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+      - uses: ./.github/actions/godot-deps
+      - uses: ./.github/actions/godot-build
+        with:
+          platform: linuxbsd
+          target: editor
+          scons-flags: dev_build=yes tests=yes debug_symbols=no module_mono_enabled=no accesskit=no
+      - name: Run edge-trimming native tests
+        run: |
+          timeout 300s ./bin/godot.linuxbsd.editor.dev.x86_64 --headless --test --test-case="*strip_edges_span*" --no-colors

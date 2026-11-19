@@ -104,18 +104,23 @@ void JoltArea3D::_add_shape_pair(Overlap &p_overlap, const JPH::BodyID &p_body_i
 	p_overlap.rid = other_object->get_rid();
 	p_overlap.instance_id = other_object->get_instance_id();
 
-	HashMap<ShapeIDPair, ShapeIndexPair, ShapeIDPair>::Iterator shape_pair = p_overlap.shape_pairs.find(ShapeIDPair(p_other_shape_id, p_self_shape_id));
-	if (shape_pair == p_overlap.shape_pairs.end()) {
-		int other_shape_index = 0;
-		int self_shape_index = find_shape_index(p_self_shape_id);
-		if (const JoltShapedObject3D *other_shaped = other_object->as_shaped()) {
-			other_shape_index = other_shaped->find_shape_index(p_other_shape_id);
-		}
-
-		shape_pair = p_overlap.shape_pairs.insert(ShapeIDPair(p_other_shape_id, p_self_shape_id), ShapeIndexPair(other_shape_index, self_shape_index));
+	const ShapeIDPair shape_id_pair(p_other_shape_id, p_self_shape_id);
+	// A persisted sensor contact may be reported more than once, sometimes
+	// from separate Jolt workers. Only the first report changes membership.
+	// An extra pending enter would inflate ref_counts and suppress its exit.
+	if (p_overlap.shape_pairs.has(shape_id_pair)) {
+		return;
 	}
 
-	p_overlap.pending_added.push_back(shape_pair->value);
+	int other_shape_index = 0;
+	const int self_shape_index = find_shape_index(p_self_shape_id);
+	if (const JoltShapedObject3D *other_shaped = other_object->as_shaped()) {
+		other_shape_index = other_shaped->find_shape_index(p_other_shape_id);
+	}
+
+	const ShapeIndexPair shape_indices(other_shape_index, self_shape_index);
+	p_overlap.shape_pairs.insert(shape_id_pair, shape_indices);
+	p_overlap.pending_added.push_back(shape_indices);
 
 	_events_changed();
 }

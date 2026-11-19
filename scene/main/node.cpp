@@ -558,8 +558,18 @@ void Node::_move_child(Node *p_child, int p_index, bool p_ignore_end) {
 	int motion_from = MIN(p_index, child_index);
 	int motion_to = MAX(p_index, child_index);
 
-	data.children_cache.remove_at(child_index);
-	data.children_cache.insert(p_index, p_child);
+	// Shift only the nodes between the old and new positions. A
+	// remove_at()+insert() pair shifts two tails of the child array,
+	// making even an adjacent move O(total_children) rather than O(1).
+	// Node pointers are trivially relocatable, and the array length and
+	// storage stay unchanged throughout this operation.
+	Node **const children = data.children_cache.ptr();
+	if (child_index < p_index) {
+		std::memmove(children + child_index, children + child_index + 1, (p_index - child_index) * sizeof(Node *));
+	} else {
+		std::memmove(children + p_index + 1, children + p_index, (child_index - p_index) * sizeof(Node *));
+	}
+	children[p_index] = p_child;
 
 	if (data.tree) {
 		data.tree->tree_changed();
@@ -1579,26 +1589,26 @@ void Node::_validate_child_name(Node *p_child, bool p_force_human_readable) {
 
 // Return s + 1 as if it were an integer
 String increase_numeric_string(const String &s) {
-	String res = s;
-	bool carry = res.length() > 0;
+	if (s.is_empty()) {
+		return s;
+	}
 
-	for (int i = res.length() - 1; i >= 0; i--) {
-		if (!carry) {
-			break;
-		}
-		char32_t n = s[i];
-		if (n == '9') { // keep carry as true: 9 + 1
-			res[i] = '0';
+	String res = s;
+	// Detach the COW string once instead of repeatedly indexing through
+	// String::operator[] while propagating the carry over a long suffix.
+	char32_t *digits = res.ptrw();
+	bool carry = true;
+	for (int i = res.length() - 1; i >= 0 && carry; i--) {
+		if (digits[i] == '9') {
+			digits[i] = '0';
 		} else {
-			res[i] = s[i] + 1;
+			digits[i]++;
 			carry = false;
 		}
 	}
-
 	if (carry) {
 		res = "1" + res;
 	}
-
 	return res;
 }
 
@@ -1614,20 +1624,20 @@ void Node::_generate_serial_child_name(const Node *p_child, StringName &name) co
 		return;
 	}
 
-	// Extract trailing number
+	// Identify the trailing numeric suffix in one scan. Building it by
+	// repeatedly prepending a one-character String used quadratic copying.
 	String name_string = name;
+	int digit_start = name_string.length();
+	while (digit_start > 0 && is_digit(name_string[digit_start - 1])) {
+		digit_start--;
+	}
 	String nums;
-	for (int i = name_string.length() - 1; i >= 0; i--) {
-		char32_t n = name_string[i];
-		if (is_digit(n)) {
-			nums = String::chr(name_string[i]) + nums;
-		} else {
-			break;
-		}
+	if (digit_start != name_string.length()) {
+		nums = name_string.substr(digit_start);
 	}
 
-	String nnsep = _get_name_num_separator();
-	int name_last_index = name_string.length() - nnsep.length() - nums.length();
+	const String nnsep = _get_name_num_separator();
+	const int name_last_index = digit_start - nnsep.length();
 
 	// Assign the base name + separator to name if we have numbers preceded by a separator
 	if (nums.length() > 0 && name_string.substr(name_last_index, nnsep.length()) == nnsep) {
@@ -1802,20 +1812,87 @@ void Node::remove_child(RequiredParam<Node> p_child) {
 }
 
 void Node::_update_children_cache_impl() const {
-	// Assign children
-	data.children_cache.resize(data.children.size());
-	int idx = 0;
-	for (const KeyValue<StringName, Node *> &K : data.children) {
-		data.children_cache[idx] = K.value;
-		idx++;
+	const int child_count = data.children.size();
+	data.children_cache.resize(child_count);
+
+	// Child indices are maintained independently for front-internal, regular,
+	// and back-internal nodes. Unless an intervening deletion left gaps, they
+	// form dense permutations and we can scatter nodes directly into their
+	// final positions, avoiding O(n log n) comparison sorting.
+	if (child_count >= 16) {
+		int front_count = 0;
+		int external_count = 0;
+		int back_count = 0;
+		for (const KeyValue<StringName, Node *> &entry : data.children) {
+			switch (entry.value->data.internal_mode) {
+				case INTERNAL_MODE_FRONT: {
+					front_count++;
+				} break;
+				case INTERNAL_MODE_DISABLED: {
+					external_count++;
+				} break;
+				case INTERNAL_MODE_BACK: {
+					back_count++;
+				} break;
+			}
+		}
+
+		Node **ordered = data.children_cache.ptr();
+		for (int i = 0; i < child_count; i++) {
+			ordered[i] = nullptr;
+		}
+
+		bool dense_indices = true;
+		for (const KeyValue<StringName, Node *> &entry : data.children) {
+			Node *child = entry.value;
+			const int index = child->data.index;
+			int group_offset = 0;
+			int group_size = 0;
+			switch (child->data.internal_mode) {
+				case INTERNAL_MODE_FRONT: {
+					group_size = front_count;
+				} break;
+				case INTERNAL_MODE_DISABLED: {
+					group_offset = front_count;
+					group_size = external_count;
+				} break;
+				case INTERNAL_MODE_BACK: {
+					group_offset = front_count + external_count;
+					group_size = back_count;
+				} break;
+			}
+			// Check before adding the offset to avoid overflow on invalid
+			// indices. Holes or collisions require the legacy sorted path.
+			if (index < 0 || index >= group_size) {
+				dense_indices = false;
+				break;
+			}
+			const int position = group_offset + index;
+			if (ordered[position] != nullptr) {
+				dense_indices = false;
+				break;
+			}
+			ordered[position] = child;
+		}
+		if (dense_indices) {
+			data.internal_children_front_count_cache = front_count;
+			data.external_children_count_cache = external_count;
+			data.internal_children_back_count_cache = back_count;
+			data.children_cache_dirty = false;
+			return;
+		}
 	}
-	// Sort them
+
+	// Sparse child indices (normally caused by removing a non-last child):
+	// keep the established ordering and compact the indices afterwards.
+	int idx = 0;
+	for (const KeyValue<StringName, Node *> &entry : data.children) {
+		data.children_cache[idx++] = entry.value;
+	}
 	data.children_cache.sort_custom<ComparatorByIndex>();
-	// Update indices
 	data.external_children_count_cache = 0;
 	data.internal_children_back_count_cache = 0;
 	data.internal_children_front_count_cache = 0;
-
 	for (uint32_t i = 0; i < data.children_cache.size(); i++) {
 		switch (data.children_cache[i]->data.internal_mode) {
 			case INTERNAL_MODE_DISABLED: {
@@ -1925,12 +2002,13 @@ Node *Node::get_node_or_null(const NodePath &p_path) const {
 		return nullptr;
 	}
 
-	ERR_FAIL_COND_V_MSG(!data.tree && p_path.is_absolute(), nullptr, "Can't use get_node() with absolute paths from outside the active scene tree.");
+	const bool absolute = p_path.is_absolute();
+	ERR_FAIL_COND_V_MSG(!data.tree && absolute, nullptr, "Can't use get_node() with absolute paths from outside the active scene tree.");
 
 	Node *current = nullptr;
 	Node *root = nullptr;
 
-	if (!p_path.is_absolute()) {
+	if (!absolute) {
 		current = const_cast<Node *>(this); //start from this
 	} else {
 		root = const_cast<Node *>(this);
@@ -1939,8 +2017,16 @@ Node *Node::get_node_or_null(const NodePath &p_path) const {
 		}
 	}
 
-	for (int i = 0; i < p_path.get_name_count(); i++) {
-		StringName name = p_path.get_name(i);
+	const int name_count = p_path.get_name_count();
+	// Single-segment paths are common: do not acquire an entire Vector COW
+	// reference for them. Multi-segment lookups can share the path array once
+	// rather than atomically copying every StringName along the traversal.
+	const StringName single_name = name_count == 1 ? p_path.get_name(0) : StringName();
+	const Vector<StringName> borrowed_names = name_count > 1 ? p_path.get_names() : Vector<StringName>();
+	const StringName *name_data = name_count > 1 ? borrowed_names.ptr() : &single_name;
+
+	for (int i = 0; i < name_count; i++) {
+		const StringName &name = name_data[i];
 		Node *next = nullptr;
 
 		if (name == SNAME(".")) {
@@ -2007,6 +2093,34 @@ bool Node::has_node(const NodePath &p_path) const {
 Node *Node::find_child(const String &p_pattern, bool p_recursive, bool p_owned) const {
 	ERR_THREAD_GUARD_V(nullptr);
 	ERR_FAIL_COND_V(p_pattern.is_empty(), nullptr);
+
+	// Exact names are the common case in scripts and editor tooling. Avoid
+	// wildcard matching for every candidate and use the child-name hash for
+	// nonrecursive lookups. Recursive searches retain depth-first ordering.
+	if (!p_pattern.contains_char('*') && !p_pattern.contains_char('?')) {
+		const StringName exact_name(p_pattern);
+		if (!p_recursive) {
+			Node *child = _get_child_by_name(exact_name);
+			return child && (!p_owned || child->data.owner) ? child : nullptr;
+		}
+		auto find_exact = [&](auto &&self, const Node *p_parent) -> Node * {
+			p_parent->_update_children_cache();
+			for (Node *child : p_parent->data.children_cache) {
+				if (p_owned && !child->data.owner) {
+					continue;
+				}
+				if (child->data.name == exact_name) {
+					return child;
+				}
+				if (Node *match = self(self, child)) {
+					return match;
+				}
+			}
+			return nullptr;
+		};
+		return find_exact(find_exact, this);
+	}
+
 	_update_children_cache();
 	Node *const *cptr = data.children_cache.ptr();
 	int ccount = data.children_cache.size();
@@ -2037,35 +2151,107 @@ TypedArray<Node> Node::find_children(const String &p_pattern, const String &p_ty
 	ERR_THREAD_GUARD_V(TypedArray<Node>());
 	TypedArray<Node> ret;
 	ERR_FAIL_COND_V(p_pattern.is_empty() && p_type.is_empty(), ret);
-	_update_children_cache();
-	Node *const *cptr = data.children_cache.ptr();
-	int ccount = data.children_cache.size();
-	for (int i = 0; i < ccount; i++) {
-		if (p_owned && !cptr[i]->data.owner) {
-			continue;
-		}
 
-		if (p_pattern.is_empty() || cptr[i]->data.name.string().match(p_pattern)) {
-			if (p_type.is_empty() || cptr[i]->is_class(p_type)) {
-				ret.append(cptr[i]);
-			} else if (cptr[i]->get_script_instance()) {
-				Ref<Script> scr = cptr[i]->get_script_instance()->get_script();
-				while (scr.is_valid()) {
-					if ((ScriptServer::is_global_class(p_type) && ScriptServer::get_global_class_path(p_type) == scr->get_path()) || p_type == scr->get_path()) {
-						ret.append(cptr[i]);
-						break;
-					}
+	// A precise direct-child lookup can use the existing name map
+	// without rebuilding or sorting the child-order cache.
+	if (data.children.is_empty()) {
+		return ret;
+	}
 
-					scr = scr->get_base_script();
-				}
-			}
-		}
-
-		if (p_recursive) {
-			ret.append_array(cptr[i]->find_children(p_pattern, p_type, true, p_owned));
+	// Match literal names using their interned StringName rather than running
+	// the wildcard matcher once for every node in large scene trees.
+	const bool exact_name_match = !p_pattern.is_empty() && !p_pattern.contains_char('*') && !p_pattern.contains_char('?');
+	const StringName exact_name = exact_name_match ? StringName(p_pattern) : StringName();
+	Node *exact_child = nullptr;
+	if (!p_recursive && exact_name_match) {
+		exact_child = _get_child_by_name(exact_name);
+		// A miss or a filtered-out child does not need type resolution or
+		// any traversal cache allocation, even when the cache is dirty.
+		if (!exact_child || (p_owned && !exact_child->data.owner)) {
+			return ret;
 		}
 	}
 
+	// Resolve the global script type once, rather than once for each matching child.
+	const bool is_global_type = !p_type.is_empty() && ScriptServer::is_global_class(p_type);
+	const String global_type_path = is_global_type ? ScriptServer::get_global_class_path(p_type) : String();
+
+	auto append_match = [&](Node *p_node) {
+		if (!p_pattern.is_empty() && !(exact_name_match ? p_node->data.name == exact_name : p_node->data.name.string().match(p_pattern))) {
+			return;
+		}
+		if (p_type.is_empty() || p_node->is_class(p_type)) {
+			ret.append(p_node);
+			return;
+		}
+		ScriptInstance *instance = p_node->get_script_instance();
+		if (!instance) {
+			return;
+		}
+		Ref<Script> script_ref = instance->get_script();
+		while (script_ref.is_valid()) {
+			const String script_path = script_ref->get_path();
+			if ((is_global_type && global_type_path == script_path) || p_type == script_path) {
+				ret.append(p_node);
+				return;
+			}
+			script_ref = script_ref->get_base_script();
+		}
+	};
+
+	if (!p_recursive && exact_name_match) {
+		append_match(exact_child);
+		return ret;
+	}
+
+	// Only wildcard or recursive traversals require the ordered child cache.
+	_update_children_cache();
+	if (!p_recursive) {
+		// Avoid allocating a traversal stack for a non-recursive query.
+		for (Node *child : data.children_cache) {
+			if (!p_owned || child->data.owner) {
+				append_match(child);
+			}
+		}
+		return ret;
+	}
+
+	// Traverse depth-first with parent pointers and the cached child indices.
+	// Unlike a per-call DFS stack, this does not allocate even for deep trees.
+	Node *current_node = data.children_cache[0];
+	while (current_node != this) {
+		if (!p_owned || current_node->data.owner) {
+			append_match(current_node);
+			current_node->_update_children_cache();
+			if (!current_node->data.children_cache.is_empty()) {
+				current_node = current_node->data.children_cache[0];
+				continue;
+			}
+		}
+
+		// Go to the next sibling, climbing until the enclosing subtree has
+		// another child. Child indices are relative to their internal mode;
+		// children_cache also contains front and back internal children.
+		while (current_node != this) {
+			Node *parent = current_node->data.parent;
+			uint32_t next_index = current_node->data.index + 1;
+			switch (current_node->data.internal_mode) {
+				case INTERNAL_MODE_FRONT: {
+				} break;
+				case INTERNAL_MODE_DISABLED: {
+					next_index += parent->data.internal_children_front_count_cache;
+				} break;
+				case INTERNAL_MODE_BACK: {
+					next_index += parent->data.internal_children_front_count_cache + parent->data.external_children_count_cache;
+				} break;
+			}
+			if (next_index < parent->data.children_cache.size()) {
+				current_node = parent->data.children_cache[next_index];
+				break;
+			}
+			current_node = parent;
+		}
+	}
 	return ret;
 }
 
@@ -2094,8 +2280,14 @@ void Node::reparent(RequiredParam<Node> p_parent, bool p_keep_global_transform) 
 			Node *check = to_visit[to_visit.size() - 1];
 			to_visit.resize(to_visit.size() - 1);
 
-			for (int i = 0; i < check->get_child_count(false); i++) {
-				Node *child = check->get_child(i, false);
+			// Read the ordered cache once. get_child_count() followed by
+			// get_child() for every child repeats guards and cache checks,
+			// which adds up when reparenting owned scenes with many nodes.
+			check->_update_children_cache();
+			const int first = check->data.internal_children_front_count_cache;
+			const int past_end = check->data.children_cache.size() - check->data.internal_children_back_count_cache;
+			for (int i = first; i < past_end; i++) {
+				Node *child = check->data.children_cache[i];
 				to_visit.push_back(child);
 				if (child->data.owner == owner_temp) {
 					common_parents.push_back(child);
@@ -2121,14 +2313,18 @@ Node *Node::get_parent() const {
 
 Node *Node::find_parent(const String &p_pattern) const {
 	ERR_THREAD_GUARD_V(nullptr);
+	if (p_pattern.is_empty()) {
+		return nullptr;
+	}
+	const bool exact_name_match = !p_pattern.contains_char('*') && !p_pattern.contains_char('?');
+	const StringName exact_name = exact_name_match ? StringName(p_pattern) : StringName();
 	Node *p = data.parent;
 	while (p) {
-		if (p->data.name.string().match(p_pattern)) {
+		if (exact_name_match ? p->data.name == exact_name : p->data.name.string().match(p_pattern)) {
 			return p;
 		}
 		p = p->data.parent;
 	}
-
 	return nullptr;
 }
 
@@ -2344,30 +2540,43 @@ Node *Node::find_common_parent_with(const Node *p_node) const {
 	if (this == p_node) {
 		return const_cast<Node *>(p_node);
 	}
-
-	HashSet<const Node *> visited;
-
-	const Node *n = this;
-
-	while (n) {
-		visited.insert(n);
-		n = n->data.parent;
-	}
-
-	const Node *common_parent = p_node;
-
-	while (common_parent) {
-		if (visited.has(common_parent)) {
-			break;
-		}
-		common_parent = common_parent->data.parent;
-	}
-
-	if (!common_parent) {
+	if (!p_node) {
 		return nullptr;
 	}
 
-	return const_cast<Node *>(common_parent);
+	const Node *left = this;
+	const Node *right = p_node;
+	uint32_t left_depth = calculate_depth();
+	uint32_t right_depth = p_node->calculate_depth();
+
+	// Align both nodes by depth before walking to their first common parent.
+	while (left_depth > right_depth) {
+		left = left->data.parent;
+		left_depth--;
+	}
+	while (right_depth > left_depth) {
+		right = right->data.parent;
+		right_depth--;
+	}
+	while (left && left != right) {
+		left = left->data.parent;
+		right = right->data.parent;
+	}
+	return const_cast<Node *>(left);
+}
+
+uint32_t Node::calculate_depth() const {
+	if (is_inside_tree()) {
+		return data.depth;
+	}
+
+	uint32_t depth = 0;
+	const Node *iter = this;
+	while (iter) {
+		depth += 1;
+		iter = iter->data.parent;
+	}
+	return depth;
 }
 
 NodePath Node::get_path_to(RequiredParam<const Node> p_node, bool p_use_unique_path) const {
@@ -2377,27 +2586,29 @@ NodePath Node::get_path_to(RequiredParam<const Node> p_node, bool p_use_unique_p
 		return NodePath(".");
 	}
 
-	HashSet<const Node *> visited;
-
 	const Node *n = this;
+	const Node *common_parent = node;
 
-	while (n) {
-		visited.insert(n);
+	const uint32_t this_depth = calculate_depth();
+	const uint32_t other_depth = node->calculate_depth();
+	uint32_t common_parent_depth = other_depth;
+
+	for (uint32_t i = other_depth; i > this_depth; i--) {
+		common_parent = common_parent->data.parent;
+		common_parent_depth -= 1;
+	}
+
+	for (uint32_t i = this_depth; i > other_depth; i--) {
 		n = n->data.parent;
 	}
 
-	const Node *common_parent = node;
-
-	while (common_parent) {
-		if (visited.has(common_parent)) {
-			break;
-		}
+	while (common_parent != n) {
 		common_parent = common_parent->data.parent;
+		n = n->data.parent;
+		common_parent_depth -= 1;
 	}
 
 	ERR_FAIL_NULL_V_MSG(common_parent, NodePath(), vformat("No path can be resolved between the nodes %s and %s as they share no common ancestor.", get_description(true), node->get_description(true)));
-
-	visited.clear();
 
 	Vector<StringName> path;
 	StringName up = String("..");
@@ -2438,23 +2649,30 @@ NodePath Node::get_path_to(RequiredParam<const Node> p_node, bool p_use_unique_p
 				path.push_back(UNIQUE_NODE_PREFIX + detected_name);
 			}
 		}
+		path.reverse();
 	} else {
-		n = node;
+		const int32_t this_branch_depth = (this_depth - common_parent_depth);
+		const int32_t other_branch_depth = (other_depth - common_parent_depth);
 
+		path.resize(this_branch_depth + other_branch_depth);
+
+		int i = 0;
+		n = this;
+		StringName *ptrw = path.ptrw();
 		while (n != common_parent) {
-			path.push_back(n->get_name());
+			ptrw[i] = up;
+			i++;
 			n = n->data.parent;
 		}
 
-		n = this;
-
+		n = node;
+		i = this_branch_depth + other_branch_depth - 1;
 		while (n != common_parent) {
-			path.push_back(up);
+			ptrw[i] = n->get_name();
+			i--;
 			n = n->data.parent;
 		}
 	}
-
-	path.reverse();
 
 	return NodePath(path, false);
 }
@@ -3533,7 +3751,7 @@ void Node::get_argument_options(const StringName &p_function, int p_idx, List<St
 	if (p_idx == 0 && (pf == "has_node" || pf == "get_node" || pf == "get_node_or_null")) {
 		_add_nodes_to_options(this, this, r_options);
 	} else if (p_idx == 0 && (pf == "add_to_group" || pf == "remove_from_group" || pf == "is_in_group")) {
-		HashMap<StringName, String> global_groups(ProjectSettings::get_singleton()->get_global_groups_list());
+		const HashMap<StringName, String> &global_groups = ProjectSettings::get_singleton()->get_global_groups_list();
 		for (const KeyValue<StringName, String> &E : global_groups) {
 			r_options->push_back(E.key.string().quote());
 		}

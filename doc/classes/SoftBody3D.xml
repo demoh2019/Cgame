@@ -84,6 +84,18 @@
 				Returns local translation of a vertex in the surface array.
 			</description>
 		</method>
+		<method name="get_tetrahedral_indices" qualifiers="const">
+			<return type="PackedInt32Array" />
+			<description>
+				Returns the experimental FEM tetrahedral connectivity. Every quadruplet references either a visual mesh vertex or an additional internal simulation vertex (the internal indices follow all visual vertex indices).
+			</description>
+		</method>
+		<method name="get_tetrahedral_interior_positions" qualifiers="const">
+			<return type="PackedVector3Array" />
+			<description>
+				Returns the additional FEM-only rest positions, which are not rendered or used as surface collision points.
+			</description>
+		</method>
 		<method name="is_point_pinned" qualifiers="const">
 			<return type="bool" />
 			<param index="0" name="point_index" type="int" />
@@ -122,6 +134,20 @@
 			<param index="3" name="insert_at" type="int" default="-1" />
 			<description>
 				Sets the pinned state of a surface vertex. When set to [code]true[/code], the optional [param attachment_path] can define a [Node3D] the pinned vertex will be attached to.
+			</description>
+		</method>
+		<method name="set_tetrahedral_indices">
+			<return type="void" />
+			<param index="0" name="indices" type="PackedInt32Array" />
+			<description>
+				Sets experimental FEM tetrahedral connectivity. Each group of four indices refers to either the mesh's visual vertex array or to the interior vertices in [member tetrahedral_interior_positions], starting at the visual vertex count. Welded visual duplicates map to shared physical nodes.
+			</description>
+		</method>
+		<method name="set_tetrahedral_interior_positions">
+			<return type="void" />
+			<param index="0" name="positions" type="PackedVector3Array" />
+			<description>
+				Sets extra internal FEM simulation vertices in local coordinates. Updating the array after assigning a mesh rebuilds the physical soft body so existing face pointers remain valid.
 			</description>
 		</method>
 	</methods>
@@ -165,6 +191,13 @@
 		</member>
 		<member name="simulation_precision" type="int" setter="set_simulation_precision" getter="get_simulation_precision" default="5">
 			Increasing this value will improve the resulting simulation, but can affect performance. Use with care.
+		</member>
+		<member name="tetrahedral_interior_positions" type="PackedVector3Array" setter="set_tetrahedral_interior_positions" getter="get_tetrahedral_interior_positions" default="PackedVector3Array()">
+			Additional tetrahedral FEM simulation particles in local mesh coordinates. They do not appear in the visual surface or as independent point collision primitives. Each is integrated and can deform under FEM and contribute to tetra-volume-dependent mass. Their tetra indices start at the original number of visual mesh vertices; for eight visual vertices, the first interior vertex has index 8. Maximum 1024 interior vertices and 2048 physical FEM vertices total. Non-finite coordinates are rejected. This feature is only implemented for the Cgame GodotPhysics3D backend.
+		</member>
+		<member name="tetrahedral_indices" type="PackedInt32Array" setter="set_tetrahedral_indices" getter="get_tetrahedral_indices" default="PackedInt32Array()">
+			An optional, pre-cooked list of four visual vertex indices for each volume finite element. In the GodotPhysics3D backend, this bypasses automatic convex tetrahedralization and allows conforming [i]nonconvex[/i] tetrahedral assemblies whose exact boundary triangles match the [SoftBody3D] mesh. All element faces, orientation, finite rest volumes and total enclosed volume are validated; invalid connectivity disables just the experimental FEM path.
+			[b]Note:[/b] Optional FEM-only interior simulation vertices are supplied through [member tetrahedral_interior_positions]; their indices follow the visual mesh's original vertex count. Independent collision meshes, arbitrary render-surface embedding and geometric overlap repair are not implemented. Maximum 4096 tetrahedra. Backends without this Cgame extension ignore the property.
 		</member>
 		<member name="total_mass" type="float" setter="set_total_mass" getter="get_total_mass" default="1.0">
 			The SoftBody3D's mass.

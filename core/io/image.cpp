@@ -2308,9 +2308,13 @@ Error Image::generate_mipmap_roughness(RoughnessChannel p_roughness_channel, con
 
 	ERR_FAIL_COND_V_MSG(p_normal_map.is_null() || p_normal_map->is_empty(), ERR_INVALID_PARAMETER, "Must provide a valid normal map for roughness mipmaps");
 
-	Ref<Image> nm = p_normal_map->duplicate();
+	// Uncompressed normal maps are read-only here: avoid duplicating their
+	// Image object. Compressed maps still need an isolated decompressed copy.
+	Ref<Image> nm = p_normal_map;
 	if (nm->is_compressed()) {
-		nm->decompress();
+		nm = p_normal_map->duplicate();
+		const Error result = nm->decompress();
+		ERR_FAIL_COND_V(result != OK, result);
 	}
 
 	normal_w = nm->get_width();
@@ -2318,13 +2322,16 @@ Error Image::generate_mipmap_roughness(RoughnessChannel p_roughness_channel, con
 
 	normal_sat_vec.resize(normal_w * normal_h * 3);
 	double *normal_sat = normal_sat_vec.ptr();
+	const uint8_t *const normal_pixels = nm->data.ptr();
 
-	// Create summed area table.
+	// Create the summed area table in row order, resolving the normal
+	// map's byte pointer once instead of calling get_pixel for every pixel.
 	for (int y = 0; y < normal_h; y++) {
+		const uint32_t row_ofs = uint32_t(y) * normal_w;
 		double line_sum[3] = { 0, 0, 0 };
 		for (int x = 0; x < normal_w; x++) {
 			double normal[3];
-			Color color = nm->get_pixel(x, y);
+			const Color color = nm->_get_color_at_ofs(normal_pixels, row_ofs + x);
 			normal[0] = color.r * 2.0 - 1.0;
 			normal[1] = color.g * 2.0 - 1.0;
 			normal[2] = Math::sqrt(MAX(0.0, 1.0 - (normal[0] * normal[0] + normal[1] * normal[1]))); //reconstruct if missing
@@ -2333,7 +2340,7 @@ Error Image::generate_mipmap_roughness(RoughnessChannel p_roughness_channel, con
 			line_sum[1] += normal[1];
 			line_sum[2] += normal[2];
 
-			uint32_t ofs = (y * normal_w + x) * 3;
+			uint32_t ofs = (row_ofs + x) * 3;
 
 			normal_sat[ofs + 0] = line_sum[0];
 			normal_sat[ofs + 1] = line_sum[1];
@@ -2360,17 +2367,17 @@ Error Image::generate_mipmap_roughness(RoughnessChannel p_roughness_channel, con
 		_get_mipmap_offset_and_size(i, ofs, w, h);
 		uint8_t *ptr = &base_ptr[ofs];
 
-		for (int x = 0; x < w; x++) {
-			for (int y = 0; y < h; y++) {
-				int from_x = x * normal_w / w;
-				int from_y = y * normal_h / h;
-				int to_x = (x + 1) * normal_w / w;
-				int to_y = (y + 1) * normal_h / h;
-				to_x = MIN(to_x - 1, normal_w);
-				to_y = MIN(to_y - 1, normal_h);
-
-				int size_x = (to_x - from_x) + 1;
-				int size_y = (to_y - from_y) + 1;
+		// Use row-major stores for contiguous destination writes and better
+		// summed-area-table cache locality. Vertical source bounds are
+		// shared by every output pixel of a given row.
+		for (int y = 0; y < h; y++) {
+			const int from_y = y * normal_h / h;
+			const int to_y = MIN((y + 1) * normal_h / h - 1, normal_h);
+			const int size_y = (to_y - from_y) + 1;
+			for (int x = 0; x < w; x++) {
+				const int from_x = x * normal_w / w;
+				const int to_x = MIN((x + 1) * normal_w / w - 1, normal_w);
+				const int size_x = (to_x - from_x) + 1;
 
 				//summed area table version (much faster)
 
@@ -3254,25 +3261,43 @@ void Image::blit_rect(const Ref<Image> &p_src, const Rect2i &p_src_rect, const P
 		return;
 	}
 
-	uint8_t *wp = data.ptrw();
-	uint8_t *dst_data_ptr = wp;
+	const bool self_blit = p_src.ptr() == this;
+	// A no-op self-copy must not detach a shared copy-on-write image buffer.
+	if (self_blit && src_rect.position == dest_rect.position) {
+		return;
+	}
 
-	const uint8_t *rp = p_src->data.ptr();
-	const uint8_t *src_data_ptr = rp;
+	uint8_t *const dst_pixels = data.ptrw();
+	const uint8_t *const src_pixels = p_src->data.ptr();
+	const size_t pixel_size = get_format_pixel_size(format);
 
-	int pixel_size = get_format_pixel_size(format);
-
-	// If the rect width is equivalent for both src and dst and the x offset is 0, we can blit in a single memcpy.
-	// Else, we do a per-line copy.
-	if ((dest_rect.size.x == p_src->width) && (p_src->width == width) && (dest_rect.position.x == 0) && (src_rect.position.x == 0)) {
-		const uint8_t *src = &src_data_ptr[(src_rect.position.y * p_src->width) * pixel_size];
-		uint8_t *dst = &dst_data_ptr[(dest_rect.position.y * width) * pixel_size];
-		memcpy(dst, src, width * dest_rect.size.y * pixel_size);
+	// Whole rows are contiguous in memory. memmove handles self-overlap
+	// without an intermediate image allocation, and memcpy remains the
+	// fast path for distinct source and destination objects.
+	if (dest_rect.size.x == p_src->width && p_src->width == width &&
+			dest_rect.position.x == 0 && src_rect.position.x == 0) {
+		const size_t src_offset = size_t(src_rect.position.y) * p_src->width * pixel_size;
+		const size_t dst_offset = size_t(dest_rect.position.y) * width * pixel_size;
+		const size_t bytes = size_t(width) * dest_rect.size.y * pixel_size;
+		if (self_blit) {
+			memmove(dst_pixels + dst_offset, src_pixels + src_offset, bytes);
+		} else {
+			memcpy(dst_pixels + dst_offset, src_pixels + src_offset, bytes);
+		}
 	} else {
-		for (int i = 0; i < dest_rect.size.y; i++) {
-			const uint8_t *src = &src_data_ptr[((src_rect.position.y + i) * p_src->width + src_rect.position.x) * pixel_size];
-			uint8_t *dst = &dst_data_ptr[((dest_rect.position.y + i) * width + dest_rect.position.x) * pixel_size];
-			memcpy(dst, src, pixel_size * dest_rect.size.x);
+		// When moving pixels down in the same image, process lower rows first
+		// so that later reads still observe their original source pixels.
+		const bool reverse_rows = self_blit && dest_rect.position.y > src_rect.position.y;
+		const size_t row_bytes = size_t(dest_rect.size.x) * pixel_size;
+		for (int row = 0; row < dest_rect.size.y; row++) {
+			const int i = reverse_rows ? dest_rect.size.y - 1 - row : row;
+			const size_t src_offset = (size_t(src_rect.position.y + i) * p_src->width + src_rect.position.x) * pixel_size;
+			const size_t dst_offset = (size_t(dest_rect.position.y + i) * width + dest_rect.position.x) * pixel_size;
+			if (self_blit) {
+				memmove(dst_pixels + dst_offset, src_pixels + src_offset, row_bytes);
+			} else {
+				memcpy(dst_pixels + dst_offset, src_pixels + src_offset, row_bytes);
+			}
 		}
 	}
 }
@@ -3304,6 +3329,67 @@ void Image::blit_rect_mask(const Ref<Image> &p_src, const Ref<Image> &p_mask, co
 	const uint8_t *src_data_ptr = rp;
 
 	int pixel_size = get_format_pixel_size(format);
+
+	// The common RGBA8 mask needs only its alpha byte, not a full Color
+	// conversion for every pixel. Copy contiguous visible spans in one block.
+	// Keep the scalar path when either image aliases the destination: source
+	// or mask pixels can otherwise change while the operation is in progress.
+	if (p_mask->format == FORMAT_RGBA8 && !is_compressed() && p_mask.ptr() != this && p_src.ptr() != this) {
+		const uint8_t *mask_data = p_mask->data.ptr();
+		const int row_width = dest_rect.size.x;
+		for (int y = 0; y < dest_rect.size.y; y++) {
+			const size_t source_pixel = size_t(src_rect.position.y + y) * p_src->width + src_rect.position.x;
+			const size_t dest_pixel = size_t(dest_rect.position.y + y) * width + dest_rect.position.x;
+			const uint8_t *mask_alpha = mask_data + source_pixel * 4 + 3;
+			int x = 0;
+			while (x < row_width) {
+				while (x < row_width && mask_alpha[size_t(x) * 4] == 0) {
+					x++;
+				}
+				const int run_start = x;
+				while (x < row_width && mask_alpha[size_t(x) * 4] != 0) {
+					x++;
+				}
+				if (run_start != x) {
+					memcpy(dst_data_ptr + (dest_pixel + run_start) * pixel_size,
+							src_data_ptr + (source_pixel + run_start) * pixel_size,
+							size_t(x - run_start) * pixel_size);
+				}
+			}
+		}
+		return;
+	}
+
+	// Other uncompressed mask formats still fell back to get_pixel() on
+	// every pixel, followed by an individual byte-wise source copy. Read
+	// their alpha directly from the mask buffer and batch adjacent visible
+	// pixels into a single memcpy. Preserve the scalar fallback for image
+	// aliasing, where writes can affect later reads.
+	if (!is_compressed() && !p_mask->is_compressed() &&
+			p_mask.ptr() != this && p_src.ptr() != this) {
+		const uint8_t *const mask_data = p_mask->data.ptr();
+		const int row_width = dest_rect.size.x;
+		for (int y = 0; y < dest_rect.size.y; y++) {
+			const size_t source_pixel = size_t(src_rect.position.y + y) * p_src->width + src_rect.position.x;
+			const size_t dest_pixel = size_t(dest_rect.position.y + y) * width + dest_rect.position.x;
+			int run_start = -1;
+			for (int x = 0; x <= row_width; x++) {
+				const bool visible = x < row_width &&
+						p_mask->_get_color_at_ofs(mask_data, uint32_t(source_pixel + x)).a != 0;
+				if (visible) {
+					if (run_start == -1) {
+						run_start = x;
+					}
+				} else if (run_start != -1) {
+					memcpy(dst_data_ptr + (dest_pixel + run_start) * pixel_size,
+							src_data_ptr + (source_pixel + run_start) * pixel_size,
+							size_t(x - run_start) * pixel_size);
+					run_start = -1;
+				}
+			}
+		}
+		return;
+	}
 
 	Ref<Image> msk = p_mask;
 
@@ -3339,6 +3425,26 @@ void Image::blend_rect(const Ref<Image> &p_src, const Rect2i &p_src_rect, const 
 	Rect2i dest_rect;
 	_get_clipped_src_and_dest_rects(p_src, p_src_rect, p_dest, src_rect, dest_rect);
 	if (!src_rect.has_area() || !dest_rect.has_area()) {
+		return;
+	}
+
+	// Hoist copy-on-write detachment and pointer lookups out of the pixel loop.
+	// Keep the established scalar traversal for self-overlapping blits and
+	// compressed formats where pixel offsets are not directly addressable.
+	if (p_src.ptr() != this && !is_compressed()) {
+		uint8_t *dst_pixels = data.ptrw();
+		const uint8_t *src_pixels = p_src->data.ptr();
+		for (int y = 0; y < dest_rect.size.y; y++) {
+			const uint32_t src_row = (src_rect.position.y + y) * p_src->width + src_rect.position.x;
+			const uint32_t dst_row = (dest_rect.position.y + y) * width + dest_rect.position.x;
+			for (int x = 0; x < dest_rect.size.x; x++) {
+				const Color sc = p_src->_get_color_at_ofs(src_pixels, src_row + x);
+				if (sc.a != 0) {
+					const uint32_t dst_offset = dst_row + x;
+					_set_color_at_ofs(dst_pixels, dst_offset, _get_color_at_ofs(dst_pixels, dst_offset).blend(sc));
+				}
+			}
+		}
 		return;
 	}
 
@@ -3379,6 +3485,31 @@ void Image::blend_rect_mask(const Ref<Image> &p_src, const Ref<Image> &p_mask, c
 	Rect2i dest_rect;
 	_get_clipped_src_and_dest_rects(p_src, p_src_rect, p_dest, src_rect, dest_rect);
 	if (!src_rect.has_area() || !dest_rect.has_area()) {
+		return;
+	}
+
+	// Read RGBA8 alpha bytes directly, and detach the destination's COW
+	// buffer only once. Exclude self-blits and destination-mask aliasing:
+	// their scalar behavior depends on preceding writes within the same call.
+	if (p_mask->format == FORMAT_RGBA8 && !is_compressed() && p_src.ptr() != this && p_mask.ptr() != this) {
+		uint8_t *dst_pixels = data.ptrw();
+		const uint8_t *src_pixels = p_src->data.ptr();
+		const uint8_t *mask_pixels = p_mask->data.ptr();
+		for (int y = 0; y < dest_rect.size.y; y++) {
+			const uint32_t src_row = (src_rect.position.y + y) * p_src->width + src_rect.position.x;
+			const uint32_t dst_row = (dest_rect.position.y + y) * width + dest_rect.position.x;
+			for (int x = 0; x < dest_rect.size.x; x++) {
+				const uint32_t src_offset = src_row + x;
+				if (mask_pixels[size_t(src_offset) * 4 + 3] == 0) {
+					continue;
+				}
+				const Color sc = p_src->_get_color_at_ofs(src_pixels, src_offset);
+				if (sc.a != 0) {
+					const uint32_t dst_offset = dst_row + x;
+					_set_color_at_ofs(dst_pixels, dst_offset, _get_color_at_ofs(dst_pixels, dst_offset).blend(sc));
+				}
+			}
+		}
 		return;
 	}
 
@@ -3944,27 +4075,67 @@ Image::UsedChannels Image::detect_used_channels(CompressSource p_source) const {
 	return used_channels;
 }
 
-void Image::optimize_channels() {
-	switch (detect_used_channels()) {
+void Image::optimize_from_channels(UsedChannels p_channels) {
+	switch (p_channels) {
 		case USED_CHANNELS_L:
-			convert(FORMAT_L8);
+			if (format >= FORMAT_L8 && format <= FORMAT_RGB565) {
+				convert(FORMAT_L8);
+			} else if (format >= FORMAT_RF && format <= FORMAT_RGBAF) {
+				convert(FORMAT_RGBF);
+			} else if (format >= FORMAT_RH && format <= FORMAT_RGBAH) {
+				convert(FORMAT_RGBH);
+			}
 			break;
 		case USED_CHANNELS_LA:
-			convert(FORMAT_LA8);
+			if (format >= FORMAT_L8 && format <= FORMAT_RGB565) {
+				convert(FORMAT_LA8);
+			} else if (format >= FORMAT_RF && format <= FORMAT_RGBAF) {
+				convert(FORMAT_RGBAF);
+			} else if (format >= FORMAT_RH && format <= FORMAT_RGBAH) {
+				convert(FORMAT_RGBAH);
+			}
 			break;
 		case USED_CHANNELS_R:
-			convert(FORMAT_R8);
+			if (format >= FORMAT_L8 && format <= FORMAT_RGB565) {
+				convert(FORMAT_R8);
+			} else if (format >= FORMAT_RF && format <= FORMAT_RGBAF) {
+				convert(FORMAT_RF);
+			} else if (format >= FORMAT_RH && format <= FORMAT_RGBE9995) {
+				convert(FORMAT_RH);
+			}
 			break;
 		case USED_CHANNELS_RG:
-			convert(FORMAT_RG8);
+			if (format >= FORMAT_L8 && format <= FORMAT_RGB565) {
+				convert(FORMAT_RG8);
+			} else if (format >= FORMAT_RF && format <= FORMAT_RGBAF) {
+				convert(FORMAT_RGF);
+			} else if (format >= FORMAT_RH && format <= FORMAT_RGBE9995) {
+				convert(FORMAT_RGH);
+			}
 			break;
 		case USED_CHANNELS_RGB:
-			convert(FORMAT_RGB8);
+			if ((format >= FORMAT_L8 && format <= FORMAT_RGBA8) || format == FORMAT_RGB565) {
+				convert(FORMAT_RGB8);
+			} else if (format >= FORMAT_RF && format <= FORMAT_RGBAF) {
+				convert(FORMAT_RGBF);
+			} else if (format >= FORMAT_RH && format <= FORMAT_RGBAH) {
+				convert(FORMAT_RGBH);
+			}
 			break;
 		case USED_CHANNELS_RGBA:
-			convert(FORMAT_RGBA8);
+			if (format >= FORMAT_L8 && format <= FORMAT_RGBA8) {
+				convert(FORMAT_RGBA8);
+			} else if (format >= FORMAT_RF && format <= FORMAT_RGBAF) {
+				convert(FORMAT_RGBAF);
+			} else if (format >= FORMAT_RH && format <= FORMAT_RGBAH) {
+				convert(FORMAT_RGBAH);
+			}
 			break;
 	}
+}
+
+void Image::optimize_channels() {
+	optimize_from_channels(detect_used_channels());
 }
 
 void Image::_bind_methods() {
@@ -4833,10 +5004,9 @@ void Image::renormalize_uint8(uint8_t *p_rgb) {
 	n.normalize();
 	n += Vector3(1, 1, 1);
 	n *= 0.5;
-	n *= 255;
-	p_rgb[0] = CLAMP(int(Math::round(n.x)), 0, 255);
-	p_rgb[1] = CLAMP(int(Math::round(n.y)), 0, 255);
-	p_rgb[2] = CLAMP(int(Math::round(n.z)), 0, 255);
+	p_rgb[0] = _quantize_unorm_fast<uint8_t>(n.x, 255.0f);
+	p_rgb[1] = _quantize_unorm_fast<uint8_t>(n.y, 255.0f);
+	p_rgb[2] = _quantize_unorm_fast<uint8_t>(n.z, 255.0f);
 }
 
 void Image::renormalize_float(float *p_rgb) {
@@ -4870,10 +5040,9 @@ void Image::renormalize_uint16(uint16_t *p_rgb) {
 	n.normalize();
 	n += Vector3(1, 1, 1);
 	n *= 0.5;
-	n *= 65535;
-	p_rgb[0] = CLAMP(int(Math::round(n.x)), 0, 65535);
-	p_rgb[1] = CLAMP(int(Math::round(n.y)), 0, 65535);
-	p_rgb[2] = CLAMP(int(Math::round(n.z)), 0, 65535);
+	p_rgb[0] = _quantize_unorm_fast<uint16_t>(n.x, 65535.0f);
+	p_rgb[1] = _quantize_unorm_fast<uint16_t>(n.y, 65535.0f);
+	p_rgb[2] = _quantize_unorm_fast<uint16_t>(n.z, 65535.0f);
 }
 
 Image::Image(const uint8_t *p_mem_png_jpg, int p_len) {

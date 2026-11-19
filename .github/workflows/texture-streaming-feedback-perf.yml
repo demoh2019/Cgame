@@ -1,0 +1,43 @@
+name: Texture streaming feedback performance
+
+on:
+  pull_request:
+    branches: [develop]
+    paths:
+      - "modules/texture_streaming/texture_streaming.cpp"
+      - "modules/texture_streaming/texture_streaming.h"
+      - "modules/texture_streaming/feedback_buffer_policy.h"
+      - "tests/core/io/test_texture_streaming_feedback_policy.cpp"
+      - "misc/scripts/tests/test_texture_streaming_feedback.py"
+      - ".github/workflows/texture-streaming-feedback-perf.yml"
+  push:
+    branches: [develop]
+    paths:
+      - "modules/texture_streaming/texture_streaming.cpp"
+      - "modules/texture_streaming/texture_streaming.h"
+      - "modules/texture_streaming/feedback_buffer_policy.h"
+      - "tests/core/io/test_texture_streaming_feedback_policy.cpp"
+      - "misc/scripts/tests/test_texture_streaming_feedback.py"
+      - ".github/workflows/texture-streaming-feedback-perf.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  feedback-performance-regressions:
+    name: Policy C++ and source-flow tests (${{ matrix.compiler }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    strategy:
+      fail-fast: false
+      matrix:
+        compiler: [g++, clang++]
+    steps:
+      - uses: actions/checkout@v4
+      - name: Validate Python test syntax
+        run: python3 -m py_compile misc/scripts/tests/test_texture_streaming_feedback.py
+      - name: Run native C++ growth-policy and source-flow regressions
+        env:
+          CXX: ${{ matrix.compiler }}
+        run: python3 -m unittest discover -s misc/scripts/tests -p 'test_texture_streaming_feedback.py' -v

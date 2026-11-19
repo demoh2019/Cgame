@@ -1,0 +1,43 @@
+name: Upstream GDScript static debugger regressions
+
+on:
+  pull_request:
+    paths:
+      - "core/debugger/**"
+      - "core/object/script_backtrace.*"
+      - "core/object/script_language*"
+      - "doc/classes/ScriptBacktrace.xml"
+      - "doc/classes/ScriptLanguageExtension.xml"
+      - "editor/debugger/**"
+      - "editor/script/script_text_editor.cpp"
+      - "modules/gdscript/**"
+      - "misc/scripts/tests/test_upstream_static_debugger.py"
+      - ".github/workflows/upstream-static-debugger.yml"
+  push:
+    branches: [develop]
+    paths:
+      - "core/debugger/**"
+      - "core/object/script_backtrace.*"
+      - "core/object/script_language*"
+      - "doc/classes/ScriptBacktrace.xml"
+      - "doc/classes/ScriptLanguageExtension.xml"
+      - "editor/debugger/**"
+      - "editor/script/script_text_editor.cpp"
+      - "modules/gdscript/**"
+      - "misc/scripts/tests/test_upstream_static_debugger.py"
+      - ".github/workflows/upstream-static-debugger.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  integration-contracts:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - name: Validate test syntax
+        run: python3 -m py_compile misc/scripts/tests/test_upstream_static_debugger.py
+      - name: Run 41 debugger and GDScript static variable contracts
+        run: python3 -m unittest discover -s misc/scripts/tests -p 'test_upstream_static_debugger.py' -v

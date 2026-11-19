@@ -1,0 +1,44 @@
+name: Case-insensitive String search hotpath regressions
+
+on:
+  pull_request:
+    branches: [develop]
+    paths:
+      - 'core/string/ustring.cpp'
+      - 'tests/core/string/test_string.cpp'
+      - '.github/workflows/string-casefold-search-perf.yml'
+  push:
+    branches: [develop]
+    paths:
+      - 'core/string/ustring.cpp'
+      - 'tests/core/string/test_string.cpp'
+      - '.github/workflows/string-casefold-search-perf.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: string-casefold-search-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  native-search-tests:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+      - uses: ./.github/actions/godot-deps
+      - name: Build editor with native String unit tests
+        uses: ./.github/actions/godot-build
+        with:
+          platform: linuxbsd
+          target: editor
+          scons-flags: dev_build=yes tests=yes debug_symbols=no module_mono_enabled=no module_text_server_fb_enabled=yes accesskit=no -j2
+      - name: Run String find/rfind/count regressions
+        run: |
+          ./bin/godot.linuxbsd.editor.dev.x86_64 --headless --test --test-case="*[String]*Find*" --no-colors
+          ./bin/godot.linuxbsd.editor.dev.x86_64 --headless --test --test-case="*[String]*Case-insensitive long-prefix*" --no-colors
+          ./bin/godot.linuxbsd.editor.dev.x86_64 --headless --test --test-case="*[String]*count*" --no-colors

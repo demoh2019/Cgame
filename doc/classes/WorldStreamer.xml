@@ -1,0 +1,184 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<class name="WorldStreamer" inherits="Node" api_type="core" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="../class.xsd">
+	<brief_description>
+		Streams the chunks of a large world in and out around a focus point.
+	</brief_description>
+	<description>
+		WorldStreamer keeps only the part of a big world that is near the player in memory. The world is divided into a grid of cells of [member cell_size]. For every cell within [member load_radius] of the [member focus] the streamer looks up a scene file (using [member chunk_path_template] or a callback set with [method set_chunk_provider]), loads it on a background thread, and adds it as a child. Cells that are farther than [member unload_radius] are removed again. Loading uses [ResourceLoader] threaded requests and at most [member max_instantiations_per_frame] chunks are instantiated per frame, so walking through the world does not stall the game.
+		A chunk scene is a normal scene: put the terrain, buildings, props and enemies of one cell in it, with the origin of the scene at the corner of the cell. The streamer moves the chunk root to the corner of its cell.
+		[codeblock]
+		var streamer = WorldStreamer.new()
+		streamer.focus = ^"../Player"
+		streamer.cell_size = 128.0
+		streamer.load_radius = 400.0
+		streamer.unload_radius = 500.0
+		streamer.chunk_path_template = "res://world/chunk_{x}_{z}.tscn"
+		add_child(streamer)
+		[/codeblock]
+		Cells without a scene file are skipped silently, so the world may have holes (oceans, unfinished areas). Unload radius larger than the load radius gives hysteresis: a player pacing along a cell border does not make chunks flicker in and out.
+		[b]Large worlds:[/b] when the chunks live under a [Node3D] set as [member chunk_parent] that is moved by [FloatingOrigin3D], the focus position is measured in that node's local space, so the grid stays in absolute world coordinates while the origin shifts.
+	</description>
+	<tutorials>
+	</tutorials>
+	<methods>
+		<method name="cell_to_world" qualifiers="const">
+			<return type="Vector3" />
+			<param index="0" name="cell" type="Vector3i" />
+			<description>
+				Returns the corner with the lowest coordinates of [param cell], in the local space of the chunk parent.
+			</description>
+		</method>
+		<method name="get_chunk" qualifiers="const">
+			<return type="Node" />
+			<param index="0" name="cell" type="Vector3i" />
+			<description>
+				Returns the loaded chunk of [param cell], or [code]null[/code] if that cell is not loaded.
+			</description>
+		</method>
+		<method name="get_chunk_generator" qualifiers="const">
+			<return type="Callable" />
+			<description>
+				Returns the callback set with [method set_chunk_generator].
+			</description>
+		</method>
+		<method name="get_chunk_provider" qualifiers="const">
+			<return type="Callable" />
+			<description>
+				Returns the callback set with [method set_chunk_provider].
+			</description>
+		</method>
+		<method name="get_loaded_cells" qualifiers="const">
+			<return type="Vector3i[]" />
+			<description>
+				Returns the cells whose chunks are currently loaded.
+			</description>
+		</method>
+		<method name="get_loaded_count" qualifiers="const">
+			<return type="int" />
+			<description>
+				Returns the number of loaded chunks.
+			</description>
+		</method>
+		<method name="get_pending_count" qualifiers="const">
+			<return type="int" />
+			<description>
+				Returns the number of chunks that are being loaded in the background.
+			</description>
+		</method>
+		<method name="is_cell_loaded" qualifiers="const">
+			<return type="bool" />
+			<param index="0" name="cell" type="Vector3i" />
+			<description>
+				Returns [code]true[/code] if the chunk of [param cell] is loaded.
+			</description>
+		</method>
+		<method name="refresh">
+			<return type="void" />
+			<param index="0" name="retry" type="bool" default="false" />
+			<description>
+				Updates the streaming immediately instead of waiting for [member update_interval]. If [param retry] is [code]true[/code], cells that had no scene or failed to load are tried again, for example after new chunk files were added.
+			</description>
+		</method>
+		<method name="set_chunk_generator">
+			<return type="void" />
+			<param index="0" name="generator" type="Callable" />
+			<description>
+				Sets a callback that builds the chunk of a cell in code, for worlds generated from a seed instead of stored as scene files. It receives the cell as a [Vector3i] and returns the chunk as a [Node], or [code]null[/code] for an empty cell. It runs on the main thread, at most [member max_instantiations_per_frame] times per frame, nearest cells first, and the focus may have moved away by the time a queued cell would be built, in which case it is skipped. When a generator is set, [member chunk_path_template] and [method set_chunk_provider] are ignored.
+			</description>
+		</method>
+		<method name="set_chunk_provider">
+			<return type="void" />
+			<param index="0" name="provider" type="Callable" />
+			<description>
+				Sets a callback used instead of [member chunk_path_template] to find the scene of a cell. It receives the cell as a [Vector3i] and returns the scene path as a [String], or an empty string if the cell has no chunk. This allows chunk lookup from a database or a procedural generator.
+			</description>
+		</method>
+		<method name="unload_all">
+			<return type="void" />
+			<description>
+				Frees every loaded chunk. They are loaded again at the next update while the focus is nearby.
+			</description>
+		</method>
+		<method name="world_to_cell" qualifiers="const">
+			<return type="Vector3i" />
+			<param index="0" name="position" type="Vector3" />
+			<description>
+				Returns the cell that contains [param position] on the streamed [member axes].
+			</description>
+		</method>
+	</methods>
+	<members>
+		<member name="axes" type="int" setter="set_axes" getter="get_axes" enum="WorldStreamer.Axes" default="0">
+			Which axes make up the grid. [constant AXES_XZ] streams on the ground plane of a 3D world, [constant AXES_XY] is for 2D worlds, and [constant AXES_XYZ] also streams along the vertical axis. Changing it unloads every chunk.
+		</member>
+		<member name="cell_size" type="float" setter="set_cell_size" getter="get_cell_size" default="64.0">
+			Edge length of a cell. Pick a size so that one chunk holds a reasonable amount of content: big enough that loading is not constant, small enough that a chunk loads quickly. Changing it unloads every chunk.
+		</member>
+		<member name="chunk_parent" type="NodePath" setter="set_chunk_parent" getter="get_chunk_parent" default="NodePath(&quot;&quot;)">
+			Node that the chunks are added to. By default they are children of the streamer. Set it to a [Node3D] or [Node2D] to control their transform, for example to move them with [FloatingOrigin3D].
+		</member>
+		<member name="chunk_path_template" type="String" setter="set_chunk_path_template" getter="get_chunk_path_template" default="&quot;&quot;">
+			Path of a chunk scene with [code]{x}[/code], [code]{y}[/code] and [code]{z}[/code] replaced by the cell coordinates, for example [code]res://world/chunk_{x}_{z}.tscn[/code]. Ignored when a provider was set with [method set_chunk_provider].
+		</member>
+		<member name="enabled" type="bool" setter="set_enabled" getter="is_enabled" default="true">
+			If [code]false[/code], no chunks are loaded or unloaded. Chunks that are already loaded stay.
+		</member>
+		<member name="focus" type="NodePath" setter="set_focus" getter="get_focus" default="NodePath(&quot;&quot;)">
+			Node whose position decides which chunks are needed, usually the player or the camera. It can be a [Node3D] or a [Node2D]. If it is empty or invalid, [member focus_position] is used.
+		</member>
+		<member name="focus_position" type="Vector3" setter="set_focus_position" getter="get_focus_position" default="Vector3(0, 0, 0)">
+			Position used when no [member focus] node is set. Update it from a script for custom streaming points.
+		</member>
+		<member name="load_radius" type="float" setter="set_load_radius" getter="get_load_radius" default="128.0">
+			Cells closer than this distance (measured to the cell's box) to the focus are loaded.
+		</member>
+		<member name="max_concurrent_loads" type="int" setter="set_max_concurrent_loads" getter="get_max_concurrent_loads" default="4">
+			Maximum number of chunks loading in the background at the same time.
+		</member>
+		<member name="max_instantiations_per_frame" type="int" setter="set_max_instantiations_per_frame" getter="get_max_instantiations_per_frame" default="1">
+			Maximum number of loaded chunks added to the scene in one frame. Instantiating a large scene takes time on the main thread, so a small value keeps the frame rate steady while moving.
+		</member>
+		<member name="position_chunks" type="bool" setter="set_position_chunks" getter="get_position_chunks" default="true">
+			If [code]true[/code], the root of every chunk is moved to the corner of its cell. Turn it off if the chunk scenes are already authored at their world position.
+		</member>
+		<member name="unload_radius" type="float" setter="set_unload_radius" getter="get_unload_radius" default="192.0">
+			Loaded cells farther than this distance from the focus are freed. Values below [member load_radius] are treated as equal to it.
+		</member>
+		<member name="update_interval" type="float" setter="set_update_interval" getter="get_update_interval" default="0.1">
+			Time in seconds between two evaluations of which cells to load and unload. Checking a few times per second is enough; [code]0[/code] checks every frame.
+		</member>
+	</members>
+	<signals>
+		<signal name="chunk_load_failed">
+			<param index="0" name="cell" type="Vector3i" />
+			<param index="1" name="path" type="String" />
+			<description>
+				Emitted when a chunk scene could not be loaded or instantiated. The cell is not retried until [method refresh] is called with [code]retry[/code].
+			</description>
+		</signal>
+		<signal name="chunk_loaded">
+			<param index="0" name="cell" type="Vector3i" />
+			<param index="1" name="chunk" type="Node" />
+			<description>
+				Emitted after the chunk of [param cell] was added to the scene.
+			</description>
+		</signal>
+		<signal name="chunk_unloaded">
+			<param index="0" name="cell" type="Vector3i" />
+			<description>
+				Emitted when the chunk of [param cell] was removed, either because the focus moved away or because the chunk was freed elsewhere.
+			</description>
+		</signal>
+	</signals>
+	<constants>
+		<constant name="AXES_XZ" value="0" enum="Axes">
+			Grid on the ground plane of a 3D world; height is ignored.
+		</constant>
+		<constant name="AXES_XY" value="1" enum="Axes">
+			Grid for 2D worlds.
+		</constant>
+		<constant name="AXES_XYZ" value="2" enum="Axes">
+			Three dimensional grid; chunks are also streamed along the vertical axis.
+		</constant>
+	</constants>
+</class>

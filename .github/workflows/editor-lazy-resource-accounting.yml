@@ -1,0 +1,63 @@
+name: Lazy editor linked resource cache regressions
+
+on:
+  pull_request:
+    branches: [develop]
+    paths:
+      - "editor/editor_node.cpp"
+      - "editor/editor_node.h"
+      - "editor/inspector/editor_inspector.cpp"
+      - "editor/inspector/multi_node_edit.cpp"
+      - "editor/scene/scene_tree_editor.cpp"
+      - "editor/scene/scene_tree_editor.h"
+      - "misc/scripts/tests/test_editor_lazy_resource_accounting.py"
+      - ".github/workflows/editor-lazy-resource-accounting.yml"
+  push:
+    branches: [develop]
+    paths:
+      - "editor/editor_node.cpp"
+      - "editor/editor_node.h"
+      - "editor/inspector/editor_inspector.cpp"
+      - "editor/inspector/multi_node_edit.cpp"
+      - "editor/scene/scene_tree_editor.cpp"
+      - "editor/scene/scene_tree_editor.h"
+      - "misc/scripts/tests/test_editor_lazy_resource_accounting.py"
+      - ".github/workflows/editor-lazy-resource-accounting.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  source-contracts:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - name: Check resource accounting invariants
+        run: |
+          python3 -m py_compile misc/scripts/tests/test_editor_lazy_resource_accounting.py
+          python3 -m unittest discover -s misc/scripts/tests -p test_editor_lazy_resource_accounting.py -v
+
+  native-editor:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+      - uses: ./.github/actions/godot-deps
+      - uses: ./.github/actions/godot-build
+        with:
+          platform: linuxbsd
+          target: editor
+          scons-flags: dev_build=yes tests=yes debug_symbols=no module_mono_enabled=no accesskit=no
+      - name: Smoke test saving a scene with shared/nested resources
+        shell: bash
+        run: |
+          set -euo pipefail
+          project="$RUNNER_TEMP/lazy-resource-editor"
+          mkdir -p "$project"
+          printf '[application]\nconfig/name="Lazy resource editor test"\n' > "$project/project.godot"
+          printf '[gd_scene format=3]\n\n[node name="Root" type="Node"]\n' > "$project/root.tscn"
+          timeout 120s ./bin/godot.linuxbsd.editor.dev.x86_64 --headless --editor --path "$project" --quit

@@ -35,6 +35,7 @@
 #include "core/os/spin_lock.h"
 #include "core/typedefs.h"
 
+#include <cstring>
 #include <type_traits>
 
 // PagedArray is used mainly for filling a very large array from multiple threads efficiently and without causing major fragmentation
@@ -45,6 +46,7 @@ template <typename T>
 class PagedArrayPool {
 	T **page_pool = nullptr;
 	uint32_t pages_allocated = 0;
+	uint32_t pages_capacity = 0;
 
 	uint32_t *available_page_pool = nullptr;
 	uint32_t pages_available = 0;
@@ -61,23 +63,35 @@ public:
 	PageInfo alloc_page() {
 		spin_lock.lock();
 		if (unlikely(pages_available == 0)) {
-			uint32_t pages_used = pages_allocated;
+			// Grow metadata geometrically rather than reallocating both arrays
+			// for every newly allocated page.
+			if (pages_allocated == pages_capacity) {
+				uint32_t next_capacity = pages_capacity ? pages_capacity + (pages_capacity >> 1) : 4;
+				if (next_capacity < pages_capacity) {
+					next_capacity = UINT32_MAX;
+				}
+				page_pool = (T **)memrealloc(page_pool, sizeof(T *) * next_capacity);
+				available_page_pool = (uint32_t *)memrealloc(available_page_pool, sizeof(uint32_t) * next_capacity);
+				pages_capacity = next_capacity;
+			}
 
-			pages_allocated++;
-			page_pool = (T **)memrealloc(page_pool, sizeof(T *) * pages_allocated);
-			available_page_pool = (uint32_t *)memrealloc(available_page_pool, sizeof(uint32_t) * pages_allocated);
-
-			page_pool[pages_used] = (T *)memalloc(sizeof(T) * page_size);
-			available_page_pool[0] = pages_used;
-
-			pages_available++;
+			const uint32_t page_id = pages_allocated++;
+			// Claim a unique slot under the lock, but allocate the payload
+			// outside it. Multiple producers can now allocate their new
+			// pages in parallel without serializing the system allocator.
+			spin_lock.unlock();
+			T *page = (T *)memalloc(sizeof(T) * page_size);
+			spin_lock.lock();
+			// Other threads may have reallocated the metadata array while
+			// this thread was allocating the payload, so use the current one.
+			page_pool[page_id] = page;
+			spin_lock.unlock();
+			return PageInfo{ page, page_id };
 		}
 
-		pages_available--;
-		uint32_t page_id = available_page_pool[pages_available];
+		const uint32_t page_id = available_page_pool[--pages_available];
 		T *page = page_pool[page_id];
 		spin_lock.unlock();
-
 		return PageInfo{ page, page_id };
 	}
 
@@ -85,6 +99,17 @@ public:
 		spin_lock.lock();
 		available_page_pool[pages_available] = p_page_id;
 		pages_available++;
+		spin_lock.unlock();
+	}
+
+	// Returning many pages at once avoids a lock/unlock pair per page.
+	void free_pages(const uint32_t *p_page_ids, uint32_t p_count) {
+		if (p_count == 0) {
+			return;
+		}
+		spin_lock.lock();
+		std::memcpy(available_page_pool + pages_available, p_page_ids, size_t(p_count) * sizeof(uint32_t));
+		pages_available += p_count;
 		spin_lock.unlock();
 	}
 
@@ -107,6 +132,7 @@ public:
 			page_pool = nullptr;
 			available_page_pool = nullptr;
 			pages_allocated = 0;
+			pages_capacity = 0;
 			pages_available = 0;
 		}
 	}
@@ -231,25 +257,39 @@ public:
 
 	void remove_at_unordered(uint64_t p_index) {
 		ERR_FAIL_UNSIGNED_INDEX(p_index, count);
-		(*this)[p_index] = (*this)[count - 1];
+		if (p_index != count - 1) {
+			// Avoid unnecessary self-assignment when removing the last element.
+			const uint32_t dst_page = p_index >> page_size_shift;
+			const uint32_t src_page = (count - 1) >> page_size_shift;
+			page_data[dst_page][p_index & page_size_mask] = page_data[src_page][(count - 1) & page_size_mask];
+		}
 		pop_back();
 	}
 
 	void clear() {
 		//destruct if needed
 		if constexpr (!std::is_trivially_destructible_v<T>) {
-			for (uint64_t i = 0; i < count; i++) {
-				uint32_t page = i >> page_size_shift;
-				uint32_t offset = i & page_size_mask;
-				page_data[page][offset].~T();
+			// Destruct contiguous pages directly. Avoid per-element shifts,
+			// masks, and page pointer lookups on the hot clear path.
+			const uint32_t full_pages = count >> page_size_shift;
+			const uint32_t remainder = count & page_size_mask;
+			const uint32_t elements_per_page = page_size_mask + 1;
+			for (uint32_t page = 0; page < full_pages; page++) {
+				T *const elements = page_data[page];
+				for (uint32_t i = 0; i < elements_per_page; i++) {
+					elements[i].~T();
+				}
+			}
+			if (remainder > 0) {
+				T *const elements = page_data[full_pages];
+				for (uint32_t i = 0; i < remainder; i++) {
+					elements[i].~T();
+				}
 			}
 		}
 
 		//return the pages to the pagepool, so they can be used by another array eventually
-		uint32_t pages_used = _get_pages_in_use();
-		for (uint32_t i = 0; i < pages_used; i++) {
-			page_pool->free_page(page_ids[i]);
-		}
+		page_pool->free_pages(page_ids, _get_pages_in_use());
 
 		count = 0;
 
@@ -287,24 +327,18 @@ public:
 
 		count -= remainder;
 
-		uint32_t src_page_index = 0;
-		uint32_t page_size = page_size_mask + 1;
-
-		while (p_array.count > 0) {
-			uint32_t page_count = _get_pages_in_use();
-			uint32_t new_page_count = page_count + 1;
-
-			if (unlikely(new_page_count > max_pages_used)) {
-				_grow_page_array(); //keep out of inline
+		const uint32_t page_size = page_size_mask + 1;
+		const uint32_t src_pages = p_array._get_pages_in_use();
+		if (src_pages > 0) {
+			// Ownership of the source's pages can be transferred in bulk.
+			const uint32_t dst_pages = _get_pages_in_use();
+			while (dst_pages + uint64_t(src_pages) > max_pages_used) {
+				_grow_page_array();
 			}
-
-			page_data[page_count] = p_array.page_data[src_page_index];
-			page_ids[page_count] = p_array.page_ids[src_page_index];
-
-			uint32_t take = MIN(p_array.count, page_size); //pages to take away
-			p_array.count -= take;
-			count += take;
-			src_page_index++;
+			std::memcpy(page_data + dst_pages, p_array.page_data, size_t(src_pages) * sizeof(T *));
+			std::memcpy(page_ids + dst_pages, p_array.page_ids, size_t(src_pages) * sizeof(uint32_t));
+			count += p_array.count;
+			p_array.count = 0;
 		}
 
 		//handle the remainder page if exists
@@ -317,15 +351,16 @@ public:
 				T *dst_page = page_data[_get_pages_in_use() - 1];
 				uint32_t to_copy = MIN(page_size - new_remainder, remainder);
 
-				for (uint32_t i = 0; i < to_copy; i++) {
-					if constexpr (!std::is_trivially_constructible_v<T>) {
+				if constexpr (std::is_trivially_copyable_v<T>) {
+					// The pages are separately owned; a single bulk copy replaces
+					// the element-by-element assignment of the partial page tail.
+					std::memcpy(dst_page + new_remainder, remainder_page + remainder - to_copy, size_t(to_copy) * sizeof(T));
+				} else {
+					for (uint32_t i = 0; i < to_copy; i++) {
 						memnew_placement(&dst_page[i + new_remainder], T(remainder_page[i + remainder - to_copy]));
-					} else {
-						dst_page[i + new_remainder] = remainder_page[i + remainder - to_copy];
-					}
-
-					if constexpr (!std::is_trivially_destructible_v<T>) {
-						remainder_page[i + remainder - to_copy].~T();
+						if constexpr (!std::is_trivially_destructible_v<T>) {
+							remainder_page[i + remainder - to_copy].~T();
+						}
 					}
 				}
 

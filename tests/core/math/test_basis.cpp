@@ -241,6 +241,50 @@ TEST_CASE("[Basis] Set axis angle") {
 	CHECK(!Math::is_nan(angle));
 }
 
+TEST_CASE("[Basis] Rotate to align parallel and almost-parallel directions") {
+	const Vector3 direction(0, 1, 0);
+	const Vector3 near_parallel[] = {
+		Vector3(0, 1, 0),
+		Vector3(1e-22, 1, 0),
+		Vector3(-1e-22, 1, 0),
+		Vector3(0, 1, 1e-22),
+		Vector3(1e-8, 1, 0).normalized(),
+	};
+
+	for (const Vector3 &end : near_parallel) {
+		Basis identity;
+		identity.rotate_to_align(direction, end);
+		CHECK(identity.is_equal_approx(Basis()));
+		CHECK(identity.is_finite());
+		CHECK(identity.is_orthonormal());
+
+		const Basis original(Vector3(0, 0, 1), Math::deg_to_rad(45.0));
+		Basis rotated = original;
+		rotated.rotate_to_align(direction, end);
+		CHECK(rotated.is_equal_approx(original));
+	}
+}
+
+TEST_CASE("[Basis] Rotate to align perpendicular directions") {
+	struct DirectionPair {
+		Vector3 start;
+		Vector3 end;
+	};
+	const DirectionPair directions[] = {
+		{ Vector3(1, 0, 0), Vector3(0, 1, 0) },
+		{ Vector3(1, 0, 0), Vector3(0, 0, 1) },
+		{ Vector3(0, 1, 0), Vector3(0, 0, -1) },
+		{ Vector3(0, 0, 1), Vector3(-1, 0, 0) },
+	};
+	for (const DirectionPair &direction : directions) {
+		Basis rotation;
+		rotation.rotate_to_align(direction.start, direction.end);
+		CHECK(rotation.xform(direction.start).is_equal_approx(direction.end));
+		CHECK(rotation.is_finite());
+		CHECK(rotation.is_orthonormal());
+	}
+}
+
 TEST_CASE("[Basis] Finite number checks") {
 	constexpr Vector3 x(0, 1, 2);
 	constexpr Vector3 infinite(Math::NaN, Math::NaN, Math::NaN);

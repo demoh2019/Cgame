@@ -1,0 +1,54 @@
+name: GDScript builtin argument type fast path
+
+on:
+  pull_request:
+    branches: [develop]
+    paths:
+      - 'modules/gdscript/gdscript_vm.cpp'
+      - 'modules/gdscript/gdscript_function.cpp'
+      - 'modules/gdscript/tests/scripts/runtime/features/argument_builtin_fastpath.gd'
+      - 'modules/gdscript/tests/scripts/runtime/features/argument_builtin_fastpath.out'
+      - 'misc/scripts/tests/test_gdscript_argument_type_fastpath.py'
+      - '.github/workflows/gdscript-argument-type-fastpath.yml'
+  push:
+    branches: [develop]
+    paths:
+      - 'modules/gdscript/gdscript_vm.cpp'
+      - 'modules/gdscript/gdscript_function.cpp'
+      - 'modules/gdscript/tests/scripts/runtime/features/argument_builtin_fastpath.gd'
+      - 'modules/gdscript/tests/scripts/runtime/features/argument_builtin_fastpath.out'
+      - 'misc/scripts/tests/test_gdscript_argument_type_fastpath.py'
+      - '.github/workflows/gdscript-argument-type-fastpath.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  guard-gcc-clang:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - name: Compile production builtin guard against exhaustive oracle
+        run: |
+          python3 -m py_compile misc/scripts/tests/test_gdscript_argument_type_fastpath.py
+          python3 -m unittest discover -s misc/scripts/tests -p test_gdscript_argument_type_fastpath.py -v
+
+  gdscript-runtime:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+      - uses: ./.github/actions/godot-deps
+      - name: Build native GDScript regression suite
+        uses: ./.github/actions/godot-build
+        with:
+          platform: linuxbsd
+          target: editor
+          scons-flags: dev_build=yes tests=yes debug_symbols=no module_mono_enabled=no module_text_server_fb_enabled=yes accesskit=no -j2
+      - name: Execute the full native and scripted GDScript test suite
+        run: |
+          timeout 600s ./bin/godot.linuxbsd.editor.dev.x86_64 --headless --test --test-suite="*GDScript*" --no-colors

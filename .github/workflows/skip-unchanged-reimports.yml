@@ -1,0 +1,53 @@
+name: Skip unchanged dependency reimports regression
+
+on:
+  pull_request:
+    branches: [develop]
+    paths:
+      - "editor/file_system/editor_file_system.cpp"
+      - "editor/file_system/editor_file_system.h"
+      - "scu_builders.py"
+      - "tests/editor/file_system/test_editor_file_system.cpp"
+      - "misc/scripts/tests/test_skip_unchanged_imports.py"
+      - ".github/workflows/skip-unchanged-reimports.yml"
+  push:
+    branches: [develop]
+    paths:
+      - "editor/file_system/editor_file_system.cpp"
+      - "editor/file_system/editor_file_system.h"
+      - "scu_builders.py"
+      - "tests/editor/file_system/test_editor_file_system.cpp"
+      - "misc/scripts/tests/test_skip_unchanged_imports.py"
+      - ".github/workflows/skip-unchanged-reimports.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  contracts:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - run: |
+          python3 -m py_compile misc/scripts/tests/test_skip_unchanged_imports.py
+          python3 -m unittest discover -s misc/scripts/tests -p test_skip_unchanged_imports.py -v
+
+  editor-reimport:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+      - uses: ./.github/actions/godot-deps
+      - uses: ./.github/actions/godot-build
+        with:
+          platform: linuxbsd
+          target: editor
+          scons-flags: dev_build=yes tests=yes debug_symbols=no module_mono_enabled=no accesskit=no
+      - name: Test importer cache invalidation and no-op reimports
+        shell: bash
+        run: |
+          timeout 300s ./bin/godot.linuxbsd.editor.dev.x86_64 --headless --test --test-case="*[EditorFileSystem]*" --no-colors

@@ -209,18 +209,19 @@ void OpenXRSpatialContainerSelfRenderingExtension::_remove_spatial_container_fro
 	}
 
 	OpenXRAPI *openxr_api = OpenXRAPI::get_singleton();
-	ERR_FAIL_NULL(openxr_api);
-	const XrSession session = openxr_api->get_session();
+	if (openxr_api) {
+		const XrSession session = openxr_api->get_session();
 
-	XrSpatialContainerEndInfoEXT end_info = {
-		XR_TYPE_SPATIAL_CONTAINER_END_INFO_EXT, // type
-		nullptr, // next
-		p_container, // spatialContainer
-	};
-	XrResult result = xrEndSpatialContainerRenderingEXT(session, &end_info);
-	if (XR_FAILED(result)) {
-		ERR_PRINT("OpenXR: Failed to end spatial container rendering.");
-		return;
+		XrSpatialContainerEndInfoEXT end_info = {
+			XR_TYPE_SPATIAL_CONTAINER_END_INFO_EXT, // type
+			nullptr, // next
+			p_container, // spatialContainer
+		};
+		XrResult result = xrEndSpatialContainerRenderingEXT(session, &end_info);
+		if (XR_FAILED(result)) {
+			ERR_PRINT("OpenXR: Failed to end spatial container rendering.");
+			// Do not skip local cleanup after a runtime error.
+		}
 	}
 
 	// Reset the active spatial container.

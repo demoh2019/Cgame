@@ -72,10 +72,10 @@ struct ObjectSignalLock {
 	Mutex *mutex2 = nullptr;
 
 	ObjectSignalLock(const Object *p_obj1, const Object *p_obj2 = nullptr) {
-		mutex1 = p_obj1->signal_mutex;
+		mutex1 = &p_obj1->_control_mutex;
 
 		if (p_obj2 != nullptr) {
-			mutex2 = p_obj2->signal_mutex;
+			mutex2 = &p_obj2->_control_mutex;
 
 			if (mutex2 < mutex1) {
 				// We must always lock two locks in the same order.
@@ -189,9 +189,6 @@ void Object::_initialize() {
 }
 
 void Object::_postinitialize() {
-	if (_uses_signal_mutex()) {
-		signal_mutex = memnew(Mutex);
-	}
 	notification(NOTIFICATION_POSTINITIALIZE);
 }
 
@@ -957,6 +954,21 @@ Variant Object::call_const(const StringName &p_method, const Variant **p_args, i
 	return method->call(this, p_args, p_argcount, r_error);
 }
 
+bool Object::_instance_binding_reference(bool p_reference) {
+	bool can_die = true;
+	if (_instance_bindings) {
+		MutexLock instance_binding_lock(_control_mutex);
+		for (uint32_t i = 0; i < _instance_binding_count; i++) {
+			if (_instance_bindings[i].reference_callback) {
+				if (!_instance_bindings[i].reference_callback(_instance_bindings[i].token, _instance_bindings[i].binding, p_reference)) {
+					can_die = false;
+				}
+			}
+		}
+	}
+	return can_die;
+}
+
 void Object::_gdvirtual_init_method_ptr(uint32_t p_compat_hash, void *&r_fn_ptr, const StringName &p_fn_name, bool p_compat) const {
 	void *fn_ptr = nullptr;
 	if (_extension->get_virtual_call_data2 && _extension->call_virtual_with_data) {
@@ -1087,7 +1099,7 @@ void Object::set_script_instance(ScriptInstance *p_instance) {
 }
 
 Variant Object::get_script() const {
-	return script_instance ? Variant(Ref<Script>(script_instance->get_script())) : Variant();
+	return script_instance ? Variant(script_instance->get_script()) : Variant();
 }
 
 bool Object::has_meta(const StringName &p_name) const {
@@ -1096,9 +1108,8 @@ bool Object::has_meta(const StringName &p_name) const {
 
 void Object::set_meta(const StringName &p_name, const Variant &p_value) {
 	if (p_value.get_type() == Variant::NIL) {
-		if (metadata.has(p_name)) {
-			metadata.erase(p_name);
-
+		// erase() already reports whether the key existed. Avoid a prior hash probe.
+		if (metadata.erase(p_name)) {
 			const String &sname = p_name;
 			if (!sname.begins_with("_")) {
 				// Metadata starting with _ don't show up in the inspector, so no need to update.
@@ -1123,14 +1134,14 @@ void Object::set_meta(const StringName &p_name, const Variant &p_value) {
 }
 
 Variant Object::get_meta(const StringName &p_name, const Variant &p_default) const {
-	if (!metadata.has(p_name)) {
-		if (p_default != Variant()) {
-			return p_default;
-		} else {
-			ERR_FAIL_V_MSG(Variant(), vformat("The object does not have any 'meta' values with the key '%s'.", p_name));
-		}
+	// The common case should only hash the metadata name once.
+	if (const Variant *value = metadata.getptr(p_name)) {
+		return *value;
 	}
-	return metadata[p_name];
+	if (p_default != Variant()) {
+		return p_default;
+	}
+	ERR_FAIL_V_MSG(Variant(), vformat("The object does not have any 'meta' values with the key '%s'.", p_name));
 }
 
 void Object::remove_meta(const StringName &p_name) {
@@ -1188,18 +1199,15 @@ void Object::add_user_signal(const MethodInfo &p_signal) {
 	ObjectSignalLock signal_lock(this);
 
 	ERR_FAIL_COND_MSG(signal_map.has(p_signal.name), vformat("Trying to add already existing signal '%s'.", p_signal.name));
-	SignalData s;
-	s.user = p_signal;
-	signal_map[p_signal.name] = s;
+	SignalData &signal_data = signal_map[p_signal.name];
+	signal_data.user_signal_info = ValuePtr<MethodInfo>::make(p_signal);
 }
 
 bool Object::_has_user_signal(const StringName &p_name) const {
 	ObjectSignalLock signal_lock(this);
 
-	if (!signal_map.has(p_name)) {
-		return false;
-	}
-	return signal_map[p_name].user.name.length() > 0;
+	const SignalData *signal = signal_map.getptr(p_name);
+	return signal != nullptr && bool(signal->user_signal_info);
 }
 
 void Object::_remove_user_signal(const StringName &p_name) {
@@ -1513,9 +1521,9 @@ void Object::get_signal_list(List<MethodInfo> *p_signals) const {
 	//find maybe usersignals?
 
 	for (const KeyValue<StringName, SignalData> &E : signal_map) {
-		if (!E.value.user.name.is_empty()) {
+		if (E.value.user_signal_info) {
 			//user signal
-			p_signals->push_back(E.value.user);
+			p_signals->push_back(*E.value.user_signal_info);
 		}
 	}
 }
@@ -1733,10 +1741,6 @@ bool Object::_disconnect(const StringName &p_signal, const Callable &p_callable,
 		signal_map.erase(p_signal);
 	}
 
-	return true;
-}
-
-bool Object::_uses_signal_mutex() const {
 	return true;
 }
 
@@ -2241,7 +2245,7 @@ void Object::set_instance_binding(void *p_token, void *p_binding, const GDExtens
 
 void *Object::get_instance_binding(void *p_token, const GDExtensionInstanceBindingCallbacks *p_callbacks) {
 	void *binding = nullptr;
-	MutexLock instance_binding_lock(_instance_binding_mutex);
+	MutexLock instance_binding_lock(_control_mutex);
 	for (uint32_t i = 0; i < _instance_binding_count; i++) {
 		if (_instance_bindings[i].token == p_token) {
 			binding = _instance_bindings[i].binding;
@@ -2277,7 +2281,7 @@ void *Object::get_instance_binding(void *p_token, const GDExtensionInstanceBindi
 
 bool Object::has_instance_binding(void *p_token) {
 	bool found = false;
-	MutexLock instance_binding_lock(_instance_binding_mutex);
+	MutexLock instance_binding_lock(_control_mutex);
 	for (uint32_t i = 0; i < _instance_binding_count; i++) {
 		if (_instance_bindings[i].token == p_token) {
 			found = true;
@@ -2290,7 +2294,7 @@ bool Object::has_instance_binding(void *p_token) {
 
 void Object::free_instance_binding(void *p_token) {
 	bool found = false;
-	MutexLock instance_binding_lock(_instance_binding_mutex);
+	MutexLock instance_binding_lock(_control_mutex);
 	for (uint32_t i = 0; i < _instance_binding_count; i++) {
 		if (!found && _instance_bindings[i].token == p_token) {
 			if (_instance_bindings[i].free_callback) {
@@ -2325,7 +2329,7 @@ void Object::clear_internal_extension() {
 	_gdtype_ptr = &_get_typev();
 
 	// Clear the instance bindings.
-	_instance_binding_mutex.lock();
+	_control_mutex.lock();
 	if (_instance_bindings) {
 		if (_instance_bindings[0].free_callback) {
 			_instance_bindings[0].free_callback(_instance_bindings[0].token, this, _instance_bindings[0].binding);
@@ -2335,7 +2339,7 @@ void Object::clear_internal_extension() {
 		_instance_bindings[0].free_callback = nullptr;
 		_instance_bindings[0].reference_callback = nullptr;
 	}
-	_instance_binding_mutex.unlock();
+	_control_mutex.unlock();
 
 	// Clear the virtual methods.
 	while (virtual_method_list) {
@@ -2440,8 +2444,6 @@ Object::~Object() {
 		}
 		memfree(_instance_bindings);
 	}
-
-	memdelete(signal_mutex);
 }
 
 bool predelete_handler(Object *p_object) {

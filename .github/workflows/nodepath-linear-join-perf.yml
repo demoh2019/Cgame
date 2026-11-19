@@ -1,0 +1,41 @@
+name: NodePath linear join performance regressions
+
+on:
+  pull_request:
+    branches: [develop]
+    paths:
+      - 'core/string/node_path.cpp'
+      - 'tests/core/string/test_node_path.cpp'
+      - '.github/workflows/nodepath-linear-join-perf.yml'
+  push:
+    branches: [develop]
+    paths:
+      - 'core/string/node_path.cpp'
+      - 'tests/core/string/test_node_path.cpp'
+      - '.github/workflows/nodepath-linear-join-perf.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: nodepath-linear-join-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  nodepath-native-regressions:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+      - uses: ./.github/actions/godot-deps
+      - name: Build Cgame editor with native tests
+        uses: ./.github/actions/godot-build
+        with:
+          platform: linuxbsd
+          target: editor
+          scons-flags: dev_build=yes tests=yes debug_symbols=no module_mono_enabled=no module_text_server_fb_enabled=yes accesskit=no -j2
+      - name: Test NodePath joins and cache invalidation
+        run: ./bin/godot.linuxbsd.editor.dev.x86_64 --headless --test --test-case="*[NodePath]*" --no-colors

@@ -1,0 +1,43 @@
+name: Render Visibility Mask Fast Path
+on:
+  pull_request:
+    paths:
+      - "servers/rendering/renderer_scene_cull.cpp"
+      - "tests/core/templates/test_hash_map.cpp"
+      - "misc/tests/test_viewport_mask_fastpath.py"
+      - ".github/workflows/render-visibility-mask-fastpath.yml"
+  workflow_dispatch:
+
+jobs:
+  source-contracts:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Validate culling mask reuse
+        run: python -m unittest discover -s misc/tests -p test_viewport_mask_fastpath.py -v
+  native-tests:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+      - uses: ./.github/actions/godot-cache-restore
+        with:
+          cache-name: linux-visibility-mask-fastpath
+        continue-on-error: true
+      - uses: ./.github/actions/godot-deps
+      - uses: ./.github/actions/godot-build
+        with:
+          platform: linuxbsd
+          target: editor
+          scons-flags: tests=yes module_text_server_fb_enabled=yes -j2
+      - uses: ./.github/actions/godot-cache-save
+        with:
+          cache-name: linux-visibility-mask-fastpath
+        continue-on-error: true
+      - name: Native hash-map regression tests
+        run: ./bin/godot.linuxbsd.editor.x86_64 --headless --test --test-case="*[ViewportMaskFastPath]*"

@@ -45,6 +45,10 @@ StringBuilder &StringBuilder::append(const String &p_string) {
 
 StringBuilder &StringBuilder::append(const char *p_cstring) {
 	int32_t len = strlen(p_cstring);
+	if (len == 0) {
+		// Like an empty String, an empty C string needs no fragment metadata.
+		return *this;
+	}
 
 	c_strings.push_back(p_cstring);
 	appended_strings.push_back(len);
@@ -57,6 +61,12 @@ StringBuilder &StringBuilder::append(const char *p_cstring) {
 String StringBuilder::as_string() const {
 	if (string_length == 0) {
 		return "";
+	}
+
+	// A single existing String can be returned by reference-counted copy,
+	// avoiding a new UTF-32 buffer and copying all of its characters.
+	if (appended_strings.size() == 1 && appended_strings[0] == -1) {
+		return strings[0];
 	}
 
 	String string;

@@ -1,0 +1,45 @@
+name: WAV chunked disk loading and sample parity regressions
+
+on:
+  push:
+    branches: [develop]
+    paths:
+      - 'scene/resources/audio/audio_stream_wav.cpp'
+      - 'scene/resources/audio/audio_stream_wav.h'
+      - 'tests/scene/test_audio_stream_wav.cpp'
+      - 'misc/scripts/tests/test_wav_chunked_load_memory.py'
+      - '.github/workflows/wav-chunked-memory.yml'
+  pull_request:
+    paths:
+      - 'scene/resources/audio/audio_stream_wav.cpp'
+      - 'scene/resources/audio/audio_stream_wav.h'
+      - 'tests/scene/test_audio_stream_wav.cpp'
+      - 'misc/scripts/tests/test_wav_chunked_load_memory.py'
+      - '.github/workflows/wav-chunked-memory.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  contracts:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - run: python3 -m unittest discover -s misc/scripts/tests -p test_wav_chunked_load_memory.py -v
+
+  native:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+      - uses: ./.github/actions/godot-deps
+      - uses: ./.github/actions/godot-build
+        with:
+          platform: linuxbsd
+          target: editor
+          scons-flags: dev_build=yes tests=yes debug_symbols=no module_mono_enabled=no accesskit=no -j2
+      - run: ./bin/godot.linuxbsd.editor.dev.x86_64 --headless --test --test-case="*[Audio][AudioStreamWAV]*"

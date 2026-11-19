@@ -34,9 +34,25 @@ TEST_FORCE_LINK(test_sky)
 
 #ifndef _3D_DISABLED
 
+#include "core/config/project_settings.h"
 #include "scene/resources/sky.h"
 
 namespace TestSky {
+
+TEST_CASE("[SceneTree][Sky] Reflection roughness minimum is exposed in ProjectSettings") {
+	List<PropertyInfo> properties;
+	ProjectSettings::get_singleton()->get_property_list(&properties);
+	bool found = false;
+	for (const PropertyInfo &property : properties) {
+		if (property.name == "rendering/reflections/sky_reflections/roughness_layers") {
+			found = true;
+			CHECK_EQ(property.hint, PROPERTY_HINT_RANGE);
+			CHECK_EQ(property.hint_string, "2,32,1");
+			break;
+		}
+	}
+	CHECK(found);
+}
 
 TEST_CASE("[SceneTree][Sky] Constructor") {
 	Ref<Sky> test_sky;

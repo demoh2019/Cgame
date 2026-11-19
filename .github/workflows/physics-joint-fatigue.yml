@@ -1,0 +1,50 @@
+name: GodotPhysics3D progressive joint fatigue fracture contracts
+
+on:
+  push:
+    branches: [develop]
+    paths:
+      - "servers/physics_joint_fatigue.h"
+      - "modules/godot_physics_3d/godot_joint_3d.h"
+      - "modules/godot_physics_3d/godot_physics_server_3d.cpp"
+      - "modules/godot_physics_3d/godot_physics_server_3d.h"
+      - "servers/physics_3d/physics_server_3d.h"
+      - "servers/physics_3d/physics_server_3d.cpp"
+      - "scene/3d/physics/joints/joint_3d.cpp"
+      - "scene/3d/physics/joints/joint_3d.h"
+      - "tests/servers/test_physics_joint_fatigue.cpp"
+      - "tests/stress/test_physics_joint_fatigue_compiler.cpp"
+      - "tests/stress/test_physics_joint_fatigue.py"
+      - ".github/workflows/physics-joint-fatigue.yml"
+  pull_request:
+    paths:
+      - "servers/physics_joint_fatigue.h"
+      - "modules/godot_physics_3d/godot_joint_3d.h"
+      - "modules/godot_physics_3d/godot_physics_server_3d.cpp"
+      - "modules/godot_physics_3d/godot_physics_server_3d.h"
+      - "servers/physics_3d/physics_server_3d.h"
+      - "servers/physics_3d/physics_server_3d.cpp"
+      - "scene/3d/physics/joints/joint_3d.cpp"
+      - "scene/3d/physics/joints/joint_3d.h"
+      - "tests/servers/test_physics_joint_fatigue.cpp"
+      - "tests/stress/test_physics_joint_fatigue_compiler.cpp"
+      - "tests/stress/test_physics_joint_fatigue.py"
+      - ".github/workflows/physics-joint-fatigue.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  fatigue-numerical-and-cpp:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Fatigue stress tests and multi-threaded solver source contracts
+        run: python3 -m unittest discover -s tests/stress -p 'test_physics_joint_fatigue.py' -v
+      - name: Compile and run real fatigue helper under strict warnings
+        run: |
+          g++ -std=c++17 -O2 -Wall -Wextra -Werror -I. \
+            tests/stress/test_physics_joint_fatigue_compiler.cpp \
+            -o /tmp/physics_joint_fatigue
+          /tmp/physics_joint_fatigue

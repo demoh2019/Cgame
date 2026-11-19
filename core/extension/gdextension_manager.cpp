@@ -43,15 +43,14 @@
 
 GDExtensionManager::LoadStatus GDExtensionManager::_load_extension_internal(const Ref<GDExtension> &p_extension, bool p_first_load) {
 	if (level >= 0) { // Already initialized up to some level.
-		int32_t minimum_level = 0;
 		if (!p_first_load) {
-			minimum_level = p_extension->get_minimum_library_initialization_level();
+			int32_t minimum_level = p_extension->get_minimum_library_initialization_level();
 			if (minimum_level < MIN(level, GDExtension::INITIALIZATION_LEVEL_SCENE)) {
 				return LOAD_STATUS_NEEDS_RESTART;
 			}
 		}
-		// Initialize up to current level.
-		for (int32_t i = minimum_level; i <= level; i++) {
+		// Initialize up to current level, including the early levels.
+		for (int32_t i = GDExtension::INITIALIZATION_LEVEL_CORE; i <= level; i++) {
 			p_extension->initialize_library(GDExtension::InitializationLevel(i));
 		}
 	}
@@ -242,8 +241,10 @@ bool GDExtensionManager::is_extension_loaded(const String &p_path) const {
 
 Vector<String> GDExtensionManager::get_loaded_extensions() const {
 	Vector<String> ret;
+	ret.resize(gdextension_map.size());
+	int idx = 0;
 	for (const KeyValue<String, Ref<GDExtension>> &E : gdextension_map) {
-		ret.push_back(E.key);
+		ret.set(idx++, E.key);
 	}
 	return ret;
 }

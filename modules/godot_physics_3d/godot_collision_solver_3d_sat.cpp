@@ -153,8 +153,23 @@ static void _generate_contacts_edge_edge(const Vector3 *p_points_A, int p_point_
 		//sort all 4 points in axis
 		real_t dvec[4] = { axis.dot(p_points_A[0]), axis.dot(p_points_A[1]), axis.dot(p_points_B[0]), axis.dot(p_points_B[1]) };
 
-		SortArray<real_t> sa;
-		sa.sort(dvec, 4);
+		// A five-comparator sorting network for exactly four values.
+		// Avoid the generic sorting machinery in this contact hot path.
+		if (dvec[1] < dvec[0]) {
+			SWAP(dvec[0], dvec[1]);
+		}
+		if (dvec[3] < dvec[2]) {
+			SWAP(dvec[2], dvec[3]);
+		}
+		if (dvec[2] < dvec[0]) {
+			SWAP(dvec[0], dvec[2]);
+		}
+		if (dvec[3] < dvec[1]) {
+			SWAP(dvec[1], dvec[3]);
+		}
+		if (dvec[2] < dvec[1]) {
+			SWAP(dvec[1], dvec[2]);
+		}
 
 		//use the middle ones as contacts
 		p_callback->call(base_A + axis * dvec[1], base_B + axis * dvec[1], p_callback->normal);
@@ -305,6 +320,12 @@ static void _generate_contacts_face_face(const Vector3 *p_points_A, int p_point_
 
 	// go through all of B points
 	for (int i = 0; i < p_point_count_B; i++) {
+		// Sutherland-Hodgman clipping can never recover vertices once
+		// the source polygon is empty. Avoid constructing the remaining
+		// edge planes (and normalizing their normals) in this case.
+		if (clipbuf_len == 0) {
+			return;
+		}
 		int i_n = (i + 1) % p_point_count_B;
 
 		Vector3 edge0_B = p_points_B[i];
@@ -317,14 +338,18 @@ static void _generate_contacts_face_face(const Vector3 *p_points_A, int p_point_
 		// avoid double clip if A is edge
 		int dst_idx = 0;
 		bool edge = clipbuf_len == 2;
+		// An edge's end vertex is the next edge's start vertex. Cache its
+		// signed clip distance instead of evaluating the plane twice for
+		// every vertex. Reuse the first distance to close the polygon.
+		const real_t first_clip_distance = clip.distance_to(clipbuf_src[0]);
+		real_t dist0 = first_clip_distance;
 		for (int j = 0; j < clipbuf_len; j++) {
 			int j_n = (j + 1) % clipbuf_len;
 
 			Vector3 edge0_A = clipbuf_src[j];
 			Vector3 edge1_A = clipbuf_src[j_n];
 
-			real_t dist0 = clip.distance_to(edge0_A);
-			real_t dist1 = clip.distance_to(edge1_A);
+			const real_t dist1 = j_n == 0 ? first_clip_distance : clip.distance_to(edge1_A);
 
 			if (dist0 <= 0) { // behind plane
 
@@ -338,13 +363,17 @@ static void _generate_contacts_face_face(const Vector3 *p_points_A, int p_point_
 				// calculate intersection
 				Vector3 rel = edge1_A - edge0_A;
 				real_t den = clip.normal.dot(rel);
-				real_t dist = -(clip.normal.dot(edge0_A) - clip.d) / den;
+				// dist0 is exactly clip.normal.dot(edge0_A) - clip.d.
+				// Reuse it to avoid a third plane projection for crossing edges.
+				const real_t dist = -dist0 / den;
 				Vector3 inters = edge0_A + rel * dist;
 
 				ERR_FAIL_COND(dst_idx >= max_clip);
 				clipbuf_dst[dst_idx] = inters;
 				dst_idx++;
 			}
+			// The next edge begins at the current edge's end point.
+			dist0 = dist1;
 		}
 
 		clipbuf_len = dst_idx;
@@ -696,7 +725,7 @@ public:
 		real_t depth = axis.length();
 
 		// Filter out bogus directions with a threshold and re-testing axis.
-		if (separator->best_depth - depth > 0.001) {
+		if (depth > CMP_EPSILON && separator->best_depth - depth > real_t(0.001)) {
 			separator->test_axis(axis / depth);
 		}
 	}
@@ -782,22 +811,21 @@ static void analytic_sphere_collision(const Vector3 &p_origin_a, real_t p_radius
 	// Get the vector from sphere B to A
 	Vector3 b_to_a = p_origin_a - p_origin_b;
 
-	// Get the length from B to A
-	real_t b_to_a_len = b_to_a.length();
-
-	// Calculate the sphere overlap, and bail if not overlapping
-	real_t overlap = p_radius_a + p_radius_b - b_to_a_len;
-	if (overlap < 0) {
+	// Most narrow-phase pairs are separated. Compare squared distances so
+	// misses and overlap-only queries avoid the square root entirely.
+	const real_t total_radius = p_radius_a + p_radius_b;
+	const real_t separation_squared = b_to_a.length_squared();
+	if (total_radius < 0.0 || separation_squared > total_radius * total_radius) {
 		return;
 	}
 
-	// Report collision
 	p_collector->collided = true;
-
-	// Bail if there is no callback to receive the A and B collision points.
 	if (!p_collector->callback) {
 		return;
 	}
+
+	const real_t b_to_a_len = Math::sqrt(separation_squared);
+	const real_t overlap = total_radius - b_to_a_len;
 
 	// Normalize the B to A vector
 	if (b_to_a_len < CMP_EPSILON) {
@@ -843,31 +871,63 @@ static void _collision_sphere_box(const GodotShape3D *p_a, const Transform3D &p_
 	const GodotSphereShape3D *sphere_A = static_cast<const GodotSphereShape3D *>(p_a);
 	const GodotBoxShape3D *box_B = static_cast<const GodotBoxShape3D *>(p_b);
 
-	// Find the point on the box nearest to the center of the sphere.
-
-	Vector3 center = p_transform_b.affine_inverse().xform(p_transform_a.origin);
+	// Box3D-style specialized AABB closest-point path: for an exactly
+	// unrotated, unscaled box the inverse is a translation. Avoid an
+	// affine matrix inversion for the common sphere-versus-static-box case.
+	// Keep affine_inverse() unchanged for rotated, scaled or sheared boxes.
+	const bool unrotated_box = p_transform_b.basis == Basis();
+	const Transform3D box_inverse = unrotated_box ?
+			Transform3D(Basis(), -p_transform_b.origin) : p_transform_b.affine_inverse();
+	Vector3 center = unrotated_box ?
+			p_transform_a.origin - p_transform_b.origin : box_inverse.xform(p_transform_a.origin);
 	Vector3 extents = box_B->get_half_extents();
+	const bool center_inside = Math::abs(center.x) <= extents.x &&
+			Math::abs(center.y) <= extents.y &&
+			Math::abs(center.z) <= extents.z;
 	Vector3 nearest(MIN(MAX(center.x, -extents.x), extents.x),
 			MIN(MAX(center.y, -extents.y), extents.y),
 			MIN(MAX(center.z, -extents.z), extents.z));
-	nearest = p_transform_b.xform(nearest);
+	nearest = unrotated_box ? p_transform_b.origin + nearest : p_transform_b.xform(nearest);
 
 	// See if it is inside the sphere.
 
 	Vector3 delta = nearest - p_transform_a.origin;
-	real_t length = delta.length();
-	real_t radius = sphere_A->get_radius() * p_transform_a.basis[0].length();
-	if (length > radius + p_margin_a + p_margin_b) {
+	const real_t radius = sphere_A->get_radius() * p_transform_a.basis[0].length();
+	const real_t combined_radius = radius + p_margin_a + p_margin_b;
+	const real_t distance_squared = delta.length_squared();
+	if (combined_radius < 0.0 || distance_squared > combined_radius * combined_radius) {
 		return;
 	}
 	p_collector->collided = true;
 	if (!p_collector->callback) {
 		return;
 	}
+	const real_t length = Math::sqrt(distance_squared);
 	Vector3 axis;
-	if (length == 0) {
-		// The box passes through the sphere center.  Select an axis based on the box's center.
-		axis = (p_transform_b.origin - nearest).normalized();
+	if (center_inside) {
+		// The sphere center is inside (or on) the box. The clamped closest
+		// point is its own center, so the old center-to-center normal can be
+		// zero. Find the nearest exit face, using world-space face distances
+		// so rotated and non-uniformly scaled boxes select the right face.
+		const Basis face_normal_basis = box_inverse.basis.transposed();
+		real_t nearest_face_distance = 1e30;
+		Vector3 exit_normal(1.0, 0.0, 0.0);
+		for (int i = 0; i < 3; i++) {
+			const Vector3 face_normal = face_normal_basis.get_column(i);
+			const real_t normal_length = face_normal.length();
+			if (normal_length <= CMP_EPSILON) {
+				continue;
+			}
+			const real_t face_distance = (extents[i] - Math::abs(center[i])) / normal_length;
+			if (face_distance < nearest_face_distance) {
+				nearest_face_distance = face_distance;
+				exit_normal = face_normal * ((center[i] < 0.0 ? -1.0 : 1.0) / normal_length);
+			}
+		}
+		// Use the opposite sphere support point so the solver pushes a
+		// completely contained sphere *out* of the box, not further inside.
+		axis = -exit_normal;
+		nearest = p_transform_a.origin + exit_normal * nearest_face_distance;
 	} else {
 		axis = delta / length;
 	}
@@ -906,7 +966,8 @@ static void _collision_sphere_capsule(const GodotShape3D *p_a, const Transform3D
 static void analytic_sphere_cylinder_collision(real_t p_radius_a, real_t p_radius_b, real_t p_height_b, const Transform3D &p_transform_a, const Transform3D &p_transform_b, _CollectorCallback *p_collector, bool p_with_margin, real_t p_margin_a, real_t p_margin_b) {
 	// Find the point on the cylinder nearest to the center of the sphere.
 
-	Vector3 center = p_transform_b.affine_inverse().xform(p_transform_a.origin);
+	const Transform3D cylinder_inverse = p_transform_b.affine_inverse();
+	Vector3 center = cylinder_inverse.xform(p_transform_a.origin);
 	Vector3 nearest = center;
 	real_t scale_A = p_transform_a.basis[0].length();
 	real_t r = Math::sqrt(center.x * center.x + center.z * center.z);
@@ -916,24 +977,59 @@ static void analytic_sphere_cylinder_collision(real_t p_radius_a, real_t p_radiu
 		nearest.z *= scale;
 	}
 	real_t half_height = p_height_b / 2;
+	const bool center_inside = r <= p_radius_b && Math::abs(center.y) <= half_height;
 	nearest.y = MIN(MAX(center.y, -half_height), half_height);
 	nearest = p_transform_b.xform(nearest);
 
 	// See if it is inside the sphere.
 
 	Vector3 delta = nearest - p_transform_a.origin;
-	real_t length = delta.length();
-	if (length > p_radius_a * scale_A + p_margin_a + p_margin_b) {
+	const real_t combined_radius = p_radius_a * scale_A + p_margin_a + p_margin_b;
+	const real_t distance_squared = delta.length_squared();
+	if (combined_radius < 0.0 || distance_squared > combined_radius * combined_radius) {
 		return;
 	}
 	p_collector->collided = true;
 	if (!p_collector->callback) {
 		return;
 	}
+	const real_t length = Math::sqrt(distance_squared);
 	Vector3 axis;
-	if (length == 0) {
-		// The cylinder passes through the sphere center.  Select an axis based on the cylinder's center.
-		axis = (p_transform_b.origin - nearest).normalized();
+	if (center_inside) {
+		// When the sphere center is inside a cylinder, the nearest point
+		// returned by clamping is its own center. Select the closest exit
+		// surface instead of producing a zero contact normal. The local
+		// radial and cap distances are converted to world-space distances
+		// through the inverse-transposed transform basis.
+		const Basis normal_basis = cylinder_inverse.basis.transposed();
+		Vector3 radial_axis;
+		if (r > CMP_EPSILON) {
+			radial_axis = Vector3(center.x / r, 0.0, center.z / r);
+		} else {
+			// On the cylinder's centerline, prefer the shortest world-space
+			// radial exit under nonuniform scaling; ties choose local +X.
+			radial_axis = normal_basis.get_column(0).length_squared() >= normal_basis.get_column(2).length_squared() ?
+					Vector3(1.0, 0.0, 0.0) : Vector3(0.0, 0.0, 1.0);
+		}
+		const Vector3 radial_normal = normal_basis.xform(radial_axis);
+		const Vector3 cap_normal = normal_basis.get_column(1);
+		const real_t radial_normal_length = radial_normal.length();
+		const real_t cap_normal_length = cap_normal.length();
+		const real_t radial_clearance = radial_normal_length > CMP_EPSILON ? (p_radius_b - r) / radial_normal_length : real_t(1e30);
+		const real_t cap_clearance = cap_normal_length > CMP_EPSILON ? (half_height - Math::abs(center.y)) / cap_normal_length : real_t(1e30);
+		Vector3 exit_normal;
+		real_t exit_distance;
+		if (radial_clearance <= cap_clearance) {
+			exit_normal = radial_normal_length > CMP_EPSILON ? radial_normal / radial_normal_length : Vector3(1.0, 0.0, 0.0);
+			exit_distance = radial_clearance < real_t(1e30) ? radial_clearance : 0.0;
+		} else {
+			exit_normal = cap_normal * ((center.y < 0.0 ? -1.0 : 1.0) / cap_normal_length);
+			exit_distance = cap_clearance;
+		}
+		// The opposite sphere support point creates a separating contact
+		// normal that pushes the contained sphere toward the exit surface.
+		axis = -exit_normal;
+		nearest = p_transform_a.origin + exit_normal * exit_distance;
 	} else {
 		axis = delta / length;
 	}
@@ -1076,6 +1172,25 @@ static void _collision_box_box(const GodotShape3D *p_a, const Transform3D &p_tra
 		return;
 	}
 
+	// Box2D/Box3D-style SAT axis deduplication. Two boxes with exactly
+	// the same rigid rotation (including identity) have only three unique
+	// face/edge-cross axes. Reject scaled or sheared transforms: for those,
+	// non-face edge directions can still separate the boxes. The rotation
+	// check also guards numerical validity of the orthonormal basis.
+	const Basis &basis_a = p_transform_a.basis;
+	const bool shared_orthonormal_basis = !p_with_margin &&
+			basis_a == p_transform_b.basis &&
+			(basis_a == Basis() || basis_a.is_rotation());
+	if (shared_orthonormal_basis) {
+		for (int i = 0; i < 3; ++i) {
+			if (!separator.test_axis(basis_a.get_column(i))) {
+				return;
+			}
+		}
+		separator.generate_contacts();
+		return;
+	}
+
 	// test faces of A
 
 	for (int i = 0; i < 3; i++) {
@@ -1214,10 +1329,17 @@ static void _collision_box_capsule(const GodotShape3D *p_a, const Transform3D &p
 					point += p_transform_a.basis.get_column(l) * he[l];
 				}
 
-				//Vector3 axis = (point - cyl_axis * cyl_axis.dot(point)).normalized();
-				Vector3 axis = Plane(cyl_axis).project(point).normalized();
-
-				if (!separator.test_axis(axis)) {
+				// Use the capsule axis as the radial origin. Projecting the
+				// world-space vertex around (0, 0, 0) changes the candidate
+				// SAT axis when the whole scene is translated.
+				const Vector3 from_capsule = point - p_transform_b.origin;
+				Vector3 radial = from_capsule - cyl_axis * from_capsule.dot(cyl_axis);
+				if (Math::is_zero_approx(radial.length_squared())) {
+					// A vertex exactly on the capsule axis contributes no
+					// radial separating direction.
+					continue;
+				}
+				if (!separator.test_axis(radial.normalized())) {
 					return;
 				}
 			}
@@ -1323,9 +1445,14 @@ static void _collision_box_cylinder(const GodotShape3D *p_a, const Transform3D &
 	// Points of A, cylinder lateral surface.
 	for (int i = 0; i < 8; i++) {
 		const Vector3 &point = vertices_A[i];
-		Vector3 axis = Plane(cyl_axis).project(point).normalized();
-
-		if (!separator.test_axis(axis)) {
+		// A cylinder's radial axis runs through its own origin, not
+		// world zero. This also avoids a temporary Plane per vertex.
+		const Vector3 from_cylinder = point - p_transform_b.origin;
+		Vector3 radial = from_cylinder - cyl_axis * from_cylinder.dot(cyl_axis);
+		if (Math::is_zero_approx(radial.length_squared())) {
+			continue;
+		}
+		if (!separator.test_axis(radial.normalized())) {
 			return;
 		}
 	}

@@ -1,0 +1,18 @@
+config_version=5
+
+[application]
+
+config/name="Cgame Jolt Radial Elasticity"
+
+[physics]
+
+3d/physics_engine="Jolt Physics"
+jolt_physics_3d/simulation/soft_body_volume_preservation=true
+jolt_physics_3d/simulation/soft_body_volume_compliance=0.00001
+jolt_physics_3d/simulation/soft_body_volume_radial_springs=true
+jolt_physics_3d/simulation/soft_body_volume_radial_compliance=0.0001
+
+[rendering]
+
+renderer/rendering_method="gl_compatibility"
+renderer/rendering_method.mobile="gl_compatibility"

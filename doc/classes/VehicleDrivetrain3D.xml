@@ -1,0 +1,135 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<class name="VehicleDrivetrain3D" inherits="Node" api_type="core" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="../class.xsd">
+	<brief_description>
+		Engine, gearbox and final drive for a [VehicleBody3D].
+	</brief_description>
+	<description>
+		VehicleDrivetrain3D replaces the single [member VehicleBody3D.engine_force] value with a drivetrain. Add it as a child of a [VehicleBody3D] (or point [member vehicle] to one) and set [member throttle] every frame. The node works out the engine speed from the speed of the car, evaluates the engine torque from [member torque_curve] and [member peak_torque], multiplies it by the current gear and [member final_drive], and sets the [member VehicleWheel3D.engine_force] of the wheels with [member VehicleWheel3D.use_as_traction]. An open differential splits the torque evenly between the driven wheels that touch the ground.
+		The result behaves like a real car: strong acceleration in low gears, a rev limiter that stops the car from accelerating beyond what the current gear allows, no drive while the clutch is open during a gear change, engine braking when the throttle is released, and reverse that can only be engaged when the car has nearly stopped. With [member automatic] the gearbox shifts up at [member shift_up_rpm] and down at [member shift_down_rpm], never selecting a gear that would immediately shift back, and waits [member shift_hold] seconds between automatic shifts so it does not hunt.
+		[codeblock]
+		func _physics_process(delta):
+		    $VehicleDrivetrain3D.throttle = Input.get_action_strength("accelerate")
+		    $VehicleDrivetrain3D.reverse = Input.is_action_pressed("reverse")
+		    $VehicleBody3D.brake = Input.get_action_strength("brake") * 20.0
+		    $VehicleBody3D.steering = Input.get_axis("steer_right", "steer_left") * 0.5
+		[/codeblock]
+		[b]Note:[/b] The torque is converted to a force with each wheel's radius, so set [member VehicleWheel3D.wheel_radius] correctly. Because the engine speed comes from the ground speed in the direction the car faces, a car that is sliding sideways has a low engine speed.
+	</description>
+	<tutorials>
+	</tutorials>
+	<methods>
+		<method name="get_engine_rpm" qualifiers="const">
+			<return type="float" />
+			<description>
+				Returns the current engine speed in revolutions per minute.
+			</description>
+		</method>
+		<method name="get_engine_torque" qualifiers="const">
+			<return type="float" />
+			<description>
+				Returns the torque of the engine in the last physics frame, in newton-meters.
+			</description>
+		</method>
+		<method name="get_gear" qualifiers="const">
+			<return type="int" />
+			<description>
+				Returns the current gear: [code]1[/code] and up are forward gears, [code]0[/code] is neutral and [code]-1[/code] is reverse.
+			</description>
+		</method>
+		<method name="get_wheel_torque" qualifiers="const">
+			<return type="float" />
+			<description>
+				Returns the total torque sent to the driven wheels in the last physics frame, in newton-meters. It is negative when driving backward or when engine braking slows a car moving forward.
+			</description>
+		</method>
+		<method name="is_shifting" qualifiers="const">
+			<return type="bool" />
+			<description>
+				Returns [code]true[/code] while a gear change is in progress and no torque is transmitted.
+			</description>
+		</method>
+		<method name="set_gear">
+			<return type="void" />
+			<param index="0" name="gear" type="int" />
+			<description>
+				Selects a gear directly, for a manual gearbox. [code]-1[/code] is reverse, [code]0[/code] neutral. Starts a gear change and emits [signal gear_changed].
+			</description>
+		</method>
+		<method name="shift_down">
+			<return type="void" />
+			<description>
+				Selects the next lower gear, down to reverse.
+			</description>
+		</method>
+		<method name="shift_up">
+			<return type="void" />
+			<description>
+				Selects the next higher gear, up to the last one.
+			</description>
+		</method>
+	</methods>
+	<members>
+		<member name="automatic" type="bool" setter="set_automatic" getter="is_automatic" default="true">
+			If [code]true[/code], the gearbox chooses forward gears. Turn it off and use [method shift_up] and [method shift_down] for a manual gearbox.
+		</member>
+		<member name="efficiency" type="float" setter="set_efficiency" getter="get_efficiency" default="0.9">
+			Fraction of the engine torque that reaches the wheels, between [code]0[/code] and [code]1[/code].
+		</member>
+		<member name="engine_brake_torque" type="float" setter="set_engine_brake_torque" getter="get_engine_brake_torque" default="40.0">
+			Torque at [member max_rpm] that slows the car when the throttle is released. It scales with the engine speed.
+		</member>
+		<member name="final_drive" type="float" setter="set_final_drive" getter="get_final_drive" default="3.7">
+			Ratio of the final drive, multiplied with the ratio of every gear.
+		</member>
+		<member name="gear_ratios" type="PackedFloat32Array" setter="set_gear_ratios" getter="get_gear_ratios" default="PackedFloat32Array(3.6, 2.2, 1.5, 1.1, 0.85)">
+			Ratio of each forward gear, from first gear up. Larger ratios give more wheel torque and a lower top speed.
+		</member>
+		<member name="idle_rpm" type="float" setter="set_idle_rpm" getter="get_idle_rpm" default="900.0">
+			Lowest engine speed.
+		</member>
+		<member name="launch_rpm" type="float" setter="set_launch_rpm" getter="get_launch_rpm" default="2500.0">
+			Engine speed at which the torque is evaluated while the clutch slips at a standstill. Without it the car would have almost no torque when starting at idle speed.
+		</member>
+		<member name="max_rpm" type="float" setter="set_max_rpm" getter="get_max_rpm" default="6500.0">
+			Engine speed of the rev limiter. Above it no torque is delivered.
+		</member>
+		<member name="peak_torque" type="float" setter="set_peak_torque" getter="get_peak_torque" default="300.0">
+			Torque in newton-meters at the best point of [member torque_curve].
+		</member>
+		<member name="reverse" type="bool" setter="set_reverse" getter="is_reverse" default="false">
+			If [code]true[/code], reverse is engaged as soon as the car has nearly stopped; otherwise it returns to first gear.
+		</member>
+		<member name="reverse_ratio" type="float" setter="set_reverse_ratio" getter="get_reverse_ratio" default="3.2">
+			Ratio of the reverse gear.
+		</member>
+		<member name="shift_down_rpm" type="float" setter="set_shift_down_rpm" getter="get_shift_down_rpm" default="2200.0">
+			Engine speed below which the automatic gearbox shifts down.
+		</member>
+		<member name="shift_hold" type="float" setter="set_shift_hold" getter="get_shift_hold" default="1.0">
+			Minimum time between two automatic gear changes.
+		</member>
+		<member name="shift_time" type="float" setter="set_shift_time" getter="get_shift_time" default="0.25">
+			Duration of a gear change. The clutch is open and no torque flows during it.
+		</member>
+		<member name="shift_up_rpm" type="float" setter="set_shift_up_rpm" getter="get_shift_up_rpm" default="5500.0">
+			Engine speed above which the automatic gearbox shifts up.
+		</member>
+		<member name="throttle" type="float" setter="set_throttle" getter="get_throttle" default="0.0">
+			The position of the accelerator pedal, from [code]0[/code] to [code]1[/code]. Set it every frame.
+		</member>
+		<member name="torque_curve" type="Curve" setter="set_torque_curve" getter="get_torque_curve">
+			Torque multiplier by engine speed. The curve is sampled from [code]0[/code] to [code]1[/code] of [member max_rpm] on the x axis and its y value multiplies [member peak_torque]. If not set, a built-in curve that peaks in the middle of the range is used.
+		</member>
+		<member name="vehicle" type="NodePath" setter="set_vehicle" getter="get_vehicle" default="NodePath(&quot;&quot;)">
+			The [VehicleBody3D] to drive. If empty, the parent node is used.
+		</member>
+	</members>
+	<signals>
+		<signal name="gear_changed">
+			<param index="0" name="gear" type="int" />
+			<description>
+				Emitted when the gear changes, by the automatic gearbox, [method set_gear], or because reverse was selected or released.
+			</description>
+		</signal>
+	</signals>
+</class>

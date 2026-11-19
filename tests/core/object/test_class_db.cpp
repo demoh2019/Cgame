@@ -33,6 +33,7 @@
 TEST_FORCE_LINK(test_class_db)
 
 #include "core/config/engine.h"
+#include "core/core_bind.h"
 #include "core/core_constants.h"
 #include "core/object/class_db.h"
 
@@ -890,6 +891,67 @@ TEST_SUITE("[ClassDB]") {
 			}
 		}
 	}
+}
+
+TEST_CASE("[CoreBind] Class metadata array conversion retains entries and order") {
+	CoreBind::Special::ClassDB api;
+	const StringName classes[] = { "Object", "RefCounted", "Node" };
+	for (const StringName &class_name : classes) {
+		List<MethodInfo> methods;
+		::ClassDB::get_method_list(class_name, &methods, false);
+		const TypedArray<Dictionary> method_results = api.class_get_method_list(class_name, false);
+		REQUIRE_EQ(method_results.size(), methods.size());
+		int index = 0;
+		for (const MethodInfo &method : methods) {
+			Dictionary item = method_results[index++];
+			CHECK_EQ(item["name"], Variant(method.name));
+		}
+
+		List<PropertyInfo> properties;
+		::ClassDB::get_property_list(class_name, &properties, false);
+		const TypedArray<Dictionary> property_results = api.class_get_property_list(class_name, false);
+		REQUIRE_EQ(property_results.size(), properties.size());
+		index = 0;
+		for (const PropertyInfo &property : properties) {
+			Dictionary item = property_results[index++];
+			CHECK_EQ(item["name"], Variant(property.name));
+		}
+
+		List<MethodInfo> signals;
+		::ClassDB::get_signal_list(class_name, &signals, false);
+		const TypedArray<Dictionary> signal_results = api.class_get_signal_list(class_name, false);
+		REQUIRE_EQ(signal_results.size(), signals.size());
+		index = 0;
+		for (const MethodInfo &signal : signals) {
+			Dictionary item = signal_results[index++];
+			CHECK_EQ(item["name"], Variant(signal.name));
+		}
+	}
+}
+
+TEST_CASE("[ClassDB] Preallocated reflection arguments match registered MethodBind signatures") {
+	const StringName class_names[] = { "Object", "RefCounted", "Node" };
+	int verified_methods = 0;
+	for (const StringName &class_name : class_names) {
+		List<MethodInfo> methods;
+		ClassDB::get_method_list(class_name, &methods, true);
+		REQUIRE(methods.size() > 0);
+		for (const MethodInfo &method : methods) {
+			const MethodBind *binding = ClassDB::get_method(class_name, method.name);
+			if (!binding) {
+				continue; // Virtual methods do not have regular MethodBinds.
+			}
+			REQUIRE_EQ(method.arguments.size(), binding->get_argument_count());
+			for (int arg_idx = 0; arg_idx < binding->get_argument_count(); arg_idx++) {
+				const PropertyInfo expected = binding->get_argument_info(arg_idx);
+				CHECK_EQ(method.arguments[arg_idx].name, expected.name);
+				CHECK_EQ(method.arguments[arg_idx].type, expected.type);
+				CHECK_EQ(method.arguments[arg_idx].hint, expected.hint);
+			}
+			verified_methods++;
+		}
+	}
+	CHECK(verified_methods > 20);
 }
 
 } // namespace TestClassDB

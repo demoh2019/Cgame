@@ -32,6 +32,42 @@
 
 #include "core/variant/variant.h"
 
+#include <cstring>
+
+// Materialize a path's components in one allocation, instead of repeatedly
+// reallocating and copying the growing prefix for each segment.
+static String _join_node_path_names(const Vector<StringName> &p_names, char32_t p_separator) {
+	const int count = p_names.size();
+	if (count == 0) {
+		return String();
+	}
+
+	uint64_t length = count - 1; // Separators between adjacent components.
+	const StringName *names = p_names.ptr();
+	for (int i = 0; i < count; i++) {
+		length += names[i].string().length();
+	}
+	ERR_FAIL_COND_V(length >= INT_MAX, String());
+
+	String joined;
+	ERR_FAIL_COND_V(joined.resize_uninitialized(int64_t(length) + 1) != OK, String());
+	char32_t *dst = joined.ptrw();
+	uint64_t pos = 0;
+	for (int i = 0; i < count; i++) {
+		if (i > 0) {
+			dst[pos++] = p_separator;
+		}
+		const String &part = names[i].string();
+		const int part_length = part.length();
+		if (part_length > 0) {
+			memcpy(dst + pos, part.ptr(), size_t(part_length) * sizeof(char32_t));
+			pos += part_length;
+		}
+	}
+	dst[pos] = 0;
+	return joined;
+}
+
 void NodePath::_update_hash_cache() const {
 	StringName path = get_concatenated_names();
 	StringName subpath = get_concatenated_subnames();
@@ -196,19 +232,39 @@ NodePath::operator String() const {
 		return String();
 	}
 
-	String ret;
+	const StringName joined_names = get_concatenated_names();
+	const StringName joined_subnames = get_concatenated_subnames();
+	const String &names = joined_names.string();
+	const String &subnames = joined_subnames.string();
+	const bool has_subnames = !subnames.is_empty();
+
+	// The most common relative node paths already have their complete
+	// representation interned. Share the buffer instead of allocating one.
+	if (!data->absolute && !has_subnames) {
+		return names;
+	}
+
+	// Write the entire path to a single buffer: avoid intermediate "/" and
+	// ":" strings and re-copying the growing output on each concatenation.
+	const int64_t result_length = int64_t(data->absolute) + names.length() + int64_t(has_subnames) + subnames.length();
+	String result;
+	ERR_FAIL_COND_V(result.resize_uninitialized(result_length + 1) != OK, String());
+	char32_t *write = result.ptrw();
+	int64_t offset = 0;
 	if (data->absolute) {
-		ret = "/";
+		write[offset++] = '/';
 	}
-
-	ret += get_concatenated_names();
-
-	String subpath = get_concatenated_subnames();
-	if (!subpath.is_empty()) {
-		ret += ":" + subpath;
+	if (!names.is_empty()) {
+		memcpy(write + offset, names.ptr(), size_t(names.length()) * sizeof(char32_t));
+		offset += names.length();
 	}
-
-	return ret;
+	if (has_subnames) {
+		write[offset++] = ':';
+		memcpy(write + offset, subnames.ptr(), size_t(subnames.length()) * sizeof(char32_t));
+		offset += subnames.length();
+	}
+	write[offset] = 0;
+	return result;
 }
 
 Vector<StringName> NodePath::get_names() const {
@@ -229,16 +285,7 @@ StringName NodePath::get_concatenated_names() const {
 	ERR_FAIL_NULL_V(data, StringName());
 
 	if (!data->concatenated_path) {
-		int pc = data->path.size();
-		String concatenated;
-		const StringName *sn = data->path.ptr();
-		for (int i = 0; i < pc; i++) {
-			if (i > 0) {
-				concatenated += "/";
-			}
-			concatenated += sn[i].string();
-		}
-		data->concatenated_path = concatenated;
+		data->concatenated_path = _join_node_path_names(data->path, '/');
 	}
 	return data->concatenated_path;
 }
@@ -247,16 +294,7 @@ StringName NodePath::get_concatenated_subnames() const {
 	ERR_FAIL_NULL_V(data, StringName());
 
 	if (!data->concatenated_subpath) {
-		int spc = data->subpath.size();
-		String concatenated;
-		const StringName *ssn = data->subpath.ptr();
-		for (int i = 0; i < spc; i++) {
-			if (i > 0) {
-				concatenated += ":";
-			}
-			concatenated += ssn[i].string();
-		}
-		data->concatenated_subpath = concatenated;
+		data->concatenated_subpath = _join_node_path_names(data->subpath, ':');
 	}
 	return data->concatenated_subpath;
 }
@@ -286,49 +324,42 @@ NodePath NodePath::rel_path_to(const NodePath &p_np) const {
 	ERR_FAIL_COND_V(!is_absolute(), NodePath());
 	ERR_FAIL_COND_V(!p_np.is_absolute(), NodePath());
 
-	Vector<StringName> src_dirs = get_names();
-	Vector<StringName> dst_dirs = p_np.get_names();
+	// Both paths must have data when absolute. Reference their segments
+	// directly instead of touching the COW vector reference counts.
+	const Vector<StringName> &src_dirs = data->path;
+	const Vector<StringName> &dst_dirs = p_np.data->path;
+	const int src_count = src_dirs.size();
+	const int dst_count = dst_dirs.size();
 
-	//find common parent
-	int common_parent = 0;
-
-	while (true) {
-		if (src_dirs.size() == common_parent) {
-			break;
-		}
-		if (dst_dirs.size() == common_parent) {
-			break;
-		}
-		if (src_dirs[common_parent] != dst_dirs[common_parent]) {
-			break;
-		}
-		common_parent++;
+	int common_prefix = 0;
+	const int shared_limit = MIN(src_count, dst_count);
+	while (common_prefix < shared_limit && src_dirs[common_prefix] == dst_dirs[common_prefix]) {
+		common_prefix++;
 	}
 
-	common_parent--;
-
+	const int up_count = src_count - common_prefix;
+	const int down_count = dst_count - common_prefix;
+	// Allocate only the segments actually emitted, not both full path
+	// lengths. Deep paths sharing a prefix can need only one or two names.
+	const int size = MAX(1, up_count + down_count);
 	Vector<StringName> relpath;
-	relpath.resize(src_dirs.size() + dst_dirs.size() + 1);
-
-	StringName *relpath_ptr = relpath.ptrw();
-
-	int path_size = 0;
-	StringName back_str("..");
-	for (int i = common_parent + 1; i < src_dirs.size(); i++) {
-		relpath_ptr[path_size++] = back_str;
+	relpath.resize(size);
+	StringName *write = relpath.ptrw();
+	int index = 0;
+	if (up_count > 0) {
+		const StringName back_str("..");
+		for (int i = 0; i < up_count; i++) {
+			write[index++] = back_str;
+		}
+	}
+	for (int i = common_prefix; i < dst_count; i++) {
+		write[index++] = dst_dirs[i];
+	}
+	if (index == 0) {
+		write[0] = ".";
 	}
 
-	for (int i = common_parent + 1; i < dst_dirs.size(); i++) {
-		relpath_ptr[path_size++] = dst_dirs[i];
-	}
-
-	if (path_size == 0) {
-		relpath_ptr[path_size++] = ".";
-	}
-
-	relpath.resize(path_size);
-
-	return NodePath(relpath, p_np.get_subnames(), false);
+	return NodePath(relpath, p_np.data->subpath, false);
 }
 
 NodePath NodePath::get_as_property_path() const {
@@ -337,11 +368,9 @@ NodePath NodePath::get_as_property_path() const {
 	} else {
 		Vector<StringName> new_path = data->subpath;
 
-		String initial_subname = data->path[0];
-
-		for (int i = 1; i < data->path.size(); i++) {
-			initial_subname += "/" + data->path[i];
-		}
+		// Share the already-joined string (or build it once) instead of
+		// constructing a second concatenation of all the path segments.
+		String initial_subname = get_concatenated_names().string();
 		new_path.insert(0, initial_subname);
 
 		return NodePath(Vector<StringName>(), new_path, false);
@@ -353,28 +382,52 @@ bool NodePath::is_empty() const {
 }
 
 void NodePath::simplify() {
-	if (!data) {
+	if (!data || data->path.size() <= 1) {
 		return;
 	}
-	_copy_on_write();
-	for (int i = 0; i < data->path.size(); i++) {
-		if (data->path.size() == 1) {
+
+	// Common case: an already normalized path. Do not detach shared data,
+	// discard cached hashes, or write to its COW vector just to do nothing.
+	const int count = data->path.size();
+	const StringName *source = data->path.ptr();
+	bool needs_simplifying = false;
+	for (int i = 0; i < count; i++) {
+		const String &part = source[i].string();
+		if (part == "." || (part == ".." && i > 0 && source[i - 1].string() != "." && source[i - 1].string() != "..")) {
+			needs_simplifying = true;
 			break;
 		}
-		if (data->path[i].string() == ".") {
-			data->path.remove_at(i);
-			i--;
-		} else if (i > 0 && data->path[i].string() == ".." && data->path[i - 1].string() != "." && data->path[i - 1].string() != "..") {
-			//remove both
-			data->path.remove_at(i - 1);
-			data->path.remove_at(i - 1);
-			i -= 2;
-			if (data->path.is_empty()) {
-				data->path.push_back(".");
-				break;
-			}
-		}
 	}
+	if (!needs_simplifying) {
+		return;
+	}
+
+	_copy_on_write();
+	// Compact in place using the already allocated array as a stack.
+	// Unlike repeated remove_at(), every surviving name moves at most once.
+	StringName *names = data->path.ptrw();
+	int write = 0;
+	for (int read = 0; read < count; read++) {
+		const String &part = names[read].string();
+		if (part == ".") {
+			continue;
+		}
+		if (part == ".." && write > 0 && names[write - 1].string() != "." && names[write - 1].string() != "..") {
+			--write;
+			continue;
+		}
+		if (read != write) {
+			names[write] = names[read];
+		}
+		++write;
+	}
+
+	// Keep the original semantics: a completely cancelled path is ".".
+	if (write == 0) {
+		names[0] = ".";
+		write = 1;
+	}
+	data->path.resize(write);
 	data->concatenated_path = StringName();
 	data->hash_cache_valid = false;
 }

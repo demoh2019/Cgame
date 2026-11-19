@@ -1,0 +1,33 @@
+name: Object Metadata and Signals Fast Path
+on:
+  pull_request:
+    paths:
+      - "core/object/object.cpp"
+      - "tests/core/object/test_object.cpp"
+      - ".github/workflows/object-metadata-single-probe.yml"
+  workflow_dispatch:
+
+jobs:
+  native-tests:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          submodules: recursive
+      - uses: ./.github/actions/godot-cache-restore
+        with:
+          cache-name: linux-object-single-probe
+        continue-on-error: true
+      - uses: ./.github/actions/godot-deps
+      - uses: ./.github/actions/godot-build
+        with:
+          platform: linuxbsd
+          target: editor
+          scons-flags: tests=yes module_text_server_fb_enabled=yes -j2
+      - uses: ./.github/actions/godot-cache-save
+        with:
+          cache-name: linux-object-single-probe
+        continue-on-error: true
+      - name: Object metadata and signal regressions
+        run: ./bin/godot.linuxbsd.editor.x86_64 --headless --test --test-case="*[ObjectSingleProbe]*"

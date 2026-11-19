@@ -89,11 +89,9 @@
 #endif
 
 #ifdef __linux__
-namespace GameMode {
-#include <thirdparty/misc/gamemode_client.h>
-}
+#include "platform/linuxbsd/cgroup_cpu_quota.h"
 
-#include "core/config/project_settings.h"
+#include <sched.h>
 #endif
 
 #ifdef FONTCONFIG_ENABLED
@@ -197,6 +195,23 @@ void OS_LinuxBSD::initialize_joypads() {
 	}
 #endif
 }
+
+#ifdef __linux__
+int OS_LinuxBSD::get_default_thread_pool_size() const {
+	int available = get_processor_count();
+	cpu_set_t set;
+	if (sched_getaffinity(0, sizeof(cpu_set_t), &set) == 0) {
+		const int count = CPU_COUNT(&set);
+		if (count > 0) {
+			available = count;
+		}
+	}
+	// Affinity alone may overestimate CPU capacity inside cgroup v2 containers.
+	// Respect both constraints, but always retain at least one worker.
+	const int quota = CgroupCPUQuota::read_cpu_max_file();
+	return CgroupCPUQuota::effective_thread_count(available, quota);
+}
+#endif
 
 String OS_LinuxBSD::get_unique_id() const {
 	static String machine_id;
@@ -996,23 +1011,7 @@ void OS_LinuxBSD::run() {
 	//int frames=0;
 	//uint64_t frame=0;
 
-#ifdef __linux__
-	Engine *e = Engine::get_singleton();
-	bool use_gamemode = GLOBAL_GET("application/run/use_game_mode");
-	int gamemode_status = -1;
-	if (!e->is_editor_hint() && !e->is_project_manager_hint()) {
-		if (use_gamemode) {
-			gamemode_status = GameMode::gamemode_request_start_for(OS::get_singleton()->get_process_id());
-			if (gamemode_status >= 0) {
-				print_verbose("GameMode: Enabled successfully.");
-			} else {
-				WARN_VERBOSE("GameMode: Failed to enable (check if the daemon is installed and running).");
-			}
-		} else {
-			print_verbose("GameMode: Not enabling, as the project has it disabled.");
-		}
-	}
-#endif
+
 
 	while (true) {
 		GodotProfileFrameMark;
@@ -1029,11 +1028,7 @@ void OS_LinuxBSD::run() {
 	}
 
 	main_loop->finalize();
-#ifdef __linux__
-	if (gamemode_status == 0) {
-		GameMode::gamemode_request_end_for(OS::get_singleton()->get_process_id());
-	}
-#endif
+
 }
 
 void OS_LinuxBSD::disable_crash_handler() {

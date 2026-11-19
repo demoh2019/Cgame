@@ -1,0 +1,48 @@
+name: Apple mobile directional shadow batching regressions
+
+on:
+  push:
+    branches: [develop]
+    paths:
+      - "servers/rendering/renderer_rd/forward_mobile/render_forward_mobile.cpp"
+      - "servers/rendering/renderer_rd/forward_mobile/render_forward_mobile.h"
+      - "misc/scripts/tests/test_apple_shadow_pass_batching.py"
+      - ".github/workflows/apple-shadow-batching.yml"
+  pull_request:
+    paths:
+      - "servers/rendering/renderer_rd/forward_mobile/render_forward_mobile.cpp"
+      - "servers/rendering/renderer_rd/forward_mobile/render_forward_mobile.h"
+      - "misc/scripts/tests/test_apple_shadow_pass_batching.py"
+      - ".github/workflows/apple-shadow-batching.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  shader-regressions:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - name: Verify Apple-only activation and shadow pass lifecycle
+        run: |
+          python3 -m py_compile misc/scripts/tests/test_apple_shadow_pass_batching.py
+          python3 -m unittest discover -s misc/scripts/tests -p test_apple_shadow_pass_batching.py -v
+
+  native-mobile-renderer-build:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+      - uses: ./.github/actions/godot-deps
+      - name: Compile renderer with native Godot tests
+        uses: ./.github/actions/godot-build
+        with:
+          platform: linuxbsd
+          target: editor
+          scons-flags: dev_build=yes tests=yes debug_symbols=no module_mono_enabled=no module_text_server_fb_enabled=yes accesskit=no -j2
+      - name: Headless editor smoke
+        run: ./bin/godot.linuxbsd.editor.dev.x86_64 --headless --test --test-case="*[SceneTree][ArrayMesh]*"

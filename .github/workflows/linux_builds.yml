@@ -243,6 +243,22 @@ jobs:
           ${{ matrix.bin }} --help
           ${{ matrix.bin }} --headless --test --force-colors
 
+      - name: CLI autoload regression tests
+        if: matrix.proj-test
+        run: |
+          ${{ matrix.bin }} --headless --path tests/data/cli_autoload --check-only --script res://run_scene_tree.gd
+          ${{ matrix.bin }} --headless --path tests/data/cli_autoload --check-only --script res://run_main_loop.gd
+          timeout 30s ${{ matrix.bin }} --headless --path tests/data/cli_autoload --script res://run_scene_tree.gd
+      - name: Open World terrain editor regression tests
+        if: matrix.proj-test
+        run: |
+          test_dir="$(mktemp -d)"
+          trap 'rm -rf "$test_dir"' EXIT
+          mkdir -p "$test_dir/addons"
+          cp -R addons/open_world "$test_dir/addons/open_world"
+          printf 'config_version=5\n' > "$test_dir/project.godot"
+          timeout 90s ${{ matrix.bin }} --headless --path "$test_dir" --script res://addons/open_world/tests/test_terrain.gd
+
       - name: .NET source generators tests
         if: matrix.build-mono
         run: |

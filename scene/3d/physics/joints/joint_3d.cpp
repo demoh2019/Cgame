@@ -158,6 +158,67 @@ NodePath Joint3D::get_node_b() const {
 	return b;
 }
 
+void Joint3D::_on_joint_broken(RID p_joint) {
+	// Invoked from the physics server's query flush; defer so scripts never run mid-physics.
+	callable_mp(this, &Joint3D::_emit_broken).call_deferred();
+}
+
+void Joint3D::_emit_broken() {
+	emit_signal(SNAME("broken"));
+}
+
+void Joint3D::set_break_force(real_t p_force) {
+	break_force = MAX(p_force, real_t(0.0));
+	PhysicsServer3D::get_singleton()->joint_set_break_force(joint, break_force);
+}
+
+real_t Joint3D::get_break_force() const {
+	return break_force;
+}
+
+void Joint3D::set_break_torque(real_t p_torque) {
+	break_torque = MAX(p_torque, real_t(0.0));
+	PhysicsServer3D::get_singleton()->joint_set_break_torque(joint, break_torque);
+}
+
+real_t Joint3D::get_break_torque() const {
+	return break_torque;
+}
+
+void Joint3D::set_fatigue_rate(real_t p_rate) {
+	fatigue_rate = Math::is_finite(p_rate) ? MAX(real_t(0.0), p_rate) : real_t(0.0);
+	PhysicsServer3D::get_singleton()->joint_set_fatigue_rate(joint, fatigue_rate);
+}
+
+real_t Joint3D::get_fatigue_rate() const {
+	return fatigue_rate;
+}
+
+void Joint3D::set_fatigue_yield_ratio(real_t p_ratio) {
+	fatigue_yield_ratio = Math::is_finite(p_ratio) ? CLAMP(p_ratio, real_t(0.0), real_t(0.99)) : real_t(0.5);
+	PhysicsServer3D::get_singleton()->joint_set_fatigue_yield_ratio(joint, fatigue_yield_ratio);
+}
+
+real_t Joint3D::get_fatigue_yield_ratio() const {
+	return fatigue_yield_ratio;
+}
+
+real_t Joint3D::get_fatigue_damage() const {
+	return PhysicsServer3D::get_singleton()->joint_get_fatigue_damage(joint);
+}
+
+bool Joint3D::is_broken() const {
+	return PhysicsServer3D::get_singleton()->joint_is_broken(joint);
+}
+
+Vector3 Joint3D::get_reaction_force() const {
+	return PhysicsServer3D::get_singleton()->joint_get_reaction_force(joint);
+}
+
+Vector3 Joint3D::get_reaction_torque() const {
+	return PhysicsServer3D::get_singleton()->joint_get_reaction_torque(joint);
+}
+
 void Joint3D::set_solver_priority(int p_priority) {
 	solver_priority = p_priority;
 	if (joint.is_valid()) {
@@ -226,6 +287,19 @@ void Joint3D::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("set_exclude_nodes_from_collision", "enable"), &Joint3D::set_exclude_nodes_from_collision);
 	ClassDB::bind_method(D_METHOD("get_exclude_nodes_from_collision"), &Joint3D::get_exclude_nodes_from_collision);
 
+	ClassDB::bind_method(D_METHOD("set_break_force", "force"), &Joint3D::set_break_force);
+	ClassDB::bind_method(D_METHOD("get_break_force"), &Joint3D::get_break_force);
+	ClassDB::bind_method(D_METHOD("set_break_torque", "torque"), &Joint3D::set_break_torque);
+	ClassDB::bind_method(D_METHOD("get_break_torque"), &Joint3D::get_break_torque);
+	ClassDB::bind_method(D_METHOD("set_fatigue_rate", "rate"), &Joint3D::set_fatigue_rate);
+	ClassDB::bind_method(D_METHOD("get_fatigue_rate"), &Joint3D::get_fatigue_rate);
+	ClassDB::bind_method(D_METHOD("set_fatigue_yield_ratio", "ratio"), &Joint3D::set_fatigue_yield_ratio);
+	ClassDB::bind_method(D_METHOD("get_fatigue_yield_ratio"), &Joint3D::get_fatigue_yield_ratio);
+	ClassDB::bind_method(D_METHOD("get_fatigue_damage"), &Joint3D::get_fatigue_damage);
+	ClassDB::bind_method(D_METHOD("is_broken"), &Joint3D::is_broken);
+	ClassDB::bind_method(D_METHOD("get_reaction_force"), &Joint3D::get_reaction_force);
+	ClassDB::bind_method(D_METHOD("get_reaction_torque"), &Joint3D::get_reaction_torque);
+
 	ClassDB::bind_method(D_METHOD("get_rid"), &Joint3D::get_rid);
 
 	ADD_PROPERTY(PropertyInfo(Variant::NODE_PATH, "node_a", PROPERTY_HINT_NODE_PATH_VALID_TYPES, "PhysicsBody3D"), "set_node_a", "get_node_a");
@@ -233,11 +307,21 @@ void Joint3D::_bind_methods() {
 	ADD_PROPERTY(PropertyInfo(Variant::INT, "solver_priority", PROPERTY_HINT_RANGE, "1,8,1"), "set_solver_priority", "get_solver_priority");
 
 	ADD_PROPERTY(PropertyInfo(Variant::BOOL, "exclude_nodes_from_collision"), "set_exclude_nodes_from_collision", "get_exclude_nodes_from_collision");
+
+	ADD_GROUP("Breaking", "break_");
+	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "break_force", PROPERTY_HINT_RANGE, "0,100000,0.001,or_greater,suffix:N"), "set_break_force", "get_break_force");
+	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "break_torque", PROPERTY_HINT_RANGE, U"0,100000,0.001,or_greater,suffix:N\u22C5m"), "set_break_torque", "get_break_torque");
+	ADD_GROUP("Fatigue", "fatigue_");
+	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "fatigue_rate", PROPERTY_HINT_RANGE, "0,100,0.01,or_greater,suffix:1/s"), "set_fatigue_rate", "get_fatigue_rate");
+	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "fatigue_yield_ratio", PROPERTY_HINT_RANGE, "0,0.99,0.01"), "set_fatigue_yield_ratio", "get_fatigue_yield_ratio");
+
+	ADD_SIGNAL(MethodInfo("broken"));
 }
 
 Joint3D::Joint3D() {
 	set_notify_transform(true);
 	joint = PhysicsServer3D::get_singleton()->joint_create();
+	PhysicsServer3D::get_singleton()->joint_set_break_callback(joint, callable_mp(this, &Joint3D::_on_joint_broken));
 }
 
 Joint3D::~Joint3D() {

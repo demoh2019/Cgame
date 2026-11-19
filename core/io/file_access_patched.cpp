@@ -34,12 +34,17 @@
 #include "core/io/file_access_pack.h"
 #include "core/os/os.h"
 
+#include <utility>
+
 Error FileAccessPatched::_apply_patch() const {
 	ERR_FAIL_COND_V(!is_open(), FAILED);
 
 	String path = old_file->get_path();
 	Vector<PackedData::PackedFile> delta_patches = PackedData::get_singleton()->get_delta_patches(path);
 	Vector<uint8_t> old_file_data = old_file->get_buffer(old_file->get_length());
+	// Alternate between two COW buffers instead of allocating a fresh
+	// destination for every delta in a patch chain.
+	Vector<uint8_t> next_file_data;
 
 	for (int i = 0; i < delta_patches.size(); ++i) {
 		const PackedData::PackedFile &delta_patch = delta_patches[i];
@@ -62,20 +67,25 @@ Error FileAccessPatched::_apply_patch() const {
 		uint64_t io_usec_end = OS::get_singleton()->get_ticks_usec();
 		uint64_t decode_usec_start = OS::get_singleton()->get_ticks_usec();
 
-		Vector<uint8_t> new_file_data;
-		err = DeltaEncoding::decode_delta(old_file_data, patch_data, new_file_data);
+		err = DeltaEncoding::decode_delta(old_file_data, patch_data, next_file_data);
 		ERR_FAIL_COND_V_MSG(err != OK, err, vformat("Failed to apply delta patch (%d of %d) to \"%s\".", i + 1, delta_patches.size(), path));
 
 		uint64_t decode_usec_end = OS::get_singleton()->get_ticks_usec();
 
-		old_file_data = new_file_data;
+		// The previous prefix buffer can be reused as the next destination.
+		// On the final patch, release it immediately to minimize peak RAM.
+		if (i + 1 == delta_patches.size()) {
+			old_file_data = std::move(next_file_data);
+		} else {
+			std::swap(old_file_data, next_file_data);
+		}
 
 		uint64_t total_usec_end = OS::get_singleton()->get_ticks_usec();
 
 		print_verbose(vformat(U"Applied delta patch to \"%s\" from \"%s\" in %d μs (%d μs I/O, %d μs decoding).", path, delta_patch.pack.get_file(), total_usec_end - total_usec_start, io_usec_end - io_usec_start, decode_usec_end - decode_usec_start));
 	}
 
-	patched_file_data = old_file_data;
+	patched_file_data = std::move(old_file_data);
 	patched_file.instantiate();
 	return patched_file->open_custom(patched_file_data.ptr(), patched_file_data.size());
 }

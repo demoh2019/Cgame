@@ -2466,4 +2466,101 @@ TEST_CASE("[Variant] Operator NOT") {
 	}
 }
 
+
+static void check_packed_parser_roundtrip(const Variant &p_array) {
+	String encoded;
+	VariantWriter::write_to_string(p_array, encoded);
+	VariantParser::StreamString stream;
+	stream.s = encoded;
+	String parse_error;
+	int line = 1;
+	Variant decoded;
+	REQUIRE_EQ(VariantParser::parse(&stream, decoded, parse_error, line), OK);
+	CHECK_EQ(decoded.get_type(), p_array.get_type());
+	CHECK_EQ(decoded, p_array);
+}
+
+TEST_CASE("[PackedParseFastPath] byte arrays parse without changing their values") {
+	PackedByteArray values;
+	for (int i = 0; i < 512; i++) {
+		values.push_back(uint8_t(i % 256));
+	}
+	check_packed_parser_roundtrip(values);
+}
+
+TEST_CASE("[PackedParseFastPath] int32 arrays preserve sign and size") {
+	PackedInt32Array values;
+	for (int i = 0; i < 128; i++) {
+		values.push_back(i * 123 - 8000);
+	}
+	check_packed_parser_roundtrip(values);
+}
+
+TEST_CASE("[PackedParseFastPath] int64 arrays preserve large numbers") {
+	PackedInt64Array values;
+	for (int i = 0; i < 128; i++) {
+		values.push_back(int64_t(1) << 40 | i);
+	}
+	check_packed_parser_roundtrip(values);
+}
+
+TEST_CASE("[PackedParseFastPath] float32 arrays preserve exactly representable fractions") {
+	PackedFloat32Array values;
+	for (int i = 0; i < 128; i++) {
+		values.push_back(float(i) * 0.5f - 10.0f);
+	}
+	check_packed_parser_roundtrip(values);
+}
+
+TEST_CASE("[PackedParseFastPath] float64 arrays preserve exactly representable fractions") {
+	PackedFloat64Array values;
+	for (int i = 0; i < 128; i++) {
+		values.push_back(double(i) * 0.125 - 7.0);
+	}
+	check_packed_parser_roundtrip(values);
+}
+
+TEST_CASE("[PackedParseFastPath] string arrays preserve escaped and long strings") {
+	PackedStringArray values;
+	values.push_back("");
+	values.push_back("quote: \" and slash: \\");
+	for (int i = 0; i < 128; i++) {
+		values.push_back("resource/file_" + itos(i) + ".tscn");
+	}
+	check_packed_parser_roundtrip(values);
+}
+
+TEST_CASE("[PackedParseFastPath] empty packed arrays round-trip") {
+	check_packed_parser_roundtrip(PackedByteArray());
+	check_packed_parser_roundtrip(PackedInt32Array());
+	check_packed_parser_roundtrip(PackedInt64Array());
+	check_packed_parser_roundtrip(PackedFloat32Array());
+	check_packed_parser_roundtrip(PackedFloat64Array());
+	check_packed_parser_roundtrip(PackedStringArray());
+}
+
+TEST_CASE("[Variant] Constructor reflection preserves argument metadata after bulk resizing") {
+	int constructors_verified = 0;
+	for (int type_index = 0; type_index < Variant::VARIANT_MAX; type_index++) {
+		const Variant::Type type = Variant::Type(type_index);
+		List<MethodInfo> constructors;
+		Variant::get_constructor_list(type, &constructors);
+		REQUIRE_EQ(constructors.size(), Variant::get_constructor_count(type));
+
+		int ctor_index = 0;
+		for (const MethodInfo &constructor : constructors) {
+			const int arg_count = Variant::get_constructor_argument_count(type, ctor_index);
+			REQUIRE_EQ(constructor.arguments.size(), arg_count);
+			CHECK_EQ(constructor.return_val.type, type);
+			for (int arg = 0; arg < arg_count; arg++) {
+				CHECK_EQ(constructor.arguments[arg].name, Variant::get_constructor_argument_name(type, ctor_index, arg));
+				CHECK_EQ(constructor.arguments[arg].type, Variant::get_constructor_argument_type(type, ctor_index, arg));
+			}
+			ctor_index++;
+			constructors_verified++;
+		}
+	}
+	CHECK(constructors_verified > 50);
+}
+
 } // namespace TestVariant

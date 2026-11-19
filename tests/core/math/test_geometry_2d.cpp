@@ -32,6 +32,7 @@
 
 TEST_FORCE_LINK(test_geometry_2d)
 
+#include "core/core_bind.h"
 #include "core/math/geometry_2d.h"
 
 namespace TestGeometry2D {
@@ -817,6 +818,56 @@ TEST_CASE("[Geometry2D] Convex hull") {
 	}
 }
 
+TEST_CASE("[Geometry2D] Bresenham allocation-free iterator matches reference in every octant") {
+	const Vector2i from(3, -4);
+	// Use the original integer algorithm as an independent reference, including tie-breaking.
+	for (int dx = -9; dx <= 9; dx++) {
+		for (int dy = -9; dy <= 9; dy++) {
+			const Vector2i to = from + Vector2i(dx, dy);
+			Vector<Vector2i> expected;
+			Vector2i delta = (to - from).abs() * 2;
+			Vector2i step = (to - from).sign();
+			Vector2i current = from;
+
+			if (delta.x > delta.y) {
+				int err = delta.x / 2;
+				for (; current.x != to.x; current.x += step.x) {
+					expected.push_back(current);
+					err -= delta.y;
+					if (err < 0) {
+						current.y += step.y;
+						err += delta.x;
+					}
+				}
+			} else {
+				int err = delta.y / 2;
+				for (; current.y != to.y; current.y += step.y) {
+					expected.push_back(current);
+					err -= delta.x;
+					if (err < 0) {
+						current.x += step.x;
+						err += delta.y;
+					}
+				}
+			}
+			expected.push_back(current);
+
+			int idx = 0;
+			for (const Vector2i &point : Geometry2D::bresenham_iter(from, to)) {
+				REQUIRE(idx < expected.size());
+				CHECK_EQ(point, expected[idx]);
+				idx++;
+			}
+			CHECK_EQ(idx, expected.size());
+			const Vector<Vector2i> materialized = Geometry2D::bresenham_line(from, to);
+			REQUIRE_EQ(materialized.size(), expected.size());
+			for (int i = 0; i < expected.size(); i++) {
+				CHECK_EQ(materialized[i], expected[i]);
+			}
+		}
+	}
+}
+
 TEST_CASE("[Geometry2D] Bresenham line") {
 	Vector<Vector2i> r;
 
@@ -888,6 +939,272 @@ TEST_CASE("[Geometry2D] Bresenham line") {
 		CHECK(r[10] == Vector2i(10, 5));
 		CHECK(r[11] == Vector2i(11, 5));
 	}
+}
+
+TEST_CASE("[CoreBind] Geometry2D polygon conversion preserves native points") {
+	CoreBind::Geometry2D *api = CoreBind::Geometry2D::get_singleton();
+	REQUIRE(api != nullptr);
+
+	Vector<Vector2> first;
+	first.push_back(Vector2(0, 0));
+	first.push_back(Vector2(10, 0));
+	first.push_back(Vector2(10, 10));
+	first.push_back(Vector2(0, 10));
+
+	Vector<Vector2> second;
+	second.push_back(Vector2(20, 20));
+	second.push_back(Vector2(30, 20));
+	second.push_back(Vector2(30, 30));
+	second.push_back(Vector2(20, 30));
+
+	const Vector<Vector<Point2>> expected = Geometry2D::merge_polygons(first, second);
+	const TypedArray<PackedVector2Array> actual = api->merge_polygons(first, second);
+	REQUIRE_EQ(actual.size(), expected.size());
+	for (int polygon = 0; polygon < expected.size(); polygon++) {
+		PackedVector2Array result = actual[polygon];
+		REQUIRE_EQ(result.size(), expected[polygon].size());
+		for (int i = 0; i < result.size(); i++) {
+			CHECK(result[i].is_equal_approx(expected[polygon][i]));
+		}
+	}
+}
+
+TEST_CASE("[Geometry2D] Large disjoint polygon results preserve full contour coordinates") {
+	constexpr int point_count = 256;
+	Vector<Point2> first;
+	Vector<Point2> second;
+	first.resize(point_count);
+	second.resize(point_count);
+	Point2 *first_write = first.ptrw();
+	Point2 *second_write = second.ptrw();
+	for (int i = 0; i < point_count; i++) {
+		const double angle = Math::TAU * i / point_count;
+		const Point2 vertex(Math::cos(angle) * 25.0, Math::sin(angle) * 25.0);
+		first_write[i] = vertex;
+		second_write[i] = vertex + Point2(100.0, 0.0);
+	}
+
+	const Vector<Vector<Point2>> union_result = Geometry2D::merge_polygons(first, second);
+	REQUIRE_EQ(union_result.size(), 2);
+	for (const Vector<Point2> &polygon : union_result) {
+		REQUIRE(polygon.size() >= 200);
+		for (const Point2 &point : polygon) {
+			CHECK(Math::is_finite(point.x));
+			CHECK(Math::is_finite(point.y));
+		}
+	}
+
+	const Vector<Vector<Point2>> repeat_result = Geometry2D::merge_polygons(first, second);
+	REQUIRE_EQ(repeat_result.size(), union_result.size());
+	for (int poly = 0; poly < union_result.size(); poly++) {
+		REQUIRE_EQ(repeat_result[poly].size(), union_result[poly].size());
+		for (int v = 0; v < union_result[poly].size(); v++) {
+			CHECK(repeat_result[poly][v].is_equal_approx(union_result[poly][v]));
+		}
+	}
+
+	const Vector<Vector<Point2>> clipped = Geometry2D::clip_polygons(first, second);
+	REQUIRE_EQ(clipped.size(), 1);
+	CHECK(clipped[0].size() >= 200);
+}
+
+TEST_CASE("[Geometry2D] Large polygon offset retains valid paths for both directions") {
+	constexpr int point_count = 384;
+	Vector<Point2> polygon;
+	polygon.resize(point_count);
+	Point2 *vertices = polygon.ptrw();
+	for (int i = 0; i < point_count; i++) {
+		const double angle = Math::TAU * i / point_count;
+		vertices[i] = Point2(Math::cos(angle) * 50.0, Math::sin(angle) * 50.0);
+	}
+
+	for (real_t delta : { -2.0, 2.0 }) {
+		const Vector<Vector<Point2>> offset = Geometry2D::offset_polygon(polygon, delta, Geometry2D::JOIN_ROUND);
+		REQUIRE_EQ(offset.size(), 1);
+		REQUIRE(offset[0].size() >= 100);
+		for (const Point2 &point : offset[0]) {
+			CHECK(Math::is_finite(point.x));
+			CHECK(Math::is_finite(point.y));
+		}
+	}
+}
+
+
+TEST_CASE("[Geometry2D][Performance] Winner-only atlas packing keeps legacy coordinates") {
+	// Rectangles have unique widths so that sort ordering is deterministic.
+	// These expected positions and sizes are from the previous all-candidate
+	// implementation, including its strict first-best tie-break rule.
+	struct Case {
+		Vector<Size2i> sizes;
+		Vector<Point2i> positions;
+		Size2i size;
+	};
+	const Case cases[] = {
+		{
+			{ Size2i(1, 2), Size2i(3, 4), Size2i(5, 6), Size2i(7, 8) },
+			{ Point2i(10, 6), Point2i(7, 6), Point2i(7, 0), Point2i(0, 0) },
+			Size2i(12, 10),
+		},
+		{
+			{ Size2i(3, 2), Size2i(5, 3), Size2i(11, 7), Size2i(2, 4), Size2i(17, 9), Size2i(7, 5), Size2i(13, 8), Size2i(19, 2) },
+			{ Point2i(7, 14), Point2i(7, 11), Point2i(17, 10), Point2i(7, 16), Point2i(0, 2), Point2i(0, 11), Point2i(17, 2), Point2i(0, 0) },
+			Size2i(30, 20),
+		},
+		{
+			{ Size2i(11, 7), Size2i(4, 20), Size2i(17, 3), Size2i(9, 13), Size2i(6, 5), Size2i(13, 6), Size2i(21, 8), Size2i(3, 12), Size2i(19, 4), Size2i(15, 10) },
+			{ Point2i(13, 22), Point2i(9, 34), Point2i(0, 12), Point2i(0, 21), Point2i(9, 29), Point2i(0, 15), Point2i(0, 0), Point2i(13, 34), Point2i(0, 8), Point2i(17, 12) },
+			Size2i(32, 54),
+		},
+	};
+
+	Vector<Point2i> actual;
+	Size2i actual_size;
+	for (const Case &test : cases) {
+		// Exercise both fresh and reused output vectors; the output must
+		// reflect the best candidate and preserve the original input order.
+		Geometry2D::make_atlas(test.sizes, actual, actual_size);
+		CHECK(actual_size == test.size);
+		CHECK(actual == test.positions);
+		REQUIRE(actual.size() == test.sizes.size());
+		for (int i = 0; i < actual.size(); i++) {
+			CHECK(actual[i].x >= 0);
+			CHECK(actual[i].y >= 0);
+			CHECK(actual[i].x + test.sizes[i].width <= actual_size.width);
+			CHECK(actual[i].y + test.sizes[i].height <= actual_size.height);
+		}
+	}
+}
+
+TEST_CASE("[Geometry2D][Performance] Atlas packing scales without per-candidate rectangle snapshots") {
+	Vector<Size2i> sizes;
+	for (int i = 0; i < 768; i++) {
+		sizes.push_back(Size2i(1 + (i * 37) % 113, 1 + (i * 19) % 79));
+	}
+	Vector<Point2i> result;
+	Size2i size;
+	Geometry2D::make_atlas(sizes, result, size);
+	REQUIRE(result.size() == sizes.size());
+	REQUIRE(size.width > 0);
+	REQUIRE(size.height > 0);
+	for (int i = 0; i < result.size(); i++) {
+		CHECK(result[i].x >= 0);
+		CHECK(result[i].y >= 0);
+		CHECK(result[i].x + sizes[i].width <= size.width);
+		CHECK(result[i].y + sizes[i].height <= size.height);
+	}
+}
+
+TEST_CASE("[Geometry2D][Performance] Convex decomposition direct writes preserve polygon area") {
+	// L-shaped polygon with a reflex vertex, expected area 7.
+	const Vector<Point2> concave = {
+		Point2(0, 0), Point2(4, 0), Point2(4, 1),
+		Point2(1, 1), Point2(1, 4), Point2(0, 4),
+	};
+	const Vector<Point2> square = {
+		Point2(10, 0), Point2(12, 0), Point2(12, 2), Point2(10, 2),
+	};
+	const Vector<Vector<Point2>> polygons = { concave, square };
+	const Vector<Vector<Point2>> convex = Geometry2D::decompose_many_polygons_in_convex(polygons, {});
+	REQUIRE(!convex.is_empty());
+
+	real_t area = 0;
+	for (const Vector<Point2> &polygon : convex) {
+		REQUIRE(polygon.size() >= 3);
+		real_t doubled_area = 0;
+		for (int i = 0; i < polygon.size(); i++) {
+			const Point2 &p = polygon[i];
+			const Point2 &q = polygon[(i + 1) % polygon.size()];
+			CHECK(Math::is_finite(p.x));
+			CHECK(Math::is_finite(p.y));
+			doubled_area += p.x * q.y - q.x * p.y;
+		}
+		area += Math::abs(doubled_area) * (real_t)0.5;
+	}
+	CHECK(Math::is_equal_approx(area, (real_t)11.0));
+}
+
+TEST_CASE("[Geometry2D][Performance] Convex decomposition handles many output vertices") {
+	Vector<Point2> polygon;
+	const int count = 192;
+	REQUIRE(polygon.resize(count) == OK);
+	Point2 *const points = polygon.ptrw();
+	for (int i = 0; i < count; i++) {
+		const real_t radians = Math::TAU * i / (real_t)count;
+		points[i] = Point2(Math::cos(radians) * 100, Math::sin(radians) * 100);
+	}
+	const Vector<Vector<Point2>> pieces = Geometry2D::decompose_polygon_in_convex(polygon);
+	REQUIRE(!pieces.is_empty());
+
+	int emitted_vertices = 0;
+	for (const Vector<Point2> &piece : pieces) {
+		REQUIRE(piece.size() >= 3);
+		emitted_vertices += piece.size();
+	}
+	CHECK(emitted_vertices >= count);
+}
+
+TEST_CASE("[Geometry2D][Performance] Moving Clipper paths preserves polygon unions") {
+	const Vector<Point2> a = {
+		Point2(0, 0), Point2(3, 0), Point2(3, 3), Point2(0, 3),
+	};
+	const Vector<Point2> b = {
+		Point2(1, 1), Point2(4, 1), Point2(4, 4), Point2(1, 4),
+	};
+	Vector<Vector<Point2>> joined;
+	Vector<Vector<Point2>> holes;
+	Geometry2D::merge_many_polygons({ a, b }, joined, holes);
+	REQUIRE(joined.size() == 1);
+	CHECK(holes.is_empty());
+
+	auto polygon_area = [](const Vector<Point2> &p_polygon) {
+		real_t area = 0;
+		for (int i = 0; i < p_polygon.size(); i++) {
+			const Point2 &a = p_polygon[i];
+			const Point2 &b = p_polygon[(i + 1) % p_polygon.size()];
+			area += a.x * b.y - b.x * a.y;
+		}
+		return Math::abs(area) / (real_t)2;
+	};
+	CHECK(Math::is_equal_approx(polygon_area(joined[0]), (real_t)14));
+
+	// Reusing the same output arrays should not retain polygons from the
+	// preceding union or detach shared COW geometry unnecessarily.
+	const Vector<Point2> single = {
+		Point2(-2, -2), Point2(2, -2), Point2(2, 2), Point2(-2, 2),
+	};
+	Geometry2D::merge_many_polygons({ single }, joined, holes);
+	REQUIRE(joined.size() == 1);
+	CHECK(holes.is_empty());
+	CHECK(Math::is_equal_approx(polygon_area(joined[0]), (real_t)16));
+}
+
+TEST_CASE("[Geometry2D][Performance] Clipper union retains many disjoint contours") {
+	Vector<Vector<Point2>> polygons;
+	for (int i = 0; i < 128; i++) {
+		const real_t x = i * 5;
+		const real_t y = (i % 16) * 8;
+		polygons.push_back({
+			Point2(x, y), Point2(x + 2, y),
+			Point2(x + 2, y + 3), Point2(x, y + 3),
+		});
+	}
+	Vector<Vector<Point2>> merged;
+	Vector<Vector<Point2>> holes;
+	Geometry2D::merge_many_polygons(polygons, merged, holes);
+	CHECK(merged.size() == 128);
+	CHECK(holes.is_empty());
+	real_t total_area = 0;
+	for (const Vector<Point2> &polygon : merged) {
+		REQUIRE(polygon.size() >= 3);
+		real_t doubled_area = 0;
+		for (int i = 0; i < polygon.size(); i++) {
+			const Point2 &a = polygon[i];
+			const Point2 &b = polygon[(i + 1) % polygon.size()];
+			doubled_area += a.x * b.y - b.x * a.y;
+		}
+		total_area += Math::abs(doubled_area) * (real_t)0.5;
+	}
+	CHECK(Math::is_equal_approx(total_area, (real_t)(128 * 6)));
 }
 
 } // namespace TestGeometry2D

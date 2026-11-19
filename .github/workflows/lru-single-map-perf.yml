@@ -1,0 +1,44 @@
+name: Single-map LRU cache and stable HashMap order regressions
+
+on:
+  pull_request:
+    paths:
+      - 'core/templates/hash_map.h'
+      - 'core/templates/lru.h'
+      - 'servers/rendering/renderer_rd/renderer_canvas_render_rd.cpp'
+      - 'servers/rendering/renderer_rd/renderer_canvas_render_rd.h'
+      - 'tests/core/templates/test_lru.cpp'
+      - '.github/workflows/lru-single-map-perf.yml'
+  push:
+    branches: [develop]
+    paths:
+      - 'core/templates/hash_map.h'
+      - 'core/templates/lru.h'
+      - 'servers/rendering/renderer_rd/renderer_canvas_render_rd.cpp'
+      - 'servers/rendering/renderer_rd/renderer_canvas_render_rd.h'
+      - 'tests/core/templates/test_lru.cpp'
+      - '.github/workflows/lru-single-map-perf.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  native-lru-and-renderer-build:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+      - uses: ./.github/actions/godot-deps
+      - name: Compile rendering and LRU native tests
+        uses: ./.github/actions/godot-build
+        with:
+          platform: linuxbsd
+          target: editor
+          scons-flags: dev_build=yes tests=yes debug_symbols=no module_mono_enabled=no module_text_server_fb_enabled=yes accesskit=no -j2
+      - name: Check LRU ordering, eviction and replacement alias safety
+        run: ./bin/godot.linuxbsd.editor.dev.x86_64 --headless --test --test-case="*[LRU]*"
+      - name: Check HashMap stable recency relinking
+        run: ./bin/godot.linuxbsd.editor.dev.x86_64 --headless --test --test-case="*[HashMap] Renew key preserves value addresses and insertion order*"
