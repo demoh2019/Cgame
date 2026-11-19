@@ -1,0 +1,40 @@
+name: VisualShader unique resource reload regression
+
+on:
+  pull_request:
+    branches: [develop]
+    paths:
+      - "modules/visual_shader/visual_shader.cpp"
+      - "modules/visual_shader/tests/test_visual_shader_unique_reload.h"
+      - ".github/workflows/visual-shader-unique-reload.yml"
+  push:
+    branches: [develop]
+    paths:
+      - "modules/visual_shader/visual_shader.cpp"
+      - "modules/visual_shader/tests/test_visual_shader_unique_reload.h"
+      - ".github/workflows/visual-shader-unique-reload.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  native-visual-shader-regressions:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+      - uses: ./.github/actions/godot-deps
+      - name: Build Godot editor with doctest
+        uses: ./.github/actions/godot-build
+        with:
+          platform: linuxbsd
+          target: editor
+          scons-flags: dev_build=yes tests=yes debug_symbols=no module_mono_enabled=no accesskit=no
+      - name: Run VisualShader serialization and reload regressions
+        shell: bash
+        run: |
+          set -euo pipefail
+          ./bin/godot.linuxbsd.editor.dev.x86_64 --headless --test --test-case='[VisualShader]*'
