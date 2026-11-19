@@ -43,6 +43,18 @@ static func max_health(tier: int) -> float:
 	return MAX_HEALTH_BY_TIER[tier] if valid_tier(tier) else 0.0
 
 
+static func color_for_tier(tier: int) -> Color:
+	match tier:
+		2:
+			return Color(0.63, 0.67, 0.69) # Salvaged stone plates.
+		3:
+			return Color(0.44, 0.55, 0.61) # Reinforced iron.
+		4:
+			return Color(0.36, 0.52, 0.7) # Hardened alloy.
+		_:
+			return Color(0.64, 0.48, 0.3) # Reclaimed timber.
+
+
 static func upgrade_cost(tier: int) -> Dictionary:
 	return UPGRADE_COST_BY_TIER.get(tier, {}).duplicate()
 
