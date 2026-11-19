@@ -215,3 +215,38 @@ graphics driver, seed and resource limits, then profile recurring regressions.
 queries on a connected 32x32 AStar2D grid, complementing the existing
 `astar_grid` and `astar_3d` workloads. Sweep this case using
 `tests/stress/scale_sweep.py --case astar_graph --scales 1,2,4,8`.
+
+## High-pressure scene/resource/audio checks and ramp-to-failure
+
+Additional integrity-checked scenarios complement existing benchmarks:
+
+| Scenario | Workload |
+| --- | --- |
+| `scene_reparent` | Repeatedly move hundreds to thousands of Node3D objects between live parents and verify that no nodes are lost |
+| `resource_roundtrip` | Repeatedly save, reload without resource cache, sample and delete a Curve resource |
+| `audio_bus_churn` | Add, rename and remove audio buses under pressure, verifying the original bus count |
+
+These are selected like any other workload. A geometric `--ramp` mode
+increases the **same** workload until a crash, integrity check error, timeout
+or RSS cap is reached, then moves on to the next scenario. Every scale is run
+in a fresh engine process and scale never exceeds 1000.
+
+```bash
+python3 tests/stress/run.py --godot ./bin/godot.linuxbsd.editor.dev.x86_64 \
+  --case scene_reparent,resource_roundtrip,audio_bus_churn \
+  --preset standard --scale 2 --ramp --ramp-steps 5 \
+  --rss-limit-mib 4096 --output out/pressure-ramp.json \
+  --summary-md out/pressure-ramp.md
+```
+
+Manual GitHub Actions runs of `whole-engine-stress` expose the same case
+selection and ramp controls. `brutal` and `ramp` are never enabled for
+scheduled CI.
+
+The JSON report also includes per-process post-warmup RSS change and the
+p50/p95/p99 engine-monitor frame/physics timings for relevant workloads.
+The `rankings` section highlights the largest observed wall-time, engine-time,
+CPU and memory consumers independently. **Sampled RSS retention is not proof
+of a leak**, and engine process/physics monitors are not precise GPU
+timestamps. Use the existing `scale_sweep.py` for scaling-exponent estimates
+and platform profilers for cause analysis.
