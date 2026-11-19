@@ -31,6 +31,7 @@
 #include "core/variant/variant.h"
 #include "scene/3d/node_3d.h"
 #include "servers/physics_pbf_3d.h"
+#include "servers/physics_pbf_rigid_coupling_3d.h"
 
 // Experimental CPU PBF fluid: a scene node (not a PhysicsServer3D backend
 // replacement) using density constraints, finite-support SPH kernels and
@@ -56,6 +57,9 @@ class PBFParticleFluid3D : public Node3D {
 
 	bool simulation_enabled = false;
 	bool collide_with_bodies = false;
+	bool two_way_rigid_coupling = false;
+	real_t max_rigid_impulse = 20.0;
+	uint64_t last_rigid_impulses = 0;
 	int collision_mask = 1;
 	int solver_iterations = 4;
 	real_t smoothing_radius = 0.32;
@@ -89,6 +93,11 @@ public:
 
 	void set_collide_with_bodies(bool p_enabled) { collide_with_bodies = p_enabled; }
 	bool is_collide_with_bodies_enabled() const { return collide_with_bodies; }
+	void set_two_way_rigid_coupling(bool p_enabled) { two_way_rigid_coupling = p_enabled; }
+	bool is_two_way_rigid_coupling_enabled() const { return two_way_rigid_coupling; }
+	void set_max_rigid_impulse(real_t p_maximum);
+	real_t get_max_rigid_impulse() const { return max_rigid_impulse; }
+	int get_last_rigid_impulses() const { return int(MIN(last_rigid_impulses, uint64_t(2147483647))); }
 	void set_collision_mask(int p_mask) { collision_mask = p_mask; }
 	int get_collision_mask() const { return collision_mask; }
 
