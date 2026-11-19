@@ -698,4 +698,43 @@ TEST_CASE("[BVH] High-bit tree masks keep 32nd-layer pairs and culls consistent"
 	CHECK(unpaired == 2);
 }
 
+
+TEST_CASE("[BVH] Empty tree masks and zero-capacity queries skip all candidates") {
+	using Tree = BVH_Manager<Item, 2, false, 16, PairTest, CullTest, AABB, Vector3, false>;
+	Tree tree;
+	Item item;
+	tree.create(&item, true, 0, 3, AABB(Vector3(0, 0, 0), Vector3(4, 4, 4)));
+	const AABB bounds(Vector3(-1, -1, -1), Vector3(6, 6, 6));
+	const Vector3 from(-2, 2, 2);
+	const Vector3 to(6, 2, 2);
+	Item *hits[1] = { nullptr };
+
+	Vector<Plane> hull;
+	hull.push_back(Plane(Vector3(1, 0, 0), 10));
+	hull.push_back(Plane(Vector3(-1, 0, 0), 10));
+	hull.push_back(Plane(Vector3(0, 1, 0), 10));
+	hull.push_back(Plane(Vector3(0, -1, 0), 10));
+	hull.push_back(Plane(Vector3(0, 0, 1), 10));
+	hull.push_back(Plane(Vector3(0, 0, -1), 10));
+
+	CHECK(tree.cull_aabb(bounds, hits, 1, nullptr, 0) == 0);
+	CHECK(tree.cull_segment(from, to, hits, 1, nullptr, 0) == 0);
+	CHECK(tree.cull_point(Vector3(2, 2, 2), hits, 1, nullptr, 0) == 0);
+	CHECK(tree.cull_convex(hull, hits, 1, nullptr, 0) == 0);
+	CHECK(hits[0] == nullptr);
+
+	CHECK(tree.cull_aabb(bounds, hits, 0, nullptr) == 0);
+	CHECK(tree.cull_segment(from, to, hits, 0, nullptr) == 0);
+	CHECK(tree.cull_point(Vector3(2, 2, 2), hits, 0, nullptr) == 0);
+	CHECK(tree.cull_convex(hull, hits, 0, nullptr) == 0);
+	CHECK(hits[0] == nullptr);
+
+	StreamCastStats stats;
+	tree.cast_segment(from, to, _stream_all_casts, &stats, 0);
+	CHECK(stats.callbacks == 0);
+	// A normal query must still find the same item.
+	CHECK(tree.cull_aabb(bounds, hits, 1, nullptr, 1) == 1);
+	CHECK(hits[0] == &item);
+}
+
 } // namespace TestBVH
