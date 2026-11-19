@@ -5,6 +5,8 @@ extends RefCounted
 const RaidEncounter = preload("res://scripts/shared/raid_encounter.gd")
 const Party = preload("res://scripts/shared/party.gd")
 const GameServer = preload("res://scripts/server/game_server.gd")
+const WorldGen = preload("res://scripts/shared/world_gen.gd")
+const Zombie = preload("res://scripts/shared/zombie.gd")
 const Net = preload("res://scripts/shared/net.gd")
 
 
@@ -159,3 +161,37 @@ func run(t) -> void:
 		t.eq(server.raid_boss_id, -1, "unfought encounter despawns within its time limit")
 		t.check(not server.zombies.has(expired_id), "timed-out boss removed from world")
 		t.eq(server.bags.size(), 1, "timeout produces no additional reward")
+
+	t.current = "real world snapshot exposes boss identity and temporary danger disc"
+	var real_world := WorldGen.new(87)
+	var real_server := GameServer.new(real_world, 87)
+	var observer = real_server.add_player(704, "Observer")
+	var another = real_server.add_player(705, "Far Away")
+	var spot: Vector3 = observer.position + Vector3(12.0, 0.0, 0.0)
+	spot.y = real_world.height_at(spot.x, spot.z)
+	var visible_boss = Zombie.new(real_server.new_id(), "brute", spot, -1)
+	RaidEncounter.empower(visible_boss)
+	real_server.zombies[visible_boss.id] = visible_boss
+	var shown: Dictionary = real_server.snapshot_for(704)
+	var found_boss := false
+	for enemy in shown["zombies"]:
+		if int(enemy["id"]) == visible_boss.id:
+			found_boss = bool(enemy.get("raid_boss", false))
+			t.eq(float(enemy.get("max_hp", 0.0)), RaidEncounter.BOSS_HEALTH,
+				"client has correct raid boss maximum HP for the health label")
+	t.check(found_boss, "raid-specific presentation is sent through existing entity snapshots")
+	real_server.raid_pending_slam = {"id": visible_boss.id,
+		"x": spot.x, "z": spot.z, "at": 120.0}
+	shown = real_server.snapshot_for(704)
+	t.check(shown.has("raid_telegraph"), "nearby observer receives 3D attack telegraph")
+	t.eq(int(shown["raid_telegraph"]["id"]), visible_boss.id,
+		"telegraph refers only to the real server boss")
+	t.eq(float(shown["raid_telegraph"]["radius"]), RaidEncounter.SLAM_RADIUS,
+		"telegraph disc matches damage radius")
+	another.position = Vector3(3000.0,
+		real_world.height_at(3000.0, 3000.0), 3000.0)
+	t.check(not real_server.snapshot_for(705).has("raid_telegraph"),
+		"far observer receives no private raid attack center")
+	real_server.raid_pending_slam = {}
+	t.check(not real_server.snapshot_for(704).has("raid_telegraph"),
+		"warning disappears from next snapshot once slam resolves")
