@@ -275,7 +275,9 @@ void GodotStep3D::step(GodotSpace3D *p_space, real_t p_delta) {
 	while (b) {
 		GodotBody3D *body = b->self();
 
-		if (body->get_island_step() != _step) {
+		// Unconnected rigid bodies need no solver island. Avoid keeping
+		// millions of tiny island vectors for sparse simulations.
+		if (body->get_island_step() != _step && !body->get_constraint_map().is_empty()) {
 			++body_island_count;
 			if (body_islands.size() < body_island_count) {
 				body_islands.resize(body_island_count);
@@ -398,7 +400,16 @@ void GodotStep3D::step(GodotSpace3D *p_space, real_t p_delta) {
 	b = body_list->first();
 	while (b) {
 		const SelfList<GodotBody3D> *n = b->next();
-		b->self()->integrate_velocities(p_delta);
+		GodotBody3D *body = b->self();
+		body->integrate_velocities(p_delta);
+		// Unconnected rigid bodies can be suspended individually after
+		// integration. The connected islands still use _check_suspend().
+		if (body->get_island_step() != _step && body->get_mode() > PS3DE::BODY_MODE_KINEMATIC && body->get_constraint_map().is_empty()) {
+			const bool can_sleep = body->sleep_test(p_delta);
+			if (body->is_active() == can_sleep) {
+				body->set_active(!can_sleep);
+			}
+		}
 		b = n;
 	}
 
