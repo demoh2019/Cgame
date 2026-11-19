@@ -51,6 +51,73 @@ TEST_FORCE_LINK(test_arraymesh)
 
 namespace TestArrayMesh {
 
+static Ref<ArrayMesh> _make_mesh_for_debug_fastpath() {
+	Ref<ArrayMesh> mesh;
+	mesh.instantiate();
+	Array arrays;
+	arrays.resize(Mesh::ARRAY_MAX);
+	PackedVector3Array vertices = {
+		Vector3(0, 0, 0), Vector3(1, 0, 0), Vector3(0, 1, 0)
+	};
+	PackedInt32Array indices = { 0, 1, 2 };
+	arrays[Mesh::ARRAY_VERTEX] = vertices;
+	arrays[Mesh::ARRAY_INDEX] = indices;
+	mesh->add_surface_from_arrays(Mesh::PRIMITIVE_TRIANGLES, arrays);
+	return mesh;
+}
+
+TEST_CASE("[MeshDebugFastPath] debug line endpoints match input triangle") {
+	Ref<ArrayMesh> mesh = _make_mesh_for_debug_fastpath();
+	Vector<Vector3> lines;
+	mesh->generate_debug_mesh_lines(lines);
+	REQUIRE_EQ(lines.size(), 6);
+	CHECK_EQ(lines[0], Vector3(0, 0, 0));
+	CHECK_EQ(lines[1], Vector3(1, 0, 0));
+	CHECK_EQ(lines[2], Vector3(1, 0, 0));
+	CHECK_EQ(lines[3], Vector3(0, 1, 0));
+	CHECK_EQ(lines[4], Vector3(0, 1, 0));
+	CHECK_EQ(lines[5], Vector3(0, 0, 0));
+}
+
+TEST_CASE("[MeshDebugFastPath] cached debug lines are equivalent") {
+	Ref<ArrayMesh> mesh = _make_mesh_for_debug_fastpath();
+	Vector<Vector3> first;
+	Vector<Vector3> second;
+	mesh->generate_debug_mesh_lines(first);
+	mesh->generate_debug_mesh_lines(second);
+	REQUIRE_EQ(first.size(), second.size());
+	for (int i = 0; i < first.size(); ++i) {
+		CHECK_EQ(first[i], second[i]);
+	}
+}
+
+TEST_CASE("[MeshDebugFastPath] returned point buffer uses copy-on-write") {
+	Ref<ArrayMesh> mesh = _make_mesh_for_debug_fastpath();
+	Vector<Vector3> first;
+	mesh->generate_debug_mesh_indices(first);
+	REQUIRE_EQ(first.size(), 3);
+	Vector<Vector3> original = first;
+	first.write[0] = Vector3(123, 456, 789);
+	Vector<Vector3> second;
+	mesh->generate_debug_mesh_indices(second);
+	REQUIRE_EQ(second.size(), original.size());
+	for (int i = 0; i < second.size(); ++i) {
+		CHECK_EQ(second[i], original[i]);
+	}
+	CHECK_NE(first[0], second[0]);
+}
+
+TEST_CASE("[MeshDebugFastPath] output vector is replaced not appended") {
+	Ref<ArrayMesh> mesh = _make_mesh_for_debug_fastpath();
+	Vector<Vector3> points;
+	points.resize(24);
+	points.fill(Vector3(123, 456, 789));
+	mesh->generate_debug_mesh_indices(points);
+	CHECK_EQ(points.size(), 3);
+	CHECK_EQ(points[0], Vector3(0, 0, 0));
+}
+
+
 static Ref<ImporterMesh> _make_mesh_for_navigation_fastpath(const PackedVector3Array &p_vertices, const PackedInt32Array &p_indices) {
 	Ref<ImporterMesh> imported;
 	imported.instantiate();
