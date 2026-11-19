@@ -640,6 +640,12 @@ PhysicsServer3D::PhysicsServer3D() {
 	// Uses physics/3d/fluid_plane surface/density, default disabled. Face
 	// triangles are clipped against the surface and pressure integrated.
 	GLOBAL_DEF(PropertyInfo(Variant::BOOL, "physics/3d/solver/soft_body_hydrostatic_pressure"), false);
+	// Jolt-style water flow drag, but distributed across deformable mesh
+	// vertices and energy-limited per immersed face. Unlike hydrostatic
+	// pressure this also applies to open cloth below the waterline.
+	// Reuses fluid_plane/density, drag_coefficient and flow_velocity.
+	GLOBAL_DEF(PropertyInfo(Variant::BOOL, "physics/3d/solver/soft_body_hydrodynamic_drag"), false);
+	GLOBAL_DEF(PropertyInfo(Variant::FLOAT, "physics/3d/solver/soft_body_hydrodynamic_tangent_ratio", PROPERTY_HINT_RANGE, "0,5,0.05"), 0.25);
 	// Optional tangential aerodynamic skin drag for cloth. Multiplies the
 	// SoftBody3D drag coefficient; zero preserves the normal-only model.
 	GLOBAL_DEF(PropertyInfo(Variant::FLOAT, "physics/3d/solver/soft_body_tangential_drag_ratio", PROPERTY_HINT_RANGE, "0,10,0.01,or_greater"), 0.0);
