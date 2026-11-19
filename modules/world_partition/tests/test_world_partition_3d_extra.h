@@ -206,6 +206,39 @@ TEST_CASE("[WorldPartition3D] Replacing bulk cell dictionary removes old cells")
 	CHECK(world.get_cell_scene(Vector2i(-2, 3)) == "res://new.tscn");
 }
 
+TEST_CASE("[WorldPartition3D] Reject radius query overflowing the positive grid boundary") {
+	WorldPartition3D world;
+	const int edge = std::numeric_limits<int32_t>::max();
+	ERR_PRINT_OFF;
+	const Array invalid = world.get_cells_in_radius(Vector2i(edge, 0), 1);
+	ERR_PRINT_ON;
+	CHECK(invalid.is_empty());
+	const Array valid = world.get_cells_in_radius(Vector2i(edge - 1, 0), 1);
+	REQUIRE(valid.size() == 9);
+	CHECK(valid.has(Vector2i(edge, 1)));
+}
+
+TEST_CASE("[WorldPartition3D] Reject radius query overflowing the negative grid boundary") {
+	WorldPartition3D world;
+	const int edge = std::numeric_limits<int32_t>::min();
+	ERR_PRINT_OFF;
+	const Array invalid = world.get_cells_in_radius(Vector2i(0, edge), 1);
+	ERR_PRINT_ON;
+	CHECK(invalid.is_empty());
+	const Array valid = world.get_cells_in_radius(Vector2i(0, edge + 1), 1);
+	REQUIRE(valid.size() == 9);
+	CHECK(valid.has(Vector2i(-1, edge)));
+}
+
+TEST_CASE("[WorldPartition3D] Zero-radius queries accept extreme grid coordinates") {
+	WorldPartition3D world;
+	const int max_value = std::numeric_limits<int32_t>::max();
+	const int min_value = std::numeric_limits<int32_t>::min();
+	const Array cells = world.get_cells_in_radius(Vector2i(min_value, max_value), 0);
+	REQUIRE(cells.size() == 1);
+	CHECK(cells[0] == Vector2i(min_value, max_value));
+}
+
 TEST_CASE("[WorldPartition3D] Invalid dictionaries do not erase valid entries") {
 	WorldPartition3D world;
 	Dictionary dict;
