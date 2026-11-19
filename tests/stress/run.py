@@ -37,6 +37,7 @@ CASES = (
     "resource_io", "astar_3d", "thread_contention",
     "geometry_2d", "mesh_build", "input_dispatch", "image_codec", "group_calls",
     "packed_arrays", "sorting", "animation_tracks", "physics_raycast_2d", "physics_raycast_3d", "render_multimesh_3d",
+    "object_lifecycle", "scene_churn",
 )
 RENDER_CASES = frozenset(("render_2d", "render_3d", "render_multimesh_3d"))
 # Each scenario runs in a fresh process. No preset has unlimited RSS or wall time.
@@ -185,7 +186,10 @@ def run_once(cmd: list[str], timeout: float, rss_limit_mib: float,
             time.sleep(0.05)
         process.wait()
         elapsed = time.monotonic() - start
-        output.seek(0)
+        # Avoid unbounded RAM usage when a child emits a large error log.
+        output.seek(0, os.SEEK_END)
+        log_size = output.tell()
+        output.seek(max(0, log_size - 2 * 1024 * 1024))
         log = output.read()
     result: dict[str, Any] = {
         "status": "passed",
@@ -222,6 +226,7 @@ def summarize(runs: list[dict[str, Any]]) -> dict[str, Any]:
         "status": "passed" if len(passed) == len(runs) else "failed",
         "median_wall_seconds": round(statistics.median(wall), 6) if wall else None,
         "p95_wall_seconds": round(wall[math.ceil(0.95 * len(wall)) - 1], 6) if wall else None,
+        "p99_wall_seconds": round(wall[math.ceil(0.99 * len(wall)) - 1], 6) if wall else None,
         "max_rss_mib": round(max(memories), 3) if memories else None,
         "median_cpu_seconds": round(statistics.median(cpu_times), 6) if cpu_times else None,
         "median_engine_ms": round(statistics.median(engine_times), 6) if engine_times else None,

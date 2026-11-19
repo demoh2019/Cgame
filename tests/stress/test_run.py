@@ -23,6 +23,10 @@ class CaseSelectionTests(unittest.TestCase):
         self.assertIn("physics_3d", selected)
         self.assertNotIn("render_2d", selected)
 
+    def test_lifecycle_scenarios_available(self):
+        self.assertEqual(stress.choose_cases(["object_lifecycle,scene_churn"], "headless"),
+                         ["object_lifecycle", "scene_churn"])
+
     def test_display_all_includes_render(self):
         self.assertEqual(stress.choose_cases(["all"], "display"), list(stress.CASES))
 
@@ -82,6 +86,10 @@ class ResultsTests(unittest.TestCase):
         stats = stress.summarize(rows)
         self.assertEqual(stats["status"], "failed")
         self.assertEqual(stats["max_rss_mib"], 15.)
+
+    def test_p99_wall_measurement(self):
+        samples = [{"status": "passed", "wall_seconds": v, "peak_rss_mib": 10.0} for v in (1., 2., 3.)]
+        self.assertEqual(stress.summarize(samples)["p99_wall_seconds"], 3.0)
 
     def test_empty_measurements(self):
         self.assertIsNone(stress.summarize([{"status": "failed", "peak_rss_mib": None}])["median_wall_seconds"])
