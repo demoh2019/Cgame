@@ -3357,7 +3357,7 @@ Variant GDScriptFunction::call(GDScriptInstance *p_instance, const Variant **p_a
 			GET_VARIANT_PTR(iterator, 2); \
 			VariantInternal::initialize(iterator, Variant::m_var_ret_type); \
 			m_ret_type *it = VariantInternal::m_ret_get_func(iterator); \
-			*it = array->get(0); \
+			*it = array->ptr()[0]; \
 			ip += 5; \
 		} else { \
 			int jumpto = _code_ptr[ip + 4]; \
@@ -3724,7 +3724,7 @@ Variant GDScriptFunction::call(GDScriptInstance *p_instance, const Variant **p_a
 			ip = jumpto; \
 		} else { \
 			GET_VARIANT_PTR(iterator, 2); \
-			*VariantInternal::m_ret_get_func(iterator) = array->get(*idx); \
+			*VariantInternal::m_ret_get_func(iterator) = array->ptr()[*idx]; \
 			ip += 5; \
 		} \
 	} \
