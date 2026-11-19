@@ -194,7 +194,10 @@ TEST_CASE("[GDScriptPropertyListFastPath] repeated enumeration preserves propert
 TEST_CASE("[GDScriptPropertyListFastPath] property type lookup reports valid and missing members") {
 	GDScriptLanguage::get_singleton()->init();
 	Ref<GDScript> script = memnew(GDScript);
-	script->set_source_code("extends RefCounted\\n@export var count: int = 7\\n@export var label: String = \\"hello\\"\\n");
+	script->set_source_code(R"GD(extends RefCounted
+@export var count: int = 7
+@export var label: String = "hello"
+)GD");
 	ERR_PRINT_OFF;
 	const Error err = script->reload();
 	ERR_PRINT_ON;
