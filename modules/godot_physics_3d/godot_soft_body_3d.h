@@ -137,6 +137,17 @@ class GodotSoftBody3D : public GodotCollisionObject3D {
 		real_t lambda = 0.0;
 	};
 	LocalVector<RodBendConstraint> xpbd_rod_bends;
+	// Geometric torsion between adjacent rod-centerline bend planes.
+	// It is a position-only, four-node constraint, not Cosserat material twist.
+	struct RodTorsionConstraint {
+		uint32_t a = 0;
+		uint32_t b = 0;
+		uint32_t c = 0;
+		uint32_t d = 0;
+		real_t rest_angle = 0.0;
+		real_t lambda = 0.0;
+	};
+	LocalVector<RodTorsionConstraint> xpbd_rod_torsions;
 	LocalVector<real_t> xpbd_dihedral_lambdas;
 	// Optional per-particle reference offsets for meshless rigid shape fitting.
 	// Zero stiffness allocates no additional per-node data.
@@ -389,6 +400,7 @@ private:
 	void initialize_shear_constraints();
 	void initialize_dihedral_constraints();
 	void initialize_rod_bend_constraints();
+	void initialize_rod_torsion_constraints();
 	void initialize_shape_matching();
 	void solve_shape_matching(real_t p_strength);
 	void solve_shape_matching_clusters(real_t p_strength);
