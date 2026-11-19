@@ -40,6 +40,13 @@ TEST_FORCE_LINK(test_gltf_document)
 
 #include "tests/test_utils.h"
 
+#include "core/io/json.h"
+#include "modules/gltf/structures/gltf_buffer_view.h"
+#ifndef PHYSICS_3D_DISABLED
+#include "modules/gltf/extensions/physics/gltf_physics_shape.h"
+#endif // PHYSICS_3D_DISABLED
+
+
 #include "modules/gltf/extensions/gltf_document_extension_convert_importer_mesh.h"
 #include "modules/gltf/gltf_document.h"
 #include "modules/gltf/extensions/gltf_light.h"
@@ -256,6 +263,299 @@ TEST_CASE("[SceneTree][GLTFDocument] Load suzanne.glb") {
 	memdelete(node);
 }
 
+
+
+
+static Dictionary make_minimal_gltf_json() {
+	Dictionary asset;
+	asset["version"] = "2.0";
+	Dictionary scene;
+	scene["nodes"] = Array();
+	Array scenes;
+	scenes.push_back(scene);
+	Dictionary root;
+	root["asset"] = asset;
+	root["scene"] = 0;
+	root["scenes"] = scenes;
+	root["nodes"] = Array();
+	return root;
+}
+
+static Error parse_gltf_json(const Dictionary &p_json) {
+	Ref<GLTFDocument> document;
+	document.instantiate();
+	Ref<GLTFState> state;
+	state.instantiate();
+	return document->append_from_buffer(JSON::stringify(p_json).to_utf8_buffer(), "res://gltf_parse_regression.gltf", state);
+}
+
+TEST_CASE("[GLTFDocument] Accessor rejects missing required fields") {
+	Dictionary accessor;
+	accessor["componentType"] = 5126;
+	accessor["count"] = 1;
+	accessor["type"] = "SCALAR";
+	CHECK(GLTFAccessor::from_dictionary(accessor).is_valid());
+
+	const String required_fields[] = { "componentType", "count", "type" };
+	ERR_PRINT_OFF
+	for (const String &field : required_fields) {
+		Dictionary invalid = accessor.duplicate();
+		invalid.erase(field);
+		CHECK_MESSAGE(GLTFAccessor::from_dictionary(invalid).is_null(), "Missing accessor field: " + field);
+	}
+	ERR_PRINT_ON
+}
+
+TEST_CASE("[GLTFDocument] Accessor requires a positive element count") {
+	Dictionary accessor;
+	accessor["componentType"] = 5126;
+	accessor["type"] = "VEC3";
+	const int64_t invalid_counts[] = { -10, -1, 0 };
+	ERR_PRINT_OFF
+	for (int64_t count : invalid_counts) {
+		accessor["count"] = count;
+		CHECK(GLTFAccessor::from_dictionary(accessor).is_null());
+	}
+	ERR_PRINT_ON
+	const int64_t valid_counts[] = { 1, 2, 128 };
+	for (int64_t count : valid_counts) {
+		accessor["count"] = count;
+		Ref<GLTFAccessor> parsed = GLTFAccessor::from_dictionary(accessor);
+		REQUIRE(parsed.is_valid());
+		CHECK(parsed->get_count() == count);
+	}
+}
+
+TEST_CASE("[GLTFDocument] Incomplete sparse accessors fail rather than return partial objects") {
+	Dictionary indices;
+	indices["bufferView"] = 0;
+	indices["componentType"] = 5123;
+	Dictionary values;
+	values["bufferView"] = 1;
+	Dictionary sparse;
+	sparse["count"] = 1;
+	sparse["indices"] = indices;
+	sparse["values"] = values;
+	Dictionary accessor;
+	accessor["componentType"] = 5126;
+	accessor["count"] = 3;
+	accessor["type"] = "SCALAR";
+	accessor["sparse"] = sparse;
+	CHECK(GLTFAccessor::from_dictionary(accessor).is_valid());
+
+	ERR_PRINT_OFF
+	for (const String &field : { String("count"), String("indices"), String("values") }) {
+		Dictionary invalid_sparse = sparse.duplicate(true);
+		invalid_sparse.erase(field);
+		Dictionary invalid_accessor = accessor.duplicate();
+		invalid_accessor["sparse"] = invalid_sparse;
+		CHECK(GLTFAccessor::from_dictionary(invalid_accessor).is_null());
+	}
+	for (const String &field : { String("bufferView"), String("componentType") }) {
+		Dictionary invalid_indices = indices.duplicate();
+		invalid_indices.erase(field);
+		Dictionary invalid_sparse = sparse.duplicate();
+		invalid_sparse["indices"] = invalid_indices;
+		Dictionary invalid_accessor = accessor.duplicate();
+		invalid_accessor["sparse"] = invalid_sparse;
+		CHECK(GLTFAccessor::from_dictionary(invalid_accessor).is_null());
+	}
+	Dictionary invalid_values = values.duplicate();
+	invalid_values.erase("bufferView");
+	Dictionary invalid_sparse = sparse.duplicate();
+	invalid_sparse["values"] = invalid_values;
+	Dictionary invalid_accessor = accessor.duplicate();
+	invalid_accessor["sparse"] = invalid_sparse;
+	CHECK(GLTFAccessor::from_dictionary(invalid_accessor).is_null());
+	ERR_PRINT_ON
+}
+
+TEST_CASE("[GLTFDocument] BufferView requires buffer and byteLength") {
+	Dictionary view;
+	view["buffer"] = 0;
+	view["byteLength"] = 16;
+	CHECK(GLTFBufferView::from_dictionary(view).is_valid());
+	ERR_PRINT_OFF
+	for (const String &field : { String("buffer"), String("byteLength") }) {
+		Dictionary invalid = view.duplicate();
+		invalid.erase(field);
+		CHECK(GLTFBufferView::from_dictionary(invalid).is_null());
+	}
+	ERR_PRINT_ON
+}
+
+TEST_CASE("[GLTFDocument] BufferView rejects out-of-range and misaligned strides") {
+	Dictionary view;
+	view["buffer"] = 0;
+	view["byteLength"] = 512;
+	CHECK(GLTFBufferView::from_dictionary(view).is_valid());
+	const int64_t invalid_strides[] = { -4, 0, 1, 3, 5, 250, 253, 256 };
+	ERR_PRINT_OFF
+	for (int64_t stride : invalid_strides) {
+		view["byteStride"] = stride;
+		CHECK(GLTFBufferView::from_dictionary(view).is_null());
+	}
+	ERR_PRINT_ON
+	const int64_t valid_strides[] = { 4, 8, 16, 252 };
+	for (int64_t stride : valid_strides) {
+		view["byteStride"] = stride;
+		Ref<GLTFBufferView> parsed = GLTFBufferView::from_dictionary(view);
+		REQUIRE(parsed.is_valid());
+		CHECK(parsed->get_byte_stride() == stride);
+	}
+}
+
+TEST_CASE("[GLTFDocument] Spot lights accept omitted optional cone fields") {
+	Dictionary light;
+	light["type"] = "spot";
+	Ref<GLTFLight> default_spot = GLTFLight::from_dictionary(light);
+	REQUIRE(default_spot.is_valid());
+	CHECK(default_spot->get_inner_cone_angle() == 0.0f);
+	CHECK(default_spot->get_outer_cone_angle() > 0.0f);
+
+	Dictionary spot;
+	spot["outerConeAngle"] = 0.6f;
+	light["spot"] = spot;
+	Ref<GLTFLight> only_outer = GLTFLight::from_dictionary(light);
+	REQUIRE(only_outer.is_valid());
+	CHECK(only_outer->get_inner_cone_angle() == 0.0f);
+	CHECK(only_outer->get_outer_cone_angle() == 0.6f);
+
+	spot.clear();
+	spot["innerConeAngle"] = 0.2f;
+	light["spot"] = spot;
+	Ref<GLTFLight> only_inner = GLTFLight::from_dictionary(light);
+	REQUIRE(only_inner.is_valid());
+	CHECK(only_inner->get_inner_cone_angle() == 0.2f);
+	CHECK(only_inner->get_outer_cone_angle() > only_inner->get_inner_cone_angle());
+
+	spot["outerConeAngle"] = 0.6f;
+	light["spot"] = spot;
+	Ref<GLTFLight> explicit_cones = GLTFLight::from_dictionary(light);
+	REQUIRE(explicit_cones.is_valid());
+	CHECK(explicit_cones->get_inner_cone_angle() == 0.2f);
+	CHECK(explicit_cones->get_outer_cone_angle() == 0.6f);
+}
+
+#ifndef PHYSICS_3D_DISABLED
+TEST_CASE("[GLTFDocument] Physics mesh shape aliases preserve nested mesh indices") {
+	const char *declared_types[] = { "hull", "convexMesh", "mesh", "convex", "trimesh" };
+	const char *normalized_types[] = { "convex", "convex", "trimesh", "convex", "trimesh" };
+	for (int i = 0; i < 5; i++) {
+		Dictionary properties;
+		properties["mesh"] = i + 1;
+		Dictionary source;
+		source["type"] = declared_types[i];
+		source[declared_types[i]] = properties;
+		Ref<GLTFPhysicsShape> parsed = GLTFPhysicsShape::from_dictionary(source);
+		REQUIRE(parsed.is_valid());
+		CHECK(parsed->get_shape_type() == normalized_types[i]);
+		CHECK(parsed->get_mesh_index() == i + 1);
+	}
+	ERR_PRINT_OFF
+	CHECK(GLTFPhysicsShape::from_dictionary(Dictionary()).is_null());
+	ERR_PRINT_ON
+}
+#endif // PHYSICS_3D_DISABLED
+
+TEST_CASE("[GLTFDocument] In-memory import rejects invalid accessor counts and sparse accessors") {
+	Dictionary root = make_minimal_gltf_json();
+	CHECK(parse_gltf_json(root) == OK);
+
+	Dictionary accessor;
+	accessor["componentType"] = 5126;
+	accessor["count"] = 1;
+	accessor["type"] = "SCALAR";
+	Array accessors;
+	accessors.push_back(accessor);
+	root["accessors"] = accessors;
+	CHECK(parse_gltf_json(root) == OK);
+
+	ERR_PRINT_OFF
+	for (int64_t count : { int64_t(0), int64_t(-1) }) {
+		accessor["count"] = count;
+		accessors[0] = accessor;
+		root["accessors"] = accessors;
+		CHECK(parse_gltf_json(root) == ERR_PARSE_ERROR);
+	}
+	accessor["count"] = 1;
+	Dictionary sparse;
+	sparse["count"] = 1;
+	accessor["sparse"] = sparse;
+	accessors[0] = accessor;
+	root["accessors"] = accessors;
+	CHECK(parse_gltf_json(root) == ERR_PARSE_ERROR);
+	ERR_PRINT_ON
+}
+
+TEST_CASE("[GLTFDocument] In-memory import rejects invalid buffer view strides") {
+	Dictionary root = make_minimal_gltf_json();
+	Dictionary view;
+	view["buffer"] = 0;
+	view["byteLength"] = 32;
+	Array views;
+	views.push_back(view);
+	root["bufferViews"] = views;
+
+	ERR_PRINT_OFF
+	for (int64_t stride : { int64_t(3), int64_t(5), int64_t(256) }) {
+		view["byteStride"] = stride;
+		views[0] = view;
+		root["bufferViews"] = views;
+		CHECK(parse_gltf_json(root) == ERR_PARSE_ERROR);
+	}
+	ERR_PRINT_ON
+}
+
+
+TEST_CASE("[GLTFDocument] In-memory import rejects camera dictionaries without a type") {
+	Dictionary root = make_minimal_gltf_json();
+	Array cameras;
+	cameras.push_back(Dictionary());
+	root["cameras"] = cameras;
+
+	ERR_PRINT_OFF
+	CHECK(parse_gltf_json(root) == ERR_PARSE_ERROR);
+	ERR_PRINT_ON
+
+	Dictionary perspective;
+	perspective["yfov"] = 0.9f;
+	perspective["znear"] = 0.1f;
+	Dictionary camera;
+	camera["type"] = "perspective";
+	camera["perspective"] = perspective;
+	cameras[0] = camera;
+	root["cameras"] = cameras;
+	CHECK(parse_gltf_json(root) == OK);
+}
+
+TEST_CASE("[GLTFDocument] In-memory import accepts a spotlight with no spot properties") {
+	Dictionary root = make_minimal_gltf_json();
+	Dictionary light;
+	light["type"] = "spot";
+	Array lights;
+	lights.push_back(light);
+	Dictionary punctual;
+	punctual["lights"] = lights;
+	Dictionary extensions;
+	extensions["KHR_lights_punctual"] = punctual;
+	root["extensions"] = extensions;
+	Array used_extensions;
+	used_extensions.push_back("KHR_lights_punctual");
+	root["extensionsUsed"] = used_extensions;
+
+	Ref<GLTFDocument> document;
+	document.instantiate();
+	Ref<GLTFState> state;
+	state.instantiate();
+	CHECK(document->append_from_buffer(JSON::stringify(root).to_utf8_buffer(), "res://valid_optional_spot.gltf", state) == OK);
+	REQUIRE(state->get_lights().size() == 1);
+	Ref<GLTFLight> parsed = state->get_lights()[0];
+	REQUIRE(parsed.is_valid());
+	CHECK(parsed->get_light_type() == "spot");
+	CHECK(parsed->get_inner_cone_angle() == 0.0f);
+	CHECK(parsed->get_outer_cone_angle() > 0.0f);
+}
 
 TEST_CASE("[SceneTree][GLTFDocument] Packed numeric glTF accessors preserve element values") {
 	Ref<GLTFState> state;
