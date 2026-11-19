@@ -1,0 +1,61 @@
+name: Days After physical barricades (Godot headless)
+
+on:
+  pull_request:
+    paths:
+      - 'demo/days_after/**'
+      - '.github/workflows/days-after-barricades.yml'
+  push:
+    branches: [develop]
+    paths:
+      - 'demo/days_after/**'
+      - '.github/workflows/days-after-barricades.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  building-gameplay:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - name: Download SHA-256 verified official Godot 4.7.2 compatibility editor
+        shell: bash
+        run: |
+          set -euo pipefail
+          curl --retry 4 --retry-delay 3 -fL -o godot.zip \
+            https://github.com/godotengine/godot-builds/releases/download/4.7.2-stable/Godot_v4.7.2-stable_linux.x86_64.zip
+          echo 'cadd3204e728a35d3f13adb7fd0d7902636b79f6b95c40c265eb73b6c35329e4  godot.zip' | sha256sum -c -
+          unzip -q godot.zip
+          chmod +x Godot_v4.7.2-stable_linux.x86_64
+          mv Godot_v4.7.2-stable_linux.x86_64 godot
+      - name: Import game scene and compile scripts
+        shell: bash
+        run: |
+          set -euo pipefail
+          timeout 120s ./godot --headless --path demo/days_after \
+            --editor --import --quit 2>&1 | tee days-after-building-import.log
+          if grep -Ei 'SCRIPT ERROR:|Parse Error:|Failed to load script|Failed loading resource' days-after-building-import.log; then
+            exit 1
+          fi
+      - name: Run actual world and physical barricade integration regression
+        shell: bash
+        run: |
+          set -euo pipefail
+          timeout 120s ./godot --headless --path demo/days_after \
+            --script res://smoke_test_building.gd 2>&1 | tee days-after-building-smoke.log
+          grep -Fq 'PASS: Days After barricade building, collision, repairs, infected damage and transactions' days-after-building-smoke.log
+          if grep -Ei 'SCRIPT ERROR:|Parse Error:|Assertion failed|Days After building:' days-after-building-smoke.log; then
+            exit 1
+          fi
+      - name: Preserve regression diagnostics
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: days-after-building-logs
+          if-no-files-found: ignore
+          path: |
+            days-after-building-import.log
+            days-after-building-smoke.log
