@@ -5,6 +5,7 @@ const Planner = preload("res://addons/ai_game_builder/planner.gd")
 const Writer = preload("res://addons/ai_game_builder/writer.gd")
 const Inspector = preload("res://addons/ai_game_builder/inspector.gd")
 const EndpointPolicy = preload("res://addons/ai_game_builder/endpoint_policy.gd")
+const Starter = preload("res://addons/ai_game_builder/starter.gd")
 
 var _http: HTTPRequest
 var _endpoint: LineEdit
@@ -14,10 +15,18 @@ var _prompt: TextEdit
 var _refinement: LineEdit
 var _preview: TextEdit
 var _generate_button: Button
+var _quick_button: Button
 var _repair_button: Button
 var _refine_button: Button
 var _apply_button: Button
 var _cancel_button: Button
+var _check_button: Button
+var _check_timer: Timer
+var _check_pid := -1
+var _check_started_ms := 0
+var _check_report_path := ""
+var _approved_paths: Array[String] = []
+var _checking := false
 var _status: Label
 var _confirmation: ConfirmationDialog
 var _pending_plan: Dictionary = {}
@@ -31,6 +40,14 @@ func _ready() -> void:
 	var heading := Label.new()
 	heading.text = "AI Game Builder"
 	add_child(heading)
+
+	var starter_row := HBoxContainer.new()
+	add_child(starter_row)
+	_quick_button = Button.new()
+	_quick_button.text = "Instant 2D Starter (Offline)"
+	_quick_button.tooltip_text = "Create an arcade game plan instantly without a model, API key, or network request. Review before applying."
+	_quick_button.pressed.connect(_create_starter)
+	starter_row.add_child(_quick_button)
 
 	_endpoint = _add_line("Chat completions endpoint", "HTTPS URL or local server", "https://api.openai.com/v1/chat/completions")
 	_model = _add_line("Model", "Model identifier", "gpt-4.1-mini")
@@ -86,6 +103,20 @@ func _ready() -> void:
 	_apply_button.pressed.connect(_confirm_apply)
 	review_controls.add_child(_apply_button)
 
+	var verify_controls := HBoxContainer.new()
+	add_child(verify_controls)
+	_check_button = Button.new()
+	_check_button.text = "Check Game (Headless)"
+	_check_button.tooltip_text = "Explicitly load approved game scripts and scenes in a separate, time-limited Godot process. Generated scenes are not instantiated."
+	_check_button.disabled = true
+	_check_button.pressed.connect(_check_approved_game)
+	verify_controls.add_child(_check_button)
+
+	_check_timer = Timer.new()
+	_check_timer.wait_time = 0.25
+	_check_timer.timeout.connect(_poll_headless_check)
+	add_child(_check_timer)
+
 	_status = Label.new()
 	_status.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	_status.text = "Generated files will appear under res://ai_generated/."
@@ -123,6 +154,20 @@ func _add_line(label_text: String, hint: String, initial: String) -> LineEdit:
 	return line
 
 
+func _create_starter() -> void:
+	if _busy or _checking:
+		return
+	var result := Starter.create_draft()
+	if not result.ok:
+		_status.text = "Offline starter unavailable: " + String(result.error)
+		return
+	_approved_paths.clear()
+	_check_button.disabled = true
+	if _prompt.text.strip_edges().is_empty():
+		_prompt.text = "Make a small playable 2D arcade collection game with a score and restart."
+	_present_plan(result.plan)
+
+
 func _generate() -> void:
 	_request_plan(_prompt.text.strip_edges(), false)
 
@@ -146,7 +191,7 @@ func _refine() -> void:
 
 
 func _request_plan(prompt: String, is_repair: bool) -> void:
-	if _busy:
+	if _busy or _checking:
 		return
 	var endpoint := _endpoint.text.strip_edges()
 	var model := _model.text.strip_edges()
@@ -171,6 +216,8 @@ func _request_plan(prompt: String, is_repair: bool) -> void:
 	if not is_repair:
 		_pending_plan.clear()
 		_last_errors.clear()
+		_approved_paths.clear()
+		_check_button.disabled = true
 		_preview.text = ""
 	_apply_button.disabled = true
 	_refine_button.disabled = true
@@ -182,6 +229,9 @@ func _allowed_endpoint(endpoint: String) -> bool:
 
 
 func _cancel() -> void:
+	if _checking:
+		_finish_headless_check("Headless game check canceled.", true)
+		return
 	if not _busy:
 		return
 	_http.cancel_request()
@@ -203,7 +253,11 @@ func _completed(result: int, response_code: int, _headers: PackedStringArray, bo
 	if not validated.ok:
 		_status.text = "Plan rejected: " + String(validated.error)
 		return
-	_pending_plan = validated.plan
+	_present_plan(validated.plan)
+
+
+func _present_plan(plan: Dictionary) -> void:
+	_pending_plan = plan
 	var inspection := Inspector.inspect(_pending_plan)
 	_last_errors = inspection.errors
 	_preview.text = JSON.stringify(_pending_plan, "\t")
@@ -222,10 +276,12 @@ func _completed(result: int, response_code: int, _headers: PackedStringArray, bo
 
 func _set_busy(value: bool) -> void:
 	_busy = value
-	_generate_button.disabled = value
-	_cancel_button.disabled = not value
-	_repair_button.disabled = value or _last_errors.is_empty()
-	_refine_button.disabled = value or _pending_plan.is_empty()
+	_quick_button.disabled = value or _checking
+	_generate_button.disabled = value or _checking
+	_cancel_button.disabled = not value and not _checking
+	_check_button.disabled = value or _checking or _approved_paths.is_empty()
+	_repair_button.disabled = value or _checking or _last_errors.is_empty()
+	_refine_button.disabled = value or _checking or _pending_plan.is_empty()
 	_refinement.editable = not value
 	_endpoint.editable = not value
 	_model.editable = not value
@@ -234,7 +290,7 @@ func _set_busy(value: bool) -> void:
 
 
 func _confirm_apply() -> void:
-	if _pending_plan.is_empty() or _busy:
+	if _pending_plan.is_empty() or _busy or _checking:
 		return
 	if not Inspector.inspect(_pending_plan).ok:
 		_status.text = "Resolve static errors before applying."
@@ -244,7 +300,7 @@ func _confirm_apply() -> void:
 
 
 func _apply() -> void:
-	if _pending_plan.is_empty() or _busy:
+	if _pending_plan.is_empty() or _busy or _checking:
 		return
 	if not Inspector.inspect(_pending_plan).ok:
 		_status.text = "Resolve static errors before applying."
@@ -253,10 +309,105 @@ func _apply() -> void:
 	if not result.ok:
 		_status.text = String(result.error)
 		return
-	_status.text = "Created %d files in res://ai_generated/. Open main.tscn to play." % result.paths.size()
+	_status.text = "Created %d files. You can now run Check Game (Headless) before playing." % result.paths.size()
+	_approved_paths.clear()
+	for path in result.paths:
+		_approved_paths.append(String(path))
+	_check_button.disabled = _approved_paths.is_empty()
 	_apply_button.disabled = true
 	_repair_button.disabled = true
 	_refine_button.disabled = true
 	_pending_plan.clear()
 	_last_errors.clear()
 	EditorInterface.get_resource_filesystem().scan()
+
+
+func _check_approved_game() -> void:
+	if _checking or _busy or _approved_paths.is_empty():
+		return
+	var report_dir := "user://ai_game_builder"
+	if DirAccess.make_dir_recursive_absolute(ProjectSettings.globalize_path(report_dir)) != OK:
+		_status.text = "Cannot create the headless check reports directory."
+		return
+
+	_check_report_path = "%s/report_%d_%d.json" % [report_dir, OS.get_process_id(), Time.get_ticks_usec()]
+	var args := PackedStringArray([
+		"--headless", "--path", ProjectSettings.globalize_path("res://"),
+		"--script", "res://addons/ai_game_builder/smoke_check.gd",
+		"--", "--report", _check_report_path, "--paths", JSON.stringify(_approved_paths)
+	])
+	var pid := OS.create_process(OS.get_executable_path(), args)
+	if pid <= 0:
+		_status.text = "Could not launch a separate Godot process for verification."
+		return
+	_check_pid = pid
+	_check_started_ms = Time.get_ticks_msec()
+	_checking = true
+	_check_button.disabled = true
+	_quick_button.disabled = true
+	_generate_button.disabled = true
+	_apply_button.disabled = true
+	_refine_button.disabled = true
+	_repair_button.disabled = true
+	_cancel_button.disabled = false
+	_check_timer.start()
+	_status.text = "Checking approved files with Godot. This does not run the game scene; Cancel is available."
+
+
+func _poll_headless_check() -> void:
+	if not _checking:
+		return
+	if Time.get_ticks_msec() - _check_started_ms > 30000:
+		_finish_headless_check("Headless verification timed out after 30 seconds.", true)
+		return
+	if OS.is_process_running(_check_pid):
+		return
+
+	# On macOS the engine may not report an exit status for an .app child;
+	# the presence of a successfully decoded report is authoritative.
+	var exit_code := OS.get_process_exit_code(_check_pid)
+	var output := ""
+	if FileAccess.file_exists(_check_report_path):
+		output = FileAccess.get_file_as_string(_check_report_path)
+	var report: Variant = JSON.parse_string(output)
+	if typeof(report) != TYPE_DICTIONARY or not report.has("ok") or not report.has("errors"):
+		_finish_headless_check("Headless process stopped without a valid diagnostic report (exit %d)." % exit_code, false)
+		return
+
+	var report_errors: Variant = report.errors
+	if typeof(report_errors) != TYPE_ARRAY:
+		_finish_headless_check("Headless verifier returned an invalid diagnostic list.", false)
+		return
+	var summary := "Headless verification checked %d resources." % int(report.get("checked", 0))
+	if not report.ok:
+		summary += " %d errors. See below; copy them into a new repair request." % report_errors.size()
+		var diagnostics := ""
+		for issue in report_errors:
+			diagnostics += "- " + String(issue) + "\n"
+		_preview.text = ("HEADLESS GODOT ERRORS:\n" + diagnostics + "\n" + _preview.text).substr(0, 65536)
+	else:
+		summary += " No resource-loading errors reported. Gameplay is not tested."
+	_finish_headless_check(summary, false)
+
+
+func _finish_headless_check(message: String, terminate: bool) -> void:
+	_check_timer.stop()
+	if terminate and _check_pid > 0 and OS.is_process_running(_check_pid):
+		OS.kill(_check_pid)
+	_check_pid = -1
+	_checking = false
+	if not _check_report_path.is_empty() and FileAccess.file_exists(_check_report_path):
+		DirAccess.remove_absolute(ProjectSettings.globalize_path(_check_report_path))
+	_check_report_path = ""
+	_check_button.disabled = _approved_paths.is_empty()
+	_quick_button.disabled = _busy
+	_generate_button.disabled = _busy
+	_cancel_button.disabled = not _busy
+	_refine_button.disabled = _busy or _pending_plan.is_empty()
+	_repair_button.disabled = _busy or _pending_plan.is_empty() or _last_errors.is_empty()
+	_status.text = message
+
+
+func _exit_tree() -> void:
+	if _checking:
+		_finish_headless_check("Headless verification canceled because the editor dock closed.", true)
