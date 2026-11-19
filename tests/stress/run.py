@@ -25,7 +25,8 @@ CASES = (
     "containers", "strings", "script_vm", "math", "signals",
     "scene_tree", "packed_scene", "images", "json", "stream",
     "file_io", "threads", "physics_2d", "physics_3d",
-    "memory_churn", "render_2d", "render_3d",
+    "memory_churn", "astar_grid", "tweens", "audio_buffers",
+    "variant_codec", "render_2d", "render_3d",
 )
 RENDER_CASES = frozenset(("render_2d", "render_3d"))
 # Each scenario runs in a fresh process. No preset has unlimited RSS or wall time.
