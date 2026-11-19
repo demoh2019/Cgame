@@ -1237,6 +1237,15 @@ func cmd_rest(peer_id: int) -> Dictionary:
 		"cooldown": player.rest_cooldown,
 		"health": player.survival.health, "stamina": player.survival.stamina}
 
+## Roll forward once at midnight UTC, persisting a fresh daily journal.
+## A backwards-moving host clock cannot revive a previously claimed day.
+func _refresh_daily(player: Player) -> int:
+	var today: int = DailyBounties.utc_day()
+	if DailyBounties.refresh(player.daily_bounty, today):
+		player.dirty_character = true
+	return today
+
+
 func cmd_contract(peer_id: int, action: String) -> Dictionary:
 	var player: Player = players.get(peer_id)
 	if player == null or not _alive(player):
