@@ -240,6 +240,7 @@ public:
 	_FORCE_INLINE_ real_t get_soft_body_self_collision_thickness() const { return soft_body_self_collision_thickness; }
 	_FORCE_INLINE_ real_t get_soft_body_self_collision_compliance() const { return soft_body_self_collision_compliance; }
 	_FORCE_INLINE_ bool are_soft_body_self_collision_edge_contacts_enabled() const { return soft_body_self_collision_edge_contacts; }
+	_FORCE_INLINE_ bool is_soft_body_self_collision_ccd_enabled() const { return soft_body_self_collision_ccd; }
 	_FORCE_INLINE_ real_t get_soft_body_xpbd_dihedral_compliance() const { return soft_body_xpbd_dihedral_compliance; }
 	_FORCE_INLINE_ real_t get_soft_body_xpbd_tether_compliance() const { return soft_body_xpbd_tether_compliance; }
 	_FORCE_INLINE_ real_t get_soft_body_xpbd_tether_slack() const { return soft_body_xpbd_tether_slack; }
