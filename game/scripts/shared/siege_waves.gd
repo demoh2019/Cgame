@@ -14,6 +14,7 @@ const MAX_ACTIVE_ZOMBIES := 90
 const MAX_PER_WAVE := 5
 const PLAYER_WALL_RANGE := 26.0
 const MIN_PLAYER_SPAWN_DISTANCE := 10.0
+const MAX_PLAYER_SPAWN_DISTANCE := 28.0 # Every spawned enemy can acquire its target.
 const SPAWN_RADII := [15.0, 20.0, 24.0]
 const SPAWN_ANGLES := 12
 
@@ -50,7 +51,10 @@ static func spawn_sites(world, wall: Dictionary, survivor: Vector3, count: int,
 			var point := target + Vector2.from_angle(angle) * ring
 			if point.length() < Structures.MIN_HUB_DISTANCE:
 				continue
-			if player.distance_squared_to(point) < MIN_PLAYER_SPAWN_DISTANCE * MIN_PLAYER_SPAWN_DISTANCE:
+			var distance_squared: float = player.distance_squared_to(point)
+			if distance_squared < MIN_PLAYER_SPAWN_DISTANCE * MIN_PLAYER_SPAWN_DISTANCE:
+				continue
+			if distance_squared > MAX_PLAYER_SPAWN_DISTANCE * MAX_PLAYER_SPAWN_DISTANCE:
 				continue
 			if world.is_water(point.x, point.y) or not Movement._is_free(world, point):
 				continue
