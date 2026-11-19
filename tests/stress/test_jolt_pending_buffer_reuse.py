@@ -34,7 +34,7 @@ class JoltPendingBufferReuseTests(unittest.TestCase):
     def test_clearing_pending_index_remains_mandatory(self):
         for suffix in ("sleeping", "awake"):
             self.assertIn(
-                f"pending_{suffix}_indices = HashMap<uint32_t, uint32_t>();",
+                f"clear_pending_index(pending_{suffix}_indices);",
                 self.flush,
             )
 

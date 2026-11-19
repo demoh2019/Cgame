@@ -65,13 +65,27 @@ constexpr double SPACE_DEFAULT_SOLVER_ITERATIONS = 8;
 // reallocation on streaming/spawn-heavy scenes. Release larger one-off batches.
 constexpr uint32_t MAX_RETAINED_PENDING_BODY_IDS = 4096;
 
+// Retain small open-addressing tables across repeated spawn/remove waves.
+// AHashMap capacity is in slots (not entries); release oversized bursts.
+constexpr uint32_t MAX_RETAINED_PENDING_INDEX_SLOTS = 4096;
+
+static void clear_pending_index(AHashMap<uint32_t, uint32_t> &r_indices) {
+	if (r_indices.get_capacity() > MAX_RETAINED_PENDING_INDEX_SLOTS) {
+		r_indices.reset();
+	} else {
+		r_indices.clear();
+	}
+}
+
 // A hash index is unnecessary in the common case of a few queued bodies.
 // For large create/destroy bursts, linear erase_unordered() becomes O(n^2).
-static void ensure_pending_index(const LocalVector<JPH::BodyID> &p_bodies, HashMap<uint32_t, uint32_t> &r_indices) {
+static void ensure_pending_index(const LocalVector<JPH::BodyID> &p_bodies, AHashMap<uint32_t, uint32_t> &r_indices) {
 	if (p_bodies.size() < 128 || !r_indices.is_empty()) {
 		return;
 	}
-	r_indices.reserve(p_bodies.size());
+	// AHashMap starts growing at roughly 75% load: reserve spare slots
+	// up front to avoid a second allocation while building the index.
+	r_indices.reserve(p_bodies.size() + p_bodies.size() / 2 + 1);
 	for (uint32_t i = 0; i < p_bodies.size(); ++i) {
 		r_indices.insert(p_bodies[i].GetIndexAndSequenceNumber(), i);
 	}
@@ -79,14 +93,14 @@ static void ensure_pending_index(const LocalVector<JPH::BodyID> &p_bodies, HashM
 
 } // namespace
 
-void JoltSpace3D::_pending_add(LocalVector<JPH::BodyID> &p_bodies, HashMap<uint32_t, uint32_t> &r_indices, const JPH::BodyID &p_id) {
+void JoltSpace3D::_pending_add(LocalVector<JPH::BodyID> &p_bodies, AHashMap<uint32_t, uint32_t> &r_indices, const JPH::BodyID &p_id) {
 	if (!r_indices.is_empty()) {
 		r_indices.insert(p_id.GetIndexAndSequenceNumber(), p_bodies.size());
 	}
 	p_bodies.push_back(p_id);
 }
 
-bool JoltSpace3D::_pending_erase(LocalVector<JPH::BodyID> &p_bodies, HashMap<uint32_t, uint32_t> &r_indices, const JPH::BodyID &p_id) {
+bool JoltSpace3D::_pending_erase(LocalVector<JPH::BodyID> &p_bodies, AHashMap<uint32_t, uint32_t> &r_indices, const JPH::BodyID &p_id) {
 	if (p_bodies.is_empty()) {
 		return false;
 	}
@@ -110,13 +124,13 @@ bool JoltSpace3D::_pending_erase(LocalVector<JPH::BodyID> &p_bodies, HashMap<uin
 	}
 	r_indices.erase(key);
 	if (p_bodies.is_empty()) {
-		// Do not retain a potentially huge index table after a bulk removal.
-		r_indices = HashMap<uint32_t, uint32_t>();
+		// Keep a small index cache for the next batch, but drop large peaks.
+		clear_pending_index(r_indices);
 	}
 	return true;
 }
 
-bool JoltSpace3D::_pending_has(const LocalVector<JPH::BodyID> &p_bodies, HashMap<uint32_t, uint32_t> &r_indices, const JPH::BodyID &p_id) {
+bool JoltSpace3D::_pending_has(const LocalVector<JPH::BodyID> &p_bodies, AHashMap<uint32_t, uint32_t> &r_indices, const JPH::BodyID &p_id) {
 	if (p_bodies.is_empty()) {
 		return false;
 	}
@@ -534,7 +548,7 @@ void JoltSpace3D::flush_pending_objects() {
 		} else {
 			pending_objects_sleeping.clear();
 		}
-		pending_sleeping_indices = HashMap<uint32_t, uint32_t>();
+		clear_pending_index(pending_sleeping_indices);
 	}
 
 	if (!pending_objects_awake.is_empty()) {
@@ -545,7 +559,7 @@ void JoltSpace3D::flush_pending_objects() {
 		} else {
 			pending_objects_awake.clear();
 		}
-		pending_awake_indices = HashMap<uint32_t, uint32_t>();
+		clear_pending_index(pending_awake_indices);
 	}
 }
 
