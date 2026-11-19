@@ -554,6 +554,10 @@ func _sell_one_material() -> void:
 
 
 func _on_result(kind: String, data: Dictionary) -> void:
+	if kind == "loot" and str(data.get("reason", "")) == "raid_reserved":
+		say("Raid loot is reserved for its contributors (%ds remaining)." % [
+			int(ceil(float(data.get("remaining", 0.0))))])
+		return
 	if kind == "rally":
 		if bool(data.get("ok", false)):
 			say("Party rally active for 45 seconds. Only teammates see the marker.")

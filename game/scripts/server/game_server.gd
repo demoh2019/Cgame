@@ -23,6 +23,7 @@ const Scavenging = preload("res://scripts/shared/scavenging.gd")
 const Structures = preload("res://scripts/shared/structures.gd")
 const SiegeWaves = preload("res://scripts/shared/siege_waves.gd")
 const RaidEncounter = preload("res://scripts/shared/raid_encounter.gd")
+const RaidLoot = preload("res://scripts/shared/raid_loot.gd")
 const Zombie = preload("res://scripts/shared/zombie.gd")
 const EliteInfected = preload("res://scripts/shared/elite_infected.gd")
 const ZoneRisk = preload("res://scripts/shared/zone_risk.gd")
@@ -1372,6 +1373,11 @@ func cmd_loot(peer_id: int, entity_id: int) -> Dictionary:
 		var bag: Dictionary = bags[entity_id]
 		if _distance_xz(player.position, bag) > Defs.REACH + 0.5:
 			return {"ok": false, "reason": "too_far"}
+		# Raid trophies are reserved briefly for the killing group members
+		# who actually participated. The server owns the access list and time.
+		if not RaidLoot.can_open(bag, player, time):
+			return {"ok": false, "reason": "raid_reserved",
+				"remaining": RaidLoot.remaining(bag, time)}
 		var left := _give_items(player, bag["items"])
 		if left.is_empty():
 			bags.erase(entity_id)
@@ -1539,7 +1545,7 @@ func _damage_target(attacker: Player, hit: Dictionary, damage: float) -> void:
 			_party_award_assists(attacker, zombie)
 			if Contracts.record_kill(attacker.contract_state):
 				attacker.dirty_character = true
-			_on_zombie_death(zombie)
+			_on_zombie_death(zombie, attacker)
 	else:
 		var victim: Player = players.get(hit["id"])
 		if victim == null or not _alive(victim):
@@ -1605,7 +1611,7 @@ func _party_award_assists(killer: Player, zombie) -> void:
 				"xp": actual, "assist": true})
 
 
-func _on_zombie_death(zombie) -> void:
+func _on_zombie_death(zombie, killer: Player) -> void:
 	var zone: int = world.zone_at(zombie.position.x, zombie.position.z)
 	var loot_rng := RandomNumberGenerator.new()
 	loot_rng.seed = WorldGen.mix(zombie.id, int(time * 10.0), world.world_seed, 5)
@@ -1620,7 +1626,12 @@ func _on_zombie_death(zombie) -> void:
 		raid_pending_slam = {}
 		events.append({"type": "raid_defeated", "id": zombie.id,
 			"x": zombie.position.x, "z": zombie.position.z})
-	_make_bag(zombie.position, loot)
+	var loot_bag_id: int = _make_bag(zombie.position, loot)
+	if zombie.raid_boss and loot_bag_id >= 0:
+		# Entitlements are frozen at the confirmed kill; guests use object
+		# identity, accounts survive reconnect. No client-authored loot rights.
+		var eligible: Array = RaidLoot.eligible(killer, zombie, players, parties, world, time)
+		RaidLoot.reserve(bags[loot_bag_id], eligible, time)
 	if spawn_state.has(zombie.spawn_id):
 		spawn_state[zombie.spawn_id] = {"zombie": -1, "next": time + (240.0 if zone < 2 else 360.0)}
 	events.append({"type": "zombie_died", "id": zombie.id, "x": zombie.position.x, "z": zombie.position.z})
@@ -2088,7 +2099,9 @@ func snapshot_for(peer_id: int) -> Dictionary:
 	var nearby_bags: Array = []
 	for bag in bags.values():
 		if here.distance_to(Vector2(bag["x"], bag["z"])) <= Defs.INTEREST_RADIUS:
-			nearby_bags.append({"id": bag["id"], "x": bag["x"], "y": bag["y"], "z": bag["z"]})
+			nearby_bags.append({"id": bag["id"], "x": bag["x"], "y": bag["y"], "z": bag["z"],
+				"raid": bag.has("raid_reserved_until"),
+				"reserved_seconds": RaidLoot.remaining(bag, time)})
 	var gone_nodes: Array = []
 	for id in depleted:
 		gone_nodes.append(id)

@@ -1220,3 +1220,22 @@ godot --headless --path game --script res://tests/run_all.gd
 
 The `test_bleeding.gd` suite verifies bleed damage/decay, cure rules, zombie
 strikes, PvP protection, persistence and invalid save rejection.
+
+## Raid loot ownership (Lineage-style cooperative PvE)
+
+Defeating a server-spawned raid boss creates **one shared loot bag**.
+For the first **75 seconds**, pickup is reserved for the killing survivor
+and surviving same-party members who actually damaged the boss within
+20 seconds, remained close, and carried the weapon used in combat.
+Nonparticipating spectators and other parties cannot take these rare
+materials immediately. After the reservation, any nearby survivor can
+collect what remains; normal zombie loot is unchanged.
+
+The server freezes entitlement at the confirmed kill and uses trusted
+account identities (or per-object guest session IDs), never client-supplied
+loot ownership. A reconnecting account keeps its earned access, while a
+recycled guest peer number cannot steal it. Public snapshots reveal only
+bag location and remaining reservation time, not account identities.
+The bag is not duplicated for each player, and repeated pickups cannot
+create items. The new `tests/test_raid_loot_rights.gd` is part of the
+headless suite. Existing Cgame APIs were sufficient.

@@ -28,6 +28,7 @@ const SUITES := [
 	"res://tests/test_zombie_ai.gd",
 	"res://tests/test_threat_aggro.gd",
 	"res://tests/test_elite_infected.gd",
+	"res://tests/test_raid_loot_rights.gd",
 	"res://tests/test_world_cycle.gd",
 	"res://tests/test_camp_rest.gd",
 	"res://tests/test_field_campfire.gd",
