@@ -94,6 +94,15 @@ Variant Dictionary::get_value_at_index(int p_index) const {
 // WARNING: This operator does not validate the value type. For scripting/extensions this is
 // done in `variant_setget.cpp`. Consider using `set()` if the data might be invalid.
 Variant &Dictionary::operator[](const Variant &p_key) {
+	// An untyped, writable dictionary never needs to convert its key.
+	if (likely(_p->typed_key.variant_type == Variant::NIL && !_p->read_only)) {
+		const uint32_t old_size = _p->variant_map.size();
+		Variant &value = _p->variant_map[p_key];
+		if (_p->variant_map.size() > old_size) {
+			VariantInternal::initialize(&value, _p->typed_value.variant_type);
+		}
+		return value;
+	}
 	Variant tmpk;
 	const Variant *key = _p->typed_key.validate(p_key, tmpk, "use `operator[]`");
 
@@ -139,6 +148,9 @@ const Variant &Dictionary::operator[](const Variant &p_key) const {
 }
 
 const Variant *Dictionary::getptr(const Variant &p_key) const {
+	if (likely(_p->typed_key.variant_type == Variant::NIL)) {
+		return _p->variant_map.getptr(p_key);
+	}
 	Variant tmpk;
 	const Variant *key = _p->typed_key.validate(p_key, tmpk, "getptr");
 	ERR_FAIL_NULL_V(key, nullptr);
@@ -162,6 +174,10 @@ Variant *Dictionary::getptr(const Variant &p_key) {
 }
 
 Variant Dictionary::get_valid(const Variant &p_key) const {
+	if (likely(_p->typed_key.variant_type == Variant::NIL)) {
+		const Variant *value = _p->variant_map.getptr(p_key);
+		return value ? *value : Variant();
+	}
 	Variant tmpk;
 	const Variant *key = _p->typed_key.validate(p_key, tmpk, "get_valid");
 	ERR_FAIL_NULL_V(key, Variant());
@@ -175,6 +191,10 @@ Variant Dictionary::get_valid(const Variant &p_key) const {
 }
 
 Variant Dictionary::get(const Variant &p_key, const Variant &p_default) const {
+	if (likely(_p->typed_key.variant_type == Variant::NIL)) {
+		const Variant *value = _p->variant_map.getptr(p_key);
+		return value ? *value : p_default;
+	}
 	Variant tmpk;
 	const Variant *key = _p->typed_key.validate(p_key, tmpk, "get");
 	ERR_FAIL_NULL_V(key, p_default);
@@ -226,6 +246,9 @@ bool Dictionary::is_empty() const {
 }
 
 bool Dictionary::has(const Variant &p_key) const {
+	if (likely(_p->typed_key.variant_type == Variant::NIL)) {
+		return _p->variant_map.has(p_key);
+	}
 	Variant tmpk;
 	const Variant *key = _p->typed_key.validate(p_key, tmpk, "use 'has'");
 	ERR_FAIL_NULL_V(key, false);
@@ -233,6 +256,14 @@ bool Dictionary::has(const Variant &p_key) const {
 }
 
 bool Dictionary::has_all(const Array &p_keys) const {
+	if (likely(_p->typed_key.variant_type == Variant::NIL)) {
+		for (int i = 0; i < p_keys.size(); i++) {
+			if (!_p->variant_map.has(p_keys[i])) {
+				return false;
+			}
+		}
+		return true;
+	}
 	for (int i = 0; i < p_keys.size(); i++) {
 		Variant tmpk;
 		const Variant *key = _p->typed_key.validate(p_keys[i], tmpk, "use 'has_all'");

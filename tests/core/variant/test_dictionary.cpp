@@ -809,4 +809,100 @@ TEST_CASE("[Dictionary] RefCounted value init") {
 	CHECK_EQ(tdict[5.0], Variant(b));
 }
 
+
+TEST_CASE("[DictionaryFastPath] untyped lookup preserves heterogeneous keys") {
+	Dictionary dict;
+	dict[42] = "integer";
+	dict[StringName("alpha")] = 12;
+	dict[Vector2(1, 2)] = 99;
+	dict[false] = "boolean";
+	CHECK_EQ(dict.size(), 4);
+	CHECK(dict.has(42));
+	CHECK(dict.has(String("alpha")));
+	CHECK(dict.has(Vector2(1, 2)));
+	CHECK(dict.has(false));
+	CHECK_FALSE(dict.has(43));
+	CHECK_EQ(dict.get(42), Variant("integer"));
+	CHECK_EQ(dict.get("alpha"), Variant(12));
+	CHECK_EQ(dict.get(Vector2(1, 2)), Variant(99));
+	CHECK_EQ(dict.get(false), Variant("boolean"));
+}
+
+TEST_CASE("[DictionaryFastPath] untyped get returns defaults without inserting") {
+	Dictionary dict;
+	dict["set"] = 8;
+	const int initial_size = dict.size();
+	CHECK_EQ(dict.get("absent", Variant(91)), Variant(91));
+	CHECK_EQ(dict.get_valid("absent").get_type(), Variant::NIL);
+	CHECK_EQ(dict.get_valid("set"), Variant(8));
+	CHECK_EQ(dict.size(), initial_size);
+}
+
+TEST_CASE("[DictionaryFastPath] const pointers reference existing values only") {
+	Dictionary dict;
+	dict[StringName("key")] = "value";
+	const Dictionary &read_only_view = dict;
+	const Variant *value = read_only_view.getptr(String("key"));
+	REQUIRE(value != nullptr);
+	CHECK_EQ(*value, Variant("value"));
+	CHECK(read_only_view.getptr("not_found") == nullptr);
+	CHECK_EQ(dict.size(), 1);
+}
+
+TEST_CASE("[DictionaryFastPath] bulk has_all short-circuits on missing keys") {
+	Dictionary dict;
+	dict[10] = true;
+	dict[StringName("key")] = false;
+	CHECK(dict.has_all(Array()));
+	Array keys = { 10, String("key") };
+	Array missing = { 10, "missing" };
+	CHECK(dict.has_all(keys));
+	CHECK_FALSE(dict.has_all(missing));
+	CHECK_EQ(dict.size(), 2);
+}
+
+TEST_CASE("[DictionaryFastPath] untyped lookup remains correct on read-only dictionaries") {
+	Dictionary dict;
+	dict["present"] = 42;
+	dict.make_read_only();
+	CHECK(dict.has("present"));
+	CHECK_FALSE(dict.has("absent"));
+	CHECK_EQ(dict.get("present"), Variant(42));
+	CHECK_EQ(dict.get("absent", 88), Variant(88));
+	const Dictionary &view = dict;
+	const Variant *value = view.getptr("present");
+	REQUIRE(value != nullptr);
+	CHECK_EQ(*value, Variant(42));
+}
+
+TEST_CASE("[DictionaryFastPath] typed keys still validate and coerce") {
+	TypedDictionary<double, int64_t> dict;
+	dict[Variant(3)] = 12;
+	CHECK(dict.has(Variant(3.0)));
+	CHECK_EQ(dict.get(Variant(3)), Variant(12));
+	ERR_PRINT_OFF;
+	CHECK_FALSE(dict.has(Variant(String("not numeric"))));
+	ERR_PRINT_ON;
+	CHECK_EQ(dict.get(Variant(4), Variant(42)), Variant(42));
+	CHECK_EQ(dict.size(), 1);
+}
+
+TEST_CASE("[DictionaryFastPath] repeat untyped reads preserve size and values") {
+	Dictionary dict;
+	for (int i = 0; i < 256; ++i) {
+		dict[i] = i * 3;
+	}
+	const Dictionary &view = dict;
+	for (int round = 0; round < 32; ++round) {
+		for (int i = 0; i < 256; ++i) {
+			CHECK(view.has(i));
+			CHECK_EQ(view.get(i), Variant(i * 3));
+			const Variant *value = view.getptr(i);
+			REQUIRE(value != nullptr);
+			CHECK_EQ(*value, Variant(i * 3));
+		}
+	}
+	CHECK_EQ(dict.size(), 256);
+}
+
 } // namespace TestDictionary
