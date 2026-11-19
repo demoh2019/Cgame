@@ -138,6 +138,7 @@ private:
 	real_t ccd_max_angular_motion = 0.0; // Opt-in maximum CCD rotation per physics step, radians.
 	real_t warm_start_coefficient = 1.0;
 	bool ccd_rotational_bounds = false; // Optional conservative angular sweep broadphase.
+	bool ccd_tight_rotational_bounds = false; // Analytical swept arc AABB; opt-in.
 	bool implicit_damping = false; // Box2D-style time-step-stable damping; disabled by default.
 	// Bullet-style angular rolling resistance; zero leaves the classic solver unchanged.
 	real_t rolling_friction = 0.0;
@@ -212,6 +213,7 @@ public:
 	_FORCE_INLINE_ real_t get_max_angular_velocity() const { return max_angular_velocity; }
 	_FORCE_INLINE_ real_t get_ccd_max_angular_motion() const { return ccd_max_angular_motion; }
 	_FORCE_INLINE_ bool is_ccd_rotational_bounds_enabled() const { return ccd_rotational_bounds; }
+	_FORCE_INLINE_ bool is_ccd_tight_rotational_bounds_enabled() const { return ccd_tight_rotational_bounds; }
 	_FORCE_INLINE_ bool is_implicit_damping_enabled() const { return implicit_damping; }
 	_FORCE_INLINE_ real_t get_rolling_friction() const { return rolling_friction; }
 	_FORCE_INLINE_ real_t get_static_friction_multiplier() const { return static_friction_multiplier; }
