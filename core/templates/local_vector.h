@@ -333,12 +333,18 @@ public:
 		if (p_pos == count) {
 			push_back(std::move(p_val));
 		} else {
-			resize(count + 1);
 			if constexpr (std::is_trivially_copyable_v<T>) {
+				resize(count + 1);
 				// The last slot already exists; shift in place without per-element assignments.
 				std::memmove(data + p_pos + 1, data + p_pos, size_t(count - p_pos - 1) * sizeof(T));
 			} else {
-				for (U i = count - 1; i > p_pos; i--) {
+				// Construct the new tail by moving the old tail, avoiding a potentially
+				// expensive default construction and an extra move assignment.
+				// This also allows insertion of non-default-constructible types.
+				reserve(count + 1);
+				memnew_placement(&data[count], T(std::move(data[count - 1])));
+				++count;
+				for (U i = count - 2; i > p_pos; i--) {
 					data[i] = std::move(data[i - 1]);
 				}
 			}
