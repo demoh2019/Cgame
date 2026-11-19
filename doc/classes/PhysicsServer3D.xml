@@ -1383,6 +1383,20 @@
 				[b]Note:[/b] Godot's default physics implementation does not support [constant BODY_STATE_LINEAR_VELOCITY], [constant BODY_STATE_ANGULAR_VELOCITY], [constant BODY_STATE_SLEEPING], or [constant BODY_STATE_CAN_SLEEP].
 			</description>
 		</method>
+		<method name="soft_body_get_tetrahedral_interior_node_count" qualifiers="const">
+			<return type="int" />
+			<param index="0" name="body" type="RID" />
+			<description>
+				Returns the number of successfully created internal FEM-only simulation particles, excluding the rendered triangle surface. This can be zero even if interior positions were authored, when mesh validation failed.
+			</description>
+		</method>
+		<method name="soft_body_get_tetrahedron_count" qualifiers="const">
+			<return type="int" />
+			<param index="0" name="body" type="RID" />
+			<description>
+				Returns the number of validated FEM tetrahedral constraints in the native Cgame GodotPhysics3D backend. Returns zero when FEM is disabled, the input connectivity is invalid, or the backend has no FEM extension.
+			</description>
+		</method>
 		<method name="soft_body_get_total_mass" qualifiers="const">
 			<return type="float" />
 			<param index="0" name="body" type="RID" />
@@ -1473,36 +1487,6 @@
 				Sets the linear stiffness of the given soft body. Higher values will result in a stiffer body, while lower values will increase the body's ability to bend. The value can be between [code]0.0[/code] and [code]1.0[/code] (inclusive).
 			</description>
 		</method>
-		<method name="soft_body_set_tetrahedral_indices">
-			<return type="void" />
-			<param index="0" name="body" type="RID" />
-			<param index="1" name="tetrahedral_indices" type="PackedInt32Array" />
-			<description>
-				Assigns explicit tetrahedral connectivity for the experimental Cgame GodotPhysics3D volumetric soft-body solver. Every four indices reference visual mesh vertices, followed by any additional FEM interior vertices specified by [method soft_body_set_tetrahedral_interior_positions]. Invalid topology disables only the FEM extension; other physics backends may ignore this method.
-			</description>
-		</method>
-		<method name="soft_body_set_tetrahedral_interior_positions">
-			<return type="void" />
-			<param index="0" name="body" type="RID" />
-			<param index="1" name="positions" type="PackedVector3Array" />
-			<description>
-				Sets additional local-space internal simulation particles for an experimental volumetric soft body. They receive physical mass and FEM forces, but do not become render vertices or separate collision particles. Recreating the simulation topology is required if the physical mesh has already been constructed.
-			</description>
-		</method>
-		<method name="soft_body_get_tetrahedron_count" qualifiers="const">
-			<return type="int" />
-			<param index="0" name="body" type="RID" />
-			<description>
-				Returns the number of validated FEM tetrahedral constraints in the native Cgame GodotPhysics3D backend. Returns zero when FEM is disabled, the input connectivity is invalid, or the backend has no FEM extension.
-			</description>
-		</method>
-		<method name="soft_body_get_tetrahedral_interior_node_count" qualifiers="const">
-			<return type="int" />
-			<param index="0" name="body" type="RID" />
-			<description>
-				Returns the number of successfully created internal FEM-only simulation particles, excluding the rendered triangle surface. This can be zero even if interior positions were authored, when mesh validation failed.
-			</description>
-		</method>
 		<method name="soft_body_set_mesh">
 			<return type="void" />
 			<param index="0" name="body" type="RID" />
@@ -1559,6 +1543,22 @@
 			<description>
 				Sets the given body state for the given body.
 				[b]Note:[/b] Godot's default physics implementation does not support [constant BODY_STATE_LINEAR_VELOCITY], [constant BODY_STATE_ANGULAR_VELOCITY], [constant BODY_STATE_SLEEPING], or [constant BODY_STATE_CAN_SLEEP].
+			</description>
+		</method>
+		<method name="soft_body_set_tetrahedral_indices">
+			<return type="void" />
+			<param index="0" name="body" type="RID" />
+			<param index="1" name="tetrahedral_indices" type="PackedInt32Array" />
+			<description>
+				Assigns explicit tetrahedral connectivity for the experimental Cgame GodotPhysics3D volumetric soft-body solver. Every four indices reference visual mesh vertices, followed by any additional FEM interior vertices specified by [method soft_body_set_tetrahedral_interior_positions]. Invalid topology disables only the FEM extension; other physics backends may ignore this method.
+			</description>
+		</method>
+		<method name="soft_body_set_tetrahedral_interior_positions">
+			<return type="void" />
+			<param index="0" name="body" type="RID" />
+			<param index="1" name="positions" type="PackedVector3Array" />
+			<description>
+				Sets additional local-space internal simulation particles for an experimental volumetric soft body. They receive physical mass and FEM forces, but do not become render vertices or separate collision particles. Recreating the simulation topology is required if the physical mesh has already been constructed.
 			</description>
 		</method>
 		<method name="soft_body_set_total_mass">
