@@ -124,6 +124,7 @@ private:
 	real_t contact_max_separation = 0.0;
 	real_t speculative_sphere_distance = 0.0; // Off unless explicitly enabled.
 	real_t soft_body_xpbd_compliance = 0.0; // Legacy PBD remains the default.
+	real_t soft_body_xpbd_area_compliance = 0.0; // Opt-in triangle area preservation.
 	real_t contact_max_allowed_penetration = 0.0;
 	real_t contact_bias = 0.0;
 	real_t max_contact_push_speed = 0.0; // 0: unlimited (legacy behavior).
