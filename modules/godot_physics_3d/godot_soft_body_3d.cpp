@@ -61,6 +61,7 @@
 #include "servers/physics_xpbd_self_friction.h"
 #include "servers/physics_xpbd_edge_collision.h"
 #include "servers/physics_softbody_pair_edge_contact.h"
+#include "servers/physics_softbody_pair_edge_sweep.h"
 #include "servers/rendering/rendering_server.h"
 
 #include <limits>
@@ -1003,7 +1004,7 @@ void GodotSoftBody3D::initialize_pair_edge_topology(real_t p_thickness) {
 	}
 }
 
-void GodotSoftBody3D::update_pair_edge_tree(real_t p_thickness) {
+void GodotSoftBody3D::update_pair_edge_tree(real_t p_thickness, bool p_swept) {
 	for (const SelfCollisionEdge &edge : xpbd_pair_edges) {
 		const Node &a = nodes[edge.a];
 		const Node &b = nodes[edge.b];
@@ -1012,6 +1013,10 @@ void GodotSoftBody3D::update_pair_edge_tree(real_t p_thickness) {
 		}
 		AABB edge_bounds(a.x, Vector3());
 		edge_bounds.expand_to(b.x);
+		if (p_swept && pair_ccd_previous.size() == nodes.size()) {
+			edge_bounds.expand_to(pair_ccd_previous[edge.a]);
+			edge_bounds.expand_to(pair_ccd_previous[edge.b]);
+		}
 		edge_bounds.grow_by(p_thickness);
 		xpbd_pair_edge_tree.update(edge.leaf, edge_bounds);
 	}
@@ -1034,8 +1039,15 @@ bool GodotSoftBody3D::solve_pair_edge_contacts(GodotSoftBody3D &p_other, real_t 
 	if (xpbd_pair_edges.is_empty() || p_other.xpbd_pair_edges.is_empty()) {
 		return false;
 	}
-	update_pair_edge_tree(p_thickness);
-	p_other.update_pair_edge_tree(p_thickness);
+	// Previous positions are already captured by the vertex/face pair CCD
+	// stage. The extra edge sweep requires all three opt-in controls.
+	const bool swept_ccd = get_space()->is_soft_body_pair_collision_edge_ccd_enabled() &&
+			get_space()->is_soft_body_pair_collision_ccd_enabled() &&
+			pair_ccd_previous.size() == nodes.size() &&
+			p_other.pair_ccd_previous.size() == p_other.nodes.size() &&
+			!pair_ccd_previous.is_empty() && !p_other.pair_ccd_previous.is_empty();
+	update_pair_edge_tree(p_thickness, swept_ccd);
+	p_other.update_pair_edge_tree(p_thickness, swept_ccd);
 	struct PairEdgeContact {
 		uint32_t first = 0;
 		uint32_t second = 0;
@@ -1044,9 +1056,27 @@ bool GodotSoftBody3D::solve_pair_edge_contacts(GodotSoftBody3D &p_other, real_t 
 	};
 	LocalVector<PairEdgeContact> contacts;
 	contacts.reserve(MIN(p_contact_budget, uint32_t(64)));
+	struct PairSweptEdgeContact {
+		uint32_t first = 0;
+		uint32_t second = 0;
+		PhysicsSoftBodyPairEdgeSweepHit hit;
+		real_t lambda = 0.0;
+	};
+	LocalVector<PairSweptEdgeContact> swept_contacts;
+	if (swept_ccd) {
+		swept_contacts.reserve(MIN(p_contact_budget, uint32_t(32)));
+	}
+	const auto contact_count = [&]() -> uint32_t {
+		return contacts.size() + swept_contacts.size();
+	};
 	const uint32_t per_edge_limit = 8;
+	// Swept BVHs can contain many false positives (e.g. crossing flocks).
+	// Bound the expensive conservative advancement attempts per body pair.
+	const uint32_t max_sweep_candidates = MIN(uint32_t(4096), MAX(uint32_t(64), p_contact_budget * uint32_t(16)));
+	uint32_t visited_candidates = 0;
 	for (const SelfCollisionEdge &edge : xpbd_pair_edges) {
-		if (contacts.size() >= p_contact_budget) {
+		if (contact_count() >= p_contact_budget ||
+				(swept_ccd && visited_candidates >= max_sweep_candidates)) {
 			break;
 		}
 		const Node &a = nodes[edge.a];
@@ -1056,9 +1086,16 @@ bool GodotSoftBody3D::solve_pair_edge_contacts(GodotSoftBody3D &p_other, real_t 
 		}
 		AABB query(a.x, Vector3());
 		query.expand_to(b.x);
+		if (swept_ccd) {
+			query.expand_to(pair_ccd_previous[edge.a]);
+			query.expand_to(pair_ccd_previous[edge.b]);
+		}
 		query.grow_by(p_thickness);
 		uint32_t hits = 0;
 		auto visit_edge = [&](void *p_userdata) -> bool {
+			if (swept_ccd && ++visited_candidates > max_sweep_candidates) {
+				return true;
+			}
 			const SelfCollisionEdge &other = *static_cast<const SelfCollisionEdge *>(p_userdata);
 			const Node &c = p_other.nodes[other.a];
 			const Node &d = p_other.nodes[other.b];
@@ -1067,8 +1104,26 @@ bool GodotSoftBody3D::solve_pair_edge_contacts(GodotSoftBody3D &p_other, real_t 
 			}
 			real_t s, t, distance;
 			Vector3 normal;
-			if (!physics_xpbd_closest_edges(a.x, b.x, c.x, d.x, s, t, normal, distance) ||
-					distance >= p_thickness) {
+			const bool discrete_contact = physics_xpbd_closest_edges(
+						a.x, b.x, c.x, d.x, s, t, normal, distance) && distance < p_thickness;
+			if (swept_ccd) {
+				PhysicsSoftBodyPairEdgeSweepHit hit;
+				if (physics_softbody_swept_edge_edge(
+							pair_ccd_previous[edge.a], a.x,
+							pair_ccd_previous[edge.b], b.x,
+							p_other.pair_ccd_previous[other.a], c.x,
+							p_other.pair_ccd_previous[other.b], d.x,
+							p_thickness, hit)) {
+					PairSweptEdgeContact contact;
+					contact.first = edge.index;
+					contact.second = other.index;
+					contact.hit = hit;
+					swept_contacts.push_back(contact);
+					++hits;
+					return hits >= per_edge_limit || contact_count() >= p_contact_budget;
+				}
+			}
+			if (!discrete_contact) {
 				return false;
 			}
 			// Prefer the original separating side when CCD history exists;
@@ -1090,11 +1145,11 @@ bool GodotSoftBody3D::solve_pair_edge_contacts(GodotSoftBody3D &p_other, real_t 
 			contact.normal = normal;
 			contacts.push_back(contact);
 			++hits;
-			return hits >= per_edge_limit || contacts.size() >= p_contact_budget;
+			return hits >= per_edge_limit || contact_count() >= p_contact_budget;
 		};
 		p_other.xpbd_pair_edge_tree.aabb_query(query, visit_edge);
 	}
-	if (contacts.is_empty()) {
+	if (contacts.is_empty() && swept_contacts.is_empty()) {
 		return false;
 	}
 
@@ -1113,6 +1168,21 @@ bool GodotSoftBody3D::solve_pair_edge_contacts(GodotSoftBody3D &p_other, real_t 
 						a.v, b.v, c.v, d.v,
 						a.im, b.im, c.im, d.im,
 						p_thickness, p_alpha, contact.normal, p_delta, contact.lambda)) {
+				moved = true;
+			}
+		}
+		for (PairSweptEdgeContact &contact : swept_contacts) {
+			const SelfCollisionEdge &ab = xpbd_pair_edges[contact.first];
+			const SelfCollisionEdge &cd = p_other.xpbd_pair_edges[contact.second];
+			Node &a = nodes[ab.a];
+			Node &b = nodes[ab.b];
+			Node &c = p_other.nodes[cd.a];
+			Node &d = p_other.nodes[cd.b];
+			if (physics_softbody_solve_swept_pair_edges(
+						a.x, b.x, c.x, d.x,
+						a.v, b.v, c.v, d.v,
+						a.im, b.im, c.im, d.im,
+						p_thickness, p_alpha, contact.hit, p_delta, contact.lambda)) {
 				moved = true;
 			}
 		}
