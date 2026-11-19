@@ -309,6 +309,26 @@ func _build() -> void:
 		else:
 			say("Party: select the member to remove"))
 	party_buttons.add_child(kick_member)
+	# Equipment-free support role, paid for with real carried medical items.
+	var aid_row := HBoxContainer.new()
+	inventory_box.add_child(aid_row)
+	var aid_items := OptionButton.new()
+	for item_id in ["bandage", "field_antiseptic", "antibiotics", "purified_serum"]:
+		if Defs.is_item(item_id):
+			var index: int = aid_items.item_count
+			aid_items.add_item(str(Defs.item(item_id).get("name", item_id)))
+			aid_items.set_item_metadata(index, item_id)
+	aid_row.add_child(aid_items)
+	var aid_button := Button.new()
+	aid_button.text = "Aid"
+	aid_button.tooltip_text = "Treat the selected nearby party member with one medical item; 5s cooldown."
+	aid_button.pressed.connect(func() -> void:
+		var target: int = _party_target.get_selected_id()
+		if target < 0 or aid_items.selected < 0:
+			say("Aid: select a nearby party member and a medical item.")
+		else:
+			client.party_aid(target, str(aid_items.get_selected_metadata())))
+	aid_row.add_child(aid_button)
 
 	var trade_title := Label.new()
 	trade_title.text = "Player barter (safe hub, within 6 metres)"
@@ -482,6 +502,11 @@ func say(text: String) -> void:
 
 func _on_event(event: Dictionary) -> void:
 	match event["type"]:
+		"party_aid":
+			if int(event.get("peer", -1)) == client.peer_id:
+				say("Teammate treated you: +%d HP, -%d infection." % [
+					roundi(float(event.get("heal", 0.0))),
+					roundi(float(event.get("cure", 0.0)))])
 		"gathered":
 			say("+%d %s" % [event["amount"], Defs.item(event["item"]).get("name", event["item"])])
 		"campfire_refueled":
@@ -554,6 +579,14 @@ func _sell_one_material() -> void:
 
 
 func _on_result(kind: String, data: Dictionary) -> void:
+	if kind == "party_aid":
+		if bool(data.get("ok", false)):
+			say("Field aid: +%d HP, -%d infection." % [
+				roundi(float(data.get("heal", 0.0))),
+				roundi(float(data.get("cure", 0.0)))])
+		else:
+			say("Field aid denied: " + str(data.get("reason", "rejected")))
+		return
 	if kind == "loot" and str(data.get("reason", "")) == "raid_reserved":
 		say("Raid loot is reserved for its contributors (%ds remaining)." % [
 			int(ceil(float(data.get("remaining", 0.0))))])
