@@ -52,7 +52,7 @@ func run(t) -> void:
 	owner.position = Vector3(0.0, world.height_at(0.0, 0.0), 0.0)
 	t.eq(server.cmd_upgrade(41, id).get("reason"), "out_of_range", "distance to wall is checked on server")
 	owner.position = Vector3(origin.x, world.height_at(origin.x, origin.y), origin.y)
-	owner.inventory.add("plank_2", 5)
+	owner.inventory.add("plank_2", 4)
 	owner.inventory.add("stone_2", 2)
 	var start_planks: int = owner.inventory.count("plank_2")
 	var start_stone: int = owner.inventory.count("stone_2")
