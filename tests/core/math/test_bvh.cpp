@@ -863,4 +863,88 @@ TEST_CASE("[BVH] Sparse and dense adjacency buffers use adaptive contact storage
 	_exercise_compact_pair_links<Pairs3D>();
 }
 
+template <typename Pairs>
+static void _exercise_partial_contact_buffer_shrink() {
+	Pairs pairs;
+	constexpr uint32_t COUNT = 128;
+	int userdata[COUNT] = {};
+	for (uint32_t i = 0; i < COUNT; ++i) {
+		BVHHandle handle;
+		handle.set_id(i + 1);
+		userdata[i] = int(i);
+		pairs.add_pair_to(handle, &userdata[i]);
+	}
+	const uint32_t peak_capacity = pairs.extended_pairs.get_capacity();
+	CHECK(peak_capacity >= COUNT);
+
+	// A dense cluster can shrink to a few contacts without becoming empty.
+	for (uint32_t i = 0; i < COUNT - 8; ++i) {
+		BVHHandle handle;
+		handle.set_id(i + 1);
+		CHECK(pairs.remove_pair_to(handle) == &userdata[i]);
+	}
+	CHECK(pairs.extended_pairs.size() == 8);
+	CHECK(pairs.extended_pairs.get_capacity() < peak_capacity);
+	CHECK(pairs.extended_pairs.get_capacity() >= pairs.extended_pairs.size());
+	CHECK(pairs.extended_pairs.get_capacity() <= 64);
+
+	for (uint32_t i = COUNT - 8; i < COUNT; ++i) {
+		BVHHandle handle;
+		handle.set_id(i + 1);
+		CHECK(pairs.contains_pair_to(handle));
+		CHECK(pairs.remove_pair_to(handle) == &userdata[i]);
+	}
+	CHECK(pairs.extended_pairs.is_empty());
+	CHECK(pairs.extended_pairs.get_capacity() <= 8);
+}
+
+TEST_CASE("[BVH] Partially dissolved dense clusters release excess adjacency memory") {
+	using Pairs2D = BVH_Tree<Item, 2, 2, 16, PairTest, CullTest, true, Rect2, Vector2>::ItemPairs;
+	using Pairs3D = BVH_Tree<Item, 2, 2, 16, PairTest, CullTest, true, AABB, Vector3>::ItemPairs;
+	_exercise_partial_contact_buffer_shrink<Pairs2D>();
+	_exercise_partial_contact_buffer_shrink<Pairs3D>();
+}
+
+TEST_CASE("[BVH] Star-shaped 2D contact graph retains surviving pairs during churn") {
+	using Tree = BVH_Manager<Item, 2, true, 16, PairTest, CullTest, Rect2, Vector2, false>;
+	Tree tree;
+	constexpr int LEAVES = 96;
+	Item center;
+	Item leaves[LEAVES];
+	BVHHandle handles[LEAVES];
+	DensePairCounts counts;
+	tree.set_pair_callback(dense_pair_created, &counts);
+	tree.set_unpair_callback(dense_pair_removed, &counts);
+	const BVHHandle central_handle = tree.create(&center, true, 0, 2, Rect2(0, 0, 200, 4), 0, true);
+	for (int i = 0; i < LEAVES; ++i) {
+		leaves[i].value = i;
+		handles[i] = tree.create(&leaves[i], true, 1, 1, Rect2(real_t(i * 2), 1, 1, 1), 0, true);
+	}
+	tree.flush_pending_pairs();
+	CHECK(counts.created == LEAVES);
+	CHECK(counts.removed == 0);
+
+	for (int i = 8; i < LEAVES; ++i) {
+		tree.move(handles[i], Rect2(real_t(i * 2), 20, 1, 1));
+	}
+	tree.update();
+	CHECK(counts.created == LEAVES);
+	CHECK(counts.removed == LEAVES - 8);
+	CHECK(counts.invalid_userdata == 0);
+
+	for (int i = 8; i < LEAVES; ++i) {
+		tree.move(handles[i], Rect2(real_t(i * 2), 1, 1, 1));
+	}
+	tree.update();
+	CHECK(counts.created == LEAVES * 2 - 8);
+	CHECK(counts.removed == LEAVES - 8);
+
+	for (const BVHHandle &handle : handles) {
+		tree.erase(handle);
+	}
+	tree.erase(central_handle);
+	CHECK(counts.removed == counts.created);
+	CHECK(counts.invalid_userdata == 0);
+}
+
 } // namespace TestBVH
