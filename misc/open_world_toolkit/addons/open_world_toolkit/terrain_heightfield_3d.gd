@@ -5,6 +5,8 @@ class_name OWTerrain3D
 
 const TERRAIN_SHADER := preload("res://addons/open_world_toolkit/terrain_layers.gdshader")
 
+@export var pcg_graph: OWPCGGraph
+
 @export var heightmap: OWHeightmap:
 	set(value):
 		if heightmap != null and heightmap.changed.is_connected(rebuild_mesh):

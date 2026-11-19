@@ -3,8 +3,10 @@ extends EditorPlugin
 ## Editor integration for the Open World Toolkit demo project.
 
 const DOCK := preload("res://addons/open_world_toolkit/terrain_brush_dock.gd")
+const PCG_DOCK := preload("res://addons/open_world_toolkit/pcg_graph_dock.gd")
 
 var dock: OWTerrainBrushDock
+var pcg_dock: OWPCGGraphDock
 var selected_terrain: OWTerrain3D
 var _stroke_map: OWHeightmap
 var _before_heights: PackedFloat32Array
@@ -14,7 +16,10 @@ var _stroke_active: bool = false
 
 func _enter_tree() -> void:
 	dock = DOCK.new()
+	pcg_dock = PCG_DOCK.new()
 	add_control_to_dock(EditorPlugin.DOCK_SLOT_RIGHT_UL, dock)
+	add_control_to_dock(EditorPlugin.DOCK_SLOT_RIGHT_BL, pcg_dock)
+	pcg_dock.bake_requested.connect(_bake_pcg)
 	dock.generate_requested.connect(_generate)
 	dock.erode_requested.connect(_erode)
 	dock.foliage_requested.connect(_scatter)
@@ -27,7 +32,9 @@ func _exit_tree() -> void:
 	if EditorInterface.get_selection().selection_changed.is_connected(_update_selection):
 		EditorInterface.get_selection().selection_changed.disconnect(_update_selection)
 	remove_control_from_docks(dock)
+	remove_control_from_docks(pcg_dock)
 	dock.queue_free()
+	pcg_dock.queue_free()
 
 
 func _handles(object: Object) -> bool:
@@ -43,6 +50,8 @@ func _update_selection() -> void:
 			break
 	if dock != null:
 		dock.set_terrain(selected_terrain)
+	if pcg_dock != null:
+		pcg_dock.set_terrain(selected_terrain)
 
 
 func _forward_3d_gui_input(camera: Camera3D, event: InputEvent) -> int:
@@ -142,3 +151,15 @@ func _scatter_in_subtree(parent: Node) -> void:
 			history.commit_action(false)
 
 		_scatter_in_subtree(node)
+
+
+func _bake_pcg() -> void:
+	if selected_terrain == null or selected_terrain.heightmap == null or selected_terrain.pcg_graph == null:
+		return
+	var data := selected_terrain.heightmap
+	var old_heights := data.heights.duplicate()
+	var old_blend := data.blend.duplicate()
+	if not selected_terrain.pcg_graph.bake_to_heightmap(data):
+		push_warning("PCG graph could not be baked: " + selected_terrain.pcg_graph.validation_error())
+		return
+	_commit_snapshot(data, old_heights, old_blend, "Bake terrain PCG graph")

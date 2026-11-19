@@ -7,6 +7,7 @@ const Terrain = preload("res://addons/open_world_toolkit/terrain_heightfield_3d.
 const Foliage = preload("res://addons/open_world_toolkit/foliage_scatter_3d.gd")
 const WorldCell = preload("res://addons/open_world_toolkit/world_cell.gd")
 const WorldPartition = preload("res://addons/open_world_toolkit/world_partition_3d.gd")
+const PCG = preload("res://addons/open_world_toolkit/pcg_graph.gd")
 
 var assertions: int = 0
 var failures: int = 0
@@ -82,6 +83,37 @@ func _run_all() -> void:
 	_test_cell_coordinates()
 	_test_cell_neighbors()
 	_test_world_cell_resource()
+	_test_pcg_default()
+	_test_pcg_empty_invalid()
+	_test_pcg_constant()
+	_test_pcg_add()
+	_test_pcg_multiply()
+	_test_pcg_clamp()
+	_test_pcg_clamp_inverted_bounds()
+	_test_pcg_terrace()
+	_test_pcg_validation_input_missing()
+	_test_pcg_output_unique()
+	_test_pcg_cycles_rejected()
+	_test_pcg_bad_ports()
+	_test_pcg_output_cannot_source()
+	_test_pcg_replace_input_link()
+	_test_pcg_disconnect()
+	_test_pcg_remove_node()
+	_test_pcg_duplicate_id_invalid()
+	_test_pcg_dangling_link_invalid()
+	_test_pcg_invalid_numeric()
+	_test_pcg_parameters_validation()
+	_test_pcg_node_position()
+	_test_pcg_graph_order_independence()
+	_test_pcg_noise_determinism()
+	_test_pcg_noise_seed_change()
+	_test_pcg_noise_frequency()
+	_test_pcg_bake_constant()
+	_test_pcg_bake_preserves_paint()
+	_test_pcg_bake_rejects_invalid_graph()
+	_test_pcg_bake_noise_consistency()
+	_test_pcg_bake_rebuilds_mesh()
+	_test_pcg_resource_serialization()
 	print("Open World Toolkit: ", completed_cases, " cases / ", assertions, " assertions / ", failures, " failures")
 	quit(1 if failures > 0 else 0)
 
@@ -448,3 +480,307 @@ func _test_world_cell_resource() -> void:
 	resource.scene_path = "res://demo/world_demo.tscn"
 	_check(resource.coordinate == Vector2i(-4, 9), "cell coordinate retained")
 	_check(resource.scene_path.ends_with(".tscn"), "resource path retained")
+
+
+func _pcg_constant_output(value: float) -> OWPCGGraph:
+	var graph := PCG.new() as OWPCGGraph
+	var number := graph.add_node("Constant")
+	graph.set_parameter(number, "value", value)
+	var output := graph.add_node("Output")
+	graph.connect_nodes(number, output, 0)
+	return graph
+
+
+func _pcg_math(kind: String, a: float, b: float) -> OWPCGGraph:
+	var graph := PCG.new() as OWPCGGraph
+	var first := graph.add_node("Constant")
+	var second := graph.add_node("Constant")
+	var operation := graph.add_node(kind)
+	var output := graph.add_node("Output")
+	graph.set_parameter(first, "value", a)
+	graph.set_parameter(second, "value", b)
+	graph.connect_nodes(first, operation, 0)
+	graph.connect_nodes(second, operation, 1)
+	graph.connect_nodes(operation, output, 0)
+	return graph
+
+
+func _test_pcg_default() -> void:
+	_case("PCG default graph is a usable noise->output graph")
+	var graph := OWPCGGraph.make_default_graph()
+	_check(graph.validation_error().is_empty(), "default graph valid")
+	_check(graph.nodes.size() == 2 and graph.links.size() == 1, "default graph shape")
+
+
+func _test_pcg_empty_invalid() -> void:
+	_case("PCG empty graph is invalid")
+	var graph := PCG.new() as OWPCGGraph
+	_check(not graph.validation_error().is_empty(), "empty graph missing Output")
+	_check(not graph.bake_to_heightmap(_make_map()), "empty graph cannot bake")
+
+
+func _test_pcg_constant() -> void:
+	_case("PCG constant output evaluation")
+	var graph := _pcg_constant_output(7.25)
+	_check(graph.validation_error().is_empty(), "constant graph complete")
+	_approx(graph.evaluate_point(100.0, -13.0), 7.25, "constant independent of coordinates")
+
+
+func _test_pcg_add() -> void:
+	_case("PCG addition node evaluates both input sockets")
+	var graph := _pcg_math("Add", 3.5, -2.0)
+	_approx(graph.evaluate_point(0.0, 0.0), 1.5, "sum")
+
+
+func _test_pcg_multiply() -> void:
+	_case("PCG multiplication node evaluates both input sockets")
+	var graph := _pcg_math("Multiply", -3.0, 4.0)
+	_approx(graph.evaluate_point(0.0, 0.0), -12.0, "product")
+
+
+func _test_pcg_clamp() -> void:
+	_case("PCG clamp limits out-of-range values")
+	var graph := _pcg_constant_output(12.0)
+	var clamp_id := graph.add_node("Clamp")
+	var output_id := int(graph.nodes[1]["id"])
+	graph.connect_nodes(1, clamp_id, 0)
+	graph.connect_nodes(clamp_id, output_id, 0)
+	graph.set_parameter(clamp_id, "maximum", 3.0)
+	_approx(graph.evaluate_point(0.0, 0.0), 3.0, "upper clamp")
+
+
+func _test_pcg_clamp_inverted_bounds() -> void:
+	_case("PCG clamp handles inverted editor bounds")
+	var graph := _pcg_constant_output(-7.0)
+	var clamp_id := graph.add_node("Clamp")
+	graph.connect_nodes(1, clamp_id, 0)
+	graph.connect_nodes(clamp_id, 2, 0)
+	graph.set_parameter(clamp_id, "minimum", 2.0)
+	graph.set_parameter(clamp_id, "maximum", -2.0)
+	_approx(graph.evaluate_point(0.0, 0.0), -2.0, "inverted clamps use sorted bounds")
+
+
+func _test_pcg_terrace() -> void:
+	_case("PCG terrace quantizes its incoming height")
+	var graph := _pcg_constant_output(0.62)
+	var terrace := graph.add_node("Terrace")
+	graph.connect_nodes(1, terrace, 0)
+	graph.connect_nodes(terrace, 2, 0)
+	graph.set_parameter(terrace, "steps", 4.0)
+	_approx(graph.evaluate_point(0.0, 0.0), 0.5, "terraced output")
+
+
+func _test_pcg_validation_input_missing() -> void:
+	_case("PCG incomplete connections are rejected")
+	var graph := PCG.new() as OWPCGGraph
+	var output := graph.add_node("Output")
+	_check(output > 0, "Output created")
+	_check(graph.validation_error().contains("Unconnected"), "missing output input detected")
+
+
+func _test_pcg_output_unique() -> void:
+	_case("PCG enforces a single terminal Output")
+	var graph := PCG.new() as OWPCGGraph
+	_check(graph.add_node("Output") > 0, "first Output created")
+	_check(graph.add_node("Output") == -1, "second Output forbidden")
+
+
+func _test_pcg_cycles_rejected() -> void:
+	_case("PCG rejects directed graph cycles")
+	var graph := PCG.new() as OWPCGGraph
+	var a := graph.add_node("Clamp")
+	var b := graph.add_node("Terrace")
+	_check(graph.connect_nodes(a, b, 0), "forward edge accepted")
+	_check(not graph.connect_nodes(b, a, 0), "reverse cycle blocked")
+	_check(graph.links.size() == 1, "failed connection did not mutate graph")
+
+
+func _test_pcg_bad_ports() -> void:
+	_case("PCG rejects invalid source and target ports")
+	var graph := _pcg_constant_output(2.0)
+	_check(not graph.connect_nodes(1, 2, -1), "negative socket")
+	_check(not graph.connect_nodes(1, 2, 1), "out-of-range socket")
+	_check(not graph.connect_nodes(1, 999, 0), "unknown target")
+	_check(not graph.connect_nodes(999, 2, 0), "unknown source")
+	_check(not graph.connect_nodes(1, 1, 0), "self link")
+
+
+func _test_pcg_output_cannot_source() -> void:
+	_case("PCG prevents links leaving Output nodes")
+	var graph := _pcg_constant_output(2.0)
+	var clamp_id := graph.add_node("Clamp")
+	_check(not graph.connect_nodes(2, clamp_id, 0), "terminal cannot source")
+
+
+func _test_pcg_replace_input_link() -> void:
+	_case("PCG reconnecting an input replaces its former source")
+	var graph := _pcg_constant_output(4.0)
+	var replacement := graph.add_node("Constant")
+	graph.set_parameter(replacement, "value", 9.0)
+	_check(graph.connect_nodes(replacement, 2, 0), "reconnect input")
+	_check(graph.links.size() == 1, "only one source per input")
+	_approx(graph.evaluate_point(0.0, 0.0), 9.0, "new source controls output")
+
+
+func _test_pcg_disconnect() -> void:
+	_case("PCG disconnect removes only matching edge")
+	var graph := _pcg_constant_output(5.0)
+	_check(not graph.disconnect_nodes(111, 2, 0), "unrelated disconnect ignored")
+	_check(graph.disconnect_nodes(1, 2, 0), "existing edge removed")
+	_check(graph.links.is_empty(), "no remaining links")
+	_check(not graph.validation_error().is_empty(), "now incomplete")
+
+
+func _test_pcg_remove_node() -> void:
+	_case("PCG node removal cleans incoming and outgoing links")
+	var graph := _pcg_constant_output(5.0)
+	_check(graph.remove_node(1), "constant deleted")
+	_check(graph.links.is_empty(), "dependent connections deleted")
+	_check(not graph.remove_node(1), "double delete rejected")
+
+
+func _test_pcg_duplicate_id_invalid() -> void:
+	_case("PCG validates malformed serialized duplicate node IDs")
+	var graph := _pcg_constant_output(1.0)
+	graph.nodes.append(graph.nodes[0].duplicate(true))
+	_check(graph.validation_error().contains("Duplicate"), "duplicate ID rejected")
+
+
+func _test_pcg_dangling_link_invalid() -> void:
+	_case("PCG detects dangling references in imported resources")
+	var graph := _pcg_constant_output(1.0)
+	graph.links.append({"from": 999, "to": 2, "input": 0})
+	_check(graph.validation_error().contains("Dangling"), "bad reference rejected")
+
+
+func _test_pcg_invalid_numeric() -> void:
+	_case("PCG rejects non-finite inputs")
+	var graph := _pcg_constant_output(3.0)
+	_check(not graph.set_parameter(1, "value", INF), "infinite constant rejected")
+	_check(not graph.set_parameter(1, "value", NAN), "NaN constant rejected")
+	_approx(graph.evaluate_point(INF, 0.0), 0.0, "invalid coordinate no-ops")
+	_approx(graph.evaluate_point(0.0, NAN), 0.0, "NaN coordinate no-ops")
+
+
+func _test_pcg_parameters_validation() -> void:
+	_case("PCG parameter editing validates type and range")
+	var graph := PCG.new() as OWPCGGraph
+	var noise := graph.add_node("Noise")
+	var terrace := graph.add_node("Terrace")
+	_check(not graph.set_parameter(noise, "frequency", 0.0), "zero frequency rejected")
+	_check(not graph.set_parameter(noise, "value", 5.0), "unknown Noise parameter rejected")
+	_check(not graph.set_parameter(terrace, "steps", 0.0), "zero terrace steps rejected")
+	_check(not graph.set_parameter(terrace, "steps", 257.0), "excessive terrace steps rejected")
+	_check(not graph.set_parameter(999, "steps", 4.0), "unknown node rejected")
+
+
+func _test_pcg_node_position() -> void:
+	_case("PCG node positions persist as resource data")
+	var graph := _pcg_constant_output(2.0)
+	_check(graph.set_node_position(1, Vector2(81.0, -42.0)), "valid position saved")
+	_check(graph.get_node_data(1)["position"] == Vector2(81.0, -42.0), "position retrieved")
+	_check(not graph.set_node_position(999, Vector2.ZERO), "invalid id rejected")
+	_check(graph.add_node("Not A Kind") == -1, "invalid node kind rejected")
+
+
+func _test_pcg_graph_order_independence() -> void:
+	_case("PCG evaluation uses topology, not serialized array order")
+	var graph := _pcg_math("Multiply", 2.0, 3.0)
+	var expected := graph.evaluate_point(4.0, 9.0)
+	graph.nodes.reverse()
+	_approx(graph.evaluate_point(4.0, 9.0), expected, "shuffled resources remain correct")
+
+
+func _test_pcg_noise_determinism() -> void:
+	_case("PCG noise evaluation is repeatable")
+	var graph := OWPCGGraph.make_default_graph()
+	var first := graph.evaluate_point(24.5, 31.75)
+	_approx(graph.evaluate_point(24.5, 31.75), first, "same sample repeated")
+	var copy := OWPCGGraph.make_default_graph()
+	_approx(copy.evaluate_point(24.5, 31.75), first, "same seed across resources")
+
+
+func _test_pcg_noise_seed_change() -> void:
+	_case("PCG global noise seed changes its output")
+	var graph := OWPCGGraph.make_default_graph()
+	var first := graph.evaluate_point(7.25, 18.0)
+	graph.seed += 1
+	_check(not is_equal_approx(first, graph.evaluate_point(7.25, 18.0)), "seed modifies generated field")
+
+
+func _test_pcg_noise_frequency() -> void:
+	_case("PCG Noise node frequency is editable")
+	var graph := OWPCGGraph.make_default_graph()
+	var first := graph.evaluate_point(39.0, 17.0)
+	_check(graph.set_parameter(1, "frequency", 0.15), "valid frequency update")
+	_check(not is_equal_approx(first, graph.evaluate_point(39.0, 17.0)), "frequency modifies field")
+
+
+func _test_pcg_bake_constant() -> void:
+	_case("PCG baking replaces every terrain height")
+	var graph := _pcg_constant_output(5.25)
+	var data := _make_map(6, 4)
+	_check(graph.bake_to_heightmap(data), "graph bakes")
+	_check(data.heights.size() == 24, "size respected")
+	for value in data.heights:
+		_approx(value, 5.25, "constant grid height")
+
+
+func _test_pcg_bake_preserves_paint() -> void:
+	_case("PCG height generation preserves texture paint data")
+	var data := _make_map()
+	data.paint(2.0, 2.0, 1.5, 0.9)
+	var paint_before := data.blend.duplicate()
+	_check(_pcg_constant_output(-1.0).bake_to_heightmap(data), "bake succeeds")
+	_check(data.blend == paint_before, "splat mask unchanged")
+
+
+func _test_pcg_bake_rejects_invalid_graph() -> void:
+	_case("PCG invalid graph does not mutate target heightmap")
+	var data := _make_map()
+	data.set_height(1, 1, 6.0)
+	var snapshot := data.heights.duplicate()
+	var graph := PCG.new() as OWPCGGraph
+	graph.add_node("Output")
+	_check(not graph.bake_to_heightmap(data), "incomplete graph refuses bake")
+	_check(data.heights == snapshot, "terrain untouched on error")
+
+
+func _test_pcg_bake_noise_consistency() -> void:
+	_case("PCG noise bake is deterministic and respects grid spacing")
+	var graph := OWPCGGraph.make_default_graph()
+	var data := _make_map(7, 9)
+	data.cell_size = 2.0
+	_check(graph.bake_to_heightmap(data), "noise bake succeeds")
+	_approx(data.get_height(3, 4), graph.evaluate_point(6.0, 8.0), "world-space coordinate consistency")
+	var first := data.heights.duplicate()
+	_check(graph.bake_to_heightmap(data), "repeat bake succeeds")
+	_check(first == data.heights, "repeat bake identical")
+
+
+func _test_pcg_bake_rebuilds_mesh() -> void:
+	_case("PCG output propagates through terrain Resource.changed")
+	var terrain := Terrain.new() as OWTerrain3D
+	terrain.heightmap = _make_map(3, 3)
+	terrain.pcg_graph = _pcg_constant_output(3.0)
+	root.add_child(terrain)
+	_check(terrain.pcg_graph.bake_to_heightmap(terrain.heightmap), "PCG bake succeeds")
+	var arrays := terrain.mesh.surface_get_arrays(0)
+	_approx(arrays[Mesh.ARRAY_VERTEX][0].y, 3.0, "rebuild after PCG bake")
+	terrain.free()
+
+
+func _test_pcg_resource_serialization() -> void:
+	_case("PCG resource survives save/load with node connections")
+	var graph := _pcg_math("Add", 1.25, 2.5)
+	graph.set_node_position(3, Vector2(120.0, -80.0))
+	var path := "user://test_open_world_pcg.tres"
+	var status := ResourceSaver.save(graph, path)
+	_check(status == OK, "PCG resource saved")
+	if status == OK:
+		var loaded := ResourceLoader.load(path, "Resource", ResourceLoader.CACHE_MODE_IGNORE) as OWPCGGraph
+		_check(loaded != null, "PCG resource loaded")
+		if loaded != null:
+			_approx(loaded.evaluate_point(3.0, 4.0), 3.75, "linked expression preserved")
+			_check(loaded.get_node_data(3)["position"] == Vector2(120.0, -80.0), "editor node positions restored")
+	DirAccess.remove_absolute(ProjectSettings.globalize_path(path))

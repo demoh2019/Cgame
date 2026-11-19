@@ -7,7 +7,7 @@ This directory is a standalone Godot project within the engine fork. Open
 enabled in the example project. To install into another Godot project, copy
 `addons/open_world_toolkit` and enable **Project → Project Settings → Plugins**.
 
-## Features (first vertical slice)
+## Features (first and second vertical slices)
 
 - `OWHeightmap` — heightfield with deterministic noise generation, radial
   sculpting (raise, lower, smooth, flatten), 2-layer texture masks and
@@ -18,6 +18,8 @@ enabled in the example project. To install into another Godot project, copy
   noise/erosion buttons, Godot editor undo/redo on completed strokes.
 - `OWFoliageScatter3D` — seeded multi-mesh foliage scatter with elevation/slope
   filters and instance cap (assign a mesh and link a terrain node first).
+- `OWPCGGraph` — deterministic scalar procedural graph with Constant, Noise, Add, Multiply, Clamp, Terrace and Output nodes, graph validation (missing ports, duplicate links and cycles), batch mesh-height baking and `.tres` persistence.
+- `OWPCGGraphDock` — visual GraphEdit canvas in the editor: connect, disconnect, reposition and delete nodes; edit numeric parameters; bake into the selected heightfield via editor Undo/Redo.
 - `OWWorldPartition3D` — runtime grid-cell streaming of assigned PackedScene
   resources around a viewer, with separate load/unload radii and support for
   negative world coordinates.
@@ -34,7 +36,8 @@ enabled in the example project. To install into another Godot project, copy
    channel used as the 2-texture blend weight.
 5. To scatter vegetation, add `OWFoliageScatter3D` to the scene, link `terrain`,
    assign `foliage_mesh`, and click **Scatter linked foliage**. Save the scene.
-6. To stream an authored world, create `OWWorldCell` resources with coordinates
+6. To build a terrain from a PCG Graph, select the Terrain node, switch to the **World PCG** dock, and press **New graph**. Add operation nodes using the type selector, connect source ports to destination ports, select nodes to edit numeric parameters, and click **Bake to Terrain (Undoable)**. The generated `OWPCGGraph` resource is kept in the terrain node. Save the scene to persist it.
+7. To stream an authored world, create `OWWorldCell` resources with coordinates
    and scene paths, assign them to an `OWWorldPartition3D` instance, and set
    `viewer_path` to a camera/player node.
 
@@ -44,7 +47,7 @@ enabled in the example project. To install into another Godot project, copy
 godot --headless --path misc/open_world_toolkit --script res://tests/run_tests.gd
 ```
 
-The GDScript suite exercises 35 test cases across grid storage, bilinear
+The GDScript suite exercises 66 test cases (35 baseline + 31 PCG) across graph validation, graph evaluation and resource persistence, grid storage, bilinear
 sampling, normals, brush shapes, blending, conservative erosion, noise,
 undo snapshots, generated mesh geometry, ray picking, foliage and cell math.
 The workflow in `.github/workflows/open-world-toolkit.yml` uses Godot 4.8 beta4.
@@ -57,7 +60,7 @@ The workflow in `.github/workflows/open-world-toolkit.yml` uses Godot 4.8 beta4.
 - Texture blending is vertex-resolution; collision is **not generated**. The
   runtime world streamer uses explicit scene resources and synchronous loads,
   not background resource streaming or HLOD. Far-away assets need manual LOD.
-- No Niagara-like PCG graph, water, vegetation authoring, cloud simulation,
+- The PCG graph is a **scalar terrain-height graph**, not a universal procedural asset graph: it does not yet spawn props, support spline roads, output biomes or bake texture masks; water, vegetation authoring, cloud simulation,
   Nanite/Lumen, hardware RT, rollback or ECS is provided here yet.
 - For the core fork, first validate this editor workflow and GDScript tests;
   then port stable functions to a `modules/` C++ implementation if desired.
@@ -68,5 +71,5 @@ The workflow in `.github/workflows/open-world-toolkit.yml` uses Godot 4.8 beta4.
 
 ## AI disclosure
 
-This first prototype and the tests were authored with AI assistance and need
+These prototypes and their tests were authored with AI assistance and need
 human review. No code from commercial engines was copied.
