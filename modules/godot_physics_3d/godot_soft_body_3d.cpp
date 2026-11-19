@@ -33,6 +33,7 @@
 #include "godot_space_3d.h"
 
 #include "core/math/geometry_3d.h"
+#include "servers/physics_softbody_self_collision.h"
 #include "servers/physics_3d/physics_server_3d_rendering_server_handler.h"
 #include "servers/physics_softbody_plasticity.h"
 #include "servers/physics_softbody_volume_safe.h"
@@ -1517,6 +1518,131 @@ void GodotSoftBody3D::rebuild_xpbd_tethers(real_t p_slack) {
 	}
 }
 
+// Build exclusions once per loaded topology, only for opt-in self contacts.
+// Vertex-vs-own-face and one-ring adjacent triangles must never repel.
+void GodotSoftBody3D::initialize_self_collision_adjacency() {
+	self_collision_adjacency_built = true;
+	self_collision_structural_edges.clear();
+	for (const Face &face : faces) {
+		for (int i = 0; i < 3; ++i) {
+			const uint32_t a = face.n[i]->index;
+			const uint32_t b = face.n[(i + 1) % 3]->index;
+			if (a != b) {
+				self_collision_structural_edges.insert(_soft_body_edge_key(a, b));
+			}
+		}
+	}
+}
+
+// One discrete, two-sided self-contact pass after structural/area/volume
+// constraints. The existing face BVH avoids O(vertices * triangles) scans.
+// Gather bounded candidates before moving any vertices, so all broadphase
+// queries see the same position snapshot. Refit the face tree afterward.
+void GodotSoftBody3D::solve_self_collisions(real_t p_thickness, real_t p_alpha_tilde) {
+	if (!(p_thickness > 0.0) || nodes.is_empty() || faces.is_empty()) {
+		return;
+	}
+	if (!self_collision_adjacency_built) {
+		initialize_self_collision_adjacency();
+	}
+	if (face_tree.is_empty()) {
+		initialize_face_tree();
+	} else {
+		// Previous XPBD passes have already moved the triangles.
+		update_face_tree(0.0);
+	}
+	self_collision_contacts.clear();
+
+	constexpr uint32_t MAX_CONTACTS_PER_VERTEX = 4;
+	constexpr uint32_t MAX_TOTAL_CONTACTS = 65536;
+	const real_t thickness_sq = p_thickness * p_thickness;
+	if (!(thickness_sq > 0.0) || !Math::is_finite(thickness_sq)) {
+		return;
+	}
+	const Vector3 reach(p_thickness, p_thickness, p_thickness);
+
+	// Keep the nearest four *non-adjacent* faces. BVH iteration order can
+	// change when rebalanced; sorting by (distance, face index) keeps contact
+	// selection deterministic without storing arbitrary amounts of data.
+	struct CandidateQuery {
+		const Node *vertex = nullptr;
+		const HashSet<uint64_t> *structural_edges = nullptr;
+		real_t thickness_sq = 0.0;
+		uint32_t indices[MAX_CONTACTS_PER_VERTEX] = {};
+		real_t distances[MAX_CONTACTS_PER_VERTEX] = {};
+		uint32_t count = 0;
+
+		bool operator()(void *p_data) {
+			const Face *face = static_cast<const Face *>(p_data);
+			for (int i = 0; i < 3; ++i) {
+				const uint32_t adjacent = face->n[i]->index;
+				if (adjacent == vertex->index ||
+						structural_edges->has(_soft_body_edge_key(adjacent, vertex->index))) {
+					return false;
+				}
+			}
+			Vector3 closest, bary;
+			if (!physics_softbody_closest_triangle_point(vertex->x,
+						face->n[0]->x, face->n[1]->x, face->n[2]->x, closest, bary)) {
+				return false;
+			}
+			const real_t d2 = vertex->x.distance_squared_to(closest);
+			if (!Math::is_finite(d2) || d2 >= thickness_sq) {
+				return false;
+			}
+			uint32_t insert = 0;
+			while (insert < count && (d2 > distances[insert] ||
+						(d2 == distances[insert] && face->index > indices[insert]))) {
+				++insert;
+			}
+			if (insert >= MAX_CONTACTS_PER_VERTEX) {
+				return false;
+			}
+			if (count < MAX_CONTACTS_PER_VERTEX) {
+				++count;
+			}
+			for (uint32_t j = count - 1; j > insert; --j) {
+				indices[j] = indices[j - 1];
+				distances[j] = distances[j - 1];
+			}
+			indices[insert] = face->index;
+			distances[insert] = d2;
+			return false; // Continue visiting potentially closer BVH leaves.
+		}
+	};
+
+	for (const Node &node : nodes) {
+		if (self_collision_contacts.size() >= MAX_TOTAL_CONTACTS) {
+			break; // Deterministic global memory/work ceiling.
+		}
+		CandidateQuery query;
+		query.vertex = &node;
+		query.structural_edges = &self_collision_structural_edges;
+		query.thickness_sq = thickness_sq;
+		face_tree.aabb_query(AABB(node.x - reach, reach * real_t(2.0)), query);
+		for (uint32_t i = 0; i < query.count &&
+				self_collision_contacts.size() < MAX_TOTAL_CONTACTS; ++i) {
+			SelfCollisionContact contact;
+			contact.vertex = node.index;
+			contact.face = query.indices[i];
+			self_collision_contacts.push_back(contact);
+		}
+	}
+
+	for (const SelfCollisionContact &contact : self_collision_contacts) {
+		Node &point = nodes[contact.vertex];
+		Face &face = faces[contact.face];
+		physics_softbody_project_self_contact(point.x, face.n[0]->x,
+				face.n[1]->x, face.n[2]->x, point.im,
+				face.n[0]->im, face.n[1]->im, face.n[2]->im,
+				p_thickness, p_alpha_tilde, point.q);
+	}
+	if (!self_collision_contacts.is_empty()) {
+		// Keep ray queries and the next prediction phase's BVH coherent.
+		update_face_tree(0.0);
+	}
+}
+
 void GodotSoftBody3D::solve_constraints(real_t p_delta) {
 	const real_t inv_delta = 1.0 / p_delta;
 
@@ -1697,6 +1823,17 @@ void GodotSoftBody3D::solve_constraints(real_t p_delta) {
 			}
 		}
 	}
+	// Vertex/triangle self contacts are optional and run after all XPBD
+	// structural passes but before reconstructing nodal velocities.
+	const real_t self_thickness = get_space()->get_soft_body_self_collision_thickness();
+	if (self_thickness > 0.0 && p_delta > 0.0) {
+		const double self_compliance = get_space()->get_soft_body_self_collision_compliance();
+		const double self_alpha = self_compliance / (double(p_delta) * double(p_delta));
+		if (Math::is_finite(self_alpha) && self_alpha >= 0.0 &&
+				self_alpha <= double(std::numeric_limits<real_t>::max())) {
+			solve_self_collisions(self_thickness, real_t(self_alpha));
+		}
+	}
 	const real_t vc = (1.0 - damping_coefficient) * inv_delta;
 	for (Node &node : nodes) {
 		if (node.im == 0.0) {
@@ -1847,6 +1984,9 @@ void GodotSoftBody3D::destroy() {
 	xpbd_dihedral_hinges.reset();
 	xpbd_dihedral_lambdas.reset();
 	xpbd_volume_gradients.reset();
+	self_collision_contacts.reset();
+	self_collision_structural_edges.clear();
+	self_collision_adjacency_built = false;
 	xpbd_volume_closed = false;
 	xpbd_volume_rest = 0.0;
 	nodes.clear();
