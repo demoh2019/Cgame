@@ -1396,7 +1396,7 @@ For a fast dependency-free reference check of the graph-color masks, serial
 overflow and exact worker-batch coverage:
 
 ```bash
-python3 -m unittest tests/stress/test_physics_2d_color_batches.py -v
+python3 -m unittest discover -s tests/stress -p 'test_physics_2d_color_batches.py' -v
 ```
 
 This Python test validates the algorithm's invariants; it does **not**
