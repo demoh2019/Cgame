@@ -145,7 +145,7 @@ class SoftSelfContactReferenceTests(unittest.TestCase):
         self.assertIn("MAX_SOFT_SELF_CONTACT_FACES = 1024", self.src)
         self.assertIn("const uint32_t build_cost = raw_count * (levels + 1);", self.topology)
         self.assertIn("r_budget -= build_cost;", self.topology)
-        self.assertIn("!prepare_soft_self_topology(", self.solver)
+        self.assertIn("!ensure_soft_self_topology(", self.solver)
         self.assertIn("prepare_soft_face_bvh(faces, vertices, JPH::Quat::sIdentity()", self.solver)
         self.assertIn("if (needs_bvh && !use_bvh)", self.solver)
         self.assertIn("query_soft_face_bvh(", self.solver)
@@ -167,7 +167,7 @@ class SoftSelfContactReferenceTests(unittest.TestCase):
         self.assertIn("CLAMP((int)GLOBAL_GET", self.settings)
         self.assertIn("if (JoltProjectSettings::soft_body_self_contacts &&", self.prestep)
         self.assertIn("SoftSelfContactScratch self_scratch;", self.prestep)
-        self.assertIn("resolve_soft_body_self_contacts(*jolt_body, *object, p_step, self_budget, self_scratch);", self.prestep)
+        self.assertIn("resolve_soft_body_self_contacts(*jolt_body, *object, p_step, self_budget, *scratch);", self.prestep)
         self.assertLess(self.prestep.index("resolve_soft_body_self_contacts("),
                         self.prestep.index("if (JoltProjectSettings::soft_body_soft_contacts &&"))
 
