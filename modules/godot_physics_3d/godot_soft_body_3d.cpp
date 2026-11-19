@@ -35,6 +35,7 @@
 #include "core/math/geometry_3d.h"
 #include "servers/physics_3d/physics_server_3d_rendering_server_handler.h"
 #include "servers/physics_softbody_plasticity.h"
+#include "servers/physics_softbody_volume_safe.h"
 #include "servers/physics_xpbd_distance.h"
 #include "servers/physics_xpbd_area.h"
 #include "servers/rendering/rendering_server.h"
@@ -319,7 +320,18 @@ void GodotSoftBody3D::initialize_volume_constraint() {
 	for (const Face &face : faces) {
 		volume += _soft_body_signed_face_volume(face.n[0]->x, face.n[1]->x, face.n[2]->x, origin);
 	}
-	if (!Math::is_finite(volume) || Math::abs(volume) <= double(CMP_EPSILON)) {
+	// Avoid a fixed world-unit epsilon: a valid 1 mm tetrahedron
+	// encloses ~1e-10 m³ and should still be considered a closed body.
+	// Use a relative cubic scale derived from double-precision coordinate
+	// differences, making the degeneracy test uniform-scale invariant.
+	double axis_extent = 0.0;
+	for (const Node &node : nodes) {
+		const double dx = Math::abs(double(node.x.x) - double(origin.x));
+		const double dy = Math::abs(double(node.x.y) - double(origin.y));
+		const double dz = Math::abs(double(node.x.z) - double(origin.z));
+		axis_extent = MAX(axis_extent, MAX(dx, MAX(dy, dz)));
+	}
+	if (!physics_softbody_volume_is_non_degenerate(volume, axis_extent)) {
 		return;
 	}
 	xpbd_volume_rest = volume;
@@ -341,13 +353,16 @@ bool GodotSoftBody3D::solve_volume_constraint(double p_alpha, double &r_lambda) 
 	const Vector3 &origin = nodes[0].x;
 	double volume = 0.0;
 	for (const Face &face : faces) {
-		const Vector3 u = face.n[0]->x - origin;
-		const Vector3 v = face.n[1]->x - origin;
-		const Vector3 w = face.n[2]->x - origin;
+		Vector3 grad_a, grad_b, grad_c;
+		if (!physics_softbody_volume_face_gradients(
+					face.n[0]->x, face.n[1]->x, face.n[2]->x, origin,
+					grad_a, grad_b, grad_c)) {
+			return false; // Never commit an invalid XPBD volume multiplier.
+		}
 		volume += _soft_body_signed_face_volume(face.n[0]->x, face.n[1]->x, face.n[2]->x, origin);
-		xpbd_volume_gradients[face.n[0]->index] += v.cross(w) * real_t(1.0 / 6.0);
-		xpbd_volume_gradients[face.n[1]->index] += w.cross(u) * real_t(1.0 / 6.0);
-		xpbd_volume_gradients[face.n[2]->index] += u.cross(v) * real_t(1.0 / 6.0);
+		xpbd_volume_gradients[face.n[0]->index] += grad_a;
+		xpbd_volume_gradients[face.n[1]->index] += grad_b;
+		xpbd_volume_gradients[face.n[2]->index] += grad_c;
 	}
 	if (!Math::is_finite(volume)) {
 		return false;
