@@ -41,6 +41,7 @@
 #include "servers/physics_xpbd_area.h"
 #include "servers/physics_xpbd_dihedral.h"
 #include "servers/physics_xpbd_self_collision.h"
+#include "servers/physics_xpbd_edge_collision.h"
 #include "servers/rendering/rendering_server.h"
 
 #include <limits>
@@ -509,19 +510,46 @@ void GodotSoftBody3D::initialize_dihedral_constraints() {
 // is enabled on the owning physics space.
 void GodotSoftBody3D::initialize_self_collision_topology() {
 	xpbd_self_contacts.reset();
+	xpbd_self_edge_contacts.reset();
+	xpbd_self_edge_tree.clear();
+	xpbd_self_edges.reset();
 	if (!get_space() || !(get_space()->get_soft_body_self_collision_thickness() > 0.0)) {
 		xpbd_self_neighbor_edges.reset();
 		return;
 	}
+	const bool with_edge_contacts = get_space()->is_soft_body_self_collision_edge_edge_enabled();
+	const real_t thickness = get_space()->get_soft_body_self_collision_thickness();
 	// Retain topology-map capacity when rebuilding an enabled mesh.
 	xpbd_self_neighbor_edges.clear();
 	for (const Face &face : faces) {
 		for (int side = 0; side < 3; ++side) {
 			const uint32_t a = face.n[side]->index;
 			const uint32_t b = face.n[(side + 1) % 3]->index;
-			if (a != b) {
-				xpbd_self_neighbor_edges.insert(_soft_body_edge_key(a, b));
+			if (a == b) {
+				continue;
 			}
+			const uint64_t key = _soft_body_edge_key(a, b);
+			if (xpbd_self_neighbor_edges.has(key)) {
+				continue;
+			}
+			xpbd_self_neighbor_edges.insert(key);
+			if (with_edge_contacts) {
+				SelfCollisionEdge edge;
+				edge.a = a;
+				edge.b = b;
+				edge.index = xpbd_self_edges.size();
+				xpbd_self_edges.push_back(edge);
+			}
+		}
+	}
+	// Insert only after all pushes, since the BVH holds raw pointers to
+	// these elements. The vector does not resize while leaves are alive.
+	if (with_edge_contacts) {
+		for (SelfCollisionEdge &edge : xpbd_self_edges) {
+			AABB bounds(nodes[edge.a].x, Vector3());
+			bounds.expand_to(nodes[edge.b].x);
+			bounds.grow_by(thickness);
+			edge.leaf = xpbd_self_edge_tree.insert(bounds, &edge);
 		}
 	}
 }
