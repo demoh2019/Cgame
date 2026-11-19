@@ -214,6 +214,11 @@ private:
 // Unlike the fixed-capacity cull variants, these routines apply the callback
 // immediately, without storing any candidate ids or making heap allocations.
 bool _visit_point_iterative(uint32_t p_node_id, const POINT &p_point, QueryVisitor p_visitor, void *p_userdata, const T *p_tester) {
+	// Each child is tested before being pushed; do not test it again on pop.
+	// The root is the only node without a parent that has prefiltered it.
+	if (!_nodes[p_node_id].aabb.intersects_point(p_point)) {
+		return true;
+	}
 	struct StackItem {
 		uint32_t node_id;
 	};
@@ -224,9 +229,6 @@ bool _visit_point_iterative(uint32_t p_node_id, const POINT &p_point, QueryVisit
 	StackItem next;
 	while (stack.pop(next)) {
 		TNode &node = _nodes[next.node_id];
-		if (!node.aabb.intersects_point(p_point)) {
-			continue;
-		}
 		if (node.is_leaf()) {
 			TLeaf &leaf = _node_get_leaf(node);
 			for (int i = 0; i < leaf.num_items; ++i) {
