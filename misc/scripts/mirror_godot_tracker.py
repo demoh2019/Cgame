@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Resumable, attribution-preserving mirror of godotengine/godot tracker records.
+"""Resumable, attribution-preserving mirror of OPEN Godot Issues and Pull Requests.
 
 Standard library only. Does not impersonate source authors or replay PR comments.
 Run `python mirror_godot_tracker.py --help` for subcommands.
@@ -160,18 +160,27 @@ def meta_put(db: sqlite3.Connection, key: str, value: str) -> None:
 
 
 def scan(api: GitHub, db: sqlite3.Connection, *, max_pages: int = 0, reset: bool = False) -> dict:
-    """Snapshot ALL open + closed issues/PRs; resume from saved page."""
-    if reset:
+    """Snapshot only OPEN source Issues/PRs, resumable by page.
+
+    --reset replaces the source inventory, retaining already-mirrored mappings.
+    """
+    if reset or meta_get(db, "scan_mode", "") != "open-v1":
+        db.execute("DELETE FROM source_records")
         meta_put(db, "scan_next_page", "1")
+        meta_put(db, "scan_mode", "open-v1")
         db.commit()
     page = int(meta_get(db, "scan_next_page", "1"))
     pages = added = 0
     while not max_pages or pages < max_pages:
-        q = urllib.parse.urlencode({"state": "all", "sort": "created", "direction": "asc", "per_page": 100, "page": page})
+        q = urllib.parse.urlencode({"state": "open", "sort": "created", "direction": "asc", "per_page": 100, "page": page})
         records = api.request("GET", f"/repos/{SOURCE}/issues?{q}")
         if not isinstance(records, list):
             raise MirrorError("GitHub returned non-list issue page")
         for item in records:
+            # Defensive check: even a mocked or unexpected API response must
+            # never make a closed record eligible for import.
+            if item.get("state") != "open":
+                continue
             kind = "pr" if item.get("pull_request") else "issue"
             db.execute("""INSERT INTO source_records(kind,number,title,state,raw) VALUES(?,?,?,?,?)
                 ON CONFLICT(kind,number) DO UPDATE SET
@@ -212,7 +221,7 @@ def dedup_key(obj: dict) -> tuple[str, int] | None:
 def load_existing(api: GitHub, db: sqlite3.Connection) -> int:
     """Reconcile real destination records before creating anything; handles interrupted POST."""
     found = 0
-    for obj in api.list_pages(f"/repos/{TARGET}/issues", params={"state": "all", "sort": "created", "direction": "asc"}):
+    for obj in api.list_pages(f"/repos/{TARGET}/issues", params={"state": "open", "sort": "created", "direction": "asc"}):
         key = dedup_key(obj)
         if key is None:
             continue
@@ -222,10 +231,6 @@ def load_existing(api: GitHub, db: sqlite3.Connection) -> int:
             VALUES(?,?,?,?,?) ON CONFLICT(kind,number) DO NOTHING""",
             (*key, dk, int(obj["number"]), url))
         found += 1
-        if obj.get("state") == "open":
-            source = db.execute("SELECT state FROM source_records WHERE kind=? AND number=?", key).fetchone()
-            if source is not None and source[0] == "closed" and dk == "issue":
-                db.execute("INSERT OR IGNORE INTO pending_closures(kind,number,dest_number) VALUES(?,?,?)", (*key, int(obj["number"])))
     db.commit()
     return found
 
@@ -341,67 +346,70 @@ def create_code_pr(api: GitHub, obj: dict, git_root: Path) -> dict:
 
 
 def synchronize(api: GitHub, db: sqlite3.Connection, *, kind: str = "all", limit: int = 50,
-                apply: bool = False, replay_open_prs: bool = False, git_root: Path | None = None,
-                skip_closed_prs: bool = False) -> dict:
+                apply: bool = False, replay_open_prs: bool = False, git_root: Path | None = None) -> dict:
+    """Only import records that are still OPEN on upstream at time of creation.
+
+    Open Pull Requests always require a real code replay into a draft PR;
+    never turn a PR into a misleading plain Issue.
+    """
     if apply:
-        # GitHub disables issues on ordinary forks by default.
         info = api.request("GET", f"/repos/{TARGET}")
-        if not info.get("has_issues") and (kind in ("all", "issues") or not skip_closed_prs):
+        if not info.get("has_issues") and kind in ("all", "issues"):
             raise MirrorError(f"Issues are disabled in {TARGET}; enable them in Settings > General > Features > Issues")
         load_existing(api, db)
-        # Reconcile interrupted close-after-create operations first.
-        for close_kind, close_number, dest_number in db.execute(
-                "SELECT kind,number,dest_number FROM pending_closures").fetchall():
-            api.request("PATCH", f"/repos/{TARGET}/issues/{dest_number}", {"state": "closed"})
-            db.execute("DELETE FROM pending_closures WHERE kind=? AND number=?", (close_kind, close_number))
-            db.commit()
-    conditions = []
+
+    filters = ["m.number IS NULL", "s.state='open'"]
     if kind == "issues":
-        conditions.append("s.kind='issue'")
-    if kind == "prs":
-        conditions.append("s.kind='pr'")
-    if skip_closed_prs:
-        conditions.append("NOT (s.kind='pr' AND s.state='closed')")
-    where = " AND ".join(["m.number IS NULL", *conditions])
+        filters.append("s.kind='issue'")
+    elif kind == "prs":
+        filters.append("s.kind='pr'")
+    else:
+        # Import Issues before PRs when both are requested, for simple
+        # incremental progress while the PR checkout is being prepared.
+        pass
     q = ("SELECT s.kind,s.number,s.raw FROM source_records s "
          "LEFT JOIN mirrored m ON m.kind=s.kind AND m.number=s.number "
-         f"WHERE {where} ORDER BY s.number ASC")
+         f"WHERE {' AND '.join(filters)} ORDER BY s.number ASC")
     items = db.execute(q + (" LIMIT ?" if limit else ""), (limit,) if limit else ()).fetchall()
-    outcome = {"candidates": len(items), "created_issues": 0, "created_prs": 0, "skipped_existing": 0, "failures": 0, "dry_run": not apply}
+    outcome = {"candidates": len(items), "created_issues": 0, "created_prs": 0,
+               "skipped_now_closed": 0, "failures": 0, "dry_run": not apply}
     if not apply:
         outcome["sample"] = [f"{k} #{n}" for k, n, _ in items[:20]]
         return outcome
+
+    if any(k == "pr" for k, _, _ in items) and not replay_open_prs:
+        raise MirrorError("Open Pull Requests require --replay-open-prs and --git-root; "
+                          "they are never converted into plain Issues")
+    if any(k == "pr" for k, _, _ in items) and git_root is None:
+        raise MirrorError("--git-root is required for real open Pull Requests")
+
     for src_kind, number, raw in items:
         obj = json.loads(raw)
         try:
-            if src_kind == "pr" and obj.get("state") == "open" and replay_open_prs:
-                if git_root is None:
-                    raise MirrorError("--git-root is required for --replay-open-prs")
-                try:
-                    result = create_code_pr(api, obj, git_root)
-                    dest_kind = "pr"
-                except MirrorError as exc:
-                    if kind == "prs" and skip_closed_prs:
-                        # Keep the failed PR retriable when only real open PRs were requested.
-                        raise
-                    result = create_archive_issue(api, obj, "pr", note=f"Code replay failed: {str(exc)[:250]}")
-                    dest_kind = "issue"
+            # Source may have closed after scan; re-check immediately before
+            # any write, and persist that transition in the local inventory.
+            current = api.request("GET", f"/repos/{SOURCE}/issues/{number}")
+            if current.get("state") != "open":
+                db.execute("UPDATE source_records SET state='closed' WHERE kind=? AND number=?",
+                           (src_kind, number))
+                db.execute("DELETE FROM failures WHERE kind=? AND number=?", (src_kind, number))
+                db.commit()
+                outcome["skipped_now_closed"] += 1
+                continue
+            if (current.get("pull_request") is not None) != (src_kind == "pr"):
+                raise MirrorError(f"Upstream item #{number} changed kind unexpectedly")
+            obj = current
+            if src_kind == "pr":
+                result = create_code_pr(api, obj, git_root)
+                dest_kind = "pr"
             else:
-                result = create_archive_issue(api, obj, src_kind,
-                    note="PR metadata archive. A merged/closed PR cannot be re-created with original merge state." if src_kind == "pr" else "")
+                result = create_archive_issue(api, obj, "issue")
                 dest_kind = "issue"
             save_mirrored(db, src_kind, number, result, dest_kind)
-            if dest_kind == "issue" and obj.get("state") == "closed":
-                # Durably record the pending operation BEFORE the second write.
-                db.execute("INSERT OR IGNORE INTO pending_closures(kind,number,dest_number) VALUES(?,?,?)",
-                           (src_kind, number, int(result["number"])))
-                db.commit()
-                api.request("PATCH", f"/repos/{TARGET}/issues/{result['number']}", {"state": "closed"})
-                db.execute("DELETE FROM pending_closures WHERE kind=? AND number=?", (src_kind, number))
-                db.commit()
             outcome["created_prs" if dest_kind == "pr" else "created_issues"] += 1
         except (MirrorError, ApiError) as exc:
-            db.execute("INSERT INTO failures(kind,number,error) VALUES(?,?,?) ON CONFLICT(kind,number) DO UPDATE SET error=excluded.error",
+            db.execute("INSERT INTO failures(kind,number,error) VALUES(?,?,?) "
+                       "ON CONFLICT(kind,number) DO UPDATE SET error=excluded.error",
                        (src_kind, number, str(exc)))
             db.commit()
             outcome["failures"] += 1
@@ -418,16 +426,15 @@ def main(argv: list[str] | None = None):
     p.add_argument("--min-write-seconds", type=float, default=9.0,
                    help="Minimum spacing of writes; GitHub rate-limits content generation")
     cmd = p.add_subparsers(dest="command", required=True)
-    a = cmd.add_parser("scan", help="Inventory all upstream issues and PRs, including closed")
+    a = cmd.add_parser("scan", help="Inventory ONLY open upstream Issues and PRs")
     a.add_argument("--max-pages", type=int, default=0, help="0 = scan until end of history")
-    a.add_argument("--reset", action="store_true", help="rescan from earliest page; safe upserts")
-    b = cmd.add_parser("sync", help="Recreate issues and archive PRs; optionally replay open PR code")
+    a.add_argument("--reset", action="store_true", help="discard cached inventory and rescan currently open items; keep mirrored mappings")
+    b = cmd.add_parser("sync", help="Import open Issues and optionally replay open PRs as draft code PRs")
     b.add_argument("--kind", choices=("all", "issues", "prs"), default="all")
     b.add_argument("--limit", type=int, default=50, help="Items per run; 0 = all (may take many days)")
     b.add_argument("--apply", action="store_true", help="Actually create GitHub issues/PRs; default dry-run")
     b.add_argument("--replay-open-prs", action="store_true", help="Use git patch replay and create draft PRs for open PRs")
     b.add_argument("--git-root", type=Path, help="Checked-out fork for patch replay")
-    b.add_argument("--skip-closed-prs", action="store_true", help="Only import open PRs when --kind prs")
     c = cmd.add_parser("status", help="Show inventory and migration totals")
     args = p.parse_args(argv)
     if args.min_write_seconds < 1:
@@ -441,10 +448,9 @@ def main(argv: list[str] | None = None):
             if args.replay_open_prs and not args.git_root:
                 p.error("--replay-open-prs requires --git-root")
             result = synchronize(api, db, kind=args.kind, limit=args.limit, apply=args.apply,
-                                 replay_open_prs=args.replay_open_prs, git_root=args.git_root,
-                                 skip_closed_prs=args.skip_closed_prs)
+                                 replay_open_prs=args.replay_open_prs, git_root=args.git_root)
         else:
-            result = {"inventory": dict(db.execute("SELECT kind,COUNT(*) FROM source_records GROUP BY kind")),
+            result = {"inventory": dict(db.execute("SELECT kind,COUNT(*) FROM source_records WHERE state='open' GROUP BY kind")),
                       "mirrored": [dict(kind=k, dest_kind=d, count=n) for k,d,n in db.execute(
                           "SELECT kind,dest_kind,COUNT(*) FROM mirrored GROUP BY kind,dest_kind")],
                       "failures": [dict(kind=k, number=n, error=e) for k,n,e in db.execute(
