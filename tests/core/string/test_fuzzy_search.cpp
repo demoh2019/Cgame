@@ -215,4 +215,80 @@ TEST_CASE("[FuzzySearch] Boundary scoring retains all ASCII separators") {
 	}
 }
 
+
+TEST_CASE("[FuzzySearch] Bounded heap matches full ranking and score filtering") {
+	Vector<String> targets;
+	for (int i = 0; i < 768; i++) {
+		switch (i % 6) {
+			case 0:
+				targets.append("res://alpha_beta_" + itos(i) + ".gd");
+				break;
+			case 1:
+				targets.append("res://beta_alpha_" + itos(i) + ".tscn");
+				break;
+			case 2:
+				targets.append("res://alpha_" + itos(i) + "_beta.gd");
+				break;
+			case 3:
+				targets.append("res://ALPHA_BETA_" + itos(i) + ".gd");
+				break;
+			case 4:
+				// Partial token matches exercise resetting rejected match objects.
+				targets.append("res://alpha_only_" + itos(i) + ".gd");
+				break;
+			default:
+				targets.append("res://other_" + itos(i) + ".tres");
+				break;
+		}
+	}
+
+	for (bool exact : { false, true }) {
+		for (bool filter : { false, true }) {
+			FuzzySearch full;
+			full.set_use_exact_tokens(exact);
+			full.set_filter_low_scores(filter);
+			full.set_max_results(targets.size());
+			const Vector<Ref<FuzzySearchMatch>> expected = full.search_all("alpha beta", targets);
+
+			for (int limit : { 1, 7, 23 }) {
+				FuzzySearch bounded;
+				bounded.set_use_exact_tokens(exact);
+				bounded.set_filter_low_scores(filter);
+				bounded.set_max_results(limit);
+				const Vector<Ref<FuzzySearchMatch>> actual = bounded.search_all("alpha beta", targets);
+				REQUIRE_EQ(actual.size(), MIN(limit, expected.size()));
+				for (int i = 0; i < actual.size(); i++) {
+					CHECK_EQ(actual[i]->get_original_index(), expected[i]->get_original_index());
+					CHECK_EQ(actual[i]->get_score(), expected[i]->get_score());
+					CHECK_EQ(actual[i]->get_matched_substrings().size(), expected[i]->get_matched_substrings().size());
+				}
+			}
+		}
+	}
+}
+
+TEST_CASE("[FuzzySearch] Bounded search recycles losers and preserves empty results") {
+	FuzzySearch search;
+	search.set_use_exact_tokens(true);
+	search.set_filter_low_scores(false);
+	search.set_max_results(1);
+
+	Vector<String> targets;
+	targets.append("res://a_alpha_beta.gd");
+	for (int i = 0; i < 512; i++) {
+		targets.append("res://alpha_only_" + itos(i) + ".gd");
+		targets.append("res://z_alpha_beta_" + itos(i) + ".gd");
+		targets.append("res://unrelated_" + itos(i) + ".tscn");
+	}
+	targets.append("res://alpha_beta.gd");
+
+	const Vector<Ref<FuzzySearchMatch>> matches = search.search_all("alpha beta", targets);
+	REQUIRE_EQ(matches.size(), 1);
+	const Ref<FuzzySearchMatch> independent = search.search("alpha beta", matches[0]->get_target());
+	REQUIRE(independent.is_valid());
+	CHECK_EQ(matches[0]->get_score(), independent->get_score());
+	CHECK_EQ(matches[0]->get_matched_substrings().size(), independent->get_matched_substrings().size());
+	CHECK_EQ(search.search_all("no_such_token_98765", targets).size(), 0);
+}
+
 } // namespace TestFuzzySearch
