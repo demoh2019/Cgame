@@ -143,4 +143,61 @@ TEST_CASE("[RBSet] lower_bound compares once per visited tree node") {
 	}
 }
 
+
+TEST_CASE("[RBSet] In-order neighbor links survive mixed insertions and erasures") {
+	RBSet<int> set;
+	std::set<int> expected;
+	uint32_t seed = 0x71238bc9u;
+	for (int i = 0; i < 3000; i++) {
+		seed = seed * 1664525u + 1013904223u;
+		int key = int((seed >> 8) % 1000u) - 500;
+		if (i < 700) {
+			key = i;
+		} else if (i < 1400) {
+			key = -i;
+		}
+		if (i % 9 == 0 && i >= 1400) {
+			CHECK(set.erase(key) == (expected.erase(key) != 0));
+		} else {
+			set.insert(key);
+			expected.insert(key);
+		}
+		if (i % 41 == 0) {
+			CHECK(set.size() == int(expected.size()));
+			const RBSet<int>::Element *node = set.front();
+			const RBSet<int>::Element *previous = nullptr;
+			for (int value : expected) {
+				REQUIRE(node != nullptr);
+				CHECK(node->get() == value);
+				CHECK(node->prev() == previous);
+				previous = node;
+				node = node->next();
+			}
+			CHECK(node == nullptr);
+			CHECK(previous == set.back());
+			const RBSet<int>::Element *next = nullptr;
+			for (auto it = expected.rbegin(); it != expected.rend(); ++it) {
+				REQUIRE(previous != nullptr);
+				CHECK(previous->get() == *it);
+				CHECK(previous->next() == next);
+				next = previous;
+				previous = previous->prev();
+			}
+			CHECK(previous == nullptr);
+			CHECK(next == set.front());
+		}
+	}
+}
+
+TEST_CASE("[RBSet] Leaf insertion avoids redundant parent comparison") {
+	RBSet<CountedKey> set;
+	set.insert({ 20 });
+	CountedKey::comparisons = 0;
+	set.insert({ 10 });
+	CHECK(CountedKey::comparisons == 1);
+	CountedKey::comparisons = 0;
+	set.insert({ 30 });
+	CHECK(CountedKey::comparisons == 2);
+}
+
 } // namespace TestRBSet
