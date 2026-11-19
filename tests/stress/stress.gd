@@ -254,11 +254,15 @@ func _physics_2d(scale: int, frames: int) -> Dictionary:
 		collider.shape = circle
 		body.add_child(collider)
 		world.add_child(body)
+	var peak_physics_ms := 0.0
+	var peak_pairs := 0
 	for i in range(frames):
 		await physics_frame
+		peak_physics_ms = maxf(peak_physics_ms, Performance.get_monitor(Performance.TIME_PHYSICS_PROCESS) * 1000.0)
+		peak_pairs = maxi(peak_pairs, int(Performance.get_monitor(Performance.PHYSICS_2D_COLLISION_PAIRS)))
 	world.queue_free()
 	await process_frame
-	return {"bodies": length, "physics_frames": frames}
+	return {"bodies": length, "physics_frames": frames, "peak_physics_ms": peak_physics_ms, "peak_collision_pairs": peak_pairs}
 
 
 func _physics_3d(scale: int, frames: int) -> Dictionary:
@@ -274,11 +278,15 @@ func _physics_3d(scale: int, frames: int) -> Dictionary:
 		collider.shape = sphere
 		body.add_child(collider)
 		world.add_child(body)
+	var peak_physics_ms := 0.0
+	var peak_pairs := 0
 	for i in range(frames):
 		await physics_frame
+		peak_physics_ms = maxf(peak_physics_ms, Performance.get_monitor(Performance.TIME_PHYSICS_PROCESS) * 1000.0)
+		peak_pairs = maxi(peak_pairs, int(Performance.get_monitor(Performance.PHYSICS_3D_COLLISION_PAIRS)))
 	world.queue_free()
 	await process_frame
-	return {"bodies": length, "physics_frames": frames}
+	return {"bodies": length, "physics_frames": frames, "peak_physics_ms": peak_physics_ms, "peak_collision_pairs": peak_pairs}
 
 
 func _memory_churn(scale: int) -> Dictionary:
@@ -308,11 +316,17 @@ func _render_2d(scale: int, frames: int) -> Dictionary:
 		sprite.texture = shared_texture
 		sprite.position = Vector2(float(i % 120) * 9.0, float(i / 120) * 9.0)
 		world.add_child(sprite)
+	var peak_frame_ms := 0.0
+	var peak_draw_calls := 0
+	var peak_video_memory := 0
 	for i in range(frames):
 		await process_frame
+		peak_frame_ms = maxf(peak_frame_ms, Performance.get_monitor(Performance.TIME_PROCESS) * 1000.0)
+		peak_draw_calls = maxi(peak_draw_calls, int(Performance.get_monitor(Performance.RENDER_TOTAL_DRAW_CALLS_IN_FRAME)))
+		peak_video_memory = maxi(peak_video_memory, int(Performance.get_monitor(Performance.RENDER_VIDEO_MEM_USED)))
 	world.queue_free()
 	await process_frame
-	return {"sprites": 600 * scale, "frames": frames}
+	return {"sprites": 600 * scale, "frames": frames, "peak_frame_ms": peak_frame_ms, "peak_draw_calls": peak_draw_calls, "peak_video_memory_bytes": peak_video_memory}
 
 
 func _render_3d(scale: int, frames: int) -> Dictionary:
@@ -331,8 +345,14 @@ func _render_3d(scale: int, frames: int) -> Dictionary:
 		mesh.mesh = box
 		mesh.position = Vector3(float(i % 40) - 20.0, 0.0, float(i / 40) - 10.0)
 		world.add_child(mesh)
+	var peak_frame_ms := 0.0
+	var peak_draw_calls := 0
+	var peak_video_memory := 0
 	for i in range(frames):
 		await process_frame
+		peak_frame_ms = maxf(peak_frame_ms, Performance.get_monitor(Performance.TIME_PROCESS) * 1000.0)
+		peak_draw_calls = maxi(peak_draw_calls, int(Performance.get_monitor(Performance.RENDER_TOTAL_DRAW_CALLS_IN_FRAME)))
+		peak_video_memory = maxi(peak_video_memory, int(Performance.get_monitor(Performance.RENDER_VIDEO_MEM_USED)))
 	world.queue_free()
 	await process_frame
-	return {"meshes": 200 * scale, "frames": frames}
+	return {"meshes": 200 * scale, "frames": frames, "peak_frame_ms": peak_frame_ms, "peak_draw_calls": peak_draw_calls, "peak_video_memory_bytes": peak_video_memory}
