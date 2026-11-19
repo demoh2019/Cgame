@@ -54,10 +54,17 @@ public:
 	inline static float contact_warm_start_distance_sq;
 	inline static float baumgarte_stabilization_factor;
 	inline static float soft_body_point_radius;
+	// Opt-in, bounded CPU soft-soft particle contacts; independent of Jolt's
+	// built-in soft-rigid contact pipeline. These settings apply per step.
+	inline static bool soft_body_soft_contacts = false;
+	inline static float soft_body_soft_contact_radius = 0.1f;
+	inline static float soft_body_soft_contact_recovery = 0.2f;
+	inline static float soft_body_soft_contact_friction = 0.2f;
+	inline static int soft_body_soft_contact_max_particle_pairs = 32768;
 	// Used when constructing a soft body; existing bodies retain their constraints.
 	inline static int soft_body_bend_mode = 0;
 	inline static float soft_body_bend_compliance = 0.001f;
-	// Optional direction-dependent XPBD compliance of cloth surface edges.
+	// Opt-in direction-dependent textile XPBD compliance at mesh creation.
 	inline static int soft_body_fiber_axis = 0;
 	inline static float soft_body_fiber_compliance_multiplier = 1.0f;
 	// Opt-in long-range cloth attachments to pinned vertices; new meshes only.
@@ -66,7 +73,7 @@ public:
 	// Opt-in convex, closed-mesh tetrahedral volume constraints.
 	inline static bool soft_body_volume_preservation = false;
 	inline static float soft_body_volume_compliance = 0.00001f;
-	// Keep the prior opt-in compressible volumetric shrink material.
+	// Restore opt-in cubically scaling tetrahedral rest volume during shrink.
 	inline static bool soft_body_volume_follow_shrinking_factor = false;
 	// Adds center-to-surface XPBD stretch springs to the convex tetra fan.
 	inline static bool soft_body_volume_radial_springs = false;
