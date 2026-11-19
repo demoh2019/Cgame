@@ -22,10 +22,10 @@
 /* THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND,        */
 /* EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF     */
 /* MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. */
-/* IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS ARISING FROM, OUT OF OR IN CONNECTION WITH THE      */
+/* IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY   */
+/* CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT,   */
+/* TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE      */
 /* SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.                 */
-/*                                                                        */
-/* DISCLAIMED: see the Godot Engine project's standard MIT license.      */
 /**************************************************************************/
 
 #include "modules/modules_enabled.gen.h"
@@ -42,7 +42,7 @@ namespace TestSegmentCapsule {
 struct ContactCount {
 	int count = 0;
 
-	static void count_contact(const Vector2 &p_a, const Vector2 &p_b, void *p_userdata) {
+	static void count_contact(const Vector2 &, const Vector2 &, void *p_userdata) {
 		static_cast<ContactCount *>(p_userdata)->count++;
 	}
 };
