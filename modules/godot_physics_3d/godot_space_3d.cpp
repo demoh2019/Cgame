@@ -722,7 +722,7 @@ bool GodotSpace3D::test_body_motion(GodotBody3D *p_body, const PS3DT::MotionPara
 					}
 				
 				return true;
-			})
+			});
 			}
 
 			if (!collided) {
@@ -875,7 +875,7 @@ bool GodotSpace3D::test_body_motion(GodotBody3D *p_body, const PS3DT::MotionPara
 				}
 			
 				return true;
-			})
+			});
 
 			if (stuck) {
 				safe = 0;
@@ -938,7 +938,7 @@ bool GodotSpace3D::test_body_motion(GodotBody3D *p_body, const PS3DT::MotionPara
 				}
 			
 				return true;
-			})
+			});
 		}
 
 		if (rcd.result_count > 0) {
