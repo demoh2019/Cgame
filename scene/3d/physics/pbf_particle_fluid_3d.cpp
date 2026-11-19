@@ -33,6 +33,7 @@
 #include "scene/resources/world_3d.h"
 #include "servers/physics_3d/physics_direct_space_state_3d.h"
 #include "servers/physics_3d/physics_server_3d.h"
+#include "servers/physics_pbf_rigid_coupling_3d.h"
 
 namespace {
 
@@ -239,13 +240,52 @@ void PBFParticleFluid3D::_resolve_world_collisions(const Vector3 &p_old, Vector3
 	const Vector3 world_velocity = world_transform.basis.xform(r_velocity);
 	const real_t normal_speed = world_velocity.dot(normal);
 	Vector3 new_velocity = world_velocity;
-	if (normal_speed < 0.0) {
+	PhysicsPBFRigidContactResult3D paired_impact;
+	PhysicsDirectBodyState3D *rigid_state = nullptr;
+
+	// A ray query only moves the particle. When explicitly enabled, use
+	// the backend's inverse inertia tensor and actual velocity at the
+	// hit point to compute equal-and-opposite collision impulses. This
+	// imparts both linear and angular momentum to a movable solid.
+	// No action on static/kinematic obstacles, separating contacts or
+	// when DirectBodyState is inaccessible outside the physics tick.
+	if (two_way_rigid_coupling && hit.rid.is_valid()) {
+		PhysicsServer3D *server = PhysicsServer3D::get_singleton();
+		const PS3DE::BodyMode body_mode = server->body_get_mode(hit.rid);
+		if (body_mode == PS3DE::BODY_MODE_RIGID || body_mode == PS3DE::BODY_MODE_RIGID_LINEAR) {
+			rigid_state = server->body_get_direct_state(hit.rid);
+			if (rigid_state) {
+				const Transform3D rigid_transform = rigid_state->get_transform();
+				const Vector3 center_world = rigid_transform.xform(rigid_state->get_center_of_mass_local());
+				const Vector3 lever = hit.position - center_world;
+				const Vector3 contact_velocity = rigid_state->get_linear_velocity() +
+						rigid_state->get_angular_velocity().cross(lever);
+				physics_pbf_rigid_contact_solve_3d(
+						world_velocity, particle_mass, contact_velocity,
+						rigid_state->get_inverse_mass(),
+						rigid_state->get_inverse_inertia_tensor(), lever,
+						normal, boundary_restitution, max_rigid_impulse, paired_impact);
+				if (paired_impact.impulse_magnitude > real_t(0.0)) {
+					new_velocity = paired_impact.particle_velocity;
+				}
+			}
+		}
+	}
+	if (!(paired_impact.impulse_magnitude > real_t(0.0)) && normal_speed < 0.0) {
+		// Legacy one-way bounce, including static/nonresponsive bodies.
 		new_velocity -= normal * ((real_t(1.0) + boundary_restitution) * normal_speed);
 	}
 	const Vector3 local_velocity = world_transform.basis.inverse().xform(new_velocity);
 	if (proposed_local.is_finite() && local_velocity.is_finite()) {
 		r_position = proposed_local;
 		r_velocity = local_velocity;
+		if (rigid_state && paired_impact.impulse_magnitude > real_t(0.0)) {
+			// The DirectBodyState position argument is an offset from the
+			// rigid body's origin IN WORLD AXES, not a local-space point.
+			const Vector3 offset_from_body_origin = hit.position - rigid_state->get_transform().origin;
+			rigid_state->apply_impulse(paired_impact.body_impulse, offset_from_body_origin);
+			++last_rigid_impulses;
+		}
 	}
 }
 
@@ -255,6 +295,7 @@ void PBFParticleFluid3D::_step_once(real_t p_delta) {
 	const Vector3 *v = velocities.ptr();
 	Vector3 *w = predicted.ptrw();
 	last_neighbor_evaluations = 0;
+	last_rigid_impulses = 0;
 	for (int i = 0; i < count; ++i) {
 		const Vector3 new_velocity = v[i] + gravity * p_delta;
 		Vector3 new_position = p[i] + new_velocity * p_delta;
@@ -438,6 +479,7 @@ void PBFParticleFluid3D::clear_particles() {
 	_resize_buffers(0);
 	average_density = 0.0;
 	last_neighbor_evaluations = 0;
+	last_rigid_impulses = 0;
 }
 
 void PBFParticleFluid3D::set_simulation_enabled(bool p_enabled) {
@@ -454,6 +496,12 @@ void PBFParticleFluid3D::_notification(int p_what) {
 		set_physics_process_internal(false);
 	} else if (p_what == NOTIFICATION_INTERNAL_PHYSICS_PROCESS && simulation_enabled) {
 		step(real_t(get_physics_process_delta_time()));
+	}
+}
+
+void PBFParticleFluid3D::set_max_rigid_impulse(real_t p_maximum) {
+	if (Math::is_finite(p_maximum) && p_maximum > real_t(0.0) && p_maximum <= real_t(1000.0)) {
+		max_rigid_impulse = p_maximum;
 	}
 }
 
@@ -538,6 +586,11 @@ void PBFParticleFluid3D::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("is_simulation_enabled"), &PBFParticleFluid3D::is_simulation_enabled);
 	ClassDB::bind_method(D_METHOD("set_collide_with_bodies", "enabled"), &PBFParticleFluid3D::set_collide_with_bodies);
 	ClassDB::bind_method(D_METHOD("is_collide_with_bodies_enabled"), &PBFParticleFluid3D::is_collide_with_bodies_enabled);
+	ClassDB::bind_method(D_METHOD("set_two_way_rigid_coupling", "enabled"), &PBFParticleFluid3D::set_two_way_rigid_coupling);
+	ClassDB::bind_method(D_METHOD("is_two_way_rigid_coupling_enabled"), &PBFParticleFluid3D::is_two_way_rigid_coupling_enabled);
+	ClassDB::bind_method(D_METHOD("set_max_rigid_impulse", "maximum"), &PBFParticleFluid3D::set_max_rigid_impulse);
+	ClassDB::bind_method(D_METHOD("get_max_rigid_impulse"), &PBFParticleFluid3D::get_max_rigid_impulse);
+	ClassDB::bind_method(D_METHOD("get_last_rigid_impulses"), &PBFParticleFluid3D::get_last_rigid_impulses);
 	ClassDB::bind_method(D_METHOD("set_collision_mask", "mask"), &PBFParticleFluid3D::set_collision_mask);
 	ClassDB::bind_method(D_METHOD("get_collision_mask"), &PBFParticleFluid3D::get_collision_mask);
 	ClassDB::bind_method(D_METHOD("set_solver_iterations", "iterations"), &PBFParticleFluid3D::set_solver_iterations);
@@ -576,6 +629,8 @@ void PBFParticleFluid3D::_bind_methods() {
 
 	ADD_PROPERTY(PropertyInfo(Variant::BOOL, "simulation_enabled"), "set_simulation_enabled", "is_simulation_enabled");
 	ADD_PROPERTY(PropertyInfo(Variant::BOOL, "collide_with_bodies"), "set_collide_with_bodies", "is_collide_with_bodies_enabled");
+	ADD_PROPERTY(PropertyInfo(Variant::BOOL, "two_way_rigid_coupling"), "set_two_way_rigid_coupling", "is_two_way_rigid_coupling_enabled");
+	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "max_rigid_impulse", PROPERTY_HINT_RANGE, "0.01,1000,0.01,suffix:N*s"), "set_max_rigid_impulse", "get_max_rigid_impulse");
 	ADD_PROPERTY(PropertyInfo(Variant::INT, "collision_mask", PROPERTY_HINT_LAYERS_3D_PHYSICS), "set_collision_mask", "get_collision_mask");
 	ADD_PROPERTY(PropertyInfo(Variant::INT, "solver_iterations", PROPERTY_HINT_RANGE, "1,12,1"), "set_solver_iterations", "get_solver_iterations");
 	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "smoothing_radius", PROPERTY_HINT_RANGE, "0.08,2,0.01,suffix:m"), "set_smoothing_radius", "get_smoothing_radius");
