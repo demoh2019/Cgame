@@ -77,7 +77,10 @@ class GitHub:
                 return json.loads(raw) if raw else None
             except urllib.error.HTTPError as exc:
                 detail = exc.read().decode("utf-8", "replace")
-                if exc.code not in (403, 429, 500, 502, 503, 504) or attempt == 6:
+                # 5xx after POST/PATCH may mean GitHub applied the write before
+                # returning an error. Never replay an ambiguous mutation.
+                retryable = exc.code in (403, 429) or (method == "GET" and exc.code in (500, 502, 503, 504))
+                if not retryable or attempt == 6:
                     raise ApiError(exc.code, detail) from exc
                 # Only retry rejected writes when the server explicitly replied that it
                 # did not apply them. Network/timeout failures are intentionally fatal.
@@ -135,6 +138,10 @@ def connect(db_path: Path) -> sqlite3.Connection:
             PRIMARY KEY(kind, number)
         );
         CREATE TABLE IF NOT EXISTS meta (key TEXT PRIMARY KEY, value TEXT NOT NULL);
+        CREATE TABLE IF NOT EXISTS pending_closures (
+            kind TEXT NOT NULL, number INTEGER NOT NULL, dest_number INTEGER NOT NULL,
+            PRIMARY KEY(kind, number)
+        );
         CREATE TABLE IF NOT EXISTS failures (
             kind TEXT NOT NULL, number INTEGER NOT NULL, error TEXT NOT NULL,
             PRIMARY KEY(kind, number)
@@ -215,6 +222,10 @@ def load_existing(api: GitHub, db: sqlite3.Connection) -> int:
             VALUES(?,?,?,?,?) ON CONFLICT(kind,number) DO NOTHING""",
             (*key, dk, int(obj["number"]), url))
         found += 1
+        if obj.get("state") == "open":
+            source = db.execute("SELECT state FROM source_records WHERE kind=? AND number=?", key).fetchone()
+            if source is not None and source[0] == "closed" and dk == "issue":
+                db.execute("INSERT OR IGNORE INTO pending_closures(kind,number,dest_number) VALUES(?,?,?)", (*key, int(obj["number"])))
     db.commit()
     return found
 
@@ -256,8 +267,8 @@ def create_archive_issue(api: GitHub, obj: dict, kind: str, *, note: str = "") -
         "title": f"{label} #{obj['number']}: {obj['title']}"[:255],
         "body": provenance_body(obj, kind, note=note),
     })
-    if obj.get("state") == "closed":
-        api.request("PATCH", f"/repos/{TARGET}/issues/{data['number']}", {"state": "closed"})
+    # Closing happens *after* the successful POST is recorded in SQLite.
+    # If a later PATCH fails, the next invocation can safely repair it.
     return data
 
 
@@ -265,7 +276,7 @@ def git(*args: str, cwd: Path, input_bytes: bytes | None = None) -> bytes:
     proc = subprocess.run(["git", *args], cwd=cwd, input=input_bytes, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
     if proc.returncode:
         raise MirrorError(f"git {' '.join(args[:5])}: {proc.stderr.decode('utf-8', 'replace')[:500]}")
-    return proc.stdout.strip()
+    return proc.stdout
 
 
 def create_code_pr(api: GitHub, obj: dict, git_root: Path) -> dict:
@@ -338,6 +349,12 @@ def synchronize(api: GitHub, db: sqlite3.Connection, *, kind: str = "all", limit
         if not info.get("has_issues") and (kind in ("all", "issues") or not skip_closed_prs):
             raise MirrorError(f"Issues are disabled in {TARGET}; enable them in Settings > General > Features > Issues")
         load_existing(api, db)
+        # Reconcile interrupted close-after-create operations first.
+        for close_kind, close_number, dest_number in db.execute(
+                "SELECT kind,number,dest_number FROM pending_closures").fetchall():
+            api.request("PATCH", f"/repos/{TARGET}/issues/{dest_number}", {"state": "closed"})
+            db.execute("DELETE FROM pending_closures WHERE kind=? AND number=?", (close_kind, close_number))
+            db.commit()
     conditions = []
     if kind == "issues":
         conditions.append("s.kind='issue'")
@@ -374,6 +391,14 @@ def synchronize(api: GitHub, db: sqlite3.Connection, *, kind: str = "all", limit
                     note="PR metadata archive. A merged/closed PR cannot be re-created with original merge state." if src_kind == "pr" else "")
                 dest_kind = "issue"
             save_mirrored(db, src_kind, number, result, dest_kind)
+            if dest_kind == "issue" and obj.get("state") == "closed":
+                # Durably record the pending operation BEFORE the second write.
+                db.execute("INSERT OR IGNORE INTO pending_closures(kind,number,dest_number) VALUES(?,?,?)",
+                           (src_kind, number, int(result["number"])))
+                db.commit()
+                api.request("PATCH", f"/repos/{TARGET}/issues/{result['number']}", {"state": "closed"})
+                db.execute("DELETE FROM pending_closures WHERE kind=? AND number=?", (src_kind, number))
+                db.commit()
             outcome["created_prs" if dest_kind == "pr" else "created_issues"] += 1
         except (MirrorError, ApiError) as exc:
             db.execute("INSERT INTO failures(kind,number,error) VALUES(?,?,?) ON CONFLICT(kind,number) DO UPDATE SET error=excluded.error",
