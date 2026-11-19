@@ -167,11 +167,12 @@ def main(argv: list[str] | None = None) -> int:
         parser.error("Missing project.godot")
     binary = str(Path(args.godot).resolve()) if ("/" in args.godot or "\\" in args.godot) else args.godot
     report: dict[str, Any] = {
-        "schema_version": 1,
+        "schema_version": 2,
         "created_utc": dt.datetime.now(dt.timezone.utc).isoformat(),
         "configuration": {
             "scales": args.scales, "frames": args.frames, "repeats": args.repeats,
-            "render_mode": args.render_mode, "seed": args.seed, "timeout_seconds": args.timeout,
+            "render_mode": args.render_mode, "rss_scope": "process_tree",
+            "seed": args.seed, "timeout_seconds": args.timeout,
             "rss_limit_mib": args.rss_limit_mib, "nonlinear_exponent": args.nonlinear_exponent,
         },
         "cases": {},
