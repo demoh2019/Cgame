@@ -1542,6 +1542,15 @@ static void ensure_pending_index(const LocalVector<JPH::BodyID> &p_bodies, AHash
 
 } // namespace
 
+// A cache belongs to one Jolt physics space, not to global project state.
+// BodyID includes the generation sequence; destroyed/rebuilt bodies are
+// explicitly evicted in remove_object(). Cap retained meshes to avoid a
+// silently unbounded allocation for streaming or procedural scenes.
+struct JoltSelfCollisionCache {
+	static constexpr uint32_t MAX_RETAINED_BODIES = 64;
+	std::unordered_map<uint32_t, SoftSelfContactScratch> bodies;
+};
+
 void JoltSpace3D::_pending_add(LocalVector<JPH::BodyID> &p_bodies, AHashMap<uint32_t, uint32_t> &r_indices, const JPH::BodyID &p_id) {
 	if (!r_indices.is_empty()) {
 		r_indices.insert(p_id.GetIndexAndSequenceNumber(), p_bodies.size());
@@ -1618,6 +1627,17 @@ void JoltSpace3D::_pre_step(float p_step) {
 		object->pre_step(p_step);
 	}
 
+	// Reclaim all cached geometry as soon as this opt-in mode is disabled.
+	// Cache is populated lazily, and never shared across physics spaces.
+	const bool persistent_self = JoltProjectSettings::soft_body_self_contacts &&
+			JoltProjectSettings::soft_body_self_edge_contacts &&
+			JoltProjectSettings::soft_body_self_edge_bvh &&
+			JoltProjectSettings::soft_body_self_persistent_bvh;
+	if (!persistent_self && self_collision_cache != nullptr) {
+		delete self_collision_cache;
+		self_collision_cache = nullptr;
+	}
+
 	// Optional cloth/soft-body self collision: one-ring topology exclusion
 	// prevents neighboring triangles from repelling their own mesh edges.
 	// This budget is separate from inter-body soft contacts and applies
@@ -1632,21 +1652,35 @@ void JoltSpace3D::_pre_step(float p_step) {
 		uint32_t self_edge_budget = self_edges ? self_budget / 2 : 0;
 		self_budget -= self_edge_budget;
 		SoftSelfContactScratch self_scratch;
+		if (persistent_self && self_collision_cache == nullptr) {
+			self_collision_cache = new JoltSelfCollisionCache;
+		}
 		for (JPH::uint32 i = 0; i < active_soft_body_count && (self_budget > 0 || self_edge_budget > 0); ++i) {
 			JPH::Body *jolt_body = lock_iface.TryGetBody(active_soft_bodies[i]);
 			if (jolt_body == nullptr) {
 				continue;
 			}
 			const JoltSoftBody3D *object = reinterpret_cast<JoltObject3D *>(jolt_body->GetUserData())->as_soft_body();
-			// Never reuse the previous body's adjacency. The VF pass fills
-			// this vector when it runs; the EE pass reuses it or rebuilds
-			// under its own quota if VF has no remaining budget.
-			self_scratch.one_ring_edges.clear();
+			SoftSelfContactScratch *scratch = &self_scratch;
+			if (persistent_self) {
+				const uint32_t id = active_soft_bodies[i].GetIndexAndSequenceNumber();
+				auto existing = self_collision_cache->bodies.find(id);
+				if (existing != self_collision_cache->bodies.end()) {
+					scratch = &existing->second;
+				} else if (self_collision_cache->bodies.size() < JoltSelfCollisionCache::MAX_RETAINED_BODIES) {
+					scratch = &self_collision_cache->bodies[id];
+				}
+			}
+			if (scratch == &self_scratch) {
+				// Default and cache-overflow paths preserve old per-step
+				// sharing, never reuse a different body's adjacency.
+				scratch->one_ring_edges.clear();
+			}
 			if (self_budget > 0) {
-				resolve_soft_body_self_contacts(*jolt_body, *object, p_step, self_budget, self_scratch);
+				resolve_soft_body_self_contacts(*jolt_body, *object, p_step, self_budget, *scratch);
 			}
 			if (self_edges && self_edge_budget > 0) {
-				resolve_soft_body_self_edge_contacts(*jolt_body, *object, p_step, self_edge_budget, self_scratch);
+				resolve_soft_body_self_edge_contacts(*jolt_body, *object, p_step, self_edge_budget, *scratch);
 			}
 		}
 	}
@@ -1810,6 +1844,9 @@ JoltSpace3D::JoltSpace3D(JPH::JobSystem *p_job_system, JPH::TempAllocator *p_tem
 }
 
 JoltSpace3D::~JoltSpace3D() {
+	delete self_collision_cache;
+	self_collision_cache = nullptr;
+
 	if (direct_state != nullptr) {
 		memdelete(direct_state);
 		direct_state = nullptr;
@@ -2091,6 +2128,10 @@ JPH::Body *JoltSpace3D::add_object(const JoltObject3D &p_object, const JPH::Soft
 }
 
 void JoltSpace3D::remove_object(const JPH::BodyID &p_jolt_id) {
+	// Invalidate the cached leaf-index map before body destruction/reuse.
+	if (self_collision_cache != nullptr) {
+		self_collision_cache->bodies.erase(p_jolt_id.GetIndexAndSequenceNumber());
+	}
 	JPH::BodyInterface &body_iface = get_body_iface();
 
 	// A body queued by CreateBody/CreateSoftBody has not been inserted in
