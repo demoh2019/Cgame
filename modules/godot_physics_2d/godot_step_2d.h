@@ -48,10 +48,16 @@ class GodotStep2D {
 	LocalVector<uint32_t> solve_island_indices;
 	LocalVector<GodotBody2D *> pending_bodies; // Reused, bounded by the DFS frontier, not island depth.
 
+	// Reused only for the opt-in single-large-island graph coloring path.
+	LocalVector<GodotConstraint2D *> colored_constraints;
+	uint32_t color_batch_offset = 0;
+
 	void _populate_island(GodotBody2D *p_body, LocalVector<GodotBody2D *> &p_body_island, LocalVector<GodotConstraint2D *> &p_constraint_island);
 	void _setup_constraint(uint32_t p_constraint_index, void *p_userdata = nullptr);
 	void _pre_solve_island(LocalVector<GodotConstraint2D *> &p_constraint_island) const;
 	void _solve_island(uint32_t p_island_index, void *p_userdata = nullptr) const;
+	void _solve_colored_constraint(uint32_t p_constraint_index, void *p_userdata = nullptr) const;
+	void _solve_large_island(const LocalVector<GodotConstraint2D *> &p_constraint_island);
 	void _check_suspend(LocalVector<GodotBody2D *> &p_body_island) const;
 
 public:
