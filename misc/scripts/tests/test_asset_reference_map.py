@@ -156,6 +156,88 @@ class ReferenceMapTests(unittest.TestCase):
             with self.subTest(suffix=suffix):
                 self.assertEqual(arm._references(source, suffix), expected)
 
+    def test_literal_fastpath_matches_character_scanner_on_random_inputs(self):
+        import random
+
+        # Legacy character-by-character string scanner is an independent
+        # correctness oracle for quotes, escapes and comments.
+        def legacy_references(text, suffix):
+            results = set()
+            index = 0
+            length = len(text)
+            block_comment = False
+            hash_comments = suffix in {".gd", ".tscn", ".tres"}
+            cpp_comments = suffix in {".cs", ".gdshader", ".gdshaderinc", ".shader"}
+            tokens = (arm._HASH_TOKENS if hash_comments else
+                      arm._CPP_TOKENS if cpp_comments else arm._QUOTE_TOKENS)
+            while index < length:
+                if block_comment:
+                    closing = text.find("*/", index)
+                    if closing < 0:
+                        break
+                    block_comment = False
+                    index = closing + 2
+                    continue
+                token = tokens.search(text, index)
+                if token is None:
+                    break
+                index = token.start()
+                char = text[index]
+                if hash_comments and char == "#":
+                    ending = text.find("\n", index)
+                    index = length if ending < 0 else ending + 1
+                    continue
+                if cpp_comments and text.startswith("//", index):
+                    ending = text.find("\n", index)
+                    index = length if ending < 0 else ending + 1
+                    continue
+                if cpp_comments and text.startswith("/*", index):
+                    block_comment = True
+                    index += 2
+                    continue
+                if char in ("'", '"'):
+                    quote = char
+                    index += 1
+                    value = []
+                    terminated = False
+                    while index < length:
+                        character = text[index]
+                        if character == "\\" and index + 1 < length:
+                            value.append(character)
+                            value.append(text[index + 1])
+                            index += 2
+                            continue
+                        if character == quote:
+                            terminated = True
+                            index += 1
+                            break
+                        value.append(character)
+                        index += 1
+                    if terminated:
+                        candidate = "".join(value)
+                        if candidate.startswith("res://"):
+                            results.add(candidate[6:])
+                    continue
+                index += 1
+            return sorted(results)
+
+        rng = random.Random(58123)
+        alphabet = "abc0123/#'\"\\ \n:\t*()"
+        for suffix in (".gd", ".cs", ".gdshader", ".tscn", ".gdextension"):
+            for case in range(500):
+                text = "".join(rng.choice(alphabet)
+                               for _ in range(rng.randrange(0, 300)))
+                if case % 4 == 0:
+                    text = '"res://a\\\"/b.png"' + text + "'res://a/b.tres'"
+                with self.subTest(suffix=suffix, case=case):
+                    self.assertEqual(arm._references(text, suffix),
+                                     legacy_references(text, suffix))
+
+    def test_many_irrelevant_strings_do_not_hide_real_asset_reference(self):
+        content = ('var text = "' + 'x' * 512 + '";\n') * 2000
+        content += 'var asset = "res://sprites/hero.png";\n'
+        self.assertEqual(arm._references(content, ".cs"), ['sprites/hero.png'])
+
     def test_invalid_windows_name_diagnostic(self):
         self.put('a.tscn', 'path="res://COM1.png"')
         self.assertEqual(self.run_map('a.tscn')['problems'][0]['kind'], 'invalid')
