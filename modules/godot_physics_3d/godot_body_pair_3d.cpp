@@ -831,6 +831,7 @@ bool GodotBodySoftBodyPair3D::pre_solve(real_t p_step) {
 	bool do_process = false;
 
 	const Transform3D &transform_A = body->get_transform();
+	const bool has_friction = body->get_friction() != 0.0;
 
 	Basis zero_basis;
 	zero_basis.set_zero();
@@ -872,11 +873,17 @@ bool GodotBodySoftBodyPair3D::pre_solve(real_t p_step) {
 		Vector3 inertia_A = body_inv_inertia_tensor.xform(c.rA.cross(c.normal));
 		real_t kNormal = body_inv_mass + node_inv_mass;
 		kNormal += c.normal.dot(inertia_A.cross(c.rA));
-		c.mass_normal = 1.0f / kNormal;
+		// Degenerate or locked contacts must not generate infinite impulses.
+		c.mass_normal = kNormal > 0.0 ? 1.0f / kNormal : 0.0f;
 
 		c.bias = -bias * inv_dt * MIN(0.0f, -depth + max_penetration);
 		c.depth = depth;
 
+		// The material can become frictionless after a contact was cached.
+		// Do not apply its obsolete tangential warm-start impulse.
+		if (!has_friction) {
+			c.acc_tangent_impulse = Vector3();
+		}
 		Vector3 j_vec = c.normal * c.acc_normal_impulse + c.acc_tangent_impulse;
 		if (body_collides) {
 			body->apply_impulse(-j_vec, c.rA + body->get_center_of_mass());
@@ -924,6 +931,8 @@ void GodotBodySoftBodyPair3D::solve(real_t p_step) {
 	}
 
 	const real_t max_bias_av = MAX_BIAS_ROTATION / p_step;
+	// Material friction is constant during the constraint solve.
+	const real_t friction = body->get_friction();
 
 	Basis zero_basis;
 	zero_basis.set_zero();
@@ -1010,8 +1019,13 @@ void GodotBodySoftBodyPair3D::solve(real_t p_step) {
 			c.active = true;
 		}
 
+		// A frictionless contact has no tangent constraint. Avoid the extra
+		// two velocities, length calculations and inertia transform.
+		if (friction == 0.0) {
+			continue;
+		}
+
 		// Friction impulse.
-		real_t friction = body->get_friction();
 
 		Vector3 lvA = body->get_linear_velocity() + body->get_angular_velocity().cross(c.rA);
 		Vector3 lvB = soft_body->get_node_velocity(c.index_B);
@@ -1028,7 +1042,11 @@ void GodotBodySoftBodyPair3D::solve(real_t p_step) {
 
 			Vector3 temp1 = body_inv_inertia_tensor.xform(c.rA.cross(tv));
 
-			real_t t = -tvl / (body_inv_mass + node_inv_mass + tv.dot(temp1.cross(c.rA)));
+			const real_t tangent_mass = body_inv_mass + node_inv_mass + tv.dot(temp1.cross(c.rA));
+			if (tangent_mass <= 0.0) {
+				continue;
+			}
+			real_t t = -tvl / tangent_mass;
 
 			Vector3 jt = t * tv;
 
