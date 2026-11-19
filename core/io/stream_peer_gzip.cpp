@@ -132,9 +132,14 @@ Error StreamPeerGZIP::put_partial_data(const uint8_t *p_data, int p_bytes, int &
 	ERR_FAIL_NULL_V(ctx, ERR_UNCONFIGURED);
 	ERR_FAIL_COND_V(p_bytes < 0, ERR_INVALID_PARAMETER);
 
-	// Ensure we have enough space in temporary buffer.
-	if (buffer.size() < p_bytes) {
-		buffer.resize(p_bytes);
+	// The output of _process() is limited by the free ring-buffer space.
+	// Growing the scratch buffer to the entire input size wastes memory for
+	// large writes (for example, a 32 MiB input with a 64 KiB output queue).
+	// Keep a bounded zlib work buffer and stream through it instead.
+	constexpr int MAX_WORK_BUFFER_SIZE = 64 * 1024;
+	const int work_size = MIN(p_bytes, MIN(rb.space_left(), MAX_WORK_BUFFER_SIZE));
+	if (buffer.size() < work_size) {
+		ERR_FAIL_COND_V(buffer.resize(work_size) != OK, ERR_OUT_OF_MEMORY);
 	}
 
 	r_sent = 0;
