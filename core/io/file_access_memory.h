@@ -81,5 +81,12 @@ public:
 	virtual bool _get_read_only_attribute(const String &p_file) override { return false; }
 	virtual Error _set_read_only_attribute(const String &p_file, bool p_ro) override { return ERR_UNAVAILABLE; }
 
-	virtual void close() override {}
+	virtual void close() override {
+		read_snapshot.clear();
+		data = nullptr;
+		writable_data = nullptr;
+		length = 0;
+		pos = 0;
+		opened = false;
+	}
 };
