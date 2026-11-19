@@ -48,6 +48,7 @@
 #include "servers/physics_fluid_box_3d.h"
 #include "servers/physics_rigid_box_aero_panels_3d.h"
 #include "servers/physics_fluid_capsule_3d.h"
+#include "servers/physics_fluid_cylinder_3d.h"
 
 void GodotBody3D::_mass_properties_changed() {
 	if (get_space() && !mass_properties_update_list.in_list()) {
@@ -813,6 +814,28 @@ void GodotBody3D::integrate_forces(real_t p_step, bool p_defer_motion) {
 							} else {
 								sample = godot_physics_fluid_sample_3d(bounds, shape_volume, water_height);
 							}
+						}
+					} else if (shape_type == PS3DE::SHAPE_CYLINDER) {
+						// Jolt-style shape-aware buoyancy for tilted rigid
+						// cylinders: analytically integrate clipped circular
+						// sections instead of their world AABB height.
+						// As with spherical/capsule formulas, similarity
+						// transforms preserve the circular cross section.
+						const GodotCylinderShape3D *cylinder = static_cast<const GodotCylinderShape3D *>(shape);
+						real_t cylinder_scale = 0.0;
+						real_t cylinder_total_volume = 0.0;
+						if (godot_physics_fluid_uniform_scale_3d(shape_world.basis, cylinder_scale) &&
+								godot_physics_fluid_cylinder_sample_3d(
+										shape_world.origin, shape_world.basis.get_column(1) / cylinder_scale,
+										cylinder->get_radius() * cylinder_scale, cylinder->get_height() * cylinder_scale,
+										water_height, sample, cylinder_total_volume)) {
+							// Correct the true fluid-volume denominator for
+							// angular damping, as for boxes and convex hulls.
+							total_fluid_shape_volume += cylinder_total_volume - shape_volume;
+						} else {
+							// Shear/nonuniform scale turns the circle into an
+							// ellipse: retain the legacy conservative fallback.
+							sample = godot_physics_fluid_sample_3d(bounds, shape_volume, water_height);
 						}
 					} else if (shape_type == PS3DE::SHAPE_BOX) {
 						// The world AABB overstates the immersed volume of a tilted
