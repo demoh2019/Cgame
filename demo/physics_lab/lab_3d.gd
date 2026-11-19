@@ -267,9 +267,24 @@ func _build_fem_concave_doubletet() -> ArrayMesh:
         1, 2, 3, 0, 3, 2, 0, 1, 3,
         2, 1, 4, 0, 4, 1, 0, 2, 4
     ])
+    # SoftBodyRenderingServerHandler updates normals every frame. Supply
+    # an initial packed normal attribute to keep the vertex layout valid.
+    var normals := PackedVector3Array()
+    normals.resize(vertices.size())
+    for i in range(0, indices.size(), 3):
+        var a := indices[i]
+        var b := indices[i + 1]
+        var c := indices[i + 2]
+        var normal := (vertices[b] - vertices[a]).cross(vertices[c] - vertices[a])
+        normals[a] = normals[a] + normal
+        normals[b] = normals[b] + normal
+        normals[c] = normals[c] + normal
+    for i in range(normals.size()):
+        normals[i] = normals[i].normalized()
     var arrays := []
     arrays.resize(Mesh.ARRAY_MAX)
     arrays[Mesh.ARRAY_VERTEX] = vertices
+    arrays[Mesh.ARRAY_NORMAL] = normals
     arrays[Mesh.ARRAY_INDEX] = indices
     var mesh := ArrayMesh.new()
     mesh.add_surface_from_arrays(Mesh.PRIMITIVE_TRIANGLES, arrays)
