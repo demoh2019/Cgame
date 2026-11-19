@@ -40,4 +40,14 @@ struct Vector3 {
 	bool is_finite() const {
 		return Math::is_finite(x) && Math::is_finite(y) && Math::is_finite(z);
 	}
+	Vector3 operator+(const Vector3 &p) const { return Vector3(x+p.x,y+p.y,z+p.z); }
+	Vector3 operator-(const Vector3 &p) const { return Vector3(x-p.x,y-p.y,z-p.z); }
+	Vector3 operator-() const { return Vector3(-x,-y,-z); }
+	Vector3 operator*(real_t p_scale) const { return Vector3(x*p_scale,y*p_scale,z*p_scale); }
+	Vector3 operator/(real_t p_scale) const { return Vector3(x/p_scale,y/p_scale,z/p_scale); }
+	double dot(const Vector3 &p) const { return double(x)*p.x+double(y)*p.y+double(z)*p.z; }
+	Vector3 cross(const Vector3 &p) const {
+		return Vector3(y*p.z-z*p.y,z*p.x-x*p.z,x*p.y-y*p.x);
+	}
+	real_t length_squared() const { return x*x+y*y+z*z; }
 };
