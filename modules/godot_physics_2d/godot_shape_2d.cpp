@@ -605,6 +605,7 @@ void GodotConvexPolygonShape2D::set_data(const Variant &p_data) {
 	mass_variance_x = 0.0;
 	mass_variance_y = 0.0;
 	mass_covariance_xy = 0.0;
+	mass_area = 0.0;
 	valid_mass_properties = false;
 
 	if (p_data.get_type() == Variant::PACKED_VECTOR2_ARRAY) {
@@ -684,6 +685,7 @@ void GodotConvexPolygonShape2D::set_data(const Variant &p_data) {
 			mass_variance_x = MAX(real_t(0.0), real_t(vx));
 			mass_variance_y = MAX(real_t(0.0), real_t(vy));
 			mass_covariance_xy = real_t(cxy);
+			mass_area = real_t(0.5 * Math::abs(twice_area));
 			valid_mass_properties = true;
 		}
 	}

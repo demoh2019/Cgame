@@ -88,6 +88,8 @@ public:
 		return get_moment_of_inertia(p_mass, p_transform.get_scale());
 	}
 	virtual Vector2 get_center_of_mass() const { return Vector2(); }
+	// Geometric area, without broadphase AABB padding. Used for compound-body mass fractions.
+	virtual real_t get_mass_area() const { return get_aabb().get_area(); }
 	virtual void set_data(const Variant &p_data) = 0;
 	virtual Variant get_data() const = 0;
 
@@ -284,6 +286,7 @@ public:
 	virtual bool contains_point(const Vector2 &p_point) const override;
 	virtual bool intersect_segment(const Vector2 &p_begin, const Vector2 &p_end, Vector2 &r_point, Vector2 &r_normal) const override;
 	virtual real_t get_moment_of_inertia(real_t p_mass, const Size2 &p_scale) const override;
+	virtual real_t get_mass_area() const override { return real_t(Math_PI) * radius * radius; }
 
 	virtual void set_data(const Variant &p_data) override;
 	virtual Variant get_data() const override;
@@ -317,6 +320,7 @@ public:
 	virtual bool contains_point(const Vector2 &p_point) const override;
 	virtual bool intersect_segment(const Vector2 &p_begin, const Vector2 &p_end, Vector2 &r_point, Vector2 &r_normal) const override;
 	virtual real_t get_moment_of_inertia(real_t p_mass, const Size2 &p_scale) const override;
+	virtual real_t get_mass_area() const override { return real_t(4.0) * Math::abs(half_extents.x * half_extents.y); }
 
 	virtual void set_data(const Variant &p_data) override;
 	virtual Variant get_data() const override;
@@ -386,6 +390,9 @@ public:
 	virtual bool contains_point(const Vector2 &p_point) const override;
 	virtual bool intersect_segment(const Vector2 &p_begin, const Vector2 &p_end, Vector2 &r_point, Vector2 &r_normal) const override;
 	virtual real_t get_moment_of_inertia(real_t p_mass, const Size2 &p_scale) const override;
+	virtual real_t get_mass_area() const override {
+		return real_t(Math_PI) * radius * radius + real_t(2.0) * radius * MAX(height - real_t(2.0) * radius, real_t(0.0));
+	}
 
 	virtual void set_data(const Variant &p_data) override;
 	virtual Variant get_data() const override;
@@ -432,6 +439,7 @@ class GodotConvexPolygonShape2D : public GodotShape2D {
 	real_t mass_variance_x = 0.0;
 	real_t mass_variance_y = 0.0;
 	real_t mass_covariance_xy = 0.0;
+	real_t mass_area = 0.0;
 	bool valid_mass_properties = false;
 
 public:
@@ -455,6 +463,7 @@ public:
 	virtual real_t get_moment_of_inertia(real_t p_mass, const Size2 &p_scale) const override;
 	virtual real_t get_moment_of_inertia_transformed(real_t p_mass, const Transform2D &p_transform) const override;
 	virtual Vector2 get_center_of_mass() const override { return mass_centroid; }
+	virtual real_t get_mass_area() const override { return valid_mass_properties ? mass_area : get_aabb().get_area(); }
 
 	virtual void set_data(const Variant &p_data) override;
 	virtual Variant get_data() const override;

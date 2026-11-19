@@ -127,6 +127,39 @@ TEST_CASE("[GodotPhysics2D] Convex polygon inertia accounts for full affine cova
 	CHECK(Math::is_equal_approx(triangle.get_moment_of_inertia_transformed(real_t(9.0), shear), real_t(8.0)));
 	CHECK(Math::is_equal_approx(triangle.get_moment_of_inertia_transformed(real_t(9.0), reflection), real_t(16.0)));
 }
+ 
+TEST_CASE("[GodotPhysics2D] Physical shape areas ignore broadphase padding and affine shear") {
+	GodotCircleShape2D circle;
+	circle.set_data(real_t(1.0));
+	CHECK(Math::is_equal_approx(circle.get_mass_area(), real_t(Math_PI)));
+
+	GodotRectangleShape2D rectangle;
+	rectangle.set_data(Vector2(2.0, 1.0));
+	CHECK(Math::is_equal_approx(rectangle.get_mass_area(), real_t(8.0)));
+
+	GodotCapsuleShape2D capsule;
+	capsule.set_data(Vector2(1.0, 4.0));
+	CHECK(Math::is_equal_approx(capsule.get_mass_area(), real_t(Math_PI) + real_t(4.0)));
+
+	GodotConvexPolygonShape2D polygon;
+	PackedVector2Array corners;
+	corners.push_back(Vector2(0.0, 0.0));
+	corners.push_back(Vector2(2.0, 0.0));
+	corners.push_back(Vector2(0.0, 2.0));
+	polygon.set_data(corners);
+	CHECK(Math::is_equal_approx(polygon.get_mass_area(), real_t(2.0)));
+	const Transform2D shear(Vector2(1.0, 0.0), Vector2(2.0, 1.0), Vector2(100.0, -50.0));
+	CHECK(Math::is_equal_approx(polygon.get_mass_area() * Math::abs(shear.determinant()), real_t(2.0)));
+	const Transform2D stretch(Vector2(2.0, 0.0), Vector2(0.0, -3.0), Vector2());
+	CHECK(Math::is_equal_approx(polygon.get_mass_area() * Math::abs(stretch.determinant()), real_t(12.0)));
+
+	PackedVector2Array reversed;
+	reversed.push_back(corners[2]);
+	reversed.push_back(corners[1]);
+	reversed.push_back(corners[0]);
+	polygon.set_data(reversed);
+	CHECK(Math::is_equal_approx(polygon.get_mass_area(), real_t(2.0)));
+}
 
 } // namespace TestGodotPhysics2DPolygonMass
 

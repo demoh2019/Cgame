@@ -51,7 +51,8 @@ void GodotBody2D::update_mass_properties() {
 				if (is_shape_disabled(i)) {
 					continue;
 				}
-				total_area += get_shape_aabb(i).get_area();
+				const GodotShape2D *shape = get_shape(i);
+				total_area += shape->get_mass_area() * Math::abs(get_shape_transform(i).determinant());
 			}
 
 			if (calculate_center_of_mass) {
@@ -64,12 +65,11 @@ void GodotBody2D::update_mass_properties() {
 							continue;
 						}
 
-						real_t area = get_shape_aabb(i).get_area();
-
-						real_t mass_new = area * mass / total_area;
+						const GodotShape2D *shape = get_shape(i);
+						const real_t area = shape->get_mass_area() * Math::abs(get_shape_transform(i).determinant());
+						const real_t mass_new = area * mass / total_area;
 
 						// Use each shape's actual centroid when available (e.g. convex polygons).
-						const GodotShape2D *shape = get_shape(i);
 						center_of_mass_local += mass_new * get_shape_transform(i).xform(shape->get_center_of_mass());
 					}
 
@@ -87,7 +87,7 @@ void GodotBody2D::update_mass_properties() {
 
 					const GodotShape2D *shape = get_shape(i);
 
-					real_t area = get_shape_aabb(i).get_area();
+					const real_t area = shape->get_mass_area() * Math::abs(get_shape_transform(i).determinant());
 					if (area == 0.0) {
 						continue;
 					}
