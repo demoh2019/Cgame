@@ -1030,7 +1030,10 @@ func cmd_attack(peer_id: int, dir_x: float, dir_z: float) -> Dictionary:
 	player.action = {} # Fighting interrupts gathering.
 	player.yaw = atan2(direction.x, direction.y)
 	var origin := Vector2(player.position.x, player.position.z)
-	var damage := Combat.weapon_damage(weapon)
+	var damage: float = Combat.weapon_damage(weapon)
+	# Mastery is server-owned. Missing/ghost equipment grants no bonus.
+	if weapon != "" and player.inventory.count(weapon) > 0:
+		damage *= player.progression.combat_damage_multiplier(weapon)
 	var reach := Defs.MELEE_RANGE
 	if kind == "ranged":
 		var ammo: String = Defs.item(weapon).get("ammo", "")
@@ -1079,7 +1082,8 @@ func cmd_skill(peer_id: int, dir_x: float, dir_z: float) -> Dictionary:
 	events.append({"type": "attack", "peer": peer_id, "dir": direction, "ranged": false, "skill": skill["id"], "x": player.position.x, "z": player.position.z})
 	if hit.is_empty():
 		return {"ok": true, "hit": false, "energy": player.combat_energy}
-	_damage_target(player, hit, float(skill["damage"]))
+	var skilled_damage: float = float(skill["damage"]) * player.progression.combat_damage_multiplier(weapon)
+	_damage_target(player, hit, skilled_damage)
 	return {"ok": true, "hit": true, "target": hit["kind"], "energy": player.combat_energy}
 
 
@@ -1264,6 +1268,16 @@ func _damage_target(attacker: Player, hit: Dictionary, damage: float) -> void:
 		events.append({"type": "hit", "kind": "zombie", "id": zombie.id, "damage": damage, "x": zombie.position.x, "z": zombie.position.z})
 		if zombie.take_damage(damage):
 			attacker.kills += 1
+			# Award XP once, when a living infected is defeated with owned/equipped
+			# gear. Ordinary hits, missed shots and re-killing corpses award none.
+			var weapon: String = attacker.inventory.weapon
+			if weapon != "" and attacker.inventory.count(weapon) > 0:
+				var mastery_xp: int = attacker.progression.award_combat(
+					weapon, int(zombie.data.get("xp", 0)))
+				if mastery_xp > 0:
+					events.append({"type": "mastery", "peer": attacker.id,
+						"skill": Progression.combat_skill_for_weapon(weapon),
+						"xp": mastery_xp})
 			if Contracts.record_kill(attacker.contract_state):
 				attacker.dirty_character = true
 			_on_zombie_death(zombie)
@@ -1601,6 +1615,7 @@ func snapshot_for(peer_id: int) -> Dictionary:
 			"gathering_levels": player.progression.levels(), "crafting_level": player.progression.crafting_level(),
 			"crafting_xp": player.progression.crafting_xp,
 			"fishing_level": player.progression.gathering_level("fishing"),
+			"combat_levels": player.progression.combat_levels(),
 			"contract": player.contract_state.duplicate(true),
 			"carry_kg": player.inventory.total_weight(),
 			"cargo_factor": player.inventory.movement_factor(),
