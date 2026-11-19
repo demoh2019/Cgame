@@ -391,6 +391,11 @@ void GodotSoftBody3D::pin_vertex(int p_index) {
 	pinned_vertices.push_back(p_index);
 	if (!soft_mesh.is_null()) {
 		Node &node = nodes[node_index];
+		if (node.im > 0.0) {
+			// Multiple visual seam vertices may map to this same particle.
+			// Count the physical particle only on its first pin.
+			--dynamic_node_count;
+		}
 		node.im = 0.0;
 		node.v = Vector3();
 		node.bv = Vector3();
@@ -424,6 +429,10 @@ void GodotSoftBody3D::unpin_vertex(int p_index) {
 				}
 
 				Node &node = nodes[node_index];
+				if (node.im == 0.0) {
+					// This is the last visual pin for the physical node.
+					++dynamic_node_count;
+				}
 				node.im = nodes.size() * inv_total_mass;
 				link_constants_dirty = true;
 			}
@@ -442,6 +451,10 @@ void GodotSoftBody3D::unpin_all_vertices() {
 
 			ERR_CONTINUE(node_index >= nodes.size());
 			Node &node = nodes[node_index];
+			if (node.im == 0.0) {
+					// Repeated visual indices must not count a welded node twice.
+					++dynamic_node_count;
+			}
 			node.im = inv_node_mass;
 		}
 		link_constants_dirty = true;
@@ -500,18 +513,27 @@ void GodotSoftBody3D::apply_node_force(uint32_t p_node_index, const Vector3 &p_f
 }
 
 void GodotSoftBody3D::apply_central_impulse(const Vector3 &p_impulse) {
-	const Vector3 impulse = p_impulse / nodes.size();
+	if (dynamic_node_count == 0) {
+		return;
+	}
+	// Pinned particles cannot receive an impulse: divide by the dynamic
+	// particle count so the sum of delivered impulses is p_impulse.
+	const Vector3 impulse = p_impulse / real_t(dynamic_node_count);
 	for (Node &node : nodes) {
-		if (node.im > 0) {
+		if (node.im > 0.0) {
 			node.v += impulse * node.im;
 		}
 	}
 }
 
 void GodotSoftBody3D::apply_central_force(const Vector3 &p_force) {
-	const Vector3 force = p_force / nodes.size();
+	if (dynamic_node_count == 0) {
+		return;
+	}
+	// Apply the requested total force only to nodes that can accelerate.
+	const Vector3 force = p_force / real_t(dynamic_node_count);
 	for (Node &node : nodes) {
-		if (node.im > 0) {
+		if (node.im > 0.0) {
 			node.f += force;
 		}
 	}
@@ -600,6 +622,7 @@ bool GodotSoftBody3D::create_from_trimesh(const Vector<int> &p_indices, const Ve
 
 	// Create nodes from vertices.
 	nodes.resize(node_count);
+	dynamic_node_count = node_count;
 	real_t inv_node_mass = node_count * inv_total_mass;
 	Vector3 leaf_size = Vector3(collision_margin, collision_margin, collision_margin) * 2.0;
 	for (uint32_t i = 0; i < node_count; ++i) {
@@ -642,6 +665,9 @@ bool GodotSoftBody3D::create_from_trimesh(const Vector<int> &p_indices, const Ve
 
 		ERR_CONTINUE(node_index >= node_count);
 		Node &node = nodes[node_index];
+		if (node.im > 0.0) {
+			--dynamic_node_count;
+		}
 		node.im = 0.0;
 	}
 
@@ -1337,6 +1363,7 @@ void GodotSoftBody3D::deinitialize_shape() {
 
 void GodotSoftBody3D::destroy() {
 	link_constants_dirty = false;
+	dynamic_node_count = 0;
 	soft_mesh = RID();
 
 	map_visual_to_physics.clear();
