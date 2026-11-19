@@ -83,8 +83,11 @@ int GodotPhysicsDirectSpaceState3D::intersect_point(const PS3DT::PointParameters
 			return true;
 		}
 
-		const Transform3D inv_xform = (p_object->get_transform() * p_object->get_shape_transform(p_shape)).affine_inverse();
-		if (!p_object->get_shape(p_shape)->intersect_point(inv_xform.xform(data.params.position))) {
+		// Both inverses are cached and maintained when transforms change.
+		// Transforming the point in two steps avoids recomputing the affine
+		// inverse of the composed body and shape transforms per candidate.
+		const Vector3 local_point = p_object->get_shape_inv_transform(p_shape).xform(p_object->get_inv_transform().xform(data.params.position));
+		if (!p_object->get_shape(p_shape)->intersect_point(local_point)) {
 			return true;
 		}
 
