@@ -95,6 +95,11 @@ void WorldPartition3D::_poll_requests() {
 				ERR_PRINT(vformat("WorldPartition3D: loaded resource is not a PackedScene: %s.", path));
 			}
 		} else {
+			if (status == ResourceLoader::THREAD_LOAD_FAILED) {
+				// Even failed requests own a user token until their result is collected.
+				// Ignoring it would leak a ResourceLoader user-load token for this path.
+				ResourceLoader::load_threaded_get(path);
+			}
 			ERR_PRINT(vformat("WorldPartition3D: failed to load cell scene: %s.", path));
 		}
 		if (!ready_scenes.has(path)) {
@@ -515,6 +520,12 @@ void WorldPartition3D::_bind_methods() {
 }
 
 WorldPartition3D::~WorldPartition3D() {
+	// ResourceLoader user requests MUST be collected to release their load tokens.
+	// A currently running request may block until finished at node destruction.
+	for (const String &path : requested_paths) {
+		ResourceLoader::load_threaded_get(path);
+	}
+	requested_paths.clear();
 	// Child nodes belong to Node; drop references without touching queued deletions.
 	active_cells.clear();
 	pending_cells.clear();
