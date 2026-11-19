@@ -4283,35 +4283,34 @@ String String::dedent() const {
 	return new_string;
 }
 
-String String::strip_edges(bool p_left, bool p_right) const {
-	int len = length();
-	int beg = 0, end = len;
-
+Span<char32_t> String::strip_edges_span(Span<char32_t> p_span, bool p_left, bool p_right) {
+	if (p_span.is_empty()) {
+		return p_span;
+	}
+	uint64_t begin = 0;
+	uint64_t end = p_span.size();
 	if (p_left) {
-		for (int i = 0; i < len; i++) {
-			if (operator[](i) <= 32) {
-				beg++;
-			} else {
-				break;
-			}
+		while (begin < end && p_span[begin] <= 32) {
+			begin++;
 		}
 	}
-
 	if (p_right) {
-		for (int i = len - 1; i >= 0; i--) {
-			if (operator[](i) <= 32) {
-				end--;
-			} else {
-				break;
-			}
+		// Scan from the *exclusive* end to handle even a single whitespace
+		// character when only trailing whitespace is requested.
+		while (end > begin && p_span[end - 1] <= 32) {
+			end--;
 		}
 	}
+	return Span<char32_t>(p_span.ptr() + begin, end - begin);
+}
 
-	if (beg == 0 && end == len) {
+String String::strip_edges(bool p_left, bool p_right) const {
+	const Span<char32_t> original = span();
+	const Span<char32_t> trimmed = strip_edges_span(original, p_left, p_right);
+	if (trimmed.size() == original.size()) {
 		return *this;
 	}
-
-	return substr(beg, end - beg);
+	return substr(trimmed.ptr() - original.ptr(), trimmed.size());
 }
 
 String String::strip_escapes() const {
