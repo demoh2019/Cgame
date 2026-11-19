@@ -721,4 +721,46 @@ TEST_CASE("[FileAccess][Performance] Variant serialization uses small scratch an
 	ERR_PRINT_ON;
 }
 
+
+TEST_CASE("[FileAccess][Performance] Small UTF-8 loads avoid a transient heap buffer") {
+	Ref<FileAccessMemory> file;
+	file.instantiate();
+	const int sizes[] = { 0, 1, 31, 255, 511, 512, 513, 1024, 8192 };
+	for (int size : sizes) {
+		Vector<uint8_t> source;
+		REQUIRE(source.resize_uninitialized(size) == OK);
+		uint8_t *bytes = source.ptrw();
+		for (int i = 0; i < size; i++) {
+			bytes[i] = uint8_t('a' + (i % 26));
+		}
+		REQUIRE(file->open_custom(source.ptr(), source.size()) == OK);
+
+		String expected;
+		expected.resize(size);
+		for (int i = 0; i < size; i++) {
+			expected[i] = char32_t('a' + (i % 26));
+		}
+		CHECK(file->get_as_utf8_string() == expected);
+		CHECK(file->get_position() == uint64_t(size));
+
+		// Check repeated reads after an explicit rewind.
+		file->seek(0);
+		CHECK(file->get_as_utf8_string() == expected);
+		file->close();
+	}
+
+	const String unicode = String::utf8("Привет, 世界 🌍").repeat(128);
+	const CharString encoded = unicode.utf8();
+	REQUIRE(file->open_custom(reinterpret_cast<const uint8_t *>(encoded.get_data()), encoded.length()) == OK);
+	CHECK(file->get_as_utf8_string() == unicode);
+
+	// A read from a nonzero cursor must report the short read rather than
+	// decoding bytes not provided by the underlying file.
+	file->seek(1);
+	ERR_PRINT_OFF;
+	CHECK(file->get_as_utf8_string().is_empty());
+	ERR_PRINT_ON;
+	file->close();
+}
+
 } // namespace TestFileAccess

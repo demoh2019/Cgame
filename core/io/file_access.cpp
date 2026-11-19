@@ -592,18 +592,25 @@ Vector<uint8_t> FileAccess::get_buffer(int64_t p_length) const {
 }
 
 String FileAccess::get_as_utf8_string() const {
-	Vector<uint8_t> sourcef;
-	uint64_t len = get_length();
-	sourcef.resize(len + 1);
+	const uint64_t len = get_length();
+	// The Unicode decoder accepts a signed size; reject lengths it cannot
+	// represent before allocating or passing a truncated length.
+	ERR_FAIL_COND_V(len > INT32_MAX, String());
 
-	uint8_t *w = sourcef.ptrw();
-	uint64_t r = get_buffer(w, len);
-	ERR_FAIL_COND_V(r != len, String());
-	w[len] = 0;
+	// Reading a small text file should not allocate an extra heap buffer.
+	// append_utf8() receives an explicit length, so a trailing NUL is not needed.
+	uint8_t stack_buffer[512];
+	Vector<uint8_t> heap_buffer;
+	uint8_t *data = stack_buffer;
+	if (len > sizeof(stack_buffer)) {
+		ERR_FAIL_COND_V(heap_buffer.resize_uninitialized(len) != OK, String());
+		data = heap_buffer.ptrw();
+	}
 
-	String s;
-	s.append_utf8((const char *)w, len);
-	return s;
+	ERR_FAIL_COND_V(get_buffer(data, len) != len, String());
+	String result;
+	result.append_utf8(reinterpret_cast<const char *>(data), len);
+	return result;
 }
 
 bool FileAccess::store_8(uint8_t p_dest) {
