@@ -5,12 +5,22 @@
 ```sh
 python3 misc/scripts/scene_smoke.py /path/to/game --godot /path/to/godot --import-first
 python3 misc/scripts/scene_smoke.py /path/to/game --godot godot --format json --frames 3 --timeout 45 --exclude 'experiments/*'
+python3 misc/scripts/scene_smoke.py /path/to/game --godot godot --format junit > scene-smoke-results.xml
 python3 -m unittest discover -s misc/scripts/tests -p test_scene_smoke.py -v
 ```
 
-Output is sorted by scene path. Exit status: `0` all scenes passed (including an empty scene set), `1` a scene or optional import failed or timed out, `2` invalid arguments, unsafe project tree or missing Godot executable. JSON contains an `ok` boolean and `results` with per-scene `scene`, `status`, `exit_code` and an error log tail; when importing fails, `import` contains the failure and `results` is empty. Error detection examines the **complete captured process log** before truncating reported diagnostics to 6000 characters.
+Output is sorted by scene path. Exit status: `0` all scenes passed (including an empty scene set), `1` a scene or optional import failed or timed out, `2` invalid arguments, unsafe project tree or missing Godot executable. JSON contains an `ok` boolean and `results` with per-scene `scene`, `status`, `exit_code` and an error log tail; `--format junit` prints a JUnit-compatible `<testsuite>` containing one `<testcase>` per scene with `<failure>` children for errors/timeouts, and a dedicated `__import__` case if import fails (XML escaping and invalid control characters are handled); when importing fails, `import` contains the failure and `results` is empty. Error detection examines the **complete captured process log** before truncating reported diagnostics to 6000 characters.
 
 `--max-scenes` (1000 by default) caps test selection; `--timeout` applies to each Godot process (and separately to import), and `--frames` defaults to 2. Hidden generated directories including `.godot` are skipped; symlinked scene files or traversed directories are rejected to avoid unintentionally checking outside the target project. Scene paths are passed as separate subprocess arguments, never via a shell. Python 3.9+ and an installed Godot 4 **editor build** are required for optional `--import-first`.
+
+## Real Godot 4.7.2 integration checks
+
+The `.github/workflows/scene-smoke.yml` workflow has two types of jobs:
+
+- Python 3.9 and 3.13 regression tests for CLI behavior, including JUnit XML serialization.
+- A Linux real-engine job that downloads the **official Godot 4.7.2 editor**, verifies the fixed SHA-256 digest before execution, then checks a valid project with `--import-first` and a separate project whose GDScript cannot parse. CI asserts both the expected exit status and one matching scene result, including an engine parser error for the invalid project. The fixtures are in `misc/scripts/tests/fixtures/scene_smoke/`.
+
+These integration checks cover a single pinned Linux editor version, not Windows, macOS, .NET, renderer-specific functionality, or a custom-built Cgame editor. A queued or absent CI result is **not** evidence the checks passed.
 
 ## Scope and limitations
 
