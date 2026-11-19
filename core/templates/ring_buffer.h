@@ -68,23 +68,19 @@ public:
 	}
 
 	int read(T *p_buf, int p_size, bool p_advance = true) {
-		int left = data_left();
-		p_size = MIN(left, p_size);
+		p_size = MIN(data_left(), p_size);
 		if (p_size <= 0) {
 			return 0;
 		}
-		int pos = read_pos;
-		int to_read = p_size;
-		int dst = 0;
-		while (to_read) {
-			int end = pos + to_read;
-			end = MIN(end, size());
-			int total = end - pos;
-			copy_block(p_buf + dst, data.ptr() + pos, total);
-			dst += total;
-			to_read -= total;
-			pos = 0;
+
+		// A transfer no larger than the capacity spans at most two blocks.
+		const int first = MIN(p_size, size() - read_pos);
+		const T *source = data.ptr();
+		copy_block(p_buf, source + read_pos, first);
+		if (p_size > first) {
+			copy_block(p_buf + first, source, p_size - first);
 		}
+
 		if (p_advance) {
 			inc(read_pos, p_size);
 		}
@@ -92,29 +88,18 @@ public:
 	}
 
 	int copy(T *p_buf, int p_offset, int p_size) const {
-		int left = data_left();
-		if ((p_offset + p_size) > left) {
-			p_size = left - p_offset;
-			if (p_size <= 0) {
-				return 0;
-			}
-		}
-		p_size = MIN(left, p_size);
-		if (p_size <= 0) {
+		const int left = data_left();
+		if (p_offset < 0 || p_offset >= left || p_size <= 0) {
 			return 0;
 		}
-		int pos = read_pos;
-		inc(pos, p_offset);
-		int to_read = p_size;
-		int dst = 0;
-		while (to_read) {
-			int end = pos + to_read;
-			end = MIN(end, size());
-			int total = end - pos;
-			copy_block(p_buf + dst, data.ptr() + pos, total);
-			dst += total;
-			to_read -= total;
-			pos = 0;
+		// Avoid overflow on large offsets and lengths.
+		p_size = MIN(left - p_offset, p_size);
+		const int pos = (read_pos + p_offset) & size_mask;
+		const int first = MIN(p_size, size() - pos);
+		const T *source = data.ptr();
+		copy_block(p_buf, source + pos, first);
+		if (p_size > first) {
+			copy_block(p_buf + first, source, p_size - first);
 		}
 		return p_size;
 	}
@@ -139,8 +124,9 @@ public:
 					return p_max_size - to_read + int(found - begin);
 				}
 			} else {
+				const T *const begin = data.ptr() + pos;
 				for (int i = 0; i < total; i++) {
-					if (data[pos + i] == p_value) {
+					if (begin[i] == p_value) {
 						return i + (p_max_size - to_read);
 					}
 				}
@@ -170,24 +156,16 @@ public:
 	}
 
 	int write(const T *p_buf, int p_size) {
-		int left = space_left();
-		p_size = MIN(left, p_size);
+		p_size = MIN(space_left(), p_size);
 		if (p_size <= 0) {
 			return 0;
 		}
 
-		int pos = write_pos;
-		int to_write = p_size;
-		int src = 0;
-		while (to_write) {
-			int end = pos + to_write;
-			end = MIN(end, size());
-			int total = end - pos;
-
-			copy_block(data.ptr() + pos, p_buf + src, total);
-			src += total;
-			to_write -= total;
-			pos = 0;
+		const int first = MIN(p_size, size() - write_pos);
+		T *dest = data.ptr();
+		copy_block(dest + write_pos, p_buf, first);
+		if (p_size > first) {
+			copy_block(dest, p_buf + first, p_size - first);
 		}
 
 		inc(write_pos, p_size);
@@ -195,17 +173,11 @@ public:
 	}
 
 	inline int space_left() const {
-		int left = read_pos - write_pos;
-		if (left < 0) {
-			return size() + left - 1;
-		}
-		if (left == 0) {
-			return size() - 1;
-		}
-		return left - 1;
+		// Capacity is a power of two, so masking replaces wrap branches.
+		return (read_pos - write_pos - 1) & size_mask;
 	}
 	inline int data_left() const {
-		return size() - space_left() - 1;
+		return (write_pos - read_pos) & size_mask;
 	}
 
 	inline int size() const {
