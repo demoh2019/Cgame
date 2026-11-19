@@ -1,0 +1,62 @@
+name: AI Game Builder tests
+
+on:
+  pull_request:
+    paths:
+      - "misc/ai_game_builder/**"
+      - ".github/workflows/ai_game_builder.yml"
+  push:
+    branches: [master]
+    paths:
+      - "misc/ai_game_builder/**"
+      - ".github/workflows/ai_game_builder.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  validate-addon:
+    runs-on: ubuntu-22.04
+    timeout-minutes: 12
+    steps:
+      - name: Checkout only the addon test project
+        uses: actions/checkout@v4
+        with:
+          sparse-checkout: |
+            misc/ai_game_builder
+
+      - name: Fetch and verify Godot 4.5.1 editor
+        shell: bash
+        run: |
+          set -euo pipefail
+          curl --fail --location --retry 3 --retry-delay 2 \
+            "https://github.com/godotengine/godot/releases/download/4.5.1-stable/Godot_v4.5.1-stable_linux.x86_64.zip" \
+            --output "$RUNNER_TEMP/godot.zip"
+          echo "02ec53d1cc7dbb9cc6355393c61b9ab43d1244751a124f10248a4802830788cd  $RUNNER_TEMP/godot.zip" | sha256sum --check
+          unzip -q "$RUNNER_TEMP/godot.zip" -d "$RUNNER_TEMP/godot-extract"
+          mv "$RUNNER_TEMP/godot-extract/Godot_v4.5.1-stable_linux.x86_64" "$RUNNER_TEMP/godot"
+          chmod +x "$RUNNER_TEMP/godot"
+          "$RUNNER_TEMP/godot" --version
+
+      - name: Parse addon and test scripts without execution
+        shell: bash
+        run: |
+          set -euo pipefail
+          for file in \
+            addons/ai_game_builder/plugin.gd \
+            addons/ai_game_builder/plan.gd \
+            addons/ai_game_builder/validator.gd \
+            addons/ai_game_builder/dock.gd \
+            tests/run_tests.gd; do
+            echo "Checking $file"
+            "$RUNNER_TEMP/godot" --headless --path misc/ai_game_builder \
+              --check-only --script "res://$file"
+          done
+
+      - name: Run headless test suite
+        shell: bash
+        run: |
+          set -euo pipefail
+          "$RUNNER_TEMP/godot" --headless --path misc/ai_game_builder \
+            --script res://tests/run_tests.gd
