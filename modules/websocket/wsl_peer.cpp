@@ -594,6 +594,7 @@ void WSLPeer::_wsl_recv_start_callback(wslay_event_context_ptr ctx, const struct
 		PendingMessage &pm = peer->pending_message;
 		pm.opcode = op;
 	}
+	peer->current_frame_is_data = op == WSLAY_TEXT_FRAME || op == WSLAY_BINARY_FRAME || op == WSLAY_CONTINUATION_FRAME;
 }
 
 void WSLPeer::_wsl_frame_recv_chunk_callback(wslay_event_context_ptr ctx, const struct wslay_event_on_frame_recv_chunk_arg *arg, void *user_data) {
