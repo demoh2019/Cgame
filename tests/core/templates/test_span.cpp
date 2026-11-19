@@ -135,6 +135,99 @@ TEST_CASE("[Span] Sequence search supports mixed and nontrivial types") {
 	CHECK(word_span.rfind_sequence(pair_span) == 2);
 }
 
+TEST_CASE("[Span] Reverse sequence word scan handles sparse and dense byte candidates") {
+	uint8_t data[513];
+	for (uint8_t &byte : data) {
+		byte = 0x31;
+	}
+	const uint8_t pattern[] = { 0x31, 0x40, 0x50 };
+	for (int start : { 63, 255, 509 }) {
+		data[start] = pattern[0];
+		data[start + 1] = pattern[1];
+		data[start + 2] = pattern[2];
+	}
+	const Span<uint8_t> hay(data);
+	const Span<uint8_t> needle(pattern);
+
+	CHECK_EQ(hay.rfind_sequence(needle), 509);
+	CHECK_EQ(hay.rfind_sequence(needle, 508), 255);
+	CHECK_EQ(hay.rfind_sequence(needle, 254), 63);
+	CHECK_EQ(hay.rfind_sequence(needle, 62), -1);
+
+	const Span<uint8_t> unaligned(data + 1, 512);
+	CHECK_EQ(unaligned.rfind_sequence(needle), 508);
+	CHECK_EQ(unaligned.rfind_sequence(needle, 253), 62);
+
+	const uint8_t none[] = { 0x31, 0x71 };
+	CHECK_EQ(hay.rfind_sequence(Span<uint8_t>(none)), -1);
+
+	const uint8_t dense[17] = { 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1 };
+	const uint8_t same_endpoints[] = { 1, 2, 1 };
+	const uint8_t different_endpoints[] = { 1, 2 };
+	CHECK_EQ(Span<uint8_t>(dense).rfind_sequence(Span<uint8_t>(same_endpoints)), -1);
+	CHECK_EQ(Span<uint8_t>(dense).rfind_sequence(Span<uint8_t>(different_endpoints)), -1);
+	const uint8_t single[] = { 1 };
+	CHECK_EQ(Span<uint8_t>(dense).rfind_sequence(Span<uint8_t>(single)), 16);
+
+	const int8_t signed_data[] = { -128, -7, 2, -128, -7, 2, 100 };
+	const int8_t signed_pattern[] = { -128, -7, 2 };
+	CHECK_EQ(Span<int8_t>(signed_data).rfind_sequence(Span<int8_t>(signed_pattern)), 3);
+	CHECK_EQ(Span<int8_t>(signed_data).rfind_sequence(Span<int8_t>(signed_pattern), 2), 0);
+}
+
+TEST_CASE("[Span] Reverse sequence randomized differential regression") {
+	uint8_t data[160];
+	uint8_t pattern[7];
+	uint32_t state = 0x12345678U;
+	for (int round = 0; round < 120; round++) {
+		for (uint8_t &byte : data) {
+			state = 1664525U * state + 1013904223U;
+			byte = uint8_t(state >> 24);
+		}
+		for (uint8_t &byte : pattern) {
+			state = 1664525U * state + 1013904223U;
+			byte = uint8_t(state >> 24);
+		}
+		const Span<uint8_t> hay(data);
+		for (int len = 1; len <= 7; len++) {
+			const Span<uint8_t> needle(pattern, len);
+			for (int attempt = 0; attempt < 5; attempt++) {
+				state = 1664525U * state + 1013904223U;
+				const uint64_t from = state % (161 - len);
+				int64_t expected = -1;
+				for (int64_t i = int64_t(from); i >= 0; i--) {
+					bool equal = true;
+					for (int j = 0; j < len; j++) {
+						if (data[i + j] != pattern[j]) {
+							equal = false;
+							break;
+						}
+					}
+					if (equal) {
+						expected = i;
+						break;
+					}
+				}
+				CHECK_EQ(hay.rfind_sequence(needle, from), expected);
+			}
+		}
+	}
+}
+
+TEST_CASE("[Span] Reverse sequence retains empty constexpr and nonempty runtime semantics") {
+	static constexpr uint8_t data[] = { 1, 2, 3, 1, 2, 3, 4 };
+	static constexpr uint8_t pattern[] = { 1, 2, 3 };
+	static constexpr Span<uint8_t> hay(data);
+	static constexpr Span<uint8_t> needle(pattern);
+	static constexpr Span<uint8_t> empty;
+	// Nonempty matching calls are_spans_equal(), which is not constexpr.
+	static_assert(hay.rfind_sequence(empty) == hay.size());
+	static_assert(hay.rfind_sequence(empty, 0) == 0);
+	CHECK_EQ(hay.rfind_sequence(needle), 3);
+	CHECK_EQ(hay.rfind_sequence(needle, 2), 0);
+	CHECK_EQ(hay.rfind_sequence(needle, 0), 0);
+}
+
 TEST_CASE("[Span] Float sequence searches preserve bitwise comparison semantics") {
 	const float nan = std::numeric_limits<float>::quiet_NaN();
 	const float values[] = { -0.0f, nan, 1.0f, -0.0f, nan };
