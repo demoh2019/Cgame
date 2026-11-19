@@ -171,6 +171,7 @@ int main() {
         self.assertIn("alloc_create_info.requiredFlags |= VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT;", block)
         cpp = r'''
 #include <cassert>
+#include <initializer_list>
 struct Usage { bool persistent; bool has_flag(int) const { return persistent; } };
 constexpr int BUFFER_USAGE_DYNAMIC_PERSISTENT_BIT = 1;
 constexpr int VMA_ALLOCATION_CREATE_HOST_ACCESS_SEQUENTIAL_WRITE_BIT = 2;
