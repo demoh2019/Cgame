@@ -15,10 +15,12 @@ Open `demo/survival_mmo/project.godot` in a compatible Cgame editor:
 ```sh
 godot --path demo/survival_mmo
 godot --headless --path demo/survival_mmo --script res://smoke_test.gd
+godot --headless --path demo/survival_mmo --script res://encumbrance_test.gd
 ```
 
-The headless script covers combat, skill advancement, resource collection,
-crafting, upgrade prerequisites, barricade collision validation and refunds.
+The headless scripts cover combat, skill advancement, resource collection,
+weight capacity and movement penalties, crafting, upgrade prerequisites,
+barricade collision validation and refunds.
 A successful test run has not yet been verified on a Cgame executable.
 
 ## Gameplay
@@ -27,6 +29,15 @@ A successful test run has not yet been verified on a Cgame executable.
 - Logging, mining and foraging gain **5 XP per resource interaction**. Every
   20 XP increases the associated skill level (max 10). From level 3 onward,
   one collection action gives two items, consuming one resource-node charge.
+- All gathered resources have weight: wood 2 kg, stone 3 kg, fiber 0.5 kg,
+  herbs 0.25 kg and scrap 1.5 kg. Equipped weapons add 2.5 kg (spear) or
+  3.5 kg (reinforced spear).
+- Carrying over 25 kg disables sprint and slows walking progressively to
+  50% at the hard 50 kg limit. Gathering cannot exceed the hard limit:
+  rejected pickups do not consume node charges or grant profession XP.
+  A near-full pack can accept part of a level-3 two-item gathering reward.
+  In this prototype, scrap from kills is not retained if the pack is full;
+  world loot containers are a follow-up feature.
 - **Space** attacks the nearest infected. Combat XP: 3 per nonlethal hit, 20
   per kill. Combat level adds +2 melee damage per level. Infected drop scrap.
 - **Q** crafts a starter spear for 2 wood and 1 stone (base damage 26).
@@ -58,7 +69,8 @@ Cgame/Godot gameplay primitives.
 ## Next milestones
 
 1. Save/load for local prototypes; transition to server-side persistence.
-2. Data-driven equipment inventory (durability, slots, tiers, weight).
+2. Data-driven equipment inventory (durability, slots, tiers, container and
+   drop-on-ground loot with persistence).
 3. Building previews, terrain checks, destruction and structural durability.
 4. Authoritative multiplayer protocol, persistence, interest management.
 5. PvP zones, guild structures, player economy and server load tests.

@@ -19,6 +19,14 @@ const LEVEL_XP_STEP := 20
 const MAX_SKILL_LEVEL := 10
 const MAX_HEALTH := 100.0
 const MAX_HUNGER := 100.0
+## Weight is gameplay state, not CharacterBody physics mass. Units: kilograms.
+const ITEM_WEIGHTS := {
+    "wood": 2.0, "stone": 3.0, "fiber": 0.5, "herb": 0.25, "scrap": 1.5,
+}
+const WEAPON_WEIGHTS := {"hands": 0.0, "spear": 2.5, "reinforced_spear": 3.5}
+const COMFORT_LOAD_KG := 25.0
+const MAX_LOAD_KG := 50.0
+const MIN_MOVE_FACTOR := 0.5
 
 var items: Dictionary = {"wood": 0, "stone": 0, "fiber": 0, "herb": 0, "scrap": 0}
 var experience: Dictionary = {
@@ -29,11 +37,49 @@ var hunger := MAX_HUNGER
 var equipped_weapon := "hands"
 
 
-func add_item(kind: String, amount: int = 1) -> void:
+func get_carry_weight() -> float:
+    var weight := float(WEAPON_WEIGHTS.get(equipped_weapon, 0.0))
+    for kind in ITEM_WEIGHTS:
+        weight += float(int(items.get(kind, 0))) * float(ITEM_WEIGHTS[kind])
+    return weight
+
+
+func get_free_weight() -> float:
+    return maxf(0.0, MAX_LOAD_KG - get_carry_weight())
+
+
+func item_capacity(kind: String) -> int:
+    if not items.has(kind) or not ITEM_WEIGHTS.has(kind):
+        return 0
+    # All resource weights are strictly positive; use an epsilon for float boundaries.
+    return maxi(0, floori((get_free_weight() + 0.0001) / float(ITEM_WEIGHTS[kind])))
+
+
+func add_item(kind: String, amount: int = 1) -> int:
+    ## Returns accepted count, allowing world pickup logic to avoid losing loot.
     if amount <= 0 or not items.has(kind):
-        return
-    items[kind] = int(items[kind]) + amount
+        return 0
+    var accepted := mini(amount, item_capacity(kind))
+    if accepted == 0:
+        return 0
+    items[kind] = int(items[kind]) + accepted
     changed.emit()
+    return accepted
+
+
+func is_encumbered() -> bool:
+    return get_carry_weight() > COMFORT_LOAD_KG + 0.0001
+
+
+func can_sprint() -> bool:
+    return not is_encumbered()
+
+
+func move_speed_factor() -> float:
+    if not is_encumbered():
+        return 1.0
+    var load_fraction := (get_carry_weight() - COMFORT_LOAD_KG) / (MAX_LOAD_KG - COMFORT_LOAD_KG)
+    return lerpf(1.0, MIN_MOVE_FACTOR, clampf(load_fraction, 0.0, 1.0))
 
 
 func get_level(skill: String) -> int:
@@ -54,10 +100,11 @@ func collect_resource(kind: String) -> int:
         return 0
     var skill: String = RESOURCE_SKILLS[kind]
     # Experienced gatherers extract more from each node charge.
-    var amount := 2 if get_level(skill) >= 3 else 1
-    add_item(kind, amount)
-    award_experience(skill, 5)
-    return amount
+    var requested := 2 if get_level(skill) >= 3 else 1
+    var accepted: int = add_item(kind, requested)
+    if accepted > 0:
+        award_experience(skill, 5)
+    return accepted
 
 
 func has_cost(recipe: String) -> bool:

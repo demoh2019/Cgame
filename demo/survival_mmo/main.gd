@@ -34,6 +34,8 @@ func _ready() -> void:
 
 func _process(delta: float) -> void:
     state.tick(delta)
+    player.cargo_speed_factor = state.move_speed_factor()
+    player.sprint_available = state.can_sprint()
     if state.health <= 0.0:
         player.active = false
         status_message = "You died. Press R to restart."
@@ -184,6 +186,10 @@ func _update_hud() -> void:
     hud.text += "HP: %d/100 | Hunger: %d/100 | Weapon: %s\n" % [int(state.health), int(state.hunger), weapon]
     hud.text += "Wood: %d | Stone: %d | Fiber: %d | Herb: %d | Scrap: %d\n" % [
         state.items["wood"], state.items["stone"], state.items["fiber"], state.items["herb"], state.items["scrap"]]
+    hud.text += "Load: %.1f / %.1f kg | %s | Speed: %.0f%%\n" % [
+        state.get_carry_weight(), StateScript.MAX_LOAD_KG,
+        "OVERLOADED: no sprint" if state.is_encumbered() else "Normal load",
+        state.move_speed_factor() * 100.0]
     hud.text += "Logging %d | Mining %d | Foraging %d | Combat %d | Crafting %d\n" % [
         state.get_level("logging"), state.get_level("mining"), state.get_level("foraging"),
         state.get_level("combat"), state.get_level("crafting")]
@@ -214,6 +220,9 @@ func _harvest() -> void:
         return
     var kind := str(nearest.get_meta("kind"))
     var amount: int = state.collect_resource(kind)
+    if amount <= 0:
+        status_message = "Backpack full: cannot collect %s. Craft items to free space." % kind
+        return
     var remaining := int(nearest.get_meta("remaining")) - 1
     nearest.set_meta("remaining", remaining)
     if remaining <= 0:
@@ -242,8 +251,11 @@ func _attack() -> void:
     var killed: bool = nearest.take_damage(damage)
     state.report_attack(killed)
     if killed:
-        state.add_item("scrap")
-        status_message = "Infected defeated! +1 scrap, combat XP +20."
+        var accepted_scrap: int = state.add_item("scrap")
+        if accepted_scrap > 0:
+            status_message = "Infected defeated! +1 scrap, combat XP +20."
+        else:
+            status_message = "Infected defeated! Scrap left behind: backpack full."
     else:
         status_message = "Hit infected for %d damage, combat XP +3." % int(damage)
 
