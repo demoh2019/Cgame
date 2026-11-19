@@ -151,6 +151,9 @@ private:
 	real_t soft_body_tetra_fiber_compliance = 0.0; // 0: no FEM directional reinforcement.
 	Vector3 soft_body_tetra_fiber_axis = Vector3(1, 0, 0); // Undeformed material direction.
 	real_t soft_body_tetra_fem_viscosity = 0.0; // Objective Kelvin-Voigt material damping.
+	real_t soft_body_tetra_damage_yield_strain = 0.15;
+	real_t soft_body_tetra_damage_rate = 0.0;
+	real_t soft_body_tetra_damage_max = 0.8;
 	real_t soft_body_xpbd_shear_compliance = 0.0; // Opt-in angular shear preservation.
 	real_t soft_body_xpbd_dihedral_compliance = 0.0; // Opt-in angle-based cloth bending.
 	real_t soft_body_shape_matching_stiffness = 0.0; // Optional global shape recovery.
@@ -307,6 +310,9 @@ public:
 	_FORCE_INLINE_ real_t get_soft_body_tetra_fiber_compliance() const { return soft_body_tetra_fiber_compliance; }
 	_FORCE_INLINE_ const Vector3 &get_soft_body_tetra_fiber_axis() const { return soft_body_tetra_fiber_axis; }
 	_FORCE_INLINE_ real_t get_soft_body_tetra_fem_viscosity() const { return soft_body_tetra_fem_viscosity; }
+	_FORCE_INLINE_ real_t get_soft_body_tetra_damage_yield_strain() const { return soft_body_tetra_damage_yield_strain; }
+	_FORCE_INLINE_ real_t get_soft_body_tetra_damage_rate() const { return soft_body_tetra_damage_rate; }
+	_FORCE_INLINE_ real_t get_soft_body_tetra_damage_max() const { return soft_body_tetra_damage_max; }
 	_FORCE_INLINE_ real_t get_soft_body_membrane_damping_rate() const { return soft_body_membrane_damping_rate; }
 	_FORCE_INLINE_ real_t get_soft_body_xpbd_shear_compliance() const { return soft_body_xpbd_shear_compliance; }
 	_FORCE_INLINE_ real_t get_soft_body_xpbd_dihedral_compliance() const { return soft_body_xpbd_dihedral_compliance; }
