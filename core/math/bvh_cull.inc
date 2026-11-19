@@ -132,17 +132,42 @@ void cast_segment(const POINT &p_from, const POINT &p_to, SegmentCastCallback p_
 		return;
 	}
 
-	real_t max_fraction = 1.0;
+	// Visit the tree whose bounds are nearest to the ray origin first.
+	// A near hit can clip away the other tree before any narrowphase work.
+	const POINT motion = p_to - p_from;
+	typename BVHABB_CLASS::Segment segment;
+	segment.from = p_from;
+	segment.to = p_to;
+	uint32_t roots[NUM_TREES];
+	real_t entry_fractions[NUM_TREES];
+	int root_count = 0;
 	uint32_t tree_test_mask = 0;
 	for (int n = 0; n < NUM_TREES; n++) {
 		tree_test_mask <<= 1;
 		if (!tree_test_mask) {
 			tree_test_mask = 1;
 		}
-		if (_root_node_id[n] == BVHCommon::INVALID || !(p_tree_collision_mask & tree_test_mask)) {
+		const uint32_t root_id = _root_node_id[n];
+		if (root_id == BVHCommon::INVALID || !(p_tree_collision_mask & tree_test_mask) || !_nodes[root_id].aabb.intersects_segment(segment)) {
 			continue;
 		}
-		_cast_segment_iterative(_root_node_id[n], p_from, p_to, p_callback, p_userdata, p_tester, max_fraction);
+		const real_t entry_fraction = _segment_entry_fraction(_nodes[root_id].aabb, p_from, motion);
+		// NUM_TREES is tiny (two for physics), so insertion sort is cheaper
+		// than allocating a priority queue for a single ray cast.
+		int insertion = root_count;
+		while (insertion > 0 && entry_fractions[insertion - 1] > entry_fraction) {
+			roots[insertion] = roots[insertion - 1];
+			entry_fractions[insertion] = entry_fractions[insertion - 1];
+			insertion--;
+		}
+		roots[insertion] = root_id;
+		entry_fractions[insertion] = entry_fraction;
+		root_count++;
+	}
+
+	real_t max_fraction = 1.0;
+	for (int n = 0; n < root_count; n++) {
+		_cast_segment_iterative(roots[n], p_from, p_to, p_callback, p_userdata, p_tester, max_fraction);
 		if (max_fraction <= 0.0) {
 			return;
 		}
@@ -240,6 +265,37 @@ void _cull_hit(uint32_t p_ref_id, CullParams &r_params) {
 	_cull_hits.push_back(p_ref_id);
 }
 
+// Broadphase ordering hint, not an intersection test: true hit/miss still
+// uses BVH_ABB::intersects_segment(). This keeps edge/grazing semantics
+// unchanged while allowing near-first traversal without a heap.
+real_t _segment_entry_fraction(const BVHABB_CLASS &p_bounds, const POINT &p_from, const POINT &p_motion) const {
+	real_t entry = 0.0;
+	real_t exit = 1.0;
+	for (int axis = 0; axis < POINT::AXIS_COUNT; axis++) {
+		const real_t origin = p_from[axis];
+		const real_t direction = p_motion[axis];
+		const real_t lower = p_bounds.min[axis];
+		const real_t upper = -p_bounds.neg_max[axis];
+		if (direction == 0.0) {
+			if (origin < lower || origin > upper) {
+				return Math::INF;
+			}
+			continue;
+		}
+		real_t t0 = (lower - origin) / direction;
+		real_t t1 = (upper - origin) / direction;
+		if (t0 > t1) {
+			SWAP(t0, t1);
+		}
+		entry = MAX(entry, t0);
+		exit = MIN(exit, t1);
+		if (entry > exit) {
+			return Math::INF;
+		}
+	}
+	return entry;
+}
+
 void _cast_segment_iterative(uint32_t p_node_id, const POINT &p_from, const POINT &p_to, SegmentCastCallback p_callback, void *p_userdata, const T *p_tester, real_t &r_max_fraction) {
 	struct StackItem {
 		uint32_t node_id;
@@ -279,7 +335,33 @@ void _cast_segment_iterative(uint32_t p_node_id, const POINT &p_from, const POIN
 					segment.to = p_from + motion * r_max_fraction;
 				}
 			}
+		} else if (node.num_children == 2) {
+			// The stack is LIFO: push the farther intersecting child first,
+			// so the nearer child can shorten the ray before it is visited.
+			const uint32_t child_a = node.children[0];
+			const uint32_t child_b = node.children[1];
+			const BVHABB_CLASS &bounds_a = _nodes[child_a].aabb;
+			const BVHABB_CLASS &bounds_b = _nodes[child_b].aabb;
+			const bool hit_a = bounds_a.intersects_segment(segment);
+			const bool hit_b = bounds_b.intersects_segment(segment);
+			if (hit_a && hit_b) {
+				const real_t entry_a = _segment_entry_fraction(bounds_a, p_from, motion);
+				const real_t entry_b = _segment_entry_fraction(bounds_b, p_from, motion);
+				if (entry_a <= entry_b) {
+					stack.request()->node_id = child_b;
+					stack.request()->node_id = child_a;
+				} else {
+					stack.request()->node_id = child_a;
+					stack.request()->node_id = child_b;
+				}
+			} else if (hit_a) {
+				stack.request()->node_id = child_a;
+			} else if (hit_b) {
+				stack.request()->node_id = child_b;
+			}
 		} else {
+			// The current BVH has binary nodes; preserve the generic
+			// fallback for other MAX_CHILDREN configurations.
 			for (int i = 0; i < node.num_children; i++) {
 				const uint32_t child_id = node.children[i];
 				if (_nodes[child_id].aabb.intersects_segment(segment)) {
