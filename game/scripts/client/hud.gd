@@ -410,6 +410,10 @@ func _on_event(event: Dictionary) -> void:
 				say("Evaded an infected attack!")
 		"siege_started":
 			say("Night siege! %d infected are attacking a T%d barricade." % [int(event.get("count", 0)), int(event.get("tier", 1))])
+		"scavenging":
+			if event.get("peer", -1) == client.peer_id:
+				say("+%d scavenging XP (rank %d)" % [
+					int(event.get("xp", 0)), int(event.get("level", 1))])
 		"crate":
 			say("You search the crate...")
 		"trade":
@@ -547,12 +551,13 @@ func _process(_delta: float) -> void:
 	var weapon: String = client.you.get("weapon", "")
 	var levels: Dictionary = client.you.get("gathering_levels", {})
 	var weapon_levels: Dictionary = client.you.get("combat_levels", {})
-	_equipped.text = "Weapon: %s | Craft L%d (%d XP)\nWood L%d | Stone L%d | Ore L%d | Fiber L%d | Fishing L%d\nMastery: Melee L%d | Ranged L%d" % [
+	_equipped.text = "Weapon: %s | Craft L%d (%d XP)\nWood L%d | Stone L%d | Ore L%d | Fiber L%d | Fishing L%d | Scavenging L%d (%d XP)\nMastery: Melee L%d | Ranged L%d" % [
 		(Defs.item(weapon).get("name", weapon) if weapon != "" else "fists"),
 		int(client.you.get("crafting_level", 1)), int(client.you.get("crafting_xp", 0)),
 		int(levels.get("wood", 1)), int(levels.get("stone", 1)),
 		int(levels.get("ore", 1)), int(levels.get("fiber", 1)),
 		int(levels.get("fishing", 1)),
+		int(client.you.get("scavenging_level", 1)), int(client.you.get("scavenging_xp", 0)),
 		int(weapon_levels.get("melee", 1)), int(weapon_levels.get("ranged", 1))
 	]
 	_death.visible = not bool(client.you.get("alive", true))
