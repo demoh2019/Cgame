@@ -630,12 +630,25 @@ void GodotBody3D::integrate_forces(real_t p_step, bool p_defer_motion) {
 
 	if (mode == PS3DE::BODY_MODE_KINEMATIC) {
 		//compute motion, angular and etc. velocities from prev transform
-		motion = new_transform.origin - get_transform().origin;
+		// With sub-stepping the platform glides toward the transform set by the user over the
+		// substeps, so its velocity stays constant for the whole tick instead of jumping at once.
+		kinematic_target = new_transform;
+		const int substeps = get_space()->get_substeps();
+		if (substeps > 1) {
+			if (get_space()->is_first_substep()) {
+				kinematic_start = get_transform();
+			}
+			if (!get_space()->is_final_substep()) {
+				const real_t t = real_t(get_space()->get_substep_index() + 1) / real_t(substeps);
+				kinematic_target = kinematic_start.interpolate_with(new_transform, t);
+			}
+		}
+		motion = kinematic_target.origin - get_transform().origin;
 		do_motion = is_continuous_collision_detection_enabled();
 		linear_velocity = constant_linear_velocity + motion / p_step;
 
 		//compute a FAKE angular velocity, not so easy
-		Basis rot = new_transform.basis.orthonormalized() * get_transform().basis.orthonormalized().transposed();
+		Basis rot = kinematic_target.basis.orthonormalized() * get_transform().basis.orthonormalized().transposed();
 		Vector3 axis;
 		real_t angle;
 
@@ -839,8 +852,12 @@ void GodotBody3D::integrate_forces(real_t p_step, bool p_defer_motion) {
 		}
 	}
 
-	applied_force = Vector3();
-	applied_torque = Vector3();
+	// With sub-stepping the force applied by the user covers the whole tick, so it is only
+	// consumed on the last substep.
+	if (get_space()->is_final_substep()) {
+		applied_force = Vector3();
+		applied_torque = Vector3();
+	}
 
 	biased_angular_velocity = Vector3();
 	biased_linear_velocity = Vector3();
@@ -854,7 +871,10 @@ void GodotBody3D::integrate_forces(real_t p_step, bool p_defer_motion) {
 		}
 	}
 
-	contact_count = 0;
+	// Contact reports accumulate over all substeps of a tick, so a short impact is not lost.
+	if (get_space()->is_first_substep()) {
+		contact_count = 0;
+	}
 }
 
 void GodotBody3D::integrate_velocities(real_t p_step) {
@@ -874,6 +894,7 @@ void GodotBody3D::integrate_velocities(real_t p_step) {
 			linear_velocity[i] = 0;
 			biased_linear_velocity[i] = 0;
 			new_transform.origin[i] = get_transform().origin[i];
+			kinematic_target.origin[i] = get_transform().origin[i];
 		}
 	}
 	//apply axis lock angular
@@ -885,8 +906,8 @@ void GodotBody3D::integrate_velocities(real_t p_step) {
 	}
 
 	if (mode == PS3DE::BODY_MODE_KINEMATIC) {
-		_set_transform(new_transform, !is_continuous_collision_detection_enabled());
-		_set_inv_transform(new_transform.affine_inverse());
+		_set_transform(kinematic_target, !is_continuous_collision_detection_enabled());
+		_set_inv_transform(kinematic_target.affine_inverse());
 		if (contacts.is_empty() && linear_velocity == Vector3() && angular_velocity == Vector3()) {
 			set_active(false); //stopped moving, deactivate
 		}

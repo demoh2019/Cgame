@@ -1851,7 +1851,14 @@ void GodotPhysicsServer3D::step(real_t p_step) {
 	active_objects = 0;
 	collision_pairs = 0;
 	for (GodotSpace3D *E : active_spaces) {
-		stepper->step(E, p_step);
+		// Sub-stepping: simulate the tick as N shorter steps. Contacts and warm-start impulses persist
+		// across them; forces and contact reports are consumed once per tick (see GodotBody3D).
+		const int substeps = E->get_substeps();
+		for (int substep = 0; substep < substeps; ++substep) {
+			E->begin_substep(substep, p_step);
+			stepper->step(E, p_step / real_t(substeps));
+		}
+		E->begin_substep(0, p_step);
 		island_count += E->get_island_count();
 		active_objects += E->get_active_objects();
 		collision_pairs += E->get_collision_pairs();

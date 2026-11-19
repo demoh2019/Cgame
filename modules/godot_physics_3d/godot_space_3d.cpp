@@ -1279,6 +1279,7 @@ GodotSpace3D::GodotSpace3D() {
 	solver_iterations = GLOBAL_GET("physics/3d/solver/solver_iterations");
 	block_solver_enabled = GLOBAL_GET("physics/3d/solver/block_solver_enabled");
 	parallel_large_islands = GLOBAL_GET("physics/3d/solver/parallel_large_islands");
+	substeps = CLAMP(int(GLOBAL_GET("physics/3d/solver/substeps")), 1, 16);
 	manifold_spread_reduction = GLOBAL_GET("physics/3d/solver/manifold_spread_reduction");
 	contact_recycle_radius = GLOBAL_GET("physics/3d/solver/contact_recycle_radius");
 	contact_max_separation = GLOBAL_GET("physics/3d/solver/contact_max_separation");

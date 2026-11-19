@@ -583,6 +583,7 @@ PhysicsServer3D::PhysicsServer3D() {
 	// Parallelize independent constraints inside a single large rigid-body island.
 	// Off by default because color-by-color iteration changes the solver order.
 	GLOBAL_DEF(PropertyInfo(Variant::BOOL, "physics/3d/solver/parallel_large_islands"), false);
+	GLOBAL_DEF(PropertyInfo(Variant::INT, "physics/3d/solver/substeps", PROPERTY_HINT_RANGE, "1,16,1"), 1);
 	// Jolt-style contact patch coverage while retaining the deepest point.
 	// Disabled by default; manifold choice affects convergence and determinism.
 	GLOBAL_DEF(PropertyInfo(Variant::BOOL, "physics/3d/solver/manifold_spread_reduction"), false);

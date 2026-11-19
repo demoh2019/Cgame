@@ -2721,6 +2721,11 @@
 			Number of solver iterations for all contacts and constraints. The greater the number of iterations, the more accurate the collisions will be. However, a greater number of iterations requires more CPU power, which can decrease performance. See [constant PhysicsServer3D.SPACE_PARAM_SOLVER_ITERATIONS].
 			[b]Note:[/b] This project setting is only effective when using GodotPhysics3D. It has no effect when using Jolt Physics.
 		</member>
+		<member name="physics/3d/solver/substeps" type="int" setter="" getter="" default="1">
+			Number of sub-steps each physics tick is split into. With a value of [code]4[/code] every tick is simulated as four consecutive steps of a quarter of the duration, each running its own collision detection and [member physics/3d/solver/solver_iterations] solver iterations. Short steps make stacks, piles and joints much more stable and rigid: for example a stack of 20 boxes collapses with the default of 16 iterations, but stays standing with [code]4[/code] sub-steps of [code]4[/code] iterations (the same total number of iterations). The cost grows roughly linearly with the number of sub-steps, because each one repeats broadphase update, contact generation and constraint setup.
+			Forces applied with [method PhysicsServer3D.body_apply_central_force] and similar methods act for the whole tick, kinematic bodies move smoothly across the sub-steps, and [method PhysicsDirectBodyState3D.get_step] returns the duration of the whole tick. Collision reports accumulate over all sub-steps of a tick.
+			[b]Note:[/b] This project setting is only effective when using GodotPhysics3D. It has no effect when using Jolt Physics. It is read when a physics space is created.
+		</member>
 		<member name="physics/3d/time_before_sleep" type="float" setter="" getter="" default="0.5">
 			Time (in seconds) of inactivity before which a 3D physics body will put to sleep. See [constant PhysicsServer3D.SPACE_PARAM_BODY_TIME_TO_SLEEP].
 			[b]Note:[/b] This project setting is only effective when using GodotPhysics3D. It has no effect when using Jolt Physics.

@@ -113,6 +113,9 @@ class GodotBody3D : public GodotCollisionObject3D {
 	void _mass_properties_changed();
 	virtual void _shapes_changed() override;
 	Transform3D new_transform;
+	// Kinematic sub-stepping: transform at the start of the tick, and the target of the current substep.
+	Transform3D kinematic_start;
+	Transform3D kinematic_target;
 
 	// Swept shape motion computed by a parallel `integrate_forces`, applied to
 	// the broadphase afterwards on the stepping thread.

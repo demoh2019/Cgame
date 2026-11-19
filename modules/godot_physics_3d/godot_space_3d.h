@@ -118,6 +118,10 @@ private:
 	int solver_iterations = 0;
 	bool block_solver_enabled = false;
 	bool parallel_large_islands = false;
+	// Sub-stepping: one physics tick is simulated as `substeps` consecutive steps of `full_step / substeps`.
+	int substeps = 1;
+	int substep_index = 0;
+	real_t full_step = 0.0;
 	bool manifold_spread_reduction = false; // Opt-in 3D four-point contact patch selection.
 
 	real_t contact_recycle_radius = 0.0;
@@ -286,6 +290,16 @@ public:
 	_FORCE_INLINE_ int get_solver_iterations() const { return solver_iterations; }
 	_FORCE_INLINE_ bool is_block_solver_enabled() const { return block_solver_enabled; }
 	_FORCE_INLINE_ bool is_parallel_large_islands_enabled() const { return parallel_large_islands; }
+	_FORCE_INLINE_ int get_substeps() const { return substeps; }
+	_FORCE_INLINE_ bool is_first_substep() const { return substep_index == 0; }
+	_FORCE_INLINE_ bool is_final_substep() const { return substep_index + 1 >= substeps; }
+	_FORCE_INLINE_ int get_substep_index() const { return substep_index; }
+	// Duration of the whole physics tick, as seen by users (PhysicsDirectBodyState3D.get_step()).
+	_FORCE_INLINE_ real_t get_full_step() const { return full_step > 0.0 ? full_step : last_step; }
+	_FORCE_INLINE_ void begin_substep(int p_index, real_t p_full_step) {
+		substep_index = p_index;
+		full_step = p_full_step;
+	}
 	_FORCE_INLINE_ bool is_manifold_spread_reduction_enabled() const { return manifold_spread_reduction; }
 	_FORCE_INLINE_ real_t get_contact_recycle_radius() const { return contact_recycle_radius; }
 	_FORCE_INLINE_ real_t get_contact_max_separation() const { return contact_max_separation; }
