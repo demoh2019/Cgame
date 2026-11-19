@@ -224,6 +224,59 @@ TEST_CASE("[GDScriptPropertyListFastPath] property type lookup reports valid and
 	CHECK_EQ(instance->get_property_type(StringName("missing_member"), nullptr), Variant::NIL);
 }
 
+TEST_CASE("[GDScriptScriptProperties] declaration order and Variant types are preserved") {
+	GDScriptLanguage::get_singleton()->init();
+	Ref<GDScript> script = memnew(GDScript);
+	script->set_source_code("extends RefCounted\n@export var alpha: int = 3\n@export var beta: String = \"ok\"\n@export var gamma: Vector2 = Vector2(1, 2)\n");
+	ERR_PRINT_OFF;
+	const Error error = script->reload();
+	ERR_PRINT_ON;
+	REQUIRE_EQ(error, OK);
+
+	List<PropertyInfo> properties;
+	script->get_script_property_list(&properties);
+	int index = 0;
+	int alpha = -1, beta = -1, gamma = -1;
+	for (const PropertyInfo &p : properties) {
+		if (p.name == "alpha") { alpha = index; CHECK_EQ(p.type, Variant::INT); }
+		if (p.name == "beta") { beta = index; CHECK_EQ(p.type, Variant::STRING); }
+		if (p.name == "gamma") { gamma = index; CHECK_EQ(p.type, Variant::VECTOR2); }
+		index++;
+	}
+	REQUIRE(alpha >= 0);
+	REQUIRE(beta >= 0);
+	REQUIRE(gamma >= 0);
+	CHECK(alpha < beta);
+	CHECK(beta < gamma);
+}
+
+TEST_CASE("[GDScriptScriptProperties] repeated enumeration preserves names, types and order") {
+	GDScriptLanguage::get_singleton()->init();
+	Ref<GDScript> script = memnew(GDScript);
+	script->set_source_code("extends RefCounted\nvar a: int = 1\nvar b: float = 2.5\nvar c: String = \"test\"\n");
+	ERR_PRINT_OFF;
+	const Error error = script->reload();
+	ERR_PRINT_ON;
+	REQUIRE_EQ(error, OK);
+
+	List<PropertyInfo> baseline;
+	script->get_script_property_list(&baseline);
+	REQUIRE(baseline.size() >= 3);
+	for (int pass = 0; pass < 64; pass++) {
+		List<PropertyInfo> current;
+		script->get_script_property_list(&current);
+		REQUIRE_EQ(current.size(), baseline.size());
+		const List<PropertyInfo>::Element *lhs = baseline.front();
+		const List<PropertyInfo>::Element *rhs = current.front();
+		while (lhs && rhs) {
+			CHECK_EQ(lhs->get().name, rhs->get().name);
+			CHECK_EQ(lhs->get().type, rhs->get().type);
+			lhs = lhs->next();
+			rhs = rhs->next();
+		}
+	}
+}
+
 TEST_CASE("[Modules][GDScript] Loading keeps ResourceCache and GDScriptCache in sync") {
 	GDScriptLanguage::get_singleton()->init();
 	const String path = TestUtils::get_temp_path("gdscript_load_test.gd");
