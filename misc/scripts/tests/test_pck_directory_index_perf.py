@@ -33,7 +33,10 @@ class PackedDataIndexContracts(unittest.TestCase):
         self.assertIn("PackedData index of many files", self.native)
         self.assertIn("packed.get_file_paths().size() == 512", self.native)
         self.assertIn("packed.get_file_paths().size() == 256", self.native)
-        self.assertIn("packed.clear();", self.native)
+        self.assertIn("PackedData::get_singleton()", self.native)
+        self.assertIn("const uint32_t previous_count", self.native)
+        self.assertIn("packed->get_file_paths().size() == previous_count", self.native)
+        self.assertNotIn("PackedData packed;", self.native)
 
 
 if __name__ == "__main__":
