@@ -675,7 +675,7 @@ void BitMap::resize(const Size2i &p_new_size) {
 	Ref<BitMap> new_bitmap;
 	new_bitmap.instantiate();
 	new_bitmap->create(p_new_size);
-	if (new_bitmap->get_size() == p_new_size && width > 0 && height > 0) {
+	if (new_bitmap->get_size() == p_new_size && p_new_size.width > 0 && p_new_size.height > 0 && width > 0 && height > 0) {
 		// Match the original nearest-neighbor sampling and float precision,
 		// but traverse destination rows in order. The destination is zeroed
 		// by create(), so only the set source bits need to be written.
