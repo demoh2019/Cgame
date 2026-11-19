@@ -9,9 +9,12 @@ on:
       - "core/math/bvh_cull.inc"
       - "modules/godot_physics_2d/**"
       - "modules/godot_physics_3d/**"
+      - "servers/physics_xpbd_area.h"
+      - "servers/physics_3d/physics_server_3d.cpp"
       - "tests/stress/physics_exception_pairs_*.gd"
       - "tests/stress/physics_bvh_streaming_*.gd"
       - "tests/stress/physics_compound_filter_batch_*.gd"
+      - "tests/stress/physics_soft_body_xpbd_area_3d.gd"
       - "tests/stress/physics_contact_angular_friction_3d.gd"
       - "tests/stress/physics_motion_exclusions_*.gd"
       - "tests/stress/stress.gd"
@@ -19,6 +22,7 @@ on:
       - "tests/stress/project.godot"
       - "tests/stress/test_physics_bvh_streaming.py"
       - "tests/stress/test_physics_compound_filter_batch.py"
+      - "tests/stress/test_physics_xpbd_area.py"
       - "tests/stress/test_physics_contact_angular_friction.py"
       - "tests/stress/test_physics_early_pair_filter.py"
       - "tests/stress/test_physics_motion_shape_pruning.py"
@@ -29,6 +33,8 @@ on:
       - "core/math/bvh_cull.inc"
       - "modules/godot_physics_2d/**"
       - "modules/godot_physics_3d/**"
+      - "servers/physics_xpbd_area.h"
+      - "servers/physics_3d/physics_server_3d.cpp"
       - "tests/stress/**"
       - ".github/workflows/physics-exception-contracts.yml"
   workflow_dispatch:
@@ -46,4 +52,5 @@ jobs:
           python3 -m unittest discover -s tests/stress -p 'test_physics_motion_shape_pruning.py' -v
           python3 -m unittest discover -s tests/stress -p 'test_physics_bvh_streaming.py' -v
           python3 -m unittest discover -s tests/stress -p 'test_physics_compound_filter_batch.py' -v
+          python3 -m unittest discover -s tests/stress -p 'test_physics_xpbd_area.py' -v
           python3 -m unittest discover -s tests/stress -p 'test_physics_contact_angular_friction.py' -v
