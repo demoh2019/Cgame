@@ -56,6 +56,9 @@ void JoltProjectSettings::register_settings() {
 	// Experimental soft-soft CPU particle contacts. Jolt itself supports
 	// soft-rigid but not soft-soft contacts. Disabled to preserve performance.
 	GLOBAL_DEF(PropertyInfo(Variant::BOOL, "physics/jolt_physics_3d/simulation/soft_body_soft_contacts"), false);
+	// More accurate contact with sparse surface meshes. Opt-in and shares
+	// the existing global pair-test budget; no cost in the default path.
+	GLOBAL_DEF(PropertyInfo(Variant::BOOL, "physics/jolt_physics_3d/simulation/soft_body_soft_vertex_face_contacts"), false);
 	GLOBAL_DEF(PropertyInfo(Variant::FLOAT, "physics/jolt_physics_3d/simulation/soft_body_soft_contact_radius", PROPERTY_HINT_RANGE, "0,1,0.001,suffix:m"), 0.1f);
 	GLOBAL_DEF(PropertyInfo(Variant::FLOAT, "physics/jolt_physics_3d/simulation/soft_body_soft_contact_recovery", PROPERTY_HINT_RANGE, "0,1,0.01"), 0.2f);
 	GLOBAL_DEF(PropertyInfo(Variant::FLOAT, "physics/jolt_physics_3d/simulation/soft_body_soft_contact_friction", PROPERTY_HINT_RANGE, "0,1,0.01"), 0.2f);
@@ -162,6 +165,7 @@ void JoltProjectSettings::read_settings() {
 	const float anisotropy_ratio = GLOBAL_GET("physics/jolt_physics_3d/simulation/soft_body_radial_anisotropy_ratio");
 	soft_body_radial_anisotropy_ratio = Math::is_finite(anisotropy_ratio) ? CLAMP(anisotropy_ratio, 0.1f, 10.0f) : 1.0f;
 	soft_body_soft_contacts = GLOBAL_GET("physics/jolt_physics_3d/simulation/soft_body_soft_contacts");
+	soft_body_soft_vertex_face_contacts = GLOBAL_GET("physics/jolt_physics_3d/simulation/soft_body_soft_vertex_face_contacts");
 	const float soft_contact_radius = GLOBAL_GET("physics/jolt_physics_3d/simulation/soft_body_soft_contact_radius");
 	soft_body_soft_contact_radius = Math::is_finite(soft_contact_radius) ? CLAMP(soft_contact_radius, 0.0f, 1.0f) : 0.1f;
 	const float soft_contact_recovery = GLOBAL_GET("physics/jolt_physics_3d/simulation/soft_body_soft_contact_recovery");
