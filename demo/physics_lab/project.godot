@@ -32,6 +32,11 @@ textures/default_filters/use_nearest_mipmap_filter=false
 # Only the Physics Lab demo uses this non-isotropic stretch preset.
 # Try ratio=1 to restore uniform edge compliance for comparison.
 3d/solver/soft_body_xpbd_compliance=0.00005
+# Accumulate irreversible edge weakening only under repeated high strain.
+# This is XPBD material fatigue, not mesh fracture/tearing.
+3d/solver/soft_body_fatigue_damage_rate=0.8
+3d/solver/soft_body_fatigue_yield_strain=0.2
+3d/solver/soft_body_fatigue_max_damage=0.85
 3d/solver/soft_body_xpbd_parallel_compliance_ratio=0.2
 3d/solver/soft_body_xpbd_material_axis=Vector3(1, 0, 0)
 # Coupled StVK membrane deformation (GodotPhysics3D backend only).
