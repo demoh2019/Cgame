@@ -50,6 +50,8 @@ jobs:
           set -euo pipefail
           timeout 180s ./godot --headless --path game --script res://tests/run_all.gd 2>&1 | tee game-tests.log
           grep -Fq 'test_barricades.gd' game-tests.log
+          grep -Fq 'test_structure_tiers.gd' game-tests.log
+          grep -Fq 'test_base_sieges.gd' game-tests.log
           grep -Fq '0 failures' game-tests.log
           if grep -Ei 'SCRIPT ERROR:|Parse Error:|Failed to load script|^FAIL ' game-tests.log; then exit 1; fi
       - name: Play the unified game scene headlessly
