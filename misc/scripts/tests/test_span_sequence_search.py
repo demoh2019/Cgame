@@ -67,6 +67,16 @@ int main(){
   }
   const int64_t expect=n.size()>h.size()?-1:backward(h,n,h.size()-n.size());
   if(hs.rfind_sequence(ns)!=expect)return 3;
+  // Compare runtime memchr fast paths against the standard linear search.
+  for(uint64_t from=0;from<=h.size()+2;from+=std::max<uint64_t>(1,h.size()/8+1)){
+   for(int b=0;b<256;b+=7){
+    const int64_t expected=from>=h.size()?-1:[&](){
+     auto it=std::find(h.begin()+from,h.end(),uint8_t(b));
+     return it==h.end()?int64_t(-1):int64_t(it-h.begin());
+    }();
+    if(hs.find(uint8_t(b),from)!=expected)return 4;
+   }
+  }
  }
  std::vector<uint8_t> big(2*1024*1024,0);
  const uint8_t needle[]={255,32,48,64,80,96,112,128};

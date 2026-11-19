@@ -147,4 +147,34 @@ TEST_CASE("[Span] Float sequence searches preserve bitwise comparison semantics"
 	CHECK(hay.find_sequence(Span<float>(positive_zero)) == -1);
 }
 
+TEST_CASE("[Span] Runtime byte search respects offsets and signed values") {
+	uint8_t bytes[4096];
+	for (uint64_t i = 0; i < 4096; i++) {
+		bytes[i] = uint8_t(i & 255);
+	}
+	const Span<uint8_t> hay(bytes);
+	CHECK(hay.find(uint8_t(255)) == 255);
+	CHECK(hay.find(uint8_t(255), 256) == 511);
+	CHECK(hay.find(uint8_t(0), 4095) == -1);
+	CHECK(hay.find(uint8_t(0), 4096) == -1);
+	CHECK(hay.find(uint8_t(0), 4097) == -1);
+
+	const int8_t signed_bytes[] = { -128, -7, 0, 42, 127 };
+	const Span<int8_t> signed_hay(signed_bytes);
+	CHECK(signed_hay.find(int8_t(-128)) == 0);
+	CHECK(signed_hay.find(int8_t(-7), 1) == 1);
+	CHECK(signed_hay.find(int8_t(-7), 2) == -1);
+	CHECK(signed_hay.find(int8_t(127)) == 4);
+}
+
+TEST_CASE("[Span] Constexpr byte search retains compile-time evaluation") {
+	static constexpr uint8_t values[] = { 0, 1, 2, 3, 4, 5 };
+	static constexpr Span<uint8_t> span(values);
+	static_assert(span.find(uint8_t(3)) == 3);
+	static_assert(span.find(uint8_t(3), 4) == -1);
+	static_assert(span.find(uint8_t(5)) == 5);
+	static_assert(span.find(uint8_t(255)) == -1);
+	CHECK(span.find(uint8_t(4)) == 4);
+}
+
 } // namespace TestSpan

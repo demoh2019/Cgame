@@ -33,6 +33,8 @@
 #include "core/error/error_macros.h"
 #include "core/typedefs.h"
 
+#include <cstring>
+
 template <typename LHS, typename RHS>
 bool are_spans_equal(const LHS *p_lhs, const RHS *p_rhs, size_t p_size) {
 	if constexpr (std::is_same_v<LHS, RHS> && std::is_fundamental_v<LHS>) {
@@ -138,6 +140,19 @@ public:
 
 template <typename T>
 constexpr int64_t Span<T>::find(const T &p_val, uint64_t p_from) const {
+#if defined(__GNUC__) || defined(__clang__)
+	if constexpr (std::is_integral_v<T> && sizeof(T) == 1 && !std::is_same_v<std::remove_cv_t<T>, bool>) {
+		// Preserve compile-time evaluation while allowing libc's vectorized
+		// byte scanner for runtime calls on GCC/Clang.
+		if (!__builtin_is_constant_evaluated()) {
+			if (p_from >= size()) {
+				return -1;
+			}
+			const T *const found = static_cast<const T *>(std::memchr(ptr() + p_from, static_cast<unsigned char>(p_val), size_t(size() - p_from)));
+			return found ? int64_t(found - ptr()) : -1;
+		}
+	}
+#endif
 	for (uint64_t i = p_from; i < size(); i++) {
 		if (ptr()[i] == p_val) {
 			return i;
@@ -162,6 +177,26 @@ constexpr int64_t Span<T>::find_sequence(const Span<T1> &p_span, uint64_t p_from
 	const T *const haystack = ptr();
 	const T1 *const needle = p_span.ptr();
 	const uint64_t last_start = size() - needle_size;
+#if defined(__GNUC__) || defined(__clang__)
+	if constexpr (std::is_same_v<T, T1> && std::is_integral_v<T> && sizeof(T) == 1 && !std::is_same_v<std::remove_cv_t<T>, bool>) {
+		if (!__builtin_is_constant_evaluated()) {
+			// Skip directly to byte candidates instead of scanning each offset.
+			const T *candidate = haystack + p_from;
+			const T *const end = haystack + last_start + 1;
+			while (candidate < end) {
+				candidate = static_cast<const T *>(std::memchr(candidate, static_cast<unsigned char>(needle[0]), size_t(end - candidate)));
+				if (!candidate) {
+					return -1;
+				}
+				if (needle_size == 1 || (candidate[needle_size - 1] == needle[needle_size - 1] && std::memcmp(candidate, needle, size_t(needle_size)) == 0)) {
+					return int64_t(candidate - haystack);
+				}
+				candidate++;
+			}
+			return -1;
+		}
+	}
+#endif
 	for (uint64_t i = p_from; i <= last_start; i++) {
 		// Avoid calling memcmp / traversing a class sequence when either
 		// endpoint already disproves the candidate. For same-type floats,
