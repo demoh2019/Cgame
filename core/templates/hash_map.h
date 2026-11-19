@@ -180,6 +180,7 @@ private:
 
 	void _resize_and_rehash(uint32_t p_new_capacity_idx) {
 		uint32_t old_capacity = hash_table_size_primes[_capacity_idx];
+		const uint32_t old_size = _size;
 
 		// Capacity can't be 0.
 		_capacity_idx = MAX((uint32_t)MIN_CAPACITY_INDEX, p_new_capacity_idx);
@@ -200,12 +201,23 @@ private:
 			return;
 		}
 
-		for (uint32_t i = 0; i < old_capacity; i++) {
-			if (old_hashes[i] == EMPTY_HASH) {
-				continue;
+		// Rehashing a sparsely populated, heavily reserved table should
+		// not scan all its empty buckets. Hash the live linked-list nodes
+		// directly when they are far fewer than the available slots.
+		// For dense tables, keep the cached hashes and linear bucket scan:
+		// it avoids potentially expensive key hashing.
+		if (old_capacity >= 4096 && old_size <= old_capacity / 64) {
+			for (HashMapElement<TKey, TValue> *entry = _head_element; entry != nullptr; entry = entry->next) {
+				_insert_element(_hash(entry->data.key), entry);
 			}
+		} else {
+			for (uint32_t i = 0; i < old_capacity; i++) {
+				if (old_hashes[i] == EMPTY_HASH) {
+					continue;
+				}
 
-			_insert_element(old_hashes[i], old_elements[i]);
+				_insert_element(old_hashes[i], old_elements[i]);
+			}
 		}
 
 		Memory::free_static(old_elements);
