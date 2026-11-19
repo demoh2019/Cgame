@@ -360,18 +360,42 @@ real_t FileAccess::get_real() const {
 	}
 }
 
+// Most serialized Variants (ints, small strings, vectors and RPC arguments)
+// fit on the stack. Only allocate a temporary Vector for larger values.
+class FileAccessVariantScratchBuffer {
+	static constexpr int STACK_SIZE = 512;
+	uint8_t stack[STACK_SIZE];
+	Vector<uint8_t> heap;
+
+public:
+	uint8_t *allocate(int p_size) {
+		if (p_size < 0) {
+			return nullptr;
+		}
+		if (p_size <= STACK_SIZE) {
+			return stack;
+		}
+		if (heap.resize_uninitialized(p_size) != OK) {
+			return nullptr;
+		}
+		return heap.ptrw();
+	}
+};
+
 Variant FileAccess::get_var(bool p_allow_objects) const {
-	uint32_t len = get_32();
-	Vector<uint8_t> buff = get_buffer(len);
-	ERR_FAIL_COND_V((uint32_t)buff.size() != len, Variant());
+	const uint32_t len = get_32();
+	ERR_FAIL_COND_V(len > INT32_MAX, Variant());
 
-	const uint8_t *r = buff.ptr();
+	FileAccessVariantScratchBuffer scratch;
+	uint8_t *buffer = scratch.allocate(int(len));
+	ERR_FAIL_NULL_V(buffer, Variant());
+	ERR_FAIL_COND_V(get_buffer(buffer, len) != len, Variant());
 
-	Variant v;
-	Error err = decode_variant(v, &r[0], len, nullptr, p_allow_objects);
-	ERR_FAIL_COND_V_MSG(err != OK, Variant(), "Error when trying to encode Variant.");
+	Variant value;
+	const Error err = decode_variant(value, buffer, int(len), nullptr, p_allow_objects);
+	ERR_FAIL_COND_V_MSG(err != OK, Variant(), "Error when trying to decode Variant.");
 
-	return v;
+	return value;
 }
 
 double FileAccess::get_double() const {
@@ -884,18 +908,18 @@ bool FileAccess::store_buffer(const uint8_t *p_src, uint64_t p_length) {
 }
 
 bool FileAccess::store_var(const Variant &p_var, bool p_full_objects) {
-	int len;
+	int len = 0;
 	Error err = encode_variant(p_var, nullptr, len, p_full_objects);
 	ERR_FAIL_COND_V_MSG(err != OK, false, "Error when trying to encode Variant.");
+	ERR_FAIL_COND_V(len < 0, false);
 
-	Vector<uint8_t> buff;
-	buff.resize(len);
-
-	uint8_t *w = buff.ptrw();
-	err = encode_variant(p_var, &w[0], len, p_full_objects);
+	FileAccessVariantScratchBuffer scratch;
+	uint8_t *buffer = scratch.allocate(len);
+	ERR_FAIL_NULL_V(buffer, false);
+	err = encode_variant(p_var, buffer, len, p_full_objects);
 	ERR_FAIL_COND_V_MSG(err != OK, false, "Error when trying to encode Variant.");
 
-	return store_32(uint32_t(len)) && store_buffer(buff);
+	return store_32(uint32_t(len)) && store_buffer(buffer, len);
 }
 
 Vector<uint8_t> FileAccess::get_file_as_bytes(const String &p_path, Error *r_error) {

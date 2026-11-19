@@ -658,4 +658,67 @@ TEST_CASE("[FileAccess][Performance] Compressed block tables preserve large roun
 	DirAccess::remove_file_or_error(path);
 }
 
+TEST_CASE("[FileAccess][Performance] Variant serialization uses small scratch and large fallback") {
+	Vector<uint8_t> storage;
+	REQUIRE(storage.resize_uninitialized(24000) == OK);
+	Ref<FileAccessMemory> file;
+	file.instantiate();
+	REQUIRE(file->open_custom(storage.ptrw(), storage.size()) == OK);
+
+	Array nested;
+	nested.push_back(123);
+	nested.push_back(String("hello"));
+	Dictionary dictionary;
+	dictionary["nested"] = nested;
+	dictionary["unicode"] = String::utf8("Привет мир 🌍");
+
+	const Variant values[] = {
+		Variant(),
+		Variant(true),
+		Variant(42),
+		Variant(uint64_t(0x7fedcba987654321)),
+		Variant(Vector3(1.5, 2.25, -3.5)),
+		Variant(String()),
+		Variant(String("short")),
+		Variant(String::utf8("Привет мир 🌍")),
+		Variant(String("x").repeat(496)),
+		Variant(String("x").repeat(500)),
+		Variant(String("x").repeat(501)),
+		Variant(String("x").repeat(512)),
+		Variant(String("x").repeat(513)),
+		Variant(String("x").repeat(8192)),
+		Variant(nested),
+		Variant(dictionary),
+	};
+
+	for (const Variant &value : values) {
+		file->seek(0);
+		REQUIRE(file->store_var(value));
+		const uint64_t total_bytes = file->get_position();
+		CHECK(total_bytes >= 8);
+		CHECK(total_bytes < uint64_t(storage.size()));
+
+		// Verify that the same wire header is produced, then decode it.
+		file->seek(0);
+		CHECK(file->get_32() == uint32_t(total_bytes - 4));
+		file->seek(0);
+		CHECK(file->get_var() == value);
+		CHECK(file->get_position() == total_bytes);
+	}
+
+	// Decoding a short buffer must not consume uninitialized scratch memory.
+	uint8_t truncated[8] = { 8, 0, 0, 0, 2, 0, 0, 0 };
+	REQUIRE(file->open_custom(truncated, sizeof(truncated)) == OK);
+	ERR_PRINT_OFF;
+	CHECK(file->get_var() == Variant());
+	ERR_PRINT_ON;
+
+	// Reject impossible 32-bit lengths before allocating an enormous vector.
+	uint8_t invalid_length[4] = { 0xff, 0xff, 0xff, 0xff };
+	REQUIRE(file->open_custom(invalid_length, sizeof(invalid_length)) == OK);
+	ERR_PRINT_OFF;
+	CHECK(file->get_var() == Variant());
+	ERR_PRINT_ON;
+}
+
 } // namespace TestFileAccess
