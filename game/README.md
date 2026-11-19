@@ -305,3 +305,22 @@ Tests: `game/tests/test_dismantle.gd` in the existing headless suite.
 
 Press Enter to talk in the world room. `/guild Name` founds a guild, `/guilds` lists them, `/join Name` joins,
 `/g text` talks to your guild only, `/leave` leaves. All of it is Nakama (rooms, groups, group channels).
+
+
+## Coordinated infected and last-known-position search
+
+AI in the canonical `game/` now shares an acquired target between infected
+within 18 metres in the authoritative server simulation. The server uses
+small spatial buckets and spreads only from enemies already chasing or
+attacking; this avoids unbounded instant alert chains. Safe-zone players,
+dead players, and survivors outside each zombie's pursuit leash cannot be
+recruited as targets.
+
+When a survivor escapes that leash, the pursuer investigates the last
+tracked position for up to four seconds before abandoning the search and
+returning home. This is implemented in the game state machine and requires
+no new Cgame engine APIs or network commands.
+
+The game tests include `test_zombie_pack.gd` and expanded
+`test_zombie_ai.gd` regression checks. Run them with
+`godot --headless --path game --script res://tests/run_all.gd`.

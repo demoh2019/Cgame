@@ -104,6 +104,32 @@ func run(t) -> void:
 		z.think(world, players, 0.1, rng)
 	t.check(z.state != Zombie.State.CHASE, "it gives up when the player is far away")
 
+	t.current = "investigate last known location after target escapes"
+	z = Zombie.new(88, "walker", Vector3(0, ground, 0))
+	players = _players(Vector3(10, ground, 0))
+	for i in 5:
+		z.think(world, players, 0.1, rng)
+	var remembered: Vector2 = z.last_known_target
+	t.near(remembered.distance_to(Vector2(10, 0)), 0.0, 0.01, "remembers last tracked point")
+	players = _players(Vector3(200, ground, 0))
+	z.think(world, players, 0.1, rng)
+	t.eq(z.state, Zombie.State.INVESTIGATE, "lost target triggers a finite investigation")
+	t.eq(z.target_id, -1, "escaping survivor is no longer targeted")
+	var investigate_start: float = z.position.x
+	for i in 12:
+		z.think(world, players, 0.1, rng)
+	t.check(z.position.x > investigate_start + 0.4, "search moves toward remembered position")
+	for i in 65:
+		z.think(world, players, 0.1, rng)
+	t.check(z.state != Zombie.State.INVESTIGATE and z.target_id == -1, "search expires instead of lasting forever")
+	z = Zombie.new(89, "walker", Vector3(0, ground, 0))
+	t.check(z.receive_pack_alert(3, {3: {"position": Vector3(13, ground, 0), "alive": true, "safe": false}}), "alert recruits idle infected")
+	t.eq(z.target_id, 3, "alert passes exact peer ID")
+	t.check(not z.receive_pack_alert(4, {4: {"position": Vector3(2, ground, 0), "alive": true, "safe": false}}), "active target is not replaced")
+	var safe_alert := Zombie.new(90, "walker", Vector3(0, ground, 0))
+	t.check(not safe_alert.receive_pack_alert(4, {4: {"position": Vector3(2, ground, 0), "alive": true, "safe": true}}), "pack alarm cannot break safe-zone protection")
+	t.check(not safe_alert.receive_pack_alert(5, {5: {"position": Vector3(50, ground, 0), "alive": true, "safe": false}}), "pack alert is bounded by leash")
+
 	t.current = "damage and death"
 	z = Zombie.new(8, "walker", Vector3(0, ground, 0))
 	t.check(not z.take_damage(10.0), "a small hit does not kill")

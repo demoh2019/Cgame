@@ -21,6 +21,8 @@ const Progression = preload("res://scripts/shared/progression.gd")
 const WORKBENCH_POSITION := Vector2(9.0, 0.0)
 const WORKBENCH_RANGE := 6.0
 const ZOMBIE_ACTIVE_RADIUS := 130.0 # Zombies farther than this from every player are put to sleep.
+const ZOMBIE_PACK_ALERT_RADIUS := 18.0
+const ZOMBIE_PACK_BUCKET_SIZE := 18.0
 const BAG_LIFETIME := 300.0
 const MAX_NAME_LENGTH := 20
 const STARTER_KIT := {"bandage": 2, "canned_food": 2, "water_bottle": 2}
@@ -922,6 +924,43 @@ func _tick_zombies(delta: float) -> void:
 				events.append({"type": "hit", "kind": "player", "id": victim.id, "damage": damage, "by": -zombie.id})
 				if not _alive(victim):
 					_on_player_death(victim, -zombie.id)
+	# Pack communication is authoritative and runs at most four times per second.
+	if tick_count % 5 == 0:
+		_alert_infected_pack(info)
+
+
+## Shares target awareness inside a bounded 2D neighborhood. Bucket lookup
+## avoids checking every zombie against every other zombie in crowded ruins.
+func _alert_infected_pack(player_info: Dictionary) -> void:
+	var buckets: Dictionary = {}
+	var alert_sources: Array = []
+	for infected in zombies.values():
+		if not infected.is_alive():
+			continue
+		var p: Vector3 = infected.position
+		var bucket := Vector2i(floori(p.x / ZOMBIE_PACK_BUCKET_SIZE), floori(p.z / ZOMBIE_PACK_BUCKET_SIZE))
+		if not buckets.has(bucket):
+			buckets[bucket] = []
+		buckets[bucket].append(infected)
+		if infected.target_id != -1 and (infected.state == Zombie.State.CHASE or infected.state == Zombie.State.ATTACK):
+			var target: Dictionary = player_info.get(infected.target_id, {})
+			if not target.is_empty() and bool(target.get("alive", false)) and not bool(target.get("safe", true)):
+				alert_sources.append(infected)
+	# Freeze alert sources before notifying anyone: no instant chain-reaction
+	# through an unlimited crowd in one simulation tick.
+	for source in alert_sources:
+		var p: Vector3 = source.position
+		var cell := Vector2i(floori(p.x / ZOMBIE_PACK_BUCKET_SIZE), floori(p.z / ZOMBIE_PACK_BUCKET_SIZE))
+		for dx in range(-1, 2):
+			for dz in range(-1, 2):
+				var neighbors: Array = buckets.get(cell + Vector2i(dx, dz), [])
+				for nearby in neighbors:
+					if nearby.id == source.id or nearby.state == Zombie.State.DEAD:
+						continue
+					var separation: Vector3 = nearby.position - p
+					separation.y = 0.0
+					if separation.length_squared() <= ZOMBIE_PACK_ALERT_RADIUS * ZOMBIE_PACK_ALERT_RADIUS:
+						nearby.receive_pack_alert(source.target_id, player_info)
 
 
 func _manage_zombie_population() -> void:

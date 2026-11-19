@@ -5,7 +5,7 @@ extends RefCounted
 const Defs = preload("res://scripts/shared/defs.gd")
 const Movement = preload("res://scripts/shared/movement.gd")
 
-enum State { IDLE, WANDER, CHASE, ATTACK, DEAD }
+enum State { IDLE, WANDER, CHASE, ATTACK, DEAD, INVESTIGATE }
 
 var id: int
 var type: String
@@ -17,6 +17,9 @@ var state: int = State.IDLE
 var target_id: int = -1 # Peer id of the player being chased.
 var home: Vector2
 var wander_target: Vector2
+var last_known_target: Vector2
+var investigate_time: float = 0.0
+const INVESTIGATE_SECONDS := 4.0
 var think_timer: float = 0.0
 var attack_timer: float = 0.0
 var stuck_time: float = 0.0
@@ -31,6 +34,7 @@ func _init(p_id: int, p_type: String, p_position: Vector3, p_spawn_id: int = 0) 
 	position = p_position
 	home = Vector2(p_position.x, p_position.z)
 	wander_target = home
+	last_known_target = home
 	spawn_id = p_spawn_id
 
 
@@ -66,6 +70,16 @@ func think(world, players: Dictionary, delta: float, rng: RandomNumberGenerator)
 					stuck_time = 0.0
 				else:
 					_move_toward(world, here, wander_target, float(data["speed"]) * 0.4, delta)
+		State.INVESTIGATE:
+			# Do not magically follow a survivor beyond our pursuit leash.
+			# Examine the place where they were last tracked, then return home.
+			investigate_time = maxf(0.0, investigate_time - delta)
+			if investigate_time <= 0.0 or here.distance_to(last_known_target) < 0.8:
+				state = State.WANDER
+				wander_target = home
+				stuck_time = 0.0
+			else:
+				_move_toward(world, here, last_known_target, float(data["speed"]) * 0.7, delta)
 		State.CHASE, State.ATTACK:
 			if not players.has(target_id) or not players[target_id]["alive"] or players[target_id]["safe"]:
 				target_id = -1
@@ -76,9 +90,10 @@ func think(world, players: Dictionary, delta: float, rng: RandomNumberGenerator)
 			var distance := here.distance_to(target)
 			if distance > float(data["lose"]):
 				target_id = -1
-				state = State.WANDER
-				wander_target = home
+				state = State.INVESTIGATE
+				investigate_time = INVESTIGATE_SECONDS
 				return {}
+			last_known_target = target
 			if distance <= float(data["attack_range"]):
 				state = State.ATTACK
 				yaw = atan2(target.x - here.x, target.y - here.y)
@@ -110,8 +125,31 @@ func _select_target(players: Dictionary, here: Vector2) -> void:
 			best_distance = distance
 	if best != -1:
 		target_id = best
-		if state == State.IDLE or state == State.WANDER:
+		if state == State.IDLE or state == State.WANDER or state == State.INVESTIGATE:
 			state = State.CHASE
+			investigate_time = 0.0
+
+
+## Nearby infected share an already acquired target. Pack alerts never bypass
+## server-owned safe-zone, life, or leash checks and cannot overwrite active aggro.
+func receive_pack_alert(peer_id: int, players: Dictionary) -> bool:
+	if state == State.DEAD or state == State.CHASE or state == State.ATTACK:
+		return false
+	if not players.has(peer_id):
+		return false
+	var info: Dictionary = players[peer_id]
+	if not bool(info.get("alive", false)) or bool(info.get("safe", true)):
+		return false
+	var survivor: Vector3 = info["position"]
+	var target: Vector2 = Vector2(survivor.x, survivor.z)
+	if Vector2(position.x, position.z).distance_to(target) > float(data["lose"]):
+		return false
+	target_id = peer_id
+	last_known_target = target
+	state = State.CHASE
+	think_timer = 0.25
+	investigate_time = 0.0
+	return true
 
 
 func _move_toward(world, here: Vector2, goal: Vector2, speed: float, delta: float) -> void:
