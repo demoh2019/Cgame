@@ -303,11 +303,21 @@ void GodotCollisionObject2D::refresh_collision_pairs() {
 		return;
 	}
 	GodotBroadPhase2D *broadphase = space->get_broadphase();
+	// Single-shape bodies keep the immediate allocation-free path. When a
+	// compound object changes filters, aggregate all of its proxy updates
+	// into one full BVH recheck rather than traversing after every shape.
+	const bool batch = shapes.size() > 1;
+	if (batch) {
+		broadphase->begin_batch();
+	}
 	for (int i = 0; i < shapes.size(); i++) {
 		const Shape &shape = shapes[i];
 		if (shape.bpid != 0) {
 			broadphase->force_collision_check(shape.bpid);
 		}
+	}
+	if (batch) {
+		broadphase->end_batch();
 	}
 }
 
