@@ -299,4 +299,39 @@ TEST_CASE("[AStarGrid2D] Pre-sized region data respects grid intersections and o
 	CHECK(outside.is_empty());
 }
 
+TEST_CASE("[AStarGrid2D] Repeated grid rebuild preserves padded mask and point coordinates") {
+	AStarGrid2D grid;
+	const Vector2i sizes[] = {
+		Vector2i(1, 1),
+		Vector2i(9, 64),
+		Vector2i(128, 32),
+		Vector2i(32, 128),
+		Vector2i(0, 0),
+		Vector2i(7, 3),
+	};
+	for (const Vector2i &size : sizes) {
+		const Rect2i region(Vector2i(-4, -3), size);
+		grid.set_region(region);
+		grid.update();
+		CHECK_FALSE(grid.is_dirty());
+
+		TypedArray<Dictionary> data = grid.get_point_data_in_region(region);
+		REQUIRE_EQ(data.size(), size.x * size.y);
+		if (size.x == 0 || size.y == 0) {
+			CHECK(data.is_empty());
+			continue;
+		}
+
+		Dictionary first = data[0];
+		Dictionary last = data[data.size() - 1];
+		CHECK_EQ(first["id"], Variant(region.position));
+		CHECK_EQ(last["id"], Variant(region.get_end() - Vector2i(1, 1)));
+		CHECK_FALSE(grid.is_point_solid(region.position));
+		grid.set_point_solid(region.position, true);
+		CHECK(grid.is_point_solid(region.position));
+		grid.update();
+		CHECK(grid.is_point_solid(region.position)); // No unnecessary rebuild while clean.
+	}
+}
+
 } // namespace TestAStar
