@@ -965,3 +965,37 @@ For contact correctness, run the independent 3D material-switch test:
 Compare performance of each case **against the same case on the baseline**,
 not the frictional case against the frictionless case; they intentionally
 model different physical behavior.
+
+## Unbounded nearest-hit 2D/3D raycast regression
+
+The broadphase raycast now streams candidate shapes to the exact narrowphase
+and shortens the active ray after each closer hit. Unlike the older
+`cull_segment()` result-array path, it does **not** silently discard candidates
+after `INTERSECTION_QUERY_MAX = 2048`. Other bounded query APIs retain their
+existing limits and semantics.
+
+Verify closest-hit correctness across 4,096 non-overlapping static bodies in
+**each** dimension, in forward and reverse directions, with collision-layer
+filtering:
+
+```bash
+./bin/godot.linuxbsd.editor.dev.x86_64 --headless --path tests/stress \
+  --script res://physics_ray_overflow_regression.gd
+```
+
+The C++ BVH unit tests independently verify that the streaming visitor sees
+4,096 candidates without clipping, respects tree masks, and returns the closest
+hit when clipping is enabled. Build with `tests=yes` to include native tests.
+
+For speed comparisons at 4,000+ shapes, benchmark existing raycast workloads
+against an earlier build **on the same machine**:
+
+```bash
+python3 tests/stress/run.py --godot ./bin/godot.linuxbsd.editor.dev.x86_64 \
+  --case physics_raycast_2d,physics_raycast_3d --scale 50 \
+  --repeats 3 --frames 12 --timeout 600 --rss-limit-mib 6144 \
+  --output out/physics-raycast-5k.json
+```
+
+A successful correctness check is **not** proof of million-body throughput;
+measure both execution time and peak process RSS separately.

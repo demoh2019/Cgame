@@ -105,102 +105,83 @@ int GodotPhysicsDirectSpaceState3D::intersect_point(const PS3DT::PointParameters
 bool GodotPhysicsDirectSpaceState3D::intersect_ray(const PS3DT::RayParameters &p_parameters, PS3DT::RayResult &r_result) {
 	ERR_FAIL_COND_V(space->locked, false);
 
-	Vector3 begin, end;
-	Vector3 normal;
-	begin = p_parameters.from;
-	end = p_parameters.to;
-	normal = (end - begin).normalized();
-
-	int amount = space->broadphase->cull_segment(begin, end, space->intersection_query_results, GodotSpace3D::INTERSECTION_QUERY_MAX, space->intersection_query_subindex_results);
-
-	// Results are unordered; the cached per-shape AABB prunes candidates after the first hit.
-
-	bool collided = false;
-	Vector3 res_point, res_normal;
-	int res_face_index = -1;
-	int res_shape = -1;
-	const GodotCollisionObject3D *res_obj = nullptr;
-	real_t min_d = Math::INF;
-
-	for (int i = 0; i < amount; i++) {
-		if (!_can_collide_with(space->intersection_query_results[i], p_parameters.collision_mask, p_parameters.collide_with_bodies, p_parameters.collide_with_areas)) {
-			continue;
-		}
-
-		if (p_parameters.pick_ray && !(space->intersection_query_results[i]->is_ray_pickable())) {
-			continue;
-		}
-
-		if (p_parameters.exclude.has(space->intersection_query_results[i]->get_self())) {
-			continue;
-		}
-
-		const GodotCollisionObject3D *col_obj = space->intersection_query_results[i];
-
-		int shape_idx = space->intersection_query_subindex_results[i];
-
-		// Once a nearer hit is known, avoid narrowphase tests beyond it.
-		if (collided && !col_obj->get_shape_aabb(shape_idx).intersects_segment(begin, res_point)) {
-			continue;
-		}
-
-		Transform3D inv_xform = col_obj->get_shape_inv_transform(shape_idx) * col_obj->get_inv_transform();
-
-		Vector3 local_from = inv_xform.xform(begin);
-		Vector3 local_to = inv_xform.xform(end);
-
-		const GodotShape3D *shape = col_obj->get_shape(shape_idx);
-
-		Vector3 shape_point, shape_normal;
-		int shape_face_index = -1;
-
-		if (shape->intersect_point(local_from)) {
-			if (p_parameters.hit_from_inside) {
-				// Hit shape at starting point.
-				min_d = 0;
-				res_point = begin;
-				res_normal = Vector3();
-				res_shape = shape_idx;
-				res_obj = col_obj;
-				collided = true;
-				break;
-			} else {
-				// Ignore shape when starting inside.
-				continue;
-			}
-		}
-
-		if (shape->intersect_segment(local_from, local_to, shape_point, shape_normal, shape_face_index, p_parameters.hit_back_faces)) {
-			Transform3D xform = col_obj->get_transform() * col_obj->get_shape_transform(shape_idx);
-			shape_point = xform.xform(shape_point);
-
-			real_t ld = normal.dot(shape_point - begin);
-
-			if (ld < min_d) {
-				min_d = ld;
-				res_point = shape_point;
-				res_normal = inv_xform.basis.xform_inv(shape_normal).normalized();
-				res_face_index = shape_face_index;
-				res_shape = shape_idx;
-				res_obj = col_obj;
-				collided = true;
-			}
-		}
-	}
-
-	if (!collided) {
+	const Vector3 begin = p_parameters.from;
+	const Vector3 end = p_parameters.to;
+	const Vector3 motion = end - begin;
+	const real_t length_squared = motion.length_squared();
+	if (length_squared == 0.0) {
 		return false;
 	}
-	ERR_FAIL_NULL_V(res_obj, false); // Shouldn't happen but silences warning.
 
-	r_result.collider_id = res_obj->get_instance_id();
-	r_result.normal = res_normal;
-	r_result.face_index = res_face_index;
-	r_result.position = res_point;
-	r_result.rid = res_obj->get_self();
-	r_result.shape = res_shape;
+	// Box2D/Jolt-style streaming BVH traversal. The narrowphase callback
+	// clips the segment to the nearest exact hit, without a 2048-result cap.
+	struct RayCastData {
+		const PS3DT::RayParameters &params;
+		PS3DT::RayResult &result;
+		Vector3 from;
+		Vector3 motion;
+		real_t inv_motion_length_squared;
+		bool hit = false;
+	};
+	RayCastData state = { p_parameters, r_result, begin, motion, 1.0 / length_squared };
 
-	return true;
+	auto visitor = [] (GodotCollisionObject3D *object, int p_shape, real_t p_max_fraction, void *p_userdata) -> real_t {
+		RayCastData &data = *static_cast<RayCastData *>(p_userdata);
+		if (!_can_collide_with(object, data.params.collision_mask, data.params.collide_with_bodies, data.params.collide_with_areas)) {
+			return p_max_fraction;
+		}
+		if (data.params.pick_ray && !object->is_ray_pickable()) {
+			return p_max_fraction;
+		}
+		if (data.params.exclude.has(object->get_self())) {
+			return p_max_fraction;
+		}
+
+		const Transform3D inv_xform = object->get_shape_inv_transform(p_shape) * object->get_inv_transform();
+		const Vector3 local_from = inv_xform.xform(data.from);
+		const Vector3 local_to = inv_xform.xform(data.from + data.motion * p_max_fraction);
+		const GodotShape3D *shape = object->get_shape(p_shape);
+
+		Vector3 world_point;
+		Vector3 world_normal;
+		real_t fraction = 0.0;
+		int face_index = -1;
+		if (shape->intersect_point(local_from)) {
+			if (!data.params.hit_from_inside) {
+				return p_max_fraction;
+			}
+			// Hit from inside has no well-defined surface normal or face.
+			world_point = data.from;
+			world_normal = Vector3();
+			fraction = 0.0;
+		} else {
+			Vector3 shape_point;
+			Vector3 shape_normal;
+			if (!shape->intersect_segment(local_from, local_to, shape_point, shape_normal, face_index, data.params.hit_back_faces)) {
+				return p_max_fraction;
+			}
+			const Transform3D xform = object->get_transform() * object->get_shape_transform(p_shape);
+			world_point = xform.xform(shape_point);
+			world_normal = inv_xform.basis.xform_inv(shape_normal).normalized();
+			fraction = data.motion.dot(world_point - data.from) * data.inv_motion_length_squared;
+		}
+
+		// The broadphase may visit objects in any order. A closer exact hit
+		// controls both the result and the clipped ray for subsequent nodes.
+		if (fraction < 0.0 || fraction > p_max_fraction || (data.hit && fraction >= p_max_fraction)) {
+			return p_max_fraction;
+		}
+		data.hit = true;
+		data.result.collider_id = object->get_instance_id();
+		data.result.normal = world_normal;
+		data.result.position = world_point;
+		data.result.rid = object->get_self();
+		data.result.shape = p_shape;
+		data.result.face_index = face_index;
+		return fraction;
+	};
+	space->broadphase->cast_segment(begin, end, visitor, &state);
+	return state.hit;
 }
 
 int GodotPhysicsDirectSpaceState3D::intersect_shape(const PS3DT::ShapeParameters &p_parameters, PS3DT::ShapeResult *r_results, int p_result_max) {
