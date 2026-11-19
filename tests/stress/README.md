@@ -104,6 +104,39 @@ time; use the same machine/configuration with an older commit to quantify
 the effects. These source-contract checks are not a compilation test,
 and runtime stress tests must still be executed on a built engine.
 
+## Batched BVH filter updates for compound bodies
+
+GodotPhysics2D and GodotPhysics3D now aggregate full broadphase rechecks
+when changing collision layers, masks or exceptions on compound bodies.
+Previously, a compound object with N registered shapes called
+`force_collision_check()` N times and immediately traversed BVH after
+each shape. Now the single-shape path remains immediate, while multiple
+shapes use the broadphase's nested `begin_batch()` / `end_batch()` API.
+For BVH backends the per-shape force calls only enqueue dirty proxies,
+and the last end_batch executes one full filter validation.
+
+A deferred full-check flag lives in the generic BVH manager, not just the
+physics adapter, so an intervening `update()` or geometry change cannot
+accidentally process pending masks with a geometry-only recheck. The flag
+is consumed when pairs are checked and cleared after the batch. Unchanged
+proxies still get rechecked, preserving layer/mask/exception changes for
+stationary bodies.
+
+```bash
+python3 -m unittest discover -s tests/stress -p 'test_physics_compound_filter_batch.py' -v
+python3 tests/stress/run.py --godot ./bin/godot.macos.editor.arm64 \
+  --case physics_compound_filter_batch_2d,physics_compound_filter_batch_3d \
+  --scale 4 --repeats 5 --frames 90 --rss-limit-mib 6144 \
+  --output out/physics-compound-filter-batch.json
+```
+
+The runtime workloads create up to 256 subshapes on a single kinematic body
+with one stationary obstacle per shape. They assert exact pair counts
+when masks, layers and exceptions change without movement and report the
+time spent inside the filter-update setter calls. Compare a baseline
+revision under identical runtime settings to assess speed. Source contracts
+and GitHub Actions are not substitutes for compilation and runtime tests.
+
 ## Early broadphase exception filtering (2D and 3D)
 
 The BVH previously discarded body-body collision exceptions only during the
