@@ -412,6 +412,43 @@ JPH::SoftBodySharedSettings *JoltSoftBody3D::_create_shared_settings() {
 	const int bend_mode = JoltProjectSettings::soft_body_bend_mode;
 	const BendType bend_type = bend_mode == 1 ? BendType::Distance : (bend_mode == 2 ? BendType::Dihedral : BendType::None);
 	settings->CreateConstraints(&vertex_attrib, 1, bend_type);
+
+	// Optional warp/weft response of woven cloth. Jolt stores compliance
+	// per structural spring; use the rest-pose edge direction rather than a
+	// world-space direction so rotating the soft body doesn't change its
+	// material. 1.0 is isotropic and skips this entire construction pass.
+	// The convex fan's radial springs are added *later*, so they retain
+	// their independent volumetric compliance.
+	const float fiber_multiplier = JoltProjectSettings::soft_body_fiber_compliance_multiplier;
+	if (fiber_multiplier != 1.0f) {
+		const int fiber_axis = JoltProjectSettings::soft_body_fiber_axis;
+		for (JPH::SoftBodySharedSettings::Edge &edge : settings->mEdgeConstraints) {
+			// FLT_MAX disables an edge in Jolt. Don't reactivate it, and
+			// don't modify rigid (zero-compliance) springs.
+			if (edge.mCompliance <= 0.0f || edge.mCompliance >= FLT_MAX || !Math::is_finite(edge.mCompliance)) {
+				continue;
+			}
+
+			const JPH::Float3 &a = settings->mVertices[edge.mVertex[0]].mPosition;
+			const JPH::Float3 &b = settings->mVertices[edge.mVertex[1]].mPosition;
+			const double dx = double(b.x) - double(a.x);
+			const double dy = double(b.y) - double(a.y);
+			const double dz = double(b.z) - double(a.z);
+			const double length_sq = dx * dx + dy * dy + dz * dz;
+			if (length_sq <= 0.0 || !Math::is_finite(length_sq)) {
+				continue;
+			}
+
+			const double parallel = fiber_axis == 0 ? dx : (fiber_axis == 1 ? dy : dz);
+			const double alignment_sq = parallel * parallel / length_sq;
+			const double compliance_scale = 1.0 + (double(fiber_multiplier) - 1.0) * alignment_sq;
+			const double adjusted = double(edge.mCompliance) * compliance_scale;
+			if (Math::is_finite(adjusted)) {
+				edge.mCompliance = float(MIN(adjusted, double(FLT_MAX)));
+			}
+		}
+	}
+
 	const float multiplier = 1.0f - shrinking_factor;
 	for (JPH::SoftBodySharedSettings::Edge &e : settings->mEdgeConstraints) {
 		e.mRestLength *= multiplier;
