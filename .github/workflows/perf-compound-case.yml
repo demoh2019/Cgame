@@ -1,0 +1,31 @@
+name: Compound case conversion performance regressions
+on:
+  push:
+    branches: [develop]
+    paths:
+      - 'core/string/ustring.cpp'
+      - 'tests/core/string/test_string.cpp'
+      - 'misc/scripts/tests/test_compound_case_perf.py'
+      - '.github/workflows/perf-compound-case.yml'
+  pull_request:
+    paths:
+      - 'core/string/ustring.cpp'
+      - 'tests/core/string/test_string.cpp'
+      - 'misc/scripts/tests/test_compound_case_perf.py'
+      - '.github/workflows/perf-compound-case.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  compound-source-contracts:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+      - name: Validate single-allocation and Unicode source contracts
+        run: |
+          python -m py_compile misc/scripts/tests/test_compound_case_perf.py
+          python -m unittest discover -s misc/scripts/tests -p test_compound_case_perf.py -v
