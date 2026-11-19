@@ -11,6 +11,7 @@ var _event_label: Label
 var _timer := 0.0
 var _hits := 0
 var _projectile_count := 0
+var _shape_cast: ShapeCast2D
 
 
 func _ready() -> void:
@@ -165,6 +166,15 @@ func _make_chains() -> void:
     var pendulum_anchor := _static_rect("Pendulum Support", Vector2(110, -230), Vector2(34, 34), Color("#dae1f3"))
     var bob := _rigid_circle(Vector2(190, -30), 32, Color("#f2b478"), 6.0)
     _pin(pendulum_anchor, bob, pendulum_anchor.global_position)
+    var groove_base := _static_rect("GrooveSupport", Vector2(-100, -230), Vector2(35, 35), Color("#d3e6f0"))
+    var slider_mass := _rigid_rect(Vector2(-100, -95), Vector2(31, 31), Color("#f1bb9e"))
+    var groove := GrooveJoint2D.new()
+    groove.position = groove_base.position
+    groove.length = 200
+    groove.initial_offset = 110
+    add_child(groove)
+    groove.node_a = groove.get_path_to(groove_base)
+    groove.node_b = groove.get_path_to(slider_mass)
 
 
 func _make_springs_and_areas() -> void:
@@ -206,6 +216,15 @@ func _launch_ccd() -> void:
 func _make_ccd() -> void:
     _static_rect("Thin CCD Target", Vector2(920, -40), Vector2(8, 240), Color("#e88b7a"))
     _launch_ccd()
+    _shape_cast = ShapeCast2D.new()
+    _shape_cast.name = "ThinWallShapeCast"
+    _shape_cast.position = Vector2(660, -280)
+    var test_circle := CircleShape2D.new()
+    test_circle.radius = 20
+    _shape_cast.shape = test_circle
+    _shape_cast.target_position = Vector2(300, 230)
+    _shape_cast.enabled = true
+    add_child(_shape_cast)
 
 
 func _make_character() -> void:
@@ -309,8 +328,9 @@ func _physics_process(delta: float) -> void:
         var query := PhysicsRayQueryParameters2D.create(Vector2(650, -350), Vector2(950, 300))
         var result := get_world_2d().direct_space_state.intersect_ray(query)
         var collider: String = str(result["collider"].name) if not result.is_empty() else "нет"
-        _stats.text = "FPS: %d  |  Dynamic bodies: %d  |  Ray2D: %s" % [
-            Engine.get_frames_per_second(), get_tree().get_nodes_in_group("demo_dynamic_2d").size(), collider
+        _stats.text = "FPS: %d | Bodies: %d | Ray2D: %s | ShapeCast: %s" % [
+            Engine.get_frames_per_second(), get_tree().get_nodes_in_group("demo_dynamic_2d").size(),
+            collider, str(_shape_cast.is_colliding())
         ]
 
 
