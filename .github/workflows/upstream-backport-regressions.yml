@@ -7,6 +7,7 @@ on:
       - "drivers/gles3/rasterizer_gles3.cpp"
       - "doc/classes/TextureRect.xml"
       - "misc/scripts/tests/test_upstream_backports.py"
+      - "misc/scripts/tests/test_upstream_backports_cpp.py"
       - ".github/workflows/upstream-backport-regressions.yml"
   push:
     branches: [develop]
@@ -15,6 +16,7 @@ on:
       - "drivers/gles3/rasterizer_gles3.cpp"
       - "doc/classes/TextureRect.xml"
       - "misc/scripts/tests/test_upstream_backports.py"
+      - "misc/scripts/tests/test_upstream_backports_cpp.py"
   workflow_dispatch:
 
 permissions:
@@ -29,6 +31,6 @@ jobs:
       - name: Check Python syntax
         run: python3 -m py_compile misc/scripts/tests/test_upstream_backports.py
       - name: Run editor, GLES3 and documentation regressions
-        run: python3 -m unittest discover -s misc/scripts/tests -p 'test_upstream_backports.py' -v
+        run: python3 -m unittest discover -s misc/scripts/tests -p 'test_upstream_backports*.py' -v
       - name: Run existing asset audit regressions
         run: python3 -m unittest discover -s misc/scripts/tests -p 'test_project_asset_audit.py' -v
