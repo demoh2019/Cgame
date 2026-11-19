@@ -41,6 +41,7 @@ TEST_FORCE_LINK(test_behavior_tree)
 #include "core/io/resource_loader.h"
 #include "core/io/resource_saver.h"
 #include "scene/main/scene_tree.h"
+#include "scene/main/window.h"
 #include "tests/signal_watcher.h"
 #include "tests/test_utils.h"
 

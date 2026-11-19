@@ -349,6 +349,87 @@ TEST_CASE("[SceneTree][WorldStreamer][FloatingOrigin3D] The chunk grid stays abs
 	memdelete(world);
 }
 
+// Builds a chunk containing one marker node; empty cells (x == 3) have no chunk.
+class Generator : public Object {
+public:
+	int calls = 0;
+	LocalVector<Vector3i> order;
+	Node *generate(const Vector3i &p_cell) {
+		calls++;
+		order.push_back(p_cell);
+		if (p_cell.x == 3) {
+			return nullptr;
+		}
+		Node3D *chunk = memnew(Node3D);
+		Node3D *marker = memnew(Node3D);
+		marker->set_name(vformat("Made_%d_%d", p_cell.x, p_cell.z));
+		chunk->add_child(marker);
+		return chunk;
+	}
+};
+
+TEST_CASE("[SceneTree][WorldStreamer] Procedural generator builds nearest chunks first and unloads far ones") {
+	Generator generator;
+	WorldStreamer *streamer = memnew(WorldStreamer);
+	streamer->set_cell_size(100.0);
+	streamer->set_load_radius(120.0);
+	streamer->set_unload_radius(180.0);
+	streamer->set_update_interval(0.0);
+	streamer->set_max_instantiations_per_frame(2);
+	streamer->set_chunk_generator(callable_mp(&generator, &Generator::generate));
+	SceneTree::get_singleton()->get_root()->add_child(streamer);
+
+	streamer->set_focus_position(Vector3(50, 0, 50));
+	SceneTree::get_singleton()->process(0.016);
+	// Two per frame: the first two generated cells are the nearest ones, the player's own cell first.
+	CHECK(generator.calls == 2);
+	REQUIRE(generator.order.size() == 2);
+	CHECK(generator.order[0] == Vector3i(0, 0, 0));
+	CHECK(streamer->get_loaded_count() == 2);
+	for (int i = 0; i < 6; i++) {
+		SceneTree::get_singleton()->process(0.016);
+	}
+	CHECK(streamer->get_loaded_count() == 9); // The 3x3 block within 120 m.
+	CHECK(generator.calls == 9);
+	Node3D *chunk = Object::cast_to<Node3D>(streamer->get_chunk(Vector3i(1, 0, 1)));
+	REQUIRE(chunk != nullptr);
+	CHECK(chunk->get_position().is_equal_approx(Vector3(100, 0, 100)));
+	CHECK(chunk->has_node(NodePath("Made_1_1")));
+
+	// A cell the generator answers null for is remembered and not asked again.
+	streamer->set_focus_position(Vector3(250, 0, 50));
+	for (int i = 0; i < 12; i++) {
+		SceneTree::get_singleton()->process(0.016);
+	}
+	CHECK_FALSE(streamer->is_cell_loaded(Vector3i(3, 0, 0)));
+	const int calls_before = generator.calls;
+	for (int i = 0; i < 6; i++) {
+		SceneTree::get_singleton()->process(0.016);
+	}
+	CHECK(generator.calls == calls_before);
+	CHECK(streamer->is_cell_loaded(Vector3i(2, 0, 0)));
+	CHECK(streamer->is_cell_loaded(Vector3i(1, 0, 0)));
+	CHECK_FALSE(streamer->is_cell_loaded(Vector3i(4, 0, 0))); // 150 m away, beyond the 120 m load radius.
+	CHECK(streamer->is_cell_loaded(Vector3i(0, 0, 0))); // 150 m away but inside the 180 m unload radius.
+	streamer->set_focus_position(Vector3(450, 0, 50));
+	for (int i = 0; i < 12; i++) {
+		SceneTree::get_singleton()->process(0.016);
+	}
+	CHECK_FALSE(streamer->is_cell_loaded(Vector3i(0, 0, 0))); // Now far enough behind to be freed.
+	CHECK(streamer->is_cell_loaded(Vector3i(4, 0, 0)));
+
+	// Moving fast: cells queued for a place the focus already left are skipped.
+	streamer->set_focus_position(Vector3(5050, 0, 50));
+	streamer->set_focus_position(Vector3(9050, 0, 50));
+	for (int i = 0; i < 20; i++) {
+		SceneTree::get_singleton()->process(0.016);
+	}
+	CHECK_FALSE(streamer->is_cell_loaded(Vector3i(50, 0, 0)));
+	CHECK(streamer->is_cell_loaded(Vector3i(90, 0, 0)));
+
+	memdelete(streamer);
+}
+
 TEST_CASE("[FloatingOrigin3D] Shift is zero inside the threshold and snapped outside") {
 	CHECK(FloatingOrigin3D::compute_shift(Vector3(100, 0, 100), 2000.0, 1000.0, false) == Vector3());
 	CHECK(FloatingOrigin3D::compute_shift(Vector3(2000, 0, 0), 2000.0, 1000.0, false) == Vector3()); // Exactly at the threshold.

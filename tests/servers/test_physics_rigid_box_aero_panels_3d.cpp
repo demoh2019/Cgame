@@ -262,7 +262,7 @@ TEST_CASE("[PhysicsBoxAero] World inverse inertia changes offset aerodynamic tor
 	half_inertia.scale(Vector3(real_t(0.5), real_t(0.5), real_t(0.5)));
 	CHECK(apply(v1, w1, 1, 0, 1, real_t(0.01), Vector3(0, 1, 0)));
 	CHECK(apply(v2, w2, 1, 0, 1, real_t(0.01), Vector3(0, 1, 0),
-			Vector3(), box_axes, 1, half_inertia));
+			Vector3(), Vector3(), box_axes, 1, half_inertia));
 	CHECK(w1.z > w2.z);
 	CHECK(v1.x == doctest::Approx(v2.x).epsilon(1e-5));
 }
@@ -271,8 +271,8 @@ TEST_CASE("[PhysicsBoxAero] Huge finite values either reject atomically or remai
 	Vector3 v(std::numeric_limits<real_t>::max() / real_t(2.0), 0, 0), w;
 	const Vector3 initial = v;
 	const bool ok = apply(v, w, 10, 10, 2000, real_t(1.0));
-	CHECK(!ok || v.is_finite());
-	CHECK(!ok || w.is_finite());
+	CHECK((!ok || v.is_finite()) == true);
+	CHECK((!ok || w.is_finite()) == true);
 	if (!ok) {
 		CHECK(v == initial);
 		CHECK(w == Vector3());

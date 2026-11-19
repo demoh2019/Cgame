@@ -62,6 +62,10 @@ private:
 	double update_interval = 0.1;
 	String chunk_path_template;
 	Callable chunk_provider;
+	// Procedural worlds: called on the main thread with the cell, returns the chunk node (or null).
+	Callable chunk_generator;
+	// Cells waiting for the generator, nearest first. Generation is paced by max_instantiations_per_frame.
+	LocalVector<Vector3i> generate_queue;
 	NodePath chunk_parent;
 	bool position_chunks = true;
 	bool enabled = true;
@@ -83,6 +87,8 @@ private:
 	void _update_streaming();
 	void _poll_loading();
 	bool _finalize_chunk(const Vector3i &p_cell, const String &p_path);
+	bool _adopt_chunk(const Vector3i &p_cell, Node *p_chunk);
+	void _run_generator_queue();
 	void _unload_cell(const Vector3i &p_cell);
 	void _reset_state();
 
@@ -113,6 +119,11 @@ public:
 	String get_chunk_path_template() const { return chunk_path_template; }
 	void set_chunk_provider(const Callable &p_provider);
 	Callable get_chunk_provider() const { return chunk_provider; }
+	// Builds chunks in code instead of loading scene files: `generator.call(cell)` must return a Node
+	// (or null for an empty cell). Use it for worlds generated from a seed. Takes precedence over the
+	// provider and the path template.
+	void set_chunk_generator(const Callable &p_generator);
+	Callable get_chunk_generator() const { return chunk_generator; }
 	void set_chunk_parent(const NodePath &p_parent);
 	NodePath get_chunk_parent() const { return chunk_parent; }
 	void set_position_chunks(bool p_enabled) { position_chunks = p_enabled; }

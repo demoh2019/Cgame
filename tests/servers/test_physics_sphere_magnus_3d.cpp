@@ -206,7 +206,7 @@ TEST_CASE("[PhysicsMagnus] Huge but finite inputs never produce nonfinite lift")
 	const real_t huge = std::numeric_limits<real_t>::max() / real_t(2.0);
 	const bool computed = lift(Vector3(huge, 0, 0),
 			Vector3(0, 0, huge), force);
-	CHECK(!computed || force.is_finite());
+	CHECK((!computed || force.is_finite()) == true);
 }
 
 } // namespace TestPhysicsSphereMagnus3D

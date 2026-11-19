@@ -130,6 +130,26 @@ void WorldStreamer::_unload_cell(const Vector3i &p_cell) {
 	emit_signal(SNAME("chunk_unloaded"), p_cell);
 }
 
+bool WorldStreamer::_adopt_chunk(const Vector3i &p_cell, Node *p_chunk) {
+	if (!p_chunk) {
+		return false;
+	}
+	p_chunk->set_name(vformat("Chunk_%d_%d_%d", p_cell.x, p_cell.y, p_cell.z));
+	if (position_chunks) {
+		const Vector3 origin = WorldStreamingGrid::cell_origin(p_cell, cell_size);
+		if (Node3D *chunk_3d = Object::cast_to<Node3D>(p_chunk)) {
+			chunk_3d->set_position(origin);
+		} else if (Node2D *chunk_2d = Object::cast_to<Node2D>(p_chunk)) {
+			chunk_2d->set_position(Vector2(origin.x, origin.y));
+		}
+	}
+	Node *parent = _get_parent_for_chunks();
+	parent->add_child(p_chunk);
+	loaded[p_cell] = p_chunk->get_instance_id();
+	emit_signal(SNAME("chunk_loaded"), p_cell, p_chunk);
+	return true;
+}
+
 bool WorldStreamer::_finalize_chunk(const Vector3i &p_cell, const String &p_path) {
 	Error error = OK;
 	Ref<PackedScene> scene = ResourceLoader::load_threaded_get(p_path, &error);
@@ -140,23 +160,61 @@ bool WorldStreamer::_finalize_chunk(const Vector3i &p_cell, const String &p_path
 	if (!chunk) {
 		return false;
 	}
-	chunk->set_name(vformat("Chunk_%d_%d_%d", p_cell.x, p_cell.y, p_cell.z));
-	if (position_chunks) {
-		const Vector3 origin = WorldStreamingGrid::cell_origin(p_cell, cell_size);
-		if (Node3D *chunk_3d = Object::cast_to<Node3D>(chunk)) {
-			chunk_3d->set_position(origin);
-		} else if (Node2D *chunk_2d = Object::cast_to<Node2D>(chunk)) {
-			chunk_2d->set_position(Vector2(origin.x, origin.y));
+	return _adopt_chunk(p_cell, chunk);
+}
+
+// Generates queued cells on the main thread, a bounded number per call.
+void WorldStreamer::_run_generator_queue() {
+	if (generate_queue.is_empty() || !chunk_generator.is_valid()) {
+		return;
+	}
+	Vector3 position;
+	const bool have_focus = _get_focus_position(position);
+	const real_t keep_radius = MAX(unload_radius, load_radius);
+	int budget = MAX(max_instantiations_per_frame, 1);
+	uint32_t consumed = 0;
+	while (consumed < generate_queue.size() && budget > 0) {
+		const Vector3i cell = generate_queue[consumed++];
+		if (loaded.has(cell)) {
+			continue;
+		}
+		// The focus may have moved on while the cell waited in the queue.
+		if (!have_focus || WorldStreamingGrid::distance_to_cell(position, cell, cell_size, _grid_axes()) > keep_radius) {
+			continue;
+		}
+		budget--;
+		Variant cell_variant = cell;
+		const Variant *args[1] = { &cell_variant };
+		Variant result;
+		Callable::CallError error;
+		chunk_generator.callp(args, 1, result, error);
+		if (error.error != Callable::CallError::CALL_OK) {
+			failed.insert(cell);
+			emit_signal(SNAME("chunk_load_failed"), cell, String("generator call failed"));
+			continue;
+		}
+		Node *chunk = Object::cast_to<Node>(result.get_validated_object());
+		if (!chunk) {
+			missing.insert(cell); // The generator says there is nothing here.
+			continue;
+		}
+		if (!_adopt_chunk(cell, chunk)) {
+			memdelete(chunk);
+			failed.insert(cell);
+			emit_signal(SNAME("chunk_load_failed"), cell, String("generator returned an unusable node"));
 		}
 	}
-	Node *parent = _get_parent_for_chunks();
-	parent->add_child(chunk);
-	loaded[p_cell] = chunk->get_instance_id();
-	emit_signal(SNAME("chunk_loaded"), p_cell, chunk);
-	return true;
+	if (consumed > 0) {
+		LocalVector<Vector3i> rest;
+		for (uint32_t i = consumed; i < generate_queue.size(); i++) {
+			rest.push_back(generate_queue[i]);
+		}
+		generate_queue = rest;
+	}
 }
 
 void WorldStreamer::_poll_loading() {
+	_run_generator_queue();
 	if (loading.is_empty()) {
 		return;
 	}
@@ -245,6 +303,20 @@ void WorldStreamer::_update_streaming() {
 		WARN_PRINT(vformat("WorldStreamer: load_radius %s with cell_size %s covers more than %d cells; only the nearest are streamed. Increase cell_size or reduce load_radius.", rtos(load_radius), rtos(cell_size), WorldStreamingGrid::MAX_CELLS));
 	}
 
+	if (chunk_generator.is_valid()) {
+		// Rebuild the queue: nearest wanted cells that are neither loaded nor queued yet.
+		HashSet<Vector3i> queued;
+		for (const Vector3i &cell : generate_queue) {
+			queued.insert(cell);
+		}
+		for (const Vector3i &cell : wanted) {
+			if (!loaded.has(cell) && !queued.has(cell) && !missing.has(cell) && !failed.has(cell)) {
+				generate_queue.push_back(cell);
+			}
+		}
+		return;
+	}
+
 	for (const Vector3i &cell : wanted) {
 		if (int(loading.size()) >= MAX(max_concurrent_loads, 1)) {
 			break;
@@ -277,6 +349,7 @@ void WorldStreamer::_reset_state() {
 	// In-flight requests finish on their own; their results are released when polled.
 	missing.clear();
 	failed.clear();
+	generate_queue.clear();
 	truncated_warned = false;
 	time_since_update = 1e9;
 }
@@ -315,6 +388,7 @@ void WorldStreamer::_notification(int p_what) {
 			if (time_since_update >= update_interval) {
 				time_since_update = 0.0;
 				_update_streaming();
+				_run_generator_queue(); // New cells are built in the same frame they were queued.
 			}
 		} break;
 	}
@@ -380,6 +454,13 @@ void WorldStreamer::set_chunk_provider(const Callable &p_provider) {
 	failed.clear();
 }
 
+void WorldStreamer::set_chunk_generator(const Callable &p_generator) {
+	chunk_generator = p_generator;
+	generate_queue.clear();
+	missing.clear();
+	failed.clear();
+}
+
 void WorldStreamer::set_chunk_parent(const NodePath &p_parent) {
 	chunk_parent = p_parent;
 }
@@ -417,6 +498,7 @@ void WorldStreamer::refresh(bool p_retry) {
 	}
 	_poll_loading();
 	_update_streaming();
+	_run_generator_queue();
 	time_since_update = 0.0;
 }
 
@@ -451,6 +533,8 @@ void WorldStreamer::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("get_update_interval"), &WorldStreamer::get_update_interval);
 	ClassDB::bind_method(D_METHOD("set_chunk_path_template", "template"), &WorldStreamer::set_chunk_path_template);
 	ClassDB::bind_method(D_METHOD("get_chunk_path_template"), &WorldStreamer::get_chunk_path_template);
+	ClassDB::bind_method(D_METHOD("set_chunk_generator", "generator"), &WorldStreamer::set_chunk_generator);
+	ClassDB::bind_method(D_METHOD("get_chunk_generator"), &WorldStreamer::get_chunk_generator);
 	ClassDB::bind_method(D_METHOD("set_chunk_provider", "provider"), &WorldStreamer::set_chunk_provider);
 	ClassDB::bind_method(D_METHOD("get_chunk_provider"), &WorldStreamer::get_chunk_provider);
 	ClassDB::bind_method(D_METHOD("set_chunk_parent", "parent"), &WorldStreamer::set_chunk_parent);

@@ -35,6 +35,12 @@
 				Returns the loaded chunk of [param cell], or [code]null[/code] if that cell is not loaded.
 			</description>
 		</method>
+		<method name="get_chunk_generator" qualifiers="const">
+			<return type="Callable" />
+			<description>
+				Returns the callback set with [method set_chunk_generator].
+			</description>
+		</method>
 		<method name="get_chunk_provider" qualifiers="const">
 			<return type="Callable" />
 			<description>
@@ -71,6 +77,13 @@
 			<param index="0" name="retry" type="bool" default="false" />
 			<description>
 				Updates the streaming immediately instead of waiting for [member update_interval]. If [param retry] is [code]true[/code], cells that had no scene or failed to load are tried again, for example after new chunk files were added.
+			</description>
+		</method>
+		<method name="set_chunk_generator">
+			<return type="void" />
+			<param index="0" name="generator" type="Callable" />
+			<description>
+				Sets a callback that builds the chunk of a cell in code, for worlds generated from a seed instead of stored as scene files. It receives the cell as a [Vector3i] and returns the chunk as a [Node], or [code]null[/code] for an empty cell. It runs on the main thread, at most [member max_instantiations_per_frame] times per frame, nearest cells first, and the focus may have moved away by the time a queued cell would be built, in which case it is skipped. When a generator is set, [member chunk_path_template] and [method set_chunk_provider] are ignored.
 			</description>
 		</method>
 		<method name="set_chunk_provider">
