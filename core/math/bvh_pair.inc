@@ -12,7 +12,6 @@ struct ItemPairs {
 	};
 
 	void clear() {
-		num_pairs = 0;
 		extended_pairs.reset();
 		expanded_aabb = BOUNDS();
 	}
@@ -20,7 +19,6 @@ struct ItemPairs {
 	BOUNDS expanded_aabb;
 
 	// maybe we can just use the number in the vector TODO
-	int32_t num_pairs;
 	LocalVector<Link> extended_pairs;
 
 	void add_pair_to(BVHHandle p_handle, void *p_userdata) {
@@ -28,11 +26,10 @@ struct ItemPairs {
 		temp.set(p_handle, p_userdata);
 
 		extended_pairs.push_back(temp);
-		num_pairs++;
 	}
 
 	uint32_t find_pair_to(BVHHandle p_handle) const {
-		for (int n = 0; n < num_pairs; n++) {
+		for (int n = 0; n < extended_pairs.size(); n++) {
 			if (extended_pairs[n].handle == p_handle) {
 				return n;
 			}
@@ -48,11 +45,10 @@ struct ItemPairs {
 	void *remove_pair_to(BVHHandle p_handle) {
 		void *userdata = nullptr;
 
-		for (int n = 0; n < num_pairs; n++) {
+		for (int n = 0; n < extended_pairs.size(); n++) {
 			if (extended_pairs[n].handle == p_handle) {
 				userdata = extended_pairs[n].userdata;
 				extended_pairs.remove_at_unordered(n);
-				num_pairs--;
 				break;
 			}
 		}
@@ -64,7 +60,7 @@ struct ItemPairs {
 	// when the number of pairs is high, the density is high and a lower collision margin is better.
 	// when there are few local pairs, a larger margin is more optimal.
 	real_t scale_expansion_margin(real_t p_margin) const {
-		real_t x = real_t(num_pairs) * (1.0 / 9.0);
+		real_t x = real_t(extended_pairs.size()) * (1.0 / 9.0);
 		x = MIN(x, 1.0);
 		x = 1.0 - x;
 		return p_margin * x;
