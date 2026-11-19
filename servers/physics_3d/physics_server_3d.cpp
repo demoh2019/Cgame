@@ -745,6 +745,11 @@ PhysicsServer3D::PhysicsServer3D() {
 	// in rigid/rigid and rigid/soft contacts. 0 disables extra math.
 	// Uses the static friction multiplier to define low-speed friction.
 	GLOBAL_DEF(PropertyInfo(Variant::FLOAT, "physics/3d/solver/stribeck_transition_velocity", PROPERTY_HINT_RANGE, "0,10,0.01,or_greater,suffix:m/s"), 0.0);
+	// Opt-in Bullet-inspired anisotropic tangential contact resistance.
+	// The preferred axis is WORLD-space; only its projection into the
+	// contact plane matters. 1.0 preserves the existing isotropic solver.
+	GLOBAL_DEF(PropertyInfo(Variant::FLOAT, "physics/3d/solver/friction_anisotropy_ratio", PROPERTY_HINT_RANGE, "0.01,1,0.01"), 1.0);
+	GLOBAL_DEF(PropertyInfo(Variant::VECTOR3, "physics/3d/solver/friction_anisotropy_axis"), Vector3(1, 0, 0));
 	GLOBAL_DEF(PropertyInfo(Variant::INT, "physics/3d/solver/friction_combine_mode", PROPERTY_HINT_ENUM, "Legacy Minimum,Geometric Mean,Average,Maximum"), 0);
 	// Default preserves the historic clamped sum. Other modes match common
 	// game-physics coefficient combination rules (Box2D / Rapier).
