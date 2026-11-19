@@ -259,7 +259,7 @@ func submit_input(peer_id: int, seq: int, move_x: float, move_z: float, sprint: 
 		var before_move: Vector3 = player.position
 		var factor: float = player.inventory.movement_factor()
 		var moving := move_x * move_x + move_z * move_z > 0.00001
-		var sprint_allowed := sprint and moving and factor >= 0.9999 and player.survival.try_sprint(allowed)
+		var sprint_allowed: bool = sprint and moving and factor >= 0.9999 and player.survival.try_sprint(allowed)
 		player.position = Movement.step(world, player.position, {
 			"x": move_x, "z": move_z, "sprint": sprint_allowed,
 			"cargo_factor": factor,
