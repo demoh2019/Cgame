@@ -57,6 +57,7 @@ const SUITES := [
 	"res://tests/test_party.gd",
 	"res://tests/test_party_aid.gd",
 	"res://tests/test_territory_control.gd",
+	"res://tests/test_outpost_supplies.gd",
 	"res://tests/test_outpost_fortification.gd",
 	"res://tests/test_party_rally.gd",
 	"res://tests/test_party_combat_safety.gd",
