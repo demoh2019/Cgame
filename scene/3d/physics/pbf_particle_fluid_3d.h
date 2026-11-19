@@ -120,6 +120,7 @@ public:
 	PackedVector3Array get_particle_positions() const;
 	PackedVector3Array get_particle_velocities() const;
 	void clear_particles();
+	int add_velocity_pulse(const Vector3 &p_center, real_t p_radius, const Vector3 &p_delta_velocity);
 	int get_particle_count() const { return positions.size(); }
 	real_t get_average_density() const { return average_density; }
 	int get_last_neighbor_evaluations() const { return int(MIN(last_neighbor_evaluations, uint64_t(2147483647))); }
