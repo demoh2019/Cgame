@@ -779,4 +779,59 @@ TEST_CASE("[Object] Rare user signal metadata survives many registrations") {
 	object.get_signal_list(&after);
 	CHECK_EQ(after.size(), before.size() + 128);
 }
+
+TEST_CASE("[ObjectSingleProbe] existing metadata reads return exact stored variants") {
+	Object object;
+	object.set_meta("_perf_meta_value", Vector3(1, 2, 3));
+	for (int i = 0; i < 128; ++i) {
+		CHECK_EQ(object.get_meta("_perf_meta_value"), Variant(Vector3(1, 2, 3)));
+		CHECK(object.has_meta("_perf_meta_value"));
+	}
+	CHECK_EQ(object.get_meta("_perf_meta_value", Variant(99)), Variant(Vector3(1, 2, 3)));
+}
+
+TEST_CASE("[ObjectSingleProbe] missing metadata defaults never create map entries") {
+	Object object;
+	CHECK_FALSE(object.has_meta("_perf_absent"));
+	for (int i = 0; i < 128; ++i) {
+		CHECK_EQ(object.get_meta("_perf_absent", Variant(78)), Variant(78));
+		CHECK_FALSE(object.has_meta("_perf_absent"));
+	}
+	ERR_PRINT_OFF;
+	CHECK_EQ(object.get_meta("_perf_absent").get_type(), Variant::NIL);
+	ERR_PRINT_ON;
+	CHECK_FALSE(object.has_meta("_perf_absent"));
+}
+
+TEST_CASE("[ObjectSingleProbe] erasing an absent key leaves metadata unchanged") {
+	Object object;
+	object.set_meta("_perf_existing", 7);
+	object.remove_meta("_perf_absent");
+	CHECK_EQ(object.get_meta("_perf_existing"), Variant(7));
+	object.remove_meta("_perf_existing");
+	CHECK_FALSE(object.has_meta("_perf_existing"));
+	object.remove_meta("_perf_existing");
+	CHECK_FALSE(object.has_meta("_perf_existing"));
+}
+
+TEST_CASE("[ObjectSingleProbe] dynamic user signals remain visible and distinct") {
+	Object object;
+	const StringName custom_signal = SNAME("cgame_user_signal_fastpath");
+	CHECK_FALSE(object.has_signal(custom_signal));
+	object.add_user_signal(MethodInfo(custom_signal));
+	for (int i = 0; i < 128; ++i) {
+		CHECK(object.has_signal(custom_signal));
+		CHECK_FALSE(object.has_signal(SNAME("nonexistent_user_signal_fastpath")));
+	}
+	List<MethodInfo> signals;
+	object.get_signal_list(&signals);
+	bool found = false;
+	for (const MethodInfo &signal : signals) {
+		if (signal.name == custom_signal) {
+			found = true;
+		}
+	}
+	CHECK(found);
+}
+
 } // namespace TestObject
