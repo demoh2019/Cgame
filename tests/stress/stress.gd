@@ -15,7 +15,7 @@ const CanvasScenePerf := preload("res://canvas_scene_perf.gd")
 const CASES := [
 	"containers", "array_literals", "dictionary_snapshot", "strings", "script_vm", "math", "signals",
 	"scene_tree", "packed_scene", "images", "json", "stream", "stream_bulk",
-	"file_io", "threads", "physics_2d", "physics_contacts_zero_friction_2d", "physics_contacts_friction_2d", "physics_3d", "physics_ccd_3d", "physics_joint_chain_2d", "physics_joint_chain_3d", "physics_sparse_2d", "physics_sparse_3d", "physics_proxies_2d", "physics_proxies_3d", "physics_rid_sparse_2d", "physics_rid_sparse_3d", "physics_rid_moving_2d", "physics_rid_moving_3d", "physics_restitution_2d", "physics_restitution_3d",
+	"file_io", "threads", "physics_2d", "physics_contacts_zero_friction_2d", "physics_contacts_friction_2d", "physics_3d", "physics_frictionless_3d", "physics_ccd_3d", "physics_joint_chain_2d", "physics_joint_chain_3d", "physics_sparse_2d", "physics_sparse_3d", "physics_proxies_2d", "physics_proxies_3d", "physics_rid_sparse_2d", "physics_rid_sparse_3d", "physics_rid_moving_2d", "physics_rid_moving_3d", "physics_restitution_2d", "physics_restitution_3d",
 	"object_churn", "memory_churn", "astar_grid", "astar_grid_neighbors", "astar_grid_jps", "astar_grid_fill", "astar_grid_rebuild", "astar_relax_2d", "astar_relax_3d", "astar_graph", "tweens", "audio_buffers",
 	"variant_codec", "packet_stream", "packet_tx_batch", "packet_rx_batch", "packet_variant_reuse", "ui_layout", "grid_reflow", "box_reflow", "flow_reflow", "render_2d", "render_3d", "render_ellipse_2d", "render_light_culling_3d",
 	"resource_load",
@@ -263,6 +263,8 @@ func _run_case(test_case: String, scale: int, frames: int, seed: int) -> Diction
 			return await _physics_contacts_2d(scale, frames, 1.0)
 		"physics_3d":
 			return await _physics_3d(scale, frames)
+		"physics_frictionless_3d":
+			return await _physics_3d(scale, frames, true)
 		"physics_ccd_3d":
 			return await _physics_ccd_3d(scale, frames)
 		"physics_joint_chain_2d":
@@ -683,14 +685,18 @@ func _physics_contacts_2d(scale: int, frames: int, friction: float) -> Dictionar
 		"frame_interval_ms": stats, "frame_p95_ms": stats["p95"], "state_valid": state_valid}
 
 
-func _physics_3d(scale: int, frames: int) -> Dictionary:
+func _physics_3d(scale: int, frames: int, p_frictionless: bool = false) -> Dictionary:
 	var world := Node3D.new()
 	root.add_child(world)
 	var sphere := SphereShape3D.new()
 	sphere.radius = 0.6
+	var frictionless_material := PhysicsMaterial.new()
+	frictionless_material.friction = 0.0
 	var length := 100 * scale
 	for i in range(length):
 		var body := RigidBody3D.new()
+		if p_frictionless:
+			body.physics_material_override = frictionless_material
 		body.position = Vector3(float(i % 20), float(i / 20), 0.0)
 		var collider := CollisionShape3D.new()
 		collider.shape = sphere
