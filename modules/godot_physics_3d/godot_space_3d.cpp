@@ -1395,6 +1395,12 @@ GodotSpace3D::GodotSpace3D() {
 	static_friction_multiplier = MAX(real_t(1.0), (real_t)GLOBAL_GET("physics/3d/solver/static_friction_multiplier"));
 	const real_t configured_stribeck_velocity = GLOBAL_GET("physics/3d/solver/stribeck_transition_velocity");
 	stribeck_transition_velocity = Math::is_finite(configured_stribeck_velocity) ? MAX(real_t(0.0), configured_stribeck_velocity) : real_t(0.0);
+	const real_t configured_anisotropy_ratio = GLOBAL_GET("physics/3d/solver/friction_anisotropy_ratio");
+	friction_anisotropy_ratio = Math::is_finite(configured_anisotropy_ratio) ? CLAMP(configured_anisotropy_ratio, real_t(0.01), real_t(1.0)) : real_t(1.0);
+	const Vector3 configured_anisotropy_axis = GLOBAL_GET("physics/3d/solver/friction_anisotropy_axis");
+	const real_t axis_length_squared = configured_anisotropy_axis.length_squared();
+	friction_anisotropy_axis = configured_anisotropy_axis.is_finite() && Math::is_finite(axis_length_squared) && axis_length_squared > real_t(1e-12) ?
+			configured_anisotropy_axis.normalized() : Vector3(1, 0, 0);
 	friction_combine_mode = CLAMP((int)GLOBAL_GET("physics/3d/solver/friction_combine_mode"), 0, 3);
 	restitution_combine_mode = CLAMP((int)GLOBAL_GET("physics/3d/solver/restitution_combine_mode"), 0, 5);
 	// Read once at space creation, avoiding ProjectSettings lookups in the hot contact loop.
