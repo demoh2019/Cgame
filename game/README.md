@@ -31,3 +31,21 @@ game/tests/e2e/run_e2e.sh path/to/godot                                    # rea
 game/tests/e2e/run_e2e_nakama.sh path/to/godot                             # needs Nakama: sign-in, save, return
 godot --headless --path game --script res://tests/test_nakama_backend.gd   # Nakama RPC security and storage
 ```
+
+## Infected wounds and field medicine (original gameplay rules)
+
+The authoritative headless server now applies fictional infection severity on
+zombie melee hits: walkers +14, runners +12, brutes +25, capped at 100.
+At 50 or more, infection causes 1.25 health damage per second. It naturally
+decays by 0.02 per second. While symptomatic, passive health recovery stops.
+
+Craft an **antiseptic** with **one cloth T1 + one water bottle** (no workbench);
+using it removes 55 infection points. The server rejects consumption if already
+healthy. Infection is included in the player's authoritative snapshot (the HUD
+shows a fourth bar) and persists in the existing version-1 character data.
+Older records without this field load with zero infection, while invalid
+values are rejected before any player state is mutated.
+
+Run `godot --headless --path game --script res://tests/run_all.gd` to execute
+the shared infection and server transaction regression tests. The condition
+is a fictional game mechanic, not a model of real infectious diseases.

@@ -27,12 +27,16 @@ const THIRST_PER_SECOND := 0.07
 const STARVE_DAMAGE_PER_SECOND := 1.2
 const INVENTORY_SLOTS := 24
 const RESPAWN_SECONDS := 4.0
+# Fictional infection loop: zombie attacks infect, medicine removes the condition.
+const INFECTION_DAMAGE_THRESHOLD := 50.0
+const INFECTION_DAMAGE_PER_SECOND := 1.25
+const INFECTION_RECOVERY_PER_SECOND := 0.02
 
 # --- Zombies ---------------------------------------------------------------------------------------
 const ZOMBIES := {
-	"walker": {"health": 45.0, "speed": 1.7, "damage": 9.0, "attack_range": 1.6, "attack_cooldown": 1.3, "notice": 16.0, "lose": 34.0, "xp": 5},
-	"runner": {"health": 28.0, "speed": 4.4, "damage": 7.0, "attack_range": 1.6, "attack_cooldown": 0.9, "notice": 24.0, "lose": 40.0, "xp": 8},
-	"brute": {"health": 170.0, "speed": 2.2, "damage": 26.0, "attack_range": 2.0, "attack_cooldown": 1.8, "notice": 14.0, "lose": 30.0, "xp": 25},
+	"walker": {"health": 45.0, "speed": 1.7, "damage": 9.0, "infection": 14.0, "attack_range": 1.6, "attack_cooldown": 1.3, "notice": 16.0, "lose": 34.0, "xp": 5},
+	"runner": {"health": 28.0, "speed": 4.4, "damage": 7.0, "infection": 12.0, "attack_range": 1.6, "attack_cooldown": 0.9, "notice": 24.0, "lose": 40.0, "xp": 8},
+	"brute": {"health": 170.0, "speed": 2.2, "damage": 26.0, "infection": 25.0, "attack_range": 2.0, "attack_cooldown": 1.8, "notice": 14.0, "lose": 30.0, "xp": 25},
 }
 
 # --- Items -------------------------------------------------------------------------------------------
@@ -130,6 +134,8 @@ static func _build_items() -> void:
 	_add_item("water_bottle", {"name": "Water Bottle", "kind": "drink", "drink": 45.0, "stack": 10, "value": 8})
 	_add_item("bandage", {"name": "Bandage", "kind": "medical", "heal": 28.0, "stack": 10, "value": 10})
 	_add_recipe("bandage", "bandage", 2, {"cloth_1": 2}, "", 2.0)
+	_add_item("antiseptic", {"name": "Field Antiseptic", "kind": "medical", "infection_reduction": 55.0, "stack": 10, "value": 16})
+	_add_recipe("antiseptic", "antiseptic", 1, {"cloth_1": 1, "water_bottle": 1}, "", 2.5)
 	# Days After loot: only found while scavenging ruins.
 	_add_item("pistol", {"name": "Pistol", "kind": "weapon", "weapon": "ranged", "tier": 3, "damage": 22.0, "cooldown": 0.45, "ammo": "ammo_9mm", "value": 150})
 	_add_item("ammo_9mm", {"name": "9mm Ammo", "kind": "ammo", "stack": 60, "value": 2})
