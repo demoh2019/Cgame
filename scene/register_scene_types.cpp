@@ -100,6 +100,7 @@
 #include "scene/gui/virtual_joystick.h"
 #include "scene/main/canvas_item.h"
 #include "scene/main/canvas_layer.h"
+#include "scene/main/debug_draw.h"
 #include "scene/main/http_request.h"
 #include "scene/main/instance_placeholder.h"
 #include "scene/main/missing_node.h"
@@ -386,6 +387,7 @@ static Ref<ResourceFormatLoaderText> resource_loader_text;
 static Ref<ResourceFormatLoaderCompressedTexture2D> resource_loader_compressed_texture;
 static Ref<ResourceFormatLoaderStreamedTexture2D> resource_loader_streamed_texture;
 static Ref<ResourceFormatLoaderCompressedTextureLayered> resource_loader_texture_layered;
+static DebugDraw *debug_draw = nullptr;
 static Ref<ResourceFormatLoaderCompressedTexture3D> resource_loader_texture_3d;
 
 static Ref<ResourceFormatSaverShader> resource_saver_shader;
@@ -1354,6 +1356,12 @@ void register_scene_types() {
 void unregister_scene_types() {
 	OS::get_singleton()->benchmark_begin_measure("Scene", "Unregister Types");
 
+	if (debug_draw) {
+		Engine::get_singleton()->remove_singleton("DebugDraw");
+		memdelete(debug_draw);
+		debug_draw = nullptr;
+	}
+
 	SceneDebugger::deinitialize();
 
 	if constexpr (GD_IS_CLASS_ENABLED(TextureLayered)) {
@@ -1422,8 +1430,12 @@ void register_scene_singletons() {
 	OS::get_singleton()->benchmark_begin_measure("Scene", "Register Singletons");
 
 	GDREGISTER_CLASS(ThemeDB);
+	GDREGISTER_CLASS(DebugDraw);
 
 	Engine::get_singleton()->add_singleton(Engine::Singleton("ThemeDB", ThemeDB::get_singleton()));
+
+	debug_draw = memnew(DebugDraw);
+	Engine::get_singleton()->add_singleton(Engine::Singleton("DebugDraw", debug_draw));
 
 	OS::get_singleton()->benchmark_end_measure("Scene", "Register Singletons");
 }
