@@ -95,7 +95,8 @@ Native Doctest tests:
     ./bin/godot.linuxbsd.editor.dev.x86_64 --headless --test \
         --test-case="[PhysicsXPBDBuckling]*"
 
-Test scenarios include disabled mode, tension invariance, yield,
+Test scenarios include actual XPBD compressive restoring-force comparison,
+tension/buckling composition, disabled mode, tension invariance, yield,
 smoothstep midpoint, saturated compression, discontinuous transition,
 fully collapsed link, zero rest length, translation/reversed links,
 yield at 100%, floating-point saturation and invalid input with
