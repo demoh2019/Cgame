@@ -131,6 +131,19 @@ class ProcessIsolationTests(unittest.TestCase):
         self.assertEqual(actual["status"], "passed", actual)
         self.assertEqual(actual["engine"]["duration_ms"], 13.2)
 
+    def test_logged_engine_error_fails_even_on_zero_exit(self):
+        payload = json.dumps(result_payload())
+        script = "print('ERROR: runtime failure');print(" + repr(stress.PREFIX + payload) + ")"
+        actual = stress.run_once([sys.executable, "-c", script], 5., 1024.,
+                                 "containers", 1, 12, 12345)
+        self.assertEqual(actual["status"], "failed")
+        self.assertEqual(actual["failure"], "engine_error_log")
+
+    def test_engine_log_error_pattern(self):
+        self.assertIsNotNone(stress.ENGINE_ERROR.search("SCRIPT ERROR: bad script"))
+        self.assertIsNotNone(stress.ENGINE_ERROR.search("E 0:00:00:000 bad resource"))
+        self.assertIsNone(stress.ENGINE_ERROR.search("WARNING: harmless note"))
+
     def test_child_crash(self):
         actual = stress.run_once([sys.executable, "-c", "import sys;sys.exit(7)"],
                                  5., 1024., "containers", 1, 12, 12345)
