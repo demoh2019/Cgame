@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<class name="BehaviorTreeSelector" inherits="BehaviorTreeComposite" api_type="core" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="../../../doc/class.xsd">
+	<brief_description>Executes fallback tasks until one succeeds or runs.</brief_description>
+	<description>A selector returns [constant BehaviorTreeTask.SUCCESS] as soon as a child succeeds. Failed tasks are skipped; a running child is resumed on subsequent ticks. If all children fail, or no children exist, the selector fails.</description>
+	
+</class>
