@@ -1,0 +1,43 @@
+name: RichTextLabel Theme Fast Path
+on:
+  pull_request:
+    paths:
+      - "scene/gui/rich_text_label.cpp"
+      - "scene/gui/rich_text_label.h"
+      - "tests/scene/test_rich_text_label.cpp"
+      - "misc/tests/test_richtext_theme_cache_contracts.py"
+      - ".github/workflows/richtext-theme-cache-fastpath.yml"
+  workflow_dispatch:
+
+jobs:
+  source-contracts:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+      - run: python -m unittest discover -s misc/tests -p test_richtext_theme_cache_contracts.py -v
+  native-tests:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          submodules: recursive
+      - uses: ./.github/actions/godot-cache-restore
+        with:
+          cache-name: linux-richtext-theme-fastpath
+        continue-on-error: true
+      - uses: ./.github/actions/godot-deps
+      - uses: ./.github/actions/godot-build
+        with:
+          platform: linuxbsd
+          target: editor
+          scons-flags: tests=yes module_text_server_fb_enabled=yes -j2
+      - uses: ./.github/actions/godot-cache-save
+        with:
+          cache-name: linux-richtext-theme-fastpath
+        continue-on-error: true
+      - name: Run RichTextLabel theme tests
+        run: ./bin/godot.linuxbsd.editor.x86_64 --headless --test --test-case="*[RichTextThemeFastPath]*"
