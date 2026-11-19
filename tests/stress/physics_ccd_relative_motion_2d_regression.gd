@@ -7,7 +7,7 @@ func _initialize() -> void:
 	_run.call_deferred()
 
 
-func _make_body(space: RID, shape: RID, x: float, velocity: float, ccd: bool, static_body: bool = false) -> RID:
+func _make_body(space: RID, shape: RID, x: float, velocity: float, ccd: bool, static_body: bool = false, y: float = 0.0) -> RID:
 	var body: RID = PhysicsServer2D.body_create()
 	if static_body:
 		PhysicsServer2D.body_set_mode(body, PhysicsServer2D.BODY_MODE_STATIC)
@@ -19,7 +19,7 @@ func _make_body(space: RID, shape: RID, x: float, velocity: float, ccd: bool, st
 	PhysicsServer2D.body_set_param(body, PhysicsServer2D.BODY_PARAM_ANGULAR_DAMP, 0.0)
 	PhysicsServer2D.body_set_state(body, PhysicsServer2D.BODY_STATE_CAN_SLEEP, false)
 	PhysicsServer2D.body_set_state(body, PhysicsServer2D.BODY_STATE_TRANSFORM,
-			Transform2D(0.0, Vector2(x, 0.0)))
+			Transform2D(0.0, Vector2(x, y)))
 	PhysicsServer2D.body_set_state(body, PhysicsServer2D.BODY_STATE_LINEAR_VELOCITY,
 			Vector2(velocity, 0.0))
 	if ccd:
@@ -29,13 +29,13 @@ func _make_body(space: RID, shape: RID, x: float, velocity: float, ccd: bool, st
 
 
 func _run_case(label: String, target_x: float, velocity_a: float, velocity_b: float,
-		min_speed: float, max_speed: float, static_target: bool = false, target_ccd: bool = false) -> int:
+		min_speed: float, max_speed: float, static_target: bool = false, target_ccd: bool = false, target_y: float = 0.0) -> int:
 	var space: RID = PhysicsServer2D.space_create()
 	var circle: RID = PhysicsServer2D.circle_shape_create()
 	PhysicsServer2D.shape_set_data(circle, 0.5)
 
 	var a: RID = _make_body(space, circle, 0.0, velocity_a, true)
-	var b: RID = _make_body(space, circle, target_x, velocity_b, target_ccd, static_target)
+	var b: RID = _make_body(space, circle, target_x, velocity_b, target_ccd, static_target, target_y)
 	PhysicsServer2D.space_set_active(space, true)
 	await physics_frame
 	await physics_frame
@@ -82,6 +82,11 @@ func _run() -> void:
 	# their collision geometry. The obstacle is stationary despite the
 	# nonzero velocity used for contact friction, so A must still brake.
 	failures += await _run_case("static conveyor surface", 1.02, 600.0, 600.0, 0.0, 525.0, true)
+
+	# The leading support ray runs along y=0 and misses a radius-0.5
+	# obstacle at y=0.8. A swept radius-one Minkowski sphere does hit it.
+	# Analytic circle/sphere TOI must catch this glancing collision.
+	failures += await _run_case("glancing sphere CCD", 4.0, 480.0, 0.0, 0.0, 440.0, true, false, 0.8)
 
 	if failures:
 		printerr("2D relative-motion CCD regression failed: %d" % failures)
