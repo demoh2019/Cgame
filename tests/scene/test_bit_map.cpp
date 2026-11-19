@@ -604,4 +604,61 @@ TEST_CASE("[BitMap] LA8 alpha import does not alter source image") {
 	}
 }
 
+TEST_CASE("[BitMap] Packed nearest-neighbor resize matches original sampling") {
+	// Compare multiple upscale/downscale combinations, including non-byte-
+	// aligned widths, against independent pixel coordinates and source bits.
+	const int source_widths[] = { 1, 3, 8, 9, 17 };
+	const int source_heights[] = { 1, 2, 7, 11 };
+	const int dest_widths[] = { 1, 2, 5, 8, 15, 32 };
+	const int dest_heights[] = { 1, 3, 8, 19 };
+	for (int width : source_widths) {
+		for (int height : source_heights) {
+			Vector<uint8_t> source_bits;
+			source_bits.resize(width * height);
+			uint8_t *reference = source_bits.ptrw();
+
+			for (int y = 0; y < height; y++) {
+				for (int x = 0; x < width; x++) {
+					reference[y * width + x] = ((x * 7 + y * 13) % 5 < 2) ? 1 : 0;
+				}
+			}
+
+			for (int new_width : dest_widths) {
+				for (int new_height : dest_heights) {
+					BitMap bitmap;
+					bitmap.create(Size2i(width, height));
+					for (int y = 0; y < height; y++) {
+						for (int x = 0; x < width; x++) {
+							if (reference[y * width + x]) {
+								bitmap.set_bit(x, y, true);
+							}
+						}
+					}
+					bitmap.resize(Size2i(new_width, new_height));
+					CHECK(bitmap.get_size() == Size2i(new_width, new_height));
+
+					const float scale_x = float(width) / new_width;
+					const float scale_y = float(height) / new_height;
+					int expected_count = 0;
+					bool all_match = true;
+					for (int y = 0; y < new_height; y++) {
+						for (int x = 0; x < new_width; x++) {
+							const int sample_x = int(x * scale_x);
+							const int sample_y = int(y * scale_y);
+							const bool expected_bit = sample_x < width && sample_y < height &&
+									reference[sample_y * width + sample_x];
+							expected_count += expected_bit;
+							if (bitmap.get_bit(x, y) != expected_bit) {
+								all_match = false;
+							}
+						}
+					}
+					CHECK(all_match);
+					CHECK(bitmap.get_true_bit_count() == expected_count);
+				}
+			}
+		}
+	}
+}
+
 } // namespace TestBitMap
