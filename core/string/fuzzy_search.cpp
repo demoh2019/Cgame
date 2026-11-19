@@ -401,11 +401,25 @@ Ref<FuzzySearchMatch> FuzzySearch::search(const String &p_query, const String &p
 Vector<Ref<FuzzySearchMatch>> FuzzySearch::search_all(const String &p_query, const PackedStringArray &p_targets) const {
 	Vector<Ref<FuzzySearchMatch>> results;
 	const Vector<FuzzySearchToken> tokens = _get_tokens(p_query);
+	if (tokens.is_empty()) {
+		return results;
+	}
+
+	// Token ranges cannot overlap, and the global miss budget bounds the number of
+	// skipped query characters. Shorter targets cannot possibly match.
+	int min_matched_length = 0;
+	for (const FuzzySearchToken &token : tokens) {
+		min_matched_length += token.string.length();
+	}
+	min_matched_length = MAX(1, min_matched_length - (exact_token_matches ? 0 : max_misses));
 
 	// Most candidates do not match. Reuse the temporary match object instead of allocating
 	// a RefCounted object (and freeing it) for every rejected target.
 	Ref<FuzzySearchMatch> result;
 	for (int i = 0; i < p_targets.size(); i++) {
+		if (p_targets[i].length() - start_offset < min_matched_length) {
+			continue;
+		}
 		if (result.is_null()) {
 			result.instantiate();
 		} else {
