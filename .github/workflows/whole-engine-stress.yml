@@ -95,6 +95,16 @@ jobs:
           else
             python3 tests/stress/run.py --godot "$BIN" --preset "$PRESET" --render-mode headless --output whole-engine-stress.json --summary-md whole-engine-stress.md
           fi
+      - name: Benchmark cold and warm asset import, script scanning and scene indexing
+        if: success() || failure()
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 tests/stress/editor_import.py \
+            --godot ./bin/godot.linuxbsd.editor.dev.x86_64 \
+            --textures 128 --scenes 512 --repeats 3 \
+            --timeout 900 --rss-limit-mib 4096 \
+            --output whole-engine-import.json
       - name: Archive per-scenario performance and failure reports
         if: always()
         uses: actions/upload-artifact@v4
@@ -104,5 +114,6 @@ jobs:
             whole-engine-stress.json
             whole-engine-stress.md
             whole-engine-native-tests.log
+            whole-engine-import.json
           if-no-files-found: warn
           retention-days: 30
