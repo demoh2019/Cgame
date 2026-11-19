@@ -319,7 +319,7 @@ TEST_SUITE("[PlaceholderScriptInstance]") {
 		for (int i = 0; i + 1 < properties.size(); i += 2) {
 			if (properties[i] == Variant(StringName("script"))) {
 				found_script = true;
-				CHECK_EQ(properties[i + 1], Variant("s:" + script_path));
+				CHECK_EQ(properties[i + 1], Variant(String("s:") + script_path));
 			}
 		}
 		CHECK(found_script);
