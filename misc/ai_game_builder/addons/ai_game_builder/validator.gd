@@ -82,7 +82,7 @@ static func validate_payload(payload: Variant) -> Dictionary:
 	return {"ok": true, "error": "", "files": checked, "summary": summary}
 
 
-static func find_missing_generated_references(files: Array[Dictionary]) -> Array[String]:
+static func find_missing_generated_references(files: Array) -> Array[String]:
 	# Cheap deterministic consistency check, without loading or executing untrusted code.
 	var present := {}
 	for entry in files:
