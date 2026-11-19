@@ -190,3 +190,16 @@ godot --headless --path game --script res://tests/run_all.gd
 The suite includes `test_vendor.gd` with capacity-rollback,
 replay-rejection and location-authority regressions. The dedicated
 `albion-after-vendor.yml` CI also runs the complete test suite.
+
+## Settlement trader (server-authoritative fixed-price NPC)
+
+At the workbench inside the safe hub, survivors can sell wood, stone,
+ore, fiber and scrap for carried silver, or buy water, canned food and
+bandages. Fixed offers are defined in `scripts/shared/market.gd`; the server
+validates position, stock, quantity limits and inventory capacity. A failed
+trade rolls back all item transfers. Carried silver is lost with full-loot
+death, unless stored in the protected stash.
+
+The test suite covers all offer rules, distance checks, buy/sell amounts,
+capacity rollback and dead-player rejection using `tests/test_market.gd`.
+This is an NPC vendor, not yet a player auction market.

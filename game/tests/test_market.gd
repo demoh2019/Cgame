@@ -1,0 +1,53 @@
+extends RefCounted
+const WorldGen = preload("res://scripts/shared/world_gen.gd")
+const GameServer = preload("res://scripts/server/game_server.gd")
+const Inventory = preload("res://scripts/shared/inventory.gd")
+
+
+func run(t) -> void:
+	var server = GameServer.new(WorldGen.new(47), 11)
+	var p = server.add_player(610, "Trader")
+	p.position = Vector3(9, server.world.height_at(9, 0), 0)
+	t.current = "market server authorization and quotes"
+	t.eq(server.cmd_trade(999, "wood_1", 1, false).get("reason"), "dead", "unknown peer")
+	t.eq(server.cmd_trade(610, "silver", 1, false).get("reason"), "invalid_offer", "cannot print silver")
+	t.eq(server.cmd_trade(610, "water_bottle", 1, false).get("reason"), "invalid_offer", "no buyback arbitrage")
+	t.eq(server.cmd_trade(610, "club_4", 1, true).get("reason"), "invalid_offer", "whitelist enforced")
+	t.eq(server.cmd_trade(610, "wood_1", 0, false).get("reason"), "invalid_offer", "zero rejected")
+	t.eq(server.cmd_trade(610, "wood_1", 21, false).get("reason"), "invalid_offer", "batch capped")
+	t.eq(server.cmd_trade(610, "wood_1", 1, false).get("reason"), "missing_items", "no phantom items")
+	t.eq(server.cmd_trade(610, "water_bottle", 1, true).get("reason"), "missing_items", "no free purchases")
+	p.inventory.add("wood_1", 5)
+	p.position = Vector3(180, server.world.height_at(180, 0), 0)
+	t.eq(server.cmd_trade(610, "wood_1", 2, false).get("reason"), "no_station", "no remote trading")
+	t.eq(p.inventory.count("wood_1"), 5, "refused sale changes nothing")
+	p.position = Vector3(9, server.world.height_at(9, 0), 0)
+	t.current = "buy and sell are exact"
+	t.check(server.cmd_trade(610, "wood_1", 3, false).get("ok", false), "sell three")
+	t.eq(p.inventory.count("wood_1"), 2, "wood decremented")
+	t.eq(p.inventory.count("silver"), 6, "six silver received")
+	p.inventory.add("silver", 30)
+	t.check(server.cmd_trade(610, "water_bottle", 2, true).get("ok", false), "buy two bottles")
+	t.eq(p.inventory.count("silver"), 12, "silver cost correct")
+	t.eq(p.inventory.count("water_bottle"), 4, "bottles added to starter stack")
+	t.check(server.cmd_trade(610, "water_bottle", 1, true).get("ok", false), "spend last silver")
+	t.eq(server.cmd_trade(610, "water_bottle", 1, true).get("reason"), "missing_items", "cannot double spend")
+	t.current = "full inventory rollback"
+	p.inventory = Inventory.new()
+	p.inventory.add("wood_1", 2)
+	for i in range(23):
+		p.inventory.add("jacket_%d" % (i % 4 + 1), 1)
+	var before: Dictionary = p.inventory.to_dict()
+	t.eq(server.cmd_trade(610, "wood_1", 1, false).get("reason"), "no_space", "no slot for silver")
+	t.eq(p.inventory.to_dict(), before, "rejected sale restored all slots")
+	t.check(server.cmd_trade(610, "wood_1", 2, false).get("ok", false), "empty source frees payout slot")
+	t.eq(p.inventory.count("silver"), 4, "payout uses released slot")
+	p.inventory = Inventory.new()
+	p.inventory.add("silver", 20)
+	for i in range(23):
+		p.inventory.add("jacket_%d" % (i % 4 + 1), 1)
+	before = p.inventory.to_dict()
+	t.eq(server.cmd_trade(610, "water_bottle", 1, true).get("reason"), "no_space", "full bag rejects purchase")
+	t.eq(p.inventory.to_dict(), before, "rejected purchase restores currency")
+	p.survival.hurt(100)
+	t.eq(server.cmd_trade(610, "wood_1", 1, false).get("reason"), "dead", "dead cannot trade")

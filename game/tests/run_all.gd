@@ -19,6 +19,7 @@ const SUITES := [
 	"res://tests/test_secure_stash.gd",
 	"res://tests/test_vendor.gd",
 	"res://tests/test_save_validation.gd",
+	"res://tests/test_market.gd",
 ]
 
 

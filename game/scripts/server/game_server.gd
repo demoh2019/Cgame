@@ -9,6 +9,7 @@ const Inventory = preload("res://scripts/shared/inventory.gd")
 const Vendor = preload("res://scripts/shared/vendor.gd")
 const SaveValidation = preload("res://scripts/shared/save_validation.gd")
 const Crafting = preload("res://scripts/shared/crafting.gd")
+const Market = preload("res://scripts/shared/market.gd")
 const Survival = preload("res://scripts/shared/survival.gd")
 const Movement = preload("res://scripts/shared/movement.gd")
 const Combat = preload("res://scripts/shared/combat.gd")
@@ -360,6 +361,35 @@ func cmd_stash(peer_id: int, item_id: String, count: int, deposit: bool) -> Dict
 	player.dirty_stash = true
 	player.dirty_character = true
 	return {"ok": true, "item": item_id, "count": count, "deposit": deposit}
+
+
+## Server-owned NPC prices and atomic inventory/currency transfers.
+func cmd_trade(peer_id: int, item_id: String, count: int, buying: bool) -> Dictionary:
+	var player: Player = players.get(peer_id)
+	if player == null or not _alive(player):
+		return {"ok": false, "reason": "dead"}
+	var distance := Vector2(player.position.x, player.position.z).distance_to(WORKBENCH_POSITION)
+	if not is_finite(distance) or distance > WORKBENCH_RANGE:
+		return {"ok": false, "reason": "no_station"}
+	if not Market.valid(item_id, count, buying):
+		return {"ok": false, "reason": "invalid_offer"}
+	var silver: int = Market.price(item_id, buying) * count
+	var source: String = "silver" if buying else item_id
+	var dest: String = item_id if buying else "silver"
+	var needed: int = silver if buying else count
+	var received: int = count if buying else silver
+	if player.inventory.count(source) < needed:
+		return {"ok": false, "reason": "missing_items"}
+	var backup: Dictionary = player.inventory.to_dict()
+	if not player.inventory.remove(source, needed):
+		return {"ok": false, "reason": "missing_items"}
+	if player.inventory.free_space_for(dest) < received or player.inventory.add(dest, received) != 0:
+		player.inventory.load_dict(backup)
+		return {"ok": false, "reason": "no_space"}
+	player.inventory.unequip_missing()
+	player.dirty_inventory = true
+	player.dirty_character = true
+	return {"ok": true, "item": item_id, "count": count, "buying": buying, "silver": silver}
 
 
 func cmd_use(peer_id: int, item_id: String) -> Dictionary:
