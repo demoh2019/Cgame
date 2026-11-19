@@ -989,3 +989,36 @@ can never be chosen by this shortcut.
 `game/tests/test_quick_cooking.gd` checks tier priority, lower-tier
 fallback, skill prerequisites, lack of side effects and station validation.
 No Cgame engine additions or network protocol changes are required.
+
+## Versioned Nakama character saves and atomic pair storage
+
+The authoritative Nakama Lua module now uses optimistic storage versions.
+`character_load` supplies a version (`*` for an uncreated document); all
+`character_save` calls require that version and return the replacement one.
+The Godot `NakamaGateway` caches these versions, so an outdated autosave
+cannot silently overwrite a newer document after a reconnect or conflict.
+On version conflict, the save fails closed; do **not** silently retry using
+the new storage version with the old character snapshot.
+
+A new server-key-only `character_pair_save` RPC commits **two existing
+character documents plus one immutable transaction receipt** in a single
+conditional Nakama storage write. The receipt rejects reuse of a transaction
+ID with different character contents and permits querying a committed
+operation after an ambiguous response. Character versions protect against
+overwriting another writer's updates. Neither the character documents nor
+the receipt are partly committed if the conditional batch is rejected.
+
+**Important integration boundary:** this is the durable backend primitive,
+not yet wired to live player barter or market purchases. The current world
+simulation applies trades synchronously and persists its characters later.
+Using this RPC for those trades requires a server-side freeze/transaction
+coordinator that locks both characters against movement-related deaths,
+inventory mutations, autosaves and disconnects while the async Nakama
+response is pending. Until that coordination is added and tested, live
+market/barter exchanges still have the documented crash window.
+
+Run `godot --headless --path game --script res://tests/test_nakama_backend.gd`
+with Nakama running via `game/backend/docker-compose.yml`. Integration tests
+cover stale saves, dual-account settlement, idempotent receipts, tampered
+transaction IDs, old versions rejecting the entire batch, and the server-key
+permission boundary. The `albion-after-nakama.yml` workflow runs them.

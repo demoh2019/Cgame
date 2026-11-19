@@ -7,6 +7,7 @@ local nk = require("nakama")
 local COLLECTION = "character"
 local KEY = "main"
 local LEADERBOARD = "kills"
+local RECEIPTS = "trade_receipt"
 
 -- Called with the runtime http key there is no user in the context; a player session has one.
 local function require_server(context)
@@ -22,32 +23,140 @@ local function decode(payload)
   return nk.json_decode(payload)
 end
 
+local function require_user_id(value)
+  if type(value) ~= "string" or #value ~= 36 or not value:match("^[%da-fA-F%-]+$") then
+    error({ "invalid user ID", 3 })
+  end
+end
+
+local function require_character_document(data)
+  if type(data) ~= "table" or type(data.json) ~= "string" or #data.json < 2 or #data.json > 120000 then
+    error({ "invalid character document", 3 })
+  end
+end
+
+local function require_version(version, allow_create)
+  if type(version) ~= "string" or version == "" or #version > 128 or (version == "*" and not allow_create) then
+    error({ "character version required", 3 })
+  end
+end
+
+local function character_object(user_id, data, version)
+  return {
+    collection = COLLECTION, key = KEY, user_id = user_id,
+    value = data, version = version,
+    permission_read = 1, permission_write = 0,
+  }
+end
+
 -- Loads a character. Returns {"exists": false} for a new player.
 local function character_load(context, payload)
   require_server(context)
   local request = decode(payload)
+  require_user_id(request.user_id)
   local objects = nk.storage_read({ { collection = COLLECTION, key = KEY, user_id = request.user_id } })
   if #objects == 0 then
-    return nk.json_encode({ exists = false })
+    return nk.json_encode({ exists = false, version = "*" })
   end
-  return nk.json_encode({ exists = true, data = objects[1].value })
+  return nk.json_encode({ exists = true, data = objects[1].value, version = objects[1].version })
 end
 
--- Saves a character document written by the game server.
+-- Each save carries the version returned by character_load or the previous save.
+-- A stale server cannot overwrite a character after a trade committed on another shard.
 local function character_save(context, payload)
   require_server(context)
   local request = decode(payload)
-  nk.storage_write({
-    {
-      collection = COLLECTION,
-      key = KEY,
-      user_id = request.user_id,
-      value = request.data,
-      permission_read = 1, -- The owner may read it (for an out-of-game profile); only the server writes.
-      permission_write = 0,
-    },
-  })
-  return nk.json_encode({ ok = true })
+  require_user_id(request.user_id)
+  require_character_document(request.data)
+  require_version(request.version, true)
+  local ok, acks = pcall(nk.storage_write, { character_object(request.user_id, request.data, request.version) })
+  if not ok or type(acks) ~= "table" or #acks ~= 1 then
+    return nk.json_encode({ ok = false, reason = "write_conflict_or_unavailable" })
+  end
+  return nk.json_encode({ ok = true, version = acks[1].version })
+end
+
+
+-- All THREE records (both character snapshots and the replay receipt) are
+-- written in one Nakama storage transaction with version preconditions.
+-- This is only the storage primitive. The world server must lock both live
+-- characters while awaiting it before using it for actual market settlement.
+local function character_pair_save(context, payload)
+  require_server(context)
+  local request = decode(payload)
+  require_user_id(request.user_a)
+  require_user_id(request.user_b)
+  if request.user_a == request.user_b then
+    error({ "distinct accounts required", 3 })
+  end
+  require_character_document(request.data_a)
+  require_character_document(request.data_b)
+  require_version(request.version_a, false)
+  require_version(request.version_b, false)
+  local id = request.transaction_id
+  if type(id) ~= "string" or #id < 8 or #id > 96 or not id:match("^[%w%-]+$") then
+    error({ "invalid transaction ID", 3 })
+  end
+  local receipt_key = { collection = RECEIPTS, key = id }
+  local hash_a = nk.hmac_sha256_hash(request.data_a.json, "afterlands-pair-v1")
+  local hash_b = nk.hmac_sha256_hash(request.data_b.json, "afterlands-pair-v1")
+
+  local function existing_receipt()
+    local objects = nk.storage_read({ receipt_key })
+    if #objects == 0 then
+      return nil
+    end
+    local receipt = objects[1].value
+    if receipt.user_a ~= request.user_a or receipt.user_b ~= request.user_b
+      or receipt.hash_a ~= hash_a or receipt.hash_b ~= hash_b then
+      return nk.json_encode({ ok = false, reason = "transaction_id_conflict" })
+    end
+    -- Re-read current versions; a later valid autosave may already have happened.
+    local versions = nk.storage_read({
+      { collection = COLLECTION, key = KEY, user_id = request.user_a },
+      { collection = COLLECTION, key = KEY, user_id = request.user_b },
+    })
+    if #versions ~= 2 then
+      return nk.json_encode({ ok = false, reason = "missing_character" })
+    end
+    local map = {}
+    for _, obj in ipairs(versions) do
+      map[obj.user_id] = obj
+    end
+    -- A receipt may outlive further legitimate character updates. A replay
+    -- must not teach a stale world server the latest version of newer data.
+    if map[request.user_a] == nil or map[request.user_b] == nil
+      or map[request.user_a].value.json ~= request.data_a.json
+      or map[request.user_b].value.json ~= request.data_b.json then
+      return nk.json_encode({ ok = false, reason = "transaction_replay_advanced" })
+    end
+    return nk.json_encode({ ok = true, replayed = true,
+      version_a = map[request.user_a].version, version_b = map[request.user_b].version })
+  end
+
+  local replay = existing_receipt()
+  if replay ~= nil then
+    return replay
+  end
+  local writes = {
+    character_object(request.user_a, request.data_a, request.version_a),
+    character_object(request.user_b, request.data_b, request.version_b),
+    { collection = RECEIPTS, key = id, version = "*",
+      value = { user_a = request.user_a, user_b = request.user_b,
+        hash_a = hash_a, hash_b = hash_b },
+      permission_read = 0, permission_write = 0 },
+  }
+  local ok, acks = pcall(nk.storage_write, writes)
+  if not ok or type(acks) ~= "table" or #acks ~= 3 then
+    -- Ambiguous network failures may have committed: check the durable receipt.
+    replay = existing_receipt()
+    if replay ~= nil then
+      return replay
+    end
+    return nk.json_encode({ ok = false, reason = "write_conflict_or_unavailable" })
+  end
+  return nk.json_encode({ ok = true, replayed = false,
+    version_a = acks[1].version, version_b = acks[2].version })
 end
 
 -- Records a player's lifetime kills on the leaderboard (the score is a "set" so it always reflects the total).
@@ -68,4 +177,5 @@ end)
 
 nk.register_rpc(character_load, "character_load")
 nk.register_rpc(character_save, "character_save")
+nk.register_rpc(character_pair_save, "character_pair_save")
 nk.register_rpc(leaderboard_submit, "leaderboard_submit")
