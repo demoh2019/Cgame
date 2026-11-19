@@ -29,7 +29,7 @@ ENGINE_ERROR = re.compile(r"(?m)^(?:SCRIPT ERROR:|ERROR:|E\s+\d+:)")
 CASES = (
     "containers", "strings", "script_vm", "math", "signals",
     "scene_tree", "packed_scene", "images", "json", "stream", "stream_bulk",
-    "file_io", "threads", "physics_2d", "physics_3d",
+    "file_io", "threads", "physics_2d", "physics_3d", "physics_sparse_2d", "physics_sparse_3d",
     "object_churn", "memory_churn", "astar_grid", "astar_relax_2d", "astar_relax_3d", "astar_graph", "tweens", "audio_buffers",
     "variant_codec", "packet_stream", "ui_layout", "render_2d", "render_3d",
     "resource_load",
