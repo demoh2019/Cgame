@@ -1285,6 +1285,10 @@ GodotSpace3D::GodotSpace3D() {
 	speculative_sphere_distance = MAX(real_t(0.0), (real_t)GLOBAL_GET("physics/3d/solver/speculative_sphere_distance"));
 	const real_t configured_xpbd_compliance = GLOBAL_GET("physics/3d/solver/soft_body_xpbd_compliance");
 	soft_body_xpbd_compliance = Math::is_finite(configured_xpbd_compliance) ? MAX(real_t(0.0), configured_xpbd_compliance) : real_t(0.0);
+	const real_t configured_plastic_yield = GLOBAL_GET("physics/3d/solver/soft_body_plastic_yield_strain");
+	soft_body_plastic_yield_strain = Math::is_finite(configured_plastic_yield) ? CLAMP(configured_plastic_yield, real_t(0.0), real_t(1.0)) : real_t(0.1);
+	const real_t configured_plastic_creep_rate = GLOBAL_GET("physics/3d/solver/soft_body_plastic_creep_rate");
+	soft_body_plastic_creep_rate = Math::is_finite(configured_plastic_creep_rate) ? MAX(real_t(0.0), configured_plastic_creep_rate) : real_t(0.0);
 	const real_t configured_area_compliance = GLOBAL_GET("physics/3d/solver/soft_body_xpbd_area_compliance");
 	soft_body_xpbd_area_compliance = Math::is_finite(configured_area_compliance) ? MAX(real_t(0.0), configured_area_compliance) : real_t(0.0);
 	contact_max_allowed_penetration = GLOBAL_GET("physics/3d/solver/contact_max_allowed_penetration");
