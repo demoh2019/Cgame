@@ -10,6 +10,7 @@ func run(scale: int) -> Dictionary:
 	var one_pixel_ms := 0.0
 	var disk_radius_ms := 0.0
 	var checksum := 0
+	var oversized_radius_ms := 0.0
 
 	for i in range(iterations):
 		var bitmap := BitMap.new()
@@ -29,9 +30,22 @@ func run(scale: int) -> Dictionary:
 			return {"error": "BitMap morphology returned invalid opaque pixel count"}
 		checksum += count
 
+		# A radius much greater than the diagonal must be handled without
+		# searching its O(radius^2) neighborhood for every destination bit.
+		var full := BitMap.new()
+		full.create(Vector2i(WIDTH, HEIGHT))
+		full.set_bit(WIDTH / 2, HEIGHT / 2, true)
+		started = Time.get_ticks_usec()
+		full.grow_mask(2048, MASK_RECT)
+		full.grow_mask(-2048, MASK_RECT)
+		oversized_radius_ms += float(Time.get_ticks_usec() - started) / 1000.0
+		if full.get_true_bit_count() != 0:
+			return {"error": "Oversized-radius morphology failed to clear mask"}
+
 	return {
 		"iterations": iterations,
 		"one_pixel_ms": one_pixel_ms,
 		"disk_radius_ms": disk_radius_ms,
+		"oversized_radius_ms": oversized_radius_ms,
 		"checksum": checksum,
 	}
