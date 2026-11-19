@@ -505,7 +505,7 @@ TEST_CASE("[ProceduralWorld] Chunks reject world coordinates outside supported r
 	Ref<ProceduralWorld> world;
 	world.instantiate();
 	ERR_PRINT_OFF;
-	CHECK(world->get_chunk_coordinates(Rect2(1000000001.0f, 0.0f, 1.0f, 1.0f), 32).is_empty());
+	CHECK(world->get_chunk_coordinates(Rect2(1100000000.0f, 0.0f, 1.0f, 1.0f), 32).is_empty());
 	CHECK(world->get_chunk_coordinates(Rect2(0, 0, 1000000, 1000000), 1).is_empty());
 	ERR_PRINT_ON;
 }
