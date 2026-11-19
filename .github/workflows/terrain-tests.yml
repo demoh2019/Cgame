@@ -1,0 +1,51 @@
+name: Terrain module regression tests
+
+on:
+  pull_request:
+    paths:
+      - "modules/terrain/**"
+      - ".github/workflows/terrain-tests.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  terrain-tests:
+    name: Build Godot and run native terrain tests
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    steps:
+      - name: Checkout Godot source
+        uses: actions/checkout@v4
+
+      - name: Install build toolchain and Linux dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            g++ scons pkg-config \
+            libasound2-dev libpulse-dev libudev-dev \
+            libx11-dev libxcursor-dev libxi-dev libxinerama-dev \
+            libxrandr-dev libxrender-dev libgl1-mesa-dev \
+            libwayland-dev libxkbcommon-dev libvulkan-dev
+
+      - name: Compile editor with terrain module and tests
+        run: |
+          scons platform=linuxbsd target=editor \
+            tests=yes module_terrain_enabled=yes \
+            debug_symbols=no -j2
+
+      - name: Execute terrain native test suites
+        shell: bash
+        run: |
+          set -euo pipefail
+          GODOT_BINARY="$(find bin -maxdepth 1 -type f -name 'godot.linuxbsd.editor.*' -perm /111 | head -n 1)"
+          if [[ -z "$GODOT_BINARY" ]]; then
+            echo "::error::Compiled Godot test binary was not found."
+            exit 1
+          fi
+          for suite in TerrainHeightmap HeightmapTerrain3D TerrainChunks TerrainScatter; do
+            echo "::group::$suite"
+            "./$GODOT_BINARY" --headless --test --test-case="*[$suite]*"
+            echo "::endgroup::"
+          done
