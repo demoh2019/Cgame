@@ -34,6 +34,7 @@
 #include "godot_contact_normal_3d.h"
 #include "godot_space_3d.h"
 #include "servers/physics_manifold_reduction_3d.h"
+#include "servers/physics_ccd_sphere_toi.h"
 
 #include <cfloat> // FLT_MAX
 
@@ -257,6 +258,33 @@ bool GodotBodyPair3D::_test_ccd(real_t p_step, GodotBody3D *p_A, int p_shape_A, 
 	const real_t extent = max_projection - min_projection;
 	if (motion_length <= extent * real_t(0.3)) {
 		return false;
+	}
+
+	// A ray through the leading sphere support can miss an oblique
+	// sphere/sphere collision, even though the swept volumes overlap.
+	// For true spheres (not ellipsoids), solve the exact linear TOI first.
+	if (shape_A_ptr->get_type() == PS3DE::SHAPE_SPHERE && shape_B_ptr->get_type() == PS3DE::SHAPE_SPHERE) {
+		const double scale_A = physics_ccd_uniform_sphere_scale(p_xform_A);
+		const double scale_B = physics_ccd_uniform_sphere_scale(p_xform_B);
+		if (scale_A > 0.0 && scale_B > 0.0) {
+			const double radius_A = double(static_cast<GodotSphereShape3D *>(shape_A_ptr)->get_radius()) * scale_A;
+			const double radius_B = double(static_cast<GodotSphereShape3D *>(shape_B_ptr)->get_radius()) * scale_B;
+			const Vector3 center_delta = p_xform_A.origin - p_xform_B.origin;
+			double impact_fraction = 0.0;
+			if (!physics_ccd_sphere_toi(center_delta, relative_motion, radius_A + radius_B, impact_fraction)) {
+				return false;
+			}
+
+			const real_t allowed_distance = CLAMP(real_t(impact_fraction * double(motion_length)) + extent * real_t(0.01), real_t(0.0), motion_length);
+			const Vector3 desired_velocity = velocity_B + direction * (allowed_distance / p_step);
+			const real_t initial_speed = velocity_A.length();
+			const Vector3 travel_direction = velocity_A / initial_speed;
+			const real_t clipped_speed = CLAMP(desired_velocity.dot(travel_direction), real_t(0.0), initial_speed);
+			p_A->set_linear_velocity(travel_direction * clipped_speed);
+			return true;
+		}
+		// Affine shear/nonuniform scale yields an ellipsoid; retain the
+		// generic support cast rather than using an incorrect sphere TOI.
 	}
 
 	// A leading face may have several support vertices. The target
