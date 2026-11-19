@@ -38,6 +38,7 @@
 #include "servers/physics_softbody_link_damping.h"
 #include "servers/physics_softbody_dihedral_damping.h"
 #include "servers/physics_softbody_aero_lift.h"
+#include "servers/physics_softbody_adiabatic_gas.h"
 #include "servers/physics_softbody_aerodynamic_drag.h"
 #include "servers/physics_softbody_plasticity.h"
 #include "servers/physics_softbody_volume_safe.h"
@@ -143,7 +144,7 @@ void GodotSoftBody3D::set_space(GodotSpace3D *p_space) {
 	_set_space(p_space);
 	xpbd_tethers_dirty = true;
 	// A mesh may have been assigned before the space was created. Validate
-	// its rest volume only after space-level compliance is available.
+	// its closed rest volume after volume compliance or gas mode is available.
 	initialize_volume_constraint();
 	initialize_shear_constraints();
 	initialize_dihedral_constraints();
@@ -306,9 +307,11 @@ static _FORCE_INLINE_ double _soft_body_signed_face_volume(const Vector3 &p_a, c
 void GodotSoftBody3D::initialize_volume_constraint() {
 	xpbd_volume_closed = false;
 	xpbd_volume_rest = 0.0;
-	if (!get_space() || get_space()->get_soft_body_xpbd_volume_compliance() <= 0.0 ||
+	if (!get_space() ||
+			(get_space()->get_soft_body_xpbd_volume_compliance() <= 0.0 &&
+					get_space()->get_soft_body_gas_pressure_gamma() <= 0.0) ||
 			nodes.size() < 4 || faces.size() < 4) {
-		// Never keep the per-node buffer for ordinary cloth/disabled settings.
+		// Neither XPBD nor gas mode needs the volume for ordinary cloth.
 		if (!xpbd_volume_gradients.is_empty()) {
 			xpbd_volume_gradients.reset();
 		}
@@ -1636,7 +1639,21 @@ void GodotSoftBody3D::apply_forces(const LocalVector<GodotArea3D *> &p_wind_area
 		return;
 	}
 
-	const bool apply_pressure = pressure_coefficient > CMP_EPSILON;
+	const bool apply_pressure = pressure_coefficient > CMP_EPSILON && Math::is_finite(pressure_coefficient);
+	const real_t gas_gamma = get_space() ? get_space()->get_soft_body_gas_pressure_gamma() : real_t(0.0);
+	// A gas mode with an open mesh must not fall back to the legacy
+	// pressure heuristic: pressure is only meaningful inside a sealed shell.
+	const bool legacy_pressure = apply_pressure && !(gas_gamma > 0.0);
+	double gas_pressure = 0.0;
+	if (apply_pressure && gas_gamma > 0.0 && xpbd_volume_closed) {
+		const Vector3 &origin = nodes[0].x;
+		double signed_volume = 0.0;
+		for (const Face &face : faces) {
+			signed_volume += _soft_body_signed_face_volume(face.n[0]->x, face.n[1]->x, face.n[2]->x, origin);
+		}
+		physics_softbody_adiabatic_pressure(xpbd_volume_rest, signed_volume,
+				double(pressure_coefficient), double(gas_gamma), gas_pressure);
+	}
 	const bool apply_wind = !p_wind_areas.is_empty();
 	const bool apply_drag = drag_coefficient > 0.0;
 	const real_t tangential_drag_ratio = get_space() ? get_space()->get_soft_body_tangential_drag_ratio() : real_t(0.0);
@@ -1652,15 +1669,29 @@ void GodotSoftBody3D::apply_forces(const LocalVector<GodotArea3D *> &p_wind_area
 	// Wind needs face forces but not volume. Skip three vector differences /
 	// a cross product per face when pressure is disabled.
 	for (const Face &face : faces) {
-		if (apply_pressure) {
+		if (legacy_pressure) {
 			volume += vec3_dot(face.n[0]->x - org, vec3_cross(face.n[1]->x - org, face.n[2]->x - org));
 		}
 
-		if (apply_wind || apply_drag || apply_lift) {
+		if (apply_wind || apply_drag || apply_lift || gas_pressure > 0.0) {
 			Vector3 node_force;
 			if (apply_wind) {
 				for (const GodotArea3D *area : p_wind_areas) {
 					node_force += _compute_area_windforce(area, &face);
+				}
+			}
+
+			if (gas_pressure > 0.0) {
+				Vector3 gas_face_force;
+				const int orientation = xpbd_volume_rest >= 0.0 ? 1 : -1;
+				if (physics_softbody_adiabatic_face_force(face.n[0]->x, face.n[1]->x, face.n[2]->x,
+						gas_pressure, orientation, gas_face_force)) {
+					// Only movable nodes receive gas forces; pinned vertices remain fixed.
+					for (int j = 0; j < 3; ++j) {
+						if (face.n[j]->im > 0.0) {
+							face.n[j]->f += gas_face_force;
+						}
+					}
 				}
 			}
 
@@ -1692,7 +1723,7 @@ void GodotSoftBody3D::apply_forces(const LocalVector<GodotArea3D *> &p_wind_area
 		}
 	}
 
-	if (apply_pressure) {
+	if (legacy_pressure) {
 		volume /= 6.0;
 		const real_t absolute_volume = Math::abs(volume);
 		// An open, flattened or degenerate mesh has no enclosed volume.
@@ -1788,7 +1819,7 @@ void GodotSoftBody3D::predict_motion(real_t p_delta) {
 
 	// Apply forces.
 	add_velocity(gravity * p_delta);
-	if (pressure_coefficient > CMP_EPSILON || !wind_areas.is_empty() || drag_coefficient > 0.0 || get_space()->get_soft_body_lift_coefficient() > 0.0) {
+	if ((pressure_coefficient > CMP_EPSILON && Math::is_finite(pressure_coefficient)) || !wind_areas.is_empty() || drag_coefficient > 0.0 || get_space()->get_soft_body_lift_coefficient() > 0.0) {
 		apply_forces(wind_areas, p_delta);
 	}
 

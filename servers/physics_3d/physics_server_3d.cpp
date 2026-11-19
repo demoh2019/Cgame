@@ -601,6 +601,10 @@ PhysicsServer3D::PhysicsServer3D() {
 	// Optional Bullet-style aerodynamic lift for deformable surfaces.
 	// Computed from mean face velocity through still air; disabled by default.
 	GLOBAL_DEF(PropertyInfo(Variant::FLOAT, "physics/3d/solver/soft_body_lift_coefficient", PROPERTY_HINT_RANGE, "0,10,0.01,or_greater"), 0.0);
+	// Opt-in sealed shell gas response: pressure = pressure_coefficient *
+	// (V_rest / V)^gamma. 1 is isothermal; ~1.4 approximates adiabatic air.
+	// Requires a manifold closed mesh and pressure_coefficient > 0.
+	GLOBAL_DEF(PropertyInfo(Variant::FLOAT, "physics/3d/solver/soft_body_gas_pressure_gamma", PROPERTY_HINT_RANGE, "0,5,0.1"), 0.0);
 	// Optional tangential aerodynamic skin drag for cloth. Multiplies the
 	// SoftBody3D drag coefficient; zero preserves the normal-only model.
 	GLOBAL_DEF(PropertyInfo(Variant::FLOAT, "physics/3d/solver/soft_body_tangential_drag_ratio", PROPERTY_HINT_RANGE, "0,10,0.01,or_greater"), 0.0);
