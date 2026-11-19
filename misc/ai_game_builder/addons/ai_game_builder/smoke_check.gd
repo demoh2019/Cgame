@@ -49,7 +49,7 @@ static func _safe_report_path(path: String) -> bool:
 	if not path.begins_with(REPORT_PREFIX):
 		return false
 	var leaf := path.trim_prefix(REPORT_PREFIX)
-	if leaf.is_empty() or leaf.length() > 70 or not leaf.ends_with(".json"):
+	if leaf.is_empty() or leaf.begins_with(".") or leaf.length() > 70 or not leaf.ends_with(".json"):
 		return false
 	if leaf.contains("/") or leaf.contains("\\") or leaf.contains(".."):
 		return false
