@@ -32,7 +32,7 @@ terrain.heightmap.import_height_image(image, -10.0, 70.0)
 add_child(terrain)
 ```
 
-The image must be uncompressed and 2–513 pixels along each dimension. Its luminance is mapped into the specified height range.
+The image must be uncompressed and 2–513 pixels along each dimension. Single-channel grayscale/R images use the red channel as height; RGB images use luminance. Values are clamped to 0–1 before mapping into the requested height range.
 
 ## Foliage placement (experimental)
 
