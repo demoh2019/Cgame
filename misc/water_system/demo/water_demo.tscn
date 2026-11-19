@@ -1,0 +1,18 @@
+[gd_scene load_steps=2 format=3]
+
+[ext_resource type="Script" path="res://addons/water_system/water_surface_3d.gd" id="1_water"]
+
+[node name="WaterDemo" type="Node3D"]
+
+[node name="Water" type="MeshInstance3D" parent="."]
+script = ExtResource("1_water")
+surface_size = Vector2(80, 80)
+subdivisions = 64
+
+[node name="Camera3D" type="Camera3D" parent="."]
+position = Vector3(0, 12, 22)
+rotation_degrees = Vector3(-27, 0, 0)
+current = true
+
+[node name="DirectionalLight3D" type="DirectionalLight3D" parent="."]
+rotation_degrees = Vector3(-46, -35, 0)
