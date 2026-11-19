@@ -254,20 +254,13 @@ bool GodotCollisionSolver3D::solve_soft_body(const GodotShape3D *p_shape_A, cons
 		AABB soft_body_aabb = soft_body->get_bounds();
 		soft_body_aabb.grow_by(collision_margin);
 
-		// Calculate AABB for internal concave shape query (in local space).
+		// Soft-body node bounds are world-space. Map them through the
+		// full inverse affine transform of the concave mesh; normalizing
+		// its basis columns misses triangles under shear or translation.
 		AABB local_aabb;
-		for (int i = 0; i < 3; i++) {
-			Vector3 axis(p_transform_A.basis.get_column(i));
-			real_t axis_scale = 1.0 / axis.length();
-
-			real_t smin = soft_body_aabb.position[i];
-			real_t smax = smin + soft_body_aabb.size[i];
-
-			smin *= axis_scale;
-			smax *= axis_scale;
-
-			local_aabb.position[i] = smin;
-			local_aabb.size[i] = smax - smin;
+		if (!godot_physics_3d_concave_query_aabb(nullptr, Transform3D(), p_transform_A,
+				local_aabb, 0.0, 0.0, &soft_body_aabb)) {
+			local_aabb = concave_shape_A->get_aabb().grow(real_t(CMP_EPSILON));
 		}
 
 		concave_shape_A->cull(local_aabb, soft_body_concave_callback, &query_cinfo, true);
