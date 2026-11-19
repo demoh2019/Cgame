@@ -386,6 +386,9 @@ void SceneTree::call_group_flagsp(uint32_t p_call_flags, const StringName &p_gro
 			}
 
 			Vector<Variant> args;
+			if (p_argcount > 0) {
+				args.reserve(p_argcount);
+			}
 			for (int i = 0; i < p_argcount; i++) {
 				args.push_back(*p_args[i]);
 			}

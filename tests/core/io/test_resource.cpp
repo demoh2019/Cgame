@@ -365,6 +365,37 @@ DEFINE_DUPLICATE_GUINEA_PIG(DuplicateGuineaPig_Storage, PROPERTY_USAGE_STORAGE)
 DEFINE_DUPLICATE_GUINEA_PIG(DuplicateGuineaPig_Storage_Always, (PROPERTY_USAGE_STORAGE | PROPERTY_USAGE_ALWAYS_DUPLICATE))
 DEFINE_DUPLICATE_GUINEA_PIG(DuplicateGuineaPig_Storage_Never, (PROPERTY_USAGE_STORAGE | PROPERTY_USAGE_NEVER_DUPLICATE))
 
+TEST_CASE("[Resource] Deep duplication preserves large nested dictionary values") {
+	Ref<DuplicateGuineaPig_Storage> original = DuplicateGuineaPig_Storage::register_and_instantiate();
+	Dictionary input;
+	for (int i = 0; i < 512; i++) {
+		Array values;
+		values.push_back(i);
+		values.push_back(i * 3);
+		input[i] = values;
+	}
+	original->set_dict(input);
+
+	Ref<Resource> copied_resource = original->duplicate(true);
+	REQUIRE(copied_resource.is_valid());
+	Dictionary result = copied_resource->get("dict");
+	REQUIRE_EQ(result.size(), 512);
+	CHECK_FALSE(input.is_same_instance(result));
+
+	for (int i = 0; i < 512; i++) {
+		Array source_values = input[i];
+		Array copied_values = result[i];
+		REQUIRE_EQ(copied_values.size(), 2);
+		CHECK_EQ(copied_values[0], Variant(i));
+		CHECK_EQ(copied_values[1], Variant(i * 3));
+		CHECK_FALSE(source_values.is_same_instance(copied_values));
+	}
+
+	input[0] = Array({ -1 });
+	Array preserved = result[0];
+	CHECK_EQ(preserved[0], Variant(0));
+}
+
 TEST_CASE("[Resource] Duplication") {
 	auto _run_test = [](
 							 TestDuplicateMode p_test_mode,
