@@ -252,6 +252,7 @@ private:
 	real_t contact_max_allowed_penetration = 0.0;
 	real_t contact_bias = 0.0;
 	real_t max_contact_push_speed = 0.0; // 0: unlimited (legacy behavior).
+	real_t max_linear_velocity = 0.0; // 0: unlimited, cached per space.
 	real_t max_linear_velocity = 0.0; // Opt-in rigid speed limit, 0 disables.
 	real_t max_angular_velocity = 0.0; // Opt-in angular speed limit, rad/s; 0 disables.
 	real_t ccd_max_angular_motion = 0.0; // Opt-in maximum CCD rotation per physics step, radians.

@@ -401,6 +401,8 @@ PhysicsServer2D::PhysicsServer2D() {
 	GLOBAL_DEF(PropertyInfo(Variant::FLOAT, "physics/2d/solver/default_contact_bias", PROPERTY_HINT_RANGE, "0,1,0.01"), 0.8);
 	// Zero disables the clamp for backwards-compatible penetration recovery.
 	GLOBAL_DEF(PropertyInfo(Variant::FLOAT, "physics/2d/solver/max_contact_push_speed", PROPERTY_HINT_RANGE, "0,1000,1,or_greater,suffix:px/s"), 0.0);
+	// Box2D-style maximum linear velocity. Disabled by default for backwards compatibility.
+	GLOBAL_DEF(PropertyInfo(Variant::FLOAT, "physics/2d/solver/max_linear_velocity", PROPERTY_HINT_RANGE, "0,10000,1,or_greater,suffix:px/s"), 0.0);
 	// Rapier-style bounded dynamic linear speed; legacy behavior is unlimited.
 	GLOBAL_DEF(PropertyInfo(Variant::FLOAT, "physics/2d/solver/max_linear_velocity", PROPERTY_HINT_RANGE, "0,10000,1,or_greater,suffix:px/s"), 0.0);
 	// Jolt-style maximum dynamic angular velocity, 0 means unlimited.

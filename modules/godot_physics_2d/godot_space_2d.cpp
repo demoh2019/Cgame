@@ -1238,6 +1238,8 @@ GodotSpace2D::GodotSpace2D() {
 	contact_bias = GLOBAL_GET("physics/2d/solver/default_contact_bias");
 	// Cache the per-space push speed limit; no project-setting lookup on contacts.
 	max_contact_push_speed = MAX((real_t)0.0, (real_t)GLOBAL_GET("physics/2d/solver/max_contact_push_speed"));
+	const real_t configured_max_linear_velocity = GLOBAL_GET("physics/2d/solver/max_linear_velocity");
+	max_linear_velocity = Math::is_finite(configured_max_linear_velocity) ? MAX(real_t(0.0), configured_max_linear_velocity) : real_t(0.0);
 	max_linear_velocity = MAX((real_t)0.0, (real_t)GLOBAL_GET("physics/2d/solver/max_linear_velocity"));
 	max_angular_velocity = MAX((real_t)0.0, (real_t)GLOBAL_GET("physics/2d/solver/max_angular_velocity"));
 	ccd_max_angular_motion = MAX(real_t(0.0), (real_t)GLOBAL_GET("physics/2d/solver/ccd_max_angular_motion"));

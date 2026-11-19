@@ -36,6 +36,7 @@
 #include "godot_body_direct_state_2d.h"
 #include "godot_constraint_2d.h"
 #include "godot_space_2d.h"
+#include "godot_velocity_limit_2d.h"
 
 #include "servers/physics_damping.h"
 #include "servers/physics_uniform_fluid.h"
@@ -643,6 +644,11 @@ void GodotBody2D::integrate_forces(real_t p_step, bool p_defer_motion) {
 		// one step, not the penetration-correction bias. A joint/contact may
 		// change angular velocity after force integration, so apply at both
 		// integration boundaries. Disabled by default and for non-CCD bodies.
+		// Limit the force-integrated speed before computing the swept CCD bounds.
+		const real_t velocity_limit = get_space()->get_max_linear_velocity();
+		if (velocity_limit > 0.0) {
+			linear_velocity = godot_physics_2d_limit_linear_velocity(linear_velocity, velocity_limit);
+		}
 		if (continuous_cd_mode != PS2DE::CCD_MODE_DISABLED) {
 			angular_velocity = godot_physics_clamp_ccd_angular_velocity(
 					angular_velocity, get_space()->get_ccd_max_angular_motion(), p_step);
@@ -706,6 +712,12 @@ void GodotBody2D::integrate_velocities(real_t p_step) {
 	if (continuous_cd_mode != PS2DE::CCD_MODE_DISABLED) {
 		angular_velocity = godot_physics_clamp_ccd_angular_velocity(
 				angular_velocity, get_space()->get_ccd_max_angular_motion(), p_step);
+	}
+	// Contact and joint impulses can accelerate the body after force integration.
+	// Clamp its physical velocity again, but never clamp bias recovery motion.
+	const real_t velocity_limit = get_space()->get_max_linear_velocity();
+	if (velocity_limit > 0.0) {
+		linear_velocity = godot_physics_2d_limit_linear_velocity(linear_velocity, velocity_limit);
 	}
 	real_t total_angular_velocity = angular_velocity + biased_angular_velocity;
 	Vector2 total_linear_velocity = linear_velocity + biased_linear_velocity;

@@ -1,4 +1,35 @@
 # Cgame whole-engine stress and performance regression suite
+## Box2D/Jolt-style optional GodotPhysics maximum linear velocity
+
+The built-in GodotPhysics2D and GodotPhysics3D backends support
+`physics/2d/solver/max_linear_velocity` (pixels/s) and
+`physics/3d/solver/max_linear_velocity` (m/s). Zero, the default,
+preserves unlimited legacy speed and avoids speed-limit math in the hot path.
+Positive values cap only rigid-body linear velocity, after force integration
+(before swept CCD bounds are calculated) and after contact/joint solving.
+Kinematic bodies and biased position recovery are not constrained. The
+setting is cached when a new physics space is created and does not affect
+existing spaces or third-party physics servers. Clamping is a stability
+option, not a substitute for CCD: high-speed tunneling is still possible.
+
+```bash
+# Real runtime check (must select GodotPhysics2D):
+./bin/godot.macos.editor.arm64 --headless --path tests/stress \
+  --script res://physics_velocity_limit_2d_regression.gd
+
+# Real 3D integration check (must select GodotPhysics3D, not Jolt):
+./bin/godot.macos.editor.arm64 --headless --path tests/stress \
+  --script res://physics_velocity_limit_3d_regression.gd
+
+# C++ math helper tests:
+./bin/godot.macos.editor.arm64 --headless --test --test-case="[GodotPhysics2D] Opt-in linear velocity limit"
+./bin/godot.macos.editor.arm64 --headless --test --test-case="[GodotPhysics3D] Opt-in linear velocity limit"
+```
+
+Compare before/after physics benchmarks on the same host. No measured
+throughput improvement is claimed by this optional limit.
+
+
 
 ## Jolt 3D island, broadphase and contact-manifold tuning
 
