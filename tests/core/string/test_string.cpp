@@ -1977,6 +1977,9 @@ TEST_CASE("[String] is_numeric") {
 
 TEST_CASE("[String] Padding fast paths avoid intermediate buffers and preserve behavior") {
 	CHECK(String("a").rpad(3, "xy") == "axyxy");
+	const String many = String("ab").repeat(1024);
+	CHECK(String("!").rpad(1025, "ab") == String("!") + many);
+	CHECK(String("!").lpad(1025, "ab") == many + "!");
 	CHECK(String("a").lpad(3, "xy") == "xyxya");
 	CHECK(String("").rpad(3, "ab") == "ababab");
 	CHECK(String("").lpad(3, "ab") == "ababab");
