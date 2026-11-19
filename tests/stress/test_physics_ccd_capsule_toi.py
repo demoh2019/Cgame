@@ -81,6 +81,7 @@ class CapsuleTimeOfImpactContracts(unittest.TestCase):
             self.assertIn("glancing capsule CCD", script)
             self.assertIn("moving capsule CCD", script)
             self.assertIn("parallel capsules CCD", script)
+            self.assertIn("antiparallel capsules CCD", script)
             self.assertIn(script_name, workflow)
 
 
