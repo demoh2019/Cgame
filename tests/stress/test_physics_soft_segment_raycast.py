@@ -49,7 +49,8 @@ def reference_triangle_segment(start, end, points, back_faces):
     if v < 0.0 or u + v > 1.0:
         return None
     fraction = dot(e2, qvec) * reciprocal
-    if not (1e-6 < fraction <= 1.0):
+    max_component = max(abs(component) for component in ray)
+    if max_component <= 1e-5 or not (1e-5 / max_component < fraction <= 1.0):
         return None
     normal = cross(e1, e2)
     back_face = dot(normal, ray) > 0
@@ -69,13 +70,14 @@ class SoftBodySegmentRaycastContracts(unittest.TestCase):
 
     def test_bounded_triangle_intersection_replaces_infinite_ray(self):
         code = self.cast
-        self.assertIn("Geometry3D::segment_intersects_triangle(query_info.from, query_info.to", code)
+        self.assertIn("const real_t fraction = e2.dot(q) * inverse_determinant;", code)
+        self.assertIn("fraction <= 1.0", code)
         self.assertNotIn("Geometry3D::ray_intersects_triangle(query_info.from", code)
-        self.assertIn("if (direction == Vector3())", code)
+        self.assertIn("if (!(max_component > CMP_EPSILON))", code)
 
     def test_respects_backface_policy_and_orients_hit_normal(self):
         code = self.cast
-        self.assertIn("const bool back_face = normal.dot(query_info.direction) > 0.0;", code)
+        self.assertIn("const bool back_face = determinant < 0.0;", code)
         self.assertIn("if (back_face && !query_info.hit_back_faces)", code)
         self.assertIn("query_info.hit_normal = back_face ? -normal : normal;", code)
         self.assertIn("query_info.hit_back_faces = p_hit_back_faces;", code)
@@ -88,9 +90,10 @@ class SoftBodySegmentRaycastContracts(unittest.TestCase):
 
     def test_nearest_hit_avoids_squared_distance_overflow(self):
         code = self.cast
-        self.assertIn("const int axis = query_info.dominant_axis;", code)
-        self.assertIn("const real_t fraction = (hit[axis] - query_info.from[axis]) / query_info.direction[axis];", code)
-        self.assertIn("fraction < query_info.closest_fraction", code)
+        self.assertIn("const real_t fraction = e2.dot(q) * inverse_determinant;", code)
+        self.assertIn("fraction >= query_info.closest_fraction", code)
+        self.assertIn("query_info.closest_fraction = fraction;", code)
+        self.assertIn("query_info.minimum_fraction = CMP_EPSILON / max_component;", code)
         self.assertNotIn("hit_dist_sq", code)
         self.assertNotIn("distance_squared_to(result)", code)
 
@@ -117,6 +120,14 @@ class SoftBodySegmentRaycastContracts(unittest.TestCase):
         ordered = sorted((hit[1][0], hit[0]) for hit in hits if hit[1] is not None)
         self.assertEqual(ordered[0][1], 0)
         self.assertLess(ordered[0][0], ordered[1][0])
+
+    def test_long_ray_still_hits_just_after_start(self):
+        # A fixed fraction epsilon drops this valid hit at t~=1e-8.
+        hit = reference_triangle_segment(
+            (0.0, 1.0, 0.0), (0.0, -1e8, 0.0), UP_TRIANGLE, False)
+        self.assertIsNotNone(hit)
+        self.assertLess(hit[0], 1e-6)
+        self.assertAlmostEqual(hit[1][1], 0.0)
 
     def test_long_segment_fraction_avoids_float32_squared_overflow(self):
         start = (0.0, 1e20, 0.0)
