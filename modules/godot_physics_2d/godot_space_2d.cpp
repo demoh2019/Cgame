@@ -1180,6 +1180,7 @@ GodotSpace2D::GodotSpace2D() {
 	// Cache the per-space push speed limit; no project-setting lookup on contacts.
 	max_contact_push_speed = MAX((real_t)0.0, (real_t)GLOBAL_GET("physics/2d/solver/max_contact_push_speed"));
 	warm_start_coefficient = CLAMP((real_t)GLOBAL_GET("physics/2d/solver/warm_start_coefficient"), real_t(0.0), real_t(1.0));
+	rolling_friction = MAX(real_t(0.0), (real_t)GLOBAL_GET("physics/2d/solver/rolling_friction"));
 	friction_combine_mode = CLAMP((int)GLOBAL_GET("physics/2d/solver/friction_combine_mode"), 0, 3);
 	restitution_combine_mode = CLAMP((int)GLOBAL_GET("physics/2d/solver/restitution_combine_mode"), 0, 5);
 	// Read once at space creation, avoiding ProjectSettings lookups in the hot contact loop.
