@@ -140,6 +140,10 @@ func _run() -> void:
 		_check(world.resource_nodes.size() >= 150, "All zones have resource nodes")
 		_check(world.infected.size() >= 15, "Infected AI spawned")
 		_check(world.survivor.zone == 0, "Player starts in Haven")
+		world.survivor.elapsed_days = 0.80
+		_check(world._is_night(), "Night phase increases infected danger")
+		world.survivor.elapsed_days = 0.40
+		_check(not world._is_night(), "Day phase is distinct from night")
 		_check(world.survivor.health > 0.0, "Survivor lives through boot")
 		world.player_position = world.resource_nodes[0]["pos"]
 		world.survivor.zone = 0
