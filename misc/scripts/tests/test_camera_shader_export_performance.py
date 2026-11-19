@@ -53,7 +53,7 @@ class CameraComponentIndexTests(unittest.TestCase):
             self.assertIn("component_indexes[1]", body)
 
     def test_decoder_does_not_use_dynamic_index_allocation(self):
-        self.assertEqual(self.impl.count("component_indexes["), 24)
+        self.assertEqual(self.impl.count("component_indexes["), 30)
 
 class ShaderBakePlatformTests(unittest.TestCase):
     @classmethod
