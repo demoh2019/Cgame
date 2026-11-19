@@ -45,6 +45,8 @@
 #include "core/io/file_access.h"
 #include "core/os/time.h"
 #include "core/string/print_string.h"
+#include "servers/physics_friction_combine.h"
+#include "servers/physics_restitution_combine.h"
 #include "core/variant/variant_utility.h"
 
 #include <Jolt/Physics/Collision/CollideShapeVsShapePerLeaf.h>
@@ -60,6 +62,19 @@ constexpr double SPACE_DEFAULT_CONTACT_DEFAULT_BIAS = 0.8;
 constexpr double SPACE_DEFAULT_SLEEP_THRESHOLD_LINEAR = 0.1;
 constexpr double SPACE_DEFAULT_SLEEP_THRESHOLD_ANGULAR = 8.0 * Math::PI / 180;
 constexpr double SPACE_DEFAULT_SOLVER_ITERATIONS = 8;
+
+// Jolt requires plain function pointers for material combination. Select the
+// mode once at space creation instead of branching on every hot contact.
+// Shared helpers keep numerical behavior consistent with GodotPhysics2D/3D.
+template <int P_MODE>
+float combine_jolt_friction(const JPH::Body &p_body1, const JPH::SubShapeID &, const JPH::Body &p_body2, const JPH::SubShapeID &) {
+	return (float)godot_physics_combine_friction(p_body1.GetFriction(), p_body2.GetFriction(), P_MODE);
+}
+
+template <int P_MODE>
+float combine_jolt_restitution(const JPH::Body &p_body1, const JPH::SubShapeID &, const JPH::Body &p_body2, const JPH::SubShapeID &) {
+	return (float)godot_physics_combine_restitution(p_body1.GetRestitution(), p_body2.GetRestitution(), P_MODE);
+}
 
 // Cache up to 4,096 BodyIDs (about 16 KiB per list) between flushes to avoid
 // reallocation on streaming/spawn-heavy scenes. Release larger one-off batches.
@@ -224,13 +239,44 @@ JoltSpace3D::JoltSpace3D(JPH::JobSystem *p_job_system, JPH::TempAllocator *p_tem
 		}
 	});
 
-	physics_system->SetCombineFriction([](const JPH::Body &p_body1, const JPH::SubShapeID &p_sub_shape_id1, const JPH::Body &p_body2, const JPH::SubShapeID &p_sub_shape_id2) {
-		return Math::abs(MIN(p_body1.GetFriction(), p_body2.GetFriction()));
-	});
+	// Snapshot the requested material modes per PhysicsSystem. Avoid reading
+	// project settings and branching for every contact, including worker threads.
+	// Existing spaces retain their combine callbacks when project settings change.
+	switch (JoltProjectSettings::friction_combine_mode) {
+		case 1:
+			physics_system->SetCombineFriction(&combine_jolt_friction<1>);
+			break;
+		case 2:
+			physics_system->SetCombineFriction(&combine_jolt_friction<2>);
+			break;
+		case 3:
+			physics_system->SetCombineFriction(&combine_jolt_friction<3>);
+			break;
+		default:
+			physics_system->SetCombineFriction(&combine_jolt_friction<0>);
+			break;
+	}
 
-	physics_system->SetCombineRestitution([](const JPH::Body &p_body1, const JPH::SubShapeID &p_sub_shape_id1, const JPH::Body &p_body2, const JPH::SubShapeID &p_sub_shape_id2) {
-		return CLAMP(p_body1.GetRestitution() + p_body2.GetRestitution(), 0.0f, 1.0f);
-	});
+	switch (JoltProjectSettings::restitution_combine_mode) {
+		case 1:
+			physics_system->SetCombineRestitution(&combine_jolt_restitution<1>);
+			break;
+		case 2:
+			physics_system->SetCombineRestitution(&combine_jolt_restitution<2>);
+			break;
+		case 3:
+			physics_system->SetCombineRestitution(&combine_jolt_restitution<3>);
+			break;
+		case 4:
+			physics_system->SetCombineRestitution(&combine_jolt_restitution<4>);
+			break;
+		case 5:
+			physics_system->SetCombineRestitution(&combine_jolt_restitution<5>);
+			break;
+		default:
+			physics_system->SetCombineRestitution(&combine_jolt_restitution<0>);
+			break;
+	}
 }
 
 JoltSpace3D::~JoltSpace3D() {
