@@ -2621,6 +2621,61 @@ TEST_CASE("[String] hash") {
 	CHECK(a.hash64() != c.hash64());
 }
 
+TEST_CASE("[String] uri_encode fast path preserves UTF-8 bytes and COW storage") {
+	const String safe = "AbcXYZ_0123456789-._~";
+	const char32_t *original = safe.ptr();
+	CHECK(safe.uri_encode() == safe);
+	CHECK(safe.uri_encode().ptr() == original);
+
+	CHECK(String("").uri_encode() == "");
+	CHECK(String(" /?#&+=:%").uri_encode() == "%20%2F%3F%23%26%2B%3D%3A%25");
+	CHECK(String(U"é").uri_encode() == "%C3%A9");
+	CHECK(String(U"😊").uri_encode() == "%F0%9F%98%8A");
+	CHECK(String(U"Aé B").uri_encode() == "A%C3%A9%20B");
+
+	const String unicode = U"żółć 😀/茶";
+	CHECK(unicode.uri_encode().uri_decode() == unicode);
+	CHECK(unicode == U"żółć 😀/茶");
+}
+
+TEST_CASE("[String] uri_encode randomized byte-for-byte equivalence") {
+	static constexpr char HEX[] = "0123456789ABCDEF";
+	uint32_t seed = 0x1E52C7AB;
+	for (int trial = 0; trial < 384; trial++) {
+		seed ^= seed << 13;
+		seed ^= seed >> 17;
+		seed ^= seed << 5;
+		const int len = int(seed % 150);
+		String input;
+		input.resize_uninitialized(len + 1);
+		char32_t *input_data = input.ptrw();
+		for (int i = 0; i < len; i++) {
+			const uint32_t n = (seed + uint32_t(i) * 11) % 37;
+			input_data[i] = n == 0 ? U'😀' : (n == 1 ? U'β' : char32_t(32 + (n * 29) % 95));
+		}
+		input_data[len] = 0;
+
+		// Independent reference implementation matching the original byte-wise loop.
+		String expected;
+		const CharString utf8 = input.utf8();
+		for (int i = 0; i < utf8.length(); i++) {
+			const uint8_t byte = uint8_t(utf8[i]);
+			const bool unreserved = (byte >= 'a' && byte <= 'z') ||
+					(byte >= 'A' && byte <= 'Z') || (byte >= '0' && byte <= '9') ||
+					byte == '-' || byte == '_' || byte == '.' || byte == '~';
+			if (unreserved) {
+				expected += byte;
+			} else {
+				expected += '%';
+				expected += HEX[byte >> 4];
+				expected += HEX[byte & 0xF];
+			}
+		}
+		CHECK(input.uri_encode() == expected);
+		CHECK(input.length() == len);
+	}
+}
+
 TEST_CASE("[String] uri_encode/unescape") {
 	String s = "Godot Engine:'docs'";
 	String t = "Godot%20Engine%3A%27docs%27";
