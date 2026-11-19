@@ -162,6 +162,77 @@ time; use the same machine/configuration with an older commit to quantify
 the effects. These source-contract checks are not a compilation test,
 and runtime stress tests must still be executed on a built engine.
 
+## Swept vertex/triangle self-collision CCD for soft bodies (3D)
+
+GodotPhysics3D now optionally checks cloth particle trajectories against
+**linearly moving triangle faces over the entire physics step**, rather
+than only checking distance in the final positions. This is continuous
+vertex/face self collision (CCD), inspired by Bullet's swept soft-body
+face contacts and PhysX cloth swept-contact mode, not a separate 3D
+physics backend.
+
+```ini
+[physics]
+3d/solver/soft_body_self_collision_thickness=0.12
+3d/solver/soft_body_self_collision_compliance=0.000001
+3d/solver/soft_body_self_collision_ccd=true
+```
+
+The new `soft_body_self_collision_ccd` flag defaults to **false**. A
+positive self-collision thickness must also be enabled; otherwise the
+existing discrete solver and memory behavior remain unchanged.
+
+On each enabled step, the triangle DynamicBVH is refit with a conservative
+AABB enclosing all six prior/current triangle vertex positions (plus
+thickness). Each vertex queries using the AABB of its own old-to-new
+segment. Adjacent triangles and pinned/pinned pairs are filtered as for
+discrete self contacts. BVH callbacks only collect witnesses; they do
+not change the tree.
+
+For each candidate not already handled by a discrete vertex/face
+contact, the oriented vertex-versus-moving-triangle plane determinant
+is a **cubic polynomial in normalized time**. Derivative roots split
+[0, 1] into monotone intervals, and 24 bisection steps locate
+transversal crossings. Each impact must have an interior barycentric
+witness on the interpolated face. The solver retains a separate
+opt-in witness buffer (impact barycentrics and previous-side normal),
+then solves unilateral XPBD separation of the current vertex and the
+current barycentric face point. This catches a vertex that ends *far
+past* a triangle, outside the discrete collision thickness. CCD and
+discrete contacts share the original per-vertex and 65,536-contact
+budgets; CCD witnesses allocate no extra memory when disabled.
+
+This CCD extension is independent of optional cloth edge/edge
+contacts and tangential vertex/face friction. The vertex/face
+friction path still applies to its normal discrete contacts. No
+additional continuous edge/edge collision test is included.
+
+```bash
+python3 -m unittest discover -s tests/stress -p 'test_physics_xpbd_soft_ccd.py' -v
+python3 tests/stress/run.py --godot ./bin/godot.macos.editor.arm64 \
+  --case physics_soft_body_ccd_3d --scale 4 \
+  --repeats 5 --frames 90 --rss-limit-mib 6144 \
+  --output out/physics-soft-ccd.json
+```
+
+The runtime test launches a disconnected triangular patch through a
+large pinned triangle in a single step. It compares the existing
+discrete contact model with the opt-in swept CCD model and checks that
+the pinned face does not move. Source-level tests additionally cover
+cubic root isolation, a moving triangle crossing a stationary vertex,
+barycentric containment, and mass-weighted XPBD projection.
+
+**Limitations:** trajectories are linearly interpolated between
+previous and predicted positions; impacts can still be missed if the
+actual substep motion differs strongly from that interpolation. The
+solver handles transverse vertex/triangle intersections, not grazing,
+tangential impacts or continuous edge/edge collisions. CCD witness
+projection uses a fixed impact normal and barycentric coordinates;
+large triangle rotations or extreme deformations can introduce
+artifacts. As with other experimental features, compile and runtime
+stress testing are required before production use, including profiling
+CPU/RAM with identical baseline hardware.
+
 ## Structural cloth edge/edge self-collisions (3D)
 
 Cgame GodotPhysics3D now has an **independent opt-in structural edge/edge
