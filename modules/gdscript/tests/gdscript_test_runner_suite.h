@@ -415,4 +415,45 @@ TEST_CASE("[GDScriptSymbolFastPath] missing constant returns Nil without adding 
 	CHECK_FALSE(lang->has_any_global_constant(missing));
 }
 
+
+#ifdef TOOLS_ENABLED
+TEST_CASE("[GDScriptNamedGlobalFastPath] script reads updated named globals through the VM") {
+	GDScriptLanguage *lang = GDScriptLanguage::get_singleton();
+	REQUIRE(lang != nullptr);
+	lang->init();
+
+	const StringName global_name = SNAME("CgamePerfNamedGlobal");
+	CHECK_FALSE(lang->get_named_globals_map().has(global_name));
+	lang->add_named_global_constant(global_name, 23);
+
+	Ref<GDScript> script = memnew(GDScript);
+	script->set_source_code(R"GD(extends RefCounted
+func read_global():
+	return CgamePerfNamedGlobal
+)GD");
+
+	ERR_PRINT_OFF;
+	const Error err = script->reload();
+	ERR_PRINT_ON;
+	CHECK_EQ(err, OK);
+
+	if (err == OK) {
+		Ref<RefCounted> instance = memnew(RefCounted);
+		instance->set_script(script);
+		for (int i = 0; i < 80; i++) {
+			CHECK_EQ(instance->call("read_global"), Variant(23));
+		}
+
+		// A codegen-time constant would not see this update. This verifies
+		// that the new single-probe STORE_NAMED_GLOBAL reads the current value.
+		lang->add_named_global_constant(global_name, 47);
+		for (int i = 0; i < 80; i++) {
+			CHECK_EQ(instance->call("read_global"), Variant(47));
+		}
+	}
+	lang->remove_named_global_constant(global_name);
+	CHECK(lang->get_named_globals_map().getptr(global_name) == nullptr);
+}
+#endif // TOOLS_ENABLED
+
 } // namespace GDScriptTests
