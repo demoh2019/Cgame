@@ -26,6 +26,9 @@
 
 #pragma once
 
+#include "core/math/vector3i.h"
+#include "core/templates/vector.h"
+#include "core/variant/variant.h"
 #include "scene/3d/node_3d.h"
 #include "servers/physics_pbf_3d.h"
 
@@ -76,9 +79,8 @@ class PBFParticleFluid3D : public Node3D {
 	void _apply_xsph_viscosity();
 	void _resolve_world_collisions(const Vector3 &p_old, Vector3 &r_predicted, Vector3 &r_velocity);
 	void _step_once(real_t p_delta);
-	static void _bind_methods();
-
 protected:
+	static void _bind_methods();
 	void _notification(int p_what);
 
 public:
@@ -120,7 +122,7 @@ public:
 	void clear_particles();
 	int get_particle_count() const { return positions.size(); }
 	real_t get_average_density() const { return average_density; }
-	int get_last_neighbor_evaluations() const { return int(MIN(last_neighbor_evaluations, uint64_t(INT32_MAX))); }
+	int get_last_neighbor_evaluations() const { return int(MIN(last_neighbor_evaluations, uint64_t(2147483647))); }
 
 	bool step(real_t p_delta);
 
