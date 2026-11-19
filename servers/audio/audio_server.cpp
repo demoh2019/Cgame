@@ -1742,7 +1742,7 @@ PackedVector2Array AudioServer::get_input_frames(int p_frames) {
 	AudioDriver *ad = AudioDriver::get_singleton();
 	ad->lock();
 	int input_position = ad->get_input_position();
-	Vector<int32_t> buf = ad->get_input_buffer();
+	const Vector<int32_t> &buf = ad->get_input_buffer();
 	if (input_position < input_buffer_ofs) {
 		input_position += buf.size();
 	}
