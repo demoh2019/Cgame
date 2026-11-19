@@ -74,6 +74,8 @@ func _run() -> void:
         return
     _check(wall.get_node_or_null("CollisionShape3D") != null, "barricade has live physics shape")
     _check(wall.collision_layer == 1, "barricade blocks infected on physics layer 1")
+    # Allow the new StaticBody3D shape to register in the physics broadphase.
+    await physics_frame
     _check(not bool(builder.call("try_build")), "overlapping second barricade is rejected")
     _check(int(player.call("get_item_count", "wood_t1")) == 3, "rejected overlapping build does not charge")
 
