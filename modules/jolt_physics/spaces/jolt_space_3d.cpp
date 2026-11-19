@@ -1149,8 +1149,10 @@ static bool soft_self_edges_are_neighbors(uint64_t p_a, uint64_t p_b, const JPH:
 	if (a0 == b0 || a0 == b1 || a1 == b0 || a1 == b1) {
 		return true;
 	}
-	for (const uint32_t a : { a0, a1 }) {
-		for (const uint32_t b : { b0, b1 }) {
+	const uint32_t endpoints_a[2] = { a0, a1 };
+	const uint32_t endpoints_b[2] = { b0, b1 };
+	for (const uint32_t a : endpoints_a) {
+		for (const uint32_t b : endpoints_b) {
 			if (std::binary_search(p_topology.begin(), p_topology.end(), soft_self_topology_edge_key(a, b))) {
 				return true;
 			}
