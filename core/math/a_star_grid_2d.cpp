@@ -187,18 +187,30 @@ void AStarGrid2D::update() {
 		return;
 	}
 
-	points.clear();
-	solid_mask.clear();
-
-	// Grid dimensions are known before construction. Reserve the outer rows,
-	// each row's points, and the complete border-padded occupancy mask once.
-	points.reserve(region.size.y);
+	const uint64_t total_points = uint64_t(region.size.x) * uint64_t(region.size.y);
 	const uint64_t padded_width = uint64_t(region.size.x) + 2;
 	const uint64_t padded_height = uint64_t(region.size.y) + 2;
 	const uint64_t mask_cells = padded_width * padded_height;
-	if (mask_cells <= UINT32_MAX) {
-		solid_mask.reserve(uint32_t(mask_cells));
+	// The underlying LocalVector uses 32-bit indices. Check limits before
+	// reserving to avoid truncation and multiplication overflow.
+	ERR_FAIL_COND_MSG(total_points > UINT32_MAX || mask_cells > UINT32_MAX || total_points > SIZE_MAX / sizeof(Point),
+			"AStarGrid2D region is too large to allocate.");
+	// Reuse buffers for similarly-sized rebuilds, but release large allocations
+	// after shrinking a grid (otherwise a tiny map retains the old peak RSS).
+	if (total_points < uint64_t(points.get_capacity()) / 4) {
+		points.reset();
+	} else {
+		points.clear();
 	}
+	if (mask_cells < uint64_t(solid_mask.get_capacity()) / 4) {
+		solid_mask.reset();
+	} else {
+		solid_mask.clear();
+	}
+
+	// One contiguous allocation for cells, rather than one per row.
+	points.reserve(uint32_t(total_points));
+	solid_mask.reserve(uint32_t(mask_cells));
 
 	const int32_t end_x = region.get_end().x;
 	const int32_t end_y = region.get_end().y;
@@ -208,8 +220,6 @@ void AStarGrid2D::update() {
 	}
 
 	for (int32_t y = region.position.y; y < end_y; y++) {
-		LocalVector<Point> line;
-		line.reserve(region.size.x);
 		solid_mask.push_back(true);
 		for (int32_t x = region.position.x; x < end_x; x++) {
 			Vector2 v = offset;
@@ -226,11 +236,10 @@ void AStarGrid2D::update() {
 				default:
 					break;
 			}
-			line.push_back(Point(Vector2i(x, y), v));
+			points.push_back(Point(Vector2i(x, y), v));
 			solid_mask.push_back(false);
 		}
 		solid_mask.push_back(true);
-		points.push_back(std::move(line));
 	}
 
 	for (int32_t x = region.position.x; x < end_x + 2; x++) {
@@ -678,7 +687,10 @@ real_t AStarGrid2D::_compute_cost(const Vector2i &p_from_id, const Vector2i &p_t
 }
 
 void AStarGrid2D::clear() {
-	points.clear();
+	points.reset();
+	solid_mask.reset();
+	end = nullptr;
+	last_closest_point = nullptr;
 	region = Rect2i();
 }
 
@@ -703,7 +715,7 @@ TypedArray<Dictionary> AStarGrid2D::get_point_data_in_region(const Rect2i &p_reg
 
 	for (int32_t y = start_y; y < end_y; y++) {
 		for (int32_t x = start_x; x < end_x; x++) {
-			const Point &p = points[y][x];
+			const Point &p = points[uint32_t(uint64_t(y) * uint32_t(region.size.x) + uint32_t(x))];
 
 			Dictionary dict;
 			dict["id"] = p.id;

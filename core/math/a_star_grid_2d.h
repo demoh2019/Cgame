@@ -119,7 +119,8 @@ private:
 	};
 
 	LocalVector<bool> solid_mask;
-	LocalVector<LocalVector<Point>> points;
+	// All cells share one allocation instead of a separate allocation per row.
+	LocalVector<Point> points;
 	Point *end = nullptr;
 	Point *last_closest_point = nullptr;
 
@@ -134,9 +135,13 @@ private: // Internal routines.
 		return !solid_mask[_to_mask_index(p_x, p_y)];
 	}
 
+	_FORCE_INLINE_ uint32_t _to_point_index(int32_t p_x, int32_t p_y) const {
+		// A grid may contain more than INT32_MAX cells. Avoid signed overflow.
+		return uint32_t((int64_t(p_y) - region.position.y) * region.size.x + int64_t(p_x) - region.position.x);
+	}
 	_FORCE_INLINE_ Point *_get_point(int32_t p_x, int32_t p_y) {
 		if (region.has_point(Vector2i(p_x, p_y))) {
-			return &points[p_y - region.position.y][p_x - region.position.x];
+			return &points[_to_point_index(p_x, p_y)];
 		}
 		return nullptr;
 	}
@@ -154,15 +159,15 @@ private: // Internal routines.
 	}
 
 	_FORCE_INLINE_ Point *_get_point_unchecked(int32_t p_x, int32_t p_y) {
-		return &points[p_y - region.position.y][p_x - region.position.x];
+		return &points[_to_point_index(p_x, p_y)];
 	}
 
 	_FORCE_INLINE_ Point *_get_point_unchecked(const Vector2i &p_id) {
-		return &points[p_id.y - region.position.y][p_id.x - region.position.x];
+		return &points[_to_point_index(p_id.x, p_id.y)];
 	}
 
 	_FORCE_INLINE_ const Point *_get_point_unchecked(const Vector2i &p_id) const {
-		return &points[p_id.y - region.position.y][p_id.x - region.position.x];
+		return &points[_to_point_index(p_id.x, p_id.y)];
 	}
 
 	void _get_nbors(Point *p_point, FixedVector<Point *, 8> &r_nbors);
