@@ -366,6 +366,46 @@ bool GodotBodyPair3D::_test_ccd(real_t p_step, GodotBody3D *p_A, int p_shape_A, 
 		}
 	}
 
+	// For parallel capsules the Minkowski sum of their axial segments
+	// is a segment with the summed half lengths. Expanding by both radii
+	// leaves another capsule, so the first linear impact has an exact
+	// constant-time solution. Skew or spinning capsules use generic CCD.
+	if (shape_A_ptr->get_type() == PS3DE::SHAPE_CAPSULE && shape_B_ptr->get_type() == PS3DE::SHAPE_CAPSULE &&
+			p_A->get_angular_velocity() == Vector3() && p_B->get_angular_velocity() == Vector3()) {
+		const double scale_A = physics_ccd_uniform_sphere_scale(p_xform_A);
+		const double scale_B = physics_ccd_uniform_sphere_scale(p_xform_B);
+		if (scale_A > 0.0 && scale_B > 0.0) {
+			const Vector3 axis_A = p_xform_A.basis.get_column(1);
+			const Vector3 axis_B = p_xform_B.basis.get_column(1);
+			if (double(axis_A.cross(axis_B).length()) <= 1e-7 * scale_A * scale_B) {
+				const GodotCapsuleShape3D *capsule_A = static_cast<GodotCapsuleShape3D *>(shape_A_ptr);
+				const GodotCapsuleShape3D *capsule_B = static_cast<GodotCapsuleShape3D *>(shape_B_ptr);
+				const double radius_A = double(capsule_A->get_radius());
+				const double radius_B = double(capsule_B->get_radius());
+				const double half_A = double(capsule_A->get_height()) * 0.5 - radius_A;
+				const double half_B = double(capsule_B->get_height()) * 0.5 - radius_B;
+				if (radius_A > 0.0 && radius_B > 0.0 && half_A >= 0.0 && half_B >= 0.0) {
+					const double ratio = scale_A / scale_B;
+					const Transform3D inverse_B = p_xform_B.affine_inverse();
+					const Vector3 local_start = inverse_B.xform(p_xform_A.origin);
+					const Vector3 local_motion = inverse_B.basis.xform(relative_motion);
+					double impact_fraction = 0.0;
+					if (!physics_ccd_capsule_toi(local_start, local_motion,
+							radius_B + radius_A * ratio, half_B + half_A * ratio, impact_fraction)) {
+						return false;
+					}
+					const real_t allowed_distance = CLAMP(real_t(impact_fraction * double(motion_length)) + extent * real_t(0.01), real_t(0.0), motion_length);
+					const Vector3 desired_velocity = velocity_B + direction * (allowed_distance / p_step);
+					const real_t initial_speed = velocity_A.length();
+					const Vector3 travel_direction = velocity_A / initial_speed;
+					const real_t clipped_speed = CLAMP(desired_velocity.dot(travel_direction), real_t(0.0), initial_speed);
+					p_A->set_linear_velocity(travel_direction * clipped_speed);
+					return true;
+				}
+			}
+		}
+	}
+
 	// A leading face may have several support vertices. The target
 	// transform is shared by all rays and is inverted only once.
 	if (p_xform_B.basis.determinant() == 0.0) {
