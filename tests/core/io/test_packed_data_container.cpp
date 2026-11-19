@@ -119,4 +119,71 @@ TEST_CASE("[PackedDataContainer] Large dictionary and hash-based lookups") {
 	CHECK(valid);
 }
 
+TEST_CASE("[PackedDataContainer] Thousands of heterogeneous dictionary entries retain matching values") {
+	Ref<PackedDataContainer> packed;
+	packed.instantiate();
+
+	Dictionary input;
+	for (int i = 0; i < 4096; i++) {
+		input[String("entry_") + itos(i)] = i * 91 - 7000;
+	}
+	for (int i = 0; i < 128; i++) {
+		input[i * 23 + 1] = String("int_value_") + itos(i);
+	}
+	const String large_value = String("shared-long-payload-").repeat(64);
+	for (int i = 0; i < 64; i++) {
+		input[String("payload_") + itos(i)] = large_value;
+	}
+	CHECK(packed->pack(input) == OK);
+	CHECK(packed->size() == 4096 + 128 + 64);
+
+	bool valid = false;
+	for (int i = 4095; i >= 0; i--) {
+		CHECK(packed->getvar(String("entry_") + itos(i), &valid) == Variant(i * 91 - 7000));
+		CHECK(valid);
+	}
+	for (int i = 0; i < 128; i++) {
+		CHECK(packed->getvar(i * 23 + 1, &valid) == Variant(String("int_value_") + itos(i)));
+		CHECK(valid);
+	}
+	for (int i = 0; i < 64; i++) {
+		CHECK(packed->getvar(String("payload_") + itos(i), &valid) == Variant(large_value));
+		CHECK(valid);
+	}
+}
+
+TEST_CASE("[PackedDataContainer] Dictionary-entry references remain stable through nested packing") {
+	Ref<PackedDataContainer> packed;
+	packed.instantiate();
+
+	Dictionary nested;
+	for (int i = 0; i < 96; i++) {
+		nested[String("nested_") + itos(i)] = i + 10;
+	}
+	Array list;
+	for (int i = 0; i < 256; i++) {
+		list.push_back(i * 3);
+	}
+	Dictionary outer;
+	outer["nested"] = nested;
+	outer["list"] = list;
+	outer["value"] = 123;
+	CHECK(packed->pack(outer) == OK);
+	CHECK(packed->size() == 3);
+
+	bool valid = false;
+	CHECK(packed->getvar("value", &valid) == Variant(123));
+	CHECK(valid);
+	Variant nested_variant = packed->getvar("nested", &valid);
+	CHECK(valid);
+	Object *nested_object = nested_variant;
+	PackedDataContainerRef *nested_ref = Object::cast_to<PackedDataContainerRef>(nested_object);
+	REQUIRE(nested_ref != nullptr);
+	CHECK(nested_ref->size() == 96);
+	for (int i = 0; i < 96; i++) {
+		CHECK(nested_ref->getvar(String("nested_") + itos(i), &valid) == Variant(i + 10));
+		CHECK(valid);
+	}
+}
+
 } // namespace TestPackedDataContainer
