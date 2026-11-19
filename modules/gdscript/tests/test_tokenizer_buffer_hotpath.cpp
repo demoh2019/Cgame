@@ -107,10 +107,10 @@ TEST_CASE("[GDScriptTokenizerHotpath] Long identifier and line continuations rou
 TEST_CASE("[GDScriptTokenizerHotpath] Raw token decoding keeps input untouched and owns the tokens") {
 	StringBuilder source;
 	for (int i = 0; i < 2200; i++) {
-		source += vformat("var symbol_%d = \"value_é_日本_%d\"\\n", i % 97, i);
-		source += vformat("symbol_%d += %d\\n", i % 97, i % 47);
+		source += vformat("var symbol_%d = \"value_é_日本_%d\"\n", i % 97, i);
+		source += vformat("symbol_%d += %d\n", i % 97, i % 47);
 	}
-	source += "var special_number = NAN\\n";
+	source += "var special_number = NAN\n";
 	const String code = source.as_string();
 	Vector<uint8_t> binary = GDScriptTokenizerBuffer::parse_code_string(code, GDScriptTokenizerBuffer::COMPRESS_NONE);
 	REQUIRE(binary.size() > 12);
@@ -149,7 +149,7 @@ TEST_CASE("[GDScriptTokenizerHotpath] Raw token decoding keeps input untouched a
 }
 
 TEST_CASE("[GDScriptTokenizerHotpath] Unicode identifiers and punctuation decode correctly") {
-	const String code = "var café_value = 42\\nvar other_value = café_value + 5\\nfunc test():\\n\\treturn other_value\\n";
+	const String code = "var café_value = 42\nvar other_value = café_value + 5\nfunc test():\n\treturn other_value\n";
 	compare_text_and_buffer(code, GDScriptTokenizerBuffer::COMPRESS_NONE);
 	compare_text_and_buffer(code, GDScriptTokenizerBuffer::COMPRESS_ZSTD);
 }
