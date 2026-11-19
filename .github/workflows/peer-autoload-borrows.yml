@@ -1,0 +1,40 @@
+name: SceneMultiplayer peers and startup autoload no-copy
+
+on:
+  push:
+    branches: [develop]
+    paths:
+      - 'modules/multiplayer/scene_multiplayer.h'
+      - 'modules/multiplayer/tests/test_scene_multiplayer.h'
+      - 'main/main.cpp'
+      - 'misc/scripts/tests/test_peer_autoload_borrows.py'
+      - '.github/workflows/peer-autoload-borrows.yml'
+  pull_request:
+    branches: [develop]
+    paths:
+      - 'modules/multiplayer/scene_multiplayer.h'
+      - 'modules/multiplayer/tests/test_scene_multiplayer.h'
+      - 'main/main.cpp'
+      - 'misc/scripts/tests/test_peer_autoload_borrows.py'
+      - '.github/workflows/peer-autoload-borrows.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  source-contracts:
+    runs-on: ubuntu-24.04
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ['3.9', '3.13']
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+      - name: Validate stable immutable container borrows
+        run: |
+          python -m py_compile misc/scripts/tests/test_peer_autoload_borrows.py
+          python -m unittest discover -s misc/scripts/tests -p test_peer_autoload_borrows.py -v
