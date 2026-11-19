@@ -265,8 +265,9 @@ void JoltSoftBody3D::_apply_environmental_forces(float p_step) {
 
 	// Calculate gravity and which areas affect the soft body through wind.
 	bool gravity_done = false;
+	bool has_distance_attenuation = false;
 	Vector3 gravity;
-	LocalVector<JoltArea3D *> wind_areas;
+	wind_areas_scratch.clear();
 	for (JoltArea3D *area : areas) {
 		if (!gravity_done) {
 			gravity_done = JoltArea3D::apply_override(gravity, area->get_gravity_mode(), [&]() {
@@ -275,7 +276,8 @@ void JoltSoftBody3D::_apply_environmental_forces(float p_step) {
 		}
 
 		if (area->get_wind_pressure() > CMP_EPSILON) {
-			wind_areas.push_back(area);
+			wind_areas_scratch.push_back(area);
+			has_distance_attenuation |= area->get_wind_attenuation_factor() != 0.0f;
 		}
 	}
 
@@ -287,7 +289,7 @@ void JoltSoftBody3D::_apply_environmental_forces(float p_step) {
 	// Apply gravity to soft body. Note that this only works so long as vertices have uniform mass (excluding pinned vertices).
 	jolt_body->AddForce(to_jolt(gravity) * mass);
 
-	if (!wind_areas.is_empty()) {
+	if (!wind_areas_scratch.is_empty()) {
 		JPH::SoftBodyMotionProperties &motion_properties = static_cast<JPH::SoftBodyMotionProperties &>(*jolt_body->GetMotionPropertiesUnchecked());
 		JPH::Array<JPH::SoftBodyVertex> &physics_vertices = motion_properties.GetVertices();
 
@@ -300,7 +302,10 @@ void JoltSoftBody3D::_apply_environmental_forces(float p_step) {
 			Vector3 v0 = to_godot(physics_vertex0.mPosition);
 			Vector3 v1 = to_godot(physics_vertex1.mPosition);
 			Vector3 v2 = to_godot(physics_vertex2.mPosition);
-			Vector3 centroid = com_position + (v0 + v1 + v2) * real_t(1.0 / 3.0);
+			Vector3 centroid;
+			if (has_distance_attenuation) {
+				centroid = com_position + (v0 + v1 + v2) * real_t(1.0 / 3.0);
+			}
 
 			// Calculate the triangle normal.
 			Vector3 normal = (v2 - v0).cross(v1 - v0);
@@ -313,14 +318,16 @@ void JoltSoftBody3D::_apply_environmental_forces(float p_step) {
 
 				// Accumulate wind forces from all wind areas.
 				Vector3 wind_force;
-				for (const JoltArea3D *area : wind_areas) {
+				for (const JoltArea3D *area : wind_areas_scratch) {
 					const Vector3 &wind_direction = area->get_wind_direction();
-					const Vector3 &wind_source = area->get_wind_source();
-
-					// Calculate attenuation factor based on distance from wind source to triangle centroid.
-					// We do not allow a projection below 1 to ensure that we never amplify and to avoid NaNs when the value would be negative.
-					real_t projection_toward_centroid = MAX((centroid - wind_source).dot(wind_direction), real_t(1.0));
-					real_t attenuation_over_distance = Math::pow(projection_toward_centroid, -real_t(area->get_wind_attenuation_factor()));
+					const float attenuation_factor = area->get_wind_attenuation_factor();
+					real_t attenuation_over_distance = real_t(1.0);
+					if (attenuation_factor != 0.0f) {
+						const Vector3 &wind_source = area->get_wind_source();
+						// The projection remains >= 1 to avoid amplifying wind near its source.
+						const real_t projection_toward_centroid = MAX((centroid - wind_source).dot(wind_direction), real_t(1.0));
+						attenuation_over_distance = Math::pow(projection_toward_centroid, -real_t(attenuation_factor));
+					}
 
 					// Calculate force magnitude.
 					real_t force_magnitude = area->get_wind_pressure() * triangle_area;
@@ -337,6 +344,18 @@ void JoltSoftBody3D::_apply_environmental_forces(float p_step) {
 				physics_vertex2.mVelocity += impulse * physics_vertex2.mInvMass;
 			}
 		}
+	}
+
+	// Reuse capacity under steady wind; trim the scratch after a large burst.
+	// Clear pointers before another frame can remove the referenced areas.
+	constexpr uint32_t MIN_CACHED_WIND_AREAS = 64;
+	const uint32_t wind_count = wind_areas_scratch.size();
+	const uint32_t retained_capacity = MAX(MIN_CACHED_WIND_AREAS,
+			wind_count > UINT32_MAX / 4 ? UINT32_MAX : wind_count * 4);
+	if (wind_areas_scratch.get_capacity() > retained_capacity) {
+		wind_areas_scratch.reset();
+	} else {
+		wind_areas_scratch.clear();
 	}
 }
 
