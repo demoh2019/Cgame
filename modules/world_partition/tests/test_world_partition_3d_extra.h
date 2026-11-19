@@ -40,6 +40,7 @@
 #include "scene/main/window.h"
 #include "tests/test_macros.h"
 
+#include <cstdint>
 #include <limits>
 
 namespace TestWorldPartition3DExtra {
