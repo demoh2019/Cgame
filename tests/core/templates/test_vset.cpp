@@ -34,6 +34,9 @@ TEST_FORCE_LINK(test_vset)
 
 #include "core/templates/vset.h"
 
+#include <cstdint>
+#include <set>
+
 namespace TestVSet {
 
 template <typename T>
@@ -148,6 +151,76 @@ TEST_CASE("[VSet] Equivalent keys use strict weak ordering rather than equality"
 	set.erase({ 17 });
 	CHECK(set.size() == 1);
 	CHECK(set[0].value == 25);
+}
+
+
+TEST_CASE("[VSet] Ascending insertion uses one comparison after the first element") {
+	VSet<ComparisonCountedInt> set;
+	for (int i = 0; i < 512; i++) {
+		ComparisonCountedInt::comparisons = 0;
+		set.insert({ i });
+		CHECK(ComparisonCountedInt::comparisons == (i == 0 ? 0 : 1));
+	}
+	CHECK(set.size() == 512);
+	for (int i = 0; i < 512; i++) {
+		CHECK(set[i].value == i);
+	}
+
+	// Duplicate maximums and smaller insertions must preserve uniqueness and order.
+	set.insert({ 511 });
+	CHECK(set.size() == 512);
+	set.insert({ -1 });
+	CHECK(set.size() == 513);
+	CHECK(set[0].value == -1);
+	CHECK(set[512].value == 511);
+}
+
+TEST_CASE("[VSet] Ordered and mixed inserts retain reference set semantics") {
+	VSet<int> set;
+	std::set<int> reference;
+	uint32_t seed = 0x71c03e9au;
+
+	for (int i = 0; i < 4096; i++) {
+		seed = seed * 1664525u + 1013904223u;
+		int value = int((seed >> 8) % 601u) - 300;
+		// Exercise monotone, reverse, duplicate-heavy and random workloads.
+		if (i < 800) {
+			value = i * 2;
+		} else if (i < 1600) {
+			value = -i * 2;
+		} else if (i < 2400) {
+			value = 17;
+		}
+		set.insert(value);
+		reference.insert(value);
+	}
+	CHECK(set.size() == int(reference.size()));
+	int index = 0;
+	for (int value : reference) {
+		CHECK(set[index] == value);
+		CHECK(set.find(value) == index);
+		CHECK(set.has(value));
+		index++;
+	}
+	CHECK(set.find(12345678) == -1);
+}
+
+TEST_CASE("[VSet] Ascending insertion preserves copy-on-write isolation") {
+	VSet<int> original;
+	for (int i = 0; i < 80; i++) {
+		original.insert(i);
+	}
+	VSet<int> shared = original;
+	shared.insert(80);
+	CHECK(shared.size() == 81);
+	CHECK(shared[80] == 80);
+	CHECK(original.size() == 80);
+	CHECK(!original.has(80));
+
+	original.insert(81);
+	CHECK(original.size() == 81);
+	CHECK(original[80] == 81);
+	CHECK(!shared.has(81));
 }
 
 } // namespace TestVSet
