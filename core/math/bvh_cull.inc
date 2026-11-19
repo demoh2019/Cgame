@@ -77,6 +77,9 @@ int cull_convex(CullParams &r_params, bool p_translate_hits = true) {
 		}
 
 		_cull_convex_iterative(_root_node_id[n], r_params);
+		if (_cull_hits_full(r_params)) {
+			break;
+		}
 	}
 
 	if (p_translate_hits) {
@@ -507,6 +510,9 @@ bool _cull_convex_iterative(uint32_t p_node_id, CullParams &r_params, bool p_ful
 
 					// register hit
 					_cull_hit(child_id, r_params);
+					if (_cull_hits_full(r_params)) {
+						return false;
+					}
 				}
 
 			} else {
@@ -540,6 +546,9 @@ bool _cull_convex_iterative(uint32_t p_node_id, CullParams &r_params, bool p_ful
 
 						// register hit
 						_cull_hit(child_id, r_params);
+						if (_cull_hits_full(r_params)) {
+							return false;
+						}
 					}
 				}
 
@@ -568,7 +577,8 @@ bool _cull_convex_iterative(uint32_t p_node_id, CullParams &r_params, bool p_ful
 						uint32_t child_id = leaf.get_item_ref_id(n);
 
 						// full up with results? exit early, no point in further testing
-						if (!_cull_hit(child_id, r_params)) {
+						_cull_hit(child_id, r_params);
+						if (_cull_hits_full(r_params)) {
 							return false;
 						}
 					}
