@@ -54,6 +54,22 @@ class _WARN_UNUSED_ RingBuffer {
 		}
 	}
 
+	// Avoid libc call overhead for very short byte spans, while retaining fast SIMD search for large spans.
+	static _FORCE_INLINE_ int find_block(const T *p_data, const T &p_value, int p_count) {
+		if constexpr (std::is_integral_v<T> && sizeof(T) == 1 && !std::is_same_v<T, bool>) {
+			if (p_count >= 16) {
+				const T *found = static_cast<const T *>(std::memchr(p_data, static_cast<unsigned char>(p_value), size_t(p_count)));
+				return found ? int(found - p_data) : -1;
+			}
+		}
+		for (int i = 0; i < p_count; i++) {
+			if (p_data[i] == p_value) {
+				return i;
+			}
+		}
+		return -1;
+	}
+
 	inline int inc(int &p_var, int p_size) const {
 		int ret = p_var;
 		p_var += p_size;
@@ -106,33 +122,25 @@ public:
 
 	int find(const T &p_value, int p_offset, int p_max_size) const {
 		const int left = data_left();
-		if (p_offset < 0 || p_max_size <= 0 || p_offset >= left) {
+		if (p_offset < 0 || p_offset >= left || p_max_size <= 0) {
 			return -1;
 		}
-		// Subtract instead of adding sizes to avoid signed integer overflow.
-		p_max_size = MIN(left - p_offset, p_max_size);
+		p_max_size = MIN(p_max_size, left - p_offset);
 		int pos = read_pos;
 		inc(pos, p_offset);
-		int to_read = p_max_size;
-		while (to_read) {
-			const int total = MIN(to_read, size() - pos);
-			if constexpr (std::is_integral_v<T> && sizeof(T) == 1 && !std::is_same_v<T, bool>) {
-				// Byte buffers (network/audio/streaming) can use optimized libc scanning.
-				const T *const begin = data.ptr() + pos;
-				const T *const found = static_cast<const T *>(std::memchr(begin, static_cast<unsigned char>(p_value), size_t(total)));
-				if (found) {
-					return p_max_size - to_read + int(found - begin);
-				}
-			} else {
-				const T *const begin = data.ptr() + pos;
-				for (int i = 0; i < total; i++) {
-					if (begin[i] == p_value) {
-						return i + (p_max_size - to_read);
-					}
-				}
+
+		// At most two contiguous spans; no loop state on the common unwrapped path.
+		const int first = MIN(p_max_size, size() - pos);
+		const T *source = data.ptr();
+		const int first_match = find_block(source + pos, p_value, first);
+		if (first_match >= 0) {
+			return first_match;
+		}
+		if (first < p_max_size) {
+			const int second_match = find_block(source, p_value, p_max_size - first);
+			if (second_match >= 0) {
+				return first + second_match;
 			}
-			to_read -= total;
-			pos = 0;
 		}
 		return -1;
 	}
