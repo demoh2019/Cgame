@@ -458,8 +458,10 @@ GDScriptTokenizer::Token GDScriptTokenizerBuffer::scan() {
 		return eof;
 	};
 
-	if (!last_token_was_newline && token_lines.has(current)) {
-		current_line = token_lines[current];
+	// Avoid hashing the token index twice (has() followed by operator[]).
+	const int *line = last_token_was_newline ? nullptr : token_lines.getptr(current);
+	if (line != nullptr) {
+		current_line = *line;
 		uint32_t current_column = token_columns[current];
 
 		// Check if there's a need to indent/dedent.
@@ -494,6 +496,8 @@ GDScriptTokenizer::Token GDScriptTokenizerBuffer::scan() {
 
 	last_token_was_newline = false;
 
-	Token token = tokens[current++];
+	// The bounds were checked above; avoid a second bounds check in the
+	// per-token path.
+	Token token = tokens.ptr()[current++];
 	return token;
 }
