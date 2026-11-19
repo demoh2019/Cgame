@@ -499,4 +499,57 @@ TEST_CASE("[BitMap] Clip to polygon") {
 	CHECK_MESSAGE(polygons[0].size() == 6, "The polygon should have exactly 6 points");
 }
 
+TEST_CASE("[BitMap] Rect byte ranges match an independent per-pixel reference") {
+	// Exercise byte boundaries, non-byte-aligned row widths, clipping, one-bit
+	// spans, empty rectangles, and repeated set/clear operations.
+	const int widths[] = { 1, 2, 3, 7, 8, 9, 15, 16, 17, 31, 32, 33, 65 };
+	const int heights[] = { 1, 2, 9, 17 };
+	for (int width : widths) {
+		for (int height : heights) {
+			BitMap bit_map;
+			bit_map.create(Size2i(width, height));
+
+			Vector<uint8_t> expected;
+			expected.resize(width * height);
+			uint8_t *reference = expected.ptrw();
+			memset(reference, 0, expected.size());
+
+			uint32_t state = 0x5a1731bdu ^ uint32_t(width * 137 + height);
+			auto random = [&state]() -> uint32_t {
+				state = state * 1664525u + 1013904223u;
+				return state;
+			};
+
+			for (int iteration = 0; iteration < 120; iteration++) {
+				const int x = int(random() % uint32_t(width * 3)) - width;
+				const int y = int(random() % uint32_t(height * 3)) - height;
+				const int rect_width = int(random() % uint32_t(width * 2 + 1));
+				const int rect_height = int(random() % uint32_t(height * 2 + 1));
+				const bool value = iteration % 4 != 1;
+				const Rect2i rect(x, y, rect_width, rect_height);
+
+				bit_map.set_bit_rect(rect, value);
+
+				int expected_count = 0;
+				bool all_match = true;
+				for (int row = 0; row < height; row++) {
+					for (int col = 0; col < width; col++) {
+						const int index = row * width + col;
+						if (rect.has_point(Point2i(col, row))) {
+							reference[index] = value ? 1 : 0;
+						}
+						const bool expected_bit = reference[index] != 0;
+						expected_count += expected_bit;
+						if (bit_map.get_bit(col, row) != expected_bit) {
+							all_match = false;
+						}
+					}
+				}
+				CHECK(all_match);
+				CHECK(bit_map.get_true_bit_count() == expected_count);
+			}
+		}
+	}
+}
+
 } // namespace TestBitMap
