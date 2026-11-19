@@ -50,6 +50,7 @@
 #include "servers/physics_fem_tetra_fiber_plasticity.h"
 #include "servers/physics_fem_tetra_viscosity.h"
 #include "servers/physics_fem_tetra_volume_plasticity.h"
+#include "servers/physics_fem_tetra_deviatoric_plasticity.h"
 #include "servers/physics_fem_tetra_damage.h"
 #include "servers/physics_fem_tetra_inversion_recovery.h"
 #include "servers/physics_softbody_shape_clusters.h"
@@ -536,6 +537,7 @@ void GodotSoftBody3D::solve_shape_matching_clusters(real_t p_strength) {
 void GodotSoftBody3D::initialize_fem_tetra() {
 	const bool previously_lumped = !xpbd_fem_mass_fractions.is_empty();
 	xpbd_fem_tetrahedra.reset();
+	xpbd_fem_deviatoric_plastic_strain.reset();
 	xpbd_fem_fiber_lambdas.reset();
 	xpbd_fem_fiber_plastic_rest_stretches.reset();
 	xpbd_fem_damage.reset();
@@ -3195,6 +3197,41 @@ void GodotSoftBody3D::solve_constraints(real_t p_delta) {
 		}
 	}
 
+	// Isotropic volume creep above changes ONLY the reference volume.
+	// This separate finite-strain plastic flow relaxes the DEVIATORIC
+	// logarithmic strain, preserving the current FEM rest determinant
+	// and masses. Sequential updates commute with isotropic volume scale.
+	// Compute on predicted coordinates ONCE before elastic projection.
+	const real_t deviatoric_plastic_rate = get_space()->get_soft_body_tetra_deviatoric_plastic_rate();
+	const bool use_deviatoric_plasticity =
+			deviatoric_plastic_rate > real_t(0.0) &&
+			get_space()->get_soft_body_tetra_fem_compliance() > real_t(0.0) &&
+			p_delta > real_t(0.0) && !xpbd_fem_tetrahedra.is_empty();
+	if (use_deviatoric_plasticity) {
+		if (xpbd_fem_deviatoric_plastic_strain.size() != xpbd_fem_tetrahedra.size()) {
+			xpbd_fem_deviatoric_plastic_strain.resize(xpbd_fem_tetrahedra.size());
+			for (double &value : xpbd_fem_deviatoric_plastic_strain) {
+				value = 0.0;
+			}
+		}
+		const double fraction = 1.0 - Math::exp(-double(deviatoric_plastic_rate) * double(p_delta));
+		if (Math::is_finite(fraction) && fraction > 0.0) {
+			const double yield_strain = double(get_space()->get_soft_body_tetra_deviatoric_plastic_yield());
+			const double hardening = double(get_space()->get_soft_body_tetra_deviatoric_plastic_hardening());
+			const double maximum = double(get_space()->get_soft_body_tetra_deviatoric_plastic_max_strain());
+			for (uint32_t i = 0; i < xpbd_fem_tetrahedra.size(); ++i) {
+				PhysicsFEMConvexTetra &tetra = xpbd_fem_tetrahedra[i];
+				const Vector3 positions[4] = {
+					nodes[tetra.a].x, nodes[tetra.b].x,
+					nodes[tetra.c].x, nodes[tetra.d].x
+				};
+				physics_fem_tetra_creep_deviatoric_rest(
+						positions, yield_strain, hardening, fraction, maximum,
+						tetra.rest, xpbd_fem_deviatoric_plastic_strain[i]);
+			}
+		}
+	}
+
 	// Tension-only viscoplastic remodeling of the REST material fiber
 	// length. Measure the predicted over-yield stretch BEFORE any XPBD
 	// elastic correction, once per tick. Permanent rest stretches survive
@@ -4014,6 +4051,7 @@ void GodotSoftBody3D::destroy() {
 	xpbd_volume_rest = 0.0;
 	xpbd_volume_original_rest = 0.0;
 	xpbd_fem_tetrahedra.reset();
+	xpbd_fem_deviatoric_plastic_strain.reset();
 	xpbd_fem_fiber_lambdas.reset();
 	xpbd_fem_fiber_plastic_rest_stretches.reset();
 	xpbd_fem_damage.reset();
