@@ -463,8 +463,8 @@ func _physics_process(delta: float) -> void:
     # Keyboard drive only affects the demo vehicle (and does not touch camera keys).
     if _vehicle == null:
         return
-    var throttle := float(Input.is_key_pressed(KEY_UP)) - float(Input.is_key_pressed(KEY_DOWN))
-    var steering_target := (float(Input.is_key_pressed(KEY_LEFT)) - float(Input.is_key_pressed(KEY_RIGHT))) * 0.4
+    var throttle := (1.0 if Input.is_key_pressed(KEY_UP) else 0.0) - (1.0 if Input.is_key_pressed(KEY_DOWN) else 0.0)
+    var steering_target := ((1.0 if Input.is_key_pressed(KEY_LEFT) else 0.0) - (1.0 if Input.is_key_pressed(KEY_RIGHT) else 0.0)) * 0.4
     _vehicle.engine_force = throttle * 1100.0
     _vehicle.steering = move_toward(_vehicle.steering, steering_target, delta * 1.7)
     _vehicle.brake = 90.0 if Input.is_key_pressed(KEY_CTRL) else 0.0
