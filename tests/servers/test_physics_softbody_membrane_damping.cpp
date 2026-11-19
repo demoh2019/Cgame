@@ -28,6 +28,7 @@
 #include "tests/test_macros.h"
 
 #include <limits>
+#include <initializer_list>
 
 TEST_FORCE_LINK(test_physics_softbody_membrane_damping)
 
