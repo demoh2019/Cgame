@@ -32,6 +32,7 @@
 
 TEST_FORCE_LINK(test_node)
 
+#include "core/config/project_settings.h"
 #include "core/io/file_access.h"
 #include "core/io/resource_saver.h"
 #include "core/object/class_db.h"
@@ -1459,6 +1460,62 @@ TEST_CASE("[SceneTree][Node] Large mixed-mode children cache preserves index ord
 	CHECK_EQ(root->get_child(front.size(), true), moved);
 	CHECK_EQ(root->get_child(front.size() + 1, true), regular[0]);
 	CHECK_EQ(root->get_child(root->get_child_count(true) - 1, true), back[back.size() - 1]);
+
+	memdelete(root);
+}
+
+
+TEST_CASE("[SceneTree][Node] Human-readable names carry long numeric suffixes") {
+	Node *root = memnew(Node);
+	String separator;
+	switch (int(GLOBAL_GET("editor/naming/node_name_num_separator"))) {
+		case 0: {
+			separator = "";
+		} break;
+		case 1: {
+			separator = " ";
+		} break;
+		case 2: {
+			separator = "_";
+		} break;
+		case 3: {
+			separator = "-";
+		} break;
+		default: {
+			separator = " ";
+		} break;
+	}
+
+	// A long suffix previously required one new string for every digit.
+	const String nines = String("9").repeat(128);
+	const String base_name = "OptimizedNode" + separator;
+	Node *first = memnew(Node);
+	first->set_name(base_name + nines);
+	root->add_child(first, true);
+	Node *second = memnew(Node);
+	second->set_name(base_name + nines);
+	root->add_child(second, true);
+	CHECK_EQ(String(first->get_name()), base_name + nines);
+	CHECK_EQ(String(second->get_name()), base_name + "1" + String("0").repeat(128));
+
+	// Incrementing a suffix must retain its leading zeroes.
+	Node *zero_first = memnew(Node);
+	zero_first->set_name(base_name + "0099");
+	root->add_child(zero_first, true);
+	Node *zero_second = memnew(Node);
+	zero_second->set_name(base_name + "0099");
+	root->add_child(zero_second, true);
+	CHECK_EQ(String(zero_second->get_name()), base_name + "0100");
+
+	// No numeric suffix: numbering still starts at 2 and uses the configured
+	// separator. Existing sibling names must remain unchanged.
+	Node *plain_first = memnew(Node);
+	plain_first->set_name("PlainNode");
+	root->add_child(plain_first, true);
+	Node *plain_second = memnew(Node);
+	plain_second->set_name("PlainNode");
+	root->add_child(plain_second, true);
+	CHECK_EQ(String(plain_second->get_name()), "PlainNode" + separator + "2");
 
 	memdelete(root);
 }

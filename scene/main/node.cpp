@@ -1579,26 +1579,26 @@ void Node::_validate_child_name(Node *p_child, bool p_force_human_readable) {
 
 // Return s + 1 as if it were an integer
 String increase_numeric_string(const String &s) {
-	String res = s;
-	bool carry = res.length() > 0;
+	if (s.is_empty()) {
+		return s;
+	}
 
-	for (int i = res.length() - 1; i >= 0; i--) {
-		if (!carry) {
-			break;
-		}
-		char32_t n = s[i];
-		if (n == '9') { // keep carry as true: 9 + 1
-			res[i] = '0';
+	String res = s;
+	// Detach the COW string once instead of repeatedly indexing through
+	// String::operator[] while propagating the carry over a long suffix.
+	char32_t *digits = res.ptrw();
+	bool carry = true;
+	for (int i = res.length() - 1; i >= 0 && carry; i--) {
+		if (digits[i] == '9') {
+			digits[i] = '0';
 		} else {
-			res[i] = s[i] + 1;
+			digits[i]++;
 			carry = false;
 		}
 	}
-
 	if (carry) {
 		res = "1" + res;
 	}
-
 	return res;
 }
 
@@ -1614,20 +1614,20 @@ void Node::_generate_serial_child_name(const Node *p_child, StringName &name) co
 		return;
 	}
 
-	// Extract trailing number
+	// Identify the trailing numeric suffix in one scan. Building it by
+	// repeatedly prepending a one-character String used quadratic copying.
 	String name_string = name;
+	int digit_start = name_string.length();
+	while (digit_start > 0 && is_digit(name_string[digit_start - 1])) {
+		digit_start--;
+	}
 	String nums;
-	for (int i = name_string.length() - 1; i >= 0; i--) {
-		char32_t n = name_string[i];
-		if (is_digit(n)) {
-			nums = String::chr(name_string[i]) + nums;
-		} else {
-			break;
-		}
+	if (digit_start != name_string.length()) {
+		nums = name_string.substr(digit_start);
 	}
 
-	String nnsep = _get_name_num_separator();
-	int name_last_index = name_string.length() - nnsep.length() - nums.length();
+	const String nnsep = _get_name_num_separator();
+	const int name_last_index = digit_start - nnsep.length();
 
 	// Assign the base name + separator to name if we have numbers preceded by a separator
 	if (nums.length() > 0 && name_string.substr(name_last_index, nnsep.length()) == nnsep) {
