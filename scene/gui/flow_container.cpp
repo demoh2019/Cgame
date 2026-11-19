@@ -160,6 +160,7 @@ void FlowContainer::_resort() {
 	lines_data.push_back(_LineData{ children_in_current_line, line_height, line_length, current_container_size - line_length, line_stretch_ratio_total, is_filled });
 
 	// Second pass for in-line expansion and alignment.
+	// Abort if a size callback has changed the child index mapping.
 	ERR_FAIL_COND(get_child_count() != child_count);
 	// Reuse these buffers between lines instead of allocating fresh
 	// arrays of child pointers and stretch activity flags per line.
@@ -173,6 +174,7 @@ void FlowContainer::_resort() {
 	ofs.y = 0;
 
 	for (int i = 0; i < child_count; i++) {
+		ERR_FAIL_COND(get_child_count() != child_count);
 		Control *child = as_sortable_control(get_child(i));
 		if (!child) {
 			continue;
@@ -197,7 +199,7 @@ void FlowContainer::_resort() {
 		if (child_idx_in_line == 0) {
 			line_children.clear();
 			stretch_children.clear();
-			for (int j = i; j < child_count && line_children.size() < uint32_t(lines_data[current_line_idx].child_count); j++) {
+			for (int j = i; j < child_count && int(line_children.size()) < lines_data[current_line_idx].child_count; j++) {
 				Control *line_child = as_sortable_control(get_child(j));
 				if (!line_child) {
 					continue;
@@ -211,7 +213,7 @@ void FlowContainer::_resort() {
 			int line_remaining_stretch = line_data.stretch_avail;
 			line_stretch_ratio_total = 0;
 
-			for (int j = 0; j < line_children.size(); j++) {
+			for (int j = 0; j < int(line_children.size()); j++) {
 				const _FlowChildRef &entry = line_children[j];
 				Control *line_child = entry.control;
 				_ChildData &line_child_data = children_data[entry.index];
@@ -229,7 +231,7 @@ void FlowContainer::_resort() {
 			while (line_stretch_ratio_total > 0) {
 				bool refit_successful = true;
 
-				for (int j = 0; j < stretch_children.size(); j++) {
+				for (int j = 0; j < int(stretch_children.size()); j++) {
 					const _FlowChildRef &entry = stretch_children[j];
 					_ChildData &line_child_data = children_data[entry.index];
 					if (!line_child_data.will_stretch) {
@@ -255,7 +257,7 @@ void FlowContainer::_resort() {
 				}
 
 				if (refit_successful) {
-					for (int j = 0; j < stretch_children.size(); j++) {
+					for (int j = 0; j < int(stretch_children.size()); j++) {
 						const _FlowChildRef &entry = stretch_children[j];
 						_ChildData &line_child_data = children_data[entry.index];
 						if (!line_child_data.will_stretch) {
@@ -268,7 +270,7 @@ void FlowContainer::_resort() {
 			}
 
 			int used_stretch = 0;
-			for (int j = 0; j < line_children.size(); j++) {
+			for (int j = 0; j < int(line_children.size()); j++) {
 				used_stretch += children_data[line_children[j].index].stretch_size;
 			}
 			lines_data.write[current_line_idx].stretch_avail = MAX(line_data.stretch_avail - used_stretch, 0);
