@@ -6,6 +6,7 @@ const Defs = preload("res://scripts/shared/defs.gd")
 var health: float = Defs.MAX_HEALTH
 var hunger: float = 100.0 # 100 is full.
 var thirst: float = 100.0
+var infection: float = 0.0
 var stamina: float = Defs.MAX_STAMINA
 var stamina_recovery_delay: float = 0.0
 var alive: bool = true
@@ -41,11 +42,18 @@ func tick(delta: float) -> float:
 	if resting > 0.0:
 		var nourishment := 0.5 if hunger <= 20.0 or thirst <= 20.0 else 1.0
 		stamina = minf(Defs.MAX_STAMINA, stamina + Defs.STAMINA_REGEN_PER_SECOND * resting * nourishment)
+	if infection > 0.0:
+		infection = minf(Defs.INFECTION_MAX,
+			infection + Defs.INFECTION_GROWTH_PER_SECOND * maxf(0.0, delta))
 	var damage := 0.0
 	if hunger <= 0.0:
 		damage += Defs.STARVE_DAMAGE_PER_SECOND * delta
 	if thirst <= 0.0:
 		damage += Defs.STARVE_DAMAGE_PER_SECOND * 1.5 * delta
+	if infection > Defs.INFECTION_DAMAGE_START:
+		var severity: float = (infection - Defs.INFECTION_DAMAGE_START) / (
+			Defs.INFECTION_MAX - Defs.INFECTION_DAMAGE_START)
+		damage += severity * Defs.INFECTION_DAMAGE_PER_SECOND * maxf(0.0, delta)
 	if damage > 0.0:
 		hurt(damage)
 	elif hunger > 40.0 and thirst > 40.0:
@@ -79,14 +87,30 @@ func drink(amount: float) -> void:
 	thirst = minf(thirst + amount, 100.0)
 
 
+func add_infection(amount: float) -> bool:
+	if not alive or not is_finite(amount) or amount <= 0.0:
+		return false
+	var before: float = infection
+	infection = minf(Defs.INFECTION_MAX, infection + amount)
+	return infection > before
+
+
+func treat_infection(amount: float) -> bool:
+	if not alive or not is_finite(amount) or amount <= 0.0 or infection <= 0.0:
+		return false
+	infection = maxf(0.0, infection - amount)
+	return true
+
+
 func reset() -> void:
 	health = Defs.MAX_HEALTH
 	hunger = 80.0
 	thirst = 80.0
 	stamina = Defs.MAX_STAMINA
 	stamina_recovery_delay = 0.0
+	infection = 0.0
 	alive = true
 
 
 func to_dict() -> Dictionary:
-	return {"health": health, "hunger": hunger, "thirst": thirst, "stamina": stamina, "alive": alive}
+	return {"health": health, "hunger": hunger, "thirst": thirst, "stamina": stamina, "infection": infection, "alive": alive}
