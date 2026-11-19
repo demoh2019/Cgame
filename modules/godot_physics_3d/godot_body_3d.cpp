@@ -40,6 +40,7 @@
 #include "servers/physics_damping.h"
 #include "servers/physics_uniform_fluid.h"
 #include "servers/physics_gyroscopic_3d.h"
+#include "servers/physics_fluid_buoyancy_3d.h"
 
 void GodotBody3D::_mass_properties_changed() {
 	if (get_space() && !mass_properties_update_list.in_list()) {
@@ -648,10 +649,67 @@ void GodotBody3D::integrate_forces(real_t p_step, bool p_defer_motion) {
 			// Gravity already includes the body's gravity scale and area
 			// overrides. With buoyancy 1, gravity and buoyancy cancel.
 			// Zero (the default) preserves the old force calculation.
-			if (get_space()->get_fluid_buoyancy() > real_t(0.0)) {
+			if (!get_space()->is_fluid_plane_enabled() && get_space()->get_fluid_buoyancy() > real_t(0.0)) {
+				// Uniform buoyancy is the legacy alternative to the new finite
+				// liquid-surface model; do not apply both lift terms.
 				force -= gravity * (mass * get_space()->get_fluid_buoyancy());
 			}
 			Vector3 torque = applied_torque + constant_torque;
+
+			// Jolt-style displaced-volume buoyancy for a horizontal liquid
+			// surface. The fraction and center of the submerged shape use its
+			// cached world AABB as an approximation (not a clipped polyhedron).
+			// Disabled by default: the extra shape loop costs nothing unless
+			// a project opts into this more complex fluid simulation.
+			real_t submerged_volume = 0.0;
+			real_t total_fluid_shape_volume = 0.0;
+			if (get_space()->is_fluid_plane_enabled() && get_space()->get_fluid_plane_density() > 0.0 && p_step > 0.0) {
+				const real_t density = get_space()->get_fluid_plane_density();
+				const Vector3 flow_velocity = get_space()->get_fluid_plane_flow_velocity();
+				const Vector3 world_center_of_mass = get_transform().origin + center_of_mass;
+				const int shape_count = get_shape_count();
+				for (int i = 0; i < shape_count; ++i) {
+					if (is_shape_disabled(i)) {
+						continue;
+					}
+					const real_t shape_volume = get_shape_area(i);
+					if (!(shape_volume > 0.0)) {
+						continue;
+					}
+					total_fluid_shape_volume += shape_volume;
+					// The cached broadphase AABB can be padded or swept for
+					// CCD. Use it only to reject definitely dry shapes; then
+					// compute current transformed bounds for a valid waterline.
+					const real_t water_height = get_space()->get_fluid_plane_surface_height();
+					if (get_shape_aabb(i).position.y >= water_height) {
+						continue;
+					}
+					const AABB bounds = (get_transform() * get_shape_transform(i)).xform(get_shape(i)->get_aabb());
+					const GodotPhysicsFluidSample3D sample = godot_physics_fluid_sample_3d(
+							bounds, shape_volume, water_height);
+					if (!(sample.submerged_volume > 0.0)) {
+						continue;
+					}
+					submerged_volume += sample.submerged_volume;
+					const Vector3 lever = sample.center_of_buoyancy - world_center_of_mass;
+					const Vector3 lift = -gravity * (density * sample.submerged_volume);
+					const Vector3 relative_velocity = linear_velocity + angular_velocity.cross(lever) - flow_velocity;
+					Vector3 drag = godot_physics_fluid_quadratic_drag_3d(
+							relative_velocity, bounds.size, sample.submerged_fraction,
+							density, get_space()->get_fluid_plane_drag_coefficient());
+					// Large density and coarse timesteps must not reverse a
+					// shape's relative flow solely because of explicit drag.
+					const real_t max_impulse = mass * relative_velocity.length() / real_t(MAX(1, shape_count));
+					const real_t drag_impulse = drag.length() * p_step;
+					if (drag_impulse > max_impulse && drag_impulse > 0.0) {
+						drag *= max_impulse / drag_impulse;
+					}
+					force += lift + drag;
+					if (mode == PS3DE::BODY_MODE_RIGID) {
+						torque += lever.cross(lift + drag);
+					}
+				}
+			}
 
 			// This per-space option uses Box2D's implicit (Pade) damping
 			// for nonnegative coefficients. The default retains the legacy
@@ -665,6 +723,11 @@ void GodotBody3D::integrate_forces(real_t p_step, bool p_defer_motion) {
 
 			linear_velocity += _inv_mass * force * p_step;
 			angular_velocity += _inv_inertia_tensor.xform(torque) * p_step;
+			if (submerged_volume > 0.0 && total_fluid_shape_volume > 0.0) {
+				const real_t fraction = CLAMP(submerged_volume / total_fluid_shape_volume, real_t(0.0), real_t(1.0));
+				angular_velocity *= godot_physics_fluid_angular_damping_3d(
+						get_space()->get_fluid_plane_angular_drag(), fraction, p_step);
+			}
 
 			// Free asymmetric rigid bodies precess because their angular
 			// momentum and angular velocity are generally not parallel.
