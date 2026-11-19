@@ -1562,6 +1562,61 @@ The source test cannot detect runtime data races. Run with ThreadSanitizer
 where practical, and compare speed, RSS, collision counts and solver stability
 on a compiled engine before enabling the option in production.
 
+### Experimental 3D two-contact block solver
+
+Box2D's well-conditioned two-point contact block solver evaluates four
+complementarity cases instead of solving both contact normals independently.
+Cgame now has an **opt-in 3D extension** using each rigid body's full
+inverse inertia tensor:
+
+`physics/3d/solver/block_solver_enabled = true`
+
+Default: **false**. Existing scenes and other physics backends retain their
+previous solver. The block path is used only when a rigid/rigid manifold
+contains exactly two active contacts whose normals are almost parallel
+(dot product above 0.9999). The 2x2 effective-mass matrix must be positive
+and well-conditioned; otherwise the original sequential solver handles
+the contacts. The coupled normal impulses are applied before the existing
+per-contact bias and Coulomb-friction solves.
+
+The matrix and four-case LCP are evaluated with local scalars and vectors;
+the feature does not enlarge the per-contact or per-manifold memory layout.
+That also means opt-in scenes pay the additional matrix work each iteration.
+It is primarily a stability/convergence experiment, **not** a guaranteed
+speedup. Benchmark CPU, p95, memory and stack stability before enabling it.
+
+Reference equation and configuration tests (mathematical verification only):
+
+```bash
+python3 -m unittest discover -s tests/stress \
+  -p 'test_physics_3d_block_solver.py' -v
+```
+
+A standalone headless regression compares the same 16 columns of four
+rigid boxes and a floor over 240 frames with the option off and on. It checks
+finite position/velocity, runaway motion, actual collision pairs, and
+settling of base boxes:
+
+```bash
+./bin/godot.macos.editor.arm64 --headless \
+  --path tests/stress --script res://physics_block_solver_3d_regression.gd
+```
+
+For repeatable performance comparison the benchmark creates a fresh low-level
+physics space for each setting and restores ProjectSettings afterwards:
+
+```bash
+python3 tests/stress/run.py --godot ./bin/godot.macos.editor.arm64 \
+  --case physics_block_solver_sequential_3d,physics_block_solver_coupled_3d \
+  --scale 4 --frames 120 --repeats 5 --rss-limit-mib 4096 \
+  --output out/physics-block-solver-3d.json
+```
+
+This experiment only solves two **normal** constraints together; a four-point
+3D manifold still uses the original point-by-point algorithm. This limited
+scope avoids introducing a coupled 4x4 solver without separate stability
+validation.
+
 ## 3D contact warm-start timestep and material stability
 
 Built-in GodotPhysics3D now scales cached normal, friction, and bias impulses
