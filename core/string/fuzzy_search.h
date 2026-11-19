@@ -67,6 +67,7 @@ class FuzzySearchMatch : public RefCounted {
 	GDCLASS(FuzzySearchMatch, RefCounted)
 
 	friend class FuzzySearch;
+	friend struct FuzzySearchResultComparator;
 
 	String target;
 	int score = 0;
