@@ -12,14 +12,7 @@ must use Forward+ for this comparison.
 
 Build baseline and optimized Cgame binaries with matching settings. Run:
 
-```sh
-/path/to/godot --path misc/benchmarks/shadow_batching --rendering-method gl_compatibility
-```
-
-The command above intentionally demonstrates a **negative control**
-(Compatibility renderer), not a valid performance result. For actual Forward+
-performance, launch the project with the default rendering method and a GPU
-supporting Forward+, for example:
+Use the project's default Forward+ rendering method on a compatible GPU:
 
 ```sh
 /path/to/godot --path misc/benchmarks/shadow_batching
