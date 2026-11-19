@@ -203,6 +203,49 @@ manifolds, compare the existing `physics_contacts_friction_2d`,
 `physics_contact_manifolds_2d`, and `physics_3d` stress cases with the same
 hardware and engine build.
 
+## Converged-contact zero-impulse fast path and singular-mass guards
+
+Built-in GodotPhysics 2D and 3D now skip the **body update**, but not the
+solver iteration or impulse accumulation, when a projected normal, friction,
+bias or center-of-mass impulse is **exactly zero**. This includes both normal
+contact points in the optional 2D block solver and rigid/soft contacts in 3D.
+It avoids no-op linear/angular velocity and inertia computations after
+resting contacts converge, without introducing a tolerance that could discard
+real impulses. The underlying contact equations, material mixing, warm-start
+caches, and solver iteration counts remain unchanged.
+
+The center-of-mass bias fallback in 2D, rigid 3D and rigid/soft 3D also
+requires a positive combined inverse mass before dividing. The rigid/rigid
+3D friction solver now checks the tangential effective-mass denominator,
+matching the pre-existing rigid/soft protection. Degenerate constraints are
+skipped rather than generating infinity/NaN. These changes are active by
+default because the only new skips are exact-zero updates and invalid
+denominators, not a new approximate convergence policy.
+
+Source-level contracts and 2,000 deterministic projected-impulse cases:
+
+```bash
+python3 -m unittest discover -s tests/stress \
+  -p 'test_physics_contact_zero_impulse.py' -v
+```
+
+Run an engine build's existing contact stability and throughput scenarios:
+
+```bash
+./bin/godot.linuxbsd.editor.dev.x86_64 --headless \
+  --path tests/stress --script res://physics_frictionless_3d_regression.gd
+
+python3 tests/stress/run.py \
+  --godot ./bin/godot.linuxbsd.editor.dev.x86_64 \
+  --case physics_contacts_zero_friction_2d,physics_contacts_friction_2d,physics_frictionless_3d,physics_soft_contacts_zero_friction_3d,physics_soft_contacts_friction_3d \
+  --scale 4 --frames 120 --repeats 3 --timeout 600 \
+  --output out/contact-zero-impulses.json
+```
+
+These commands should be run on the same hardware, comparing the **same
+scenario** before and after the change. The reference tests do not prove
+thread safety, engine compilation, or any measured CPU/RAM reduction.
+
 ## Rigid/soft 3D contact throughput and stability
 
 The built-in GodotPhysics rigid/soft contact solver now skips expensive
