@@ -92,24 +92,25 @@ bool GodotWorldBoundaryShape2D::contains_point(const Vector2 &p_point) const {
 }
 
 bool GodotWorldBoundaryShape2D::intersect_segment(const Vector2 &p_begin, const Vector2 &p_end, Vector2 &r_point, Vector2 &r_normal) const {
-	Vector2 segment = p_begin - p_end;
-	real_t den = normal.dot(segment);
+	const double dx = double(p_end.x) - double(p_begin.x);
+	const double dy = double(p_end.y) - double(p_begin.y);
+	const double nx = double(normal.x);
+	const double ny = double(normal.y);
+	const double denominator = nx * dx + ny * dy;
+	if (denominator == 0.0) {
+		return false; // Parallel rays and zero-length segments cannot cross the plane.
+	}
 
-	//printf("den is %i\n",den);
-	if (Math::abs(den) <= CMP_EPSILON) {
+	// Test the dimensionless segment fraction, not the absolute magnitude
+	// of the denominator. A short ray can cross a thin geometry feature.
+	const double fraction = (double(d) - nx * double(p_begin.x) - ny * double(p_begin.y)) / denominator;
+	if (!(fraction >= -CMP_EPSILON && fraction <= 1.0 + CMP_EPSILON)) {
 		return false;
 	}
 
-	real_t dist = (normal.dot(p_begin) - d) / den;
-	//printf("dist is %i\n",dist);
-
-	if (dist < -CMP_EPSILON || dist > (1.0 + CMP_EPSILON)) {
-		return false;
-	}
-
-	r_point = p_begin + segment * -dist;
+	r_point = Vector2(real_t(double(p_begin.x) + dx * fraction),
+			real_t(double(p_begin.y) + dy * fraction));
 	r_normal = normal;
-
 	return true;
 }
 
