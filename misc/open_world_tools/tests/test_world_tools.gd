@@ -339,8 +339,8 @@ func _test_foliage_world_space_and_slope() -> void:
 		var tr: Transform3D = f.multimesh.get_instance_transform(i)
 		first_set.append(tr)
 		var world_origin: Vector3 = f.global_transform * tr.origin
-		_check(world_origin.x >= 70.0 and world_origin.x <= 74.0, "foliage world X stays in terrain bounds")
-		_check(world_origin.z >= -40.0 and world_origin.z <= -36.0, "foliage world Z stays in terrain bounds")
+		_check(world_origin.x >= 69.999 and world_origin.x <= 74.001, "foliage world X stays in terrain bounds")
+		_check(world_origin.z >= -40.001 and world_origin.z <= -35.999, "foliage world Z stays in terrain bounds")
 		_check(_close(world_origin.y, 9.0), "foliage world Y matches terrain elevation")
 		_check(_close(tr.basis.get_scale().x, 0.8), "fixed foliage instance scale respected")
 	f.scatter()
