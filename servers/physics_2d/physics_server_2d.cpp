@@ -364,6 +364,9 @@ PhysicsServer2D::PhysicsServer2D() {
 	// Box2D-style coupled two-point normal contact solve. Experimental: opt in
 	// until stack and cross-platform benchmarks verify the behavior.
 	GLOBAL_DEF(PropertyInfo(Variant::BOOL, "physics/2d/solver/block_solver_enabled"), false);
+	// Experimental graph-coloring parallel solve for one large connected 2D island.
+	// Off by default until build, determinism and performance tests pass.
+	GLOBAL_DEF(PropertyInfo(Variant::BOOL, "physics/2d/solver/parallel_large_islands"), false);
 	GLOBAL_DEF(PropertyInfo(Variant::FLOAT, "physics/2d/solver/contact_recycle_radius", PROPERTY_HINT_RANGE, "0,10,0.01,or_greater,suffix:m"), 1.0);
 	GLOBAL_DEF(PropertyInfo(Variant::FLOAT, "physics/2d/solver/contact_max_separation", PROPERTY_HINT_RANGE, "0,10,0.01,or_greater,suffix:m"), 1.5);
 	GLOBAL_DEF(PropertyInfo(Variant::FLOAT, "physics/2d/solver/contact_max_allowed_penetration", PROPERTY_HINT_RANGE, "0.01,10,0.01,or_greater,suffix:m"), 0.3);
