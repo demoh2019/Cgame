@@ -182,6 +182,8 @@ class GodotSoftBody3D : public GodotCollisionObject3D {
 	// Tetra rest matrices and XPBD multipliers are retained across iterations.
 	// Empty unless tetra FEM compliance is explicitly enabled.
 	LocalVector<PhysicsFEMConvexTetra> xpbd_fem_tetrahedra;
+	// Per-tetra equivalent plastic shear strain, lazy when rate>0.
+	LocalVector<double> xpbd_fem_deviatoric_plastic_strain;
 	// Optional imported tet indices referencing original visual mesh vertices.
 	// Preserved across mesh rebuilds, recooked into welded particle indices.
 	PackedInt32Array xpbd_explicit_tetra_visual_indices;
