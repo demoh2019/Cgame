@@ -60,7 +60,8 @@ func run(t) -> void:
 	net.free()
 	_strike(sim, 102, -1.0)
 	t.eq(aggressor.defense_target, -1, "first aggressor cannot claim counterattack protection")
-	aggressor.survival.hurt(92.0)
+	# Ensure the finishing blow, not fixture setup, causes the PvP death.
+	aggressor.survival.hurt(maxf(0.0, aggressor.survival.health - 5.0))
 	_strike(sim, 102, -1.0)
 	t.check(not aggressor.survival.alive, "legitimate defender wins combat")
 	t.near(defender.pvp_infamy, 0.0, 0.001, "self-defense adds no criminal reputation")
