@@ -705,8 +705,8 @@ func _resource_io(scale: int) -> Dictionary:
 	for i in range(20 * scale):
 		if ResourceSaver.save(resource, path) != OK:
 			return {"error": "Resource save failed"}
-		var loaded := ResourceLoader.load(path, "Gradient", ResourceLoader.CACHE_MODE_IGNORE)
-		if not (loaded is Gradient) or loaded.get_point_count() != resource.get_point_count():
+		var loaded := ResourceLoader.load(path, "Gradient", ResourceLoader.CACHE_MODE_IGNORE) as Gradient
+		if loaded == null or loaded.get_point_count() != resource.get_point_count():
 			return {"error": "Resource load failed"}
 		count += 1
 	DirAccess.remove_absolute(ProjectSettings.globalize_path(path))
