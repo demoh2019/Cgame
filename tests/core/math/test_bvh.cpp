@@ -1350,4 +1350,68 @@ TEST_CASE("[BVH] 3D point, segment and box culls preserve exact results") {
 	CHECK(CountingCullTest::calls == 1);
 }
 
+TEST_CASE("[BVH] Large changed-proxy queues are released after idle frames") {
+	using Tree = BVH_Manager<Item, 1, true, 16, PairTest, CullTest, Rect2, Vector2, false>;
+	Tree tree;
+	constexpr int COUNT = 5000;
+	Item items[COUNT + 1];
+	BVHHandle handles[COUNT];
+	int created = 0;
+	int removed = 0;
+	tree.set_pair_callback(count_pair, &created);
+	tree.set_unpair_callback(count_unpair, &removed);
+
+	// Emulate a large streaming/spawn burst. Defer broadphase pair checking
+	// until all proxies are inserted; separated boxes must not form pairs.
+	for (int i = 0; i < COUNT; ++i) {
+		items[i].value = i;
+		handles[i] = tree.create(&items[i], true, 0, 1,
+				Rect2(i * 8.0, 0, 1, 1), 0, true);
+	}
+	CHECK(tree.get_changed_queue_capacity() >= COUNT);
+	tree.update();
+	CHECK(created == 0);
+	CHECK(tree.get_changed_queue_capacity() >= COUNT);
+
+	// Retain allocated queue storage during a short pause so workloads with
+	// intermittent bursts avoid frame-to-frame realloc/free churn.
+	for (int i = 0; i < 8; ++i) {
+		tree.update();
+	}
+	CHECK(tree.get_changed_queue_capacity() >= COUNT);
+
+	// Any busy update restarts the quiet-frame counter, even if the queue
+	// remains small and no collision pair is created.
+	tree.move(handles[COUNT - 1], Rect2(COUNT * 8.0 + 32.0, 0, 1, 1));
+	tree.update();
+	CHECK(tree.get_changed_queue_capacity() >= COUNT);
+	for (int i = 0; i < 15; ++i) {
+		tree.update();
+	}
+	CHECK(tree.get_changed_queue_capacity() >= COUNT);
+
+	// A sustained quiet period returns one-off queue memory to the allocator.
+	tree.update();
+	CHECK(tree.get_changed_queue_capacity() <= 4096);
+	CHECK(created == 0);
+	CHECK(removed == 0);
+
+	// After trimming, normal insertion, pair callbacks, and ref reuse
+	// must continue to work with an empty changed-proxy queue.
+	items[COUNT].value = COUNT;
+	BVHHandle overlapping = tree.create(&items[COUNT], true, 0, 1,
+			Rect2(0.5, 0, 1, 1));
+	CHECK(created == 1);
+	Item *result[2] = {};
+	CHECK(tree.cull_aabb(Rect2(0, 0, 2, 2), result, 2, nullptr) == 2);
+	tree.erase(overlapping);
+	CHECK(removed == 1);
+
+	tree.move(handles[0], Rect2(8.5, 0, 1, 1));
+	tree.update();
+	CHECK(created == 2);
+	CHECK(removed == 1);
+	CHECK(tree.get_changed_queue_capacity() <= 4096);
+}
+
 } // namespace TestBVH
