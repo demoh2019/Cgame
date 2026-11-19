@@ -1496,20 +1496,16 @@ void ScriptTextEditor::_show_symbol_tooltip(const String &p_symbol, int p_row, i
 	}
 
 	String static_prefix;
-	if (lc_error == OK && result.type == EditorLanguage::LookupResult::Type::CLASS_PROPERTY) {
+	if (lc_error == OK && result.type == EditorLanguage::LookupResult::Type::CLASS_PROPERTY && !result.script_path.is_empty()) {
 		const Ref<Script> result_script = ResourceLoader::load(result.script_path);
-		const String script_global_name = result_script->get_global_name();
-
 		if (result_script.is_valid()) {
-			bool is_static_variable = false;
-			result_script->get(result.class_member, &is_static_variable);
-
-			if (is_static_variable) {
-				if (script_global_name.is_empty()) {
-					static_prefix = result_script->get_path();
-				} else {
-					static_prefix = script_global_name;
-				}
+			// ResourceLoader can fail while AI-generated scripts are incomplete.
+			// Never dereference the result before confirming it is a Script.
+			bool has_static_member = false;
+			result_script->get(result.class_member, &has_static_member);
+			if (has_static_member) {
+				const String script_global_name = result_script->get_global_name();
+				static_prefix = script_global_name.is_empty() ? result_script->get_path() : script_global_name;
 			}
 		}
 	}
