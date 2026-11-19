@@ -590,6 +590,10 @@ PhysicsServer3D::PhysicsServer3D() {
 	// Zero selects the legacy Bullet-style projection; nonzero compliance
 	// enables a per-link Lagrange multiplier across iterations of each step.
 	GLOBAL_DEF(PropertyInfo(Variant::FLOAT, "physics/3d/solver/soft_body_xpbd_compliance", PROPERTY_HINT_RANGE, "0,0.01,0.000001,or_greater"), 0.0);
+	// Optional nonlinear tensile XPBD springs for deformable cloth/ropes.
+	// Stiffen beyond yield; zero preserves the original linear XPBD solver.
+	GLOBAL_DEF(PropertyInfo(Variant::FLOAT, "physics/3d/solver/soft_body_xpbd_tension_hardening", PROPERTY_HINT_RANGE, "0,100,0.1,or_greater"), 0.0);
+	GLOBAL_DEF(PropertyInfo(Variant::FLOAT, "physics/3d/solver/soft_body_xpbd_tension_yield_strain", PROPERTY_HINT_RANGE, "0,3,0.01,or_greater"), 0.1);
 	// Independent unilateral XPBD limits prevent excessively stretching or
 	// compressing a soft-body link while permitting normal elastic motion
 	// inside the allowed interval. Zero ratios disable the solver entirely.

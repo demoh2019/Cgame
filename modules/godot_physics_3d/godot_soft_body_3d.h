@@ -86,6 +86,8 @@ class GodotSoftBody3D : public GodotCollisionObject3D {
 	// Only allocated when the experimental XPBD solver is enabled. The
 	// lambda for each link is retained across iterations of the same step.
 	LocalVector<real_t> xpbd_link_lambdas;
+	// Optional once-per-step nonlinear compliance, zero RAM when disabled.
+	LocalVector<real_t> xpbd_link_hardening_alphas;
 	// Optional unilateral stretch/compression limits. Each link retains two
 	// XPBD multipliers per step; the default settings allocate nothing.
 	LocalVector<PhysicsXPBDStrainLimitLambdas> xpbd_strain_lambdas;
