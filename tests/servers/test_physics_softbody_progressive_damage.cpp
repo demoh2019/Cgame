@@ -51,7 +51,7 @@ TEST_CASE("[PhysicsSoftDamage] Compression and sub-yield tension cause no damage
 TEST_CASE("[PhysicsSoftDamage] Rate dependent accumulation matches analytic relaxation") {
 	real_t d = 0.0;
 	// e=0.35; y=0.1; f=0.6 -> target=0.95*(0.25/0.5)=0.475.
-	const real_t rate = real_t(Math::LN2);
+	const real_t rate = real_t(0.6931471805599453);
 	CHECK(physics_softbody_progressive_tension_damage(Vector3(), Vector3(real_t(1.35), 0, 0),
 			1, real_t(0.1), real_t(0.6), rate, 1, d));
 	CHECK(d == doctest::Approx(0.2375).epsilon(1e-5));
