@@ -242,5 +242,88 @@ class SmokeTests(unittest.TestCase):
         self.assertEqual(result.returncode, 2)
 
 
+    @unittest.skipIf(os.name == "nt", "fake executable requires POSIX shebang")
+    def test_middle_error_not_hidden_by_head_tail_log_sampling(self):
+        exe = self.fake_godot(
+            "print('HEAD')\nprint('x' * 70000)\nprint('ERROR: hidden parser failure')"
+            "\nprint('y' * 70000)\nprint('TAIL')")
+        report = smoke.check_project(self.project, godot=exe)
+        check = report["checks"][0]
+        self.assertFalse(report["ok"])
+        self.assertFalse(check["ok"])
+        self.assertTrue(check["output_truncated"])
+        self.assertEqual(check["error_count"], 1)
+        self.assertEqual(check["errors"], ["ERROR: hidden parser failure"])
+
+    @unittest.skipIf(os.name == "nt", "fake executable requires POSIX shebang")
+    def test_middle_warning_reported_without_failing_check(self):
+        exe = self.fake_godot(
+            "print('x' * 70000)\nprint('WARNING: hidden deprecation')"
+            "\nprint('y' * 70000)")
+        report = smoke.check_project(self.project, godot=exe)
+        check = report["checks"][0]
+        self.assertTrue(report["ok"])
+        self.assertEqual(check["warning_count"], 1)
+        self.assertEqual(check["warnings"], ["WARNING: hidden deprecation"])
+
+    @unittest.skipIf(os.name == "nt", "fake executable requires POSIX shebang")
+    def test_many_hidden_errors_still_mark_result_failed(self):
+        exe = self.fake_godot("print('ERROR: repeated\\n' * 100, end='')")
+        check = smoke.check_project(self.project, godot=exe)["checks"][0]
+        self.assertFalse(check["ok"])
+        self.assertEqual(check["error_count"], 100)
+        self.assertEqual(len(check["errors"]), smoke.MAX_DIAGNOSTICS)
+        self.assertTrue(check["diagnostics_truncated"])
+
+    def test_full_log_diagnostics_empty(self):
+        with tempfile.TemporaryFile(mode="w+b") as log:
+            self.assertEqual(smoke._scan_log_diagnostics(log, self.project),
+                             ([], [], 0, 0))
+
+    def test_full_log_diagnostics_crlf_and_invalid_utf8(self):
+        with tempfile.TemporaryFile(mode="w+b") as log:
+            log.write(b"NOTICE: first\r\nERROR: broken\\xff\r\nWARNING: suspect\r\n")
+            errors, warnings, error_count, warning_count = smoke._scan_log_diagnostics(log, self.project)
+        self.assertEqual(error_count, 1)
+        self.assertEqual(warning_count, 1)
+        self.assertEqual(len(errors), 1)
+        self.assertIn("broken", errors[0])
+        self.assertEqual(warnings, ["WARNING: suspect"])
+
+    def test_full_log_diagnostics_drops_huge_line_tail(self):
+        with tempfile.TemporaryFile(mode="w+b") as log:
+            log.write(b"ERROR: start" + b"A" * (2 * 1024 * 1024) + b"\nWARNING: after\n")
+            errors, warnings, ec, wc = smoke._scan_log_diagnostics(log, self.project)
+        self.assertEqual((ec, wc), (1, 1))
+        self.assertEqual(len(errors[0]), 500)
+        self.assertEqual(warnings, ["WARNING: after"])
+
+    def test_full_log_diagnostics_redacts_stage_path(self):
+        with tempfile.TemporaryFile(mode="w+b") as log:
+            log.write(("ERROR: " + str(self.project) + "/main.gd\n").encode("utf-8"))
+            errors, _, ec, _ = smoke._scan_log_diagnostics(log, self.project)
+        self.assertEqual(ec, 1)
+        self.assertEqual(errors, ["ERROR: <STAGED_PROJECT>/main.gd"])
+
+    def test_full_log_diagnostics_counts_warnings_past_reporting_cap(self):
+        with tempfile.TemporaryFile(mode="w+b") as log:
+            log.write(b"WARNING: x\n" * 101)
+            errors, warnings, ec, wc = smoke._scan_log_diagnostics(log, self.project)
+        self.assertEqual(errors, [])
+        self.assertEqual(ec, 0)
+        self.assertEqual(wc, 101)
+        self.assertEqual(len(warnings), smoke.MAX_DIAGNOSTICS)
+
+    @unittest.skipIf(os.name == "nt", "fake executable requires POSIX shebang")
+    def test_report_includes_diagnostic_counts_when_no_errors(self):
+        report = smoke.check_project(self.project, godot=self.fake_godot("print('ready')"))
+        check = report["checks"][0]
+        self.assertTrue(check["ok"])
+        self.assertEqual(check["error_count"], 0)
+        self.assertEqual(check["warning_count"], 0)
+        self.assertFalse(check["diagnostics_truncated"])
+
+
+
 if __name__ == "__main__":
     unittest.main()
