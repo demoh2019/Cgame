@@ -574,6 +574,10 @@ PhysicsServer3D::PhysicsServer3D() {
 	// Zero selects the legacy Bullet-style projection; nonzero compliance
 	// enables a per-link Lagrange multiplier across iterations of each step.
 	GLOBAL_DEF(PropertyInfo(Variant::FLOAT, "physics/3d/solver/soft_body_xpbd_compliance", PROPERTY_HINT_RANGE, "0,0.01,0.000001,or_greater"), 0.0);
+	// Optional viscoplastic rest-length creep for cloth, rope and deformable meshes.
+	// Yield is the allowed elastic strain; creep rate 0 keeps legacy behavior.
+	GLOBAL_DEF(PropertyInfo(Variant::FLOAT, "physics/3d/solver/soft_body_plastic_yield_strain", PROPERTY_HINT_RANGE, "0,1,0.001"), 0.1);
+	GLOBAL_DEF(PropertyInfo(Variant::FLOAT, "physics/3d/solver/soft_body_plastic_creep_rate", PROPERTY_HINT_RANGE, "0,100,0.1,or_greater,suffix:1/s"), 0.0);
 	GLOBAL_DEF(PropertyInfo(Variant::FLOAT, "physics/3d/solver/contact_recycle_radius", PROPERTY_HINT_RANGE, "0,0.1,0.001,or_greater,suffix:m"), 0.01);
 	GLOBAL_DEF(PropertyInfo(Variant::FLOAT, "physics/3d/solver/contact_max_separation", PROPERTY_HINT_RANGE, "0,0.1,0.001,or_greater,suffix:m"), 0.05);
 	// Experimental sphere-only speculative contacts for existing broadphase pairs.
