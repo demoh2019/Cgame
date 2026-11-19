@@ -22,6 +22,11 @@ const REACH := 2.6 # Gathering / looting distance.
 const MELEE_RANGE := 2.2
 const PISTOL_RANGE := 40.0
 const MAX_HEALTH := 100.0
+const INFECTION_MAX := 100.0
+const INFECTION_GROWTH_PER_SECOND := 0.065
+const INFECTION_DAMAGE_START := 30.0
+const INFECTION_DAMAGE_PER_SECOND := 1.4
+const ZOMBIE_INFECTION_PER_HIT := {"walker": 8.0, "runner": 12.0, "brute": 20.0}
 const COMBAT_ENERGY_MAX := 100.0
 const COMBAT_ENERGY_REGEN := 9.0
 # Sprint exhaustion is a server-owned survival mechanic.
@@ -177,6 +182,13 @@ static func _build_items() -> void:
 	_add_item("water_bottle", {"name": "Water Bottle", "kind": "drink", "drink": 45.0, "stack": 10, "value": 8})
 	_add_item("bandage", {"name": "Bandage", "kind": "medical", "heal": 28.0, "stack": 10, "value": 10})
 	_add_recipe("bandage", "bandage", 2, {"cloth_1": 2}, "", 2.0)
+	# Common crafted wound care and scarce medical loot from infected ruins.
+	_add_item("field_antiseptic", {"name": "Field Antiseptic", "kind": "medical",
+		"heal": 8.0, "cure": 40.0, "stack": 5, "value": 20})
+	_add_recipe("field_antiseptic", "field_antiseptic", 1,
+		{"bandage": 1, "cloth_1": 1, "water_bottle": 1}, "", 3.0)
+	_add_item("antibiotics", {"name": "Antibiotics", "kind": "medical",
+		"cure": 100.0, "stack": 5, "value": 80})
 	# Days After loot: only found while scavenging ruins.
 	_add_item("pistol", {"name": "Pistol", "kind": "weapon", "weapon": "ranged", "tier": 3, "damage": 22.0, "cooldown": 0.45, "ammo": "ammo_9mm", "value": 150})
 	_add_item("ammo_9mm", {"name": "9mm Ammo", "kind": "ammo", "stack": 60, "value": 2})
