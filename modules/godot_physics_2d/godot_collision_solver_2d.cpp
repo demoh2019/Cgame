@@ -193,8 +193,13 @@ bool GodotCollisionSolver2D::solve_concave(const GodotShape2D *p_shape_A, const 
 	// it can discard real collisions under shear or non-uniform transforms.
 	const real_t determinant = p_transform_B.determinant();
 	if (determinant == 0.0) {
-		// No inverse exists: conservatively visit the full concave AABB.
-		concave_B->cull(concave_B->get_aabb(), concave_callback, &cinfo);
+		// No inverse exists: conservatively visit all concave segments.
+		// Expanding the query is necessary for zero-width segment AABBs,
+		// which Rect2::intersects() does not consider overlapping themselves.
+		Rect2 full_aabb = concave_B->get_aabb();
+		const real_t padding = MAX(MAX(Math::abs(full_aabb.size.x), Math::abs(full_aabb.size.y)) * real_t(CMP_EPSILON), real_t(0.001));
+		full_aabb.grow_by(padding);
+		concave_B->cull(full_aabb, concave_callback, &cinfo);
 		return cinfo.collided;
 	}
 
