@@ -36,8 +36,8 @@ func _run() -> void:
 				if linear_first <= 0.0 or angular_first <= 0.0:
 					printerr("FAIL: implicit damping stopped a moving body")
 					failures += 1
-				elif absf(linear_second / linear_first - expected) > 0.05 or
-						absf(angular_second / angular_first - expected) > 0.05:
+				elif (absf(linear_second / linear_first - expected) > 0.05
+						or absf(angular_second / angular_first - expected) > 0.05):
 					printerr("FAIL: expected implicit linear/angular velocity factor %f, got %s" % [expected, result])
 					failures += 1
 			else:
@@ -85,7 +85,7 @@ func _measure_2d(enabled: bool) -> Dictionary:
 	PhysicsServer2D.free_rid(body)
 	PhysicsServer2D.free_rid(shape)
 	PhysicsServer2D.free_rid(space)
-	if not first.is_finite() or not second.is_finite() or not is_finite(first_angular) or not is_finite(second_angular):
+	if not first.is_finite() or not second.is_finite() or is_nan(first_angular) or is_inf(first_angular) or is_nan(second_angular) or is_inf(second_angular):
 		return {"error": "non-finite 2D damping state"}
 	return {
 		"dimension": 2, "implicit_damping": enabled,
