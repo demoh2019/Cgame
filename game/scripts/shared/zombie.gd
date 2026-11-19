@@ -20,6 +20,8 @@ var yaw: float = 0.0
 var health: float
 var state: int = State.IDLE
 var target_id: int = -1 # Peer id of the player being chased.
+var forced_target_id: int = -1 # Server-authorized party guardian.
+var forced_target_seconds: float = 0.0
 var home: Vector2
 var wander_target: Vector2
 var last_known_target: Vector2
@@ -66,6 +68,9 @@ func think(world, players: Dictionary, delta: float, rng: RandomNumberGenerator)
 		return {}
 	attack_timer = maxf(attack_timer - delta, 0.0)
 	Threat.decay(threat, delta)
+	forced_target_seconds = maxf(0.0, forced_target_seconds - delta)
+	if forced_target_seconds <= 0.0:
+		forced_target_id = -1
 	think_timer -= delta
 	var here := Vector2(position.x, position.z)
 
@@ -123,7 +128,34 @@ func think(world, players: Dictionary, delta: float, rng: RandomNumberGenerator)
 	return result
 
 
+## Only the authoritative server calls this after checking the guardian's party,
+## weapon, distance, combat energy and cooldown.
+func force_taunt(peer_id: int, seconds: float) -> bool:
+	if not is_alive() or peer_id <= 0 or not is_finite(seconds) or seconds <= 0.0 or seconds > 5.0:
+		return false
+	forced_target_id = peer_id
+	forced_target_seconds = seconds
+	target_id = peer_id
+	state = State.CHASE
+	think_timer = 0.0
+	investigate_time = 0.0
+	Threat.record(threat, peer_id, 30.0)
+	return true
+
+
 func _select_target(players: Dictionary, here: Vector2) -> void:
+	# Threat is subordinate only during the short guardian focus.
+	# Safe, dead, distant and disconnected taunts are cleared immediately.
+	if forced_target_seconds > 0.0 and players.has(forced_target_id):
+		var info: Dictionary = players[forced_target_id]
+		var at: Vector3 = info.get("position", Vector3.INF)
+		if bool(info.get("alive", false)) and not bool(info.get("safe", true)) and 				at.is_finite() and here.distance_to(Vector2(at.x, at.z)) <= float(data["lose"]):
+			target_id = forced_target_id
+			state = State.CHASE
+			investigate_time = 0.0
+			return
+	forced_target_id = -1
+	forced_target_seconds = 0.0
 	# Damage-earning attackers within the leash take priority over passive
 	# proximity targeting. Invalid, safe, disconnected or distant IDs expire.
 	var priority: int = Threat.pick(threat, players, here, float(data["lose"]), target_id)

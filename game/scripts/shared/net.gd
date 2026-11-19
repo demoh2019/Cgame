@@ -459,6 +459,13 @@ func c_attack(dir_x: float, dir_z: float) -> void:
 
 
 @rpc("any_peer", "reliable")
+func c_guardian_taunt() -> void:
+	var peer := multiplayer.get_remote_sender_id()
+	if _allowed(peer):
+		s_result.rpc_id(peer, "guardian_taunt", sim.cmd_guardian_taunt(peer))
+
+
+@rpc("any_peer", "reliable")
 func c_skill(dir_x: float, dir_z: float) -> void:
 	var peer := multiplayer.get_remote_sender_id()
 	if _allowed(peer):
@@ -584,6 +591,8 @@ func _event_visible_to(event: Dictionary, peer: int) -> bool:
 			return event.get("peer", -1) == peer or event.get("by", -1) == peer
 		"trade":
 			return event.get("a", -1) == peer or event.get("b", -1) == peer
+		"guardian_taunt":
+			return _is_nearby(event, peer)
 		"outpost_taken", "outpost_lost", "outpost_fortified", "outpost_breached":
 			return _is_nearby(event, peer)
 		"death":

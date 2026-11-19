@@ -27,6 +27,7 @@ const Scavenging = preload("res://scripts/shared/scavenging.gd")
 const Structures = preload("res://scripts/shared/structures.gd")
 const SiegeWaves = preload("res://scripts/shared/siege_waves.gd")
 const RaidEncounter = preload("res://scripts/shared/raid_encounter.gd")
+const GuardianTaunt = preload("res://scripts/shared/guardian_taunt.gd")
 const RaidReinforcements = preload("res://scripts/shared/raid_reinforcements.gd")
 const RaidLoot = preload("res://scripts/shared/raid_loot.gd")
 const Zombie = preload("res://scripts/shared/zombie.gd")
@@ -70,6 +71,7 @@ class Player:
 	var contract_state: Dictionary = {} # Server-owned persistent camp contract journal.
 	var rest_cooldown: float = 0.0 # Per-survivor seconds until next camp recovery.
 	var party_aid_timer: float = 0.0 # Temporary medical support cooldown.
+	var guardian_timer: float = 0.0 # Session-only PvE frontline cooldown.
 	var lake_drink_cooldown: float = 0.0 # Prevents lake hydration spam and relog bypass.
 	var input_budget: float = 0.0
 	var last_input_seq: int = 0
@@ -335,6 +337,7 @@ func _spawn_player(player: Player) -> void:
 	player.dodge_timer = 0.0
 	player.dodge_immunity = 0.0
 	player.party_aid_timer = 0.0
+	player.guardian_timer = 0.0
 	player.combat_energy = Defs.COMBAT_ENERGY_MAX
 	player.noise_radius = 0.0
 	player.noise_timer = 0.0
@@ -1468,6 +1471,50 @@ func cmd_attack(peer_id: int, dir_x: float, dir_z: float) -> Dictionary:
 	return {"ok": true, "hit": true, "target": hit["kind"]}
 
 
+## Party frontline role: no client-authored targets, aggro, radius or damage.
+func cmd_guardian_taunt(peer_id: int) -> Dictionary:
+	var player: Player = players.get(peer_id)
+	if player == null or not _alive(player):
+		return {"ok": false, "reason": "dead"}
+	if _is_safe(player.position):
+		return {"ok": false, "reason": "safe_zone"}
+	var allies: Array = parties.members_of(peer_id)
+	if allies.size() < 2:
+		return {"ok": false, "reason": "not_in_party"}
+	if not GuardianTaunt.melee_equipped(player.inventory):
+		return {"ok": false, "reason": "need_melee"}
+	if player.guardian_timer > 0.0:
+		return {"ok": false, "reason": "cooldown", "remaining": player.guardian_timer}
+	if player.combat_energy < GuardianTaunt.ENERGY_COST:
+		return {"ok": false, "reason": "no_energy"}
+	var targets: Array = []
+	for infected in zombies.values():
+		if infected.target_id == peer_id or not GuardianTaunt.eligible_enemy(
+				infected, player.position, allies, world):
+			continue
+		var victim: Player = players.get(infected.target_id)
+		if victim == null or not _alive(victim) or _is_safe(victim.position):
+			continue
+		if world.zone_at(victim.position.x, victim.position.z) != world.zone_at(
+				player.position.x, player.position.z):
+			continue
+		targets.append(infected)
+	if targets.is_empty():
+		return {"ok": false, "reason": "no_engaged_infected"}
+	targets.sort_custom(func(a, b): return a.position.distance_squared_to(
+		player.position) < b.position.distance_squared_to(player.position))
+	var count := mini(GuardianTaunt.MAX_TARGETS, targets.size())
+	for index in count:
+		targets[index].force_taunt(peer_id, GuardianTaunt.FOCUS_SECONDS)
+	player.combat_energy -= GuardianTaunt.ENERGY_COST
+	player.guardian_timer = GuardianTaunt.COOLDOWN
+	player.action = {}
+	events.append({"type": "guardian_taunt", "peer": peer_id,
+		"x": player.position.x, "z": player.position.z, "count": count})
+	return {"ok": true, "count": count, "cooldown": player.guardian_timer,
+		"energy": player.combat_energy}
+
+
 ## Resolve active combat on the server; the client supplies only aim direction.
 func cmd_skill(peer_id: int, dir_x: float, dir_z: float) -> Dictionary:
 	var player: Player = players.get(peer_id)
@@ -1889,6 +1936,7 @@ func _tick_players(delta: float) -> void:
 		player.input_budget = minf(player.input_budget + delta, 0.25)
 		player.rest_cooldown = maxf(0.0, player.rest_cooldown - maxf(0.0, delta))
 		player.party_aid_timer = maxf(0.0, player.party_aid_timer - maxf(0.0, delta))
+		player.guardian_timer = maxf(0.0, player.guardian_timer - maxf(0.0, delta))
 		player.lake_drink_cooldown = maxf(0.0, player.lake_drink_cooldown - maxf(0.0, delta))
 		player.attack_timer = maxf(player.attack_timer - delta, 0.0)
 		player.skill_timer = maxf(player.skill_timer - delta, 0.0)
@@ -2392,6 +2440,7 @@ func snapshot_for(peer_id: int) -> Dictionary:
 			"weather": Weather.conditions(world, player.position.x, player.position.z, time),
 			"lake_drink_cooldown": player.lake_drink_cooldown,
 			"combat_energy": player.combat_energy, "skill_cooldown": player.skill_timer,
+			"guardian_cooldown": player.guardian_timer,
 			"dodge_cooldown": player.dodge_timer, "dodge_immunity": player.dodge_immunity,
 			"rest_cooldown": player.rest_cooldown,
 			"party_aid_cooldown": player.party_aid_timer,
