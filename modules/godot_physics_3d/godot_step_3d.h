@@ -69,6 +69,7 @@ class GodotStep3D {
 	bool cached_color_valid = false;
 	uint32_t color_batch_offset = 0;
 	uint32_t color_batch_count = 0;
+	uint32_t color_batch_size = 8; // Worker-aware task granularity, constant during each group.
 	// Read only while other islands run in worker jobs. The colored solver
 	// starts only after those jobs have completed.
 	uint32_t deferred_large_island_index = UINT32_MAX;
