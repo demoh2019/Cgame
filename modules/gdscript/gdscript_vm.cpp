@@ -3719,7 +3719,7 @@ Variant GDScriptFunction::call(GDScriptInstance *p_instance, const Variant **p_a
 		const Vector<m_elem_type> *array = VariantInternal::m_get_func((const Variant *)container); \
 		int64_t *idx = VariantInternal::get_int(counter); \
 		(*idx)++; \
-		// Unsigned comparison also rejects negative or overflowed indices. \
+		/* Unsigned comparison also rejects negative or overflowed indices. */ \
 		if (uint64_t(*idx) >= uint64_t(array->size())) { \
 			int jumpto = _code_ptr[ip + 4]; \
 			GD_ERR_BREAK(jumpto < 0 || jumpto > _code_size); \
