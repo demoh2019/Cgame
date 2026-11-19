@@ -70,4 +70,27 @@ TEST_CASE("[StringBuilder] Empty segments remain empty") {
 	CHECK(builder.as_string().is_empty());
 }
 
+TEST_CASE("[StringBuilder] Empty C-string fragments do not allocate fragment metadata") {
+	StringBuilder builder;
+	for (int i = 0; i < 1024; i++) {
+		builder.append("");
+	}
+	CHECK(builder.num_strings_appended() == 0);
+	CHECK(builder.get_string_length() == 0);
+	CHECK(builder.as_string().is_empty());
+
+	const String original = U"scene/テスト";
+	builder.append(original);
+	for (int i = 0; i < 1024; i++) {
+		builder.append("");
+	}
+	CHECK(builder.num_strings_appended() == 1);
+	CHECK(builder.get_string_length() == uint32_t(original.length()));
+	CHECK(builder.as_string().ptr() == original.ptr());
+
+	builder.append("/end");
+	CHECK(builder.num_strings_appended() == 2);
+	CHECK(builder.as_string() == original + "/end");
+}
+
 } // namespace TestStringBuilder
