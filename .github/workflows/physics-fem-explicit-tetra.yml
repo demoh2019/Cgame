@@ -1,0 +1,63 @@
+name: Imported explicit concave tetra FEM contracts
+
+on:
+  push:
+    branches: [develop]
+    paths:
+      - "servers/physics_fem_explicit_tetra.h"
+      - "servers/physics_fem_convex_star.h"
+      - "servers/physics_3d/physics_server_3d.h"
+      - "servers/physics_3d/physics_server_3d.cpp"
+      - "modules/godot_physics_3d/godot_soft_body_3d.cpp"
+      - "modules/godot_physics_3d/godot_soft_body_3d.h"
+      - "modules/godot_physics_3d/godot_physics_server_3d.cpp"
+      - "modules/godot_physics_3d/godot_physics_server_3d.h"
+      - "scene/3d/physics/soft_body_3d.cpp"
+      - "scene/3d/physics/soft_body_3d.h"
+      - "demo/physics_lab/lab_3d.gd"
+      - "tests/servers/test_physics_fem_explicit_tetra.cpp"
+      - "tests/stress/test_physics_fem_explicit_tetra.py"
+      - "tests/stress/test_physics_fem_explicit_tetra_compiler.cpp"
+      - "tests/stress/physics_fem_convex_cpp_stubs/**"
+      - ".github/workflows/physics-fem-explicit-tetra.yml"
+  pull_request:
+    paths:
+      - "servers/physics_fem_explicit_tetra.h"
+      - "servers/physics_fem_convex_star.h"
+      - "servers/physics_3d/physics_server_3d.h"
+      - "servers/physics_3d/physics_server_3d.cpp"
+      - "modules/godot_physics_3d/godot_soft_body_3d.cpp"
+      - "modules/godot_physics_3d/godot_soft_body_3d.h"
+      - "modules/godot_physics_3d/godot_physics_server_3d.cpp"
+      - "modules/godot_physics_3d/godot_physics_server_3d.h"
+      - "scene/3d/physics/soft_body_3d.cpp"
+      - "scene/3d/physics/soft_body_3d.h"
+      - "demo/physics_lab/lab_3d.gd"
+      - "tests/servers/test_physics_fem_explicit_tetra.cpp"
+      - "tests/stress/test_physics_fem_explicit_tetra.py"
+      - "tests/stress/test_physics_fem_explicit_tetra_compiler.cpp"
+      - "tests/stress/physics_fem_convex_cpp_stubs/**"
+      - ".github/workflows/physics-fem-explicit-tetra.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  explicit-tetra-validation:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Compile actual explicit tetra validator in float and double
+        run: |
+          for precision in float double; do
+            flags=""
+            if [ "$precision" = "double" ]; then flags="-DCGAME_USE_DOUBLE"; fi
+            g++ -std=c++17 -O2 -Wall -Wextra -Werror $flags \
+              -Itests/stress/physics_fem_convex_cpp_stubs -I. \
+              tests/stress/test_physics_fem_explicit_tetra_compiler.cpp \
+              -o "/tmp/explicit_tetra_$precision"
+            "/tmp/explicit_tetra_$precision"
+          done
+      - name: Randomized 2500 mesh cooking and end-to-end wiring contracts
+        run: python3 -m unittest discover -s tests/stress -p 'test_physics_fem_explicit_tetra.py' -v
