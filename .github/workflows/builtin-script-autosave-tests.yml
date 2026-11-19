@@ -1,0 +1,33 @@
+name: Built-in Script Autoformat on Scene Save
+
+on:
+  pull_request:
+    paths:
+      - "editor/editor_node.cpp"
+      - "editor/script/script_editor_plugin.cpp"
+      - "editor/script/script_editor_plugin.h"
+      - "misc/tests/test_builtin_script_autosave.py"
+      - ".github/workflows/builtin-script-autosave-tests.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  structural-regression:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: Validate editor save-flow invariants
+        run: python3 -m unittest -v misc.tests.test_builtin_script_autosave
+
+  native-editor-compile:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+      - uses: ./.github/actions/godot-deps
+      - name: Compile native editor and tests
+        run: scons platform=linuxbsd target=editor tests=yes module_text_server_fb_enabled=yes -j2
