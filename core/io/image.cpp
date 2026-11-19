@@ -3305,6 +3305,36 @@ void Image::blit_rect_mask(const Ref<Image> &p_src, const Ref<Image> &p_mask, co
 
 	int pixel_size = get_format_pixel_size(format);
 
+	// The common RGBA8 mask needs only its alpha byte, not a full Color
+	// conversion for every pixel. Copy contiguous visible spans in one block.
+	// Keep the scalar path when either image aliases the destination: source
+	// or mask pixels can otherwise change while the operation is in progress.
+	if (p_mask->format == FORMAT_RGBA8 && !is_compressed() && p_mask.ptr() != this && p_src.ptr() != this) {
+		const uint8_t *mask_data = p_mask->data.ptr();
+		const int row_width = dest_rect.size.x;
+		for (int y = 0; y < dest_rect.size.y; y++) {
+			const size_t source_pixel = size_t(src_rect.position.y + y) * p_src->width + src_rect.position.x;
+			const size_t dest_pixel = size_t(dest_rect.position.y + y) * width + dest_rect.position.x;
+			const uint8_t *mask_alpha = mask_data + source_pixel * 4 + 3;
+			int x = 0;
+			while (x < row_width) {
+				while (x < row_width && mask_alpha[size_t(x) * 4] == 0) {
+					x++;
+				}
+				const int run_start = x;
+				while (x < row_width && mask_alpha[size_t(x) * 4] != 0) {
+					x++;
+				}
+				if (run_start != x) {
+					memcpy(dst_data_ptr + (dest_pixel + run_start) * pixel_size,
+							src_data_ptr + (source_pixel + run_start) * pixel_size,
+							size_t(x - run_start) * pixel_size);
+				}
+			}
+		}
+		return;
+	}
+
 	Ref<Image> msk = p_mask;
 
 	for (int i = 0; i < dest_rect.size.y; i++) {
