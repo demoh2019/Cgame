@@ -1176,6 +1176,14 @@ static void _collision_capsule_capsule(const GodotShape2D *p_a, const Transform2
 	const GodotCapsuleShape2D *capsule_A = static_cast<const GodotCapsuleShape2D *>(p_a);
 	const GodotCapsuleShape2D *capsule_B = static_cast<const GodotCapsuleShape2D *>(p_b);
 
+	SeparatorAxisTest2D<GodotCapsuleShape2D, GodotCapsuleShape2D> separator(capsule_A, p_transform_a, capsule_B, p_transform_b, p_collector, p_motion_a, p_motion_b, p_cast_A, p_cast_B, p_with_margin, p_margin_A, p_margin_B);
+
+	if (!separator.test_previous_axis()) {
+		return;
+	}
+
+	bool exact_overlap_known = false;
+
 	// Box2D-style closest-segment test: avoid SAT projections and support queries
 	// for separated capsules, and directly resolve unambiguous end-cap contacts.
 	// Parallel/overlapping segment contacts still use SAT for a stable manifold.
@@ -1226,6 +1234,16 @@ static void _collision_capsule_capsule(const GodotShape2D *p_a, const Transform2
 				return;
 			}
 
+			// The exact centerline-distance test has already ruled out separation.
+			// Boolean queries don't need to run through SAT again.
+			if (!p_collector->callback) {
+				p_collector->collided = true;
+				if (p_collector->sep_axis) {
+					*p_collector->sep_axis = Vector2();
+				}
+				return;
+			}
+
 			// Endpoint contacts have a single well-defined normal. For side-side
 			// contacts, parallelism or coincident centerlines preserve SAT clipping.
 			if (distance_squared > 0.0 &&
@@ -1241,20 +1259,15 @@ static void _collision_capsule_capsule(const GodotShape2D *p_a, const Transform2
 				}
 				return;
 			}
+			exact_overlap_known = true;
 		}
-	}
-
-	SeparatorAxisTest2D<GodotCapsuleShape2D, GodotCapsuleShape2D> separator(capsule_A, p_transform_a, capsule_B, p_transform_b, p_collector, p_motion_a, p_motion_b, p_cast_A, p_cast_B, p_with_margin, p_margin_A, p_margin_B);
-
-	if (!separator.test_previous_axis()) {
-		return;
 	}
 
 	// Capsule center segments give an exact distance test for rigid, stationary
 	// capsules. Reject noncontacts before the SAT support projections, and
 	// answer overlap-only queries without constructing a contact manifold.
 	// Contact-producing queries still use SAT to retain side-side manifolds.
-	if (!p_cast_A && !p_cast_B && p_margin_A >= 0.0 && p_margin_B >= 0.0 &&
+	if (!exact_overlap_known && !p_cast_A && !p_cast_B && p_margin_A >= 0.0 && p_margin_B >= 0.0 &&
 			capsule_A->get_radius() > 0.0 && capsule_B->get_radius() > 0.0 &&
 			_is_unit_orthogonal_transform(p_transform_a) && _is_unit_orthogonal_transform(p_transform_b)) {
 		const real_t half_segment_A = capsule_A->get_height() * real_t(0.5) - capsule_A->get_radius();
