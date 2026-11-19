@@ -493,8 +493,11 @@ void JoltContactListener3D::_flush_area_body_events() {
 
 	for (ThreadLocals &tl : ThreadLocals::instances) {
 		for (const JPH::SubShapeIDPair &shape_pair : tl.area_exits) {
-			area_overlaps.erase(shape_pair);
-			_dispatch_area_exit(shape_pair);
+			// Multiple callbacks can enqueue the same exit. Dispatch only
+			// when this pair was actually present in the persistent set.
+			if (area_overlaps.erase(shape_pair)) {
+				_dispatch_area_exit(shape_pair);
+			}
 		}
 
 		clear_contact_scratch(tl.area_exits, MAX_CACHED_AREA_EVENTS);
@@ -508,8 +511,13 @@ void JoltContactListener3D::_flush_area_body_events() {
 
 	for (ThreadLocals &tl : ThreadLocals::instances) {
 		for (const JPH::SubShapeIDPair &shape_pair : tl.area_enters) {
-			area_overlaps.insert(shape_pair);
-			_dispatch_area_enter(shape_pair);
+			// A pair may have been reported by more than one Jolt worker.
+			// Preserve exit-before-enter for changed subshapes, but never
+			// notify the area twice about one persistent pair.
+			if (!area_overlaps.has(shape_pair)) {
+				area_overlaps.insert(shape_pair);
+				_dispatch_area_enter(shape_pair);
+			}
 		}
 
 		clear_contact_scratch(tl.area_enters, MAX_CACHED_AREA_EVENTS);
