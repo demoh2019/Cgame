@@ -416,6 +416,76 @@ static void query_soft_face_bvh(const JPH::Array<SoftFaceBVHEntry> &p_entries,
 	}
 }
 
+// Experimental speculative soft-soft CCD for an approaching vertex and a
+// moving/deforming face. Linearize the face motion by the mean vertex
+// velocity for the time-of-impact plane test, then re-evaluate the moving
+// triangle at that time for the closest point and barycentric weights.
+// This is a cheap *approximate* swept contact, NOT continuous triangle CCD,
+// and it does not use Jolt's rigid-body LinearCast pipeline.
+static bool predict_soft_vertex_face_sweep(JPH::Vec3Arg p_point, JPH::Vec3Arg p_point_velocity,
+		JPH::Vec3Arg p_a, JPH::Vec3Arg p_b, JPH::Vec3Arg p_c,
+		JPH::Vec3Arg p_va, JPH::Vec3Arg p_vb, JPH::Vec3Arg p_vc,
+		float p_step, float p_radius, float p_max_sweep,
+		float &r_u, float &r_v, float &r_w, JPH::Vec3 &r_normal) {
+	if (p_step <= 0.0f || p_radius <= 0.0f || p_max_sweep <= 0.0f) {
+		return false;
+	}
+	const JPH::Vec3 face_cross = (p_b - p_a).Cross(p_c - p_a);
+	const float normal_length_sq = face_cross.LengthSq();
+	if (!Math::is_finite(normal_length_sq) || normal_length_sq <= 1.0e-12f) {
+		return false;
+	}
+	const JPH::Vec3 face_normal = face_cross / Math::sqrt(normal_length_sq);
+	const JPH::Vec3 mean_face_velocity = (p_va + p_vb + p_vc) / 3.0f;
+	const JPH::Vec3 relative_velocity = p_point_velocity - mean_face_velocity;
+	const float relative_displacement_sq = (relative_velocity * p_step).LengthSq();
+	if (!Math::is_finite(relative_displacement_sq) || relative_displacement_sq > p_max_sweep * p_max_sweep) {
+		return false; // Fixed and documented sweep horizon.
+	}
+	const float plane_distance = (p_point - p_a).Dot(face_normal);
+	const float plane_speed = relative_velocity.Dot(face_normal);
+	if (!Math::is_finite(plane_distance) || !Math::is_finite(plane_speed)) {
+		return false;
+	}
+	// Two-sided contact: only catch a trajectory starting *outside* the
+	// contact shell and moving towards it. The discrete solver handles points
+	// currently within the shell.
+	float target_distance = 0.0f;
+	if (plane_distance > p_radius && plane_speed < -1.0e-6f) {
+		target_distance = p_radius;
+	} else if (plane_distance < -p_radius && plane_speed > 1.0e-6f) {
+		target_distance = -p_radius;
+	} else {
+		return false;
+	}
+	const float toi = (target_distance - plane_distance) / plane_speed;
+	if (!Math::is_finite(toi) || toi < 0.0f || toi > p_step) {
+		return false;
+	}
+
+	// The plane TOI is linearized, but evaluate the actual interpolated
+	// triangle at the predicted time to reject faces that shear/rotate away.
+	const JPH::Vec3 point_at_hit = p_point + p_point_velocity * toi;
+	const JPH::Vec3 a_at_hit = p_a + p_va * toi;
+	const JPH::Vec3 b_at_hit = p_b + p_vb * toi;
+	const JPH::Vec3 c_at_hit = p_c + p_vc * toi;
+	JPH::Vec3 nearest = JPH::Vec3::sZero();
+	if (!closest_soft_triangle_point(point_at_hit, a_at_hit, b_at_hit, c_at_hit, nearest, r_u, r_v, r_w)) {
+		return false;
+	}
+	const JPH::Vec3 contact_vector = point_at_hit - nearest;
+	const float hit_distance_sq = contact_vector.LengthSq();
+	// Small tolerance for finite-precision TOI. Conservatively reject a
+	// speculative contact when the interpolated surface has moved away.
+	const float hit_tolerance = p_radius * 1.02f + 1.0e-4f;
+	if (!Math::is_finite(hit_distance_sq) || hit_distance_sq > hit_tolerance * hit_tolerance) {
+		return false;
+	}
+	r_normal = hit_distance_sq > 1.0e-12f ? contact_vector / Math::sqrt(hit_distance_sq) :
+			(plane_distance > 0.0f ? face_normal : -face_normal);
+	return true;
+}
+
 static void resolve_soft_soft_vertex_face_direction(JPH::Body &p_point_body, JPH::Body &p_face_body,
 		const JoltSoftBody3D &p_point_object, float p_step, uint32_t &r_contact_budget, SoftFaceBVHScratch &r_bvh_scratch) {
 	JPH::SoftBodyMotionProperties &point_props = static_cast<JPH::SoftBodyMotionProperties &>(*p_point_body.GetMotionPropertiesUnchecked());
