@@ -32,6 +32,7 @@ var equipped_tool: String = ""
 var equipped_weapon: String = ""
 var equipped_armor: String = ""
 var combat_xp: int = 0
+var contract_state: Dictionary = {"active": "", "progress": 0, "completed": []}
 var attack_cooldown: float = 0.0
 var last_message: String = "Ищите припасы, сырьё и создавайте снаряжение."
 
