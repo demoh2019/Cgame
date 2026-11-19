@@ -1093,4 +1093,54 @@ TEST_CASE("[Geometry2D][Performance] Atlas packing scales without per-candidate 
 		CHECK(result[i].y + sizes[i].height <= size.height);
 	}
 }
+
+TEST_CASE("[Geometry2D][Performance] Convex decomposition direct writes preserve polygon area") {
+	// L-shaped polygon with a reflex vertex, expected area 7.
+	const Vector<Point2> concave = {
+		Point2(0, 0), Point2(4, 0), Point2(4, 1),
+		Point2(1, 1), Point2(1, 4), Point2(0, 4),
+	};
+	const Vector<Point2> square = {
+		Point2(10, 0), Point2(12, 0), Point2(12, 2), Point2(10, 2),
+	};
+	const Vector<Vector<Point2>> polygons = { concave, square };
+	const Vector<Vector<Point2>> convex = Geometry2D::decompose_many_polygons_in_convex(polygons, {});
+	REQUIRE(!convex.is_empty());
+
+	real_t area = 0;
+	for (const Vector<Point2> &polygon : convex) {
+		REQUIRE(polygon.size() >= 3);
+		real_t doubled_area = 0;
+		for (int i = 0; i < polygon.size(); i++) {
+			const Point2 &p = polygon[i];
+			const Point2 &q = polygon[(i + 1) % polygon.size()];
+			CHECK(Math::is_finite(p.x));
+			CHECK(Math::is_finite(p.y));
+			doubled_area += p.x * q.y - q.x * p.y;
+		}
+		area += Math::abs(doubled_area) * (real_t)0.5;
+	}
+	CHECK(Math::is_equal_approx(area, (real_t)11.0));
+}
+
+TEST_CASE("[Geometry2D][Performance] Convex decomposition handles many output vertices") {
+	Vector<Point2> polygon;
+	const int count = 192;
+	REQUIRE(polygon.resize(count) == OK);
+	Point2 *const points = polygon.ptrw();
+	for (int i = 0; i < count; i++) {
+		const real_t radians = Math::TAU * i / (real_t)count;
+		points[i] = Point2(Math::cos(radians) * 100, Math::sin(radians) * 100);
+	}
+	const Vector<Vector<Point2>> pieces = Geometry2D::decompose_polygon_in_convex(polygon);
+	REQUIRE(!pieces.is_empty());
+
+	int emitted_vertices = 0;
+	for (const Vector<Point2> &piece : pieces) {
+		REQUIRE(piece.size() >= 3);
+		emitted_vertices += piece.size();
+	}
+	CHECK(emitted_vertices >= count);
+}
+
 } // namespace TestGeometry2D
