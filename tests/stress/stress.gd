@@ -16,7 +16,7 @@ const CanvasScenePerf := preload("res://canvas_scene_perf.gd")
 const CASES := [
 	"containers", "array_literals", "dictionary_snapshot", "strings", "script_vm", "math", "signals",
 	"scene_tree", "packed_scene", "images", "json", "stream", "stream_bulk",
-	"file_io", "threads", "physics_2d", "physics_contacts_zero_friction_2d", "physics_contacts_friction_2d", "physics_contact_manifolds_2d", "physics_3d", "physics_frictionless_3d", "physics_soft_contacts_zero_friction_3d", "physics_soft_contacts_friction_3d", "physics_ccd_2d", "physics_dense_2d", "physics_dense_3d", "physics_pending_3d", "physics_ccd_3d", "physics_joint_chain_2d", "physics_joint_chain_3d", "physics_sparse_2d", "physics_sparse_3d", "physics_proxies_2d", "physics_proxies_3d", "physics_rid_sparse_2d", "physics_rid_sparse_3d", "physics_rid_moving_2d", "physics_rid_moving_3d", "physics_restitution_2d", "physics_restitution_3d",
+	"file_io", "threads", "physics_2d", "physics_contacts_zero_friction_2d", "physics_contacts_friction_2d", "physics_contact_manifolds_2d", "physics_contact_block_solver_2d", "physics_3d", "physics_frictionless_3d", "physics_soft_contacts_zero_friction_3d", "physics_soft_contacts_friction_3d", "physics_ccd_2d", "physics_dense_2d", "physics_dense_3d", "physics_pending_3d", "physics_ccd_3d", "physics_joint_chain_2d", "physics_joint_chain_3d", "physics_sparse_2d", "physics_sparse_3d", "physics_proxies_2d", "physics_proxies_3d", "physics_rid_sparse_2d", "physics_rid_sparse_3d", "physics_rid_moving_2d", "physics_rid_moving_3d", "physics_restitution_2d", "physics_restitution_3d",
 	"object_churn", "memory_churn", "astar_grid", "astar_grid_neighbors", "astar_grid_jps", "astar_grid_fill", "astar_grid_rebuild", "astar_relax_2d", "astar_relax_3d", "astar_graph", "tweens", "audio_buffers",
 	"variant_codec", "packet_stream", "packet_tx_batch", "packet_rx_batch", "packet_variant_reuse", "ui_layout", "grid_reflow", "box_reflow", "flow_reflow", "render_2d", "render_3d", "render_ellipse_2d", "render_light_culling_3d",
 	"resource_load",
@@ -264,6 +264,8 @@ func _run_case(test_case: String, scale: int, frames: int, seed: int) -> Diction
 			return await _physics_contacts_2d(scale, frames, 1.0)
 		"physics_contact_manifolds_2d":
 			return await _physics_contact_manifolds_2d(scale, frames)
+		"physics_contact_block_solver_2d":
+			return await _physics_contact_manifolds_2d(scale, frames, true)
 		"physics_3d":
 			return await _physics_3d(scale, frames)
 		"physics_frictionless_3d":
@@ -702,7 +704,11 @@ func _physics_contacts_2d(scale: int, frames: int, friction: float) -> Dictionar
 
 # Persistent 2-point box manifolds. This case complements the circle stress
 # scenarios: contact point order can change as boxes rotate and slide.
-func _physics_contact_manifolds_2d(scale: int, frames: int) -> Dictionary:
+func _physics_contact_manifolds_2d(scale: int, frames: int, block_solver: bool = false) -> Dictionary:
+	# A new physics space reads the block solver mode at its creation.
+	var setting := "physics/2d/solver/block_solver_enabled"
+	var original_setting: Variant = ProjectSettings.get_setting(setting, false)
+	ProjectSettings.set_setting(setting, block_solver)
 	var space := PhysicsServer2D.space_create()
 	var floor_shape := PhysicsServer2D.rectangle_shape_create()
 	var box_shape := PhysicsServer2D.rectangle_shape_create()
@@ -758,9 +764,10 @@ func _physics_contact_manifolds_2d(scale: int, frames: int) -> Dictionary:
 	PhysicsServer2D.free_rid(box_shape)
 	PhysicsServer2D.free_rid(floor_shape)
 	PhysicsServer2D.free_rid(space)
+	ProjectSettings.set_setting(setting, original_setting)
 
 	var stats := _frame_statistics(frame_intervals)
-	return {"bodies": count, "physics_frames": frames,
+	return {"bodies": count, "block_solver_enabled": block_solver, "physics_frames": frames,
 		"peak_physics_ms": peak_physics_ms, "peak_collision_pairs": peak_pairs,
 		"frame_interval_ms": stats, "frame_p95_ms": stats["p95"], "state_valid": state_valid}
 
