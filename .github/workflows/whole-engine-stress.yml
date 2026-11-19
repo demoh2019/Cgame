@@ -100,6 +100,14 @@ jobs:
           platform: linuxbsd
           target: editor
           scons-flags: dev_build=yes tests=yes debug_symbols=no module_text_server_fb_enabled=yes -j2
+      - name: Verify swept cloth edge CCD native geometry and impact constraints
+        shell: bash
+        run: |
+          set -euo pipefail
+          timeout 120s ./bin/godot.linuxbsd.editor.dev.x86_64 \
+            --headless --test --test-case="*[PhysicsEdgeCCD]*" \
+            --success=true --no-colors 2>&1 | tee physics-edge-ccd.log
+          grep -Fq '[PhysicsEdgeCCD]' physics-edge-ccd.log
       - name: Syntax-check physics stress scripts
         shell: bash
         run: |
