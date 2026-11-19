@@ -58,6 +58,26 @@ def discover_scenes(root, exclude=(), max_scenes=1000):
     return sorted(scenes)
 
 
+def select_scenes(discovered, requested=(), require_scenes=False):
+    """Select exact project-relative scenes; reject missing or unsafe requests."""
+    if requested:
+        chosen = set()
+        for name in requested:
+            relative = name[6:] if name.startswith("res://") else name
+            if (not relative or relative.startswith("/") or "\\" in relative or ":" in relative
+                    or any(part in ("", ".", "..") for part in relative.split("/"))):
+                raise SmokeError("Invalid scene selection: {!r}".format(name))
+            if relative not in discovered:
+                raise SmokeError("Selected scene was not found: {!r}".format(name))
+            chosen.add(relative)
+        scenes = [scene for scene in discovered if scene in chosen]
+    else:
+        scenes = list(discovered)
+    if require_scenes and not scenes:
+        raise SmokeError("No scenes selected; --require-scenes needs at least one scene")
+    return scenes
+
+
 def run_command(args, timeout):
     """Return exit code, bounded diagnostics, timeout flag, and error marker flag."""
     try:
@@ -131,6 +151,8 @@ def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("project", type=Path, help="Path to an existing Godot 4 project")
     parser.add_argument("--godot", default="godot", help="Godot editor binary or path")
+    parser.add_argument("--scene", action="append", default=[], help="Exact res:// or relative scene path; repeatable")
+    parser.add_argument("--require-scenes", action="store_true", help="Fail if no scenes are selected")
     parser.add_argument("--exclude", action="append", default=[], help="Scene glob to skip; repeatable")
     parser.add_argument("--timeout", type=int, default=30, help="Timeout per launch in seconds")
     parser.add_argument("--frames", type=int, default=2, help="Headless iterations per scene")
@@ -142,7 +164,8 @@ def main(argv=None):
         if not 1 <= opts.timeout <= 3600 or not 1 <= opts.frames <= 10000 or not 1 <= opts.max_scenes <= 100000:
             raise SmokeError("timeout, frames and max-scenes must be positive and within their limits")
         root = opts.project.absolute()
-        scenes = discover_scenes(root, opts.exclude, opts.max_scenes)
+        scenes = select_scenes(discover_scenes(root, opts.exclude, opts.max_scenes),
+                               opts.scene, opts.require_scenes)
         binary = shutil.which(opts.godot)
         if binary is None:
             raise SmokeError("Godot editor binary not found: {}".format(opts.godot))
