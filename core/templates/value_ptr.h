@@ -145,21 +145,21 @@ bool operator!=(const ValuePtr<TL> &p_lhs, const TR &p_rhs) {
 }
 
 template <typename TL>
-bool operator==(const ValuePtr<TL> &p_lhs, std::nullptr_t p_rhs) {
+bool operator==(const ValuePtr<TL> &p_lhs, std::nullptr_t) {
 	return p_lhs.ptr() == nullptr;
 }
 
 template <typename TL>
-bool operator!=(const ValuePtr<TL> &p_lhs, std::nullptr_t p_rhs) {
+bool operator!=(const ValuePtr<TL> &p_lhs, std::nullptr_t) {
 	return p_lhs.ptr() != nullptr;
 }
 
 template <typename TR>
-bool operator==(std::nullptr_t p_lhs, const ValuePtr<TR> &p_rhs) {
+bool operator==(std::nullptr_t, const ValuePtr<TR> &p_rhs) {
 	return nullptr == p_rhs.ptr();
 }
 
 template <typename TR>
-bool operator!=(std::nullptr_t p_lhs, const ValuePtr<TR> &p_rhs) {
+bool operator!=(std::nullptr_t, const ValuePtr<TR> &p_rhs) {
 	return nullptr != p_rhs.ptr();
 }
