@@ -32,6 +32,8 @@
 
 #include "core/math/math_funcs_binary.h"
 
+#include <cstring>
+
 void FileAccessCompressed::configure(const String &p_magic, Compression::Mode p_mode, uint32_t p_block_size) {
 	magic = p_magic.ascii().get_data();
 	magic = (magic + "    ").substr(0, 4);
@@ -49,23 +51,39 @@ Error FileAccessCompressed::open_after_magic(Ref<FileAccess> p_base) {
 		ERR_FAIL_V_MSG(ERR_FILE_CORRUPT, vformat("Can't open compressed file '%s' with block size 0, it is corrupted.", p_base->get_path()));
 	}
 	read_total = f->get_32();
-	uint32_t bc = (read_total / block_size) + 1;
-	uint64_t acc_ofs = f->get_position() + bc * 4;
+	const uint32_t bc = (read_total / block_size) + 1;
+	const uint64_t table_bytes = uint64_t(bc) * sizeof(uint32_t);
+	uint64_t acc_ofs = f->get_position() + table_bytes;
 	uint32_t max_bs = 0;
-	// The block count is known from the header. Construct the table once
-	// instead of growing it and relocating its entries on each append.
+	// The block count is known from the header. Construct the table once.
 	ERR_FAIL_COND_V(read_blocks.resize(bc) != OK, ERR_OUT_OF_MEMORY);
 	ReadBlock *blocks = read_blocks.ptrw();
-	for (uint32_t i = 0; i < bc; i++) {
-		ReadBlock &rb = blocks[i];
-		rb.offset = acc_ofs;
-		rb.csize = f->get_32();
-		acc_ofs += rb.csize;
-		max_bs = MAX(max_bs, rb.csize);
+
+	// Reading four bytes per block causes enormous numbers of tiny I/O calls
+	// on large resources. Batch table reads in bounded 1 KiB stack chunks.
+	uint32_t sizes[256];
+	const bool swapped = f->is_big_endian();
+	for (uint32_t i = 0; i < bc;) {
+		const uint32_t count = MIN(uint32_t(256), bc - i);
+		const uint64_t bytes = uint64_t(count) * sizeof(uint32_t);
+		ERR_FAIL_COND_V(f->get_buffer(reinterpret_cast<uint8_t *>(sizes), bytes) != bytes, ERR_FILE_CORRUPT);
+		for (uint32_t j = 0; j < count; j++) {
+			ReadBlock &rb = blocks[i + j];
+			rb.offset = acc_ofs;
+			rb.csize = swapped ? BSWAP32(sizes[j]) : sizes[j];
+			acc_ofs += rb.csize;
+			max_bs = MAX(max_bs, rb.csize);
+		}
+		i += count;
 	}
 
-	comp_buffer.resize(max_bs);
-	buffer.resize(block_size);
+	ERR_FAIL_COND_V(comp_buffer.resize(max_bs) != OK, ERR_OUT_OF_MEMORY);
+	// A file shorter than one compression block only needs its actual
+	// uncompressed size. Large configured blocks (e.g. 8 MiB) should not
+	// force that allocation for a tiny file. Retain one byte for empty
+	// streams so codecs still receive a valid output pointer.
+	const uint32_t initial_buffer_size = MAX(uint32_t(1), MIN(block_size, uint32_t(read_total)));
+	ERR_FAIL_COND_V(buffer.resize(initial_buffer_size) != OK, ERR_OUT_OF_MEMORY);
 	read_ptr = buffer.ptrw();
 	f->get_buffer(comp_buffer.ptrw(), read_blocks[0].csize);
 	at_end = false;
@@ -129,11 +147,15 @@ void FileAccessCompressed::_close() {
 		f->store_32(cmode); //write compression mode 4
 		f->store_32(block_size); //write block size 4
 		f->store_32(uint32_t(write_max)); //max amount of data written 4
-		uint32_t bc = (write_max / block_size) + 1;
+		const uint32_t bc = (write_max / block_size) + 1;
+		const uint64_t table_bytes = uint64_t(bc) * sizeof(uint32_t);
 
-		for (uint32_t i = 0; i < bc; i++) {
-			f->store_32(0); //compressed sizes, will update later
-		}
+		// Allocate the table once, initially as zero placeholders. A single
+		// contiguous write avoids one virtual I/O call per compressed block.
+		LocalVector<uint32_t> block_sizes;
+		block_sizes.resize_uninitialized(bc);
+		memset(block_sizes.ptr(), 0, table_bytes);
+		f->store_buffer(reinterpret_cast<const uint8_t *>(block_sizes.ptr()), table_bytes);
 
 		uint32_t last_block_size = write_max % block_size;
 
@@ -147,10 +169,8 @@ void FileAccessCompressed::_close() {
 		// per-thread memory retention and preserving independently decodable frames.
 		Compression::ZstdCompressionContext zstd_context;
 
-		// Compress and store the blocks. Every entry is written exactly once,
-		// so reserve the complete table instead of repeatedly reallocating it.
-		LocalVector<uint32_t> block_sizes;
-		block_sizes.resize_uninitialized(bc);
+		// Each table entry is written exactly once; the reserved buffer
+		// also serves as the initial zero-filled on-disk placeholder.
 		for (uint32_t i = 0; i < bc; i++) {
 			uint32_t bl = i == (bc - 1) ? last_block_size : block_size;
 			uint8_t *bp = &write_ptr[i * block_size];
@@ -164,10 +184,15 @@ void FileAccessCompressed::_close() {
 			block_sizes[i] = compressed_size;
 		}
 
-		f->seek(16); //ok write block sizes
-		for (uint32_t i = 0; i < bc; i++) {
-			f->store_32(block_sizes[i]);
+		f->seek(16); // Update compressed block sizes in a single write.
+		// Match FileAccess::store_32() byte order if the underlying file
+		// was configured for big-endian binary I/O.
+		if (f->is_big_endian()) {
+			for (uint32_t i = 0; i < bc; i++) {
+				block_sizes[i] = BSWAP32(block_sizes[i]);
+			}
 		}
+		f->store_buffer(reinterpret_cast<const uint8_t *>(block_sizes.ptr()), table_bytes);
 		f->seek_end();
 		f->store_buffer((const uint8_t *)mgc.get_data(), mgc.length()); //magic at the end too
 	} else {

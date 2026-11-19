@@ -83,6 +83,13 @@ public:
 
 	virtual bool intersect_segment(const Vector2 &p_begin, const Vector2 &p_end, Vector2 &r_point, Vector2 &r_normal) const = 0;
 	virtual real_t get_moment_of_inertia(real_t p_mass, const Size2 &p_scale) const = 0;
+	// Shape-local linear transforms can include shear, not only axis scaling.
+	virtual real_t get_moment_of_inertia_transformed(real_t p_mass, const Transform2D &p_transform) const {
+		return get_moment_of_inertia(p_mass, p_transform.get_scale());
+	}
+	virtual Vector2 get_center_of_mass() const { return Vector2(); }
+	// Geometric area, without broadphase AABB padding. Used for compound-body mass fractions.
+	virtual real_t get_mass_area() const { return get_aabb().get_area(); }
 	virtual void set_data(const Variant &p_data) = 0;
 	virtual Variant get_data() const = 0;
 
@@ -137,14 +144,14 @@ public:
 		project_range_cast(p_cast, p_normal, p_transform, r_min, r_max); \
 	} \
 	_FORCE_INLINE_ void project_range_cast(const Vector2 &p_cast, const Vector2 &p_normal, const Transform2D &p_transform, real_t &r_min, real_t &r_max) const { \
-		real_t mina, maxa; \
-		real_t minb, maxb; \
-		Transform2D ofsb = p_transform; \
-		ofsb.columns[2] += p_cast; \
-		project_range(p_normal, p_transform, mina, maxa); \
-		project_range(p_normal, ofsb, minb, maxb); \
-		r_min = MIN(mina, minb); \
-		r_max = MAX(maxa, maxb); \
+		project_range(p_normal, p_transform, r_min, r_max); \
+		/* A translated shape's projection is shifted by the motion's projection. */ \
+		const real_t cast_offset = p_normal.dot(p_cast); \
+		if (cast_offset < 0.0) { \
+			r_min += cast_offset; \
+		} else { \
+			r_max += cast_offset; \
+		} \
 	}
 
 class GodotWorldBoundaryShape2D : public GodotShape2D {
@@ -279,6 +286,11 @@ public:
 	virtual bool contains_point(const Vector2 &p_point) const override;
 	virtual bool intersect_segment(const Vector2 &p_begin, const Vector2 &p_end, Vector2 &r_point, Vector2 &r_normal) const override;
 	virtual real_t get_moment_of_inertia(real_t p_mass, const Size2 &p_scale) const override;
+	virtual real_t get_moment_of_inertia_transformed(real_t p_mass, const Transform2D &p_transform) const override { 
+		return p_mass * radius * radius * real_t(0.25) *
+				(p_transform.columns[0].length_squared() + p_transform.columns[1].length_squared());
+	}
+	virtual real_t get_mass_area() const override { return real_t(Math::PI) * radius * radius; }
 
 	virtual void set_data(const Variant &p_data) override;
 	virtual Variant get_data() const override;
@@ -312,24 +324,25 @@ public:
 	virtual bool contains_point(const Vector2 &p_point) const override;
 	virtual bool intersect_segment(const Vector2 &p_begin, const Vector2 &p_end, Vector2 &r_point, Vector2 &r_normal) const override;
 	virtual real_t get_moment_of_inertia(real_t p_mass, const Size2 &p_scale) const override;
+	virtual real_t get_moment_of_inertia_transformed(real_t p_mass, const Transform2D &p_transform) const override {
+		return p_mass * real_t(1.0 / 3.0) *
+				(half_extents.x * half_extents.x * p_transform.columns[0].length_squared() +
+					half_extents.y * half_extents.y * p_transform.columns[1].length_squared());
+	}
+	virtual real_t get_mass_area() const override { return real_t(4.0) * Math::abs(half_extents.x * half_extents.y); }
 
 	virtual void set_data(const Variant &p_data) override;
 	virtual Variant get_data() const override;
 
 	_FORCE_INLINE_ void project_range(const Vector2 &p_normal, const Transform2D &p_transform, real_t &r_min, real_t &r_max) const {
-		// no matter the angle, the box is mirrored anyway
-		r_max = -1e20;
-		r_min = 1e20;
-		for (int i = 0; i < 4; i++) {
-			real_t d = p_normal.dot(p_transform.xform(Vector2(((i & 1) * 2 - 1) * half_extents.x, ((i >> 1) * 2 - 1) * half_extents.y)));
-
-			if (d > r_max) {
-				r_max = d;
-			}
-			if (d < r_min) {
-				r_min = d;
-			}
-		}
+		// A transformed rectangle is a parallelogram. Its projection radius
+		// is the sum of its two signed half-axis projections, in absolute value.
+		// Avoid transforming and projecting all four corners on every SAT axis.
+		const real_t center = p_normal.dot(p_transform.get_origin());
+		const real_t radius = Math::abs(p_normal.dot(p_transform.columns[0]) * half_extents.x) +
+				Math::abs(p_normal.dot(p_transform.columns[1]) * half_extents.y);
+		r_min = center - radius;
+		r_max = center + radius;
 	}
 
 	_FORCE_INLINE_ Vector2 get_circle_axis(const Transform2D &p_xform, const Transform2D &p_xform_inv, const Vector2 &p_circle) const {
@@ -373,6 +386,7 @@ public:
 class GodotCapsuleShape2D : public GodotShape2D {
 	real_t radius = 0.0;
 	real_t height = 0.0;
+	Vector2 _get_second_moments() const;
 
 public:
 	_FORCE_INLINE_ const real_t &get_radius() const { return radius; }
@@ -386,26 +400,39 @@ public:
 	virtual bool contains_point(const Vector2 &p_point) const override;
 	virtual bool intersect_segment(const Vector2 &p_begin, const Vector2 &p_end, Vector2 &r_point, Vector2 &r_normal) const override;
 	virtual real_t get_moment_of_inertia(real_t p_mass, const Size2 &p_scale) const override;
+	virtual real_t get_moment_of_inertia_transformed(real_t p_mass, const Transform2D &p_transform) const override;
+	virtual real_t get_mass_area() const override {
+		return real_t(Math::PI) * radius * radius + real_t(2.0) * radius * MAX(height - real_t(2.0) * radius, real_t(0.0));
+	}
 
 	virtual void set_data(const Variant &p_data) override;
 	virtual Variant get_data() const override;
 
 	_FORCE_INLINE_ void project_range(const Vector2 &p_normal, const Transform2D &p_transform, real_t &r_min, real_t &r_max) const {
-		// no matter the angle, the box is mirrored anyway
-		Vector2 n = p_transform.basis_xform_inv(p_normal).normalized();
-		real_t h = height * 0.5 - radius;
-
-		n *= radius;
-		n.y += (n.y > 0) ? h : -h;
-
-		r_max = p_normal.dot(p_transform.xform(n));
-		r_min = p_normal.dot(p_transform.xform(-n));
-
-		if (r_max < r_min) {
-			SWAP(r_max, r_min);
+		const real_t half_segment = height * real_t(0.5) - radius;
+		if (half_segment < 0.0 || radius < 0.0) {
+			// Preserve the original projection for temporarily invalid shape data.
+			Vector2 n = p_transform.basis_xform_inv(p_normal).normalized();
+			n *= radius;
+			n.y += (n.y > 0.0) ? half_segment : -half_segment;
+			r_max = p_normal.dot(p_transform.xform(n));
+			r_min = p_normal.dot(p_transform.xform(-n));
+			if (r_max < r_min) {
+				SWAP(r_max, r_min);
+			}
+			return;
 		}
 
-		//ERR_FAIL_COND( r_max < r_min );
+		// A capsule is a center segment swept by a disk. The affine support
+		// radius is the sum of the transformed disk and center-segment radii.
+		// This avoids normalizing and transforming two support points per axis.
+		const real_t axis_x = p_normal.dot(p_transform.columns[0]);
+		const real_t axis_y = p_normal.dot(p_transform.columns[1]);
+		const real_t projected_radius = radius * Math::sqrt(axis_x * axis_x + axis_y * axis_y) +
+				half_segment * Math::abs(axis_y);
+		const real_t center = p_normal.dot(p_transform.get_origin());
+		r_min = center - projected_radius;
+		r_max = center + projected_radius;
 	}
 
 	DEFAULT_PROJECT_RANGE_CAST
@@ -419,6 +446,14 @@ class GodotConvexPolygonShape2D : public GodotShape2D {
 
 	Point *points = nullptr;
 	int point_count = 0;
+	Vector2 mass_centroid;
+	real_t mass_variance_x = 0.0;
+	real_t mass_variance_y = 0.0;
+	real_t mass_covariance_xy = 0.0;
+	real_t mass_area = 0.0;
+	bool valid_mass_properties = false;
+	bool mass_clockwise = false;
+	bool normals_generated_from_vertices = false;
 
 public:
 	_FORCE_INLINE_ int get_point_count() const { return point_count; }
@@ -439,6 +474,9 @@ public:
 	virtual bool contains_point(const Vector2 &p_point) const override;
 	virtual bool intersect_segment(const Vector2 &p_begin, const Vector2 &p_end, Vector2 &r_point, Vector2 &r_normal) const override;
 	virtual real_t get_moment_of_inertia(real_t p_mass, const Size2 &p_scale) const override;
+	virtual real_t get_moment_of_inertia_transformed(real_t p_mass, const Transform2D &p_transform) const override;
+	virtual Vector2 get_center_of_mass() const override { return mass_centroid; }
+	virtual real_t get_mass_area() const override { return valid_mass_properties ? mass_area : get_aabb().get_area(); }
 
 	virtual void set_data(const Variant &p_data) override;
 	virtual Variant get_data() const override;
@@ -449,9 +487,14 @@ public:
 			return;
 		}
 
-		r_min = r_max = p_normal.dot(p_transform.xform(points[0].pos));
+		// Transform the projection axis only once. For an affine transform,
+		// dot(axis, transform.xform(point)) == dot(local_axis, point) + offset.
+		// This also supports non-uniform scales, shears and degenerate bases.
+		const Vector2 local_axis = p_transform.basis_xform_inv(p_normal);
+		const real_t offset = p_normal.dot(p_transform.get_origin());
+		r_min = r_max = local_axis.dot(points[0].pos);
 		for (int i = 1; i < point_count; i++) {
-			real_t d = p_normal.dot(p_transform.xform(points[i].pos));
+			const real_t d = local_axis.dot(points[i].pos);
 			if (d > r_max) {
 				r_max = d;
 			}
@@ -459,6 +502,8 @@ public:
 				r_min = d;
 			}
 		}
+		r_min += offset;
+		r_max += offset;
 	}
 
 	DEFAULT_PROJECT_RANGE_CAST

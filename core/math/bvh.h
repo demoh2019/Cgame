@@ -53,8 +53,8 @@
 #include "core/math/bvh_tree.h"
 #include "core/math/geometry_3d.h"
 #include "core/os/mutex.h"
+#include "core/templates/hash_set.h"
 
-#include <climits> // INT_MAX
 
 #define BVHTREE_CLASS BVH_Tree<T, NUM_TREES, 2, MAX_ITEMS, USER_PAIR_TEST_FUNCTION, USER_CULL_TEST_FUNCTION, USE_PAIRS, BOUNDS, POINT>
 #define BVH_LOCKED_FUNCTION BVHLockedFunction _lock_guard(&_mutex, BVH_THREAD_SAFE &&_thread_safe);
@@ -106,7 +106,7 @@ public:
 		check_pair_callback_userdata = p_userdata;
 	}
 
-	BVHHandle create(T *p_userdata, bool p_active = true, uint32_t p_tree_id = 0, uint32_t p_tree_collision_mask = 1, const BOUNDS &p_aabb = BOUNDS(), int p_subindex = 0) {
+	BVHHandle create(T *p_userdata, bool p_active = true, uint32_t p_tree_id = 0, uint32_t p_tree_collision_mask = 1, const BOUNDS &p_aabb = BOUNDS(), int p_subindex = 0, bool p_defer_pairing = false) {
 		BVH_LOCKED_FUNCTION
 
 		// not sure if absolutely necessary to flush collisions here. It will cost performance to, instead
@@ -126,11 +126,31 @@ public:
 			// force a collision check no matter the AABB
 			if (p_active) {
 				_add_changed_item(h, p_aabb, false);
-				_check_for_collisions(true);
+				// A new item's leaf is not padded (see item_add), so with BVH_EXPAND_LEAF_AABBS the
+				// pair search would use the exact bounds. Use the same padded bounds that later
+				// moves use, so speculative margins also pair neighbours at creation.
+				{
+					BOUNDS &padded = tree._pairs[h.id()].expanded_aabb;
+					padded = p_aabb;
+					padded.grow_by(tree._pairing_expansion);
+				}
+				if (!p_defer_pairing) {
+					_check_for_collisions(true);
+				}
 			}
 		}
 
 		return h;
+	}
+
+	// Flush deferred insertions and filter changes after a batch. New pairs
+	// are always validated in _collide(); invalid existing pairs require the
+	// full recheck requested by deferred force_collision_check().
+	void flush_pending_pairs() {
+		BVH_LOCKED_FUNCTION
+		if (USE_PAIRS) {
+			_check_for_collisions();
+		}
 	}
 
 	////////////////////////////////////////////////////
@@ -154,10 +174,10 @@ public:
 		erase(h);
 	}
 
-	void force_collision_check(uint32_t p_handle) {
+	void force_collision_check(uint32_t p_handle, bool p_defer_pairing = false) {
 		BVHHandle h;
 		h.set(p_handle);
-		force_collision_check(h);
+		force_collision_check(h, p_defer_pairing);
 	}
 
 	bool activate(uint32_t p_handle, const BOUNDS &p_aabb, bool p_delay_collision_check = false) {
@@ -215,6 +235,17 @@ public:
 		force_collision_check(p_handle);
 	}
 
+	// Refresh cached pair metadata without recreating contacts or changing
+	// collision filters. Pair-check callbacks may replace userdata; both
+	// endpoints are kept synchronized through their reciprocal indices.
+	void refresh_pair_userdata(BVHHandle p_handle) {
+		DEV_ASSERT(!p_handle.is_invalid());
+		BVH_LOCKED_FUNCTION
+		if (USE_PAIRS && check_pair_callback) {
+			_recheck_pairs(p_handle);
+		}
+	}
+
 	void erase(BVHHandle p_handle) {
 		DEV_ASSERT(!p_handle.is_invalid());
 		BVH_LOCKED_FUNCTION
@@ -232,19 +263,21 @@ public:
 	// use in conjunction with activate if you have deferred the collision check, and
 	// set pairable has never been called.
 	// (deferred collision checks are a workaround for visual server for historical reasons)
-	void force_collision_check(BVHHandle p_handle) {
+	void force_collision_check(BVHHandle p_handle, bool p_defer_pairing = false) {
 		DEV_ASSERT(!p_handle.is_invalid());
 		BVH_LOCKED_FUNCTION
 		if (USE_PAIRS) {
-			// the aabb should already be up to date in the BVH
+			// Filter changes do not change the proxy bounds. Existing pairs must
+			// still be fully validated even when all AABBs are unchanged.
 			BOUNDS aabb;
 			item_get_AABB(p_handle, aabb);
-
-			// add it as changed even if aabb not different
 			_add_changed_item(p_handle, aabb, false);
 
-			// force an immediate full collision check, much like calls to set_pairable
-			_check_for_collisions(true);
+			if (p_defer_pairing) {
+				_pending_full_pair_check = true;
+			} else {
+				_check_for_collisions(true);
+			}
 		}
 	}
 
@@ -304,8 +337,20 @@ public:
 	// call e.g. once per frame (this does a trickle optimize)
 	void update() {
 		BVH_LOCKED_FUNCTION
+		// Reclaim the oversized changed-proxy queue only after sustained idle
+		// frames. Repeated heavy spawn/move frames keep their reserved capacity
+		// and do not incur a realloc/free cycle on every physics tick.
+		const bool had_changes = !changed_items.is_empty();
 		tree.update();
 		_check_for_collisions();
+		if (had_changes) {
+			changed_queue_idle_updates = 0;
+		} else if (changed_items.get_capacity() > MAX_RETAINED_CHANGED_ITEMS) {
+			if (++changed_queue_idle_updates >= CHANGED_QUEUE_RECLAIM_IDLE_UPDATES) {
+				changed_items.reset();
+				changed_queue_idle_updates = 0;
+			}
+		}
 #ifdef BVH_INTEGRITY_CHECKS
 		tree._integrity_check_all();
 #endif
@@ -315,6 +360,13 @@ public:
 	void update_collisions() {
 		BVH_LOCKED_FUNCTION
 		_check_for_collisions();
+	}
+
+	// Lightweight diagnostic for tests/profilers. The queue retains modest
+	// capacity intentionally, but releases burst allocations after idle frames.
+	uint32_t get_changed_queue_capacity() const {
+		BVH_LOCKED_FUNCTION
+		return changed_items.get_capacity();
 	}
 
 	// prefer calling this directly as type safe
@@ -386,6 +438,29 @@ public:
 		return params.result_count_overall;
 	}
 
+	// Stream segment candidates directly to the narrowphase callback. Unlike
+	// cull_segment(), this does not stop after a fixed-size result buffer is full.
+	// Callback returns a new ray fraction in [0, p_max_fraction], clipping
+	// subsequent BVH traversal after a closer exact hit.
+	using SegmentCastCallback = real_t (*)(T *, int, real_t, void *);
+	void cast_segment(const POINT &p_from, const POINT &p_to, SegmentCastCallback p_callback, void *p_userdata, uint32_t p_tree_collision_mask = 0xFFFFFFFF, const T *p_tester = nullptr) {
+		BVH_LOCKED_FUNCTION
+		tree.cast_segment(p_from, p_to, p_callback, p_userdata, p_tree_collision_mask, p_tester);
+	}
+
+	// Stream point/AABB candidates instead of returning a fixed number of
+	// unfiltered proxies. A false visitor result stops traversal immediately.
+	using QueryVisitor = bool (*)(T *, int, void *);
+	bool visit_point(const POINT &p_point, QueryVisitor p_visitor, void *p_userdata, uint32_t p_tree_collision_mask = 0xFFFFFFFF, const T *p_tester = nullptr) {
+		BVH_LOCKED_FUNCTION
+		return tree.visit_point(p_point, p_visitor, p_userdata, p_tree_collision_mask, p_tester);
+	}
+
+	bool visit_aabb(const BOUNDS &p_aabb, QueryVisitor p_visitor, void *p_userdata, uint32_t p_tree_collision_mask = 0xFFFFFFFF, const T *p_tester = nullptr) {
+		BVH_LOCKED_FUNCTION
+		return tree.visit_aabb(p_aabb, p_visitor, p_userdata, p_tree_collision_mask, p_tester);
+	}
+
 	int cull_point(const POINT &p_point, T **p_result_array, int p_result_max, const T *p_tester, uint32_t p_tree_collision_mask = 0xFFFFFFFF, int *p_subindex_array = nullptr) {
 		BVH_LOCKED_FUNCTION
 		typename BVHTREE_CLASS::CullParams params;
@@ -404,10 +479,11 @@ public:
 	}
 
 	int cull_convex(const Vector<Plane> &p_convex, T **p_result_array, int p_result_max, const T *p_tester, uint32_t p_tree_collision_mask = 0xFFFFFFFF) {
-		BVH_LOCKED_FUNCTION
-		if (!p_convex.size()) {
+		if (p_result_max <= 0 || p_convex.is_empty()) {
+			// A zero-capacity query needs neither hull construction nor a tree traversal.
 			return 0;
 		}
+		BVH_LOCKED_FUNCTION
 
 		Vector<Vector3> convex_points = Geometry3D::compute_convex_mesh_points(&p_convex[0], p_convex.size());
 		if (convex_points.is_empty()) {
@@ -433,52 +509,83 @@ public:
 	}
 
 private:
-	// do this after moving etc.
-	void _check_for_collisions(bool p_full_check = false) {
-		if (!changed_items.size()) {
-			// noop
+	// Existing dense-dense pairs are indexed globally, avoiding a per-object
+	// hash table (and its memory overhead) on millions of sparse bodies.
+	static constexpr uint32_t DENSE_PAIR_THRESHOLD = 32;
+
+	static uint64_t _dense_pair_key(BVHHandle p_a, BVHHandle p_b) {
+		const uint32_t a = MIN(p_a.id(), p_b.id());
+		const uint32_t b = MAX(p_a.id(), p_b.id());
+		return (uint64_t(a) << 32) | uint64_t(b);
+	}
+
+	// Called after adding both adjacency links. When a body crosses the
+	// threshold, register all of its pairs with already-dense neighbors.
+	void _index_new_dense_neighbors(BVHHandle p_handle) {
+		const typename BVHTREE_CLASS::ItemPairs &pairs = tree._pairs[p_handle.id()];
+		if (pairs.extended_pairs.size() != DENSE_PAIR_THRESHOLD) {
 			return;
 		}
+		for (const typename BVHTREE_CLASS::ItemPairs::Link &link : pairs.extended_pairs) {
+			if (tree._pairs[link.handle.id()].extended_pairs.size() >= DENSE_PAIR_THRESHOLD) {
+				dense_pair_keys.insert(_dense_pair_key(p_handle, link.handle));
+			}
+		}
+	}
 
-		typename BVHTREE_CLASS::CullParams params;
+	// Called only when an adjacency list falls from the threshold to one
+	// below it. Dense-dense entries for its remaining links are now stale.
+	void _unindex_new_sparse_neighbors(BVHHandle p_handle) {
+		const typename BVHTREE_CLASS::ItemPairs &pairs = tree._pairs[p_handle.id()];
+		for (const typename BVHTREE_CLASS::ItemPairs::Link &link : pairs.extended_pairs) {
+			if (tree._pairs[link.handle.id()].extended_pairs.size() >= DENSE_PAIR_THRESHOLD) {
+				dense_pair_keys.erase(_dense_pair_key(p_handle, link.handle));
+			}
+		}
+	}
 
-		params.result_count_overall = 0;
-		params.result_max = INT_MAX;
-		params.result_array = nullptr;
-		params.subindex_array = nullptr;
+	// Pairing traverses candidate leaves directly. The original cull_aabb
+	// filled _cull_hits for every changed proxy and then read the entire list
+	// a second time, retaining memory proportional to the densest scene.
+	void _check_for_collisions(bool p_full_check = false) {
+		if (changed_items.is_empty()) {
+			_pending_full_pair_check = false;
+			return;
+		}
+		// A deferred layer/mask or exclusion change must survive unrelated
+		// move(), update() and flush calls until its full check is executed.
+		const bool full_check = p_full_check || _pending_full_pair_check;
+		_pending_full_pair_check = false;
+
+		struct PairVisit {
+			BVH_Manager *manager;
+			BVHHandle changed;
+		};
+		auto pair_visitor = [](uint32_t p_ref_id, void *p_userdata) -> bool {
+			PairVisit &query = *static_cast<PairVisit *>(p_userdata);
+			if (p_ref_id == query.changed.id()) {
+				return true;
+			}
+			BVHHandle candidate;
+			candidate.set_id(p_ref_id);
+			// The callback changes pair adjacency, not BVH node topology.
+			query.manager->_collide(query.changed, candidate);
+			return true;
+		};
 
 		for (const BVHHandle &h : changed_items) {
-			// use the expanded aabb for pairing
-			const BOUNDS &expanded_aabb = tree._pairs[h.id()].expanded_aabb;
+			// Callbacks may grow pair adjacency storage: keep a stable AABB copy.
+			const BOUNDS expanded_aabb = tree._pairs[h.id()].expanded_aabb;
 			BVHABB_CLASS abb;
 			abb.from(expanded_aabb);
 
-			tree.item_fill_cullparams(h, params);
+			// Remove obsolete pairs first, preserving the full filter recheck
+			// for static layer / collision exception changes.
+			_find_leavers(h, abb, full_check);
 
-			// find all the existing paired aabbs that are no longer
-			// paired, and send callbacks
-			_find_leavers(h, abb, p_full_check);
-
-			uint32_t changed_item_ref_id = h.id();
-
-			params.abb = abb;
-
-			params.result_count_overall = 0; // might not be needed
-			tree.cull_aabb(params, false);
-
-			for (const uint32_t ref_id : tree._cull_hits) {
-				// don't collide against ourself
-				if (ref_id == changed_item_ref_id) {
-					continue;
-				}
-
-				// checkmasks is already done in the cull routine.
-				BVHHandle h_collidee;
-				h_collidee.set_id(ref_id);
-
-				// find NEW enterers, and send callbacks for them only
-				_collide(h, h_collidee);
-			}
+			const typename BVHTREE_CLASS::ItemExtra &extra = _get_extra(h);
+			PairVisit query = { this, h };
+			tree.visit_aabb_refs(expanded_aabb, pair_visitor, &query, extra.tree_collision_mask, extra.userdata);
 		}
 		_reset();
 	}
@@ -498,7 +605,26 @@ private:
 	T *item_get_userdata(BVHHandle p_handle) const { return _get_extra(p_handle).userdata; }
 	int item_get_subindex(BVHHandle p_handle) const { return _get_extra(p_handle).subindex; }
 
-	void _unpair(BVHHandle p_from, BVHHandle p_to) {
+	// Unordered removal may move the last link into the deleted slot.
+	// Update its partner's reciprocal index before compacting the list.
+	void _remove_pair_link(BVHHandle p_owner, uint32_t p_index) {
+		typename BVHTREE_CLASS::ItemPairs &pairs = tree._pairs[p_owner.id()];
+		DEV_ASSERT(p_index < pairs.extended_pairs.size());
+		const uint32_t last = pairs.extended_pairs.size() - 1;
+		if (p_index != last) {
+			const typename BVHTREE_CLASS::ItemPairs::Link moved = pairs.extended_pairs[last];
+			typename BVHTREE_CLASS::ItemPairs &other = tree._pairs[moved.handle.id()];
+			DEV_ASSERT(moved.reverse_index < other.extended_pairs.size());
+			DEV_ASSERT(other.extended_pairs[moved.reverse_index].handle == p_owner);
+			other.extended_pairs[moved.reverse_index].reverse_index = p_index;
+		}
+		pairs.remove_pair_at(p_index);
+	}
+
+	// The caller knows its adjacency index. The reciprocal index avoids
+	// searching the partner's list to remove the corresponding link.
+	void _unpair(BVHHandle p_from, BVHHandle p_to, uint32_t p_known_index) {
+		const BVHHandle index_owner = p_from;
 		tree._handle_sort(p_from, p_to);
 
 		typename BVHTREE_CLASS::ItemExtra &exa = tree._extra[p_from.id()];
@@ -512,8 +638,41 @@ private:
 		typename BVHTREE_CLASS::ItemPairs &pairs_from = tree._pairs[p_from.id()];
 		typename BVHTREE_CLASS::ItemPairs &pairs_to = tree._pairs[p_to.id()];
 
-		void *ud_from = pairs_from.remove_pair_to(p_to);
-		pairs_to.remove_pair_to(p_from);
+		const uint32_t from_degree = pairs_from.extended_pairs.size();
+		const uint32_t to_degree = pairs_to.extended_pairs.size();
+		if (from_degree >= DENSE_PAIR_THRESHOLD && to_degree >= DENSE_PAIR_THRESHOLD) {
+			dense_pair_keys.erase(_dense_pair_key(p_from, p_to));
+		}
+
+		uint32_t from_index;
+		uint32_t to_index;
+		if (index_owner == p_from) {
+			from_index = p_known_index;
+			DEV_ASSERT(from_index < from_degree);
+			to_index = pairs_from.extended_pairs[from_index].reverse_index;
+		} else {
+			to_index = p_known_index;
+			DEV_ASSERT(to_index < to_degree);
+			from_index = pairs_to.extended_pairs[to_index].reverse_index;
+		}
+		DEV_ASSERT(from_index < from_degree && to_index < to_degree);
+		DEV_ASSERT(pairs_from.extended_pairs[from_index].handle == p_to);
+		DEV_ASSERT(pairs_to.extended_pairs[to_index].handle == p_from);
+		void *ud_from = pairs_from.extended_pairs[from_index].userdata;
+		_remove_pair_link(p_from, from_index);
+		_remove_pair_link(p_to, to_index);
+		if (from_degree == DENSE_PAIR_THRESHOLD) {
+			_unindex_new_sparse_neighbors(p_from);
+		}
+		if (to_degree == DENSE_PAIR_THRESHOLD) {
+			_unindex_new_sparse_neighbors(p_to);
+		}
+		// Avoid touching the hash allocator for the overwhelmingly common
+		// sparse-sparse unlink, which could never have been indexed.
+		if ((from_degree >= DENSE_PAIR_THRESHOLD || to_degree >= DENSE_PAIR_THRESHOLD) &&
+				dense_pair_keys.is_empty()) {
+			dense_pair_keys.reset();
+		}
 
 #ifdef BVH_VERBOSE_PAIRING
 		print_line("_unpair " + itos(p_from.id()) + " from " + itos(p_to.id()));
@@ -521,7 +680,7 @@ private:
 
 		// callback
 		if (unpair_callback) {
-			unpair_callback(pair_callback_userdata, p_from, exa.userdata, exa.subindex, p_to, exb.userdata, exb.subindex, ud_from);
+			unpair_callback(unpair_callback_userdata, p_from, exa.userdata, exa.subindex, p_to, exb.userdata, exb.subindex, ud_from);
 		}
 	}
 
@@ -545,7 +704,7 @@ private:
 	}
 
 	// returns true if unpair
-	bool _find_leavers_process_pair(typename BVHTREE_CLASS::ItemPairs &p_pairs_from, const BVHABB_CLASS &p_abb_from, BVHHandle p_from, BVHHandle p_to, bool p_full_check) {
+	bool _find_leavers_process_pair(typename BVHTREE_CLASS::ItemPairs &p_pairs_from, const BVHABB_CLASS &p_abb_from, BVHHandle p_from, BVHHandle p_to, bool p_full_check, uint32_t p_pair_index) {
 		BVHABB_CLASS abb_to;
 		tree.item_get_ABB(p_to, abb_to);
 
@@ -572,7 +731,7 @@ private:
 			}
 		}
 
-		_unpair(p_from, p_to);
+		_unpair(p_from, p_to, p_pair_index);
 		return true;
 	}
 
@@ -586,7 +745,7 @@ private:
 		// remove from pairing list for every partner
 		for (uint32_t n = 0; n < p_from.extended_pairs.size(); n++) {
 			BVHHandle h_to = p_from.extended_pairs[n].handle;
-			if (_find_leavers_process_pair(p_from, abb_from, p_handle, h_to, p_full_check)) {
+			if (_find_leavers_process_pair(p_from, abb_from, p_handle, h_to, p_full_check, n)) {
 				// we need to keep the counter n up to date if we deleted a pair
 				// as the number of items in p_from.extended_pairs will have decreased by 1
 				// and we don't want to miss an item
@@ -608,12 +767,8 @@ private:
 		const typename BVHTREE_CLASS::ItemExtra &exa = _get_extra(p_ha);
 		const typename BVHTREE_CLASS::ItemExtra &exb = _get_extra(p_hb);
 
-		// user collision callback
-		if (!USER_PAIR_TEST_FUNCTION::user_pair_check(exa.userdata, exb.userdata)) {
-			return;
-		}
-
-		// if the userdata is the same, no collisions should occur
+		// Compound shapes belonging to the same object can never form a pair.
+		// Reject them before running the potentially expensive user filter.
 		if ((exa.userdata == exb.userdata) && exa.userdata) {
 			return;
 		}
@@ -621,9 +776,14 @@ private:
 		typename BVHTREE_CLASS::ItemPairs &p_from = tree._pairs[p_ha.id()];
 		typename BVHTREE_CLASS::ItemPairs &p_to = tree._pairs[p_hb.id()];
 
-		// does this pair exist already?
-		// or only check the one with lower number of pairs for greater speed
-		if (p_from.num_pairs <= p_to.num_pairs) {
+		// Only high-degree pairs use the hash index. Sparse contacts retain
+		// the compact linear adjacency scan, with no per-body index storage.
+		if (p_from.extended_pairs.size() >= DENSE_PAIR_THRESHOLD &&
+				p_to.extended_pairs.size() >= DENSE_PAIR_THRESHOLD) {
+			if (dense_pair_keys.has(_dense_pair_key(p_ha, p_hb))) {
+				return;
+			}
+		} else if (p_from.extended_pairs.size() <= p_to.extended_pairs.size()) {
 			if (p_from.contains_pair_to(p_hb)) {
 				return;
 			}
@@ -631,6 +791,12 @@ private:
 			if (p_to.contains_pair_to(p_ha)) {
 				return;
 			}
+		}
+
+		// Already-existing pairs have been checked by _find_leavers().
+		// Only new pairs need the user-defined (layer / mask) filter.
+		if (!USER_PAIR_TEST_FUNCTION::user_pair_check(exa.userdata, exb.userdata)) {
+			return;
 		}
 
 		// callback
@@ -644,9 +810,17 @@ private:
 			callback_userdata = pair_callback(pair_callback_userdata, p_ha, exa.userdata, exa.subindex, p_hb, exb.userdata, exb.subindex);
 		}
 
-		// new pair! .. only really need to store the userdata on the lower handle, but both have storage so...
-		p_from.add_pair_to(p_hb, callback_userdata);
-		p_to.add_pair_to(p_ha, callback_userdata);
+		// Reciprocal positions enable constant-time unlink and pair-data updates.
+		const uint32_t from_index = p_from.extended_pairs.size();
+		const uint32_t to_index = p_to.extended_pairs.size();
+		p_from.add_pair_to(p_hb, callback_userdata, to_index);
+		p_to.add_pair_to(p_ha, callback_userdata, from_index);
+		if (p_from.extended_pairs.size() >= DENSE_PAIR_THRESHOLD &&
+				p_to.extended_pairs.size() >= DENSE_PAIR_THRESHOLD) {
+			dense_pair_keys.insert(_dense_pair_key(p_ha, p_hb));
+		}
+		_index_new_dense_neighbors(p_ha);
+		_index_new_dense_neighbors(p_hb);
 	}
 
 	// if we remove an item, we need to immediately remove the pairs, to prevent reading the pair after deletion
@@ -657,7 +831,7 @@ private:
 		// can't easily use a for loop here, because removing changes the size of the list
 		while (p_from.extended_pairs.size()) {
 			BVHHandle h_to = p_from.extended_pairs[0].handle;
-			_unpair(p_handle, h_to);
+			_unpair(p_handle, h_to, 0);
 		}
 	}
 
@@ -674,15 +848,11 @@ private:
 			if (new_pair_data != pair.userdata) {
 				pair.userdata = new_pair_data;
 
-				// Update pair data for the second item.
+				// The reciprocal link index stays current through unordered removals.
 				typename BVHTREE_CLASS::ItemPairs &to = tree._pairs[h_to.id()];
-				for (unsigned int to_index = 0; to_index < to.extended_pairs.size(); to_index++) {
-					typename BVHTREE_CLASS::ItemPairs::Link &to_pair = to.extended_pairs[to_index];
-					if (to_pair.handle == p_handle) {
-						to_pair.userdata = new_pair_data;
-						break;
-					}
-				}
+				DEV_ASSERT(pair.reverse_index < to.extended_pairs.size());
+				DEV_ASSERT(to.extended_pairs[pair.reverse_index].handle == p_handle);
+				to.extended_pairs[pair.reverse_index].userdata = new_pair_data;
 			}
 		}
 	}
@@ -738,7 +908,8 @@ private:
 		// mark as on list
 		last_updated_tick = _tick;
 
-		// add to the list
+		// Remember the queue position so erasing an item doesn't scan all moved bodies.
+		tree._extra[p_handle.id()].changed_item_index = changed_items.size();
 		changed_items.push_back(p_handle);
 	}
 
@@ -750,21 +921,22 @@ private:
 		// callbacks
 		_remove_pairs_containing(p_handle);
 
-		// remove from changed items (not very efficient yet)
-		for (int n = 0; n < (int)changed_items.size(); n++) {
-			if (changed_items[n] == p_handle) {
-				changed_items.remove_at_unordered(n);
+		// Unordered removal is O(1): update the moved entry's index.
+		typename BVHTREE_CLASS::ItemExtra &extra = tree._extra[p_handle.id()];
+		if (extra.last_updated_tick == _tick) {
+			const uint32_t index = extra.changed_item_index;
+			DEV_ASSERT(index < changed_items.size());
+			DEV_ASSERT(changed_items[index] == p_handle);
 
-				// because we are using an unordered remove,
-				// the last changed item will now be at spot 'n',
-				// and we need to redo it, so we prevent moving on to
-				// the next n at the next for iteration.
-				n--;
+			const BVHHandle last_handle = changed_items[changed_items.size() - 1];
+			changed_items.remove_at_unordered(index);
+			if (last_handle != p_handle) {
+				tree._extra[last_handle.id()].changed_item_index = index;
 			}
 		}
 
-		// reset the last updated tick (may not be necessary but just in case)
-		tree._extra[p_handle.id()].last_updated_tick = 0;
+		// A freed ref ID may be reused before the next update.
+		extra.last_updated_tick = 0;
 	}
 
 	PairCallback pair_callback = nullptr;
@@ -775,10 +947,17 @@ private:
 	void *check_pair_callback_userdata = nullptr;
 
 	BVHTREE_CLASS tree;
+	HashSet<uint64_t> dense_pair_keys;
 
 	// for collision pairing,
 	// maintain a list of all items moved etc on each frame / tick
 	LocalVector<BVHHandle> changed_items;
+	// Retain common movement bursts; release exceptional queue capacity
+	// only after consecutive idle updates to prevent steady-state churn.
+	static constexpr uint32_t MAX_RETAINED_CHANGED_ITEMS = 4096;
+	static constexpr uint8_t CHANGED_QUEUE_RECLAIM_IDLE_UPDATES = 16;
+	uint8_t changed_queue_idle_updates = 0;
+	bool _pending_full_pair_check = false;
 	uint32_t _tick = 1; // Start from 1 so items with 0 indicate never updated.
 
 	class BVHLockedFunction {

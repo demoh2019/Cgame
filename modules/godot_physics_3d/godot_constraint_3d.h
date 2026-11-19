@@ -42,6 +42,8 @@ class GodotConstraint3D {
 	uint64_t island_step;
 	int priority;
 	bool disabled_collisions_between_bodies;
+	// Index of this constraint in the constraint list of each body it touches.
+	uint32_t _body_slots[2] = { 0, 0 };
 
 	RID self;
 
@@ -63,6 +65,12 @@ public:
 
 	_FORCE_INLINE_ GodotBody3D **get_body_ptr() const { return _body_ptr; }
 	_FORCE_INLINE_ int get_body_count() const { return _body_count; }
+	_FORCE_INLINE_ uint32_t get_body_slot(int p_pos) const { return _body_slots[p_pos]; }
+	_FORCE_INLINE_ void set_body_slot(int p_pos, uint32_t p_slot) { _body_slots[p_pos] = p_slot; }
+
+	// Contact-only islands can treat static/kinematic bodies as read-only.
+	// Other constraint types retain conservative exclusive body ownership.
+	virtual bool permits_parallel_immovable_body_sharing() const { return false; }
 
 	virtual GodotSoftBody3D *get_soft_body_ptr(int p_index) const { return nullptr; }
 	virtual int get_soft_body_count() const { return 0; }

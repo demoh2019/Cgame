@@ -31,6 +31,7 @@
 #include "flow_container.h"
 
 #include "core/object/class_db.h"
+#include "core/templates/local_vector.h"
 #include "scene/gui/texture_rect.h"
 #include "scene/theme/theme_db.h"
 
@@ -40,6 +41,11 @@ struct _ChildData {
 	bool will_stretch = false;
 	float stretch_ratio = 0.0;
 	int stretch_size = 0;
+};
+
+struct _FlowChildRef {
+	Control *control = nullptr;
+	int index = 0;
 };
 
 struct _LineData {
@@ -59,7 +65,11 @@ void FlowContainer::_resort() {
 
 	bool rtl = is_layout_rtl();
 
-	HashMap<Control *, _ChildData> children_data;
+	// Dense measurements indexed by the child slot avoid a fresh hash
+	// table and repeated pointer hashes at every UI reflow.
+	const int child_count = get_child_count();
+	LocalVector<_ChildData> children_data;
+	children_data.resize(child_count);
 
 	Vector<_LineData> lines_data;
 
@@ -72,7 +82,7 @@ void FlowContainer::_resort() {
 	Control *last_child = nullptr;
 
 	// First pass for line wrapping and minimum size calculation.
-	for (int i = 0; i < get_child_count(); i++) {
+	for (int i = 0; i < child_count; i++) {
 		Control *child = as_sortable_control(get_child(i));
 		if (!child) {
 			continue;
@@ -139,7 +149,7 @@ void FlowContainer::_resort() {
 		last_child = child;
 		child_data.min_size = child_msc;
 		child_data.max_size = child_max_size;
-		children_data[child] = child_data;
+		children_data[i] = child_data;
 		children_in_current_line++;
 	}
 	line_length = vertical ? (ofs.y) : (ofs.x);
@@ -150,6 +160,12 @@ void FlowContainer::_resort() {
 	lines_data.push_back(_LineData{ children_in_current_line, line_height, line_length, current_container_size - line_length, line_stretch_ratio_total, is_filled });
 
 	// Second pass for in-line expansion and alignment.
+	// Abort if a size callback has changed the child index mapping.
+	ERR_FAIL_COND(get_child_count() != child_count);
+	// Reuse these buffers between lines instead of allocating fresh
+	// arrays of child pointers and stretch activity flags per line.
+	LocalVector<_FlowChildRef> line_children;
+	LocalVector<_FlowChildRef> stretch_children;
 
 	int current_line_idx = 0;
 	int child_idx_in_line = 0;
@@ -157,12 +173,13 @@ void FlowContainer::_resort() {
 	ofs.x = 0;
 	ofs.y = 0;
 
-	for (int i = 0; i < get_child_count(); i++) {
+	for (int i = 0; i < child_count; i++) {
+		ERR_FAIL_COND(get_child_count() != child_count);
 		Control *child = as_sortable_control(get_child(i));
 		if (!child) {
 			continue;
 		}
-		_ChildData &child_data = children_data[child];
+		_ChildData &child_data = children_data[i];
 		Size2i child_size = child_data.min_size;
 
 		_LineData line_data = lines_data[current_line_idx];
@@ -180,34 +197,33 @@ void FlowContainer::_resort() {
 		}
 
 		if (child_idx_in_line == 0) {
-			Vector<Control *> line_children;
-			for (int j = i; j < get_child_count() && line_children.size() < lines_data[current_line_idx].child_count; j++) {
+			line_children.clear();
+			stretch_children.clear();
+			for (int j = i; j < child_count && int(line_children.size()) < lines_data[current_line_idx].child_count; j++) {
 				Control *line_child = as_sortable_control(get_child(j));
 				if (!line_child) {
 					continue;
 				}
-				_ChildData &line_child_data = children_data[line_child];
+				_ChildData &line_child_data = children_data[j];
 
-				line_children.push_back(line_child);
+				line_children.push_back(_FlowChildRef{ line_child, j });
 				line_child_data.stretch_size = 0;
 			}
 
 			int line_remaining_stretch = line_data.stretch_avail;
-			Vector<Control *> stretch_children;
-			Vector<bool> stretch_children_active;
 			line_stretch_ratio_total = 0;
 
-			for (int j = 0; j < line_children.size(); j++) {
-				Control *line_child = line_children[j];
-				_ChildData &line_child_data = children_data[line_child];
+			for (int j = 0; j < int(line_children.size()); j++) {
+				const _FlowChildRef &entry = line_children[j];
+				Control *line_child = entry.control;
+				_ChildData &line_child_data = children_data[entry.index];
 				bool can_stretch = vertical ? line_child->get_v_size_flags().has_flag(SIZE_EXPAND) : line_child->get_h_size_flags().has_flag(SIZE_EXPAND);
 				if (!can_stretch) {
 					continue;
 				}
 				line_child_data.will_stretch = true;
 
-				stretch_children.push_back(line_child);
-				stretch_children_active.push_back(true);
+				stretch_children.push_back(entry);
 				line_child_data.stretch_ratio = line_child->get_stretch_ratio();
 				line_stretch_ratio_total += line_child_data.stretch_ratio;
 			}
@@ -215,13 +231,12 @@ void FlowContainer::_resort() {
 			while (line_stretch_ratio_total > 0) {
 				bool refit_successful = true;
 
-				for (int j = 0; j < stretch_children.size(); j++) {
-					if (!stretch_children_active[j]) {
+				for (int j = 0; j < int(stretch_children.size()); j++) {
+					const _FlowChildRef &entry = stretch_children[j];
+					_ChildData &line_child_data = children_data[entry.index];
+					if (!line_child_data.will_stretch) {
 						continue;
 					}
-
-					Control *line_child = stretch_children[j];
-					_ChildData &line_child_data = children_data[line_child];
 					float stretch_ratio = line_child_data.stretch_ratio;
 					int child_stretch = line_remaining_stretch * stretch_ratio / line_stretch_ratio_total;
 
@@ -233,7 +248,7 @@ void FlowContainer::_resort() {
 
 					if (child_stretch > max_stretch) {
 						line_child_data.stretch_size = max_stretch;
-						stretch_children_active.write[j] = false;
+						line_child_data.will_stretch = false;
 						line_stretch_ratio_total -= stretch_ratio;
 						line_remaining_stretch -= max_stretch;
 						refit_successful = false;
@@ -242,13 +257,12 @@ void FlowContainer::_resort() {
 				}
 
 				if (refit_successful) {
-					for (int j = 0; j < stretch_children.size(); j++) {
-						if (!stretch_children_active[j]) {
+					for (int j = 0; j < int(stretch_children.size()); j++) {
+						const _FlowChildRef &entry = stretch_children[j];
+						_ChildData &line_child_data = children_data[entry.index];
+						if (!line_child_data.will_stretch) {
 							continue;
 						}
-
-						Control *line_child = stretch_children[j];
-						_ChildData &line_child_data = children_data[line_child];
 						line_child_data.stretch_size = line_remaining_stretch * line_child_data.stretch_ratio / line_stretch_ratio_total;
 					}
 					break;
@@ -256,8 +270,8 @@ void FlowContainer::_resort() {
 			}
 
 			int used_stretch = 0;
-			for (int j = 0; j < line_children.size(); j++) {
-				used_stretch += children_data[line_children[j]].stretch_size;
+			for (int j = 0; j < int(line_children.size()); j++) {
+				used_stretch += children_data[line_children[j].index].stretch_size;
 			}
 			lines_data.write[current_line_idx].stretch_avail = MAX(line_data.stretch_avail - used_stretch, 0);
 			line_data = lines_data[current_line_idx];
@@ -333,7 +347,7 @@ void FlowContainer::_resort() {
 			}
 
 			if (child->get_v_size_flags().has_flag(SIZE_EXPAND)) {
-				int stretch = children_data[child].stretch_size;
+				int stretch = children_data[i].stretch_size;
 				child_size.height += stretch;
 			}
 
@@ -343,7 +357,7 @@ void FlowContainer::_resort() {
 			}
 
 			if (child->get_h_size_flags().has_flag(SIZE_EXPAND)) {
-				int stretch = children_data[child].stretch_size;
+				int stretch = children_data[i].stretch_size;
 				child_size.width += stretch;
 			}
 		}

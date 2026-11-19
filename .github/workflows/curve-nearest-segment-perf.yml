@@ -1,0 +1,45 @@
+name: Curve2D and Curve3D closest-point projection regressions
+
+on:
+  pull_request:
+    branches: [develop]
+    paths:
+      - 'scene/resources/curve.cpp'
+      - 'tests/scene/test_curve_2d.cpp'
+      - 'tests/scene/test_curve_3d.cpp'
+      - '.github/workflows/curve-nearest-segment-perf.yml'
+  push:
+    branches: [develop]
+    paths:
+      - 'scene/resources/curve.cpp'
+      - 'tests/scene/test_curve_2d.cpp'
+      - 'tests/scene/test_curve_3d.cpp'
+      - '.github/workflows/curve-nearest-segment-perf.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: curve-nearest-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  native-curve-projection:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+      - uses: ./.github/actions/godot-deps
+      - name: Build editor and native regressions
+        uses: ./.github/actions/godot-build
+        with:
+          platform: linuxbsd
+          target: editor
+          scons-flags: dev_build=yes tests=yes debug_symbols=no module_mono_enabled=no module_text_server_fb_enabled=yes accesskit=no -j2
+      - name: Run Curve2D and Curve3D native test suites
+        run: |
+          timeout 600s ./bin/godot.linuxbsd.editor.dev.x86_64 --headless --test --test-case="*[Curve2D]*" --no-colors
+          timeout 600s ./bin/godot.linuxbsd.editor.dev.x86_64 --headless --test --test-case="*[Curve3D]*" --no-colors

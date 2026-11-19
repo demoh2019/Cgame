@@ -76,7 +76,14 @@ public:
 			}
 
 			const uint32_t page_id = pages_allocated++;
+			// Claim a unique slot under the lock, but allocate the payload
+			// outside it. Multiple producers can now allocate their new
+			// pages in parallel without serializing the system allocator.
+			spin_lock.unlock();
 			T *page = (T *)memalloc(sizeof(T) * page_size);
+			spin_lock.lock();
+			// Other threads may have reallocated the metadata array while
+			// this thread was allocating the payload, so use the current one.
 			page_pool[page_id] = page;
 			spin_lock.unlock();
 			return PageInfo{ page, page_id };
@@ -262,10 +269,22 @@ public:
 	void clear() {
 		//destruct if needed
 		if constexpr (!std::is_trivially_destructible_v<T>) {
-			for (uint64_t i = 0; i < count; i++) {
-				uint32_t page = i >> page_size_shift;
-				uint32_t offset = i & page_size_mask;
-				page_data[page][offset].~T();
+			// Destruct contiguous pages directly. Avoid per-element shifts,
+			// masks, and page pointer lookups on the hot clear path.
+			const uint32_t full_pages = count >> page_size_shift;
+			const uint32_t remainder = count & page_size_mask;
+			const uint32_t elements_per_page = page_size_mask + 1;
+			for (uint32_t page = 0; page < full_pages; page++) {
+				T *const elements = page_data[page];
+				for (uint32_t i = 0; i < elements_per_page; i++) {
+					elements[i].~T();
+				}
+			}
+			if (remainder > 0) {
+				T *const elements = page_data[full_pages];
+				for (uint32_t i = 0; i < remainder; i++) {
+					elements[i].~T();
+				}
 			}
 		}
 
@@ -332,15 +351,16 @@ public:
 				T *dst_page = page_data[_get_pages_in_use() - 1];
 				uint32_t to_copy = MIN(page_size - new_remainder, remainder);
 
-				for (uint32_t i = 0; i < to_copy; i++) {
-					if constexpr (!std::is_trivially_constructible_v<T>) {
+				if constexpr (std::is_trivially_copyable_v<T>) {
+					// The pages are separately owned; a single bulk copy replaces
+					// the element-by-element assignment of the partial page tail.
+					std::memcpy(dst_page + new_remainder, remainder_page + remainder - to_copy, size_t(to_copy) * sizeof(T));
+				} else {
+					for (uint32_t i = 0; i < to_copy; i++) {
 						memnew_placement(&dst_page[i + new_remainder], T(remainder_page[i + remainder - to_copy]));
-					} else {
-						dst_page[i + new_remainder] = remainder_page[i + remainder - to_copy];
-					}
-
-					if constexpr (!std::is_trivially_destructible_v<T>) {
-						remainder_page[i + remainder - to_copy].~T();
+						if constexpr (!std::is_trivially_destructible_v<T>) {
+							remainder_page[i + remainder - to_copy].~T();
+						}
 					}
 				}
 

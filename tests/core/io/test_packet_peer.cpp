@@ -348,4 +348,163 @@ TEST_CASE("[PacketPeer][PacketPeerStream] Switching streams drops cached parsed 
 	CHECK_EQ(packets->get_available_packet_count(), 1);
 }
 
+
+TEST_CASE("[PacketPeer][Performance] Repeated Variant encoding reuses scratch capacity") {
+	Ref<StreamPeerBuffer> stream;
+	stream.instantiate();
+	Ref<PacketPeerStream> packets;
+	packets.instantiate();
+	packets->set_stream_peer(stream);
+	packets->set_input_buffer_max_size(32768);
+	packets->set_output_buffer_max_size(32768);
+
+	// Grow repeatedly, shrink the payload, then grow again. Each packet
+	// must remain byte-for-byte decodable after scratch buffer reuse.
+	const int sizes[] = { 1, 128, 64, 1024, 256, 8192, 16, 4096, 2, 12288, 512 };
+	for (int repeat = 0; repeat < 8; ++repeat) {
+		for (int size : sizes) {
+			String payload = String("z").repeat(size);
+			stream->clear();
+			REQUIRE(packets->put_var(payload) == OK);
+			stream->seek(0);
+			Variant decoded;
+			REQUIRE(packets->get_var(decoded) == OK);
+			CHECK(String(decoded) == payload);
+			CHECK(packets->get_available_packet_count() == 0);
+		}
+	}
+
+	// Enforce the existing limit even after the scratch buffer was grown.
+	packets->set_encode_buffer_max_size(1024);
+	stream->clear();
+	ERR_PRINT_OFF;
+	CHECK(packets->put_var(String("x").repeat(2048)) == ERR_OUT_OF_MEMORY);
+	ERR_PRINT_ON;
+	CHECK_EQ(stream->get_size(), 0);
+	stream->clear();
+	REQUIRE(packets->put_var(String("ok")) == OK);
+	stream->seek(0);
+	Variant small;
+	REQUIRE(packets->get_var(small) == OK);
+	CHECK(String(small) == "ok");
+}
+
+
+class CountingStreamBuffer : public StreamPeerBuffer {
+public:
+	int partial_reads = 0;
+
+	Error get_partial_data(uint8_t *p_buffer, int p_bytes, int &r_received) override {
+		partial_reads++;
+		return StreamPeerBuffer::get_partial_data(p_buffer, p_bytes, r_received);
+	}
+};
+
+TEST_CASE("[PacketPeer][Performance] Cached frames avoid redundant stream polls") {
+	Ref<CountingStreamBuffer> stream;
+	stream.instantiate();
+	Ref<PacketPeerStream> packets;
+	packets.instantiate();
+	packets->set_stream_peer(stream);
+	packets->set_input_buffer_max_size(16384);
+
+	// All complete frames fit into one poll; consuming them should never
+	// ask the underlying StreamPeer to read again.
+	constexpr int COUNT = 512;
+	Vector<uint8_t> wire;
+	for (int i = 0; i < COUNT; ++i) {
+		const uint8_t frame[] = { 1, 0, 0, 0, uint8_t(i) };
+		wire.append_array(Span<uint8_t>(frame, 5));
+	}
+	REQUIRE(stream->put_data(wire.ptr(), wire.size()) == OK);
+	stream->seek(0);
+	const uint8_t *buffer = nullptr;
+	int length = 0;
+	for (int i = 0; i < COUNT; ++i) {
+		REQUIRE(packets->get_packet(&buffer, length) == OK);
+		REQUIRE(length == 1);
+		CHECK(buffer[0] == uint8_t(i));
+	}
+	CHECK(stream->partial_reads == 1);
+
+	// When the buffered batch is empty, the next request polls again.
+	ERR_PRINT_OFF;
+	CHECK(packets->get_packet(&buffer, length) == ERR_UNAVAILABLE);
+	ERR_PRINT_ON;
+	CHECK(stream->partial_reads == 2);
+
+	// Appending a new frame is observed on the next poll.
+	const uint8_t final_frame[] = { 1, 0, 0, 0, 77 };
+	REQUIRE(stream->put_data(final_frame, 5) == OK);
+	stream->seek(wire.size());
+	REQUIRE(packets->get_packet(&buffer, length) == OK);
+	REQUIRE(length == 1);
+	CHECK(buffer[0] == 77);
+	CHECK(stream->partial_reads == 3);
+}
+
+
+TEST_CASE("[PacketPeer][Performance] Write-only streams never poll the receiver") {
+	Ref<CountingStreamBuffer> stream;
+	stream.instantiate();
+	Ref<PacketPeerStream> packets;
+	packets.instantiate();
+	packets->set_stream_peer(stream);
+	packets->set_input_buffer_max_size(16384);
+
+	constexpr int COUNT = 512;
+	for (int i = 0; i < COUNT; ++i) {
+		const uint8_t byte = uint8_t(i);
+		REQUIRE(packets->put_packet(&byte, 1) == OK);
+	}
+	CHECK(stream->partial_reads == 0);
+	CHECK(stream->get_size() == COUNT * 5);
+
+	stream->seek(0);
+	CHECK(packets->get_available_packet_count() == COUNT);
+	CHECK(stream->partial_reads == 1);
+	const uint8_t *payload = nullptr;
+	int size = 0;
+	for (int i = 0; i < COUNT; ++i) {
+		REQUIRE(packets->get_packet(&payload, size) == OK);
+		REQUIRE(size == 1);
+		CHECK(payload[0] == uint8_t(i));
+	}
+	CHECK(stream->partial_reads == 1);
+}
+
+
+TEST_CASE("[PacketPeer][Performance] Header consumption survives many ring wraps") {
+	Ref<StreamPeerBuffer> stream;
+	stream.instantiate();
+	Ref<PacketPeerStream> packets;
+	packets.instantiate();
+	packets->set_stream_peer(stream);
+	packets->set_input_buffer_max_size(64);
+
+	// Frames are five bytes long, deliberately not aligned to the ring's
+	// power-of-two boundary, exercising split headers and wrapped payloads.
+	constexpr int COUNT = 513;
+	Vector<uint8_t> wire;
+	REQUIRE(wire.resize_uninitialized(COUNT * 5) == OK);
+	uint8_t *dst = wire.ptrw();
+	for (int i = 0; i < COUNT; ++i) {
+		dst[5 * i + 0] = 1;
+		dst[5 * i + 1] = 0;
+		dst[5 * i + 2] = 0;
+		dst[5 * i + 3] = 0;
+		dst[5 * i + 4] = uint8_t(i);
+	}
+	REQUIRE(stream->put_data(wire.ptr(), wire.size()) == OK);
+	stream->seek(0);
+	const uint8_t *payload = nullptr;
+	int length = -1;
+	for (int i = 0; i < COUNT; ++i) {
+		REQUIRE(packets->get_packet(&payload, length) == OK);
+		REQUIRE(length == 1);
+		CHECK(payload[0] == uint8_t(i));
+	}
+	CHECK(packets->get_available_packet_count() == 0);
+}
+
 } // namespace TestPacketPeer

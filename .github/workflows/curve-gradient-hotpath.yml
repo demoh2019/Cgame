@@ -5,6 +5,9 @@ on:
     branches: [develop]
     paths:
       - 'scene/resources/curve.cpp'
+      - 'scene/resources/curve.h'
+      - 'tests/scene/test_curve_2d.cpp'
+      - 'tests/scene/test_curve_3d.cpp'
       - 'scene/resources/gradient.h'
       - 'tests/scene/test_curve.cpp'
       - 'tests/scene/test_gradient.cpp'
@@ -14,6 +17,9 @@ on:
   pull_request:
     paths:
       - 'scene/resources/curve.cpp'
+      - 'scene/resources/curve.h'
+      - 'tests/scene/test_curve_2d.cpp'
+      - 'tests/scene/test_curve_3d.cpp'
       - 'scene/resources/gradient.h'
       - 'tests/scene/test_curve.cpp'
       - 'tests/scene/test_gradient.cpp'
@@ -67,4 +73,6 @@ jobs:
           set -euo pipefail
           BIN=./bin/godot.linuxbsd.editor.dev.x86_64
           "$BIN" --headless --test --test-case='*[Curve]*' --no-colors
+          "$BIN" --headless --test --test-case='*[Curve2D]*' --no-colors
+          "$BIN" --headless --test --test-case='*[Curve3D]*' --no-colors
           "$BIN" --headless --test --test-case='*[Gradient]*' --no-colors

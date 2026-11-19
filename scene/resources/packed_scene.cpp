@@ -1088,7 +1088,7 @@ Error SceneState::_parse_node(Node *p_owner, Node *p_node, int p_parent_idx, Has
 			Variant default_value = PropertyUtils::get_property_default_value(p_node, name, &is_valid_default, &states_stack, true);
 
 			if (is_valid_default && !PropertyUtils::is_property_value_different(p_node, value, default_value)) {
-				if (value.get_type() == Variant::ARRAY && has_local_resource(value)) {
+				if (value.get_type() == Variant::ARRAY && has_local_resource(Array(value))) {
 					// Save anyway
 				} else if (value.get_type() == Variant::DICTIONARY) {
 					Dictionary dictionary = value;

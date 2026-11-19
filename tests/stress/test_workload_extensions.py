@@ -8,6 +8,7 @@ import run
 ADDED = (
     "packed_arrays", "sorting", "animation_tracks",
     "physics_raycast_2d", "physics_raycast_3d", "render_multimesh_3d",
+    "curve_bake", "curve_nearest",
 )
 
 

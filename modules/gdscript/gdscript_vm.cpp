@@ -580,11 +580,11 @@ Variant GDScriptFunction::call(GDScriptInstance *p_instance, const Variant **p_a
 				if (argument_types[i].builtin_type == Variant::DICTIONARY && argument_types[i].has_container_element_types()) {
 					const GDScriptDataType &arg_key_type = argument_types[i].get_container_element_type_or_variant(0);
 					const GDScriptDataType &arg_value_type = argument_types[i].get_container_element_type_or_variant(1);
-					Dictionary dict(p_args[i]->operator Dictionary(), arg_key_type.builtin_type, arg_key_type.native_type, arg_key_type.script_type, arg_value_type.builtin_type, arg_value_type.native_type, arg_value_type.script_type);
+					Dictionary dict(p_args[i]->operator Dictionary(), arg_key_type.builtin_type, arg_key_type.native_type, Ref<Script>(arg_key_type.script_type), arg_value_type.builtin_type, arg_value_type.native_type, Ref<Script>(arg_value_type.script_type));
 					memnew_placement(&stack[i + FIXED_ADDRESSES_MAX], Variant(dict));
 				} else if (argument_types[i].builtin_type == Variant::ARRAY && argument_types[i].has_container_element_type(0)) {
 					const GDScriptDataType &arg_type = argument_types[i].container_element_types[0];
-					Array array(p_args[i]->operator Array(), arg_type.builtin_type, arg_type.native_type, arg_type.script_type);
+					Array array(p_args[i]->operator Array(), arg_type.builtin_type, arg_type.native_type, Ref<Script>(arg_type.script_type));
 					memnew_placement(&stack[i + FIXED_ADDRESSES_MAX], Variant(array));
 				} else {
 					Variant variant;
@@ -1805,8 +1805,13 @@ Variant GDScriptFunction::call(GDScriptInstance *p_instance, const Variant **p_a
 				Array array;
 				array.resize(argc);
 
-				for (int i = 0; i < argc; i++) {
-					array[i] = *(instruction_args[i]);
+				// The newly allocated untyped Array is exclusively owned and the
+				// destination slots are initialized. Walk them linearly instead of
+				// calling Array::operator[] (read-only check + COW write proxy)
+				// and repeating the indexed lookup for every literal element.
+				Array::Iterator write = array.begin();
+				for (int i = 0; i < argc; i++, ++write) {
+					*write = *instruction_args[i];
 				}
 
 				GET_INSTRUCTION_ARG(dst, argc);
@@ -3184,7 +3189,7 @@ Variant GDScriptFunction::call(GDScriptInstance *p_instance, const Variant **p_a
 
 				Vector2i *bounds = VariantInternal::get_vector2i(container);
 
-				VariantInternal::initialize(counter, Variant::FLOAT);
+				VariantInternal::initialize(counter, Variant::INT);
 				*VariantInternal::get_int(counter) = bounds->x;
 
 				if (bounds->x < bounds->y) {
@@ -3303,7 +3308,8 @@ Variant GDScriptFunction::call(GDScriptInstance *p_instance, const Variant **p_a
 				Dictionary *dict = VariantInternal::get_dictionary(container);
 				const Variant *next = dict->next(nullptr);
 
-				if (!dict->is_empty()) {
+				// next(nullptr) already tests emptiness; do not probe the hash map twice.
+				if (next) {
 					GET_VARIANT_PTR(iterator, 2);
 					*counter = *next;
 					*iterator = *next;
@@ -3357,7 +3363,7 @@ Variant GDScriptFunction::call(GDScriptInstance *p_instance, const Variant **p_a
 			GET_VARIANT_PTR(iterator, 2); \
 			VariantInternal::initialize(iterator, Variant::m_var_ret_type); \
 			m_ret_type *it = VariantInternal::m_ret_get_func(iterator); \
-			*it = array->get(0); \
+			*it = array->ptr()[0]; \
 			ip += 5; \
 		} else { \
 			int jumpto = _code_ptr[ip + 4]; \
@@ -3657,7 +3663,17 @@ Variant GDScriptFunction::call(GDScriptInstance *p_instance, const Variant **p_a
 					ip = jumpto;
 				} else {
 					GET_VARIANT_PTR(iterator, 2);
-					*VariantInternal::get_string(iterator) = str->substr(*idx, 1);
+					String *character = VariantInternal::get_string(iterator);
+					const char32_t codepoint = str->ptr()[*idx];
+					if (likely(character->length() == 1)) {
+						// Reuse the existing single-character buffer instead
+						// of allocating a substring for each loop iteration.
+						// ptrw() detaches if a previous character was saved
+						// elsewhere, preserving String's COW value semantics.
+						character->ptrw()[0] = codepoint;
+					} else {
+						*character = str->substr(*idx, 1);
+					}
 
 					ip += 5; // Loop again.
 				}
@@ -3718,13 +3734,14 @@ Variant GDScriptFunction::call(GDScriptInstance *p_instance, const Variant **p_a
 		const Vector<m_elem_type> *array = VariantInternal::m_get_func((const Variant *)container); \
 		int64_t *idx = VariantInternal::get_int(counter); \
 		(*idx)++; \
-		if (*idx >= array->size()) { \
+		/* Unsigned comparison also rejects negative or overflowed indices. */ \
+		if (uint64_t(*idx) >= uint64_t(array->size())) { \
 			int jumpto = _code_ptr[ip + 4]; \
 			GD_ERR_BREAK(jumpto < 0 || jumpto > _code_size); \
 			ip = jumpto; \
 		} else { \
 			GET_VARIANT_PTR(iterator, 2); \
-			*VariantInternal::m_ret_get_func(iterator) = array->get(*idx); \
+			*VariantInternal::m_ret_get_func(iterator) = array->ptr()[*idx]; \
 			ip += 5; \
 		} \
 	} \

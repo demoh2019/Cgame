@@ -243,6 +243,12 @@ jobs:
           ${{ matrix.bin }} --help
           ${{ matrix.bin }} --headless --test --force-colors
 
+      - name: CLI autoload regression tests
+        if: matrix.proj-test
+        run: |
+          ${{ matrix.bin }} --headless --path tests/data/cli_autoload --check-only --script res://run_scene_tree.gd
+          ${{ matrix.bin }} --headless --path tests/data/cli_autoload --check-only --script res://run_main_loop.gd
+          timeout 30s ${{ matrix.bin }} --headless --path tests/data/cli_autoload --script res://run_scene_tree.gd
       - name: .NET source generators tests
         if: matrix.build-mono
         run: |

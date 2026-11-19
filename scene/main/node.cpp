@@ -558,8 +558,18 @@ void Node::_move_child(Node *p_child, int p_index, bool p_ignore_end) {
 	int motion_from = MIN(p_index, child_index);
 	int motion_to = MAX(p_index, child_index);
 
-	data.children_cache.remove_at(child_index);
-	data.children_cache.insert(p_index, p_child);
+	// Shift only the nodes between the old and new positions. A
+	// remove_at()+insert() pair shifts two tails of the child array,
+	// making even an adjacent move O(total_children) rather than O(1).
+	// Node pointers are trivially relocatable, and the array length and
+	// storage stay unchanged throughout this operation.
+	Node **const children = data.children_cache.ptr();
+	if (child_index < p_index) {
+		std::memmove(children + child_index, children + child_index + 1, (p_index - child_index) * sizeof(Node *));
+	} else {
+		std::memmove(children + p_index + 1, children + p_index, (child_index - p_index) * sizeof(Node *));
+	}
+	children[p_index] = p_child;
 
 	if (data.tree) {
 		data.tree->tree_changed();
@@ -1579,26 +1589,26 @@ void Node::_validate_child_name(Node *p_child, bool p_force_human_readable) {
 
 // Return s + 1 as if it were an integer
 String increase_numeric_string(const String &s) {
-	String res = s;
-	bool carry = res.length() > 0;
+	if (s.is_empty()) {
+		return s;
+	}
 
-	for (int i = res.length() - 1; i >= 0; i--) {
-		if (!carry) {
-			break;
-		}
-		char32_t n = s[i];
-		if (n == '9') { // keep carry as true: 9 + 1
-			res[i] = '0';
+	String res = s;
+	// Detach the COW string once instead of repeatedly indexing through
+	// String::operator[] while propagating the carry over a long suffix.
+	char32_t *digits = res.ptrw();
+	bool carry = true;
+	for (int i = res.length() - 1; i >= 0 && carry; i--) {
+		if (digits[i] == '9') {
+			digits[i] = '0';
 		} else {
-			res[i] = s[i] + 1;
+			digits[i]++;
 			carry = false;
 		}
 	}
-
 	if (carry) {
 		res = "1" + res;
 	}
-
 	return res;
 }
 
@@ -1614,20 +1624,20 @@ void Node::_generate_serial_child_name(const Node *p_child, StringName &name) co
 		return;
 	}
 
-	// Extract trailing number
+	// Identify the trailing numeric suffix in one scan. Building it by
+	// repeatedly prepending a one-character String used quadratic copying.
 	String name_string = name;
+	int digit_start = name_string.length();
+	while (digit_start > 0 && is_digit(name_string[digit_start - 1])) {
+		digit_start--;
+	}
 	String nums;
-	for (int i = name_string.length() - 1; i >= 0; i--) {
-		char32_t n = name_string[i];
-		if (is_digit(n)) {
-			nums = String::chr(name_string[i]) + nums;
-		} else {
-			break;
-		}
+	if (digit_start != name_string.length()) {
+		nums = name_string.substr(digit_start);
 	}
 
-	String nnsep = _get_name_num_separator();
-	int name_last_index = name_string.length() - nnsep.length() - nums.length();
+	const String nnsep = _get_name_num_separator();
+	const int name_last_index = digit_start - nnsep.length();
 
 	// Assign the base name + separator to name if we have numbers preceded by a separator
 	if (nums.length() > 0 && name_string.substr(name_last_index, nnsep.length()) == nnsep) {
@@ -1802,20 +1812,87 @@ void Node::remove_child(RequiredParam<Node> p_child) {
 }
 
 void Node::_update_children_cache_impl() const {
-	// Assign children
-	data.children_cache.resize(data.children.size());
-	int idx = 0;
-	for (const KeyValue<StringName, Node *> &K : data.children) {
-		data.children_cache[idx] = K.value;
-		idx++;
+	const int child_count = data.children.size();
+	data.children_cache.resize(child_count);
+
+	// Child indices are maintained independently for front-internal, regular,
+	// and back-internal nodes. Unless an intervening deletion left gaps, they
+	// form dense permutations and we can scatter nodes directly into their
+	// final positions, avoiding O(n log n) comparison sorting.
+	if (child_count >= 16) {
+		int front_count = 0;
+		int external_count = 0;
+		int back_count = 0;
+		for (const KeyValue<StringName, Node *> &entry : data.children) {
+			switch (entry.value->data.internal_mode) {
+				case INTERNAL_MODE_FRONT: {
+					front_count++;
+				} break;
+				case INTERNAL_MODE_DISABLED: {
+					external_count++;
+				} break;
+				case INTERNAL_MODE_BACK: {
+					back_count++;
+				} break;
+			}
+		}
+
+		Node **ordered = data.children_cache.ptr();
+		for (int i = 0; i < child_count; i++) {
+			ordered[i] = nullptr;
+		}
+
+		bool dense_indices = true;
+		for (const KeyValue<StringName, Node *> &entry : data.children) {
+			Node *child = entry.value;
+			const int index = child->data.index;
+			int group_offset = 0;
+			int group_size = 0;
+			switch (child->data.internal_mode) {
+				case INTERNAL_MODE_FRONT: {
+					group_size = front_count;
+				} break;
+				case INTERNAL_MODE_DISABLED: {
+					group_offset = front_count;
+					group_size = external_count;
+				} break;
+				case INTERNAL_MODE_BACK: {
+					group_offset = front_count + external_count;
+					group_size = back_count;
+				} break;
+			}
+			// Check before adding the offset to avoid overflow on invalid
+			// indices. Holes or collisions require the legacy sorted path.
+			if (index < 0 || index >= group_size) {
+				dense_indices = false;
+				break;
+			}
+			const int position = group_offset + index;
+			if (ordered[position] != nullptr) {
+				dense_indices = false;
+				break;
+			}
+			ordered[position] = child;
+		}
+		if (dense_indices) {
+			data.internal_children_front_count_cache = front_count;
+			data.external_children_count_cache = external_count;
+			data.internal_children_back_count_cache = back_count;
+			data.children_cache_dirty = false;
+			return;
+		}
 	}
-	// Sort them
+
+	// Sparse child indices (normally caused by removing a non-last child):
+	// keep the established ordering and compact the indices afterwards.
+	int idx = 0;
+	for (const KeyValue<StringName, Node *> &entry : data.children) {
+		data.children_cache[idx++] = entry.value;
+	}
 	data.children_cache.sort_custom<ComparatorByIndex>();
-	// Update indices
 	data.external_children_count_cache = 0;
 	data.internal_children_back_count_cache = 0;
 	data.internal_children_front_count_cache = 0;
-
 	for (uint32_t i = 0; i < data.children_cache.size(); i++) {
 		switch (data.children_cache[i]->data.internal_mode) {
 			case INTERNAL_MODE_DISABLED: {
@@ -1925,12 +2002,13 @@ Node *Node::get_node_or_null(const NodePath &p_path) const {
 		return nullptr;
 	}
 
-	ERR_FAIL_COND_V_MSG(!data.tree && p_path.is_absolute(), nullptr, "Can't use get_node() with absolute paths from outside the active scene tree.");
+	const bool absolute = p_path.is_absolute();
+	ERR_FAIL_COND_V_MSG(!data.tree && absolute, nullptr, "Can't use get_node() with absolute paths from outside the active scene tree.");
 
 	Node *current = nullptr;
 	Node *root = nullptr;
 
-	if (!p_path.is_absolute()) {
+	if (!absolute) {
 		current = const_cast<Node *>(this); //start from this
 	} else {
 		root = const_cast<Node *>(this);
@@ -1939,8 +2017,16 @@ Node *Node::get_node_or_null(const NodePath &p_path) const {
 		}
 	}
 
-	for (int i = 0; i < p_path.get_name_count(); i++) {
-		StringName name = p_path.get_name(i);
+	const int name_count = p_path.get_name_count();
+	// Single-segment paths are common: do not acquire an entire Vector COW
+	// reference for them. Multi-segment lookups can share the path array once
+	// rather than atomically copying every StringName along the traversal.
+	const StringName single_name = name_count == 1 ? p_path.get_name(0) : StringName();
+	const Vector<StringName> borrowed_names = name_count > 1 ? p_path.get_names() : Vector<StringName>();
+	const StringName *name_data = name_count > 1 ? borrowed_names.ptr() : &single_name;
+
+	for (int i = 0; i < name_count; i++) {
+		const StringName &name = name_data[i];
 		Node *next = nullptr;
 
 		if (name == SNAME(".")) {
@@ -2066,8 +2152,9 @@ TypedArray<Node> Node::find_children(const String &p_pattern, const String &p_ty
 	TypedArray<Node> ret;
 	ERR_FAIL_COND_V(p_pattern.is_empty() && p_type.is_empty(), ret);
 
-	_update_children_cache();
-	if (data.children_cache.is_empty()) {
+	// A precise direct-child lookup can use the existing name map
+	// without rebuilding or sorting the child-order cache.
+	if (data.children.is_empty()) {
 		return ret;
 	}
 
@@ -2075,6 +2162,15 @@ TypedArray<Node> Node::find_children(const String &p_pattern, const String &p_ty
 	// the wildcard matcher once for every node in large scene trees.
 	const bool exact_name_match = !p_pattern.is_empty() && !p_pattern.contains_char('*') && !p_pattern.contains_char('?');
 	const StringName exact_name = exact_name_match ? StringName(p_pattern) : StringName();
+	Node *exact_child = nullptr;
+	if (!p_recursive && exact_name_match) {
+		exact_child = _get_child_by_name(exact_name);
+		// A miss or a filtered-out child does not need type resolution or
+		// any traversal cache allocation, even when the cache is dirty.
+		if (!exact_child || (p_owned && !exact_child->data.owner)) {
+			return ret;
+		}
+	}
 
 	// Resolve the global script type once, rather than once for each matching child.
 	const bool is_global_type = !p_type.is_empty() && ScriptServer::is_global_class(p_type);
@@ -2103,16 +2199,14 @@ TypedArray<Node> Node::find_children(const String &p_pattern, const String &p_ty
 		}
 	};
 
+	if (!p_recursive && exact_name_match) {
+		append_match(exact_child);
+		return ret;
+	}
+
+	// Only wildcard or recursive traversals require the ordered child cache.
+	_update_children_cache();
 	if (!p_recursive) {
-		// A unique direct child name needs only one hash lookup, even when a
-		// type filter is also supplied. Keep ownership/type checks unchanged.
-		if (exact_name_match) {
-			Node *child = _get_child_by_name(exact_name);
-			if (child && (!p_owned || child->data.owner)) {
-				append_match(child);
-			}
-			return ret;
-		}
 		// Avoid allocating a traversal stack for a non-recursive query.
 		for (Node *child : data.children_cache) {
 			if (!p_owned || child->data.owner) {
@@ -2186,8 +2280,14 @@ void Node::reparent(RequiredParam<Node> p_parent, bool p_keep_global_transform) 
 			Node *check = to_visit[to_visit.size() - 1];
 			to_visit.resize(to_visit.size() - 1);
 
-			for (int i = 0; i < check->get_child_count(false); i++) {
-				Node *child = check->get_child(i, false);
+			// Read the ordered cache once. get_child_count() followed by
+			// get_child() for every child repeats guards and cache checks,
+			// which adds up when reparenting owned scenes with many nodes.
+			check->_update_children_cache();
+			const int first = check->data.internal_children_front_count_cache;
+			const int past_end = check->data.children_cache.size() - check->data.internal_children_back_count_cache;
+			for (int i = first; i < past_end; i++) {
+				Node *child = check->data.children_cache[i];
 				to_visit.push_back(child);
 				if (child->data.owner == owner_temp) {
 					common_parents.push_back(child);

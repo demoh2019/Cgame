@@ -37,6 +37,7 @@
 #include "core/templates/vector.h"
 
 #include <cstring>
+#include <functional>
 #include <initializer_list>
 #include <type_traits>
 
@@ -217,6 +218,35 @@ public:
 	}
 	_FORCE_INLINE_ bool is_empty() const { return count == 0; }
 	_FORCE_INLINE_ U get_capacity() const { return capacity; }
+
+	// Unlike reserve(), this allocates exactly the requested initial capacity.
+	// Subsequent growth through push_back() still uses geometric expansion.
+	// Useful for the common case of tiny lists that rarely grow past one item.
+	void reserve_exact(U p_size) {
+		if (p_size > capacity) {
+			T *new_data = (T *)memrealloc(data, size_t(p_size) * sizeof(T));
+			CRASH_COND_MSG(!new_data, "Out of memory");
+			data = new_data;
+			capacity = p_size;
+		}
+	}
+
+	// Reclaim excess capacity explicitly without changing the number or order
+	// of elements. The caller controls the threshold to avoid resize churn.
+	void shrink_to(U p_capacity) {
+		if (p_capacity < count || p_capacity >= capacity) {
+			return;
+		}
+		if (p_capacity == 0) {
+			reset();
+			return;
+		}
+		T *new_data = (T *)memrealloc(data, size_t(p_capacity) * sizeof(T));
+		CRASH_COND_MSG(!new_data, "Out of memory");
+		data = new_data;
+		capacity = p_capacity;
+	}
+
 	void reserve(U p_size) {
 		if (p_size > capacity) {
 			if (tight) {
@@ -332,12 +362,18 @@ public:
 		if (p_pos == count) {
 			push_back(std::move(p_val));
 		} else {
-			resize(count + 1);
 			if constexpr (std::is_trivially_copyable_v<T>) {
+				resize(count + 1);
 				// The last slot already exists; shift in place without per-element assignments.
 				std::memmove(data + p_pos + 1, data + p_pos, size_t(count - p_pos - 1) * sizeof(T));
 			} else {
-				for (U i = count - 1; i > p_pos; i--) {
+				// Construct the new tail by moving the old tail, avoiding a potentially
+				// expensive default construction and an extra move assignment.
+				// This also allows insertion of non-default-constructible types.
+				reserve(count + 1);
+				memnew_placement(&data[count], T(std::move(data[count - 1])));
+				++count;
+				for (U i = count - 2; i > p_pos; i--) {
 					data[i] = std::move(data[i - 1]);
 				}
 			}
@@ -429,15 +465,38 @@ public:
 	}
 
 	void operator=(Span<T> p_from) {
+		const T *const source = p_from.ptr();
+		if (source == data) {
+			// A full self-assignment needs no work. For a prefix, only destroy
+			// the removed tail; avoid reassigning every surviving element.
+			resize(p_from.size());
+			return;
+		}
+		// A span into our tail must be copied before shrinking: for
+		// nontrivial T, resize() would destroy the source elements first.
+		// std::less provides a total pointer order even for unrelated buffers.
+		if (data != nullptr && source != nullptr &&
+				std::less<const T *>()(data, source) &&
+				std::less<const T *>()(source, data + count)) {
+			if constexpr (std::is_trivially_copyable_v<T>) {
+				std::memmove(data, source, size_t(p_from.size()) * sizeof(T));
+			} else {
+				// Copying left to right preserves still-unread source elements.
+				for (size_t i = 0; i < p_from.size(); i++) {
+					data[i] = source[i];
+				}
+			}
+			resize(p_from.size());
+			return;
+		}
 		resize(p_from.size());
 		if constexpr (std::is_trivially_copyable_v<T>) {
 			if (count > 0) {
-				// A span can refer to part of this vector; preserve overlap semantics.
-				std::memmove(data, p_from.ptr(), size_t(count) * sizeof(T));
+				std::memmove(data, source, size_t(count) * sizeof(T));
 			}
 		} else {
 			for (size_t i = 0; i < p_from.size(); i++) {
-				data[i] = p_from[i];
+				data[i] = source[i];
 			}
 		}
 	}

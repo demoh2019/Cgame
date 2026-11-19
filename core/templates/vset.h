@@ -77,11 +77,19 @@ protected:
 
 public:
 	void insert(const T &p_val) {
-		// Ordered insertions are common when building sets from sorted input.
-		// Avoid a logarithmic search when this value follows the last element.
-		if (!_data.is_empty() && Comparator<T>()(_data[_data.size() - 1], p_val)) {
-			_data.push_back(p_val);
-			return;
+		// Ordered insertions and repeated maximum keys are both common.
+		// Check the tail before running binary search. Comparison is based on
+		// strict weak ordering, not operator==, to preserve VSet semantics.
+		if (!_data.is_empty()) {
+			const T &last = _data[_data.size() - 1];
+			Comparator<T> compare;
+			if (compare(last, p_val)) {
+				_data.push_back(p_val);
+				return;
+			}
+			if (!compare(p_val, last)) {
+				return; // Already equivalent to the last element.
+			}
 		}
 
 		bool exact;

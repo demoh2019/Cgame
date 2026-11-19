@@ -20,7 +20,11 @@ class RegistryConsistencyTests(unittest.TestCase):
     def test_no_duplicate_case_identifiers_or_dispatch_arms(self):
         declarations = re.findall(r'const CASES := \[([\s\S]*?)\]', self.script)
         declared = re.findall(r'"([a-z0-9_]+)"', declarations[0])
-        dispatched = re.findall(r'^\t\t"([a-z0-9_]+)":', self.script, re.MULTILINE)
+        dispatcher = self.script.split("func _run_case(", 1)[1].split("\n\nfunc ", 1)[0]
+        dispatched = []
+        for line in dispatcher.splitlines():
+            if line.startswith('\t\t"') and line.rstrip().endswith(":"):
+                dispatched.extend(re.findall(r'"([a-z0-9_]+)"', line))
         self.assertEqual(len(declared), len(set(declared)))
         self.assertEqual(len(dispatched), len(set(dispatched)))
         self.assertEqual(set(declared), set(dispatched))

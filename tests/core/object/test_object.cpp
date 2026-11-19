@@ -834,4 +834,33 @@ TEST_CASE("[ObjectSingleProbe] dynamic user signals remain visible and distinct"
 	CHECK(found);
 }
 
+TEST_CASE("[Object] Signal connection bulk export preserves unique callable targets") {
+	Object emitter;
+	emitter.add_user_signal(MethodInfo("bulk_signal"));
+	Object targets[128];
+
+	for (int i = 0; i < 128; i++) {
+		const Callable callback = callable_mp(&targets[i], &Object::notify_property_list_changed);
+		REQUIRE_EQ(emitter.connect("bulk_signal", callback), OK);
+	}
+
+	const Signal signal(&emitter, "bulk_signal");
+	const Array exported = signal.get_connections();
+	REQUIRE_EQ(exported.size(), 128);
+	HashSet<ObjectID> visited;
+	for (int i = 0; i < exported.size(); i++) {
+		const Dictionary entry = exported[i];
+		REQUIRE(entry.has("callable"));
+		const Callable callback = entry["callable"];
+		Object *target = callback.get_object();
+		REQUIRE(target != nullptr);
+		CHECK_FALSE(visited.has(target->get_instance_id()));
+		visited.insert(target->get_instance_id());
+	}
+	REQUIRE_EQ(visited.size(), 128);
+	for (const Object &target : targets) {
+		CHECK(visited.has(target.get_instance_id()));
+	}
+}
+
 } // namespace TestObject

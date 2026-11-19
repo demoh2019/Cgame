@@ -1,0 +1,37 @@
+name: Geometry2D convex decomposition direct-write regression
+
+on:
+  pull_request:
+    branches: [develop]
+    paths:
+      - "core/math/geometry_2d.cpp"
+      - "tests/core/math/test_geometry_2d.cpp"
+      - ".github/workflows/geometry2d-convex-direct-write.yml"
+  push:
+    branches: [develop]
+    paths:
+      - "core/math/geometry_2d.cpp"
+      - "tests/core/math/test_geometry_2d.cpp"
+      - ".github/workflows/geometry2d-convex-direct-write.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  native-convex:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+      - uses: ./.github/actions/godot-deps
+      - uses: ./.github/actions/godot-build
+        with:
+          platform: linuxbsd
+          target: editor
+          scons-flags: dev_build=yes tests=yes debug_symbols=no module_mono_enabled=no accesskit=no
+      - name: Verify Geometry2D convex decomposition and output copies
+        run: |
+          timeout 300s ./bin/godot.linuxbsd.editor.dev.x86_64 --headless --test --test-case="*[Geometry2D]*" --no-colors

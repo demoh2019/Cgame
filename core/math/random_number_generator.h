@@ -30,7 +30,11 @@
 
 #pragma once
 
+#include "core/math/color.h"
 #include "core/math/random_pcg.h"
+#include "core/math/quaternion.h"
+#include "core/math/vector2.h"
+#include "core/math/vector3.h"
 #include "core/object/ref_counted.h"
 
 class RandomNumberGenerator : public RefCounted {
@@ -57,6 +61,14 @@ public:
 	_FORCE_INLINE_ int randi_range(int p_from, int p_to) { return randbase.random(p_from, p_to); }
 
 	_FORCE_INLINE_ int64_t rand_weighted(const Vector<float> &p_weights) { return randbase.rand_weighted(p_weights); }
+
+	// Unity-style geometric helpers (Random.insideUnitCircle, onUnitSphere, rotation, ColorHSV).
+	Vector2 rand_in_circle(real_t p_radius = 1.0);
+	Vector2 rand_on_circle(real_t p_radius = 1.0);
+	Vector3 rand_in_sphere(real_t p_radius = 1.0);
+	Vector3 rand_on_sphere(real_t p_radius = 1.0);
+	Quaternion rand_rotation();
+	Color rand_color_hsv(real_t p_hue_min = 0.0, real_t p_hue_max = 1.0, real_t p_saturation_min = 0.0, real_t p_saturation_max = 1.0, real_t p_value_min = 0.0, real_t p_value_max = 1.0, real_t p_alpha_min = 1.0, real_t p_alpha_max = 1.0);
 
 	RandomNumberGenerator() { randbase.randomize(); }
 };

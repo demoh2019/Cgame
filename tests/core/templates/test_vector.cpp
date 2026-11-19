@@ -400,6 +400,100 @@ TEST_CASE("[Vector] To byte array") {
 	CHECK(byte_array[15] == 59);
 }
 
+struct GreaterVectorComparator {
+	bool operator()(const int &p_a, const int &p_b) const {
+		return p_a > p_b;
+	}
+};
+
+TEST_CASE("[Vector] Sorting large shared ordered data preserves COW storage") {
+	Vector<int> original;
+	REQUIRE(original.reserve_exact(8192) == OK);
+	for (int i = 0; i < 512; ++i) {
+		original.push_back(i / 2);
+	}
+	const int *const original_storage = original.ptr();
+	Vector<int> sorted_copy = original;
+	sorted_copy.sort();
+	CHECK(sorted_copy.ptr() == original_storage);
+	CHECK(original.ptr() == original_storage);
+	CHECK(sorted_copy.size() == 512);
+	CHECK(sorted_copy[0] == 0);
+	CHECK(sorted_copy[511] == 255);
+
+	// A comparator with descending ordering must use the same fast path.
+	Vector<int> descending;
+	for (int i = 255; i >= 0; --i) {
+		descending.push_back(i);
+	}
+	Vector<int> descending_copy = descending;
+	const int *const descending_storage = descending.ptr();
+	descending_copy.sort_custom<GreaterVectorComparator>();
+	CHECK(descending_copy.ptr() == descending_storage);
+	CHECK(descending.ptr() == descending_storage);
+
+	// Real reordering must detach and leave the shared original intact.
+	Vector<int> reversed;
+	for (int i = 255; i >= 0; --i) {
+		reversed.push_back(i);
+	}
+	Vector<int> reversed_copy = reversed;
+	reversed_copy.sort();
+	CHECK(reversed_copy.ptr() != reversed.ptr());
+	for (int i = 0; i < 256; i++) {
+		CHECK(reversed_copy[i] == i);
+		CHECK(reversed[i] == 255 - i);
+	}
+
+	// No-op sorting of shared nontrivial values must also avoid COW.
+	Vector<String> strings;
+	for (int i = 0; i < 128; i++) {
+		strings.push_back("same");
+	}
+	const String *const string_storage = strings.ptr();
+	Vector<String> strings_copy = strings;
+	strings_copy.sort();
+	CHECK(strings_copy.ptr() == string_storage);
+	strings_copy.write[0] = "changed";
+	CHECK(strings[0] == "same");
+	CHECK(strings_copy[0] == "changed");
+}
+
+TEST_CASE("[Vector] No-op operations do not detach shared COW storage") {
+	// An empty vector can still own a large reserved allocation.
+	Vector<int> empty;
+	REQUIRE(empty.reserve_exact(8192) == OK);
+	Vector<int> other_empty = empty;
+	const int *empty_storage = empty.ptr();
+	REQUIRE(empty_storage != nullptr);
+	other_empty.fill(42);
+	other_empty.reverse();
+	other_empty.sort();
+	CHECK(other_empty.ptr() == empty_storage);
+	CHECK(empty.ptr() == empty_storage);
+	CHECK(other_empty.capacity() == empty.capacity());
+	CHECK(other_empty.is_empty());
+
+	// Sorting and reversing a singleton cannot change its contents.
+	// These operations must not fork the large reserved backing storage.
+	Vector<String> singleton;
+	singleton.push_back("kept");
+	REQUIRE(singleton.reserve_exact(4096) == OK);
+	Vector<String> shared = singleton;
+	const String *original_ptr = singleton.ptr();
+	shared.sort();
+	shared.reverse();
+	CHECK(shared.ptr() == original_ptr);
+	CHECK(singleton.ptr() == original_ptr);
+	CHECK(shared[0] == "kept");
+
+	// An actual write must still detach and preserve independent values.
+	shared.write[0] = "changed";
+	CHECK(shared.ptr() != singleton.ptr());
+	CHECK(singleton[0] == "kept");
+	CHECK(shared[0] == "changed");
+}
+
 TEST_CASE("[Vector] Slice") {
 	Vector<int> vector;
 	vector.push_back(0);
@@ -446,6 +540,45 @@ TEST_CASE("[Vector] Slice") {
 	Vector<int> slice7 = vector.slice(5, 1);
 	CHECK(slice7.size() == 0); // Expected to fail.
 	ERR_PRINT_ON;
+}
+
+TEST_CASE("[Vector] Full slice reuses COW storage and detaches on mutation") {
+	Vector<uint8_t> bytes;
+	REQUIRE(bytes.resize(8192) == OK);
+	for (int i = 0; i < bytes.size(); i++) {
+		bytes.write[i] = uint8_t(i * 17);
+	}
+
+	const uint8_t *original_ptr = bytes.ptr();
+	Vector<uint8_t> full = bytes.slice(0, bytes.size());
+	CHECK(full.size() == bytes.size());
+	CHECK(full.ptr() == original_ptr); // No allocation or bulk copy.
+
+	// Mutating either owner must preserve the other's values.
+	full.write[0] = 251;
+	CHECK(full.ptr() != bytes.ptr());
+	CHECK(bytes[0] == 0);
+	CHECK(full[0] == 251);
+	CHECK(bytes[7000] == uint8_t(7000 * 17));
+
+	Vector<uint8_t> clamped = bytes.slice(-8192, 999999);
+	CHECK(clamped.ptr() == bytes.ptr());
+	bytes.write[1] = 252;
+	CHECK(clamped[1] == uint8_t(17));
+	CHECK(bytes[1] == 252);
+
+	Vector<String> words;
+	words.push_back("alpha");
+	words.push_back("beta");
+	words.push_back("gamma");
+	Vector<String> copied = words.slice(0);
+	CHECK(copied.ptr() == words.ptr());
+	words.write[0] = "changed";
+	CHECK(copied[0] == "alpha");
+	CHECK(words[0] == "changed");
+	copied.write[1] = "modified";
+	CHECK(words[1] == "beta");
+	CHECK(copied[1] == "modified");
 }
 
 TEST_CASE("[Vector] Slice large trivial arrays without aliasing") {

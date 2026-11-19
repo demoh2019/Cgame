@@ -253,4 +253,356 @@ TEST_CASE("[ViewportMaskFastPath] adding a viewport preserves existing mask poin
 	CHECK_EQ(*masks.getptr(1), uint64_t(1));
 }
 
+struct CollidingHash {
+	static uint32_t hash(int) {
+		return 0x13579bdu;
+	}
+};
+
+TEST_CASE("[HashMap] Clear sparse reserved table handles collision clusters") {
+	// 17/32/64 entries exercise the extended sparse path; 65 checks
+	// the contiguous full-table clear fallback at the same capacity.
+	for (int count : { 1, 8, 16, 17, 32, 64, 65 }) {
+		HashMap<int, int, CollidingHash> map;
+		map.reserve(16384);
+		const uint32_t capacity = map.get_capacity();
+		for (int i = 0; i < count; i++) {
+			map.insert(i, i + 100);
+		}
+		CHECK(map.size() == uint32_t(count));
+		for (int i = 0; i < count; i++) {
+			CHECK(map.has(i));
+			CHECK(map.get(i) == i + 100);
+		}
+
+		map.clear();
+		CHECK(map.is_empty());
+		CHECK(map.get_capacity() == capacity);
+		CHECK(!map.begin());
+		for (int i = 0; i < count; i++) {
+			CHECK(!map.has(i));
+			CHECK(map.getptr(i) == nullptr);
+		}
+
+		// A reused table must not retain stale probe chains.
+		for (int i = 0; i < count; i++) {
+			map.insert(i + 1000, i + 10);
+		}
+		for (int i = 0; i < count; i++) {
+			CHECK(map.get(i + 1000) == i + 10);
+		}
+		map.clear();
+		CHECK(map.is_empty());
+	}
+}
+
+struct DescendingKeyComparisonCounter {
+	static inline uint32_t comparisons = 0;
+	bool operator()(const KeyValue<int, int> &p_a, const KeyValue<int, int> &p_b) const {
+		comparisons++;
+		return p_a.key < p_b.key;
+	}
+};
+
+TEST_CASE("[HashMap] Reverse-ordered keys sort in linear comparisons without reallocating nodes") {
+	HashMap<int, int> map;
+	for (int i = 511; i >= 0; i--) {
+		map.insert(i, i * 3);
+	}
+	int *const stable_value_ptr = map.getptr(300);
+	DescendingKeyComparisonCounter::comparisons = 0;
+	map.sort_custom<DescendingKeyComparisonCounter>();
+
+	// One comparison finds the first descent; the remaining N-2
+	// comparisons verify that every link is strictly descending.
+	CHECK(DescendingKeyComparisonCounter::comparisons <= 512);
+	CHECK(map.getptr(300) == stable_value_ptr);
+	int expected = 0;
+	for (const KeyValue<int, int> &entry : map) {
+		CHECK(entry.key == expected);
+		CHECK(entry.value == expected * 3);
+		expected++;
+	}
+	CHECK(expected == 512);
+	CHECK(map.begin()->key == 0);
+	CHECK(map.last()->key == 511);
+}
+
+TEST_CASE("[HashMap] Equal-value groups keep stable relative order") {
+	HashMap<int, int> map;
+	for (int i = 0; i < 128; i++) {
+		map.insert(i, (127 - i) / 4);
+	}
+	struct ByValue {
+		bool operator()(const KeyValue<int, int> &p_a, const KeyValue<int, int> &p_b) const {
+			return p_a.value < p_b.value;
+		}
+	};
+	map.sort_custom<ByValue>();
+	int prev_value = -1;
+	int prev_key = -1;
+	int total = 0;
+	for (const KeyValue<int, int> &entry : map) {
+		CHECK(entry.value >= prev_value);
+		if (entry.value == prev_value) {
+			CHECK(entry.key > prev_key);
+		}
+		prev_value = entry.value;
+		prev_key = entry.key;
+		total++;
+	}
+	CHECK(total == 128);
+}
+
+TEST_CASE("[SortList] Reverse a strict subrange and restore outer links") {
+	struct Item {
+		int value = 0;
+		Item *prev = nullptr;
+		Item *next = nullptr;
+	};
+	Item items[7];
+	const int values[7] = { 100, 5, 4, 3, 2, 1, -100 };
+	for (int i = 0; i < 7; i++) {
+		items[i].value = values[i];
+		items[i].prev = i > 0 ? &items[i - 1] : nullptr;
+		items[i].next = i < 6 ? &items[i + 1] : nullptr;
+	}
+	Item *head = &items[1];
+	Item *tail = &items[5];
+	SortList<Item, int, &Item::value, &Item::prev, &Item::next> sorter;
+	sorter.sort(head, tail);
+
+	CHECK(head == &items[5]);
+	CHECK(tail == &items[1]);
+	CHECK(items[0].next == head);
+	CHECK(head->prev == &items[0]);
+	CHECK(tail->next == &items[6]);
+	CHECK(items[6].prev == tail);
+	const int expected[7] = { 100, 1, 2, 3, 4, 5, -100 };
+	Item *item = &items[0];
+	for (int i = 0; i < 7; i++) {
+		REQUIRE(item != nullptr);
+		CHECK(item->value == expected[i]);
+		if (item->next) {
+			CHECK(item->next->prev == item);
+		}
+		item = item->next;
+	}
+	CHECK(item == nullptr);
+}
+
+struct CountingSparseRehashHasher {
+	static inline int hashes = 0;
+	static uint32_t hash(int p_key) {
+		hashes++;
+		return uint32_t((p_key & 3) + 1); // Deliberate collision clusters.
+	}
+};
+
+TEST_CASE("[HashMap] Sparse rehash visits live nodes and preserves value addresses") {
+	HashMap<int, int, CountingSparseRehashHasher> map;
+	map.reserve(16384);
+	const uint32_t old_capacity = map.get_capacity();
+	int *pointers[24];
+	for (int i = 0; i < 24; i++) {
+		map.insert(i, i * 13);
+		pointers[i] = map.getptr(i);
+		REQUIRE(pointers[i] != nullptr);
+	}
+	CountingSparseRehashHasher::hashes = 0;
+	map.reserve(old_capacity + 1000);
+	CHECK(map.get_capacity() > old_capacity);
+	CHECK(map.size() == 24);
+	// One hash for each live node; no walk across the old bucket array.
+	CHECK(CountingSparseRehashHasher::hashes == 24);
+	for (int i = 0; i < 24; i++) {
+		CHECK(map.getptr(i) == pointers[i]);
+		CHECK(map.get(i) == i * 13);
+	}
+
+	int expected_key = 0;
+	for (const KeyValue<int, int> &entry : map) {
+		CHECK(entry.key == expected_key);
+		expected_key++;
+	}
+	CHECK(expected_key == 24);
+	for (int i = 0; i < 24; i += 2) {
+		CHECK(map.erase(i));
+	}
+	for (int i = 0; i < 24; i++) {
+		CHECK(map.has(i) == ((i & 1) != 0));
+	}
+	map.clear();
+	CHECK(map.is_empty());
+	map.insert(200, 987);
+	CHECK(map.get(200) == 987);
+}
+
+TEST_CASE("[HashMap] Dense rehash retains original cached hashes") {
+	HashMap<int, int, CountingSparseRehashHasher> map;
+	for (int i = 0; i < 96; i++) {
+		map.insert(i, i + 100);
+	}
+	CountingSparseRehashHasher::hashes = 0;
+	map.reserve(map.get_capacity() + 100);
+	CHECK(CountingSparseRehashHasher::hashes == 0);
+	for (int i = 0; i < 96; i++) {
+		CHECK(map.get(i) == i + 100);
+	}
+}
+
+struct DistributedHash {
+	static uint32_t hash(int p_key) {
+		return uint32_t(p_key) * 2654435761u;
+	}
+};
+
+TEST_CASE("[HashMap] Growing an empty allocated table preserves empty bucket invariants") {
+	HashMap<int, int, DistributedHash> map;
+	for (int i = 0; i < 32; i++) {
+		map.insert(i, i * 7);
+	}
+	map.clear();
+	CHECK(map.size() == 0);
+	const uint32_t first_capacity = map.get_capacity();
+	map.reserve(8192);
+	CHECK(map.get_capacity() > first_capacity);
+	CHECK(map.is_empty());
+	map.reserve(32768);
+	CHECK(map.is_empty());
+	const uint32_t large_capacity = map.get_capacity();
+	CHECK(large_capacity >= 32768);
+
+	// Hashes cover different buckets, including newly allocated regions;
+	// nonzero garbage after realloc would break lookup and insertion.
+	for (int i = 0; i < 512; i++) {
+		map.insert(i + 300, (i + 300) * 11);
+	}
+	CHECK(map.size() == 512);
+	for (int i = 0; i < 512; i++) {
+		CHECK(map.get(i + 300) == (i + 300) * 11);
+	}
+	map.clear();
+	CHECK(map.is_empty());
+	map.reserve(65536);
+	CHECK(map.get_capacity() > large_capacity);
+	for (int i = 0; i < 512; i++) {
+		CHECK(!map.has(i + 300));
+	}
+	for (int i = 0; i < 128; i++) {
+		map.insert(i + 2000, i + 17);
+	}
+	for (int i = 0; i < 128; i++) {
+		CHECK(map.get(i + 2000) == i + 17);
+	}
+}
+
+
+struct WraparoundClusterHash {
+	static inline uint32_t start = 1;
+	static uint32_t hash(int) {
+		return start;
+	}
+};
+
+TEST_CASE("[HashMap] Backward shift handles wrapped collision clusters and stable nodes") {
+	HashMap<int, int, WraparoundClusterHash> map;
+	map.reserve(256);
+	WraparoundClusterHash::start = map.get_capacity() - 2;
+	int *addresses[72];
+	for (int i = 0; i < 72; i++) {
+		map.insert(i, i * 17);
+		addresses[i] = map.getptr(i);
+		REQUIRE(addresses[i] != nullptr);
+	}
+	CHECK(map.size() == 72);
+	for (int i = 0; i < 72; i++) {
+		if (i % 3 == 0) {
+			CHECK(map.erase(i));
+			CHECK(!map.erase(i));
+		} else if (i % 7 == 0) {
+			CHECK(map.replace_key(i, i + 1000));
+		}
+	}
+	CHECK(map.size() == 48);
+	int expected_key = 0;
+	int visited = 0;
+	for (const KeyValue<int, int> &entry : map) {
+		while (expected_key < 72 && expected_key % 3 == 0) {
+			expected_key++;
+		}
+		REQUIRE(expected_key < 72);
+		CHECK(entry.key == (expected_key % 7 == 0 ? expected_key + 1000 : expected_key));
+		CHECK(entry.value == expected_key * 17);
+		expected_key++;
+		visited++;
+	}
+	CHECK(visited == 48);
+	for (int i = 0; i < 72; i++) {
+		const int updated_key = (i % 7 == 0 && i % 3 != 0) ? i + 1000 : i;
+		if (i % 3 == 0) {
+			CHECK(map.getptr(i) == nullptr);
+		} else {
+			CHECK(map.getptr(updated_key) == addresses[i]);
+			CHECK(*map.getptr(updated_key) == i * 17);
+			if (updated_key != i) {
+				CHECK(!map.has(i));
+			}
+		}
+	}
+	for (int i = 0; i < 72; i++) {
+		if (i % 3 != 0) {
+			const int key = (i % 7 == 0) ? i + 1000 : i;
+			CHECK(map.erase(key));
+		}
+	}
+	CHECK(map.is_empty());
+	map.insert(2000, 42);
+	CHECK(map.get(2000) == 42);
+}
+
+TEST_CASE("[HashMap] Backward shift preserves addresses under distributed erase and rekey") {
+	HashMap<int, int, DistributedHash> map;
+	map.reserve(2048);
+	int *addresses[511];
+	for (int i = 0; i < 511; i++) {
+		map.insert(i, i + 900);
+		addresses[i] = map.getptr(i);
+		REQUIRE(addresses[i] != nullptr);
+	}
+	int expected_count = 511;
+	for (int i = 0; i < 511; i++) {
+		if (i % 4 == 0) {
+			CHECK(map.erase(i));
+			expected_count--;
+		} else if (i % 6 == 1) {
+			CHECK(map.replace_key(i, i + 10000));
+		}
+	}
+	CHECK(map.size() == uint32_t(expected_count));
+	int next_original = 0;
+	int visited = 0;
+	for (const KeyValue<int, int> &entry : map) {
+		while (next_original < 511 && next_original % 4 == 0) {
+			next_original++;
+		}
+		REQUIRE(next_original < 511);
+		const int key = next_original % 6 == 1 ? next_original + 10000 : next_original;
+		CHECK(entry.key == key);
+		CHECK(entry.value == next_original + 900);
+		CHECK(map.getptr(key) == addresses[next_original]);
+		if (key != next_original) {
+			CHECK(map.getptr(next_original) == nullptr);
+		}
+		next_original++;
+		visited++;
+	}
+	CHECK(visited == expected_count);
+	for (int i = 0; i < 511; i += 4) {
+		map.insert(i, -i);
+		CHECK(map.get(i) == -i);
+	}
+	CHECK(map.size() == 511);
+}
+
 } // namespace TestHashMap

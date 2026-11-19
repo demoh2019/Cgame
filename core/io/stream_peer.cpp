@@ -544,54 +544,65 @@ Error StreamPeerBuffer::put_data(const uint8_t *p_data, int p_bytes) {
 		return OK;
 	}
 
-	if (pointer + p_bytes > data.size()) {
-		data.resize(pointer + p_bytes);
+	// Compute the end without signed overflow, even for untrusted stream lengths.
+	if (p_bytes > INT32_MAX - pointer) {
+		return ERR_INVALID_PARAMETER;
+	}
+	const int end = pointer + p_bytes;
+	if (end > data.size()) {
+		const Error err = data.resize(end);
+		if (err != OK) {
+			return err;
+		}
 	}
 
-	uint8_t *w = data.ptrw();
-	memcpy(&w[pointer], p_data, p_bytes);
-
-	pointer += p_bytes;
+	memcpy(data.ptrw() + pointer, p_data, p_bytes);
+	pointer = end;
 	return OK;
 }
 
 Error StreamPeerBuffer::put_partial_data(const uint8_t *p_data, int p_bytes, int &r_sent) {
-	r_sent = p_bytes;
-	return put_data(p_data, p_bytes);
+	const Error err = put_data(p_data, p_bytes);
+	r_sent = err == OK ? MAX(p_bytes, 0) : 0;
+	return err;
 }
 
 Error StreamPeerBuffer::get_data(uint8_t *p_buffer, int p_bytes) {
-	int recv;
-	get_partial_data(p_buffer, p_bytes, recv);
-	if (recv != p_bytes) {
+	// A failed full read still consumes any available bytes (legacy contract).
+	// Avoid an extra virtual get_partial_data() roundtrip for every primitive.
+	if (p_bytes < 0 || (p_bytes > 0 && !p_buffer)) {
 		return ERR_INVALID_PARAMETER;
 	}
-
-	return OK;
-}
-
-Error StreamPeerBuffer::get_partial_data(uint8_t *p_buffer, int p_bytes, int &r_received) {
-	if (!p_bytes) {
-		r_received = 0;
+	if (p_bytes == 0) {
 		return OK;
 	}
 
-	if (pointer + p_bytes > data.size()) {
-		r_received = data.size() - pointer;
-		if (r_received <= 0) {
-			r_received = 0;
-			return OK; //you got 0
-		}
-	} else {
-		r_received = p_bytes;
+	const int available = data.size() - pointer;
+	if (available <= 0) {
+		return ERR_INVALID_PARAMETER;
 	}
+	const int received = MIN(p_bytes, available);
+	memcpy(p_buffer, data.ptr() + pointer, received);
+	pointer += received;
+	return received == p_bytes ? OK : ERR_INVALID_PARAMETER;
+}
 
-	const uint8_t *r = data.ptr();
-	memcpy(p_buffer, r + pointer, r_received);
-
+Error StreamPeerBuffer::get_partial_data(uint8_t *p_buffer, int p_bytes, int &r_received) {
+	r_received = 0;
+	if (p_bytes < 0 || (p_bytes > 0 && !p_buffer)) {
+		return ERR_INVALID_PARAMETER;
+	}
+	if (p_bytes == 0) {
+		return OK;
+	}
+	// Subtract before comparing so a giant request cannot overflow pointer + bytes.
+	const int available = data.size() - pointer;
+	if (available <= 0) {
+		return OK;
+	}
+	r_received = MIN(p_bytes, available);
+	memcpy(p_buffer, data.ptr() + pointer, r_received);
 	pointer += r_received;
-	// FIXME: return what? OK or ERR_*
-	// return OK for now so we don't maybe return garbage
 	return OK;
 }
 

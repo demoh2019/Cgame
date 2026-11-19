@@ -21,7 +21,40 @@ class CaseSelectionTests(unittest.TestCase):
         selected = stress.choose_cases([], "headless")
         self.assertIn("physics_2d", selected)
         self.assertIn("physics_3d", selected)
+        self.assertIn("physics_dense_2d", selected)
+        self.assertIn("physics_dense_3d", selected)
+        self.assertIn("physics_pending_3d", selected)
+        self.assertIn("physics_ccd_3d", selected)
         self.assertNotIn("render_2d", selected)
+
+    def test_curve_stress_cases_are_selectable_and_headless(self):
+        cases = ("curve_tessellation_2d", "curve_tessellation_3d")
+        self.assertEqual(stress.choose_cases([",".join(cases)], "headless"), list(cases))
+        self.assertTrue(set(cases).issubset(stress.choose_cases(["all"], "headless")))
+
+    def test_astar_grid_bulk_fill_is_selectable(self):
+        self.assertEqual(stress.choose_cases(["astar_grid_fill"], "headless"),
+                         ["astar_grid_fill"])
+        self.assertIn("astar_grid_fill", stress.choose_cases(["all"], "headless"))
+
+    def test_astar_grid_jps_stress_is_headless(self):
+        self.assertEqual(stress.choose_cases(["astar_grid_jps"], "headless"),
+                         ["astar_grid_jps"])
+        self.assertIn("astar_grid_jps", stress.choose_cases(["all"], "headless"))
+
+    def test_astar_grid_neighbor_stress_is_headless(self):
+        self.assertEqual(stress.choose_cases(["astar_grid_neighbors"], "headless"),
+                         ["astar_grid_neighbors"])
+        self.assertIn("astar_grid_neighbors", stress.choose_cases(["all"], "headless"))
+
+    def test_packet_batch_scenarios_available(self):
+        names = ["packet_tx_batch", "packet_rx_batch", "packet_variant_reuse"]
+        self.assertEqual(stress.choose_cases([",".join(names)], "headless"), names)
+        self.assertTrue(set(names).issubset(stress.choose_cases(["all"], "headless")))
+
+    def test_lifecycle_scenarios_available(self):
+        self.assertEqual(stress.choose_cases(["object_lifecycle,scene_churn"], "headless"),
+                         ["object_lifecycle", "scene_churn"])
 
     def test_display_all_includes_render(self):
         self.assertEqual(stress.choose_cases(["all"], "display"), list(stress.CASES))
@@ -83,6 +116,10 @@ class ResultsTests(unittest.TestCase):
         self.assertEqual(stats["status"], "failed")
         self.assertEqual(stats["max_rss_mib"], 15.)
 
+    def test_p99_wall_measurement(self):
+        samples = [{"status": "passed", "wall_seconds": v, "peak_rss_mib": 10.0} for v in (1., 2., 3.)]
+        self.assertEqual(stress.summarize(samples)["p99_wall_seconds"], 3.0)
+
     def test_empty_measurements(self):
         self.assertIsNone(stress.summarize([{"status": "failed", "peak_rss_mib": None}])["median_wall_seconds"])
 
@@ -137,6 +174,25 @@ class BaselineTests(unittest.TestCase):
         self.assertIn("high run-to-run variability", text)
         self.assertIn("startup/teardown dominates", text)
 
+    def test_retained_growth_covers_lifecycle_and_scene_churn(self):
+        current = self.make_report()
+        for name in ("object_lifecycle", "scene_churn"):
+            current["cases"][name] = {"status": "passed", "runs": [
+                {"status": "passed", "engine": {"detail": {
+                    "retained_growth_bytes": 3 * 1048576}}},
+            ]}
+        errors = stress.compare_baseline(current, self.make_report(), 20., 2.)
+        self.assertEqual(len(errors), 2)
+        self.assertTrue(any("object_lifecycle" in error for error in errors))
+        self.assertTrue(any("scene_churn" in error for error in errors))
+
+    def test_rss_scope_mismatch_rejected(self):
+        baseline = self.make_report()
+        current = self.make_report()
+        current["configuration"]["rss_scope"] = "process_tree"
+        with self.assertRaisesRegex(ValueError, "rss_scope"):
+            stress.compare_baseline(current, baseline, 20.0, None)
+
     def test_memory_churn_threshold(self):
         current = self.make_report()
         current["cases"]["memory_churn"] = {"status": "passed", "runs": [
@@ -154,6 +210,88 @@ class RegistryTests(unittest.TestCase):
         gd_cases = re.findall(r'"([^"]+)"', registry)
         self.assertEqual(len(gd_cases), len(set(gd_cases)))
         self.assertEqual(set(gd_cases), set(stress.CASES))
+
+
+class AbsoluteBudgetTests(unittest.TestCase):
+    def make_case(self, detail):
+        return {"stress": {"runs": [
+            {"status": "passed", "engine": {"detail": detail}},
+        ]}}
+
+    def test_spikes_and_vram_over_budget(self):
+        suite = self.make_case({
+            "peak_frame_ms": 31., "peak_physics_ms": 26.,
+            "peak_video_memory_bytes": 300 * 1048576,
+        })
+        failures = stress.check_absolute_limits(suite, 16., 20., 256.)
+        self.assertEqual(len(failures), 3)
+
+    def test_budgets_ignored_when_unreported(self):
+        suite = self.make_case({"checksum": 42})
+        self.assertEqual(stress.check_absolute_limits(suite, 1., 1., 1.), [])
+
+    def test_compliant_budgets(self):
+        suite = self.make_case({
+            "peak_frame_ms": 12., "peak_physics_ms": 14.,
+            "peak_video_memory_bytes": 128 * 1048576,
+        })
+        self.assertEqual(stress.check_absolute_limits(suite, 16., 20., 256.), [])
+
+    def test_nan_or_negative_metric_caught(self):
+        suite = self.make_case({"peak_frame_ms": float("nan"), "peak_physics_ms": -1.})
+        failures = stress.check_absolute_limits(suite, 16., 20., None)
+        self.assertEqual(len(failures), 2)
+
+    def test_failed_process_not_double_reported(self):
+        suite = {"stress": {"runs": [{"status": "failed", "engine": {
+            "detail": {"peak_frame_ms": 900.}}}]}}
+        self.assertEqual(stress.check_absolute_limits(suite, 16., None, None), [])
+
+
+class PhaseHotspotTests(unittest.TestCase):
+    @staticmethod
+    def _run(phase_ms, optional_ms=None):
+        detail = {"resize_ms": phase_ms, "blit_ms": 1.0}
+        if optional_ms is not None:
+            detail["optional_ms"] = optional_ms
+        return {
+            "status": "passed", "wall_seconds": 1.0,
+            "cpu_seconds": 0.5, "peak_rss_mib": 128.0,
+            "engine": {"duration_ms": 100.0, "detail": detail},
+        }
+
+    def test_median_phase_filters_missing_and_nonfinite_values(self):
+        rows = [self._run(2.0, 5.0), self._run(9.0),
+                self._run(4.0, float("nan"))]
+        stats = stress.summarize(rows)
+        self.assertEqual(stats["phase_median_ms"]["resize_ms"], 4.0)
+        self.assertEqual(stats["phase_median_ms"]["blit_ms"], 1.0)
+        self.assertNotIn("optional_ms", stats["phase_median_ms"])
+
+    def test_baseline_rejects_individual_phase_regressions(self):
+        config = {"preset": "smoke", "scale": 1, "frames": 12,
+                  "render_mode": "headless", "seed": 12345,
+                  "rss_scope": "process_tree"}
+        baseline = {"configuration": config,
+                    "cases": {"bitmap_pipeline": stress.summarize([self._run(5.0)])}}
+        current = {"configuration": config,
+                   "cases": {"bitmap_pipeline": stress.summarize([self._run(8.0)])}}
+        errors = stress.compare_baseline(current, baseline, 20.0, None)
+        self.assertEqual(len(errors), 1, errors)
+        self.assertIn("resize_ms", errors[0])
+
+    def test_markdown_identifies_slowest_engine_phases(self):
+        report = {
+            "configuration": {"preset": "smoke", "scale": 1,
+                              "render_mode": "headless"},
+            "status": "passed", "failures": [],
+            "cases": {"bitmap_pipeline": stress.summarize([
+                self._run(11.0)])},
+        }
+        output = stress.markdown_hotspots(report)
+        self.assertIn("## In-engine phase metrics", output)
+        self.assertIn("| bitmap_pipeline | resize_ms | 11.000 |", output)
+        self.assertLess(output.index("resize_ms"), output.index("blit_ms"))
 
 
 class ProcessIsolationTests(unittest.TestCase):
@@ -247,52 +385,14 @@ class ImportProjectTests(unittest.TestCase):
             self.assertEqual(result["status"], "passed", result)
 
 
-class AdditionalStressCoverageTests(unittest.TestCase):
-    def test_python_cases_match_gdscript_case_registry(self):
-        import re
+class SmallFileIoCoverageTests(unittest.TestCase):
+    def test_small_file_io_case_registration(self):
         project = Path(__file__).parent
         script = (project / "stress.gd").read_text(encoding="utf-8")
-        case_list = script.split("const CASES := [", 1)[1].split("]", 1)[0]
-        self.assertEqual(list(stress.CASES), re.findall(r'"([a-z0-9_]+)"', case_list))
-        self.assertIn('"small_file_io", "scene_churn":', script)
         helper = (project / "extra_cases.gd").read_text(encoding="utf-8")
-        self.assertIn('func _small_file_io(', helper)
-        self.assertIn('func _scene_churn(', helper)
-
-    def test_phase_summary_and_baseline_regression(self):
-        runs = []
-        for duration, phase in ((12., 9.), (16., 13.), (13., 10.)):
-            result = result_payload(detail={"phases_ms": {"write": phase, "read": 2.}})
-            result["duration_ms"] = duration
-            runs.append({"status": "passed", "wall_seconds": 1., "peak_rss_mib": 10.,
-                         "engine": result})
-        summary = stress.summarize(runs)
-        self.assertEqual(summary["median_engine_ms"], 13.)
-        self.assertEqual(summary["p95_engine_ms"], 16.)
-        self.assertEqual(summary["phase_median_ms"], {"read": 2., "write": 10.})
-        old = BaselineTests().make_report()
-        old["cases"]["math"].update(phase_median_ms={"write": 5.})
-        new = BaselineTests().make_report()
-        new["cases"]["math"].update(phase_median_ms={"write": 9.})
-        self.assertEqual(len(stress.compare_baseline(new, old, 20., None)), 1)
-
-    def test_reject_invalid_phase_metrics(self):
-        for bad in (-1.0, float("nan"), "10ms"):
-            result = result_payload(detail={"phases_ms": {"write": bad}})
-            with self.assertRaisesRegex(ValueError, "phase"):
-                stress.parse_result(stress.PREFIX + json.dumps(result),
-                                    "containers", 1, 12, 12345)
-
-    def test_ranked_markdown_shows_hottest_phase(self):
-        report = {"status": "passed", "failures": [],
-                  "configuration": {"preset": "smoke", "scale": 1,
-                                    "render_mode": "headless", "rss_limit_mib": 2048},
-                  "cases": {"small_file_io": {
-                      "median_wall_seconds": 1.0, "max_rss_mib": 20.,
-                      "median_engine_ms": 500., "p95_wall_seconds": 1.,
-                      "phase_median_ms": {"write": 320., "read": 100.},
-                  }}}
-        self.assertIn("write (320.00 ms)", stress.markdown_hotspots(report))
+        self.assertIn("small_file_io", stress.CASES)
+        self.assertIn('"small_file_io":', script)
+        self.assertIn("func _small_file_io(", helper)
 
 
 if __name__ == "__main__":

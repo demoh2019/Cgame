@@ -2539,4 +2539,28 @@ TEST_CASE("[PackedParseFastPath] empty packed arrays round-trip") {
 	check_packed_parser_roundtrip(PackedStringArray());
 }
 
+TEST_CASE("[Variant] Constructor reflection preserves argument metadata after bulk resizing") {
+	int constructors_verified = 0;
+	for (int type_index = 0; type_index < Variant::VARIANT_MAX; type_index++) {
+		const Variant::Type type = Variant::Type(type_index);
+		List<MethodInfo> constructors;
+		Variant::get_constructor_list(type, &constructors);
+		REQUIRE_EQ(constructors.size(), Variant::get_constructor_count(type));
+
+		int ctor_index = 0;
+		for (const MethodInfo &constructor : constructors) {
+			const int arg_count = Variant::get_constructor_argument_count(type, ctor_index);
+			REQUIRE_EQ(constructor.arguments.size(), arg_count);
+			CHECK_EQ(constructor.return_val.type, type);
+			for (int arg = 0; arg < arg_count; arg++) {
+				CHECK_EQ(constructor.arguments[arg].name, Variant::get_constructor_argument_name(type, ctor_index, arg));
+				CHECK_EQ(constructor.arguments[arg].type, Variant::get_constructor_argument_type(type, ctor_index, arg));
+			}
+			ctor_index++;
+			constructors_verified++;
+		}
+	}
+	CHECK(constructors_verified > 50);
+}
+
 } // namespace TestVariant

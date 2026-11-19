@@ -32,6 +32,7 @@
 
 TEST_FORCE_LINK(test_node)
 
+#include "core/config/project_settings.h"
 #include "core/io/file_access.h"
 #include "core/io/resource_saver.h"
 #include "core/object/class_db.h"
@@ -1377,6 +1378,379 @@ TEST_CASE("[SceneTree][Node] find_children stackless handles deep branches") {
 	CHECK_EQ(Object::cast_to<Node>(nodes[nodes.size() - 2]), leaf);
 	CHECK_EQ(Object::cast_to<Node>(nodes[nodes.size() - 1]), last);
 	memdelete(root);
+}
+
+
+TEST_CASE("[SceneTree][Node] Large mixed-mode children cache preserves index order") {
+	Node *root = memnew(Node);
+	Vector<Node *> front;
+	Vector<Node *> regular;
+	Vector<Node *> back;
+
+	// Interleave additions to force the cache to be rebuilt while each
+	// internal-mode index range remains dense.
+	for (int i = 0; i < 128; i++) {
+		Node *ordinary = memnew(Node);
+		ordinary->set_name("Regular" + itos(i));
+		root->add_child(ordinary);
+		regular.push_back(ordinary);
+
+		if (i < 32) {
+			Node *internal_front = memnew(Node);
+			internal_front->set_name("Front" + itos(i));
+			root->add_child(internal_front, false, Node::INTERNAL_MODE_FRONT);
+			front.push_back(internal_front);
+		}
+		if (i < 24) {
+			Node *internal_back = memnew(Node);
+			internal_back->set_name("Back" + itos(i));
+			root->add_child(internal_back, false, Node::INTERNAL_MODE_BACK);
+			back.push_back(internal_back);
+		}
+	}
+
+	REQUIRE_EQ(root->get_child_count(true), 184);
+	REQUIRE_EQ(root->get_child_count(false), 128);
+	for (int i = 0; i < front.size(); i++) {
+		CHECK_EQ(root->get_child(i, true), front[i]);
+		CHECK_EQ(front[i]->get_index(), i);
+	}
+	for (int i = 0; i < regular.size(); i++) {
+		CHECK_EQ(root->get_child(front.size() + i, true), regular[i]);
+		CHECK_EQ(root->get_child(i, false), regular[i]);
+		CHECK_EQ(regular[i]->get_index(), i);
+	}
+	for (int i = 0; i < back.size(); i++) {
+		CHECK_EQ(root->get_child(front.size() + regular.size() + i, true), back[i]);
+		CHECK_EQ(back[i]->get_index(), i);
+	}
+
+	// Removing middle nodes creates index gaps and triggers the legacy
+	// comparison-based fallback, which must compact each mode correctly.
+	for (int mode = 0; mode < 3; mode++) {
+		Vector<Node *> *group = mode == 0 ? &front : (mode == 1 ? &regular : &back);
+		const int middle = group->size() / 2;
+		Node *removed = (*group)[middle];
+		root->remove_child(removed);
+		memdelete(removed);
+		group->remove_at(middle);
+	}
+	REQUIRE_EQ(root->get_child_count(true), 181);
+	REQUIRE_EQ(root->get_child_count(false), 127);
+	for (int i = 0; i < front.size(); i++) {
+		CHECK_EQ(root->get_child(i, true), front[i]);
+	}
+	for (int i = 0; i < regular.size(); i++) {
+		CHECK_EQ(root->get_child(i, false), regular[i]);
+		CHECK_EQ(root->get_child(front.size() + i, true), regular[i]);
+	}
+	for (int i = 0; i < back.size(); i++) {
+		CHECK_EQ(root->get_child(front.size() + regular.size() + i, true), back[i]);
+	}
+
+	// A cache rebuild after new front-internal nodes should reuse the linear
+	// path. Explicit moves continue to respect the public child ordering.
+	Node *new_front = memnew(Node);
+	new_front->set_name("FrontAppended");
+	root->add_child(new_front, false, Node::INTERNAL_MODE_FRONT);
+	front.push_back(new_front);
+	Node *moved = regular[70];
+	root->move_child(moved, 0);
+	CHECK_EQ(root->get_child(0, false), moved);
+	CHECK_EQ(root->get_child(front.size(), true), moved);
+	CHECK_EQ(root->get_child(front.size() + 1, true), regular[0]);
+	CHECK_EQ(root->get_child(root->get_child_count(true) - 1, true), back[back.size() - 1]);
+
+	memdelete(root);
+}
+
+
+TEST_CASE("[SceneTree][Node] Move child shifts only the affected range and preserves child indices") {
+	Node *root = memnew(Node);
+	Vector<Node *> front;
+	Vector<Node *> ordinary;
+	Vector<Node *> back;
+	for (int i = 0; i < 8; i++) {
+		Node *child = memnew(Node);
+		child->set_name("Front" + itos(i));
+		root->add_child(child, false, Node::INTERNAL_MODE_FRONT);
+		front.push_back(child);
+	}
+	for (int i = 0; i < 192; i++) {
+		Node *child = memnew(Node);
+		child->set_name("Ordinary" + itos(i));
+		root->add_child(child);
+		ordinary.push_back(child);
+	}
+	for (int i = 0; i < 8; i++) {
+		Node *child = memnew(Node);
+		child->set_name("Back" + itos(i));
+		root->add_child(child, false, Node::INTERNAL_MODE_BACK);
+		back.push_back(child);
+	}
+
+	// Use Vector as a simple reference model. Exercise adjacent moves
+	// in both directions, distant moves and the one-past-end index.
+	auto check_order = [&]() {
+		CHECK_EQ(root->get_child_count(true), front.size() + ordinary.size() + back.size());
+		CHECK_EQ(root->get_child_count(false), ordinary.size());
+		int global_index = 0;
+		for (int i = 0; i < front.size(); i++) {
+			CHECK_EQ(root->get_child(global_index++, true), front[i]);
+			CHECK_EQ(front[i]->get_index(), i);
+		}
+		for (int i = 0; i < ordinary.size(); i++) {
+			CHECK_EQ(root->get_child(global_index++, true), ordinary[i]);
+			CHECK_EQ(root->get_child(i, false), ordinary[i]);
+			CHECK_EQ(ordinary[i]->get_index(), i);
+		}
+		for (int i = 0; i < back.size(); i++) {
+			CHECK_EQ(root->get_child(global_index++, true), back[i]);
+			CHECK_EQ(back[i]->get_index(), i);
+		}
+	};
+	auto move = [&](Vector<Node *> &r_reference, int p_from, int p_to) {
+		Node *child = r_reference[p_from];
+		root->move_child(child, p_to);
+		int normalized_to = p_to < 0 ? p_to + r_reference.size() : p_to;
+		if (normalized_to == r_reference.size()) {
+			normalized_to--;
+		}
+		r_reference.remove_at(p_from);
+		r_reference.insert(normalized_to, child);
+		check_order();
+	};
+
+	check_order();
+	move(ordinary, 85, 86);
+	move(ordinary, 86, 85);
+	move(ordinary, 191, 0);
+	move(ordinary, 0, 191);
+	move(ordinary, 11, -1);
+	move(ordinary, 0, ordinary.size());
+	move(front, 3, 4);
+	move(front, 0, 7);
+	move(front, 7, 0);
+	move(back, 3, 4);
+	move(back, 0, 7);
+	move(back, 7, 0);
+	memdelete(root);
+}
+
+TEST_CASE("[SceneTree][Node] Exact child queries work with dirty traversal cache") {
+	Node *root = memnew(Node);
+	Vector<Node *> children;
+	for (int i = 0; i < 512; i++) {
+		Node *child = memnew(Node);
+		child->set_name("Candidate" + itos(i));
+		root->add_child(child);
+		children.push_back(child);
+	}
+
+	// Removing a non-tail child invalidates the ordering cache.
+	// Exact lookups must still use the authoritative name table.
+	Node *deleted = children[3];
+	root->remove_child(deleted);
+	memdelete(deleted);
+	TypedArray<Node> found = root->find_children("Candidate511", "Node", false, false);
+	REQUIRE_EQ(found.size(), 1);
+	CHECK_EQ(Object::cast_to<Node>(found[0]), children[511]);
+	CHECK_EQ(root->find_children("Candidate3", "Node", false, false).size(), 0);
+	CHECK_EQ(root->find_children("Missing", "Node", false, false).size(), 0);
+	CHECK_EQ(root->find_children("Candidate511", "Node3D", false, false).size(), 0);
+
+	// Ownership filtering must work without visiting unrelated children.
+	CHECK_EQ(root->find_children("Candidate100", "Node", false, true).size(), 0);
+	children[100]->set_owner(root);
+	found = root->find_children("Candidate100", "Node", false, true);
+	REQUIRE_EQ(found.size(), 1);
+	CHECK_EQ(Object::cast_to<Node>(found[0]), children[100]);
+
+	// Wildcard and recursive lookups still visit the ordered children.
+	CHECK_EQ(root->find_children("Candidate51?", "Node", false, false).size(), 2);
+	found = root->find_children("Candidate511", "Node", true, false);
+	REQUIRE_EQ(found.size(), 1);
+	CHECK_EQ(Object::cast_to<Node>(found[0]), children[511]);
+	CHECK_EQ(root->get_child_count(), 511);
+	CHECK_EQ(root->get_child(3), children[4]);
+	memdelete(root);
+}
+
+TEST_CASE("[SceneTree][Node] Reparenting a large owned subtree preserves all descendant owners") {
+	Node *root = memnew(Node);
+	Node *left = memnew(Node);
+	Node *right = memnew(Node);
+	root->add_child(left);
+	root->add_child(right);
+
+	Node *branch = memnew(Node);
+	left->add_child(branch);
+	branch->set_owner(root);
+	Vector<Node *> descendants;
+	for (int i = 0; i < 128; i++) {
+		Node *child = memnew(Node);
+		child->set_name("Owned" + itos(i));
+		branch->add_child(child);
+		child->set_owner(root);
+		descendants.push_back(child);
+		Node *grandchild = memnew(Node);
+		grandchild->set_name("Leaf");
+		child->add_child(grandchild);
+		grandchild->set_owner(root);
+	}
+
+	branch->reparent(right, false);
+	CHECK_EQ(branch->get_parent(), right);
+	CHECK_EQ(branch->get_owner(), root);
+	CHECK_EQ(left->get_child_count(), 0);
+	CHECK_EQ(right->get_child_count(), 1);
+	CHECK_EQ(branch->get_child_count(false), 128);
+	for (int i = 0; i < descendants.size(); i++) {
+		Node *child = descendants[i];
+		CHECK_EQ(branch->get_child(i), child);
+		CHECK_EQ(child->get_owner(), root);
+		CHECK_EQ(child->get_child_count(), 1);
+		CHECK_EQ(child->get_child(0)->get_owner(), root);
+	}
+
+	memdelete(root);
+}
+
+TEST_CASE("[SceneTree][Node] Human-readable names carry long numeric suffixes") {
+	Node *root = memnew(Node);
+	String separator;
+	switch (int(GLOBAL_GET("editor/naming/node_name_num_separator"))) {
+		case 0: {
+			separator = "";
+		} break;
+		case 1: {
+			separator = " ";
+		} break;
+		case 2: {
+			separator = "_";
+		} break;
+		case 3: {
+			separator = "-";
+		} break;
+		default: {
+			separator = " ";
+		} break;
+	}
+
+	// A long suffix previously required one new string for every digit.
+	const String nines = String("9").repeat(128);
+	const String base_name = "OptimizedNode" + separator;
+	Node *first = memnew(Node);
+	first->set_name(base_name + nines);
+	root->add_child(first, true);
+	Node *second = memnew(Node);
+	second->set_name(base_name + nines);
+	root->add_child(second, true);
+	CHECK_EQ(String(first->get_name()), base_name + nines);
+	CHECK_EQ(String(second->get_name()), base_name + "1" + String("0").repeat(128));
+
+	// Incrementing a suffix must retain its leading zeroes.
+	Node *zero_first = memnew(Node);
+	zero_first->set_name(base_name + "0099");
+	root->add_child(zero_first, true);
+	Node *zero_second = memnew(Node);
+	zero_second->set_name(base_name + "0099");
+	root->add_child(zero_second, true);
+	CHECK_EQ(String(zero_second->get_name()), base_name + "0100");
+
+	// No numeric suffix: numbering still starts at 2 and uses the configured
+	// separator. Existing sibling names must remain unchanged.
+	Node *plain_first = memnew(Node);
+	plain_first->set_name("PlainNode");
+	root->add_child(plain_first, true);
+	Node *plain_second = memnew(Node);
+	plain_second->set_name("PlainNode");
+	root->add_child(plain_second, true);
+	CHECK_EQ(String(plain_second->get_name()), "PlainNode" + separator + "2");
+
+	memdelete(root);
+}
+
+
+TEST_CASE("[SceneTree][Node] Borrowed multi-component NodePath lookup preserves resolution") {
+	Node *root = memnew(Node);
+	root->set_name("LookupRoot");
+	Node *parent = root;
+	String relative_path;
+
+	for (int i = 0; i < 96; i++) {
+		Node *child = memnew(Node);
+		const String name = i == 48 ? String(U"Unicode雪") : "Segment" + itos(i);
+		child->set_name(name);
+		parent->add_child(child);
+		if (i != 0) {
+			relative_path += "/";
+		}
+		relative_path += name;
+		parent = child;
+	}
+	Node *leaf = parent;
+	const NodePath deep_path(relative_path);
+	const NodePath with_subname(relative_path + ":custom_property");
+	const NodePath missing_path(relative_path + "/DoesNotExist");
+
+	for (int repeat = 0; repeat < 256; repeat++) {
+		CHECK_EQ(root->get_node_or_null(deep_path), leaf);
+		CHECK_EQ(root->get_node_or_null(with_subname), leaf);
+		CHECK_EQ(root->get_node_or_null(missing_path), nullptr);
+	}
+	CHECK_EQ(root->get_node_or_null(NodePath("Segment0")), root->get_child(0));
+	CHECK_EQ(leaf->get_node_or_null(NodePath("..")), leaf->get_parent());
+	CHECK_EQ(leaf->get_node_or_null(NodePath("../.")), leaf->get_parent());
+	CHECK_EQ(root->get_node_or_null(NodePath(".")), root);
+
+	memdelete(root);
+}
+
+
+TEST_CASE("[SceneTree][Node] Wide mixed normal and physics process dispatch") {
+	SceneTree *tree = SceneTree::get_singleton();
+	TestNode *parent = memnew(TestNode);
+	tree->get_root()->add_child(parent);
+	Vector<TestNode *> nodes;
+
+	// Exercise both dispatch loops with a mixture of normal, internal and
+	// physics process flags. Every pass must read each node's live flags.
+	for (int i = 0; i < 128; i++) {
+		TestNode *child = memnew(TestNode);
+		parent->add_child(child);
+		child->set_process(true);
+		child->set_physics_process(true);
+		child->set_process_internal((i & 1) == 0);
+		child->set_physics_process_internal(i % 3 == 0);
+		nodes.push_back(child);
+	}
+
+	tree->process(0);
+	tree->physics_process(0);
+	for (int i = 0; i < nodes.size(); i++) {
+		CHECK_EQ(nodes[i]->process_counter, 1);
+		CHECK_EQ(nodes[i]->physics_process_counter, 1);
+		CHECK_EQ(nodes[i]->internal_process_counter, (i & 1) == 0 ? 1 : 0);
+		CHECK_EQ(nodes[i]->internal_physics_process_counter, i % 3 == 0 ? 1 : 0);
+	}
+
+	// Disable only external notifications for the first group, leaving
+	// internal ones enabled to check process-group membership changes.
+	for (int i = 0; i < 32; i++) {
+		nodes[i]->set_process(false);
+		nodes[i]->set_physics_process(false);
+	}
+	tree->process(0);
+	tree->physics_process(0);
+	for (int i = 0; i < nodes.size(); i++) {
+		CHECK_EQ(nodes[i]->process_counter, i < 32 ? 1 : 2);
+		CHECK_EQ(nodes[i]->physics_process_counter, i < 32 ? 1 : 2);
+		CHECK_EQ(nodes[i]->internal_process_counter, (i & 1) == 0 ? 2 : 0);
+		CHECK_EQ(nodes[i]->internal_physics_process_counter, i % 3 == 0 ? 2 : 0);
+	}
+
+	memdelete(parent);
 }
 
 } // namespace TestNode

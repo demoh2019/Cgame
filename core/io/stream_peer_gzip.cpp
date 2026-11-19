@@ -101,19 +101,18 @@ Error StreamPeerGZIP::_start(bool p_compress, bool p_is_deflate, int p_buffer_si
 	return OK;
 }
 
-Error StreamPeerGZIP::_process(uint8_t *p_dst, int p_dst_size, const uint8_t *p_src, int p_src_size, int &r_consumed, int &r_out, bool p_close) {
+Error StreamPeerGZIP::_process(uint8_t *p_dst, int p_dst_size, const uint8_t *p_src, int p_src_size, int &r_consumed, int &r_out) {
 	ERR_FAIL_NULL_V(ctx, ERR_UNCONFIGURED);
 	z_stream &strm = *(z_stream *)ctx;
 	strm.avail_in = p_src_size;
 	strm.avail_out = p_dst_size;
 	strm.next_in = (Bytef *)p_src;
 	strm.next_out = (Bytef *)p_dst;
-	int flush = p_close ? Z_FINISH : Z_NO_FLUSH;
 	if (compressing) {
-		int err = deflate(&strm, flush);
-		ERR_FAIL_COND_V(err != (p_close ? Z_STREAM_END : Z_OK), FAILED);
+		int err = deflate(&strm, Z_NO_FLUSH);
+		ERR_FAIL_COND_V(err != Z_OK, FAILED);
 	} else {
-		int err = inflate(&strm, flush);
+		int err = inflate(&strm, Z_NO_FLUSH);
 		ERR_FAIL_COND_V(err != Z_OK && err != Z_STREAM_END, FAILED);
 	}
 	r_out = p_dst_size - strm.avail_out;
@@ -132,9 +131,14 @@ Error StreamPeerGZIP::put_partial_data(const uint8_t *p_data, int p_bytes, int &
 	ERR_FAIL_NULL_V(ctx, ERR_UNCONFIGURED);
 	ERR_FAIL_COND_V(p_bytes < 0, ERR_INVALID_PARAMETER);
 
-	// Ensure we have enough space in temporary buffer.
-	if (buffer.size() < p_bytes) {
-		buffer.resize(p_bytes);
+	// The output of _process() is limited by the free ring-buffer space.
+	// Growing the scratch buffer to the entire input size wastes memory for
+	// large writes (for example, a 32 MiB input with a 64 KiB output queue).
+	// Keep a bounded zlib work buffer and stream through it instead.
+	constexpr int MAX_WORK_BUFFER_SIZE = 64 * 1024;
+	const int work_size = MIN(p_bytes, MIN(rb.space_left(), MAX_WORK_BUFFER_SIZE));
+	if (buffer.size() < work_size) {
+		ERR_FAIL_COND_V(buffer.resize(work_size) != OK, ERR_OUT_OF_MEMORY);
 	}
 
 	r_sent = 0;
@@ -184,17 +188,32 @@ int StreamPeerGZIP::get_available_bytes() const {
 
 Error StreamPeerGZIP::finish() {
 	ERR_FAIL_COND_V(!ctx || !compressing, ERR_UNAVAILABLE);
-	// Ensure we have enough space in temporary buffer.
-	if (buffer.size() < get_available_bytes()) {
-		buffer.resize(get_available_bytes()); // get_available_bytes() is what we can store in RingBuffer.
+
+	// zlib may need multiple Z_FINISH calls for incompressible input. Never
+	// allocate a scratch buffer based on the amount of compressed output
+	// already queued (which could be many MiB); reuse the bounded buffer
+	// allocated by start_compression() / put_partial_data().
+	z_stream &strm = *(z_stream *)ctx;
+	strm.next_in = Z_NULL;
+	strm.avail_in = 0;
+	while (true) {
+		const int work_size = MIN(buffer.size(), rb.space_left());
+		ERR_FAIL_COND_V(work_size <= 0, ERR_OUT_OF_MEMORY);
+
+		strm.next_out = buffer.ptrw();
+		strm.avail_out = work_size;
+		const int result = deflate(&strm, Z_FINISH);
+		ERR_FAIL_COND_V(result != Z_OK && result != Z_STREAM_END, FAILED);
+
+		const int produced = work_size - int(strm.avail_out);
+		if (produced > 0) {
+			const int written = rb.write(buffer.ptr(), produced);
+			ERR_FAIL_COND_V(written != produced, ERR_BUG);
+		}
+		if (result == Z_STREAM_END) {
+			return OK;
+		}
+		// Avoid looping forever if zlib cannot make progress.
+		ERR_FAIL_COND_V(produced == 0, FAILED);
 	}
-	int consumed = 0;
-	int to_write = 0;
-	Error err = _process(buffer.ptrw(), buffer.size(), nullptr, 0, consumed, to_write, true); // compress
-	if (err != OK) {
-		return err;
-	}
-	int wrote = rb.write(buffer.ptr(), to_write);
-	ERR_FAIL_COND_V(wrote != to_write, ERR_OUT_OF_MEMORY);
-	return OK;
 }

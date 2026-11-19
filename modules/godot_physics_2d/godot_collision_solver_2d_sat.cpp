@@ -103,8 +103,23 @@ _FORCE_INLINE_ static void _generate_contacts_edge_edge(const Vector2 *p_points_
 	dvec[3].a = false;
 	dvec[3].idx = 1;
 
-	SortArray<_generate_contacts_Pair> sa;
-	sa.sort(dvec, 4);
+	// A five-comparator sorting network for exactly four values.
+	// Avoid the generic sorting machinery in this contact hot path.
+	if (dvec[1] < dvec[0]) {
+		SWAP(dvec[0], dvec[1]);
+	}
+	if (dvec[3] < dvec[2]) {
+		SWAP(dvec[2], dvec[3]);
+	}
+	if (dvec[2] < dvec[0]) {
+		SWAP(dvec[0], dvec[2]);
+	}
+	if (dvec[3] < dvec[1]) {
+		SWAP(dvec[1], dvec[3]);
+	}
+	if (dvec[2] < dvec[1]) {
+		SWAP(dvec[1], dvec[2]);
+	}
 
 	for (int i = 1; i <= 2; i++) {
 		if (dvec[i].a) {
@@ -430,9 +445,53 @@ static void _collision_segment_segment(const GodotShape2D *p_a, const Transform2
 	separator.generate_contacts();
 }
 
+// Shared by the analytic narrow-phase paths below.
+_FORCE_INLINE_ static bool _is_unit_orthogonal_transform(const Transform2D &p_transform);
+
 static void _collision_segment_circle(const GodotShape2D *p_a, const Transform2D &p_transform_a, const GodotShape2D *p_b, const Transform2D &p_transform_b, _CollectorCallback2D *p_collector, const Vector2 &p_motion_a, const Vector2 &p_motion_b, bool p_cast_A, bool p_cast_B, bool p_with_margin, real_t p_margin_A, real_t p_margin_B) {
 	const GodotSegmentShape2D *segment_A = static_cast<const GodotSegmentShape2D *>(p_a);
 	const GodotCircleShape2D *circle_B = static_cast<const GodotCircleShape2D *>(p_b);
+
+	// Like Box2D's specialized segment/circle manifold, use the closest point
+	// on the segment instead of projecting both shapes onto multiple SAT axes.
+	// Swept shapes, non-rigid transforms, and degenerate cases retain SAT.
+	if (!p_cast_A && !p_cast_B && p_margin_A >= 0.0 && p_margin_B >= 0.0 &&
+			circle_B->get_radius() >= 0.0 && _is_unit_orthogonal_transform(p_transform_a) &&
+			_is_unit_orthogonal_transform(p_transform_b)) {
+		const Vector2 segment_start = p_transform_a.xform(segment_A->get_a());
+		const Vector2 segment_direction = p_transform_a.xform(segment_A->get_b()) - segment_start;
+		const real_t segment_length_squared = segment_direction.length_squared();
+		if (segment_length_squared > CMP_EPSILON * CMP_EPSILON) {
+			const Vector2 center = p_transform_b.get_origin();
+			const real_t fraction = CLAMP((center - segment_start).dot(segment_direction) / segment_length_squared, real_t(0.0), real_t(1.0));
+			const Vector2 closest = segment_start + segment_direction * fraction;
+			const Vector2 separation = closest - center;
+			const real_t distance_squared = separation.length_squared();
+
+			// The SAT fallback provides a stable axis for coincident points.
+			if (distance_squared > 0.0) {
+				const real_t radius = circle_B->get_radius() + p_margin_B;
+				const real_t combined_radius = radius + p_margin_A;
+				if (distance_squared > combined_radius * combined_radius) {
+					if (p_collector->sep_axis) {
+						*p_collector->sep_axis = separation / Math::sqrt(distance_squared);
+					}
+					return;
+				}
+
+				p_collector->collided = true;
+				if (p_collector->callback) {
+					const Vector2 normal = separation / Math::sqrt(distance_squared);
+					p_collector->normal = normal;
+					p_collector->call(closest - normal * p_margin_A, center + normal * radius);
+				}
+				if (p_collector->sep_axis) {
+					*p_collector->sep_axis = Vector2();
+				}
+				return;
+			}
+		}
+	}
 
 	SeparatorAxisTest2D<GodotSegmentShape2D, GodotCircleShape2D> separator(segment_A, p_transform_a, circle_B, p_transform_b, p_collector, p_motion_a, p_motion_b, p_cast_A, p_cast_B, p_with_margin, p_margin_A, p_margin_B);
 
@@ -536,6 +595,41 @@ static void _collision_segment_capsule(const GodotShape2D *p_a, const Transform2
 	const GodotSegmentShape2D *segment_A = static_cast<const GodotSegmentShape2D *>(p_a);
 	const GodotCapsuleShape2D *capsule_B = static_cast<const GodotCapsuleShape2D *>(p_b);
 
+	// Closest-segment distance is sufficient for overlap-only queries.
+	// Contacts still use SAT to preserve edge manifolds, warm-start impulses
+	// and stable face normals in stacking configurations.
+	const real_t half_capsule_segment = capsule_B->get_height() * real_t(0.5) - capsule_B->get_radius();
+	if (!p_cast_A && !p_cast_B && !p_collector->callback && p_margin_A >= 0.0 && p_margin_B >= 0.0 &&
+			capsule_B->get_radius() >= 0.0 && half_capsule_segment >= 0.0 &&
+			_is_unit_orthogonal_transform(p_transform_a) && _is_unit_orthogonal_transform(p_transform_b)) {
+		const Vector2 segment_start = p_transform_a.xform(segment_A->get_a());
+		const Vector2 segment_end = p_transform_a.xform(segment_A->get_b());
+		if (segment_start.distance_squared_to(segment_end) > CMP_EPSILON2) {
+			const Vector2 capsule_offset = p_transform_b.columns[1] * half_capsule_segment;
+			const Vector2 capsule_center = p_transform_b.get_origin();
+			Vector2 closest_segment;
+			Vector2 closest_capsule;
+			const real_t distance = Geometry2D::get_closest_points_between_segments(
+					segment_start, segment_end,
+					capsule_center - capsule_offset, capsule_center + capsule_offset,
+					closest_segment, closest_capsule);
+			const real_t combined_radius = capsule_B->get_radius() + p_margin_A + p_margin_B;
+
+			if (distance > combined_radius) {
+				if (p_collector->sep_axis) {
+					*p_collector->sep_axis = (closest_segment - closest_capsule) / distance;
+				}
+				return;
+			}
+
+			p_collector->collided = true;
+			if (p_collector->sep_axis) {
+				*p_collector->sep_axis = Vector2();
+			}
+			return;
+		}
+	}
+
 	SeparatorAxisTest2D<GodotSegmentShape2D, GodotCapsuleShape2D> separator(segment_A, p_transform_a, capsule_B, p_transform_b, p_collector, p_motion_a, p_motion_b, p_cast_A, p_cast_B, p_with_margin, p_margin_A, p_margin_B);
 
 	if (!separator.test_previous_axis()) {
@@ -610,9 +704,67 @@ static void _collision_segment_convex_polygon(const GodotShape2D *p_a, const Tra
 
 /////////
 
+_FORCE_INLINE_ static bool _is_unit_orthogonal_transform(const Transform2D &p_transform) {
+	return Math::is_equal_approx(p_transform.columns[0].length_squared(), real_t(1.0)) &&
+			Math::is_equal_approx(p_transform.columns[1].length_squared(), real_t(1.0)) &&
+			Math::is_zero_approx(p_transform.columns[0].dot(p_transform.columns[1]));
+}
+
 static void _collision_circle_circle(const GodotShape2D *p_a, const Transform2D &p_transform_a, const GodotShape2D *p_b, const Transform2D &p_transform_b, _CollectorCallback2D *p_collector, const Vector2 &p_motion_a, const Vector2 &p_motion_b, bool p_cast_A, bool p_cast_B, bool p_with_margin, real_t p_margin_A, real_t p_margin_B) {
 	const GodotCircleShape2D *circle_A = static_cast<const GodotCircleShape2D *>(p_a);
 	const GodotCircleShape2D *circle_B = static_cast<const GodotCircleShape2D *>(p_b);
+
+	// Like the direct circle manifold used by Box2D, avoid general SAT and
+	// support-point generation for stationary, rigidly transformed circles.
+	// Non-uniform scale, shear and swept shapes retain the original SAT path.
+	if (!p_cast_A && !p_cast_B && _is_unit_orthogonal_transform(p_transform_a) && _is_unit_orthogonal_transform(p_transform_b)) {
+		const real_t radius_A = circle_A->get_radius() + p_margin_A;
+		const real_t radius_B = circle_B->get_radius() + p_margin_B;
+		const real_t combined_radius = radius_A + radius_B;
+		const Vector2 separation = p_transform_a.get_origin() - p_transform_b.get_origin();
+		const real_t distance_squared = separation.length_squared();
+
+		// Box2D-style coincident-circle manifold. At exactly equal centers,
+		// select a deterministic axis (or preserve the cached separator)
+		// instead of invoking SAT for a zero-length center direction.
+		// Leave two zero-radius coincident points to the legacy SAT path.
+		if (radius_A >= 0.0 && radius_B >= 0.0 &&
+				(distance_squared > 0.0 || combined_radius > 0.0)) {
+			if (distance_squared > combined_radius * combined_radius) {
+				if (p_collector->sep_axis) {
+					*p_collector->sep_axis = separation / Math::sqrt(distance_squared);
+				}
+				return;
+			}
+
+			p_collector->collided = true;
+			if (p_collector->callback) {
+				Vector2 axis;
+				if (distance_squared > 0.0) {
+					axis = separation / Math::sqrt(distance_squared);
+				} else {
+					// SAT defaults to the Y axis for coincident points.
+					// Retain that contact orientation, or the cached axis
+					// when the pair previously had a valid separation.
+					axis = Vector2(0.0, -1.0);
+					if (p_collector->sep_axis && (*p_collector->sep_axis).is_finite()) {
+						const Vector2 cached_axis = *p_collector->sep_axis;
+						const real_t cached_length_squared = cached_axis.length_squared();
+						if (cached_length_squared > real_t(CMP_EPSILON) * real_t(CMP_EPSILON)) {
+							axis = -cached_axis / Math::sqrt(cached_length_squared);
+						}
+					}
+				}
+				p_collector->normal = axis;
+				p_collector->call(p_transform_a.get_origin() - axis * radius_A,
+						p_transform_b.get_origin() + axis * radius_B);
+				if (p_collector->sep_axis && *p_collector->sep_axis != Vector2()) {
+					*p_collector->sep_axis = Vector2();
+				}
+			}
+			return;
+		}
+	}
 
 	SeparatorAxisTest2D<GodotCircleShape2D, GodotCircleShape2D> separator(circle_A, p_transform_a, circle_B, p_transform_b, p_collector, p_motion_a, p_motion_b, p_cast_A, p_cast_B, p_with_margin, p_margin_A, p_margin_B);
 
@@ -634,6 +786,78 @@ static void _collision_circle_circle(const GodotShape2D *p_a, const Transform2D 
 static void _collision_circle_rectangle(const GodotShape2D *p_a, const Transform2D &p_transform_a, const GodotShape2D *p_b, const Transform2D &p_transform_b, _CollectorCallback2D *p_collector, const Vector2 &p_motion_a, const Vector2 &p_motion_b, bool p_cast_A, bool p_cast_B, bool p_with_margin, real_t p_margin_A, real_t p_margin_B) {
 	const GodotCircleShape2D *circle_A = static_cast<const GodotCircleShape2D *>(p_a);
 	const GodotRectangleShape2D *rectangle_B = static_cast<const GodotRectangleShape2D *>(p_b);
+
+// Specialized circle/rectangle manifold for rigid transforms. The generic SAT
+	// path below handles degenerate rectangles, scaling, shearing and swept shapes.
+	if (!p_cast_A && !p_cast_B && p_margin_A >= 0.0 && p_margin_B >= 0.0 &&
+			circle_A->get_radius() >= 0.0 && _is_unit_orthogonal_transform(p_transform_a) &&
+			_is_unit_orthogonal_transform(p_transform_b)) {
+		const Vector2 center = p_transform_a.get_origin();
+		const Vector2 local_center = p_transform_b.basis_xform_inv(center - p_transform_b.get_origin());
+		const Vector2 half_extents = rectangle_B->get_half_extents();
+		const Vector2 closest_local(
+				CLAMP(local_center.x, -half_extents.x, half_extents.x),
+				CLAMP(local_center.y, -half_extents.y, half_extents.y));
+		const Vector2 closest = p_transform_b.xform(closest_local);
+		const Vector2 separation = center - closest;
+		const real_t distance_squared = separation.length_squared();
+
+		// Box2D-style embedded circle/rectangle manifold: a fully contained
+		// center is not a closest-point separation test. Select the nearest
+		// *exit* face in the box's local space and use the opposite support
+		// point on the circle. This produces a positive penetration depth
+		// even for a circle that fits completely inside the rectangle.
+		// The basis is guaranteed unit-orthogonal by the guard above.
+		if (half_extents.x > real_t(0.0) && half_extents.y > real_t(0.0) &&
+				Math::abs(local_center.x) <= half_extents.x &&
+				Math::abs(local_center.y) <= half_extents.y) {
+			const real_t clearance_x = half_extents.x - Math::abs(local_center.x);
+			const real_t clearance_y = half_extents.y - Math::abs(local_center.y);
+			const bool nearest_x_face = clearance_x <= clearance_y;
+			const Vector2 local_exit_normal = nearest_x_face ?
+					Vector2(local_center.x < 0.0 ? -1.0 : 1.0, 0.0) :
+					Vector2(0.0, local_center.y < 0.0 ? -1.0 : 1.0);
+			const Vector2 exit_normal = p_transform_b.basis_xform(local_exit_normal);
+			const Vector2 normal = -exit_normal;
+			const real_t circle_radius = circle_A->get_radius() + p_margin_A;
+			const real_t nearest_face_distance = nearest_x_face ? clearance_x : clearance_y;
+
+			p_collector->collided = true;
+			if (p_collector->callback) {
+				p_collector->normal = normal;
+				p_collector->call(center + normal * circle_radius,
+						center + exit_normal * (nearest_face_distance + p_margin_B));
+				if (p_collector->sep_axis && *p_collector->sep_axis != Vector2()) {
+					*p_collector->sep_axis = Vector2();
+				}
+			}
+			return;
+		}
+
+		// The regular closest-point path only handles centers outside the
+		// rectangle. Leave all degenerate cases to the general SAT solver.
+		if (distance_squared > 0.0) {
+			const real_t circle_radius = circle_A->get_radius() + p_margin_A;
+			const real_t combined_radius = circle_radius + p_margin_B;
+			if (distance_squared > combined_radius * combined_radius) {
+				if (p_collector->sep_axis) {
+					*p_collector->sep_axis = separation / Math::sqrt(distance_squared);
+				}
+				return;
+			}
+
+			p_collector->collided = true;
+			if (p_collector->callback) {
+				const Vector2 normal = separation / Math::sqrt(distance_squared);
+				p_collector->normal = normal;
+				p_collector->call(center - normal * circle_radius, closest + normal * p_margin_B);
+				if (p_collector->sep_axis && *p_collector->sep_axis != Vector2()) {
+					*p_collector->sep_axis = Vector2();
+				}
+			}
+			return;
+		}
+	}
 
 	SeparatorAxisTest2D<GodotCircleShape2D, GodotRectangleShape2D> separator(circle_A, p_transform_a, rectangle_B, p_transform_b, p_collector, p_motion_a, p_motion_b, p_cast_A, p_cast_B, p_with_margin, p_margin_A, p_margin_B);
 
@@ -692,6 +916,48 @@ static void _collision_circle_capsule(const GodotShape2D *p_a, const Transform2D
 	const GodotCircleShape2D *circle_A = static_cast<const GodotCircleShape2D *>(p_a);
 	const GodotCapsuleShape2D *capsule_B = static_cast<const GodotCapsuleShape2D *>(p_b);
 
+	// Like the specialized capsule/circle manifold in Box2D, find the nearest
+	// point on the capsule's center segment instead of testing multiple SAT axes.
+	// Preserve the SAT path for moving, scaled, degenerate or coincident shapes.
+	const real_t half_segment = capsule_B->get_height() * real_t(0.5) - capsule_B->get_radius();
+	if (!p_cast_A && !p_cast_B && p_margin_A >= 0.0 && p_margin_B >= 0.0 &&
+			circle_A->get_radius() >= 0.0 && capsule_B->get_radius() >= 0.0 &&
+			half_segment >= 0.0 && _is_unit_orthogonal_transform(p_transform_a) &&
+			_is_unit_orthogonal_transform(p_transform_b)) {
+		const Vector2 center_A = p_transform_a.get_origin();
+		const Vector2 center_B = p_transform_b.get_origin();
+		const Vector2 capsule_axis = p_transform_b.columns[1];
+		const real_t position = CLAMP((center_A - center_B).dot(capsule_axis), -half_segment, half_segment);
+		const Vector2 closest_B = center_B + capsule_axis * position;
+		const Vector2 difference = center_A - closest_B;
+		const real_t distance_squared = difference.length_squared();
+
+		// At an exact centerline coincidence the SAT solver determines a stable
+		// contact direction from the capsule axis (or its cached separating axis).
+		if (distance_squared > 0.0) {
+			const real_t radius_A = circle_A->get_radius() + p_margin_A;
+			const real_t radius_B = capsule_B->get_radius() + p_margin_B;
+			const real_t total_radius = radius_A + radius_B;
+			if (distance_squared > total_radius * total_radius) {
+				if (p_collector->sep_axis) {
+					*p_collector->sep_axis = difference / Math::sqrt(distance_squared);
+				}
+				return;
+			}
+
+			p_collector->collided = true;
+			if (p_collector->callback) {
+				const Vector2 normal = difference / Math::sqrt(distance_squared);
+				p_collector->normal = normal;
+				p_collector->call(center_A - normal * radius_A, closest_B + normal * radius_B);
+				if (p_collector->sep_axis && *p_collector->sep_axis != Vector2()) {
+					*p_collector->sep_axis = Vector2();
+				}
+			}
+			return;
+		}
+	}
+
 	SeparatorAxisTest2D<GodotCircleShape2D, GodotCapsuleShape2D> separator(circle_A, p_transform_a, capsule_B, p_transform_b, p_collector, p_motion_a, p_motion_b, p_cast_A, p_cast_B, p_with_margin, p_margin_A, p_margin_B);
 
 	if (!separator.test_previous_axis()) {
@@ -723,6 +989,84 @@ static void _collision_circle_capsule(const GodotShape2D *p_a, const Transform2D
 static void _collision_circle_convex_polygon(const GodotShape2D *p_a, const Transform2D &p_transform_a, const GodotShape2D *p_b, const Transform2D &p_transform_b, _CollectorCallback2D *p_collector, const Vector2 &p_motion_a, const Vector2 &p_motion_b, bool p_cast_A, bool p_cast_B, bool p_with_margin, real_t p_margin_A, real_t p_margin_B) {
 	const GodotCircleShape2D *circle_A = static_cast<const GodotCircleShape2D *>(p_a);
 	const GodotConvexPolygonShape2D *convex_B = static_cast<const GodotConvexPolygonShape2D *>(p_b);
+
+	// Specialized circle/polygon narrow phase inspired by Box2D: compare the
+	// circle against the nearest polygon boundary point in polygon-local space.
+	// This avoids SAT support projections on separated and exterior contacts.
+	// Embedded centers, degenerate edges, casts and non-rigid transforms use SAT.
+	if (!p_cast_A && !p_cast_B && p_margin_A >= 0.0 && p_margin_B >= 0.0 &&
+			circle_A->get_radius() >= 0.0 && convex_B->get_point_count() >= 3 &&
+			_is_unit_orthogonal_transform(p_transform_a) &&
+			_is_unit_orthogonal_transform(p_transform_b)) {
+		const Vector2 center_world = p_transform_a.get_origin();
+		const Vector2 center_local = p_transform_b.basis_xform_inv(center_world - p_transform_b.get_origin());
+		const int point_count = convex_B->get_point_count();
+		real_t distance_squared = -1.0;
+		Vector2 closest_local;
+		bool has_positive_cross = false;
+		bool has_negative_cross = false;
+		bool valid_edges = true;
+
+		for (int i = 0; i < point_count; i++) {
+			const Vector2 start = convex_B->get_point(i);
+			const Vector2 end = convex_B->get_point(i + 1 == point_count ? 0 : i + 1);
+			const Vector2 edge = end - start;
+			const real_t edge_length_squared = edge.length_squared();
+			if (edge_length_squared <= CMP_EPSILON * CMP_EPSILON) {
+				valid_edges = false;
+				break;
+			}
+
+			const Vector2 from_start = center_local - start;
+			const real_t cross = edge.cross(from_start);
+			has_positive_cross |= cross > 0.0;
+			has_negative_cross |= cross < 0.0;
+
+			const real_t fraction = CLAMP(from_start.dot(edge) / edge_length_squared, real_t(0.0), real_t(1.0));
+			const Vector2 candidate = start + edge * fraction;
+			const real_t candidate_distance_squared = center_local.distance_squared_to(candidate);
+			if (distance_squared < 0.0 || candidate_distance_squared < distance_squared) {
+				distance_squared = candidate_distance_squared;
+				closest_local = candidate;
+			}
+		}
+
+		// Interior containment is sufficient for overlap-only queries; they
+		// do not need a contact normal or SAT support projections.
+		if (valid_edges && (has_positive_cross != has_negative_cross) && !p_collector->callback) {
+			p_collector->collided = true;
+			if (p_collector->sep_axis) {
+				*p_collector->sep_axis = Vector2();
+			}
+			return;
+		}
+
+		// A valid convex polygon has a consistent edge orientation. If the
+		// center is inside (or on the boundary), SAT retains its stable normal.
+		if (valid_edges && has_positive_cross && has_negative_cross && distance_squared > 0.0) {
+			const real_t radius_A = circle_A->get_radius() + p_margin_A;
+			const real_t total_radius = radius_A + p_margin_B;
+			const Vector2 outward_local = center_local - closest_local;
+			if (distance_squared > total_radius * total_radius) {
+				if (p_collector->sep_axis) {
+					*p_collector->sep_axis = p_transform_b.basis_xform(outward_local / Math::sqrt(distance_squared));
+				}
+				return;
+			}
+
+			p_collector->collided = true;
+			if (p_collector->callback) {
+				const Vector2 normal = p_transform_b.basis_xform(outward_local / Math::sqrt(distance_squared));
+				p_collector->normal = normal;
+				p_collector->call(center_world - normal * radius_A,
+						p_transform_b.xform(closest_local) + normal * p_margin_B);
+			}
+			if (p_collector->sep_axis) {
+				*p_collector->sep_axis = Vector2();
+			}
+			return;
+		}
+	}
 
 	SeparatorAxisTest2D<GodotCircleShape2D, GodotConvexPolygonShape2D> separator(circle_A, p_transform_a, convex_B, p_transform_b, p_collector, p_motion_a, p_motion_b, p_cast_A, p_cast_B, p_with_margin, p_margin_A, p_margin_B);
 
@@ -773,13 +1117,23 @@ static void _collision_rectangle_rectangle(const GodotShape2D *p_a, const Transf
 		return;
 	}
 
-	//box faces B
-	if (!separator.test_axis(p_transform_b.columns[0].normalized())) {
-		return;
-	}
+	// Box2D-style SAT axis deduplication: rectangles with exactly equal
+	// basis vectors have identical face directions. The two axes of B
+	// would repeat the same support projections already tested for A.
+	// Exact comparison is important: even a small relative rotation can
+	// introduce new separating axes. The cast, margin and manifold paths
+	// remain unchanged for all configurations.
+	const bool identical_rectangle_axes = p_transform_a.columns[0] == p_transform_b.columns[0] &&
+			p_transform_a.columns[1] == p_transform_b.columns[1];
+	if (!identical_rectangle_axes) {
+		// box faces B
+		if (!separator.test_axis(p_transform_b.columns[0].normalized())) {
+			return;
+		}
 
-	if (!separator.test_axis(p_transform_b.columns[1].normalized())) {
-		return;
+		if (!separator.test_axis(p_transform_b.columns[1].normalized())) {
+			return;
+		}
 	}
 
 	if (p_with_margin) {
@@ -969,6 +1323,141 @@ static void _collision_capsule_capsule(const GodotShape2D *p_a, const Transform2
 
 	if (!separator.test_previous_axis()) {
 		return;
+	}
+
+	bool exact_overlap_known = false;
+
+	// Box2D-style closest-segment test: avoid SAT projections and support queries
+	// for separated capsules, and directly resolve unambiguous end-cap contacts.
+	// Parallel/overlapping segment contacts still use SAT for a stable manifold.
+	const real_t half_A = capsule_A->get_height() * real_t(0.5) - capsule_A->get_radius();
+	const real_t half_B = capsule_B->get_height() * real_t(0.5) - capsule_B->get_radius();
+	if (!p_cast_A && !p_cast_B && p_margin_A >= 0.0 && p_margin_B >= 0.0 &&
+			capsule_A->get_radius() >= 0.0 && capsule_B->get_radius() >= 0.0 &&
+			half_A > 0.0 && half_B > 0.0 &&
+			_is_unit_orthogonal_transform(p_transform_a) && _is_unit_orthogonal_transform(p_transform_b)) {
+		const Vector2 start_A = p_transform_a.get_origin() - p_transform_a.columns[1] * half_A;
+		const Vector2 start_B = p_transform_b.get_origin() - p_transform_b.columns[1] * half_B;
+		const Vector2 direction_A = p_transform_a.columns[1] * (real_t(2.0) * half_A);
+		const Vector2 direction_B = p_transform_b.columns[1] * (real_t(2.0) * half_B);
+		const Vector2 between = start_A - start_B;
+		const real_t length_squared_A = direction_A.length_squared();
+		const real_t length_squared_B = direction_B.length_squared();
+		const real_t dot_AB = direction_A.dot(direction_B);
+		const real_t dot_A_between = direction_A.dot(between);
+		const real_t dot_B_between = direction_B.dot(between);
+		const real_t denominator = length_squared_A * length_squared_B - dot_AB * dot_AB;
+
+		// Skip the shortcut entirely for nearly parallel axes: picking the
+		// first endpoint as a closest-point seed can miss long shallow crossings.
+		if (denominator > length_squared_A * length_squared_B * real_t(0.0001)) {
+			// Closest points on two finite center segments.
+			real_t fraction_A = CLAMP((dot_AB * dot_B_between - dot_A_between * length_squared_B) / denominator, real_t(0.0), real_t(1.0));
+			real_t fraction_B = (dot_AB * fraction_A + dot_B_between) / length_squared_B;
+			if (fraction_B < 0.0) {
+				fraction_B = 0.0;
+				fraction_A = CLAMP(-dot_A_between / length_squared_A, real_t(0.0), real_t(1.0));
+			} else if (fraction_B > 1.0) {
+				fraction_B = 1.0;
+				fraction_A = CLAMP((dot_AB - dot_A_between) / length_squared_A, real_t(0.0), real_t(1.0));
+			}
+
+			const Vector2 closest_A = start_A + direction_A * fraction_A;
+			const Vector2 closest_B = start_B + direction_B * fraction_B;
+			const Vector2 separation = closest_A - closest_B;
+			const real_t distance_squared = separation.length_squared();
+			const real_t radius_A = capsule_A->get_radius() + p_margin_A;
+			const real_t radius_B = capsule_B->get_radius() + p_margin_B;
+			const real_t combined_radius = radius_A + radius_B;
+
+			if (distance_squared > combined_radius * combined_radius) {
+				if (p_collector->sep_axis) {
+					*p_collector->sep_axis = separation / Math::sqrt(distance_squared);
+				}
+				return;
+			}
+
+			// The exact centerline-distance test has already ruled out separation.
+			// Boolean queries don't need to run through SAT again.
+			if (!p_collector->callback) {
+				p_collector->collided = true;
+				if (p_collector->sep_axis) {
+					*p_collector->sep_axis = Vector2();
+				}
+				return;
+			}
+
+			// Endpoint contacts have a single well-defined normal. For side-side
+			// contacts, parallelism or coincident centerlines preserve SAT clipping.
+			if (distance_squared > 0.0 &&
+					(fraction_A == 0.0 || fraction_A == 1.0 || fraction_B == 0.0 || fraction_B == 1.0)) {
+				p_collector->collided = true;
+				if (p_collector->callback) {
+					const Vector2 normal = separation / Math::sqrt(distance_squared);
+					p_collector->normal = normal;
+					p_collector->call(closest_A - normal * radius_A, closest_B + normal * radius_B);
+				}
+				if (p_collector->sep_axis) {
+					*p_collector->sep_axis = Vector2();
+				}
+				return;
+			}
+			exact_overlap_known = true;
+		}
+	}
+
+	// Capsule center segments give an exact distance test for rigid, stationary
+	// capsules. Reject noncontacts before the SAT support projections, and
+	// answer overlap-only queries without constructing a contact manifold.
+	// Contact-producing queries still use SAT to retain side-side manifolds.
+	if (!exact_overlap_known && !p_cast_A && !p_cast_B && p_margin_A >= 0.0 && p_margin_B >= 0.0 &&
+			capsule_A->get_radius() > 0.0 && capsule_B->get_radius() > 0.0 &&
+			_is_unit_orthogonal_transform(p_transform_a) && _is_unit_orthogonal_transform(p_transform_b)) {
+		const real_t half_segment_A = capsule_A->get_height() * real_t(0.5) - capsule_A->get_radius();
+		const real_t half_segment_B = capsule_B->get_height() * real_t(0.5) - capsule_B->get_radius();
+		if (half_segment_A >= 0.0 && half_segment_B >= 0.0) {
+			const real_t combined_radius = capsule_A->get_radius() + capsule_B->get_radius() + p_margin_A + p_margin_B;
+			const Vector2 center_delta = p_transform_a.get_origin() - p_transform_b.get_origin();
+			const real_t center_distance_squared = center_delta.length_squared();
+			const real_t enclosing_radius = half_segment_A + half_segment_B + combined_radius;
+
+			// A quick conservative enclosing-circle test avoids segment work for
+			// widely separated capsules, including rotated broad-phase false hits.
+			if (center_distance_squared > enclosing_radius * enclosing_radius) {
+				if (p_collector->sep_axis) {
+					*p_collector->sep_axis = center_delta / Math::sqrt(center_distance_squared);
+				}
+				return;
+			}
+
+			// Most dense contacts have nearby centers; retain the old SAT path
+			// there unless the caller needs only a boolean overlap result.
+			if (!p_collector->callback || center_distance_squared > combined_radius * combined_radius) {
+				const Vector2 segment_A = p_transform_a.columns[1] * half_segment_A;
+				const Vector2 segment_B = p_transform_b.columns[1] * half_segment_B;
+				Vector2 closest_A;
+				Vector2 closest_B;
+				const real_t segment_distance = Geometry2D::get_closest_points_between_segments(
+						p_transform_a.get_origin() - segment_A, p_transform_a.get_origin() + segment_A,
+						p_transform_b.get_origin() - segment_B, p_transform_b.get_origin() + segment_B,
+						closest_A, closest_B);
+
+				if (segment_distance > combined_radius) {
+					if (p_collector->sep_axis) {
+						*p_collector->sep_axis = (closest_A - closest_B) / segment_distance;
+					}
+					return;
+				}
+
+				if (!p_collector->callback) {
+					p_collector->collided = true;
+					if (p_collector->sep_axis) {
+						*p_collector->sep_axis = Vector2();
+					}
+					return;
+				}
+			}
+		}
 	}
 
 	if (!separator.test_cast()) {

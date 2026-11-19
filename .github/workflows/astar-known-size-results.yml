@@ -43,6 +43,7 @@ jobs:
       - name: Verify AStar result counts and region bounds
         run: |
           ./bin/godot.linuxbsd.editor.dev.x86_64 --headless --test --test-case="*[AStar3D] Known-size point IDs and connections preserve all entries*"
+          ./bin/godot.linuxbsd.editor.dev.x86_64 --headless --test --test-case="*[AStar3D][Performance] Direct result writes preserve large graph snapshots*"
           ./bin/godot.linuxbsd.editor.dev.x86_64 --headless --test --test-case="*[AStarGrid2D] Pre-sized region data respects grid intersections and order*"
           ./bin/godot.linuxbsd.editor.dev.x86_64 --headless --test --test-case="*[AStar3D] Start heuristic evaluated once per search*"
           ./bin/godot.linuxbsd.editor.dev.x86_64 --headless --test --test-case="*[AStar2D] Start heuristic evaluated once per search*"

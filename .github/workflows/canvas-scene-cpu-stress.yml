@@ -1,0 +1,68 @@
+name: Canvas and SceneTree CPU stress smoke
+
+on:
+  pull_request:
+    branches: [develop]
+    paths:
+      - 'tests/stress/stress.gd'
+      - 'tests/stress/run.py'
+      - 'tests/stress/canvas_scene_perf.gd'
+      - 'tests/stress/test_canvas_scene_perf.py'
+      - 'tests/stress/README.md'
+      - '.github/workflows/canvas-scene-cpu-stress.yml'
+  push:
+    branches: [develop]
+    paths:
+      - 'tests/stress/stress.gd'
+      - 'tests/stress/run.py'
+      - 'tests/stress/canvas_scene_perf.gd'
+      - 'tests/stress/test_canvas_scene_perf.py'
+      - 'tests/stress/README.md'
+      - '.github/workflows/canvas-scene-cpu-stress.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: canvas-scene-stress-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  cpu-scenario-smoke:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Check stress registry and bounded scenario registration
+        run: python3 -m unittest discover -s tests/stress -p 'test_*.py' -v
+      - uses: ./.github/actions/godot-deps
+      - name: Compile native Cgame test editor
+        uses: ./.github/actions/godot-build
+        with:
+          platform: linuxbsd
+          target: editor
+          scons-flags: dev_build=yes tests=yes debug_symbols=no module_mono_enabled=no module_text_server_fb_enabled=yes accesskit=no -j2
+      - name: Parse workload scripts
+        run: |
+          ./bin/godot.linuxbsd.editor.dev.x86_64 --headless --path tests/stress --script res://stress.gd --check-only
+          ./bin/godot.linuxbsd.editor.dev.x86_64 --headless --path tests/stress --script res://canvas_scene_perf.gd --check-only
+      - name: Measure 2D hierarchy and process dispatch with resource caps
+        run: |
+          python3 tests/stress/run.py \
+            --godot ./bin/godot.linuxbsd.editor.dev.x86_64 \
+            --case canvas_transform_2d,process_dispatch --scale 1 \
+            --frames 12 --repeats 1 --timeout 90 --rss-limit-mib 2048 \
+            --output canvas-scene-stress.json
+      - name: Archive measured CPU and RSS results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: canvas-scene-stress
+          path: canvas-scene-stress.json
+          if-no-files-found: warn

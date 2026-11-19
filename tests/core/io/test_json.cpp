@@ -589,4 +589,175 @@ TEST_CASE("[JSON] UTF32 batch parser keeps invalid escapes and identifiers rejec
 	CHECK(json.get_data().get_type() == Variant::NIL);
 }
 
+
+TEST_CASE("[JSON] Dictionary serialization preserves sorted and insertion key order") {
+	Dictionary input;
+	input["z"] = 3;
+	input["a"] = 1;
+	input["m"] = 2;
+
+	CHECK_EQ(JSON::stringify(input, "", false), "{\"z\":3,\"a\":1,\"m\":2}");
+	CHECK_EQ(JSON::stringify(input, "", true), "{\"a\":1,\"m\":2,\"z\":3}");
+	CHECK_EQ(JSON::stringify(input, "  ", false), "{\n  \"z\": 3,\n  \"a\": 1,\n  \"m\": 2\n}");
+	CHECK_EQ(JSON::stringify(input, "  ", true), "{\n  \"a\": 1,\n  \"m\": 2,\n  \"z\": 3\n}");
+
+	Dictionary nested;
+	nested["contents"] = input;
+	nested["unicode"] = String(U"Путь/雪/🚀");
+	for (bool sorted : { false, true }) {
+		const Dictionary decoded = JSON::parse_string(JSON::stringify(nested, "", sorted));
+		CHECK_EQ(decoded["unicode"], Variant(String(U"Путь/雪/🚀")));
+		const Dictionary contents = decoded["contents"];
+		CHECK_EQ(contents["z"], Variant(3));
+		CHECK_EQ(contents["a"], Variant(1));
+		CHECK_EQ(contents["m"], Variant(2));
+	}
+}
+
+TEST_CASE("[JSON] Large dictionary serializes without missing or reordered values") {
+	Dictionary entries;
+	for (int i = 1535; i >= 0; i--) {
+		entries[String("res://entry_") + itos(i)] = i * 13 - 17;
+	}
+
+	for (bool sorted : { false, true }) {
+		const String json = JSON::stringify(entries, "", sorted);
+		CHECK_FALSE(json.is_empty());
+		const Dictionary decoded = JSON::parse_string(json);
+		REQUIRE_EQ(decoded.size(), entries.size());
+		for (int i = 0; i < 1536; i += 13) {
+			CHECK_EQ(decoded[String("res://entry_") + itos(i)], Variant(i * 13 - 17));
+		}
+	}
+
+	const String compact = JSON::stringify(entries, "", false);
+	const int first = compact.find("\"res://entry_1535\"");
+	const int second = compact.find("\"res://entry_1534\"");
+	CHECK(first >= 0);
+	CHECK(second > first);
+}
+
+
+TEST_CASE("[JSON] Native Array and Dictionary Variants retain contents across serialization") {
+	Array nested;
+	nested.push_back(2);
+	nested.push_back(3);
+	Dictionary object;
+	object["ok"] = true;
+	Array source;
+	source.push_back(1);
+	source.push_back(String(U"雪"));
+	source.push_back(nested);
+	source.push_back(object);
+
+	const Variant root(source);
+	for (int i = 0; i < 128; i++) {
+		CHECK_EQ(JSON::stringify(root), "[1,\"雪\",[2,3],{\"ok\":true}]");
+		CHECK_EQ(source.size(), 4);
+		CHECK_EQ(nested.size(), 2);
+		CHECK_EQ(object["ok"], Variant(true));
+	}
+}
+
+TEST_CASE("[JSON] Packed arrays still use the converted Array representation") {
+	PackedInt32Array ints;
+	ints.push_back(-1);
+	ints.push_back(0);
+	ints.push_back(32768);
+	CHECK_EQ(JSON::stringify(Variant(ints)), "[-1,0,32768]");
+
+	PackedStringArray labels;
+	labels.push_back(String(U"雪"));
+	labels.push_back(String(U"🚀"));
+	CHECK_EQ(JSON::stringify(Variant(labels)), "[\"雪\",\"🚀\"]");
+
+	PackedFloat64Array numbers;
+	numbers.push_back(0.5);
+	numbers.push_back(-1.25);
+	const Array decoded = JSON::parse_string(JSON::stringify(Variant(numbers)));
+	REQUIRE_EQ(decoded.size(), 2);
+	CHECK_EQ(decoded[0], Variant(0.5));
+	CHECK_EQ(decoded[1], Variant(-1.25));
+}
+
+TEST_CASE("[JSON] Deep nested native arrays stringify repeatedly without corruption") {
+	Array root;
+	for (int i = 0; i < 32; i++) {
+		Array outer;
+		for (int j = 0; j < 32; j++) {
+			outer.push_back(i * 32 + j);
+		}
+		root.push_back(outer);
+	}
+	const Variant root_variant(root);
+	for (int run = 0; run < 16; run++) {
+		const Array decoded = JSON::parse_string(JSON::stringify(root_variant));
+		REQUIRE_EQ(decoded.size(), 32);
+		for (int i = 0; i < 32; i++) {
+			const Array values = decoded[i];
+			REQUIRE_EQ(values.size(), 32);
+			CHECK_EQ(values[0], Variant(i * 32));
+			CHECK_EQ(values[31], Variant(i * 32 + 31));
+		}
+	}
+}
+
+template <typename T>
+static void check_packed_array_json_equivalent(const T &p_values) {
+	// Previous stringify behavior converted every packed element to a Variant
+	// by constructing a full Array. Keep that conversion as the test oracle.
+	const Variant packed(p_values);
+	const Array reference = packed;
+	CHECK_EQ(JSON::stringify(packed), JSON::stringify(reference));
+	CHECK_EQ(JSON::stringify(packed, "\t", false, true), JSON::stringify(reference, "\t", false, true));
+}
+
+TEST_CASE("[JSON] Packed arrays stream with the same formatting as an Array") {
+	PackedInt32Array int32_values;
+	PackedInt64Array int64_values;
+	PackedFloat32Array float32_values;
+	PackedFloat64Array float64_values;
+	PackedStringArray string_values;
+
+	check_packed_array_json_equivalent(int32_values);
+	check_packed_array_json_equivalent(int64_values);
+	check_packed_array_json_equivalent(float32_values);
+	check_packed_array_json_equivalent(float64_values);
+	check_packed_array_json_equivalent(string_values);
+
+	for (int i = 0; i < 1024; i++) {
+		int32_values.push_back((i % 2 == 0 ? 1 : -1) * i);
+		int64_values.push_back((int64_t(1) << 42) + i);
+		float32_values.push_back((i % 7) * 0.5f);
+		float64_values.push_back((i % 9) * -0.125);
+		string_values.push_back(String(U"ресурс/雪/") + itos(i));
+	}
+	check_packed_array_json_equivalent(int32_values);
+	check_packed_array_json_equivalent(int64_values);
+	check_packed_array_json_equivalent(float32_values);
+	check_packed_array_json_equivalent(float64_values);
+	check_packed_array_json_equivalent(string_values);
+
+	const Array parsed = JSON::parse_string(JSON::stringify(Variant(int32_values)));
+	REQUIRE_EQ(parsed.size(), int32_values.size());
+	CHECK_EQ(parsed[0], Variant(0));
+	CHECK_EQ(parsed[1], Variant(-1));
+	CHECK_EQ(parsed[1023], Variant(-1023));
+}
+
+TEST_CASE("[JSON] Large packed primitive arrays do not lose elements or ordering") {
+	PackedInt32Array values;
+	REQUIRE_EQ(values.resize(16384), OK);
+	int32_t *ptr = values.ptrw();
+	for (int i = 0; i < values.size(); i++) {
+		ptr[i] = i * 7 - 1234;
+	}
+	const String encoded = JSON::stringify(Variant(values));
+	const Array decoded = JSON::parse_string(encoded);
+	REQUIRE_EQ(decoded.size(), values.size());
+	for (int i = 0; i < values.size(); i += 113) {
+		CHECK_EQ(decoded[i], Variant(i * 7 - 1234));
+	}
+}
+
 } // namespace TestJSON

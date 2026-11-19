@@ -31,6 +31,8 @@
 #pragma once
 
 #include "godot_broad_phase_3d.h"
+#include "godot_body_3d.h"
+#include "godot_soft_body_3d.h"
 
 #include "core/math/bvh.h"
 
@@ -39,8 +41,33 @@ class GodotBroadPhase3DBVH : public GodotBroadPhase3D {
 	class UserPairTestFunction {
 	public:
 		static bool user_pair_check(const T *p_a, const T *p_b) {
-			// return false if no collision, decided by masks etc
-			return p_a->interacts_with(p_b);
+			// Reject invalid pairs before allocating constraint records or
+			// touching the narrowphase. Area monitoring is unaffected.
+			if (!p_a->interacts_with(p_b)) {
+				return false;
+			}
+			if (p_a->get_type() == GodotCollisionObject3D::TYPE_BODY &&
+					p_b->get_type() == GodotCollisionObject3D::TYPE_BODY) {
+				const GodotBody3D *body_a = static_cast<const GodotBody3D *>(p_a);
+				const GodotBody3D *body_b = static_cast<const GodotBody3D *>(p_b);
+				// Either endpoint can exclude the pair (including joint exceptions).
+				return !body_a->has_exception(body_b->get_self()) &&
+						!body_b->has_exception(body_a->get_self());
+			}
+			// Soft bodies share the same exception semantics as rigid bodies.
+			// Keep area/soft-body monitoring pairs untouched.
+			if ((p_a->get_type() == GodotCollisionObject3D::TYPE_BODY &&
+					p_b->get_type() == GodotCollisionObject3D::TYPE_SOFT_BODY) ||
+					(p_a->get_type() == GodotCollisionObject3D::TYPE_SOFT_BODY &&
+						p_b->get_type() == GodotCollisionObject3D::TYPE_BODY)) {
+				const GodotBody3D *body = static_cast<const GodotBody3D *>(
+						p_a->get_type() == GodotCollisionObject3D::TYPE_BODY ? p_a : p_b);
+				const GodotSoftBody3D *soft_body = static_cast<const GodotSoftBody3D *>(
+						p_a->get_type() == GodotCollisionObject3D::TYPE_SOFT_BODY ? p_a : p_b);
+				return !body->has_exception(soft_body->get_self()) &&
+						!soft_body->has_exception(body->get_self());
+			}
+			return true;
 		}
 	};
 
@@ -71,10 +98,16 @@ class GodotBroadPhase3DBVH : public GodotBroadPhase3D {
 	void *pair_userdata = nullptr;
 	UnpairCallback unpair_callback = nullptr;
 	void *unpair_userdata = nullptr;
+	uint32_t batch_depth = 0;
 
 public:
 	// 0 is an invalid ID
 	virtual ID create(GodotCollisionObject3D *p_object, int p_subindex = 0, const AABB &p_aabb = AABB(), bool p_static = false) override;
+	virtual ID create_deferred(GodotCollisionObject3D *p_object, int p_subindex, const AABB &p_aabb, bool p_static) override;
+	virtual void flush_pending_pairs() override;
+	virtual void force_collision_check(ID p_id) override;
+	virtual void begin_batch() override;
+	virtual void end_batch() override;
 	virtual void move(ID p_id, const AABB &p_aabb) override;
 	virtual void set_static(ID p_id, bool p_static) override;
 	virtual void remove(ID p_id) override;
@@ -84,7 +117,10 @@ public:
 	virtual int get_subindex(ID p_id) const override;
 
 	virtual int cull_point(const Vector3 &p_point, GodotCollisionObject3D **p_results, int p_max_results, int *p_result_indices = nullptr) override;
+	virtual void cast_segment(const Vector3 &p_from, const Vector3 &p_to, SegmentCastCallback p_callback, void *p_userdata) override;
 	virtual int cull_segment(const Vector3 &p_from, const Vector3 &p_to, GodotCollisionObject3D **p_results, int p_max_results, int *p_result_indices = nullptr) override;
+	virtual void visit_point(const Vector3 &p_point, QueryVisitor p_visitor, void *p_userdata) override;
+	virtual void visit_aabb(const AABB &p_aabb, QueryVisitor p_visitor, void *p_userdata) override;
 	virtual int cull_aabb(const AABB &p_aabb, GodotCollisionObject3D **p_results, int p_max_results, int *p_result_indices = nullptr) override;
 
 	virtual void set_pair_callback(PairCallback p_pair_callback, void *p_userdata) override;

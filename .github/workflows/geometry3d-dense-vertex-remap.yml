@@ -1,0 +1,37 @@
+name: Geometry3D direct vertex remapping regressions
+
+on:
+  push:
+    branches: [develop]
+    paths:
+      - "core/math/geometry_3d.cpp"
+      - "tests/core/math/test_geometry_3d.cpp"
+      - ".github/workflows/geometry3d-dense-vertex-remap.yml"
+  pull_request:
+    branches: [develop]
+    paths:
+      - "core/math/geometry_3d.cpp"
+      - "tests/core/math/test_geometry_3d.cpp"
+      - ".github/workflows/geometry3d-dense-vertex-remap.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  remap-native-regression:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+      - uses: ./.github/actions/godot-deps
+      - uses: ./.github/actions/godot-build
+        with:
+          platform: linuxbsd
+          target: editor
+          scons-flags: dev_build=yes tests=yes debug_symbols=no module_mono_enabled=no accesskit=no
+      - name: Verify dense vertex remapping and face/edge preservation
+        run: |
+          timeout 300s ./bin/godot.linuxbsd.editor.dev.x86_64 --headless --test --test-case="*[Geometry3D]*" --no-colors

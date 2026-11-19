@@ -21,25 +21,32 @@ import tempfile
 import time
 from typing import Any
 
+from process_tree import sample as sample_process_tree, isolation_options, kill_group
+
 PREFIX = "STRESS_RESULT:"
 # A zero exit status is not enough: the engine can log script/runtime errors.
 ENGINE_ERROR = re.compile(r"(?m)^(?:SCRIPT ERROR:|ERROR:|E\s+\d+:)")
 CASES = (
-    "containers", "strings", "script_vm", "math", "signals",
-    "scene_tree", "packed_scene", "images", "json", "stream",
-    "file_io", "threads", "physics_2d", "physics_3d",
-    "memory_churn", "astar_grid", "astar_graph", "tweens", "audio_buffers",
-    "variant_codec", "packet_stream", "ui_layout", "render_2d", "render_3d",
+    "containers", "array_literals", "dictionary_snapshot", "strings", "script_vm", "math", "signals",
+    "scene_tree", "packed_scene", "images", "json", "stream", "stream_bulk",
+    "file_io", "threads", "physics_2d", "physics_contacts_zero_friction_2d", "physics_contacts_friction_2d", "physics_contact_manifolds_2d", "physics_contact_block_solver_2d", "physics_3d", "physics_damping_legacy_2d", "physics_damping_implicit_2d", "physics_damping_legacy_3d", "physics_damping_implicit_3d", "physics_box_box_axis_aligned_3d", "physics_box_box_rotated_3d", "physics_box_box_misaligned_3d", "physics_face_clip_dense_3d", "physics_face_clip_rotated_3d", "physics_sphere_box_identity_3d", "physics_sphere_box_rotated_3d", "physics_circle_rectangle_embedded_2d", "physics_circle_rectangle_exterior_2d", "physics_circles_coincident_2d", "physics_circles_offset_2d", "physics_fluid_2d_disabled", "physics_fluid_2d_enabled", "physics_fluid_3d_disabled", "physics_fluid_3d_enabled", "physics_rect_sat_axis_aligned_2d", "physics_rect_sat_shared_rotation_2d", "physics_rect_sat_misaligned_2d", "physics_box_capsule_near_3d", "physics_box_capsule_far_3d", "physics_box_cylinder_near_3d", "physics_box_cylinder_far_3d", "physics_block_solver_sequential_3d", "physics_block_solver_coupled_3d", "physics_frictionless_3d", "physics_soft_contacts_zero_friction_3d", "physics_soft_contacts_friction_3d", "physics_ccd_2d", "physics_ccd_rotational_radial_2d", "physics_ccd_rotational_tight_2d", "physics_ccd_rotational_radial_3d", "physics_ccd_rotational_tight_3d", "physics_separated_pairs_2d", "physics_separated_pairs_3d", "physics_dense_2d", "physics_dense_3d", "physics_pending_3d", "physics_ccd_3d", "physics_joint_chain_2d", "physics_large_island_serial_2d", "physics_large_island_parallel_2d", "physics_multi_island_serial_2d", "physics_multi_island_parallel_2d", "physics_joint_chain_3d", "physics_large_island_3d_serial", "physics_large_island_3d_parallel", "physics_large_island_3d_priority", "physics_large_island_3d_topology_serial", "physics_large_island_3d_topology_parallel", "physics_multi_island_3d_serial", "physics_multi_island_3d_parallel", "physics_multi_island_3d_two_large", "physics_sparse_2d", "physics_sparse_3d", "physics_proxy_same_aabb_2d", "physics_proxy_same_aabb_3d", "physics_proxies_2d", "physics_proxies_3d", "physics_rid_sparse_2d", "physics_rid_sparse_3d", "physics_rid_moving_2d", "physics_rid_moving_3d", "physics_restitution_2d", "physics_restitution_3d",
+    "object_churn", "memory_churn", "astar_grid", "astar_grid_neighbors", "astar_grid_jps", "astar_grid_fill", "astar_grid_rebuild", "astar_relax_2d", "astar_relax_3d", "astar_graph", "tweens", "audio_buffers",
+    "variant_codec", "packet_stream", "packet_tx_batch", "packet_rx_batch", "packet_variant_reuse", "ui_layout", "grid_reflow", "box_reflow", "flow_reflow", "render_2d", "render_3d", "render_ellipse_2d", "render_light_culling_3d",
     "resource_load",
     "input_map",
     "transform_hierarchy",
-    "node_paths", "regex", "compression", "hashing",
+    "node_paths", "regex", "compression", "gzip_stream", "hashing",
     "resource_io", "astar_3d", "thread_contention",
     "geometry_2d", "mesh_build", "input_dispatch", "image_codec", "group_calls",
     "packed_arrays", "sorting", "animation_tracks", "physics_raycast_2d", "physics_raycast_3d", "render_multimesh_3d",
-    "small_file_io", "scene_churn",
+    "object_lifecycle", "scene_churn",
+    "scene_reparent", "scene_move", "resource_roundtrip", "audio_bus_churn",
+    "bitmap_rects", "bitmap_pipeline", "bitmap_morphology",
+    "curve_tessellation_2d", "curve_tessellation_3d", "curve_bake", "curve_nearest",
+    "canvas_transform_2d", "process_dispatch",
+    "physics_filter_toggle_2d", "physics_filter_toggle_3d", "physics_motion_filter_overflow_2d", "physics_motion_filter_overflow_3d", "physics_motion_exclusions_3d", "physics_motion_exclusions_2d", "physics_exception_pairs_2d", "physics_exception_pairs_3d", "physics_bvh_streaming_2d", "physics_bvh_streaming_3d", "physics_compound_filter_batch_2d", "physics_compound_filter_batch_3d", "physics_soft_body_xpbd_area_3d", "physics_soft_body_xpbd_volume_3d", "physics_soft_body_xpbd_dihedral_3d", "physics_soft_body_self_collision_3d", "physics_soft_body_edge_collision_3d", "physics_soft_body_ccd_3d", "physics_contact_angular_friction_3d", "physics_one_way_overflow_2d", "small_file_io",
 )
-RENDER_CASES = frozenset(("render_2d", "render_3d", "render_multimesh_3d"))
+RENDER_CASES = frozenset(("render_2d", "render_3d", "render_ellipse_2d", "render_light_culling_3d", "render_multimesh_3d"))
 # Each scenario runs in a fresh process. No preset has unlimited RSS or wall time.
 PRESETS = {
     "smoke": dict(scale=1, frames=12, repeats=1, timeout=90.0, rss_mib=2048),
@@ -64,7 +71,29 @@ def rss_mib(pid: int) -> float | None:
                 return int(line.split()[1]) / 1024.0
     except (OSError, ValueError, IndexError):
         pass
+    if sys.platform == "darwin":
+        return macos_ps_rss_mib(pid)
     return None
+
+
+def macos_ps_rss_mib(pid: int) -> float | None:
+    """Get resident KiB from ps on macOS when psutil is unavailable."""
+    try:
+        result = subprocess.run(
+            ["ps", "-o", "rss=", "-p", str(pid)],
+            capture_output=True, text=True, timeout=1.0, check=False,
+        )
+        if result.returncode != 0:
+            return None
+        kib = result.stdout.strip()
+        return int(kib) / 1024.0 if kib else None
+    except (OSError, ValueError, subprocess.TimeoutExpired):
+        return None
+
+
+def sampling_interval_seconds(operating_system: str, psutil_available: bool) -> float:
+    """Reduce ps subprocess overhead on macOS without psutil."""
+    return 0.25 if operating_system == "darwin" and not psutil_available else 0.05
 
 
 def cpu_seconds(pid: int) -> float | None:
@@ -102,13 +131,6 @@ def parse_result(log: str, case: str, scale: int, frames: int, seed: int) -> dic
     detail = data.get("detail")
     if not isinstance(detail, dict) or "error" in detail:
         raise ValueError("Engine scenario failed: %r" % detail)
-    phases = detail.get("phases_ms", {})
-    if not isinstance(phases, dict) or any(
-        not isinstance(name, str) or not isinstance(value, (int, float))
-        or not math.isfinite(value) or value < 0
-        for name, value in phases.items()
-    ):
-        raise ValueError("Invalid phase measurements")
     return data
 
 
@@ -145,41 +167,56 @@ def run_once(cmd: list[str], timeout: float, rss_limit_mib: float,
              case: str, scale: int, frames: int, seed: int,
              require_marker: bool = True) -> dict[str, Any]:
     start = time.monotonic()
+    try:
+        import psutil  # type: ignore[import-not-found]
+        psutil_available = True
+    except ImportError:
+        psutil_available = False
+    sample_interval = sampling_interval_seconds(sys.platform, psutil_available)
     maximum_rss: float | None = None
     latest_cpu: float | None = None
+    peak_processes = 0
     failure = None
     # A file, rather than a PIPE, avoids deadlock if the engine emits megabytes of errors.
     with tempfile.TemporaryFile(mode="w+t", encoding="utf-8", errors="replace") as output:
         try:
-            process = subprocess.Popen(cmd, stdout=output, stderr=subprocess.STDOUT)
+            process = subprocess.Popen(cmd, stdout=output, stderr=subprocess.STDOUT,
+                                       **isolation_options())
         except OSError as exc:
             return {"status": "failed", "failure": "launch: %s" % exc,
                     "wall_seconds": 0.0, "peak_rss_mib": None, "exit_code": None}
         while process.poll() is None:
             elapsed = time.monotonic() - start
-            current_rss = rss_mib(process.pid)
-            current_cpu = cpu_seconds(process.pid)
+            current_rss, current_cpu, process_count = sample_process_tree(process.pid)
+            peak_processes = max(peak_processes, process_count)
             if current_cpu is not None:
-                latest_cpu = current_cpu
+                latest_cpu = max(latest_cpu or 0.0, current_cpu)
             if current_rss is not None:
                 maximum_rss = max(maximum_rss or 0.0, current_rss)
                 if current_rss > rss_limit_mib:
                     failure = "rss_limit_exceeded"
             if elapsed > timeout:
                 failure = "timeout"
+            elif elapsed > 1.0 and maximum_rss is None:
+                # Do not report an enforced RAM limit if monitoring is absent.
+                failure = "rss_monitor_unavailable"
             if failure is not None:
-                process.kill()
+                kill_group(process)
                 break
-            time.sleep(0.05)
+            time.sleep(sample_interval)
         process.wait()
         elapsed = time.monotonic() - start
-        output.seek(0)
+        # Avoid unbounded RAM usage when a child emits a large error log.
+        output.seek(0, os.SEEK_END)
+        log_size = output.tell()
+        output.seek(max(0, log_size - 2 * 1024 * 1024))
         log = output.read()
     result: dict[str, Any] = {
         "status": "passed",
         "wall_seconds": round(elapsed, 6),
         "peak_rss_mib": round(maximum_rss, 3) if maximum_rss is not None else None,
         "cpu_seconds": round(latest_cpu, 6) if latest_cpu is not None else None,
+        "peak_processes": peak_processes,
         "exit_code": process.returncode,
     }
     if failure is None and process.returncode != 0:
@@ -204,32 +241,74 @@ def summarize(runs: list[dict[str, Any]]) -> dict[str, Any]:
     memories = [r["peak_rss_mib"] for r in runs if r["peak_rss_mib"] is not None]
     cpu_times = [r["cpu_seconds"] for r in passed if r.get("cpu_seconds") is not None]
     engine_times = sorted(r["engine"]["duration_ms"] for r in passed if r.get("engine"))
-    phase_samples: dict[str, list[float]] = {}
-    for run in passed:
-        for phase, value in run.get("engine", {}).get("detail", {}).get("phases_ms", {}).items():
-            phase_samples.setdefault(phase, []).append(value)
-    phases = {phase: round(statistics.median(values), 3)
-              for phase, values in sorted(phase_samples.items())}
     engine_memory = [r["engine"]["engine_memory_after_bytes"] for r in passed
                      if isinstance(r.get("engine"), dict) and isinstance(r["engine"].get("engine_memory_after_bytes"), (int, float))]
+    phase_values: dict[str, list[float]] = {}
+    for run in passed:
+        engine = run.get("engine")
+        detail = engine.get("detail", {}) if isinstance(engine, dict) else {}
+        if not isinstance(detail, dict):
+            continue
+        for metric, value in detail.items():
+            if (metric.endswith("_ms") and isinstance(value, (int, float))
+                    and not isinstance(value, bool) and math.isfinite(value) and value >= 0):
+                phase_values.setdefault(metric, []).append(float(value))
+    # Incomplete or intermittently missing metrics would mislead a baseline.
+    phase_medians = {
+        key: round(statistics.median(values), 6)
+        for key, values in sorted(phase_values.items())
+        if len(values) == len(passed)
+    }
+
     return {
         "status": "passed" if len(passed) == len(runs) else "failed",
         "median_wall_seconds": round(statistics.median(wall), 6) if wall else None,
         "p95_wall_seconds": round(wall[math.ceil(0.95 * len(wall)) - 1], 6) if wall else None,
+        "p99_wall_seconds": round(wall[math.ceil(0.99 * len(wall)) - 1], 6) if wall else None,
         "max_rss_mib": round(max(memories), 3) if memories else None,
+        "max_processes": max((r.get("peak_processes", 0) for r in runs), default=0),
         "median_cpu_seconds": round(statistics.median(cpu_times), 6) if cpu_times else None,
         "median_engine_ms": round(statistics.median(engine_times), 6) if engine_times else None,
         "p95_engine_ms": round(engine_times[math.ceil(0.95 * len(engine_times)) - 1], 6) if engine_times else None,
         "max_engine_memory_bytes": max(engine_memory) if engine_memory else None,
-        "phase_median_ms": phases,
+        "phase_median_ms": phase_medians,
         "runs": runs,
     }
+
+
+
+def check_absolute_limits(cases: dict[str, Any], max_frame_ms: float | None,
+                          max_physics_ms: float | None, max_vram_mib: float | None) -> list[str]:
+    """Enforce explicit local budgets against measured scenario maxima."""
+    failures = []
+    metrics = (
+        ("peak_frame_ms", max_frame_ms, "ms"),
+        ("peak_physics_ms", max_physics_ms, "ms"),
+        ("peak_video_memory_bytes", None if max_vram_mib is None else max_vram_mib * 1048576, "bytes"),
+    )
+    for case_name, case in cases.items():
+        for number, run in enumerate(case.get("runs", []), start=1):
+            if run.get("status") != "passed":
+                continue
+            detail = run.get("engine", {}).get("detail", {})
+            if not isinstance(detail, dict):
+                continue
+            for field, limit, unit in metrics:
+                if limit is None or field not in detail:
+                    continue
+                reading = detail[field]
+                if not isinstance(reading, (int, float)) or not math.isfinite(reading) or reading < 0:
+                    failures.append("%s #%d invalid %s: %r" % (case_name, number, field, reading))
+                elif reading > limit:
+                    failures.append("%s #%d %s: %.3f %s > %.3f %s" % (
+                        case_name, number, field, reading, unit, limit, unit))
+    return failures
 
 
 def compare_baseline(current: dict[str, Any], baseline: dict[str, Any],
                      percent: float, memory_growth_limit_mib: float | None) -> list[str]:
     errors: list[str] = []
-    keys = ("preset", "scale", "frames", "render_mode", "seed")
+    keys = ("preset", "scale", "frames", "render_mode", "seed", "rss_scope")
     for key in keys:
         if current.get("configuration", {}).get(key) != baseline.get("configuration", {}).get(key):
             raise ValueError("Baseline configuration mismatch: %s" % key)
@@ -242,19 +321,26 @@ def compare_baseline(current: dict[str, Any], baseline: dict[str, Any],
             if new is not None and old is not None and old > 0 and new > old * (1 + percent / 100.0):
                 errors.append("%s %s: %.3f > %.3f (baseline + %.1f%%)" %
                               (name, field, new, old, percent))
-        for phase, new in data.get("phase_median_ms", {}).items():
-            old = previous.get("phase_median_ms", {}).get(phase)
-            if old is not None and old > 0 and new > old * (1 + percent / 100.0):
-                errors.append("%s phase %s: %.3f > %.3f (baseline + %.1f%%)" %
-                              (name, phase, new, old, percent))
-    if memory_growth_limit_mib is not None and "memory_churn" in current["cases"]:
-        for run in current["cases"]["memory_churn"]["runs"]:
-            if run["status"] != "passed":
-                continue
-            growth = run["engine"]["detail"]["retained_growth_bytes"] / 1048576.0
-            if growth > memory_growth_limit_mib:
-                errors.append("memory_churn retained growth %.3f MiB > %.3f MiB" %
-                              (growth, memory_growth_limit_mib))
+        current_phases = data.get("phase_median_ms", {})
+        previous_phases = previous.get("phase_median_ms", {})
+        for metric in sorted(current_phases.keys() & previous_phases.keys()):
+            new = current_phases[metric]
+            old = previous_phases[metric]
+            if old > 0 and new > old * (1 + percent / 100.0):
+                errors.append("%s %s: %.3f ms > %.3f ms (baseline + %.1f%%)" %
+                              (name, metric, new, old, percent))
+    if memory_growth_limit_mib is not None:
+        for case_name in ("memory_churn", "object_lifecycle", "scene_churn"):
+            for run in current["cases"].get(case_name, {}).get("runs", []):
+                if run["status"] != "passed":
+                    continue
+                retained_bytes = run.get("engine", {}).get("detail", {}).get("retained_growth_bytes")
+                if not isinstance(retained_bytes, (int, float)) or not math.isfinite(retained_bytes):
+                    continue
+                growth = retained_bytes / 1048576.0
+                if growth > memory_growth_limit_mib:
+                    errors.append("%s retained growth %.3f MiB > %.3f MiB" %
+                                  (case_name, growth, memory_growth_limit_mib))
     return errors
 
 
@@ -277,10 +363,7 @@ def markdown_hotspots(report: dict[str, Any]) -> str:
             note.append("near RSS limit")
         if engine is not None and wall > 0 and wall - engine / 1000.0 > max(0.25, wall * 0.5):
             note.append("startup/teardown dominates")
-        phases = values.get("phase_median_ms", {})
-        slowest = max(phases, key=phases.get) if phases else None
-        phase_label = ("%s (%.2f ms)" % (slowest, phases[slowest])) if slowest else "n/a"
-        rows.append((case, wall, p95, rss, engine, phase_label, "; ".join(note)))
+        rows.append((case, wall, p95, rss, engine, "; ".join(note)))
     rows.sort(key=lambda item: item[1], reverse=True)
 
     def number(value: float | None) -> str:
@@ -296,12 +379,29 @@ def markdown_hotspots(report: dict[str, Any]) -> str:
         "Ordered by median wall time, **not** normalized workload throughput. "
         "Compare the same case and preset on identical hardware to identify regressions.",
         "",
-        "| Scenario | Median wall (s) | p95 wall (s) | Peak RSS (MiB) | Engine median (ms) | Slowest phase | Signals |",
-        "| --- | ---: | ---: | ---: | ---: | --- | --- |",
+        "| Scenario | Median wall (s) | p95 wall (s) | Peak RSS (MiB) | Engine median (ms) | Signals |",
+        "| --- | ---: | ---: | ---: | ---: | --- |",
     ]
-    for case, wall, p95, rss, engine, phase, note in rows:
-        lines.append("| %s | %s | %s | %s | %s | %s | %s |" % (
-            case, number(wall), number(p95), number(rss), number(engine), phase, note or "—"))
+    for case, wall, p95, rss, engine, note in rows:
+        lines.append("| %s | %s | %s | %s | %s | %s |" % (
+            case, number(wall), number(p95), number(rss), number(engine), note or "—"))
+    phase_rows = [
+        (case, metric, value)
+        for case, stats in report["cases"].items()
+        for metric, value in stats.get("phase_median_ms", {}).items()
+    ]
+    if phase_rows:
+        lines += [
+            "", "## In-engine phase metrics",
+            "",
+            "Phase medians are comparable only within the same case and fixed "
+            "workload; frame measurements can include scheduling and waiting.",
+            "",
+            "| Scenario | Detail metric | Median (ms) |",
+            "| --- | --- | ---: |",
+        ]
+        for case, metric, value in sorted(phase_rows, key=lambda row: row[2], reverse=True):
+            lines.append("| %s | %s | %s |" % (case, metric, number(value)))
     lines += ["", "Failures: %d" % len(report["failures"])]
     lines.extend("- %s" % str(message).replace("\n", " ") for message in report["failures"])
     lines.append("")
@@ -325,6 +425,9 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--baseline", type=Path, help="Previous JSON report with identical preset/scale/mode")
     parser.add_argument("--max-regression-pct", type=float, default=20.0)
     parser.add_argument("--max-retained-growth-mib", type=float, default=None)
+    parser.add_argument("--max-frame-ms", type=float, help="Maximum observed script/frame time (ms), for cases reporting it")
+    parser.add_argument("--max-physics-ms", type=float, help="Maximum observed physics process time (ms)")
+    parser.add_argument("--max-vram-mib", type=float, help="Maximum observed renderer video memory (MiB)")
     parser.add_argument("--output", type=Path, default=Path("stress-results.json"))
     parser.add_argument("--summary-md", type=Path, help="Also write a ranked human-readable bottleneck report")
     parser.add_argument("--list-cases", action="store_true")
@@ -342,6 +445,8 @@ def main(argv: list[str] | None = None) -> int:
     if (config["repeats"] < 1 or config["scale"] < 1 or config["scale"] > 1000
             or config["frames"] < 1 or config["frames"] > 100000
             or config["timeout"] <= 0 or config["rss_mib"] <= 0
+            or any(value is not None and value < 0 for value in (
+                args.max_frame_ms, args.max_physics_ms, args.max_vram_mib))
             or args.max_regression_pct < 0
             or (args.max_retained_growth_mib is not None and args.max_retained_growth_mib < 0)):
         parser.error("All limits and iterations must be positive and within engine bounds")
@@ -355,14 +460,15 @@ def main(argv: list[str] | None = None) -> int:
     if not (project / "project.godot").is_file() or not (project / "stress.gd").is_file():
         parser.error("Invalid stress project: %s" % project)
     report: dict[str, Any] = {
-        "schema_version": 1,
+        "schema_version": 2,
         "created_utc": dt.datetime.now(dt.timezone.utc).isoformat(),
         "host": {"platform": platform.platform(), "processor": platform.processor(),
                  "logical_cpus": os.cpu_count()},
         "godot_binary": binary,
         "configuration": {"preset": args.preset, "scale": config["scale"],
                           "frames": config["frames"], "repeats": config["repeats"],
-                          "render_mode": args.render_mode, "timeout_seconds": config["timeout"],
+                          "render_mode": args.render_mode, "rss_scope": "process_tree",
+                          "timeout_seconds": config["timeout"],
                           "rss_limit_mib": config["rss_mib"], "seed": args.seed},
         "cases": {},
         "failures": [],
@@ -383,6 +489,8 @@ def main(argv: list[str] | None = None) -> int:
                                           (case, repetition + 1, run.get("failure", "failed")))
         report["cases"][case] = summarize(runs)
 
+    report["failures"].extend(check_absolute_limits(
+        report["cases"], args.max_frame_ms, args.max_physics_ms, args.max_vram_mib))
     try:
         baseline = json.loads(args.baseline.read_text(encoding="utf-8")) if args.baseline else report
         report["failures"].extend(compare_baseline(report, baseline,

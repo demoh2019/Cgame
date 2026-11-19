@@ -1,0 +1,36 @@
+name: GodotPhysics3D anisotropic elliptical contact friction
+
+on:
+  push:
+    branches: [develop]
+    paths:
+      - "servers/physics_contact_anisotropic_friction.h"
+      - "modules/godot_physics_3d/godot_body_pair_3d.cpp"
+      - "modules/godot_physics_3d/godot_space_3d.cpp"
+      - "modules/godot_physics_3d/godot_space_3d.h"
+      - "servers/physics_3d/physics_server_3d.cpp"
+      - "tests/servers/test_godot_physics_contact_anisotropic_friction.cpp"
+      - "tests/stress/test_physics_anisotropic_friction.py"
+      - ".github/workflows/physics-anisotropic-friction.yml"
+  pull_request:
+    paths:
+      - "servers/physics_contact_anisotropic_friction.h"
+      - "modules/godot_physics_3d/godot_body_pair_3d.cpp"
+      - "modules/godot_physics_3d/godot_space_3d.cpp"
+      - "modules/godot_physics_3d/godot_space_3d.h"
+      - "servers/physics_3d/physics_server_3d.cpp"
+      - "tests/servers/test_godot_physics_contact_anisotropic_friction.cpp"
+      - "tests/stress/test_physics_anisotropic_friction.py"
+      - ".github/workflows/physics-anisotropic-friction.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  numerical-contracts:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Ellipse bounds, static/kinetic friction, source integration
+        run: python3 -m unittest discover -s tests/stress -p 'test_physics_anisotropic_friction.py' -v

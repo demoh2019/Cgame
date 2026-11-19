@@ -1069,13 +1069,14 @@ Error GLTFDocument::_serialize_meshes(Ref<GLTFState> p_state) {
 					const int64_t ret_size = a.size() / 4;
 					Vector<Color> attribs;
 					attribs.resize(ret_size);
+					Color *attribs_write = attribs.ptrw();
 					for (int64_t i = 0; i < ret_size; i++) {
 						Color out;
 						out.r = a[(i * 4) + 0];
 						out.g = a[(i * 4) + 1];
 						out.b = a[(i * 4) + 2];
 						out.a = a[(i * 4) + 3];
-						attribs.write[i] = out;
+						attribs_write[i] = out;
 					}
 					attributes["TANGENT"] = GLTFAccessor::encode_new_accessor_from_colors(p_state, attribs, GLTFBufferView::TARGET_ARRAY_BUFFER);
 				}
@@ -1086,8 +1087,9 @@ Error GLTFDocument::_serialize_meshes(Ref<GLTFState> p_state) {
 					const int64_t ret_size = a.size();
 					Vector<Vector3> attribs;
 					attribs.resize(ret_size);
+					Vector3 *attribs_write = attribs.ptrw();
 					for (int64_t i = 0; i < ret_size; i++) {
-						attribs.write[i] = Vector3(a[i]).normalized();
+						attribs_write[i] = Vector3(a[i]).normalized();
 					}
 					attributes["NORMAL"] = GLTFAccessor::encode_new_accessor_from_vector3s(p_state, attribs, GLTFBufferView::TARGET_ARRAY_BUFFER);
 				}
@@ -1169,13 +1171,14 @@ Error GLTFDocument::_serialize_meshes(Ref<GLTFState> p_state) {
 					const int ret_size = a.size() / JOINT_GROUP_SIZE;
 					Vector<Vector4i> attribs;
 					attribs.resize(ret_size);
+					Vector4i *attribs_write = attribs.ptrw();
 					{
 						for (int array_i = 0; array_i < attribs.size(); array_i++) {
 							int32_t joint_0 = a[(array_i * JOINT_GROUP_SIZE) + 0];
 							int32_t joint_1 = a[(array_i * JOINT_GROUP_SIZE) + 1];
 							int32_t joint_2 = a[(array_i * JOINT_GROUP_SIZE) + 2];
 							int32_t joint_3 = a[(array_i * JOINT_GROUP_SIZE) + 3];
-							attribs.write[array_i] = Vector4i(joint_0, joint_1, joint_2, joint_3);
+							attribs_write[array_i] = Vector4i(joint_0, joint_1, joint_2, joint_3);
 						}
 					}
 					attributes["JOINTS_0"] = GLTFAccessor::encode_new_accessor_from_vector4is(p_state, attribs, GLTFBufferView::TARGET_ARRAY_BUFFER);
@@ -1184,6 +1187,8 @@ Error GLTFDocument::_serialize_meshes(Ref<GLTFState> p_state) {
 					joints_0.resize(vertex_num);
 					Vector<Vector4i> joints_1;
 					joints_1.resize(vertex_num);
+					Vector4i *joints_0_write = joints_0.ptrw();
+					Vector4i *joints_1_write = joints_1.ptrw();
 					int32_t weights_8_count = JOINT_GROUP_SIZE * 2;
 					for (int32_t vertex_i = 0; vertex_i < vertex_num; vertex_i++) {
 						Vector4i joint_0;
@@ -1191,13 +1196,13 @@ Error GLTFDocument::_serialize_meshes(Ref<GLTFState> p_state) {
 						joint_0.y = a[vertex_i * weights_8_count + 1];
 						joint_0.z = a[vertex_i * weights_8_count + 2];
 						joint_0.w = a[vertex_i * weights_8_count + 3];
-						joints_0.write[vertex_i] = joint_0;
+						joints_0_write[vertex_i] = joint_0;
 						Vector4i joint_1;
 						joint_1.x = a[vertex_i * weights_8_count + 4];
 						joint_1.y = a[vertex_i * weights_8_count + 5];
 						joint_1.z = a[vertex_i * weights_8_count + 6];
 						joint_1.w = a[vertex_i * weights_8_count + 7];
-						joints_1.write[vertex_i] = joint_1;
+						joints_1_write[vertex_i] = joint_1;
 					}
 					attributes["JOINTS_0"] = GLTFAccessor::encode_new_accessor_from_vector4is(p_state, joints_0, GLTFBufferView::TARGET_ARRAY_BUFFER);
 					attributes["JOINTS_1"] = GLTFAccessor::encode_new_accessor_from_vector4is(p_state, joints_1, GLTFBufferView::TARGET_ARRAY_BUFFER);
@@ -1210,13 +1215,14 @@ Error GLTFDocument::_serialize_meshes(Ref<GLTFState> p_state) {
 					int32_t vertex_count = vertex_array.size();
 					Vector<Vector4> attribs;
 					attribs.resize(vertex_count);
+					Vector4 *attribs_write = attribs.ptrw();
 					for (int i = 0; i < vertex_count; i++) {
 						Vector4 weight_0(a[(i * JOINT_GROUP_SIZE) + 0], a[(i * JOINT_GROUP_SIZE) + 1], a[(i * JOINT_GROUP_SIZE) + 2], a[(i * JOINT_GROUP_SIZE) + 3]);
 						float divisor = weight_0.x + weight_0.y + weight_0.z + weight_0.w;
 						if (Math::is_zero_approx(divisor) || !Math::is_finite(divisor)) {
-							attribs.write[i] = Vector4(1, 0, 0, 0);
+							attribs_write[i] = Vector4(1, 0, 0, 0);
 						} else {
-							attribs.write[i] = weight_0 / divisor;
+							attribs_write[i] = weight_0 / divisor;
 						}
 					}
 					attributes["WEIGHTS_0"] = GLTFAccessor::encode_new_accessor_from_vector4s(p_state, attribs, GLTFBufferView::TARGET_ARRAY_BUFFER);
@@ -1225,6 +1231,8 @@ Error GLTFDocument::_serialize_meshes(Ref<GLTFState> p_state) {
 					weights_0.resize(vertex_num);
 					Vector<Vector4> weights_1;
 					weights_1.resize(vertex_num);
+					Vector4 *weights_0_write = weights_0.ptrw();
+					Vector4 *weights_1_write = weights_1.ptrw();
 					int32_t weights_8_count = JOINT_GROUP_SIZE * 2;
 					for (int32_t vertex_i = 0; vertex_i < vertex_num; vertex_i++) {
 						Vector4 weight_0;
@@ -1239,11 +1247,11 @@ Error GLTFDocument::_serialize_meshes(Ref<GLTFState> p_state) {
 						weight_1.w = a[vertex_i * weights_8_count + 7];
 						float divisor = weight_0.x + weight_0.y + weight_0.z + weight_0.w + weight_1.x + weight_1.y + weight_1.z + weight_1.w;
 						if (Math::is_zero_approx(divisor) || !Math::is_finite(divisor)) {
-							weights_0.write[vertex_i] = Vector4(1, 0, 0, 0);
-							weights_1.write[vertex_i] = Vector4(0, 0, 0, 0);
+							weights_0_write[vertex_i] = Vector4(1, 0, 0, 0);
+							weights_1_write[vertex_i] = Vector4(0, 0, 0, 0);
 						} else {
-							weights_0.write[vertex_i] = weight_0 / divisor;
-							weights_1.write[vertex_i] = weight_1 / divisor;
+							weights_0_write[vertex_i] = weight_0 / divisor;
+							weights_1_write[vertex_i] = weight_1 / divisor;
 						}
 					}
 					attributes["WEIGHTS_0"] = GLTFAccessor::encode_new_accessor_from_vector4s(p_state, weights_0, GLTFBufferView::TARGET_ARRAY_BUFFER);
