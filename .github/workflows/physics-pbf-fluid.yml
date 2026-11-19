@@ -1,0 +1,31 @@
+name: Native PBF ParticleFluid3D contracts
+
+on:
+  pull_request:
+    branches: [develop]
+    paths:
+      - "servers/physics_pbf_3d.h"
+      - "scene/3d/physics/pbf_particle_fluid_3d.h"
+      - "scene/3d/physics/pbf_particle_fluid_3d.cpp"
+      - "scene/register_scene_types.cpp"
+      - "tests/servers/test_physics_pbf_3d.cpp"
+      - "tests/stress/test_physics_pbf_3d.py"
+      - "tests/stress/physics_pbf_particle_fluid_3d_regression.gd"
+      - "tests/stress/physics_pbf_particle_fluid_stress.gd"
+      - "tests/stress/run.py"
+      - "tests/stress/stress.gd"
+      - "demo/physics_lab/lab_3d.gd"
+      - "demo/physics_lab/pbf_water_3d.gd"
+      - ".github/workflows/physics-pbf-fluid.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  mathematical-and-source-contracts:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Validate independent SPH/PBF kernel, grid and projection contracts
+        run: python3 -m unittest discover -s tests/stress -p 'test_physics_pbf_3d.py' -v
