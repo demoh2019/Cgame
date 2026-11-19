@@ -762,4 +762,75 @@ TEST_CASE("[FileAccess][Performance] Small UTF-8 loads avoid a transient heap bu
 	file->close();
 }
 
+TEST_CASE("[FileAccess][Performance] Reused Zstandard compression context keeps independent frames") {
+	Compression::ZstdCompressionContext compressor;
+	const int sizes[] = { 1, 4, 16, 64, 127, 512, 4096, 65536 };
+
+	// Exercise the same compressor across many payload sizes and back-to-back
+	// frames; the decoder must be able to read every frame independently.
+	for (int repeat = 0; repeat < 6; repeat++) {
+		for (int size : sizes) {
+			Vector<uint8_t> source;
+			REQUIRE(source.resize_uninitialized(size) == OK);
+			uint8_t *input = source.ptrw();
+			for (int i = 0; i < size; i++) {
+				input[i] = uint8_t(((uint32_t)i * 37 + (uint32_t)repeat * 19 + (i / 29) * 11) & 255);
+			}
+
+			const int64_t capacity = Compression::get_max_compressed_buffer_size(size, Compression::MODE_ZSTD);
+			REQUIRE(capacity > 0);
+			Vector<uint8_t> compressed;
+			REQUIRE(compressed.resize_uninitialized(capacity) == OK);
+			const int64_t length = compressor.compress(compressed.ptrw(), source.ptr(), size);
+			REQUIRE(length > 0);
+			REQUIRE(length <= capacity);
+
+			Vector<uint8_t> decoded;
+			REQUIRE(decoded.resize_uninitialized(size) == OK);
+			const int64_t decoded_size = Compression::decompress(decoded.ptrw(), size, compressed.ptr(), length, Compression::MODE_ZSTD);
+			CHECK(decoded_size == size);
+			CHECK(decoded == source);
+		}
+	}
+}
+
+TEST_CASE("[FileAccess][Performance] Multi-block Zstandard compressed file reuses context") {
+	const String file_path = TestUtils::get_temp_path("cgame_zstd_context_reuse.bin");
+	const int block_size = 512;
+	const int bytes = block_size * 384 + 17;
+
+	Vector<uint8_t> source;
+	REQUIRE(source.resize_uninitialized(bytes) == OK);
+	uint8_t *input = source.ptrw();
+	for (int i = 0; i < bytes; i++) {
+		input[i] = uint8_t((i * 13 + i / 127) & 255);
+	}
+
+	Ref<FileAccessCompressed> writer;
+	writer.instantiate();
+	writer->configure("GCPF", Compression::MODE_ZSTD, block_size);
+	REQUIRE(writer->open_internal(file_path, FileAccess::WRITE) == OK);
+	REQUIRE(writer->store_buffer(source.ptr(), source.size()));
+	writer->close();
+
+	Ref<FileAccessCompressed> reader;
+	reader.instantiate();
+	reader->configure("GCPF", Compression::MODE_ZSTD, block_size);
+	REQUIRE(reader->open_internal(file_path, FileAccess::READ) == OK);
+	CHECK(reader->get_length() == bytes);
+
+	Vector<uint8_t> decoded;
+	REQUIRE(decoded.resize_uninitialized(bytes) == OK);
+	CHECK(reader->get_buffer(decoded.ptrw(), bytes) == uint64_t(bytes));
+	CHECK(decoded == source);
+	reader->seek(block_size * 180 - 7);
+	uint8_t cross_block[27] = {};
+	CHECK(reader->get_buffer(cross_block, sizeof(cross_block)) == sizeof(cross_block));
+	for (int i = 0; i < int(sizeof(cross_block)); i++) {
+		CHECK(cross_block[i] == source[block_size * 180 - 7 + i]);
+	}
+	reader->close();
+	DirAccess::remove_file_or_error(file_path);
+}
+
 } // namespace TestFileAccess

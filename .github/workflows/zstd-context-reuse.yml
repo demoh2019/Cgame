@@ -1,0 +1,42 @@
+name: Zstandard per-file compressor reuse regression
+
+on:
+  pull_request:
+    branches: [develop]
+    paths:
+      - 'core/io/compression.h'
+      - 'core/io/compression.cpp'
+      - 'core/io/file_access_compressed.cpp'
+      - 'tests/core/io/test_file_access.cpp'
+      - '.github/workflows/zstd-context-reuse.yml'
+  push:
+    branches: [develop]
+    paths:
+      - 'core/io/compression.h'
+      - 'core/io/compression.cpp'
+      - 'core/io/file_access_compressed.cpp'
+      - 'tests/core/io/test_file_access.cpp'
+      - '.github/workflows/zstd-context-reuse.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  native-zstd-context:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+      - uses: ./.github/actions/godot-deps
+      - uses: ./.github/actions/godot-build
+        with:
+          platform: linuxbsd
+          target: editor
+          scons-flags: dev_build=yes tests=yes debug_symbols=no module_mono_enabled=no accesskit=no
+      - name: Verify independent Zstandard frames with one compression context
+        run: |
+          timeout 300s ./bin/godot.linuxbsd.editor.dev.x86_64 --headless --test --test-case='*Zstandard compression context*' --no-colors
+          timeout 300s ./bin/godot.linuxbsd.editor.dev.x86_64 --headless --test --test-case='*Multi-block Zstandard compressed file*' --no-colors

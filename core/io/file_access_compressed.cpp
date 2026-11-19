@@ -142,6 +142,11 @@ void FileAccessCompressed::_close() {
 		temp_cblock.resize(Compression::get_max_compressed_buffer_size(bc == 1 ? last_block_size : block_size, cmode));
 		uint8_t *temp_cblock_ptr = temp_cblock.ptr();
 
+		// Reuse Zstandard's expensive workspace for all blocks in this file.
+		// The context is destroyed when the file is closed, avoiding permanent
+		// per-thread memory retention and preserving independently decodable frames.
+		Compression::ZstdCompressionContext zstd_context;
+
 		// Compress and store the blocks. Every entry is written exactly once,
 		// so reserve the complete table instead of repeatedly reallocating it.
 		LocalVector<uint32_t> block_sizes;
@@ -150,7 +155,9 @@ void FileAccessCompressed::_close() {
 			uint32_t bl = i == (bc - 1) ? last_block_size : block_size;
 			uint8_t *bp = &write_ptr[i * block_size];
 
-			const int64_t compressed_size = Compression::compress(temp_cblock_ptr, bp, bl, cmode);
+			const int64_t compressed_size = cmode == Compression::MODE_ZSTD
+					? zstd_context.compress(temp_cblock_ptr, bp, bl)
+					: Compression::compress(temp_cblock_ptr, bp, bl, cmode);
 			ERR_FAIL_COND_MSG(compressed_size < 0, "FileAccessCompressed: Error compressing data.");
 
 			f->store_buffer(temp_cblock_ptr, (uint64_t)compressed_size);
