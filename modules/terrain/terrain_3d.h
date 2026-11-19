@@ -30,8 +30,8 @@
 #include "terrain_heightmap.h"
 
 // Editor-visible mesh node driven by a serializable TerrainHeightmap resource.
-class Terrain3D : public MeshInstance3D {
-    GDCLASS(Terrain3D, MeshInstance3D);
+class HeightmapTerrain3D : public MeshInstance3D {
+    GDCLASS(HeightmapTerrain3D, MeshInstance3D);
 
     Ref<TerrainHeightmap> terrain_data;
     float cell_size = 1.0f;
@@ -50,6 +50,6 @@ public:
 
     void rebuild();
 
-    Terrain3D();
-    ~Terrain3D();
+    HeightmapTerrain3D();
+    ~HeightmapTerrain3D();
 };
