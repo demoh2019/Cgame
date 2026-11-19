@@ -1386,6 +1386,9 @@ func cmd_attack(peer_id: int, dir_x: float, dir_z: float) -> Dictionary:
 		return {"ok": false, "reason": "no_direction"}
 	direction = direction.normalized()
 	var weapon: String = player.inventory.weapon
+	# Dropped/stolen gear must not keep its statistics through a stale slot.
+	if weapon != "" and player.inventory.count(weapon) < 1:
+		weapon = ""
 	var kind: String = Defs.item(weapon).get("weapon", "melee") if weapon != "" else "melee"
 	player.attack_timer = Combat.weapon_cooldown(weapon)
 	player.action = {} # Fighting interrupts gathering.
@@ -1670,6 +1673,11 @@ func _damage_target(attacker: Player, hit: Dictionary, damage: float) -> void:
 		var zombie = zombies.get(hit["id"])
 		if zombie == null:
 			return
+		# PvE relic traits are derived from physically carried gear on the server.
+		# Never grant these against survivors or for stale equipment IDs.
+		var equipped_weapon: String = attacker.inventory.weapon
+		var physically_owned: bool = equipped_weapon != "" and attacker.inventory.count(equipped_weapon) > 0
+		damage = Combat.against_infected(damage, equipped_weapon, physically_owned)
 		# Only real, positive, server-applied hits can qualify for group XP.
 		if damage > 0.0 and zombie.is_alive() and (zombie.contributors.size() < 16 or zombie.contributors.has(attacker.id)):
 			var equipped: String = attacker.inventory.weapon

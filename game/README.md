@@ -1487,3 +1487,22 @@ The `game/tests/test_outpost_supplies.gd` suite validates PvP-zone
 reward tables, real capture requirements, proximity and hostile presence,
 full-backpack rollback, once-per-account protection, finite shares, expiry
 and renewal after recapture.
+
+
+## Combat skill merge regression: maul + pistol both available
+
+The **Purifier Maul T3** from elite/raid cores and the pistol's
+**Focused Shot** now coexist in the same classless combat rules.
+The maul has **Purifying Slam** (35 energy; 8-second cooldown) and grants
+25% additional damage to infected only. The pistol retains its existing
+ammunition-consuming ranged ability. The server derives melee/ranged
+hits, stamina, cooldown and carried-weapon ownership from its own state.
+
+Fixes an earlier merge that accidentally dropped the maul's skill and
+its infected-only damage trait while adding the pistol skill. Also fixes
+stale/ghost equipped items dealing weapon damage after the last copy has
+left the inventory. PvP remains unaffected by the PvE bonus.
+
+The existing `tests/test_purifier_maul.gd` is updated for Focused Shot
+coexistence and re-registered in `tests/run_all.gd`; both the regular
+`test_ranged_skills.gd` and relic tests must run together.

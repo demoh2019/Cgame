@@ -20,6 +20,17 @@ static func weapon_damage(weapon_id: String) -> float:
 	return float(Defs.item(weapon_id).get("damage", 6.0))
 
 
+## PvE-only equipment trait. The authoritative server calls this ONLY after
+## resolving a hit against a living infected, never for player-versus-player.
+static func against_infected(damage: float, weapon_id: String, owned: bool) -> float:
+	if not is_finite(damage) or damage <= 0.0:
+		return 0.0
+	if not owned:
+		return damage
+	var trait: float = float(Defs.item(weapon_id).get("infected_bonus", 0.0))
+	return damage * (1.0 + clampf(trait, 0.0, 0.5))
+
+
 static func weapon_cooldown(weapon_id: String) -> float:
 	if weapon_id == "":
 		return 0.6
@@ -32,6 +43,11 @@ static func active_skill(weapon_id: String) -> Dictionary:
 	var info: Dictionary = Defs.item(weapon_id)
 	if info.is_empty():
 		return {}
+	if weapon_id == "purifier_maul_3" and str(info.get("weapon", "")) == "melee":
+		return {"id": "purifying_slam", "energy_cost": 35.0, "cooldown": 8.0,
+			"attack_lock": 1.1, "range": Defs.MELEE_RANGE + 0.8,
+			"damage": weapon_damage(weapon_id) * 1.5,
+			"ranged": false}
 	if weapon_id.begins_with("club_") and str(info.get("weapon", "")) == "melee":
 		return {"id": "heavy_strike", "energy_cost": 30.0, "cooldown": 6.0,
 			"attack_lock": 0.95, "range": Defs.MELEE_RANGE + 0.6,

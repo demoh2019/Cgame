@@ -27,7 +27,10 @@ func run(t) -> void:
 		"relic grants a dedicated weapon-based skill")
 	t.eq(Combat.active_skill("club_3")["id"], "heavy_strike",
 		"existing club skill still works")
-	t.check(Combat.active_skill("pistol").is_empty(), "ranged weapons do not inherit relic skill")
+	t.eq(Combat.active_skill("pistol")["id"], "focused_shot",
+		"existing ranged ability is preserved while restoring relic skill")
+	t.check(bool(Combat.active_skill("pistol")["ranged"]),
+		"pistol remains a ranged ammunition-consuming active skill")
 	t.near(Combat.against_infected(100.0, weapon_id, true), 125.0, 0.0001,
 		"owned relic gives exactly 25 percent PvE advantage")
 	t.near(Combat.against_infected(100.0, weapon_id, false), 100.0, 0.0001,
