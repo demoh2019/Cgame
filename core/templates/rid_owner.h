@@ -381,7 +381,7 @@ public:
 		// Iterate contiguous chunks rather than dividing and taking the remainder
 		// for every slot (elements_in_chunk need not be a power of two).
 		const uint32_t chunk_count = max_alloc / elements_in_chunk;
-		for (uint32_t chunk_index = 0; chunk_index < chunk_count; chunk_index++) {
+		for (uint32_t chunk_index = 0; chunk_index < chunk_count && owned.size() < alloc_count; chunk_index++) {
 			const Chunk *chunk = chunks[chunk_index];
 			const uint32_t base_index = chunk_index * elements_in_chunk;
 			for (uint32_t element_index = 0; element_index < elements_in_chunk; element_index++) {
@@ -389,6 +389,9 @@ public:
 				if (validator != 0xFFFFFFFF) {
 					const uint32_t index = base_index + element_index;
 					owned.push_back(_make_from_id((uint64_t(validator) << 32) | index));
+					if (owned.size() == alloc_count) {
+						break;
+					}
 				}
 			}
 		}
@@ -405,7 +408,7 @@ public:
 		}
 		uint32_t output_index = 0;
 		const uint32_t chunk_count = max_alloc / elements_in_chunk;
-		for (uint32_t chunk_index = 0; chunk_index < chunk_count; chunk_index++) {
+		for (uint32_t chunk_index = 0; chunk_index < chunk_count && output_index < alloc_count; chunk_index++) {
 			const Chunk *chunk = chunks[chunk_index];
 			const uint32_t base_index = chunk_index * elements_in_chunk;
 			for (uint32_t element_index = 0; element_index < elements_in_chunk; element_index++) {
@@ -413,6 +416,9 @@ public:
 				if (validator != 0xFFFFFFFF) {
 					const uint32_t index = base_index + element_index;
 					p_rid_buffer[output_index++] = _make_from_id((uint64_t(validator) << 32) | index);
+					if (output_index == alloc_count) {
+						break;
+					}
 				}
 			}
 		}
