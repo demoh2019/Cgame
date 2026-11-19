@@ -37,6 +37,7 @@ class HBoxContainer;
 class OptionButton;
 class SpinBox;
 class ColorPickerButton;
+class Button;
 
 class HeightmapTerrainEditorPlugin : public EditorPlugin {
     GDCLASS(HeightmapTerrainEditorPlugin, EditorPlugin);
@@ -47,6 +48,9 @@ class HeightmapTerrainEditorPlugin : public EditorPlugin {
     SpinBox *radius = nullptr;
     SpinBox *strength = nullptr;
     ColorPickerButton *paint_color = nullptr;
+    Button *erosion_button = nullptr;
+
+    void _erode_clicked();
 
 protected:
     static void _bind_methods() {}
