@@ -33,6 +33,8 @@
 #include "core/templates/hash_map.h"
 #include "core/templates/list.h"
 
+#include <utility>
+
 template <typename TKey, typename TData, typename Hasher = HashMapHasherDefault, typename Comparator = HashMapComparatorDefault<TKey>, void (*BeforeEvict)(TKey &, TData &) = nullptr>
 class _WARN_UNUSED_ LRUCache {
 public:
@@ -57,18 +59,26 @@ private:
 public:
 	const Pair *insert(const TKey &p_key, const TData &p_value) {
 		Element *e = _map.getptr(p_key);
-		Element n = _list.push_front(Pair(p_key, p_value));
-
 		if (e) {
+			// Reuse the existing list node and hash entry. Replacing a hot
+			// cache entry must not allocate and free both structures again.
 			GODOT_GCC_WARNING_PUSH_AND_IGNORE("-Waddress")
 			if constexpr (BeforeEvict != nullptr) {
+				// Take a snapshot first: p_value can alias the old cache value,
+				// which the eviction hook may destroy or modify.
+				TData replacement = p_value;
 				BeforeEvict((*e)->get().key, (*e)->get().data);
+				(*e)->get().data = std::move(replacement);
+			} else {
+				(*e)->get().data = p_value;
 			}
 			GODOT_GCC_WARNING_POP
-			_list.erase(*e);
-			_map.erase(p_key);
+			_list.move_to_front(*e);
+			return &(*e)->get();
 		}
-		_map[p_key] = _list.front();
+
+		Element n = _list.push_front(Pair(p_key, p_value));
+		_map[p_key] = n;
 
 		while (_map.size() > capacity) {
 			Element d = _list.back();
