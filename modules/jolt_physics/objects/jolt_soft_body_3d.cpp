@@ -377,6 +377,10 @@ JPH::SoftBodySharedSettings *JoltSoftBody3D::_create_shared_settings() {
 		physics_faces.emplace_back((JPH::uint32)physics_face[2], (JPH::uint32)physics_face[1], (JPH::uint32)physics_face[0]);
 	}
 
+	// Only vertices created from referenced surface faces are eligible for
+	// soft-soft particle contacts: the optional tetrahedral center is internal.
+	surface_particle_count = (uint32_t)physics_vertices.size();
+
 	// Pin whatever pinned vertices we have currently. This is used during the `Optimize` call below to order the
 	// constraints. Note that it's fine if the pinned vertices change later, but that will reduce the effectiveness
 	// of the constraints a bit.
@@ -506,10 +510,9 @@ JPH::SoftBodySharedSettings *JoltSoftBody3D::_create_shared_settings() {
 			tether.mMaxDistance *= multiplier;
 		}
 	}
-	// Restore optional isotropic rest-volume contraction on top of the
-	// updated Jolt fan topology. The fan now builds its tetrahedral
-	// constraints BEFORE surface constraints, to keep LRA cached indices
-	// valid. Rest-volume targets still scale by the cube of the length.
+	// A compressible volumetric material has a rest-volume factor s^3
+	// when its edge rest lengths scale by s. Keep the old incompressible
+	// target by default; the convex fan must have been constructed first.
 	const bool follow_volume_shrink = has_convex_volume &&
 			JoltProjectSettings::soft_body_volume_follow_shrinking_factor &&
 			multiplier > 0.0f && multiplier != 1.0f;
@@ -524,9 +527,8 @@ JPH::SoftBodySharedSettings *JoltSoftBody3D::_create_shared_settings() {
 		}
 	}
 
-	// Build optional radial springs AFTER directional surface elasticity.
-	// These springs have independent anisotropy settings and must not be
-	// modified by the textile's warp/weft fiber axis.
+	// The radial springs are a separate volumetric material, added AFTER
+	// textile fiber compliance and LRA constraint creation.
 	if (has_convex_volume && JoltProjectSettings::soft_body_volume_radial_springs) {
 		const uint32_t surface_edge_count = (uint32_t)settings->mEdgeConstraints.size();
 		append_volume_radial_springs(*settings, JoltProjectSettings::soft_body_volume_radial_compliance,
