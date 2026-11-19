@@ -55,7 +55,6 @@
 #include "core/os/mutex.h"
 #include "core/templates/hash_set.h"
 
-#include <climits> // INT_MAX
 
 #define BVHTREE_CLASS BVH_Tree<T, NUM_TREES, 2, MAX_ITEMS, USER_PAIR_TEST_FUNCTION, USER_CULL_TEST_FUNCTION, USE_PAIRS, BOUNDS, POINT>
 #define BVH_LOCKED_FUNCTION BVHLockedFunction _lock_guard(&_mutex, BVH_THREAD_SAFE &&_thread_safe);
@@ -517,52 +516,42 @@ private:
 		}
 	}
 
-	// do this after moving etc.
+	// Pairing traverses candidate leaves directly. The original cull_aabb
+	// filled _cull_hits for every changed proxy and then read the entire list
+	// a second time, retaining memory proportional to the densest scene.
 	void _check_for_collisions(bool p_full_check = false) {
-		if (!changed_items.size()) {
-			// noop
+		if (changed_items.is_empty()) {
 			return;
 		}
 
-		typename BVHTREE_CLASS::CullParams params;
-
-		params.result_count_overall = 0;
-		params.result_max = INT_MAX;
-		params.result_array = nullptr;
-		params.subindex_array = nullptr;
+		struct PairVisit {
+			BVH_Manager *manager;
+			BVHHandle changed;
+		};
+		auto pair_visitor = [](uint32_t p_ref_id, void *p_userdata) -> bool {
+			PairVisit &query = *static_cast<PairVisit *>(p_userdata);
+			if (p_ref_id == query.changed.id()) {
+				return true;
+			}
+			BVHHandle candidate;
+			candidate.set_id(p_ref_id);
+			// The callback changes pair adjacency, not BVH node topology.
+			query.manager->_collide(query.changed, candidate);
+			return true;
+		};
 
 		for (const BVHHandle &h : changed_items) {
-			// use the expanded aabb for pairing
 			const BOUNDS &expanded_aabb = tree._pairs[h.id()].expanded_aabb;
 			BVHABB_CLASS abb;
 			abb.from(expanded_aabb);
 
-			tree.item_fill_cullparams(h, params);
-
-			// find all the existing paired aabbs that are no longer
-			// paired, and send callbacks
+			// Remove obsolete pairs first, preserving the full filter recheck
+			// for static layer / collision exception changes.
 			_find_leavers(h, abb, p_full_check);
 
-			uint32_t changed_item_ref_id = h.id();
-
-			params.abb = abb;
-
-			params.result_count_overall = 0; // might not be needed
-			tree.cull_aabb(params, false);
-
-			for (const uint32_t ref_id : tree._cull_hits) {
-				// don't collide against ourself
-				if (ref_id == changed_item_ref_id) {
-					continue;
-				}
-
-				// checkmasks is already done in the cull routine.
-				BVHHandle h_collidee;
-				h_collidee.set_id(ref_id);
-
-				// find NEW enterers, and send callbacks for them only
-				_collide(h, h_collidee);
-			}
+			const typename BVHTREE_CLASS::ItemExtra &extra = _get_extra(h);
+			PairVisit query = { this, h };
+			tree.visit_aabb_refs(expanded_aabb, pair_visitor, &query, extra.tree_collision_mask, extra.userdata);
 		}
 		_reset();
 	}
