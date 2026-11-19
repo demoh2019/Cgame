@@ -35,6 +35,12 @@ static func _number(value: Variant) -> bool:
 	return (value is int or value is float) and is_finite(float(value))
 
 
+## JSON may decode integer tokens as float. Accept only exactly integral finite
+## numbers representable without precision loss (IDs remain well below 2^53).
+static func _whole_number(value: Variant) -> bool:
+	return _number(value) and absf(float(value)) <= 9007199254740991.0 and floor(float(value)) == float(value)
+
+
 static func _valid_owner_key(value: Variant) -> bool:
 	if not value is String or value.is_empty() or value.length() > 128:
 		return false
@@ -53,9 +59,9 @@ static func _valid_owner_key(value: Variant) -> bool:
 static func parse_state(world, data: Variant) -> Dictionary:
 	if not data is Dictionary:
 		return {"ok": false, "reason": "bad_document"}
-	if not data.get("version") is int or data["version"] != VERSION:
+	if not _whole_number(data.get("version")) or int(data["version"]) != VERSION:
 		return {"ok": false, "reason": "wrong_version"}
-	if not data.get("seed") is int or data["seed"] != world.world_seed:
+	if not _whole_number(data.get("seed")) or int(data["seed"]) != world.world_seed:
 		return {"ok": false, "reason": "wrong_seed"}
 	var records: Variant = data.get("barricades")
 	if not records is Array or records.size() > Structures.MAX_GLOBAL:
@@ -67,7 +73,7 @@ static func parse_state(world, data: Variant) -> Dictionary:
 	for record in records:
 		if not record is Dictionary:
 			return {"ok": false, "reason": "bad_entry"}
-		if not record.get("id") is int or int(record["id"]) <= FIRST_STRUCTURE_ID:
+		if not _whole_number(record.get("id")) or int(record["id"]) <= FIRST_STRUCTURE_ID:
 			return {"ok": false, "reason": "bad_id"}
 		var id: int = record["id"]
 		if seen.has(id):
