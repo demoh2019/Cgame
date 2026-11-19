@@ -38,6 +38,12 @@
 #include "scene/gui/label.h"
 #include "scene/gui/option_button.h"
 #include "scene/gui/spin_box.h"
+#include "scene/main/scene_tree.h"
+
+#ifndef PHYSICS_3D_DISABLED
+#include "../terrain_collision_3d.h"
+#include "scene/3d/physics/static_body_3d.h"
+#endif
 
 void TerrainEditorPlugin::_notification(int p_what) {
 	if (p_what == NOTIFICATION_ENTER_TREE) {
@@ -80,6 +86,14 @@ void TerrainEditorPlugin::_notification(int p_what) {
 		brush_strength->set_value(1.0);
 		brush_strength->set_tooltip_text("Height change per brush sample; smoothing is limited to 1.0");
 		toolbar->add_child(brush_strength);
+
+#ifndef PHYSICS_3D_DISABLED
+		Button *make_collider = memnew(Button);
+		make_collider->set_text("Add Collider");
+		make_collider->set_tooltip_text("Create a StaticBody3D child with an auto-updating TerrainCollision3D.");
+		make_collider->connect(SNAME("pressed"), callable_mp(this, &TerrainEditorPlugin::_create_collision));
+		toolbar->add_child(make_collider);
+#endif
 
 		add_control_to_container(CONTAINER_SPATIAL_EDITOR_MENU, toolbar);
 		toolbar->hide();
@@ -137,6 +151,38 @@ void TerrainEditorPlugin::_paint_toggled(bool p_enabled) {
 		_finish_stroke();
 	}
 }
+
+#ifndef PHYSICS_3D_DISABLED
+
+void TerrainEditorPlugin::_create_collision() {
+	if (edited_instance == nullptr || terrain.is_null() || get_tree() == nullptr) {
+		return;
+	}
+	Node *scene_root = get_tree()->get_edited_scene_root();
+	if (scene_root == nullptr) {
+		return;
+	}
+
+	// Creating the body as a child of MeshInstance3D means its transform always
+	// follows the visual mesh, even if the parent is later moved or rotated.
+	StaticBody3D *body = memnew(StaticBody3D);
+	body->set_name("TerrainStaticBody3D");
+	TerrainCollision3D *collider = memnew(TerrainCollision3D);
+	collider->set_name("TerrainCollision3D");
+	collider->set_terrain(terrain);
+	body->add_child(collider);
+
+	EditorUndoRedoManager *undo_redo = get_undo_redo();
+	undo_redo->create_action("Add Terrain Collider");
+	undo_redo->add_do_method(edited_instance, "add_child", body);
+	undo_redo->add_do_method(body, "set_owner", scene_root);
+	undo_redo->add_do_method(collider, "set_owner", scene_root);
+	undo_redo->add_undo_method(edited_instance, "remove_child", body);
+	undo_redo->add_do_reference(body);
+	undo_redo->commit_action();
+}
+
+#endif // PHYSICS_3D_DISABLED
 
 void TerrainEditorPlugin::clear() {
 	_finish_stroke();
