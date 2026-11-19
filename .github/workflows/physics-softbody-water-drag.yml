@@ -1,0 +1,32 @@
+name: Physics SoftBody3D water drag numerical contracts
+
+on:
+  pull_request:
+    paths:
+      - "servers/physics_softbody_water_drag.h"
+      - "servers/physics_3d/physics_server_3d.cpp"
+      - "modules/godot_physics_3d/godot_space_3d.cpp"
+      - "modules/godot_physics_3d/godot_space_3d.h"
+      - "modules/godot_physics_3d/godot_soft_body_3d.cpp"
+      - "tests/servers/test_physics_softbody_water_drag.cpp"
+      - "tests/stress/test_physics_softbody_water_drag.py"
+      - ".github/workflows/physics-softbody-water-drag.yml"
+  push:
+    branches: [develop]
+    paths:
+      - "servers/physics_softbody_water_drag.h"
+      - "modules/godot_physics_3d/godot_soft_body_3d.cpp"
+      - "tests/stress/test_physics_softbody_water_drag.py"
+      - ".github/workflows/physics-softbody-water-drag.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  numerical-contracts:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Check water drag numerical invariants and GodotPhysics3D integration
+        run: python3 -m unittest discover -s tests/stress -p test_physics_softbody_water_drag.py -v
