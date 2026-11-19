@@ -35,6 +35,7 @@ TEST_FORCE_LINK(test_os)
 #include "core/os/os.h"
 
 #ifdef __linux__
+#include "platform/linuxbsd/cgroup_cpu_quota.h"
 #include <sched.h>
 #endif
 
@@ -214,10 +215,35 @@ TEST_CASE("[OS] Thread pool respects Linux affinity mask") {
 	if (sched_getaffinity(0, sizeof(cpu_set_t), &allowed_cores) == 0) {
 		const int allowed_count = CPU_COUNT(&allowed_cores);
 		if (allowed_count > 0) {
-			CHECK(OS::get_singleton()->get_default_thread_pool_size() == allowed_count);
+			CHECK(OS::get_singleton()->get_default_thread_pool_size() <= allowed_count);
 		}
 	}
 }
+TEST_CASE("[OS] Thread pool honors cgroup v2 CPU quota if available") {
+	const int quota_count = CgroupCPUQuota::read_cpu_max_file();
+	const int pool_count = OS::get_singleton()->get_default_thread_pool_size();
+	CHECK(pool_count > 0);
+	if (quota_count > 0) {
+		CHECK(pool_count <= quota_count);
+	}
+}
+
+TEST_CASE("[OS] Cgroup v2 CPU max parser") {
+	CHECK(CgroupCPUQuota::parse_cpu_max("max 100000") == 0);
+	CHECK(CgroupCPUQuota::parse_cpu_max("200000 100000") == 2);
+	CHECK(CgroupCPUQuota::parse_cpu_max("250000 100000") == 3);
+	CHECK(CgroupCPUQuota::parse_cpu_max("50000 100000") == 1);
+	CHECK(CgroupCPUQuota::parse_cpu_max("100000 0") == 0);
+	CHECK(CgroupCPUQuota::parse_cpu_max("0 100000") == 0);
+	CHECK(CgroupCPUQuota::parse_cpu_max("-100000 100000") == 0);
+	CHECK(CgroupCPUQuota::parse_cpu_max("100000 garbage") == 0);
+	CHECK(CgroupCPUQuota::parse_cpu_max("18446744073709551616 1") == 0);
+	CHECK(CgroupCPUQuota::effective_thread_count(16, 2) == 2);
+	CHECK(CgroupCPUQuota::effective_thread_count(16, 0) == 16);
+	CHECK(CgroupCPUQuota::effective_thread_count(2, 16) == 2);
+	CHECK(CgroupCPUQuota::effective_thread_count(0, 2) == 1);
+}
+
 #endif // __linux__
 
 } // namespace TestOS

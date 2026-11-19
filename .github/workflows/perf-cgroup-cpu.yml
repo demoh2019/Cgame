@@ -1,0 +1,50 @@
+name: Linux cgroup CPU quota performance regressions
+on:
+  push:
+    branches: [develop]
+    paths:
+      - platform/linuxbsd/os_linuxbsd.cpp
+      - platform/linuxbsd/cgroup_cpu_quota.h
+      - tests/core/os/test_os.cpp
+      - misc/scripts/benchmarks/test_cgroup_cpu_quota.cpp
+      - misc/scripts/README_perf_cgroup_cpu.md
+      - .github/workflows/perf-cgroup-cpu.yml
+  pull_request:
+    paths:
+      - platform/linuxbsd/os_linuxbsd.cpp
+      - platform/linuxbsd/cgroup_cpu_quota.h
+      - tests/core/os/test_os.cpp
+      - misc/scripts/benchmarks/test_cgroup_cpu_quota.cpp
+      - misc/scripts/README_perf_cgroup_cpu.md
+      - .github/workflows/perf-cgroup-cpu.yml
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  parser:
+    runs-on: ubuntu-24.04
+    strategy:
+      fail-fast: false
+      matrix:
+        compiler: [g++, clang++]
+    steps:
+      - uses: actions/checkout@v4
+      - name: Compile and test cgroup quota parser
+        run: |
+          ${{ matrix.compiler }} -std=c++17 -O2 -Wall -Wextra -Werror -I. misc/scripts/benchmarks/test_cgroup_cpu_quota.cpp -o /tmp/cgroup_quota_test
+          /tmp/cgroup_quota_test
+  native-editor:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+      - uses: ./.github/actions/godot-deps
+      - uses: ./.github/actions/godot-build
+        with:
+          platform: linuxbsd
+          target: editor
+          scons-flags: dev_build=yes tests=yes debug_symbols=no module_mono_enabled=no accesskit=no
+      - name: OS native regression tests
+        run: ./bin/godot.linuxbsd.editor.dev.x86_64 --headless --test --test-case='[OS]*'
