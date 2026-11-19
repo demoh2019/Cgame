@@ -387,21 +387,30 @@ public:
 	virtual Variant get_data() const override;
 
 	_FORCE_INLINE_ void project_range(const Vector2 &p_normal, const Transform2D &p_transform, real_t &r_min, real_t &r_max) const {
-		// no matter the angle, the box is mirrored anyway
-		Vector2 n = p_transform.basis_xform_inv(p_normal).normalized();
-		real_t h = height * 0.5 - radius;
-
-		n *= radius;
-		n.y += (n.y > 0) ? h : -h;
-
-		r_max = p_normal.dot(p_transform.xform(n));
-		r_min = p_normal.dot(p_transform.xform(-n));
-
-		if (r_max < r_min) {
-			SWAP(r_max, r_min);
+		const real_t half_segment = height * real_t(0.5) - radius;
+		if (half_segment < 0.0 || radius < 0.0) {
+			// Preserve the original projection for temporarily invalid shape data.
+			Vector2 n = p_transform.basis_xform_inv(p_normal).normalized();
+			n *= radius;
+			n.y += (n.y > 0.0) ? half_segment : -half_segment;
+			r_max = p_normal.dot(p_transform.xform(n));
+			r_min = p_normal.dot(p_transform.xform(-n));
+			if (r_max < r_min) {
+				SWAP(r_max, r_min);
+			}
+			return;
 		}
 
-		//ERR_FAIL_COND( r_max < r_min );
+		// A capsule is a center segment swept by a disk. The affine support
+		// radius is the sum of the transformed disk and center-segment radii.
+		// This avoids normalizing and transforming two support points per axis.
+		const real_t axis_x = p_normal.dot(p_transform.columns[0]);
+		const real_t axis_y = p_normal.dot(p_transform.columns[1]);
+		const real_t projected_radius = radius * Math::sqrt(axis_x * axis_x + axis_y * axis_y) +
+				half_segment * Math::abs(axis_y);
+		const real_t center = p_normal.dot(p_transform.get_origin());
+		r_min = center - projected_radius;
+		r_max = center + projected_radius;
 	}
 
 	DEFAULT_PROJECT_RANGE_CAST
