@@ -254,23 +254,36 @@ bool _visit_point_iterative(uint32_t p_node_id, const POINT &p_point, QueryVisit
 }
 
 bool _visit_aabb_iterative(uint32_t p_node_id, const BVHABB_CLASS &p_query, QueryVisitor p_visitor, void *p_userdata, const T *p_tester) {
+	// Mirror bounded cull_aabb's fully-within shortcut for streaming queries.
+	// Once a subtree is contained in the query, none of its descendants need
+	// per-proxy AABB tests; keep invoking the visitor to honor exact filters.
+	const BVHABB_CLASS &root_bounds = _nodes[p_node_id].aabb;
+	if (!root_bounds.intersects(p_query)) {
+		return true;
+	}
+
 	struct StackItem {
 		uint32_t node_id;
+		bool fully_within;
 	};
 	BVH_IterativeInfo<StackItem> stack;
 	stack.stack = (StackItem *)alloca(stack.get_alloca_stacksize());
 	stack.get_first()->node_id = p_node_id;
+	stack.get_first()->fully_within = p_query.is_other_within(root_bounds);
+
+	// Pre-swizzling the query avoids two negations for each partially
+	// intersecting item in dense leaves. Fully covered leaves skip this test.
+	BVHABB_CLASS swizzled_query;
+	swizzled_query.min = -p_query.neg_max;
+	swizzled_query.neg_max = -p_query.min;
 
 	StackItem next;
 	while (stack.pop(next)) {
 		TNode &node = _nodes[next.node_id];
-		if (!node.aabb.intersects(p_query)) {
-			continue;
-		}
 		if (node.is_leaf()) {
 			TLeaf &leaf = _node_get_leaf(node);
 			for (int i = 0; i < leaf.num_items; ++i) {
-				if (!leaf.get_aabb(i).intersects(p_query)) {
+				if (!next.fully_within && !swizzled_query.intersects_swizzled(leaf.get_aabb(i))) {
 					continue;
 				}
 				const ItemExtra &extra = _extra[leaf.get_item_ref_id(i)];
@@ -284,9 +297,13 @@ bool _visit_aabb_iterative(uint32_t p_node_id, const BVHABB_CLASS &p_query, Quer
 		} else {
 			for (int i = 0; i < node.num_children; ++i) {
 				const uint32_t child_id = node.children[i];
-				if (_nodes[child_id].aabb.intersects(p_query)) {
-					stack.request()->node_id = child_id;
+				const BVHABB_CLASS &child_bounds = _nodes[child_id].aabb;
+				if (!next.fully_within && !child_bounds.intersects(p_query)) {
+					continue;
 				}
+				StackItem *child = stack.request();
+				child->node_id = child_id;
+				child->fully_within = next.fully_within || p_query.is_other_within(child_bounds);
 			}
 		}
 	}
