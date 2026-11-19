@@ -87,7 +87,7 @@ func _build() -> void:
 	top_left.size_flags_horizontal = Control.SIZE_SHRINK_BEGIN
 	top_left.size_flags_vertical = Control.SIZE_SHRINK_BEGIN
 	margin.add_child(top_left)
-	for entry in [["health", Color(0.85, 0.2, 0.2)], ["hunger", Color(0.9, 0.65, 0.2)], ["thirst", Color(0.25, 0.55, 0.95)], ["infection", Color(0.54, 0.28, 0.65)], ["exposure", Color(0.38, 0.7, 0.88)]]:
+	for entry in [["health", Color(0.85, 0.2, 0.2)], ["hunger", Color(0.9, 0.65, 0.2)], ["thirst", Color(0.25, 0.55, 0.95)], ["infection", Color(0.54, 0.28, 0.65)], ["bleeding", Color(0.73, 0.21, 0.27)], ["exposure", Color(0.38, 0.7, 0.88)]]:
 		var bar := ProgressBar.new()
 		bar.custom_minimum_size = Vector2(240, 18)
 		bar.max_value = 100.0
@@ -506,6 +506,9 @@ func _on_event(event: Dictionary) -> void:
 		"infection":
 			if event.get("peer", -1) == client.peer_id:
 				say("Infected wound: severity %d. Use antiseptic or antibiotics." % int(event.get("severity", 0)))
+		"bleeding":
+			if event.get("peer", -1) == client.peer_id:
+				say("Bleeding wound: %d/100. Use a bandage or antiseptic." % int(event.get("severity", 0)))
 		"mastery":
 			if event.get("peer", -1) == client.peer_id:
 				say("+%d %s weapon mastery XP" % [int(event.get("xp", 0)),
@@ -668,6 +671,7 @@ func _process(_delta: float) -> void:
 	_bars["hunger"].value = client.you["hunger"]
 	_bars["thirst"].value = client.you["thirst"]
 	_bars["infection"].value = float(client.you.get("infection", 0.0))
+	_bars["bleeding"].value = float(client.you.get("bleeding", 0.0))
 	_bars["exposure"].value = float(client.you.get("exposure", 0.0))
 	var zone: int = clampi(int(client.you.get("zone", 0)), 0, 3)
 	_zone_label.text = "%s zone (T%d)\n%s" % [Defs.ZONE_NAMES[zone].capitalize(), zone + 1, ZoneRisk.description(zone)]
