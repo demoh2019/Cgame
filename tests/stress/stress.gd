@@ -13,8 +13,10 @@ const CASES := [
 	"memory_churn", "astar_grid", "tweens", "audio_buffers",
 	"variant_codec", "packet_stream", "ui_layout", "render_2d", "render_3d",
 	"node_paths", "regex", "compression", "hashing",
-	"resource_io", "astar_3d", "ui_layout", "thread_contention",
+	"resource_io", "astar_3d", "thread_contention",
 	"geometry_2d", "mesh_build", "input_dispatch", "image_codec", "group_calls",
+	"packed_arrays", "sorting", "animation_tracks", "physics_raycast_2d",
+	"physics_raycast_3d", "render_multimesh_3d",
 	"packed_arrays", "sorting", "animation_tracks", "physics_raycast_2d", "physics_raycast_3d", "render_multimesh_3d",
 ]
 
@@ -216,8 +218,6 @@ func _run_case(test_case: String, scale: int, frames: int, seed: int) -> Diction
 			return _resource_io(scale)
 		"astar_3d":
 			return _astar_3d(scale)
-		"ui_layout":
-			return await _ui_layout(scale, frames)
 		"thread_contention":
 			return _thread_contention(scale)
 		"geometry_2d", "mesh_build", "input_dispatch", "image_codec", "group_calls":
@@ -652,29 +652,6 @@ func _astar_3d(scale: int) -> Dictionary:
 			return {"error": "AStar3D path incorrect"}
 		checksum += path.size()
 	return {"vertices": SIDE * SIDE, "searches": 100 * scale, "checksum": checksum}
-
-
-func _ui_layout(scale: int, frames: int) -> Dictionary:
-	var column := VBoxContainer.new()
-	root.add_child(column)
-	var count := 250 * scale
-	for i in range(count):
-		var label := Label.new()
-		label.text = "Layout stress item %d" % i
-		column.add_child(label)
-	var peak_process_ms := 0.0
-	var checksum := 0.0
-	for frame in range(frames):
-		column.custom_minimum_size = Vector2(float(frame % 40), 0.0)
-		column.queue_sort()
-		await process_frame
-		checksum += column.get_combined_minimum_size().y
-		peak_process_ms = maxf(peak_process_ms, Performance.get_monitor(Performance.TIME_PROCESS) * 1000.0)
-	column.queue_free()
-	await process_frame
-	if checksum <= 0.0:
-		return {"error": "UI layout returned no minimum height"}
-	return {"controls": count, "frames": frames, "peak_process_ms": peak_process_ms, "height_checksum": checksum}
 
 
 var contention_lock := Mutex.new()
