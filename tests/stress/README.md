@@ -54,9 +54,13 @@ The `test_body_motion()` broadphase no longer retains the potentially
 huge list of candidate collision shapes in per-space dynamic vectors.
 Recovery, swept-motion tests and rest-contact collection instead consume
 filtered BVH candidates through callbacks, with no 2048-item ceiling.
-For compound moving bodies, the BVH is traversed once per enabled shape:
-the change prioritizes bounded temporary memory, while CPU overhead must
-be checked against the previous buffered implementation.
+For compound moving bodies, the BVH is traversed once per enabled shape,
+using that shape's *own* transformed AABB (and its swept union for motion).
+A large gap between parts of a compound object no longer causes every shape
+to narrowphase-test all intervening broadphase proxies. The original
+conservative whole-body motion AABB remains available to the 3D distance
+solver. This prioritizes bounded temporary memory and avoids unnecessary
+narrowphase work, but CPU gains must be measured against a baseline.
 
 ```bash
 python3 tests/stress/run.py --godot ./bin/godot.macos.editor.arm64 \
@@ -66,7 +70,10 @@ python3 tests/stress/run.py --godot ./bin/godot.macos.editor.arm64 \
 ```
 
 These cases test explicit exclusions, more than 2048 eligible colliders,
-nearest-hit selection, zero-motion recovery and compound-body sweeps.
+nearest-hit selection, zero-motion recovery, sparse compound shapes,
+offset-shape hits and rotated query transforms. The result dictionaries also
+report `gap_query_ms` and `gap_proxies` for a workload where the empty region
+between compound shapes contains many unrelated static bodies.
 Compare per-scenario duration distributions and peak *process* RSS on identical hardware
 before attributing performance wins to this refactor. The tests do not
 replace a full 2D one-way platform or 3D soft-body regression suite.
