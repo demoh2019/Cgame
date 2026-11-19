@@ -44,15 +44,31 @@ func _run() -> void:
 		starts.append(x)
 
 	PhysicsServer2D.space_set_active(space, true)
+	var original_ticks: int = Engine.physics_ticks_per_second
 	var failures: int = 0
 	var peak_pairs: int = 0
 	for frame in range(150):
-		# This changes a material on a persistent pair, forcing old tangential
-		# impulses to be discarded on a frictionless step and later rebuilt.
+		# Exercise fractional, zero and restored material friction while a
+		# contact persists. The warm-start tangent impulse must remain inside
+		# the current Coulomb cone after each material change.
+		if frame == 30:
+			PhysicsServer2D.body_set_param(balls[2], PhysicsServer2D.BODY_PARAM_FRICTION, 0.2)
 		if frame == 65:
 			PhysicsServer2D.body_set_param(balls[2], PhysicsServer2D.BODY_PARAM_FRICTION, 0.0)
 		if frame == 95:
 			PhysicsServer2D.body_set_param(balls[2], PhysicsServer2D.BODY_PARAM_FRICTION, 1.0)
+
+		# Change the global fixed timestep while keeping contact pairs alive.
+		# 60->120 and back test dt ratios 1/2 and 2; 60->240 exercises the
+		# safe cache reset after a larger timestep change.
+		if frame == 40:
+			Engine.physics_ticks_per_second = 120
+		if frame == 80:
+			Engine.physics_ticks_per_second = 60
+		if frame == 110:
+			Engine.physics_ticks_per_second = 240
+		if frame == 125:
+			Engine.physics_ticks_per_second = 60
 		await physics_frame
 		peak_pairs = maxi(peak_pairs, int(Performance.get_monitor(Performance.PHYSICS_2D_COLLISION_PAIRS)))
 		for ball in balls:
@@ -82,6 +98,7 @@ func _run() -> void:
 			failures += 1
 		print("Contact solver: free=%.3f, friction=%.3f, peak_pairs=%d" % [free_displacement, friction_displacement, peak_pairs])
 
+	Engine.physics_ticks_per_second = original_ticks
 	PhysicsServer2D.space_set_active(space, false)
 	for ball in balls:
 		PhysicsServer2D.free_rid(ball)
