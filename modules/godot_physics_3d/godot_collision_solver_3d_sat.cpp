@@ -1315,10 +1315,17 @@ static void _collision_box_capsule(const GodotShape3D *p_a, const Transform3D &p
 					point += p_transform_a.basis.get_column(l) * he[l];
 				}
 
-				//Vector3 axis = (point - cyl_axis * cyl_axis.dot(point)).normalized();
-				Vector3 axis = Plane(cyl_axis).project(point).normalized();
-
-				if (!separator.test_axis(axis)) {
+				// Use the capsule axis as the radial origin. Projecting the
+				// world-space vertex around (0, 0, 0) changes the candidate
+				// SAT axis when the whole scene is translated.
+				const Vector3 from_capsule = point - p_transform_b.origin;
+				Vector3 radial = from_capsule - cyl_axis * from_capsule.dot(cyl_axis);
+				if (Math::is_zero_approx(radial.length_squared())) {
+					// A vertex exactly on the capsule axis contributes no
+					// radial separating direction.
+					continue;
+				}
+				if (!separator.test_axis(radial.normalized())) {
 					return;
 				}
 			}
@@ -1424,9 +1431,14 @@ static void _collision_box_cylinder(const GodotShape3D *p_a, const Transform3D &
 	// Points of A, cylinder lateral surface.
 	for (int i = 0; i < 8; i++) {
 		const Vector3 &point = vertices_A[i];
-		Vector3 axis = Plane(cyl_axis).project(point).normalized();
-
-		if (!separator.test_axis(axis)) {
+		// A cylinder's radial axis runs through its own origin, not
+		// world zero. This also avoids a temporary Plane per vertex.
+		const Vector3 from_cylinder = point - p_transform_b.origin;
+		Vector3 radial = from_cylinder - cyl_axis * from_cylinder.dot(cyl_axis);
+		if (Math::is_zero_approx(radial.length_squared())) {
+			continue;
+		}
+		if (!separator.test_axis(radial.normalized())) {
 			return;
 		}
 	}
