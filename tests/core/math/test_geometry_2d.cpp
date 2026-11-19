@@ -969,4 +969,64 @@ TEST_CASE("[CoreBind] Geometry2D polygon conversion preserves native points") {
 	}
 }
 
+TEST_CASE("[Geometry2D] Large disjoint polygon results preserve full contour coordinates") {
+	constexpr int point_count = 256;
+	Vector<Point2> first;
+	Vector<Point2> second;
+	first.resize(point_count);
+	second.resize(point_count);
+	Point2 *first_write = first.ptrw();
+	Point2 *second_write = second.ptrw();
+	for (int i = 0; i < point_count; i++) {
+		const double angle = Math::TAU * i / point_count;
+		const Point2 vertex(Math::cos(angle) * 25.0, Math::sin(angle) * 25.0);
+		first_write[i] = vertex;
+		second_write[i] = vertex + Point2(100.0, 0.0);
+	}
+
+	const Vector<Vector<Point2>> union_result = Geometry2D::merge_polygons(first, second);
+	REQUIRE_EQ(union_result.size(), 2);
+	for (const Vector<Point2> &polygon : union_result) {
+		REQUIRE(polygon.size() >= 200);
+		for (const Point2 &point : polygon) {
+			CHECK(Math::is_finite(point.x));
+			CHECK(Math::is_finite(point.y));
+		}
+	}
+
+	const Vector<Vector<Point2>> repeat_result = Geometry2D::merge_polygons(first, second);
+	REQUIRE_EQ(repeat_result.size(), union_result.size());
+	for (int poly = 0; poly < union_result.size(); poly++) {
+		REQUIRE_EQ(repeat_result[poly].size(), union_result[poly].size());
+		for (int v = 0; v < union_result[poly].size(); v++) {
+			CHECK(repeat_result[poly][v].is_equal_approx(union_result[poly][v]));
+		}
+	}
+
+	const Vector<Vector<Point2>> clipped = Geometry2D::clip_polygons(first, second);
+	REQUIRE_EQ(clipped.size(), 1);
+	CHECK(clipped[0].size() >= 200);
+}
+
+TEST_CASE("[Geometry2D] Large polygon offset retains valid paths for both directions") {
+	constexpr int point_count = 384;
+	Vector<Point2> polygon;
+	polygon.resize(point_count);
+	Point2 *vertices = polygon.ptrw();
+	for (int i = 0; i < point_count; i++) {
+		const double angle = Math::TAU * i / point_count;
+		vertices[i] = Point2(Math::cos(angle) * 50.0, Math::sin(angle) * 50.0);
+	}
+
+	for (real_t delta : { -2.0, 2.0 }) {
+		const Vector<Vector<Point2>> offset = Geometry2D::offset_polygon(polygon, delta, Geometry2D::JOIN_ROUND);
+		REQUIRE_EQ(offset.size(), 1);
+		REQUIRE(offset[0].size() >= 100);
+		for (const Point2 &point : offset[0]) {
+			CHECK(Math::is_finite(point.x));
+			CHECK(Math::is_finite(point.y));
+		}
+	}
+}
+
 } // namespace TestGeometry2D
