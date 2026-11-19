@@ -6,7 +6,7 @@ const Rules = preload("res://scripts/rules.gd")
 const Survivor = preload("res://scripts/survivor.gd")
 const Infected = preload("res://scripts/infected.gd")
 
-const SPAWN := Vector2(970, 730)
+const SPAWN = Vector2(970, 730)
 const RESOURCE_COLORS: Dictionary = {
 	"wood": Color(0.54, 0.78, 0.39),
 	"stone": Color(0.55, 0.65, 0.66),
