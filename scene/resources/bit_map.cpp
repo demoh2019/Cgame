@@ -31,7 +31,10 @@
 #include "bit_map.h"
 
 #include "core/object/class_db.h"
+#include "core/templates/local_vector.h"
 #include "core/variant/typed_array.h"
+
+#include <cmath>
 
 void BitMap::create(const Size2i &p_size) {
 	ERR_FAIL_COND(p_size.width < 1);
@@ -711,10 +714,31 @@ void BitMap::grow_mask(int p_pixels, const Rect2i &p_rect) {
 	const Vector<uint8_t> original = bitmask;
 	uint8_t *destination = bitmask.ptrw();
 	const uint8_t *source = original.ptr();
-	const int64_t left = p_rect.position.x;
-	const int64_t right = left + p_rect.size.x;
-	const int64_t top = p_rect.position.y;
-	const int64_t bottom = top + p_rect.size.y;
+	// Only source pixels inside the intersection of image and p_rect can
+	// contribute to growth. For shrinking, stepping outside that region is
+	// already a transparent neighbor, so an entire border band is known.
+	const int64_t left = current.position.x;
+	const int64_t top = current.position.y;
+	const int64_t right = left + current.size.x;
+	const int64_t bottom = top + current.size.y;
+
+	// Cache each disk scanline's half-width once instead of testing every
+	// candidate in the surrounding square against the radius.
+	const int max_delta_y = MIN(radius, current.size.y - 1);
+	LocalVector<int> horizontal_extents;
+	horizontal_extents.resize_uninitialized(max_delta_y + 1);
+	for (int dy = 0; dy <= max_delta_y; dy++) {
+		const int64_t dy_squared = int64_t(dy) * dy;
+		int64_t extent = int64_t(std::sqrt(double(radius_squared - dy_squared)));
+		// Correct possible floating-point rounding at the exact boundary.
+		while (extent * extent + dy_squared > radius_squared) {
+			extent--;
+		}
+		while ((extent + 1) * (extent + 1) + dy_squared <= radius_squared) {
+			extent++;
+		}
+		horizontal_extents[dy] = int(extent);
+	}
 
 	for (int y = current.position.y; y < current.position.y + current.size.y; y++) {
 		for (int x = current.position.x; x < current.position.x + current.size.x; x++) {
@@ -724,30 +748,26 @@ void BitMap::grow_mask(int p_pixels, const Rect2i &p_rect) {
 				continue;
 			}
 
+			// A radius reaching past the image/p_rect intersection always
+			// encounters an unset pixel, so erosion can clear it immediately.
+			if (!bit_value && (int64_t(x) - left < radius || right - x <= radius ||
+					int64_t(y) - top < radius || bottom - y <= radius)) {
+				destination[bit >> 3] &= uint8_t(~mask);
+				continue;
+			}
+
 			bool found = false;
-			for (int64_t candidate_y = int64_t(y) - radius; candidate_y <= int64_t(y) + radius && !found; candidate_y++) {
-				const int64_t delta_y = candidate_y - y;
-				const int64_t delta_y_squared = delta_y * delta_y;
-				for (int64_t candidate_x = int64_t(x) - radius; candidate_x <= int64_t(x) + radius; candidate_x++) {
-					const int64_t delta_x = candidate_x - x;
-					if (delta_x * delta_x + delta_y_squared > radius_squared) {
-						continue;
-					}
-					const bool outside = candidate_x < left || candidate_x >= right ||
-							candidate_y < top || candidate_y >= bottom;
-					if (outside) {
-						if (!bit_value) {
-							found = true;
-							break;
-						}
-						continue;
-					}
-					// get_bit() returned false for points outside the image.
-					bool neighbor = false;
-					if (candidate_x >= 0 && candidate_x < width && candidate_y >= 0 && candidate_y < height) {
-						const int neighbor_bit = int(candidate_y) * width + int(candidate_x);
-						neighbor = (source[neighbor_bit >> 3] & (1u << (neighbor_bit & 7))) != 0;
-					}
+			const int64_t first_y = MAX(top, int64_t(y) - radius);
+			const int64_t last_y = MIN(bottom - 1, int64_t(y) + radius);
+			for (int64_t candidate_y = first_y; candidate_y <= last_y && !found; candidate_y++) {
+				const int dy = ABS(int(candidate_y - y));
+				const int half_width = horizontal_extents[dy];
+				const int64_t first_x = MAX(left, int64_t(x) - half_width);
+				const int64_t last_x = MIN(right - 1, int64_t(x) + half_width);
+				const int source_row = int(candidate_y) * width;
+				for (int64_t candidate_x = first_x; candidate_x <= last_x; candidate_x++) {
+					const int neighbor_bit = source_row + int(candidate_x);
+					const bool neighbor = (source[neighbor_bit >> 3] & (1u << (neighbor_bit & 7))) != 0;
 					if (neighbor == bit_value) {
 						found = true;
 						break;
