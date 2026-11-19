@@ -5,6 +5,7 @@
 
 #include <cmath>
 #include <cstdio>
+#include <initializer_list>
 
 static bool approximately(double p_a, double p_b, double p_tol = 1e-5) {
 	return std::abs(p_a - p_b) < p_tol;
