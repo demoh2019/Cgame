@@ -88,6 +88,13 @@ func _run() -> void:
 		printerr("FAIL: long soft-body ray should hit the nearest face.")
 		failed = true
 
+	# The upper face is only one unit from the origin of a 100-million-unit
+	# segment; the old fixed fraction epsilon falsely rejected this hit.
+	var near_start := _cast(state, Vector3(0.0, 1.0, 0.0), Vector3(0.0, -1e8, 0.0))
+	if near_start.is_empty() or int(near_start.get("face_index", -1)) != 0:
+		printerr("FAIL: long segment missed a nearby soft-body triangle.")
+		failed = true
+
 	world.queue_free()
 	await process_frame
 	if failed:
