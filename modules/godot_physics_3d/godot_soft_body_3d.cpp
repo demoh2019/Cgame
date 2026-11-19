@@ -43,6 +43,7 @@
 #include "servers/physics_softbody_plasticity.h"
 #include "servers/physics_softbody_volume_safe.h"
 #include "servers/physics_xpbd_distance.h"
+#include "servers/physics_xpbd_tension_hardening.h"
 #include "servers/physics_xpbd_area.h"
 #include "servers/physics_xpbd_dihedral.h"
 #include "servers/physics_xpbd_shear.h"
@@ -2012,6 +2013,8 @@ void GodotSoftBody3D::solve_constraints(real_t p_delta) {
 	const double compliance = linear_stiffness > 0.0 ? double(configured_compliance) / double(linear_stiffness) : 0.0;
 	const double alpha_double = p_delta > 0.0 ? compliance / (double(p_delta) * p_delta) : 0.0;
 	const bool use_xpbd = compliance > 0.0 && Math::is_finite(alpha_double) && alpha_double > 0.0;
+	const real_t tension_hardening = get_space() ? get_space()->get_soft_body_xpbd_tension_hardening() : real_t(0.0);
+	const bool use_tension_hardening = use_xpbd && tension_hardening > real_t(0.0);
 	// Unilateral strain limits supplement (rather than replace) the elastic
 	// stretch solver. No extra per-link scratch or work with both ratios 0.
 	const real_t strain_max_ratio = get_space() ? get_space()->get_soft_body_xpbd_strain_max_stretch_ratio() : real_t(0.0);
@@ -2071,6 +2074,22 @@ void GodotSoftBody3D::solve_constraints(real_t p_delta) {
 		}
 	} else if (!xpbd_link_lambdas.is_empty()) {
 		xpbd_link_lambdas.reset();
+	}
+
+	// Freeze nonlinear compliance for the whole physics step. Recomputing
+	// alpha within iterations while retaining lambda causes oscillation.
+	if (use_tension_hardening) {
+		xpbd_link_hardening_alphas.resize(links.size());
+		const real_t yield_strain = get_space()->get_soft_body_xpbd_tension_yield_strain();
+		for (uint32_t link_index = 0; link_index < links.size(); ++link_index) {
+			const Link &link = links[link_index];
+			real_t link_alpha = alpha;
+			physics_xpbd_tension_hardening_alpha(link.n[0]->x, link.n[1]->x,
+					link.rl, alpha, yield_strain, tension_hardening, link_alpha);
+			xpbd_link_hardening_alphas[link_index] = link_alpha;
+		}
+	} else if (!xpbd_link_hardening_alphas.is_empty()) {
+		xpbd_link_hardening_alphas.reset();
 	}
 
 	if (use_strain_limits) {
@@ -2145,7 +2164,8 @@ void GodotSoftBody3D::solve_constraints(real_t p_delta) {
 				if (link.c0 > 0.0) {
 					physics_xpbd_solve_distance(link.n[0]->x, link.n[1]->x,
 							link.n[0]->im, link.n[1]->im, link.rl,
-							alpha, xpbd_link_lambdas[link_index]);
+							use_tension_hardening ? xpbd_link_hardening_alphas[link_index] : alpha,
+							xpbd_link_lambdas[link_index]);
 				}
 			}
 		} else {
@@ -2382,6 +2402,7 @@ void GodotSoftBody3D::destroy() {
 	face_tree.clear();
 
 	xpbd_link_lambdas.reset();
+	xpbd_link_hardening_alphas.reset();
 	xpbd_strain_lambdas.reset();
 	xpbd_area_lambdas.reset();
 	xpbd_shear_rest_cosines.reset();

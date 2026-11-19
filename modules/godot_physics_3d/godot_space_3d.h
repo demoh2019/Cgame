@@ -127,6 +127,8 @@ private:
 	real_t soft_body_xpbd_strain_min_compression_ratio = 0.0; // 0 disables lower limit; 0..1.
 	real_t soft_body_xpbd_strain_limit_compliance = 0.0; // 0: hard unilateral constraints.
 	real_t soft_body_xpbd_compliance = 0.0; // Legacy PBD remains the default.
+	real_t soft_body_xpbd_tension_hardening = 0.0; // Opt-in nonlinear tensile response.
+	real_t soft_body_xpbd_tension_yield_strain = 0.1;
 	real_t soft_body_plastic_yield_strain = 0.1; // Relative elastic yield limit.
 	real_t soft_body_plastic_creep_rate = 0.0; // 1/second; 0 keeps elastic behavior.
 	real_t soft_body_link_damping = 0.0; // Optional longitudinal dashpot rate, 1/s.
@@ -250,6 +252,8 @@ public:
 	_FORCE_INLINE_ real_t get_soft_body_xpbd_strain_min_compression_ratio() const { return soft_body_xpbd_strain_min_compression_ratio; }
 	_FORCE_INLINE_ real_t get_soft_body_xpbd_strain_limit_compliance() const { return soft_body_xpbd_strain_limit_compliance; }
 	_FORCE_INLINE_ real_t get_soft_body_xpbd_compliance() const { return soft_body_xpbd_compliance; }
+	_FORCE_INLINE_ real_t get_soft_body_xpbd_tension_hardening() const { return soft_body_xpbd_tension_hardening; }
+	_FORCE_INLINE_ real_t get_soft_body_xpbd_tension_yield_strain() const { return soft_body_xpbd_tension_yield_strain; }
 	_FORCE_INLINE_ real_t get_soft_body_plastic_yield_strain() const { return soft_body_plastic_yield_strain; }
 	_FORCE_INLINE_ real_t get_soft_body_plastic_creep_rate() const { return soft_body_plastic_creep_rate; }
 	_FORCE_INLINE_ real_t get_soft_body_link_damping() const { return soft_body_link_damping; }
