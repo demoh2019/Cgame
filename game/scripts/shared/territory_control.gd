@@ -5,6 +5,7 @@ extends RefCounted
 
 const Defs = preload("res://scripts/shared/defs.gd")
 const ZoneRisk = preload("res://scripts/shared/zone_risk.gd")
+const OutpostFortification = preload("res://scripts/shared/outpost_fortification.gd")
 const OutpostSupplies = preload("res://scripts/shared/outpost_supplies.gd")
 
 const MAX_SITES := 3
@@ -41,7 +42,7 @@ func _init(world) -> void:
 			sites.append({
 				"id": index + 1, "x": position.x, "z": position.y,
 				"owner": 0, "until": 0.0, "challenger": 0,
-				"progress": 0.0, "contested": false,
+				"progress": 0.0, "contested": false, "fortification": 0,
 				"supplies_left": 0, "supply_epoch": 0,
 				"supply_claims": {},
 			})
@@ -55,10 +56,32 @@ func public_state(now: float) -> Array:
 			"id": int(site["id"]), "x": float(site["x"]), "z": float(site["z"]),
 			"owner": int(site["owner"]), "challenger": int(site["challenger"]),
 			"progress": float(site["progress"]), "contested": bool(site["contested"]),
+			"fortification": int(site["fortification"]),
+			"capture_target": capture_target(site),
 			"expires_in": maxf(0.0, float(site["until"]) - now),
 			"supplies_left": int(site.get("supplies_left", 0)),
 		})
 	return result
+
+
+## A fortified owner's flag requires more uninterrupted enemy presence.
+## Neutral and newly captured sites always use the base capture duration.
+func capture_target(site: Dictionary) -> float:
+	return OutpostFortification.capture_duration(CAPTURE_SECONDS, int(site.get("fortification", 0)))
+
+
+func site_by_id(site_id: int) -> Dictionary:
+	for site in sites:
+		if int(site["id"]) == site_id:
+			return site
+	return {}
+
+
+func contested_by_rivals(site: Dictionary, group_id: int, players: Dictionary, parties) -> bool:
+	for other_group in _occupied_groups(site, players, parties):
+		if int(other_group) != group_id:
+			return true
+	return false
 
 
 func _occupied_groups(site: Dictionary, players: Dictionary, parties) -> Dictionary:
@@ -86,6 +109,7 @@ func tick(delta: float, now: float, players: Dictionary, parties) -> Array:
 			site["owner"] = 0
 			site["until"] = 0.0
 			site["supplies_left"] = 0
+			site["fortification"] = 0
 			site["supply_claims"] = {}
 			changed.append({"type": "outpost_lost", "id": site["id"], "x": site["x"], "z": site["z"]})
 		var occupants: Dictionary = _occupied_groups(site, players, parties)
@@ -104,11 +128,12 @@ func tick(delta: float, now: float, players: Dictionary, parties) -> Array:
 		if int(site["challenger"]) != group_id:
 			site["challenger"] = group_id
 			site["progress"] = 0.0
-		site["progress"] = minf(CAPTURE_SECONDS, float(site["progress"]) + step)
-		if float(site["progress"]) >= CAPTURE_SECONDS:
+		site["progress"] = minf(capture_target(site), float(site["progress"]) + step)
+		if float(site["progress"]) >= capture_target(site):
 			site["owner"] = group_id
 			site["until"] = now + HOLD_SECONDS
 			OutpostSupplies.initialize_capture(site)
+			site["fortification"] = 0 # Previous defenders lose their walls.
 			site["challenger"] = 0
 			site["progress"] = 0.0
 			changed.append({

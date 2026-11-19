@@ -1382,3 +1382,37 @@ phase state remain session-only; the existing single shared loot bag
 and participant-first loot rights continue unchanged. Test coverage:
 `game/tests/test_raid_phase.gd` in the standard headless suite.
 The feature uses existing Cgame scripting, networking and scene APIs.
+
+## Resource-built outpost fortifications (survival x siege warfare)
+
+Captured PvP outposts can now be **fortified up to tier 3** using materials
+collected in the survival world. Stand within **4 metres** of your
+party-owned flag and choose **Fortify controlled outpost** in the online
+inventory. Any living party member may contribute resources, but the site
+must be owned by the party, not expired and not currently under attack.
+
+The server verifies ownership, current enemy presence, player coordinates
+and the carried materials; clients cannot set fortification levels, prices
+or owners. Exact costs are: T1 **4 wood / 3 stone**, T2 **8 wood / 6 stone**,
+T3 **12 wood / 10 stone**, all tier-1 materials. Resource spending and
+one-tier upgrading occur in one synchronous server operation. A failed
+upgrade removes nothing and cannot change the level.
+
+Enemy capture requires **30 seconds + 10 seconds per fortification tier**
+of uncontested presence. The bonus affects only the current owner; when the
+outpost is captured by another group, abandoned or expires, its
+fortifications are destroyed without a material refund. The HUD displays
+the fortification tier, and capture progress uses its actual duration.
+
+Every fortification request has a monotonic per-player session ID. Duplicate
+requests return their original result without spending resources again,
+while stale IDs and reused IDs with changed arguments are refused.
+Outpost capture and reinforcement events are visible only to players within
+interest range. The logic and tests are in `outpost_fortification.gd`,
+`territory_control.gd`, `game_server.gd` and
+`tests/test_outpost_fortification.gd`.
+
+This is still session-based **party** warfare, not durable guild
+territory ownership. A future phase must authenticate guilds in Nakama
+and persist fortification ownership transactionally before cross-server
+clan sieges. No native Cgame engine changes were necessary for this stage.

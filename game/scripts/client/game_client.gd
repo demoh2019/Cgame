@@ -233,6 +233,16 @@ func party_rally() -> void:
 	net.c_party_rally.rpc_id(1)
 
 
+var _outpost_fortify_request_id: int = 0
+
+
+func outpost_fortify(site_id: int) -> void:
+	if _outpost_fortify_request_id >= 2_147_483_647:
+		return # Reconnect rather than wrap a request identifier.
+	_outpost_fortify_request_id += 1
+	net.c_outpost_fortify.rpc_id(1, site_id, _outpost_fortify_request_id)
+
+
 func trade_invite(target_id: int) -> void:
 	net.c_trade_invite.rpc_id(1, target_id)
 

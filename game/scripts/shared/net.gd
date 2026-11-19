@@ -363,6 +363,15 @@ func c_party_kick(target_id: int) -> void:
 		s_result.rpc_id(peer, "party", sim.cmd_party_kick(peer, target_id))
 
 
+## Only the sender's authoritative party and backpack can reinforce a flag.
+@rpc("any_peer", "reliable")
+func c_outpost_fortify(site_id: int, request_id: int) -> void:
+	var peer := multiplayer.get_remote_sender_id()
+	if _allowed(peer):
+		s_result.rpc_id(peer, "outpost_fortify",
+			sim.cmd_outpost_fortify(peer, site_id, request_id))
+
+
 @rpc("any_peer", "reliable")
 func c_trade_invite(target_id: int) -> void:
 	var peer := multiplayer.get_remote_sender_id()
@@ -566,6 +575,8 @@ func _event_visible_to(event: Dictionary, peer: int) -> bool:
 			return event.get("peer", -1) == peer or event.get("by", -1) == peer
 		"trade":
 			return event.get("a", -1) == peer or event.get("b", -1) == peer
+		"outpost_taken", "outpost_lost", "outpost_fortified":
+			return _is_nearby(event, peer)
 		"death":
 			return true # Everyone hears that somebody died (no position is shared).
 		"hit":
