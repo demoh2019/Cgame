@@ -876,84 +876,68 @@ int String::get_slice_count(const char *p_splitter) const {
 }
 
 String String::get_slice(const String &p_splitter, int p_slice) const {
-	if (is_empty() || p_splitter.is_empty()) {
+	if (is_empty() || p_splitter.is_empty() || p_slice < 0) {
 		return "";
 	}
 
-	int pos = 0;
-	int prev_pos = 0;
-	//int slices=1;
-	if (p_slice < 0) {
-		return "";
-	}
-	if (find(p_splitter) == -1) {
+	// Reuse the first search result rather than searching the first slice twice.
+	int pos = find(p_splitter);
+	if (pos == -1) {
 		return *this;
 	}
 
+	const int len = length();
+	const int splitter_length = p_splitter.length();
+	int prev_pos = 0;
 	int i = 0;
 	while (true) {
-		pos = find(p_splitter, pos);
-		if (pos == -1) {
-			pos = length(); //reached end
-		}
-
-		int from = prev_pos;
-		//int to=pos;
-
 		if (p_slice == i) {
-			return substr(from, pos - from);
+			return substr(prev_pos, pos - prev_pos);
 		}
-
-		if (pos == length()) { //reached end and no find
+		if (pos == len) {
 			break;
 		}
-		pos += p_splitter.length();
-		prev_pos = pos;
-		i++;
+		prev_pos = pos + splitter_length;
+		++i;
+		pos = find(p_splitter, prev_pos);
+		if (pos == -1) {
+			pos = len;
+		}
 	}
 
-	return ""; //no find!
+	return "";
 }
 
 String String::get_slice(const char *p_splitter, int p_slice) const {
-	if (is_empty() || p_splitter == nullptr || *p_splitter == '\0') {
+	if (is_empty() || p_splitter == nullptr || *p_splitter == '\0' || p_slice < 0) {
 		return "";
 	}
 
-	int pos = 0;
-	int prev_pos = 0;
-	//int slices=1;
-	if (p_slice < 0) {
-		return "";
-	}
-	if (find(p_splitter) == -1) {
+	int pos = find(p_splitter);
+	if (pos == -1) {
 		return *this;
 	}
 
-	int i = 0;
+	const int len = length();
 	const int splitter_length = strlen(p_splitter);
+	int prev_pos = 0;
+	int i = 0;
 	while (true) {
-		pos = find(p_splitter, pos);
-		if (pos == -1) {
-			pos = length(); //reached end
-		}
-
-		int from = prev_pos;
-		//int to=pos;
-
 		if (p_slice == i) {
-			return substr(from, pos - from);
+			return substr(prev_pos, pos - prev_pos);
 		}
-
-		if (pos == length()) { //reached end and no find
+		if (pos == len) {
 			break;
 		}
-		pos += splitter_length;
-		prev_pos = pos;
-		i++;
+		prev_pos = pos + splitter_length;
+		++i;
+		pos = find(p_splitter, prev_pos);
+		if (pos == -1) {
+			pos = len;
+		}
 	}
 
-	return ""; //no find!
+	return "";
 }
 
 String String::get_slicec(char32_t p_splitter, int p_slice) const {
