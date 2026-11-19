@@ -346,6 +346,38 @@ bool GodotBodyPair2D::_test_ccd(real_t p_step, GodotBody2D *p_A, int p_shape_A, 
 		// Arbitrary affine transforms require the general support-cast path.
 	}
 
+	// The reverse order is the same Minkowski sum: cast B's circle
+	// center against A's expanded capsule, using -relative_motion.
+	if (shape_A_ptr->get_type() == PS2DE::SHAPE_CAPSULE && shape_B_ptr->get_type() == PS2DE::SHAPE_CIRCLE &&
+			p_A->get_angular_velocity() == 0.0 && p_B->get_angular_velocity() == 0.0) {
+		const double scale_A = physics_ccd_uniform_sphere_scale(p_xform_A);
+		const double scale_B = physics_ccd_uniform_sphere_scale(p_xform_B);
+		if (scale_A > 0.0 && scale_B > 0.0) {
+			const GodotCapsuleShape2D *capsule = static_cast<GodotCapsuleShape2D *>(shape_A_ptr);
+			const double capsule_radius = double(capsule->get_radius());
+			const double half_segment = double(capsule->get_height()) * 0.5 - capsule_radius;
+			const double circle_radius = double(static_cast<GodotCircleShape2D *>(shape_B_ptr)->get_radius()) * scale_B / scale_A;
+			if (capsule_radius > 0.0 && half_segment >= 0.0 && circle_radius > 0.0) {
+				const Transform2D inverse_A = p_xform_A.affine_inverse();
+				const Vector2 local_start = inverse_A.xform(p_xform_B.get_origin());
+				const Vector2 local_motion = -inverse_A.basis_xform(relative_motion);
+				double impact_fraction = 0.0;
+				if (!physics_ccd_capsule_toi(local_start, local_motion, capsule_radius + circle_radius, half_segment, impact_fraction)) {
+					return false;
+				}
+
+				const real_t allowed_distance = CLAMP(real_t(impact_fraction * double(mlen)) + (max - min) * real_t(0.01), real_t(0.0), mlen);
+				const Vector2 desired_velocity = velocity_B + mnormal * (allowed_distance / p_step);
+				const Vector2 velocity_A = p_A->get_linear_velocity();
+				const real_t initial_speed = velocity_A.length();
+				const Vector2 travel_direction = velocity_A / initial_speed;
+				const real_t clipped_speed = CLAMP(desired_velocity.dot(travel_direction), real_t(0.0), initial_speed);
+				p_A->set_linear_velocity(travel_direction * clipped_speed);
+				return true;
+			}
+		}
+	}
+
 	Vector2 supports_A[2];
 	int support_count_A = 0;
 	shape_A_ptr->get_supports(p_xform_A.basis_xform_inv(mnormal).normalized(), supports_A, support_count_A);
