@@ -55,6 +55,24 @@ def rss_mib(pid: int) -> float | None:
     return None
 
 
+def cpu_seconds(pid: int) -> float | None:
+    """CPU user+system seconds, sampled while the child is alive."""
+    try:
+        import psutil  # type: ignore[import-not-found]
+
+        times = psutil.Process(pid).cpu_times()
+        return times.user + times.system
+    except (ImportError, OSError):
+        pass
+    try:
+        # Linux stat's comm field may contain spaces or parentheses.
+        raw = Path("/proc/%d/stat" % pid).read_text()
+        fields = raw.rsplit(")", 1)[1].split()
+        return (int(fields[11]) + int(fields[12])) / os.sysconf("SC_CLK_TCK")
+    except (OSError, ValueError, IndexError, AttributeError):
+        return None
+
+
 def parse_result(log: str, case: str, scale: int, frames: int, seed: int) -> dict[str, Any]:
     markers = [line[len(PREFIX):] for line in log.splitlines() if line.startswith(PREFIX)]
     if len(markers) != 1:
@@ -108,6 +126,7 @@ def run_once(cmd: list[str], timeout: float, rss_limit_mib: float,
              case: str, scale: int, frames: int, seed: int) -> dict[str, Any]:
     start = time.monotonic()
     maximum_rss: float | None = None
+    latest_cpu: float | None = None
     failure = None
     # A file, rather than a PIPE, avoids deadlock if the engine emits megabytes of errors.
     with tempfile.TemporaryFile(mode="w+t", encoding="utf-8", errors="replace") as output:
@@ -119,6 +138,9 @@ def run_once(cmd: list[str], timeout: float, rss_limit_mib: float,
         while process.poll() is None:
             elapsed = time.monotonic() - start
             current_rss = rss_mib(process.pid)
+            current_cpu = cpu_seconds(process.pid)
+            if current_cpu is not None:
+                latest_cpu = current_cpu
             if current_rss is not None:
                 maximum_rss = max(maximum_rss or 0.0, current_rss)
                 if current_rss > rss_limit_mib:
@@ -137,6 +159,7 @@ def run_once(cmd: list[str], timeout: float, rss_limit_mib: float,
         "status": "passed",
         "wall_seconds": round(elapsed, 6),
         "peak_rss_mib": round(maximum_rss, 3) if maximum_rss is not None else None,
+        "cpu_seconds": round(latest_cpu, 6) if latest_cpu is not None else None,
         "exit_code": process.returncode,
     }
     if failure is None and process.returncode != 0:
@@ -157,11 +180,13 @@ def summarize(runs: list[dict[str, Any]]) -> dict[str, Any]:
     passed = [r for r in runs if r["status"] == "passed"]
     wall = sorted(r["wall_seconds"] for r in passed)
     memories = [r["peak_rss_mib"] for r in runs if r["peak_rss_mib"] is not None]
+    cpu_times = [r["cpu_seconds"] for r in passed if r.get("cpu_seconds") is not None]
     return {
         "status": "passed" if len(passed) == len(runs) else "failed",
         "median_wall_seconds": round(statistics.median(wall), 6) if wall else None,
         "p95_wall_seconds": round(wall[math.ceil(0.95 * len(wall)) - 1], 6) if wall else None,
         "max_rss_mib": round(max(memories), 3) if memories else None,
+        "median_cpu_seconds": round(statistics.median(cpu_times), 6) if cpu_times else None,
         "runs": runs,
     }
 
@@ -177,7 +202,7 @@ def compare_baseline(current: dict[str, Any], baseline: dict[str, Any],
         previous = baseline.get("cases", {}).get(name)
         if not previous or data["status"] != "passed":
             continue
-        for field in ("median_wall_seconds", "max_rss_mib"):
+        for field in ("median_wall_seconds", "median_cpu_seconds", "max_rss_mib"):
             new, old = data.get(field), previous.get(field)
             if new is not None and old is not None and old > 0 and new > old * (1 + percent / 100.0):
                 errors.append("%s %s: %.3f > %.3f (baseline + %.1f%%)" %
