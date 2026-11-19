@@ -116,11 +116,15 @@ void TriangleMesh::create(const Vector<Vector3> &p_faces, const Vector<int32_t> 
 	int fc = p_faces.size();
 	ERR_FAIL_COND(!fc || ((fc % 3) != 0));
 	fc /= 3;
-	triangles.resize(fc);
+	// Every triangle is populated before use. Skip default-initializing a
+	// potentially large temporary array when constructing mesh geometry.
+	ERR_FAIL_COND(triangles.resize_uninitialized(fc) != OK);
 
 	// A full binary tree with fc leaves has exactly 2 * fc - 1 nodes.
 	// Avoid reserving 3 * fc nodes and shrinking/copying them after construction.
-	bvh.resize(fc * 2 - 1);
+	// All leaves are written before BVH construction; each inner node is
+	// initialized by _create_bvh() before it becomes reachable.
+	ERR_FAIL_COND(bvh.resize_uninitialized(fc * 2 - 1) != OK);
 	BVH *bw = bvh.ptrw();
 
 	{
@@ -167,7 +171,7 @@ void TriangleMesh::create(const Vector<Vector3> &p_faces, const Vector<int32_t> 
 			bw[i].center = bw[i].aabb.get_center();
 		}
 
-		vertices.resize(db.size());
+		ERR_FAIL_COND(vertices.resize_uninitialized(db.size()) != OK);
 		Vector3 *vw = vertices.ptrw();
 		for (const KeyValue<Vector3, int> &E : db) {
 			vw[E.value] = E.key;
@@ -177,7 +181,7 @@ void TriangleMesh::create(const Vector<Vector3> &p_faces, const Vector<int32_t> 
 	// Sort compact leaf indices instead of pointers. On 64-bit systems this
 	// halves the temporary sorting buffer from 8 * fc to 4 * fc bytes.
 	Vector<int> leaf_indices;
-	leaf_indices.resize(fc);
+	ERR_FAIL_COND(leaf_indices.resize_uninitialized(fc) != OK);
 	int *indices = leaf_indices.ptrw();
 	for (int i = 0; i < fc; i++) {
 		indices[i] = i;

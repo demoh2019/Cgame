@@ -260,6 +260,66 @@ TEST_CASE("[TriangleMesh][Regression] Compact BVH references nodes by index and 
 	}
 }
 
+
+TEST_CASE("[TriangleMesh][Performance] Repeated BVH builds overwrite uninitialized scratch safely") {
+	Ref<TriangleMesh> mesh;
+	mesh.instantiate();
+	// Grow, shrink and regrow all four internal buffers. Each run must
+	// initialize every referenced triangle, vertex and BVH node.
+	const int face_counts[] = { 128, 1, 37, 2, 257, 8 };
+	for (int face_count : face_counts) {
+		Vector<Vector3> input;
+		REQUIRE(input.resize_uninitialized(face_count * 3) == OK);
+		Vector3 *const positions = input.ptrw();
+		for (int i = 0; i < face_count; i++) {
+			const real_t x = real_t(i * 3);
+			positions[i * 3 + 0] = Vector3(x, 0, 0);
+			positions[i * 3 + 1] = Vector3(x + 1, 0, 0);
+			positions[i * 3 + 2] = Vector3(x, 1, 0);
+		}
+		mesh->create(input);
+		REQUIRE(mesh->is_valid());
+		REQUIRE(mesh->get_bvh().size() == face_count * 2 - 1);
+		REQUIRE(mesh->get_triangles().size() == face_count);
+		REQUIRE(mesh->get_vertices().size() == face_count * 3);
+		const Vector<Face3> output = mesh->get_faces();
+		REQUIRE(output.size() == face_count);
+		for (int i = 0; i < face_count; i++) {
+			for (int corner = 0; corner < 3; corner++) {
+				CHECK(output[i].vertex[corner] == positions[i * 3 + corner]);
+			}
+			CHECK(mesh->get_triangles()[i].surface_index == 0);
+		}
+
+		// Check that leaves from an earlier, larger BVH cannot leak into a
+		// smaller rebuilt tree and that all child references are valid.
+		const Vector<TriangleMesh::BVH> &nodes = mesh->get_bvh();
+		int leaves = 0;
+		for (int n = 0; n < nodes.size(); n++) {
+			const TriangleMesh::BVH &node = nodes[n];
+			if (node.face_index >= 0) {
+				REQUIRE(node.face_index < face_count);
+				leaves++;
+			} else {
+				CHECK(node.left >= 0);
+				CHECK(node.right >= 0);
+				CHECK(node.left < n);
+				CHECK(node.right < n);
+			}
+		}
+		CHECK(leaves == face_count);
+		for (int i : { 0, face_count / 2, face_count - 1 }) {
+			const Vector3 from(real_t(i * 3) + real_t(0.25), real_t(0.25), 2);
+			Vector3 hit;
+			Vector3 normal;
+			int32_t face_index = -1;
+			CHECK(mesh->intersect_ray(from, Vector3(0, 0, -1), hit, normal, nullptr, &face_index));
+			CHECK(face_index == i);
+			CHECK(hit.is_equal_approx(Vector3(from.x, from.y, 0)));
+		}
+	}
+}
+
 } // namespace TestTriangleMesh
 
 #endif // _3D_DISABLED
