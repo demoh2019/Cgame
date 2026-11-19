@@ -36,6 +36,8 @@
 
 Vector<Vector3> BoxShape3D::get_debug_mesh_lines() const {
 	Vector<Vector3> lines;
+	lines.resize(24);
+	Vector3 *vertices = lines.ptrw();
 	AABB aabb;
 	aabb.position = -size / 2;
 	aabb.size = size;
@@ -43,8 +45,8 @@ Vector<Vector3> BoxShape3D::get_debug_mesh_lines() const {
 	for (int i = 0; i < 12; i++) {
 		Vector3 a, b;
 		aabb.get_edge(i, a, b);
-		lines.push_back(a);
-		lines.push_back(b);
+		vertices[2 * i] = a;
+		vertices[2 * i + 1] = b;
 	}
 
 	return lines;
