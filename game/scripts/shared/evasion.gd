@@ -14,7 +14,7 @@ const MIN_DISPLACEMENT := 0.08
 
 
 static func destination(world, origin: Vector3, input_direction: Vector2) -> Vector3:
-	if not origin.is_finite() or not input_direction.is_finite():
+	if not origin.is_finite() or not input_direction.is_finite() or not is_finite(input_direction.length_squared()):
 		return origin
 	if input_direction.length_squared() < 0.0001:
 		return origin
