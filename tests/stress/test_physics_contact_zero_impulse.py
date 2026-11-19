@@ -81,6 +81,23 @@ class ZeroImpulseContactContracts(unittest.TestCase):
         self.assertIn("const real_t tangent_mass = body_inv_mass + node_inv_mass", self.soft3)
         self.assertIn("if (tangent_mass <= 0.0)", self.soft3)
 
+
+    def test_bias_velocities_are_refreshed_only_after_applied_impulse(self):
+        # Without a bias impulse, reading the same biased velocities again
+        # cannot change the computed relative normal velocity.
+        for name, block, indentation in (
+            ("rigid2", self.rigid2, "\t\t\t"),
+            ("rigid3", self.rigid3, "\t\t\t\t"),
+            ("soft3", self.soft3, "\t\t\t\t"),
+        ):
+            with self.subTest(name=name):
+                begin = block.index("if (bias_delta != 0.0) {")
+                end = block.index("const real_t total_inverse_mass =", begin)
+                guarded_region = block[begin:end]
+                self.assertIn("\n" + indentation + "vbn = dbv.dot(c.normal);", guarded_region)
+                self.assertLess(guarded_region.index("vbn = dbv.dot(c.normal);"),
+                                guarded_region.rfind("}"))
+
     def test_skip_zero_matches_projected_gauss_seidel(self):
         rng = random.Random(24248)
         for _ in range(2000):
