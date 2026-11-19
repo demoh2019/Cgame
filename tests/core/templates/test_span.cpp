@@ -34,6 +34,9 @@ TEST_FORCE_LINK(test_span)
 
 #include "core/templates/span.h"
 
+#include <limits>
+#include <string>
+
 namespace TestSpan {
 
 TEST_CASE("[Span] Constexpr Validators") {
@@ -69,6 +72,79 @@ TEST_CASE("[Span] Constexpr Validators") {
 	for (const char32_t &chr : span_string) {
 		CHECK_EQ(chr, span_string[idx++]);
 	}
+}
+
+TEST_CASE("[Span] Sequence find prefilters repeated candidates") {
+	const uint8_t haystack[] = { 7, 7, 7, 7, 8, 7, 7, 8, 7, 7 };
+	const uint8_t needle[] = { 7, 7, 8 };
+	const Span<uint8_t> hay(haystack);
+	const Span<uint8_t> pattern(needle);
+
+	CHECK(hay.find_sequence(pattern) == 2);
+	CHECK(hay.find_sequence(pattern, 3) == 5);
+	CHECK(hay.find_sequence(pattern, 6) == -1);
+	CHECK(hay.rfind_sequence(pattern) == 5);
+	CHECK(hay.rfind_sequence(pattern, 4) == 2);
+	CHECK(hay.rfind_sequence(pattern, 1) == -1);
+
+	const uint8_t single[] = { 8 };
+	CHECK(hay.find_sequence(Span<uint8_t>(single)) == 4);
+	CHECK(hay.rfind_sequence(Span<uint8_t>(single)) == 7);
+}
+
+TEST_CASE("[Span] Sequence search empty and out-of-bounds ranges") {
+	const int data[] = { 1, 2, 3, 4 };
+	const int too_long[] = { 1, 2, 3, 4, 5 };
+	const Span<int> hay(data);
+	const Span<int> oversized(too_long);
+	const Span<int> empty;
+
+	CHECK(hay.find_sequence(oversized) == -1);
+	CHECK(hay.rfind_sequence(oversized) == -1);
+	CHECK(hay.find_sequence(oversized, 3) == -1);
+	CHECK(hay.rfind_sequence(oversized, 3) == -1);
+	CHECK(hay.find_sequence(empty) == 0);
+	CHECK(hay.find_sequence(empty, hay.size()) == 4);
+	CHECK(hay.find_sequence(empty, hay.size() + 1) == -1);
+	CHECK(hay.rfind_sequence(empty) == 4);
+	CHECK(hay.rfind_sequence(empty, hay.size() + 1) == -1);
+	CHECK(hay.find_sequence(hay) == 0);
+	CHECK(hay.rfind_sequence(hay) == 0);
+
+	CHECK(empty.find_sequence(empty) == 0);
+	CHECK(empty.rfind_sequence(empty) == 0);
+	CHECK(empty.find_sequence(hay) == -1);
+	CHECK(empty.rfind_sequence(hay) == -1);
+}
+
+TEST_CASE("[Span] Sequence search supports mixed and nontrivial types") {
+	const int haystack[] = { 100, 200, 100, 200, 300 };
+	const int16_t needle[] = { 100, 200 };
+	const Span<int> hay(haystack);
+	const Span<int16_t> pattern(needle);
+	CHECK(hay.find_sequence(pattern) == 0);
+	CHECK(hay.find_sequence(pattern, 1) == 2);
+	CHECK(hay.rfind_sequence(pattern) == 2);
+
+	const std::string words[] = { "alpha", "beta", "alpha", "beta", "gamma" };
+	const std::string pair[] = { "alpha", "beta" };
+	const Span<std::string> word_span(words);
+	const Span<std::string> pair_span(pair);
+	CHECK(word_span.find_sequence(pair_span) == 0);
+	CHECK(word_span.find_sequence(pair_span, 1) == 2);
+	CHECK(word_span.rfind_sequence(pair_span) == 2);
+}
+
+TEST_CASE("[Span] Float sequence searches preserve bitwise comparison semantics") {
+	const float nan = std::numeric_limits<float>::quiet_NaN();
+	const float values[] = { -0.0f, nan, 1.0f, -0.0f, nan };
+	const float pattern[] = { values[0], values[1] };
+	const float positive_zero[] = { 0.0f };
+	const Span<float> hay(values);
+
+	CHECK(hay.find_sequence(Span<float>(pattern)) == 0);
+	CHECK(hay.rfind_sequence(Span<float>(pattern)) == 3);
+	CHECK(hay.find_sequence(Span<float>(positive_zero)) == -1);
 }
 
 } // namespace TestSpan

@@ -1,0 +1,58 @@
+name: Span sequence fastpath and bounds regressions
+
+on:
+  push:
+    branches: [develop]
+    paths:
+      - 'core/templates/span.h'
+      - 'tests/core/templates/test_span.cpp'
+      - 'misc/scripts/tests/test_span_sequence_search.py'
+      - '.github/workflows/span-sequence-hotpath.yml'
+  pull_request:
+    paths:
+      - 'core/templates/span.h'
+      - 'tests/core/templates/test_span.cpp'
+      - 'misc/scripts/tests/test_span_sequence_search.py'
+      - '.github/workflows/span-sequence-hotpath.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: span-sequence-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  standalone-cpp17-regression-and-benchmark:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    strategy:
+      fail-fast: false
+      matrix:
+        cxx: [g++, clang++]
+    steps:
+      - uses: actions/checkout@v4
+      - name: Check Python syntax
+        run: python3 -m py_compile misc/scripts/tests/test_span_sequence_search.py
+      - name: Compile actual Span header and run randomized reference tests
+        env:
+          CXX: ${{ matrix.cxx }}
+        run: python3 misc/scripts/tests/test_span_sequence_search.py
+
+  native-span-tests:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+      - uses: ./.github/actions/godot-deps
+      - name: Build native editor with tests
+        uses: ./.github/actions/godot-build
+        with:
+          platform: linuxbsd
+          target: editor
+          scons-flags: dev_build=yes tests=yes debug_symbols=no module_mono_enabled=no module_text_server_fb_enabled=yes accesskit=no -j2
+      - name: Run native Span test cases
+        run: ./bin/godot.linuxbsd.editor.dev.x86_64 --headless --test --test-suite="*Span*" --no-colors
