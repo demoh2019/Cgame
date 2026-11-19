@@ -77,6 +77,13 @@ protected:
 
 public:
 	void insert(const T &p_val) {
+		// Ordered insertions are common when building sets from sorted input.
+		// Avoid a logarithmic search when this value follows the last element.
+		if (!_data.is_empty() && Comparator<T>()(_data[_data.size() - 1], p_val)) {
+			_data.push_back(p_val);
+			return;
+		}
+
 		bool exact;
 		int pos = _find(p_val, exact);
 		if (exact) {
