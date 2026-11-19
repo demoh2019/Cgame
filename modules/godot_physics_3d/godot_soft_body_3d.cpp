@@ -1253,6 +1253,11 @@ void GodotSoftBody3D::solve_constraints(real_t p_delta) {
 			}
 		}
 	} else {
+		// Release the optional buffers if XPBD was switched off or a
+		// substep cannot safely use compliance; the default uses zero RAM.
+		if (!xpbd_link_lambdas.is_empty()) {
+			xpbd_link_lambdas.reset();
+		}
 		// Legacy PBD solver, unchanged when compliance is zero.
 		for (int isolve = 0; isolve < iteration_count; ++isolve) {
 			const real_t ti = isolve / (real_t)iteration_count;
