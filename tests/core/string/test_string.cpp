@@ -375,6 +375,70 @@ TEST_CASE("[String] Case function test") {
 	CHECK(a.to_lower() == "momonga");
 }
 
+TEST_CASE("[String] ASCII case conversion matches character mapping") {
+	for (char32_t c = 1; c < 128; ++c) {
+		const String source = String::chr(c);
+		const String uppercase = source.to_upper();
+		const String lowercase = source.to_lower();
+		CHECK(uppercase.length() == 1);
+		CHECK(lowercase.length() == 1);
+		CHECK(uppercase[0] == String::char_uppercase(c));
+		CHECK(lowercase[0] == String::char_lowercase(c));
+	}
+}
+
+TEST_CASE("[String] Case conversion preserves Unicode mapping") {
+	const String source = U"\u0416\u03A3\u00C4\u212A";
+	CHECK(source.to_lower() == String(U"\u0436\u03C3\u00E4k"));
+	CHECK(source.to_upper() == source);
+	CHECK(String(U"\u0436\u03C3\u00E4k").to_upper() == String(U"\u0416\u03A3\u00C4K"));
+
+	String mixed = "hello WORLD ";
+	mixed += String(U"\u0416\u03A3");
+	CHECK(mixed.to_lower() == String(U"hello world \u0436\u03C3"));
+	CHECK(mixed.to_upper() == String(U"HELLO WORLD \u0416\u03A3"));
+}
+
+TEST_CASE("[String] Already normalized case conversion shares original allocation") {
+	String lowercase;
+	String uppercase;
+	for (int i = 0; i < 1024; ++i) {
+		lowercase += "the quick brown fox 123 ";
+		uppercase += "THE QUICK BROWN FOX 123 ";
+	}
+	lowercase += String(U"\u0436\u03C3\u00E4");
+	uppercase += String(U"\u0416\u03A3\u00C4");
+
+	const char32_t *lower_ptr = lowercase.ptr();
+	const char32_t *upper_ptr = uppercase.ptr();
+	const String same_lower = lowercase.to_lower();
+	const String same_upper = uppercase.to_upper();
+	CHECK(same_lower == lowercase);
+	CHECK(same_upper == uppercase);
+	CHECK(same_lower.ptr() == lower_ptr);
+	CHECK(same_upper.ptr() == upper_ptr);
+	CHECK(lowercase.ptr() == lower_ptr);
+	CHECK(uppercase.ptr() == upper_ptr);
+}
+
+TEST_CASE("[String] Case conversion works at start middle end and with embedded NUL") {
+	CHECK(String("abcdefgh").to_upper() == "ABCDEFGH");
+	CHECK(String("ABCDEFGH").to_lower() == "abcdefgh");
+	CHECK(String("111X111").to_lower() == "111x111");
+	CHECK(String("111x111").to_upper() == "111X111");
+	CHECK(String("111111X").to_lower() == "111111x");
+	CHECK(String("111111x").to_upper() == "111111X");
+
+	String embedded = "xQ";
+	embedded.resize(4);
+	embedded[2] = 0;
+	embedded[3] = 'Z';
+	CHECK(embedded.to_lower()[1] == 'q');
+	CHECK(embedded.to_lower()[2] == 0);
+	CHECK(embedded.to_upper()[1] == 'Q');
+	CHECK(embedded.to_upper()[2] == 0);
+}
+
 TEST_CASE("[String] Case compare function test") {
 	String a = "MoMoNgA";
 
