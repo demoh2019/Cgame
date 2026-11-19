@@ -284,6 +284,9 @@ public:
 	virtual void soft_body_set_tetrahedral_indices(RID, const PackedInt32Array &) {}
 	// Optional interior FEM rest nodes, following all visual-vertex indices.
 	virtual void soft_body_set_tetrahedral_interior_positions(RID, const PackedVector3Array &) {}
+	// Optional diagnostics: zero for backends without volumetric FEM.
+	virtual int soft_body_get_tetrahedron_count(RID) const { return 0; }
+	virtual int soft_body_get_tetrahedral_interior_node_count(RID) const { return 0; }
 
 	virtual AABB soft_body_get_bounds(RID p_body) const = 0;
 
