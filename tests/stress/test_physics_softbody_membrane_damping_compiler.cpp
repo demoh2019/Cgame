@@ -4,6 +4,7 @@
 
 #include <cmath>
 #include <cstdio>
+#include <initializer_list>
 
 static bool approx(double a, double b, double tolerance = 1e-5) {
 	return std::abs(a - b) <= tolerance;
