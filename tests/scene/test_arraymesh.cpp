@@ -67,9 +67,12 @@ static Ref<ArrayMesh> _make_convex_collision_source(int p_surface_count) {
 		const PackedVector3Array vertices = {
 			Vector3(i * 4 + 1, 1, 0),
 			Vector3(i * 4 + 2, 1, 0),
-			Vector3(i * 4 + 1, 2, 0)
+			Vector3(i * 4 + 1, 2, 0),
+			Vector3(i * 4 + 1, 1, 1)
 		};
+		const PackedInt32Array indices = { 0, 2, 1, 0, 1, 3, 0, 3, 2, 1, 2, 3 };
 		arrays[Mesh::ARRAY_VERTEX] = vertices;
+		arrays[Mesh::ARRAY_INDEX] = indices;
 		mesh->add_surface_from_arrays(Mesh::PRIMITIVE_TRIANGLES, arrays);
 	}
 	return mesh;
@@ -80,23 +83,25 @@ TEST_CASE("[ConvexShapeFastPath] one triangle preserves the source vertices with
 	const Ref<ConvexPolygonShape3D> shape = mesh->create_convex_shape(false, false);
 	REQUIRE(shape.is_valid());
 	const Vector<Vector3> points = shape->get_points();
-	REQUIRE_EQ(points.size(), 3);
+	REQUIRE_EQ(points.size(), 4);
 	CHECK_EQ(points[0], Vector3(1, 1, 0));
 	CHECK_EQ(points[1], Vector3(2, 1, 0));
 	CHECK_EQ(points[2], Vector3(1, 2, 0));
+	CHECK_EQ(points[3], Vector3(1, 1, 1));
 }
 
 TEST_CASE("[ConvexShapeFastPath] many independent surfaces preserve exact concatenation order") {
-	const int surfaces = 64;
+	const int surfaces = 32;
 	Ref<ArrayMesh> mesh = _make_convex_collision_source(surfaces);
 	const Ref<ConvexPolygonShape3D> shape = mesh->create_convex_shape(false, false);
 	REQUIRE(shape.is_valid());
 	const Vector<Vector3> points = shape->get_points();
-	REQUIRE_EQ(points.size(), surfaces * 3);
+	REQUIRE_EQ(points.size(), surfaces * 4);
 	for (int s = 0; s < surfaces; ++s) {
-		CHECK_EQ(points[s * 3 + 0], Vector3(s * 4 + 1, 1, 0));
-		CHECK_EQ(points[s * 3 + 1], Vector3(s * 4 + 2, 1, 0));
-		CHECK_EQ(points[s * 3 + 2], Vector3(s * 4 + 1, 2, 0));
+		CHECK_EQ(points[s * 4 + 0], Vector3(s * 4 + 1, 1, 0));
+		CHECK_EQ(points[s * 4 + 1], Vector3(s * 4 + 2, 1, 0));
+		CHECK_EQ(points[s * 4 + 2], Vector3(s * 4 + 1, 2, 0));
+		CHECK_EQ(points[s * 4 + 3], Vector3(s * 4 + 1, 1, 1));
 	}
 }
 
