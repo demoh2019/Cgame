@@ -69,8 +69,10 @@ bool GodotCollisionSolver3D::solve_static_world_boundary(const GodotShape3D *p_s
 	bool found = false;
 
 	for (int i = 0; i < support_count; i++) {
-		supports[i] += p_margin * supports[i].normalized();
-		supports[i] = p_transform_B.xform(supports[i]);
+		// Margin is a world-space distance along the plane normal. Expanding
+		// a local vertex radially depends on its distance from the shape origin,
+		// and may miss contacts for long or off-center shapes.
+		supports[i] = p_transform_B.xform(supports[i]) - p.normal * p_margin;
 		if (p.distance_to(supports[i]) >= 0) {
 			continue;
 		}
@@ -79,12 +81,12 @@ bool GodotCollisionSolver3D::solve_static_world_boundary(const GodotShape3D *p_s
 		Vector3 support_A = p.project(supports[i]);
 
 		if (p_result_callback) {
+			// The transformed plane has a unit normal. Reuse it instead of
+			// normalizing the same projected separation for every support.
 			if (p_swap_result) {
-				Vector3 normal = (support_A - supports[i]).normalized();
-				p_result_callback(supports[i], 0, support_A, 0, normal, p_userdata);
+				p_result_callback(supports[i], 0, support_A, 0, p.normal, p_userdata);
 			} else {
-				Vector3 normal = (supports[i] - support_A).normalized();
-				p_result_callback(support_A, 0, supports[i], 0, normal, p_userdata);
+				p_result_callback(support_A, 0, supports[i], 0, -p.normal, p_userdata);
 			}
 		}
 	}
