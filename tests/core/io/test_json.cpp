@@ -589,4 +589,52 @@ TEST_CASE("[JSON] UTF32 batch parser keeps invalid escapes and identifiers rejec
 	CHECK(json.get_data().get_type() == Variant::NIL);
 }
 
+
+TEST_CASE("[JSON] Dictionary serialization preserves sorted and insertion key order") {
+	Dictionary input;
+	input["z"] = 3;
+	input["a"] = 1;
+	input["m"] = 2;
+
+	CHECK_EQ(JSON::stringify(input, "", false), "{\"z\":3,\"a\":1,\"m\":2}");
+	CHECK_EQ(JSON::stringify(input, "", true), "{\"a\":1,\"m\":2,\"z\":3}");
+	CHECK_EQ(JSON::stringify(input, "  ", false), "{\n  \"z\": 3,\n  \"a\": 1,\n  \"m\": 2\n}");
+	CHECK_EQ(JSON::stringify(input, "  ", true), "{\n  \"a\": 1,\n  \"m\": 2,\n  \"z\": 3\n}");
+
+	Dictionary nested;
+	nested["contents"] = input;
+	nested["unicode"] = String(U"Путь/雪/🚀");
+	for (bool sorted : { false, true }) {
+		const Dictionary decoded = JSON::parse_string(JSON::stringify(nested, "", sorted));
+		CHECK_EQ(decoded["unicode"], Variant(String(U"Путь/雪/🚀")));
+		const Dictionary contents = decoded["contents"];
+		CHECK_EQ(contents["z"], Variant(3));
+		CHECK_EQ(contents["a"], Variant(1));
+		CHECK_EQ(contents["m"], Variant(2));
+	}
+}
+
+TEST_CASE("[JSON] Large dictionary serializes without missing or reordered values") {
+	Dictionary entries;
+	for (int i = 1535; i >= 0; i--) {
+		entries[String("res://entry_") + itos(i)] = i * 13 - 17;
+	}
+
+	for (bool sorted : { false, true }) {
+		const String json = JSON::stringify(entries, "", sorted);
+		CHECK_FALSE(json.is_empty());
+		const Dictionary decoded = JSON::parse_string(json);
+		REQUIRE_EQ(decoded.size(), entries.size());
+		for (int i = 0; i < 1536; i += 13) {
+			CHECK_EQ(decoded[String("res://entry_") + itos(i)], Variant(i * 13 - 17));
+		}
+	}
+
+	const String compact = JSON::stringify(entries, "", false);
+	const int first = compact.find("\"res://entry_1535\"");
+	const int second = compact.find("\"res://entry_1534\"");
+	CHECK(first >= 0);
+	CHECK(second > first);
+}
+
 } // namespace TestJSON
