@@ -5,6 +5,7 @@ extends SceneTree
 const PREFIX := "JOLT_SOFTBODY_VOLUME_SHRINK_RESULT:"
 const SETTING := "physics/jolt_physics_3d/simulation/soft_body_volume_follow_shrinking_factor"
 const VOLUME_SETTING := "physics/jolt_physics_3d/simulation/soft_body_volume_preservation"
+const RADIAL_SETTING := "physics/jolt_physics_3d/simulation/soft_body_volume_radial_springs"
 const SHRINK_VALUES := [-0.15, 0.0, 0.25]
 const FRAMES := 90
 
@@ -43,6 +44,7 @@ func _positions(body: RID) -> PackedVector3Array:
 
 func _run() -> void:
 	var enabled := bool(ProjectSettings.get_setting(SETTING, false))
+	var radial_enabled := bool(ProjectSettings.get_setting(RADIAL_SETTING, false))
 	var backend := str(ProjectSettings.get_setting("physics/3d/physics_engine", ""))
 	if backend != "Jolt Physics" or not bool(ProjectSettings.get_setting(VOLUME_SETTING, false)):
 		printerr("Jolt volume shrink regression requires the Jolt volume-preservation backend")
@@ -114,6 +116,7 @@ func _run() -> void:
 	PhysicsServer3D.free_rid(space)
 	print(PREFIX + JSON.stringify({
 		"follow_shrinking_factor": enabled,
+		"radial_springs": radial_enabled,
 		"rest_volume": rest_volume,
 		"frames": FRAMES,
 		"cases": metrics,
