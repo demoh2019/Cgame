@@ -111,6 +111,29 @@ python3 tests/stress/scale_sweep.py \
 | 2D transform propagation | `canvas_transform_2d` | Wide CanvasItem subtree; separate parent transform mutation and descendant global-transform rebuild times |
 | SceneTree notification dispatch | `process_dispatch` | Thousands of native Nodes with mixed ordinary/internal process flags and frame/physics time monitors |
 
+## GodotPhysics persistent-contact memory layout
+
+The built-in 2D/3D pair contact structs no longer retain an unused world
+position. The 3D contact struct also no longer stores the unused feature-A
+index (feature-B is still required to identify soft-body nodes).
+
+An isolated C++ float-layout comparison, using the same field order and
+primitive sizes (not the full Godot engine), estimates **16 bytes saved per
+2D pair** (2 contacts) and **64 bytes saved per 3D pair** (4 contacts).
+The actual saving depends on target alignment, `real_t` precision, active
+pair counts and allocator behavior, so confirm engine RSS with paired runs:
+
+```bash
+python3 tests/stress/run.py --godot ./bin/godot.linuxbsd.editor.dev.x86_64 \
+  --case physics_contact_manifolds_2d,physics_3d \
+  --scale 8 --repeats 5 --frames 120 --rss-limit-mib 6144 \
+  --output out/contact-layout.json
+```
+
+Compare the peak process RSS and actual collision-pair counts to a baseline
+from the same host. Pair structs only become a major saving when many pairs
+are alive; isolated bodies do not allocate one.
+
 ## Sparse constraint-island scheduling (2D and 3D)
 
 After per-island `pre_solve`, the built-in GodotPhysics scheduler skips islands
