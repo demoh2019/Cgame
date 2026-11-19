@@ -10,6 +10,20 @@ const ASSIST_RANGE := 28.0
 const ASSIST_WINDOW := 20.0
 const ASSIST_XP_RATE := 0.5
 
+
+## Only the server invokes this after a confirmed infected kill.
+static func assist_xp(base_xp: int) -> int:
+	if base_xp <= 0:
+		return 0
+	return maxi(1, mini(100, int(floor(float(base_xp) * ASSIST_XP_RATE))))
+
+
+static func in_assist_range(first: Vector3, second: Vector3) -> bool:
+	if not first.is_finite() or not second.is_finite():
+		return false
+	var offset := Vector2(first.x - second.x, first.z - second.z)
+	return offset.length_squared() <= ASSIST_RANGE * ASSIST_RANGE
+
 var groups: Dictionary = {} # group id -> {"leader": peer, "members": [peers]}
 var group_by_peer: Dictionary = {} # peer id -> group id
 var invites: Dictionary = {} # invited peer -> {"from": id, "group": id, "expires": time}
