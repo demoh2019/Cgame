@@ -38,7 +38,6 @@
 #include "godot_collision_object_3d.h"
 #include "godot_soft_body_3d.h"
 
-#include "core/templates/local_vector.h"
 #include "core/typedefs.h"
 #include "servers/physics_contact_push_speed.h"
 #include "servers/physics_restitution_combine.h"
@@ -124,10 +123,6 @@ private:
 	int friction_combine_mode = 0; // 0: legacy, 1: geometric, 2: average, 3: maximum
 	int restitution_combine_mode = 0; // 0: legacy sum, 1: max, 2: average, 3: min, 4: multiply, 5: geometric
 
-	// Reusable, grow-on-demand motion query buffers. Dense scenes can contain
-	// more than 2048 eligible shapes; never truncate the narrowphase candidates.
-	LocalVector<GodotCollisionObject3D *> intersection_query_results;
-	LocalVector<int> intersection_query_subindex_results;
 
 	real_t body_linear_velocity_sleep_threshold = 0.0;
 	real_t body_angular_velocity_sleep_threshold = 0.0;
@@ -149,7 +144,8 @@ private:
 
 	friend class GodotPhysicsDirectSpaceState3D;
 
-	int _cull_aabb_for_body(GodotBody3D *p_body, const AABB &p_aabb, const PS3DT::MotionParameters &p_parameters);
+	template <typename Visitor>
+	void _visit_motion_candidates(GodotBody3D *p_body, const AABB &p_aabb, const PS3DT::MotionParameters &p_parameters, const Visitor &p_callback);
 
 public:
 	_FORCE_INLINE_ void set_self(const RID &p_self) { self = p_self; }
