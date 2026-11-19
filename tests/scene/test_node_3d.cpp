@@ -32,6 +32,9 @@ TEST_FORCE_LINK(test_node_3d)
 #ifndef _3D_DISABLED
 
 #include "scene/3d/node_3d.h"
+#ifndef PHYSICS_3D_DISABLED
+#include "scene/3d/physics/character_body_3d.h"
+#endif
 #include "scene/main/scene_tree.h"
 #include "scene/main/window.h"
 
@@ -176,6 +179,34 @@ TEST_CASE("[SceneTree][Node3D] Visibility remains false while parent is hidden a
 	CHECK(child->is_visible_in_tree());
 	free_root_node(parent);
 }
+
+
+#ifndef PHYSICS_3D_DISABLED
+TEST_CASE("[CharacterBodySlideFastPath] CharacterBody3D no-collision queries preserve nil semantics") {
+	CharacterBody3D *body = memnew(CharacterBody3D);
+	CHECK_EQ(body->get_slide_collision_count(), 0);
+	Variant last = body->call(SNAME("get_last_slide_collision"));
+	CHECK_EQ(last.get_type(), Variant::NIL);
+	ERR_PRINT_OFF;
+	Variant invalid = body->call(SNAME("get_slide_collision"), 0);
+	ERR_PRINT_ON;
+	CHECK_EQ(invalid.get_type(), Variant::NIL);
+	CHECK_EQ(body->get_slide_collision_count(), 0);
+	memdelete(body);
+}
+
+TEST_CASE("[CharacterBodySlideFastPath] CharacterBody3D repeated missing collision requests allocate no result") {
+	CharacterBody3D *body = memnew(CharacterBody3D);
+	ERR_PRINT_OFF;
+	for (int i = 0; i < 32; i++) {
+		const Variant result = body->call(SNAME("get_slide_collision"), 0);
+		CHECK_EQ(result.get_type(), Variant::NIL);
+	}
+	ERR_PRINT_ON;
+	CHECK_EQ(body->get_slide_collision_count(), 0);
+	memdelete(body);
+}
+#endif // PHYSICS_3D_DISABLED
 
 } // namespace TestNode3D
 
