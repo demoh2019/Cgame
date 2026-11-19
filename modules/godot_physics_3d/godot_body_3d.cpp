@@ -721,7 +721,8 @@ void GodotBody3D::integrate_velocities(real_t p_step) {
 	real_t ang_vel = total_angular_velocity.length();
 	Transform3D transform_new = get_transform();
 
-	if (!Math::is_zero_approx(ang_vel)) {
+	const bool rotated = !Math::is_zero_approx(ang_vel);
+	if (rotated) {
 		Vector3 ang_vel_axis = total_angular_velocity / ang_vel;
 		Basis rot(ang_vel_axis, ang_vel * p_step);
 		Basis identity3(1, 0, 0, 0, 1, 0, 0, 0, 1);
@@ -741,7 +742,11 @@ void GodotBody3D::integrate_velocities(real_t p_step) {
 	_set_transform(transform_new);
 	_set_inv_transform(get_transform().inverse());
 
-	_update_transform_dependent();
+	// Pure translation does not change the local center of mass orientation
+	// or the world inertia tensor. Recompute them only after rotation.
+	if (rotated) {
+		_update_transform_dependent();
+	}
 }
 
 void GodotBody3D::wakeup_neighbours() {
