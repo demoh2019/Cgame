@@ -938,4 +938,82 @@ TEST_CASE("[BitMap] One-pixel grow and shrink match independent four-neighbor re
 	}
 }
 
+TEST_CASE("[BitMap] Generic-radius morphology matches independent disk reference") {
+	const int widths[] = { 3, 8, 11, 17 };
+	const int heights[] = { 2, 9 };
+	const int radii[] = { -5, -3, -2, 2, 3, 5 };
+	for (int width : widths) {
+		for (int height : heights) {
+			const Rect2i rectangles[] = {
+				Rect2i(0, 0, width, height),
+				Rect2i(-2, -2, width + 4, height + 4),
+				Rect2i(1, 1, width - 1, height - 1),
+			};
+			for (const Rect2i &rect : rectangles) {
+				for (int pixels : radii) {
+					BitMap bitmap;
+					bitmap.create(Size2i(width, height));
+					Vector<uint8_t> source;
+					source.resize(width * height);
+					uint8_t *reference = source.ptrw();
+					for (int y = 0; y < height; y++) {
+						for (int x = 0; x < width; x++) {
+							const bool value = (x * 11 + y * 7 + width) % 9 < 4;
+							reference[y * width + x] = value ? 1 : 0;
+							if (value) {
+								bitmap.set_bit(x, y, true);
+							}
+						}
+					}
+					bitmap.grow_mask(pixels, rect);
+					const bool grow = pixels > 0;
+					const int radius = ABS(pixels);
+					bool all_match = true;
+					int expected_count = 0;
+					for (int y = 0; y < height; y++) {
+						for (int x = 0; x < width; x++) {
+							bool expected = reference[y * width + x] != 0;
+							if (rect.has_point(Point2i(x, y)) && expected != grow) {
+								bool found = false;
+								for (int dy = -radius; dy <= radius && !found; dy++) {
+									for (int dx = -radius; dx <= radius; dx++) {
+										if (dx * dx + dy * dy > radius * radius) {
+											continue;
+										}
+										const Point2i sample(x + dx, y + dy);
+										const bool inside_rect = rect.has_point(sample);
+										if (!inside_rect) {
+											if (!grow) {
+												found = true;
+												break;
+											}
+											continue;
+										}
+										const bool inside_image = sample.x >= 0 && sample.x < width &&
+												sample.y >= 0 && sample.y < height;
+										const bool sample_value = inside_image && reference[sample.y * width + sample.x];
+										if (sample_value == grow) {
+											found = true;
+											break;
+										}
+									}
+								}
+								if (found) {
+									expected = grow;
+								}
+							}
+							expected_count += expected;
+							if (bitmap.get_bit(x, y) != expected) {
+								all_match = false;
+							}
+						}
+					}
+					CHECK(all_match);
+					CHECK(bitmap.get_true_bit_count() == expected_count);
+				}
+			}
+		}
+	}
+}
+
 } // namespace TestBitMap
