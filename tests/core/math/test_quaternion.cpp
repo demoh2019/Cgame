@@ -406,6 +406,56 @@ void test_quat_vec_rotate(Vector3 euler_yzx, Vector3 v_in) {
 	CHECK(v_rot.is_equal_approx(v_compare));
 }
 
+TEST_CASE("[Quaternion] Normalize finite quaternions") {
+	const Quaternion quaternions[] = {
+		Quaternion(),
+		Quaternion(0, 0, 0, 2),
+		Quaternion(0, 0, 0, -3),
+		Quaternion(2, 0, 0, 0),
+		Quaternion(1, 2, 3, 4),
+		Quaternion(-2, 3, -4, 5),
+	};
+
+	for (const Quaternion &input : quaternions) {
+		Quaternion in_place = input;
+		const Quaternion normalized = input.normalized();
+		in_place.normalize();
+
+		CHECK(normalized.is_finite());
+		CHECK(normalized.is_normalized());
+		CHECK(in_place.is_equal_approx(normalized));
+		CHECK(normalized.length_squared() == doctest::Approx(1.0));
+	}
+	CHECK(Quaternion(2, 0, 0, 0).normalized() == Quaternion(1, 0, 0, 0));
+	CHECK(Quaternion(0, 0, 0, -3).normalized() == Quaternion(0, 0, 0, -1));
+}
+
+TEST_CASE("[Quaternion] Normalize zero and near-zero quaternions") {
+	ERR_PRINT_OFF;
+	const Quaternion degenerate[] = {
+		Quaternion(0, 0, 0, 0),
+		Quaternion(1e-160, 0, 0, 0),
+		Quaternion(0, -1e-160, 0, 0),
+		Quaternion(0, 0, 0, 1e-10),
+		Quaternion(1e-10, -1e-10, 1e-10, -1e-10),
+		Quaternion(Math::NaN, 0, 0, 1),
+		Quaternion(0, Math::NaN, 0, 1),
+		Quaternion(0, 0, Math::NaN, 1),
+	};
+
+	for (const Quaternion &input : degenerate) {
+		Quaternion in_place = input;
+		const Quaternion normalized = input.normalized();
+		in_place.normalize();
+
+		CHECK(normalized.is_finite());
+		CHECK(normalized.is_normalized());
+		CHECK(normalized == Quaternion());
+		CHECK(in_place == Quaternion());
+	}
+	ERR_PRINT_ON;
+}
+
 TEST_CASE("[Quaternion] Finite number checks") {
 	constexpr real_t x = Math::NaN;
 

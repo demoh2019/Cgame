@@ -68,11 +68,23 @@ void Quaternion::normalize() {
 		WARN_PRINT("Quaternion cannot be normalized, the elements should be finite.");
 	}
 #endif // MATH_CHECKS
-	*this /= length();
+	const real_t length_sq = length_squared();
+	// Avoid division by zero, underflow and overflow in the squared length.
+	if (likely(Math::is_finite(length_sq) && length_sq >= (real_t)CMP_EPSILON2)) {
+		*this /= Math::sqrt(length_sq);
+		return;
+	}
+
+#ifdef MATH_CHECKS
+	WARN_PRINT_ONCE("Quaternion length is near zero or non-finite, resetting to identity.");
+#endif
+	*this = Quaternion();
 }
 
 Quaternion Quaternion::normalized() const {
-	return *this / length();
+	Quaternion q = *this;
+	q.normalize();
+	return q;
 }
 
 bool Quaternion::is_normalized() const {
