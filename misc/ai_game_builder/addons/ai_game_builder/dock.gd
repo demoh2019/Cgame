@@ -97,6 +97,11 @@ func _ready() -> void:
 	offline_starter.pressed.connect(_preview_offline_starter)
 	add_child(offline_starter)
 
+	var offline_3d := Button.new()
+	offline_3d.text = "Preview offline 3D starter (no API key)"
+	offline_3d.pressed.connect(_preview_offline_3d_starter)
+	add_child(offline_3d)
+
 	_feedback = LineEdit.new()
 	_feedback.placeholder_text = "What should AI improve in this draft?"
 	add_child(_feedback)
@@ -159,22 +164,26 @@ func _system_prompt() -> String:
 
 
 
-func _preview_offline_starter() -> void:
+func _preview_offline_3d_starter() -> void:
+	_preview_offline_starter("3D game")
+
+
+func _preview_offline_starter(mode_name: String = "2D game") -> void:
 	if _generate.disabled:
 		_status.text = "Finish the active request before loading a starter."
 		return
-	var draft := Starter.create_draft()
+	var draft := Starter.create_draft(mode_name)
 	if not draft["ok"]:
 		_status.text = draft["error"]
 		return
-	var review := Quality.review_payload(draft, "2D game")
+	var review := Quality.review_payload(draft, mode_name)
 	if not review["ok"]:
 		_status.text = "; ".join(PackedStringArray(review["errors"]))
 		return
 	_pending_files = draft["files"]
 	_pending_summary = draft["summary"]
-	_draft_task = "Build upon the bundled 2D arcade starter."
-	_draft_mode = "2D game"
+	_draft_task = "Build upon the bundled %s starter." % mode_name
+	_draft_mode = mode_name
 	_draft_version = 1
 	_repair_attempts = 0
 	_file_picker.clear()
@@ -185,7 +194,7 @@ func _preview_offline_starter() -> void:
 	_show_file(0)
 	_refine.disabled = false
 	_apply.disabled = false
-	_status.text = "Offline starter ready: review %d files, then Apply or Improve." % _pending_files.size()
+	_status.text = "Offline %s starter ready: review %d files, then Apply or Improve." % [mode_name, _pending_files.size()]
 
 
 func _generate_files() -> void:
