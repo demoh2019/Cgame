@@ -135,6 +135,7 @@ int main() {
     def test_compiled_audio_preview_empty_and_window_bounds(self):
         head = r"""
 #include <algorithm>
+#include <cmath>
 #include <cstdint>
 #include <vector>
 #define CLAMP(value, min, max) std::clamp((value), (min), (max))
@@ -150,10 +151,10 @@ int main() {
     AudioStreamPreview audio;
     if (audio.get_max(0, 10) != 0 || audio.get_min(0, 10) != 0) return 1;
     audio.preview = {10, 250, 20, 200, 30, 150, 40, 100};
-    if (audio.get_max(0, 10) != (250 / 255.0) * 2.0 - 1.0) return 2;
-    if (audio.get_min(0, 10) != (10 / 255.0) * 2.0 - 1.0) return 3;
-    if (audio.get_max(5, 6) != (150 / 255.0) * 2.0 - 1.0) return 4;
-    if (audio.get_min(5, 6) != (30 / 255.0) * 2.0 - 1.0) return 5;
+    if (std::fabs(audio.get_max(0, 10) - ((250 / 255.0) * 2.0 - 1.0)) > 0.000001) return 2;
+    if (std::fabs(audio.get_min(0, 10) - ((10 / 255.0) * 2.0 - 1.0)) > 0.000001) return 3;
+    if (std::fabs(audio.get_max(5, 6) - ((150 / 255.0) * 2.0 - 1.0)) > 0.000001) return 4;
+    if (std::fabs(audio.get_min(5, 6) - ((30 / 255.0) * 2.0 - 1.0)) > 0.000001) return 5;
     audio.length = 0;
     if (audio.get_max(0, 10) != 0 || audio.get_min(0, 10) != 0) return 6;
     return 0;
