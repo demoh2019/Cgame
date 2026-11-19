@@ -213,6 +213,12 @@ _FORCE_INLINE_ PhysicsCCDCapsulePairTOIResult physics_ccd_capsule_pair_toi(
 	if (!Math::is_finite(end.squared) || !Math::is_finite(end.derivative_half)) {
 		return PhysicsCCDCapsulePairTOIResult::FALLBACK;
 	}
+	// If the distance is still decreasing at the end but remains
+	// outside the combined radius, no earlier time could have touched.
+	// This common short-sweep miss needs no minimum or entry search.
+	if (end.squared > radius_sq && end.derivative_half <= 0.0) {
+		return PhysicsCCDCapsulePairTOIResult::MISS;
+	}
 	// If the end of the step is already inside the combined capsule
 	// radius, [0, 1] brackets the first hit. There is no reason to
 	// spend another search on the minimum separation: first-entry
