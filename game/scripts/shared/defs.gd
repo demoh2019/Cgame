@@ -236,6 +236,15 @@ static func _build_items() -> void:
 		{"bandage": 1, "cloth_1": 1, "water_bottle": 1}, "", 3.0)
 	_add_item("antibiotics", {"name": "Antibiotics", "kind": "medical",
 		"cure": 100.0, "stack": 5, "value": 80})
+	# Lineage-style elite hunts feed back into survival via medical crafting.
+	_add_item("infected_core", {"name": "Infected Core", "kind": "resource",
+		"tier": 3, "stack": 20, "value": 48, "weight": 0.4})
+	_add_item("purified_serum", {"name": "Purified Survivor Serum", "kind": "medical",
+		"tier": 3, "heal": 16.0, "cure": 65.0, "stack": 5,
+		"value": 110, "weight": 0.2})
+	_add_recipe("purified_serum", "purified_serum", 1,
+		{"infected_core": 2, "bandage": 1, "water_bottle": 1},
+		"workbench", 6.0)
 	# Days After loot: only found while scavenging ruins.
 	_add_item("pistol", {"name": "Pistol", "kind": "weapon", "weapon": "ranged", "tier": 3, "damage": 22.0, "cooldown": 0.45, "ammo": "ammo_9mm", "value": 150})
 	# Ranged fighting can be sustained through scavenging and T2 metalworking.

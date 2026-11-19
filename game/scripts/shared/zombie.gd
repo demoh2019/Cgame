@@ -5,11 +5,13 @@ extends RefCounted
 const Defs = preload("res://scripts/shared/defs.gd")
 const Movement = preload("res://scripts/shared/movement.gd")
 const Threat = preload("res://scripts/shared/threat.gd")
+const EliteInfected = preload("res://scripts/shared/elite_infected.gd")
 
 enum State { IDLE, WANDER, CHASE, ATTACK, DEAD, INVESTIGATE }
 
 var id: int
 var type: String
+var elite: bool = false
 var spawn_id: int
 var position: Vector3
 var yaw: float = 0.0
@@ -39,6 +41,15 @@ func _init(p_id: int, p_type: String, p_position: Vector3, p_spawn_id: int = 0) 
 	wander_target = home
 	last_known_target = home
 	spawn_id = p_spawn_id
+
+
+## One-way transformation on server-created enemies. Never shared mutable stats.
+func become_elite() -> void:
+	if elite or state == State.DEAD:
+		return
+	data = EliteInfected.empowered_stats(data)
+	health = float(data["health"])
+	elite = true
 
 
 func is_alive() -> bool:

@@ -342,10 +342,12 @@ func _sync_zombies() -> void:
 			continue
 		active[zombie.id] = true
 		if not _zombie_meshes.has(zombie.id):
-			var mesh := _mesh(Vector3(0.85, 1.6, 0.85), Color(0.66, 0.37, 0.35))
+			var mesh := _mesh(
+				Vector3(1.05, 1.95, 1.05) if zombie.elite else Vector3(0.85, 1.6, 0.85),
+				Color(0.98, 0.65, 0.18) if zombie.elite else Color(0.66, 0.37, 0.35))
 			add_child(mesh)
 			_zombie_meshes[zombie.id] = mesh
-		_zombie_meshes[zombie.id].position = zombie.position + Vector3(0.0, 0.8, 0.0)
+		_zombie_meshes[zombie.id].position = zombie.position + Vector3(0.0, 0.975 if zombie.elite else 0.8, 0.0)
 	for zombie_id in _zombie_meshes.keys():
 		if not active.has(zombie_id):
 			_zombie_meshes[zombie_id].queue_free()

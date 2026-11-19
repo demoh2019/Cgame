@@ -22,6 +22,7 @@ const Scavenging = preload("res://scripts/shared/scavenging.gd")
 const Structures = preload("res://scripts/shared/structures.gd")
 const SiegeWaves = preload("res://scripts/shared/siege_waves.gd")
 const Zombie = preload("res://scripts/shared/zombie.gd")
+const EliteInfected = preload("res://scripts/shared/elite_infected.gd")
 const ZoneRisk = preload("res://scripts/shared/zone_risk.gd")
 const Weather = preload("res://scripts/shared/weather.gd")
 const Progression = preload("res://scripts/shared/progression.gd")
@@ -1579,7 +1580,10 @@ func _on_zombie_death(zombie) -> void:
 	var zone: int = world.zone_at(zombie.position.x, zombie.position.z)
 	var loot_rng := RandomNumberGenerator.new()
 	loot_rng.seed = WorldGen.mix(zombie.id, int(time * 10.0), world.world_seed, 5)
-	_make_bag(zombie.position, Combat.zombie_loot(zombie.type, zone, loot_rng))
+	var loot: Dictionary = Combat.zombie_loot(zombie.type, zone, loot_rng)
+	if zombie.elite:
+		loot = EliteInfected.enhanced_loot(loot, zone)
+	_make_bag(zombie.position, loot)
 	if spawn_state.has(zombie.spawn_id):
 		spawn_state[zombie.spawn_id] = {"zombie": -1, "next": time + (240.0 if zone < 2 else 360.0)}
 	events.append({"type": "zombie_died", "id": zombie.id, "x": zombie.position.x, "z": zombie.position.z})
@@ -1860,6 +1864,11 @@ func _manage_zombie_population() -> void:
 				continue # Never appear in front of a player.
 			var zombie_id := new_id()
 			var z := Zombie.new(zombie_id, spawn["type"], Vector3(spawn["x"], world.height_at(spawn["x"], spawn["z"]), spawn["z"]), spawn["id"])
+			# Only dangerous-zone ruins can roll a deterministic champion.
+			if EliteInfected.is_elite_spawn(int(spawn["id"]),
+					world.zone_at(float(spawn["x"]), float(spawn["z"])),
+					bool(spawn["ruin"]), world.world_seed):
+				z.become_elite()
 			zombies[zombie_id] = z
 			state["zombie"] = zombie_id
 	# Sleeping: remove zombies nobody is near, and let their spawns create them again later.
@@ -1924,7 +1933,8 @@ func snapshot_for(peer_id: int) -> Dictionary:
 	for zombie in zombies.values():
 		var p: Vector3 = zombie.position
 		if zombie.is_alive() and here.distance_to(Vector2(p.x, p.z)) <= Defs.INTEREST_RADIUS:
-			nearby_zombies.append({"id": zombie.id, "type": zombie.type, "x": p.x, "y": p.y, "z": p.z, "yaw": zombie.yaw, "hp": zombie.health, "state": zombie.state})
+			nearby_zombies.append({"id": zombie.id, "type": zombie.type, "x": p.x, "y": p.y, "z": p.z, "yaw": zombie.yaw, "hp": zombie.health, "state": zombie.state,
+					"elite": zombie.elite})
 	var nearby_barricades: Array = []
 	for wall in barricades.values():
 		if Structures.within_range(here, Vector2(float(wall["x"]), float(wall["z"])), Defs.INTEREST_RADIUS):

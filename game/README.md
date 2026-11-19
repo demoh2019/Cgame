@@ -1104,3 +1104,25 @@ expiration hides the waypoint; markers do not survive server restarts.
 This is separate from guild territory claims and loot rights. Existing
 Godot/Cgame script and scene APIs are sufficient. Regression tests:
 `game/tests/test_party_rally.gd` in the canonical headless runner.
+
+
+## Elite infected encounters (MMORPG ruin champions)
+
+Rare **elite infected** appear deterministically among ruin spawn points in
+**red and black** risk zones only (approximately one in seven ruin spawns).
+They have **2.5× health**, **1.4× damage** and **3× base weapon mastery XP**,
+and retain existing aggro, party-assist, group threat and protection rules.
+Elites are larger and gold-tinted in both clients; multiplayer snapshots
+replicate an `elite` flag rather than trusting clients to label enemies.
+
+Elite kills drop the original infected loot plus guaranteed salvage,
+silver and one **Infected Core**, in an ordinary lootable world bag. Two
+cores, a bandage and a water bottle can be crafted at the workbench into
+**Purified Survivor Serum** (T3), which heals 16 health and treats 65
+infection using the existing medical item rules. This connects cooperative
+PvE hunts with the survival and player-economy loops.
+
+`tests/test_elite_infected.gd` checks deterministic rarity, safe-zone
+exclusion, stat isolation, server visibility, one-time loot rewards and
+the trophy crafting recipe. It is included in the main `game/` test suite.
+No native Cgame engine change is required for this game-layer feature.

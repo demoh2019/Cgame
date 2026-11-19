@@ -46,7 +46,9 @@ func _touch(key: String, kind: String, entity: Dictionary, seen: Dictionary) -> 
 	var label: Label3D = _nodes[key].get_node_or_null("Label")
 	if label != null:
 		if kind == "zombie":
-			label.text = "%s  %d" % [entity["type"], int(entity["hp"])]
+			label.text = "%s%s  %d" % [
+				"ELITE " if bool(entity.get("elite", false)) else "",
+				str(entity["type"]), int(entity["hp"])]
 		elif kind == "player":
 			label.text = str(entity["name"]) if entity["alive"] else "%s (dead)" % entity["name"]
 	if kind == "barricade":
@@ -59,7 +61,9 @@ func _touch(key: String, kind: String, entity: Dictionary, seen: Dictionary) -> 
 		# A zombie that has locked on to someone flushes red.
 		var model: Node3D = _nodes[key].get_node("Model")
 		var base: Color = ZOMBIE_LOOK[entity["type"]]["tint"]
-		model.set_tint(base.lerp(ALERT_TINT, 0.6) if int(entity["state"]) >= 2 else base)
+		if bool(entity.get("elite", false)):
+			base = Color(0.98, 0.65, 0.18)
+		model.set_tint(base.lerp(ALERT_TINT, 0.45) if int(entity["state"]) >= 2 else base)
 	if kind == "player":
 		_nodes[key].get_node("Model").visible = bool(entity["alive"])
 
@@ -118,7 +122,7 @@ func _make(kind: String, entity: Dictionary) -> Node3D:
 	var height := 2.0
 	if kind == "zombie":
 		var look: Dictionary = ZOMBIE_LOOK[entity["type"]]
-		model.setup(look["tint"], look["scale"], look["walk"])
+		model.setup(look["tint"], float(look["scale"]) * (1.18 if bool(entity.get("elite", false)) else 1.0), look["walk"])
 		height = 1.3 * float(look["scale"])
 	else:
 		var hue := float(abs(int(entity["id"]) * 2654435761 % 1000)) / 1000.0
