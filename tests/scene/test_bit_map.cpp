@@ -869,4 +869,73 @@ TEST_CASE("[BitMap] Byte-wise blit preserves unaligned source and destination ro
 	}
 }
 
+TEST_CASE("[BitMap] One-pixel grow and shrink match independent four-neighbor reference") {
+	const int widths[] = { 1, 2, 3, 7, 8, 9, 17 };
+	const int heights[] = { 1, 2, 5, 11 };
+	for (int width : widths) {
+		for (int height : heights) {
+			const Rect2i rectangles[] = {
+				Rect2i(0, 0, width, height),
+				Rect2i(-2, -2, width + 4, height + 4),
+				Rect2i(1, 0, width - 1, height),
+				Rect2i(0, 1, width, height - 1),
+				Rect2i(width / 2, height / 2, 1, 1),
+				Rect2i(width, height, 1, 1),
+			};
+			for (const Rect2i &rect : rectangles) {
+				for (int pixels : { -1, 1 }) {
+					BitMap bitmap;
+					bitmap.create(Size2i(width, height));
+					Vector<uint8_t> reference;
+					reference.resize(width * height);
+					uint8_t *values = reference.ptrw();
+					for (int y = 0; y < height; y++) {
+						for (int x = 0; x < width; x++) {
+							const bool filled = (x * 17 + y * 5 + width) % 7 < 3;
+							values[y * width + x] = filled ? 1 : 0;
+							if (filled) {
+								bitmap.set_bit(x, y, true);
+							}
+						}
+					}
+
+					const bool grow = pixels > 0;
+					const Point2i offsets[] = {
+						Point2i(-1, 0), Point2i(1, 0),
+						Point2i(0, -1), Point2i(0, 1),
+					};
+					bool all_match = true;
+					int expected_count = 0;
+					bitmap.grow_mask(pixels, rect);
+					for (int y = 0; y < height; y++) {
+						for (int x = 0; x < width; x++) {
+							bool expected = values[y * width + x] != 0;
+							if (rect.has_point(Point2i(x, y)) && expected != grow) {
+								for (const Point2i &offset : offsets) {
+									const Point2i neighbor = Point2i(x, y) + offset;
+									const bool inside_rect = rect.has_point(neighbor);
+									const bool inside_image = neighbor.x >= 0 && neighbor.x < width &&
+											neighbor.y >= 0 && neighbor.y < height;
+									const bool neighbor_value = inside_image &&
+											values[neighbor.y * width + neighbor.x];
+									if ((!inside_rect && !grow) || (inside_rect && neighbor_value == grow)) {
+										expected = grow;
+										break;
+									}
+								}
+							}
+							expected_count += expected;
+							if (bitmap.get_bit(x, y) != expected) {
+								all_match = false;
+							}
+						}
+					}
+					CHECK(all_match);
+					CHECK(bitmap.get_true_bit_count() == expected_count);
+				}
+			}
+		}
+	}
+}
+
 } // namespace TestBitMap
