@@ -60,6 +60,11 @@ static bool accept_even(int p_number) {
 	return (p_number % 2) == 0;
 }
 
+static bool accept_last(int p_number) {
+	filter_calls++;
+	return p_number == 4095;
+}
+
 static bool mutate_following_value(int p_number) {
 	filter_calls++;
 	if (p_number == 1 && filter_source) {
@@ -106,6 +111,18 @@ TEST_CASE("[ArrayFilterLazy] Partial acceptance keeps ordering after delayed fir
 	CHECK_EQ(result, expected);
 	CHECK_EQ(filter_calls, 8);
 	CHECK_EQ(source.size(), 8);
+}
+
+TEST_CASE("[ArrayFilterLazy] Late first match allocates only the remaining suffix") {
+	Array source;
+	for (int i = 0; i < 4096; i++) {
+		source.append(i);
+	}
+	filter_calls = 0;
+	Array result = source.filter(callable_mp_static(accept_last));
+	REQUIRE_EQ(result.size(), 1);
+	CHECK_EQ(result[0], Variant(4095));
+	CHECK_EQ(filter_calls, 4096);
 }
 
 TEST_CASE("[ArrayFilterLazy] Empty typed results preserve the typed element constraint") {
