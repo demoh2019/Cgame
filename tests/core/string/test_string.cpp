@@ -2838,4 +2838,39 @@ TEST_CASE("[String] get_with_code_lines matches original formatting without per-
 	CHECK(actual.contains("10002 | "));
 }
 
+TEST_CASE("[String] strip_edges_span matches String::strip_edges for empty, Unicode, and whitespace") {
+	const String inputs[] = {
+		String(),
+		" ",
+		"  \t\r\n",
+		" a ",
+		" \tHello world\t ",
+		String::utf8(" \tПривет 🌎 \t"),
+		"\ttrailing\n",
+		String("x").repeat(1000),
+	};
+	for (const String &value : inputs) {
+		for (bool left : { false, true }) {
+			for (bool right : { false, true }) {
+				const Span<char32_t> span = String::strip_edges_span(value.span(), left, right);
+				const String expected = value.strip_edges(left, right);
+				CHECK(span == expected.span());
+			}
+		}
+	}
+}
+
+TEST_CASE("[String] strip_edges_span trims a single trailing whitespace character") {
+	const String lone = " ";
+	CHECK(String::strip_edges_span(lone.span(), false, true).is_empty());
+	CHECK(String::strip_edges_span(lone.span(), true, false).is_empty());
+	const String spaces = " \t\n";
+	CHECK(String::strip_edges_span(spaces.span(), false, true).is_empty());
+	CHECK(String::strip_edges_span(spaces.span(), true, true).is_empty());
+	const String leading = " text ";
+	CHECK(String::strip_edges_span(leading.span(), false, true) == Span<char32_t>(U" text"));
+	CHECK(String::strip_edges_span(leading.span(), true, false) == Span<char32_t>(U"text "));
+	CHECK(String::strip_edges_span(leading.span(), true, true) == Span<char32_t>(U"text"));
+}
+
 } // namespace TestString

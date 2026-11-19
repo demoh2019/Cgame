@@ -482,7 +482,6 @@ Error HTTPClientTCP::poll() {
 						(rs >= 2 && response_str[rs - 2] == '\n' && response_str[rs - 1] == '\n') ||
 						(rs >= 4 && response_str[rs - 4] == '\r' && response_str[rs - 3] == '\n' && response_str[rs - 2] == '\r' && response_str[rs - 1] == '\n')) {
 					// End of response, parse.
-					response_str.push_back(0);
 					String response = String::utf8((const char *)response_str.ptr(), response_str.size());
 					Vector<String> responses = response.split("\n");
 					body_size = -1;
@@ -507,12 +506,18 @@ Error HTTPClientTCP::poll() {
 							continue;
 						}
 						if (s.begins_with("content-length:")) {
-							body_size = s.substr(s.find_char(':') + 1).strip_edges().to_int();
+							// The UTF-32 buffer is already lowercase and remains alive here.
+							constexpr int prefix_length = sizeof("content-length:") - 1;
+							Span<char32_t> value(s.ptr() + prefix_length, s.length() - prefix_length);
+							value = String::strip_edges_span(value, true, true);
+							body_size = String::to_int(value.ptr(), value.size());
 							body_left = body_size;
 
 						} else if (s.begins_with("transfer-encoding:")) {
-							String encoding = header.substr(header.find_char(':') + 1).strip_edges();
-							if (encoding == "chunked") {
+							constexpr int prefix_length = sizeof("transfer-encoding:") - 1;
+							Span<char32_t> value(s.ptr() + prefix_length, s.length() - prefix_length);
+							value = String::strip_edges_span(value, true, true);
+							if (value == Span<char32_t>(U"chunked")) {
 								chunked = true;
 							}
 						} else if (s.begins_with("connection: close")) {
