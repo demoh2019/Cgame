@@ -581,4 +581,79 @@ TEST_CASE("[BVH] Axis-aligned and reversed streaming rays retain intersection re
 	CHECK(order.first == 7);
 }
 
+
+struct DensePairCounts {
+	int created = 0;
+	int removed = 0;
+	int invalid_userdata = 0;
+};
+
+static void *dense_pair_created(void *p_userdata, uint32_t, Item *, int, uint32_t, Item *, int) {
+	DensePairCounts *counts = static_cast<DensePairCounts *>(p_userdata);
+	counts->created++;
+	return p_userdata;
+}
+
+static void dense_pair_removed(void *p_userdata, uint32_t, Item *, int, uint32_t, Item *, int, void *p_pair_userdata) {
+	DensePairCounts *counts = static_cast<DensePairCounts *>(p_userdata);
+	counts->removed++;
+	if (p_pair_userdata != p_userdata) {
+		counts->invalid_userdata++;
+	}
+}
+
+TEST_CASE("[BVH] Pair graph stores only the authoritative adjacency vector size") {
+	using Pairs2D = BVH_Tree<Item, 2, 2, 16, PairTest, CullTest, true, Rect2, Vector2>::ItemPairs;
+	using Pairs3D = BVH_Tree<Item, 2, 2, 16, PairTest, CullTest, true, AABB, Vector3>::ItemPairs;
+
+	// No extra per-object pair counter or alignment gap. The vector already
+	// owns an authoritative count and adjacency links remain externally stored.
+	CHECK(sizeof(Pairs2D) == sizeof(Rect2) + sizeof(LocalVector<Pairs2D::Link>));
+	CHECK(sizeof(Pairs3D) == sizeof(AABB) + sizeof(LocalVector<Pairs3D::Link>));
+}
+
+TEST_CASE("[BVH] Dense contact graph survives pair deletion and handle reuse") {
+	using Tree = BVH_Manager<Item, 2, true, 16, PairTest, CullTest, Rect2, Vector2, false>;
+	Tree tree;
+	constexpr int COUNT = 32;
+	Item items[COUNT + 1];
+	BVHHandle handles[COUNT];
+	DensePairCounts counts;
+
+	tree.set_pair_callback(dense_pair_created, &counts);
+	tree.set_unpair_callback(dense_pair_removed, &counts);
+
+	for (int i = 0; i < COUNT; ++i) {
+		items[i].value = i;
+		handles[i] = tree.create(&items[i], true, uint32_t(i & 1), 3, Rect2(0, 0, 4, 4), 0, true);
+	}
+	CHECK(counts.created == 0);
+	tree.flush_pending_pairs();
+
+	constexpr int TOTAL_PAIRS = COUNT * (COUNT - 1) / 2;
+	CHECK(counts.created == TOTAL_PAIRS);
+	CHECK(counts.removed == 0);
+	tree.update();
+	CHECK(counts.created == TOTAL_PAIRS);
+
+	constexpr int REPLACED = COUNT / 2;
+	tree.erase(handles[REPLACED]);
+	CHECK(counts.removed == COUNT - 1);
+
+	items[COUNT].value = COUNT;
+	const BVHHandle replacement = tree.create(&items[COUNT], true, uint32_t(REPLACED & 1), 3, Rect2(0, 0, 4, 4));
+	CHECK(counts.created == TOTAL_PAIRS + COUNT - 1);
+	tree.update();
+	CHECK(counts.created == TOTAL_PAIRS + COUNT - 1);
+
+	for (int i = 0; i < COUNT; ++i) {
+		if (i != REPLACED) {
+			tree.erase(handles[i]);
+		}
+	}
+	tree.erase(replacement);
+	CHECK(counts.removed == counts.created);
+	CHECK(counts.invalid_userdata == 0);
+}
+
 } // namespace TestBVH
