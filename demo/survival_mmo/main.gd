@@ -1,10 +1,11 @@
 extends Node3D
 ## Days After-style survival loop plus Albion-style gathering and equipment.
-## Prototype only: no network replication, persistence, guilds or trading yet.
+## Offline prototype: local save/load only, not authoritative MMO persistence.
 
 const StateScript = preload("res://game_state.gd")
 const PlayerScript = preload("res://player.gd")
 const ZombieScript = preload("res://zombie.gd")
+const SaveScript = preload("res://save_system.gd")
 
 const GATHER_DISTANCE := 2.5
 const ATTACK_DISTANCE := 2.4
@@ -116,11 +117,14 @@ func _create_player() -> void:
     add_child(player)
 
 
-func _spawn_resource(kind: String, at: Vector3) -> void:
+func _spawn_resource(kind: String, at: Vector3, remaining: int = 4) -> void:
     var body := _make_box("Gather_" + kind, at, Vector3(0.85, 0.7, 0.85), RESOURCE_COLORS[kind])
     body.add_to_group("gatherable")
     body.set_meta("kind", kind)
-    body.set_meta("remaining", 4)
+    body.set_meta("remaining", remaining)
+    var visual := body.get_node("Visual") as MeshInstance3D
+    if visual != null:
+        visual.scale = Vector3.ONE * pow(0.83, 4 - remaining)
 
 
 func _create_resources() -> void:
@@ -134,8 +138,9 @@ func _create_resources() -> void:
         _spawn_resource("herb", at)
 
 
-func _spawn_zombie(at: Vector3) -> void:
+func _spawn_zombie(at: Vector3, remaining_health: float = 36.0) -> void:
     var zombie = ZombieScript.new()
+    zombie.health = remaining_health
     zombie.name = "Infected"
     zombie.position = at
     zombie.target = player
@@ -192,6 +197,7 @@ func _update_hud() -> void:
     hud.text += "Q spear (2 wood, 1 stone) | T upgrade (1 wood, 2 stone, 2 scrap, combat Lv2)\n"
     hud.text += "H bandage (2 fiber, 1 herb)\n"
     hud.text += "F eat herb | B build barricade (3 wood, 2 stone) | R restart\n"
+    hud.text += "K save world | L load world (user://survival_world_v1.json)\n"
     hud.text += status_message
 
 
@@ -280,6 +286,104 @@ func _build() -> void:
     status_message = "Barricade built. Crafting XP +10."
 
 
+
+func _vec3_to_list(vector: Vector3) -> Array:
+    return [vector.x, vector.y, vector.z]
+
+
+func _list_to_vec3(values: Array) -> Vector3:
+    return Vector3(float(values[0]), float(values[1]), float(values[2]))
+
+
+func _make_snapshot() -> Dictionary:
+    var world := {"resources": [], "infected": [], "barricades": []}
+    for node in get_tree().get_nodes_in_group("gatherable"):
+        if not is_instance_valid(node) or node.is_queued_for_deletion():
+            continue
+        world["resources"].append({
+            "kind": str(node.get_meta("kind")),
+            "remaining": int(node.get_meta("remaining")),
+            "position": _vec3_to_list(node.global_position),
+        })
+    for node in get_tree().get_nodes_in_group("infected"):
+        if not is_instance_valid(node) or node.is_queued_for_deletion():
+            continue
+        world["infected"].append({
+            "health": float(node.health),
+            "position": _vec3_to_list(node.global_position),
+        })
+    for node in get_tree().get_nodes_in_group("player_building"):
+        if not is_instance_valid(node) or node.is_queued_for_deletion():
+            continue
+        world["barricades"].append({
+            "position": _vec3_to_list(node.global_position),
+            "yaw": node.rotation.y,
+        })
+    return {
+        "version": SaveScript.VERSION,
+        "player": _vec3_to_list(player.global_position),
+        "state": {
+            "items": state.items.duplicate(true),
+            "experience": state.experience.duplicate(true),
+            "health": state.health,
+            "hunger": state.hunger,
+            "weapon": state.equipped_weapon,
+        },
+        "world": world,
+    }
+
+
+func _clear_dynamic_entities() -> void:
+    for group in ["gatherable", "infected", "player_building"]:
+        for node in get_tree().get_nodes_in_group(group):
+            if is_instance_valid(node) and not node.is_queued_for_deletion():
+                remove_child(node) # Remove from groups immediately, before queued deletion.
+                node.queue_free()
+
+
+func _apply_snapshot(snapshot: Dictionary) -> bool:
+    # Validate everything before touching the running world.
+    if not SaveScript.is_valid_snapshot(snapshot):
+        return false
+    var stats: Dictionary = snapshot["state"]
+    var world: Dictionary = snapshot["world"]
+    _clear_dynamic_entities()
+    state.items = stats["items"].duplicate(true)
+    state.experience = stats["experience"].duplicate(true)
+    state.health = float(stats["health"])
+    state.hunger = float(stats["hunger"])
+    state.equipped_weapon = str(stats["weapon"])
+    state.changed.emit()
+    player.global_position = _list_to_vec3(snapshot["player"])
+    player.velocity = Vector3.ZERO
+    player.active = state.health > 0.0
+    for entry in world["resources"]:
+        _spawn_resource(str(entry["kind"]), _list_to_vec3(entry["position"]), int(entry["remaining"]))
+    for entry in world["infected"]:
+        _spawn_zombie(_list_to_vec3(entry["position"]), float(entry["health"]))
+    for entry in world["barricades"]:
+        var barrier := _make_box("Barricade", _list_to_vec3(entry["position"]),
+                Vector3(2.0, 1.4, 0.6), Color("#76583d"))
+        barrier.rotation.y = float(entry["yaw"])
+        barrier.add_to_group("player_building")
+    return true
+
+
+func _save_game(path: String = SaveScript.DEFAULT_PATH) -> bool:
+    var ok: bool = SaveScript.write_snapshot(_make_snapshot(), path)
+    status_message = "World saved." if ok else "Save failed; previous save retained if available."
+    return ok
+
+
+func _load_game(path: String = SaveScript.DEFAULT_PATH) -> bool:
+    var snapshot: Dictionary = SaveScript.read_snapshot(path)
+    if snapshot.is_empty() or not _apply_snapshot(snapshot):
+        status_message = "No valid save found; world unchanged."
+        return false
+    status_message = "Character, resources, infected and buildings restored."
+    return true
+
+
 func receive_zombie_hit(damage: float) -> void:
     if state.health <= 0.0:
         return
@@ -294,6 +398,12 @@ func _unhandled_key_input(event: InputEvent) -> void:
         return
     if event.physical_keycode == KEY_R:
         get_tree().reload_current_scene()
+        return
+    if event.physical_keycode == KEY_K:
+        _save_game()
+        return
+    if event.physical_keycode == KEY_L:
+        _load_game()
         return
     if state.health <= 0.0:
         return
