@@ -269,4 +269,20 @@ TEST_CASE("[Geometry3D] Preallocated plane arrays preserve reference formulas an
 	}
 }
 
+TEST_CASE("[Geometry3D] Known-size builders handle zero and negative dimensions") {
+	const Vector<Plane> cylinder = Geometry3D::build_cylinder_planes(1.0, 2.0, -1);
+	REQUIRE_EQ(cylinder.size(), 2);
+	CHECK(cylinder[0].is_equal_approx(Plane(Vector3(1, 0, 0), 1.0)));
+	CHECK(cylinder[1].is_equal_approx(Plane(Vector3(-1, 0, 0), 1.0)));
+
+	const Vector<Plane> sphere_empty = Geometry3D::build_sphere_planes(1.0, 2, -1);
+	CHECK_EQ(sphere_empty.size(), 0);
+	const Vector<Plane> sphere_flat = Geometry3D::build_sphere_planes(1.0, -1, 3);
+	CHECK_EQ(sphere_flat.size(), 3);
+	const Vector<Plane> capsule_empty = Geometry3D::build_capsule_planes(1.0, 2.0, -1, 3);
+	CHECK_EQ(capsule_empty.size(), 0);
+	const Vector<Plane> capsule_flat = Geometry3D::build_capsule_planes(1.0, 2.0, 3, -1);
+	CHECK_EQ(capsule_flat.size(), 3);
+}
+
 } // namespace TestGeometry3D
