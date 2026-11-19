@@ -1,0 +1,36 @@
+name: Godot Node2D Editor Resize Regression Tests
+
+on:
+  pull_request:
+    paths:
+      - "scene/2d/node_2d.cpp"
+      - "scene/2d/visible_on_screen_notifier_2d.h"
+      - "scene/main/canvas_item.h"
+      - "tests/scene/test_node_2d_editor_resize.cpp"
+      - ".github/workflows/node2d-editor-resize-tests.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  editor-resize:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - uses: ./.github/actions/godot-deps
+
+      - name: Build editor and native tests
+        run: scons platform=linuxbsd target=editor tests=yes module_text_server_fb_enabled=yes -j2
+
+      - name: Run Node2D editor resize regressions
+        shell: bash
+        run: |
+          set -euo pipefail
+          exe="$(find bin -maxdepth 1 -type f -name 'godot.linuxbsd.editor.*' -perm /u+x | head -n 1)"
+          test -n "$exe"
+          "$exe" --headless --test --test-case="*[Node2DEditorResize]*"
