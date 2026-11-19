@@ -4480,37 +4480,85 @@ String String::strip_escapes() const {
 	return stripped;
 }
 
-String String::lstrip(const String &p_chars) const {
-	int len = length();
-	int beg;
+// The usual trim sets are ASCII whitespace or punctuation. A two-word stack
+// lookup table avoids searching the entire set for every stripped code point.
+// Non-ASCII code points still use the full Unicode String lookup.
+static _FORCE_INLINE_ bool _trim_char_in_set(char32_t p_char, const String &p_chars, const uint64_t p_ascii_mask[2]) {
+	const uint32_t codepoint = uint32_t(p_char);
+	if (codepoint < 128) {
+		return (p_ascii_mask[codepoint >> 6] & (uint64_t(1) << (codepoint & 63))) != 0;
+	}
+	return p_chars.find_char(p_char) != -1;
+}
 
-	for (beg = 0; beg < len; beg++) {
-		if (p_chars.find_char(get(beg)) == -1) {
-			break;
+static _FORCE_INLINE_ void _make_ascii_trim_mask(const String &p_chars, uint64_t r_ascii_mask[2]) {
+	r_ascii_mask[0] = 0;
+	r_ascii_mask[1] = 0;
+	const char32_t *characters = p_chars.ptr();
+	for (int i = 0; i < p_chars.length(); i++) {
+		const uint32_t codepoint = uint32_t(characters[i]);
+		if (codepoint < 128) {
+			r_ascii_mask[codepoint >> 6] |= uint64_t(1) << (codepoint & 63);
 		}
 	}
+}
 
-	if (beg == 0) {
+String String::lstrip(const String &p_chars) const {
+	const int len = length();
+	if (len == 0 || p_chars.is_empty()) {
 		return *this;
 	}
 
+	const char32_t *characters = ptr();
+	const int char_count = p_chars.length();
+	if (char_count == 1) {
+		const char32_t trim_char = p_chars.ptr()[0];
+		int beg = 0;
+		while (beg < len && characters[beg] == trim_char) {
+			beg++;
+		}
+		return beg == 0 ? *this : substr(beg, len - beg);
+	}
+
+	// Unchanged strings are common; avoid even building the lookup mask.
+	if (p_chars.find_char(characters[0]) == -1) {
+		return *this;
+	}
+	uint64_t ascii_mask[2];
+	_make_ascii_trim_mask(p_chars, ascii_mask);
+	int beg = 1;
+	while (beg < len && _trim_char_in_set(characters[beg], p_chars, ascii_mask)) {
+		beg++;
+	}
 	return substr(beg, len - beg);
 }
 
 String String::rstrip(const String &p_chars) const {
-	int len = length();
-	int end;
-
-	for (end = len - 1; end >= 0; end--) {
-		if (p_chars.find_char(get(end)) == -1) {
-			break;
-		}
-	}
-
-	if (end == len - 1) {
+	const int len = length();
+	if (len == 0 || p_chars.is_empty()) {
 		return *this;
 	}
 
+	const char32_t *characters = ptr();
+	const int char_count = p_chars.length();
+	if (char_count == 1) {
+		const char32_t trim_char = p_chars.ptr()[0];
+		int end = len - 1;
+		while (end >= 0 && characters[end] == trim_char) {
+			end--;
+		}
+		return end == len - 1 ? *this : substr(0, end + 1);
+	}
+
+	if (p_chars.find_char(characters[len - 1]) == -1) {
+		return *this;
+	}
+	uint64_t ascii_mask[2];
+	_make_ascii_trim_mask(p_chars, ascii_mask);
+	int end = len - 2;
+	while (end >= 0 && _trim_char_in_set(characters[end], p_chars, ascii_mask)) {
+		end--;
+	}
 	return substr(0, end + 1);
 }
 
@@ -5788,12 +5836,18 @@ String String::validate_node_name() const {
 }
 
 String String::get_basename() const {
-	int pos = rfind_char('.');
-	if (pos < 0 || pos < MAX(rfind_char('/'), rfind_char('\\'))) {
-		return *this;
+	// Stop at the last separator. A dot in a parent folder is not an
+	// extension, so one reverse scan is enough instead of three searches.
+	const char32_t *characters = ptr();
+	for (int i = length() - 1; i >= 0; i--) {
+		if (characters[i] == '.') {
+			return substr(0, i);
+		}
+		if (characters[i] == '/' || characters[i] == '\\') {
+			break;
+		}
 	}
-
-	return substr(0, pos);
+	return *this;
 }
 
 String itos(int64_t p_val) {
