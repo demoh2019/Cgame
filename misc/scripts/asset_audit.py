@@ -68,8 +68,13 @@ def list_project_files(root: Path, exclude: Iterable[str] = ()) -> list[str]:
     """Return project-relative paths using POSIX separators, without following dirs links."""
     root = root.resolve()
     excludes = tuple(exclude)
+    def reject_scan_failure(error: OSError) -> None:
+        # By default os.walk silently ignores unreadable directories. A partial
+        # inventory could incorrectly report missing dependencies as valid.
+        raise ValueError(f"Cannot enumerate all project files: {error}")
+
     result: list[str] = []
-    for directory, dirs, files in os.walk(root, followlinks=False):
+    for directory, dirs, files in os.walk(root, followlinks=False, onerror=reject_scan_failure):
         relative_dir = Path(directory).relative_to(root).as_posix()
         dirs[:] = sorted(name for name in dirs if name not in SKIP_DIRS and not _is_excluded(
             name if relative_dir == "." else relative_dir + "/" + name, excludes))
