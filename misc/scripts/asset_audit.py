@@ -170,17 +170,23 @@ def find_cycles(graph: dict[str, list[str]]) -> list[tuple[str, ...]]:
     for start in sorted(nodes):
         if start in visited:
             continue
-        stack: list[tuple[str, bool]] = [(start, False)]
+        # Discover each node exactly once. The old stack queued the same
+        # not-yet-visited child repeatedly in dense graphs (up to O(E) frames).
+        # Component members and the final cycle list are sorted below, so
+        # traversal order of existing adjacency lists does not affect output.
+        visited.add(start)
+        stack = [(start, iter(graph.get(start, ())))]
         while stack:
-            node, done = stack.pop()
-            if done:
+            node, neighbors = stack[-1]
+            try:
+                child = next(neighbors)
+            except StopIteration:
                 order.append(node)
+                stack.pop()
                 continue
-            if node in visited:
-                continue
-            visited.add(node)
-            stack.append((node, True))
-            stack.extend((child, False) for child in sorted(graph.get(node, ()), reverse=True) if child not in visited)
+            if child not in visited:
+                visited.add(child)
+                stack.append((child, iter(graph.get(child, ()))))
     reversed_graph: dict[str, list[str]] = defaultdict(list)
     for source, destinations in graph.items():
         for destination in destinations:
