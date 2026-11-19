@@ -596,6 +596,10 @@ PhysicsServer3D::PhysicsServer3D() {
 	// Opt-in XPBD hinge dihedral bending for adjacent cloth triangles.
 	// Zero disables setup, solver work and all persistent hinge buffers.
 	GLOBAL_DEF(PropertyInfo(Variant::FLOAT, "physics/3d/solver/soft_body_xpbd_dihedral_compliance", PROPERTY_HINT_RANGE, "0,0.01,0.000001,or_greater"), 0.0);
+	// Optional permanent cloth creases after bending beyond an angular yield.
+	// Zero rate disables the pass, even when the XPBD hinge solver is enabled.
+	GLOBAL_DEF(PropertyInfo(Variant::FLOAT, "physics/3d/solver/soft_body_bending_plastic_yield_angle", PROPERTY_HINT_RANGE, "0,3.14159265,0.01,suffix:rad"), 0.2);
+	GLOBAL_DEF(PropertyInfo(Variant::FLOAT, "physics/3d/solver/soft_body_bending_plastic_creep_rate", PROPERTY_HINT_RANGE, "0,100,0.1,or_greater,suffix:1/s"), 0.0);
 	// Optional Bullet-style vertex/triangle soft-body self contacts.
 	// Zero thickness disables BVH candidate generation and all buffers.
 	GLOBAL_DEF(PropertyInfo(Variant::FLOAT, "physics/3d/solver/soft_body_self_collision_thickness", PROPERTY_HINT_RANGE, "0,1,0.001,or_greater,suffix:m"), 0.0);
