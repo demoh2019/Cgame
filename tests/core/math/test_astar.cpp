@@ -649,4 +649,69 @@ TEST_CASE("[AStarGrid2D] Partial route honors closest reachable cell with a bloc
 	CHECK_EQ(Vector2i(full[4]), Vector2i(4, 0));
 }
 
+
+TEST_CASE("[AStarGrid2D] Flat rows preserve coordinate order and weights") {
+	AStarGrid2D grid;
+	const Rect2i regions[] = {
+		Rect2i(-11, -23, 257, 3),
+		Rect2i(17, -91, 3, 257),
+		Rect2i(-7, 4, 1, 1),
+		Rect2i(5, 6, 0, 12),
+		Rect2i(2, 3, 13, 0),
+		Rect2i(-16, -8, 63, 65),
+	};
+	for (const Rect2i &region : regions) {
+		grid.set_region(region);
+		grid.update();
+		CHECK_FALSE(grid.is_dirty());
+		TypedArray<Dictionary> all = grid.get_point_data_in_region(region);
+		REQUIRE_EQ(all.size(), region.size.x * region.size.y);
+		if (all.is_empty()) {
+			continue;
+		}
+		const Vector2i first = region.position;
+		const Vector2i last = region.get_end() - Vector2i(1, 1);
+		CHECK_EQ(grid.get_point_position(first), Vector2(first));
+		CHECK_EQ(grid.get_point_position(last), Vector2(last));
+		Dictionary first_row = all[0];
+		Dictionary final_row = all[all.size() - 1];
+		CHECK_EQ(Vector2i(first_row["id"]), first);
+		CHECK_EQ(Vector2i(final_row["id"]), last);
+		const int next_index = MIN(region.size.x, all.size() - 1);
+		Dictionary next_row = all[next_index];
+		CHECK_EQ(Vector2i(next_row["id"]), first + Vector2i(0, MIN(1, region.size.y - 1)));
+
+		grid.set_point_weight_scale(last, 3.25);
+		CHECK_EQ(grid.get_point_weight_scale(last), doctest::Approx(3.25));
+		grid.set_point_solid(first, true);
+		CHECK(grid.is_point_solid(first));
+		if (first != last) {
+			CHECK_FALSE(grid.is_point_solid(last));
+		}
+		grid.set_point_solid(first, false);
+		CHECK_FALSE(grid.is_point_solid(first));
+	}
+}
+
+TEST_CASE("[AStarGrid2D] Flat cells preserve routes across row boundaries") {
+	AStarGrid2D grid;
+	grid.set_region(Rect2i(-5, -10, 17, 19));
+	grid.set_diagonal_mode(AStarGrid2D::DIAGONAL_MODE_NEVER);
+	grid.update();
+	const Vector2i start(-5, -10);
+	const Vector2i finish(-5, -7);
+	const TypedArray<Vector2i> direct = grid.get_id_path(start, finish);
+	REQUIRE_EQ(direct.size(), 4);
+	for (int i = 0; i < direct.size(); ++i) {
+		CHECK_EQ(Vector2i(direct[i]), Vector2i(-5, -10 + i));
+	}
+	grid.set_point_solid(Vector2i(-5, -9), true);
+	const TypedArray<Vector2i> detour = grid.get_id_path(start, finish);
+	REQUIRE_EQ(detour.size(), 6);
+	CHECK_EQ(Vector2i(detour[0]), start);
+	CHECK_EQ(Vector2i(detour[detour.size() - 1]), finish);
+	grid.set_point_solid(Vector2i(-5, -9), false);
+	CHECK_EQ(grid.get_id_path(start, finish).size(), 4);
+}
+
 } // namespace TestAStar
