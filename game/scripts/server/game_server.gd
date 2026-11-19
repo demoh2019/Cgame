@@ -88,6 +88,7 @@ func character_data(player: Player) -> Dictionary:
 	return {
 		"version": 1,
 		"health": player.survival.health, "hunger": player.survival.hunger, "thirst": player.survival.thirst,
+		"infection": player.survival.infection,
 		"alive": alive, "kills": player.kills, "deaths": player.deaths,
 		"x": player.position.x, "z": player.position.z,
 		"inventory": player.inventory.to_dict(),
@@ -97,6 +98,14 @@ func character_data(player: Player) -> Dictionary:
 ## Restores a saved character. Returns false (and changes nothing) if the data is not usable.
 func apply_character(player: Player, data: Dictionary) -> bool:
 	if int(data.get("version", 0)) != 1 or typeof(data.get("inventory")) != TYPE_DICTIONARY:
+		return false
+	# Backward compatible with stored version-1 characters created before infection existed.
+	# Validate before mutating player inventory or any other live state.
+	var infection_value: Variant = data.get("infection", 0.0)
+	if not (infection_value is int or infection_value is float):
+		return false
+	var safe_infection := float(infection_value)
+	if not is_finite(safe_infection) or safe_infection < 0.0 or safe_infection > 100.0:
 		return false
 	var inventory = Inventory.new()
 	var slots: Variant = data["inventory"].get("slots")
@@ -125,6 +134,7 @@ func apply_character(player: Player, data: Dictionary) -> bool:
 	survival.health = clampf(float(data.get("health", 100.0)), 1.0, Defs.MAX_HEALTH)
 	survival.hunger = clampf(float(data.get("hunger", 80.0)), 0.0, 100.0)
 	survival.thirst = clampf(float(data.get("thirst", 80.0)), 0.0, 100.0)
+	survival.infection = safe_infection
 	player.survival = survival
 	# Where they logged out, if that is a sane place; otherwise the hub.
 	var x := float(data.get("x", 0.0))
@@ -245,13 +255,19 @@ func cmd_use(peer_id: int, item_id: String) -> Dictionary:
 			player.inventory.remove(item_id, 1)
 			player.survival.drink(float(data["drink"]))
 		"medical":
+			var infection_reduction := float(data.get("infection_reduction", 0.0))
+			if infection_reduction > 0.0 and player.survival.infection <= 0.0:
+				return {"ok": false, "reason": "not_needed"}
 			player.inventory.remove(item_id, 1)
-			player.survival.heal(float(data["heal"]))
+			player.survival.heal(float(data.get("heal", 0.0)))
+			if infection_reduction > 0.0:
+				player.survival.treat_infection(infection_reduction)
 		"weapon", "armor":
 			player.inventory.equip(item_id)
 		_:
 			return {"ok": false, "reason": "not_usable"}
 	player.dirty_inventory = true
+	player.dirty_character = true
 	return {"ok": true}
 
 
@@ -546,6 +562,9 @@ func _tick_zombies(delta: float) -> void:
 			if victim != null and _alive(victim):
 				var damage: float = Combat.apply_armor(float(result["damage"]), victim.inventory.armor)
 				victim.survival.hurt(damage)
+				if _alive(victim):
+					victim.survival.expose_to_infection(float(zombie.data.get("infection", 0.0)))
+				victim.dirty_character = true
 				events.append({"type": "hit", "kind": "player", "id": victim.id, "damage": damage, "by": -zombie.id})
 				if not _alive(victim):
 					_on_player_death(victim, -zombie.id)
@@ -648,7 +667,7 @@ func snapshot_for(peer_id: int) -> Dictionary:
 		"you": {
 			"x": player.position.x, "y": player.position.y, "z": player.position.z, "yaw": player.yaw,
 			"health": player.survival.health, "hunger": player.survival.hunger, "thirst": player.survival.thirst,
-			"alive": _alive(player), "kills": player.kills, "deaths": player.deaths, "zone": player.zone_notice,
+			"infection": player.survival.infection, "alive": _alive(player), "kills": player.kills, "deaths": player.deaths, "zone": player.zone_notice,
 			"action": player.action.duplicate(),
 			"weapon": player.inventory.weapon, "armor": player.inventory.armor,
 		},

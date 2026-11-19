@@ -40,7 +40,7 @@ func _build() -> void:
 	top_left.size_flags_horizontal = Control.SIZE_SHRINK_BEGIN
 	top_left.size_flags_vertical = Control.SIZE_SHRINK_BEGIN
 	margin.add_child(top_left)
-	for entry in [["health", Color(0.85, 0.2, 0.2)], ["hunger", Color(0.9, 0.65, 0.2)], ["thirst", Color(0.25, 0.55, 0.95)]]:
+	for entry in [["health", Color(0.85, 0.2, 0.2)], ["hunger", Color(0.9, 0.65, 0.2)], ["thirst", Color(0.25, 0.55, 0.95)], ["infection", Color(0.68, 0.3, 0.72)]]:
 		var bar := ProgressBar.new()
 		bar.custom_minimum_size = Vector2(240, 18)
 		bar.max_value = 100.0
@@ -174,6 +174,7 @@ func _process(_delta: float) -> void:
 	_bars["health"].value = client.you["health"]
 	_bars["hunger"].value = client.you["hunger"]
 	_bars["thirst"].value = client.you["thirst"]
+	_bars["infection"].value = client.you.get("infection", 0.0)
 	var zone: int = clampi(int(client.you.get("zone", 0)), 0, 3)
 	_zone_label.text = "%s zone  (tier %d)" % [Defs.ZONE_NAMES[zone].capitalize(), zone + 1]
 	_zone_label.add_theme_color_override("font_color", [Color(0.4, 0.9, 0.4), Color(0.95, 0.85, 0.3), Color(0.95, 0.45, 0.3), Color(0.8, 0.3, 0.9)][zone])
