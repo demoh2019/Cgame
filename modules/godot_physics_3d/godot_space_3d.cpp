@@ -1300,6 +1300,12 @@ GodotSpace3D::GodotSpace3D() {
 	fluid_angular_drag = MAX(real_t(0.0), (real_t)GLOBAL_GET("physics/3d/solver/fluid_angular_drag"));
 	fluid_buoyancy = MAX(real_t(0.0), (real_t)GLOBAL_GET("physics/3d/solver/fluid_buoyancy"));
 	fluid_flow_velocity = GLOBAL_GET("physics/3d/solver/fluid_flow_velocity");
+	fluid_plane_enabled = GLOBAL_GET("physics/3d/fluid_plane/enabled");
+	fluid_plane_surface_height = GLOBAL_GET("physics/3d/fluid_plane/surface_height");
+	fluid_plane_density = MAX(real_t(0.0), (real_t)GLOBAL_GET("physics/3d/fluid_plane/density"));
+	fluid_plane_drag_coefficient = MAX(real_t(0.0), (real_t)GLOBAL_GET("physics/3d/fluid_plane/drag_coefficient"));
+	fluid_plane_angular_drag = MAX(real_t(0.0), (real_t)GLOBAL_GET("physics/3d/fluid_plane/angular_drag"));
+	fluid_plane_flow_velocity = GLOBAL_GET("physics/3d/fluid_plane/flow_velocity");
 	gyroscopic_forces = GLOBAL_GET("physics/3d/solver/gyroscopic_forces");
 	gyroscopic_integration_mode = CLAMP((int)GLOBAL_GET("physics/3d/solver/gyroscopic_integration_mode"), 0, 1);
 	rolling_friction = MAX(real_t(0.0), (real_t)GLOBAL_GET("physics/3d/solver/rolling_friction"));
