@@ -1537,6 +1537,45 @@ TEST_CASE("[SceneTree][Node] Move child shifts only the affected range and prese
 	memdelete(root);
 }
 
+TEST_CASE("[SceneTree][Node] Exact child queries work with dirty traversal cache") {
+	Node *root = memnew(Node);
+	Vector<Node *> children;
+	for (int i = 0; i < 512; i++) {
+		Node *child = memnew(Node);
+		child->set_name("Candidate" + itos(i));
+		root->add_child(child);
+		children.push_back(child);
+	}
+
+	// Removing a non-tail child invalidates the ordering cache.
+	// Exact lookups must still use the authoritative name table.
+	Node *deleted = children[3];
+	root->remove_child(deleted);
+	memdelete(deleted);
+	TypedArray<Node> found = root->find_children("Candidate511", "Node", false, false);
+	REQUIRE_EQ(found.size(), 1);
+	CHECK_EQ(Object::cast_to<Node>(found[0]), children[511]);
+	CHECK_EQ(root->find_children("Candidate3", "Node", false, false).size(), 0);
+	CHECK_EQ(root->find_children("Missing", "Node", false, false).size(), 0);
+	CHECK_EQ(root->find_children("Candidate511", "Node3D", false, false).size(), 0);
+
+	// Ownership filtering must work without visiting unrelated children.
+	CHECK_EQ(root->find_children("Candidate100", "Node", false, true).size(), 0);
+	children[100]->set_owner(root);
+	found = root->find_children("Candidate100", "Node", false, true);
+	REQUIRE_EQ(found.size(), 1);
+	CHECK_EQ(Object::cast_to<Node>(found[0]), children[100]);
+
+	// Wildcard and recursive lookups still visit the ordered children.
+	CHECK_EQ(root->find_children("Candidate51?", "Node", false, false).size(), 2);
+	found = root->find_children("Candidate511", "Node", true, false);
+	REQUIRE_EQ(found.size(), 1);
+	CHECK_EQ(Object::cast_to<Node>(found[0]), children[511]);
+	CHECK_EQ(root->get_child_count(), 511);
+	CHECK_EQ(root->get_child(3), children[4]);
+	memdelete(root);
+}
+
 TEST_CASE("[SceneTree][Node] Human-readable names carry long numeric suffixes") {
 	Node *root = memnew(Node);
 	String separator;

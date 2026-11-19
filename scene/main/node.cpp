@@ -2152,8 +2152,9 @@ TypedArray<Node> Node::find_children(const String &p_pattern, const String &p_ty
 	TypedArray<Node> ret;
 	ERR_FAIL_COND_V(p_pattern.is_empty() && p_type.is_empty(), ret);
 
-	_update_children_cache();
-	if (data.children_cache.is_empty()) {
+	// A precise direct-child lookup can use the existing name map
+	// without rebuilding or sorting the child-order cache.
+	if (data.children.is_empty()) {
 		return ret;
 	}
 
@@ -2161,6 +2162,15 @@ TypedArray<Node> Node::find_children(const String &p_pattern, const String &p_ty
 	// the wildcard matcher once for every node in large scene trees.
 	const bool exact_name_match = !p_pattern.is_empty() && !p_pattern.contains_char('*') && !p_pattern.contains_char('?');
 	const StringName exact_name = exact_name_match ? StringName(p_pattern) : StringName();
+	Node *exact_child = nullptr;
+	if (!p_recursive && exact_name_match) {
+		exact_child = _get_child_by_name(exact_name);
+		// A miss or a filtered-out child does not need type resolution or
+		// any traversal cache allocation, even when the cache is dirty.
+		if (!exact_child || (p_owned && !exact_child->data.owner)) {
+			return ret;
+		}
+	}
 
 	// Resolve the global script type once, rather than once for each matching child.
 	const bool is_global_type = !p_type.is_empty() && ScriptServer::is_global_class(p_type);
@@ -2189,16 +2199,14 @@ TypedArray<Node> Node::find_children(const String &p_pattern, const String &p_ty
 		}
 	};
 
+	if (!p_recursive && exact_name_match) {
+		append_match(exact_child);
+		return ret;
+	}
+
+	// Only wildcard or recursive traversals require the ordered child cache.
+	_update_children_cache();
 	if (!p_recursive) {
-		// A unique direct child name needs only one hash lookup, even when a
-		// type filter is also supplied. Keep ownership/type checks unchanged.
-		if (exact_name_match) {
-			Node *child = _get_child_by_name(exact_name);
-			if (child && (!p_owned || child->data.owner)) {
-				append_match(child);
-			}
-			return ret;
-		}
 		// Avoid allocating a traversal stack for a non-recursive query.
 		for (Node *child : data.children_cache) {
 			if (!p_owned || child->data.owner) {
