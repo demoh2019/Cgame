@@ -13,7 +13,7 @@ var _water_visual: Polygon2D
 var _water_line: Line2D
 var _status: Label
 var _water_depth := 245.0
-var _fluid_density := 0.001
+var _fluid_density := 0.0025
 var _flow := 60.0
 var _wind_on := false
 var _wind_force := 350.0
