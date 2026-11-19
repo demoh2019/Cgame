@@ -425,6 +425,8 @@ def main(argv=None):
     parser.add_argument("--start-page", type=int, default=1)
     parser.add_argument("--start-path", default="",
                         help="Opaque next_path from an earlier checkpoint; bypasses page walking")
+    parser.add_argument("--start-offset", type=int, default=0,
+                        help="0-based offset from the checkpoint on the cursor page")
     parser.add_argument("--pages", type=int, default=1,
                         help="Number of pages (0 = all remaining pages)")
     parser.add_argument("--max-items", type=int, default=20,
@@ -439,7 +441,7 @@ def main(argv=None):
     parser.add_argument("--base-branch", default="master")
     parser.add_argument("--write-delay", type=float, default=10.0)
     args = parser.parse_args(argv)
-    if args.start_page < 1 or args.pages < 0 or args.max_items < 0:
+    if args.start_page < 1 or args.pages < 0 or args.max_items < 0 or not (0 <= args.start_offset <= 100):
         parser.error("invalid pagination arguments")
     if args.apply and not os.environ.get("GH_TOKEN"):
         parser.error("Set GH_TOKEN to write to GitHub")
@@ -447,7 +449,7 @@ def main(argv=None):
     git_mirror = GitHeadMirror(args.git_dir, args.source, args.base_branch)
     mirror = Mirror(api, args.source, args.dest, args.apply,
                     args.include_comments, args.pr_mode, git_mirror)
-    start_page, start_offset = args.start_page, 0
+    start_page, start_offset = args.start_page, args.start_offset
     start_cursor = args.start_path or None
     if args.resume:
         if not args.checkpoint.exists():
