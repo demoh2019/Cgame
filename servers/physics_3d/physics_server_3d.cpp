@@ -584,6 +584,11 @@ PhysicsServer3D::PhysicsServer3D() {
 	// Zero selects the legacy Bullet-style projection; nonzero compliance
 	// enables a per-link Lagrange multiplier across iterations of each step.
 	GLOBAL_DEF(PropertyInfo(Variant::FLOAT, "physics/3d/solver/soft_body_xpbd_compliance", PROPERTY_HINT_RANGE, "0,0.01,0.000001,or_greater"), 0.0);
+	// Anisotropic soft-body fibers use the undeformed local mesh axis and
+	// independently scale XPBD stretch compliance along that direction.
+	// Disabled (or ratio 1) preserves exactly the isotropic solver path.
+	GLOBAL_DEF(PropertyInfo(Variant::INT, "physics/3d/solver/soft_body_xpbd_fiber_axis", PROPERTY_HINT_ENUM, "Disabled,X,Y,Z"), 0);
+	GLOBAL_DEF(PropertyInfo(Variant::FLOAT, "physics/3d/solver/soft_body_xpbd_fiber_compliance_ratio", PROPERTY_HINT_RANGE, "0.1,10,0.05"), 1.0);
 	// Optional viscoplastic rest-length creep for cloth, rope and deformable meshes.
 	// Yield is the allowed elastic strain; creep rate 0 keeps legacy behavior.
 	GLOBAL_DEF(PropertyInfo(Variant::FLOAT, "physics/3d/solver/soft_body_plastic_yield_strain", PROPERTY_HINT_RANGE, "0,1,0.001"), 0.1);
