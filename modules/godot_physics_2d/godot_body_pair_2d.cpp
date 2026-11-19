@@ -245,7 +245,8 @@ bool GodotBodyPair2D::_test_ccd(real_t p_step, GodotBody2D *p_A, int p_shape_A, 
 	// A single support ray can miss a glancing circle/circle impact.
 	// With uniform-scale transforms the Minkowski sum is another circle,
 	// so solve its first linear time of impact analytically in O(1).
-	if (shape_A_ptr->get_type() == PS2DE::SHAPE_CIRCLE && shape_B_ptr->get_type() == PS2DE::SHAPE_CIRCLE) {
+	if (shape_A_ptr->get_type() == PS2DE::SHAPE_CIRCLE && shape_B_ptr->get_type() == PS2DE::SHAPE_CIRCLE &&
+			p_A->get_angular_velocity() == 0.0 && p_B->get_angular_velocity() == 0.0) {
 		const double scale_A = physics_ccd_uniform_sphere_scale(p_xform_A);
 		const double scale_B = physics_ccd_uniform_sphere_scale(p_xform_B);
 		if (scale_A > 0.0 && scale_B > 0.0) {
