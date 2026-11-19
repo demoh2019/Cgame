@@ -180,11 +180,13 @@ class JoltSoftFaceBVHTests(unittest.TestCase):
         self.assertIn("std::nth_element(", self.code)
         self.assertIn("MAX_SOFT_FACE_BVH_FACES = 4096", self.code)
         self.assertIn("SOFT_FACE_BVH_LEAF_SIZE = 4", self.code)
-        self.assertIn("face_candidates.reserve(face_entries.size());", self.code)
+        self.assertIn("r_bvh_scratch.candidates.reserve(r_bvh_scratch.entries.size());", self.code)
 
     def test_global_budget_charged_for_build_traversal_and_exact_tests(self):
         self.assertIn("const uint32_t build_cost = (uint32_t)p_faces.size() * (split_levels + 1)", self.code)
         self.assertIn("r_budget -= build_cost;", self.code)
+        self.assertIn("SoftFaceBVHScratch bvh_scratch;", self.code)
+        self.assertIn("r_bvh_scratch.clear();", self.code)
         self.assertIn("--r_budget;", self.code)
         self.assertIn("--r_contact_budget; // Every exact face test", self.code)
         self.assertIn("if (r_contact_budget == 0)", self.code)
