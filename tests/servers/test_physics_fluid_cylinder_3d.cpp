@@ -144,6 +144,23 @@ TEST_CASE("[PhysicsCylinderFluid] Very long cylinder clips narrow wet band accur
 	CHECK(sample.center_of_buoyancy.is_finite());
 }
 
+TEST_CASE("[PhysicsCylinderFluid] Extremely long near-horizontal cylinders preserve axial hydrostatic lever") {
+	// A slope of 1e-12 seems horizontal, but a cylinder extending a
+	// million radii to either side accumulates a finite first moment.
+	// Simply returning zero axial moment would lose restoring torque.
+	const Vector3 almost_horizontal(1, real_t(1e-12), 0);
+	GodotPhysicsFluidSample3D sample;
+	real_t total_volume = 0.0;
+	REQUIRE(godot_physics_fluid_cylinder_sample_3d(
+			Vector3(), almost_horizontal, 1.0, real_t(2e6), 0.1,
+			sample, total_volume));
+	CHECK(total_volume > 0.0);
+	CHECK(sample.submerged_fraction > real_t(0.5));
+	CHECK(sample.center_of_buoyancy.is_finite());
+	CHECK(sample.center_of_buoyancy.x < real_t(-0.25));
+	CHECK(sample.center_of_buoyancy.x > real_t(-0.5));
+}
+
 TEST_CASE("[PhysicsCylinderFluid] Invalid inputs fail without partial updates") {
 	GodotPhysicsFluidSample3D sample;
 	real_t total_volume = 15.0;
