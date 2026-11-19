@@ -265,6 +265,47 @@ python3 tests/stress/run.py --godot ./bin/godot.linuxbsd.editor.dev.x86_64 \
 Run these with the built-in GodotPhysics server selected. Record results before
 and after changes, and verify build/test status independently.
 
+## Cached broadphase AABB: no-op update fast path (Box2D-style)
+
+Built-in GodotPhysics 2D and 3D now check the previously submitted
+`Shape::aabb_cache` before calling `BroadPhase::move`. When the exact
+bounds have not changed, the physics collision object skips a redundant
+BVH lookup and tree lock entirely. Creation of a new proxy, real transform
+changes, shape resizing, and CCD swept-AABB changes still update the tree.
+
+Box2D uses fat AABBs to avoid reinserting a proxy for small movements;
+GodotPhysics already avoids some tree refits internally. This new early
+guard avoids the *call itself* for identical proxies, without increasing
+their bounds or changing collision filtering. Jolt's broadphase similarly
+prioritizes incremental updates and static/dynamic separation. The gain
+depends on how frequently client code repeats unchanged transforms.
+
+Correctness regression: unchanged bounds must keep the object queryable,
+while moving or resizing must invalidate and replace the cached proxy:
+
+```bash
+python3 -m unittest discover -s tests/stress -p 'test_physics_broadphase_aabb_cache.py' -v
+./bin/godot.macos.editor.arm64 --headless --path tests/stress \
+  --script res://physics_broadphase_aabb_cache_regression.gd
+```
+
+Benchmark identical-transform update throughput separately from object
+creation. Compare each case with the **same case** on an older build and
+identical hardware, not against a moving-body workload:
+
+```bash
+python3 tests/stress/run.py --godot ./bin/godot.macos.editor.arm64 \
+  --case physics_proxy_same_aabb_2d,physics_proxy_same_aabb_3d \
+  --scale 4 --frames 90 --repeats 5 --timeout 600 \
+  --rss-limit-mib 4096 --output out/broadphase-same-aabb.json
+```
+
+A scale of 977 uses 1,000,448 static physics bodies **per scenario** and
+must only be attempted on a dedicated, sufficiently provisioned host with
+strict RSS and timeout limits. The workload returns `ns_per_update`,
+`unchanged_transform_updates_ms`, `peak_physics_ms`, and frame p95.
+A successful source inspection is not a substitute for runtime tests.
+
 ## Million-body sparse physics benchmark (opt-in)
 
 `physics_rid_sparse_2d` and `physics_rid_sparse_3d` construct collision-shaped
