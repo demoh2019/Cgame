@@ -136,8 +136,19 @@ class GodotSoftBody3D : public GodotCollisionObject3D {
 		Vector3 normal;
 		real_t lambda = 0.0;
 	};
+	// CCD witnesses are stored separately so ordinary edge contacts stay
+	// compact. Only populated when both edge contacts and swept CCD are on.
+	struct SelfEdgeCCDContact {
+		uint32_t first = 0;
+		uint32_t second = 0;
+		real_t first_weight = 0.5;
+		real_t second_weight = 0.5;
+		Vector3 separating_normal;
+		real_t lambda = 0.0;
+	};
 	LocalVector<SelfCollisionEdge> xpbd_self_edges;
 	LocalVector<SelfEdgeContact> xpbd_self_edge_contacts;
+	LocalVector<SelfEdgeCCDContact> xpbd_self_edge_ccd_contacts;
 	DynamicBVH xpbd_self_edge_tree;
 	// Allocated only for positive volume compliance on a closed soft mesh.
 	LocalVector<Vector3> xpbd_volume_gradients;
