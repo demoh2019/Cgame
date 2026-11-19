@@ -43,6 +43,7 @@
 #include "servers/physics_softbody_adiabatic_gas.h"
 #include "servers/physics_softbody_shape_matching.h"
 #include "servers/physics_fem_tetra_neo_hookean.h"
+#include "servers/physics_fem_lumped_mass.h"
 #include "servers/physics_fem_tetra_fiber.h"
 #include "servers/physics_fem_tetra_viscosity.h"
 #include "servers/physics_softbody_shape_clusters.h"
@@ -510,31 +511,77 @@ void GodotSoftBody3D::solve_shape_matching_clusters(real_t p_strength) {
 // meshes are rejected without changing any other soft-body physics.
 // Rest matrices, node indices and per-step XPBD multipliers remain cached.
 void GodotSoftBody3D::initialize_fem_tetra() {
+	const bool previously_lumped = !xpbd_fem_mass_fractions.is_empty();
 	xpbd_fem_tetrahedra.reset();
 	xpbd_fem_fiber_lambdas.reset();
-	if (!get_space() ||
-			!(get_space()->get_soft_body_tetra_fem_compliance() > 0.0 ||
-					get_space()->get_soft_body_tetra_fem_viscosity() > 0.0) ||
-			!xpbd_volume_closed || nodes.size() < 4 || nodes.size() > 2048 ||
-			faces.size() < 4 || faces.size() > 4096) {
-		return;
+	xpbd_fem_mass_fractions.reset();
+
+	if (get_space() &&
+			(get_space()->get_soft_body_tetra_fem_compliance() > 0.0 ||
+					get_space()->get_soft_body_tetra_fem_viscosity() > 0.0 ||
+					get_space()->get_soft_body_tetra_fiber_compliance() > 0.0) &&
+			xpbd_volume_closed && nodes.size() >= 4 && nodes.size() <= 2048 &&
+			faces.size() >= 4 && faces.size() <= 4096) {
+		LocalVector<Vector3> positions;
+		positions.resize(nodes.size());
+		for (uint32_t i = 0; i < nodes.size(); ++i) {
+			positions[i] = nodes[i].x;
+		}
+		LocalVector<PhysicsFEMConvexFace> triangles;
+		triangles.reserve(faces.size());
+		for (const Face &face : faces) {
+			PhysicsFEMConvexFace triangle;
+			triangle.a = face.n[0]->index;
+			triangle.b = face.n[1]->index;
+			triangle.c = face.n[2]->index;
+			triangles.push_back(triangle);
+		}
+		physics_fem_build_convex_star_tetrahedra(
+				positions, triangles, xpbd_volume_rest, xpbd_fem_tetrahedra);
+
+		// The total mass is unchanged. Each tetra distributes rho*V/4
+		// onto its four vertices. Include pinned vertices in the fractions;
+		// pinning changes mobility rather than deleting physical mass.
+		if (!xpbd_fem_tetrahedra.is_empty() &&
+				get_space()->get_soft_body_tetra_fem_lumped_mass()) {
+			LocalVector<double> fractions;
+			LocalVector<real_t> inverse_masses;
+			if (physics_fem_build_lumped_masses(nodes.size(), xpbd_fem_tetrahedra,
+						total_mass, fractions, inverse_masses)) {
+				xpbd_fem_mass_fractions = std::move(fractions);
+				for (uint32_t i = 0; i < nodes.size(); ++i) {
+					if (nodes[i].im > 0.0) {
+						nodes[i].im = inverse_masses[i];
+					}
+				}
+				link_constants_dirty = true;
+				return;
+			}
+		}
 	}
-	LocalVector<Vector3> positions;
-	positions.resize(nodes.size());
-	for (uint32_t i = 0; i < nodes.size(); ++i) {
-		positions[i] = nodes[i].x;
+
+	// Disabling/rejecting FEM must not leave stale nonuniform masses behind.
+	if (previously_lumped) {
+		const real_t uniform_inverse = real_t(nodes.size()) * inv_total_mass;
+		for (Node &node : nodes) {
+			if (node.im > 0.0) {
+				node.im = uniform_inverse;
+			}
+		}
+		link_constants_dirty = true;
 	}
-	LocalVector<PhysicsFEMConvexFace> triangles;
-	triangles.reserve(faces.size());
-	for (const Face &face : faces) {
-		PhysicsFEMConvexFace triangle;
-		triangle.a = face.n[0]->index;
-		triangle.b = face.n[1]->index;
-		triangle.c = face.n[2]->index;
-		triangles.push_back(triangle);
+}
+
+real_t GodotSoftBody3D::get_unpinned_node_inverse_mass(uint32_t p_node_index) const {
+	ERR_FAIL_UNSIGNED_INDEX_V(p_node_index, nodes.size(), real_t(0.0));
+	if (xpbd_fem_mass_fractions.size() == nodes.size()) {
+		real_t result = 0.0;
+		if (physics_fem_unpinned_inverse_mass(
+					xpbd_fem_mass_fractions, p_node_index, total_mass, result)) {
+			return result;
+		}
 	}
-	physics_fem_build_convex_star_tetrahedra(
-			positions, triangles, xpbd_volume_rest, xpbd_fem_tetrahedra);
+	return real_t(nodes.size()) * inv_total_mass;
 }
 
 // Cache undeformed triangle angles only for opt-in shear constraints.
@@ -1899,7 +1946,7 @@ void GodotSoftBody3D::unpin_vertex(int p_index) {
 					// This is the last visual pin for the physical node.
 					++dynamic_node_count;
 				}
-				node.im = nodes.size() * inv_total_mass;
+				node.im = get_unpinned_node_inverse_mass(node_index);
 				link_constants_dirty = true;
 			}
 
@@ -1910,7 +1957,6 @@ void GodotSoftBody3D::unpin_vertex(int p_index) {
 
 void GodotSoftBody3D::unpin_all_vertices() {
 	if (!soft_mesh.is_null() && !pinned_vertices.is_empty()) {
-		const real_t inv_node_mass = nodes.size() * inv_total_mass;
 		for (const int pinned_vertex : pinned_vertices) {
 			ERR_CONTINUE(pinned_vertex < 0 || pinned_vertex >= (int)map_visual_to_physics.size());
 			const uint32_t node_index = map_visual_to_physics[pinned_vertex];
@@ -1921,7 +1967,7 @@ void GodotSoftBody3D::unpin_all_vertices() {
 					// Repeated visual indices must not count a welded node twice.
 					++dynamic_node_count;
 			}
-			node.im = inv_node_mass;
+			node.im = get_unpinned_node_inverse_mass(node_index);
 		}
 		link_constants_dirty = true;
 	}
@@ -3549,6 +3595,7 @@ void GodotSoftBody3D::destroy() {
 	xpbd_volume_original_rest = 0.0;
 	xpbd_fem_tetrahedra.reset();
 	xpbd_fem_fiber_lambdas.reset();
+	xpbd_fem_mass_fractions.reset();
 	nodes.clear();
 	links.clear();
 	faces.clear();
