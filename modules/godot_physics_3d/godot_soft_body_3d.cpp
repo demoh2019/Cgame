@@ -1128,6 +1128,7 @@ void GodotSoftBody3D::initialize_rod_bend_constraints() {
 			int best_i = -1;
 			int best_j = -1;
 			double best_alignment = straightness;
+			double best_length_squared = std::numeric_limits<double>::infinity();
 			for (uint32_t i = 0; i < adjacent.size(); ++i) {
 				bool used_i = false;
 				for (uint32_t k = 0; k < consumed_count; ++k) {
@@ -1159,8 +1160,17 @@ void GodotSoftBody3D::initialize_rod_bend_constraints() {
 					}
 					const double alignment = -(u[0] * v[0] + u[1] * v[1] + u[2] * v[2]) /
 							(Math::sqrt(lu_sq) * Math::sqrt(lv_sq));
-					if (Math::is_finite(alignment) && alignment > best_alignment) {
+					// Prefer short structural (warp/weft) edges over longer
+					// triangle diagonals when candidates are equally straight.
+					// A long diagonal should not steal a strand direction from
+					// two shorter, collinear fiber segments.
+					const double length_squared = lu_sq + lv_sq;
+					if (Math::is_finite(alignment) && Math::is_finite(length_squared) &&
+							(alignment > best_alignment + 1e-9 ||
+								(alignment > straightness && alignment >= best_alignment - 1e-9 &&
+										length_squared < best_length_squared))) {
 						best_alignment = alignment;
+						best_length_squared = length_squared;
 						best_i = int(i);
 						best_j = int(j);
 					}
