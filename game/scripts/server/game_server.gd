@@ -2152,7 +2152,11 @@ func _tick_players(delta: float) -> void:
 			player.survival.stamina = minf(Defs.MAX_STAMINA,
 				player.survival.stamina + TerritoryControl.RALLY_STAMINA_PER_SECOND * delta)
 		var conditions: Dictionary = Weather.conditions(world, player.position.x, player.position.z, time)
-		var weather_severity: float = Weather.effective_severity(conditions, player.inventory.armor)
+		# An old armor ID after an inventory transfer must not provide warmth.
+		var worn_armor: String = player.inventory.armor
+		if worn_armor != "" and player.inventory.count(worn_armor) <= 0:
+			worn_armor = ""
+		var weather_severity: float = Weather.effective_severity(conditions, worn_armor)
 		if FieldCampfire.has_warmth(campfires, player.position, time):
 			weather_severity = 0.0
 		damage += player.survival.weather_tick(delta, weather_severity)
@@ -2684,6 +2688,8 @@ func snapshot_for(peer_id: int) -> Dictionary:
 			"exposure": player.survival.exposure,
 			"warmth_seconds": player.survival.warmth_seconds,
 			"weather": Weather.conditions(world, player.position.x, player.position.z, time),
+			"weather_insulation": Weather.protection(
+				player.inventory.armor if player.inventory.count(player.inventory.armor) > 0 else ""),
 			"lake_drink_cooldown": player.lake_drink_cooldown,
 			"combat_energy": player.combat_energy, "skill_cooldown": player.skill_timer,
 			"guardian_cooldown": player.guardian_timer,

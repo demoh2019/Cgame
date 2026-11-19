@@ -194,6 +194,18 @@ static func _build_items() -> void:
 		# Armour: reduces incoming damage.
 		_add_item("jacket_%d" % t, {"name": "Jacket T%d" % t, "kind": "armor", "tier": t, "armor": 0.08 + 0.07 * (t - 1), "value": 35 * t})
 		_add_recipe("jacket_%d" % t, "jacket_%d" % t, 1, {"cloth_%d" % t: 4}, "workbench", 5.0)
+		# Environmental armor for expedition gatherers: better insulation than
+		# combat jackets, but weaker against attacks of the same tier.
+		if t >= 2:
+			var storm_id: String = "storm_coat_%d" % t
+			var cold_protection: float = 0.55 if t == 2 else (0.67 if t == 3 else 0.78)
+			_add_item(storm_id, {"name": "Expedition Stormcoat T%d" % t,
+				"kind": "armor", "tier": t, "armor": 0.05 + 0.07 * float(t - 1),
+				"insulation": cold_protection, "weight": 3.4 + 0.3 * float(t),
+				"value": 48 * t})
+			_add_recipe(storm_id, storm_id, 1,
+				{"cloth_%d" % t: 6, "fiber_%d" % t: 4},
+				"workbench", 6.0 + float(t))
 	# Consumables.
 	# Shore fishing: scavenging food supports the classless artisan loop.
 	_add_item("fishing_rod", {"name": "Fishing Rod", "kind": "tool", "tool": "fishing",

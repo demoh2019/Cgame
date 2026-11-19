@@ -835,6 +835,12 @@ func _update_hud() -> void:
 		weight, speed_pct, survivor.inventory.count("silver"),
 		Contracts.description(survivor.contract_state), ", ".join(rows)
 	]
+	var local_armor: String = survivor.inventory.armor
+	if local_armor != "" and survivor.inventory.count(local_armor) <= 0:
+		local_armor = ""
+	_stats.text += "\nSTORM INSULATION %d%% | %s" % [
+		int(round(100.0 * Weather.protection(local_armor))),
+		str(Defs.item(local_armor).get("name", "No armor"))]
 	_stats.text += "\nSURVIVOR RENOWN %s %d / %d | Hub supply discount %d%%" % [
 		Reputation.title(survivor.renown), survivor.renown,
 		Reputation.next_threshold(survivor.renown),

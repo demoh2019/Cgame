@@ -1815,3 +1815,29 @@ lifetime are sent to nearby clients; both clients render a small yellow lure.
 zombie investigation, active combat and boss immunity, privacy, interest
 filtering, and cleanup. Existing Cgame simulation, world geometry and
 rendering APIs cover the feature without a native engine change.
+
+
+## T2–T4 expedition stormcoats (weather-versus-combat loadouts)
+
+Survivors can now craft **Expedition Stormcoats T2–T4** at the normal
+workbench using **six matching-tier cloth and four matching-tier fiber**.
+Higher tiers require matching server-owned crafting mastery. Coats are
+equippable, storable, tradeable, and can be dropped under existing full-loot
+rules, just like other armor.
+
+Ordinary jackets and raid armor retain their existing **35% weather
+insulation**. Expedition coats instead provide **55% (T2), 67% (T3), or
+78% (T4)** storm insulation, while reducing ordinary attack mitigation
+by three percentage points compared with a same-tier combat jacket.
+They use the existing exclusive armor slot, so players must choose a
+mountain/storm expedition loadout or their optimal PvP combat defense.
+
+The actual game server verifies that the equipped coat still exists in
+the backpack before granting any weather protection; a ghost equipment
+slot cannot manufacture warmth. Both the local and connected HUDs display
+the selected insulation percentage. Cold exposure, heat packs, campfires,
+biome temperatures, shelter and death remain controlled by existing rules.
+
+New `test_stormcoats.gd` checks every tier, recipe costs, profession gates,
+real server cold exposure, owner snapshots and stale-item exploit prevention.
+This game-layer expansion needs no changes to Cgame's native engine code.
