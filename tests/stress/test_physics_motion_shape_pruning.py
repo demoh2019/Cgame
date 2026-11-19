@@ -64,6 +64,30 @@ class MotionShapePruningContracts(unittest.TestCase):
         self.assertNotIn(", motion_aabb, &sep_axis)", cpp)
         self.assertNotIn(", motion_aabb, &sep)", cpp)
 
+    def test_dense_one_way_recovery_keeps_every_pair_and_compound_slot(self):
+        cpp = self.source["2d"]
+        header = self.headers["2d"]
+        self.assertIn("int local_shape_index = 0;", header)
+        self.assertNotIn("GodotShape2D *local_shape =", header)
+        self.assertIn("INLINE_EXCLUDED_SHAPE_PAIRS = 32", cpp)
+        self.assertIn("LocalVector<ExcludedShapeSW> excluded_shape_overflow;", cpp)
+        self.assertIn("excluded_shape_overflow.clear();", cpp)
+        self.assertIn("excluded_shape_overflow.push_back(esp);", cpp)
+        self.assertIn("++excluded_shape_pair_count;", cpp)
+        self.assertIn("esp.local_shape_index = j;", cpp)
+        self.assertIn("pair.local_shape_index == body_shape_idx", cpp)
+        self.assertIn("pair.local_shape_index == j", cpp)
+        self.assertNotIn("max_excluded_shape_pairs", cpp)
+        script = (STRESS / "physics_one_way_overflow_2d.gd").read_text(encoding="utf-8")
+        self.assertIn("var platform_count := 64 + 32 * mini(scale, 8)", script)
+        self.assertIn("body_set_shape_as_one_way_collision", script)
+        self.assertIn("one_way_overflow_verified", script)
+        self.assertIn("compound_shared_shape_verified", script)
+        runner = (STRESS / "run.py").read_text(encoding="utf-8")
+        stress = (STRESS / "stress.gd").read_text(encoding="utf-8")
+        self.assertIn('"physics_one_way_overflow_2d"', runner)
+        self.assertIn('"physics_one_way_overflow_2d":', stress)
+
     def test_dense_sparse_offset_rotated_and_compound_regressions(self):
         project = (STRESS / "project.godot").read_text(encoding="utf-8")
         runner = (STRESS / "run.py").read_text(encoding="utf-8")
