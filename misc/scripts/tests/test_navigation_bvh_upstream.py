@@ -71,5 +71,45 @@ class NavigationBVHContracts(unittest.TestCase):
                 self.assertIn(text, src)
 
 
+
+    def test_hotpath_avoids_sqrt_for_aabb_nodes(self):
+        for dim in ("2d", "3d"):
+            with self.subTest(dimension=dim):
+                src = load(f"modules/navigation_{dim}/{dim}/nav_polygon_bvh_{dim}.h")
+                self.assertNotIn("Math::sqrt(_distance_squared(", src)
+                self.assertIn("prune_distance_sq = prune_distance * prune_distance;", src)
+                self.assertIn("_distance_squared(p_point, node.bounds) > prune_distance_sq", src)
+
+    def test_hotpath_sorts_child_bounds_without_sqrt(self):
+        for dim in ("2d", "3d"):
+            with self.subTest(dimension=dim):
+                src = load(f"modules/navigation_{dim}/{dim}/nav_polygon_bvh_{dim}.h")
+                self.assertIn("left_distance_sq = _distance_squared(", src)
+                self.assertIn("right_distance_sq = _distance_squared(", src)
+                self.assertIn("left_distance_sq < right_distance_sq", src)
+
+    def test_hotpath_preserves_rounding_slack_for_tied_polygons(self):
+        for dim in ("2d", "3d"):
+            with self.subTest(dimension=dim):
+                src = load(f"modules/navigation_{dim}/{dim}/nav_polygon_bvh_{dim}.h")
+                self.assertIn("r_distance + CMP_EPSILON", src)
+                self.assertGreaterEqual(src.count("<= prune_distance_sq"), 4)
+
+    def test_extended_native_query_and_memory_regressions(self):
+        src = load("tests/servers/test_nav_polygon_bvh.cpp")
+        self.assertEqual(src.count("TEST_CASE("), 16)
+        for marker in ("Large grid matches original polygon scan",
+                       "Equal-distance ties retain original polygon order",
+                       "Rebuilding smaller input releases BVH memory",
+                       "Existing better match is not overwritten"):
+            self.assertEqual(src.count(marker), 2)
+
+    def test_native_benchmarks_report_both_dimensions_and_memory(self):
+        src = load("tests/servers/test_nav_polygon_bvh.cpp")
+        self.assertIn("Navigation 2D BVH endpoint benchmark", src)
+        self.assertIn("Navigation 3D BVH endpoint benchmark", src)
+        self.assertEqual(src.count("x 512 queries:"), 2)
+        self.assertEqual(src.count("get_size_bytes()"), 12)
+
 if __name__ == "__main__":
     unittest.main()

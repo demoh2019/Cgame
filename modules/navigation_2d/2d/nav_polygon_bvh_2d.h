@@ -156,7 +156,9 @@ public:
 			const Node &node = nodes[search_index];
 			// Allow rounding slack when pruning to retain potentially equal-distance candidates.
 			const real_t prune_distance = r_distance + CMP_EPSILON;
-			if (Math::sqrt(_distance_squared(p_point, node.bounds)) > prune_distance) {
+			// Squared comparisons remove three square roots per internal BVH node.
+			const real_t prune_distance_sq = prune_distance * prune_distance;
+			if (_distance_squared(p_point, node.bounds) > prune_distance_sq) {
 				continue;
 			}
 			if (node.count != 0) {
@@ -170,23 +172,23 @@ public:
 				const uint32_t right_index = node.right_or_first;
 				const Node &left_node = nodes[left_index];
 				const Node &right_node = nodes[right_index];
-				const real_t left_distance = Math::sqrt(_distance_squared(p_point, left_node.bounds));
-				const real_t right_distance = Math::sqrt(_distance_squared(p_point, right_node.bounds));
+				const real_t left_distance_sq = _distance_squared(p_point, left_node.bounds);
+				const real_t right_distance_sq = _distance_squared(p_point, right_node.bounds);
 				DEV_ASSERT(stack_top + 2 <= STACK_SIZE);
 				// Push the farther child first to visit the nearer child and tighten the bound first.
-				if (left_distance < right_distance) {
-					if (right_distance <= prune_distance) {
+				if (left_distance_sq < right_distance_sq) {
+					if (right_distance_sq <= prune_distance_sq) {
 						search_stack[stack_top++] = right_index;
 					}
-					if (left_distance <= prune_distance) {
+					if (left_distance_sq <= prune_distance_sq) {
 						search_stack[stack_top++] = left_index;
 					}
 
 				} else {
-					if (left_distance <= prune_distance) {
+					if (left_distance_sq <= prune_distance_sq) {
 						search_stack[stack_top++] = left_index;
 					}
-					if (right_distance <= prune_distance) {
+					if (right_distance_sq <= prune_distance_sq) {
 						search_stack[stack_top++] = right_index;
 					}
 				}

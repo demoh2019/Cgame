@@ -7,6 +7,7 @@ on:
       - "modules/navigation_2d/**"
       - "modules/navigation_3d/**"
       - "tests/servers/test_navigation_polygon_bvh.cpp"
+      - "tests/servers/test_nav_polygon_bvh.cpp"
       - "misc/scripts/tests/test_navigation_bvh_upstream.py"
       - ".github/workflows/navigation-bvh-performance.yml"
   push:
@@ -15,6 +16,7 @@ on:
       - "modules/navigation_2d/**"
       - "modules/navigation_3d/**"
       - "tests/servers/test_navigation_polygon_bvh.cpp"
+      - "tests/servers/test_nav_polygon_bvh.cpp"
       - "misc/scripts/tests/test_navigation_bvh_upstream.py"
       - ".github/workflows/navigation-bvh-performance.yml"
   workflow_dispatch:
