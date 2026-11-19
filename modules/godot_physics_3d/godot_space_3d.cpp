@@ -1361,6 +1361,15 @@ GodotSpace3D::GodotSpace3D() {
 	soft_body_tetra_fem_lumped_mass = bool(GLOBAL_GET("physics/3d/solver/soft_body_tetra_fem_lumped_mass"));
 	const real_t configured_tetra_poisson = GLOBAL_GET("physics/3d/solver/soft_body_tetra_fem_poisson_ratio");
 	soft_body_tetra_fem_poisson_ratio = Math::is_finite(configured_tetra_poisson) ? CLAMP(configured_tetra_poisson, real_t(0.0), real_t(0.49)) : real_t(0.3);
+	const real_t configured_principal_min = GLOBAL_GET("physics/3d/solver/soft_body_tetra_principal_min_stretch");
+	soft_body_tetra_principal_min_stretch = Math::is_finite(configured_principal_min) ?
+			CLAMP(configured_principal_min, real_t(0.0), real_t(1.0)) : real_t(0.0);
+	const real_t configured_principal_max = GLOBAL_GET("physics/3d/solver/soft_body_tetra_principal_max_stretch");
+	soft_body_tetra_principal_max_stretch = Math::is_finite(configured_principal_max) && configured_principal_max > 0.0 ?
+			CLAMP(configured_principal_max, real_t(1.0), real_t(16.0)) : real_t(0.0);
+	const real_t configured_principal_compliance = GLOBAL_GET("physics/3d/solver/soft_body_tetra_principal_limit_compliance");
+	soft_body_tetra_principal_limit_compliance = Math::is_finite(configured_principal_compliance) ?
+			MAX(real_t(0.0), configured_principal_compliance) : real_t(0.0);
 	const int configured_tetra_material_model = GLOBAL_GET("physics/3d/solver/soft_body_tetra_fem_material_model");
 	soft_body_tetra_fem_material_model = CLAMP(configured_tetra_material_model, 0, 2);
 	const real_t configured_tetra_ogden_exponent = GLOBAL_GET("physics/3d/solver/soft_body_tetra_ogden_exponent");

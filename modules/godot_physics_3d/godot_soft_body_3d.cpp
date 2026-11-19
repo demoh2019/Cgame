@@ -45,6 +45,7 @@
 #include "servers/physics_fem_tetra_neo_hookean.h"
 #include "servers/physics_fem_tetra_mooney_rivlin.h"
 #include "servers/physics_fem_tetra_ogden.h"
+#include "servers/physics_fem_tetra_principal_limits.h"
 #include "servers/physics_fem_lumped_mass.h"
 #include "servers/physics_fem_tetra_fiber.h"
 #include "servers/physics_fem_tetra_fiber_plasticity.h"
@@ -557,6 +558,7 @@ void GodotSoftBody3D::initialize_fem_tetra() {
 	const bool previously_lumped = !xpbd_fem_mass_fractions.is_empty();
 	xpbd_fem_tetrahedra.reset();
 	xpbd_fem_fiber_lambdas.reset();
+	xpbd_fem_principal_lambdas.reset();
 	xpbd_fem_fiber_plastic_rest_stretches.reset();
 	xpbd_fem_damage.reset();
 	xpbd_fem_mass_fractions.reset();
@@ -3480,6 +3482,12 @@ void GodotSoftBody3D::solve_constraints(real_t p_delta) {
 	const double fem_alpha = p_delta > 0.0 ? fem_compliance / (double(p_delta) * double(p_delta)) : 0.0;
 	const bool use_fem = !xpbd_fem_tetrahedra.is_empty() && fem_compliance > 0.0 && p_delta > 0.0 &&
 			Math::is_finite(fem_alpha) && fem_alpha > 0.0;
+	const double fem_principal_min = get_space() ? double(get_space()->get_soft_body_tetra_principal_min_stretch()) : 0.0;
+	const double fem_principal_max = get_space() ? double(get_space()->get_soft_body_tetra_principal_max_stretch()) : 0.0;
+	const double fem_principal_compliance = get_space() ? double(get_space()->get_soft_body_tetra_principal_limit_compliance()) : 0.0;
+	const double fem_principal_alpha = p_delta > 0.0 ? fem_principal_compliance / (double(p_delta) * double(p_delta)) : 0.0;
+	const bool use_fem_principal = use_fem && (fem_principal_min > 0.0 || fem_principal_max > 0.0) &&
+			Math::is_finite(fem_principal_alpha) && fem_principal_alpha >= 0.0;
 	const double fem_poisson = get_space() ? double(get_space()->get_soft_body_tetra_fem_poisson_ratio()) : 0.3;
 	const bool fem_mooney_rivlin = get_space() && get_space()->get_soft_body_tetra_fem_material_model() == 1;
 	const bool fem_ogden = get_space() && get_space()->get_soft_body_tetra_fem_material_model() == 2;
@@ -3664,6 +3672,17 @@ void GodotSoftBody3D::solve_constraints(real_t p_delta) {
 			tetra.lambda = 0.0;
 		}
 	}
+	// The two unilateral singular-value constraints keep one pair of
+	// multipliers per cooked tetra, persisting only within this physics tick.
+	if (use_fem_principal) {
+		xpbd_fem_principal_lambdas.resize(xpbd_fem_tetrahedra.size());
+		for (PhysicsFEMTetraPrincipalLambdas &lambda : xpbd_fem_principal_lambdas) {
+			lambda.minimum = 0.0;
+			lambda.maximum = 0.0;
+		}
+	} else if (!xpbd_fem_principal_lambdas.is_empty()) {
+		xpbd_fem_principal_lambdas.reset();
+	}
 	// Fiber multipliers are per-tet and persist only within the current
 	// step. The default 0 compliance allocates no scratch or solver work.
 	if (use_fem_fiber) {
@@ -3792,6 +3811,19 @@ void GodotSoftBody3D::solve_constraints(real_t p_delta) {
 					physics_fem_tetra_solve(a.x, b.x, c.x, d.x,
 							a.im, b.im, c.im, d.im,
 							tetra.rest, fem_poisson, local_alpha, tetra.lambda);
+				}
+				if (use_fem_principal) {
+					PhysicsFEMTetraPrincipalLambdas &lambda = xpbd_fem_principal_lambdas[i];
+					if (fem_principal_max > 0.0) {
+						physics_fem_tetra_principal_solve(a.x, b.x, c.x, d.x,
+								a.im, b.im, c.im, d.im, tetra.rest,
+								false, fem_principal_max, fem_principal_alpha, lambda.maximum);
+					}
+					if (fem_principal_min > 0.0) {
+						physics_fem_tetra_principal_solve(a.x, b.x, c.x, d.x,
+								a.im, b.im, c.im, d.im, tetra.rest,
+								true, fem_principal_min, fem_principal_alpha, lambda.minimum);
+					}
 				}
 			}
 		}
@@ -4094,6 +4126,7 @@ void GodotSoftBody3D::destroy() {
 	xpbd_volume_original_rest = 0.0;
 	xpbd_fem_tetrahedra.reset();
 	xpbd_fem_fiber_lambdas.reset();
+	xpbd_fem_principal_lambdas.reset();
 	xpbd_fem_fiber_plastic_rest_stretches.reset();
 	xpbd_fem_damage.reset();
 	xpbd_fem_mass_fractions.reset();
