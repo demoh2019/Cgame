@@ -2143,6 +2143,17 @@ func snapshot_for(peer_id: int) -> Dictionary:
 		"barricades": nearby_barricades, "campfires": nearby_campfires,
 		"depleted": gone_nodes, "crates_used": used_crates,
 	}
+	# Send a ground telegraph only to survivors close enough to see it.
+	# The server remains the sole authority on the slam center and deadline.
+	if not raid_pending_slam.is_empty():
+		var warning_at := Vector2(float(raid_pending_slam["x"]),
+			float(raid_pending_slam["z"]))
+		if here.distance_to(warning_at) <= Defs.INTEREST_RADIUS:
+			snapshot["raid_telegraph"] = {"id": int(raid_pending_slam["id"]),
+				"x": warning_at.x,
+				"y": world.height_at(warning_at.x, warning_at.y),
+				"z": warning_at.y, "radius": RaidEncounter.SLAM_RADIUS,
+				"until": float(raid_pending_slam["at"])}
 	if player.dirty_inventory:
 		snapshot["inventory"] = player.inventory.to_dict()
 		player.dirty_inventory = false
