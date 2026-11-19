@@ -100,10 +100,11 @@ func _test_file_lifecycle() -> void:
 func _test_diagnostics() -> void:
 	var main_path := "res://ai_generated/main.tscn"
 	var hero_path := "res://ai_generated/hero.gd"
-	var scene := '[gd_scene load_steps=2 format=3]' + "\n" + \
-			'[ext_resource type="Script" path="res://ai_generated/hero.gd" id="1_script"]' + "\n" + \
-			'[node name="Game" type="Node2D"]' + "\n" + \
-			'script = ExtResource("1_script")' + "\n"
+	var scene := """[gd_scene load_steps=2 format=3]
+[ext_resource type="Script" path="res://ai_generated/hero.gd" id="1_script"]
+[node name="Game" type="Node2D"]
+script = ExtResource("1_script")
+"""
 	var correct := Validator.analyze_plan({"files": [
 		_file(main_path, scene),
 		_file(hero_path, "extends Node2D\n")
@@ -163,9 +164,7 @@ func _test_diagnostics() -> void:
 		DirAccess.remove_absolute(ProjectSettings.globalize_path(on_disk_path))
 	var created := Plan.apply({"files": [_file(on_disk_path, "extends Node\n")]})
 	_check(created["ok"], "creates a resource for disk reference tests")
-	var disk_scene := '[gd_scene format=3]' + "\n" + \
-			'[ext_resource type="Script" path="' + on_disk_path + '" id="1"]' + "\n" + \
-			'[node name="Root" type="Node"]' + "\n"
+	var disk_scene := '[gd_scene format=3]\n[ext_resource type="Script" path="%s" id="1"]\n[node name="Root" type="Node"]\n' % on_disk_path
 	var file_exists_report := Validator.analyze_plan({"files": [_file(main_path, disk_scene)]})
 	_check(file_exists_report["ok"], "references to unchanged resources on disk are accepted")
 	var saved := Validator.analyze_saved()
