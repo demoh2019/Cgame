@@ -1,0 +1,39 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<class name="HeightmapTerrain3D" inherits="MeshInstance3D" api_type="core" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="../../../doc/class.xsd">
+    <brief_description>
+        Renders and edits a simple heightmap-based landscape.
+    </brief_description>
+    <description>
+        Generates a triangle mesh from a [TerrainHeightmap], including normals, UVs, and vertex colors. The editor provides a brush toolbar for raising, lowering, and coloring the terrain with Undo/Redo. The generated mesh is regenerated when height or color data changes.
+        [b]Note:[/b] The current implementation is intended for small meshes only, as editing any sample rebuilds the entire mesh. Physics collision, tiled LOD, foliage, and world streaming are not generated automatically.
+    </description>
+    <tutorials>
+    </tutorials>
+    <methods>
+        <method name="build_mesh" qualifiers="const">
+            <return type="ArrayMesh" />
+            <description>
+                Generates an independent mesh from the current heightmap.
+            </description>
+        </method>
+        <method name="sample_height_local" qualifiers="const">
+            <return type="float" />
+            <param index="0" name="x" type="float" />
+            <param index="1" name="z" type="float" />
+            <description>
+                Samples the height at local 3D coordinates, accounting for [member cell_size].
+            </description>
+        </method>
+    </methods>
+    <members>
+        <member name="cell_size" type="float" setter="set_cell_size" getter="get_cell_size" default="1.0">
+            Distance in local units between adjacent samples.
+        </member>
+        <member name="heightmap" type="TerrainHeightmap" setter="set_heightmap" getter="get_heightmap">
+            Heightmap resource from which the mesh is generated.
+        </member>
+        <member name="terrain_material" type="Material" setter="set_terrain_material" getter="get_terrain_material">
+            Optional material assigned to the generated surface. By default, a standard material displays the painted vertex colors.
+        </member>
+    </members>
+</class>
