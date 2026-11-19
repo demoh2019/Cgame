@@ -33,6 +33,7 @@
 #include "../world_partition_3d.h"
 
 #include "core/config/project_settings.h"
+#include "core/math/math_funcs.h"
 #include "core/io/dir_access.h"
 #include "core/io/resource_saver.h"
 #include "core/os/os.h"
@@ -297,6 +298,8 @@ TEST_CASE("[SceneTree][WorldPartition3D] Stream one authored PackedScene and unl
 	partition->set_unload_radius(1);
 	partition->set_observer_path(partition->get_path_to(observer));
 	partition->set_cell_scene(Vector2i(0, 0), path);
+	Node3D *authored_child = memnew(Node3D);
+	partition->add_child(authored_child);
 
 	for (int i = 0; i < 2000 && !partition->is_cell_loaded(Vector2i(0, 0)); i++) {
 		partition->update_streaming();
@@ -304,15 +307,76 @@ TEST_CASE("[SceneTree][WorldPartition3D] Stream one authored PackedScene and unl
 	}
 	CHECK(partition->is_cell_loaded(Vector2i(0, 0)));
 	CHECK(partition->get_loaded_cell_count() == 1);
+	CHECK(partition->get_child_count() == 2);
+
+	// Hysteresis: do not unload a cell when it has left the load radius
+	// but is still within the larger unload radius.
+	observer->set_position(Vector3(16, 0, 0));
+	partition->update_streaming();
+	CHECK(partition->is_cell_loaded(Vector2i(0, 0)));
+	CHECK(partition->get_loaded_cell_count() == 1);
+
 	observer->set_position(Vector3(64, 0, 0));
 	partition->update_streaming();
 	CHECK_FALSE(partition->is_cell_loaded(Vector2i(0, 0)));
 	CHECK(partition->get_loaded_cell_count() == 0);
+	CHECK(partition->get_child_count() == 1);
+	CHECK(partition->get_child(0) == authored_child);
 
 	SceneTree::get_singleton()->get_root()->remove_child(partition);
 	SceneTree::get_singleton()->get_root()->remove_child(observer);
 	memdelete(partition);
 	memdelete(observer);
+	CHECK(DirAccess::remove_absolute(path) == OK);
+}
+
+
+TEST_CASE("[SceneTree][WorldPartition3D] Automatic streaming respects transforms and authored offsets") {
+	Node3D *template_root = memnew(Node3D);
+	template_root->set_position(Vector3(2, 3, 5));
+	Ref<PackedScene> packed;
+	packed.instantiate();
+	REQUIRE(packed->pack(template_root) == OK);
+	memdelete(template_root);
+
+	const String path = "user://world_partition_transform_doctest_" + itos(OS::get_singleton()->get_process_id()) + ".tscn";
+	REQUIRE(ResourceSaver::save(packed, path) == OK);
+
+	Node3D *parent = memnew(Node3D);
+	WorldPartition3D *partition = memnew(WorldPartition3D);
+	Node3D *observer = memnew(Node3D);
+	observer->set_name("Observer");
+	parent->add_child(partition);
+	parent->add_child(observer);
+	SceneTree::get_singleton()->get_root()->add_child(parent);
+
+	partition->set_cell_size(16);
+	partition->set_load_radius(0);
+	partition->set_unload_radius(0);
+	partition->set_position(Vector3(100, 0, 25));
+	partition->set_rotation(Vector3(0, Math::PI / 2, 0));
+	observer->set_global_position(partition->to_global(Vector3(20, 0, -4)));
+	partition->set_observer_path(partition->get_path_to(observer));
+	partition->set_cell_scene(Vector2i(1, -1), path);
+
+	// Drive actual SceneTree processing, rather than calling update_streaming.
+	for (int i = 0; i < 2000 && !partition->is_cell_loaded(Vector2i(1, -1)); i++) {
+		SceneTree::get_singleton()->process(0);
+		OS::get_singleton()->delay_usec(1000);
+	}
+	REQUIRE(partition->is_cell_loaded(Vector2i(1, -1)));
+	REQUIRE_EQ(partition->get_child_count(), 1);
+	Node3D *loaded = Object::cast_to<Node3D>(partition->get_child(0));
+	REQUIRE(loaded != nullptr);
+	CHECK(loaded->get_position().is_equal_approx(Vector3(18, 3, -11)));
+
+	observer->set_global_position(partition->to_global(Vector3(64, 0, -4)));
+	SceneTree::get_singleton()->process(0);
+	CHECK_FALSE(partition->is_cell_loaded(Vector2i(1, -1)));
+	CHECK_EQ(partition->get_loaded_cell_count(), 0);
+
+	SceneTree::get_singleton()->get_root()->remove_child(parent);
+	memdelete(parent);
 	CHECK(DirAccess::remove_absolute(path) == OK);
 }
 
