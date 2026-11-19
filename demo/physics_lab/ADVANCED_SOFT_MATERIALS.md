@@ -135,6 +135,53 @@ GodotPhysics3D внутри проекта, не для отдельного Sof
 не FEM-модель трещин и **не физический разрыв сетки**.
 Топология тела не меняется, поведение Jolt/2D не затрагивается.
 
+## Анизотропный изгиб ткани (warp/weft bending)
+
+Новое расширение нативного XPBD-солвера позволяет независимо
+настраивать **направленный изгиб** относительно той же оси волокон,
+которая уже используется для направленного растяжения.
+
+```ini
+[physics]
+
+3d/physics_engine="GodotPhysics3D"
+3d/solver/soft_body_xpbd_material_axis=Vector3(1, 0, 0)
+3d/solver/soft_body_xpbd_dihedral_compliance=0.00001
+3d/solver/soft_body_xpbd_bend_parallel_compliance_ratio=0.2
+```
+
+- `soft_body_xpbd_dihedral_compliance` — существующая базовая
+  податливость сгибов. Должна быть **больше нуля**, чтобы XPBD создал
+  угловые ограничения между соседними треугольниками.
+- `soft_body_xpbd_bend_parallel_compliance_ratio` — **новый** параметр.
+  `1.0` по умолчанию сохраняет исходный изотропный изгиб;
+  `0.2` делает сгибы вокруг линии, параллельной оси волокон, более
+  жёсткими; `3.0` делает их мягче. Диапазон `0.01..100`.
+- Ориентация линии сгиба определяется только **исходными локальными
+  координатами сетки** (не текущими мировыми координатами). Поэтому
+  поворот и деформация объекта не меняют структуру материала.
+- Для промежуточных углов используется плавная интерполяция
+  `cos²` между параллельной и перпендикулярной податливостью.
+- Направленное растяжение имеет **собственную независимую настройку**
+  `soft_body_xpbd_parallel_compliance_ratio`, поэтому можно
+  смоделировать ткань, которая плохо растягивается, но легко сгибается,
+  или наоборот.
+- Не выделяется отдельный массив на каждую итерацию: коэффициент
+  ориентации сохраняется **один раз при построении шарнира**.
+  В отключённом режиме не выполняется дополнительное умножение в
+  горячем цикле XPBD.
+- Совместимо с существующей пластичностью изгиба, которая меняет
+  равновесный угол шарнира, но не направление волокон. Модель применима
+  к сеткам с корректно ориентированными соседними треугольниками.
+
+Для наглядного A/B-сравнения в `demo/physics_lab/project.godot`
+переключайте `soft_body_xpbd_bend_parallel_compliance_ratio`
+между `0.2` и `1.0` при неизменном шаге и геометрии.
+
+Это **приближённая ортотропная модель на дискретных угловых
+шарнирах**. Она не является полноценной нелинейной оболочечной FEM
+моделью, не учитывает скручивание Cosserat-стержней и не влияет на Jolt.
+
 ## Контракты и тесты
 
 ```bash
@@ -142,6 +189,7 @@ python3 -m unittest discover -s tests/stress -p 'test_physics_softbody_nonlinear
 python3 -m unittest discover -s tests/stress -p 'test_physics_xpbd_tension_hardening.py' -v
 python3 -m unittest discover -s tests/stress -p 'test_physics_softbody_link_damping.py' -v
 python3 -m unittest discover -s tests/stress -p 'test_physics_xpbd_anisotropic_stretch.py' -v
+python3 -m unittest discover -s tests/stress -p 'test_physics_xpbd_orthotropic_bending.py' -v
 python3 -m unittest discover -s tests/stress -p 'test_physics_softbody_fatigue_damage.py' -v
 ```
 
