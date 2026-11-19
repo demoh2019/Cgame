@@ -31,6 +31,7 @@
 #pragma once
 
 #include "core/io/resource.h"
+#include "core/templates/local_vector.h"
 #include "core/variant/typed_array.h"
 #include "core/variant/variant.h"
 
