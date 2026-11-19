@@ -97,6 +97,7 @@ def select_rod_triplets(positions, triangles, straightness=0.9):
         used = set()
         for _ in range(2):
             best_score = straightness
+            best_length_squared = math.inf
             choice = None
             for i in range(len(adjacent)):
                 if adjacent[i] in used:
@@ -109,8 +110,14 @@ def select_rod_triplets(positions, triangles, straightness=0.9):
                     if norm(u) < 1e-12 or norm(v) < 1e-12:
                         continue
                     alignment = -dot(u, v)/norm(u)/norm(v)
-                    if alignment > best_score:
-                        best_score, choice = alignment, (adjacent[i], adjacent[j])
+                    length_squared = dot(u, u) + dot(v, v)
+                    if (alignment > best_score + 1e-9 or
+                            (alignment > straightness and
+                             alignment >= best_score - 1e-9 and
+                             length_squared < best_length_squared)):
+                        best_score = alignment
+                        best_length_squared = length_squared
+                        choice = (adjacent[i], adjacent[j])
             if choice is None:
                 break
             a, c = choice
