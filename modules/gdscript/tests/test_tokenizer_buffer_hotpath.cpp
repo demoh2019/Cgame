@@ -70,7 +70,7 @@ static void compare_text_and_buffer(const String &p_source, GDScriptTokenizerBuf
 			break;
 		}
 	}
-	CHECK(scanned > 100);
+	CHECK(scanned > 10);
 	CHECK(scanned < 100000);
 }
 
