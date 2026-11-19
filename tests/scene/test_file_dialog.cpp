@@ -178,4 +178,32 @@ TEST_CASE("[SceneTree][FileDialog] Native callbacks retain untranslated option k
 	CHECK(int(Dictionary(native_options[1])["default"]) == 1);
 }
 
+TEST_CASE("[SceneTree][FileDialog] Native callbacks accept untranslated option keys") {
+	NativeDialogFixture fixture;
+	fixture.install_translation();
+	fixture.translation_server->set_locale("es");
+	fixture.dialog->set_file_mode(FileDialog::FILE_MODE_OPEN_ANY);
+	fixture.dialog->add_option("Quality", { "Low", "High" }, 1);
+	fixture.show_native_dialog();
+
+	// A platform backend may return the original option key instead of its label.
+	Dictionary chosen;
+	chosen["Quality"] = 0;
+	chosen["Unknown option"] = 1;
+	Vector<String> files;
+	files.push_back("res://native-dialog-original-key.txt");
+	fixture.server->get_captured_native_dialog_callback().call(true, files, 0, chosen);
+
+	Dictionary selection = fixture.dialog->get_selected_options();
+	CHECK(selection.has("Quality"));
+	CHECK_FALSE(selection.has("Calidad"));
+	CHECK_FALSE(selection.has("Unknown option"));
+	CHECK(int(selection["Quality"]) == 0);
+
+	TypedArray<Dictionary> next_options = fixture.show_native_dialog();
+	REQUIRE(next_options.size() == 1);
+	CHECK(String(Dictionary(next_options[0])["name"]) == "Calidad");
+	CHECK(int(Dictionary(next_options[0])["default"]) == 0);
+}
+
 } // namespace TestFileDialog
