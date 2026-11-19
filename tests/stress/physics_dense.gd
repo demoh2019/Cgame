@@ -106,6 +106,37 @@ func run_3d(tree: SceneTree, scale: int, frames: int) -> Dictionary:
 			"frame_interval_ms": _frame_statistics(frame_intervals)}
 
 
+
+# Create and remove bodies *before* their first physics step. Jolt queues
+# these additions; without indexed removal this workload can become quadratic.
+func run_pending_3d(scale: int) -> Dictionary:
+	var space := PhysicsServer3D.space_create()
+	PhysicsServer3D.space_set_active(space, true)
+	var shape := PhysicsServer3D.sphere_shape_create()
+	PhysicsServer3D.shape_set_data(shape, 0.5)
+	var count := mini(512 * scale, 8192)
+	var bodies: Array[RID] = []
+	bodies.resize(count)
+	var creation_started := Time.get_ticks_usec()
+	for i in range(count):
+		var body := PhysicsServer3D.body_create()
+		PhysicsServer3D.body_add_shape(body, shape)
+		PhysicsServer3D.body_set_state(body, PhysicsServer3D.BODY_STATE_TRANSFORM,
+				Transform3D(Basis(), Vector3(float(i) * 4.0, 0.0, 0.0)))
+		PhysicsServer3D.body_set_param(body, PhysicsServer3D.BODY_PARAM_GRAVITY_SCALE, 0.0)
+		PhysicsServer3D.body_set_space(body, space)
+		bodies[i] = body
+	var create_ms := float(Time.get_ticks_usec() - creation_started) / 1000.0
+	var cleanup_started := Time.get_ticks_usec()
+	for body in bodies:
+		PhysicsServer3D.free_rid(body)
+	bodies.clear()
+	PhysicsServer3D.free_rid(shape)
+	PhysicsServer3D.free_rid(space)
+	var cleanup_ms := float(Time.get_ticks_usec() - cleanup_started) / 1000.0
+	return {"bodies": count, "create_ms": create_ms, "pending_cleanup_ms": cleanup_ms}
+
+
 func _frame_statistics(values: Array[float]) -> Dictionary:
 	var sorted_values := values.duplicate()
 	sorted_values.sort()
