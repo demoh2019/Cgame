@@ -62,9 +62,9 @@ int GodotPhysicsDirectSpaceState2D::intersect_point(const PS2DT::PointParameters
 		return 0;
 	}
 
-	// Keep the existing tiny AABB for 2D broadphase point queries, but
-	// examine candidates until enough *actual* hits survive all filters.
-	const Rect2 query_aabb(p_parameters.position - Vector2(0.00001, 0.00001), Vector2(0.00002, 0.00002));
+	// Query the BVH with the exact point, just as GodotPhysics 3D does.
+	// A tiny synthetic AABB also visits nearby proxies that cannot contain
+	// the point. The shape callback still applies exact containment and filters.
 	struct PointQuery {
 		const PS2DT::PointParameters &params;
 		PS2DT::ShapeResult *results;
@@ -98,7 +98,7 @@ int GodotPhysicsDirectSpaceState2D::intersect_point(const PS2DT::PointParameters
 		return data.count < data.max_results;
 	};
 
-	space->broadphase->visit_aabb(query_aabb, visitor, &query);
+	space->broadphase->visit_point(p_parameters.position, visitor, &query);
 	return query.count;
 }
 
