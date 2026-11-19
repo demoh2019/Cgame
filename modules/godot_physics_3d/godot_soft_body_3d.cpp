@@ -47,6 +47,7 @@
 #include "servers/physics_fem_tetra_fiber.h"
 #include "servers/physics_fem_tetra_viscosity.h"
 #include "servers/physics_fem_tetra_damage.h"
+#include "servers/physics_fem_tetra_inversion_recovery.h"
 #include "servers/physics_softbody_shape_clusters.h"
 #include "servers/physics_softbody_aerodynamic_drag.h"
 #include "servers/physics_softbody_plasticity.h"
@@ -3126,6 +3127,8 @@ void GodotSoftBody3D::solve_constraints(real_t p_delta) {
 	const bool use_fem_fiber = use_fem && fem_fiber_compliance > 0.0 &&
 			Math::is_finite(fem_fiber_alpha) && fem_fiber_alpha > 0.0;
 	const Vector3 fem_fiber_axis = get_space() ? get_space()->get_soft_body_tetra_fiber_axis() : Vector3(1, 0, 0);
+	const bool use_fem_inversion_recovery = use_fem && get_space()->is_soft_body_tetra_inversion_recovery_enabled();
+	const double fem_inversion_min_j = double(get_space()->get_soft_body_tetra_inversion_min_j());
 	const double volume_compliance = get_space() ? double(get_space()->get_soft_body_xpbd_volume_compliance()) : 0.0;
 	const double volume_alpha = p_delta > 0.0 ? volume_compliance / (double(p_delta) * double(p_delta)) : 0.0;
 	const bool use_volume_xpbd = xpbd_volume_closed && volume_compliance > 0.0 &&
@@ -3401,6 +3404,14 @@ void GodotSoftBody3D::solve_constraints(real_t p_delta) {
 				Node &b = nodes[tetra.b];
 				Node &c = nodes[tetra.c];
 				Node &d = nodes[tetra.d];
+				// Neo-Hookean log(J) has no valid gradient for J<=0. Repair
+				// strongly compressed or inverted elements first using a bounded,
+				// mass-weighted unilateral volume constraint. An intact element
+				// is untouched, as is the whole solver with recovery disabled.
+				if (use_fem_inversion_recovery) {
+					physics_fem_tetra_recover_orientation(a.x, b.x, c.x, d.x,
+							a.im, b.im, c.im, d.im, tetra.rest, fem_inversion_min_j);
+				}
 				double local_alpha = fem_alpha;
 				if (has_damage) {
 					PhysicsFEMTetraDamage::effective_compliance(
