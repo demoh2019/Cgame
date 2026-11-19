@@ -62,7 +62,7 @@ struct PhysicsPBFSurfaceTension3D {
 		const double spline = d * d * d * r3;
 		const double shape = (p_distance <= p_h * 0.5) ?
 				(2.0 * spline - h6 / 64.0) : spline;
-		const double result = (32.0 / (Math_PI * h9)) * shape;
+		const double result = (32.0 / (Math::PI * h9)) * shape;
 		const real_t coefficient = real_t(result);
 		return Math::is_finite(result) && Math::is_finite(coefficient) ?
 				coefficient : real_t(0.0);
