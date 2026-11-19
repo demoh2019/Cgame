@@ -3802,6 +3802,16 @@ void GodotSoftBody3D::solve_constraints(real_t p_delta) {
 			Math::is_finite(rod_alpha_double) && rod_alpha_double > 0.0;
 	const real_t rod_alpha = use_rod_bend_xpbd ? real_t(MIN(rod_alpha_double,
 			double(std::numeric_limits<real_t>::max()))) : real_t(0.0);
+	const double rod_torsion_compliance = get_space() ?
+			double(get_space()->get_soft_body_xpbd_rod_torsion_compliance()) : 0.0;
+	const double rod_torsion_alpha_double = p_delta > 0.0 ?
+			rod_torsion_compliance / (double(p_delta) * double(p_delta)) : 0.0;
+	const bool use_rod_torsion_xpbd = rod_torsion_compliance > 0.0 &&
+			!xpbd_rod_torsions.is_empty() && Math::is_finite(rod_torsion_alpha_double) &&
+			rod_torsion_alpha_double > 0.0;
+	const real_t rod_torsion_alpha = use_rod_torsion_xpbd ?
+			real_t(MIN(rod_torsion_alpha_double,
+					double(std::numeric_limits<real_t>::max()))) : real_t(0.0);
 	const double fem_compliance = get_space() ? double(get_space()->get_soft_body_tetra_fem_compliance()) : 0.0;
 	const double fem_alpha = p_delta > 0.0 ? fem_compliance / (double(p_delta) * double(p_delta)) : 0.0;
 	const bool use_fem = !xpbd_fem_tetrahedra.is_empty() && fem_compliance > 0.0 && p_delta > 0.0 &&
@@ -3994,6 +4004,13 @@ void GodotSoftBody3D::solve_constraints(real_t p_delta) {
 			rod.lambda = real_t(0.0);
 		}
 	}
+	// Signed geometric torsion has its own step-local XPBD multiplier:
+	// keep it across solver iterations, never across physics timesteps.
+	if (use_rod_torsion_xpbd) {
+		for (RodTorsionConstraint &torsion : xpbd_rod_torsions) {
+			torsion.lambda = real_t(0.0);
+		}
+	}
 	if (use_volume_xpbd) {
 		// Reuse scratch at every iteration; one volume scalar lambda per step.
 		xpbd_volume_gradients.resize(nodes.size());
@@ -4136,6 +4153,17 @@ void GodotSoftBody3D::solve_constraints(real_t p_delta) {
 				Node &c = nodes[rod.c];
 				physics_xpbd_solve_rod_bend(a.x, middle.x, c.x,
 						a.im, middle.im, c.im, rod.rest_angle, rod_alpha, rod.lambda);
+			}
+		}
+		if (use_rod_torsion_xpbd) {
+			for (RodTorsionConstraint &torsion : xpbd_rod_torsions) {
+				Node &a = nodes[torsion.a];
+				Node &b = nodes[torsion.b];
+				Node &c = nodes[torsion.c];
+				Node &d = nodes[torsion.d];
+				physics_xpbd_solve_rod_geometric_torsion(a.x, b.x, c.x, d.x,
+							a.im, b.im, c.im, d.im,
+							torsion.rest_angle, rod_torsion_alpha, torsion.lambda);
 			}
 		}
 		if (shape_matching_iteration_strength > 0.0) {
@@ -4482,6 +4510,7 @@ void GodotSoftBody3D::destroy() {
 	xpbd_dihedral_hinges.reset();
 	xpbd_dihedral_lambdas.reset();
 	xpbd_rod_bends.reset();
+	xpbd_rod_torsions.reset();
 	xpbd_shape_rest_offsets.reset();
 	xpbd_shape_clusters.reset();
 	xpbd_shape_cluster_members.reset();
