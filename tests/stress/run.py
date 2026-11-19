@@ -37,6 +37,7 @@ CASES = (
     "resource_io", "astar_3d", "thread_contention",
     "geometry_2d", "mesh_build", "input_dispatch", "image_codec", "group_calls",
     "packed_arrays", "sorting", "animation_tracks", "physics_raycast_2d", "physics_raycast_3d", "render_multimesh_3d",
+    "scene_reparent", "resource_roundtrip", "audio_bus_churn",
 )
 RENDER_CASES = frozenset(("render_2d", "render_3d", "render_multimesh_3d"))
 # Each scenario runs in a fresh process. No preset has unlimited RSS or wall time.
