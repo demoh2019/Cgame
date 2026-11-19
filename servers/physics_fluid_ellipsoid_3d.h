@@ -29,6 +29,7 @@
 
 #pragma once
 
+#include "core/math/transform_3d.h"
 #include "servers/physics_fluid_buoyancy_3d.h"
 
 // Exact hydrostatic volume and buoyancy centroid for any non-degenerate
@@ -75,7 +76,7 @@ _FORCE_INLINE_ bool godot_physics_fluid_affine_ellipsoid_sample_3d(
 	const double determinant = ax * (by * cz - bz * cy) +
 			bx * (cy * az - cz * ay) + cx * (ay * bz - az * by);
 	const double radius = double(p_local_radius);
-	const double total_volume = (4.0 / 3.0) * double(Math_PI) *
+	const double total_volume = (4.0 / 3.0) * double(Math::PI) *
 			radius * radius * radius * Math::abs(determinant);
 	const double height = radius * Math::sqrt(vertical_squared);
 	if (!(vertical_squared > 0.0) || !(height > 0.0) ||
