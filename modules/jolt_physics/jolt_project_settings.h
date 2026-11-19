@@ -57,6 +57,9 @@ public:
 	// Used when constructing a soft body; existing bodies retain their constraints.
 	inline static int soft_body_bend_mode = 0;
 	inline static float soft_body_bend_compliance = 0.001f;
+	// Optional anisotropic XPBD textile stiffness in rest-pose local axes.
+	inline static int soft_body_fiber_axis = 0;
+	inline static float soft_body_fiber_compliance_multiplier = 1.0f;
 	// Opt-in long-range cloth attachments to pinned vertices; new meshes only.
 	inline static int soft_body_lra_mode = 0;
 	inline static float soft_body_lra_max_distance_multiplier = 1.05f;
