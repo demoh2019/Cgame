@@ -39,7 +39,7 @@
 //
 // Only use this fast path when both shapes have fixed orientations during
 // the sweep and their local bounds conservatively cover their geometry.
-_FORCE_INLINE_ bool physics_ccd_swept_bounds_may_overlap(const Rect2 &p_moving, const Rect2 &p_target, const Vector2 &p_relative_motion) {
+_FORCE_INLINE_ bool physics_ccd_swept_bounds_may_overlap(const Rect2 &p_moving, const Rect2 &p_target, const Vector2 &p_relative_motion, real_t p_backtrack_fraction = 0.0) {
 	if (!p_moving.is_finite() || !p_target.is_finite() || !p_relative_motion.is_finite() ||
 			p_moving.size.x < 0.0 || p_moving.size.y < 0.0 ||
 			p_target.size.x < 0.0 || p_target.size.y < 0.0) {
@@ -49,7 +49,13 @@ _FORCE_INLINE_ bool physics_ccd_swept_bounds_may_overlap(const Rect2 &p_moving, 
 	if (!translated.is_finite()) {
 		return true;
 	}
-	const Rect2 swept = p_moving.merge(translated);
+	// The legacy support rays start slightly behind the body. Include
+	// the same lead-in so the fast path cannot discard such a ray hit.
+	const Rect2 backtracked(p_moving.position - p_relative_motion * p_backtrack_fraction, p_moving.size);
+	if (!backtracked.is_finite()) {
+		return true;
+	}
+	const Rect2 swept = p_moving.merge(translated).merge(backtracked);
 	const Vector2 moving_end = swept.get_end();
 	const Vector2 target_end = p_target.get_end();
 	if (!swept.is_finite() || !moving_end.is_finite() || !target_end.is_finite()) {
@@ -59,7 +65,7 @@ _FORCE_INLINE_ bool physics_ccd_swept_bounds_may_overlap(const Rect2 &p_moving, 
 			swept.position.y <= target_end.y && moving_end.y >= p_target.position.y;
 }
 
-_FORCE_INLINE_ bool physics_ccd_swept_bounds_may_overlap(const AABB &p_moving, const AABB &p_target, const Vector3 &p_relative_motion) {
+_FORCE_INLINE_ bool physics_ccd_swept_bounds_may_overlap(const AABB &p_moving, const AABB &p_target, const Vector3 &p_relative_motion, real_t p_backtrack_fraction = 0.0) {
 	if (!p_moving.is_finite() || !p_target.is_finite() || !p_relative_motion.is_finite() ||
 			p_moving.size.x < 0.0 || p_moving.size.y < 0.0 || p_moving.size.z < 0.0 ||
 			p_target.size.x < 0.0 || p_target.size.y < 0.0 || p_target.size.z < 0.0) {
@@ -69,7 +75,12 @@ _FORCE_INLINE_ bool physics_ccd_swept_bounds_may_overlap(const AABB &p_moving, c
 	if (!translated.is_finite()) {
 		return true;
 	}
-	const AABB swept = p_moving.merge(translated);
+	// Include the support ray's backward lead-in, not only [t=0, t=1].
+	const AABB backtracked(p_moving.position - p_relative_motion * p_backtrack_fraction, p_moving.size);
+	if (!backtracked.is_finite()) {
+		return true;
+	}
+	const AABB swept = p_moving.merge(translated).merge(backtracked);
 	const Vector3 moving_end = swept.get_end();
 	const Vector3 target_end = p_target.get_end();
 	if (!swept.is_finite() || !moving_end.is_finite() || !target_end.is_finite()) {
