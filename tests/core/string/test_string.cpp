@@ -2793,6 +2793,47 @@ TEST_CASE("[String] uri_encode/unescape") {
 	CHECK(x5.uri_decode() == U"[[ ]]");
 }
 
+TEST_CASE("[String] xml_escape single-buffer entities and COW no-op") {
+	const String safe = U"unchanged σαβ text";
+	const char32_t *safe_ptr = safe.ptr();
+	CHECK(safe.xml_escape().ptr() == safe_ptr);
+	CHECK(safe.xml_escape(false).ptr() == safe_ptr);
+
+	const String special = "&<>'\"";
+	CHECK(special.xml_escape(true) == "&amp;&lt;&gt;&apos;&quot;");
+	CHECK(special.xml_escape(false) == "&amp;&lt;&gt;'\"");
+	CHECK(String("&amp;").xml_escape() == "&amp;amp;");
+	CHECK(String(U"🌍<&'\">").xml_escape() == U"🌍&lt;&amp;&apos;&quot;&gt;");
+	CHECK(String("&&&&&&").xml_escape() == "&amp;&amp;&amp;&amp;&amp;&amp;");
+	CHECK(special == "&<>'\"");
+}
+
+TEST_CASE("[String] xml_escape randomized equivalence to ordered substitutions") {
+	uint32_t seed = 0x9812D45B;
+	for (int trial = 0; trial < 384; trial++) {
+		seed ^= seed << 13;
+		seed ^= seed >> 17;
+		seed ^= seed << 5;
+		const int len = int(seed % 150);
+		String input;
+		input.resize_uninitialized(len + 1);
+		char32_t *data = input.ptrw();
+		for (int i = 0; i < len; i++) {
+			static constexpr char32_t alphabet[] = U"A&B<'\">γ😀 -_";
+			data[i] = alphabet[(seed + uint32_t(i) * 23) % (sizeof(alphabet) / sizeof(char32_t) - 1)];
+		}
+		data[len] = 0;
+		const bool escape_quotes = trial % 2 == 0;
+
+		String expected = input.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;");
+		if (escape_quotes) {
+			expected = expected.replace("'", "&apos;").replace("\"", "&quot;");
+		}
+		CHECK(input.xml_escape(escape_quotes) == expected);
+		CHECK(input.length() == len);
+	}
+}
+
 TEST_CASE("[String] xml_escape/unescape") {
 	String s = "\"Test\" <test@test&'test'>";
 	CHECK(s.xml_escape(true).xml_unescape() == s);
