@@ -590,6 +590,12 @@ func say(text: String) -> void:
 
 func _on_event(event: Dictionary) -> void:
 	match event["type"]:
+		"self_defense":
+			if int(event.get("peer", -1)) == client.peer_id:
+				say("ATTACKED! You may retaliate for 30 seconds without infamy.")
+		"justice":
+			if int(event.get("peer", -1)) == client.peer_id:
+				say("Lawful PvP victory (%s). No criminal infamy added." % str(event.get("reason", "defense")))
 		"party_aid":
 			if int(event.get("peer", -1)) == client.peer_id:
 				say("Teammate treated you: +%d HP, -%d infection, -%d bleeding." % [
@@ -890,6 +896,9 @@ func _process(_delta: float) -> void:
 	_bars["exposure"].value = float(client.you.get("exposure", 0.0))
 	var zone: int = clampi(int(client.you.get("zone", 0)), 0, 3)
 	_zone_label.text = "%s zone (T%d)\n%s" % [Defs.ZONE_NAMES[zone].capitalize(), zone + 1, ZoneRisk.description(zone)]
+	var response_time: float = float(client.you.get("self_defense_seconds", 0.0))
+	if response_time > 0.0:
+		_info_label.text += "\nSELF-DEFENSE: %ds remaining" % ceili(response_time)
 	var infamy: float = float(client.you.get("pvp_infamy", 0.0))
 	if infamy > 0.0:
 		_zone_label.text += "\n%s %d/100 | Vendor penalty" % [

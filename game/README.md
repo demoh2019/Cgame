@@ -1903,3 +1903,20 @@ the game via `godot --headless --path game --script res://tests/run_all.gd`.
 
 The feature reuses existing Cgame gameplay, physics, audio signalling
 and multiplayer primitives. No native engine changes were required.
+
+## PvP self-defense and hunting criminal outlaws
+
+A real damaging PvP attack in red/black zones opens a **30-second legal
+retaliation** window for the victim against that attacker. The original
+aggressor cannot earn an exemption simply because their victim hits back.
+Players marked **OUTLAW** (50+ infamy) may also be defeated without
+accruing criminal infamy. Ordinary unprovoked kills continue to add
+25 infamy. Server-only timers expire automatically and are cleared upon
+an aggressor disconnect, a victim's death or respawn. They are never
+stored in Nakama saves, and a recycled peer ID cannot transfer guilt.
+
+The existing kill/death, full-loot and anti-farming PvP honor rules stay
+unchanged; this system creates no new silver, experience or loot. Online
+HUD and private network messages inform the defender and lawful hunter.
+Headless checks are registered as `tests/test_pvp_justice.gd`. Existing
+Cgame PvP simulation and RPC APIs are sufficient; no C++ work is required.

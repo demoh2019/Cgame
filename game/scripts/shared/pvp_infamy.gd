@@ -5,6 +5,27 @@ const MAX_INFAMY := 100.0
 const INFAMY_PER_KILL := 25.0
 const OUTLAW_THRESHOLD := 50.0
 const SECONDS_PER_POINT := 180.0
+const SELF_DEFENSE_SECONDS := 30.0
+
+
+## These temporary rights never appear in character saves or client RPCs.
+static func defense_remaining(target_id: int, expiry: float, now: float) -> float:
+	if target_id <= 0 or not is_finite(expiry) or not is_finite(now):
+		return 0.0
+	return clampf(expiry - now, 0.0, SELF_DEFENSE_SECONDS)
+
+
+static func can_retaliate(target_id: int, expiry: float,
+		victim_id: int, now: float) -> bool:
+	return victim_id > 0 and target_id == victim_id and 		defense_remaining(target_id, expiry, now) > 0.0
+
+
+static func lawful_kill_reason(score: float, target_id: int, expiry: float,
+		victim_id: int, now: float) -> String:
+	if is_outlaw(score):
+		return "outlaw"
+	return "self_defense" if can_retaliate(target_id, expiry, victim_id, now) else ""
+
 
 
 static func valid(value: Variant) -> bool:

@@ -101,6 +101,8 @@ class Player:
 	var kills: int = 0
 	var deaths: int = 0
 	var pvp_infamy: float = 0.0 # Persistent server-only criminal reputation.
+	var defense_target: int = -1 # Last verified PvP aggressor in this session.
+	var defense_until: float = 0.0 # Current server-clock expiry; never saved.
 	var pvp_kills: int = 0
 	var pvp_honor: int = 0
 	var zone_notice: int = -1
@@ -334,6 +336,11 @@ func valid_character_data(data: Dictionary) -> bool:
 
 
 func remove_player(peer_id: int) -> void:
+	# Prevent a recycled peer ID inheriting another survivor's guilt.
+	for survivor in players.values():
+		if survivor.defense_target == peer_id:
+			survivor.defense_target = -1
+			survivor.defense_until = 0.0
 	market_buy_requests.erase(peer_id)
 	outpost_fortify_requests.erase(peer_id)
 	outpost_breach_requests.erase(peer_id)
@@ -362,6 +369,8 @@ func _spawn_player(player: Player) -> void:
 			break
 	player.position = Vector3(spot.x, world.height_at(spot.x, spot.y), spot.y)
 	player.survival.reset()
+	player.defense_target = -1
+	player.defense_until = 0.0
 	var kept_gear: bool = player.keep_inventory_on_respawn
 	player.keep_inventory_on_respawn = false
 	if not kept_gear:
@@ -1977,6 +1986,18 @@ func _damage_target(attacker: Player, hit: Dictionary, damage: float) -> void:
 			return
 		var final_damage: float = Combat.apply_armor(damage, victim.inventory.armor)
 		var applied: float = victim.survival.hurt(final_damage)
+		# Only genuine dangerous-zone player damage grants retaliation.
+		# A legally counterattacking victim cannot justify the original
+		# initiator's aggression, and wanted outlaws get no immunity.
+		if applied > 0.0 and _alive(victim) and not PvpInfamy.is_outlaw(victim.pvp_infamy) 				and not PvpInfamy.can_retaliate(attacker.defense_target,
+				attacker.defense_until, victim.id, time):
+			var fresh: bool = not PvpInfamy.can_retaliate(victim.defense_target,
+				victim.defense_until, attacker.id, time)
+			victim.defense_target = attacker.id
+			victim.defense_until = time + PvpInfamy.SELF_DEFENSE_SECONDS
+			if fresh:
+				events.append({"type": "self_defense", "peer": victim.id,
+					"seconds": PvpInfamy.SELF_DEFENSE_SECONDS})
 		var wielded: String = attacker.inventory.weapon
 		if applied > 0.0 and _alive(victim) and wielded != "" and attacker.inventory.count(wielded) > 0 \
 				and str(Defs.item(wielded).get("weapon", "")) == "melee":
@@ -1987,13 +2008,18 @@ func _damage_target(attacker: Player, hit: Dictionary, damage: float) -> void:
 		events.append({"type": "hit", "kind": "player", "id": victim.id, "damage": final_damage, "by": attacker.id})
 		if not _alive(victim):
 			attacker.kills += 1
-			var old_score: float = attacker.pvp_infamy
-			attacker.pvp_infamy = PvpInfamy.gain_for_kill(old_score)
-			if attacker.pvp_infamy > old_score:
-				attacker.dirty_character = true
-				events.append({"type": "infamy", "peer": attacker.id,
-					"score": attacker.pvp_infamy,
-					"outlaw": PvpInfamy.is_outlaw(attacker.pvp_infamy)})
+			var lawful: String = PvpInfamy.lawful_kill_reason(victim.pvp_infamy,
+				attacker.defense_target, attacker.defense_until, victim.id, time)
+			if lawful != "":
+				events.append({"type": "justice", "peer": attacker.id, "reason": lawful})
+			else:
+				var old_score: float = attacker.pvp_infamy
+				attacker.pvp_infamy = PvpInfamy.gain_for_kill(old_score)
+				if attacker.pvp_infamy > old_score:
+					attacker.dirty_character = true
+					events.append({"type": "infamy", "peer": attacker.id,
+						"score": attacker.pvp_infamy,
+						"outlaw": PvpInfamy.is_outlaw(attacker.pvp_infamy)})
 			var honor_result: Dictionary = PvPHonor.record(attacker, victim,
 				world.zone_at(victim.position.x, victim.position.z), time, pvp_honor_ledger)
 			if bool(honor_result.get("ok", false)):
@@ -2081,6 +2107,8 @@ func _on_player_death(victim: Player, killer: int) -> void:
 	victim.action = {}
 	victim.dodge_immunity = 0.0
 	victim.guardian_brace = 0.0
+	victim.defense_target = -1
+	victim.defense_until = 0.0
 	var zone: int = world.zone_at(victim.position.x, victim.position.z)
 	var drops_gear: bool = ZoneRisk.full_loot(zone)
 	victim.last_death_full_loot = drops_gear
@@ -2687,6 +2715,8 @@ func snapshot_for(peer_id: int) -> Dictionary:
 			"stamina": player.survival.stamina,
 			"alive": _alive(player), "kills": player.kills, "deaths": player.deaths, "zone": player.zone_notice,
 			"pvp_infamy": player.pvp_infamy, "outlaw": PvpInfamy.is_outlaw(player.pvp_infamy),
+			"self_defense_seconds": PvpInfamy.defense_remaining(
+				player.defense_target, player.defense_until, time),
 			"pvp_kills": player.pvp_kills, "pvp_honor": player.pvp_honor,
 			"pvp_rank": PvPHonor.rank(player.pvp_honor),
 			"action": player.action.duplicate(),
