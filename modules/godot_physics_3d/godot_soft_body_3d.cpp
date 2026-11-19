@@ -1781,13 +1781,19 @@ void GodotSoftBody3D::solve_self_collisions(real_t p_thickness, real_t p_alpha_t
 // canonical 64-bit edge keys. Broadphase and closest-segment work have
 // separate per-source and total budgets, so collapsed dense cloth cannot
 // allocate or narrowphase-check an unbounded number of candidate pairs.
-void GodotSoftBody3D::solve_self_edge_contacts(real_t p_thickness, real_t p_alpha_tilde) {
+void GodotSoftBody3D::solve_self_edge_contacts(real_t p_thickness, real_t p_alpha_tilde, bool p_ccd) {
 	if (!self_collision_edges_built) {
 		initialize_self_collision_adjacency(); // A world may enable edges later.
 	}
 	self_collision_edge_contacts.clear();
 	if (self_collision_edges.is_empty() || face_tree.is_empty()) {
 		return;
+	}
+	if (p_ccd) {
+		update_self_collision_swept_face_tree();
+		for (real_t &fraction : self_collision_ccd_fractions) {
+			fraction = 1.0;
+		}
 	}
 	const real_t thickness_sq = p_thickness * p_thickness;
 	if (!(thickness_sq > 0.0) || !Math::is_finite(thickness_sq)) {
@@ -1797,7 +1803,9 @@ void GodotSoftBody3D::solve_self_edge_contacts(real_t p_thickness, real_t p_alph
 	constexpr uint32_t MAX_TOTAL_EDGE_CONTACTS = 32768;
 	constexpr uint32_t MAX_EDGE_TESTS_PER_SOURCE = 128;
 	constexpr uint32_t MAX_EDGE_TESTS_PER_STEP = 1048576;
+	constexpr uint32_t MAX_CCD_EDGE_TESTS_PER_STEP = 8192;
 	uint32_t remaining_tests = MAX_EDGE_TESTS_PER_STEP;
+	uint32_t remaining_ccd_tests = MAX_CCD_EDGE_TESTS_PER_STEP;
 	const Vector3 reach(p_thickness, p_thickness, p_thickness);
 
 	struct EdgeCandidateQuery {
@@ -1810,6 +1818,10 @@ void GodotSoftBody3D::solve_self_edge_contacts(real_t p_thickness, real_t p_alph
 		uint32_t count = 0;
 		uint64_t keys[MAX_CONTACTS_PER_EDGE] = {};
 		real_t distances[MAX_CONTACTS_PER_EDGE] = {};
+		real_t times[MAX_CONTACTS_PER_EDGE] = {};
+		bool use_ccd = false;
+		real_t thickness = 0.0;
+		uint32_t *remaining_ccd_tests = nullptr;
 
 		bool operator()(void *p_data) {
 			const Face *face = static_cast<const Face *>(p_data);
@@ -1855,12 +1867,27 @@ void GodotSoftBody3D::solve_self_edge_contacts(real_t p_thickness, real_t p_alph
 					continue;
 				}
 				const real_t distance_sq = on_ab.distance_squared_to(on_cd);
-				if (!Math::is_finite(distance_sq) || distance_sq >= thickness_sq) {
+				if (!Math::is_finite(distance_sq)) {
 					continue;
 				}
+				real_t toi = 1.0;
+				if (distance_sq >= thickness_sq) {
+					if (!use_ccd || *remaining_ccd_tests == 0) {
+						continue;
+					}
+					--(*remaining_ccd_tests);
+					if (!physics_softbody_ccd_edge_edge(
+							(*nodes)[a].q, (*nodes)[a].x,
+							(*nodes)[b].q, (*nodes)[b].x,
+							(*nodes)[c].q, (*nodes)[c].x,
+							(*nodes)[d].q, (*nodes)[d].x, thickness, toi)) {
+						continue;
+					}
+				}
 				uint32_t insert = 0;
-				while (insert < count && (distance_sq > distances[insert] ||
-						(distance_sq == distances[insert] && key > keys[insert]))) {
+				while (insert < count && (toi > times[insert] ||
+						(toi == times[insert] && (distance_sq > distances[insert] ||
+							(distance_sq == distances[insert] && key > keys[insert]))))) {
 					++insert;
 				}
 				if (insert >= MAX_CONTACTS_PER_EDGE) {
@@ -1872,9 +1899,11 @@ void GodotSoftBody3D::solve_self_edge_contacts(real_t p_thickness, real_t p_alph
 				for (uint32_t j = count - 1; j > insert; --j) {
 					keys[j] = keys[j - 1];
 					distances[j] = distances[j - 1];
+					times[j] = times[j - 1];
 				}
 				keys[insert] = key;
 				distances[insert] = distance_sq;
+				times[insert] = toi;
 			}
 			return false;
 		}
@@ -1888,6 +1917,10 @@ void GodotSoftBody3D::solve_self_edge_contacts(real_t p_thickness, real_t p_alph
 		const Vector3 &b = nodes[edge.b].x;
 		AABB query_aabb(a, Vector3());
 		query_aabb.expand_to(b);
+		if (p_ccd) {
+			query_aabb.expand_to(nodes[edge.a].q);
+			query_aabb.expand_to(nodes[edge.b].q);
+		}
 		query_aabb.position -= reach;
 		query_aabb.size += reach * real_t(2.0);
 		EdgeCandidateQuery query;
@@ -1896,6 +1929,9 @@ void GodotSoftBody3D::solve_self_edge_contacts(real_t p_thickness, real_t p_alph
 		query.structural_edges = &self_collision_structural_edges;
 		query.thickness_sq = thickness_sq;
 		query.remaining_tests = &remaining_tests;
+		query.remaining_ccd_tests = &remaining_ccd_tests;
+		query.use_ccd = p_ccd;
+		query.thickness = p_thickness;
 		face_tree.aabb_query(query_aabb, query);
 		for (uint32_t i = 0; i < query.count &&
 				self_collision_edge_contacts.size() < MAX_TOTAL_EDGE_CONTACTS; ++i) {
@@ -1904,6 +1940,7 @@ void GodotSoftBody3D::solve_self_edge_contacts(real_t p_thickness, real_t p_alph
 			contact.b = edge.b;
 			contact.c = uint32_t(query.keys[i] >> 32);
 			contact.d = uint32_t(query.keys[i]);
+			contact.toi = query.times[i];
 			self_collision_edge_contacts.push_back(contact);
 		}
 	}
@@ -1911,6 +1948,19 @@ void GodotSoftBody3D::solve_self_edge_contacts(real_t p_thickness, real_t p_alph
 	// All edge contacts see one geometry snapshot while gathering. Resolve
 	// only afterward, then refit the shared face tree once for subsequent
 	// ray queries and the next physics step.
+	if (p_ccd) {
+		for (const SelfEdgeContact &contact : self_collision_edge_contacts) {
+			if (contact.toi >= 1.0) {
+				continue;
+			}
+			const real_t safe_t = MAX(real_t(0.0), contact.toi - real_t(0.0001));
+			const uint32_t participants[] = { contact.a, contact.b, contact.c, contact.d };
+			for (uint32_t vertex_index : participants) {
+				self_collision_ccd_fractions[vertex_index] = MIN(self_collision_ccd_fractions[vertex_index], safe_t);
+			}
+		}
+		apply_self_collision_ccd_rewinds();
+	}
 	for (const SelfEdgeContact &contact : self_collision_edge_contacts) {
 		Node &a = nodes[contact.a];
 		Node &b = nodes[contact.b];
@@ -1920,7 +1970,7 @@ void GodotSoftBody3D::solve_self_edge_contacts(real_t p_thickness, real_t p_alph
 				a.im, b.im, c.im, d.im, p_thickness, p_alpha_tilde,
 				a.q, b.q, c.q, d.q);
 	}
-	if (!self_collision_edge_contacts.is_empty()) {
+	if (p_ccd || !self_collision_edge_contacts.is_empty()) {
 		update_face_tree(0.0);
 	}
 }
