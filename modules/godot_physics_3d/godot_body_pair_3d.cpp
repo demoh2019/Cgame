@@ -704,40 +704,50 @@ void GodotBodySoftBodyPair3D::_contact_added_callback(const Vector3 &p_point_A, 
 }
 
 void GodotBodySoftBodyPair3D::contact_added_callback(const Vector3 &p_point_A, int, const Vector3 &p_point_B, int p_index_B, const Vector3 &normal) {
-	Vector3 local_A = body->get_inv_transform().xform(p_point_A);
-	Vector3 local_B = p_point_B - soft_body->get_node_position(p_index_B);
+	const Vector3 local_A = body->get_inv_transform().xform(p_point_A);
+	const Vector3 local_B = p_point_B - soft_body->get_node_position(p_index_B);
 
 	Contact contact;
-
 	contact.index_B = p_index_B;
 	contact.local_A = local_A;
 	contact.local_B = local_B;
 	contact.normal = (normal.dot((p_point_A - p_point_B)) < 0 ? -normal : normal);
 	contact.used = true;
 
-	// Attempt to determine if the contact will be reused.
-	real_t contact_recycle_radius = space->get_contact_recycle_radius();
-
-	uint32_t contact_count = contacts.size();
-	for (uint32_t contact_index = 0; contact_index < contact_count; ++contact_index) {
-		Contact &c = contacts[contact_index];
-		if (c.index_B == p_index_B) {
-			if (c.local_A.distance_squared_to(local_A) < (contact_recycle_radius * contact_recycle_radius) &&
-					c.local_B.distance_squared_to(local_B) < (contact_recycle_radius * contact_recycle_radius) &&
-					c.normal.dot(contact.normal) >= real_t(0.98)) {
-				contact.acc_normal_impulse = c.acc_normal_impulse;
-				contact.acc_bias_impulse = c.acc_bias_impulse;
-				contact.acc_bias_impulse_center_of_mass = c.acc_bias_impulse_center_of_mass;
-				// A rotating soft-body surface changes the contact normal. Reproject
-				// the cached friction so it never injects a normal impulse.
-				contact.acc_tangent_impulse = c.acc_tangent_impulse - contact.normal * c.acc_tangent_impulse.dot(contact.normal);
+	// Direct node-ID lookup for dense soft-body contact patches. Below the
+	// threshold, a linear scan avoids allocating the hash table entirely.
+	const uint32_t contact_count = contacts.size();
+	contact_index.maybe_build(contacts);
+	int existing_index = contact_index.find(p_index_B);
+	if (!contact_index.is_active()) {
+		for (uint32_t i = 0; i < contact_count; ++i) {
+			if (contacts[i].index_B == p_index_B) {
+				existing_index = int(i);
+				break;
 			}
-			c = contact;
-			return;
 		}
 	}
 
+	if (existing_index != -1) {
+		Contact &previous = contacts[existing_index];
+		const real_t recycle_radius = space->get_contact_recycle_radius();
+		const real_t recycle_radius_squared = recycle_radius * recycle_radius;
+		if (previous.local_A.distance_squared_to(local_A) < recycle_radius_squared &&
+				previous.local_B.distance_squared_to(local_B) < recycle_radius_squared &&
+				previous.normal.dot(contact.normal) >= real_t(0.98)) {
+			contact.acc_normal_impulse = previous.acc_normal_impulse;
+			contact.acc_bias_impulse = previous.acc_bias_impulse;
+			contact.acc_bias_impulse_center_of_mass = previous.acc_bias_impulse_center_of_mass;
+			// A rotating soft-body surface changes the contact normal. Reproject
+			// the cached friction so it never injects a normal impulse.
+			contact.acc_tangent_impulse = previous.acc_tangent_impulse - contact.normal * previous.acc_tangent_impulse.dot(contact.normal);
+		}
+		previous = contact;
+		return;
+	}
+
 	contacts.push_back(contact);
+	contact_index.appended(p_index_B, contact_count);
 }
 
 void GodotBodySoftBodyPair3D::validate_contacts() {
@@ -769,14 +779,17 @@ void GodotBodySoftBodyPair3D::validate_contacts() {
 		}
 
 		if (erase) {
-			// Contact no longer needed, remove.
-			if ((contact_index + 1) < contact_count) {
-				// Swap with the last one.
+			// The node map stores vector indices. Update the relocated node
+			// after swap-removal, then release the map when sparse again.
+			const int removed_node = c.index_B;
+			const bool has_moved_contact = (contact_index + 1) < contact_count;
+			const int moved_node = has_moved_contact ? contacts[contact_count - 1].index_B : removed_node;
+			if (has_moved_contact) {
 				SWAP(c, contacts[contact_count - 1]);
 			}
-
-			contact_index--;
 			contact_count--;
+			this->contact_index.swap_removed(removed_node, moved_node, contact_index, contact_count);
+			contact_index--;
 		}
 	}
 
