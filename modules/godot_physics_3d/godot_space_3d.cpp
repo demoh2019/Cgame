@@ -36,6 +36,7 @@
 #include "godot_physics_server_3d.h"
 
 #include "core/config/project_settings.h"
+#include "servers/physics_cast_motion_pruning.h"
 
 #define TEST_MOTION_MARGIN_MIN_VALUE 0.0001
 #define TEST_MOTION_MIN_CONTACT_DEPTH_FACTOR 0.05
@@ -245,8 +246,8 @@ bool GodotPhysicsDirectSpaceState3D::cast_motion(const PS3DT::ShapeParameters &p
 	GodotShape3D *shape = GodotPhysicsServer3D::godot_singleton->shape_owner.get_or_null(p_parameters.shape_rid);
 	ERR_FAIL_NULL_V(shape, false);
 
-	AABB aabb = p_parameters.transform.xform(shape->get_aabb());
-	aabb = aabb.merge(AABB(aabb.position + p_parameters.motion, aabb.size)); //motion
+	const AABB start_aabb = p_parameters.transform.xform(shape->get_aabb());
+	AABB aabb = start_aabb.merge(AABB(start_aabb.position + p_parameters.motion, start_aabb.size)); //motion
 	aabb = aabb.grow(p_parameters.margin);
 
 	real_t best_safe = 1;
@@ -268,6 +269,8 @@ bool GodotPhysicsDirectSpaceState3D::cast_motion(const PS3DT::ShapeParameters &p
 	struct CastMotionData {
 		const PS3DT::ShapeParameters &params;
 		const AABB &query_aabb;
+		const AABB &start_aabb;
+		AABB clipped_aabb;
 		GodotMotionShape3D &motion_shape;
 		const Transform3D &xform_inv;
 		const Vector3 &motion_normal;
@@ -279,7 +282,7 @@ bool GodotPhysicsDirectSpaceState3D::cast_motion(const PS3DT::ShapeParameters &p
 		Vector3 &closest_B;
 		PS3DT::ShapeRestInfo *info;
 	};
-	CastMotionData data = { p_parameters, aabb, mshape, xform_inv, motion_normal, mshape.motion,
+	CastMotionData data = { p_parameters, aabb, start_aabb, aabb, mshape, xform_inv, motion_normal, mshape.motion,
 		best_safe, best_unsafe, best_first, closest_A, closest_B, r_info };
 	auto visitor = [](GodotCollisionObject3D *p_object, int p_shape, void *p_userdata) -> bool {
 		CastMotionData &data = *static_cast<CastMotionData *>(p_userdata);
@@ -289,6 +292,14 @@ bool GodotPhysicsDirectSpaceState3D::cast_motion(const PS3DT::ShapeParameters &p
 
 		if (data.params.exclude.has(p_object->get_self())) {
 			return true; //ignore excluded
+		}
+
+		// An earlier hit can only be improved by another collider inside
+		// the shortened swept bounds. The cached broadphase proxy bounds
+		// conservatively cover the current shape and any CCD expansion.
+		if (data.best_unsafe < 1.0 &&
+				!data.clipped_aabb.intersects(p_object->get_shape_aabb(p_shape))) {
+			return true;
 		}
 
 		const GodotCollisionObject3D *col_obj = p_object;
@@ -354,6 +365,8 @@ bool GodotPhysicsDirectSpaceState3D::cast_motion(const PS3DT::ShapeParameters &p
 			data.best_first = true; //force reset
 			data.best_safe = low;
 			data.best_unsafe = hi;
+			data.clipped_aabb = godot_physics_cast_motion_clipped_aabb(data.start_aabb,
+					data.params.motion, data.best_unsafe, data.params.margin);
 		}
 
 		if (data.info && (data.best_first || (point_A.distance_squared_to(point_B) < data.closest_A.distance_squared_to(data.closest_B) && low <= data.best_safe))) {
