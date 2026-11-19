@@ -326,7 +326,7 @@ func _update_status() -> void:
         _gravity_scale, "ON" if _waves else "OFF"
     ]
     if is_instance_valid(_held):
-        _status.text += "\\nВыбрано: %s | масса %.1f кг | %s" % [
+        _status.text += "\nВыбрано: %s | масса %.1f кг | %s" % [
             _held.name, _held.mass, "заморожено" if _held.freeze else "активно"
         ]
     if _wind_label != null:
