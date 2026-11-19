@@ -41,6 +41,7 @@
 #include "core/templates/paged_allocator.h"
 #include "core/typedefs.h"
 #include "servers/physics_contact_push_speed.h"
+#include "servers/physics_friction_combine.h"
 #include "servers/physics_restitution_combine.h"
 #include "servers/physics_2d/direct_states/physics_direct_space_state_2d.h"
 
@@ -222,21 +223,7 @@ public:
 	// Match Box2D's geometric mean when explicitly selected, while keeping
 	// the historical GodotPhysics material combination as the default.
 	_FORCE_INLINE_ real_t mix_friction(real_t p_a, real_t p_b) const {
-		if (friction_combine_mode == 0) {
-			return Math::abs(MIN(p_a, p_b));
-		}
-		const real_t a = Math::abs(p_a);
-		const real_t b = Math::abs(p_b);
-		switch (friction_combine_mode) {
-			case 1:
-				return Math::sqrt(a * b);
-			case 2:
-				return (a + b) * (real_t)0.5;
-			case 3:
-				return MAX(a, b);
-			default:
-				return Math::abs(MIN(p_a, p_b));
-		}
+		return godot_physics_combine_friction(p_a, p_b, friction_combine_mode);
 	}
 	_FORCE_INLINE_ real_t get_constraint_bias() const { return constraint_bias; }
 	_FORCE_INLINE_ real_t get_body_linear_velocity_sleep_threshold() const { return body_linear_velocity_sleep_threshold; }

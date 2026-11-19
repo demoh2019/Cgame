@@ -67,6 +67,10 @@ void JoltProjectSettings::register_settings() {
 
 	GLOBAL_DEF(PropertyInfo(Variant::FLOAT, "physics/jolt_physics_3d/collisions/collision_margin_fraction", PROPERTY_HINT_RANGE, U"0,1,0.00001"), 0.08f);
 	GLOBAL_DEF(PropertyInfo(Variant::FLOAT, "physics/jolt_physics_3d/collisions/active_edge_threshold", PROPERTY_HINT_RANGE, U"0,90,0.01,radians_as_degrees"), Math::deg_to_rad(50.0f));
+	// Legacy combination is preserved unless the user opts into Box2D/Rapier rules.
+	// Modes mirror built-in GodotPhysics for predictable 3D backend switching.
+	GLOBAL_DEF(PropertyInfo(Variant::INT, "physics/jolt_physics_3d/collisions/friction_combine_mode", PROPERTY_HINT_ENUM, "Legacy Minimum,Geometric Mean,Average,Maximum"), 0);
+	GLOBAL_DEF(PropertyInfo(Variant::INT, "physics/jolt_physics_3d/collisions/restitution_combine_mode", PROPERTY_HINT_ENUM, "Legacy Clamped Sum,Maximum,Average,Minimum,Multiply,Geometric Mean"), 0);
 
 	GLOBAL_DEF(PropertyInfo(Variant::INT, "physics/jolt_physics_3d/joints/world_node", PROPERTY_HINT_ENUM, U"Node A,Node B"), JOLT_JOINT_WORLD_NODE_A);
 
@@ -116,6 +120,8 @@ void JoltProjectSettings::read_settings() {
 	collision_margin_fraction = GLOBAL_GET("physics/jolt_physics_3d/collisions/collision_margin_fraction");
 	float active_edge_threshold = GLOBAL_GET("physics/jolt_physics_3d/collisions/active_edge_threshold");
 	active_edge_threshold_cos = Math::cos(active_edge_threshold);
+	friction_combine_mode = CLAMP((int)GLOBAL_GET("physics/jolt_physics_3d/collisions/friction_combine_mode"), 0, 3);
+	restitution_combine_mode = CLAMP((int)GLOBAL_GET("physics/jolt_physics_3d/collisions/restitution_combine_mode"), 0, 5);
 
 	joint_world_node = (JoltJointWorldNode)(int)GLOBAL_GET("physics/jolt_physics_3d/joints/world_node");
 
