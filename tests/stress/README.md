@@ -127,3 +127,28 @@ It also records median and p95 **in-engine duration** independently of process
 startup, and baseline comparisons now track median engine time. These rankings
 are a triage aid, not a universal throughput leaderboard: scenarios do different
 amounts of work. Native CI archives both JSON and Markdown artifacts.
+
+## Nonlinear scaling sweeps (opt-in)
+
+For the same case and same machine, comparing progressively larger workloads
+reveals more than a single slow run. Each scale/repeat runs in its **own process**
+under the same timeout and RSS watchdog as the normal suite. The sweep
+separately calculates median engine time, wall time and process RSS.
+
+```bash
+python3 tests/stress/scale_sweep.py --godot ./bin/godot.linuxbsd.editor.dev.x86_64 \
+  --case containers,node_paths,compression,astar_3d,physics_2d,physics_3d \
+  --scales 1,2,4,8,16 --frames 90 --repeats 5 \
+  --timeout 600 --rss-limit-mib 6144 \
+  --output out/scale-sweep.json --summary-md out/scale-sweep.md
+```
+
+To run every available headless case use `--case all`; display workloads
+require `--render-mode display` on a GPU-capable host. A sweep is **not**
+scheduled in CI: large input sizes can saturate a shared runner. The generated
+Markdown report ranks the estimated engine-time scaling exponent and flags
+high timing variance and accelerating RSS. An exponent above 1 suggests
+nonlinear growth in this particular test workload, **not** necessarily an
+O(n²) implementation. CPU affinity, import caches, driver and memory limits
+must be controlled for trustworthy comparisons. In particular, RSS acceleration
+is not proof of a leak.
