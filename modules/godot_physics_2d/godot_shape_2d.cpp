@@ -574,6 +574,21 @@ real_t GodotConvexPolygonShape2D::get_moment_of_inertia(real_t p_mass, const Siz
 	return p_mass * aabb_new.size.dot(aabb_new.size) / 12.0;
 }
 
+real_t GodotConvexPolygonShape2D::get_moment_of_inertia_transformed(real_t p_mass, const Transform2D &p_transform) const {
+	if (!valid_mass_properties) {
+		return get_moment_of_inertia(p_mass, p_transform.get_scale());
+	}
+
+	// A linear map M transforms covariance C into M * C * M^T.
+	// In 2D, angular inertia about the center is mass * trace(M * C * M^T).
+	const Vector2 &basis_x = p_transform.columns[0];
+	const Vector2 &basis_y = p_transform.columns[1];
+	const real_t inertia_per_mass = mass_variance_x * basis_x.length_squared() +
+			mass_variance_y * basis_y.length_squared() +
+			real_t(2.0) * mass_covariance_xy * basis_x.dot(basis_y);
+	return p_mass * MAX(inertia_per_mass, real_t(0.0));
+}
+
 void GodotConvexPolygonShape2D::set_data(const Variant &p_data) {
 #ifdef REAL_T_IS_DOUBLE
 	ERR_FAIL_COND(p_data.get_type() != Variant::PACKED_VECTOR2_ARRAY && p_data.get_type() != Variant::PACKED_FLOAT64_ARRAY);
@@ -589,6 +604,7 @@ void GodotConvexPolygonShape2D::set_data(const Variant &p_data) {
 	mass_centroid = Vector2();
 	mass_variance_x = 0.0;
 	mass_variance_y = 0.0;
+	mass_covariance_xy = 0.0;
 	valid_mass_properties = false;
 
 	if (p_data.get_type() == Variant::PACKED_VECTOR2_ARRAY) {
@@ -641,6 +657,7 @@ void GodotConvexPolygonShape2D::set_data(const Variant &p_data) {
 		double first_y = 0.0;
 		double second_x = 0.0;
 		double second_y = 0.0;
+		double mixed_xy = 0.0;
 		for (int i = 0; i < point_count; i++) {
 			const Vector2 &a = points[i].pos;
 			const Vector2 &b = points[(i + 1) % point_count].pos;
@@ -654,6 +671,7 @@ void GodotConvexPolygonShape2D::set_data(const Variant &p_data) {
 			first_y += (ay + by) * cross;
 			second_x += (ax * ax + ax * bx + bx * bx) * cross;
 			second_y += (ay * ay + ay * by + by * by) * cross;
+			mixed_xy += (2.0 * ax * ay + ax * by + bx * ay + 2.0 * bx * by) * cross;
 		}
 
 		if (Math::abs(twice_area) > 1.0e-14) {
@@ -661,9 +679,11 @@ void GodotConvexPolygonShape2D::set_data(const Variant &p_data) {
 			const double cy = first_y / (3.0 * twice_area);
 			const double vx = second_x / (6.0 * twice_area) - cx * cx;
 			const double vy = second_y / (6.0 * twice_area) - cy * cy;
+			const double cxy = mixed_xy / (12.0 * twice_area) - cx * cy;
 			mass_centroid = reference + Vector2(real_t(cx), real_t(cy));
 			mass_variance_x = MAX(real_t(0.0), real_t(vx));
 			mass_variance_y = MAX(real_t(0.0), real_t(vy));
+			mass_covariance_xy = real_t(cxy);
 			valid_mass_properties = true;
 		}
 	}

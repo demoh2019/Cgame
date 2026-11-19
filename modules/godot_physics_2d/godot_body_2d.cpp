@@ -94,10 +94,9 @@ void GodotBody2D::update_mass_properties() {
 
 					real_t mass_new = area * mass / total_area;
 
-					Transform2D mtx = get_shape_transform(i);
-					Vector2 scale = mtx.get_scale();
-					Vector2 shape_centroid = mtx.xform(shape->get_center_of_mass()) - center_of_mass_local;
-					inertia += shape->get_moment_of_inertia(mass_new, scale) + mass_new * shape_centroid.length_squared();
+					const Transform2D &mtx = get_shape_transform(i);
+					const Vector2 shape_centroid = mtx.xform(shape->get_center_of_mass()) - center_of_mass_local;
+					inertia += shape->get_moment_of_inertia_transformed(mass_new, mtx) + mass_new * shape_centroid.length_squared();
 				}
 			}
 

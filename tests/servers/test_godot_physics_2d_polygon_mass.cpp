@@ -86,6 +86,48 @@ TEST_CASE("[GodotPhysics2D] Degenerate convex polygon retains bounded inertia fa
 	CHECK(Math::is_equal_approx(polygon.get_moment_of_inertia(real_t(12.0), Vector2(1.0, 1.0)), real_t(20.0)));
 }
 
+TEST_CASE("[GodotPhysics2D] Convex polygon inertia accounts for full affine covariance") {
+	GodotConvexPolygonShape2D rectangle;
+	PackedVector2Array rectangle_vertices;
+	rectangle_vertices.push_back(Vector2(-2.0, -1.0));
+	rectangle_vertices.push_back(Vector2(2.0, -1.0));
+	rectangle_vertices.push_back(Vector2(2.0, 1.0));
+	rectangle_vertices.push_back(Vector2(-2.0, 1.0));
+	rectangle.set_data(rectangle_vertices);
+
+	const Transform2D identity;
+	CHECK(Math::is_equal_approx(rectangle.get_moment_of_inertia_transformed(real_t(12.0), identity), real_t(20.0)));
+
+	const Transform2D shear(Vector2(1.0, 0.0), Vector2(2.0, 1.0), Vector2(100.0, -50.0));
+	CHECK(Math::is_equal_approx(rectangle.get_moment_of_inertia_transformed(real_t(12.0), shear), real_t(36.0)));
+
+	const Transform2D nonuniform_scale(Vector2(2.0, 0.0), Vector2(0.0, 0.5), Vector2());
+	CHECK(Math::is_equal_approx(rectangle.get_moment_of_inertia_transformed(real_t(12.0), nonuniform_scale), real_t(65.0)));
+
+	const Transform2D rotation(Vector2(0.0, 1.0), Vector2(-1.0, 0.0), Vector2());
+	CHECK(Math::is_equal_approx(rectangle.get_moment_of_inertia_transformed(real_t(12.0), rotation), real_t(20.0)));
+
+	GodotConvexPolygonShape2D triangle;
+	PackedVector2Array corners;
+	corners.push_back(Vector2(0.0, 0.0));
+	corners.push_back(Vector2(2.0, 0.0));
+	corners.push_back(Vector2(0.0, 2.0));
+	triangle.set_data(corners);
+	CHECK(Math::is_equal_approx(triangle.get_moment_of_inertia_transformed(real_t(9.0), shear), real_t(8.0)));
+	CHECK(shear.xform(triangle.get_center_of_mass()).is_equal_approx(Vector2(real_t(102.0), real_t(-49.3333333333333))));
+
+	const Transform2D reflection(Vector2(-1.0, 0.0), Vector2(2.0, 1.0), Vector2());
+	CHECK(Math::is_equal_approx(triangle.get_moment_of_inertia_transformed(real_t(9.0), reflection), real_t(16.0)));
+
+	PackedVector2Array reversed;
+	reversed.push_back(corners[2]);
+	reversed.push_back(corners[1]);
+	reversed.push_back(corners[0]);
+	triangle.set_data(reversed);
+	CHECK(Math::is_equal_approx(triangle.get_moment_of_inertia_transformed(real_t(9.0), shear), real_t(8.0)));
+	CHECK(Math::is_equal_approx(triangle.get_moment_of_inertia_transformed(real_t(9.0), reflection), real_t(16.0)));
+}
+
 } // namespace TestGodotPhysics2DPolygonMass
 
 #endif // MODULE_GODOT_PHYSICS_2D_ENABLED
