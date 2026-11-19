@@ -194,21 +194,29 @@ void GodotBodyPair2D::_validate_contacts() {
 	}
 }
 
-// `_test_ccd` prevents tunneling by slowing down a high velocity body that is about to collide so
-// that next frame it will be at an appropriate location to collide (i.e. slight overlap).
-// WARNING: The way velocity is adjusted down to cause a collision means the momentum will be
-// weaker than it should for a bounce!
-// Process: Only proceed if body A's motion is high relative to its size.
-// Cast forward along motion vector to see if A is going to enter/pass B's collider next frame, only proceed if it does.
-// Adjust the velocity of A down so that it will just slightly intersect the collider instead of blowing right past it.
+// Cast-ray CCD clips the moving body's velocity if its leading support would
+// tunnel through the other body in one physics step. Cast in relative-motion
+// space, so co-moving or approaching bodies are not tested against a target
+// frozen at its *future* position. This is still an approximate CCD response:
+// shortening velocity can change the momentum of an ensuing bounce.
 bool GodotBodyPair2D::_test_ccd(real_t p_step, GodotBody2D *p_A, int p_shape_A, const Transform2D &p_xform_A, GodotBody2D *p_B, int p_shape_B, const Transform2D &p_xform_B) {
-	Vector2 motion = p_A->get_linear_velocity() * p_step;
-	real_t mlen = motion.length();
-	if (mlen < CMP_EPSILON) {
+	if (p_step <= 0.0) {
+		return false;
+	}
+	const Vector2 motion_A = p_A->get_linear_velocity() * p_step;
+	if (motion_A.length_squared() == 0.0) {
+		return false;
+	}
+	const Vector2 motion_B = p_B->get_linear_velocity() * p_step;
+	const Vector2 relative_motion = motion_A - motion_B;
+	const real_t mlen = relative_motion.length();
+	if (mlen < CMP_EPSILON || motion_A.dot(relative_motion) <= 0.0) {
+		// Co-moving bodies cannot meet along this sweep. Also avoid changing A
+		// when only B is closing from behind; B's own CCD handles that case.
 		return false;
 	}
 
-	Vector2 mnormal = motion / mlen;
+	const Vector2 mnormal = relative_motion / mlen;
 
 	real_t min = 0.0, max = 0.0;
 	p_A->get_shape(p_shape_A)->project_rangev(mnormal, p_xform_A, min, max);
@@ -220,10 +228,9 @@ bool GodotBodyPair2D::_test_ccd(real_t p_step, GodotBody2D *p_A, int p_shape_A, 
 		return false;
 	}
 
-	// A is moving fast enough that tunneling might occur. See if it's really about to collide.
-
-	// Roughly predict body B's position in the next frame (ignoring collisions).
-	Transform2D predicted_xform_B = p_xform_B.translated(p_B->get_linear_velocity() * p_step);
+	// A is moving fast relative to B, so test the relative sweep against
+	// B's current shape. Using B's predicted end position produces false
+	// collisions for equally fast co-moving bodies.
 
 	// CCD cast-ray uses the leading support feature, which may contain two
 	// vertices (a box face, capsule side, or polygon edge). Test both ends:
@@ -239,26 +246,27 @@ bool GodotBodyPair2D::_test_ccd(real_t p_step, GodotBody2D *p_A, int p_shape_A, 
 
 	// All rays share the same target transform and direction. Compare squared
 	// hit distances in target-local space to avoid a square root for each hit.
-	const Transform2D predicted_inv_B = predicted_xform_B.affine_inverse();
+	if (p_xform_B.determinant() == 0.0) {
+		return false;
+	}
+	const Transform2D inv_B = p_xform_B.affine_inverse();
 	bool found_hit = false;
-	real_t hit_distance_squared = 0.0;
-	Vector2 hit_local;
-	Vector2 hit_support_from;
+	real_t best_hit_distance = 0.0;
 	for (int support_idx = 0; support_idx < support_count_A; ++support_idx) {
 		const Vector2 from = p_xform_A.xform(supports_A[support_idx]);
-		const Vector2 local_from = predicted_inv_B.xform(from - motion * 0.1);
-		const Vector2 local_to = predicted_inv_B.xform(from + motion);
+		const Vector2 local_from = inv_B.xform(from - relative_motion * 0.1);
+		const Vector2 local_to = inv_B.xform(from + relative_motion);
 		Vector2 rpos, rnorm;
 		if (!shape_B_ptr->intersect_segment(local_from, local_to, rpos, rnorm)) {
 			continue;
 		}
 
-		const real_t candidate_distance_squared = local_from.distance_squared_to(rpos);
-		if (!found_hit || candidate_distance_squared < hit_distance_squared) {
+		// Compare world-space distances along the *relative* sweep, not
+		// squared lengths after an arbitrary affine transform of B.
+		const real_t hit_distance = mnormal.dot(p_xform_B.xform(rpos) - from);
+		if (!found_hit || hit_distance < best_hit_distance) {
 			found_hit = true;
-			hit_distance_squared = candidate_distance_squared;
-			hit_local = rpos;
-			hit_support_from = from;
+			best_hit_distance = hit_distance;
 		}
 	}
 	if (!found_hit) {
@@ -267,7 +275,7 @@ bool GodotBodyPair2D::_test_ccd(real_t p_step, GodotBody2D *p_A, int p_shape_A, 
 
 	// Check one-way collision based on motion direction.
 	if (p_A->get_shape(p_shape_A)->allows_one_way_collision() && p_B->is_shape_set_as_one_way_collision(p_shape_B)) {
-		Vector2 direction = predicted_xform_B.basis_xform(p_B->get_shape_one_way_collision_direction(p_shape_B)).normalized();
+		Vector2 direction = p_xform_B.basis_xform(p_B->get_shape_one_way_collision_direction(p_shape_B)).normalized();
 
 		if (direction.dot(mnormal) < CMP_EPSILON) {
 			collided = false;
@@ -278,10 +286,11 @@ bool GodotBodyPair2D::_test_ccd(real_t p_step, GodotBody2D *p_A, int p_shape_A, 
 
 	// Shorten the linear velocity so it does not hit, but gets close enough,
 	// next frame will hit softly or soft enough.
-	Vector2 hitpos = predicted_xform_B.xform(hit_local);
-
-	real_t newlen = hitpos.distance_to(hit_support_from) + (max - min) * 0.01; // adding 1% of body length to the distance between collision and support point should cause body A's support point to arrive just within B's collider next frame.
-	p_A->set_linear_velocity(mnormal * (newlen / p_step));
+	// Move A no farther than the first relative contact plus a small
+	// penetration allowance. Preserve B's velocity when converting this
+	// relative motion back to the world frame.
+	const real_t newlen = CLAMP(best_hit_distance + (max - min) * real_t(0.01), real_t(0.0), mlen);
+	p_A->set_linear_velocity(p_B->get_linear_velocity() + mnormal * (newlen / p_step));
 
 	return true;
 }
