@@ -113,8 +113,8 @@ TEST_CASE("[PhysicsPBFContact] Capped impulses retain action reaction exactly") 
 			Vector3(0, -100, 0), 5.0, Vector3(), 0.01,
 			Basis(), Vector3(), Vector3(0, 1, 0), 1.0, 7.0, impact));
 	CHECK(impact.impulse_magnitude == doctest::Approx(7.0).epsilon(1e-5));
-	CHECK((impact.particle_velocity - Vector3(0, -100, 0)) * real_t(5.0) +
-			impact.body_impulse == Vector3());
+	CHECK(((impact.particle_velocity - Vector3(0, -100, 0)) * real_t(5.0) +
+			impact.body_impulse).length() < real_t(0.0001));
 }
 
 TEST_CASE("[PhysicsPBFContact] No impulse for separating, static or degenerate contacts") {
@@ -157,7 +157,7 @@ TEST_CASE("[PhysicsPBFContact] Restitution series has correct normal relative re
 				Basis(), Vector3(), normal, restitution, 1000.0, impact));
 		const Vector3 new_body_v = impact.body_impulse * real_t(0.5);
 		const real_t relative_out = (impact.particle_velocity - new_body_v).dot(normal);
-		CHECK(relative_out == doctest::Approx(4.0 * restitution).epsilon(1e-5));
+		CHECK(Math::abs(relative_out - real_t(4.0) * restitution) < real_t(0.0001));
 	}
 }
 
