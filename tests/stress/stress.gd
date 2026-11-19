@@ -17,7 +17,7 @@ const CASES := [
 	"resource_load",
 	"input_map",
 	"transform_hierarchy",
-	"node_paths", "regex", "compression", "hashing",
+	"node_paths", "regex", "compression", "gzip_stream", "hashing",
 	"resource_io", "astar_3d", "thread_contention",
 	"geometry_2d", "mesh_build", "input_dispatch", "image_codec", "group_calls",
 	"packed_arrays", "sorting", "animation_tracks", "physics_raycast_2d",
@@ -260,6 +260,8 @@ func _run_case(test_case: String, scale: int, frames: int, seed: int) -> Diction
 			return _regex(scale)
 		"compression":
 			return _compression(scale)
+		"gzip_stream":
+			return _gzip_stream(scale)
 		"hashing":
 			return _hashing(scale)
 		"resource_io":
@@ -1634,3 +1636,59 @@ func _packet_variant_reuse(scale: int) -> Dictionary:
 	var elapsed := float(Time.get_ticks_usec() - started) / 1000.0
 	return {"packets": count, "variant_characters": checksum,
 		"roundtrip_ms": elapsed, "checksum": checksum}
+
+
+# Isolate end-to-end streaming GZIP/DEFLATE (including multi-chunk finish).
+# The content is deliberately difficult to compress to stress the output
+# queue and the bounded zlib scratch buffer.
+func _gzip_stream(scale: int) -> Dictionary:
+	var payload := PackedByteArray()
+	var input_size := mini(1024 * scale, 32768)
+	payload.resize(input_size)
+	var seed := 0x519a07f3
+	for i in range(input_size):
+		seed = (seed * 1664525 + 1013904223) & 0xffffffff
+		payload[i] = (seed >> 24) & 255
+
+	var compression_ms := 0.0
+	var decompression_ms := 0.0
+	var bytes_encoded := 0
+	var checksum := 0
+	var runs := mini(20 * scale, 1000)
+	for i in range(runs):
+		var use_deflate := i % 2 == 0
+		var started := Time.get_ticks_usec()
+		var encoder := StreamPeerGZIP.new()
+		if encoder.start_compression(use_deflate) != OK:
+			return {"error": "GZIP stream initialization failed"}
+		if encoder.put_data(payload) != OK or encoder.finish() != OK:
+			return {"error": "GZIP stream compression failed"}
+		var raw_result: Array = encoder.get_data(encoder.get_available_bytes())
+		if raw_result[0] != OK:
+			return {"error": "GZIP compressed data read failed"}
+		var encoded: PackedByteArray = raw_result[1]
+		compression_ms += float(Time.get_ticks_usec() - started) / 1000.0
+
+		started = Time.get_ticks_usec()
+		var decoder := StreamPeerGZIP.new()
+		if decoder.start_decompression(use_deflate) != OK:
+			return {"error": "GZIP stream decoder initialization failed"}
+		if decoder.put_data(encoded) != OK:
+			return {"error": "GZIP stream decompression failed"}
+		var restored_result: Array = decoder.get_data(input_size)
+		if restored_result[0] != OK:
+			return {"error": "GZIP restored data read failed"}
+		var restored: PackedByteArray = restored_result[1]
+		decompression_ms += float(Time.get_ticks_usec() - started) / 1000.0
+		if restored != payload:
+			return {"error": "GZIP or DEFLATE stream changed payload bytes"}
+		bytes_encoded += encoded.size()
+		checksum += restored[i % restored.size()]
+	return {
+		"roundtrips": runs,
+		"input_size": input_size,
+		"encoded_total_bytes": bytes_encoded,
+		"compression_ms": compression_ms,
+		"decompression_ms": decompression_ms,
+		"checksum": checksum,
+	}

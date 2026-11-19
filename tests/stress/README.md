@@ -491,3 +491,22 @@ sparse million-column case separately. Frame-driven durations may
 include scheduling delays, so these measurements are *triage signals*,
 not C++ function-only timings. Always compare the same test case,
 input size, platform, build flags, clock conditions and driver.
+
+## Streaming GZIP/DEFLATE throughput
+
+The `gzip_stream` scenario cycles between GZIP and raw-zlib DEFLATE
+for difficult-to-compress payloads, checks the full byte-for-byte result
+and reports separate `compression_ms` and `decompression_ms` timings.
+Inputs and repeat counts are capped to keep brutal runs within a fixed
+memory and time budget. The runner also records process RSS.
+
+```bash
+python3 tests/stress/scale_sweep.py \
+  --godot ./bin/godot.linuxbsd.editor.dev.x86_64 \
+  --case gzip_stream --scales 1,2,4,8,16 --repeats 5 \
+  --output out/gzip-stream.json --summary-md out/gzip-stream.md
+```
+
+Use identical hardware and build settings for old/new comparisons.
+The standalone zlib harness verifies finalization correctness, but is
+not a substitute for the native Godot round-trip or benchmark results.

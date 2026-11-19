@@ -35,7 +35,7 @@ CASES = (
     "resource_load",
     "input_map",
     "transform_hierarchy",
-    "node_paths", "regex", "compression", "hashing",
+    "node_paths", "regex", "compression", "gzip_stream", "hashing",
     "resource_io", "astar_3d", "thread_contention",
     "geometry_2d", "mesh_build", "input_dispatch", "image_codec", "group_calls",
     "packed_arrays", "sorting", "animation_tracks", "physics_raycast_2d", "physics_raycast_3d", "render_multimesh_3d",
