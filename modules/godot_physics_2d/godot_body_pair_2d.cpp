@@ -526,13 +526,13 @@ bool GodotBodyPair2D::pre_solve(real_t p_step) {
 			const real_t cached_tangent_limit = mixed_friction * c.acc_normal_impulse;
 			c.acc_tangent_impulse = CLAMP(c.acc_tangent_impulse, -cached_tangent_limit, cached_tangent_limit);
 			const Vector2 tangent = c.normal.orthogonal();
-		if (!report_contacts_only) {
+			if (!report_contacts_only) {
 				const real_t rtA = c.rA.dot(tangent);
 				const real_t rtB = c.rB.dot(tangent);
 				real_t kTangent = inv_mass_A + inv_mass_B;
 				kTangent += inv_inertia_A * (c.rA.dot(c.rA) - rtA * rtA) + inv_inertia_B * (c.rB.dot(c.rB) - rtB * rtB);
 				c.mass_tangent = kTangent > 0.0 ? 1.0f / kTangent : 0.0f;
-		}
+			}
 
 			P += c.acc_tangent_impulse * tangent;
 		} else {
