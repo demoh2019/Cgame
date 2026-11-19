@@ -226,11 +226,20 @@ void TerrainHeightmap::import_height_image(const Ref<Image> &p_image, real_t p_m
     ERR_FAIL_COND(!Math::is_finite(p_min_height) || !Math::is_finite(p_max_height));
     ERR_FAIL_COND(p_max_height < p_min_height);
 
+    const Image::Format format = p_image->get_format();
+    // R-only formats return Color(r, 0, 0, 1). Applying RGB luminance
+    // would incorrectly scale a height of 1.0 to roughly 0.21.
+    const bool single_channel = format == Image::FORMAT_L8 || format == Image::FORMAT_LA8 ||
+            format == Image::FORMAT_R8 || format == Image::FORMAT_RF ||
+            format == Image::FORMAT_RH || format == Image::FORMAT_R16 ||
+            format == Image::FORMAT_R16I;
     PackedFloat32Array samples;
     samples.resize(iw * ih);
     for (int z = 0; z < ih; ++z) {
         for (int x = 0; x < iw; ++x) {
-            samples.set(z * iw + x, Math::lerp(p_min_height, p_max_height, p_image->get_pixel(x, z).get_luminance()));
+            const Color pixel = p_image->get_pixel(x, z);
+            const real_t intensity = single_channel ? pixel.r : pixel.get_luminance();
+            samples.set(z * iw + x, Math::lerp(p_min_height, p_max_height, CLAMP(intensity, real_t(0), real_t(1))));
         }
     }
     set_dimensions(iw, ih);
