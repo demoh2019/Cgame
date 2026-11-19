@@ -17,6 +17,7 @@ const Survival = preload("res://scripts/shared/survival.gd")
 const Movement = preload("res://scripts/shared/movement.gd")
 const Evasion = preload("res://scripts/shared/evasion.gd")
 const Combat = preload("res://scripts/shared/combat.gd")
+const Scavenging = preload("res://scripts/shared/scavenging.gd")
 const Structures = preload("res://scripts/shared/structures.gd")
 const SiegeWaves = preload("res://scripts/shared/siege_waves.gd")
 const Zombie = preload("res://scripts/shared/zombie.gd")
@@ -1216,16 +1217,25 @@ func cmd_loot(peer_id: int, entity_id: int) -> Dictionary:
 			return {"ok": false, "reason": "too_far"}
 		var local_rng := RandomNumberGenerator.new()
 		local_rng.seed = WorldGen.mix(entity_id, int(time), world.world_seed, 3)
-		var loot := Combat.crate_loot(int(crate["zone"]), local_rng)
-		var left := _give_items(player, loot)
+		var zone: int = int(crate["zone"])
+		# Evaluate the bonus at the level earned BEFORE this crate. Only a
+		# real reachable unopened world crate can grant XP or extra materials.
+		var loot: Dictionary = Scavenging.enriched_loot(zone,
+			player.progression.scavenging_level(), Combat.crate_loot(zone, local_rng))
+		var left: Dictionary = _give_items(player, loot)
 		if not left.is_empty():
 			# Whatever does not fit stays on the ground next to the crate.
 			_make_bag(Vector3(crate["x"], crate["y"], crate["z"]), left)
 		opened_crates[entity_id] = time + 600.0
+		var gained_xp: int = player.progression.award_scavenge(zone)
+		if gained_xp > 0:
+			player.dirty_character = true
+			events.append({"type": "scavenging", "peer": peer_id, "xp": gained_xp,
+				"level": player.progression.scavenging_level()})
 		if Contracts.record_crate(player.contract_state, entity_id):
 			player.dirty_character = true
 		events.append({"type": "crate", "peer": peer_id, "id": entity_id})
-		return {"ok": true}
+		return {"ok": true, "scavenging_xp": gained_xp}
 	return {"ok": false, "reason": "nothing_there"}
 
 
@@ -1751,6 +1761,8 @@ func snapshot_for(peer_id: int) -> Dictionary:
 			"gathering_levels": player.progression.levels(), "crafting_level": player.progression.crafting_level(),
 			"crafting_xp": player.progression.crafting_xp,
 			"fishing_level": player.progression.gathering_level("fishing"),
+			"scavenging_level": player.progression.scavenging_level(),
+			"scavenging_xp": player.progression.scavenging_xp,
 			"combat_levels": player.progression.combat_levels(),
 			"contract": player.contract_state.duplicate(true),
 			"carry_kg": player.inventory.total_weight(),
