@@ -1,0 +1,51 @@
+name: GDScript property-list low-allocation regression
+
+on:
+  pull_request:
+    paths:
+      - "modules/gdscript/gdscript.cpp"
+      - "misc/scripts/tests/test_gdscript_property_list_localvectors.py"
+      - "misc/benchmarks/gdscript_property_lists/**"
+      - ".github/workflows/perf-gdscript-property-lists.yml"
+  push:
+    branches: [develop]
+    paths:
+      - "modules/gdscript/gdscript.cpp"
+      - "misc/scripts/tests/test_gdscript_property_list_localvectors.py"
+      - "misc/benchmarks/gdscript_property_lists/**"
+      - ".github/workflows/perf-gdscript-property-lists.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  source-contracts:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - name: Check GDScript property-list storage and ordering invariants
+        run: python3 -m unittest discover -s misc/scripts/tests -p 'test_gdscript_property_list_localvectors.py' -v
+
+  engine-regressions:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install native dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libwayland-bin
+      - uses: ./.github/actions/godot-deps
+      - name: Build Cgame Linux editor with GDScript
+        uses: ./.github/actions/godot-build
+        with:
+          platform: linuxbsd
+          target: editor
+          scons-flags: dev_build=yes debug_symbols=no tests=yes module_text_server_fb_enabled=yes -j2
+      - name: Run inherited properties behavior and timing regression
+        shell: bash
+        run: |
+          set -euo pipefail
+          timeout 180s ./bin/godot.linuxbsd.editor.dev.x86_64 --headless --path misc/benchmarks/gdscript_property_lists --script res://regression.gd
