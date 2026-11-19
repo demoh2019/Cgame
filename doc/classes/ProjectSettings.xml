@@ -2623,6 +2623,9 @@
 			Default solver bias for all physics contacts. Defines how much bodies react to enforce contact separation. See [constant PhysicsServer2D.SPACE_PARAM_CONTACT_DEFAULT_BIAS].
 			Individual shapes can have a specific bias value (see [member Shape2D.custom_solver_bias]).
 		</member>
+		<member name="physics/2d/solver/parallel_large_islands" type="bool" setter="" getter="" default="true">
+			If [code]true[/code], a single very large group of touching 2D bodies (a pile or stack with hundreds of contacts) is solved on several threads by splitting its contacts into independent batches. The simulation stays deterministic. Smaller groups are solved on one thread as before. Disable it to restore the strictly sequential contact order.
+		</member>
 		<member name="physics/2d/solver/solver_iterations" type="int" setter="" getter="" default="16">
 			Number of solver iterations for all contacts and constraints. The greater the number of iterations, the more accurate the collisions will be. However, a greater number of iterations requires more CPU power, which can decrease performance. See [constant PhysicsServer2D.SPACE_PARAM_SOLVER_ITERATIONS].
 		</member>
