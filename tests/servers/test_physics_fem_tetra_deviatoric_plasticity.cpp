@@ -166,11 +166,13 @@ TEST_CASE("[PhysicsFEMDeviatoricPlastic] Inverted, degenerate and invalid inputs
 			normal, -1.0, 0.2, 1.0, 4.0, rest, accumulated));
 	CHECK_FALSE(physics_fem_tetra_creep_deviatoric_rest(
 			normal, 0.0, 0.2, 1.1, 4.0, rest, accumulated));
+	double saturated_history = 4.0;
 	CHECK_FALSE(physics_fem_tetra_creep_deviatoric_rest(
-			normal, 0.0, 0.2, 0.5, 4.0, rest, accumulated));
-	// With zero yield, a small valid plastic step would be allowed above;
-	// the previous call is deliberately used as a fail-safe check only
-	// when its maximum cumulative plastic strain has already been reached.
+			normal, 0.0, 0.2, 0.5, 4.0, rest, saturated_history));
+	CHECK(saturated_history == 4.0);
+	CHECK_FALSE(physics_fem_tetra_creep_deviatoric_rest(
+			normal, 0.0, 0.2, std::numeric_limits<double>::quiet_NaN(),
+			4.0, rest, accumulated));
 	CHECK(rest.volume == doctest::Approx(1.0 / 6.0));
 	CHECK(Math::abs(determinant(rest.inv_dm) - 1.0) < 1e-12);
 	CHECK(accumulated == 0.0);
