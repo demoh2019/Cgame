@@ -264,6 +264,23 @@ void GodotCollisionObject2D::_set_space(GodotSpace2D *p_space) {
 	}
 }
 
+void GodotCollisionObject2D::_collision_filter_changed() {
+	// Collision layers/masks do not modify shape geometry. Rechecking the BVH
+	// directly avoids recalculating every transformed shape bound and ensures
+	// that overlapping stationary objects gain/lose pairs immediately.
+	if (space) {
+		GodotBroadPhase2D *broadphase = space->get_broadphase();
+		for (int i = 0; i < shapes.size(); i++) {
+			const Shape &s = shapes[i];
+			if (s.bpid != 0) {
+				broadphase->force_collision_check(s.bpid);
+			}
+		}
+	}
+	// Preserve existing wake-up, mass-property and area-monitoring behavior.
+	_shapes_changed();
+}
+
 void GodotCollisionObject2D::_shape_changed() {
 	_update_shapes();
 	_shapes_changed();
