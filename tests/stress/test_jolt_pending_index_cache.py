@@ -36,7 +36,7 @@ class JoltPendingIndexCacheTests(unittest.TestCase):
         self.assertNotIn("AAHashMap<", self.header)
         self.assertNotRegex(self.header, r"(?<!A)HashMap<uint32_t, uint32_t>")
         self.assertNotRegex(self.pending, r"(?<!A)HashMap<uint32_t, uint32_t>")
-        self.assertIn("r_indices.reserve(p_bodies.size());", self.pending)
+        self.assertIn("r_indices.reserve(p_bodies.size() + p_bodies.size() / 2 + 1);", self.pending)
         self.assertIn("r_indices.insert(p_bodies[i].GetIndexAndSequenceNumber(), i);", self.pending)
 
     def test_bounded_cache_reuses_small_tables_and_drops_spikes(self):
