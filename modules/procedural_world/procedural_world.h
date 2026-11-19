@@ -43,7 +43,7 @@ protected:
 
 public:
 	// Row-major height map: index = y * width + x.
-	PackedFloat32Array generate_heightmap(int p_width, int p_height, int p_seed, float p_scale = 64.0f, float p_amplitude = 32.0f, int p_octaves = 4) const;
+	PackedFloat32Array generate_heightmap(int p_width, int p_height, int p_seed, float p_scale = 64.0f, float p_amplitude = 32.0f, int p_octaves = 4, const Vector2i &p_origin = Vector2i()) const;
 	PackedFloat32Array erode_heightmap(const PackedFloat32Array &p_heights, int p_width, int p_height, int p_iterations = 8, float p_talus = 1.0f, float p_strength = 0.5f) const;
 
 	// Rejection-based blue-noise-inspired scatter; never returns points closer than min_distance.

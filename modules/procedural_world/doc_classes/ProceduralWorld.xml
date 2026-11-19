@@ -15,7 +15,8 @@
 			<param index="3" name="scale" type="float" default="64.0" />
 			<param index="4" name="amplitude" type="float" default="32.0" />
 			<param index="5" name="octaves" type="int" default="4" />
-			<description>Returns width × height row-major samples of multi-octave value noise. Sizes are capped to protect memory usage.</description>
+			<param index="6" name="origin" type="Vector2i" default="Vector2i(0, 0)" />
+			<description>Returns width × height row-major samples of multi-octave value noise, using origin as the first sample's world coordinate so neighboring heightmap tiles can meet seamlessly. Sizes are capped to protect memory usage.</description>
 		</method>
 		<method name="erode_heightmap" qualifiers="const">
 			<return type="PackedFloat32Array" />
@@ -34,7 +35,7 @@
 			<param index="2" name="seed" type="int" />
 			<param index="3" name="max_points" type="int" default="1024" />
 			<param index="4" name="attempts_per_point" type="int" default="30" />
-			<description>Deterministically scatters points within area with at least min_distance separation. The number returned may be lower than max_points.</description>
+			<description>Deterministically scatters points within area with at least min_distance separation. The number returned may be lower than max_points. Adjacent scatter calls are independent and do not enforce spacing across their boundaries.</description>
 		</method>
 		<method name="get_chunk_coordinates" qualifiers="const">
 			<return type="Array" />

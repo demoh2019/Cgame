@@ -29,6 +29,7 @@
 #pragma once
 
 #include "../procedural_world.h"
+#include "core/math/math_funcs.h"
 #include "tests/test_macros.h"
 
 namespace TestProceduralWorld {
@@ -54,6 +55,19 @@ TEST_CASE("[ProceduralWorld] Seeded heightmaps are deterministic") {
 	}
 }
 
+TEST_CASE("[ProceduralWorld] Tiled heightmaps share identical overlapping samples") {
+	Ref<ProceduralWorld> world;
+	world.instantiate();
+	const PackedFloat32Array left = world->generate_heightmap(8, 6, 1024, 32.0f, 8.0f, 4, Vector2i(-7, -3));
+	const PackedFloat32Array right = world->generate_heightmap(8, 6, 1024, 32.0f, 8.0f, 4, Vector2i(0, -3));
+	REQUIRE(left.size() == 48);
+	REQUIRE(right.size() == 48);
+	for (int y = 0; y < 6; y++) {
+		CHECK(left[y * 8 + 7] == right[y * 8]);
+	}
+	CHECK(left != right);
+}
+
 TEST_CASE("[ProceduralWorld] Heightmap inputs are bounded") {
 	Ref<ProceduralWorld> world;
 	world.instantiate();
@@ -63,6 +77,7 @@ TEST_CASE("[ProceduralWorld] Heightmap inputs are bounded") {
 	CHECK(world->generate_heightmap(8, 8, 1, 0.0f).is_empty());
 	CHECK(world->generate_heightmap(8, 8, 1, 1.0f, -1.0f).is_empty());
 	CHECK(world->generate_heightmap(8, 8, 1, 1.0f, 1.0f, 0).is_empty());
+	CHECK(world->generate_heightmap(8, 8, 1, 1.0f, 1.0f, 4, Vector2i(1000001, 0)).is_empty());
 	ERR_PRINT_ON;
 }
 

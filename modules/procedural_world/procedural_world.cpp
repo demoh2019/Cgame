@@ -60,10 +60,11 @@ float ProceduralWorld::_noise(float p_x, float p_y, uint32_t p_seed) {
 	return (upper + (lower - upper) * ty) * 2.0f - 1.0f;
 }
 
-PackedFloat32Array ProceduralWorld::generate_heightmap(int p_width, int p_height, int p_seed, float p_scale, float p_amplitude, int p_octaves) const {
+PackedFloat32Array ProceduralWorld::generate_heightmap(int p_width, int p_height, int p_seed, float p_scale, float p_amplitude, int p_octaves, const Vector2i &p_origin) const {
 	ERR_FAIL_COND_V_MSG(p_width <= 0 || p_height <= 0 || p_width > 2048 || p_height > 2048 || int64_t(p_width) * p_height > 4194304, PackedFloat32Array(), "Heightmap dimensions must be positive and contain at most 4194304 samples.");
 	ERR_FAIL_COND_V_MSG(!Math::is_finite(p_scale) || p_scale < 0.001f || !Math::is_finite(p_amplitude) || p_amplitude < 0.0f, PackedFloat32Array(), "Scale must be finite and >= 0.001, and amplitude must be finite and nonnegative.");
 	ERR_FAIL_COND_V_MSG(p_octaves < 1 || p_octaves > 8, PackedFloat32Array(), "Octaves must be in range 1..8.");
+	ERR_FAIL_COND_V_MSG(Math::abs(int64_t(p_origin.x)) > 1000000 || Math::abs(int64_t(p_origin.y)) > 1000000, PackedFloat32Array(), "Heightmap world origin must lie within +/-1000000.");
 
 	PackedFloat32Array heights;
 	heights.resize(p_width * p_height);
@@ -75,7 +76,7 @@ PackedFloat32Array ProceduralWorld::generate_heightmap(int p_width, int p_height
 			float octave_amplitude = 1.0f;
 			float frequency = 1.0f / p_scale;
 			for (int octave = 0; octave < p_octaves; octave++) {
-				value += _noise(float(x) * frequency, float(y) * frequency, uint32_t(p_seed) + uint32_t(octave) * 0x9e3779b9U) * octave_amplitude;
+				value += _noise(float(p_origin.x + x) * frequency, float(p_origin.y + y) * frequency, uint32_t(p_seed) + uint32_t(octave) * 0x9e3779b9U) * octave_amplitude;
 				weight += octave_amplitude;
 				octave_amplitude *= 0.5f;
 				frequency *= 2.0f;
@@ -199,7 +200,7 @@ Array ProceduralWorld::get_chunk_coordinates(const Rect2 &p_world_area, int p_ch
 }
 
 void ProceduralWorld::_bind_methods() {
-	ClassDB::bind_method(D_METHOD("generate_heightmap", "width", "height", "seed", "scale", "amplitude", "octaves"), &ProceduralWorld::generate_heightmap, DEFVAL(64.0f), DEFVAL(32.0f), DEFVAL(4));
+	ClassDB::bind_method(D_METHOD("generate_heightmap", "width", "height", "seed", "scale", "amplitude", "octaves", "origin"), &ProceduralWorld::generate_heightmap, DEFVAL(64.0f), DEFVAL(32.0f), DEFVAL(4), DEFVAL(Vector2i()));
 	ClassDB::bind_method(D_METHOD("erode_heightmap", "heights", "width", "height", "iterations", "talus", "strength"), &ProceduralWorld::erode_heightmap, DEFVAL(8), DEFVAL(1.0f), DEFVAL(0.5f));
 	ClassDB::bind_method(D_METHOD("scatter_points", "area", "min_distance", "seed", "max_points", "attempts_per_point"), &ProceduralWorld::scatter_points, DEFVAL(1024), DEFVAL(30));
 	ClassDB::bind_method(D_METHOD("get_chunk_coordinates", "world_area", "chunk_size"), &ProceduralWorld::get_chunk_coordinates, DEFVAL(64));
