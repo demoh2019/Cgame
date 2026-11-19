@@ -135,7 +135,9 @@ func _run() -> void:
 		errors.append("Topology-connected quad moved unexpectedly")
 
 	for body_idx in range(3):
-		var pins: Array[int] = [0, 3] if body_idx != 1 else [2, 5]
+		var pins: Array[int] = [0, 3]
+		if body_idx == 1:
+			pins = [2, 5]
 		for index in pins:
 			if not PhysicsServer3D.soft_body_is_point_pinned(bodies[body_idx], index):
 				errors.append("Pinned particle released, body " + str(body_idx))
