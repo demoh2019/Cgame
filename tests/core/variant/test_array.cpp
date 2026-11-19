@@ -192,6 +192,73 @@ TEST_CASE("[Array] typed append_array rejects invalid elements atomically") {
 	CHECK_EQ(double(target[0]), 7.0);
 }
 
+TEST_CASE("[Array] typed append_array accepts compatible untyped values") {
+	TypedArray<int> destination = { 8 };
+	Array source = { 1, 2, 3, 4 };
+	destination.append_array(source);
+	REQUIRE_EQ(destination.size(), 5);
+	CHECK_EQ(destination[0], Variant(8));
+	for (int i = 0; i < 4; ++i) {
+		CHECK_EQ(destination[i + 1], Variant(i + 1));
+	}
+	source[0] = 99;
+	CHECK_EQ(destination[1], Variant(1));
+}
+
+TEST_CASE("[Array] typed append_array handles empty untyped sources") {
+	TypedArray<int> destination = { 8 };
+	Array source;
+	destination.append_array(source);
+	CHECK_EQ(destination.size(), 1);
+	CHECK_EQ(destination[0], Variant(8));
+}
+
+TEST_CASE("[Array] typed append_array converts mixed numeric values") {
+	TypedArray<double> destination = { 9.0 };
+	Array source = { 1, 2.5, 3, 4.5 };
+	destination.append_array(source);
+	REQUIRE_EQ(destination.size(), 5);
+	CHECK_EQ(destination[0], Variant(9.0));
+	CHECK_EQ(destination[1], Variant(1.0));
+	CHECK_EQ(destination[2], Variant(2.5));
+	CHECK_EQ(destination[3], Variant(3.0));
+	CHECK_EQ(destination[4], Variant(4.5));
+	for (int i = 0; i < destination.size(); ++i) {
+		CHECK_EQ(Variant(destination[i]).get_type(), Variant::FLOAT);
+	}
+}
+
+TEST_CASE("[Array] typed append_array preserves compatible prefix") {
+	TypedArray<double> destination;
+	Array source = { 1.25, 2.5, 3, 4.75, 5 };
+	destination.append_array(source);
+	REQUIRE_EQ(destination.size(), 5);
+	CHECK_EQ(destination[0], Variant(1.25));
+	CHECK_EQ(destination[1], Variant(2.5));
+	CHECK_EQ(destination[2], Variant(3.0));
+	CHECK_EQ(destination[3], Variant(4.75));
+	CHECK_EQ(destination[4], Variant(5.0));
+	source[2] = -3;
+	CHECK_EQ(destination[2], Variant(3.0));
+}
+
+TEST_CASE("[Array] typed append_array handles repeated appends and aliases") {
+	TypedArray<int> destination = { 4, 5, 6 };
+	for (int repeat = 0; repeat < 3; ++repeat) {
+		Array source = { 1, 2 };
+		destination.append_array(source);
+	}
+	REQUIRE_EQ(destination.size(), 9);
+	CHECK_EQ(destination[7], Variant(1));
+	CHECK_EQ(destination[8], Variant(2));
+	TypedArray<int> aliased = { 4, 5 };
+	Array alias = aliased;
+	aliased.append_array(alias);
+	REQUIRE_EQ(aliased.size(), 4);
+	CHECK_EQ(aliased[2], Variant(4));
+	CHECK_EQ(aliased[3], Variant(5));
+}
+
 TEST_CASE("[Array] resize(), insert(), and erase()") {
 	Array arr;
 	arr.resize(2);
