@@ -57,7 +57,7 @@ static func _process(kind: String, params: Dictionary, source: Array, seed: int,
 				return _failure("RANDOM_FILTER chance must be within 0..1")
 			var chance: float = float(params["chance"])
 			var rng := RandomNumberGenerator.new()
-			rng.seed = seed ^ (node_id * 1140071481932319847)
+			rng.seed = seed ^ (node_id * 2246822519)
 			for point in source:
 				if rng.randf() < chance:
 					result.append(point)
