@@ -170,6 +170,130 @@ void cast_segment(const POINT &p_from, const POINT &p_to, SegmentCastCallback p_
 	}
 }
 
+// Stream query candidates directly to a caller-supplied narrowphase filter.
+// Unlike cull_point/cull_aabb these visitors cannot discard valid results
+// when a fixed-size candidate buffer is filled by filtered-out objects.
+// Return false from a visitor to stop traversal once enough actual hits exist.
+using QueryVisitor = bool (*)(T *, int, void *);
+
+bool visit_point(const POINT &p_point, QueryVisitor p_visitor, void *p_userdata, uint32_t p_tree_collision_mask = 0xFFFFFFFF, const T *p_tester = nullptr) {
+	if (!p_visitor || !p_tree_collision_mask) {
+		return true;
+	}
+	for (int tree_index = 0; tree_index < NUM_TREES; ++tree_index) {
+		if (!(p_tree_collision_mask & (uint32_t(1) << tree_index))) {
+			continue;
+		}
+		const uint32_t root = _root_node_id[tree_index];
+		if (root != BVHCommon::INVALID && !_visit_point_iterative(root, p_point, p_visitor, p_userdata, p_tester)) {
+			return false;
+		}
+	}
+	return true;
+}
+
+bool visit_aabb(const BOUNDS &p_aabb, QueryVisitor p_visitor, void *p_userdata, uint32_t p_tree_collision_mask = 0xFFFFFFFF, const T *p_tester = nullptr) {
+	if (!p_visitor || !p_tree_collision_mask) {
+		return true;
+	}
+	BVHABB_CLASS query;
+	query.from(p_aabb);
+	for (int tree_index = 0; tree_index < NUM_TREES; ++tree_index) {
+		if (!(p_tree_collision_mask & (uint32_t(1) << tree_index))) {
+			continue;
+		}
+		const uint32_t root = _root_node_id[tree_index];
+		if (root != BVHCommon::INVALID && !_visit_aabb_iterative(root, query, p_visitor, p_userdata, p_tester)) {
+			return false;
+		}
+	}
+	return true;
+}
+
+private:
+// Unlike the fixed-capacity cull variants, these routines apply the callback
+// immediately, without storing any candidate ids or making heap allocations.
+bool _visit_point_iterative(uint32_t p_node_id, const POINT &p_point, QueryVisitor p_visitor, void *p_userdata, const T *p_tester) {
+	struct StackItem {
+		uint32_t node_id;
+	};
+	BVH_IterativeInfo<StackItem> stack;
+	stack.stack = (StackItem *)alloca(stack.get_alloca_stacksize());
+	stack.get_first()->node_id = p_node_id;
+
+	StackItem next;
+	while (stack.pop(next)) {
+		TNode &node = _nodes[next.node_id];
+		if (!node.aabb.intersects_point(p_point)) {
+			continue;
+		}
+		if (node.is_leaf()) {
+			TLeaf &leaf = _node_get_leaf(node);
+			for (int i = 0; i < leaf.num_items; ++i) {
+				if (!leaf.get_aabb(i).intersects_point(p_point)) {
+					continue;
+				}
+				const ItemExtra &extra = _extra[leaf.get_item_ref_id(i)];
+				if (USE_PAIRS && !USER_CULL_TEST_FUNCTION::user_cull_check(p_tester, extra.userdata)) {
+					continue;
+				}
+				if (!p_visitor(extra.userdata, extra.subindex, p_userdata)) {
+					return false;
+				}
+			}
+		} else {
+			for (int i = 0; i < node.num_children; ++i) {
+				const uint32_t child_id = node.children[i];
+				if (_nodes[child_id].aabb.intersects_point(p_point)) {
+					stack.request()->node_id = child_id;
+				}
+			}
+		}
+	}
+	return true;
+}
+
+bool _visit_aabb_iterative(uint32_t p_node_id, const BVHABB_CLASS &p_query, QueryVisitor p_visitor, void *p_userdata, const T *p_tester) {
+	struct StackItem {
+		uint32_t node_id;
+	};
+	BVH_IterativeInfo<StackItem> stack;
+	stack.stack = (StackItem *)alloca(stack.get_alloca_stacksize());
+	stack.get_first()->node_id = p_node_id;
+
+	StackItem next;
+	while (stack.pop(next)) {
+		TNode &node = _nodes[next.node_id];
+		if (!node.aabb.intersects(p_query)) {
+			continue;
+		}
+		if (node.is_leaf()) {
+			TLeaf &leaf = _node_get_leaf(node);
+			for (int i = 0; i < leaf.num_items; ++i) {
+				if (!leaf.get_aabb(i).intersects(p_query)) {
+					continue;
+				}
+				const ItemExtra &extra = _extra[leaf.get_item_ref_id(i)];
+				if (USE_PAIRS && !USER_CULL_TEST_FUNCTION::user_cull_check(p_tester, extra.userdata)) {
+					continue;
+				}
+				if (!p_visitor(extra.userdata, extra.subindex, p_userdata)) {
+					return false;
+				}
+			}
+		} else {
+			for (int i = 0; i < node.num_children; ++i) {
+				const uint32_t child_id = node.children[i];
+				if (_nodes[child_id].aabb.intersects(p_query)) {
+					stack.request()->node_id = child_id;
+				}
+			}
+		}
+	}
+	return true;
+}
+
+public:
 int cull_point(CullParams &r_params, bool p_translate_hits = true) {
 	_cull_hits.clear();
 	r_params.result_count = 0;
