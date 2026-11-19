@@ -1,0 +1,13 @@
+; Open World Tools isolated prototype project.
+config_version=5
+
+[application]
+config/name="Godot Open World Tools Prototype"
+run/main_scene="res://demo.tscn"
+
+[editor_plugins]
+enabled=PackedStringArray("res://addons/open_world_tools/plugin.cfg")
+
+[rendering]
+renderer/rendering_method="gl_compatibility"
+renderer/rendering_method.mobile="gl_compatibility"
