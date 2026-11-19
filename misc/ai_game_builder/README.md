@@ -16,6 +16,30 @@ A compatible default endpoint is https://api.openai.com/v1/chat/completions. A l
 
 The API key is held only in the dock's memory. This plugin does not persist it.
 
+## Product focus: fast, reliable game creation
+
+AI Game Builder is the highest-priority product workflow in Cgame. The
+immediate goal is a **repeatable prompt → review → check → repair → approve**
+cycle for a playable prototype, not uncontrolled autonomous code execution.
+
+Provider connection safety is part of that workflow. The endpoint validator
+accepts HTTPS with a syntactically valid hostname, and HTTP only for the
+exact loopback hostnames `localhost`, `127.0.0.1`, and `[::1]`. It rejects
+URL userinfo, host-prefix spoofing such as
+`http://localhost:1234@other-server`, invalid ports, fragments,
+backslashes, and control characters. API keys remain in memory and cannot
+contain header-control characters. The URL validation is not a full
+network-isolation sandbox; review any custom HTTPS endpoint before sending
+your prompt or key.
+
+Generated files must also have portable names (including Windows device-name
+rules); the writer rechecks output paths before each file operation. This
+reduces accidental overwrites and common symlink redirects, but malicious
+concurrent filesystem races require operating-system sandboxing.
+
+The standalone test suite includes endpoint policy, credentials/header,
+reserved filename, and multi-file no-overwrite regression cases.
+
 ## Safety limits
 
 - AI only returns candidate text files. It cannot execute commands, edit existing files, install packages, or make arbitrary changes to engine settings.
