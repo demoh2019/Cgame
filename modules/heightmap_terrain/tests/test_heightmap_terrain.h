@@ -260,4 +260,148 @@ TEST_CASE("[Terrain] Generated mesh passes painted vertex colors") {
     memdelete(terrain);
 }
 
+TEST_CASE("[Terrain] Brush accepts very large off-map coordinates without mutation") {
+    Ref<TerrainHeightmap> data;
+    data.instantiate();
+    data->set_dimensions(3, 3);
+    const PackedFloat32Array before_height = data->get_heights();
+    const PackedColorArray before_color = data->get_colors();
+    data->apply_height_brush(Vector2(1e20, 1e20), 3, 7);
+    data->apply_height_brush(Vector2(-1e20, -1e20), 3, 7);
+    data->apply_color_brush(Vector2(1e20, 1e20), 3, Color(0, 1, 0), 1);
+    data->apply_color_brush(Vector2(-1e20, -1e20), 3, Color(0, 1, 0), 1);
+    CHECK(data->get_heights() == before_height);
+    CHECK(data->get_colors() == before_color);
+}
+
+TEST_CASE("[Terrain] Invalid resolution never corrupts the grid") {
+    Ref<TerrainHeightmap> data;
+    data.instantiate();
+    data->set_dimensions(3, 3);
+    data->set_height(1, 1, 4);
+    ERR_PRINT_OFF;
+    data->set_dimensions(0, 3);
+    data->set_dimensions(3, 1);
+    data->set_dimensions(TerrainHeightmap::MAX_RESOLUTION + 1, 3);
+    ERR_PRINT_ON;
+    CHECK(data->get_width() == 3);
+    CHECK(data->get_depth() == 3);
+    CHECK(data->get_heights().size() == 9);
+    CHECK(data->get_height(1, 1) == 4);
+}
+
+TEST_CASE("[Terrain] Invalid height arrays cannot overwrite valid samples") {
+    Ref<TerrainHeightmap> data;
+    data.instantiate();
+    data->set_dimensions(2, 2);
+    data->set_height(1, 1, 7);
+    PackedFloat32Array short_array;
+    short_array.resize(3);
+    PackedFloat32Array nan_array;
+    nan_array.resize(4);
+    nan_array.set(2, Math::NaN);
+    ERR_PRINT_OFF;
+    data->set_heights(short_array);
+    data->set_heights(nan_array);
+    ERR_PRINT_ON;
+    CHECK(data->get_height(1, 1) == 7);
+    CHECK(data->get_heights().size() == 4);
+}
+
+TEST_CASE("[Terrain] Invalid color arrays cannot overwrite valid colors") {
+    Ref<TerrainHeightmap> data;
+    data.instantiate();
+    data->set_dimensions(2, 2);
+    data->apply_color_brush(Vector2(0, 0), 0.5, Color(0, 0, 1), 1);
+    PackedColorArray short_array;
+    short_array.resize(3);
+    PackedColorArray nan_array;
+    nan_array.resize(4);
+    nan_array.set(2, Color(Math::NaN, 0, 0));
+    ERR_PRINT_OFF;
+    data->set_colors(short_array);
+    data->set_colors(nan_array);
+    ERR_PRINT_ON;
+    CHECK(data->get_color(0, 0) == Color(0, 0, 1));
+    CHECK(data->get_colors().size() == 4);
+}
+
+TEST_CASE("[Terrain] Heightmap can be shared between multiple terrain nodes") {
+    Ref<TerrainHeightmap> shared;
+    shared.instantiate();
+    shared->set_dimensions(2, 2);
+    HeightmapTerrain3D *a = memnew(HeightmapTerrain3D);
+    HeightmapTerrain3D *b = memnew(HeightmapTerrain3D);
+    a->set_heightmap(shared);
+    b->set_heightmap(shared);
+    shared->set_height(1, 1, 4);
+    const Array a_arrays = a->get_mesh()->surface_get_arrays(0);
+    const Array b_arrays = b->get_mesh()->surface_get_arrays(0);
+    const PackedVector3Array a_vertices = a_arrays[Mesh::ARRAY_VERTEX];
+    const PackedVector3Array b_vertices = b_arrays[Mesh::ARRAY_VERTEX];
+    CHECK(a_vertices[3].y == doctest::Approx(4));
+    CHECK(b_vertices[3].y == doctest::Approx(4));
+    memdelete(a);
+    memdelete(b);
+}
+
+TEST_CASE("[Terrain] Switching heightmap disconnects old resource updates") {
+    Ref<TerrainHeightmap> first;
+    Ref<TerrainHeightmap> second;
+    first.instantiate();
+    second.instantiate();
+    first->set_dimensions(2, 2);
+    second->set_dimensions(2, 2);
+    HeightmapTerrain3D *terrain = memnew(HeightmapTerrain3D);
+    terrain->set_heightmap(first);
+    terrain->set_heightmap(second);
+    first->set_height(1, 1, 100);
+    const Array old_arrays = terrain->get_mesh()->surface_get_arrays(0);
+    const PackedVector3Array old_vertices = old_arrays[Mesh::ARRAY_VERTEX];
+    CHECK(old_vertices[3].y == doctest::Approx(0));
+    second->set_height(1, 1, 9);
+    const Array new_arrays = terrain->get_mesh()->surface_get_arrays(0);
+    const PackedVector3Array new_vertices = new_arrays[Mesh::ARRAY_VERTEX];
+    CHECK(new_vertices[3].y == doctest::Approx(9));
+    memdelete(terrain);
+}
+
+TEST_CASE("[Terrain] Sloped mesh produces finite unit normals") {
+    Ref<TerrainHeightmap> data;
+    data.instantiate();
+    data->set_dimensions(3, 3);
+    for (int z = 0; z < 3; ++z) {
+        for (int x = 0; x < 3; ++x) {
+            data->set_height(x, z, x + z);
+        }
+    }
+    HeightmapTerrain3D *terrain = memnew(HeightmapTerrain3D);
+    terrain->set_heightmap(data);
+    const Array arrays = terrain->build_mesh()->surface_get_arrays(0);
+    const PackedVector3Array normals = arrays[Mesh::ARRAY_NORMAL];
+    REQUIRE(normals.size() == 9);
+    for (int i = 0; i < normals.size(); ++i) {
+        CHECK(normals[i].is_finite());
+        CHECK(normals[i].length() == doctest::Approx(1.0));
+        CHECK(normals[i].y > 0);
+    }
+    CHECK(normals[4].is_equal_approx(Vector3(-1, 1, -1).normalized()));
+    memdelete(terrain);
+}
+
+TEST_CASE("[Terrain] Invalid cell size keeps the last valid mesh scaling") {
+    HeightmapTerrain3D *terrain = memnew(HeightmapTerrain3D);
+    terrain->set_cell_size(5);
+    ERR_PRINT_OFF;
+    terrain->set_cell_size(0);
+    terrain->set_cell_size(-1);
+    terrain->set_cell_size(Math::NaN);
+    ERR_PRINT_ON;
+    CHECK(terrain->get_cell_size() == 5);
+    const Array arrays = terrain->build_mesh()->surface_get_arrays(0);
+    const PackedVector3Array verts = arrays[Mesh::ARRAY_VERTEX];
+    CHECK(verts[1].x == doctest::Approx(5));
+    memdelete(terrain);
+}
+
 } // namespace TestHeightmapTerrain
