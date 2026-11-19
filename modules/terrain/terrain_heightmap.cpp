@@ -184,8 +184,13 @@ void TerrainHeightmap::sculpt(const Vector2 &p_center, float p_radius, float p_d
         return;
     }
     bool modified = false;
-    for (int z = 0; z < dimensions.y; z++) {
-        for (int x = 0; x < dimensions.x; x++) {
+    // Visit only the brush's clamped bounding box, rather than the whole terrain.
+    const int min_x = int(CLAMP(Math::floor(p_center.x - p_radius), 0.0f, float(dimensions.x - 1)));
+    const int max_x = int(CLAMP(Math::ceil(p_center.x + p_radius), 0.0f, float(dimensions.x - 1)));
+    const int min_z = int(CLAMP(Math::floor(p_center.y - p_radius), 0.0f, float(dimensions.y - 1)));
+    const int max_z = int(CLAMP(Math::ceil(p_center.y + p_radius), 0.0f, float(dimensions.y - 1)));
+    for (int z = min_z; z <= max_z; z++) {
+        for (int x = min_x; x <= max_x; x++) {
             const float dist = Vector2(x, z).distance_to(p_center);
             if (dist >= p_radius) {
                 continue;
@@ -214,8 +219,13 @@ void TerrainHeightmap::smooth(const Vector2 &p_center, float p_radius, float p_s
     }
     const PackedFloat32Array original = heights.duplicate();
     bool modified = false;
-    for (int z = 0; z < dimensions.y; z++) {
-        for (int x = 0; x < dimensions.x; x++) {
+    // Visit only the brush's clamped bounding box, rather than the whole terrain.
+    const int min_x = int(CLAMP(Math::floor(p_center.x - p_radius), 0.0f, float(dimensions.x - 1)));
+    const int max_x = int(CLAMP(Math::ceil(p_center.x + p_radius), 0.0f, float(dimensions.x - 1)));
+    const int min_z = int(CLAMP(Math::floor(p_center.y - p_radius), 0.0f, float(dimensions.y - 1)));
+    const int max_z = int(CLAMP(Math::ceil(p_center.y + p_radius), 0.0f, float(dimensions.y - 1)));
+    for (int z = min_z; z <= max_z; z++) {
+        for (int x = min_x; x <= max_x; x++) {
             const float dist = Vector2(x, z).distance_to(p_center);
             if (dist >= p_radius) {
                 continue;
@@ -311,8 +321,13 @@ void TerrainHeightmap::paint_layer(const Vector2 &p_center, float p_radius, int 
             p_layer == 2 ? 1.0f : 0.0f,
             p_layer == 3 ? 1.0f : 0.0f);
     bool modified = false;
-    for (int z = 0; z < dimensions.y; z++) {
-        for (int x = 0; x < dimensions.x; x++) {
+    // Visit only the brush's clamped bounding box, rather than the whole terrain.
+    const int min_x = int(CLAMP(Math::floor(p_center.x - p_radius), 0.0f, float(dimensions.x - 1)));
+    const int max_x = int(CLAMP(Math::ceil(p_center.x + p_radius), 0.0f, float(dimensions.x - 1)));
+    const int min_z = int(CLAMP(Math::floor(p_center.y - p_radius), 0.0f, float(dimensions.y - 1)));
+    const int max_z = int(CLAMP(Math::ceil(p_center.y + p_radius), 0.0f, float(dimensions.y - 1)));
+    for (int z = min_z; z <= max_z; z++) {
+        for (int x = min_x; x <= max_x; x++) {
             const float dist = Vector2(x, z).distance_to(p_center);
             if (dist >= p_radius) {
                 continue;
@@ -375,7 +390,7 @@ PackedVector3Array TerrainHeightmap::scatter_points(int p_seed, float p_spacing,
     const int cols = int(cols_d);
     const int rows = int(rows_d);
     const float max_slope_tangent = p_max_slope_degrees == 90.0f ?
-            INFINITY : Math::tan(p_max_slope_degrees * float(Math::PI) / 180.0f);
+            std::numeric_limits<float>::infinity() : Math::tan(p_max_slope_degrees * float(Math::PI) / 180.0f);
 
     const uint32_t seed = uint32_t(p_seed);
     for (int z = 0; z < rows; z++) {
