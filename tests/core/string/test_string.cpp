@@ -683,6 +683,98 @@ TEST_CASE("[String] Find MK") {
 	CHECK(s.findmk(keys, 1000, &key) == -1);
 }
 
+TEST_CASE("[String] Find MK filters middle mismatches and preserves key order") {
+	Vector<String> keys;
+	keys.push_back("aXYZz");
+	keys.push_back("a123z");
+	keys.push_back("a12");
+	keys.push_back("zz");
+	keys.push_back("a123z");
+	const String haystack = "qqqa12zzzzza123z";
+	int matched_key = -7;
+	CHECK(haystack.findmk(keys, 0, &matched_key) == 3);
+	CHECK(matched_key == 2);
+	CHECK(haystack.findmk(keys, 5, &matched_key) == 6);
+	CHECK(matched_key == 3);
+	CHECK(haystack.findmk(keys, 11, &matched_key) == 11);
+	CHECK(matched_key == 1); // Earlier identical key wins.
+	CHECK(haystack.findmk(keys, 99, &matched_key) == -1);
+	CHECK(matched_key == 1); // A miss does not alter output metadata.
+}
+
+TEST_CASE("[String] Find MK preserves empty keys and UTF32 matching") {
+	Vector<String> keys;
+	keys.push_back(U"🚀Ω");
+	keys.push_back(U"Ω🚀");
+	keys.push_back("");
+	keys.push_back(U"🚀");
+	const String haystack = U"αβΩ🚀γ";
+	int matched = -1;
+	CHECK(haystack.findmk(keys, 0, &matched) == 0);
+	CHECK(matched == 2);
+	CHECK(haystack.findmk(keys, 3, &matched) == 3);
+	CHECK(matched == 2);
+
+	Vector<String> without_empty;
+	without_empty.push_back(U"🚀Ω");
+	without_empty.push_back(U"Ω🚀");
+	CHECK(haystack.findmk(without_empty, 0, &matched) == 2);
+	CHECK(matched == 1);
+	CHECK(haystack.findmk(without_empty, 3, &matched) == -1);
+	CHECK(matched == 1);
+	CHECK(String().findmk(without_empty, 0, &matched) == -1);
+	CHECK(matched == 1);
+}
+
+TEST_CASE("[String] Find MK deterministic differential search") {
+	uint32_t seed = 0x9e3779b9;
+	auto next = [&seed]() {
+		seed ^= seed << 13;
+		seed ^= seed >> 17;
+		seed ^= seed << 5;
+		return seed;
+	};
+	for (int trial = 0; trial < 180; trial++) {
+		String haystack;
+		const int haystack_len = 20 + int(next() % 120);
+		for (int i = 0; i < haystack_len; i++) {
+			haystack += String::chr(U'a' + (next() % 5));
+		}
+		Vector<String> patterns;
+		const int count = 1 + int(next() % 24);
+		for (int k = 0; k < count; k++) {
+			String token;
+			const int n = int(next() % 9);
+			for (int j = 0; j < n; j++) {
+				token += String::chr(U'a' + (next() % 5));
+			}
+			patterns.push_back(token);
+		}
+		for (int j = 0; j < 15; j++) {
+			const int from = int(next() % (haystack_len + 8)) - 3;
+			int expected_index = -1;
+			int expected_key = -1;
+			for (int pos = MAX(0, from); pos < haystack.length() && from >= 0 && expected_index < 0; pos++) {
+				for (int k = 0; k < patterns.size(); k++) {
+					if (patterns[k].length() <= haystack.length() - pos &&
+							haystack.substr(pos, patterns[k].length()) == patterns[k]) {
+						expected_index = pos;
+						expected_key = k;
+						break;
+					}
+				}
+			}
+			int actual_key = -99;
+			CHECK(haystack.findmk(patterns, from, &actual_key) == expected_index);
+			if (expected_index >= 0) {
+				CHECK(actual_key == expected_key);
+			} else {
+				CHECK(actual_key == -99);
+			}
+		}
+	}
+}
+
 TEST_CASE("[String] Find and replace") {
 	String s = "Happy Birthday, Anna!";
 	MULTICHECK_STRING_STRING_EQ(s, replace, "Birthday", "Halloween", "Happy Halloween, Anna!");

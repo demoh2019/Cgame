@@ -1,0 +1,46 @@
+name: Multi-pattern String search regressions
+
+on:
+  pull_request:
+    branches: [develop]
+    paths:
+      - 'core/string/ustring.cpp'
+      - 'tests/core/string/test_string.cpp'
+      - 'misc/scripts/tests/test_string_findmk_compilation.py'
+      - '.github/workflows/string-findmk-candidates.yml'
+  push:
+    branches: [develop]
+    paths:
+      - 'core/string/ustring.cpp'
+      - 'tests/core/string/test_string.cpp'
+      - 'misc/scripts/tests/test_string_findmk_compilation.py'
+      - '.github/workflows/string-findmk-candidates.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  gcc-clang-search:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - name: Test the production multi-key implementation with deterministic C++ oracle
+        run: python3 misc/scripts/tests/test_string_findmk_compilation.py
+  native-string-search:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+      - uses: ./.github/actions/godot-deps
+      - name: Build engine with native doctests
+        uses: ./.github/actions/godot-build
+        with:
+          platform: linuxbsd
+          target: editor
+          scons-flags: dev_build=yes tests=yes debug_symbols=no module_mono_enabled=no module_text_server_fb_enabled=yes accesskit=no -j2
+      - name: Run Find MK native regression cases
+        run: ./bin/godot.linuxbsd.editor.dev.x86_64 --headless --test --test-case="*[String] Find MK*"

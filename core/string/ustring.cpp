@@ -3269,42 +3269,42 @@ int String::find_char(char32_t p_char, int p_from) const {
 }
 
 int String::findmk(const Vector<String> &p_keys, int p_from, int *r_key) const {
-	if (p_from < 0) {
+	const int len = length();
+	if (p_from < 0 || p_from >= len || p_keys.is_empty()) {
 		return -1;
 	}
-	if (p_keys.is_empty()) {
-		return -1;
-	}
 
-	//int str_len=p_str.length();
-	const String *keys = &p_keys[0];
-	int key_count = p_keys.size();
-	int len = length();
-
-	if (len == 0) {
-		return -1; // won't find anything!
-	}
-
+	// Preserve the first matching position, then the caller's key order.
+	// Filter the overwhelmingly common misses before calling memcmp.
+	const String *keys = p_keys.ptr();
+	const int key_count = p_keys.size();
 	const char32_t *src = get_data();
 
 	for (int i = p_from; i < len; i++) {
+		const int remaining = len - i;
 		for (int k = 0; k < key_count; k++) {
 			const int str_len = keys[k].length();
-
-			if (i + str_len > len) {
-				continue; // Can't find this key here.
+			if (str_len > remaining) {
+				continue;
 			}
-
-			const char32_t *str = keys[k].get_data();
-			if (are_spans_equal(src + i, str, str_len)) {
-				if (r_key) {
-					*r_key = k;
+			// Empty needles match the current position as in the old implementation.
+			if (str_len != 0) {
+				const char32_t *str = keys[k].get_data();
+				if (src[i] != str[0] ||
+						(str_len > 1 && src[i + str_len - 1] != str[str_len - 1])) {
+					continue;
 				}
-				return i;
+				// Endpoints have already matched. Two-char keys need no memcmp.
+				if (str_len > 2 && !are_spans_equal(src + i + 1, str + 1, str_len - 2)) {
+					continue;
+				}
 			}
+			if (r_key) {
+				*r_key = k;
+			}
+			return i;
 		}
 	}
-
 	return -1;
 }
 
