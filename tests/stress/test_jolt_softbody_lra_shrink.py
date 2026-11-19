@@ -36,7 +36,10 @@ class JoltSoftBodyLRAShrinkTests(unittest.TestCase):
         self.assertIn("const float multiplier = 1.0f - shrinking_factor;", m)
         self.assertIn("for (JPH::SoftBodySharedSettings::Edge &e : settings->mEdgeConstraints)", m)
         self.assertIn("e.mRestLength *= multiplier;", m)
+        self.assertIn("if (multiplier != 1.0f) {", m)
         self.assertIn("for (JPH::SoftBodySharedSettings::LRA &tether : settings->mLRAConstraints)", m)
+        self.assertLess(m.index("if (multiplier != 1.0f) {"),
+                        m.index("tether.mMaxDistance *= multiplier;"))
         self.assertIn("tether.mMaxDistance *= multiplier;", m)
         self.assertIn("float mMaxDistance = 0.0f;", self.lra_header)
         self.assertLess(m.index("settings->CreateConstraints(&vertex_attrib"),
