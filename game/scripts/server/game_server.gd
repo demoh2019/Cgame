@@ -9,6 +9,7 @@ const WorldGen = preload("res://scripts/shared/world_gen.gd")
 const Inventory = preload("res://scripts/shared/inventory.gd")
 const Vendor = preload("res://scripts/shared/vendor.gd")
 const PlayerTrade = preload("res://scripts/shared/player_trade.gd")
+const Party = preload("res://scripts/shared/party.gd")
 const MarketBoard = preload("res://scripts/shared/market_board.gd")
 const Contracts = preload("res://scripts/shared/contracts.gd")
 const SaveValidation = preload("res://scripts/shared/save_validation.gd")
@@ -95,6 +96,7 @@ var market_orders: Dictionary = {} # id -> advertised online stock (not escrow).
 var market_sales: Array = [] # Bounded session-only receipts, NOT durable settlement.
 var market_buy_requests: Dictionary = {} # Peer -> last request ID, arguments and result.
 var trade_by_player: Dictionary = {} # peer -> active trade
+var parties = Party.new() # Server-only session groups and short-lived invitations.
 var world_structure_revision: int = 0
 var bags: Dictionary = {} # bag id -> {"id", "x","y","z", "items": {id: n}, "expires": t}
 var events: Array = [] # Things that happened this tick, for the network layer to announce.
@@ -269,6 +271,7 @@ func remove_player(peer_id: int) -> void:
 	market_buy_requests.erase(peer_id)
 	_cancel_market_seller(peer_id)
 	_cancel_player_trade(peer_id, "disconnected")
+	parties.disconnect(peer_id)
 	var player: Player = players.get(peer_id)
 	if player != null and not player.user_id.is_empty():
 		for wall in barricades.values():
@@ -429,6 +432,69 @@ func cmd_craft(peer_id: int, recipe_id: String, times: int = 1) -> Dictionary:
 		player.dirty_character = true
 		return {"ok": true}
 	return {"ok": false, "reason": ["ok", "unknown_recipe", "missing_inputs", "no_station", "no_space"][status]}
+
+
+# --- Cooperative survivor parties (classic MMO-style group play) -----------------------
+## Invite only a real nearby player. All membership and leadership is
+## session-owned; no client supplies a party ID or its member list.
+func cmd_party_invite(peer_id: int, target_id: int) -> Dictionary:
+	var source: Player = players.get(peer_id)
+	var target: Player = players.get(target_id)
+	if source == null or target == null or not _alive(source) or not _alive(target):
+		return {"ok": false, "reason": "unavailable"}
+	if not Party_member_invite_range(source, target):
+		return {"ok": false, "reason": "too_far"}
+	return parties.invite(peer_id, target_id, time)
+
+
+func Party_member_invite_range(first: Player, second: Player) -> bool:
+	var a := Vector2(first.position.x, first.position.z)
+	var b := Vector2(second.position.x, second.position.z)
+	return a.is_finite() and b.is_finite() and a.distance_to(b) <= Party.INVITE_RANGE
+
+
+func cmd_party_accept(peer_id: int) -> Dictionary:
+	var target: Player = players.get(peer_id)
+	if target == null or not _alive(target):
+		return {"ok": false, "reason": "dead"}
+	var invite: Dictionary = parties.invites.get(peer_id, {})
+	if invite.is_empty():
+		return {"ok": false, "reason": "no_invite"}
+	if time >= float(invite["expires"]):
+		return parties.accept(peer_id, time)
+	var leader: Player = players.get(int(invite["from"]))
+	if leader == null or not _alive(leader):
+		return {"ok": false, "reason": "leader_offline"}
+	if not Party_member_invite_range(leader, target):
+		return {"ok": false, "reason": "too_far"}
+	return parties.accept(peer_id, time)
+
+
+func cmd_party_decline(peer_id: int) -> Dictionary:
+	return parties.decline(peer_id)
+
+
+func cmd_party_leave(peer_id: int) -> Dictionary:
+	return parties.leave(peer_id)
+
+
+func cmd_party_kick(peer_id: int, target_id: int) -> Dictionary:
+	return parties.kick(peer_id, target_id)
+
+
+func _party_state_for(peer_id: int) -> Dictionary:
+	var state: Dictionary = parties.state_for(peer_id)
+	var roster: Array = []
+	for id in state["members"]:
+		var member: Player = players.get(id)
+		if member != null:
+			roster.append({"id": int(id), "name": member.name,
+				"alive": _alive(member), "health": member.survival.health})
+	state["roster"] = roster
+	var invite_from: int = int(state["invite_from"])
+	var sender: Player = players.get(invite_from)
+	state["invite_name"] = sender.name if sender != null else ""
+	return state
 
 
 # --- Direct player trade -------------------------------------------------------------------------------
@@ -1491,6 +1557,7 @@ func tick(delta: float) -> void:
 	tick_count += 1
 	_tick_market()
 	_tick_trades()
+	parties.expire(time)
 	_tick_players(delta)
 	if tick_count % SiegeWaves.CHECK_EVERY_TICKS == 0:
 		_tick_siege_waves()
@@ -1819,6 +1886,7 @@ func snapshot_for(peer_id: int) -> Dictionary:
 	var snapshot := {
 		"tick": tick_count, "time": time, "ack": player.last_input_seq,
 		"you": {
+			"party": _party_state_for(peer_id),
 			"x": player.position.x, "y": player.position.y, "z": player.position.z, "yaw": player.yaw,
 			"health": player.survival.health, "hunger": player.survival.hunger, "thirst": player.survival.thirst,
 			"stamina": player.survival.stamina,
