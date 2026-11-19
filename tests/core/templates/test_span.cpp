@@ -177,4 +177,36 @@ TEST_CASE("[Span] Constexpr byte search retains compile-time evaluation") {
 	CHECK(span.find(uint8_t(4)) == 4);
 }
 
+TEST_CASE("[Span] Fundamental storage identity and value comparisons") {
+	int values[2048];
+	int identical_copy[2048];
+	for (int i = 0; i < 2048; i++) {
+		values[i] = (i * 17) ^ (i >> 3);
+		identical_copy[i] = values[i];
+	}
+	const Span<int> original(values);
+	const Span<int> same_bytes(values);
+	const Span<int> independent(identical_copy);
+	CHECK(original == same_bytes);
+	CHECK(original == independent);
+	identical_copy[2047]++;
+	CHECK(original != independent);
+	CHECK(original == same_bytes);
+	CHECK(Span<int>() == Span<int>());
+
+	const float negative_zero[] = { -0.0f };
+	const float positive_zero[] = { 0.0f };
+	CHECK(Span<float>(negative_zero) == Span<float>(negative_zero));
+	CHECK(Span<float>(negative_zero) != Span<float>(positive_zero));
+}
+
+TEST_CASE("[Span] Non-reflexive custom comparisons still call element equality") {
+	struct NeverEqual {
+		bool operator!=(const NeverEqual &) const { return true; }
+	};
+	NeverEqual value;
+	const Span<NeverEqual> same(&value, 1);
+	CHECK_FALSE(same == same);
+}
+
 } // namespace TestSpan
