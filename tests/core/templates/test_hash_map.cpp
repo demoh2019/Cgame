@@ -201,4 +201,56 @@ TEST_CASE("[AnimationAudioMapFastPath] missing and existing track keys preserve 
 	CHECK_EQ(playing[18], 240);
 }
 
+
+TEST_CASE("[ViewportMaskFastPath] missing mask lookup does not insert a viewport") {
+	HashMap<int, uint64_t> masks;
+	CHECK(masks.getptr(100) == nullptr);
+	CHECK(masks.is_empty());
+	const uint64_t *existing = masks.getptr(100);
+	const uint64_t mask = existing != nullptr ? *existing : 0;
+	CHECK_EQ(mask, uint64_t(0));
+	CHECK(masks.is_empty());
+}
+
+TEST_CASE("[ViewportMaskFastPath] registered viewport returns the original 64-bit mask") {
+	HashMap<int, uint64_t> masks;
+	const uint64_t high_bit = uint64_t(1) << 63;
+	masks[101] = high_bit;
+	const uint64_t *ptr = masks.getptr(101);
+	REQUIRE(ptr != nullptr);
+	CHECK_EQ(*ptr, high_bit);
+	CHECK_EQ(masks.size(), 1);
+}
+
+TEST_CASE("[ViewportMaskFastPath] removing viewport releases only its visibility bit") {
+	HashMap<int, uint64_t> masks;
+	uint64_t used = uint64_t(1) | uint64_t(4) | (uint64_t(1) << 63);
+	masks[1] = uint64_t(1);
+	masks[2] = uint64_t(4);
+	masks[3] = uint64_t(1) << 63;
+	const uint64_t *entry = masks.getptr(2);
+	REQUIRE(entry != nullptr);
+	const uint64_t removed_mask = *entry;
+	used &= ~removed_mask;
+	masks.erase(2);
+	CHECK_EQ(used, uint64_t(1) | (uint64_t(1) << 63));
+	CHECK(masks.getptr(2) == nullptr);
+	CHECK_EQ(*masks.getptr(1), uint64_t(1));
+	CHECK_EQ(*masks.getptr(3), uint64_t(1) << 63);
+}
+
+TEST_CASE("[ViewportMaskFastPath] adding a viewport preserves existing mask pointers after lookup") {
+	HashMap<int, uint64_t> masks;
+	masks[1] = uint64_t(1);
+	const uint64_t *mask = masks.getptr(2);
+	CHECK(mask == nullptr);
+	if (mask == nullptr) {
+		masks[2] = uint64_t(2);
+		mask = masks.getptr(2);
+	}
+	REQUIRE(mask != nullptr);
+	CHECK_EQ(*mask, uint64_t(2));
+	CHECK_EQ(*masks.getptr(1), uint64_t(1));
+}
+
 } // namespace TestHashMap
