@@ -225,31 +225,34 @@ void RenderingDevice::_remove_dependency(RID p_id, RID p_depends_on) {
 void RenderingDevice::_free_dependencies(RID p_id) {
 	_THREAD_SAFE_METHOD_
 
-	// Direct dependencies must be freed.
-
-	HashMap<RID, HashSet<RID>>::Iterator E = dependency_map.find(p_id);
-	if (E) {
-		while (E->value.size()) {
-			free_rid(*E->value.begin());
+	// Direct dependencies are freed recursively. Unlike HashMap, AHashMap
+	// relocates entries when removing an element, so an iterator cannot survive
+	// any recursive free_rid() that may remove other dependency map entries.
+	while (true) {
+		AHashMap<RID, HashSet<RID>>::Iterator E = dependency_map.find(p_id);
+		if (!E) {
+			break;
 		}
-		dependency_map.remove(E);
+		if (E->value.is_empty()) {
+			dependency_map.erase(p_id);
+			break;
+		}
+		const RID dependent = *E->value.begin();
+		free_rid(dependent);
 	}
 
 	// Reverse dependencies must be unreferenced.
-	E = reverse_dependency_map.find(p_id);
-
+	AHashMap<RID, HashSet<RID>>::Iterator E = reverse_dependency_map.find(p_id);
 	if (E) {
 		for (const RID &F : E->value) {
-			HashMap<RID, HashSet<RID>>::Iterator G = dependency_map.find(F);
+			AHashMap<RID, HashSet<RID>>::Iterator G = dependency_map.find(F);
 			ERR_CONTINUE(!G);
 			ERR_CONTINUE(!G->value.has(p_id));
 			G->value.erase(p_id);
 		}
-
 		reverse_dependency_map.remove(E);
 	}
 }
-
 void RenderingDevice::_replace_dependency(RID p_dependent, RID p_old_dependency, RID p_new_dependency) {
 	// Remove the edge: p_old_dependency -> p_dependent.
 	{
@@ -7729,7 +7732,7 @@ bool RenderingDevice::_dependency_make_mutable(RID p_id, RID p_resource_id, RDG:
 
 bool RenderingDevice::_dependencies_make_mutable_recursive(RID p_id, RDG::ResourceTracker *p_resource_tracker) {
 	bool made_mutable = false;
-	HashMap<RID, HashSet<RID>>::Iterator E = dependency_map.find(p_id);
+	AHashMap<RID, HashSet<RID>>::Iterator E = dependency_map.find(p_id);
 	if (E) {
 		for (RID rid : E->value) {
 			made_mutable = _dependency_make_mutable(rid, p_id, p_resource_tracker) || made_mutable;
@@ -7995,7 +7998,7 @@ void RenderingDevice::texture_replace_rid(RID p_old_texture, RID p_new_texture) 
 		new_us->driver_id = RDD::UniformSetID();
 
 		// Remove its dependency entries and free the temporary RID.
-		HashMap<RID, HashSet<RID>>::Iterator rev_it = reverse_dependency_map.find(new_us_rid);
+		AHashMap<RID, HashSet<RID>>::Iterator rev_it = reverse_dependency_map.find(new_us_rid);
 		if (rev_it) {
 			for (const RID &dep_on : rev_it->value) {
 				HashSet<RID> *fwd = dependency_map.getptr(dep_on);
@@ -8005,7 +8008,7 @@ void RenderingDevice::texture_replace_rid(RID p_old_texture, RID p_new_texture) 
 			}
 			reverse_dependency_map.remove(rev_it);
 		}
-		HashMap<RID, HashSet<RID>>::Iterator fwd_it = dependency_map.find(new_us_rid);
+		AHashMap<RID, HashSet<RID>>::Iterator fwd_it = dependency_map.find(new_us_rid);
 		if (fwd_it) {
 			dependency_map.remove(fwd_it);
 		}
