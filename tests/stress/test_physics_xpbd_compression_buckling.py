@@ -86,7 +86,7 @@ class XPBDCompressionBucklingTests(unittest.TestCase):
         self.assertNotIn("memnew(", helper)
         self.assertNotIn("malloc(", helper)
 
-    def test_native_tests_cover_12_scenarios(self):
+    def test_native_tests_cover_14_scenarios(self):
         native = (ROOT / "tests/servers/test_physics_xpbd_compression_buckling.cpp").read_text()
         self.assertIn("TEST_FORCE_LINK(test_physics_xpbd_compression_buckling)", native)
         self.assertGreaterEqual(native.count("TEST_CASE("), 12)
