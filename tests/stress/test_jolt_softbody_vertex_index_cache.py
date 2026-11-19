@@ -68,7 +68,7 @@ class JoltSoftBodyVertexIndexCacheTests(unittest.TestCase):
     def test_compact_contiguous_position_index(self):
         self.assertIn('#include "core/templates/a_hash_map.h"', self.source)
         self.assertIn("AHashMap<Vector3, int> vertex_to_physics;", self.mesh)
-        self.assertNotIn("HashMap<Vector3, int>", self.mesh)
+        self.assertNotRegex(self.mesh, r"(?<!A)HashMap<Vector3, int>")
         self.assertIn("max_referenced_vertices = MIN(", self.mesh)
         self.assertIn("vertex_to_physics.reserve(max_referenced_vertices + max_referenced_vertices / 2 + 1);", self.mesh)
 
