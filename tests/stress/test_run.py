@@ -21,6 +21,10 @@ class CaseSelectionTests(unittest.TestCase):
         selected = stress.choose_cases([], "headless")
         self.assertIn("physics_2d", selected)
         self.assertIn("physics_3d", selected)
+        self.assertIn("physics_dense_2d", selected)
+        self.assertIn("physics_dense_3d", selected)
+        self.assertIn("physics_pending_3d", selected)
+        self.assertIn("physics_ccd_3d", selected)
         self.assertNotIn("render_2d", selected)
 
     def test_curve_stress_cases_are_selectable_and_headless(self):
