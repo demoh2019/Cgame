@@ -675,19 +675,34 @@ void BitMap::resize(const Size2i &p_new_size) {
 	Ref<BitMap> new_bitmap;
 	new_bitmap.instantiate();
 	new_bitmap->create(p_new_size);
-	// also allow for upscaling
-	int lw = (width == 0) ? 0 : p_new_size.width;
-	int lh = (height == 0) ? 0 : p_new_size.height;
-
-	float scale_x = ((float)width / p_new_size.width);
-	float scale_y = ((float)height / p_new_size.height);
-	for (int x = 0; x < lw; x++) {
-		for (int y = 0; y < lh; y++) {
-			bool new_bit = get_bit(x * scale_x, y * scale_y);
-			new_bitmap->set_bit(x, y, new_bit);
+	if (new_bitmap->get_size() == p_new_size && width > 0 && height > 0) {
+		// Match the original nearest-neighbor sampling and float precision,
+		// but traverse destination rows in order. The destination is zeroed
+		// by create(), so only the set source bits need to be written.
+		const float scale_x = float(width) / p_new_size.width;
+		const float scale_y = float(height) / p_new_size.height;
+		const uint8_t *source = bitmask.ptr();
+		uint8_t *destination = new_bitmap->bitmask.ptrw();
+		for (int y = 0; y < p_new_size.height; y++) {
+			const int source_y = int(y * scale_y);
+			if (source_y < 0 || source_y >= height) {
+				continue;
+			}
+			const int source_row = source_y * width;
+			const int dest_row = y * p_new_size.width;
+			for (int x = 0; x < p_new_size.width; x++) {
+				const int source_x = int(x * scale_x);
+				if (source_x < 0 || source_x >= width) {
+					continue;
+				}
+				const int source_bit = source_row + source_x;
+				if (source[source_bit >> 3] & (1u << (source_bit & 7))) {
+					const int dest_bit = dest_row + x;
+					destination[dest_bit >> 3] |= uint8_t(1u << (dest_bit & 7));
+				}
+			}
 		}
 	}
-
 	width = new_bitmap->width;
 	height = new_bitmap->height;
 	bitmask = new_bitmap->bitmask;
