@@ -4,7 +4,7 @@
         Renders and edits a simple heightmap-based landscape.
     </brief_description>
     <description>
-        Generates a triangle mesh from a [TerrainHeightmap], including normals, UVs, and vertex colors. The editor provides a brush toolbar for raising, lowering, and coloring the terrain with Undo/Redo. The generated mesh is regenerated when height or color data changes.
+        Generates a triangle mesh from a [TerrainHeightmap], including normals, UVs, and vertex colors. The editor provides brush tools for raising, lowering, vertex-color painting, and painting four texture layers, with Undo/Redo. Assign textures to the layer properties to enable the built-in splat-blend shader; an explicit custom [member terrain_material] takes precedence. The generated mesh is regenerated when height or color data changes.
         [b]Note:[/b] The current implementation is intended for small meshes only, as editing any sample rebuilds the entire mesh. Physics collision, tiled LOD, foliage, and world streaming are not generated automatically.
     </description>
     <tutorials>
@@ -31,6 +31,24 @@
         </member>
         <member name="heightmap" type="TerrainHeightmap" setter="set_heightmap" getter="get_heightmap">
             Heightmap resource from which the mesh is generated.
+        </member>
+        <member name="splatmap" type="TerrainSplatmap" setter="set_splatmap" getter="get_splatmap">
+            Four-channel texture blending mask. This is kept in sync with the heightmap's dimensions.
+        </member>
+        <member name="layer_0" type="Texture2D" setter="set_layer_0" getter="get_layer_0">
+            Base material's color texture, corresponding to the red splatmap channel.
+        </member>
+        <member name="layer_1" type="Texture2D" setter="set_layer_1" getter="get_layer_1">
+            Layer texture corresponding to the green splatmap channel.
+        </member>
+        <member name="layer_2" type="Texture2D" setter="set_layer_2" getter="get_layer_2">
+            Layer texture corresponding to the blue splatmap channel.
+        </member>
+        <member name="layer_3" type="Texture2D" setter="set_layer_3" getter="get_layer_3">
+            Layer texture corresponding to the alpha splatmap channel.
+        </member>
+        <member name="texture_tiling" type="float" setter="set_texture_tiling" getter="get_texture_tiling" default="8.0">
+            Number of texture repetitions across the full terrain extent. Does not change mask coordinates.
         </member>
         <member name="terrain_material" type="Material" setter="set_terrain_material" getter="get_terrain_material">
             Optional material assigned to the generated surface. By default, a standard material displays the painted vertex colors.
