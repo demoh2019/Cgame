@@ -85,6 +85,8 @@ class GodotSoftBody3D : public GodotCollisionObject3D {
 	// Only allocated when the experimental XPBD solver is enabled. The
 	// lambda for each link is retained across iterations of the same step.
 	LocalVector<real_t> xpbd_link_lambdas;
+	// Reused per-link alpha cache; never allocated with isotropic XPBD.
+	LocalVector<real_t> xpbd_fiber_alphas;
 	// One compliance multiplier per triangle, allocated only in area-XPBD mode.
 	LocalVector<real_t> xpbd_area_lambdas;
 	// Optional per-face undeformed angle and per-step XPBD multipliers.
