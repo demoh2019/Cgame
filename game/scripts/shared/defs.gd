@@ -251,6 +251,14 @@ static func _build_items() -> void:
 	_add_recipe("purified_serum", "purified_serum", 1,
 		{"infected_core": 2, "bandage": 1, "water_bottle": 1},
 		"workbench", 6.0)
+	# Rare raid equipment: no loot-table bypass. Earn cores through real elite
+	# infected and raid kills, then craft it with tier 3 artisan mastery.
+	_add_item("purifier_maul_3", {"name": "Purifier Maul T3", "kind": "weapon",
+		"weapon": "melee", "tier": 3, "damage": 32.0, "cooldown": 0.78,
+		"infected_bonus": 0.25, "weight": 4.8, "value": 260})
+	_add_recipe("purifier_maul_3", "purifier_maul_3", 1,
+		{"infected_core": 4, "bar_3": 3, "plank_3": 2, "cloth_3": 1},
+		"workbench", 9.0)
 	# Days After loot: only found while scavenging ruins.
 	_add_item("pistol", {"name": "Pistol", "kind": "weapon", "weapon": "ranged", "tier": 3, "damage": 22.0, "cooldown": 0.45, "ammo": "ammo_9mm", "value": 150})
 	# Ranged fighting can be sustained through scavenging and T2 metalworking.

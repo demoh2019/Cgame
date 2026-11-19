@@ -20,6 +20,17 @@ static func weapon_damage(weapon_id: String) -> float:
 	return float(Defs.item(weapon_id).get("damage", 6.0))
 
 
+## Bounded anti-infected trait is applied only against server-confirmed
+## infected targets. No PvP multiplier or client-reported damage is trusted.
+static func against_infected(damage: float, weapon_id: String, carried: bool) -> float:
+	if not is_finite(damage) or damage <= 0.0:
+		return 0.0
+	if not carried:
+		return damage
+	var bonus: float = float(Defs.item(weapon_id).get("infected_bonus", 0.0))
+	return damage * (1.0 + clampf(bonus, 0.0, 0.5))
+
+
 static func weapon_cooldown(weapon_id: String) -> float:
 	if weapon_id == "":
 		return 0.6
@@ -29,7 +40,13 @@ static func weapon_cooldown(weapon_id: String) -> float:
 ## A server-owned ability granted by a melee club, independent of character class.
 static func active_skill(weapon_id: String) -> Dictionary:
 	var info: Dictionary = Defs.item(weapon_id)
-	if info.is_empty() or str(info.get("weapon", "")) != "melee" or not weapon_id.begins_with("club_"):
+	if info.is_empty() or str(info.get("weapon", "")) != "melee":
+		return {}
+	if weapon_id == "purifier_maul_3":
+		return {"id": "purifying_slam", "energy_cost": 35.0, "cooldown": 8.0,
+			"attack_lock": 1.1, "range": Defs.MELEE_RANGE + 0.8,
+			"damage": weapon_damage(weapon_id) * 1.5}
+	if not weapon_id.begins_with("club_"):
 		return {}
 	return {"id": "heavy_strike", "energy_cost": 30.0, "cooldown": 6.0,
 		"attack_lock": 0.95, "range": Defs.MELEE_RANGE + 0.6,

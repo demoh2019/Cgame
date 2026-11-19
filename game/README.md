@@ -1416,3 +1416,25 @@ This is still session-based **party** warfare, not durable guild
 territory ownership. A future phase must authenticate guilds in Nakama
 and persist fortification ownership transactionally before cross-server
 clan sieges. No native Cgame engine changes were necessary for this stage.
+
+
+## Raid trophy armament: Purifier Maul T3
+
+Elite- and raid-only Infected Cores now provide a second gameplay progression
+loop beyond medicinal serum. A survivor with Crafting T3 can forge the
+**Purifier Maul T3** from four cores, three T3 bars, two T3 planks and one
+T3 cloth at the permanent workbench. The maul is a normal traded, dropped,
+equipped melee weapon, compatible with weapon mastery and full-loot combat.
+
+The maul grants a dedicated **Purifying Slam** active melee ability
+(35 combat energy; 8-second cooldown) and **25% bonus damage to infected**,
+including elite enemies and raid bosses. The bonus applies only after an
+actual server-confirmed infected target is hit and the player physically
+carries the equipped maul. PvP damage, other weapons, unarmed attacks
+and ghost equipment never gain this bonus. Existing safe hub, party PvP
+protection, armor, inventory and skill cooldown checks remain in place.
+
+`game/tests/test_purifier_maul.gd` validates the full boss-material
+recipe, tier gates, consumed resources, real authoritative attacks, the
+special ability, cooldowns and the PvP/PvE damage separation. The
+existing Cgame engine APIs support this without native changes.
