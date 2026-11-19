@@ -11,7 +11,7 @@ const CASES := [
 	"file_io", "threads", "physics_2d", "physics_3d",
 	"memory_churn", "astar_grid", "tweens", "audio_buffers",
 	"variant_codec", "render_2d", "render_3d",
-	"astar_graph", "compression", "regex", "resource_io", "animation_tracks", "ui_layout",
+	"astar_graph", "animation_tracks",
 	"node_paths", "regex", "compression", "hashing",
 	"resource_io", "astar_3d", "ui_layout", "thread_contention",
 ]
@@ -188,16 +188,8 @@ func _run_case(test_case: String, scale: int, frames: int, seed: int) -> Diction
 			return _variant_codec(scale)
 		"astar_graph":
 			return _astar_graph(scale)
-		"compression":
-			return _compression(scale)
-		"regex":
-			return _regex(scale)
-		"resource_io":
-			return _resource_io(scale)
 		"animation_tracks":
 			return _animation_tracks(scale)
-		"ui_layout":
-			return await _ui_layout(scale, frames)
 		"tweens":
 			return await _tweens(scale, frames)
 		"physics_2d":
@@ -666,53 +658,6 @@ func _astar_graph(scale: int) -> Dictionary:
 		checksum += path.size()
 	return {"vertices": WIDTH * WIDTH, "searches": 40 * scale, "checksum": checksum}
 
-
-func _compression(scale: int) -> Dictionary:
-	var source := PackedByteArray()
-	source.resize(256 * 1024)
-	for i in range(source.size()):
-		source[i] = (i >> 6) & 255
-	var total_encoded := 0
-	for i in range(40 * scale):
-		var packed := source.compress(FileAccess.COMPRESSION_ZSTD)
-		var unpacked := packed.decompress(source.size(), FileAccess.COMPRESSION_ZSTD)
-		if unpacked != source:
-			return {"error": "ZSTD roundtrip mismatch"}
-		total_encoded += packed.size()
-	return {"roundtrips": 40 * scale, "uncompressed_bytes": source.size() * 40 * scale,
-		"compressed_bytes": total_encoded}
-
-
-func _regex(scale: int) -> Dictionary:
-	var expression := RegEx.new()
-	if expression.compile("event_[0-9]+:([a-z]+)") != OK:
-		return {"error": "Could not compile RegEx"}
-	var checksum := 0
-	for i in range(3000 * scale):
-		var match_result := expression.search("source event_%d:running completed" % i)
-		if match_result == null or match_result.get_string(1) != "running":
-			return {"error": "RegEx match mismatch"}
-		checksum += match_result.get_string(0).length()
-	return {"matches": 3000 * scale, "checksum": checksum}
-
-
-func _resource_io(scale: int) -> Dictionary:
-	var path := "user://stress_gradient.tres"
-	var resource := Gradient.new()
-	resource.add_point(0.25, Color.RED)
-	resource.add_point(0.75, Color.BLUE)
-	var count := 0
-	for i in range(20 * scale):
-		if ResourceSaver.save(resource, path) != OK:
-			return {"error": "Resource save failed"}
-		var loaded := ResourceLoader.load(path, "Gradient", ResourceLoader.CACHE_MODE_IGNORE) as Gradient
-		if loaded == null or loaded.get_point_count() != resource.get_point_count():
-			return {"error": "Resource load failed"}
-		count += 1
-	DirAccess.remove_absolute(ProjectSettings.globalize_path(path))
-	return {"save_load_pairs": count}
-
-
 func _animation_tracks(scale: int) -> Dictionary:
 	var animation := Animation.new()
 	animation.length = 1.0
@@ -726,29 +671,3 @@ func _animation_tracks(scale: int) -> Dictionary:
 		checksum += value.x + value.y
 	return {"interpolations": 30000 * scale, "checksum": checksum}
 
-
-func _ui_layout(scale: int, frames: int) -> Dictionary:
-	var column := VBoxContainer.new()
-	root.add_child(column)
-	var rows: Array[HBoxContainer] = []
-	var count := 75 * scale
-	for i in range(count):
-		var row := HBoxContainer.new()
-		var button := Button.new()
-		button.text = "Action %d" % i
-		row.add_child(button)
-		var label := Label.new()
-		label.text = "Value %d" % i
-		row.add_child(label)
-		column.add_child(row)
-		rows.append(row)
-	var peak_frame_ms := 0.0
-	for frame in range(frames):
-		for j in range(mini(8 * scale, count)):
-			var label := rows[(frame * 7 + j) % count].get_child(1) as Label
-			label.text = "Frame %d - %d" % [frame, j]
-		await process_frame
-		peak_frame_ms = maxf(peak_frame_ms, Performance.get_monitor(Performance.TIME_PROCESS) * 1000.0)
-	column.queue_free()
-	await process_frame
-	return {"rows": count, "frames": frames, "peak_frame_ms": peak_frame_ms}
