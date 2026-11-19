@@ -57,6 +57,9 @@ public:
 	// Opt-in, bounded CPU soft-soft particle contacts; independent of Jolt's
 	// built-in soft-rigid contact pipeline. These settings apply per step.
 	inline static bool soft_body_soft_contacts = false;
+	// Optional vertex-versus-triangle soft contacts; replaces the cheaper
+	// vertex-versus-vertex method when enabled. Requires soft_contacts=true.
+	inline static bool soft_body_soft_vertex_face_contacts = false;
 	inline static float soft_body_soft_contact_radius = 0.1f;
 	inline static float soft_body_soft_contact_recovery = 0.2f;
 	inline static float soft_body_soft_contact_friction = 0.2f;
