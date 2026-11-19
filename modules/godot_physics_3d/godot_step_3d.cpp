@@ -41,6 +41,8 @@
 
 // Avoid worker pool task/wakeup overhead when the workload is smaller than a batch.
 static constexpr uint32_t MIN_PARALLEL_SETUP_CONSTRAINTS = 32;
+// Amortize thread-pool callback dispatch across independent constraints.
+static constexpr uint32_t PARALLEL_SETUP_BATCH_SIZE = 16;
 static constexpr uint32_t MIN_PARALLEL_SOLVE_ISLANDS = 16;
 
 // Parallel graph coloring only pays off for large connected rigid-body groups.
@@ -143,6 +145,14 @@ void GodotStep3D::_integrate_forces_block(uint32_t p_block_index, void *p_userda
 void GodotStep3D::_setup_constraint(uint32_t p_constraint_index, void *p_userdata) {
 	GodotConstraint3D *constraint = all_constraints[p_constraint_index];
 	constraint->setup(delta);
+}
+
+void GodotStep3D::_setup_constraint_batch(uint32_t p_batch_index, void *p_userdata) {
+	const uint32_t begin = p_batch_index * PARALLEL_SETUP_BATCH_SIZE;
+	const uint32_t end = MIN(begin + PARALLEL_SETUP_BATCH_SIZE, all_constraints.size());
+	for (uint32_t constraint_index = begin; constraint_index < end; ++constraint_index) {
+		_setup_constraint(constraint_index, nullptr);
+	}
 }
 
 void GodotStep3D::_pre_solve_island(LocalVector<GodotConstraint3D *> &p_constraint_island) const {
@@ -551,7 +561,10 @@ void GodotStep3D::step(GodotSpace3D *p_space, real_t p_delta) {
 			_setup_constraint(constraint_index, nullptr);
 		}
 	} else {
-		WorkerThreadPool::GroupID group_task = WorkerThreadPool::get_singleton()->add_template_group_task(this, &GodotStep3D::_setup_constraint, nullptr, total_constraint_count, -1, true, SNAME("Physics3DConstraintSetup"));
+		// Each worker callback performs a contiguous run of independent
+		// constraint setups, reducing scheduling overhead in dense scenes.
+		const uint32_t batch_count = (total_constraint_count + PARALLEL_SETUP_BATCH_SIZE - 1) / PARALLEL_SETUP_BATCH_SIZE;
+		WorkerThreadPool::GroupID group_task = WorkerThreadPool::get_singleton()->add_template_group_task(this, &GodotStep3D::_setup_constraint_batch, nullptr, batch_count, -1, true, SNAME("Physics3DConstraintSetup"));
 		WorkerThreadPool::get_singleton()->wait_for_group_task_completion(group_task);
 	}
 
