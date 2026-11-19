@@ -4,12 +4,14 @@ on:
   pull_request:
     paths:
       - 'core/math/a_star_grid_2d.cpp'
+      - 'core/math/a_star_grid_2d.h'
       - 'tests/core/math/test_astar.cpp'
       - '.github/workflows/astar-grid-bulk-update.yml'
   push:
     branches: [develop]
     paths:
       - 'core/math/a_star_grid_2d.cpp'
+      - 'core/math/a_star_grid_2d.h'
       - 'tests/core/math/test_astar.cpp'
       - '.github/workflows/astar-grid-bulk-update.yml'
   workflow_dispatch:
