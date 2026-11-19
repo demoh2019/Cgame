@@ -74,6 +74,9 @@ void JoltProjectSettings::register_settings() {
 	// Self-collision operates on non-adjacent vertex/face pairs only; the
 	// topology-aware CPU pass is separately budgeted and disabled by default.
 	GLOBAL_DEF(PropertyInfo(Variant::BOOL, "physics/jolt_physics_3d/simulation/soft_body_self_contacts"), false);
+	// Full moving-triangle closest-point conservative advancement for
+	// non-neighboring vertices, using the existing per-space self VF cap.
+	GLOBAL_DEF(PropertyInfo(Variant::BOOL, "physics/jolt_physics_3d/simulation/soft_body_self_speculative_vertex_face_ccd"), false);
 	// Capture narrow cloth folds where two nonadjacent edges cross even
 	// though no point comes close to an opposing triangle.
 	GLOBAL_DEF(PropertyInfo(Variant::BOOL, "physics/jolt_physics_3d/simulation/soft_body_self_edge_contacts"), false);
@@ -206,6 +209,7 @@ void JoltProjectSettings::read_settings() {
 	soft_body_soft_speculative_ccd = GLOBAL_GET("physics/jolt_physics_3d/simulation/soft_body_soft_speculative_ccd");
 	soft_body_soft_speculative_edge_ccd = GLOBAL_GET("physics/jolt_physics_3d/simulation/soft_body_soft_speculative_edge_ccd");
 	soft_body_self_contacts = GLOBAL_GET("physics/jolt_physics_3d/simulation/soft_body_self_contacts");
+	soft_body_self_speculative_vertex_face_ccd = GLOBAL_GET("physics/jolt_physics_3d/simulation/soft_body_self_speculative_vertex_face_ccd");
 	soft_body_self_edge_contacts = GLOBAL_GET("physics/jolt_physics_3d/simulation/soft_body_self_edge_contacts");
 	soft_body_self_speculative_edge_ccd = GLOBAL_GET("physics/jolt_physics_3d/simulation/soft_body_self_speculative_edge_ccd");
 	soft_body_self_edge_bvh = GLOBAL_GET("physics/jolt_physics_3d/simulation/soft_body_self_edge_bvh");
