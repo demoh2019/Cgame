@@ -28,6 +28,8 @@ func _ready() -> void:
 	fluid.box_min = Vector3(-1.7, 0.0, -1.7)
 	fluid.box_max = Vector3(1.7, 3.3, 1.7)
 	fluid.collide_with_bodies = false
+	fluid.two_way_rigid_coupling = false
+	fluid.max_rigid_impulse = 20.0
 	add_child(fluid)
 
 	assert(fluid.create_block(BLOCK_ORIGIN, BLOCK_SIZE, BLOCK_SPACING))
@@ -53,7 +55,7 @@ func _ready() -> void:
 
 	label = Label3D.new()
 	label.name = "StationLabel"
-	label.text = "NATIVE CPU PBF FLUID | %d particles | U: reset | I: pause | O: stir" % fluid.get_particle_count()
+	label.text = "NATIVE CPU PBF FLUID | %d particles | U: reset | I: pause | O: stir | P: rigid coupling" % fluid.get_particle_count()
 	label.position = Vector3(0, 3.65, 0)
 	label.font_size = 40
 	label.pixel_size = 0.006
@@ -67,6 +69,26 @@ func _ready() -> void:
 	bottom.mesh = floor_mesh
 	bottom.position = Vector3(0, -0.07, 0)
 	add_child(bottom)
+
+	# A real RigidBody3D obstacle for opt-in two-way fluid interaction.
+	# Its CollisionShape3D receives a native impulse at each hit point;
+	# angular velocity emerges naturally on off-center impacts.
+	var reactive_body := RigidBody3D.new()
+	reactive_body.name = "ReactiveFloat"
+	reactive_body.mass = 2.0
+	reactive_body.position = Vector3(0.0, 1.05, 0.0)
+	var floating_shape := CollisionShape3D.new()
+	var sphere_collision := SphereShape3D.new()
+	sphere_collision.radius = 0.32
+	floating_shape.shape = sphere_collision
+	reactive_body.add_child(floating_shape)
+	var float_visual := MeshInstance3D.new()
+	var float_mesh := SphereMesh.new()
+	float_mesh.radius = 0.32
+	float_mesh.height = 0.64
+	float_visual.mesh = float_mesh
+	reactive_body.add_child(float_visual)
+	add_child(reactive_body)
 
 	fluid.simulation_enabled = true
 	_update_visuals()
@@ -99,3 +121,12 @@ func _unhandled_key_input(event: InputEvent) -> void:
 			# Stir the free surface with an upward/lateral velocity pulse.
 			# This is a native kernel call; no per-particle GDScript loop.
 			fluid.add_velocity_pulse(Vector3(0, 1.0, 0), 1.8, Vector3(3.0, 4.5, 0))
+		KEY_P:
+			# Expensive ray sweeps and rigid-body momentum exchange are
+			# only enabled when the player explicitly opts in.
+			fluid.two_way_rigid_coupling = not fluid.two_way_rigid_coupling
+			fluid.collide_with_bodies = fluid.two_way_rigid_coupling
+			label.text = "NATIVE CPU PBF FLUID | Rigid coupling: %s | Paired hits: %d" % [
+				"ON" if fluid.two_way_rigid_coupling else "OFF",
+				fluid.get_last_rigid_impulses()
+			]
