@@ -34,7 +34,7 @@ func run(scale: int) -> Dictionary:
 		# searching its O(radius^2) neighborhood for every destination bit.
 		var full := BitMap.new()
 		full.create(Vector2i(WIDTH, HEIGHT))
-		full.set_bit(WIDTH / 2, HEIGHT / 2, true)
+		full.set_bit(WIDTH >> 1, HEIGHT >> 1, true)
 		started = Time.get_ticks_usec()
 		full.grow_mask(2048, MASK_RECT)
 		full.grow_mask(-2048, MASK_RECT)
