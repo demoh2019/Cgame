@@ -37,15 +37,32 @@
 struct GodotPhysicsContactRecycling {
 	uint64_t geometry_version_a = 0;
 	uint64_t geometry_version_b = 0;
+	// SAT/GJK found no overlap at the cached *relative* transform.
+	// Kept separately from the solver's collided flag, which can also be
+	// reset by contact-report-only and one-way filtering paths.
+	bool narrowphase_separated = false;
 
-	inline bool can_reuse(uint64_t p_current_a, uint64_t p_current_b, bool p_collided, int p_contact_count, bool p_ccd) const {
-		return p_collided && p_contact_count > 0 && !p_ccd &&
-				geometry_version_a != 0 && geometry_version_b != 0 &&
+	inline bool matches_geometry(uint64_t p_current_a, uint64_t p_current_b) const {
+		return geometry_version_a != 0 && geometry_version_b != 0 &&
 				geometry_version_a == p_current_a && geometry_version_b == p_current_b;
 	}
 
-	inline void remember(uint64_t p_current_a, uint64_t p_current_b) {
+	inline bool can_reuse(uint64_t p_current_a, uint64_t p_current_b, bool p_collided, int p_contact_count, bool p_ccd) const {
+		return p_collided && p_contact_count > 0 && !p_ccd && !narrowphase_separated &&
+				matches_geometry(p_current_a, p_current_b);
+	}
+
+	// Safe only with an exactly identical relative translation and unchanged
+	// body orientation/shape revisions, verified by the calling body pair.
+	// A coarse-phase overlap is not evidence of an actual shape collision:
+	// such persistent near-miss pairs would otherwise rerun SAT/GJK every step.
+	inline bool can_reuse_separation(uint64_t p_current_a, uint64_t p_current_b, bool p_ccd) const {
+		return narrowphase_separated && !p_ccd && matches_geometry(p_current_a, p_current_b);
+	}
+
+	inline void remember(uint64_t p_current_a, uint64_t p_current_b, bool p_narrowphase_collided = true) {
 		geometry_version_a = p_current_a;
 		geometry_version_b = p_current_b;
+		narrowphase_separated = !p_narrowphase_collided;
 	}
 };
