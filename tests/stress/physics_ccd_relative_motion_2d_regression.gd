@@ -29,13 +29,13 @@ func _make_body(space: RID, shape: RID, x: float, velocity: float, ccd: bool, st
 
 
 func _run_case(label: String, target_x: float, velocity_a: float, velocity_b: float,
-		min_speed: float, max_speed: float, static_target: bool = false) -> int:
+		min_speed: float, max_speed: float, static_target: bool = false, target_ccd: bool = false) -> int:
 	var space: RID = PhysicsServer2D.space_create()
 	var circle: RID = PhysicsServer2D.circle_shape_create()
 	PhysicsServer2D.shape_set_data(circle, 0.5)
 
 	var a: RID = _make_body(space, circle, 0.0, velocity_a, true)
-	var b: RID = _make_body(space, circle, target_x, velocity_b, false, static_target)
+	var b: RID = _make_body(space, circle, target_x, velocity_b, target_ccd, static_target)
 	PhysicsServer2D.space_set_active(space, true)
 	await physics_frame
 	await physics_frame
@@ -68,9 +68,11 @@ func _run() -> void:
 	var failures: int = 0
 	# These targets begin 0.02 units behind A's back surface. Both rays
 	# overlap the *predicted* target position under the old algorithm, even
-	# though A is not closing on B. CCD must leave A's velocity alone.
-	failures += await _run_case("co-moving bodies", -1.02, 600.0, 600.0, 525.0, 625.0)
-	failures += await _run_case("slower trailing body", -1.02, 600.0, 300.0, 525.0, 625.0)
+	# though A is not closing on B. Enable CCD on B too so its swept AABB
+	# remains in the pair broadphase even though it begins behind A.
+	# CCD must leave A's velocity alone.
+	failures += await _run_case("co-moving bodies", -1.02, 600.0, 600.0, 525.0, 625.0, false, true)
+	failures += await _run_case("slower trailing body", -1.02, 600.0, 300.0, 525.0, 625.0, false, true)
 
 	# In contrast, a slower target directly ahead is approached by A.
 	# An entering ray should shorten A's speed, without reversing it.
