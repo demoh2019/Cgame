@@ -43,6 +43,7 @@ class GodotStep2D {
 	LocalVector<LocalVector<GodotBody2D *>> body_islands;
 	LocalVector<LocalVector<GodotConstraint2D *>> constraint_islands;
 	LocalVector<GodotConstraint2D *> all_constraints;
+	LocalVector<GodotBody2D *> pending_bodies; // Reused, bounded by the DFS frontier, not island depth.
 
 	void _populate_island(GodotBody2D *p_body, LocalVector<GodotBody2D *> &p_body_island, LocalVector<GodotConstraint2D *> &p_constraint_island);
 	void _setup_constraint(uint32_t p_constraint_index, void *p_userdata = nullptr);

@@ -40,34 +40,41 @@
 #define CONSTRAINT_COUNT_RESERVE 1024
 
 void GodotStep2D::_populate_island(GodotBody2D *p_body, LocalVector<GodotBody2D *> &p_body_island, LocalVector<GodotConstraint2D *> &p_constraint_island) {
+	// A recursive flood fill over a long chain of joints can exhaust the
+	// physics thread's stack. Keep a reusable explicit DFS frontier instead.
+	// Mark at enqueue time to avoid inserting the same body multiple times.
+	pending_bodies.clear();
 	p_body->set_island_step(_step);
+	pending_bodies.push_back(p_body);
 
-	if (p_body->get_mode() > PS2DE::BODY_MODE_KINEMATIC) {
-		// Only rigid bodies are tested for activation.
-		p_body_island.push_back(p_body);
-	}
+	while (!pending_bodies.is_empty()) {
+		GodotBody2D *body = pending_bodies[pending_bodies.size() - 1];
+		pending_bodies.remove_at(pending_bodies.size() - 1);
 
-	for (const Pair<GodotConstraint2D *, int> &E : p_body->get_constraint_list()) {
-		GodotConstraint2D *constraint = E.first;
-		if (constraint->get_island_step() == _step) {
-			continue; // Already processed.
+		if (body->get_mode() > PS2DE::BODY_MODE_KINEMATIC) {
+			p_body_island.push_back(body);
 		}
-		constraint->set_island_step(_step);
-		p_constraint_island.push_back(constraint);
-		all_constraints.push_back(constraint);
 
-		for (int i = 0; i < constraint->get_body_count(); i++) {
-			if (i == E.second) {
+		for (const Pair<GodotConstraint2D *, int> &E : body->get_constraint_list()) {
+			GodotConstraint2D *constraint = E.first;
+			if (constraint->get_island_step() == _step) {
 				continue;
 			}
-			GodotBody2D *other_body = constraint->get_body_ptr()[i];
-			if (other_body->get_island_step() == _step) {
-				continue; // Already processed.
+			constraint->set_island_step(_step);
+			p_constraint_island.push_back(constraint);
+			all_constraints.push_back(constraint);
+
+			for (int i = 0; i < constraint->get_body_count(); i++) {
+				if (i == E.second) {
+					continue;
+				}
+				GodotBody2D *other_body = constraint->get_body_ptr()[i];
+				if (other_body->get_island_step() == _step || other_body->get_mode() == PS2DE::BODY_MODE_STATIC) {
+					continue;
+				}
+				other_body->set_island_step(_step);
+				pending_bodies.push_back(other_body);
 			}
-			if (other_body->get_mode() == PS2DE::BODY_MODE_STATIC) {
-				continue; // Static bodies don't connect islands.
-			}
-			_populate_island(other_body, p_body_island, p_constraint_island);
 		}
 	}
 }

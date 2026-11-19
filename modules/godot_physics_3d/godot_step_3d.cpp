@@ -39,75 +39,85 @@
 #define ISLAND_COUNT_RESERVE 128
 #define CONSTRAINT_COUNT_RESERVE 1024
 
-void GodotStep3D::_populate_island(GodotBody3D *p_body, LocalVector<GodotBody3D *> &p_body_island, LocalVector<GodotConstraint3D *> &p_constraint_island) {
-	p_body->set_island_step(_step);
-
-	if (p_body->get_mode() > PS3DE::BODY_MODE_KINEMATIC) {
-		// Only rigid bodies are tested for activation.
-		p_body_island.push_back(p_body);
+void GodotStep3D::_populate_island_graph(GodotBody3D *p_body, GodotSoftBody3D *p_soft_body, LocalVector<GodotBody3D *> &p_body_island, LocalVector<GodotConstraint3D *> &p_constraint_island) {
+	// Handle rigid and soft bodies in one explicit DFS. Mark when scheduled,
+	// not when popped, so cycles and heavily connected islands cannot enqueue
+	// the same body repeatedly. Long joint chains no longer consume C++ stack.
+	pending_island_tasks.clear();
+	if (p_body) {
+		p_body->set_island_step(_step);
+		pending_island_tasks.push_back(IslandTask{ p_body, nullptr });
+	} else {
+		p_soft_body->set_island_step(_step);
+		pending_island_tasks.push_back(IslandTask{ nullptr, p_soft_body });
 	}
 
-	for (const KeyValue<GodotConstraint3D *, int> &E : p_body->get_constraint_map()) {
-		GodotConstraint3D *constraint = E.key;
-		if (constraint->get_island_step() == _step) {
-			continue; // Already processed.
-		}
-		constraint->set_island_step(_step);
-		p_constraint_island.push_back(constraint);
+	while (!pending_island_tasks.is_empty()) {
+		const IslandTask task = pending_island_tasks[pending_island_tasks.size() - 1];
+		pending_island_tasks.remove_at(pending_island_tasks.size() - 1);
 
-		all_constraints.push_back(constraint);
+		if (task.body) {
+			GodotBody3D *body = task.body;
+			if (body->get_mode() > PS3DE::BODY_MODE_KINEMATIC) {
+				p_body_island.push_back(body);
+			}
+			for (const KeyValue<GodotConstraint3D *, int> &E : body->get_constraint_map()) {
+				GodotConstraint3D *constraint = E.key;
+				if (constraint->get_island_step() == _step) {
+					continue;
+				}
+				constraint->set_island_step(_step);
+				p_constraint_island.push_back(constraint);
+				all_constraints.push_back(constraint);
 
-		// Find connected rigid bodies.
-		for (int i = 0; i < constraint->get_body_count(); i++) {
-			if (i == E.value) {
-				continue;
+				for (int i = 0; i < constraint->get_body_count(); i++) {
+					if (i == E.value) {
+						continue;
+					}
+					GodotBody3D *other = constraint->get_body_ptr()[i];
+					if (other->get_island_step() == _step || other->get_mode() == PS3DE::BODY_MODE_STATIC) {
+						continue;
+					}
+					other->set_island_step(_step);
+					pending_island_tasks.push_back(IslandTask{ other, nullptr });
+				}
+				for (int i = 0; i < constraint->get_soft_body_count(); i++) {
+					GodotSoftBody3D *other = constraint->get_soft_body_ptr(i);
+					if (other->get_island_step() == _step) {
+						continue;
+					}
+					other->set_island_step(_step);
+					pending_island_tasks.push_back(IslandTask{ nullptr, other });
+				}
 			}
-			GodotBody3D *other_body = constraint->get_body_ptr()[i];
-			if (other_body->get_island_step() == _step) {
-				continue; // Already processed.
-			}
-			if (other_body->get_mode() == PS3DE::BODY_MODE_STATIC) {
-				continue; // Static bodies don't connect islands.
-			}
-			_populate_island(other_body, p_body_island, p_constraint_island);
-		}
+		} else {
+			for (GodotConstraint3D *constraint : task.soft_body->get_constraints()) {
+				if (constraint->get_island_step() == _step) {
+					continue;
+				}
+				constraint->set_island_step(_step);
+				p_constraint_island.push_back(constraint);
+				all_constraints.push_back(constraint);
 
-		// Find connected soft bodies.
-		for (int i = 0; i < constraint->get_soft_body_count(); i++) {
-			GodotSoftBody3D *soft_body = constraint->get_soft_body_ptr(i);
-			if (soft_body->get_island_step() == _step) {
-				continue; // Already processed.
+				for (int i = 0; i < constraint->get_body_count(); i++) {
+					GodotBody3D *other = constraint->get_body_ptr()[i];
+					if (other->get_island_step() == _step || other->get_mode() == PS3DE::BODY_MODE_STATIC) {
+						continue;
+					}
+					other->set_island_step(_step);
+					pending_island_tasks.push_back(IslandTask{ other, nullptr });
+				}
 			}
-			_populate_island_soft_body(soft_body, p_body_island, p_constraint_island);
 		}
 	}
 }
 
+void GodotStep3D::_populate_island(GodotBody3D *p_body, LocalVector<GodotBody3D *> &p_body_island, LocalVector<GodotConstraint3D *> &p_constraint_island) {
+	_populate_island_graph(p_body, nullptr, p_body_island, p_constraint_island);
+}
+
 void GodotStep3D::_populate_island_soft_body(GodotSoftBody3D *p_soft_body, LocalVector<GodotBody3D *> &p_body_island, LocalVector<GodotConstraint3D *> &p_constraint_island) {
-	p_soft_body->set_island_step(_step);
-
-	for (GodotConstraint3D *E : p_soft_body->get_constraints()) {
-		GodotConstraint3D *constraint = E;
-		if (constraint->get_island_step() == _step) {
-			continue; // Already processed.
-		}
-		constraint->set_island_step(_step);
-		p_constraint_island.push_back(constraint);
-
-		all_constraints.push_back(constraint);
-
-		// Find connected rigid bodies.
-		for (int i = 0; i < constraint->get_body_count(); i++) {
-			GodotBody3D *body = constraint->get_body_ptr()[i];
-			if (body->get_island_step() == _step) {
-				continue; // Already processed.
-			}
-			if (body->get_mode() == PS3DE::BODY_MODE_STATIC) {
-				continue; // Static bodies don't connect islands.
-			}
-			_populate_island(body, p_body_island, p_constraint_island);
-		}
-	}
+	_populate_island_graph(nullptr, p_soft_body, p_body_island, p_constraint_island);
 }
 
 void GodotStep3D::_setup_constraint(uint32_t p_constraint_index, void *p_userdata) {
