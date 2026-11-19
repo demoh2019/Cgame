@@ -76,6 +76,41 @@ public:
 	bool did_mutate = false;
 };
 
+TEST_CASE("[SceneTreeGroupCOW] Script-visible group snapshot retains order and type") {
+	SceneTree *tree = SceneTree::get_singleton();
+	Node *parent = memnew(Node);
+	tree->get_root()->add_child(parent);
+	const StringName group = "test_group_snapshot_typed_linear";
+	Vector<Node *> nodes;
+	for (int i = 0; i < 256; i++) {
+		Node *node = memnew(Node);
+		node->set_name("GroupItem" + itos(i));
+		parent->add_child(node);
+		node->add_to_group(group);
+		nodes.push_back(node);
+	}
+
+	// The script-exposed method builds a TypedArray<Node>, unlike the
+	// native get_nodes_in_group() method, which returns Vector<Node *>.
+	Array snapshot = tree->call("get_nodes_in_group", group);
+	REQUIRE_EQ(snapshot.size(), 256);
+	CHECK(snapshot.is_typed());
+	for (int i = 0; i < 256; i++) {
+		CHECK_EQ(Object::cast_to<Node>(snapshot[i]), nodes[i]);
+	}
+
+	nodes[100]->remove_from_group(group);
+	Array updated = tree->call("get_nodes_in_group", group);
+	REQUIRE_EQ(updated.size(), 255);
+	for (int i = 0; i < updated.size(); i++) {
+		CHECK_EQ(Object::cast_to<Node>(updated[i]), nodes[i < 100 ? i : i + 1]);
+	}
+	// The old returned array still contains the original snapshot.
+	CHECK_EQ(Object::cast_to<Node>(snapshot[100]), nodes[100]);
+	memdelete(parent);
+	CHECK_EQ(tree->get_node_count_in_group(group), 0);
+}
+
 TEST_CASE("[SceneTreeGroupCOW] Snapshot reads share backing storage until a mutation") {
 	Vector<int> nodes;
 	for (int i = 0; i < 4096; i++) {

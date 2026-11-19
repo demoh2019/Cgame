@@ -1600,8 +1600,12 @@ TypedArray<Node> SceneTree::_get_nodes_in_group(const StringName &p_group) {
 	ret.resize(nc);
 
 	Node *const *ptr = E->value.nodes.ptr();
-	for (int i = 0; i < nc; i++) {
-		ret[i] = ptr[i];
+	// This freshly resized typed array has writable contiguous slots.
+	// Write sequentially to avoid repeated indexed access and checks for
+	// large group snapshots requested by scripts.
+	Array::Iterator write = ret.begin();
+	for (int i = 0; i < nc; i++, ++write) {
+		*write = ptr[i];
 	}
 
 	return ret;
