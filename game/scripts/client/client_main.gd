@@ -20,6 +20,10 @@ var _camera: Camera3D
 var _avatar: MeshInstance3D
 var _stats: Label
 var _instructions: Label
+var _bank_panel: PanelContainer
+var _bank_label: Label
+var _bank_open: bool = false
+var _selected_bank_item: String = ""
 var _feedback: String = "Leave the safe hub to gather. Return to the workbench to craft."
 var _chunks: Dictionary = {}
 var _resource_meshes: Dictionary = {}
@@ -38,6 +42,7 @@ func _ready() -> void:
 	_make_light_and_camera()
 	_make_avatar()
 	_make_workbench()
+	_make_bank_landmark()
 	_make_hud()
 	_stream_chunks()
 	_update_hud()
@@ -60,6 +65,10 @@ func _setup_actions() -> void:
 	_bind_key("survive_weapon", KEY_4)
 	_bind_key("survive_armor", KEY_5)
 	_bind_key("survive_lake", KEY_R)
+	_bind_key("survive_bank", KEY_B)
+	_bind_key("survive_bank_next", KEY_J)
+	_bind_key("survive_bank_deposit", KEY_K)
+	_bind_key("survive_bank_withdraw", KEY_L)
 
 
 func _bind_key(action: StringName, key: Key) -> void:
@@ -124,6 +133,17 @@ func _make_workbench() -> void:
 	add_child(bench)
 
 
+## The protected stash is one visible building near the hub's workbench.
+## Server authority still validates the player's actual position before transfers.
+func _make_bank_landmark() -> void:
+	var x: float = GameServer.WORKBENCH_POSITION.x - 4.0
+	var z: float = GameServer.WORKBENCH_POSITION.y
+	var bank := _mesh(Vector3(2.0, 1.25, 1.6), Color(0.24, 0.47, 0.65))
+	bank.name = "SafeStash"
+	bank.position = Vector3(x, world.height_at(x, z) + 0.625, z)
+	add_child(bank)
+
+
 func _make_hud() -> void:
 	var layer := CanvasLayer.new()
 	layer.name = "HUD"
@@ -138,6 +158,16 @@ func _make_hud() -> void:
 	_instructions.position = Vector2(18, 145)
 	_instructions.add_theme_font_size_override("font_size", 15)
 	layer.add_child(_instructions)
+	_bank_panel = PanelContainer.new()
+	_bank_panel.name = "BankPanel"
+	_bank_panel.position = Vector2(18, 330)
+	_bank_panel.custom_minimum_size = Vector2(600, 165)
+	_bank_panel.visible = false
+	layer.add_child(_bank_panel)
+	_bank_label = Label.new()
+	_bank_label.name = "Contents"
+	_bank_label.add_theme_font_size_override("font_size", 15)
+	_bank_panel.add_child(_bank_label)
 
 
 func _terrain_color(x: float, z: float) -> Color:
@@ -269,6 +299,9 @@ func _physics_process(delta: float) -> void:
 	_camera.position = _camera.position.lerp(survivor.position + Vector3(0, 22, 27), minf(1.0, delta * 7.0))
 	_camera.look_at(survivor.position + Vector3(0, 0.7, 0), Vector3.UP)
 	_stream_chunks()
+	if _bank_open and not _can_use_bank():
+		_bank_open = false
+		_feedback = "Safe stash closed: return to the workbench."
 	for item_id in _resource_meshes:
 		_resource_meshes[item_id].visible = not sim.depleted.has(item_id)
 	for item_id in _crate_meshes:
@@ -325,8 +358,112 @@ func _result(action: String, data: Dictionary) -> void:
 	_update_hud()
 
 
+## The menu is local presentation only; inventory/stash are changed solely
+## through the same authoritative GameServer command used by multiplayer RPC.
+func _can_use_bank() -> bool:
+	if survivor == null or not survivor.survival.alive:
+		return false
+	var point := Vector2(survivor.position.x, survivor.position.z)
+	return point.distance_to(GameServer.WORKBENCH_POSITION) <= GameServer.WORKBENCH_RANGE
+
+
+func _bank_items() -> Array[String]:
+	var names: Array[String] = []
+	for storage in [survivor.inventory, survivor.stash]:
+		for slot in storage.slots:
+			if slot.is_empty():
+				continue
+			var item_id: String = str(slot["id"])
+			if not names.has(item_id):
+				names.append(item_id)
+	names.sort()
+	return names
+
+
+func _current_bank_item() -> String:
+	var names: Array[String] = _bank_items()
+	if names.is_empty():
+		_selected_bank_item = ""
+	elif not names.has(_selected_bank_item):
+		_selected_bank_item = names[0]
+	return _selected_bank_item
+
+
+func _toggle_bank() -> bool:
+	if _bank_open:
+		_bank_open = false
+	else:
+		if not _can_use_bank():
+			_feedback = "Safe stash is only available beside the hub workbench."
+			_update_hud()
+			return false
+		_bank_open = true
+		_current_bank_item()
+	_update_hud()
+	return _bank_open
+
+
+func _next_bank_item() -> void:
+	if not _bank_open or not _can_use_bank():
+		return
+	var names: Array[String] = _bank_items()
+	if names.is_empty():
+		return
+	var selected: String = _current_bank_item()
+	_selected_bank_item = names[(names.find(selected) + 1) % names.size()]
+	_update_hud()
+
+
+func _bank_transfer(deposit: bool, requested_count: int = 1) -> bool:
+	if not _bank_open or not _can_use_bank():
+		_feedback = "Open the stash (B) beside the hub workbench."
+		_update_hud()
+		return false
+	var item_id: String = _current_bank_item()
+	if item_id.is_empty() or requested_count <= 0:
+		_feedback = "Select an item before transferring."
+		_update_hud()
+		return false
+	var source = survivor.inventory if deposit else survivor.stash
+	var count: int = mini(requested_count, mini(source.count(item_id), Defs.stack_size(item_id)))
+	if count < 1:
+		_feedback = "No %s available to %s." % [item_id, "deposit" if deposit else "withdraw"]
+		_update_hud()
+		return false
+	var result: Dictionary = sim.cmd_stash(LOCAL_PLAYER_ID, item_id, count, deposit)
+	_result("Deposit" if deposit else "Withdraw", result)
+	return bool(result.get("ok", false))
+
+
+func _update_bank_hud() -> void:
+	_bank_panel.visible = _bank_open
+	if not _bank_open:
+		return
+	var item_id: String = _current_bank_item()
+	var lines: PackedStringArray = []
+	for name in _bank_items():
+		lines.append("%s  carried:%d  stored:%d" % [
+			name, survivor.inventory.count(name), survivor.stash.count(name)])
+		if lines.size() >= 7:
+			break
+	_bank_label.text = "SAFE HUB STASH | B close, J next, K store, L take (Shift: up to 10)\nSelected: %s  | carried %d | stored %d\n%s" % [
+		item_id if not item_id.is_empty() else "(empty)",
+		survivor.inventory.count(item_id) if not item_id.is_empty() else 0,
+		survivor.stash.count(item_id) if not item_id.is_empty() else 0,
+		"\n".join(lines) if not lines.is_empty() else "No items in inventory or stash"
+	]
+
+
 func _unhandled_input(event: InputEvent) -> void:
-	if event.is_action_pressed("survive_gather"):
+	if event.is_action_pressed("survive_bank"):
+		_toggle_bank()
+	elif event.is_action_pressed("survive_bank_next"):
+		_next_bank_item()
+	elif event.is_action_pressed("survive_bank_deposit"):
+		_bank_transfer(true, 10 if Input.is_key_pressed(KEY_SHIFT) else 1)
+	elif event.is_action_pressed("survive_bank_withdraw"):
+		_bank_transfer(false, 10 if Input.is_key_pressed(KEY_SHIFT) else 1)
+	elif event.is_action_pressed("survive_gather"):
 		var target := _nearest_node()
 		if target.is_empty():
 			_feedback = "No resource within reach."
@@ -375,8 +512,9 @@ func _update_hud() -> void:
 	]
 	var recipe: Dictionary = Defs.recipes()[RECIPES[_recipe_index]]
 	var near_bench: bool = Vector2(position.x, position.z).distance_to(GameServer.WORKBENCH_POSITION) < GameServer.WORKBENCH_RANGE
-	_instructions.text = "WASD move | Shift sprint | E gather | Q loot | F attack\nTab recipe | C craft | 1 eat 2 drink 3 bandage 4 weapon 5 armor R lake\nCRAFT %s -> %s x%d | %s | inputs %s\n%s" % [
+	_instructions.text = "WASD move | Shift sprint | E gather | Q loot | F attack\nTab recipe | C craft | B stash (at hub) | 1 food 2 water 3 heal 4 weapon 5 armor R lake\nCRAFT %s -> %s x%d | %s | inputs %s\n%s" % [
 		RECIPES[_recipe_index], str(recipe["output"]), int(recipe["count"]),
 		"WORKBENCH" if near_bench else "workbench at x=9, z=0",
 		str(recipe["inputs"]), _feedback
 	]
+	_update_bank_hud()

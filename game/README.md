@@ -27,6 +27,31 @@ account persistence must be wired into this scene before claiming an MMO.
 Controls: WASD movement, Shift sprint, E gather, Q loot, F attack,
 Tab choose recipe, C craft, 1 food, 2 water, 3 bandage,
 4 equip club, 5 equip jacket, R drink from natural water.
+
+### Safe hub protected stash (local preview)
+
+Return to the blue stash building beside the workbench (x=5, z=0).
+Press **B** to open/close the stash, **J** to select the next item,
+**K** to deposit one item and **L** to withdraw one. Hold Shift with K/L
+for up to 10 at once, limited by the source quantity and item stack size.
+The HUD shows selected item, carried and stored quantities, and available
+items. The window closes if you leave the station or die.
+
+Transfers call the existing `GameServer.cmd_stash` authoritative validation:
+the player must be alive, close to the workbench, and have sufficient items
+and destination space. Deposited equipment is automatically unequipped if
+it is no longer carried. The protected stash does not drop on death.
+The local preview's memory resets when the process exits; account-bound
+persistence requires the connected server/Nakama path.
+
+No new engine APIs are needed: Godot's UI and the existing inventory/network
+interfaces cover this feature. Verify in the compiled engine with:
+
+```bash
+godot --headless --path game --script res://tests/smoke_client_scene.gd
+godot --headless --path game --script res://tests/run_all.gd
+```
+
 The workbench is near world coordinates x=9, z=0. Leave the safe hub
 to collect resources; higher-tier nodes require higher-tier tools.
 
