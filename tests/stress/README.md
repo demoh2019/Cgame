@@ -532,6 +532,61 @@ scenes and binaries with drag both enabled and disabled. This test and the
 source contracts do not constitute a completed native build or measured
 performance improvement unless run.
 
+## Box2D-style implicit rigid-body damping (opt-in 2D / 3D)
+
+GodotPhysics2D and GodotPhysics3D use clamped explicit-Euler velocity damping
+by default: `max(0, 1 - damping * delta)`. At large `damping * delta`, this
+can zero all velocity within a single frame. Box2D instead uses the implicit
+(Pade) approximation `1 / (1 + damping * delta)`, which remains strictly
+positive for finite nonnegative damping and is less sensitive to timestep
+size. The new implementation provides that formula through one shared
+inline helper for **both linear and angular velocity**.
+
+Enable it per physics space with:
+
+- `physics/2d/solver/implicit_damping = true`
+- `physics/3d/solver/implicit_damping = true`
+
+**Both settings default to false**, preserving existing GodotPhysics
+behavior and scene compatibility. Each space snapshots the setting at
+creation. The legacy algorithm remains in use for negative damping
+coefficients even when implicit damping is enabled, avoiding changes to
+existing custom amplification behavior. This does not change area
+damping overrides, force integration order, kinematic bodies or collision
+responses. The feature is for GodotPhysics; external physics backends
+are not affected.
+
+Run the source and mathematical contracts, then the executable
+high-damping comparison (requires the newly compiled Cgame engine):
+
+```bash
+python3 -m unittest discover -s tests/stress -p 'test_physics_implicit_damping.py' -v
+./bin/godot.macos.editor.arm64 --headless --path tests/stress \
+  --script res://physics_implicit_damping_regression.gd
+```
+
+The regression creates separate 2D and 3D spaces with the option both
+disabled and enabled, overrides all area damping, and checks the
+expected per-tick linear/angular velocity ratio at damping = 120 and
+60 Hz. The legacy solver should clamp the speed to zero, while implicit
+damping should multiply it by approximately `1/3` each frame. It
+restores the original physics tick rate and project settings.
+
+To compare CPU and RAM overhead between both algorithms, the stress
+scenarios create the same 256 independent dynamic bodies per scale in
+either dimension, disabling sleep to keep integration work active:
+
+```bash
+python3 tests/stress/run.py --godot ./bin/godot.macos.editor.arm64 \
+  --case physics_damping_legacy_2d,physics_damping_implicit_2d,physics_damping_legacy_3d,physics_damping_implicit_3d \
+  --scale 8 --frames 90 --repeats 5 --timeout 600 \
+  --rss-limit-mib 4096 --output out/physics-implicit-damping.json
+```
+
+Compare results against the same pre-change build for accurate overhead
+attribution. Mathematical source checks are not a substitute for a real
+GodotPhysics build, the headless regression or profiling.
+
 ## Contact restitution stability (Jolt / Box2D-style threshold)
 
 Built-in GodotPhysics now suppresses contact restitution when the approaching
