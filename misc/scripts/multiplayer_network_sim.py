@@ -20,6 +20,8 @@ import time
 from dataclasses import asdict, dataclass, field
 from typing import Callable
 
+from network_sim_presets import PRESETS, resolve_preset
+
 
 @dataclass(frozen=True)
 class Impairment:
@@ -50,6 +52,19 @@ class Impairment:
             jitter = rng.uniform(-self.jitter_ms, self.jitter_ms) if self.jitter_ms else 0.0
             times.append(now + max(0.0, self.latency_ms + jitter) / 1000.0)
         return times
+
+
+def policy_from_args(args: argparse.Namespace, direction: str) -> Impairment:
+    """Resolve the selected profile with optional per-direction CLI overrides."""
+    if direction not in ("up", "down"):
+        raise ValueError(f"Unknown traffic direction: {direction!r}")
+    overrides = {
+        "latency_ms": getattr(args, f"{direction}_latency_ms"),
+        "jitter_ms": getattr(args, f"{direction}_jitter_ms"),
+        "loss_percent": getattr(args, f"{direction}_loss"),
+        "duplicate_percent": getattr(args, f"{direction}_duplicate"),
+    }
+    return Impairment(**resolve_preset(args.preset, overrides))
 
 
 @dataclass
@@ -282,11 +297,13 @@ def make_parser() -> argparse.ArgumentParser:
     parser.add_argument("--target-port", required=True, type=int)
     parser.add_argument("--listen-host", default="127.0.0.1", help="Default loopback only")
     parser.add_argument("--listen-port", type=int, default=2457)
+    parser.add_argument("--preset", choices=sorted(PRESETS), default="clean",
+                        help="Synthetic one-way connection profile, defaults to clean")
     for name in ("up", "down"):
-        parser.add_argument(f"--{name}-latency-ms", type=float, default=0.0)
-        parser.add_argument(f"--{name}-jitter-ms", type=float, default=0.0)
-        parser.add_argument(f"--{name}-loss", type=float, default=0.0)
-        parser.add_argument(f"--{name}-duplicate", type=float, default=0.0)
+        parser.add_argument(f"--{name}-latency-ms", type=float, default=None)
+        parser.add_argument(f"--{name}-jitter-ms", type=float, default=None)
+        parser.add_argument(f"--{name}-loss", type=float, default=None)
+        parser.add_argument(f"--{name}-duplicate", type=float, default=None)
     parser.add_argument("--seed", type=int, default=1)
     parser.add_argument("--max-clients", type=int, default=64)
     parser.add_argument("--max-pending", type=int, default=10000, help="Cap queued copies per proxy")
@@ -298,14 +315,9 @@ def make_parser() -> argparse.ArgumentParser:
 def main(argv: list[str] | None = None) -> int:
     args = make_parser().parse_args(argv)
     try:
-        def policy(name: str) -> Impairment:
-            return Impairment(
-                getattr(args, f"{name}_latency_ms"), getattr(args, f"{name}_jitter_ms"),
-                getattr(args, f"{name}_loss"), getattr(args, f"{name}_duplicate")
-            )
         with UDPNetworkSimulator(
             (args.target_host, args.target_port), (args.listen_host, args.listen_port),
-            policy("up"), policy("down"), args.seed, args.max_clients, args.session_timeout,
+            policy_from_args(args, "up"), policy_from_args(args, "down"), args.seed, args.max_clients, args.session_timeout,
             max_pending=args.max_pending,
         ) as proxy:
             stop = threading.Event()

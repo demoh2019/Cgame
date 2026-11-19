@@ -18,6 +18,7 @@ from unittest.mock import patch
 from pathlib import Path
 
 SCRIPT = Path(__file__).resolve().parents[1] / "multiplayer_network_sim.py"
+sys.path.insert(0, str(SCRIPT.parent))
 spec = importlib.util.spec_from_file_location("multiplayer_network_sim", SCRIPT)
 sim = importlib.util.module_from_spec(spec)
 sys.modules[spec.name] = sim
@@ -448,6 +449,45 @@ class CLITests(unittest.TestCase):
                     p.kill()
                     p.communicate()
 
+
+
+class ProfileCLITests(unittest.TestCase):
+    def parse(self, *options):
+        return sim.make_parser().parse_args(["--target-port", "2456", *options])
+
+    def test_profile_selection_applies_to_both_directions(self):
+        args = self.parse("--preset", "mobile")
+        self.assertEqual(sim.policy_from_args(args, "up").latency_ms, 100)
+        self.assertEqual(sim.policy_from_args(args, "down").latency_ms, 100)
+        self.assertEqual(sim.policy_from_args(args, "up").loss_percent, 4)
+
+    def test_explicit_upstream_override_preserves_downstream_preset(self):
+        args = self.parse("--preset", "severe", "--up-loss", "0", "--up-latency-ms", "7")
+        self.assertEqual(sim.policy_from_args(args, "up").loss_percent, 0)
+        self.assertEqual(sim.policy_from_args(args, "up").latency_ms, 7)
+        self.assertEqual(sim.policy_from_args(args, "down").loss_percent, 12)
+        self.assertEqual(sim.policy_from_args(args, "down").latency_ms, 250)
+
+    def test_default_profile_is_backwards_compatible(self):
+        args = self.parse()
+        self.assertEqual(sim.policy_from_args(args, "up"), sim.Impairment())
+        self.assertEqual(sim.policy_from_args(args, "down"), sim.Impairment())
+
+    def test_cli_rejects_misspelled_profile(self):
+        with contextlib.redirect_stderr(io.StringIO()):
+            with self.assertRaises(SystemExit) as error:
+                self.parse("--preset", "wi-fi")
+        self.assertEqual(error.exception.code, 2)
+
+    def test_invalid_direction_fails(self):
+        args = self.parse("--preset", "wifi")
+        with self.assertRaises(ValueError):
+            sim.policy_from_args(args, "invalid")
+
+    def test_cli_invalid_override_fails_before_listening(self):
+        args = self.parse("--preset", "wifi", "--up-jitter-ms", "-1")
+        with self.assertRaises(ValueError):
+            sim.policy_from_args(args, "up")
 
 if __name__ == "__main__":
     unittest.main()
