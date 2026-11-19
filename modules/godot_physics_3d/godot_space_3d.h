@@ -96,6 +96,7 @@ private:
 	real_t contact_max_separation = 0.0;
 	real_t contact_max_allowed_penetration = 0.0;
 	real_t contact_bias = 0.0;
+	real_t warm_start_coefficient = 1.0;
 	real_t restitution_velocity_threshold = 0.0;
 	int friction_combine_mode = 0; // 0: Godot legacy, 1: geometric, 2: average, 3: maximum
 
@@ -165,6 +166,7 @@ public:
 	_FORCE_INLINE_ real_t get_contact_max_separation() const { return contact_max_separation; }
 	_FORCE_INLINE_ real_t get_contact_max_allowed_penetration() const { return contact_max_allowed_penetration; }
 	_FORCE_INLINE_ real_t get_contact_bias() const { return contact_bias; }
+	_FORCE_INLINE_ real_t get_warm_start_coefficient() const { return warm_start_coefficient; }
 	_FORCE_INLINE_ real_t get_restitution_velocity_threshold() const { return restitution_velocity_threshold; }
 	// Match Box2D's geometric mean when explicitly selected, while keeping
 	// the historical GodotPhysics material combination as the default.
