@@ -50,8 +50,8 @@ class PhysicsBroadphaseFilterContracts(unittest.TestCase):
                 end = code.index(f"::_shape_changed()", begin)
                 body = code[begin:end]
                 self.assertIn("if (space)", body)
-                self.assertIn("if (s.bpid != 0)", body)
-                self.assertIn("broadphase->force_collision_check(s.bpid);", body)
+                self.assertIn("if (shape.bpid != 0)", body)
+                self.assertIn("broadphase->force_collision_check(shape.bpid);", body)
                 self.assertIn("_shapes_changed();", body)
                 self.assertNotIn("_update_shapes();", body)
 
