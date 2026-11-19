@@ -1630,8 +1630,12 @@ The lifetime score is bounded at **10,000**. Rank milestones are:
 
 Only the **hub NPC's water, food and bandages** use the ranked purchase
 price. The server rounds each discounted unit price **up to at least one
-silver**, and then multiplies by quantity. The original NPC sale payouts,
-player-to-player barter and market orders are unaffected. This avoids a
+silver**, and then multiplies by quantity. The **renown discount alone** does not alter NPC sale payouts,
+player-to-player barter or market orders. If a survivor also has
+PvP criminal infamy, the existing **infamy markup is applied after
+the renown discount** (and infamy may independently penalize NPC sales).
+Both effects are calculated server-side and the online/local UI displays
+the resulting purchase price. This avoids a
 buy/sell currency loop while giving established survivors modest relief
 on necessities.
 
