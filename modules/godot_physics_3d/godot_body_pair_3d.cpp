@@ -318,9 +318,20 @@ bool GodotBodyPair3D::setup(real_t p_step) {
 	const uint64_t geometry_version_a = A->get_collision_geometry_version();
 	const uint64_t geometry_version_b = B->get_collision_geometry_version();
 	if (contact_recycling.can_reuse(geometry_version_a, geometry_version_b, collided, contact_count, ccd_enabled)) {
-		// Previous contacts still have their used flags set. pre_solve will
-		// recompute masses, bias, friction and velocities for this step.
-		return true;
+		// SAT may have emitted a new manifold with fewer points, leaving
+		// old (unused) contacts to be pruned on the next frame. Never recycle
+		// such a mixed manifold indefinitely without validating the points.
+		bool all_contacts_used = true;
+		for (int i = 0; i < contact_count; i++) {
+			if (!contacts[i].used) {
+				all_contacts_used = false;
+				break;
+			}
+		}
+		if (all_contacts_used) {
+			// pre_solve still refreshes masses, bias, friction and velocities.
+			return true;
+		}
 	}
 
 	validate_contacts();
