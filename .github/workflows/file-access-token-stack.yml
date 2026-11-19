@@ -1,39 +1,53 @@
-name: FileAccess stack-first token scanning regression
+name: FileAccess native performance and memory regressions
 
 on:
   pull_request:
     branches: [develop]
     paths:
-      - 'core/io/file_access.cpp'
-      - 'tests/core/io/test_file_access.cpp'
-      - '.github/workflows/file-access-token-stack.yml'
+      - "core/io/file_access.cpp"
+      - "core/io/file_access.h"
+      - "core/io/file_access_memory.cpp"
+      - "core/io/file_access_memory.h"
+      - "tests/core/io/test_file_access.cpp"
+      - ".github/workflows/file-access-token-stack.yml"
   push:
     branches: [develop]
     paths:
-      - 'core/io/file_access.cpp'
-      - 'tests/core/io/test_file_access.cpp'
-      - '.github/workflows/file-access-token-stack.yml'
+      - "core/io/file_access.cpp"
+      - "core/io/file_access.h"
+      - "core/io/file_access_memory.cpp"
+      - "core/io/file_access_memory.h"
+      - "tests/core/io/test_file_access.cpp"
+      - ".github/workflows/file-access-token-stack.yml"
   workflow_dispatch:
 
 permissions:
   contents: read
 
+concurrency:
+  group: fileaccess-native-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
-  native-token:
+  native-file-access:
     runs-on: ubuntu-24.04
-    timeout-minutes: 90
+    timeout-minutes: 120
     steps:
       - uses: actions/checkout@v4
         with:
           submodules: recursive
       - uses: ./.github/actions/godot-deps
-      - uses: ./.github/actions/godot-build
+      - name: Compile native Godot test engine once
+        uses: ./.github/actions/godot-build
         with:
           platform: linuxbsd
           target: editor
-          scons-flags: dev_build=yes tests=yes debug_symbols=no module_mono_enabled=no accesskit=no
-      - name: Check short and long token scanning
+          scons-flags: dev_build=yes tests=yes debug_symbols=no module_mono_enabled=no module_text_server_fb_enabled=yes accesskit=no -j2
+      - name: FileAccess COW, token, UTF-8, Variant and CSV regression suite
         run: |
-          timeout 300s ./bin/godot.linuxbsd.editor.dev.x86_64 --headless --test --test-case='*Token scanning reuses stack-first*' --no-colors
-          timeout 300s ./bin/godot.linuxbsd.editor.dev.x86_64 --headless --test --test-case='*[FileAccess][Performance] CSV*' --no-colors
-          timeout 300s ./bin/godot.linuxbsd.editor.dev.x86_64 --headless --test --test-case='*[FileAccess] CSV read' --no-colors
+          timeout 300s ./bin/godot.linuxbsd.editor.dev.x86_64 --headless --test --test-case="*[FileAccess] Memory*" --no-colors
+          timeout 300s ./bin/godot.linuxbsd.editor.dev.x86_64 --headless --test --test-case="*Small UTF-8 loads avoid*" --no-colors
+          timeout 300s ./bin/godot.linuxbsd.editor.dev.x86_64 --headless --test --test-case="*Variant serialization uses small scratch*" --no-colors
+          timeout 300s ./bin/godot.linuxbsd.editor.dev.x86_64 --headless --test --test-case="*Token scanning reuses stack-first*" --no-colors
+          timeout 300s ./bin/godot.linuxbsd.editor.dev.x86_64 --headless --test --test-case="*[FileAccess] CSV read" --no-colors
+          timeout 300s ./bin/godot.linuxbsd.editor.dev.x86_64 --headless --test --test-case="*[FileAccess][Performance] CSV*" --no-colors
