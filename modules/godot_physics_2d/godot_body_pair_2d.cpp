@@ -460,9 +460,31 @@ bool GodotBodyPair2D::pre_solve(real_t p_step) {
 	mixed_friction = space->mix_friction(A->get_friction(), B->get_friction());
 	const bool has_friction = mixed_friction > 0.0;
 
+	// A cached impulse has force*time units. Preserve its equivalent force
+	// when the physics tick rate changes, rather than reusing the old impulse.
+	// Discard the cache after unusually large timestep jumps.
+	const real_t previous_step = space->get_previous_step();
+	const bool step_changed = previous_step > 0.0 && !Math::is_equal_approx(previous_step, p_step);
+	const real_t impulse_scale = step_changed ? p_step / previous_step : real_t(1.0);
+	const bool can_scale_impulses = impulse_scale >= real_t(0.5) && impulse_scale <= real_t(2.0);
+
 	for (int i = 0; i < contact_count; i++) {
 		Contact &c = contacts[i];
 		c.active = false;
+
+		if (step_changed) {
+			if (can_scale_impulses) {
+				c.acc_normal_impulse *= impulse_scale;
+				c.acc_tangent_impulse *= impulse_scale;
+				c.acc_bias_impulse *= impulse_scale;
+				c.acc_bias_impulse_center_of_mass *= impulse_scale;
+			} else {
+				c.acc_normal_impulse = 0.0;
+				c.acc_tangent_impulse = 0.0;
+				c.acc_bias_impulse = 0.0;
+				c.acc_bias_impulse_center_of_mass = 0.0;
+			}
+		}
 
 		Vector2 global_A = transform_A.basis_xform(c.local_A);
 		Vector2 global_B = transform_B.basis_xform(c.local_B) + offset_B;
@@ -493,6 +515,10 @@ bool GodotBodyPair2D::pre_solve(real_t p_step) {
 
 		Vector2 P = c.acc_normal_impulse * c.normal;
 		if (has_friction) {
+			// Friction can change between frames. Restrict the cached total
+			// tangent impulse to the *current* Coulomb cone before applying it.
+			const real_t cached_tangent_limit = mixed_friction * c.acc_normal_impulse;
+			c.acc_tangent_impulse = CLAMP(c.acc_tangent_impulse, -cached_tangent_limit, cached_tangent_limit);
 			const Vector2 tangent = c.normal.orthogonal();
 			const real_t rtA = c.rA.dot(tangent);
 			const real_t rtB = c.rB.dot(tangent);
