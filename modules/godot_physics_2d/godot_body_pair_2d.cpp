@@ -40,6 +40,7 @@
 #include "servers/physics_ccd_rotating_capsule_toi.h"
 #include "servers/physics_speculative_sphere_contact.h"
 #include "servers/physics_speculative_capsule_contact.h"
+#include "servers/physics_speculative_capsule_pair_contact.h"
 #include "servers/physics_ccd_capsule_toi.h"
 #include "servers/physics_ccd_capsule_pair_toi.h"
 #include "servers/physics_ccd_circle_segment_toi.h"
@@ -663,7 +664,7 @@ bool GodotBodyPair2D::setup(real_t p_step) {
 	const PS2DE::ShapeType type_B = B->get_shape(shape_B)->get_type();
 	const bool velocity_sensitive_pair = space->get_speculative_sphere_distance() > 0.0 &&
 			((type_A == PS2DE::SHAPE_CIRCLE && (type_B == PS2DE::SHAPE_CIRCLE || type_B == PS2DE::SHAPE_CAPSULE)) ||
-					(type_A == PS2DE::SHAPE_CAPSULE && type_B == PS2DE::SHAPE_CIRCLE));
+					(type_A == PS2DE::SHAPE_CAPSULE && (type_B == PS2DE::SHAPE_CIRCLE || type_B == PS2DE::SHAPE_CAPSULE)));
 	const uint64_t geometry_version_a = A->get_collision_geometry_version();
 	const uint64_t geometry_version_b = B->get_collision_geometry_version();
 	// The broadphase AABBs may overlap even when the actual shapes are
@@ -810,6 +811,47 @@ bool GodotBodyPair2D::setup(real_t p_step) {
 					contact_recycling.speculative_contact = true;
 					oneway_disabled = false;
 				}
+			}
+		}
+	}
+
+	// Advanced predictive capsule/capsule contacts, including skew axes.
+	// Reuse the exact center-segment CCD TOI and surface witnesses. Rotating
+	// shapes and report-only pairs retain their legacy narrowphase behavior.
+	if (!collided && !report_contacts_only && space->get_speculative_sphere_distance() > 0.0 &&
+			shape_A_ptr->get_type() == PS2DE::SHAPE_CAPSULE && shape_B_ptr->get_type() == PS2DE::SHAPE_CAPSULE &&
+			A->get_angular_velocity() == 0.0 && B->get_angular_velocity() == 0.0 &&
+			!(A->get_mode() == PS2DE::BODY_MODE_STATIC && A->get_linear_velocity() != Vector2()) &&
+			!(B->get_mode() == PS2DE::BODY_MODE_STATIC && B->get_linear_velocity() != Vector2()) &&
+			!A->is_shape_set_as_one_way_collision(shape_A) &&
+			!B->is_shape_set_as_one_way_collision(shape_B)) {
+		const double scale_A = physics_ccd_uniform_sphere_scale(xform_A);
+		const double scale_B = physics_ccd_uniform_sphere_scale(xform_B);
+		if (scale_A > 0.0 && scale_B > 0.0) {
+			const GodotCapsuleShape2D *capsule_A = static_cast<GodotCapsuleShape2D *>(shape_A_ptr);
+			const GodotCapsuleShape2D *capsule_B = static_cast<GodotCapsuleShape2D *>(shape_B_ptr);
+			const real_t radius_A = real_t(double(capsule_A->get_radius()) * scale_A);
+			const real_t radius_B = real_t(double(capsule_B->get_radius()) * scale_B);
+			const real_t half_A = real_t((double(capsule_A->get_height()) * 0.5 - double(capsule_A->get_radius())) * scale_A);
+			const real_t half_B = real_t((double(capsule_B->get_height()) * 0.5 - double(capsule_B->get_radius())) * scale_B);
+			const Vector2 velocity_A = A->get_mode() == PS2DE::BODY_MODE_STATIC ? Vector2() : A->get_linear_velocity();
+			const Vector2 velocity_B = B->get_mode() == PS2DE::BODY_MODE_STATIC ? Vector2() : B->get_linear_velocity();
+			Vector2 point_A, point_B, normal;
+			if (physics_speculative_capsule_pair_contact(
+					xform_A.get_origin(), xform_B.get_origin(), xform_A.columns[1], xform_B.columns[1],
+					half_A, half_B, radius_A, radius_B,
+					(velocity_A - velocity_B) * p_step, space->get_speculative_sphere_distance(),
+					point_A, point_B, normal)) {
+				Contact speculative;
+				speculative.local_A = A->get_inv_transform().basis_xform(point_A);
+				speculative.local_B = B->get_inv_transform().basis_xform(point_B - offset_B);
+				speculative.normal = normal;
+				speculative.used = true;
+				contacts[0] = speculative;
+				contact_count = 1;
+				collided = true;
+				contact_recycling.speculative_contact = true;
+				oneway_disabled = false;
 			}
 		}
 	}
