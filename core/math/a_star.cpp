@@ -272,10 +272,13 @@ bool AStar3D::has_point(int64_t p_id) const {
 PackedInt64Array AStar3D::get_point_ids() {
 	PackedInt64Array point_list;
 	point_list.resize(points.size());
+	int64_t *write = point_list.ptrw();
 	int idx = 0;
 
-	for (KeyValue<int64_t, Point *> &kv : points) {
-		point_list.set(idx++, kv.key);
+	// The output has exactly the right size and is exclusively owned.
+	// Avoid a COW-sensitive set() call for every point in a large graph.
+	for (const KeyValue<int64_t, Point *> &kv : points) {
+		write[idx++] = kv.key;
 	}
 
 	return point_list;
@@ -287,10 +290,11 @@ Vector<int64_t> AStar3D::get_point_connections(int64_t p_id) {
 
 	Vector<int64_t> point_list;
 	point_list.resize((*p_entry)->neighbors.size());
+	int64_t *write = point_list.ptrw();
 	int idx = 0;
 
-	for (KeyValue<int64_t, Point *> &kv : (*p_entry)->neighbors) {
-		point_list.set(idx++, kv.key);
+	for (const KeyValue<int64_t, Point *> &kv : (*p_entry)->neighbors) {
+		write[idx++] = kv.key;
 	}
 
 	return point_list;
