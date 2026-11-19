@@ -29,13 +29,44 @@ class CCD2DMultipleSupportsTests(unittest.TestCase):
         )
         self.assertIn("supports_A[support_idx]", cast)
 
-    def test_picks_nearest_hit_and_reuses_transform_inverse(self):
+    def test_relative_sweep_reuses_the_target_inverse(self):
         cast = self.cast
-        self.assertEqual(cast.count("predicted_xform_B.affine_inverse()"), 1)
-        self.assertIn("local_from.distance_squared_to(rpos)", cast)
-        self.assertIn("candidate_distance_squared < hit_distance_squared", cast)
-        self.assertIn("hit_support_from = from", cast)
-        self.assertIn("hitpos.distance_to(hit_support_from)", cast)
+        self.assertIn("const Vector2 relative_motion = motion_A - velocity_B * p_step;", cast)
+        self.assertEqual(cast.count("p_xform_B.affine_inverse()"), 1)
+        self.assertIn("const Transform2D inv_B", cast)
+        self.assertIn("inv_B.xform(from - relative_motion * 0.1)", cast)
+        self.assertIn("inv_B.xform(from + relative_motion)", cast)
+        self.assertNotIn("predicted_xform_B", cast)
+
+    def test_earliest_support_is_ranked_in_world_space(self):
+        cast = self.cast
+        self.assertIn("const real_t hit_distance = mnormal.dot(p_xform_B.xform(rpos) - from);", cast)
+        self.assertIn("hit_distance < best_hit_distance", cast)
+        self.assertIn("best_hit_distance = hit_distance", cast)
+        self.assertIn("CLAMP(best_hit_distance +", cast)
+
+    def test_ccd_never_accelerates_or_reverses_body(self):
+        cast = self.cast
+        self.assertIn("motion_A.dot(relative_motion) <= 0.0", cast)
+        self.assertIn("const Vector2 corrected_velocity = velocity_B +", cast)
+        self.assertIn("const real_t clamped_speed = CLAMP(", cast)
+        self.assertIn("p_A->set_linear_velocity(travel_direction * clamped_speed)", cast)
+
+    def test_static_surface_velocity_is_not_geometry_motion(self):
+        cast = self.cast
+        self.assertIn("p_B->get_mode() == PS2DE::BODY_MODE_STATIC", cast)
+        self.assertIn("const Vector2 velocity_B =", cast)
+
+    def test_relative_motion_runtime_coverage_runs_in_native_ci(self):
+        regression = ROOT / "tests" / "stress" / "physics_ccd_relative_motion_2d_regression.gd"
+        script = regression.read_text(encoding="utf-8")
+        for scenario in ("co-moving bodies", "slower trailing body",
+                         "slower body ahead", "static conveyor surface"):
+            self.assertIn(scenario, script)
+
+        workflow = (ROOT / ".github" / "workflows" / "whole-engine-stress.yml").read_text(encoding="utf-8")
+        self.assertIn("physics_ccd_relative_motion_2d_regression.gd", workflow)
+        self.assertIn("physics_ccd_edge_2d_regression.gd", workflow)
 
     def test_one_way_filter_runs_after_support_casts(self):
         cast = self.cast
