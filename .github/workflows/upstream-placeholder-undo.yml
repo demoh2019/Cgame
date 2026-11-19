@@ -5,12 +5,14 @@ on:
     branches: [develop]
     paths:
       - 'editor/docks/scene_tree_dock.cpp'
+      - 'tests/scene/test_node.cpp'
       - 'misc/scripts/tests/test_upstream_placeholder_undo.py'
       - 'misc/scripts/README_upstream_placeholder_undo.md'
       - '.github/workflows/upstream-placeholder-undo.yml'
   pull_request:
     paths:
       - 'editor/docks/scene_tree_dock.cpp'
+      - 'tests/scene/test_node.cpp'
       - 'misc/scripts/tests/test_upstream_placeholder_undo.py'
       - 'misc/scripts/README_upstream_placeholder_undo.md'
       - '.github/workflows/upstream-placeholder-undo.yml'
@@ -32,3 +34,23 @@ jobs:
         run: python3 -m py_compile misc/scripts/tests/test_upstream_placeholder_undo.py
       - name: Run UndoRedo C++ harness and source regressions
         run: python3 -m unittest discover -s misc/scripts/tests -p 'test_upstream_placeholder_undo.py' -v
+
+  native-node-undo:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+      - uses: ./.github/actions/godot-deps
+      - name: Build engine native tests
+        uses: ./.github/actions/godot-build
+        with:
+          platform: linuxbsd
+          target: editor
+          scons-flags: dev_build=yes tests=yes debug_symbols=no module_mono_enabled=no accesskit=no
+      - name: Exercise real Node UndoRedo actions
+        shell: bash
+        run: |
+          set -euo pipefail
+          ./bin/godot.linuxbsd.editor.dev.x86_64 --headless --test --test-case='*[Node][PlaceholderUndo]*'

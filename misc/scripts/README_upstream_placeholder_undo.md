@@ -13,3 +13,19 @@ python3 -m unittest discover -s misc/scripts/tests -p 'test_upstream_placeholder
 ```
 
 Seven checks include direct inspection of **the actual C++ implementation** plus a compiled C++ harness that simulates selection, nested editor-history actions, reversing and reapplying placeholder flags, and null selections. The harness is not a complete Godot editor integration test. CI runs on Ubuntu and macOS; a production engine build and editor UI Undo/Redo exercise are still required before release.
+
+## Native engine coverage
+
+Four additional `[Node][PlaceholderUndo]` cases are registered in
+`tests/scene/test_node.cpp` and exercise the actual Godot `UndoRedo` and
+`Node::set_scene_instance_load_placeholder` implementations: enable, disable,
+multi-node atomic change, and repeated history/undo/redo. The CI workflow also
+builds the Linux Godot editor with `tests=yes` and runs these cases.
+
+```sh
+./bin/godot.linuxbsd.editor.dev.x86_64 --headless --test --test-case='*[Node][PlaceholderUndo]*'
+```
+
+The existing compiled harness exercises the editor toggle wiring but cannot
+replace a manual interactive GUI check. The native suite does not instantiate
+`EditorNode`; both are complementary, not proof of complete editor behavior.
