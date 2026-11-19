@@ -407,6 +407,24 @@ JPH::SoftBodySharedSettings *JoltSoftBody3D::_create_shared_settings() {
 			tether.mMaxDistance *= multiplier;
 		}
 	}
+	// For compressible volumetric materials, edge lengths scale linearly
+	// while tetrahedral rest volumes scale cubically (determinant of an
+	// isotropic 3D transform). Keep the original volume when this is off:
+	// that models an incompressible solid contracting only at its surface.
+	// Both modes use the existing Jolt XPBD volume constraint solver.
+	if (JoltProjectSettings::soft_body_volume_follow_shrinking_factor &&
+			multiplier != 1.0f && !settings->mVolumeConstraints.empty()) {
+		const double scale = MAX(double(multiplier), 0.0);
+		const double volume_scale = scale * scale * scale;
+		if (Math::is_finite(volume_scale)) {
+			for (JPH::SoftBodySharedSettings::Volume &volume : settings->mVolumeConstraints) {
+				const double scaled_rest_volume = double(volume.mSixRestVolume) * volume_scale;
+				// A finite, bounded target protects Jolt's XPBD solver from
+				// floating-point overflow for extreme user-defined shrinkage.
+				volume.mSixRestVolume = float(CLAMP(scaled_rest_volume, -double(FLT_MAX), double(FLT_MAX)));
+			}
+		}
+	}
 	settings->Optimize();
 
 	return settings;
