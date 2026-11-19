@@ -4,6 +4,7 @@ extends Node3D
 
 const LAB_2D := "res://lab_2d.tscn"
 const INTERACTIVE_ENV_3D = preload("res://environment_3d.gd")
+const ADVANCED_PHYSICS_3D = preload("res://advanced_3d.gd")
 const ZONES_X := [-28.0, -14.0, 0.0, 14.0, 28.0]
 
 var _camera: Camera3D
@@ -36,6 +37,10 @@ func _ready() -> void:
     interactions.name = "Environment3D"
     add_child(interactions)
     interactions.setup(_camera)
+    var advanced = ADVANCED_PHYSICS_3D.new()
+    advanced.name = "AdvancedPhysics3D"
+    add_child(advanced)
+    advanced.setup()
 
 
 func _make_environment() -> void:
