@@ -14,6 +14,8 @@ static func apply(plan: Dictionary) -> Dictionary:
 	# Fail the entire operation if any target exists. Never silently overwrite.
 	for item in files:
 		var target := PlanValidator.OUTPUT_PREFIX + String(item.path)
+		if _path_has_symlink(target):
+			return {"ok": false, "error": "Symlink detected in generated output path: %s" % target}
 		if FileAccess.file_exists(target) or DirAccess.dir_exists_absolute(ProjectSettings.globalize_path(target)):
 			return {"ok": false, "error": "Refusing to overwrite existing path: %s" % target}
 
@@ -43,3 +45,22 @@ static func apply(plan: Dictionary) -> Dictionary:
 static func _rollback(created: Array[String]) -> void:
 	for target in created:
 		DirAccess.remove_absolute(ProjectSettings.globalize_path(target))
+
+
+# Protect against a pre-existing directory (or file) symlink redirecting the
+# otherwise valid res://ai_generated/ path outside the project. This cannot
+# defeat malicious concurrent filesystem changes; use a sandbox if untrusted.
+static func _path_has_symlink(resource_path: String) -> bool:
+	var directory := DirAccess.open("res://")
+	if directory == null:
+		return true
+	var relative_path := resource_path.trim_prefix("res://")
+	for component in relative_path.split("/", false):
+		if directory.is_link(component):
+			return true
+		if directory.dir_exists(component):
+			if directory.change_dir(component) != OK:
+				return true
+		else:
+			return false
+	return false
