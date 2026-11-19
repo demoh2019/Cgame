@@ -1431,6 +1431,9 @@ GodotSpace3D::GodotSpace3D() {
 	const real_t configured_rod_bend_compliance = GLOBAL_GET("physics/3d/solver/soft_body_xpbd_rod_bend_compliance");
 	soft_body_xpbd_rod_bend_compliance = Math::is_finite(configured_rod_bend_compliance) ?
 			MAX(real_t(0.0), configured_rod_bend_compliance) : real_t(0.0);
+	const real_t configured_rod_torsion = GLOBAL_GET("physics/3d/solver/soft_body_xpbd_rod_torsion_compliance");
+	soft_body_xpbd_rod_torsion_compliance = Math::is_finite(configured_rod_torsion) ?
+			MAX(real_t(0.0), configured_rod_torsion) : real_t(0.0);
 	const real_t configured_rod_straightness = GLOBAL_GET("physics/3d/solver/soft_body_xpbd_rod_straightness");
 	soft_body_xpbd_rod_straightness = Math::is_finite(configured_rod_straightness) ?
 			CLAMP(configured_rod_straightness, real_t(0.0), real_t(0.9999)) : real_t(0.9);
