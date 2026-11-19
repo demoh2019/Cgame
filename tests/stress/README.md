@@ -872,10 +872,26 @@ The standalone `physics_contact_solver_regression.gd` script uses three
 independent dynamic circles sliding against static floors. It checks that
 frictionless contact travels farther than frictional contact, that body
 positions/velocities remain finite for 150 physics frames, and that changing
-contact friction from 1 to 0 to 1 does not cause unstable velocities.
+contact friction from 1 to 0.2 to 0 to 1 does not cause unstable velocities.
+The test changes `Engine.physics_ticks_per_second` between 60, 120 and 240
+and restores its previous value. It also exercises a non-default warm-start
+coefficient in the newly created physics space.
 
 This specifically exercises contact persistence, warm-start impulse reuse
 and the zero-friction tangent-solver shortcut. It does not establish a speedup.
+
+The optional project setting `physics/2d/solver/warm_start_coefficient` follows
+Rapier's tunable contact warm-starting principle: `1.0` (default) fully
+reuses compatible cached impulses, `0.0` disables reuse, and values between
+them damp the cached impulse. It is read when creating a `GodotSpace2D`;
+changing the project setting does not alter spaces already created. The
+default `1.0` preserves existing fixed-timestep simulation behavior.
+A timestep change scales the impulses by the ratio of new-to-previous
+physics step; changes larger than 2x or smaller than 0.5x drop cached
+impulses. Cached tangential impulses are always limited to
+`friction * cached_normal_impulse` before warm starting, including when a
+contact's friction coefficient changes.
+
 For throughput, two matched low-level workloads use the same dense circle
 geometry while varying only the friction coefficient. Compare each case
 against a baseline from the same machine, binary settings and scale; do not
