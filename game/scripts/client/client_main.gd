@@ -59,6 +59,8 @@ func _setup_actions() -> void:
 	_bind_key("survive_weapon", KEY_4)
 	_bind_key("survive_armor", KEY_5)
 	_bind_key("survive_lake", KEY_R)
+	_bind_key("survive_vendor_buy", KEY_B)
+	_bind_key("survive_vendor_sell", KEY_V)
 
 
 func _bind_key(action: StringName, key: Key) -> void:
@@ -344,6 +346,11 @@ func _unhandled_input(event: InputEvent) -> void:
 		_result("Equip armor", sim.cmd_use(LOCAL_PLAYER_ID, "jacket_1"))
 	elif event.is_action_pressed("survive_lake"):
 		_result("Drink from water", sim.cmd_drink_water(LOCAL_PLAYER_ID))
+	elif event.is_action_pressed("survive_vendor_buy"):
+		_result("Buy water (12 silver)", sim.cmd_vendor(LOCAL_PLAYER_ID, "water_bottle", 1, true))
+	elif event.is_action_pressed("survive_vendor_sell"):
+		var salvage_id := "scrap" if survivor.inventory.count("scrap") > 0 else "wood_1"
+		_result("Sell %s" % salvage_id, sim.cmd_vendor(LOCAL_PLAYER_ID, salvage_id, 1, false))
 
 
 func _update_hud() -> void:
@@ -356,14 +363,14 @@ func _update_hud() -> void:
 	for slot in survivor.inventory.slots:
 		if not slot.is_empty():
 			rows.append("%s:%d" % [str(slot["id"]), int(slot["count"])])
-	_stats.text = "ALBION AFTER | LOCAL SURVIVAL PREVIEW\nHP %d  HUNGER %d  THIRST %d  KILLS %d\nZONE %s (T%d)  POS %d,%d  ZOMBIES %d\nINVENTORY %s" % [
+	_stats.text = "ALBION AFTER | LOCAL SURVIVAL PREVIEW\nHP %d  HUNGER %d  THIRST %d  KILLS %d\nZONE %s (T%d)  POS %d,%d  ZOMBIES %d\nSILVER %d  INVENTORY %s" % [
 		int(vitals.health), int(vitals.hunger), int(vitals.thirst), survivor.kills,
 		Defs.ZONE_NAMES[zone], WorldGen.tier_for_zone(zone), int(position.x), int(position.z),
-		sim.zombies.size(), ", ".join(rows)
+		sim.zombies.size(), survivor.inventory.count("silver"), ", ".join(rows)
 	]
 	var recipe: Dictionary = Defs.recipes()[RECIPES[_recipe_index]]
 	var near_bench: bool = Vector2(position.x, position.z).distance_to(GameServer.WORKBENCH_POSITION) < GameServer.WORKBENCH_RANGE
-	_instructions.text = "WASD move | Shift sprint | E gather | Q loot | F attack\nTab recipe | C craft | 1 eat 2 drink 3 bandage 4 weapon 5 armor R lake\nCRAFT %s -> %s x%d | %s | inputs %s\n%s" % [
+	_instructions.text = "WASD move | Shift sprint | E gather | Q loot | F attack\nTab recipe | C craft | 1 eat 2 drink 3 bandage 4 weapon 5 armor R lake\nB buy water / V sell salvage at hub workbench\nCRAFT %s -> %s x%d | %s | inputs %s\n%s" % [
 		RECIPES[_recipe_index], str(recipe["output"]), int(recipe["count"]),
 		"WORKBENCH" if near_bench else "workbench at x=9, z=0",
 		str(recipe["inputs"]), _feedback
