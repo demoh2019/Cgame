@@ -83,6 +83,15 @@ class GodotSoftBody3D : public GodotCollisionObject3D {
 	LocalVector<real_t> xpbd_link_lambdas;
 	// One compliance multiplier per triangle, allocated only in area-XPBD mode.
 	LocalVector<real_t> xpbd_area_lambdas;
+	// Compact indexed hinges avoid 4x pointer storage per cloth bend and
+	// remain valid while Node::x changes during physics integration.
+	struct DihedralBend {
+		uint32_t vertex[4] = {};
+		real_t rest_angle = 0.0;
+		real_t lambda = 0.0;
+	};
+	LocalVector<DihedralBend> xpbd_dihedral_bends;
+	bool xpbd_dihedral_built = false; // Lazy topology build only when enabled.
 	// Allocated only for positive volume compliance on a closed soft mesh.
 	LocalVector<Vector3> xpbd_volume_gradients;
 	double xpbd_volume_rest = 0.0;
@@ -255,6 +264,7 @@ private:
 
 	bool create_from_trimesh(const Vector<int> &p_indices, const Vector<Vector3> &p_vertices);
 	void generate_bending_constraints(int p_distance);
+	void build_xpbd_dihedral_bends();
 	void reoptimize_link_order();
 	void append_link(uint32_t p_node1, uint32_t p_node2);
 	void append_face(uint32_t p_node1, uint32_t p_node2, uint32_t p_node3);
