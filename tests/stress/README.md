@@ -1392,6 +1392,17 @@ mode):
   --path tests/stress --script res://physics_large_island_regression.gd
 ```
 
+For a fast dependency-free reference check of the graph-color masks, serial
+overflow and exact worker-batch coverage:
+
+```bash
+python3 -m unittest tests/stress/test_physics_2d_color_batches.py -v
+```
+
+This Python test validates the algorithm's invariants; it does **not**
+exercise Godot's C++ solver or establish thread safety. The GDScript test
+above and a compiled sanitizer-enabled engine remain required.
+
 For repeatable scale and RAM measurements, the low-level stress case creates
 its own physics space after changing the project setting and restores the
 setting immediately after creation (existing spaces do not update their
