@@ -282,6 +282,8 @@ public:
 	// Optional pre-cooked tetra FEM connectivity for the soft body's welded
 	// surface nodes. An unsupported physics backend may ignore the extension.
 	virtual void soft_body_set_tetrahedral_indices(RID, const PackedInt32Array &) {}
+	// Optional interior FEM rest nodes, following all visual-vertex indices.
+	virtual void soft_body_set_tetrahedral_interior_positions(RID, const PackedVector3Array &) {}
 
 	virtual AABB soft_body_get_bounds(RID p_body) const = 0;
 
