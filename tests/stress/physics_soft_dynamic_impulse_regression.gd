@@ -52,7 +52,7 @@ func _run() -> void:
 
 	var fully_dynamic := bodies[0].get_physics_rid()
 	var half_pinned := bodies[1].get_physics_rid()
-	var pinned_count := unique_indices.size() / 2
+	var pinned_count: int = unique_indices.size() >> 1
 	for i in range(pinned_count):
 		PhysicsServer3D.soft_body_pin_point(half_pinned, unique_indices[i], true)
 
