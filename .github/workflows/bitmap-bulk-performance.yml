@@ -60,7 +60,7 @@ jobs:
           set -euo pipefail
           python3 tests/stress/run.py \
             --godot ./bin/godot.linuxbsd.editor.dev.x86_64 \
-            --case bitmap_rects,bitmap_pipeline --scale 1 --frames 12 --repeats 5 \
+            --case bitmap_rects,bitmap_pipeline,bitmap_morphology --scale 1 --frames 12 --repeats 5 \
             --timeout 120 --rss-limit-mib 2048 \
             --output bitmap-bulk-results.json --summary-md bitmap-bulk-hotspots.md
       - name: Upload performance measurements
