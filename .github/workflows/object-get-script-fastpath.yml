@@ -17,9 +17,23 @@ jobs:
       - uses: actions/checkout@v7
         with:
           submodules: recursive
+      - name: Restore native editor SCons cache
+        uses: ./.github/actions/godot-cache-restore
+        with:
+          cache-name: linux-editor-native-script-fastpaths
+        continue-on-error: true
       - uses: ./.github/actions/godot-deps
       - name: Compile editor with native tests
-        run: scons platform=linuxbsd target=editor tests=yes module_text_server_fb_enabled=yes -j2
+        uses: ./.github/actions/godot-build
+        with:
+          platform: linuxbsd
+          target: editor
+          scons-flags: tests=yes module_text_server_fb_enabled=yes -j2
+      - name: Save native editor SCons cache
+        uses: ./.github/actions/godot-cache-save
+        with:
+          cache-name: linux-editor-native-script-fastpaths
+        continue-on-error: true
       - name: Run object script fast-path regression tests
         run: ./bin/godot.linuxbsd.editor.x86_64 --headless --test --test-case="*[ObjectGetScript]*"
       - name: Run script serialization fast-path regression tests
