@@ -230,4 +230,41 @@ TEST_CASE("[TerrainMesh] Invalid dimensions, arrays and brush parameters leave d
 	CHECK(terrain->get_height_scale() == doctest::Approx(1.0f));
 }
 
+TEST_CASE("[TerrainMesh] Segment picking intersects flat terrain at correct position") {
+	Ref<TerrainMesh> terrain = make_terrain(Vector2i(4, 4));
+	Vector3 hit;
+	REQUIRE(terrain->intersect_segment(Vector3(1.5f, 5.0f, 1.5f), Vector3(1.5f, -5.0f, 1.5f), hit));
+	CHECK(hit.is_equal_approx(Vector3(1.5f, 0.0f, 1.5f)));
+}
+
+TEST_CASE("[TerrainMesh] Segment picking follows the rendered triangle surface") {
+	Ref<TerrainMesh> terrain = make_terrain(Vector2i(2, 2));
+	terrain->set_height(1, 1, 4.0f);
+	Vector3 hit;
+	REQUIRE(terrain->intersect_segment(Vector3(0.75f, 8.0f, 0.75f), Vector3(0.75f, -8.0f, 0.75f), hit));
+	CHECK(hit.y == doctest::Approx(2.0f));
+}
+
+TEST_CASE("[TerrainMesh] Segment picking respects world-spacing and vertical scaling") {
+	Ref<TerrainMesh> terrain = make_terrain(Vector2i(2, 2));
+	terrain->set_cell_size(3.0f);
+	terrain->set_height_scale(2.0f);
+	terrain->set_height(0, 0, 3.0f);
+	terrain->set_height(1, 0, 3.0f);
+	terrain->set_height(0, 1, 3.0f);
+	terrain->set_height(1, 1, 3.0f);
+	Vector3 hit;
+	REQUIRE(terrain->intersect_segment(Vector3(1.5f, 10, 1.5f), Vector3(1.5f, 0, 1.5f), hit));
+	CHECK(hit.y == doctest::Approx(6.0f));
+}
+
+TEST_CASE("[TerrainMesh] Segment picking rejects rays outside or away from terrain") {
+	Ref<TerrainMesh> terrain = make_terrain();
+	Vector3 hit(99, 99, 99);
+	CHECK_FALSE(terrain->intersect_segment(Vector3(-4, 10, -4), Vector3(-4, -10, -4), hit));
+	CHECK_FALSE(terrain->intersect_segment(Vector3(1, 10, 1), Vector3(1, 1, 1), hit));
+	CHECK_FALSE(terrain->intersect_segment(Vector3(1, 0, 1), Vector3(1, 0, 1), hit));
+	CHECK(hit == Vector3(99, 99, 99));
+}
+
 } // namespace TestTerrainMesh
