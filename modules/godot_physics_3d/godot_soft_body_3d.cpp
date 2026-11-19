@@ -649,32 +649,73 @@ bool GodotSoftBody3D::solve_edge_self_collisions(real_t p_delta) {
 			}
 			real_t s, t, distance;
 			Vector3 normal;
-			if (!physics_xpbd_closest_edges(a.x, b.x, c.x, d.x, s, t, normal, distance) ||
-					distance >= thickness) {
+			if (physics_xpbd_closest_edges(a.x, b.x, c.x, d.x, s, t, normal, distance) &&
+					distance < thickness) {
+				// Existing discrete XPBD behavior, unchanged by the CCD switch.
+				const Vector3 previous_a = a.q + (b.q - a.q) * s;
+				const Vector3 previous_b = c.q + (d.q - c.q) * t;
+				const Vector3 previous_separation = previous_a - previous_b;
+				if (previous_separation.is_finite() &&
+						previous_separation.length_squared() > CMP_EPSILON * CMP_EPSILON &&
+						previous_separation.dot(normal) < 0.0) {
+					normal = -normal;
+				}
+				SelfEdgeContact contact;
+				contact.first = edge.index;
+				contact.second = other.index;
+				contact.normal = normal;
+				contact.lambda = 0.0;
+				xpbd_self_edge_contacts.push_back(contact);
+			} else if (swept_ccd && remaining_swept_tests > 0) {
+				--remaining_swept_tests;
+				PhysicsXPBDEdgeCCDHit hit;
+				if (!physics_xpbd_swept_edge_edge(a.q, a.x, b.q, b.x,
+							c.q, c.x, d.q, d.x, hit)) {
+					return false;
+				}
+				SelfEdgeCCDContact contact;
+				contact.first = edge.index;
+				contact.second = other.index;
+				contact.s = hit.s;
+				contact.t = hit.t;
+				contact.time = hit.time;
+				contact.normal = hit.normal;
+				contact.lambda = 0.0;
+				xpbd_self_edge_ccd_contacts.push_back(contact);
+			} else {
 				return false;
 			}
-			// Maintain the normal's side from last frame, even if the
-			// current edges crossed through each other this frame.
-			const Vector3 previous_a = a.q + (b.q - a.q) * s;
-			const Vector3 previous_b = c.q + (d.q - c.q) * t;
-			const Vector3 previous_separation = previous_a - previous_b;
-			if (previous_separation.is_finite() && previous_separation.length_squared() > CMP_EPSILON * CMP_EPSILON &&
-					previous_separation.dot(normal) < 0.0) {
-				normal = -normal;
-			}
-			SelfEdgeContact contact;
-			contact.first = edge.index;
-			contact.second = other.index;
-			contact.normal = normal;
-			contact.lambda = 0.0;
-			xpbd_self_edge_contacts.push_back(contact);
 			++hits;
-			return hits >= per_edge_limit || xpbd_self_edge_contacts.size() >= global_limit;
+			return hits >= per_edge_limit ||
+					xpbd_self_edge_contacts.size() + xpbd_self_edge_ccd_contacts.size() >= global_limit;
 		};
 		xpbd_self_edge_tree.aabb_query(query, visit_edge);
 	}
-	if (xpbd_self_edge_contacts.is_empty()) {
+	if (xpbd_self_edge_contacts.is_empty() && xpbd_self_edge_ccd_contacts.is_empty()) {
 		return false;
+	}
+	if (!xpbd_self_edge_ccd_contacts.is_empty()) {
+		// Rewind movable nodes to their earliest impact time. This avoids
+		// enormous corrections when two thin edges finish far apart.
+		xpbd_self_edge_ccd_min_time.resize(nodes.size());
+		for (real_t &fraction : xpbd_self_edge_ccd_min_time) {
+			fraction = 1.0;
+		}
+		for (const SelfEdgeCCDContact &contact : xpbd_self_edge_ccd_contacts) {
+			const SelfCollisionEdge &first = xpbd_self_edges[contact.first];
+			const SelfCollisionEdge &second = xpbd_self_edges[contact.second];
+			const real_t safe_time = MAX(real_t(0.0), contact.time - real_t(0.0001));
+			const uint32_t ids[4] = { first.a, first.b, second.a, second.b };
+			for (uint32_t id : ids) {
+				xpbd_self_edge_ccd_min_time[id] = MIN(xpbd_self_edge_ccd_min_time[id], safe_time);
+			}
+		}
+		for (uint32_t i = 0; i < nodes.size(); ++i) {
+			Node &node = nodes[i];
+			if (node.im > 0.0 && xpbd_self_edge_ccd_min_time[i] < 1.0) {
+				node.x = node.q.lerp(node.x, xpbd_self_edge_ccd_min_time[i]);
+			}
+		}
 	}
 	const int contact_iterations = MIN(MAX(iteration_count, 1), 4);
 	for (int iteration = 0; iteration < contact_iterations; ++iteration) {
@@ -687,6 +728,20 @@ bool GodotSoftBody3D::solve_edge_self_collisions(real_t p_delta) {
 			Node &d = nodes[second.b];
 			physics_xpbd_solve_edge_collision(a.x, b.x, c.x, d.x,
 					a.im, b.im, c.im, d.im, thickness, alpha, contact.normal, contact.lambda);
+		}
+		for (SelfEdgeCCDContact &contact : xpbd_self_edge_ccd_contacts) {
+			const SelfCollisionEdge &first = xpbd_self_edges[contact.first];
+			const SelfCollisionEdge &second = xpbd_self_edges[contact.second];
+			Node &a = nodes[first.a];
+			Node &b = nodes[first.b];
+			Node &c = nodes[second.a];
+			Node &d = nodes[second.b];
+			PhysicsXPBDEdgeCCDHit hit;
+			hit.s = contact.s;
+			hit.t = contact.t;
+			hit.normal = contact.normal;
+			physics_xpbd_solve_swept_edge_edge(a.x, b.x, c.x, d.x,
+					a.im, b.im, c.im, d.im, thickness, alpha, hit, contact.lambda);
 		}
 	}
 	return true;
