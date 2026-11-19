@@ -32,6 +32,6 @@ func interact(player: Node) -> void:
         return
     if item_type != "food" and item_type != "water":
         return
-    collected = true
-    player.call("collect_item", item_type, quantity)
-    queue_free()
+    if bool(player.call("collect_item", item_type, quantity)):
+        collected = true
+        queue_free()
