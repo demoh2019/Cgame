@@ -35,7 +35,7 @@ Each `.tscn` cell must have a `Node3D` root. The authored origin is relative to 
 
 ## Tests
 
-The module includes 55 Doctest cases across `test_world_partition_3d.h` (20) and `test_world_partition_3d_extra.h` (35), including disk-backed scenes, origin-offset checks, load/unload hysteresis, duplicate mappings and overflow guards, shared resource requests, and cleanup of failed/pending ResourceLoader tokens. Tests are picked up by Godot's generated module-test list.
+The module includes 56 Doctest cases across `test_world_partition_3d.h` (20) and `test_world_partition_3d_extra.h` (36), including disk-backed scenes, origin-offset checks, load/unload hysteresis, duplicate mappings and overflow guards, shared resource requests, and cleanup of failed/pending ResourceLoader tokens. Tests are picked up by Godot's generated module-test list.
 
 ```sh
 scons platform=linuxbsd target=editor tests=yes -j"$(nproc)"
