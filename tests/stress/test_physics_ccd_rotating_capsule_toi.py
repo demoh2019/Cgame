@@ -126,9 +126,22 @@ class NonlinearCapsuleCCDTests(unittest.TestCase):
         self.assertGreater(misses, 100)
 
     def test_native_cases_2d_and_3d(self):
-        self.assertEqual(self.native.count("TEST_CASE("), 7)
+        self.assertEqual(self.native.count("TEST_CASE("), 9)
         self.assertIn("Fast rotational tunneling is detected", self.native)
         self.assertIn("Capsule sweeps around Z onto a stationary sphere", self.native)
+
+    def test_rotational_pivot_is_in_world_space(self):
+        self.assertIn("p_A->get_transform().get_origin() + p_A->get_center_of_mass()", self.pair["2d"])
+        self.assertIn("p_A->get_transform().origin + p_A->get_center_of_mass()", self.pair["3d"])
+        self.assertIn("Rotating off-center capsule TOI is invariant under translation", self.native)
+
+    def test_engine_smoke_covers_translated_noncentral_rotors(self):
+        script = (ROOT / "tests/stress/physics_ccd_rotating_capsule_toi_regression.gd").read_text()
+        self.assertIn("Vector2(2048.0, -4096.0)", script)
+        self.assertIn("PhysicsServer2D.BODY_PARAM_CENTER_OF_MASS", script)
+        self.assertIn("PhysicsServer3D.BODY_PARAM_CENTER_OF_MASS", script)
+        self.assertIn("Transform2D(0.0, offset)", script)
+        self.assertIn("Transform3D(Basis(), Vector3(offset.x, offset.y, 0.0))", script)
 
 
 if __name__ == "__main__":
