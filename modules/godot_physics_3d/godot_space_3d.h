@@ -233,6 +233,7 @@ public:
 	_FORCE_INLINE_ real_t get_soft_body_plastic_yield_strain() const { return soft_body_plastic_yield_strain; }
 	_FORCE_INLINE_ real_t get_soft_body_plastic_creep_rate() const { return soft_body_plastic_creep_rate; }
 	_FORCE_INLINE_ real_t get_soft_body_xpbd_area_compliance() const { return soft_body_xpbd_area_compliance; }
+	_FORCE_INLINE_ real_t get_soft_body_xpbd_dihedral_compliance() const { return soft_body_xpbd_dihedral_compliance; }
 	_FORCE_INLINE_ real_t get_soft_body_xpbd_tether_compliance() const { return soft_body_xpbd_tether_compliance; }
 	_FORCE_INLINE_ real_t get_soft_body_xpbd_tether_slack() const { return soft_body_xpbd_tether_slack; }
 	_FORCE_INLINE_ real_t get_soft_body_xpbd_volume_compliance() const { return soft_body_xpbd_volume_compliance; }
