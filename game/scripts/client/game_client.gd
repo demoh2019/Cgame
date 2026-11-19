@@ -22,6 +22,7 @@ var players: Dictionary = {} # id -> entity from the latest snapshot
 var zombies: Dictionary = {}
 var barricades: Dictionary = {} # Nearby defenses from the server.
 var campfires: Dictionary = {} # Nearby temporary warmth sources, server-provided.
+var raid_telegraph: Dictionary = {} # Current server-authored raid attack warning, if visible.
 var outposts: Array = [] # Public server-controlled PvP objectives.
 var bags: Dictionary = {}
 var depleted: Dictionary = {}
@@ -73,6 +74,7 @@ func on_snapshot(snapshot: Dictionary) -> void:
 	snapshots_received += 1
 	server_time = float(snapshot["time"])
 	you = snapshot["you"]
+	raid_telegraph = snapshot.get("raid_telegraph", {}).duplicate(true)
 	outposts = snapshot.get("outposts", [])
 	if snapshot.has("inventory"):
 		inventory.load_dict(snapshot["inventory"])
