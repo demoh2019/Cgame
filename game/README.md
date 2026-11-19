@@ -1022,3 +1022,50 @@ with Nakama running via `game/backend/docker-compose.yml`. Integration tests
 cover stale saves, dual-account settlement, idempotent receipts, tampered
 transaction IDs, old versions rejecting the entire batch, and the server-key
 permission boundary. The `albion-after-nakama.yml` workflow runs them.
+
+
+## Cooperative survivor parties: group PvE and weapon mastery
+
+The canonical online game in `game/` now supports **temporary server-owned
+survivor parties** for Lineage-style cooperative adventuring without abandoning
+Days After survival risks or Albion-style classless gear progression.
+
+- Any living survivor can invite another living player within **16 metres**.
+  The first invite creates the group; accepting joins it. Parties hold at
+  most **5** members. Invitations expire after **30 seconds** and cannot be
+  accepted at a distance, faked, or replayed. Only the leader can invite
+  additional members or kick anyone; leadership transfers when they leave.
+  Disconnects remove members and pending invitations.
+- Open the online **I** inventory panel to select a nearby survivor, **Invite**,
+  **Join**, **Decline**, **Leave**, or (leader-only) **Kick**. The private party
+  roster shows participant names, health and who leads; invite prompts
+  appear only to the invited player.
+- **Friendly fire is disabled between members of the same party**, even in
+  dangerous PvP zones. Unaffiliated players still follow existing zone rules.
+- The **killing blow** awards its normal weapon mastery XP and kill/contract
+  progress to the actual killer. Eligible party members within **28 metres**
+  of that infected can earn **50% assist mastery XP** only if they actually
+  landed a server-validated, armed hit on that same infected within the
+  last **20 seconds**, are alive, and still carry the weapon used.
+  Simply staying nearby or joining a group without fighting grants nothing.
+- No loot, currency or contract progress is duplicated or automatically
+  granted to party members. The existing world loot bags remain accessible
+  according to current game rules. Parties are **session-local** and do not
+  pretend to be permanent guilds or persistent clans.
+- All party mutations come through rate-limited authenticated server RPCs.
+  Client data contains only intended recipients for invitations/removals;
+  no client may set the leader, membership list or granted XP.
+
+The headless regression suite includes `game/tests/test_party.gd` covering
+party capacity, leader handoff, expired and replayed invitations,
+network roster privacy, friendly fire, assist contribution requirements,
+nonparticipant/stale-damage XP rejection, and safe cleanup.
+
+```sh
+godot --headless --path game --script res://tests/run_all.gd
+```
+
+Future Lineage-inspired steps can build **clans, raid encounters, party-wide
+quests and territory sieges** atop these authoritative group primitives.
+Any missing general-purpose engine capability will be added and tested in
+Cgame rather than reimplemented privately for a single game.
