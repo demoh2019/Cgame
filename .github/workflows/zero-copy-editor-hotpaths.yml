@@ -1,0 +1,27 @@
+name: Zero-copy editor collection regressions
+on:
+  pull_request:
+    paths:
+      - "core/object/class_db.cpp"
+      - "core/io/ip.cpp"
+      - "editor/docks/filesystem_dock.cpp"
+      - "editor/export/editor_export.cpp"
+      - "editor/import/3d/scene_import_settings.cpp"
+      - "editor/scene/scene_tree_editor.cpp"
+      - "editor/shader/shader_create_dialog.cpp"
+      - "editor/inspector/editor_properties.cpp"
+      - "editor/scene/group_settings_editor.cpp"
+      - "misc/tests/test_zero_copy_editor_collections.py"
+      - ".github/workflows/zero-copy-editor-hotpaths.yml"
+  workflow_dispatch:
+
+jobs:
+  source-contracts:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+      - name: Verify no-copy C++ contracts
+        run: python -m unittest discover -s misc/tests -p test_zero_copy_editor_collections.py -v
