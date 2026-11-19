@@ -38,7 +38,7 @@ class ApiError(RuntimeError):
 
 
 class GitHub:
-    def __init__(self, token: str = "", write_delay: float = 2.0, sleep=time.sleep):
+    def __init__(self, token: str = "", write_delay: float = 10.0, sleep=time.sleep):
         self.token = token
         self.write_delay = write_delay
         self.sleep = sleep
@@ -294,7 +294,7 @@ class Mirror:
         else:
             self.create_archive(item, kind)
 
-    def run(self, start_page=1, pages=1, max_items=20, checkpoint=None):
+    def run(self, start_page=1, pages=1, max_items=20, checkpoint=None, start_offset=0):
         self.build_index()
         page = start_page
         processed = 0
@@ -306,6 +306,8 @@ class Mirror:
             if not batch:
                 break
             for offset, item in enumerate(batch):
+                if page == start_page and offset < start_offset:
+                    continue
                 if processed >= max_items > 0:
                     return self.stats
                 processed += 1
@@ -315,12 +317,14 @@ class Mirror:
                     self.stats["errors"] += 1
                     print(f"Failed upstream #{item.get('number')}: {exc}",
                           file=sys.stderr)
-                if checkpoint:
+                    # Do not advance the checkpoint past a failed migration.
+                    return self.stats
+                if checkpoint and self.apply:
                     checkpoint.write_text(json.dumps(
                         {"next_page": page, "next_offset": offset + 1, "processed": processed},
                         indent=2) + "\n")
             page += 1
-            if checkpoint:
+            if checkpoint and self.apply:
                 checkpoint.write_text(json.dumps(
                     {"next_page": page, "next_offset": 0, "processed": processed},
                     indent=2) + "\n")
@@ -342,9 +346,11 @@ def main(argv=None):
     parser.add_argument("--include-comments", action="store_true")
     parser.add_argument("--apply", action="store_true", help="Write changes to GitHub")
     parser.add_argument("--checkpoint", type=Path, default=Path("mirror-checkpoint.json"))
+    parser.add_argument("--resume", action="store_true",
+                        help="Read the next source page and offset from the checkpoint")
     parser.add_argument("--git-dir", type=Path, default=Path("."))
     parser.add_argument("--base-branch", default="master")
-    parser.add_argument("--write-delay", type=float, default=2.0)
+    parser.add_argument("--write-delay", type=float, default=10.0)
     args = parser.parse_args(argv)
     if args.start_page < 1 or args.pages < 0 or args.max_items < 0:
         parser.error("invalid pagination arguments")
@@ -354,7 +360,15 @@ def main(argv=None):
     git_mirror = GitHeadMirror(args.git_dir, args.source, args.base_branch)
     mirror = Mirror(api, args.source, args.dest, args.apply,
                     args.include_comments, args.pr_mode, git_mirror)
-    stats = mirror.run(args.start_page, args.pages, args.max_items, args.checkpoint)
+    start_page, start_offset = args.start_page, 0
+    if args.resume:
+        if not args.checkpoint.exists():
+            parser.error("Checkpoint not found; cannot resume")
+        state = json.loads(args.checkpoint.read_text())
+        start_page = int(state["next_page"])
+        start_offset = int(state["next_offset"])
+    stats = mirror.run(start_page, args.pages, args.max_items, args.checkpoint,
+                       start_offset=start_offset)
     print("Summary:", json.dumps(stats, sort_keys=True))
     return 1 if stats["errors"] else 0
 
