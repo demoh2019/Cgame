@@ -238,6 +238,10 @@ func repair(id: int) -> void:
 	net.c_repair.rpc_id(1, id)
 
 
+func upgrade(id: int) -> void:
+	net.c_upgrade.rpc_id(1, id)
+
+
 func dismantle(id: int) -> void:
 	net.c_dismantle.rpc_id(1, id)
 
