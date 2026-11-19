@@ -810,6 +810,7 @@ func _refresh_party_controls() -> void:
 	var state: Dictionary = client.you.get("party", {})
 	var group_id: int = int(state.get("id", 0))
 	var roster: Array = state.get("roster", [])
+	var remaining_aid: float = float(client.you.get("party_aid_cooldown", 0.0))
 	if group_id == 0:
 		_party_status.text = "No party. Invite someone nearby to start one."
 	else:
@@ -818,6 +819,8 @@ func _refresh_party_controls() -> void:
 			var prefix: String = "[Leader] " if int(member["id"]) == int(state.get("leader", 0)) else ""
 			names.append("%s%s (%d HP)" % [prefix, str(member["name"]), int(member["health"])])
 		_party_status.text = "Party %d (%d/5): %s" % [group_id, roster.size(), ", ".join(names)]
+	if remaining_aid > 0.0:
+		_party_status.text += "\nMedical aid ready in %.1f s" % remaining_aid
 	if int(state.get("invite_from", 0)) > 0:
 		_party_status.text += "\nInvitation from " + str(state.get("invite_name", "Survivor"))
 	var rally: Dictionary = state.get("rally", {})
