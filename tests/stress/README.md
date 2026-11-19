@@ -1455,7 +1455,52 @@ The tests check finite body states and joint spacing, not physical
 equivalence to the serial solver or measured performance improvements.
 Start with small scales and monitor CPU usage, peak RSS and frame p95.
 
-### Idempotent static-body transform updates (GodotPhysics2D / GodotPhysics3D)
+### Axis-aligned 3D box-box SAT fast path
+
+GodotPhysics3D's box-box narrow phase traditionally tests three face axes
+from each box and nine cross-edge axes (15 candidates), even when both
+boxes are exactly world-axis aligned. In that case the duplicate face axes
+and nonzero cross products are equivalent to the three world-space
+separating axes X, Y and Z.
+
+The new `_collision_box_box` fast path tests each axis once and then uses
+the **existing contact manifold generator**. This is safe only when both
+`Transform3D.basis` values are *exactly* `Basis()` and neither shape has
+collision margins. Rotated, scaled, sheared, or margin-expanded boxes
+continue through the full generic SAT procedure. The previously cached
+separation axis is still tested first, and no allocation or new physics
+setting is introduced.
+
+The Python reference compares three-axis and generic 15-axis overlap tests
+for more than 5,000 deterministic 3D box pairs, including touching and
+non-overlapping cases. The headless Godot test compares axis-aligned and
+equivalently rotated query boxes, using both `intersect_shape` and
+`collide_shape` to exercise the actual contact generator.
+
+```bash
+python3 -m unittest discover -s tests/stress -p 'test_physics_3d_axis_aligned_box_sat.py' -v
+./bin/godot.macos.editor.arm64 --headless --path tests/stress \
+  --script res://physics_box_box_sat_3d_regression.gd
+```
+
+For repeatable performance measurements compare the same 256
+static+rigid box pairs per scale with identity and rotated bases. Both
+scenarios reapply a slightly changing overlap each frame to avoid only
+measuring persistent manifold caching:
+
+```bash
+python3 tests/stress/run.py --godot ./bin/godot.macos.editor.arm64 \
+  --case physics_box_box_axis_aligned_3d,physics_box_box_rotated_3d \
+  --scale 4 --frames 90 --repeats 5 --timeout 600 \
+  --rss-limit-mib 4096 --output out/physics-box-sat-3d.json
+```
+
+This does not establish a speedup without a compiled before/after benchmark,
+and rotated scenes naturally have some additional transform overhead.
+Compare both workloads across the same two engine builds for a reliable
+estimate of the optimization's contribution.
+
+## Idempotent static-body transform updates (GodotPhysics2D / GodotPhysics3D)
 
 Jolt exposes a `SetPositionAndRotationWhenChanged` path to avoid broadphase
 updates and waking neighboring bodies when a pose is unchanged. Cgame's
