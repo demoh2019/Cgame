@@ -668,7 +668,9 @@ void GodotBody3D::integrate_forces(real_t p_step, bool p_defer_motion) {
 				const Basis principal_frame = principal_inertia_axes.orthonormalized();
 				if (principal_frame.is_finite()) {
 					const Vector3 principal_omega = principal_frame.xform_inv(angular_velocity);
-					const Vector3 corrected_omega = GodotPhysicsGyroscopic3D::integrate_principal(principal_omega, _inv_inertia, p_step);
+					const Vector3 corrected_omega = get_space()->get_gyroscopic_integration_mode() == 1 ?
+							GodotPhysicsGyroscopic3D::integrate_principal_midpoint(principal_omega, _inv_inertia, p_step) :
+							GodotPhysicsGyroscopic3D::integrate_principal(principal_omega, _inv_inertia, p_step);
 					angular_velocity = principal_frame.xform(corrected_omega);
 				}
 			}
