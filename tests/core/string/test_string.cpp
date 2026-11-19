@@ -3245,6 +3245,46 @@ TEST_CASE("[String] xml_unescape no-op fast path handles long strings") {
 	CHECK(result == plain);
 }
 
+TEST_CASE("[String] Trimming long ASCII sets and mixed Unicode keeps existing behavior") {
+	const String chars = "0123456789abcdef";
+	const String long_prefix = String("012345abcdef").repeat(2048);
+	CHECK((long_prefix + "!").lstrip(chars) == "!");
+	CHECK(("!" + long_prefix).rstrip(chars) == "!");
+	CHECK(long_prefix.lstrip(chars).is_empty());
+	CHECK(long_prefix.rstrip(chars).is_empty());
+
+	CHECK(String("aaaaX").lstrip("a") == "X");
+	CHECK(String("Xbbbb").rstrip("b") == "X");
+	CHECK(String("abc").lstrip("") == "abc");
+	CHECK(String("abc").rstrip("") == "abc");
+	CHECK(String("").lstrip(chars).is_empty());
+	CHECK(String("").rstrip(chars).is_empty());
+
+	// ASCII membership uses the fast mask; non-ASCII membership retains
+	// the full Unicode comparison, even when mixed within the same set.
+	CHECK(String(U"  \u00B5\u00B5text").lstrip(String(U" \u00B5")) == "text");
+	CHECK(String(U"text\u00B5\u00B5  ").rstrip(String(U" \u00B5")) == "text");
+	CHECK(String(U"\u00BFx").lstrip(String(U"\u00B5\u00FF")) == String(U"\u00BFx"));
+	CHECK(String(U"x\u00BF").rstrip(String(U"\u00B5\u00FF")) == String(U"x\u00BF"));
+
+	// No allocation is necessary when the edge is not part of the trim set.
+	const String unchanged = U"\u00B5keep\u00B5";
+	CHECK(unchanged.lstrip(chars).ptr() == unchanged.ptr());
+	CHECK(unchanged.rstrip(chars).ptr() == unchanged.ptr());
+}
+
+TEST_CASE("[String] Basename ignores dots in parent folders and scans once") {
+	CHECK(String("res://folder/name.tar.gz").get_basename() == "res://folder/name.tar");
+	CHECK(String("dir.name/subdir/file").get_basename() == "dir.name/subdir/file");
+	CHECK(String("dir.name/subdir/file.txt").get_basename() == "dir.name/subdir/file");
+	CHECK(String("C:\\dir.name\\file.png").get_basename() == "C:\\dir.name\\file");
+	CHECK(String("C:\\dir.name\\file").get_basename() == "C:\\dir.name\\file");
+	CHECK(String(".hidden").get_basename() == "");
+	CHECK(String("file.").get_basename() == "file");
+	CHECK(String("file").get_basename() == "file");
+	CHECK(String("").get_basename().is_empty());
+}
+
 TEST_CASE("[String] Strip escapes") {
 	String s = "\t\tTest Test\r\n Test";
 	CHECK(s.strip_escapes() == "Test Test Test");
