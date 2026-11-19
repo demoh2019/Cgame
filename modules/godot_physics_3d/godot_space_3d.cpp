@@ -1342,6 +1342,10 @@ GodotSpace3D::GodotSpace3D() {
 	const real_t configured_gas_gamma = GLOBAL_GET("physics/3d/solver/soft_body_gas_pressure_gamma");
 	soft_body_gas_pressure_gamma = Math::is_finite(configured_gas_gamma) ? CLAMP(configured_gas_gamma, real_t(0.0), real_t(5.0)) : real_t(0.0);
 	soft_body_hydrostatic_pressure = bool(GLOBAL_GET("physics/3d/solver/soft_body_hydrostatic_pressure"));
+	soft_body_hydrodynamic_drag = bool(GLOBAL_GET("physics/3d/solver/soft_body_hydrodynamic_drag"));
+	const real_t configured_tangent_ratio = GLOBAL_GET("physics/3d/solver/soft_body_hydrodynamic_tangent_ratio");
+	soft_body_hydrodynamic_tangent_ratio = Math::is_finite(configured_tangent_ratio) ?
+			CLAMP(configured_tangent_ratio, real_t(0.0), real_t(5.0)) : real_t(0.25);
 	const real_t configured_tangential_drag = GLOBAL_GET("physics/3d/solver/soft_body_tangential_drag_ratio");
 	soft_body_tangential_drag_ratio = Math::is_finite(configured_tangential_drag) ? MAX(real_t(0.0), configured_tangential_drag) : real_t(0.0);
 	const real_t configured_area_compliance = GLOBAL_GET("physics/3d/solver/soft_body_xpbd_area_compliance");
