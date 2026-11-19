@@ -732,6 +732,95 @@ static bool closest_soft_edge_edge(JPH::Vec3Arg p0, JPH::Vec3Arg p1,
 	return true;
 }
 
+// Swept soft edge/edge approximation using conservative advancement for
+// linearly moving endpoints. The minimum distance between two segments is
+// Lipschitz continuous, bounded by the largest endpoint-relative speed;
+// stepping by (distance - radius) / speed_bound cannot skip a first contact
+// in exact arithmetic. This is NOT CCD for arbitrarily accelerated,
+// internally constrained or nonlinear deformable motion during Jolt Update.
+constexpr uint32_t MAX_SOFT_EDGE_SWEEP_ITERATIONS = 16;
+constexpr float SOFT_EDGE_SWEEP_DISTANCE_TOLERANCE = 1.0e-4f;
+
+static bool predict_soft_edge_edge_sweep(
+		JPH::Vec3Arg p0, JPH::Vec3Arg p1, JPH::Vec3Arg q0, JPH::Vec3Arg q1,
+		JPH::Vec3Arg vp0, JPH::Vec3Arg vp1, JPH::Vec3Arg vq0, JPH::Vec3Arg vq1,
+		float p_step, float p_radius, float p_max_sweep, uint32_t &r_budget,
+		float &r_s, float &r_t, JPH::Vec3 &r_normal) {
+	if (p_step <= 0.0f || p_radius <= 0.0f || p_max_sweep <= 0.0f) {
+		return false;
+	}
+
+	// A convex combination of two endpoint velocities cannot exceed
+	// the maximum magnitude of these four endpoint-relative velocities.
+	const float max_relative_speed_sq = MAX(
+			MAX((vq0 - vp0).LengthSq(), (vq0 - vp1).LengthSq()),
+			MAX((vq1 - vp0).LengthSq(), (vq1 - vp1).LengthSq()));
+	if (!Math::is_finite(max_relative_speed_sq) || max_relative_speed_sq <= 1.0e-12f) {
+		return false;
+	}
+	const float speed_bound = Math::sqrt(max_relative_speed_sq);
+	const float travel_bound = speed_bound * p_step;
+	if (!Math::is_finite(travel_bound) || travel_bound > p_max_sweep) {
+		return false;
+	}
+
+	float time = 0.0f;
+	for (uint32_t iteration = 0; iteration < MAX_SOFT_EDGE_SWEEP_ITERATIONS && r_budget > 0; ++iteration) {
+		// Account for each iterative segment closest-point evaluation, in
+		// addition to the initial broadphase/segment test already debited.
+		--r_budget;
+		const JPH::Vec3 a0 = p0 + vp0 * time;
+		const JPH::Vec3 a1 = p1 + vp1 * time;
+		const JPH::Vec3 b0 = q0 + vq0 * time;
+		const JPH::Vec3 b1 = q1 + vq1 * time;
+		JPH::Vec3 nearest_a = JPH::Vec3::sZero();
+		JPH::Vec3 nearest_b = JPH::Vec3::sZero();
+		float s = 0.0f, t = 0.0f;
+		if (!closest_soft_edge_edge(a0, a1, b0, b1, s, t, nearest_a, nearest_b)) {
+			return false;
+		}
+		const JPH::Vec3 gap = nearest_b - nearest_a;
+		const float distance_sq = gap.LengthSq();
+		if (!Math::is_finite(distance_sq)) {
+			return false;
+		}
+		const float distance = Math::sqrt(MAX(distance_sq, 0.0f));
+		if (time > 0.0f && distance <= p_radius + SOFT_EDGE_SWEEP_DISTANCE_TOLERANCE) {
+			const JPH::Vec3 vel_a = vp0 * (1.0f - s) + vp1 * s;
+			const JPH::Vec3 vel_b = vq0 * (1.0f - t) + vq1 * t;
+			const JPH::Vec3 rel_velocity = vel_b - vel_a;
+			if (distance > 1.0e-6f) {
+				r_normal = gap / distance;
+			} else if (rel_velocity.LengthSq() > 1.0e-12f) {
+				r_normal = -rel_velocity.Normalized();
+			} else {
+				return false;
+			}
+			// Only future *approaching* contacts get speculative impulses.
+			// Tangential/grazing contacts have no normal closing velocity.
+			if (!Math::is_finite(rel_velocity.Dot(r_normal)) || rel_velocity.Dot(r_normal) >= -1.0e-6f) {
+				return false;
+			}
+			r_s = s;
+			r_t = t;
+			return true;
+		}
+		if (distance <= p_radius) {
+			return false; // Already overlapping: use the discrete solver.
+		}
+
+		// This is a conservative time increment from the distance bound;
+		// unlike fixed substep sampling, fast narrow impacts are not
+		// skipped when the remaining work budget is sufficient.
+		const float advance = (distance - p_radius) / speed_bound;
+		if (!Math::is_finite(advance) || advance <= 1.0e-8f * p_step || time + advance > p_step) {
+			return false;
+		}
+		time += advance;
+	}
+	return false; // Work cap or iteration cap; no unbounded loop.
+}
+
 static void resolve_soft_soft_edge_edge_contacts(JPH::Body &p_body_a, JPH::Body &p_body_b,
 		float p_step, uint32_t &r_budget, SoftEdgeContactScratch &r_scratch) {
 	JPH::SoftBodyMotionProperties &props_a = static_cast<JPH::SoftBodyMotionProperties &>(*p_body_a.GetMotionPropertiesUnchecked());
