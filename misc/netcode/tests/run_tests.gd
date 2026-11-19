@@ -505,6 +505,7 @@ func _test_queue_time_validation() -> void:
 	_begin_case()
 	var queue = ImpairmentQueue.new()
 	_check(queue.schedule({"x": 1}, -1)["status"] == "invalid_time", "negative send time rejected")
+	_check(queue.schedule({"x": 1}, 9223372036854775807)["status"] == "invalid_time", "overflowing deadline rejected")
 	_check(queue.poll_due(-1).is_empty(), "negative poll time safe")
 	_check(queue.get_pending_count() == 0, "invalid time not enqueued")
 	_check(queue.get_dropped_count() == 0, "invalid send not counted as loss")
