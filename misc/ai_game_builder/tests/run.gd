@@ -165,9 +165,22 @@ func _run() -> void:
 		{"path": "script.gd", "content": "@tool\nextends Node\nfunc run():\n\tOS.execute(\"x\", [])\n"}
 	]}
 	var warnings := Inspector.inspect(risky_script)
-	_check(warnings.ok, "code warnings do not prevent review")
-	_check(warnings.warnings.size() == 2, "tool and OS execution trigger warnings")
-	_check(warnings.errors.is_empty(), "warning-only plan has no hard error")
+	_check(not warnings.ok, "generated editor tool and OS execution are blocked")
+	_check(warnings.errors.size() == 2, "tool and process launch report independent errors")
+	_check(warnings.warnings.is_empty(), "blocked operations do not also warn")
+
+	var script_warnings := {"files": [
+		{"path": "main.tscn", "content": "[gd_scene format=3]\n"},
+		{"path": "script.gd", "content": "extends Node\nfunc save():\n\tFileAccess.open(\"user://save.txt\", FileAccess.WRITE)\n"}
+	]}
+	var soft_warning := Inspector.inspect(script_warnings)
+	_check(soft_warning.ok, "save file API only warns")
+	_check(soft_warning.warnings.size() == 1, "save operation warning surfaced")
+	var process_script := {"files": [
+		{"path": "main.tscn", "content": "[gd_scene format=3]\n"},
+		{"path": "script.gd", "content": "extends Node\nfunc spawn():\n\tOS.create_process(\"bad\", [])\n"}
+	]}
+	_check(not Inspector.inspect(process_script).ok, "process creation rejected")
 	var repair_text := Inspector.repair_prompt("Create a platformer", missing_dependency, Inspector.inspect(missing_dependency).errors)
 	_check(repair_text.contains("Create a platformer"), "repair includes original request")
 	_check(repair_text.contains("player.gd"), "repair includes missing dependency")
