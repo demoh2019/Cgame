@@ -6,6 +6,7 @@ const Writer = preload("res://addons/ai_game_builder/writer.gd")
 const Inspector = preload("res://addons/ai_game_builder/inspector.gd")
 const Dock = preload("res://addons/ai_game_builder/dock.gd")
 const Plugin = preload("res://addons/ai_game_builder/plugin.gd")
+const EndpointPolicy = preload("res://addons/ai_game_builder/endpoint_policy.gd")
 
 var _total := 0
 var _failed := 0
@@ -13,6 +14,7 @@ var _failed := 0
 
 func _initialize() -> void:
 	_run()
+	_run_security_tests()
 	_check(Dock != null, "Editor dock script loads")
 	_check(Plugin != null, "Editor plugin script loads")
 	print("AI Game Builder: %d tests, %d failed" % [_total, _failed])
@@ -232,3 +234,108 @@ func _run() -> void:
 			else:
 				print("SKIP symlink test: filesystem does not support creating symlinks.")
 
+
+
+func _run_security_tests() -> void:
+	# Malicious strings must never cause an HTTP request to a non-loopback host.
+	# Some of these used to pass the old starts_with("http://localhost:") test.
+	var safe_endpoints := [
+		"https://api.openai.com/v1/chat/completions",
+		"https://api.example.com",
+		"https://api.example.com:443/v1/chat/completions",
+		"https://api-2.example.com/v1/chat/completions",
+		"https://127.0.0.1:443/v1",
+		"https://[::1]:443/v1",
+		"https://localhost:8443/v1/chat/completions",
+		"https://api.example.com?format=json",
+		"http://localhost:8080/v1/chat/completions",
+		"http://localhost/v1/chat/completions",
+		"http://127.0.0.1:1234/v1",
+		"http://[::1]:1234/v1",
+		"http://[::1]/v1",
+		"http://localhost:1/v1",
+		"http://localhost:65535/v1",
+		"http://localhost:80/v1?stream=false",
+	]
+	for endpoint in safe_endpoints:
+		_check(EndpointPolicy.is_allowed(endpoint), "safe endpoint accepted: " + endpoint)
+
+	var unsafe_endpoints := [
+		"",
+		"http://evil.example.com/v1",
+		"http://localhost.evil.com:1234/v1",
+		"http://127.0.0.1.evil.com:1234/v1",
+		"http://localhost:1234@evil.com/v1",
+		"http://127.0.0.1:1234@evil.com/v1",
+		"http://[::1]:1234@evil.com/v1",
+		"http://localhost@evil.com/v1",
+		"http://[::1]@evil.com/v1",
+		"http://[::1].evil.com:1234/v1",
+		"http://127.1:1234/v1",
+		"http://0.0.0.0:1234/v1",
+		"http://127.0.0.2:1234/v1",
+		"http://192.168.1.2:1234/v1",
+		"http://[::ffff:127.0.0.1]:1234/v1",
+		"http://localhost:/v1",
+		"http://localhost:0/v1",
+		"http://localhost:65536/v1",
+		"http://localhost:-1/v1",
+		"http://localhost:80bad/v1",
+		"http://localhost:00000000080/v1",
+		"http://localhost:80.0/v1",
+		"http://[::1/v1",
+		"http://[xyz::1]:8080/v1",
+		"ftp://localhost:8080/v1",
+		"file:///etc/passwd",
+		"HTTPS://api.example.com/v1",
+		"https://",
+		"https:///v1",
+		"https://api.example.com:0/v1",
+		"https://api.example.com:65536/v1",
+		"https://api.example.com:abc/v1",
+		"https://api.example.com:0000001/v1",
+		"https://api.example.com@evil.com/v1",
+		"https://api.example.com:443@evil.com/v1",
+		"https://api_example.com/v1",
+		"https://-api.example.com/v1",
+		"https://api-.example.com/v1",
+		"https://api..example.com/v1",
+		"https://api.example.com./v1",
+		"https://api%2eexample.com/v1",
+		"https://api.example.com#fragment",
+		"https://api.example.com/path with spaces",
+		"https://api.example.com/line\nbreak",
+		"https://api.example.com/line\rbreak",
+		"https://api.example.com/line\tbreak",
+		"https://api.example.com\\evil",
+		"https://[::1]oops:443/v1",
+		"https://[]:443/v1",
+		"http://localhost:80/v1?receiver=user@evil.com",
+	]
+	for endpoint in unsafe_endpoints:
+		_check(not EndpointPolicy.is_allowed(endpoint), "unsafe endpoint rejected: " + endpoint)
+
+	for token in ["", "sk-test123", "local_token-+/=", "abc.def_ghi", "TOKEN12345"]:
+		_check(EndpointPolicy.is_valid_bearer_token(token), "safe provider API key accepted")
+	for token in [
+		"bearer\nInjected: yes", "bearer\rInjected: yes", "bad\tkey",
+		"abc def", "bad\u0000key", "bad\u007fkey", "é", "x".repeat(4097),
+	]:
+		_check(not EndpointPolicy.is_valid_bearer_token(token), "unsafe header value rejected")
+
+	for filename in [
+		"CON.gd", "con.backup.gd", "aux.gd", "PRN.tscn",
+		"nul.md", "COM1.gd", "com9.gd", "LPT1.gd",
+		"lpt9.tres", "some/AUX/level.gd", "screens/level./main.tscn",
+		"a./main.tscn",
+	]:
+		_reject(_plan(filename, "extends Node"), "portable reserved path rejected: " + filename)
+	for filename in [
+		"console.gd", "auxiliary.tscn", "COM0.gd", "com10.gd",
+		"lpt0.tscn", "lpt10.tscn", "some/valid.folder/main.tscn",
+	]:
+		_accept(_plan(filename, "extends Node"), "portable safe path accepted: " + filename)
+
+	# Safety validation runs again at the write boundary.
+	_check(not Writer.apply(_plan("CON.gd", "extends Node")).ok, "writer rejects reserved file path")
+	_check(not Writer.apply(_plan("data/lpt1.backup.txt", "demo")).ok, "writer rejects nested reserved component")
