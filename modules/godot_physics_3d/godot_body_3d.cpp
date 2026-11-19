@@ -34,6 +34,7 @@
 #include "godot_body_direct_state_3d.h"
 #include "godot_constraint_3d.h"
 #include "godot_space_3d.h"
+#include "godot_velocity_limit_3d.h"
 
 void GodotBody3D::_mass_properties_changed() {
 	if (get_space() && !mass_properties_update_list.in_list()) {
@@ -659,6 +660,11 @@ void GodotBody3D::integrate_forces(real_t p_step, bool p_defer_motion) {
 			angular_velocity += _inv_inertia_tensor.xform(torque) * p_step;
 		}
 
+		// Limit velocity before expanding swept collision bounds for CCD.
+		const real_t velocity_limit = get_space()->get_max_linear_velocity();
+		if (velocity_limit > 0.0) {
+			linear_velocity = godot_physics_3d_limit_linear_velocity(linear_velocity, velocity_limit);
+		}
 		if (continuous_cd) {
 			motion = linear_velocity * p_step;
 			do_motion = true;
@@ -720,6 +726,12 @@ void GodotBody3D::integrate_velocities(real_t p_step) {
 		return;
 	}
 
+	// Contacts and joints can accelerate the body after forces were integrated.
+	// Preserve biased penetration-recovery motion when clamping real velocity.
+	const real_t velocity_limit = get_space()->get_max_linear_velocity();
+	if (velocity_limit > 0.0) {
+		linear_velocity = godot_physics_3d_limit_linear_velocity(linear_velocity, velocity_limit);
+	}
 	Vector3 total_angular_velocity = angular_velocity + biased_angular_velocity;
 	Vector3 total_linear_velocity = linear_velocity + biased_linear_velocity;
 
