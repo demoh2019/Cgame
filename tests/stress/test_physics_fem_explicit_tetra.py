@@ -189,5 +189,90 @@ class ExplicitTetraContracts(unittest.TestCase):
         self.assertIn("if (!xpbd_explicit_tetra_visual_indices.is_empty())", body)
 
 
+CUBE_INTERIOR_POINTS = (
+    (-1, -1, -1), (1, -1, -1), (1, 1, -1), (-1, 1, -1),
+    (-1, -1, 1), (1, -1, 1), (1, 1, 1), (-1, 1, 1),
+    (0, 0, 0),
+)
+CUBE_FACES = (
+    (0, 2, 1), (0, 3, 2),
+    (4, 5, 6), (4, 6, 7),
+    (0, 1, 5), (0, 5, 4),
+    (3, 7, 6), (3, 6, 2),
+    (0, 4, 7), (0, 7, 3),
+    (1, 2, 6), (1, 6, 5),
+)
+CUBE_INTERIOR_TETS = tuple((8, *face) for face in CUBE_FACES)
+
+
+class InteriorFEMContracts(unittest.TestCase):
+    def test_cube_cooks_twelve_elements_with_one_interior_vertex(self):
+        self.assertEqual(shell_volume(CUBE_INTERIOR_POINTS, CUBE_FACES), 8)
+        cooked = cook(CUBE_INTERIOR_POINTS, CUBE_FACES, CUBE_INTERIOR_TETS, 8)
+        self.assertEqual(cooked, list(CUBE_INTERIOR_TETS))
+        self.assertEqual(len(cooked), 12)
+        self.assertAlmostEqual(
+            sum(abs(det(CUBE_INTERIOR_POINTS, tet)) / 6 for tet in cooked), 8)
+
+    def test_outside_or_degenerate_interior_nodes_are_rejected(self):
+        points = list(CUBE_INTERIOR_POINTS)
+        points[8] = (3, 3, 3)
+        self.assertIsNone(cook(points, CUBE_FACES, CUBE_INTERIOR_TETS, 8))
+        points[8] = points[0]
+        self.assertIsNone(cook(points, CUBE_FACES, CUBE_INTERIOR_TETS, 8))
+
+    def test_random_4000_interior_node_rigid_transforms(self):
+        rng = random.Random(20261119)
+        for _ in range(4000):
+            axis = [rng.uniform(-1, 1) for _ in range(3)]
+            length = math.sqrt(dot(axis, axis))
+            axis = [x / length for x in axis]
+            theta = rng.uniform(-math.pi, math.pi)
+            cs, sn = math.cos(theta), math.sin(theta)
+            scale = 10 ** rng.uniform(-5, 8)
+            offset = [rng.uniform(-4, 4) * scale for _ in range(3)]
+
+            def move(p):
+                twist = cross(axis, p)
+                along = dot(axis, p)
+                return tuple(
+                    scale * (cs * p[i] + sn * twist[i] +
+                             (1 - cs) * axis[i] * along) + offset[i]
+                    for i in range(3)
+                )
+
+            points = tuple(move(p) for p in CUBE_INTERIOR_POINTS)
+            volume = shell_volume(points, CUBE_FACES)
+            tets = cook(points, CUBE_FACES, CUBE_INTERIOR_TETS, volume)
+            self.assertEqual(tets, list(CUBE_INTERIOR_TETS))
+            self.assertAlmostEqual(
+                sum(abs(det(points, t)) / 6 for t in tets) / volume,
+                1.0, delta=1e-7)
+
+    def test_scene_interior_api_and_collisions_exclusion(self):
+        scene = (ROOT / "scene/3d/physics/soft_body_3d.cpp").read_text()
+        server = (ROOT / "servers/physics_3d/physics_server_3d.cpp").read_text()
+        body = (ROOT / "modules/godot_physics_3d/godot_soft_body_3d.cpp").read_text()
+        header = (ROOT / "modules/godot_physics_3d/godot_soft_body_3d.h").read_text()
+        demo = (ROOT / "demo/physics_lab/lab_3d.gd").read_text()
+        self.assertIn('Variant::PACKED_VECTOR3_ARRAY, "tetrahedral_interior_positions"', scene)
+        self.assertIn('D_METHOD("soft_body_set_tetrahedral_interior_positions"', server)
+        self.assertIn("set_tetrahedral_interior_positions", body)
+        self.assertIn("xpbd_surface_node_count = node_count;", body)
+        self.assertIn("xpbd_surface_node_count + uint32_t(internal_index)", body)
+        self.assertIn("if (i < xpbd_surface_node_count)", body)
+        self.assertIn("if (node.index >= xpbd_surface_node_count)", body)
+        self.assertIn("node_id < xpbd_surface_node_count", body)
+        self.assertIn("p_vertices.xpbd_surface_node_count", body)
+        self.assertIn("uint32_t xpbd_surface_node_count = 0;", header)
+        self.assertIn("FEMInteriorNodeTwelveTets", demo)
+
+    def test_no_surface_change_for_default_empty_interior_positions(self):
+        body = (ROOT / "modules/godot_physics_3d/godot_soft_body_3d.cpp").read_text()
+        self.assertIn("if (extra_count > 0)", body)
+        self.assertIn("if (i < xpbd_surface_node_count)", body)
+        self.assertIn("xpbd_surface_node_count = 0;", body)
+
+
 if __name__ == "__main__":
     unittest.main()
