@@ -1,0 +1,66 @@
+name: Upstream lifecycle backport regression checks
+
+on:
+  push:
+    branches: [develop]
+    paths:
+      - "main/main.cpp"
+      - "modules/gdscript/register_types.cpp"
+      - "misc/scripts/tests/test_upstream_lifecycle_backports.py"
+      - "misc/scripts/README_upstream_lifecycle_backports.md"
+      - ".github/workflows/upstream-lifecycle-backports.yml"
+  pull_request:
+    paths:
+      - "main/main.cpp"
+      - "modules/gdscript/register_types.cpp"
+      - "misc/scripts/tests/test_upstream_lifecycle_backports.py"
+      - "misc/scripts/README_upstream_lifecycle_backports.md"
+      - ".github/workflows/upstream-lifecycle-backports.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  source-contracts:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.9", "3.13"]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+      - name: Verify source contracts
+        run: |
+          python -m py_compile misc/scripts/tests/test_upstream_lifecycle_backports.py
+          python -m unittest discover -s misc/scripts/tests -p 'test_upstream_lifecycle_backports.py' -v
+
+  linux-editor-smoke:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+      - uses: ./.github/actions/godot-deps
+      - name: Compile editor with tests
+        uses: ./.github/actions/godot-build
+        with:
+          platform: linuxbsd
+          target: editor
+          scons-flags: dev_build=yes tests=yes debug_symbols=no module_mono_enabled=no accesskit=no
+      - name: Exercise GDScript editor lifecycle and headless import
+        shell: bash
+        run: |
+          set -euo pipefail
+          project="$RUNNER_TEMP/lifecycle-test-project"
+          mkdir -p "$project"
+          printf '[application]\nconfig/name="Lifecycle regression smoke"\nrun/main_scene="res://main.tscn"\n' > "$project/project.godot"
+          printf '[gd_scene format=3]\n\n[node name="Root" type="Node"]\n' > "$project/main.tscn"
+          engine=./bin/godot.linuxbsd.editor.dev.x86_64
+          "$engine" --headless --path "$project" --editor --quit
+          "$engine" --headless --path "$project" --import
+          "$engine" --headless --path "$project" --quit-after 2
