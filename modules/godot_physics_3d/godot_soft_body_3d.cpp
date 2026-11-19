@@ -54,6 +54,12 @@ subject to the following restrictions:
 */
 ///btSoftBody implementation by Nathanael Presson
 
+// Compact, orientation-independent edge key. Unlike a vertex-count-squared
+// matrix, this uses memory proportional to the actual mesh connectivity.
+static _FORCE_INLINE_ uint64_t _soft_body_edge_key(uint32_t p_a, uint32_t p_b) {
+	return (uint64_t(MIN(p_a, p_b)) << 32) | uint64_t(MAX(p_a, p_b));
+}
+
 GodotSoftBody3D::GodotSoftBody3D() :
 		GodotCollisionObject3D(TYPE_SOFT_BODY),
 		active_list(this) {
@@ -575,21 +581,16 @@ bool GodotSoftBody3D::create_from_trimesh(const Vector<int> &p_indices, const Ve
 		node.index = i;
 	}
 
-	// Create links and faces from triangles.
-	LocalVector<bool> chks;
-	chks.resize(node_count * node_count);
-	memset(chks.ptr(), 0, chks.size() * sizeof(bool));
-
+	// Deduplicate undirected triangle edges in O(E) storage, not O(V^2).
+	// This avoids allocating a dense vertex-pair matrix for large soft meshes.
+	HashSet<uint64_t> unique_edges;
 	for (uint32_t i = 0; i < triangle_count * 3; i += 3) {
 		const int idx[] = { triangles[i], triangles[i + 1], triangles[i + 2] };
 
 		for (int j = 2, k = 0; k < 3; j = k++) {
-			int chk = idx[k] * node_count + idx[j];
-			if (!chks[chk]) {
-				chks[chk] = true;
-				int inv_chk = idx[j] * node_count + idx[k];
-				chks[inv_chk] = true;
-
+			const uint64_t edge = _soft_body_edge_key(idx[j], idx[k]);
+			if (!unique_edges.has(edge)) {
+				unique_edges.insert(edge);
 				append_link(idx[j], idx[k]);
 			}
 		}
@@ -621,103 +622,89 @@ bool GodotSoftBody3D::create_from_trimesh(const Vector<int> &p_indices, const Ve
 }
 
 void GodotSoftBody3D::generate_bending_constraints(int p_distance) {
-	uint32_t i, j;
+	if (p_distance <= 1 || nodes.is_empty() || links.is_empty()) {
+		return;
+	}
 
-	if (p_distance > 1) {
-		// Build graph.
-		const uint32_t n = nodes.size();
-		const unsigned inf = (~(unsigned)0) >> 1;
-		const uint32_t adj_size = n * n;
-		unsigned *adj = memnew_arr(unsigned, adj_size);
+	const uint32_t node_count = nodes.size();
+	// Build adjacency from the original structural links. Bending links
+	// appended below must not change graph distances in this construction.
+	LocalVector<LocalVector<uint32_t>> neighbors;
+	neighbors.resize(node_count);
+	HashSet<uint64_t> registered_edges;
+	for (const Link &link : links) {
+		const uint32_t a = link.n[0] - &nodes[0];
+		const uint32_t b = link.n[1] - &nodes[0];
+		if (a == b) {
+			continue;
+		}
+		const uint64_t key = _soft_body_edge_key(a, b);
+		if (registered_edges.has(key)) {
+			continue;
+		}
+		registered_edges.insert(key);
+		neighbors[a].push_back(b);
+		neighbors[b].push_back(a);
+	}
 
-#define IDX(_x_, _y_) ((_y_) * n + (_x_))
-		for (j = 0; j < n; ++j) {
-			for (i = 0; i < n; ++i) {
-				int idx_ij = j * n + i;
-				int idx_ji = i * n + j;
-				if (i != j) {
-					adj[idx_ij] = adj[idx_ji] = inf;
+	if (p_distance == 2) {
+		// A two-hop link connects two neighbors of the same center. This is
+		// O(sum(degree^2)) rather than O(V^2), with no dense adjacency matrix.
+		// Skip structural edges and deduplicate links seen through other centers.
+		for (uint32_t center = 0; center < node_count; ++center) {
+			const LocalVector<uint32_t> &adjacent = neighbors[center];
+			for (uint32_t i = 0; i < adjacent.size(); ++i) {
+				for (uint32_t j = i + 1; j < adjacent.size(); ++j) {
+					const uint32_t a = adjacent[i];
+					const uint32_t b = adjacent[j];
+					const uint64_t key = _soft_body_edge_key(a, b);
+					if (!registered_edges.has(key)) {
+						registered_edges.insert(key);
+						append_link(MAX(a, b), MIN(a, b));
+					}
+				}
+			}
+		}
+		return;
+	}
+
+	// Preserve support for other distances without Floyd's O(V^2) matrix.
+	// A bounded breadth-first traversal gives the exact shortest-path
+	// distance. Its scratch memory is O(V + E).
+	LocalVector<int> distances;
+	distances.resize(node_count);
+	LocalVector<uint32_t> queue;
+	queue.reserve(node_count);
+	for (uint32_t origin = 0; origin < node_count; ++origin) {
+		for (int &distance : distances) {
+			distance = -1;
+		}
+		queue.clear();
+		queue.push_back(origin);
+		distances[origin] = 0;
+
+		for (uint32_t front = 0; front < queue.size(); ++front) {
+			const uint32_t current = queue[front];
+			const int next_distance = distances[current] + 1;
+			if (next_distance > p_distance) {
+				continue;
+			}
+			for (const uint32_t next : neighbors[current]) {
+				if (distances[next] != -1) {
+					continue;
+				}
+				distances[next] = next_distance;
+				if (next_distance == p_distance) {
+					if (origin < next) {
+						append_link(next, origin);
+					}
 				} else {
-					adj[idx_ij] = adj[idx_ji] = 0;
+					queue.push_back(next);
 				}
 			}
 		}
-		for (Link &link : links) {
-			const int ia = (int)(link.n[0] - &nodes[0]);
-			const int ib = (int)(link.n[1] - &nodes[0]);
-			int idx = ib * n + ia;
-			int idx_inv = ia * n + ib;
-			adj[idx] = 1;
-			adj[idx_inv] = 1;
-		}
-
-		// Special optimized case for distance == 2.
-		if (p_distance == 2) {
-			LocalVector<LocalVector<int>> node_links;
-
-			// Build node links.
-			node_links.resize(nodes.size());
-
-			for (Link &link : links) {
-				const int ia = (int)(link.n[0] - &nodes[0]);
-				const int ib = (int)(link.n[1] - &nodes[0]);
-				if (!node_links[ia].has(ib)) {
-					node_links[ia].push_back(ib);
-				}
-
-				if (!node_links[ib].has(ia)) {
-					node_links[ib].push_back(ia);
-				}
-			}
-			for (uint32_t ii = 0; ii < node_links.size(); ii++) {
-				for (uint32_t jj = 0; jj < node_links[ii].size(); jj++) {
-					int k = node_links[ii][jj];
-					for (const int &l : node_links[k]) {
-						if ((int)ii != l) {
-							int idx_ik = k * n + ii;
-							int idx_kj = l * n + k;
-							const unsigned sum = adj[idx_ik] + adj[idx_kj];
-							ERR_FAIL_COND(sum != 2);
-							int idx_ij = l * n + ii;
-							if (adj[idx_ij] > sum) {
-								int idx_ji = l * n + ii;
-								adj[idx_ij] = adj[idx_ji] = sum;
-							}
-						}
-					}
-				}
-			}
-		} else {
-			// Generic Floyd's algorithm.
-			for (uint32_t k = 0; k < n; ++k) {
-				for (j = 0; j < n; ++j) {
-					for (i = j + 1; i < n; ++i) {
-						int idx_ik = k * n + i;
-						int idx_kj = j * n + k;
-						const unsigned sum = adj[idx_ik] + adj[idx_kj];
-						int idx_ij = j * n + i;
-						if (adj[idx_ij] > sum) {
-							int idx_ji = j * n + i;
-							adj[idx_ij] = adj[idx_ji] = sum;
-						}
-					}
-				}
-			}
-		}
-
-		// Build links.
-		for (j = 0; j < n; ++j) {
-			for (i = j + 1; i < n; ++i) {
-				int idx_ij = j * n + i;
-				if (adj[idx_ij] == (unsigned)p_distance) {
-					append_link(i, j);
-				}
-			}
-		}
-		memdelete_arr(adj);
 	}
 }
-
 //===================================================================
 //
 //
