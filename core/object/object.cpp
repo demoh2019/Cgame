@@ -1108,9 +1108,8 @@ bool Object::has_meta(const StringName &p_name) const {
 
 void Object::set_meta(const StringName &p_name, const Variant &p_value) {
 	if (p_value.get_type() == Variant::NIL) {
-		if (metadata.has(p_name)) {
-			metadata.erase(p_name);
-
+		// erase() already reports whether the key existed. Avoid a prior hash probe.
+		if (metadata.erase(p_name)) {
 			const String &sname = p_name;
 			if (!sname.begins_with("_")) {
 				// Metadata starting with _ don't show up in the inspector, so no need to update.
@@ -1135,14 +1134,14 @@ void Object::set_meta(const StringName &p_name, const Variant &p_value) {
 }
 
 Variant Object::get_meta(const StringName &p_name, const Variant &p_default) const {
-	if (!metadata.has(p_name)) {
-		if (p_default != Variant()) {
-			return p_default;
-		} else {
-			ERR_FAIL_V_MSG(Variant(), vformat("The object does not have any 'meta' values with the key '%s'.", p_name));
-		}
+	// The common case should only hash the metadata name once.
+	if (const Variant *value = metadata.getptr(p_name)) {
+		return *value;
 	}
-	return metadata[p_name];
+	if (p_default != Variant()) {
+		return p_default;
+	}
+	ERR_FAIL_V_MSG(Variant(), vformat("The object does not have any 'meta' values with the key '%s'.", p_name));
 }
 
 void Object::remove_meta(const StringName &p_name) {
@@ -1207,10 +1206,8 @@ void Object::add_user_signal(const MethodInfo &p_signal) {
 bool Object::_has_user_signal(const StringName &p_name) const {
 	ObjectSignalLock signal_lock(this);
 
-	if (!signal_map.has(p_name)) {
-		return false;
-	}
-	return signal_map[p_name].user_signal_info;
+	const SignalData *signal = signal_map.getptr(p_name);
+	return signal != nullptr && bool(signal->user_signal_info);
 }
 
 void Object::_remove_user_signal(const StringName &p_name) {
