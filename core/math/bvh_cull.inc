@@ -124,7 +124,6 @@ void cast_segment(const POINT &p_from, const POINT &p_to, SegmentCastCallback p_
 
 	// Visit the tree whose bounds are nearest to the ray origin first.
 	// A near hit can clip away the other tree before any narrowphase work.
-	const POINT motion = p_to - p_from;
 	typename BVHABB_CLASS::Segment segment;
 	segment.from = p_from;
 	segment.to = p_to;
@@ -134,10 +133,13 @@ void cast_segment(const POINT &p_from, const POINT &p_to, SegmentCastCallback p_
 	for (int n = 0; n < NUM_TREES; n++) {
 		const uint32_t tree_test_mask = uint32_t(1) << n;
 		const uint32_t root_id = _root_node_id[n];
-		if (root_id == BVHCommon::INVALID || !(p_tree_collision_mask & tree_test_mask) || !_nodes[root_id].aabb.intersects_segment(segment)) {
+		if (root_id == BVHCommon::INVALID || !(p_tree_collision_mask & tree_test_mask)) {
 			continue;
 		}
-		const real_t entry_fraction = _segment_entry_fraction(_nodes[root_id].aabb, p_from, motion);
+		real_t entry_fraction;
+		if (!_nodes[root_id].aabb.intersects_segment(segment, &entry_fraction)) {
+			continue;
+		}
 		// NUM_TREES is tiny (two for physics), so insertion sort is cheaper
 		// than allocating a priority queue for a single ray cast.
 		int insertion = root_count;
@@ -241,37 +243,6 @@ void _cull_hit(uint32_t p_ref_id, CullParams &r_params) {
 	_cull_hits.push_back(p_ref_id);
 }
 
-// Broadphase ordering hint, not an intersection test: true hit/miss still
-// uses BVH_ABB::intersects_segment(). This keeps edge/grazing semantics
-// unchanged while allowing near-first traversal without a heap.
-real_t _segment_entry_fraction(const BVHABB_CLASS &p_bounds, const POINT &p_from, const POINT &p_motion) const {
-	real_t entry = 0.0;
-	real_t exit = 1.0;
-	for (int axis = 0; axis < POINT::AXIS_COUNT; axis++) {
-		const real_t origin = p_from[axis];
-		const real_t direction = p_motion[axis];
-		const real_t lower = p_bounds.min[axis];
-		const real_t upper = -p_bounds.neg_max[axis];
-		if (direction == 0.0) {
-			if (origin < lower || origin > upper) {
-				return Math::INF;
-			}
-			continue;
-		}
-		real_t t0 = (lower - origin) / direction;
-		real_t t1 = (upper - origin) / direction;
-		if (t0 > t1) {
-			SWAP(t0, t1);
-		}
-		entry = MAX(entry, t0);
-		exit = MIN(exit, t1);
-		if (entry > exit) {
-			return Math::INF;
-		}
-	}
-	return entry;
-}
-
 void _cast_segment_iterative(uint32_t p_node_id, const POINT &p_from, const POINT &p_to, SegmentCastCallback p_callback, void *p_userdata, const T *p_tester, real_t &r_max_fraction) {
 	struct StackItem {
 		uint32_t node_id;
@@ -305,10 +276,10 @@ void _cast_segment_iterative(uint32_t p_node_id, const POINT &p_from, const POIN
 				real_t nearest_entry = Math::INF;
 				for (int i = 0; i < leaf.num_items; i++) {
 					const BVHABB_CLASS &aabb = leaf.get_aabb(i);
-					if (!aabb.intersects_segment(segment)) {
+					real_t entry;
+					if (!aabb.intersects_segment(segment, &entry)) {
 						continue;
 					}
-					const real_t entry = _segment_entry_fraction(aabb, p_from, motion);
 					if (nearest_item == -1 || entry < nearest_entry) {
 						nearest_entry = entry;
 						nearest_item = i;
@@ -350,11 +321,11 @@ void _cast_segment_iterative(uint32_t p_node_id, const POINT &p_from, const POIN
 			const uint32_t child_b = node.children[1];
 			const BVHABB_CLASS &bounds_a = _nodes[child_a].aabb;
 			const BVHABB_CLASS &bounds_b = _nodes[child_b].aabb;
-			const bool hit_a = bounds_a.intersects_segment(segment);
-			const bool hit_b = bounds_b.intersects_segment(segment);
+			real_t entry_a;
+			real_t entry_b;
+			const bool hit_a = bounds_a.intersects_segment(segment, &entry_a);
+			const bool hit_b = bounds_b.intersects_segment(segment, &entry_b);
 			if (hit_a && hit_b) {
-				const real_t entry_a = _segment_entry_fraction(bounds_a, p_from, motion);
-				const real_t entry_b = _segment_entry_fraction(bounds_b, p_from, motion);
 				if (entry_a <= entry_b) {
 					stack.request()->node_id = child_b;
 					stack.request()->node_id = child_a;
