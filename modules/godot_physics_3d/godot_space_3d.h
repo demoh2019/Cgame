@@ -145,6 +145,11 @@ private:
 	int soft_body_self_collision_max_contacts_per_vertex = 8;
 	bool soft_body_self_collision_edge_edge = false; // Separate opt-in edge BVH.
 	bool soft_body_self_collision_ccd = false; // Swept vertex/face, off by default.
+	// Bullet-style discrete vertex/triangle contacts between separate soft bodies.
+	real_t soft_body_pair_collision_thickness = 0.0; // Disabled by default.
+	real_t soft_body_pair_collision_compliance = 0.000001;
+	int soft_body_pair_max_contacts = 256; // Per pair, temporary bounded scratch.
+	int soft_body_pair_max_pairs = 128; // Candidate body-pairs per step.
 	real_t soft_body_xpbd_tether_compliance = 0.0; // Zero bypasses tether setup and solver.
 	real_t soft_body_xpbd_tether_slack = 0.05; // Opt-in triangle area preservation.
 	real_t soft_body_xpbd_volume_compliance = 0.0; // Opt-in enclosed volume preservation.
@@ -268,6 +273,10 @@ public:
 	_FORCE_INLINE_ int get_soft_body_self_collision_max_contacts_per_vertex() const { return soft_body_self_collision_max_contacts_per_vertex; }
 	_FORCE_INLINE_ bool is_soft_body_self_collision_edge_edge_enabled() const { return soft_body_self_collision_edge_edge; }
 	_FORCE_INLINE_ bool is_soft_body_self_collision_ccd_enabled() const { return soft_body_self_collision_ccd; }
+	_FORCE_INLINE_ real_t get_soft_body_pair_collision_thickness() const { return soft_body_pair_collision_thickness; }
+	_FORCE_INLINE_ real_t get_soft_body_pair_collision_compliance() const { return soft_body_pair_collision_compliance; }
+	_FORCE_INLINE_ int get_soft_body_pair_max_contacts() const { return soft_body_pair_max_contacts; }
+	_FORCE_INLINE_ int get_soft_body_pair_max_pairs() const { return soft_body_pair_max_pairs; }
 	_FORCE_INLINE_ real_t get_soft_body_xpbd_tether_compliance() const { return soft_body_xpbd_tether_compliance; }
 	_FORCE_INLINE_ real_t get_soft_body_xpbd_tether_slack() const { return soft_body_xpbd_tether_slack; }
 	_FORCE_INLINE_ real_t get_soft_body_xpbd_volume_compliance() const { return soft_body_xpbd_volume_compliance; }

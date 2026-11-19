@@ -47,6 +47,7 @@
 #include "servers/physics_xpbd_dihedral.h"
 #include "servers/physics_xpbd_shear.h"
 #include "servers/physics_xpbd_self_collision.h"
+#include "servers/physics_softbody_pair_contact.h"
 #include "servers/physics_xpbd_soft_ccd.h"
 #include "servers/physics_xpbd_self_friction.h"
 #include "servers/physics_xpbd_edge_collision.h"
@@ -693,6 +694,144 @@ bool GodotSoftBody3D::solve_edge_self_collisions(real_t p_delta) {
 					a.im, b.im, c.im, d.im, thickness, alpha, contact.normal, contact.lambda);
 		}
 	}
+	return true;
+}
+
+// Optional two-way discrete soft/soft contact stage. Unlike internal folds,
+// both the vertex and the other mesh's face move according to their masses.
+// Capture candidate pairs BEFORE changing any position: refitting a BVH while
+// traversing it invalidates callbacks, and mutations could hide later hits.
+// The scratch list and per-vertex budget are bounded by project settings.
+bool GodotSoftBody3D::solve_pair_contacts(GodotSoftBody3D &p_other, real_t p_delta,
+		real_t p_thickness, real_t p_compliance,
+		uint32_t p_max_contacts, uint32_t p_max_contacts_per_vertex) {
+	if (&p_other == this || !get_space() || get_space() != p_other.get_space() ||
+			!(p_delta > real_t(0.0)) || !Math::is_finite(p_delta) ||
+			!(p_thickness > real_t(0.0)) || !Math::is_finite(p_thickness) ||
+			p_compliance < real_t(0.0) || !Math::is_finite(p_compliance) ||
+			p_max_contacts == 0 || p_max_contacts_per_vertex == 0 ||
+			nodes.is_empty() || p_other.nodes.is_empty() ||
+			faces.is_empty() || p_other.faces.is_empty()) {
+		return false;
+	}
+	const double alpha_double = double(p_compliance) / (double(p_delta) * double(p_delta));
+	if (!Math::is_finite(alpha_double) || alpha_double < 0.0) {
+		return false;
+	}
+	const real_t alpha = real_t(MIN(alpha_double, double(std::numeric_limits<real_t>::max())));
+	const uint32_t max_contacts = MIN(p_max_contacts, uint32_t(2048));
+	const uint32_t per_vertex_limit = MIN(p_max_contacts_per_vertex, uint32_t(32));
+
+	AABB enlarged = bounds;
+	enlarged.grow_by(p_thickness);
+	if (!enlarged.intersects(p_other.bounds)) {
+		return false;
+	}
+
+	// Ray/cloth queries may have already built either tree. Refit after the
+	// body-local constraints before querying current, not predicted, faces.
+	if (face_tree.is_empty()) {
+		initialize_face_tree();
+	} else {
+		update_face_tree(real_t(0.0));
+	}
+	if (p_other.face_tree.is_empty()) {
+		p_other.initialize_face_tree();
+	} else {
+		p_other.update_face_tree(real_t(0.0));
+	}
+
+	struct PairContact {
+		uint32_t vertex = 0;
+		uint32_t face = 0;
+		bool vertex_on_first = true;
+		int8_t side = 1;
+		real_t lambda = 0.0;
+	};
+	LocalVector<PairContact> contacts;
+	contacts.reserve(MIN(max_contacts, uint32_t(64)));
+	const Vector3 padding(p_thickness, p_thickness, p_thickness);
+
+	auto collect = [&](GodotSoftBody3D &p_vertices, GodotSoftBody3D &p_faces, bool p_first) {
+		for (uint32_t index = 0; index < p_vertices.nodes.size() && contacts.size() < max_contacts; ++index) {
+			const Node &node = p_vertices.nodes[index];
+			if (!node.x.is_finite()) {
+				continue;
+			}
+			uint32_t vertex_contacts = 0;
+			auto visit_face = [&](void *p_data) -> bool {
+				const Face &face = *static_cast<const Face *>(p_data);
+				if (node.im == real_t(0.0) &&
+						face.n[0]->im == real_t(0.0) &&
+						face.n[1]->im == real_t(0.0) &&
+						face.n[2]->im == real_t(0.0)) {
+					return false;
+				}
+				Vector3 normal, barycentric;
+				real_t distance = 0.0;
+				if (!physics_xpbd_self_collision_face_projection(node.x,
+							face.n[0]->x, face.n[1]->x, face.n[2]->x,
+							normal, barycentric, distance) ||
+						Math::abs(distance) >= p_thickness) {
+					return false;
+				}
+				PairContact contact;
+				contact.vertex = index;
+				contact.face = face.index;
+				contact.vertex_on_first = p_first;
+				contact.side = distance >= real_t(0.0) ? 1 : -1;
+				contacts.push_back(contact);
+				++vertex_contacts;
+				return vertex_contacts >= per_vertex_limit || contacts.size() >= max_contacts;
+			};
+			p_faces.face_tree.aabb_query(AABB(node.x - padding, padding * real_t(2.0)), visit_face);
+		}
+	};
+
+	collect(*this, p_other, true);
+	if (contacts.size() < max_contacts) {
+		collect(p_other, *this, false);
+	}
+	if (contacts.is_empty()) {
+		return false;
+	}
+
+	bool moved = false;
+	const int contact_iterations = MIN(MAX(iteration_count, 1), 4);
+	for (int iteration = 0; iteration < contact_iterations; ++iteration) {
+		for (PairContact &contact : contacts) {
+			GodotSoftBody3D &vertex_body = contact.vertex_on_first ? *this : p_other;
+			GodotSoftBody3D &face_body = contact.vertex_on_first ? p_other : *this;
+			Node &vertex = vertex_body.nodes[contact.vertex];
+			Face &face = face_body.faces[contact.face];
+			if (physics_softbody_solve_pair_vertex_face(vertex.x,
+						face.n[0]->x, face.n[1]->x, face.n[2]->x,
+						vertex.v, face.n[0]->v, face.n[1]->v, face.n[2]->v,
+						vertex.im, face.n[0]->im, face.n[1]->im, face.n[2]->im,
+						p_thickness, alpha, contact.side, p_delta, contact.lambda)) {
+				moved = true;
+			}
+		}
+	}
+	if (!moved) {
+		return false;
+	}
+
+	// Refit both bodies only AFTER the contact loop. They will be used by
+	// subsequent pair queries, raycasts, and the next physics step.
+	auto finalize = [](GodotSoftBody3D &p_body) {
+		for (Node &node : p_body.nodes) {
+			node.q = node.x;
+			AABB node_bounds(node.x, Vector3());
+			node_bounds.grow_by(p_body.collision_margin);
+			p_body.node_tree.update(node.leaf, node_bounds);
+		}
+		p_body.update_normals_and_centroids();
+		p_body.update_bounds();
+		p_body.update_face_tree(real_t(0.0));
+	};
+	finalize(*this);
+	finalize(p_other);
 	return true;
 }
 
