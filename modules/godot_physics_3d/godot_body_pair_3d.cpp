@@ -659,11 +659,12 @@ void GodotBodyPair3D::solve(real_t p_step) {
 			Vector3 jtOld = c.acc_tangent_impulse;
 			c.acc_tangent_impulse += jt;
 
-			real_t fi_len = c.acc_tangent_impulse.length();
-			real_t jtMax = c.acc_normal_impulse * friction;
+			const real_t fi_len_squared = c.acc_tangent_impulse.length_squared();
+			const real_t jtMax = c.acc_normal_impulse * friction;
 
-			if (fi_len > CMP_EPSILON && fi_len > jtMax) {
-				c.acc_tangent_impulse *= jtMax / fi_len;
+			// Only compute sqrt for impulses outside the friction cone.
+			if (fi_len_squared > CMP_EPSILON * CMP_EPSILON && fi_len_squared > jtMax * jtMax) {
+				c.acc_tangent_impulse *= jtMax / Math::sqrt(fi_len_squared);
 			}
 
 			jt = c.acc_tangent_impulse - jtOld;
@@ -722,7 +723,8 @@ void GodotBodySoftBodyPair3D::contact_added_callback(const Vector3 &p_point_A, i
 		Contact &c = contacts[contact_index];
 		if (c.index_B == p_index_B) {
 			if (c.local_A.distance_squared_to(local_A) < (contact_recycle_radius * contact_recycle_radius) &&
-					c.local_B.distance_squared_to(local_B) < (contact_recycle_radius * contact_recycle_radius)) {
+					c.local_B.distance_squared_to(local_B) < (contact_recycle_radius * contact_recycle_radius) &&
+					c.normal.dot(contact.normal) >= real_t(0.98)) {
 				contact.acc_normal_impulse = c.acc_normal_impulse;
 				contact.acc_bias_impulse = c.acc_bias_impulse;
 				contact.acc_bias_impulse_center_of_mass = c.acc_bias_impulse_center_of_mass;
@@ -1090,11 +1092,12 @@ void GodotBodySoftBodyPair3D::solve(real_t p_step) {
 			Vector3 jtOld = c.acc_tangent_impulse;
 			c.acc_tangent_impulse += jt;
 
-			real_t fi_len = c.acc_tangent_impulse.length();
-			real_t jtMax = c.acc_normal_impulse * friction;
+			const real_t fi_len_squared = c.acc_tangent_impulse.length_squared();
+			const real_t jtMax = c.acc_normal_impulse * friction;
 
-			if (fi_len > CMP_EPSILON && fi_len > jtMax) {
-				c.acc_tangent_impulse *= jtMax / fi_len;
+			// Only compute sqrt for impulses outside the friction cone.
+			if (fi_len_squared > CMP_EPSILON * CMP_EPSILON && fi_len_squared > jtMax * jtMax) {
+				c.acc_tangent_impulse *= jtMax / Math::sqrt(fi_len_squared);
 			}
 
 			jt = c.acc_tangent_impulse - jtOld;
