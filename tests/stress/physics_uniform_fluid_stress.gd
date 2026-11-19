@@ -6,12 +6,11 @@ extends RefCounted
 func _configure_fluid(is_3d: bool, enabled: bool) -> Dictionary:
 	var root := "physics/3d/solver/" if is_3d else "physics/2d/solver/"
 	var flow: Variant = Vector3(3.0, 0.0, 0.0) if is_3d else Vector2(3.0, 0.0)
-	var config := {
-		root + "fluid_linear_drag": 0.4 if enabled else 0.0,
-		root + "fluid_angular_drag": 0.3 if enabled else 0.0,
-		root + "fluid_buoyancy": 1.0 if enabled else 0.0,
-		root + "fluid_flow_velocity": flow if enabled else (Vector3.ZERO if is_3d else Vector2.ZERO),
-	}
+	var config := {}
+	config[root + "fluid_linear_drag"] = 0.4 if enabled else 0.0
+	config[root + "fluid_angular_drag"] = 0.3 if enabled else 0.0
+	config[root + "fluid_buoyancy"] = 1.0 if enabled else 0.0
+	config[root + "fluid_flow_velocity"] = flow if enabled else (Vector3.ZERO if is_3d else Vector2.ZERO)
 	var old := {}
 	for key in config.keys():
 		old[key] = ProjectSettings.get_setting(key)
