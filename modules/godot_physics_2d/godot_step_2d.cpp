@@ -333,6 +333,10 @@ void GodotStep2D::_solve_large_island(const LocalVector<GodotConstraint2D *> &p_
 	// topology. Avoid pointer-only equality: joint endpoints can be rebound
 	// without the constraint object itself changing.
 	bool cacheable = true;
+	// Keep peak-cache RAM bounded when a once-huge island becomes small.
+	if (cached_color_topology.get_capacity() > MAX(uint32_t(1024), constraint_count * uint32_t(4))) {
+		cached_color_topology.reset();
+	}
 	cached_color_topology.resize(constraint_count);
 	for (uint32_t i = 0; i < constraint_count; ++i) {
 		GodotConstraint2D *constraint = p_constraint_island[i];
