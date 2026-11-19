@@ -31,6 +31,7 @@
 #pragma once
 
 #include "core/os/mutex.h"
+#include "core/templates/hash_map.h"
 #include "core/templates/local_vector.h"
 #include "core/templates/rid.h"
 #include "core/templates/self_list.h"
@@ -69,6 +70,13 @@ class JoltSpace3D {
 
 	LocalVector<JPH::BodyID> pending_objects_sleeping;
 	LocalVector<JPH::BodyID> pending_objects_awake;
+	// Materialized only when large pending batches are searched/removed.
+	HashMap<uint32_t, uint32_t> pending_sleeping_indices;
+	HashMap<uint32_t, uint32_t> pending_awake_indices;
+
+	static void _pending_add(LocalVector<JPH::BodyID> &p_bodies, HashMap<uint32_t, uint32_t> &r_indices, const JPH::BodyID &p_id);
+	static bool _pending_erase(LocalVector<JPH::BodyID> &p_bodies, HashMap<uint32_t, uint32_t> &r_indices, const JPH::BodyID &p_id);
+	static bool _pending_has(const LocalVector<JPH::BodyID> &p_bodies, HashMap<uint32_t, uint32_t> &r_indices, const JPH::BodyID &p_id);
 
 	RID rid;
 
