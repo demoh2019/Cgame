@@ -1646,7 +1646,7 @@ void JoltPhysicsServer3D::step(real_t p_step) {
 	}
 
 	// Sample after each space's physics step. Jolt exposes O(1) active-body
-	// counts; never call GetBodyStats(), which scans all registered bodies.
+	// counts; avoid O(n) iteration over all registered bodies.
 	uint64_t active_count = 0;
 	uint64_t manifold_count = 0;
 	for (JoltSpace3D *active_space : active_spaces) {
