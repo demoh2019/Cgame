@@ -66,7 +66,7 @@ def submerged_drag(points, velocities, inverse_mass, flow,
                 impulse[j][k] += bary[j]*net
 
     power = sum(impulse[j][k]*(velocities[j][k]-flow[k])
-                for j in range(3) for k in range(3))
+                for j in range(3) if inverse_mass[j] > 0 for k in range(3))
     quadratic = sum(inverse_mass[j]*impulse[j][k]**2
                     for j in range(3) for k in range(3))
     if power >= 0 or quadratic <= 0:
@@ -150,6 +150,15 @@ class TestHydrodynamicSoftbody(unittest.TestCase):
             for j in range(3):
                 if inv[j] == 0:
                     self.assertEqual(dv[j], (0, 0, 0))
+
+    def test_pinned_reaction_does_not_add_energy_to_free_vertices(self):
+        p = ((0, -1, 0), (1, -1, 0), (0, -1, 1))
+        v = ((0, 100, 0), (0, 0, 0), (0, 0, 0))
+        inv = (0, 1, 1)
+        dv = submerged_drag(p, v, inv, (0, 0, 0),
+                            density=1000, cd=5, tangent_ratio=1, dt=0.1)
+        self.assertEqual(dv, ((0.0, 0.0, 0.0),)*3)
+        self.assertEqual(kinetic_energy(v, inv, (0, 0, 0)), 0.0)
 
     def test_sequential_shared_face_drag_stays_dissipative(self):
         p = ((0, -1, 0), (1, -1, 0), (0, -1, 1))
