@@ -29,6 +29,8 @@ class SkewCapsuleTOIContracts(unittest.TestCase):
         self.assertEqual(source.count("for (int i = 0; i < search_iterations; ++i)"), 2)
         self.assertIn("minimum.squared <= radius_sq", source)
         self.assertIn("r_fraction = high;", source)
+        self.assertIn("end.derivative_half > 0.0 && end.squared > radius_sq", source)
+        self.assertIn("end.squared > radius_sq && end.derivative_half <= 0.0", source)
 
     def test_initial_overlap_and_degenerate_inputs_preserve_fallback(self):
         source = HELPER.read_text(encoding="utf-8")
@@ -60,6 +62,8 @@ class SkewCapsuleTOIContracts(unittest.TestCase):
         self.assertIn("[CapsulePairTOI]", cpp)
         self.assertIn("Perpendicular 2D capsules", cpp)
         self.assertIn("Skew 3D capsule", cpp)
+        self.assertIn("Sweep ending in overlap uses the earliest entry", cpp)
+        self.assertIn("Sweep too short to reach an obstacle", cpp)
         self.assertIn("Swept cross-axis separation", cpp)
         self.assertIn("Nonfinite inputs return fallback", cpp)
         workflow = WORKFLOW.read_text(encoding="utf-8")
