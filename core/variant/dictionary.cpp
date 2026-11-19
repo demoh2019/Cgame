@@ -501,10 +501,13 @@ Array Dictionary::keys() const {
 
 	varr.resize(size());
 
-	int i = 0;
+	// The result is freshly allocated and already typed to match the keys.
+	// Resolve the writable span once, instead of paying for an indexed
+	// Array write and its COW/read-only checks per dictionary entry.
+	Array::Iterator write = varr.begin();
 	for (const KeyValue<Variant, Variant> &E : _p->variant_map) {
-		varr[i] = E.key;
-		i++;
+		*write = E.key;
+		++write;
 	}
 
 	return varr;
@@ -521,10 +524,13 @@ Array Dictionary::values() const {
 
 	varr.resize(size());
 
-	int i = 0;
+	// The result is freshly allocated and already typed to match the values.
+	// Resolve the writable span once, instead of paying for an indexed
+	// Array write and its COW/read-only checks per dictionary entry.
+	Array::Iterator write = varr.begin();
 	for (const KeyValue<Variant, Variant> &E : _p->variant_map) {
-		varr[i] = E.value;
-		i++;
+		*write = E.value;
+		++write;
 	}
 
 	return varr;

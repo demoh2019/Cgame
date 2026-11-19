@@ -1065,4 +1065,38 @@ TEST_CASE("[TypedContainer] Dictionary Ref<Script> fast path retains Variant com
 	}
 }
 
+
+TEST_CASE("[Dictionary] keys and values preserve typed storage and entry alignment") {
+	TypedDictionary<String, int> typed;
+	for (int i = 0; i < 4096; ++i) {
+		typed[String::num_int64(i)] = i * 3;
+	}
+	Array keys = typed.keys();
+	Array values = typed.values();
+	REQUIRE_EQ(keys.size(), 4096);
+	REQUIRE_EQ(values.size(), 4096);
+	CHECK_EQ(keys.get_typed_builtin(), Variant::STRING);
+	CHECK_EQ(values.get_typed_builtin(), Variant::INT);
+	for (int i = 0; i < keys.size(); ++i) {
+		const Variant &key = keys[i];
+		CHECK_EQ(typed[key], values[i]);
+	}
+
+	Dictionary untyped;
+	untyped["s"] = String("value");
+	untyped[42] = Vector2(3, 5);
+	untyped[true] = 7;
+	keys = untyped.keys();
+	values = untyped.values();
+	REQUIRE_EQ(keys.size(), untyped.size());
+	REQUIRE_EQ(values.size(), untyped.size());
+	for (int i = 0; i < keys.size(); ++i) {
+		CHECK_EQ(untyped[keys[i]], values[i]);
+	}
+
+	Dictionary empty;
+	CHECK_EQ(empty.keys().size(), 0);
+	CHECK_EQ(empty.values().size(), 0);
+}
+
 } // namespace TestDictionary
