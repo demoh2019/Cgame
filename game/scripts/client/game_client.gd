@@ -101,7 +101,8 @@ func _reconcile(snapshot: Dictionary) -> void:
 	# Start from the server's position and replay the inputs it has not seen yet.
 	var replayed := authoritative
 	for entry in _pending:
-		replayed = Movement.step(world, replayed, entry["input"], float(entry["dt"]))
+		replayed = Movement.step(world, replayed, entry["input"], float(entry["dt"]),
+			int(entry.get("carry_grams", 0)))
 	var error := replayed.distance_to(predicted)
 	worst_error = maxf(worst_error, error)
 	if error > 0.001:
@@ -120,8 +121,11 @@ func send_input(move: Vector2, sprint: bool, face_yaw: float, delta: float) -> v
 	_seq += 1
 	yaw = face_yaw
 	var input := {"x": move.x, "z": move.y, "sprint": sprint}
-	predicted = Movement.step(world, predicted, input, delta)
-	_pending.append({"seq": _seq, "input": input, "dt": delta})
+	# Predicted weight is replayed together with the input; the server always
+	# uses its own inventory and corrects us on the next snapshot.
+	var carried_grams: int = inventory.weight_grams()
+	predicted = Movement.step(world, predicted, input, delta, carried_grams)
+	_pending.append({"seq": _seq, "input": input, "dt": delta, "carry_grams": carried_grams})
 	if _pending.size() > 120:
 		_pending.pop_front()
 	net.c_input.rpc_id(1, _seq, move.x, move.y, sprint, face_yaw, delta)
