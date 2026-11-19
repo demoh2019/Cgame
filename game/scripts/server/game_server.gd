@@ -40,6 +40,8 @@ class Player:
 	var deaths: int = 0
 	var zone_notice: int = -1
 	var dirty_inventory: bool = true
+	var user_id: String = "" # Nakama account, empty in offline mode.
+	var dirty_character: bool = false # Something worth saving changed.
 
 var players: Dictionary = {} # peer id -> Player
 var zombies: Dictionary = {} # zombie id -> Zombie
@@ -63,17 +65,79 @@ func new_id() -> int:
 
 # --- Players ---------------------------------------------------------------------------------------------
 
-func add_player(peer_id: int, p_name: String) -> Player:
+func add_player(peer_id: int, p_name: String, p_user_id: String = "", saved: Dictionary = {}) -> Player:
 	var player := Player.new()
 	player.id = peer_id
+	player.user_id = p_user_id
 	player.name = p_name.strip_edges().substr(0, MAX_NAME_LENGTH)
 	if player.name == "":
 		player.name = "Survivor%d" % (peer_id % 1000)
 	player.inventory = Inventory.new()
 	player.survival = Survival.new()
 	players[peer_id] = player
-	_spawn_player(player)
+	if saved.is_empty() or not apply_character(player, saved):
+		_spawn_player(player)
+	else:
+		events.append({"type": "spawn", "peer": player.id})
 	return player
+
+
+## The part of a player that survives between sessions.
+func character_data(player: Player) -> Dictionary:
+	var alive := _alive(player)
+	return {
+		"version": 1,
+		"health": player.survival.health, "hunger": player.survival.hunger, "thirst": player.survival.thirst,
+		"alive": alive, "kills": player.kills, "deaths": player.deaths,
+		"x": player.position.x, "z": player.position.z,
+		"inventory": player.inventory.to_dict(),
+	}
+
+
+## Restores a saved character. Returns false (and changes nothing) if the data is not usable.
+func apply_character(player: Player, data: Dictionary) -> bool:
+	if int(data.get("version", 0)) != 1 or typeof(data.get("inventory")) != TYPE_DICTIONARY:
+		return false
+	var inventory = Inventory.new()
+	var slots: Variant = data["inventory"].get("slots")
+	if typeof(slots) != TYPE_ARRAY or slots.size() != Defs.INVENTORY_SLOTS:
+		return false
+	var cleaned: Array = []
+	for slot in slots:
+		# JSON turns numbers into floats and may hold anything: accept only real items with sane counts.
+		if typeof(slot) != TYPE_DICTIONARY or slot.is_empty():
+			cleaned.append({})
+			continue
+		var id := str(slot.get("id", ""))
+		var count := int(slot.get("count", 0))
+		if not Defs.is_item(id) or count < 1 or count > Defs.stack_size(id):
+			return false
+		cleaned.append({"id": id, "count": count})
+	inventory.slots = cleaned
+	var weapon := str(data["inventory"].get("weapon", ""))
+	var armor := str(data["inventory"].get("armor", ""))
+	inventory.weapon = weapon if weapon != "" and inventory.count(weapon) > 0 else ""
+	inventory.armor = armor if armor != "" and inventory.count(armor) > 0 else ""
+	player.inventory = inventory
+	player.kills = maxi(int(data.get("kills", 0)), 0)
+	player.deaths = maxi(int(data.get("deaths", 0)), 0)
+	var survival = Survival.new()
+	survival.health = clampf(float(data.get("health", 100.0)), 1.0, Defs.MAX_HEALTH)
+	survival.hunger = clampf(float(data.get("hunger", 80.0)), 0.0, 100.0)
+	survival.thirst = clampf(float(data.get("thirst", 80.0)), 0.0, 100.0)
+	player.survival = survival
+	# Where they logged out, if that is a sane place; otherwise the hub.
+	var x := float(data.get("x", 0.0))
+	var z := float(data.get("z", 0.0))
+	if is_finite(x) and is_finite(z) and absf(x) < 50000.0 and absf(z) < 50000.0 and bool(data.get("alive", true)) and not world.is_water(x, z):
+		player.position = Vector3(x, world.height_at(x, z), z)
+	else:
+		var angle := rng.randf() * TAU
+		var spot := Vector2.from_angle(angle) * rng.randf_range(10.0, 22.0)
+		player.position = Vector3(spot.x, world.height_at(spot.x, spot.y), spot.y)
+	player.dirty_inventory = true
+	player.dirty_character = true
+	return true
 
 
 func remove_player(peer_id: int) -> void:
@@ -161,6 +225,7 @@ func cmd_craft(peer_id: int, recipe_id: String, times: int = 1) -> Dictionary:
 	var status: int = Crafting.craft(player.inventory, recipe_id, at_bench, times)
 	if status == Crafting.Result.OK:
 		player.dirty_inventory = true
+		player.dirty_character = true
 		return {"ok": true}
 	return {"ok": false, "reason": ["ok", "unknown_recipe", "missing_inputs", "no_station", "no_space"][status]}
 
@@ -307,6 +372,7 @@ func _find_crate(crate_id: int) -> Dictionary:
 
 ## Moves items into a player's inventory; returns what did not fit.
 func _give_items(player: Player, items: Dictionary) -> Dictionary:
+	player.dirty_character = true
 	var left: Dictionary = {}
 	for id in items:
 		var remaining: int = player.inventory.add(id, int(items[id]))
@@ -369,6 +435,7 @@ func _hit_distance(origin: Vector2, direction: Vector2, target: Vector2, reach: 
 
 
 func _damage_target(attacker: Player, hit: Dictionary, damage: float) -> void:
+	attacker.dirty_character = true
 	if hit["kind"] == "zombie":
 		var zombie = zombies.get(hit["id"])
 		if zombie == null:
@@ -402,6 +469,7 @@ func _on_zombie_death(zombie) -> void:
 ## Albion style full loot: everything the player carried drops where they died.
 func _on_player_death(victim: Player, killer: int) -> void:
 	victim.deaths += 1
+	victim.dirty_character = true
 	victim.action = {}
 	var everything: Dictionary = victim.inventory.take_everything()
 	victim.respawn_timer = Defs.RESPAWN_SECONDS
@@ -458,6 +526,7 @@ func _finish_gather(player: Player, node: Dictionary) -> void:
 	var amount: int = int(info["amount"]) + (1 if rng.randf() < 0.3 else 0)
 	var left: int = player.inventory.add(item_id, amount)
 	player.dirty_inventory = true
+	player.dirty_character = true
 	player.action = {}
 	depleted[int(node["id"])] = time + float(info["respawn"])
 	events.append({"type": "gathered", "peer": player.id, "item": item_id, "amount": amount - left, "node": node["id"]})

@@ -5,6 +5,7 @@ extends Node
 const Defs = preload("res://scripts/shared/defs.gd")
 
 signal welcomed
+signal join_refused(reason: String)
 signal result_received(kind: String, data: Dictionary)
 
 var role: String = "client" # "server" or "client"
@@ -15,6 +16,12 @@ var _command_counts: Dictionary = {} # peer -> commands in the current second
 var _count_clock: float = 0.0
 const MAX_COMMANDS_PER_SECOND := 80
 var snapshot_accumulator: float = 0.0
+var gateway # NakamaGateway, or null in offline mode.
+var user_to_peer: Dictionary = {}
+var _joining: Dictionary = {}
+var _saving: Dictionary = {}
+var _save_clock: float = 0.0
+const SAVE_INTERVAL := 30.0
 
 
 func _process(delta: float) -> void:
@@ -35,14 +42,81 @@ func _allowed(peer_id: int) -> bool:
 # --- Client to server ----------------------------------------------------------------------------------
 
 @rpc("any_peer", "reliable")
-func c_join(player_name: String) -> void:
+func c_join(player_name: String, token: String = "", refresh: String = "") -> void:
 	if role != "server":
 		return
 	var peer := multiplayer.get_remote_sender_id()
-	if sim.players.has(peer):
+	if sim.players.has(peer) or _joining.has(peer):
 		return
-	sim.add_player(peer, str(player_name))
+	if gateway == null or not gateway.enabled:
+		# Offline mode (tests, local play): no accounts, nothing is saved.
+		sim.add_player(peer, str(player_name))
+		s_welcome.rpc_id(peer, sim.world.world_seed, Defs.TICK_RATE)
+		return
+	_joining[peer] = true
+	var identity: Dictionary = await gateway.verify(str(token), str(refresh))
+	if not identity["ok"]:
+		_joining.erase(peer)
+		s_join_refused.rpc_id(peer, "Sign in failed: %s" % identity["reason"])
+		_disconnect_later(peer)
+		return
+	var user_id: String = identity["user_id"]
+	# One session per account: a second login replaces the first, which is saved before it goes.
+	if user_to_peer.has(user_id):
+		var old_peer: int = user_to_peer[user_id]
+		await leave(old_peer)
+		_disconnect_later(old_peer)
+	var loaded: Dictionary = await gateway.load_character(user_id)
+	if not multiplayer.get_peers().has(peer):
+		_joining.erase(peer)
+		return # Gone while we were loading.
+	if not loaded["ok"]:
+		_joining.erase(peer)
+		s_join_refused.rpc_id(peer, "The character could not be loaded, try again later.")
+		_disconnect_later(peer)
+		return
+	var saved: Dictionary = loaded.get("data", {}) if loaded.get("exists", false) else {}
+	user_to_peer[user_id] = peer
+	sim.add_player(peer, str(identity["username"]), user_id, saved)
+	_joining.erase(peer)
 	s_welcome.rpc_id(peer, sim.world.world_seed, Defs.TICK_RATE)
+
+
+func _disconnect_later(peer: int) -> void:
+	await get_tree().create_timer(0.3).timeout # Let the refusal message get out first.
+	if multiplayer.get_peers().has(peer):
+		multiplayer.multiplayer_peer.disconnect_peer(peer)
+
+
+## Saves a player's character and removes them from the world. Safe to call for unknown peers.
+func leave(peer: int) -> void:
+	var player = sim.players.get(peer)
+	if player == null:
+		return
+	var user_id: String = player.user_id
+	var data: Dictionary = sim.character_data(player)
+	# Leaving removes the player from the world first, so nothing can still change their character.
+	sim.remove_player(peer)
+	if user_id != "":
+		user_to_peer.erase(user_id)
+		if gateway != null and gateway.enabled:
+			await gateway.save_character(user_id, data)
+			await gateway.submit_score(user_id, player.name, int(data["kills"]), int(data["deaths"]))
+
+
+func _save_all() -> void:
+	if gateway == null or not gateway.enabled:
+		return
+	for peer in sim.players.keys():
+		var player = sim.players[peer]
+		if player.user_id == "" or _saving.has(peer):
+			continue
+		_saving[peer] = true
+		var data: Dictionary = sim.character_data(player)
+		var ok: bool = await gateway.save_character(player.user_id, data)
+		if ok and data["kills"] > 0:
+			await gateway.submit_score(player.user_id, player.name, int(data["kills"]), int(data["deaths"]))
+		_saving.erase(peer)
 
 
 @rpc("any_peer", "unreliable_ordered")
@@ -126,6 +200,11 @@ func s_welcome(world_seed: int, tick_rate: int) -> void:
 	welcomed.emit()
 
 
+@rpc("authority", "reliable")
+func s_join_refused(reason: String) -> void:
+	join_refused.emit(reason)
+
+
 @rpc("authority", "unreliable_ordered")
 func s_snapshot(snapshot: Dictionary) -> void:
 	if client != null:
@@ -150,6 +229,10 @@ func s_result(kind: String, data: Dictionary) -> void:
 ## Runs one simulation tick and sends what changed. Called by the server main loop.
 func server_tick(delta: float) -> void:
 	sim.tick(delta)
+	_save_clock += delta
+	if _save_clock >= SAVE_INTERVAL:
+		_save_clock = 0.0
+		_save_all()
 	var all_events: Array = sim.drain_events()
 	for peer in sim.players:
 		var personal: Array = []

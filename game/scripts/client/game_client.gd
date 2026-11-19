@@ -133,8 +133,8 @@ func display_position() -> Vector3:
 	return predicted + correction
 
 
-func join(player_name: String) -> void:
-	net.c_join.rpc_id(1, player_name)
+func join(player_name: String, token: String = "", refresh: String = "") -> void:
+	net.c_join.rpc_id(1, player_name, token, refresh)
 
 
 # --- Commands ----------------------------------------------------------------------------------------------

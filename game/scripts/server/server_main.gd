@@ -7,6 +7,7 @@ const Defs = preload("res://scripts/shared/defs.gd")
 const WorldGen = preload("res://scripts/shared/world_gen.gd")
 const GameServer = preload("res://scripts/server/game_server.gd")
 const Net = preload("res://scripts/shared/net.gd")
+const Gateway = preload("res://scripts/server/nakama_gateway.gd")
 
 var net
 var sim
@@ -23,6 +24,8 @@ func _initialize() -> void:
 	var port := 24565
 	var world_seed := 1337
 	var max_clients := 64
+	var nakama_address := "" # host:port of Nakama; empty means offline mode.
+	var nakama_http_key := "albion_http_key"
 	var args := OS.get_cmdline_user_args()
 	var i := 0
 	while i < args.size():
@@ -36,6 +39,12 @@ func _initialize() -> void:
 			"--max-clients":
 				i += 1
 				max_clients = int(args[i])
+			"--nakama":
+				i += 1
+				nakama_address = args[i]
+			"--nakama-key":
+				i += 1
+				nakama_http_key = args[i]
 			"--quit-after":
 				i += 1
 				_quit_after = float(args[i])
@@ -48,6 +57,13 @@ func _initialize() -> void:
 	net.sim = sim
 	net.allow_debug = "--debug-commands" in args
 	root.add_child(net)
+	if nakama_address != "":
+		var gateway := Gateway.new()
+		gateway.name = "NakamaGateway"
+		root.add_child(gateway)
+		var parts := nakama_address.split(":")
+		gateway.setup(parts[0], int(parts[1]) if parts.size() > 1 else 7350, "albion_after_key", nakama_http_key)
+		net.gateway = gateway
 	peer = ENetMultiplayerPeer.new()
 	var error := peer.create_server(port, max_clients)
 	if error != OK:
@@ -56,10 +72,10 @@ func _initialize() -> void:
 		return
 	get_multiplayer().multiplayer_peer = peer
 	get_multiplayer().peer_disconnected.connect(func(id: int) -> void:
-		sim.remove_player(id)
+		net.leave(id)
 		print("SERVER peer %d left (%d players)" % [id, sim.players.size()]))
 	get_multiplayer().peer_connected.connect(func(id: int) -> void: print("SERVER peer %d connected" % id))
-	print("SERVER listening on %d, seed %d, %d ticks/s%s" % [port, world_seed, Defs.TICK_RATE, ", debug commands on" if net.allow_debug else ""])
+	print("SERVER listening on %d, seed %d, %d ticks/s%s, accounts: %s" % [port, world_seed, Defs.TICK_RATE, ", debug commands on" if net.allow_debug else "", nakama_address if nakama_address != "" else "offline"])
 
 
 func _physics_process(delta: float) -> bool:

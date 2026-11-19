@@ -7,6 +7,7 @@ const Defs = preload("res://scripts/shared/defs.gd")
 const WorldGen = preload("res://scripts/shared/world_gen.gd")
 const Net = preload("res://scripts/shared/net.gd")
 const GameClient = preload("res://scripts/client/game_client.gd")
+const NakamaScript = preload("res://addons/com.heroiclabs.nakama/Nakama.gd")
 const GameServerConstants = preload("res://tests/e2e/constants.gd")
 
 var net
@@ -14,6 +15,10 @@ var client
 var peer: ENetMultiplayerPeer
 var scenario := "solo"
 var bot_name := "Bot"
+var nakama_address := ""
+var device_id := ""
+var returning := false # A returning player keeps their character, so skip the fresh-spawn checks.
+var session
 var failures: Array[String] = []
 var checks := 0
 const STEP := 1.0 / 30.0
@@ -35,6 +40,14 @@ func _initialize() -> void:
 			"--name":
 				i += 1
 				bot_name = args[i]
+			"--nakama":
+				i += 1
+				nakama_address = args[i]
+			"--returning":
+				returning = true
+			"--device":
+				i += 1
+				device_id = args[i]
 		i += 1
 	Engine.physics_ticks_per_second = 30
 	net = Net.new()
@@ -115,15 +128,30 @@ func _run() -> void:
 	if not connected:
 		_finish()
 		return
-	client.join(bot_name)
+	var token := ""
+	var refresh := ""
+	if nakama_address != "":
+		var nakama = NakamaScript.new()
+		root.add_child(nakama)
+		var parts := nakama_address.split(":")
+		var nakama_client = nakama.create_client("albion_after_key", parts[0], int(parts[1]), "http", 10, NakamaLogger.LOG_LEVEL.ERROR)
+		session = await nakama_client.authenticate_device_async(device_id, bot_name, true)
+		check(not session.is_exception(), "signed in to Nakama")
+		if session.is_exception():
+			_finish()
+			return
+		token = session.token
+		refresh = session.refresh_token
+	client.join(bot_name, token, refresh)
 	check(await until(func() -> bool: return client.welcomed and client.snapshots_received > 0, 6.0), "welcome and first snapshot")
 	if not client.welcomed:
 		_finish()
 		return
 	check(client.world.world_seed == 1337, "the client built the world from the server's seed")
 	check(client.you.get("alive", false), "alive after joining")
-	check(Vector2(client.you["x"], client.you["z"]).length() < Defs.HUB_SAFE_RADIUS, "spawned inside the hub")
-	check(client.inventory.count("canned_food") == 2, "the starter kit arrived")
+	if not returning:
+		check(Vector2(client.you["x"], client.you["z"]).length() < Defs.HUB_SAFE_RADIUS, "spawned inside the hub")
+		check(client.inventory.count("canned_food") == 2, "the starter kit arrived")
 	client.predicted = Vector3(client.you["x"], client.you["y"], client.you["z"])
 	match scenario:
 		"solo":
@@ -134,6 +162,12 @@ func _run() -> void:
 			await _scenario_killer()
 		"idle":
 			await until(func() -> bool: return false, 3.0)
+		"persist1":
+			await _scenario_persist1()
+		"persist2":
+			await _scenario_persist2()
+		"refused":
+			pass
 	_finish()
 
 
@@ -277,3 +311,31 @@ func _scenario_killer() -> void:
 		await walk_to(Vector2(loot["x"], loot["z"]), 5.0, false, 1.5)
 		client.loot(loot["id"])
 		check(await until(func() -> bool: return client.inventory.count("silver") >= 50, 3.0), "took the victim's silver")
+
+
+# --- Persistence scenarios (need Nakama) ----------------------------------------------------------------------
+
+func _scenario_persist1() -> void:
+	check(client.inventory.count("silver") == 0, "a brand new account starts without silver")
+	debug("give", {"item": "silver", "count": 123})
+	debug("give", {"item": "club_3", "count": 1})
+	check(await until(func() -> bool: return client.inventory.count("silver") == 123 and client.inventory.count("club_3") == 1, 4.0), "has silver and a club")
+	client.use_item("club_3")
+	await until(func() -> bool: return client.you.get("weapon", "") == "club_3", 3.0)
+	check(client.you.get("weapon", "") == "club_3", "club equipped")
+	client.use_item("canned_food")
+	await until(func() -> bool: return client.inventory.count("canned_food") == 1, 3.0)
+	await teleport(300.0, 300.0)
+	debug("hurt", {"amount": 30.0})
+	await until(func() -> bool: return client.you["health"] < 80.0, 3.0)
+	check(client.you["health"] < 80.0, "took damage before leaving")
+	await until(func() -> bool: return false, 0.5)
+
+
+func _scenario_persist2() -> void:
+	check(client.inventory.count("silver") == 123, "the silver was kept across sessions (%d)" % client.inventory.count("silver"))
+	check(client.inventory.count("club_3") == 1, "the club was kept")
+	check(client.you.get("weapon", "") == "club_3", "and is still equipped")
+	check(client.inventory.count("canned_food") == 1, "eaten food stays eaten")
+	check(client.you["health"] < 85.0, "the injury was kept (%.0f)" % client.you["health"])
+	check(Vector2(client.you["x"], client.you["z"]).distance_to(Vector2(300.0, 300.0)) < 6.0, "they reappear where they logged out")
