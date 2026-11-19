@@ -218,3 +218,21 @@ then falls back to raw salvage. The local preview `V` key and a new inventory
 panel button use this helper. The same server-side `cmd_vendor` validates
 each transaction; Nakama persistence and safe-bank rules remain unchanged.
 The existing `test_vendor.gd` suite also covers refined-goods payouts.
+
+
+## Equipment-granted active combat skill
+
+In `game/`, press **G** with any crafted club equipped for a server-driven
+**Heavy Strike**. It deals **1.6×** club damage within **2.8 metres**, uses
+**30 combat energy** and has a **6-second** cooldown. Energy regenerates at
+**9 per second** while alive (max 100); respawn restores energy and clears
+combat timers. The live HUD shows energy, cooldown and weapon.
+
+The local preview calls `GameServer.cmd_skill`; the dedicated transport
+exposes the same move through `Net.c_skill`. Only aim direction comes from
+the client. Weapon ownership, damage, energy, cooldown and protected-hub PvP
+rules are enforced by the server. These are game-specific mechanics, so no
+native engine modification was necessary.
+
+Regression tests are in `game/tests/test_weapon_skills.gd` and run with
+`godot --headless --path game --script res://tests/run_all.gd`.
