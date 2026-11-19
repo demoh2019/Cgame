@@ -31,6 +31,7 @@
 #pragma once
 
 #include "core/io/resource.h"
+#include "core/templates/pair.h"
 
 class PackedDataContainer : public Resource {
 	GDCLASS(PackedDataContainer, Resource);
