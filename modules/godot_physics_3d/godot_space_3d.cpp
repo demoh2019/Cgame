@@ -302,7 +302,7 @@ bool GodotPhysicsDirectSpaceState3D::cast_motion(const PS3DT::ShapeParameters &p
 		//test initial overlap, ignore objects it's inside of.
 		sep_axis = data.motion_normal;
 
-		if (!GodotCollisionSolver3D::solve_distance(shape, data.params.transform, col_obj->get_shape(shape_idx), col_obj_xform, point_A, point_B, data.query_aabb, &sep_axis)) {
+		if (!GodotCollisionSolver3D::solve_distance(data.motion_shape.shape, data.params.transform, col_obj->get_shape(shape_idx), col_obj_xform, point_A, point_B, data.query_aabb, &sep_axis)) {
 			return true;
 		}
 
@@ -313,7 +313,7 @@ bool GodotPhysicsDirectSpaceState3D::cast_motion(const PS3DT::ShapeParameters &p
 		for (int j = 0; j < 8; j++) { //steps should be customizable..
 			real_t fraction = low + (hi - low) * fraction_coeff;
 
-			data.motion_shape.motion = data.xform_inv.basis.xform(data.params.motion * fraction);
+			data.motion_shape.motion = data.full_motion * fraction;
 
 			Vector3 lA, lB;
 			Vector3 sep = data.motion_normal; //important optimization for this to work fast enough
