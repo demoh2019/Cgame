@@ -33,6 +33,7 @@
 #include "godot_collision_solver_3d.h"
 #include "godot_contact_normal_3d.h"
 #include "godot_space_3d.h"
+#include "servers/physics_manifold_reduction_3d.h"
 
 #include <cfloat> // FLT_MAX
 
@@ -109,7 +110,31 @@ void GodotBodyPair3D::contact_added_callback(const Vector3 &p_point_A, int, cons
 
 	// Figure out if the contact amount must be reduced to fit the new contact.
 	if (new_index == MAX_CONTACTS) {
-		// Remove the contact with the minimum depth.
+		if (space->is_manifold_spread_reduction_enabled()) {
+			// When five candidates compete for four slots, preserve the
+			// deepest point and maximize patch coverage on a common plane.
+			// Coordinates are relative to body A to reduce floating-point
+			// error in large worlds. This path allocates no heap memory.
+			const Basis &basis_A = A->get_transform().basis;
+			const Basis &basis_B = B->get_transform().basis;
+			Vector3 candidate_points[MAX_CONTACTS + 1];
+			Vector3 candidate_normals[MAX_CONTACTS + 1];
+			real_t candidate_depths[MAX_CONTACTS + 1];
+			for (int i = 0; i <= MAX_CONTACTS; i++) {
+				const Contact &c = i == MAX_CONTACTS ? contact : contacts[i];
+				const Vector3 point_A = basis_A.xform(c.local_A);
+				const Vector3 point_B = basis_B.xform(c.local_B) + offset_B;
+				candidate_points[i] = point_A;
+				candidate_normals[i] = c.normal;
+				candidate_depths[i] = (point_A - point_B).dot(c.normal);
+			}
+			const int replacement = GodotPhysicsManifoldReduction3D::choose_replacement(candidate_points, candidate_depths, candidate_normals);
+			if (replacement >= 0) {
+				contacts[replacement] = contact;
+			}
+			return;
+		}
+		// Legacy: remove the contact with the minimum depth.
 
 		const Basis &basis_A = A->get_transform().basis;
 		const Basis &basis_B = B->get_transform().basis;
