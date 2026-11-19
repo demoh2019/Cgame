@@ -108,7 +108,7 @@ TEST_CASE("[GDScriptStaticDebugger] Compiled static value appears in debugger an
 	const String path = TestUtils::get_temp_path("gdscript_static_debugger_test.gd");
 	Ref<FileAccess> output = FileAccess::open(path, FileAccess::WRITE);
 	REQUIRE(output.is_valid());
-	output->store_string("extends RefCounted\\nstatic var ai_score: int = 42\\n");
+	output->store_string("extends RefCounted\nstatic var ai_score: int = 42\n");
 	output->close();
 
 	Ref<GDScript> script = ResourceLoader::load(path);
