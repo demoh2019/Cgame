@@ -1246,6 +1246,8 @@ GodotSpace3D::GodotSpace3D() {
 	contact_bias = GLOBAL_GET("physics/3d/solver/default_contact_bias");
 	// Cache the per-space push speed limit; no project-setting lookup on contacts.
 	max_contact_push_speed = MAX((real_t)0.0, (real_t)GLOBAL_GET("physics/3d/solver/max_contact_push_speed"));
+	const real_t configured_max_linear_velocity = GLOBAL_GET("physics/3d/solver/max_linear_velocity");
+	max_linear_velocity = Math::is_finite(configured_max_linear_velocity) ? MAX(real_t(0.0), configured_max_linear_velocity) : real_t(0.0);
 	warm_start_coefficient = CLAMP((real_t)GLOBAL_GET("physics/3d/solver/warm_start_coefficient"), real_t(0.0), real_t(1.0));
 	friction_combine_mode = CLAMP((int)GLOBAL_GET("physics/3d/solver/friction_combine_mode"), 0, 3);
 	restitution_combine_mode = CLAMP((int)GLOBAL_GET("physics/3d/solver/restitution_combine_mode"), 0, 5);
