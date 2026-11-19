@@ -31,6 +31,7 @@
 #include "godot_body_pair_2d.h"
 
 #include "godot_collision_solver_2d.h"
+#include "godot_contact_normal_2d.h"
 #include "godot_space_2d.h"
 
 #define ACCUMULATE_IMPULSES
@@ -55,7 +56,9 @@ void GodotBodyPair2D::_contact_added_callback(const Vector2 &p_point_A, const Ve
 	Contact contact;
 	contact.local_A = local_A;
 	contact.local_B = local_B;
-	contact.normal = (p_point_A - p_point_B).normalized();
+	// Contact normals point from B toward A. Use the reverse body-center
+	// direction when coincident support points cannot define a contact axis.
+	contact.normal = godot_physics_2d_contact_normal(p_point_A, p_point_B, -offset_B);
 	contact.used = true;
 
 	// Match persistent contacts by the closest *unused* pair of local

@@ -81,12 +81,11 @@ bool GodotCollisionSolver3D::solve_static_world_boundary(const GodotShape3D *p_s
 		Vector3 support_A = p.project(supports[i]);
 
 		if (p_result_callback) {
+			// The transformed plane already supplies the unit contact normal.
 			if (p_swap_result) {
-				Vector3 normal = (support_A - supports[i]).normalized();
-				p_result_callback(supports[i], 0, support_A, 0, normal, p_userdata);
+				p_result_callback(supports[i], 0, support_A, 0, p.normal, p_userdata);
 			} else {
-				Vector3 normal = (supports[i] - support_A).normalized();
-				p_result_callback(support_A, 0, supports[i], 0, normal, p_userdata);
+				p_result_callback(support_A, 0, supports[i], 0, -p.normal, p_userdata);
 			}
 		}
 	}
