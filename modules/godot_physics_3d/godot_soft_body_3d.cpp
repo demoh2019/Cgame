@@ -225,8 +225,17 @@ void GodotSoftBody3D::set_tetrahedral_indices(const PackedInt32Array &p_indices)
 	}
 	// Store visual indices, not welded particle indices: the mesh can be
 	// replaced or restored without making the binding point at stale nodes.
+	if (xpbd_explicit_tetra_visual_indices == p_indices) {
+		return;
+	}
 	xpbd_explicit_tetra_visual_indices = p_indices;
-	if (!nodes.is_empty() && get_space()) {
+	if (!soft_mesh.is_null() &&
+			!xpbd_explicit_tetra_interior_positions.is_empty()) {
+		// Switching from/to interior connectivity changes the number of
+		// physical nodes. Rebuild instead of reallocating Node* references.
+		const RID current_mesh = soft_mesh;
+		set_mesh(current_mesh);
+	} else if (!nodes.is_empty() && get_space()) {
 		initialize_fem_tetra();
 	}
 }
@@ -2252,7 +2261,8 @@ bool GodotSoftBody3D::create_from_trimesh(const Vector<int> &p_indices, const Ve
 	// no visual vertices, triangle faces or collision point BVH leaves.
 	// Importing them BEFORE append_face()/append_link() prevents vector
 	// reallocations from invalidating stored Node* references.
-	const uint32_t extra_count = uint32_t(xpbd_explicit_tetra_interior_positions.size());
+	const uint32_t extra_count = xpbd_explicit_tetra_visual_indices.is_empty() ? 0 :
+			uint32_t(xpbd_explicit_tetra_interior_positions.size());
 	if (extra_count > 0) {
 		ERR_FAIL_COND_V_MSG(xpbd_surface_node_count != vertices.size() ||
 					xpbd_surface_node_count > 2048 ||
