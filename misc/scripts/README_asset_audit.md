@@ -17,6 +17,12 @@ JSON report for CI:
 python3 misc/scripts/project_asset_audit.py /path/to/godot-project --format json
 ```
 
+GitHub Actions file/line annotations with escaped paths and messages:
+
+```bash
+python3 misc/scripts/project_asset_audit.py /path/to/godot-project --format github --fail-on-warning
+```
+
 Optional flags: `--exclude "vendor/*"` (repeatable), `--max-text-bytes N`,
 `--fail-on-warning`, and `--no-cycles`. Exit codes: 0 for success, 1 for audit
 violations, 2 for invalid configuration.
