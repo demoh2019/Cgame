@@ -1395,13 +1395,12 @@ GodotSoftBodyShape3D::GodotSoftBodyShape3D(GodotSoftBody3D *p_soft_body) {
 struct _SoftBodyIntersectSegmentInfo {
 	const GodotSoftBody3D *soft_body = nullptr;
 	Vector3 from;
-	Vector3 to;
 	Vector3 direction;
 	Vector3 hit_position;
 	Vector3 hit_normal;
 	uint32_t hit_face_index = UINT32_MAX;
-	int dominant_axis = 0;
 	real_t closest_fraction = 1.0;
+	real_t minimum_fraction = 0.0;
 	bool hit_back_faces = false;
 
 	static bool process_hit(uint32_t p_face_index, void *p_userdata) {
@@ -1410,58 +1409,65 @@ struct _SoftBodyIntersectSegmentInfo {
 		Vector3 points[3];
 		query_info.soft_body->get_face_points(p_face_index, points[0], points[1], points[2]);
 
-		// A ray test would also accept triangles beyond the requested endpoint
-		// when their broadphase bounds are inflated by the collision margin.
-		Vector3 hit;
-		if (!Geometry3D::segment_intersects_triangle(query_info.from, query_info.to, points[0], points[1], points[2], &hit)) {
+		// Moller-Trumbore on the *finite* segment, without normalizing its
+		// direction. The intersection parameter is already the segment
+		// fraction, so there is no squared-distance overflow or extra
+		// division to determine which triangle is closest.
+		const Vector3 e1 = points[1] - points[0];
+		const Vector3 e2 = points[2] - points[0];
+		const Vector3 h = query_info.direction.cross(e2);
+		const real_t determinant = e1.dot(h);
+		if (Math::is_zero_approx(determinant)) {
 			return false;
 		}
-
-		// Match FaceShape3D's triangle winding and back-face semantics.
-		Vector3 normal = (points[1] - points[0]).cross(points[2] - points[0]);
-		const bool back_face = normal.dot(query_info.direction) > 0.0;
+		const bool back_face = determinant < 0.0;
 		if (back_face && !query_info.hit_back_faces) {
 			return false;
 		}
 
-		// Select the nearest intersection using a normalized segment fraction.
-		// Squared world-space distances overflow for very long rays in float32.
-		const int axis = query_info.dominant_axis;
-		const real_t fraction = (hit[axis] - query_info.from[axis]) / query_info.direction[axis];
-		if (fraction >= 0.0 && fraction <= 1.0 &&
-				(query_info.hit_face_index == UINT32_MAX || fraction < query_info.closest_fraction)) {
-			normal.normalize();
-			query_info.closest_fraction = fraction;
-			query_info.hit_position = hit;
-			query_info.hit_normal = back_face ? -normal : normal;
-			query_info.hit_face_index = p_face_index;
+		const real_t inverse_determinant = 1.0 / determinant;
+		const Vector3 relative_origin = query_info.from - points[0];
+		const real_t u = relative_origin.dot(h) * inverse_determinant;
+		if (u < 0.0 || u > 1.0) {
+			return false;
+		}
+		const Vector3 q = relative_origin.cross(e1);
+		const real_t v = query_info.direction.dot(q) * inverse_determinant;
+		if (v < 0.0 || u + v > 1.0) {
+			return false;
 		}
 
-		// Continue: a closer face might lie farther down the BVH traversal.
-		return false;
+		const real_t fraction = e2.dot(q) * inverse_determinant;
+		// Compare against a world-distance epsilon. A fixed fraction epsilon
+		// incorrectly rejects valid near-origin hits on kilometer-long rays.
+		if (!(fraction > query_info.minimum_fraction && fraction <= 1.0) ||
+				(query_info.hit_face_index != UINT32_MAX && fraction >= query_info.closest_fraction)) {
+			return false;
+		}
+
+		Vector3 normal = e1.cross(e2);
+		normal.normalize();
+		query_info.closest_fraction = fraction;
+		query_info.hit_position = query_info.from + query_info.direction * fraction;
+		query_info.hit_normal = back_face ? -normal : normal;
+		query_info.hit_face_index = p_face_index;
+		return false; // Continue: another BVH leaf may contain a closer face.
 	}
 };
 
 bool GodotSoftBodyShape3D::intersect_segment(const Vector3 &p_begin, const Vector3 &p_end, Vector3 &r_result, Vector3 &r_normal, int &r_face_index, bool p_hit_back_faces) const {
 	const Vector3 direction = p_end - p_begin;
-	if (direction == Vector3()) {
+	const real_t max_component = MAX(Math::abs(direction.x), MAX(Math::abs(direction.y), Math::abs(direction.z)));
+	if (!(max_component > CMP_EPSILON)) {
 		return false;
 	}
 
 	_SoftBodyIntersectSegmentInfo query_info;
 	query_info.soft_body = soft_body;
 	query_info.from = p_begin;
-	query_info.to = p_end;
 	query_info.direction = direction;
 	query_info.hit_back_faces = p_hit_back_faces;
-	// Pick the largest nonzero component to minimize loss of precision and
-	// avoid sqrt and a squared-distance overflow for large-world raycasts.
-	if (Math::abs(direction.y) > Math::abs(direction[query_info.dominant_axis])) {
-		query_info.dominant_axis = 1;
-	}
-	if (Math::abs(direction.z) > Math::abs(direction[query_info.dominant_axis])) {
-		query_info.dominant_axis = 2;
-	}
+	query_info.minimum_fraction = CMP_EPSILON / max_component;
 
 	soft_body->query_ray(p_begin, p_end, _SoftBodyIntersectSegmentInfo::process_hit, &query_info);
 
