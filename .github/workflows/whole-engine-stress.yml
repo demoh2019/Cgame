@@ -107,6 +107,26 @@ jobs:
             --preset smoke --render-mode headless \
             --case physics_dense_2d,physics_dense_3d,physics_pending_3d,physics_ccd_3d \
             --output physics-native-smoke.json --summary-md physics-native-smoke.md
+      - name: Regression-test native 2D CCD support edges and relative motion
+        shell: bash
+        run: |
+          set -euo pipefail
+          BIN=./bin/godot.linuxbsd.editor.dev.x86_64
+          # Explicitly select the backend under test even when other
+          # physics implementations are available in this build.
+          PROJECT="$RUNNER_TEMP/cgame-godotphysics2d-ccd"
+          mkdir -p "$PROJECT"
+          cp -a tests/stress/. "$PROJECT/"
+          printf '\n[physics]\n2d/physics_engine="GodotPhysics2D"\n' >> "$PROJECT/project.godot"
+          timeout 120s "$BIN" --headless --path "$PROJECT" \
+            --script res://physics_ccd_edge_2d_regression.gd \
+            2>&1 | tee physics2d-ccd-edge.log
+          grep -Fq '2D CCD edge regression: passed' physics2d-ccd-edge.log
+          timeout 120s "$BIN" --headless --path "$PROJECT" \
+            --script res://physics_ccd_relative_motion_2d_regression.gd \
+            2>&1 | tee physics2d-ccd-relative.log
+          grep -Fq '2D relative-motion CCD regression passed.' physics2d-ccd-relative.log
+
       - name: Exercise repeated Jolt pending-body batch reuse
         shell: bash
         run: |
@@ -145,6 +165,8 @@ jobs:
             physics-native-smoke.json
             physics-native-smoke.md
             physics-pending-reuse.log
+            physics2d-ccd-edge.log
+            physics2d-ccd-relative.log
             physics3d-colored-islands.log
             physics-jolt-contact-scratch.log
           if-no-files-found: warn
