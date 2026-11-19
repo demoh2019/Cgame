@@ -17,7 +17,7 @@ func _check_both_labs() -> void:
     var checks := [
         {
             "scene": "res://lab_3d.tscn",
-            "nodes": ["Ground", "ThinTarget", "DeformableMesh", "FEMConvexCubeSixTets", "SuspensionVehicle", "BodyEnterSensor", "DownwardQuery", "DownwardShapeCast", "HingeBase", "SliderBase", "Environment3D/WaterVolume3D", "Environment3D/MagnetCore", "Environment3D/InteractionHUD3D", "AdvancedPhysics3D/VortexZone", "AdvancedPhysics3D/ConveyorBelt3D", "AdvancedPhysics3D/LocalGravityWell", "AdvancedPhysics3D/AdvancedHUD3D"],
+            "nodes": ["Ground", "ThinTarget", "DeformableMesh", "FEMConvexCubeSixTets", "FEMConcaveImportedTwoTets", "SuspensionVehicle", "BodyEnterSensor", "DownwardQuery", "DownwardShapeCast", "HingeBase", "SliderBase", "Environment3D/WaterVolume3D", "Environment3D/MagnetCore", "Environment3D/InteractionHUD3D", "AdvancedPhysics3D/VortexZone", "AdvancedPhysics3D/ConveyorBelt3D", "AdvancedPhysics3D/LocalGravityWell", "AdvancedPhysics3D/AdvancedHUD3D"],
             "group": "demo_dynamic",
             "minimum": 25
         },
