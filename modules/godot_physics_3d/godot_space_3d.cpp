@@ -1017,24 +1017,19 @@ void *GodotSpace3D::_broadphase_pair(GodotCollisionObject3D *A, int p_subindex_A
 		GodotArea3D *area = static_cast<GodotArea3D *>(A);
 		if (type_B == GodotCollisionObject3D::TYPE_AREA) {
 			GodotArea3D *area_b = static_cast<GodotArea3D *>(B);
-			GodotArea2Pair3D *area2_pair = memnew(GodotArea2Pair3D(area_b, p_subindex_B, area, p_subindex_A));
-			return area2_pair;
+			return self->area2_pair_pool.alloc(area_b, p_subindex_B, area, p_subindex_A);
 		} else if (type_B == GodotCollisionObject3D::TYPE_SOFT_BODY) {
 			GodotSoftBody3D *softbody = static_cast<GodotSoftBody3D *>(B);
-			GodotAreaSoftBodyPair3D *soft_area_pair = memnew(GodotAreaSoftBodyPair3D(softbody, p_subindex_B, area, p_subindex_A));
-			return soft_area_pair;
+			return self->area_soft_body_pair_pool.alloc(softbody, p_subindex_B, area, p_subindex_A);
 		} else {
 			GodotBody3D *body = static_cast<GodotBody3D *>(B);
-			GodotAreaPair3D *area_pair = memnew(GodotAreaPair3D(body, p_subindex_B, area, p_subindex_A));
-			return area_pair;
+			return self->area_pair_pool.alloc(body, p_subindex_B, area, p_subindex_A);
 		}
 	} else if (type_A == GodotCollisionObject3D::TYPE_BODY) {
 		if (type_B == GodotCollisionObject3D::TYPE_SOFT_BODY) {
-			GodotBodySoftBodyPair3D *soft_pair = memnew(GodotBodySoftBodyPair3D(static_cast<GodotBody3D *>(A), p_subindex_A, static_cast<GodotSoftBody3D *>(B)));
-			return soft_pair;
+			return self->body_soft_body_pair_pool.alloc(static_cast<GodotBody3D *>(A), p_subindex_A, static_cast<GodotSoftBody3D *>(B));
 		} else {
-			GodotBodyPair3D *b = memnew(GodotBodyPair3D(static_cast<GodotBody3D *>(A), p_subindex_A, static_cast<GodotBody3D *>(B), p_subindex_B));
-			return b;
+			return self->body_pair_pool.alloc(static_cast<GodotBody3D *>(A), p_subindex_A, static_cast<GodotBody3D *>(B), p_subindex_B);
 		}
 	} else {
 		// Soft Body/Soft Body, not supported.
@@ -1050,8 +1045,28 @@ void GodotSpace3D::_broadphase_unpair(GodotCollisionObject3D *A, int p_subindex_
 
 	GodotSpace3D *self = static_cast<GodotSpace3D *>(p_self);
 	self->collision_pairs--;
-	GodotConstraint3D *c = static_cast<GodotConstraint3D *>(p_data);
-	memdelete(c);
+
+	// Return the pair to the pool it came from; the pair type is fully
+	// determined by the object types, exactly as in `_broadphase_pair`.
+	GodotCollisionObject3D::Type type_A = A->get_type();
+	GodotCollisionObject3D::Type type_B = B->get_type();
+	if (type_A > type_B) {
+		SWAP(type_A, type_B);
+	}
+
+	if (type_A == GodotCollisionObject3D::TYPE_AREA) {
+		if (type_B == GodotCollisionObject3D::TYPE_AREA) {
+			self->area2_pair_pool.free(static_cast<GodotArea2Pair3D *>(p_data));
+		} else if (type_B == GodotCollisionObject3D::TYPE_SOFT_BODY) {
+			self->area_soft_body_pair_pool.free(static_cast<GodotAreaSoftBodyPair3D *>(p_data));
+		} else {
+			self->area_pair_pool.free(static_cast<GodotAreaPair3D *>(p_data));
+		}
+	} else if (type_B == GodotCollisionObject3D::TYPE_SOFT_BODY) {
+		self->body_soft_body_pair_pool.free(static_cast<GodotBodySoftBodyPair3D *>(p_data));
+	} else {
+		self->body_pair_pool.free(static_cast<GodotBodyPair3D *>(p_data));
+	}
 }
 
 const SelfList<GodotBody3D>::List &GodotSpace3D::get_active_body_list() const {

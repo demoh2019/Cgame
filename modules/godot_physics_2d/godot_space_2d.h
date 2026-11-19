@@ -31,11 +31,12 @@
 #pragma once
 
 #include "godot_area_2d.h"
+#include "godot_area_pair_2d.h"
 #include "godot_body_2d.h"
+#include "godot_body_pair_2d.h"
 #include "godot_broad_phase_2d.h"
 #include "godot_collision_object_2d.h"
 
-#include "core/math/math_funcs.h"
 #include "core/typedefs.h"
 #include "servers/physics_2d/direct_states/physics_direct_space_state_2d.h"
 
@@ -90,6 +91,17 @@ private:
 	static void _broadphase_unpair(GodotCollisionObject2D *A, int p_subindex_A, GodotCollisionObject2D *B, int p_subindex_B, void *p_data, void *p_self);
 
 	HashSet<GodotCollisionObject2D *> objects;
+
+	// Broadphase pairs are created and destroyed constantly while bodies move.
+	// Pool them per space instead of hitting the general allocator for every
+	// pair. Members are destroyed after the destructor body, so the pools
+	// outlive the broadphase that releases the remaining pairs.
+	enum {
+		PAIR_POOL_PAGE_SIZE = 256,
+	};
+	PagedAllocator<GodotBodyPair2D, true, PAIR_POOL_PAGE_SIZE> body_pair_pool;
+	PagedAllocator<GodotAreaPair2D, true, PAIR_POOL_PAGE_SIZE> area_pair_pool;
+	PagedAllocator<GodotArea2Pair2D, true, PAIR_POOL_PAGE_SIZE> area2_pair_pool;
 
 	GodotArea2D *area = nullptr;
 

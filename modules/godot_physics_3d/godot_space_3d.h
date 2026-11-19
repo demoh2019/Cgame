@@ -31,12 +31,13 @@
 #pragma once
 
 #include "godot_area_3d.h"
+#include "godot_area_pair_3d.h"
 #include "godot_body_3d.h"
+#include "godot_body_pair_3d.h"
 #include "godot_broad_phase_3d.h"
 #include "godot_collision_object_3d.h"
 #include "godot_soft_body_3d.h"
 
-#include "core/math/math_funcs.h"
 #include "core/typedefs.h"
 #include "servers/physics_3d/direct_states/physics_direct_space_state_3d.h"
 
@@ -87,6 +88,21 @@ private:
 	static void _broadphase_unpair(GodotCollisionObject3D *A, int p_subindex_A, GodotCollisionObject3D *B, int p_subindex_B, void *p_data, void *p_self);
 
 	HashSet<GodotCollisionObject3D *> objects;
+
+	// Broadphase pairs are created and destroyed constantly while bodies move.
+	// Pool them per space instead of hitting the general allocator for every
+	// pair. Members are destroyed after the destructor body, so the pools
+	// outlive the broadphase that releases the remaining pairs. Pages are only
+	// allocated on first use, so unused pair kinds cost no memory.
+	enum {
+		PAIR_POOL_PAGE_SIZE = 256,
+		SOFT_BODY_PAIR_POOL_PAGE_SIZE = 32,
+	};
+	PagedAllocator<GodotBodyPair3D, true, PAIR_POOL_PAGE_SIZE> body_pair_pool;
+	PagedAllocator<GodotBodySoftBodyPair3D, true, SOFT_BODY_PAIR_POOL_PAGE_SIZE> body_soft_body_pair_pool;
+	PagedAllocator<GodotAreaPair3D, true, PAIR_POOL_PAGE_SIZE> area_pair_pool;
+	PagedAllocator<GodotAreaSoftBodyPair3D, true, SOFT_BODY_PAIR_POOL_PAGE_SIZE> area_soft_body_pair_pool;
+	PagedAllocator<GodotArea2Pair3D, true, PAIR_POOL_PAGE_SIZE> area2_pair_pool;
 
 	GodotArea3D *area = nullptr;
 

@@ -1002,18 +1002,14 @@ void *GodotSpace2D::_broadphase_pair(GodotCollisionObject2D *A, int p_subindex_A
 		GodotArea2D *area = static_cast<GodotArea2D *>(A);
 		if (type_B == GodotCollisionObject2D::TYPE_AREA) {
 			GodotArea2D *area_b = static_cast<GodotArea2D *>(B);
-			GodotArea2Pair2D *area2_pair = memnew(GodotArea2Pair2D(area_b, p_subindex_B, area, p_subindex_A));
-			return area2_pair;
+			return self->area2_pair_pool.alloc(area_b, p_subindex_B, area, p_subindex_A);
 		} else {
 			GodotBody2D *body = static_cast<GodotBody2D *>(B);
-			GodotAreaPair2D *area_pair = memnew(GodotAreaPair2D(body, p_subindex_B, area, p_subindex_A));
-			return area_pair;
+			return self->area_pair_pool.alloc(body, p_subindex_B, area, p_subindex_A);
 		}
-
-	} else {
-		GodotBodyPair2D *b = memnew(GodotBodyPair2D(static_cast<GodotBody2D *>(A), p_subindex_A, static_cast<GodotBody2D *>(B), p_subindex_B));
-		return b;
 	}
+
+	return self->body_pair_pool.alloc(static_cast<GodotBody2D *>(A), p_subindex_A, static_cast<GodotBody2D *>(B), p_subindex_B);
 }
 
 void GodotSpace2D::_broadphase_unpair(GodotCollisionObject2D *A, int p_subindex_A, GodotCollisionObject2D *B, int p_subindex_B, void *p_data, void *p_self) {
@@ -1023,8 +1019,18 @@ void GodotSpace2D::_broadphase_unpair(GodotCollisionObject2D *A, int p_subindex_
 
 	GodotSpace2D *self = static_cast<GodotSpace2D *>(p_self);
 	self->collision_pairs--;
-	GodotConstraint2D *c = static_cast<GodotConstraint2D *>(p_data);
-	memdelete(c);
+
+	// Return the pair to the pool it came from; the pair type is fully
+	// determined by the object types, exactly as in `_broadphase_pair`.
+	const bool area_A = A->get_type() == GodotCollisionObject2D::TYPE_AREA;
+	const bool area_B = B->get_type() == GodotCollisionObject2D::TYPE_AREA;
+	if (area_A && area_B) {
+		self->area2_pair_pool.free(static_cast<GodotArea2Pair2D *>(p_data));
+	} else if (area_A || area_B) {
+		self->area_pair_pool.free(static_cast<GodotAreaPair2D *>(p_data));
+	} else {
+		self->body_pair_pool.free(static_cast<GodotBodyPair2D *>(p_data));
+	}
 }
 
 const SelfList<GodotBody2D>::List &GodotSpace2D::get_active_body_list() const {
