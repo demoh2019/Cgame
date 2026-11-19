@@ -53,6 +53,23 @@ class GodotStep2D {
 	LocalVector<GodotConstraint2D *> colored_constraints;
 	LocalVector<uint8_t> constraint_colors;
 	AHashMap<GodotBody2D *, uint32_t> occupied_colors;
+
+	// Exact topology snapshots (not hashes): a cached color schedule may be
+	// reused only if every constraint, participating body and body mode match.
+	// Restrict caching to 0-2 body constraints; others rebuild safely.
+	struct ColorCacheEntry {
+		GodotConstraint2D *constraint = nullptr;
+		GodotBody2D *body_A = nullptr;
+		GodotBody2D *body_B = nullptr;
+		uint8_t body_count = 0;
+		uint8_t mode_A = 0;
+		uint8_t mode_B = 0;
+	};
+	LocalVector<ColorCacheEntry> cached_color_topology;
+	uint32_t cached_color_sizes[17] = {};
+	uint32_t cached_color_starts[17] = {};
+	bool cached_color_contact_only = false;
+	bool cached_color_valid = false;
 	uint32_t color_batch_offset = 0;
 	uint32_t color_batch_count = 0;
 	// Read-only during worker dispatch. Used only when one large island is
