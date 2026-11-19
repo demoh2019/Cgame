@@ -474,4 +474,30 @@ TEST_CASE("[SceneTree][GridContainer] Reflow honors expansion and maximum sizes"
 	memdelete(grid);
 }
 
+TEST_CASE("[SceneTree][GridContainer] Many empty columns use constant scratch storage") {
+	GridContainer *grid = memnew(GridContainer);
+	Window *root = SceneTree::get_singleton()->get_root();
+	root->add_child(grid);
+	grid->add_theme_constant_override("h_separation", 0);
+	grid->add_theme_constant_override("v_separation", 0);
+	grid->set_size(Size2(128, 32));
+
+	Control *child = memnew(Control);
+	child->set_custom_minimum_size(Size2(10, 12));
+	child->set_h_size_flags(Control::SIZE_EXPAND_FILL);
+	grid->add_child(child);
+
+	// The old implementation allocated nearly a million RBSet nodes and
+	// iterated over every nominal column, even with only one visible child.
+	grid->set_columns(1000000);
+	SceneTree::get_singleton()->process(0);
+
+	CHECK(grid->get_minimum_size().is_equal_approx(Size2(10, 12)));
+	CHECK(child->get_size().x == doctest::Approx(10));
+	CHECK(child->get_position().x == doctest::Approx(0));
+
+	memdelete(child);
+	memdelete(grid);
+}
+
 } // namespace TestGridContainer
