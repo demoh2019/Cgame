@@ -163,7 +163,8 @@ class GodotSoftBody3D : public GodotCollisionObject3D {
 	DynamicBVH xpbd_self_edge_tree;
 	// Allocated only for positive volume compliance on a closed soft mesh.
 	LocalVector<Vector3> xpbd_volume_gradients;
-	double xpbd_volume_rest = 0.0;
+	double xpbd_volume_rest = 0.0; // May change via plastic creep.
+	double xpbd_volume_original_rest = 0.0; // Frozen gas reference and damage baseline.
 	bool xpbd_volume_closed = false;
 	LocalVector<Face> faces;
 	// Number of particles with nonzero inverse mass. Maintained on pin,
