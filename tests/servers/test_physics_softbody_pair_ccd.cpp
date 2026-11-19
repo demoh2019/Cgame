@@ -60,6 +60,24 @@ TEST_CASE("[PhysicsSoftPairCCD] Fast vertex crosses stationary pinned triangle")
 	CHECK(lambda > 0.0);
 }
 
+TEST_CASE("[PhysicsSoftPairCCD] Near-plane endpoint preserves previous collision side") {
+	// The endpoint is already close enough for a discrete contact, but
+	// its signed side is WRONG after crossing. CCD must use the impact side.
+	Vector3 vertex(0.25, 0.25, -0.02), a = A, b = B, c = C;
+	PhysicsXPBDSoftCCDSweepHit hit;
+	REQUIRE(physics_xpbd_swept_vertex_triangle(
+			Vector3(0.25, 0.25, 0.2), vertex,
+			a, a, b, b, c, c, hit));
+	CHECK(hit.separating_normal.z > 0.0);
+	Vector3 vv(0, 0, -11), va, vb, vc;
+	real_t lambda = 0.0;
+	REQUIRE(physics_softbody_solve_pair_swept_face(vertex, a, b, c,
+			vv, va, vb, vc, 1.0, 0.0, 0.0, 0.0,
+			0.05, 0.0, hit, 0.02, lambda));
+	CHECK(vertex.z == doctest::Approx(0.05).epsilon(1e-5));
+	CHECK(vv.z > -11.0);
+}
+
 TEST_CASE("[PhysicsSoftPairCCD] Swept moving triangle transmits impulse to face only") {
 	Vector3 vertex(0.2, 0.3, 0.0);
 	const Vector3 prev_a(0, 0, 1), prev_b(1, 0, 1), prev_c(0, 1, 1);
