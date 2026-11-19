@@ -115,6 +115,57 @@ public:
 	virtual Status execute(const Dictionary &p_blackboard, Dictionary &r_memory, const String &p_path, double p_delta) override;
 };
 
+/** Built-in leaf that checks a blackboard value. */
+class BehaviorTreeBlackboardCheck : public BehaviorTreeTask {
+	GDCLASS(BehaviorTreeBlackboardCheck, BehaviorTreeTask);
+
+	StringName key;
+	Variant expected_value;
+
+protected:
+	static void _bind_methods();
+
+public:
+	void set_key(const StringName &p_key) { key = p_key; emit_changed(); }
+	StringName get_key() const { return key; }
+	void set_expected_value(const Variant &p_value) { expected_value = p_value; emit_changed(); }
+	Variant get_expected_value() const { return expected_value; }
+	virtual Status execute(const Dictionary &p_blackboard, Dictionary &r_memory, const String &p_path, double p_delta) override;
+};
+
+/** Built-in leaf that writes a blackboard value. */
+class BehaviorTreeBlackboardSet : public BehaviorTreeTask {
+	GDCLASS(BehaviorTreeBlackboardSet, BehaviorTreeTask);
+
+	StringName key;
+	Variant value;
+
+protected:
+	static void _bind_methods();
+
+public:
+	void set_key(const StringName &p_key) { key = p_key; emit_changed(); }
+	StringName get_key() const { return key; }
+	void set_value(const Variant &p_value) { value = p_value; emit_changed(); }
+	Variant get_value() const { return value; }
+	virtual Status execute(const Dictionary &p_blackboard, Dictionary &r_memory, const String &p_path, double p_delta) override;
+};
+
+/** Time-based leaf whose elapsed time is scoped to the owning runner. */
+class BehaviorTreeWait : public BehaviorTreeTask {
+	GDCLASS(BehaviorTreeWait, BehaviorTreeTask);
+
+	double duration = 1.0;
+
+protected:
+	static void _bind_methods();
+
+public:
+	void set_duration(double p_duration);
+	double get_duration() const { return duration; }
+	virtual Status execute(const Dictionary &p_blackboard, Dictionary &r_memory, const String &p_path, double p_delta) override;
+};
+
 class BehaviorTreeRunner : public Node {
 	GDCLASS(BehaviorTreeRunner, Node);
 
