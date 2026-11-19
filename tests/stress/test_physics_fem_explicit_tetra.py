@@ -267,6 +267,30 @@ class InteriorFEMContracts(unittest.TestCase):
         self.assertIn("uint32_t xpbd_surface_node_count = 0;", header)
         self.assertIn("FEMInteriorNodeTwelveTets", demo)
 
+    def test_interior_invalid_geometry_is_not_allocated(self):
+        body = (ROOT / "modules/godot_physics_3d/godot_soft_body_3d.cpp").read_text()
+        start = body.index("bool GodotSoftBody3D::create_from_trimesh(")
+        finish = body.index("void GodotSoftBody3D::generate_bending_constraints(", start)
+        creation = body[start:finish]
+        self.assertIn("physics_fem_build_explicit_tetrahedra(", creation)
+        self.assertIn("vertices.resize(xpbd_surface_node_count);", creation)
+        self.assertLess(
+            creation.index("physics_fem_build_explicit_tetrahedra("),
+            creation.index("nodes.resize(node_count);"))
+        self.assertIn("if (valid_indices && physics_fem_build_explicit_tetrahedra(", creation)
+
+    def test_runtime_fem_diagnostics_are_exposed_and_asserted(self):
+        header = (ROOT / "servers/physics_3d/physics_server_3d.h").read_text()
+        backend = (ROOT / "modules/godot_physics_3d/godot_physics_server_3d.cpp").read_text()
+        smoke = (ROOT / "demo/physics_lab/smoke_test.gd").read_text()
+        self.assertIn("soft_body_get_tetrahedron_count", header)
+        self.assertIn("soft_body_get_tetrahedral_interior_node_count", header)
+        self.assertIn("get_fem_tetrahedron_count()", backend)
+        self.assertIn("get_fem_interior_node_count()", backend)
+        self.assertIn('"FEMConvexCubeSixTets": [6, 0]', smoke)
+        self.assertIn('"FEMConcaveImportedTwoTets": [2, 0]', smoke)
+        self.assertIn('"FEMInteriorNodeTwelveTets": [12, 1]', smoke)
+
     def test_no_surface_change_for_default_empty_interior_positions(self):
         body = (ROOT / "modules/godot_physics_3d/godot_soft_body_3d.cpp").read_text()
         self.assertIn("if (extra_count > 0)", body)
