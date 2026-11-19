@@ -100,6 +100,14 @@ jobs:
           platform: linuxbsd
           target: editor
           scons-flags: dev_build=yes tests=yes debug_symbols=no module_text_server_fb_enabled=yes -j2
+      - name: Native XPBD edge friction regression
+        shell: bash
+        run: |
+          set -euo pipefail
+          timeout 120s ./bin/godot.linuxbsd.editor.dev.x86_64 \
+            --headless --test --test-case="*[PhysicsEdgeFriction]*" \
+            --success=true --no-colors 2>&1 | tee physics-xpbd-edge-friction.log
+          grep -Fq '[PhysicsEdgeFriction]' physics-xpbd-edge-friction.log
       - name: Syntax-check physics stress scripts
         shell: bash
         run: |
