@@ -179,6 +179,8 @@ class GodotSoftBody3D : public GodotCollisionObject3D {
 	// Tetra rest matrices and XPBD multipliers are retained across iterations.
 	// Empty unless tetra FEM compliance is explicitly enabled.
 	LocalVector<PhysicsFEMConvexTetra> xpbd_fem_tetrahedra;
+	// Allocated only when damage rate >0, retained over physics frames.
+	LocalVector<real_t> xpbd_fem_tetra_damage;
 	// Normalized FEM rest-volume fractions; only populated with opt-in lumped mass.
 	// Includes pinned nodes so unpin and mass changes restore their physical mass.
 	LocalVector<double> xpbd_fem_mass_fractions;
