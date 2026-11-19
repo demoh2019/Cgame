@@ -129,7 +129,9 @@ _FORCE_INLINE_ PhysicsCCDCapsulePairTOIResult physics_ccd_capsule_pair_toi(
 		double p_half_segment_a, double p_half_segment_b, double p_combined_radius,
 		double &r_fraction) {
 	using namespace PhysicsCCDCapsulePairInternal;
-	if (!(p_half_segment_a >= 0.0 && p_half_segment_b >= 0.0 && p_combined_radius > 0.0)) {
+	if (!(p_half_segment_a >= 0.0 && p_half_segment_b >= 0.0 && p_combined_radius > 0.0) ||
+			!Math::is_finite(p_half_segment_a) || !Math::is_finite(p_half_segment_b) ||
+			!Math::is_finite(p_combined_radius)) {
 		return PhysicsCCDCapsulePairTOIResult::FALLBACK;
 	}
 
@@ -137,7 +139,8 @@ _FORCE_INLINE_ PhysicsCCDCapsulePairTOIResult physics_ccd_capsule_pair_toi(
 	Vec3 axis_b = { double(p_axis_b.x), double(p_axis_b.y), double(p_axis_b.z) };
 	const double axis_a_sq = dot(axis_a, axis_a);
 	const double axis_b_sq = dot(axis_b, axis_b);
-	if (!(axis_a_sq > 0.0 && axis_b_sq > 0.0)) {
+	if (!(axis_a_sq > 0.0 && axis_b_sq > 0.0) ||
+			!Math::is_finite(axis_a_sq) || !Math::is_finite(axis_b_sq)) {
 		return PhysicsCCDCapsulePairTOIResult::FALLBACK;
 	}
 	axis_a = axis_a * (1.0 / Math::sqrt(axis_a_sq));
@@ -145,7 +148,12 @@ _FORCE_INLINE_ PhysicsCCDCapsulePairTOIResult physics_ccd_capsule_pair_toi(
 
 	const Vec3 center = { double(p_center_delta.x), double(p_center_delta.y), double(p_center_delta.z) };
 	const Vec3 motion = { double(p_relative_motion.x), double(p_relative_motion.y), double(p_relative_motion.z) };
-	if (!(dot(motion, motion) > 0.0)) {
+	const double motion_squared = dot(motion, motion);
+	if (!Math::is_finite(motion_squared) ||
+			!Math::is_finite(center.x) || !Math::is_finite(center.y) || !Math::is_finite(center.z)) {
+		return PhysicsCCDCapsulePairTOIResult::FALLBACK;
+	}
+	if (!(motion_squared > 0.0)) {
 		return PhysicsCCDCapsulePairTOIResult::MISS;
 	}
 
@@ -176,10 +184,16 @@ _FORCE_INLINE_ PhysicsCCDCapsulePairTOIResult physics_ccd_capsule_pair_toi(
 	const double segment_dot = dot(segment_a, segment_b);
 	const Vec3 start_delta = center - axis_a * p_half_segment_a + axis_b * p_half_segment_b;
 	const double radius_sq = p_combined_radius * p_combined_radius;
+	if (!Math::is_finite(radius_sq)) {
+		return PhysicsCCDCapsulePairTOIResult::FALLBACK;
+	}
 	const Distance start = distance_at(start_delta, motion, segment_a, segment_b,
 			segment_a_squared, segment_b_squared, segment_dot, 0.0);
+	if (!Math::is_finite(start.squared) || !Math::is_finite(start.derivative_half)) {
+		return PhysicsCCDCapsulePairTOIResult::FALLBACK;
+	}
 	if (!(start.squared > radius_sq)) {
-		return PhysicsCCDCapsulePairTOIResult::FALLBACK; // Initially contacting or invalid.
+		return PhysicsCCDCapsulePairTOIResult::FALLBACK; // Initially contacting.
 	}
 	if (start.derivative_half >= 0.0) {
 		return PhysicsCCDCapsulePairTOIResult::MISS; // Squared distance is convex.
@@ -196,6 +210,9 @@ _FORCE_INLINE_ PhysicsCCDCapsulePairTOIResult physics_ccd_capsule_pair_toi(
 	double minimum_fraction = 1.0;
 	const Distance end = distance_at(start_delta, motion, segment_a, segment_b,
 			segment_a_squared, segment_b_squared, segment_dot, 1.0);
+	if (!Math::is_finite(end.squared) || !Math::is_finite(end.derivative_half)) {
+		return PhysicsCCDCapsulePairTOIResult::FALLBACK;
+	}
 	if (end.derivative_half > 0.0) {
 		double low = 0.0;
 		double high = 1.0;
@@ -214,6 +231,9 @@ _FORCE_INLINE_ PhysicsCCDCapsulePairTOIResult physics_ccd_capsule_pair_toi(
 
 	const Distance minimum = distance_at(start_delta, motion, segment_a, segment_b,
 			segment_a_squared, segment_b_squared, segment_dot, minimum_fraction);
+	if (!Math::is_finite(minimum.squared)) {
+		return PhysicsCCDCapsulePairTOIResult::FALLBACK;
+	}
 	if (!(minimum.squared <= radius_sq)) {
 		return minimum.squared > radius_sq ? PhysicsCCDCapsulePairTOIResult::MISS : PhysicsCCDCapsulePairTOIResult::FALLBACK;
 	}
