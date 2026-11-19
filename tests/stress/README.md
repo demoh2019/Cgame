@@ -111,6 +111,40 @@ python3 tests/stress/scale_sweep.py \
 | 2D transform propagation | `canvas_transform_2d` | Wide CanvasItem subtree; separate parent transform mutation and descendant global-transform rebuild times |
 | SceneTree notification dispatch | `process_dispatch` | Thousands of native Nodes with mixed ordinary/internal process flags and frame/physics time monitors |
 
+## Million-body sparse physics benchmark (opt-in)
+
+`physics_rid_sparse_2d` and `physics_rid_sparse_3d` construct collision-shaped
+rigid bodies directly in dedicated PhysicsServer spaces, avoiding SceneTree and
+node-per-body costs. Each body is active (sleep disabled), gravity is zero, and
+bodies are spaced far enough apart to avoid collisions. The scenarios separately
+report creation, physics frame, and RID cleanup costs; the harness also records
+peak process-tree RSS and enforces timeout/RSS limits.
+
+For a manageable initial sample:
+
+```bash
+python3 tests/stress/run.py --godot ./bin/godot.linuxbsd.editor.dev.x86_64 \
+  --case physics_rid_sparse_2d,physics_rid_sparse_3d \
+  --scale 16 --frames 90 --repeats 5 \
+  --output out/physics-rid-sparse.json
+```
+
+**Only on an isolated, sufficiently provisioned host:** scale 977 constructs
+1,000,448 active rigid bodies in each case. The process can consume substantial
+RAM and time. Use strict limits and compare runs on the same machine.
+
+```bash
+python3 tests/stress/run.py --godot ./bin/godot.linuxbsd.editor.dev.x86_64 \
+  --case physics_rid_sparse_2d,physics_rid_sparse_3d \
+  --scale 977 --frames 30 --repeats 1 --timeout 1800 \
+  --rss-limit-mib 8192 --output out/physics-million.json
+```
+
+This isolates **sparse** solver and broadphase overhead. It does **not** imply
+million-body real-time stability in densely colliding scenes, simulate any
+fluid/material physics, or cover rendering. Run dense-contact and joint-chain
+scenarios separately for numerical stability, tunneling and contact throughput.
+
 ## Presets and safety
 
 | Preset | Scale | Physics/render frames | Repeats per case | Per-process timeout | RSS cap |
