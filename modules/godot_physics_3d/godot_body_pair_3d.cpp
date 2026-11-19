@@ -534,7 +534,9 @@ bool GodotBodyPair3D::pre_solve(real_t p_step) {
 
 	real_t max_penetration = space->get_contact_max_allowed_penetration();
 
-	real_t bias = 0.8;
+	// Respect the space's configurable penetration-correction coefficient.
+	// Shape-specific custom bias below still takes precedence.
+	real_t bias = space->get_contact_bias();
 
 	GodotShape3D *shape_A_ptr = A->get_shape(shape_A);
 	GodotShape3D *shape_B_ptr = B->get_shape(shape_B);
