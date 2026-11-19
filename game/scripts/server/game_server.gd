@@ -689,6 +689,8 @@ func cmd_loot(peer_id: int, entity_id: int) -> Dictionary:
 			# Whatever does not fit stays on the ground next to the crate.
 			_make_bag(Vector3(crate["x"], crate["y"], crate["z"]), left)
 		opened_crates[entity_id] = time + 600.0
+		if Contracts.record_crate(player.contract_state, entity_id):
+			player.dirty_character = true
 		events.append({"type": "crate", "peer": peer_id, "id": entity_id})
 		return {"ok": true}
 	return {"ok": false, "reason": "nothing_there"}

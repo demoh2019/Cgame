@@ -18,7 +18,7 @@ func run(t) -> void:
 	t.current = "contract definitions and validation"
 	var empty: Dictionary = Contracts.empty_state()
 	t.check(Contracts.valid_state(empty), "fresh journal is valid")
-	t.eq(Contracts.ORDER.size(), 3, "three unique missions are available")
+	t.eq(Contracts.ORDER.size(), 4, "four unique missions are available")
 	for id in Contracts.ORDER:
 		t.check(Contracts.CATALOG.has(id), "valid mission " + id)
 		var rule: Dictionary = Contracts.CATALOG[id]
@@ -44,7 +44,7 @@ func run(t) -> void:
 	t.current = "hub authorization and resource delivery"
 	var server := GameServer.new(WorldGen.new(42), 9)
 	var player = server.add_player(91, "Quest Survivor")
-	player.position = Vector3(120.0, world.height_at(120.0, 120.0), 120.0)
+	player.position = Vector3(120.0, server.world.height_at(120.0, 120.0), 120.0)
 	t.eq(server.cmd_contract(91, "accept")["reason"], "no_station",
 		"contract requests require a real hub location")
 	_at_hub(server, player)
@@ -107,19 +107,65 @@ func run(t) -> void:
 	t.eq(player.contract_state["progress"], 2, "second unique zombie completes objective")
 	t.check(server.cmd_contract(91, "claim")["ok"], "two kills give patrol reward")
 	t.eq(player.inventory.count("silver"), 65, "all three rewards sum correctly")
-	t.eq(server.cmd_contract(91, "accept")["reason"], "all_complete", "no unlimited mission resets")
-	t.eq(player.contract_state["completed"].size(), 3, "finite completion history")
+	t.check(server.cmd_contract(91, "accept")["ok"], "open fourth ruin expedition")
+	t.eq(player.contract_state["active"], "ruin_recovery", "ruin task becomes active")
+	t.eq(server.cmd_contract(91, "claim")["reason"], "incomplete", "no payout without distinct crates")
+	t.check(not Contracts.record_crate(Contracts.empty_state(), 12), "inactive journal ignores crate events")
+	var crates: Array = []
+	for cx in range(8, 30):
+		if crates.size() >= 2:
+			break
+		for cz in range(8, 30):
+			if crates.size() >= 2:
+				break
+			for found in server.world.chunk(Vector2i(cx, cz))["crates"]:
+				if not server.world.is_water(float(found["x"]), float(found["z"])):
+					crates.append(found)
+					break
+	t.eq(crates.size(), 2, "world contains two distinct ruin caches")
+	if crates.size() == 2:
+		for i in range(2):
+			var cache: Dictionary = crates[i]
+			var x: float = float(cache["x"])
+			var z: float = float(cache["z"])
+			player.position = Vector3(x - 1.0, server.world.height_at(x - 1.0, z), z)
+			t.check(server.cmd_loot(91, int(cache["id"]))["ok"], "server authorizes ruin cache opening")
+			t.eq(player.contract_state["progress"], i + 1, "opening advances contract once")
+			t.eq(server.cmd_loot(91, int(cache["id"]))["reason"], "empty", "cache cannot reopen instantly")
+			t.eq(player.contract_state["progress"], i + 1, "duplicate loot does not credit progress")
+		server.opened_crates.erase(int(crates[0]["id"]))
+		var old: Dictionary = crates[0]
+		player.position = Vector3(float(old["x"]) - 1.0, 0.0, float(old["z"]))
+		t.check(server.cmd_loot(91, int(old["id"]))["ok"], "same physical cache can refill")
+		t.eq(player.contract_state["progress"], 2, "refilled cache cannot count a second time")
+		var journal_save: Dictionary = server.character_data(player)
+		t.check(server.apply_character(player, journal_save), "cache identifiers persist in a saved character")
+		t.eq(player.contract_state["crate_ids"].size(), 2, "two unique IDs survive reload")
+		player.position = Vector3(150.0, server.world.height_at(150.0, 0.0), 0.0)
+		t.eq(server.cmd_contract(91, "claim")["reason"], "no_station", "offsite claim denied")
+		_at_hub(server, player)
+		var before_silver: int = player.inventory.count("silver")
+		var before_ammo: int = player.inventory.count("ammo_9mm")
+		t.check(server.cmd_contract(91, "claim")["ok"], "two distinct caches complete expedition")
+		t.eq(player.inventory.count("silver"), before_silver + 60, "silver payout is exactly 60")
+		t.eq(player.inventory.count("ammo_9mm"), before_ammo + 10, "payout includes ten bullets")
+		t.eq(server.cmd_contract(91, "claim")["reason"], "no_active", "claim cannot repeat")
+	t.eq(server.cmd_contract(91, "accept")["reason"], "all_complete", "finite mission chain ends")
+	t.eq(player.contract_state["completed"].size(), 4, "four tasks in completion history")
 
 	t.current = "corrupt saves reject all state changes"
 	var original: Dictionary = server.character_data(player)
 	invalid = original.duplicate(true)
 	invalid["contracts"]["completed"] = ["camp_supplies", "camp_supplies"]
 	t.check(not server.apply_character(player, invalid), "duplicate completed ID rejected")
-	t.eq(player.contract_state["completed"].size(), 3, "failed save does not change journal")
+	t.eq(player.contract_state["completed"].size(), 4, "failed save does not change journal")
 	t.eq(player.inventory.count("silver"), 65, "failed save does not change wallet")
 	invalid = original.duplicate(true)
 	invalid["contracts"]["active"] = "hacked_rewards"
 	t.check(not server.valid_character_data(invalid), "unrecognized client-forged task rejected")
+	var invalid_crates: Dictionary = original.duplicate(true)
+	invalid_crates["contracts"]["crate_ids"] = ["forged"]
+	t.check(not server.valid_character_data(invalid_crates), "completed journal cannot hold active cache IDs")
 	var legacy: Dictionary = original.duplicate(true)
 	legacy.erase("contracts")
 	t.check(server.apply_character(player, legacy), "pre-contract Nakama v1 save still loads")

@@ -6,7 +6,7 @@ extends RefCounted
 const Inventory = preload("res://scripts/shared/inventory.gd")
 const SaveValidation = preload("res://scripts/shared/save_validation.gd")
 
-const ORDER := ["camp_supplies", "weapon_training", "infected_patrol"]
+const ORDER := ["camp_supplies", "weapon_training", "infected_patrol", "ruin_recovery"]
 const CATALOG := {
 	"camp_supplies": {
 		"title": "Supply the camp",
@@ -29,15 +29,23 @@ const CATALOG := {
 		"kills": 2,
 		"reward": {"silver": 35, "canned_food": 2},
 	},
+	"ruin_recovery": {
+		"title": "Recover supplies from the ruins",
+		"deliver": {},
+		"possess": {},
+		"kills": 0,
+		"crates": 2,
+		"reward": {"silver": 60, "ammo_9mm": 10},
+	},
 }
 
 
 static func empty_state() -> Dictionary:
-	return {"active": "", "progress": 0, "completed": []}
+	return {"active": "", "progress": 0, "completed": [], "crate_ids": []}
 
 
 static func valid_state(data: Variant) -> bool:
-	if not (data is Dictionary) or data.size() != 3:
+	if not (data is Dictionary) or (data.size() != 3 and data.size() != 4):
 		return false
 	var active: Variant = data.get("active")
 	var progress: Variant = data.get("progress")
@@ -57,7 +65,24 @@ static func valid_state(data: Variant) -> bool:
 		return false
 	if active == "" and int(progress) != 0:
 		return false
-	if active != "" and int(progress) > int(CATALOG[active]["kills"]):
+	var visited: Variant = data.get("crate_ids", [])
+	if not (visited is Array) or visited.size() > 2:
+		return false
+	var ids: Dictionary = {}
+	for key in visited:
+		if not (key is String) or key.is_empty() or key.length() > 24 or ids.has(key):
+			return false
+		ids[key] = true
+	if active != "":
+		var goal: int = int(CATALOG[active]["kills"]) + int(CATALOG[active].get("crates", 0))
+		if int(progress) > goal:
+			return false
+		if active == "ruin_recovery":
+			if visited.size() != int(progress):
+				return false
+		elif not visited.is_empty():
+			return false
+	elif not visited.is_empty():
 		return false
 	return true
 
@@ -74,6 +99,8 @@ static func description(state: Dictionary) -> String:
 	var label: String = str(rule["title"])
 	if int(rule["kills"]) > 0:
 		label += " (%d/%d infected)" % [int(state["progress"]), int(rule["kills"])]
+	elif int(rule.get("crates", 0)) > 0:
+		label += " (%d/%d distinct ruin caches)" % [int(state["progress"]), int(rule["crates"])]
 	return label
 
 
@@ -88,6 +115,7 @@ static func accept(state: Dictionary) -> Dictionary:
 	var next: String = ORDER[done.size()]
 	state["active"] = next
 	state["progress"] = 0
+	state["crate_ids"] = []
 	return {"ok": true, "active": next, "title": str(CATALOG[next]["title"])}
 
 
@@ -104,6 +132,22 @@ static func record_kill(state: Dictionary) -> bool:
 	return true
 
 
+## One server-confirmed ruin cache only counts once for the character,
+## even if the physical cache refills later.
+static func record_crate(state: Dictionary, crate_id: int) -> bool:
+	if not valid_state(state) or str(state["active"]) != "ruin_recovery":
+		return false
+	var key: String = str(crate_id)
+	var seen: Array = state.get("crate_ids", [])
+	var required: int = int(CATALOG["ruin_recovery"]["crates"])
+	if seen.has(key) or int(state["progress"]) >= required:
+		return false
+	seen.append(key)
+	state["crate_ids"] = seen
+	state["progress"] = int(state["progress"]) + 1
+	return true
+
+
 static func claim(carried, state: Dictionary) -> Dictionary:
 	if not valid_state(state):
 		return {"ok": false, "reason": "invalid_state"}
@@ -111,7 +155,7 @@ static func claim(carried, state: Dictionary) -> Dictionary:
 	if active == "":
 		return {"ok": false, "reason": "no_active"}
 	var rule: Dictionary = CATALOG[active]
-	if int(state["progress"]) < int(rule["kills"]):
+	if int(state["progress"]) < int(rule["kills"]) + int(rule.get("crates", 0)):
 		return {"ok": false, "reason": "incomplete"}
 
 	# Use an independent copy to ensure a partial debit or a full backpack
@@ -134,4 +178,5 @@ static func claim(carried, state: Dictionary) -> Dictionary:
 	completed.append(active)
 	state["active"] = ""
 	state["progress"] = 0
+	state["crate_ids"] = []
 	return {"ok": true, "completed": active, "title": str(rule["title"]), "reward": rule["reward"].duplicate(true)}

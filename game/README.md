@@ -400,3 +400,15 @@ walls and defense against recycled connection IDs. This is not yet a
 multi-shard world database: crash recovery is limited to the last successful
 autosave, and account-based ownership requires an authenticated identity.
 
+
+## Ruin recovery: fourth outpost contract
+
+Complete the existing three camp missions to unlock a **two-cache ruins
+expedition**. Opening distinct, reachable ruin supply crates advances the
+objective on the server. Repeated requests, loot bags, and refilling the
+same cache do not advance the mission again. The character's visited crate
+IDs are saved, and legacy version-1 accounts with the previous three-field
+contract journal remain compatible. At the safe hub board, claim **60 silver
+and 10 rounds of 9mm ammunition**. The common `run_all.gd` suite now runs
+`test_contracts.gd` and covers quest progress, replay, persistence and
+validation. This is game logic and needs no Cgame engine API changes.
