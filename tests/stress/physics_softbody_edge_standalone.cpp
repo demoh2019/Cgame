@@ -7,6 +7,7 @@
 //   tests/stress/physics_softbody_edge_standalone.cpp -o /tmp/soft_edge_test
 // /tmp/soft_edge_test
 #include "servers/physics_softbody_self_collision.h"
+#include "servers/physics_softbody_ccd.h"
 
 #include <cstdint>
 #include <cstdio>
@@ -62,6 +63,29 @@ int main() {
 	ok &= check(physics_softbody_project_self_contact(point, ta, tb, tc,
 			1, 0, 0, 0, 0.1f, 0, point) && Math::abs(point.z - 0.1f) < 0.00002f,
 			"existing vertex-face projection still works");
+
+	// Both endpoints are separated at t=1, but their linear trajectories
+	// cross in between: these are the tunneling cases CCD was added for.
+	{
+		const Vector3 a(0, 0, 0), b(2, 0, 0), c(0, 2, 0);
+		real_t toi = -1.0f;
+		ok &= check(physics_softbody_ccd_point_triangle(
+				Vector3(0.5f, 0.5f, 1), Vector3(0.5f, 0.5f, -1),
+				a, a, b, b, c, c, 0.05f, toi) &&
+				toi > 0.45f && toi < 0.5f, "swept point penetrates static triangle");
+		const Vector3 p(-1, 0, 0), q(1, 0, 0);
+		const Vector3 r(0, -1, 1), w(0, 1, 1);
+		toi = -1.0f;
+		ok &= check(physics_softbody_ccd_edge_edge(
+				p, p, q, q, r, r + Vector3(0, 0, -2),
+				w, w + Vector3(0, 0, -2), 0.05f, toi) &&
+				toi > 0.45f && toi < 0.5f, "swept crossed thin edges");
+		toi = 0.75f;
+		ok &= check(!physics_softbody_ccd_point_triangle(
+				Vector3(0.5f, 0.5f, 0.5f), Vector3(0.5f, 0.5f, 0.3f),
+				a, a, b, b, c, c, 0.05f, toi) && toi == 0.75f,
+				"near miss does not create CCD contact");
+	}
 
 	// For random finite segments, the analytical closest pair cannot be
 	// farther apart than ANY sampled candidate on a coarse 9x9 grid.
