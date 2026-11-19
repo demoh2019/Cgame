@@ -24,7 +24,7 @@ const CASES := [
 	"packed_arrays", "sorting", "animation_tracks", "physics_raycast_2d",
 	"physics_raycast_3d", "render_multimesh_3d",
 	"object_lifecycle", "scene_churn",
-	"scene_reparent", "resource_roundtrip", "audio_bus_churn",
+	"scene_reparent", "scene_move", "resource_roundtrip", "audio_bus_churn",
 	"bitmap_rects", "bitmap_pipeline", "bitmap_morphology",
 	"curve_tessellation_2d", "curve_tessellation_3d", "curve_bake", "curve_nearest",
 ]
@@ -201,6 +201,8 @@ func _run_case(test_case: String, scale: int, frames: int, seed: int) -> Diction
 			return await _scene_churn(scale)
 		"scene_reparent":
 			return PressureStress.new().scene_reparent(self, scale)
+		"scene_move":
+			return PressureStress.new().scene_move(self, scale)
 		"resource_roundtrip":
 			return PressureStress.new().resource_roundtrip(scale)
 		"audio_bus_churn":
