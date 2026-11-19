@@ -238,7 +238,12 @@ static func _build_items() -> void:
 		"cure": 100.0, "stack": 5, "value": 80})
 	# Days After loot: only found while scavenging ruins.
 	_add_item("pistol", {"name": "Pistol", "kind": "weapon", "weapon": "ranged", "tier": 3, "damage": 22.0, "cooldown": 0.45, "ammo": "ammo_9mm", "value": 150})
-	_add_item("ammo_9mm", {"name": "9mm Ammo", "kind": "ammo", "stack": 60, "value": 2})
+	# Ranged fighting can be sustained through scavenging and T2 metalworking.
+	# Recipes use the existing authoritative bench and crafting mastery rules.
+	_add_item("ammo_9mm", {"name": "9mm Ammo", "kind": "ammo",
+		"tier": 2, "stack": 60, "value": 2})
+	_add_recipe("ammo_9mm", "ammo_9mm", 12,
+		{"scrap": 2, "bar_2": 1}, "workbench", 4.0)
 	_add_item("scrap", {"name": "Scrap Metal", "kind": "resource", "tier": 2, "stack": 100, "value": 3})
 	_add_item("silver", {"name": "Silver", "kind": "currency", "stack": 100000, "value": 1})
 
