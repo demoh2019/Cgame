@@ -145,7 +145,7 @@ def existing_keys(items, source=SOURCE_DEFAULT):
         for match in MARKER_RE.finditer(body):
             if match.group(1) == source:
                 found.add(source_key(match.group(2), int(match.group(3))))
-        if item.get("pull_request"):
+        if item.get("pull_request") is not None:
             for match in SOURCE_LINK_RE.finditer(body):
                 found.add(source_key(match.group(1), int(match.group(2))))
     return found
