@@ -369,3 +369,34 @@ This is a **first NPC quest chain**, not a procedural quest generator,
 guild mission board, live events or multiplayer marketplace. No missing
 generic Cgame engine primitive was identified; reusable networking,
 inventory, movement and persistence APIs already provide the foundation.
+
+## Durable server-authoritative barricades
+
+The canonical dedicated server now checkpoints **authenticated-account
+barricades** between restarts. Owner IDs are kept in the server-only world
+checkpoint and are *not sent to clients*. On reconnect, the same authenticated
+account can repair or dismantle its structures using its new network peer ID;
+a recycled guest peer ID cannot claim someone else's walls. Guest/anonymous
+barricades remain session-only until they have a stable account identity.
+
+By default, the dedicated server loads a seed-specific file such as
+`user://albion_after_world_1337.json`. Changes are saved every 45 seconds
+and on graceful `--quit-after` shutdown. A bad file refuses server startup:
+schema, world seed, account IDs, health, stable IDs, placement collision,
+protected areas, terrain slope, overlap and ownership caps are validated
+**before** any collision blocker is installed. Saves use a temporary file
+and rename, rather than truncating an existing valid checkpoint.
+
+Use an explicit save file or disable persistence for disposable tests:
+
+```bash
+godot --headless --path game --script res://scripts/server/server_main.gd -- --seed 1337 --world-save user://my_world.json
+godot --headless --path game --script res://scripts/server/server_main.gd -- --no-world-save --quit-after 3
+```
+
+`test_world_persistence.gd` checks durable walls, owner reconnect,
+collision, rejection of damaged and foreign-seed saves, session-only guest
+walls and defense against recycled connection IDs. This is not yet a
+multi-shard world database: crash recovery is limited to the last successful
+autosave, and account-based ownership requires an authenticated identity.
+

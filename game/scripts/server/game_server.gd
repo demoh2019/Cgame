@@ -66,7 +66,8 @@ var zombies: Dictionary = {} # zombie id -> Zombie
 var depleted: Dictionary = {} # node id -> time it comes back
 var opened_crates: Dictionary = {} # crate id -> time it refills
 var spawn_state: Dictionary = {} # spawn id -> {"zombie": id or -1, "next": time}
-var barricades: Dictionary = {} # Session-only authoritative player structures.
+var barricades: Dictionary = {} # Server-owned structures; authenticated walls may persist.
+var world_structure_revision: int = 0
 var bags: Dictionary = {} # bag id -> {"id", "x","y","z", "items": {id: n}, "expires": t}
 var events: Array = [] # Things that happened this tick, for the network layer to announce.
 var _next_id: int = 5_000_000_000
@@ -97,6 +98,12 @@ func add_player(peer_id: int, p_name: String, p_user_id: String = "", saved: Dic
 	player.progression = Progression.new()
 	player.contract_state = Contracts.empty_state()
 	players[peer_id] = player
+	# Bind restored account-owned structures to this authenticated session.
+	# Never match a stale numerical peer ID in place of the account identity.
+	if not p_user_id.is_empty():
+		for wall in barricades.values():
+			if str(wall.get("owner_account", "")) == p_user_id:
+				wall["owner"] = peer_id
 	if saved.is_empty() or not apply_character(player, saved):
 		_spawn_player(player)
 	else:
@@ -211,6 +218,11 @@ func valid_character_data(data: Dictionary) -> bool:
 
 
 func remove_player(peer_id: int) -> void:
+	var player: Player = players.get(peer_id)
+	if player != null and not player.user_id.is_empty():
+		for wall in barricades.values():
+			if str(wall.get("owner_account", "")) == player.user_id:
+				wall["owner"] = -1
 	players.erase(peer_id)
 
 
@@ -456,6 +468,7 @@ func cmd_build(peer_id: int, x: float, z: float) -> Dictionary:
 		"hp": Structures.MAX_HEALTH, "owner": peer_id,
 		"owner_account": player.user_id}
 	barricades[id] = item
+	world_structure_revision += 1
 	world.add_dynamic_blocker(id, x, z, Structures.RADIUS)
 	player.dirty_inventory = true
 	player.dirty_character = true
@@ -484,6 +497,7 @@ func cmd_repair(peer_id: int, id: int) -> Dictionary:
 		player.inventory.remove(item_id, int(Structures.REPAIR_COST[item_id]))
 	item["hp"] = minf(Structures.MAX_HEALTH, float(item["hp"]) + Structures.REPAIR_HEALTH)
 	barricades[id] = item
+	world_structure_revision += 1
 	player.dirty_inventory = true
 	player.dirty_character = true
 	return {"ok": true, "id": id, "hp": float(item["hp"])}
@@ -513,6 +527,7 @@ func cmd_dismantle(peer_id: int, id: int) -> Dictionary:
 	# Atomic gameplay commit: a failed attempt cannot erase a barricade or mint loot.
 	player.inventory.load_dict(trial.to_dict())
 	barricades.erase(id)
+	world_structure_revision += 1
 	world.remove_dynamic_blocker(id)
 	player.dirty_inventory = true
 	player.dirty_character = true
@@ -527,6 +542,7 @@ func damage_barricade(id: int, damage: float) -> bool:
 		return false
 	var item: Dictionary = barricades[id]
 	item["hp"] = maxf(0.0, float(item["hp"]) - damage)
+	world_structure_revision += 1
 	if float(item["hp"]) <= 0.0:
 		barricades.erase(id)
 		world.remove_dynamic_blocker(id)
