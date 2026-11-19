@@ -104,10 +104,24 @@ _FORCE_INLINE_ bool physics_speculative_sphere_contact(
 		// although their displacement during a short step is representable.
 		relative_motion = p_velocity_a * p_step - p_velocity_b * p_step;
 	}
+	if (!relative_motion.is_finite()) {
+		return false;
+	}
+	// Necessary condition for a sphere hit: even the projected motion along
+	// the initial separation normal must close the gap by the end of this
+	// step. Near-stationary pairs can skip the costlier exact TOI query.
+	// Use a conservative floating-point slack for boundary contacts.
+	const real_t radial_travel = relative_motion.dot(normal);
+	if (Math::is_finite(radial_travel)) {
+		const double travel = double(radial_travel);
+		const double slack = double(CMP_EPSILON) * MAX(1.0, Math::abs(travel));
+		if (travel + slack < gap) {
+			return false;
+		}
+	}
 	double impact_fraction = 0.0;
-	if (!relative_motion.is_finite() ||
-			!physics_ccd_sphere_toi(-center_delta, relative_motion,
-					double(p_radius_a) + double(p_radius_b), impact_fraction)) {
+	if (!physics_ccd_sphere_toi(-center_delta, relative_motion,
+				double(p_radius_a) + double(p_radius_b), impact_fraction)) {
 		return false;
 	}
 	const Vector point_a = p_center_a + normal * p_radius_a;
