@@ -1,0 +1,27 @@
+name: Physics XPBD dihedral bending contracts
+
+on:
+  pull_request:
+    paths:
+      - "servers/physics_xpbd_dihedral.h"
+      - "servers/physics_3d/physics_server_3d.cpp"
+      - "modules/godot_physics_3d/godot_space_3d.cpp"
+      - "modules/godot_physics_3d/godot_space_3d.h"
+      - "modules/godot_physics_3d/godot_soft_body_3d.cpp"
+      - "modules/godot_physics_3d/godot_soft_body_3d.h"
+      - "tests/servers/test_physics_xpbd_dihedral.cpp"
+      - "tests/stress/test_physics_xpbd_dihedral.py"
+      - ".github/workflows/physics-xpbd-dihedral.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  dihedral-contracts:
+    name: XPBD dihedral source contracts
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Check default-off settings, manifold topology and solver invariants
+        run: python3 -m unittest discover -s tests/stress -p 'test_physics_xpbd_dihedral.py' -v
