@@ -159,7 +159,10 @@ class SoftSelfPositionProjectionTests(unittest.TestCase):
     def test_random_multiple_contacts_have_safe_global_cap(self):
         rng = random.Random(327)
         count = 48
-        inverse = [rng.choice([0., .4, .8, 1.]) for _ in range(count)]
+        # Test center-of-mass invariance on fully movable contacts.
+        # Pinned vertices can exchange momentum with the external anchors,
+        # which is correctly covered by the separate pinned-contact test.
+        inverse = [rng.choice([.4, .8, 1.]) for _ in range(count)]
         all_deltas = [(0.,0.,0.) for _ in range(count)]
         for _ in range(240):
             indices = rng.sample(range(count), 4)
