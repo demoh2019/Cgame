@@ -56,6 +56,38 @@ TEST_CASE("[GodotPhysics] Conservative narrowphase recycling checks") {
 	CHECK_FALSE(cache.can_reuse(0, 10, true, 1, false));
 }
 
+TEST_CASE("[GodotPhysics] Recycle exact separated SAT/GJK pairs") {
+	GodotPhysicsContactRecycling cache;
+	// An uninitialized pair must always reach narrowphase.
+	CHECK_FALSE(cache.can_reuse_separation(7, 11, false));
+
+	cache.remember(7, 11, false); // Actual narrowphase found no contact.
+	CHECK(cache.can_reuse_separation(7, 11, false));
+	CHECK_FALSE(cache.can_reuse(7, 11, true, 2, false));
+	CHECK_FALSE(cache.can_reuse_separation(8, 11, false)); // Body A rotated.
+	CHECK_FALSE(cache.can_reuse_separation(7, 12, false)); // Body B changed.
+	CHECK_FALSE(cache.can_reuse_separation(7, 11, true)); // CCD must run.
+	CHECK_FALSE(cache.can_reuse_separation(0, 11, false)); // Invalid revision.
+
+	// A new contact must replace the cached negative result.
+	cache.remember(7, 11, true);
+	CHECK_FALSE(cache.can_reuse_separation(7, 11, false));
+	CHECK(cache.can_reuse(7, 11, true, 2, false));
+
+	// Clearing one result does not accidentally validate another generation.
+	cache.remember(9, 12, false);
+	CHECK_FALSE(cache.can_reuse_separation(7, 11, false));
+	CHECK(cache.can_reuse_separation(9, 12, false));
+	cache.remember(0, 12, false);
+	CHECK_FALSE(cache.can_reuse_separation(0, 12, false));
+
+	// The legacy two-argument overload records a potentially colliding
+	// manifold and must not falsely authorize a separated-pair shortcut.
+	cache.remember(10, 13);
+	CHECK_FALSE(cache.can_reuse_separation(10, 13, false));
+	CHECK(cache.can_reuse(10, 13, true, 1, false));
+}
+
 } // namespace TestGodotPhysicsContactRecycling
 
 #ifdef MODULE_GODOT_PHYSICS_2D_ENABLED
