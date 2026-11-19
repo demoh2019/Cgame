@@ -5,6 +5,7 @@ extends Node3D
 const LAB_2D := "res://lab_2d.tscn"
 const INTERACTIVE_ENV_3D = preload("res://environment_3d.gd")
 const ADVANCED_PHYSICS_3D = preload("res://advanced_3d.gd")
+const PBF_WATER_3D = preload("res://pbf_water_3d.gd")
 const ZONES_X := [-28.0, -14.0, 0.0, 14.0, 28.0]
 
 var _camera: Camera3D
@@ -42,6 +43,9 @@ func _ready() -> void:
     advanced.name = "AdvancedPhysics3D"
     add_child(advanced)
     advanced.setup()
+    var pbf_water = PBF_WATER_3D.new()
+    pbf_water.name = "PBFWaterDemo"
+    add_child(pbf_water)
 
 
 func _make_environment() -> void:
@@ -513,6 +517,7 @@ func _process(delta: float) -> void:
 func _cycle_camera_station() -> void:
     var targets := [
         Vector3(0, 2.0, -11.0),
+        Vector3(-28, 2.0, -11.0),
         Vector3(28, 2.0, -11.0),
         Vector3(-21, 2.5, 24.0),
         Vector3(4, 3.0, 24.0),
