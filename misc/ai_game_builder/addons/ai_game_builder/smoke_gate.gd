@@ -39,8 +39,11 @@ static func validate_targets(value: Variant) -> Dictionary:
 			return {"ok": false, "error": "Approved file is unreadable or too large: %s" % path}
 		var content := file.get_as_text()
 		file.close()
-		if content.contains("@tool") and relative.get_extension().to_lower() == "gd":
-			return {"ok": false, "error": "Generated editor-executable script is forbidden: %s" % path}
+		var ext := relative.get_extension().to_lower()
+		if ["gd", "tscn", "tres"].has(ext) and content.contains("@tool"):
+			return {"ok": false, "error": "Editor-executable generated resource is forbidden: %s" % path}
+		if ext == "gd" and (content.contains("OS.execute(") or content.contains("OS.create_process(")):
+			return {"ok": false, "error": "Generated process-launching script is forbidden: %s" % path}
 		paths.append(path)
 
 	if not paths.has(Validator.OUTPUT_PREFIX + "main.tscn"):
