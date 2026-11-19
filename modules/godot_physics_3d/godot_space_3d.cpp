@@ -1256,6 +1256,9 @@ GodotSpace3D::GodotSpace3D() {
 	contact_max_separation = GLOBAL_GET("physics/3d/solver/contact_max_separation");
 	contact_max_allowed_penetration = GLOBAL_GET("physics/3d/solver/contact_max_allowed_penetration");
 	contact_bias = GLOBAL_GET("physics/3d/solver/default_contact_bias");
+	// Read once at space creation, avoiding ProjectSettings lookups in the hot contact loop.
+	const real_t configured_restitution_threshold = GLOBAL_GET("physics/3d/solver/restitution_velocity_threshold");
+	restitution_velocity_threshold = MAX((real_t)0.0, configured_restitution_threshold);
 
 	broadphase = GodotBroadPhase3D::create_func();
 	broadphase->set_pair_callback(_broadphase_pair, this);
