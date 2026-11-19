@@ -479,10 +479,16 @@ signed char String::nocasecmp_to(const String &p_str) const {
 			return -1;
 		} else if (*that_str == 0) { // If at end of other, and not of this, we are greater.
 			return 1;
-		} else if (_find_upper(*this_str) < _find_upper(*that_str)) { // If current character in this is less, we are less.
-			return -1;
-		} else if (_find_upper(*this_str) > _find_upper(*that_str)) { // If current character in this is greater, we are greater.
-			return 1;
+		} else {
+			// Case fold each character once; ASCII skips the Unicode table lookup.
+			const char32_t this_upper = String::char_uppercase(*this_str);
+			const char32_t that_upper = String::char_uppercase(*that_str);
+			if (this_upper < that_upper) {
+				return -1;
+			}
+			if (this_upper > that_upper) {
+				return 1;
+			}
 		}
 
 		this_str++;
@@ -652,9 +658,12 @@ static _FORCE_INLINE_ signed char naturalnocasecmp_to_base(const char32_t *p_thi
 			} else if (is_digit(*p_that_str)) {
 				return 1;
 			} else {
-				if (_find_upper(*p_this_str) < _find_upper(*p_that_str)) { // If current character in this is less, we are less.
+				const char32_t this_upper = String::char_uppercase(*p_this_str);
+				const char32_t that_upper = String::char_uppercase(*p_that_str);
+				if (this_upper < that_upper) {
 					return -1;
-				} else if (_find_upper(*p_this_str) > _find_upper(*p_that_str)) { // If current character in this is greater, we are greater.
+				}
+				if (this_upper > that_upper) {
 					return 1;
 				}
 
@@ -3530,8 +3539,8 @@ bool String::_base_is_subsequence_of(const String &p_string, bool p_case_insensi
 	for (; *src && *tgt; tgt++) {
 		bool match = false;
 		if (p_case_insensitive) {
-			char32_t srcc = _find_lower(*src);
-			char32_t tgtc = _find_lower(*tgt);
+			char32_t srcc = String::char_lowercase(*src);
+			char32_t tgtc = String::char_lowercase(*tgt);
 			match = srcc == tgtc;
 		} else {
 			match = *src == *tgt;
@@ -3593,17 +3602,35 @@ float String::similarity(const String &p_string) const {
 }
 
 static bool _wildcard_match(const char32_t *p_pattern, const char32_t *p_string, bool p_case_sensitive) {
-	switch (*p_pattern) {
-		case '\0':
-			return !*p_string;
-		case '*':
-			return _wildcard_match(p_pattern + 1, p_string, p_case_sensitive) || (*p_string && _wildcard_match(p_pattern, p_string + 1, p_case_sensitive));
-		case '?':
-			return *p_string && (*p_string != '.') && _wildcard_match(p_pattern + 1, p_string + 1, p_case_sensitive);
-		default:
+	// Iterative wildcard matching avoids exponential recursive exploration of
+	// overlapping '*' branches and keeps stack/heap usage constant.
+	const char32_t *star_pattern = nullptr;
+	const char32_t *star_string = nullptr;
 
-			return (p_case_sensitive ? (*p_string == *p_pattern) : (_find_upper(*p_string) == _find_upper(*p_pattern))) && _wildcard_match(p_pattern + 1, p_string + 1, p_case_sensitive);
+	while (*p_string) {
+		if (*p_pattern == '*') {
+			star_pattern = ++p_pattern;
+			star_string = p_string;
+			continue;
+		}
+		if ((*p_pattern == '?' && *p_string != '.') ||
+				(*p_pattern != '\0' && *p_pattern != '?' &&
+						(p_case_sensitive ? *p_string == *p_pattern : String::char_uppercase(*p_string) == String::char_uppercase(*p_pattern)))) {
+			++p_pattern;
+			++p_string;
+			continue;
+		}
+		if (!star_pattern) {
+			return false;
+		}
+		// Retry the pattern after the latest '*' one codepoint later.
+		p_pattern = star_pattern;
+		p_string = ++star_string;
 	}
+	while (*p_pattern == '*') {
+		++p_pattern;
+	}
+	return *p_pattern == '\0';
 }
 
 bool String::match(const String &p_wildcard) const {
