@@ -133,6 +133,10 @@ private:
 	bool ccd_rotational_bounds = false; // Optional conservative angular sweep broadphase.
 	bool ccd_tight_rotational_bounds = false; // Analytical swept arc AABB; opt-in.
 	bool implicit_damping = false; // Box2D-style time-step-stable damping; disabled by default.
+	real_t fluid_linear_drag = 0.0; // Uniform-medium quadratic drag per unit mass.
+	real_t fluid_angular_drag = 0.0; // Uniform-medium quadratic angular resistance.
+	real_t fluid_buoyancy = 0.0; // 0 = off; 1 = neutral in the fully submerged model.
+	Vector3 fluid_flow_velocity; // Constant ambient current or wind, in world space.
 	bool gyroscopic_forces = false; // Jolt-style asymmetric rigid-body rotation; opt-in.
 	int gyroscopic_integration_mode = 0; // 0: normalized Euler, 1: implicit midpoint.
 	// Bullet-style resistance about and perpendicular to the contact normal.
@@ -220,6 +224,10 @@ public:
 	_FORCE_INLINE_ bool is_ccd_rotational_bounds_enabled() const { return ccd_rotational_bounds; }
 	_FORCE_INLINE_ bool is_ccd_tight_rotational_bounds_enabled() const { return ccd_tight_rotational_bounds; }
 	_FORCE_INLINE_ bool is_implicit_damping_enabled() const { return implicit_damping; }
+	_FORCE_INLINE_ real_t get_fluid_linear_drag() const { return fluid_linear_drag; }
+	_FORCE_INLINE_ real_t get_fluid_angular_drag() const { return fluid_angular_drag; }
+	_FORCE_INLINE_ real_t get_fluid_buoyancy() const { return fluid_buoyancy; }
+	_FORCE_INLINE_ const Vector3 &get_fluid_flow_velocity() const { return fluid_flow_velocity; }
 	_FORCE_INLINE_ bool are_gyroscopic_forces_enabled() const { return gyroscopic_forces; }
 	_FORCE_INLINE_ int get_gyroscopic_integration_mode() const { return gyroscopic_integration_mode; }
 	_FORCE_INLINE_ real_t get_rolling_friction() const { return rolling_friction; }
