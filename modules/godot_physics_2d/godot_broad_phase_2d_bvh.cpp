@@ -160,8 +160,9 @@ GodotBroadPhase2D *GodotBroadPhase2DBVH::_create() {
 GodotBroadPhase2DBVH::GodotBroadPhase2DBVH() {
 	bvh.set_pair_callback(_pair_callback, this);
 	bvh.set_unpair_callback(_unpair_callback, this);
-	const real_t pairing_margin = GLOBAL_GET("physics/2d/broadphase_pairing_margin");
-	if (pairing_margin >= 0.0) {
-		bvh.params_set_pairing_expansion(pairing_margin);
-	}
+	const real_t pairing_margin = MAX(real_t(0.0), (real_t)GLOBAL_GET("physics/2d/broadphase_pairing_margin"));
+	const real_t speculative_distance = MAX(real_t(0.0), (real_t)GLOBAL_GET("physics/2d/solver/speculative_sphere_distance"));
+	// Predictive constraints require broadphase candidates before actual touch.
+	// Keep the original pairing margin when speculative contacts are disabled.
+	bvh.params_set_pairing_expansion(MAX(pairing_margin, speculative_distance));
 }
