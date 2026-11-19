@@ -247,5 +247,53 @@ class ImportProjectTests(unittest.TestCase):
             self.assertEqual(result["status"], "passed", result)
 
 
+class AdditionalStressCoverageTests(unittest.TestCase):
+    def test_python_cases_match_gdscript_case_registry(self):
+        import re
+        project = Path(__file__).parent
+        script = (project / "stress.gd").read_text(encoding="utf-8")
+        case_list = script.split("const CASES := [", 1)[1].split("]", 1)[0]
+        self.assertEqual(list(stress.CASES), re.findall(r'"([a-z0-9_]+)"', case_list))
+        self.assertIn('"small_file_io", "scene_churn":', script)
+        helper = (project / "extra_cases.gd").read_text(encoding="utf-8")
+        self.assertIn('func _small_file_io(', helper)
+        self.assertIn('func _scene_churn(', helper)
+
+    def test_phase_summary_and_baseline_regression(self):
+        runs = []
+        for duration, phase in ((12., 9.), (16., 13.), (13., 10.)):
+            result = result_payload(detail={"phases_ms": {"write": phase, "read": 2.}})
+            result["duration_ms"] = duration
+            runs.append({"status": "passed", "wall_seconds": 1., "peak_rss_mib": 10.,
+                         "engine": result})
+        summary = stress.summarize(runs)
+        self.assertEqual(summary["median_engine_ms"], 13.)
+        self.assertEqual(summary["p95_engine_ms"], 16.)
+        self.assertEqual(summary["phase_median_ms"], {"read": 2., "write": 10.})
+        old = BaselineTests().make_report()
+        old["cases"]["math"].update(phase_median_ms={"write": 5.})
+        new = BaselineTests().make_report()
+        new["cases"]["math"].update(phase_median_ms={"write": 9.})
+        self.assertEqual(len(stress.compare_baseline(new, old, 20., None)), 1)
+
+    def test_reject_invalid_phase_metrics(self):
+        for bad in (-1.0, float("nan"), "10ms"):
+            result = result_payload(detail={"phases_ms": {"write": bad}})
+            with self.assertRaisesRegex(ValueError, "phase"):
+                stress.parse_result(stress.PREFIX + json.dumps(result),
+                                    "containers", 1, 12, 12345)
+
+    def test_ranked_markdown_shows_hottest_phase(self):
+        report = {"status": "passed", "failures": [],
+                  "configuration": {"preset": "smoke", "scale": 1,
+                                    "render_mode": "headless", "rss_limit_mib": 2048},
+                  "cases": {"small_file_io": {
+                      "median_wall_seconds": 1.0, "max_rss_mib": 20.,
+                      "median_engine_ms": 500., "p95_wall_seconds": 1.,
+                      "phase_median_ms": {"write": 320., "read": 100.},
+                  }}}
+        self.assertIn("write (320.00 ms)", stress.markdown_hotspots(report))
+
+
 if __name__ == "__main__":
     unittest.main()

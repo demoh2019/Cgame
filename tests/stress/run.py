@@ -37,6 +37,7 @@ CASES = (
     "resource_io", "astar_3d", "thread_contention",
     "geometry_2d", "mesh_build", "input_dispatch", "image_codec", "group_calls",
     "packed_arrays", "sorting", "animation_tracks", "physics_raycast_2d", "physics_raycast_3d", "render_multimesh_3d",
+    "small_file_io", "scene_churn",
 )
 RENDER_CASES = frozenset(("render_2d", "render_3d", "render_multimesh_3d"))
 # Each scenario runs in a fresh process. No preset has unlimited RSS or wall time.
@@ -101,6 +102,13 @@ def parse_result(log: str, case: str, scale: int, frames: int, seed: int) -> dic
     detail = data.get("detail")
     if not isinstance(detail, dict) or "error" in detail:
         raise ValueError("Engine scenario failed: %r" % detail)
+    phases = detail.get("phases_ms", {})
+    if not isinstance(phases, dict) or any(
+        not isinstance(name, str) or not isinstance(value, (int, float))
+        or not math.isfinite(value) or value < 0
+        for name, value in phases.items()
+    ):
+        raise ValueError("Invalid phase measurements")
     return data
 
 
@@ -196,6 +204,12 @@ def summarize(runs: list[dict[str, Any]]) -> dict[str, Any]:
     memories = [r["peak_rss_mib"] for r in runs if r["peak_rss_mib"] is not None]
     cpu_times = [r["cpu_seconds"] for r in passed if r.get("cpu_seconds") is not None]
     engine_times = sorted(r["engine"]["duration_ms"] for r in passed if r.get("engine"))
+    phase_samples: dict[str, list[float]] = {}
+    for run in passed:
+        for phase, value in run.get("engine", {}).get("detail", {}).get("phases_ms", {}).items():
+            phase_samples.setdefault(phase, []).append(value)
+    phases = {phase: round(statistics.median(values), 3)
+              for phase, values in sorted(phase_samples.items())}
     engine_memory = [r["engine"]["engine_memory_after_bytes"] for r in passed
                      if isinstance(r.get("engine"), dict) and isinstance(r["engine"].get("engine_memory_after_bytes"), (int, float))]
     return {
@@ -207,6 +221,7 @@ def summarize(runs: list[dict[str, Any]]) -> dict[str, Any]:
         "median_engine_ms": round(statistics.median(engine_times), 6) if engine_times else None,
         "p95_engine_ms": round(engine_times[math.ceil(0.95 * len(engine_times)) - 1], 6) if engine_times else None,
         "max_engine_memory_bytes": max(engine_memory) if engine_memory else None,
+        "phase_median_ms": phases,
         "runs": runs,
     }
 
@@ -227,6 +242,11 @@ def compare_baseline(current: dict[str, Any], baseline: dict[str, Any],
             if new is not None and old is not None and old > 0 and new > old * (1 + percent / 100.0):
                 errors.append("%s %s: %.3f > %.3f (baseline + %.1f%%)" %
                               (name, field, new, old, percent))
+        for phase, new in data.get("phase_median_ms", {}).items():
+            old = previous.get("phase_median_ms", {}).get(phase)
+            if old is not None and old > 0 and new > old * (1 + percent / 100.0):
+                errors.append("%s phase %s: %.3f > %.3f (baseline + %.1f%%)" %
+                              (name, phase, new, old, percent))
     if memory_growth_limit_mib is not None and "memory_churn" in current["cases"]:
         for run in current["cases"]["memory_churn"]["runs"]:
             if run["status"] != "passed":
@@ -257,7 +277,10 @@ def markdown_hotspots(report: dict[str, Any]) -> str:
             note.append("near RSS limit")
         if engine is not None and wall > 0 and wall - engine / 1000.0 > max(0.25, wall * 0.5):
             note.append("startup/teardown dominates")
-        rows.append((case, wall, p95, rss, engine, "; ".join(note)))
+        phases = values.get("phase_median_ms", {})
+        slowest = max(phases, key=phases.get) if phases else None
+        phase_label = ("%s (%.2f ms)" % (slowest, phases[slowest])) if slowest else "n/a"
+        rows.append((case, wall, p95, rss, engine, phase_label, "; ".join(note)))
     rows.sort(key=lambda item: item[1], reverse=True)
 
     def number(value: float | None) -> str:
@@ -273,12 +296,12 @@ def markdown_hotspots(report: dict[str, Any]) -> str:
         "Ordered by median wall time, **not** normalized workload throughput. "
         "Compare the same case and preset on identical hardware to identify regressions.",
         "",
-        "| Scenario | Median wall (s) | p95 wall (s) | Peak RSS (MiB) | Engine median (ms) | Signals |",
-        "| --- | ---: | ---: | ---: | ---: | --- |",
+        "| Scenario | Median wall (s) | p95 wall (s) | Peak RSS (MiB) | Engine median (ms) | Slowest phase | Signals |",
+        "| --- | ---: | ---: | ---: | ---: | --- | --- |",
     ]
-    for case, wall, p95, rss, engine, note in rows:
-        lines.append("| %s | %s | %s | %s | %s | %s |" % (
-            case, number(wall), number(p95), number(rss), number(engine), note or "—"))
+    for case, wall, p95, rss, engine, phase, note in rows:
+        lines.append("| %s | %s | %s | %s | %s | %s | %s |" % (
+            case, number(wall), number(p95), number(rss), number(engine), phase, note or "—"))
     lines += ["", "Failures: %d" % len(report["failures"])]
     lines.extend("- %s" % str(message).replace("\n", " ") for message in report["failures"])
     lines.append("")

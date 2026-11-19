@@ -215,3 +215,16 @@ graphics driver, seed and resource limits, then profile recurring regressions.
 queries on a connected 32x32 AStar2D grid, complementing the existing
 `astar_grid` and `astar_3d` workloads. Sweep this case using
 `tests/stress/scale_sweep.py --case astar_graph --scales 1,2,4,8`.
+
+## Lifetime / small-file pressure and phase profiling
+
+Two more isolated workloads extend the matrix: `small_file_io` creates,
+reads, verifies and removes hundreds to thousands of tiny files, reporting
+write/read/cleanup timings. `scene_churn` repeatedly creates and frees
+Node2D children over many frames to expose allocator retention and scene
+lifecycle stalls. All scratch files stay under the stress project's `user://`.
+
+Per-phase timings (`detail.phases_ms`) now appear as phase medians in JSON,
+and `--summary-md` includes the slowest instrumented phase for each case.
+Phase regressions are compared against an optional same-hardware baseline;
+these numbers complement, rather than replace, native CPU/heap profiling.
