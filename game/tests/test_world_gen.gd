@@ -133,10 +133,10 @@ func run(t) -> void:
 	var ruin_walls := 0
 	for cx in range(-10, 11):
 		for cz in range(-10, 11):
-			var data := a.chunk(Vector2i(cx, cz))
-			if not data["ruin"]:
-				t.eq(data["structures"].size(), 0, "only ruins have structures")
-			for s in data["structures"]:
+			var chunk_data := a.chunk(Vector2i(cx, cz))
+			if not chunk_data["ruin"]:
+				t.eq(chunk_data["structures"].size(), 0, "only ruins have structures")
+			for s in chunk_data["structures"]:
 				ruin_structures += 1
 				ruin_walls += 1 if s["kind"] == "wall" else 0
 				t.eq(WorldGen.cell_of(s["x"], s["z"]), Vector2i(cx, cz), "a structure lies in its chunk")
