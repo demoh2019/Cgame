@@ -1304,3 +1304,42 @@ median/p95 frame time, peak physics time, process RSS, and final joint
 separation. Adding thread dispatch and graph construction can make small or
 highly connected islands *slower*, and altered constraint order can affect
 numerical outcomes. This should not be enabled by default without measurements.
+
+## Jolt collision substepping (opt-in)
+
+Jolt's `PhysicsSystem::Update(delta, collision_steps, ...)` supports repeating
+collision detection and integration within the same engine physics frame.
+Cgame previously always used one collision step. Two project settings now expose
+that upstream Jolt capability without increasing the default CPU cost:
+
+| Project setting | Default | Meaning |
+| --- | ---: | --- |
+| `physics/jolt_physics_3d/simulation/collision_steps` | `1` | Minimum number of collision/integration passes in each Jolt tick (clamped to 1–8) |
+| `physics/jolt_physics_3d/simulation/max_collision_step_seconds` | `0.0` | Disabled when zero; otherwise request enough passes so each subdivision is at most this many seconds, subject to the eight-step cap |
+
+For example, use `collision_steps = 2` to increase contact stability at the
+expense of more CPU per tick. Or set `max_collision_step_seconds = 0.01`
+to request additional passes whenever a physics tick is longer than 10 ms.
+The effective count is the greater of the configured minimum and the
+time-based requirement, capped at eight.
+
+These settings apply to **Jolt Physics 3D** only, not GodotPhysics2D or
+GodotPhysics3D. The default (`collision_steps=1`, `max_collision_step_seconds=0`)
+preserves the old behavior. This feature is not a substitute for continuous
+collision detection (CCD) on very fast objects; enable CCD separately when
+needed. Additional collision passes may increase CPU time substantially.
+
+Compare the same physical workload on the same machine/backend before and
+after adjusting settings:
+
+```sh
+python3 tests/stress/run.py --godot ./bin/godot.linuxbsd.editor.dev.x86_64 \
+  --case physics_ccd_3d,physics_dense_3d,physics_joint_chain_3d \
+  --preset standard --output out/jolt-substeps.json \
+  --summary-md out/jolt-substeps.md
+```
+
+Run `python3 -m unittest tests/stress/test_jolt_collision_substeps.py -v`
+for the source-wiring contracts; also build and execute the native physics
+tests to confirm actual runtime behavior. No performance improvement should
+be inferred merely from the presence of this configuration option.

@@ -36,6 +36,12 @@
 void JoltProjectSettings::register_settings() {
 	GLOBAL_DEF(PropertyInfo(Variant::INT, "physics/jolt_physics_3d/simulation/velocity_steps", PROPERTY_HINT_RANGE, U"2,16,or_greater"), 10);
 	GLOBAL_DEF(PropertyInfo(Variant::INT, "physics/jolt_physics_3d/simulation/position_steps", PROPERTY_HINT_RANGE, U"1,16,or_greater"), 2);
+	// Jolt subdivides each physics tick into collision + integration passes.
+	// One pass preserves the current performance and simulation behavior.
+	GLOBAL_DEF(PropertyInfo(Variant::INT, "physics/jolt_physics_3d/simulation/collision_steps", PROPERTY_HINT_RANGE, U"1,8,1"), 1);
+	// 0 disables automatic substepping. Positive values trigger additional passes
+	// only when the physics timestep exceeds this duration (seconds).
+	GLOBAL_DEF(PropertyInfo(Variant::FLOAT, "physics/jolt_physics_3d/simulation/max_collision_step_seconds", PROPERTY_HINT_RANGE, U"0,0.1,0.001,or_greater,suffix:s"), 0.0f);
 	GLOBAL_DEF(PropertyInfo(Variant::BOOL, "physics/jolt_physics_3d/simulation/use_enhanced_internal_edge_removal"), true);
 	GLOBAL_DEF(PropertyInfo(Variant::BOOL, "physics/jolt_physics_3d/simulation/generate_all_kinematic_contacts"), false);
 	GLOBAL_DEF(PropertyInfo(Variant::FLOAT, "physics/jolt_physics_3d/simulation/penetration_slop", PROPERTY_HINT_RANGE, U"0,1,0.00001,or_greater,suffix:m"), 0.02f);
@@ -80,6 +86,8 @@ void JoltProjectSettings::register_settings() {
 void JoltProjectSettings::read_settings() {
 	simulation_velocity_steps = GLOBAL_GET("physics/jolt_physics_3d/simulation/velocity_steps");
 	simulation_position_steps = GLOBAL_GET("physics/jolt_physics_3d/simulation/position_steps");
+	simulation_collision_steps = GLOBAL_GET("physics/jolt_physics_3d/simulation/collision_steps");
+	simulation_max_collision_step_seconds = GLOBAL_GET("physics/jolt_physics_3d/simulation/max_collision_step_seconds");
 	use_enhanced_internal_edge_removal_for_bodies = GLOBAL_GET("physics/jolt_physics_3d/simulation/use_enhanced_internal_edge_removal");
 	generate_all_kinematic_contacts = GLOBAL_GET("physics/jolt_physics_3d/simulation/generate_all_kinematic_contacts");
 	penetration_slop = GLOBAL_GET("physics/jolt_physics_3d/simulation/penetration_slop");
