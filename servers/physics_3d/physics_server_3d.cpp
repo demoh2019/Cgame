@@ -561,6 +561,9 @@ PhysicsServer3D::PhysicsServer3D() {
 	GLOBAL_DEF(PropertyInfo(Variant::FLOAT, "physics/3d/sleep_threshold_angular", PROPERTY_HINT_RANGE, U"0,90,0.1,radians_as_degrees,suffix:°/s"), Math::deg_to_rad(8.0));
 	GLOBAL_DEF(PropertyInfo(Variant::FLOAT, "physics/3d/time_before_sleep", PROPERTY_HINT_RANGE, "0,5,0.01,or_greater,suffix:s"), 0.5);
 	GLOBAL_DEF(PropertyInfo(Variant::INT, "physics/3d/solver/solver_iterations", PROPERTY_HINT_RANGE, "1,32,1,or_greater"), 16);
+	// Experimental 3D extension of Box2D's two-point normal LCP solver.
+	// Disabled until stability and cross-platform performance are validated.
+	GLOBAL_DEF(PropertyInfo(Variant::BOOL, "physics/3d/solver/block_solver_enabled"), false);
 	// Parallelize independent constraints inside a single large rigid-body island.
 	// Off by default because color-by-color iteration changes the solver order.
 	GLOBAL_DEF(PropertyInfo(Variant::BOOL, "physics/3d/solver/parallel_large_islands"), false);
