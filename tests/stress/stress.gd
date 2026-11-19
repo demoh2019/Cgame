@@ -5,6 +5,7 @@ extends SceneTree
 signal sample_signal(value: int)
 
 const PREFIX := "STRESS_RESULT:"
+const ExtraStress := preload("res://extra_stress.gd")
 const CASES := [
 	"containers", "strings", "script_vm", "math", "signals",
 	"scene_tree", "packed_scene", "images", "json", "stream",
@@ -13,6 +14,7 @@ const CASES := [
 	"variant_codec", "render_2d", "render_3d",
 	"node_paths", "regex", "compression", "hashing",
 	"resource_io", "astar_3d", "ui_layout", "thread_contention",
+	"geometry_2d", "mesh_build", "input_dispatch", "image_codec", "group_calls",
 ]
 
 var signal_total: int = 0
@@ -213,6 +215,8 @@ func _run_case(test_case: String, scale: int, frames: int, seed: int) -> Diction
 			return await _ui_layout(scale, frames)
 		"thread_contention":
 			return _thread_contention(scale)
+		"geometry_2d", "mesh_build", "input_dispatch", "image_codec", "group_calls":
+			return ExtraStress.new().run(test_case, self, scale)
 	return {"error": "Unhandled case"}
 
 

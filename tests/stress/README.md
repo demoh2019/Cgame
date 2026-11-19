@@ -55,6 +55,9 @@ Run `--list-cases` for supported identifiers.
 | Physics | `physics_2d`, `physics_3d` | Rigid bodies/collision shapes and physics frames |
 | Allocator | `memory_churn` | Multiple cycles of ephemeral PackedByteArray allocations |
 | Rendering | `render_2d`, `render_3d` | Shared texture/mesh, many draw nodes, frame pumping (display only) |
+| Geometry / meshes | `geometry_2d`, `mesh_build` | Convex hulls, triangulation and SurfaceTool mesh construction |
+| Input / scene groups | `input_dispatch`, `group_calls` | Dispatch input actions and bulk group method calls |
+| Image codec | `image_codec` | Repeated PNG encode/decode and size validation |
 
 ## Presets and safety
 

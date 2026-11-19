@@ -32,6 +32,7 @@ CASES = (
     "variant_codec", "render_2d", "render_3d",
     "node_paths", "regex", "compression", "hashing",
     "resource_io", "astar_3d", "ui_layout", "thread_contention",
+    "geometry_2d", "mesh_build", "input_dispatch", "image_codec", "group_calls",
 )
 RENDER_CASES = frozenset(("render_2d", "render_3d"))
 # Each scenario runs in a fresh process. No preset has unlimited RSS or wall time.

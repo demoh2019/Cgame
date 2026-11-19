@@ -146,6 +146,16 @@ class BaselineTests(unittest.TestCase):
         self.assertEqual(len(failures), 1)
 
 
+class RegistryTests(unittest.TestCase):
+    def test_python_and_gdscript_case_registries_match(self):
+        import re
+        script = Path(__file__).with_name("stress.gd").read_text(encoding="utf-8")
+        registry = script.split("const CASES := [", 1)[1].split("]", 1)[0]
+        gd_cases = re.findall(r'"([^"]+)"', registry)
+        self.assertEqual(len(gd_cases), len(set(gd_cases)))
+        self.assertEqual(set(gd_cases), set(stress.CASES))
+
+
 class ProcessIsolationTests(unittest.TestCase):
     def test_valid_child_output(self):
         payload = json.dumps(result_payload())
