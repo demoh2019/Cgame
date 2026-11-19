@@ -53,6 +53,7 @@
 #include "core/math/bvh_tree.h"
 #include "core/math/geometry_3d.h"
 #include "core/os/mutex.h"
+#include "core/templates/hash_set.h"
 
 #include <climits> // INT_MAX
 
@@ -470,6 +471,41 @@ public:
 	}
 
 private:
+	// Existing dense-dense pairs are indexed globally, avoiding a per-object
+	// hash table (and its memory overhead) on millions of sparse bodies.
+	static constexpr uint32_t DENSE_PAIR_THRESHOLD = 32;
+
+	static uint64_t _dense_pair_key(BVHHandle p_a, BVHHandle p_b) {
+		const uint32_t a = MIN(p_a.id(), p_b.id());
+		const uint32_t b = MAX(p_a.id(), p_b.id());
+		return (uint64_t(a) << 32) | uint64_t(b);
+	}
+
+	// Called after adding both adjacency links. When a body crosses the
+	// threshold, register all of its pairs with already-dense neighbors.
+	void _index_new_dense_neighbors(BVHHandle p_handle) {
+		const typename BVHTREE_CLASS::ItemPairs &pairs = tree._pairs[p_handle.id()];
+		if (pairs.extended_pairs.size() != DENSE_PAIR_THRESHOLD) {
+			return;
+		}
+		for (const typename BVHTREE_CLASS::ItemPairs::Link &link : pairs.extended_pairs) {
+			if (tree._pairs[link.handle.id()].extended_pairs.size() >= DENSE_PAIR_THRESHOLD) {
+				dense_pair_keys.insert(_dense_pair_key(p_handle, link.handle));
+			}
+		}
+	}
+
+	// Called only when an adjacency list falls from the threshold to one
+	// below it. Dense-dense entries for its remaining links are now stale.
+	void _unindex_new_sparse_neighbors(BVHHandle p_handle) {
+		const typename BVHTREE_CLASS::ItemPairs &pairs = tree._pairs[p_handle.id()];
+		for (const typename BVHTREE_CLASS::ItemPairs::Link &link : pairs.extended_pairs) {
+			if (tree._pairs[link.handle.id()].extended_pairs.size() >= DENSE_PAIR_THRESHOLD) {
+				dense_pair_keys.erase(_dense_pair_key(p_handle, link.handle));
+			}
+		}
+	}
+
 	// do this after moving etc.
 	void _check_for_collisions(bool p_full_check = false) {
 		if (!changed_items.size()) {
@@ -552,6 +588,12 @@ private:
 		typename BVHTREE_CLASS::ItemPairs &pairs_from = tree._pairs[p_from.id()];
 		typename BVHTREE_CLASS::ItemPairs &pairs_to = tree._pairs[p_to.id()];
 
+		const uint32_t from_degree = pairs_from.extended_pairs.size();
+		const uint32_t to_degree = pairs_to.extended_pairs.size();
+		if (from_degree >= DENSE_PAIR_THRESHOLD && to_degree >= DENSE_PAIR_THRESHOLD) {
+			dense_pair_keys.erase(_dense_pair_key(p_from, p_to));
+		}
+
 		void *ud_from;
 		if (index_owner == p_from) {
 			ud_from = pairs_from.remove_pair_at(p_known_index);
@@ -559,6 +601,15 @@ private:
 		} else {
 			ud_from = pairs_from.remove_pair_to(p_to);
 			pairs_to.remove_pair_at(p_known_index);
+		}
+		if (from_degree == DENSE_PAIR_THRESHOLD) {
+			_unindex_new_sparse_neighbors(p_from);
+		}
+		if (to_degree == DENSE_PAIR_THRESHOLD) {
+			_unindex_new_sparse_neighbors(p_to);
+		}
+		if (dense_pair_keys.is_empty()) {
+			dense_pair_keys.reset();
 		}
 
 #ifdef BVH_VERBOSE_PAIRING
@@ -663,9 +714,14 @@ private:
 		typename BVHTREE_CLASS::ItemPairs &p_from = tree._pairs[p_ha.id()];
 		typename BVHTREE_CLASS::ItemPairs &p_to = tree._pairs[p_hb.id()];
 
-		// does this pair exist already?
-		// or only check the one with lower number of pairs for greater speed
-		if (p_from.extended_pairs.size() <= p_to.extended_pairs.size()) {
+		// Only high-degree pairs use the hash index. Sparse contacts retain
+		// the compact linear adjacency scan, with no per-body index storage.
+		if (p_from.extended_pairs.size() >= DENSE_PAIR_THRESHOLD &&
+				p_to.extended_pairs.size() >= DENSE_PAIR_THRESHOLD) {
+			if (dense_pair_keys.has(_dense_pair_key(p_ha, p_hb))) {
+				return;
+			}
+		} else if (p_from.extended_pairs.size() <= p_to.extended_pairs.size()) {
 			if (p_from.contains_pair_to(p_hb)) {
 				return;
 			}
@@ -695,6 +751,12 @@ private:
 		// new pair! .. only really need to store the userdata on the lower handle, but both have storage so...
 		p_from.add_pair_to(p_hb, callback_userdata);
 		p_to.add_pair_to(p_ha, callback_userdata);
+		if (p_from.extended_pairs.size() >= DENSE_PAIR_THRESHOLD &&
+				p_to.extended_pairs.size() >= DENSE_PAIR_THRESHOLD) {
+			dense_pair_keys.insert(_dense_pair_key(p_ha, p_hb));
+		}
+		_index_new_dense_neighbors(p_ha);
+		_index_new_dense_neighbors(p_hb);
 	}
 
 	// if we remove an item, we need to immediately remove the pairs, to prevent reading the pair after deletion
@@ -825,6 +887,7 @@ private:
 	void *check_pair_callback_userdata = nullptr;
 
 	BVHTREE_CLASS tree;
+	HashSet<uint64_t> dense_pair_keys;
 
 	// for collision pairing,
 	// maintain a list of all items moved etc on each frame / tick
