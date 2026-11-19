@@ -32,7 +32,6 @@
 
 #include "core/object/class_db.h"
 #include "core/templates/local_vector.h"
-#include "core/templates/rb_map.h"
 #include "scene/theme/theme_db.h"
 
 void GridContainer::_resort() {
