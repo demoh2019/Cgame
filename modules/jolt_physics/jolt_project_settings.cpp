@@ -53,6 +53,13 @@ void JoltProjectSettings::register_settings() {
 	GLOBAL_DEF(PropertyInfo(Variant::FLOAT, "physics/jolt_physics_3d/simulation/contact_warm_start_distance", PROPERTY_HINT_RANGE, U"0,0.2,0.0001,suffix:m"), 0.01f);
 	GLOBAL_DEF(PropertyInfo(Variant::FLOAT, "physics/jolt_physics_3d/simulation/baumgarte_stabilization_factor", PROPERTY_HINT_RANGE, U"0,1,0.01"), 0.2f);
 	GLOBAL_DEF(PropertyInfo(Variant::FLOAT, "physics/jolt_physics_3d/simulation/soft_body_point_radius", PROPERTY_HINT_RANGE, U"0,1,0.001,or_greater,suffix:m"), 0.01f);
+	// Experimental soft-soft CPU particle contacts. Jolt itself supports
+	// soft-rigid but not soft-soft contacts. Disabled to preserve performance.
+	GLOBAL_DEF(PropertyInfo(Variant::BOOL, "physics/jolt_physics_3d/simulation/soft_body_soft_contacts"), false);
+	GLOBAL_DEF(PropertyInfo(Variant::FLOAT, "physics/jolt_physics_3d/simulation/soft_body_soft_contact_radius", PROPERTY_HINT_RANGE, "0,1,0.001,suffix:m"), 0.1f);
+	GLOBAL_DEF(PropertyInfo(Variant::FLOAT, "physics/jolt_physics_3d/simulation/soft_body_soft_contact_recovery", PROPERTY_HINT_RANGE, "0,1,0.01"), 0.2f);
+	GLOBAL_DEF(PropertyInfo(Variant::FLOAT, "physics/jolt_physics_3d/simulation/soft_body_soft_contact_friction", PROPERTY_HINT_RANGE, "0,1,0.01"), 0.2f);
+	GLOBAL_DEF(PropertyInfo(Variant::INT, "physics/jolt_physics_3d/simulation/soft_body_soft_contact_max_particle_pairs", PROPERTY_HINT_RANGE, "1024,65536,1024"), 32768);
 	// Extra XPBD bending is opt-in to preserve existing scene behavior.
 	// Applies when creating/rebuilding a soft body, not retroactively.
 	GLOBAL_DEF(PropertyInfo(Variant::INT, "physics/jolt_physics_3d/simulation/soft_body_bend_mode", PROPERTY_HINT_ENUM, "Disabled,Distance,Dihedral"), 0);
@@ -146,6 +153,14 @@ void JoltProjectSettings::read_settings() {
 	soft_body_radial_anisotropy_axis = CLAMP((int)GLOBAL_GET("physics/jolt_physics_3d/simulation/soft_body_radial_anisotropy_axis"), 0, 3);
 	const float anisotropy_ratio = GLOBAL_GET("physics/jolt_physics_3d/simulation/soft_body_radial_anisotropy_ratio");
 	soft_body_radial_anisotropy_ratio = Math::is_finite(anisotropy_ratio) ? CLAMP(anisotropy_ratio, 0.1f, 10.0f) : 1.0f;
+	soft_body_soft_contacts = GLOBAL_GET("physics/jolt_physics_3d/simulation/soft_body_soft_contacts");
+	const float soft_contact_radius = GLOBAL_GET("physics/jolt_physics_3d/simulation/soft_body_soft_contact_radius");
+	soft_body_soft_contact_radius = Math::is_finite(soft_contact_radius) ? CLAMP(soft_contact_radius, 0.0f, 1.0f) : 0.1f;
+	const float soft_contact_recovery = GLOBAL_GET("physics/jolt_physics_3d/simulation/soft_body_soft_contact_recovery");
+	soft_body_soft_contact_recovery = Math::is_finite(soft_contact_recovery) ? CLAMP(soft_contact_recovery, 0.0f, 1.0f) : 0.2f;
+	const float soft_contact_friction = GLOBAL_GET("physics/jolt_physics_3d/simulation/soft_body_soft_contact_friction");
+	soft_body_soft_contact_friction = Math::is_finite(soft_contact_friction) ? CLAMP(soft_contact_friction, 0.0f, 1.0f) : 0.2f;
+	soft_body_soft_contact_max_particle_pairs = CLAMP((int)GLOBAL_GET("physics/jolt_physics_3d/simulation/soft_body_soft_contact_max_particle_pairs"), 1024, 65536);
 	bounce_velocity_threshold = GLOBAL_GET("physics/jolt_physics_3d/simulation/bounce_velocity_threshold");
 	sleep_allowed = GLOBAL_GET("physics/jolt_physics_3d/simulation/allow_sleep");
 	sleep_velocity_threshold = GLOBAL_GET("physics/jolt_physics_3d/simulation/sleep_velocity_threshold");
