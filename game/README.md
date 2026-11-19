@@ -1364,3 +1364,21 @@ bleeding treatment in feedback, while existing privacy protections remain.
 `test_party_aid.gd` checks bleeding-only treatment at full health,
 repeated no-effect calls, correct payment and antiseptic treating bleeding
 and infection together. This uses existing Cgame medical/survival APIs.
+
+## Raid boss phase two: enrage (Lineage-style PvE)
+
+The group mutant warlord now enters a second server-controlled phase
+at **35% health** (210 of 600 HP). It becomes crimson with an
+**ENRAGED RAID BOSS** nameplate; nearby survivors receive a one-time
+phase warning. Existing melee damage rises by 35%, telegraphed slams
+rise from 34 to 44 base damage, and their cooldown drops from 14 to
+8 seconds. The two-second danger circle, safe-zone rules, armor and
+dodge immunity still apply. An already pending slam is never cancelled
+or duplicated by a phase transition.
+
+No client message can trigger enrage or modify its damage and timers.
+Ordinary infected/elite stats remain unchanged. Bosses, rewards and
+phase state remain session-only; the existing single shared loot bag
+and participant-first loot rights continue unchanged. Test coverage:
+`game/tests/test_raid_phase.gd` in the standard headless suite.
+The feature uses existing Cgame scripting, networking and scene APIs.

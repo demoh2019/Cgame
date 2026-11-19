@@ -1862,6 +1862,13 @@ func _tick_raid_encounter() -> void:
 			raid_boss_id = -1
 			raid_pending_slam = {}
 			return
+		if RaidEncounter.try_enrage(boss):
+			# Phase transition is one-time per encounter. Never cancel a
+			# telegraphed strike already in flight.
+			raid_next_slam_at = minf(raid_next_slam_at,
+				time + RaidEncounter.ENRAGE_SLAM_COOLDOWN)
+			events.append({"type": "raid_enraged", "id": raid_boss_id,
+				"x": at.x, "z": at.y, "hp": boss.health})
 		if not raid_pending_slam.is_empty():
 			if time >= float(raid_pending_slam["at"]):
 				var center := Vector2(float(raid_pending_slam["x"]),
@@ -1874,7 +1881,7 @@ func _tick_raid_encounter() -> void:
 			raid_pending_slam = {"id": raid_boss_id,
 				"x": at.x, "z": at.y,
 				"at": time + RaidEncounter.SLAM_WARNING}
-			raid_next_slam_at = time + RaidEncounter.SLAM_COOLDOWN
+			raid_next_slam_at = time + RaidEncounter.slam_cooldown(boss)
 			events.append({"type": "raid_warning", "id": raid_boss_id,
 				"x": at.x, "z": at.y,
 				"radius": RaidEncounter.SLAM_RADIUS,
@@ -1923,7 +1930,7 @@ func _resolve_raid_slam(boss_id: int, center: Vector2) -> void:
 		if survivor.dodge_immunity > 0.0:
 			events.append({"type": "evaded", "peer": survivor.id, "zombie": boss_id})
 			continue
-		var damage: float = Combat.apply_armor(RaidEncounter.SLAM_DAMAGE, survivor.inventory.armor)
+		var damage: float = Combat.apply_armor(RaidEncounter.slam_damage(boss), survivor.inventory.armor)
 		survivor.survival.hurt(damage)
 		events.append({"type": "hit", "kind": "player", "id": survivor.id,
 			"damage": damage, "by": -boss_id})
@@ -2157,6 +2164,7 @@ func snapshot_for(peer_id: int) -> Dictionary:
 		if zombie.is_alive() and here.distance_to(Vector2(p.x, p.z)) <= Defs.INTEREST_RADIUS:
 			nearby_zombies.append({"id": zombie.id, "type": zombie.type, "x": p.x, "y": p.y, "z": p.z, "yaw": zombie.yaw, "hp": zombie.health, "state": zombie.state,
 					"elite": zombie.elite, "raid_boss": zombie.raid_boss,
+					"raid_enraged": zombie.raid_enraged,
 					"max_hp": float(zombie.data.get("health", zombie.health))})
 	var nearby_barricades: Array = []
 	for wall in barricades.values():

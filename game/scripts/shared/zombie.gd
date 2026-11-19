@@ -13,6 +13,7 @@ var id: int
 var type: String
 var elite: bool = false
 var raid_boss: bool = false # Session-only group encounter; never a client-spawnable type.
+var raid_enraged: bool = false # Server transitions once at low raid boss health.
 var spawn_id: int
 var position: Vector3
 var yaw: float = 0.0

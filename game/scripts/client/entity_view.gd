@@ -51,7 +51,9 @@ func _touch(key: String, kind: String, entity: Dictionary, seen: Dictionary) -> 
 	if label != null:
 		if kind == "zombie":
 			label.text = "%s%s  %d" % [
-				"RAID BOSS " if bool(entity.get("raid_boss", false)) else ("ELITE " if bool(entity.get("elite", false)) else ""),
+				"ENRAGED RAID BOSS " if bool(entity.get("raid_enraged", false)) else (
+				"RAID BOSS " if bool(entity.get("raid_boss", false)) else (
+				"ELITE " if bool(entity.get("elite", false)) else "")),
 				str(entity["type"]), int(entity["hp"])]
 		elif kind == "player":
 			label.text = str(entity["name"]) if entity["alive"] else "%s (dead)" % entity["name"]
@@ -78,7 +80,9 @@ func _touch(key: String, kind: String, entity: Dictionary, seen: Dictionary) -> 
 		# A zombie that has locked on to someone flushes red.
 		var model: Node3D = _nodes[key].get_node("Model")
 		var base: Color = ZOMBIE_LOOK[entity["type"]]["tint"]
-		if bool(entity.get("raid_boss", false)):
+		if bool(entity.get("raid_enraged", false)):
+			base = Color(1.0, 0.12, 0.12)
+		elif bool(entity.get("raid_boss", false)):
 			base = Color(0.92, 0.2, 0.63)
 		elif bool(entity.get("elite", false)):
 			base = Color(0.98, 0.65, 0.18)

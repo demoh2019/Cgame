@@ -25,6 +25,11 @@ const SLAM_RADIUS := 5.0
 const SLAM_DAMAGE := 34.0
 const SLAM_WARNING := 2.0
 const SLAM_COOLDOWN := 14.0
+# Phase two at 35% HP, following classic party PvE boss encounter design.
+const ENRAGE_HEALTH_FRACTION := 0.35
+const ENRAGE_MELEE_MULTIPLIER := 1.35
+const ENRAGE_SLAM_DAMAGE := 44.0
+const ENRAGE_SLAM_COOLDOWN := 8.0
 
 
 static func eligible_leader(world, players: Dictionary, parties) -> int:
@@ -94,6 +99,27 @@ static func empower(boss) -> void:
 	boss.data["lose"] = 48.0
 	boss.health = BOSS_HEALTH
 	boss.raid_boss = true
+
+
+## Only an alive, server-owned raid boss may enter phase two.
+## Its own stats dictionary is cloned, so unrelated brutes stay unchanged.
+static func try_enrage(boss) -> bool:
+	if not boss.raid_boss or boss.raid_enraged or not boss.is_alive():
+		return false
+	if not is_finite(boss.health) or boss.health > BOSS_HEALTH * ENRAGE_HEALTH_FRACTION:
+		return false
+	boss.data = boss.data.duplicate(true)
+	boss.data["damage"] = BOSS_DAMAGE * ENRAGE_MELEE_MULTIPLIER
+	boss.raid_enraged = true
+	return true
+
+
+static func slam_cooldown(boss) -> float:
+	return ENRAGE_SLAM_COOLDOWN if boss.raid_enraged else SLAM_COOLDOWN
+
+
+static func slam_damage(boss) -> float:
+	return ENRAGE_SLAM_DAMAGE if boss.raid_enraged else SLAM_DAMAGE
 
 
 static func treasure(zone: int) -> Dictionary:
