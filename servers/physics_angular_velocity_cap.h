@@ -39,3 +39,32 @@ _FORCE_INLINE_ static real_t godot_physics_clamp_angular_velocity(real_t p_angul
 _FORCE_INLINE_ static Vector3 godot_physics_clamp_angular_velocity(const Vector3 &p_angular_velocity, real_t p_max_speed) {
 	return godot_physics_clamp_linear_velocity(p_angular_velocity, p_max_speed);
 }
+
+
+// Rapier-style CCD rotation safety limit. Unlike the ordinary maximum
+// angular velocity (rad/s), this is a maximum *angle per physics step*
+// (radians). The caller enables it only for dynamic CCD bodies.
+// Zero disables the feature, and invalid/nonpositive dt never divides.
+_FORCE_INLINE_ static real_t godot_physics_clamp_ccd_angular_velocity(real_t p_angular_velocity, real_t p_max_angle, real_t p_step) {
+	if (!(p_max_angle > real_t(0.0)) || !Math::is_finite(p_max_angle) ||
+			!(p_step > real_t(0.0)) || !Math::is_finite(p_step)) {
+		return p_angular_velocity;
+	}
+	const real_t speed_limit = p_max_angle / p_step;
+	if (!Math::is_finite(speed_limit)) {
+		return p_angular_velocity;
+	}
+	return godot_physics_clamp_angular_velocity(p_angular_velocity, speed_limit);
+}
+
+_FORCE_INLINE_ static Vector3 godot_physics_clamp_ccd_angular_velocity(const Vector3 &p_angular_velocity, real_t p_max_angle, real_t p_step) {
+	if (!(p_max_angle > real_t(0.0)) || !Math::is_finite(p_max_angle) ||
+			!(p_step > real_t(0.0)) || !Math::is_finite(p_step)) {
+		return p_angular_velocity;
+	}
+	const real_t speed_limit = p_max_angle / p_step;
+	if (!Math::is_finite(speed_limit)) {
+		return p_angular_velocity;
+	}
+	return godot_physics_clamp_angular_velocity(p_angular_velocity, speed_limit);
+}
