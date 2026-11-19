@@ -52,7 +52,7 @@ static Dictionary serialized_transitions(const Ref<AudioStreamInteractive> &p_st
 	return p_stream->get("_transitions");
 }
 
-TEST_CASE("[AudioStreamInteractive] Serialize transitions after removing clips") {
+TEST_CASE("[Audio][AudioStreamInteractive] Serialize transitions after removing clips") {
 	Ref<AudioStreamInteractive> stream;
 	stream.instantiate();
 	stream->set_clip_count(4);
@@ -78,7 +78,7 @@ TEST_CASE("[AudioStreamInteractive] Serialize transitions after removing clips")
 	CHECK_FALSE(after.has(Vector2i(0, 3)));
 }
 
-TEST_CASE("[AudioStreamInteractive] Preserve removed transitions in memory for undo") {
+TEST_CASE("[Audio][AudioStreamInteractive] Preserve removed transitions in memory for undo") {
 	Ref<AudioStreamInteractive> stream;
 	stream.instantiate();
 	stream->set_clip_count(3);
@@ -100,7 +100,7 @@ TEST_CASE("[AudioStreamInteractive] Preserve removed transitions in memory for u
 	CHECK(float(restored_data["fade_beats"]) == doctest::Approx(3.25f));
 }
 
-TEST_CASE("[AudioStreamInteractive] Keep wildcard transitions on clip shrink") {
+TEST_CASE("[Audio][AudioStreamInteractive] Keep wildcard transitions on clip shrink") {
 	Ref<AudioStreamInteractive> stream;
 	stream.instantiate();
 	stream->set_clip_count(3);
@@ -129,7 +129,7 @@ TEST_CASE("[AudioStreamInteractive] Keep wildcard transitions on clip shrink") {
 	CHECK(transitions.has(Vector2i(any, any)));
 }
 
-TEST_CASE("[AudioStreamInteractive] Reject transitions whose clip index equals the count") {
+TEST_CASE("[Audio][AudioStreamInteractive] Reject transitions whose clip index equals the count") {
 	Ref<AudioStreamInteractive> stream;
 	stream.instantiate();
 	stream->set_clip_count(3);
@@ -142,7 +142,7 @@ TEST_CASE("[AudioStreamInteractive] Reject transitions whose clip index equals t
 	CHECK(serialized_transitions(stream).has(Vector2i(2, 2)));
 }
 
-TEST_CASE("[AudioStreamInteractive] Serialized transitions can be loaded after shrinking") {
+TEST_CASE("[Audio][AudioStreamInteractive] Serialized transitions can be loaded after shrinking") {
 	Ref<AudioStreamInteractive> stream;
 	stream.instantiate();
 	stream->set_clip_count(3);
@@ -163,7 +163,7 @@ TEST_CASE("[AudioStreamInteractive] Serialized transitions can be loaded after s
 	CHECK(serialized_transitions(reloaded).size() == 1);
 }
 
-TEST_CASE("[AudioStreamInteractive] Zero-clip serialization drops concrete transitions without losing undo state") {
+TEST_CASE("[Audio][AudioStreamInteractive] Zero-clip serialization drops concrete transitions without losing undo state") {
 	Ref<AudioStreamInteractive> stream;
 	stream.instantiate();
 	stream->set_clip_count(2);
@@ -192,7 +192,7 @@ TEST_CASE("[AudioStreamInteractive] Zero-clip serialization drops concrete trans
 	CHECK(restored.has(Vector2i(1, 1)));
 }
 
-TEST_CASE("[AudioStreamInteractive] Repeated serialization never mutates the retained transition map") {
+TEST_CASE("[Audio][AudioStreamInteractive] Repeated serialization never mutates the retained transition map") {
 	Ref<AudioStreamInteractive> stream;
 	stream.instantiate();
 	stream->set_clip_count(3);
@@ -212,6 +212,37 @@ TEST_CASE("[AudioStreamInteractive] Repeated serialization never mutates the ret
 	stream->set_clip_count(3);
 	CHECK(serialized_transitions(stream).size() == 2);
 	CHECK(serialized_transitions(stream).has(Vector2i(0, 2)));
+}
+
+TEST_CASE("[Audio][AudioStreamInteractive] Shrinking and restoring preserves wildcard and held transitions") {
+	Ref<AudioStreamInteractive> stream;
+	stream.instantiate();
+	stream->set_clip_count(4);
+	const int any = AudioStreamInteractive::CLIP_ANY;
+	add_transition(stream, any, any);
+	stream->add_transition(1, 3,
+			AudioStreamInteractive::TRANSITION_FROM_TIME_NEXT_BEAT,
+			AudioStreamInteractive::TRANSITION_TO_TIME_START,
+			AudioStreamInteractive::FADE_AUTOMATIC,
+			0.75f, false, -1, true);
+
+	stream->set_clip_count(2);
+	Dictionary reduced = serialized_transitions(stream);
+	CHECK(reduced.size() == 1);
+	CHECK(reduced.has(Vector2i(any, any)));
+	CHECK_FALSE(reduced.has(Vector2i(1, 3)));
+	CHECK(stream->has_transition(1, 3));
+	CHECK(stream->is_transition_holding_previous(1, 3));
+	CHECK(stream->get_transition_fade_beats(1, 3) == doctest::Approx(0.75f));
+
+	stream->set_clip_count(4);
+	Dictionary restored = serialized_transitions(stream);
+	CHECK(restored.size() == 2);
+	CHECK(restored.has(Vector2i(any, any)));
+	CHECK(restored.has(Vector2i(1, 3)));
+	Dictionary state = restored[Vector2i(1, 3)];
+	CHECK(bool(state["hold_previous"]));
+	CHECK(float(state["fade_beats"]) == doctest::Approx(0.75f));
 }
 
 } // namespace TestAudioStreamInteractive
