@@ -281,4 +281,71 @@ TEST_CASE("[Audio][AudioStreamWAV] WAV explicit loop endpoints preserve last-fra
 	}
 }
 
+
+TEST_CASE("[Audio][AudioStreamWAV] copy-on-write get_data shares the original large buffer") {
+	Ref<AudioStreamWAV> stream = memnew(AudioStreamWAV);
+	Vector<uint8_t> original;
+	original.resize(256 * 1024);
+	uint8_t *original_write = original.ptrw();
+	for (int i = 0; i < original.size(); i++) {
+		original_write[i] = uint8_t(i % 251);
+	}
+	stream->set_data(original);
+
+	// No additional 256 KiB allocation is required to read this buffer.
+	const Vector<uint8_t> snapshot = stream->get_data();
+	REQUIRE_EQ(snapshot.size(), original.size());
+	CHECK(snapshot.ptr() == original.ptr());
+	CHECK_EQ(snapshot[0], uint8_t(0));
+	CHECK_EQ(snapshot[snapshot.size() - 1], uint8_t((snapshot.size() - 1) % 251));
+}
+
+TEST_CASE("[Audio][AudioStreamWAV] mutating a returned buffer detaches without changing stream samples") {
+	Ref<AudioStreamWAV> stream = memnew(AudioStreamWAV);
+	Vector<uint8_t> raw;
+	raw.resize(64 * 1024);
+	uint8_t *raw_write = raw.ptrw();
+	for (int i = 0; i < raw.size(); i++) {
+		raw_write[i] = uint8_t(i % 239);
+	}
+	stream->set_data(raw);
+
+	Vector<uint8_t> snapshot = stream->get_data();
+	REQUIRE(snapshot.ptr() == raw.ptr());
+	snapshot.ptrw()[0] = 253;
+	snapshot.ptrw()[1024] = 254;
+	CHECK(snapshot.ptr() != raw.ptr());
+	CHECK_EQ(raw[0], uint8_t(0));
+	CHECK_EQ(raw[1024], uint8_t(1024 % 239));
+	const Vector<uint8_t> streamed = stream->get_data();
+	CHECK_EQ(streamed[0], uint8_t(0));
+	CHECK_EQ(streamed[1024], uint8_t(1024 % 239));
+	CHECK_EQ(snapshot[0], uint8_t(253));
+	CHECK_EQ(snapshot[1024], uint8_t(254));
+}
+
+TEST_CASE("[Audio][AudioStreamWAV] replacing data preserves previous snapshots") {
+	Ref<AudioStreamWAV> stream = memnew(AudioStreamWAV);
+	Vector<uint8_t> first = { 12, 34, 56, 78 };
+	stream->set_data(first);
+	const Vector<uint8_t> old_snapshot = stream->get_data();
+	const Vector<uint8_t> next = { 1, 2, 3 };
+	stream->set_data(next);
+	CHECK_EQ(old_snapshot.size(), 4);
+	CHECK_EQ(old_snapshot[0], uint8_t(12));
+	CHECK_EQ(old_snapshot[3], uint8_t(78));
+	const Vector<uint8_t> current = stream->get_data();
+	REQUIRE_EQ(current.size(), 3);
+	CHECK_EQ(current[0], uint8_t(1));
+	CHECK_EQ(current[2], uint8_t(3));
+}
+
+TEST_CASE("[Audio][AudioStreamWAV] empty sample buffers remain valid") {
+	Ref<AudioStreamWAV> stream = memnew(AudioStreamWAV);
+	const Vector<uint8_t> empty = stream->get_data();
+	CHECK(empty.is_empty());
+	stream->set_data(Vector<uint8_t>());
+	CHECK(stream->get_data().is_empty());
+}
+
 } // namespace TestAudioStreamWAV
