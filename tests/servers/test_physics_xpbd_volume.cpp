@@ -31,6 +31,8 @@ TEST_FORCE_LINK(test_physics_xpbd_volume)
 
 #include "servers/physics_xpbd_volume.h"
 
+#include <limits>
+
 namespace TestPhysicsXPBDVolume {
 
 // A positive-winding unit tetrahedron with outward-oriented faces.
@@ -144,6 +146,42 @@ TEST_CASE("[Physics] XPBD volume compliance softens correction and avoids singul
 	CHECK_FALSE(solve_tetra_volume(p, fixed_mass, 1.0 / 6.0, 0.0, lambda));
 	CHECK(lambda == 0.0);
 	CHECK(delta_lambda == 4.0);
+}
+
+TEST_CASE("[Physics] XPBD volume accepts small nonzero weighted gradients") {
+	// A fixed epsilon used to drop these gradients even though the
+	// scalar correction is representable and the geometry is nondegenerate.
+	real_t lambda = real_t(0.0);
+	real_t delta_lambda = real_t(0.0);
+	CHECK(physics_xpbd_volume_delta(real_t(1e-8), real_t(1e-10),
+			real_t(0.0), lambda, delta_lambda));
+	CHECK(lambda == doctest::Approx(-100.0).epsilon(1e-5));
+	CHECK(delta_lambda == doctest::Approx(-100.0).epsilon(1e-5));
+}
+
+TEST_CASE("[Physics] XPBD volume multiplier overflow cannot partially mutate solver state") {
+	real_t lambda = real_t(1.0), delta_lambda = real_t(4.0);
+	const real_t error = std::numeric_limits<real_t>::max();
+	const real_t weight = std::numeric_limits<real_t>::min();
+	CHECK_FALSE(physics_xpbd_volume_delta(error, weight, real_t(0.0), lambda, delta_lambda));
+	CHECK(lambda == real_t(1.0));
+	CHECK(delta_lambda == real_t(4.0));
+	CHECK_FALSE(physics_xpbd_volume_delta(real_t(1.0), real_t(1.0),
+			std::numeric_limits<real_t>::infinity(), lambda, delta_lambda));
+	CHECK(lambda == real_t(1.0));
+	CHECK(delta_lambda == real_t(4.0));
+}
+
+TEST_CASE("[Physics] XPBD enclosed volume remains meaningful for tiny valid tetrahedra") {
+	const real_t scale = real_t(1e-3);
+	const Vector3 p[4] = {
+		Vector3(), Vector3(scale, 0, 0), Vector3(0, scale, 0), Vector3(0, 0, scale)
+	};
+	Vector3 gradients[4];
+	const real_t volume = tetra_volume_and_gradients(p, gradients);
+	CHECK(volume / (scale * scale * scale) == doctest::Approx(1.0 / 6.0).epsilon(1e-4));
+	CHECK(volume > real_t(0.0));
+	CHECK(volume < CMP_EPSILON); // Old absolute threshold rejected it.
 }
 
 } // namespace TestPhysicsXPBDVolume
