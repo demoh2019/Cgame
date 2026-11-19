@@ -701,9 +701,16 @@ void GodotBody3D::integrate_forces(real_t p_step, bool p_defer_motion) {
 									sphere->get_radius() * uniform_scale, shape_volume, water_height);
 						} else if (godot_physics_fluid_capsule_vertical_3d(shape_world.basis, uniform_scale)) {
 							const GodotCapsuleShape3D *capsule = static_cast<const GodotCapsuleShape3D *>(shape);
-							sample = godot_physics_fluid_vertical_capsule_sample_3d(shape_world.origin,
-									capsule->get_radius() * uniform_scale,
-									capsule->get_height() * uniform_scale, shape_volume, water_height);
+							// Raw PhysicsServer shapes can specify height < 2*radius,
+							// which is not a cylinder plus hemispheres. Keep the
+							// AABB behavior rather than returning zero displaced volume.
+							if (capsule->get_radius() > 0.0 && capsule->get_height() >= real_t(2.0) * capsule->get_radius()) {
+								sample = godot_physics_fluid_vertical_capsule_sample_3d(shape_world.origin,
+										capsule->get_radius() * uniform_scale,
+										capsule->get_height() * uniform_scale, shape_volume, water_height);
+							} else {
+								sample = godot_physics_fluid_sample_3d(bounds, shape_volume, water_height);
+							}
 						} else {
 							// A tilted capsule has noncircular horizontal slices.
 							sample = godot_physics_fluid_sample_3d(bounds, shape_volume, water_height);
