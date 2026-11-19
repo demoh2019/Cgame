@@ -47,7 +47,24 @@ To check GDScript parsing separately using the installed Godot executable:
     godot --headless --path /path/to/your/project --check-only --script res://ai_generated/player.gd
 
 Godot supports --check-only with --script for syntax/parser checks; run it
-for every relevant .gd script. Static inspection by this addon **does not**
+for every relevant .gd script.
+
+To verify ALL generated .gd files and write a report in one operation, run:
+
+    python3 misc/ai_game_builder/tools/check_generated.py \
+      --project /path/to/your/game --godot godot \
+      --report /path/to/ai-diagnostics.json
+
+This discovers scripts inside res://ai_generated/, calls Godot --check-only
+separately on each script, captures parse errors and exit codes, and emits
+JSON diagnostics. It uses a timeout and will not execute the game by default.
+To additionally launch the generated main scene for three headless frames,
+explicitly pass --smoke-run **in a sandbox only**: that mode executes
+untrusted game code and is NOT a safe static check.
+
+Paste error messages or JSON report contents into the editor's diagnostics
+field and choose Ask AI to repair. The AI still proposes changes for review;
+the standalone checker does not silently edit anything. Static inspection by this addon **does not**
 validate GDScript syntax, fully parse .tscn files, exercise game mechanics, run
 scripts or prove that a generated game is playable. Execute untrusted
 generated games only in a suitably isolated environment.
@@ -80,7 +97,10 @@ From a local Godot 4 installation, run from the Godot repository root:
 The suite checks schema validation, path security, duplicate and size limits,
 JSON parsing, file creation, update, overwrite refusal, preflight behavior,
 resource-reference validation, JSON diagnostics, unsafe editor scripts, and
-risk warnings.
+risk warnings. Python tests of tools/check_generated.py can be run even without
+Godot installed:
+
+    python3 -m unittest discover -s misc/ai_game_builder/tests -p 'test_*.py' -v
 Run a manual editor smoke test to validate API integration and UI behavior.
 
 ## Future work
