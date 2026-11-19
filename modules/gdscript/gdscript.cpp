@@ -318,7 +318,9 @@ void GDScript::_get_script_property_list(List<PropertyInfo> *r_list, bool p_incl
 	const GDScript *sptr = this;
 
 	while (sptr) {
-		Vector<_GDScriptMemberSort> msort;
+		LocalVector<_GDScriptMemberSort> msort;
+		// Only members declared at this level are emitted, so avoid growth reallocations.
+		msort.reserve(sptr->members.size());
 		for (const KeyValue<StringName, MemberInfo> &E : sptr->member_indices) {
 			if (!sptr->members.has(E.key)) {
 				continue; // Skip base class members.
@@ -1077,16 +1079,18 @@ bool GDScript::_set(const StringName &p_name, const Variant &p_value) {
 void GDScript::_get_property_list(List<PropertyInfo> *p_properties) const {
 	p_properties->push_back(PropertyInfo(Variant::STRING, "script/source", PROPERTY_HINT_NONE, "", PROPERTY_USAGE_NO_EDITOR | PROPERTY_USAGE_INTERNAL));
 
-	List<const GDScript *> classes;
-	const GDScript *top = this;
-	while (top) {
+	// A contiguous stack avoids one list-node allocation per inherited script.
+	LocalVector<const GDScript *> classes;
+	for (const GDScript *top = this; top; top = top->base.ptr()) {
 		classes.push_back(top);
-		top = top->base.ptr();
 	}
 
-	for (const List<const GDScript *>::Element *E = classes.back(); E; E = E->prev()) {
-		Vector<_GDScriptMemberSort> msort;
-		for (const KeyValue<StringName, MemberInfo> &F : E->get()->static_variables_indices) {
+	// Static script properties are emitted base-first, exactly as before.
+	for (uint32_t i = classes.size(); i > 0; --i) {
+		const GDScript *current = classes[i - 1];
+		LocalVector<_GDScriptMemberSort> msort;
+		msort.reserve(current->static_variables_indices.size());
+		for (const KeyValue<StringName, MemberInfo> &F : current->static_variables_indices) {
 			_GDScriptMemberSort ms;
 			ms.index = F.value.index;
 			ms.name = F.key;
@@ -1094,12 +1098,11 @@ void GDScript::_get_property_list(List<PropertyInfo> *p_properties) const {
 		}
 		msort.sort();
 
-		for (int i = 0; i < msort.size(); i++) {
-			p_properties->push_back(E->get()->static_variables_indices[msort[i].name].property_info);
+		for (const _GDScriptMemberSort &member : msort) {
+			p_properties->push_back(current->static_variables_indices[member.name].property_info);
 		}
 	}
 }
-
 void GDScript::_bind_methods() {
 	ClassDB::bind_vararg_method(METHOD_FLAGS_DEFAULT, "new", &GDScript::_new, MethodInfo("new"));
 }
@@ -1763,6 +1766,7 @@ void GDScriptInstance::get_property_list(List<PropertyInfo> *r_properties) const
 #endif
 
 		LocalVector<_GDScriptMemberSort> msort;
+		msort.reserve(sptr->members.size());
 		for (const KeyValue<StringName, GDScript::MemberInfo> &F : sptr->member_indices) {
 			if (!sptr->members.has(F.key)) {
 				continue; // Skip base class members.
