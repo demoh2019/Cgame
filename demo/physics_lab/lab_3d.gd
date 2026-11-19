@@ -224,6 +224,37 @@ func _make_joints() -> void:
     slider.node_b = slider.get_path_to(sliding_weight)
 
 
+# An indexed, watertight cube with eight SHARED vertices. A BoxMesh
+# duplicates vertices per face and is unsuitable for tetra FEM cooking.
+# The new conservative star tetrahedralizer produces six actual tets.
+func _build_fem_convex_cube() -> ArrayMesh:
+    var vertices := PackedVector3Array([
+        Vector3(-1.2, -1.2, -1.2), Vector3(1.2, -1.2, -1.2),
+        Vector3(1.2, 1.2, -1.2), Vector3(-1.2, 1.2, -1.2),
+        Vector3(-1.2, -1.2, 1.2), Vector3(1.2, -1.2, 1.2),
+        Vector3(1.2, 1.2, 1.2), Vector3(-1.2, 1.2, 1.2)
+    ])
+    var indices := PackedInt32Array([
+        0, 2, 1, 0, 3, 2,
+        4, 5, 6, 4, 6, 7,
+        0, 1, 5, 0, 5, 4,
+        3, 7, 6, 3, 6, 2,
+        0, 4, 7, 0, 7, 3,
+        1, 2, 6, 1, 6, 5
+    ])
+    var normals := PackedVector3Array()
+    for vertex in vertices:
+        normals.append(vertex.normalized())
+    var arrays := []
+    arrays.resize(Mesh.ARRAY_MAX)
+    arrays[Mesh.ARRAY_VERTEX] = vertices
+    arrays[Mesh.ARRAY_NORMAL] = normals
+    arrays[Mesh.ARRAY_INDEX] = indices
+    var result := ArrayMesh.new()
+    result.add_surface_from_arrays(Mesh.PRIMITIVE_TRIANGLES, arrays)
+    return result
+
+
 func _make_soft_body() -> void:
     var soft := SoftBody3D.new()
     soft.name = "DeformableMesh"
@@ -233,12 +264,24 @@ func _make_soft_body() -> void:
     mesh.radial_segments = 16
     mesh.rings = 8
     soft.mesh = mesh
-    soft.position = Vector3(14, 6, -11)
+    soft.position = Vector3(11.7, 6, -11)
     soft.simulation_precision = 9
     soft.total_mass = 3.0
     soft.material_override = _material(Color("#cf9aef"))
     add_child(soft)
-    _static_box("SoftBodyObstacle", Vector3(14, 0.75, -11), Vector3(6, 1.5, 6), Color("#b3a9ce"))
+
+    # Unlike the sphere above, this indexed, closed, convex mesh has a
+    # deterministic six-tetrahedral FEM interior. Other physics engines
+    # may ignore the experimental GodotPhysics3D FEM extension.
+    var fem_cube := SoftBody3D.new()
+    fem_cube.name = "FEMConvexCubeSixTets"
+    fem_cube.mesh = _build_fem_convex_cube()
+    fem_cube.position = Vector3(16.6, 6, -11)
+    fem_cube.simulation_precision = 12
+    fem_cube.total_mass = 4.0
+    fem_cube.material_override = _material(Color("#82dae7"))
+    add_child(fem_cube)
+    _static_box("SoftBodyObstacle", Vector3(14, 0.75, -11), Vector3(8.5, 1.5, 6), Color("#b3a9ce"))
 
 
 func _make_ccd_station() -> void:
