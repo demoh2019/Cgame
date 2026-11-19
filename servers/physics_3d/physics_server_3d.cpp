@@ -661,7 +661,10 @@ PhysicsServer3D::PhysicsServer3D() {
 	GLOBAL_DEF(PropertyInfo(Variant::FLOAT, "physics/3d/solver/soft_body_tetra_fem_poisson_ratio", PROPERTY_HINT_RANGE, "0,0.49,0.01"), 0.3);
 	// Optional large-deformation Mooney-Rivlin rubber-like material, with
 	// two isochoric invariants and separate volumetric compression response.
-	GLOBAL_DEF(PropertyInfo(Variant::INT, "physics/3d/solver/soft_body_tetra_fem_material_model", PROPERTY_HINT_ENUM, "Neo-Hookean,Mooney-Rivlin"), 0);
+	GLOBAL_DEF(PropertyInfo(Variant::INT, "physics/3d/solver/soft_body_tetra_fem_material_model", PROPERTY_HINT_ENUM, "Neo-Hookean,Mooney-Rivlin,Ogden"), 0);
+	// One-term principal-stretch Ogden hyperelastic material, normalized to
+	// unit Young modulus. Enabled only with material_model=2; default is 3.
+	GLOBAL_DEF(PropertyInfo(Variant::FLOAT, "physics/3d/solver/soft_body_tetra_ogden_exponent", PROPERTY_HINT_RANGE, "1,8,0.1"), 3.0);
 	GLOBAL_DEF(PropertyInfo(Variant::FLOAT, "physics/3d/solver/soft_body_tetra_mooney_rivlin_fraction", PROPERTY_HINT_RANGE, "0,1,0.01"), 0.5);
 	// Experimental tension-only reinforcing fibers transported in a tetra's
 	// undeformed material frame. Independent of isotropic Neo-Hookean FEM.
