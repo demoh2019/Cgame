@@ -203,6 +203,35 @@ ui_accept={
 }
 
 
+TEST_CASE("[ConfigFile] encode_to_text builder preserves settings and empty sections") {
+	ConfigFile single;
+	single.set_value("", "value", 42);
+	CHECK(single.encode_to_text() == "value=42\n");
+
+	ConfigFile settings;
+	settings.set_value("display", "name", "Cgame");
+	settings.set_value("display", "quality", 3);
+	settings.set_value("display", "enabled", true);
+	settings.set_value("paths", "resource", "res://assets/model.glb");
+	const String serialized = settings.encode_to_text();
+	ConfigFile decoded;
+	CHECK(decoded.parse(serialized) == OK);
+	CHECK(decoded.get_value("display", "name") == "Cgame");
+	CHECK(decoded.get_value("display", "quality") == 3);
+	CHECK(decoded.get_value("display", "enabled") == true);
+	CHECK(decoded.get_value("paths", "resource") == "res://assets/model.glb");
+
+	ConfigFile many;
+	for (int i = 0; i < 512; i++) {
+		many.set_value("values", "k_" + itos(i), i);
+	}
+	ConfigFile restored;
+	CHECK(restored.parse(many.encode_to_text()) == OK);
+	for (int i = 0; i < 512; i++) {
+		CHECK(restored.get_value("values", "k_" + itos(i)) == i);
+	}
+}
+
 TEST_CASE("[ConfigFile][Performance] Hot section and key lookups retain all semantics") {
 	ConfigFile config;
 	const int sections = 11;
