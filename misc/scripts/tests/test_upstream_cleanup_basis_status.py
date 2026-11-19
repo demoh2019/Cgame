@@ -92,7 +92,7 @@ Error cleanup(Error err) {
     return OK;
 }
 int main() {
-    if (cleanup(FAIL) != FAIL || events != EXPECTED) return 1;
+    if (cleanup(FAIL) != FAIL || events != std::vector<std::string>EXPECTED) return 1;
     events.clear();
     display_server = new DisplayServer;
     if (cleanup(OK) != OK || !events.empty()) return 2;
