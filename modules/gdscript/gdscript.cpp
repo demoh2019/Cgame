@@ -363,7 +363,8 @@ bool GDScript::has_method(const StringName &p_method) const {
 }
 
 bool GDScript::has_static_method(const StringName &p_method) const {
-	return member_functions.has(p_method) && member_functions[p_method]->is_static();
+	const GDScriptFunction *const *function = member_functions.getptr(p_method);
+	return function != nullptr && (*function)->is_static();
 }
 
 int GDScript::get_script_method_argument_count(const StringName &p_method, bool *r_is_valid) const {
@@ -723,8 +724,9 @@ void GDScript::_save_old_static_data() {
 
 void GDScript::_restore_old_static_data() {
 	for (KeyValue<StringName, MemberInfo> &E : old_static_variables_indices) {
-		if (static_variables_indices.has(E.key)) {
-			static_variables.write[static_variables_indices[E.key].index] = old_static_variables[E.value.index];
+		const MemberInfo *member = static_variables_indices.getptr(E.key);
+		if (member != nullptr) {
+			static_variables.write[member->index] = old_static_variables[E.value.index];
 		}
 	}
 	old_static_variables_indices.clear();
@@ -2127,9 +2129,9 @@ String GDScriptLanguage::get_name() const {
 /* LANGUAGE FUNCTIONS */
 
 void GDScriptLanguage::_add_global(const StringName &p_name, const Variant &p_value) {
-	if (globals.has(p_name)) {
-		//overwrite existing
-		global_array.write[globals[p_name]] = p_value;
+	if (const int *existing_index = globals.getptr(p_name)) {
+		// Overwrite the existing slot without a second hash lookup.
+		global_array.write[*existing_index] = p_value;
 		return;
 	}
 
@@ -2146,11 +2148,13 @@ void GDScriptLanguage::_add_global(const StringName &p_name, const Variant &p_va
 }
 
 void GDScriptLanguage::_remove_global(const StringName &p_name) {
-	if (!globals.has(p_name)) {
+	const int *existing_index = globals.getptr(p_name);
+	if (existing_index == nullptr) {
 		return;
 	}
-	global_array_empty_indexes.push_back(globals[p_name]);
-	global_array.write[globals[p_name]] = Variant::NIL;
+	const int index = *existing_index;
+	global_array_empty_indexes.push_back(index);
+	global_array.write[index] = Variant::NIL;
 	globals.erase(p_name);
 }
 
@@ -2163,11 +2167,11 @@ void GDScriptLanguage::add_named_global_constant(const StringName &p_name, const
 }
 
 Variant GDScriptLanguage::get_any_global_constant(const StringName &p_name) {
-	if (named_globals.has(p_name)) {
-		return named_globals[p_name];
+	if (const Variant *named = named_globals.getptr(p_name)) {
+		return *named;
 	}
-	if (globals.has(p_name)) {
-		return _global_array[globals[p_name]];
+	if (const int *global_index = globals.getptr(p_name)) {
+		return _global_array[*global_index];
 	}
 	ERR_FAIL_V_MSG(Variant(), vformat("Could not find any global constant with name: %s.", p_name));
 }
