@@ -13,6 +13,7 @@ var _belt_enabled := true
 var _belt_speed := 6.0
 var _gravity_enabled := true
 var _gravity_area: Area3D
+var _vortex_area: Area3D
 var _conveyor: StaticBody3D
 var _readout: Label
 var _elapsed := 0.0
@@ -89,6 +90,18 @@ func _label(name: String, at: Vector3, label_text: String) -> void:
 
 
 func _make_vortex() -> void:
+    _vortex_area = Area3D.new()
+    _vortex_area.name = "VortexDetector"
+    _vortex_area.position = VORTEX_CENTER
+    _vortex_area.collision_layer = 0
+    _vortex_area.collision_mask = 1
+    _vortex_area.monitoring = true
+    var detector_shape := CollisionShape3D.new()
+    var sphere := SphereShape3D.new()
+    sphere.radius = VORTEX_RADIUS
+    detector_shape.shape = sphere
+    _vortex_area.add_child(detector_shape)
+    add_child(_vortex_area)
     var disk := MeshInstance3D.new()
     disk.name = "VortexZone"
     disk.position = Vector3(VORTEX_CENTER.x, 0.16, VORTEX_CENTER.z)
@@ -298,7 +311,7 @@ func _physics_process(delta: float) -> void:
     if not _vortex_enabled:
         return
     _elapsed += delta
-    for node in get_tree().get_nodes_in_group("demo_dynamic"):
+    for node in _vortex_area.get_overlapping_bodies():
         if not node is RigidBody3D:
             continue
         var body := node as RigidBody3D
