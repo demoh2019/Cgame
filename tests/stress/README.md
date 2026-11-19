@@ -1365,7 +1365,50 @@ The tests check finite body states and joint spacing, not physical
 equivalence to the serial solver or measured performance improvements.
 Start with small scales and monitor CPU usage, peak RSS and frame p95.
 
-### 3D cached constraint colors and batched setup
+### Idempotent static-body transform updates (GodotPhysics2D / GodotPhysics3D)
+
+Jolt exposes a `SetPositionAndRotationWhenChanged` path to avoid broadphase
+updates and waking neighboring bodies when a pose is unchanged. Cgame's
+built-in GodotPhysics2D and GodotPhysics3D now similarly short-circuit an
+**exactly equal** `BODY_STATE_TRANSFORM` assignment for static bodies.
+
+This avoids unnecessary shape refresh, inverse-transform recomputation and
+`wakeup_neighbours()` traversals. The test uses exact transform equality,
+rather than a small tolerance: even a very small real change continues to
+update collision proxies and wake connected rigid bodies. Kinematic and
+rigid-body transform paths, changing shape data, and shape-change callbacks
+are unaffected.
+
+The headless regression connects each static body to a dynamic rigid body
+with a pin joint. It explicitly sleeps the dynamic body, repeats 128 identical
+static transforms without permitting a wakeup, then verifies that a changed
+static transform wakes the neighbor. It complements the existing ray-query
+and shape-resize broadphase regression.
+
+```bash
+python3 -m unittest discover -s tests/stress -p 'test_physics_static_transform_noop.py' -v
+./bin/godot.macos.editor.arm64 --headless --path tests/stress \
+  --script res://physics_static_transform_sleep_regression.gd
+./bin/godot.macos.editor.arm64 --headless --path tests/stress \
+  --script res://physics_broadphase_aabb_cache_regression.gd
+```
+
+For a reproducible performance comparison with previous builds, use the
+existing 1024-static-bodies-per-scale workload. It reports
+`unchanged_transform_updates_ms`, `ns_per_update`, frame p95 and collision
+pair counts for both dimensions:
+
+```bash
+python3 tests/stress/run.py --godot ./bin/godot.macos.editor.arm64 \
+  --case physics_proxy_same_aabb_2d,physics_proxy_same_aabb_3d \
+  --scale 4 --frames 90 --repeats 5 --timeout 600 \
+  --rss-limit-mib 4096 --output out/static-transform-noop.json
+```
+
+The static Python tests check source contracts; measured speedups and runtime
+correctness still require a locally compiled Godot binary.
+
+## 3D cached constraint colors and batched setup
 
 The built-in **GodotPhysics3D** opt-in large-island solver now follows the
 topology-reuse technique also used by Cgame's 2D solver. When a large island
