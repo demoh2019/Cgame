@@ -259,9 +259,50 @@ exposes rate-limited `c_build` and `c_repair` requests, and the client can
 replicate the same visual wall/HP state. The world imposes a 300-wall cap for
 this experimental gameplay slice.
 
-**Scope:** barricades currently survive only while the server/session is
-running. They are not included in Nakama character saves, and do not yet have
-guild ownership, decay, mesh damage, server-sharded persistence, or siege tools.
+### Durable dedicated-server barricades
+
+On the dedicated server, world barricades now persist to
+`user://worlds/barricades_seed_<seed>.json`. The world is saved after changes
+(at most 20 seconds between save attempts) and flushed on graceful
+`--quit-after` shutdown. Each snapshot is written to a temporary file and
+renamed into place without deleting a previous valid snapshot first.
+If an existing snapshot cannot be loaded or validated, the server **refuses
+to start** rather than wiping player-owned defenses. Keep backups of this
+server data directory. A force-kill or hardware failure can lose up to one
+autosave interval, and file rename may fail on filesystems that cannot
+replace an existing destination.
+
+The save includes the world seed, version, position, current durability,
+stable structure ID and owner identity. It never stores transient network
+peer IDs as ownership; reconnecting with the same authenticated Nakama
+account can repair its existing walls, and another account cannot take
+them over by copying the display name. World collision blockers and IDs
+are reconstructed at startup. Corrupt JSON, wrong seed, duplicates, invalid
+owner IDs and overlapping barriers are rejected before any live world is
+modified. Built and destroyed walls use the same persistence mechanism.
+
+**Offline security limitation:** without Nakama, anonymous structures are
+tagged by a local peer ID, suitable only for trusted local testing; this
+is **not secure permanent ownership** on unauthenticated public servers.
+The local playable scene uses a directly instantiated GameServer and remains
+memory-only because it does not run the dedicated-server bootstrap.
+Durability and owner information remain server-authoritative over the
+network, but world files are stored locally on each dedicated server and
+are not synchronized across shards, clustered servers or Nakama storage.
+
+Guild ownership, decay, mesh damage, server-sharded persistence and siege
+tools remain later milestones. Character inventory/stash persistence is
+separate from these world snapshots.
+
+Run the persistence tests, including real disk writes, restarts and corrupt
+file rejection, with:
+
+```sh
+godot --headless --path game --script res://tests/run_all.gd
+```
+
+The suite `game/tests/test_world_persistence.gd` uses a separate test-only
+path and never edits production save files.
 These are planned for a future unified world-building milestone.
 
 To run all game tests, including terrain collision, resources, construction,
