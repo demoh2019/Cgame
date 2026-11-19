@@ -90,6 +90,10 @@ func apply_brush(local_position: Vector3, radius: float, strength: float, mode: 
 	initialize_storage()
 	if radius <= 0.0 or strength == 0.0 or (strength < 0.0 and mode != BrushMode.RAISE):
 		return 0
+	if mode < BrushMode.RAISE or mode > BrushMode.PAINT_TEXTURE_LAYER:
+		return 0
+	if mode == BrushMode.PAINT_TEXTURE_LAYER and (layer_index < 0 or layer_index > 3):
+		return 0
 	var previous: PackedFloat32Array = height_data.duplicate()
 	var changed: int = 0
 	var center_x: float = local_position.x / cell_size
