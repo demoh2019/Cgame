@@ -1819,7 +1819,8 @@ func _tick_raid_encounter() -> void:
 	var boss = Zombie.new(spawn_id, "brute",
 		Vector3(site.x, world.height_at(site.x, site.y), site.y), -1)
 	RaidEncounter.empower(boss)
-	var targets := {leader_id: {"position": leader.position, "alive": true, "safe": false}}
+	var targets: Dictionary = {}
+	targets[leader_id] = {"position": leader.position, "alive": true, "safe": false}
 	boss.receive_pack_alert(leader_id, targets)
 	zombies[spawn_id] = boss
 	raid_boss_id = spawn_id
