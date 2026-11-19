@@ -724,9 +724,12 @@ static void _collision_circle_circle(const GodotShape2D *p_a, const Transform2D 
 		const Vector2 separation = p_transform_a.get_origin() - p_transform_b.get_origin();
 		const real_t distance_squared = separation.length_squared();
 
-		// Coincident centers are handled by SAT to retain its previous-axis
-		// behavior. Negative effective radii are not valid for this shortcut.
-		if (radius_A >= 0.0 && radius_B >= 0.0 && distance_squared > 0.0) {
+		// Box2D-style coincident-circle manifold. At exactly equal centers,
+		// select a deterministic axis (or preserve the cached separator)
+		// instead of invoking SAT for a zero-length center direction.
+		// Leave two zero-radius coincident points to the legacy SAT path.
+		if (radius_A >= 0.0 && radius_B >= 0.0 &&
+				(distance_squared > 0.0 || combined_radius > 0.0)) {
 			if (distance_squared > combined_radius * combined_radius) {
 				if (p_collector->sep_axis) {
 					*p_collector->sep_axis = separation / Math::sqrt(distance_squared);
@@ -736,7 +739,22 @@ static void _collision_circle_circle(const GodotShape2D *p_a, const Transform2D 
 
 			p_collector->collided = true;
 			if (p_collector->callback) {
-				const Vector2 axis = separation / Math::sqrt(distance_squared);
+				Vector2 axis;
+				if (distance_squared > 0.0) {
+					axis = separation / Math::sqrt(distance_squared);
+				} else {
+					// SAT defaults to the Y axis for coincident points.
+					// Retain that contact orientation, or the cached axis
+					// when the pair previously had a valid separation.
+					axis = Vector2(0.0, -1.0);
+					if (p_collector->sep_axis && (*p_collector->sep_axis).is_finite()) {
+						const Vector2 cached_axis = *p_collector->sep_axis;
+						const real_t cached_length_squared = cached_axis.length_squared();
+						if (cached_length_squared > real_t(CMP_EPSILON) * real_t(CMP_EPSILON)) {
+							axis = -cached_axis / Math::sqrt(cached_length_squared);
+						}
+					}
+				}
 				p_collector->normal = axis;
 				p_collector->call(p_transform_a.get_origin() - axis * radius_A,
 						p_transform_b.get_origin() + axis * radius_B);
