@@ -5714,6 +5714,50 @@ func _ready():
 	memdelete(code_edit);
 }
 
+TEST_CASE("[SceneTree][CodeEdit] Large completion candidate buffers preserve every suggestion") {
+	CodeEdit *editor = memnew(CodeEdit);
+	SceneTree::get_singleton()->get_root()->add_child(editor);
+	editor->set_code_completion_enabled(true);
+	editor->set_text("apr");
+	editor->set_caret_column(3);
+	for (int i = 0; i < 512; i++) {
+		const String name = "apricot_" + itos(i);
+		editor->add_code_completion_option(CodeEdit::CodeCompletionKind::KIND_VARIABLE, name, name);
+	}
+	editor->update_code_completion_options();
+	const TypedArray<Dictionary> options = editor->get_code_completion_options();
+	REQUIRE_EQ(options.size(), 512);
+	for (int i = 0; i < options.size(); i++) {
+		const Dictionary option = options[i];
+		const String display = option["display_text"];
+		CHECK(display.begins_with("apricot_"));
+		CHECK_EQ(option["insert_text"], Variant(display));
+	}
+
+	memdelete(editor);
+}
+
+TEST_CASE("[SceneTree][CodeEdit] Completion matching keeps case and contiguous ranking") {
+	CodeEdit *editor = memnew(CodeEdit);
+	SceneTree::get_singleton()->get_root()->add_child(editor);
+	editor->set_code_completion_enabled(true);
+	editor->set_text("ab");
+	editor->set_caret_column(2);
+
+	editor->add_code_completion_option(CodeEdit::CodeCompletionKind::KIND_VARIABLE, "a_b", "a_b");
+	editor->add_code_completion_option(CodeEdit::CodeCompletionKind::KIND_VARIABLE, "ABValue", "ABValue");
+	editor->add_code_completion_option(CodeEdit::CodeCompletionKind::KIND_VARIABLE, "abValue", "abValue");
+	editor->add_code_completion_option(CodeEdit::CodeCompletionKind::KIND_VARIABLE, "a_middle_b", "a_middle_b");
+	editor->update_code_completion_options();
+
+	const TypedArray<Dictionary> options = editor->get_code_completion_options();
+	REQUIRE_EQ(options.size(), 4);
+	const Dictionary best = options[0];
+	CHECK_EQ(best["display_text"], Variant("abValue"));
+
+	memdelete(editor);
+}
+
 } // namespace TestCodeEdit
 
 #endif // ADVANCED_GUI_DISABLED
