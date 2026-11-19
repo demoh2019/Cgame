@@ -137,10 +137,10 @@ private:
 	real_t soft_body_tangential_drag_ratio = 0.0; // Optional skin friction on cloth faces.
 	real_t soft_body_xpbd_area_compliance = 0.0;
 	real_t soft_body_xpbd_membrane_compliance = 0.0; // Optional StVK surface membrane energy.
-	real_t soft_body_membrane_poisson_ratio = 0.3;
+	real_t soft_body_membrane_poisson_ratio = 0.3; // Plane-stress Poisson coupling.
+	real_t soft_body_membrane_damping_rate = 0.0; // Objective viscoelastic strain-rate relaxation, 1/s.
 	real_t soft_body_tetra_fem_compliance = 0.0; // Disabled by default.
 	real_t soft_body_tetra_fem_poisson_ratio = 0.3;
-	real_t soft_body_membrane_damping_rate = 0.0; // Objective viscoelastic strain-rate relaxation, 1/s. // Plane-stress Poisson coupling.
 	real_t soft_body_xpbd_shear_compliance = 0.0; // Opt-in angular shear preservation.
 	real_t soft_body_xpbd_dihedral_compliance = 0.0; // Opt-in angle-based cloth bending.
 	real_t soft_body_shape_matching_stiffness = 0.0; // Optional global shape recovery.
