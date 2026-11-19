@@ -36,6 +36,7 @@
 #include "servers/physics_3d/physics_server_3d_rendering_server_handler.h"
 #include "servers/physics_softbody_bending_plasticity.h"
 #include "servers/physics_softbody_link_damping.h"
+#include "servers/physics_softbody_aero_lift.h"
 #include "servers/physics_softbody_plasticity.h"
 #include "servers/physics_softbody_volume_safe.h"
 #include "servers/physics_xpbd_distance.h"
@@ -1636,7 +1637,9 @@ void GodotSoftBody3D::apply_forces(const LocalVector<GodotArea3D *> &p_wind_area
 	const bool apply_pressure = pressure_coefficient > CMP_EPSILON;
 	const bool apply_wind = !p_wind_areas.is_empty();
 	const bool apply_drag = drag_coefficient > 0.0;
-	if (!apply_pressure && !apply_wind && !apply_drag) {
+	const real_t lift_coefficient = get_space() ? get_space()->get_soft_body_lift_coefficient() : real_t(0.0);
+	const bool apply_lift = lift_coefficient > 0.0;
+	if (!apply_pressure && !apply_wind && !apply_drag && !apply_lift) {
 		return;
 	}
 
@@ -1650,7 +1653,7 @@ void GodotSoftBody3D::apply_forces(const LocalVector<GodotArea3D *> &p_wind_area
 			volume += vec3_dot(face.n[0]->x - org, vec3_cross(face.n[1]->x - org, face.n[2]->x - org));
 		}
 
-		if (apply_wind || apply_drag) {
+		if (apply_wind || apply_drag || apply_lift) {
 			Vector3 node_force;
 			if (apply_wind) {
 				for (const GodotArea3D *area : p_wind_areas) {
@@ -1658,17 +1661,25 @@ void GodotSoftBody3D::apply_forces(const LocalVector<GodotArea3D *> &p_wind_area
 				}
 			}
 
-			if (apply_drag && face.ra > CMP_EPSILON) {
-				// Quadratic aerodynamic drag against still air, projected onto
-				// the triangle normal (two-sided cloth). Average node velocity
-				// prevents seams from receiving inconsistent drag directions.
-				// The face force -0.5 * Cd * area * vn * abs(vn) is shared by
-				// its three nodes, requiring no additional per-vertex storage.
+			if ((apply_drag || apply_lift) && face.ra > CMP_EPSILON) {
+				// Share one average face velocity between aerodynamic effects.
+				// Drag dissipates normal motion; lift is orthogonal to the flow.
 				const Vector3 face_velocity = (face.n[0]->v + face.n[1]->v + face.n[2]->v) * real_t(1.0 / 3.0);
-				const real_t normal_speed = face.normal.dot(face_velocity);
-				if (Math::abs(normal_speed) > CMP_EPSILON) {
-					const real_t drag_per_node = -drag_coefficient * face.ra * real_t(1.0 / 6.0) * normal_speed * Math::abs(normal_speed);
-					node_force += face.normal * drag_per_node;
+				if (apply_drag) {
+					// The -0.5 * Cd * area * vn * abs(vn) drag is shared by
+					// all three triangle nodes (rest area convention).
+					const real_t normal_speed = face.normal.dot(face_velocity);
+					if (Math::abs(normal_speed) > CMP_EPSILON) {
+						const real_t drag_per_node = -drag_coefficient * face.ra * real_t(1.0 / 6.0) * normal_speed * Math::abs(normal_speed);
+						node_force += face.normal * drag_per_node;
+					}
+				}
+				if (apply_lift) {
+					Vector3 lift_force;
+					if (physics_softbody_compute_face_lift(face.normal, face_velocity, face.ra, lift_coefficient, lift_force)) {
+						// Face lift is distributed equally; no additional storage.
+						node_force += lift_force * real_t(1.0 / 3.0);
+					}
 				}
 			}
 
@@ -1774,7 +1785,7 @@ void GodotSoftBody3D::predict_motion(real_t p_delta) {
 
 	// Apply forces.
 	add_velocity(gravity * p_delta);
-	if (pressure_coefficient > CMP_EPSILON || !wind_areas.is_empty() || drag_coefficient > 0.0) {
+	if (pressure_coefficient > CMP_EPSILON || !wind_areas.is_empty() || drag_coefficient > 0.0 || get_space()->get_soft_body_lift_coefficient() > 0.0) {
 		apply_forces(wind_areas);
 	}
 
