@@ -319,5 +319,108 @@ class MirrorTests(unittest.TestCase):
         self.assertEqual(self.db.execute("SELECT number FROM source_records").fetchone()[0], 1)
 
 
+    def test_failed_first_item_does_not_starve_subsequent_batches(self):
+        class FailOne(FakeAPI):
+            def request(self, method, path, payload=None):
+                if method == "POST" and path.endswith("/issues") and payload["title"].startswith("[Upstream Issue] #1:"):
+                    raise m.MirrorError("synthetic invalid issue body")
+                return super().request(method, path, payload)
+
+        api = FailOne([issue(1), issue(2), issue(3)])
+        m.scan(api, self.db)
+        with redirect_stderr(io.StringIO()):
+            first = m.synchronize(api, self.db, kind="issues", limit=1, apply=True)
+        self.assertEqual((first["failures"], first["created_issues"]), (1, 0))
+        second = m.synchronize(api, self.db, kind="issues", limit=1, apply=True)
+        self.assertEqual((second["created_issues"], second["failures"]), (1, 0))
+        self.assertIn("number=2", api.writes[0][2]["body"])
+        self.assertEqual(self.db.execute("SELECT COUNT(*) FROM failures").fetchone()[0], 1)
+        third = m.synchronize(api, self.db, kind="issues", limit=1, apply=False,
+                              retry_failures=True)
+        self.assertEqual(third["sample"], ["issue #1"])
+
+    def test_retry_failures_retries_exactly_failed_item_and_clears_failure(self):
+        api = FakeAPI([issue(1)])
+        m.scan(api, self.db)
+        self.db.execute("INSERT INTO failures(kind,number,error) VALUES('issue',1,'transient')")
+        self.db.commit()
+        self.assertEqual(m.synchronize(api, self.db, kind="issues", apply=True)["created_issues"], 0)
+        out = m.synchronize(api, self.db, kind="issues", apply=True, retry_failures=True)
+        self.assertEqual(out["created_issues"], 1)
+        self.assertEqual(self.db.execute("SELECT COUNT(*) FROM failures").fetchone()[0], 0)
+
+    def test_closed_destination_copy_prevents_duplicate_after_lost_db(self):
+        source = issue(101)
+        mirror = {"number": 701, "title": "[Upstream Issue] 101", "state": "closed",
+                  "body": m.provenance_body(source, "issue"),
+                  "html_url": "https://github.com/demoh2019/godot/issues/701"}
+        api = FakeAPI([source], existing=[mirror])
+        m.scan(api, self.db)
+        out = m.synchronize(api, self.db, kind="issues", apply=True)
+        self.assertEqual(out["candidates"], 0)
+        self.assertEqual(api.writes, [])
+        self.assertEqual(self.db.execute("SELECT dest_number FROM mirrored WHERE number=101").fetchone()[0], 701)
+
+    def test_reset_preserves_completed_imports_and_failure_history(self):
+        api = FakeAPI([issue(1), issue(2)])
+        m.scan(api, self.db)
+        m.synchronize(api, self.db, kind="issues", limit=1, apply=True)
+        self.db.execute("INSERT INTO failures(kind,number,error) VALUES('issue',2,'cannot apply')")
+        self.db.commit()
+        m.scan(api, self.db, reset=True)
+        self.assertEqual(self.db.execute("SELECT COUNT(*) FROM mirrored").fetchone()[0], 1)
+        self.assertEqual(self.db.execute("SELECT COUNT(*) FROM failures").fetchone()[0], 1)
+        self.assertEqual(m.synchronize(api, self.db, kind="issues", apply=False)["candidates"], 0)
+
+    def test_negative_batch_limit_fails_before_any_writes(self):
+        api = FakeAPI([issue(1)])
+        m.scan(api, self.db)
+        with self.assertRaisesRegex(m.MirrorError, "--limit"):
+            m.synchronize(api, self.db, kind="issues", limit=-1, apply=True)
+        self.assertEqual(api.writes, [])
+
+    def test_cli_rejects_negative_scan_pages(self):
+        with redirect_stderr(io.StringIO()):
+            with self.assertRaises(SystemExit) as e:
+                m.main(["--db", str(Path(self.tmp.name) / "other.sqlite3"), "scan", "--max-pages", "-1"])
+        self.assertEqual(e.exception.code, 2)
+
+    def test_cli_rejects_negative_sync_limit(self):
+        with redirect_stderr(io.StringIO()):
+            with self.assertRaises(SystemExit) as e:
+                m.main(["--db", str(Path(self.tmp.name) / "other.sqlite3"), "sync", "--limit", "-9"])
+        self.assertEqual(e.exception.code, 2)
+
+    def test_scan_from_empty_repo_is_idempotent(self):
+        api = FakeAPI([])
+        for _ in range(2):
+            stats = m.scan(api, self.db, reset=True)
+            self.assertEqual((stats["issues"], stats["prs"], stats["records_seen"]), (0, 0, 0))
+        self.assertEqual(m.synchronize(api, self.db, apply=False)["candidates"], 0)
+
+    def test_pr_dry_run_includes_pr_without_code_write(self):
+        api = FakeAPI([issue(10, kind="pr")])
+        m.scan(api, self.db)
+        result = m.synchronize(api, self.db, kind="prs", limit=1)
+        self.assertEqual(result["sample"], ["pr #10"])
+        self.assertEqual(result["created_issues"], 0)
+        self.assertEqual(api.writes, [])
+
+    def test_anonymous_read_and_write_requires_token(self):
+        client = m.GitHub(token="")
+        with self.assertRaisesRegex(m.MirrorError, "GH_TOKEN"):
+            client.request("POST", "/repos/demoh2019/godot/issues", {"title": "x"})
+
+    def test_closed_issue_does_not_overwrite_existing_mappings(self):
+        api = FakeAPI([issue(40)])
+        m.scan(api, self.db)
+        m.synchronize(api, self.db, kind="issues", apply=True)
+        dest = self.db.execute("SELECT dest_number FROM mirrored WHERE number=40").fetchone()[0]
+        api.live_states[40] = "closed"
+        m.scan(api, self.db, reset=True)
+        self.assertEqual(m.synchronize(api, self.db, kind="issues", apply=True)["created_issues"], 0)
+        self.assertEqual(self.db.execute("SELECT dest_number FROM mirrored WHERE number=40").fetchone()[0], dest)
+
+
 if __name__ == "__main__":
     unittest.main()
