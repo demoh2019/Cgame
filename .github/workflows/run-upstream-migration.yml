@@ -57,7 +57,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          ref: master
+          ref: develop
           fetch-depth: 0
           persist-credentials: true
       - name: Register upstream remote
