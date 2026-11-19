@@ -52,7 +52,7 @@ func _test_2d() -> Dictionary:
 	var state := PhysicsServer2D.space_get_direct_state(space)
 	var begin := Time.get_ticks_usec()
 	var failures := 0
-	for repetition in range(REPEATS):
+	for _repetition in range(REPEATS):
 		for i in range(COUNT):
 			query.position = world_points[i]
 			var hits := state.intersect_point(query, 2)
@@ -120,7 +120,7 @@ func _test_3d() -> Dictionary:
 	var state := PhysicsServer3D.space_get_direct_state(space)
 	var begin := Time.get_ticks_usec()
 	var failures := 0
-	for repetition in range(REPEATS):
+	for _repetition in range(REPEATS):
 		for i in range(COUNT):
 			query.position = world_points[i]
 			var hits := state.intersect_point(query, 2)
