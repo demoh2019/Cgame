@@ -38,6 +38,7 @@
 #include "godot_collision_object_3d.h"
 #include "godot_soft_body_3d.h"
 
+#include "core/templates/local_vector.h"
 #include "core/typedefs.h"
 #include "servers/physics_restitution_combine.h"
 #include "servers/physics_3d/direct_states/physics_direct_space_state_3d.h"
@@ -120,12 +121,10 @@ private:
 	int friction_combine_mode = 0; // 0: legacy, 1: geometric, 2: average, 3: maximum
 	int restitution_combine_mode = 0; // 0: legacy sum, 1: max, 2: average, 3: min, 4: multiply, 5: geometric
 
-	enum {
-		INTERSECTION_QUERY_MAX = 2048
-	};
-
-	GodotCollisionObject3D *intersection_query_results[INTERSECTION_QUERY_MAX];
-	int intersection_query_subindex_results[INTERSECTION_QUERY_MAX];
+	// Reusable, grow-on-demand motion query buffers. Dense scenes can contain
+	// more than 2048 eligible shapes; never truncate the narrowphase candidates.
+	LocalVector<GodotCollisionObject3D *> intersection_query_results;
+	LocalVector<int> intersection_query_subindex_results;
 
 	real_t body_linear_velocity_sleep_threshold = 0.0;
 	real_t body_angular_velocity_sleep_threshold = 0.0;
