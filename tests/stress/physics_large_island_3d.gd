@@ -106,14 +106,14 @@ func run(tree: SceneTree, scale: int, frames: int, parallel: bool, high_priority
 		for island_id in range(extra_islands):
 			for i in range(1, extra_island_size):
 				var index := count + island_id * extra_island_size + i
-				var previous: Transform3D = PhysicsServer3D.body_get_state(
+				var previous_extra: Transform3D = PhysicsServer3D.body_get_state(
 						bodies[index - 1], PhysicsServer3D.BODY_STATE_TRANSFORM)
-				var current: Transform3D = PhysicsServer3D.body_get_state(
+				var current_extra: Transform3D = PhysicsServer3D.body_get_state(
 						bodies[index], PhysicsServer3D.BODY_STATE_TRANSFORM)
-				if not previous.origin.is_finite() or not current.origin.is_finite():
+				if not previous_extra.origin.is_finite() or not current_extra.origin.is_finite():
 					error = "Non-finite 3D independent-island joint positions"
 					break
-				max_joint_spacing = maxf(max_joint_spacing, previous.origin.distance_to(current.origin))
+				max_joint_spacing = maxf(max_joint_spacing, previous_extra.origin.distance_to(current_extra.origin))
 			if error != "":
 				break
 		if max_joint_spacing > 11.0:
