@@ -403,10 +403,10 @@ void SoftBody3D::_bind_methods() {
 
 	ADD_PROPERTY(PropertyInfo(Variant::INT, "point_count", PROPERTY_HINT_NONE, "", PROPERTY_USAGE_NONE), "", "get_point_count");
 
+	ADD_PROPERTY(PropertyInfo(Variant::INT, "disable_mode", PROPERTY_HINT_ENUM, "Remove,KeepActive"), "set_disable_mode", "get_disable_mode");
+
 	ADD_GROUP("Advanced FEM", "tetrahedral_");
 	ADD_PROPERTY(PropertyInfo(Variant::PACKED_INT32_ARRAY, "tetrahedral_indices"), "set_tetrahedral_indices", "get_tetrahedral_indices");
-
-	ADD_PROPERTY(PropertyInfo(Variant::INT, "disable_mode", PROPERTY_HINT_ENUM, "Remove,KeepActive"), "set_disable_mode", "get_disable_mode");
 
 	BIND_ENUM_CONSTANT(DISABLE_MODE_REMOVE);
 	BIND_ENUM_CONSTANT(DISABLE_MODE_KEEP_ACTIVE);
