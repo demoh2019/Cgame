@@ -1222,6 +1222,9 @@ GodotSpace2D::GodotSpace2D() {
 	contact_max_separation = GLOBAL_GET("physics/2d/solver/contact_max_separation");
 	contact_max_allowed_penetration = GLOBAL_GET("physics/2d/solver/contact_max_allowed_penetration");
 	contact_bias = GLOBAL_GET("physics/2d/solver/default_contact_bias");
+	// Read once at space creation, avoiding ProjectSettings lookups in the hot contact loop.
+	const real_t configured_restitution_threshold = GLOBAL_GET("physics/2d/solver/restitution_velocity_threshold");
+	restitution_velocity_threshold = MAX((real_t)0.0, configured_restitution_threshold);
 	constraint_bias = GLOBAL_GET("physics/2d/solver/default_constraint_bias");
 
 	broadphase = GodotBroadPhase2D::create_func();
