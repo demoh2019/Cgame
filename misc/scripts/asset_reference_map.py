@@ -6,6 +6,7 @@ Scope: quoted res:// literals in Godot text resources, not runtime dependencies.
 
 import argparse
 import json
+import re
 from pathlib import Path
 import sys
 
@@ -14,6 +15,16 @@ from asset_size_map import AssetSizeError, scan_project
 TEXT_EXTENSIONS = frozenset({".tscn", ".tres", ".gd", ".cs", ".gdshader", ".gdshaderinc", ".shader", ".gdextension"})
 MAX_TEXT_BYTES = 8 * 1024 * 1024
 MAX_ROOTS = 100
+# Search for meaningful lexer tokens in C instead of walking every ordinary
+# source character in Python. Patterns preserve the scanner's comment rules.
+_HASH_TOKENS = re.compile(r"""[#'"]""")
+_CPP_TOKENS = re.compile(r"""[/'"]""")
+_QUOTE_TOKENS = re.compile(r"""['"]""")
+_RESERVED_STEMS = frozenset(
+    {"CON", "PRN", "AUX", "NUL"}
+    | {"COM" + str(i) for i in range(1, 10)}
+    | {"LPT" + str(i) for i in range(1, 10)}
+)
 
 
 class ReferenceMapError(ValueError):
@@ -31,6 +42,7 @@ def _references(text, suffix):
     block_comment = False
     hash_comments = suffix in {".gd", ".tscn", ".tres"}
     cpp_comments = suffix in {".cs", ".gdshader", ".gdshaderinc", ".shader"}
+    tokens = _HASH_TOKENS if hash_comments else (_CPP_TOKENS if cpp_comments else _QUOTE_TOKENS)
     while index < length:
         if block_comment:
             closing = text.find("*/", index)
@@ -39,6 +51,10 @@ def _references(text, suffix):
             block_comment = False
             index = closing + 2
             continue
+        token = tokens.search(text, index)
+        if token is None:
+            break
+        index = token.start()
         char = text[index]
         if hash_comments and char == "#":
             ending = text.find("\n", index)
@@ -54,27 +70,29 @@ def _references(text, suffix):
             continue
         if char in ("'", '"'):
             quote = char
-            index += 1
-            value = []
-            terminated = False
-            while index < length:
-                character = text[index]
-                if character == "\\" and index + 1 < length:
-                    # Keep the escape explicitly so unsafe/ambiguous paths fail validation.
-                    value.append(character)
-                    value.append(text[index + 1])
-                    index += 2
-                    continue
-                if character == quote:
-                    terminated = True
-                    index += 1
+            value_start = index + 1
+            search_from = value_start
+            # Let the C-level string search skip ordinary literal content.
+            # A quote closes only when preceded by an even number of slashes.
+            # This preserves escaped quotes and original literal backslashes,
+            # without building a character list for unrelated strings.
+            while True:
+                closing = text.find(quote, search_from)
+                if closing < 0:
+                    index = length
                     break
-                value.append(character)
-                index += 1
-            if terminated:
-                candidate = "".join(value)
-                if candidate.startswith("res://"):
-                    result.add(candidate[6:])
+                escaped = False
+                scan = closing - 1
+                while scan >= value_start and text[scan] == "\\":
+                    escaped = not escaped
+                    scan -= 1
+                if escaped:
+                    search_from = closing + 1
+                    continue
+                if text.startswith("res://", value_start):
+                    result.add(text[value_start + 6:closing])
+                index = closing + 1
+                break
             continue
         index += 1
     return sorted(result)
@@ -89,9 +107,7 @@ def _portable_path(path):
     for component in path.split('/'):
         stem = component.split('.', 1)[0].upper()
         if (component in ('', '.', '..') or component.endswith((' ', '.'))
-                or stem in {"CON", "PRN", "AUX", "NUL"}
-                or stem in {"COM" + str(i) for i in range(1, 10)}
-                or stem in {"LPT" + str(i) for i in range(1, 10)}
+                or stem in _RESERVED_STEMS
                 or any(ord(c) < 32 or c in '<>"|?*' for c in component)):
             raise ReferenceMapError("Non-portable resource path component")
     return path
@@ -167,15 +183,15 @@ def build_reference_map(project, roots, max_text_bytes=MAX_TEXT_BYTES, max_total
     per_root = []
     combined = set()
     for root in root_paths:
-        seen = set()
+        # Mark at enqueue time: on dense shared-dependency graphs the old
+        # pop-time check could schedule the same resource thousands of times.
+        seen = {root}
         pending = [root]
         while pending:
             path = pending.pop()
-            if path in seen:
-                continue
-            seen.add(path)
             for target in direct(path):
                 if target not in seen:
+                    seen.add(target)
                     pending.append(target)
         per_root.append({"root": "res://" + root, "file_count": len(seen),
                          "total_bytes": sum(index[path] for path in seen)})
@@ -196,7 +212,7 @@ def build_reference_map(project, roots, max_text_bytes=MAX_TEXT_BYTES, max_total
                      "files": [{"path": path, "bytes": index[path]} for path in sorted(combined)]},
         "references": {"res://" + source: ["res://" + target for target in graph[source]]
                        for source in sorted(combined)},
-        "referenced_by": {"res://" + path: ["res://" + source for source in sorted(referenced_by[path])]
+        "referenced_by": {"res://" + path: ["res://" + source for source in referenced_by[path]]
                           for path in sorted(combined)},
         "problems": problems,
         "budget": {"limit_bytes": max_total_bytes, "exceeded": max_total_bytes is not None and total > max_total_bytes},

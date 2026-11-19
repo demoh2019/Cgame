@@ -2,6 +2,8 @@
 """Regression tests for content-hash-driven Godot import orchestration."""
 
 import json
+import hashlib
+import os
 from pathlib import Path
 import subprocess
 import sys
@@ -55,6 +57,60 @@ class ImportPipelineTests(unittest.TestCase):
         result = self.pipeline()
         self.assertEqual(result["status"], "skipped")
         self.assertEqual(len(self.calls), 3)
+
+    def test_warm_run_skips_source_hashing(self):
+        self.write("textures/large.png", "a" * 25000)
+        self.pipeline()
+        with patch("project_import_pipeline.hashlib.sha256", wraps=hashlib.sha256) as sha:
+            result = self.pipeline()
+        self.assertEqual(result["status"], "skipped")
+        self.assertEqual(sha.call_count, 0)
+
+    def test_verify_all_disables_metadata_cache(self):
+        self.write("level.tscn", "[gd_scene format=3]")
+        self.pipeline()
+        with patch("project_import_pipeline.hashlib.sha256", wraps=hashlib.sha256) as sha:
+            self.assertEqual(self.pipeline(verify_all=True)["status"], "skipped")
+        self.assertEqual(sha.call_count, 2)  # project.godot + level.tscn
+
+    def test_metadata_cached_file_uses_sha_of_original(self):
+        asset = self.write("texture.bin", "abcdef")
+        self.pipeline()
+        recorded = load_state(self.root / ".godot" / STATE_NAME)
+        self.assertEqual(recorded["files"]["texture.bin"],
+                         hashlib.sha256(asset.read_bytes()).hexdigest())
+        self.assertEqual(len(recorded["file_stats"]["texture.bin"]), 6)
+
+    def test_touch_without_content_change_refreshes_metadata(self):
+        self.write("scene.tscn", "[gd_scene format=3]")
+        self.pipeline()
+        entry = self.root / "scene.tscn"
+        modified = entry.stat().st_mtime_ns + 10_000_000_000
+        os.utime(entry, ns=(modified, modified))
+        self.assertEqual(self.pipeline()["status"], "skipped")
+        with patch("project_import_pipeline.hashlib.sha256", wraps=hashlib.sha256) as sha:
+            self.assertEqual(self.pipeline()["status"], "skipped")
+        self.assertEqual(sha.call_count, 0)
+
+    def test_invalid_metadata_cache_is_rejected(self):
+        self.pipeline()
+        state_path = self.root / ".godot" / STATE_NAME
+        state = json.loads(state_path.read_text(encoding="utf-8"))
+        state["file_stats"]["project.godot"][2] = "broken"
+        state_path.write_text(json.dumps(state), encoding="utf-8")
+        self.assertIsNone(load_state(state_path))
+        self.assertIn("missing_state", self.pipeline()["reasons"])
+
+    def test_existing_source_change_during_import_rejected(self):
+        self.write("player.gd", "before")
+        def mutate(command, **kwargs):
+            if command[-1] == "--version":
+                return subprocess.CompletedProcess(command, 0, stdout="4.7.2.stable\n")
+            self.write("player.gd", "AFTER!")
+            return subprocess.CompletedProcess(command, 0)
+        with self.assertRaisesRegex(ImportPipelineError, "changed during import"):
+            run_pipeline(self.root, runner=mutate)
+        self.assertFalse((self.root / ".godot" / STATE_NAME).exists())
 
     def test_change_same_size_is_not_skipped(self):
         self.write("a.gd", "one")
@@ -193,7 +249,9 @@ class ImportPipelineTests(unittest.TestCase):
         self.assertEqual(result["removed"], ["a"])
 
     def test_save_state_roundtrip(self):
-        state = {"schema": CACHE_VERSION, "files": inventory(self.root), "engine": "4"}
+        files, file_stats = inventory(self.root, include_metadata=True)
+        state = {"schema": CACHE_VERSION, "files": files,
+                 "file_stats": file_stats, "engine": "4"}
         path = self.root / ".godot" / STATE_NAME
         save_state(path, state)
         self.assertEqual(load_state(path), state)

@@ -2,8 +2,10 @@
 
 A lightweight, opt-in asset import orchestrator for the Godot/Cgame editor. Its
 purpose is to **avoid redundant headless imports in repeated builds and CI**,
-not to replace Godot's own asset importer. It uses a content-hash inventory,
-so touching a file without modifying its contents does not reimport it.
+not to replace Godot's own asset importer. It uses a content-hash inventory.
+After a successful import, unchanged files reuse cached SHA-256 hashes if their
+device, inode, mode, size, nanosecond mtime and ctime all match. Touching a file
+without changing its contents still does not trigger a reimport.
 
 ## Usage
 
@@ -11,6 +13,7 @@ so touching a file without modifying its contents does not reimport it.
 python3 misc/scripts/project_import_pipeline.py /path/to/my-godot-game --godot /path/to/godot --json
 python3 misc/scripts/project_import_pipeline.py /path/to/my-godot-game --dry-run --json
 python3 misc/scripts/project_import_pipeline.py /path/to/my-godot-game --force
+python3 misc/scripts/project_import_pipeline.py /path/to/my-godot-game --verify-all
 ```
 
 The project must contain `project.godot`. The script invokes the editor as
@@ -19,8 +22,10 @@ changed, the imported cache is missing, or `--force` was supplied. This CLI
 invocation is supported by Godot; imports are still performed by the engine.
 The script never modifies project source files directly.
 
-On successful import, the wrapper atomically saves source SHA-256 hashes and
-the engine version into `.godot/cgame-import-state.json`. The `.godot` directory
+On successful import, the wrapper atomically saves source SHA-256 hashes,
+file metadata fingerprints and the engine version into
+`.godot/cgame-import-state.json`. Existing version-1 states are
+intentionally invalidated once to populate version-2 fingerprints. The `.godot` directory
 is ignored during hashing. Files under `.git`, `.hg`, `.svn`, `.venv`, `venv`,
 `node_modules`, and `__pycache__` are excluded, too. Imported sidecar `.import`
 settings elsewhere in the project are tracked. On an unchanged next run, the
@@ -34,8 +39,13 @@ racing imports never write a success state, so the next run retries.
 
 This is **whole-project** import orchestration. It does not perform per-file
 partial imports, manage distributed/shared caches, or guarantee CI performance
-benefits unless `.godot` is retained between builds. Input file hashing is
-O(total project source bytes). Do not run multiple copies concurrently on the
+benefits unless `.godot` is retained between builds. A cold scan hashes O(total project source bytes); an unchanged warm scan
+requires O(number of source files) metadata checks, without rereading source
+file contents. The default fast path trusts filesystem metadata: an adversary
+who can preserve all checked timestamps and inode metadata could cause a stale
+hash cache hit. Use `--verify-all` for reproducible or security-sensitive
+builds, which forces content verification on every scan. Do not run multiple
+copies concurrently on the
 same `.godot` cache. Symlinked inputs are rejected to avoid importing external
 or untracked data.
 

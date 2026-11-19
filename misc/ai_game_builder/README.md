@@ -93,6 +93,10 @@ scene imports and runtime tests when this addon or its workflow changes.
 The 3D runtime test (`tests/test_runtime_3d.gd`) runs only inside the staged
 project where `res://ai_generated/` is present. No API key is required in CI.
 
+## Agent mode (MCP)
+
+For fully automatic building by an external coding agent, see [`misc/godot_agent`](../godot_agent/README.md): a token-lean MCP server with scene, script, project, check and headless play-test tools.
+
 ## Next steps
 
 For production use, add a project-context selector (opt-in), plan/execute/verify agent loop, background task queue, undoable edits, Godot parser checks, automated headless scene smoke tests, local model endpoints, tool policies and asset-generation backends.

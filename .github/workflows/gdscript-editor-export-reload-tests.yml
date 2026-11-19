@@ -1,0 +1,35 @@
+name: Godot GDScript Inspector Reload Regression
+
+on:
+  pull_request:
+    paths:
+      - "modules/gdscript/gdscript.cpp"
+      - "modules/gdscript/register_types.cpp"
+      - "modules/gdscript/tests/test_gdscript_editor_reload.h"
+      - ".github/workflows/gdscript-editor-export-reload-tests.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  gdscript-editor-reload:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - uses: ./.github/actions/godot-deps
+
+      - name: Compile Godot editor with regression tests
+        run: scons platform=linuxbsd target=editor tests=yes module_text_server_fb_enabled=yes -j2
+
+      - name: Run GDScript live owner export/Inspector tests
+        shell: bash
+        run: |
+          set -euo pipefail
+          exe="$(find bin -maxdepth 1 -type f -name 'godot.linuxbsd.editor.*' -perm /u+x | head -n 1)"
+          test -n "$exe"
+          "$exe" --headless --test --test-case="*[GDScriptReload]*"

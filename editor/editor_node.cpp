@@ -1130,7 +1130,7 @@ void EditorNode::_notification(int p_what) {
 			} else {
 				EditorFileSystem::get_singleton()->scan_changes();
 			}
-			_scan_external_changes();
+			callable_mp(this, &EditorNode::_scan_external_changes).call_deferred();
 
 			GDExtensionManager *gdextension_manager = GDExtensionManager::get_singleton();
 			callable_mp(gdextension_manager, &GDExtensionManager::reload_extensions).call_deferred();
@@ -1504,6 +1504,7 @@ void EditorNode::_resources_reimporting(const Vector<String> &p_resources) {
 	scenes_modification_table.clear();
 	scenes_reimported.clear();
 	resources_reimported.clear();
+	uninstanced_scenes_reimported.clear();
 	EditorFileSystem *editor_file_system = EditorFileSystem::get_singleton();
 	for (const String &res_path : p_resources) {
 		// It's faster to use EditorFileSystem::get_file_type than fetching the resource type from disk.
@@ -1559,6 +1560,7 @@ void EditorNode::_resources_reimported(const Vector<String> &p_resources) {
 	}
 
 	reload_instances_with_path_in_edited_scenes();
+	reload_uninstanced_scenes();
 
 	scenes_modification_table.clear();
 	scenes_reimported.clear();
@@ -1624,7 +1626,46 @@ void EditorNode::_remove_lock_file() {
 	OS::get_singleton()->remove_lock_file();
 }
 
+ConfirmationDialog *EditorNode::_create_disk_changed_dialog() {
+	ConfirmationDialog *dialog = memnew(ConfirmationDialog);
+	dialog->set_title(TTRC("Files have been modified outside Godot"));
+
+	VBoxContainer *vbc = memnew(VBoxContainer);
+	dialog->add_child(vbc);
+
+	Label *dl = memnew(Label);
+	dl->set_text(TTRC("The following files are newer on disk:"));
+	vbc->add_child(dl);
+
+	disk_changed_list = memnew(Tree);
+	disk_changed_list->set_accessibility_name(TTRC("The following files are newer on disk:"));
+	vbc->add_child(disk_changed_list);
+	disk_changed_list->set_v_size_flags(Control::SIZE_EXPAND_FILL);
+
+	Label *what_action_label = memnew(Label);
+	what_action_label->set_text(TTRC("What action should be taken?"));
+	vbc->add_child(what_action_label);
+
+	dialog->connect(SceneStringName(confirmed), callable_mp(this, &EditorNode::_reload_modified_scenes));
+	dialog->connect(SceneStringName(confirmed), callable_mp(this, &EditorNode::_reload_project_settings));
+	dialog->set_ok_button_text(TTRC("Reload from disk"));
+
+	dialog->add_button(TTRC("Ignore external changes"), !DisplayServer::get_singleton()->get_swap_cancel_ok(), "resave");
+	dialog->connect("custom_action", callable_mp(this, &EditorNode::_resave_externally_modified_scenes));
+
+	dialog->connect(SceneStringName(visibility_changed), callable_mp(this, &EditorNode::_restore_disk_changed_dialog_parent), CONNECT_DEFERRED);
+	gui_base->add_child(dialog);
+	disk_changed = dialog->get_instance_id();
+	return dialog;
+}
+
 void EditorNode::_scan_external_changes() {
+	// A temporary modal may have been freed together with the dialog.
+	ConfirmationDialog *dialog = ObjectDB::get_instance<ConfirmationDialog>(disk_changed);
+	if (!dialog) {
+		dialog = _create_disk_changed_dialog();
+	}
+
 	disk_changed_list->clear();
 	TreeItem *r = disk_changed_list->create_item();
 	disk_changed_list->set_hide_root(true);
@@ -1662,8 +1703,18 @@ void EditorNode::_scan_external_changes() {
 		disk_changed_project = true;
 	}
 
-	if (need_reload) {
-		callable_mp((Window *)disk_changed, &Window::popup_centered_ratio).call_deferred(0.3);
+	if (need_reload && !dialog->is_visible()) {
+		Window *window = get_last_exclusive_window();
+		Node *popup_parent = window == get_window() ? static_cast<Node *>(gui_base) : window;
+		dialog->reparent(popup_parent);
+		dialog->popup_centered_ratio(0.3);
+	}
+}
+
+void EditorNode::_restore_disk_changed_dialog_parent() {
+	ConfirmationDialog *dialog = ObjectDB::get_instance<ConfirmationDialog>(disk_changed);
+	if (dialog && !dialog->is_visible() && gui_base->is_inside_tree()) {
+		dialog->reparent(gui_base);
 	}
 }
 
@@ -1674,7 +1725,9 @@ void EditorNode::_resave_externally_modified_scenes(String p_str) {
 		ProjectSettings::get_singleton()->save();
 	}
 
-	disk_changed->hide();
+	if (ConfirmationDialog *dialog = ObjectDB::get_instance<ConfirmationDialog>(disk_changed)) {
+		dialog->hide();
+	}
 }
 
 void EditorNode::_reload_modified_scenes() {
@@ -1703,7 +1756,9 @@ void EditorNode::_reload_modified_scenes() {
 
 	_set_current_scene(current_idx);
 	scene_tabs->update_scene_tabs();
-	disk_changed->hide();
+	if (ConfirmationDialog *dialog = ObjectDB::get_instance<ConfirmationDialog>(disk_changed)) {
+		dialog->hide();
+	}
 }
 
 void EditorNode::_reload_project_settings() {
@@ -1845,7 +1900,9 @@ void EditorNode::save_resource_in_path(const Ref<Resource> &p_resource, const St
 	saving_resources_in_path.erase(p_resource);
 
 	_resource_saved(p_resource, path);
-	clear_node_reference(p_resource); // // Check if Resource is saved to disk to potentially remove it from resource_count
+	if (!is_resource_internal_to_scene(p_resource)) {
+		invalidate_resource_usage_cache();
+	}
 	emit_signal(SNAME("resource_saved"), p_resource);
 	editor_data.notify_resource_saved(p_resource);
 
@@ -1966,7 +2023,7 @@ void EditorNode::save_resource_as(const Ref<Resource> &p_resource, const String 
 		file->set_current_file(new_resource_name_snake_case);
 		file->set_current_path(new_resource_name_snake_case);
 	}
-	file->set_title(TTR("Save Resource As..."));
+	file->set_title(TTRC("Save Resource As..."));
 	file->popup_file_dialog();
 }
 
@@ -2072,70 +2129,205 @@ void EditorNode::gather_resources(const Variant &p_variant, List<Ref<Resource>> 
 	}
 }
 
-void EditorNode::update_resource_count(Node *p_node, bool p_remove) {
-	if (!get_edited_scene()) {
+void EditorNode::_reset_resource_usage_cache() {
+	for (const KeyValue<Ref<Resource>, HashSet<ObjectID>> &E : resource_node_usage) {
+		const Callable callback = callable_mp(this, &EditorNode::_resource_usage_changed).bind(E.key->get_instance_id());
+		E.key->disconnect_changed(callback);
+	}
+	node_resource_usage.clear();
+	resource_node_usage.clear();
+	dirty_resource_usage_nodes.clear();
+	resource_usage_scene_id = get_edited_scene() ? get_edited_scene()->get_instance_id() : ObjectID();
+	resource_usage_initialized = false;
+	resource_usage_invalid = false;
+	resource_usage_updating = false;
+	_queue_resource_counter_changed();
+}
+
+void EditorNode::invalidate_resource_usage_cache() {
+	if (!resource_usage_initialized || resource_usage_invalid) {
+		return;
+	}
+	resource_usage_invalid = true;
+	_queue_resource_counter_changed();
+}
+
+bool EditorNode::_is_node_in_resource_usage_scope(Node *p_node) const {
+	Node *scene = get_editor_data().get_edited_scene_root();
+	if (!scene || !p_node || (p_node != scene && !scene->is_ancestor_of(p_node))) {
+		return false;
+	}
+	return p_node == scene || p_node->get_owner() == scene || (p_node->get_owner() && scene->is_editable_instance(p_node->get_owner()));
+}
+
+void EditorNode::_collect_node_resource_usage(Node *p_node, HashSet<Ref<Resource>> &r_resources) {
+	List<Ref<Resource>> resources;
+	HashSet<Object *> scanned_objects;
+	gather_resources(p_node, resources, scanned_objects, true);
+	for (const Ref<Resource> &resource : resources) {
+		if (resource.is_valid() && is_resource_internal_to_scene(resource)) {
+			r_resources.insert(resource);
+		}
+	}
+}
+
+void EditorNode::_remove_resource_usage_snapshot(ObjectID p_node_id) {
+	HashSet<Ref<Resource>> *old_resources = node_resource_usage.getptr(p_node_id);
+	if (!old_resources) {
+		return;
+	}
+	for (const Ref<Resource> &resource : *old_resources) {
+		HashSet<ObjectID> *nodes = resource_node_usage.getptr(resource);
+		if (!nodes) {
+			continue;
+		}
+		nodes->erase(p_node_id);
+		if (nodes->is_empty()) {
+			const Callable callback = callable_mp(this, &EditorNode::_resource_usage_changed).bind(resource->get_instance_id());
+			resource->disconnect_changed(callback);
+			resource_node_usage.erase(resource);
+		}
+	}
+	node_resource_usage.erase(p_node_id);
+}
+
+void EditorNode::_reconcile_node_resource_usage(Node *p_node) {
+	ERR_FAIL_NULL(p_node);
+	const ObjectID node_id = p_node->get_instance_id();
+	if (!_is_node_in_resource_usage_scope(p_node)) {
+		_remove_resource_usage_snapshot(node_id);
 		return;
 	}
 
-	List<Ref<Resource>> res_list;
-	HashSet<Object *> scanned_objects;
-	gather_resources(p_node, res_list, scanned_objects, true);
+	HashSet<Ref<Resource>> resources;
+	_collect_node_resource_usage(p_node, resources);
+	_remove_resource_usage_snapshot(node_id);
+	node_resource_usage.insert(node_id, resources);
+	for (const Ref<Resource> &resource : resources) {
+		HashSet<ObjectID> &nodes = resource_node_usage[resource];
+		if (nodes.is_empty()) {
+			const Callable callback = callable_mp(this, &EditorNode::_resource_usage_changed).bind(resource->get_instance_id());
+			resource->connect_changed(callback);
+		}
+		nodes.insert(node_id);
+	}
+}
 
-	for (Ref<Resource> &R : res_list) {
-		List<Node *>::Element *E = resource_count[R].find(p_node);
-		if (E) {
-			if (p_remove) {
-				resource_count[R].erase(E);
+void EditorNode::_rebuild_resource_usage_cache() {
+	Node *scene = get_edited_scene();
+	_reset_resource_usage_cache();
+	resource_usage_initialized = true;
+	resource_usage_updating = true;
+	if (scene) {
+		List<Node *> pending;
+		pending.push_back(scene);
+		while (!pending.is_empty()) {
+			Node *node = pending.front()->get();
+			pending.pop_front();
+			if (_is_node_in_resource_usage_scope(node)) {
+				_reconcile_node_resource_usage(node);
 			}
+			for (int i = 0; i < node->get_child_count(false); i++) {
+				pending.push_back(node->get_child(i, false));
+			}
+		}
+	}
+	resource_usage_updating = false;
+}
+
+void EditorNode::_ensure_resource_usage_cache() {
+	const ObjectID scene_id = get_edited_scene() ? get_edited_scene()->get_instance_id() : ObjectID();
+	if (!resource_usage_initialized || resource_usage_invalid || resource_usage_scene_id != scene_id) {
+		_rebuild_resource_usage_cache();
+		return;
+	}
+	if (resource_usage_updating || dirty_resource_usage_nodes.is_empty()) {
+		return;
+	}
+	resource_usage_updating = true;
+	HashSet<ObjectID> dirty(dirty_resource_usage_nodes);
+	dirty_resource_usage_nodes.clear();
+	for (const ObjectID &node_id : dirty) {
+		Node *node = ObjectDB::get_instance<Node>(node_id);
+		if (node) {
+			_reconcile_node_resource_usage(node);
 		} else {
-			resource_count[R].push_back(p_node);
+			_remove_resource_usage_snapshot(node_id);
+		}
+	}
+	resource_usage_updating = false;
+}
+
+void EditorNode::_mark_resource_usage_subtree_dirty(Node *p_node) {
+	if (!resource_usage_initialized || !p_node) {
+		return;
+	}
+
+	List<Node *> pending;
+	pending.push_back(p_node);
+	while (!pending.is_empty()) {
+		Node *node = pending.front()->get();
+		pending.pop_front();
+		dirty_resource_usage_nodes.insert(node->get_instance_id());
+		for (int i = 0; i < node->get_child_count(false); i++) {
+			pending.push_back(node->get_child(i, false));
 		}
 	}
 	_queue_resource_counter_changed();
+}
+
+void EditorNode::mark_node_resource_usage_dirty(Node *p_node) {
+	if (!resource_usage_initialized || !p_node) {
+		return;
+	}
+	dirty_resource_usage_nodes.insert(p_node->get_instance_id());
+	_queue_resource_counter_changed();
+}
+
+void EditorNode::remove_node_from_resource_usage_cache(Node *p_node) {
+	if (!resource_usage_initialized || !p_node) {
+		return;
+	}
+	dirty_resource_usage_nodes.erase(p_node->get_instance_id());
+	_remove_resource_usage_snapshot(p_node->get_instance_id());
+	_queue_resource_counter_changed();
+}
+
+void EditorNode::_resource_usage_changed(ObjectID p_resource_id) {
+	if (!resource_usage_initialized) {
+		return;
+	}
+	if (resource_usage_updating) {
+		resource_usage_invalid = true;
+		_queue_resource_counter_changed();
+		return;
+	}
+	Resource *resource = ObjectDB::get_instance<Resource>(p_resource_id);
+	if (!resource) {
+		invalidate_resource_usage_cache();
+		return;
+	}
+	HashSet<ObjectID> *nodes = resource_node_usage.getptr(Ref<Resource>(resource));
+	if (!nodes) {
+		return;
+	}
+	for (const ObjectID &node_id : *nodes) {
+		dirty_resource_usage_nodes.insert(node_id);
+	}
+	_queue_resource_counter_changed();
+}
+
+void EditorNode::_undo_redo_resource_usage_changed() {
+	// Inspector actions mark affected nodes dirty; invalidate for other actions.
+	if (resource_usage_initialized && dirty_resource_usage_nodes.is_empty()) {
+		invalidate_resource_usage_cache();
+	}
 }
 
 int EditorNode::get_resource_count(Ref<Resource> p_res) {
-	List<Node *> *L = resource_count.getptr(p_res);
-	return L ? L->size() : 0;
-}
-
-List<Node *> EditorNode::get_resource_node_list(Ref<Resource> p_res) {
-	List<Node *> *L = resource_count.getptr(p_res);
-	return L == nullptr ? List<Node *>() : List<Node *>(*L);
-}
-
-void EditorNode::update_node_reference(const Variant &p_value, Node *p_node, bool p_remove) {
-	List<Ref<Resource>> list;
-	Ref<Resource> res = p_value;
-	HashSet<Object *> scanned_objects;
-	gather_resources(p_value, list, scanned_objects, true); //Gather all Resources and their SubResources to remove p_node from their lists.
-
-	if (res.is_valid() && is_resource_internal_to_scene(res)) {
-		// Avoid external Resources from being added in.
-		list.push_back(res);
-	}
-
-	for (Ref<Resource> &R : list) {
-		if (!p_remove) {
-			resource_count[R].push_back(p_node);
-		} else {
-			List<Node *>::Element *E = resource_count[R].find(p_node);
-			if (E) {
-				resource_count[R].erase(E);
-			}
-		}
-	}
-	_queue_resource_counter_changed();
-}
-
-void EditorNode::clear_node_reference(Ref<Resource> p_res) {
-	if (is_resource_internal_to_scene(p_res)) {
-		return;
-	}
-	List<Node *> *node_list = resource_count.getptr(p_res);
-	if (node_list != nullptr) {
-		node_list->clear();
-	}
+	_ensure_resource_usage_cache();
+	HashSet<ObjectID> *nodes = resource_node_usage.getptr(p_res);
+	return nodes ? nodes->size() : 0;
 }
 
 void EditorNode::_menu_option(int p_option) {
@@ -2556,6 +2748,7 @@ void EditorNode::_save_scene(String p_file, int idx) {
 
 	scene->propagate_notification(NOTIFICATION_EDITOR_PRE_SAVE);
 
+	ScriptEditor::get_singleton()->auto_format_all_scripts();
 	editor_data.apply_changes_in_editors();
 	save_default_environment();
 	List<Pair<AnimationMixer *, Ref<AnimatedValuesBackup>>> anim_backups;
@@ -2660,7 +2853,7 @@ void EditorNode::save_scene_list(const HashSet<String> &p_scene_paths) {
 void EditorNode::save_before_run() {
 	current_menu_option = SAVE_AND_RUN;
 	_menu_option_confirm(SCENE_SAVE_AS_SCENE, true);
-	file->set_title(TTR("Save scene before running..."));
+	file->set_title(TTRC("Save scene before running..."));
 }
 
 void EditorNode::try_autosave() {
@@ -2844,8 +3037,8 @@ void EditorNode::_dialog_action(String p_file) {
 
 		case FILE_EXPORT_MESH_LIBRARY: {
 			const Dictionary &fd_options = file_export_lib->get_selected_options();
-			bool merge_with_existing_library = fd_options.get(TTR("Merge With Existing"), true);
-			bool apply_mesh_instance_transforms = fd_options.get(TTR("Apply MeshInstance Transforms"), false);
+			bool merge_with_existing_library = fd_options.get(TTRC("Merge With Existing"), true);
+			bool apply_mesh_instance_transforms = fd_options.get(TTRC("Apply MeshInstance Transforms"), false);
 
 			Ref<MeshLibrary> ml;
 			if (merge_with_existing_library && FileAccess::exists(p_file)) {
@@ -3509,7 +3702,7 @@ void EditorNode::_menu_option_confirm(int p_option, bool p_confirmed) {
 			if (scene) {
 				file->set_current_path(scene->get_scene_file_path());
 			};
-			file->set_title(p_option == SCENE_OPEN_SCENE ? TTR("Open Scene") : TTR("Open Base Scene"));
+			file->set_title(p_option == SCENE_OPEN_SCENE ? TTRC("Open Scene") : TTRC("Open Base Scene"));
 			file->popup_file_dialog();
 
 		} break;
@@ -3650,7 +3843,7 @@ void EditorNode::_menu_option_confirm(int p_option, bool p_confirmed) {
 				root_name = EditorNode::adjust_scene_name_casing(root_name);
 				file->set_current_path(root_name + "." + extensions.front()->get().to_lower());
 			}
-			file->set_title(TTR("Save Scene As..."));
+			file->set_title(TTRC("Save Scene As..."));
 			file->popup_file_dialog();
 
 		} break;
@@ -3660,7 +3853,7 @@ void EditorNode::_menu_option_confirm(int p_option, bool p_confirmed) {
 			if (scene_path.is_empty()) {
 				_menu_option_confirm(EditorSceneTabs::SCENE_SAVE_AS_SCENE, true);
 				current_menu_option = SCENE_TAB_SAVE_AS_MAIN_SCENE; // Overwrites SCENE_TAB_SAVE_SCENE.
-				file->set_title(TTR("Save new main scene..."));
+				file->set_title(TTRC("Save new main scene..."));
 			} else {
 				ProjectSettings::get_singleton()->set("application/run/main_scene", ResourceUID::path_to_uid(scene_path));
 				ProjectSettings::get_singleton()->save();
@@ -3680,7 +3873,7 @@ void EditorNode::_menu_option_confirm(int p_option, bool p_confirmed) {
 			if (scene_path.is_empty()) {
 				_menu_option_confirm(EditorSceneTabs::SCENE_SAVE_AS_SCENE, true);
 				current_menu_option = SCENE_TAB_SAVE_AS_AND_RUN; // Overwrites SCENE_TAB_SAVE_SCENE.
-				file->set_title(TTR("Save scene before running..."));
+				file->set_title(TTRC("Save scene before running..."));
 			} else {
 				project_run_bar->play_custom_scene(scene_path);
 			}
@@ -3855,11 +4048,11 @@ void EditorNode::_menu_option_confirm(int p_option, bool p_confirmed) {
 			if (!p_confirmed) {
 				if (!stop_project_confirmation && project_run_bar->is_playing()) {
 					if (is_restart) {
-						confirmation->set_text(TTR("Stop running project before reloading the current project?"));
-						confirmation->set_ok_button_text(TTR("Stop & Reload"));
+						confirmation->set_text(TTRC("Stop running project before reloading the current project?"));
+						confirmation->set_ok_button_text(TTRC("Stop & Reload"));
 					} else {
-						confirmation->set_text(TTR("Stop running project before exiting the editor?"));
-						confirmation->set_ok_button_text(TTR("Stop & Quit"));
+						confirmation->set_text(TTRC("Stop running project before exiting the editor?"));
+						confirmation->set_ok_button_text(TTRC("Stop & Quit"));
 					}
 					confirmation_button->hide();
 					confirmation->reset_size();
@@ -3869,11 +4062,11 @@ void EditorNode::_menu_option_confirm(int p_option, bool p_confirmed) {
 				}
 
 				if (!stop_download_confirmation && export_template_manager->is_downloading()) {
-					confirmation->set_text(TTR("The export templates are still being downloaded."));
+					confirmation->set_text(TTRC("The export templates are still being downloaded."));
 					if (is_restart) {
-						confirmation->set_ok_button_text(TTR("Stop & Reload"));
+						confirmation->set_ok_button_text(TTRC("Stop & Reload"));
 					} else {
-						confirmation->set_ok_button_text(TTR("Stop & Quit"));
+						confirmation->set_ok_button_text(TTRC("Stop & Quit"));
 					}
 					confirmation_button->hide();
 					confirmation->reset_size();
@@ -3886,11 +4079,11 @@ void EditorNode::_menu_option_confirm(int p_option, bool p_confirmed) {
 				if (_next_unsaved_scene(!save_each) == -1) {
 					if (EditorUndoRedoManager::get_singleton()->is_history_unsaved(EditorUndoRedoManager::GLOBAL_HISTORY)) {
 						if (is_restart) {
-							save_confirmation->set_ok_button_text(TTR("Save & Reload"));
-							save_confirmation->set_text(TTR("Save modified resources before reloading?"));
+							save_confirmation->set_ok_button_text(TTRC("Save & Reload"));
+							save_confirmation->set_text(TTRC("Save modified resources before reloading?"));
 						} else {
-							save_confirmation->set_ok_button_text(TTR("Save & Quit"));
-							save_confirmation->set_text(TTR("Save modified resources before closing?"));
+							save_confirmation->set_ok_button_text(TTRC("Save & Quit"));
+							save_confirmation->set_text(TTRC("Save modified resources before closing?"));
 						}
 						save_confirmation->reset_size();
 						save_confirmation->popup_centered();
@@ -3902,10 +4095,10 @@ void EditorNode::_menu_option_confirm(int p_option, bool p_confirmed) {
 						const String unsaved_status = editor_data.get_editor_plugin(i)->get_unsaved_status();
 						if (!unsaved_status.is_empty()) {
 							if (is_restart) {
-								save_confirmation->set_ok_button_text(TTR("Save & Reload"));
+								save_confirmation->set_ok_button_text(TTRC("Save & Reload"));
 								save_confirmation->set_text(unsaved_status);
 							} else {
-								save_confirmation->set_ok_button_text(TTR("Save & Quit"));
+								save_confirmation->set_ok_button_text(TTRC("Save & Quit"));
 								save_confirmation->set_text(unsaved_status);
 							}
 							save_confirmation->reset_size();
@@ -3937,10 +4130,10 @@ void EditorNode::_menu_option_confirm(int p_option, bool p_confirmed) {
 						i = _next_unsaved_scene(true, ++i);
 					}
 					if (is_restart) {
-						save_confirmation->set_ok_button_text(TTR("Save & Reload"));
+						save_confirmation->set_ok_button_text(TTRC("Save & Reload"));
 						save_confirmation->set_text(TTR("Save changes to the following scene(s) before reloading?") + unsaved_scenes);
 					} else {
-						save_confirmation->set_ok_button_text(TTR("Save & Quit"));
+						save_confirmation->set_ok_button_text(TTRC("Save & Quit"));
 						save_confirmation->set_text((p_option == SCENE_QUIT ? TTR("Save changes to the following scene(s) before quitting?") : TTR("Save changes to the following scene(s) before opening Project Manager?")) + unsaved_scenes);
 					}
 					save_confirmation->reset_size();
@@ -4019,7 +4212,7 @@ void EditorNode::_menu_option_confirm(int p_option, bool p_confirmed) {
 			if (scene) {
 				file->set_current_path(scene->get_scene_file_path());
 			}
-			file->set_title(TTR("Pick a Main Scene"));
+			file->set_title(TTRC("Pick a Main Scene"));
 			file->popup_file_dialog();
 
 		} break;
@@ -4263,7 +4456,7 @@ void EditorNode::_export_as_menu_option(int p_idx) {
 			file_export_lib->add_filter("*." + E);
 		}
 
-		file_export_lib->set_title(TTR("Export Mesh Library"));
+		file_export_lib->set_title(TTRC("Export Mesh Library"));
 		file_export_lib->popup_file_dialog();
 	} else { // Custom menu options added by plugins
 		if (export_as_menu->get_item_submenu(p_idx).is_empty()) { // If not a submenu
@@ -4401,7 +4594,7 @@ void EditorNode::_update_file_menu_opened() {
 		file_menu->set_item_tooltip(file_menu->get_item_index(SCENE_SAVE_ALL_SCENES), String());
 	} else {
 		file_menu->set_item_disabled(file_menu->get_item_index(SCENE_SAVE_ALL_SCENES), true);
-		file_menu->set_item_tooltip(file_menu->get_item_index(SCENE_SAVE_ALL_SCENES), TTR("All scenes are already saved."));
+		file_menu->set_item_tooltip(file_menu->get_item_index(SCENE_SAVE_ALL_SCENES), TTRC("All scenes are already saved."));
 	}
 	_update_undo_redo_allowed();
 }
@@ -4756,6 +4949,9 @@ void EditorNode::set_edited_scene_root(Node *p_scene, bool p_auto_add) {
 	if (p_auto_add && p_scene) {
 		scene_root->add_child(p_scene, true);
 	}
+	if (p_scene != old_edited_scene_root) {
+		_reset_resource_usage_cache();
+	}
 }
 
 String EditorNode::get_preview_locale() const {
@@ -4892,7 +5088,7 @@ void EditorNode::_set_current_scene_nocheck(int p_idx, bool p_ignore_state) {
 
 		EditorUndoRedoManager::get_singleton()->clear_history(editor_data.get_scene_history_id(p_idx), false);
 	}
-	resource_count.clear();
+	_reset_resource_usage_cache();
 	SceneTreeDock::get_singleton()->get_tree_editor()->update_tree();
 
 	_update_title();
@@ -5546,15 +5742,15 @@ void EditorNode::request_instantiate_scenes(const Vector<String> &p_files) {
 String EditorNode::get_multiwindow_support_tooltip_text() const {
 	if (SceneTree::get_singleton()->get_root()->is_embedding_subwindows()) {
 		if (DisplayServer::get_singleton()->has_feature(DisplayServerEnums::FEATURE_SUBWINDOWS)) {
-			return TTR("Multi-window support is not available because the `--single-window` command line argument was used to start the editor.");
+			return TTRC("Multi-window support is not available because the `--single-window` command line argument was used to start the editor.");
 		} else {
-			return TTR("Multi-window support is not available because the current platform doesn't support multiple windows.");
+			return TTRC("Multi-window support is not available because the current platform doesn't support multiple windows.");
 		}
 	} else if (EDITOR_GET("interface/editor/display/single_window_mode")) {
-		return TTR("Multi-window support is not available because Interface > Editor > Single Window Mode is enabled in the editor settings.");
+		return TTRC("Multi-window support is not available because Interface > Editor > Single Window Mode is enabled in the editor settings.");
 	}
 
-	return TTR("Multi-window support is not available because Interface > Multi Window > Enable is disabled in the editor settings.");
+	return TTRC("Multi-window support is not available because Interface > Multi Window > Enable is disabled in the editor settings.");
 }
 
 void EditorNode::_inherit_request(String p_file) {
@@ -5905,7 +6101,7 @@ void EditorNode::_pick_main_scene_custom_action(const String &p_custom_action_na
 		if (!FileAccess::exists(scene->get_scene_file_path())) {
 			current_menu_option = SAVE_AND_RUN_MAIN_SCENE;
 			_menu_option_confirm(SCENE_SAVE_AS_SCENE, true);
-			file->set_title(TTR("Save scene before running..."));
+			file->set_title(TTRC("Save scene before running..."));
 		} else {
 			current_menu_option = SETTINGS_PICK_MAIN_SCENE;
 			_dialog_action(scene->get_scene_file_path());
@@ -6666,7 +6862,7 @@ bool EditorNode::ensure_main_scene(bool p_from_native) {
 
 	if (main_scene.is_empty()) {
 		current_menu_option = -1;
-		pick_main_scene->set_text(TTR("No main scene has ever been defined. Select one?\nYou can change it later in \"Project Settings\" under the 'application' category."));
+		pick_main_scene->set_text(TTRC("No main scene has ever been defined. Select one?\nYou can change it later in \"Project Settings\" under the 'application' category."));
 		pick_main_scene->popup_centered();
 
 		if (editor_data.get_edited_scene_root()) {
@@ -6782,8 +6978,8 @@ bool EditorNode::immediate_confirmation_dialog(const String &p_text, const Strin
 }
 
 bool EditorNode::is_cmdline_mode() {
-	ERR_FAIL_NULL_V(singleton, false);
-	return singleton->cmdline_mode;
+	// After editor teardown there is no UI left to handle deferred actions.
+	return !singleton || singleton->cmdline_mode;
 }
 
 void EditorNode::cleanup() {
@@ -6984,7 +7180,7 @@ void EditorNode::_scene_tab_closed(int p_tab) {
 	}
 
 	if (!unsaved_message.is_empty()) {
-		save_confirmation->set_ok_button_text(TTR("Save & Close"));
+		save_confirmation->set_ok_button_text(TTRC("Save & Close"));
 		save_confirmation->set_text(unsaved_message + "\n\n" + TTR("Save before closing?"));
 		save_confirmation->reset_size();
 		save_confirmation->popup_centered();
@@ -7407,6 +7603,8 @@ void EditorNode::preload_reimporting_with_path_in_edited_scenes(const List<Strin
 
 					// Search the scene to find nodes that references the nodes will be recreated.
 					get_preload_modifications_reference_to_nodes(edited_scene_root, edited_scene_root, instances_to_reimport, instance_list_with_children, scene_modifications.other_instances_modifications);
+				} else {
+					uninstanced_scenes_reimported.push_back(instance_path);
 				}
 			}
 
@@ -7793,6 +7991,19 @@ void EditorNode::reload_instances_with_path_in_edited_scenes() {
 	progress.step(TTR("Reloading done."), editor_data.get_edited_scene_count());
 }
 
+void EditorNode::reload_uninstanced_scenes() {
+	if (uninstanced_scenes_reimported.is_empty()) {
+		return;
+	}
+	for (String &scene_path : uninstanced_scenes_reimported) {
+		Error err;
+		Ref<PackedScene> instance_scene_packed_scene = ResourceLoader::load(scene_path, "", ResourceFormatLoader::CACHE_MODE_REPLACE_DEEP, &err);
+
+		ERR_FAIL_COND(err != OK);
+		ERR_FAIL_COND(instance_scene_packed_scene.is_null());
+	}
+}
+
 void EditorNode::_remove_all_not_owned_children(Node *p_node, Node *p_owner) {
 	Vector<Node *> nodes_to_remove;
 	if (p_node != p_owner && p_node->get_owner() != p_owner) {
@@ -8057,7 +8268,7 @@ void EditorNode::_bind_methods() {
 
 	ClassDB::bind_method("stop_child_process", &EditorNode::stop_child_process);
 
-	ClassDB::bind_method(D_METHOD("update_node_reference", "value", "node", "remove"), &EditorNode::update_node_reference, DEFVAL(false));
+	ClassDB::bind_method(D_METHOD("mark_node_resource_usage_dirty", "node"), &EditorNode::mark_node_resource_usage_dirty);
 
 	ADD_SIGNAL(MethodInfo("request_help_search"));
 	ADD_SIGNAL(MethodInfo("script_add_function_request", PropertyInfo(Variant::OBJECT, "obj"), PropertyInfo(Variant::STRING, "function"), PropertyInfo(Variant::PACKED_STRING_ARRAY, "args")));
@@ -8586,8 +8797,10 @@ EditorNode::EditorNode() {
 
 	EditorUndoRedoManager::get_singleton()->connect("version_changed", callable_mp(this, &EditorNode::_update_undo_redo_allowed));
 	EditorUndoRedoManager::get_singleton()->connect("version_changed", callable_mp(this, &EditorNode::_update_unsaved_cache));
+	EditorUndoRedoManager::get_singleton()->connect("version_changed", callable_mp(this, &EditorNode::_undo_redo_resource_usage_changed));
 	EditorUndoRedoManager::get_singleton()->connect("history_changed", callable_mp(this, &EditorNode::_update_undo_redo_allowed));
 	EditorUndoRedoManager::get_singleton()->connect("history_changed", callable_mp(this, &EditorNode::_update_unsaved_cache));
+	EditorUndoRedoManager::get_singleton()->connect("history_changed", callable_mp(this, &EditorNode::_undo_redo_resource_usage_changed));
 	ProjectSettings::get_singleton()->connect("settings_changed", callable_mp(this, &EditorNode::_update_from_settings));
 	GDExtensionManager::get_singleton()->connect("extensions_reloaded", callable_mp(this, &EditorNode::_gdextensions_reloaded));
 
@@ -9160,7 +9373,7 @@ EditorNode::EditorNode() {
 
 	// Command palette and editor shortcuts.
 	command_palette = EditorCommandPalette::get_singleton();
-	command_palette->set_title(TTR("Command Palette"));
+	command_palette->set_title(TTRC("Command Palette"));
 	gui_base->add_child(command_palette);
 
 	ED_SHORTCUT("editor/next_tab", TTRC("Next Scene Tab"), KeyModifierMask::CTRL + Key::TAB);
@@ -9465,14 +9678,14 @@ EditorNode::EditorNode() {
 
 	gradle_build_manage_templates = memnew(ConfirmationDialog);
 	gradle_build_manage_templates->set_flag(Window::FLAG_RESIZE_DISABLED, true);
-	gradle_build_manage_templates->set_text(TTR("Android build template is missing, please install relevant templates."));
-	gradle_build_manage_templates->set_ok_button_text(TTR("Manage Templates"));
-	gradle_build_manage_templates->add_button(TTR("Install from file"))->connect(SceneStringName(pressed), callable_mp(this, &EditorNode::_android_install_build_template));
+	gradle_build_manage_templates->set_text(TTRC("Android build template is missing, please install relevant templates."));
+	gradle_build_manage_templates->set_ok_button_text(TTRC("Manage Templates"));
+	gradle_build_manage_templates->add_button(TTRC("Install from file"))->connect(SceneStringName(pressed), callable_mp(this, &EditorNode::_android_install_build_template));
 	gradle_build_manage_templates->connect(SceneStringName(confirmed), callable_mp(this, &EditorNode::_menu_option).bind(EDITOR_MANAGE_EXPORT_TEMPLATES));
 	gui_base->add_child(gradle_build_manage_templates);
 
 	file_android_build_source = memnew(EditorFileDialog);
-	file_android_build_source->set_title(TTR("Select Android sources file"));
+	file_android_build_source->set_title(TTRC("Select Android sources file"));
 	file_android_build_source->set_access(EditorFileDialog::ACCESS_FILESYSTEM);
 	file_android_build_source->set_file_mode(EditorFileDialog::FILE_MODE_OPEN_FILE);
 	file_android_build_source->add_filter("*.zip");
@@ -9493,7 +9706,7 @@ EditorNode::EditorNode() {
 
 		install_android_build_template = memnew(ConfirmationDialog);
 		install_android_build_template->set_flag(Window::FLAG_RESIZE_DISABLED, true);
-		install_android_build_template->set_ok_button_text(TTR("Install"));
+		install_android_build_template->set_ok_button_text(TTRC("Install"));
 		install_android_build_template->connect(SceneStringName(confirmed), callable_mp(this, &EditorNode::_menu_confirm_current));
 		install_android_build_template->add_child(vbox);
 		install_android_build_template->set_min_size(Vector2(500.0 * EDSCALE, 0));
@@ -9507,13 +9720,13 @@ EditorNode::EditorNode() {
 	gui_base->add_child(remove_android_build_template);
 
 	file_templates = memnew(EditorFileDialog);
-	file_templates->set_title(TTR("Import Templates From ZIP File"));
+	file_templates->set_title(TTRC("Import Templates From ZIP File"));
 
 	gui_base->add_child(file_templates);
 	file_templates->set_file_mode(EditorFileDialog::FILE_MODE_OPEN_FILE);
 	file_templates->set_access(EditorFileDialog::ACCESS_FILESYSTEM);
 	file_templates->clear_filters();
-	file_templates->add_filter("*.tpz", TTR("Template Package"));
+	file_templates->add_filter("*.tpz", TTRC("Template Package"));
 
 	file = memnew(EditorFileDialog);
 	gui_base->add_child(file);
@@ -9521,11 +9734,11 @@ EditorNode::EditorNode() {
 	file->set_transient_to_focused(true);
 
 	file_export_lib = memnew(EditorFileDialog);
-	file_export_lib->set_title(TTR("Export Library"));
+	file_export_lib->set_title(TTRC("Export Library"));
 	file_export_lib->set_file_mode(EditorFileDialog::FILE_MODE_SAVE_FILE);
 	file_export_lib->connect("file_selected", callable_mp(this, &EditorNode::_dialog_action));
-	file_export_lib->add_option(TTR("Merge With Existing"), Vector<String>(), true);
-	file_export_lib->add_option(TTR("Apply MeshInstance Transforms"), Vector<String>(), false);
+	file_export_lib->add_option(TTRC("Merge With Existing"), Vector<String>(), true);
+	file_export_lib->add_option(TTRC("Apply MeshInstance Transforms"), Vector<String>(), false);
 	gui_base->add_child(file_export_lib);
 
 	file_pack_zip = memnew(EditorFileDialog);
@@ -9533,7 +9746,7 @@ EditorNode::EditorNode() {
 	file_pack_zip->set_file_mode(EditorFileDialog::FILE_MODE_SAVE_FILE);
 	file_pack_zip->set_access(EditorFileDialog::ACCESS_FILESYSTEM);
 	file_pack_zip->add_filter("*.zip", "ZIP Archive");
-	file_pack_zip->set_title(TTR("Pack Project as ZIP..."));
+	file_pack_zip->set_title(TTRC("Pack Project as ZIP..."));
 	gui_base->add_child(file_pack_zip);
 
 	file->connect("file_selected", callable_mp(this, &EditorNode::_dialog_action));
@@ -9543,36 +9756,6 @@ EditorNode::EditorNode() {
 	add_child(audio_preview_gen);
 
 	add_editor_plugin(memnew(DebuggerEditorPlugin(debug_menu)));
-
-	disk_changed = memnew(ConfirmationDialog);
-	{
-		disk_changed->set_title(TTR("Files have been modified outside Godot"));
-
-		VBoxContainer *vbc = memnew(VBoxContainer);
-		disk_changed->add_child(vbc);
-
-		Label *dl = memnew(Label);
-		dl->set_text(TTR("The following files are newer on disk:"));
-		vbc->add_child(dl);
-
-		disk_changed_list = memnew(Tree);
-		disk_changed_list->set_accessibility_name(TTRC("The following files are newer on disk:"));
-		vbc->add_child(disk_changed_list);
-		disk_changed_list->set_v_size_flags(Control::SIZE_EXPAND_FILL);
-
-		Label *what_action_label = memnew(Label);
-		what_action_label->set_text(TTR("What action should be taken?"));
-		vbc->add_child(what_action_label);
-
-		disk_changed->connect(SceneStringName(confirmed), callable_mp(this, &EditorNode::_reload_modified_scenes));
-		disk_changed->connect(SceneStringName(confirmed), callable_mp(this, &EditorNode::_reload_project_settings));
-		disk_changed->set_ok_button_text(TTR("Reload from disk"));
-
-		disk_changed->add_button(TTR("Ignore external changes"), !DisplayServer::get_singleton()->get_swap_cancel_ok(), "resave");
-		disk_changed->connect("custom_action", callable_mp(this, &EditorNode::_resave_externally_modified_scenes));
-	}
-
-	gui_base->add_child(disk_changed);
 
 	project_data_missing = memnew(ConfirmationDialog);
 	project_data_missing->set_flag(Window::FLAG_RESIZE_DISABLED, true);
@@ -9727,8 +9910,8 @@ EditorNode::EditorNode() {
 
 	open_imported = memnew(ConfirmationDialog);
 	open_imported->set_flag(Window::FLAG_RESIZE_DISABLED, true);
-	open_imported->set_ok_button_text(TTR("Open Anyway"));
-	new_inherited_button = open_imported->add_button(TTR("New Inherited"), !DisplayServer::get_singleton()->get_swap_cancel_ok(), "inherit");
+	open_imported->set_ok_button_text(TTRC("Open Anyway"));
+	new_inherited_button = open_imported->add_button(TTRC("New Inherited"), !DisplayServer::get_singleton()->get_swap_cancel_ok(), "inherit");
 	open_imported->connect(SceneStringName(confirmed), callable_mp(this, &EditorNode::_open_imported));
 	open_imported->connect("custom_action", callable_mp(this, &EditorNode::_inherit_imported));
 	gui_base->add_child(open_imported);
@@ -9747,7 +9930,7 @@ EditorNode::EditorNode() {
 	load_error_dialog = memnew(AcceptDialog);
 	load_error_dialog->set_unparent_when_invisible(true);
 	load_error_dialog->add_child(load_errors);
-	load_error_dialog->set_title(TTR("Load Errors"));
+	load_error_dialog->set_title(TTRC("Load Errors"));
 	load_error_dialog->connect(SceneStringName(visibility_changed), callable_mp(this, &EditorNode::_load_error_dialog_visibility_changed));
 
 	execute_outputs = memnew(RichTextLabel);
@@ -9768,9 +9951,9 @@ EditorNode::EditorNode() {
 
 	pick_main_scene = memnew(ConfirmationDialog);
 	gui_base->add_child(pick_main_scene);
-	pick_main_scene->set_ok_button_text(TTR("Select"));
+	pick_main_scene->set_ok_button_text(TTRC("Select"));
 	pick_main_scene->connect(SceneStringName(confirmed), callable_mp(this, &EditorNode::_menu_option).bind(SETTINGS_PICK_MAIN_SCENE));
-	select_current_scene_button = pick_main_scene->add_button(TTR("Select Current"), true, "select_current");
+	select_current_scene_button = pick_main_scene->add_button(TTRC("Select Current"), true, "select_current");
 	pick_main_scene->connect("custom_action", callable_mp(this, &EditorNode::_pick_main_scene_custom_action));
 
 	open_project_settings = memnew(ConfirmationDialog);

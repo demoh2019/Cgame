@@ -17,7 +17,7 @@ import subprocess
 import sys
 import tempfile
 
-CACHE_VERSION = 1
+CACHE_VERSION = 2
 STATE_NAME = "cgame-import-state.json"
 IGNORE_DIRS = frozenset({".godot", ".git", ".hg", ".svn", ".venv", "venv", "__pycache__", "node_modules"})
 BLOCK_SIZE = 1024 * 1024
@@ -28,12 +28,25 @@ class ImportPipelineError(Exception):
     """Invalid project, unsafe file layout, or failed Godot invocation."""
 
 
-def inventory(root: Path) -> dict[str, str]:
-    """Hash regular source files; do not follow links outside or inside projects."""
+def _fingerprint(info: os.stat_result) -> list[int]:
+    """Attributes used to recognize unchanged files, including same-size edits."""
+    return [info.st_dev, info.st_ino, info.st_mode, info.st_size,
+            info.st_mtime_ns, info.st_ctime_ns]
+
+
+def inventory(root: Path, previous: dict | None = None, *,
+              include_metadata: bool = False, verify_all: bool = False):
+    """Reuse SHA-256 for stat-identical regular files; never follow symlinks.
+
+    verify_all disables metadata caching for strict content verification.
+    """
     root = Path(root).resolve()
     if not (root / "project.godot").is_file():
         raise ImportPipelineError(f"Missing project.godot in {root}")
     entries: dict[str, str] = {}
+    fingerprints: dict[str, list[int]] = {}
+    previous_hashes = previous.get("files", {}) if previous else {}
+    previous_stats = previous.get("file_stats", {}) if previous else {}
 
     def fail_walk(err: OSError) -> None:
         raise ImportPipelineError(f"Cannot enumerate project files: {err}") from err
@@ -52,17 +65,29 @@ def inventory(root: Path) -> dict[str, str]:
             before = path.stat()
             if not stat.S_ISREG(before.st_mode):
                 raise ImportPipelineError(f"Not a regular file: {rel}")
-            digest = hashlib.sha256()
-            with path.open("rb") as handle:
-                while data := handle.read(BLOCK_SIZE):
-                    digest.update(data)
-                after = os.fstat(handle.fileno())
-            if (before.st_dev, before.st_ino, before.st_size, before.st_mtime_ns) != (
-                after.st_dev, after.st_ino, after.st_size, after.st_mtime_ns
-            ):
-                raise ImportPipelineError(f"File changed while hashing: {rel}")
-            entries[rel] = digest.hexdigest()
-    return dict(sorted(entries.items()))
+            before_stats = _fingerprint(before)
+            if not verify_all and previous_stats.get(rel) == before_stats and rel in previous_hashes:
+                # Warm scan: no file data read and no new SHA-256 calculation.
+                entries[rel] = previous_hashes[rel]
+            else:
+                digest = hashlib.sha256()
+                flags = os.O_RDONLY | getattr(os, "O_BINARY", 0) | getattr(os, "O_NOFOLLOW", 0)
+                fd = os.open(path, flags)
+                with os.fdopen(fd, "rb") as handle:
+                    after_open = os.fstat(handle.fileno())
+                    if _fingerprint(after_open) != before_stats or not stat.S_ISREG(after_open.st_mode):
+                        raise ImportPipelineError(f"File changed while opening: {rel}")
+                    while data := handle.read(BLOCK_SIZE):
+                        digest.update(data)
+                    after_read = os.fstat(handle.fileno())
+                if _fingerprint(after_read) != before_stats:
+                    raise ImportPipelineError(f"File changed while hashing: {rel}")
+                entries[rel] = digest.hexdigest()
+            fingerprints[rel] = before_stats
+    files_sorted = dict(sorted(entries.items()))
+    if include_metadata:
+        return files_sorted, dict(sorted(fingerprints.items()))
+    return files_sorted
 
 
 def load_state(path: Path) -> dict | None:
@@ -80,6 +105,13 @@ def load_state(path: Path) -> dict | None:
         return None
     if not all(isinstance(k, str) and isinstance(v, str) and len(v) == 64
                and all(ch in "0123456789abcdef" for ch in v) for k, v in files.items()):
+        return None
+    file_stats = state.get("file_stats")
+    if not isinstance(file_stats, dict) or file_stats.keys() != files.keys():
+        return None
+    if not all(isinstance(stats, list) and len(stats) == 6
+               and all(type(item) is int and item >= 0 for item in stats)
+               for stats in file_stats.values()):
         return None
     return state
 
@@ -123,7 +155,7 @@ def save_state(path: Path, state: dict) -> None:
 
 def run_pipeline(root: Path, godot: str = "godot", force: bool = False,
                  dry_run: bool = False, timeout: int = 900,
-                 runner=subprocess.run) -> dict:
+                 runner=subprocess.run, verify_all: bool = False) -> dict:
     root = Path(root).resolve()
     if timeout < 1:
         raise ImportPipelineError("timeout must be positive")
@@ -131,7 +163,9 @@ def run_pipeline(root: Path, godot: str = "godot", force: bool = False,
     # Do not trust a symlinked cache directory for reads or atomic writes.
     if (root / ".godot").is_symlink() or state_path.is_symlink():
         raise ImportPipelineError("Unsafe .godot cache path (symlink)")
-    current = inventory(root)
+    previous = load_state(state_path)
+    current, fingerprints = inventory(root, previous, include_metadata=True,
+                                      verify_all=verify_all)
     try:
         version = runner([godot, "--version"], cwd=str(root), text=True,
                          capture_output=True, timeout=timeout)
@@ -140,12 +174,18 @@ def run_pipeline(root: Path, godot: str = "godot", force: bool = False,
     if version.returncode != 0 or not version.stdout.strip():
         raise ImportPipelineError("Godot version command failed")
     engine = version.stdout.strip()
-    previous = load_state(state_path)
     cache_exists = (root / ".godot").is_dir()
     plan = make_plan(current, previous, engine, cache_exists, force)
     plan["engine"] = engine
     plan["status"] = "dry_run" if dry_run else ("skipped" if not plan["needs_import"] else "pending")
-    if dry_run or not plan["needs_import"]:
+    if dry_run:
+        return plan
+    if not plan["needs_import"]:
+        # A touched-but-content-identical file may get a new fingerprint:
+        # refresh the metadata cache so subsequent warm scans skip it.
+        if previous is not None and previous["file_stats"] != fingerprints:
+            save_state(state_path, {"schema": CACHE_VERSION, "engine": engine,
+                                    "files": current, "file_stats": fingerprints})
         return plan
     try:
         completed = runner([godot, "--headless", "--path", str(root), "--import"],
@@ -154,9 +194,13 @@ def run_pipeline(root: Path, godot: str = "godot", force: bool = False,
         raise ImportPipelineError(f"Godot asset import failed: {exc}") from exc
     if completed.returncode != 0:
         raise ImportPipelineError(f"Godot import returned exit code {completed.returncode}")
-    if inventory(root) != current:
+    after, final_fingerprints = inventory(
+        root, {"files": current, "file_stats": fingerprints},
+        include_metadata=True, verify_all=verify_all)
+    if after != current:
         raise ImportPipelineError("Project inputs changed during import; state not saved")
-    save_state(state_path, {"schema": CACHE_VERSION, "engine": engine, "files": current})
+    save_state(state_path, {"schema": CACHE_VERSION, "engine": engine,
+                            "files": current, "file_stats": final_fingerprints})
     plan["status"] = "imported"
     return plan
 
@@ -166,12 +210,15 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("root", nargs="?", type=Path, default=Path("."), help="Godot project root")
     parser.add_argument("--godot", default="godot", help="Godot editor executable")
     parser.add_argument("--force", action="store_true", help="Import even if unchanged")
+    parser.add_argument("--verify-all", action="store_true",
+                        help="Rehash every file instead of trusting unchanged metadata")
     parser.add_argument("--dry-run", action="store_true", help="Show proposed work without importing")
     parser.add_argument("--timeout", type=int, default=900, help="Seconds per Godot command")
     parser.add_argument("--json", action="store_true", help="Machine-readable plan and result")
     args = parser.parse_args(argv)
     try:
-        result = run_pipeline(args.root, args.godot, args.force, args.dry_run, args.timeout)
+        result = run_pipeline(args.root, args.godot, args.force, args.dry_run, args.timeout,
+                              verify_all=args.verify_all)
     except ImportPipelineError as exc:
         print(f"Import pipeline: {exc}", file=sys.stderr)
         return 2

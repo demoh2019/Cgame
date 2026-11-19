@@ -133,7 +133,7 @@ bool GodotSliderJoint3D::setup(real_t p_step) {
 
 //-----------------------------------------------------------------------------
 
-void GodotSliderJoint3D::solve(real_t p_step) {
+void GodotSliderJoint3D::_solve_joint(real_t p_step) {
 	int i;
 	// linear
 	Vector3 velA = A->get_velocity_in_local_point(m_relPosA);

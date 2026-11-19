@@ -586,4 +586,579 @@ TEST_CASE("[Image] Multiple queued upload snapshots keep independent generations
 	CHECK(original->get_pixel(0, 0) == blue);
 }
 
+
+TEST_CASE("[Image][NormalMipmap] RGB8 keeps a flat normal and alpha") {
+	Ref<Image> image = memnew(Image(4, 4, false, Image::FORMAT_RGBA8));
+	const Color base_normal(0.5, 0.5, 1.0, 0.75);
+	for (int y = 0; y < 4; y++) {
+		for (int x = 0; x < 4; x++) {
+			image->set_pixel(x, y, base_normal);
+		}
+	}
+	CHECK(image->generate_mipmaps(true) == OK);
+	CHECK(image->get_mipmap_count() == 2);
+	const Ref<Image> mip = image->get_image_from_mipmap(1);
+	REQUIRE(mip.is_valid());
+	for (int y = 0; y < mip->get_height(); y++) {
+		for (int x = 0; x < mip->get_width(); x++) {
+			const Color normal = mip->get_pixel(x, y);
+			CHECK(Math::abs(normal.r - 0.5f) <= 2.0f / 255.0f);
+			CHECK(Math::abs(normal.g - 0.5f) <= 2.0f / 255.0f);
+			CHECK(Math::abs(normal.b - 1.0f) <= 1.0f / 255.0f);
+			CHECK(Math::abs(normal.a - base_normal.a) <= 2.0f / 255.0f);
+		}
+	}
+}
+
+TEST_CASE("[Image][NormalMipmap] RGB16 keeps a flat normal and alpha") {
+	Ref<Image> image = memnew(Image(4, 4, false, Image::FORMAT_RGBA16));
+	const Color base_normal(0.5, 0.5, 1.0, 0.625);
+	for (int y = 0; y < 4; y++) {
+		for (int x = 0; x < 4; x++) {
+			image->set_pixel(x, y, base_normal);
+		}
+	}
+	CHECK(image->generate_mipmaps(true) == OK);
+	const Ref<Image> mip = image->get_image_from_mipmap(1);
+	REQUIRE(mip.is_valid());
+	const Color normal = mip->get_pixel(0, 0);
+	CHECK(Math::abs(normal.r - 0.5f) < 3.0f / 65535.0f);
+	CHECK(Math::abs(normal.g - 0.5f) < 3.0f / 65535.0f);
+	CHECK(Math::abs(normal.b - 1.0f) < 2.0f / 65535.0f);
+	CHECK(Math::abs(normal.a - base_normal.a) < 3.0f / 65535.0f);
+}
+
+TEST_CASE("[Image][NormalMipmap] Nonaxis normal stays unit length in RGB8 and RGB16") {
+	for (Image::Format format : { Image::FORMAT_RGBA8, Image::FORMAT_RGBA16 }) {
+		Ref<Image> image = memnew(Image(4, 4, false, format));
+		const Color sample(0.7, 0.35, 0.92, 1.0);
+		for (int y = 0; y < 4; y++) {
+			for (int x = 0; x < 4; x++) {
+				image->set_pixel(x, y, sample);
+			}
+		}
+		CHECK(image->generate_mipmaps(true) == OK);
+		const Ref<Image> mip = image->get_image_from_mipmap(1);
+		REQUIRE(mip.is_valid());
+		const Color color = mip->get_pixel(0, 0);
+		const Vector3 decoded(color.r * 2.0f - 1.0f, color.g * 2.0f - 1.0f, color.b * 2.0f - 1.0f);
+		CHECK(Math::abs(decoded.length() - 1.0f) < (format == Image::FORMAT_RGBA8 ? 0.02f : 0.0002f));
+		CHECK(Math::abs(color.a - 1.0f) < 0.001f);
+	}
+}
+
+TEST_CASE("[Image][NormalMipmap] Mipmap renormalization is deterministic for repeated sources") {
+	for (Image::Format format : { Image::FORMAT_RGBA8, Image::FORMAT_RGBA16 }) {
+		Ref<Image> first = memnew(Image(4, 4, false, format));
+		Ref<Image> second = memnew(Image(4, 4, false, format));
+		for (int y = 0; y < 4; y++) {
+			for (int x = 0; x < 4; x++) {
+				const Color sample(0.4f + 0.1f * (x % 2), 0.3f + 0.1f * (y % 2), 0.9f, 0.8f);
+				first->set_pixel(x, y, sample);
+				second->set_pixel(x, y, sample);
+			}
+		}
+		CHECK(first->generate_mipmaps(true) == OK);
+		CHECK(second->generate_mipmaps(true) == OK);
+		CHECK(first->get_data() == second->get_data());
+	}
+}
+
+
+TEST_CASE("[Image] optimize_from_channels reduces uncompressed grayscale storage") {
+	Ref<Image> image = memnew(Image(8, 8, false, Image::FORMAT_RGBA8));
+	image->fill(Color(0.5, 0.5, 0.5, 1.0));
+	CHECK_EQ(image->get_data_size(), 8 * 8 * 4);
+	image->optimize_from_channels(Image::USED_CHANNELS_L);
+	CHECK_EQ(image->get_format(), Image::FORMAT_L8);
+	CHECK_EQ(image->get_data_size(), 8 * 8);
+	const Color result = image->get_pixel(0, 0);
+	CHECK(Math::abs(result.r - 0.5) < 0.01);
+	CHECK(Math::abs(result.g - 0.5) < 0.01);
+	CHECK(Math::abs(result.b - 0.5) < 0.01);
+}
+
+TEST_CASE("[Image] optimize_from_channels keeps grayscale alpha") {
+	Ref<Image> image = memnew(Image(8, 8, false, Image::FORMAT_RGBA8));
+	image->fill(Color(0.5, 0.5, 0.5, 0.25));
+	image->optimize_from_channels(Image::USED_CHANNELS_LA);
+	CHECK_EQ(image->get_format(), Image::FORMAT_LA8);
+	CHECK_EQ(image->get_data_size(), 8 * 8 * 2);
+	const Color result = image->get_pixel(0, 0);
+	CHECK(Math::abs(result.r - 0.5) < 0.01);
+	CHECK(Math::abs(result.a - 0.25) < 0.01);
+}
+
+TEST_CASE("[Image] optimize_from_channels removes unused RGB8 and RG8 channels") {
+	Ref<Image> image = memnew(Image(8, 8, false, Image::FORMAT_RGBA8));
+	image->fill(Color(0.2, 0.4, 0.6, 1.0));
+	image->optimize_from_channels(Image::USED_CHANNELS_RGB);
+	CHECK_EQ(image->get_format(), Image::FORMAT_RGB8);
+	CHECK_EQ(image->get_data_size(), 8 * 8 * 3);
+	CHECK(Math::abs(image->get_pixel(0, 0).r - 0.2) < 0.01);
+
+	Ref<Image> normal = memnew(Image(8, 8, false, Image::FORMAT_RGBA8));
+	normal->fill(Color(0.3, 0.7, 0.0, 1.0));
+	normal->optimize_from_channels(Image::USED_CHANNELS_RG);
+	CHECK_EQ(normal->get_format(), Image::FORMAT_RG8);
+	CHECK_EQ(normal->get_data_size(), 8 * 8 * 2);
+	CHECK(Math::abs(normal->get_pixel(0, 0).g - 0.7) < 0.01);
+}
+
+TEST_CASE("[Image] optimize_from_channels preserves HDR precision") {
+	Ref<Image> hdr = memnew(Image(4, 4, false, Image::FORMAT_RGBAF));
+	hdr->fill(Color(2.0, 2.0, 2.0, 1.0));
+	hdr->optimize_from_channels(Image::USED_CHANNELS_L);
+	CHECK_EQ(hdr->get_format(), Image::FORMAT_RGBF);
+	CHECK(Math::abs(hdr->get_pixel(0, 0).r - 2.0) < 0.001);
+	CHECK_EQ(hdr->get_data_size(), 4 * 4 * 3 * 4);
+
+	Ref<Image> half = memnew(Image(4, 4, false, Image::FORMAT_RGBAH));
+	half->fill(Color(1.5, 1.5, 1.5, 1.0));
+	half->optimize_from_channels(Image::USED_CHANNELS_L);
+	CHECK_EQ(half->get_format(), Image::FORMAT_RGBH);
+	CHECK(Math::abs(half->get_pixel(0, 0).g - 1.5) < 0.01);
+}
+
+
+TEST_CASE("[Image][MaskedBlit] RGBA8 runs match scalar RGBAF reference") {
+	const Image::Format formats[] = { Image::FORMAT_RGB8, Image::FORMAT_RGBA8, Image::FORMAT_RGBAF };
+	constexpr int SW = 79;
+	constexpr int SH = 31;
+	for (const Image::Format format : formats) {
+		Ref<Image> source = memnew(Image(SW, SH, false, format));
+		Ref<Image> mask8 = memnew(Image(SW, SH, false, Image::FORMAT_RGBA8));
+		Ref<Image> maskf = memnew(Image(SW, SH, false, Image::FORMAT_RGBAF));
+		Ref<Image> optimized = memnew(Image(92, 39, false, format));
+		Ref<Image> reference = memnew(Image(92, 39, false, format));
+		optimized->fill(Color(0.2f, 0.3f, 0.4f, 0.5f));
+		reference->fill(Color(0.2f, 0.3f, 0.4f, 0.5f));
+
+		for (int y = 0; y < SH; y++) {
+			for (int x = 0; x < SW; x++) {
+				source->set_pixel(x, y, Color(float(x % 37) / 36.0f, float(y % 19) / 18.0f, float((x * 7 + y) % 29) / 28.0f, float(x % 5) / 4.0f));
+				const int pattern = (x / 9 + y / 3) % 5;
+				const float alpha = pattern == 0 ? 0.0f : pattern == 1 ? (1.0f / 255.0f) : pattern == 2 ? 0.5f : 1.0f;
+				mask8->set_pixel(x, y, Color(0, 0, 0, alpha));
+				maskf->set_pixel(x, y, Color(0, 0, 0, alpha));
+			}
+		}
+		optimized->blit_rect_mask(source, mask8, Rect2i(3, 2, 71, 27), Point2i(7, 6));
+		reference->blit_rect_mask(source, maskf, Rect2i(3, 2, 71, 27), Point2i(7, 6));
+		CHECK_MESSAGE(optimized->get_data() == reference->get_data(),
+				"RGBA8 opaque runs must match the existing scalar blit byte-for-byte, for every destination pixel format.");
+	}
+}
+
+TEST_CASE("[Image][MaskedBlit] Cropped spans match scalar clipping") {
+	Ref<Image> source = memnew(Image(47, 25, false, Image::FORMAT_RGBA8));
+	Ref<Image> mask8 = memnew(Image(47, 25, false, Image::FORMAT_RGBA8));
+	Ref<Image> maskf = memnew(Image(47, 25, false, Image::FORMAT_RGBAF));
+	for (int y = 0; y < 25; y++) {
+		for (int x = 0; x < 47; x++) {
+			source->set_pixel(x, y, Color(float(x) / 46, float(y) / 24, 0.75f, 1));
+			const float alpha = (x / 4 + y / 2) % 3 == 0 ? 0.0f : 1.0f;
+			mask8->set_pixel(x, y, Color(0, 0, 0, alpha));
+			maskf->set_pixel(x, y, Color(0, 0, 0, alpha));
+		}
+	}
+	const Rect2i source_rects[] = {
+		Rect2i(-6, -4, 40, 25),
+		Rect2i(30, 12, 40, 30),
+		Rect2i(0, 0, 47, 25),
+		Rect2i(8, 3, 30, 16),
+	};
+	const Point2i dest_positions[] = {
+		Point2i(10, 5),
+		Point2i(20, 10),
+		Point2i(-8, -6),
+		Point2i(0, 0),
+	};
+	for (int i = 0; i < 4; i++) {
+		Ref<Image> optimized = memnew(Image(32, 20, false, Image::FORMAT_RGBA8));
+		Ref<Image> reference = memnew(Image(32, 20, false, Image::FORMAT_RGBA8));
+		optimized->fill(Color(0.9f, 0.5f, 0.2f, 0.8f));
+		reference->fill(Color(0.9f, 0.5f, 0.2f, 0.8f));
+		optimized->blit_rect_mask(source, mask8, source_rects[i], dest_positions[i]);
+		reference->blit_rect_mask(source, maskf, source_rects[i], dest_positions[i]);
+		CHECK_MESSAGE(optimized->get_data() == reference->get_data(), "Clipping may not alter RGBA8 mask blit results.");
+	}
+}
+
+TEST_CASE("[Image][MaskedBlit] Self alias keeps scalar semantics") {
+	Ref<Image> actual = memnew(Image(8, 8, false, Image::FORMAT_RGBA8));
+	Ref<Image> reference = memnew(Image(8, 8, false, Image::FORMAT_RGBA8));
+	Ref<Image> mask = memnew(Image(8, 8, false, Image::FORMAT_RGBA8));
+	for (int y = 0; y < 8; y++) {
+		for (int x = 0; x < 8; x++) {
+			const Color color(float(x) / 7, float(y) / 7, 0.25f, 1.0f);
+			actual->set_pixel(x, y, color);
+			reference->set_pixel(x, y, color);
+			mask->set_pixel(x, y, Color(0, 0, 0, (x + y) % 3 ? 1.0f : 0.0f));
+		}
+	}
+	for (int y = 0; y < 7; y++) {
+		for (int x = 0; x < 7; x++) {
+			if (mask->get_pixel(x, y).a != 0) {
+				reference->set_pixel(x + 1, y + 1, reference->get_pixel(x, y));
+			}
+		}
+	}
+	actual->blit_rect_mask(actual, mask, Rect2i(0, 0, 7, 7), Point2i(1, 1));
+	CHECK_MESSAGE(actual->get_data() == reference->get_data(), "Self-blits preserve the existing scalar copy order.");
+}
+
+TEST_CASE("[Image][MaskedBlit] Destination mask alias keeps scalar semantics") {
+	Ref<Image> source = memnew(Image(8, 8, false, Image::FORMAT_RGBA8));
+	Ref<Image> actual = memnew(Image(8, 8, false, Image::FORMAT_RGBA8));
+	Ref<Image> reference = memnew(Image(8, 8, false, Image::FORMAT_RGBA8));
+	for (int y = 0; y < 8; y++) {
+		for (int x = 0; x < 8; x++) {
+			source->set_pixel(x, y, Color(float(x + 1) / 9, float(y + 1) / 9, 0.3f, (x * 2 + y) % 5 ? 1.0f : 0.0f));
+			const Color color(0.1f, 0.2f, 0.3f, (x + y) % 4 ? 1.0f : 0.0f);
+			actual->set_pixel(x, y, color);
+			reference->set_pixel(x, y, color);
+		}
+	}
+	for (int y = 0; y < 7; y++) {
+		for (int x = 0; x < 7; x++) {
+			if (reference->get_pixel(x, y).a != 0) {
+				reference->set_pixel(x + 1, y + 1, source->get_pixel(x, y));
+			}
+		}
+	}
+	actual->blit_rect_mask(source, actual, Rect2i(0, 0, 7, 7), Point2i(1, 1));
+	CHECK_MESSAGE(actual->get_data() == reference->get_data(), "Destination-mask aliasing must retain scalar semantics.");
+}
+
+
+TEST_CASE("[Image][BlendHotpath] Unmasked blend matches per-pixel reference for several formats") {
+	const Image::Format formats[] = { Image::FORMAT_RGBA8, Image::FORMAT_RGB8, Image::FORMAT_LA8, Image::FORMAT_RGBAF };
+	for (Image::Format format : formats) {
+		Ref<Image> source = memnew(Image(32, 21, false, format));
+		Ref<Image> actual = memnew(Image(39, 26, false, format));
+		Ref<Image> expected = memnew(Image(39, 26, false, format));
+		actual->fill(Color(0.15f, 0.25f, 0.35f, 0.55f));
+		expected->fill(Color(0.15f, 0.25f, 0.35f, 0.55f));
+		for (int y = 0; y < 21; y++) {
+			for (int x = 0; x < 32; x++) {
+				source->set_pixel(x, y, Color((x % 13) / 12.0f, (y % 11) / 10.0f, ((x + y) % 17) / 16.0f, (x + y) % 5 == 0 ? 0.0f : (x % 7) / 6.0f));
+			}
+		}
+		// Source [4, 3, 29, 18) maps to destination [6, 5, 31, 20).
+		for (int y = 0; y < 15; y++) {
+			for (int x = 0; x < 25; x++) {
+				const Color sc = source->get_pixel(x + 4, y + 3);
+				if (sc.a != 0) {
+					expected->set_pixel(x + 6, y + 5, expected->get_pixel(x + 6, y + 5).blend(sc));
+				}
+			}
+		}
+		actual->blend_rect(source, Rect2i(4, 3, 25, 15), Point2i(6, 5));
+		CHECK_MESSAGE(actual->get_data() == expected->get_data(), "Blend fast path must match the scalar Color.blend reference for every format.");
+	}
+}
+
+TEST_CASE("[Image][BlendHotpath] RGBA8 mask direct-alpha blend matches scalar reference") {
+	const Image::Format formats[] = { Image::FORMAT_RGBA8, Image::FORMAT_RGB8, Image::FORMAT_LA8, Image::FORMAT_RGBAF };
+	for (Image::Format format : formats) {
+		Ref<Image> source = memnew(Image(34, 23, false, format));
+		Ref<Image> mask = memnew(Image(34, 23, false, Image::FORMAT_RGBA8));
+		Ref<Image> actual = memnew(Image(37, 26, false, format));
+		Ref<Image> expected = memnew(Image(37, 26, false, format));
+		actual->fill(Color(0.4f, 0.2f, 0.3f, 0.7f));
+		expected->fill(Color(0.4f, 0.2f, 0.3f, 0.7f));
+		for (int y = 0; y < 23; y++) {
+			for (int x = 0; x < 34; x++) {
+				source->set_pixel(x, y, Color((x % 23) / 22.0f, (y % 17) / 16.0f, 0.33f, (x + y) % 5 ? 0.75f : 0.0f));
+				const float alpha = (x / 5 + y / 4) % 3 == 0 ? 0.0f : ((x + y) % 7 == 0 ? 0.5f : 1.0f);
+				mask->set_pixel(x, y, Color(0.2f, 0.3f, 0.4f, alpha));
+			}
+		}
+		for (int y = 0; y < 19; y++) {
+			for (int x = 0; x < 28; x++) {
+				if (mask->get_pixel(x + 3, y + 2).a != 0) {
+					const Color sc = source->get_pixel(x + 3, y + 2);
+					if (sc.a != 0) {
+						expected->set_pixel(x + 6, y + 4, expected->get_pixel(x + 6, y + 4).blend(sc));
+					}
+				}
+			}
+		}
+		actual->blend_rect_mask(source, mask, Rect2i(3, 2, 28, 19), Point2i(6, 4));
+		CHECK_MESSAGE(actual->get_data() == expected->get_data(), "RGBA8 masks must match per-pixel composition exactly.");
+	}
+}
+
+TEST_CASE("[Image][BlendHotpath] Masked blend clipping and no-op regions preserve destination") {
+	Ref<Image> source = memnew(Image(17, 15, false, Image::FORMAT_RGBA8));
+	Ref<Image> mask = memnew(Image(17, 15, false, Image::FORMAT_RGBA8));
+	source->fill(Color(0.1f, 0.9f, 0.2f, 0.5f));
+	for (int y = 0; y < 15; y++) {
+		for (int x = 0; x < 17; x++) {
+			mask->set_pixel(x, y, Color(0, 0, 0, (x + y) % 4 ? 1.0f : 0.0f));
+		}
+	}
+	Ref<Image> actual = memnew(Image(12, 11, false, Image::FORMAT_RGBA8));
+	Ref<Image> expected = memnew(Image(12, 11, false, Image::FORMAT_RGBA8));
+	actual->fill(Color(0.2f, 0.3f, 0.4f, 1.0f));
+	expected->fill(Color(0.2f, 0.3f, 0.4f, 1.0f));
+	// Negative source and destination clipping: source (0, 0) -> destination (3, 2).
+	for (int y = 0; y < 9; y++) {
+		for (int x = 0; x < 9; x++) {
+			if (mask->get_pixel(x, y).a != 0) {
+				const Color sc = source->get_pixel(x, y);
+				expected->set_pixel(x + 3, y + 2, expected->get_pixel(x + 3, y + 2).blend(sc));
+			}
+		}
+	}
+	actual->blend_rect_mask(source, mask, Rect2i(-5, -3, 18, 15), Point2i(-2, -1));
+	CHECK_MESSAGE(actual->get_data() == expected->get_data(), "Clipped blending must preserve pixel positions and exact output.");
+	const PackedByteArray before = actual->get_data();
+	actual->blend_rect_mask(source, mask, Rect2i(100, 100, 4, 4), Point2i(0, 0));
+	CHECK(actual->get_data() == before);
+}
+
+TEST_CASE("[Image][BlendHotpath] Copy-on-write source sharing survives blend") {
+	Ref<Image> source = memnew(Image(19, 13, false, Image::FORMAT_RGBA8));
+	source->fill(Color(0.9f, 0.5f, 0.4f, 0.75f));
+	Ref<Image> actual = memnew(Image(19, 13, false, Image::FORMAT_RGBA8));
+	actual->fill(Color(0.1f, 0.2f, 0.3f, 0.5f));
+	Ref<Image> expected = memnew(Image(19, 13, false, Image::FORMAT_RGBA8));
+	expected->copy_internals_from(actual);
+	const PackedByteArray held_source = source->get_data();
+	const PackedByteArray held_destination = actual->get_data();
+	for (int y = 0; y < 13; y++) {
+		for (int x = 0; x < 19; x++) {
+			const Color sc = source->get_pixel(x, y);
+			expected->set_pixel(x, y, expected->get_pixel(x, y).blend(sc));
+		}
+	}
+	actual->blend_rect(source, Rect2i(0, 0, 19, 13), Point2i(0, 0));
+	CHECK(actual->get_data() == expected->get_data());
+	CHECK(source->get_data() == held_source);
+	CHECK(actual->get_data() != held_destination);
+}
+
+TEST_CASE("[Image][BlendHotpath] Self-blend and destination-mask alias use scalar fallback") {
+	Ref<Image> source = memnew(Image(8, 8, false, Image::FORMAT_RGBA8));
+	Ref<Image> mask = memnew(Image(8, 8, false, Image::FORMAT_RGBA8));
+	Ref<Image> actual = memnew(Image(8, 8, false, Image::FORMAT_RGBA8));
+	Ref<Image> expected = memnew(Image(8, 8, false, Image::FORMAT_RGBA8));
+	for (int y = 0; y < 8; y++) {
+		for (int x = 0; x < 8; x++) {
+			const Color color(x / 7.0f, y / 7.0f, 0.4f, (x + y) % 4 ? 0.8f : 0.0f);
+			source->set_pixel(x, y, color);
+			mask->set_pixel(x, y, Color(0, 0, 0, (x + 2 * y) % 3 ? 1.0f : 0.0f));
+			actual->set_pixel(x, y, color);
+			expected->set_pixel(x, y, color);
+		}
+	}
+	for (int y = 0; y < 7; y++) {
+		for (int x = 0; x < 7; x++) {
+			const Color sc = expected->get_pixel(x, y);
+			if (sc.a != 0) {
+				expected->set_pixel(x + 1, y + 1, expected->get_pixel(x + 1, y + 1).blend(sc));
+			}
+		}
+	}
+	actual->blend_rect(actual, Rect2i(0, 0, 7, 7), Point2i(1, 1));
+	CHECK_MESSAGE(actual->get_data() == expected->get_data(), "Self-blend must preserve sequential read/write semantics.");
+
+	Ref<Image> masked = memnew(Image(8, 8, false, Image::FORMAT_RGBA8));
+	Ref<Image> reference = memnew(Image(8, 8, false, Image::FORMAT_RGBA8));
+	masked->copy_internals_from(mask);
+	reference->copy_internals_from(mask);
+	for (int y = 0; y < 7; y++) {
+		for (int x = 0; x < 7; x++) {
+			if (reference->get_pixel(x, y).a != 0) {
+				const Color sc = source->get_pixel(x, y);
+				if (sc.a != 0) {
+					reference->set_pixel(x + 1, y + 1, reference->get_pixel(x + 1, y + 1).blend(sc));
+				}
+			}
+		}
+	}
+	masked->blend_rect_mask(source, masked, Rect2i(0, 0, 7, 7), Point2i(1, 1));
+	CHECK_MESSAGE(masked->get_data() == reference->get_data(), "Destination-mask alias must preserve the original scalar behavior.");
+}
+
+
+TEST_CASE("[Image][Performance] Roughness mipmaps keep flat normal and source intact") {
+	for (Image::Format normal_format : { Image::FORMAT_RGBA8, Image::FORMAT_RGBAF }) {
+		Ref<Image> normal_map = Image::create_empty(64, 32, false, normal_format);
+		REQUIRE(normal_map.is_valid());
+		Ref<Image> roughness = Image::create_empty(64, 32, false, Image::FORMAT_RGBAF);
+		REQUIRE(roughness.is_valid());
+		const Color source_normal(0.5, 0.5, 1.0, 1.0);
+		const Color base_roughness(0.35, 0.45, 0.55, 0.65);
+		for (int y = 0; y < 32; y++) {
+			for (int x = 0; x < 64; x++) {
+				normal_map->set_pixel(x, y, source_normal);
+				roughness->set_pixel(x, y, base_roughness);
+			}
+		}
+		const Vector<uint8_t> original_normals = normal_map->get_data();
+		REQUIRE(roughness->generate_mipmaps() == OK);
+		REQUIRE(roughness->generate_mipmap_roughness(Image::ROUGHNESS_CHANNEL_R, normal_map) == OK);
+		CHECK(normal_map->get_data() == original_normals);
+		CHECK_FALSE(normal_map->has_mipmaps());
+
+		for (int mip = 1; mip <= roughness->get_mipmap_count(); mip++) {
+			const Ref<Image> level = roughness->get_image_from_mipmap(mip);
+			REQUIRE(level.is_valid());
+			for (int y = 0; y < level->get_height(); y++) {
+				for (int x = 0; x < level->get_width(); x++) {
+					const Color color = level->get_pixel(x, y);
+					CHECK(Math::abs(color.r - base_roughness.r) < 0.01);
+					CHECK(Math::is_equal_approx(color.g, base_roughness.g));
+					CHECK(Math::is_equal_approx(color.b, base_roughness.b));
+					CHECK(Math::is_equal_approx(color.a, base_roughness.a));
+				}
+			}
+		}
+	}
+}
+
+TEST_CASE("[Image][Performance] Roughness mipmaps process nonuniform normals by rows") {
+	Ref<Image> normal_map = Image::create_empty(64, 32, false, Image::FORMAT_RGBAF);
+	Ref<Image> roughness = Image::create_empty(64, 32, false, Image::FORMAT_RGBAF);
+	REQUIRE(normal_map.is_valid());
+	REQUIRE(roughness.is_valid());
+
+	for (int y = 0; y < 32; y++) {
+		for (int x = 0; x < 64; x++) {
+			const float nx = x % 2 == 0 ? 0.35f : 0.65f;
+			const float ny = y % 2 == 0 ? 0.4f : 0.6f;
+			normal_map->set_pixel(x, y, Color(nx, ny, 1, 1));
+			roughness->set_pixel(x, y, Color(0.1, 0.2, 0.3, 0.4));
+		}
+	}
+	REQUIRE(roughness->generate_mipmaps() == OK);
+	REQUIRE(roughness->generate_mipmap_roughness(Image::ROUGHNESS_CHANNEL_G, normal_map) == OK);
+	Ref<Image> mip = roughness->get_image_from_mipmap(1);
+	REQUIRE(mip.is_valid());
+	for (int y = 0; y < mip->get_height(); y++) {
+		for (int x = 0; x < mip->get_width(); x++) {
+			const Color c = mip->get_pixel(x, y);
+			CHECK(c.g >= 0.2f);
+			CHECK(Math::is_finite(c.g));
+			CHECK(Math::is_equal_approx(c.r, (real_t)0.1));
+			CHECK(Math::is_equal_approx(c.b, (real_t)0.3));
+			CHECK(Math::is_equal_approx(c.a, (real_t)0.4));
+		}
+	}
+}
+
+
+TEST_CASE("[Image][Performance] Self-blit overlapping rectangles preserve source snapshot") {
+	struct Case {
+		Rect2i source;
+		Point2i dest;
+	};
+	const Case cases[] = {
+		{ Rect2i(0, 0, 8, 8), Point2i(0, 0) },
+		{ Rect2i(0, 0, 7, 8), Point2i(1, 0) },
+		{ Rect2i(1, 0, 7, 8), Point2i(0, 0) },
+		{ Rect2i(0, 0, 8, 7), Point2i(0, 1) },
+		{ Rect2i(0, 1, 8, 7), Point2i(0, 0) },
+		{ Rect2i(1, 1, 6, 6), Point2i(2, 2) },
+		{ Rect2i(2, 2, 6, 6), Point2i(1, 1) },
+		{ Rect2i(0, 0, 12, 12), Point2i(-2, -2) },
+	};
+
+	for (Image::Format format : { Image::FORMAT_RGBA8, Image::FORMAT_RGBAF, Image::FORMAT_L8 }) {
+		for (const Case &test_case : cases) {
+			Ref<Image> actual = Image::create_empty(8, 8, false, format);
+			REQUIRE(actual.is_valid());
+			for (int y = 0; y < 8; y++) {
+				for (int x = 0; x < 8; x++) {
+					actual->set_pixel(x, y, Color((x + 1) / 10.0f, (y + 1) / 10.0f,
+							(x + y + 1) / 20.0f, (x + 2 * y + 1) / 25.0f));
+				}
+			}
+
+			// A distinct cloned source provides snapshot semantics, even if
+			// its bytes initially share an allocation through copy-on-write.
+			Ref<Image> original = actual->duplicate();
+			Ref<Image> expected = actual->duplicate();
+			REQUIRE(original.is_valid());
+			REQUIRE(expected.is_valid());
+
+			const uint8_t *const pointer_before = actual->get_data().ptr();
+			actual->blit_rect(actual, test_case.source, test_case.dest);
+			expected->blit_rect(original, test_case.source, test_case.dest);
+			CHECK(actual->get_data() == expected->get_data());
+			if (test_case.source.position == test_case.dest &&
+					test_case.source.size == Size2i(8, 8)) {
+				// No-op self-copies must not trigger a COW allocation.
+				CHECK(actual->get_data().ptr() == pointer_before);
+			}
+		}
+	}
+}
+
+
+TEST_CASE("[Image][Performance] Masked blits batch non-RGBA8 mask formats") {
+	// Reference the original scalar get_pixel()/set_pixel() semantics,
+	// including nonzero fractional alpha and source/destination clipping.
+	const Rect2i source_rects[] = {
+		Rect2i(0, 0, 48, 32),
+		Rect2i(5, 4, 38, 25),
+		Rect2i(16, 7, 45, 40),
+	};
+	const Point2i destinations[] = {
+		Point2i(0, 0),
+		Point2i(7, 2),
+		Point2i(-9, -4),
+	};
+
+	for (Image::Format mask_format : {
+				Image::FORMAT_L8, Image::FORMAT_LA8, Image::FORMAT_RGBAF, Image::FORMAT_RGBA16 }) {
+		Ref<Image> source = Image::create_empty(48, 32, false, Image::FORMAT_RGBA8);
+		Ref<Image> mask = Image::create_empty(48, 32, false, mask_format);
+		Ref<Image> destination = Image::create_empty(48, 32, false, Image::FORMAT_RGBA8);
+		REQUIRE(source.is_valid());
+		REQUIRE(mask.is_valid());
+		REQUIRE(destination.is_valid());
+
+		for (int y = 0; y < 32; y++) {
+			for (int x = 0; x < 48; x++) {
+				source->set_pixel(x, y, Color(float(x) / 47, float(y) / 31, 0.75f, 0.6f));
+				destination->set_pixel(x, y, Color(0.2f, 0.3f, 0.4f, 0.5f));
+				const float alpha = (x + 3 * y) % 7 == 0 ? 0.0f :
+						((x + y) % 3 == 0 ? 0.5f : 1.0f);
+				mask->set_pixel(x, y, Color(0.25f, 0.5f, 0.75f, alpha));
+			}
+		}
+		const Vector<uint8_t> original_source = source->get_data();
+		const Vector<uint8_t> original_mask = mask->get_data();
+		for (int test = 0; test < 3; test++) {
+			Ref<Image> actual = destination->duplicate();
+			Ref<Image> expected = destination->duplicate();
+			REQUIRE(actual.is_valid());
+			REQUIRE(expected.is_valid());
+			actual->blit_rect_mask(source, mask, source_rects[test], destinations[test]);
+
+			const Rect2i &rect = source_rects[test];
+			for (int y = rect.position.y; y < rect.position.y + rect.size.y; y++) {
+				for (int x = rect.position.x; x < rect.position.x + rect.size.x; x++) {
+					const int dx = destinations[test].x + x - rect.position.x;
+					const int dy = destinations[test].y + y - rect.position.y;
+					if (x < 0 || x >= 48 || y < 0 || y >= 32 ||
+							dx < 0 || dx >= 48 || dy < 0 || dy >= 32) {
+						continue;
+					}
+					if (mask->get_pixel(x, y).a != 0) {
+						expected->set_pixel(dx, dy, source->get_pixel(x, y));
+					}
+				}
+			}
+			CHECK(actual->get_data() == expected->get_data());
+			CHECK(source->get_data() == original_source);
+			CHECK(mask->get_data() == original_mask);
+		}
+	}
+}
+
 } // namespace TestImage

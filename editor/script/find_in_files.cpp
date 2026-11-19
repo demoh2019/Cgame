@@ -901,7 +901,7 @@ void FindInFilesResultsPanel::stop_search() {
 	cancel_button->hide();
 }
 
-void FindInFilesResultsPanel::_remove_result(TreeItem *p_item) {
+void FindInFilesResultsPanel::_remove_result(TreeItem *p_item, bool p_update_matches) {
 	const String file_path = p_item->get_metadata(0);
 	result_items.erase(p_item);
 	if (file_items_results_count.has(p_item)) {
@@ -927,7 +927,9 @@ void FindInFilesResultsPanel::_remove_result(TreeItem *p_item) {
 		}
 	}
 	get_tree()->queue_delete(p_item);
-	_update_matches_text();
+	if (p_update_matches) {
+		_update_matches_text();
+	}
 }
 
 void FindInFilesResultsPanel::update_layout(EditorDock::DockLayout p_layout, int p_slot) {
@@ -949,6 +951,22 @@ void FindInFilesContainer::create_rename_control(const String &p_symbol, const E
 	Ref<Script> scr = ResourceLoader::load(p_lookup.script_path);
 	ERR_FAIL_COND(scr.is_null());
 	exts.insert(scr->get_language()->get_extension());
+
+	if (p_lookup.type == EditorLanguage::LookupResult::Type::CLASS_PROPERTY) {
+		const Ref<Script> script = ResourceLoader::load(p_lookup.script_path);
+
+		List<PropertyInfo> script_properties;
+		script->get_script_property_list(&script_properties);
+		for (const PropertyInfo &pi : script_properties) {
+			if (pi.name == p_symbol) {
+				if (pi.usage & PROPERTY_USAGE_STORAGE) {
+					// The renamed symbol is an exported variable, so also search in scenes.
+					exts.insert("tscn");
+				}
+				break;
+			}
+		}
+	}
 
 	FindInFilesSearch *finder = new_panel->get_finder();
 	finder->set_search_text(p_symbol);
@@ -1010,6 +1028,12 @@ void FindInFilesResultsPanel::_on_result_found(const String &p_fpath, int p_line
 	Ref<Texture2D> remove_texture = get_editor_theme_icon(SNAME("Close"));
 	Ref<Texture2D> replace_texture = get_editor_theme_icon(SNAME("ReplaceText"));
 
+	bool is_renaming = !symbol_rename.script_path.is_empty();
+	bool is_scene = p_fpath.has_extension("tscn");
+	if (is_renaming && is_scene && p_begin > 0) {
+		return;
+	}
+
 	HashMap<String, TreeItem *>::Iterator E = file_items.find(p_fpath);
 	if (!E) {
 		file_item = results_display->create_item();
@@ -1066,28 +1090,30 @@ void FindInFilesResultsPanel::_on_result_found(const String &p_fpath, int p_line
 		_update_replace_item(item, r);
 
 		bool check_item = false;
-		if (!symbol_rename.script_path.is_empty()) {
-			const Ref<Script> source_script = ResourceLoader::load(p_fpath);
-			if (source_script.is_valid()) {
-				PackedStringArray lines = source_script->get_source_code().split("\n");
-				const String current_line = lines[p_line_number - 1];
-				lines.write[p_line_number - 1] = current_line.insert(p_begin, String::chr(0xFFFF));
+		if (is_renaming) {
+			if (!is_scene) {
+				const Ref<Script> source_script = ResourceLoader::load(p_fpath);
+				if (source_script.is_valid()) {
+					PackedStringArray lines = source_script->get_source_code().split("\n");
+					const String current_line = lines[p_line_number - 1];
+					lines.write[p_line_number - 1] = current_line.insert(p_begin, String::chr(0xFFFF));
 
-				EditorLanguage::LookupResult result;
-				Error err = source_script->get_language()->get_editor_language()->lookup_code_for_rename(String("\n").join(lines), current_line.substr(p_begin, p_end - p_begin), source_script->get_path(), result);
-				if (err == OK) {
-					check_item = result.type == symbol_rename.type &&
-							result.class_name == symbol_rename.class_name &&
-							result.class_member == symbol_rename.class_member &&
-							result.doc_type == symbol_rename.doc_type &&
-							result.enumeration == symbol_rename.enumeration &&
-							result.is_bitfield == symbol_rename.is_bitfield &&
-							result.value == symbol_rename.value &&
-							result.script_path == symbol_rename.script_path &&
-							result.location == symbol_rename.location;
+					EditorLanguage::LookupResult result;
+					Error err = source_script->get_language()->get_editor_language()->lookup_code_for_rename(String("\n").join(lines), current_line.substr(p_begin, p_end - p_begin), source_script->get_path(), result);
+					if (err == OK) {
+						check_item = result.type == symbol_rename.type &&
+								result.class_name == symbol_rename.class_name &&
+								result.class_member == symbol_rename.class_member &&
+								result.doc_type == symbol_rename.doc_type &&
+								result.enumeration == symbol_rename.enumeration &&
+								result.is_bitfield == symbol_rename.is_bitfield &&
+								result.value == symbol_rename.value &&
+								result.script_path == symbol_rename.script_path &&
+								result.location == symbol_rename.location;
+					}
+				} else {
+					ERR_PRINT(vformat("Failed to load Script at \"%s\".", p_fpath));
 				}
-			} else {
-				ERR_PRINT(vformat("Failed to load Script at \"%s\".", p_fpath));
 			}
 		} else {
 			check_item = true;
@@ -1262,8 +1288,10 @@ void FindInFilesResultsPanel::replace_all() {
 	}
 
 	for (TreeItem *item : replaced_items) {
-		_remove_result(item);
+		_remove_result(item, false);
 	}
+	// Recompute the matches label once, not after every replaced result.
+	_update_matches_text();
 
 	emit_signal(SNAME("files_modified"));
 
@@ -1297,7 +1325,7 @@ void FindInFilesResultsPanel::_on_button_clicked(TreeItem *p_item, int p_column,
 		emit_signal(SNAME("files_modified"));
 	}
 
-	_remove_result(p_item);
+	_remove_result(p_item, true);
 }
 
 void FindInFilesResultsPanel::_apply_replaces_in_file(const String &p_fpath, const Vector<Result> &p_locations, const String &p_new_text) {
@@ -1321,13 +1349,16 @@ void FindInFilesResultsPanel::_apply_replaces_in_file(const String &p_fpath, con
 	int placeholder;
 	int repl_line_number = 0;
 
+	// The Vector is never resized while applying matches. Acquire its writable
+	// pointer once rather than checking copy-on-write for every replacement.
+	String *lines_write = lines.ptrw();
 	// Iterate backwards so changes don't affect the location of the next change in the same line.
 	for (int i = p_locations.size() - 1; i >= 0; i--) {
 		const Result &location = p_locations[i];
 		repl_line_number = location.line_number - 1;
 
 		if (repl_line_number >= 0 && repl_line_number < lines.size()) {
-			String &line = lines.write[repl_line_number];
+			String &line = lines_write[repl_line_number];
 			if (find_next(line, search_text, location.begin, finder->is_match_case(), finder->is_whole_words(), placeholder, placeholder)) {
 				line = line.left(location.begin) + p_new_text + line.substr(location.end);
 			} else {

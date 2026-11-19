@@ -1,0 +1,52 @@
+name: Core known-size collection reservations
+
+on:
+  push:
+    branches: [develop]
+    paths:
+      - 'core/config/project_settings.cpp'
+      - 'core/io/resource_loader.cpp'
+      - 'core/math/color.cpp'
+      - 'core/object/script_language.cpp'
+      - 'core/os/os.cpp'
+      - 'core/string/translation.cpp'
+      - 'core/variant/variant_parser.cpp'
+      - 'tests/core/string/test_translation.cpp'
+      - '.github/workflows/core-known-size-hash-reservation.yml'
+  pull_request:
+    paths:
+      - 'core/config/project_settings.cpp'
+      - 'core/io/resource_loader.cpp'
+      - 'core/math/color.cpp'
+      - 'core/object/script_language.cpp'
+      - 'core/os/os.cpp'
+      - 'core/string/translation.cpp'
+      - 'core/variant/variant_parser.cpp'
+      - 'tests/core/string/test_translation.cpp'
+      - '.github/workflows/core-known-size-hash-reservation.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  native-core-regressions:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+      - uses: ./.github/actions/godot-deps
+      - name: Build Godot with native tests
+        uses: ./.github/actions/godot-build
+        with:
+          platform: linuxbsd
+          target: editor
+          scons-flags: dev_build=yes tests=yes debug_symbols=no module_mono_enabled=no module_text_server_fb_enabled=yes accesskit=no -j2
+      - name: Verify translation dictionary round-tripping
+        run: ./bin/godot.linuxbsd.editor.dev.x86_64 --headless --test --test-case="*[Translation] Bulk message property round-trip*"
+      - name: Verify named color table
+        run: ./bin/godot.linuxbsd.editor.dev.x86_64 --headless --test --test-case="*[Color] Named colors*"
+      - name: Verify dictionary Variant parsing
+        run: ./bin/godot.linuxbsd.editor.dev.x86_64 --headless --test --test-case="*[Variant] Writer and parser dictionary*"

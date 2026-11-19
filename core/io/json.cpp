@@ -30,10 +30,14 @@
 
 #include "json.h"
 
+#include "core/string/string_builder.h"
+
 #include "core/io/resource_loader.h"
 #include "core/object/class_db.h"
 #include "core/object/script_language.h"
 #include "core/variant/container_type_validate.h"
+#include "core/variant/variant_internal.h"
+
 
 const char *JSON::tk_name[TK_MAX] = {
 	"'{'",
@@ -48,13 +52,21 @@ const char *JSON::tk_name[TK_MAX] = {
 	"EOF",
 };
 
-void JSON::_add_indent(String &r_result, const String &p_indent, int p_size) {
-	for (int i = 0; i < p_size; i++) {
+void JSON::_add_indent(StringBuilder &r_result, const String &p_indent, int p_size) {
+	// Compact JSON is the hot path. Do not walk the current nesting depth
+	// when there is no indentation to emit.
+	if (p_size <= 0 || p_indent.is_empty()) {
+		return;
+	}
+	if (p_size == 1) {
 		r_result += p_indent;
+	} else {
+		// Store a single indentation fragment instead of p_size builder entries.
+		r_result += p_indent.repeat(p_size);
 	}
 }
 
-void JSON::_stringify(String &r_result, const Variant &p_var, const String &p_indent, int p_cur_indent, bool p_sort_keys, HashSet<const void *> &p_markers, bool p_full_precision) {
+void JSON::_stringify(StringBuilder &r_result, const Variant &p_var, const String &p_indent, int p_cur_indent, bool p_sort_keys, HashSet<const void *> &p_markers, bool p_full_precision) {
 	if (p_cur_indent > Variant::MAX_RECURSION_DEPTH) {
 		r_result += "...";
 		ERR_FAIL_MSG("JSON structure is too deep. Bailing.");
@@ -62,6 +74,31 @@ void JSON::_stringify(String &r_result, const Variant &p_var, const String &p_in
 
 	const char *colon = p_indent.is_empty() ? ":" : ": ";
 	const char *end_statement = p_indent.is_empty() ? "" : "\n";
+
+	// Packed numeric and string arrays do not need a temporary Array/Variant
+	// for every element. Stream each value directly into the output builder.
+	const auto stringify_packed = [&](const auto &p_array) {
+		if (p_array.is_empty()) {
+			r_result += "[]";
+			return;
+		}
+		r_result += "[";
+		r_result += end_statement;
+		bool first = true;
+		for (const auto &element : p_array) {
+			if (first) {
+				first = false;
+			} else {
+				r_result += ",";
+				r_result += end_statement;
+			}
+			_add_indent(r_result, p_indent, p_cur_indent + 1);
+			_stringify(r_result, Variant(element), p_indent, p_cur_indent + 1, p_sort_keys, p_markers, p_full_precision);
+		}
+		r_result += end_statement;
+		_add_indent(r_result, p_indent, p_cur_indent);
+		r_result += "]";
+	};
 
 	switch (p_var.get_type()) {
 		case Variant::NIL:
@@ -110,33 +147,43 @@ void JSON::_stringify(String &r_result, const Variant &p_var, const String &p_in
 			return;
 		}
 		case Variant::PACKED_INT32_ARRAY:
+			stringify_packed(*VariantInternal::get_int32_array(&p_var));
+			return;
 		case Variant::PACKED_INT64_ARRAY:
+			stringify_packed(*VariantInternal::get_int64_array(&p_var));
+			return;
 		case Variant::PACKED_FLOAT32_ARRAY:
+			stringify_packed(*VariantInternal::get_float32_array(&p_var));
+			return;
 		case Variant::PACKED_FLOAT64_ARRAY:
+			stringify_packed(*VariantInternal::get_float64_array(&p_var));
+			return;
 		case Variant::PACKED_STRING_ARRAY:
+			stringify_packed(*VariantInternal::get_string_array(&p_var));
+			return;
 		case Variant::ARRAY: {
-			Array a = p_var;
-			if (p_markers.has(a.id())) {
+			const Array *a = VariantInternal::get_array(&p_var);
+			if (p_markers.has(a->id())) {
 				r_result += "\"[...]\"";
 				ERR_FAIL_MSG("Converting circular structure to JSON.");
 			}
 
-			if (a.is_empty()) {
+			if (a->is_empty()) {
 				r_result += "[]";
 				return;
 			}
 
-			r_result += '[';
+			r_result += "[";
 			r_result += end_statement;
 
-			p_markers.insert(a.id());
+			p_markers.insert(a->id());
 
 			bool first = true;
-			for (const Variant &var : a) {
+			for (const Variant &var : *a) {
 				if (first) {
 					first = false;
 				} else {
-					r_result += ',';
+					r_result += ",";
 					r_result += end_statement;
 				}
 				_add_indent(r_result, p_indent, p_cur_indent + 1);
@@ -144,12 +191,14 @@ void JSON::_stringify(String &r_result, const Variant &p_var, const String &p_in
 			}
 			r_result += end_statement;
 			_add_indent(r_result, p_indent, p_cur_indent);
-			r_result += ']';
-			p_markers.erase(a.id());
+			r_result += "]";
+			p_markers.erase(a->id());
 			return;
 		}
 		case Variant::DICTIONARY: {
-			Dictionary d = p_var;
+			// The input Variant keeps this dictionary alive for the entire call.
+			// Reuse it without another atomic COW reference increment/decrement.
+			const Dictionary &d = *VariantInternal::get_dictionary(&p_var);
 			if (p_markers.has(d.id())) {
 				r_result += "\"{...}\"";
 				ERR_FAIL_MSG("Converting circular structure to JSON.");
@@ -160,40 +209,59 @@ void JSON::_stringify(String &r_result, const Variant &p_var, const String &p_in
 				return;
 			}
 
-			r_result += '{';
+			r_result += "{";
 			r_result += end_statement;
 			p_markers.insert(d.id());
 
-			LocalVector<Variant> keys = d.get_key_list();
-
-			if (p_sort_keys) {
-				keys.sort_custom<StringLikeVariantOrder>();
-			}
-
 			bool first_key = true;
-			for (const Variant &key : keys) {
+			const auto write_entry = [&](const KeyValue<Variant, Variant> &p_entry) {
 				if (first_key) {
 					first_key = false;
 				} else {
-					r_result += ',';
+					r_result += ",";
 					r_result += end_statement;
 				}
 				_add_indent(r_result, p_indent, p_cur_indent + 1);
-				_stringify(r_result, String(key), p_indent, p_cur_indent + 1, p_sort_keys, p_markers, p_full_precision);
+				_stringify(r_result, String(p_entry.key), p_indent, p_cur_indent + 1, p_sort_keys, p_markers, p_full_precision);
 				r_result += colon;
-				_stringify(r_result, d[key], p_indent, p_cur_indent + 1, p_sort_keys, p_markers, p_full_precision);
+				_stringify(r_result, p_entry.value, p_indent, p_cur_indent + 1, p_sort_keys, p_markers, p_full_precision);
+			};
+
+			if (p_sort_keys) {
+				// HashMap nodes remain stable across table growth. Sorting pointers
+				// avoids copying Variant keys and re-hashing for each value lookup.
+				struct EntryComparator {
+					bool operator()(const KeyValue<Variant, Variant> *p_a, const KeyValue<Variant, Variant> *p_b) const {
+						return StringLikeVariantOrder::compare(p_a->key, p_b->key);
+					}
+				};
+				LocalVector<const KeyValue<Variant, Variant> *> entries;
+				entries.reserve(d.size());
+				for (const KeyValue<Variant, Variant> &entry : d) {
+					entries.push_back(&entry);
+				}
+				entries.sort_custom<EntryComparator>();
+				for (const KeyValue<Variant, Variant> *entry : entries) {
+					write_entry(*entry);
+				}
+			} else {
+				// Insertion order is already the HashMap's iteration order.
+				// No temporary key vector, Variant copies, or secondary lookup.
+				for (const KeyValue<Variant, Variant> &entry : d) {
+					write_entry(entry);
+				}
 			}
 
 			r_result += end_statement;
 			_add_indent(r_result, p_indent, p_cur_indent);
-			r_result += '}';
+			r_result += "}";
 			p_markers.erase(d.id());
 			return;
 		}
 		default:
-			r_result += '"';
+			r_result += "\"";
 			r_result += String(p_var).json_escape();
-			r_result += '"';
+			r_result += "\"";
 			return;
 	}
 }
@@ -243,14 +311,23 @@ Error JSON::_get_token(const char32_t *p_str, int &r_index, int p_len, Token &r_
 			case '"': {
 				r_index++;
 				String str;
+				int run_start = r_index;
 				while (true) {
 					if (p_str[r_index] == 0) {
 						r_err_str = "Unterminated string";
 						return ERR_PARSE_ERROR;
 					} else if (p_str[r_index] == '"') {
+						// Most JSON strings have no escapes; copy the entire UTF-32
+						// run once rather than growing String one codepoint at a time.
+						if (r_index > run_start) {
+							str.append_utf32_unchecked(Span<char32_t>(p_str + run_start, r_index - run_start));
+						}
 						r_index++;
 						break;
 					} else if (p_str[r_index] == '\\') {
+						if (r_index > run_start) {
+							str.append_utf32_unchecked(Span<char32_t>(p_str + run_start, r_index - run_start));
+						}
 						//escaped characters...
 						r_index++;
 						char32_t next = p_str[r_index];
@@ -366,12 +443,11 @@ Error JSON::_get_token(const char32_t *p_str, int &r_index, int p_len, Token &r_
 						}
 
 						str += res;
-
+						run_start = r_index + 1;
 					} else {
 						if (p_str[r_index] == '\n') {
 							r_line++;
 						}
-						str += p_str[r_index];
 					}
 					r_index++;
 				}
@@ -397,15 +473,13 @@ Error JSON::_get_token(const char32_t *p_str, int &r_index, int p_len, Token &r_
 					return OK;
 
 				} else if (is_ascii_alphabet_char(p_str[r_index])) {
-					String id;
-
-					while (is_ascii_alphabet_char(p_str[r_index])) {
-						id += p_str[r_index];
+					const int start = r_index;
+					while (r_index < p_len && is_ascii_alphabet_char(p_str[r_index])) {
 						r_index++;
 					}
 
 					r_token.type = TK_IDENTIFIER;
-					r_token.value = id;
+					r_token.value = String::utf32_unchecked(Span<char32_t>(p_str + start, r_index - start));
 					return OK;
 				} else {
 					r_err_str = "Unexpected character";
@@ -588,10 +662,12 @@ String JSON::get_parsed_text() const {
 }
 
 String JSON::stringify(const Variant &p_var, const String &p_indent, bool p_sort_keys, bool p_full_precision) {
-	String result;
+	// Collect pieces once and assemble a single UTF-32 buffer at the end.
+	// Growing String on every nested field repeatedly copies the preceding JSON.
+	StringBuilder result;
 	HashSet<const void *> markers;
 	_stringify(result, p_var, p_indent, 0, p_sort_keys, markers, p_full_precision);
-	return result;
+	return result.as_string();
 }
 
 Variant JSON::parse_string(const String &p_json_string) {
@@ -799,8 +875,9 @@ Variant JSON::_from_native(const Variant &p_variant, bool p_full_objects, int p_
 
 				Variant value;
 				if (pi.name == CoreStringName(script)) {
-					const Ref<Script> script = obj->get_script();
-					if (script.is_valid()) {
+					const ScriptInstance *instance = obj->get_script_instance();
+					const Script *script = instance != nullptr ? instance->get_script() : nullptr;
+					if (script != nullptr) {
 						const String path = script->get_path();
 						ERR_FAIL_COND_V_MSG(path.is_empty() || !path.begins_with("res://"), Variant(), "Failed to encode a path to a custom script.");
 						value = path;
@@ -836,9 +913,11 @@ Variant JSON::_from_native(const Variant &p_variant, bool p_full_objects, int p_
 
 			ERR_FAIL_COND_V_MSG(p_depth > Variant::MAX_RECURSION_DEPTH, ret, "Variant is too deep. Bailing.");
 
+			args.resize(dict.size() * 2);
+			int idx = 0;
 			for (const KeyValue<Variant, Variant> &kv : dict) {
-				args.push_back(_from_native(kv.key, p_full_objects, p_depth + 1));
-				args.push_back(_from_native(kv.value, p_full_objects, p_depth + 1));
+				args.set(idx++, _from_native(kv.key, p_full_objects, p_depth + 1));
+				args.set(idx++, _from_native(kv.value, p_full_objects, p_depth + 1));
 			}
 
 			return ret;
@@ -864,8 +943,9 @@ Variant JSON::_from_native(const Variant &p_variant, bool p_full_objects, int p_
 
 			ERR_FAIL_COND_V_MSG(p_depth > Variant::MAX_RECURSION_DEPTH, ret, "Variant is too deep. Bailing.");
 
+			args.resize(arr.size());
 			for (int i = 0; i < arr.size(); i++) {
-				args.push_back(_from_native(arr[i], p_full_objects, p_depth + 1));
+				args.set(i, _from_native(arr[i], p_full_objects, p_depth + 1));
 			}
 
 			return ret;
@@ -875,8 +955,9 @@ Variant JSON::_from_native(const Variant &p_variant, bool p_full_objects, int p_
 			const PackedByteArray arr = p_variant;
 
 			Array args;
+			args.resize(arr.size());
 			for (int i = 0; i < arr.size(); i++) {
-				args.push_back(arr[i]);
+				args.set(i, arr[i]);
 			}
 
 			RETURN_ARGS;
@@ -885,8 +966,9 @@ Variant JSON::_from_native(const Variant &p_variant, bool p_full_objects, int p_
 			const PackedInt32Array arr = p_variant;
 
 			Array args;
+			args.resize(arr.size());
 			for (int i = 0; i < arr.size(); i++) {
-				args.push_back(arr[i]);
+				args.set(i, arr[i]);
 			}
 
 			RETURN_ARGS;
@@ -895,8 +977,9 @@ Variant JSON::_from_native(const Variant &p_variant, bool p_full_objects, int p_
 			const PackedInt64Array arr = p_variant;
 
 			Array args;
+			args.resize(arr.size());
 			for (int i = 0; i < arr.size(); i++) {
-				args.push_back(arr[i]);
+				args.set(i, arr[i]);
 			}
 
 			RETURN_ARGS;
@@ -905,8 +988,9 @@ Variant JSON::_from_native(const Variant &p_variant, bool p_full_objects, int p_
 			const PackedFloat32Array arr = p_variant;
 
 			Array args;
+			args.resize(arr.size());
 			for (int i = 0; i < arr.size(); i++) {
-				args.push_back(arr[i]);
+				args.set(i, arr[i]);
 			}
 
 			RETURN_ARGS;
@@ -915,8 +999,9 @@ Variant JSON::_from_native(const Variant &p_variant, bool p_full_objects, int p_
 			const PackedFloat64Array arr = p_variant;
 
 			Array args;
+			args.resize(arr.size());
 			for (int i = 0; i < arr.size(); i++) {
-				args.push_back(arr[i]);
+				args.set(i, arr[i]);
 			}
 
 			RETURN_ARGS;
@@ -925,8 +1010,9 @@ Variant JSON::_from_native(const Variant &p_variant, bool p_full_objects, int p_
 			const PackedStringArray arr = p_variant;
 
 			Array args;
+			args.resize(arr.size());
 			for (int i = 0; i < arr.size(); i++) {
-				args.push_back(arr[i]);
+				args.set(i, arr[i]);
 			}
 
 			RETURN_ARGS;
@@ -935,10 +1021,12 @@ Variant JSON::_from_native(const Variant &p_variant, bool p_full_objects, int p_
 			const PackedVector2Array arr = p_variant;
 
 			Array args;
+			args.resize(arr.size() * 2);
+			int idx = 0;
 			for (int i = 0; i < arr.size(); i++) {
 				Vector2 v = arr[i];
-				args.push_back(v.x);
-				args.push_back(v.y);
+				args.set(idx++, v.x);
+				args.set(idx++, v.y);
 			}
 
 			RETURN_ARGS;
@@ -947,11 +1035,13 @@ Variant JSON::_from_native(const Variant &p_variant, bool p_full_objects, int p_
 			const PackedVector3Array arr = p_variant;
 
 			Array args;
+			args.resize(arr.size() * 3);
+			int idx = 0;
 			for (int i = 0; i < arr.size(); i++) {
 				Vector3 v = arr[i];
-				args.push_back(v.x);
-				args.push_back(v.y);
-				args.push_back(v.z);
+				args.set(idx++, v.x);
+				args.set(idx++, v.y);
+				args.set(idx++, v.z);
 			}
 
 			RETURN_ARGS;
@@ -960,12 +1050,14 @@ Variant JSON::_from_native(const Variant &p_variant, bool p_full_objects, int p_
 			const PackedColorArray arr = p_variant;
 
 			Array args;
+			args.resize(arr.size() * 4);
+			int idx = 0;
 			for (int i = 0; i < arr.size(); i++) {
 				Color v = arr[i];
-				args.push_back(v.r);
-				args.push_back(v.g);
-				args.push_back(v.b);
-				args.push_back(v.a);
+				args.set(idx++, v.r);
+				args.set(idx++, v.g);
+				args.set(idx++, v.b);
+				args.set(idx++, v.a);
 			}
 
 			RETURN_ARGS;
@@ -974,12 +1066,14 @@ Variant JSON::_from_native(const Variant &p_variant, bool p_full_objects, int p_
 			const PackedVector4Array arr = p_variant;
 
 			Array args;
+			args.resize(arr.size() * 4);
+			int idx = 0;
 			for (int i = 0; i < arr.size(); i++) {
 				Vector4 v = arr[i];
-				args.push_back(v.x);
-				args.push_back(v.y);
-				args.push_back(v.z);
-				args.push_back(v.w);
+				args.set(idx++, v.x);
+				args.set(idx++, v.y);
+				args.set(idx++, v.z);
+				args.set(idx++, v.w);
 			}
 
 			RETURN_ARGS;

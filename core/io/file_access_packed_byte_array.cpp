@@ -64,15 +64,20 @@ uint64_t FileAccessPackedByteArray::get_buffer(uint8_t *p_dst, uint64_t p_length
 		return 0;
 	}
 
-	uint64_t left = data.size() - pos;
-	uint64_t read = MIN(p_length, left);
+	const uint64_t length = uint64_t(data.size());
+	// The cursor can temporarily be at EOF after a shrink. Avoid unsigned
+	// underflow and do not dereference an empty array (even for a zero copy).
+	const uint64_t available = pos < length ? length - pos : 0;
+	const uint64_t read = MIN(p_length, available);
 
 	if (read < p_length) {
 		WARN_PRINT("Reading less data than requested");
 	}
 
-	memcpy(p_dst, &data[pos], read);
-	pos += read;
+	if (read > 0) {
+		memcpy(p_dst, data.ptr() + pos, read);
+		pos += read;
+	}
 
 	return read;
 }
@@ -82,7 +87,11 @@ Error FileAccessPackedByteArray::get_error() const {
 }
 
 Error FileAccessPackedByteArray::resize(int64_t p_length) {
-	return data.resize(p_length);
+	const Error err = data.resize(p_length);
+	if (err == OK && pos > uint64_t(data.size())) {
+		pos = uint64_t(data.size());
+	}
+	return err;
 }
 
 bool FileAccessPackedByteArray::store_buffer(const uint8_t *p_src, uint64_t p_length) {
@@ -92,11 +101,16 @@ bool FileAccessPackedByteArray::store_buffer(const uint8_t *p_src, uint64_t p_le
 
 	ERR_FAIL_NULL_V(p_src, false);
 
-	uint64_t left = data.size() - pos;
-	uint64_t write = MIN(p_length, left);
+	const uint64_t length = uint64_t(data.size());
+	const uint64_t available = pos < length ? length - pos : 0;
+	const uint64_t write = MIN(p_length, available);
 
-	memcpy(data.ptrw() + pos, p_src, write);
-	pos += write;
+	// Only request writable storage when bytes will actually be changed.
+	// An out-of-range write must not detach PackedByteArray's COW storage.
+	if (write > 0) {
+		memcpy(data.ptrw() + pos, p_src, write);
+		pos += write;
+	}
 
 	ERR_FAIL_COND_V_MSG(write < p_length, false, "Writing less data than requested.");
 

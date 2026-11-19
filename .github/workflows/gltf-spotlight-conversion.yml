@@ -1,0 +1,52 @@
+name: glTF spotlight cone attenuation regression
+
+on:
+  pull_request:
+    branches: [develop]
+    paths:
+      - "modules/gltf/extensions/gltf_light.cpp"
+      - "modules/gltf/tests/test_gltf_spotlight.h"
+      - "misc/scripts/tests/test_gltf_spotlight_expressions.py"
+      - ".github/workflows/gltf-spotlight-conversion.yml"
+  push:
+    branches: [develop]
+    paths:
+      - "modules/gltf/extensions/gltf_light.cpp"
+      - "modules/gltf/tests/test_gltf_spotlight.h"
+      - "misc/scripts/tests/test_gltf_spotlight_expressions.py"
+      - ".github/workflows/gltf-spotlight-conversion.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  expression-regressions:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - name: Compile Python checks and run Godot expression cases
+        run: |
+          python3 -m py_compile misc/scripts/tests/test_gltf_spotlight_expressions.py
+          python3 -m unittest discover -s misc/scripts/tests -p 'test_gltf_spotlight_expressions.py' -v
+
+  native-editor-tests:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+      - uses: ./.github/actions/godot-deps
+      - name: Build Godot editor with native unit tests
+        uses: ./.github/actions/godot-build
+        with:
+          platform: linuxbsd
+          target: editor
+          scons-flags: dev_build=yes tests=yes debug_symbols=no module_mono_enabled=no accesskit=no
+      - name: Run native spotlight conversion tests
+        shell: bash
+        run: |
+          set -euo pipefail
+          ./bin/godot.linuxbsd.editor.dev.x86_64 --headless --test --test-case='[GLTFLight]*'

@@ -365,6 +365,37 @@ DEFINE_DUPLICATE_GUINEA_PIG(DuplicateGuineaPig_Storage, PROPERTY_USAGE_STORAGE)
 DEFINE_DUPLICATE_GUINEA_PIG(DuplicateGuineaPig_Storage_Always, (PROPERTY_USAGE_STORAGE | PROPERTY_USAGE_ALWAYS_DUPLICATE))
 DEFINE_DUPLICATE_GUINEA_PIG(DuplicateGuineaPig_Storage_Never, (PROPERTY_USAGE_STORAGE | PROPERTY_USAGE_NEVER_DUPLICATE))
 
+TEST_CASE("[Resource] Deep duplication preserves large nested dictionary values") {
+	Ref<DuplicateGuineaPig_Storage> original = DuplicateGuineaPig_Storage::register_and_instantiate();
+	Dictionary input;
+	for (int i = 0; i < 512; i++) {
+		Array values;
+		values.push_back(i);
+		values.push_back(i * 3);
+		input[i] = values;
+	}
+	original->set_dict(input);
+
+	Ref<Resource> copied_resource = original->duplicate(true);
+	REQUIRE(copied_resource.is_valid());
+	Dictionary result = copied_resource->get("dict");
+	REQUIRE_EQ(result.size(), 512);
+	CHECK_FALSE(input.is_same_instance(result));
+
+	for (int i = 0; i < 512; i++) {
+		Array source_values = input[i];
+		Array copied_values = result[i];
+		REQUIRE_EQ(copied_values.size(), 2);
+		CHECK_EQ(copied_values[0], Variant(i));
+		CHECK_EQ(copied_values[1], Variant(i * 3));
+		CHECK_FALSE(source_values.is_same_instance(copied_values));
+	}
+
+	input[0] = Array({ -1 });
+	Array preserved = result[0];
+	CHECK_EQ(preserved[0], Variant(0));
+}
+
 TEST_CASE("[Resource] Duplication") {
 	auto _run_test = [](
 							 TestDuplicateMode p_test_mode,
@@ -668,6 +699,106 @@ TEST_CASE("[Resource] Breaking circular references on save") {
 
 	// Break circular reference to avoid memory leak
 	resource_c->remove_meta("next");
+}
+
+TEST_CASE("[Resource] Threaded nested loads release task tokens") {
+	const String directory = TestUtils::get_temp_path("threaded_resource_token_lifetime");
+	REQUIRE(DirAccess::make_dir_recursive_absolute(directory) == OK);
+	const String child_path = directory.path_join("child.tres");
+	const String parent_path = directory.path_join("parent.tres");
+
+	Ref<Resource> child = memnew(Resource);
+	child->set_name("Threaded child");
+	REQUIRE(ResourceSaver::save(child, child_path) == OK);
+	child->set_path_cache(child_path);
+
+	Ref<Resource> parent = memnew(Resource);
+	parent->set_name("Threaded parent");
+	parent->set_meta("external_resource", child);
+	REQUIRE(ResourceSaver::save(parent, parent_path, ResourceSaver::FLAG_RELATIVE_PATHS) == OK);
+	child.unref();
+	parent.unref();
+
+	// Repeated, uncached loads exercise reference release with and without sub-threads.
+	for (bool sub_threads : { false, true }) {
+		for (int iteration = 0; iteration < 12; ++iteration) {
+			INFO("sub_threads: ", sub_threads, ", iteration: ", iteration);
+			REQUIRE(ResourceLoader::load_threaded_request(parent_path, "", sub_threads, ResourceLoader::CACHE_MODE_IGNORE) == OK);
+			Error error = ERR_BUG;
+			Ref<Resource> loaded = ResourceLoader::load_threaded_get(parent_path, &error);
+			REQUIRE(error == OK);
+			REQUIRE(loaded.is_valid());
+			CHECK(loaded->get_name() == "Threaded parent");
+			Ref<Resource> nested = loaded->get_meta("external_resource");
+			REQUIRE(nested.is_valid());
+			CHECK(nested->get_name() == "Threaded child");
+		}
+	}
+}
+
+
+TEST_CASE("[Resource] set_path lookup, takeover and collision") {
+	const String cache_path = "res://__cgame_resource_path_20261119__.tres";
+	const String other_path = "res://__cgame_resource_path_other_20261119__.tres";
+	Ref<Resource> first;
+	first.instantiate();
+	Ref<Resource> second;
+	second.instantiate();
+	CHECK_FALSE(ResourceCache::has(cache_path));
+	first->set_path(cache_path);
+	CHECK(ResourceCache::get_ref(cache_path) == first);
+	first->set_path(cache_path);
+	CHECK_EQ(first->get_path(), cache_path);
+	second->set_path(other_path);
+	ERR_PRINT_OFF;
+	second->set_path(cache_path);
+	ERR_PRINT_ON;
+	CHECK_EQ(first->get_path(), cache_path);
+	CHECK(second->get_path().is_empty());
+	CHECK(ResourceCache::get_ref(cache_path) == first);
+	second->set_path(other_path);
+	second->set_path(cache_path, true);
+	CHECK(first->get_path().is_empty());
+	CHECK(ResourceCache::get_ref(cache_path) == second);
+	CHECK_FALSE(ResourceCache::has(other_path));
+	second->set_path(String());
+	CHECK_FALSE(ResourceCache::has(cache_path));
+}
+
+TEST_CASE("[Resource] Binary NodePath arrays preserve long name and subname sequences") {
+	Ref<Resource> resource;
+	resource.instantiate();
+	Array original_paths;
+
+	for (int i = 0; i < 96; i++) {
+		String path = "/Root";
+		const int name_count = (i == 0) ? 96 : 1 + (i % 32);
+		const int subname_count = (i == 0) ? 64 : (i % 19);
+		for (int j = 0; j < name_count; j++) {
+			path += "/section_" + itos(i) + "_" + itos(j);
+		}
+		for (int j = 0; j < subname_count; j++) {
+			path += ":field_" + itos(i) + "_" + itos(j);
+		}
+		original_paths.push_back(NodePath(path));
+	}
+
+	resource->set_meta("paths", original_paths);
+	const String path = TestUtils::get_temp_path("resource_nodepaths_bulk.res");
+	REQUIRE_EQ(ResourceSaver::save(resource, path), OK);
+	const Ref<Resource> loaded = ResourceLoader::load(path);
+	REQUIRE(loaded.is_valid());
+	REQUIRE(loaded->has_meta("paths"));
+	const Array result_paths = loaded->get_meta("paths");
+	REQUIRE_EQ(result_paths.size(), original_paths.size());
+	for (int i = 0; i < original_paths.size(); i++) {
+		REQUIRE_EQ(result_paths[i].get_type(), Variant::NODE_PATH);
+		const NodePath expected = original_paths[i];
+		const NodePath actual = result_paths[i];
+		CHECK_EQ(actual, expected);
+		CHECK_EQ(actual.get_name_count(), expected.get_name_count());
+		CHECK_EQ(actual.get_subname_count(), expected.get_subname_count());
+	}
 }
 
 } // namespace TestResource

@@ -179,6 +179,20 @@ text = "SUPER_SECRET_TOKEN=never_include"
         self.write("sub.tscn", '[gd_scene format=3]\n')
         self.assertEqual(export_context(self.root, "res://main.tscn")["summary"]["scenes"], 2)
 
+    def test_many_shared_edges_and_cycle(self):
+        # Hundreds of duplicate dependencies should not blow up the BFS queue.
+        duplicates = "\n".join(
+            f'[ext_resource path="res://shared.tscn" id="{i}"]'
+            for i in range(500)
+        )
+        self.write("main.tscn", "[gd_scene format=3]\n" + duplicates + "\n")
+        self.write("shared.tscn",
+                   '[gd_scene format=3]\n[ext_resource path="res://main.tscn" id="loop"]\n')
+        data = export_context(self.root, "res://main.tscn", max_depth=100, max_scenes=2)
+        self.assertEqual(data["summary"]["scenes"], 2)
+        self.assertEqual(data["summary"]["external_resources"], 501)
+        self.assertEqual(data["warnings"], [])
+
     def test_cycle_is_bounded(self):
         self.write("main.tscn", '[gd_scene format=3]\n[ext_resource path="res://sub.tscn" id="a"]')
         self.write("sub.tscn", '[gd_scene format=3]\n[ext_resource path="res://main.tscn" id="a"]')

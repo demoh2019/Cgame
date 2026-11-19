@@ -1,0 +1,52 @@
+name: Jolt soft-body speculative self edge CCD contracts
+
+on:
+  pull_request:
+    branches: [develop]
+    paths:
+      - "modules/jolt_physics/spaces/jolt_space_3d.cpp"
+      - "modules/jolt_physics/jolt_project_settings.cpp"
+      - "modules/jolt_physics/jolt_project_settings.h"
+      - "tests/stress/test_jolt_soft_self_edge_sweep.py"
+      - "tests/stress/jolt_soft_self_edge_sweep/**"
+      - ".github/workflows/jolt-soft-self-edge-sweep.yml"
+  push:
+    branches: [develop]
+    paths:
+      - "modules/jolt_physics/spaces/jolt_space_3d.cpp"
+      - "modules/jolt_physics/jolt_project_settings.cpp"
+      - "modules/jolt_physics/jolt_project_settings.h"
+      - "tests/stress/test_jolt_soft_self_edge_sweep.py"
+      - "tests/stress/jolt_soft_self_edge_sweep/**"
+      - ".github/workflows/jolt-soft-self-edge-sweep.yml"
+  workflow_dispatch:
+
+jobs:
+  self-edge-ccd-geometry:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Self CCD geometry and previous soft-body contact contracts
+        run: |
+          python3 -m unittest \
+            tests/stress/test_jolt_soft_self_edge_sweep.py \
+            tests/stress/test_jolt_soft_self_position_projection.py \
+            tests/stress/test_jolt_soft_self_persistent_bvh.py \
+            tests/stress/test_jolt_soft_self_edge_bvh.py \
+            tests/stress/test_jolt_soft_self_edge_contacts.py \
+            tests/stress/test_jolt_soft_self_contacts.py \
+            tests/stress/test_jolt_soft_soft_edge_sweep.py \
+            tests/stress/test_jolt_soft_soft_speculative_ccd.py \
+            tests/stress/test_jolt_soft_soft_edge_edge.py \
+            tests/stress/test_jolt_soft_soft_vertex_face.py \
+            tests/stress/test_jolt_softsoft_face_bvh.py \
+            tests/stress/test_jolt_soft_soft_particle_contacts.py -v
+      - name: Validate Python syntax and native scene presence
+        run: |
+          python3 -m py_compile tests/stress/test_jolt_soft_self_edge_sweep.py
+          test -f tests/stress/jolt_soft_self_edge_sweep/project.godot
+          test -f tests/stress/jolt_soft_self_edge_sweep/swept_self_edges_regression.gd

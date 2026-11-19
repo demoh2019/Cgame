@@ -33,6 +33,7 @@
 #include "core/templates/interpolated_property.h"
 #include "scene/3d/node_3d.h"
 #include "scene/3d/velocity_tracker_3d.h"
+#include "scene/main/camera_shake.h"
 #include "scene/resources/camera_attributes.h"
 #include "scene/resources/compositor.h"
 #include "scene/resources/environment.h"
@@ -73,6 +74,17 @@ private:
 	InterpolatedProperty<real_t> _far = 4000.0;
 	real_t v_offset = 0.0;
 	real_t h_offset = 0.0;
+
+	// Trauma based shake, see CameraShake. Applied in camera space to the rendered view only.
+	CameraShake shake;
+	Vector3 shake_max_offset = Vector3(0.15, 0.15, 0.15);
+	real_t shake_max_rotation = Math::deg_to_rad(real_t(3.0));
+	real_t shake_decay = 1.5;
+	real_t shake_frequency = 25.0;
+	real_t shake_trauma_exponent = 2.0;
+	Vector3 shake_translation_current;
+	Vector3 shake_rotation_current;
+	void _advance_shake(double p_delta);
 	KeepAspect keep_aspect = KEEP_HEIGHT;
 
 	RID camera;
@@ -198,6 +210,23 @@ public:
 
 	void set_v_offset(real_t p_offset);
 	real_t get_v_offset() const;
+
+	void add_trauma(real_t p_amount);
+	void set_trauma(real_t p_trauma);
+	real_t get_trauma() const;
+
+	void set_shake_max_offset(const Vector3 &p_offset);
+	Vector3 get_shake_max_offset() const;
+	void set_shake_max_rotation(real_t p_radians);
+	real_t get_shake_max_rotation() const;
+	void set_shake_decay(real_t p_decay);
+	real_t get_shake_decay() const;
+	void set_shake_frequency(real_t p_frequency);
+	real_t get_shake_frequency() const;
+	void set_shake_trauma_exponent(real_t p_exponent);
+	real_t get_shake_trauma_exponent() const;
+	Vector3 get_shake_translation() const { return shake_translation_current; }
+	Vector3 get_shake_rotation() const { return shake_rotation_current; }
 
 	void set_h_offset(real_t p_offset);
 	real_t get_h_offset() const;

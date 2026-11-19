@@ -1,0 +1,35 @@
+name: SoftBody3D two-way soft-soft contact contracts
+
+on:
+  pull_request:
+    paths:
+      - "servers/physics_softbody_pair_contact.h"
+      - "modules/godot_physics_3d/godot_soft_body_3d.cpp"
+      - "modules/godot_physics_3d/godot_soft_body_3d.h"
+      - "modules/godot_physics_3d/godot_step_3d.cpp"
+      - "modules/godot_physics_3d/godot_space_3d.cpp"
+      - "modules/godot_physics_3d/godot_space_3d.h"
+      - "servers/physics_3d/physics_server_3d.cpp"
+      - "tests/servers/test_physics_softbody_pair_contact.cpp"
+      - "tests/stress/test_physics_softbody_pair_contact.py"
+      - ".github/workflows/physics-softbody-pair-contact.yml"
+  push:
+    branches: [develop]
+    paths:
+      - "servers/physics_softbody_pair_contact.h"
+      - "modules/godot_physics_3d/godot_soft_body_3d.cpp"
+      - "modules/godot_physics_3d/godot_step_3d.cpp"
+      - "tests/stress/test_physics_softbody_pair_contact.py"
+      - ".github/workflows/physics-softbody-pair-contact.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  numerical-contracts:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Check two-way contact momentum, pinning and engine wiring
+        run: python3 -m unittest discover -s tests/stress -p 'test_physics_softbody_pair_contact.py' -v

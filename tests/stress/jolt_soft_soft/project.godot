@@ -1,0 +1,19 @@
+config_version=5
+
+[application]
+
+config/name="Cgame Jolt Soft-Soft Particle Contacts"
+
+[physics]
+
+3d/physics_engine="Jolt Physics"
+jolt_physics_3d/simulation/soft_body_soft_contacts=true
+jolt_physics_3d/simulation/soft_body_soft_contact_radius=0.16
+jolt_physics_3d/simulation/soft_body_soft_contact_recovery=0.35
+jolt_physics_3d/simulation/soft_body_soft_contact_friction=0.25
+jolt_physics_3d/simulation/soft_body_soft_contact_max_particle_pairs=32768
+
+[rendering]
+
+renderer/rendering_method="gl_compatibility"
+renderer/rendering_method.mobile="gl_compatibility"

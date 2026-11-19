@@ -1,0 +1,54 @@
+name: Native XPBD orthotropic cloth bending contracts
+
+on:
+  pull_request:
+    paths:
+      - 'modules/godot_physics_3d/godot_soft_body_3d.cpp'
+      - 'modules/godot_physics_3d/godot_soft_body_3d.h'
+      - 'modules/godot_physics_3d/godot_space_3d.cpp'
+      - 'modules/godot_physics_3d/godot_space_3d.h'
+      - 'servers/physics_3d/physics_server_3d.cpp'
+      - 'tests/servers/test_physics_xpbd_orthotropic_bending.cpp'
+      - 'tests/stress/test_physics_xpbd_orthotropic_bending.py'
+      - 'tests/stress/test_physics_xpbd_dihedral.py'
+      - 'tests/stress/test_physics_xpbd_anisotropic_stretch.py'
+      - 'demo/physics_lab/project.godot'
+      - '.github/workflows/physics-xpbd-orthotropic-bending.yml'
+  push:
+    branches: [develop]
+    paths:
+      - 'modules/godot_physics_3d/godot_soft_body_3d.cpp'
+      - 'modules/godot_physics_3d/godot_soft_body_3d.h'
+      - 'modules/godot_physics_3d/godot_space_3d.cpp'
+      - 'modules/godot_physics_3d/godot_space_3d.h'
+      - 'servers/physics_3d/physics_server_3d.cpp'
+      - 'tests/servers/test_physics_xpbd_orthotropic_bending.cpp'
+      - 'tests/stress/test_physics_xpbd_orthotropic_bending.py'
+      - 'tests/stress/test_physics_xpbd_dihedral.py'
+      - 'tests/stress/test_physics_xpbd_anisotropic_stretch.py'
+      - 'demo/physics_lab/project.godot'
+      - '.github/workflows/physics-xpbd-orthotropic-bending.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: xpbd-orthotropic-bend-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  numerical-and-source-contracts:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - name: Validate Python scripts
+        run: |
+          python3 -m py_compile tests/stress/test_physics_xpbd_orthotropic_bending.py tests/stress/test_physics_xpbd_dihedral.py tests/stress/test_physics_xpbd_anisotropic_stretch.py
+      - name: Orthotropic bend and legacy XPBD constraints
+        run: |
+          python3 -m unittest discover -s tests/stress -p 'test_physics_xpbd_orthotropic_bending.py' -v
+          python3 -m unittest discover -s tests/stress -p 'test_physics_xpbd_dihedral.py' -v
+          python3 -m unittest discover -s tests/stress -p 'test_physics_xpbd_anisotropic_stretch.py' -v
+          python3 -m unittest discover -s tests/stress -p 'test_physics_softbody_dihedral_damping.py' -v

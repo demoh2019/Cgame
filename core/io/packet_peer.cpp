@@ -34,6 +34,8 @@
 #include "core/io/marshalls.h"
 #include "core/object/class_db.h"
 
+#include <cstring>
+
 /* helpers / binders */
 
 void PacketPeer::set_encode_buffer_max_size(int p_max_size) {
@@ -51,17 +53,16 @@ Error PacketPeer::get_packet_buffer(Vector<uint8_t> &r_buffer) {
 	const uint8_t *buffer;
 	int buffer_size;
 	RETURN_IF_ERROR(get_packet(&buffer, buffer_size));
+	ERR_FAIL_COND_V(buffer_size < 0, ERR_INVALID_DATA);
 
-	r_buffer.resize(buffer_size);
+	RETURN_IF_ERROR(r_buffer.resize_uninitialized(buffer_size));
 	if (buffer_size == 0) {
 		return OK;
 	}
+	ERR_FAIL_NULL_V(buffer, ERR_INVALID_DATA);
 
-	uint8_t *w = r_buffer.ptrw();
-	for (int i = 0; i < buffer_size; i++) {
-		w[i] = buffer[i];
-	}
-
+	// Copy contiguous bytes in one operation instead of a per-byte loop.
+	memcpy(r_buffer.ptrw(), buffer, buffer_size);
 	return OK;
 }
 
@@ -97,8 +98,10 @@ Error PacketPeer::put_var(const Variant &p_packet, bool p_full_objects) {
 	ERR_FAIL_COND_V_MSG(len > encode_buffer_max_size, ERR_OUT_OF_MEMORY, "Failed to encode variant, encode size is bigger then encode_buffer_max_size. Consider raising it via 'set_encode_buffer_max_size'.");
 
 	if (unlikely(encode_buffer.size() < len)) {
-		encode_buffer.resize(0); // Avoid realloc
-		encode_buffer.resize(Math::next_power_of_2((uint32_t)len));
+		// Grow once and reuse the scratch buffer across packets. Its bytes are
+		// overwritten by encode_variant(), so zero-initialization and a prior
+		// shrink-to-zero are unnecessary.
+		RETURN_IF_ERROR(encode_buffer.resize_uninitialized(Math::next_power_of_2((uint32_t)len)));
 	}
 
 	uint8_t *w = encode_buffer.ptrw();
@@ -190,87 +193,97 @@ void PacketPeerStream::_bind_methods() {
 Error PacketPeerStream::_poll_buffer() const {
 	ERR_FAIL_COND_V(peer.is_null(), ERR_UNCONFIGURED);
 
-	int read = 0;
-	ERR_FAIL_COND_V(input_buffer.size() < ring_buffer.space_left(), ERR_UNAVAILABLE);
-	RETURN_IF_ERROR(peer->get_partial_data(input_buffer.ptrw(), ring_buffer.space_left(), read));
-	if (read == 0) {
-		return OK;
+	const int space = ring_buffer.space_left();
+	ERR_FAIL_COND_V(input_buffer.size() < space, ERR_UNAVAILABLE);
+	if (space > 0) {
+		int read = 0;
+		if (ring_buffer.contiguous_space_left() == space) {
+			// Receive directly into the ring on the common unwrapped path.
+			RETURN_IF_ERROR(peer->get_partial_data(ring_buffer.write_ptr(), space, read));
+			ERR_FAIL_COND_V(read < 0 || read > space, ERR_BUG);
+			ERR_FAIL_COND_V(ring_buffer.advance_write(read) != read, ERR_BUG);
+		} else {
+			// Wrapped free space: preserve the existing single stream read,
+			// then copy its two spans using the optimized bulk ring writer.
+			RETURN_IF_ERROR(peer->get_partial_data(input_buffer.ptrw(), space, read));
+			ERR_FAIL_COND_V(read < 0 || read > space, ERR_BUG);
+			if (read > 0) {
+				ERR_FAIL_COND_V(ring_buffer.write(input_buffer.ptr(), read) != read, ERR_BUG);
+			}
+		}
 	}
 
-	int w = ring_buffer.write(&input_buffer[0], read);
-	ERR_FAIL_COND_V(w != read, ERR_BUG);
-
+	// Resume at the first unparsed byte, not at the beginning of the
+	// ring buffer. Repeated polling now has O(new frames) parsing cost.
+	const int available = ring_buffer.data_left();
+	while (available - parsed_frame_bytes >= 4) {
+		uint8_t lbuf[4];
+		ring_buffer.copy(lbuf, parsed_frame_bytes, 4);
+		const uint32_t length = decode_uint32(lbuf);
+		const int remaining = available - parsed_frame_bytes - 4;
+		if (length > uint32_t(remaining)) {
+			break; // Partial payload; resume when new bytes arrive.
+		}
+		parsed_frame_bytes += 4 + int(length);
+		complete_packet_count++;
+	}
 	return OK;
 }
 
 int PacketPeerStream::get_available_packet_count() const {
 	_poll_buffer();
-
-	uint32_t remaining = ring_buffer.data_left();
-
-	int ofs = 0;
-	int count = 0;
-
-	while (remaining >= 4) {
-		uint8_t lbuf[4];
-		ring_buffer.copy(lbuf, ofs, 4);
-		uint32_t len = decode_uint32(lbuf);
-		remaining -= 4;
-		ofs += 4;
-		if (len > remaining) {
-			break;
-		}
-		remaining -= len;
-		ofs += len;
-		count++;
-	}
-
-	return count;
+	return complete_packet_count;
 }
 
 Error PacketPeerStream::get_packet(const uint8_t **r_buffer, int &r_buffer_size) {
 	ERR_FAIL_COND_V(peer.is_null(), ERR_UNCONFIGURED);
-	_poll_buffer();
+	// Already complete packets are buffered. Avoid querying the underlying
+	// stream and re-examining the ring for every packet in a large batch.
+	// The next get_packet() automatically polls once the batch is consumed.
+	if (complete_packet_count == 0) {
+		_poll_buffer();
+	}
 
-	int remaining = ring_buffer.data_left();
+	ERR_FAIL_COND_V(complete_packet_count == 0, ERR_UNAVAILABLE);
+	const int remaining = ring_buffer.data_left();
 	ERR_FAIL_COND_V(remaining < 4, ERR_UNAVAILABLE);
 	uint8_t lbuf[4];
 	ring_buffer.copy(lbuf, 0, 4);
-	remaining -= 4;
-	uint32_t len = decode_uint32(lbuf);
-	ERR_FAIL_COND_V(remaining < (int)len, ERR_UNAVAILABLE);
+	const uint32_t len = decode_uint32(lbuf);
+	// Compare unsigned to reject malformed 32-bit lengths without overflow.
+	ERR_FAIL_COND_V(len > uint32_t(remaining - 4), ERR_UNAVAILABLE);
+	ERR_FAIL_COND_V(len > uint32_t(input_buffer.size()), ERR_UNAVAILABLE);
 
-	ERR_FAIL_COND_V(input_buffer.size() < (int)len, ERR_UNAVAILABLE);
-	ring_buffer.read(lbuf, 4); //get rid of first 4 bytes
-	ring_buffer.read(input_buffer.ptrw(), len); // read packet
+	ring_buffer.advance_read(4); // Header was already decoded; do not copy it again.
+	ring_buffer.read(input_buffer.ptrw(), int(len));
+	parsed_frame_bytes -= 4 + int(len);
+	complete_packet_count--;
 
-	*r_buffer = &input_buffer[0];
-	r_buffer_size = len;
+	*r_buffer = input_buffer.ptr();
+	r_buffer_size = int(len);
 	return OK;
 }
 
 Error PacketPeerStream::put_packet(const uint8_t *p_buffer, int p_buffer_size) {
 	ERR_FAIL_COND_V(peer.is_null(), ERR_UNCONFIGURED);
-	Error err = _poll_buffer(); //won't hurt to poll here too
-
-	if (err) {
-		return err;
-	}
-
+	// Sending a packet must not synchronously read or parse inbound frames.
+	// The receive path polls on demand via get_packet()/get_available_packet_count().
 	if (p_buffer_size == 0) {
 		return OK;
 	}
 
 	ERR_FAIL_COND_V(p_buffer_size < 0, ERR_INVALID_PARAMETER);
-	ERR_FAIL_COND_V(p_buffer_size + 4 > output_buffer.size(), ERR_INVALID_PARAMETER);
+	ERR_FAIL_NULL_V(p_buffer, ERR_INVALID_PARAMETER);
+	// Avoid signed overflow in p_buffer_size + 4 for malformed lengths.
+	ERR_FAIL_COND_V(output_buffer.size() < 4 || p_buffer_size > output_buffer.size() - 4, ERR_INVALID_PARAMETER);
 
-	encode_uint32(p_buffer_size, output_buffer.ptrw());
-	uint8_t *dst = &output_buffer.write[4];
-	for (int i = 0; i < p_buffer_size; i++) {
-		dst[i] = p_buffer[i];
-	}
+	// Resolve writable COW storage once, then fill the prefix and payload
+	// with an efficient bulk copy rather than repeated proxy lookups.
+	uint8_t *dst = output_buffer.ptrw();
+	encode_uint32(p_buffer_size, dst);
+	memcpy(dst + 4, p_buffer, p_buffer_size);
 
-	return peer->put_data(&output_buffer[0], p_buffer_size + 4);
+	return peer->put_data(dst, p_buffer_size + 4);
 }
 
 int PacketPeerStream::get_max_packet_size() const {
@@ -279,7 +292,9 @@ int PacketPeerStream::get_max_packet_size() const {
 
 void PacketPeerStream::set_stream_peer(const Ref<StreamPeer> &p_peer) {
 	if (p_peer.ptr() != peer.ptr()) {
-		ring_buffer.advance_read(ring_buffer.data_left()); // Reset the ring buffer.
+		ring_buffer.clear();
+		parsed_frame_bytes = 0;
+		complete_packet_count = 0;
 	}
 
 	peer = p_peer;
@@ -295,6 +310,8 @@ void PacketPeerStream::set_input_buffer_max_size(int p_max_size) {
 	ERR_FAIL_COND_MSG(ring_buffer.data_left(), "Buffer in use, resizing would cause loss of data.");
 	ring_buffer.resize(Math::nearest_shift(Math::next_power_of_2((uint32_t)p_max_size + (uint32_t)4)) - 1);
 	input_buffer.resize(Math::next_power_of_2((uint32_t)p_max_size + (uint32_t)4));
+	parsed_frame_bytes = 0;
+	complete_packet_count = 0;
 }
 
 int PacketPeerStream::get_input_buffer_max_size() const {

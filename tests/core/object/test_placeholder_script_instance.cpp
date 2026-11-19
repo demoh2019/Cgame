@@ -36,6 +36,8 @@ TEST_FORCE_LINK(test_placeholder_script_instance)
 // Placeholder instances should only be used for editor purposes anyway.
 #ifdef TOOLS_ENABLED
 
+#include "core/io/json.h"
+#include "core/io/marshalls.h"
 #include "core/object/method_info.h"
 #include "core/object/object.h"
 #include "core/object/property_info.h"
@@ -257,6 +259,112 @@ TEST_SUITE("[PlaceholderScriptInstance]") {
 			inst->update(scr->property_infos, scr->default_values);
 
 			CHECK_EQ(obj->get("prop_a"), Variant(2));
+		}
+	}
+
+	TEST_CASE("[ObjectGetScript] No script instance returns NIL.") {
+		Ref<RefCounted> obj = memnew(RefCounted);
+		CHECK_EQ(obj->get_script().get_type(), Variant::NIL);
+	}
+
+	TEST_CASE("[ObjectGetScript] The getter returns the attached script.") {
+		Ref<_MockScript> scr = memnew(_MockScript);
+		MAKE_INSTANCE(scr);
+
+		Variant script_variant = obj->get_script();
+		CHECK_EQ(script_variant.get_type(), Variant::OBJECT);
+		CHECK_EQ(script_variant, Variant(scr.ptr()));
+	}
+
+	TEST_CASE("[ObjectGetScript] Repeated calls do not leak references.") {
+		Ref<_MockScript> scr = memnew(_MockScript);
+		MAKE_INSTANCE(scr);
+		const uint32_t original_refcount = scr->get_reference_count();
+
+		for (int i = 0; i < 256; i++) {
+			{
+				Variant script_variant = obj->get_script();
+				CHECK_EQ(script_variant.get_type(), Variant::OBJECT);
+				CHECK_EQ(script_variant, Variant(scr.ptr()));
+			}
+			CHECK_EQ(scr->get_reference_count(), original_refcount);
+		}
+	}
+
+	TEST_CASE("[ObjectGetScript] A retained Variant keeps the script alive.") {
+		Ref<_MockScript> scr = memnew(_MockScript);
+		MAKE_INSTANCE(scr);
+		Script *script_ptr = scr.ptr();
+
+		Variant retained = obj->get_script();
+		obj->set_script_instance(nullptr);
+		scr.unref();
+
+		CHECK_EQ(retained.get_type(), Variant::OBJECT);
+		Ref<Script> still_alive = retained;
+		CHECK_EQ(still_alive.ptr(), script_ptr);
+	}
+
+	TEST_CASE("[ScriptSerializationFastPath] JSON keeps the attached script path.") {
+		Ref<_MockScript> scr = memnew(_MockScript);
+		const String script_path = "res://cgame_script_serialize_regression.gd";
+		scr->set_path(script_path);
+		MAKE_INSTANCE(scr);
+
+		Variant encoded_variant = JSON::from_native(obj, true);
+		REQUIRE_EQ(encoded_variant.get_type(), Variant::DICTIONARY);
+		Dictionary encoded = encoded_variant;
+		Array properties = encoded["props"];
+		bool found_script = false;
+		for (int i = 0; i + 1 < properties.size(); i += 2) {
+			if (properties[i] == Variant(StringName("script"))) {
+				found_script = true;
+				CHECK_EQ(properties[i + 1], Variant(String("s:") + script_path));
+			}
+		}
+		CHECK(found_script);
+	}
+
+	TEST_CASE("[ScriptSerializationFastPath] JSON repeated exports retain stable script references.") {
+		Ref<_MockScript> scr = memnew(_MockScript);
+		scr->set_path("res://cgame_script_serialize_refcount.gd");
+		MAKE_INSTANCE(scr);
+		const uint32_t original_refcount = scr->get_reference_count();
+
+		for (int i = 0; i < 128; i++) {
+			Variant encoded = JSON::from_native(obj, true);
+			CHECK_EQ(encoded.get_type(), Variant::DICTIONARY);
+			CHECK_EQ(scr->get_reference_count(), original_refcount);
+		}
+	}
+
+	TEST_CASE("[ScriptSerializationFastPath] Binary serializer handles an attached script.") {
+		Ref<_MockScript> scr = memnew(_MockScript);
+		scr->set_path("res://cgame_binary_script_serialize.gd");
+		MAKE_INSTANCE(scr);
+
+		int required_bytes = 0;
+		REQUIRE_EQ(encode_variant(obj, nullptr, required_bytes, true), OK);
+		REQUIRE(required_bytes > 0);
+
+		Vector<uint8_t> buffer;
+		buffer.resize(required_bytes);
+		int written_bytes = 0;
+		CHECK_EQ(encode_variant(obj, buffer.ptrw(), written_bytes, true), OK);
+		CHECK_EQ(written_bytes, required_bytes);
+	}
+
+	TEST_CASE("[ScriptSerializationFastPath] Binary serialization does not leak script references.") {
+		Ref<_MockScript> scr = memnew(_MockScript);
+		scr->set_path("res://cgame_binary_script_refcount.gd");
+		MAKE_INSTANCE(scr);
+		const uint32_t original_refcount = scr->get_reference_count();
+
+		for (int i = 0; i < 64; i++) {
+			int required_bytes = 0;
+			CHECK_EQ(encode_variant(obj, nullptr, required_bytes, true), OK);
+			CHECK(required_bytes > 0);
+			CHECK_EQ(scr->get_reference_count(), original_refcount);
 		}
 	}
 }

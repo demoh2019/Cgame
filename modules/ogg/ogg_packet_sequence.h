@@ -31,6 +31,7 @@
 #pragma once
 
 #include "core/io/resource.h"
+#include "core/templates/local_vector.h"
 #include "core/variant/typed_array.h"
 #include "core/variant/variant.h"
 
@@ -44,10 +45,10 @@ class OggPacketSequence : public Resource {
 	friend class OggPacketSequencePlayback;
 
 	// List of pages, each of which is a list of packets on that page. The innermost PackedByteArrays contain complete ogg packets.
-	Vector<Vector<PackedByteArray>> page_data;
+	LocalVector<LocalVector<PackedByteArray, int64_t>> page_data;
 
 	// List of the granule position for each page.
-	Vector<uint64_t> page_granule_positions;
+	LocalVector<uint64_t, int64_t> page_granule_positions;
 
 	// The page after the current last page. Similar semantics to an end() iterator.
 	int64_t end_page = 0;
@@ -63,7 +64,7 @@ protected:
 public:
 	// Pushes information about all the pages that ended on this page.
 	// This should be called for each page, even for pages that no packets ended on.
-	void push_page(int64_t p_granule_pos, const Vector<PackedByteArray> &p_data);
+	void push_page(int64_t p_granule_pos, const LocalVector<PackedByteArray, int64_t> &p_data);
 
 	void set_packet_data(const TypedArray<Array> &p_data);
 	TypedArray<Array> get_packet_data() const;

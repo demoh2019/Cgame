@@ -1,0 +1,42 @@
+name: StreamPeer and GZIP bounded-scratch regression
+
+on:
+  pull_request:
+    branches: [develop]
+    paths:
+      - 'core/io/stream_peer.cpp'
+      - 'core/io/stream_peer_gzip.cpp'
+      - 'tests/core/io/test_stream_peer.cpp'
+      - 'tests/core/io/test_stream_peer_gzip.cpp'
+      - '.github/workflows/stream-peer-stack-buffer.yml'
+  push:
+    branches: [develop]
+    paths:
+      - 'core/io/stream_peer.cpp'
+      - 'core/io/stream_peer_gzip.cpp'
+      - 'tests/core/io/test_stream_peer.cpp'
+      - 'tests/core/io/test_stream_peer_gzip.cpp'
+      - '.github/workflows/stream-peer-stack-buffer.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  native-stream-peer:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+      - uses: ./.github/actions/godot-deps
+      - uses: ./.github/actions/godot-build
+        with:
+          platform: linuxbsd
+          target: editor
+          scons-flags: dev_build=yes tests=yes debug_symbols=no module_mono_enabled=no accesskit=no
+      - name: Exercise small and large string/Variant StreamPeer roundtrips
+        run: |
+          timeout 300s ./bin/godot.linuxbsd.editor.dev.x86_64 --headless --test --test-case="*[StreamPeer]*" --no-colors
+          timeout 300s ./bin/godot.linuxbsd.editor.dev.x86_64 --headless --test --test-case="*[StreamPeerGZIP]*" --no-colors

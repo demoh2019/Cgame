@@ -171,6 +171,14 @@ void PhysicsServer2D::_bind_methods() {
 
 	ClassDB::bind_method(D_METHOD("body_set_param", "body", "param", "value"), &PhysicsServer2D::body_set_param);
 	ClassDB::bind_method(D_METHOD("body_get_param", "body", "param"), &PhysicsServer2D::body_get_param);
+	ClassDB::bind_method(D_METHOD("body_set_solver_priority", "body", "priority"), &PhysicsServer2D::body_set_solver_priority);
+	ClassDB::bind_method(D_METHOD("body_get_solver_priority", "body"), &PhysicsServer2D::body_get_solver_priority);
+	ClassDB::bind_method(D_METHOD("body_set_max_depenetration_velocity", "body", "value"), &PhysicsServer2D::body_set_max_depenetration_velocity);
+	ClassDB::bind_method(D_METHOD("body_get_max_depenetration_velocity", "body"), &PhysicsServer2D::body_get_max_depenetration_velocity);
+	ClassDB::bind_method(D_METHOD("body_set_max_angular_velocity", "body", "value"), &PhysicsServer2D::body_set_max_angular_velocity);
+	ClassDB::bind_method(D_METHOD("body_get_max_angular_velocity", "body"), &PhysicsServer2D::body_get_max_angular_velocity);
+	ClassDB::bind_method(D_METHOD("body_set_max_linear_velocity", "body", "value"), &PhysicsServer2D::body_set_max_linear_velocity);
+	ClassDB::bind_method(D_METHOD("body_get_max_linear_velocity", "body"), &PhysicsServer2D::body_get_max_linear_velocity);
 
 	ClassDB::bind_method(D_METHOD("body_reset_mass_properties", "body"), &PhysicsServer2D::body_reset_mass_properties);
 
@@ -225,6 +233,14 @@ void PhysicsServer2D::_bind_methods() {
 
 	ClassDB::bind_method(D_METHOD("joint_disable_collisions_between_bodies", "joint", "disable"), &PhysicsServer2D::joint_disable_collisions_between_bodies);
 	ClassDB::bind_method(D_METHOD("joint_is_disabled_collisions_between_bodies", "joint"), &PhysicsServer2D::joint_is_disabled_collisions_between_bodies);
+	ClassDB::bind_method(D_METHOD("joint_set_break_force", "joint", "force"), &PhysicsServer2D::joint_set_break_force);
+	ClassDB::bind_method(D_METHOD("joint_get_break_force", "joint"), &PhysicsServer2D::joint_get_break_force);
+	ClassDB::bind_method(D_METHOD("joint_set_break_torque", "joint", "torque"), &PhysicsServer2D::joint_set_break_torque);
+	ClassDB::bind_method(D_METHOD("joint_get_break_torque", "joint"), &PhysicsServer2D::joint_get_break_torque);
+	ClassDB::bind_method(D_METHOD("joint_get_reaction_force", "joint"), &PhysicsServer2D::joint_get_reaction_force);
+	ClassDB::bind_method(D_METHOD("joint_get_reaction_torque", "joint"), &PhysicsServer2D::joint_get_reaction_torque);
+	ClassDB::bind_method(D_METHOD("joint_is_broken", "joint"), &PhysicsServer2D::joint_is_broken);
+	ClassDB::bind_method(D_METHOD("joint_set_break_callback", "joint", "callable"), &PhysicsServer2D::joint_set_break_callback);
 
 	ClassDB::bind_method(D_METHOD("joint_make_pin", "joint", "anchor", "body_a", "body_b"), &PhysicsServer2D::joint_make_pin, DEFVAL(RID()));
 	ClassDB::bind_method(D_METHOD("joint_make_groove", "joint", "groove1_a", "groove2_a", "anchor_b", "body_a", "body_b"), &PhysicsServer2D::joint_make_groove, DEFVAL(RID()), DEFVAL(RID()));
@@ -361,10 +377,66 @@ PhysicsServer2D::PhysicsServer2D() {
 	GLOBAL_DEF(PropertyInfo(Variant::FLOAT, "physics/2d/sleep_threshold_angular", PROPERTY_HINT_RANGE, U"0,90,0.1,radians_as_degrees,suffix:°/s"), Math::deg_to_rad(8.0));
 	GLOBAL_DEF(PropertyInfo(Variant::FLOAT, "physics/2d/time_before_sleep", PROPERTY_HINT_RANGE, "0,5,0.01,or_greater,suffix:s"), 0.5);
 	GLOBAL_DEF(PropertyInfo(Variant::INT, "physics/2d/solver/solver_iterations", PROPERTY_HINT_RANGE, "1,32,1,or_greater"), 16);
+	// Slack around each shape AABB before the broadphase re-checks its pairs. Moving
+	// bodies stay inside their padded box for several frames, which avoids a pair
+	// query per body per step. Matches the scale of the solver contact margins (px).
+	GLOBAL_DEF(PropertyInfo(Variant::FLOAT, "physics/2d/broadphase_pairing_margin", PROPERTY_HINT_RANGE, "0,64,0.01,or_greater,suffix:px"), 1.0);
+	// Box2D-style coupled two-point normal contact solve. Experimental: opt in
+	// until stack and cross-platform benchmarks verify the behavior.
+	GLOBAL_DEF(PropertyInfo(Variant::BOOL, "physics/2d/solver/block_solver_enabled"), false);
+	// Graph-coloring parallel solve for one large connected 2D island. Colors only
+	// group constraints that share no movable body, so the result is deterministic
+	// regardless of thread timing. On by default in 2D: a 20k-body pile solves ~40%
+	// faster; islands below the size threshold keep the serial path.
+	GLOBAL_DEF(PropertyInfo(Variant::BOOL, "physics/2d/solver/parallel_large_islands"), true);
+	// Opt-in two-point manifold reduction preserving the deepest point and
+	// maximizing tangent span; legacy depth-first pruning remains the default.
+	GLOBAL_DEF(PropertyInfo(Variant::BOOL, "physics/2d/solver/manifold_spread_reduction"), false);
 	GLOBAL_DEF(PropertyInfo(Variant::FLOAT, "physics/2d/solver/contact_recycle_radius", PROPERTY_HINT_RANGE, "0,10,0.01,or_greater,suffix:m"), 1.0);
 	GLOBAL_DEF(PropertyInfo(Variant::FLOAT, "physics/2d/solver/contact_max_separation", PROPERTY_HINT_RANGE, "0,10,0.01,or_greater,suffix:m"), 1.5);
+	// Experimental sphere-only speculative contacts for existing broadphase pairs.
+	// 0 preserves legacy behavior; wider gaps can produce ghost interactions.
+	GLOBAL_DEF(PropertyInfo(Variant::FLOAT, "physics/2d/solver/speculative_sphere_distance", PROPERTY_HINT_RANGE, "0,16,0.1,or_greater,suffix:px"), 0.0);
 	GLOBAL_DEF(PropertyInfo(Variant::FLOAT, "physics/2d/solver/contact_max_allowed_penetration", PROPERTY_HINT_RANGE, "0.01,10,0.01,or_greater,suffix:m"), 0.3);
 	GLOBAL_DEF(PropertyInfo(Variant::FLOAT, "physics/2d/solver/default_contact_bias", PROPERTY_HINT_RANGE, "0,1,0.01"), 0.8);
+	// Zero disables the clamp for backwards-compatible penetration recovery.
+	GLOBAL_DEF(PropertyInfo(Variant::FLOAT, "physics/2d/solver/max_contact_push_speed", PROPERTY_HINT_RANGE, "0,1000,1,or_greater,suffix:px/s"), 0.0);
+	// Rapier-style bounded dynamic linear speed; legacy behavior is unlimited.
+	GLOBAL_DEF(PropertyInfo(Variant::FLOAT, "physics/2d/solver/max_linear_velocity", PROPERTY_HINT_RANGE, "0,10000,1,or_greater,suffix:px/s"), 0.0);
+	// Jolt-style maximum dynamic angular velocity, 0 means unlimited.
+	GLOBAL_DEF(PropertyInfo(Variant::FLOAT, "physics/2d/solver/max_angular_velocity", PROPERTY_HINT_RANGE, U"0,3600,1,radians_as_degrees,or_greater,suffix:°/s"), 0.0);
+	// Rapier-style optional per-step rotation cap for CCD dynamic bodies only.
+	GLOBAL_DEF(PropertyInfo(Variant::FLOAT, "physics/2d/solver/ccd_max_angular_motion", PROPERTY_HINT_RANGE, U"0,360,1,radians_as_degrees,or_greater,suffix:°"), 0.0);
+	// Like Rapier's warmstart coefficient: scale cached contact impulses
+	// on each step (0 disables warm starting, 1 preserves legacy behavior).
+	GLOBAL_DEF(PropertyInfo(Variant::FLOAT, "physics/2d/solver/warm_start_coefficient", PROPERTY_HINT_RANGE, "0,1,0.01"), 1.0);
+	// Box2D-style Pade damping remains opt-in for backwards-compatible motion.
+	// Account for rotating CCD shapes in broadphase candidate generation.
+	// Conservative only: narrowphase angular time-of-impact remains separate.
+	GLOBAL_DEF(PropertyInfo(Variant::BOOL, "physics/2d/solver/ccd_rotational_bounds"), false);
+	// More accurate analytical arc envelope than isotropic chord padding.
+	// Requires rotational bounds and is off by default until benchmarked.
+	GLOBAL_DEF(PropertyInfo(Variant::BOOL, "physics/2d/solver/ccd_tight_rotational_bounds"), false);
+	GLOBAL_DEF(PropertyInfo(Variant::BOOL, "physics/2d/solver/implicit_damping"), false);
+	// Optional uniform fully submerged fluid approximation, inspired by
+	// Jolt's buoyancy/drag: 1 = neutral buoyancy, >1 floats. All effects
+	// are off by default. Drag coefficients are mass/inertia normalized.
+	GLOBAL_DEF(PropertyInfo(Variant::FLOAT, "physics/2d/solver/fluid_linear_drag", PROPERTY_HINT_RANGE, "0,100,0.01,or_greater"), 0.0);
+	GLOBAL_DEF(PropertyInfo(Variant::FLOAT, "physics/2d/solver/fluid_angular_drag", PROPERTY_HINT_RANGE, "0,100,0.01,or_greater"), 0.0);
+	GLOBAL_DEF(PropertyInfo(Variant::FLOAT, "physics/2d/solver/fluid_buoyancy", PROPERTY_HINT_RANGE, "0,2,0.01,or_greater"), 0.0);
+	GLOBAL_DEF(PropertyInfo(Variant::VECTOR2, "physics/2d/solver/fluid_flow_velocity"), Vector2());
+	// Bullet-style rotational resistance for loaded rigid contacts; off by default.
+	GLOBAL_DEF(PropertyInfo(Variant::FLOAT, "physics/2d/solver/rolling_friction", PROPERTY_HINT_RANGE, "0,1,0.01,or_greater"), 0.0);
+	// Suppress tiny bounces at contacts so stacked bodies can settle (pixels per second).
+	GLOBAL_DEF(PropertyInfo(Variant::FLOAT, "physics/2d/solver/restitution_velocity_threshold", PROPERTY_HINT_RANGE, "0,1000,1,or_greater,suffix:px/s"), 30.0);
+	// Box2D-style material mixing is opt-in to keep existing GodotPhysics projects compatible.
+	// PhysX-style static coefficient = combined material friction * multiplier;
+	// default 1.0 keeps the historic single-Coulomb-cone solver unchanged.
+	GLOBAL_DEF(PropertyInfo(Variant::FLOAT, "physics/2d/solver/static_friction_multiplier", PROPERTY_HINT_RANGE, "1,5,0.01,or_greater"), 1.0);
+	GLOBAL_DEF(PropertyInfo(Variant::INT, "physics/2d/solver/friction_combine_mode", PROPERTY_HINT_ENUM, "Legacy Minimum,Geometric Mean,Average,Maximum"), 0);
+	// Default preserves the historic clamped sum. Other modes match common
+	// game-physics coefficient combination rules (Box2D / Rapier).
+	GLOBAL_DEF(PropertyInfo(Variant::INT, "physics/2d/solver/restitution_combine_mode", PROPERTY_HINT_ENUM, "Legacy Clamped Sum,Maximum,Average,Minimum,Multiply,Geometric Mean"), 0);
 	GLOBAL_DEF(PropertyInfo(Variant::FLOAT, "physics/2d/solver/default_constraint_bias", PROPERTY_HINT_RANGE, "0,1,0.01"), 0.2);
 }
 

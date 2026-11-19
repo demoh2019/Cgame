@@ -31,6 +31,7 @@
 #pragma once
 
 #include "core/os/mutex.h"
+#include "core/templates/a_hash_map.h"
 #include "core/templates/local_vector.h"
 #include "core/templates/rid.h"
 #include "core/templates/self_list.h"
@@ -57,6 +58,7 @@ class JoltObject3D;
 class JoltPhysicsDirectSpaceState3D;
 class JoltShapedObject3D;
 class JoltSoftBody3D;
+struct JoltSelfCollisionCache;
 
 class JoltSpace3D {
 	Mutex pending_objects_mutex;
@@ -69,6 +71,13 @@ class JoltSpace3D {
 
 	LocalVector<JPH::BodyID> pending_objects_sleeping;
 	LocalVector<JPH::BodyID> pending_objects_awake;
+	// Materialized only when large pending batches are searched/removed.
+	AHashMap<uint32_t, uint32_t> pending_sleeping_indices;
+	AHashMap<uint32_t, uint32_t> pending_awake_indices;
+
+	static void _pending_add(LocalVector<JPH::BodyID> &p_bodies, AHashMap<uint32_t, uint32_t> &r_indices, const JPH::BodyID &p_id);
+	static bool _pending_erase(LocalVector<JPH::BodyID> &p_bodies, AHashMap<uint32_t, uint32_t> &r_indices, const JPH::BodyID &p_id);
+	static bool _pending_has(const LocalVector<JPH::BodyID> &p_bodies, AHashMap<uint32_t, uint32_t> &r_indices, const JPH::BodyID &p_id);
 
 	RID rid;
 
@@ -82,6 +91,10 @@ class JoltSpace3D {
 	JoltArea3D *default_area = nullptr;
 
 	float last_step = 0.0f;
+
+	// Lazily allocated only in experimental persistent self-BVH mode.
+	// Owned by this space, so independent worlds never share soft meshes.
+	JoltSelfCollisionCache *self_collision_cache = nullptr;
 
 	uint16_t default_area_changed_count = 0;
 
@@ -111,6 +124,7 @@ public:
 	void set_param(PS3DE::SpaceParameter p_param, double p_value);
 
 	JPH::PhysicsSystem &get_physics_system() const { return *physics_system; }
+	int get_contact_manifold_count() const;
 
 	JPH::TempAllocator &get_temp_allocator() const { return *temp_allocator; }
 

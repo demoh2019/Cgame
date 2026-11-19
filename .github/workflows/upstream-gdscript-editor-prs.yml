@@ -8,7 +8,14 @@ on:
       - 'editor/script/script_text_editor.cpp'
       - 'editor/animation/animation_track_editor.cpp'
       - 'editor/editor_node.cpp'
+      - 'editor/doc/editor_help.cpp'
+      - 'editor/doc/editor_help.h'
+      - 'editor/file_system/editor_file_system.cpp'
+      - 'misc/scripts/tests/test_upstream_editor_shutdown.py'
       - 'scene/main/window.cpp'
+      - 'editor/scene/3d/path_3d_editor_plugin.cpp'
+      - 'editor/scene/3d/path_3d_editor_plugin.h'
+      - 'scene/3d/audio_stream_player_3d.cpp'
       - 'modules/visual_shader/editor/visual_shader_editor_plugin.cpp'
       - 'modules/gdscript/gdscript_parser.cpp'
       - 'modules/gdscript/gdscript_parser.h'
@@ -22,7 +29,14 @@ on:
       - 'editor/script/script_text_editor.cpp'
       - 'editor/animation/animation_track_editor.cpp'
       - 'editor/editor_node.cpp'
+      - 'editor/doc/editor_help.cpp'
+      - 'editor/doc/editor_help.h'
+      - 'editor/file_system/editor_file_system.cpp'
+      - 'misc/scripts/tests/test_upstream_editor_shutdown.py'
       - 'scene/main/window.cpp'
+      - 'editor/scene/3d/path_3d_editor_plugin.cpp'
+      - 'editor/scene/3d/path_3d_editor_plugin.h'
+      - 'scene/3d/audio_stream_player_3d.cpp'
       - 'modules/visual_shader/editor/visual_shader_editor_plugin.cpp'
       - 'modules/gdscript/gdscript_parser.cpp'
       - 'modules/gdscript/gdscript_parser.h'
@@ -47,10 +61,13 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: ${{ matrix.python-version }}
-      - name: Compile regression suite
-        run: python -m py_compile misc/scripts/tests/test_upstream_gdscript_editor_prs.py
-      - name: Verify regression contracts
-        run: python -m unittest discover -s misc/scripts/tests -p 'test_upstream_gdscript_editor_prs.py' -v
+      - name: Compile regression suites
+        run: |
+          python -m py_compile misc/scripts/tests/test_upstream_gdscript_editor_prs.py misc/scripts/tests/test_upstream_editor_shutdown.py
+      - name: Verify editor and teardown contracts
+        run: |
+          python -m unittest discover -s misc/scripts/tests -p 'test_upstream_gdscript_editor_prs.py' -v
+          python -m unittest discover -s misc/scripts/tests -p 'test_upstream_editor_shutdown.py' -v
 
   native-godot-editor-smoke:
     runs-on: ubuntu-24.04
@@ -81,6 +98,17 @@ jobs:
           if grep -Ei 'SCRIPT ERROR:|Parse Error:|Failed to load script' godot_editor_smoke.log; then
             exit 1
           fi
+      - name: Repeat headless editor initialization and teardown
+        shell: bash
+        run: |
+          set -euo pipefail
+          PROJECT_DIR="$(mktemp -d)"
+          trap 'rm -rf "$PROJECT_DIR"' EXIT
+          printf 'config_version=5\n[application]\nconfig/name="Editor Teardown Smoke"\n' > "$PROJECT_DIR/project.godot"
+          BIN=./bin/godot.linuxbsd.editor.dev.x86_64
+          for attempt in 1 2 3; do
+            timeout 45s "$BIN" --headless --editor --path "$PROJECT_DIR" --import --quit
+          done
       - name: Run GDScript parser and warning integration tests on newly built Cgame
         shell: bash
         run: |

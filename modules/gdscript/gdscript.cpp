@@ -33,6 +33,7 @@
 #include "gdscript_analyzer.h"
 #include "gdscript_cache.h"
 #include "gdscript_compiler.h"
+#include "gdscript_constants.h"
 #include "gdscript_helper.h"
 #include "gdscript_linter.h"
 #include "gdscript_parser.h"
@@ -42,6 +43,7 @@
 #include "core/io/resource_loader.h"
 #include "core/object/callable_mp.h"
 #include "core/object/class_db.h"
+#include "core/templates/local_vector.h"
 #include "core/templates/rb_set.h"
 
 #ifdef TOOLS_ENABLED
@@ -313,41 +315,42 @@ void GDScript::get_script_method_list(List<MethodInfo> *r_list) const {
 	_get_script_method_list(r_list, true);
 }
 
+// The sort only needs declaration order and an already-found property address.
+// Avoid copying StringName keys and a second hash lookup for every property.
+struct _GDScriptPropertySort {
+	int index = 0;
+	const PropertyInfo *info = nullptr;
+	_FORCE_INLINE_ bool operator<(const _GDScriptPropertySort &p_other) const { return index < p_other.index; }
+};
+
 void GDScript::_get_script_property_list(List<PropertyInfo> *r_list, bool p_include_base) const {
 	const GDScript *sptr = this;
-	List<PropertyInfo> props;
 
 	while (sptr) {
-		Vector<_GDScriptMemberSort> msort;
+		LocalVector<_GDScriptPropertySort> sorted;
+		// Only members introduced at this inheritance level can be emitted.
+		sorted.reserve(sptr->members.size());
 		for (const KeyValue<StringName, MemberInfo> &E : sptr->member_indices) {
 			if (!sptr->members.has(E.key)) {
 				continue; // Skip base class members.
 			}
-			_GDScriptMemberSort ms;
-			ms.index = E.value.index;
-			ms.name = E.key;
-			msort.push_back(ms);
+			sorted.push_back({ E.value.index, &E.value.property_info });
 		}
 
-		msort.sort();
-		msort.reverse();
-		for (int i = 0; i < msort.size(); i++) {
-			props.push_front(sptr->member_indices[msort[i].name].property_info);
-		}
+		sorted.sort();
 
 #ifdef TOOLS_ENABLED
 		r_list->push_back(sptr->get_class_category());
 #endif // TOOLS_ENABLED
 
-		for (const PropertyInfo &E : props) {
-			r_list->push_back(E);
+		for (const _GDScriptPropertySort &member : sorted) {
+			r_list->push_back(*member.info);
 		}
 
 		if (!p_include_base) {
 			break;
 		}
 
-		props.clear();
 		sptr = sptr->base.ptr();
 	}
 }
@@ -361,7 +364,8 @@ bool GDScript::has_method(const StringName &p_method) const {
 }
 
 bool GDScript::has_static_method(const StringName &p_method) const {
-	return member_functions.has(p_method) && member_functions[p_method]->is_static();
+	GDScriptFunction *const *function = member_functions.getptr(p_method);
+	return function != nullptr && (*function)->is_static();
 }
 
 int GDScript::get_script_method_argument_count(const StringName &p_method, bool *r_is_valid) const {
@@ -692,13 +696,13 @@ void GDScript::_static_default_init() {
 		if (type.builtin_type == Variant::ARRAY && type.has_container_element_type(0)) {
 			const GDScriptDataType element_type = type.get_container_element_type(0);
 			Array default_value;
-			default_value.set_typed(element_type.builtin_type, element_type.native_type, element_type.script_type);
+			default_value.set_typed(element_type.builtin_type, element_type.native_type, Ref<Script>(element_type.script_type));
 			static_variables.write[E.value.index] = default_value;
 		} else if (type.builtin_type == Variant::DICTIONARY && type.has_container_element_types()) {
 			const GDScriptDataType key_type = type.get_container_element_type_or_variant(0);
 			const GDScriptDataType value_type = type.get_container_element_type_or_variant(1);
 			Dictionary default_value;
-			default_value.set_typed(key_type.builtin_type, key_type.native_type, key_type.script_type, value_type.builtin_type, value_type.native_type, value_type.script_type);
+			default_value.set_typed(key_type.builtin_type, key_type.native_type, Ref<Script>(key_type.script_type), value_type.builtin_type, value_type.native_type, Ref<Script>(value_type.script_type));
 			static_variables.write[E.value.index] = default_value;
 		} else {
 			Variant default_value;
@@ -721,8 +725,9 @@ void GDScript::_save_old_static_data() {
 
 void GDScript::_restore_old_static_data() {
 	for (KeyValue<StringName, MemberInfo> &E : old_static_variables_indices) {
-		if (static_variables_indices.has(E.key)) {
-			static_variables.write[static_variables_indices[E.key].index] = old_static_variables[E.value.index];
+		const MemberInfo *member = static_variables_indices.getptr(E.key);
+		if (member != nullptr) {
+			static_variables.write[member->index] = old_static_variables[E.value.index];
 		}
 	}
 	old_static_variables_indices.clear();
@@ -1082,29 +1087,28 @@ bool GDScript::_set(const StringName &p_name, const Variant &p_value) {
 void GDScript::_get_property_list(List<PropertyInfo> *p_properties) const {
 	p_properties->push_back(PropertyInfo(Variant::STRING, "script/source", PROPERTY_HINT_NONE, "", PROPERTY_USAGE_NO_EDITOR | PROPERTY_USAGE_INTERNAL));
 
-	List<const GDScript *> classes;
-	const GDScript *top = this;
-	while (top) {
+	// Contiguous storage avoids a heap allocation per inherited script.
+	LocalVector<const GDScript *> classes;
+	for (const GDScript *top = this; top; top = top->base.ptr()) {
 		classes.push_back(top);
-		top = top->base.ptr();
 	}
 
-	for (const List<const GDScript *>::Element *E = classes.back(); E; E = E->prev()) {
-		Vector<_GDScriptMemberSort> msort;
-		for (const KeyValue<StringName, MemberInfo> &F : E->get()->static_variables_indices) {
-			_GDScriptMemberSort ms;
-			ms.index = F.value.index;
-			ms.name = F.key;
-			msort.push_back(ms);
+	// Enumerate base-first for compatibility with the existing property order.
+	for (uint32_t i = classes.size(); i > 0; --i) {
+		const GDScript *current = classes[i - 1];
+		LocalVector<_GDScriptPropertySort> sorted;
+		sorted.reserve(current->static_variables_indices.size());
+		for (const KeyValue<StringName, MemberInfo> &member : current->static_variables_indices) {
+			// Avoid copying StringName keys and a second hash lookup.
+			sorted.push_back({ member.value.index, &member.value.property_info });
 		}
-		msort.sort();
+		sorted.sort();
 
-		for (int i = 0; i < msort.size(); i++) {
-			p_properties->push_back(E->get()->static_variables_indices[msort[i].name].property_info);
+		for (const _GDScriptPropertySort &member : sorted) {
+			p_properties->push_back(*member.info);
 		}
 	}
 }
-
 void GDScript::_bind_methods() {
 	ClassDB::bind_vararg_method(METHOD_FLAGS_DEFAULT, "new", &GDScript::_new, MethodInfo("new"));
 }
@@ -1723,11 +1727,13 @@ bool GDScriptInstance::get(const StringName &p_name, Variant &r_ret) const {
 }
 
 Variant::Type GDScriptInstance::get_property_type(const StringName &p_name, bool *r_is_valid) const {
-	if (script->member_indices.has(p_name)) {
+	// Avoid hashing and probing the same member name twice on the property-query hot path.
+	const GDScript::MemberInfo *member = script->member_indices.getptr(p_name);
+	if (member != nullptr) {
 		if (r_is_valid) {
 			*r_is_valid = true;
 		}
-		return script->member_indices[p_name].property_info.type;
+		return member->property_info.type;
 	}
 
 	if (r_is_valid) {
@@ -1758,12 +1764,30 @@ void GDScriptInstance::validate_property(PropertyInfo &p_property) const {
 }
 
 void GDScriptInstance::get_property_list(List<PropertyInfo> *r_properties) const {
-	// exported members, not done yet!
-
 	const GDScript *sptr = script.ptr();
-	List<PropertyInfo> props;
 
 	while (sptr) {
+#ifdef TOOLS_ENABLED
+		r_properties->push_back(sptr->get_class_category());
+#endif
+
+		LocalVector<_GDScriptPropertySort> sorted;
+		sorted.reserve(sptr->members.size());
+		for (const KeyValue<StringName, GDScript::MemberInfo> &member : sptr->member_indices) {
+			if (!sptr->members.has(member.key)) {
+				continue; // Skip base class members.
+			}
+			sorted.push_back({ member.value.index, &member.value.property_info });
+		}
+
+		sorted.sort();
+		for (const _GDScriptPropertySort &member : sorted) {
+			PropertyInfo pinfo = *member.info;
+			validate_property(pinfo);
+			r_properties->push_back(pinfo);
+		}
+
+		// Call the script's custom _get_property_list, if defined.
 		if (likely(sptr->valid)) {
 			HashMap<StringName, GDScriptFunction *>::ConstIterator E = sptr->member_functions.find(GDScriptLanguage::get_singleton()->strings._get_property_list);
 			if (E) {
@@ -1836,41 +1860,12 @@ void GDScriptInstance::get_property_list(List<PropertyInfo> *r_properties) const
 						ERR_CONTINUE(pinfo.name.is_empty() && (pinfo.usage & PROPERTY_USAGE_STORAGE));
 						ERR_CONTINUE(pinfo.type < 0 || pinfo.type >= Variant::VARIANT_MAX);
 
-						props.push_back(pinfo);
+						validate_property(pinfo);
+						r_properties->push_back(pinfo);
 					}
 				}
 			}
 		}
-
-		//instance a fake script for editing the values
-
-		Vector<_GDScriptMemberSort> msort;
-		for (const KeyValue<StringName, GDScript::MemberInfo> &F : sptr->member_indices) {
-			if (!sptr->members.has(F.key)) {
-				continue; // Skip base class members.
-			}
-			_GDScriptMemberSort ms;
-			ms.index = F.value.index;
-			ms.name = F.key;
-			msort.push_back(ms);
-		}
-
-		msort.sort();
-		msort.reverse();
-		for (int i = 0; i < msort.size(); i++) {
-			props.push_front(sptr->member_indices[msort[i].name].property_info);
-		}
-
-#ifdef TOOLS_ENABLED
-		r_properties->push_back(sptr->get_class_category());
-#endif // TOOLS_ENABLED
-
-		for (PropertyInfo &prop : props) {
-			validate_property(prop);
-			r_properties->push_back(prop);
-		}
-
-		props.clear();
 
 		sptr = sptr->base.ptr();
 	}
@@ -1999,31 +1994,51 @@ void GDScriptInstance::notification(int p_notification, bool p_reversed) {
 		return;
 	}
 
-	//notification is not virtual, it gets called at ALL levels just like in C.
+	// Notifications are non-virtual and must reach every script in the inheritance chain.
 	Variant value = p_notification;
 	const Variant *args[1] = { &value };
 	const StringName &notification_str = GDScriptLanguage::get_singleton()->strings._notification;
 
-	LocalVector<GDScript *> script_stack;
-	uint32_t script_count = 0;
-	for (GDScript *sptr = script.ptr(); sptr; sptr = sptr->base.ptr(), ++script_count) {
-		script_stack.push_back(sptr);
+	// Derived-first notifications don't need any ancestry buffer or heap allocation.
+	if (p_reversed) {
+		for (GDScript *sc = script.ptr(); sc; sc = sc->base.ptr()) {
+			if (likely(sc->valid)) {
+				GDScriptFunction **fn = sc->member_functions.getptr(notification_str);
+				if (fn) {
+					Callable::CallError err;
+					(*fn)->call(this, args, 1, err);
+				}
+			}
+		}
+		return;
 	}
 
-	const int start = p_reversed ? 0 : script_count - 1;
-	const int end = p_reversed ? script_count : -1;
-	const int step = p_reversed ? 1 : -1;
-
-	for (int idx = start; idx != end; idx += step) {
-		GDScript *sc = script_stack[idx];
-		if (likely(sc->valid)) {
-			HashMap<StringName, GDScriptFunction *>::Iterator E = sc->member_functions.find(notification_str);
-			if (E) {
-				Callable::CallError err;
-				E->value->call(this, args, 1, err);
-				if (err.error != Callable::CallError::CALL_OK) {
-					//print error about notification call
+	// Keep the established base-first order without allocating for the common
+	// short inheritance chain; a dynamic fallback handles arbitrarily deep scripts.
+	constexpr uint32_t INLINE_SCRIPT_DEPTH = 8;
+	GDScript *inline_stack[INLINE_SCRIPT_DEPTH];
+	LocalVector<GDScript *> overflow_stack;
+	uint32_t script_count = 0;
+	for (GDScript *sc = script.ptr(); sc; sc = sc->base.ptr(), ++script_count) {
+		if (script_count < INLINE_SCRIPT_DEPTH) {
+			inline_stack[script_count] = sc;
+		} else {
+			if (script_count == INLINE_SCRIPT_DEPTH) {
+				for (uint32_t i = 0; i < INLINE_SCRIPT_DEPTH; i++) {
+					overflow_stack.push_back(inline_stack[i]);
 				}
+			}
+			overflow_stack.push_back(sc);
+		}
+	}
+	GDScript **script_stack = script_count <= INLINE_SCRIPT_DEPTH ? inline_stack : overflow_stack.ptr();
+	for (uint32_t idx = script_count; idx > 0; idx--) {
+		GDScript *sc = script_stack[idx - 1];
+		if (likely(sc->valid)) {
+			GDScriptFunction **fn = sc->member_functions.getptr(notification_str);
+			if (fn) {
+				Callable::CallError err;
+				(*fn)->call(this, args, 1, err);
 			}
 		}
 	}
@@ -2115,9 +2130,9 @@ String GDScriptLanguage::get_name() const {
 /* LANGUAGE FUNCTIONS */
 
 void GDScriptLanguage::_add_global(const StringName &p_name, const Variant &p_value) {
-	if (globals.has(p_name)) {
-		//overwrite existing
-		global_array.write[globals[p_name]] = p_value;
+	if (const int *existing_index = globals.getptr(p_name)) {
+		// Overwrite the existing slot without a second hash lookup.
+		global_array.write[*existing_index] = p_value;
 		return;
 	}
 
@@ -2134,11 +2149,13 @@ void GDScriptLanguage::_add_global(const StringName &p_name, const Variant &p_va
 }
 
 void GDScriptLanguage::_remove_global(const StringName &p_name) {
-	if (!globals.has(p_name)) {
+	const int *existing_index = globals.getptr(p_name);
+	if (existing_index == nullptr) {
 		return;
 	}
-	global_array_empty_indexes.push_back(globals[p_name]);
-	global_array.write[globals[p_name]] = Variant::NIL;
+	const int index = *existing_index;
+	global_array_empty_indexes.push_back(index);
+	global_array.write[index] = Variant::NIL;
 	globals.erase(p_name);
 }
 
@@ -2151,11 +2168,11 @@ void GDScriptLanguage::add_named_global_constant(const StringName &p_name, const
 }
 
 Variant GDScriptLanguage::get_any_global_constant(const StringName &p_name) {
-	if (named_globals.has(p_name)) {
-		return named_globals[p_name];
+	if (const Variant *named = named_globals.getptr(p_name)) {
+		return *named;
 	}
-	if (globals.has(p_name)) {
-		return _global_array[globals[p_name]];
+	if (const int *global_index = globals.getptr(p_name)) {
+		return _global_array[*global_index];
 	}
 	ERR_FAIL_V_MSG(Variant(), vformat("Could not find any global constant with name: %s.", p_name));
 }
@@ -2172,10 +2189,9 @@ void GDScriptLanguage::init() {
 		_add_global(StringName(CoreConstants::get_global_constant_name(i)), CoreConstants::get_global_constant_value(i));
 	}
 
-	_add_global(StringName("PI"), Math::PI);
-	_add_global(StringName("TAU"), Math::TAU);
-	_add_global(StringName("INF"), Math::INF);
-	_add_global(StringName("NAN"), Math::NaN);
+	for (int i = 0; i < GDScriptConstants::get_constant_count(); i++) {
+		_add_global(StringName(GDScriptConstants::get_constant_name(i)), GDScriptConstants::get_constant_value(i));
+	}
 
 	// Populate native classes.
 

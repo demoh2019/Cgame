@@ -108,8 +108,6 @@ void TilesEditorUtils::_thread() {
 				viewport->add_child(tile_map_layer);
 
 				Rect2 encompassing_rect;
-				// A nonempty TileMapPattern can produce an empty layer when
-				// every cell refers to an invalid source (upstream #125451).
 				if (!tile_map_layer->get_tile_map_layer_data().is_empty()) {
 					encompassing_rect.set_position(tile_map_layer->map_to_local(tile_map_layer->get_tile_map_layer_data().begin()->key));
 				}
@@ -132,7 +130,6 @@ void TilesEditorUtils::_thread() {
 					}
 				}
 
-				// Empty and zero-sized previews must not divide by zero.
 				const Vector2 scale = calculate_preview_scale(thumbnail_size2, encompassing_rect);
 				tile_map_layer->set_scale(scale);
 				tile_map_layer->set_position(-(scale * encompassing_rect.get_center()) + thumbnail_size2 / 2);

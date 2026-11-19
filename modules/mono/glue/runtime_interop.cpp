@@ -1244,8 +1244,15 @@ int32_t godotsharp_dictionary_count(const Dictionary *p_self) {
 }
 
 void godotsharp_dictionary_key_value_pair_at(const Dictionary *p_self, int32_t p_index, Variant *r_key, Variant *r_value) {
-	memnew_placement(r_key, Variant(p_self->get_key_at_index(p_index)));
-	memnew_placement(r_value, Variant(p_self->get_value_at_index(p_index)));
+	// Fetch both parts of the pair with one indexed lookup.
+	const KeyValue<Variant, Variant> *entry = p_self->get_key_value_at_index(p_index);
+	if (entry) {
+		memnew_placement(r_key, Variant(entry->key));
+		memnew_placement(r_value, Variant(entry->value));
+	} else {
+		memnew_placement(r_key, Variant());
+		memnew_placement(r_value, Variant());
+	}
 }
 
 void godotsharp_dictionary_add(Dictionary *p_self, const Variant *p_key, const Variant *p_value) {

@@ -86,6 +86,37 @@ class AssetSizeTests(unittest.TestCase):
         self.put("b", b"1" * 4)
         self.assertEqual([v["path"] for v in sizes.scan(self.root, max_file=2)["violations"]], ["b", "a"])
 
+    def test_large_top_matches_full_sort_reference(self):
+        for i in range(230):
+            self.put(f"assets/{i:04d}.png", b"x" * ((i * 31 + i // 9) % 37))
+        files = [(f"assets/{i:04d}.png", (i * 31 + i // 9) % 37)
+                 for i in range(230)]
+        oracle = sorted(files, key=lambda item: (-item[1], item[0]))
+        for top in (0, 1, 3, 20, 100, 230, 500):
+            with self.subTest(top=top):
+                self.assertEqual(
+                    sizes.scan(self.root, top=top)["largest"],
+                    [{"path": p, "bytes": n} for p, n in oracle[:top]],
+                )
+
+    def test_violation_order_is_full_sort_filtered_by_budget(self):
+        for i in range(90):
+            self.put(f"data/{i:03d}.bin", b"x" * ((i * 13) % 19))
+        ordered = sorted(
+            ((f"data/{i:03d}.bin", (i * 13) % 19) for i in range(90)),
+            key=lambda item: (-item[1], item[0]),
+        )
+        for limit in (0, 2, 8, 17, 18, 19, 200):
+            with self.subTest(limit=limit):
+                report = sizes.scan(self.root, top=7, max_file=limit)
+                expected = [
+                    {"kind": "file", "path": path, "bytes": count, "limit_bytes": limit}
+                    for path, count in ordered if count > limit
+                ]
+                self.assertEqual(report["violations"], expected)
+                self.assertEqual(report["largest"],
+                                 [{"path": p, "bytes": n} for p, n in ordered[:7]])
+
     def test_zero_top(self):
         self.put("asset", b"123")
         self.assertEqual(sizes.scan(self.root, top=0)["largest"], [])

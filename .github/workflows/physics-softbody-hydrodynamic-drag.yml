@@ -1,0 +1,56 @@
+name: SoftBody3D submerged drag and water current contracts
+
+on:
+  pull_request:
+    paths:
+      - 'servers/physics_softbody_fluid_clipping.h'
+      - 'servers/physics_softbody_hydrostatic.h'
+      - 'servers/physics_softbody_hydrodynamic_drag.h'
+      - 'modules/godot_physics_3d/godot_soft_body_3d.cpp'
+      - 'modules/godot_physics_3d/godot_soft_body_3d.h'
+      - 'modules/godot_physics_3d/godot_space_3d.cpp'
+      - 'modules/godot_physics_3d/godot_space_3d.h'
+      - 'servers/physics_3d/physics_server_3d.cpp'
+      - 'tests/servers/test_physics_softbody_hydrodynamic_drag.cpp'
+      - 'tests/stress/test_physics_softbody_hydrodynamic_drag.py'
+      - 'tests/stress/test_physics_softbody_hydrostatic.py'
+      - '.github/workflows/physics-softbody-hydrodynamic-drag.yml'
+      - 'demo/softbody_hydrostatic_lab/**'
+  push:
+    branches: [develop]
+    paths:
+      - 'servers/physics_softbody_fluid_clipping.h'
+      - 'servers/physics_softbody_hydrostatic.h'
+      - 'servers/physics_softbody_hydrodynamic_drag.h'
+      - 'modules/godot_physics_3d/godot_soft_body_3d.cpp'
+      - 'modules/godot_physics_3d/godot_soft_body_3d.h'
+      - 'modules/godot_physics_3d/godot_space_3d.cpp'
+      - 'modules/godot_physics_3d/godot_space_3d.h'
+      - 'servers/physics_3d/physics_server_3d.cpp'
+      - 'tests/servers/test_physics_softbody_hydrodynamic_drag.cpp'
+      - 'tests/stress/test_physics_softbody_hydrodynamic_drag.py'
+      - 'tests/stress/test_physics_softbody_hydrostatic.py'
+      - '.github/workflows/physics-softbody-hydrodynamic-drag.yml'
+      - 'demo/softbody_hydrostatic_lab/**'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: softbody-current-drag-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  numerical-reference:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - name: Python syntax
+        run: |
+          python3 -m py_compile tests/stress/test_physics_softbody_hydrodynamic_drag.py tests/stress/test_physics_softbody_hydrostatic.py
+      - name: Current drag, energy, pins, underwater clip and old pressure contracts
+        run: |
+          python3 -m unittest discover -s tests/stress -p 'test_physics_softbody_hydrodynamic_drag.py' -v
+          python3 -m unittest discover -s tests/stress -p 'test_physics_softbody_hydrostatic.py' -v

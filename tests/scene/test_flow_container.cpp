@@ -636,4 +636,49 @@ TEST_CASE("[SceneTree][FlowContainer] VFlowContainer") {
 	memdelete(vflow_container);
 }
 
+TEST_CASE("[SceneTree][FlowContainer] Dense layout cache ignores hidden and non-Control children") {
+	HFlowContainer *flow = memnew(HFlowContainer);
+	Window *root = SceneTree::get_singleton()->get_root();
+	root->add_child(flow);
+	flow->set_size(Size2(75, 100));
+	flow->add_theme_constant_override("h_separation", 0);
+	flow->add_theme_constant_override("v_separation", 0);
+
+	Control *controls[5];
+	for (int i = 0; i < 5; i++) {
+		controls[i] = memnew(Control);
+		controls[i]->set_custom_minimum_size(Size2(35, 12));
+		if (i % 2 == 0) {
+			controls[i]->set_h_size_flags(Control::SIZE_EXPAND_FILL);
+		}
+		flow->add_child(controls[i]);
+	}
+	Node *ignored = memnew(Node);
+	flow->add_child(ignored);
+	controls[2]->hide();
+	SceneTree::get_singleton()->process(0);
+
+	CHECK(flow->get_line_count() == 2);
+	CHECK(flow->get_line_max_child_count() == 2);
+	CHECK(flow->get_minimum_size().is_equal_approx(Size2(35, 24)));
+	CHECK(controls[0]->get_position().y == doctest::Approx(0));
+	CHECK(controls[1]->get_position().y == doctest::Approx(0));
+	CHECK(controls[3]->get_position().y == doctest::Approx(12));
+	CHECK(controls[4]->get_position().y == doctest::Approx(12));
+
+	// Exercise a capped stretch child and reverse horizontal line fill.
+	controls[0]->set_custom_maximum_size(Size2(38, -1));
+	flow->set_reverse_fill(true);
+	SceneTree::get_singleton()->process(0);
+	CHECK(flow->get_line_count() == 2);
+	CHECK(controls[0]->get_size().x <= 38);
+	CHECK(controls[1]->get_size().x >= 35);
+
+	for (Control *control : controls) {
+		memdelete(control);
+	}
+	memdelete(ignored);
+	memdelete(flow);
+}
+
 } // namespace TestFlowContainer

@@ -12,6 +12,7 @@ from emscripten_helpers import (
     create_template_zip,
     get_template_zip_path,
     run_closure_compiler,
+    run_optimize_wasm,
 )
 from SCons.Util import WhereIs
 
@@ -62,6 +63,7 @@ def get_opts():
             False,
         ),
         BoolVariable("wasm_simd", "Use WebAssembly SIMD to improve CPU performance", True),
+        BoolVariable("optimize_wasm", "Run Binaryen wasm-opt -Oz on Web export templates after linking", False),
     ]
 
 
@@ -327,3 +329,7 @@ def configure(env: "SConsEnvironment"):
 
     # Disable GDScript LSP (as the Web platform is not compatible with TCP).
     env.Append(CPPDEFINES=["GDSCRIPT_NO_LSP"])
+
+    # Build a separate optimized binary rather than overwriting Emscripten output.
+    if env["optimize_wasm"]:
+        env.Append(BUILDERS={"OptimizeWASM": env.Builder(action=env.Action(run_optimize_wasm), suffix=".opt.wasm", src_suffix=".wasm")})
