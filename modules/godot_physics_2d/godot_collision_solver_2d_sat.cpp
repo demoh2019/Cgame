@@ -632,17 +632,17 @@ static void _collision_circle_circle(const GodotShape2D *p_a, const Transform2D 
 
 		// Coincident centers are handled by SAT to retain its previous-axis
 		// behavior. Negative effective radii are not valid for this shortcut.
-		if (combined_radius >= 0.0 && distance_squared > 0.0) {
-			const Vector2 axis = separation / Math::sqrt(distance_squared);
+		if (radius_A >= 0.0 && radius_B >= 0.0 && distance_squared > 0.0) {
 			if (distance_squared > combined_radius * combined_radius) {
 				if (p_collector->sep_axis) {
-					*p_collector->sep_axis = axis;
+					*p_collector->sep_axis = separation / Math::sqrt(distance_squared);
 				}
 				return;
 			}
 
 			p_collector->collided = true;
 			if (p_collector->callback) {
+				const Vector2 axis = separation / Math::sqrt(distance_squared);
 				p_collector->normal = axis;
 				p_collector->call(p_transform_a.get_origin() - axis * radius_A,
 						p_transform_b.get_origin() + axis * radius_B);
