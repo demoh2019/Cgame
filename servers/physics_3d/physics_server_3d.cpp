@@ -593,6 +593,8 @@ PhysicsServer3D::PhysicsServer3D() {
 	GLOBAL_DEF(PropertyInfo(Variant::FLOAT, "physics/3d/solver/soft_body_self_collision_thickness", PROPERTY_HINT_RANGE, "0,1,0.001,or_greater,suffix:m"), 0.0);
 	GLOBAL_DEF(PropertyInfo(Variant::FLOAT, "physics/3d/solver/soft_body_self_collision_compliance", PROPERTY_HINT_RANGE, "0,0.01,0.000001,or_greater"), 0.000001);
 	GLOBAL_DEF(PropertyInfo(Variant::INT, "physics/3d/solver/soft_body_self_collision_max_contacts_per_vertex", PROPERTY_HINT_RANGE, "1,32,1"), 8);
+	// Optional edge/edge contacts for folds missed by vertex/triangle contacts.
+	GLOBAL_DEF(PropertyInfo(Variant::BOOL, "physics/3d/solver/soft_body_self_collision_edge_edge"), false);
 	// Jolt-style long-range cloth tethers limit distance from pinned
 	// particles along the original structural mesh. 0 keeps them off.
 	GLOBAL_DEF(PropertyInfo(Variant::FLOAT, "physics/3d/solver/soft_body_xpbd_tether_compliance", PROPERTY_HINT_RANGE, "0,0.01,0.000001,or_greater"), 0.0);
