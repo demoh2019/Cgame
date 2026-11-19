@@ -112,7 +112,7 @@ func _open_cloth_mesh() -> ArrayMesh:
     var points := PackedVector3Array()
     var normals := PackedVector3Array()
     var indices := PackedInt32Array()
-    const SIDE := 5
+    const SIDE = 5
     for z in range(SIDE):
         for x in range(SIDE):
             points.append(Vector3((float(x) - 2.0) * 0.5, 0.0, (float(z) - 2.0) * 0.5))
