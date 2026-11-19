@@ -17,7 +17,7 @@ func _check_both_labs() -> void:
     var checks := [
         {
             "scene": "res://lab_3d.tscn",
-            "nodes": ["Ground", "ThinTarget", "DeformableMesh", "FEMConvexCubeSixTets", "SuspensionVehicle", "BodyEnterSensor", "DownwardQuery", "DownwardShapeCast", "HingeBase", "SliderBase", "Environment3D/WaterVolume3D", "Environment3D/MagnetCore", "Environment3D/InteractionHUD3D", "AdvancedPhysics3D/VortexZone", "AdvancedPhysics3D/ConveyorBelt3D", "AdvancedPhysics3D/LocalGravityWell", "AdvancedPhysics3D/AdvancedHUD3D"],
+            "nodes": ["Ground", "ThinTarget", "DeformableMesh", "FEMConvexCubeSixTets", "SuspensionVehicle", "BodyEnterSensor", "DownwardQuery", "DownwardShapeCast", "HingeBase", "SliderBase", "Environment3D/WaterVolume3D", "Environment3D/MagnetCore", "Environment3D/InteractionHUD3D", "AdvancedPhysics3D/VortexZone", "AdvancedPhysics3D/ConveyorBelt3D", "AdvancedPhysics3D/LocalGravityWell", "AdvancedPhysics3D/AdvancedHUD3D", "PBFWaterDemo/PBFWaterCPU", "PBFWaterDemo/PBFWaterCPU/ParticleRenderer"],
             "group": "demo_dynamic",
             "minimum": 25
         },
@@ -42,6 +42,13 @@ func _check_both_labs() -> void:
         for node_name in check["nodes"]:
             if lab.get_node_or_null(node_name) == null:
                 push_error("%s missing node %s" % [check["scene"], node_name])
+                successful = false
+        # The liquid station must exercise the native PBF class, not a
+        # pre-baked mesh or a GDScript-only particle approximation.
+        if check["group"] == "demo_dynamic":
+            var pbf_fluid := lab.get_node_or_null("PBFWaterDemo/PBFWaterCPU") as PBFParticleFluid3D
+            if pbf_fluid == null or pbf_fluid.get_particle_count() != 245:
+                push_error("Physics Lab native PBF water tank missing or incorrectly seeded.")
                 successful = false
         var count := get_nodes_in_group(check["group"]).size()
         # Also exercise newly exposed physics interactions (no UI required).
