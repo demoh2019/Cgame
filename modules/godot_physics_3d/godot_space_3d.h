@@ -147,6 +147,7 @@ private:
 	real_t soft_body_membrane_damping_rate = 0.0; // Objective viscoelastic strain-rate relaxation, 1/s.
 	real_t soft_body_tetra_fem_compliance = 0.0; // Disabled by default.
 	real_t soft_body_tetra_fem_poisson_ratio = 0.3;
+	real_t soft_body_tetra_fem_damping_rate = 0.0; // Objective volumetric viscoelasticity, 1/s.
 	real_t soft_body_xpbd_shear_compliance = 0.0; // Opt-in angular shear preservation.
 	real_t soft_body_xpbd_dihedral_compliance = 0.0; // Opt-in angle-based cloth bending.
 	real_t soft_body_shape_matching_stiffness = 0.0; // Optional global shape recovery.
@@ -298,6 +299,7 @@ public:
 	_FORCE_INLINE_ real_t get_soft_body_membrane_poisson_ratio() const { return soft_body_membrane_poisson_ratio; }
 	_FORCE_INLINE_ real_t get_soft_body_tetra_fem_compliance() const { return soft_body_tetra_fem_compliance; }
 	_FORCE_INLINE_ real_t get_soft_body_tetra_fem_poisson_ratio() const { return soft_body_tetra_fem_poisson_ratio; }
+	_FORCE_INLINE_ real_t get_soft_body_tetra_fem_damping_rate() const { return soft_body_tetra_fem_damping_rate; }
 	_FORCE_INLINE_ real_t get_soft_body_membrane_damping_rate() const { return soft_body_membrane_damping_rate; }
 	_FORCE_INLINE_ real_t get_soft_body_xpbd_shear_compliance() const { return soft_body_xpbd_shear_compliance; }
 	_FORCE_INLINE_ real_t get_soft_body_xpbd_dihedral_compliance() const { return soft_body_xpbd_dihedral_compliance; }
