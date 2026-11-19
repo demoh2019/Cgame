@@ -1096,4 +1096,117 @@ TEST_CASE("[BVH] Dense pair hash index preserves 3D contacts across threshold an
 			AABB(Vector3(0, 0, 0), Vector3(4, 4, 4)),
 			AABB(Vector3(100, 0, 0), Vector3(4, 4, 4)));
 }
+
+struct ReciprocalPairStats {
+	int created = 0;
+	int removed = 0;
+	int checked = 0;
+	int bad_userdata = 0;
+	int initial_token = 13;
+	int updated_token = 29;
+};
+
+static void *reciprocal_pair_created(void *p_userdata, uint32_t, Item *, int, uint32_t, Item *, int) {
+	ReciprocalPairStats *stats = static_cast<ReciprocalPairStats *>(p_userdata);
+	stats->created++;
+	return &stats->initial_token;
+}
+
+static void *reciprocal_pair_checked(void *p_userdata, uint32_t, Item *, int, uint32_t, Item *, int, void *p_pair_userdata) {
+	ReciprocalPairStats *stats = static_cast<ReciprocalPairStats *>(p_userdata);
+	stats->checked++;
+	if (p_pair_userdata != &stats->initial_token && p_pair_userdata != &stats->updated_token) {
+		stats->bad_userdata++;
+	}
+	return &stats->updated_token;
+}
+
+static void reciprocal_pair_removed(void *p_userdata, uint32_t, Item *, int, uint32_t, Item *, int, void *p_pair_userdata) {
+	ReciprocalPairStats *stats = static_cast<ReciprocalPairStats *>(p_userdata);
+	stats->removed++;
+	if (p_pair_userdata != &stats->updated_token) {
+		stats->bad_userdata++;
+	}
+}
+
+template <typename Bounds, typename Point>
+static void _exercise_reciprocal_pair_links(const Bounds &p_overlap, const Bounds &p_far) {
+	using Tree = BVH_Manager<Item, 2, true, 16, PairTest, CullTest, Bounds, Point, false>;
+	constexpr int COUNT = 40;
+	constexpr int REPLACEMENTS = 8;
+	Tree tree;
+	Item items[COUNT + REPLACEMENTS];
+	BVHHandle handles[COUNT];
+	ReciprocalPairStats stats;
+	tree.set_pair_callback(reciprocal_pair_created, &stats);
+	tree.set_check_pair_callback(reciprocal_pair_checked, &stats);
+	tree.set_unpair_callback(reciprocal_pair_removed, &stats);
+
+	for (int i = 0; i < COUNT; ++i) {
+		items[i].value = i;
+		handles[i] = tree.create(&items[i], true, uint32_t(i & 1), 3, p_overlap, 0, true);
+	}
+	tree.flush_pending_pairs();
+	constexpr int TOTAL = COUNT * (COUNT - 1) / 2;
+	CHECK(stats.created == TOTAL);
+
+	// Both copies of every pair's payload must be synchronized by the
+	// reciprocal index, even after unordered adjacency swaps.
+	auto recheck_all = [&]() {
+		for (const BVHHandle &handle : handles) {
+			tree.recheck_pairs(handle);
+		}
+		CHECK(stats.bad_userdata == 0);
+	};
+	recheck_all();
+	CHECK(stats.checked == TOTAL * 2);
+
+	const int replace_indices[REPLACEMENTS] = { 0, COUNT - 1, COUNT / 2, 5, 31, 1, 37, 14 };
+	for (int i = 0; i < REPLACEMENTS; ++i) {
+		const int replace = replace_indices[i];
+		tree.erase(handles[replace]);
+		CHECK(stats.removed == (i + 1) * (COUNT - 1));
+
+		items[COUNT + i].value = COUNT + i;
+		handles[replace] = tree.create(&items[COUNT + i], true, uint32_t(replace & 1), 3, p_overlap);
+		CHECK(stats.created == TOTAL + (i + 1) * (COUNT - 1));
+		recheck_all();
+	}
+
+	// Force one more unordered-link removal and regeneration without
+	// destroying its body; all reciprocal indices must remain consistent.
+	tree.move(handles[0], p_far);
+	tree.update();
+	CHECK(stats.removed == (REPLACEMENTS + 1) * (COUNT - 1));
+	tree.move(handles[0], p_overlap);
+	tree.update();
+	CHECK(stats.created == TOTAL + (REPLACEMENTS + 1) * (COUNT - 1));
+	recheck_all();
+
+	for (const BVHHandle &handle : handles) {
+		tree.erase(handle);
+	}
+	CHECK(stats.removed == stats.created);
+	CHECK(stats.bad_userdata == 0);
+}
+
+TEST_CASE("[BVH] Reciprocal 2D pair indices survive dense removals and handle reuse") {
+	_exercise_reciprocal_pair_links<Rect2, Vector2>(Rect2(0, 0, 4, 4), Rect2(100, 0, 4, 4));
+}
+
+TEST_CASE("[BVH] Reciprocal 3D pair indices survive dense removals and handle reuse") {
+	_exercise_reciprocal_pair_links<AABB, Vector3>(
+			AABB(Vector3(0, 0, 0), Vector3(4, 4, 4)),
+			AABB(Vector3(100, 0, 0), Vector3(4, 4, 4)));
+}
+
+TEST_CASE("[BVH] Reciprocal pair indices fit into the 64-bit contact link") {
+	using Pairs2D = BVH_Tree<Item, 2, 2, 16, PairTest, CullTest, true, Rect2, Vector2>::ItemPairs;
+	using Pairs3D = BVH_Tree<Item, 2, 2, 16, PairTest, CullTest, true, AABB, Vector3>::ItemPairs;
+	if (sizeof(void *) == 8) {
+		CHECK(sizeof(Pairs2D::Link) == 16);
+		CHECK(sizeof(Pairs3D::Link) == 16);
+	}
+}
+
 } // namespace TestBVH
