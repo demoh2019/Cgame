@@ -9,6 +9,7 @@ verify neutral bone insertion. This is not a full FBX import runtime test.
 from __future__ import annotations
 
 from pathlib import Path
+import os
 import shutil
 import subprocess
 import tempfile
@@ -95,7 +96,7 @@ class FBXNeutralBoneContracts(unittest.TestCase):
         self.assertIn("fbx_skin->clusters.count == 0 || fbx_skin->weights.count == 0", prior)
         self.assertIn("p_state->skin_indices.push_back(-1);", prior)
 
-    @unittest.skipUnless(shutil.which("c++"), "C++ compiler unavailable")
+    @unittest.skipUnless(shutil.which(os.environ.get("CXX", "c++")), "C++ compiler unavailable")
     def test_compiled_importer_weight_loop_keeps_unweighted_vertices(self):
         # Compile the actual production loop so a mutation of the importer
         # changes behavior. Include four- and eight-weight skinning scenarios.
@@ -178,7 +179,7 @@ int main() {
             binary = Path(temp) / "fbx_neutral_weight"
             cpp.write_text(prelude + loop + checks, encoding="utf-8")
             compiled = subprocess.run(
-                ["c++", "-std=c++17", "-Wall", "-Wextra", "-Werror", str(cpp), "-o", str(binary)],
+                [os.environ.get("CXX", "c++"), "-std=c++17", "-Wall", "-Wextra", "-Werror", str(cpp), "-o", str(binary)],
                 text=True, capture_output=True, check=False,
             )
             self.assertEqual(compiled.returncode, 0, compiled.stderr)
