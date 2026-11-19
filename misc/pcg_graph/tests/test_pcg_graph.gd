@@ -106,6 +106,13 @@ func _test_graph_mutations() -> void:
 
 
 func _test_cycle_prevention() -> void:
+	# The reverse edge would have a free input, so rejection must be caused
+	# by cycle detection rather than the duplicate-input guard.
+	var standalone := Graph.new()
+	var first := standalone.add_graph_node("JITTER")
+	var second := standalone.add_graph_node("OFFSET")
+	_check(standalone.add_connection(first, second), "first cycle-test edge")
+	_check(not standalone.add_connection(second, first), "real cycle is rejected")
 	var graph := Graph.new()
 	var source := graph.add_graph_node("GRID")
 	var a := graph.add_graph_node("JITTER")
