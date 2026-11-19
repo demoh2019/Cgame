@@ -32,6 +32,8 @@
 
 #include "godot_collision_object_2d.h"
 
+#include "core/config/project_settings.h"
+
 GodotBroadPhase2D::ID GodotBroadPhase2DBVH::create(GodotCollisionObject2D *p_object, int p_subindex, const Rect2 &p_aabb, bool p_static) {
 	uint32_t tree_id = p_static ? TREE_STATIC : TREE_DYNAMIC;
 	uint32_t tree_collision_mask = p_static ? TREE_FLAG_DYNAMIC : (TREE_FLAG_STATIC | TREE_FLAG_DYNAMIC);
@@ -158,4 +160,8 @@ GodotBroadPhase2D *GodotBroadPhase2DBVH::_create() {
 GodotBroadPhase2DBVH::GodotBroadPhase2DBVH() {
 	bvh.set_pair_callback(_pair_callback, this);
 	bvh.set_unpair_callback(_unpair_callback, this);
+	const real_t pairing_margin = GLOBAL_GET("physics/2d/broadphase_pairing_margin");
+	if (pairing_margin >= 0.0) {
+		bvh.params_set_pairing_expansion(pairing_margin);
+	}
 }

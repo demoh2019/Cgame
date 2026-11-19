@@ -35,6 +35,7 @@ TEST_FORCE_LINK(test_godot_physics_2d_solver)
 
 #ifdef MODULE_GODOT_PHYSICS_2D_ENABLED
 
+#include "core/config/project_settings.h"
 #include "modules/godot_physics_2d/godot_body_2d.h"
 #include "modules/godot_physics_2d/godot_constraint_2d.h"
 #include "modules/godot_physics_2d/godot_physics_server_2d.h"
@@ -287,6 +288,11 @@ TEST_CASE("[SceneTree][GodotPhysics2D] Large islands are solved in parallel dete
 	}
 	CHECK(mismatches == 0);
 	CHECK(escaped == 0);
+}
+
+TEST_CASE("[SceneTree][GodotPhysics2D] Broadphase pairing margin setting is registered with pixel-scale default") {
+	REQUIRE(ProjectSettings::get_singleton()->has_setting("physics/2d/broadphase_pairing_margin"));
+	CHECK(real_t(GLOBAL_GET("physics/2d/broadphase_pairing_margin")) == doctest::Approx(1.0));
 }
 
 class PairStub2D : public GodotConstraint2D {

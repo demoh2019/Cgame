@@ -361,6 +361,10 @@ PhysicsServer2D::PhysicsServer2D() {
 	GLOBAL_DEF(PropertyInfo(Variant::FLOAT, "physics/2d/sleep_threshold_angular", PROPERTY_HINT_RANGE, U"0,90,0.1,radians_as_degrees,suffix:°/s"), Math::deg_to_rad(8.0));
 	GLOBAL_DEF(PropertyInfo(Variant::FLOAT, "physics/2d/time_before_sleep", PROPERTY_HINT_RANGE, "0,5,0.01,or_greater,suffix:s"), 0.5);
 	GLOBAL_DEF(PropertyInfo(Variant::INT, "physics/2d/solver/solver_iterations", PROPERTY_HINT_RANGE, "1,32,1,or_greater"), 16);
+	// Slack around each shape AABB before the broadphase re-checks its pairs. Moving
+	// bodies stay inside their padded box for several frames, which avoids a pair
+	// query per body per step. Matches the scale of the solver contact margins (px).
+	GLOBAL_DEF(PropertyInfo(Variant::FLOAT, "physics/2d/broadphase_pairing_margin", PROPERTY_HINT_RANGE, "0,64,0.01,or_greater,suffix:px"), 1.0);
 	// Box2D-style coupled two-point normal contact solve. Experimental: opt in
 	// until stack and cross-platform benchmarks verify the behavior.
 	GLOBAL_DEF(PropertyInfo(Variant::BOOL, "physics/2d/solver/block_solver_enabled"), false);

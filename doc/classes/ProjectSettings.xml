@@ -2577,6 +2577,10 @@
 			[/csharp]
 			[/codeblocks]
 		</member>
+		<member name="physics/2d/broadphase_pairing_margin" type="float" setter="" getter="" default="1.0">
+			Extra padding (in pixels) added around every 2D collision shape when the broadphase tracks pairs. A body only triggers a new pair search once it leaves its padded bounds, so a larger margin makes moving bodies cheaper, at the price of tracking more nearly-touching pairs. Set it to a value close to [code]0.1[/code] to restore a very tight margin, or increase it for scenes with very many slowly moving bodies. Collision results do not change, only the cost of finding them.
+			[b]Note:[/b] The value is read when a physics space is created.
+		</member>
 		<member name="physics/2d/default_linear_damp" type="float" setter="" getter="" default="0.1">
 			The default linear motion damping in 2D. Damping is used to gradually slow down physical objects over time. RigidBodies will fall back to this value when combining their own damping values and no area damping value is present.
 			Suggested values are in the range [code]0[/code] to [code]30[/code]. At value [code]0[/code] objects will keep moving with the same velocity. Greater values will stop the object faster. A value equal to or greater than the physics tick rate ([member physics/common/physics_ticks_per_second]) will bring the object to a stop in one iteration.
