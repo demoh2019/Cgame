@@ -697,6 +697,10 @@ PhysicsServer3D::PhysicsServer3D() {
 	// Closed, consistently oriented soft meshes can preserve enclosed volume.
 	// Zero disables the extra XPBD constraint and its node-gradient buffer.
 	GLOBAL_DEF(PropertyInfo(Variant::FLOAT, "physics/3d/solver/soft_body_xpbd_volume_compliance", PROPERTY_HINT_RANGE, "0,0.01,0.000001,or_greater"), 0.0);
+	// Bulk viscosity removes only the breathing/compression mode of a valid
+	// closed soft body while preserving its free translation and rotation.
+	// Zero skips the O(faces + nodes) velocity projection and scratch setup.
+	GLOBAL_DEF(PropertyInfo(Variant::FLOAT, "physics/3d/solver/soft_body_volume_damping_rate", PROPERTY_HINT_RANGE, "0,1000,0.1,or_greater,suffix:1/s"), 0.0);
 	// Closed-mesh viscoplastic volume creep after sufficiently strong crushing
 	// or expansion. Requires XPBD volume compliance; a zero rate is legacy.
 	GLOBAL_DEF(PropertyInfo(Variant::FLOAT, "physics/3d/solver/soft_body_volume_plastic_yield_strain", PROPERTY_HINT_RANGE, "0,0.95,0.01"), 0.15);

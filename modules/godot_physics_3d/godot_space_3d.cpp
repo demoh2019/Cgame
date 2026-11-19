@@ -1375,6 +1375,8 @@ GodotSpace3D::GodotSpace3D() {
 	soft_body_xpbd_tether_slack = Math::is_finite(configured_tether_slack) ? MAX(real_t(0.0), configured_tether_slack) : real_t(0.05);
 	const real_t configured_volume_compliance = GLOBAL_GET("physics/3d/solver/soft_body_xpbd_volume_compliance");
 	soft_body_xpbd_volume_compliance = Math::is_finite(configured_volume_compliance) ? MAX(real_t(0.0), configured_volume_compliance) : real_t(0.0);
+	const real_t configured_volume_damping = GLOBAL_GET("physics/3d/solver/soft_body_volume_damping_rate");
+	soft_body_volume_damping_rate = Math::is_finite(configured_volume_damping) ? MAX(real_t(0.0), configured_volume_damping) : real_t(0.0);
 	const real_t configured_volume_yield = GLOBAL_GET("physics/3d/solver/soft_body_volume_plastic_yield_strain");
 	soft_body_volume_plastic_yield_strain = Math::is_finite(configured_volume_yield) ? CLAMP(configured_volume_yield, real_t(0.0), real_t(0.95)) : real_t(0.15);
 	const real_t configured_volume_creep = GLOBAL_GET("physics/3d/solver/soft_body_volume_plastic_creep_rate");

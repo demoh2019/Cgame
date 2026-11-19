@@ -170,7 +170,7 @@ class GodotSoftBody3D : public GodotCollisionObject3D {
 	// both the topology and leaves; default-off scenes allocate no edge nodes.
 	LocalVector<SelfCollisionEdge> xpbd_pair_edges;
 	DynamicBVH xpbd_pair_edge_tree;
-	// Allocated only for positive volume compliance on a closed soft mesh.
+	// Lazy scratch shared by XPBD volume constraint and optional bulk viscosity.
 	LocalVector<Vector3> xpbd_volume_gradients;
 	double xpbd_volume_rest = 0.0; // May change via plastic creep.
 	double xpbd_volume_original_rest = 0.0; // Frozen gas reference and damage baseline.
@@ -356,6 +356,7 @@ private:
 			real_t p_thickness, real_t p_alpha, uint32_t p_contact_budget);
 	void initialize_volume_constraint();
 	bool solve_volume_constraint(double p_alpha, double &r_lambda);
+	void damp_volume_rate(double p_fraction);
 	void reset_link_rest_lengths();
 	void update_link_constants();
 	void rebuild_xpbd_tethers(real_t p_slack);
