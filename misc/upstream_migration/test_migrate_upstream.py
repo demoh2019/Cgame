@@ -67,6 +67,9 @@ class RepositoryTargetTests(unittest.TestCase):
     def test_does_not_write_to_source_repository(self):
         self.assertNotEqual(m.TARGET, m.SOURCE)
 
+    def test_backport_target_branch(self):
+        self.assertEqual(m.TARGET_BASE, "develop")
+
     def test_destination_api_uses_canonical_name(self):
         self.assertTrue(m.page_path(m.TARGET, "issues", "open").startswith(
             "/repos/demoh2019/Cgame/issues?"
@@ -413,7 +416,7 @@ class GitIntegrationTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as root:
             base = Path(root)
             upstream = base / "godotengine" / "godot.git"
-            fork = base / "demoh2019" / "godot.git"
+            fork = base / "demoh2019" / "Cgame.git"
             upstream.parent.mkdir()
             fork.parent.mkdir()
             run("init", "--bare", upstream)
@@ -429,6 +432,12 @@ class GitIntegrationTests(unittest.TestCase):
             run("remote", "add", "origin", fork, cwd=seed)
             run("push", "upstream", "master", cwd=seed)
             run("push", "origin", "master", cwd=seed)
+            run("switch", "-c", "develop", cwd=seed)
+            (seed / "fork-only.txt").write_text("fork enhancement\n", encoding="utf-8")
+            run("add", "fork-only.txt", cwd=seed)
+            run("commit", "-m", "Fork enhancement", cwd=seed)
+            run("push", "origin", "develop", cwd=seed)
+            run("switch", "master", cwd=seed)
             run("switch", "-c", "feature", cwd=seed)
             (seed / "engine.txt").write_text("base\nfix\n", encoding="utf-8")
             run("add", "engine.txt", cwd=seed)
@@ -445,10 +454,12 @@ class GitIntegrationTests(unittest.TestCase):
             self.assertEqual(path, f"/repos/{m.TARGET}/pulls")
             self.assertTrue(metadata['draft'])
             self.assertEqual(metadata['head'], 'upstream-pr-987')
+            self.assertEqual(metadata['base'], 'develop')
             self.assertIn('original', metadata['body'].lower() if 'original' in metadata['body'].lower() else metadata['body'])
             inspect = base / "inspect"
             run("clone", "-b", "upstream-pr-987", fork, inspect)
             self.assertEqual((inspect / "engine.txt").read_text(encoding="utf-8"), "base\nfix\n")
+            self.assertEqual((inspect / "fork-only.txt").read_text(encoding="utf-8"), "fork enhancement\n")
 
     def test_backport_rejects_non_repo_path(self):
         import subprocess
