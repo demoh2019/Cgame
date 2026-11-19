@@ -806,4 +806,67 @@ TEST_CASE("[BitMap] Full-map byte fill preserves partial-byte padding") {
 	}
 }
 
+TEST_CASE("[BitMap] Byte-wise blit preserves unaligned source and destination rows") {
+	// Independently verify the packed byte-OR path across different pitches,
+	// clipping, short spans, and offsets on either side of byte boundaries.
+	const int source_widths[] = { 1, 7, 8, 9, 15, 17, 33, 65 };
+	const int source_heights[] = { 1, 3, 9 };
+	const int dest_widths[] = { 1, 5, 8, 9, 17, 32 };
+	const int dest_heights[] = { 1, 5, 11 };
+	for (int sw : source_widths) {
+		for (int sh : source_heights) {
+			Ref<BitMap> source;
+			source.instantiate();
+			source->create(Size2i(sw, sh));
+			for (int y = 0; y < sh; y++) {
+				for (int x = 0; x < sw; x++) {
+					if ((x * 13 + y * 7) % 11 < 5) {
+						source->set_bit(x, y, true);
+					}
+				}
+			}
+			for (int dw : dest_widths) {
+				for (int dh : dest_heights) {
+					const Point2i offsets[] = {
+						Point2i(-sw, -sh), Point2i(-3, 2),
+						Point2i(0, 0), Point2i(1, 1),
+						Point2i(dw - 4, dh - 2),
+						Point2i(dw + 1, dh + 1),
+					};
+					for (const Point2i &offset : offsets) {
+						BitMap dest;
+						dest.create(Size2i(dw, dh));
+						for (int y = 0; y < dh; y++) {
+							for (int x = 0; x < dw; x++) {
+								if ((x * 5 + y * 17) % 13 == 0) {
+									dest.set_bit(x, y, true);
+								}
+							}
+						}
+						dest.blit(offset, source);
+						int expected_count = 0;
+						bool all_match = true;
+						for (int y = 0; y < dh; y++) {
+							for (int x = 0; x < dw; x++) {
+								const int sx = x - offset.x;
+								const int sy = y - offset.y;
+								const bool initial = (x * 5 + y * 17) % 13 == 0;
+								const bool from_source = sx >= 0 && sx < sw && sy >= 0 && sy < sh &&
+										((sx * 13 + sy * 7) % 11 < 5);
+								const bool expected = initial || from_source;
+								expected_count += expected;
+								if (dest.get_bit(x, y) != expected) {
+									all_match = false;
+								}
+							}
+						}
+						CHECK(all_match);
+						CHECK(dest.get_true_bit_count() == expected_count);
+					}
+				}
+			}
+		}
+	}
+}
+
 } // namespace TestBitMap
