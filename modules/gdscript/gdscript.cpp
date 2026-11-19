@@ -1718,11 +1718,13 @@ bool GDScriptInstance::get(const StringName &p_name, Variant &r_ret) const {
 }
 
 Variant::Type GDScriptInstance::get_property_type(const StringName &p_name, bool *r_is_valid) const {
-	if (script->member_indices.has(p_name)) {
+	// Avoid hashing and probing the same member name twice on the property-query hot path.
+	const GDScript::MemberInfo *member = script->member_indices.getptr(p_name);
+	if (member != nullptr) {
 		if (r_is_valid) {
 			*r_is_valid = true;
 		}
-		return script->member_indices[p_name].property_info.type;
+		return member->property_info.type;
 	}
 
 	if (r_is_valid) {
