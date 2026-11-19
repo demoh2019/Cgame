@@ -9,7 +9,7 @@ const ExtraStress := preload("res://extra_stress.gd")
 const CASES := [
 	"containers", "strings", "script_vm", "math", "signals",
 	"scene_tree", "packed_scene", "images", "json", "stream", "stream_bulk",
-	"file_io", "threads", "physics_2d", "physics_3d",
+	"file_io", "threads", "physics_2d", "physics_3d", "physics_sparse_2d", "physics_sparse_3d",
 	"object_churn", "memory_churn", "astar_grid", "astar_relax_2d", "astar_relax_3d", "astar_graph", "tweens", "audio_buffers",
 	"variant_codec", "packet_stream", "ui_layout", "render_2d", "render_3d",
 	"resource_load",
@@ -218,6 +218,10 @@ func _run_case(test_case: String, scale: int, frames: int, seed: int) -> Diction
 			return await _physics_2d(scale, frames)
 		"physics_3d":
 			return await _physics_3d(scale, frames)
+		"physics_sparse_2d":
+			return await _physics_sparse_2d(scale, frames)
+		"physics_sparse_3d":
+			return await _physics_sparse_3d(scale, frames)
 		"memory_churn":
 			return await _memory_churn(scale)
 		"render_2d":
@@ -560,6 +564,78 @@ func _physics_3d(scale: int, frames: int) -> Dictionary:
 	await process_frame
 	var frame_statistics := _frame_statistics(frame_intervals)
 	return {"bodies": length, "physics_frames": frames, "peak_physics_ms": peak_physics_ms, "peak_collision_pairs": peak_pairs, "frame_interval_ms": frame_statistics, "frame_p95_ms": frame_statistics["p95"]}
+
+
+func _physics_sparse_2d(scale: int, frames: int) -> Dictionary:
+	# Many separate active islands exercise worst-case per-island allocations.
+	# Zero contacts distinguishes sparse topology from the dense physics case.
+	var world := Node2D.new()
+	root.add_child(world)
+	var circle := CircleShape2D.new()
+	circle.radius = 1.0
+	var count := 128 * scale
+	for i in range(count):
+		var body := RigidBody2D.new()
+		body.gravity_scale = 0.0
+		body.can_sleep = false
+		body.position = Vector2(float(i) * 16.0, 0.0)
+		var collider := CollisionShape2D.new()
+		collider.shape = circle
+		body.add_child(collider)
+		world.add_child(body)
+
+	var peak_physics_ms := 0.0
+	var peak_pairs := 0
+	var frame_intervals: Array[float] = []
+	var last_tick := Time.get_ticks_usec()
+	for i in range(frames):
+		await physics_frame
+		var now := Time.get_ticks_usec()
+		frame_intervals.append(float(now - last_tick) / 1000.0)
+		last_tick = now
+		peak_physics_ms = maxf(peak_physics_ms, Performance.get_monitor(Performance.TIME_PHYSICS_PROCESS) * 1000.0)
+		peak_pairs = maxi(peak_pairs, int(Performance.get_monitor(Performance.PHYSICS_2D_COLLISION_PAIRS)))
+	world.queue_free()
+	await process_frame
+	if peak_pairs != 0:
+		return {"error": "Sparse 2D physics bodies unexpectedly collided", "pairs": peak_pairs}
+	var frame_statistics := _frame_statistics(frame_intervals)
+	return {"bodies": count, "physics_frames": frames, "peak_physics_ms": peak_physics_ms, "peak_collision_pairs": peak_pairs, "frame_interval_ms": frame_statistics, "frame_p95_ms": frame_statistics["p95"]}
+
+
+func _physics_sparse_3d(scale: int, frames: int) -> Dictionary:
+	var world := Node3D.new()
+	root.add_child(world)
+	var sphere := SphereShape3D.new()
+	sphere.radius = 0.5
+	var count := 64 * scale
+	for i in range(count):
+		var body := RigidBody3D.new()
+		body.gravity_scale = 0.0
+		body.can_sleep = false
+		body.position = Vector3(float(i) * 8.0, 0.0, 0.0)
+		var collider := CollisionShape3D.new()
+		collider.shape = sphere
+		body.add_child(collider)
+		world.add_child(body)
+
+	var peak_physics_ms := 0.0
+	var peak_pairs := 0
+	var frame_intervals: Array[float] = []
+	var last_tick := Time.get_ticks_usec()
+	for i in range(frames):
+		await physics_frame
+		var now := Time.get_ticks_usec()
+		frame_intervals.append(float(now - last_tick) / 1000.0)
+		last_tick = now
+		peak_physics_ms = maxf(peak_physics_ms, Performance.get_monitor(Performance.TIME_PHYSICS_PROCESS) * 1000.0)
+		peak_pairs = maxi(peak_pairs, int(Performance.get_monitor(Performance.PHYSICS_3D_COLLISION_PAIRS)))
+	world.queue_free()
+	await process_frame
+	if peak_pairs != 0:
+		return {"error": "Sparse 3D physics bodies unexpectedly collided", "pairs": peak_pairs}
+	var frame_statistics := _frame_statistics(frame_intervals)
+	return {"bodies": count, "physics_frames": frames, "peak_physics_ms": peak_physics_ms, "peak_collision_pairs": peak_pairs, "frame_interval_ms": frame_statistics, "frame_p95_ms": frame_statistics["p95"]}
 
 
 func _memory_churn(scale: int) -> Dictionary:
