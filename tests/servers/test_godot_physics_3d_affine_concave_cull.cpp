@@ -71,7 +71,7 @@ TEST_CASE("[GodotPhysics3D] Convex vs mesh affine-local culling bounds") {
 	for (int i = 0; i < 3; ++i) {
 		const real_t expected = (margin_a + margin_b) * inverse_basis[i].length();
 		CHECK(Math::is_equal_approx(expanded.position[i], local_query.position[i] - expected));
-		CHECK(Math::is_equal_approx(expanded.size[i], local_query.size[i] + expected * 2.0));
+		CHECK(Math::is_equal_approx(expanded.size[i], local_query.size[i] + expected * real_t(2.0)));
 	}
 }
 
