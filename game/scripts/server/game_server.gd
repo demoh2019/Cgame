@@ -18,6 +18,7 @@ const OutpostBreach = preload("res://scripts/shared/outpost_breach.gd")
 const MarketBoard = preload("res://scripts/shared/market_board.gd")
 const Contracts = preload("res://scripts/shared/contracts.gd")
 const SaveValidation = preload("res://scripts/shared/save_validation.gd")
+const Reputation = preload("res://scripts/shared/reputation.gd")
 const Crafting = preload("res://scripts/shared/crafting.gd")
 const Survival = preload("res://scripts/shared/survival.gd")
 const Movement = preload("res://scripts/shared/movement.gd")
@@ -69,6 +70,7 @@ class Player:
 	var survival
 	var progression # Permanent skills; gear is lost on death, not experience.
 	var contract_state: Dictionary = {} # Server-owned persistent camp contract journal.
+	var renown: int = 0 # Permanent survivor reputation, validated on Nakama loads.
 	var rest_cooldown: float = 0.0 # Per-survivor seconds until next camp recovery.
 	var party_aid_timer: float = 0.0 # Temporary medical support cooldown.
 	var guardian_timer: float = 0.0 # Session-only PvE frontline cooldown.
@@ -152,6 +154,7 @@ func add_player(peer_id: int, p_name: String, p_user_id: String = "", saved: Dic
 	player.survival = Survival.new()
 	player.progression = Progression.new()
 	player.contract_state = Contracts.empty_state()
+	player.renown = 0
 	players[peer_id] = player
 	# Bind restored account-owned structures to this authenticated session.
 	# Never match a stale numerical peer ID in place of the account identity.
@@ -182,6 +185,7 @@ func character_data(player: Player) -> Dictionary:
 		"stash": player.stash.to_dict(),
 		"progression": player.progression.to_dict(),
 		"contracts": player.contract_state.duplicate(true),
+		"renown": player.renown,
 		"rest_cooldown": player.rest_cooldown, "lake_drink_cooldown": player.lake_drink_cooldown,
 	}
 
@@ -268,11 +272,16 @@ func apply_character(player: Player, data: Dictionary) -> bool:
 	var loaded_contracts: Variant = data.get("contracts", Contracts.empty_state())
 	if not Contracts.valid_state(loaded_contracts):
 		return false
+	# Old version-one characters predate renown and begin at rank zero.
+	var loaded_renown: Variant = data.get("renown", 0)
+	if not Reputation.valid_points(loaded_renown):
+		return false
 
 	# One commit point: a failed parse cannot partially replace the player's
 	# inventory, protected stash, progression or survival state.
 	player.progression = loaded_progression
 	player.contract_state = (loaded_contracts as Dictionary).duplicate(true)
+	player.renown = int(loaded_renown)
 	player.rest_cooldown = float(data.get("rest_cooldown", 0.0))
 	player.lake_drink_cooldown = float(data.get("lake_drink_cooldown", 0.0))
 	player.inventory = parsed_bag["inventory"]
@@ -996,7 +1005,8 @@ func cmd_vendor(peer_id: int, item_id: String, quantity: int, buy: bool) -> Dict
 	var location := Vector2(player.position.x, player.position.z)
 	if not location.is_finite() or location.distance_to(WORKBENCH_POSITION) > WORKBENCH_RANGE:
 		return {"ok": false, "reason": "no_station"}
-	var outcome: Dictionary = Vendor.transact(player.inventory, item_id, quantity, buy)
+	var outcome: Dictionary = Vendor.transact(player.inventory, item_id, quantity, buy,
+		player.renown)
 	if outcome.get("ok", false):
 		player.dirty_inventory = true
 		player.dirty_character = true
@@ -1016,6 +1026,21 @@ func cmd_outpost_supplies(peer_id: int, site_id: int) -> Dictionary:
 		player.dirty_inventory = true
 		player.dirty_character = true
 	return result
+
+
+## Only confirmed server events award reputation; no client RPC can submit
+## an arbitrary score, rank or vendor discount.
+func _earn_renown(player: Player, points: int, source: String) -> void:
+	var previous: int = player.renown
+	player.renown = Reputation.apply_earned(previous, points)
+	if player.renown == previous:
+		return
+	player.dirty_character = true
+	events.append({"type": "renown", "peer": player.id,
+		"earned": player.renown - previous,
+		"total": player.renown,
+		"rank": Reputation.title(player.renown),
+		"source": source})
 
 
 ## Camp contracts use the same real hub distance check as the vendor and bank.
@@ -1063,6 +1088,7 @@ func cmd_contract(peer_id: int, action: String) -> Dictionary:
 		player.dirty_character = true
 		if action == "claim":
 			player.dirty_inventory = true
+			_earn_renown(player, Reputation.CONTRACT_RENOWN, "contract")
 	return result
 
 
@@ -1784,6 +1810,8 @@ func _damage_target(attacker: Player, hit: Dictionary, damage: float) -> void:
 		events.append({"type": "hit", "kind": "zombie", "id": zombie.id, "damage": damage, "x": zombie.position.x, "z": zombie.position.z})
 		if zombie.take_damage(damage, attacker.id):
 			attacker.kills += 1
+			_earn_renown(attacker, Reputation.kill_points(zombie.type,
+				zombie.elite, zombie.raid_boss), "infected")
 			# Award XP once, when a living infected is defeated with owned/equipped
 			# gear. Ordinary hits, missed shots and re-killing corpses award none.
 			var weapon: String = attacker.inventory.weapon
@@ -2454,6 +2482,10 @@ func snapshot_for(peer_id: int) -> Dictionary:
 			"scavenging_xp": player.progression.scavenging_xp,
 			"combat_levels": player.progression.combat_levels(),
 			"contract": player.contract_state.duplicate(true),
+			"renown": player.renown,
+			"renown_rank": Reputation.title(player.renown),
+			"vendor_discount": Reputation.discount_percent(player.renown),
+			"renown_next": Reputation.next_threshold(player.renown),
 			"carry_kg": player.inventory.total_weight(),
 			"cargo_factor": player.inventory.movement_factor(),
 		},
