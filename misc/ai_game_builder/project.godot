@@ -1,0 +1,16 @@
+; Minimal project for trying and testing the standalone editor plugin.
+config_version=5
+
+[application]
+
+config/name="AI Game Builder Demo"
+config/features=PackedStringArray("4.3", "GL Compatibility")
+
+[editor_plugins]
+
+enabled=PackedStringArray("res://addons/ai_game_builder/plugin.cfg")
+
+[rendering]
+
+renderer/rendering_method="gl_compatibility"
+renderer/rendering_method.mobile="gl_compatibility"
