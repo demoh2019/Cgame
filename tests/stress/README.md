@@ -41,6 +41,22 @@ python3 tests/stress/run.py --godot /path/to/godot --case memory_churn --max-ret
 
 Run `--list-cases` for supported identifiers.
 
+For reproducible CPU profiling of 2D hierarchy invalidation and native process
+dispatch (two separate processes under the runner's RSS/time watchdogs):
+
+```bash
+python3 tests/stress/run.py --godot ./bin/godot.linuxbsd.editor.dev.x86_64 \
+  --case canvas_transform_2d,process_dispatch --scale 4 \
+  --repeats 7 --frames 90 --rss-limit-mib 4096 --output out/canvas-process.json
+```
+
+The `canvas_transform_2d` scenario separates time spent invalidating a wide
+subtree from the subsequent cost of rebuilding descendants' global transforms.
+The `process_dispatch` scenario measures frame processing overhead with
+native Nodes (rather than scripted callbacks) and reports process and physics
+monitors. Timings must be compared on identical hardware, engine configuration
+and load; headless runs are **not** GPU benchmarks.
+
 Profile curve changes with repeatable workloads on the same CPU and engine build:
 
 ```bash
@@ -92,6 +108,8 @@ python3 tests/stress/scale_sweep.py \
 | Image codec | `image_codec` | Repeated PNG encode/decode and size validation |
 | Curve baking | `curve_bake` | 1000-sample rebakes after edits, cached interpolation across hundreds of control points |
 | Path projection | `curve_nearest` | Curve2D/3D closest-point and offset searches plus baked-distance sampling with separate timings |
+| 2D transform propagation | `canvas_transform_2d` | Wide CanvasItem subtree; separate parent transform mutation and descendant global-transform rebuild times |
+| SceneTree notification dispatch | `process_dispatch` | Thousands of native Nodes with mixed ordinary/internal process flags and frame/physics time monitors |
 
 ## Presets and safety
 

@@ -43,6 +43,7 @@ CASES = (
     "scene_reparent", "scene_move", "resource_roundtrip", "audio_bus_churn",
     "bitmap_rects", "bitmap_pipeline", "bitmap_morphology",
     "curve_tessellation_2d", "curve_tessellation_3d", "curve_bake", "curve_nearest",
+    "canvas_transform_2d", "process_dispatch",
 )
 RENDER_CASES = frozenset(("render_2d", "render_3d", "render_ellipse_2d", "render_multimesh_3d"))
 # Each scenario runs in a fresh process. No preset has unlimited RSS or wall time.
