@@ -34,6 +34,7 @@ TEST_FORCE_LINK(test_file_access)
 
 #include "core/io/dir_access.h"
 #include "core/io/file_access.h"
+#include "core/io/file_access_packed_byte_array.h"
 #include "tests/test_utils.h"
 
 namespace TestFileAccess {
@@ -295,6 +296,168 @@ TEST_CASE("[FileAccess] Cursor positioning") {
 		f->seek_end(-len - 10); // seeking to a position below 0; ignored.
 		CHECK(f->get_position() == 5);
 	}
+}
+
+
+TEST_CASE("[FileAccessPackedByteArray] Zero-length reads preserve state") {
+	PackedByteArray bytes;
+	for (int i = 0; i < 4096; i++) {
+		bytes.push_back(uint8_t(i & 0xFF));
+	}
+
+	Ref<FileAccessPackedByteArray> file;
+	file.instantiate();
+	REQUIRE(file->open_custom(bytes) == OK);
+	REQUIRE(file->get_length() == 4096);
+
+	uint8_t sentinel = 0xA5;
+	CHECK(file->get_buffer(&sentinel, 0) == 0);
+	CHECK(file->get_position() == 0);
+	CHECK(sentinel == 0xA5);
+
+	file->seek(2048);
+	CHECK(file->get_buffer(&sentinel, 0) == 0);
+	CHECK(file->get_position() == 2048);
+	CHECK(sentinel == 0xA5);
+
+	file->seek_end(0);
+	CHECK(file->eof_reached());
+	CHECK(file->get_buffer(&sentinel, 0) == 0);
+	CHECK(file->get_position() == 4096);
+	CHECK(sentinel == 0xA5);
+
+	uint8_t output[4096] = {};
+	file->seek(0);
+	CHECK(file->get_buffer(output, 4096) == 4096);
+	CHECK(output[0] == 0);
+	CHECK(output[255] == 255);
+	CHECK(output[4095] == 255);
+	CHECK(file->eof_reached());
+	CHECK(file->get_buffer(&sentinel, 0) == 0);
+	CHECK(file->get_position() == 4096);
+}
+
+TEST_CASE("[FileAccessPackedByteArray] Reads around 4096-byte page boundaries") {
+	const int sizes[] = { 0, 1, 4095, 4096, 4097, 8192 };
+
+	for (int size : sizes) {
+		PackedByteArray bytes;
+		for (int i = 0; i < size; i++) {
+			bytes.push_back(uint8_t(i & 0xFF));
+		}
+		Ref<FileAccessPackedByteArray> file;
+		file.instantiate();
+		REQUIRE(file->open_custom(bytes) == OK);
+
+		uint8_t buffer[4096] = {};
+		int full_pages = size / 4096;
+		for (int page = 0; page < full_pages; page++) {
+			CHECK(file->get_buffer(buffer, 4096) == 4096);
+		}
+
+		uint64_t remaining = size % 4096;
+		uint8_t sentinel = 0xD3;
+		if (remaining > 0) {
+			CHECK(file->get_buffer(buffer, remaining) == remaining);
+		}
+		CHECK(file->get_position() == (uint64_t)size);
+		CHECK(file->get_buffer(&sentinel, 0) == 0);
+		CHECK(file->get_position() == (uint64_t)size);
+		CHECK(sentinel == 0xD3);
+	}
+}
+
+TEST_CASE("[FileAccessPackedByteArray] Empty files allow zero-byte reads") {
+	Ref<FileAccessPackedByteArray> file;
+	file.instantiate();
+	REQUIRE(file->open_custom(PackedByteArray()) == OK);
+	CHECK(file->get_length() == 0);
+	CHECK(file->eof_reached());
+	uint8_t sentinel = 0x51;
+	for (int i = 0; i < 10; i++) {
+		CHECK(file->get_buffer(&sentinel, 0) == 0);
+		CHECK(file->get_position() == 0);
+		CHECK(sentinel == 0x51);
+	}
+}
+
+TEST_CASE("[FileAccessPackedByteArray] Reading one byte after zero reads") {
+	Ref<FileAccessPackedByteArray> file;
+	file.instantiate();
+	PackedByteArray input;
+	input.push_back(0x3D);
+	REQUIRE(file->open_custom(input) == OK);
+	uint8_t value = 0xA5;
+	for (int i = 0; i < 10; i++) {
+		CHECK(file->get_buffer(&value, 0) == 0);
+		CHECK(file->get_position() == 0);
+		CHECK_FALSE(file->eof_reached());
+	}
+	CHECK(file->get_buffer(&value, 1) == 1);
+	CHECK(value == 0x3D);
+	CHECK(file->eof_reached());
+	CHECK(file->get_buffer(&value, 0) == 0);
+	CHECK(value == 0x3D);
+}
+
+TEST_CASE("[FileAccessPackedByteArray] Mixed reads preserve byte order") {
+	Ref<FileAccessPackedByteArray> file;
+	file.instantiate();
+	PackedByteArray input;
+	for (int i = 0; i < 257; i++) {
+		input.push_back(uint8_t(i & 0xFF));
+	}
+	REQUIRE(file->open_custom(input) == OK);
+	uint8_t out[257] = {};
+	CHECK(file->get_buffer(out, 100) == 100);
+	CHECK(file->get_buffer(out, 0) == 0);
+	CHECK(file->get_position() == 100);
+	CHECK(file->get_buffer(out + 100, 157) == 157);
+	CHECK(file->get_buffer(out, 0) == 0);
+	CHECK(file->get_position() == 257);
+	for (int i = 0; i < 257; i++) {
+		CHECK(out[i] == (i & 0xFF));
+	}
+}
+
+TEST_CASE("[FileAccessPackedByteArray] Repeated zero reads after seeks") {
+	Ref<FileAccessPackedByteArray> file;
+	file.instantiate();
+	PackedByteArray input;
+	input.resize(8192);
+	REQUIRE(file->open_custom(input) == OK);
+	uint8_t sentinel = 0xA5;
+	const int offsets[] = { 8192, 8191, 4096, 4095, 0 };
+	for (int offset : offsets) {
+		file->seek(offset);
+		CHECK(file->get_position() == (uint64_t)offset);
+		for (int attempt = 0; attempt < 3; attempt++) {
+			CHECK(file->get_buffer(&sentinel, 0) == 0);
+			CHECK(file->get_position() == (uint64_t)offset);
+			CHECK(sentinel == 0xA5);
+		}
+	}
+}
+
+TEST_CASE("[FileAccessPackedByteArray] Zero reads never change EOF status") {
+	Ref<FileAccessPackedByteArray> file;
+	file.instantiate();
+	PackedByteArray input;
+	input.push_back(7);
+	input.push_back(8);
+	REQUIRE(file->open_custom(input) == OK);
+	uint8_t value = 0xAA;
+	CHECK(file->get_error() == OK);
+	CHECK(file->get_buffer(&value, 0) == 0);
+	CHECK(file->get_error() == OK);
+	file->seek_end(0);
+	CHECK(file->get_error() == ERR_FILE_EOF);
+	CHECK(file->get_buffer(&value, 0) == 0);
+	CHECK(file->get_error() == ERR_FILE_EOF);
+	file->seek_end(-1);
+	CHECK(file->get_error() == OK);
+	CHECK(file->get_buffer(&value, 0) == 0);
+	CHECK(file->get_error() == OK);
 }
 
 } // namespace TestFileAccess
