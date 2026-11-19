@@ -406,6 +406,8 @@ def main(argv=None):
     parser.add_argument("--source", default=SOURCE_DEFAULT)
     parser.add_argument("--dest", default=DEST_DEFAULT)
     parser.add_argument("--start-page", type=int, default=1)
+    parser.add_argument("--start-path", default="",
+                        help="Opaque next_path from an earlier checkpoint; bypasses page walking")
     parser.add_argument("--pages", type=int, default=1,
                         help="Number of pages (0 = all remaining pages)")
     parser.add_argument("--max-items", type=int, default=20,
@@ -429,13 +431,14 @@ def main(argv=None):
     mirror = Mirror(api, args.source, args.dest, args.apply,
                     args.include_comments, args.pr_mode, git_mirror)
     start_page, start_offset = args.start_page, 0
+    start_cursor = args.start_path or None
     if args.resume:
         if not args.checkpoint.exists():
             parser.error("Checkpoint not found; cannot resume")
         state = json.loads(args.checkpoint.read_text())
         start_page = int(state["next_page"])
         start_offset = int(state["next_offset"])
-    start_cursor = state.get("next_path") if args.resume else None
+        start_cursor = state.get("next_path")
     stats = mirror.run(start_page, args.pages, args.max_items, args.checkpoint,
                        start_offset=start_offset, start_cursor=start_cursor)
     print("Summary:", json.dumps(stats, sort_keys=True))
