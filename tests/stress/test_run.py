@@ -156,6 +156,42 @@ class RegistryTests(unittest.TestCase):
         self.assertEqual(set(gd_cases), set(stress.CASES))
 
 
+class AbsoluteBudgetTests(unittest.TestCase):
+    def make_case(self, detail):
+        return {"stress": {"runs": [
+            {"status": "passed", "engine": {"detail": detail}},
+        ]}}
+
+    def test_spikes_and_vram_over_budget(self):
+        suite = self.make_case({
+            "peak_frame_ms": 31., "peak_physics_ms": 26.,
+            "peak_video_memory_bytes": 300 * 1048576,
+        })
+        failures = stress.check_absolute_limits(suite, 16., 20., 256.)
+        self.assertEqual(len(failures), 3)
+
+    def test_budgets_ignored_when_unreported(self):
+        suite = self.make_case({"checksum": 42})
+        self.assertEqual(stress.check_absolute_limits(suite, 1., 1., 1.), [])
+
+    def test_compliant_budgets(self):
+        suite = self.make_case({
+            "peak_frame_ms": 12., "peak_physics_ms": 14.,
+            "peak_video_memory_bytes": 128 * 1048576,
+        })
+        self.assertEqual(stress.check_absolute_limits(suite, 16., 20., 256.), [])
+
+    def test_nan_or_negative_metric_caught(self):
+        suite = self.make_case({"peak_frame_ms": float("nan"), "peak_physics_ms": -1.})
+        failures = stress.check_absolute_limits(suite, 16., 20., None)
+        self.assertEqual(len(failures), 2)
+
+    def test_failed_process_not_double_reported(self):
+        suite = {"stress": {"runs": [{"status": "failed", "engine": {
+            "detail": {"peak_frame_ms": 900.}}}]}}
+        self.assertEqual(stress.check_absolute_limits(suite, 16., None, None), [])
+
+
 class ProcessIsolationTests(unittest.TestCase):
     def test_valid_child_output(self):
         payload = json.dumps(result_payload())
