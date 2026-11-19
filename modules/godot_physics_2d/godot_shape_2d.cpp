@@ -562,6 +562,20 @@ void GodotConvexPolygonShape2D::get_supports(const Vector2 &p_normal, Vector2 *r
 }
 
 bool GodotConvexPolygonShape2D::contains_point(const Vector2 &p_point) const {
+	if (valid_mass_properties && normals_generated_from_vertices) {
+		// Normals generated from vertex edges have a known winding.
+		// An exterior point can be rejected at its first separating edge.
+		for (int i = 0; i < point_count; i++) {
+			const real_t separation = points[i].normal.dot(p_point - points[i].pos);
+			if (mass_clockwise ? (separation < 0.0) : (separation > 0.0)) {
+				return false;
+			}
+		}
+		return true;
+	}
+
+	// Preserve the sign-independent fallback for user-provided normals
+	// and zero-area polygons, whose winding cannot be trusted.
 	bool has_positive = false;
 	bool has_negative = false;
 
@@ -717,12 +731,14 @@ void GodotConvexPolygonShape2D::set_data(const Variant &p_data) {
 	mass_area = 0.0;
 	valid_mass_properties = false;
 	mass_clockwise = false;
+	normals_generated_from_vertices = false;
 
 	if (p_data.get_type() == Variant::PACKED_VECTOR2_ARRAY) {
 		Vector<Vector2> arr = p_data;
 		ERR_FAIL_COND(arr.is_empty());
 		point_count = arr.size();
 		points = memnew_arr(Point, point_count);
+		normals_generated_from_vertices = true;
 		const Vector2 *r = arr.ptr();
 
 		for (int i = 0; i < point_count; i++) {

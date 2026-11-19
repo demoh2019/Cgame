@@ -453,6 +453,7 @@ class GodotConvexPolygonShape2D : public GodotShape2D {
 	real_t mass_area = 0.0;
 	bool valid_mass_properties = false;
 	bool mass_clockwise = false;
+	bool normals_generated_from_vertices = false;
 
 public:
 	_FORCE_INLINE_ int get_point_count() const { return point_count; }

@@ -131,6 +131,46 @@ TEST_CASE("[GodotPhysics2D] Degenerate convex polygons retain segment-based ray 
 	CHECK(hit.is_equal_approx(Vector2()));
 }
 
+TEST_CASE("[GodotPhysics2D] Convex point containment rejects exterior points for either winding") {
+	const Vector2 corners[] = {
+		Vector2(-2.0, -1.0), Vector2(2.0, -1.0),
+		Vector2(2.0, 1.0), Vector2(-2.0, 1.0)
+	};
+	for (int winding = 0; winding < 2; ++winding) {
+		PackedVector2Array vertices;
+		for (int i = 0; i < 4; i++) {
+			vertices.push_back(corners[winding ? 3 - i : i]);
+		}
+		GodotConvexPolygonShape2D shape;
+		shape.set_data(vertices);
+		for (int yi = -20; yi <= 20; yi++) {
+			for (int xi = -40; xi <= 40; xi++) {
+				const Vector2 point(real_t(xi) * real_t(0.125), real_t(yi) * real_t(0.125));
+				const bool inside = point.x >= real_t(-2.0) && point.x <= real_t(2.0) &&
+						point.y >= real_t(-1.0) && point.y <= real_t(1.0);
+				CHECK(shape.contains_point(point) == inside);
+			}
+		}
+	}
+
+	// An oblique edge verifies winding and sign handling beyond axis-aligned boxes.
+	for (int winding = 0; winding < 2; ++winding) {
+		const Vector2 corners_tri[] = { Vector2(), Vector2(4.0, 0.0), Vector2(0.0, 4.0) };
+		PackedVector2Array vertices;
+		for (int i = 0; i < 3; i++) {
+			vertices.push_back(corners_tri[winding ? 2 - i : i]);
+		}
+		GodotConvexPolygonShape2D shape;
+		shape.set_data(vertices);
+		CHECK(shape.contains_point(Vector2(1.0, 1.0)));
+		CHECK(shape.contains_point(Vector2()));
+		CHECK(shape.contains_point(Vector2(2.0, 2.0)));
+		CHECK_FALSE(shape.contains_point(Vector2(3.0, 2.0)));
+		CHECK_FALSE(shape.contains_point(Vector2(-1.0, 1.0)));
+		CHECK_FALSE(shape.contains_point(Vector2(1.0, -1.0)));
+	}
+}
+
 } // namespace TestGodotPhysics2DConvexRayClip
 
 #endif // MODULE_GODOT_PHYSICS_2D_ENABLED
