@@ -44,6 +44,7 @@
 #include "servers/physics_fluid_convex_hull_3d.h"
 #include "servers/physics_rigid_convex_aero_facets_3d.h"
 #include "servers/physics_fluid_box_3d.h"
+#include "servers/physics_rigid_box_aero_panels_3d.h"
 #include "servers/physics_fluid_capsule_3d.h"
 
 void GodotBody3D::_mass_properties_changed() {
@@ -909,6 +910,43 @@ void GodotBody3D::integrate_forces(real_t p_step, bool p_defer_motion) {
 					linear_velocity, get_space()->get_fluid_flow_velocity(), get_space()->get_fluid_linear_drag(), p_step);
 			angular_velocity = godot_physics_fluid_angular_drag(
 					angular_velocity, get_space()->get_fluid_angular_drag(), p_step);
+
+			// Optional six-face, orientation-sensitive aerodynamic impulses
+			// for rigid boxes. Pressure acts only on windward faces,
+			// tangential skin drag acts on both sides and damps rotation.
+			// The helper evaluates each panel at its actual world center
+			// and uses inverse mass/inertia to avoid reversing its slip.
+			// Disabled by default: no additional shape loops or buffers.
+			if (mode == PS3DE::BODY_MODE_RIGID && p_step > 0.0 &&
+					get_space()->get_rigid_box_aero_density() > 0.0 &&
+					(get_space()->get_rigid_box_aero_pressure_coefficient() > 0.0 ||
+							get_space()->get_rigid_box_aero_skin_coefficient() > 0.0)) {
+				const Vector3 world_com = get_transform().origin + center_of_mass;
+				for (int i = 0; i < get_shape_count(); ++i) {
+					if (is_shape_disabled(i)) {
+						continue;
+					}
+					const GodotShape3D *shape = get_shape(i);
+					if (shape->get_type() != PS3DE::SHAPE_BOX) {
+						continue;
+					}
+					const GodotBoxShape3D *box = static_cast<const GodotBoxShape3D *>(shape);
+					const Vector3 half = box->get_half_extents();
+					const Transform3D box_world = get_transform() * get_shape_transform(i);
+					const Vector3 world_half_axes[3] = {
+						box_world.basis.xform(Vector3(half.x, 0, 0)),
+						box_world.basis.xform(Vector3(0, half.y, 0)),
+						box_world.basis.xform(Vector3(0, 0, half.z))
+					};
+					godot_physics_rigid_box_aero_step_3d(linear_velocity, angular_velocity,
+							box_world.origin, world_half_axes, world_com,
+							get_space()->get_rigid_box_aero_wind_velocity(),
+							get_space()->get_rigid_box_aero_density(),
+							get_space()->get_rigid_box_aero_pressure_coefficient(),
+							get_space()->get_rigid_box_aero_skin_coefficient(),
+							_inv_mass, _inv_inertia_tensor, p_step);
+				}
+			}
 
 			// Apply point-impulse pressure and skin drag on the TRUE
 			// polygon faces of a transformed convex collision shape.

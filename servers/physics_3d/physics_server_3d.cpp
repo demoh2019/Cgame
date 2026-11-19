@@ -878,6 +878,12 @@ PhysicsServer3D::PhysicsServer3D() {
 	GLOBAL_DEF(PropertyInfo(Variant::FLOAT, "physics/3d/solver/fluid_angular_drag", PROPERTY_HINT_RANGE, "0,100,0.01,or_greater"), 0.0);
 	GLOBAL_DEF(PropertyInfo(Variant::FLOAT, "physics/3d/solver/fluid_buoyancy", PROPERTY_HINT_RANGE, "0,2,0.01,or_greater"), 0.0);
 	GLOBAL_DEF(PropertyInfo(Variant::VECTOR3, "physics/3d/solver/fluid_flow_velocity"), Vector3());
+	// Rigid BoxShape3D: oriented six-face pressure + tangential drag, with
+	// inertia-aware impulses at each face center. 0+0 disables all work.
+	GLOBAL_DEF(PropertyInfo(Variant::FLOAT, "physics/3d/solver/rigid_box_aero_pressure_coefficient", PROPERTY_HINT_RANGE, "0,10,0.01,or_greater"), 0.0);
+	GLOBAL_DEF(PropertyInfo(Variant::FLOAT, "physics/3d/solver/rigid_box_aero_skin_coefficient", PROPERTY_HINT_RANGE, "0,10,0.01,or_greater"), 0.0);
+	GLOBAL_DEF(PropertyInfo(Variant::FLOAT, "physics/3d/solver/rigid_box_aero_density", PROPERTY_HINT_RANGE, "0,2000,0.01,or_greater,suffix:kg/m³"), 1.225);
+	GLOBAL_DEF(PropertyInfo(Variant::VECTOR3, "physics/3d/solver/rigid_box_aero_wind_velocity"), Vector3());
 	// Airflow on the actual oriented polygon faces of ConvexPolygonShape3D.
 	// Each panel creates force and torque with inertia-aware impulse caps.
 	// Both coefficients at zero (default) cost no additional shape traversal.
