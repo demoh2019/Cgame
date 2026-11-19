@@ -1,0 +1,40 @@
+name: Native terrain compile and regression tests
+
+on:
+  pull_request:
+    paths:
+      - 'modules/terrain/**'
+      - '.github/workflows/native-terrain-tests.yml'
+  push:
+    branches: [master, develop]
+    paths:
+      - 'modules/terrain/**'
+      - '.github/workflows/native-terrain-tests.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: terrain-tests-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  native-terrain-linux:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 120
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+        with:
+          submodules: recursive
+      - name: Install Godot build dependencies
+        uses: ./.github/actions/godot-deps
+      - name: Build with tests enabled
+        uses: ./.github/actions/godot-build
+        with:
+          platform: linuxbsd
+          target: editor
+          scons-flags: tests=yes dev_mode=yes debug_symbols=no module_text_server_fb_enabled=yes module_mono_enabled=no
+      - name: Run native terrain C++ regression tests
+        run: ./bin/godot.linuxbsd.editor.x86_64 --headless --test --test-case='*[Terrain3D]*' --force-colors

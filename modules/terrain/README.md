@@ -33,6 +33,24 @@ thermal erosion algorithm with simultaneous updates. This is not hydraulic erosi
 The `import_heightmap(image, minimum, maximum)` method takes an uncompressed
 Image and maps its luminance into the supplied height range.
 
+## Physics collision snapshot
+
+With 3D physics enabled, call `create_collision_shape()` to create a
+`ConcavePolygonShape3D` from current terrain triangles:
+
+```gdscript
+var terrain: HeightmapTerrain3D = $HeightmapTerrain3D
+var body := StaticBody3D.new()
+terrain.add_child(body)
+var collision := CollisionShape3D.new()
+body.add_child(collision)
+collision.shape = terrain.create_collision_shape()
+```
+
+The shape is **not automatically refreshed** when terrain heights change.
+Regenerate and reassign it following sculpt/erode/import operations.
+Use it for static terrain, not a dynamic rigid body.
+
 ## Run tests
 
 ```sh

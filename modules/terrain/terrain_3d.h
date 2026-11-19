@@ -33,6 +33,9 @@
 #include "scene/3d/mesh_instance_3d.h"
 
 class Image;
+#ifndef PHYSICS_3D_DISABLED
+class ConcavePolygonShape3D;
+#endif // PHYSICS_3D_DISABLED
 class StandardMaterial3D;
 
 // Initial built-in heightfield terrain: one grid, one surface, no LOD/streaming.
@@ -78,6 +81,11 @@ public:
 	void paint_color(const Vector2 &p_grid_position, real_t p_radius, const Color &p_color, real_t p_opacity);
 	void erode_thermal(int p_iterations, real_t p_talus, real_t p_strength);
 	void import_heightmap(const Ref<Image> &p_image, real_t p_min_height, real_t p_max_height);
+
+	// Snapshot of the current render triangles. Recreate after sculpting.
+#ifndef PHYSICS_3D_DISABLED
+	Ref<ConcavePolygonShape3D> create_collision_shape() const;
+#endif // PHYSICS_3D_DISABLED
 
 	HeightmapTerrain3D();
 };
