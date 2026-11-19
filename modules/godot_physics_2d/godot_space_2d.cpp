@@ -61,55 +61,41 @@ int GodotPhysicsDirectSpaceState2D::intersect_point(const PS2DT::PointParameters
 		return 0;
 	}
 
-	Rect2 aabb;
-	aabb.position = p_parameters.position - Vector2(0.00001, 0.00001);
-	aabb.size = Vector2(0.00002, 0.00002);
+	// Keep the existing tiny AABB for 2D broadphase point queries, but
+	// examine candidates until enough *actual* hits survive all filters.
+	const Rect2 query_aabb(p_parameters.position - Vector2(0.00001, 0.00001), Vector2(0.00002, 0.00002));
+	struct PointQuery {
+		const PS2DT::PointParameters &params;
+		PS2DT::ShapeResult *results;
+		int max_results;
+		int count = 0;
+	};
+	PointQuery query = { p_parameters, r_results, p_result_max };
 
-	int amount = space->broadphase->cull_aabb(aabb, space->intersection_query_results, GodotSpace2D::INTERSECTION_QUERY_MAX, space->intersection_query_subindex_results);
-
-	int cc = 0;
-
-	for (int i = 0; i < amount; i++) {
-		if (!_can_collide_with(space->intersection_query_results[i], p_parameters.collision_mask, p_parameters.collide_with_bodies, p_parameters.collide_with_areas)) {
-			continue;
+	auto visitor = [](GodotCollisionObject2D *p_object, int p_shape, void *p_userdata) -> bool {
+		PointQuery &data = *static_cast<PointQuery *>(p_userdata);
+		if (!_can_collide_with(p_object, data.params.collision_mask, data.params.collide_with_bodies, data.params.collide_with_areas) ||
+				data.params.exclude.has(p_object->get_self()) ||
+				(data.params.pick_point && !p_object->is_pickable()) ||
+				p_object->get_canvas_instance_id() != data.params.canvas_instance_id) {
+			return true;
 		}
 
-		if (p_parameters.exclude.has(space->intersection_query_results[i]->get_self())) {
-			continue;
-		}
-
-		const GodotCollisionObject2D *col_obj = space->intersection_query_results[i];
-
-		if (p_parameters.pick_point && !col_obj->is_pickable()) {
-			continue;
-		}
-
-		if (col_obj->get_canvas_instance_id() != p_parameters.canvas_instance_id) {
-			continue;
-		}
-
-		int shape_idx = space->intersection_query_subindex_results[i];
-
-		GodotShape2D *shape = col_obj->get_shape(shape_idx);
-
-		Vector2 local_point = (col_obj->get_transform() * col_obj->get_shape_transform(shape_idx)).affine_inverse().xform(p_parameters.position);
-
+		GodotShape2D *shape = p_object->get_shape(p_shape);
+		const Vector2 local_point = (p_object->get_transform() * p_object->get_shape_transform(p_shape)).affine_inverse().xform(data.params.position);
 		if (!shape->contains_point(local_point)) {
-			continue;
+			return true;
 		}
 
-		if (cc >= p_result_max) {
-			continue;
-		}
+		PS2DT::ShapeResult &result = data.results[data.count++];
+		result.collider_id = p_object->get_instance_id();
+		result.rid = p_object->get_self();
+		result.shape = p_shape;
+		return data.count < data.max_results;
+	};
 
-		r_results[cc].collider_id = col_obj->get_instance_id();
-		r_results[cc].rid = col_obj->get_self();
-		r_results[cc].shape = shape_idx;
-
-		cc++;
-	}
-
-	return cc;
+	space->broadphase->visit_aabb(query_aabb, visitor, &query);
+	return query.count;
 }
 
 bool GodotPhysicsDirectSpaceState2D::intersect_ray(const PS2DT::RayParameters &p_parameters, PS2DT::RayResult &r_result) {
