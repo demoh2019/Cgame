@@ -264,6 +264,21 @@ void GodotCollisionObject2D::_set_space(GodotSpace2D *p_space) {
 	}
 }
 
+void GodotCollisionObject2D::_collision_filter_changed() {
+	// A layer/mask change affects pair eligibility, not the shape bounds.
+	if (space) {
+		GodotBroadPhase2D *broadphase = space->get_broadphase();
+		for (int i = 0; i < shapes.size(); i++) {
+			const Shape &shape = shapes[i];
+			if (shape.bpid != 0) {
+				broadphase->force_collision_check(shape.bpid);
+			}
+		}
+	}
+	// Preserve waking bodies and notifying area monitors.
+	_shapes_changed();
+}
+
 void GodotCollisionObject2D::_shape_changed() {
 	_update_shapes();
 	_shapes_changed();
