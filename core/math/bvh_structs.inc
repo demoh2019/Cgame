@@ -17,11 +17,11 @@ struct ItemExtra {
 	// we may want to check that two items have compatible tree ids and tree masks,
 	// as if they are incompatible they should not pair / collide.
 	bool are_item_trees_compatible(const ItemExtra &p_other) const {
-		uint32_t other_type = 1 << p_other.tree_id;
+		const uint32_t other_type = uint32_t(1) << p_other.tree_id;
 		if (tree_collision_mask & other_type) {
 			return true;
 		}
-		uint32_t our_type = 1 << tree_id;
+		const uint32_t our_type = uint32_t(1) << tree_id;
 		if (p_other.tree_collision_mask & our_type) {
 			return true;
 		}
@@ -32,7 +32,7 @@ struct ItemExtra {
 	uint32_t tree_id;
 
 	// Defines which trees this item should collision check against.
-	// 1 << tree_id, and normally items would collide against there own
+	// uint32_t(1) << tree_id, and normally items would collide against their own
 	// tree (but not always).
 	uint32_t tree_collision_mask;
 
