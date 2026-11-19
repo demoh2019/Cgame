@@ -1069,3 +1069,22 @@ Future Lineage-inspired steps can build **clans, raid encounters, party-wide
 quests and territory sieges** atop these authoritative group primitives.
 Any missing general-purpose engine capability will be added and tested in
 Cgame rather than reimplemented privately for a single game.
+
+
+### Party combat safety: targeting and XP caps
+
+The canonical online game treats members of the same survivor party as
+non-targetable in PvP aiming: a friendly player standing between a survivor
+and an infected enemy does not intercept a melee or ranged attack. The same
+friendly-fire prohibition remains enforced in the final damage handler.
+
+On a real infected kill, actual recent contributors in the party receive
+limited weapon-mastery assist XP (50% of the infected's normal XP, capped at
+100 per kill), only while alive, in range and in the same risk zone.
+A dead infected, AFK bystander, former member, absent equipment or stale
+contribution cannot generate shared XP.
+
+`tests/test_party_combat_safety.gd` exercises live server attacks,
+roster changes, PvP hit selection, XP limits and exploit rejections.
+This is cooperative PvE progression, not an automated loot distribution
+or guild/clan replacement.
