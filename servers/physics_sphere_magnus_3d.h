@@ -123,7 +123,7 @@ _FORCE_INLINE_ static bool godot_physics_sphere_magnus_force_3d(
 			return false;
 		}
 	}
-	const Vector3 force(real_t(components[0]),
+	const Vector3 force = Vector3(real_t(components[0]),
 			real_t(components[1]), real_t(components[2]));
 	if (!force.is_finite()) {
 		return false;

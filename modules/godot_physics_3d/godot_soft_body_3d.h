@@ -38,6 +38,7 @@
 #include "servers/physics_fem_tetra_standard_linear_solid.h"
 #include "servers/physics_fem_tetra_prony.h"
 #include "servers/physics_fem_explicit_tetra.h"
+#include "servers/physics_fem_tetra_cycle_fatigue.h"
 #include "servers/physics_fem_tetra_principal_limits.h"
 #include "servers/physics_xpbd_strain_limit.h"
 #include "godot_collision_object_3d.h"

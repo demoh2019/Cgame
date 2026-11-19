@@ -31,6 +31,7 @@
 #pragma once
 
 #include "core/math/aabb.h"
+#include "core/math/basis.h"
 
 // Approximate fluid integration for GodotPhysics' rigid bodies. A horizontal
 // free surface clips each shape's *world AABB* to estimate submerged volume

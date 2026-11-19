@@ -143,7 +143,7 @@ _FORCE_INLINE_ static bool godot_physics_rotating_frame_step_3d(
 			return false;
 		}
 	}
-	const Vector3 next_velocity(
+	const Vector3 next_velocity = Vector3(
 			real_t(result[0]), real_t(result[1]), real_t(result[2]));
 	if (!next_velocity.is_finite()) {
 		return false;

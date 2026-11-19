@@ -147,7 +147,7 @@ _FORCE_INLINE_ static bool godot_physics_convex_aero_facet_3d(
 			real_t(sign * normal[0] / normal_length),
 			real_t(sign * normal[1] / normal_length),
 			real_t(sign * normal[2] / normal_length));
-	const Vector3 next_center(real_t(centroid[0]), real_t(centroid[1]), real_t(centroid[2]));
+	const Vector3 next_center = Vector3(real_t(centroid[0]), real_t(centroid[1]), real_t(centroid[2]));
 	if (!next_normal.is_finite() || !next_center.is_finite()) {
 		return false;
 	}
