@@ -347,47 +347,39 @@ bool GodotPhysicsDirectSpaceState3D::collide_shape(const PS3DT::ShapeParameters 
 	if (p_result_max <= 0) {
 		return false;
 	}
-
 	GodotShape3D *shape = GodotPhysicsServer3D::godot_singleton->shape_owner.get_or_null(p_parameters.shape_rid);
 	ERR_FAIL_NULL_V(shape, false);
 
 	AABB aabb = p_parameters.transform.xform(shape->get_aabb());
 	aabb = aabb.grow(p_parameters.margin);
 
-	int amount = space->broadphase->cull_aabb(aabb, space->intersection_query_results, GodotSpace3D::INTERSECTION_QUERY_MAX, space->intersection_query_subindex_results);
-
-	bool collided = false;
-	r_result_count = 0;
-
 	GodotPhysicsServer3D::CollCbkData cbk;
 	cbk.max = p_result_max;
 	cbk.amount = 0;
 	cbk.ptr = r_results;
-	GodotCollisionSolver3D::CallbackResult cbkres = GodotPhysicsServer3D::_shape_col_cbk;
-
-	GodotPhysicsServer3D::CollCbkData *cbkptr = &cbk;
-
-	for (int i = 0; i < amount; i++) {
-		if (!_can_collide_with(space->intersection_query_results[i], p_parameters.collision_mask, p_parameters.collide_with_bodies, p_parameters.collide_with_areas)) {
-			continue;
+	struct CollisionQuery {
+		const PS3DT::ShapeParameters &params;
+		GodotShape3D *shape;
+		GodotPhysicsServer3D::CollCbkData &callback;
+		bool collided = false;
+	};
+	CollisionQuery query = { p_parameters, shape, cbk };
+	auto visitor = [](GodotCollisionObject3D *p_object, int p_shape, void *p_userdata) -> bool {
+		CollisionQuery &data = *static_cast<CollisionQuery *>(p_userdata);
+		if (!_can_collide_with(p_object, data.params.collision_mask, data.params.collide_with_bodies, data.params.collide_with_areas) ||
+				data.params.exclude.has(p_object->get_self())) {
+			return true;
 		}
-
-		const GodotCollisionObject3D *col_obj = space->intersection_query_results[i];
-
-		if (p_parameters.exclude.has(col_obj->get_self())) {
-			continue;
+		if (GodotCollisionSolver3D::solve_static(data.shape, data.params.transform,
+					p_object->get_shape(p_shape), p_object->get_transform() * p_object->get_shape_transform(p_shape),
+					GodotPhysicsServer3D::_shape_col_cbk, &data.callback, nullptr, data.params.margin)) {
+			data.collided = true;
 		}
-
-		int shape_idx = space->intersection_query_subindex_results[i];
-
-		if (GodotCollisionSolver3D::solve_static(shape, p_parameters.transform, col_obj->get_shape(shape_idx), col_obj->get_transform() * col_obj->get_shape_transform(shape_idx), cbkres, cbkptr, nullptr, p_parameters.margin)) {
-			collided = true;
-		}
-	}
-
+		return data.callback.amount < data.callback.max;
+	};
+	space->broadphase->visit_aabb(aabb, visitor, &query);
 	r_result_count = cbk.amount;
-
-	return collided;
+	return query.collided;
 }
 
 struct _RestResultData {
