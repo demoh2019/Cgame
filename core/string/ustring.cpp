@@ -70,7 +70,19 @@ static _FORCE_INLINE_ char32_t lower_case(char32_t p_char) {
 template <typename T1, typename T2>
 static bool strings_equal_lower(const T1 *p_lhs_begin, const T2 *p_rhs_begin, size_t p_len) {
 	for (size_t i = 0; i < p_len; ++i) {
-		if (_find_lower(p_lhs_begin[i]) != _find_lower(p_rhs_begin[i])) {
+		const auto lhs = p_lhs_begin[i];
+		const auto rhs = p_rhs_begin[i];
+		if (lhs == rhs) {
+			continue;
+		}
+		// Avoid Unicode table lookups for the common ASCII search path.
+		// Mixed ASCII/Unicode comparisons still need Unicode case mapping
+		// (e.g. U+212A KELVIN SIGN matches ASCII 'k').
+		if (static_cast<uint32_t>(lhs) < 128 && static_cast<uint32_t>(rhs) < 128) {
+			if (lower_case(lhs) != lower_case(rhs)) {
+				return false;
+			}
+		} else if (_find_lower(lhs) != _find_lower(rhs)) {
 			return false;
 		}
 	}
