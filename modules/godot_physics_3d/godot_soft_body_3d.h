@@ -98,6 +98,16 @@ class GodotSoftBody3D : public GodotCollisionObject3D {
 	};
 	LocalVector<DihedralHinge> xpbd_dihedral_hinges;
 	LocalVector<real_t> xpbd_dihedral_lambdas;
+	// Optional vertex/non-adjacent-face self contacts. Never allocate when
+	// the space's self-collision thickness is zero.
+	struct SelfCollisionContact {
+		uint32_t vertex = 0;
+		uint32_t face = 0;
+		int8_t side = 1;
+		real_t lambda = 0.0;
+	};
+	LocalVector<SelfCollisionContact> xpbd_self_contacts;
+	HashSet<uint64_t> xpbd_self_neighbor_edges;
 	// Allocated only for positive volume compliance on a closed soft mesh.
 	LocalVector<Vector3> xpbd_volume_gradients;
 	double xpbd_volume_rest = 0.0;
@@ -258,6 +268,8 @@ private:
 	void update_constants();
 	void update_area();
 	void initialize_dihedral_constraints();
+	void initialize_self_collision_topology();
+	void solve_self_collisions(real_t p_delta);
 	void initialize_volume_constraint();
 	bool solve_volume_constraint(double p_alpha, double &r_lambda);
 	void reset_link_rest_lengths();
