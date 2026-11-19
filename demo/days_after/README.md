@@ -37,6 +37,8 @@ or third-party plugins are required.
 | 8 | Craft and equip a rusty spear |
 | 9 | Craft and equip a scrap vest |
 | F | Melee attack (forward hit arc) |
+| B | Buy water while aiming at camp trader |
+| E at camp trader | Sell one salvage item or resource |
 | R | Restart the scene |
 
 The HUD shows health, hunger, thirst, tiered inventory, profession levels,
@@ -61,6 +63,36 @@ Current enemy pursuit uses direct movement and can get stuck at obstacles.
 These are original classless survival/RPG mechanics, not copied assets,
 economy data or gameplay code from existing games. No MMO networking, PvP,
 save/load, durability or player economy is claimed yet.
+
+
+## Local camp trader (first economy integration)
+
+A physical camp trading terminal now connects infected combat, scavenging,
+crafting and survival. Aim at the gold station near the player and use:
+
+- **E**: sell one available infected sample or resource at a fixed local price.
+- **B**: buy one bottle of water for **7 credits** while aiming at the station.
+
+Eliminating infected grants a salvage sample worth **12 credits**. Tier-1
+wood / stone / fiber sells for **2 / 3 / 2 credits**; tier-2 materials for
+**5 / 6 / 5**. Food costs **9** and bandages **16** through the validated
+gameplay API (the interactive terminal currently sells only water).
+
+Transactions are all-or-nothing: prices are fixed server-side candidates
+(in `trade_rules.gd`), requested quantity is bounded to 100, unsupported
+items are rejected, insufficient funds/items do not mutate inventory, and the
+wallet cannot exceed 1,000,000,000 credits. The current vendor is **offline
+and NPC-operated**; do not call this a player-driven marketplace or secure
+multiplayer system. For online play, execute inventory/currency transactions
+authoritatively on the server with idempotent transaction IDs.
+
+```sh
+./bin/godot.linuxbsd.editor.x86_64 --headless --path demo/days_after --script res://smoke_test_trade.gd
+```
+
+The trade smoke test checks enemy salvage, fixed-price exchange, item
+decrements, purchases, invalid quantities, no duplication, currency cap and
+death gating. For full validation, also run the existing `smoke_test.gd`.
 
 ## Smoke test
 
