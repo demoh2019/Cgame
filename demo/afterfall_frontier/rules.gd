@@ -95,7 +95,12 @@ static func sanitize_bag(raw: Variant) -> Dictionary:
 	for item_id in ITEMS.keys():
 		var quantity: Variant = raw.get(item_id, 0)
 		if typeof(quantity) in [TYPE_INT, TYPE_FLOAT]:
-			var count: int = clampi(int(quantity), 0, STACK_LIMIT)
+			var number: float = float(quantity)
+			# Reject NaN/Infinity before integer conversion: a manually
+			# edited save must not create huge or invalid item stacks.
+			if not is_finite(number):
+				continue
+			var count: int = int(clampf(number, 0.0, float(STACK_LIMIT)))
 			if count > 0:
 				bag[item_id] = count
 	return bag
