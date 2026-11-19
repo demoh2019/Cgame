@@ -42,10 +42,15 @@ void JoltProjectSettings::register_settings() {
 	// 0 disables automatic substepping. Positive values trigger additional passes
 	// only when the physics timestep exceeds this duration (seconds).
 	GLOBAL_DEF(PropertyInfo(Variant::FLOAT, "physics/jolt_physics_3d/simulation/max_collision_step_seconds", PROPERTY_HINT_RANGE, U"0,0.1,0.001,or_greater,suffix:s"), 0.0f);
+	GLOBAL_DEF(PropertyInfo(Variant::BOOL, "physics/jolt_physics_3d/simulation/use_large_island_splitter"), true);
+	GLOBAL_DEF(PropertyInfo(Variant::BOOL, "physics/jolt_physics_3d/simulation/use_manifold_reduction"), true);
 	GLOBAL_DEF(PropertyInfo(Variant::BOOL, "physics/jolt_physics_3d/simulation/use_enhanced_internal_edge_removal"), true);
 	GLOBAL_DEF(PropertyInfo(Variant::BOOL, "physics/jolt_physics_3d/simulation/generate_all_kinematic_contacts"), false);
 	GLOBAL_DEF(PropertyInfo(Variant::FLOAT, "physics/jolt_physics_3d/simulation/penetration_slop", PROPERTY_HINT_RANGE, U"0,1,0.00001,or_greater,suffix:m"), 0.02f);
 	GLOBAL_DEF(PropertyInfo(Variant::FLOAT, "physics/jolt_physics_3d/simulation/speculative_contact_distance", PROPERTY_HINT_RANGE, U"0,1,0.00001,or_greater,suffix:m"), 0.02f);
+	GLOBAL_DEF(PropertyInfo(Variant::FLOAT, "physics/jolt_physics_3d/simulation/max_penetration_correction_distance", PROPERTY_HINT_RANGE, U"0,5,0.001,suffix:m"), 0.2f);
+	GLOBAL_DEF(PropertyInfo(Variant::FLOAT, "physics/jolt_physics_3d/simulation/contact_manifold_merge_angle", PROPERTY_HINT_RANGE, U"0,90,0.1,radians_as_degrees"), Math::deg_to_rad(5.0f));
+	GLOBAL_DEF(PropertyInfo(Variant::FLOAT, "physics/jolt_physics_3d/simulation/contact_warm_start_distance", PROPERTY_HINT_RANGE, U"0,0.2,0.0001,suffix:m"), 0.01f);
 	GLOBAL_DEF(PropertyInfo(Variant::FLOAT, "physics/jolt_physics_3d/simulation/baumgarte_stabilization_factor", PROPERTY_HINT_RANGE, U"0,1,0.01"), 0.2f);
 	GLOBAL_DEF(PropertyInfo(Variant::FLOAT, "physics/jolt_physics_3d/simulation/soft_body_point_radius", PROPERTY_HINT_RANGE, U"0,1,0.001,or_greater,suffix:m"), 0.01f);
 	// Extra XPBD bending is opt-in to preserve existing scene behavior.
@@ -79,6 +84,7 @@ void JoltProjectSettings::register_settings() {
 	GLOBAL_DEF(PropertyInfo(Variant::INT, "physics/jolt_physics_3d/joints/world_node", PROPERTY_HINT_ENUM, U"Node A,Node B"), JOLT_JOINT_WORLD_NODE_A);
 
 	GLOBAL_DEF(PropertyInfo(Variant::INT, "physics/jolt_physics_3d/limits/temporary_memory_buffer_size", PROPERTY_HINT_RANGE, U"1,32,or_greater,suffix:MiB"), 32);
+	GLOBAL_DEF(PropertyInfo(Variant::INT, "physics/jolt_physics_3d/limits/max_in_flight_body_pairs", PROPERTY_HINT_RANGE, U"1024,262144,1024"), 16384);
 	GLOBAL_DEF_RST(PropertyInfo(Variant::FLOAT, "physics/jolt_physics_3d/limits/world_boundary_shape_size", PROPERTY_HINT_RANGE, U"2,2000,0.1,or_greater,suffix:m"), 2000.0f);
 	GLOBAL_DEF(PropertyInfo(Variant::FLOAT, "physics/jolt_physics_3d/limits/max_linear_velocity", PROPERTY_HINT_RANGE, U"0,500,0.01,or_greater,suffix:m/s"), 500.0f);
 	GLOBAL_DEF(PropertyInfo(Variant::FLOAT, "physics/jolt_physics_3d/limits/max_angular_velocity", PROPERTY_HINT_RANGE, U"0,2700,0.01,or_greater,radians_as_degrees,suffix:°/s"), Math::deg_to_rad(2700.0f));
@@ -96,10 +102,17 @@ void JoltProjectSettings::read_settings() {
 	simulation_position_steps = GLOBAL_GET("physics/jolt_physics_3d/simulation/position_steps");
 	simulation_collision_steps = GLOBAL_GET("physics/jolt_physics_3d/simulation/collision_steps");
 	simulation_max_collision_step_seconds = GLOBAL_GET("physics/jolt_physics_3d/simulation/max_collision_step_seconds");
+	simulation_use_large_island_splitter = GLOBAL_GET("physics/jolt_physics_3d/simulation/use_large_island_splitter");
+	simulation_use_manifold_reduction = GLOBAL_GET("physics/jolt_physics_3d/simulation/use_manifold_reduction");
 	use_enhanced_internal_edge_removal_for_bodies = GLOBAL_GET("physics/jolt_physics_3d/simulation/use_enhanced_internal_edge_removal");
 	generate_all_kinematic_contacts = GLOBAL_GET("physics/jolt_physics_3d/simulation/generate_all_kinematic_contacts");
 	penetration_slop = GLOBAL_GET("physics/jolt_physics_3d/simulation/penetration_slop");
 	speculative_contact_distance = GLOBAL_GET("physics/jolt_physics_3d/simulation/speculative_contact_distance");
+	max_penetration_correction_distance = CLAMP((float)GLOBAL_GET("physics/jolt_physics_3d/simulation/max_penetration_correction_distance"), 0.0f, 5.0f);
+	const float merge_angle = CLAMP((float)GLOBAL_GET("physics/jolt_physics_3d/simulation/contact_manifold_merge_angle"), 0.0f, (float)Math::PI / 2.0f);
+	contact_manifold_merge_normal_cos = Math::cos(merge_angle);
+	const float contact_warm_start_distance = CLAMP((float)GLOBAL_GET("physics/jolt_physics_3d/simulation/contact_warm_start_distance"), 0.0f, 0.2f);
+	contact_warm_start_distance_sq = contact_warm_start_distance * contact_warm_start_distance;
 	baumgarte_stabilization_factor = GLOBAL_GET("physics/jolt_physics_3d/simulation/baumgarte_stabilization_factor");
 	soft_body_point_radius = GLOBAL_GET("physics/jolt_physics_3d/simulation/soft_body_point_radius");
 	soft_body_bend_mode = CLAMP((int)GLOBAL_GET("physics/jolt_physics_3d/simulation/soft_body_bend_mode"), 0, 2);
@@ -133,6 +146,7 @@ void JoltProjectSettings::read_settings() {
 	joint_world_node = (JoltJointWorldNode)(int)GLOBAL_GET("physics/jolt_physics_3d/joints/world_node");
 
 	temp_memory_mib = GLOBAL_GET("physics/jolt_physics_3d/limits/temporary_memory_buffer_size");
+	max_in_flight_body_pairs = CLAMP((int)GLOBAL_GET("physics/jolt_physics_3d/limits/max_in_flight_body_pairs"), 1024, 262144);
 	temp_memory_b = (int64_t)temp_memory_mib * 1024 * 1024;
 	world_boundary_shape_size = GLOBAL_GET("physics/jolt_physics_3d/limits/world_boundary_shape_size");
 	max_linear_velocity = GLOBAL_GET("physics/jolt_physics_3d/limits/max_linear_velocity");
