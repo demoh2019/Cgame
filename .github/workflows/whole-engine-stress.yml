@@ -152,6 +152,10 @@ jobs:
             --script res://physics_ccd_circle_segment_2d_regression.gd \
             2>&1 | tee physics2d-circle-segment-ccd.log
           grep -Fq '2D circle-segment CCD regression passed.' physics2d-circle-segment-ccd.log
+          timeout 120s "$BIN" --headless --path "$PROJECT" \
+            --script res://physics_ccd_capsule_segment_2d_regression.gd \
+            2>&1 | tee physics2d-capsule-segment-ccd.log
+          grep -Fq '2D capsule-segment CCD regression passed.' physics2d-capsule-segment-ccd.log
 
       - name: Regression-test analytic circle-segment TOI in native C++
         shell: bash
@@ -161,6 +165,15 @@ jobs:
             --headless --test --test-case="*CircleSegmentTOI*" \
             --success=true --no-colors 2>&1 | tee physics2d-circle-segment-toi.log
           grep -Fq '[CircleSegmentTOI]' physics2d-circle-segment-toi.log
+
+      - name: Regression-test capsule-segment volume TOI in native C++
+        shell: bash
+        run: |
+          set -euo pipefail
+          timeout 120s ./bin/godot.linuxbsd.editor.dev.x86_64 \
+            --headless --test --test-case="*CapsuleSegmentTOI*" \
+            --success=true --no-colors 2>&1 | tee physics2d-capsule-segment-toi.log
+          grep -Fq '[CapsuleSegmentTOI]' physics2d-capsule-segment-toi.log
 
       - name: Exercise repeated Jolt pending-body batch reuse
         shell: bash
@@ -195,6 +208,18 @@ jobs:
             --script res://physics_jolt_pending_broadphase_regression.gd \
             2>&1 | tee physics-jolt-pending-broadphase.log
           grep -Fq 'Jolt pending broadphase regression passed.' physics-jolt-pending-broadphase.log
+      - name: Validate Jolt convex soft-body radial elasticity
+        shell: bash
+        run: |
+          set -euo pipefail
+          BIN=./bin/godot.linuxbsd.editor.dev.x86_64
+          PROJECT=tests/stress/jolt_radial
+          timeout 120s "$BIN" --headless --path "$PROJECT" \
+            --script res://radial_elasticity_regression.gd --check-only
+          timeout 180s "$BIN" --headless --path "$PROJECT" \
+            --script res://radial_elasticity_regression.gd \
+            2>&1 | tee jolt-radial-elasticity.log
+          grep -Fq 'PASS: radial convex soft-body elasticity stability' jolt-radial-elasticity.log
       - name: Validate Jolt convex soft-body volume preservation
         shell: bash
         run: |
@@ -380,27 +405,31 @@ jobs:
               2>&1 | tee "physics-jolt-lra-shrink-$MODE.log"
             grep -Fq 'Jolt soft-body LRA shrink regression passed.' "physics-jolt-lra-shrink-$MODE.log"
           done
-      - name: Regression-test Jolt compressible and incompressible volume materials
+      - name: Regression-test Jolt incompressible and contracting volume materials
         shell: bash
         run: |
           set -euo pipefail
-          for FOLLOW in false true; do
-            PROJECT="$RUNNER_TEMP/cgame-jolt-volume-shrink-$FOLLOW"
-            mkdir -p "$PROJECT"
-            cp -a tests/stress/. "$PROJECT/"
-            # Explicitly enable the existing Jolt backend and volume fan.
-            # Keep the original [physics] section rather than appending one.
-            sed -i 's|^3d/physics_engine="GodotPhysics3D"$|3d/physics_engine="Jolt Physics"|' "$PROJECT/project.godot"
-            sed -i "/^\[physics\]$/a jolt_physics_3d/simulation/soft_body_volume_preservation=true" "$PROJECT/project.godot"
-            sed -i "/^\[physics\]$/a jolt_physics_3d/simulation/soft_body_volume_compliance=0.000001" "$PROJECT/project.godot"
-            sed -i "/^\[physics\]$/a jolt_physics_3d/simulation/soft_body_volume_follow_shrinking_factor=$FOLLOW" "$PROJECT/project.godot"
-            grep -Fqx '3d/physics_engine="Jolt Physics"' "$PROJECT/project.godot"
-            grep -Fqx "jolt_physics_3d/simulation/soft_body_volume_follow_shrinking_factor=$FOLLOW" "$PROJECT/project.godot"
-            timeout 180s ./bin/godot.linuxbsd.editor.dev.x86_64 \
-              --headless --path "$PROJECT" \
-              --script res://physics_jolt_softbody_volume_shrink_regression.gd \
-              2>&1 | tee "physics-jolt-volume-shrink-$FOLLOW.log"
-            grep -Fq 'Jolt soft-body volumetric shrink regression passed.' "physics-jolt-volume-shrink-$FOLLOW.log"
+          for RADIAL in false true; do
+            for FOLLOW in false true; do
+              PROJECT="$RUNNER_TEMP/cgame-jolt-volume-shrink-$RADIAL-$FOLLOW"
+              mkdir -p "$PROJECT"
+              cp -a tests/stress/. "$PROJECT/"
+              # Preserve a single physics section with explicit backend and
+              # volume settings; compare optional center spokes on/off.
+              sed -i 's|^3d/physics_engine="GodotPhysics3D"$|3d/physics_engine="Jolt Physics"|' "$PROJECT/project.godot"
+              sed -i "/^\[physics\]$/a jolt_physics_3d/simulation/soft_body_volume_preservation=true" "$PROJECT/project.godot"
+              sed -i "/^\[physics\]$/a jolt_physics_3d/simulation/soft_body_volume_compliance=0.000001" "$PROJECT/project.godot"
+              sed -i "/^\[physics\]$/a jolt_physics_3d/simulation/soft_body_volume_radial_springs=$RADIAL" "$PROJECT/project.godot"
+              sed -i "/^\[physics\]$/a jolt_physics_3d/simulation/soft_body_volume_follow_shrinking_factor=$FOLLOW" "$PROJECT/project.godot"
+              grep -Fqx '3d/physics_engine="Jolt Physics"' "$PROJECT/project.godot"
+              grep -Fqx "jolt_physics_3d/simulation/soft_body_volume_radial_springs=$RADIAL" "$PROJECT/project.godot"
+              grep -Fqx "jolt_physics_3d/simulation/soft_body_volume_follow_shrinking_factor=$FOLLOW" "$PROJECT/project.godot"
+              timeout 180s ./bin/godot.linuxbsd.editor.dev.x86_64 \
+                --headless --path "$PROJECT" \
+                --script res://physics_jolt_softbody_volume_shrink_regression.gd \
+                2>&1 | tee "physics-jolt-volume-shrink-$RADIAL-$FOLLOW.log"
+              grep -Fq 'Jolt soft-body volumetric shrink regression passed.' "physics-jolt-volume-shrink-$RADIAL-$FOLLOW.log"
+            done
           done
       - name: Verify Jolt packed object-layer filtering
         shell: bash
@@ -444,6 +473,8 @@ jobs:
             physics2d-ccd-relative.log
             physics2d-circle-segment-toi.log
             physics2d-circle-segment-ccd.log
+            physics2d-capsule-segment-toi.log
+            physics2d-capsule-segment-ccd.log
             physics3d-colored-islands.log
             physics3d-ccd-relative.log
             physics3d-capsule-rays.log
