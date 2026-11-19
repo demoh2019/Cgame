@@ -33,9 +33,9 @@
 TEST_FORCE_LINK(test_animation_player)
 
 #include "scene/animation/animation_player.h"
-#include "scene/resources/animation.h"
 #include "scene/main/scene_tree.h"
 #include "scene/main/window.h"
+#include "scene/resources/animation.h"
 
 namespace TestAnimationPlayer {
 
