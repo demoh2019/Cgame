@@ -10,13 +10,13 @@ func _check_both_labs() -> void:
     var checks := [
         {
             "scene": "res://lab_3d.tscn",
-            "nodes": ["Ground", "ThinTarget", "DeformableMesh", "SuspensionVehicle", "BodyEnterSensor", "DownwardQuery", "DownwardShapeCast", "HingeBase", "SliderBase", "Environment3D/WaterVolume3D", "Environment3D/MagnetCore", "Environment3D/InteractionHUD3D"],
+            "nodes": ["Ground", "ThinTarget", "DeformableMesh", "SuspensionVehicle", "BodyEnterSensor", "DownwardQuery", "DownwardShapeCast", "HingeBase", "SliderBase", "Environment3D/WaterVolume3D", "Environment3D/MagnetCore", "Environment3D/InteractionHUD3D", "AdvancedPhysics3D/VortexZone", "AdvancedPhysics3D/ConveyorBelt3D", "AdvancedPhysics3D/LocalGravityWell", "AdvancedPhysics3D/AdvancedHUD3D"],
             "group": "demo_dynamic",
             "minimum": 25
         },
         {
             "scene": "res://lab_2d.tscn",
-            "nodes": ["2D Ground", "Thin CCD Target", "AutonomousCharacterBody2D", "UpwardGravityZone", "ThinWallShapeCast", "GrooveSupport", "Environment2D/WaterVolume2D", "Environment2D/Magnet2D", "Environment2D/InteractionHUD2D"],
+            "nodes": ["2D Ground", "Thin CCD Target", "AutonomousCharacterBody2D", "UpwardGravityZone", "ThinWallShapeCast", "GrooveSupport", "Environment2D/WaterVolume2D", "Environment2D/Magnet2D", "Environment2D/InteractionHUD2D", "AdvancedPhysics2D/VortexField2D", "AdvancedPhysics2D/ConveyorBelt2D", "AdvancedPhysics2D/LocalGravityWell2D", "AdvancedPhysics2D/AdvancedHUD2D"],
             "group": "demo_dynamic_2d",
             "minimum": 25
         }
@@ -47,11 +47,17 @@ func _check_both_labs() -> void:
         controller.call("_toggle_wind")
         controller.call("_toggle_magnet")
         controller.call("_cycle_gravity")
+        var advanced_name := "AdvancedPhysics3D" if check["group"] == "demo_dynamic" else "AdvancedPhysics2D"
+        var advanced: Node = lab.get_node(advanced_name)
+        advanced.call("_toggle_vortex")
+        advanced.call("_toggle_gravity")
+        advanced.call("_reverse_belt")
+        advanced.call("spawn_fracture_test")
         for extra_frame in range(20):
             await physics_frame
         var spawned_count := get_nodes_in_group(check["group"]).size()
-        if spawned_count < count + 1:
-            push_error("%s failed to spawn an interactive physics body" % check["scene"])
+        if spawned_count < count + 3:
+            push_error("%s failed to spawn water and fracture physics bodies" % check["scene"])
             successful = false
         if count < check["minimum"]:
             push_error("%s has only %d dynamic bodies" % [check["scene"], count])
@@ -60,5 +66,5 @@ func _check_both_labs() -> void:
         lab.queue_free()
         await process_frame
     if successful:
-        print("PASS: both Cgame physics labs and interaction controllers loaded, spawned bodies, and ran 40 physics frames.")
+        print("PASS: both Cgame physics labs, vortex/belt/gravity/fracture stations and water interactions ran 40 physics frames.")
     quit(0 if successful else 1)
