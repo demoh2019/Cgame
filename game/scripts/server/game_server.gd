@@ -1684,6 +1684,7 @@ func _tick_players(delta: float) -> void:
 				_spawn_player(player)
 			continue
 		player.combat_energy = minf(Defs.COMBAT_ENERGY_MAX, player.combat_energy + Defs.COMBAT_ENERGY_REGEN * delta)
+		var had_bleeding: bool = player.survival.bleeding > 0.0
 		var damage: float = player.survival.tick(delta)
 		# Holding a contested PvP outpost grants a small local rally advantage.
 		# Only the server owns party identity, site control and stamina.
@@ -1699,7 +1700,8 @@ func _tick_players(delta: float) -> void:
 		damage += player.survival.weather_tick(delta, weather_severity)
 		if player.survival.exposure > 0.0 or player.survival.warmth_seconds > 0.0:
 			player.dirty_character = true
-		if player.survival.infection > 0.0 or player.survival.bleeding > 0.0:
+		if player.survival.infection > 0.0 or had_bleeding or damage > 0.0:
+			# Persist the last clotting tick and its health loss, not only active wounds.
 			player.dirty_character = true
 		if damage > 0.0 and not _alive(player):
 			_on_player_death(player, -1)
