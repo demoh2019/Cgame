@@ -67,6 +67,33 @@ public:
 	}
 };
 
+class CountingHeuristic3D : public AStar3D {
+public:
+	int start_heuristic_calls = 0;
+
+protected:
+	real_t _estimate_cost(int64_t p_from, int64_t p_to) override {
+		if (p_from == 1 && p_to == 2) {
+			++start_heuristic_calls;
+		}
+		return AStar3D::_estimate_cost(p_from, p_to);
+	}
+};
+
+TEST_CASE("[AStar3D] Start heuristic evaluated once per search") {
+	CountingHeuristic3D graph;
+	graph.add_point(1, Vector3(0, 0, 0));
+	graph.add_point(2, Vector3(1, 0, 0));
+	graph.connect_points(1, 2);
+
+	const Vector<int64_t> path = graph.get_id_path(1, 2);
+	REQUIRE(path.size() == 2);
+	CHECK(graph.start_heuristic_calls == 1);
+
+	graph.get_id_path(1, 2);
+	CHECK(graph.start_heuristic_calls == 2);
+}
+
 TEST_CASE("[AStar3D] ABC path") {
 	ABCX abcx;
 	Vector<int64_t> path = abcx.get_id_path(ABCX::A, ABCX::C);
@@ -270,6 +297,32 @@ TEST_CASE("[AStar3D] Known-size point IDs and connections preserve all entries")
 	astar.remove_point(255);
 	CHECK_EQ(astar.get_point_ids().size(), 255);
 	CHECK_EQ(astar.get_point_connections(0).size(), 254);
+}
+
+class CountingHeuristicGrid2D : public AStarGrid2D {
+public:
+	int start_heuristic_calls = 0;
+
+protected:
+	real_t _estimate_cost(const Vector2i &p_from, const Vector2i &p_to) override {
+		if (p_from == Vector2i(0, 0) && p_to == Vector2i(1, 1)) {
+			++start_heuristic_calls;
+		}
+		return AStarGrid2D::_estimate_cost(p_from, p_to);
+	}
+};
+
+TEST_CASE("[AStarGrid2D] Start heuristic evaluated once per search") {
+	CountingHeuristicGrid2D grid;
+	grid.set_region(Rect2i(0, 0, 3, 3));
+	grid.update();
+
+	const Vector<Vector2> path = grid.get_point_path(Vector2i(0, 0), Vector2i(1, 1));
+	REQUIRE(path.size() == 2);
+	CHECK(grid.start_heuristic_calls == 1);
+
+	grid.get_point_path(Vector2i(0, 0), Vector2i(1, 1));
+	CHECK(grid.start_heuristic_calls == 2);
 }
 
 TEST_CASE("[AStarGrid2D] Fixed-capacity neighbors preserve corner policies and paths") {
