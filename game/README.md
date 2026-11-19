@@ -820,3 +820,39 @@ not part of durable account-owned barricade checkpoints.
 The regression suite includes `tests/test_field_campfire.gd` for fuel,
 placement validation, shared warmth, snapshot privacy, and expiry. No native
 Cgame API changes were required for this vertical slice.
+
+
+### Regional fishing and coastal economy: T1–T4
+
+The same multiplayer game now extends shore fishing into the zone-tier,
+gear-tier and profession-tier economy:
+
+- T1 rod and fish remain supported exactly as before. T2–T4 fishing rods
+  require matching-tier planks, cloth and metal bars at the workbench,
+  and the existing classless crafting level gates the recipes.
+- The server chooses the catch tier using **the minimum** of the region's
+  zone tier (green T1, yellow T2, red T3, black T4), the carried fishing
+  rod's tier and the survivor's permanent fishing skill tier. A player
+  cannot request a higher-tier fish or forge a catch in a client RPC.
+- The server fixes the catch item/tier at the start of a 5-second cast
+  and checks the position, rod, region, backpack capacity and fishing
+  mastery again before delivering 1–2 fish. Moving away or losing
+  eligibility aborts the cast without creating an item or XP.
+- Tier 2–4 raw coastal fish are distinct inventory/market goods.
+  Cooking one fish with matching-tier wood at the workbench produces
+  cooked fish restoring progressively more hunger.
+- The safe-hub NPC buys T1–T4 raw fish at 4, 8, 14 and 22 silver
+  respectively, while the online player market can list them at
+  player-chosen prices. The price difference rewards risk and
+  professions without allowing vendor purchase/resale arbitrage.
+- The existing **T** cast key in local play and online inventory cast
+  button continue to work. The network HUD now reports the actual
+  tier and item name of each successful catch.
+
+`game/tests/test_fishing_tiers.gd` is registered in the main
+headless suite and covers all four zone/rod/mastery limits, inventory
+capacity, tiered rod crafting, cooking and server-atomic sales.
+
+No general Cgame engine feature was missing for this step: the shared
+game data, authoritative simulation, client networking and tiered
+inventory/crafting APIs already provide the required primitives.
