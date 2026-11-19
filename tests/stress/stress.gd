@@ -6,6 +6,7 @@ signal sample_signal(value: int)
 
 const PREFIX := "STRESS_RESULT:"
 const ExtraStress := preload("res://extra_stress.gd")
+const PressureScenarios := preload("res://pressure_scenarios.gd")
 const CASES := [
 	"containers", "strings", "script_vm", "math", "signals",
 	"scene_tree", "packed_scene", "images", "json", "stream",
@@ -20,6 +21,7 @@ const CASES := [
 	"geometry_2d", "mesh_build", "input_dispatch", "image_codec", "group_calls",
 	"packed_arrays", "sorting", "animation_tracks", "physics_raycast_2d",
 	"physics_raycast_3d", "render_multimesh_3d",
+	"scene_reparent", "resource_roundtrip", "audio_bus_churn",
 ]
 
 var signal_total: int = 0
@@ -244,6 +246,12 @@ func _run_case(test_case: String, scale: int, frames: int, seed: int) -> Diction
 			return await _physics_raycast_3d(scale)
 		"render_multimesh_3d":
 			return await _render_multimesh_3d(scale, frames)
+		"scene_reparent":
+			return PressureScenarios.new().scene_reparent(self, scale)
+		"resource_roundtrip":
+			return PressureScenarios.new().resource_roundtrip(scale)
+		"audio_bus_churn":
+			return PressureScenarios.new().audio_bus_churn(scale)
 	return {"error": "Unhandled case"}
 
 
