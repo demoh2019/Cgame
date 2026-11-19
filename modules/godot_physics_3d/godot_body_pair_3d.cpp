@@ -60,16 +60,22 @@ void GodotBodyPair3D::contact_added_callback(const Vector3 &p_point_A, int p_ind
 	contact.used = true;
 
 	// Attempt to determine if the contact will be reused.
-	real_t contact_recycle_radius = space->get_contact_recycle_radius();
+	const real_t contact_recycle_radius = space->get_contact_recycle_radius();
+	const real_t contact_recycle_radius_squared = contact_recycle_radius * contact_recycle_radius;
 
 	for (int i = 0; i < contact_count; i++) {
 		Contact &c = contacts[i];
-		if (c.local_A.distance_squared_to(local_A) < (contact_recycle_radius * contact_recycle_radius) &&
-				c.local_B.distance_squared_to(local_B) < (contact_recycle_radius * contact_recycle_radius)) {
-			contact.acc_normal_impulse = c.acc_normal_impulse;
-			contact.acc_bias_impulse = c.acc_bias_impulse;
-			contact.acc_bias_impulse_center_of_mass = c.acc_bias_impulse_center_of_mass;
-			contact.acc_tangent_impulse = c.acc_tangent_impulse;
+		if (c.local_A.distance_squared_to(local_A) < contact_recycle_radius_squared &&
+				c.local_B.distance_squared_to(local_B) < contact_recycle_radius_squared) {
+			// Contact anchors can remain near a corner while the normal changes
+			// substantially. Never warm-start the new normal with old impulses.
+			if (c.normal.dot(contact.normal) >= real_t(0.98)) {
+				contact.acc_normal_impulse = c.acc_normal_impulse;
+				contact.acc_bias_impulse = c.acc_bias_impulse;
+				contact.acc_bias_impulse_center_of_mass = c.acc_bias_impulse_center_of_mass;
+				// The old friction impulse may no longer be tangent to the new normal.
+				contact.acc_tangent_impulse = c.acc_tangent_impulse - contact.normal * c.acc_tangent_impulse.dot(contact.normal);
+			}
 			c = contact;
 			return;
 		}
