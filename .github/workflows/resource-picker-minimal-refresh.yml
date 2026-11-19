@@ -1,0 +1,35 @@
+name: Editor resource picker minimal refresh regressions
+on:
+  pull_request:
+    branches: [develop]
+    paths: ["editor/inspector/editor_resource_picker.cpp", "editor/inspector/editor_resource_picker.h", "misc/scripts/tests/test_resource_picker_minimal_refresh.py", ".github/workflows/resource-picker-minimal-refresh.yml"]
+  push:
+    branches: [develop]
+    paths: ["editor/inspector/editor_resource_picker.cpp", "editor/inspector/editor_resource_picker.h", "misc/scripts/tests/test_resource_picker_minimal_refresh.py", ".github/workflows/resource-picker-minimal-refresh.yml"]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  structural-regressions:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - run: |
+          python3 -m py_compile misc/scripts/tests/test_resource_picker_minimal_refresh.py
+          python3 -m unittest discover -s misc/scripts/tests -p 'test_resource_picker_minimal_refresh.py' -v
+  native-compile:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+      - uses: ./.github/actions/godot-deps
+      - uses: ./.github/actions/godot-build
+        with:
+          platform: linuxbsd
+          target: editor
+          scons-flags: dev_build=yes tests=yes debug_symbols=no module_mono_enabled=no accesskit=no
