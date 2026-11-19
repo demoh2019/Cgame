@@ -22,8 +22,8 @@ func _run() -> void:
         return
     var game := packed_scene.instantiate()
     root.add_child(game)
-    var survivor: CharacterBody3D = game.get_node("Player")
-    var infected: CharacterBody3D = game.get_node("InfectedWalker")
+    var survivor := game.get_node("Player") as CharacterBody3D
+    var infected := game.get_node("InfectedWalker") as CharacterBody3D
     infected.set_physics_process(false)
     infected.global_position = survivor.global_position + Vector3(0.0, 0.0, -1.5)
 
