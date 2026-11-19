@@ -175,4 +175,84 @@ TEST_CASE("[PCKPacker] PackedData index of many files in existing directories") 
 	CHECK(packed->get_file_paths().size() == previous_count);
 }
 
+
+TEST_CASE("[PCKPacker] FileAccessPack bounded bulk reads and unsigned lengths") {
+	const String path = TestUtils::get_temp_path("pck_bulk_read_bounds.bin");
+	const uint8_t contents[] = { 11, 22, 33, 44, 55, 66, 77, 88 };
+	{
+		Ref<FileAccess> file = FileAccess::open(path, FileAccess::WRITE);
+		REQUIRE(file.is_valid());
+		CHECK(file->store_buffer(contents, sizeof(contents)));
+		file->close();
+	}
+
+	PackedData::PackedFile metadata{};
+	metadata.pack = path;
+	metadata.offset = 0;
+	metadata.size = sizeof(contents);
+	metadata.bundle = false;
+	metadata.encrypted = false;
+	Ref<FileAccess> file(memnew(FileAccessPack("res://pck_bulk_read_bounds.bin", metadata)));
+	REQUIRE(file.is_valid());
+	CHECK(file->get_length() == 8);
+
+	uint8_t dst[12] = {};
+	CHECK(file->get_buffer(dst, 0) == 0);
+	CHECK(file->get_position() == 0);
+	CHECK_FALSE(file->eof_reached());
+	CHECK(file->get_buffer(dst, 3) == 3);
+	CHECK(dst[0] == 11);
+	CHECK(dst[2] == 33);
+	CHECK(file->get_position() == 3);
+
+	// Must not overflow int64_t or advance the cursor by the request size.
+	CHECK(file->get_buffer(dst, UINT64_MAX) == 5);
+	CHECK(dst[0] == 44);
+	CHECK(dst[4] == 88);
+	CHECK(file->get_position() == 8);
+	CHECK(file->eof_reached());
+	CHECK(file->get_buffer(dst, 1) == 0);
+
+	file->seek(0);
+	CHECK_FALSE(file->eof_reached());
+	CHECK(file->get_buffer(dst, 8) == 8);
+	CHECK(file->get_position() == 8);
+	CHECK_FALSE(file->eof_reached()); // An exact read does not overrun EOF.
+	CHECK(file->get_buffer(dst, 1) == 0);
+	CHECK(file->eof_reached());
+
+	file->seek(9); // Beyond the logical packed entry.
+	CHECK(file->eof_reached());
+	CHECK(file->get_buffer(dst, UINT64_MAX) == 0);
+	CHECK(file->get_position() == 9);
+}
+
+TEST_CASE("[PCKPacker] FileAccessPack reports physical short reads accurately") {
+	const String path = TestUtils::get_temp_path("pck_truncated_bulk_read.bin");
+	const uint8_t contents[] = { 0x17, 0x29, 0x3b };
+	{
+		Ref<FileAccess> out = FileAccess::open(path, FileAccess::WRITE);
+		REQUIRE(out.is_valid());
+		CHECK(out->store_buffer(contents, sizeof(contents)));
+		out->close();
+	}
+
+	PackedData::PackedFile metadata{};
+	metadata.pack = path;
+	metadata.offset = 0;
+	metadata.size = 10; // The archive index advertises more than the file has.
+	metadata.bundle = false;
+	metadata.encrypted = false;
+	Ref<FileAccess> file(memnew(FileAccessPack("res://pck_truncated_bulk_read.bin", metadata)));
+	REQUIRE(file.is_valid());
+	uint8_t dst[12] = {};
+	CHECK(file->get_buffer(dst, 8) == 3);
+	CHECK(file->get_position() == 3);
+	CHECK(file->eof_reached());
+	CHECK(dst[0] == 0x17);
+	CHECK(dst[1] == 0x29);
+	CHECK(dst[2] == 0x3b);
+	CHECK(file->get_buffer(dst, 1) == 0);
+}
+
 } // namespace TestPCKPacker

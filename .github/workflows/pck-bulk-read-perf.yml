@@ -1,0 +1,29 @@
+name: PCK bulk read boundary regressions
+
+on:
+  pull_request:
+    branches: [develop]
+    paths:
+      - "core/io/file_access_pack.cpp"
+      - "tests/core/io/test_pck_packer.cpp"
+      - "misc/scripts/tests/test_pck_bulk_read_perf.py"
+      - ".github/workflows/pck-bulk-read-perf.yml"
+  push:
+    branches: [develop]
+    paths:
+      - "core/io/file_access_pack.cpp"
+      - "tests/core/io/test_pck_packer.cpp"
+      - "misc/scripts/tests/test_pck_bulk_read_perf.py"
+      - ".github/workflows/pck-bulk-read-perf.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  read-bounds-contracts:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - run: python3 -m unittest discover -s misc/scripts/tests -p test_pck_bulk_read_perf.py -v

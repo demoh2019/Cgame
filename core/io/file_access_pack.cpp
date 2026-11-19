@@ -476,24 +476,31 @@ uint64_t FileAccessPack::get_buffer(uint8_t *p_dst, uint64_t p_length) const {
 	ERR_FAIL_COND_V_MSG(f.is_null(), -1, "File must be opened before use.");
 	ERR_FAIL_COND_V(!p_dst && p_length > 0, -1);
 
-	if (eof) {
+	if (eof || p_length == 0) {
 		return 0;
 	}
 
-	int64_t to_read = p_length;
-	if (to_read + pos > pf.size) {
+	// Keep the entire calculation unsigned, without overflow, and never read
+	// outside the logical packed-file bounds (even after an oversized seek).
+	const uint64_t available = pos < pf.size ? pf.size - pos : 0;
+	const uint64_t to_read = MIN(p_length, available);
+	if (to_read == 0) {
 		eof = true;
-		to_read = (int64_t)pf.size - (int64_t)pos;
-	}
-
-	pos += to_read;
-
-	if (to_read <= 0) {
 		return 0;
 	}
-	f->get_buffer(p_dst, to_read);
 
-	return to_read;
+	const uint64_t bytes_read = f->get_buffer(p_dst, to_read);
+	if (bytes_read > to_read) {
+		// Underlying FileAccess implementations can signal errors as UINT64_MAX.
+		eof = true;
+		return 0;
+	}
+
+	// Report bytes actually received, not the amount requested. This also
+	// prevents skipping data after a short read (e.g. a truncated pack).
+	pos += bytes_read;
+	eof = p_length > available || bytes_read < to_read;
+	return bytes_read;
 }
 
 void FileAccessPack::set_big_endian(bool p_big_endian) {
