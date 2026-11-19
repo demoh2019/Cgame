@@ -735,7 +735,9 @@ TEST_CASE("[FileAccess][Performance] Small UTF-8 loads avoid a transient heap bu
 		}
 		REQUIRE(file->open_custom(source.ptr(), source.size()) == OK);
 
-		const String expected = String::utf8(reinterpret_cast<const char *>(source.ptr()), size);
+		// String::utf8() intentionally rejects a null pointer, even when
+		// the length is zero; use an empty String for that valid file case.
+		const String expected = size == 0 ? String() : String::utf8(reinterpret_cast<const char *>(source.ptr()), size);
 		CHECK(expected.length() == size);
 		CHECK(file->get_as_utf8_string() == expected);
 		CHECK(file->get_position() == uint64_t(size));

@@ -593,6 +593,9 @@ Vector<uint8_t> FileAccess::get_buffer(int64_t p_length) const {
 
 String FileAccess::get_as_utf8_string() const {
 	const uint64_t len = get_length();
+	if (len == 0) {
+		return String(); // Do not allocate or invoke the UTF-8 decoder for an empty file.
+	}
 	// The Unicode decoder accepts a signed size; reject lengths it cannot
 	// represent before allocating or passing a truncated length.
 	ERR_FAIL_COND_V(len > INT32_MAX, String());
