@@ -474,3 +474,20 @@ python3 tests/stress/scale_sweep.py \
   --output out/packet-scale.json --summary-md out/packet-scale.md
 ```
 
+
+## Per-phase CPU hotspot reports
+
+All numeric workload `detail` fields ending in `_ms` are summarized as
+**median per-phase milliseconds** across successful repeats, provided
+that every repeat has that field. Missing or nonfinite samples are not
+silently imputed. The summary Markdown now includes a separate ranking
+for these per-phase measurements, and baseline comparisons can flag
+regressions in a particular phase even when overall process time stays
+unchanged.
+
+For example, `bitmap_pipeline` reports blit, resize, L8 export and
+LA8 import durations. `grid_reflow` reports reflow wait time and the
+sparse million-column case separately. Frame-driven durations may
+include scheduling delays, so these measurements are *triage signals*,
+not C++ function-only timings. Always compare the same test case,
+input size, platform, build flags, clock conditions and driver.
