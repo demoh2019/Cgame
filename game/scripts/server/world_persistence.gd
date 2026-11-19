@@ -123,13 +123,32 @@ static func restore(sim, data: Variant) -> bool:
 	return true
 
 
+## Prevent a --world-save argument from escaping the Cgame user-data tree.
+## This is path normalization, not a defense against attacker-created symlinks
+## on the host filesystem (administrators must secure the data directory).
+static func valid_world_path(path: String) -> bool:
+	if not path.begins_with("user://"):
+		return false
+	var base: String = ProjectSettings.globalize_path("user://").simplify_path().trim_suffix("/")
+	var target: String = ProjectSettings.globalize_path(path).simplify_path()
+	return target.begins_with(base + "/") and not target.ends_with("/")
+
+
+## A successful second save retains one previous complete checkpoint in .bak.
+## The backup is not loaded automatically, because that could resurrect items
+## already salvaged/destroyed after the previous save.
 static func save(sim, path: String) -> bool:
+	if not valid_world_path(path):
+		return false
 	var data: Dictionary = capture(sim)
 	var payload: String = JSON.stringify(data)
 	if payload.to_utf8_buffer().size() > MAX_BYTES:
 		return false
-	var temporary := path + ".tmp"
-	var file := FileAccess.open(temporary, FileAccess.WRITE)
+	var absolute: String = ProjectSettings.globalize_path(path)
+	if DirAccess.make_dir_recursive_absolute(absolute.get_base_dir()) != OK:
+		return false
+	var temporary: String = absolute + ".tmp"
+	var file: FileAccess = FileAccess.open(temporary, FileAccess.WRITE)
 	if file == null:
 		return false
 	file.store_string(payload)
@@ -138,12 +157,34 @@ static func save(sim, path: String) -> bool:
 	file.close()
 	if result != OK:
 		return false
-	return DirAccess.rename_absolute(
-			ProjectSettings.globalize_path(temporary),
-			ProjectSettings.globalize_path(path)) == OK
+	if FileAccess.file_exists(path):
+		var old_file: FileAccess = FileAccess.open(path, FileAccess.READ)
+		if old_file == null:
+			return false
+		var old_length: int = old_file.get_length()
+		if old_length <= 0 or old_length > MAX_BYTES:
+			old_file.close()
+			return false
+		var previous: Variant = JSON.parse_string(old_file.get_as_text())
+		old_file.close()
+		# Refuse to rotate an obviously corrupt primary over the last backup.
+		if typeof(previous) != TYPE_DICTIONARY or not _bounded_int(previous.get("version"), VERSION, VERSION):
+			return false
+		if not _bounded_int(previous.get("world_seed"), -2147483648, 2147483647):
+			return false
+		if int(previous["world_seed"]) != int(sim.world.world_seed) or typeof(previous.get("barricades")) != TYPE_ARRAY:
+			return false
+		var backup_temp: String = absolute + ".bak.tmp"
+		if DirAccess.copy_absolute(absolute, backup_temp) != OK:
+			return false
+		if DirAccess.rename_absolute(backup_temp, absolute + ".bak") != OK:
+			return false
+	return DirAccess.rename_absolute(temporary, absolute) == OK
 
 
 static func load(sim, path: String) -> bool:
+	if not valid_world_path(path):
+		return false
 	var file := FileAccess.open(path, FileAccess.READ)
 	if file == null:
 		return false
