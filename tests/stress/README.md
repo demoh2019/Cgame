@@ -52,6 +52,8 @@ Run `--list-cases` for supported identifiers.
 | Animation | `tweens` | Large numbers of repeatedly moving, node-bound Tween tracks |
 | Audio | `audio_buffers` | High-volume 16-bit WAV sample buffer construction (not live mixing) |
 | Serialization | `variant_codec` | Lossless Variant binary serialization and deserialization |
+| Packet framing | `packet_stream` | StreamPeerBuffer/PacketPeerStream ring-buffer transfers at variable sizes |
+| UI layout | `ui_layout` | Repeated GridContainer relayout with hundreds to thousands of Buttons |
 | Physics | `physics_2d`, `physics_3d` | Rigid bodies/collision shapes and physics frames |
 | Allocator | `memory_churn` | Multiple cycles of ephemeral PackedByteArray allocations |
 | Rendering | `render_2d`, `render_3d` | Shared texture/mesh, many draw nodes, frame pumping (display only) |
@@ -78,6 +80,26 @@ deletes its own test file in the project's `user://` data directory.
 server: physics and object allocation remain useful, GPU performance does not.
 Use a dedicated GPU runner with a real display for rendering conclusions.
 Virtual displays with software rendering are valid only for software-GL baselines.
+
+## Synthetic editor import benchmark
+
+Cold/warm resource imports have a separate entrypoint, because editor asset
+loading cannot be measured reliably by an in-game GDScript scenario:
+
+```bash
+python3 tests/stress/editor_import.py --godot ./bin/godot.linuxbsd.editor.dev.x86_64 \
+  --textures 128 --scenes 512 --repeats 3 --output out/import.json
+
+# Heavier importer pressure; synthetic project is created in a temporary dir:
+python3 tests/stress/editor_import.py --godot ./bin/godot.linuxbsd.editor.dev.x86_64 \
+  --textures 1024 --scenes 4096 --repeats 5 --timeout 1200 \
+  --rss-limit-mib 8192 --output out/import-brutal.json
+```
+
+The generator uses pure Python/stdlib to create reproducible PNG images,
+Godot scenes and scripts. The importer is a real Godot process and the
+watchdog records process CPU, resident memory, and cold/warm elapsed times.
+Run on an isolated machine for heavy presets. It does not alter source files.
 
 ## Reports and regression interpretation
 
