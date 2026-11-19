@@ -87,7 +87,8 @@ class GodotStep3D {
 		PARALLEL_INTEGRATE_MIN_BODIES = 2048,
 		PARALLEL_INTEGRATE_BLOCK_SIZE = 128,
 	};
-	LocalVector<GodotBody3D *> active_bodies;
+	// Body snapshot being integrated by the parallel force-integration job.
+	const LocalVector<GodotBody3D *> *integrate_bodies = nullptr;
 
 	void _populate_island_graph(GodotBody3D *p_body, GodotSoftBody3D *p_soft_body, LocalVector<GodotBody3D *> &p_body_island, LocalVector<GodotConstraint3D *> &p_constraint_island);
 	void _populate_island(GodotBody3D *p_body, LocalVector<GodotBody3D *> &p_body_island, LocalVector<GodotConstraint3D *> &p_constraint_island);

@@ -81,6 +81,12 @@ private:
 
 	GodotBroadPhase3D *broadphase = nullptr;
 	SelfList<GodotBody3D>::List active_list;
+	// Bumped whenever a body enters or leaves the active list, so the stepper can
+	// reuse one contiguous snapshot of the list instead of re-walking it.
+	uint32_t active_list_version = 0;
+	// Contiguous copy of the active list, rebuilt lazily when the version changes.
+	LocalVector<GodotBody3D *> active_snapshot;
+	uint32_t active_snapshot_version = UINT32_MAX;
 	SelfList<GodotBody3D>::List mass_properties_update_list;
 	SelfList<GodotBody3D>::List state_query_list;
 	SelfList<GodotArea3D>::List monitor_query_list;
@@ -169,6 +175,10 @@ public:
 	GodotArea3D *get_default_area() const { return area; }
 
 	const SelfList<GodotBody3D>::List &get_active_body_list() const;
+	_FORCE_INLINE_ uint32_t get_active_list_version() const { return active_list_version; }
+	// Pointer snapshot of the active bodies; avoids walking the intrusive list (a serial
+	// chain of cache misses on huge scenes) when membership did not change.
+	const LocalVector<GodotBody3D *> &get_active_bodies();
 	void body_add_to_active_list(SelfList<GodotBody3D> *p_body);
 	void body_remove_from_active_list(SelfList<GodotBody3D> *p_body);
 	void body_add_to_mass_properties_update_list(SelfList<GodotBody3D> *p_body);

@@ -137,10 +137,10 @@ void GodotStep3D::_populate_island_soft_body(GodotSoftBody3D *p_soft_body, Local
 
 void GodotStep3D::_integrate_forces_block(uint32_t p_block_index, void *p_userdata) {
 	const uint32_t begin = p_block_index * PARALLEL_INTEGRATE_BLOCK_SIZE;
-	const uint32_t end = MIN(begin + PARALLEL_INTEGRATE_BLOCK_SIZE, active_bodies.size());
+	const uint32_t end = MIN(begin + PARALLEL_INTEGRATE_BLOCK_SIZE, integrate_bodies->size());
 	for (uint32_t body_index = begin; body_index < end; ++body_index) {
 		// Broadphase updates for swept shapes are deferred: the broadphase is not thread safe.
-		active_bodies[body_index]->integrate_forces(delta, true);
+		(*integrate_bodies)[body_index]->integrate_forces(delta, true);
 	}
 }
 
@@ -474,8 +474,6 @@ void GodotStep3D::step(GodotSpace3D *p_space, real_t p_delta) {
 	iterations = p_space->get_solver_iterations();
 	delta = p_delta;
 
-	const SelfList<GodotBody3D>::List *body_list = &p_space->get_active_body_list();
-
 	const SelfList<GodotSoftBody3D>::List *soft_body_list = &p_space->get_active_soft_body_list();
 
 	/* INTEGRATE FORCES */
@@ -485,23 +483,19 @@ void GodotStep3D::step(GodotSpace3D *p_space, real_t p_delta) {
 
 	int active_count = 0;
 
-	const SelfList<GodotBody3D> *b = body_list->first();
-	active_bodies.clear();
-	while (b) {
-		active_bodies.push_back(b->self());
-		b = b->next();
-		active_count++;
-	}
+	const LocalVector<GodotBody3D *> *active_bodies = &p_space->get_active_bodies();
+	active_count = (int)active_bodies->size();
 
-	if (active_bodies.size() < PARALLEL_INTEGRATE_MIN_BODIES) {
-		for (GodotBody3D *body : active_bodies) {
+	if (active_bodies->size() < PARALLEL_INTEGRATE_MIN_BODIES) {
+		for (GodotBody3D *body : *active_bodies) {
 			body->integrate_forces(p_delta);
 		}
 	} else {
-		const uint32_t block_count = (active_bodies.size() + PARALLEL_INTEGRATE_BLOCK_SIZE - 1) / PARALLEL_INTEGRATE_BLOCK_SIZE;
+		integrate_bodies = active_bodies;
+		const uint32_t block_count = (active_bodies->size() + PARALLEL_INTEGRATE_BLOCK_SIZE - 1) / PARALLEL_INTEGRATE_BLOCK_SIZE;
 		WorkerThreadPool::GroupID group_task = WorkerThreadPool::get_singleton()->add_template_group_task(this, &GodotStep3D::_integrate_forces_block, nullptr, block_count, -1, true, SNAME("Physics3DIntegrateForces"));
 		WorkerThreadPool::get_singleton()->wait_for_group_task_completion(group_task);
-		for (GodotBody3D *body : active_bodies) {
+		for (GodotBody3D *body : *active_bodies) {
 			body->apply_deferred_motion(p_delta);
 		}
 	}
@@ -556,12 +550,12 @@ void GodotStep3D::step(GodotSpace3D *p_space, real_t p_delta) {
 
 	/* GENERATE CONSTRAINT ISLANDS FOR ACTIVE RIGID BODIES */
 
-	b = body_list->first();
+	// Activations during the broadphase update (e.g. kinematic bodies entering areas) rebuild the snapshot.
+	active_bodies = &p_space->get_active_bodies();
 
 	uint32_t body_island_count = 0;
 
-	while (b) {
-		GodotBody3D *body = b->self();
+	for (GodotBody3D *body : *active_bodies) {
 
 		// Unconnected rigid bodies need no solver island. Avoid keeping
 		// millions of tiny island vectors for sparse simulations.
@@ -592,7 +586,6 @@ void GodotStep3D::step(GodotSpace3D *p_space, real_t p_delta) {
 				--island_count;
 			}
 		}
-		b = b->next();
 	}
 
 	/* GENERATE CONSTRAINT ISLANDS FOR ACTIVE SOFT BODIES */
@@ -770,10 +763,8 @@ void GodotStep3D::step(GodotSpace3D *p_space, real_t p_delta) {
 
 	/* INTEGRATE VELOCITIES */
 
-	b = body_list->first();
-	while (b) {
-		const SelfList<GodotBody3D> *n = b->next();
-		GodotBody3D *body = b->self();
+	active_bodies = &p_space->get_active_bodies();
+	for (GodotBody3D *body : *active_bodies) {
 		body->integrate_velocities(p_delta);
 		// Unconnected rigid bodies can be suspended individually after
 		// integration. The connected islands still use _check_suspend().
@@ -783,7 +774,6 @@ void GodotStep3D::step(GodotSpace3D *p_space, real_t p_delta) {
 				body->set_active(!can_sleep);
 			}
 		}
-		b = n;
 	}
 
 	/* SLEEP / WAKE UP ISLANDS */

@@ -84,7 +84,8 @@ class GodotStep2D {
 		PARALLEL_INTEGRATE_MIN_BODIES = 2048,
 		PARALLEL_INTEGRATE_BLOCK_SIZE = 128,
 	};
-	LocalVector<GodotBody2D *> active_bodies;
+	// Body snapshot being integrated by the parallel force-integration job.
+	const LocalVector<GodotBody2D *> *integrate_bodies = nullptr;
 
 	void _populate_island(GodotBody2D *p_body, LocalVector<GodotBody2D *> &p_body_island, LocalVector<GodotConstraint2D *> &p_constraint_island);
 	void _setup_constraint(uint32_t p_constraint_index, void *p_userdata = nullptr);

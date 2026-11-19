@@ -1036,12 +1036,25 @@ const SelfList<GodotBody2D>::List &GodotSpace2D::get_active_body_list() const {
 	return active_list;
 }
 
+const LocalVector<GodotBody2D *> &GodotSpace2D::get_active_bodies() {
+	if (active_snapshot_version != active_list_version) {
+		active_snapshot.clear();
+		for (const SelfList<GodotBody2D> *b = active_list.first(); b; b = b->next()) {
+			active_snapshot.push_back(b->self());
+		}
+		active_snapshot_version = active_list_version;
+	}
+	return active_snapshot;
+}
+
 void GodotSpace2D::body_add_to_active_list(SelfList<GodotBody2D> *p_body) {
 	active_list.add(p_body);
+	active_list_version++;
 }
 
 void GodotSpace2D::body_remove_from_active_list(SelfList<GodotBody2D> *p_body) {
 	active_list.remove(p_body);
+	active_list_version++;
 }
 
 void GodotSpace2D::body_add_to_mass_properties_update_list(SelfList<GodotBody2D> *p_body) {
