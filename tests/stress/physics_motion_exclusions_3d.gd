@@ -154,6 +154,20 @@ func run(tree: SceneTree, scale: int, frames: int) -> Dictionary:
 		and result.get_collision_safe_fraction() < 0.2
 	)
 
+	# Rotate the entire moving body by 90 degrees, so the offset shape
+	# moves from y=8 to x=-8. Its AABB must follow query.from, not the
+	# physics server's cached transform from the previous simulation step.
+	PhysicsServer3D.body_set_state(offset_body, PhysicsServer3D.BODY_STATE_TRANSFORM,
+			Transform3D(Basis(), Vector3(-6.6, 0.0, 0.0)))
+	await tree.physics_frame
+	query.from = Transform3D(Basis(Vector3(0.0, 0.0, 1.0), PI * 0.5), Vector3.ZERO)
+	var rotated_hit := PhysicsServer3D.body_test_motion(mover, query, result)
+	var rotated_compound_valid := (
+		rotated_hit and result.get_collision_count() > 0
+		and result.get_collider_rid() == offset_body
+		and result.get_collision_safe_fraction() < 0.2
+	)
+
 	PhysicsServer3D.space_set_active(space, false)
 	for body in excluded_bodies:
 		if body != near_body:
@@ -167,15 +181,17 @@ func run(tree: SceneTree, scale: int, frames: int) -> Dictionary:
 	PhysicsServer3D.free_rid(sphere)
 	PhysicsServer3D.free_rid(space)
 
-	if errors != 0 or not far_valid or not stationary_valid or not dense_valid or not compound_valid or not gap_clear or not offset_shape_valid:
+	if errors != 0 or not far_valid or not stationary_valid or not dense_valid or not compound_valid or not gap_clear or not offset_shape_valid or not rotated_compound_valid:
 		return {"error": "3D motion exclusions, nearest obstacle or stationary sweep regressed",
 				"failures": errors, "near_fraction": near_fraction, "far_fraction": far_fraction,
 				"far_valid": far_valid, "stationary_valid": stationary_valid,
 				"dense_valid": dense_valid, "compound_valid": compound_valid,
-				"gap_clear": gap_clear, "offset_shape_valid": offset_shape_valid}
+				"gap_clear": gap_clear, "offset_shape_valid": offset_shape_valid,
+				"rotated_compound_valid": rotated_compound_valid}
 	return {"excluded_bodies": count, "queries": trials, "creation_ms": creation_ms,
 			"motion_queries_ms": query_ms, "near_fraction": near_fraction, "far_fraction": far_fraction,
 			"stationary_valid": true, "dense_candidate_count": count + 2,
 			"dense_query_ms": dense_query_ms, "dense_nearest_hit_verified": dense_valid, "compound_nearest_hit_verified": compound_valid,
 			"gap_proxies": gap_count, "gap_query_ms": gap_query_ms, "gap_clear": gap_clear,
-			"offset_shape_hit_verified": offset_shape_valid}
+			"offset_shape_hit_verified": offset_shape_valid,
+			"rotated_compound_hit_verified": rotated_compound_valid}
