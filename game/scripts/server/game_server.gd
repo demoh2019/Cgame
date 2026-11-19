@@ -216,7 +216,8 @@ func submit_input(peer_id: int, seq: int, move_x: float, move_z: float, sprint: 
 	player.input_budget -= allowed
 	player.yaw = yaw
 	if allowed > 0.0:
-		player.position = Movement.step(world, player.position, {"x": move_x, "z": move_z, "sprint": sprint}, allowed)
+		player.position = Movement.step(world, player.position, {"x": move_x, "z": move_z, "sprint": sprint}, allowed,
+			player.inventory.weight_grams())
 		# Walking away cancels gathering.
 		if not player.action.is_empty():
 			var node := _find_node(int(player.action["node"]))
@@ -720,6 +721,7 @@ func snapshot_for(peer_id: int) -> Dictionary:
 			"health": player.survival.health, "hunger": player.survival.hunger, "thirst": player.survival.thirst,
 			"alive": _alive(player), "kills": player.kills, "deaths": player.deaths, "zone": player.zone_notice,
 			"action": player.action.duplicate(),
+			"carry_grams": player.inventory.weight_grams(), "can_sprint": player.inventory.can_sprint(),
 			"weapon": player.inventory.weapon, "armor": player.inventory.armor,
 		},
 		"players": nearby_players, "zombies": nearby_zombies, "bags": nearby_bags,
