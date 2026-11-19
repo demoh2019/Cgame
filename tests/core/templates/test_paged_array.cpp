@@ -196,4 +196,107 @@ TEST_CASE("[PagedArray] Extensive merge_unordered() test") {
 	}
 }
 
+
+TEST_CASE("[PagedArray] Bulk clear releases many pages without losing shared ownership") {
+	PagedArrayPool<uint32_t> pool(4);
+	PagedArray<uint32_t> first;
+	PagedArray<uint32_t> second;
+	PagedArray<uint32_t> third;
+	first.set_page_pool(&pool);
+	second.set_page_pool(&pool);
+	third.set_page_pool(&pool);
+
+	for (uint32_t i = 0; i < 1029; i++) {
+		first.push_back(i + 100);
+	}
+	for (uint32_t i = 0; i < 733; i++) {
+		second.push_back(i + 5000);
+	}
+	for (uint32_t i = 0; i < 333; i++) {
+		third.push_back(i + 9000);
+	}
+
+	first.clear();
+	third.clear();
+	CHECK(first.size() == 0);
+	CHECK(third.size() == 0);
+	for (uint32_t i = 0; i < 733; i++) {
+		CHECK(second[i] == i + 5000);
+	}
+
+	// Interleaved allocation reuses the returned pages while second remains live.
+	for (uint32_t i = 0; i < 1401; i++) {
+		third.push_back(i + 12000);
+	}
+	for (uint32_t i = 0; i < 1401; i++) {
+		CHECK(third[i] == i + 12000);
+	}
+	for (uint32_t i = 0; i < 733; i++) {
+		CHECK(second[i] == i + 5000);
+	}
+
+	second.clear();
+	third.clear();
+	for (uint32_t i = 0; i < 2003; i++) {
+		first.push_back(i ^ 0x5a5a);
+	}
+	for (uint32_t i = 0; i < 2003; i++) {
+		CHECK(first[i] == (i ^ 0x5a5a));
+	}
+	first.reset();
+	second.reset();
+	third.reset();
+	pool.reset();
+}
+
+TEST_CASE("[PagedArray] Metadata capacity growth survives repeated allocation boundaries") {
+	PagedArrayPool<uint64_t> pool(1);
+	PagedArray<uint64_t> array;
+	array.set_page_pool(&pool);
+
+	for (uint32_t round = 0; round < 9; round++) {
+		const uint32_t elements = (uint32_t(1) << round) + 3;
+		for (uint32_t i = 0; i < elements; i++) {
+			array.push_back((uint64_t(round) << 32) | i);
+		}
+		for (uint32_t i = 0; i < elements; i++) {
+			CHECK(array[i] == ((uint64_t(round) << 32) | i));
+		}
+		while (array.size() > elements / 2) {
+			array.pop_back();
+		}
+		for (uint32_t i = 0; i < elements / 2; i++) {
+			CHECK(array[i] == ((uint64_t(round) << 32) | i));
+		}
+		array.clear();
+		CHECK(array.size() == 0);
+	}
+
+	// Reset frees the metadata even when capacity exceeds the number of pages.
+	array.reset();
+	pool.reset();
+	for (uint32_t i = 0; i < 129; i++) {
+		array.push_back(i * 3);
+	}
+	for (uint32_t i = 0; i < 129; i++) {
+		CHECK(array[i] == uint64_t(i) * 3);
+	}
+	array.reset();
+	pool.reset();
+}
+
+TEST_CASE("[PagedArray] Clearing an empty paged array is safe") {
+	PagedArrayPool<uint32_t> pool(2);
+	PagedArray<uint32_t> array;
+	array.set_page_pool(&pool);
+	array.clear();
+	array.clear();
+	array.push_back(42);
+	array.pop_back();
+	array.clear();
+	CHECK(array.size() == 0);
+	array.reset();
+	pool.reset();
+}
+
 } // namespace TestPagedArray
