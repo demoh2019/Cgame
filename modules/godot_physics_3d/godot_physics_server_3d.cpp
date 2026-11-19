@@ -1557,6 +1557,36 @@ real_t GodotPhysicsServer3D::joint_get_break_torque(RID p_joint) const {
 	return joint->get_break_torque();
 }
 
+void GodotPhysicsServer3D::joint_set_fatigue_rate(RID p_joint, real_t p_rate) {
+	GodotJoint3D *joint = joint_owner.get_or_null(p_joint);
+	ERR_FAIL_NULL(joint);
+	joint->set_fatigue_rate(p_rate);
+}
+
+real_t GodotPhysicsServer3D::joint_get_fatigue_rate(RID p_joint) const {
+	GodotJoint3D *joint = joint_owner.get_or_null(p_joint);
+	ERR_FAIL_NULL_V(joint, 0.0);
+	return joint->get_fatigue_rate();
+}
+
+void GodotPhysicsServer3D::joint_set_fatigue_yield_ratio(RID p_joint, real_t p_ratio) {
+	GodotJoint3D *joint = joint_owner.get_or_null(p_joint);
+	ERR_FAIL_NULL(joint);
+	joint->set_fatigue_yield_ratio(p_ratio);
+}
+
+real_t GodotPhysicsServer3D::joint_get_fatigue_yield_ratio(RID p_joint) const {
+	GodotJoint3D *joint = joint_owner.get_or_null(p_joint);
+	ERR_FAIL_NULL_V(joint, 0.5);
+	return joint->get_fatigue_yield_ratio();
+}
+
+real_t GodotPhysicsServer3D::joint_get_fatigue_damage(RID p_joint) const {
+	GodotJoint3D *joint = joint_owner.get_or_null(p_joint);
+	ERR_FAIL_NULL_V(joint, 0.0);
+	return joint->get_fatigue_damage();
+}
+
 Vector3 GodotPhysicsServer3D::joint_get_reaction_force(RID p_joint) const {
 	GodotJoint3D *joint = joint_owner.get_or_null(p_joint);
 	ERR_FAIL_NULL_V(joint, Vector3());
@@ -1582,7 +1612,7 @@ void GodotPhysicsServer3D::joint_set_break_callback(RID p_joint, const Callable 
 }
 
 // Runs after every step: a joint whose last-step reaction exceeded its threshold is detached.
-void GodotPhysicsServer3D::_process_joint_breaks() {
+void GodotPhysicsServer3D::_process_joint_breaks(real_t p_step) {
 	if (breakable_joints.is_empty()) {
 		return;
 	}
@@ -1593,6 +1623,8 @@ void GodotPhysicsServer3D::_process_joint_breaks() {
 		if (!joint) {
 			stale.push_back(rid);
 		} else if (joint->exceeds_break_threshold()) {
+			to_break.push_back(rid);
+		} else if (joint->accumulate_fatigue(p_step) && joint->is_fatigue_broken()) {
 			to_break.push_back(rid);
 		}
 	}
@@ -1913,7 +1945,7 @@ void GodotPhysicsServer3D::step(real_t p_step) {
 		active_objects += E->get_active_objects();
 		collision_pairs += E->get_collision_pairs();
 	}
-	_process_joint_breaks();
+	_process_joint_breaks(p_step);
 }
 
 void GodotPhysicsServer3D::sync() {

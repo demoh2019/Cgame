@@ -459,6 +459,11 @@ void PhysicsServer3D::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("joint_set_break_force", "joint", "force"), &PhysicsServer3D::joint_set_break_force);
 	ClassDB::bind_method(D_METHOD("joint_get_break_force", "joint"), &PhysicsServer3D::joint_get_break_force);
 	ClassDB::bind_method(D_METHOD("joint_set_break_torque", "joint", "torque"), &PhysicsServer3D::joint_set_break_torque);
+	ClassDB::bind_method(D_METHOD("joint_set_fatigue_rate", "joint", "rate"), &PhysicsServer3D::joint_set_fatigue_rate);
+	ClassDB::bind_method(D_METHOD("joint_get_fatigue_rate", "joint"), &PhysicsServer3D::joint_get_fatigue_rate);
+	ClassDB::bind_method(D_METHOD("joint_set_fatigue_yield_ratio", "joint", "ratio"), &PhysicsServer3D::joint_set_fatigue_yield_ratio);
+	ClassDB::bind_method(D_METHOD("joint_get_fatigue_yield_ratio", "joint"), &PhysicsServer3D::joint_get_fatigue_yield_ratio);
+	ClassDB::bind_method(D_METHOD("joint_get_fatigue_damage", "joint"), &PhysicsServer3D::joint_get_fatigue_damage);
 	ClassDB::bind_method(D_METHOD("joint_get_break_torque", "joint"), &PhysicsServer3D::joint_get_break_torque);
 	ClassDB::bind_method(D_METHOD("joint_get_reaction_force", "joint"), &PhysicsServer3D::joint_get_reaction_force);
 	ClassDB::bind_method(D_METHOD("joint_get_reaction_torque", "joint"), &PhysicsServer3D::joint_get_reaction_torque);
