@@ -62,6 +62,9 @@ void JoltProjectSettings::register_settings() {
 	// Build a bounded face hierarchy for overlapping soft-body pairs to
 	// avoid testing sparse contact queries against every triangle.
 	GLOBAL_DEF(PropertyInfo(Variant::BOOL, "physics/jolt_physics_3d/simulation/soft_body_soft_vertex_face_bvh"), false);
+	// Catch crossed deformable edges whose endpoints are all far from the
+	// opposite surface. Requires soft contacts and vertex-face mode.
+	GLOBAL_DEF(PropertyInfo(Variant::BOOL, "physics/jolt_physics_3d/simulation/soft_body_soft_edge_edge_contacts"), false);
 	GLOBAL_DEF(PropertyInfo(Variant::FLOAT, "physics/jolt_physics_3d/simulation/soft_body_soft_contact_radius", PROPERTY_HINT_RANGE, "0,1,0.001,suffix:m"), 0.1f);
 	GLOBAL_DEF(PropertyInfo(Variant::FLOAT, "physics/jolt_physics_3d/simulation/soft_body_soft_contact_recovery", PROPERTY_HINT_RANGE, "0,1,0.01"), 0.2f);
 	GLOBAL_DEF(PropertyInfo(Variant::FLOAT, "physics/jolt_physics_3d/simulation/soft_body_soft_contact_friction", PROPERTY_HINT_RANGE, "0,1,0.01"), 0.2f);
@@ -170,6 +173,7 @@ void JoltProjectSettings::read_settings() {
 	soft_body_soft_contacts = GLOBAL_GET("physics/jolt_physics_3d/simulation/soft_body_soft_contacts");
 	soft_body_soft_vertex_face_contacts = GLOBAL_GET("physics/jolt_physics_3d/simulation/soft_body_soft_vertex_face_contacts");
 	soft_body_soft_vertex_face_bvh = GLOBAL_GET("physics/jolt_physics_3d/simulation/soft_body_soft_vertex_face_bvh");
+	soft_body_soft_edge_edge_contacts = GLOBAL_GET("physics/jolt_physics_3d/simulation/soft_body_soft_edge_edge_contacts");
 	const float soft_contact_radius = GLOBAL_GET("physics/jolt_physics_3d/simulation/soft_body_soft_contact_radius");
 	soft_body_soft_contact_radius = Math::is_finite(soft_contact_radius) ? CLAMP(soft_contact_radius, 0.0f, 1.0f) : 0.1f;
 	const float soft_contact_recovery = GLOBAL_GET("physics/jolt_physics_3d/simulation/soft_body_soft_contact_recovery");
