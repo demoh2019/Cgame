@@ -46,6 +46,40 @@ func _run() -> void:
         quit(1)
         return
 
+    for node_name in ["WoodPileA", "WoodPileB", "WoodPileC", "StonePileA", "StonePileB"]:
+        var materials = game.get_node_or_null(node_name)
+        if materials == null:
+            push_error("Missing crafting material pickup: " + node_name)
+            quit(1)
+            return
+        materials.call("interact", survivor)
+    if int(survivor.get("wood_count")) != 3 or int(survivor.get("stone_count")) != 2:
+        push_error("Materials did not reach inventory.")
+        quit(1)
+        return
+    if not bool(game.call("_craft_campfire")) or game.get_node_or_null("Campfire_1") == null:
+        push_error("Campfire recipe did not create a world object.")
+        quit(1)
+        return
+    if int(survivor.get("wood_count")) != 0 or int(survivor.get("stone_count")) != 0:
+        push_error("Crafting did not consume materials.")
+        quit(1)
+        return
+    if bool(game.call("_craft_campfire")):
+        push_error("Crafting succeeded without resources.")
+        quit(1)
+        return
+    var cycle = game.get_node_or_null("DayNight")
+    if cycle == null:
+        push_error("Day/night controller is missing.")
+        quit(1)
+        return
+    cycle.call("advance", 240.0)
+    if int(cycle.get("day_number")) != 2:
+        push_error("Day/night progression failed.")
+        quit(1)
+        return
+
     for i in range(10):
         await physics_frame
     if not survivor.global_position.is_finite():

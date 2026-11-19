@@ -22,7 +22,13 @@ func _ready() -> void:
     mesh.size = Vector3(0.7, 0.8, 0.7)
     visual.mesh = mesh
     var material := StandardMaterial3D.new()
-    material.albedo_color = Color("#6db2d4") if item_type == "water" else Color("#d6a561")
+    var colors := {
+        "food": Color("#d6a561"),
+        "water": Color("#6db2d4"),
+        "wood": Color("#956744"),
+        "stone": Color("#a2a4a0")
+    }
+    material.albedo_color = colors.get(item_type, Color("#aaaaaa"))
     visual.material_override = material
     add_child(visual)
 
@@ -30,7 +36,7 @@ func _ready() -> void:
 func interact(player: Node) -> void:
     if collected or not player.has_method("collect_item"):
         return
-    if item_type != "food" and item_type != "water":
+    if item_type not in ["food", "water", "wood", "stone"]:
         return
     collected = true
     player.call("collect_item", item_type, quantity)

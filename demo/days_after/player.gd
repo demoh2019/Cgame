@@ -14,6 +14,9 @@ var hunger: float = 80.0
 var thirst: float = 80.0
 var food_count: int = 0
 var water_count: int = 0
+var wood_count: int = 0
+var stone_count: int = 0
+var stamina: float = 100.0
 
 @onready var camera: Camera3D = $Head/Camera3D
 @onready var aim_ray: RayCast3D = $Head/Camera3D/AimRay
@@ -45,7 +48,12 @@ func _physics_process(delta: float) -> void:
 
     var move_input := Input.get_vector("move_left", "move_right", "move_forward", "move_back")
     var direction := (global_transform.basis * Vector3(move_input.x, 0.0, move_input.y)).normalized()
-    var move_speed := SPRINT_SPEED if Input.is_action_pressed("sprint") else WALK_SPEED
+    var running := Input.is_action_pressed("sprint") and stamina > 0.0 and health > 0.0 and move_input.length_squared() > 0.0
+    var move_speed := SPRINT_SPEED if running else WALK_SPEED
+    if running:
+        stamina = maxf(0.0, stamina - 12.0 * delta)
+    else:
+        stamina = minf(100.0, stamina + 8.0 * delta)
     velocity.x = direction.x * move_speed
     velocity.z = direction.z * move_speed
     move_and_slide()
@@ -83,6 +91,10 @@ func collect_item(item_type: String, quantity: int) -> void:
             food_count += quantity
         "water":
             water_count += quantity
+        "wood":
+            wood_count += quantity
+        "stone":
+            stone_count += quantity
 
 
 func consume_food() -> void:
