@@ -341,7 +341,7 @@ bool GodotPhysicsDirectSpaceState3D::cast_motion(const PS3DT::ShapeParameters &p
 			data.closest_B = point_B;
 			data.rest_info->collider_id = col_obj->get_instance_id();
 			data.rest_info->rid = col_obj->get_self();
-			data.rest_info->data.shape = shape_idx;
+			data.rest_info->shape = shape_idx;
 			data.rest_info->point = data.closest_B;
 			data.rest_info->normal = (data.closest_A - data.closest_B).normalized();
 			data.best_first = false;
