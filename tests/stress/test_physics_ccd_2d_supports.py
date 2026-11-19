@@ -48,6 +48,15 @@ class CCD2DMultipleSupportsTests(unittest.TestCase):
         self.assertIn("CCD_MODE_CAST_RAY", script)
         self.assertIn("result.origin.x < -0.2", script)
 
+    def test_parallel_stress_workload_is_registered(self):
+        runner = (ROOT / "tests" / "stress" / "run.py").read_text(encoding="utf-8")
+        script = (ROOT / "tests" / "stress" / "stress.gd").read_text(encoding="utf-8")
+        self.assertIn('"physics_ccd_2d"', runner)
+        self.assertIn('func _physics_ccd_2d(scale: int, frames: int)', script)
+        self.assertIn('body.continuous_cd = RigidBody2D.CCD_MODE_CAST_RAY', script)
+        self.assertIn('target.position = Vector2(0.0, lane_y - 1.5)', script)
+        self.assertIn('return await _physics_ccd_2d(scale, frames)', script)
+
 
 if __name__ == "__main__":
     unittest.main()
