@@ -479,10 +479,12 @@ void JoltContactListener3D::_flush_contacts() {
 }
 
 void JoltContactListener3D::_flush_area_body_events() {
-	uint32_t new_overlap_count = area_overlaps.size();
+	// Event callbacks can be duplicated during shape shifts. An unsigned
+	// subtraction would wrap on more exits than current overlaps and request
+	// an enormous, unnecessary allocation from HashSet::reserve().
+	int64_t estimated_overlap_count = area_overlaps.size();
 	for (const ThreadLocals &tl : ThreadLocals::instances) {
-		new_overlap_count -= tl.area_exits.size();
-		new_overlap_count += tl.area_enters.size();
+		estimated_overlap_count += int64_t(tl.area_enters.size()) - int64_t(tl.area_exits.size());
 	}
 
 	// Exits must be dispatched before enters, as shape-shifting relies on it.
@@ -496,7 +498,11 @@ void JoltContactListener3D::_flush_area_body_events() {
 		clear_contact_scratch(tl.area_exits, MAX_CACHED_AREA_EVENTS);
 	}
 
-	area_overlaps.reserve(new_overlap_count);
+	if (estimated_overlap_count > int64_t(area_overlaps.size())) {
+		// Reserve is only an optimization: leave the container to grow on
+		// demand if duplicate exits made the estimate too small.
+		area_overlaps.reserve(uint32_t(MIN(estimated_overlap_count, int64_t(UINT32_MAX))));
+	}
 
 	for (ThreadLocals &tl : ThreadLocals::instances) {
 		for (const JPH::SubShapeIDPair &shape_pair : tl.area_enters) {
