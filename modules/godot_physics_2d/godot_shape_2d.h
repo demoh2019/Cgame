@@ -286,6 +286,10 @@ public:
 	virtual bool contains_point(const Vector2 &p_point) const override;
 	virtual bool intersect_segment(const Vector2 &p_begin, const Vector2 &p_end, Vector2 &r_point, Vector2 &r_normal) const override;
 	virtual real_t get_moment_of_inertia(real_t p_mass, const Size2 &p_scale) const override;
+	virtual real_t get_moment_of_inertia_transformed(real_t p_mass, const Transform2D &p_transform) const override { 
+		return p_mass * radius * radius * real_t(0.25) *
+				(p_transform.columns[0].length_squared() + p_transform.columns[1].length_squared());
+	}
 	virtual real_t get_mass_area() const override { return real_t(Math_PI) * radius * radius; }
 
 	virtual void set_data(const Variant &p_data) override;
@@ -320,6 +324,11 @@ public:
 	virtual bool contains_point(const Vector2 &p_point) const override;
 	virtual bool intersect_segment(const Vector2 &p_begin, const Vector2 &p_end, Vector2 &r_point, Vector2 &r_normal) const override;
 	virtual real_t get_moment_of_inertia(real_t p_mass, const Size2 &p_scale) const override;
+	virtual real_t get_moment_of_inertia_transformed(real_t p_mass, const Transform2D &p_transform) const override {
+		return p_mass * real_t(1.0 / 3.0) *
+				(half_extents.x * half_extents.x * p_transform.columns[0].length_squared() +
+					half_extents.y * half_extents.y * p_transform.columns[1].length_squared());
+	}
 	virtual real_t get_mass_area() const override { return real_t(4.0) * Math::abs(half_extents.x * half_extents.y); }
 
 	virtual void set_data(const Variant &p_data) override;
@@ -377,6 +386,7 @@ public:
 class GodotCapsuleShape2D : public GodotShape2D {
 	real_t radius = 0.0;
 	real_t height = 0.0;
+	Vector2 _get_second_moments() const;
 
 public:
 	_FORCE_INLINE_ const real_t &get_radius() const { return radius; }
@@ -390,6 +400,7 @@ public:
 	virtual bool contains_point(const Vector2 &p_point) const override;
 	virtual bool intersect_segment(const Vector2 &p_begin, const Vector2 &p_end, Vector2 &r_point, Vector2 &r_normal) const override;
 	virtual real_t get_moment_of_inertia(real_t p_mass, const Size2 &p_scale) const override;
+	virtual real_t get_moment_of_inertia_transformed(real_t p_mass, const Transform2D &p_transform) const override;
 	virtual real_t get_mass_area() const override {
 		return real_t(Math_PI) * radius * radius + real_t(2.0) * radius * MAX(height - real_t(2.0) * radius, real_t(0.0));
 	}

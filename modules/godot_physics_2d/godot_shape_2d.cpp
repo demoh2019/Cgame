@@ -459,9 +459,40 @@ bool GodotCapsuleShape2D::intersect_segment(const Vector2 &p_begin, const Vector
 	return collided; //todo
 }
 
+Vector2 GodotCapsuleShape2D::_get_second_moments() const {
+	const double r = double(radius);
+	const double straight_height = double(height) - 2.0 * r;
+	const double cap_area = Math_PI * r * r;
+	const double rect_area = 2.0 * r * straight_height;
+	const double total_area = cap_area + rect_area;
+
+	// Exact second moments of a vertical capsule about its centroid.
+	// Combine the central rectangle with two semicircular end caps using
+	// the parallel-axis theorem, including the semicircle centroid shift.
+	const double second_x = (rect_area * r * r / 3.0 + cap_area * r * r / 4.0) / total_area;
+	const double second_y = (rect_area * straight_height * straight_height / 12.0 +
+			cap_area * (r * r / 4.0 + straight_height * straight_height / 4.0) +
+			4.0 * straight_height * r * r * r / 3.0) / total_area;
+	return Vector2(real_t(second_x), real_t(second_y));
+}
+
 real_t GodotCapsuleShape2D::get_moment_of_inertia(real_t p_mass, const Size2 &p_scale) const {
-	Vector2 he2 = Vector2(radius * 2, height) * p_scale;
-	return p_mass * he2.dot(he2) / 12.0;
+	if (radius <= 0.0 || height < 2.0 * radius) {
+		// Preserve the previous bounded estimate for temporarily invalid shape data.
+		const Vector2 bounds = Vector2(radius * 2.0, height) * p_scale;
+		return p_mass * bounds.length_squared() / 12.0;
+	}
+	const Vector2 moments = _get_second_moments();
+	return p_mass * (moments.x * p_scale.x * p_scale.x + moments.y * p_scale.y * p_scale.y);
+}
+
+real_t GodotCapsuleShape2D::get_moment_of_inertia_transformed(real_t p_mass, const Transform2D &p_transform) const {
+	if (radius <= 0.0 || height < 2.0 * radius) {
+		return get_moment_of_inertia(p_mass, p_transform.get_scale());
+	}
+	const Vector2 moments = _get_second_moments();
+	return p_mass * (moments.x * p_transform.columns[0].length_squared() +
+			moments.y * p_transform.columns[1].length_squared());
 }
 
 void GodotCapsuleShape2D::set_data(const Variant &p_data) {
