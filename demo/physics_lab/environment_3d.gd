@@ -12,6 +12,8 @@ var _camera: Camera3D
 var _water: Area3D
 var _water_shape: BoxShape3D
 var _water_mesh: BoxMesh
+var _water_surface: MeshInstance3D
+var _surface_shader: ShaderMaterial
 var _wind_label: Label3D
 var _status: Label
 var _water_height := 2.6
@@ -74,6 +76,30 @@ func _create_water() -> void:
     visual.mesh = _water_mesh
     visual.material_override = _make_material(Color(0.12, 0.54, 0.93, 0.23))
     _water.add_child(visual)
+    _water_surface = MeshInstance3D.new()
+    _water_surface.name = "AnimatedSurface"
+    var surface_mesh := PlaneMesh.new()
+    surface_mesh.size = WATER_SIZE
+    surface_mesh.subdivide_width = 28
+    surface_mesh.subdivide_depth = 28
+    _water_surface.mesh = surface_mesh
+    var shader := Shader.new()
+    shader.code = """
+shader_type spatial;
+render_mode unshaded, cull_disabled;
+uniform float amplitude = 0.22;
+void vertex() {
+    VERTEX.y += amplitude * sin(TIME * 2.5 + VERTEX.x * 0.8) * cos(TIME * 0.7 + VERTEX.z * 0.3);
+}
+void fragment() {
+    ALBEDO = vec3(0.13, 0.75, 0.97);
+    ALPHA = 0.52;
+}
+"""
+    _surface_shader = ShaderMaterial.new()
+    _surface_shader.shader = shader
+    _water_surface.material_override = _surface_shader
+    _water.add_child(_water_surface)
     _set_water_height(_water_height)
     # Visible boundaries give the basin physical walls, but the water itself
     # does not create solid contacts.
@@ -115,6 +141,8 @@ func _set_water_height(level: float) -> void:
     var dimensions := Vector3(WATER_SIZE.x, _water_height, WATER_SIZE.y)
     _water_shape.size = dimensions
     _water_mesh.size = dimensions
+    if _water_surface != null:
+        _water_surface.position.y = _water_height * 0.5 + 0.03
     _update_status()
 
 
@@ -280,6 +308,8 @@ func _toggle_magnet() -> void:
 
 func _toggle_waves() -> void:
     _waves = not _waves
+    if _surface_shader != null:
+        _surface_shader.set_shader_parameter("amplitude", 0.22 if _waves else 0.0)
     _update_status()
 
 
