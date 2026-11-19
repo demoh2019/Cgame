@@ -72,7 +72,7 @@ static func validate(raw: Variant) -> Dictionary:
 static func apply(raw: Variant) -> Dictionary:
 	var plan := validate(raw)
 	if not plan["ok"]:
-		return {"ok": false, "error": "; ".join(plan["errors"]), "written": []}
+		return {"ok": false, "error": "; ".join(PackedStringArray(plan["errors"])), "written": []}
 
 	# Preflight every file before changing anything. No silent overwrites.
 	var originals := {}
