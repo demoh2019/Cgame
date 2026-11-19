@@ -31,6 +31,7 @@
 
 #include "core/math/vector2.h"
 #include "core/math/vector3.h"
+#include "servers/physics_ccd_sphere_toi.h"
 
 // Return an unpenetrated contact for an approaching pair of actual circles
 // or spheres, not the inflated points from a shape-margin SAT query.
@@ -62,11 +63,14 @@ _FORCE_INLINE_ bool physics_speculative_sphere_contact(
 		return false;
 	}
 	const Vector normal = center_delta / distance;
-	const real_t closing_speed = -(p_velocity_b - p_velocity_a).dot(normal);
-	// A speculative constraint is only needed when this pair would reach
-	// its surface in the current step. This excludes all separating and
-	// stationary near-misses without allocating contact storage.
-	if (!Math::is_finite(closing_speed) || !(closing_speed > 0.0 && closing_speed * p_step >= gap)) {
+	// Radial closing speed alone produces ghost contacts for glancing paths
+	// with large tangential motion. Use the exact linear sphere TOI instead:
+	// the pair must actually reach its Minkowski contact surface this step.
+	const Vector relative_motion = (p_velocity_a - p_velocity_b) * p_step;
+	double impact_fraction = 0.0;
+	if (!relative_motion.is_finite() ||
+			!physics_ccd_sphere_toi(-center_delta, relative_motion,
+					double(p_radius_a) + double(p_radius_b), impact_fraction)) {
 		return false;
 	}
 	const Vector point_a = p_center_a + normal * p_radius_a;
