@@ -8,6 +8,7 @@ const WorldGen = preload("res://scripts/shared/world_gen.gd")
 const WorldCycle = preload("res://scripts/shared/world_cycle.gd")
 const ZoneRisk = preload("res://scripts/shared/zone_risk.gd")
 const GameServer = preload("res://scripts/server/game_server.gd")
+const Structures = preload("res://scripts/shared/structures.gd")
 const Vendor = preload("res://scripts/shared/vendor.gd")
 const SurvivalRadar = preload("res://scripts/client/survival_radar.gd")
 const Contracts = preload("res://scripts/shared/contracts.gd")
@@ -84,6 +85,7 @@ func _setup_actions() -> void:
 	_bind_key("survive_lake", KEY_R)
 	_bind_key("survive_build", KEY_U)
 	_bind_key("survive_repair", KEY_H)
+	_bind_key("survive_upgrade", KEY_Y)
 	_bind_key("survive_dismantle", KEY_X)
 	_bind_key("survive_vendor_buy", KEY_N)
 	_bind_key("survive_vendor_sell", KEY_V)
@@ -360,12 +362,14 @@ func _sync_barricades() -> void:
 		var structure: StaticBody3D = _barricade_bodies[id]
 		structure.position = point
 		var visual: MeshInstance3D = structure.get_node("Body")
-		var health_fraction := clampf(float(wall["hp"]) / 120.0, 0.0, 1.0)
+		var wall_tier: int = Structures.tier_of(wall)
+		var max_hp: float = Structures.max_health(wall_tier)
+		var health_fraction := clampf(float(wall["hp"]) / maxf(max_hp, 1.0), 0.0, 1.0)
 		var material: StandardMaterial3D = visual.material_override
 		if material == null or material == _materials.get(str(Color(0.57, 0.40, 0.23))):
 			material = StandardMaterial3D.new()
 			visual.material_override = material
-		material.albedo_color = Color(0.27, 0.20, 0.17).lerp(Color(0.64, 0.48, 0.3), health_fraction)
+		material.albedo_color = Color(0.20, 0.18, 0.18).lerp(Structures.color_for_tier(wall_tier), health_fraction)
 	for id in _barricade_bodies.keys():
 		if not active.has(id):
 			_barricade_bodies[id].queue_free()
@@ -619,7 +623,14 @@ func _unhandled_input(event: InputEvent) -> void:
 			_feedback = "Repair: aim toward a nearby barricade"
 		else:
 			_result("Repair barricade", sim.cmd_repair(LOCAL_PLAYER_ID, wall_id))
-	elif event.is_action_pressed("survive_dismantle"):
+	elif event.is_action_pressed("survive_upgrade"):
+		var wall_id := _nearest_barricade()
+		if wall_id == -1:
+			_feedback = "Upgrade: aim toward your nearby barricade"
+		else:
+			_result("Upgrade barricade", sim.cmd_upgrade(LOCAL_PLAYER_ID, wall_id))
+		_update_hud()
+		elif event.is_action_pressed("survive_dismantle"):
 		var wall_id := _nearest_barricade()
 		if wall_id == -1:
 			_feedback = "Dismantle: aim toward your nearby barricade"
@@ -670,7 +681,7 @@ func _update_hud() -> void:
 	var recipe_id: String = _recipes[_recipe_index] if not _recipes.is_empty() else "bandage"
 	var recipe: Dictionary = Defs.recipes().get(recipe_id, {})
 	var near_bench: bool = Vector2(position.x, position.z).distance_to(GameServer.WORKBENCH_POSITION) < GameServer.WORKBENCH_RANGE
-	_instructions.text = "WASD move | Shift sprint | E gather | Q loot | F attack | G heavy strike | Space dodge | U build | H repair | X dismantle\nTab / Shift+Tab recipes | C craft | B stash | 1 food 2 water 3 heal 4 weapon 5 armor 6 antiseptic 7 antibiotics R lake\nN buy water / V sell salvage | P accept / Shift+P turn in (hub)\nCRAFT %s -> %s x%d | %s | inputs %s\n%s" % [
+	_instructions.text = "WASD move | Shift sprint | E gather | Q loot | F attack | G heavy strike | Space dodge | U build | H repair | Y upgrade | X dismantle\nTab / Shift+Tab recipes | C craft | B stash | 1 food 2 water 3 heal 4 weapon 5 armor 6 antiseptic 7 antibiotics R lake\nN buy water / V sell salvage | P accept / Shift+P turn in (hub)\nCRAFT %s -> %s x%d | %s | inputs %s\n%s" % [
 		recipe_id, str(recipe.get("output", "")), int(recipe.get("count", 0)),
 		"WORKBENCH" if near_bench else "workbench at x=9, z=0",
 		str(recipe.get("inputs", {})), _feedback
