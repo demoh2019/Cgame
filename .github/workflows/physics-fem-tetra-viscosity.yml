@@ -1,0 +1,32 @@
+name: SoftBody FEM objective viscosity physical contracts
+
+on:
+  pull_request:
+    paths:
+      - "servers/physics_fem_tetra_viscosity.h"
+      - "modules/godot_physics_3d/godot_soft_body_3d.cpp"
+      - "modules/godot_physics_3d/godot_space_3d.cpp"
+      - "modules/godot_physics_3d/godot_space_3d.h"
+      - "servers/physics_3d/physics_server_3d.cpp"
+      - "tests/servers/test_physics_fem_tetra_viscosity.cpp"
+      - "tests/stress/test_physics_fem_tetra_viscosity.py"
+      - ".github/workflows/physics-fem-tetra-viscosity.yml"
+  push:
+    branches: [develop]
+    paths:
+      - "servers/physics_fem_tetra_viscosity.h"
+      - "modules/godot_physics_3d/godot_soft_body_3d.cpp"
+      - "tests/stress/test_physics_fem_tetra_viscosity.py"
+      - ".github/workflows/physics-fem-tetra-viscosity.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  analytical-reference:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Verify objective viscosity physical invariants and wiring
+        run: python3 -m unittest discover -s tests/stress -p test_physics_fem_tetra_viscosity.py -v
