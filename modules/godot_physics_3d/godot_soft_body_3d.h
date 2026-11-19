@@ -83,6 +83,10 @@ class GodotSoftBody3D : public GodotCollisionObject3D {
 	LocalVector<real_t> xpbd_link_lambdas;
 	// One compliance multiplier per triangle, allocated only in area-XPBD mode.
 	LocalVector<real_t> xpbd_area_lambdas;
+	// Allocated only for positive volume compliance on a closed soft mesh.
+	LocalVector<Vector3> xpbd_volume_gradients;
+	double xpbd_volume_rest = 0.0;
+	bool xpbd_volume_closed = false;
 	LocalVector<Face> faces;
 	// Number of particles with nonzero inverse mass. Maintained on pin,
 	// unpin and mesh rebuild for O(1) central impulse/force normalization.
@@ -238,6 +242,8 @@ private:
 	void update_bounds();
 	void update_constants();
 	void update_area();
+	void initialize_volume_constraint();
+	bool solve_volume_constraint(double p_alpha, double &r_lambda);
 	void reset_link_rest_lengths();
 	void update_link_constants();
 
