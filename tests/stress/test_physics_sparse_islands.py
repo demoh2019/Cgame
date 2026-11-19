@@ -22,21 +22,22 @@ class SparsePhysicsIslandTests(unittest.TestCase):
                 self.assertIn("body_island.clear()", source)
                 self.assertIn("constraint_island.clear()", source)
 
-    def test_physics_step_avoids_worker_pool_for_zero_or_one_work_item(self):
-        """No lock/group/task allocation for idle steps or one-item batches."""
+    def test_physics_step_avoids_worker_pool_for_small_batches(self):
+        """No group creation for tiny setup batches or few solve islands."""
         for dimension in ("2d", "3d"):
             source = (
                 ROOT / "modules" / f"godot_physics_{dimension}" /
                 f"godot_step_{dimension}.cpp"
             ).read_text(encoding="utf-8")
             with self.subTest(dimension=dimension):
-                self.assertIn("if (total_constraint_count == 1)", source)
-                self.assertIn("_setup_constraint(0, nullptr);", source)
-                self.assertIn("else if (total_constraint_count > 1)", source)
-                self.assertIn("if (island_count == 1)", source)
+                self.assertIn("MIN_PARALLEL_SETUP_CONSTRAINTS = 32", source)
+                self.assertIn("MIN_PARALLEL_SOLVE_ISLANDS = 16", source)
+                self.assertIn("if (total_constraint_count < MIN_PARALLEL_SETUP_CONSTRAINTS)", source)
+                self.assertIn("_setup_constraint(constraint_index, nullptr);", source)
+                self.assertIn("else if (solve_island_count < MIN_PARALLEL_SOLVE_ISLANDS)", source)
+                self.assertIn("_solve_island(island_index, nullptr);", source)
                 self.assertIn("_solve_island(0, nullptr);", source)
-                self.assertIn("else if (island_count > 1)", source)
-                # At least two independent islands still use the parallel path.
+                # Larger workloads still reach the parallel thread pool.
                 self.assertIn("add_template_group_task", source)
                 self.assertIn("wait_for_group_task_completion(group_task)", source)
 
