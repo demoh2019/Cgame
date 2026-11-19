@@ -625,6 +625,133 @@ TEST_CASE("[Terrain3D][Collision] Painting colors cannot change the physics geom
 	memdelete(terrain);
 }
 
+
+TEST_CASE("[Terrain3D][Collision] The collision API is exposed to scripts") {
+	HeightmapTerrain3D *terrain = memnew(HeightmapTerrain3D);
+	CHECK(terrain->has_method("create_collision_shape"));
+	CHECK(terrain->create_collision_shape().is_valid());
+	memdelete(terrain);
+}
+
+TEST_CASE("[Terrain3D][Collision] Negative sample heights are preserved") {
+	HeightmapTerrain3D *terrain = memnew(HeightmapTerrain3D);
+	terrain->set_grid_size(Vector2i(3, 3));
+	terrain->set_height_at(1, 1, -5);
+	const Ref<ConcavePolygonShape3D> shape = terrain->create_collision_shape();
+	REQUIRE(shape.is_valid());
+	bool found_trough = false;
+	for (const Vector3 &vertex : shape->get_faces()) {
+		if (Math::is_equal_approx(vertex.y, (real_t)-5)) {
+			found_trough = true;
+		}
+	}
+	CHECK(found_trough);
+	memdelete(terrain);
+}
+
+TEST_CASE("[Terrain3D][Collision] Resizing the terrain does not mutate an old snapshot") {
+	HeightmapTerrain3D *terrain = memnew(HeightmapTerrain3D);
+	terrain->set_grid_size(Vector2i(2, 2));
+	Ref<ConcavePolygonShape3D> previous = terrain->create_collision_shape();
+	REQUIRE(previous.is_valid());
+	CHECK(previous->get_faces().size() == 6);
+	terrain->set_grid_size(Vector2i(7, 4));
+	Ref<ConcavePolygonShape3D> current = terrain->create_collision_shape();
+	REQUIRE(current.is_valid());
+	CHECK(current->get_faces().size() == 6 * 3 * 6);
+	CHECK(previous->get_faces().size() == 6);
+	memdelete(terrain);
+}
+
+TEST_CASE("[Terrain3D][Collision] Bulk height replacement changes physics geometry") {
+	HeightmapTerrain3D *terrain = memnew(HeightmapTerrain3D);
+	terrain->set_grid_size(Vector2i(3, 2));
+	PackedFloat32Array heights = terrain->get_height_data();
+	heights.set(5, 11);
+	terrain->set_height_data(heights);
+	Ref<ConcavePolygonShape3D> shape = terrain->create_collision_shape();
+	REQUIRE(shape.is_valid());
+	bool found_peak = false;
+	for (const Vector3 &vertex : shape->get_faces()) {
+		if (Math::is_equal_approx(vertex.y, (real_t)11)) {
+			found_peak = true;
+		}
+	}
+	CHECK(found_peak);
+	memdelete(terrain);
+}
+
+TEST_CASE("[Terrain3D][Collision] Sculpting changes the next collision snapshot") {
+	HeightmapTerrain3D *terrain = memnew(HeightmapTerrain3D);
+	terrain->set_grid_size(Vector2i(5, 5));
+	const Ref<ConcavePolygonShape3D> before = terrain->create_collision_shape();
+	REQUIRE(before.is_valid());
+	terrain->sculpt(Vector2(2, 2), 1.5, 4);
+	const Ref<ConcavePolygonShape3D> after = terrain->create_collision_shape();
+	REQUIRE(after.is_valid());
+	CHECK(before->get_faces() != after->get_faces());
+	CHECK(before->get_faces().size() == after->get_faces().size());
+	memdelete(terrain);
+}
+
+TEST_CASE("[Terrain3D][Collision] Importing a grayscale heightmap changes physics heights") {
+	HeightmapTerrain3D *terrain = memnew(HeightmapTerrain3D);
+	Ref<Image> image = Image::create_empty(2, 3, false, Image::FORMAT_RGBA8);
+	REQUIRE(image.is_valid());
+	image->fill(Color(1, 1, 1));
+	terrain->import_heightmap(image, -2, 9);
+	const Ref<ConcavePolygonShape3D> shape = terrain->create_collision_shape();
+	REQUIRE(shape.is_valid());
+	CHECK(shape->get_faces().size() == 2 * 1 * 6);
+	for (const Vector3 &vertex : shape->get_faces()) {
+		CHECK(Math::is_equal_approx(vertex.y, (real_t)9));
+	}
+	memdelete(terrain);
+}
+
+TEST_CASE("[Terrain3D][Collision] Collision is generated in terrain-local coordinates") {
+	HeightmapTerrain3D *terrain = memnew(HeightmapTerrain3D);
+	terrain->set_grid_size(Vector2i(2, 2));
+	const Ref<ConcavePolygonShape3D> before = terrain->create_collision_shape();
+	REQUIRE(before.is_valid());
+	terrain->set_position(Vector3(100, 2, -20));
+	terrain->set_rotation(Vector3(0, 1, 0));
+	const Ref<ConcavePolygonShape3D> after = terrain->create_collision_shape();
+	REQUIRE(after.is_valid());
+	CHECK(before->get_faces() == after->get_faces());
+	memdelete(terrain);
+}
+
+TEST_CASE("[Terrain3D][Collision] Thermal erosion requires a regenerated collision shape") {
+	HeightmapTerrain3D *terrain = memnew(HeightmapTerrain3D);
+	terrain->set_grid_size(Vector2i(5, 5));
+	terrain->set_height_at(2, 2, 16);
+	const Ref<ConcavePolygonShape3D> before = terrain->create_collision_shape();
+	REQUIRE(before.is_valid());
+	terrain->erode_thermal(4, 0, 1);
+	const Ref<ConcavePolygonShape3D> after = terrain->create_collision_shape();
+	REQUIRE(after.is_valid());
+	CHECK(before->get_faces() != after->get_faces());
+	CHECK(before->get_faces().size() == after->get_faces().size());
+	memdelete(terrain);
+}
+
+TEST_CASE("[Terrain3D][Collision] Invalid height edits leave existing triangle positions unchanged") {
+	HeightmapTerrain3D *terrain = memnew(HeightmapTerrain3D);
+	terrain->set_grid_size(Vector2i(3, 3));
+	const Ref<ConcavePolygonShape3D> before = terrain->create_collision_shape();
+	REQUIRE(before.is_valid());
+	ERR_PRINT_OFF
+	terrain->set_height_at(-1, 0, 6);
+	terrain->set_height_at(3, 0, 6);
+	terrain->set_height_at(1, 1, INF);
+	ERR_PRINT_ON
+	const Ref<ConcavePolygonShape3D> after = terrain->create_collision_shape();
+	REQUIRE(after.is_valid());
+	CHECK(before->get_faces() == after->get_faces());
+	memdelete(terrain);
+}
+
 #endif // PHYSICS_3D_DISABLED
 
 } // namespace TestTerrain3D
