@@ -51,6 +51,12 @@
 				An impulse is time-independent! Applying an impulse every frame would result in a framerate-dependent force. For this reason, it should only be used when simulating one-time impacts (use the "_force" functions otherwise).
 			</description>
 		</method>
+		<method name="get_tetrahedral_indices" qualifiers="const">
+			<return type="PackedInt32Array" />
+			<description>
+				Returns the experimental FEM tetrahedral connectivity, as quadruplets of visual mesh vertex indices.
+			</description>
+		</method>
 		<method name="get_collision_exceptions">
 			<return type="PhysicsBody3D[]" />
 			<description>
@@ -114,6 +120,13 @@
 				Based on [param value], enables or disables the specified layer in the [member collision_mask], given a [param layer_number] between 1 and 32.
 			</description>
 		</method>
+		<method name="set_tetrahedral_indices">
+			<return type="void" />
+			<param index="0" name="indices" type="PackedInt32Array" />
+			<description>
+				Sets explicit tetrahedral connectivity for the experimental GodotPhysics3D soft-body FEM solver. Each four indices reference the mesh's visual vertices; welded duplicates are mapped to shared physics nodes.
+			</description>
+		</method>
 		<method name="set_point_pinned">
 			<return type="void" />
 			<param index="0" name="point_index" type="int" />
@@ -165,6 +178,10 @@
 		</member>
 		<member name="simulation_precision" type="int" setter="set_simulation_precision" getter="get_simulation_precision" default="5">
 			Increasing this value will improve the resulting simulation, but can affect performance. Use with care.
+		</member>
+		<member name="tetrahedral_indices" type="PackedInt32Array" setter="set_tetrahedral_indices" getter="get_tetrahedral_indices" default="PackedInt32Array()">
+			An optional, pre-cooked list of four visual vertex indices for each volume finite element. In the GodotPhysics3D backend, this bypasses automatic convex tetrahedralization and allows conforming [i]nonconvex[/i] tetrahedral assemblies whose exact boundary triangles match the [SoftBody3D] mesh. All element faces, orientation, finite rest volumes and total enclosed volume are validated; invalid connectivity disables just the experimental FEM path.
+			[b]Note:[/b] Currently only vertices referenced by the visible closed triangle mesh are supported. Interior-only simulation nodes, independent collision geometry and automatic geometric intersection repair are not implemented. Maximum 4096 tetrahedra. The property is ignored by backends that do not implement Cgame's FEM extension.
 		</member>
 		<member name="total_mass" type="float" setter="set_total_mass" getter="get_total_mass" default="1.0">
 			The SoftBody3D's mass.
