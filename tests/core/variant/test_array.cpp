@@ -1006,4 +1006,29 @@ TEST_CASE("[TypeConvertFastPath] typed dictionary stores coerced numeric keys") 
 	CHECK_EQ(dict[Variant(7.0)], Variant(2.0));
 }
 
+TEST_CASE("[TypedContainer] Array Ref<Script> fast path retains Variant compatibility") {
+	Array legacy;
+	legacy.set_typed(Variant::INT, StringName(), Variant());
+	Array direct;
+	direct.set_typed(Variant::INT, StringName(), Ref<Script>());
+	REQUIRE(direct.is_same_typed(legacy));
+
+	Array source = { 5, 10, 15 };
+	Array typed_from_ref(source, Variant::INT, StringName(), Ref<Script>());
+	Array typed_from_variant(source, Variant::INT, StringName(), Variant());
+	REQUIRE(typed_from_ref.is_same_typed(typed_from_variant));
+	REQUIRE_EQ(typed_from_ref.size(), 3);
+	for (int i = 0; i < 3; i++) {
+		CHECK_EQ(typed_from_ref[i], source[i]);
+		CHECK_EQ(typed_from_variant[i], source[i]);
+	}
+
+	for (int i = 0; i < 512; i++) {
+		TypedArray<int> typed;
+		REQUIRE_EQ(typed.get_typed_builtin(), Variant::INT);
+		typed.push_back(i);
+		CHECK_EQ(typed[0], Variant(i));
+	}
+}
+
 } // namespace TestArray
