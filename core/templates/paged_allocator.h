@@ -38,7 +38,8 @@
 #include "core/typedefs.h"
 
 #include <type_traits>
-#include <typeinfo> // IWYU pragma: keep // Used in macro.
+#include <typeinfo>
+#include <utility> // IWYU pragma: keep // Used in macro.
 
 template <typename T, bool thread_safe = false, uint32_t DEFAULT_PAGE_SIZE = 4096>
 class PagedAllocator {
@@ -89,7 +90,8 @@ public:
 		if constexpr (thread_safe) {
 			spin_lock.unlock();
 		}
-		memnew_placement(alloc, T(p_args...));
+		// Preserve rvalue arguments when constructing pooled objects.
+		memnew_placement(alloc, T(std::forward<Args>(p_args)...));
 		return alloc;
 	}
 
@@ -106,7 +108,7 @@ public:
 	}
 
 	template <typename... Args>
-	T *new_allocation(Args &&...p_args) { return alloc(p_args...); }
+	T *new_allocation(Args &&...p_args) { return alloc(std::forward<Args>(p_args)...); }
 	void delete_allocation(T *p_mem) { free(p_mem); }
 
 private:
