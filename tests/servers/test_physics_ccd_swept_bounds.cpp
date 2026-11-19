@@ -51,8 +51,9 @@ TEST_CASE("[PhysicsCCDSweep] 2D rejects misses without rejecting border touches"
 			Rect2(Vector2(4, 5), Vector2(2, 2)), Vector2(10, 0)));
 	CHECK(physics_ccd_swept_bounds_may_overlap(moving,
 			Rect2(Vector2(1, 1), Vector2(2, 2)), Vector2(-10, 0)));
-	// A conservative union can include targets missed by a diagonal sweep.
-	CHECK(physics_ccd_swept_bounds_may_overlap(
+	// The old start/end AABB union included this target even though the
+	// moving box passes above it before reaching the target's X interval.
+	CHECK_FALSE(physics_ccd_swept_bounds_may_overlap(
 			Rect2(Vector2(0, 0), Vector2(1, 1)),
 			Rect2(Vector2(5, 0), Vector2(1, 1)), Vector2(6, 6)));
 }
@@ -69,6 +70,14 @@ TEST_CASE("[PhysicsCCDSweep] 3D rejects misses along any coordinate") {
 	CHECK(physics_ccd_swept_bounds_may_overlap(moving, behind, Vector3(10, 0, 0), real_t(0.1)));
 	CHECK_FALSE(physics_ccd_swept_bounds_may_overlap(moving,
 			AABB(Vector3(8, 0, 4), Vector3(2, 2, 2)), Vector3(10, 0, 0)));
+	// A diagonal false positive of the old union-of-bounds culling.
+	CHECK_FALSE(physics_ccd_swept_bounds_may_overlap(
+			AABB(Vector3(0, 0, 0), Vector3(1, 1, 1)),
+			AABB(Vector3(5, 0, 0), Vector3(1, 1, 1)), Vector3(6, 6, 0)));
+	// A genuine glancing diagonal contact must remain eligible.
+	CHECK(physics_ccd_swept_bounds_may_overlap(
+			AABB(Vector3(0, 0, 0), Vector3(1, 1, 1)),
+			AABB(Vector3(5, 5, 0), Vector3(1, 1, 1)), Vector3(6, 6, 0)));
 }
 
 TEST_CASE("[PhysicsCCDSweep] Sheared shape AABBs remain conservative") {
