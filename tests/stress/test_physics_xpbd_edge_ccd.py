@@ -39,6 +39,47 @@ class SweptEdgeContracts(unittest.TestCase):
             # one root has both segment weights 1/2 (interior).
             self.assertEqual((0.5, 0.5), (0.5, 0.5))
 
+    def test_cubic_coplanarity_coefficients_randomized(self):
+        rng = random.Random(20261120)
+        def sub(a, b):
+            return tuple(x-y for x, y in zip(a, b))
+        def dot(a, b):
+            return sum(x*y for x, y in zip(a, b))
+        def cross(a, b):
+            return (a[1]*b[2]-a[2]*b[1], a[2]*b[0]-a[0]*b[2],
+                    a[0]*b[1]-a[1]*b[0])
+        def add(a, b):
+            return tuple(x+y for x, y in zip(a, b))
+        def mul(a, t):
+            return tuple(x*t for x in a)
+        for _ in range(2000):
+            a0, a1, b0, b1, c0, c1, d0, d1 = [
+                tuple(rng.uniform(-10, 10) for _ in range(3)) for j in range(8)]
+            u0 = sub(b0, a0)
+            du = sub(sub(b1, b0), sub(a1, a0))
+            v0 = sub(d0, c0)
+            dv = sub(sub(d1, d0), sub(c1, c0))
+            w0 = sub(a0, c0)
+            dw = sub(sub(a1, a0), sub(c1, c0))
+            cr0 = cross(u0, v0)
+            cr1 = add(cross(du, v0), cross(u0, dv))
+            cr2 = cross(du, dv)
+            coeff = (dot(w0, cr0),
+                     dot(dw, cr0)+dot(w0, cr1),
+                     dot(dw, cr1)+dot(w0, cr2),
+                     dot(dw, cr2))
+            def interpolate(p, q, t):
+                return add(p, mul(sub(q, p), t))
+            for t in (0.0, 0.13, 0.37, 0.71, 1.0):
+                a = interpolate(a0, a1, t)
+                b = interpolate(b0, b1, t)
+                c = interpolate(c0, c1, t)
+                d = interpolate(d0, d1, t)
+                direct = dot(sub(a, c), cross(sub(b, a), sub(d, c)))
+                poly = ((coeff[3]*t+coeff[2])*t+coeff[1])*t+coeff[0]
+                self.assertAlmostEqual(poly, direct,
+                                       delta=1e-10*max(1.0, abs(direct)))
+
     def test_mass_conservation_and_contact_gap(self):
         rng = random.Random(52656)
         for _ in range(5000):
@@ -85,8 +126,9 @@ class SweptEdgeContracts(unittest.TestCase):
         self.assertIn("if (!na.is_finite() || !nb.is_finite()", kernel)
         self.assertLess(kernel.index("if (!na.is_finite()"), kernel.index("r_a = na;"))
         self.assertIn("PhysicsXPBDEdgeCCDHit hit;", kernel)
+        self.assertIn("double(r_a.x) - double(r_c.x)", kernel)
         self.assertEqual((ROOT / "tests/servers/test_physics_xpbd_edge_ccd.cpp").read_text().count(
-            'TEST_CASE("[PhysicsEdgeCCD]'), 7)
+            'TEST_CASE("[PhysicsEdgeCCD]'), 8)
 
     def test_work_budget_and_no_default_memory(self):
         src = (ROOT / "modules/godot_physics_3d/godot_soft_body_3d.cpp").read_text()
@@ -107,6 +149,13 @@ class SweptEdgeContracts(unittest.TestCase):
         self.assertIn("TEST_FORCE_LINK(test_physics_xpbd_edge_ccd)", native)
         workflow = (ROOT / ".github/workflows/whole-engine-stress.yml").read_text()
         self.assertIn("*[PhysicsEdgeCCD]*", workflow)
+        case = "physics_soft_body_edge_ccd_3d"
+        self.assertIn(f'"{case}"', (STRESS / "run.py").read_text())
+        self.assertIn(f'"{case}":', (STRESS / "stress.gd").read_text())
+        scene = (STRESS / f"{case}.gd").read_text()
+        self.assertIn("discrete.mean_z < -0.2", scene)
+        self.assertIn("continuous.min_z > 0.02", scene)
+        self.assertIn("soft_body_apply_point_impulse(body, j", scene)
 
 
 if __name__ == "__main__":
