@@ -67,8 +67,9 @@ _FORCE_INLINE_ static bool physics_softbody_creep_rest_length(
 		return false;
 	}
 	const real_t next_rest_length = real_t(next);
+	const real_t squared_rest_length = next_rest_length * next_rest_length;
 	if (!(next_rest_length > real_t(0.0)) || !Math::is_finite(next_rest_length) ||
-			!Math::is_finite(next_rest_length * next_rest_length) ||
+			!(squared_rest_length > real_t(0.0)) || !Math::is_finite(squared_rest_length) ||
 			next_rest_length == r_rest_length) {
 		return false;
 	}
