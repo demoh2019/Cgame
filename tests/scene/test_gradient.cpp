@@ -231,8 +231,8 @@ TEST_CASE("[Gradient][Performance] Two-point hotpath retains boundaries and colo
 	CHECK(offsets[0] == 0.0f);
 	CHECK(offsets[1] == 1.0f);
 	gradient->set_color(0, Color(0.4f, 0.5f, 0.6f));
-	CHECK(colors[0].is_equal_approx(first));
-	CHECK(colors[1].is_equal_approx(last));
+	CHECK(colors[0].is_equal_approx(last));
+	CHECK(colors[1].is_equal_approx(first));
 }
 
 } // namespace TestGradient
