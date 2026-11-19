@@ -1,0 +1,33 @@
+name: Script autoload registration regression
+
+on:
+  pull_request:
+    branches: [develop]
+    paths:
+      - "main/main.cpp"
+      - "misc/scripts/tests/test_script_autoload_registration.py"
+      - ".github/workflows/script-autoload-registration.yml"
+  push:
+    branches: [develop]
+    paths:
+      - "main/main.cpp"
+      - "misc/scripts/tests/test_script_autoload_registration.py"
+      - ".github/workflows/script-autoload-registration.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  native-autoload-tests:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        cxx: [g++, clang++]
+    steps:
+      - uses: actions/checkout@v4
+      - name: Run extracted C++ autoload registration tests
+        env:
+          CXX: ${{ matrix.cxx }}
+        run: python3 -m unittest discover -s misc/scripts/tests -p test_script_autoload_registration.py -v
