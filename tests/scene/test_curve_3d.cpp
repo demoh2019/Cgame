@@ -355,4 +355,28 @@ TEST_CASE("[Curve3D] Closest segment projection uses squared length") {
 	CHECK(Math::is_finite(repeated->get_closest_offset(Vector3(5, 2, 3))));
 }
 
+
+TEST_CASE("[Curve3D][Performance] Recursive midpoint reuse preserves closed and baked paths") {
+	Ref<Curve3D> curve = memnew(Curve3D);
+	curve->add_point(Vector3(0, 0, 0), Vector3(), Vector3(4, 18, 3));
+	curve->add_point(Vector3(12, -3, 8), Vector3(-6, 9, 1), Vector3(6, -18, -2));
+	curve->add_point(Vector3(25, 4, 0), Vector3(-4, -12, 2), Vector3());
+	const PackedVector3Array adaptive = curve->tessellate(9, 0.5);
+	const PackedVector3Array even = curve->tessellate_even_length(10, 1.0);
+	REQUIRE(adaptive.size() > 3);
+	REQUIRE(even.size() > 3);
+	CHECK(adaptive[0] == Vector3(0, 0, 0));
+	CHECK(adaptive[adaptive.size() - 1] == Vector3(25, 4, 0));
+	CHECK(even[0] == Vector3(0, 0, 0));
+	CHECK(even[even.size() - 1] == Vector3(25, 4, 0));
+	curve->set_closed(true);
+	const PackedVector3Array closed = curve->tessellate(9, 0.5);
+	REQUIRE(closed.size() > adaptive.size());
+	CHECK(closed[0] == closed[closed.size() - 1]);
+	curve->set_bake_interval(1.0);
+	const PackedVector3Array baked = curve->get_baked_points();
+	REQUIRE(baked.size() > 3);
+	CHECK(baked[0] == baked[baked.size() - 1]);
+}
+
 } // namespace TestCurve3D

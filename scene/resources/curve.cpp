@@ -857,41 +857,37 @@ void Curve2D::mark_dirty() {
 	emit_changed();
 }
 
-void Curve2D::_bake_segment2d(LocalVector<Vector2> &r_bake, real_t p_begin, real_t p_end, const Vector2 &p_a, const Vector2 &p_out, const Vector2 &p_b, const Vector2 &p_in, int p_depth, int p_max_depth, real_t p_cos_threshold) const {
+void Curve2D::_bake_segment2d(LocalVector<Vector2> &r_bake, real_t p_begin, real_t p_end, const Vector2 &p_a, const Vector2 &p_out, const Vector2 &p_b, const Vector2 &p_in, const Vector2 &p_begin_pos, const Vector2 &p_end_pos, int p_depth, int p_max_depth, real_t p_cos_threshold) const {
 	real_t mp = p_begin + (p_end - p_begin) * 0.5;
-	Vector2 beg = p_a.bezier_interpolate(p_a + p_out, p_b + p_in, p_b, p_begin);
 	Vector2 mid = p_a.bezier_interpolate(p_a + p_out, p_b + p_in, p_b, mp);
-	Vector2 end = p_a.bezier_interpolate(p_a + p_out, p_b + p_in, p_b, p_end);
 
-	Vector2 na = (mid - beg).normalized();
-	Vector2 nb = (end - mid).normalized();
+	Vector2 na = (mid - p_begin_pos).normalized();
+	Vector2 nb = (p_end_pos - mid).normalized();
 	real_t dp = na.dot(nb);
 
 	// In-order traversal produces ascending parameter positions without a map.
 	if (p_depth < p_max_depth) {
-		_bake_segment2d(r_bake, p_begin, mp, p_a, p_out, p_b, p_in, p_depth + 1, p_max_depth, p_cos_threshold);
+		_bake_segment2d(r_bake, p_begin, mp, p_a, p_out, p_b, p_in, p_begin_pos, mid, p_depth + 1, p_max_depth, p_cos_threshold);
 	}
 	if (dp < p_cos_threshold) {
 		r_bake.push_back(mid);
 	}
 	if (p_depth < p_max_depth) {
-		_bake_segment2d(r_bake, mp, p_end, p_a, p_out, p_b, p_in, p_depth + 1, p_max_depth, p_cos_threshold);
+		_bake_segment2d(r_bake, mp, p_end, p_a, p_out, p_b, p_in, mid, p_end_pos, p_depth + 1, p_max_depth, p_cos_threshold);
 	}
 }
 
-void Curve2D::_bake_segment2d_even_length(LocalVector<Pair<real_t, Vector2>> &r_bake, real_t p_begin, real_t p_end, const Vector2 &p_a, const Vector2 &p_out, const Vector2 &p_b, const Vector2 &p_in, int p_depth, int p_max_depth, real_t p_length) const {
-	Vector2 beg = p_a.bezier_interpolate(p_a + p_out, p_b + p_in, p_b, p_begin);
-	Vector2 end = p_a.bezier_interpolate(p_a + p_out, p_b + p_in, p_b, p_end);
+void Curve2D::_bake_segment2d_even_length(LocalVector<Pair<real_t, Vector2>> &r_bake, real_t p_begin, real_t p_end, const Vector2 &p_a, const Vector2 &p_out, const Vector2 &p_b, const Vector2 &p_in, const Vector2 &p_begin_pos, const Vector2 &p_end_pos, int p_depth, int p_max_depth, real_t p_length) const {
 
-	real_t length = beg.distance_to(end);
+	real_t length = p_begin_pos.distance_to(p_end_pos);
 
 	if (length > p_length && p_depth < p_max_depth) {
 		real_t mp = (p_begin + p_end) * 0.5;
 		Vector2 mid = p_a.bezier_interpolate(p_a + p_out, p_b + p_in, p_b, mp);
 		// Left, midpoint, right: parametric order without sorting or map nodes.
-		_bake_segment2d_even_length(r_bake, p_begin, mp, p_a, p_out, p_b, p_in, p_depth + 1, p_max_depth, p_length);
+		_bake_segment2d_even_length(r_bake, p_begin, mp, p_a, p_out, p_b, p_in, p_begin_pos, mid, p_depth + 1, p_max_depth, p_length);
 		r_bake.push_back(Pair<real_t, Vector2>(mp, mid));
-		_bake_segment2d_even_length(r_bake, mp, p_end, p_a, p_out, p_b, p_in, p_depth + 1, p_max_depth, p_length);
+		_bake_segment2d_even_length(r_bake, mp, p_end, p_a, p_out, p_b, p_in, mid, p_end_pos, p_depth + 1, p_max_depth, p_length);
 	}
 }
 
@@ -1290,7 +1286,7 @@ PackedVector2Array Curve2D::tessellate(int p_max_stages, real_t p_tolerance) con
 	result.push_back(points[0].position);
 	const real_t cos_threshold = Math::cos(Math::deg_to_rad(p_tolerance));
 	for (uint32_t i = 0; i + 1 < points.size(); ++i) {
-		_bake_segment2d(result, 0, 1, points[i].position, points[i].out, points[i + 1].position, points[i + 1].in, 0, p_max_stages, cos_threshold);
+		_bake_segment2d(result, 0, 1, points[i].position, points[i].out, points[i + 1].position, points[i + 1].in, points[i].position, points[i + 1].position, 0, p_max_stages, cos_threshold);
 		result.push_back(points[i + 1].position);
 	}
 
@@ -1308,7 +1304,7 @@ Vector<LocalVector<Pair<real_t, Vector2>>> Curve2D::_tessellate_even_length(int 
 	midpoints.resize(points.size() - 1);
 
 	for (uint32_t i = 0; i < points.size() - 1; i++) {
-		_bake_segment2d_even_length(midpoints.write[i], 0, 1, points[i].position, points[i].out, points[i + 1].position, points[i + 1].in, 0, p_max_stages, p_length);
+		_bake_segment2d_even_length(midpoints.write[i], 0, 1, points[i].position, points[i].out, points[i + 1].position, points[i + 1].in, points[i].position, points[i + 1].position, 0, p_max_stages, p_length);
 	}
 	return midpoints;
 }
@@ -1565,41 +1561,37 @@ void Curve3D::mark_dirty() {
 	emit_changed();
 }
 
-void Curve3D::_bake_segment3d(LocalVector<Vector3> &r_bake, real_t p_begin, real_t p_end, const Vector3 &p_a, const Vector3 &p_out, const Vector3 &p_b, const Vector3 &p_in, int p_depth, int p_max_depth, real_t p_cos_threshold) const {
+void Curve3D::_bake_segment3d(LocalVector<Vector3> &r_bake, real_t p_begin, real_t p_end, const Vector3 &p_a, const Vector3 &p_out, const Vector3 &p_b, const Vector3 &p_in, const Vector3 &p_begin_pos, const Vector3 &p_end_pos, int p_depth, int p_max_depth, real_t p_cos_threshold) const {
 	real_t mp = p_begin + (p_end - p_begin) * 0.5;
-	Vector3 beg = p_a.bezier_interpolate(p_a + p_out, p_b + p_in, p_b, p_begin);
 	Vector3 mid = p_a.bezier_interpolate(p_a + p_out, p_b + p_in, p_b, mp);
-	Vector3 end = p_a.bezier_interpolate(p_a + p_out, p_b + p_in, p_b, p_end);
 
-	Vector3 na = (mid - beg).normalized();
-	Vector3 nb = (end - mid).normalized();
+	Vector3 na = (mid - p_begin_pos).normalized();
+	Vector3 nb = (p_end_pos - mid).normalized();
 	real_t dp = na.dot(nb);
 
 	// In-order traversal produces ascending parameter positions without a map.
 	if (p_depth < p_max_depth) {
-		_bake_segment3d(r_bake, p_begin, mp, p_a, p_out, p_b, p_in, p_depth + 1, p_max_depth, p_cos_threshold);
+		_bake_segment3d(r_bake, p_begin, mp, p_a, p_out, p_b, p_in, p_begin_pos, mid, p_depth + 1, p_max_depth, p_cos_threshold);
 	}
 	if (dp < p_cos_threshold) {
 		r_bake.push_back(mid);
 	}
 	if (p_depth < p_max_depth) {
-		_bake_segment3d(r_bake, mp, p_end, p_a, p_out, p_b, p_in, p_depth + 1, p_max_depth, p_cos_threshold);
+		_bake_segment3d(r_bake, mp, p_end, p_a, p_out, p_b, p_in, mid, p_end_pos, p_depth + 1, p_max_depth, p_cos_threshold);
 	}
 }
 
-void Curve3D::_bake_segment3d_even_length(LocalVector<Pair<real_t, Vector3>> &r_bake, real_t p_begin, real_t p_end, const Vector3 &p_a, const Vector3 &p_out, const Vector3 &p_b, const Vector3 &p_in, int p_depth, int p_max_depth, real_t p_length) const {
-	Vector3 beg = p_a.bezier_interpolate(p_a + p_out, p_b + p_in, p_b, p_begin);
-	Vector3 end = p_a.bezier_interpolate(p_a + p_out, p_b + p_in, p_b, p_end);
+void Curve3D::_bake_segment3d_even_length(LocalVector<Pair<real_t, Vector3>> &r_bake, real_t p_begin, real_t p_end, const Vector3 &p_a, const Vector3 &p_out, const Vector3 &p_b, const Vector3 &p_in, const Vector3 &p_begin_pos, const Vector3 &p_end_pos, int p_depth, int p_max_depth, real_t p_length) const {
 
-	real_t length = beg.distance_to(end);
+	real_t length = p_begin_pos.distance_to(p_end_pos);
 
 	if (length > p_length && p_depth < p_max_depth) {
 		real_t mp = (p_begin + p_end) * 0.5;
 		Vector3 mid = p_a.bezier_interpolate(p_a + p_out, p_b + p_in, p_b, mp);
 		// Left, midpoint, right: parametric order without sorting or map nodes.
-		_bake_segment3d_even_length(r_bake, p_begin, mp, p_a, p_out, p_b, p_in, p_depth + 1, p_max_depth, p_length);
+		_bake_segment3d_even_length(r_bake, p_begin, mp, p_a, p_out, p_b, p_in, p_begin_pos, mid, p_depth + 1, p_max_depth, p_length);
 		r_bake.push_back(Pair<real_t, Vector3>(mp, mid));
-		_bake_segment3d_even_length(r_bake, mp, p_end, p_a, p_out, p_b, p_in, p_depth + 1, p_max_depth, p_length);
+		_bake_segment3d_even_length(r_bake, mp, p_end, p_a, p_out, p_b, p_in, mid, p_end_pos, p_depth + 1, p_max_depth, p_length);
 	}
 }
 
@@ -2282,7 +2274,7 @@ PackedVector3Array Curve3D::tessellate(int p_max_stages, real_t p_tolerance) con
 	const int num_intervals = closed ? point_count : point_count - 1;
 	for (int i = 0; i < num_intervals; ++i) {
 		const int next = i + 1 == point_count ? 0 : i + 1;
-		_bake_segment3d(result, 0, 1, points[i].position, points[i].out, points[next].position, points[next].in, 0, p_max_stages, cos_threshold);
+		_bake_segment3d(result, 0, 1, points[i].position, points[i].out, points[next].position, points[next].in, points[i].position, points[next].position, 0, p_max_stages, cos_threshold);
 		result.push_back(points[next].position);
 	}
 
@@ -2302,9 +2294,9 @@ Vector<LocalVector<Pair<real_t, Vector3>>> Curve3D::_tessellate_even_length(int 
 
 	for (int i = 0; i < num_intervals; i++) {
 		if (!closed || i < num_intervals - 1) {
-			_bake_segment3d_even_length(midpoints.write[i], 0, 1, points[i].position, points[i].out, points[i + 1].position, points[i + 1].in, 0, p_max_stages, p_length);
+			_bake_segment3d_even_length(midpoints.write[i], 0, 1, points[i].position, points[i].out, points[i + 1].position, points[i + 1].in, points[i].position, points[i + 1].position, 0, p_max_stages, p_length);
 		} else {
-			_bake_segment3d_even_length(midpoints.write[i], 0, 1, points[i].position, points[i].out, points[0].position, points[0].in, 0, p_max_stages, p_length);
+			_bake_segment3d_even_length(midpoints.write[i], 0, 1, points[i].position, points[i].out, points[0].position, points[0].in, points[i].position, points[0].position, 0, p_max_stages, p_length);
 		}
 	}
 	return midpoints;

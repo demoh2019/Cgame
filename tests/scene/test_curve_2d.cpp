@@ -357,4 +357,31 @@ TEST_CASE("[Curve2D] Closest segment projection uses squared length") {
 	CHECK(Math::is_finite(repeated->get_closest_offset(Vector2(5, 2))));
 }
 
+
+TEST_CASE("[Curve2D][Performance] Recursive midpoint reuse preserves adaptive and baked outputs") {
+	Ref<Curve2D> curve = memnew(Curve2D);
+	curve->add_point(Vector2(0, 0), Vector2(), Vector2(4, 20));
+	curve->add_point(Vector2(12, -3), Vector2(-6, 9), Vector2(6, -18));
+	curve->add_point(Vector2(25, 4), Vector2(-4, -12), Vector2());
+	const PackedVector2Array adaptive = curve->tessellate(9, 0.5);
+	const PackedVector2Array even = curve->tessellate_even_length(10, 1.0);
+	REQUIRE(adaptive.size() > 3);
+	REQUIRE(even.size() > 3);
+	CHECK(adaptive[0] == Vector2(0, 0));
+	CHECK(adaptive[adaptive.size() - 1] == Vector2(25, 4));
+	CHECK(even[0] == Vector2(0, 0));
+	CHECK(even[even.size() - 1] == Vector2(25, 4));
+	// Recomputing the subdivisions must produce byte-for-byte identical vertices.
+	const PackedVector2Array repeated = curve->tessellate(9, 0.5);
+	REQUIRE(repeated.size() == adaptive.size());
+	for (int i = 0; i < adaptive.size(); ++i) {
+		CHECK(repeated[i] == adaptive[i]);
+	}
+	curve->set_bake_interval(1.0);
+	const PackedVector2Array baked = curve->get_baked_points();
+	CHECK(baked.size() >= 3);
+	CHECK(baked[0] == Vector2(0, 0));
+	CHECK(baked[baked.size() - 1] == Vector2(25, 4));
+}
+
 } // namespace TestCurve2D
