@@ -422,4 +422,35 @@ TEST_CASE("[AHashMap][Move] Move a reserved empty table into an occupied map") {
 	CHECK(destination[20] == "new");
 	CHECK(!source.has(20));
 }
+
+TEST_CASE("[AnimationAudioMapFastPath] one pointer lookup finds active audio stream metadata") {
+	AHashMap<int, int> stream_info;
+	stream_info[10] = 1234;
+	stream_info[11] = 5678;
+	const int *existing = stream_info.getptr(10);
+	REQUIRE(existing != nullptr);
+	CHECK_EQ(*existing, 1234);
+	CHECK(stream_info.getptr(99) == nullptr);
+	CHECK_EQ(stream_info.size(), 2);
+}
+
+TEST_CASE("[AnimationAudioMapFastPath] stream erase after pointer read retains other metadata") {
+	AHashMap<int, int> stream_info;
+	for (int i = 0; i < 96; ++i) {
+		stream_info[i] = i + 1000;
+	}
+	for (int i = 0; i < 96; i += 2) {
+		const int *existing = stream_info.getptr(i);
+		REQUIRE(existing != nullptr);
+		CHECK_EQ(*existing, i + 1000);
+		stream_info.erase(i);
+	}
+	CHECK_EQ(stream_info.size(), 48);
+	for (int i = 1; i < 96; i += 2) {
+		const int *existing = stream_info.getptr(i);
+		REQUIRE(existing != nullptr);
+		CHECK_EQ(*existing, i + 1000);
+	}
+}
+
 } // namespace TestAHashMap
