@@ -33,6 +33,8 @@
 TEST_FORCE_LINK(test_bvh)
 
 #include "core/math/bvh.h"
+#include "core/math/rect2.h"
+#include "core/math/vector2.h"
 
 namespace TestBVH {
 
@@ -41,13 +43,13 @@ struct Item {
 };
 
 struct PairTest {
-	static bool user_pair_check(const Item *p_a, const Item *p_b) {
+	static bool user_pair_check(const Item *, const Item *) {
 		return true;
 	}
 };
 
 struct CullTest {
-	static bool user_cull_check(const Item *p_a, const Item *p_b) {
+	static bool user_cull_check(const Item *, const Item *) {
 		return true;
 	}
 };
