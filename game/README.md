@@ -459,3 +459,28 @@ still requires an engine/editor playtest.
 Destructible terrain and base building will use Zylann's Godot Voxel. It is not part of the default engine build:
 `misc/third_party/fetch_voxel_module.sh` fetches it and `custom_modules=out/custom_modules` builds it in.
 Verified here: it compiles on this fork unchanged and its classes register. No game feature uses it yet.
+
+
+## Zombie infection and field medicine (canonical game)
+
+Real infected melee strikes add server-authoritative infection severity:
+walker +8, runner +12, brute +20. Untreated wounds progress by
+0.065 severity/second, max 100; severity above 30 reduces health over time
+(up to 1.4 HP/s). Death/respawn clears infection.
+
+- **Field Antiseptic**: craft from 1 bandage + 1 cloth T1 + 1 clean water
+  bottle (no workbench required); heals 8 HP and reduces infection by 40.
+- **Antibiotics**: rare loot from ruin crates, more likely in red/black zones.
+  One dose clears up to 100 infection severity.
+- **6** uses an antiseptic kit, **7** uses antibiotics in the local preview.
+  Medicine is not consumed when it could neither heal nor treat the player.
+- The authoritative server decides all zombie exposures and treatments,
+  publishes infection in snapshots, and persists it in character saves.
+  Older version-1 character saves without infection load healthy; invalid
+  severity, nonfinite numbers and corrupt types are rejected atomically.
+- The playable HUD and multiplayer HUD show the infection state.
+
+This uses existing Cgame scripting, inventory and networking APIs; no
+native engine change was required. Regression tests in
+`game/tests/test_infection.gd` run with
+`godot --headless --path game --script res://tests/run_all.gd`.
