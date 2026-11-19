@@ -3,7 +3,7 @@ public:
 // depends which works best for cache.
 struct ItemPairs {
 	struct Link {
-		void set(BVHHandle p_handle, void *p_userdata, uint32_t p_reverse_index) {
+		void set(BVHHandle p_handle, void *p_userdata, uint32_t p_reverse_index = BVHCommon::INVALID) {
 			handle = p_handle;
 			reverse_index = p_reverse_index;
 			userdata = p_userdata;
