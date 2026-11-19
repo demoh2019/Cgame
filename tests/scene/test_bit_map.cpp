@@ -752,4 +752,39 @@ TEST_CASE("[BitMap] Overlapping self-blit preserves original copy order") {
 	}
 }
 
+TEST_CASE("[BitMap] Packed LA8 alpha thresholds agree with all 256 alpha levels") {
+	// A byte-packed mask must preserve the original floating-point
+	// comparison, including alpha zero, threshold 1 and partial bytes.
+	constexpr int WIDTH = 257;
+	constexpr int HEIGHT = 3;
+	Vector<uint8_t> la8;
+	la8.resize(WIDTH * HEIGHT * 2);
+	uint8_t *bytes = la8.ptrw();
+	for (int i = 0; i < WIDTH * HEIGHT; i++) {
+		bytes[i * 2] = 127;
+		bytes[i * 2 + 1] = uint8_t(i & 255);
+	}
+	const Ref<Image> source = Image::create_from_data(WIDTH, HEIGHT, false, Image::FORMAT_LA8, la8);
+	REQUIRE(source.is_valid());
+
+	const float thresholds[] = { -1.0f, 0.0f, 0.08f, 0.1f, 0.25f, 0.5f, 0.75f, 0.999f, 1.0f, 2.0f };
+	for (float threshold : thresholds) {
+		BitMap map;
+		map.create_from_image_alpha(source, threshold);
+		CHECK(map.get_size() == Size2i(WIDTH, HEIGHT));
+		int expected_count = 0;
+		bool all_pixels_match = true;
+		for (int i = 0; i < WIDTH * HEIGHT; i++) {
+			const int alpha = i & 255;
+			const bool expected = alpha / 255.0 > threshold;
+			expected_count += expected;
+			if (map.get_bit(i % WIDTH, i / WIDTH) != expected) {
+				all_pixels_match = false;
+			}
+		}
+		CHECK(all_pixels_match);
+		CHECK(map.get_true_bit_count() == expected_count);
+	}
+}
+
 } // namespace TestBitMap
