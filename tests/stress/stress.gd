@@ -16,7 +16,7 @@ const CASES := [
 	"containers", "array_literals", "dictionary_snapshot", "strings", "script_vm", "math", "signals",
 	"scene_tree", "packed_scene", "images", "json", "stream", "stream_bulk",
 	"file_io", "threads", "physics_2d", "physics_3d", "physics_joint_chain_2d", "physics_joint_chain_3d", "physics_sparse_2d", "physics_sparse_3d",
-	"object_churn", "memory_churn", "astar_grid", "astar_grid_neighbors", "astar_grid_jps", "astar_grid_rebuild", "astar_relax_2d", "astar_relax_3d", "astar_graph", "tweens", "audio_buffers",
+	"object_churn", "memory_churn", "astar_grid", "astar_grid_neighbors", "astar_grid_jps", "astar_grid_fill", "astar_grid_rebuild", "astar_relax_2d", "astar_relax_3d", "astar_graph", "tweens", "audio_buffers",
 	"variant_codec", "packet_stream", "packet_tx_batch", "packet_rx_batch", "packet_variant_reuse", "ui_layout", "grid_reflow", "box_reflow", "flow_reflow", "render_2d", "render_3d", "render_ellipse_2d", "render_light_culling_3d",
 	"resource_load",
 	"input_map",
@@ -223,6 +223,8 @@ func _run_case(test_case: String, scale: int, frames: int, seed: int) -> Diction
 			return _astar_grid_neighbors(scale)
 		"astar_grid_jps":
 			return _astar_grid_jps(scale)
+		"astar_grid_fill":
+			return _astar_grid_fill(scale)
 		"astar_grid_rebuild":
 			return _astar_grid_rebuild(scale)
 		"astar_relax_2d":
@@ -2049,3 +2051,50 @@ func _physics_joint_chain_3d(scale: int, frames: int) -> Dictionary:
 	return {"bodies": count, "joints": count - 1, "physics_frames": frames,
 		"peak_physics_ms": peak_physics_ms, "frame_interval_ms": statistics,
 		"frame_p95_ms": statistics["p95"]}
+
+
+
+# High-bandwidth bulk region writes: profile obstruction masks and point
+# weight updates independently of construction and pathfinding.
+func _astar_grid_fill(scale: int) -> Dictionary:
+	var side: int = mini(64 * scale, 1024)
+	var region := Rect2i(-17, 23, side, side)
+	var grid := AStarGrid2D.new()
+	grid.region = region
+	var started := Time.get_ticks_usec()
+	grid.update()
+	var build_ms := float(Time.get_ticks_usec() - started) / 1000.0
+	var interior := Rect2i(region.position + Vector2i.ONE, region.size - Vector2i(2, 2))
+	var clipped := Rect2i(region.position - Vector2i(5, 5), region.size + Vector2i(10, 10))
+	var cycles: int = 12 * scale
+	var memory_before := int(Performance.get_monitor(Performance.MEMORY_STATIC))
+
+	started = Time.get_ticks_usec()
+	for i in range(cycles):
+		grid.fill_solid_region(clipped, true)
+		grid.fill_solid_region(interior, false)
+	var mask_ms := float(Time.get_ticks_usec() - started) / 1000.0
+	var border := region.position
+	var center := region.position + Vector2i(side >> 1, side >> 1)
+	if not grid.is_point_solid(border) or grid.is_point_solid(center):
+		return {"error": "AStarGrid bulk obstacle fill changed border clipping"}
+
+	started = Time.get_ticks_usec()
+	for i in range(cycles):
+		grid.fill_weight_scale_region(clipped, 2.0 + float(i))
+		grid.fill_weight_scale_region(interior, 1.0)
+	var weight_ms := float(Time.get_ticks_usec() - started) / 1000.0
+	if not is_equal_approx(grid.get_point_weight_scale(border), 1.0 + float(cycles)):
+		return {"error": "AStarGrid bulk weight fill changed border cells"}
+	if not is_equal_approx(grid.get_point_weight_scale(center), 1.0):
+		return {"error": "AStarGrid bulk weight fill changed inner cells"}
+
+	return {
+		"cells": side * side,
+		"passes": cycles,
+		"build_ms": build_ms,
+		"solid_mask_ms": mask_ms,
+		"weight_scale_ms": weight_ms,
+		"static_memory_change_bytes": int(Performance.get_monitor(Performance.MEMORY_STATIC)) - memory_before,
+		"checksum": int(grid.is_point_solid(border)) + int(grid.get_point_weight_scale(border)),
+	}

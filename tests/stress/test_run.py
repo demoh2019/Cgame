@@ -28,6 +28,11 @@ class CaseSelectionTests(unittest.TestCase):
         self.assertEqual(stress.choose_cases([",".join(cases)], "headless"), list(cases))
         self.assertTrue(set(cases).issubset(stress.choose_cases(["all"], "headless")))
 
+    def test_astar_grid_bulk_fill_is_selectable(self):
+        self.assertEqual(stress.choose_cases(["astar_grid_fill"], "headless"),
+                         ["astar_grid_fill"])
+        self.assertIn("astar_grid_fill", stress.choose_cases(["all"], "headless"))
+
     def test_astar_grid_jps_stress_is_headless(self):
         self.assertEqual(stress.choose_cases(["astar_grid_jps"], "headless"),
                          ["astar_grid_jps"])
