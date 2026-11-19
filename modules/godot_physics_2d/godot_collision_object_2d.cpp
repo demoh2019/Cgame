@@ -164,6 +164,11 @@ void GodotCollisionObject2D::_update_shapes() {
 		return;
 	}
 
+	// Register compound shapes before generating pair callbacks. A single-shape
+	// object retains the synchronous insertion behavior.
+	const bool defer_pair_checks = shapes.size() > 1;
+	bool has_deferred_shapes = false;
+
 	for (int i = 0; i < shapes.size(); i++) {
 		Shape &s = shapes.write[i];
 		if (s.disabled) {
@@ -180,17 +185,31 @@ void GodotCollisionObject2D::_update_shapes() {
 
 		if (s.bpid == 0) {
 			// create() already registers the AABB in the requested static/dynamic tree.
-			s.bpid = space->get_broadphase()->create(this, i, shape_aabb, _static);
+			if (defer_pair_checks) {
+				s.bpid = space->get_broadphase()->create_deferred(this, i, shape_aabb, _static);
+				has_deferred_shapes = true;
+			} else {
+				s.bpid = space->get_broadphase()->create(this, i, shape_aabb, _static);
+			}
 		} else {
 			space->get_broadphase()->move(s.bpid, shape_aabb);
 		}
 	}
+	if (has_deferred_shapes) {
+		space->get_broadphase()->flush_pending_pairs();
+	}
+
 }
 
 void GodotCollisionObject2D::_update_shapes_with_motion(const Vector2 &p_motion) {
 	if (!space) {
 		return;
 	}
+
+	// Register compound shapes before generating pair callbacks. A single-shape
+	// object retains the synchronous insertion behavior.
+	const bool defer_pair_checks = shapes.size() > 1;
+	bool has_deferred_shapes = false;
 
 	for (int i = 0; i < shapes.size(); i++) {
 		Shape &s = shapes.write[i];
@@ -207,11 +226,20 @@ void GodotCollisionObject2D::_update_shapes_with_motion(const Vector2 &p_motion)
 
 		if (s.bpid == 0) {
 			// create() already registers the AABB in the requested static/dynamic tree.
-			s.bpid = space->get_broadphase()->create(this, i, shape_aabb, _static);
+			if (defer_pair_checks) {
+				s.bpid = space->get_broadphase()->create_deferred(this, i, shape_aabb, _static);
+				has_deferred_shapes = true;
+			} else {
+				s.bpid = space->get_broadphase()->create(this, i, shape_aabb, _static);
+			}
 		} else {
 			space->get_broadphase()->move(s.bpid, shape_aabb);
 		}
 	}
+	if (has_deferred_shapes) {
+		space->get_broadphase()->flush_pending_pairs();
+	}
+
 }
 
 void GodotCollisionObject2D::_set_space(GodotSpace2D *p_space) {
