@@ -317,6 +317,8 @@ int Compression::decompress_dynamic(Vector<uint8_t> *p_dst_vect, int64_t p_max_d
 			// the output cursor by the nominal chunk size.
 			uint8_t *next_out = p_dst_vect->ptrw() + total_out;
 			size_t avail_out = size_t(p_dst_vect->size()) - total_out;
+			const size_t previous_out = total_out;
+			const size_t previous_in = avail_in;
 			const BrotliDecoderResult result = BrotliDecoderDecompressStream(state, &avail_in, &next_in, &avail_out, &next_out, &total_out);
 
 			if (p_max_dst_size >= 0 && total_out > uint64_t(p_max_dst_size)) {
@@ -329,7 +331,9 @@ int Compression::decompress_dynamic(Vector<uint8_t> *p_dst_vect, int64_t p_max_d
 				BrotliDecoderDestroyInstance(state);
 				return Z_OK;
 			}
-			if (result == BROTLI_DECODER_RESULT_ERROR || (result == BROTLI_DECODER_RESULT_NEEDS_MORE_INPUT && avail_in == 0)) {
+			if (result == BROTLI_DECODER_RESULT_ERROR ||
+					(result == BROTLI_DECODER_RESULT_NEEDS_MORE_INPUT && avail_in == 0) ||
+					(total_out == previous_out && avail_in == previous_in)) {
 				if (result == BROTLI_DECODER_RESULT_ERROR) {
 					WARN_PRINT(BrotliDecoderErrorString(BrotliDecoderGetErrorCode(state)));
 				}
