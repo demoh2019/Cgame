@@ -641,7 +641,7 @@ func cmd_build(peer_id: int, x: float, z: float) -> Dictionary:
 		player.inventory.remove(item_id, int(Structures.COST[item_id]))
 	var id := new_id()
 	var item := {"id": id, "x": x, "y": world.height_at(x, z), "z": z,
-		"hp": Structures.MAX_HEALTH, "owner": peer_id,
+		"hp": Structures.MAX_HEALTH, "tier": 1, "owner": peer_id,
 		"owner_account": player.user_id}
 	barricades[id] = item
 	world_structure_revision += 1
@@ -665,18 +665,61 @@ func cmd_repair(peer_id: int, id: int) -> Dictionary:
 	var target := Vector2(float(item["x"]), float(item["z"]))
 	if not Structures.within_range(origin, target, Structures.REPAIR_RANGE):
 		return {"ok": false, "reason": "out_of_range"}
-	if float(item["hp"]) >= Structures.MAX_HEALTH:
+	var tier: int = Structures.tier_of(item)
+	var max_hp: float = Structures.max_health(tier)
+	var cost: Dictionary = Structures.repair_cost(tier)
+	if max_hp <= 0.0:
+		return {"ok": false, "reason": "invalid_tier"}
+	if float(item["hp"]) >= max_hp:
 		return {"ok": false, "reason": "full_health"}
-	if not player.inventory.has_all(Structures.REPAIR_COST):
+	if not player.inventory.has_all(cost):
 		return {"ok": false, "reason": "missing_materials"}
-	for item_id in Structures.REPAIR_COST:
-		player.inventory.remove(item_id, int(Structures.REPAIR_COST[item_id]))
-	item["hp"] = minf(Structures.MAX_HEALTH, float(item["hp"]) + Structures.REPAIR_HEALTH)
+	for item_id in cost:
+		player.inventory.remove(str(item_id), int(cost[item_id]))
+	item["hp"] = minf(max_hp, float(item["hp"]) + Structures.repair_amount(tier))
 	barricades[id] = item
 	world_structure_revision += 1
 	player.dirty_inventory = true
 	player.dirty_character = true
-	return {"ok": true, "id": id, "hp": float(item["hp"])}
+	return {"ok": true, "id": id, "hp": float(item["hp"]), "tier": tier}
+
+
+## Upgrade the closest existing wall, not an arbitrary remote structure.
+## Item costs are server-derived from the target tier, never RPC parameters.
+func cmd_upgrade(peer_id: int, id: int) -> Dictionary:
+	var player: Player = players.get(peer_id)
+	if player == null or not _alive(player):
+		return {"ok": false, "reason": "dead"}
+	var item: Dictionary = barricades.get(id, {})
+	if item.is_empty():
+		return {"ok": false, "reason": "no_structure"}
+	if not Structures.can_manage(item, peer_id, player.user_id):
+		return {"ok": false, "reason": "not_owner"}
+	var origin := Vector2(player.position.x, player.position.z)
+	var target := Vector2(float(item["x"]), float(item["z"]))
+	if not Structures.within_range(origin, target, Structures.UPGRADE_RANGE):
+		return {"ok": false, "reason": "out_of_range"}
+	var old_tier: int = Structures.tier_of(item)
+	if not Structures.valid_tier(old_tier):
+		return {"ok": false, "reason": "invalid_tier"}
+	if old_tier >= Structures.MAX_TIER:
+		return {"ok": false, "reason": "max_tier"}
+	var next_tier: int = old_tier + 1
+	var cost: Dictionary = Structures.upgrade_cost(next_tier)
+	if not player.inventory.has_all(cost):
+		return {"ok": false, "reason": "missing_materials"}
+	# Preserve damage ratio: upgrades do not secretly repair the wall.
+	var fraction: float = clampf(float(item["hp"]) / Structures.max_health(old_tier), 0.0, 1.0)
+	for item_id in cost:
+		player.inventory.remove(str(item_id), int(cost[item_id]))
+	item["tier"] = next_tier
+	item["hp"] = Structures.max_health(next_tier) * fraction
+	barricades[id] = item
+	world_structure_revision += 1
+	player.dirty_inventory = true
+	player.dirty_character = true
+	events.append({"type": "barricade_upgraded", "id": id, "tier": next_tier, "peer": peer_id})
+	return {"ok": true, "id": id, "tier": next_tier, "hp": float(item["hp"])}
 
 
 ## Owner-only, local, all-or-nothing structure salvage.
@@ -694,7 +737,7 @@ func cmd_dismantle(peer_id: int, id: int) -> Dictionary:
 	var target := Vector2(float(structure["x"]), float(structure["z"]))
 	if not Structures.within_range(origin, target, Structures.DISMANTLE_RANGE):
 		return {"ok": false, "reason": "out_of_range"}
-	var salvage: Dictionary = Structures.salvage_for_health(float(structure["hp"]))
+	var salvage: Dictionary = Structures.salvage_for_health(float(structure["hp"]), Structures.tier_of(structure))
 	var trial = Inventory.new(player.inventory.slots.size())
 	trial.load_dict(player.inventory.to_dict())
 	for item_id in salvage:
@@ -717,7 +760,7 @@ func damage_barricade(id: int, damage: float) -> bool:
 	if not barricades.has(id) or not is_finite(damage) or damage <= 0.0:
 		return false
 	var item: Dictionary = barricades[id]
-	item["hp"] = maxf(0.0, float(item["hp"]) - damage)
+	item["hp"] = maxf(0.0, float(item["hp"]) - damage * Structures.damage_factor(Structures.tier_of(item)))
 	world_structure_revision += 1
 	if float(item["hp"]) <= 0.0:
 		barricades.erase(id)
