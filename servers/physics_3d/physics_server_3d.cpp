@@ -587,6 +587,9 @@ PhysicsServer3D::PhysicsServer3D() {
 	// Reproduce free rotation of asymmetric bodies (Jolt-style gyroscopic term).
 	// Off by default because it changes angular motion and costs extra math.
 	GLOBAL_DEF(PropertyInfo(Variant::BOOL, "physics/3d/solver/gyroscopic_forces"), false);
+	// Midpoint preserves both angular momentum magnitude and rotational energy
+	// in torque-free free rigid-body motion; normalized Euler remains default.
+	GLOBAL_DEF(PropertyInfo(Variant::INT, "physics/3d/solver/gyroscopic_integration_mode", PROPERTY_HINT_ENUM, "Normalized Euler,Implicit Midpoint"), 0);
 	// Optional Bullet-style rolling and torsional contact friction, off by default.
 	GLOBAL_DEF(PropertyInfo(Variant::FLOAT, "physics/3d/solver/rolling_friction", PROPERTY_HINT_RANGE, "0,1,0.01,or_greater"), 0.0);
 	GLOBAL_DEF(PropertyInfo(Variant::FLOAT, "physics/3d/solver/spinning_friction", PROPERTY_HINT_RANGE, "0,1,0.01,or_greater"), 0.0);
