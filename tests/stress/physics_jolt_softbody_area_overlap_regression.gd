@@ -46,6 +46,8 @@ func _exercise() -> void:
 	PhysicsServer3D.soft_body_set_mesh(soft_body, mesh.get_rid())
 	PhysicsServer3D.soft_body_set_collision_layer(soft_body, 1)
 	PhysicsServer3D.soft_body_set_collision_mask(soft_body, 1)
+	# Keep contact callbacks flowing even in long idle sensor cycles.
+	PhysicsServer3D.soft_body_set_state(soft_body, PhysicsServer3D.BODY_STATE_CAN_SLEEP, false)
 	PhysicsServer3D.soft_body_set_space(soft_body, space)
 
 	var sensor_shape := PhysicsServer3D.sphere_shape_create()
