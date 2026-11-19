@@ -363,3 +363,16 @@ conversion and LA8 alpha-import time. For comparisons, use identical
 hardware and engine build settings; synthetic C++ microbenchmarks cannot
 predict whole-game FPS. A dedicated GitHub Actions workflow runs native
 BitMap correctness tests and these workloads on the actual fork.
+
+## StreamPeerBuffer bulk throughput
+
+`stream_bulk` tests 8 KiB binary writes, complete reads and oversized partial
+reads. It verifies returned bytes, tracks transferred data and reports
+`read_write_ms` separately from initial buffer construction. Unlike the
+`stream` workload (32-bit primitive calls), this targets bulk transfers.
+
+```bash
+python3 tests/stress/scale_sweep.py --godot ./bin/godot.linuxbsd.editor.dev.x86_64 \\
+  --case stream,stream_bulk --scales 1,2,4,8,16 --repeats 5 \\
+  --output out/stream-scaling.json --summary-md out/stream-scaling.md
+```
