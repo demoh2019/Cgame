@@ -478,51 +478,6 @@ static void _collision_segment_circle(const GodotShape2D *p_a, const Transform2D
 		}
 	}
 
-	// Box2D-style closest-point manifold for a stationary segment and circle.
-	// Preserve SAT for swept, scaled, sheared and degenerate configurations.
-	if (!p_cast_A && !p_cast_B && p_margin_A >= 0.0 && p_margin_B >= 0.0 &&
-			circle_B->get_radius() >= 0.0 && _is_unit_orthogonal_transform(p_transform_a) &&
-			_is_unit_orthogonal_transform(p_transform_b)) {
-		const Vector2 endpoint_a = p_transform_a.xform(segment_A->get_a());
-		const Vector2 endpoint_b = p_transform_a.xform(segment_A->get_b());
-		const Vector2 edge = endpoint_b - endpoint_a;
-		const real_t edge_length_squared = edge.length_squared();
-
-		if (edge_length_squared > 0.0) {
-			const Vector2 circle_center = p_transform_b.get_origin();
-			const real_t fraction = CLAMP((circle_center - endpoint_a).dot(edge) / edge_length_squared, real_t(0.0), real_t(1.0));
-			const Vector2 closest_a = endpoint_a + edge * fraction;
-			const Vector2 separation = closest_a - circle_center;
-			const real_t distance_squared = separation.length_squared();
-
-			// SAT chooses the contact normal when the circle center lies on
-			// the segment, including any previously cached separating axis.
-			if (distance_squared > 0.0) {
-				const real_t radius_a = p_margin_A;
-				const real_t radius_b = circle_B->get_radius() + p_margin_B;
-				const real_t total_radius = radius_a + radius_b;
-
-				if (distance_squared > total_radius * total_radius) {
-					if (p_collector->sep_axis) {
-						*p_collector->sep_axis = separation / Math::sqrt(distance_squared);
-					}
-					return;
-				}
-
-				p_collector->collided = true;
-				if (p_collector->callback) {
-					const Vector2 normal = separation / Math::sqrt(distance_squared);
-					p_collector->normal = normal;
-					p_collector->call(closest_a - normal * radius_a, circle_center + normal * radius_b);
-					if (p_collector->sep_axis && *p_collector->sep_axis != Vector2()) {
-						*p_collector->sep_axis = Vector2();
-					}
-				}
-				return;
-			}
-		}
-	}
-
 	SeparatorAxisTest2D<GodotSegmentShape2D, GodotCircleShape2D> separator(segment_A, p_transform_a, circle_B, p_transform_b, p_collector, p_motion_a, p_motion_b, p_cast_A, p_cast_B, p_with_margin, p_margin_A, p_margin_B);
 
 	if (!separator.test_previous_axis()) {
@@ -934,6 +889,65 @@ static void _collision_circle_capsule(const GodotShape2D *p_a, const Transform2D
 static void _collision_circle_convex_polygon(const GodotShape2D *p_a, const Transform2D &p_transform_a, const GodotShape2D *p_b, const Transform2D &p_transform_b, _CollectorCallback2D *p_collector, const Vector2 &p_motion_a, const Vector2 &p_motion_b, bool p_cast_A, bool p_cast_B, bool p_with_margin, real_t p_margin_A, real_t p_margin_B) {
 	const GodotCircleShape2D *circle_A = static_cast<const GodotCircleShape2D *>(p_a);
 	const GodotConvexPolygonShape2D *convex_B = static_cast<const GodotConvexPolygonShape2D *>(p_b);
+
+	// A point outside a convex polygon only needs the nearest boundary point
+	// for a single circle contact. Avoid testing O(n) SAT axes against O(n)
+	// polygon projections. Embedded, coincident, swept and non-rigid cases
+	// retain the existing SAT path for its stable minimum-depth manifold.
+	if (!p_cast_A && !p_cast_B && p_margin_A >= 0.0 && p_margin_B >= 0.0 &&
+			circle_A->get_radius() >= 0.0 && convex_B->get_point_count() >= 3 &&
+			_is_unit_orthogonal_transform(p_transform_a) && _is_unit_orthogonal_transform(p_transform_b)) {
+		const Vector2 center = p_transform_a.get_origin();
+		const Vector2 center_local = p_transform_b.xform_inv(center);
+
+		if (!convex_B->contains_point(center_local)) {
+			const int point_count = convex_B->get_point_count();
+			real_t closest_distance_squared = Math_INF;
+			Vector2 closest_local;
+			bool valid_edges = true;
+
+			for (int i = 0; i < point_count; i++) {
+				const Vector2 &start = convex_B->get_point(i);
+				const Vector2 edge = convex_B->get_point(i + 1 == point_count ? 0 : i + 1) - start;
+				const real_t edge_length_squared = edge.length_squared();
+				if (edge_length_squared <= CMP_EPSILON * CMP_EPSILON) {
+					valid_edges = false;
+					break;
+				}
+				const real_t t = CLAMP((center_local - start).dot(edge) / edge_length_squared, real_t(0.0), real_t(1.0));
+				const Vector2 candidate = start + edge * t;
+				const real_t distance_squared = center_local.distance_squared_to(candidate);
+				if (distance_squared < closest_distance_squared) {
+					closest_distance_squared = distance_squared;
+					closest_local = candidate;
+				}
+			}
+
+			if (valid_edges && closest_distance_squared > 0.0) {
+				const real_t circle_radius = circle_A->get_radius() + p_margin_A;
+				const real_t combined_radius = circle_radius + p_margin_B;
+				if (closest_distance_squared > combined_radius * combined_radius) {
+					if (p_collector->sep_axis) {
+						const Vector2 closest = p_transform_b.xform(closest_local);
+						*p_collector->sep_axis = (center - closest) / Math::sqrt(closest_distance_squared);
+					}
+					return;
+				}
+
+				p_collector->collided = true;
+				if (p_collector->callback) {
+					const Vector2 closest = p_transform_b.xform(closest_local);
+					const Vector2 normal = (center - closest) / Math::sqrt(closest_distance_squared);
+					p_collector->normal = normal;
+					p_collector->call(center - normal * circle_radius, closest + normal * p_margin_B);
+					if (p_collector->sep_axis && *p_collector->sep_axis != Vector2()) {
+						*p_collector->sep_axis = Vector2();
+					}
+				}
+				return;
+			}
+		}
+	}
 
 	SeparatorAxisTest2D<GodotCircleShape2D, GodotConvexPolygonShape2D> separator(circle_A, p_transform_a, convex_B, p_transform_b, p_collector, p_motion_a, p_motion_b, p_cast_A, p_cast_B, p_with_margin, p_margin_A, p_margin_B);
 
