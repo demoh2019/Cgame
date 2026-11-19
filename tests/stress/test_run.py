@@ -23,6 +23,7 @@ class CaseSelectionTests(unittest.TestCase):
         self.assertIn("physics_3d", selected)
         self.assertIn("physics_dense_2d", selected)
         self.assertIn("physics_dense_3d", selected)
+        self.assertIn("physics_pending_3d", selected)
         self.assertIn("physics_ccd_3d", selected)
         self.assertNotIn("render_2d", selected)
 
