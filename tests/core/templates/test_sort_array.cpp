@@ -291,4 +291,84 @@ TEST_CASE("[SortArray] Nth Element Random") {
 	}
 }
 
+
+struct TrackedSortValue {
+	int key = 0;
+	int *copies = nullptr;
+	int *moves = nullptr;
+	TrackedSortValue() = default;
+	TrackedSortValue(int p_key, int *p_copies, int *p_moves) : key(p_key), copies(p_copies), moves(p_moves) {}
+	TrackedSortValue(const TrackedSortValue &p) : key(p.key), copies(p.copies), moves(p.moves) {
+		if (copies) { ++*copies; }
+	}
+	TrackedSortValue(TrackedSortValue &&p) noexcept : key(p.key), copies(p.copies), moves(p.moves) {
+		if (moves) { ++*moves; }
+		p.key = -999;
+	}
+	TrackedSortValue &operator=(const TrackedSortValue &p) {
+		key = p.key;
+		copies = p.copies;
+		moves = p.moves;
+		if (copies) { ++*copies; }
+		return *this;
+	}
+	TrackedSortValue &operator=(TrackedSortValue &&p) noexcept {
+		key = p.key;
+		copies = p.copies;
+		moves = p.moves;
+		if (moves) { ++*moves; }
+		p.key = -999;
+		return *this;
+	}
+	bool operator<(const TrackedSortValue &p) const { return key < p.key; }
+};
+
+TEST_CASE("[SortArray] Insertion sort moves values instead of copying") {
+	int copies = 0;
+	int moves = 0;
+	TrackedSortValue values[] = {
+		{ 7, &copies, &moves }, { 6, &copies, &moves },
+		{ 5, &copies, &moves }, { 4, &copies, &moves },
+		{ 3, &copies, &moves }, { 2, &copies, &moves },
+		{ 1, &copies, &moves }, { 0, &copies, &moves }
+	};
+	SortArray<TrackedSortValue> sort;
+	sort.insertion_sort(0, 8, values);
+	CHECK_EQ(copies, 0);
+	CHECK_GT(moves, 0);
+	for (int i = 0; i < 8; ++i) {
+		CHECK_EQ(values[i].key, i);
+	}
+}
+
+TEST_CASE("[SortArray] Insertion sort preserves duplicates and sorted input") {
+	int copies = 0;
+	int moves = 0;
+	TrackedSortValue values[] = {
+		{ 2, &copies, &moves }, { 1, &copies, &moves },
+		{ 1, &copies, &moves }, { 0, &copies, &moves }
+	};
+	SortArray<TrackedSortValue> sort;
+	sort.insertion_sort(0, 4, values);
+	CHECK_EQ(copies, 0);
+	CHECK_EQ(values[0].key, 0);
+	CHECK_EQ(values[1].key, 1);
+	CHECK_EQ(values[2].key, 1);
+	CHECK_EQ(values[3].key, 2);
+
+	TrackedSortValue sorted[] = {
+		{ -1, &copies, &moves }, { 0, &copies, &moves },
+		{ 1, &copies, &moves }, { 2, &copies, &moves }
+	};
+	copies = 0;
+	moves = 0;
+	sort.insertion_sort(0, 4, sorted);
+	sort.insertion_sort(0, 0, sorted);
+	sort.insertion_sort(1, 2, sorted);
+	CHECK_EQ(copies, 0);
+	for (int i = 0; i < 4; ++i) {
+		CHECK_EQ(sorted[i].key, i - 1);
+	}
+}
+
 } // namespace TestSortArray
