@@ -132,7 +132,9 @@ func _build_player() -> void:
     ray.name = "AimRay"
     ray.target_position = Vector3(0.0, 0.0, -3.2)
     ray.collide_with_areas = true
-    ray.collide_with_bodies = false
+    # Solid walls block looting. Exclude the owner's CharacterBody3D.
+    ray.collide_with_bodies = true
+    ray.add_exception(player)
     camera.add_child(ray)
 
     add_child(player)
