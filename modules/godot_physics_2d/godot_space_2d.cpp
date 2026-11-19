@@ -36,6 +36,7 @@
 #include "godot_physics_server_2d.h"
 
 #include "core/config/project_settings.h"
+#include "core/templates/local_vector.h"
 
 #define TEST_MOTION_MARGIN_MIN_VALUE 0.0001
 #define TEST_MOTION_MIN_CONTACT_DEPTH_FACTOR 0.05
@@ -546,8 +547,12 @@ bool GodotSpace2D::test_body_motion(GodotBody2D *p_body, const PS2DT::MotionPara
 	body_aabb = p_parameters.from.xform(p_body->get_inv_transform().xform(body_aabb));
 	body_aabb = body_aabb.grow(margin);
 
-	static const int max_excluded_shape_pairs = 32;
-	ExcludedShapeSW excluded_shape_pairs[max_excluded_shape_pairs];
+	// Keep the common <=32 one-way contacts entirely on the stack. A dense
+	// platform field must still record ALL rejected shape pairs; the old
+	// fixed limit silently lost exclusions past the first 32 candidates.
+	static constexpr int INLINE_EXCLUDED_SHAPE_PAIRS = 32;
+	ExcludedShapeSW excluded_shape_pairs[INLINE_EXCLUDED_SHAPE_PAIRS];
+	LocalVector<ExcludedShapeSW> excluded_shape_overflow;
 	int excluded_shape_pair_count = 0;
 
 	real_t min_contact_depth = margin * TEST_MOTION_MIN_CONTACT_DEPTH_FACTOR;
@@ -575,7 +580,8 @@ bool GodotSpace2D::test_body_motion(GodotBody2D *p_body, const PS2DT::MotionPara
 			cbk.passed = 0;
 			cbk.ptr = sr;
 			cbk.invalid_by_dir = 0;
-			excluded_shape_pair_count = 0; //last step is the one valid
+			excluded_shape_pair_count = 0; // The final recovery pass determines the one-way exclusions.
+			excluded_shape_overflow.clear();
 
 			GodotPhysicsServer2D::CollCbkData *cbkptr = &cbk;
 			GodotCollisionSolver2D::CallbackResult cbkres = GodotPhysicsServer2D::_shape_col_cbk;
@@ -635,14 +641,16 @@ bool GodotSpace2D::test_body_motion(GodotBody2D *p_body, const PS2DT::MotionPara
 					}
 
 					if (!did_collide && cbk.invalid_by_dir > 0) {
-						//this shape must be excluded
-						if (excluded_shape_pair_count < max_excluded_shape_pairs) {
-							ExcludedShapeSW esp;
-							esp.local_shape = body_shape;
-							esp.against_object = col_obj;
-							esp.against_shape_index = shape_idx;
-							excluded_shape_pairs[excluded_shape_pair_count++] = esp;
+						ExcludedShapeSW esp;
+						esp.local_shape_index = j;
+						esp.against_object = col_obj;
+						esp.against_shape_index = shape_idx;
+						if (excluded_shape_pair_count < INLINE_EXCLUDED_SHAPE_PAIRS) {
+							excluded_shape_pairs[excluded_shape_pair_count] = esp;
+						} else {
+							excluded_shape_overflow.push_back(esp);
 						}
+						++excluded_shape_pair_count;
 					}
 
 					if (did_collide) {
@@ -738,7 +746,9 @@ bool GodotSpace2D::test_body_motion(GodotBody2D *p_body, const PS2DT::MotionPara
 				bool excluded = false;
 
 				for (int k = 0; k < excluded_shape_pair_count; k++) {
-					if (excluded_shape_pairs[k].local_shape == body_shape && excluded_shape_pairs[k].against_object == col_obj && excluded_shape_pairs[k].against_shape_index == col_shape_idx) {
+					const ExcludedShapeSW &pair = k < INLINE_EXCLUDED_SHAPE_PAIRS ?
+							excluded_shape_pairs[k] : excluded_shape_overflow[k - INLINE_EXCLUDED_SHAPE_PAIRS];
+					if (pair.local_shape_index == body_shape_idx && pair.against_object == col_obj && pair.against_shape_index == col_shape_idx) {
 						excluded = true;
 						break;
 					}
@@ -878,7 +888,9 @@ bool GodotSpace2D::test_body_motion(GodotBody2D *p_body, const PS2DT::MotionPara
 
 				bool excluded = false;
 				for (int k = 0; k < excluded_shape_pair_count; k++) {
-					if (excluded_shape_pairs[k].local_shape == body_shape && excluded_shape_pairs[k].against_object == col_obj && excluded_shape_pairs[k].against_shape_index == shape_idx) {
+					const ExcludedShapeSW &pair = k < INLINE_EXCLUDED_SHAPE_PAIRS ?
+							excluded_shape_pairs[k] : excluded_shape_overflow[k - INLINE_EXCLUDED_SHAPE_PAIRS];
+					if (pair.local_shape_index == j && pair.against_object == col_obj && pair.against_shape_index == shape_idx) {
 						excluded = true;
 						break;
 					}
