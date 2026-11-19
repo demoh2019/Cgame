@@ -47,6 +47,7 @@
 #include "servers/physics_fem_lumped_mass.h"
 #include "servers/physics_fem_tetra_fiber.h"
 #include "servers/physics_fem_tetra_viscosity.h"
+#include "servers/physics_fem_tetra_volume_plasticity.h"
 #include "servers/physics_fem_tetra_damage.h"
 #include "servers/physics_fem_tetra_inversion_recovery.h"
 #include "servers/physics_softbody_shape_clusters.h"
@@ -3054,6 +3055,27 @@ void GodotSoftBody3D::solve_constraints(real_t p_delta) {
 			continue;
 		}
 		node.x = node.q + node.v * p_delta;
+	}
+
+	// Local FEM volumetric plasticity: relax each tetra REST deformation
+	// toward persistent isotropic expansion/compression once per physics tick.
+	// This changes the internal FEM rest matrix, NOT the gas reference,
+	// global shell volume target or conserved nodal masses. Zero rate
+	// completely skips the extra O(tetrahedra) pass.
+	const real_t tetra_plastic_rate = get_space()->get_soft_body_tetra_volume_plastic_rate();
+	if (tetra_plastic_rate > real_t(0.0) &&
+			get_space()->get_soft_body_tetra_fem_compliance() > real_t(0.0) &&
+			p_delta > real_t(0.0) && !xpbd_fem_tetrahedra.is_empty()) {
+		const double plastic_fraction = 1.0 - Math::exp(-double(tetra_plastic_rate) * double(p_delta));
+		if (Math::is_finite(plastic_fraction) && plastic_fraction > 0.0) {
+			for (PhysicsFEMConvexTetra &tetra : xpbd_fem_tetrahedra) {
+				physics_fem_tetra_creep_volume_rest(
+						nodes[tetra.a].x, nodes[tetra.b].x,
+						nodes[tetra.c].x, nodes[tetra.d].x,
+						get_space()->get_soft_body_tetra_volume_plastic_yield(),
+						plastic_fraction, tetra.rest, tetra.plastic_volume_scale);
+			}
+		}
 	}
 
 	// Local scalar continuum damage is evaluated on predicted positions

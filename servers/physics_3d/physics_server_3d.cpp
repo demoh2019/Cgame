@@ -670,6 +670,11 @@ PhysicsServer3D::PhysicsServer3D() {
 	// Objective Kelvin-Voigt strain-rate stress for each tetrahedral FEM element.
 	// Independent from the global breathing-mode viscosity, off by default.
 	GLOBAL_DEF(PropertyInfo(Variant::FLOAT, "physics/3d/solver/soft_body_tetra_fem_viscosity", PROPERTY_HINT_RANGE, "0,1000,0.1,or_greater"), 0.0);
+	// Optional local isotropic volume viscoplasticity for tetrahedral FEM.
+	// Modifies each element rest matrix (not mesh connectivity); disabled by
+	// default. Distinct from the global closed-shell volume creep setting.
+	GLOBAL_DEF(PropertyInfo(Variant::FLOAT, "physics/3d/solver/soft_body_tetra_volume_plastic_rate", PROPERTY_HINT_RANGE, "0,100,0.1,or_greater,suffix:1/s"), 0.0);
+	GLOBAL_DEF(PropertyInfo(Variant::FLOAT, "physics/3d/solver/soft_body_tetra_volume_plastic_yield", PROPERTY_HINT_RANGE, "0,2,0.01"), 0.15);
 	// Local XPBD-style volume projection recovers inverted FEM tetrahedra
 	// before the logarithmic Neo-Hookean energy solver (which rejects J<=0).
 	// Disabled by default to preserve legacy behavior and solver ordering.
