@@ -92,7 +92,7 @@ bool AIGameBuilderPlugin::is_safe_project_path(const String &p_path) {
 			return false;
 		}
 		// Reserved Windows device names are invalid even with a file extension.
-		const String stem = component.get_basename().to_upper();
+		const String stem = component.get_slice(".", 0).to_upper();
 		if (stem == "CON" || stem == "PRN" || stem == "AUX" || stem == "NUL" ||
 				(stem.length() == 4 && (stem.begins_with("COM") || stem.begins_with("LPT")) && stem[3] >= '1' && stem[3] <= '9')) {
 			return false;
