@@ -15,6 +15,7 @@ var _failed := 0
 func _initialize() -> void:
 	_run()
 	_run_security_tests()
+	_run_writer_atomic_tests()
 	_check(Dock != null, "Editor dock script loads")
 	_check(Plugin != null, "Editor plugin script loads")
 	print("AI Game Builder: %d tests, %d failed" % [_total, _failed])
@@ -339,3 +340,45 @@ func _run_security_tests() -> void:
 	# Safety validation runs again at the write boundary.
 	_check(not Writer.apply(_plan("CON.gd", "extends Node")).ok, "writer rejects reserved file path")
 	_check(not Writer.apply(_plan("data/lpt1.backup.txt", "demo")).ok, "writer rejects nested reserved component")
+
+
+func _run_writer_atomic_tests() -> void:
+	# An existing destination in any position must reject the WHOLE
+	# plan before the first new file is written.
+	var test_dir := "res://ai_generated/tests"
+	_check(DirAccess.make_dir_recursive_absolute(ProjectSettings.globalize_path(test_dir)) == OK, "atomic writer test directory available")
+	var preexisting := test_dir.path_join("_ai_existing.txt")
+	var new_output := test_dir.path_join("_ai_should_not_exist.txt")
+	for path in [preexisting, new_output]:
+		if FileAccess.file_exists(path):
+			DirAccess.remove_absolute(ProjectSettings.globalize_path(path))
+	var seed := FileAccess.open(preexisting, FileAccess.WRITE)
+	_check(seed != null, "atomic writer seeded existing output")
+	if seed == null:
+		return
+	seed.store_string("original contents")
+	seed.close()
+
+	var conflict_plan := {
+		"files": [
+			{"path": "tests/_ai_should_not_exist.txt", "content": "new file"},
+			{"path": "tests/_ai_existing.txt", "content": "overwrite"}
+		]
+	}
+	var before := Writer.apply(conflict_plan)
+	_check(not before.ok, "multi-file writer rejects a later existing destination")
+	_check(not FileAccess.file_exists(new_output), "multi-file preflight creates no earlier file")
+	_check(FileAccess.get_file_as_string(preexisting) == "original contents", "multi-file preflight preserves existing contents")
+
+	var reverse_plan := {
+		"files": [
+			{"path": "tests/_ai_existing.txt", "content": "overwrite"},
+			{"path": "tests/_ai_should_not_exist.txt", "content": "new file"}
+		]
+	}
+	var after := Writer.apply(reverse_plan)
+	_check(not after.ok, "multi-file writer rejects an earlier existing destination")
+	_check(not FileAccess.file_exists(new_output), "reverse-order preflight also creates no file")
+	_check(FileAccess.get_file_as_string(preexisting) == "original contents", "reverse-order preflight preserves contents")
+
+	_check(DirAccess.remove_absolute(ProjectSettings.globalize_path(preexisting)) == OK, "atomic writer fixture cleanup")
