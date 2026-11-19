@@ -670,6 +670,32 @@ func _process(_delta: float) -> void:
 	var journal: Variant = client.you.get("contract", Contracts.empty_state())
 	_contract_label.text = Contracts.description(journal if journal is Dictionary else Contracts.empty_state())
 	_info_label.text += "  Rest %.0fs" % float(client.you.get("rest_cooldown", 0.0))
+	# A lightweight compass for siege outposts; all coordinates, owners and
+	# progress originate in the authoritative snapshot, not client commands.
+	var closest: Dictionary = {}
+	var best_distance := INF
+	var here := Vector2(float(client.you.get("x", 0.0)), float(client.you.get("z", 0.0)))
+	for post in client.outposts:
+		var distance: float = here.distance_to(Vector2(float(post["x"]), float(post["z"])))
+		if distance < best_distance:
+			best_distance = distance
+			closest = post
+	if not closest.is_empty():
+		var group_id: int = int(client.you.get("party", {}).get("id", 0))
+		var owner: int = int(closest["owner"])
+		var status: String = "Neutral" if owner == 0 else ("YOURS" if owner == group_id and group_id != 0 else "Party %d" % owner)
+		if bool(closest["contested"]):
+			status += " | CONTESTED"
+		elif int(closest["challenger"]) != 0:
+			status += " | Capture %d%%" % int(100.0 * float(closest["progress"]) / 30.0)
+		_info_label.text += "\nSiege outpost #%d at (%d, %d): %.0f m | %s" % [
+			int(closest["id"]), int(closest["x"]), int(closest["z"]), best_distance, status
+		]
+
+	var rally: Dictionary = client.you.get("party", {}).get("rally", {})
+	if not rally.is_empty():
+		_info_label.text += "\nPARTY RALLY x%d z%d | %ds left" % [
+			int(rally["x"]), int(rally["z"]), int(ceil(float(rally["remaining"])))]
 	var rally: Dictionary = client.you.get("party", {}).get("rally", {})
 	if not rally.is_empty():
 		_info_label.text += "\nPARTY RALLY x%d z%d | %ds left" % [

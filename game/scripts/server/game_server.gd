@@ -10,6 +10,7 @@ const Inventory = preload("res://scripts/shared/inventory.gd")
 const Vendor = preload("res://scripts/shared/vendor.gd")
 const PlayerTrade = preload("res://scripts/shared/player_trade.gd")
 const Party = preload("res://scripts/shared/party.gd")
+const TerritoryControl = preload("res://scripts/shared/territory_control.gd")
 const MarketBoard = preload("res://scripts/shared/market_board.gd")
 const Contracts = preload("res://scripts/shared/contracts.gd")
 const SaveValidation = preload("res://scripts/shared/save_validation.gd")
@@ -98,6 +99,7 @@ var market_sales: Array = [] # Bounded session-only receipts, NOT durable settle
 var market_buy_requests: Dictionary = {} # Peer -> last request ID, arguments and result.
 var trade_by_player: Dictionary = {} # peer -> active trade
 var parties = Party.new() # Server-only session groups and short-lived invitations.
+var territory # Session outposts generated from this world seed.
 var world_structure_revision: int = 0
 var bags: Dictionary = {} # bag id -> {"id", "x","y","z", "items": {id: n}, "expires": t}
 var events: Array = [] # Things that happened this tick, for the network layer to announce.
@@ -106,6 +108,7 @@ var _next_id: int = 5_000_000_000
 
 func _init(p_world, p_seed: int = 1) -> void:
 	world = p_world
+	territory = TerritoryControl.new(p_world)
 	rng.seed = p_seed
 
 
@@ -1625,6 +1628,7 @@ func tick(delta: float) -> void:
 	_tick_trades()
 	parties.expire(time)
 	_tick_players(delta)
+	events.append_array(territory.tick(delta, time, players, parties))
 	if tick_count % SiegeWaves.CHECK_EVERY_TICKS == 0:
 		_tick_siege_waves()
 	_tick_zombies(delta)
@@ -1650,6 +1654,13 @@ func _tick_players(delta: float) -> void:
 			continue
 		player.combat_energy = minf(Defs.COMBAT_ENERGY_MAX, player.combat_energy + Defs.COMBAT_ENERGY_REGEN * delta)
 		var damage: float = player.survival.tick(delta)
+		# Holding a contested PvP outpost grants a small local rally advantage.
+		# Only the server owns party identity, site control and stamina.
+		if player.survival.stamina_recovery_delay <= 0.0 and \
+				player.survival.hunger > 20.0 and player.survival.thirst > 20.0 and \
+				territory.has_rally_bonus(player.id, player.position, parties, time):
+			player.survival.stamina = minf(Defs.MAX_STAMINA,
+				player.survival.stamina + TerritoryControl.RALLY_STAMINA_PER_SECOND * delta)
 		var conditions: Dictionary = Weather.conditions(world, player.position.x, player.position.z, time)
 		var weather_severity: float = Weather.effective_severity(conditions, player.inventory.armor)
 		if FieldCampfire.has_warmth(campfires, player.position, time):
@@ -1957,6 +1968,7 @@ func snapshot_for(peer_id: int) -> Dictionary:
 		used_crates.append(id)
 	var snapshot := {
 		"tick": tick_count, "time": time, "ack": player.last_input_seq,
+		"outposts": territory.public_state(time),
 		"you": {
 			"party": _party_state_for(peer_id),
 			"x": player.position.x, "y": player.position.y, "z": player.position.z, "yaw": player.yaw,

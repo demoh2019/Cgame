@@ -1148,3 +1148,35 @@ in `tests/run_all.gd`. It verifies pre-invite hits, legitimate assists,
 corpse replay denial, regrouping and single-loot accounting. Existing
 Lineage-style invitations, rally points, contribution windows, party
 friendly-fire immunity and guild systems remain unchanged.
+
+## Contested survivor outposts (Lineage-style siege prototype)
+
+Three seed-deterministic outposts are placed on traversable land in the
+**red and black full-loot PvP zones**. In the multiplayer HUD the nearest
+outpost is displayed with its world coordinates, distance, controller and
+capture progress. The same public state travels in authoritative snapshots.
+
+At least **two living members of one server-owned party** must stand within
+12 metres of a flag for 30 accumulated seconds to claim it. A rival nearby
+survivor contests the capture, even if not yet in a party. Rival parties can
+retake the flag by driving the defenders away and capturing it themselves.
+Ownership lasts for at most 15 minutes, and ends earlier if its party
+disbands. Outpost ownership and capture timers are server-session data only.
+There are no client RPCs for setting owners, changing progress or claiming
+unearned rewards.
+
+While a party controls an outpost, its members gain **2 additional stamina
+per second** while within 18 metres, provided they are alive, sufficiently
+fed and hydrated, and not in the normal stamina-recovery delay. The benefit
+is capped at the normal stamina maximum and never applies remotely.
+Successful captures emit one server-owned event; the list and progress are
+synchronized in the existing snapshots.
+
+This is a **party-controlled siege prototype**, not permanent Nakama guild
+ownership or a persistent castle economy. Proper clan wars will require
+authenticated guild membership, authority rules for scheduling sieges, and
+durable territory ownership before they can be enabled. Static battle
+logic is in `scripts/shared/territory_control.gd`, integrated with
+`scripts/server/game_server.gd`, and regression-tested by
+`tests/test_territory_control.gd` through `tests/run_all.gd`.
+Existing Cgame physics, ENet and snapshot APIs are sufficient.
