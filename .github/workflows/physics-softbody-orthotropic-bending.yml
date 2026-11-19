@@ -1,0 +1,33 @@
+name: SoftBody3D orthotropic XPBD dihedral bending contracts
+
+on:
+  pull_request:
+    paths:
+      - "servers/physics_softbody_orthotropic_bending.h"
+      - "servers/physics_3d/physics_server_3d.cpp"
+      - "modules/godot_physics_3d/godot_space_3d.cpp"
+      - "modules/godot_physics_3d/godot_space_3d.h"
+      - "modules/godot_physics_3d/godot_soft_body_3d.cpp"
+      - "modules/godot_physics_3d/godot_soft_body_3d.h"
+      - "tests/servers/test_physics_softbody_orthotropic_bending.cpp"
+      - "tests/stress/test_physics_softbody_orthotropic_bending.py"
+      - ".github/workflows/physics-softbody-orthotropic-bending.yml"
+  push:
+    branches: [develop]
+    paths:
+      - "servers/physics_softbody_orthotropic_bending.h"
+      - "modules/godot_physics_3d/godot_soft_body_3d.cpp"
+      - "tests/stress/test_physics_softbody_orthotropic_bending.py"
+      - ".github/workflows/physics-softbody-orthotropic-bending.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  numerical-contracts:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Validate warp/weft bending and GodotPhysics3D integration
+        run: python3 -m unittest discover -s tests/stress -p test_physics_softbody_orthotropic_bending.py -v
