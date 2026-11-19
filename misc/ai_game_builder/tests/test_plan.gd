@@ -37,7 +37,7 @@ func _run_validation_tests() -> void:
 		"res://file.gd", ".env", ".git/config.gd", ".godot/cache.gd",
 		"addons/evil/plugin.gd", "ADDONS/evil/plugin.gd",
 		"folder/.hidden.gd", "folder/ending./file.gd",
-		"file.exe", "project.godot", "script.gd\nother.gd",
+		"file.exe", "project.godot", "override.cfg", "export_presets.cfg", "script.gd\nother.gd",
 		"script.gd\rother.gd", "file.txt/", "a/./main.gd"
 	]
 	for path in bad_paths:
@@ -74,6 +74,8 @@ func _run_validation_tests() -> void:
 	var wrong_main := _sample()
 	wrong_main["main_scene"] = "scenes/missing.tscn"
 	_expect(not Plan.validate_plan(wrong_main)["ok"], "reject main scene not in files")
+	wrong_main["main_scene"] = "Scenes/main.tscn"
+	_expect(not Plan.validate_plan(wrong_main)["ok"], "require exact-case main scene path")
 	wrong_main["main_scene"] = 42
 	_expect(not Plan.validate_plan(wrong_main)["ok"], "reject non-string main scene")
 	wrong_main["main_scene"] = "scenes/main.tscn"
