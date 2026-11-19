@@ -94,7 +94,7 @@ PackedFloat32Array TerrainHeightmap::get_heights() const {
 void TerrainHeightmap::set_colors(const PackedColorArray &p_colors) {
     ERR_FAIL_COND_MSG(p_colors.size() != width * depth, "The color count must equal width * depth.");
     for (int i = 0; i < p_colors.size(); ++i) {
-        ERR_FAIL_COND_MSG(!p_colors[i].is_finite(), "Terrain vertex colors must be finite.");
+        ERR_FAIL_COND_MSG(!Math::is_finite(p_colors[i].r) || !Math::is_finite(p_colors[i].g) || !Math::is_finite(p_colors[i].b) || !Math::is_finite(p_colors[i].a), "Terrain vertex colors must be finite.");
     }
     if (colors == p_colors) {
         return;
@@ -177,7 +177,7 @@ void TerrainHeightmap::apply_height_brush(const Vector2 &p_center, real_t p_radi
 }
 
 void TerrainHeightmap::apply_color_brush(const Vector2 &p_center, real_t p_radius, const Color &p_color, real_t p_strength) {
-    ERR_FAIL_COND(!p_center.is_finite() || !p_color.is_finite() || !Math::is_finite(p_radius) || !Math::is_finite(p_strength));
+    ERR_FAIL_COND(!p_center.is_finite() || !Math::is_finite(p_color.r) || !Math::is_finite(p_color.g) || !Math::is_finite(p_color.b) || !Math::is_finite(p_color.a) || !Math::is_finite(p_radius) || !Math::is_finite(p_strength));
     ERR_FAIL_COND(p_radius <= 0);
     p_strength = CLAMP(p_strength, 0.0, 1.0);
     if (p_strength == 0) {
@@ -210,6 +210,7 @@ void TerrainHeightmap::apply_color_brush(const Vector2 &p_center, real_t p_radiu
 
 void TerrainHeightmap::import_height_image(const Ref<Image> &p_image, real_t p_min_height, real_t p_max_height) {
     ERR_FAIL_COND(p_image.is_null());
+    ERR_FAIL_COND_MSG(p_image->is_compressed(), "Decompress the heightmap image before importing.");
     const int iw = p_image->get_width();
     const int ih = p_image->get_height();
     ERR_FAIL_COND_MSG(iw < 2 || ih < 2 || iw > MAX_RESOLUTION || ih > MAX_RESOLUTION,
