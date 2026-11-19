@@ -1375,17 +1375,43 @@ static void resolve_soft_body_self_contacts(JPH::Body &p_body, const JoltSoftBod
 		return;
 	}
 
+	const bool refit_faces = JoltProjectSettings::soft_body_self_face_bvh_refit;
+	// The existing persistent edge cache and the independent face-cache
+	// option both reuse immutable mesh adjacency for stable BodyID objects.
 	if (!ensure_soft_self_topology(faces, uint32_t(vertices.size()), r_scratch, r_budget,
-			JoltProjectSettings::soft_body_self_persistent_bvh)) {
+			JoltProjectSettings::soft_body_self_persistent_bvh || refit_faces)) {
 		return;
 	}
-	r_scratch.bvh.clear();
-	// Use the existing bounding-volume hierarchy on the same body's
-	// *local* deforming triangles. For tiny cloths brute force is cheaper.
-	// Large bodies are skipped if the BVH would exhaust the work budget.
+	// Use the same triangle BVH whether we build or refit it, preserving
+	// topology exclusions and the existing discrete/speculative narrowphase.
+	// On small meshes, continue to use the old direct face scan.
 	const bool needs_bvh = faces.size() >= MIN_SOFT_FACE_BVH_FACES;
-	const bool use_bvh = needs_bvh && prepare_soft_face_bvh(faces, vertices, JPH::Quat::sIdentity(),
-			JPH::Vec3::sZero(), r_scratch.bvh.entries, r_scratch.bvh.nodes, r_budget);
+	bool use_bvh = false;
+	if (needs_bvh && refit_faces && r_scratch.face_bvh_ready &&
+			r_scratch.face_bvh_face_count == faces.size() && r_scratch.face_bvh_refits < 120) {
+		use_bvh = refit_soft_self_face_bvh(faces, vertices, r_scratch.bvh, r_budget);
+		if (use_bvh) {
+			++r_scratch.face_bvh_refits;
+		}
+	}
+	if (needs_bvh && !use_bvh) {
+		// May follow an aborted refit: always discard potentially partial
+		// AABBs/nodes before attempting a fresh, budgeted median build.
+		r_scratch.bvh.clear();
+		use_bvh = prepare_soft_face_bvh(faces, vertices, JPH::Quat::sIdentity(),
+				JPH::Vec3::sZero(), r_scratch.bvh.entries, r_scratch.bvh.nodes, r_budget);
+		if (use_bvh) {
+			r_scratch.face_bvh_refits = 0;
+		}
+	}
+	if (refit_faces) {
+		r_scratch.face_bvh_ready = use_bvh;
+		r_scratch.face_bvh_face_count = use_bvh ? uint32_t(faces.size()) : 0;
+	} else {
+		// An independently persistent edge cache may outlive this toggle.
+		// Never reuse a face tree from before refitting was switched off.
+		r_scratch.face_bvh_ready = false;
+	}
 	if (needs_bvh && !use_bvh) {
 		return;
 	}
