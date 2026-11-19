@@ -27,6 +27,9 @@
 #include "servers/physics_fem_explicit_tetra.h"
 #include "tests/test_macros.h"
 
+#include <initializer_list>
+#include <utility>
+
 TEST_FORCE_LINK(test_physics_fem_explicit_tetra)
 
 namespace TestPhysicsFEMExplicitTetra {
