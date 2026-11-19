@@ -147,6 +147,63 @@ TEST_CASE("[SceneTree][Control] Repeated moves do not preserve temporary size co
 	}
 }
 
+TEST_CASE("[SceneTree][Control] Global movement preserves size after temporary constraints") {
+	for (bool maximum : { false, true }) {
+		Control *parent = memnew(Control);
+		parent->set_position(Point2(12, 18));
+		parent->set_size(Size2(200, 200));
+		SceneTree::get_singleton()->get_root()->add_child(parent);
+		Control *child = memnew(Control);
+		parent->add_child(child);
+		child->set_size(Size2(60, 70));
+		if (maximum) {
+			child->set_custom_maximum_size(Size2(30, 40));
+		} else {
+			child->set_custom_minimum_size(Size2(90, 100));
+		}
+		SceneTree::get_singleton()->process(0);
+		child->set_global_position(Point2(110, 120));
+		if (maximum) {
+			child->set_custom_maximum_size(Size2(-1, -1));
+		} else {
+			child->set_custom_minimum_size(Size2());
+		}
+		SceneTree::get_singleton()->process(0);
+		CHECK(child->get_size().is_equal_approx(Size2(60, 70)));
+		CHECK(child->get_global_position().is_equal_approx(Point2(110, 120)));
+		memdelete(parent);
+	}
+}
+
+TEST_CASE("[SceneTree][Control] Stretched anchors preserve the unconstrained size on move") {
+	for (bool keep_offsets : { false, true }) {
+		for (bool maximum : { false, true }) {
+			Control *parent = memnew(Control);
+			parent->set_size(Size2(200, 200));
+			SceneTree::get_singleton()->get_root()->add_child(parent);
+			Control *child = memnew(Control);
+			parent->add_child(child);
+			child->set_anchors_and_offsets_preset(Control::PRESET_FULL_RECT);
+			child->set_size(Size2(60, 70));
+			if (maximum) {
+				child->set_custom_maximum_size(Size2(30, 40));
+			} else {
+				child->set_custom_minimum_size(Size2(90, 100));
+			}
+			SceneTree::get_singleton()->process(0);
+			child->set_position(Point2(17, 19), keep_offsets);
+			if (maximum) {
+				child->set_custom_maximum_size(Size2(-1, -1));
+			} else {
+				child->set_custom_minimum_size(Size2());
+			}
+			SceneTree::get_singleton()->process(0);
+			CHECK(child->get_size().is_equal_approx(Size2(60, 70)));
+			memdelete(parent);
+		}
+	}
+}
+
 TEST_CASE("[SceneTree][Control] Transforms") {
 	SUBCASE("[Control][Global Transform] Global Transform should be accessible while not in SceneTree.") { // GH-79453
 		Control *test_node = memnew(Control);
