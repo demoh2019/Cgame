@@ -26,6 +26,8 @@ var _magnet_on := false
 var _magnet_repels := false
 var _gravity_scale := 1.0
 var _spawn_mass := 2.0
+var _selected_friction := 0.65
+var _selected_bounce := 0.15
 var _held: RigidBody3D
 var _held_distance := 8.0
 var _dragging := false
@@ -143,6 +145,10 @@ func _spawn_box(world_position: Vector3, mass: float, magnetic := false, radius 
     body.name = "InteractiveMetal" if magnetic else "InteractiveObject"
     body.position = world_position
     body.mass = maxf(0.1, mass)
+    var contact := PhysicsMaterial.new()
+    contact.friction = _selected_friction
+    contact.bounce = _selected_bounce
+    body.physics_material_override = contact
     body.continuous_cd = true
     var collider := CollisionShape3D.new()
     var box := BoxShape3D.new()
@@ -213,6 +219,14 @@ func _create_hud() -> void:
     _add_slider(column, "Течение воды", -6.0, 6.0, _water_current, func(v: float) -> void:
         _water_current = v
         _update_status()
+    )
+    _add_slider(column, "Трение выбранного тела", 0.0, 2.0, _selected_friction, func(v: float) -> void:
+        _selected_friction = v
+        _apply_selected_material()
+    )
+    _add_slider(column, "Упругость выбранного тела", 0.0, 1.0, _selected_bounce, func(v: float) -> void:
+        _selected_bounce = v
+        _apply_selected_material()
     )
     _add_slider(column, "Масса нового куба", 0.5, 20.0, _spawn_mass, func(v: float) -> void:
         _spawn_mass = v
@@ -288,12 +302,18 @@ func _cycle_gravity() -> void:
     _update_status()
 
 
+func _apply_selected_material() -> void:
+    if not is_instance_valid(_held):
+        return
+    var material := PhysicsMaterial.new()
+    material.friction = _selected_friction
+    material.bounce = _selected_bounce
+    _held.physics_material_override = material
+
+
 func _toggle_freeze() -> void:
     if is_instance_valid(_held):
         _held.freeze = not _held.freeze
-        if _held.freeze:
-            _held = null
-            _dragging = false
         _update_status()
 
 
@@ -366,7 +386,7 @@ func _pick() -> void:
         _held = null
         return
     var candidate := hit["collider"] as RigidBody3D
-    if candidate == null or candidate is VehicleBody3D or candidate.freeze:
+    if candidate == null or candidate is VehicleBody3D:
         _held = null
         return
     _held = candidate
