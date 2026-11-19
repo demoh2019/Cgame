@@ -1,0 +1,6 @@
+; Isolated test project for the AI Game Builder addon.
+config_version=5
+
+[application]
+
+config/name="AI Game Builder Tests"
