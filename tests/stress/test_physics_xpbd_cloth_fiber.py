@@ -71,6 +71,9 @@ class OrthotropicClothFiberContracts(unittest.TestCase):
 
     def test_native_and_compiler_smoke_cover_geometry_and_extremes(self):
         self.assertIn("TEST_FORCE_LINK(test_physics_xpbd_cloth_fiber)", self.native)
+        self.assertIn('#include "servers/physics_xpbd_distance.h"', self.native)
+        self.assertIn("physics_xpbd_solve_distance(pinned_warp, stretched_warp,", self.native)
+        self.assertIn("stretched_warp.length() < stretched_weft.length()", self.native)
         for name in (
             "warp and weft compliances follow rest fibers",
             "axis reversal and rigid rest translations are invariant",
