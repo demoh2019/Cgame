@@ -109,3 +109,36 @@ func run(t) -> void:
 					contains = true
 			t.check(contains, "a blocking node is found near itself")
 			break
+
+	t.current = "structures"
+	var hub: Array = a.hub_structures()
+	t.check(hub.size() >= 10, "the hub has a fountain, a workbench and houses (%d)" % hub.size())
+	var kinds: Dictionary = {}
+	for s in hub:
+		kinds[s["kind"]] = true
+		t.check(s["radius"] > 0.0 and s["scale"] > 0.0, "hub structure sizes are positive")
+	t.check(kinds.has("fountain") and kinds.has("workbench") and kinds.has("building"), "all hub structure kinds exist")
+	t.eq(hub, b.hub_structures(), "the hub is the same for the same seed")
+	for s in hub:
+		if s["kind"] == "building":
+			t.check(Vector2(s["x"], s["z"]).length() > 28.0, "houses stand outside the spawn ring")
+			var near_house := a.blockers_near(s["x"], s["z"], 0.3)
+			var found := false
+			for blocker in near_house:
+				if blocker["kind"] == "building" and blocker["x"] == s["x"] and blocker["z"] == s["z"]:
+					found = true
+			t.check(found, "a house blocks movement at its own position")
+	t.check(a.blockers_near(0.0, 0.0, 1.5).is_empty(), "the fountain basin and the spawn area are open")
+	var ruin_structures := 0
+	var ruin_walls := 0
+	for cx in range(-10, 11):
+		for cz in range(-10, 11):
+			var data := a.chunk(Vector2i(cx, cz))
+			if not data["ruin"]:
+				t.eq(data["structures"].size(), 0, "only ruins have structures")
+			for s in data["structures"]:
+				ruin_structures += 1
+				ruin_walls += 1 if s["kind"] == "wall" else 0
+				t.eq(WorldGen.cell_of(s["x"], s["z"]), Vector2i(cx, cz), "a structure lies in its chunk")
+				t.check(not a.is_water(s["x"], s["z"]), "structures are not in water")
+	t.check(ruin_structures > 20 and ruin_walls > 3, "ruins hold buildings and walls (%d, %d walls)" % [ruin_structures, ruin_walls])

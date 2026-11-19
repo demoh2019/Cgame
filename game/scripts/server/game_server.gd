@@ -203,8 +203,16 @@ func remove_player(peer_id: int) -> void:
 
 
 func _spawn_player(player: Player) -> void:
-	var angle := rng.randf() * TAU
-	var spot := Vector2.from_angle(angle) * rng.randf_range(10.0, 22.0)
+	var spot := Vector2(12.0, 6.0)
+	for attempt in 20: # Not inside the workbench or a building: take the first free spot.
+		var candidate := Vector2.from_angle(rng.randf() * TAU) * rng.randf_range(10.0, 22.0)
+		var blocked := false
+		for blocker in world.blockers_near(candidate.x, candidate.y, Defs.PLAYER_RADIUS + 1.0):
+			if Vector2(blocker["x"] - candidate.x, blocker["z"] - candidate.y).length() < Defs.PLAYER_RADIUS + float(blocker["radius"]) + 0.3:
+				blocked = true
+		if not blocked:
+			spot = candidate
+			break
 	player.position = Vector3(spot.x, world.height_at(spot.x, spot.y), spot.y)
 	player.survival.reset()
 	var kept_gear: bool = player.keep_inventory_on_respawn

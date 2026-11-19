@@ -96,9 +96,9 @@ func run(t) -> void:
 		t.eq(server.cmd_gather(10, tier2["id"])["reason"], "need_tool", "a tier 2 tree needs a tool")
 		server.players[10].inventory.add("axe_2", 1)
 		t.eq(server.cmd_gather(10, tier2["id"])["reason"], "need_skill", "tool alone does not bypass profession levels")
-		server.players[10].progression.award_gather("wood", 1, 13)
+		server.players[10].progression.award_gather("tree", 1, 13)
 		var good := server.cmd_gather(10, tier2["id"])
-		t.check(good["ok"], "an axe of the right tier works")
+		t.check(good["ok"], "an axe of the right tier works: %s" % str(good))
 		var hands := server.cmd_gather(10, tier2["id"])
 		t.check(good["seconds"] < 3.0, "a tool is faster than hands (%f s)" % good["seconds"])
 		server.players[10].action = {}

@@ -31,8 +31,8 @@ func run(t) -> void:
 	# portion is in the protected stash after a valid carried inventory.
 	t.current = "corrupt saves reject atomically"
 	var original_health: float = player.survival.health
-	var original_wood := player.inventory.count("club_1")
-	var original_silver := player.stash.count("silver")
+	var original_wood: int = player.inventory.count("club_1")
+	var original_silver: int = player.stash.count("silver")
 	var invalid: Dictionary = saved.duplicate(true)
 	invalid["inventory"]["slots"][0] = {"id": "wood_1", "count": 1.5}
 	t.check(not server.apply_character(player, invalid), "fractional carried items rejected")

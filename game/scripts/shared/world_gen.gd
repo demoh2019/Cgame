@@ -12,6 +12,7 @@ var _detail: FastNoiseLite
 var _temperature: FastNoiseLite
 var _moisture: FastNoiseLite
 var _cache: Dictionary = {}
+var _hub_structures: Array = []
 const CACHE_LIMIT := 256
 
 # Height range in meters. The hub is leveled to HUB_HEIGHT so the town can be built flat.
@@ -102,6 +103,33 @@ func is_safe(x: float, z: float) -> bool:
 	return Vector2(x, z).length() < Defs.HUB_SAFE_RADIUS
 
 
+# --- Structures -----------------------------------------------------------------------------------------------
+# Buildings and walls are part of the seed too: the server uses them as obstacles, the client draws them.
+# kind: "fountain" | "building" | "wall" | "workbench". "variant" picks the model, "scale" the size in meters
+# per model unit and "yaw" the rotation.
+
+const BUILDING_VARIANTS := 5 # building-small-a..d and the garage.
+const BUILDING_SCALE := 6.0
+const WALL_SCALE := 3.0
+
+
+## Everything built in the hub: a fountain plaza, a ring of houses and the workbench.
+func hub_structures() -> Array:
+	if _hub_structures.is_empty():
+		_hub_structures.append({"kind": "fountain", "variant": 0, "scale": 5.0, "x": 0.0, "z": 0.0, "yaw": 0.0, "radius": 2.6, "blocks": false}) # A basin you can wade through.
+		_hub_structures.append({"kind": "workbench", "variant": 0, "scale": 1.0, "x": 9.0, "z": 0.0, "yaw": 0.0, "radius": 0.9, "blocks": true})
+		var count := 9
+		for i in count:
+			var angle := TAU * float(i) / float(count) + 0.3
+			var radius := 31.0 + 3.0 * float(mix(i, 3, 17) % 3)
+			var spot := Vector2.from_angle(angle) * radius
+			_hub_structures.append({
+				"kind": "building", "variant": mix(i, 5, 9) % BUILDING_VARIANTS, "scale": BUILDING_SCALE,
+				"x": spot.x, "z": spot.y, "yaw": -angle + PI * 0.5, "radius": BUILDING_SCALE * 0.62, "blocks": true,
+			})
+	return _hub_structures
+
+
 # --- Chunks --------------------------------------------------------------------------------------------
 
 static func cell_of(x: float, z: float) -> Vector2i:
@@ -140,6 +168,7 @@ func _generate_chunk(cell: Vector2i) -> Dictionary:
 	var nodes: Array = []
 	var crates: Array = []
 	var spawns: Array = []
+	var structures: Array = []
 	var ruin := false
 
 	# Ruins: scavenging sites, never inside the hub, rarer in the safe green zone.
@@ -191,6 +220,28 @@ func _generate_chunk(cell: Vector2i) -> Dictionary:
 				"x": p.x, "z": p.y, "y": height_at(p.x, p.y), "radius": 0.6, "blocks": true,
 			})
 			index += 1
+		# Ruined buildings and wall fragments around the crates.
+		var struct_count := rng.randi_range(3, 5)
+		var struct_spots: Array[Vector2] = []
+		for i in struct_count * 6:
+			if struct_spots.size() >= struct_count:
+				break
+			var spot := center + Vector2.from_angle(rng.randf() * TAU) * rng.randf_range(15.0, 25.0)
+			var clear := not is_water(spot.x, spot.y)
+			for other in struct_spots:
+				if other.distance_to(spot) < 10.0:
+					clear = false
+			if clear:
+				struct_spots.append(spot)
+		for spot in struct_spots:
+			var is_wall := rng.randf() < 0.4
+			var yaw := rng.randf() * TAU
+			structures.append({
+				"id": entity_id(cell, index), "kind": "wall" if is_wall else "building", "variant": rng.randi_range(0, BUILDING_VARIANTS - 1),
+				"scale": WALL_SCALE if is_wall else BUILDING_SCALE, "x": spot.x, "z": spot.y, "y": height_at(spot.x, spot.y), "yaw": yaw,
+				"radius": WALL_SCALE * 0.6 if is_wall else BUILDING_SCALE * 0.62, "blocks": true,
+			})
+			index += 1
 		var pack := rng.randi_range(4, 7) + zone
 		for i in pack:
 			var p := center + Vector2(rng.randf_range(-20.0, 20.0), rng.randf_range(-20.0, 20.0))
@@ -206,7 +257,7 @@ func _generate_chunk(cell: Vector2i) -> Dictionary:
 			spawns.append({"id": entity_id(cell, index), "x": p.x, "z": p.y, "type": _pick_zombie(zone, rng), "ruin": false})
 			index += 1
 
-	return {"cell": cell, "zone": zone, "tier": tier, "ruin": ruin, "nodes": nodes, "crates": crates, "spawns": spawns}
+	return {"cell": cell, "zone": zone, "tier": tier, "ruin": ruin, "nodes": nodes, "crates": crates, "spawns": spawns, "structures": structures}
 
 
 func _pick_node_kind(biome: String, rng: RandomNumberGenerator) -> String:
@@ -266,12 +317,16 @@ static func _pick_zombie(zone: int, rng: RandomNumberGenerator) -> String:
 ## Static things that block movement near a point, for both the server and client prediction.
 func blockers_near(x: float, z: float, radius: float) -> Array:
 	var result: Array = []
+	if Vector2(x, z).length() < 60.0 + radius:
+		for structure in hub_structures():
+			if structure["blocks"] and absf(structure["x"] - x) < radius + structure["radius"] and absf(structure["z"] - z) < radius + structure["radius"]:
+				result.append(structure)
 	var cell_a := cell_of(x - radius, z - radius)
 	var cell_b := cell_of(x + radius, z + radius)
 	for cx in range(cell_a.x, cell_b.x + 1):
 		for cz in range(cell_a.y, cell_b.y + 1):
 			var data := chunk(Vector2i(cx, cz))
-			for group in ["nodes", "crates"]:
+			for group in ["nodes", "crates", "structures"]:
 				for n in data[group]:
 					if n["blocks"] and absf(n["x"] - x) < radius + n["radius"] and absf(n["z"] - z) < radius + n["radius"]:
 						result.append(n)
