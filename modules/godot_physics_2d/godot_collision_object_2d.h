@@ -67,6 +67,8 @@ private:
 	Vector<Shape> shapes;
 	GodotSpace2D *space = nullptr;
 	Transform2D transform;
+	// Invalidates the exact-pose manifold cache when geometry or transforms change.
+	uint64_t collision_geometry_version = 1;
 	Transform2D inv_transform;
 	uint32_t collision_mask = 1;
 	uint32_t collision_layer = 1;
@@ -83,6 +85,9 @@ protected:
 	void _unregister_shapes();
 
 	_FORCE_INLINE_ void _set_transform(const Transform2D &p_transform, bool p_update_shapes = true) {
+		if (transform != p_transform) {
+			++collision_geometry_version;
+		}
 		transform = p_transform;
 		if (p_update_shapes) {
 			_update_shapes();
@@ -132,6 +137,7 @@ public:
 	}
 
 	_FORCE_INLINE_ const Transform2D &get_transform() const { return transform; }
+	_FORCE_INLINE_ uint64_t get_collision_geometry_version() const { return collision_geometry_version; }
 	_FORCE_INLINE_ const Transform2D &get_inv_transform() const { return inv_transform; }
 	_FORCE_INLINE_ GodotSpace2D *get_space() const { return space; }
 
@@ -143,6 +149,7 @@ public:
 
 	_FORCE_INLINE_ void set_shape_as_one_way_collision(int p_idx, bool p_one_way_collision, real_t p_margin, const Vector2 &p_direction) {
 		CRASH_BAD_INDEX(p_idx, shapes.size());
+		++collision_geometry_version;
 		shapes.write[p_idx].one_way_collision = p_one_way_collision;
 		shapes.write[p_idx].one_way_collision_margin = p_margin;
 		shapes.write[p_idx].one_way_collision_direction = p_direction;
