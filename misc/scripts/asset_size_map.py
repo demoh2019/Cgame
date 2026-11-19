@@ -3,6 +3,7 @@
 
 import argparse
 import json
+from heapq import nsmallest
 import os
 from pathlib import Path
 import re
@@ -37,6 +38,15 @@ def scan_project(root):
     names_by_case = {}
     for current, directories, filenames in os.walk(root, followlinks=False, onerror=walk_error):
         directory = Path(current)
+        # Check each directory's case-insensitive name once, instead of
+        # rebuilding and casefolding every parent prefix for every asset.
+        if directory != root:
+            relative_directory = directory.relative_to(root).as_posix()
+            alias = relative_directory.casefold()
+            previous = names_by_case.setdefault(alias, relative_directory)
+            if previous != relative_directory:
+                raise AssetSizeError("Case-insensitive path collision: {} / {}".format(
+                    previous, relative_directory))
         for name in list(directories):
             if name in EXCLUDED_DIRECTORIES:
                 directories.remove(name)
@@ -51,13 +61,11 @@ def scan_project(root):
             details = full_path.stat(follow_symlinks=False)
             if not stat.S_ISREG(details.st_mode):
                 raise AssetSizeError("Non-regular asset: {}".format(relative))
-            components = relative.split("/")
-            for depth in range(1, len(components) + 1):
-                part = "/".join(components[:depth])
-                alias = part.casefold()
-                previous = names_by_case.setdefault(alias, part)
-                if previous != part:
-                    raise AssetSizeError("Case-insensitive path collision: {} / {}".format(previous, part))
+            alias = relative.casefold()
+            previous = names_by_case.setdefault(alias, relative)
+            if previous != relative:
+                raise AssetSizeError("Case-insensitive path collision: {} / {}".format(
+                    previous, relative))
             entries.append({"path": relative, "extension": _extension(name), "bytes": details.st_size})
     return sorted(entries, key=lambda item: item["path"])
 
@@ -110,7 +118,7 @@ def build_report(entries, top=10, total_limit=None, file_limit=None, extension_l
         "total_bytes": total,
         "by_extension": [{"extension": ext, **totals[ext]} for ext in sorted(totals)],
         "largest_files": [{"path": item["path"], "bytes": item["bytes"]}
-                          for item in sorted(entries, key=lambda x: (-x["bytes"], x["path"]))[:top]],
+                          for item in nsmallest(top, entries, key=lambda x: (-x["bytes"], x["path"]))],
         "violations": violations,
     }
 
