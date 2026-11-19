@@ -1,0 +1,80 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<class name="TerrainMesh" inherits="PrimitiveMesh" api_type="core" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="../../../doc/class.xsd">
+	<brief_description>
+		An editable grid-based 3D heightfield mesh.
+	</brief_description>
+	<description>
+		[TerrainMesh] generates an upward-facing triangulated heightfield from a rectangular grid of floating-point heights. It can be assigned directly to [member MeshInstance3D.mesh], and automatically rebuilds its geometry after edits.
+		Heights are stored in a row-major array (X first, then Z). A grid position [code]Vector2(x, z)[/code] selects the sample at horizontal coordinate [code]x * cell_size[/code] and depth coordinate [code]z * cell_size[/code]. The rendered Y coordinate is the stored height multiplied by [member height_scale].
+		Use [method sculpt] to raise or lower terrain, [method smooth] to reduce abrupt height changes, or [method erode] for basic thermal erosion. All brush positions and radii are specified in grid cells, not world units.
+		When 3D physics is enabled, use a [TerrainCollision3D] node to generate a matching static collider that automatically follows resource edits.
+		[b]Note:[/b] This is a basic single-mesh terrain resource. It does not yet implement chunk streaming, LOD, texture painting, or asynchronous collision baking.
+	</description>
+	<methods>
+		<method name="erode">
+			<return type="void" />
+			<param index="0" name="iterations" type="int" />
+			<param index="1" name="talus" type="float" default="0.0" />
+			<param index="2" name="strength" type="float" default="0.5" />
+			<description>
+				Applies a simple volume-conserving thermal erosion pass [param iterations] times. Material above the [param talus] height difference flows toward lower orthogonal neighbors. [param strength] must be between [code]0[/code] and [code]1[/code].
+			</description>
+		</method>
+		<method name="get_height" qualifiers="const">
+			<return type="float" />
+			<param index="0" name="x" type="int" />
+			<param index="1" name="z" type="int" />
+			<description>
+				Returns the stored unscaled height at grid coordinate ([param x], [param z]).
+			</description>
+		</method>
+		<method name="sample_height" qualifiers="const">
+			<return type="float" />
+			<param index="0" name="grid_position" type="Vector2" />
+			<description>
+				Returns a bilinearly interpolated unscaled height. Positions outside the grid clamp to its edges.
+			</description>
+		</method>
+		<method name="sculpt">
+			<return type="void" />
+			<param index="0" name="grid_position" type="Vector2" />
+			<param index="1" name="radius" type="float" />
+			<param index="2" name="amount" type="float" />
+			<description>
+				Raises or lowers heights inside a circular brush, with linear distance falloff. Positive [param amount] raises the terrain; negative [param amount] lowers it. The [param radius] is measured in grid cells and must be positive.
+			</description>
+		</method>
+		<method name="set_height">
+			<return type="void" />
+			<param index="0" name="x" type="int" />
+			<param index="1" name="z" type="int" />
+			<param index="2" name="height" type="float" />
+			<description>
+				Assigns the unscaled height of a single grid vertex. The height must be finite.
+			</description>
+		</method>
+		<method name="smooth">
+			<return type="void" />
+			<param index="0" name="grid_position" type="Vector2" />
+			<param index="1" name="radius" type="float" />
+			<param index="2" name="strength" type="float" />
+			<description>
+				Blends heights in the specified brush radius toward their original 3-by-3 neighborhood average. [param strength] must be between [code]0[/code] and [code]1[/code].
+			</description>
+		</method>
+	</methods>
+	<members>
+		<member name="cell_size" type="float" setter="set_cell_size" getter="get_cell_size" default="1.0">
+			The positive X/Z world spacing between adjacent grid samples.
+		</member>
+		<member name="grid_size" type="Vector2i" setter="set_grid_size" getter="get_grid_size" default="Vector2i(16, 16)">
+			Grid dimensions in vertices, including both edges. Each dimension must be between 2 and 1024. Resizing retains overlapping previous samples and initializes new samples to zero.
+		</member>
+		<member name="height_scale" type="float" setter="set_height_scale" getter="get_height_scale" default="1.0">
+			The positive multiplier applied to stored heights to obtain rendered Y coordinates.
+		</member>
+		<member name="heights" type="PackedFloat32Array" setter="set_heights" getter="get_heights">
+			Row-major height samples. Its length must equal [code]grid_size.x * grid_size.y[/code]. Individual samples may be negative, but all must be finite.
+		</member>
+	</members>
+</class>

@@ -40,9 +40,14 @@
 #include "servers/physics_damping.h"
 #include "servers/physics_uniform_fluid.h"
 #include "servers/physics_gyroscopic_3d.h"
+#include "servers/physics_rotating_frame_3d.h"
 #include "servers/physics_fluid_buoyancy_3d.h"
+#include "servers/physics_sphere_magnus_3d.h"
 #include "servers/physics_fluid_convex_hull_3d.h"
+#include "servers/physics_rigid_convex_aero_facets_3d.h"
 #include "servers/physics_fluid_box_3d.h"
+#include "servers/physics_rigid_box_aero_panels_3d.h"
+#include "servers/physics_fluid_capsule_3d.h"
 
 void GodotBody3D::_mass_properties_changed() {
 	if (get_space() && !mass_properties_update_list.in_list()) {
@@ -490,6 +495,80 @@ bool GodotBody3D::is_axis_locked(PS3DE::BodyAxis p_axis) const {
 	return locked_axis & p_axis;
 }
 
+// Aerodynamic drag from the wind of the areas the body is inside. Every wind area contributes an air
+// velocity (its pressure converted to the speed with the same dynamic pressure, v = sqrt(2 q / rho)),
+// and the body feels 0.5 * rho * Cd * A * |v_rel| * v_rel for the air velocity relative to it.
+Vector3 GodotBody3D::compute_wind_force() const {
+	if (wind_drag_coefficient <= 0.0 || areas.is_empty() || !get_space()) {
+		return Vector3();
+	}
+	const real_t density = get_space()->get_air_density();
+	if (density <= 0.0) {
+		return Vector3();
+	}
+	Vector3 air_velocity;
+	bool has_wind = false;
+	for (const AreaCMP &entry : areas) {
+		const real_t pressure = entry.area->get_wind_force_magnitude();
+		if (pressure <= CMP_EPSILON) {
+			continue;
+		}
+		real_t attenuation = 1.0;
+		const real_t falloff = entry.area->get_wind_attenuation_factor();
+		if (falloff != 0.0) {
+			const Vector3 distance = get_transform().origin - entry.area->get_wind_source();
+			// A minimum radius keeps the speed finite at the source.
+			attenuation = Math::pow(MAX(distance.length_squared(), real_t(1.0)), -falloff * real_t(0.5));
+		}
+		air_velocity += entry.area->get_wind_direction() * (Math::sqrt(real_t(2.0) * pressure / density) * attenuation);
+		has_wind = true;
+	}
+	if (!has_wind) {
+		return Vector3();
+	}
+	const Vector3 relative = air_velocity - linear_velocity;
+	const real_t speed = relative.length();
+	if (!(speed > CMP_EPSILON) || !Math::is_finite(speed)) {
+		return Vector3();
+	}
+	const Vector3 direction = relative / speed;
+
+	real_t area = wind_area;
+	if (area <= 0.0) {
+		// Projected area of the combined shape bounds onto the plane facing the wind.
+		AABB bounds;
+		bool first = true;
+		for (int i = 0; i < get_shape_count(); i++) {
+			if (is_shape_disabled(i)) {
+				continue;
+			}
+			const AABB shape_bounds = get_shape_aabb(i);
+			if (first) {
+				bounds = shape_bounds;
+				first = false;
+			} else {
+				bounds.merge_with(shape_bounds);
+			}
+		}
+		if (first) {
+			return Vector3();
+		}
+		const Vector3 extent = bounds.size;
+		area = extent.y * extent.z * Math::abs(direction.x) + extent.x * extent.z * Math::abs(direction.y) + extent.x * extent.y * Math::abs(direction.z);
+	}
+
+	Vector3 force = direction * (real_t(0.5) * density * wind_drag_coefficient * area * speed * speed);
+	// An explicit step must never accelerate the body past the air speed: that is where drag is zero.
+	if (mass > 0.0 && get_space()->get_last_step() > 0.0) {
+		const real_t max_force = speed * mass / get_space()->get_last_step();
+		const real_t force_length = force.length();
+		if (force_length > max_force) {
+			force *= max_force / force_length;
+		}
+	}
+	return force;
+}
+
 void GodotBody3D::integrate_forces(real_t p_step, bool p_defer_motion) {
 	if (mode == PS3DE::BODY_MODE_STATIC) {
 		return;
@@ -630,12 +709,25 @@ void GodotBody3D::integrate_forces(real_t p_step, bool p_defer_motion) {
 
 	if (mode == PS3DE::BODY_MODE_KINEMATIC) {
 		//compute motion, angular and etc. velocities from prev transform
-		motion = new_transform.origin - get_transform().origin;
+		// With sub-stepping the platform glides toward the transform set by the user over the
+		// substeps, so its velocity stays constant for the whole tick instead of jumping at once.
+		kinematic_target = new_transform;
+		const int substeps = get_space()->get_substeps();
+		if (substeps > 1) {
+			if (get_space()->is_first_substep()) {
+				kinematic_start = get_transform();
+			}
+			if (!get_space()->is_final_substep()) {
+				const real_t t = real_t(get_space()->get_substep_index() + 1) / real_t(substeps);
+				kinematic_target = kinematic_start.interpolate_with(new_transform, t);
+			}
+		}
+		motion = kinematic_target.origin - get_transform().origin;
 		do_motion = is_continuous_collision_detection_enabled();
 		linear_velocity = constant_linear_velocity + motion / p_step;
 
 		//compute a FAKE angular velocity, not so easy
-		Basis rot = new_transform.basis.orthonormalized() * get_transform().basis.orthonormalized().transposed();
+		Basis rot = kinematic_target.basis.orthonormalized() * get_transform().basis.orthonormalized().transposed();
 		Vector3 axis;
 		real_t angle;
 
@@ -647,6 +739,7 @@ void GodotBody3D::integrate_forces(real_t p_step, bool p_defer_motion) {
 			//overridden by direct state query
 
 			Vector3 force = gravity * mass + applied_force + constant_force;
+			force += compute_wind_force();
 			// Uniform fully submerged buoyancy: force = -buoyancy * mass * gravity.
 			// Gravity already includes the body's gravity scale and area
 			// overrides. With buoyancy 1, gravity and buoyancy cancel.
@@ -701,21 +794,25 @@ void GodotBody3D::integrate_forces(real_t p_step, bool p_defer_motion) {
 							const GodotSphereShape3D *sphere = static_cast<const GodotSphereShape3D *>(shape);
 							sample = godot_physics_fluid_sphere_sample_3d(shape_world.origin,
 									sphere->get_radius() * uniform_scale, shape_volume, water_height);
-						} else if (godot_physics_fluid_capsule_vertical_3d(shape_world.basis, uniform_scale)) {
+						} else {
 							const GodotCapsuleShape3D *capsule = static_cast<const GodotCapsuleShape3D *>(shape);
-							// Raw PhysicsServer shapes can specify height < 2*radius,
-							// which is not a cylinder plus hemispheres. Keep the
-							// AABB behavior rather than returning zero displaced volume.
+							// Invalid PhysicsServer shapes retain the AABB fallback;
+							// otherwise integrate the true circular cross sections.
 							if (capsule->get_radius() > 0.0 && capsule->get_height() >= real_t(2.0) * capsule->get_radius()) {
-								sample = godot_physics_fluid_vertical_capsule_sample_3d(shape_world.origin,
-										capsule->get_radius() * uniform_scale,
-										capsule->get_height() * uniform_scale, shape_volume, water_height);
+								const real_t world_radius = capsule->get_radius() * uniform_scale;
+								const real_t world_height = capsule->get_height() * uniform_scale;
+								if (godot_physics_fluid_capsule_vertical_3d(shape_world.basis, uniform_scale)) {
+									sample = godot_physics_fluid_vertical_capsule_sample_3d(
+											shape_world.origin, world_radius, world_height, shape_volume, water_height);
+								} else if (!godot_physics_fluid_tilted_capsule_sample_3d(
+												   shape_world.origin, shape_world.basis.get_column(1) / uniform_scale,
+												   world_radius, world_height, shape_volume, water_height, sample)) {
+									// Safe fallback for nonfinite or degenerate geometry.
+									sample = godot_physics_fluid_sample_3d(bounds, shape_volume, water_height);
+								}
 							} else {
 								sample = godot_physics_fluid_sample_3d(bounds, shape_volume, water_height);
 							}
-						} else {
-							// A tilted capsule has noncircular horizontal slices.
-							sample = godot_physics_fluid_sample_3d(bounds, shape_volume, water_height);
 						}
 					} else if (shape_type == PS3DE::SHAPE_BOX) {
 						// The world AABB overstates the immersed volume of a tilted
@@ -773,6 +870,77 @@ void GodotBody3D::integrate_forces(real_t p_step, bool p_defer_motion) {
 				}
 			}
 
+			// Spinning spheres curve because the medium generates a lift force
+			// perpendicular to local relative flow (Magnus effect). The
+			// exact sphere radius is used only for uniformly scaled
+			// SphereShape3D; sheared/nonuniform spheres are deliberately
+			// skipped instead of applying a physically incorrect area.
+			// A compound rigid body also receives the correct lever-arm
+			// torque. With zero spin coefficient, this branch adds NO
+			// shape traversal, memory, or force to legacy integration.
+			if (mode == PS3DE::BODY_MODE_RIGID &&
+					get_space()->get_sphere_magnus_spin_coefficient() > 0.0 &&
+					get_space()->get_sphere_magnus_medium_density() > 0.0 &&
+					get_space()->get_sphere_magnus_max_lift_coefficient() > 0.0 &&
+					p_step > 0.0 && angular_velocity != Vector3()) {
+				const Vector3 world_com = get_transform().origin + center_of_mass;
+				const Vector3 &flow = get_space()->get_sphere_magnus_flow_velocity();
+				const int sphere_shape_count = get_shape_count();
+				for (int i = 0; i < sphere_shape_count; ++i) {
+					if (is_shape_disabled(i)) {
+						continue;
+					}
+					const GodotShape3D *shape = get_shape(i);
+					if (shape->get_type() != PS3DE::SHAPE_SPHERE) {
+						continue;
+					}
+					const Transform3D sphere_transform = get_transform() * get_shape_transform(i);
+					real_t uniform_scale = 0.0;
+					if (!godot_physics_fluid_uniform_scale_3d(sphere_transform.basis, uniform_scale)) {
+						continue;
+					}
+					const real_t radius =
+							static_cast<const GodotSphereShape3D *>(shape)->get_radius() * uniform_scale;
+					const Vector3 lever = sphere_transform.origin - world_com;
+					const Vector3 center_velocity = linear_velocity + angular_velocity.cross(lever);
+					const Vector3 relative_velocity = center_velocity - flow;
+					Vector3 lift;
+					if (!godot_physics_sphere_magnus_force_3d(center_velocity, angular_velocity,
+								flow, radius, get_space()->get_sphere_magnus_medium_density(),
+								get_space()->get_sphere_magnus_spin_coefficient(),
+								get_space()->get_sphere_magnus_max_lift_coefficient(), lift) ||
+							!relative_velocity.is_finite()) {
+						continue;
+					}
+					// Guard a very light sphere against an enormous lateral
+					// impulse in one large timestep. Unlike a clamped force,
+					// the cap is mass- and flow-relative-speed aware.
+					const real_t lift_speed = lift.length();
+					const real_t local_speed = relative_velocity.length();
+					if (!(lift_speed > 0.0) || !Math::is_finite(lift_speed) ||
+							!(local_speed > 0.0) || !Math::is_finite(local_speed)) {
+						continue;
+					}
+					const double requested_impulse = double(lift_speed) * double(p_step);
+					const double max_impulse = double(mass) * double(local_speed) /
+							double(MAX(1, sphere_shape_count));
+					if (!(max_impulse > 0.0) || !Math::is_finite(max_impulse) ||
+							!Math::is_finite(requested_impulse)) {
+						continue;
+					}
+					if (requested_impulse > max_impulse) {
+						lift *= real_t(max_impulse / requested_impulse);
+					}
+					const Vector3 candidate_force = force + lift;
+					const Vector3 candidate_torque = torque + lever.cross(lift);
+					if (!candidate_force.is_finite() || !candidate_torque.is_finite()) {
+						continue;
+					}
+					force = candidate_force;
+					torque = candidate_torque;
+				}
+			}
+
 			// This per-space option uses Box2D's implicit (Pade) damping
 			// for nonnegative coefficients. The default retains the legacy
 			// clamped explicit-Euler result exactly.
@@ -815,11 +983,91 @@ void GodotBody3D::integrate_forces(real_t p_step, bool p_defer_motion) {
 					linear_velocity, get_space()->get_fluid_flow_velocity(), get_space()->get_fluid_linear_drag(), p_step);
 			angular_velocity = godot_physics_fluid_angular_drag(
 					angular_velocity, get_space()->get_fluid_angular_drag(), p_step);
+
+			// Fictitious accelerations are expressed in the coordinates of
+			// a prescribed rotating world frame. Boris integration keeps
+			// pure Coriolis motion speed-preserving at large timesteps.
+			// The opt-in mode affects only the COM translation of dynamic
+			// rigid bodies; angular attitude dynamics are unchanged.
+			if (mode == PS3DE::BODY_MODE_RIGID && get_space()->is_rotating_frame_enabled()) {
+				const Vector3 world_com = get_transform().origin + center_of_mass;
+				godot_physics_rotating_frame_step_3d(linear_velocity, world_com,
+						get_space()->get_rotating_frame_origin(),
+						get_space()->get_rotating_frame_angular_velocity(),
+						get_space()->get_rotating_frame_angular_acceleration(), p_step);
+			}
+
+			// Optional six-face, orientation-sensitive aerodynamic impulses
+			// for rigid boxes. Pressure acts only on windward faces,
+			// tangential skin drag acts on both sides and damps rotation.
+			// The helper evaluates each panel at its actual world center
+			// and uses inverse mass/inertia to avoid reversing its slip.
+			// Disabled by default: no additional shape loops or buffers.
+			if (mode == PS3DE::BODY_MODE_RIGID && p_step > 0.0 &&
+					get_space()->get_rigid_box_aero_density() > 0.0 &&
+					(get_space()->get_rigid_box_aero_pressure_coefficient() > 0.0 ||
+							get_space()->get_rigid_box_aero_skin_coefficient() > 0.0)) {
+				const Vector3 world_com = get_transform().origin + center_of_mass;
+				for (int i = 0; i < get_shape_count(); ++i) {
+					if (is_shape_disabled(i)) {
+						continue;
+					}
+					const GodotShape3D *shape = get_shape(i);
+					if (shape->get_type() != PS3DE::SHAPE_BOX) {
+						continue;
+					}
+					const GodotBoxShape3D *box = static_cast<const GodotBoxShape3D *>(shape);
+					const Vector3 half = box->get_half_extents();
+					const Transform3D box_world = get_transform() * get_shape_transform(i);
+					const Vector3 world_half_axes[3] = {
+						box_world.basis.xform(Vector3(half.x, 0, 0)),
+						box_world.basis.xform(Vector3(0, half.y, 0)),
+						box_world.basis.xform(Vector3(0, 0, half.z))
+					};
+					godot_physics_rigid_box_aero_step_3d(linear_velocity, angular_velocity,
+							box_world.origin, world_half_axes, world_com,
+							get_space()->get_rigid_box_aero_wind_velocity(),
+							get_space()->get_rigid_box_aero_density(),
+							get_space()->get_rigid_box_aero_pressure_coefficient(),
+							get_space()->get_rigid_box_aero_skin_coefficient(),
+							_inv_mass, _inv_inertia_tensor, p_step);
+				}
+			}
+
+			// Apply point-impulse pressure and skin drag on the TRUE
+			// polygon faces of a transformed convex collision shape.
+			// Real face area/centroid and the body's world inertia make
+			// this sensitive to shape orientation, spinning and offset COM.
+			// Default coefficients zero: no hull traversal or scratch.
+			if (mode == PS3DE::BODY_MODE_RIGID && p_step > 0.0 &&
+					get_space()->get_rigid_convex_aero_density() > 0.0 &&
+					(get_space()->get_rigid_convex_aero_pressure_coefficient() > 0.0 ||
+							get_space()->get_rigid_convex_aero_skin_coefficient() > 0.0)) {
+				const Vector3 world_com = get_transform().origin + center_of_mass;
+				for (int i = 0; i < get_shape_count(); ++i) {
+					if (is_shape_disabled(i)) {
+						continue;
+					}
+					const GodotShape3D *shape = get_shape(i);
+					if (shape->get_type() != PS3DE::SHAPE_CONVEX_POLYGON) {
+						continue;
+					}
+					const GodotConvexPolygonShape3D *convex = static_cast<const GodotConvexPolygonShape3D *>(shape);
+					const Transform3D hull_world = get_transform() * get_shape_transform(i);
+					godot_physics_rigid_convex_aero_step_3d(linear_velocity, angular_velocity,
+							convex->get_mesh(), hull_world, world_com,
+							get_space()->get_rigid_convex_aero_wind_velocity(),
+							get_space()->get_rigid_convex_aero_density(),
+							get_space()->get_rigid_convex_aero_pressure_coefficient(),
+							get_space()->get_rigid_convex_aero_skin_coefficient(),
+							_inv_mass, _inv_inertia_tensor, p_step);
+				}
+			}
 		}
 
 		// Limit dynamic angular speed after damping, torque and optional gyro
 		// integration. Kinematic bodies retain their requested target rotation.
-		angular_velocity = godot_physics_clamp_angular_velocity(angular_velocity, get_space()->get_max_angular_velocity());
+		angular_velocity = godot_physics_clamp_angular_velocity(angular_velocity, get_effective_max_angular_velocity(get_space()->get_max_angular_velocity()));
 		// Rapier-style CCD safeguard: limit the *physical* rotation across
 		// one step, not the penetration-correction bias. A joint/contact may
 		// change angular velocity after force integration, so apply at both
@@ -831,7 +1079,7 @@ void GodotBody3D::integrate_forces(real_t p_step, bool p_defer_motion) {
 
 		// Bound physical velocity before calculating the broadphase CCD sweep.
 		// This is skipped by static and kinematic bodies.
-		linear_velocity = godot_physics_clamp_linear_velocity(linear_velocity, get_space()->get_max_linear_velocity());
+		linear_velocity = godot_physics_clamp_linear_velocity(linear_velocity, get_effective_max_linear_velocity(get_space()->get_max_linear_velocity()));
 
 		if (continuous_cd) {
 			motion = linear_velocity * p_step;
@@ -839,8 +1087,12 @@ void GodotBody3D::integrate_forces(real_t p_step, bool p_defer_motion) {
 		}
 	}
 
-	applied_force = Vector3();
-	applied_torque = Vector3();
+	// With sub-stepping the force applied by the user covers the whole tick, so it is only
+	// consumed on the last substep.
+	if (get_space()->is_final_substep()) {
+		applied_force = Vector3();
+		applied_torque = Vector3();
+	}
 
 	biased_angular_velocity = Vector3();
 	biased_linear_velocity = Vector3();
@@ -854,7 +1106,10 @@ void GodotBody3D::integrate_forces(real_t p_step, bool p_defer_motion) {
 		}
 	}
 
-	contact_count = 0;
+	// Contact reports accumulate over all substeps of a tick, so a short impact is not lost.
+	if (get_space()->is_first_substep()) {
+		contact_count = 0;
+	}
 }
 
 void GodotBody3D::integrate_velocities(real_t p_step) {
@@ -874,6 +1129,7 @@ void GodotBody3D::integrate_velocities(real_t p_step) {
 			linear_velocity[i] = 0;
 			biased_linear_velocity[i] = 0;
 			new_transform.origin[i] = get_transform().origin[i];
+			kinematic_target.origin[i] = get_transform().origin[i];
 		}
 	}
 	//apply axis lock angular
@@ -885,8 +1141,8 @@ void GodotBody3D::integrate_velocities(real_t p_step) {
 	}
 
 	if (mode == PS3DE::BODY_MODE_KINEMATIC) {
-		_set_transform(new_transform, !is_continuous_collision_detection_enabled());
-		_set_inv_transform(new_transform.affine_inverse());
+		_set_transform(kinematic_target, !is_continuous_collision_detection_enabled());
+		_set_inv_transform(kinematic_target.affine_inverse());
 		if (contacts.is_empty() && linear_velocity == Vector3() && angular_velocity == Vector3()) {
 			set_active(false); //stopped moving, deactivate
 		}
@@ -896,10 +1152,10 @@ void GodotBody3D::integrate_velocities(real_t p_step) {
 
 	// Contact and joint impulses can add speed after force integration.
 	// Cap the physical component before position integration too.
-	linear_velocity = godot_physics_clamp_linear_velocity(linear_velocity, get_space()->get_max_linear_velocity());
+	linear_velocity = godot_physics_clamp_linear_velocity(linear_velocity, get_effective_max_linear_velocity(get_space()->get_max_linear_velocity()));
 	// Contacts and joints can increase angular velocity after force integration.
 	// Limit physical rotation, leaving penetration-correction bias untouched.
-	angular_velocity = godot_physics_clamp_angular_velocity(angular_velocity, get_space()->get_max_angular_velocity());
+	angular_velocity = godot_physics_clamp_angular_velocity(angular_velocity, get_effective_max_angular_velocity(get_space()->get_max_angular_velocity()));
 	// Reapply the CCD-only per-step cap after contact/joint impulses.
 	if (continuous_cd) {
 		angular_velocity = godot_physics_clamp_ccd_angular_velocity(

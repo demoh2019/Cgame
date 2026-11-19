@@ -51,6 +51,14 @@
 #include "scene/resources/image_texture.h"
 #include "servers/rendering/rendering_server.h"
 
+Vector2 TilesEditorUtils::calculate_preview_scale(const Vector2 &p_thumbnail_size, const Rect2 &p_bounds) {
+	const real_t extent = MAX(p_bounds.size.x, p_bounds.size.y);
+	if (extent <= CMP_EPSILON) {
+		return Vector2(1, 1);
+	}
+	return p_thumbnail_size / extent;
+}
+
 TilesEditorUtils *TilesEditorUtils::singleton = nullptr;
 TileMapEditorPlugin *tile_map_plugin_singleton = nullptr;
 TileSetEditorPlugin *tile_set_plugin_singleton = nullptr;
@@ -122,7 +130,7 @@ void TilesEditorUtils::_thread() {
 					}
 				}
 
-				Vector2 scale = thumbnail_size2 / MAX(encompassing_rect.size.x, encompassing_rect.size.y);
+				const Vector2 scale = calculate_preview_scale(thumbnail_size2, encompassing_rect);
 				tile_map_layer->set_scale(scale);
 				tile_map_layer->set_position(-(scale * encompassing_rect.get_center()) + thumbnail_size2 / 2);
 

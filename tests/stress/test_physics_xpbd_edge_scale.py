@@ -105,12 +105,44 @@ class EdgeEdgeScaleContracts(unittest.TestCase):
         self.assertLess(narrow.index("if (!next_normal.is_finite()"),
                         narrow.index("r_s = real_t(s);"))
 
+    def test_edge_normal_constraint_remains_wide_after_closest_points(self):
+        source = (ROOT / "servers/physics_xpbd_edge_collision.h").read_text()
+        solver = source.split("_FORCE_INLINE_ bool physics_xpbd_solve_edge_collision(", 1)[1]
+        self.assertIn("const double pa_x =", solver)
+        self.assertIn("const double pb_x =", solver)
+        self.assertIn("const double signed_separation =", solver)
+        self.assertNotIn("const Vector3 pa = r_a + ab * s;", solver)
+        self.assertNotIn("const Vector3 pb = r_c + cd * t;", solver)
+
+        # Deliberately quantized world-space coordinates. The independent
+        # double solver computes the correct normal reaction even though
+        # float32 interpolation of huge world points catastrophically rounds.
+        a = (562400919552.0, -862583193600.0, 958564925440.0)
+        b = (-327081918464.0, -797319233536.0, 506280804352.0)
+        c = (858412285952.0, -999397326848.0, 1211941519360.0)
+        d = (43656658944.0, -795747680256.0, 669078716416.0)
+        s, t, distance, normal = closest_edges(a, b, c, d)
+        self.assertLess(distance, 1.0)
+        s, t = f32(s), f32(t)
+        pa = tuple(a[i] + (b[i] - a[i]) * s for i in range(3))
+        pb = tuple(c[i] + (d[i] - c[i]) * t for i in range(3))
+        signed = sum((pa[i] - pb[i]) * normal[i] for i in range(3))
+        mass = (1 - s) ** 2 + s ** 2 + (1 - t) ** 2 + t ** 2
+        lambda_normal = max(0.0, (0.5 - signed) / mass)
+        self.assertGreater(lambda_normal, 0.0)
+        self.assertLess(lambda_normal, 1.0)
+
+        naive_pa = tuple(f32(a[i] + f32(f32(b[i] - a[i]) * s)) for i in range(3))
+        naive_pb = tuple(f32(c[i] + f32(f32(d[i] - c[i]) * t)) for i in range(3))
+        naive_signed = sum((naive_pa[i] - naive_pb[i]) * normal[i] for i in range(3))
+        self.assertGreater(abs(naive_signed), 100.0)
+
     def test_existing_xpbd_edge_collision_reuses_wide_narrowphase(self):
         src = (ROOT / "servers/physics_xpbd_edge_collision.h").read_text()
         self.assertGreaterEqual(src.count("physics_xpbd_closest_edges("), 2)
         self.assertIn("physics_xpbd_solve_edge_collision(", src)
         native = (ROOT / "tests/servers/test_physics_xpbd_edge_scale.cpp").read_text()
-        self.assertEqual(native.count('TEST_CASE("[PhysicsEdgeScale]'), 7)
+        self.assertEqual(native.count('TEST_CASE("[PhysicsEdgeScale]'), 8)
 
 
 if __name__ == "__main__":

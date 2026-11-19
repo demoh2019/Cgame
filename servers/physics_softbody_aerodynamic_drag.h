@@ -106,7 +106,7 @@ _FORCE_INLINE_ static bool physics_softbody_quadratic_aerodynamic_force(
 	if (!Math::is_finite(fx) || !Math::is_finite(fy) || !Math::is_finite(fz)) {
 		return false;
 	}
-	const Vector3 force(real_t(fx), real_t(fy), real_t(fz));
+	const Vector3 force = Vector3(real_t(fx), real_t(fy), real_t(fz));
 	if (!force.is_finite()) {
 		return false;
 	}

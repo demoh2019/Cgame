@@ -100,10 +100,28 @@ jobs:
           platform: linuxbsd
           target: editor
           scons-flags: dev_build=yes tests=yes debug_symbols=no module_text_server_fb_enabled=yes -j2
+      - name: Native tilted capsule hydrostatic integration regressions
+        shell: bash
+        run: |
+          set -euo pipefail
+          timeout 120s ./bin/godot.linuxbsd.editor.dev.x86_64 \
+            --headless --test --test-case="*[PhysicsTiltedCapsule]*" \
+            --success=true --no-colors 2>&1 | tee physics-fluid-tilted-capsule-native.log
+          grep -Fq '[PhysicsTiltedCapsule]' physics-fluid-tilted-capsule-native.log
+      - name: Runtime tilted capsule restoring torque and symmetry
+        shell: bash
+        run: |
+          set -euo pipefail
+          timeout 120s ./bin/godot.linuxbsd.editor.dev.x86_64 \
+            --headless --path tests/stress \
+            --script res://physics_tilted_capsule_buoyancy_3d_regression.gd \
+            2>&1 | tee physics-fluid-tilted-capsule-runtime.log
+          grep -Fq 'Tilted capsule restoring torque passed' physics-fluid-tilted-capsule-runtime.log
       - name: Syntax-check physics stress scripts
         shell: bash
         run: |
           set -euo pipefail
+          ./bin/godot.linuxbsd.editor.dev.x86_64 --headless --path tests/stress --script res://physics_tilted_capsule_buoyancy_3d_regression.gd --check-only
           ./bin/godot.linuxbsd.editor.dev.x86_64 --headless --path tests/stress --script res://stress.gd --check-only
           ./bin/godot.linuxbsd.editor.dev.x86_64 --headless --path tests/stress --script res://physics_dense.gd --check-only
           ./bin/godot.linuxbsd.editor.dev.x86_64 --headless --path tests/stress --script res://physics_pending_reuse_stress.gd --check-only
@@ -236,6 +254,126 @@ jobs:
             --script res://physics_jolt_pending_broadphase_regression.gd \
             2>&1 | tee physics-jolt-pending-broadphase.log
           grep -Fq 'Jolt pending broadphase regression passed.' physics-jolt-pending-broadphase.log
+      - name: Regression-test conservative self vertex-face CCD
+        shell: bash
+        run: |
+          set -euo pipefail
+          BIN=./bin/godot.linuxbsd.editor.dev.x86_64
+          PROJECT=tests/stress/jolt_soft_self_vf_sweep
+          timeout 120s "$BIN" --headless --path "$PROJECT" \
+            --script res://swept_self_triangle_regression.gd --check-only
+          timeout 180s "$BIN" --headless --path "$PROJECT" \
+            --script res://swept_self_triangle_regression.gd \
+            2>&1 | tee jolt-soft-self-vf-ccd.log
+          grep -Fq 'PASS: Jolt swept self vertex-face CCD versus unopposed control' jolt-soft-self-vf-ccd.log
+      - name: Regression-test speculative self edge-edge CCD
+        shell: bash
+        run: |
+          set -euo pipefail
+          BIN=./bin/godot.linuxbsd.editor.dev.x86_64
+          PROJECT=tests/stress/jolt_soft_self_edge_sweep
+          timeout 120s "$BIN" --headless --path "$PROJECT" \
+            --script res://swept_self_edges_regression.gd --check-only
+          timeout 180s "$BIN" --headless --path "$PROJECT" \
+            --script res://swept_self_edges_regression.gd \
+            2>&1 | tee jolt-soft-self-edge-sweep.log
+          grep -Fq 'PASS: Jolt swept self edge-edge CCD versus unopposed control' jolt-soft-self-edge-sweep.log
+      - name: Regression-test Jolt compliant self-contact position projection
+        shell: bash
+        run: |
+          set -euo pipefail
+          BIN=./bin/godot.linuxbsd.editor.dev.x86_64
+          PROJECT=tests/stress/jolt_soft_self_position
+          timeout 120s "$BIN" --headless --path "$PROJECT" \
+            --script res://position_projection_regression.gd --check-only
+          timeout 180s "$BIN" --headless --path "$PROJECT" \
+            --script res://position_projection_regression.gd \
+            2>&1 | tee jolt-soft-self-position.log
+          grep -Fq 'PASS: Jolt compliant Jacobi self-contact position projection' jolt-soft-self-position.log
+      - name: Regression-test persistent Jolt self-face BVH refit and cache eviction
+        shell: bash
+        run: |
+          set -euo pipefail
+          BIN=./bin/godot.linuxbsd.editor.dev.x86_64
+          PROJECT=tests/stress/jolt_soft_self_face_bvh
+          timeout 120s "$BIN" --headless --path "$PROJECT" \
+            --script res://persistent_face_bvh_regression.gd --check-only
+          timeout 180s "$BIN" --headless --path "$PROJECT" \
+            --script res://persistent_face_bvh_regression.gd \
+            2>&1 | tee jolt-self-face-bvh-refit.log
+          grep -Fq 'PASS: Jolt persistent self-face BVH refit and body recreation' jolt-self-face-bvh-refit.log
+      - name: Regression-test persistent Jolt self-edge BVH refit and cache eviction
+        shell: bash
+        run: |
+          set -euo pipefail
+          BIN=./bin/godot.linuxbsd.editor.dev.x86_64
+          PROJECT=tests/stress/jolt_soft_self_persistent_bvh
+          timeout 120s "$BIN" --headless --path "$PROJECT" \
+            --script res://persistent_refit_regression.gd --check-only
+          timeout 180s "$BIN" --headless --path "$PROJECT" \
+            --script res://persistent_refit_regression.gd \
+            2>&1 | tee jolt-self-persistent-bvh.log
+          grep -Fq 'PASS: Jolt persistent self-edge BVH refit and body recreation' jolt-self-persistent-bvh.log
+      - name: Regression-test Jolt BVH dense self edge collision stability
+        shell: bash
+        run: |
+          set -euo pipefail
+          BIN=./bin/godot.linuxbsd.editor.dev.x86_64
+          PROJECT=tests/stress/jolt_soft_self_edge_bvh
+          timeout 120s "$BIN" --headless --path "$PROJECT" \
+            --script res://bvh_self_edges_regression.gd --check-only
+          timeout 180s "$BIN" --headless --path "$PROJECT" \
+            --script res://bvh_self_edges_regression.gd \
+            2>&1 | tee jolt-self-edge-bvh.log
+          grep -Fq 'PASS: Jolt BVH accelerated self edge collisions' jolt-self-edge-bvh.log
+      - name: Regression-test Jolt nonadjacent self edge-edge contacts
+        shell: bash
+        run: |
+          set -euo pipefail
+          BIN=./bin/godot.linuxbsd.editor.dev.x86_64
+          PROJECT=tests/stress/jolt_soft_self_edges
+          timeout 120s "$BIN" --headless --path "$PROJECT" \
+            --script res://self_edges_regression.gd --check-only
+          timeout 180s "$BIN" --headless --path "$PROJECT" \
+            --script res://self_edges_regression.gd \
+            2>&1 | tee jolt-soft-self-edges.log
+          grep -Fq 'PASS: Jolt self edge-edge contacts suppress one-ring adjacency' jolt-soft-self-edges.log
+      - name: Regression-test Jolt folded soft-body self collision
+        shell: bash
+        run: |
+          set -euo pipefail
+          BIN=./bin/godot.linuxbsd.editor.dev.x86_64
+          PROJECT=tests/stress/jolt_soft_self
+          timeout 120s "$BIN" --headless --path "$PROJECT" \
+            --script res://self_collision_regression.gd --check-only
+          timeout 180s "$BIN" --headless --path "$PROJECT" \
+            --script res://self_collision_regression.gd \
+            2>&1 | tee jolt-soft-self-collision.log
+          grep -Fq 'PASS: Jolt nonlocal soft self collision and one-ring suppression' jolt-soft-self-collision.log
+      - name: Regression-test conservative swept soft-body edge-edge contacts
+        shell: bash
+        run: |
+          set -euo pipefail
+          BIN=./bin/godot.linuxbsd.editor.dev.x86_64
+          PROJECT=tests/stress/jolt_soft_soft_edge_sweep
+          timeout 120s "$BIN" --headless --path "$PROJECT" \
+            --script res://swept_edges_regression.gd --check-only
+          timeout 180s "$BIN" --headless --path "$PROJECT" \
+            --script res://swept_edges_regression.gd \
+            2>&1 | tee jolt-soft-soft-edge-sweep.log
+          grep -Fq 'PASS: Jolt conservative swept soft-edge contacts and collision filters' jolt-soft-soft-edge-sweep.log
+      - name: Regression-test speculative soft-body swept vertex-face contacts
+        shell: bash
+        run: |
+          set -euo pipefail
+          BIN=./bin/godot.linuxbsd.editor.dev.x86_64
+          PROJECT=tests/stress/jolt_soft_soft_sweep
+          timeout 120s "$BIN" --headless --path "$PROJECT" \
+            --script res://swept_triangle_regression.gd --check-only
+          timeout 180s "$BIN" --headless --path "$PROJECT" \
+            --script res://swept_triangle_regression.gd \
+            2>&1 | tee jolt-soft-soft-sweep.log
+          grep -Fq 'PASS: Jolt speculative swept soft vertex-face contact with masked control' jolt-soft-soft-sweep.log
       - name: Regression-test Jolt crossing soft-body edge-edge contacts
         shell: bash
         run: |

@@ -118,6 +118,7 @@
 #include "editor/inspector/editor_resource_picker.h"
 #include "editor/inspector/editor_resource_preview.h"
 #include "editor/inspector/multi_node_edit.h"
+#include "editor/plugins/ai_game_builder_plugin.h"
 #include "editor/plugins/editor_plugin.h"
 #include "editor/plugins/editor_plugin_list.h"
 #include "editor/plugins/editor_resource_conversion_plugin.h"
@@ -2748,6 +2749,7 @@ void EditorNode::_save_scene(String p_file, int idx) {
 
 	scene->propagate_notification(NOTIFICATION_EDITOR_PRE_SAVE);
 
+	ScriptEditor::get_singleton()->auto_format_all_scripts();
 	editor_data.apply_changes_in_editors();
 	save_default_environment();
 	List<Pair<AnimationMixer *, Ref<AnimatedValuesBackup>>> anim_backups;
@@ -9767,6 +9769,7 @@ EditorNode::EditorNode() {
 	add_editor_plugin(memnew(CanvasItemEditorPlugin));
 	add_editor_plugin(memnew(Node3DEditorPlugin));
 	add_editor_plugin(memnew(ScriptEditorPlugin));
+	add_editor_plugin(memnew(AIGameBuilderPlugin));
 
 	if (!Engine::get_singleton()->is_recovery_mode_hint()) {
 		add_editor_plugin(get_game_view_plugin());

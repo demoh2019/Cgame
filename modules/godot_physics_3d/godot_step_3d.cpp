@@ -788,6 +788,53 @@ void GodotStep3D::step(GodotSpace3D *p_space, real_t p_delta) {
 		sb = sb->next();
 	}
 
+	// Experimental soft-body/soft-body vertex-face contacts. This runs only
+	// AFTER all body-local XPBD constraints, so both sides have finalized
+	// positions/velocities. Zero thickness skips the entire O(body^2) loop.
+	// Limit not only successful contacts but also AABB pair checks: many
+	// separated soft bodies must never cause unbounded quadratic CPU work.
+	const real_t pair_thickness = p_space->get_soft_body_pair_collision_thickness();
+	const bool pair_ccd = p_space->is_soft_body_pair_collision_ccd_enabled();
+	if (pair_thickness > real_t(0.0) && soft_body_list->first() != nullptr &&
+			soft_body_list->first()->next() != nullptr) {
+		const real_t pair_compliance = p_space->get_soft_body_pair_collision_compliance();
+		const real_t pair_friction = p_space->get_soft_body_pair_collision_friction();
+		const uint32_t max_contacts = uint32_t(p_space->get_soft_body_pair_max_contacts());
+		const uint32_t max_pairs = uint32_t(p_space->get_soft_body_pair_max_pairs());
+		const uint32_t max_pair_checks = 16384;
+		const uint32_t max_contacts_per_vertex = 8;
+		uint32_t checked_pairs = 0;
+		uint32_t candidate_pairs = 0;
+		bool budget_exhausted = false;
+		const SelfList<GodotSoftBody3D> *first = soft_body_list->first();
+		while (first && !budget_exhausted) {
+			const SelfList<GodotSoftBody3D> *second = first->next();
+			while (second) {
+				if (checked_pairs >= max_pair_checks || candidate_pairs >= max_pairs) {
+					budget_exhausted = true;
+					break;
+				}
+				++checked_pairs;
+				GodotSoftBody3D *a = first->self();
+				GodotSoftBody3D *b = second->self();
+				second = second->next();
+				if (!a->interacts_with(b) ||
+						a->has_exception(b->get_self()) || b->has_exception(a->get_self())) {
+					continue;
+				}
+				AABB expanded = pair_ccd ? a->get_pair_swept_bounds() : a->get_bounds();
+				expanded.grow_by(pair_thickness);
+				if (!expanded.intersects(pair_ccd ? b->get_pair_swept_bounds() : b->get_bounds())) {
+					continue;
+				}
+				++candidate_pairs;
+				a->solve_pair_contacts(*b, p_delta, pair_thickness,
+						pair_compliance, pair_friction, max_contacts, max_contacts_per_vertex);
+			}
+			first = first->next();
+		}
+	}
+
 	{ //profile
 		profile_endtime = OS::get_singleton()->get_ticks_usec();
 		p_space->set_elapsed_time(GodotSpace3D::ELAPSED_TIME_INTEGRATE_VELOCITIES, profile_endtime - profile_begtime);

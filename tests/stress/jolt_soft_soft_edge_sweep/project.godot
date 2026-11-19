@@ -1,0 +1,24 @@
+config_version=5
+
+[application]
+
+config/name="Cgame Jolt Swept Soft-Body Edges"
+
+[physics]
+
+3d/physics_engine="Jolt Physics"
+3d/default_gravity=0.0
+jolt_physics_3d/simulation/soft_body_soft_contacts=true
+jolt_physics_3d/simulation/soft_body_soft_vertex_face_contacts=true
+jolt_physics_3d/simulation/soft_body_soft_edge_edge_contacts=true
+jolt_physics_3d/simulation/soft_body_soft_speculative_ccd=false
+jolt_physics_3d/simulation/soft_body_soft_speculative_edge_ccd=true
+jolt_physics_3d/simulation/soft_body_soft_ccd_max_sweep=4.0
+jolt_physics_3d/simulation/soft_body_soft_ccd_max_correction_speed=128.0
+jolt_physics_3d/simulation/soft_body_soft_contact_radius=0.14
+jolt_physics_3d/simulation/soft_body_soft_contact_max_particle_pairs=32768
+
+[rendering]
+
+renderer/rendering_method="gl_compatibility"
+renderer/rendering_method.mobile="gl_compatibility"

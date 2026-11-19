@@ -56,6 +56,7 @@
 #include <Jolt/Physics/SoftBody/SoftBodyMotionProperties.h>
 
 #include <algorithm>
+#include <unordered_map>
 
 namespace {
 
@@ -416,6 +417,76 @@ static void query_soft_face_bvh(const JPH::Array<SoftFaceBVHEntry> &p_entries,
 	}
 }
 
+// Experimental speculative soft-soft CCD for an approaching vertex and a
+// moving/deforming face. Linearize the face motion by the mean vertex
+// velocity for the time-of-impact plane test, then re-evaluate the moving
+// triangle at that time for the closest point and barycentric weights.
+// This is a cheap *approximate* swept contact, NOT continuous triangle CCD,
+// and it does not use Jolt's rigid-body LinearCast pipeline.
+static bool predict_soft_vertex_face_sweep(JPH::Vec3Arg p_point, JPH::Vec3Arg p_point_velocity,
+		JPH::Vec3Arg p_a, JPH::Vec3Arg p_b, JPH::Vec3Arg p_c,
+		JPH::Vec3Arg p_va, JPH::Vec3Arg p_vb, JPH::Vec3Arg p_vc,
+		float p_step, float p_radius, float p_max_sweep,
+		float &r_u, float &r_v, float &r_w, JPH::Vec3 &r_normal) {
+	if (p_step <= 0.0f || p_radius <= 0.0f || p_max_sweep <= 0.0f) {
+		return false;
+	}
+	const JPH::Vec3 face_cross = (p_b - p_a).Cross(p_c - p_a);
+	const float normal_length_sq = face_cross.LengthSq();
+	if (!Math::is_finite(normal_length_sq) || normal_length_sq <= 1.0e-12f) {
+		return false;
+	}
+	const JPH::Vec3 face_normal = face_cross / Math::sqrt(normal_length_sq);
+	const JPH::Vec3 mean_face_velocity = (p_va + p_vb + p_vc) / 3.0f;
+	const JPH::Vec3 relative_velocity = p_point_velocity - mean_face_velocity;
+	const float relative_displacement_sq = (relative_velocity * p_step).LengthSq();
+	if (!Math::is_finite(relative_displacement_sq) || relative_displacement_sq > p_max_sweep * p_max_sweep) {
+		return false; // Fixed and documented sweep horizon.
+	}
+	const float plane_distance = (p_point - p_a).Dot(face_normal);
+	const float plane_speed = relative_velocity.Dot(face_normal);
+	if (!Math::is_finite(plane_distance) || !Math::is_finite(plane_speed)) {
+		return false;
+	}
+	// Two-sided contact: only catch a trajectory starting *outside* the
+	// contact shell and moving towards it. The discrete solver handles points
+	// currently within the shell.
+	float target_distance = 0.0f;
+	if (plane_distance > p_radius && plane_speed < -1.0e-6f) {
+		target_distance = p_radius;
+	} else if (plane_distance < -p_radius && plane_speed > 1.0e-6f) {
+		target_distance = -p_radius;
+	} else {
+		return false;
+	}
+	const float toi = (target_distance - plane_distance) / plane_speed;
+	if (!Math::is_finite(toi) || toi < 0.0f || toi > p_step) {
+		return false;
+	}
+
+	// The plane TOI is linearized, but evaluate the actual interpolated
+	// triangle at the predicted time to reject faces that shear/rotate away.
+	const JPH::Vec3 point_at_hit = p_point + p_point_velocity * toi;
+	const JPH::Vec3 a_at_hit = p_a + p_va * toi;
+	const JPH::Vec3 b_at_hit = p_b + p_vb * toi;
+	const JPH::Vec3 c_at_hit = p_c + p_vc * toi;
+	JPH::Vec3 nearest = JPH::Vec3::sZero();
+	if (!closest_soft_triangle_point(point_at_hit, a_at_hit, b_at_hit, c_at_hit, nearest, r_u, r_v, r_w)) {
+		return false;
+	}
+	const JPH::Vec3 contact_vector = point_at_hit - nearest;
+	const float hit_distance_sq = contact_vector.LengthSq();
+	// Small tolerance for finite-precision TOI. Conservatively reject a
+	// speculative contact when the interpolated surface has moved away.
+	const float hit_tolerance = p_radius * 1.02f + 1.0e-4f;
+	if (!Math::is_finite(hit_distance_sq) || hit_distance_sq > hit_tolerance * hit_tolerance) {
+		return false;
+	}
+	r_normal = hit_distance_sq > 1.0e-12f ? contact_vector / Math::sqrt(hit_distance_sq) :
+			(plane_distance > 0.0f ? face_normal : -face_normal);
+	return true;
+}
+
 static void resolve_soft_soft_vertex_face_direction(JPH::Body &p_point_body, JPH::Body &p_face_body,
 		const JoltSoftBody3D &p_point_object, float p_step, uint32_t &r_contact_budget, SoftFaceBVHScratch &r_bvh_scratch) {
 	JPH::SoftBodyMotionProperties &point_props = static_cast<JPH::SoftBodyMotionProperties &>(*p_point_body.GetMotionPropertiesUnchecked());
@@ -437,6 +508,10 @@ static void resolve_soft_soft_vertex_face_direction(JPH::Body &p_point_body, JPH
 	const float radius_sq = radius * radius;
 	const float bias_per_step = JoltProjectSettings::soft_body_soft_contact_recovery / p_step;
 	const float friction = JoltProjectSettings::soft_body_soft_contact_friction;
+	const bool speculative_ccd = JoltProjectSettings::soft_body_soft_speculative_ccd &&
+			JoltProjectSettings::soft_body_soft_ccd_max_sweep > 0.0f;
+	const float sweep_expansion = speculative_ccd ? JoltProjectSettings::soft_body_soft_ccd_max_sweep : 0.0f;
+	const float candidate_radius = radius + sweep_expansion;
 
 	// Build BVH only on meaningful meshes, while honoring the global work
 	// budget. Rebuild from the current deformed geometry every simulation
@@ -453,7 +528,7 @@ static void resolve_soft_soft_vertex_face_direction(JPH::Body &p_point_body, JPH
 		JPH::SoftBodyVertex &point = points[i];
 		const JPH::Vec3 point_position = point_rotation * point.mPosition;
 		if (use_bvh) {
-			query_soft_face_bvh(r_bvh_scratch.entries, r_bvh_scratch.nodes, point_position, radius,
+			query_soft_face_bvh(r_bvh_scratch.entries, r_bvh_scratch.nodes, point_position, candidate_radius,
 					r_contact_budget, r_bvh_scratch.candidates, r_bvh_scratch.stack);
 		}
 		const uint32_t candidate_count = use_bvh ? (uint32_t)r_bvh_scratch.candidates.size() : (uint32_t)faces.size();
@@ -477,9 +552,9 @@ static void resolve_soft_soft_vertex_face_direction(JPH::Body &p_point_body, JPH
 			// expensive seven-region closest-point calculations. No heap/BVH.
 			const JPH::Vec3 tri_min = JPH::Vec3::sMin(a, JPH::Vec3::sMin(b, c));
 			const JPH::Vec3 tri_max = JPH::Vec3::sMax(a, JPH::Vec3::sMax(b, c));
-			if (point_position.GetX() < tri_min.GetX() - radius || point_position.GetX() > tri_max.GetX() + radius ||
-					point_position.GetY() < tri_min.GetY() - radius || point_position.GetY() > tri_max.GetY() + radius ||
-					point_position.GetZ() < tri_min.GetZ() - radius || point_position.GetZ() > tri_max.GetZ() + radius) {
+			if (point_position.GetX() < tri_min.GetX() - candidate_radius || point_position.GetX() > tri_max.GetX() + candidate_radius ||
+					point_position.GetY() < tri_min.GetY() - candidate_radius || point_position.GetY() > tri_max.GetY() + candidate_radius ||
+					point_position.GetZ() < tri_min.GetZ() - candidate_radius || point_position.GetZ() > tri_max.GetZ() + candidate_radius) {
 				continue;
 			}
 
@@ -490,8 +565,19 @@ static void resolve_soft_soft_vertex_face_direction(JPH::Body &p_point_body, JPH
 			}
 			const JPH::Vec3 diff = point_position - nearest;
 			const float distance_sq = diff.LengthSq();
-			if (!Math::is_finite(distance_sq) || distance_sq >= radius_sq) {
+			if (!Math::is_finite(distance_sq)) {
 				continue;
+			}
+			bool swept_contact = false;
+			JPH::Vec3 swept_normal = JPH::Vec3::sZero();
+			if (distance_sq >= radius_sq) {
+				if (!speculative_ccd || !predict_soft_vertex_face_sweep(
+						point_position, point_rotation * point.mVelocity, a, b, c,
+						face_rotation * v0.mVelocity, face_rotation * v1.mVelocity, face_rotation * v2.mVelocity,
+						p_step, radius, sweep_expansion, u, v, w, swept_normal)) {
+					continue;
+				}
+				swept_contact = true;
 			}
 			const float inverse_mass_sum = point.mInvMass + u * u * v0.mInvMass + v * v * v1.mInvMass + w * w * v2.mInvMass;
 			if (!Math::is_finite(inverse_mass_sum) || inverse_mass_sum <= 0.0f) {
@@ -502,16 +588,23 @@ static void resolve_soft_soft_vertex_face_direction(JPH::Body &p_point_body, JPH
 			const float distance = Math::sqrt(MAX(distance_sq, 0.0f));
 			// Both sides of a triangle can collide; at exact coincidence,
 			// choose the normal opposing the current normal approach.
-			JPH::Vec3 normal = distance > 1.0e-6f ? diff / distance : (b - a).Cross(c - a).Normalized();
-			if (distance <= 1.0e-6f && relative_velocity.Dot(normal) > 0.0f) {
+			JPH::Vec3 normal = swept_contact ? swept_normal :
+					(distance > 1.0e-6f ? diff / distance : (b - a).Cross(c - a).Normalized());
+			if (!swept_contact && distance <= 1.0e-6f && relative_velocity.Dot(normal) > 0.0f) {
 				normal = -normal;
 			}
 			const float normal_speed = relative_velocity.Dot(normal);
 			if (!Math::is_finite(normal_speed)) {
 				continue;
 			}
-			const float recovery_speed = MIN((radius - distance) * bias_per_step, MAX_SOFT_SOFT_PENETRATION_BIAS);
-			const float correction = MIN(MAX(recovery_speed - normal_speed, 0.0f), MAX_SOFT_SOFT_CONTACT_SPEED_CORRECTION);
+			// For a future impact, remove approaching normal velocity now.
+			// Using the discrete 8 m/s cap would allow a fast vertex to tunnel.
+			// Speculative contacts add no penetration bias before impact.
+			const float recovery_speed = swept_contact ? 0.0f :
+					MIN((radius - distance) * bias_per_step, MAX_SOFT_SOFT_PENETRATION_BIAS);
+			const float max_correction = swept_contact ? JoltProjectSettings::soft_body_soft_ccd_max_correction_speed :
+					MAX_SOFT_SOFT_CONTACT_SPEED_CORRECTION;
+			const float correction = MIN(MAX(recovery_speed - normal_speed, 0.0f), max_correction);
 			if (correction <= 0.0f) {
 				continue;
 			}
@@ -640,6 +733,95 @@ static bool closest_soft_edge_edge(JPH::Vec3Arg p0, JPH::Vec3Arg p1,
 	return true;
 }
 
+// Swept soft edge/edge approximation using conservative advancement for
+// linearly moving endpoints. The minimum distance between two segments is
+// Lipschitz continuous, bounded by the largest endpoint-relative speed;
+// stepping by (distance - radius) / speed_bound cannot skip a first contact
+// in exact arithmetic. This is NOT CCD for arbitrarily accelerated,
+// internally constrained or nonlinear deformable motion during Jolt Update.
+constexpr uint32_t MAX_SOFT_EDGE_SWEEP_ITERATIONS = 16;
+constexpr float SOFT_EDGE_SWEEP_DISTANCE_TOLERANCE = 1.0e-4f;
+
+static bool predict_soft_edge_edge_sweep(
+		JPH::Vec3Arg p0, JPH::Vec3Arg p1, JPH::Vec3Arg q0, JPH::Vec3Arg q1,
+		JPH::Vec3Arg vp0, JPH::Vec3Arg vp1, JPH::Vec3Arg vq0, JPH::Vec3Arg vq1,
+		float p_step, float p_radius, float p_max_sweep, uint32_t &r_budget,
+		float &r_s, float &r_t, JPH::Vec3 &r_normal) {
+	if (p_step <= 0.0f || p_radius <= 0.0f || p_max_sweep <= 0.0f) {
+		return false;
+	}
+
+	// A convex combination of two endpoint velocities cannot exceed
+	// the maximum magnitude of these four endpoint-relative velocities.
+	const float max_relative_speed_sq = MAX(
+			MAX((vq0 - vp0).LengthSq(), (vq0 - vp1).LengthSq()),
+			MAX((vq1 - vp0).LengthSq(), (vq1 - vp1).LengthSq()));
+	if (!Math::is_finite(max_relative_speed_sq) || max_relative_speed_sq <= 1.0e-12f) {
+		return false;
+	}
+	const float speed_bound = Math::sqrt(max_relative_speed_sq);
+	const float travel_bound = speed_bound * p_step;
+	if (!Math::is_finite(travel_bound) || travel_bound > p_max_sweep) {
+		return false;
+	}
+
+	float time = 0.0f;
+	for (uint32_t iteration = 0; iteration < MAX_SOFT_EDGE_SWEEP_ITERATIONS && r_budget > 0; ++iteration) {
+		// Account for each iterative segment closest-point evaluation, in
+		// addition to the initial broadphase/segment test already debited.
+		--r_budget;
+		const JPH::Vec3 a0 = p0 + vp0 * time;
+		const JPH::Vec3 a1 = p1 + vp1 * time;
+		const JPH::Vec3 b0 = q0 + vq0 * time;
+		const JPH::Vec3 b1 = q1 + vq1 * time;
+		JPH::Vec3 nearest_a = JPH::Vec3::sZero();
+		JPH::Vec3 nearest_b = JPH::Vec3::sZero();
+		float s = 0.0f, t = 0.0f;
+		if (!closest_soft_edge_edge(a0, a1, b0, b1, s, t, nearest_a, nearest_b)) {
+			return false;
+		}
+		const JPH::Vec3 gap = nearest_b - nearest_a;
+		const float distance_sq = gap.LengthSq();
+		if (!Math::is_finite(distance_sq)) {
+			return false;
+		}
+		const float distance = Math::sqrt(MAX(distance_sq, 0.0f));
+		if (time > 0.0f && distance <= p_radius + SOFT_EDGE_SWEEP_DISTANCE_TOLERANCE) {
+			const JPH::Vec3 vel_a = vp0 * (1.0f - s) + vp1 * s;
+			const JPH::Vec3 vel_b = vq0 * (1.0f - t) + vq1 * t;
+			const JPH::Vec3 rel_velocity = vel_b - vel_a;
+			if (distance > 1.0e-6f) {
+				r_normal = gap / distance;
+			} else if (rel_velocity.LengthSq() > 1.0e-12f) {
+				r_normal = -rel_velocity.Normalized();
+			} else {
+				return false;
+			}
+			// Only future *approaching* contacts get speculative impulses.
+			// Tangential/grazing contacts have no normal closing velocity.
+			if (!Math::is_finite(rel_velocity.Dot(r_normal)) || rel_velocity.Dot(r_normal) >= -1.0e-6f) {
+				return false;
+			}
+			r_s = s;
+			r_t = t;
+			return true;
+		}
+		if (distance <= p_radius) {
+			return false; // Already overlapping: use the discrete solver.
+		}
+
+		// This is a conservative time increment from the distance bound;
+		// unlike fixed substep sampling, fast narrow impacts are not
+		// skipped when the remaining work budget is sufficient.
+		const float advance = (distance - p_radius) / speed_bound;
+		if (!Math::is_finite(advance) || advance <= 1.0e-8f * p_step || time + advance > p_step) {
+			return false;
+		}
+		time += advance;
+	}
+	return false; // Work cap or iteration cap; no unbounded loop.
+}
+
 static void resolve_soft_soft_edge_edge_contacts(JPH::Body &p_body_a, JPH::Body &p_body_b,
 		float p_step, uint32_t &r_budget, SoftEdgeContactScratch &r_scratch) {
 	JPH::SoftBodyMotionProperties &props_a = static_cast<JPH::SoftBodyMotionProperties &>(*p_body_a.GetMotionPropertiesUnchecked());
@@ -659,6 +841,9 @@ static void resolve_soft_soft_edge_edge_contacts(JPH::Body &p_body_a, JPH::Body 
 	const float radius = JoltProjectSettings::soft_body_soft_contact_radius;
 	const float friction = JoltProjectSettings::soft_body_soft_contact_friction;
 	const float bias_per_step = JoltProjectSettings::soft_body_soft_contact_recovery / p_step;
+	const bool swept_edge_ccd = JoltProjectSettings::soft_body_soft_speculative_edge_ccd &&
+			JoltProjectSettings::soft_body_soft_ccd_max_sweep > 0.0f;
+	const float candidate_radius = radius + (swept_edge_ccd ? JoltProjectSettings::soft_body_soft_ccd_max_sweep : 0.0f);
 
 	for (uint64_t key_a : r_scratch.keys_a) {
 		if (r_budget == 0) {
@@ -681,9 +866,9 @@ static void resolve_soft_soft_edge_edge_contacts(JPH::Body &p_body_a, JPH::Body 
 			const JPH::Vec3 q1 = center_delta + rotation_b * b1.mPosition;
 			const JPH::Vec3 q_min = JPH::Vec3::sMin(q0, q1);
 			const JPH::Vec3 q_max = JPH::Vec3::sMax(q0, q1);
-			if (p_max.GetX() + radius < q_min.GetX() || q_max.GetX() + radius < p_min.GetX() ||
-					p_max.GetY() + radius < q_min.GetY() || q_max.GetY() + radius < p_min.GetY() ||
-					p_max.GetZ() + radius < q_min.GetZ() || q_max.GetZ() + radius < p_min.GetZ()) {
+			if (p_max.GetX() + candidate_radius < q_min.GetX() || q_max.GetX() + candidate_radius < p_min.GetX() ||
+					p_max.GetY() + candidate_radius < q_min.GetY() || q_max.GetY() + candidate_radius < p_min.GetY() ||
+					p_max.GetZ() + candidate_radius < q_min.GetZ() || q_max.GetZ() + candidate_radius < p_min.GetZ()) {
 				continue;
 			}
 
@@ -694,8 +879,20 @@ static void resolve_soft_soft_edge_edge_contacts(JPH::Body &p_body_a, JPH::Body 
 			}
 			const JPH::Vec3 separation = near_b - near_a;
 			const float distance_sq = separation.LengthSq();
-			if (!Math::is_finite(distance_sq) || distance_sq >= radius * radius) {
+			if (!Math::is_finite(distance_sq)) {
 				continue;
+			}
+			bool swept_contact = false;
+			JPH::Vec3 swept_normal = JPH::Vec3::sZero();
+			if (distance_sq >= radius * radius) {
+				if (!swept_edge_ccd || !predict_soft_edge_edge_sweep(p0, p1, q0, q1,
+						rotation_a * a0.mVelocity, rotation_a * a1.mVelocity,
+						rotation_b * b0.mVelocity, rotation_b * b1.mVelocity,
+						p_step, radius, JoltProjectSettings::soft_body_soft_ccd_max_sweep,
+						r_budget, s, t, swept_normal)) {
+					continue;
+				}
+				swept_contact = true;
 			}
 			const float wa0 = 1.0f - s, wa1 = s;
 			const float wb0 = 1.0f - t, wb1 = t;
@@ -708,9 +905,11 @@ static void resolve_soft_soft_edge_edge_contacts(JPH::Body &p_body_a, JPH::Body 
 			const JPH::Vec3 vel_a = rotation_a * (wa0 * a0.mVelocity + wa1 * a1.mVelocity);
 			const JPH::Vec3 vel_b = rotation_b * (wb0 * b0.mVelocity + wb1 * b1.mVelocity);
 			const JPH::Vec3 relative_velocity = vel_b - vel_a;
-			const float distance = Math::sqrt(MAX(distance_sq, 0.0f));
-			JPH::Vec3 normal;
-			if (distance > 1.0e-6f) {
+			const float distance = swept_contact ? radius : Math::sqrt(MAX(distance_sq, 0.0f));
+			JPH::Vec3 normal = swept_normal;
+			if (swept_contact) {
+				// The predictor has already chosen a normal at future impact.
+			} else if (distance > 1.0e-6f) {
 				normal = separation / distance;
 			} else {
 				const JPH::Vec3 crossing = (p1 - p0).Cross(q1 - q0);
@@ -739,8 +938,13 @@ static void resolve_soft_soft_edge_edge_contacts(JPH::Body &p_body_a, JPH::Body 
 			if (!Math::is_finite(normal_speed)) {
 				continue;
 			}
-			const float recovery_speed = MIN((radius - distance) * bias_per_step, MAX_SOFT_SOFT_PENETRATION_BIAS);
-			const float correction = MIN(MAX(recovery_speed - normal_speed, 0.0f), MAX_SOFT_SOFT_CONTACT_SPEED_CORRECTION);
+			// Speculative impacts only remove future normal closing speed;
+			// the discrete path retains its penetration recovery.
+			const float recovery_speed = swept_contact ? 0.0f :
+					MIN((radius - distance) * bias_per_step, MAX_SOFT_SOFT_PENETRATION_BIAS);
+			const float max_correction = swept_contact ? JoltProjectSettings::soft_body_soft_ccd_max_correction_speed :
+					MAX_SOFT_SOFT_CONTACT_SPEED_CORRECTION;
+			const float correction = MIN(MAX(recovery_speed - normal_speed, 0.0f), max_correction);
 			if (correction <= 0.0f) {
 				continue;
 			}
@@ -763,6 +967,934 @@ static void resolve_soft_soft_edge_edge_contacts(JPH::Body &p_body_a, JPH::Body 
 			a1.mVelocity -= local_impulse_a * (wa1 * a1.mInvMass);
 			b0.mVelocity += local_impulse_b * (wb0 * b0.mInvMass);
 			b1.mVelocity += local_impulse_b * (wb1 * b1.mInvMass);
+		}
+	}
+}
+
+// Experimental single-body self collision. No topology mutation or Jolt
+// internal solver changes: contact impulses are added to the per-particle
+// velocities before Jolt's parallel Update. Exclude immediate mesh
+// neighbors to avoid treating ordinary cloth springs as self contacts.
+constexpr uint32_t MAX_SOFT_SELF_CONTACT_FACES = 1024;
+
+struct SoftSelfContactScratch {
+	SoftFaceBVHScratch bvh;
+	SoftFaceBVHScratch edge_bvh; // Reused across active soft bodies.
+	uint32_t face_bvh_face_count = 0;
+	uint32_t face_bvh_refits = 0;
+	bool face_bvh_ready = false;
+	JPH::Array<uint64_t> one_ring_edges;
+	// Jacobi self-contact corrections are accumulated without moving BVH
+	// geometry during a candidate query, then uniformly capped and applied.
+	JPH::Array<JPH::Vec3> position_deltas;
+	bool position_projection_ready = false;
+
+	// Face-array address identifies an immutable Jolt SoftBodySharedSettings
+	// topology. A body rebuild gets a new BodyID, invalidating this cache.
+	const void *topology_faces = nullptr;
+	uint32_t topology_face_count = 0;
+	uint32_t topology_vertex_count = 0;
+	uint32_t edge_bvh_edge_count = 0;
+	uint32_t edge_bvh_refits = 0;
+	bool edge_bvh_ready = false;
+};
+
+// Optional one-pass XPBD-style projection for soft self-contacts.
+// A true iterative XPBD solver stores per-constraint lambda and recomputes
+// geometry each iteration; this is deliberately a one-shot compliant Jacobi
+// projection, supplementing (not replacing) existing velocity impulses.
+// Accumulate deltas first: moving vertices while querying a BVH built from
+// their old positions could otherwise incorrectly reject later contacts.
+constexpr uint32_t MAX_SOFT_SELF_POSITION_VERTICES = 4096;
+
+static bool prepare_soft_self_position_projection(
+		const JPH::Array<JPH::SoftBodyVertex> &p_vertices,
+		uint32_t &r_budget, SoftSelfContactScratch &r_scratch) {
+	r_scratch.position_projection_ready = false;
+	const uint32_t count = uint32_t(p_vertices.size());
+	if (!JoltProjectSettings::soft_body_self_position_projection ||
+			JoltProjectSettings::soft_body_self_position_max_correction <= 0.0f ||
+			count == 0 || count > MAX_SOFT_SELF_POSITION_VERTICES) {
+		return false;
+	}
+	// Clearing and applying the buffer are both O(vertex_count).
+	const uint32_t work = 2 * count;
+	if (r_budget <= work) {
+		return false;
+	}
+	r_budget -= work;
+	r_scratch.position_deltas.resize(count);
+	for (JPH::Vec3 &delta : r_scratch.position_deltas) {
+		delta = JPH::Vec3::sZero();
+	}
+	r_scratch.position_projection_ready = true;
+	return true;
+}
+
+static void accumulate_soft_self_position_projection(
+		SoftSelfContactScratch &r_scratch,
+		const JPH::Array<JPH::SoftBodyVertex> &p_vertices,
+		const uint32_t p_indices[4], const float p_gradients[4],
+		JPH::Vec3Arg p_normal, float p_penetration, float p_step) {
+	if (!r_scratch.position_projection_ready || p_penetration <= 0.0f) {
+		return;
+	}
+	const float normal_length_sq = p_normal.LengthSq();
+	if (!Math::is_finite(normal_length_sq) || normal_length_sq <= 1.0e-12f) {
+		return;
+	}
+	float effective_mass = 0.0f;
+	float max_weighted_inverse_mass = 0.0f;
+	for (uint32_t i = 0; i < 4; ++i) {
+		if (p_indices[i] >= p_vertices.size()) {
+			return;
+		}
+		const float inverse_mass = p_vertices[p_indices[i]].mInvMass;
+		const float gradient = p_gradients[i];
+		if (!Math::is_finite(inverse_mass) || inverse_mass < 0.0f || !Math::is_finite(gradient)) {
+			return;
+		}
+		effective_mass += gradient * gradient * inverse_mass;
+		max_weighted_inverse_mass = MAX(max_weighted_inverse_mass, Math::abs(gradient) * inverse_mass);
+	}
+	if (!Math::is_finite(effective_mass) || effective_mass <= 0.0f ||
+			!Math::is_finite(max_weighted_inverse_mass) || max_weighted_inverse_mass <= 0.0f) {
+		return;
+	}
+	const float compliance = JoltProjectSettings::soft_body_self_position_compliance;
+	const float max_correction = JoltProjectSettings::soft_body_self_position_max_correction;
+	const float scaled_compliance = compliance / (p_step * p_step);
+	const float denominator = effective_mass + scaled_compliance;
+	if (!Math::is_finite(denominator) || denominator <= 0.0f) {
+		return;
+	}
+	// Delta lambda = -C / (sum(w_i |grad_i|^2) + alpha).
+	// All new constraints start at lambda=0. Cap this contribution as
+	// well as the final Jacobi sum to avoid extreme penetration recovery.
+	const float lambda = MIN(p_penetration / denominator, max_correction / max_weighted_inverse_mass);
+	if (!Math::is_finite(lambda) || lambda <= 0.0f) {
+		return;
+	}
+	const JPH::Vec3 normal = p_normal / Math::sqrt(normal_length_sq);
+	for (uint32_t i = 0; i < 4; ++i) {
+		const float scale = p_gradients[i] * p_vertices[p_indices[i]].mInvMass * lambda;
+		r_scratch.position_deltas[p_indices[i]] += normal * scale;
+	}
+}
+
+static void apply_soft_self_position_projection(JPH::Body &p_body, SoftSelfContactScratch &r_scratch) {
+	if (!r_scratch.position_projection_ready) {
+		return;
+	}
+	r_scratch.position_projection_ready = false;
+	JPH::SoftBodyMotionProperties &props = static_cast<JPH::SoftBodyMotionProperties &>(*p_body.GetMotionPropertiesUnchecked());
+	JPH::Array<JPH::SoftBodyVertex> &vertices = props.GetVertices();
+	if (vertices.size() != r_scratch.position_deltas.size()) {
+		return;
+	}
+	const float max_correction = JoltProjectSettings::soft_body_self_position_max_correction;
+	const float limit_sq = max_correction * max_correction;
+	float maximum_sq = 0.0f;
+	for (const JPH::Vec3 &delta : r_scratch.position_deltas) {
+		const float displacement_sq = delta.LengthSq();
+		if (!Math::is_finite(displacement_sq)) {
+			return; // Leave all vertices unchanged rather than partially moving.
+		}
+		maximum_sq = MAX(maximum_sq, displacement_sq);
+	}
+	// Apply ONE uniform scale to all Jacobi displacements: unlike
+	// per-vertex clipping, this preserves the inverse-mass-weighted
+	// internal center of mass of the accumulated constraints.
+	const float scale = maximum_sq > limit_sq ? max_correction / Math::sqrt(maximum_sq) : 1.0f;
+	if (scale <= 0.0f || !Math::is_finite(scale)) {
+		return;
+	}
+	for (uint32_t i = 0; i < vertices.size(); ++i) {
+		JPH::SoftBodyVertex &vertex = vertices[i];
+		if (vertex.mInvMass <= 0.0f) {
+			continue; // Pinned particle.
+		}
+		const JPH::Vec3 delta = r_scratch.position_deltas[i] * scale;
+		vertex.mPosition += delta;
+		vertex.mPreviousPosition += delta; // No artificial history/velocity jump.
+	}
+}
+
+static uint64_t soft_self_topology_edge_key(uint32_t p_a, uint32_t p_b) {
+	return (uint64_t(MIN(p_a, p_b)) << 32) | uint64_t(MAX(p_a, p_b));
+}
+
+static bool prepare_soft_self_topology(const JPH::Array<JPH::SoftBodySharedSettings::Face> &p_faces,
+		uint32_t p_vertex_count, JPH::Array<uint64_t> &r_edges, uint32_t &r_budget) {
+	r_edges.clear();
+	if (p_faces.empty() || p_faces.size() > MAX_SOFT_SELF_CONTACT_FACES) {
+		return false;
+	}
+	// Conservative O(F log F) charge for collecting and sorting 3*F edges.
+	const uint32_t raw_count = uint32_t(p_faces.size()) * 3;
+	uint32_t levels = 0;
+	for (uint32_t n = raw_count; n > 1; n = (n + 1) / 2) {
+		++levels;
+	}
+	const uint32_t build_cost = raw_count * (levels + 1);
+	if (r_budget <= build_cost) {
+		return false;
+	}
+	r_budget -= build_cost;
+	r_edges.reserve(raw_count);
+	for (const JPH::SoftBodySharedSettings::Face &face : p_faces) {
+		const uint32_t a = face.mVertex[0];
+		const uint32_t b = face.mVertex[1];
+		const uint32_t c = face.mVertex[2];
+		if (face.IsDegenerate() || a >= p_vertex_count || b >= p_vertex_count || c >= p_vertex_count) {
+			continue;
+		}
+		r_edges.push_back(soft_self_topology_edge_key(a, b));
+		r_edges.push_back(soft_self_topology_edge_key(b, c));
+		r_edges.push_back(soft_self_topology_edge_key(c, a));
+	}
+	std::sort(r_edges.begin(), r_edges.end());
+	r_edges.resize(size_t(std::unique(r_edges.begin(), r_edges.end()) - r_edges.begin()));
+	return !r_edges.empty();
+}
+
+// Jolt's shared soft-body settings are immutable at runtime. The pointer
+// identity of the face array and the vertex/face counts are therefore a
+// safe topology generation key for the lifetime of one Jolt BodyID. When
+// the body is rebuilt, remove_object() destroys its per-body cache.
+static bool ensure_soft_self_topology(const JPH::Array<JPH::SoftBodySharedSettings::Face> &p_faces,
+		uint32_t p_vertex_count, SoftSelfContactScratch &r_scratch,
+		uint32_t &r_budget, bool p_persistent) {
+	if (r_budget == 0) {
+		return false;
+	}
+	if (p_persistent && !r_scratch.one_ring_edges.empty() &&
+			r_scratch.topology_faces == &p_faces &&
+			r_scratch.topology_face_count == p_faces.size() &&
+			r_scratch.topology_vertex_count == p_vertex_count) {
+		--r_budget; // Account for constant-time topology validation.
+		return true;
+	}
+	if (!p_persistent && !r_scratch.one_ring_edges.empty()) {
+		return true; // Same-step reuse between VF and EE as before.
+	}
+
+	// A changed topology invalidates the adjacency, face and edge trees:
+	// their persistent leaf mappings must never reference an old mesh.
+	r_scratch.face_bvh_ready = false;
+	r_scratch.face_bvh_face_count = 0;
+	r_scratch.face_bvh_refits = 0;
+	r_scratch.edge_bvh_ready = false;
+	r_scratch.edge_bvh_edge_count = 0;
+	r_scratch.edge_bvh_refits = 0;
+	r_scratch.topology_faces = nullptr;
+	const bool valid = prepare_soft_self_topology(p_faces, p_vertex_count, r_scratch.one_ring_edges, r_budget);
+	if (valid && p_persistent) {
+		r_scratch.topology_faces = &p_faces;
+		r_scratch.topology_face_count = uint32_t(p_faces.size());
+		r_scratch.topology_vertex_count = p_vertex_count;
+	}
+	return valid;
+}
+
+static bool soft_self_is_neighbor(uint32_t p_point, const JPH::SoftBodySharedSettings::Face &p_face,
+		const JPH::Array<uint64_t> &p_topology_edges) {
+	// Reject points on the tested face, plus the direct one-ring of any
+	// face corner. This excludes adjacent faces sharing an edge or corner.
+	for (uint32_t corner = 0; corner < 3; ++corner) {
+		const uint32_t face_vertex = p_face.mVertex[corner];
+		if (p_point == face_vertex ||
+				std::binary_search(p_topology_edges.begin(), p_topology_edges.end(),
+						soft_self_topology_edge_key(p_point, face_vertex))) {
+			return true;
+		}
+	}
+	return false;
+}
+
+// Opt-in self vertex/face CCD for linearly moving, independently deforming
+// triangle corners. Unlike the cheap inter-body mean-plane predictor above,
+// this repeatedly measures the *actual distance to the moving triangle*
+// and bounds its closing speed by max(|v_point-v_a|,|v_point-v_b|,
+// |v_point-v_c|). The bound remains conservative under linear per-vertex
+// motion, even when the triangle rotates/shears or the nearest feature
+// switches between its face, edges and corners.
+// Actual Jolt XPBD motion can accelerate within a step: this does not
+// provide exact nonlinear deformable CCD or a TOI rewind.
+constexpr uint32_t MAX_SOFT_SELF_VERTEX_FACE_SWEEP_ITERATIONS = 16;
+constexpr float SOFT_SELF_VERTEX_FACE_SWEEP_TOLERANCE = 1.0e-4f;
+
+static bool predict_soft_self_vertex_face_sweep(
+		JPH::Vec3Arg p_point, JPH::Vec3Arg p_point_velocity,
+		JPH::Vec3Arg p_a, JPH::Vec3Arg p_b, JPH::Vec3Arg p_c,
+		JPH::Vec3Arg p_va, JPH::Vec3Arg p_vb, JPH::Vec3Arg p_vc,
+		float p_step, float p_radius, float p_max_sweep, uint32_t &r_budget,
+		float &r_u, float &r_v, float &r_w, JPH::Vec3 &r_normal) {
+	if (!Math::is_finite(p_step) || !Math::is_finite(p_radius) || !Math::is_finite(p_max_sweep) ||
+			p_step <= 0.0f || p_radius <= 0.0f || p_max_sweep <= 0.0f) {
+		return false;
+	}
+	const float max_relative_speed_sq = MAX(
+			(p_point_velocity - p_va).LengthSq(),
+			MAX((p_point_velocity - p_vb).LengthSq(), (p_point_velocity - p_vc).LengthSq()));
+	if (!Math::is_finite(max_relative_speed_sq) || max_relative_speed_sq <= 1.0e-12f) {
+		return false;
+	}
+	const float speed_bound = Math::sqrt(max_relative_speed_sq);
+	const float travel_bound = speed_bound * p_step;
+	if (!Math::is_finite(travel_bound) || travel_bound > p_max_sweep) {
+		return false;
+	}
+
+	float time = 0.0f;
+	for (uint32_t iteration = 0; iteration < MAX_SOFT_SELF_VERTEX_FACE_SWEEP_ITERATIONS && r_budget > 0; ++iteration) {
+		--r_budget; // One extra face distance evaluation per advancement.
+		const JPH::Vec3 point_at_time = p_point + p_point_velocity * time;
+		const JPH::Vec3 a_at_time = p_a + p_va * time;
+		const JPH::Vec3 b_at_time = p_b + p_vb * time;
+		const JPH::Vec3 c_at_time = p_c + p_vc * time;
+		JPH::Vec3 nearest = JPH::Vec3::sZero();
+		float u = 0.0f, v = 0.0f, w = 0.0f;
+		if (!closest_soft_triangle_point(point_at_time, a_at_time, b_at_time, c_at_time, nearest, u, v, w)) {
+			return false;
+		}
+		const JPH::Vec3 separation = point_at_time - nearest;
+		const float distance_sq = separation.LengthSq();
+		if (!Math::is_finite(distance_sq)) {
+			return false;
+		}
+		const float distance = Math::sqrt(MAX(distance_sq, 0.0f));
+		if (time > 0.0f && distance <= p_radius + SOFT_SELF_VERTEX_FACE_SWEEP_TOLERANCE) {
+			const JPH::Vec3 face_velocity = u * p_va + v * p_vb + w * p_vc;
+			const JPH::Vec3 relative_velocity = p_point_velocity - face_velocity;
+			if (distance > 1.0e-6f) {
+				r_normal = separation / distance;
+			} else {
+				// Exact coincidence has no geometric orientation; choose
+				// the normal opposing velocity rather than face winding.
+				const float velocity_sq = relative_velocity.LengthSq();
+				if (!Math::is_finite(velocity_sq) || velocity_sq <= 1.0e-12f) {
+					return false;
+				}
+				r_normal = -relative_velocity / Math::sqrt(velocity_sq);
+			}
+			const float approach_speed = relative_velocity.Dot(r_normal);
+			if (!Math::is_finite(approach_speed) || approach_speed >= -1.0e-6f) {
+				return false; // Avoid speculative impulses on outgoing contacts.
+			}
+			r_u = u;
+			r_v = v;
+			r_w = w;
+			return true;
+		}
+		if (distance <= p_radius) {
+			return false; // Initial overlap belongs to the discrete solver.
+		}
+		const float advance = (distance - p_radius) / speed_bound;
+		if (!Math::is_finite(advance) || advance <= 1.0e-8f * p_step || time + advance > p_step) {
+			return false;
+		}
+		time += advance;
+	}
+	return false; // Iteration cap and shared contact work budget.
+}
+
+// The median face hierarchy is built in parent-before-children order.
+// Once the topology and leaf face indices are cached, every physics step
+// can refit the CURRENT deformed triangle AABBs in reverse node order.
+// Unlike a rebuilt tree, median partitions are reused; periodically
+// rebuilding compensates for a cloth that folds far from its old layout.
+static bool refit_soft_self_face_bvh(
+		const JPH::Array<JPH::SoftBodySharedSettings::Face> &p_faces,
+		const JPH::Array<JPH::SoftBodyVertex> &p_vertices,
+		SoftFaceBVHScratch &r_bvh, uint32_t &r_budget) {
+	const uint32_t entry_count = uint32_t(r_bvh.entries.size());
+	const uint32_t node_count = uint32_t(r_bvh.nodes.size());
+	if (entry_count == 0 || node_count == 0) {
+		return false;
+	}
+	// Three corner reads + bounds calculation per face, plus node unions.
+	// Charge before touching data so the global self VF quota stays bounded.
+	const uint32_t refit_cost = 4 * entry_count + node_count;
+	if (r_budget <= refit_cost) {
+		return false;
+	}
+	r_budget -= refit_cost;
+	for (SoftFaceBVHEntry &entry : r_bvh.entries) {
+		if (entry.face_index >= p_faces.size()) {
+			return false;
+		}
+		const JPH::SoftBodySharedSettings::Face &face = p_faces[entry.face_index];
+		const uint32_t a = face.mVertex[0], b = face.mVertex[1], c = face.mVertex[2];
+		if (face.IsDegenerate() || a >= p_vertices.size() ||
+				b >= p_vertices.size() || c >= p_vertices.size()) {
+			return false; // Rebuild, filtering any invalid source faces.
+		}
+		const JPH::Vec3 p0 = p_vertices[a].mPosition;
+		const JPH::Vec3 p1 = p_vertices[b].mPosition;
+		const JPH::Vec3 p2 = p_vertices[c].mPosition;
+		entry.min = JPH::Vec3::sMin(p0, JPH::Vec3::sMin(p1, p2));
+		entry.max = JPH::Vec3::sMax(p0, JPH::Vec3::sMax(p1, p2));
+		if (!Math::is_finite(entry.min.GetX()) || !Math::is_finite(entry.min.GetY()) ||
+				!Math::is_finite(entry.min.GetZ()) || !Math::is_finite(entry.max.GetX()) ||
+				!Math::is_finite(entry.max.GetY()) || !Math::is_finite(entry.max.GetZ())) {
+			return false; // Never query stale or nonfinite bounds.
+		}
+	}
+	for (uint32_t i = node_count; i > 0; --i) {
+		SoftFaceBVHNode &node = r_bvh.nodes[i - 1];
+		if (node.end <= node.begin || node.end > entry_count) {
+			return false;
+		}
+		if (node.end - node.begin <= SOFT_FACE_BVH_LEAF_SIZE) {
+			node.min = r_bvh.entries[node.begin].min;
+			node.max = r_bvh.entries[node.begin].max;
+			for (uint32_t j = node.begin + 1; j < node.end; ++j) {
+				node.min = JPH::Vec3::sMin(node.min, r_bvh.entries[j].min);
+				node.max = JPH::Vec3::sMax(node.max, r_bvh.entries[j].max);
+			}
+		} else {
+			if (node.left <= i - 1 || node.right <= i - 1 ||
+					node.left >= node_count || node.right >= node_count) {
+				return false;
+			}
+			node.min = JPH::Vec3::sMin(r_bvh.nodes[node.left].min, r_bvh.nodes[node.right].min);
+			node.max = JPH::Vec3::sMax(r_bvh.nodes[node.left].max, r_bvh.nodes[node.right].max);
+		}
+	}
+	return true;
+}
+
+static void resolve_soft_body_self_contacts(JPH::Body &p_body, const JoltSoftBody3D &p_object,
+		float p_step, uint32_t &r_budget, SoftSelfContactScratch &r_scratch) {
+	JPH::SoftBodyMotionProperties &props = static_cast<JPH::SoftBodyMotionProperties &>(*p_body.GetMotionPropertiesUnchecked());
+	JPH::Array<JPH::SoftBodyVertex> &vertices = props.GetVertices();
+	const JPH::Array<JPH::SoftBodySharedSettings::Face> &faces = props.GetFaces();
+	const uint32_t particle_count = MIN(p_object.get_surface_particle_count(), uint32_t(vertices.size()));
+	if (particle_count == 0 || faces.empty() || faces.size() > MAX_SOFT_SELF_CONTACT_FACES || r_budget == 0) {
+		return;
+	}
+
+	const bool refit_faces = JoltProjectSettings::soft_body_self_face_bvh_refit;
+	// The existing persistent edge cache and the independent face-cache
+	// option both reuse immutable mesh adjacency for stable BodyID objects.
+	if (!ensure_soft_self_topology(faces, uint32_t(vertices.size()), r_scratch, r_budget,
+			JoltProjectSettings::soft_body_self_persistent_bvh || refit_faces)) {
+		return;
+	}
+	// Use the same triangle BVH whether we build or refit it, preserving
+	// topology exclusions and the existing discrete/speculative narrowphase.
+	// On small meshes, continue to use the old direct face scan.
+	const bool needs_bvh = faces.size() >= MIN_SOFT_FACE_BVH_FACES;
+	bool use_bvh = false;
+	if (needs_bvh && refit_faces && r_scratch.face_bvh_ready &&
+			r_scratch.face_bvh_face_count == faces.size() && r_scratch.face_bvh_refits < 120) {
+		use_bvh = refit_soft_self_face_bvh(faces, vertices, r_scratch.bvh, r_budget);
+		if (use_bvh) {
+			++r_scratch.face_bvh_refits;
+		}
+	}
+	if (needs_bvh && !use_bvh) {
+		// May follow an aborted refit: always discard potentially partial
+		// AABBs/nodes before attempting a fresh, budgeted median build.
+		r_scratch.bvh.clear();
+		use_bvh = prepare_soft_face_bvh(faces, vertices, JPH::Quat::sIdentity(),
+				JPH::Vec3::sZero(), r_scratch.bvh.entries, r_scratch.bvh.nodes, r_budget);
+		if (use_bvh) {
+			r_scratch.face_bvh_refits = 0;
+		}
+	}
+	if (refit_faces) {
+		r_scratch.face_bvh_ready = use_bvh;
+		r_scratch.face_bvh_face_count = use_bvh ? uint32_t(faces.size()) : 0;
+	} else {
+		// An independently persistent edge cache may outlive this toggle.
+		// Never reuse a face tree from before refitting was switched off.
+		r_scratch.face_bvh_ready = false;
+	}
+	if (needs_bvh && !use_bvh) {
+		return;
+	}
+	if (use_bvh) {
+		r_scratch.bvh.candidates.reserve(r_scratch.bvh.entries.size());
+		r_scratch.bvh.stack.reserve(32);
+	}
+
+	const float radius = JoltProjectSettings::soft_body_soft_contact_radius;
+	const float radius_sq = radius * radius;
+	const float bias_per_step = JoltProjectSettings::soft_body_soft_contact_recovery / p_step;
+	const float friction = JoltProjectSettings::soft_body_soft_contact_friction;
+	// For every pair accepted by the predictor, relative point-to-face
+	// travel is <= max_sweep (bounded against each face vertex). Expanding
+	// static face BVH and point/AABB tests by that amount cannot cull an
+	// eligible swept contact, even if the triangle deforms during the step.
+	const bool swept_self_vertex_face_ccd = JoltProjectSettings::soft_body_self_speculative_vertex_face_ccd &&
+			JoltProjectSettings::soft_body_soft_ccd_max_sweep > 0.0f;
+	const float candidate_radius = radius +
+			(swept_self_vertex_face_ccd ? JoltProjectSettings::soft_body_soft_ccd_max_sweep : 0.0f);
+	for (uint32_t i = 0; i < particle_count && r_budget > 0; ++i) {
+		JPH::SoftBodyVertex &point = vertices[i];
+		const JPH::Vec3 point_position = point.mPosition;
+		if (use_bvh) {
+			query_soft_face_bvh(r_scratch.bvh.entries, r_scratch.bvh.nodes, point_position,
+					candidate_radius, r_budget, r_scratch.bvh.candidates, r_scratch.bvh.stack);
+		}
+		const uint32_t candidate_count = use_bvh ? uint32_t(r_scratch.bvh.candidates.size()) : uint32_t(faces.size());
+		for (uint32_t j = 0; j < candidate_count && r_budget > 0; ++j) {
+			--r_budget; // Count all candidate checks, including adjacent faces.
+			const JPH::SoftBodySharedSettings::Face &face = faces[use_bvh ? r_scratch.bvh.candidates[j] : j];
+			const uint32_t id0 = face.mVertex[0], id1 = face.mVertex[1], id2 = face.mVertex[2];
+			if (face.IsDegenerate() || id0 >= vertices.size() || id1 >= vertices.size() || id2 >= vertices.size() ||
+					soft_self_is_neighbor(i, face, r_scratch.one_ring_edges)) {
+				continue;
+			}
+			JPH::SoftBodyVertex &a = vertices[id0];
+			JPH::SoftBodyVertex &b = vertices[id1];
+			JPH::SoftBodyVertex &c = vertices[id2];
+			const JPH::Vec3 min_bound = JPH::Vec3::sMin(a.mPosition, JPH::Vec3::sMin(b.mPosition, c.mPosition));
+			const JPH::Vec3 max_bound = JPH::Vec3::sMax(a.mPosition, JPH::Vec3::sMax(b.mPosition, c.mPosition));
+			if (!soft_face_aabb_overlaps_point(min_bound, max_bound, point_position, candidate_radius)) {
+				continue;
+			}
+			float u = 0.0f, v = 0.0f, w = 0.0f;
+			JPH::Vec3 nearest = JPH::Vec3::sZero();
+			if (!closest_soft_triangle_point(point_position, a.mPosition, b.mPosition, c.mPosition, nearest, u, v, w)) {
+				continue;
+			}
+			const JPH::Vec3 diff = point_position - nearest;
+			const float distance_sq = diff.LengthSq();
+			if (!Math::is_finite(distance_sq)) {
+				continue;
+			}
+			bool swept_contact = false;
+			JPH::Vec3 swept_normal = JPH::Vec3::sZero();
+			if (distance_sq >= radius_sq) {
+				if (!swept_self_vertex_face_ccd || !predict_soft_self_vertex_face_sweep(
+						point_position, point.mVelocity, a.mPosition, b.mPosition, c.mPosition,
+						a.mVelocity, b.mVelocity, c.mVelocity, p_step, radius,
+						JoltProjectSettings::soft_body_soft_ccd_max_sweep, r_budget,
+						u, v, w, swept_normal)) {
+					continue;
+				}
+				swept_contact = true;
+			}
+			const float inverse_mass_sum = point.mInvMass + u * u * a.mInvMass + v * v * b.mInvMass + w * w * c.mInvMass;
+			if (!Math::is_finite(inverse_mass_sum) || inverse_mass_sum <= 0.0f) {
+				continue;
+			}
+			const JPH::Vec3 face_velocity = u * a.mVelocity + v * b.mVelocity + w * c.mVelocity;
+			const JPH::Vec3 relative_velocity = point.mVelocity - face_velocity;
+			const float distance = swept_contact ? radius : Math::sqrt(MAX(distance_sq, 0.0f));
+			JPH::Vec3 normal = swept_contact ? swept_normal :
+					(distance > 1.0e-6f ? diff / distance :
+							(b.mPosition - a.mPosition).Cross(c.mPosition - a.mPosition).Normalized());
+			if (!swept_contact && distance <= 1.0e-6f && relative_velocity.Dot(normal) > 0.0f) {
+				normal = -normal;
+			}
+			const float normal_speed = relative_velocity.Dot(normal);
+			if (!Math::is_finite(normal_speed)) {
+				continue;
+			}
+			// Future contacts are predictive impulses ONLY; the existing
+			// Jacobi positional solver must not project a future overlap.
+			if (!swept_contact && r_scratch.position_projection_ready) {
+				const uint32_t indices[4] = { i, id0, id1, id2 };
+				const float gradients[4] = { 1.0f, -u, -v, -w };
+				accumulate_soft_self_position_projection(r_scratch, vertices, indices, gradients,
+						normal, radius - distance, p_step);
+			}
+			const float recovery_speed = swept_contact ? 0.0f :
+					MIN((radius - distance) * bias_per_step, MAX_SOFT_SOFT_PENETRATION_BIAS);
+			const float max_correction = swept_contact ? JoltProjectSettings::soft_body_soft_ccd_max_correction_speed :
+					MAX_SOFT_SOFT_CONTACT_SPEED_CORRECTION;
+			const float correction = MIN(MAX(recovery_speed - normal_speed, 0.0f), max_correction);
+			if (correction <= 0.0f) {
+				continue;
+			}
+			const float normal_impulse = correction / inverse_mass_sum;
+			if (!Math::is_finite(normal_impulse) || normal_impulse <= 0.0f) {
+				continue;
+			}
+			JPH::Vec3 impulse = normal * normal_impulse;
+			const JPH::Vec3 tangential = relative_velocity - normal * normal_speed;
+			const float tangent_speed_sq = tangential.LengthSq();
+			if (friction > 0.0f && Math::is_finite(tangent_speed_sq) && tangent_speed_sq > 1.0e-12f) {
+				const float tangent_speed = Math::sqrt(tangent_speed_sq);
+				const float tangential_impulse = MIN(tangent_speed / inverse_mass_sum, friction * normal_impulse);
+				impulse -= tangential * (tangential_impulse / tangent_speed);
+			}
+			point.mVelocity += impulse * point.mInvMass;
+			a.mVelocity -= impulse * (u * a.mInvMass);
+			b.mVelocity -= impulse * (v * b.mInvMass);
+			c.mVelocity -= impulse * (w * c.mInvMass);
+		}
+	}
+}
+
+// Skip coincident and one-ring-connected edges. Both segment endpoints
+// belong to the same deforming soft-body mesh, so adjacent edges must not
+// push against the springs which constrain their shared cloth surface.
+static bool soft_self_edges_are_neighbors(uint64_t p_a, uint64_t p_b, const JPH::Array<uint64_t> &p_topology) {
+	const uint32_t a0 = uint32_t(p_a >> 32), a1 = uint32_t(p_a);
+	const uint32_t b0 = uint32_t(p_b >> 32), b1 = uint32_t(p_b);
+	if (a0 == b0 || a0 == b1 || a1 == b0 || a1 == b1) {
+		return true;
+	}
+	const uint32_t endpoints_a[2] = { a0, a1 };
+	const uint32_t endpoints_b[2] = { b0, b1 };
+	for (const uint32_t a : endpoints_a) {
+		for (const uint32_t b : endpoints_b) {
+			if (std::binary_search(p_topology.begin(), p_topology.end(), soft_self_topology_edge_key(a, b))) {
+				return true;
+			}
+		}
+	}
+	return false;
+}
+
+// Self-edge BVH reuses the established median-split face BVH node/entry
+// storage: entry.face_index is the *original self-edge key index* here.
+// The tree is rebuilt from current local-space segment AABBs, because a
+// soft-body's vertices deform at every step. This is a broadphase only:
+// exact segment distances and topology exclusions remain unchanged.
+constexpr uint32_t MIN_SOFT_SELF_EDGE_BVH_EDGES = 32;
+constexpr uint32_t MAX_SOFT_SELF_EDGE_BVH_EDGES = 3072;
+
+static bool prepare_soft_self_edge_bvh(const JPH::Array<uint64_t> &p_edges,
+		const JPH::Array<JPH::SoftBodyVertex> &p_vertices, SoftFaceBVHScratch &r_bvh, uint32_t &r_budget) {
+	r_bvh.clear();
+	const uint32_t edge_count = uint32_t(p_edges.size());
+	if (edge_count < MIN_SOFT_SELF_EDGE_BVH_EDGES || edge_count > MAX_SOFT_SELF_EDGE_BVH_EDGES) {
+		return false;
+	}
+	// Median partition scans every level and the bounds pass scans each
+	// segment. Charge a conservative O(E log E) work cost in advance.
+	uint32_t levels = 0;
+	for (uint32_t count = edge_count; count > 1; count = (count + 1) / 2) {
+		++levels;
+	}
+	const uint32_t build_cost = edge_count * (levels + 2);
+	if (r_budget <= build_cost) {
+		return false; // Preserve at least one work unit for contact queries.
+	}
+	r_budget -= build_cost;
+	r_bvh.entries.reserve(edge_count);
+	for (uint32_t i = 0; i < edge_count; ++i) {
+		const uint64_t edge = p_edges[i];
+		const uint32_t a = uint32_t(edge >> 32), b = uint32_t(edge);
+		if (a >= p_vertices.size() || b >= p_vertices.size() || a == b) {
+			continue;
+		}
+		const JPH::Vec3 p0 = p_vertices[a].mPosition;
+		const JPH::Vec3 p1 = p_vertices[b].mPosition;
+		const JPH::Vec3 min_bound = JPH::Vec3::sMin(p0, p1);
+		const JPH::Vec3 max_bound = JPH::Vec3::sMax(p0, p1);
+		if (!Math::is_finite(min_bound.GetX()) || !Math::is_finite(min_bound.GetY()) || !Math::is_finite(min_bound.GetZ()) ||
+				!Math::is_finite(max_bound.GetX()) || !Math::is_finite(max_bound.GetY()) || !Math::is_finite(max_bound.GetZ())) {
+			continue;
+		}
+		SoftFaceBVHEntry entry;
+		entry.min = min_bound;
+		entry.max = max_bound;
+		entry.face_index = i;
+		r_bvh.entries.push_back(entry);
+	}
+	if (r_bvh.entries.empty()) {
+		return false;
+	}
+	r_bvh.nodes.reserve(2 * r_bvh.entries.size());
+	build_soft_face_bvh(r_bvh.entries, r_bvh.nodes, 0, uint32_t(r_bvh.entries.size()));
+	r_bvh.candidates.reserve(r_bvh.entries.size());
+	r_bvh.stack.reserve(32); // Median split: depth <= 12 for 3072 edges.
+	return true;
+}
+
+// Refit in O(E + N) without modifying the median partitions or leaf
+// indices. Children always follow their parent in build_soft_face_bvh(),
+// so walking nodes backwards guarantees children have fresh bounds first.
+// This refits *exact* AABBs: no speculative motion margin is cached.
+static bool refit_soft_self_edge_bvh(const JPH::Array<uint64_t> &p_edges,
+		const JPH::Array<JPH::SoftBodyVertex> &p_vertices,
+		SoftFaceBVHScratch &r_bvh, uint32_t &r_budget) {
+	const uint32_t entry_count = uint32_t(r_bvh.entries.size());
+	const uint32_t node_count = uint32_t(r_bvh.nodes.size());
+	if (entry_count == 0 || node_count == 0) {
+		return false;
+	}
+	// Each segment is read, its leaf is combined, and each internal node
+	// gets one union. Reserve enough work up front, or use linear fallback.
+	const uint32_t refit_cost = 2 * entry_count + node_count;
+	if (r_budget <= refit_cost) {
+		return false;
+	}
+	r_budget -= refit_cost;
+	for (SoftFaceBVHEntry &entry : r_bvh.entries) {
+		if (entry.face_index >= p_edges.size()) {
+			return false;
+		}
+		const uint64_t key = p_edges[entry.face_index];
+		const uint32_t a = uint32_t(key >> 32), b = uint32_t(key);
+		if (a == b || a >= p_vertices.size() || b >= p_vertices.size()) {
+			return false;
+		}
+		const JPH::Vec3 p0 = p_vertices[a].mPosition;
+		const JPH::Vec3 p1 = p_vertices[b].mPosition;
+		entry.min = JPH::Vec3::sMin(p0, p1);
+		entry.max = JPH::Vec3::sMax(p0, p1);
+		if (!Math::is_finite(entry.min.GetX()) || !Math::is_finite(entry.min.GetY()) || !Math::is_finite(entry.min.GetZ()) ||
+				!Math::is_finite(entry.max.GetX()) || !Math::is_finite(entry.max.GetY()) || !Math::is_finite(entry.max.GetZ())) {
+			return false;
+		}
+	}
+	for (uint32_t i = node_count; i > 0; --i) {
+		SoftFaceBVHNode &node = r_bvh.nodes[i - 1];
+		if (node.end <= node.begin || node.end > entry_count) {
+			return false;
+		}
+		if (node.end - node.begin <= SOFT_FACE_BVH_LEAF_SIZE) {
+			node.min = r_bvh.entries[node.begin].min;
+			node.max = r_bvh.entries[node.begin].max;
+			for (uint32_t j = node.begin + 1; j < node.end; ++j) {
+				node.min = JPH::Vec3::sMin(node.min, r_bvh.entries[j].min);
+				node.max = JPH::Vec3::sMax(node.max, r_bvh.entries[j].max);
+			}
+		} else {
+			if (node.left <= i - 1 || node.right <= i - 1 ||
+					node.left >= node_count || node.right >= node_count) {
+				return false;
+			}
+			node.min = JPH::Vec3::sMin(r_bvh.nodes[node.left].min, r_bvh.nodes[node.right].min);
+			node.max = JPH::Vec3::sMax(r_bvh.nodes[node.left].max, r_bvh.nodes[node.right].max);
+		}
+	}
+	return true;
+}
+
+static bool soft_self_edge_bounds_overlap(JPH::Vec3Arg p_min_a, JPH::Vec3Arg p_max_a,
+		JPH::Vec3Arg p_min_b, JPH::Vec3Arg p_max_b, float p_radius) {
+	return p_max_a.GetX() + p_radius >= p_min_b.GetX() && p_max_b.GetX() + p_radius >= p_min_a.GetX() &&
+			p_max_a.GetY() + p_radius >= p_min_b.GetY() && p_max_b.GetY() + p_radius >= p_min_a.GetY() &&
+			p_max_a.GetZ() + p_radius >= p_min_b.GetZ() && p_max_b.GetZ() + p_radius >= p_min_a.GetZ();
+}
+
+static void query_soft_self_edge_bvh(JPH::Vec3Arg p_min, JPH::Vec3Arg p_max, float p_radius,
+		SoftFaceBVHScratch &r_bvh, uint32_t &r_budget) {
+	r_bvh.candidates.clear();
+	r_bvh.stack.clear();
+	r_bvh.stack.push_back(0);
+	while (!r_bvh.stack.empty() && r_budget > 0) {
+		const uint32_t node_index = r_bvh.stack.back();
+		r_bvh.stack.pop_back();
+		--r_budget; // Every visited node consumes the global EE work quota.
+		const SoftFaceBVHNode &node = r_bvh.nodes[node_index];
+		if (!soft_self_edge_bounds_overlap(p_min, p_max, node.min, node.max, p_radius)) {
+			continue;
+		}
+		if (node.end - node.begin <= SOFT_FACE_BVH_LEAF_SIZE) {
+			for (uint32_t i = node.begin; i < node.end; ++i) {
+				const SoftFaceBVHEntry &entry = r_bvh.entries[i];
+				if (soft_self_edge_bounds_overlap(p_min, p_max, entry.min, entry.max, p_radius)) {
+					r_bvh.candidates.push_back(entry.face_index);
+				}
+			}
+		} else {
+			r_bvh.stack.push_back(node.right);
+			r_bvh.stack.push_back(node.left);
+		}
+	}
+}
+
+// Supplement vertex-face self contacts with segment-segment impulses.
+// A single body does not have a pair of COM transforms, so all positions,
+// velocities, and impulse corrections stay in its local coordinate frame.
+static void resolve_soft_body_self_edge_contacts(JPH::Body &p_body, const JoltSoftBody3D &p_object,
+		float p_step, uint32_t &r_budget, SoftSelfContactScratch &r_scratch) {
+	JPH::SoftBodyMotionProperties &props = static_cast<JPH::SoftBodyMotionProperties &>(*p_body.GetMotionPropertiesUnchecked());
+	JPH::Array<JPH::SoftBodyVertex> &vertices = props.GetVertices();
+	const JPH::Array<JPH::SoftBodySharedSettings::Face> &faces = props.GetFaces();
+	if (faces.empty() || faces.size() > MAX_SOFT_SELF_CONTACT_FACES || r_budget == 0 || p_object.get_surface_particle_count() == 0) {
+		return;
+	}
+
+	// Persistent mode reuses immutable mesh topology across physics frames;
+	// the default linear/BVH modes still share the list within this step.
+	if (!ensure_soft_self_topology(faces, uint32_t(vertices.size()), r_scratch, r_budget,
+			JoltProjectSettings::soft_body_self_persistent_bvh)) {
+		return;
+	}
+	const JPH::Array<uint64_t> &edges = r_scratch.one_ring_edges;
+	const uint32_t edge_count = uint32_t(edges.size());
+	if (edge_count < 2) {
+		return;
+	}
+
+	const float radius = JoltProjectSettings::soft_body_soft_contact_radius;
+	const float radius_sq = radius * radius;
+	const float recovery = JoltProjectSettings::soft_body_soft_contact_recovery / p_step;
+	const float friction = JoltProjectSettings::soft_body_soft_contact_friction;
+	// A pair's closest distance cannot close faster than the maximum
+	// relative endpoint speed. Every predicted contact is rejected if
+	// that speed times dt exceeds max_sweep. Therefore a current-state
+	// BVH expanded by max_sweep is a conservative swept broadphase for
+	// every pair that the bounded predictor is allowed to accept.
+	// Keeping the tree in CURRENT space also works with persistent refits.
+	const bool swept_self_edge_ccd = JoltProjectSettings::soft_body_self_speculative_edge_ccd &&
+			JoltProjectSettings::soft_body_soft_ccd_max_sweep > 0.0f;
+	const float candidate_radius = radius +
+			(swept_self_edge_ccd ? JoltProjectSettings::soft_body_soft_ccd_max_sweep : 0.0f);
+	bool use_edge_bvh = false;
+	if (JoltProjectSettings::soft_body_self_edge_bvh) {
+		const bool persistent = JoltProjectSettings::soft_body_self_persistent_bvh;
+		// Refit stable leaf-to-edge mappings, but rebuild periodically to
+		// restore BVH quality after extensive folding/unfolding.
+		if (persistent && r_scratch.edge_bvh_ready &&
+				r_scratch.edge_bvh_edge_count == edge_count && r_scratch.edge_bvh_refits < 120) {
+			use_edge_bvh = refit_soft_self_edge_bvh(edges, vertices, r_scratch.edge_bvh, r_budget);
+			if (use_edge_bvh) {
+				++r_scratch.edge_bvh_refits;
+			}
+		}
+		if (!use_edge_bvh) {
+			use_edge_bvh = prepare_soft_self_edge_bvh(edges, vertices, r_scratch.edge_bvh, r_budget);
+			if (use_edge_bvh) {
+				r_scratch.edge_bvh_refits = 0;
+			}
+		}
+		if (persistent) {
+			r_scratch.edge_bvh_ready = use_edge_bvh;
+			r_scratch.edge_bvh_edge_count = use_edge_bvh ? edge_count : 0;
+		}
+	}
+
+	// Query each unordered pair once: avoids doubling impulses on the
+	// very same self-contact. Topological exclusion also skips edges
+	// connected through a one-ring vertex even if they share no endpoint.
+	for (uint32_t i = 0; i + 1 < edge_count && r_budget > 0; ++i) {
+		const uint64_t key_a = edges[i];
+		JPH::SoftBodyVertex &a0 = vertices[uint32_t(key_a >> 32)];
+		JPH::SoftBodyVertex &a1 = vertices[uint32_t(key_a)];
+		const JPH::Vec3 p0 = a0.mPosition;
+		const JPH::Vec3 p1 = a1.mPosition;
+		const JPH::Vec3 p_min = JPH::Vec3::sMin(p0, p1);
+		const JPH::Vec3 p_max = JPH::Vec3::sMax(p0, p1);
+		if (use_edge_bvh) {
+			query_soft_self_edge_bvh(p_min, p_max, candidate_radius, r_scratch.edge_bvh, r_budget);
+		}
+		const uint32_t candidate_count = use_edge_bvh ? uint32_t(r_scratch.edge_bvh.candidates.size()) : edge_count;
+		for (uint32_t candidate = 0; candidate < candidate_count && r_budget > 0; ++candidate) {
+			// The tree permutes entries, but preserves each original
+			// edge index. Retain j > i to evaluate unordered pairs once.
+			const uint32_t j = use_edge_bvh ? r_scratch.edge_bvh.candidates[candidate] : candidate;
+			if (j <= i) {
+				continue;
+			}
+			--r_budget; // Every tested candidate, including topology rejects.
+			const uint64_t key_b = edges[j];
+			if (soft_self_edges_are_neighbors(key_a, key_b, edges)) {
+				continue;
+			}
+			JPH::SoftBodyVertex &b0 = vertices[uint32_t(key_b >> 32)];
+			JPH::SoftBodyVertex &b1 = vertices[uint32_t(key_b)];
+			const JPH::Vec3 q0 = b0.mPosition;
+			const JPH::Vec3 q1 = b1.mPosition;
+			const JPH::Vec3 q_min = JPH::Vec3::sMin(q0, q1);
+			const JPH::Vec3 q_max = JPH::Vec3::sMax(q0, q1);
+			if (!soft_self_edge_bounds_overlap(p_min, p_max, q_min, q_max, candidate_radius)) {
+				continue;
+			}
+
+			float s = 0.0f, t = 0.0f;
+			JPH::Vec3 near_a = JPH::Vec3::sZero(), near_b = JPH::Vec3::sZero();
+			if (!closest_soft_edge_edge(p0, p1, q0, q1, s, t, near_a, near_b)) {
+				continue;
+			}
+			const JPH::Vec3 diff = near_b - near_a;
+			const float distance_sq = diff.LengthSq();
+			if (!Math::is_finite(distance_sq)) {
+				continue;
+			}
+			bool swept_contact = false;
+			JPH::Vec3 swept_normal = JPH::Vec3::sZero();
+			if (distance_sq >= radius_sq) {
+				// The shared conservative-advancement predictor is also used
+				// for inter-body EE. Its segment geometry, velocity and work
+				// budgets are valid in this body's local coordinates.
+				if (!swept_self_edge_ccd || !predict_soft_edge_edge_sweep(p0, p1, q0, q1,
+						 a0.mVelocity, a1.mVelocity, b0.mVelocity, b1.mVelocity,
+						 p_step, radius, JoltProjectSettings::soft_body_soft_ccd_max_sweep,
+						 r_budget, s, t, swept_normal)) {
+					continue;
+				}
+				swept_contact = true;
+			}
+
+			const float wa0 = 1.0f - s, wa1 = s, wb0 = 1.0f - t, wb1 = t;
+			const float inverse_mass_sum = wa0 * wa0 * a0.mInvMass + wa1 * wa1 * a1.mInvMass +
+					wb0 * wb0 * b0.mInvMass + wb1 * wb1 * b1.mInvMass;
+			if (!Math::is_finite(inverse_mass_sum) || inverse_mass_sum <= 0.0f) {
+				continue;
+			}
+			const JPH::Vec3 relative_velocity = wb0 * b0.mVelocity + wb1 * b1.mVelocity -
+					wa0 * a0.mVelocity - wa1 * a1.mVelocity;
+			const float distance = swept_contact ? radius : Math::sqrt(MAX(distance_sq, 0.0f));
+			JPH::Vec3 normal = swept_normal;
+			if (swept_contact) {
+				// Use the impact-time normal returned by the predictor.
+			} else if (distance > 1.0e-6f) {
+				normal = diff / distance;
+			} else {
+				const JPH::Vec3 cross_normal = (p1 - p0).Cross(q1 - q0);
+				const float cross_sq = cross_normal.LengthSq();
+				if (!Math::is_finite(cross_sq) || cross_sq <= SOFT_EDGE_EPSILON) {
+					// Collinear coincidence has no stable separating normal.
+					// Its endpoints/face contacts are handled elsewhere.
+					continue;
+				}
+				normal = cross_normal / Math::sqrt(cross_sq);
+				// Exact crossings have an ambiguous orientation; choose the
+				// sign opposing current approach when moving.
+				if (normal.Dot(relative_velocity) > 0.0f) {
+					normal = -normal;
+				}
+			}
+
+			const float normal_speed = relative_velocity.Dot(normal);
+			if (!Math::is_finite(normal_speed)) {
+				continue;
+			}
+			// Never project *future* contacts into current penetration;
+			// the Jacobi projection only corrects actual overlaps.
+			if (!swept_contact && r_scratch.position_projection_ready) {
+				const uint32_t indices[4] = { uint32_t(key_a >> 32), uint32_t(key_a),
+					uint32_t(key_b >> 32), uint32_t(key_b) };
+				const float gradients[4] = { -wa0, -wa1, wb0, wb1 };
+				accumulate_soft_self_position_projection(r_scratch, vertices, indices, gradients,
+						normal, radius - distance, p_step);
+			}
+			const float recovery_speed = swept_contact ? 0.0f :
+					MIN((radius - distance) * recovery, MAX_SOFT_SOFT_PENETRATION_BIAS);
+			const float max_correction = swept_contact ? JoltProjectSettings::soft_body_soft_ccd_max_correction_speed :
+					MAX_SOFT_SOFT_CONTACT_SPEED_CORRECTION;
+			const float correction = MIN(MAX(recovery_speed - normal_speed, 0.0f), max_correction);
+			if (correction <= 0.0f) {
+				continue;
+			}
+			const float normal_impulse = correction / inverse_mass_sum;
+			if (!Math::is_finite(normal_impulse) || normal_impulse <= 0.0f) {
+				continue;
+			}
+			JPH::Vec3 impulse = normal * normal_impulse;
+			const JPH::Vec3 tangent = relative_velocity - normal * normal_speed;
+			const float tangent_speed_sq = tangent.LengthSq();
+			if (friction > 0.0f && Math::is_finite(tangent_speed_sq) && tangent_speed_sq > SOFT_EDGE_EPSILON) {
+				const float tangent_speed = Math::sqrt(tangent_speed_sq);
+				const float tangent_impulse = MIN(tangent_speed / inverse_mass_sum, friction * normal_impulse);
+				impulse -= tangent * (tangent_impulse / tangent_speed);
+			}
+			a0.mVelocity -= impulse * (wa0 * a0.mInvMass);
+			a1.mVelocity -= impulse * (wa1 * a1.mInvMass);
+			b0.mVelocity += impulse * (wb0 * b0.mInvMass);
+			b1.mVelocity += impulse * (wb1 * b1.mInvMass);
 		}
 	}
 }
@@ -790,6 +1922,15 @@ static void ensure_pending_index(const LocalVector<JPH::BodyID> &p_bodies, AHash
 }
 
 } // namespace
+
+// A cache belongs to one Jolt physics space, not to global project state.
+// BodyID includes the generation sequence; destroyed/rebuilt bodies are
+// explicitly evicted in remove_object(). Cap retained meshes to avoid a
+// silently unbounded allocation for streaming or procedural scenes.
+struct JoltSelfCollisionCache {
+	static constexpr uint32_t MAX_RETAINED_BODIES = 64;
+	std::unordered_map<uint32_t, SoftSelfContactScratch> bodies;
+};
 
 void JoltSpace3D::_pending_add(LocalVector<JPH::BodyID> &p_bodies, AHashMap<uint32_t, uint32_t> &r_indices, const JPH::BodyID &p_id) {
 	if (!r_indices.is_empty()) {
@@ -867,6 +2008,79 @@ void JoltSpace3D::_pre_step(float p_step) {
 		object->pre_step(p_step);
 	}
 
+	// Reclaim all cached geometry as soon as this opt-in mode is disabled.
+	// Cache is populated lazily, and never shared across physics spaces.
+	const bool persistent_edges = JoltProjectSettings::soft_body_self_contacts &&
+			JoltProjectSettings::soft_body_self_edge_contacts &&
+			JoltProjectSettings::soft_body_self_edge_bvh &&
+			JoltProjectSettings::soft_body_self_persistent_bvh;
+	// Allow persistent face BVH even when the edge solver is disabled.
+	// Both modes share the existing generation-aware 64-body cache cap.
+	const bool persistent_self = persistent_edges ||
+			(JoltProjectSettings::soft_body_self_contacts &&
+					JoltProjectSettings::soft_body_self_face_bvh_refit);
+	if (!persistent_self && self_collision_cache != nullptr) {
+		delete self_collision_cache;
+		self_collision_cache = nullptr;
+	}
+
+	// Optional cloth/soft-body self collision: one-ring topology exclusion
+	// prevents neighboring triangles from repelling their own mesh edges.
+	// This budget is separate from inter-body soft contacts and applies
+	// across all active soft bodies in this physics space per step.
+	if (JoltProjectSettings::soft_body_self_contacts && active_soft_body_count > 0 &&
+			JoltProjectSettings::soft_body_soft_contact_radius > 0.0f && Math::is_finite(p_step) && p_step > 0.0f) {
+		uint32_t self_budget = (uint32_t)JoltProjectSettings::soft_body_self_contact_max_checks;
+		const bool self_edges = JoltProjectSettings::soft_body_self_edge_contacts;
+		// Keep the existing global self-contact cap unchanged: if the edge
+		// pass is enabled, reserve half for VF and half for EE, so a dense
+		// VF pass cannot starve edge crossings within the same cloth.
+		uint32_t self_edge_budget = self_edges ? self_budget / 2 : 0;
+		self_budget -= self_edge_budget;
+		SoftSelfContactScratch self_scratch;
+		if (persistent_self && self_collision_cache == nullptr) {
+			self_collision_cache = new JoltSelfCollisionCache;
+		}
+		for (JPH::uint32 i = 0; i < active_soft_body_count && (self_budget > 0 || self_edge_budget > 0); ++i) {
+			JPH::Body *jolt_body = lock_iface.TryGetBody(active_soft_bodies[i]);
+			if (jolt_body == nullptr) {
+				continue;
+			}
+			const JoltSoftBody3D *object = reinterpret_cast<JoltObject3D *>(jolt_body->GetUserData())->as_soft_body();
+			SoftSelfContactScratch *scratch = &self_scratch;
+			if (persistent_self) {
+				const uint32_t id = active_soft_bodies[i].GetIndexAndSequenceNumber();
+				auto existing = self_collision_cache->bodies.find(id);
+				if (existing != self_collision_cache->bodies.end()) {
+					scratch = &existing->second;
+				} else if (self_collision_cache->bodies.size() < JoltSelfCollisionCache::MAX_RETAINED_BODIES) {
+					scratch = &self_collision_cache->bodies[id];
+				}
+			}
+			if (scratch == &self_scratch) {
+				// Default and cache-overflow paths preserve old per-step
+				// sharing, never reuse a different body's adjacency.
+				scratch->one_ring_edges.clear();
+			}
+			// Charge clearing and applying the Jacobi buffer against the
+			// existing per-space VF budget. Both self VF and EE accumulate
+			// into the same stable-position snapshot, so all BVH queries
+			// use unchanged vertex positions during the contact loops.
+			scratch->position_projection_ready = false;
+			if (JoltProjectSettings::soft_body_self_position_projection && self_budget > 0) {
+				JPH::SoftBodyMotionProperties &props = static_cast<JPH::SoftBodyMotionProperties &>(*jolt_body->GetMotionPropertiesUnchecked());
+				prepare_soft_self_position_projection(props.GetVertices(), self_budget, *scratch);
+			}
+			if (self_budget > 0) {
+				resolve_soft_body_self_contacts(*jolt_body, *object, p_step, self_budget, *scratch);
+			}
+			if (self_edges && self_edge_budget > 0) {
+				resolve_soft_body_self_edge_contacts(*jolt_body, *object, p_step, self_edge_budget, *scratch);
+			}
+			apply_soft_self_position_projection(*jolt_body, *scratch);
+		}
+	}
+
 	// Jolt's native soft-body collision path only handles rigid bodies. The
 	// CPU approximation runs before Jolt's parallel physics Update(), which
 	// makes mutable particle velocities safe to access here.
@@ -884,6 +2098,13 @@ void JoltSpace3D::_pre_step(float p_step) {
 		SoftFaceBVHScratch bvh_scratch; // No allocations when disabled.
 		SoftEdgeContactScratch edge_scratch; // Reused for every tested body pair.
 		const float radius = JoltProjectSettings::soft_body_soft_contact_radius;
+		// Expand broadphase only for the opt-in swept VF approximation:
+		// otherwise separated bodies never reach its narrowphase.
+		const float broadphase_margin = radius +
+				((JoltProjectSettings::soft_body_soft_vertex_face_contacts &&
+				  JoltProjectSettings::soft_body_soft_speculative_ccd) ||
+				 (edge_contacts && JoltProjectSettings::soft_body_soft_speculative_edge_ccd) ?
+				 JoltProjectSettings::soft_body_soft_ccd_max_sweep : 0.0f);
 
 		for (JPH::uint32 i = 0; i < active_soft_body_count && (particle_budget > 0 || edge_budget > 0) && checked_body_pairs < MAX_SOFT_SOFT_BODY_PAIR_CHECKS; ++i) {
 			JPH::Body *jolt_a = lock_iface.TryGetBody(active_soft_bodies[i]);
@@ -891,7 +2112,7 @@ void JoltSpace3D::_pre_step(float p_step) {
 				continue;
 			}
 			JoltSoftBody3D *object_a = reinterpret_cast<JoltObject3D *>(jolt_a->GetUserData())->as_soft_body();
-			const AABB bounds_a = object_a->get_bounds().grow(radius);
+			const AABB bounds_a = object_a->get_bounds().grow(broadphase_margin);
 			for (JPH::uint32 j = i + 1; j < active_soft_body_count && (particle_budget > 0 || edge_budget > 0) && checked_body_pairs < MAX_SOFT_SOFT_BODY_PAIR_CHECKS; ++j) {
 				++checked_body_pairs;
 				JPH::Body *jolt_b = lock_iface.TryGetBody(active_soft_bodies[j]);
@@ -899,7 +2120,7 @@ void JoltSpace3D::_pre_step(float p_step) {
 					continue;
 				}
 				JoltSoftBody3D *object_b = reinterpret_cast<JoltObject3D *>(jolt_b->GetUserData())->as_soft_body();
-				if (!object_a->can_interact_with(*object_b) || !bounds_a.intersects(object_b->get_bounds().grow(radius))) {
+				if (!object_a->can_interact_with(*object_b) || !bounds_a.intersects(object_b->get_bounds().grow(broadphase_margin))) {
 					continue;
 				}
 				if (particle_budget > 0) {
@@ -1019,6 +2240,9 @@ JoltSpace3D::JoltSpace3D(JPH::JobSystem *p_job_system, JPH::TempAllocator *p_tem
 }
 
 JoltSpace3D::~JoltSpace3D() {
+	delete self_collision_cache;
+	self_collision_cache = nullptr;
+
 	if (direct_state != nullptr) {
 		memdelete(direct_state);
 		direct_state = nullptr;
@@ -1300,6 +2524,10 @@ JPH::Body *JoltSpace3D::add_object(const JoltObject3D &p_object, const JPH::Soft
 }
 
 void JoltSpace3D::remove_object(const JPH::BodyID &p_jolt_id) {
+	// Invalidate the cached leaf-index map before body destruction/reuse.
+	if (self_collision_cache != nullptr) {
+		self_collision_cache->bodies.erase(p_jolt_id.GetIndexAndSequenceNumber());
+	}
 	JPH::BodyInterface &body_iface = get_body_iface();
 
 	// A body queued by CreateBody/CreateSoftBody has not been inserted in

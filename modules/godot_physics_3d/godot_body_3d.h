@@ -113,6 +113,9 @@ class GodotBody3D : public GodotCollisionObject3D {
 	void _mass_properties_changed();
 	virtual void _shapes_changed() override;
 	Transform3D new_transform;
+	// Kinematic sub-stepping: transform at the start of the tick, and the target of the current substep.
+	Transform3D kinematic_start;
+	Transform3D kinematic_target;
 
 	// Swept shape motion computed by a parallel `integrate_forces`, applied to
 	// the broadphase afterwards on the stepping thread.
@@ -158,6 +161,14 @@ class GodotBody3D : public GodotCollisionObject3D {
 	// Contacts touching this body are solved `solver_priority` times as many iterations (Unity
 	// Rigidbody.solverIterations analogue). 1 is the normal cost.
 	int solver_priority = 1;
+	// Per-body limits; 0 falls back to the project-wide value (Unity maxLinearVelocity,
+	// maxAngularVelocity and maxDepenetrationVelocity).
+	real_t max_linear_velocity = 0.0;
+	real_t max_angular_velocity = 0.0;
+	real_t max_depenetration_velocity = 0.0;
+	// Wind: 0 drag coefficient means the body ignores wind. A zero area is estimated from the shapes.
+	real_t wind_drag_coefficient = 0.0;
+	real_t wind_area = 0.0;
 
 	void _update_transform_dependent();
 
@@ -208,6 +219,20 @@ public:
 
 	_FORCE_INLINE_ uint64_t get_island_step() const { return island_step; }
 	_FORCE_INLINE_ int get_solver_priority() const { return solver_priority; }
+	_FORCE_INLINE_ void set_max_linear_velocity(real_t p_value) { max_linear_velocity = MAX(p_value, real_t(0.0)); }
+	_FORCE_INLINE_ real_t get_max_linear_velocity() const { return max_linear_velocity; }
+	_FORCE_INLINE_ void set_max_angular_velocity(real_t p_value) { max_angular_velocity = MAX(p_value, real_t(0.0)); }
+	_FORCE_INLINE_ real_t get_max_angular_velocity() const { return max_angular_velocity; }
+	_FORCE_INLINE_ void set_max_depenetration_velocity(real_t p_value) { max_depenetration_velocity = MAX(p_value, real_t(0.0)); }
+	_FORCE_INLINE_ real_t get_max_depenetration_velocity() const { return max_depenetration_velocity; }
+	_FORCE_INLINE_ void set_wind_drag_coefficient(real_t p_value) { wind_drag_coefficient = MAX(p_value, real_t(0.0)); }
+	_FORCE_INLINE_ real_t get_wind_drag_coefficient() const { return wind_drag_coefficient; }
+	_FORCE_INLINE_ void set_wind_area(real_t p_value) { wind_area = MAX(p_value, real_t(0.0)); }
+	_FORCE_INLINE_ real_t get_wind_area() const { return wind_area; }
+	Vector3 compute_wind_force() const;
+	// Effective limits: the body value when set, otherwise the space default.
+	_FORCE_INLINE_ real_t get_effective_max_linear_velocity(real_t p_space_default) const { return max_linear_velocity > 0.0 ? max_linear_velocity : p_space_default; }
+	_FORCE_INLINE_ real_t get_effective_max_angular_velocity(real_t p_space_default) const { return max_angular_velocity > 0.0 ? max_angular_velocity : p_space_default; }
 	_FORCE_INLINE_ void set_solver_priority(int p_priority) { solver_priority = CLAMP(p_priority, 1, 8); }
 	_FORCE_INLINE_ void set_island_step(uint64_t p_step) { island_step = p_step; }
 

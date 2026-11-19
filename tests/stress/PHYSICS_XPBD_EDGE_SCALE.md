@@ -38,6 +38,27 @@ endpoints being valid finite coordinates.
 A separate PR on edge/edge friction uses the same common narrowphase, so
 it inherits this numerical improvement without adding another query pass.
 
+## Wide normal XPBD constraint after narrowphase
+
+The initial wide-precision edge discovery is **not enough** if the constraint
+solver reconstructs the two closest world-space points in float32 before
+projecting their separation onto the contact normal. For very large positions
+a sub-unit true gap can be rounded into tens of thousands of units, creating
+a wildly incorrect normal lambda.
+
+The XPBD normal solver now computes the interpolated points and signed normal
+separation directly in double, using the already validated closest-edge
+parameters `s` and `t`. The rest of the accumulated XPBD lambda, pinning,
+mass weighting and two-phase finite position update is unchanged.
+
+One new regression uses float32-exact endpoints around 1e12 world units:
+normal separation is about zero in wide arithmetic, while old rounded
+interpolation produced roughly -56,676 units of fake penetration. It checks
+that the correction lambda remains bounded instead of injecting an enormous
+impulse. World-space moves smaller than the float32 unit in the last place
+may still fail to affect a stored particle position; double-precision
+builds/origin shifting remain necessary for such scenes.
+
 ## Regression
 
 ```bash
@@ -45,9 +66,9 @@ python3 -m unittest discover -s tests/stress -p test_physics_xpbd_edge_scale.py 
 ./bin/godot.linuxbsd.editor.dev.x86_64 --headless --test --test-case="[PhysicsEdgeScale]"
 ```
 
-Seven C++ cases cover ordinary, 1e20-scale, and 1e-8-scale edges, true
+Eight C++ cases cover ordinary, 1e20-scale, and 1e-8-scale edges, true
 intersection normal, exact pins and contact projection, parallel/endpoint
-no-contact, atomic failure and translation invariance. Six Python
+no-contact, atomic failure and translation invariance. Seven Python
 source and numerical cases include 10,000 seeded interior pairs with edge
 sizes from 1e-19 to 1e23.
 

@@ -1,0 +1,30 @@
+name: PC Export Template Precedence Tests
+
+on:
+  pull_request:
+    paths:
+      - "editor/export/editor_export_platform_pc.*"
+      - "tests/editor/test_export_template_pc.cpp"
+      - ".github/workflows/pc-export-templates-tests.yml"
+  workflow_dispatch:
+
+jobs:
+  export-template-precedence:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 120
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+        with:
+          submodules: recursive
+
+      - name: Set up SCons and build dependencies
+        uses: ./.github/actions/godot-deps
+
+      - name: Compile Godot editor and native tests
+        run: |
+          scons platform=linuxbsd target=editor tests=yes module_text_server_fb_enabled=yes -j2
+
+      - name: Run export-template precedence tests
+        run: |
+          ./bin/godot.linuxbsd.editor.x86_64 --headless --test --test-case="*ExportTemplatePC*"
