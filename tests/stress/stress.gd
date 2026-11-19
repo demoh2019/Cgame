@@ -1505,7 +1505,7 @@ func _astar_grid_rebuild(scale: int) -> Dictionary:
 	var checksum := 0
 	var mem_before := int(Performance.get_monitor(Performance.MEMORY_STATIC))
 	for cycle in range(3):
-		var region_size := Vector2i(side, side / 2) if cycle % 2 == 0 else Vector2i(side / 2, side)
+		var region_size := Vector2i(side, side >> 1) if cycle % 2 == 0 else Vector2i(side >> 1, side)
 		var region := Rect2i(Vector2i(-17, -9), region_size)
 		var started := Time.get_ticks_usec()
 		grid.set_region(region)
@@ -1537,7 +1537,7 @@ func _astar_grid_rebuild(scale: int) -> Dictionary:
 	var mem_after_clear := int(Performance.get_monitor(Performance.MEMORY_STATIC))
 	return {
 		"cycles": 3,
-		"max_grid_cells": side * (side / 2),
+		"max_grid_cells": side * (side >> 1),
 		"build_ms": builds_ms,
 		"shrink_ms": shrinks_ms,
 		"static_memory_after_shrink_delta_bytes": mem_after_shrink - mem_before,
