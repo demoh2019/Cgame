@@ -1,0 +1,52 @@
+name: Albion After PvP risk and death loot
+on:
+  push:
+    branches: [develop]
+    paths:
+      - 'game/**'
+      - '.github/workflows/albion-after-zone-risk.yml'
+  pull_request:
+    paths:
+      - 'game/**'
+      - '.github/workflows/albion-after-zone-risk.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  zone-policy:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - name: Fetch verified Godot compatibility editor
+        shell: bash
+        run: |
+          set -euo pipefail
+          curl --retry 4 --retry-delay 3 -fL -o godot.zip https://github.com/godotengine/godot-builds/releases/download/4.7.2-stable/Godot_v4.7.2-stable_linux.x86_64.zip
+          echo 'cadd3204e728a35d3f13adb7fd0d7902636b79f6b95c40c265eb73b6c35329e4  godot.zip' | sha256sum -c -
+          unzip -q godot.zip
+          chmod +x Godot_v4.7.2-stable_linux.x86_64
+          mv Godot_v4.7.2-stable_linux.x86_64 godot
+      - name: Import project
+        shell: bash
+        run: |
+          set -euo pipefail
+          ./godot --headless --path game --editor --import --quit 2>&1 | tee game-import.log
+          if grep -Ei 'SCRIPT ERROR:|Parse Error:|Failed to load script' game-import.log; then exit 1; fi
+      - name: Run server and risk tests
+        shell: bash
+        run: |
+          set -euo pipefail
+          timeout 240s ./godot --headless --path game --script res://tests/run_all.gd 2>&1 | tee risk-tests.log
+          grep -Fq 'test_zone_risk.gd' risk-tests.log
+          grep -Eq 'TOTAL [0-9]+ checks, 0 failures' risk-tests.log
+          if grep -Ei 'SCRIPT ERROR:|Parse Error:|Failed to load script|FAIL ' risk-tests.log; then exit 1; fi
+      - name: Keep logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: risk-test-logs
+          if-no-files-found: ignore
+          path: |
+            game-import.log
+            risk-tests.log

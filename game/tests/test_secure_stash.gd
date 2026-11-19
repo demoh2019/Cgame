@@ -91,6 +91,7 @@ func run(t) -> void:
 	var protected_wood: int = player.stash.count("wood_1")
 	var protected_weapon: int = player.stash.count("club_1")
 	player.inventory.add("silver", 17)
+	player.position = Vector3(800.0, server.world.height_at(800.0, 0.0), 0.0)
 	player.survival.health = 0.0
 	server._on_player_death(player, -1)
 	t.eq(player.inventory.count("silver"), 0, "silver carried outside the bank is dropped")

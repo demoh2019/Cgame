@@ -3,6 +3,7 @@ extends CanvasLayer
 
 const Defs = preload("res://scripts/shared/defs.gd")
 const Crafting = preload("res://scripts/shared/crafting.gd")
+const ZoneRisk = preload("res://scripts/shared/zone_risk.gd")
 
 var client
 var _bars: Dictionary = {}
@@ -166,10 +167,11 @@ func _on_event(event: Dictionary) -> void:
 		"gathered":
 			say("+%d %s" % [event["amount"], Defs.item(event["item"]).get("name", event["item"])])
 		"zone":
-			say("Entering the %s zone" % Defs.ZONE_NAMES[clampi(event["zone"], 0, 3)])
+			var zone: int = clampi(int(event["zone"]), 0, 3)
+			say("Entering %s: %s" % [Defs.ZONE_NAMES[zone], ZoneRisk.description(zone)])
 		"death":
 			if event.get("peer", -1) == client.peer_id:
-				say("You died.")
+				say("You died: %s" % ("full loot" if bool(event.get("full_loot", true)) else "gear retained"))
 			else:
 				say("A survivor was killed.")
 		"hit":
@@ -203,7 +205,7 @@ func _process(_delta: float) -> void:
 	_bars["hunger"].value = client.you["hunger"]
 	_bars["thirst"].value = client.you["thirst"]
 	var zone: int = clampi(int(client.you.get("zone", 0)), 0, 3)
-	_zone_label.text = "%s zone  (tier %d)" % [Defs.ZONE_NAMES[zone].capitalize(), zone + 1]
+	_zone_label.text = "%s zone (T%d)\n%s" % [Defs.ZONE_NAMES[zone].capitalize(), zone + 1, ZoneRisk.description(zone)]
 	_zone_label.add_theme_color_override("font_color", [Color(0.4, 0.9, 0.4), Color(0.95, 0.85, 0.3), Color(0.95, 0.45, 0.3), Color(0.8, 0.3, 0.9)][zone])
 	_info_label.text = "FPS %d  kills %d  deaths %d  Load %.1f kg  Speed %.0f%%  Stamina %d" % [
 		Engine.get_frames_per_second(), client.you.get("kills", 0), client.you.get("deaths", 0),
@@ -219,6 +221,7 @@ func _process(_delta: float) -> void:
 		int(levels.get("ore", 1)), int(levels.get("fiber", 1))
 	]
 	_death.visible = not bool(client.you.get("alive", true))
+	_death.text = "YOU DIED\n%s" % ("All carried items dropped." if bool(client.you.get("last_death_full_loot", false)) else "Carried equipment retained.")
 	if _inventory_panel.visible:
 		_refresh_inventory()
 	if _craft_panel.visible:

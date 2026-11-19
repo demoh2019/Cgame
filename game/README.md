@@ -108,3 +108,19 @@ multiple servers sharing an account store. In-memory pending saves are lost
 on process crash, and periodic autosaves can lose progress after abrupt exit.
 Before enabling real-money markets or cross-server trading, implement durable
 transaction journals and optimistic storage versions at the backend.
+
+## World risk, PvP and full loot
+
+Green (T1) and yellow (T2) are **PvE-only** in this first iteration.
+Death to zombies or survival hazards in those zones retains carried gear,
+including equipped equipment. Respawning there does **not** duplicate starter
+items. Red (T3) and black (T4) enable PvP and full carried-inventory loot on
+death. Only a character *and* their target inside red/black can PvP, so
+border sniping into protected zones is blocked. The hub remains a safe area.
+Account-bound stash and permanent profession XP are protected everywhere.
+This yellow-zone behavior is intentionally simpler than Albion's nonlethal
+PvP; it can be extended once a downed/knockout system exists.
+
+The zone banner and death overlay clearly show the risk, with server-authoritative
+checks and regression tests in `game/tests/test_zone_risk.gd`. Run
+`godot --headless --path game --script res://tests/run_all.gd`.

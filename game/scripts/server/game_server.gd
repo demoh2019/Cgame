@@ -12,6 +12,7 @@ const Survival = preload("res://scripts/shared/survival.gd")
 const Movement = preload("res://scripts/shared/movement.gd")
 const Combat = preload("res://scripts/shared/combat.gd")
 const Zombie = preload("res://scripts/shared/zombie.gd")
+const ZoneRisk = preload("res://scripts/shared/zone_risk.gd")
 const Progression = preload("res://scripts/shared/progression.gd")
 
 const WORKBENCH_POSITION := Vector2(9.0, 0.0)
@@ -42,6 +43,8 @@ class Player:
 	var noise_timer: float = 0.0
 	var action: Dictionary = {} # Current gathering: {"node": id, "remaining": s, "total": s}
 	var respawn_timer: float = 0.0
+	var keep_inventory_on_respawn: bool = false
+	var last_death_full_loot: bool = false
 	var kills: int = 0
 	var deaths: int = 0
 	var zone_notice: int = -1
@@ -200,9 +203,12 @@ func _spawn_player(player: Player) -> void:
 	var spot := Vector2.from_angle(angle) * rng.randf_range(10.0, 22.0)
 	player.position = Vector3(spot.x, world.height_at(spot.x, spot.y), spot.y)
 	player.survival.reset()
-	player.inventory = Inventory.new()
-	for id in STARTER_KIT:
-		player.inventory.add(id, STARTER_KIT[id])
+	var kept_gear: bool = player.keep_inventory_on_respawn
+	player.keep_inventory_on_respawn = false
+	if not kept_gear:
+		player.inventory = Inventory.new()
+		for id in STARTER_KIT:
+			player.inventory.add(id, STARTER_KIT[id])
 	player.action = {}
 	player.noise_radius = 0.0
 	player.noise_timer = 0.0
@@ -506,7 +512,7 @@ func _make_bag(position: Vector3, items: Dictionary) -> int:
 func _find_hit(attacker: Player, origin: Vector2, direction: Vector2, reach: float, ranged: bool) -> Dictionary:
 	var best: Dictionary = {}
 	var best_distance := INF
-	var in_safe := _is_safe(attacker.position)
+	var attacker_zone: int = world.zone_at(attacker.position.x, attacker.position.z)
 	# Zombies.
 	for zombie in zombies.values():
 		if not zombie.is_alive():
@@ -515,10 +521,12 @@ func _find_hit(attacker: Player, origin: Vector2, direction: Vector2, reach: flo
 		if distance >= 0.0 and distance < best_distance:
 			best = {"kind": "zombie", "id": zombie.id}
 			best_distance = distance
-	# Other players (outside the safe hub, both of them).
-	if not in_safe:
+	# Red/black PvP only; zone borders do not permit attacking protected players.
+	if ZoneRisk.allows_pvp(attacker_zone):
 		for other in players.values():
-			if other.id == attacker.id or not _alive(other) or _is_safe(other.position):
+			if other.id == attacker.id or not _alive(other):
+				continue
+			if not ZoneRisk.can_pvp(attacker_zone, world.zone_at(other.position.x, other.position.z)):
 				continue
 			var distance := _hit_distance(origin, direction, Vector2(other.position.x, other.position.z), reach, ranged, 0.5)
 			if distance >= 0.0 and distance < best_distance:
@@ -558,7 +566,10 @@ func _damage_target(attacker: Player, hit: Dictionary, damage: float) -> void:
 			_on_zombie_death(zombie)
 	else:
 		var victim: Player = players.get(hit["id"])
-		if victim == null:
+		if victim == null or not _alive(victim):
+			return
+		if not ZoneRisk.can_pvp(world.zone_at(attacker.position.x, attacker.position.z),
+				world.zone_at(victim.position.x, victim.position.z)):
 			return
 		var final_damage: float = Combat.apply_armor(damage, victim.inventory.armor)
 		victim.survival.hurt(final_damage)
@@ -578,16 +589,21 @@ func _on_zombie_death(zombie) -> void:
 	events.append({"type": "zombie_died", "id": zombie.id})
 
 
-## Albion style full loot: everything the player carried drops where they died.
+## Full-loot deaths occur in red/black. Green/yellow deaths retain gear.
 func _on_player_death(victim: Player, killer: int) -> void:
 	victim.deaths += 1
 	victim.dirty_character = true
 	victim.action = {}
-	var everything: Dictionary = victim.inventory.take_everything()
+	var zone: int = world.zone_at(victim.position.x, victim.position.z)
+	var drops_gear: bool = ZoneRisk.full_loot(zone)
+	victim.last_death_full_loot = drops_gear
+	victim.keep_inventory_on_respawn = not drops_gear
+	if drops_gear:
+		var everything: Dictionary = victim.inventory.take_everything()
+		_make_bag(victim.position, everything)
 	victim.respawn_timer = Defs.RESPAWN_SECONDS
-	_make_bag(victim.position, everything)
 	victim.dirty_inventory = true
-	events.append({"type": "death", "peer": victim.id, "killer": killer})
+	events.append({"type": "death", "peer": victim.id, "killer": killer, "full_loot": drops_gear, "zone": zone})
 
 
 # --- The simulation tick -------------------------------------------------------------------------------
@@ -770,6 +786,7 @@ func snapshot_for(peer_id: int) -> Dictionary:
 			"alive": _alive(player), "kills": player.kills, "deaths": player.deaths, "zone": player.zone_notice,
 			"action": player.action.duplicate(),
 			"weapon": player.inventory.weapon, "armor": player.inventory.armor,
+			"last_death_full_loot": player.last_death_full_loot,
 			"gathering_levels": player.progression.levels(), "crafting_level": player.progression.crafting_level(),
 			"crafting_xp": player.progression.crafting_xp,
 			"carry_kg": player.inventory.total_weight(),
