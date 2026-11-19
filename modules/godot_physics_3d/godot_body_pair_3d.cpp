@@ -380,6 +380,7 @@ bool GodotBodyPair3D::pre_solve(real_t p_step) {
 
 	real_t inv_mass_A = collide_A ? A->get_inv_mass() : 0.0;
 	real_t inv_mass_B = collide_B ? B->get_inv_mass() : 0.0;
+	const bool has_friction = combine_friction(A, B) > 0.0;
 
 	for (int i = 0; i < contact_count; i++) {
 		Contact &c = contacts[i];
@@ -415,6 +416,11 @@ bool GodotBodyPair3D::pre_solve(real_t p_step) {
 		c.bias = -bias * inv_dt * MIN(0.0f, -depth + max_penetration);
 		c.depth = depth;
 
+		// Contacts may survive a material change. Do not warm-start stale
+		// tangential impulses after the pair becomes frictionless.
+		if (!has_friction) {
+			c.acc_tangent_impulse = Vector3();
+		}
 		Vector3 j_vec = c.normal * c.acc_normal_impulse + c.acc_tangent_impulse;
 
 		c.acc_impulse -= j_vec;
@@ -479,6 +485,8 @@ void GodotBodyPair3D::solve(real_t p_step) {
 
 	real_t inv_mass_A = collide_A ? A->get_inv_mass() : 0.0;
 	real_t inv_mass_B = collide_B ? B->get_inv_mass() : 0.0;
+	// Mixing is independent of contact point; compute once per solver pass.
+	const real_t friction = combine_friction(A, B);
 
 	for (int i = 0; i < contact_count; i++) {
 		Contact &c = contacts[i];
@@ -559,9 +567,13 @@ void GodotBodyPair3D::solve(real_t p_step) {
 			c.active = true;
 		}
 
-		//friction impulse
+		// Frictionless contacts need neither tangential velocities nor inertia
+		// calculations. Their cached tangent impulse was cleared in pre_solve().
+		if (friction == 0.0) {
+			continue;
+		}
 
-		real_t friction = combine_friction(A, B);
+		//friction impulse
 
 		Vector3 lvA = A->get_linear_velocity() + A->get_angular_velocity().cross(c.rA);
 		Vector3 lvB = B->get_linear_velocity() + B->get_angular_velocity().cross(c.rB);
