@@ -117,8 +117,10 @@ After per-island `pre_solve`, the built-in GodotPhysics scheduler skips islands
 whose remaining constraint lists are empty. Area monitoring constraints always
 return `false` from `pre_solve` after emitting notifications, so this removes
 worker-group overhead in sensor-dense scenes without dropping enter/exit events.
-When every island contains live constraints, direct indexing is retained and no
-additional index buffer is allocated.
+A compact index list is allocated only if at least 32 islands and at
+least one quarter of all islands are empty; smaller sparse cases retain direct
+indexing to avoid allocation and per-task indirection. If no islands remain,
+solver dispatch is skipped unconditionally.
 
 Run the headless 2D+3D area-only regression with built-in GodotPhysics enabled:
 
