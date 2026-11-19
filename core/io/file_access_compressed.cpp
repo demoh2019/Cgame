@@ -52,13 +52,16 @@ Error FileAccessCompressed::open_after_magic(Ref<FileAccess> p_base) {
 	uint32_t bc = (read_total / block_size) + 1;
 	uint64_t acc_ofs = f->get_position() + bc * 4;
 	uint32_t max_bs = 0;
+	// The block count is known from the header. Construct the table once
+	// instead of growing it and relocating its entries on each append.
+	ERR_FAIL_COND_V(read_blocks.resize(bc) != OK, ERR_OUT_OF_MEMORY);
+	ReadBlock *blocks = read_blocks.ptrw();
 	for (uint32_t i = 0; i < bc; i++) {
-		ReadBlock rb;
+		ReadBlock &rb = blocks[i];
 		rb.offset = acc_ofs;
 		rb.csize = f->get_32();
 		acc_ofs += rb.csize;
 		max_bs = MAX(max_bs, rb.csize);
-		read_blocks.push_back(rb);
 	}
 
 	comp_buffer.resize(max_bs);
@@ -139,8 +142,10 @@ void FileAccessCompressed::_close() {
 		temp_cblock.resize(Compression::get_max_compressed_buffer_size(bc == 1 ? last_block_size : block_size, cmode));
 		uint8_t *temp_cblock_ptr = temp_cblock.ptr();
 
-		// Compress and store the blocks.
+		// Compress and store the blocks. Every entry is written exactly once,
+		// so reserve the complete table instead of repeatedly reallocating it.
 		LocalVector<uint32_t> block_sizes;
+		block_sizes.resize_uninitialized(bc);
 		for (uint32_t i = 0; i < bc; i++) {
 			uint32_t bl = i == (bc - 1) ? last_block_size : block_size;
 			uint8_t *bp = &write_ptr[i * block_size];
@@ -149,7 +154,7 @@ void FileAccessCompressed::_close() {
 			ERR_FAIL_COND_MSG(compressed_size < 0, "FileAccessCompressed: Error compressing data.");
 
 			f->store_buffer(temp_cblock_ptr, (uint64_t)compressed_size);
-			block_sizes.push_back(compressed_size);
+			block_sizes[i] = compressed_size;
 		}
 
 		f->seek(16); //ok write block sizes
