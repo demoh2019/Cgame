@@ -74,7 +74,7 @@ static bool strings_equal_lower(const T1 *p_lhs_begin, const T2 *p_rhs_begin, si
 	// findn/rfindn/countn compare the entire candidate before rejecting it.
 	// Only probe the tail after two exact prefix matches, so typical misses
 	// continue through the original short-circuiting loop unchanged.
-	if (p_len >= 16 &&
+	if (p_len >= 32 &&
 			static_cast<uint32_t>(p_lhs_begin[0]) == static_cast<uint32_t>(p_rhs_begin[0]) &&
 			static_cast<uint32_t>(p_lhs_begin[1]) == static_cast<uint32_t>(p_rhs_begin[1])) {
 		const auto lhs = p_lhs_begin[p_len - 1];
