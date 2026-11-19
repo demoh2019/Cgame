@@ -51,6 +51,128 @@ TEST_FORCE_LINK(test_arraymesh)
 
 namespace TestArrayMesh {
 
+static Ref<ImporterMesh> _make_mesh_for_navigation_fastpath(const PackedVector3Array &p_vertices, const PackedInt32Array &p_indices) {
+	Ref<ImporterMesh> imported;
+	imported.instantiate();
+	Array arrays;
+	arrays.resize(Mesh::ARRAY_MAX);
+	arrays[Mesh::ARRAY_VERTEX] = p_vertices;
+	arrays[Mesh::ARRAY_INDEX] = p_indices;
+	PackedVector3Array normals;
+	for (int i = 0; i < p_vertices.size(); ++i) {
+		normals.push_back(Vector3(0, 0, 1));
+	}
+	arrays[Mesh::ARRAY_NORMAL] = normals;
+	imported->add_surface(Mesh::PRIMITIVE_TRIANGLES, arrays, TypedArray<Array>(), Dictionary(), Ref<Material>(), String());
+	return imported;
+}
+
+TEST_CASE("[ImporterMeshFastPath] indexed quad yields exactly two faces and four navigation vertices") {
+	const PackedVector3Array positions = { Vector3(0, 0, 0), Vector3(1, 0, 0), Vector3(1, 1, 0), Vector3(0, 1, 0) };
+	const PackedInt32Array indices = { 0, 1, 2, 0, 2, 3 };
+	Ref<ImporterMesh> mesh = _make_mesh_for_navigation_fastpath(positions, indices);
+	const Vector<Face3> faces = mesh->get_faces();
+	REQUIRE_EQ(faces.size(), 2);
+	CHECK(faces[0].vertex[0].is_equal_approx(positions[0]));
+	CHECK(faces[0].vertex[2].is_equal_approx(positions[2]));
+	CHECK(faces[1].vertex[2].is_equal_approx(positions[3]));
+	Ref<NavigationMesh> navmesh = mesh->create_navigation_mesh();
+	REQUIRE(navmesh.is_valid());
+	CHECK_EQ(navmesh->get_polygon_count(), 2);
+	const Vector<Vector3> unique_vertices = navmesh->get_vertices();
+	REQUIRE_EQ(unique_vertices.size(), 4);
+	for (int i = 0; i < unique_vertices.size(); ++i) {
+		CHECK(unique_vertices[i].is_equal_approx(positions[i]));
+	}
+}
+
+TEST_CASE("[ImporterMeshFastPath] nonindexed faces still deduplicate positions") {
+	const PackedVector3Array positions = {
+		Vector3(0, 0, 0), Vector3(1, 0, 0), Vector3(1, 1, 0),
+		Vector3(0, 0, 0), Vector3(1, 1, 0), Vector3(0, 1, 0)
+	};
+	Ref<ImporterMesh> mesh = _make_mesh_for_navigation_fastpath(positions, PackedInt32Array());
+	const Vector<Face3> faces = mesh->get_faces();
+	REQUIRE_EQ(faces.size(), 2);
+	Ref<NavigationMesh> navmesh = mesh->create_navigation_mesh();
+	REQUIRE(navmesh.is_valid());
+	CHECK_EQ(navmesh->get_polygon_count(), 2);
+	CHECK_EQ(navmesh->get_vertices().size(), 4);
+	for (int p = 0; p < navmesh->get_polygon_count(); ++p) {
+		CHECK_EQ(navmesh->get_polygon(p).size(), 3);
+	}
+}
+
+TEST_CASE("[ImporterMeshFastPath] multiple surfaces share vertices without dropping triangles") {
+	const PackedVector3Array positions = { Vector3(0, 0, 0), Vector3(1, 0, 0), Vector3(0, 1, 0) };
+	const PackedInt32Array triangle = { 0, 1, 2 };
+	Ref<ImporterMesh> mesh = _make_mesh_for_navigation_fastpath(positions, triangle);
+	Array arrays = mesh->get_surface_arrays(0);
+	mesh->add_surface(Mesh::PRIMITIVE_TRIANGLES, arrays, TypedArray<Array>(), Dictionary(), Ref<Material>(), String());
+	const Vector<Face3> faces = mesh->get_faces();
+	CHECK_EQ(faces.size(), 2);
+	Ref<NavigationMesh> navmesh = mesh->create_navigation_mesh();
+	REQUIRE(navmesh.is_valid());
+	CHECK_EQ(navmesh->get_polygon_count(), 2);
+	CHECK_EQ(navmesh->get_vertices().size(), 3);
+}
+
+
+TEST_CASE("[ImporterMeshFastPath] merging a translated mesh does not mutate the source buffers") {
+	const PackedVector3Array positions = { Vector3(0, 0, 0), Vector3(1, 0, 0), Vector3(0, 1, 0) };
+	const PackedInt32Array triangle = { 0, 1, 2 };
+	Ref<ImporterMesh> original = _make_mesh_for_navigation_fastpath(positions, triangle);
+	TypedArray<ImporterMesh> input_meshes;
+	input_meshes.push_back(original);
+	TypedArray<Transform3D> transforms;
+	transforms.push_back(Transform3D(Basis(), Vector3(5, -2, 3)));
+	Ref<ImporterMesh> merged = ImporterMesh::merge_importer_meshes(input_meshes, transforms, false);
+	REQUIRE(merged.is_valid());
+	REQUIRE_EQ(merged->get_surface_count(), 1);
+	const Array merged_arrays = merged->get_surface_arrays(0);
+	const PackedVector3Array translated = merged_arrays[Mesh::ARRAY_VERTEX];
+	REQUIRE_EQ(translated.size(), 3);
+	CHECK(translated[0].is_equal_approx(Vector3(5, -2, 3)));
+	CHECK(translated[1].is_equal_approx(Vector3(6, -2, 3)));
+	CHECK(translated[2].is_equal_approx(Vector3(5, -1, 3)));
+	const Array original_arrays = original->get_surface_arrays(0);
+	const PackedVector3Array unchanged = original_arrays[Mesh::ARRAY_VERTEX];
+	REQUIRE_EQ(unchanged.size(), 3);
+	CHECK(unchanged[0].is_equal_approx(Vector3(0, 0, 0)));
+	CHECK(unchanged[1].is_equal_approx(Vector3(1, 0, 0)));
+	CHECK(unchanged[2].is_equal_approx(Vector3(0, 1, 0)));
+}
+
+TEST_CASE("[ImporterMeshFastPath] merging matching surfaces remaps indices and keeps original") {
+	const PackedVector3Array positions = { Vector3(0, 0, 0), Vector3(1, 0, 0), Vector3(0, 1, 0) };
+	const PackedInt32Array triangle = { 0, 1, 2 };
+	Ref<ImporterMesh> source = _make_mesh_for_navigation_fastpath(positions, triangle);
+	TypedArray<ImporterMesh> inputs;
+	inputs.push_back(source);
+	inputs.push_back(source);
+	TypedArray<Transform3D> transforms;
+	transforms.push_back(Transform3D());
+	transforms.push_back(Transform3D(Basis(), Vector3(3, 0, 0)));
+	Ref<ImporterMesh> merged = ImporterMesh::merge_importer_meshes(inputs, transforms, true);
+	REQUIRE(merged.is_valid());
+	REQUIRE_EQ(merged->get_surface_count(), 1);
+	const Array arrays = merged->get_surface_arrays(0);
+	const PackedInt32Array indices = arrays[Mesh::ARRAY_INDEX];
+	const PackedVector3Array vertices = arrays[Mesh::ARRAY_VERTEX];
+	REQUIRE_EQ(indices.size(), 6);
+	REQUIRE_EQ(vertices.size(), 6);
+	for (int i = 0; i < 6; ++i) {
+		CHECK_EQ(indices[i], i);
+	}
+	CHECK(vertices[3].is_equal_approx(Vector3(3, 0, 0)));
+	CHECK(vertices[4].is_equal_approx(Vector3(4, 0, 0)));
+	const PackedInt32Array source_indices = source->get_surface_arrays(0)[Mesh::ARRAY_INDEX];
+	REQUIRE_EQ(source_indices.size(), 3);
+	CHECK_EQ(source_indices[0], 0);
+	CHECK_EQ(source_indices[1], 1);
+	CHECK_EQ(source_indices[2], 2);
+}
+
 #ifdef MODULE_XATLAS_UNWRAP_ENABLED
 TEST_CASE("[SceneTree][ImporterMesh] Lightmap unwrap preserves attribute compression") {
 	for (bool compressed : { false, true }) {
