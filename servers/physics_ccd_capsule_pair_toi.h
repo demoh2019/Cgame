@@ -213,7 +213,14 @@ _FORCE_INLINE_ PhysicsCCDCapsulePairTOIResult physics_ccd_capsule_pair_toi(
 	if (!Math::is_finite(end.squared) || !Math::is_finite(end.derivative_half)) {
 		return PhysicsCCDCapsulePairTOIResult::FALLBACK;
 	}
-	if (end.derivative_half > 0.0) {
+	// If the end of the step is already inside the combined capsule
+	// radius, [0, 1] brackets the first hit. There is no reason to
+	// spend another search on the minimum separation: first-entry
+	// bisection works on the full bracket and the crossing is unique
+	// because squared segment distance is convex in linear time.
+	// Only locate the minimum when the end is outside the contact radius;
+	// that is where grazing mid-step contacts can otherwise be missed.
+	if (end.derivative_half > 0.0 && end.squared > radius_sq) {
 		double low = 0.0;
 		double high = 1.0;
 		for (int i = 0; i < search_iterations; ++i) {
