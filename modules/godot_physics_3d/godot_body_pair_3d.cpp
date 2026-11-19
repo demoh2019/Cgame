@@ -1276,7 +1276,7 @@ void GodotBodyPair3D::solve(real_t p_step) {
 				normal_load_impulse += contacts[i].acc_normal_impulse;
 			}
 		}
-		if (normal_load_impulse > 0.0 && Math::is_finite(normal_load_impulse)) {
+		if (normal_load_impulse >= 0.0 && Math::is_finite(normal_load_impulse)) {
 			const Vector3 &normal = angular_friction_normal;
 			const Basis &inertia_A = inv_inertia_tensor_A;
 			const Basis &inertia_B = inv_inertia_tensor_B;
@@ -1286,7 +1286,7 @@ void GodotBodyPair3D::solve(real_t p_step) {
 				const real_t unconstrained_delta = GodotPhysicsContactAngularFriction::clamped_impulse(
 						relative_spin, effective_inverse_inertia, normal_load_impulse, spinning_coefficient, angular_friction_radius);
 				const real_t limit = spinning_coefficient * normal_load_impulse * angular_friction_radius;
-				if (Math::is_finite(limit) && limit > 0.0) {
+				if (Math::is_finite(limit) && limit >= 0.0) {
 					const real_t next_impulse = CLAMP(accumulated_spinning_impulse + unconstrained_delta, -limit, limit);
 					const real_t delta = next_impulse - accumulated_spinning_impulse;
 					accumulated_spinning_impulse = next_impulse;
@@ -1302,33 +1302,36 @@ void GodotBodyPair3D::solve(real_t p_step) {
 				}
 			}
 			if (rolling_coefficient > 0.0) {
-				// Re-evaluate angular speed after spinning friction, preserving
-				// a dissipative correction for asymmetric inertia tensors.
+				// Re-evaluate angular speed after spinning friction. Project the
+				// accumulated torque back onto the NEW Coulomb disk even when
+				// load drops to zero or the tangent speed is already negligible.
 				const Vector3 relative_omega = B->get_angular_velocity() - A->get_angular_velocity();
 				const Vector3 tangent = relative_omega - normal * relative_omega.dot(normal);
 				const real_t tangent_length_squared = tangent.length_squared();
+				Vector3 candidate_impulse;
 				if (tangent_length_squared > CMP_EPSILON * CMP_EPSILON) {
 					const real_t tangent_speed = Math::sqrt(tangent_length_squared);
 					const Vector3 axis = tangent / tangent_speed;
-					const real_t effective_inverse_inertia = axis.dot(inertia_A.xform(axis) + inertia_B.xform(axis));
+					const real_t inverse_inertia = axis.dot(inertia_A.xform(axis) + inertia_B.xform(axis));
 					const real_t candidate_delta = GodotPhysicsContactAngularFriction::clamped_impulse(
-							tangent_speed, effective_inverse_inertia, normal_load_impulse, rolling_coefficient, angular_friction_radius);
-					const real_t limit = rolling_coefficient * normal_load_impulse * angular_friction_radius;
-					if (Math::is_finite(limit) && limit > 0.0 && candidate_delta != 0.0) {
-						Vector3 next_impulse = accumulated_rolling_impulse + axis * candidate_delta;
-						const real_t length_squared = next_impulse.length_squared();
-						if (length_squared > limit * limit) {
-							next_impulse *= limit / Math::sqrt(length_squared);
+							tangent_speed, inverse_inertia, normal_load_impulse, rolling_coefficient, angular_friction_radius);
+					candidate_impulse = axis * candidate_delta;
+				}
+				const real_t limit = rolling_coefficient * normal_load_impulse * angular_friction_radius;
+				if (Math::is_finite(limit) && limit >= 0.0) {
+					Vector3 next_impulse = accumulated_rolling_impulse + candidate_impulse;
+					const real_t length_squared = next_impulse.length_squared();
+					if (length_squared > limit * limit) {
+						next_impulse *= limit / Math::sqrt(length_squared);
+					}
+					const Vector3 delta = next_impulse - accumulated_rolling_impulse;
+					accumulated_rolling_impulse = next_impulse;
+					if (delta != Vector3()) {
+						if (collide_A) {
+							A->apply_torque_impulse(-delta);
 						}
-						const Vector3 delta = next_impulse - accumulated_rolling_impulse;
-						accumulated_rolling_impulse = next_impulse;
-						if (delta != Vector3()) {
-							if (collide_A) {
-								A->apply_torque_impulse(-delta);
-							}
-							if (collide_B) {
-								B->apply_torque_impulse(delta);
-							}
+						if (collide_B) {
+							B->apply_torque_impulse(delta);
 						}
 					}
 				}
