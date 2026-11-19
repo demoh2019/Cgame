@@ -945,15 +945,16 @@ static void _collision_circle_convex_polygon(const GodotShape2D *p_a, const Tran
 			_is_unit_orthogonal_transform(p_transform_b)) {
 		const Vector2 center_world = p_transform_a.get_origin();
 		const Vector2 center_local = p_transform_b.basis_xform_inv(center_world - p_transform_b.get_origin());
+		const int point_count = convex_B->get_point_count();
 		real_t distance_squared = -1.0;
 		Vector2 closest_local;
 		bool has_positive_cross = false;
 		bool has_negative_cross = false;
 		bool valid_edges = true;
 
-		for (int i = 0; i < convex_B->get_point_count(); i++) {
+		for (int i = 0; i < point_count; i++) {
 			const Vector2 start = convex_B->get_point(i);
-			const Vector2 end = convex_B->get_point((i + 1) % convex_B->get_point_count());
+			const Vector2 end = convex_B->get_point(i + 1 == point_count ? 0 : i + 1);
 			const Vector2 edge = end - start;
 			const real_t edge_length_squared = edge.length_squared();
 			if (edge_length_squared <= CMP_EPSILON * CMP_EPSILON) {
@@ -973,6 +974,16 @@ static void _collision_circle_convex_polygon(const GodotShape2D *p_a, const Tran
 				distance_squared = candidate_distance_squared;
 				closest_local = candidate;
 			}
+		}
+
+		// Interior containment is sufficient for overlap-only queries; they
+		// do not need a contact normal or SAT support projections.
+		if (valid_edges && (has_positive_cross != has_negative_cross) && !p_collector->callback) {
+			p_collector->collided = true;
+			if (p_collector->sep_axis) {
+				*p_collector->sep_axis = Vector2();
+			}
+			return;
 		}
 
 		// A valid convex polygon has a consistent edge orientation. If the
