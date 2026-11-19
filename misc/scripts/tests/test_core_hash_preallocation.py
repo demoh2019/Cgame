@@ -12,10 +12,10 @@ CONTRACTS = {
     "core/config/project_settings.cpp": ["HashSet<StringName> cache(scene_groups.size());"],
     "core/extension/gdextension_interface.cpp": ["HashMap<StringName, Variant> values_map(values.size());"],
     "core/io/file_access_pack.cpp": ["r_paths.reserve(r_paths.size() + p_dir->files.size());"],
-    "core/io/marshalls.cpp": ["dict.reserve(count);"],
-    "core/io/remote_filesystem_client.cpp": ["HashSet<String> files_processed(file_count);"],
+    "core/io/marshalls.cpp": ["dict.reserve(MIN(count, 65536));"],
+    "core/io/remote_filesystem_client.cpp": ["HashSet<String> files_processed(MIN(file_count, 65536u));"],
     "core/io/resource.cpp": ["dst.reserve(src.size());"],
-    "core/io/resource_format_binary.cpp": ["d.reserve(len);"],
+    "core/io/resource_format_binary.cpp": ["d.reserve(MIN(len, 65536u));"],
     "core/io/resource_loader.cpp": ["deps_dict.reserve(p_map.size());"],
     "core/math/color.cpp": ["named_colors_hashmap.reserve(named_color_count);"],
     "core/object/script_language.cpp": ["ret.reserve(map.size());"],
@@ -56,7 +56,7 @@ class HashPreallocationContracts(unittest.TestCase):
         source = (ROOT / "core/io/resource_format_binary.cpp").read_text(encoding="utf-8")
         self.assertLess(source.find("len &= 0x7FFFFFFF;"), source.find("d.reserve(len);"))
         source = (ROOT / "core/io/marshalls.cpp").read_text(encoding="utf-8")
-        self.assertIn("dict.reserve(count);", source)
+        self.assertIn("dict.reserve(MIN(count, 65536));", source)
         source = (ROOT / "core/string/translation.cpp").read_text(encoding="utf-8")
         self.assertIn("translation_map.clear();\n\ttranslation_map.reserve(p_messages.size());", source)
 
