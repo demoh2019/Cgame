@@ -33,7 +33,7 @@
 #include "godot_constraint_2d.h"
 
 #include "core/object/worker_thread_pool.h"
-#include "core/templates/hash_map.h"
+#include "core/templates/a_hash_map.h"
 #include "core/os/os.h"
 
 #define BODY_ISLAND_COUNT_RESERVE 128
@@ -140,7 +140,7 @@ void GodotStep2D::_solve_large_island(const LocalVector<GodotConstraint2D *> &p_
 	// bodies too, since not all joint implementations are guaranteed read-only.
 	// No body or no remaining color -> serial overflow, solved after each
 	// colored pass. This is a performance optimization, not an island split.
-	HashMap<GodotBody2D *, uint32_t> occupied_colors;
+	AHashMap<GodotBody2D *, uint32_t> occupied_colors;
 	LocalVector<uint8_t> constraint_colors;
 	constraint_colors.resize(constraint_count);
 	uint32_t group_sizes[MAX_LARGE_ISLAND_COLORS + 1] = {};
@@ -187,7 +187,7 @@ void GodotStep2D::_solve_large_island(const LocalVector<GodotConstraint2D *> &p_
 			}
 		}
 
-		constraint_colors[i] = color;
+		constraint_colors[i] = static_cast<uint8_t>(color);
 		++group_sizes[color];
 	}
 
