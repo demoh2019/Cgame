@@ -122,7 +122,7 @@ is zero.
   For clean aerodynamic benchmarks disable those other drag effects
   to avoid double-counting, unless the combination is intentional.
 
-## Physical limitations
+## Limitations and physical scope
 
 This model is deliberately a low-cost **quadratic six-panel drag
 approximation**, not the Navier–Stokes equations. It does not
