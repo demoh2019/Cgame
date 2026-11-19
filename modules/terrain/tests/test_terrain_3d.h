@@ -29,10 +29,10 @@
 #include "../terrain_3d.h"
 #include "tests/test_macros.h"
 
-namespace TestTerrain3D {
+namespace TestHeightmapTerrain3D {
 
-TEST_CASE("[Terrain3D] New node owns a default terrain mesh") {
-    Terrain3D terrain;
+TEST_CASE("[HeightmapTerrain3D] New node owns a default terrain mesh") {
+    HeightmapTerrain3D terrain;
     CHECK(terrain.get_terrain_data().is_valid());
     CHECK(terrain.get_cell_size() == 1.0f);
     Ref<Mesh> mesh = terrain.get_mesh();
@@ -40,8 +40,8 @@ TEST_CASE("[Terrain3D] New node owns a default terrain mesh") {
     CHECK(mesh->get_surface_count() == 1);
 }
 
-TEST_CASE("[Terrain3D] Mesh is regenerated on height changes") {
-    Terrain3D terrain;
+TEST_CASE("[HeightmapTerrain3D] Mesh is regenerated on height changes") {
+    HeightmapTerrain3D terrain;
     Ref<TerrainHeightmap> data = terrain.get_terrain_data();
     data->set_dimensions(Size2i(2, 2));
     Ref<Mesh> first = terrain.get_mesh();
@@ -56,8 +56,8 @@ TEST_CASE("[Terrain3D] Mesh is regenerated on height changes") {
     CHECK(vertices[3] == Vector3(1, 5, 1));
 }
 
-TEST_CASE("[Terrain3D] Cell size updates the mesh coordinates") {
-    Terrain3D terrain;
+TEST_CASE("[HeightmapTerrain3D] Cell size updates the mesh coordinates") {
+    HeightmapTerrain3D terrain;
     Ref<TerrainHeightmap> data = terrain.get_terrain_data();
     data->set_dimensions(Size2i(2, 2));
     terrain.set_cell_size(3.0f);
@@ -67,8 +67,8 @@ TEST_CASE("[Terrain3D] Cell size updates the mesh coordinates") {
     CHECK(vertices[3] == Vector3(3, 0, 3));
 }
 
-TEST_CASE("[Terrain3D] Invalid cell size leaves previous geometry intact") {
-    Terrain3D terrain;
+TEST_CASE("[HeightmapTerrain3D] Invalid cell size leaves previous geometry intact") {
+    HeightmapTerrain3D terrain;
     Ref<Mesh> original = terrain.get_mesh();
     ERR_PRINT_OFF
     terrain.set_cell_size(-1);
@@ -77,8 +77,8 @@ TEST_CASE("[Terrain3D] Invalid cell size leaves previous geometry intact") {
     CHECK(terrain.get_cell_size() == 1.0f);
 }
 
-TEST_CASE("[Terrain3D] Replacing terrain data disconnects previous resource") {
-    Terrain3D terrain;
+TEST_CASE("[HeightmapTerrain3D] Replacing terrain data disconnects previous resource") {
+    HeightmapTerrain3D terrain;
     Ref<TerrainHeightmap> old_data = terrain.get_terrain_data();
     Ref<TerrainHeightmap> new_data;
     new_data.instantiate();
@@ -91,11 +91,11 @@ TEST_CASE("[Terrain3D] Replacing terrain data disconnects previous resource") {
     CHECK(terrain.get_mesh() != replacement);
 }
 
-TEST_CASE("[Terrain3D] Null terrain resource clears the generated mesh") {
-    Terrain3D terrain;
+TEST_CASE("[HeightmapTerrain3D] Null terrain resource clears the generated mesh") {
+    HeightmapTerrain3D terrain;
     terrain.set_terrain_data(Ref<TerrainHeightmap>());
     CHECK(terrain.get_terrain_data().is_null());
     CHECK(terrain.get_mesh().is_null());
 }
 
-} // namespace TestTerrain3D
+} // namespace TestHeightmapTerrain3D
