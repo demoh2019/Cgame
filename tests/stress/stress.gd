@@ -21,6 +21,7 @@ const CASES := [
 	"packed_arrays", "sorting", "animation_tracks", "physics_raycast_2d",
 	"physics_raycast_3d", "render_multimesh_3d",
 	"object_lifecycle", "scene_churn",
+	"bitmap_rects",
 ]
 
 var signal_total: int = 0
@@ -251,6 +252,8 @@ func _run_case(test_case: String, scale: int, frames: int, seed: int) -> Diction
 			return await _physics_raycast_3d(scale)
 		"render_multimesh_3d":
 			return await _render_multimesh_3d(scale, frames)
+		"bitmap_rects":
+			return _bitmap_rects(scale)
 	return {"error": "Unhandled case"}
 
 
@@ -1052,3 +1055,27 @@ func _object_churn(scale: int) -> Dictionary:
 		checksum += objects.size()
 		objects.clear()
 	return {"objects_created": 8 * 3000 * scale, "checksum": checksum}
+
+# Exercise bulk byte-range writes, clipping, and packed popcount in a real engine.
+func _bitmap_rects(scale: int) -> Dictionary:
+	var bitmap := BitMap.new()
+	bitmap.create(Vector2i(2048, 2048))
+	const SIZE := 2048
+	var rectangles := 200 * scale
+	var start := Time.get_ticks_usec()
+	for i in range(rectangles):
+		bitmap.set_bit_rect(Rect2i((i * 17) % 1536, (i * 37) % 1536, 512, 512), (i & 1) == 0)
+	var fill_ms := float(Time.get_ticks_usec() - start) / 1000.0
+	start = Time.get_ticks_usec()
+	var retained := bitmap.get_true_bit_count()
+	var count_ms := float(Time.get_ticks_usec() - start) / 1000.0
+	if retained < 0 or retained > SIZE * SIZE:
+		return {"error": "BitMap popcount out of range"}
+	bitmap.set_bit_rect(Rect2i(0, 0, SIZE, SIZE), true)
+	if bitmap.get_true_bit_count() != SIZE * SIZE:
+		return {"error": "BitMap full-rectangle fill corrupted pixels"}
+	bitmap.set_bit_rect(Rect2i(17, 0, 1, SIZE), false)
+	if bitmap.get_true_bit_count() != SIZE * SIZE - SIZE:
+		return {"error": "BitMap unaligned clear corrupted other bits"}
+	return {"rectangles": rectangles, "fill_ms": fill_ms, "popcount_ms": count_ms,
+			"checksum": retained}
