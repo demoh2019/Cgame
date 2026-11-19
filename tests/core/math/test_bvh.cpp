@@ -1234,6 +1234,16 @@ TEST_CASE("[BVH] Large changed-proxy queues are released after idle frames") {
 
 	// Retain allocated queue storage during a short pause so workloads with
 	// intermittent bursts avoid frame-to-frame realloc/free churn.
+	for (int i = 0; i < 8; ++i) {
+		tree.update();
+	}
+	CHECK(tree.get_changed_queue_capacity() >= COUNT);
+
+	// Any busy update restarts the quiet-frame counter, even if the queue
+	// remains small and no collision pair is created.
+	tree.move(handles[COUNT - 1], Rect2(COUNT * 8.0 + 32.0, 0, 1, 1));
+	tree.update();
+	CHECK(tree.get_changed_queue_capacity() >= COUNT);
 	for (int i = 0; i < 15; ++i) {
 		tree.update();
 	}
