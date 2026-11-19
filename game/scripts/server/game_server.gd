@@ -39,6 +39,7 @@ const Zombie = preload("res://scripts/shared/zombie.gd")
 const EliteInfected = preload("res://scripts/shared/elite_infected.gd")
 const ZoneRisk = preload("res://scripts/shared/zone_risk.gd")
 const Weather = preload("res://scripts/shared/weather.gd")
+const BloodScent = preload("res://scripts/shared/blood_scent.gd")
 const Progression = preload("res://scripts/shared/progression.gd")
 const CampRest = preload("res://scripts/shared/camp_rest.gd")
 const FieldCampfire = preload("res://scripts/shared/field_campfire.gd")
@@ -2434,7 +2435,10 @@ func _tick_zombies(delta: float) -> void:
 	for player in players.values():
 		info[player.id] = {"position": player.position, "alive": _alive(player),
 			"safe": _is_safe(player.position), "noise": player.noise_radius if player.noise_timer > 0.0 else 0.0,
-			"notice_multiplier": WorldCycle.notice_multiplier(time)}
+			"notice_multiplier": WorldCycle.notice_multiplier(time),
+			# Only actual server wounds contribute; never trust client input.
+			"scent": BloodScent.detection_radius(player.survival.bleeding,
+				_alive(player), _is_safe(player.position))}
 	# Activate spawns near players and put far-away zombies to sleep.
 	if tick_count % 20 == 1:
 		_manage_zombie_population()
@@ -2687,6 +2691,8 @@ func snapshot_for(peer_id: int) -> Dictionary:
 			"pvp_rank": PvPHonor.rank(player.pvp_honor),
 			"action": player.action.duplicate(),
 			"infection": player.survival.infection, "bleeding": player.survival.bleeding,
+			"blood_scent_radius": BloodScent.detection_radius(player.survival.bleeding,
+				_alive(player), _is_safe(player.position)),
 			"exposure": player.survival.exposure,
 			"warmth_seconds": player.survival.warmth_seconds,
 			"weather": Weather.conditions(world, player.position.x, player.position.z, time),

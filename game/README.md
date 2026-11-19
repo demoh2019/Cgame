@@ -1841,3 +1841,34 @@ biome temperatures, shelter and death remain controlled by existing rules.
 New `test_stormcoats.gd` checks every tier, recipe costs, profession gates,
 real server cold exposure, owner snapshots and stale-item exploit prevention.
 This game-layer expansion needs no changes to Cgame's native engine code.
+
+
+## Blood scent: wounds affect infected detection (survival + zombie AI)
+
+Untreated bleeding now affects stealth in both the canonical local preview
+and authoritative multiplayer game. When bleeding exceeds **12/100**,
+infected can smell a survivor's wound from **about 20–30 metres**,
+compared with a walker's normal **16 m** sight range. The radius scales
+with actual wound severity and drops as a wound naturally clots.
+Bandages and party medical aid that stop bleeding immediately remove
+this *additional* detection channel.
+
+Existing safety and combat rules remain intact: infected cannot acquire
+a dead or safe-hub survivor through scent, pack/threat and guardian
+taunt priorities still apply, and scent never extends an enemy's
+normal pursuit leash. A zombie already pursuing a player can keep
+following until it ordinarily loses interest — healing does not
+magically reset an established chase.
+
+The server calculates scent exclusively from the authoritative character
+`Survival.bleeding`, not a client RPC. Only the survivor gets their
+effective scent radius in the private snapshot for a HUD warning;
+bleeding values are not added to the replicated bystander list.
+The local playable preview shows the same warning and first-aid hint.
+
+Implementation: `scripts/shared/blood_scent.gd`,
+`scripts/shared/zombie.gd`, and `scripts/server/game_server.gd`.
+Tests: `game/tests/test_blood_scent.gd` in the headless suite
+(`godot --headless --path game --script res://tests/run_all.gd`).
+Existing GDScript simulation and networking provide this mechanic;
+no native Cgame engine extension is necessary.

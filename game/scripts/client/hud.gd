@@ -910,6 +910,9 @@ func _process(_delta: float) -> void:
 		str(client.you.get("renown_rank", "Newcomer")),
 		int(client.you.get("renown", 0)), int(client.you.get("renown_next", 40)),
 		int(client.you.get("vendor_discount", 0))]
+	var blood_range: float = float(client.you.get("blood_scent_radius", 0.0))
+	if blood_range > 0.0:
+		_info_label.text += "\nBLOOD SCENT: infected can sense the wound from %d m" % ceili(blood_range)
 	var weather: Dictionary = client.you.get("weather", {})
 	if not weather.is_empty():
 		_info_label.text += "\nWeather: %s %.0fC %s | Exposure %d/100 | Heat pack %ds" % [
