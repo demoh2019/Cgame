@@ -37,6 +37,7 @@
 #include "servers/physics_contact_angular_friction.h"
 #include "servers/physics_manifold_reduction_3d.h"
 #include "servers/physics_ccd_sphere_toi.h"
+#include "servers/physics_speculative_sphere_contact.h"
 #include "servers/physics_ccd_capsule_toi.h"
 #include "servers/physics_ccd_swept_bounds.h"
 
@@ -531,6 +532,34 @@ bool GodotBodyPair3D::setup(real_t p_step) {
 	GodotShape3D *shape_B_ptr = B->get_shape(shape_B);
 
 	collided = GodotCollisionSolver3D::solve_static(shape_A_ptr, xform_A, shape_B_ptr, xform_B, _contact_added_callback, this, &sep_axis);
+
+	// Predictive sphere contacts use real surface anchors and a negative
+	// penetration depth. A velocity constraint limits approaching motion to
+	// the available gap; no friction or penetration bias acts before touch.
+	// This path is optional and only runs for pairs present in the broadphase.
+	if (!collided && !report_contacts_only && space->get_speculative_sphere_distance() > 0.0 &&
+			A->get_angular_velocity() == Vector3() && B->get_angular_velocity() == Vector3() &&
+			shape_A_ptr->get_type() == PS3DE::SHAPE_SPHERE && shape_B_ptr->get_type() == PS3DE::SHAPE_SPHERE) {
+		const double scale_A = physics_ccd_uniform_sphere_scale(xform_A);
+		const double scale_B = physics_ccd_uniform_sphere_scale(xform_B);
+		if (scale_A > 0.0 && scale_B > 0.0) {
+			Vector3 point_A, point_B, normal;
+			const real_t radius_A = real_t(double(static_cast<GodotSphereShape3D *>(shape_A_ptr)->get_radius()) * scale_A);
+			const real_t radius_B = real_t(double(static_cast<GodotSphereShape3D *>(shape_B_ptr)->get_radius()) * scale_B);
+			const Vector3 velocity_B = B->get_mode() == PS3DE::BODY_MODE_STATIC ? Vector3() : B->get_linear_velocity();
+			if (physics_speculative_sphere_contact(xform_A.origin, radius_A, xform_B.origin, radius_B,
+					A->get_linear_velocity(), velocity_B, p_step, space->get_speculative_sphere_distance(), point_A, point_B, normal)) {
+				Contact speculative;
+				speculative.local_A = A->get_inv_transform().basis.xform(point_A);
+				speculative.local_B = B->get_inv_transform().basis.xform(point_B - offset_B);
+				speculative.normal = normal;
+				speculative.used = true;
+				contacts[0] = speculative;
+				contact_count = 1;
+				collided = true;
+			}
+		}
+	}
 	contact_recycling.remember(geometry_version_a, geometry_version_b, collided);
 
 	if (!collided) {
