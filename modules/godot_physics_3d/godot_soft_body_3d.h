@@ -296,7 +296,7 @@ public:
 	// Two-way discrete contacts with another SoftBody3D after both bodies
 	// finish their own constraints. Reuses each body's existing face BVH.
 	bool solve_pair_contacts(GodotSoftBody3D &p_other, real_t p_delta,
-			real_t p_thickness, real_t p_compliance,
+			real_t p_thickness, real_t p_compliance, real_t p_friction,
 			uint32_t p_max_contacts, uint32_t p_max_contacts_per_vertex);
 
 	_FORCE_INLINE_ uint32_t get_node_index(void *p_node) const { return static_cast<Node *>(p_node)->index; }

@@ -781,12 +781,13 @@ bool GodotSoftBody3D::solve_edge_self_collisions(real_t p_delta) {
 // traversing it invalidates callbacks, and mutations could hide later hits.
 // The scratch list and per-vertex budget are bounded by project settings.
 bool GodotSoftBody3D::solve_pair_contacts(GodotSoftBody3D &p_other, real_t p_delta,
-		real_t p_thickness, real_t p_compliance,
+		real_t p_thickness, real_t p_compliance, real_t p_friction,
 		uint32_t p_max_contacts, uint32_t p_max_contacts_per_vertex) {
 	if (&p_other == this || !get_space() || get_space() != p_other.get_space() ||
 			!(p_delta > real_t(0.0)) || !Math::is_finite(p_delta) ||
 			!(p_thickness > real_t(0.0)) || !Math::is_finite(p_thickness) ||
 			p_compliance < real_t(0.0) || !Math::is_finite(p_compliance) ||
+			p_friction < real_t(0.0) || !Math::is_finite(p_friction) ||
 			p_max_contacts == 0 || p_max_contacts_per_vertex == 0 ||
 			nodes.is_empty() || p_other.nodes.is_empty() ||
 			faces.is_empty() || p_other.faces.is_empty()) {
@@ -893,6 +894,26 @@ bool GodotSoftBody3D::solve_pair_contacts(GodotSoftBody3D &p_other, real_t p_del
 	}
 	if (!moved) {
 		return false;
+	}
+
+	// Normal lambda persists across the position iterations of this step.
+	// Apply pair friction ONCE as a mass-weighted tangential velocity impulse
+	// bounded by mu * normal_lambda / dt. No extra contact buffers are needed.
+	if (p_friction > real_t(0.0)) {
+		for (const PairContact &contact : contacts) {
+			if (!(contact.lambda > real_t(0.0))) {
+				continue;
+			}
+			GodotSoftBody3D &vertex_body = contact.vertex_on_first ? *this : p_other;
+			GodotSoftBody3D &face_body = contact.vertex_on_first ? p_other : *this;
+			Node &vertex = vertex_body.nodes[contact.vertex];
+			Face &face = face_body.faces[contact.face];
+			physics_softbody_solve_pair_friction(vertex.x,
+					face.n[0]->x, face.n[1]->x, face.n[2]->x,
+					vertex.v, face.n[0]->v, face.n[1]->v, face.n[2]->v,
+					vertex.im, face.n[0]->im, face.n[1]->im, face.n[2]->im,
+					p_friction, contact.lambda, p_thickness, p_delta);
+		}
 	}
 
 	// Refit both bodies only AFTER the contact loop. They will be used by
