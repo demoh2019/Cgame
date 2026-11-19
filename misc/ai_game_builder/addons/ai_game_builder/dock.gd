@@ -3,6 +3,7 @@ extends VBoxContainer
 
 const Planner = preload("res://addons/ai_game_builder/planner.gd")
 const Writer = preload("res://addons/ai_game_builder/writer.gd")
+const Inspector = preload("res://addons/ai_game_builder/inspector.gd")
 
 var _http: HTTPRequest
 var _endpoint: LineEdit
@@ -11,11 +12,13 @@ var _api_key: LineEdit
 var _prompt: TextEdit
 var _preview: TextEdit
 var _generate_button: Button
+var _repair_button: Button
 var _apply_button: Button
 var _cancel_button: Button
 var _status: Label
 var _confirmation: ConfirmationDialog
 var _pending_plan: Dictionary = {}
+var _last_errors: Array[String] = []
 var _busy := false
 
 
@@ -45,6 +48,12 @@ func _ready() -> void:
 	_generate_button.text = "Generate"
 	_generate_button.pressed.connect(_generate)
 	controls.add_child(_generate_button)
+	_repair_button = Button.new()
+	_repair_button.text = "Repair"
+	_repair_button.tooltip_text = "Regenerate after detected dependency errors. Each attempt makes another API call."
+	_repair_button.disabled = true
+	_repair_button.pressed.connect(_repair)
+	controls.add_child(_repair_button)
 	_cancel_button = Button.new()
 	_cancel_button.text = "Cancel"
 	_cancel_button.disabled = true
@@ -94,9 +103,19 @@ func _add_line(label_text: String, hint: String, initial: String) -> LineEdit:
 
 
 func _generate() -> void:
+	_request_plan(_prompt.text.strip_edges(), false)
+
+
+func _repair() -> void:
+	if _pending_plan.is_empty() or _last_errors.is_empty() or _busy:
+		return
+	var repair_text := Inspector.repair_prompt(_prompt.text.strip_edges(), _pending_plan, _last_errors)
+	_request_plan(repair_text, true)
+
+
+func _request_plan(prompt: String, is_repair: bool) -> void:
 	if _busy:
 		return
-	var prompt := _prompt.text.strip_edges()
 	var endpoint := _endpoint.text.strip_edges()
 	var model := _model.text.strip_edges()
 	if prompt.is_empty() or model.is_empty():
@@ -106,9 +125,6 @@ func _generate() -> void:
 		_status.text = "Use HTTPS, or HTTP on localhost/127.0.0.1 only."
 		return
 
-	_pending_plan.clear()
-	_apply_button.disabled = true
-	_preview.text = ""
 	var headers := PackedStringArray(["Content-Type: application/json"])
 	var key := _api_key.text.strip_edges()
 	if not key.is_empty():
@@ -117,9 +133,13 @@ func _generate() -> void:
 	if request_error != OK:
 		_status.text = "Unable to start the request (error %d)." % request_error
 		return
+	if not is_repair:
+		_pending_plan.clear()
+		_last_errors.clear()
+		_preview.text = ""
+	_apply_button.disabled = true
 	_set_busy(true)
-	_status.text = "Generating a reviewable game plan..."
-
+	_status.text = "Requesting a repaired plan..." if is_repair else "Generating a reviewable game plan..."
 
 func _allowed_endpoint(endpoint: String) -> bool:
 	var lower := endpoint.to_lower()
@@ -151,15 +171,26 @@ func _completed(result: int, response_code: int, _headers: PackedStringArray, bo
 		_status.text = "Plan rejected: " + String(validated.error)
 		return
 	_pending_plan = validated.plan
+	var inspection := Inspector.inspect(_pending_plan)
+	_last_errors = inspection.errors
 	_preview.text = JSON.stringify(_pending_plan, "\t")
-	_apply_button.disabled = false
-	_status.text = "Ready for review: %d files. No changes have been made." % _pending_plan.files.size()
+	if not inspection.errors.is_empty():
+		_preview.text = "STATIC ERRORS (not yet applied):\n" + "\n".join(inspection.errors) + "\n\n" + _preview.text
+	if not inspection.warnings.is_empty():
+		_preview.text = "REVIEW WARNINGS:\n" + "\n".join(inspection.warnings) + "\n\n" + _preview.text
+	_apply_button.disabled = not inspection.ok
+	_repair_button.disabled = inspection.ok
+	if inspection.ok:
+		_status.text = "Review passed for %d files. Inspect the code before applying." % _pending_plan.files.size()
+	else:
+		_status.text = "%d static errors. Click Repair for another model attempt." % inspection.errors.size()
 
 
 func _set_busy(value: bool) -> void:
 	_busy = value
 	_generate_button.disabled = value
 	_cancel_button.disabled = not value
+	_repair_button.disabled = value or _last_errors.is_empty()
 	_endpoint.editable = not value
 	_model.editable = not value
 	_prompt.editable = not value
@@ -169,6 +200,9 @@ func _set_busy(value: bool) -> void:
 func _confirm_apply() -> void:
 	if _pending_plan.is_empty() or _busy:
 		return
+	if not Inspector.inspect(_pending_plan).ok:
+		_status.text = "Resolve static errors before applying."
+		return
 	_confirmation.dialog_text = "Create %d new files under res://ai_generated/? Existing files will never be overwritten. Review the preview first." % _pending_plan.files.size()
 	_confirmation.popup_centered()
 
@@ -176,11 +210,16 @@ func _confirm_apply() -> void:
 func _apply() -> void:
 	if _pending_plan.is_empty() or _busy:
 		return
+	if not Inspector.inspect(_pending_plan).ok:
+		_status.text = "Resolve static errors before applying."
+		return
 	var result := Writer.apply(_pending_plan)
 	if not result.ok:
 		_status.text = String(result.error)
 		return
 	_status.text = "Created %d files in res://ai_generated/. Open main.tscn to play." % result.paths.size()
 	_apply_button.disabled = true
+	_repair_button.disabled = true
 	_pending_plan.clear()
+	_last_errors.clear()
 	EditorInterface.get_resource_filesystem().scan()
