@@ -58,25 +58,49 @@ void GodotBodyPair2D::_contact_added_callback(const Vector2 &p_point_A, const Ve
 	contact.normal = (p_point_A - p_point_B).normalized();
 	contact.used = true;
 
-	// Attempt to determine if the contact will be reused.
-	real_t recycle_radius_2 = space->get_contact_recycle_radius() * space->get_contact_recycle_radius();
-
+	// Match persistent contacts by the closest *unused* pair of local
+	// anchors, not the first contact inside the recycling radius. This keeps
+	// the two manifold points from inheriting the same cached impulse when
+	// their positions become close during rotation or sliding.
+	const real_t recycle_radius = space->get_contact_recycle_radius();
+	const real_t recycle_radius_2 = recycle_radius * recycle_radius;
+	int best_match = -1;
+	real_t best_distance_squared = 0.0;
 	for (int i = 0; i < contact_count; i++) {
-		Contact &c = contacts[i];
-		if (c.local_A.distance_squared_to(local_A) < recycle_radius_2 &&
-				c.local_B.distance_squared_to(local_B) < recycle_radius_2) {
-			// Retain warm-start impulses only if the contact normal is still
-			// compatible with the previous frame. Contacts close to a corner
-			// can keep their anchors while the normal changes abruptly.
-			if (c.normal.dot(contact.normal) >= real_t(0.98)) {
-				contact.acc_normal_impulse = c.acc_normal_impulse;
-				contact.acc_tangent_impulse = c.acc_tangent_impulse;
-				contact.acc_bias_impulse = c.acc_bias_impulse;
-				contact.acc_bias_impulse_center_of_mass = c.acc_bias_impulse_center_of_mass;
-			}
-			c = contact;
-			return;
+		const Contact &c = contacts[i];
+		if (c.used) {
+			// Already matched to a contact generated during this setup pass.
+			continue;
 		}
+
+		const real_t distance_A_squared = c.local_A.distance_squared_to(local_A);
+		if (distance_A_squared >= recycle_radius_2) {
+			continue;
+		}
+		const real_t distance_B_squared = c.local_B.distance_squared_to(local_B);
+		if (distance_B_squared >= recycle_radius_2) {
+			continue;
+		}
+
+		const real_t total_distance_squared = distance_A_squared + distance_B_squared;
+		if (best_match == -1 || total_distance_squared < best_distance_squared) {
+			best_match = i;
+			best_distance_squared = total_distance_squared;
+		}
+	}
+
+	if (best_match != -1) {
+		Contact &previous = contacts[best_match];
+		// Keep warm-start impulses only when the contact normal still agrees
+		// with its previous direction (e.g. not after crossing a sharp edge).
+		if (previous.normal.dot(contact.normal) >= real_t(0.98)) {
+			contact.acc_normal_impulse = previous.acc_normal_impulse;
+			contact.acc_tangent_impulse = previous.acc_tangent_impulse;
+			contact.acc_bias_impulse = previous.acc_bias_impulse;
+			contact.acc_bias_impulse_center_of_mass = previous.acc_bias_impulse_center_of_mass;
+		}
+		previous = contact;
+		return;
 	}
 
 	// Figure out if the contact amount must be reduced to fit the new contact.
