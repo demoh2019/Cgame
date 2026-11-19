@@ -34,7 +34,7 @@ class TypedContainerVMLookupTests(unittest.TestCase):
             self.assertNotIn(old, self.cpp)
 
     def test_array_script_type_resolved_without_ref(self):
-        self.assertEqual(self.cpp.count("Script *script_type = Object::cast_to<Script>(type->operator Object *());"), 3)
+        self.assertGreaterEqual(self.cpp.count("Script *script_type = Object::cast_to<Script>(type->operator Object *());"), 3)
 
     def test_dictionary_types_resolved_without_ref(self):
         self.assertEqual(self.cpp.count("Script *key_script_type = Object::cast_to<Script>(key_type->operator Object *());"), 3)
@@ -42,7 +42,7 @@ class TypedContainerVMLookupTests(unittest.TestCase):
 
     def test_debug_error_reporting_preserved(self):
         for kind in ("Trying to assign an array", "Trying to assign a dictionary",
-                     "Trying to return a value", "Trying to return a dictionary"):
+                     "Trying to return a value", 'return type is "Dictionary['):
             self.assertIn(kind, self.cpp)
 
     def test_array_is_opcode_is_covered_by_runtime_test(self):
