@@ -284,9 +284,12 @@ JPH::SoftBodySharedSettings *JoltSoftBody3D::_create_shared_settings() {
 	// their maximum distance, a shrinking cloth would shorten its springs
 	// while still allowing free vertices to stretch to the *old* anchor
 	// distance. Scale both Euclidean and geodesic tethers consistently.
-	// This loop is empty when LRA is disabled (the default).
-	for (JPH::SoftBodySharedSettings::LRA &tether : settings->mLRAConstraints) {
-		tether.mMaxDistance *= multiplier;
+	// Skip the whole extra pass for the common shrink=0 configuration.
+	// The loop is also empty when LRA is disabled (the default).
+	if (multiplier != 1.0f) {
+		for (JPH::SoftBodySharedSettings::LRA &tether : settings->mLRAConstraints) {
+			tether.mMaxDistance *= multiplier;
+		}
 	}
 	settings->Optimize();
 
