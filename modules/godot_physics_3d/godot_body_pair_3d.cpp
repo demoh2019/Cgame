@@ -727,6 +727,8 @@ bool GodotBodyPair3D::pre_solve(real_t p_step) {
 		real_t depth = axis.dot(c.normal);
 
 		const bool speculative = depth < 0.0 && !report_contacts_only &&
+				shape_A_ptr->get_type() == PS3DE::SHAPE_SPHERE &&
+				shape_B_ptr->get_type() == PS3DE::SHAPE_SPHERE &&
 				space->get_speculative_sphere_distance() >= -depth;
 		if (depth <= 0.0 && !speculative) {
 			continue;
