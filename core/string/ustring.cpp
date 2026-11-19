@@ -5929,10 +5929,18 @@ static String _pad_string(const String &p_source, int p_min_length, const String
 		memcpy(write, source, size_t(source_length) * sizeof(char32_t));
 		write += source_length;
 	}
-	for (int64_t i = 0; i < repetitions; i++) {
-		memcpy(write, characters, size_t(character_length) * sizeof(char32_t));
-		write += character_length;
+	// Seed one repetition, then double the already-written region. Each copy
+	// has non-overlapping source and destination, even for multi-char padding.
+	const int64_t padding_length = repetitions * character_length;
+	char32_t *padding_start = write;
+	memcpy(padding_start, characters, size_t(character_length) * sizeof(char32_t));
+	int64_t copied = character_length;
+	while (copied < padding_length) {
+		const int64_t copy_length = MIN(copied, padding_length - copied);
+		memcpy(padding_start + copied, padding_start, size_t(copy_length) * sizeof(char32_t));
+		copied += copy_length;
 	}
+	write += padding_length;
 	if (p_left && source_length > 0) {
 		memcpy(write, source, size_t(source_length) * sizeof(char32_t));
 		write += source_length;
