@@ -832,8 +832,9 @@ bool GodotBodySoftBodyPair3D::pre_solve(real_t p_step) {
 			Vector3 crA = body->get_angular_velocity().cross(c.rA);
 			Vector3 dv = soft_body->get_node_velocity(c.index_B) - body->get_linear_velocity() - crA;
 
-			// Normal impulse.
-			c.bounce = c.bounce * dv.dot(c.normal);
+			// Use the same restitution threshold for rigid/soft contacts.
+			const real_t normal_velocity = dv.dot(c.normal);
+			c.bounce = normal_velocity < -space->get_restitution_velocity_threshold() ? c.bounce * normal_velocity : 0.0;
 		}
 	}
 
