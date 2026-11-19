@@ -162,6 +162,68 @@ time; use the same machine/configuration with an older commit to quantify
 the effects. These source-contract checks are not a compilation test,
 and runtime stress tests must still be executed on a built engine.
 
+## Opt-in cloth and soft-body vertex/triangle self-collision (3D)
+
+Cgame GodotPhysics3D adds a discrete, two-way XPBD **vertex/face
+self-contact** stage inspired by Bullet soft bodies and Position Based
+Dynamics. A vertex near a triangle belonging to the SAME soft body can
+now be pushed away, rather than folding through an unrelated region of
+its own cloth mesh. This is separate from rigid/soft collisions and
+from XPBD stretch, area, dihedral, volume and tether constraints.
+
+```ini
+[physics]
+3d/solver/soft_body_self_collision_thickness=0.12
+3d/solver/soft_body_self_collision_compliance=0.000001
+3d/solver/soft_body_self_collision_max_contacts_per_vertex=8
+```
+
+**Off by default:** zero thickness skips self-contact BVH queries and
+releases topology/contact buffers. Enable only in scenes that need
+self-contact. Positive thickness is the minimum separation between
+non-adjacent triangles and nearby vertices. Smaller compliance makes
+the contact less compressible; zero compliance is also valid. The
+per-vertex cap (1–32, default 8) and total cap (65,536 contacts per
+soft body per step) bound scratch memory under extreme overlap.
+
+On setup, a hash of **original triangle mesh edges** excludes contacts
+between vertices and any incident or one-ring adjacent face. This is
+independent of auxiliary two-hop bending links. At solve time, the
+existing `DynamicBVH` face tree is refit from current geometry, queried
+for each vertex's thickness AABB, then the candidates are solved without
+modifying the tree during traversal. Contact separation is solved
+against the projected interior of the face, with inverse-mass-weighted
+impulses on the vertex and three face vertices, unilateral accumulated
+XPBD multipliers and exact inverse-mass-zero pins. The contact direction
+is chosen from previous positions where available. Post-correction
+face bounds are refit for subsequent ray queries.
+
+**Limitations:** this is *discrete* vertex/triangle self collision, not
+continuous cloth CCD. Very fast tunneling can pass through the discrete
+envelope. Near-edge / edge-edge and vertex-vertex contacts are not yet
+supported; the node must project inside the candidate triangle. The
+one-ring filter and contact budget may leave densely folded regions
+without a constraint. Mesh fold quality also depends on tessellation
+and other material constraints. This implementation does not cover
+collisions between two distinct soft bodies.
+
+```bash
+python3 -m unittest discover -s tests/stress -p 'test_physics_xpbd_self_collision.py' -v
+python3 tests/stress/run.py --godot ./bin/godot.macos.editor.arm64 \
+  --case physics_soft_body_self_collision_3d --scale 4 \
+  --repeats 5 --frames 90 --rss-limit-mib 6144 \
+  --output out/physics-soft-self-collision.json
+```
+
+The runtime test isolates two disconnected mesh layers starting closer
+than the configured thickness and verifies they separate when enabled
+but do not when disabled. It separately creates an incident pair of
+triangles to check that directly connected vertices do not produce fake
+contacts. Python source tests cover unilateral contact projection,
+previous-side consistency, barycentric containment and pinned faces.
+Runtime behavior and CPU/RSS savings must still be verified on a
+compiled GodotPhysics3D engine.
+
 ## XPBD dihedral-angle cloth bending (3D)
 
 GodotPhysics3D now supports an **opt-in, angle-based XPBD hinge bending**
