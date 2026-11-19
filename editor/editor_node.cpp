@@ -118,6 +118,7 @@
 #include "editor/inspector/editor_resource_picker.h"
 #include "editor/inspector/editor_resource_preview.h"
 #include "editor/inspector/multi_node_edit.h"
+#include "editor/plugins/ai_game_builder_plugin.h"
 #include "editor/plugins/editor_plugin.h"
 #include "editor/plugins/editor_plugin_list.h"
 #include "editor/plugins/editor_resource_conversion_plugin.h"
@@ -9768,6 +9769,7 @@ EditorNode::EditorNode() {
 	add_editor_plugin(memnew(CanvasItemEditorPlugin));
 	add_editor_plugin(memnew(Node3DEditorPlugin));
 	add_editor_plugin(memnew(ScriptEditorPlugin));
+	add_editor_plugin(memnew(AIGameBuilderPlugin));
 
 	if (!Engine::get_singleton()->is_recovery_mode_hint()) {
 		add_editor_plugin(get_game_view_plugin());
