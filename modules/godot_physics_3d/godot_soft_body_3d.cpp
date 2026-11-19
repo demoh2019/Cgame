@@ -37,6 +37,7 @@
 #include "servers/physics_softbody_bending_plasticity.h"
 #include "servers/physics_softbody_link_damping.h"
 #include "servers/physics_softbody_dihedral_damping.h"
+#include "servers/physics_softbody_area_rate_damping.h"
 #include "servers/physics_softbody_aero_lift.h"
 #include "servers/physics_softbody_adiabatic_gas.h"
 #include "servers/physics_softbody_shape_matching.h"
@@ -2360,6 +2361,24 @@ void GodotSoftBody3D::solve_constraints(real_t p_delta) {
 				Node &d = nodes[hinge.d];
 				physics_softbody_damp_dihedral(a.x, b.x, c.x, d.x,
 						a.v, b.v, c.v, d.v, a.im, b.im, c.im, d.im, fraction);
+			}
+		}
+	}
+
+	// Optional membrane area-rate dissipation (Kelvin-Voigt-style viscous
+	// response). The Jacobian is translation/rotation invariant, so a rigid
+	// motion does not lose energy. Execute before x <- q + v*dt, like the
+	// existing longitudinal and dihedral dashpots. No buffers are allocated.
+	const real_t area_damping = get_space()->get_soft_body_area_rate_damping();
+	if (area_damping > real_t(0.0) && p_delta > real_t(0.0) && !faces.is_empty()) {
+		const double fraction = 1.0 - Math::exp(-double(area_damping) * double(p_delta));
+		if (Math::is_finite(fraction) && fraction > 0.0 && fraction <= 1.0) {
+			for (const Face &face : faces) {
+				Node &a = *face.n[0];
+				Node &b = *face.n[1];
+				Node &c = *face.n[2];
+				physics_softbody_damp_triangle_area_rate(a.x, b.x, c.x,
+						a.v, b.v, c.v, a.im, b.im, c.im, fraction);
 			}
 		}
 	}
