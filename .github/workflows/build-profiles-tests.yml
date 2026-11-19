@@ -1,0 +1,38 @@
+name: Build Profiles CLI tests
+
+on:
+  push:
+    branches: [develop]
+    paths:
+      - "misc/scripts/build_profiles.py"
+      - "misc/scripts/tests/test_build_profiles.py"
+      - "misc/scripts/README_build_profiles.md"
+      - ".github/workflows/build-profiles-tests.yml"
+  pull_request:
+    paths:
+      - "misc/scripts/build_profiles.py"
+      - "misc/scripts/tests/test_build_profiles.py"
+      - "misc/scripts/README_build_profiles.md"
+      - ".github/workflows/build-profiles-tests.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  profiles:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+        python-version: ["3.10", "3.13"]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+      - name: Check syntax
+        run: python -m py_compile misc/scripts/build_profiles.py misc/scripts/tests/test_build_profiles.py
+      - name: Run regression tests
+        run: python -m unittest discover -s misc/scripts/tests -p 'test_build_profiles.py' -v
