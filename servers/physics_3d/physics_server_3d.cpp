@@ -635,6 +635,10 @@ PhysicsServer3D::PhysicsServer3D() {
 	// (V_rest / V)^gamma. 1 is isothermal; ~1.4 approximates adiabatic air.
 	// Requires a manifold closed mesh and pressure_coefficient > 0.
 	GLOBAL_DEF(PropertyInfo(Variant::FLOAT, "physics/3d/solver/soft_body_gas_pressure_gamma", PROPERTY_HINT_RANGE, "0,5,0.1"), 0.0);
+	// Apply water-plane hydrostatic pressure to closed deformable surfaces.
+	// Uses physics/3d/fluid_plane surface/density, default disabled. Face
+	// triangles are clipped against the surface and pressure integrated.
+	GLOBAL_DEF(PropertyInfo(Variant::BOOL, "physics/3d/solver/soft_body_hydrostatic_pressure"), false);
 	// Optional tangential aerodynamic skin drag for cloth. Multiplies the
 	// SoftBody3D drag coefficient; zero preserves the normal-only model.
 	GLOBAL_DEF(PropertyInfo(Variant::FLOAT, "physics/3d/solver/soft_body_tangential_drag_ratio", PROPERTY_HINT_RANGE, "0,10,0.01,or_greater"), 0.0);
