@@ -402,6 +402,13 @@ PhysicsServer2D::PhysicsServer2D() {
 	// Requires rotational bounds and is off by default until benchmarked.
 	GLOBAL_DEF(PropertyInfo(Variant::BOOL, "physics/2d/solver/ccd_tight_rotational_bounds"), false);
 	GLOBAL_DEF(PropertyInfo(Variant::BOOL, "physics/2d/solver/implicit_damping"), false);
+	// Optional uniform fully submerged fluid approximation, inspired by
+	// Jolt's buoyancy/drag: 1 = neutral buoyancy, >1 floats. All effects
+	// are off by default. Drag coefficients are mass/inertia normalized.
+	GLOBAL_DEF(PropertyInfo(Variant::FLOAT, "physics/2d/solver/fluid_linear_drag", PROPERTY_HINT_RANGE, "0,100,0.01,or_greater"), 0.0);
+	GLOBAL_DEF(PropertyInfo(Variant::FLOAT, "physics/2d/solver/fluid_angular_drag", PROPERTY_HINT_RANGE, "0,100,0.01,or_greater"), 0.0);
+	GLOBAL_DEF(PropertyInfo(Variant::FLOAT, "physics/2d/solver/fluid_buoyancy", PROPERTY_HINT_RANGE, "0,2,0.01,or_greater"), 0.0);
+	GLOBAL_DEF(PropertyInfo(Variant::VECTOR2, "physics/2d/solver/fluid_flow_velocity"), Vector2());
 	// Bullet-style rotational resistance for loaded rigid contacts; off by default.
 	GLOBAL_DEF(PropertyInfo(Variant::FLOAT, "physics/2d/solver/rolling_friction", PROPERTY_HINT_RANGE, "0,1,0.01,or_greater"), 0.0);
 	// Suppress tiny bounces at contacts so stacked bodies can settle (pixels per second).
