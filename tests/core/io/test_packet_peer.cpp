@@ -389,4 +389,58 @@ TEST_CASE("[PacketPeer][Performance] Repeated Variant encoding reuses scratch ca
 	CHECK(String(small) == "ok");
 }
 
+
+class CountingStreamBuffer : public StreamPeerBuffer {
+public:
+	int partial_reads = 0;
+
+	Error get_partial_data(uint8_t *p_buffer, int p_bytes, int &r_received) override {
+		partial_reads++;
+		return StreamPeerBuffer::get_partial_data(p_buffer, p_bytes, r_received);
+	}
+};
+
+TEST_CASE("[PacketPeer][Performance] Cached frames avoid redundant stream polls") {
+	Ref<CountingStreamBuffer> stream;
+	stream.instantiate();
+	Ref<PacketPeerStream> packets;
+	packets.instantiate();
+	packets->set_stream_peer(stream);
+	packets->set_input_buffer_max_size(16384);
+
+	// All complete frames fit into one poll; consuming them should never
+	// ask the underlying StreamPeer to read again.
+	constexpr int COUNT = 512;
+	Vector<uint8_t> wire;
+	for (int i = 0; i < COUNT; ++i) {
+		const uint8_t frame[] = { 1, 0, 0, 0, uint8_t(i) };
+		wire.append_array(Span<uint8_t>(frame, 5));
+	}
+	REQUIRE(stream->put_data(wire.ptr(), wire.size()) == OK);
+	stream->seek(0);
+	const uint8_t *buffer = nullptr;
+	int length = 0;
+	for (int i = 0; i < COUNT; ++i) {
+		REQUIRE(packets->get_packet(&buffer, length) == OK);
+		REQUIRE(length == 1);
+		CHECK(buffer[0] == uint8_t(i));
+	}
+	CHECK(stream->partial_reads == 1);
+
+	// When the buffered batch is empty, the next request polls again.
+	ERR_PRINT_OFF;
+	CHECK(packets->get_packet(&buffer, length) == ERR_UNAVAILABLE);
+	ERR_PRINT_ON;
+	CHECK(stream->partial_reads == 2);
+
+	// Appending a new frame is observed on the next poll.
+	const uint8_t final_frame[] = { 1, 0, 0, 0, 77 };
+	REQUIRE(stream->put_data(final_frame, 5) == OK);
+	stream->seek(wire.size());
+	REQUIRE(packets->get_packet(&buffer, length) == OK);
+	REQUIRE(length == 1);
+	CHECK(buffer[0] == 77);
+	CHECK(stream->partial_reads == 3);
+}
+
 } // namespace TestPacketPeer

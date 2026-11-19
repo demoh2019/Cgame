@@ -228,7 +228,12 @@ int PacketPeerStream::get_available_packet_count() const {
 
 Error PacketPeerStream::get_packet(const uint8_t **r_buffer, int &r_buffer_size) {
 	ERR_FAIL_COND_V(peer.is_null(), ERR_UNCONFIGURED);
-	_poll_buffer();
+	// Already complete packets are buffered. Avoid querying the underlying
+	// stream and re-examining the ring for every packet in a large batch.
+	// The next get_packet() automatically polls once the batch is consumed.
+	if (complete_packet_count == 0) {
+		_poll_buffer();
+	}
 
 	ERR_FAIL_COND_V(complete_packet_count == 0, ERR_UNAVAILABLE);
 	const int remaining = ring_buffer.data_left();
