@@ -24,6 +24,12 @@ textures/default_filters/use_nearest_mipmap_filter=false
 3d/solver/soft_body_xpbd_strain_max_stretch_ratio=1.5
 3d/solver/soft_body_xpbd_strain_min_compression_ratio=0.6
 3d/solver/soft_body_xpbd_strain_limit_compliance=0.0
+# Enable XPBD edge constraints for direction-dependent cloth behavior.
+# Only the Physics Lab demo uses this non-isotropic stretch preset.
+# Try ratio=1 to restore uniform edge compliance for comparison.
+3d/solver/soft_body_xpbd_compliance=0.00005
+3d/solver/soft_body_xpbd_parallel_compliance_ratio=0.2
+3d/solver/soft_body_xpbd_material_axis=Vector3(1, 0, 0)
 # Coupled StVK membrane deformation (GodotPhysics3D backend only).
 3d/solver/soft_body_xpbd_membrane_compliance=0.00001
 3d/solver/soft_body_membrane_poisson_ratio=0.3

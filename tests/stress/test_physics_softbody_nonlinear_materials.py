@@ -142,7 +142,7 @@ class TestSoftbodyNonlinearMaterials(unittest.TestCase):
         self.assertIn("get_soft_body_xpbd_compression_hardening()", soft)
         self.assertIn("physics_xpbd_compression_hardening_alpha(", soft)
         self.assertIn("physics_softbody_damp_strain_rate(", soft)
-        self.assertIn("use_tension_hardening || use_compression_hardening", soft)
+        self.assertIn("use_tension_hardening || use_compression_hardening || use_anisotropic_stretch", soft)
         self.assertIn("if (strain_rate_damping > real_t(0.0)", soft)
         begin = soft.index("void GodotSoftBody3D::solve_constraints(")
         damp = soft.index("physics_softbody_damp_strain_rate(", begin)

@@ -50,6 +50,7 @@
 #include "servers/physics_softbody_volume_safe.h"
 #include "servers/physics_xpbd_distance.h"
 #include "servers/physics_xpbd_tension_hardening.h"
+#include "servers/physics_xpbd_anisotropic_stretch.h"
 #include "servers/physics_xpbd_compression_hardening.h"
 #include "servers/physics_xpbd_area.h"
 #include "servers/physics_xpbd_dihedral.h"
@@ -2838,6 +2839,8 @@ void GodotSoftBody3D::solve_constraints(real_t p_delta) {
 	const bool use_tension_hardening = use_xpbd && tension_hardening > real_t(0.0);
 	const real_t compression_hardening = get_space() ? get_space()->get_soft_body_xpbd_compression_hardening() : real_t(0.0);
 	const bool use_compression_hardening = use_xpbd && compression_hardening > real_t(0.0);
+	const real_t parallel_ratio = get_space() ? get_space()->get_soft_body_xpbd_parallel_compliance_ratio() : real_t(1.0);
+	const bool use_anisotropic_stretch = use_xpbd && parallel_ratio != real_t(1.0);
 	// Unilateral strain limits supplement (rather than replace) the elastic
 	// stretch solver. No extra per-link scratch or work with both ratios 0.
 	const real_t strain_max_ratio = get_space() ? get_space()->get_soft_body_xpbd_strain_max_stretch_ratio() : real_t(0.0);
@@ -2912,16 +2915,23 @@ void GodotSoftBody3D::solve_constraints(real_t p_delta) {
 
 	// Freeze nonlinear compliance for the whole physics step. Recomputing
 	// alpha within iterations while retaining lambda causes oscillation.
-	if (use_tension_hardening || use_compression_hardening) {
+	if (use_tension_hardening || use_compression_hardening || use_anisotropic_stretch) {
 		xpbd_link_hardening_alphas.resize(links.size());
 		const real_t yield_strain = get_space()->get_soft_body_xpbd_tension_yield_strain();
 		const real_t compression_yield = get_space()->get_soft_body_xpbd_compression_yield_strain();
+		const Vector3 material_axis = get_space()->get_soft_body_xpbd_material_axis();
 		for (uint32_t link_index = 0; link_index < links.size(); ++link_index) {
 			const Link &link = links[link_index];
 			real_t link_alpha = alpha;
+			if (use_anisotropic_stretch) {
+				// Use undeformed mesh coordinates, not live world-space link
+				// directions. The fiber frame must follow the moving cloth.
+				physics_xpbd_anisotropic_stretch_alpha(link.n[0]->s, link.n[1]->s,
+						material_axis, alpha, parallel_ratio, link_alpha);
+			}
 			if (use_tension_hardening) {
 				physics_xpbd_tension_hardening_alpha(link.n[0]->x, link.n[1]->x,
-						link.rl, alpha, yield_strain, tension_hardening, link_alpha);
+						link.rl, link_alpha, yield_strain, tension_hardening, link_alpha);
 			}
 			if (use_compression_hardening) {
 				// Tension and compression are disjoint. Preserve the alpha set
@@ -3034,7 +3044,7 @@ void GodotSoftBody3D::solve_constraints(real_t p_delta) {
 				if (link.c0 > 0.0) {
 					physics_xpbd_solve_distance(link.n[0]->x, link.n[1]->x,
 							link.n[0]->im, link.n[1]->im, link.rl,
-							(use_tension_hardening || use_compression_hardening) ? xpbd_link_hardening_alphas[link_index] : alpha,
+							(use_tension_hardening || use_compression_hardening || use_anisotropic_stretch) ? xpbd_link_hardening_alphas[link_index] : alpha,
 							xpbd_link_lambdas[link_index]);
 				}
 			}
