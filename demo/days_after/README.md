@@ -107,3 +107,25 @@ world containers, crafting cooldowns and multiplayer state are not persisted.
 ```sh
 ./bin/godot.linuxbsd.editor.x86_64 --headless --path demo/days_after --script res://smoke_test_saves.gd
 ```
+
+## Shelter storage and persistent world snapshot
+
+A physical crate near the starting position is the survivor's offline shelter stash.
+Aim at it and press **E** to open or close. While near it, **Tab** cycles items,
+**G** deposits one, **H** withdraws one and **Esc** closes the interface. An
+equipped item cannot be deposited if it is the character's final owned copy.
+
+- **F5/F9** keeps the existing player-only save/load.
+- **F6/F10** saves/loads **both survivor and stash** to
+  `user://days_after_world.json`.
+- Snapshots validate both inventories and player stats before applying changes.
+  Invalid or incompatible data is rejected without partially changing live state.
+- This remains a **local offline save**. Enemy state, world resource timers,
+  player-built structures and multiplayer progression are not yet persistent.
+
+```sh
+godot --headless --path demo/days_after --script res://smoke_test_stash.gd
+```
+
+The old `smoke_test_inventory.gd` was also fixed to use the current
+`get_item_count()` API for food and water.
