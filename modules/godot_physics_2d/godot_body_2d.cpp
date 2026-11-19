@@ -46,35 +46,29 @@ void GodotBody2D::update_mass_properties() {
 
 	switch (mode) {
 		case PS2DE::BODY_MODE_RIGID: {
-			real_t total_area = 0;
+			// Accumulate area and its first moment in a single pass. The center
+			// of mass does not depend on the total body mass, so there is no
+			// reason to revisit every shape to normalize its contribution.
+			real_t total_area = 0.0;
+			Vector2 weighted_centroid;
 			for (int i = 0; i < get_shape_count(); i++) {
 				if (is_shape_disabled(i)) {
 					continue;
 				}
+
 				const GodotShape2D *shape = get_shape(i);
-				total_area += shape->get_mass_area() * Math::abs(get_shape_transform(i).determinant());
-			}
-
-			if (calculate_center_of_mass) {
-				// We have to recompute the center of mass.
-				center_of_mass_local = Vector2();
-
-				if (total_area != 0.0) {
-					for (int i = 0; i < get_shape_count(); i++) {
-						if (is_shape_disabled(i)) {
-							continue;
-						}
-
-						const GodotShape2D *shape = get_shape(i);
-						const real_t area = shape->get_mass_area() * Math::abs(get_shape_transform(i).determinant());
-						const real_t mass_new = area * mass / total_area;
-
-						// Use each shape's actual centroid when available (e.g. convex polygons).
-						center_of_mass_local += mass_new * get_shape_transform(i).xform(shape->get_center_of_mass());
-					}
-
-					center_of_mass_local /= mass;
+				const Transform2D &shape_transform = get_shape_transform(i);
+				const real_t area = shape->get_mass_area() * Math::abs(shape_transform.determinant());
+				if (area <= 0.0) {
+					continue;
 				}
+				total_area += area;
+				if (calculate_center_of_mass) {
+					weighted_centroid += area * shape_transform.xform(shape->get_center_of_mass());
+				}
+			}
+			if (calculate_center_of_mass) {
+				center_of_mass_local = total_area > 0.0 ? weighted_centroid / total_area : Vector2();
 			}
 
 			if (calculate_inertia) {
