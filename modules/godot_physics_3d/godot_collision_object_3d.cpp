@@ -30,6 +30,7 @@
 
 #include "godot_collision_object_3d.h"
 #include "servers/physics_ccd_rotational_bounds.h"
+#include "servers/physics_ccd_tight_rotational_bounds.h"
 #include "godot_shape_volume_3d.h"
 
 #include "godot_physics_server_3d.h"
@@ -236,10 +237,18 @@ void GodotCollisionObject3D::_update_shapes_with_motion(const Vector3 &p_motion,
 		Transform3D xform = transform * s.xform;
 		shape_aabb = xform.xform(shape_aabb);
 		// Conservative rotational broadphase envelope about the world COM.
-		const real_t rotation_padding = godot_physics_ccd_rotational_padding(shape_aabb, p_rotation_pivot, rotation_factor);
-		shape_aabb.merge_with(AABB(shape_aabb.position + p_motion, shape_aabb.size));
-		if (rotation_padding > real_t(0.0)) {
-			shape_aabb.grow_by(rotation_padding);
+		if (rotation_factor > real_t(0.0) && space->is_ccd_tight_rotational_bounds_enabled()) {
+			// Evaluate swept extrema of each world AABB corner around the COM,
+			// then apply the linear translation envelope conservatively.
+			shape_aabb = godot_physics_ccd_tight_rotational_bounds(
+					shape_aabb, p_rotation_pivot, p_angular_velocity * p_step, p_motion);
+		} else {
+			// Preserve the original chord-padding path, including when disabled.
+			const real_t rotation_padding = godot_physics_ccd_rotational_padding(shape_aabb, p_rotation_pivot, rotation_factor);
+			shape_aabb.merge_with(AABB(shape_aabb.position + p_motion, shape_aabb.size));
+			if (rotation_padding > real_t(0.0)) {
+				shape_aabb.grow_by(rotation_padding);
+			}
 		}
 		// Skip the BVH lookup and lock if the proxy bounds are unchanged.
 		// The swept AABB and ordinary AABB are cached independently per update.
