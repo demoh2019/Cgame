@@ -369,13 +369,13 @@ func _apply_snapshot(snapshot: Dictionary) -> bool:
     return true
 
 
-func _save_game(path: String = SaveScript.DEFAULT_PATH) -> bool:
+func _save_game(path: String = "user://survival_world_v1.json") -> bool:
     var ok: bool = SaveScript.write_snapshot(_make_snapshot(), path)
     status_message = "World saved." if ok else "Save failed; previous save retained if available."
     return ok
 
 
-func _load_game(path: String = SaveScript.DEFAULT_PATH) -> bool:
+func _load_game(path: String = "user://survival_world_v1.json") -> bool:
     var snapshot: Dictionary = SaveScript.read_snapshot(path)
     if snapshot.is_empty() or not _apply_snapshot(snapshot):
         status_message = "No valid save found; world unchanged."
