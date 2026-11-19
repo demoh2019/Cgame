@@ -72,6 +72,7 @@ func _run() -> void:
 
 	var finite := stepped
 	for i in range(12):
+		finite = base.step(dt) and finite
 		finite = surface.step(dt) and finite
 		finite = replica.step(dt) and finite
 		if not finite:
