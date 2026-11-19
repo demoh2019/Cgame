@@ -167,18 +167,19 @@ void GodotCollisionObject3D::_update_shapes() {
 		AABB shape_aabb = s.shape->get_aabb();
 		Transform3D xform = transform * s.xform;
 		shape_aabb = xform.xform(shape_aabb);
-		shape_aabb.grow_by((s.aabb_cache.size.x + s.aabb_cache.size.y) * 0.5 * 0.05);
+		// Base the broadphase margin on the current shape, not a stale cached bound.
+		shape_aabb.grow_by((shape_aabb.size.x + shape_aabb.size.y) * 0.5 * 0.05);
 		s.aabb_cache = shape_aabb;
 
 		Vector3 scale = xform.get_basis().get_scale();
 		s.area_cache = s.shape->get_volume() * scale.x * scale.y * scale.z;
 
 		if (s.bpid == 0) {
+			// create() already registers the AABB in the requested static/dynamic tree.
 			s.bpid = space->get_broadphase()->create(this, i, shape_aabb, _static);
-			space->get_broadphase()->set_static(s.bpid, _static);
+		} else {
+			space->get_broadphase()->move(s.bpid, shape_aabb);
 		}
-
-		space->get_broadphase()->move(s.bpid, shape_aabb);
 	}
 }
 
@@ -201,11 +202,11 @@ void GodotCollisionObject3D::_update_shapes_with_motion(const Vector3 &p_motion)
 		s.aabb_cache = shape_aabb;
 
 		if (s.bpid == 0) {
+			// create() already registers the AABB in the requested static/dynamic tree.
 			s.bpid = space->get_broadphase()->create(this, i, shape_aabb, _static);
-			space->get_broadphase()->set_static(s.bpid, _static);
+		} else {
+			space->get_broadphase()->move(s.bpid, shape_aabb);
 		}
-
-		space->get_broadphase()->move(s.bpid, shape_aabb);
 	}
 }
 

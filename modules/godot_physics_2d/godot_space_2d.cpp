@@ -123,13 +123,13 @@ bool GodotPhysicsDirectSpaceState2D::intersect_ray(const PS2DT::RayParameters &p
 
 	int amount = space->broadphase->cull_segment(begin, end, space->intersection_query_results, GodotSpace2D::INTERSECTION_QUERY_MAX, space->intersection_query_subindex_results);
 
-	//todo, create another array that references results, compute AABBs and check closest point to ray origin, sort, and stop evaluating results when beyond first collision
+	// Results are unordered; the cached per-shape AABB prunes candidates after the first hit.
 
 	bool collided = false;
 	Vector2 res_point, res_normal;
 	int res_shape = -1;
 	const GodotCollisionObject2D *res_obj = nullptr;
-	real_t min_d = 1e10;
+	real_t min_d = Math::INF;
 
 	for (int i = 0; i < amount; i++) {
 		if (!_can_collide_with(space->intersection_query_results[i], p_parameters.collision_mask, p_parameters.collide_with_bodies, p_parameters.collide_with_areas)) {
@@ -143,6 +143,12 @@ bool GodotPhysicsDirectSpaceState2D::intersect_ray(const PS2DT::RayParameters &p
 		const GodotCollisionObject2D *col_obj = space->intersection_query_results[i];
 
 		int shape_idx = space->intersection_query_subindex_results[i];
+
+		// Once a nearer hit is known, avoid narrowphase tests beyond it.
+		if (collided && !col_obj->get_shape_aabb(shape_idx).intersects_segment(begin, res_point)) {
+			continue;
+		}
+
 		Transform2D inv_xform = col_obj->get_shape_inv_transform(shape_idx) * col_obj->get_inv_transform();
 
 		Vector2 local_from = inv_xform.xform(begin);
@@ -172,7 +178,7 @@ bool GodotPhysicsDirectSpaceState2D::intersect_ray(const PS2DT::RayParameters &p
 			Transform2D xform = col_obj->get_transform() * col_obj->get_shape_transform(shape_idx);
 			shape_point = xform.xform(shape_point);
 
-			real_t ld = normal.dot(shape_point);
+			real_t ld = normal.dot(shape_point - begin);
 
 			if (ld < min_d) {
 				min_d = ld;

@@ -1207,10 +1207,21 @@ func _physics_raycast_2d(scale: int) -> Dictionary:
 		if not hit.is_empty():
 			hits += 1
 	var query_ms := float(Time.get_ticks_usec() - started) / 1000.0
+	# Verify that the unordered broadphase still returns the nearest body in both directions.
+	var ray_from := Vector2(-5.0, 0.0)
+	var ray_to := Vector2(float(bodies) * 8.0 + 5.0, 0.0)
+	var space_state := root.get_world_2d().direct_space_state
+	var first_hit := space_state.intersect_ray(PhysicsRayQueryParameters2D.create(ray_from, ray_to))
+	var last_hit := space_state.intersect_ray(PhysicsRayQueryParameters2D.create(ray_to, ray_from))
+	var nearest_valid := not first_hit.is_empty() and not last_hit.is_empty()
+	if nearest_valid:
+		nearest_valid = absf(first_hit.position.x + 2.0) < 0.05 and absf(last_hit.position.x - (float(bodies - 1) * 8.0 + 2.0)) < 0.05
 	world.queue_free()
 	await process_frame
-	if hits == 0:
-		return {"error": "Physics2D raycasts returned no hits"}
+	if not nearest_valid:
+		return {"error": "Physics2D raycasts returned the wrong nearest hit"}
+	if hits != 150 * scale:
+		return {"error": "Physics2D raycasts missed shapes", "hits": hits, "expected": 150 * scale}
 	return {"bodies": bodies, "queries": 150 * scale, "hits": hits, "query_ms": query_ms}
 
 
@@ -1238,10 +1249,21 @@ func _physics_raycast_3d(scale: int) -> Dictionary:
 		if not hit.is_empty():
 			hits += 1
 	var query_ms := float(Time.get_ticks_usec() - started) / 1000.0
+	# Verify nearest-hit selection when the broadphase reports many candidates.
+	var ray_from := Vector3(-5.0, 0.0, 0.0)
+	var ray_to := Vector3(float(bodies) * 8.0 + 5.0, 0.0, 0.0)
+	var space_state := root.get_world_3d().direct_space_state
+	var first_hit := space_state.intersect_ray(PhysicsRayQueryParameters3D.create(ray_from, ray_to))
+	var last_hit := space_state.intersect_ray(PhysicsRayQueryParameters3D.create(ray_to, ray_from))
+	var nearest_valid := not first_hit.is_empty() and not last_hit.is_empty()
+	if nearest_valid:
+		nearest_valid = absf(first_hit.position.x + 2.0) < 0.05 and absf(last_hit.position.x - (float(bodies - 1) * 8.0 + 2.0)) < 0.05
 	world.queue_free()
 	await process_frame
-	if hits == 0:
-		return {"error": "Physics3D raycasts returned no hits"}
+	if not nearest_valid:
+		return {"error": "Physics3D raycasts returned the wrong nearest hit"}
+	if hits != 150 * scale:
+		return {"error": "Physics3D raycasts missed shapes", "hits": hits, "expected": 150 * scale}
 	return {"bodies": bodies, "queries": 150 * scale, "hits": hits, "query_ms": query_ms}
 
 
