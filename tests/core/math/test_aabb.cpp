@@ -479,4 +479,34 @@ TEST_CASE("[AABB] Finite number checks") {
 			"AABB with two components infinite should not be finite.");
 }
 
+TEST_CASE("[AABB] Get endpoint corners") {
+	AABB aabb(Vector3(1, 2, 3), Vector3(4, 5, 6));
+
+	// Minimum corner (index 0).
+	CHECK(aabb.get_endpoint(0) == Vector3(1, 2, 3));
+
+	// Maximum corner (index 7 = position + size).
+	CHECK(aabb.get_endpoint(7) == Vector3(5, 7, 9));
+
+	// Intermediate corners.
+	CHECK(aabb.get_endpoint(1) == Vector3(1, 2, 9));
+	CHECK(aabb.get_endpoint(2) == Vector3(1, 7, 3));
+	CHECK(aabb.get_endpoint(3) == Vector3(1, 7, 9));
+	CHECK(aabb.get_endpoint(4) == Vector3(5, 2, 3));
+	CHECK(aabb.get_endpoint(5) == Vector3(5, 2, 9));
+	CHECK(aabb.get_endpoint(6) == Vector3(5, 7, 3));
+	CHECK(aabb.get_endpoint(7) == Vector3(5, 7, 9));
+}
+
+TEST_CASE("[AABB] Grow the box") {
+	AABB aabb(Vector3(0, 3, -2), Vector3(2.5, 1, 6));
+
+	AABB expected(Vector3(-2, 1, -4), Vector3(6.5, 5, 10));
+	aabb.grow_by(2);
+	// Grow equally in both directions.
+	CHECK(aabb == expected);
+	CHECK(aabb.grow(0) == aabb);
+	CHECK(aabb.grow(1) == AABB(Vector3(-3, 0, -5), Vector3(8.5, 7, 12)));
+}
+
 } // namespace TestAABB
