@@ -219,7 +219,9 @@ bool GodotCollisionSolver2D::solve_concave(const GodotShape2D *p_shape_A, const 
 		// A world-space margin becomes an ellipse under the inverse affine
 		// transform. Its support along a local axis is the corresponding
 		// inverse-basis row length times the original margin.
-		const real_t local_margin = total_margin * inverse_B.basis_xform_inv(axis).length();
+		const real_t row_x = inverse_B.columns[0][i];
+		const real_t row_y = inverse_B.columns[1][i];
+		const real_t local_margin = total_margin * Math::sqrt(row_x * row_x + row_y * row_y);
 		local_aabb.position[i] = min_projection - local_margin;
 		local_aabb.size[i] = max_projection - min_projection + 2.0 * local_margin;
 	}
