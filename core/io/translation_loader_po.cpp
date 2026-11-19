@@ -31,7 +31,6 @@
 #include "translation_loader_po.h"
 
 #include "core/io/file_access.h"
-#include "core/string/string_builder.h"
 #include "core/string/translation.h"
 
 Ref<Resource> TranslationLoaderPO::load_translation(Ref<FileAccess> r_file, Error *r_error) {
@@ -154,20 +153,6 @@ Ref<Resource> TranslationLoaderPO::load_translation(Ref<FileAccess> r_file, Erro
 		String msg_str;
 		String msg_context;
 		Vector<String> msgs_plural;
-		// Multiline PO entries may contain thousands of quoted chunks.
-		// Appending to a String on each line repeatedly copies the entire
-		// accumulated prefix. Collect chunks and materialize only at entry
-		// boundaries, making long message parsing linear in total text size.
-		StringBuilder id_parts;
-		StringBuilder str_parts;
-		StringBuilder context_parts;
-		StringBuilder plural_parts;
-		// Most PO entries have only one or two fragments. Avoid constructing
-		// builder storage on that common path; switch to it for long entries.
-		uint32_t id_chunks = 0;
-		uint32_t str_chunks = 0;
-		uint32_t context_chunks = 0;
-		uint32_t plural_chunks = 0;
 
 		if (r_error) {
 			*r_error = ERR_FILE_CORRUPT;
@@ -180,27 +165,6 @@ Ref<Resource> TranslationLoaderPO::load_translation(Ref<FileAccess> r_file, Erro
 		bool skip_this = false;
 		bool skip_next = false;
 		bool is_eof = false;
-
-		auto finish_entry_text = [&]() {
-			if (id_parts.num_strings_appended() != 0) {
-				msg_id += id_parts.as_string();
-				id_parts = StringBuilder();
-			}
-			if (str_parts.num_strings_appended() != 0) {
-				msg_str += str_parts.as_string();
-				str_parts = StringBuilder();
-			}
-			if (context_parts.num_strings_appended() != 0) {
-				msg_context += context_parts.as_string();
-				context_parts = StringBuilder();
-			}
-		};
-		auto finish_plural_text = [&]() {
-			if (plural_index >= 0 && plural_parts.num_strings_appended() != 0) {
-				msgs_plural.write[plural_index] += plural_parts.as_string();
-				plural_parts = StringBuilder();
-			}
-		};
 
 		while (!is_eof) {
 			String l = r_file->get_line().strip_edges();
@@ -217,8 +181,6 @@ Ref<Resource> TranslationLoaderPO::load_translation(Ref<FileAccess> r_file, Erro
 
 			if (l.begins_with("msgctxt")) {
 				ERR_FAIL_COND_V_MSG(status != STATUS_READING_STRING && status != STATUS_READING_PLURAL, Ref<Resource>(), vformat("Unexpected 'msgctxt', was expecting 'msgid_plural' or 'msgstr' before 'msgctxt' while parsing: %s:%d.", path, line));
-				finish_entry_text();
-				finish_plural_text();
 
 				// In PO file, "msgctxt" appears before "msgid". If we encounter a "msgctxt", we add what we have read
 				// and set "entered_context" to true to prevent adding twice.
@@ -231,7 +193,6 @@ Ref<Resource> TranslationLoaderPO::load_translation(Ref<FileAccess> r_file, Erro
 					}
 				}
 				msg_context = "";
-				context_chunks = 0;
 				l = l.substr(7).strip_edges();
 				status = STATUS_READING_CONTEXT;
 				entered_context = true;
@@ -249,13 +210,9 @@ Ref<Resource> TranslationLoaderPO::load_translation(Ref<FileAccess> r_file, Erro
 				plural_index = -1;
 				msgs_plural.clear();
 				msgs_plural.resize(plural_forms);
-				plural_parts = StringBuilder();
-				plural_chunks = 0;
 				status = STATUS_READING_PLURAL;
 			} else if (l.begins_with("msgid")) {
 				ERR_FAIL_COND_V_MSG(status == STATUS_READING_ID, Ref<Resource>(), vformat("Unexpected 'msgid', was expecting 'msgstr' while parsing: %s:%d.", path, line));
-				finish_entry_text();
-				finish_plural_text();
 
 				if (!msg_id.is_empty()) {
 					if (!skip_this && !entered_context) {
@@ -285,11 +242,6 @@ Ref<Resource> TranslationLoaderPO::load_translation(Ref<FileAccess> r_file, Erro
 				}
 				msg_id = "";
 				msg_str = "";
-				id_chunks = 0;
-				str_chunks = 0;
-				if (!entered_context) {
-					context_chunks = 0;
-				}
 				skip_this = skip_next;
 				skip_next = false;
 				entered_context = false;
@@ -297,8 +249,6 @@ Ref<Resource> TranslationLoaderPO::load_translation(Ref<FileAccess> r_file, Erro
 
 			if (l.begins_with("msgstr[")) {
 				ERR_FAIL_COND_V_MSG(status != STATUS_READING_PLURAL, Ref<Resource>(), vformat("Unexpected 'msgstr[]', was expecting 'msgid_plural' before 'msgstr[]' while parsing: %s:%d.", path, line));
-				finish_plural_text();
-				plural_chunks = 0;
 				plural_index++; // Increment to add to the next slot in vector msgs_plural.
 				l = l.substr(9).strip_edges();
 			} else if (l.begins_with("msgstr")) {
@@ -343,38 +293,23 @@ Ref<Resource> TranslationLoaderPO::load_translation(Ref<FileAccess> r_file, Erro
 			l = l.c_unescape();
 
 			if (status == STATUS_READING_ID) {
-				if (++id_chunks <= 2) {
-					msg_id += l;
-				} else {
-					id_parts.append(l);
-				}
+				msg_id += l;
 			} else if (status == STATUS_READING_STRING) {
-				if (++str_chunks <= 2) {
-					msg_str += l;
-				} else {
-					str_parts.append(l);
-				}
+				msg_str += l;
 			} else if (status == STATUS_READING_CONTEXT) {
-				if (++context_chunks <= 2) {
-					msg_context += l;
-				} else {
-					context_parts.append(l);
-				}
+				msg_context += l;
 			} else if (status == STATUS_READING_PLURAL && plural_index >= 0) {
 				ERR_FAIL_COND_V_MSG(plural_index >= plural_forms, Ref<Resource>(), vformat("Unexpected plural form while parsing: %s:%d.", path, line));
-				if (++plural_chunks <= 2) {
-					msgs_plural.write[plural_index] += l;
-				} else {
-					plural_parts.append(l);
-				}
+				// Update the existing String in place. Building a temporary
+				// (old + fragment) forks the COW buffer on every line and
+				// repeatedly copies its whole prefix for multiline plurals.
+				msgs_plural.write[plural_index] += l;
 			}
 
 			line++;
 		}
 
 		// Add the last set of data from last iteration.
-		finish_entry_text();
-		finish_plural_text();
 		if (status == STATUS_READING_STRING) {
 			if (!msg_id.is_empty()) {
 				if (!skip_this) {
