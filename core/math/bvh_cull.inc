@@ -134,7 +134,6 @@ void cast_segment(const POINT &p_from, const POINT &p_to, SegmentCastCallback p_
 
 	// Visit the tree whose bounds are nearest to the ray origin first.
 	// A near hit can clip away the other tree before any narrowphase work.
-	const POINT motion = p_to - p_from;
 	typename BVHABB_CLASS::Segment segment;
 	segment.from = p_from;
 	segment.to = p_to;
