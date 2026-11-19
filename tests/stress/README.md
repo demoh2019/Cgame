@@ -158,6 +158,49 @@ For speed/RSS comparisons capture before/after runs using the runner's
 `physics_sparse_2d`, `physics_sparse_3d` and
 `physics_contact_manifolds_2d` workloads on the same host.
 
+## Configurable material friction mixing (Box2D-style)
+
+GodotPhysics previously always combined the two contacting bodies' friction as
+`abs(min(friction_a, friction_b))`. Projects can now opt into other material
+combination rules with `physics/2d/solver/friction_combine_mode` and
+`physics/3d/solver/friction_combine_mode`:
+
+| Value | Mode | Example: 0.25 vs. 1.0 |
+| ---: | --- | ---: |
+| 0 | Legacy Minimum (default, backwards compatible) | 0.25 |
+| 1 | Geometric Mean (Box2D-style) | 0.5 |
+| 2 | Average | 0.625 |
+| 3 | Maximum | 1.0 |
+
+For the opt-in modes, coefficients are converted to non-negative magnitudes
+before mixing. The 0 mode retains the historical GodotPhysics behavior,
+including its treatment of negative material friction. Both backends read
+this setting **once when a new physics space is created**. Changes to this
+setting do not update already created spaces or third-party physics backends.
+
+Mixed friction is calculated once per rigid-body contact pair's pre-solve pass,
+not repeatedly on every solver iteration. A frictionless pair retains the
+existing fast path with tangential impulses disabled.
+
+The separate low-level regression compares two concurrent worlds (legacy vs.
+geometric) with otherwise identical sliding bodies and contact shapes:
+
+```bash
+./bin/godot.linuxbsd.editor.dev.x86_64 --headless \
+  --path tests/stress --script res://physics_friction_mix_regression.gd
+```
+
+It asserts that the geometric mean slows the sliding body more than legacy
+mixing under default test-project gravity. Run this with **built-in GodotPhysics**
+selected. The script restores the original ProjectSettings value and frees all
+RIDs. This regression checks one geometry and material combination; it is not
+a complete friction or determinism proof.
+
+For contact throughput and numerical-stability measurements across large
+manifolds, compare the existing `physics_contacts_friction_2d`,
+`physics_contact_manifolds_2d`, and `physics_3d` stress cases with the same
+hardware and engine build.
+
 ## Contact restitution stability (Jolt / Box2D-style threshold)
 
 Built-in GodotPhysics now suppresses contact restitution when the approaching
