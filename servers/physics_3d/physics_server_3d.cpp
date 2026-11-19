@@ -840,6 +840,10 @@ PhysicsServer3D::PhysicsServer3D() {
 	// Closed, consistently oriented soft meshes can preserve enclosed volume.
 	// Zero disables the extra XPBD constraint and its node-gradient buffer.
 	GLOBAL_DEF(PropertyInfo(Variant::FLOAT, "physics/3d/solver/soft_body_xpbd_volume_compliance", PROPERTY_HINT_RANGE, "0,0.01,0.000001,or_greater"), 0.0);
+	// Opt-in global corotational shape memory for soft solids. The
+	// frequency-independent exponential PBD projection costs O(vertices),
+	// but does not require a tetrahedral mesh or any persistent buffers.
+	GLOBAL_DEF(PropertyInfo(Variant::FLOAT, "physics/3d/solver/soft_body_shape_matching_rate", PROPERTY_HINT_RANGE, "0,1000,0.1,or_greater,suffix:1/s"), 0.0);
 	// Bulk viscosity removes only the breathing/compression mode of a valid
 	// closed soft body while preserving its free translation and rotation.
 	// Zero skips the O(faces + nodes) velocity projection and scratch setup.

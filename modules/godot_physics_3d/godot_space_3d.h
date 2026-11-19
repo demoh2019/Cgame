@@ -244,6 +244,7 @@ private:
 	real_t soft_body_xpbd_tether_compliance = 0.0; // Zero bypasses tether setup and solver.
 	real_t soft_body_xpbd_tether_slack = 0.05; // Opt-in triangle area preservation.
 	real_t soft_body_xpbd_volume_compliance = 0.0; // Opt-in enclosed volume preservation.
+	real_t soft_body_shape_matching_rate = 0.0; // Global corotational shape-memory rate, 1/s.
 	real_t soft_body_volume_damping_rate = 0.0; // 1/s, opt-in global bulk viscosity.
 	real_t soft_body_volume_plastic_yield_strain = 0.15; // Relative volume strain threshold.
 	real_t soft_body_volume_plastic_creep_rate = 0.0; // 1/s, 0 disables permanent volumetric deformation.
@@ -481,6 +482,7 @@ public:
 	_FORCE_INLINE_ real_t get_soft_body_xpbd_tether_compliance() const { return soft_body_xpbd_tether_compliance; }
 	_FORCE_INLINE_ real_t get_soft_body_xpbd_tether_slack() const { return soft_body_xpbd_tether_slack; }
 	_FORCE_INLINE_ real_t get_soft_body_xpbd_volume_compliance() const { return soft_body_xpbd_volume_compliance; }
+	_FORCE_INLINE_ real_t get_soft_body_shape_matching_rate() const { return soft_body_shape_matching_rate; }
 	_FORCE_INLINE_ real_t get_soft_body_volume_damping_rate() const { return soft_body_volume_damping_rate; }
 	_FORCE_INLINE_ real_t get_soft_body_volume_plastic_yield_strain() const { return soft_body_volume_plastic_yield_strain; }
 	_FORCE_INLINE_ real_t get_soft_body_volume_plastic_creep_rate() const { return soft_body_volume_plastic_creep_rate; }
