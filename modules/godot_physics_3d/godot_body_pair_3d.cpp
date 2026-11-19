@@ -593,6 +593,95 @@ void GodotBodyPair3D::solve(real_t p_step) {
 	// Mixing is independent of contact point; compute once per solver pass.
 	const real_t friction = mixed_friction;
 
+	// Box2D's two-contact block LCP generalized to 3D tensor inertia.
+	// Only solve a well-conditioned pair with nearly parallel contact normals;
+	// every other manifold retains the existing sequential solver.
+	bool block_solved = false;
+	bool block_normal_updated[2] = { false, false };
+	if (space->is_block_solver_enabled() && contact_count == 2 &&
+			contacts[0].active && contacts[1].active &&
+			contacts[0].normal.dot(contacts[1].normal) > real_t(0.9999)) {
+		Contact &c0 = contacts[0];
+		Contact &c1 = contacts[1];
+		const Vector3 &normal = c0.normal;
+		const Vector3 ra0 = c0.rA.cross(normal);
+		const Vector3 ra1 = c1.rA.cross(normal);
+		const Vector3 rb0 = c0.rB.cross(normal);
+		const Vector3 rb1 = c1.rB.cross(normal);
+		const Vector3 ia0 = inv_inertia_tensor_A.xform(ra0);
+		const Vector3 ia1 = inv_inertia_tensor_A.xform(ra1);
+		const Vector3 ib0 = inv_inertia_tensor_B.xform(rb0);
+		const Vector3 ib1 = inv_inertia_tensor_B.xform(rb1);
+		const real_t inv_mass = inv_mass_A + inv_mass_B;
+		const real_t k00 = inv_mass + ra0.dot(ia0) + rb0.dot(ib0);
+		const real_t k01 = inv_mass + ra0.dot(ia1) + rb0.dot(ib1);
+		const real_t k11 = inv_mass + ra1.dot(ia1) + rb1.dot(ib1);
+		const real_t det = k00 * k11 - k01 * k01;
+		const real_t largest = MAX(k00, k11);
+
+		// Prevent a nearly singular two-point system from amplifying errors.
+		if (k00 > 0.0 && k11 > 0.0 && det > CMP_EPSILON &&
+				largest * largest < real_t(100.0) * det) {
+			const Vector3 rel_linear = B->get_linear_velocity() - A->get_linear_velocity();
+			const Vector3 angular_A = A->get_angular_velocity();
+			const Vector3 angular_B = B->get_angular_velocity();
+			const real_t vn0 = (rel_linear + angular_B.cross(c0.rB) - angular_A.cross(c0.rA)).dot(normal);
+			const real_t vn1 = (rel_linear + angular_B.cross(c1.rB) - angular_A.cross(c1.rA)).dot(normal);
+			const real_t old0 = c0.acc_normal_impulse;
+			const real_t old1 = c1.acc_normal_impulse;
+			const real_t b0 = vn0 + c0.bounce - k00 * old0 - k01 * old1;
+			const real_t b1 = vn1 + c1.bounce - k01 * old0 - k11 * old1;
+			real_t next0 = -(k11 * b0 - k01 * b1) / det;
+			real_t next1 = -(k00 * b1 - k01 * b0) / det;
+			bool valid = next0 >= 0.0 && next1 >= 0.0;
+			// Complementarity: both loaded, one loaded, or neither loaded.
+			if (!valid) {
+				next0 = 0.0;
+				next1 = -b1 / k11;
+				valid = next1 >= 0.0 && k01 * next1 + b0 >= 0.0;
+			}
+			if (!valid) {
+				next1 = 0.0;
+				next0 = -b0 / k00;
+				valid = next0 >= 0.0 && k01 * next0 + b1 >= 0.0;
+			}
+			if (!valid) {
+				next0 = 0.0;
+				next1 = 0.0;
+				valid = b0 >= 0.0 && b1 >= 0.0;
+			}
+			if (valid) {
+				const real_t d0 = next0 - old0;
+				const real_t d1 = next1 - old1;
+				c0.acc_normal_impulse = next0;
+				c1.acc_normal_impulse = next1;
+				if (d0 != 0.0) {
+					const Vector3 impulse = normal * d0;
+					if (collide_A) {
+						A->apply_impulse(-impulse, c0.rA + A->get_center_of_mass());
+					}
+					if (collide_B) {
+						B->apply_impulse(impulse, c0.rB + B->get_center_of_mass());
+					}
+					c0.acc_impulse -= impulse;
+					block_normal_updated[0] = true;
+				}
+				if (d1 != 0.0) {
+					const Vector3 impulse = normal * d1;
+					if (collide_A) {
+						A->apply_impulse(-impulse, c1.rA + A->get_center_of_mass());
+					}
+					if (collide_B) {
+						B->apply_impulse(impulse, c1.rB + B->get_center_of_mass());
+					}
+					c1.acc_impulse -= impulse;
+					block_normal_updated[1] = true;
+				}
+				block_solved = true;
+			}
+		}
+	}
+
 	for (int i = 0; i < contact_count; i++) {
 		Contact &c = contacts[i];
 		if (!c.active) {
@@ -658,7 +747,12 @@ void GodotBodyPair3D::solve(real_t p_step) {
 		//normal impulse
 		real_t vn = dv.dot(c.normal);
 
-		if (Math::abs(vn) > MIN_VELOCITY) {
+		if (block_solved) {
+			// Joint normal impulses were already applied together.
+			if (block_normal_updated[i]) {
+				c.active = true;
+			}
+		} else if (Math::abs(vn) > MIN_VELOCITY) {
 			real_t jn = -(c.bounce + vn) * c.mass_normal;
 			real_t jnOld = c.acc_normal_impulse;
 			c.acc_normal_impulse = MAX(jnOld + jn, 0.0f);
