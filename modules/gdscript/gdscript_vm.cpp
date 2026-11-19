@@ -3836,7 +3836,11 @@ Variant GDScriptFunction::call(GDScriptInstance *p_instance, const Variant **p_a
 				int globalname_idx = _code_ptr[ip + 2];
 				GD_ERR_BREAK(globalname_idx < 0 || globalname_idx >= _global_names_count);
 				const StringName *globalname = &_global_names_ptr[globalname_idx];
-				if (unlikely(!GDScriptLanguage::get_singleton()->get_named_globals_map().has(*globalname))) {
+				// Autoload references are frequently read from script hot loops.
+				// Resolve the named global with one hash lookup instead of has()
+				// followed by operator[] (which probes the same table twice).
+				const Variant *global_value = GDScriptLanguage::get_singleton()->get_named_globals_map().getptr(*globalname);
+				if (unlikely(global_value == nullptr)) {
 #ifdef DEBUG_ENABLED
 					err_text = vformat(R"(Trying to access non-existent autoload singleton "%s".)", *globalname);
 #endif
@@ -3844,7 +3848,7 @@ Variant GDScriptFunction::call(GDScriptInstance *p_instance, const Variant **p_a
 				}
 
 				GET_VARIANT_PTR(dst, 0);
-				*dst = GDScriptLanguage::get_singleton()->get_named_globals_map()[*globalname];
+				*dst = *global_value;
 
 				ip += 3;
 			}
