@@ -56,6 +56,10 @@ public:
 	_FORCE_INLINE_ GodotBody2D **get_body_ptr() const { return _body_ptr; }
 	_FORCE_INLINE_ int get_body_count() const { return _body_count; }
 
+	// Only rigid-rigid contact pairs can safely share immovable bodies across
+	// parallel constraint jobs. Joints and other constraints remain conservative.
+	virtual bool permits_parallel_immovable_body_sharing() const { return false; }
+
 	_FORCE_INLINE_ void disable_collisions_between_bodies(const bool p_disabled) { disabled_collisions_between_bodies = p_disabled; }
 	_FORCE_INLINE_ bool is_disabled_collisions_between_bodies() const { return disabled_collisions_between_bodies; }
 
