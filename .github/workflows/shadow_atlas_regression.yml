@@ -1,0 +1,30 @@
+name: Shadow atlas version regression
+
+on:
+  pull_request:
+    branches: [develop]
+    paths:
+      - 'drivers/gles3/storage/light_storage.cpp'
+      - 'servers/rendering/renderer_rd/storage_rd/light_storage.cpp'
+      - 'misc/scripts/tests/test_shadow_atlas_regression.py'
+      - '.github/workflows/shadow_atlas_regression.yml'
+  push:
+    branches: [develop]
+    paths:
+      - 'drivers/gles3/storage/light_storage.cpp'
+      - 'servers/rendering/renderer_rd/storage_rd/light_storage.cpp'
+      - 'misc/scripts/tests/test_shadow_atlas_regression.py'
+      - '.github/workflows/shadow_atlas_regression.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  fallback-regression:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - name: Compile and run isolated fallback regression checks
+        run: python3 -m unittest discover -s misc/scripts/tests -p 'test_shadow_atlas_regression.py' -v
