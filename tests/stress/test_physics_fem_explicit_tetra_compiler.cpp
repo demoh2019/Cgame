@@ -1,6 +1,7 @@
 // Standalone compile and runtime smoke of the REAL explicit tetra cooker.
 // Build both float and double variants with minimal test-only core stubs.
 #include "servers/physics_fem_explicit_tetra.h"
+#include "servers/physics_fem_lumped_mass.h"
 
 #include <cmath>
 #include <cstdio>
@@ -63,6 +64,53 @@ int main() {
 	if (physics_fem_build_explicit_tetrahedra(
 				positions, shell, indices, -0.5, cooked)) {
 		return 5;
+	}
+	// One interior node + eight surface vertices, with twelve conforming
+	// volumetric elements. The interior particle has no surface triangle.
+	LocalVector<Vector3> cube_vertices;
+	for (const Vector3 &v : {
+			Vector3(-1, -1, -1), Vector3(1, -1, -1),
+			Vector3(1, 1, -1), Vector3(-1, 1, -1),
+			Vector3(-1, -1, 1), Vector3(1, -1, 1),
+			Vector3(1, 1, 1), Vector3(-1, 1, 1),
+			Vector3(0, 0, 0) }) {
+		cube_vertices.push_back(v);
+	}
+	LocalVector<PhysicsFEMConvexFace> cube_surface;
+	LocalVector<uint32_t> cube_tet_indices;
+	for (const PhysicsFEMConvexFace &face : {
+			PhysicsFEMConvexFace{0, 2, 1}, PhysicsFEMConvexFace{0, 3, 2},
+			PhysicsFEMConvexFace{4, 5, 6}, PhysicsFEMConvexFace{4, 6, 7},
+			PhysicsFEMConvexFace{0, 1, 5}, PhysicsFEMConvexFace{0, 5, 4},
+			PhysicsFEMConvexFace{3, 7, 6}, PhysicsFEMConvexFace{3, 6, 2},
+			PhysicsFEMConvexFace{0, 4, 7}, PhysicsFEMConvexFace{0, 7, 3},
+			PhysicsFEMConvexFace{1, 2, 6}, PhysicsFEMConvexFace{1, 6, 5} }) {
+		cube_surface.push_back(face);
+		cube_tet_indices.push_back(8);
+		cube_tet_indices.push_back(face.a);
+		cube_tet_indices.push_back(face.b);
+		cube_tet_indices.push_back(face.c);
+	}
+	LocalVector<PhysicsFEMConvexTetra> cube_tets;
+	if (!physics_fem_build_explicit_tetrahedra(
+				cube_vertices, cube_surface, cube_tet_indices, 8.0, cube_tets) ||
+			cube_tets.size() != 12) {
+		return 6;
+	}
+	LocalVector<double> fractions;
+	LocalVector<real_t> inverse_masses;
+	if (!physics_fem_build_lumped_masses(
+				cube_vertices.size(), cube_tets, real_t(12.0),
+				fractions, inverse_masses) ||
+			fractions.size() != 9 || !near(fractions[8], .25) ||
+			!near(inverse_masses[8], 1.0 / 3.0)) {
+		return 7;
+	}
+	cube_vertices[8] = Vector3(3, 3, 3);
+	if (physics_fem_build_explicit_tetrahedra(
+				cube_vertices, cube_surface, cube_tet_indices, 8.0, cube_tets) ||
+			cube_tets.size() != 12) {
+		return 8;
 	}
 	std::puts("explicit concave multi-tet FEM validation smoke OK");
 	return 0;
