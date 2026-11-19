@@ -810,6 +810,7 @@ Error decode_variant(Variant &r_variant, const uint8_t *p_buffer, int p_len, int
 				dict.set_typed(key_type, value_type);
 			}
 
+			dict.reserve(count);
 			for (int i = 0; i < count; i++) {
 				Variant key, value;
 
