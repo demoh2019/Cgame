@@ -1,0 +1,38 @@
+name: Asset reference map regression tests
+
+on:
+  push:
+    paths:
+      - 'misc/scripts/asset_reference_map.py'
+      - 'misc/scripts/tests/test_asset_reference_map.py'
+      - 'misc/scripts/README_asset_reference_map.md'
+      - 'misc/scripts/asset_size_map.py'
+      - '.github/workflows/asset-reference-map.yml'
+  pull_request:
+    paths:
+      - 'misc/scripts/asset_reference_map.py'
+      - 'misc/scripts/tests/test_asset_reference_map.py'
+      - 'misc/scripts/README_asset_reference_map.md'
+      - 'misc/scripts/asset_size_map.py'
+      - '.github/workflows/asset-reference-map.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-24.04
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ['3.9', '3.13']
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+      - name: Syntax and dependency-reference regression tests
+        run: |
+          python -m py_compile misc/scripts/asset_reference_map.py misc/scripts/tests/test_asset_reference_map.py
+          python -m unittest discover -s misc/scripts/tests -p test_asset_reference_map.py -v
