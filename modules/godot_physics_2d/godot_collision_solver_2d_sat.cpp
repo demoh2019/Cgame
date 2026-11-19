@@ -478,6 +478,51 @@ static void _collision_segment_circle(const GodotShape2D *p_a, const Transform2D
 		}
 	}
 
+	// Box2D-style closest-point manifold for a stationary segment and circle.
+	// Preserve SAT for swept, scaled, sheared and degenerate configurations.
+	if (!p_cast_A && !p_cast_B && p_margin_A >= 0.0 && p_margin_B >= 0.0 &&
+			circle_B->get_radius() >= 0.0 && _is_unit_orthogonal_transform(p_transform_a) &&
+			_is_unit_orthogonal_transform(p_transform_b)) {
+		const Vector2 endpoint_a = p_transform_a.xform(segment_A->get_a());
+		const Vector2 endpoint_b = p_transform_a.xform(segment_A->get_b());
+		const Vector2 edge = endpoint_b - endpoint_a;
+		const real_t edge_length_squared = edge.length_squared();
+
+		if (edge_length_squared > 0.0) {
+			const Vector2 circle_center = p_transform_b.get_origin();
+			const real_t fraction = CLAMP((circle_center - endpoint_a).dot(edge) / edge_length_squared, real_t(0.0), real_t(1.0));
+			const Vector2 closest_a = endpoint_a + edge * fraction;
+			const Vector2 separation = closest_a - circle_center;
+			const real_t distance_squared = separation.length_squared();
+
+			// SAT chooses the contact normal when the circle center lies on
+			// the segment, including any previously cached separating axis.
+			if (distance_squared > 0.0) {
+				const real_t radius_a = p_margin_A;
+				const real_t radius_b = circle_B->get_radius() + p_margin_B;
+				const real_t total_radius = radius_a + radius_b;
+
+				if (distance_squared > total_radius * total_radius) {
+					if (p_collector->sep_axis) {
+						*p_collector->sep_axis = separation / Math::sqrt(distance_squared);
+					}
+					return;
+				}
+
+				p_collector->collided = true;
+				if (p_collector->callback) {
+					const Vector2 normal = separation / Math::sqrt(distance_squared);
+					p_collector->normal = normal;
+					p_collector->call(closest_a - normal * radius_a, circle_center + normal * radius_b);
+					if (p_collector->sep_axis && *p_collector->sep_axis != Vector2()) {
+						*p_collector->sep_axis = Vector2();
+					}
+				}
+				return;
+			}
+		}
+	}
+
 	SeparatorAxisTest2D<GodotSegmentShape2D, GodotCircleShape2D> separator(segment_A, p_transform_a, circle_B, p_transform_b, p_collector, p_motion_a, p_motion_b, p_cast_A, p_cast_B, p_with_margin, p_margin_A, p_margin_B);
 
 	if (!separator.test_previous_axis()) {
