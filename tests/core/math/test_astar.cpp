@@ -712,6 +712,12 @@ TEST_CASE("[AStarGrid2D] Flat cells preserve routes across row boundaries") {
 	CHECK_EQ(Vector2i(detour[detour.size() - 1]), finish);
 	grid.set_point_solid(Vector2i(-5, -9), false);
 	CHECK_EQ(grid.get_id_path(start, finish).size(), 4);
+
+	grid.set_region(Rect2i(0, 0, 1, 1));
+	grid.update();
+	CHECK_EQ(grid.get_point_position(Vector2i(0, 0)), Vector2());
+	grid.clear();
+	CHECK_EQ(grid.get_region(), Rect2i());
 }
 
 } // namespace TestAStar

@@ -195,8 +195,18 @@ void AStarGrid2D::update() {
 	// reserving to avoid truncation and multiplication overflow.
 	ERR_FAIL_COND_MSG(total_points > UINT32_MAX || mask_cells > UINT32_MAX || total_points > SIZE_MAX / sizeof(Point),
 			"AStarGrid2D region is too large to allocate.");
-	points.clear();
-	solid_mask.clear();
+	// Reuse buffers for similarly-sized rebuilds, but release large allocations
+	// after shrinking a grid (otherwise a tiny map retains the old peak RSS).
+	if (total_points < uint64_t(points.get_capacity()) / 4) {
+		points.reset();
+	} else {
+		points.clear();
+	}
+	if (mask_cells < uint64_t(solid_mask.get_capacity()) / 4) {
+		solid_mask.reset();
+	} else {
+		solid_mask.clear();
+	}
 
 	// One contiguous allocation for cells, rather than one per row.
 	points.reserve(uint32_t(total_points));
@@ -677,7 +687,10 @@ real_t AStarGrid2D::_compute_cost(const Vector2i &p_from_id, const Vector2i &p_t
 }
 
 void AStarGrid2D::clear() {
-	points.clear();
+	points.reset();
+	solid_mask.reset();
+	end = nullptr;
+	last_closest_point = nullptr;
 	region = Rect2i();
 }
 
