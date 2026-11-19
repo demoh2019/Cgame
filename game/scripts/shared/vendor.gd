@@ -5,6 +5,7 @@ extends RefCounted
 ## only when both the debit and the credit fully fit.
 
 const Inventory = preload("res://scripts/shared/inventory.gd")
+const Reputation = preload("res://scripts/shared/reputation.gd")
 
 const MAX_QUANTITY := 50
 
@@ -70,14 +71,18 @@ static func first_sellable(carried) -> String:
 	return ""
 
 
-static func transact(carried, item_id: String, quantity: int, buy: bool) -> Dictionary:
+static func transact(carried, item_id: String, quantity: int, buy: bool,
+		renown: int = 0) -> Dictionary:
 	if quantity < 1 or quantity > MAX_QUANTITY:
 		return {"ok": false, "reason": "invalid_quantity"}
 	var prices: Dictionary = BUY_PRICES if buy else SELL_PRICES
 	var unit_price: int = int(prices.get(item_id, 0))
 	if unit_price < 1:
 		return {"ok": false, "reason": "not_traded"}
-	var total_price: int = unit_price * quantity
+	# The rank comes from the server-owned Player. Discounts never change
+	# proceeds from selling resources or player-market pricing.
+	var total_price: int = Reputation.buy_price(unit_price, quantity, renown) \
+		if buy else unit_price * quantity
 
 	# Never commit a partial payment or a partial item transfer. The same
 	# validation works even if the backpack is at its stack/slot limit.
