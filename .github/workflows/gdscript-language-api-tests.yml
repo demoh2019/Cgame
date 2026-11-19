@@ -1,0 +1,44 @@
+name: GDScript language API regression tests
+
+on:
+  pull_request:
+    paths:
+      - 'editor/docks/scene_tree_dock.cpp'
+      - 'modules/gdscript/register_types.cpp'
+      - 'modules/gdscript/tests/test_script_language_api.h'
+      - '.github/workflows/gdscript-language-api-tests.yml'
+  push:
+    branches: [develop]
+    paths:
+      - 'editor/docks/scene_tree_dock.cpp'
+      - 'modules/gdscript/register_types.cpp'
+      - 'modules/gdscript/tests/test_script_language_api.h'
+      - '.github/workflows/gdscript-language-api-tests.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: gdscript-language-api-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  gdscript-language-api-linux:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 120
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+        with:
+          submodules: recursive
+      - name: Install Godot build dependencies
+        uses: ./.github/actions/godot-deps
+      - name: Build Godot with native tests enabled
+        uses: ./.github/actions/godot-build
+        with:
+          platform: linuxbsd
+          target: editor
+          scons-flags: tests=yes dev_mode=yes debug_symbols=no module_text_server_fb_enabled=yes module_mono_enabled=no
+      - name: Run Script language API regression
+        run: ./bin/godot.linuxbsd.editor.x86_64 --headless --test --test-case='[GDScript] Script exposes its owning language directly' --force-colors
