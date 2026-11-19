@@ -154,6 +154,12 @@ struct ObjectGDExtension {
  * much alone defines the object model.
  */
 
+// Compile-time equality check for inherited static binding functions.
+template <void (*A)(), void (*B)()>
+inline constexpr bool _is_same_function = false;
+template <void (*A)()>
+inline constexpr bool _is_same_function<A, A> = true;
+
 /// Provides `Object` functionality, such as being able to use `Object::cast_to()`.
 /// Use this for `Object` subclasses that are not registered in `ClassDB` (use `GDCLASS` otherwise).
 #define GDSOFTCLASS(m_class, m_inherits) \
@@ -279,35 +285,39 @@ public: \
 	} \
 \
 protected: \
-	_FORCE_INLINE_ static void (*_get_bind_methods())() { \
+	static constexpr void (*_get_bind_methods())() { \
 		return &m_class::_bind_methods; \
 	} \
-	_FORCE_INLINE_ static void (*_get_bind_compatibility_methods())() { \
+	static constexpr void (*_get_bind_compatibility_methods())() { \
 		return &m_class::_bind_compatibility_methods; \
 	} \
 \
-public: \
-	static void initialize_class() { \
-		static SafeFlag initialized; \
-		if (likely(initialized.is_set())) { \
-			return; \
-		} \
+	static inline SafeFlag _class_initialized{false}; \
 \
+	_COLD_ static void _initialize_class_cold() { \
 		static BinaryMutex __init_mutex; \
 		MutexLock lock(__init_mutex); \
-		if (initialized.is_set()) { \
+		if (_class_initialized.is_set()) { \
 			return; \
 		} \
 		m_inherits::initialize_class(); \
 		_add_class_to_classdb(get_gdtype_static_mutable(), &super_type::get_gdtype_static()); \
 		get_gdtype_static_mutable().initialize(); \
-		if (m_class::_get_bind_methods() != m_inherits::_get_bind_methods()) { \
+		if constexpr (!_is_same_function<m_class::_get_bind_methods(), m_inherits::_get_bind_methods()>) { \
 			_bind_methods(); \
 		} \
-		if (m_class::_get_bind_compatibility_methods() != m_inherits::_get_bind_compatibility_methods()) { \
+		if constexpr (!_is_same_function<m_class::_get_bind_compatibility_methods(), m_inherits::_get_bind_compatibility_methods()>) { \
 			_bind_compatibility_methods(); \
 		} \
-		initialized.set(); \
+		_class_initialized.set(); \
+	} \
+\
+public: \
+	static void initialize_class() { \
+		if (likely(_class_initialized.is_set())) { \
+			return; \
+		} \
+		_initialize_class_cold(); \
 	} \
 \
 protected: \
@@ -552,10 +562,10 @@ protected:
 	// Out-lined helper function to save on binary space.
 	_NO_INLINE_ void _get_property_list_inner(List<PropertyInfo> *p_list, const StringName &p_class_name) const;
 
-	_FORCE_INLINE_ static void (*_get_bind_methods())() {
+	static constexpr void (*_get_bind_methods())() {
 		return &Object::_bind_methods;
 	}
-	_FORCE_INLINE_ static void (*_get_bind_compatibility_methods())() {
+	static constexpr void (*_get_bind_compatibility_methods())() {
 		return &Object::_bind_compatibility_methods;
 	}
 	_FORCE_INLINE_ bool (Object::*_get_get() const)(const StringName &p_name, Variant &r_ret) const {

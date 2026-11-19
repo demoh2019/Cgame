@@ -57,6 +57,10 @@ public:
 	int get_property() const { return property_value; }
 };
 
+class _TestNoBindings : public _TestDerivedObject {
+	GDCLASS(_TestNoBindings, _TestDerivedObject);
+};
+
 class _MockScriptInstance : public ScriptInstance {
 	StringName property_name = "NO_NAME";
 	Variant property_value;
@@ -113,6 +117,31 @@ public:
 		return nullptr;
 	}
 };
+
+TEST_CASE("[Object] GDCLASS cold initializer binds exactly once") {
+	_TestDerivedObject::initialize_class();
+	const StringName type = _TestDerivedObject::get_class_static();
+	CHECK(ClassDB::class_exists(type));
+	const MethodBind *binding = ClassDB::get_method(type, SNAME("get_property"));
+	CHECK(binding != nullptr);
+	for (int i = 0; i < 8; i++) {
+		_TestDerivedObject::initialize_class();
+	}
+	CHECK(ClassDB::get_method(type, SNAME("get_property")) == binding);
+	_TestDerivedObject object;
+	object.set_property(42);
+	CHECK(object.get_property() == 42);
+}
+
+TEST_CASE("[Object] GDCLASS cold initializer inherits bindings") {
+	_TestNoBindings::initialize_class();
+	_TestNoBindings::initialize_class();
+	const StringName type = _TestNoBindings::get_class_static();
+	CHECK(ClassDB::class_exists(type));
+	_TestNoBindings object;
+	object.set_property(123);
+	CHECK(object.get_property() == 123);
+}
 
 TEST_CASE("[Object] Core getters") {
 	Object object;

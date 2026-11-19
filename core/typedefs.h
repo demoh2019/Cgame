@@ -116,6 +116,15 @@ static_assert(__cplusplus >= 201703L, "Minimum of C++17 required.");
 #endif
 #endif
 
+// Mark one-time initialization and teardown functions cold.
+#ifndef _COLD_
+#if defined(__GNUC__)
+#define _COLD_ __attribute__((cold))
+#else
+#define _COLD_
+#endif
+#endif
+
 // Should never inline.
 #ifndef _NO_INLINE_
 #if defined(__GNUC__)
