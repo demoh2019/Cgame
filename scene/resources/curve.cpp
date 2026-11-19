@@ -296,28 +296,35 @@ void Curve::update_auto_tangents(int p_index) {
 	Point &p = _points[p_index];
 
 	if (p_index > 0) {
-		if (p.left_mode == TANGENT_LINEAR) {
-			Vector2 v = (_points[p_index - 1].position - p.position).normalized();
-			p.left_tangent = v.y / v.x;
-		}
-		if (_points[p_index - 1].right_mode == TANGENT_LINEAR) {
-			Vector2 v = (_points[p_index - 1].position - p.position).normalized();
-			_points[p_index - 1].right_tangent = v.y / v.x;
+		Point &previous = _points[p_index - 1];
+		if (p.left_mode == TANGENT_LINEAR || previous.right_mode == TANGENT_LINEAR) {
+			// Normalize-and-divide computes a square root that cancels out
+			// in the tangent slope; evaluate delta.y / delta.x once instead.
+			const Vector2 delta = previous.position - p.position;
+			const real_t slope = delta.y / delta.x;
+			if (p.left_mode == TANGENT_LINEAR) {
+				p.left_tangent = slope;
+			}
+			if (previous.right_mode == TANGENT_LINEAR) {
+				previous.right_tangent = slope;
+			}
 		}
 	}
 
 	if ((uint32_t)p_index + 1 < _points.size()) {
-		if (p.right_mode == TANGENT_LINEAR) {
-			Vector2 v = (_points[p_index + 1].position - p.position).normalized();
-			p.right_tangent = v.y / v.x;
-		}
-		if (_points[p_index + 1].left_mode == TANGENT_LINEAR) {
-			Vector2 v = (_points[p_index + 1].position - p.position).normalized();
-			_points[p_index + 1].left_tangent = v.y / v.x;
+		Point &next = _points[p_index + 1];
+		if (p.right_mode == TANGENT_LINEAR || next.left_mode == TANGENT_LINEAR) {
+			const Vector2 delta = next.position - p.position;
+			const real_t slope = delta.y / delta.x;
+			if (p.right_mode == TANGENT_LINEAR) {
+				p.right_tangent = slope;
+			}
+			if (next.left_mode == TANGENT_LINEAR) {
+				next.left_tangent = slope;
+			}
 		}
 	}
 }
-
 #define MIN_X_RANGE 0.01
 #define MIN_Y_RANGE 0.01
 

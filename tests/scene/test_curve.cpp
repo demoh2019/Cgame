@@ -529,4 +529,29 @@ TEST_CASE("[Curve] Monotone baking preserves overlapping control points") {
 		CHECK(curve->sample_baked(x) == doctest::Approx(curve->sample(x)).epsilon(0.0001));
 	}
 }
+
+TEST_CASE("[Curve][Performance] Linear tangents reuse direct segment slope") {
+	Ref<Curve> curve = memnew(Curve);
+	constexpr int COUNT = 128;
+	for (int i = 0; i < COUNT; ++i) {
+		const real_t x = real_t(i) / real_t(COUNT - 1);
+		const real_t y = real_t((i * 47) % COUNT) / real_t(COUNT);
+		curve->add_point(Vector2(x, y), 0, 0, Curve::TANGENT_LINEAR, Curve::TANGENT_LINEAR);
+	}
+	REQUIRE(curve->get_point_count() == COUNT);
+	for (int i = 1; i < COUNT; ++i) {
+		const Vector2 a = curve->get_point_position(i - 1);
+		const Vector2 b = curve->get_point_position(i);
+		const real_t expected_slope = (b.y - a.y) / (b.x - a.x);
+		CHECK(curve->get_point_right_tangent(i - 1) == doctest::Approx(expected_slope).epsilon(0.0001));
+		CHECK(curve->get_point_left_tangent(i) == doctest::Approx(expected_slope).epsilon(0.0001));
+	}
+	curve->set_point_value(63, 0.25);
+	for (int i = 63; i <= 64; ++i) {
+		const Vector2 a = curve->get_point_position(i - 1);
+		const Vector2 b = curve->get_point_position(i);
+		CHECK(curve->get_point_left_tangent(i) == doctest::Approx((b.y - a.y) / (b.x - a.x)).epsilon(0.0001));
+	}
+}
+
 } // namespace TestCurve
