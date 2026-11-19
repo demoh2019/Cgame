@@ -20,7 +20,7 @@ func run(t) -> void:
 	var damage := s.tick(1.0)
 	t.check(damage > 1.0, "symptomatic infection harms survivor")
 	t.check(s.health < 90.0, "infection reduces health")
-	t.check(not s.tick(-1.0) > 0.0, "invalid negative delta rejected")
+	t.near(s.tick(-1.0), 0.0, 0.0001, "invalid negative delta rejected")
 	t.check(s.treat_infection(55.0), "medicine works")
 	t.check(s.infection < Defs.INFECTION_DAMAGE_THRESHOLD, "medicine suppresses symptoms")
 	t.check(not s.treat_infection(NAN), "NaN treatment rejected")
