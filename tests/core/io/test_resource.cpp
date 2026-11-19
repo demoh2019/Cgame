@@ -32,6 +32,7 @@
 
 TEST_FORCE_LINK(test_resource)
 
+#include "core/io/dir_access.h"
 #include "core/io/resource.h"
 #include "core/io/resource_loader.h"
 #include "core/io/resource_saver.h"
@@ -569,6 +570,49 @@ TEST_CASE("[Resource] Saving and loading") {
 	CHECK_MESSAGE(
 			loaded_child_resource_text->get_name() == "I'm a child resource",
 			"The loaded child resource name should be equal to the expected value.");
+}
+
+TEST_CASE("[Resource] Loading binary resources with relative external paths") {
+	const String temp_dir = TestUtils::get_temp_path("relative_resource_paths");
+	// Cover dependencies in the same directory, parent/grandparent directories,
+	// sibling files and a cousin directory. All paths must resolve from the
+	// binary resource's own directory, not from the dependency path itself.
+	const char *relative_paths[][2] = {
+		{ "outer.res", "inner_same_dir.tres" },
+		{ "sub/outer_parent.res", "inner_parent.tres" },
+		{ "sub/deep/outer_grandparent.res", "inner_grandparent.tres" },
+		{ "sub/outer_sibling.res", "sub/inner_sibling.tres" },
+		{ "sub/deep/outer_sibling.res", "sub/deep/inner_sibling.tres" },
+		{ "sub/deep/outer_cousin.res", "sub/neighbor/inner_cousin.tres" },
+	};
+
+	for (const auto &paths : relative_paths) {
+		const String outer_path = temp_dir.path_join(paths[0]);
+		const String inner_path = temp_dir.path_join(paths[1]);
+		REQUIRE(DirAccess::make_dir_recursive_absolute(outer_path.get_base_dir()) == OK);
+		REQUIRE(DirAccess::make_dir_recursive_absolute(inner_path.get_base_dir()) == OK);
+
+		Ref<Resource> inner_resource = memnew(Resource);
+		inner_resource->set_name("Inner resource");
+		REQUIRE(ResourceSaver::save(inner_resource, inner_path) == OK);
+		inner_resource->set_path_cache(inner_path);
+
+		Ref<Resource> outer_resource = memnew(Resource);
+		outer_resource->set_meta("external_resource", inner_resource);
+		REQUIRE(ResourceSaver::save(outer_resource, outer_path, ResourceSaver::FLAG_RELATIVE_PATHS) == OK);
+
+		inner_resource.unref();
+		outer_resource.unref();
+
+		Error load_error;
+		Ref<Resource> loaded_outer_resource = ResourceLoader::load(outer_path, "", ResourceFormatLoader::CacheMode::CACHE_MODE_IGNORE, &load_error);
+		REQUIRE(load_error == OK);
+		REQUIRE(loaded_outer_resource.is_valid());
+
+		Ref<Resource> loaded_inner_resource = loaded_outer_resource->get_meta("external_resource");
+		REQUIRE(loaded_inner_resource.is_valid());
+		CHECK(loaded_inner_resource->get_name() == "Inner resource");
+	}
 }
 
 TEST_CASE("[Resource] Breaking circular references on save") {
