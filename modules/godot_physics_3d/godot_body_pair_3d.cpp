@@ -335,6 +335,37 @@ bool GodotBodyPair3D::_test_ccd(real_t p_step, GodotBody3D *p_A, int p_shape_A, 
 		// Ellipsoids and sheared capsules retain the general support cast.
 	}
 
+	// Also cover the reversed pair order: a moving capsule A sweeping
+	// past sphere B. In A's frame B traces the negative relative motion.
+	if (shape_A_ptr->get_type() == PS3DE::SHAPE_CAPSULE && shape_B_ptr->get_type() == PS3DE::SHAPE_SPHERE &&
+			p_A->get_angular_velocity() == Vector3() && p_B->get_angular_velocity() == Vector3()) {
+		const double scale_A = physics_ccd_uniform_sphere_scale(p_xform_A);
+		const double scale_B = physics_ccd_uniform_sphere_scale(p_xform_B);
+		if (scale_A > 0.0 && scale_B > 0.0) {
+			const GodotCapsuleShape3D *capsule = static_cast<GodotCapsuleShape3D *>(shape_A_ptr);
+			const double capsule_radius = double(capsule->get_radius());
+			const double half_segment = double(capsule->get_height()) * 0.5 - capsule_radius;
+			const double sphere_radius = double(static_cast<GodotSphereShape3D *>(shape_B_ptr)->get_radius()) * scale_B / scale_A;
+			if (capsule_radius > 0.0 && half_segment >= 0.0 && sphere_radius > 0.0) {
+				const Transform3D inverse_A = p_xform_A.affine_inverse();
+				const Vector3 local_start = inverse_A.xform(p_xform_B.origin);
+				const Vector3 local_motion = -inverse_A.basis.xform(relative_motion);
+				double impact_fraction = 0.0;
+				if (!physics_ccd_capsule_toi(local_start, local_motion, capsule_radius + sphere_radius, half_segment, impact_fraction)) {
+					return false;
+				}
+
+				const real_t allowed_distance = CLAMP(real_t(impact_fraction * double(motion_length)) + extent * real_t(0.01), real_t(0.0), motion_length);
+				const Vector3 desired_velocity = velocity_B + direction * (allowed_distance / p_step);
+				const real_t initial_speed = velocity_A.length();
+				const Vector3 travel_direction = velocity_A / initial_speed;
+				const real_t clipped_speed = CLAMP(desired_velocity.dot(travel_direction), real_t(0.0), initial_speed);
+				p_A->set_linear_velocity(travel_direction * clipped_speed);
+				return true;
+			}
+		}
+	}
+
 	// A leading face may have several support vertices. The target
 	// transform is shared by all rays and is inverted only once.
 	if (p_xform_B.basis.determinant() == 0.0) {
