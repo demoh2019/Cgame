@@ -53,6 +53,7 @@
 #include "servers/physics_xpbd_shear.h"
 #include "servers/physics_xpbd_self_collision.h"
 #include "servers/physics_softbody_pair_contact.h"
+#include "servers/physics_softbody_pair_ccd.h"
 #include "servers/physics_xpbd_soft_ccd.h"
 #include "servers/physics_xpbd_self_friction.h"
 #include "servers/physics_xpbd_edge_collision.h"
@@ -970,9 +971,15 @@ bool GodotSoftBody3D::solve_pair_contacts(GodotSoftBody3D &p_other, real_t p_del
 	const uint32_t max_contacts = MIN(p_max_contacts, uint32_t(2048));
 	const uint32_t per_vertex_limit = MIN(p_max_contacts_per_vertex, uint32_t(32));
 
-	AABB enlarged = bounds;
+	// The continuous path compares swept body bounds. Current-only AABBs
+	// cannot detect bodies that cross and separate within one physics tick.
+	const bool swept_ccd = get_space()->is_soft_body_pair_collision_ccd_enabled() &&
+			pair_ccd_previous.size() == nodes.size() &&
+			p_other.pair_ccd_previous.size() == p_other.nodes.size() &&
+			!pair_ccd_previous.is_empty() && !p_other.pair_ccd_previous.is_empty();
+	AABB enlarged = swept_ccd ? pair_ccd_swept_bounds : bounds;
 	enlarged.grow_by(p_thickness);
-	if (!enlarged.intersects(p_other.bounds)) {
+	if (!enlarged.intersects(swept_ccd ? p_other.pair_ccd_swept_bounds : p_other.bounds)) {
 		return false;
 	}
 
@@ -988,6 +995,12 @@ bool GodotSoftBody3D::solve_pair_contacts(GodotSoftBody3D &p_other, real_t p_del
 	} else {
 		p_other.update_face_tree(real_t(0.0));
 	}
+	if (swept_ccd) {
+		// Refit the SAME BVH with the union of previous/current triangle
+		// positions. No extra persistent tree is allocated.
+		update_pair_swept_face_tree(p_thickness);
+		p_other.update_pair_swept_face_tree(p_thickness);
+	}
 
 	struct PairContact {
 		uint32_t vertex = 0;
@@ -998,12 +1011,28 @@ bool GodotSoftBody3D::solve_pair_contacts(GodotSoftBody3D &p_other, real_t p_del
 	};
 	LocalVector<PairContact> contacts;
 	contacts.reserve(MIN(max_contacts, uint32_t(64)));
+	// Separate opt-in scratch: discrete contacts keep their compact layout.
+	struct PairCCDContact {
+		uint32_t vertex = 0;
+		uint32_t face = 0;
+		bool vertex_on_first = true;
+		PhysicsXPBDSoftCCDSweepHit hit;
+		real_t lambda = 0.0;
+	};
+	LocalVector<PairCCDContact> ccd_contacts;
+	if (swept_ccd) {
+		ccd_contacts.reserve(MIN(max_contacts, uint32_t(32)));
+	}
+	const auto contact_count = [&]() -> uint32_t {
+		return contacts.size() + ccd_contacts.size();
+	};
 	const Vector3 padding(p_thickness, p_thickness, p_thickness);
 
 	auto collect = [&](GodotSoftBody3D &p_vertices, GodotSoftBody3D &p_faces, bool p_first) {
-		for (uint32_t index = 0; index < p_vertices.nodes.size() && contacts.size() < max_contacts; ++index) {
+		for (uint32_t index = 0; index < p_vertices.nodes.size() && contact_count() < max_contacts; ++index) {
 			const Node &node = p_vertices.nodes[index];
-			if (!node.x.is_finite()) {
+			if (!node.x.is_finite() ||
+					(swept_ccd && !p_vertices.pair_ccd_previous[index].is_finite())) {
 				continue;
 			}
 			uint32_t vertex_contacts = 0;
@@ -1017,30 +1046,65 @@ bool GodotSoftBody3D::solve_pair_contacts(GodotSoftBody3D &p_other, real_t p_del
 				}
 				Vector3 normal, barycentric;
 				real_t distance = 0.0;
-				if (!physics_xpbd_self_collision_face_projection(node.x,
-							face.n[0]->x, face.n[1]->x, face.n[2]->x,
-							normal, barycentric, distance) ||
-						Math::abs(distance) >= p_thickness) {
-					return false;
+				const bool discrete_contact = physics_xpbd_self_collision_face_projection(
+						node.x, face.n[0]->x, face.n[1]->x, face.n[2]->x,
+						normal, barycentric, distance) &&
+						Math::abs(distance) < p_thickness;
+				bool accepted = false;
+				if (swept_ccd) {
+					// Test continuous crossing FIRST, even if the vertex ended
+					// near the plane: the previous side must not be lost.
+					PhysicsXPBDSoftCCDSweepHit hit;
+					if (physics_xpbd_swept_vertex_triangle(
+							p_vertices.pair_ccd_previous[index], node.x,
+							p_faces.pair_ccd_previous[face.n[0]->index], face.n[0]->x,
+							p_faces.pair_ccd_previous[face.n[1]->index], face.n[1]->x,
+							p_faces.pair_ccd_previous[face.n[2]->index], face.n[2]->x, hit)) {
+						PairCCDContact contact;
+						contact.vertex = index;
+						contact.face = face.index;
+						contact.vertex_on_first = p_first;
+						contact.hit = hit;
+						ccd_contacts.push_back(contact);
+						accepted = true;
+					}
 				}
-				PairContact contact;
-				contact.vertex = index;
-				contact.face = face.index;
-				contact.vertex_on_first = p_first;
-				contact.side = distance >= real_t(0.0) ? 1 : -1;
-				contacts.push_back(contact);
-				++vertex_contacts;
-				return vertex_contacts >= per_vertex_limit || contacts.size() >= max_contacts;
+				if (!accepted && discrete_contact) {
+					PairContact contact;
+					contact.vertex = index;
+					contact.face = face.index;
+					contact.vertex_on_first = p_first;
+					contact.side = distance >= real_t(0.0) ? 1 : -1;
+					contacts.push_back(contact);
+					accepted = true;
+				}
+				if (accepted) {
+					++vertex_contacts;
+				}
+				return vertex_contacts >= per_vertex_limit || contact_count() >= max_contacts;
 			};
-			p_faces.face_tree.aabb_query(AABB(node.x - padding, padding * real_t(2.0)), visit_face);
+			if (swept_ccd) {
+				AABB swept_query(p_vertices.pair_ccd_previous[index], Vector3());
+				swept_query.expand_to(node.x);
+				swept_query.grow_by(p_thickness);
+				p_faces.face_tree.aabb_query(swept_query, visit_face);
+			} else {
+				p_faces.face_tree.aabb_query(AABB(node.x - padding, padding * real_t(2.0)), visit_face);
+			}
 		}
 	};
 
 	collect(*this, p_other, true);
-	if (contacts.size() < max_contacts) {
+	if (contact_count() < max_contacts) {
 		collect(p_other, *this, false);
 	}
-	if (contacts.is_empty()) {
+	if (contacts.is_empty() && ccd_contacts.is_empty()) {
+		// Swept BVHs were refitted for candidate lookup. Avoid retaining
+		// enlarged bounds across unrelated queries when no hit was found.
+		if (swept_ccd) {
+			update_face_tree(real_t(0.0));
+			p_other.update_face_tree(real_t(0.0));
+		}
 		return false;
 	}
 
@@ -1060,8 +1124,27 @@ bool GodotSoftBody3D::solve_pair_contacts(GodotSoftBody3D &p_other, real_t p_del
 				moved = true;
 			}
 		}
+		for (PairCCDContact &contact : ccd_contacts) {
+			GodotSoftBody3D &vertex_body = contact.vertex_on_first ? *this : p_other;
+			GodotSoftBody3D &face_body = contact.vertex_on_first ? p_other : *this;
+			Node &vertex = vertex_body.nodes[contact.vertex];
+			Face &face = face_body.faces[contact.face];
+			if (physics_softbody_solve_pair_swept_face(vertex.x,
+						face.n[0]->x, face.n[1]->x, face.n[2]->x,
+						vertex.v, face.n[0]->v, face.n[1]->v, face.n[2]->v,
+						vertex.im, face.n[0]->im, face.n[1]->im, face.n[2]->im,
+						p_thickness, alpha, contact.hit, p_delta, contact.lambda)) {
+				moved = true;
+			}
+		}
 	}
 	if (!moved) {
+		// CCD BVH entries are swept, so restore ordinary current-position
+		// bounds even when all candidates were rejected by narrowphase.
+		if (swept_ccd) {
+			update_face_tree(real_t(0.0));
+			p_other.update_face_tree(real_t(0.0));
+		}
 		return false;
 	}
 
@@ -1097,6 +1180,8 @@ bool GodotSoftBody3D::solve_pair_contacts(GodotSoftBody3D &p_other, real_t p_del
 		p_body.update_normals_and_centroids();
 		p_body.update_bounds();
 		p_body.update_face_tree(real_t(0.0));
+		// Another body-pair may be processed later in this same tick.
+		p_body.refresh_pair_ccd_swept_bounds();
 	};
 	finalize(*this);
 	finalize(p_other);
@@ -2259,8 +2344,22 @@ void GodotSoftBody3D::predict_motion(real_t p_delta) {
 	const real_t max_displacement = 1000.0;
 	real_t clamp_delta_v = max_displacement * inv_delta;
 
+	// The pair stage executes after body-local constraints have rewritten
+	// Node::q. Preserve each particle's actual previous position only when
+	// continuous inter-body collisions are enabled. The disabled mode adds
+	// no extra per-node storage, passes, or BVH refits.
+	const bool pair_ccd_enabled = get_space()->is_soft_body_pair_collision_ccd_enabled() &&
+			get_space()->get_soft_body_pair_collision_thickness() > real_t(0.0);
+	if (pair_ccd_enabled) {
+		pair_ccd_previous.resize(nodes.size());
+	} else if (!pair_ccd_previous.is_empty()) {
+		pair_ccd_previous.reset();
+	}
 	// Integrate.
 	for (Node &node : nodes) {
+		if (pair_ccd_enabled) {
+			pair_ccd_previous[node.index] = node.x;
+		}
 		node.q = node.x;
 		if (node.im == 0.0) {
 			// Inverse-mass-zero particles are kinematic (Jolt-style pins).
@@ -2742,6 +2841,9 @@ void GodotSoftBody3D::solve_constraints(real_t p_delta) {
 	}
 
 	update_normals_and_centroids();
+	// Local XPBD projections have finished; cache a conservative union of
+	// the previous and the FINAL current positions for the pair broadphase.
+	refresh_pair_ccd_swept_bounds();
 }
 
 void GodotSoftBody3D::solve_links(real_t kst, real_t ti) {
@@ -2862,6 +2964,57 @@ void GodotSoftBody3D::update_swept_face_tree(real_t p_thickness) {
 		swept.grow_by(margin);
 		face_tree.update(face.leaf, swept);
 	}
+}
+
+// A swept BVH for INTER-body contacts, using the opt-in history vector
+// rather than Node::q (which the local solver has already overwritten).
+// Both endpoints of each moving face are enclosed conservatively.
+void GodotSoftBody3D::update_pair_swept_face_tree(real_t p_thickness) {
+	if (pair_ccd_previous.size() != nodes.size()) {
+		return;
+	}
+	const real_t margin = MAX(real_t(0.0), collision_margin) + p_thickness;
+	for (const Face &face : faces) {
+		const Node &a = *face.n[0];
+		const Node &b = *face.n[1];
+		const Node &c = *face.n[2];
+		const Vector3 &pa = pair_ccd_previous[a.index];
+		const Vector3 &pb = pair_ccd_previous[b.index];
+		const Vector3 &pc = pair_ccd_previous[c.index];
+		if (!pa.is_finite() || !pb.is_finite() || !pc.is_finite() ||
+				!a.x.is_finite() || !b.x.is_finite() || !c.x.is_finite()) {
+			continue;
+		}
+		AABB swept(pa, Vector3());
+		swept.expand_to(pb);
+		swept.expand_to(pc);
+		swept.expand_to(a.x);
+		swept.expand_to(b.x);
+		swept.expand_to(c.x);
+		swept.grow_by(margin);
+		face_tree.update(face.leaf, swept);
+	}
+}
+
+void GodotSoftBody3D::refresh_pair_ccd_swept_bounds() {
+	if (pair_ccd_previous.is_empty() || pair_ccd_previous.size() != nodes.size()) {
+		return;
+	}
+	if (!nodes[0].x.is_finite()) {
+		pair_ccd_previous.reset();
+		return;
+	}
+	AABB swept(nodes[0].x, Vector3());
+	for (const Node &node : nodes) {
+		const Vector3 &previous = pair_ccd_previous[node.index];
+		if (!previous.is_finite() || !node.x.is_finite()) {
+			pair_ccd_previous.reset();
+			return;
+		}
+		swept.expand_to(previous);
+		swept.expand_to(node.x);
+	}
+	pair_ccd_swept_bounds = swept;
 }
 
 void GodotSoftBody3D::initialize_shape(bool p_force_move) {

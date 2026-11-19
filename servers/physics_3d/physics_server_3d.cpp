@@ -670,6 +670,9 @@ PhysicsServer3D::PhysicsServer3D() {
 	// Coulomb-limited velocity friction between DISTINCT soft bodies.
 	// Zero is free slip; no friction pass or additional persistent storage.
 	GLOBAL_DEF(PropertyInfo(Variant::FLOAT, "physics/3d/solver/soft_body_pair_collision_friction", PROPERTY_HINT_RANGE, "0,4,0.01,or_greater"), 0.0);
+	// Extra continuous vertex/triangle crossing detection for different soft bodies.
+	// False preserves discrete-only behavior and allocates no history buffers.
+	GLOBAL_DEF(PropertyInfo(Variant::BOOL, "physics/3d/solver/soft_body_pair_collision_ccd"), false);
 	GLOBAL_DEF(PropertyInfo(Variant::INT, "physics/3d/solver/soft_body_pair_max_contacts", PROPERTY_HINT_RANGE, "1,2048,1"), 256);
 	GLOBAL_DEF(PropertyInfo(Variant::INT, "physics/3d/solver/soft_body_pair_max_pairs", PROPERTY_HINT_RANGE, "1,512,1"), 128);
 	// Jolt-style long-range cloth tethers limit distance from pinned
