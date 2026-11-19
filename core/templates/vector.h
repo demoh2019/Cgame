@@ -185,9 +185,25 @@ public:
 			return;
 		}
 
-		T *data = ptrw();
 		SortArray<T, Comparator, Validate> sorter{ p_args... };
-		sorter.sort(data, len);
+		// SortArray can skip already ordered large ranges, but ptrw()
+		// would detach shared COW storage *before* that early exit.
+		// Scan a shared range read-only first to avoid copying large
+		// buffers on repeated sorting of unchanged data.
+		if (len >= 64 && _cowdata.refcount() > 1) {
+			const T *const read_only_data = ptr();
+			bool already_sorted = true;
+			for (Size i = 1; i < len; i++) {
+				if (sorter.compare(read_only_data[i], read_only_data[i - 1])) {
+					already_sorted = false;
+					break;
+				}
+			}
+			if (already_sorted) {
+				return;
+			}
+		}
+		sorter.sort(ptrw(), len);
 	}
 
 	Size bsearch(const T &p_value, bool p_before) const {
