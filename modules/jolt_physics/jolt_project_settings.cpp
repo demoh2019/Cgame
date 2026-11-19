@@ -57,8 +57,7 @@ void JoltProjectSettings::register_settings() {
 	// Applies when creating/rebuilding a soft body, not retroactively.
 	GLOBAL_DEF(PropertyInfo(Variant::INT, "physics/jolt_physics_3d/simulation/soft_body_bend_mode", PROPERTY_HINT_ENUM, "Disabled,Distance,Dihedral"), 0);
 	GLOBAL_DEF(PropertyInfo(Variant::FLOAT, "physics/jolt_physics_3d/simulation/soft_body_bend_compliance", PROPERTY_HINT_RANGE, "0,1,0.000001,or_greater"), 0.001f);
-	// Warp/weft fabric response: alter spring compliance along a local axis.
-	// A value of 1 keeps isotropic constraints; other values are opt-in.
+	// Direction-dependent rest-pose cloth stiffness. One is isotropic.
 	GLOBAL_DEF(PropertyInfo(Variant::INT, "physics/jolt_physics_3d/simulation/soft_body_fiber_axis", PROPERTY_HINT_ENUM, "X,Y,Z"), 0);
 	GLOBAL_DEF(PropertyInfo(Variant::FLOAT, "physics/jolt_physics_3d/simulation/soft_body_fiber_compliance_multiplier", PROPERTY_HINT_RANGE, "0.1,10,0.05"), 1.0f);
 	// Long-range attachments reduce excessive cloth stretch from pinned points.
@@ -69,12 +68,16 @@ void JoltProjectSettings::register_settings() {
 	// small, closed, consistently wound convex soft-body surface meshes.
 	GLOBAL_DEF(PropertyInfo(Variant::BOOL, "physics/jolt_physics_3d/simulation/soft_body_volume_preservation"), false);
 	GLOBAL_DEF(PropertyInfo(Variant::FLOAT, "physics/jolt_physics_3d/simulation/soft_body_volume_compliance", PROPERTY_HINT_RANGE, "0,0.01,0.000001,or_greater"), 0.00001f);
-	// False preserves incompressible rest volume; true follows isotropic size changes.
+	// Rest-volume material response retained after the LRA fan reordering.
 	GLOBAL_DEF(PropertyInfo(Variant::BOOL, "physics/jolt_physics_3d/simulation/soft_body_volume_follow_shrinking_factor"), false);
 	// Optional volumetric edge springs resist interior-to-surface stretching
 	// and add shape support to the convex tetrahedral volume fan.
 	GLOBAL_DEF(PropertyInfo(Variant::BOOL, "physics/jolt_physics_3d/simulation/soft_body_volume_radial_springs"), false);
 	GLOBAL_DEF(PropertyInfo(Variant::FLOAT, "physics/jolt_physics_3d/simulation/soft_body_volume_radial_compliance", PROPERTY_HINT_RANGE, "0,1,0.000001"), 0.0001f);
+	// Directional radial elastic response in the original mesh-local frame.
+	// A ratio > 1 increases compliance (softer), < 1 reduces it (stiffer).
+	GLOBAL_DEF(PropertyInfo(Variant::INT, "physics/jolt_physics_3d/simulation/soft_body_radial_anisotropy_axis", PROPERTY_HINT_ENUM, "Isotropic,Local X,Local Y,Local Z"), 0);
+	GLOBAL_DEF(PropertyInfo(Variant::FLOAT, "physics/jolt_physics_3d/simulation/soft_body_radial_anisotropy_ratio", PROPERTY_HINT_RANGE, "0.1,10,0.01"), 1.0f);
 	GLOBAL_DEF(PropertyInfo(Variant::FLOAT, "physics/jolt_physics_3d/simulation/bounce_velocity_threshold", PROPERTY_HINT_RANGE, U"0,1,0.001,or_greater,suffix:m/s"), 1.0f);
 	GLOBAL_DEF(PropertyInfo(Variant::BOOL, "physics/jolt_physics_3d/simulation/allow_sleep"), true);
 	GLOBAL_DEF(PropertyInfo(Variant::FLOAT, "physics/jolt_physics_3d/simulation/sleep_velocity_threshold", PROPERTY_HINT_RANGE, U"0,1,0.001,or_greater,suffix:m/s"), 0.03f);
@@ -149,6 +152,9 @@ void JoltProjectSettings::read_settings() {
 	soft_body_volume_radial_springs = GLOBAL_GET("physics/jolt_physics_3d/simulation/soft_body_volume_radial_springs");
 	const float radial_compliance = GLOBAL_GET("physics/jolt_physics_3d/simulation/soft_body_volume_radial_compliance");
 	soft_body_volume_radial_compliance = Math::is_finite(radial_compliance) ? CLAMP(radial_compliance, 0.0f, 1.0f) : 0.0001f;
+	soft_body_radial_anisotropy_axis = CLAMP((int)GLOBAL_GET("physics/jolt_physics_3d/simulation/soft_body_radial_anisotropy_axis"), 0, 3);
+	const float anisotropy_ratio = GLOBAL_GET("physics/jolt_physics_3d/simulation/soft_body_radial_anisotropy_ratio");
+	soft_body_radial_anisotropy_ratio = Math::is_finite(anisotropy_ratio) ? CLAMP(anisotropy_ratio, 0.1f, 10.0f) : 1.0f;
 	bounce_velocity_threshold = GLOBAL_GET("physics/jolt_physics_3d/simulation/bounce_velocity_threshold");
 	sleep_allowed = GLOBAL_GET("physics/jolt_physics_3d/simulation/allow_sleep");
 	sleep_velocity_threshold = GLOBAL_GET("physics/jolt_physics_3d/simulation/sleep_velocity_threshold");
