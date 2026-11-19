@@ -26,7 +26,9 @@ def issue(number, *, closed=False, is_pr=False, body="A bug"):
 
 
 class FakeAPI:
-    def __init__(self, source=None, destination=None, comments=None, fail_pr=False):
+    def __init__(self, source=None, destination=None, comments=None, fail_pr=False,
+                 issues_enabled=True):
+        self.issues_enabled = issues_enabled
         self.source = source or []
         self.destination = destination or []
         self.comments = comments or []
@@ -45,6 +47,8 @@ class FakeAPI:
 
     def request(self, method, path, payload=None):
         self.calls.append((method, path, payload))
+        if method == "GET" and path == "/repos/demoh2019/godot":
+            return {"has_issues": self.issues_enabled}
         if method == "GET" and path.startswith("/repos/godotengine/godot/issues?"):
             return self.source
         if method == "GET" and "/pulls/" in path:
@@ -83,6 +87,12 @@ class MirrorTests(unittest.TestCase):
         self.assertIn("Original author: alice", body)
         self.assertIn("Original labels: [bug]", body)
         self.assertIn("Details\n\n#41", body)
+
+    def test_disabled_issue_tracker_blocks_all_writes(self):
+        api = FakeAPI([issue(1)], issues_enabled=False)
+        with self.assertRaisesRegex(RuntimeError, "Issues are disabled"):
+            m.Mirror(api, apply=True).run(max_items=1)
+        self.assertFalse([x for x in api.calls if x[0] != "GET"])
 
     def test_existing_marker_and_previous_upstream_pr_links_are_deduped(self):
         entries = [
