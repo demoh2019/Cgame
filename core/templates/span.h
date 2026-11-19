@@ -347,6 +347,34 @@ constexpr int64_t Span<T>::rfind_sequence(const Span<T1> &p_span, uint64_t p_fro
 
 template <typename T>
 constexpr uint64_t Span<T>::count(const T &p_val) const {
+#if defined(__GNUC__) || defined(__clang__)
+	if constexpr (std::is_integral_v<T> && sizeof(T) == 1 && !std::is_same_v<std::remove_cv_t<T>, bool>) {
+		// A scalar loop is cheaper for short spans and constexpr evaluation.
+		if (!__builtin_is_constant_evaluated() && size() >= 64) {
+			constexpr uint64_t ONE_PER_BYTE = 0x0101010101010101ULL;
+			constexpr uint64_t LOW_BITS = 0x7F7F7F7F7F7F7F7FULL;
+			constexpr uint64_t HIGH_BITS = 0x8080808080808080ULL;
+			const uint64_t pattern = uint64_t(uint8_t(p_val)) * ONE_PER_BYTE;
+			uint64_t amount = 0;
+			uint64_t i = 0;
+			while (size() - i >= sizeof(uint64_t)) {
+				uint64_t word;
+				std::memcpy(&word, ptr() + i, sizeof(word));
+				const uint64_t diff = word ^ pattern;
+				// Exact per-byte zero test: masking before the addition avoids
+				// cross-byte borrows and false matches next to a zero byte.
+				const uint64_t matches = ~(((diff & LOW_BITS) + LOW_BITS) | diff) & HIGH_BITS;
+				// Each matching byte contributes one; the sum fits in one byte.
+				amount += ((matches >> 7) * ONE_PER_BYTE) >> 56;
+				i += sizeof(uint64_t);
+			}
+			for (; i < size(); i++) {
+				amount += ptr()[i] == p_val;
+			}
+			return amount;
+		}
+	}
+#endif
 	uint64_t amount = 0;
 	for (uint64_t i = 0; i < size(); i++) {
 		if (ptr()[i] == p_val) {
