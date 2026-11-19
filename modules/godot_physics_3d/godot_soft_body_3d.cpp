@@ -1338,10 +1338,35 @@ void GodotSoftBody3D::solve_constraints(real_t p_delta) {
 		node.x = node.q + node.v * p_delta;
 	}
 
-	// Solve positions.
+	// Solve positions. XPBD accumulates constraint multipliers only within
+	// this physics step; never leak lambdas across frames or mesh rebuilds.
+	const bool solve_xpbd_distance = xpbd_distance_constraints && p_delta > CMP_EPSILON;
+	const bool solve_xpbd_volume = xpbd_volume_valid && p_delta > CMP_EPSILON;
+	if (solve_xpbd_distance) {
+		for (real_t &lambda : xpbd_link_lambdas) {
+			lambda = 0.0;
+		}
+	}
+	xpbd_volume_lambda = 0.0;
+	const real_t inv_dt_squared = p_delta > CMP_EPSILON ? inv_delta * inv_delta : 0.0;
+	const real_t distance_alpha = xpbd_distance_compliance * inv_dt_squared;
+	const real_t volume_alpha = xpbd_volume_compliance * inv_dt_squared;
 	for (int isolve = 0; isolve < iteration_count; ++isolve) {
-		const real_t ti = isolve / (real_t)iteration_count;
-		solve_links(1.0, ti);
+		if (solve_xpbd_distance) {
+			for (uint32_t i = 0; i < links.size(); ++i) {
+				Link &link = links[i];
+				godot_physics_xpbd_distance_3d(link.n[0]->x, link.n[0]->im,
+						link.n[1]->x, link.n[1]->im, link.rl,
+						distance_alpha, xpbd_link_lambdas[i]);
+			}
+		} else {
+			// Preserve the original Bullet-derived solver exactly by default.
+			const real_t ti = isolve / (real_t)iteration_count;
+			solve_links(1.0, ti);
+		}
+		if (solve_xpbd_volume) {
+			solve_xpbd_volume_constraint(volume_alpha);
+		}
 	}
 	const real_t vc = (1.0 - damping_coefficient) * inv_delta;
 	for (Node &node : nodes) {
