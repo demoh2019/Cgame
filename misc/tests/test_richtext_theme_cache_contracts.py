@@ -14,9 +14,9 @@ NOTIFICATION = SOURCE.split("case NOTIFICATION_THEME_CHANGED: {", 1)[1].split("}
 class RichTextThemeCacheContracts(unittest.TestCase):
     def test_comparator_covers_every_theme_cache_field(self):
         fields = set(re.findall(
-            r"^\\s*(?:Ref<[^>]+>|int|Color|float)\\s+(\\w+)(?:\\s*=\\s*[^;]+)?;",
+            r"^\s*(?:Ref<[^>]+>|int|Color|float)\s+(\w+)(?:\s*=\s*[^;]+)?;",
             THEME, re.MULTILINE))
-        compared = set(re.findall(r"\\b(\\w+)\\s*==\\s*p_other\\.(\\w+)", COMPARISON))
+        compared = set(re.findall(r"\b(\w+)\s*==\s*p_other\.(\w+)", COMPARISON))
         self.assertTrue(fields)
         self.assertEqual(fields, {left for left, right in compared if left == right})
         self.assertEqual(len(fields), len(compared))
@@ -27,7 +27,7 @@ class RichTextThemeCacheContracts(unittest.TestCase):
         self.assertLess(NOTIFICATION.index("theme_cache_old.focus_style"), NOTIFICATION.index("if (theme_cache != theme_cache_old)"))
 
     def test_font_cache_invalidation_is_conditional(self):
-        self.assertRegex(NOTIFICATION, r"if \\(theme_cache != theme_cache_old\\) \\{\\s*main->first_invalid_font_line\\.store\\(0\\);\\s*\\}")
+        self.assertRegex(NOTIFICATION, r"if \(theme_cache != theme_cache_old\) \{\s*main->first_invalid_font_line\.store\(0\);\s*\}")
 
     def test_cache_is_updated_and_layout_refresh_preserved(self):
         self.assertLess(NOTIFICATION.index("if (theme_cache != theme_cache_old)"), NOTIFICATION.index("theme_cache_old = theme_cache;"))
