@@ -1147,6 +1147,17 @@ higher joint priorities, soft-body dependencies, null/empty body lists, or
 insufficient independent parallel work fall back to the existing sequential
 priority solver. The bounded coloring scratch buffer is reused across steps.
 
+The 3D worker dispatcher now batches **up to eight same-color constraints
+per group-task callback**, matching the existing 2D implementation. For a
+color containing `N` constraints, this reduces the number of scheduled
+callback indices from `N` to `ceil(N / 8)` while leaving the constraint
+order within a color and the barrier between colors unchanged. The last
+partial batch is bounds-checked. 3D also reuses the graph-color mapping
+and hash allocation between steps, with oversized tables discarded when
+the island shrinks and scratch released when coloring is no longer active.
+This trades temporary capacity for fewer allocation and scheduling calls;
+actual wall-clock gains depend on island density and thread count.
+
 3D setup batches smaller than 32 constraints and solve batches smaller
 than 16 independent islands now run inline rather than paying thread-pool
 dispatch and barrier costs. The large-island graph-color path remains opt-in.
@@ -1155,9 +1166,12 @@ As with any iterative constraint solver, changing the order of constraints
 may change convergence and determinism. Keep the option disabled if strict
 frame-for-frame comparison with the legacy solver is required.
 
-Run source contracts and the runtime finite-state/joint-spacing regression:
+Run source contracts and the runtime finite-state/joint-spacing regression.
+The new batch regression checks worker index bounds, 500 deterministic
+group sizes, barrier preservation and scratch-buffer cleanup:
 
 ```bash
+python3 -m unittest discover -s tests/stress -p 'test_physics_3d_color_batching.py' -v
 python3 -m unittest discover -s tests/stress -p 'test_physics_3d_large_island_coloring.py' -v
 ./bin/godot.macos.editor.arm64 --headless --path tests/stress \
   --script res://physics_large_island_3d_regression.gd
