@@ -32,7 +32,7 @@
 
 #include "godot_space_3d.h"
 
-#include "core/templates/hash_map.h"
+#include "core/templates/a_hash_map.h"
 #include "core/templates/local_vector.h"
 
 class GodotStep3D {
@@ -50,7 +50,7 @@ class GodotStep3D {
 	// Reused only by the opt-in large rigid-body island coloring path.
 	LocalVector<GodotConstraint3D *> colored_constraints;
 	LocalVector<uint8_t> constraint_colors;
-	HashMap<GodotBody3D *, uint32_t> occupied_colors;
+	AHashMap<GodotBody3D *, uint32_t> occupied_colors;
 	uint32_t color_batch_offset = 0;
 	uint32_t color_batch_count = 0;
 	// Read only while other islands run in worker jobs. The colored solver
