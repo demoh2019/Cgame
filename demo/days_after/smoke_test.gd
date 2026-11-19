@@ -107,6 +107,50 @@ func _run() -> void:
         quit(1)
         return
 
+
+    # All equipment and damage come from the same classless loadout.
+    var stone_b := game.get_node_or_null("StoneB")
+    var infected := game.get_node_or_null("InfectedWalker") as CharacterBody3D
+    if stone_b == null or infected == null or game.infected_total != 4:
+        push_error("Missing combat enemy or required stone node.")
+        quit(1)
+        return
+    stone_b.call("interact", survivor)
+    if not bool(survivor.call("craft_recipe", "rusty_spear")):
+        push_error("Crafting a melee weapon failed.")
+        quit(1)
+        return
+    if str(survivor.get("equipped_weapon")) != "rusty_spear":
+        push_error("Crafted spear was not equipped.")
+        quit(1)
+        return
+
+    # Previous fiber gathering yielded four fiber, and the reinforced
+    # bandage consumed one. Reuse the remaining fiber for an armor craft.
+    survivor.call("add_item", "stone_t1", 1)
+    if not bool(survivor.call("craft_recipe", "scrap_vest")):
+        push_error("Crafting the vest failed.")
+        quit(1)
+        return
+    survivor.set("health", 100.0)
+    survivor.call("take_damage", 20.0)
+    if not is_equal_approx(float(survivor.get("health")), 85.0):
+        push_error("Equipment damage reduction failed.")
+        quit(1)
+        return
+
+    infected.global_position = survivor.global_position + Vector3(0.0, 0.0, -1.8)
+    var before_hit := float(infected.get("health"))
+    if not bool(survivor.call("perform_attack")) or float(infected.get("health")) >= before_hit:
+        push_error("Melee attack did not hit the infected in front.")
+        quit(1)
+        return
+    infected.call("take_damage", 1000.0)
+    if game.infected_kills != 1 or int(survivor.get("combat_xp")) != 25:
+        push_error("Infected elimination did not award combat XP.")
+        quit(1)
+        return
+
     # Simulate a timer timeout without a 45-second delay.
     wood_a.call("_restore")
     if bool(wood_a.get("depleted")) or not wood_a.visible:
@@ -123,5 +167,5 @@ func _run() -> void:
 
     game.queue_free()
     await process_frame
-    print("PASS: Days After scene, survival, gathering, crafting, tier gates, respawn and 10 physics frames.")
+    print("PASS: Days After survival, gathering tiers, respawn, equipment, zombie combat and 10 physics frames.")
     quit(0)

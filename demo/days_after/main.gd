@@ -6,10 +6,13 @@ extends Node3D
 const PLAYER_SCRIPT = preload("res://player.gd")
 const PICKUP_SCRIPT = preload("res://pickup.gd")
 const RESOURCE_SCRIPT = preload("res://resource_node.gd")
+const ZOMBIE_SCRIPT = preload("res://zombie.gd")
 
 var player
 var hud_label: Label
 var prompt_label: Label
+var infected_kills: int = 0
+var infected_total: int = 0
 
 
 func _ready() -> void:
@@ -18,6 +21,7 @@ func _ready() -> void:
     _build_player()
     _build_pickups()
     _build_resources()
+    _build_enemies()
     _build_hud()
 
 
@@ -37,6 +41,9 @@ func _configure_controls() -> void:
     _bind_key("craft_advanced_bandage", KEY_6)
     _bind_key("use_advanced_bandage", KEY_7)
     _bind_key("restart", KEY_R)
+    _bind_key("attack", KEY_F)
+    _bind_key("craft_spear", KEY_8)
+    _bind_key("craft_vest", KEY_9)
 
 
 func _bind_key(action_name: String, key_code: int) -> void:
@@ -136,6 +143,7 @@ func _build_player() -> void:
     camera.add_child(ray)
 
     add_child(player)
+    player.attack_requested.connect(_on_player_attacked)
 
 
 func _build_pickups() -> void:
@@ -165,6 +173,8 @@ func _build_resources() -> void:
     _add_resource("FiberA", "fiber", 1, Vector3(0.0, 0.55, -3.0), 2)
     _add_resource("FiberB", "fiber", 1, Vector3(2.6, 0.55, -4.5), 2)
     _add_resource("FiberT2", "fiber", 2, Vector3(-4.1, 0.55, -5.5), 2)
+    _add_resource("WoodT2", "wood", 2, Vector3(12.0, 0.55, 6.0), 2)
+    _add_resource("StoneT2", "stone", 2, Vector3(12.0, 0.55, -6.0), 2)
 
 
 func _add_resource(node_name: String, kind: String, tier: int,
@@ -177,6 +187,52 @@ func _add_resource(node_name: String, kind: String, tier: int,
     resource.display_name = "%s T%d" % [kind, tier]
     resource.position = location
     add_child(resource)
+
+
+func _build_enemies() -> void:
+    _spawn_infected("InfectedWalker", Vector3(9.0, 1.05, 7.0))
+    _spawn_infected("InfectedScavenger", Vector3(-10.0, 1.05, 8.0))
+    _spawn_infected("InfectedRoad", Vector3(11.0, 1.05, -2.0))
+    _spawn_infected("InfectedNorth", Vector3(-11.0, 1.05, -13.0))
+
+
+func _spawn_infected(node_name: String, location: Vector3) -> void:
+    var infected = ZOMBIE_SCRIPT.new()
+    infected.name = node_name
+    infected.target = player
+    infected.position = location
+    infected.eliminated.connect(_on_infected_eliminated)
+    add_child(infected)
+    infected_total += 1
+
+
+func _on_player_attacked(damage: float, range_meters: float) -> void:
+    var closest: Node3D = null
+    var best_distance: float = range_meters
+    var forward: Vector3 = -player.global_transform.basis.z
+    forward.y = 0.0
+    forward = forward.normalized()
+    for candidate in get_tree().get_nodes_in_group("infected"):
+        if candidate.is_queued_for_deletion():
+            continue
+        var to_enemy: Vector3 = candidate.global_position - player.global_position
+        to_enemy.y = 0.0
+        var distance: float = to_enemy.length()
+        if distance <= 0.01 or distance > best_distance:
+            continue
+        if forward.dot(to_enemy / distance) < 0.28:
+            continue
+        closest = candidate
+        best_distance = distance
+    if closest != null:
+        closest.call("take_damage", damage)
+        player.last_message = "Атака: %d урона." % int(damage)
+
+
+func _on_infected_eliminated() -> void:
+    infected_kills += 1
+    player.gain_combat_xp(25)
+    player.last_message = "Заражённый уничтожен! Опыт боя +25."
 
 
 func _build_hud() -> void:
@@ -199,14 +255,14 @@ func _build_hud() -> void:
     column.add_child(hud_label)
 
     var help_label := Label.new()
-    help_label.text = "WASD / Shift / Space — движение | E — собрать\n" + \
-        "1 — съесть | 2 — выпить | 3 — бинт | 4 — инструмент\n" + \
-        "5 — использовать бинт | 6 — усиленный бинт | 7 — лечиться\n" + \
-        "Esc / ЛКМ — мышь | R — рестарт"
+    help_label.text = "WASD движение | Shift бег | Space прыжок | F удар\n" + \
+        "E сбор | 1 еда | 2 вода | 3 бинт | 4 инструмент | 5 лечение\n" + \
+        "6 улучшенный бинт | 7 лечение | 8 копьё | 9 броня\n" + \
+        "Esc мышь | ЛКМ захват мыши | R перезапуск"
     column.add_child(help_label)
 
     prompt_label = Label.new()
-    prompt_label.position = Vector2(18, 232)
+    prompt_label.position = Vector2(18, 315)
     ui.add_child(prompt_label)
 
     var crosshair := Label.new()
@@ -219,26 +275,47 @@ func _build_hud() -> void:
 func _process(_delta: float) -> void:
     if player == null or hud_label == null:
         return
-    hud_label.text = "DAYS AFTER — ВЫЖИВАНИЕ + ПРОФЕССИИ\n" + \
+    hud_label.text = (
+        "DAYS AFTER  ×  SANDBOX SURVIVAL\n" +
         "Здоровье %d | Голод %d | Жажда %d\n" % [
             roundi(player.health), roundi(player.hunger), roundi(player.thirst)
-        ] + "Еда %d | Вода %d | Дерево %d | Камень %d | Волокно %d\n" % [
+        ] +
+        "Рюкзак: еда %d, вода %d, древесина %d, камень %d, волокно %d\n" % [
             player.get_item_count("food"), player.get_item_count("water"),
             player.get_item_count("wood_t1"), player.get_item_count("stone_t1"),
             player.get_item_count("fiber_t1")
-        ] + "Волокно T2 %d | Инструмент %s | Бинты %d/%d\n" % [
-            player.get_item_count("fiber_t2"), player.equipped_tool,
-            player.get_item_count("field_bandage"), player.get_item_count("reinforced_bandage")
-        ] + "Навыки: лес %d | камень %d | волокно %d | крафт XP %d\n" % [
+        ] +
+        "T2: дерево %d, камень %d, волокно %d\n" % [
+            player.get_item_count("wood_t2"), player.get_item_count("stone_t2"),
+            player.get_item_count("fiber_t2")
+        ] +
+        "Добыча: древесина %d | камень %d | волокно %d | ремесло XP %d\n" % [
             player.gathering_level("wood"), player.gathering_level("stone"),
             player.gathering_level("fiber"), player.crafting_xp
-        ] + player.last_message
+        ] +
+        "Бинты: %d / %d | T2 дерево %d, камень %d, волокно %d\n" % [
+            player.get_item_count("field_bandage"),
+            player.get_item_count("reinforced_bandage"),
+            player.get_item_count("wood_t2"), player.get_item_count("stone_t2"),
+            player.get_item_count("fiber_t2")
+        ] +
+        "Снаряжение: оружие %s | броня %s | инструмент %s\n" % [
+            player.equipped_weapon if not player.equipped_weapon.is_empty() else "руки",
+            player.equipped_armor if not player.equipped_armor.is_empty() else "нет",
+            player.equipped_tool if not player.equipped_tool.is_empty() else "нет"
+        ] +
+        "Заражённые: %d/%d | Боевой опыт %d\n" % [
+            infected_kills, infected_total, player.combat_xp
+        ] +
+        player.last_message
+    )
     if player.health <= 0.0:
-        prompt_label.text = "Вы погибли от истощения. Нажмите R, чтобы начать заново."
+        prompt_label.text = "Вы погибли. Нажмите R, чтобы начать заново."
     else:
         var target: Node = player.get_aimed_pickup()
-        prompt_label.text = ("[E] Подобрать: " + str(target.get("display_name"))
-            if target != null else "Исследуйте руины и найдите припасы.")
-
+        prompt_label.text = (
+            "[E] Взаимодействовать: " + str(target.get("display_name"))
+            if target != null else "Исследуйте руины, собирайте T1 и осваивайте T2."
+        )
     if Input.is_action_just_pressed("restart"):
         get_tree().reload_current_scene()
