@@ -667,6 +667,8 @@ func _physics_contacts_2d(scale: int, frames: int, friction: float) -> Dictionar
 		PhysicsServer2D.body_add_shape(body, circle_shape)
 		PhysicsServer2D.body_set_param(body, PhysicsServer2D.BODY_PARAM_FRICTION, friction)
 		PhysicsServer2D.body_set_state(body, PhysicsServer2D.BODY_STATE_CAN_SLEEP, false)
+		# Raw GodotSpace2D defaults to -Y gravity; fall onto the +Y floor.
+		PhysicsServer2D.body_set_param(body, PhysicsServer2D.BODY_PARAM_GRAVITY_SCALE, -1.0)
 		PhysicsServer2D.body_set_state(body, PhysicsServer2D.BODY_STATE_TRANSFORM,
 				Transform2D(0.0, Vector2(float(i % 64) - 31.5, -1.35 - float(int(i / 64)) * 1.05)))
 		PhysicsServer2D.body_set_space(body, space)
@@ -730,6 +732,8 @@ func _physics_contact_manifolds_2d(scale: int, frames: int, block_solver: bool =
 		PhysicsServer2D.body_add_shape(body, box_shape)
 		PhysicsServer2D.body_set_param(body, PhysicsServer2D.BODY_PARAM_FRICTION, 0.8)
 		PhysicsServer2D.body_set_state(body, PhysicsServer2D.BODY_STATE_CAN_SLEEP, false)
+		# Raw GodotSpace2D defaults to -Y gravity; fall onto the +Y floor.
+		PhysicsServer2D.body_set_param(body, PhysicsServer2D.BODY_PARAM_GRAVITY_SCALE, -1.0)
 		PhysicsServer2D.body_set_state(body, PhysicsServer2D.BODY_STATE_TRANSFORM,
 				Transform2D(0.0, Vector2(float(i % 64) * 1.65 - 52.0, -1.20 - float(int(i / 64)) * 0.94)))
 		if i % 2 == 0:
