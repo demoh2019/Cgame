@@ -315,11 +315,19 @@ def main():
     parser.add_argument("--max-new", type=int, default=25, help="0 means no per-run limit")
     parser.add_argument("--state", default=".github/upstream-mirror-state.json")
     parser.add_argument("--git-dir", default=".")
+    parser.add_argument("--allow-untrusted-pr-import", action="store_true",
+                        help="Explicitly allow pushing unreviewed upstream PR branches into the fork")
     parser.add_argument("--skip-comments", action="store_true")
     parser.add_argument("--pause", type=float, default=1.0, help="Delay between writes")
     args = parser.parse_args()
     if args.max_new < 0:
         parser.error("--max-new must be >= 0")
+    if args.mode in ("all", "open-prs") and not args.allow_untrusted_pr_import:
+        parser.error(
+            "Importing open PRs can trigger CI on untrusted branches. "
+            "Review your fork's Actions permissions and secrets first, then pass "
+            "--allow-untrusted-pr-import to acknowledge this risk."
+        )
     token = os.environ.get("GH_TOKEN") or os.environ.get("GITHUB_TOKEN")
     if not token:
         parser.error("GH_TOKEN or GITHUB_TOKEN with write permissions is required")
