@@ -32,6 +32,8 @@
 
 #include "godot_collision_object_3d.h"
 
+#include "core/config/project_settings.h"
+
 GodotBroadPhase3DBVH::ID GodotBroadPhase3DBVH::create(GodotCollisionObject3D *p_object, int p_subindex, const AABB &p_aabb, bool p_static) {
 	uint32_t tree_id = p_static ? TREE_STATIC : TREE_DYNAMIC;
 	uint32_t tree_collision_mask = p_static ? TREE_FLAG_DYNAMIC : (TREE_FLAG_STATIC | TREE_FLAG_DYNAMIC);
