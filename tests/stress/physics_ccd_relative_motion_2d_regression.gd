@@ -105,6 +105,9 @@ func _run() -> void:
 	# Reversed order: A is a capsule centered at y=2.2 and sweeps
 	# into the static circle/sphere B at x=4, y=0.
 	failures += await _run_case("moving capsule CCD", 4.0, 480.0, 0.0, 0.0, 470.0, true, false, 0.0, false, 2.2, true)
+	# Parallel capsule center segments combine into a longer expanded
+	# capsule. Their first grazing contact must be found by volume TOI.
+	failures += await _run_case("parallel capsules CCD", 4.0, 480.0, 0.0, 0.0, 425.0, true, false, 3.8, true, 0.0, true)
 
 	if failures:
 		printerr("2D relative-motion CCD regression failed: %d" % failures)
