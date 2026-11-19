@@ -124,3 +124,37 @@ It also records median and p95 **in-engine duration** independently of process
 startup, and baseline comparisons now track median engine time. These rankings
 are a triage aid, not a universal throughput leaderboard: scenarios do different
 amounts of work. Native CI archives both JSON and Markdown artifacts.
+
+
+## Multi-scale bottleneck sweep
+
+Single-scale timings are useful regressions but can hide quadratic algorithms.
+The separate analyzer repeats the **same workloads** at increasing scales and
+ranks deviations from proportional growth. It uses the existing isolated
+process watchdog, so timeouts, crashes and RSS overages remain visible.
+
+```bash
+# Three loads per workload, with three repetitions at each load.
+python3 tests/stress/sweep.py --godot ./bin/godot.linuxbsd.editor.dev.x86_64 \
+  --preset smoke --scales 1,2,4 --repeats 3 --output out/scaling.json
+
+# Stronger scaling analysis of selected CPU, navigation and resource paths.
+python3 tests/stress/sweep.py --godot ./bin/godot.linuxbsd.editor.dev.x86_64 \
+  --case containers,astar_graph,astar_3d,resource_io,animation_tracks \
+  --scales 2,8,32 --repeats 5 --timeout 600 --rss-limit-mib 4096 \
+  --threshold-pct 25 --fail-on-superlinear --output out/scaling-hard.json
+```
+
+Reports include median **engine execution time**, full-process wall time,
+maximum sampled RSS, the RAM delta between smallest and largest loads, failed
+cases, and ranked superlinear-growth candidates. Intermediate JSON and logs
+are retained alongside the final report. A growth warning is a **lead to
+investigate**, not proof of quadratic complexity; caching, startup overhead,
+thread scheduling, and a change of algorithmic regime can all affect it.
+
+Additional probes: `astar_graph` exercises 2D shortest paths on a densely
+connected graph, and `animation_tracks` measures repeated track-key
+interpolation. `resource_io` also creates/removes its own resource fixture
+under `user://`; no repository sources are modified. For GPU bottlenecks,
+use `--render-mode display` on a real GPU host and keep hardware/driver
+constant across comparison points.
