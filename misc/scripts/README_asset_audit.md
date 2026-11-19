@@ -50,6 +50,15 @@ existing path contains the expected resource type. It may flag a `res://`
 literal that is only intended as a string. Run the Godot editor's import and
 project validation too.
 
+## Dependency and reverse-reference graph
+
+To inspect which files use a particular asset (and which resources a scene
+depends on), run the read-only [Asset Reference Graph](README_asset_reference_graph.md)
+CLI. It shares this auditor's static-reference parser, supports multi-hop
+dependency and referrer traversal, and exports text, JSON or Graphviz DOT.
+Only existing static resource paths produce graph edges; run this auditor
+to diagnose broken or invalid references.
+
 ## Tests
 
 The tool uses Python's standard library and needs no engine build:
