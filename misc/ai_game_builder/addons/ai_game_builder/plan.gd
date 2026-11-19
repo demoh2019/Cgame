@@ -2,6 +2,7 @@
 extends RefCounted
 
 # Generated files are new, confined to this directory, and never overwrite existing files.
+const QualityGate = preload("res://addons/ai_game_builder/quality_gate.gd")
 const OUTPUT_ROOT = "res://ai_generated/"
 const MAX_FILES = 16
 const MAX_FILE_CHARS = 90000
@@ -54,12 +55,19 @@ static func validate(plan: Dictionary) -> Dictionary:
 		total_size += content.length()
 		if total_size > MAX_TOTAL_CHARS:
 			return _failure("Generated content exceeds the size limit.")
-		if seen.has(path):
-			return _failure("Duplicate file path: %s" % path)
+		var normalized := path.to_lower()
+		if seen.has(normalized):
+			return _failure("Duplicate file path (case insensitive): %s" % path)
 		if FileAccess.file_exists(path) or DirAccess.dir_exists_absolute(path):
 			return _failure("Existing files cannot be overwritten: %s" % path)
-		seen[path] = true
+		if _has_symlink_component(path):
+			return _failure("Symbolic links are not allowed in generated paths: %s" % path)
+		seen[normalized] = true
 		files.append({"path": path, "content": content})
+
+	var quality_error: String = QualityGate.inspect_files(files)
+	if not quality_error.is_empty():
+		return _failure(quality_error)
 
 	return {"ok": true, "summary": summary.left(1500), "files": files}
 
@@ -98,6 +106,9 @@ static func apply(plan: Dictionary) -> Dictionary:
 	var created: Array[String] = []
 	for entry in checked["files"]:
 		var path: String = entry["path"]
+		if _has_symlink_component(path):
+			_rollback(created)
+			return _failure("Symbolic link appeared while applying: %s" % path)
 		if DirAccess.make_dir_recursive_absolute(path.get_base_dir()) != OK:
 			_rollback(created)
 			return _failure("Failed to create directory for: %s" % path)
@@ -105,6 +116,9 @@ static func apply(plan: Dictionary) -> Dictionary:
 			_rollback(created)
 			return _failure("A file appeared while applying: %s" % path)
 
+		if _has_symlink_component(path):
+			_rollback(created)
+			return _failure("Symbolic link appeared before writing: %s" % path)
 		var handle := FileAccess.open(path, FileAccess.WRITE)
 		if handle == null:
 			_rollback(created)
@@ -118,6 +132,19 @@ static func apply(plan: Dictionary) -> Dictionary:
 			return _failure("Failed to write: %s" % path)
 		created.append(path)
 	return {"ok": true, "paths": created}
+
+
+static func _has_symlink_component(path: String) -> bool:
+	var directory := DirAccess.open("res://")
+	if directory == null:
+		return true
+	var relative := path.trim_prefix("res://")
+	var current := ""
+	for segment in relative.split("/"):
+		current = segment if current.is_empty() else current + "/" + segment
+		if directory.is_link(current):
+			return true
+	return false
 
 
 static func _rollback(paths: Array[String]) -> void:

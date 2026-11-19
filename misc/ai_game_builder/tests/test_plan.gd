@@ -3,6 +3,7 @@ extends SceneTree
 const Plan = preload("res://addons/ai_game_builder/plan.gd")
 const Client = preload("res://addons/ai_game_builder/ai_client.gd")
 const Context = preload("res://addons/ai_game_builder/project_context.gd")
+const QualityGate = preload("res://addons/ai_game_builder/quality_gate.gd")
 
 var _failed := 0
 
@@ -20,6 +21,21 @@ func _run() -> void:
 	_check(not Plan.parse_response("{}")["ok"], "missing files")
 	_check(not Plan.validate({"files": []})["ok"], "empty files")
 	_check(not Plan.validate({"files": [good["files"][0], good["files"][0]]})["ok"], "duplicate path")
+	_check(not Plan.validate({"files": [
+		{"path": "res://ai_generated/Test.gd", "content": "pass"},
+		{"path": "res://ai_generated/test.gd", "content": "pass"},
+	]})["ok"], "case-insensitive duplicate")
+	_check(not Plan.validate({"files": [{"path": "res://ai_generated/editor.gd", "content": "@tool\nextends Node"}]})["ok"], "reject editor-executed scripts")
+	_check(not Plan.validate({"files": [{"path": "res://ai_generated/broken.json", "content": "{invalid"}]})["ok"], "reject malformed JSON")
+	_check(Plan.validate({"files": [{"path": "res://ai_generated/data.json", "content": "{\"hello\":true}"}]})["ok"], "accept valid JSON")
+	var scene_ref := "[gd_scene load_steps=2 format=3]\n[ext_resource type=\"Script\" path=\"res://ai_generated/missing_unique_74291.gd\" id=\"1\"]\n"
+	_check(not Plan.validate({"files": [{"path": "res://ai_generated/check.tscn", "content": scene_ref}]})["ok"], "reject missing generated dependency")
+	var scene_ref_valid := scene_ref.replace("missing_unique_74291.gd", "included.gd")
+	_check(Plan.validate({"files": [
+		{"path": "res://ai_generated/check.tscn", "content": scene_ref_valid},
+		{"path": "res://ai_generated/included.gd", "content": "extends Node"},
+	]})["ok"], "accept generated dependency")
+	_check(QualityGate.inspect_files([{"path": "res://ai_generated/script.gd", "content": "extends Node"}]).is_empty(), "safe source")
 	_check(not Plan.validate({"files": [{"path": "res://ai_generated/empty.gd", "content": ""}]})["ok"], "empty content")
 	_check(not Plan.validate({"files": [{"path": "res://ai_generated/huge.gd", "content": "x".repeat(90001)}]})["ok"], "oversized content")
 	_check(not Plan.validate({"files": [{"path": "res://ai_generated/a.gd", "content": 1}]})["ok"], "invalid content type")

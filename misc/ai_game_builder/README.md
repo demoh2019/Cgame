@@ -16,8 +16,8 @@ It ships as a source addon in the fork (not as a built-in engine feature).
      with the key field left empty.
 4. Describe a game (e.g. "Make a playable 2D platformer with a score and menu").
    Click **Generate** and **review the complete proposed file contents**.
-5. Click **Apply** to create files. Open the generated scene in
-   `res://ai_generated/` and run it. Set a main scene manually if desired.
+5. Click **Apply** to create files, then **Open scene** to inspect the result.
+   Set a main scene manually if desired.
 
 The model and endpoint are configurable, with no bundled API key. The key is
 kept only in the dock's password field; it is not written to disk by the plugin.
@@ -26,9 +26,10 @@ kept only in the dock's password field; it is not written to disk by the plugin.
 
 - Only a bounded list of *new* files under `res://ai_generated/` can be
   written: GDScript, scenes, resources, shaders, JSON, and Markdown.
-- File path traversal, absolute paths outside the output directory,
+- File path traversal, symlink components, case-insensitive path collisions, absolute paths outside the output directory,
   duplicate paths, unsupported extensions, oversized plans, and overwrites
   are rejected. Partial writes are rolled back on detected file errors.
+- Generated JSON is parsed, generated scene/resource references are checked for missing output files, and generated `@tool` GDScript is rejected.
 - API access is HTTPS only except for localhost HTTP. Redirects are disabled.
 - The provider receives the user prompt, project name, main scene, and at most
   80 relevant **file paths**. The plugin does **not** send file contents.
@@ -47,7 +48,8 @@ Run with a Godot 4.8 editor or headless build:
     godot --headless --path misc/ai_game_builder --script tests/test_plan.gd
 
 Tests cover JSON parsing, file limits, path sanitization, endpoint policies,
-response parsing, actual file creation, and overwrite protection.
+resource dependencies, editor-script restrictions, actual file creation, and overwrite protection.
+The Linux CI editor build also runs a headless project smoke test with the plugin enabled.
 
 ## Next stages
 

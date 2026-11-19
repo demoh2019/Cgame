@@ -248,6 +248,21 @@ jobs:
         run: |
           dotnet test modules/mono/editor/Godot.NET.Sdk/Godot.SourceGenerators.Tests
 
+      - name: AI Game Builder regression tests
+        if: matrix.proj-test
+        run: |
+          ${{ matrix.bin }} --headless --path misc/ai_game_builder --script tests/test_plan.gd
+
+      - name: AI Game Builder editor smoke test
+        if: matrix.proj-test
+        run: |
+          set -o pipefail
+          ${{ matrix.bin }} --headless --editor --path misc/ai_game_builder --quit-after 10 2>&1 | tee /tmp/ai-game-builder-editor.log
+          if grep -E 'SCRIPT ERROR|Parse Error|Failed to load script' /tmp/ai-game-builder-editor.log; then
+            echo "::error::AI Game Builder plugin failed editor loading"
+            exit 1
+          fi
+
       # Check class reference
       - name: Check for class reference updates
         if: matrix.doc-test

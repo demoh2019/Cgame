@@ -14,6 +14,8 @@ var _preview: TextEdit
 var _status: Label
 var _generate_button: Button
 var _apply_button: Button
+var _open_button: Button
+var _last_scene := ""
 var _pending_plan: Dictionary = {}
 
 
@@ -57,6 +59,11 @@ func _ready() -> void:
 	_apply_button.disabled = true
 	_apply_button.pressed.connect(_on_apply_pressed)
 	actions.add_child(_apply_button)
+	_open_button = Button.new()
+	_open_button.text = "Открыть сцену"
+	_open_button.disabled = true
+	_open_button.pressed.connect(_on_open_pressed)
+	actions.add_child(_open_button)
 
 	_status = _add_label("Сначала создайте план. Применение требует подтверждения.")
 	_add_label("Предпросмотр: содержимое всех создаваемых файлов")
@@ -83,6 +90,8 @@ func _on_generate_pressed() -> void:
 		return
 	_pending_plan = {}
 	_apply_button.disabled = true
+	_open_button.disabled = true
+	_last_scene = ""
 	_preview.text = ""
 	_generate_button.disabled = true
 	_status.text = "Генерация... Запрос отправлен модели."
@@ -125,4 +134,17 @@ func _on_apply_pressed() -> void:
 	_apply_button.disabled = true
 	_pending_plan = {}
 	EditorInterface.get_resource_filesystem().scan()
-	_status.text = "Создано файлов: %d. Откройте сцену в res://ai_generated/." % result["paths"].size()
+	_last_scene = ""
+	for path in result["paths"]:
+		if str(path).ends_with(".tscn"):
+			_last_scene = path
+			break
+	_open_button.disabled = _last_scene.is_empty()
+	_status.text = "Создано файлов: %d. Можно открыть сгенерированную сцену." % result["paths"].size()
+
+
+func _on_open_pressed() -> void:
+	if _last_scene.is_empty() or not FileAccess.file_exists(_last_scene):
+		_open_button.disabled = true
+		return
+	EditorInterface.open_scene_from_path(_last_scene)
