@@ -52,7 +52,7 @@ static bool _is_word_boundary(const String &p_str, int p_index) {
 	if (p_index == -1 || p_index == p_str.length()) {
 		return true;
 	}
-	// Called repeatedly while scoring candidates. Avoid searching a temporary
+	// Called repeatedly while scoring candidates. Avoid searching a
 	// String for these six ASCII word delimiters.
 	switch (p_str[p_index]) {
 		case '/':
