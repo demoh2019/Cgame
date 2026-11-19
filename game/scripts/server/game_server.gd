@@ -22,6 +22,7 @@ const Combat = preload("res://scripts/shared/combat.gd")
 const Scavenging = preload("res://scripts/shared/scavenging.gd")
 const Structures = preload("res://scripts/shared/structures.gd")
 const SiegeWaves = preload("res://scripts/shared/siege_waves.gd")
+const RaidEncounter = preload("res://scripts/shared/raid_encounter.gd")
 const Zombie = preload("res://scripts/shared/zombie.gd")
 const EliteInfected = preload("res://scripts/shared/elite_infected.gd")
 const ZoneRisk = preload("res://scripts/shared/zone_risk.gd")
@@ -92,6 +93,11 @@ var barricades: Dictionary = {}
 var siege_last_by_wall: Dictionary = {} # Session timers only; no character persistence.
 var last_siege_time: float = -1000000.0
 var siege_waves_started: int = 0 # Server-owned structures; authenticated walls may persist.
+var raid_boss_id: int = -1
+var last_raid_spawn_time: float = -1000000.0
+var raid_started_at: float = 0.0
+var raid_next_slam_at: float = 0.0
+var raid_pending_slam: Dictionary = {} # World position & deadline are server-owned.
 var campfires: Dictionary = {} # Temporary shared warmth, never checkpointed.
 var trades: Dictionary = {} # trade id -> offer/accept/expiry
 var market_orders: Dictionary = {} # id -> advertised online stock (not escrow).
@@ -1590,6 +1596,14 @@ func _on_zombie_death(zombie) -> void:
 	var loot: Dictionary = Combat.zombie_loot(zombie.type, zone, loot_rng)
 	if zombie.elite:
 		loot = EliteInfected.enhanced_loot(loot, zone)
+	if zombie.raid_boss:
+		# Fixed server-side reward bag; no player gets multiple personal copies.
+		for item_id in RaidEncounter.treasure(zone):
+			loot[item_id] = int(loot.get(item_id, 0)) + int(RaidEncounter.treasure(zone)[item_id])
+		raid_boss_id = -1
+		raid_pending_slam = {}
+		events.append({"type": "raid_defeated", "id": zombie.id,
+			"x": zombie.position.x, "z": zombie.position.z})
 	_make_bag(zombie.position, loot)
 	if spawn_state.has(zombie.spawn_id):
 		spawn_state[zombie.spawn_id] = {"zombie": -1, "next": time + (240.0 if zone < 2 else 360.0)}
@@ -1631,6 +1645,7 @@ func tick(delta: float) -> void:
 	events.append_array(territory.tick(delta, time, players, parties))
 	if tick_count % SiegeWaves.CHECK_EVERY_TICKS == 0:
 		_tick_siege_waves()
+	_tick_raid_encounter()
 	_tick_zombies(delta)
 	_tick_world(delta)
 
@@ -1730,6 +1745,95 @@ func _finish_gather(player: Player, node: Dictionary) -> void:
 	player.action = {}
 	depleted[int(node["id"])] = time + float(info["respawn"])
 	events.append({"type": "gathered", "peer": player.id, "item": item_id, "amount": amount - left, "node": node["id"]})
+
+
+## Rare dangerous-zone group boss. One live boss per simulation and a 10-minute
+## cooldown; normal elite infected and nightly barricade sieges remain separate.
+func _tick_raid_encounter() -> void:
+	if raid_boss_id != -1:
+		var boss = zombies.get(raid_boss_id)
+		if boss == null or not boss.is_alive():
+			raid_boss_id = -1
+			raid_pending_slam = {}
+			return
+		var at := Vector2(boss.position.x, boss.position.z)
+		if time >= raid_started_at + RaidEncounter.MAX_ENCOUNTER_SECONDS \
+				or _nearest_player_distance(at) > ZOMBIE_ACTIVE_RADIUS:
+			zombies.erase(raid_boss_id)
+			events.append({"type": "raid_expired", "id": raid_boss_id,
+				"x": at.x, "z": at.y})
+			raid_boss_id = -1
+			raid_pending_slam = {}
+			return
+		if not raid_pending_slam.is_empty():
+			if time >= float(raid_pending_slam["at"]):
+				var center := Vector2(float(raid_pending_slam["x"]),
+					float(raid_pending_slam["z"]))
+				var boss_id: int = int(raid_pending_slam["id"])
+				raid_pending_slam = {}
+				_resolve_raid_slam(boss_id, center)
+			return
+		if time >= raid_next_slam_at and boss.target_id != -1:
+			raid_pending_slam = {"id": raid_boss_id,
+				"x": at.x, "z": at.y,
+				"at": time + RaidEncounter.SLAM_WARNING}
+			raid_next_slam_at = time + RaidEncounter.SLAM_COOLDOWN
+			events.append({"type": "raid_warning", "id": raid_boss_id,
+				"x": at.x, "z": at.y,
+				"radius": RaidEncounter.SLAM_RADIUS,
+				"seconds": RaidEncounter.SLAM_WARNING})
+		return
+
+	if time < RaidEncounter.START_DELAY or \
+			time - last_raid_spawn_time < RaidEncounter.COOLDOWN or \
+			zombies.size() >= RaidEncounter.MAX_INFECTED or \
+			tick_count % SiegeWaves.CHECK_EVERY_TICKS != 0:
+		return
+	var leader_id: int = RaidEncounter.eligible_leader(world, players, parties)
+	if leader_id == -1:
+		return
+	var leader: Player = players.get(leader_id)
+	var site: Vector2 = RaidEncounter.spawn_site(world, players,
+		leader.position, tick_count % RaidEncounter.SPAWN_ANGLES)
+	if site == Vector2.INF:
+		return
+	var spawn_id: int = new_id()
+	var boss = Zombie.new(spawn_id, "brute",
+		Vector3(site.x, world.height_at(site.x, site.y), site.y), -1)
+	RaidEncounter.empower(boss)
+	var targets := {leader_id: {"position": leader.position, "alive": true, "safe": false}}
+	boss.receive_pack_alert(leader_id, targets)
+	zombies[spawn_id] = boss
+	raid_boss_id = spawn_id
+	raid_started_at = time
+	last_raid_spawn_time = time
+	raid_next_slam_at = time + 9.0
+	events.append({"type": "raid_started", "id": spawn_id,
+		"x": site.x, "z": site.y, "zone": world.zone_at(site.x, site.y),
+		"health": boss.health})
+
+
+func _resolve_raid_slam(boss_id: int, center: Vector2) -> void:
+	var boss = zombies.get(boss_id)
+	if boss == null or not boss.is_alive() or not boss.raid_boss:
+		return
+	for survivor in players.values():
+		if not _alive(survivor) or _is_safe(survivor.position) \
+				or world.zone_at(survivor.position.x, survivor.position.z) < RaidEncounter.MIN_ZONE \
+				or not RaidEncounter.in_slam(center, survivor.position):
+			continue
+		if survivor.dodge_immunity > 0.0:
+			events.append({"type": "evaded", "peer": survivor.id, "zombie": boss_id})
+			continue
+		var damage: float = Combat.apply_armor(RaidEncounter.SLAM_DAMAGE, survivor.inventory.armor)
+		survivor.survival.hurt(damage)
+		events.append({"type": "hit", "kind": "player", "id": survivor.id,
+			"damage": damage, "by": -boss_id})
+		if not _alive(survivor):
+			_on_player_death(survivor, -boss_id)
+	events.append({"type": "raid_slam", "id": boss_id,
+		"x": center.x, "z": center.y,
+		"radius": RaidEncounter.SLAM_RADIUS})
 
 
 ## Night-only server raids on defended survivors. Neither clients nor
@@ -1949,7 +2053,8 @@ func snapshot_for(peer_id: int) -> Dictionary:
 		var p: Vector3 = zombie.position
 		if zombie.is_alive() and here.distance_to(Vector2(p.x, p.z)) <= Defs.INTEREST_RADIUS:
 			nearby_zombies.append({"id": zombie.id, "type": zombie.type, "x": p.x, "y": p.y, "z": p.z, "yaw": zombie.yaw, "hp": zombie.health, "state": zombie.state,
-					"elite": zombie.elite})
+					"elite": zombie.elite, "raid_boss": zombie.raid_boss,
+					"max_hp": float(zombie.data.get("health", zombie.health))})
 	var nearby_barricades: Array = []
 	for wall in barricades.values():
 		if Structures.within_range(here, Vector2(float(wall["x"]), float(wall["z"])), Defs.INTEREST_RADIUS):
