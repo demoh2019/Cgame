@@ -33,7 +33,7 @@ func _run() -> void:
 	success = _check(game.player != null and is_instance_valid(game.player), "player spawns") and success
 	success = _check(game.enemies.size() > 0, "infected spawn") and success
 	success = _check(game.resource_nodes.size() > 50, "resources generated") and success
-	success = _check(game.is_safe_at(game.SPAWN), "refuge is safe") and success
+	success = _check(game.is_safe_at(game.player.position), "refuge is safe") and success
 
 	# Put the player next to the first resource; validate real world/inventory integration.
 	var amount_before: int = int(game.inventory["wood"])
@@ -47,6 +47,14 @@ func _run() -> void:
 	var hp_before: int = infected.hp
 	success = _check(game.try_attack(), "attack in weapon range") and success
 	success = _check(infected.hp < hp_before, "infected takes damage") and success
+
+	# Camp building consumes resources and increases safe zones.
+	game.inventory["wood"] = 5
+	game.inventory["stone"] = 3
+	game.selected_recipe = 3
+	var camp_count: int = game.safe_camps.size()
+	success = _check(game.try_craft(), "craft campfire") and success
+	success = _check(game.safe_camps.size() == camp_count + 1, "build new safe camp") and success
 
 	game.queue_free()
 	await process_frame
