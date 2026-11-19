@@ -1,0 +1,37 @@
+name: LocalVector trivial shift performance regressions
+
+on:
+  pull_request:
+    branches: [develop]
+    paths:
+      - "core/templates/local_vector.h"
+      - "tests/core/templates/test_local_vector.cpp"
+      - ".github/workflows/local-vector-shifts.yml"
+  push:
+    branches: [develop]
+    paths:
+      - "core/templates/local_vector.h"
+      - "tests/core/templates/test_local_vector.cpp"
+      - ".github/workflows/local-vector-shifts.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  native-local-vector:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 100
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+      - uses: ./.github/actions/godot-deps
+      - uses: ./.github/actions/godot-build
+        with:
+          platform: linuxbsd
+          target: editor
+          scons-flags: dev_build=yes tests=yes debug_symbols=no module_mono_enabled=no accesskit=no
+      - name: Run native LocalVector test suite
+        run: |
+          timeout 300s ./bin/godot.linuxbsd.editor.dev.x86_64 --headless --test --test-case="*[LocalVector]*" --no-colors

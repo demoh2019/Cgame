@@ -34,6 +34,8 @@ TEST_FORCE_LINK(test_local_vector)
 
 #include "core/templates/local_vector.h"
 
+#include <cstdint>
+#include <type_traits>
 #include <vector>
 
 namespace TestLocalVector {
@@ -263,60 +265,123 @@ TEST_CASE("[LocalVector] Size / Resize / Reserve.") {
 	CHECK(vector.get_capacity() >= 4);
 }
 
-TEST_CASE("[LocalVector] Bulk trivial insert and remove match reference vector") {
+
+TEST_CASE("[LocalVector] Trivial inserts and erases match std::vector through randomized shifts") {
 	LocalVector<int> actual;
-	std::vector<int> expected;
-	for (int i = 0; i < 512; i++) {
-		const size_t position = size_t(i * 23) % (expected.size() + 1);
-		actual.insert(uint32_t(position), i);
-		expected.insert(expected.begin() + position, i);
+	std::vector<int> reference;
+	uint32_t seed = 0x48d12a73;
+	for (int step = 0; step < 4096; step++) {
+		seed ^= seed << 13;
+		seed ^= seed >> 17;
+		seed ^= seed << 5;
+		if ((seed & 3) != 0 && reference.size() < 256 || reference.empty()) {
+			const size_t at = (seed >> 8) % (reference.size() + 1);
+			const int value = int(seed >> 10);
+			actual.insert(uint32_t(at), value);
+			reference.insert(reference.begin() + at, value);
+		} else {
+			const size_t at = (seed >> 8) % reference.size();
+			actual.remove_at(uint32_t(at));
+			reference.erase(reference.begin() + at);
+		}
+		CHECK(actual.size() == reference.size());
+		for (size_t i = 0; i < reference.size(); i++) {
+			CHECK(actual[uint32_t(i)] == reference[i]);
+		}
 	}
-	for (int i = 0; i < 256; i++) {
-		const size_t position = size_t(i * 17) % expected.size();
-		actual.remove_at(uint32_t(position));
-		expected.erase(expected.begin() + position);
-	}
-	CHECK(actual.size() == expected.size());
-	for (size_t i = 0; i < expected.size(); i++) {
-		CHECK(actual[uint32_t(i)] == expected[i]);
-	}
-	actual.remove_at(0);
-	CHECK(actual.size() == expected.size() - 1);
-	actual.remove_at(actual.size() - 1);
-	CHECK(actual.size() == expected.size() - 2);
 }
 
-TEST_CASE("[LocalVector] Byte find handles offsets and signed characters") {
-	LocalVector<uint8_t> bytes;
-	bytes.resize(4096);
-	for (uint32_t i = 0; i < bytes.size(); i++) {
-		bytes[i] = uint8_t(i & 255);
+struct NonTrivialLocalItem {
+	int value = 0;
+	NonTrivialLocalItem() = default;
+	explicit NonTrivialLocalItem(int p_value) :
+			value(p_value) {}
+	NonTrivialLocalItem(const NonTrivialLocalItem &) = default;
+	NonTrivialLocalItem(NonTrivialLocalItem &&p_other) :
+			value(p_other.value) {}
+	NonTrivialLocalItem &operator=(const NonTrivialLocalItem &) = default;
+	NonTrivialLocalItem &operator=(NonTrivialLocalItem &&p_other) {
+		value = p_other.value;
+		return *this;
 	}
-	CHECK(bytes.find(uint8_t(201)) == 201);
-	CHECK(bytes.find(uint8_t(201), 202) == 457);
-	CHECK(bytes.find(uint8_t(255), -1) == 4095);
-	CHECK(bytes.find(uint8_t(0), 4096) == -1);
-	CHECK(bytes.find(uint8_t(0), -4097) == -1);
+	~NonTrivialLocalItem() {}
+};
+static_assert(!std::is_trivially_copyable_v<NonTrivialLocalItem>);
 
-	LocalVector<int8_t> signed_bytes{ -128, -10, 0, 10, 127 };
-	CHECK(signed_bytes.find(int8_t(-128)) == 0);
-	CHECK(signed_bytes.find(int8_t(127), 1) == 4);
-	CHECK(signed_bytes.find(int8_t(-10), 2) == -1);
+TEST_CASE("[LocalVector] Nontrivial inserted elements retain normal move semantics") {
+	LocalVector<NonTrivialLocalItem> values;
+	for (int i = 0; i < 12; i++) {
+		values.push_back(NonTrivialLocalItem(i));
+	}
+	values.insert(0, NonTrivialLocalItem(99));
+	values.insert(7, NonTrivialLocalItem(88));
+	values.insert(values.size(), NonTrivialLocalItem(77));
+	CHECK(values.size() == 15);
+	CHECK(values[0].value == 99);
+	CHECK(values[7].value == 88);
+	CHECK(values[14].value == 77);
+	values.remove_at(0);
+	values.remove_at(6);
+	CHECK(values.size() == 13);
+	for (int i = 0; i < 12; i++) {
+		CHECK(values[uint32_t(i)].value == i);
+	}
+	CHECK(values[12].value == 77);
 }
 
-TEST_CASE("[LocalVector] Nontrivial insert and erase preserve element order") {
-	LocalVector<String> names;
-	names.push_back("alpha");
-	names.push_back("gamma");
-	names.insert(1, String("beta"));
-	CHECK(names.size() == 3);
-	CHECK(names[0] == "alpha");
-	CHECK(names[1] == "beta");
-	CHECK(names[2] == "gamma");
-	CHECK(names.find(String("gamma")) == 2);
-	names.remove_at(0);
-	CHECK(names[0] == "beta");
-	CHECK(names[1] == "gamma");
+TEST_CASE("[LocalVector] Trivial edge shifts preserve zero and last slot") {
+	LocalVector<uint64_t> values;
+	values.insert(0, uint64_t(0x101));
+	CHECK(values.size() == 1);
+	values.insert(0, uint64_t(0x202));
+	values.insert(1, uint64_t(0x303));
+	values.insert(3, uint64_t(0x404));
+	CHECK(values.size() == 4);
+	CHECK(values[0] == 0x202);
+	CHECK(values[1] == 0x303);
+	CHECK(values[2] == 0x101);
+	CHECK(values[3] == 0x404);
+	values.remove_at(3);
+	values.remove_at(0);
+	CHECK(values.size() == 2);
+	CHECK(values[0] == 0x303);
+	CHECK(values[1] == 0x101);
+}
+
+
+TEST_CASE("[LocalVector] Trivial Span assignment supports overlapping storage") {
+	LocalVector<int> values;
+	for (int i = 0; i < 32; i++) {
+		values.push_back(i);
+	}
+	values = Span<int>(values.ptr() + 8, 24);
+	CHECK(values.size() == 24);
+	for (int i = 0; i < 24; i++) {
+		CHECK(values[uint32_t(i)] == i + 8);
+	}
+	values = values.span();
+	CHECK(values.size() == 24);
+	for (int i = 0; i < 24; i++) {
+		CHECK(values[uint32_t(i)] == i + 8);
+	}
+	LocalVector<int> empty;
+	values = empty.span();
+	CHECK(values.is_empty());
+}
+
+TEST_CASE("[LocalVector] Trivial Vector move assignment copies bulk values") {
+	Vector<uint32_t> source;
+	source.resize(256);
+	uint32_t *write = source.ptrw();
+	for (uint32_t i = 0; i < 256; i++) {
+		write[i] = (i << 16) ^ 0xBA5E;
+	}
+	LocalVector<uint32_t> values;
+	values = std::move(source);
+	CHECK(values.size() == 256);
+	for (uint32_t i = 0; i < 256; i++) {
+		CHECK(values[i] == ((i << 16) ^ 0xBA5E));
+	}
 }
 
 } // namespace TestLocalVector

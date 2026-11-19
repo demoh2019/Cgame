@@ -413,8 +413,15 @@ public:
 
 	void operator=(Span<T> p_from) {
 		resize(p_from.size());
-		for (size_t i = 0; i < p_from.size(); i++) {
-			data[i] = p_from[i];
+		if constexpr (std::is_trivially_copyable_v<T>) {
+			if (count > 0) {
+				// A span can refer to part of this vector; preserve overlap semantics.
+				std::memmove(data, p_from.ptr(), size_t(count) * sizeof(T));
+			}
+		} else {
+			for (size_t i = 0; i < p_from.size(); i++) {
+				data[i] = p_from[i];
+			}
 		}
 	}
 	void operator=(const LocalVector &p_vector) { operator=(p_vector.span()); }
@@ -434,8 +441,14 @@ public:
 	}
 	void operator=(Vector<T> &&p_from) {
 		resize(p_from.size());
-		for (U i = 0; i < count; i++) {
-			data[i] = std::move(p_from[i]);
+		if constexpr (std::is_trivially_copyable_v<T>) {
+			if (count > 0) {
+				std::memcpy(data, p_from.ptr(), size_t(count) * sizeof(T));
+			}
+		} else {
+			for (U i = 0; i < count; i++) {
+				data[i] = std::move(p_from[i]);
+			}
 		}
 	}
 
