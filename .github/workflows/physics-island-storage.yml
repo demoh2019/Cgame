@@ -1,0 +1,26 @@
+name: Physics island scratch RAM source contracts
+
+on:
+  pull_request:
+    paths:
+      - "servers/physics_island_storage.h"
+      - "modules/godot_physics_2d/godot_step_2d.cpp"
+      - "modules/godot_physics_3d/godot_step_3d.cpp"
+      - "modules/godot_physics_2d/godot_step_2d.h"
+      - "modules/godot_physics_3d/godot_step_3d.h"
+      - "tests/servers/test_physics_island_storage.cpp"
+      - "tests/stress/test_physics_island_storage.py"
+      - ".github/workflows/physics-island-storage.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  island-storage-contracts:
+    name: Island storage source contracts
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Validate bounded idle reclamation and 2D/3D wiring
+        run: python3 -m unittest discover -s tests/stress -p 'test_physics_island_storage.py' -v
