@@ -38,8 +38,8 @@ static const Vector3 B(1, 0, 0);
 static const Vector3 C(0, 1, 0);
 static const Vector3 D(0, 0, 1);
 
-// The signed dihedral rate has an analytical Jacobian. Test the change in
-// angle by a small forward step, independent of the solver implementation.
+// Independently compute the signed hinge Jacobian to verify damping rates.
+// A separate finite-difference angle check below catches sign mistakes.
 static double angular_rate(const Vector3 &p_va, const Vector3 &p_vb,
 		const Vector3 &p_vc, const Vector3 &p_vd) {
 	const Vector3 edge = B - A;
@@ -63,6 +63,21 @@ TEST_CASE("[PhysicsDihedralDamping] Full angular damping removes bending velocit
 	CHECK(physics_softbody_damp_dihedral(A, B, C, D, va, vb, vc, vd,
 			1.0, 1.0, 1.0, 1.0, 1.0));
 	CHECK(Math::abs(angular_rate(va, vb, vc, vd)) < 1e-5);
+
+	// Also test the actual change of the signed dihedral, not just the
+	// analytical Jacobian used by the damping projection.
+	const auto signed_angle = [](const Vector3 &p_a, const Vector3 &p_b,
+			const Vector3 &p_c, const Vector3 &p_d) {
+		const Vector3 edge = (p_b - p_a).normalized();
+		const Vector3 nc = (p_b - p_a).cross(p_c - p_a).normalized();
+		const Vector3 nd = (p_d - p_a).cross(p_b - p_a).normalized();
+		return Math::atan2(edge.dot(nc.cross(nd)), nc.dot(nd));
+	};
+	const real_t h = real_t(0.0001);
+	const double start_angle = signed_angle(A, B, C, D);
+	const double end_angle = signed_angle(A + va * h, B + vb * h, C + vc * h, D + vd * h);
+	const double angle_delta = Math::atan2(Math::sin(end_angle - start_angle), Math::cos(end_angle - start_angle));
+	CHECK(Math::abs(angle_delta / h) < 0.01);
 }
 
 TEST_CASE("[PhysicsDihedralDamping] Damping removes kinetic energy and conserves momentum") {
@@ -123,7 +138,7 @@ TEST_CASE("[PhysicsDihedralDamping] Two half relaxations equal one three-quarter
 	CHECK(d1.is_equal_approx(d2));
 }
 
-TEST_CASE("[PhysicsDihedralDamping] Non-manifold and invalid inputs are transactional") {
+TEST_CASE("[PhysicsDihedralDamping] Degenerate and invalid inputs are transactional") {
 	Vector3 va, vb, vc(0, 0, 2), vd(0, 4, 0);
 	const Vector3 old_va = va, old_vb = vb, old_vc = vc, old_vd = vd;
 	CHECK_FALSE(physics_softbody_damp_dihedral(A, B, C, D, va, vb, vc, vd,
