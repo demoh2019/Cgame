@@ -781,6 +781,34 @@ scons platform=macos target=editor arch=arm64 -j$(sysctl -n hw.ncpu)
 ```
 
 
+### 2D persistent manifold matching regression
+
+The new `physics_contact_recycling_regression.gd` script exercises a set of
+independent rectangular bodies on static platforms. It reverses angular
+velocity repeatedly while checking for nonfinite or runaway body states and
+for the presence of actual collision pairs. This targets changes to
+`GodotBodyPair2D::_contact_added_callback()`, which now assigns each new
+manifold point to the nearest *unused* old contact before restoring its
+accumulated impulses.
+
+```bash
+./bin/godot.macos.editor.arm64 --headless \
+  --path tests/stress --script res://physics_contact_recycling_regression.gd
+```
+
+For repeated throughput measurements, `physics_contact_manifolds_2d` creates
+real dynamic box contacts, rather than the circle-only contacts exercised by
+the friction benchmarks. Baseline comparisons must use identical hardware,
+Godot settings, workloads and build mode. This is a dense interacting-body
+test, **not** a million-independent-proxy test.
+
+```bash
+python3 tests/stress/run.py --godot ./bin/godot.macos.editor.arm64 \
+  --case physics_contact_manifolds_2d --scale 4 --frames 120 \
+  --repeats 5 --rss-limit-mib 4096 \
+  --output out/physics-contact-manifolds-2d.json
+```
+
 ## 3D frictionless contact solver regression
 
 The `physics_frictionless_3d` workload is identical in topology to
