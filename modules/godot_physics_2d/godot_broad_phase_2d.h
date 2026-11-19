@@ -60,6 +60,9 @@ public:
 	virtual bool is_static(ID p_id) const = 0;
 	virtual int get_subindex(ID p_id) const = 0;
 
+	using SegmentCastCallback = real_t (*)(GodotCollisionObject2D *, int, real_t, void *);
+	virtual void cast_segment(const Vector2 &p_from, const Vector2 &p_to, SegmentCastCallback p_callback, void *p_userdata) = 0;
+
 	virtual int cull_segment(const Vector2 &p_from, const Vector2 &p_to, GodotCollisionObject2D **p_results, int p_max_results, int *p_result_indices = nullptr) = 0;
 	virtual int cull_aabb(const Rect2 &p_aabb, GodotCollisionObject2D **p_results, int p_max_results, int *p_result_indices = nullptr) = 0;
 
