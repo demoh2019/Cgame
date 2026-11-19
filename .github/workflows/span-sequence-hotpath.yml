@@ -20,7 +20,7 @@ permissions:
   contents: read
 
 concurrency:
-  group: span-sequence-\${{ github.ref }}
+  group: span-sequence-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
@@ -37,7 +37,7 @@ jobs:
         run: python3 -m py_compile misc/scripts/tests/test_span_sequence_search.py
       - name: Compile actual Span header and run randomized reference tests
         env:
-          CXX: \${{ matrix.cxx }}
+          CXX: ${{ matrix.cxx }}
         run: python3 misc/scripts/tests/test_span_sequence_search.py
 
   native-span-tests:
