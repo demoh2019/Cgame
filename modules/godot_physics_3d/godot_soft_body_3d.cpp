@@ -637,6 +637,17 @@ void GodotSoftBody3D::initialize_fem_tetra() {
 			physics_fem_build_convex_star_tetrahedra(
 					positions, triangles, xpbd_volume_rest, xpbd_fem_tetrahedra);
 		}
+		// A disabled/previously invalid FEM state keeps internal particles
+		// kinematic. Restore them only after a validated volume material
+		// has cooked successfully; interior vertices cannot be user-pinned.
+		if (!xpbd_fem_tetrahedra.is_empty()) {
+			for (uint32_t i = xpbd_surface_node_count; i < nodes.size(); ++i) {
+				if (nodes[i].im == 0.0) {
+					nodes[i].im = real_t(nodes.size()) * inv_total_mass;
+					++dynamic_node_count;
+				}
+			}
+		}
 		// Element histories are allocated only if elastic FEM and damage are enabled.
 		if (!xpbd_fem_tetrahedra.is_empty() &&
 				get_space()->get_soft_body_tetra_fem_compliance() > 0.0 &&
@@ -668,7 +679,33 @@ void GodotSoftBody3D::initialize_fem_tetra() {
 		}
 	}
 
-	// Disabling/rejecting FEM must not leave stale nonuniform masses behind.
+	// If the space has no active FEM material, keep the original surface
+	// physics exactly as before. Do NOT leave unbound invisible particles
+	// contributing mass or receiving impulses. Never change user pins.
+	if (xpbd_fem_tetrahedra.is_empty() &&
+			xpbd_surface_node_count < nodes.size()) {
+		const real_t surface_inverse = real_t(xpbd_surface_node_count) * inv_total_mass;
+		for (uint32_t i = 0; i < xpbd_surface_node_count; ++i) {
+			if (nodes[i].im > 0.0) {
+				nodes[i].im = surface_inverse;
+			}
+		}
+		for (uint32_t i = xpbd_surface_node_count; i < nodes.size(); ++i) {
+			Node &node = nodes[i];
+			if (node.im > 0.0) {
+				--dynamic_node_count;
+			}
+			node.im = 0.0;
+			node.v = Vector3();
+			node.bv = Vector3();
+			node.f = Vector3();
+		}
+		link_constants_dirty = true;
+		return;
+	}
+
+	// Disabling/rejecting lumped masses must not leave stale nonuniform
+	// masses on active FEM particles when reverting to uniform mode.
 	if (previously_lumped) {
 		const real_t uniform_inverse = real_t(nodes.size()) * inv_total_mass;
 		for (Node &node : nodes) {
@@ -689,7 +726,9 @@ real_t GodotSoftBody3D::get_unpinned_node_inverse_mass(uint32_t p_node_index) co
 			return result;
 		}
 	}
-	return real_t(nodes.size()) * inv_total_mass;
+	const uint32_t active_count = xpbd_fem_tetrahedra.is_empty() ?
+			xpbd_surface_node_count : nodes.size();
+	return real_t(active_count) * inv_total_mass;
 }
 
 // Cache undeformed triangle angles only for opt-in shear constraints.
