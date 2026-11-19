@@ -405,9 +405,31 @@ bool GodotBodyPair3D::pre_solve(real_t p_step) {
 	mixed_friction = space->mix_friction(A->get_friction(), B->get_friction());
 	const bool has_friction = mixed_friction > 0.0;
 
+	// Warm-start impulses represent force integrated over the previous step.
+	// Match their magnitude to a new tick duration, as in the 2D solver.
+	// A large timing discontinuity invalidates the cache instead.
+	const real_t previous_step = space->get_previous_step();
+	const bool step_changed = previous_step > 0.0 && !Math::is_equal_approx(previous_step, p_step);
+	const real_t impulse_scale = step_changed ? p_step / previous_step : real_t(1.0);
+	const bool can_scale_impulses = impulse_scale >= real_t(0.5) && impulse_scale <= real_t(2.0);
+
 	for (int i = 0; i < contact_count; i++) {
 		Contact &c = contacts[i];
 		c.active = false;
+
+		if (step_changed) {
+			if (can_scale_impulses) {
+				c.acc_normal_impulse *= impulse_scale;
+				c.acc_tangent_impulse *= impulse_scale;
+				c.acc_bias_impulse *= impulse_scale;
+				c.acc_bias_impulse_center_of_mass *= impulse_scale;
+			} else {
+				c.acc_normal_impulse = 0.0;
+				c.acc_tangent_impulse = Vector3();
+				c.acc_bias_impulse = 0.0;
+				c.acc_bias_impulse_center_of_mass = 0.0;
+			}
+		}
 
 		Vector3 global_A = basis_A.xform(c.local_A);
 		Vector3 global_B = basis_B.xform(c.local_B) + offset_B;
@@ -442,9 +464,16 @@ bool GodotBodyPair3D::pre_solve(real_t p_step) {
 
 		c.depth = depth;
 
-		// Contacts may survive a material change. Do not warm-start stale
-		// tangential impulses after the pair becomes frictionless.
-		if (!has_friction) {
+		// Keep previous-frame friction inside the CURRENT material's Coulomb
+		// cone. Otherwise lowering friction can still apply a too-large
+		// tangential impulse during the warm start.
+		if (has_friction) {
+			const real_t cached_tangent_limit = mixed_friction * c.acc_normal_impulse;
+			const real_t cached_tangent_length = c.acc_tangent_impulse.length();
+			if (cached_tangent_length > cached_tangent_limit) {
+				c.acc_tangent_impulse *= cached_tangent_limit / cached_tangent_length;
+			}
+		} else {
 			c.acc_tangent_impulse = Vector3();
 		}
 		Vector3 j_vec = c.normal * c.acc_normal_impulse + c.acc_tangent_impulse;
