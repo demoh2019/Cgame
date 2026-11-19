@@ -367,6 +367,9 @@ PhysicsServer2D::PhysicsServer2D() {
 	// Experimental graph-coloring parallel solve for one large connected 2D island.
 	// Off by default until build, determinism and performance tests pass.
 	GLOBAL_DEF(PropertyInfo(Variant::BOOL, "physics/2d/solver/parallel_large_islands"), false);
+	// Opt-in two-point manifold reduction preserving the deepest point and
+	// maximizing tangent span; legacy depth-first pruning remains the default.
+	GLOBAL_DEF(PropertyInfo(Variant::BOOL, "physics/2d/solver/manifold_spread_reduction"), false);
 	GLOBAL_DEF(PropertyInfo(Variant::FLOAT, "physics/2d/solver/contact_recycle_radius", PROPERTY_HINT_RANGE, "0,10,0.01,or_greater,suffix:m"), 1.0);
 	GLOBAL_DEF(PropertyInfo(Variant::FLOAT, "physics/2d/solver/contact_max_separation", PROPERTY_HINT_RANGE, "0,10,0.01,or_greater,suffix:m"), 1.5);
 	GLOBAL_DEF(PropertyInfo(Variant::FLOAT, "physics/2d/solver/contact_max_allowed_penetration", PROPERTY_HINT_RANGE, "0.01,10,0.01,or_greater,suffix:m"), 0.3);
