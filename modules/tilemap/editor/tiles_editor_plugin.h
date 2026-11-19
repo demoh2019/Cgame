@@ -85,6 +85,9 @@ private:
 public:
 	_FORCE_INLINE_ static TilesEditorUtils *get_singleton() { return singleton; }
 
+	// Pure geometry used by the real pattern preview and native regression tests.
+	static Vector2 calculate_preview_scale(const Vector2 &p_thumbnail_size, const Rect2 &p_bounds);
+
 	// Pattern preview API.
 	void queue_pattern_preview(Ref<TileSet> p_tile_set, Ref<TileMapPattern> p_pattern, Callable p_callback);
 
