@@ -7,6 +7,7 @@ const Defs = preload("res://scripts/shared/defs.gd")
 const WorldGen = preload("res://scripts/shared/world_gen.gd")
 const Inventory = preload("res://scripts/shared/inventory.gd")
 const Vendor = preload("res://scripts/shared/vendor.gd")
+const Contracts = preload("res://scripts/shared/contracts.gd")
 const SaveValidation = preload("res://scripts/shared/save_validation.gd")
 const Crafting = preload("res://scripts/shared/crafting.gd")
 const Survival = preload("res://scripts/shared/survival.gd")
@@ -38,6 +39,7 @@ class Player:
 	var stash # Account-bound safe storage; isolated from full-loot death drops.
 	var survival
 	var progression # Permanent skills; gear is lost on death, not experience.
+	var contract_state: Dictionary = {} # Server-owned persistent camp contract journal.
 	var input_budget: float = 0.0
 	var last_input_seq: int = 0
 	var attack_timer: float = 0.0
@@ -91,6 +93,7 @@ func add_player(peer_id: int, p_name: String, p_user_id: String = "", saved: Dic
 	player.stash = Inventory.new(Defs.STASH_SLOTS)
 	player.survival = Survival.new()
 	player.progression = Progression.new()
+	player.contract_state = Contracts.empty_state()
 	players[peer_id] = player
 	if saved.is_empty() or not apply_character(player, saved):
 		_spawn_player(player)
@@ -111,6 +114,7 @@ func character_data(player: Player) -> Dictionary:
 		"inventory": player.inventory.to_dict(),
 		"stash": player.stash.to_dict(),
 		"progression": player.progression.to_dict(),
+		"contracts": player.contract_state.duplicate(true),
 	}
 
 
@@ -173,10 +177,15 @@ func apply_character(player: Player, data: Dictionary) -> bool:
 	var loaded_progression = Progression.new()
 	if data.has("progression") and not loaded_progression.load_dict(data["progression"]):
 		return false
+	# Legacy v1 characters without contracts start from the first mission.
+	var loaded_contracts: Variant = data.get("contracts", Contracts.empty_state())
+	if not Contracts.valid_state(loaded_contracts):
+		return false
 
 	# One commit point: a failed parse cannot partially replace the player's
 	# inventory, protected stash, progression or survival state.
 	player.progression = loaded_progression
+	player.contract_state = (loaded_contracts as Dictionary).duplicate(true)
 	player.inventory = parsed_bag["inventory"]
 	player.stash = parsed_stash["inventory"]
 	player.kills = int(data.get("kills", 0))
@@ -340,6 +349,27 @@ func cmd_vendor(peer_id: int, item_id: String, quantity: int, buy: bool) -> Dict
 		player.dirty_inventory = true
 		player.dirty_character = true
 	return outcome
+
+
+## Camp contracts use the same real hub distance check as the vendor and bank.
+## The only client input is accept/claim, never rewards, progress or prices.
+func cmd_contract(peer_id: int, action: String) -> Dictionary:
+	var player: Player = players.get(peer_id)
+	if player == null or not _alive(player):
+		return {"ok": false, "reason": "dead"}
+	var at: Vector2 = Vector2(player.position.x, player.position.z)
+	if not at.is_finite() or at.distance_to(WORKBENCH_POSITION) > WORKBENCH_RANGE:
+		return {"ok": false, "reason": "no_station"}
+	var result: Dictionary = {}
+	match action:
+		"accept": result = Contracts.accept(player.contract_state)
+		"claim": result = Contracts.claim(player.inventory, player.contract_state)
+		_: return {"ok": false, "reason": "unknown_action"}
+	if bool(result.get("ok", false)):
+		player.dirty_character = true
+		if action == "claim":
+			player.dirty_inventory = true
+	return result
 
 
 ## Authoritative hub bank: move a bounded item stack only when the actual
@@ -722,6 +752,8 @@ func _damage_target(attacker: Player, hit: Dictionary, damage: float) -> void:
 		events.append({"type": "hit", "kind": "zombie", "id": zombie.id, "damage": damage, "x": zombie.position.x, "z": zombie.position.z})
 		if zombie.take_damage(damage):
 			attacker.kills += 1
+			if Contracts.record_kill(attacker.contract_state):
+				attacker.dirty_character = true
 			_on_zombie_death(zombie)
 	else:
 		var victim: Player = players.get(hit["id"])
@@ -969,6 +1001,7 @@ func snapshot_for(peer_id: int) -> Dictionary:
 			"last_death_full_loot": player.last_death_full_loot,
 			"gathering_levels": player.progression.levels(), "crafting_level": player.progression.crafting_level(),
 			"crafting_xp": player.progression.crafting_xp,
+			"contract": player.contract_state.duplicate(true),
 			"carry_kg": player.inventory.total_weight(),
 			"cargo_factor": player.inventory.movement_factor(),
 		},
