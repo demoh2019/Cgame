@@ -1975,6 +1975,38 @@ TEST_CASE("[String] is_numeric") {
 	CHECK(String("-1.2").is_numeric());
 }
 
+TEST_CASE("[String] Padding fast paths avoid intermediate buffers and preserve behavior") {
+	CHECK(String("a").rpad(3, "xy") == "axyxy");
+	const String many = String("ab").repeat(1024);
+	CHECK(String("!").rpad(1025, "ab") == String("!") + many);
+	CHECK(String("!").lpad(1025, "ab") == many + "!");
+	CHECK(String("a").lpad(3, "xy") == "xyxya");
+	CHECK(String("").rpad(3, "ab") == "ababab");
+	CHECK(String("").lpad(3, "ab") == "ababab");
+	CHECK(String("hi").lpad(3, String(U"\u00B5")) == String(U"\u00B5hi"));
+	CHECK(String("hi").rpad(3, String(U"\u00B5")) == String(U"hi\u00B5"));
+	CHECK(String("42").pad_decimals(3) == "42.000");
+	CHECK(String("42.").pad_decimals(2) == "42.00");
+	CHECK(String("42.10").pad_decimals(3) == "42.100");
+	CHECK(String("42.123").pad_decimals(1) == "42.1");
+	CHECK(String("42.123").pad_decimals(0) == "42");
+	CHECK(String("").pad_decimals(2) == ".00");
+	CHECK(String("-8").pad_zeros(3) == "-008");
+	CHECK(String("foo").pad_zeros(3) == "foo000");
+	CHECK(String("0").pad_zeros(4) == "0000");
+	CHECK(String(".5").pad_zeros(8) == ".5");
+	CHECK(String(U"\u00B5-8").pad_zeros(3) == String(U"\u00B5-008"));
+
+	const String unchanged = "value";
+	CHECK(unchanged.rpad(5, "x").ptr() == unchanged.ptr());
+	CHECK(unchanged.lpad(5, "x").ptr() == unchanged.ptr());
+	CHECK(unchanged.rpad(30, "").ptr() == unchanged.ptr());
+	CHECK(unchanged.lpad(30, "").ptr() == unchanged.ptr());
+	const String decimal = "3.140";
+	CHECK(decimal.pad_decimals(3).ptr() == decimal.ptr());
+	CHECK(unchanged.pad_zeros(0).ptr() == unchanged.ptr());
+}
+
 TEST_CASE("[String] pad") {
 	String s = String("test");
 	CHECK(s.lpad(10, "x") == U"xxxxxxtest");
