@@ -105,8 +105,14 @@ TEST_CASE("[GodotPhysics2D] Translation is free; rotation and geometry invalidat
 	CHECK(body.get_collision_geometry_version() > rotated);
 	const uint64_t rotated_again = body.get_collision_geometry_version();
 
-	body.set_collision_mask(3);
+	Transform2D sheared = body.get_transform();
+	sheared.columns[0] += Vector2(real_t(0.1), 0);
+	body.move(sheared);
 	CHECK(body.get_collision_geometry_version() > rotated_again);
+	const uint64_t sheared_revision = body.get_collision_geometry_version();
+
+	body.set_collision_mask(3);
+	CHECK(body.get_collision_geometry_version() > sheared_revision);
 	const uint64_t filter_changed = body.get_collision_geometry_version();
 
 	GodotCircleShape2D circle;
@@ -199,8 +205,14 @@ TEST_CASE("[GodotPhysics3D] Translation is free; rotation and geometry invalidat
 	CHECK(body.get_collision_geometry_version() > rotated);
 	const uint64_t rotated_again = body.get_collision_geometry_version();
 
-	body.set_collision_layer(7);
+	Transform3D scaled = body.get_transform();
+	scaled.basis.scale(Vector3(2, 1, 1));
+	body.move(scaled);
 	CHECK(body.get_collision_geometry_version() > rotated_again);
+	const uint64_t scaled_revision = body.get_collision_geometry_version();
+
+	body.set_collision_layer(7);
+	CHECK(body.get_collision_geometry_version() > scaled_revision);
 	const uint64_t filter_changed = body.get_collision_geometry_version();
 
 	GodotSphereShape3D sphere;
