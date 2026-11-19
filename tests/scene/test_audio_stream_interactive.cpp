@@ -155,7 +155,9 @@ TEST_CASE("[AudioStreamInteractive] Serialized transitions can be loaded after s
 	Ref<AudioStreamInteractive> reloaded;
 	reloaded.instantiate();
 	reloaded->set_clip_count(2);
-	CHECK(reloaded->set("_transitions", serialized));
+	bool set_valid = false;
+	reloaded->set("_transitions", serialized, &set_valid);
+	CHECK(set_valid);
 	CHECK(reloaded->has_transition(0, 1));
 	CHECK_FALSE(reloaded->has_transition(2, 1));
 	CHECK(serialized_transitions(reloaded).size() == 1);
