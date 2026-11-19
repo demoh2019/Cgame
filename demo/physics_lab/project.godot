@@ -16,3 +16,11 @@ window/size/viewport_height=900
 renderer/rendering_method="gl_compatibility"
 renderer/rendering_method.mobile="gl_compatibility"
 textures/default_filters/use_nearest_mipmap_filter=false
+
+[physics]
+
+# The built-in GodotPhysics3D soft-body solver can cap cloth/mesh strain.
+# These limits affect only the standalone physics lab project.
+3d/solver/soft_body_xpbd_strain_max_stretch_ratio=1.5
+3d/solver/soft_body_xpbd_strain_min_compression_ratio=0.6
+3d/solver/soft_body_xpbd_strain_limit_compliance=0.0
