@@ -69,7 +69,9 @@ class JoltLRAContracts(unittest.TestCase):
         self.assertIn("if (has_kinematic_vertex)", self.generator)
 
     def test_both_jolt_distance_modes_and_multiplier_are_connected(self):
-        self.assertIn("ELRAType::EuclideanDistance", self.soft)
+        self.assertIn("using LRAType = JPH::SoftBodySharedSettings::ELRAType;", self.generator)
+        self.assertIn("EuclideanDistance", self.jolt_api)
+        self.assertIn("GeodesicDistance", self.jolt_api)
         self.assertIn("LRAType::EuclideanDistance", self.generator)
         self.assertIn("LRAType::GeodesicDistance", self.generator)
         self.assertIn("vertex_attrib.mLRAMaxDistanceMultiplier", self.generator)
