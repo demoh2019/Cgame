@@ -28,6 +28,9 @@ without replacing Jolt's existing XPBD solver or changing old scenes.
 Both modes require
 `physics/jolt_physics_3d/simulation/soft_body_volume_preservation=true`,
 which enables Jolt's existing convex tetrahedral volume constraints.
+When optional center-to-surface radial springs are enabled, the compressible
+mode also scales their rest lengths by `s`; the incompressible mode keeps
+those radial lengths at their original geometric values.
 The feature applies only to new/rebuilt soft bodies; existing bodies
 are not retroactively rebuilt when project settings change.
 
@@ -41,18 +44,22 @@ are not retroactively rebuilt when project settings change.
 
 Jolt stores **six times the signed tetrahedral rest volume** in
 `SoftBodySharedSettings::Volume::mSixRestVolume`. Multiplying this
-value by a nonnegative `s³` preserves the tetrahedron's orientation.
+value by a positive `s³` preserves the tetrahedron's orientation.
 The implementation uses double-precision intermediates and clamps
 extreme results to `[-FLT_MAX, FLT_MAX]` to avoid passing infinity to
 the solver. A nonfinite cubic scale is ignored. Users should keep
-shrinking factors in a physically meaningful range, usually <1.
+shrinking factors in a physically meaningful range below 1.
+Nonpositive linear multipliers are ignored by the new volume mode,
+leaving original volume constraints instead of inverting tetrahedra.
 
 The volume adjustment happens only once during construction, after
 `CalculateVolumeConstraintVolumes()` and before
 `SoftBodySharedSettings::Optimize()`. It skips the extra loop when
 the setting is disabled (default), no convex volume constraints were
-generated, or there is no contraction/expansion. No new work runs each
-physics frame.
+generated, or there is no contraction/expansion. If optional center-to-
+surface radial springs are generated, only those appended spokes are
+scaled; surface springs have already been processed. No new work runs
+each physics frame.
 
 ## Enable
 
@@ -88,8 +95,9 @@ The headless native regression
 creates three closed tetrahedral soft bodies (shrink -0.15, 0 and 0.25),
 pins one vertex of each, advances 90 physics frames, records original,
 target and measured volumes, and checks finite positions, bounds and
-stable anchors. GitHub Actions runs this fixture **twice**, with the
-new setting `false` and `true`, and archives separate logs.
+stable anchors. GitHub Actions runs this fixture **four times**,
+with volume-follow mode `false`/`true` crossed with optional radial
+springs `false`/`true`, and archives separate logs.
 
 The native test is a smoke/regression check, not a precision validation
 of FEM materials or a guarantee that the solver reaches its exact target
