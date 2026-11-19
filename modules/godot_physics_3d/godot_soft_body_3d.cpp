@@ -33,6 +33,8 @@
 #include "godot_space_3d.h"
 
 #include "core/math/geometry_3d.h"
+#include "core/config/project_settings.h"
+#include "servers/physics_xpbd_3d.h"
 #include "servers/physics_3d/physics_server_3d_rendering_server_handler.h"
 #include "servers/rendering/rendering_server.h"
 
@@ -64,6 +66,14 @@ GodotSoftBody3D::GodotSoftBody3D() :
 		GodotCollisionObject3D(TYPE_SOFT_BODY),
 		active_list(this) {
 	_set_static(false);
+	// Project-scoped opt-in, snapshotted once per soft body. No settings
+	// reads or allocations in the normal legacy contact/constraint path.
+	xpbd_distance_constraints = GLOBAL_GET("physics/3d/soft_body/xpbd_distance_constraints");
+	xpbd_volume_preservation = GLOBAL_GET("physics/3d/soft_body/xpbd_volume_preservation");
+	const real_t distance_compliance = GLOBAL_GET("physics/3d/soft_body/xpbd_distance_compliance");
+	const real_t volume_compliance = GLOBAL_GET("physics/3d/soft_body/xpbd_volume_compliance");
+	xpbd_distance_compliance = Math::is_finite(distance_compliance) ? MAX(real_t(0.0), distance_compliance) : real_t(0.0);
+	xpbd_volume_compliance = Math::is_finite(volume_compliance) ? MAX(real_t(0.0), volume_compliance) : real_t(0.0);
 }
 
 void GodotSoftBody3D::_shapes_changed() {
@@ -237,6 +247,10 @@ void GodotSoftBody3D::update_constants() {
 	reset_link_rest_lengths();
 	update_link_constants();
 	update_area();
+	if (xpbd_distance_constraints) {
+		xpbd_link_lambdas.resize(links.size());
+	}
+	rebuild_xpbd_volume_rest_state();
 }
 
 void GodotSoftBody3D::update_area() {
@@ -1374,6 +1388,11 @@ void GodotSoftBody3D::destroy() {
 	nodes.clear();
 	links.clear();
 	faces.clear();
+	xpbd_link_lambdas.reset();
+	xpbd_volume_gradients.reset();
+	xpbd_volume_valid = false;
+	xpbd_rest_volume = 0.0;
+	xpbd_volume_lambda = 0.0;
 
 	bounds = AABB();
 	deinitialize_shape();
