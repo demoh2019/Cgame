@@ -26,6 +26,34 @@ func _initialize() -> void:
 	_test("reject duplicate paths", not Validator.validate_payload({"files": [{"path": "x.gd", "content": "pass"}, {"path": "X.gd", "content": "pass"}]})["ok"])
 	_test("reject @tool", not Validator.validate_payload({"files": [{"path": "scripts/x.gd", "content": "@tool\nextends Node"}]})["ok"])
 	_test("reject too many files", not Validator.validate_payload(_many_files())["ok"])
+	_test("reject CON device file", not Validator.is_safe_relative_path("CON.gd"))
+	_test("reject mixed-case Windows device name", not Validator.is_safe_relative_path("scenes/cOn.tscn"))
+	_test("reject device directory", not Validator.is_safe_relative_path("AUX/scripts/player.gd"))
+	_test("reject NUL device name", not Validator.is_safe_relative_path("nul.json"))
+	_test("reject COM serial port name", not Validator.is_safe_relative_path("scripts/COM1.gd"))
+	_test("reject LPT parallel port name", not Validator.is_safe_relative_path("LPT9.md"))
+	_test("allow non-device prefix", Validator.is_safe_relative_path("scripts/COM10.gd"))
+	_test("allow device-like ordinary basename", Validator.is_safe_relative_path("scripts/console.gd"))
+	_test("reject file-as-parent", not Validator.validate_payload({"files": [
+		{"path": "scripts/player.gd", "content": "extends Node"},
+		{"path": "scripts/player.gd/child.gd", "content": "extends Node"},
+	]})["ok"])
+	_test("reject reversed file-as-parent", not Validator.validate_payload({"files": [
+		{"path": "scripts/player.gd/child.gd", "content": "extends Node"},
+		{"path": "scripts/player.gd", "content": "extends Node"},
+	]})["ok"])
+	_test("reject case-insensitive file-parent collision", not Validator.validate_payload({"files": [
+		{"path": "scripts/Player.gd/child.gd", "content": "extends Node"},
+		{"path": "scripts/player.GD", "content": "extends Node"},
+	]})["ok"])
+	_test("allow siblings in same folder", Validator.validate_payload({"files": [
+		{"path": "scenes/main.tscn", "content": "[gd_scene format=3]\n[node name=\"Main\" type=\"Node\"]"},
+		{"path": "scenes/menu.tscn", "content": "[gd_scene format=3]\n[node name=\"Menu\" type=\"Node\"]"},
+	]})["ok"])
+	_test("do not confuse prefix with a directory", Validator.validate_payload({"files": [
+		{"path": "scripts/player.gd", "content": "extends Node"},
+		{"path": "scripts/player.gdbackup/child.gd", "content": "extends Node"},
+	]})["ok"])
 	_test("reject oversize file", not Validator.validate_payload({"files": [{"path": "big.gd", "content": "a".repeat(Validator.MAX_FILE_BYTES + 1)}]})["ok"])
 
 	var response := {"choices": [{"message": {"content": JSON.stringify(_valid())}}]}
