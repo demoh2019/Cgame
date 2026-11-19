@@ -1,0 +1,41 @@
+name: Physics soft-body swept edge CCD
+
+on:
+  pull_request:
+    paths:
+      - "servers/physics_xpbd_edge_ccd.h"
+      - "servers/physics_xpbd_edge_collision.h"
+      - "modules/godot_physics_3d/godot_soft_body_3d.cpp"
+      - "modules/godot_physics_3d/godot_soft_body_3d.h"
+      - "tests/servers/test_physics_xpbd_edge_ccd.cpp"
+      - "tests/stress/test_physics_xpbd_edge_ccd.py"
+      - "tests/stress/physics_xpbd_edge_ccd_standalone.cpp"
+      - "tests/stress/mock_xpbd_edge_ccd/core/math/vector3.h"
+      - ".github/workflows/physics-xpbd-edge-ccd.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  edge-ccd-contracts:
+    name: Swept edge CCD GCC/Clang (${{ matrix.compiler }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        compiler: [g++, clang++]
+    steps:
+      - uses: actions/checkout@v4
+      - name: Check opt-in swept BVH and solver wiring
+        run: python3 -m unittest discover -s tests/stress -p 'test_physics_xpbd_edge_ccd.py' -v
+      - name: Compile exact swept edge CCD math header
+        env:
+          CXX: ${{ matrix.compiler }}
+        run: |
+          "$CXX" -std=c++17 -O2 -Wall -Wextra -Werror -pedantic \
+            -Itests/stress/mock_xpbd_edge_ccd -I. \
+            tests/stress/physics_xpbd_edge_ccd_standalone.cpp \
+            -o "$RUNNER_TEMP/physics-xpbd-edge-ccd"
+      - name: Exercise 4000 seeded crossings, false positives and pinned contact projection
+        run: "$RUNNER_TEMP/physics-xpbd-edge-ccd"
