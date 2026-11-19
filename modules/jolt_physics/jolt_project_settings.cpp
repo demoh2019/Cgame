@@ -49,6 +49,12 @@ void JoltProjectSettings::register_settings() {
 	GLOBAL_DEF(PropertyInfo(Variant::BOOL, "physics/jolt_physics_3d/simulation/generate_all_kinematic_contacts"), false);
 	GLOBAL_DEF(PropertyInfo(Variant::FLOAT, "physics/jolt_physics_3d/simulation/penetration_slop", PROPERTY_HINT_RANGE, U"0,1,0.00001,or_greater,suffix:m"), 0.02f);
 	GLOBAL_DEF(PropertyInfo(Variant::FLOAT, "physics/jolt_physics_3d/simulation/speculative_contact_distance", PROPERTY_HINT_RANGE, U"0,1,0.00001,or_greater,suffix:m"), 0.02f);
+	// Jolt defaults: 20 cm of maximum positional correction, 5-degree
+	// contact-normal clustering, and 1 cm of warm-start point persistence.
+	// All three are per-world settings; invalid values are clamped on read.
+	GLOBAL_DEF(PropertyInfo(Variant::FLOAT, "physics/jolt_physics_3d/simulation/max_penetration_correction_distance", PROPERTY_HINT_RANGE, U"0,5,0.001,suffix:m"), 0.2f);
+	GLOBAL_DEF(PropertyInfo(Variant::FLOAT, "physics/jolt_physics_3d/simulation/contact_manifold_merge_angle", PROPERTY_HINT_RANGE, U"0,90,0.1,radians_as_degrees"), Math::deg_to_rad(5.0f));
+	GLOBAL_DEF(PropertyInfo(Variant::FLOAT, "physics/jolt_physics_3d/simulation/contact_warm_start_distance", PROPERTY_HINT_RANGE, U"0,0.2,0.0001,suffix:m"), 0.01f);
 	GLOBAL_DEF(PropertyInfo(Variant::FLOAT, "physics/jolt_physics_3d/simulation/baumgarte_stabilization_factor", PROPERTY_HINT_RANGE, U"0,1,0.01"), 0.2f);
 	GLOBAL_DEF(PropertyInfo(Variant::FLOAT, "physics/jolt_physics_3d/simulation/soft_body_point_radius", PROPERTY_HINT_RANGE, U"0,1,0.001,or_greater,suffix:m"), 0.01f);
 	GLOBAL_DEF(PropertyInfo(Variant::FLOAT, "physics/jolt_physics_3d/simulation/bounce_velocity_threshold", PROPERTY_HINT_RANGE, U"0,1,0.001,or_greater,suffix:m/s"), 1.0f);
@@ -101,6 +107,11 @@ void JoltProjectSettings::read_settings() {
 	generate_all_kinematic_contacts = GLOBAL_GET("physics/jolt_physics_3d/simulation/generate_all_kinematic_contacts");
 	penetration_slop = GLOBAL_GET("physics/jolt_physics_3d/simulation/penetration_slop");
 	speculative_contact_distance = GLOBAL_GET("physics/jolt_physics_3d/simulation/speculative_contact_distance");
+	max_penetration_correction_distance = CLAMP((float)GLOBAL_GET("physics/jolt_physics_3d/simulation/max_penetration_correction_distance"), 0.0f, 5.0f);
+	const float merge_angle = CLAMP((float)GLOBAL_GET("physics/jolt_physics_3d/simulation/contact_manifold_merge_angle"), 0.0f, (float)Math::PI / 2.0f);
+	contact_manifold_merge_normal_cos = Math::cos(merge_angle);
+	const float contact_warm_start_distance = CLAMP((float)GLOBAL_GET("physics/jolt_physics_3d/simulation/contact_warm_start_distance"), 0.0f, 0.2f);
+	contact_warm_start_distance_sq = contact_warm_start_distance * contact_warm_start_distance;
 	baumgarte_stabilization_factor = GLOBAL_GET("physics/jolt_physics_3d/simulation/baumgarte_stabilization_factor");
 	soft_body_point_radius = GLOBAL_GET("physics/jolt_physics_3d/simulation/soft_body_point_radius");
 	bounce_velocity_threshold = GLOBAL_GET("physics/jolt_physics_3d/simulation/bounce_velocity_threshold");
