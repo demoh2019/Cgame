@@ -13,6 +13,7 @@ func _initialize() -> void:
 	_test_json_parsing()
 	_test_file_lifecycle()
 	_test_diagnostics()
+	_test_symlink_guard()
 	if failures > 0:
 		printerr("%d of %d AI Game Builder checks failed." % [failures, checks])
 		quit(1)
@@ -171,3 +172,23 @@ func _test_diagnostics() -> void:
 	_check(saved["files"] >= 1, "static inspection reads real generated files")
 	_check(saved["ok"], "saved known-good GDScript passes static inspection")
 	DirAccess.remove_absolute(ProjectSettings.globalize_path(on_disk_path))
+
+
+func _test_symlink_guard() -> void:
+	# The generated directory must not be able to escape through a symlink.
+	# Link creation can be unavailable on some platforms; CI verifies Linux.
+	var root := DirAccess.open("res://")
+	_check(root != null, "project root can be opened for link checks")
+	if root == null:
+		return
+	var link_path := "res://ai_generated/ai_builder_link_test"
+	var global_link := ProjectSettings.globalize_path(link_path)
+	if root.create_link(ProjectSettings.globalize_path("res://"), global_link) != OK:
+		print("SKIP symlink test: creating links is unavailable.")
+		return
+	var result := Plan.apply({"files": [
+		_file(link_path + "/escaped.gd", "extends Node\n")
+	]})
+	_check(not result["ok"], "refuses to write through a directory symlink")
+	_check(not FileAccess.file_exists("res://escaped.gd"), "symlink guard prevented outside file creation")
+	DirAccess.remove_absolute(global_link)
