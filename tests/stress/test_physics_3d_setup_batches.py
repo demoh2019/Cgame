@@ -1,7 +1,8 @@
 """Reference and source contracts for low-overhead 3D constraint setup.
 
-The algorithm remains identical for each individual constraint; the thread
-pool now schedules contiguous 16-element chunks instead of single elements.
+The algorithm remains identical for each individual constraint; the worker
+pool now schedules adaptive contiguous chunks (at least 16 constraints) and
+caps the number of worker tasks per setup stage.
 Run GodotPhysics3D's headless regressions for end-to-end coverage.
 """
 
@@ -12,71 +13,69 @@ import unittest
 ROOT = Path(__file__).resolve().parents[2]
 SOURCE = ROOT / "modules/godot_physics_3d/godot_step_3d.cpp"
 HEADER = ROOT / "modules/godot_physics_3d/godot_step_3d.h"
-BATCH_SIZE = 16
+MIN_BATCH_SIZE = 16
 INLINE_LIMIT = 32
 
 
-def setup_batches(total: int) -> list[range]:
-    """Reference implementation of the C++ batch-index partition."""
-    if total < INLINE_LIMIT:
+def setup_batches(total: int, workers: int) -> list[range]:
+    """Reference equivalent of the adaptive C++ setup planner."""
+    if total <= 0:
+        return []
+    if total < INLINE_LIMIT or workers <= 1:
         return [range(total)]
-    count = (total + BATCH_SIZE - 1) // BATCH_SIZE
+    target_tasks = min(max(1, workers), 32) * 4
+    desired_batch_size = total // target_tasks + int(total % target_tasks != 0)
+    batch_size = max(MIN_BATCH_SIZE, desired_batch_size)
+    batch_count = total // batch_size + int(total % batch_size != 0)
     return [
-        range(index * BATCH_SIZE, min((index + 1) * BATCH_SIZE, total))
-        for index in range(count)
+        range(i * batch_size, min((i + 1) * batch_size, total))
+        for i in range(batch_count)
     ]
 
-
 class Physics3DSetupBatches(unittest.TestCase):
-    def test_setup_uses_one_group_task_per_batch(self):
+    def test_setup_uses_adaptive_worker_batches(self):
         source = SOURCE.read_text(encoding="utf-8")
         header = HEADER.read_text(encoding="utf-8")
-        self.assertIn("static constexpr uint32_t PARALLEL_SETUP_BATCH_SIZE = 16;", source)
-        self.assertIn("MIN_PARALLEL_SETUP_CONSTRAINTS = 32;", source)
-        self.assertIn("void _setup_constraint_batch(", header)
-        self.assertIn("void GodotStep3D::_setup_constraint_batch(", source)
-        self.assertIn("const uint32_t begin = p_batch_index * PARALLEL_SETUP_BATCH_SIZE;", source)
-        self.assertIn(
-            "const uint32_t end = MIN(begin + PARALLEL_SETUP_BATCH_SIZE, all_constraints.size());",
-            source,
-        )
-        self.assertIn("_setup_constraint(constraint_index, nullptr);", source)
-        self.assertIn(
-            "const uint32_t batch_count = (total_constraint_count + PARALLEL_SETUP_BATCH_SIZE - 1) / PARALLEL_SETUP_BATCH_SIZE;",
-            source,
-        )
-        self.assertIn(
+        for text in (
+            "static constexpr uint32_t MIN_PARALLEL_SETUP_BATCH_SIZE = 16;",
+            "const uint32_t begin = p_batch_index * setup_batch_size;",
+            "begin + MIN(setup_batch_size, all_constraints.size() - begin)",
+            "const uint32_t target_tasks = MIN(setup_workers, uint32_t(32)) * 4;",
+            "const uint32_t desired_batch_size = total_constraint_count / target_tasks + uint32_t(total_constraint_count % target_tasks != 0);",
+            "const uint32_t batch_count = total_constraint_count / setup_batch_size + uint32_t(total_constraint_count % setup_batch_size != 0);",
+            "total_constraint_count < MIN_PARALLEL_SETUP_CONSTRAINTS || setup_workers == 1",
             "&GodotStep3D::_setup_constraint_batch, nullptr, batch_count",
-            source,
-        )
-        self.assertNotIn(
-            "&GodotStep3D::_setup_constraint, nullptr, total_constraint_count",
-            source,
-        )
-        self.assertIn("wait_for_group_task_completion(group_task)", source)
+            "setup_pool->wait_for_group_task_completion(group_task);",
+        ):
+            self.assertIn(text, source)
+        self.assertIn("uint32_t setup_batch_size = 16;", header)
 
     def test_every_constraint_is_prepared_once_without_empty_tasks(self):
         rng = random.Random(20261119)
         counts = list(range(0, 300)) + [rng.randint(1, 20000) for _ in range(500)]
         for count in counts:
-            batches = setup_batches(count)
-            covered = [index for batch in batches for index in batch]
-            self.assertEqual(covered, list(range(count)), f"count={count}")
-            if count < INLINE_LIMIT:
-                self.assertEqual(len(batches), 1)
-            else:
-                self.assertEqual(len(batches), (count + BATCH_SIZE - 1) // BATCH_SIZE)
-                self.assertTrue(all(0 < len(batch) <= BATCH_SIZE for batch in batches))
+            for workers in (1, 2, 4, 8, 16, 32, 64, 256):
+                batches = setup_batches(count, workers)
+                if count == 0:
+                    self.assertEqual(batches, [])
+                    continue
+                self.assertEqual(batches[0].start, 0)
+                self.assertEqual(batches[-1].stop, count)
+                self.assertEqual(sum(len(batch) for batch in batches), count)
+                self.assertTrue(all(len(batch) > 0 for batch in batches))
+                self.assertTrue(all(a.stop == b.start for a, b in zip(batches, batches[1:])))
+                if count < INLINE_LIMIT or workers == 1:
+                    self.assertEqual(len(batches), 1)
+                else:
+                    self.assertLessEqual(len(batches), min(workers, 32) * 4)
 
-    def test_million_constraint_workload_has_no_overflow(self):
-        total = 1_000_000
-        batch_count = (total + BATCH_SIZE - 1) // BATCH_SIZE
-        self.assertEqual(batch_count, 62500)
-        self.assertEqual((batch_count - 1) * BATCH_SIZE, 999984)
-        self.assertEqual(
-            min(batch_count * BATCH_SIZE, total), total
-        )
-        self.assertLess(batch_count, total)
+    def test_million_and_uint32_max_constraints_have_bounded_tasks(self):
+        for count in (1_000_000, 2_147_483_647, 4_294_967_295):
+            for workers in (2, 8, 32, 64):
+                batches = setup_batches(count, workers)
+                self.assertLessEqual(len(batches), min(workers, 32) * 4)
+                self.assertEqual(sum(len(batch) for batch in batches), count)
+                self.assertEqual(batches[-1].stop, count)
 
     def test_dense_3d_stress_still_available(self):
         runner = (ROOT / "tests/stress/run.py").read_text(encoding="utf-8")
