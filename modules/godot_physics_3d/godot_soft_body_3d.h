@@ -95,6 +95,8 @@ class GodotSoftBody3D : public GodotCollisionObject3D {
 	LocalVector<real_t> xpbd_link_lambdas;
 	// Optional once-per-step nonlinear compliance, zero RAM when disabled.
 	LocalVector<real_t> xpbd_link_hardening_alphas;
+	// Persistent damage for progressive XPBD fatigue; no memory unless enabled.
+	LocalVector<real_t> xpbd_link_fatigue_damage;
 	// Optional unilateral stretch/compression limits. Each link retains two
 	// XPBD multipliers per step; the default settings allocate nothing.
 	LocalVector<PhysicsXPBDStrainLimitLambdas> xpbd_strain_lambdas;
