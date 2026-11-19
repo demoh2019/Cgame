@@ -85,6 +85,35 @@ def _iterate_entries(root: Path, patterns: tuple[str, ...]):
                 yield path, relative
 
 
+def _strip_inline_comment(line: str, extension: str) -> str:
+    """Remove supported line comments without truncating quoted literals."""
+    if extension == ".gd":
+        marker = "#"
+    elif extension in {".cs", ".gdshader", ".gdshaderinc", ".shader"}:
+        marker = "//"
+    else:
+        return line
+
+    quote = None
+    escaped = False
+    i = 0
+    while i < len(line):
+        char = line[i]
+        if quote is not None:
+            if escaped:
+                escaped = False
+            elif char == "\\":
+                escaped = True
+            elif char == quote:
+                quote = None
+        elif char in ("'", '"'):
+            quote = char
+        elif line.startswith(marker, i):
+            return line[:i]
+        i += 1
+    return line
+
+
 def _iter_static_references(text: str, extension: str):
     """Yield (line_number, res_target) from literal resource paths, not comments."""
     for lineno, line in enumerate(text.splitlines(), start=1):
@@ -96,7 +125,7 @@ def _iter_static_references(text: str, extension: str):
             continue
         if extension in {".gd", ".cs"} and stripped.startswith("//"):
             continue
-        for match in QUOTED_STRING.finditer(line):
+        for match in QUOTED_STRING.finditer(_strip_inline_comment(line, extension)):
             value = match.group("value")
             if value.startswith("res://"):
                 yield lineno, value[6:]
