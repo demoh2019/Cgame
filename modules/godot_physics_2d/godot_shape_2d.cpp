@@ -1058,8 +1058,23 @@ void GodotConcavePolygonShape2D::set_data(const Variant &p_data) {
 
 	Rect2 aabb_new;
 
+	Vector<Vector2> p2arr;
 	if (p_data.get_type() == Variant::PACKED_VECTOR2_ARRAY) {
-		Vector<Vector2> p2arr = p_data;
+		p2arr = p_data;
+	} else {
+		// Accept a flattened list of segment endpoints as well as Vector2 pairs.
+		// Four scalar coordinates form one segment: x0, y0, x1, y1.
+		Vector<real_t> scalars = p_data;
+		ERR_FAIL_COND_MSG(scalars.size() % 4 != 0, "Concave polygon segment data must contain four scalars per segment.");
+		p2arr.resize(scalars.size() / 2);
+		Vector2 *dest = p2arr.ptrw();
+		const real_t *values = scalars.ptr();
+		for (int i = 0; i < p2arr.size(); i++) {
+			dest[i] = Vector2(values[i * 2], values[i * 2 + 1]);
+		}
+	}
+
+	{
 		int len = p2arr.size();
 		ERR_FAIL_COND(len % 2);
 
@@ -1119,8 +1134,6 @@ void GodotConcavePolygonShape2D::set_data(const Variant &p_data) {
 
 		_generate_bvh(main_vbh.ptrw(), main_vbh.size(), 1);
 
-	} else {
-		//dictionary with arrays
 	}
 
 	configure(aabb_new);
