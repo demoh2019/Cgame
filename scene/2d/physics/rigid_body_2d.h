@@ -74,6 +74,7 @@ private:
 
 	Ref<PhysicsMaterial> physics_material_override;
 	real_t gravity_scale = 1.0;
+	int solver_priority = 1;
 
 	DampMode linear_damp_mode = DAMP_MODE_COMBINE;
 	DampMode angular_damp_mode = DAMP_MODE_COMBINE;
@@ -175,6 +176,9 @@ public:
 
 	void set_gravity_scale(real_t p_gravity_scale);
 	real_t get_gravity_scale() const;
+
+	void set_solver_priority(int p_priority);
+	int get_solver_priority() const;
 
 	void set_linear_damp_mode(DampMode p_mode);
 	DampMode get_linear_damp_mode() const;

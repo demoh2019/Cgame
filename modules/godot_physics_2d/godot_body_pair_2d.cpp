@@ -1057,6 +1057,8 @@ bool GodotBodyPair2D::setup(real_t p_step) {
 
 bool GodotBodyPair2D::pre_solve(real_t p_step) {
 	block_normal_valid = false;
+	// Contacts of high-priority bodies get proportionally more solver iterations.
+	set_priority(MAX(A->get_solver_priority(), B->get_solver_priority()));
 	if (oneway_disabled) {
 		return false;
 	}

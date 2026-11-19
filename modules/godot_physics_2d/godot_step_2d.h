@@ -96,6 +96,9 @@ class GodotStep2D {
 	void _integrate_forces_block(uint32_t p_block_index, void *p_userdata = nullptr);
 	void _pre_solve_island(LocalVector<GodotConstraint2D *> &p_constraint_island) const;
 	void _solve_island(uint32_t p_island_index, void *p_userdata = nullptr) const;
+	// Runs priority passes: a constraint of priority N takes part in N * iterations solves.
+	void _solve_with_priorities(const LocalVector<GodotConstraint2D *> &p_constraint_island) const;
+	static bool _has_priority_constraints(const LocalVector<GodotConstraint2D *> &p_constraint_island);
 	void _solve_island_except_large(uint32_t p_island_index, void *p_userdata = nullptr) const;
 	void _solve_colored_constraint(uint32_t p_constraint_index, void *p_userdata = nullptr) const;
 	bool _can_reuse_color_cache(const LocalVector<GodotConstraint2D *> &p_constraint_island, bool p_contact_only) const;

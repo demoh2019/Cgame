@@ -130,10 +130,52 @@ void GodotStep2D::_pre_solve_island(LocalVector<GodotConstraint2D *> &p_constrai
 	p_constraint_island.resize(valid_constraint_count);
 }
 
+bool GodotStep2D::_has_priority_constraints(const LocalVector<GodotConstraint2D *> &p_constraint_island) {
+	if (!GodotBody2D::has_high_priority_bodies()) {
+		return false;
+	}
+	for (GodotConstraint2D *constraint : p_constraint_island) {
+		if (constraint->get_priority() > 1) {
+			return true;
+		}
+	}
+	return false;
+}
+
+void GodotStep2D::_solve_with_priorities(const LocalVector<GodotConstraint2D *> &p_constraint_island) const {
+	// Work on a copy: islands are shared with sleeping and area bookkeeping.
+	LocalVector<GodotConstraint2D *> active;
+	active.reserve(p_constraint_island.size());
+	for (GodotConstraint2D *constraint : p_constraint_island) {
+		active.push_back(constraint);
+	}
+	int current_priority = 1;
+	while (!active.is_empty()) {
+		for (int i = 0; i < iterations; i++) {
+			for (GodotConstraint2D *constraint : active) {
+				constraint->solve(delta);
+			}
+		}
+		++current_priority;
+		uint32_t kept = 0;
+		for (uint32_t i = 0; i < active.size(); ++i) {
+			if (active[i]->get_priority() >= current_priority) {
+				active[kept++] = active[i];
+			}
+		}
+		active.resize(kept);
+	}
+}
+
 void GodotStep2D::_solve_island(uint32_t p_island_index, void *p_userdata) const {
 	// Most frames have no pruned islands: the empty map retains direct indexing.
 	const uint32_t island_index = solve_island_indices.is_empty() ? p_island_index : solve_island_indices[p_island_index];
 	const LocalVector<GodotConstraint2D *> &constraint_island = constraint_islands[island_index];
+
+	if (_has_priority_constraints(constraint_island)) {
+		_solve_with_priorities(constraint_island);
+		return;
+	}
 
 	for (int i = 0; i < iterations; i++) {
 		uint32_t constraint_count = constraint_island.size();
@@ -231,6 +273,11 @@ void GodotStep2D::_run_colored_batches(const uint32_t *p_sizes, const uint32_t *
 
 void GodotStep2D::_solve_large_island(const LocalVector<GodotConstraint2D *> &p_constraint_island) {
 	const uint32_t constraint_count = p_constraint_island.size();
+	if (_has_priority_constraints(p_constraint_island)) {
+		// Priority passes are inherently sequential; graph coloring would break them.
+		_solve_with_priorities(p_constraint_island);
+		return;
+	}
 	if (constraint_count < MIN_PARALLEL_LARGE_ISLAND) {
 		for (int iteration = 0; iteration < iterations; ++iteration) {
 			for (uint32_t i = 0; i < constraint_count; ++i) {

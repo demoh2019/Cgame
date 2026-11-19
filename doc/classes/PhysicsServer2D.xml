@@ -484,6 +484,13 @@
 				Returns the local transform matrix of the shape with the given index in the area's array of shapes.
 			</description>
 		</method>
+		<method name="body_get_solver_priority" qualifiers="const">
+			<return type="int" />
+			<param index="0" name="body" type="RID" />
+			<description>
+				Returns the value set by [method body_set_solver_priority].
+			</description>
+		</method>
 		<method name="body_get_space" qualifiers="const">
 			<return type="RID" />
 			<param index="0" name="body" type="RID" />
@@ -672,6 +679,15 @@
 			<param index="2" name="transform" type="Transform2D" />
 			<description>
 				Sets the local transform matrix of the body's shape with the given index.
+			</description>
+		</method>
+		<method name="body_set_solver_priority">
+			<return type="void" />
+			<param index="0" name="body" type="RID" />
+			<param index="1" name="priority" type="int" />
+			<description>
+				Sets how many times more solver iterations the contacts of the body receive, from [code]1[/code] (default) to [code]8[/code].
+				[b]Note:[/b] Only Godot Physics implements this; other backends ignore it.
 			</description>
 		</method>
 		<method name="body_set_space">

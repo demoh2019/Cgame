@@ -411,6 +411,15 @@ real_t RigidBody2D::get_gravity_scale() const {
 	return gravity_scale;
 }
 
+void RigidBody2D::set_solver_priority(int p_priority) {
+	solver_priority = CLAMP(p_priority, 1, 8);
+	PhysicsServer2D::get_singleton()->body_set_solver_priority(get_rid(), solver_priority);
+}
+
+int RigidBody2D::get_solver_priority() const {
+	return solver_priority;
+}
+
 void RigidBody2D::set_linear_damp_mode(DampMode p_mode) {
 	linear_damp_mode = p_mode;
 	PhysicsServer2D::get_singleton()->body_set_param(get_rid(), PS2DE::BODY_PARAM_LINEAR_DAMP_MODE, linear_damp_mode);
@@ -675,6 +684,8 @@ void RigidBody2D::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("set_physics_material_override", "physics_material_override"), &RigidBody2D::set_physics_material_override);
 	ClassDB::bind_method(D_METHOD("get_physics_material_override"), &RigidBody2D::get_physics_material_override);
 
+	ClassDB::bind_method(D_METHOD("set_solver_priority", "priority"), &RigidBody2D::set_solver_priority);
+	ClassDB::bind_method(D_METHOD("get_solver_priority"), &RigidBody2D::get_solver_priority);
 	ClassDB::bind_method(D_METHOD("set_gravity_scale", "gravity_scale"), &RigidBody2D::set_gravity_scale);
 	ClassDB::bind_method(D_METHOD("get_gravity_scale"), &RigidBody2D::get_gravity_scale);
 
@@ -753,6 +764,7 @@ void RigidBody2D::_bind_methods() {
 	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "mass", PROPERTY_HINT_RANGE, "0.001,1000,0.001,or_greater,exp,suffix:kg"), "set_mass", "get_mass");
 	ADD_PROPERTY(PropertyInfo(Variant::OBJECT, "physics_material_override", PROPERTY_HINT_RESOURCE_TYPE, PhysicsMaterial::get_class_static()), "set_physics_material_override", "get_physics_material_override");
 	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "gravity_scale", PROPERTY_HINT_RANGE, "-8,8,0.001,or_less,or_greater"), "set_gravity_scale", "get_gravity_scale");
+	ADD_PROPERTY(PropertyInfo(Variant::INT, "solver_priority", PROPERTY_HINT_RANGE, "1,8,1"), "set_solver_priority", "get_solver_priority");
 	ADD_GROUP("Mass Distribution", "");
 	ADD_PROPERTY(PropertyInfo(Variant::INT, "center_of_mass_mode", PROPERTY_HINT_ENUM, "Auto,Custom"), "set_center_of_mass_mode", "get_center_of_mass_mode");
 	ADD_PROPERTY(PropertyInfo(Variant::VECTOR2, "center_of_mass", PROPERTY_HINT_RANGE, "-1000,1000,0.01,or_less,or_greater,suffix:px"), "set_center_of_mass", "get_center_of_mass");

@@ -838,6 +838,9 @@ GodotBody2D::GodotBody2D() :
 }
 
 GodotBody2D::~GodotBody2D() {
+	if (solver_priority > 1) {
+		high_priority_body_count--;
+	}
 	memdelete(fi_callback_data);
 	memdelete(direct_state);
 }

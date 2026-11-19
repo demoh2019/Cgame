@@ -214,6 +214,9 @@ public:
 	virtual void body_set_param(RID p_body, PS2DE::BodyParameter p_param, const Variant &p_value) override;
 	virtual Variant body_get_param(RID p_body, PS2DE::BodyParameter p_param) const override;
 
+	virtual void body_set_solver_priority(RID p_body, int p_priority) override;
+	virtual int body_get_solver_priority(RID p_body) const override;
+
 	virtual void body_reset_mass_properties(RID p_body) override;
 
 	virtual void body_set_state(RID p_body, PS2DE::BodyState p_state, const Variant &p_variant) override;

@@ -194,6 +194,11 @@ public:
 	virtual void body_set_param(RID p_body, PS2DE::BodyParameter p_param, const Variant &p_value) = 0;
 	virtual Variant body_get_param(RID p_body, PS2DE::BodyParameter p_param) const = 0;
 
+	// Extra solver iterations for the contacts of one body (1 = default, up to 8). Optional: only
+	// GodotPhysics2D implements it; other backends ignore it.
+	virtual void body_set_solver_priority(RID p_body, int p_priority) {}
+	virtual int body_get_solver_priority(RID p_body) const { return 1; }
+
 	virtual void body_reset_mass_properties(RID p_body) = 0;
 
 	//state

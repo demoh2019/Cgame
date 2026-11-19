@@ -171,6 +171,8 @@ void PhysicsServer2D::_bind_methods() {
 
 	ClassDB::bind_method(D_METHOD("body_set_param", "body", "param", "value"), &PhysicsServer2D::body_set_param);
 	ClassDB::bind_method(D_METHOD("body_get_param", "body", "param"), &PhysicsServer2D::body_get_param);
+	ClassDB::bind_method(D_METHOD("body_set_solver_priority", "body", "priority"), &PhysicsServer2D::body_set_solver_priority);
+	ClassDB::bind_method(D_METHOD("body_get_solver_priority", "body"), &PhysicsServer2D::body_get_solver_priority);
 
 	ClassDB::bind_method(D_METHOD("body_reset_mass_properties", "body"), &PhysicsServer2D::body_reset_mass_properties);
 

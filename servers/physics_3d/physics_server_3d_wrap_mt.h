@@ -219,6 +219,9 @@ public:
 	FUNC3(body_set_param, RID, PS3DE::BodyParameter, const Variant &);
 	FUNC2RC(Variant, body_get_param, RID, PS3DE::BodyParameter);
 
+	FUNC2(body_set_solver_priority, RID, int);
+	FUNC1RC(int, body_get_solver_priority, RID);
+
 	FUNC1(body_reset_mass_properties, RID);
 
 	FUNC3(body_set_state, RID, PS3DE::BodyState, const Variant &);

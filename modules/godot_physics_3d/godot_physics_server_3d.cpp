@@ -663,6 +663,18 @@ void GodotPhysicsServer3D::body_set_param(RID p_body, PS3DE::BodyParameter p_par
 	body->set_param(p_param, p_value);
 }
 
+void GodotPhysicsServer3D::body_set_solver_priority(RID p_body, int p_priority) {
+	GodotBody3D *body = body_owner.get_or_null(p_body);
+	ERR_FAIL_NULL(body);
+	body->set_solver_priority(p_priority);
+}
+
+int GodotPhysicsServer3D::body_get_solver_priority(RID p_body) const {
+	GodotBody3D *body = body_owner.get_or_null(p_body);
+	ERR_FAIL_NULL_V(body, 1);
+	return body->get_solver_priority();
+}
+
 Variant GodotPhysicsServer3D::body_get_param(RID p_body, PS3DE::BodyParameter p_param) const {
 	GodotBody3D *body = body_owner.get_or_null(p_body);
 	ERR_FAIL_NULL_V(body, 0);

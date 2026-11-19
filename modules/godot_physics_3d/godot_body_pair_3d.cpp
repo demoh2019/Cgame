@@ -819,6 +819,8 @@ bool GodotBodyPair3D::setup(real_t p_step) {
 }
 
 bool GodotBodyPair3D::pre_solve(real_t p_step) {
+	// Contacts of high-priority bodies get proportionally more solver iterations.
+	set_priority(MAX(A->get_solver_priority(), B->get_solver_priority()));
 	if (!collided) {
 		if (check_ccd) {
 			const Vector3 &offset_A = A->get_transform().get_origin();

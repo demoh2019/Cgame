@@ -248,6 +248,10 @@
 		<member name="sleeping" type="bool" setter="set_sleeping" getter="is_sleeping" default="false">
 			If [code]true[/code], the body will not move and will not calculate forces until woken up by another body through, for example, a collision, or by using the [method apply_impulse] or [method apply_force] methods.
 		</member>
+		<member name="solver_priority" type="int" setter="set_solver_priority" getter="get_solver_priority" default="1">
+			How many times more solver iterations the contacts of this body receive (similar to Unity's [code]Rigidbody.solverIterations[/code]). A value of [code]4[/code] solves every contact that touches this body four times as often per physics step, which makes stacks, wheels or heavy loads more rigid at a proportional cost. Contacts between two bodies use the larger of their values. Joints have their own priority.
+			[b]Note:[/b] Only supported by Godot Physics.
+		</member>
 	</members>
 	<signals>
 		<signal name="body_entered">

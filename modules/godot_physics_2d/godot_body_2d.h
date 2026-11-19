@@ -161,6 +161,10 @@ class GodotBody2D : public GodotCollisionObject2D {
 	GodotPhysicsDirectBodyState2D *direct_state = nullptr;
 
 	uint64_t island_step = 0;
+	// Contacts touching this body are solved `solver_priority` times as many iterations (Unity
+	// Rigidbody.solverIterations analogue). 1 is the normal cost.
+	int solver_priority = 1;
+	inline static uint32_t high_priority_body_count = 0;
 
 	void _update_transform_dependent();
 
@@ -211,6 +215,19 @@ public:
 	_FORCE_INLINE_ const VSet<RID> &get_exceptions() const { return exceptions; }
 
 	_FORCE_INLINE_ uint64_t get_island_step() const { return island_step; }
+	_FORCE_INLINE_ int get_solver_priority() const { return solver_priority; }
+	void set_solver_priority(int p_priority) {
+		const int clamped = CLAMP(p_priority, 1, 8);
+		if (solver_priority <= 1 && clamped > 1) {
+			high_priority_body_count++;
+		} else if (solver_priority > 1 && clamped <= 1) {
+			high_priority_body_count--;
+		}
+		solver_priority = clamped;
+	}
+	// True while any body requests extra solver iterations; lets the stepper skip a scan of every
+	// constraint in the common case where none does.
+	static bool has_high_priority_bodies() { return high_priority_body_count > 0; }
 	_FORCE_INLINE_ void set_island_step(uint64_t p_step) { island_step = p_step; }
 
 	void add_constraint(GodotConstraint2D *p_constraint, int p_pos);
