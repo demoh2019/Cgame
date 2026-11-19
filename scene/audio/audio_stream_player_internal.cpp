@@ -302,6 +302,10 @@ bool AudioStreamPlayerInternal::is_active() const {
 
 void AudioStreamPlayerInternal::set_pitch_scale(float p_pitch_scale) {
 	ERR_FAIL_COND(p_pitch_scale <= 0.0);
+	// Shared by AudioStreamPlayer, AudioStreamPlayer2D and AudioStreamPlayer3D.
+	if (pitch_scale == p_pitch_scale) {
+		return;
+	}
 	pitch_scale = p_pitch_scale;
 
 	for (Ref<AudioStreamPlayback> &playback : stream_playbacks) {
