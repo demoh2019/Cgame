@@ -57,6 +57,8 @@ static func crate_loot(zone: int, rng: RandomNumberGenerator) -> Dictionary:
 			loot["ammo_9mm"] = int(loot.get("ammo_9mm", 0)) + rng.randi_range(6, 18)
 		else:
 			loot["pistol"] = 1
+	if rng.randf() < (0.14 if zone >= 2 else 0.025):
+		loot["antibiotics"] = 1
 	var silver := rng.randi_range(2, 10) * tier
 	loot["silver"] = silver
 	return loot
