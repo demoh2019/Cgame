@@ -134,10 +134,29 @@ jobs:
             --script res://physics_pbf_rigid_coupling_3d_regression.gd \
             2>&1 | tee physics-pbf-rigid-runtime.log
           grep -Fq 'Native PBF two-way rigid contact passed' physics-pbf-rigid-runtime.log
+      - name: Native PBF vorticity curl, caps and rotating liquid doctests
+        shell: bash
+        run: |
+          set -euo pipefail
+          timeout 120s ./bin/godot.linuxbsd.editor.dev.x86_64 \
+            --headless --test --test-case="*[PhysicsPBFVorticity]*" \
+            --success=true --no-colors 2>&1 | tee physics-pbf-vorticity-native.log
+          grep -Fq '[PhysicsPBFVorticity]' physics-pbf-vorticity-native.log
+      - name: Headless PBF vortex restoration vs opt-out and deterministic replica
+        shell: bash
+        run: |
+          set -euo pipefail
+          timeout 120s ./bin/godot.linuxbsd.editor.dev.x86_64 \
+            --headless --path tests/stress \
+            --script res://physics_pbf_vorticity_3d_regression.gd \
+            2>&1 | tee physics-pbf-vorticity-runtime.log
+          grep -Fq 'Native PBF vorticity passed' physics-pbf-vorticity-runtime.log
       - name: Syntax-check physics stress scripts
         shell: bash
         run: |
           set -euo pipefail
+          ./bin/godot.linuxbsd.editor.dev.x86_64 --headless --path tests/stress \
+            --script res://physics_pbf_vorticity_3d_regression.gd --check-only
           ./bin/godot.linuxbsd.editor.dev.x86_64 --headless --path tests/stress \
             --script res://physics_pbf_rigid_coupling_3d_regression.gd --check-only
           ./bin/godot.linuxbsd.editor.dev.x86_64 --headless --path tests/stress \
