@@ -300,6 +300,10 @@ func _update_status() -> void:
         _water_depth, _fluid_density, _flow, "ON" if _wind_on else "OFF", _wind_force,
         "ON" if _magnet_on else "OFF", _gravity_scale, "ON" if _waves else "OFF"
     ]
+    if is_instance_valid(_held):
+        _status.text += "\\nВыбрано: %s | масса %.1f | %s" % [
+            _held.name, _held.mass, "заморожено" if _held.freeze else "активно"
+        ]
 
 
 func _unhandled_input(event: InputEvent) -> void:
@@ -356,6 +360,7 @@ func _physics_process(delta: float) -> void:
         _held = _pick_body()
         if is_instance_valid(_held):
             _held.sleeping = false
+            _update_status()
     if _request_push:
         _request_push = false
         _mouse_world = get_global_mouse_position()
