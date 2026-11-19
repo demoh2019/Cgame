@@ -955,4 +955,70 @@ TEST_CASE("[FileAccess][Performance] Token scanning reuses stack-first character
 	file->close();
 }
 
+TEST_CASE("[FileAccess][Performance] Batched compressed tables preserve all codec headers") {
+	const String path = TestUtils::get_temp_path("cgame_compressed_batched_table.bin");
+	const int block_size = 64;
+	const int byte_count = block_size * 311 + 13;
+	const uint32_t block_count = byte_count / block_size + 1;
+	Vector<uint8_t> payload;
+	REQUIRE(payload.resize_uninitialized(byte_count) == OK);
+	uint8_t *bytes = payload.ptrw();
+	for (int i = 0; i < byte_count; i++) {
+		bytes[i] = uint8_t((i * 29 + (i / 97) * 7) & 255);
+	}
+
+	const Compression::Mode modes[] = {
+		Compression::MODE_FASTLZ,
+		Compression::MODE_DEFLATE,
+		Compression::MODE_GZIP,
+		Compression::MODE_ZSTD,
+	};
+	for (Compression::Mode mode : modes) {
+		Ref<FileAccessCompressed> writer;
+		writer.instantiate();
+		writer->configure("GCPF", mode, block_size);
+		REQUIRE(writer->open_internal(path, FileAccess::WRITE) == OK);
+		CHECK(writer->store_buffer(payload.ptr(), payload.size()));
+		writer->close();
+
+		// Parse the file with the ordinary binary reader, rather than relying
+		// exclusively on FileAccessCompressed's new table decoder.
+		Ref<FileAccess> raw = FileAccess::open(path, FileAccess::READ);
+		REQUIRE(raw.is_valid());
+		char magic[4];
+		REQUIRE(raw->get_buffer(reinterpret_cast<uint8_t *>(magic), 4) == 4);
+		CHECK(String::utf8(magic, 4) == "GCPF");
+		CHECK(raw->get_32() == uint32_t(mode));
+		CHECK(raw->get_32() == uint32_t(block_size));
+		CHECK(raw->get_32() == uint32_t(byte_count));
+		uint64_t compressed_total = 0;
+		for (uint32_t i = 0; i < block_count; i++) {
+			const uint32_t compressed_size = raw->get_32();
+			CHECK(compressed_size > 0);
+			compressed_total += compressed_size;
+		}
+		CHECK(raw->get_position() == uint64_t(16) + uint64_t(block_count) * 4);
+		CHECK(raw->get_length() == raw->get_position() + compressed_total + 4);
+		raw->close();
+
+		Ref<FileAccessCompressed> reader;
+		reader.instantiate();
+		reader->configure("GCPF", mode, block_size);
+		REQUIRE(reader->open_internal(path, FileAccess::READ) == OK);
+		CHECK(reader->get_length() == uint64_t(byte_count));
+		Vector<uint8_t> restored;
+		REQUIRE(restored.resize_uninitialized(byte_count) == OK);
+		CHECK(reader->get_buffer(restored.ptrw(), byte_count) == uint64_t(byte_count));
+		CHECK(restored == payload);
+		reader->seek(block_size * 140 - 5);
+		uint8_t crossing[28] = {};
+		CHECK(reader->get_buffer(crossing, sizeof(crossing)) == sizeof(crossing));
+		for (int i = 0; i < int(sizeof(crossing)); i++) {
+			CHECK(crossing[i] == payload[block_size * 140 - 5 + i]);
+		}
+		reader->close();
+	}
+	DirAccess::remove_file_or_error(path);
+}
+
 } // namespace TestFileAccess
