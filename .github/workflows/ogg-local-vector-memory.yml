@@ -1,0 +1,46 @@
+name: Ogg packet zero-refcount storage and playback regressions
+
+on:
+  push:
+    branches: [develop]
+    paths:
+      - 'modules/ogg/ogg_packet_sequence.cpp'
+      - 'modules/ogg/ogg_packet_sequence.h'
+      - 'modules/vorbis/audio_stream_ogg_vorbis.cpp'
+      - 'tests/core/io/test_ogg_packet_sequence.cpp'
+      - 'misc/scripts/tests/test_ogg_local_vector_storage.py'
+      - '.github/workflows/ogg-local-vector-memory.yml'
+  pull_request:
+    paths:
+      - 'modules/ogg/ogg_packet_sequence.cpp'
+      - 'modules/ogg/ogg_packet_sequence.h'
+      - 'modules/vorbis/audio_stream_ogg_vorbis.cpp'
+      - 'tests/core/io/test_ogg_packet_sequence.cpp'
+      - 'misc/scripts/tests/test_ogg_local_vector_storage.py'
+      - '.github/workflows/ogg-local-vector-memory.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  source:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - run: python3 -m unittest discover -s misc/scripts/tests -p test_ogg_local_vector_storage.py -v
+
+  native:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+      - uses: ./.github/actions/godot-deps
+      - uses: ./.github/actions/godot-build
+        with:
+          platform: linuxbsd
+          target: editor
+          scons-flags: dev_build=yes tests=yes debug_symbols=no module_mono_enabled=no module_ogg_enabled=yes module_vorbis_enabled=yes accesskit=no -j2
+      - run: ./bin/godot.linuxbsd.editor.dev.x86_64 --headless --test --test-case="*[OGG]*"
