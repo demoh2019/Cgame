@@ -41,22 +41,36 @@ bool GodotCollisionSolver2D::solve_static_world_boundary(const GodotShape2D *p_s
 		return false;
 	}
 
-	Vector2 n = p_transform_A.basis_xform(world_boundary->get_normal()).normalized();
-	Vector2 p = p_transform_A.xform(world_boundary->get_normal() * world_boundary->get_d());
-	real_t d = n.dot(p);
+	// A plane n_local.dot(x_local) = d transforms by the inverse transpose,
+	// not by the shape's forward basis. This also handles non-unit plane normals
+	// and affine shear without shifting the boundary to the wrong location.
+	if (p_transform_A.determinant() == 0.0) {
+		return false; // A singular transform does not define a unique plane.
+	}
+	const Transform2D inverse_A = p_transform_A.affine_inverse();
+	const Vector2 unnormalized_normal = inverse_A.basis_xform_inv(world_boundary->get_normal());
+	const real_t normal_length = unnormalized_normal.length();
+	if (normal_length == 0.0) {
+		return false;
+	}
+	const Vector2 n = unnormalized_normal / normal_length;
+	const real_t d = (world_boundary->get_d() + unnormalized_normal.dot(p_transform_A.get_origin())) / normal_length;
 
 	Vector2 supports[2];
-	int support_count;
+	int support_count = 0;
 
-	p_shape_B->get_supports(p_transform_B.affine_inverse().basis_xform(-n).normalized(), supports, support_count);
+	// For a world-space support direction, the local direction is the
+	// transpose of the shape's forward basis (not its matrix inverse).
+	p_shape_B->get_supports(p_transform_B.basis_xform_inv(-n).normalized(), supports, support_count);
 
 	bool found = false;
 
 	for (int i = 0; i < support_count; i++) {
-		supports[i] += p_margin * supports[i].normalized();
-		supports[i] = p_transform_B.xform(supports[i]);
-		supports[i] += p_motion_B;
-		real_t pd = n.dot(supports[i]);
+		// Margin is a world-space distance along the contact normal. Applying
+		// it to a local vertex position incorrectly depends on the shape's
+		// origin and changes sign for offset polygons.
+		supports[i] = p_transform_B.xform(supports[i]) - n * p_margin + p_motion_B;
+		const real_t pd = n.dot(supports[i]);
 		if (pd >= d) {
 			continue;
 		}
