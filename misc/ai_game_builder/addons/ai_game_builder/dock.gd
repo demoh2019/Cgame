@@ -91,7 +91,7 @@ func _ready() -> void:
 	_add_field("Files to write (select to inspect)", _file_list)
 
 	_file_preview = TextEdit.new()
-	_file_preview.readonly = true
+	_file_preview.editable = false
 	_file_preview.custom_minimum_size = Vector2(0, 165)
 	_file_preview.size_flags_vertical = Control.SIZE_EXPAND_FILL
 	add_child(_file_preview)
