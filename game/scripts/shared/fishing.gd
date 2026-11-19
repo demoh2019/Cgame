@@ -25,13 +25,29 @@ static func water_near(world, position: Vector3) -> Vector2:
 	return Vector2.INF
 
 
-static func validate_start(world, player_position: Vector3, backpack) -> Dictionary:
-	if backpack.best_tool("fishing") == "":
+## A region never produces fish above its own zone tier, the carried
+## fishing tool tier, or the survivor's server-owned profession tier.
+static func catch_tier(zone: int, rod_tier: int, skill_tier: int) -> int:
+	return clampi(mini(zone + 1, mini(rod_tier, skill_tier)), 1, Defs.MAX_TIER)
+
+
+static func catch_item(tier: int) -> String:
+	if tier < 1 or tier > Defs.MAX_TIER:
+		return ""
+	return CATCH_ID if tier == 1 else "raw_fish_%d" % tier
+
+
+static func validate_start(world, player_position: Vector3, backpack, skill_tier: int = 1) -> Dictionary:
+	var rod_id: String = backpack.best_tool("fishing")
+	if rod_id == "":
 		return {"ok": false, "reason": "need_rod"}
 	var water := water_near(world, player_position)
 	if water == Vector2.INF:
 		return {"ok": false, "reason": "need_water"}
-	if backpack.free_space_for(CATCH_ID) <= 0:
+	var zone_tier: int = int(world.zone_at(player_position.x, player_position.z))
+	var tier: int = catch_tier(zone_tier, Defs.tier_of(rod_id), skill_tier)
+	var item_id: String = catch_item(tier)
+	if backpack.free_space_for(item_id) <= 0:
 		return {"ok": false, "reason": "no_space"}
 	return {"ok": true, "water_x": water.x, "water_z": water.y,
-		"seconds": CAST_SECONDS}
+		"seconds": CAST_SECONDS, "tier": tier, "item": item_id}
