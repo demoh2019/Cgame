@@ -305,7 +305,14 @@ void GodotBody2D::set_state(PS2DE::BodyState p_state, const Variant &p_variant) 
 					first_time_kinematic = false;
 				}
 			} else if (mode == PS2DE::BODY_MODE_STATIC) {
-				_set_transform(p_variant);
+				// A repeated identical transform is not a motion event. Avoid
+				// broadphase updates, matrix inversion and waking nearby bodies.
+				// Shape changes have their own update/wakeup path.
+				const Transform2D transform = p_variant;
+				if (transform == get_transform()) {
+					break;
+				}
+				_set_transform(transform);
 				_set_inv_transform(get_transform().affine_inverse());
 				wakeup_neighbours();
 			} else {
