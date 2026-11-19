@@ -1,0 +1,23 @@
+name: Project asset audit tests
+
+on:
+  pull_request:
+    paths:
+      - "misc/scripts/project_asset_audit.py"
+      - "misc/scripts/tests/test_project_asset_audit.py"
+      - "misc/scripts/README_asset_audit.md"
+      - ".github/workflows/project-asset-audit.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  python-audit-tests:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Check Python syntax
+        run: python3 -m py_compile misc/scripts/project_asset_audit.py misc/scripts/tests/test_project_asset_audit.py
+      - name: Run asset auditor regression tests
+        run: python3 -m unittest discover -s misc/scripts/tests -p 'test_project_asset_audit.py' -v
