@@ -88,6 +88,14 @@ private:
 	uint8_t masks[TSize] = {};
 };
 
+// Fail the native build if future changes break a broadphase category rule
+// or make the matrix require dynamic first-use initialization.
+static_assert(JoltBroadPhaseMatrix<>().should_collide(JoltBroadPhaseLayer::BODY_DYNAMIC, JoltBroadPhaseLayer::BODY_STATIC));
+static_assert(JoltBroadPhaseMatrix<>().should_collide(JoltBroadPhaseLayer::BODY_DYNAMIC, JoltBroadPhaseLayer::AREA_UNDETECTABLE));
+static_assert(JoltBroadPhaseMatrix<>().should_collide(JoltBroadPhaseLayer::AREA_UNDETECTABLE, JoltBroadPhaseLayer::BODY_DYNAMIC));
+static_assert(!JoltBroadPhaseMatrix<>().should_collide(JoltBroadPhaseLayer::BODY_STATIC, JoltBroadPhaseLayer::BODY_STATIC));
+static_assert(!JoltBroadPhaseMatrix<>().should_collide(JoltBroadPhaseLayer::AREA_UNDETECTABLE, JoltBroadPhaseLayer::AREA_UNDETECTABLE));
+
 constexpr JPH::ObjectLayer encode_layers(JPH::BroadPhaseLayer p_broad_phase_layer, JPH::ObjectLayer p_object_layer) {
 	const uint16_t upper_bits = uint16_t((uint8_t)p_broad_phase_layer << OBJECT_LAYER_INDEX_BITS);
 	const uint16_t lower_bits = uint16_t(p_object_layer);
