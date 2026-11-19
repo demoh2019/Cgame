@@ -65,7 +65,8 @@ func _run() -> void:
 	var unchanged_positions := base.get_particle_positions() == surface.get_particle_positions()
 	var velocities_changed := _velocity_difference(
 			base.get_particle_velocities(), surface.get_particle_velocities()) > 0.01
-	var momentum_delta := _total_velocity(surface.get_particle_velocities()) - 			_total_velocity(base.get_particle_velocities())
+	var momentum_delta := (_total_velocity(surface.get_particle_velocities()) -
+			_total_velocity(base.get_particle_velocities()))
 	var conserved := momentum_delta.length() < 0.005
 	var deterministic := surface.get_particle_velocities() == replica.get_particle_velocities()
 	deterministic = deterministic and surface.get_particle_positions() == replica.get_particle_positions()
