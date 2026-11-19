@@ -249,6 +249,12 @@ public:
 		if (result_size == 0) {
 			return result;
 		}
+		// A whole-vector slice can share the existing COW storage.
+		// A subsequent write still detaches, retaining value semantics.
+		// This avoids allocating and copying potentially large arrays.
+		if (begin == 0 && end == s) {
+			return *this;
+		}
 		if (result.resize(result_size) != OK) {
 			return Vector<T>();
 		}
