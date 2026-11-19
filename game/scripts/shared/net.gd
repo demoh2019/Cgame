@@ -582,6 +582,6 @@ func _event_visible_to(event: Dictionary, peer: int) -> bool:
 		"hit":
 			return event.get("id", -1) == peer or event.get("by", 0) == peer or _is_nearby(event, peer)
 		"attack", "zombie_died", "siege_started", "raid_started", \
-				"raid_warning", "raid_slam", "raid_enraged", "raid_defeated", "raid_expired":
+				"raid_warning", "raid_slam", "raid_enraged", "raid_reinforcements", "raid_defeated", "raid_expired":
 			return _is_nearby(event, peer)
 	return false

@@ -26,6 +26,7 @@ const Scavenging = preload("res://scripts/shared/scavenging.gd")
 const Structures = preload("res://scripts/shared/structures.gd")
 const SiegeWaves = preload("res://scripts/shared/siege_waves.gd")
 const RaidEncounter = preload("res://scripts/shared/raid_encounter.gd")
+const RaidReinforcements = preload("res://scripts/shared/raid_reinforcements.gd")
 const RaidLoot = preload("res://scripts/shared/raid_loot.gd")
 const Zombie = preload("res://scripts/shared/zombie.gd")
 const EliteInfected = preload("res://scripts/shared/elite_infected.gd")
@@ -104,6 +105,8 @@ var last_raid_spawn_time: float = -1000000.0
 var raid_started_at: float = 0.0
 var raid_next_slam_at: float = 0.0
 var raid_pending_slam: Dictionary = {} # World position & deadline are server-owned.
+var raid_wave: int = 0 # Number of completed reinforcement phases.
+var raid_minions: Array[int] = [] # Raid-only infected are cleared with boss.
 var campfires: Dictionary = {} # Temporary shared warmth, never checkpointed.
 var trades: Dictionary = {} # trade id -> offer/accept/expiry
 var market_orders: Dictionary = {} # id -> advertised online stock (not escrow).
@@ -1768,6 +1771,8 @@ func _on_zombie_death(zombie, killer: Player) -> void:
 			loot[item_id] = int(loot.get(item_id, 0)) + int(RaidEncounter.treasure(zone)[item_id])
 		raid_boss_id = -1
 		raid_pending_slam = {}
+		_clear_raid_minions()
+		raid_wave = 0
 		events.append({"type": "raid_defeated", "id": zombie.id,
 			"x": zombie.position.x, "z": zombie.position.z})
 	var loot_bag_id: int = _make_bag(zombie.position, loot, -1 if zombie.raid_boss else killer.id)
@@ -1929,6 +1934,8 @@ func _tick_raid_encounter() -> void:
 		if boss == null or not boss.is_alive():
 			raid_boss_id = -1
 			raid_pending_slam = {}
+			_clear_raid_minions()
+			raid_wave = 0
 			return
 		var at := Vector2(boss.position.x, boss.position.z)
 		if time >= raid_started_at + RaidEncounter.MAX_ENCOUNTER_SECONDS \
@@ -1938,7 +1945,10 @@ func _tick_raid_encounter() -> void:
 				"x": at.x, "z": at.y})
 			raid_boss_id = -1
 			raid_pending_slam = {}
+			_clear_raid_minions()
+			raid_wave = 0
 			return
+		_tick_raid_reinforcements(boss)
 		if RaidEncounter.try_enrage(boss):
 			# Phase transition is one-time per encounter. Never cancel a
 			# telegraphed strike already in flight.
@@ -1987,12 +1997,54 @@ func _tick_raid_encounter() -> void:
 	boss.receive_pack_alert(leader_id, targets)
 	zombies[spawn_id] = boss
 	raid_boss_id = spawn_id
+	raid_wave = 0
+	raid_minions.clear()
 	raid_started_at = time
 	last_raid_spawn_time = time
 	raid_next_slam_at = time + 9.0
 	events.append({"type": "raid_started", "id": spawn_id,
 		"x": site.x, "z": site.y, "zone": world.zone_at(site.x, site.y),
 		"health": boss.health})
+
+
+## Two one-time health phases; no client command may create minions.
+## The existing boss enrage and slam remain intact.
+func _tick_raid_reinforcements(boss) -> void:
+	var phase: int = RaidReinforcements.next_phase(
+		boss.health, float(boss.data["health"]), raid_wave)
+	var free_slots: int = RaidEncounter.MAX_INFECTED - zombies.size()
+	if phase == 0 or free_slots <= 0:
+		return
+	var points: Array[Vector2] = RaidReinforcements.sites(
+		world, players, zombies, boss.position, phase,
+		mini(free_slots, RaidReinforcements.MAX_WAVE))
+	if points.is_empty():
+		return
+	var types: Array[String] = RaidReinforcements.kinds(phase)
+	var target: Player = players.get(boss.target_id)
+	var visible_targets: Dictionary = {}
+	if target != null and _alive(target) and not _is_safe(target.position):
+		visible_targets[boss.target_id] = {"position": target.position,
+			"alive": true, "safe": false}
+	for i in points.size():
+		var spot: Vector2 = points[i]
+		var enemy_id: int = new_id()
+		var minion = Zombie.new(enemy_id, types[i],
+			Vector3(spot.x, world.height_at(spot.x, spot.y), spot.y), -1)
+		if not visible_targets.is_empty():
+			minion.receive_pack_alert(boss.target_id, visible_targets)
+		zombies[enemy_id] = minion
+		raid_minions.append(enemy_id)
+	raid_wave = phase
+	events.append({"type": "raid_reinforcements", "id": boss.id,
+		"x": boss.position.x, "z": boss.position.z,
+		"phase": phase, "count": points.size()})
+
+
+func _clear_raid_minions() -> void:
+	for enemy_id in raid_minions:
+		zombies.erase(enemy_id)
+	raid_minions.clear()
 
 
 func _resolve_raid_slam(boss_id: int, center: Vector2) -> void:

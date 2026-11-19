@@ -585,6 +585,9 @@ func _on_event(event: Dictionary) -> void:
 			say("RAID VICTORY! The warlord dropped one shared loot bag.")
 		"raid_expired":
 			say("Raid boss retreated. The encounter is over.")
+		"raid_reinforcements":
+			say("RAID PHASE %d! %d additional infected appeared." % [
+				int(event.get("phase", 1)), int(event.get("count", 0))])
 		"scavenging":
 			if event.get("peer", -1) == client.peer_id:
 				say("+%d scavenging XP (rank %d)" % [
