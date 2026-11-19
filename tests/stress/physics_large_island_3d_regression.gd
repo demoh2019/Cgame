@@ -26,8 +26,8 @@ func _run() -> void:
 					[parallel, priority_fallback, result["error"]])
 			failures += 1
 			continue
-		if int(result["joints"]) < 256 or float(result["max_joint_spacing"]) > 11.0 \
-				or int(result["bodies"]) != 320 + extra_islands * extra_island_size:
+		if (int(result["joints"]) < 256 or float(result["max_joint_spacing"]) > 11.0
+				or int(result["bodies"]) != 320 + extra_islands * extra_island_size):
 			printerr("FAIL: incorrect connected-island test geometry or joint drift")
 			failures += 1
 		print("3D island: parallel=%s, priority_fallback=%s, extra=%d, joints=%d, peak=%.3f ms" %
