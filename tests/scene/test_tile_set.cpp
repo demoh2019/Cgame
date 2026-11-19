@@ -30,9 +30,13 @@
 
 #include "tests/test_macros.h"
 
+#include "modules/modules_enabled.gen.h"
+
 TEST_FORCE_LINK(test_tile_set)
 
-#include "scene/resources/2d/tile_set.h"
+#ifdef MODULE_TILEMAP_ENABLED
+
+#include "modules/tilemap/tile_set.h"
 
 struct NeighborTestCase {
 	TileSet::CellNeighbor direction;
@@ -628,3 +632,5 @@ TEST_CASE("[TileSet] get_neighbor_cell on a invalid layout") {
 }
 
 } // namespace TestTileSet
+
+#endif // MODULE_TILEMAP_ENABLED
