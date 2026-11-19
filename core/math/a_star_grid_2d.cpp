@@ -399,7 +399,7 @@ AStarGrid2D::Point *AStarGrid2D::_forced_successor(int32_t p_x, int32_t p_y, int
 	return nullptr;
 }
 
-void AStarGrid2D::_get_nbors(Point *p_point, LocalVector<Point *> &r_nbors) {
+void AStarGrid2D::_get_nbors(Point *p_point, FixedVector<Point *, 8> &r_nbors) {
 	bool ts0 = false, td0 = false,
 		 ts1 = false, td1 = false,
 		 ts2 = false, td2 = false,
@@ -521,7 +521,9 @@ bool AStarGrid2D::_solve(Point *p_begin_point, Point *p_end_point, bool p_allow_
 
 	LocalVector<Point *> open_list;
 	SortArray<Point *, SortPoints> sorter;
-	LocalVector<Point *> nbors;
+	// A grid cell has at most four cardinal and four diagonal neighbors.
+	// Keep the scratch list on the stack instead of allocating a heap buffer.
+	FixedVector<Point *, 8> nbors;
 
 	p_begin_point->g_score = 0;
 	p_begin_point->f_score = _estimate_cost(p_begin_point->id, p_end_point->id);
