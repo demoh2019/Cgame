@@ -125,7 +125,7 @@ public:
 	template <typename T1 = T>
 	constexpr int64_t rfind_sequence(const Span<T1> &p_span, uint64_t p_from) const;
 	template <typename T1 = T>
-	_FORCE_INLINE_ constexpr int64_t rfind_sequence(const Span<T1> &p_span) const { return rfind_sequence(p_span, size() - p_span.size()); }
+	_FORCE_INLINE_ constexpr int64_t rfind_sequence(const Span<T1> &p_span) const { return p_span.size() > size() ? -1 : rfind_sequence(p_span, size() - p_span.size()); }
 	constexpr uint64_t count(const T &p_val) const;
 	/// Find the index of the given value using binary search.
 	/// Note: Assumes that elements in the span are sorted. Otherwise, use find() instead.
@@ -149,12 +149,32 @@ constexpr int64_t Span<T>::find(const T &p_val, uint64_t p_from) const {
 template <typename T>
 template <typename T1>
 constexpr int64_t Span<T>::find_sequence(const Span<T1> &p_span, uint64_t p_from) const {
-	for (uint64_t i = p_from; i <= size() - p_span.size(); i++) {
-		if (are_spans_equal(ptr() + i, p_span.ptr(), p_span.size())) {
+	const uint64_t needle_size = p_span.size();
+	// Subtract only after validating the range; otherwise unsigned underflow
+	// can make an oversized pattern scan past the end of the haystack.
+	if (p_from > size() || needle_size > size() - p_from) {
+		return -1;
+	}
+	if (needle_size == 0) {
+		return p_from;
+	}
+
+	const T *const haystack = ptr();
+	const T1 *const needle = p_span.ptr();
+	const uint64_t last_start = size() - needle_size;
+	for (uint64_t i = p_from; i <= last_start; i++) {
+		// Avoid calling memcmp / traversing a class sequence when either
+		// endpoint already disproves the candidate. For same-type floats,
+		// preserve the bitwise memcmp semantics of are_spans_equal().
+		if constexpr (!(std::is_same_v<T, T1> && std::is_floating_point_v<T>)) {
+			if (haystack[i] != needle[0] || (needle_size > 1 && haystack[i + needle_size - 1] != needle[needle_size - 1])) {
+				continue;
+			}
+		}
+		if (are_spans_equal(haystack + i, needle, needle_size)) {
 			return i;
 		}
 	}
-
 	return -1;
 }
 
@@ -172,13 +192,28 @@ constexpr int64_t Span<T>::rfind(const T &p_val, uint64_t p_from) const {
 template <typename T>
 template <typename T1>
 constexpr int64_t Span<T>::rfind_sequence(const Span<T1> &p_span, uint64_t p_from) const {
-	DEV_ASSERT(p_from + p_span.size() <= size());
-	for (int64_t i = p_from; i >= 0; i--) {
-		if (are_spans_equal(ptr() + i, p_span.ptr(), p_span.size())) {
+	const uint64_t needle_size = p_span.size();
+	if (p_from > size() || needle_size > size() - p_from) {
+		return -1;
+	}
+	if (needle_size == 0) {
+		return p_from;
+	}
+
+	const T *const haystack = ptr();
+	const T1 *const needle = p_span.ptr();
+	// Never truncate the unsigned range to signed before walking backwards.
+	for (uint64_t i = p_from + 1; i > 0;) {
+		--i;
+		if constexpr (!(std::is_same_v<T, T1> && std::is_floating_point_v<T>)) {
+			if (haystack[i] != needle[0] || (needle_size > 1 && haystack[i + needle_size - 1] != needle[needle_size - 1])) {
+				continue;
+			}
+		}
+		if (are_spans_equal(haystack + i, needle, needle_size)) {
 			return i;
 		}
 	}
-
 	return -1;
 }
 
