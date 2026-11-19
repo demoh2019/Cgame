@@ -1,0 +1,41 @@
+name: SceneTree process dispatch native regression
+
+on:
+  pull_request:
+    branches: [develop]
+    paths:
+      - 'scene/main/scene_tree.cpp'
+      - 'tests/scene/test_node.cpp'
+      - '.github/workflows/scene-process-dispatch-perf.yml'
+  push:
+    branches: [develop]
+    paths:
+      - 'scene/main/scene_tree.cpp'
+      - 'tests/scene/test_node.cpp'
+      - '.github/workflows/scene-process-dispatch-perf.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: scene-process-dispatch-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  native-scene-dispatch:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+      - uses: ./.github/actions/godot-deps
+      - name: Build Cgame with native tests
+        uses: ./.github/actions/godot-build
+        with:
+          platform: linuxbsd
+          target: editor
+          scons-flags: dev_build=yes tests=yes debug_symbols=no module_mono_enabled=no module_text_server_fb_enabled=yes accesskit=no -j2
+      - name: Run SceneTree process regression suite
+        run: timeout 600s ./bin/godot.linuxbsd.editor.dev.x86_64 --headless --test --test-case="*[SceneTree][Node]*" --no-colors

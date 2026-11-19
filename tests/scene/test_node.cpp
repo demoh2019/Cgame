@@ -1707,4 +1707,50 @@ TEST_CASE("[SceneTree][Node] Borrowed multi-component NodePath lookup preserves 
 	memdelete(root);
 }
 
+
+TEST_CASE("[SceneTree][Node] Wide mixed normal and physics process dispatch") {
+	SceneTree *tree = SceneTree::get_singleton();
+	TestNode *parent = memnew(TestNode);
+	tree->get_root()->add_child(parent);
+	Vector<TestNode *> nodes;
+
+	// Exercise both dispatch loops with a mixture of normal, internal and
+	// physics process flags. Every pass must read each node's live flags.
+	for (int i = 0; i < 128; i++) {
+		TestNode *child = memnew(TestNode);
+		parent->add_child(child);
+		child->set_process(true);
+		child->set_physics_process(true);
+		child->set_process_internal((i & 1) == 0);
+		child->set_physics_process_internal(i % 3 == 0);
+		nodes.push_back(child);
+	}
+
+	tree->process(0);
+	tree->physics_process(0);
+	for (int i = 0; i < nodes.size(); i++) {
+		CHECK_EQ(nodes[i]->process_counter, 1);
+		CHECK_EQ(nodes[i]->physics_process_counter, 1);
+		CHECK_EQ(nodes[i]->internal_process_counter, (i & 1) == 0 ? 1 : 0);
+		CHECK_EQ(nodes[i]->internal_physics_process_counter, i % 3 == 0 ? 1 : 0);
+	}
+
+	// Disable only external notifications for the first group, leaving
+	// internal ones enabled to check process-group membership changes.
+	for (int i = 0; i < 32; i++) {
+		nodes[i]->set_process(false);
+		nodes[i]->set_physics_process(false);
+	}
+	tree->process(0);
+	tree->physics_process(0);
+	for (int i = 0; i < nodes.size(); i++) {
+		CHECK_EQ(nodes[i]->process_counter, i < 32 ? 1 : 2);
+		CHECK_EQ(nodes[i]->physics_process_counter, i < 32 ? 1 : 2);
+		CHECK_EQ(nodes[i]->internal_process_counter, (i & 1) == 0 ? 2 : 0);
+		CHECK_EQ(nodes[i]->internal_physics_process_counter, i % 3 == 0 ? 2 : 0);
+	}
+
+	memdelete(parent);
+}
+
 } // namespace TestNode
