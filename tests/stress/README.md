@@ -1032,3 +1032,34 @@ python3 tests/stress/run.py --godot ./bin/godot.linuxbsd.editor.dev.x86_64 \
 
 A successful correctness check is **not** proof of million-body throughput;
 measure both execution time and peak process RSS separately.
+
+## Near-first streaming BVH raycasts
+
+Streaming raycasts now visit intersecting BVH roots and binary child nodes in
+the order of their **estimated entry fraction** along the ray. As with Jolt's
+early-out fraction and Box2D's clipped tree raycasts, the first nearby exact
+hit can reject distant nodes before they enter the narrowphase. The hint is
+only used to order work: `BVH_ABB::intersects_segment()` still decides whether
+a node intersects, including axis-aligned, reversed and grazing cases.
+
+The change uses the existing iterative LIFO stack, no priority queue or
+per-object heap allocation. It cannot guarantee first-hit ordering *inside*
+each multi-item BVH leaf; the exact raycast visitor continues to clip using
+the closest hit and remains correct if earlier callbacks see farther objects.
+
+Unit tests (native `tests=yes`) cover:
+- 4,096 candidates, nearest-hit clipping and fewer narrowphase callbacks;
+- ordering independent of static/dynamic tree insertion order;
+- reversed and axis-aligned 2D/3D rays.
+
+For existing stress-suite timings on the same engine binary and hardware:
+
+```bash
+python3 tests/stress/run.py --godot ./bin/godot.linuxbsd.editor.dev.x86_64 \
+  --case physics_raycast_2d,physics_raycast_3d --scale 50 \
+  --repeats 5 --frames 12 --timeout 600 --rss-limit-mib 6144 \
+  --output out/raycast-near-first.json
+```
+
+Compare query time and process RSS to an otherwise identical baseline build.
+No specific CPU/latency speedup is claimed without measured results.
