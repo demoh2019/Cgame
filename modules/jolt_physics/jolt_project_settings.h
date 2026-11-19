@@ -62,6 +62,9 @@ public:
 	inline static bool soft_body_soft_vertex_face_contacts = false;
 	// Optional bounded per-pair dynamic-face BVH; only applies in vertex-face mode.
 	inline static bool soft_body_soft_vertex_face_bvh = false;
+	// Independently budgeted segment-segment soft-body contacts.
+	// Requires both soft_body_soft_contacts and vertex_face_contacts.
+	inline static bool soft_body_soft_edge_edge_contacts = false;
 	inline static float soft_body_soft_contact_radius = 0.1f;
 	inline static float soft_body_soft_contact_recovery = 0.2f;
 	inline static float soft_body_soft_contact_friction = 0.2f;
