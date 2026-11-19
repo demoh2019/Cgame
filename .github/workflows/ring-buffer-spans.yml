@@ -1,0 +1,30 @@
+name: RingBuffer zero-allocation two-span and byte-search regressions
+
+on:
+  pull_request:
+    branches: [develop]
+    paths:
+      - 'core/templates/ring_buffer.h'
+      - 'tests/core/templates/test_ring_buffer.cpp'
+      - 'misc/scripts/tests/test_ring_buffer_spans.py'
+      - '.github/workflows/ring-buffer-spans.yml'
+  push:
+    branches: [develop]
+    paths:
+      - 'core/templates/ring_buffer.h'
+      - 'tests/core/templates/test_ring_buffer.cpp'
+      - 'misc/scripts/tests/test_ring_buffer_spans.py'
+      - '.github/workflows/ring-buffer-spans.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  gcc-clang-header-regression:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - name: Compile production header and run GCC + Clang differential tests
+        run: python3 misc/scripts/tests/test_ring_buffer_spans.py
