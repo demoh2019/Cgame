@@ -1,17 +1,17 @@
 # Native TerrainHeightmap (experimental foundation)
 
-This built-in engine module adds a serializable \`TerrainHeightmap\` resource with deterministic CPU algorithms:
+This built-in engine module adds a serializable `TerrainHeightmap` resource with deterministic CPU algorithms:
 
 - Height field storage, safe dimension changes and bilinear sampling.
 - Sculpt and smooth brushes with radial falloff.
 - Conservative thermal/talus erosion (not hydraulic erosion).
 - Four RGBA vertex-paint layers that always remain normalized.
 - Indexed ArrayMesh generation with normals, UVs and vertex color weights.
-- In-engine C++ doctest coverage in \`tests/test_terrain_heightmap.h\`.
+- In-engine C++ doctest coverage in `tests/test_terrain_heightmap.h`.
 
 ## Minimal GDScript example
 
-\`\`\`gdscript
+```gdscript
 extends Node3D
 
 @export var terrain: TerrainHeightmap
@@ -26,11 +26,11 @@ func _ready() -> void:
     var instance := MeshInstance3D.new()
     instance.mesh = terrain.build_mesh(2.0)
     add_child(instance)
-\`\`\`
+```
 
-For the paint layers to be visible as textures, assign a shader/material that blends four textures using \`COLOR.rgba\`. Otherwise standard vertex color behavior (if used by the material) applies. An example shader is in \`examples/four_layer_terrain.gdshader\`.
+For the paint layers to be visible as textures, assign a shader/material that blends four textures using `COLOR.rgba`. Otherwise standard vertex color behavior (if used by the material) applies. An example shader is in `examples/four_layer_terrain.gdshader`.
 
-\`build_mesh()\` returns a new mesh. Brush operations modify **only** the resource, so call \`instance.mesh = terrain.build_mesh(cell_size)\` after edits, or connect the resource's \`changed\` signal for regeneration. Resource data can be saved into a \`.tres\` or a \`.tscn\` via the normal Godot ResourceSaver / scene serializer.
+`build_mesh()` returns a new mesh. Brush operations modify **only** the resource, so call `instance.mesh = terrain.build_mesh(cell_size)` after edits, or connect the resource's `changed` signal for regeneration. Resource data can be saved into a `.tres` or a `.tscn` via the normal Godot ResourceSaver / scene serializer.
 
 ### Performance and project scope
 
@@ -42,9 +42,9 @@ Not yet included: viewport Terrain Editor UI, editor undo/redo brush integration
 
 Compile an engine with tests enabled and the terrain module enabled, then run:
 
-\`\`\`shell
+```shell
 scons platform=linuxbsd target=editor tests=yes module_terrain_enabled=yes
 ./bin/godot.linuxbsd.editor.x86_64 --headless --test --test-case="*[TerrainHeightmap]*"
-\`\`\`
+```
 
 The exact binary suffix and test flags depend on the target platform and build configuration. Run the entire Godot test suite for integration regressions.
