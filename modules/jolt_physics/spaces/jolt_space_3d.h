@@ -119,6 +119,7 @@ public:
 	void set_param(PS3DE::SpaceParameter p_param, double p_value);
 
 	JPH::PhysicsSystem &get_physics_system() const { return *physics_system; }
+	int get_contact_manifold_count() const;
 
 	JPH::TempAllocator &get_temp_allocator() const { return *temp_allocator; }
 
