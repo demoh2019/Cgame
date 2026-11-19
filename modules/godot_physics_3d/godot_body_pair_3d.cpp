@@ -284,10 +284,6 @@ bool GodotBodyPair3D::_test_ccd(real_t p_step, GodotBody3D *p_A, int p_shape_A, 
 	return true;
 }
 
-real_t combine_bounce(GodotBody3D *A, GodotBody3D *B) {
-	return CLAMP(A->get_bounce() + B->get_bounce(), 0, 1);
-}
-
 bool GodotBodyPair3D::setup(real_t p_step) {
 	check_ccd = false;
 
@@ -431,6 +427,9 @@ bool GodotBodyPair3D::pre_solve(real_t p_step) {
 	// Materials may change between frames. Compute once before warm starting,
 	// instead of re-mixing them for every solver iteration.
 	mixed_friction = space->mix_friction(A->get_friction(), B->get_friction());
+	// Materials are shared by the entire manifold; combine restitution once
+	// per constraint setup, not once per contact point.
+	const real_t mixed_restitution = space->mix_restitution(A->get_bounce(), B->get_bounce());
 	const bool has_friction = mixed_friction > 0.0;
 
 	// Warm-start impulses represent force integrated over the previous step.
@@ -542,7 +541,7 @@ bool GodotBodyPair3D::pre_solve(real_t p_step) {
 			B->apply_impulse(j_vec, c.rB + B->get_center_of_mass());
 		}
 
-		c.bounce = combine_bounce(A, B);
+		c.bounce = mixed_restitution;
 		if (c.bounce) {
 			Vector3 crA = A->get_prev_angular_velocity().cross(c.rA);
 			Vector3 crB = B->get_prev_angular_velocity().cross(c.rB);
