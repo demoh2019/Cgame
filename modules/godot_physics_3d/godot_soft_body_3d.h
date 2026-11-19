@@ -34,7 +34,7 @@
 #include "servers/physics_xpbd_tether.h"
 #include "servers/physics_softbody_shape_clusters.h"
 #include "servers/physics_xpbd_membrane.h"
-#include "servers/physics_fem_tetra_neo_hookean.h"
+#include "servers/physics_fem_convex_star.h"
 #include "servers/physics_xpbd_strain_limit.h"
 #include "godot_collision_object_3d.h"
 
@@ -175,8 +175,10 @@ class GodotSoftBody3D : public GodotCollisionObject3D {
 	double xpbd_volume_rest = 0.0; // May change via plastic creep.
 	double xpbd_volume_original_rest = 0.0; // Frozen gas reference and damage baseline.
 	bool xpbd_volume_closed = false;
-	PhysicsFEMTetraRest xpbd_fem_tetra_rest;
-	bool xpbd_fem_tetra_valid = false;
+	// Optional convex closed-shell mesh cooked into a fan of real tetrahedra.
+	// Tetra rest matrices and XPBD multipliers are retained across iterations.
+	// Empty unless tetra FEM compliance is explicitly enabled.
+	LocalVector<PhysicsFEMConvexTetra> xpbd_fem_tetrahedra;
 	LocalVector<Face> faces;
 	// Number of particles with nonzero inverse mass. Maintained on pin,
 	// unpin and mesh rebuild for O(1) central impulse/force normalization.
