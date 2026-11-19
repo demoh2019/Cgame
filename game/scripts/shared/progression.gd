@@ -8,9 +8,15 @@ const MAX_XP := 100000000
 const GATHER_XP_PER_ITEM := 8
 const CRAFT_XP_PER_BATCH := 25
 const GATHER_SKILLS := ["wood", "stone", "ore", "fiber", "fishing"]
+# Equipment-based weapon mastery; awarded by the authoritative server on confirmed kills.
+const COMBAT_SKILLS := ["melee", "ranged"]
+const COMBAT_XP_PER_LEVEL := 80
+const COMBAT_MAX_LEVEL := 5
+const COMBAT_DAMAGE_PER_LEVEL := 0.03
 
 var gathering_xp: Dictionary = {"wood": 0, "stone": 0, "ore": 0, "fiber": 0, "fishing": 0}
 var crafting_xp: int = 0
+var combat_xp: Dictionary = {"melee": 0, "ranged": 0}
 
 
 static func resource_skill(kind: String) -> String:
@@ -63,6 +69,38 @@ func award_craft(tier: int, batches: int) -> int:
 	return crafting_xp - old_xp
 
 
+static func combat_skill_for_weapon(weapon_id: String) -> String:
+	var kind: String = str(Defs.item(weapon_id).get("weapon", ""))
+	return kind if kind in COMBAT_SKILLS else ""
+
+
+func combat_level(skill: String) -> int:
+	if not combat_xp.has(skill):
+		return 0
+	return mini(COMBAT_MAX_LEVEL,
+		1 + maxi(0, int(combat_xp[skill])) / COMBAT_XP_PER_LEVEL)
+
+
+func combat_levels() -> Dictionary:
+	return {"melee": combat_level("melee"), "ranged": combat_level("ranged")}
+
+
+func combat_damage_multiplier(weapon_id: String) -> float:
+	var skill := combat_skill_for_weapon(weapon_id)
+	if skill == "":
+		return 1.0
+	return 1.0 + float(combat_level(skill) - 1) * COMBAT_DAMAGE_PER_LEVEL
+
+
+func award_combat(weapon_id: String, earned_xp: int) -> int:
+	var skill := combat_skill_for_weapon(weapon_id)
+	if skill == "" or earned_xp <= 0:
+		return 0
+	var old_xp: int = int(combat_xp[skill])
+	combat_xp[skill] = mini(MAX_XP, old_xp + mini(earned_xp, 1000))
+	return int(combat_xp[skill]) - old_xp
+
+
 func levels() -> Dictionary:
 	var result: Dictionary = {}
 	for skill in GATHER_SKILLS:
@@ -71,7 +109,8 @@ func levels() -> Dictionary:
 
 
 func to_dict() -> Dictionary:
-	return {"gathering": gathering_xp.duplicate(true), "crafting": crafting_xp}
+	return {"gathering": gathering_xp.duplicate(true),
+		"crafting": crafting_xp, "combat": combat_xp.duplicate(true)}
 
 
 static func _valid_xp(value: Variant) -> bool:
@@ -102,6 +141,17 @@ func load_dict(data: Variant) -> bool:
 		if not source.has(skill) or not _valid_xp(source[skill]):
 			return false
 		clean[skill] = int(source[skill])
+	# Old characters have no combat subtree; missing data starts at novice level.
+	var combat_raw: Variant = data.get("combat", {"melee": 0, "ranged": 0})
+	if not (combat_raw is Dictionary) or combat_raw.size() != COMBAT_SKILLS.size():
+		return false
+	var clean_combat: Dictionary = {}
+	for skill in COMBAT_SKILLS:
+		if not combat_raw.has(skill) or not _valid_xp(combat_raw[skill]):
+			return false
+		clean_combat[skill] = int(combat_raw[skill])
+	# Atomic commit: corrupt combat XP must not overwrite existing gathering or crafting.
 	gathering_xp = clean
 	crafting_xp = int(data["crafting"])
+	combat_xp = clean_combat
 	return true
