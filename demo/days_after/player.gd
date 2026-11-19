@@ -128,6 +128,26 @@ func add_item(item_id: String, quantity: int) -> void:
     inventory[item_id] = get_item_count(item_id) + quantity
 
 
+
+func try_spend_items(cost: Dictionary) -> bool:
+    # Validate every item and quantity before mutating any stack.
+    # This function can be reused by building, repairs and later game trading.
+    if health <= 0.0 or cost.is_empty():
+        return false
+    for item_id in cost:
+        if not (item_id is String) or str(item_id).is_empty():
+            return false
+        if not (cost[item_id] is int) or int(cost[item_id]) <= 0:
+            return false
+        if get_item_count(str(item_id)) < int(cost[item_id]):
+            return false
+    var updated := inventory.duplicate()
+    for item_id in cost:
+        updated[item_id] = get_item_count(str(item_id)) - int(cost[item_id])
+    inventory = updated
+    return true
+
+
 func collect_item(item_type: String, quantity: int) -> void:
     if health <= 0.0 or quantity <= 0:
         return
