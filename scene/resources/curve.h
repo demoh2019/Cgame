@@ -32,7 +32,7 @@
 
 #include "core/io/resource.h"
 #include "core/templates/local_vector.h"
-#include "core/templates/rb_map.h"
+#include "core/templates/pair.h"
 #include "scene/property_list_helper.h"
 
 // y(x) curve
@@ -219,14 +219,14 @@ class Curve2D : public Resource {
 	Transform2D _sample_posture(Interval p_interval) const;
 
 	void _bake_segment2d(LocalVector<Vector2> &r_bake, real_t p_begin, real_t p_end, const Vector2 &p_a, const Vector2 &p_out, const Vector2 &p_b, const Vector2 &p_in, int p_depth, int p_max_depth, real_t p_cos_threshold) const;
-	void _bake_segment2d_even_length(RBMap<real_t, Vector2> &r_bake, real_t p_begin, real_t p_end, const Vector2 &p_a, const Vector2 &p_out, const Vector2 &p_b, const Vector2 &p_in, int p_depth, int p_max_depth, real_t p_length) const;
+	void _bake_segment2d_even_length(LocalVector<Pair<real_t, Vector2>> &r_bake, real_t p_begin, real_t p_end, const Vector2 &p_a, const Vector2 &p_out, const Vector2 &p_b, const Vector2 &p_in, int p_depth, int p_max_depth, real_t p_length) const;
 	Dictionary _get_data() const;
 	void _set_data(const Dictionary &p_data);
 
 	void _add_point(const Vector2 &p_position, const Vector2 &p_in = Vector2(), const Vector2 &p_out = Vector2(), int p_atpos = -1);
 	void _remove_point(int p_index);
 
-	Vector<RBMap<real_t, Vector2>> _tessellate_even_length(int p_max_stages = 5, real_t p_length = 0.2) const;
+	Vector<LocalVector<Pair<real_t, Vector2>>> _tessellate_even_length(int p_max_stages = 5, real_t p_length = 0.2) const;
 	bool _filter_property(const String &p_name, int p_index) const;
 
 protected:
@@ -319,14 +319,14 @@ class Curve3D : public Resource {
 	bool up_vector_enabled = true;
 
 	void _bake_segment3d(LocalVector<Vector3> &r_bake, real_t p_begin, real_t p_end, const Vector3 &p_a, const Vector3 &p_out, const Vector3 &p_b, const Vector3 &p_in, int p_depth, int p_max_depth, real_t p_cos_threshold) const;
-	void _bake_segment3d_even_length(RBMap<real_t, Vector3> &r_bake, real_t p_begin, real_t p_end, const Vector3 &p_a, const Vector3 &p_out, const Vector3 &p_b, const Vector3 &p_in, int p_depth, int p_max_depth, real_t p_length) const;
+	void _bake_segment3d_even_length(LocalVector<Pair<real_t, Vector3>> &r_bake, real_t p_begin, real_t p_end, const Vector3 &p_a, const Vector3 &p_out, const Vector3 &p_b, const Vector3 &p_in, int p_depth, int p_max_depth, real_t p_length) const;
 	Dictionary _get_data() const;
 	void _set_data(const Dictionary &p_data);
 
 	void _add_point(const Vector3 &p_position, const Vector3 &p_in = Vector3(), const Vector3 &p_out = Vector3(), int p_atpos = -1);
 	void _remove_point(int p_index);
 
-	Vector<RBMap<real_t, Vector3>> _tessellate_even_length(int p_max_stages = 5, real_t p_length = 0.2) const;
+	Vector<LocalVector<Pair<real_t, Vector3>>> _tessellate_even_length(int p_max_stages = 5, real_t p_length = 0.2) const;
 	bool _filter_property(const String &p_name, int p_index) const;
 
 protected:

@@ -828,7 +828,7 @@ void Curve2D::_bake_segment2d(LocalVector<Vector2> &r_bake, real_t p_begin, real
 	}
 }
 
-void Curve2D::_bake_segment2d_even_length(RBMap<real_t, Vector2> &r_bake, real_t p_begin, real_t p_end, const Vector2 &p_a, const Vector2 &p_out, const Vector2 &p_b, const Vector2 &p_in, int p_depth, int p_max_depth, real_t p_length) const {
+void Curve2D::_bake_segment2d_even_length(LocalVector<Pair<real_t, Vector2>> &r_bake, real_t p_begin, real_t p_end, const Vector2 &p_a, const Vector2 &p_out, const Vector2 &p_b, const Vector2 &p_in, int p_depth, int p_max_depth, real_t p_length) const {
 	Vector2 beg = p_a.bezier_interpolate(p_a + p_out, p_b + p_in, p_b, p_begin);
 	Vector2 end = p_a.bezier_interpolate(p_a + p_out, p_b + p_in, p_b, p_end);
 
@@ -837,9 +837,9 @@ void Curve2D::_bake_segment2d_even_length(RBMap<real_t, Vector2> &r_bake, real_t
 	if (length > p_length && p_depth < p_max_depth) {
 		real_t mp = (p_begin + p_end) * 0.5;
 		Vector2 mid = p_a.bezier_interpolate(p_a + p_out, p_b + p_in, p_b, mp);
-		r_bake[mp] = mid;
-
+		// Left, midpoint, right: parametric order without sorting or map nodes.
 		_bake_segment2d_even_length(r_bake, p_begin, mp, p_a, p_out, p_b, p_in, p_depth + 1, p_max_depth, p_length);
+		r_bake.push_back(Pair<real_t, Vector2>(mp, mid));
 		_bake_segment2d_even_length(r_bake, mp, p_end, p_a, p_out, p_b, p_in, p_depth + 1, p_max_depth, p_length);
 	}
 }
@@ -899,7 +899,7 @@ void Curve2D::_bake() const {
 
 	// Tessellate curve to (almost) even length segments.
 	{
-		Vector<RBMap<real_t, Vector2>> midpoints = _tessellate_even_length(10, bake_interval);
+		Vector<LocalVector<Pair<real_t, Vector2>>> midpoints = _tessellate_even_length(10, bake_interval);
 
 		int pc = 1;
 		for (uint32_t i = 0; i < points.size() - 1; i++) {
@@ -920,10 +920,10 @@ void Curve2D::_bake() const {
 		int pidx = 0;
 
 		for (uint32_t i = 0; i < points.size() - 1; i++) {
-			for (const KeyValue<real_t, Vector2> &E : midpoints[i]) {
+			for (const Pair<real_t, Vector2> &E : midpoints[i]) {
 				pidx++;
-				bpw[pidx] = E.value;
-				bfw[pidx] = _calculate_tangent(points[i].position, points[i].position + points[i].out, points[i + 1].position + points[i + 1].in, points[i + 1].position, E.key);
+				bpw[pidx] = E.second;
+				bfw[pidx] = _calculate_tangent(points[i].position, points[i].position + points[i].out, points[i + 1].position + points[i + 1].in, points[i + 1].position, E.first);
 			}
 
 			pidx++;
@@ -1248,8 +1248,8 @@ PackedVector2Array Curve2D::tessellate(int p_max_stages, real_t p_tolerance) con
 	}
 	return tess;
 }
-Vector<RBMap<real_t, Vector2>> Curve2D::_tessellate_even_length(int p_max_stages, real_t p_length) const {
-	Vector<RBMap<real_t, Vector2>> midpoints;
+Vector<LocalVector<Pair<real_t, Vector2>>> Curve2D::_tessellate_even_length(int p_max_stages, real_t p_length) const {
+	Vector<LocalVector<Pair<real_t, Vector2>>> midpoints;
 	ERR_FAIL_COND_V_MSG(points.size() < 2, midpoints, "Curve must have at least 2 control point");
 
 	midpoints.resize(points.size() - 1);
@@ -1273,7 +1273,7 @@ bool Curve2D::_filter_property(const String &p_name, int p_index) const {
 PackedVector2Array Curve2D::tessellate_even_length(int p_max_stages, real_t p_length) const {
 	PackedVector2Array tess;
 
-	Vector<RBMap<real_t, Vector2>> midpoints = _tessellate_even_length(p_max_stages, p_length);
+	Vector<LocalVector<Pair<real_t, Vector2>>> midpoints = _tessellate_even_length(p_max_stages, p_length);
 	if (midpoints.is_empty()) {
 		return tess;
 	}
@@ -1290,9 +1290,9 @@ PackedVector2Array Curve2D::tessellate_even_length(int p_max_stages, real_t p_le
 	int pidx = 0;
 
 	for (uint32_t i = 0; i < points.size() - 1; i++) {
-		for (const KeyValue<real_t, Vector2> &E : midpoints[i]) {
+		for (const Pair<real_t, Vector2> &E : midpoints[i]) {
 			pidx++;
-			bpw[pidx] = E.value;
+			bpw[pidx] = E.second;
 		}
 
 		pidx++;
@@ -1534,7 +1534,7 @@ void Curve3D::_bake_segment3d(LocalVector<Vector3> &r_bake, real_t p_begin, real
 	}
 }
 
-void Curve3D::_bake_segment3d_even_length(RBMap<real_t, Vector3> &r_bake, real_t p_begin, real_t p_end, const Vector3 &p_a, const Vector3 &p_out, const Vector3 &p_b, const Vector3 &p_in, int p_depth, int p_max_depth, real_t p_length) const {
+void Curve3D::_bake_segment3d_even_length(LocalVector<Pair<real_t, Vector3>> &r_bake, real_t p_begin, real_t p_end, const Vector3 &p_a, const Vector3 &p_out, const Vector3 &p_b, const Vector3 &p_in, int p_depth, int p_max_depth, real_t p_length) const {
 	Vector3 beg = p_a.bezier_interpolate(p_a + p_out, p_b + p_in, p_b, p_begin);
 	Vector3 end = p_a.bezier_interpolate(p_a + p_out, p_b + p_in, p_b, p_end);
 
@@ -1543,9 +1543,9 @@ void Curve3D::_bake_segment3d_even_length(RBMap<real_t, Vector3> &r_bake, real_t
 	if (length > p_length && p_depth < p_max_depth) {
 		real_t mp = (p_begin + p_end) * 0.5;
 		Vector3 mid = p_a.bezier_interpolate(p_a + p_out, p_b + p_in, p_b, mp);
-		r_bake[mp] = mid;
-
+		// Left, midpoint, right: parametric order without sorting or map nodes.
 		_bake_segment3d_even_length(r_bake, p_begin, mp, p_a, p_out, p_b, p_in, p_depth + 1, p_max_depth, p_length);
+		r_bake.push_back(Pair<real_t, Vector3>(mp, mid));
 		_bake_segment3d_even_length(r_bake, mp, p_end, p_a, p_out, p_b, p_in, p_depth + 1, p_max_depth, p_length);
 	}
 }
@@ -1625,7 +1625,7 @@ void Curve3D::_bake() const {
 
 	// Step 1: Tessellate curve to (almost) even length segments.
 	{
-		Vector<RBMap<real_t, Vector3>> midpoints = _tessellate_even_length(10, bake_interval);
+		Vector<LocalVector<Pair<real_t, Vector3>>> midpoints = _tessellate_even_length(10, bake_interval);
 
 		const int num_intervals = closed ? points.size() : points.size() - 1;
 
@@ -1660,15 +1660,15 @@ void Curve3D::_bake() const {
 		int pidx = 0;
 
 		for (int i = 0; i < num_intervals; i++) {
-			for (const KeyValue<real_t, Vector3> &E : midpoints[i]) {
+			for (const Pair<real_t, Vector3> &E : midpoints[i]) {
 				pidx++;
-				bpw[pidx] = E.value;
+				bpw[pidx] = E.second;
 				if (!closed || i < num_intervals - 1) {
-					bfw[pidx] = _calculate_tangent(points[i].position, points[i].position + points[i].out, points[i + 1].position + points[i + 1].in, points[i + 1].position, E.key);
-					btw[pidx] = Math::lerp(points[i].tilt, points[i + 1].tilt, E.key);
+					bfw[pidx] = _calculate_tangent(points[i].position, points[i].position + points[i].out, points[i + 1].position + points[i + 1].in, points[i + 1].position, E.first);
+					btw[pidx] = Math::lerp(points[i].tilt, points[i + 1].tilt, E.first);
 				} else {
-					bfw[pidx] = _calculate_tangent(points[i].position, points[i].position + points[i].out, points[0].position + points[0].in, points[0].position, E.key);
-					btw[pidx] = Math::lerp(points[i].tilt, points[0].tilt, E.key);
+					bfw[pidx] = _calculate_tangent(points[i].position, points[i].position + points[i].out, points[0].position + points[0].in, points[0].position, E.first);
+					btw[pidx] = Math::lerp(points[i].tilt, points[0].tilt, E.first);
 				}
 			}
 
@@ -2248,8 +2248,8 @@ PackedVector3Array Curve3D::tessellate(int p_max_stages, real_t p_tolerance) con
 	}
 	return tess;
 }
-Vector<RBMap<real_t, Vector3>> Curve3D::_tessellate_even_length(int p_max_stages, real_t p_length) const {
-	Vector<RBMap<real_t, Vector3>> midpoints;
+Vector<LocalVector<Pair<real_t, Vector3>>> Curve3D::_tessellate_even_length(int p_max_stages, real_t p_length) const {
+	Vector<LocalVector<Pair<real_t, Vector3>>> midpoints;
 	ERR_FAIL_COND_V_MSG(points.size() < 2, midpoints, "Curve must have at least 2 control point");
 
 	const int num_intervals = closed ? points.size() : points.size() - 1;
@@ -2278,7 +2278,7 @@ bool Curve3D::_filter_property(const String &p_name, int p_index) const {
 PackedVector3Array Curve3D::tessellate_even_length(int p_max_stages, real_t p_length) const {
 	PackedVector3Array tess;
 
-	Vector<RBMap<real_t, Vector3>> midpoints = _tessellate_even_length(p_max_stages, p_length);
+	Vector<LocalVector<Pair<real_t, Vector3>>> midpoints = _tessellate_even_length(p_max_stages, p_length);
 	if (midpoints.is_empty()) {
 		return tess;
 	}
@@ -2297,9 +2297,9 @@ PackedVector3Array Curve3D::tessellate_even_length(int p_max_stages, real_t p_le
 	int pidx = 0;
 
 	for (int i = 0; i < num_intervals; i++) {
-		for (const KeyValue<real_t, Vector3> &E : midpoints[i]) {
+		for (const Pair<real_t, Vector3> &E : midpoints[i]) {
 			pidx++;
-			bpw[pidx] = E.value;
+			bpw[pidx] = E.second;
 		}
 
 		pidx++;

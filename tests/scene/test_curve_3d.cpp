@@ -312,4 +312,23 @@ TEST_CASE("[Curve3D][Performance] Tessellation preserves order and closed endpoi
 	CHECK(closed_tess[closed_tess.size() - 1] == Vector3(0, 0, 0));
 }
 
+
+TEST_CASE("[Curve3D][Performance] Even length tessellation and baked cache retain endpoints") {
+	Ref<Curve3D> curve = memnew(Curve3D);
+	curve->add_point(Vector3(0, 0, 0), Vector3(), Vector3(0, 18, 0));
+	curve->add_point(Vector3(100, 0, 0), Vector3(0, 18, 0), Vector3());
+	const PackedVector3Array even = curve->tessellate_even_length(10, 2.0);
+	REQUIRE(even.size() > 2);
+	CHECK(even[0] == Vector3(0, 0, 0));
+	CHECK(even[even.size() - 1] == Vector3(100, 0, 0));
+	for (int i = 1; i < even.size(); ++i) {
+		CHECK(even[i - 1].x < even[i].x);
+	}
+	curve->set_bake_interval(2.0);
+	const PackedVector3Array baked = curve->get_baked_points();
+	REQUIRE(baked.size() > 2);
+	CHECK(baked[0] == Vector3(0, 0, 0));
+	CHECK(baked[baked.size() - 1] == Vector3(100, 0, 0));
+}
+
 } // namespace TestCurve3D

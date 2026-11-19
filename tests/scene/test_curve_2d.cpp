@@ -315,4 +315,23 @@ TEST_CASE("[Curve2D][Performance] Tessellation emits strictly ordered adaptive s
 	}
 }
 
+
+TEST_CASE("[Curve2D][Performance] Even length tessellation and baked cache preserve progression") {
+	Ref<Curve2D> curve = memnew(Curve2D);
+	curve->add_point(Vector2(0, 0), Vector2(), Vector2(0, 18));
+	curve->add_point(Vector2(100, 0), Vector2(0, 18), Vector2());
+	const PackedVector2Array even = curve->tessellate_even_length(10, 2.0);
+	REQUIRE(even.size() > 2);
+	CHECK(even[0] == Vector2(0, 0));
+	CHECK(even[even.size() - 1] == Vector2(100, 0));
+	for (int i = 1; i < even.size(); ++i) {
+		CHECK(even[i - 1].x < even[i].x);
+	}
+	curve->set_bake_interval(2.0);
+	const PackedVector2Array baked = curve->get_baked_points();
+	REQUIRE(baked.size() > 2);
+	CHECK(baked[0] == Vector2(0, 0));
+	CHECK(baked[baked.size() - 1] == Vector2(100, 0));
+}
+
 } // namespace TestCurve2D
