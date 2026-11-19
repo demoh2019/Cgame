@@ -47,6 +47,7 @@
 #include "servers/physics_softbody_volume_plasticity.h"
 #include "servers/physics_softbody_volume_safe.h"
 #include "servers/physics_xpbd_distance.h"
+#include "servers/physics_softbody_progressive_damage.h"
 #include "servers/physics_xpbd_tension_hardening.h"
 #include "servers/physics_xpbd_area.h"
 #include "servers/physics_xpbd_dihedral.h"
@@ -2566,6 +2567,11 @@ void GodotSoftBody3D::solve_constraints(real_t p_delta) {
 	const bool use_xpbd = compliance > 0.0 && Math::is_finite(alpha_double) && alpha_double > 0.0;
 	const real_t tension_hardening = get_space() ? get_space()->get_soft_body_xpbd_tension_hardening() : real_t(0.0);
 	const bool use_tension_hardening = use_xpbd && tension_hardening > real_t(0.0);
+	const real_t damage_rate = get_space()->get_soft_body_xpbd_damage_rate();
+	const real_t damage_yield = get_space()->get_soft_body_xpbd_damage_yield_strain();
+	const real_t damage_failure = get_space()->get_soft_body_xpbd_damage_failure_strain();
+	const bool use_damage = use_xpbd && damage_rate > 0.0 && damage_failure > damage_yield && !links.is_empty();
+	const bool use_nonlinear_links = use_tension_hardening || use_damage;
 	// Unilateral strain limits supplement (rather than replace) the elastic
 	// stretch solver. No extra per-link scratch or work with both ratios 0.
 	const real_t strain_max_ratio = get_space() ? get_space()->get_soft_body_xpbd_strain_max_stretch_ratio() : real_t(0.0);
@@ -2633,16 +2639,43 @@ void GodotSoftBody3D::solve_constraints(real_t p_delta) {
 		xpbd_link_lambdas.reset();
 	}
 
-	// Freeze nonlinear compliance for the whole physics step. Recomputing
-	// alpha within iterations while retaining lambda causes oscillation.
-	if (use_tension_hardening) {
+	// Damage persists over physical steps, unlike the per-step XPBD lambda.
+	// Keep exactly one scalar per link. On topology changes, discard stale
+	// damage; after deinitialize, links and damage are both cleared.
+	if (use_damage) {
+		if (xpbd_link_damage.size() != links.size()) {
+			xpbd_link_damage.resize(links.size());
+			for (real_t &damage : xpbd_link_damage) {
+				damage = real_t(0.0);
+			}
+		}
+	} else if (!xpbd_link_damage.is_empty()) {
+		xpbd_link_damage.reset();
+	}
+
+	// Freeze damage-adjusted nonlinear compliance for the whole XPBD step:
+	// lambda iterations must use one constant alpha for convergence.
+	// Reuse the existing tensile-hardening alpha buffer when damage is on.
+	if (use_nonlinear_links) {
 		xpbd_link_hardening_alphas.resize(links.size());
 		const real_t yield_strain = get_space()->get_soft_body_xpbd_tension_yield_strain();
 		for (uint32_t link_index = 0; link_index < links.size(); ++link_index) {
 			const Link &link = links[link_index];
 			real_t link_alpha = alpha;
-			physics_xpbd_tension_hardening_alpha(link.n[0]->x, link.n[1]->x,
-					link.rl, alpha, yield_strain, tension_hardening, link_alpha);
+			if (use_tension_hardening) {
+				physics_xpbd_tension_hardening_alpha(link.n[0]->x, link.n[1]->x,
+						link.rl, alpha, yield_strain, tension_hardening, link_alpha);
+			}
+			if (use_damage && link.c0 > 0.0) {
+				physics_softbody_progressive_tension_damage(link.n[0]->x, link.n[1]->x,
+						link.rl, damage_yield, damage_failure, damage_rate, p_delta,
+						xpbd_link_damage[link_index]);
+				real_t damaged_alpha = link_alpha;
+				if (physics_softbody_progressive_damage_alpha(link_alpha,
+							xpbd_link_damage[link_index], damaged_alpha)) {
+					link_alpha = damaged_alpha;
+				}
+			}
 			xpbd_link_hardening_alphas[link_index] = link_alpha;
 		}
 	} else if (!xpbd_link_hardening_alphas.is_empty()) {
@@ -2741,7 +2774,7 @@ void GodotSoftBody3D::solve_constraints(real_t p_delta) {
 				if (link.c0 > 0.0) {
 					physics_xpbd_solve_distance(link.n[0]->x, link.n[1]->x,
 							link.n[0]->im, link.n[1]->im, link.rl,
-							use_tension_hardening ? xpbd_link_hardening_alphas[link_index] : alpha,
+							use_nonlinear_links ? xpbd_link_hardening_alphas[link_index] : alpha,
 							xpbd_link_lambdas[link_index]);
 				}
 			}
@@ -3049,6 +3082,7 @@ void GodotSoftBody3D::destroy() {
 
 	xpbd_link_lambdas.reset();
 	xpbd_link_hardening_alphas.reset();
+	xpbd_link_damage.reset();
 	xpbd_strain_lambdas.reset();
 	xpbd_area_lambdas.reset();
 	xpbd_shear_rest_cosines.reset();
