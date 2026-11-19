@@ -427,4 +427,45 @@ TEST_CASE("[NodePath] Long stringified paths preserve all codepoints") {
 	CHECK_EQ(String(path.get_as_property_path()), ":" + source.substr(1));
 }
 
+
+TEST_CASE("[NodePath] Relative conversion handles common ancestors and subnames") {
+	struct Case {
+		const char *from;
+		const char *to;
+		const char *expected;
+	};
+	const Case cases[] = {
+		{ "/root/scene", "/root/scene", "." },
+		{ "/root/scene", "/root/scene:position:x", ".:position:x" },
+		{ "/root/scene", "/root/scene/child", "child" },
+		{ "/root/scene/child", "/root/scene", ".." },
+		{ "/root/a/b", "/root/a/c", "../c" },
+		{ "/first/a", "/second/b", "../../second/b" },
+		{ "/", "/", "." },
+		{ "/", "/root", "root" },
+		{ "/root", "/", ".." },
+	};
+	for (const Case &test : cases) {
+		const NodePath from(test.from);
+		const NodePath to(test.to);
+		CHECK_EQ(String(from.rel_path_to(to)), String(test.expected));
+	}
+}
+
+TEST_CASE("[NodePath] Relative conversion avoids growing to deep common prefixes") {
+	String shared = "/root";
+	for (int i = 0; i < 768; i++) {
+		shared += "/section" + itos(i);
+	}
+	const NodePath from(shared + "/current");
+	const NodePath to(shared + "/other:position:x");
+	const NodePath relative = from.rel_path_to(to);
+	CHECK_EQ(relative.get_name_count(), 2);
+	CHECK_EQ(relative.get_name(0), "..");
+	CHECK_EQ(relative.get_name(1), "other");
+	CHECK_EQ(relative.get_subname_count(), 2);
+	CHECK_EQ(String(relative), "../other:position:x");
+	CHECK_EQ(String(to.rel_path_to(from)), "../current");
+}
+
 } // namespace TestNodePath
