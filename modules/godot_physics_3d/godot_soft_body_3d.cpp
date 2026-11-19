@@ -2753,6 +2753,16 @@ void GodotSoftBody3D::apply_hydrodynamic_drag(real_t p_delta) {
 		return;
 	}
 	for (Face &face : faces) {
+		// Most cloth may be entirely outside the fluid: reject dry faces
+		// before building velocities or running submerged polygon clipping.
+		if (face.n[0]->x.y > surface_y && face.n[1]->x.y > surface_y &&
+				face.n[2]->x.y > surface_y) {
+			continue;
+		}
+		if (face.n[0]->im == real_t(0.0) && face.n[1]->im == real_t(0.0) &&
+				face.n[2]->im == real_t(0.0)) {
+			continue;
+		}
 		Vector3 position[3];
 		Vector3 velocity[3];
 		real_t inverse_mass[3];
