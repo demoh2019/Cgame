@@ -229,6 +229,52 @@ class AbsoluteBudgetTests(unittest.TestCase):
         self.assertEqual(stress.check_absolute_limits(suite, 16., None, None), [])
 
 
+class PhaseHotspotTests(unittest.TestCase):
+    @staticmethod
+    def _run(phase_ms, optional_ms=None):
+        detail = {"resize_ms": phase_ms, "blit_ms": 1.0}
+        if optional_ms is not None:
+            detail["optional_ms"] = optional_ms
+        return {
+            "status": "passed", "wall_seconds": 1.0,
+            "cpu_seconds": 0.5, "peak_rss_mib": 128.0,
+            "engine": {"duration_ms": 100.0, "detail": detail},
+        }
+
+    def test_median_phase_filters_missing_and_nonfinite_values(self):
+        rows = [self._run(2.0, 5.0), self._run(9.0),
+                self._run(4.0, float("nan"))]
+        stats = stress.summarize(rows)
+        self.assertEqual(stats["phase_median_ms"]["resize_ms"], 4.0)
+        self.assertEqual(stats["phase_median_ms"]["blit_ms"], 1.0)
+        self.assertNotIn("optional_ms", stats["phase_median_ms"])
+
+    def test_baseline_rejects_individual_phase_regressions(self):
+        config = {"preset": "smoke", "scale": 1, "frames": 12,
+                  "render_mode": "headless", "seed": 12345,
+                  "rss_scope": "process_tree"}
+        baseline = {"configuration": config,
+                    "cases": {"bitmap_pipeline": stress.summarize([self._run(5.0)])}}
+        current = {"configuration": config,
+                   "cases": {"bitmap_pipeline": stress.summarize([self._run(8.0)])}}
+        errors = stress.compare_baseline(current, baseline, 20.0, None)
+        self.assertEqual(len(errors), 1, errors)
+        self.assertIn("resize_ms", errors[0])
+
+    def test_markdown_identifies_slowest_engine_phases(self):
+        report = {
+            "configuration": {"preset": "smoke", "scale": 1,
+                              "render_mode": "headless"},
+            "status": "passed", "failures": [],
+            "cases": {"bitmap_pipeline": stress.summarize([
+                self._run(11.0)])},
+        }
+        output = stress.markdown_hotspots(report)
+        self.assertIn("## In-engine phase metrics", output)
+        self.assertIn("| bitmap_pipeline | resize_ms | 11.000 |", output)
+        self.assertLess(output.index("resize_ms"), output.index("blit_ms"))
+
+
 class ProcessIsolationTests(unittest.TestCase):
     def test_valid_child_output(self):
         payload = json.dumps(result_payload())
