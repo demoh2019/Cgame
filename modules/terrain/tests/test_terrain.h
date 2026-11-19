@@ -752,6 +752,81 @@ TEST_CASE("[Terrain3D][Collision] Invalid height edits leave existing triangle p
 	memdelete(terrain);
 }
 
+
+TEST_CASE("[Terrain3D] Rejects nonfinite packed vertex colors atomically") {
+	HeightmapTerrain3D *terrain = memnew(HeightmapTerrain3D);
+	terrain->set_grid_size(Vector2i(2, 2));
+	const PackedColorArray original = terrain->get_color_data();
+	PackedColorArray colors = original;
+	ERR_PRINT_OFF
+	colors.set(0, Color(INF, 0, 0));
+	terrain->set_color_data(colors);
+	CHECK(terrain->get_color_data() == original);
+	colors.set(0, Color(0, NaN, 0));
+	terrain->set_color_data(colors);
+	CHECK(terrain->get_color_data() == original);
+	colors.set(0, Color(0, 0, -INF));
+	terrain->set_color_data(colors);
+	CHECK(terrain->get_color_data() == original);
+	colors.set(0, Color(0, 0, 0, NaN));
+	terrain->set_color_data(colors);
+	CHECK(terrain->get_color_data() == original);
+	ERR_PRINT_ON
+	memdelete(terrain);
+}
+
+TEST_CASE("[Terrain3D] Rejects nonfinite paint colors without changing samples") {
+	HeightmapTerrain3D *terrain = memnew(HeightmapTerrain3D);
+	const PackedColorArray before = terrain->get_color_data();
+	ERR_PRINT_OFF
+	terrain->paint_color(Vector2(1, 1), 2, Color(INF, 0, 0), 1);
+	terrain->paint_color(Vector2(1, 1), 2, Color(0, NaN, 0), 1);
+	terrain->paint_color(Vector2(1, 1), 2, Color(0, 0, 0, -INF), 1);
+	ERR_PRINT_ON
+	CHECK(terrain->get_color_data() == before);
+	memdelete(terrain);
+}
+
+TEST_CASE("[Terrain3D] Finite HDR vertex colors are preserved without clamping") {
+	HeightmapTerrain3D *terrain = memnew(HeightmapTerrain3D);
+	terrain->set_grid_size(Vector2i(2, 2));
+	PackedColorArray colors = terrain->get_color_data();
+	colors.set(1, Color(2.5, -0.5, 4, 0.4));
+	terrain->set_color_data(colors);
+	CHECK(terrain->get_color_data()[1].is_equal_approx(Color(2.5, -0.5, 4, 0.4)));
+	const Array arrays = terrain->get_mesh()->surface_get_arrays(0);
+	const PackedColorArray mesh_colors = arrays[Mesh::ARRAY_COLOR];
+	CHECK(mesh_colors[1].is_equal_approx(Color(2.5, -0.5, 4, 0.4)));
+	memdelete(terrain);
+}
+
+TEST_CASE("[Terrain3D] Extremely large finite brush coordinates cannot affect nearby terrain") {
+	HeightmapTerrain3D *terrain = memnew(HeightmapTerrain3D);
+	terrain->set_grid_size(Vector2i(3, 3));
+	const PackedFloat32Array original = terrain->get_height_data();
+	terrain->sculpt(Vector2(1e20, 1e20), 2, 5);
+	CHECK(terrain->get_height_data() == original);
+	terrain->sculpt(Vector2(-1e20, -1e20), 2, 5);
+	CHECK(terrain->get_height_data() == original);
+	memdelete(terrain);
+}
+
+TEST_CASE("[Terrain3D] Color validation does not modify previously generated physics triangles") {
+	HeightmapTerrain3D *terrain = memnew(HeightmapTerrain3D);
+	terrain->set_grid_size(Vector2i(2, 2));
+	const Ref<ConcavePolygonShape3D> before = terrain->create_collision_shape();
+	REQUIRE(before.is_valid());
+	PackedColorArray colors = terrain->get_color_data();
+	colors.set(0, Color(NaN, 0, 0));
+	ERR_PRINT_OFF
+	terrain->set_color_data(colors);
+	ERR_PRINT_ON
+	const Ref<ConcavePolygonShape3D> after = terrain->create_collision_shape();
+	REQUIRE(after.is_valid());
+	CHECK(after->get_faces() == before->get_faces());
+	memdelete(terrain);
+}
+
 #endif // PHYSICS_3D_DISABLED
 
 } // namespace TestTerrain3D

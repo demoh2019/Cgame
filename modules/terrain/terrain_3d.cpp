@@ -173,6 +173,10 @@ void HeightmapTerrain3D::set_height_data(const PackedFloat32Array &p_data) {
 
 void HeightmapTerrain3D::set_color_data(const PackedColorArray &p_data) {
 	ERR_FAIL_COND_MSG(p_data.size() != grid_size.x * grid_size.y, "Terrain color data size does not match grid_size.");
+	for (int i = 0; i < p_data.size(); i++) {
+		const Color color = p_data[i];
+		ERR_FAIL_COND_MSG(!Math::is_finite(color.r) || !Math::is_finite(color.g) || !Math::is_finite(color.b) || !Math::is_finite(color.a), "Terrain vertex colors must have finite channels.");
+	}
 	color_data = p_data;
 	_rebuild_mesh();
 }
@@ -207,10 +211,12 @@ real_t HeightmapTerrain3D::sample_height(const Vector2 &p_grid_position) const {
 
 void HeightmapTerrain3D::sculpt(const Vector2 &p_grid_position, real_t p_radius, real_t p_delta) {
 	ERR_FAIL_COND(!Math::is_finite(p_grid_position.x) || !Math::is_finite(p_grid_position.y) || !Math::is_finite(p_radius) || !Math::is_finite(p_delta) || p_radius <= 0.0);
-	const int min_x = MAX(0, (int)Math::floor(p_grid_position.x - p_radius));
-	const int max_x = MIN(grid_size.x - 1, (int)Math::ceil(p_grid_position.x + p_radius));
-	const int min_z = MAX(0, (int)Math::floor(p_grid_position.y - p_radius));
-	const int max_z = MIN(grid_size.y - 1, (int)Math::ceil(p_grid_position.y + p_radius));
+	// Clamp to the grid before converting floating-point brush bounds to int.
+	// Large but finite positions must never overflow an integer conversion.
+	const int min_x = (int)CLAMP(Math::floor(p_grid_position.x - p_radius), 0.0, (real_t)(grid_size.x - 1));
+	const int max_x = (int)CLAMP(Math::ceil(p_grid_position.x + p_radius), 0.0, (real_t)(grid_size.x - 1));
+	const int min_z = (int)CLAMP(Math::floor(p_grid_position.y - p_radius), 0.0, (real_t)(grid_size.y - 1));
+	const int max_z = (int)CLAMP(Math::ceil(p_grid_position.y + p_radius), 0.0, (real_t)(grid_size.y - 1));
 	for (int z = min_z; z <= max_z; z++) {
 		for (int x = min_x; x <= max_x; x++) {
 			real_t distance = Vector2(x, z).distance_to(p_grid_position);
@@ -257,6 +263,7 @@ void HeightmapTerrain3D::smooth(const Vector2 &p_grid_position, real_t p_radius,
 
 void HeightmapTerrain3D::paint_color(const Vector2 &p_grid_position, real_t p_radius, const Color &p_color, real_t p_opacity) {
 	ERR_FAIL_COND(!Math::is_finite(p_grid_position.x) || !Math::is_finite(p_grid_position.y) || !Math::is_finite(p_radius) || !Math::is_finite(p_opacity) || p_radius <= 0.0);
+	ERR_FAIL_COND_MSG(!Math::is_finite(p_color.r) || !Math::is_finite(p_color.g) || !Math::is_finite(p_color.b) || !Math::is_finite(p_color.a), "Terrain paint colors must have finite channels.");
 	const real_t opacity = CLAMP(p_opacity, 0.0, 1.0);
 	for (int z = 0; z < grid_size.y; z++) {
 		for (int x = 0; x < grid_size.x; x++) {
