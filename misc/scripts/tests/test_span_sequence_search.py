@@ -54,7 +54,22 @@ int64_t baseline(const Span<uint8_t>&h,const Span<uint8_t>&n){
   if(std::memcmp(h.ptr()+i,n.ptr(),n.size())==0)return i;
  return -1;
 }
+struct NeverEqual {
+ bool operator!=(const NeverEqual &) const { return true; }
+};
 int main(){
+ // Identity equality only applies to fundamental types and must not hide
+ // custom non-reflexive element comparisons.
+ std::vector<uint8_t> identity(1024,42), copy=identity;
+ const Span<uint8_t> a(identity.data(),identity.size());
+ const Span<uint8_t> b(identity.data(),identity.size());
+ const Span<uint8_t> c(copy.data(),copy.size());
+ if(!(a==b) || !(a==c))return 5;
+ copy[1023]=77;
+ if(a==c || !(a==b))return 6;
+ NeverEqual strange;
+ const Span<NeverEqual> non_reflexive(&strange,1);
+ if(non_reflexive==non_reflexive)return 7;
  std::mt19937 rng(912371);
  for(int trial=0;trial<2400;++trial){
   std::vector<uint8_t> h(rng()%160),n(rng()%45);
