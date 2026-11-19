@@ -37,6 +37,7 @@
 #include "servers/physics_contact_angular_friction.h"
 #include "servers/physics_manifold_reduction_3d.h"
 #include "servers/physics_ccd_sphere_toi.h"
+#include "servers/physics_ccd_rotating_capsule_toi.h"
 #include "servers/physics_speculative_sphere_contact.h"
 #include "servers/physics_ccd_capsule_toi.h"
 #include "servers/physics_ccd_capsule_pair_toi.h"
@@ -244,6 +245,33 @@ bool GodotBodyPair3D::_test_ccd(real_t p_step, GodotBody3D *p_A, int p_shape_A, 
 	const Vector3 velocity_A = p_A->get_linear_velocity();
 	const Vector3 motion_A = velocity_A * p_step;
 	if (motion_A.length_squared() == 0.0) {
+		// Nonlinear CCD for a capsule rotating around its center of mass
+		// against a static sphere. Rotational CCD broadphase bounds must
+		// already have generated this pair; other shapes keep old behavior.
+		if (space->is_ccd_rotational_bounds_enabled() &&
+				p_A->get_angular_velocity() != Vector3() &&
+				p_B->get_mode() == PS3DE::BODY_MODE_STATIC &&
+				shape_A_ptr->get_type() == PS3DE::SHAPE_CAPSULE &&
+				shape_B_ptr->get_type() == PS3DE::SHAPE_SPHERE) {
+			const double scale_A = physics_ccd_uniform_sphere_scale(p_xform_A);
+			const double scale_B = physics_ccd_uniform_sphere_scale(p_xform_B);
+			if (scale_A > 0.0 && scale_B > 0.0) {
+				const GodotCapsuleShape3D *capsule = static_cast<GodotCapsuleShape3D *>(shape_A_ptr);
+				const GodotSphereShape3D *sphere = static_cast<GodotSphereShape3D *>(shape_B_ptr);
+				const double half_segment = double(capsule->get_height()) * 0.5 - double(capsule->get_radius());
+				const double radius = double(capsule->get_radius()) * scale_A + double(sphere->get_radius()) * scale_B;
+				double impact_fraction = 0.0;
+				const PhysicsCCDRotatingCapsuleTOIResult result = physics_ccd_rotating_capsule_toi(
+						p_xform_A.origin, p_xform_A.basis.get_column(1),
+						p_A->get_center_of_mass(), p_xform_B.origin,
+						p_A->get_angular_velocity(), p_step, half_segment * scale_A, radius, impact_fraction);
+				if (result == PhysicsCCDRotatingCapsuleTOIResult::HIT) {
+					const real_t fraction = CLAMP(real_t(impact_fraction) + real_t(0.005), real_t(0.0), real_t(1.0));
+					p_A->set_angular_velocity(p_A->get_angular_velocity() * fraction);
+					return true;
+				}
+			}
+		}
 		return false;
 	}
 
