@@ -6,6 +6,7 @@ extends RefCounted
 const Defs = preload("res://scripts/shared/defs.gd")
 const WorldGen = preload("res://scripts/shared/world_gen.gd")
 const Inventory = preload("res://scripts/shared/inventory.gd")
+const Vendor = preload("res://scripts/shared/vendor.gd")
 const SaveValidation = preload("res://scripts/shared/save_validation.gd")
 const Crafting = preload("res://scripts/shared/crafting.gd")
 const Survival = preload("res://scripts/shared/survival.gd")
@@ -276,6 +277,23 @@ func cmd_craft(peer_id: int, recipe_id: String, times: int = 1) -> Dictionary:
 		player.dirty_character = true
 		return {"ok": true}
 	return {"ok": false, "reason": ["ok", "unknown_recipe", "missing_inputs", "no_station", "no_space"][status]}
+
+
+## The safe-hub vendor never trusts client balance, price or proximity.
+## A successful purchase or sale changes the same inventory that is saved
+## to Nakama and synchronized to the client.
+func cmd_vendor(peer_id: int, item_id: String, quantity: int, buy: bool) -> Dictionary:
+	var player: Player = players.get(peer_id)
+	if player == null or not _alive(player):
+		return {"ok": false, "reason": "dead"}
+	var location := Vector2(player.position.x, player.position.z)
+	if not location.is_finite() or location.distance_to(WORKBENCH_POSITION) > WORKBENCH_RANGE:
+		return {"ok": false, "reason": "no_station"}
+	var outcome: Dictionary = Vendor.transact(player.inventory, item_id, quantity, buy)
+	if outcome.get("ok", false):
+		player.dirty_inventory = true
+		player.dirty_character = true
+	return outcome
 
 
 ## Authoritative hub bank: move a bounded item stack only when the actual
