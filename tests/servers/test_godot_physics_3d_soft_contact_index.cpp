@@ -117,6 +117,34 @@ TEST_CASE("[GodotPhysics3D] Soft-contact index releases memory below sparse thre
 	}
 }
 
+TEST_CASE("[GodotPhysics3D] Soft-contact index remains correct through varied swap removals") {
+	GodotSoftContactIndex3D lookup;
+	LocalVector<Contact> contacts;
+	for (int i = 0; i < 256; ++i) {
+		contacts.push_back(Contact{ i * 211 + 17 });
+	}
+	lookup.maybe_build(contacts);
+	CHECK(lookup.is_active());
+
+	for (int step = 0; step < 241; ++step) {
+		const uint32_t erased_at = uint32_t((step * 37 + 13) % int(contacts.size()));
+		const int removed_node = contacts[erased_at].index_B;
+		const int moved_node = contacts[contacts.size() - 1].index_B;
+		SWAP(contacts[erased_at], contacts[contacts.size() - 1]);
+		contacts.resize(contacts.size() - 1);
+		lookup.swap_removed(removed_node, moved_node, erased_at, contacts.size());
+
+		CHECK(lookup.find(removed_node) == -1);
+		for (uint32_t i = 0; i < contacts.size(); ++i) {
+			// The helper releases its map when under 16 contacts.
+			if (lookup.is_active()) {
+				CHECK(lookup.find(contacts[i].index_B) == int(i));
+			}
+		}
+	}
+	CHECK_FALSE(lookup.is_active());
+}
+
 } // namespace TestGodotPhysics3DSoftContactIndex
 
 #endif // MODULE_GODOT_PHYSICS_3D_ENABLED
