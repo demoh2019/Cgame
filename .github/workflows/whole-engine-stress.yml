@@ -82,6 +82,7 @@ jobs:
         run: |
           set -euo pipefail
           ./bin/godot.linuxbsd.editor.dev.x86_64 --headless --path tests/stress --script res://stress.gd --check-only
+          ./bin/godot.linuxbsd.editor.dev.x86_64 --headless --path tests/stress --script res://memory_soak.gd --check-only
       - name: Run the complete native C++ test suite
         shell: bash
         run: |
@@ -128,6 +129,16 @@ jobs:
           else
             python3 tests/stress/scale_sweep.py --godot "$BIN" --render-mode headless --case all --scales 1,2,4 --frames 30 --repeats 2 --output whole-engine-scale-sweep.json --summary-md whole-engine-scale-sweep.md
           fi
+      - name: Run in-process memory retention smoke
+        if: success() || failure()
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 tests/stress/memory_soak.py \
+            --godot ./bin/godot.linuxbsd.editor.dev.x86_64 \
+            --cycles 50 --batch 60 --repeats 1 \
+            --timeout 180 --rss-limit-mib 2048 \
+            --output whole-engine-memory-soak.json
       - name: Archive per-scenario performance and failure reports
         if: always()
         uses: actions/upload-artifact@v4
@@ -139,6 +150,7 @@ jobs:
             whole-engine-bottlenecks.md
             whole-engine-native-tests.log
             whole-engine-import.json
+            whole-engine-memory-soak.json
             whole-engine-scale-sweep.json
             whole-engine-scale-sweep.md
           if-no-files-found: warn
