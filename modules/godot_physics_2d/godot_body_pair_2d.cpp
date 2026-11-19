@@ -772,8 +772,18 @@ bool GodotBodyPair2D::pre_solve(real_t p_step) {
 		Vector2 axis = global_A - global_B;
 		real_t depth = axis.dot(c.normal);
 
-		if (depth <= 0.0) {
+		const bool speculative = depth < 0.0 && !report_contacts_only &&
+				space->get_speculative_sphere_distance() >= -depth;
+		if (depth <= 0.0 && !speculative) {
 			continue;
+		}
+		if (speculative) {
+			// Neither cached impulses nor penetration recovery may act before
+			// the surfaces touch. Only the approaching normal velocity is limited.
+			c.acc_normal_impulse = 0.0;
+			c.acc_tangent_impulse = 0.0;
+			c.acc_bias_impulse = 0.0;
+			c.acc_bias_impulse_center_of_mass = 0.0;
 		}
 
 #ifdef DEBUG_ENABLED
@@ -796,7 +806,7 @@ bool GodotBodyPair2D::pre_solve(real_t p_step) {
 		}
 
 		Vector2 P = c.acc_normal_impulse * c.normal;
-		if (has_friction) {
+		if (has_friction && !speculative) {
 			// Friction can change between frames. Restrict the cached total
 			// tangent impulse to the *current* Coulomb cone before applying it.
 			const real_t cached_tangent_limit = mixed_friction * space->get_static_friction_multiplier() * c.acc_normal_impulse;
@@ -821,13 +831,14 @@ bool GodotBodyPair2D::pre_solve(real_t p_step) {
 		if (!report_contacts_only) {
 			// Cap deep-overlap recovery so embedded bodies cannot be violently
 			// pushed out in a single tick (Box2D-style contact tuning).
-			c.bias = space->limit_contact_bias(-bias * inv_dt * MIN(0.0f, -depth + max_penetration));
+			c.bias = speculative ? real_t(0.0) :
+					space->limit_contact_bias(-bias * inv_dt * MIN(0.0f, -depth + max_penetration));
 		}
 		c.depth = depth;
 
 		c.acc_impulse -= P;
 
-		if (A->can_report_contacts() || B->can_report_contacts()) {
+		if (!speculative && (A->can_report_contacts() || B->can_report_contacts())) {
 			Vector2 crB = Vector2(-B->get_angular_velocity() * c.rB.y, B->get_angular_velocity() * c.rB.x) + B->get_linear_velocity();
 			Vector2 crA = Vector2(-A->get_angular_velocity() * c.rA.y, A->get_angular_velocity() * c.rA.x) + A->get_linear_velocity();
 			if (A->can_report_contacts()) {
@@ -844,7 +855,7 @@ bool GodotBodyPair2D::pre_solve(real_t p_step) {
 		}
 
 #ifdef ACCUMULATE_IMPULSES
-		{
+		if (P != Vector2()) {
 			// Apply normal + friction impulse
 			if (collide_A) {
 				A->apply_impulse(-P, c.rA + A->get_center_of_mass());
@@ -855,8 +866,10 @@ bool GodotBodyPair2D::pre_solve(real_t p_step) {
 		}
 #endif
 
-		c.bounce = mixed_restitution;
-		if (c.bounce) {
+		// c.bounce is the allowable approach speed for speculative contacts.
+		// For real contacts it retains its normal restitution meaning.
+		c.bounce = speculative ? -depth * inv_dt : mixed_restitution;
+		if (!speculative && c.bounce) {
 			Vector2 crA(-A->get_prev_angular_velocity() * c.rA.y, A->get_prev_angular_velocity() * c.rA.x);
 			Vector2 crB(-B->get_prev_angular_velocity() * c.rB.y, B->get_prev_angular_velocity() * c.rB.x);
 			Vector2 dv = B->get_prev_linear_velocity() + crB - A->get_prev_linear_velocity() - crA;
@@ -875,6 +888,7 @@ bool GodotBodyPair2D::pre_solve(real_t p_step) {
 	// Contact anchors and mass properties are fixed throughout the solve.
 	if (do_process && space->is_block_solver_enabled() && contact_count == 2 &&
 			contacts[0].active && contacts[1].active &&
+			contacts[0].depth > 0.0 && contacts[1].depth > 0.0 &&
 			contacts[0].normal.dot(contacts[1].normal) > real_t(0.9999)) {
 		const Contact &c0 = contacts[0];
 		const Contact &c1 = contacts[1];
@@ -1048,6 +1062,7 @@ void GodotBodyPair2D::solve(real_t p_step) {
 		real_t vn = dv.dot(c.normal);
 		real_t vbn = dbv.dot(c.normal);
 
+		if (c.depth > 0.0) {
 		const real_t jbn = (c.bias - vbn) * c.mass_normal;
 		const real_t jbnOld = c.acc_bias_impulse;
 		c.acc_bias_impulse = MAX(jbnOld + jbn, 0.0f);
@@ -1087,6 +1102,7 @@ void GodotBodyPair2D::solve(real_t p_step) {
 			}
 		}
 
+		}
 		Vector2 j;
 		if (block_solved) {
 			// Normal impulses were applied together above; solve friction
@@ -1098,7 +1114,7 @@ void GodotBodyPair2D::solve(real_t p_step) {
 			c.acc_normal_impulse = MAX(old_normal + jn, 0.0f);
 			j = c.normal * (c.acc_normal_impulse - old_normal);
 		}
-		if (friction > 0.0) {
+		if (friction > 0.0 && c.depth > 0.0) {
 			const Vector2 tangent = c.normal.orthogonal();
 			const real_t vt = dv.dot(tangent);
 			const real_t jt_max = friction * c.acc_normal_impulse;
