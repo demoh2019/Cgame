@@ -1207,6 +1207,7 @@ GodotSpace2D::GodotSpace2D() {
 	manifold_spread_reduction = GLOBAL_GET("physics/2d/solver/manifold_spread_reduction");
 	contact_recycle_radius = GLOBAL_GET("physics/2d/solver/contact_recycle_radius");
 	contact_max_separation = GLOBAL_GET("physics/2d/solver/contact_max_separation");
+	speculative_sphere_distance = MAX(real_t(0.0), (real_t)GLOBAL_GET("physics/2d/solver/speculative_sphere_distance"));
 	contact_max_allowed_penetration = GLOBAL_GET("physics/2d/solver/contact_max_allowed_penetration");
 	contact_bias = GLOBAL_GET("physics/2d/solver/default_contact_bias");
 	// Cache the per-space push speed limit; no project-setting lookup on contacts.
