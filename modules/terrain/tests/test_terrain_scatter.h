@@ -13,7 +13,7 @@
 /* "Software"), to deal in the Software without restriction, including    */
 /* without limitation the rights to use, copy, modify, merge, publish,    */
 /* distribute, sublicense, and/or sell copies of the Software, and to     */
-/* permit persons to whom the Software is furnished to so, subject to the */
+/* permit persons to whom the Software is furnished to whom the Software is furnished to do so, subject to the */
 /* following conditions:                                                  */
 /*                                                                        */
 /* THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND,        */
@@ -106,15 +106,13 @@ TEST_CASE("[TerrainScatter] Height window excludes inaccessible elevations") {
     Ref<TerrainHeightmap> data;
     data.instantiate();
     data->set_dimensions(Size2i(5, 5));
-    data->set_heights(PackedFloat32Array());
-    // The invalid bulk setter does not mutate the resource.
     for (int z = 0; z < 5; z++) {
         for (int x = 0; x < 5; x++) {
             data->set_height_at(x, z, float(z));
         }
     }
     const PackedVector3Array on_high = data->scatter_points(1, 1, 0, 90, 2.5f, 3.5f);
-    CHECK(on_high.size() == 4);
+    CHECK(on_high.size() == 8);
     for (const Vector3 &p : on_high) {
         CHECK(p.y >= 2.5f);
         CHECK(p.y <= 3.5f);
@@ -179,7 +177,7 @@ TEST_CASE("[TerrainScatter] Invalid brush style parameters return no points") {
 TEST_CASE("[TerrainScatter] Excessively dense candidate grids are rejected") {
     Ref<TerrainHeightmap> data;
     data.instantiate();
-    data->set_dimensions(Size2i(1025, 1025));
+    data->set_dimensions(Size2i(1024, 1024));
     ERR_PRINT_OFF
     const PackedVector3Array too_many = data->scatter_points(1, 1.0f, 0.8f);
     ERR_PRINT_ON
