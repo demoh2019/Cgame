@@ -23,7 +23,7 @@ func _check_both_labs() -> void:
     ]
     var successful := true
     for check in checks:
-        var packed: PackedScene = load(check["scene"])
+        var packed := load(check["scene"]) as PackedScene
         if packed == null:
             push_error("Failed to load " + check["scene"])
             successful = false
