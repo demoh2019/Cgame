@@ -2386,6 +2386,45 @@ TEST_CASE("[String] Path functions") {
 	CHECK(String("res://../../texture.png") == String("res://../../texture.png").simplify_path());
 }
 
+TEST_CASE("[String] Path extraction single-pass regressions") {
+	struct PathCase {
+		const char *path;
+		const char *base_dir;
+		const char *file;
+		const char *extension;
+	};
+
+	static const PathCase cases[] = {
+		{ "", "", "", "" },
+		{ "file", "", "file", "" },
+		{ "file.tar.gz", "", "file.tar.gz", "gz" },
+		{ "file.", "", "file.", "" },
+		{ ".hidden", "", ".hidden", "hidden" },
+		{ "folder/file.ext", "folder", "file.ext", "ext" },
+		{ "folder/", "folder", "", "" },
+		{ "folder\\sub/file.ext", "folder\\sub", "file.ext", "ext" },
+		{ "file.txt/folder", "file.txt", "folder", "" },
+		{ "/file", "/", "file", "" },
+		{ "/", "/", "", "" },
+		{ "res://", "res://", "", "" },
+		{ "res://file", "res://", "file", "" },
+		{ "res://folder/sub/", "res://folder/sub", "", "" },
+		{ "user://addons\\script.gd", "user://addons", "script.gd", "gd" },
+		{ "C:\\file", "C:\\", "file", "" },
+		{ "C:\\folder\\file.txt", "C:\\folder", "file.txt", "txt" },
+		{ "//server/share/file.txt", "//server/share/", "file.txt", "txt" },
+		{ "//server/share/dir/file.txt", "//server/share/dir", "file.txt", "txt" },
+		{ "\\\\server\\share\\file.txt", "\\\\server\\share\\", "file.txt", "txt" },
+	};
+
+	for (const PathCase &test : cases) {
+		const String path(test.path);
+		CHECK(path.get_base_dir() == test.base_dir);
+		CHECK(path.get_file() == test.file);
+		CHECK(path.get_extension() == test.extension);
+	}
+}
+
 TEST_CASE("[String] hash") {
 	String a = "Test";
 	String b = "Test";
