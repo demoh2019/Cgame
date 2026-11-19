@@ -1,8 +1,9 @@
-# SoftBody3D: optional XPBD vertex/face self-contact friction
+# SoftBody3D: optional XPBD vertex/face and edge/edge self-contact friction
 
 Cgame's built-in GodotPhysics3D now offers a separate dimensionless
-**tangential friction coefficient** for XPBD self-contacts. This extends
-the existing optional vertex/face collision thickness and compliance;
+**tangential friction coefficient** for XPBD self-contacts, including
+optional structural edge/edge contacts. This extends
+the existing optional collision thickness and compliance;
 it does not replace the normal contact solver.
 
 ## Settings
@@ -11,7 +12,8 @@ it does not replace the normal contact solver.
 | --- | ---: | --- |
 | `physics/3d/solver/soft_body_self_collision_thickness` | 0 | Enable discrete vertex/face self contacts |
 | `physics/3d/solver/soft_body_self_collision_compliance` | 0.000001 | Normal XPBD softness |
-| `physics/3d/solver/soft_body_self_collision_friction` | **0** | Coulomb-like friction coefficient; 0 disables extra work |
+| `physics/3d/solver/soft_body_self_collision_friction` | **0** | Coulomb-like friction coefficient for active self-contact modes; 0 disables extra work |
+| `physics/3d/solver/soft_body_self_collision_edge_edge` | **false** | Also generate structural edge/edge self-contacts, including friction when enabled |
 
 Example experiment for cloth with folds: thickness `0.01` m,
 compliance `0.000001`, friction `0.5`. Recreate a physics space
@@ -48,32 +50,47 @@ free preserve linear momentum under the barycentric approximation; a pin
 transfers reaction to its external attachment. The contact separation
 remains unchanged to first order because the correction is tangential.
 
-The tangential pass runs **after** the existing self-collision XPBD normal
-iterations and **before** SoftBody3D reconstructs velocity from positions.
+For **structural edge/edge** contacts, the same friction coefficient applies
+after the edge/edge normal XPBD iterations. The four endpoint corrections use
+two segment interpolation weights `(1-s, s)` and `(1-t, t)`, with opposite
+signs for the second edge. Their weighted inverse mass is
+`W = wa²*inv_a + wb²*inv_b + wc²*inv_c + wd²*inv_d`.
+The contact's accumulated nonnegative normal XPBD lambda supplies the same
+bounded Coulomb impulse budget. Pinned endpoints remain unchanged and all
+proposed positions are validated before the four-way update.
+
+The tangential passes run **after** their respective self-collision XPBD
+normal iterations and **before** SoftBody3D reconstructs velocity from positions.
 Applying friction directly to `node.v` at this point would be overwritten
 by the velocity reconstruction.
 
 ## Performance and limitations
 
 No additional broadphase, candidate query, persistent buffer or per-contact
-heap allocation is introduced. With friction set to zero, the existing
-normal collision path skips the extra traversal entirely. When enabled,
-the additional work is O(number of already-gathered contacts), still
-bounded by the existing 65,536 contact-pair budget.
+heap allocation is introduced by friction. Edge contacts themselves remain
+separately opt-in and use their existing structural-edge BVH. With friction
+set to zero, both normal collision paths skip tangential traversal entirely.
+When enabled, extra work is O(number of already-gathered contacts), still
+bounded by the existing 65,536 contact-pair budget per contact mode.
 
-This extends discrete vertex/face contacts only: it does **not** add swept
-continuous self-collision, edge/edge contact friction, collisions between
-different soft bodies, or robust behavior for deeply interpenetrating cloth
-and degenerate triangles. Multiple contact order can influence the result.
+This extends discrete vertex/face and opt-in interior structural edge/edge
+contacts only. It does **not** add swept edge/edge CCD, full continuous
+self-collision, contacts between different soft bodies, persistent static
+friction, or robust behavior for deeply interpenetrating cloth and
+parallel/degenerate edges. Existing optional swept vertex/face detection is
+separate. Multiple contact order can influence the result.
 
 ## Verification
 
 ```bash
 python3 -m unittest discover -s tests/stress -p test_physics_xpbd_self_friction.py -v
+python3 -m unittest discover -s tests/stress -p test_physics_xpbd_edge_friction.py -v
 
 # With a native tests=yes Cgame build:
 ./bin/godot.linuxbsd.editor.dev.x86_64 --headless --test \
   --test-case="[PhysicsSelfFriction]"
+./bin/godot.linuxbsd.editor.dev.x86_64 --headless --test \\
+  --test-case="[PhysicsEdgeFriction]"
 ```
 
 For runtime evaluation, simulate folded cloth with moving/pinned faces
