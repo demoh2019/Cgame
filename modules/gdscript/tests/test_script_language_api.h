@@ -52,4 +52,24 @@ TEST_CASE("[GDScript] Script exposes its owning language directly") {
 	CHECK_EQ(second->get_language(), language);
 }
 
+TEST_CASE("[GDScript] Script language remains available with valid and malformed source") {
+	Ref<GDScript> script;
+	script.instantiate();
+	REQUIRE(script.is_valid());
+
+	ScriptLanguage *language = script->get_language();
+	REQUIRE(language != nullptr);
+
+	// The editor must be able to identify a script's language even while
+	// its source is incomplete or contains an error.
+	script->set_source_code("extends Node\n");
+	CHECK_EQ(script->get_language(), language);
+
+	script->set_source_code("extends ???\n");
+	CHECK_EQ(script->get_language(), language);
+
+	script->set_source_code("");
+	CHECK_EQ(script->get_language(), language);
+}
+
 } // namespace GDScriptTests
