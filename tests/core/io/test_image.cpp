@@ -1050,4 +1050,52 @@ TEST_CASE("[Image][Performance] Roughness mipmaps process nonuniform normals by 
 	}
 }
 
+
+TEST_CASE("[Image][Performance] Self-blit overlapping rectangles preserve source snapshot") {
+	struct Case {
+		Rect2i source;
+		Point2i dest;
+	};
+	const Case cases[] = {
+		{ Rect2i(0, 0, 8, 8), Point2i(0, 0) },
+		{ Rect2i(0, 0, 7, 8), Point2i(1, 0) },
+		{ Rect2i(1, 0, 7, 8), Point2i(0, 0) },
+		{ Rect2i(0, 0, 8, 7), Point2i(0, 1) },
+		{ Rect2i(0, 1, 8, 7), Point2i(0, 0) },
+		{ Rect2i(1, 1, 6, 6), Point2i(2, 2) },
+		{ Rect2i(2, 2, 6, 6), Point2i(1, 1) },
+		{ Rect2i(0, 0, 12, 12), Point2i(-2, -2) },
+	};
+
+	for (Image::Format format : { Image::FORMAT_RGBA8, Image::FORMAT_RGBAF, Image::FORMAT_L8 }) {
+		for (const Case &test_case : cases) {
+			Ref<Image> actual = Image::create_empty(8, 8, false, format);
+			REQUIRE(actual.is_valid());
+			for (int y = 0; y < 8; y++) {
+				for (int x = 0; x < 8; x++) {
+					actual->set_pixel(x, y, Color((x + 1) / 10.0f, (y + 1) / 10.0f,
+							(x + y + 1) / 20.0f, (x + 2 * y + 1) / 25.0f));
+				}
+			}
+
+			// A distinct cloned source provides snapshot semantics, even if
+			// its bytes initially share an allocation through copy-on-write.
+			Ref<Image> original = actual->duplicate();
+			Ref<Image> expected = actual->duplicate();
+			REQUIRE(original.is_valid());
+			REQUIRE(expected.is_valid());
+
+			const uint8_t *const pointer_before = actual->get_data().ptr();
+			actual->blit_rect(actual, test_case.source, test_case.dest);
+			expected->blit_rect(original, test_case.source, test_case.dest);
+			CHECK(actual->get_data() == expected->get_data());
+			if (test_case.source.position == test_case.dest &&
+					test_case.source.size == Size2i(8, 8)) {
+				// No-op self-copies must not trigger a COW allocation.
+				CHECK(actual->get_data().ptr() == pointer_before);
+			}
+		}
+	}
+}
+
 } // namespace TestImage
