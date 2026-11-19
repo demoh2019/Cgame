@@ -99,6 +99,49 @@ TEST_CASE("[HashSet] Colliding keys survive wraparound and repeated erases") {
 	}
 }
 
+TEST_CASE("[HashSet] Growing a cleared set reuses empty hash storage") {
+	HashSet<int, CountingHasher> set;
+	for (int i = 0; i < 64; i++) {
+		set.insert(i);
+	}
+	set.clear();
+	CHECK(set.is_empty());
+	const uint32_t previous_capacity = set.get_capacity();
+	CountingHasher::calls = 0;
+	set.reserve(8192);
+	CHECK(set.get_capacity() > previous_capacity);
+	CHECK(CountingHasher::calls == 0);
+	set.reserve(32768);
+	CHECK(set.get_capacity() >= 32768);
+	CHECK(set.is_empty());
+
+	// A growth after clear must initialize all newly available hash
+	// slots, even when the allocator returns uninitialized memory.
+	for (int i = 0; i < 512; i++) {
+		set.insert(i * 17 + 1000);
+	}
+	CHECK(set.size() == 512);
+	for (int i = 0; i < 512; i++) {
+		CHECK(set.has(i * 17 + 1000));
+	}
+	for (int i = 0; i < 512; i += 2) {
+		CHECK(set.erase(i * 17 + 1000));
+	}
+	CHECK(set.size() == 256);
+	set.clear();
+	CHECK(set.is_empty());
+	set.reserve(65536);
+	for (int i = 0; i < 512; i++) {
+		CHECK_FALSE(set.has(i * 17 + 1000));
+	}
+	for (int i = 0; i < 128; i++) {
+		set.insert(i + 200000);
+	}
+	for (int i = 0; i < 128; i++) {
+		CHECK(set.has(i + 200000));
+	}
+}
+
 TEST_CASE("[HashSet] Sparse clear reuses reserved table without stale keys") {
 	HashSet<int> set;
 	set.reserve(49157);
