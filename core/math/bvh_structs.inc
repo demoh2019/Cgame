@@ -45,6 +45,10 @@ struct ItemExtra {
 	// are active so that we can slowly iterate through it over many frames for
 	// slow optimize.
 	uint32_t active_ref_id;
+
+	// Index in BVH_Manager::changed_items while last_updated_tick is current.
+	// Occupies existing tail padding on 64-bit targets.
+	uint32_t changed_item_index;
 };
 
 // tree leaf

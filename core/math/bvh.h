@@ -738,7 +738,8 @@ private:
 		// mark as on list
 		last_updated_tick = _tick;
 
-		// add to the list
+		// Remember the queue position so erasing an item doesn't scan all moved bodies.
+		tree._extra[p_handle.id()].changed_item_index = changed_items.size();
 		changed_items.push_back(p_handle);
 	}
 
@@ -750,21 +751,22 @@ private:
 		// callbacks
 		_remove_pairs_containing(p_handle);
 
-		// remove from changed items (not very efficient yet)
-		for (int n = 0; n < (int)changed_items.size(); n++) {
-			if (changed_items[n] == p_handle) {
-				changed_items.remove_at_unordered(n);
+		// Unordered removal is O(1): update the moved entry's index.
+		typename BVHTREE_CLASS::ItemExtra &extra = tree._extra[p_handle.id()];
+		if (extra.last_updated_tick == _tick) {
+			const uint32_t index = extra.changed_item_index;
+			DEV_ASSERT(index < changed_items.size());
+			DEV_ASSERT(changed_items[index] == p_handle);
 
-				// because we are using an unordered remove,
-				// the last changed item will now be at spot 'n',
-				// and we need to redo it, so we prevent moving on to
-				// the next n at the next for iteration.
-				n--;
+			const BVHHandle last_handle = changed_items[changed_items.size() - 1];
+			changed_items.remove_at_unordered(index);
+			if (last_handle != p_handle) {
+				tree._extra[last_handle.id()].changed_item_index = index;
 			}
 		}
 
-		// reset the last updated tick (may not be necessary but just in case)
-		tree._extra[p_handle.id()].last_updated_tick = 0;
+		// A freed ref ID may be reused before the next update.
+		extra.last_updated_tick = 0;
 	}
 
 	PairCallback pair_callback = nullptr;
