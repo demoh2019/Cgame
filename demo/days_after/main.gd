@@ -7,10 +7,13 @@ const PLAYER_SCRIPT = preload("res://player.gd")
 const PICKUP_SCRIPT = preload("res://pickup.gd")
 const RESOURCE_SCRIPT = preload("res://resource_node.gd")
 const ZOMBIE_SCRIPT = preload("res://zombie.gd")
+const CONTRACT_BOARD_SCRIPT = preload("res://contract_board.gd")
+const CONTRACT_RULES = preload("res://contract_rules.gd")
 
 var player
 var hud_label: Label
 var prompt_label: Label
+var contract_board: Area3D
 var infected_kills: int = 0
 var infected_total: int = 0
 
@@ -21,6 +24,7 @@ func _ready() -> void:
     _build_player()
     _build_pickups()
     _build_resources()
+    _build_contract_board()
     _build_enemies()
     _build_hud()
 
@@ -189,6 +193,13 @@ func _add_resource(node_name: String, kind: String, tier: int,
     add_child(resource)
 
 
+func _build_contract_board() -> void:
+    contract_board = CONTRACT_BOARD_SCRIPT.new()
+    contract_board.name = "CampContracts"
+    contract_board.position = Vector3(-1.5, 1.0, 5.0)
+    add_child(contract_board)
+
+
 func _build_enemies() -> void:
     _spawn_infected("InfectedWalker", Vector3(9.0, 1.05, 7.0))
     _spawn_infected("InfectedScavenger", Vector3(-10.0, 1.05, 8.0))
@@ -233,6 +244,8 @@ func _on_player_attacked(damage: float, range_meters: float) -> void:
 func _on_infected_eliminated() -> void:
     infected_kills += 1
     player.gain_combat_xp(25)
+    if is_instance_valid(contract_board):
+        contract_board.record_infected_kill(player)
     player.last_message = "Заражённый уничтожен! Опыт боя +25."
 
 
@@ -259,7 +272,7 @@ func _build_hud() -> void:
     help_label.text = "WASD движение | Shift бег | Space прыжок | F удар\n" + \
         "E сбор | 1 еда | 2 вода | 3 бинт | 4 инструмент | 5 лечение\n" + \
         "6 улучшенный бинт | 7 лечение | 8 копьё | 9 броня\n" + \
-        "Esc мышь | ЛКМ захват мыши | R перезапуск"
+        "E у доски: принять / сдать контракт | Esc мышь | ЛКМ захват мыши | R перезапуск"
     column.add_child(help_label)
 
     prompt_label = Label.new()
@@ -276,6 +289,18 @@ func _build_hud() -> void:
 func _process(_delta: float) -> void:
     if player == null or hud_label == null:
         return
+    var state: Dictionary = player.contract_state
+    var active: String = str(state.get("active", ""))
+    var contract_label := "Посетите доску заказов возле лагеря."
+    if not active.is_empty() and CONTRACT_RULES.CONTRACTS.has(active):
+        var details: Dictionary = CONTRACT_RULES.CONTRACTS[active]
+        contract_label = str(details["title"])
+        if int(details["kills"]) > 0:
+            contract_label += " (%d/%d заражённых)" % [
+                int(state["progress"]), int(details["kills"])
+            ]
+    elif (state.get("completed", []) as Array).size() >= CONTRACT_RULES.ORDER.size():
+        contract_label = "Все контракты выполнены."
     hud_label.text = (
         "DAYS AFTER  ×  SANDBOX SURVIVAL\n" +
         "Здоровье %d | Голод %d | Жажда %d\n" % [
@@ -304,6 +329,7 @@ func _process(_delta: float) -> void:
         "Заражённые: %d/%d | Боевой опыт %d\n" % [
             infected_kills, infected_total, player.combat_xp
         ] +
+        "Контракт: %s\n" % [contract_label] +
         player.last_message
     )
     if player.health <= 0.0:
