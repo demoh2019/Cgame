@@ -70,6 +70,25 @@ static _FORCE_INLINE_ char32_t lower_case(char32_t p_char) {
 // Case-insensitive version of are_spans_equal
 template <typename T1, typename T2>
 static bool strings_equal_lower(const T1 *p_lhs_begin, const T2 *p_rhs_begin, size_t p_len) {
+	// For long common prefixes, a different final character otherwise makes
+	// findn/rfindn/countn compare the entire candidate before rejecting it.
+	// Only probe the tail after two exact prefix matches, so typical misses
+	// continue through the original short-circuiting loop unchanged.
+	if (p_len >= 32 &&
+			static_cast<uint32_t>(p_lhs_begin[0]) == static_cast<uint32_t>(p_rhs_begin[0]) &&
+			static_cast<uint32_t>(p_lhs_begin[1]) == static_cast<uint32_t>(p_rhs_begin[1])) {
+		const auto lhs = p_lhs_begin[p_len - 1];
+		const auto rhs = p_rhs_begin[p_len - 1];
+		if (static_cast<uint32_t>(lhs) != static_cast<uint32_t>(rhs)) {
+			if (static_cast<uint32_t>(lhs) < 128 && static_cast<uint32_t>(rhs) < 128) {
+				if (lower_case(lhs) != lower_case(rhs)) {
+					return false;
+				}
+			} else if (_find_lower(lhs) != _find_lower(rhs)) {
+				return false;
+			}
+		}
+	}
 	for (size_t i = 0; i < p_len; ++i) {
 		const auto lhs = p_lhs_begin[i];
 		const auto rhs = p_rhs_begin[i];

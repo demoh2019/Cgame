@@ -4066,4 +4066,46 @@ TEST_CASE("[String] simplify_path linear parser matches legacy algorithm") {
 	CHECK_EQ(deep.simplify_path(), reference(deep));
 }
 
+
+TEST_CASE("[String] Case-insensitive long-prefix search rejects mismatched suffixes") {
+	const String prefix = String("a").repeat(63);
+	const String text = String("a").repeat(4096) + "Q" + String("a").repeat(256);
+	const String match = prefix + "q";
+	const String missing = prefix + "z";
+
+	CHECK(text.findn(match) == 4033);
+	CHECK(text.rfindn(match) == 4033);
+	CHECK(text.countn(match) == 1);
+	CHECK(text.findn(missing) == -1);
+	CHECK(text.rfindn(missing) == -1);
+	CHECK(text.countn(missing) == 0);
+
+	const CharString match_ascii = match.ascii();
+	const CharString missing_ascii = missing.ascii();
+	CHECK(text.findn(match_ascii.get_data()) == 4033);
+	CHECK(text.rfindn(match_ascii.get_data()) == 4033);
+	CHECK(text.countn(match_ascii.get_data()) == 1);
+	CHECK(text.findn(missing_ascii.get_data()) == -1);
+	CHECK(text.rfindn(missing_ascii.get_data()) == -1);
+	CHECK(text.countn(missing_ascii.get_data()) == 0);
+}
+
+TEST_CASE("[String] Case-insensitive long-prefix tail filters retain Unicode folding") {
+	// An uppercase tail must match a lowercase needle, including when the
+	// first two codepoints match exactly and the tail prefilter is active.
+	const String source = "aa" + String("b").repeat(61) + "Z";
+	const String needle = "aa" + String("b").repeat(61) + "z";
+	CHECK(source.findn(needle) == 0);
+	CHECK(source.rfindn(needle) == 0);
+	CHECK(source.countn(needle) == 1);
+
+	// U+212A KELVIN SIGN has the same lowercase form as ASCII 'k', so the
+	// exact-prefix prefilter must fall through to the Unicode comparison.
+	const String kelvin = String::chr(0x212A) + String("x").repeat(62) + "Z";
+	const String ascii_needle = "k" + String("x").repeat(62) + "z";
+	CHECK(kelvin.findn(ascii_needle) == 0);
+	CHECK(kelvin.rfindn(ascii_needle) == 0);
+	CHECK(kelvin.countn(ascii_needle) == 1);
+}
+
 } // namespace TestString
