@@ -61,6 +61,17 @@ private:
 
 public:
 	Iterator insert(const TKey &p_key, const TData &p_value) {
+		// A disabled cache should not allocate a hash-table node only to evict
+		// it immediately. Keep the insertion/eviction path for hook-enabled
+		// caches, where callback visibility of the transient entry matters.
+		GODOT_GCC_WARNING_PUSH_AND_IGNORE("-Waddress")
+		if constexpr (BeforeEvict == nullptr) {
+			if (capacity == 0) {
+				return _map.end();
+			}
+		}
+		GODOT_GCC_WARNING_POP
+
 		// Preserve the existing node and userdata address on replacement.
 		// This is also allocation-free for a repeatedly inserted hot key.
 		TData *existing = _map.renew_key(p_key);
@@ -102,11 +113,9 @@ public:
 	_FORCE_INLINE_ size_t get_size() const { return _map.size(); }
 
 	void set_capacity(size_t p_capacity) {
-		if (capacity > 0) {
-			capacity = p_capacity;
-			while (_map.size() > capacity) {
-				_evict_oldest();
-			}
+		capacity = p_capacity;
+		while (_map.size() > capacity) {
+			_evict_oldest();
 		}
 	}
 
