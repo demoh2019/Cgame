@@ -269,6 +269,54 @@ class AssetAuditTest(unittest.TestCase):
         self.assertEqual(len(audit.find_cycles(graph)), 1)
         self.assertEqual(len(audit.find_cycles(graph)[0]), 2501)
 
+    def test_cycle_algorithm_dense_dag_has_no_false_cycles(self):
+        # Previously a 350-node complete DAG could queue 61,075 redundant
+        # DFS work items before reaching the oldest pending sibling.
+        n = 350
+        graph = {f"n{i:03d}": [f"n{j:03d}" for j in range(i + 1, n)]
+                 for i in range(n)}
+        self.assertEqual(audit.find_cycles(graph), [])
+
+    def test_cycle_algorithm_dense_component_reported_once(self):
+        n = 80
+        nodes = [f"n{i:03d}" for i in range(n)]
+        graph = {source: [target for target in nodes if target != source]
+                 for source in nodes}
+        self.assertEqual(audit.find_cycles(graph), [tuple(nodes)])
+
+    def test_cycle_algorithm_matches_independent_reachability_oracle(self):
+        from random import Random
+        random = Random(19112026)
+        for n in range(1, 13):
+            nodes = [f"v{i:02d}" for i in range(n)]
+            for trial in range(20):
+                # Leave the last node without an explicit adjacency entry to
+                # cover destination-only nodes as well as complete components.
+                graph = {source: [target for target in nodes if random.random() < 0.25]
+                         for source in nodes[:-1]}
+                reachable = {}
+                for start in nodes:
+                    visited = {start}
+                    pending = [start]
+                    while pending:
+                        for next_node in graph.get(pending.pop(), ()):
+                            if next_node not in visited:
+                                visited.add(next_node)
+                                pending.append(next_node)
+                    reachable[start] = visited
+                remaining = set(nodes)
+                expected = []
+                while remaining:
+                    start = min(remaining)
+                    component = tuple(sorted(node for node in remaining
+                                             if node in reachable[start]
+                                             and start in reachable[node]))
+                    remaining.difference_update(component)
+                    if len(component) > 1:
+                        expected.append(component)
+                with self.subTest(n=n, trial=trial):
+                    self.assertEqual(audit.find_cycles(graph), sorted(expected))
+
     def test_cycle_algorithm_disconnected_graph(self):
         graph = {"a": ["b"], "b": ["a"], "c": ["d"], "d": ["c"], "e": []}
         self.assertEqual(audit.find_cycles(graph), [("a", "b"), ("c", "d")])
