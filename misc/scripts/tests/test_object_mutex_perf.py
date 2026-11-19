@@ -141,7 +141,13 @@ struct Mutex {
     void lock() { actual.lock(); }
     void unlock() { actual.unlock(); }
 };
-template<class T> using MutexLock = std::lock_guard<T>;
+template<class T> class MutexLock {
+    T &mutex;
+public:
+    explicit MutexLock(T &value) : mutex(value) { mutex.lock(); }
+    ~MutexLock() { mutex.unlock(); }
+};
+template<class T> MutexLock(T &) -> MutexLock<T>;
 struct Object {
     mutable Mutex _control_mutex;
     struct Binding {
