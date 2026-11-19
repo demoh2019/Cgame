@@ -831,7 +831,17 @@ bool GodotBodySoftBodyPair3D::pre_solve(real_t p_step) {
 	bool do_process = false;
 
 	const Transform3D &transform_A = body->get_transform();
-	const bool has_friction = body->get_friction() != 0.0;
+	const real_t friction = body->get_friction();
+	const bool has_friction = friction != 0.0;
+	// Soft/rigid manifolds also persist between timesteps. Reuse their
+	// impulses consistently with the rigid/rigid contact solver.
+	const real_t previous_step = space->get_previous_step();
+	const bool step_changed = previous_step > 0.0 && !Math::is_equal_approx(previous_step, p_step);
+	const real_t timestep_ratio = step_changed ? p_step / previous_step : real_t(1.0);
+	const bool can_scale_impulses = timestep_ratio >= real_t(0.5) && timestep_ratio <= real_t(2.0);
+	const real_t warm_start_coefficient = space->get_warm_start_coefficient();
+	const bool rescale_impulses = step_changed || warm_start_coefficient != real_t(1.0);
+	const real_t impulse_scale = timestep_ratio * warm_start_coefficient;
 
 	Basis zero_basis;
 	zero_basis.set_zero();
@@ -844,6 +854,19 @@ bool GodotBodySoftBodyPair3D::pre_solve(real_t p_step) {
 	for (uint32_t contact_index = 0; contact_index < contact_count; ++contact_index) {
 		Contact &c = contacts[contact_index];
 		c.active = false;
+		if (rescale_impulses) {
+			if (can_scale_impulses) {
+				c.acc_normal_impulse *= impulse_scale;
+				c.acc_tangent_impulse *= impulse_scale;
+				c.acc_bias_impulse *= impulse_scale;
+				c.acc_bias_impulse_center_of_mass *= impulse_scale;
+			} else {
+				c.acc_normal_impulse = 0.0;
+				c.acc_tangent_impulse = Vector3();
+				c.acc_bias_impulse = 0.0;
+				c.acc_bias_impulse_center_of_mass = 0.0;
+			}
+		}
 
 		real_t node_inv_mass = soft_body_collides ? soft_body->get_node_inv_mass(c.index_B) : 0.0;
 		if ((node_inv_mass == 0.0) && (body_inv_mass == 0.0)) {
@@ -883,6 +906,14 @@ bool GodotBodySoftBodyPair3D::pre_solve(real_t p_step) {
 		// Do not apply its obsolete tangential warm-start impulse.
 		if (!has_friction) {
 			c.acc_tangent_impulse = Vector3();
+		} else if (friction > 0.0) {
+			// Material changes must shrink the cached friction impulse to the
+			// current Coulomb cone before it is applied to either body.
+			const real_t tangent_limit = friction * c.acc_normal_impulse;
+			const real_t tangent_length_squared = c.acc_tangent_impulse.length_squared();
+			if (tangent_length_squared > tangent_limit * tangent_limit) {
+				c.acc_tangent_impulse *= tangent_limit / Math::sqrt(tangent_length_squared);
+			}
 		}
 		Vector3 j_vec = c.normal * c.acc_normal_impulse + c.acc_tangent_impulse;
 		if (body_collides) {
