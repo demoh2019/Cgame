@@ -1431,6 +1431,39 @@ and the body-color map are reused across frames; oversized allocations
 are released when the workload shrinks or island-level scheduling resumes.
 No additional fields are stored on bodies or contacts.
 
+#### Persistent graph-color schedule cache
+
+Following Box2D 3's persistent coloring strategy, a single large 2D island
+now reuses its previous color groups and sorted constraint batches when the
+constraint graph has **exactly** the same topology. On a cache hit there is no
+body-color hash map rebuild and no repeated counting sort.
+
+The validation checks the original constraint order, each constraint's
+identity, the exact pair of body pointers, both body modes and the special
+contact-only ownership rule. Constraint insertion/removal, joint endpoint
+rebinding, static/kinematic mode transitions, or a different island will
+trigger a full recolor. Constraints with more than two referenced bodies
+always take the uncached path. The cache uses a compact scratch snapshot
+inside the stepper (not extra fields on every body/contact) and returns its
+memory when the graph shrinks or the solver switches back to island jobs.
+The cache is active only when experimental parallel large-island solving
+is enabled.
+
+A separate regression rewires an existing joint, then restores it while
+running the sequential and colored modes on the same 384-body chain:
+
+```bash
+./bin/godot.macos.editor.arm64 --headless \
+  --path tests/stress --script res://physics_color_cache_regression.gd
+```
+
+Reference fuzz tests exercise exact invalidation, sharing of static bodies
+in contact-only islands, and graph-color independence:
+
+```bash
+python3 -m unittest discover -s tests/stress -p 'test_physics_2d_color_cache.py' -v
+```
+
 The standalone regression runs matching sequential and experimental solves
 for three scenarios: one chain of 384 bodies; one 384-body chain alongside a
 48-body chain; and two independent 384-body chains alongside a 48-body chain.
