@@ -256,8 +256,30 @@ func snapshot() -> Dictionary:
 	}
 
 
+static func _read_bounded_int(data: Dictionary, key: String,
+		default_value: int, lower: int, upper: int) -> int:
+	var raw: Variant = data.get(key, default_value)
+	if typeof(raw) not in [TYPE_INT, TYPE_FLOAT]:
+		return default_value
+	var number: float = float(raw)
+	if not is_finite(number):
+		return default_value
+	return int(clampf(number, float(lower), float(upper)))
+
+
+static func _read_bounded_float(data: Dictionary, key: String,
+		default_value: float, lower: float, upper: float) -> float:
+	var raw: Variant = data.get(key, default_value)
+	if typeof(raw) not in [TYPE_INT, TYPE_FLOAT]:
+		return default_value
+	var number: float = float(raw)
+	return clampf(number, lower, upper) if is_finite(number) else default_value
+
+
 func import_snapshot(data: Variant) -> bool:
-	if typeof(data) != TYPE_DICTIONARY or int(data.get("version", 0)) != 1:
+	if typeof(data) != TYPE_DICTIONARY:
+		return false
+	if _read_bounded_int(data, "version", 0, 0, 10) != 1:
 		return false
 	var bag: Dictionary = Rules.sanitize_bag(data.get("inventory", {}))
 	var saved_stash: Dictionary = Rules.sanitize_bag(data.get("stash", {}))
@@ -271,18 +293,18 @@ func import_snapshot(data: Variant) -> bool:
 	if typeof(raw_skills) != TYPE_DICTIONARY:
 		return false
 	for profession in ["gathering", "crafting", "combat"]:
-		new_skills[profession] = clampi(int(raw_skills.get(profession, 0)), 0, 1000000)
+		new_skills[profession] = _read_bounded_int(raw_skills, profession, 0, 0, 1000000)
 	inventory = bag
 	stash = saved_stash
 	skills = new_skills
-	health = clampf(float(data.get("health", 100.0)), 0.0, 100.0)
-	hunger = clampf(float(data.get("hunger", 90.0)), 0.0, 100.0)
-	thirst = clampf(float(data.get("thirst", 90.0)), 0.0, 100.0)
-	stamina = clampf(float(data.get("stamina", 100.0)), 0.0, 100.0)
-	coins = clampi(int(data.get("coins", 12)), 0, 1000000)
-	shelter_level = clampi(int(data.get("shelter_level", 0)), 0, 3)
-	zone = clampi(int(data.get("zone", 0)), 0, 2)
-	elapsed_days = clampf(float(data.get("elapsed_days", 0.35)), 0.0, 100000.0)
-	deaths = clampi(int(data.get("deaths", 0)), 0, 1000000)
-	infected_kills = clampi(int(data.get("infected_kills", 0)), 0, 1000000)
+	health = _read_bounded_float(data, "health", 100.0, 0.0, 100.0)
+	hunger = _read_bounded_float(data, "hunger", 90.0, 0.0, 100.0)
+	thirst = _read_bounded_float(data, "thirst", 90.0, 0.0, 100.0)
+	stamina = _read_bounded_float(data, "stamina", 100.0, 0.0, 100.0)
+	coins = _read_bounded_int(data, "coins", 12, 0, 1000000)
+	shelter_level = _read_bounded_int(data, "shelter_level", 0, 0, 3)
+	zone = _read_bounded_int(data, "zone", 0, 0, 2)
+	elapsed_days = _read_bounded_float(data, "elapsed_days", 0.35, 0.0, 100000.0)
+	deaths = _read_bounded_int(data, "deaths", 0, 0, 1000000)
+	infected_kills = _read_bounded_int(data, "infected_kills", 0, 0, 1000000)
 	return true
