@@ -467,6 +467,55 @@ TEST_CASE("[String] Find case insensitive") {
 	MULTICHECK_STRING_INT_EQ(s, rfindn, "WHA", -1, 13);
 }
 
+TEST_CASE("[String] Find case insensitive ASCII fast path") {
+	const String s = "xxaBcDyyABCDzz";
+	CHECK(s.findn(String("abcd")) == 2);
+	CHECK(s.findn("ABcd") == 2);
+	CHECK(s.findn(String("abCd"), 3) == 8);
+	CHECK(s.findn("aBcD", 3) == 8);
+	CHECK(s.rfindn(String("ABcD")) == 8);
+	CHECK(s.rfindn("aBcD") == 8);
+	CHECK(s.rfindn(String("aBcD"), 7) == 2);
+	CHECK(s.rfindn("abCd", 7) == 2);
+	CHECK(s.findn("abCe") == -1);
+	CHECK(s.findn(String("abCe")) == -1);
+	CHECK(s.findn("ABCDz", 9) == -1);
+
+	String repeated;
+	for (int i = 0; i < 128; ++i) {
+		repeated += "aBcD";
+	}
+	CHECK(repeated.findn("ABCD") == 0);
+	CHECK(repeated.rfindn("abcd") == 127 * 4);
+	CHECK(repeated.findn("abce") == -1);
+}
+
+TEST_CASE("[String] Find case insensitive ASCII exhaustive pairs") {
+	for (char32_t a = 32; a < 127; ++a) {
+		for (char32_t b = 32; b < 127; ++b) {
+			const char32_t folded_a = (a >= 'A' && a <= 'Z') ? a + ('a' - 'A') : a;
+			const char32_t folded_b = (b >= 'A' && b <= 'Z') ? b + ('a' - 'A') : b;
+			const int expected = folded_a == folded_b ? 0 : -1;
+			const String source = String::chr(a);
+			const String needle = String::chr(b);
+			CHECK(source.findn(needle) == expected);
+			CHECK(source.rfindn(needle) == expected);
+		}
+	}
+}
+
+TEST_CASE("[String] Find case insensitive Unicode fallback") {
+	const String s = U"xx\\u212A\\u03A3\\u00C4yy\\u0416\\u0423\\u041A";
+	CHECK(s.findn(String(U"k\\u03C3\\u00E4")) == 2);
+	CHECK(s.rfindn(String(U"k\\u03C3\\u00E4")) == 2);
+	CHECK(s.findn(String(U"\\u0436\\u0443\\u043A")) == 7);
+	CHECK(s.rfindn(String(U"\\u0436\\u0443\\u043A")) == 7);
+	CHECK(s.findn("k") == 2);
+	CHECK(s.rfindn("K") == 2);
+	CHECK(s.findn(String(U"k\\u03C3\\u00E5")) == -1);
+	CHECK(s.findn(String(U"\\u0436\\u0443\\u043A"), 8) == -1);
+}
+
 TEST_CASE("[String] Find MK") {
 	Vector<String> keys;
 	keys.push_back("sty");
