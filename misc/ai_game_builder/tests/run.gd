@@ -67,6 +67,8 @@ func _run() -> void:
 	_reject(_plan("café.gd"), "non-ASCII path rejected")
 	_reject(_plan("a.png"), "binary extension rejected")
 	_reject(_plan("evil.exe"), "executable extension rejected")
+	_reject(_plan("bad.gd\n"), "trailing newline rejected")
+	_reject(_plan("a\n/b.gd"), "embedded newline rejected")
 	_reject(_plan("file.gd", ""), "empty content rejected")
 	_reject(_plan("file.gd", "x".repeat(Validator.MAX_FILE_BYTES + 1)), "oversized file rejected")
 	_reject(_plan("file.gd", "hi\u0000there"), "embedded NUL rejected")
