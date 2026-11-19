@@ -90,7 +90,7 @@ class JoltVolumetricContractionTests(unittest.TestCase):
 
     def test_default_and_zero_shrink_add_no_extra_volume_work(self):
         code = self.builder
-        self.assertIn("if (JoltProjectSettings::soft_body_volume_follow_shrinking_factor &&", code)
+        self.assertIn("if (has_volume_fan && JoltProjectSettings::soft_body_volume_follow_shrinking_factor &&", code)
         self.assertIn("multiplier != 1.0f && multiplier > 0.0f)", code)
         self.assertIn("has_volume_fan && JoltProjectSettings::soft_body_volume_follow_shrinking_factor", code)
         self.assertIn("if (Math::is_finite(volume_scale))", code)
@@ -156,6 +156,7 @@ class JoltVolumetricContractionTests(unittest.TestCase):
             'pow(1.0 - shrink, 3.0) if enabled else rest_volume',
             'JOLT_SOFTBODY_VOLUME_SHRINK_RESULT:',
             'Jolt soft-body volumetric shrink regression passed.',
+            'soft_body_volume_radial_springs',
         ):
             self.assertIn(needle, script)
 
