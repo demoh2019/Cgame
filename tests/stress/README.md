@@ -283,6 +283,7 @@ The next setup skips SAT/GJK only when:
 - Both geometry generations match the previous manifold.
 - Neither body has continuous collision detection enabled.
 - Every old contact is still marked as used (no stale points remain to prune).
+- The 2D pair has not been rejected as a one-way collision.
 
 The solver still recomputes effective masses, material mixing, penetration
 bias and impulse clamping each frame. CCD, new collisions, geometry changes and
