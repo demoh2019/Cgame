@@ -29,6 +29,7 @@
 /**************************************************************************/
 
 #include "godot_collision_object_2d.h"
+#include "servers/physics_ccd_rotational_bounds.h"
 
 #include "godot_physics_server_2d.h"
 #include "godot_space_2d.h"
@@ -210,10 +211,15 @@ void GodotCollisionObject2D::_update_shapes() {
 
 }
 
-void GodotCollisionObject2D::_update_shapes_with_motion(const Vector2 &p_motion) {
+void GodotCollisionObject2D::_update_shapes_with_motion(const Vector2 &p_motion, real_t p_angular_displacement, const Vector2 &p_rotation_pivot) {
 	if (!space) {
 		return;
 	}
+
+	// Only opted-in CCD spaces pay for rotational broadphase bounds. Angular
+	// displacement is known before the narrowphase and requires no allocations.
+	const real_t rotation_factor = space->is_ccd_rotational_bounds_enabled() ?
+			godot_physics_ccd_rotational_factor(p_angular_displacement) : real_t(0.0);
 
 	// Register compound shapes before generating pair callbacks. A single-shape
 	// object retains the synchronous insertion behavior.
@@ -230,7 +236,13 @@ void GodotCollisionObject2D::_update_shapes_with_motion(const Vector2 &p_motion)
 		Rect2 shape_aabb = s.shape->get_aabb();
 		Transform2D xform = transform * s.xform;
 		shape_aabb = xform.xform(shape_aabb);
-		shape_aabb = shape_aabb.merge(Rect2(shape_aabb.position + p_motion, shape_aabb.size)); //use motion
+		// Every point on a rotating collider remains within this expanded
+		// translated AABB. Use its farthest starting corner from the world COM.
+		const real_t rotation_padding = godot_physics_ccd_rotational_padding(shape_aabb, p_rotation_pivot, rotation_factor);
+		shape_aabb = shape_aabb.merge(Rect2(shape_aabb.position + p_motion, shape_aabb.size));
+		if (rotation_padding > real_t(0.0)) {
+			shape_aabb = shape_aabb.grow(rotation_padding);
+		}
 		// Skip the BVH lookup and lock if the proxy bounds are unchanged.
 		// The swept AABB and ordinary AABB are cached independently per update.
 		const bool aabb_changed = s.aabb_cache != shape_aabb;

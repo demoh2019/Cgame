@@ -701,7 +701,7 @@ void GodotBody3D::integrate_forces(real_t p_step, bool p_defer_motion) {
 			deferred_motion = motion;
 			has_deferred_motion = true;
 		} else {
-			_update_shapes_with_motion(motion);
+			_update_shapes_with_motion(motion, angular_velocity, p_step, get_transform().origin + center_of_mass);
 		}
 	}
 

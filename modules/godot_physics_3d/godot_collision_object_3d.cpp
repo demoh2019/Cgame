@@ -29,6 +29,7 @@
 /**************************************************************************/
 
 #include "godot_collision_object_3d.h"
+#include "servers/physics_ccd_rotational_bounds.h"
 #include "godot_shape_volume_3d.h"
 
 #include "godot_physics_server_3d.h"
@@ -209,10 +210,15 @@ void GodotCollisionObject3D::_update_shapes() {
 
 }
 
-void GodotCollisionObject3D::_update_shapes_with_motion(const Vector3 &p_motion) {
+void GodotCollisionObject3D::_update_shapes_with_motion(const Vector3 &p_motion, const Vector3 &p_angular_velocity, real_t p_step, const Vector3 &p_rotation_pivot) {
 	if (!space) {
 		return;
 	}
+
+	// Only opted-in CCD spaces pay for rotational broadphase bounds. Angular
+	// displacement is known before the narrowphase and requires no allocations.
+	const real_t rotation_factor = space->is_ccd_rotational_bounds_enabled() ?
+			godot_physics_ccd_rotational_factor(p_angular_velocity.length() * p_step) : real_t(0.0);
 
 	// Register compound shapes before generating pair callbacks. A single-shape
 	// object retains the synchronous insertion behavior.
@@ -229,7 +235,12 @@ void GodotCollisionObject3D::_update_shapes_with_motion(const Vector3 &p_motion)
 		AABB shape_aabb = s.shape->get_aabb();
 		Transform3D xform = transform * s.xform;
 		shape_aabb = xform.xform(shape_aabb);
-		shape_aabb.merge_with(AABB(shape_aabb.position + p_motion, shape_aabb.size)); //use motion
+		// Conservative rotational broadphase envelope about the world COM.
+		const real_t rotation_padding = godot_physics_ccd_rotational_padding(shape_aabb, p_rotation_pivot, rotation_factor);
+		shape_aabb.merge_with(AABB(shape_aabb.position + p_motion, shape_aabb.size));
+		if (rotation_padding > real_t(0.0)) {
+			shape_aabb.grow_by(rotation_padding);
+		}
 		// Skip the BVH lookup and lock if the proxy bounds are unchanged.
 		// The swept AABB and ordinary AABB are cached independently per update.
 		const bool aabb_changed = s.aabb_cache != shape_aabb;

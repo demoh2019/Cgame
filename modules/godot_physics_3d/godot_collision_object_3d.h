@@ -84,7 +84,7 @@ private:
 	void _collision_filter_changed();
 
 protected:
-	void _update_shapes_with_motion(const Vector3 &p_motion);
+	void _update_shapes_with_motion(const Vector3 &p_motion, const Vector3 &p_angular_velocity, real_t p_step, const Vector3 &p_rotation_pivot);
 	void _unregister_shapes();
 
 	_FORCE_INLINE_ void _set_transform(const Transform3D &p_transform, bool p_update_shapes = true) {

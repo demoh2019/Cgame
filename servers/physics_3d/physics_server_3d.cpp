@@ -586,6 +586,9 @@ PhysicsServer3D::PhysicsServer3D() {
 	// Rapier-style cached contact impulse reuse, opt-in damping (1.0 is legacy).
 	GLOBAL_DEF(PropertyInfo(Variant::FLOAT, "physics/3d/solver/warm_start_coefficient", PROPERTY_HINT_RANGE, "0,1,0.01"), 1.0);
 	// Box2D-style Pade damping remains opt-in for backwards-compatible motion.
+	// Account for rotating CCD shapes in broadphase candidate generation.
+	// Conservative only: narrowphase angular time-of-impact remains separate.
+	GLOBAL_DEF(PropertyInfo(Variant::BOOL, "physics/3d/solver/ccd_rotational_bounds"), false);
 	GLOBAL_DEF(PropertyInfo(Variant::BOOL, "physics/3d/solver/implicit_damping"), false);
 	// Reproduce free rotation of asymmetric bodies (Jolt-style gyroscopic term).
 	// Off by default because it changes angular motion and costs extra math.

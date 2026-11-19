@@ -502,7 +502,7 @@ void GodotStep3D::step(GodotSpace3D *p_space, real_t p_delta) {
 		WorkerThreadPool::GroupID group_task = WorkerThreadPool::get_singleton()->add_template_group_task(this, &GodotStep3D::_integrate_forces_block, nullptr, block_count, -1, true, SNAME("Physics3DIntegrateForces"));
 		WorkerThreadPool::get_singleton()->wait_for_group_task_completion(group_task);
 		for (GodotBody3D *body : active_bodies) {
-			body->apply_deferred_motion();
+			body->apply_deferred_motion(p_delta);
 		}
 	}
 
