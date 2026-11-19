@@ -35,7 +35,7 @@ TEST_CASE("[GodotPhysics2D] Rotating long box distant from target can be culled"
 	const Rect2 long_box(Vector2(-10, -1), Vector2(20, 2));
 	const Rect2 target(Vector2(-1, -1), Vector2(2, 2));
 	CHECK_FALSE(physics_ccd_rotational_sphere_bounds_may_overlap(
-			long_box, Vector2(), target.translated(Vector2(0, 100)),
+			long_box, Vector2(), Rect2(Vector2(-1, 99), Vector2(2, 2)),
 			Vector2(0, 100), Vector2(0, 30)));
 }
 
@@ -52,10 +52,10 @@ TEST_CASE("[GodotPhysics2D] Swept centers detect head-on approach and near miss"
 	const Rect2 box(Vector2(-1, -1), Vector2(2, 2));
 	const Rect2 other(Vector2(-1, -1), Vector2(2, 2));
 	CHECK(physics_ccd_rotational_sphere_bounds_may_overlap(
-			box, Vector2(), other.translated(Vector2(10, 0)),
+			box, Vector2(), Rect2(Vector2(9, -1), Vector2(2, 2)),
 			Vector2(10, 0), Vector2(11, 0)));
 	CHECK_FALSE(physics_ccd_rotational_sphere_bounds_may_overlap(
-			box, Vector2(), other.translated(Vector2(10, 10)),
+			box, Vector2(), Rect2(Vector2(9, 9), Vector2(2, 2)),
 			Vector2(10, 10), Vector2(4, 0)));
 }
 
@@ -63,7 +63,7 @@ TEST_CASE("[GodotPhysics3D] Rotating long box rejects distant pair") {
 	const AABB blade(Vector3(-10, -1, -1), Vector3(20, 2, 2));
 	const AABB target(Vector3(-1, -1, -1), Vector3(2, 2, 2));
 	CHECK_FALSE(physics_ccd_rotational_sphere_bounds_may_overlap(
-			blade, Vector3(), target.translated(Vector3(0, 80, 0)),
+			blade, Vector3(), AABB(Vector3(-1, 79, -1), Vector3(2, 2, 2)),
 			Vector3(0, 80, 0), Vector3(0, 25, 0)));
 }
 
