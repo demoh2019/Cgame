@@ -20,14 +20,18 @@ It ships as a source addon in the fork (not as a built-in engine feature).
    Click **Generate** and **review the complete proposed file contents**.
 5. Click **Apply** to create files, then **Open scene** to inspect the result.
    Set a main scene manually if desired.
+6. To patch an existing game, select one or more `.gd` or `.tscn` files,
+   enable **send selected file contents** and **edit selected files**,
+   describe a specific change, review the exact text replacements, then Apply.
 
 The model and endpoint are configurable, with no bundled API key. The key is
 kept only in the dock's password field; it is not written to disk by the plugin.
 
 ## Safety and scope
 
-- Only a bounded list of *new* files under `res://ai_generated/` can be
-  written: GDScript, scenes, resources, shaders, JSON, and Markdown.
+- In generation mode, only a bounded list of *new* files under `res://ai_generated/` can be written: GDScript, scenes, resources, shaders, JSON, and Markdown.
+- In edit mode, only `.gd/.tscn` files explicitly selected and shared by the user can be updated. At most 8 exact substring edits are allowed, one per file, after preview and confirmation. No model-generated permissions are accepted.
+- Existing file edits use preimage SHA-256 checks and a separate on-disk backup for each file. On detected writing errors the addon attempts to restore all changed files; if restoration fails, backups are retained for manual recovery.
 - File path traversal, symlink components, case-insensitive path collisions, absolute paths outside the output directory,
   duplicate paths, unsupported extensions, oversized plans, and overwrites
   are rejected. Partial writes are rolled back on detected file errors.
@@ -43,8 +47,7 @@ kept only in the dock's password field; it is not written to disk by the plugin.
 - Generated code is untrusted until reviewed; avoid executing generated code
   without examining its behavior. A successful HTTP response does not prove
   that a generated game runs correctly.
-- This is an MVP: it does not yet iterate on compiler errors, read selected
-  files, modify existing code, build 3D assets, or run an autonomous agent.
+- This is an MVP: it does not yet iterate on compiler errors, build 3D assets, or run an autonomous agent. Review generated code and maintain your own version-control history before applying changes.
 
 ## Tests
 
@@ -53,13 +56,14 @@ Run with a Godot 4.8 editor or headless build:
     godot --headless --path misc/ai_game_builder --script tests/test_plan.gd
 
 Tests cover JSON parsing, file limits, path sanitization, endpoint policies,
-resource dependencies, editor-script restrictions, actual file creation, and overwrite protection.
+resource dependencies, editor-script restrictions, actual file creation, overwrite protection,
+restricted existing-file edits, stale previews, backup collisions, and edit application.
 The Linux CI editor build also runs a headless project smoke test with the plugin enabled.
 
 ## Next stages
 
-Add opt-in selected-file context, semantic AST-aware edits, a structured
-action/tool API, diff review, undo support, background import validation,
+Add semantic AST-aware edits, a structured action/tool API, full diff review,
+undo support, background import validation,
 headless play tests, test-driven repair loops, and profiling. For production,
 consider including this addon in project templates or integrating a native
 editor module after the security model and tests mature.

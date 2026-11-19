@@ -4,6 +4,7 @@ extends VBoxContainer
 const AIClient = preload("res://addons/ai_game_builder/ai_client.gd")
 const ProjectContext = preload("res://addons/ai_game_builder/project_context.gd")
 const Plan = preload("res://addons/ai_game_builder/plan.gd")
+const EditPlan = preload("res://addons/ai_game_builder/edit_plan.gd")
 
 var _client
 var _endpoint: LineEdit
@@ -11,6 +12,9 @@ var _model: LineEdit
 var _key: LineEdit
 var _prompt: TextEdit
 var _include_selected_files: CheckBox
+var _edit_mode: CheckBox
+var _approved_edit_paths := PackedStringArray()
+var _pending_is_edit := false
 var _preview: TextEdit
 var _status: Label
 var _generate_button: Button
@@ -54,6 +58,11 @@ func _ready() -> void:
 	_include_selected_files.button_pressed = false
 	_include_selected_files.tooltip_text = "Необязательно: только выбранные файлы, до 4 файлов и 20 000 символов суммарно. Код уходит выбранному API-провайдеру."
 	add_child(_include_selected_files)
+	_edit_mode = CheckBox.new()
+	_edit_mode.text = "Исправить выбранные скрипты/сцены (точечные замены)"
+	_edit_mode.tooltip_text = "Требует включённой передачи выбранных файлов модели. Каждое изменение показывается до применения."
+	_edit_mode.button_pressed = false
+	add_child(_edit_mode)
 
 	var actions := HBoxContainer.new()
 	add_child(actions)
@@ -73,14 +82,14 @@ func _ready() -> void:
 	actions.add_child(_open_button)
 
 	_status = _add_label("Сначала создайте план. Применение требует подтверждения.")
-	_add_label("Предпросмотр: содержимое всех создаваемых файлов")
+	_add_label("Предпросмотр: новые файлы или изменения выбранного исходного кода")
 	_preview = TextEdit.new()
 	_preview.editable = false
 	_preview.wrap_mode = TextEdit.LINE_WRAPPING_BOUNDARY
 	_preview.custom_minimum_size = Vector2(0, 180)
 	_preview.size_flags_vertical = Control.SIZE_EXPAND_FILL
 	add_child(_preview)
-	_add_label("Файлы создаются только в res://ai_generated/; существующие файлы не меняются. Проверьте код перед применением.")
+	_add_label("Генерация создаёт новые файлы в res://ai_generated/. В режиме исправления изменяются только выбранные и явно разрешённые файлы, с резервной копией и проверкой перед записью.")
 
 
 func _add_label(value: String) -> Label:
@@ -95,7 +104,12 @@ func _on_generate_pressed() -> void:
 	if _prompt.text.strip_edges().is_empty():
 		_status.text = "Введите описание игры или функции."
 		return
+	if _edit_mode.button_pressed and not _include_selected_files.button_pressed:
+		_status.text = "Для исправлений сначала разрешите передачу выбранных файлов модели."
+		return
 	_pending_plan = {}
+	_pending_is_edit = _edit_mode.button_pressed
+	_approved_edit_paths = PackedStringArray()
 	_apply_button.disabled = true
 	_open_button.disabled = true
 	_last_scene = ""
@@ -104,14 +118,19 @@ func _on_generate_pressed() -> void:
 	_status.text = "Генерация... Запрос отправлен модели."
 	var context := ProjectContext.describe()
 	if _include_selected_files.button_pressed:
+		_approved_edit_paths = ProjectContext.selected_editable_paths(EditorInterface.get_selected_paths())
 		context += "\nSelected source files (explicitly shared by the user):\n"
-		context += ProjectContext.describe_selected(EditorInterface.get_selected_paths())
-	_client.generate(_endpoint.text, _model.text, _key.text, _prompt.text, context)
+		context += ProjectContext.describe_selected(_approved_edit_paths)
+	if _pending_is_edit and _approved_edit_paths.is_empty():
+		_generate_button.disabled = false
+		_status.text = "Выберите хотя бы один .gd или .tscn файл в FileSystem."
+		return
+	_client.generate(_endpoint.text, _model.text, _key.text, _prompt.text, context, _pending_is_edit)
 
 
 func _on_generated(response: String) -> void:
 	_generate_button.disabled = false
-	var parsed := Plan.parse_response(response)
+	var parsed := EditPlan.parse_response(response, _approved_edit_paths) if _pending_is_edit else Plan.parse_response(response)
 	if not parsed["ok"]:
 		_status.text = "Ответ не принят: %s" % parsed["error"]
 		_preview.text = "Модель не вернула корректный план. Уточните запрос или повторите генерацию."
@@ -120,10 +139,15 @@ func _on_generated(response: String) -> void:
 	_pending_plan = parsed
 	var parts := PackedStringArray()
 	parts.append(parsed["summary"])
-	for entry in parsed["files"]:
-		parts.append("\n=== %s ===\n%s" % [entry["path"], entry["content"]])
+	if _pending_is_edit:
+		for edit in parsed["edits"]:
+			parts.append("\n=== ИЗМЕНИТЬ %s ===\nУДАЛИТЬ:\n%s\nДОБАВИТЬ:\n%s" % [edit["path"], edit["find"], edit["replace"]])
+		_status.text = "Подготовлено исправлений: %d. Проверьте изменения перед применением." % parsed["edits"].size()
+	else:
+		for entry in parsed["files"]:
+			parts.append("\n=== %s ===\n%s" % [entry["path"], entry["content"]])
+		_status.text = "Готово: %d файлов. Проверьте предпросмотр и нажмите «Применить»." % parsed["files"].size()
 	_preview.text = "\n".join(parts)
-	_status.text = "Готово: %d файлов. Проверьте предпросмотр и нажмите «Применить»." % parsed["files"].size()
 	_apply_button.disabled = false
 
 
@@ -137,7 +161,7 @@ func _on_failed(message: String) -> void:
 func _on_apply_pressed() -> void:
 	if _pending_plan.is_empty():
 		return
-	var result := Plan.apply(_pending_plan)
+	var result := EditPlan.apply(_pending_plan) if _pending_is_edit else Plan.apply(_pending_plan)
 	if not result["ok"]:
 		_apply_button.disabled = true
 		_status.text = "Не удалось применить: %s" % result["error"]
@@ -145,6 +169,9 @@ func _on_apply_pressed() -> void:
 	_apply_button.disabled = true
 	_pending_plan = {}
 	EditorInterface.get_resource_filesystem().scan()
+	if _pending_is_edit:
+		_status.text = "Изменено файлов: %d. Проверьте результат запуском проекта." % result["edited_paths"].size()
+		return
 	_last_scene = ""
 	for path in result["paths"]:
 		if str(path).ends_with(".tscn"):

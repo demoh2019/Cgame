@@ -50,20 +50,28 @@ const MAX_SELECTED_TOTAL_CHARS = 20000
 const SELECTED_EXTENSIONS = ["gd", "tscn"]
 
 
+static func selected_editable_paths(paths: PackedStringArray) -> PackedStringArray:
+	var result := PackedStringArray()
+	var remaining := MAX_SELECTED_TOTAL_CHARS
+	for path in paths:
+		if result.size() >= MAX_SELECTED_FILES or remaining <= 0:
+			break
+		if not _is_selected_path_safe(path) or not FileAccess.file_exists(path):
+			continue
+		var text := FileAccess.get_file_as_string(path)
+		if text.is_empty() or text.length() > 100000:
+			continue
+		result.append(path)
+		remaining -= mini(text.length(), mini(remaining, MAX_SELECTED_CHARS))
+	return result
+
+
 static func describe_selected(paths: PackedStringArray) -> String:
 	var snippets := PackedStringArray()
 	var count := 0
 	var remaining := MAX_SELECTED_TOTAL_CHARS
-	for path in paths:
-		if count >= MAX_SELECTED_FILES or remaining <= 0:
-			break
-		if not _is_selected_path_safe(path):
-			continue
-		if not FileAccess.file_exists(path):
-			continue
+	for path in selected_editable_paths(paths):
 		var data := FileAccess.get_file_as_string(path)
-		if data.is_empty():
-			continue
 		var limit := mini(MAX_SELECTED_CHARS, remaining)
 		var excerpt := data.left(limit)
 		remaining -= excerpt.length()
@@ -77,7 +85,7 @@ static func describe_selected(paths: PackedStringArray) -> String:
 
 
 static func _is_selected_path_safe(path: String) -> bool:
-	if not path.begins_with("res://") or path.contains("\\"):
+	if not path.begins_with("res://") or path.contains("\\") or path.contains(":") and not path.begins_with("res://"):
 		return false
 	if not (path.get_extension().to_lower() in SELECTED_EXTENSIONS):
 		return false
@@ -86,7 +94,9 @@ static func _is_selected_path_safe(path: String) -> bool:
 		return false
 	var current := ""
 	for segment in path.trim_prefix("res://").split("/"):
-		if segment.is_empty() or segment == "." or segment == "..":
+		if segment.is_empty() or segment == "." or segment == ".." or segment.begins_with("."):
+			return false
+		if segment in ["addons", "node_modules", ".godot", ".git"]:
 			return false
 		current = segment if current.is_empty() else current + "/" + segment
 		if root.is_link(current):

@@ -4,6 +4,7 @@ const Plan = preload("res://addons/ai_game_builder/plan.gd")
 const Client = preload("res://addons/ai_game_builder/ai_client.gd")
 const Context = preload("res://addons/ai_game_builder/project_context.gd")
 const QualityGate = preload("res://addons/ai_game_builder/quality_gate.gd")
+const EditPlan = preload("res://addons/ai_game_builder/edit_plan.gd")
 
 var _failed := 0
 
@@ -100,6 +101,7 @@ func _run() -> void:
 		_check(not Plan.apply(write_plan)["ok"], "prevent overwrite")
 		DirAccess.remove_absolute(output)
 
+	_test_edits()
 	print("AI Game Builder tests: %d failures" % _failed)
 	quit(1 if _failed > 0 else 0)
 
@@ -108,3 +110,59 @@ func _check(condition: bool, title: String) -> void:
 	if not condition:
 		_failed += 1
 		push_error("FAILED: " + title)
+
+
+
+func _test_edits() -> void:
+	DirAccess.make_dir_recursive_absolute("res://ai_generated")
+	var path := "res://ai_generated/_ai_builder_edit_test.gd"
+	var backup := path + ".ai_builder_backup"
+	if FileAccess.file_exists(backup):
+		DirAccess.remove_absolute(backup)
+	_write_fixture(path, "extends Node\nvar speed = 3\n")
+	var allow := PackedStringArray([path])
+	var raw := {"summary": "Speed adjustment", "edits": [{"path": path, "find": "speed = 3", "replace": "speed = 5"}]}
+	var preview := EditPlan.validate(raw, allow)
+	_check(preview["ok"], "preview an approved edit")
+	_check(EditPlan.parse_response(JSON.stringify(raw), allow)["ok"], "parse JSON edits")
+	_check(not EditPlan.validate(raw, PackedStringArray())["ok"], "reject unselected target")
+	_check(not EditPlan.validate({"summary": "broken", "edits": [{"path": path, "find": "missing", "replace": "fix"}]}, allow)["ok"], "reject absent find text")
+	_check(not EditPlan.validate({"summary": "broken", "edits": [{"path": path, "find": "", "replace": "fix"}]}, allow)["ok"], "reject empty find")
+	_check(not EditPlan.validate({"summary": "broken", "edits": [{"path": path, "find": "speed = 3", "replace": "speed = 3"}]}, allow)["ok"], "reject no-op")
+	_check(not EditPlan.validate({"summary": "bad", "edits": [
+		{"path": path, "find": "speed = 3", "replace": "speed = 5"},
+		{"path": path, "find": "speed = 3", "replace": "speed = 7"},
+	]}, allow)["ok"], "reject duplicate edit")
+	_check(not EditPlan.validate({"summary": "bad", "edits": [{"path": path, "find": "speed = 3", "replace": "@tool\nspeed = 4"}]}, allow)["ok"], "reject @tool introduction")
+	_check(not EditPlan.validate({"summary": "bad", "edits": [{"path": "res://project.godot", "find": "a", "replace": "b"}]}, PackedStringArray(["res://project.godot"]))["ok"], "reject project file modifications")
+
+	if preview["ok"]:
+		var applied := EditPlan.apply(preview)
+		_check(applied["ok"], "apply approved edit")
+		_check(FileAccess.get_file_as_string(path).contains("speed = 5"), "verify applied content")
+		_check(not FileAccess.file_exists(backup), "remove successful backup")
+		_check(not EditPlan.apply(preview)["ok"], "stale preview rejected")
+
+	_write_fixture(path, "extends Node\nvar speed = 3\n")
+	var stale := EditPlan.validate(raw, allow)
+	_write_fixture(path, "extends Node\nvar speed = 3\nvar extra = 8\n")
+	_check(not EditPlan.apply(stale)["ok"], "reject changed source between preview and apply")
+	_check(FileAccess.get_file_as_string(path).contains("extra = 8"), "preserve concurrent changes")
+
+	_write_fixture(path, "extends Node\nvar speed = 3\n")
+	_write_fixture(backup, "occupied backup")
+	var with_backup := EditPlan.validate(raw, allow)
+	_check(not EditPlan.apply(with_backup)["ok"], "do not overwrite an existing backup")
+	_check(FileAccess.get_file_as_string(path).contains("speed = 3"), "backup collision leaves source untouched")
+	_check(FileAccess.get_file_as_string(backup) == "occupied backup", "backup collision leaves backup untouched")
+
+	DirAccess.remove_absolute(path)
+	DirAccess.remove_absolute(backup)
+
+
+func _write_fixture(path: String, content: String) -> void:
+	var file := FileAccess.open(path, FileAccess.WRITE)
+	_check(file != null, "open test fixture " + path)
+	if file != null:
+		file.store_string(content)
+		file.close()
