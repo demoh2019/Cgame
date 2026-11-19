@@ -72,7 +72,7 @@ static bool strings_equal_lower(const T1 *p_lhs_begin, const T2 *p_rhs_begin, si
 	for (size_t i = 0; i < p_len; ++i) {
 		const auto lhs = p_lhs_begin[i];
 		const auto rhs = p_rhs_begin[i];
-		if (lhs == rhs) {
+		if (static_cast<uint32_t>(lhs) == static_cast<uint32_t>(rhs)) {
 			continue;
 		}
 		// Avoid Unicode table lookups for the common ASCII search path.
