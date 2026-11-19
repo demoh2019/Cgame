@@ -150,11 +150,15 @@ void TerrainHeightmap::apply_height_brush(const Vector2 &p_center, real_t p_radi
     if (Math::is_zero_approx(p_amount)) {
         return;
     }
-    // Scan only the affected region. This also bounds work for brushes outside the terrain.
-    const int from_x = MAX(0, int(Math::floor(MAX(p_center.x - p_radius, real_t(-1)))));
-    const int to_x = MIN(width - 1, int(Math::ceil(MIN(p_center.x + p_radius, real_t(width)))));
-    const int from_z = MAX(0, int(Math::floor(MAX(p_center.y - p_radius, real_t(-1)))));
-    const int to_z = MIN(depth - 1, int(Math::ceil(MIN(p_center.y + p_radius, real_t(depth)))));
+    // Clip in floating point before narrowing to int, even for huge brush coordinates.
+    if (p_center.x + p_radius < 0 || p_center.y + p_radius < 0 ||
+            p_center.x - p_radius > width - 1 || p_center.y - p_radius > depth - 1) {
+        return;
+    }
+    const int from_x = int(Math::floor(MAX(p_center.x - p_radius, real_t(0))));
+    const int to_x = int(Math::ceil(MIN(p_center.x + p_radius, real_t(width - 1))));
+    const int from_z = int(Math::floor(MAX(p_center.y - p_radius, real_t(0))));
+    const int to_z = int(Math::ceil(MIN(p_center.y + p_radius, real_t(depth - 1))));
     bool modified = false;
     for (int z = from_z; z <= to_z; ++z) {
         for (int x = from_x; x <= to_x; ++x) {
@@ -183,10 +187,14 @@ void TerrainHeightmap::apply_color_brush(const Vector2 &p_center, real_t p_radiu
     if (p_strength == 0) {
         return;
     }
-    const int from_x = MAX(0, int(Math::floor(MAX(p_center.x - p_radius, real_t(-1)))));
-    const int to_x = MIN(width - 1, int(Math::ceil(MIN(p_center.x + p_radius, real_t(width)))));
-    const int from_z = MAX(0, int(Math::floor(MAX(p_center.y - p_radius, real_t(-1)))));
-    const int to_z = MIN(depth - 1, int(Math::ceil(MIN(p_center.y + p_radius, real_t(depth)))));
+    if (p_center.x + p_radius < 0 || p_center.y + p_radius < 0 ||
+            p_center.x - p_radius > width - 1 || p_center.y - p_radius > depth - 1) {
+        return;
+    }
+    const int from_x = int(Math::floor(MAX(p_center.x - p_radius, real_t(0))));
+    const int to_x = int(Math::ceil(MIN(p_center.x + p_radius, real_t(width - 1))));
+    const int from_z = int(Math::floor(MAX(p_center.y - p_radius, real_t(0))));
+    const int to_z = int(Math::ceil(MIN(p_center.y + p_radius, real_t(depth - 1))));
     bool modified = false;
     for (int z = from_z; z <= to_z; ++z) {
         for (int x = from_x; x <= to_x; ++x) {
