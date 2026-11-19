@@ -43,6 +43,7 @@ func _test_2d() -> Dictionary:
 		bodies.append(body)
 	PhysicsServer2D.space_set_active(space, true)
 	await physics_frame
+	await process_frame
 
 	var state := PhysicsServer2D.space_get_direct_state(space)
 	var query := PhysicsShapeQueryParameters2D.new()
@@ -96,6 +97,7 @@ func _test_3d() -> Dictionary:
 		bodies.append(body)
 	PhysicsServer3D.space_set_active(space, true)
 	await physics_frame
+	await process_frame
 
 	var state := PhysicsServer3D.space_get_direct_state(space)
 	var query := PhysicsShapeQueryParameters3D.new()
