@@ -529,6 +529,7 @@ bool GodotBodyPair2D::_test_ccd(real_t p_step, GodotBody2D *p_A, int p_shape_A, 
 
 bool GodotBodyPair2D::setup(real_t p_step) {
 	check_ccd = false;
+	speculative_contact = false;
 
 	if (!A->interacts_with(B) || A->has_exception(B->get_self()) || B->has_exception(A->get_self())) {
 		collided = false;
@@ -560,18 +561,25 @@ bool GodotBodyPair2D::setup(real_t p_step) {
 	// shearing, filters and space changes. CCD always uses the narrow phase.
 	const bool ccd_enabled = A->get_continuous_collision_detection_mode() != PS2DE::CCD_MODE_DISABLED ||
 			B->get_continuous_collision_detection_mode() != PS2DE::CCD_MODE_DISABLED;
+	// The TOI fallback depends on velocity; fixed relative poses alone do
+	// not make previous positive/negative narrowphase results reusable.
+	// Restrict this bypass to eligible primitive pairs to preserve fast
+	// manifold recycling for all other shapes.
+	const bool velocity_sensitive_pair = space->get_speculative_sphere_distance() > 0.0 &&
+			A->get_shape(shape_A)->get_type() == PS2DE::SHAPE_CIRCLE &&
+			B->get_shape(shape_B)->get_type() == PS2DE::SHAPE_CIRCLE;
 	const uint64_t geometry_version_a = A->get_collision_geometry_version();
 	const uint64_t geometry_version_b = B->get_collision_geometry_version();
 	// The broadphase AABBs may overlap even when the actual shapes are
 	// separated. Reuse that exact negative SAT/GJK result while neither
 	// relative translation nor either body's shape/orientation has changed.
 	// Previous results obtained through one-way filtering are never cached.
-	if (relative_translation_unchanged && contact_recycling.can_reuse_separation(geometry_version_a, geometry_version_b, ccd_enabled)) {
+	if (relative_translation_unchanged && contact_recycling.can_reuse_separation(geometry_version_a, geometry_version_b, ccd_enabled, velocity_sensitive_pair)) {
 		collided = false;
 		oneway_disabled = false;
 		return false;
 	}
-	if (relative_translation_unchanged && contact_recycling.can_reuse(geometry_version_a, geometry_version_b, collided && !oneway_disabled, contact_count, ccd_enabled)) {
+	if (relative_translation_unchanged && contact_recycling.can_reuse(geometry_version_a, geometry_version_b, collided && !oneway_disabled, contact_count, ccd_enabled, velocity_sensitive_pair)) {
 		// SAT may have emitted a new manifold with fewer points, leaving
 		// old (unused) contacts to be pruned on the next frame. Never recycle
 		// such a mixed manifold indefinitely without validating the points.
@@ -648,6 +656,7 @@ bool GodotBodyPair2D::setup(real_t p_step) {
 				contacts[0] = speculative;
 				contact_count = 1;
 				collided = true;
+				speculative_contact = true;
 				oneway_disabled = false;
 			}
 		}
@@ -818,9 +827,7 @@ bool GodotBodyPair2D::pre_solve(real_t p_step) {
 		Vector2 axis = global_A - global_B;
 		real_t depth = axis.dot(c.normal);
 
-		const bool speculative = depth < 0.0 && !report_contacts_only &&
-				shape_A_ptr->get_type() == PS2DE::SHAPE_CIRCLE &&
-				shape_B_ptr->get_type() == PS2DE::SHAPE_CIRCLE &&
+		const bool speculative = speculative_contact && depth < 0.0 && !report_contacts_only &&
 				space->get_speculative_sphere_distance() >= -depth;
 		if (depth <= 0.0 && !speculative) {
 			continue;
