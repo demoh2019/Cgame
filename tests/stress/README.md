@@ -71,6 +71,39 @@ that ordinary solids still block motion and that a second compound shape
 using the same shape resource detects its own obstacle. This workload is
 a correctness regression, not a claim about measured throughput.
 
+## Streaming BVH pair creation without hit buffers
+
+The shared BVH manager formerly called `cull_aabb()` for each changed
+proxy, accumulated all overlapping ref IDs in `tree._cull_hits`, then made
+a second pass to build new collision pairs. In scenes with thousands of
+overlapping colliders this scratch vector became proportional to the
+densest broadphase query.
+
+`_check_for_collisions()` now uses `visit_aabb_refs()` to stream stable
+BVH reference IDs directly to `_collide()`. The existing iterative
+leaf visitor is compile-time specialized for ID or object callbacks,
+preserving its fully-within subtree optimization, layer/tree mask tests,
+user cull filters, and early-exit behavior. Old-pair removal and full
+filter rechecks still precede new-pair generation. Pair callbacks change
+adjacency links, not BVH topology; a local copy keeps the queried AABB
+stable while adjacency storage grows.
+
+```bash
+python3 -m unittest discover -s tests/stress -p 'test_physics_bvh_streaming.py' -v
+python3 tests/stress/run.py --godot ./bin/godot.macos.editor.arm64 \
+  --case physics_bvh_streaming_2d,physics_bvh_streaming_3d \
+  --scale 4 --repeats 5 --frames 90 --rss-limit-mib 6144 \
+  --output out/physics-bvh-streaming.json
+```
+
+Each stress case tests more than 2048 overlapping static proxies against
+one kinematic body, toggles collision masks without changing transforms,
+then removes and reinserts that body in the space to validate pair
+teardown/rebuilding. The runner measures process RSS and per-case wall
+time; use the same machine/configuration with an older commit to quantify
+the effects. These source-contract checks are not a compilation test,
+and runtime stress tests must still be executed on a built engine.
+
 ## Early broadphase exception filtering (2D and 3D)
 
 The BVH previously discarded body-body collision exceptions only during the
