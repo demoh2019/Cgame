@@ -124,6 +124,8 @@ private:
 	real_t contact_max_separation = 0.0;
 	real_t speculative_sphere_distance = 0.0; // Off unless explicitly enabled.
 	real_t soft_body_xpbd_compliance = 0.0; // Legacy PBD remains the default.
+	bool soft_body_xpbd_volume_preservation = false;
+	real_t soft_body_xpbd_volume_compliance = 0.0;
 	real_t contact_max_allowed_penetration = 0.0;
 	real_t contact_bias = 0.0;
 	real_t max_contact_push_speed = 0.0; // 0: unlimited (legacy behavior).
@@ -216,6 +218,8 @@ public:
 	_FORCE_INLINE_ real_t get_contact_max_separation() const { return contact_max_separation; }
 	_FORCE_INLINE_ real_t get_speculative_sphere_distance() const { return speculative_sphere_distance; }
 	_FORCE_INLINE_ real_t get_soft_body_xpbd_compliance() const { return soft_body_xpbd_compliance; }
+	_FORCE_INLINE_ bool is_soft_body_xpbd_volume_enabled() const { return soft_body_xpbd_volume_preservation; }
+	_FORCE_INLINE_ real_t get_soft_body_xpbd_volume_compliance() const { return soft_body_xpbd_volume_compliance; }
 	_FORCE_INLINE_ real_t get_contact_max_allowed_penetration() const { return contact_max_allowed_penetration; }
 	_FORCE_INLINE_ real_t get_contact_bias() const { return contact_bias; }
 	_FORCE_INLINE_ real_t limit_contact_bias(real_t p_bias) const { return godot_physics_limit_contact_bias(p_bias, max_contact_push_speed); }
