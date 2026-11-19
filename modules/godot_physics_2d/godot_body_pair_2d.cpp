@@ -584,6 +584,9 @@ bool GodotBodyPair2D::setup(real_t p_step) {
 	if (!collided && !report_contacts_only && space->get_speculative_sphere_distance() > 0.0 &&
 			motion_A == Vector2() && motion_B == Vector2() &&
 			A->get_angular_velocity() == 0.0 && B->get_angular_velocity() == 0.0 &&
+			// Static surface velocities affect friction, not collision geometry.
+			!(A->get_mode() == PS2DE::BODY_MODE_STATIC && A->get_linear_velocity() != Vector2()) &&
+			!(B->get_mode() == PS2DE::BODY_MODE_STATIC && B->get_linear_velocity() != Vector2()) &&
 			!A->is_shape_set_as_one_way_collision(shape_A) && !B->is_shape_set_as_one_way_collision(shape_B) &&
 			shape_A_ptr->get_type() == PS2DE::SHAPE_CIRCLE && shape_B_ptr->get_type() == PS2DE::SHAPE_CIRCLE) {
 		const double scale_A = physics_ccd_uniform_sphere_scale(xform_A);
@@ -606,6 +609,7 @@ bool GodotBodyPair2D::setup(real_t p_step) {
 				contacts[0] = speculative;
 				contact_count = 1;
 				collided = true;
+				oneway_disabled = false;
 			}
 		}
 	}
