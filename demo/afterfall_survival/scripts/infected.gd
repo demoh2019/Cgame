@@ -1,7 +1,7 @@
 extends CharacterBody2D
 ## Lightweight PvE enemy with a safe-camp exclusion radius.
 
-var game: Node2D
+var game = null
 var target: CharacterBody2D
 var hp: int = 40
 var bite_cooldown: float = 0.0

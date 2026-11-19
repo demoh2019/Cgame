@@ -138,11 +138,13 @@ func _process(delta: float) -> void:
 
 
 func _unhandled_input(event: InputEvent) -> void:
-	if event is InputEventMouseButton and event.pressed and event.button_index == MOUSE_BUTTON_LEFT:
+	var mouse_event := event as InputEventMouseButton
+	if mouse_event != null and mouse_event.pressed and mouse_event.button_index == MOUSE_BUTTON_LEFT:
 		try_attack()
-	if not (event is InputEventKey) or not event.pressed or event.echo:
+	var key_event := event as InputEventKey
+	if key_event == null or not key_event.pressed or key_event.echo:
 		return
-	match event.physical_keycode:
+	match key_event.physical_keycode:
 		KEY_E:
 			try_gather()
 		KEY_C:

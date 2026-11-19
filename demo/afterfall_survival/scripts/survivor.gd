@@ -1,7 +1,7 @@
 extends CharacterBody2D
 ## Uses stock Godot CharacterBody2D; engine-specific physics comes later if needed.
 
-var game: Node2D
+var game = null
 var active_weapon: String = "club"
 var facing: Vector2 = Vector2.RIGHT
 
