@@ -58,6 +58,22 @@ static func weapon_reach(weapon_id: String) -> float:
 		Defs.MELEE_RANGE, Defs.MELEE_RANGE + 1.3)
 
 
+## Ranged distance and noise are derived from carried gear on the server.
+static func ranged_range(weapon_id: String) -> float:
+	return clampf(float(Defs.item(weapon_id).get("range", Defs.PISTOL_RANGE)),
+		8.0, Defs.PISTOL_RANGE)
+
+
+static func ranged_noise(weapon_id: String) -> Dictionary:
+	var data: Dictionary = Defs.item(weapon_id)
+	return {
+		"radius": clampf(float(data.get("shot_noise_radius", Defs.GUNSHOT_NOISE_RADIUS)),
+			0.0, Defs.GUNSHOT_NOISE_RADIUS),
+		"seconds": clampf(float(data.get("shot_noise_seconds", Defs.GUNSHOT_NOISE_SECONDS)),
+			0.0, Defs.GUNSHOT_NOISE_SECONDS)
+	}
+
+
 static func weapon_cooldown(weapon_id: String) -> float:
 	if weapon_id == "":
 		return 0.6
@@ -85,6 +101,11 @@ static func active_skill(weapon_id: String) -> Dictionary:
 			"attack_lock": 0.95, "range": Defs.MELEE_RANGE + 0.6,
 			"damage": weapon_damage(weapon_id) * 1.6,
 			"ranged": false}
+	if weapon_id.begins_with("bow_") and str(info.get("weapon", "")) == "ranged":
+		return {"id": "power_draw", "energy_cost": 30.0, "cooldown": 6.0,
+			"attack_lock": 1.2, "range": ranged_range(weapon_id) + 5.0,
+			"damage": weapon_damage(weapon_id) * 1.6,
+			"ranged": true, "ammo": str(info.get("ammo", ""))}
 	if weapon_id == "pistol" and str(info.get("weapon", "")) == "ranged":
 		return {"id": "focused_shot", "energy_cost": 40.0, "cooldown": 8.0,
 			"attack_lock": 0.55, "range": Defs.PISTOL_RANGE + 4.0,
