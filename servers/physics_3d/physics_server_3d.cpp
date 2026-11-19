@@ -594,6 +594,11 @@ PhysicsServer3D::PhysicsServer3D() {
 	// Stiffen beyond yield; zero preserves the original linear XPBD solver.
 	GLOBAL_DEF(PropertyInfo(Variant::FLOAT, "physics/3d/solver/soft_body_xpbd_tension_hardening", PROPERTY_HINT_RANGE, "0,100,0.1,or_greater"), 0.0);
 	GLOBAL_DEF(PropertyInfo(Variant::FLOAT, "physics/3d/solver/soft_body_xpbd_tension_yield_strain", PROPERTY_HINT_RANGE, "0,3,0.01,or_greater"), 0.1);
+	// Thin shell/cloth compression response: compliance rises smoothly after
+	// a compression strain threshold. Off (ratio 1) keeps legacy XPBD intact.
+	GLOBAL_DEF(PropertyInfo(Variant::FLOAT, "physics/3d/solver/soft_body_xpbd_buckling_softening_ratio", PROPERTY_HINT_RANGE, "1,100,0.1,or_greater"), 1.0);
+	GLOBAL_DEF(PropertyInfo(Variant::FLOAT, "physics/3d/solver/soft_body_xpbd_buckling_yield_strain", PROPERTY_HINT_RANGE, "0,1,0.01"), 0.05);
+	GLOBAL_DEF(PropertyInfo(Variant::FLOAT, "physics/3d/solver/soft_body_xpbd_buckling_transition_strain", PROPERTY_HINT_RANGE, "0,1,0.01"), 0.05);
 	// Independent unilateral XPBD limits prevent excessively stretching or
 	// compressing a soft-body link while permitting normal elastic motion
 	// inside the allowed interval. Zero ratios disable the solver entirely.
