@@ -32,7 +32,7 @@ class SphereTimeOfImpactContracts(unittest.TestCase):
         self.assertIn("physics_ccd_sphere_toi(center_delta, relative_motion, radius_A + radius_B", source)
         self.assertIn("p_A->get_angular_velocity() == 0.0", source)
         self.assertIn("p_B->get_angular_velocity() == 0.0", source)
-        self.assertIn("const Vector2 inv_B", source.replace("const Transform2D inv_B", "const Vector2 inv_B"))
+        self.assertIn("const Transform2D inv_B", source)
 
     def test_3d_uses_analytic_toi_with_affine_and_rotation_fallback(self):
         source = CCD_3D.read_text(encoding="utf-8")
