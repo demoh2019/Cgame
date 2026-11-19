@@ -117,11 +117,36 @@ jobs:
             --script res://physics_tilted_capsule_buoyancy_3d_regression.gd \
             2>&1 | tee physics-fluid-tilted-capsule-runtime.log
           grep -Fq 'Tilted capsule restoring torque passed' physics-fluid-tilted-capsule-runtime.log
+      - name: Native tilted cylinder exact displaced-volume regressions
+        shell: bash
+        run: |
+          set -euo pipefail
+          timeout 120s ./bin/godot.linuxbsd.editor.dev.x86_64 \
+            --headless --test --test-case="*[PhysicsCylinderFluid]*" \
+            --success=true --no-colors 2>&1 | tee physics-fluid-cylinder-native.log
+          grep -Fq '[PhysicsCylinderFluid]' physics-fluid-cylinder-native.log
+      - name: Runtime exact cylinder immersion and restoring torque
+        shell: bash
+        run: |
+          set -euo pipefail
+          timeout 120s ./bin/godot.linuxbsd.editor.dev.x86_64 \
+            --headless --path tests/stress \
+            --script res://physics_cylinder_buoyancy_3d_regression.gd \
+            2>&1 | tee physics-fluid-cylinder-runtime.log
+          grep -Fq 'Exact cylinder buoyancy passed' physics-fluid-cylinder-runtime.log
+          ./bin/godot.linuxbsd.editor.dev.x86_64 --headless --path tests/stress \
+            --script res://physics_cylinder_buoyancy_3d_regression.gd --check-only
+          ./bin/godot.linuxbsd.editor.dev.x86_64 --headless --path tests/stress \
+            --script res://physics_cylinder_fluid_stress.gd --check-only
       - name: Syntax-check physics stress scripts
         shell: bash
         run: |
           set -euo pipefail
           ./bin/godot.linuxbsd.editor.dev.x86_64 --headless --path tests/stress --script res://physics_tilted_capsule_buoyancy_3d_regression.gd --check-only
+          ./bin/godot.linuxbsd.editor.dev.x86_64 --headless --path tests/stress \
+            --script res://physics_cylinder_buoyancy_3d_regression.gd --check-only
+          ./bin/godot.linuxbsd.editor.dev.x86_64 --headless --path tests/stress \
+            --script res://physics_cylinder_fluid_stress.gd --check-only
           ./bin/godot.linuxbsd.editor.dev.x86_64 --headless --path tests/stress --script res://stress.gd --check-only
           ./bin/godot.linuxbsd.editor.dev.x86_64 --headless --path tests/stress --script res://physics_dense.gd --check-only
           ./bin/godot.linuxbsd.editor.dev.x86_64 --headless --path tests/stress --script res://physics_pending_reuse_stress.gd --check-only
