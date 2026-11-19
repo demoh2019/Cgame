@@ -84,6 +84,11 @@ void JoltProjectSettings::register_settings() {
 	// without re-sorting the BVH every physics step; cache is bounded per space.
 	GLOBAL_DEF(PropertyInfo(Variant::BOOL, "physics/jolt_physics_3d/simulation/soft_body_self_persistent_bvh"), false);
 	GLOBAL_DEF(PropertyInfo(Variant::INT, "physics/jolt_physics_3d/simulation/soft_body_self_contact_max_checks", PROPERTY_HINT_RANGE, "1024,65536,1024"), 16384);
+	// Pre-step XPBD-style Jacobi projection supplements soft self-contact
+	// impulses without changing Jolt's native deformable constraint solver.
+	GLOBAL_DEF(PropertyInfo(Variant::BOOL, "physics/jolt_physics_3d/simulation/soft_body_self_position_projection"), false);
+	GLOBAL_DEF(PropertyInfo(Variant::FLOAT, "physics/jolt_physics_3d/simulation/soft_body_self_position_compliance", PROPERTY_HINT_RANGE, "0,0.001,0.000001"), 0.000001f);
+	GLOBAL_DEF(PropertyInfo(Variant::FLOAT, "physics/jolt_physics_3d/simulation/soft_body_self_position_max_correction", PROPERTY_HINT_RANGE, "0,0.1,0.001,suffix:m"), 0.02f);
 	GLOBAL_DEF(PropertyInfo(Variant::FLOAT, "physics/jolt_physics_3d/simulation/soft_body_soft_ccd_max_sweep", PROPERTY_HINT_RANGE, "0,4,0.01,suffix:m"), 1.0f);
 	GLOBAL_DEF(PropertyInfo(Variant::FLOAT, "physics/jolt_physics_3d/simulation/soft_body_soft_ccd_max_correction_speed", PROPERTY_HINT_RANGE, "1,256,1,suffix:m/s"), 128.0f);
 	GLOBAL_DEF(PropertyInfo(Variant::FLOAT, "physics/jolt_physics_3d/simulation/soft_body_soft_contact_radius", PROPERTY_HINT_RANGE, "0,1,0.001,suffix:m"), 0.1f);
@@ -202,6 +207,11 @@ void JoltProjectSettings::read_settings() {
 	soft_body_self_edge_bvh = GLOBAL_GET("physics/jolt_physics_3d/simulation/soft_body_self_edge_bvh");
 	soft_body_self_persistent_bvh = GLOBAL_GET("physics/jolt_physics_3d/simulation/soft_body_self_persistent_bvh");
 	soft_body_self_contact_max_checks = CLAMP((int)GLOBAL_GET("physics/jolt_physics_3d/simulation/soft_body_self_contact_max_checks"), 1024, 65536);
+	soft_body_self_position_projection = GLOBAL_GET("physics/jolt_physics_3d/simulation/soft_body_self_position_projection");
+	const float position_compliance = GLOBAL_GET("physics/jolt_physics_3d/simulation/soft_body_self_position_compliance");
+	soft_body_self_position_compliance = Math::is_finite(position_compliance) ? CLAMP(position_compliance, 0.0f, 0.001f) : 0.000001f;
+	const float max_position_correction = GLOBAL_GET("physics/jolt_physics_3d/simulation/soft_body_self_position_max_correction");
+	soft_body_self_position_max_correction = Math::is_finite(max_position_correction) ? CLAMP(max_position_correction, 0.0f, 0.1f) : 0.02f;
 	const float ccd_sweep = GLOBAL_GET("physics/jolt_physics_3d/simulation/soft_body_soft_ccd_max_sweep");
 	soft_body_soft_ccd_max_sweep = Math::is_finite(ccd_sweep) ? CLAMP(ccd_sweep, 0.0f, 4.0f) : 1.0f;
 	const float ccd_correction = GLOBAL_GET("physics/jolt_physics_3d/simulation/soft_body_soft_ccd_max_correction_speed");
