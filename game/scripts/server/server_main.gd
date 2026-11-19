@@ -7,7 +7,7 @@ const Defs = preload("res://scripts/shared/defs.gd")
 const WorldGen = preload("res://scripts/shared/world_gen.gd")
 const GameServer = preload("res://scripts/server/game_server.gd")
 const Net = preload("res://scripts/shared/net.gd")
-const Gateway = preload("res://scripts/server/nakama_gateway.gd")
+const GATEWAY_PATH := "res://scripts/server/nakama_gateway.gd"
 
 var net
 var sim
@@ -58,7 +58,11 @@ func _initialize() -> void:
 	net.allow_debug = "--debug-commands" in args
 	root.add_child(net)
 	if nakama_address != "":
-		var gateway := Gateway.new()
+		if not ResourceLoader.exists(GATEWAY_PATH):
+			printerr("SERVER Nakama gateway is unavailable: " + GATEWAY_PATH)
+			quit(2)
+			return
+		var gateway = load(GATEWAY_PATH).new()
 		gateway.name = "NakamaGateway"
 		root.add_child(gateway)
 		var parts := nakama_address.split(":")

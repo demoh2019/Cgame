@@ -1,422 +1,370 @@
 extends Node3D
-## The game client: connect screen, the isometric camera, controls, and the glue between the
-## network state and what is drawn.
+## Local playable client of the SAME authoritative simulation used by the dedicated server.
+## Not a second set of gameplay rules: gathering, combat, loot, survival and crafting all
+## call GameServer. Multiplayer transport will be wired to this presentation separately.
 
 const Defs = preload("res://scripts/shared/defs.gd")
 const WorldGen = preload("res://scripts/shared/world_gen.gd")
-const Net = preload("res://scripts/shared/net.gd")
-const GameClient = preload("res://scripts/client/game_client.gd")
-const ChunkView = preload("res://scripts/client/chunk_view.gd")
-const EntityView = preload("res://scripts/client/entity_view.gd")
-const Hud = preload("res://scripts/client/hud.gd")
-const Meshes = preload("res://scripts/client/meshes.gd")
+const GameServer = preload("res://scripts/server/game_server.gd")
+const LOCAL_PLAYER_ID := 2
+const TERRAIN_STEP := 8.0
+const RECIPES := ["plank_1", "cloth_1", "bar_1", "axe_1", "pickaxe_1", "club_1", "jacket_1", "bandage"]
 
-const CAMERA_OFFSET := Vector3(0.0, 17.0, 12.5)
-const DAY_LENGTH := 900.0 # Seconds of server time per day.
-
-var net
-var client
-var peer: ENetMultiplayerPeer
-var streamer: WorldStreamer
-var chunk_root: Node3D
-var entities: Node3D
-var camera: Camera3D
-var sun: DirectionalLight3D
-var environment: Environment
-var water: MeshInstance3D
-var hud
-var avatar: Node3D
-var connect_panel: PanelContainer
-var address_edit: LineEdit
-var name_edit: LineEdit
-var status_label: Label
-var _zoom := 1.0
-var _attack_cooldown := 0.0
-var _screenshot_path := ""
-var _screenshot_frames := 0
-var _demo := ""
-var _frames := 0
-var _demo_frames := 0 # Frames since the first snapshot arrived.
+var world
+var sim
+var survivor
+var _sequence: int = 0
+var _facing: Vector2 = Vector2(0.0, -1.0)
+var _recipe_index: int = 0
+var _camera: Camera3D
+var _avatar: MeshInstance3D
+var _stats: Label
+var _instructions: Label
+var _feedback: String = "Leave the safe hub to gather. Return to the workbench to craft."
+var _chunks: Dictionary = {}
+var _resource_meshes: Dictionary = {}
+var _crate_meshes: Dictionary = {}
+var _zombie_meshes: Dictionary = {}
+var _materials: Dictionary = {}
+var _last_center: Vector2i = Vector2i(999999, 999999)
+var _hud_clock: float = 0.0
 
 
 func _ready() -> void:
-	Engine.physics_ticks_per_second = 30
-	_build_environment()
-	_build_connect_screen()
-	var args := OS.get_cmdline_user_args()
-	var address := "127.0.0.1:24565"
-	var player_name := "Survivor"
-	var i := 0
-	while i < args.size():
-		match args[i]:
-			"--server":
-				i += 1
-				address = args[i]
-			"--name":
-				i += 1
-				player_name = args[i]
-			"--screenshot":
-				i += 1
-				_screenshot_path = args[i]
-			"--demo":
-				i += 1
-				_demo = args[i]
-			"--connect":
-				address_edit.text = address
-		i += 1
-	address_edit.text = address
-	name_edit.text = player_name
-	if "--connect" in args:
-		_connect()
+	_setup_actions()
+	world = WorldGen.new(1337)
+	sim = GameServer.new(world, 1337)
+	survivor = sim.add_player(LOCAL_PLAYER_ID, "Survivor")
+	_make_light_and_camera()
+	_make_avatar()
+	_make_hud()
+	_stream_chunks()
+	_update_hud()
 
 
-func _build_environment() -> void:
-	environment = Environment.new()
-	environment.background_mode = Environment.BG_SKY
-	var sky := Sky.new()
-	sky.sky_material = ProceduralSkyMaterial.new()
-	environment.sky = sky
-	environment.ambient_light_source = Environment.AMBIENT_SOURCE_SKY
-	environment.fog_enabled = true
-	environment.fog_density = 0.0028
-	environment.fog_light_color = Color(0.7, 0.78, 0.86)
-	var world_environment := WorldEnvironment.new()
-	world_environment.environment = environment
-	add_child(world_environment)
-	sun = DirectionalLight3D.new()
-	sun.shadow_enabled = false
-	sun.rotation_degrees = Vector3(-52, 35, 0)
-	add_child(sun)
-	camera = Camera3D.new()
-	camera.fov = 38.0
-	camera.far = 700.0
-	camera.position = CAMERA_OFFSET * 3.0
-	add_child(camera)
-	camera.look_at(Vector3.ZERO)
-	camera.current = true
-	chunk_root = Node3D.new()
-	chunk_root.name = "Chunks"
-	add_child(chunk_root)
-	entities = EntityView.new()
-	add_child(entities)
-	# The sea: one big plane that follows the player.
-	water = MeshInstance3D.new()
-	var plane := PlaneMesh.new()
-	plane.size = Vector2(1400, 1400)
-	water.mesh = plane
-	var water_material := StandardMaterial3D.new()
-	water_material.albedo_color = Color(0.12, 0.35, 0.55, 0.72)
-	water_material.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
-	water_material.roughness = 0.15
-	water_material.metallic = 0.2
-	water.material_override = water_material
-	water.position.y = Defs.WATER_LEVEL - 0.35
-	add_child(water)
+func _setup_actions() -> void:
+	_bind_key("survive_up", KEY_W)
+	_bind_key("survive_down", KEY_S)
+	_bind_key("survive_left", KEY_A)
+	_bind_key("survive_right", KEY_D)
+	_bind_key("survive_sprint", KEY_SHIFT)
+	_bind_key("survive_gather", KEY_E)
+	_bind_key("survive_loot", KEY_Q)
+	_bind_key("survive_attack", KEY_F)
+	_bind_key("survive_craft", KEY_C)
+	_bind_key("survive_next_recipe", KEY_TAB)
+	_bind_key("survive_food", KEY_1)
+	_bind_key("survive_water", KEY_2)
+	_bind_key("survive_bandage", KEY_3)
+	_bind_key("survive_weapon", KEY_4)
+	_bind_key("survive_armor", KEY_5)
+	_bind_key("survive_lake", KEY_R)
 
 
-func _build_connect_screen() -> void:
-	var layer := CanvasLayer.new()
-	layer.layer = 10
-	add_child(layer)
-	connect_panel = PanelContainer.new()
-	connect_panel.set_anchors_preset(Control.PRESET_CENTER)
-	connect_panel.position = Vector2(-190, -110)
-	layer.add_child(connect_panel)
-	var box := VBoxContainer.new()
-	box.custom_minimum_size = Vector2(380, 0)
-	connect_panel.add_child(box)
-	var title := Label.new()
-	title.text = "ALBION AFTER"
-	title.add_theme_font_size_override("font_size", 30)
-	title.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	box.add_child(title)
-	var subtitle := Label.new()
-	subtitle.text = "Gather. Craft. Survive. Lose everything."
-	subtitle.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	box.add_child(subtitle)
-	name_edit = LineEdit.new()
-	name_edit.placeholder_text = "Name"
-	box.add_child(name_edit)
-	address_edit = LineEdit.new()
-	address_edit.placeholder_text = "host:port"
-	box.add_child(address_edit)
-	var button := Button.new()
-	button.text = "Connect"
-	button.pressed.connect(_connect)
-	box.add_child(button)
-	status_label = Label.new()
-	status_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	box.add_child(status_label)
-
-
-func _connect() -> void:
-	var parts := address_edit.text.split(":")
-	var host := parts[0]
-	var port := int(parts[1]) if parts.size() > 1 else 24565
-	net = Net.new()
-	net.name = "Net"
-	net.role = "client"
-	get_tree().root.add_child.call_deferred(net) # RPC paths must match the server: /root/Net.
-	client = GameClient.new(net)
-	peer = ENetMultiplayerPeer.new()
-	if peer.create_client(host, port) != OK:
-		status_label.text = "Could not connect."
+func _bind_key(action: StringName, key: Key) -> void:
+	if InputMap.has_action(action):
 		return
-	multiplayer.multiplayer_peer = peer
-	status_label.text = "Connecting..."
-	multiplayer.connected_to_server.connect(func() -> void:
-		status_label.text = "Joining..."
-		client.join(name_edit.text))
-	multiplayer.connection_failed.connect(func() -> void: status_label.text = "Connection failed.")
-	multiplayer.server_disconnected.connect(func() -> void:
-		status_label.text = "Disconnected."
-		connect_panel.visible = true)
-	net.welcomed.connect(_on_welcomed)
+	InputMap.add_action(action)
+	var event := InputEventKey.new()
+	event.physical_keycode = key
+	InputMap.action_add_event(action, event)
 
 
-func _on_welcomed() -> void:
-	connect_panel.visible = false
-	hud = Hud.new()
-	add_child(hud)
-	hud.setup(client)
-	# Streaming: chunks are built from the seed as the player walks.
-	streamer = WorldStreamer.new()
-	streamer.cell_size = Defs.CHUNK_SIZE
-	streamer.axes = WorldStreamer.AXES_XZ
-	streamer.load_radius = 150.0
-	streamer.unload_radius = 220.0
-	streamer.update_interval = 0.15
-	streamer.max_instantiations_per_frame = 1
-	streamer.set_chunk_generator(_generate_chunk)
-	add_child(streamer)
-	avatar = Node3D.new()
-	var mesh := MeshInstance3D.new()
-	mesh.mesh = Meshes.get_mesh("body")
+func _make_light_and_camera() -> void:
+	var env_node := WorldEnvironment.new()
+	var env := Environment.new()
+	env.background_mode = Environment.BG_COLOR
+	env.background_color = Color(0.16, 0.19, 0.24)
+	env.ambient_light_source = Environment.AMBIENT_SOURCE_COLOR
+	env.ambient_light_color = Color(0.62, 0.68, 0.73)
+	env.ambient_light_energy = 0.7
+	env_node.environment = env
+	add_child(env_node)
+	var sun := DirectionalLight3D.new()
+	sun.rotation_degrees = Vector3(-52.0, -32.0, 0.0)
+	sun.light_energy = 1.3
+	add_child(sun)
+	_camera = Camera3D.new()
+	_camera.name = "Camera3D"
+	_camera.current = true
+	_camera.fov = 58.0
+	add_child(_camera)
+
+
+func _mesh(box_size: Vector3, color: Color) -> MeshInstance3D:
+	var instance := MeshInstance3D.new()
+	var box := BoxMesh.new()
+	box.size = box_size
+	instance.mesh = box
+	var key := str(color)
+	if not _materials.has(key):
+		var material := StandardMaterial3D.new()
+		material.albedo_color = color
+		material.roughness = 0.96
+		_materials[key] = material
+	instance.material_override = _materials[key]
+	return instance
+
+
+func _make_avatar() -> void:
+	_avatar = _mesh(Vector3(0.8, 1.7, 0.8), Color(0.25, 0.69, 0.84))
+	_avatar.name = "Survivor"
+	add_child(_avatar)
+
+
+func _make_hud() -> void:
+	var layer := CanvasLayer.new()
+	layer.name = "HUD"
+	add_child(layer)
+	_stats = Label.new()
+	_stats.name = "Stats"
+	_stats.position = Vector2(18, 18)
+	_stats.add_theme_font_size_override("font_size", 17)
+	layer.add_child(_stats)
+	_instructions = Label.new()
+	_instructions.name = "Instructions"
+	_instructions.position = Vector2(18, 145)
+	_instructions.add_theme_font_size_override("font_size", 15)
+	layer.add_child(_instructions)
+
+
+func _terrain_color(x: float, z: float) -> Color:
+	if world.is_safe(x, z):
+		return Color(0.32, 0.41, 0.31)
+	match world.biome_at(x, z):
+		"water":
+			return Color(0.12, 0.3, 0.52)
+		"beach":
+			return Color(0.53, 0.51, 0.36)
+		"mountain":
+			return Color(0.42, 0.42, 0.44)
+		"swamp":
+			return Color(0.29, 0.38, 0.26)
+		"forest":
+			return Color(0.28, 0.43, 0.27)
+		_:
+			return Color(0.43, 0.41, 0.31)
+
+
+func _terrain_vertex(surface: SurfaceTool, x: float, z: float) -> void:
+	surface.set_color(_terrain_color(x, z))
+	surface.add_vertex(Vector3(x, world.height_at(x, z) - 0.12, z))
+
+
+func _make_terrain(cell: Vector2i) -> MeshInstance3D:
+	var surface := SurfaceTool.new()
+	surface.begin(Mesh.PRIMITIVE_TRIANGLES)
+	var origin: Vector2 = WorldGen.cell_origin(cell)
+	var steps: int = int(Defs.CHUNK_SIZE / TERRAIN_STEP)
+	for ix in range(steps):
+		for iz in range(steps):
+			var x: float = origin.x + float(ix) * TERRAIN_STEP
+			var z: float = origin.y + float(iz) * TERRAIN_STEP
+			_terrain_vertex(surface, x, z)
+			_terrain_vertex(surface, x, z + TERRAIN_STEP)
+			_terrain_vertex(surface, x + TERRAIN_STEP, z)
+			_terrain_vertex(surface, x + TERRAIN_STEP, z)
+			_terrain_vertex(surface, x, z + TERRAIN_STEP)
+			_terrain_vertex(surface, x + TERRAIN_STEP, z + TERRAIN_STEP)
+	surface.generate_normals()
+	var terrain := MeshInstance3D.new()
+	terrain.name = "Terrain"
+	terrain.mesh = surface.commit()
 	var material := StandardMaterial3D.new()
-	material.albedo_color = Color(0.95, 0.9, 0.3)
 	material.vertex_color_use_as_albedo = true
-	mesh.material_override = material
-	avatar.add_child(mesh)
-	var label := Label3D.new()
-	label.text = name_edit.text
-	label.billboard = BaseMaterial3D.BILLBOARD_ENABLED
-	label.no_depth_test = true
-	label.pixel_size = 0.009
-	label.font_size = 28
-	label.outline_size = 8
-	label.position = Vector3(0, 2.5, 0)
-	avatar.add_child(label)
-	add_child(avatar)
+	material.roughness = 1.0
+	terrain.material_override = material
+	return terrain
 
 
-func _generate_chunk(cell: Vector3i) -> Node:
-	var view := ChunkView.new()
-	view.build(client.world, Vector2i(cell.x, cell.z))
-	return view
+func _make_chunk(cell: Vector2i) -> Node3D:
+	var chunk_node := Node3D.new()
+	chunk_node.name = "Chunk_%d_%d" % [cell.x, cell.y]
+	chunk_node.add_child(_make_terrain(cell))
+	var chunk_data: Dictionary = world.chunk(cell)
+	for node in chunk_data["nodes"]:
+		var tint := Color(0.29, 0.62, 0.35)
+		match str(node["kind"]):
+			"rock", "ore":
+				tint = Color(0.58, 0.6, 0.62)
+			"bush", "berry":
+				tint = Color(0.68, 0.72, 0.3)
+		var visible_node := _mesh(Vector3(1.0, 1.25, 1.0), tint)
+		visible_node.position = Vector3(node["x"], node["y"] + 0.55, node["z"])
+		chunk_node.add_child(visible_node)
+		_resource_meshes[int(node["id"])] = visible_node
+	for crate in chunk_data["crates"]:
+		var visible_crate := _mesh(Vector3(1.1, 0.7, 1.0), Color(0.67, 0.42, 0.21))
+		visible_crate.position = Vector3(crate["x"], crate["y"] + 0.35, crate["z"])
+		chunk_node.add_child(visible_crate)
+		_crate_meshes[int(crate["id"])] = visible_crate
+	return chunk_node
+
+
+func _stream_chunks() -> void:
+	var center: Vector2i = WorldGen.cell_of(survivor.position.x, survivor.position.z)
+	if center == _last_center:
+		return
+	_last_center = center
+	for cell in _chunks.keys():
+		if abs(cell.x - center.x) > 1 or abs(cell.y - center.y) > 1:
+			var old_chunk: Node3D = _chunks[cell]
+			for item_id in _resource_meshes.keys():
+				if old_chunk.is_ancestor_of(_resource_meshes[item_id]):
+					_resource_meshes.erase(item_id)
+			for item_id in _crate_meshes.keys():
+				if old_chunk.is_ancestor_of(_crate_meshes[item_id]):
+					_crate_meshes.erase(item_id)
+			_chunks.erase(cell)
+			old_chunk.queue_free()
+	for cx in range(center.x - 1, center.x + 2):
+		for cz in range(center.y - 1, center.y + 2):
+			var cell := Vector2i(cx, cz)
+			if not _chunks.has(cell):
+				var chunk: Node3D = _make_chunk(cell)
+				add_child(chunk)
+				_chunks[cell] = chunk
+
+
+func _sync_zombies() -> void:
+	var active: Dictionary = {}
+	for zombie in sim.zombies.values():
+		if not zombie.is_alive() or zombie.position.distance_to(survivor.position) > 72.0:
+			continue
+		active[zombie.id] = true
+		if not _zombie_meshes.has(zombie.id):
+			var mesh := _mesh(Vector3(0.85, 1.6, 0.85), Color(0.66, 0.37, 0.35))
+			add_child(mesh)
+			_zombie_meshes[zombie.id] = mesh
+		_zombie_meshes[zombie.id].position = zombie.position + Vector3(0.0, 0.8, 0.0)
+	for zombie_id in _zombie_meshes.keys():
+		if not active.has(zombie_id):
+			_zombie_meshes[zombie_id].queue_free()
+			_zombie_meshes.erase(zombie_id)
 
 
 func _physics_process(delta: float) -> void:
-	if client == null or not client.welcomed or not client.you.has("x"):
+	if sim == null:
 		return
-	_attack_cooldown = maxf(_attack_cooldown - delta, 0.0)
-	var alive: bool = bool(client.you.get("alive", true))
-	var move := Vector2.ZERO
-	var sprint := false
-	if alive and not _typing():
-		move.x = Input.get_axis("ui_left", "ui_right") + float(Input.is_key_pressed(KEY_D)) - float(Input.is_key_pressed(KEY_A))
-		move.y = Input.get_axis("ui_up", "ui_down") + float(Input.is_key_pressed(KEY_S)) - float(Input.is_key_pressed(KEY_W))
-		sprint = Input.is_key_pressed(KEY_SHIFT)
-	move = move.limit_length(1.0)
-	var aim := _aim_direction()
-	var yaw: float = atan2(aim.x, aim.y) if aim != Vector2.ZERO else float(client.yaw)
-	client.send_input(move, sprint, yaw, delta)
-	if alive and not hud.is_menu_open() and Input.is_mouse_button_pressed(MOUSE_BUTTON_LEFT) and _attack_cooldown <= 0.0 and aim != Vector2.ZERO:
-		client.attack(aim)
-		_attack_cooldown = 0.18
+	sim.tick(delta)
+	var movement := Input.get_vector("survive_left", "survive_right", "survive_up", "survive_down")
+	if movement.length_squared() > 0.001:
+		_facing = movement.normalized()
+	_sequence += 1
+	sim.submit_input(LOCAL_PLAYER_ID, _sequence, movement.x, movement.y,
+			Input.is_action_pressed("survive_sprint"), atan2(_facing.x, _facing.y), delta)
+	_avatar.position = survivor.position + Vector3(0, 0.85, 0)
+	_camera.position = _camera.position.lerp(survivor.position + Vector3(0, 22, 27), minf(1.0, delta * 7.0))
+	_camera.look_at(survivor.position + Vector3(0, 0.7, 0), Vector3.UP)
+	_stream_chunks()
+	for item_id in _resource_meshes:
+		_resource_meshes[item_id].visible = not sim.depleted.has(item_id)
+	for item_id in _crate_meshes:
+		_crate_meshes[item_id].visible = not sim.opened_crates.has(item_id)
+	_sync_zombies()
+	_hud_clock += delta
+	if _hud_clock > 0.15:
+		_hud_clock = 0.0
+		_update_hud()
 
 
-func _process(delta: float) -> void:
-	_frames += 1
-	if client == null or not client.welcomed or not client.you.has("x"):
-		return
-	client.decay_correction(delta)
-	var position: Vector3 = client.display_position()
-	if avatar != null:
-		avatar.position = position
-		avatar.rotation.y = lerp_angle(avatar.rotation.y, client.yaw, 1.0 - exp(-16.0 * delta))
-		avatar.visible = bool(client.you.get("alive", true))
-	if streamer != null:
-		streamer.focus_position = position
-		_apply_world_state()
-	entities.update_from(client)
-	# The camera glides after the player.
-	var target := position + CAMERA_OFFSET * _zoom
-	camera.position = camera.position.lerp(target, 1.0 - exp(-10.0 * delta))
-	camera.look_at(position + Vector3(0, 0.8, 0))
-	water.position.x = position.x
-	water.position.z = position.z
-	_update_time_of_day()
-	_update_prompt()
-	_run_demo()
+func _nearest_node() -> Dictionary:
+	var found: Dictionary = {}
+	var distance: float = Defs.REACH + 0.5
+	var cell: Vector2i = WorldGen.cell_of(survivor.position.x, survivor.position.z)
+	for dx in range(-1, 2):
+		for dz in range(-1, 2):
+			for node in world.chunk(Vector2i(cell.x + dx, cell.y + dz))["nodes"]:
+				if sim.depleted.has(node["id"]):
+					continue
+				var d := Vector2(survivor.position.x - float(node["x"]), survivor.position.z - float(node["z"])).length()
+				if d < distance:
+					found = node
+					distance = d
+	return found
 
 
-func _apply_world_state() -> void:
-	var hidden: Dictionary = {}
-	hidden.merge(client.depleted)
-	hidden.merge(client.crates_used)
-	for cell in streamer.get_loaded_cells():
-		var chunk := streamer.get_chunk(cell)
-		if chunk != null and chunk.has_method("apply_state"):
-			chunk.apply_state(hidden)
+func _nearest_loot() -> Dictionary:
+	var found: Dictionary = {}
+	var distance: float = Defs.REACH + 0.5
+	for bag in sim.bags.values():
+		var d := Vector2(survivor.position.x - float(bag["x"]), survivor.position.z - float(bag["z"])).length()
+		if d < distance:
+			found = bag
+			distance = d
+	var cell: Vector2i = WorldGen.cell_of(survivor.position.x, survivor.position.z)
+	for dx in range(-1, 2):
+		for dz in range(-1, 2):
+			for crate in world.chunk(Vector2i(cell.x + dx, cell.y + dz))["crates"]:
+				if sim.opened_crates.has(crate["id"]):
+					continue
+				var d := Vector2(survivor.position.x - float(crate["x"]), survivor.position.z - float(crate["z"])).length()
+				if d < distance:
+					found = crate
+					distance = d
+	return found
 
 
-func _update_time_of_day() -> void:
-	var day := fmod(client.server_time / DAY_LENGTH, 1.0)
-	var sun_angle := day * TAU
-	var height := sin(sun_angle) # 1 at noon, -1 at midnight.
-	sun.rotation = Vector3(-deg_to_rad(lerpf(8.0, 70.0, clampf(height, 0.0, 1.0))), deg_to_rad(35.0 + day * 90.0), 0.0)
-	var daylight := clampf(height * 2.0 + 0.5, 0.0, 1.0)
-	sun.light_energy = lerpf(0.08, 1.15, daylight)
-	sun.light_color = Color(1.0, 0.85, 0.65).lerp(Color(1.0, 0.98, 0.94), clampf(height * 1.5, 0.0, 1.0))
-	environment.ambient_light_energy = lerpf(0.25, 1.0, daylight)
-	environment.fog_light_color = Color(0.05, 0.07, 0.12).lerp(Color(0.7, 0.78, 0.86), daylight)
-
-
-func _aim_direction() -> Vector2:
-	var viewport := get_viewport()
-	if viewport == null or client == null or not client.you.has("x"):
-		return Vector2.ZERO
-	var mouse := viewport.get_mouse_position()
-	var origin := camera.project_ray_origin(mouse)
-	var direction := camera.project_ray_normal(mouse)
-	var plane := Plane(Vector3.UP, client.predicted.y + 0.5)
-	var hit: Variant = plane.intersects_ray(origin, direction)
-	if hit == null:
-		return Vector2.ZERO
-	var offset := Vector2(hit.x - client.predicted.x, hit.z - client.predicted.z)
-	return offset.normalized() if offset.length() > 0.05 else Vector2.ZERO
-
-
-func _typing() -> bool:
-	var focus := get_viewport().gui_get_focus_owner()
-	return focus is LineEdit
-
-
-func _update_prompt() -> void:
-	var text := ""
-	var p: Vector3 = client.predicted
-	var loot: Dictionary = client.nearest_loot(p, Defs.REACH)
-	var node: Dictionary = client.nearest_node(p, Defs.REACH)
-	if not loot.is_empty():
-		text = "[E] Loot" if loot["kind"] == "bag" else "[E] Search the crate"
-	elif not node.is_empty():
-		text = "[E] Gather %s (tier %d)" % [node["kind"], node["tier"]]
-		var needed := Defs.tool_tier_for_node(node["kind"])
-		if needed != "":
-			var tool_id: String = client.inventory.best_tool(needed)
-			if Defs.tier_of(tool_id) < int(node["tier"]) and not (tool_id == "" and node["tier"] == 1):
-				text = "Needs a tier %d %s" % [node["tier"], needed]
-	elif Vector2(p.x, p.z).distance_to(Vector2(9.0, 0.0)) < 6.0:
-		text = "Hub workbench: C craft | I inventory/stash (right-click store)"
-	elif _near_water(p):
-		text = "[F] Drink"
-	if not client.you.get("action", {}).is_empty():
-		var action: Dictionary = client.you["action"]
-		text = "Gathering... %d%%" % int(100.0 * (1.0 - float(action["remaining"]) / maxf(float(action["total"]), 0.01)))
-	hud.set_prompt(text)
-
-
-func _near_water(p: Vector3) -> bool:
-	for angle in 8:
-		var spot := Vector2(p.x, p.z) + Vector2.from_angle(angle * TAU / 8.0) * 3.0
-		if client.world.is_water(spot.x, spot.y):
-			return true
-	return false
+func _result(action: String, data: Dictionary) -> void:
+	if bool(data.get("ok", false)):
+		_feedback = "%s: SUCCESS" % action
+	else:
+		_feedback = "%s: %s" % [action, str(data.get("reason", "failed"))]
+	_update_hud()
 
 
 func _unhandled_input(event: InputEvent) -> void:
-	if client == null or not client.welcomed or hud == null:
+	if event.is_action_pressed("survive_gather"):
+		var target := _nearest_node()
+		if target.is_empty():
+			_feedback = "No resource within reach."
+		else:
+			_result("Gather", sim.cmd_gather(LOCAL_PLAYER_ID, target["id"]))
+	elif event.is_action_pressed("survive_loot"):
+		var target := _nearest_loot()
+		if target.is_empty():
+			_feedback = "No nearby crate or loot bag."
+		else:
+			_result("Loot", sim.cmd_loot(LOCAL_PLAYER_ID, target["id"]))
+	elif event.is_action_pressed("survive_attack"):
+		_result("Attack", sim.cmd_attack(LOCAL_PLAYER_ID, _facing.x, _facing.y))
+	elif event.is_action_pressed("survive_next_recipe"):
+		_recipe_index = (_recipe_index + 1) % RECIPES.size()
+	elif event.is_action_pressed("survive_craft"):
+		_result("Craft", sim.cmd_craft(LOCAL_PLAYER_ID, RECIPES[_recipe_index]))
+	elif event.is_action_pressed("survive_food"):
+		_result("Eat", sim.cmd_use(LOCAL_PLAYER_ID, "canned_food"))
+	elif event.is_action_pressed("survive_water"):
+		_result("Drink", sim.cmd_use(LOCAL_PLAYER_ID, "water_bottle"))
+	elif event.is_action_pressed("survive_bandage"):
+		_result("Heal", sim.cmd_use(LOCAL_PLAYER_ID, "bandage"))
+	elif event.is_action_pressed("survive_weapon"):
+		_result("Equip weapon", sim.cmd_use(LOCAL_PLAYER_ID, "club_1"))
+	elif event.is_action_pressed("survive_armor"):
+		_result("Equip armor", sim.cmd_use(LOCAL_PLAYER_ID, "jacket_1"))
+	elif event.is_action_pressed("survive_lake"):
+		_result("Drink from water", sim.cmd_drink_water(LOCAL_PLAYER_ID))
+
+
+func _update_hud() -> void:
+	if survivor == null:
 		return
-	if event is InputEventKey and event.pressed and not event.echo and not _typing():
-		match event.keycode:
-			KEY_E:
-				_interact()
-			KEY_F:
-				client.drink()
-			KEY_I, KEY_TAB:
-				hud.toggle_inventory()
-			KEY_C:
-				hud.toggle_crafting()
-	if event is InputEventMouseButton and event.pressed:
-		if event.button_index == MOUSE_BUTTON_WHEEL_UP:
-			_zoom = clampf(_zoom - 0.1, 0.55, 1.8)
-		elif event.button_index == MOUSE_BUTTON_WHEEL_DOWN:
-			_zoom = clampf(_zoom + 0.1, 0.55, 1.8)
-
-
-func _interact() -> void:
-	var p: Vector3 = client.predicted
-	var loot: Dictionary = client.nearest_loot(p, Defs.REACH)
-	if not loot.is_empty():
-		client.loot(loot["id"])
-		return
-	var node: Dictionary = client.nearest_node(p, Defs.REACH)
-	if not node.is_empty():
-		client.gather(node["id"])
-
-
-# --- Scripted demo for screenshots and videos --------------------------------------------------------------
-
-func _run_demo() -> void:
-	if _demo == "" or client == null:
-		return
-	_demo_frames += 1
-	var net_ref = net
-	match _demo:
-		"ruins":
-			if _demo_frames == 40:
-				var site := _find_ruin()
-				net_ref.c_debug.rpc_id(1, "teleport", {"x": site.x - 16.0, "z": site.y + 10.0})
-				net_ref.c_debug.rpc_id(1, "give", {"item": "club_2", "count": 1})
-				net_ref.c_debug.rpc_id(1, "give", {"item": "jacket_2", "count": 1})
-				net_ref.c_debug.rpc_id(1, "zombie", {"type": "walker", "x": site.x - 8.0, "z": site.y + 12.0})
-				net_ref.c_debug.rpc_id(1, "zombie", {"type": "runner", "x": site.x - 4.0, "z": site.y + 6.0})
-				net_ref.c_debug.rpc_id(1, "zombie", {"type": "brute", "x": site.x, "z": site.y + 14.0})
-			if _demo_frames == 90:
-				client.use_item("club_2")
-				client.use_item("jacket_2")
-		"forest":
-			if _demo_frames == 40:
-				var spot := _find_forest()
-				net_ref.c_debug.rpc_id(1, "teleport", {"x": spot.x, "z": spot.y})
-				net_ref.c_debug.rpc_id(1, "give", {"item": "axe_1", "count": 1})
-		"hub":
-			if _demo_frames == 40:
-				net_ref.c_debug.rpc_id(1, "teleport", {"x": 14.0, "z": 6.0})
-	if _screenshot_path != "":
-		_screenshot_frames += 1
-		if _screenshot_frames == 400:
-			get_viewport().get_texture().get_image().save_png(_screenshot_path)
-			print("CLIENT screenshot saved: ", _screenshot_path)
-			get_tree().quit()
-
-
-func _find_ruin() -> Vector2:
-	for radius in range(5, 14):
-		for cx in range(-radius, radius + 1):
-			for cz in range(-radius, radius + 1):
-				if client.world.chunk(Vector2i(cx, cz))["ruin"] and max(abs(cx), abs(cz)) == radius:
-					return WorldGen.cell_origin(Vector2i(cx, cz)) + Vector2.ONE * Defs.CHUNK_SIZE * 0.5
-	return Vector2(120, 120)
-
-
-func _find_forest() -> Vector2:
-	for radius in range(3, 12):
-		for cx in range(-radius, radius + 1):
-			for cz in range(-radius, radius + 1):
-				if max(abs(cx), abs(cz)) != radius:
-					continue
-				var center := WorldGen.cell_origin(Vector2i(cx, cz)) + Vector2.ONE * 32.0
-				if client.world.biome_at(center.x, center.y) == "forest" and not client.world.is_water(center.x, center.y):
-					return center
-	return Vector2(100, 100)
+	var vitals = survivor.survival
+	var position: Vector3 = survivor.position
+	var zone: int = world.zone_at(position.x, position.z)
+	var rows: PackedStringArray = []
+	for slot in survivor.inventory.slots:
+		if not slot.is_empty():
+			rows.append("%s:%d" % [str(slot["id"]), int(slot["count"])])
+	_stats.text = "ALBION AFTER | LOCAL SURVIVAL PREVIEW\nHP %d  HUNGER %d  THIRST %d  KILLS %d\nZONE %s (T%d)  POS %d,%d  ZOMBIES %d\nINVENTORY %s" % [
+		int(vitals.health), int(vitals.hunger), int(vitals.thirst), survivor.kills,
+		Defs.ZONE_NAMES[zone], world.tier_for_zone(zone), int(position.x), int(position.z),
+		sim.zombies.size(), ", ".join(rows)
+	]
+	var recipe: Dictionary = Defs.recipes()[RECIPES[_recipe_index]]
+	var near_bench: bool = Vector2(position.x, position.z).distance_to(GameServer.WORKBENCH_POSITION) < GameServer.WORKBENCH_RANGE
+	_instructions.text = "WASD move | Shift sprint | E gather | Q loot | F attack\nTab recipe | C craft | 1 eat 2 drink 3 bandage 4 weapon 5 armor R lake\nCRAFT %s -> %s x%d | %s | inputs %s\n%s" % [
+		RECIPES[_recipe_index], str(recipe["output"]), int(recipe["count"]),
+		"WORKBENCH" if near_bench else "workbench at x=9, z=0",
+		str(recipe["inputs"]), _feedback
+	]
