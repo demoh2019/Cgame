@@ -13,7 +13,7 @@ const CASES := [
 	"scene_tree", "packed_scene", "images", "json", "stream", "stream_bulk",
 	"file_io", "threads", "physics_2d", "physics_3d", "physics_sparse_2d", "physics_sparse_3d",
 	"object_churn", "memory_churn", "astar_grid", "astar_grid_rebuild", "astar_relax_2d", "astar_relax_3d", "astar_graph", "tweens", "audio_buffers",
-	"variant_codec", "packet_stream", "packet_tx_batch", "packet_rx_batch", "packet_variant_reuse", "ui_layout", "grid_reflow", "render_2d", "render_3d",
+	"variant_codec", "packet_stream", "packet_tx_batch", "packet_rx_batch", "packet_variant_reuse", "ui_layout", "grid_reflow", "render_2d", "render_3d", "render_ellipse_2d",
 	"resource_load",
 	"input_map",
 	"transform_hierarchy",
@@ -246,6 +246,8 @@ func _run_case(test_case: String, scale: int, frames: int, seed: int) -> Diction
 			return await _memory_churn(scale)
 		"render_2d":
 			return await _render_2d(scale, frames)
+		"render_ellipse_2d":
+			return _render_ellipse_2d(scale)
 		"render_3d":
 			return await _render_3d(scale, frames)
 		"resource_load":
@@ -682,6 +684,28 @@ func _memory_churn(scale: int) -> Dictionary:
 		readings.append(int(Performance.get_monitor(Performance.MEMORY_STATIC)))
 	var retained := readings.back() - readings[2]
 	return {"cycles": readings.size(), "sample_bytes": readings, "retained_growth_bytes": retained}
+
+
+func _render_ellipse_2d(scale: int) -> Dictionary:
+	# A display renderer is required: headless dummy bypasses tessellation.
+	# Include queued render-server work with force_sync at both boundaries.
+	var item := RenderingServer.canvas_item_create()
+	var count := 256 * scale
+	RenderingServer.force_sync()
+	var begin := Time.get_ticks_usec()
+	for i in range(count):
+		var pos := Vector2(float(i % 64) * 5.0, float(i / 64) * 5.0)
+		var radius := 2.0 + float(i & 15)
+		var color := Color(0.8, 0.5, 0.3, 1.0)
+		if i & 1:
+			RenderingServer.canvas_item_add_circle(item, pos, radius, color, (i & 2) != 0)
+		else:
+			RenderingServer.canvas_item_add_ellipse(item, pos, radius, radius * 0.65, color, (i & 2) != 0)
+	RenderingServer.force_sync()
+	var tessellate_ms := float(Time.get_ticks_usec() - begin) / 1000.0
+	RenderingServer.free_rid(item)
+	RenderingServer.force_sync()
+	return {"commands": count, "antialiased_commands": count / 2, "ellipse_cpu_ms": tessellate_ms}
 
 
 func _render_2d(scale: int, frames: int) -> Dictionary:

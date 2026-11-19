@@ -31,7 +31,7 @@ CASES = (
     "scene_tree", "packed_scene", "images", "json", "stream", "stream_bulk",
     "file_io", "threads", "physics_2d", "physics_3d", "physics_sparse_2d", "physics_sparse_3d",
     "object_churn", "memory_churn", "astar_grid", "astar_grid_rebuild", "astar_relax_2d", "astar_relax_3d", "astar_graph", "tweens", "audio_buffers",
-    "variant_codec", "packet_stream", "packet_tx_batch", "packet_rx_batch", "packet_variant_reuse", "ui_layout", "grid_reflow", "render_2d", "render_3d",
+    "variant_codec", "packet_stream", "packet_tx_batch", "packet_rx_batch", "packet_variant_reuse", "ui_layout", "grid_reflow", "render_2d", "render_3d", "render_ellipse_2d",
     "resource_load",
     "input_map",
     "transform_hierarchy",
@@ -44,7 +44,7 @@ CASES = (
     "bitmap_rects", "bitmap_pipeline",
     "curve_tessellation_2d", "curve_tessellation_3d", "curve_bake", "curve_nearest",
 )
-RENDER_CASES = frozenset(("render_2d", "render_3d", "render_multimesh_3d"))
+RENDER_CASES = frozenset(("render_2d", "render_3d", "render_ellipse_2d", "render_multimesh_3d"))
 # Each scenario runs in a fresh process. No preset has unlimited RSS or wall time.
 PRESETS = {
     "smoke": dict(scale=1, frames=12, repeats=1, timeout=90.0, rss_mib=2048),
