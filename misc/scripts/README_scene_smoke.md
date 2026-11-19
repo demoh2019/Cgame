@@ -1,0 +1,22 @@
+# Headless scene smoke tests (roadmap #61, item 44)
+
+`scene_smoke.py` adds a lightweight **Advanced Editor Testing** workflow for Godot 4 projects. It scans `.tscn`/`.scn` files, optionally imports assets, launches **each scene in its own headless Godot process** for a bounded number of iterations and reports failures. This catches process crashes, hangs, nonzero exits and `ERROR:`/`SCRIPT ERROR:` log lines, even when Godot returns exit code 0.
+
+```sh
+python3 misc/scripts/scene_smoke.py /path/to/game --godot /path/to/godot --import-first
+python3 misc/scripts/scene_smoke.py /path/to/game --godot godot --format json --frames 3 --timeout 45 --exclude 'experiments/*'
+python3 -m unittest discover -s misc/scripts/tests -p test_scene_smoke.py -v
+```
+
+Output is sorted by scene path. Exit status: `0` all scenes passed (including an empty scene set), `1` a scene or optional import failed or timed out, `2` invalid arguments, unsafe project tree or missing Godot executable. JSON contains an `ok` boolean and `results` with per-scene `scene`, `status`, `exit_code` and an error log tail; when importing fails, `import` contains the failure and `results` is empty. Error detection examines the **complete captured process log** before truncating reported diagnostics to 6000 characters.
+
+`--max-scenes` (1000 by default) caps test selection; `--timeout` applies to each Godot process (and separately to import), and `--frames` defaults to 2. Hidden generated directories including `.godot` are skipped; symlinked scene files or traversed directories are rejected to avoid unintentionally checking outside the target project. Scene paths are passed as separate subprocess arguments, never via a shell. Python 3.9+ and an installed Godot 4 **editor build** are required for optional `--import-first`.
+
+## Scope and limitations
+
+- **This is a smoke test, not a screenshot comparison or a deterministic gameplay test.** It does not certify rendering fidelity, physics determinism, scene correctness after the chosen number of frames, or availability of platform-specific resources.
+- Running a game scene executes **project code**, which can write files, access the network or start processes. Use only trusted projects, preferably inside disposable CI sandboxes. A timeout limits execution duration, not resource consumption.
+- Non-error warnings are allowed. Some engine diagnostics use formats other than the recognized error prefixes and may not fail the run; review logs and run other tests for full coverage. On platforms without a compatible headless renderer, skip scenes requiring graphics.
+- The Python test suite uses a fake Godot executable for deterministic subprocess, timeout, import and error-detection coverage. Passing those tests does **not** prove an actual Godot engine build or game project passed.
+
+This is the first incremental testing tool for issue #61; **do not mark roadmap item 44 complete** without real-engine CI, examples, and broader editor integration.
