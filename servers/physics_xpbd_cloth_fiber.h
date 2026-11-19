@@ -73,13 +73,19 @@ _FORCE_INLINE_ bool physics_xpbd_cloth_fiber_alpha(
 	}
 	const double multiplier = 1.0 +
 			(double(p_parallel_compliance_ratio) - 1.0) * cos2;
-	const double alpha = double(p_isotropic_alpha) * multiplier;
+	if (!Math::is_finite(multiplier) || multiplier < 0.0) {
+		return false;
+	}
+	// Guard BEFORE multiplication: in a real_t=double build, multiplying
+	// DBL_MAX by a softening ratio must saturate instead of overflowing.
+	const double max_alpha = double(std::numeric_limits<real_t>::max());
+	const double isotropic = double(p_isotropic_alpha);
+	const double alpha = multiplier > 1.0 && isotropic > max_alpha / multiplier ?
+			max_alpha : isotropic * multiplier;
 	if (!Math::is_finite(alpha) || alpha < 0.0) {
 		return false;
 	}
-	// Numerical saturation to the engine's real_t range is allowed;
-	// it still represents an extremely soft finite material.
-	const real_t value = real_t(MIN(alpha, double(std::numeric_limits<real_t>::max())));
+	const real_t value = real_t(MIN(alpha, max_alpha));
 	if (!Math::is_finite(value)) {
 		return false;
 	}
