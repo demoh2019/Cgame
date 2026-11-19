@@ -3490,10 +3490,6 @@ bool String::is_subsequence_ofn(const String &p_string) const {
 	return _base_is_subsequence_of(p_string, true);
 }
 
-bool String::is_quoted() const {
-	return is_enclosed_in("\"") || is_enclosed_in("'");
-}
-
 bool String::is_lowercase() const {
 	for (const char32_t *str = &operator[](0); *str; str++) {
 		if (is_unicode_upper_case(*str)) {

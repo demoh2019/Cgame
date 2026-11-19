@@ -2873,4 +2873,23 @@ TEST_CASE("[String] strip_edges_span trims a single trailing whitespace characte
 	CHECK(String::strip_edges_span(leading.span(), true, true) == Span<char32_t>(U"text"));
 }
 
+
+TEST_CASE("[String] Quoted strings use zero-temporary fast path") {
+	CHECK_FALSE(String().is_quoted());
+	CHECK_FALSE(String("\"").is_quoted());
+	CHECK_FALSE(String("'").is_quoted());
+	CHECK(String("\"\"").is_quoted());
+	CHECK(String("''").is_quoted());
+	CHECK(String("\"hello\"").is_quoted());
+	CHECK(String("'hello'").is_quoted());
+	CHECK_FALSE(String("\"hello'").is_quoted());
+	CHECK_FALSE(String("'hello\"").is_quoted());
+	CHECK_FALSE(String("hello").is_quoted());
+	CHECK(String("abba").is_enclosed_in("a"));
+	CHECK(String("ababab").is_enclosed_in("ab"));
+	CHECK(String("abba").is_enclosed_in(""));
+	CHECK_FALSE(String("abax").is_enclosed_in("ab"));
+	CHECK(String("abba").is_enclosed_in('a', 'a'));
+	CHECK_FALSE(String("a").is_enclosed_in('a', 'a'));
+}
 } // namespace TestString

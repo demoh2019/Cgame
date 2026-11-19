@@ -736,4 +736,33 @@ TEST_CASE("[Resource] Threaded nested loads release task tokens") {
 	}
 }
 
+
+TEST_CASE("[Resource] set_path lookup, takeover and collision") {
+	const String cache_path = "res://__cgame_resource_path_20261119__.tres";
+	const String other_path = "res://__cgame_resource_path_other_20261119__.tres";
+	Ref<Resource> first;
+	first.instantiate();
+	Ref<Resource> second;
+	second.instantiate();
+	CHECK_FALSE(ResourceCache::has(cache_path));
+	first->set_path(cache_path);
+	CHECK(ResourceCache::get_ref(cache_path) == first);
+	first->set_path(cache_path);
+	CHECK_EQ(first->get_path(), cache_path);
+	second->set_path(other_path);
+	ERR_PRINT_OFF;
+	second->set_path(cache_path);
+	ERR_PRINT_ON;
+	CHECK_EQ(first->get_path(), cache_path);
+	CHECK(second->get_path().is_empty());
+	CHECK(ResourceCache::get_ref(cache_path) == first);
+	second->set_path(other_path);
+	second->set_path(cache_path, true);
+	CHECK(first->get_path().is_empty());
+	CHECK(ResourceCache::get_ref(cache_path) == second);
+	CHECK_FALSE(ResourceCache::has(other_path));
+	second->set_path(String());
+	CHECK_FALSE(ResourceCache::has(cache_path));
+}
+
 } // namespace TestResource
