@@ -50,8 +50,13 @@ void BitMap::create(const Size2i &p_size) {
 
 void BitMap::create_from_image_alpha(const Ref<Image> &p_image, float p_threshold) {
 	ERR_FAIL_COND(p_image.is_null() || p_image->is_empty());
-	Ref<Image> img = p_image->duplicate();
-	img->convert(Image::FORMAT_LA8);
+	// Already-LA8 images can be read directly. Only duplicate before a
+	// format conversion, which must never mutate the caller's Image.
+	Ref<Image> img = p_image;
+	if (img->get_format() != Image::FORMAT_LA8) {
+		img = img->duplicate();
+		img->convert(Image::FORMAT_LA8);
+	}
 	ERR_FAIL_COND(img->get_format() != Image::FORMAT_LA8);
 
 	create(Size2i(img->get_width(), img->get_height()));
@@ -689,15 +694,21 @@ void BitMap::resize(const Size2i &p_new_size) {
 }
 
 Ref<Image> BitMap::convert_to_image() const {
-	Ref<Image> image = Image::create_empty(width, height, false, Image::FORMAT_L8);
-
-	for (int i = 0; i < width; i++) {
-		for (int j = 0; j < height; j++) {
-			image->set_pixel(i, j, get_bit(i, j) ? Color(1, 1, 1) : Color(0, 0, 0));
-		}
+	if (width == 0 || height == 0) {
+		return Image::create_empty(width, height, false, Image::FORMAT_L8);
 	}
 
-	return image;
+	// FORMAT_L8 is one byte per pixel. Avoid per-pixel Color conversion,
+	// bounds checks and image updates; the packed mask is already row-major.
+	Vector<uint8_t> image_data;
+	image_data.resize(width * height);
+	uint8_t *dst = image_data.ptrw();
+	const uint8_t *src = bitmask.ptr();
+	const int pixels = width * height;
+	for (int i = 0; i < pixels; i++) {
+		dst[i] = (src[i >> 3] & (1u << (i & 7))) ? 0xff : 0;
+	}
+	return Image::create_from_data(width, height, false, Image::FORMAT_L8, image_data);
 }
 
 void BitMap::blit(const Vector2i &p_pos, const Ref<BitMap> &p_bitmap) {
