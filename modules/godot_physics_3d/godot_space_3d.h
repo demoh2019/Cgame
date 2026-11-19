@@ -161,6 +161,7 @@ private:
 	Vector3 fluid_flow_velocity; // Constant ambient current or wind, in world space.
 	// Advanced, opt-in flat water plane: displacement per partly submerged shape.
 	bool fluid_plane_enabled = false;
+	bool soft_body_hydrostatic_buoyancy = false; // Closed mesh only; off by default.
 	real_t fluid_plane_surface_height = 0.0;
 	real_t fluid_plane_density = 1000.0;
 	real_t fluid_plane_drag_coefficient = 0.8;
@@ -290,6 +291,7 @@ public:
 	_FORCE_INLINE_ real_t get_fluid_buoyancy() const { return fluid_buoyancy; }
 	_FORCE_INLINE_ const Vector3 &get_fluid_flow_velocity() const { return fluid_flow_velocity; }
 	_FORCE_INLINE_ bool is_fluid_plane_enabled() const { return fluid_plane_enabled; }
+	_FORCE_INLINE_ bool is_soft_body_hydrostatic_buoyancy_enabled() const { return soft_body_hydrostatic_buoyancy; }
 	_FORCE_INLINE_ real_t get_fluid_plane_surface_height() const { return fluid_plane_surface_height; }
 	_FORCE_INLINE_ real_t get_fluid_plane_density() const { return fluid_plane_density; }
 	_FORCE_INLINE_ real_t get_fluid_plane_drag_coefficient() const { return fluid_plane_drag_coefficient; }
