@@ -238,4 +238,41 @@ TEST_CASE("[BVH] 3D point culls stop at result capacity") {
 	CHECK(CountingCullTest::calls == 1);
 }
 
+TEST_CASE("[BVH] 3D convex culls stop at requested result capacity") {
+	using Tree = BVH_Manager<Item, 2, true, 16, PairTest, CountingCullTest, AABB, Vector3, false>;
+	Tree tree;
+	constexpr int COUNT = 48;
+	Item items[COUNT];
+	for (int i = 0; i < COUNT; i++) {
+		items[i].value = i;
+		tree.create(&items[i], true, uint32_t(i & 1), 3, AABB(Vector3(0, 0, 0), Vector3(4, 4, 4)));
+	}
+
+	// Six outward-facing planes enclosing every AABB in both trees.
+	Vector<Plane> hull;
+	hull.push_back(Plane(Vector3(1, 0, 0), 10));
+	hull.push_back(Plane(Vector3(-1, 0, 0), 10));
+	hull.push_back(Plane(Vector3(0, 1, 0), 10));
+	hull.push_back(Plane(Vector3(0, -1, 0), 10));
+	hull.push_back(Plane(Vector3(0, 0, 1), 10));
+	hull.push_back(Plane(Vector3(0, 0, -1), 10));
+
+	Item *results[3] = { nullptr, nullptr, nullptr };
+	CountingCullTest::calls = 0;
+	CHECK(tree.cull_convex(hull, results, 1, nullptr) == 1);
+	CHECK(results[0] != nullptr);
+	CHECK(CountingCullTest::calls == 1);
+
+	CountingCullTest::calls = 0;
+	CHECK(tree.cull_convex(hull, results, 3, nullptr) == 3);
+	CHECK(results[0] != nullptr);
+	CHECK(results[1] != nullptr);
+	CHECK(results[2] != nullptr);
+	CHECK(CountingCullTest::calls == 3);
+
+	CountingCullTest::calls = 0;
+	CHECK(tree.cull_convex(hull, results, 0, nullptr) == 0);
+	CHECK(CountingCullTest::calls == 0);
+}
+
 } // namespace TestBVH
