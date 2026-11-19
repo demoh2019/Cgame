@@ -935,6 +935,73 @@ static void _collision_circle_convex_polygon(const GodotShape2D *p_a, const Tran
 	const GodotCircleShape2D *circle_A = static_cast<const GodotCircleShape2D *>(p_a);
 	const GodotConvexPolygonShape2D *convex_B = static_cast<const GodotConvexPolygonShape2D *>(p_b);
 
+	// Specialized circle/polygon narrow phase inspired by Box2D: compare the
+	// circle against the nearest polygon boundary point in polygon-local space.
+	// This avoids SAT support projections on separated and exterior contacts.
+	// Embedded centers, degenerate edges, casts and non-rigid transforms use SAT.
+	if (!p_cast_A && !p_cast_B && p_margin_A >= 0.0 && p_margin_B >= 0.0 &&
+			circle_A->get_radius() >= 0.0 && convex_B->get_point_count() >= 3 &&
+			_is_unit_orthogonal_transform(p_transform_a) &&
+			_is_unit_orthogonal_transform(p_transform_b)) {
+		const Vector2 center_world = p_transform_a.get_origin();
+		const Vector2 center_local = p_transform_b.basis_xform_inv(center_world - p_transform_b.get_origin());
+		real_t distance_squared = -1.0;
+		Vector2 closest_local;
+		bool has_positive_cross = false;
+		bool has_negative_cross = false;
+		bool valid_edges = true;
+
+		for (int i = 0; i < convex_B->get_point_count(); i++) {
+			const Vector2 start = convex_B->get_point(i);
+			const Vector2 end = convex_B->get_point((i + 1) % convex_B->get_point_count());
+			const Vector2 edge = end - start;
+			const real_t edge_length_squared = edge.length_squared();
+			if (edge_length_squared <= CMP_EPSILON * CMP_EPSILON) {
+				valid_edges = false;
+				break;
+			}
+
+			const Vector2 from_start = center_local - start;
+			const real_t cross = edge.cross(from_start);
+			has_positive_cross |= cross > 0.0;
+			has_negative_cross |= cross < 0.0;
+
+			const real_t fraction = CLAMP(from_start.dot(edge) / edge_length_squared, real_t(0.0), real_t(1.0));
+			const Vector2 candidate = start + edge * fraction;
+			const real_t candidate_distance_squared = center_local.distance_squared_to(candidate);
+			if (distance_squared < 0.0 || candidate_distance_squared < distance_squared) {
+				distance_squared = candidate_distance_squared;
+				closest_local = candidate;
+			}
+		}
+
+		// A valid convex polygon has a consistent edge orientation. If the
+		// center is inside (or on the boundary), SAT retains its stable normal.
+		if (valid_edges && has_positive_cross && has_negative_cross && distance_squared > 0.0) {
+			const real_t radius_A = circle_A->get_radius() + p_margin_A;
+			const real_t total_radius = radius_A + p_margin_B;
+			const Vector2 outward_local = center_local - closest_local;
+			if (distance_squared > total_radius * total_radius) {
+				if (p_collector->sep_axis) {
+					*p_collector->sep_axis = p_transform_b.basis_xform(outward_local / Math::sqrt(distance_squared));
+				}
+				return;
+			}
+
+			p_collector->collided = true;
+			if (p_collector->callback) {
+				const Vector2 normal = p_transform_b.basis_xform(outward_local / Math::sqrt(distance_squared));
+				p_collector->normal = normal;
+				p_collector->call(center_world - normal * radius_A,
+						p_transform_b.xform(closest_local) + normal * p_margin_B);
+			}
+			if (p_collector->sep_axis) {
+				*p_collector->sep_axis = Vector2();
+			}
+			return;
+		}
+	}
+
 	SeparatorAxisTest2D<GodotCircleShape2D, GodotConvexPolygonShape2D> separator(circle_A, p_transform_a, convex_B, p_transform_b, p_collector, p_motion_a, p_motion_b, p_cast_A, p_cast_B, p_with_margin, p_margin_A, p_margin_B);
 
 	if (!separator.test_previous_axis()) {
