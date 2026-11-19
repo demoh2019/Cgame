@@ -5,10 +5,16 @@ extends Node3D
 
 const PLAYER_SCRIPT = preload("res://player.gd")
 const PICKUP_SCRIPT = preload("res://pickup.gd")
+const RESOURCE_SCRIPT = preload("res://resource_node.gd")
+const DAY_NIGHT_SCRIPT = preload("res://day_night.gd")
 
 var player
 var hud_label: Label
 var prompt_label: Label
+var day_night
+var campfire_count := 0
+var _message := ""
+var _message_seconds := 0.0
 
 
 func _ready() -> void:
@@ -16,6 +22,8 @@ func _ready() -> void:
     _build_world()
     _build_player()
     _build_pickups()
+    _build_resources()
+    _build_day_night()
     _build_hud()
 
 
@@ -29,6 +37,7 @@ func _configure_controls() -> void:
     _bind_key("interact", KEY_E)
     _bind_key("consume_food", KEY_1)
     _bind_key("consume_water", KEY_2)
+    _bind_key("craft_campfire", KEY_F)
     _bind_key("restart", KEY_R)
 
 
@@ -149,6 +158,32 @@ func _add_pickup(node_name: String, kind: String, title: String,
     add_child(pickup)
 
 
+func _build_resources() -> void:
+    _add_resource("TimberA", "wood", 1, Vector3(0.0, 1.0, 4.8))
+    _add_resource("TimberB", "wood", 1, Vector3(3.0, 1.0, 3.0))
+    _add_resource("StoneA", "stone", 1, Vector3(4.5, 1.0, 1.5))
+    _add_resource("StoneB", "stone", 1, Vector3(-3.5, 1.0, -1.0))
+    _add_resource("FiberA", "fiber", 1, Vector3(-3.5, 1.0, 2.5))
+    _add_resource("HighTierWood", "wood", 2, Vector3(8.0, 1.0, -4.0))
+
+
+func _add_resource(node_name: String, kind: String, tier: int, location: Vector3) -> void:
+    var resource = RESOURCE_SCRIPT.new()
+    resource.name = node_name
+    resource.resource_kind = kind
+    resource.tier = tier
+    resource.yield_count = 2
+    resource.display_name = "%s T%d" % [kind, tier]
+    resource.position = location
+    add_child(resource)
+
+
+func _build_day_night() -> void:
+    day_night = DAY_NIGHT_SCRIPT.new()
+    day_night.name = "DayNight"
+    add_child(day_night)
+
+
 func _build_hud() -> void:
     var ui := CanvasLayer.new()
     ui.name = "HUD"
@@ -170,7 +205,7 @@ func _build_hud() -> void:
 
     var help_label := Label.new()
     help_label.text = "WASD — ходьба | Shift — бег | Space — прыжок\n" + \
-        "E — подобрать | 1 — съесть | 2 — выпить\n" + \
+        "E — собрать | 1 — еда | 2 — вода | F — костёр\n" + \
         "Esc — освободить мышь | ЛКМ — вернуть | R — заново"
     column.add_child(help_label)
 
@@ -185,21 +220,76 @@ func _build_hud() -> void:
     crosshair.set_anchors_and_offsets_preset(Control.PRESET_CENTER)
 
 
-func _process(_delta: float) -> void:
+func _process(delta: float) -> void:
     if player == null or hud_label == null:
         return
-    hud_label.text = "DAYS AFTER — ПРОТОТИП\n" + \
-        "Здоровье: %d   Голод: %d   Жажда: %d\n" % [
-            roundi(player.health), roundi(player.hunger), roundi(player.thirst)
-        ] + "Рюкзак: еда × %d   вода × %d" % [
-            player.food_count, player.water_count
-        ]
+    _message_seconds = maxf(0.0, _message_seconds - delta)
+    hud_label.text = "DAYS AFTER | День %d, %s\n" % [
+        day_night.day_number, day_night.get_time_label()
+    ] + "HP: %d   Голод: %d   Жажда: %d   Выносливость: %d\n" % [
+        roundi(player.health), roundi(player.hunger), roundi(player.thirst), roundi(player.stamina)
+    ] + "Рюкзак: еда ×%d вода ×%d дерево T1 ×%d камень T1 ×%d\n" % [
+        player.get_item_count("food"), player.get_item_count("water"),
+        player.get_item_count("wood_t1"), player.get_item_count("stone_t1")
+    ] + "Костры: %d | Для костра: 3 дерева T1 + 2 камня T1" % campfire_count
     if player.health <= 0.0:
         prompt_label.text = "Вы погибли от истощения. Нажмите R, чтобы начать заново."
+    elif _message_seconds > 0.0:
+        prompt_label.text = _message
     else:
         var target: Node = player.get_aimed_pickup()
         prompt_label.text = ("[E] Подобрать: " + str(target.get("display_name"))
             if target != null else "Исследуйте руины и найдите припасы.")
 
+    if Input.is_action_just_pressed("craft_campfire"):
+        _craft_campfire()
     if Input.is_action_just_pressed("restart"):
         get_tree().reload_current_scene()
+
+
+func _craft_campfire() -> bool:
+    if player == null or player.health <= 0.0:
+        return false
+    if player.get_item_count("wood_t1") < 3 or player.get_item_count("stone_t1") < 2:
+        _message = "Для костра нужны 3 дерева T1 и 2 камня T1."
+        _message_seconds = 3.0
+        return false
+    player.inventory["wood_t1"] = player.get_item_count("wood_t1") - 3
+    player.inventory["stone_t1"] = player.get_item_count("stone_t1") - 2
+    campfire_count += 1
+    var campfire := Node3D.new()
+    campfire.name = "Campfire_%d" % campfire_count
+    campfire.position = player.global_position + Vector3(1.6, -0.75, 0.0)
+
+    var body := MeshInstance3D.new()
+    var body_mesh := CylinderMesh.new()
+    body_mesh.top_radius = 0.8
+    body_mesh.bottom_radius = 0.85
+    body_mesh.height = 0.25
+    body.mesh = body_mesh
+    var body_material := StandardMaterial3D.new()
+    body_material.albedo_color = Color("#6c3b20")
+    body.material_override = body_material
+    campfire.add_child(body)
+
+    var flame := MeshInstance3D.new()
+    var flame_mesh := SphereMesh.new()
+    flame_mesh.radius = 0.4
+    flame_mesh.height = 0.65
+    flame.mesh = flame_mesh
+    flame.position.y = 0.4
+    var fire_material := StandardMaterial3D.new()
+    fire_material.albedo_color = Color("#ff7a24")
+    flame.material_override = fire_material
+    campfire.add_child(flame)
+
+    var light := OmniLight3D.new()
+    light.position.y = 0.65
+    light.light_color = Color("#ff9a43")
+    light.light_energy = 1.8
+    light.omni_range = 7.0
+    campfire.add_child(light)
+    add_child(campfire)
+    _message = "Костёр построен!"
+    _message_seconds = 3.0
+    return true

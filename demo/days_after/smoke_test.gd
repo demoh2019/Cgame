@@ -28,7 +28,7 @@ func _run() -> void:
     food.call("interact", survivor)
     food.call("interact", survivor)
     water.call("interact", survivor)
-    if int(survivor.get("food_count")) != 2 or int(survivor.get("water_count")) != 1:
+    if int(survivor.call("get_item_count", "food")) != 2 or int(survivor.call("get_item_count", "water")) != 1:
         push_error("Loot was not collected exactly once.")
         quit(1)
         return
@@ -37,7 +37,7 @@ func _run() -> void:
     survivor.set("thirst", 10.0)
     survivor.call("consume_food")
     survivor.call("consume_water")
-    if int(survivor.get("food_count")) != 1 or int(survivor.get("water_count")) != 0:
+    if int(survivor.call("get_item_count", "food")) != 1 or int(survivor.call("get_item_count", "water")) != 0:
         push_error("Consumption did not decrement the inventory.")
         quit(1)
         return
@@ -46,6 +46,41 @@ func _run() -> void:
         quit(1)
         return
 
+    var wood = game.get_node_or_null("TimberA")
+    var wood_b = game.get_node_or_null("TimberB")
+    var stone = game.get_node_or_null("StoneA")
+    if wood == null or wood_b == null or stone == null:
+        push_error("Missing tier-one harvesting deposits.")
+        quit(1)
+        return
+    for deposit in [wood, wood_b, stone]:
+        deposit.call("interact", survivor)
+    if int(survivor.call("get_item_count", "wood_t1")) != 4:
+        push_error("Tier-one wood gathering did not populate the inventory.")
+        quit(1)
+        return
+    if not bool(game.call("_craft_campfire")) or game.get_node_or_null("Campfire_1") == null:
+        push_error("Campfire crafting failed.")
+        quit(1)
+        return
+    if int(survivor.call("get_item_count", "wood_t1")) != 1:
+        push_error("Campfire crafting did not consume wood.")
+        quit(1)
+        return
+    if bool(game.call("_craft_campfire")):
+        push_error("Campfire crafting incorrectly ignored missing stone.")
+        quit(1)
+        return
+    var clock = game.get_node_or_null("DayNight")
+    if clock == null:
+        push_error("Day/night controller is missing.")
+        quit(1)
+        return
+    clock.call("advance", 240.0)
+    if int(clock.get("day_number")) != 2:
+        push_error("Day/night controller did not reach day two.")
+        quit(1)
+        return
     for i in range(10):
         await physics_frame
     if not survivor.global_position.is_finite():

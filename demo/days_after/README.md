@@ -27,13 +27,16 @@ or third-party plugins are required.
 | E | Pick up a crate while aiming at it |
 | 1 | Eat one collected food item |
 | 2 | Drink one collected water item |
+| F | Build a campfire from 3 wood T1 and 2 stone T1 |
 | Esc | Release pointer |
 | Left mouse button | Capture pointer |
 | R | Restart the scene |
 
-The HUD shows health, hunger, thirst, inventory and an interaction hint.
+The HUD shows health, hunger, thirst, stamina, in-game time, inventory and a contextual hint.
 Food restores 35 hunger points; water restores 45 thirst points. Depletion
-reduces health. Pickups cannot be collected twice.
+reduces health. Sprinting drains stamina and walking recovers it. Gatherable
+wood, stone and fiber support progression; campfires emit OmniLight3D light.
+One full day lasts four real minutes. Pickups cannot be collected twice.
 
 ## Smoke test
 

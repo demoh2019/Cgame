@@ -19,6 +19,7 @@ const RECIPES := {
 var health: float = 100.0
 var hunger: float = 80.0
 var thirst: float = 80.0
+var stamina: float = 100.0
 var inventory: Dictionary = {}
 var gathering_xp: Dictionary = {"wood": 0, "stone": 0, "fiber": 0}
 var crafting_xp: int = 0
@@ -55,7 +56,12 @@ func _physics_process(delta: float) -> void:
 
     var move_input := Input.get_vector("move_left", "move_right", "move_forward", "move_back")
     var direction := (global_transform.basis * Vector3(move_input.x, 0.0, move_input.y)).normalized()
-    var move_speed := SPRINT_SPEED if Input.is_action_pressed("sprint") else WALK_SPEED
+    var running := Input.is_action_pressed("sprint") and stamina > 0.0 and health > 0.0 and move_input.length_squared() > 0.0
+    var move_speed := SPRINT_SPEED if running else WALK_SPEED
+    if running:
+        stamina = maxf(0.0, stamina - 12.0 * delta)
+    else:
+        stamina = minf(100.0, stamina + 8.0 * delta)
     velocity.x = direction.x * move_speed if health > 0.0 else 0.0
     velocity.z = direction.z * move_speed if health > 0.0 else 0.0
     move_and_slide()
