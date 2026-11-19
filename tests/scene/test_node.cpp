@@ -1576,6 +1576,46 @@ TEST_CASE("[SceneTree][Node] Exact child queries work with dirty traversal cache
 	memdelete(root);
 }
 
+TEST_CASE("[SceneTree][Node] Reparenting a large owned subtree preserves all descendant owners") {
+	Node *root = memnew(Node);
+	Node *left = memnew(Node);
+	Node *right = memnew(Node);
+	root->add_child(left);
+	root->add_child(right);
+
+	Node *branch = memnew(Node);
+	left->add_child(branch);
+	branch->set_owner(root);
+	Vector<Node *> descendants;
+	for (int i = 0; i < 128; i++) {
+		Node *child = memnew(Node);
+		child->set_name("Owned" + itos(i));
+		branch->add_child(child);
+		child->set_owner(root);
+		descendants.push_back(child);
+		Node *grandchild = memnew(Node);
+		grandchild->set_name("Leaf");
+		child->add_child(grandchild);
+		grandchild->set_owner(root);
+	}
+
+	branch->reparent(right, false);
+	CHECK_EQ(branch->get_parent(), right);
+	CHECK_EQ(branch->get_owner(), root);
+	CHECK_EQ(left->get_child_count(), 0);
+	CHECK_EQ(right->get_child_count(), 1);
+	CHECK_EQ(branch->get_child_count(false), 128);
+	for (int i = 0; i < descendants.size(); i++) {
+		Node *child = descendants[i];
+		CHECK_EQ(branch->get_child(i), child);
+		CHECK_EQ(child->get_owner(), root);
+		CHECK_EQ(child->get_child_count(), 1);
+		CHECK_EQ(child->get_child(0)->get_owner(), root);
+	}
+
+	memdelete(root);
+}
+
 TEST_CASE("[SceneTree][Node] Human-readable names carry long numeric suffixes") {
 	Node *root = memnew(Node);
 	String separator;
