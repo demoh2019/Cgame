@@ -5603,13 +5603,35 @@ String String::get_extension() const {
 }
 
 String String::path_join(const String &p_file) const {
-	if (is_empty()) {
+	const int base_length = length();
+	if (base_length == 0) {
 		return p_file;
 	}
-	if (operator[](length() - 1) == '/' || (p_file.size() > 0 && p_file.operator[](0) == '/')) {
-		return *this + p_file;
+	const int file_length = p_file.length();
+	const bool already_separated = ptr()[base_length - 1] == '/' ||
+			(file_length > 0 && p_file.ptr()[0] == '/');
+	if (file_length == 0 && already_separated) {
+		return *this; // Joining an empty segment needs no additional allocation.
 	}
-	return *this + "/" + p_file;
+
+	const int separator_length = already_separated ? 0 : 1;
+	const int64_t result_length = int64_t(base_length) + file_length + separator_length;
+	ERR_FAIL_COND_V_MSG(result_length >= INT32_MAX, "", "Joined path is too long.");
+
+	String result;
+	result.resize_uninitialized(int(result_length) + 1);
+	char32_t *write = result.ptrw();
+	memcpy(write, ptr(), size_t(base_length) * sizeof(char32_t));
+	write += base_length;
+	if (separator_length) {
+		*write++ = '/';
+	}
+	if (file_length > 0) {
+		memcpy(write, p_file.ptr(), size_t(file_length) * sizeof(char32_t));
+		write += file_length;
+	}
+	*write = 0;
+	return result;
 }
 
 String String::property_name_encode() const {
