@@ -84,6 +84,8 @@ class JoltContactListener3D final
 	struct ThreadLocals {
 		SelfList<ThreadLocals> instances_element;
 
+		// Per-thread count: no contended atomic operation on contact callbacks.
+		uint64_t contact_manifold_callbacks = 0;
 		LocalVector<Manifold> manifolds;
 		LocalVector<JPH::SubShapeIDPair> area_enters;
 		LocalVector<JPH::SubShapeIDPair> area_exits;
@@ -107,6 +109,8 @@ class JoltContactListener3D final
 	HashSet<JPH::SubShapeIDPair, ShapePairHasher> area_soft_body_overlaps;
 
 	JoltSpace3D *space = nullptr;
+	// Last completed step, aggregated after all worker callbacks finish.
+	int contact_manifold_count = 0;
 
 #ifdef DEBUG_ENABLED
 	PackedVector3Array debug_contacts;
@@ -156,6 +160,7 @@ public:
 
 	void pre_step();
 	void post_step();
+	int get_contact_manifold_count() const { return contact_manifold_count; }
 
 #ifdef DEBUG_ENABLED
 	const PackedVector3Array &get_debug_contacts() const { return debug_contacts; }
