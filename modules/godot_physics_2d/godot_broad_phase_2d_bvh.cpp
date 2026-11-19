@@ -67,7 +67,8 @@ void GodotBroadPhase2DBVH::end_batch() {
 
 void GodotBroadPhase2DBVH::force_collision_check(ID p_id) {
 	ERR_FAIL_COND(!p_id);
-	bvh.force_collision_check(p_id - 1);
+	// A compound object's filters are updated in a single BVH batch.
+	bvh.force_collision_check(p_id - 1, batch_depth > 0);
 }
 
 void GodotBroadPhase2DBVH::move(ID p_id, const Rect2 &p_aabb) {
