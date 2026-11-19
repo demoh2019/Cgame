@@ -509,10 +509,12 @@ void GodotSoftBody3D::initialize_dihedral_constraints() {
 // is enabled on the owning physics space.
 void GodotSoftBody3D::initialize_self_collision_topology() {
 	xpbd_self_contacts.reset();
-	xpbd_self_neighbor_edges.clear();
 	if (!get_space() || !(get_space()->get_soft_body_self_collision_thickness() > 0.0)) {
+		xpbd_self_neighbor_edges.reset();
 		return;
 	}
+	// Retain topology-map capacity when rebuilding an enabled mesh.
+	xpbd_self_neighbor_edges.clear();
 	for (const Face &face : faces) {
 		for (int side = 0; side < 3; ++side) {
 			const uint32_t a = face.n[side]->index;
@@ -1991,7 +1993,7 @@ void GodotSoftBody3D::destroy() {
 	xpbd_dihedral_hinges.reset();
 	xpbd_dihedral_lambdas.reset();
 	xpbd_self_contacts.reset();
-	xpbd_self_neighbor_edges.clear();
+	xpbd_self_neighbor_edges.reset();
 	xpbd_volume_gradients.reset();
 	xpbd_volume_closed = false;
 	xpbd_volume_rest = 0.0;
