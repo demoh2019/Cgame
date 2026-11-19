@@ -23,6 +23,7 @@ const INVESTIGATE_SECONDS := 4.0
 var think_timer: float = 0.0
 var attack_timer: float = 0.0
 var stuck_time: float = 0.0
+var contributors: Dictionary = {} # Server: peer -> time + equipped weapon for PvE assist XP.
 var data: Dictionary
 
 
