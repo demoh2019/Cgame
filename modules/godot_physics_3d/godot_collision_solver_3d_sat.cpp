@@ -857,10 +857,15 @@ static void _collision_sphere_box(const GodotShape3D *p_a, const Transform3D &p_
 	const GodotSphereShape3D *sphere_A = static_cast<const GodotSphereShape3D *>(p_a);
 	const GodotBoxShape3D *box_B = static_cast<const GodotBoxShape3D *>(p_b);
 
-	// Find the point on the box nearest to the center of the sphere.
-
-	const Transform3D box_inverse = p_transform_b.affine_inverse();
-	Vector3 center = box_inverse.xform(p_transform_a.origin);
+	// Box3D-style specialized AABB closest-point path: for an exactly
+	// unrotated, unscaled box the inverse is a translation. Avoid an
+	// affine matrix inversion for the common sphere-versus-static-box case.
+	// Keep affine_inverse() unchanged for rotated, scaled or sheared boxes.
+	const bool unrotated_box = p_transform_b.basis == Basis();
+	const Transform3D box_inverse = unrotated_box ?
+			Transform3D(Basis(), -p_transform_b.origin) : p_transform_b.affine_inverse();
+	Vector3 center = unrotated_box ?
+			p_transform_a.origin - p_transform_b.origin : box_inverse.xform(p_transform_a.origin);
 	Vector3 extents = box_B->get_half_extents();
 	const bool center_inside = Math::abs(center.x) <= extents.x &&
 			Math::abs(center.y) <= extents.y &&
@@ -868,7 +873,7 @@ static void _collision_sphere_box(const GodotShape3D *p_a, const Transform3D &p_
 	Vector3 nearest(MIN(MAX(center.x, -extents.x), extents.x),
 			MIN(MAX(center.y, -extents.y), extents.y),
 			MIN(MAX(center.z, -extents.z), extents.z));
-	nearest = p_transform_b.xform(nearest);
+	nearest = unrotated_box ? p_transform_b.origin + nearest : p_transform_b.xform(nearest);
 
 	// See if it is inside the sphere.
 
