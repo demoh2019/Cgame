@@ -709,6 +709,14 @@ void GodotBody3D::integrate_velocities(real_t p_step) {
 	}
 
 	Vector3 total_angular_velocity = angular_velocity + biased_angular_velocity;
+	Vector3 total_linear_velocity = linear_velocity + biased_linear_velocity;
+
+	// The mass properties and inertia tensor are already updated when they
+	// change. Avoid rebuilding an unchanged transform (and its inverse) for
+	// active stationary bodies, which is common in sparse simulations.
+	if (total_angular_velocity == Vector3() && total_linear_velocity == Vector3()) {
+		return;
+	}
 
 	real_t ang_vel = total_angular_velocity.length();
 	Transform3D transform_new = get_transform();
@@ -722,7 +730,6 @@ void GodotBody3D::integrate_velocities(real_t p_step) {
 		transform_new.orthonormalize();
 	}
 
-	Vector3 total_linear_velocity = linear_velocity + biased_linear_velocity;
 	/*for(int i=0;i<3;i++) {
 		if (axis_lock&(1<<i)) {
 			transform_new.origin[i]=0.0;
