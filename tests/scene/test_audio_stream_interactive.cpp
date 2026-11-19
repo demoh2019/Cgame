@@ -163,6 +163,57 @@ TEST_CASE("[AudioStreamInteractive] Serialized transitions can be loaded after s
 	CHECK(serialized_transitions(reloaded).size() == 1);
 }
 
+TEST_CASE("[AudioStreamInteractive] Zero-clip serialization drops concrete transitions without losing undo state") {
+	Ref<AudioStreamInteractive> stream;
+	stream.instantiate();
+	stream->set_clip_count(2);
+	add_transition(stream, 0, 0);
+	add_transition(stream, 0, 1);
+	add_transition(stream, 1, 0);
+	add_transition(stream, 1, 1);
+
+	CHECK(serialized_transitions(stream).size() == 4);
+	stream->set_clip_count(1);
+	Dictionary one_clip = serialized_transitions(stream);
+	CHECK(one_clip.size() == 1);
+	CHECK(one_clip.has(Vector2i(0, 0)));
+
+	stream->set_clip_count(0);
+	CHECK(serialized_transitions(stream).is_empty());
+	CHECK(stream->has_transition(0, 1));
+	CHECK(stream->has_transition(1, 0));
+
+	stream->set_clip_count(2);
+	Dictionary restored = serialized_transitions(stream);
+	CHECK(restored.size() == 4);
+	CHECK(restored.has(Vector2i(0, 0)));
+	CHECK(restored.has(Vector2i(0, 1)));
+	CHECK(restored.has(Vector2i(1, 0)));
+	CHECK(restored.has(Vector2i(1, 1)));
+}
+
+TEST_CASE("[AudioStreamInteractive] Repeated serialization never mutates the retained transition map") {
+	Ref<AudioStreamInteractive> stream;
+	stream.instantiate();
+	stream->set_clip_count(3);
+	add_transition(stream, 0, 2, 2.5f);
+	add_transition(stream, 1, 1);
+	stream->set_clip_count(2);
+
+	for (int i = 0; i < 5; i++) {
+		Dictionary serialized = serialized_transitions(stream);
+		CHECK(serialized.size() == 1);
+		CHECK(serialized.has(Vector2i(1, 1)));
+		CHECK_FALSE(serialized.has(Vector2i(0, 2)));
+		CHECK(stream->has_transition(0, 2));
+		CHECK(stream->get_transition_fade_beats(0, 2) == doctest::Approx(2.5f));
+	}
+
+	stream->set_clip_count(3);
+	CHECK(serialized_transitions(stream).size() == 2);
+	CHECK(serialized_transitions(stream).has(Vector2i(0, 2)));
+}
+
 } // namespace TestAudioStreamInteractive
 
 #endif // MODULE_INTERACTIVE_MUSIC_ENABLED
