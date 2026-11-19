@@ -1,0 +1,33 @@
+name: Rendering dependency tracker lifetime
+
+on:
+  pull_request:
+    branches: [develop]
+    paths:
+      - "servers/rendering/storage/utilities.cpp"
+      - "misc/scripts/tests/test_dependency_tracker_release_cleanup.py"
+      - ".github/workflows/dependency-tracker-lifetime.yml"
+  push:
+    branches: [develop]
+    paths:
+      - "servers/rendering/storage/utilities.cpp"
+      - "misc/scripts/tests/test_dependency_tracker_release_cleanup.py"
+      - ".github/workflows/dependency-tracker-lifetime.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  native-tracker-cleanup:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        cxx: [g++, clang++]
+    steps:
+      - uses: actions/checkout@v4
+      - name: Verify release and debug tracker cleanup against real C++ destructor
+        env:
+          CXX: ${{ matrix.cxx }}
+        run: python3 -m unittest discover -s misc/scripts/tests -p test_dependency_tracker_release_cleanup.py -v
