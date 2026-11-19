@@ -15,7 +15,7 @@ const CanvasScenePerf := preload("res://canvas_scene_perf.gd")
 const CASES := [
 	"containers", "array_literals", "dictionary_snapshot", "strings", "script_vm", "math", "signals",
 	"scene_tree", "packed_scene", "images", "json", "stream", "stream_bulk",
-	"file_io", "threads", "physics_2d", "physics_contacts_zero_friction_2d", "physics_contacts_friction_2d", "physics_contact_manifolds_2d", "physics_3d", "physics_frictionless_3d", "physics_ccd_3d", "physics_joint_chain_2d", "physics_joint_chain_3d", "physics_sparse_2d", "physics_sparse_3d", "physics_proxies_2d", "physics_proxies_3d", "physics_rid_sparse_2d", "physics_rid_sparse_3d", "physics_rid_moving_2d", "physics_rid_moving_3d", "physics_restitution_2d", "physics_restitution_3d",
+	"file_io", "threads", "physics_2d", "physics_contacts_zero_friction_2d", "physics_contacts_friction_2d", "physics_contact_manifolds_2d", "physics_3d", "physics_frictionless_3d", "physics_ccd_2d", "physics_ccd_3d", "physics_joint_chain_2d", "physics_joint_chain_3d", "physics_sparse_2d", "physics_sparse_3d", "physics_proxies_2d", "physics_proxies_3d", "physics_rid_sparse_2d", "physics_rid_sparse_3d", "physics_rid_moving_2d", "physics_rid_moving_3d", "physics_restitution_2d", "physics_restitution_3d",
 	"object_churn", "memory_churn", "astar_grid", "astar_grid_neighbors", "astar_grid_jps", "astar_grid_fill", "astar_grid_rebuild", "astar_relax_2d", "astar_relax_3d", "astar_graph", "tweens", "audio_buffers",
 	"variant_codec", "packet_stream", "packet_tx_batch", "packet_rx_batch", "packet_variant_reuse", "ui_layout", "grid_reflow", "box_reflow", "flow_reflow", "render_2d", "render_3d", "render_ellipse_2d", "render_light_culling_3d",
 	"resource_load",
@@ -267,6 +267,8 @@ func _run_case(test_case: String, scale: int, frames: int, seed: int) -> Diction
 			return await _physics_3d(scale, frames)
 		"physics_frictionless_3d":
 			return await _physics_3d(scale, frames, true)
+		"physics_ccd_2d":
+			return await _physics_ccd_2d(scale, frames)
 		"physics_ccd_3d":
 			return await _physics_ccd_3d(scale, frames)
 		"physics_joint_chain_2d":
@@ -786,6 +788,65 @@ func _physics_3d(scale: int, frames: int, p_frictionless: bool = false) -> Dicti
 	return {"bodies": length, "physics_frames": frames, "peak_physics_ms": peak_physics_ms, "peak_collision_pairs": peak_pairs, "frame_interval_ms": frame_statistics, "frame_p95_ms": frame_statistics["p95"]}
 
 
+
+
+# Stress 2D CCD ray casts where the first leading support misses a target
+# but the second support intersects it. Isolated lanes avoid unrelated pairs.
+func _physics_ccd_2d(scale: int, frames: int) -> Dictionary:
+	var world := Node2D.new()
+	root.add_child(world)
+	var projectile_shape := RectangleShape2D.new()
+	projectile_shape.size = Vector2(0.7, 3.0)
+	var target_shape := CircleShape2D.new()
+	target_shape.radius = 0.3
+	var count := 64 * scale
+	var projectiles: Array[RigidBody2D] = []
+	projectiles.resize(count)
+
+	for i in range(count):
+		var lane_y := float(i) * 4.0
+		var target := StaticBody2D.new()
+		target.position = Vector2(0.0, lane_y - 1.5)
+		var target_collider := CollisionShape2D.new()
+		target_collider.shape = target_shape
+		target.add_child(target_collider)
+		world.add_child(target)
+
+		var body := RigidBody2D.new()
+		body.gravity_scale = 0.0
+		body.can_sleep = false
+		body.continuous_cd = RigidBody2D.CCD_MODE_CAST_RAY
+		body.position = Vector2(-3.5, lane_y)
+		var body_collider := CollisionShape2D.new()
+		body_collider.shape = projectile_shape
+		body.add_child(body_collider)
+		world.add_child(body)
+		projectiles[i] = body
+
+	var peak_physics_ms := 0.0
+	var peak_pairs := 0
+	var frame_intervals: Array[float] = []
+	var last_tick := Time.get_ticks_usec()
+	for frame in range(frames):
+		for i in range(count):
+			var body := projectiles[i]
+			body.global_position = Vector2(-3.5, float(i) * 4.0)
+			body.linear_velocity = Vector2(420.0, 0.0)
+			body.angular_velocity = 0.0
+		await physics_frame
+		var frame_tick := Time.get_ticks_usec()
+		frame_intervals.append(float(frame_tick - last_tick) / 1000.0)
+		last_tick = frame_tick
+		peak_physics_ms = maxf(peak_physics_ms, Performance.get_monitor(Performance.TIME_PHYSICS_PROCESS) * 1000.0)
+		peak_pairs = maxi(peak_pairs, int(Performance.get_monitor(Performance.PHYSICS_2D_COLLISION_PAIRS)))
+
+	world.queue_free()
+	await process_frame
+	var frame_statistics := _frame_statistics(frame_intervals)
+	return {"projectiles": count, "targets": count, "physics_frames": frames,
+			"ccd_enabled": true, "peak_physics_ms": peak_physics_ms,
+			"peak_collision_pairs": peak_pairs, "frame_interval_ms": frame_statistics,
+			"frame_p95_ms": frame_statistics["p95"]}
 
 
 # Repeated high-velocity CCD casts against isolated static targets.
