@@ -465,7 +465,7 @@ func cmd_party_accept(peer_id: int) -> Dictionary:
 	var leader: Player = players.get(int(invite["from"]))
 	if leader == null or not _alive(leader):
 		return {"ok": false, "reason": "leader_offline"}
-	if not Party_member_invite_range(leader, target):
+	if not _party_invite_in_range(leader, target):
 		return {"ok": false, "reason": "too_far"}
 	return parties.accept(peer_id, time)
 
