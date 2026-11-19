@@ -179,14 +179,18 @@ func _create_hud() -> void:
 
 
 func _update_hud() -> void:
-    var weapon := "Spear" if state.has_spear else "Hands"
+    var weapon: String = state.equipped_weapon.capitalize().replace("_", " ")
     hud.text = "Cgame | SURVIVAL x SANDBOX (offline prototype)\n"
     hud.text += "HP: %d/100 | Hunger: %d/100 | Weapon: %s\n" % [int(state.health), int(state.hunger), weapon]
     hud.text += "Wood: %d | Stone: %d | Fiber: %d | Herb: %d | Scrap: %d\n" % [
         state.items["wood"], state.items["stone"], state.items["fiber"], state.items["herb"], state.items["scrap"]]
+    hud.text += "Logging %d | Mining %d | Foraging %d | Combat %d | Crafting %d\n" % [
+        state.get_level("logging"), state.get_level("mining"), state.get_level("foraging"),
+        state.get_level("combat"), state.get_level("crafting")]
     hud.text += "Zombies left: %d\n" % get_tree().get_nodes_in_group("infected").size()
     hud.text += "WASD move | Shift sprint | E gather | Space attack\n"
-    hud.text += "Q craft spear (2 wood, 1 stone) | H bandage (2 fiber, 1 herb)\n"
+    hud.text += "Q spear (2 wood, 1 stone) | T upgrade (1 wood, 2 stone, 2 scrap, combat Lv2)\n"
+    hud.text += "H bandage (2 fiber, 1 herb)\n"
     hud.text += "F eat herb | B build barricade (3 wood, 2 stone) | R restart\n"
     hud.text += status_message
 
@@ -209,7 +213,7 @@ func _harvest() -> void:
         status_message = "Move closer to a resource."
         return
     var kind := str(nearest.get_meta("kind"))
-    state.add_item(kind)
+    var amount: int = state.collect_resource(kind)
     var remaining := int(nearest.get_meta("remaining")) - 1
     nearest.set_meta("remaining", remaining)
     if remaining <= 0:
@@ -218,7 +222,7 @@ func _harvest() -> void:
         var visual := nearest.get_node("Visual") as MeshInstance3D
         if visual != null:
             visual.scale *= 0.83
-    status_message = "Gathered 1 %s." % kind
+    status_message = "Gathered %d %s. Profession XP +5." % [amount, kind]
 
 
 func _attack() -> void:
@@ -234,24 +238,46 @@ func _attack() -> void:
     if nearest == null:
         status_message = "No enemy in range."
         return
-    var damage := 26.0 if state.has_spear else 10.0
-    if nearest.take_damage(damage):
+    var damage: float = state.weapon_damage()
+    var killed: bool = nearest.take_damage(damage)
+    state.report_attack(killed)
+    if killed:
         state.add_item("scrap")
-        status_message = "Infected defeated! +1 scrap."
+        status_message = "Infected defeated! +1 scrap, combat XP +20."
     else:
-        status_message = "Hit infected for %d damage." % int(damage)
+        status_message = "Hit infected for %d damage, combat XP +3." % int(damage)
+
+
+func _can_place_barricade(at: Vector3, angle: float) -> bool:
+    # Check the exact collider against the physics world BEFORE spending resources.
+    var box := BoxShape3D.new()
+    box.size = Vector3(2.0, 1.4, 0.6)
+    var query := PhysicsShapeQueryParameters3D.new()
+    query.shape = box
+    query.transform = Transform3D(Basis(Vector3.UP, angle), at)
+    query.collision_mask = 1
+    query.collide_with_bodies = true
+    query.collide_with_areas = false
+    return get_world_3d().direct_space_state.intersect_shape(query, 1).is_empty()
 
 
 func _build() -> void:
-    if not state.spend_recipe("barricade"):
+    if not state.has_cost("barricade"):
         status_message = "Barricade requires 3 wood and 2 stone."
         return
     var pos: Vector3 = player.global_position + player.facing_direction() * 2.7
-    pos.y = 0.7
+    pos.y = 0.72 # Bottom slightly above the terrain so ground contact is not overlap.
+    var angle: float = atan2(-player.facing_direction().x, -player.facing_direction().z)
+    if not _can_place_barricade(pos, angle):
+        status_message = "Cannot build here: blocked by an obstacle or character."
+        return
+    if not state.spend_recipe("barricade"):
+        return
     var barrier := _make_box("Barricade", pos, Vector3(2.0, 1.4, 0.6), Color("#76583d"))
-    barrier.rotation.y = atan2(-player.facing_direction().x, -player.facing_direction().z)
+    barrier.rotation.y = angle
     barrier.add_to_group("player_building")
-    status_message = "Barricade built (physical obstacle)."
+    state.award_experience("crafting", 10)
+    status_message = "Barricade built. Crafting XP +10."
 
 
 func receive_zombie_hit(damage: float) -> void:
@@ -278,13 +304,19 @@ func _unhandled_key_input(event: InputEvent) -> void:
             _attack()
         KEY_Q:
             if state.craft_spear():
-                status_message = "Spear crafted. Melee damage increased."
+                status_message = "Spear crafted. Melee damage increased. Crafting XP +12."
             else:
-                status_message = "Need 2 wood + 1 stone (or spear already equipped)."
+                status_message = "Need 2 wood + 1 stone (or another weapon equipped)."
+        KEY_T:
+            if state.craft_weapon("reinforced_spear"):
+                status_message = "Reinforced spear equipped! Crafting XP +12."
+            else:
+                status_message = "Requires spear, combat Lv2, 1 wood + 2 stone + 2 scrap."
         KEY_H:
             if state.spend_recipe("bandage"):
                 state.heal(35.0)
-                status_message = "Bandage used: +35 HP."
+                state.award_experience("crafting", 8)
+                status_message = "Bandage used: +35 HP. Crafting XP +8."
             else:
                 status_message = "Bandage requires 2 fiber + 1 herb."
         KEY_F:
