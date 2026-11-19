@@ -138,9 +138,11 @@ _FORCE_INLINE_ static bool physics_fem_tetra_damp_strain_rate(
 				}
 			}
 		}
-		if (!(weighted_mass > 0.0) || !Math::is_finite(weighted_mass) ||
-				!Math::is_finite(strain_rate)) {
-			continue; // Pinned or degenerate mode.
+		if (!Math::is_finite(weighted_mass) || !Math::is_finite(strain_rate)) {
+			return false; // Invalid mode: no partial velocity commits.
+		}
+		if (!(weighted_mass > 0.0)) {
+			continue; // Fully pinned/degenerate mode.
 		}
 		const double impulse = -p_fraction * strain_rate / weighted_mass;
 		if (!Math::is_finite(impulse) || impulse == 0.0) {
