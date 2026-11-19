@@ -41,7 +41,7 @@ TEST_FORCE_LINK(test_translation_loader_po)
 
 namespace TestTranslationLoaderPO {
 
-TEST_CASE("[TranslationLoaderPO][Performance] Multiline messages, context, and plural forms scale linearly") {
+TEST_CASE("[TranslationLoaderPO][Performance] Plural fragments append in place with unchanged PO semantics") {
 	StringBuilder po;
 	po.append(R"PO(msgid ""
 msgstr ""
