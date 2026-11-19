@@ -77,16 +77,20 @@ def scan(root: Path, top: int = 20, max_total: int | None = None,
     # Limit the selection heap to requested output size instead of sorting
     # every asset when the usual report needs only a small top-N.
     rank_key = lambda item: (-item[1], item[0])
-    largest = nsmallest(top, files, key=rank_key)
+    # Sorting violations is necessary for deterministic diagnostics, but
+    # passing assets never need to be part of that sort.
+    violating_files = (sorted((item for item in files if item[1] > max_file), key=rank_key)
+                       if max_file is not None else [])
+    # If the violations already fill the top-N they are the top-N of all
+    # assets too, so reuse the ranked list rather than sorting a second time.
+    largest = (violating_files[:top] if len(violating_files) >= top
+               else nsmallest(top, files, key=rank_key))
     violations: list[dict] = []
     if max_total is not None and total > max_total:
         violations.append({"kind": "total", "bytes": total, "limit_bytes": max_total})
     if max_file is not None:
-        # The violation list remains globally ranked, but only over entries
-        # that exceed the limit (no full-sort allocation for passing files).
-        over_limit = ((path, size) for path, size in files if size > max_file)
         violations.extend({"kind": "file", "path": path, "bytes": size, "limit_bytes": max_file}
-                          for path, size in sorted(over_limit, key=rank_key))
+                          for path, size in violating_files)
 
     return {
         "format": 1,
