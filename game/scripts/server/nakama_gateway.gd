@@ -46,12 +46,19 @@ func load_character(user_id: String) -> Dictionary:
 	if not parsed.get("exists", false):
 		return {"ok": true, "exists": false}
 	var data: Variant = parsed.get("data")
-	return {"ok": true, "exists": true, "data": data if typeof(data) == TYPE_DICTIONARY else {}}
+	if typeof(data) != TYPE_DICTIONARY:
+		return {"ok": true, "exists": true, "data": {}}
+	# New records keep the document as a JSON string, because Nakama's Lua layer turns every empty array
+	# into an empty object, which broke saved state that holds empty lists. Older records were stored raw.
+	if data.has("json"):
+		var document: Variant = JSON.parse_string(str(data["json"]))
+		return {"ok": true, "exists": true, "data": document if typeof(document) == TYPE_DICTIONARY else {}}
+	return {"ok": true, "exists": true, "data": data}
 
 
 func save_character(user_id: String, data: Dictionary) -> bool:
 	saves_in_flight += 1
-	var response = await client.rpc_async_with_key(http_key, "character_save", JSON.stringify({"user_id": user_id, "data": data}))
+	var response = await client.rpc_async_with_key(http_key, "character_save", JSON.stringify({"user_id": user_id, "data": {"json": JSON.stringify(data)}}))
 	saves_in_flight -= 1
 	if response.is_exception():
 		save_failures += 1

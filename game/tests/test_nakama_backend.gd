@@ -51,6 +51,13 @@ func _run() -> void:
 	check(loaded["ok"] and loaded["exists"], "the character exists afterwards")
 	check(loaded["data"].get("kills", 0) == 9 and loaded["data"]["inventory"]["weapon"] == "club_2", "the character round-trips: %s" % str(loaded.get("data")))
 	check(is_equal_approx(float(loaded["data"].get("health", 0)), 73.5), "numbers survive")
+	# Nakama's Lua layer turns an empty array into an empty object: the gateway must hide that.
+	var with_lists := character.duplicate(true)
+	with_lists["contracts"] = {"active": "", "progress": 0, "completed": [], "crate_ids": []}
+	await gateway.save_character(uid, with_lists)
+	var lists_back: Dictionary = await gateway.load_character(uid)
+	check(typeof(lists_back["data"]["contracts"]["completed"]) == TYPE_ARRAY and typeof(lists_back["data"]["contracts"]["crate_ids"]) == TYPE_ARRAY, "empty arrays stay arrays through Nakama")
+	await gateway.save_character(uid, character)
 	character["kills"] = 12
 	await gateway.save_character(uid, character)
 	check((await gateway.load_character(uid))["data"]["kills"] == 12, "saving again overwrites")
