@@ -511,7 +511,8 @@ func _apply_water() -> void:
         var submerged := clampf((surface - center_y + properties.y) / height, 0.0, 1.0)
         if submerged <= 0.0:
             continue
-        var buoyant_force := Vector3.UP * (9.8 * _fluid_density * properties.x * submerged)
+        var base_g := float(ProjectSettings.get_setting("physics/3d/default_gravity", 9.8))
+        var buoyant_force := Vector3.UP * (base_g * body.gravity_scale * _fluid_density * properties.x * submerged)
         body.apply_central_force(buoyant_force)
         var water_relative: Vector3 = body.linear_velocity - Vector3(_water_current, 0, 0)
         # Quadratic drag approximation with bounded magnitude.
