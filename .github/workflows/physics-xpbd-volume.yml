@@ -11,6 +11,7 @@ on:
       - "modules/godot_physics_3d/godot_soft_body_3d.h"
       - "tests/servers/test_physics_xpbd_volume.cpp"
       - "tests/stress/test_physics_xpbd_volume.py"
+      - "tests/stress/test_physics_xpbd_volume_numeric.py"
       - ".github/workflows/physics-xpbd-volume.yml"
   workflow_dispatch:
 
@@ -25,3 +26,5 @@ jobs:
       - uses: actions/checkout@v4
       - name: Validate volume formulation and 3D integration wiring
         run: python3 -m unittest discover -s tests/stress -p 'test_physics_xpbd_volume.py' -v
+      - name: Validate independent XPBD tetra physics reference
+        run: python3 -m unittest discover -s tests/stress -p 'test_physics_xpbd_volume_numeric.py' -v
