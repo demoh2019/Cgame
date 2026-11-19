@@ -641,7 +641,7 @@ private:
 
 		// does this pair exist already?
 		// or only check the one with lower number of pairs for greater speed
-		if (p_from.num_pairs <= p_to.num_pairs) {
+		if (p_from.extended_pairs.size() <= p_to.extended_pairs.size()) {
 			if (p_from.contains_pair_to(p_hb)) {
 				return;
 			}
