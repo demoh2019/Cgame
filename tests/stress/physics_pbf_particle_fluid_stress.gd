@@ -3,7 +3,7 @@
 extends RefCounted
 
 
-func run(tree: SceneTree, scale: int, frames: int, enabled: bool, with_vorticity: bool = false, with_divergence: bool = false, with_density_pressure: bool = false) -> Dictionary:
+func run(tree: SceneTree, scale: int, frames: int, enabled: bool, with_vorticity: bool = false, with_divergence: bool = false, with_density_pressure: bool = false, with_surface_tension: bool = false) -> Dictionary:
 	var fluid := PBFParticleFluid3D.new()
 	fluid.name = "PBFStress"
 	fluid.smoothing_radius = 0.32
@@ -19,6 +19,9 @@ func run(tree: SceneTree, scale: int, frames: int, enabled: bool, with_vorticity
 	fluid.density_pressure_iterations = 8 if with_density_pressure else 0
 	fluid.density_pressure_tolerance = 0.002
 	fluid.density_pressure_max_velocity_change = 0.15
+	fluid.surface_cohesion = 0.06 if with_surface_tension else 0.0
+	fluid.surface_curvature = 0.025 if with_surface_tension else 0.0
+	fluid.surface_max_pair_velocity_change = 0.005
 	fluid.box_min = Vector3(-2.0, 0.0, -2.0)
 	fluid.box_max = Vector3(2.0, 4.0, 2.0)
 	tree.root.add_child(fluid)
@@ -48,6 +51,9 @@ func run(tree: SceneTree, scale: int, frames: int, enabled: bool, with_vorticity
 	var pressure_neighbors := 0
 	var peak_pressure_iterations := 0
 	var peak_predicted_density_error := 0.0
+	var surface_pairs := 0
+	var surface_neighbor_evaluations := 0
+	var peak_mean_color_normal := 0.0
 	var error := ""
 	for frame in range(frames):
 		await tree.physics_frame
@@ -65,6 +71,9 @@ func run(tree: SceneTree, scale: int, frames: int, enabled: bool, with_vorticity
 		pressure_neighbors = maxi(pressure_neighbors, fluid.get_last_density_pressure_neighbor_evaluations())
 		peak_pressure_iterations = maxi(peak_pressure_iterations, fluid.get_last_density_pressure_iterations())
 		peak_predicted_density_error = maxf(peak_predicted_density_error, fluid.get_average_predicted_density_error())
+		surface_pairs = maxi(surface_pairs, fluid.get_last_surface_tension_pairs())
+		surface_neighbor_evaluations = maxi(surface_neighbor_evaluations, fluid.get_last_surface_tension_neighbor_evaluations())
+		peak_mean_color_normal = maxf(peak_mean_color_normal, fluid.get_mean_surface_normal_magnitude())
 		if frame % 10 == 0:
 			var positions := fluid.get_particle_positions()
 			for i in [0, int(count / 2), count - 1]:
@@ -84,6 +93,10 @@ func run(tree: SceneTree, scale: int, frames: int, enabled: bool, with_vorticity
 		"vorticity_enabled": with_vorticity,
 		"divergence_enabled": with_divergence,
 		"density_pressure_enabled": with_density_pressure,
+		"surface_tension_enabled": with_surface_tension,
+		"surface_tension_pairs": surface_pairs,
+		"surface_tension_neighbor_evaluations": surface_neighbor_evaluations,
+		"peak_mean_surface_normal_magnitude": peak_mean_color_normal,
 		"density_pressure_neighbor_evaluations_per_substep": pressure_neighbors,
 		"density_pressure_max_iterations_used": peak_pressure_iterations,
 		"peak_predicted_density_error": peak_predicted_density_error,
