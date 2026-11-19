@@ -218,6 +218,19 @@ public:
 	}
 	_FORCE_INLINE_ bool is_empty() const { return count == 0; }
 	_FORCE_INLINE_ U get_capacity() const { return capacity; }
+
+	// Unlike reserve(), this allocates exactly the requested initial capacity.
+	// Subsequent growth through push_back() still uses geometric expansion.
+	// Useful for the common case of tiny lists that rarely grow past one item.
+	void reserve_exact(U p_size) {
+		if (p_size > capacity) {
+			T *new_data = (T *)memrealloc(data, size_t(p_size) * sizeof(T));
+			CRASH_COND_MSG(!new_data, "Out of memory");
+			data = new_data;
+			capacity = p_size;
+		}
+	}
+
 	void reserve(U p_size) {
 		if (p_size > capacity) {
 			if (tight) {
