@@ -1603,10 +1603,11 @@ func cmd_attack(peer_id: int, dir_x: float, dir_z: float) -> Dictionary:
 			return {"ok": false, "reason": "no_ammo"}
 		player.inventory.remove(ammo, 1)
 		player.dirty_inventory = true
-		# Only a real shot with ammunition makes gunshot noise.
-		player.noise_radius = maxf(player.noise_radius, Defs.GUNSHOT_NOISE_RADIUS)
-		player.noise_timer = maxf(player.noise_timer, Defs.GUNSHOT_NOISE_SECONDS)
-		reach = Defs.PISTOL_RANGE
+		# Arrows are much quieter than firearms, but still attract nearby infected.
+		var shot_noise: Dictionary = Combat.ranged_noise(weapon)
+		player.noise_radius = maxf(player.noise_radius, float(shot_noise["radius"]))
+		player.noise_timer = maxf(player.noise_timer, float(shot_noise["seconds"]))
+		reach = Combat.ranged_range(weapon)
 	var hit := _find_hit(player, origin, direction, reach, kind == "ranged")
 	events.append({"type": "attack", "peer": peer_id, "dir": direction, "ranged": kind == "ranged", "x": player.position.x, "z": player.position.z})
 	if hit.is_empty():
@@ -1694,8 +1695,9 @@ func cmd_skill(peer_id: int, dir_x: float, dir_z: float) -> Dictionary:
 	player.action = {}
 	player.yaw = atan2(direction.x, direction.y)
 	if ranged:
-		player.noise_radius = maxf(player.noise_radius, Defs.GUNSHOT_NOISE_RADIUS)
-		player.noise_timer = maxf(player.noise_timer, Defs.GUNSHOT_NOISE_SECONDS)
+		var shot_noise: Dictionary = Combat.ranged_noise(weapon)
+		player.noise_radius = maxf(player.noise_radius, float(shot_noise["radius"]))
+		player.noise_timer = maxf(player.noise_timer, float(shot_noise["seconds"]))
 	var origin := Vector2(player.position.x, player.position.z)
 	events.append({"type": "attack", "peer": peer_id, "dir": direction, "ranged": ranged, "skill": skill["id"], "x": player.position.x, "z": player.position.z})
 	# Spear attacks can pierce a narrow forward line. The server selects
