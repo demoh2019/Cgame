@@ -1400,6 +1400,9 @@ GodotSpace3D::GodotSpace3D() {
 	const real_t configured_tetra_shear_plastic_yield = GLOBAL_GET("physics/3d/solver/soft_body_tetra_shear_plastic_yield");
 	soft_body_tetra_shear_plastic_yield = Math::is_finite(configured_tetra_shear_plastic_yield) ?
 			CLAMP(configured_tetra_shear_plastic_yield, real_t(0.0), real_t(2.0)) : real_t(0.2);
+	const real_t configured_tetra_shear_hardening = GLOBAL_GET("physics/3d/solver/soft_body_tetra_shear_plastic_hardening");
+	soft_body_tetra_shear_plastic_hardening = Math::is_finite(configured_tetra_shear_hardening) ?
+			CLAMP(configured_tetra_shear_hardening, real_t(0.0), real_t(10.0)) : real_t(0.0);
 	const real_t configured_tetra_shear_plastic_max = GLOBAL_GET("physics/3d/solver/soft_body_tetra_shear_plastic_max_strain");
 	soft_body_tetra_shear_plastic_max_strain = Math::is_finite(configured_tetra_shear_plastic_max) ?
 			CLAMP(configured_tetra_shear_plastic_max, real_t(0.01), real_t(4.0)) : real_t(2.0);
