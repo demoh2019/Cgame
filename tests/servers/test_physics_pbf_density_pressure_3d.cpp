@@ -193,6 +193,18 @@ TEST_CASE("[PhysicsPBFDensityPressure] Invalid tuning and clearing state are saf
 	CHECK(fluid.get_average_predicted_density_error() == 0.0);
 	CHECK(fluid.get_last_density_pressure_iterations() == 0);
 	CHECK(fluid.get_last_density_pressure_neighbor_evaluations() == 0);
+	// Turning the stage off releases its optional scratch vectors. The
+	// next re-enable/reseed must allocate clean state and remain finite.
+	fluid.set_density_pressure_iterations(0);
+	CHECK(fluid.get_density_pressure_iterations() == 0);
+	fluid.set_density_pressure_iterations(6);
+	REQUIRE(fluid.create_block(Vector3(-0.35, 1, -0.35), Vector3i(3, 3, 3), 0.175));
+	REQUIRE(fluid.step(real_t(1.0 / 60.0)));
+	CHECK(Math::is_finite(fluid.get_average_predicted_density_error()));
+	CHECK(fluid.get_last_density_pressure_neighbor_evaluations() > 0);
+	fluid.set_density_pressure_iterations(0);
+	CHECK(fluid.get_last_density_pressure_neighbor_evaluations() == 0);
+	CHECK(fluid.get_average_predicted_density_error() == 0.0);
 }
 
 } // namespace TestPhysicsPBFDensityPressure3D
