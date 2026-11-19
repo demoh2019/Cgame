@@ -661,7 +661,9 @@ Array Array::filter(const Callable &p_callable) const {
 				// Most filtering to an empty result needs no element buffer at all.
 				// Allocate only after the first accepted item, preserving one allocation
 				// for common nonempty results and the original callback order.
-				new_arr.resize(size());
+				// Earlier elements were rejected, so the maximum possible result
+				// is the remaining suffix rather than the entire source.
+				new_arr.resize(size() - i);
 				write = new_arr._p->array.ptrw();
 			}
 			// Callbacks may mutate the source, so fetch the value after the call.
