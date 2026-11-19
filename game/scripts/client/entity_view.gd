@@ -5,6 +5,7 @@ const Defs = preload("res://scripts/shared/defs.gd")
 const Structures = preload("res://scripts/shared/structures.gd")
 const Meshes = preload("res://scripts/client/meshes.gd")
 const CharacterModel = preload("res://scripts/client/character_model.gd")
+const LootLabel = preload("res://scripts/shared/loot_label.gd")
 
 const ZOMBIE_LOOK := {
 	"walker": {"tint": Color(0.62, 0.85, 0.55), "scale": 2.0, "walk": 0.8},
@@ -54,6 +55,9 @@ func _touch(key: String, kind: String, entity: Dictionary, seen: Dictionary) -> 
 				str(entity["type"]), int(entity["hp"])]
 		elif kind == "player":
 			label.text = str(entity["name"]) if entity["alive"] else "%s (dead)" % entity["name"]
+		elif kind == "bag":
+			label.text = LootLabel.for_bag(entity)
+			label.visible = not label.text.is_empty()
 	if kind == "bag":
 		# Gold = available to your party, grey = reserved, brown = public.
 		var loot_mesh: MeshInstance3D = _nodes[key].get_child(0)
@@ -151,6 +155,16 @@ func _make(kind: String, entity: Dictionary) -> Node3D:
 		mesh.mesh = Meshes.get_mesh("bag")
 		mesh.material_override = StandardMaterial3D.new()
 		root.add_child(mesh)
+		var label := Label3D.new()
+		label.name = "Label"
+		label.billboard = BaseMaterial3D.BILLBOARD_ENABLED
+		label.no_depth_test = true
+		label.pixel_size = 0.008
+		label.font_size = 24
+		label.outline_size = 8
+		label.position.y = 1.3
+		label.visible = false
+		root.add_child(label)
 		return root
 	var model := CharacterModel.new()
 	model.name = "Model"
