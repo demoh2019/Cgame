@@ -181,6 +181,7 @@ void cast_segment(const POINT &p_from, const POINT &p_to, SegmentCastCallback p_
 // when a fixed-size candidate buffer is filled by filtered-out objects.
 // Return false from a visitor to stop traversal once enough actual hits exist.
 using QueryVisitor = bool (*)(T *, int, void *);
+using RefQueryVisitor = bool (*)(uint32_t, void *);
 
 bool visit_point(const POINT &p_point, QueryVisitor p_visitor, void *p_userdata, uint32_t p_tree_collision_mask = 0xFFFFFFFF, const T *p_tester = nullptr) {
 	if (!p_visitor || !p_tree_collision_mask) {
@@ -209,7 +210,29 @@ bool visit_aabb(const BOUNDS &p_aabb, QueryVisitor p_visitor, void *p_userdata, 
 			continue;
 		}
 		const uint32_t root = _root_node_id[tree_index];
-		if (root != BVHCommon::INVALID && !_visit_aabb_iterative(root, query, p_visitor, p_userdata, p_tester)) {
+		if (root != BVHCommon::INVALID && !_visit_aabb_iterative<false>(root, query, p_visitor, p_userdata, p_tester)) {
+			return false;
+		}
+	}
+	return true;
+}
+
+ 
+// Pairing uses stable BVH reference IDs rather than object pointers. Traverse
+// directly to the callback so dense overlap scenes do not allocate one
+// temporary ID per candidate before building contacts.
+bool visit_aabb_refs(const BOUNDS &p_aabb, RefQueryVisitor p_visitor, void *p_userdata, uint32_t p_tree_collision_mask = 0xFFFFFFFF, const T *p_tester = nullptr) {
+	if (!p_visitor || !p_tree_collision_mask) {
+		return true;
+	}
+	BVHABB_CLASS query;
+	query.from(p_aabb);
+	for (int tree_index = 0; tree_index < NUM_TREES; ++tree_index) {
+		if (!(p_tree_collision_mask & (uint32_t(1) << tree_index))) {
+			continue;
+		}
+		const uint32_t root = _root_node_id[tree_index];
+		if (root != BVHCommon::INVALID && !_visit_aabb_iterative<true>(root, query, nullptr, p_userdata, p_tester, p_visitor)) {
 			return false;
 		}
 	}
@@ -261,7 +284,8 @@ bool _visit_point_iterative(uint32_t p_node_id, const POINT &p_point, QueryVisit
 	return true;
 }
 
-bool _visit_aabb_iterative(uint32_t p_node_id, const BVHABB_CLASS &p_query, QueryVisitor p_visitor, void *p_userdata, const T *p_tester) {
+template <bool RETURN_REF_IDS>
+bool _visit_aabb_iterative(uint32_t p_node_id, const BVHABB_CLASS &p_query, QueryVisitor p_visitor, void *p_userdata, const T *p_tester, RefQueryVisitor p_ref_visitor = nullptr) {
 	// Mirror bounded cull_aabb's fully-within shortcut for streaming queries.
 	// Once a subtree is contained in the query, none of its descendants need
 	// per-proxy AABB tests; keep invoking the visitor to honor exact filters.
@@ -294,12 +318,19 @@ bool _visit_aabb_iterative(uint32_t p_node_id, const BVHABB_CLASS &p_query, Quer
 				if (!next.fully_within && !swizzled_query.intersects_swizzled(leaf.get_aabb(i))) {
 					continue;
 				}
-				const ItemExtra &extra = _extra[leaf.get_item_ref_id(i)];
+				const uint32_t ref_id = leaf.get_item_ref_id(i);
+				const ItemExtra &extra = _extra[ref_id];
 				if (USE_PAIRS && !USER_CULL_TEST_FUNCTION::user_cull_check(p_tester, extra.userdata)) {
 					continue;
 				}
-				if (!p_visitor(extra.userdata, extra.subindex, p_userdata)) {
-					return false;
+				if constexpr (RETURN_REF_IDS) {
+					if (!p_ref_visitor(ref_id, p_userdata)) {
+						return false;
+					}
+				} else {
+					if (!p_visitor(extra.userdata, extra.subindex, p_userdata)) {
+						return false;
+					}
 				}
 			}
 		} else {
