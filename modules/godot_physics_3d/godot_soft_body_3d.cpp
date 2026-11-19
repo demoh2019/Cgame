@@ -57,6 +57,7 @@
 #include "servers/physics_xpbd_tension_hardening.h"
 #include "servers/physics_xpbd_anisotropic_stretch.h"
 #include "servers/physics_xpbd_compression_hardening.h"
+#include "servers/physics_softbody_fatigue_damage.h"
 #include "servers/physics_xpbd_area.h"
 #include "servers/physics_xpbd_dihedral.h"
 #include "servers/physics_xpbd_shear.h"
@@ -3079,6 +3080,10 @@ void GodotSoftBody3D::solve_constraints(real_t p_delta) {
 	const bool use_compression_hardening = use_xpbd && compression_hardening > real_t(0.0);
 	const real_t parallel_ratio = get_space() ? get_space()->get_soft_body_xpbd_parallel_compliance_ratio() : real_t(1.0);
 	const bool use_anisotropic_stretch = use_xpbd && parallel_ratio != real_t(1.0);
+	const real_t fatigue_rate = get_space() ? get_space()->get_soft_body_fatigue_damage_rate() : real_t(0.0);
+	const real_t fatigue_max = get_space() ? get_space()->get_soft_body_fatigue_max_damage() : real_t(0.0);
+	const bool use_fatigue = use_xpbd && fatigue_rate > real_t(0.0) &&
+			fatigue_max > real_t(0.0) && p_delta > real_t(0.0);
 	// Unilateral strain limits supplement (rather than replace) the elastic
 	// stretch solver. No extra per-link scratch or work with both ratios 0.
 	const real_t strain_max_ratio = get_space() ? get_space()->get_soft_body_xpbd_strain_max_stretch_ratio() : real_t(0.0);
@@ -3156,13 +3161,28 @@ void GodotSoftBody3D::solve_constraints(real_t p_delta) {
 		xpbd_link_lambdas.reset();
 	}
 
+	// Fatigue is stateful and follows the mesh's link ordering. Lazy storage
+	// is allocated once, retained across frames, and destroyed on mesh reset.
+	// Default damage rate=0 adds no per-link work or memory allocation.
+	if (use_fatigue) {
+		if (xpbd_link_fatigue_damage.size() != links.size()) {
+			xpbd_link_fatigue_damage.resize(links.size());
+			for (real_t &damage : xpbd_link_fatigue_damage) {
+				damage = real_t(0.0);
+			}
+		}
+	} else if (!xpbd_link_fatigue_damage.is_empty()) {
+		xpbd_link_fatigue_damage.reset();
+	}
+
 	// Freeze nonlinear compliance for the whole physics step. Recomputing
 	// alpha within iterations while retaining lambda causes oscillation.
-	if (use_tension_hardening || use_compression_hardening || use_anisotropic_stretch) {
+	if (use_tension_hardening || use_compression_hardening || use_anisotropic_stretch || use_fatigue) {
 		xpbd_link_hardening_alphas.resize(links.size());
 		const real_t yield_strain = get_space()->get_soft_body_xpbd_tension_yield_strain();
 		const real_t compression_yield = get_space()->get_soft_body_xpbd_compression_yield_strain();
 		const Vector3 material_axis = get_space()->get_soft_body_xpbd_material_axis();
+		const real_t fatigue_yield = use_fatigue ? get_space()->get_soft_body_fatigue_yield_strain() : real_t(0.0);
 		for (uint32_t link_index = 0; link_index < links.size(); ++link_index) {
 			const Link &link = links[link_index];
 			real_t link_alpha = alpha;
@@ -3181,6 +3201,14 @@ void GodotSoftBody3D::solve_constraints(real_t p_delta) {
 				// above if this link happens to be in tension.
 				physics_xpbd_compression_hardening_alpha(link.n[0]->x, link.n[1]->x,
 						link.rl, link_alpha, compression_yield, compression_hardening, link_alpha);
+			}
+			if (use_fatigue) {
+				// Use predicted deformation, before distance projection.
+				// Damage evolves once per simulation step, never per iteration.
+				real_t &damage = xpbd_link_fatigue_damage[link_index];
+				physics_softbody_accumulate_fatigue_damage(link.n[0]->x, link.n[1]->x,
+						link.rl, fatigue_yield, fatigue_rate, fatigue_max, double(p_delta), damage);
+				physics_softbody_fatigue_compliance_alpha(link_alpha, damage, link_alpha);
 			}
 			xpbd_link_hardening_alphas[link_index] = link_alpha;
 		}
@@ -3298,7 +3326,7 @@ void GodotSoftBody3D::solve_constraints(real_t p_delta) {
 				if (link.c0 > 0.0) {
 					physics_xpbd_solve_distance(link.n[0]->x, link.n[1]->x,
 							link.n[0]->im, link.n[1]->im, link.rl,
-							(use_tension_hardening || use_compression_hardening || use_anisotropic_stretch) ? xpbd_link_hardening_alphas[link_index] : alpha,
+							(use_tension_hardening || use_compression_hardening || use_anisotropic_stretch || use_fatigue) ? xpbd_link_hardening_alphas[link_index] : alpha,
 							xpbd_link_lambdas[link_index]);
 				}
 			}
@@ -3637,6 +3665,7 @@ void GodotSoftBody3D::destroy() {
 
 	xpbd_link_lambdas.reset();
 	xpbd_link_hardening_alphas.reset();
+	xpbd_link_fatigue_damage.reset();
 	xpbd_strain_lambdas.reset();
 	xpbd_area_lambdas.reset();
 	xpbd_shear_rest_cosines.reset();

@@ -602,6 +602,12 @@ PhysicsServer3D::PhysicsServer3D() {
 	// Only applies to the XPBD stretch solver; 0 is bit-for-bit legacy behavior.
 	GLOBAL_DEF(PropertyInfo(Variant::FLOAT, "physics/3d/solver/soft_body_xpbd_compression_hardening", PROPERTY_HINT_RANGE, "0,100,0.1,or_greater"), 0.0);
 	GLOBAL_DEF(PropertyInfo(Variant::FLOAT, "physics/3d/solver/soft_body_xpbd_compression_yield_strain", PROPERTY_HINT_RANGE, "0,1,0.01"), 0.1);
+	// Phenomenological fatigue weakening after repeated strain excursions.
+	// An XPBD-only material state: 0 rate preserves legacy behavior and
+	// allocates no damage storage; cap < 1 avoids singular zero stiffness.
+	GLOBAL_DEF(PropertyInfo(Variant::FLOAT, "physics/3d/solver/soft_body_fatigue_damage_rate", PROPERTY_HINT_RANGE, "0,100,0.1,or_greater,suffix:1/s"), 0.0);
+	GLOBAL_DEF(PropertyInfo(Variant::FLOAT, "physics/3d/solver/soft_body_fatigue_yield_strain", PROPERTY_HINT_RANGE, "0,5,0.01,or_greater"), 0.3);
+	GLOBAL_DEF(PropertyInfo(Variant::FLOAT, "physics/3d/solver/soft_body_fatigue_max_damage", PROPERTY_HINT_RANGE, "0,0.99,0.01"), 0.9);
 	GLOBAL_DEF(PropertyInfo(Variant::FLOAT, "physics/3d/solver/soft_body_xpbd_tension_yield_strain", PROPERTY_HINT_RANGE, "0,3,0.01,or_greater"), 0.1);
 	// Independent unilateral XPBD limits prevent excessively stretching or
 	// compressing a soft-body link while permitting normal elastic motion

@@ -103,7 +103,7 @@ class TestAnisotropicStretch(unittest.TestCase):
         self.assertIn("get_soft_body_xpbd_material_axis()", space_h)
         self.assertIn('GLOBAL_GET("physics/3d/solver/soft_body_xpbd_material_axis")', space_cpp)
         self.assertIn("const bool use_anisotropic_stretch = use_xpbd && parallel_ratio != real_t(1.0)", body)
-        self.assertIn("if (use_tension_hardening || use_compression_hardening || use_anisotropic_stretch)", body)
+        self.assertIn("if (use_tension_hardening || use_compression_hardening || use_anisotropic_stretch || use_fatigue)", body)
         self.assertIn("physics_xpbd_anisotropic_stretch_alpha(link.n[0]->s, link.n[1]->s", body)
         self.assertIn("physics_xpbd_anisotropic_stretch_alpha(", kernel)
         self.assertLess(

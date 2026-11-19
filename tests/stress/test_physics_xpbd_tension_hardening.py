@@ -77,9 +77,9 @@ class TestTensionHardening(unittest.TestCase):
         self.assertIn('GLOBAL_GET("physics/3d/solver/soft_body_xpbd_tension_hardening")', space_cpp)
         self.assertIn("LocalVector<real_t> xpbd_link_hardening_alphas;", body_h)
         self.assertIn("const bool use_tension_hardening = use_xpbd &&", body_cpp)
-        self.assertIn("if (use_tension_hardening || use_compression_hardening || use_anisotropic_stretch) {\n\t\txpbd_link_hardening_alphas.resize", body_cpp)
+        self.assertIn("if (use_tension_hardening || use_compression_hardening || use_anisotropic_stretch || use_fatigue) {\n\t\txpbd_link_hardening_alphas.resize", body_cpp)
         self.assertIn("xpbd_link_hardening_alphas.reset();", body_cpp)
-        self.assertIn("(use_tension_hardening || use_compression_hardening || use_anisotropic_stretch) ? xpbd_link_hardening_alphas[link_index] : alpha", body_cpp)
+        self.assertIn("(use_tension_hardening || use_compression_hardening || use_anisotropic_stretch || use_fatigue) ? xpbd_link_hardening_alphas[link_index] : alpha", body_cpp)
         self.assertIn("physics_xpbd_tension_hardening_alpha(", solver_h)
         self.assertLess(body_cpp.index("physics_xpbd_tension_hardening_alpha("),
                         body_cpp.index("for (int isolve = 0; isolve < iteration_count; ++isolve)"))
