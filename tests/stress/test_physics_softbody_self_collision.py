@@ -16,6 +16,8 @@ SOFT_CPP = ROOT / "modules/godot_physics_3d/godot_soft_body_3d.cpp"
 SOFT_H = ROOT / "modules/godot_physics_3d/godot_soft_body_3d.h"
 MATH = ROOT / "servers/physics_softbody_self_collision.h"
 NATIVE = ROOT / "tests/servers/test_physics_softbody_self_collision.cpp"
+STANDALONE = ROOT / "tests/stress/physics_softbody_edge_standalone.cpp"
+VECTOR3_MOCK = ROOT / "tests/stress/mock_physics/core/math/vector3.h"
 
 
 class SoftBodySelfCollisionSourceContracts(unittest.TestCase):
@@ -28,6 +30,8 @@ class SoftBodySelfCollisionSourceContracts(unittest.TestCase):
         cls.soft_h = SOFT_H.read_text(encoding="utf-8")
         cls.math = MATH.read_text(encoding="utf-8")
         cls.native = NATIVE.read_text(encoding="utf-8")
+        cls.standalone = STANDALONE.read_text(encoding="utf-8")
+        cls.vector3_mock = VECTOR3_MOCK.read_text(encoding="utf-8")
 
     def test_world_configuration_is_default_disabled(self):
         self.assertIn('"physics/3d/solver/soft_body_self_collision_thickness"', self.defs)
@@ -130,6 +134,15 @@ class SoftBodySelfCollisionSourceContracts(unittest.TestCase):
                      "compliance and pinned particles",
                      "degeneracy and invalid inputs"):
             self.assertIn(name.lower(), self.native.lower())
+
+    def test_standalone_cpp_compiler_smoke_covers_exact_header_and_previous_math(self):
+        self.assertIn('#include "servers/physics_softbody_self_collision.h"', self.standalone)
+        self.assertIn("for (int iteration = 0; iteration < 20000 && ok; ++iteration)", self.standalone)
+        self.assertIn("physics_softbody_closest_segment_points(", self.standalone)
+        self.assertIn("physics_softbody_project_edge_contact(", self.standalone)
+        self.assertIn("physics_softbody_project_self_contact(", self.standalone)
+        self.assertIn("struct Vector3", self.vector3_mock)
+        self.assertIn("constexpr Vector3", self.vector3_mock)
 
 
 if __name__ == "__main__":
