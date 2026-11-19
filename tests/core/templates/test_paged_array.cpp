@@ -93,14 +93,16 @@ TEST_CASE("[PagedArray][Performance] New pages allocate concurrently without dup
 		pool.free_pages(ids.data(), uint32_t(ids.size()));
 	}
 
+	std::vector<uint32_t> recycled_ids;
+	recycled_ids.reserve(thread_count * pages_per_thread);
 	for (int i = 0; i < thread_count * pages_per_thread; i++) {
 		const Pool::PageInfo reused = pool.alloc_page();
 		REQUIRE(reused.page != nullptr);
 		CHECK(allocated_ids.erase(reused.page_id) == 1);
-		pool.free_page(reused.page_id);
+		recycled_ids.push_back(reused.page_id);
 	}
-	// The repeated alloc/free loop only exercises the most recently returned
-	// page, so every page is still available for the final reset.
+	CHECK(allocated_ids.empty());
+	pool.free_pages(recycled_ids.data(), uint32_t(recycled_ids.size()));
 	pool.reset();
 }
 
