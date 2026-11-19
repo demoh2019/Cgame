@@ -1395,10 +1395,14 @@ GodotSoftBodyShape3D::GodotSoftBodyShape3D(GodotSoftBody3D *p_soft_body) {
 struct _SoftBodyIntersectSegmentInfo {
 	const GodotSoftBody3D *soft_body = nullptr;
 	Vector3 from;
-	Vector3 dir;
+	Vector3 to;
+	Vector3 direction;
 	Vector3 hit_position;
-	uint32_t hit_face_index = -1;
-	real_t hit_dist_sq = Math::INF;
+	Vector3 hit_normal;
+	uint32_t hit_face_index = UINT32_MAX;
+	int dominant_axis = 0;
+	real_t closest_fraction = 1.0;
+	bool hit_back_faces = false;
 
 	static bool process_hit(uint32_t p_face_index, void *p_userdata) {
 		_SoftBodyIntersectSegmentInfo &query_info = *(static_cast<_SoftBodyIntersectSegmentInfo *>(p_userdata));
@@ -1406,32 +1410,65 @@ struct _SoftBodyIntersectSegmentInfo {
 		Vector3 points[3];
 		query_info.soft_body->get_face_points(p_face_index, points[0], points[1], points[2]);
 
-		Vector3 result;
-		if (Geometry3D::ray_intersects_triangle(query_info.from, query_info.dir, points[0], points[1], points[2], &result)) {
-			real_t dist_sq = query_info.from.distance_squared_to(result);
-			if (dist_sq < query_info.hit_dist_sq) {
-				query_info.hit_dist_sq = dist_sq;
-				query_info.hit_position = result;
-				query_info.hit_face_index = p_face_index;
-			}
+		// A ray test would also accept triangles beyond the requested endpoint
+		// when their broadphase bounds are inflated by the collision margin.
+		Vector3 hit;
+		if (!Geometry3D::segment_intersects_triangle(query_info.from, query_info.to, points[0], points[1], points[2], &hit)) {
+			return false;
 		}
 
-		// Continue with the query.
+		// Match FaceShape3D's triangle winding and back-face semantics.
+		Vector3 normal = (points[1] - points[0]).cross(points[2] - points[0]);
+		const bool back_face = normal.dot(query_info.direction) > 0.0;
+		if (back_face && !query_info.hit_back_faces) {
+			return false;
+		}
+
+		// Select the nearest intersection using a normalized segment fraction.
+		// Squared world-space distances overflow for very long rays in float32.
+		const int axis = query_info.dominant_axis;
+		const real_t fraction = (hit[axis] - query_info.from[axis]) / query_info.direction[axis];
+		if (fraction >= 0.0 && fraction <= 1.0 &&
+				(query_info.hit_face_index == UINT32_MAX || fraction < query_info.closest_fraction)) {
+			normal.normalize();
+			query_info.closest_fraction = fraction;
+			query_info.hit_position = hit;
+			query_info.hit_normal = back_face ? -normal : normal;
+			query_info.hit_face_index = p_face_index;
+		}
+
+		// Continue: a closer face might lie farther down the BVH traversal.
 		return false;
 	}
 };
 
 bool GodotSoftBodyShape3D::intersect_segment(const Vector3 &p_begin, const Vector3 &p_end, Vector3 &r_result, Vector3 &r_normal, int &r_face_index, bool p_hit_back_faces) const {
+	const Vector3 direction = p_end - p_begin;
+	if (direction == Vector3()) {
+		return false;
+	}
+
 	_SoftBodyIntersectSegmentInfo query_info;
 	query_info.soft_body = soft_body;
 	query_info.from = p_begin;
-	query_info.dir = (p_end - p_begin).normalized();
+	query_info.to = p_end;
+	query_info.direction = direction;
+	query_info.hit_back_faces = p_hit_back_faces;
+	// Pick the largest nonzero component to minimize loss of precision and
+	// avoid sqrt and a squared-distance overflow for large-world raycasts.
+	if (Math::abs(direction.y) > Math::abs(direction[query_info.dominant_axis])) {
+		query_info.dominant_axis = 1;
+	}
+	if (Math::abs(direction.z) > Math::abs(direction[query_info.dominant_axis])) {
+		query_info.dominant_axis = 2;
+	}
 
 	soft_body->query_ray(p_begin, p_end, _SoftBodyIntersectSegmentInfo::process_hit, &query_info);
 
-	if (query_info.hit_dist_sq != Math::INF) {
+	if (query_info.hit_face_index != UINT32_MAX) {
 		r_result = query_info.hit_position;
-		r_normal = soft_body->get_face_normal(query_info.hit_face_index);
+		r_normal = query_info.hit_normal;
+		r_face_index = int(query_info.hit_face_index);
 		return true;
 	}
 
