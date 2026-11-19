@@ -8,7 +8,6 @@ on:
       - "doc/classes/TextureRect.xml"
       - "misc/scripts/tests/test_upstream_backports.py"
       - "misc/scripts/tests/test_upstream_backports_cpp.py"
-      - "misc/scripts/tests/test_upstream_backports_cpp.py"
       - ".github/workflows/upstream-backport-regressions.yml"
   push:
     branches: [develop]
@@ -17,6 +16,7 @@ on:
       - "drivers/gles3/rasterizer_gles3.cpp"
       - "doc/classes/TextureRect.xml"
       - "misc/scripts/tests/test_upstream_backports.py"
+      - "misc/scripts/tests/test_upstream_backports_cpp.py"
   workflow_dispatch:
 
 permissions:
