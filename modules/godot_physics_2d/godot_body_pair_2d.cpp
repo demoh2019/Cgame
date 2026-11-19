@@ -344,6 +344,15 @@ bool GodotBodyPair2D::setup(real_t p_step) {
 			B->get_continuous_collision_detection_mode() != PS2DE::CCD_MODE_DISABLED;
 	const uint64_t geometry_version_a = A->get_collision_geometry_version();
 	const uint64_t geometry_version_b = B->get_collision_geometry_version();
+	// The broadphase AABBs may overlap even when the actual shapes are
+	// separated. Reuse that exact negative SAT/GJK result while neither
+	// relative translation nor either body's shape/orientation has changed.
+	// Previous results obtained through one-way filtering are never cached.
+	if (relative_translation_unchanged && contact_recycling.can_reuse_separation(geometry_version_a, geometry_version_b, ccd_enabled)) {
+		collided = false;
+		oneway_disabled = false;
+		return false;
+	}
 	if (relative_translation_unchanged && contact_recycling.can_reuse(geometry_version_a, geometry_version_b, collided && !oneway_disabled, contact_count, ccd_enabled)) {
 		// SAT may have emitted a new manifold with fewer points, leaving
 		// old (unused) contacts to be pruned on the next frame. Never recycle
@@ -386,7 +395,7 @@ bool GodotBodyPair2D::setup(real_t p_step) {
 	bool prev_collided = collided;
 
 	collided = GodotCollisionSolver2D::solve(shape_A_ptr, xform_A, motion_A, shape_B_ptr, xform_B, motion_B, _add_contact, this, &sep_axis);
-	contact_recycling.remember(geometry_version_a, geometry_version_b);
+	contact_recycling.remember(geometry_version_a, geometry_version_b, collided);
 	if (!collided) {
 		oneway_disabled = false;
 
