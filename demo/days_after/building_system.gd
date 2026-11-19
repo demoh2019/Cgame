@@ -9,7 +9,7 @@ const BUILD_COST := {"wood_t1": 3, "stone_t1": 2}
 const BUILD_DISTANCE: float = 3.0
 const RAY_HEIGHT: float = 2.0
 const RAY_DEPTH: float = 5.0
-const GROUND_CLEARANCE: float = 0.035
+const GROUND_CLEARANCE: float = 0.08
 
 var player: CharacterBody3D
 
