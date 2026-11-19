@@ -43,6 +43,9 @@ class GodotStep3D {
 
 	LocalVector<LocalVector<GodotBody3D *>> body_islands;
 	LocalVector<LocalVector<GodotConstraint3D *>> constraint_islands;
+	// Keep normal bursts cached; reclaim oversized idle tails gradually.
+	uint8_t body_island_idle_steps = 0;
+	uint8_t constraint_island_idle_steps = 0;
 	LocalVector<GodotConstraint3D *> all_constraints;
 	// Filled only when pre_solve removes constraints from some islands.
 	// Dense frames use direct island indices with no extra allocation.
