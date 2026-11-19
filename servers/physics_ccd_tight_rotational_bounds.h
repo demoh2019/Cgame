@@ -113,9 +113,10 @@ _FORCE_INLINE_ static Rect2 godot_physics_ccd_tight_rotational_bounds(
 		return swept.grow(godot_physics_ccd_rotational_padding(p_bounds, p_pivot, factor));
 	}
 
+	const Vector2 magnitude_low = min_bound.abs();
+	const Vector2 magnitude_high = max_bound.abs();
 	const real_t precision = real_t(8.0) * CMP_EPSILON * MAX(real_t(1.0),
-			MAX(min_bound.abs().max_axis_index() == 0 ? Math::abs(min_bound.x) : Math::abs(min_bound.y),
-					max_bound.abs().max_axis_index() == 0 ? Math::abs(max_bound.x) : Math::abs(max_bound.y)));
+			MAX(MAX(magnitude_low.x, magnitude_low.y), MAX(magnitude_high.x, magnitude_high.y)));
 	return Rect2(min_bound, max_bound - min_bound).grow(precision);
 }
 
@@ -161,9 +162,12 @@ _FORCE_INLINE_ static AABB godot_physics_ccd_tight_rotational_bounds(
 		swept.grow_by(godot_physics_ccd_rotational_padding(p_bounds, p_pivot, factor));
 		return swept;
 	}
-	const real_t precision = real_t(8.0) * CMP_EPSILON * MAX(real_t(1.0),
-			MAX(min_bound.abs().max_axis_index() == 0 ? Math::abs(min_bound.x) : (min_bound.abs().max_axis_index() == 1 ? Math::abs(min_bound.y) : Math::abs(min_bound.z)),
-					max_bound.abs().max_axis_index() == 0 ? Math::abs(max_bound.x) : (max_bound.abs().max_axis_index() == 1 ? Math::abs(max_bound.y) : Math::abs(max_bound.z))));
+	const Vector3 magnitude_low = min_bound.abs();
+	const Vector3 magnitude_high = max_bound.abs();
+	const real_t maximum_coordinate = MAX(
+			MAX(MAX(magnitude_low.x, magnitude_low.y), magnitude_low.z),
+			MAX(MAX(magnitude_high.x, magnitude_high.y), magnitude_high.z));
+	const real_t precision = real_t(8.0) * CMP_EPSILON * MAX(real_t(1.0), maximum_coordinate);
 	AABB tight(min_bound, max_bound - min_bound);
 	tight.grow_by(precision);
 	return tight;
