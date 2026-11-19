@@ -1154,7 +1154,7 @@ static void _exercise_reciprocal_pair_links(const Bounds &p_overlap, const Bound
 	// reciprocal index, even after unordered adjacency swaps.
 	auto recheck_all = [&]() {
 		for (const BVHHandle &handle : handles) {
-			tree.recheck_pairs(handle);
+			tree.refresh_pair_userdata(handle);
 		}
 		CHECK(stats.bad_userdata == 0);
 	};
