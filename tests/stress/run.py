@@ -30,6 +30,8 @@ CASES = (
     "file_io", "threads", "physics_2d", "physics_3d",
     "memory_churn", "astar_grid", "tweens", "audio_buffers",
     "variant_codec", "render_2d", "render_3d",
+    "node_paths", "regex", "compression", "hashing",
+    "resource_io", "astar_3d", "ui_layout", "thread_contention",
 )
 RENDER_CASES = frozenset(("render_2d", "render_3d"))
 # Each scenario runs in a fresh process. No preset has unlimited RSS or wall time.
@@ -187,12 +189,15 @@ def summarize(runs: list[dict[str, Any]]) -> dict[str, Any]:
     wall = sorted(r["wall_seconds"] for r in passed)
     memories = [r["peak_rss_mib"] for r in runs if r["peak_rss_mib"] is not None]
     cpu_times = [r["cpu_seconds"] for r in passed if r.get("cpu_seconds") is not None]
+    engine_times = sorted(r["engine"]["duration_ms"] for r in passed if r.get("engine"))
     return {
         "status": "passed" if len(passed) == len(runs) else "failed",
         "median_wall_seconds": round(statistics.median(wall), 6) if wall else None,
         "p95_wall_seconds": round(wall[math.ceil(0.95 * len(wall)) - 1], 6) if wall else None,
         "max_rss_mib": round(max(memories), 3) if memories else None,
         "median_cpu_seconds": round(statistics.median(cpu_times), 6) if cpu_times else None,
+        "median_engine_ms": round(statistics.median(engine_times), 6) if engine_times else None,
+        "p95_engine_ms": round(engine_times[math.ceil(0.95 * len(engine_times)) - 1], 6) if engine_times else None,
         "runs": runs,
     }
 
@@ -208,7 +213,7 @@ def compare_baseline(current: dict[str, Any], baseline: dict[str, Any],
         previous = baseline.get("cases", {}).get(name)
         if not previous or data["status"] != "passed":
             continue
-        for field in ("median_wall_seconds", "median_cpu_seconds", "max_rss_mib"):
+        for field in ("median_wall_seconds", "median_cpu_seconds", "median_engine_ms", "max_rss_mib"):
             new, old = data.get(field), previous.get(field)
             if new is not None and old is not None and old > 0 and new > old * (1 + percent / 100.0):
                 errors.append("%s %s: %.3f > %.3f (baseline + %.1f%%)" %
@@ -222,6 +227,53 @@ def compare_baseline(current: dict[str, Any], baseline: dict[str, Any],
                 errors.append("memory_churn retained growth %.3f MiB > %.3f MiB" %
                               (growth, memory_growth_limit_mib))
     return errors
+
+
+
+def markdown_hotspots(report: dict[str, Any]) -> str:
+    """Human-readable ranking; distinct workloads are not normalized to identical work."""
+    rows = []
+    for case, values in report["cases"].items():
+        if values.get("median_wall_seconds") is None:
+            continue
+        wall = values["median_wall_seconds"]
+        p95 = values.get("p95_wall_seconds")
+        rss = values.get("max_rss_mib")
+        engine = values.get("median_engine_ms")
+        note = []
+        if p95 is not None and wall > 0 and p95 / wall >= 1.5:
+            note.append("high run-to-run variability")
+        cap = report.get("configuration", {}).get("rss_limit_mib")
+        if rss is not None and isinstance(cap, (int, float)) and cap > 0 and rss >= cap * 0.8:
+            note.append("near RSS limit")
+        if engine is not None and wall > 0 and wall - engine / 1000.0 > max(1.0, wall * 0.5):
+            note.append("startup/teardown dominates")
+        rows.append((case, wall, p95, rss, engine, "; ".join(note)))
+    rows.sort(key=lambda item: item[1], reverse=True)
+
+    def number(value: float | None) -> str:
+        return "%.3f" % value if value is not None else "n/a"
+
+    lines = [
+        "# Cgame stress: expensive workloads",
+        "",
+        "Preset: %s; scale: %s; mode: %s; status: %s." % (
+            report["configuration"]["preset"], report["configuration"]["scale"],
+            report["configuration"]["render_mode"], report["status"]),
+        "",
+        "Ordered by median wall time, **not** normalized workload throughput. "
+        "Compare the same case and preset on identical hardware to identify regressions.",
+        "",
+        "| Scenario | Median wall (s) | p95 wall (s) | Peak RSS (MiB) | Engine median (ms) | Signals |",
+        "| --- | ---: | ---: | ---: | ---: | --- |",
+    ]
+    for case, wall, p95, rss, engine, note in rows:
+        lines.append("| %s | %s | %s | %s | %s | %s |" % (
+            case, number(wall), number(p95), number(rss), number(engine), note or "—"))
+    lines += ["", "Failures: %d" % len(report["failures"])]
+    lines.extend("- %s" % str(message).replace("\n", " ") for message in report["failures"])
+    lines.append("")
+    return "\n".join(lines)
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -242,6 +294,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--max-regression-pct", type=float, default=20.0)
     parser.add_argument("--max-retained-growth-mib", type=float, default=None)
     parser.add_argument("--output", type=Path, default=Path("stress-results.json"))
+    parser.add_argument("--summary-md", type=Path, help="Also write a ranked human-readable bottleneck report")
     parser.add_argument("--list-cases", action="store_true")
     args = parser.parse_args(argv)
 
@@ -309,6 +362,9 @@ def main(argv: list[str] | None = None) -> int:
     temp = args.output.with_name(args.output.name + ".tmp")
     temp.write_text(json.dumps(report, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
     temp.replace(args.output)
+    if args.summary_md is not None:
+        args.summary_md.parent.mkdir(parents=True, exist_ok=True)
+        args.summary_md.write_text(markdown_hotspots(report), encoding="utf-8")
     print("Stress report: %s (%s)" % (args.output, report["status"]))
     for error in report["failures"]:
         print("FAIL: " + error, file=sys.stderr)

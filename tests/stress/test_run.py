@@ -113,6 +113,29 @@ class BaselineTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "mismatch"):
             stress.compare_baseline(new, old, 20., None)
 
+    def test_engine_time_regression_without_wall_regression(self):
+        baseline = self.make_report()
+        current = self.make_report()
+        baseline["cases"]["math"]["median_engine_ms"] = 100.0
+        current["cases"]["math"]["median_engine_ms"] = 150.0
+        self.assertEqual(len(stress.compare_baseline(current, baseline, 20., None)), 1)
+
+    def test_hotspots_rank_and_explain_resource_pressure(self):
+        report = self.make_report()
+        report["status"] = "passed"
+        report["failures"] = []
+        report["configuration"]["rss_limit_mib"] = 100.0
+        report["cases"]["math"].update({"p95_wall_seconds": 1.9, "median_engine_ms": 50.0})
+        report["cases"]["io"] = {
+            "median_wall_seconds": 2.0, "p95_wall_seconds": 2.1,
+            "max_rss_mib": 95.0, "median_engine_ms": 1800.0,
+        }
+        text = stress.markdown_hotspots(report)
+        self.assertLess(text.index("| io |"), text.index("| math |"))
+        self.assertIn("near RSS limit", text)
+        self.assertIn("high run-to-run variability", text)
+        self.assertIn("startup/teardown dominates", text)
+
     def test_memory_churn_threshold(self):
         current = self.make_report()
         current["cases"]["memory_churn"] = {"status": "passed", "runs": [

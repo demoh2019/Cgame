@@ -91,9 +91,9 @@ jobs:
           "$BIN" --version
           if [[ "$RENDER_MODE" == "display" ]]; then
             # Software GL only: results must NOT be compared with discrete-GPU measurements.
-            xvfb-run -a python3 tests/stress/run.py --godot "$BIN" --preset "$PRESET" --render-mode display --output whole-engine-stress.json
+            xvfb-run -a python3 tests/stress/run.py --godot "$BIN" --preset "$PRESET" --render-mode display --output whole-engine-stress.json --summary-md whole-engine-stress.md
           else
-            python3 tests/stress/run.py --godot "$BIN" --preset "$PRESET" --render-mode headless --output whole-engine-stress.json
+            python3 tests/stress/run.py --godot "$BIN" --preset "$PRESET" --render-mode headless --output whole-engine-stress.json --summary-md whole-engine-stress.md
           fi
       - name: Archive per-scenario performance and failure reports
         if: always()
@@ -102,6 +102,7 @@ jobs:
           name: cgame-stress-${{ env.PRESET }}-${{ env.RENDER_MODE }}
           path: |
             whole-engine-stress.json
+            whole-engine-stress.md
             whole-engine-native-tests.log
           if-no-files-found: warn
           retention-days: 30

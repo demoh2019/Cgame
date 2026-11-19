@@ -96,3 +96,31 @@ ASan/UBSan/TSan builds, Valgrind/heap profiling, long-lived multiplayer sessions
 real device GPU/mobile profiling, shader import/export projects, and fuzzing.
 No finite synthetic suite can cover every engine feature or prove absence of
 optimization bugs.
+
+## Extended bottleneck diagnostics
+
+The stress suite now includes eight additional integrity-checked cases:
+
+| Area | Case | Stress dimension |
+| --- | --- | --- |
+| Scene lookup | `node_paths` | Repeated cached NodePath lookups in a wide tree; reports lookup-only time |
+| Pattern matching | `regex` | Many regular-expression searches with verified match counts |
+| Data compression | `compression` | Zstandard compress/decompress roundtrips with byte-for-byte validation |
+| Cryptography | `hashing` | Repeated SHA-256 contexts with deterministic digest checks |
+| Resource serialization | `resource_io` | Repeated native .tres save/load using cache bypass and cleanup |
+| 3D navigation | `astar_3d` | Graph construction and repeated 3D shortest-path searches |
+| UI/layout | `ui_layout` | Hundreds of Controls, forced layout passes and process-frame profiling |
+| Synchronization | `thread_contention` | Eight or fewer threads contending on a Mutex with a checked shared counter |
+
+Write a ranked Markdown report alongside the full JSON diagnostics:
+
+```bash
+python3 tests/stress/run.py --godot ./bin/godot.linuxbsd.editor.dev.x86_64 --preset standard --summary-md out/hotspots.md --output out/stress.json
+```
+
+The report sorts workloads by elapsed wall time and flags high p95/median
+variability, RSS nearing its limit, and process overhead relative to engine time.
+It also records median and p95 **in-engine duration** independently of process
+startup, and baseline comparisons now track median engine time. These rankings
+are a triage aid, not a universal throughput leaderboard: scenarios do different
+amounts of work. Native CI archives both JSON and Markdown artifacts.

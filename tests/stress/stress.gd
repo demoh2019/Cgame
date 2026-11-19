@@ -11,6 +11,8 @@ const CASES := [
 	"file_io", "threads", "physics_2d", "physics_3d",
 	"memory_churn", "astar_grid", "tweens", "audio_buffers",
 	"variant_codec", "render_2d", "render_3d",
+	"node_paths", "regex", "compression", "hashing",
+	"resource_io", "astar_3d", "ui_layout", "thread_contention",
 ]
 
 var signal_total: int = 0
@@ -195,6 +197,22 @@ func _run_case(test_case: String, scale: int, frames: int, seed: int) -> Diction
 			return await _render_2d(scale, frames)
 		"render_3d":
 			return await _render_3d(scale, frames)
+		"node_paths":
+			return _node_paths(scale)
+		"regex":
+			return _regex(scale)
+		"compression":
+			return _compression(scale)
+		"hashing":
+			return _hashing(scale)
+		"resource_io":
+			return _resource_io(scale)
+		"astar_3d":
+			return _astar_3d(scale)
+		"ui_layout":
+			return await _ui_layout(scale, frames)
+		"thread_contention":
+			return _thread_contention(scale)
 	return {"error": "Unhandled case"}
 
 
@@ -440,3 +458,175 @@ func _render_3d(scale: int, frames: int) -> Dictionary:
 	world.queue_free()
 	await process_frame
 	return {"meshes": 200 * scale, "frames": frames, "peak_frame_ms": peak_frame_ms, "peak_draw_calls": peak_draw_calls, "peak_video_memory_bytes": peak_video_memory}
+
+
+## Additional cross-subsystem workloads. Each one has an explicit integrity check.
+
+func _node_paths(scale: int) -> Dictionary:
+	var group := Node.new()
+	root.add_child(group)
+	var paths: Array[NodePath] = []
+	var count := 400 * scale
+	for i in range(count):
+		var child := Node.new()
+		child.name = "Target%d" % i
+		group.add_child(child)
+		paths.append(NodePath("Target%d" % i))
+	var started := Time.get_ticks_usec()
+	var found := 0
+	for i in range(count * 10):
+		if group.get_node_or_null(paths[i % count]) != null:
+			found += 1
+	var lookup_ms := float(Time.get_ticks_usec() - started) / 1000.0
+	group.free()
+	if found != count * 10:
+		return {"error": "NodePath lookup count mismatch"}
+	return {"nodes": count, "lookups": found, "lookup_ms": lookup_ms}
+
+
+func _regex(scale: int) -> Dictionary:
+	var pattern := RegEx.new()
+	if pattern.compile("item_[0-9]{4}:[A-Z]+") != OK:
+		return {"error": "RegEx could not compile"}
+	var matches_found := 0
+	for i in range(400 * scale):
+		var value := "item_%04d:ALPHA item_%04d:BETA no-match" % [i % 10000, (i + 1) % 10000]
+		var matches := pattern.search_all(value)
+		if matches.size() != 2:
+			return {"error": "RegEx match count mismatch"}
+		matches_found += matches.size()
+	return {"inputs": 400 * scale, "matches": matches_found}
+
+
+func _compression(scale: int) -> Dictionary:
+	var data := PackedByteArray()
+	data.resize(256 * 1024)
+	for i in range(data.size()):
+		data[i] = (i * 31 + (i >> 3)) & 255
+	var compressed_bytes := 0
+	for i in range(35 * scale):
+		var compressed := data.compress(FileAccess.COMPRESSION_ZSTD)
+		if compressed.is_empty():
+			return {"error": "Zstd compression failed"}
+		var restored := compressed.decompress(data.size(), FileAccess.COMPRESSION_ZSTD)
+		if restored != data:
+			return {"error": "Compressed payload differs after decompression"}
+		compressed_bytes += compressed.size()
+	return {"roundtrips": 35 * scale, "source_bytes": data.size(), "total_compressed_bytes": compressed_bytes}
+
+
+func _hashing(scale: int) -> Dictionary:
+	var bytes := PackedByteArray()
+	bytes.resize(64 * 1024)
+	for i in range(bytes.size()):
+		bytes[i] = (i * 17 + (i >> 5)) & 255
+	var first_digest := PackedByteArray()
+	for i in range(120 * scale):
+		var context := HashingContext.new()
+		if context.start(HashingContext.HASH_SHA256) != OK:
+			return {"error": "Could not initialize SHA-256 context"}
+		if context.update(bytes) != OK:
+			return {"error": "Could not hash input"}
+		var digest := context.finish()
+		if digest.size() != 32:
+			return {"error": "Unexpected SHA-256 digest size"}
+		if i == 0:
+			first_digest = digest
+		elif digest != first_digest:
+			return {"error": "Unstable hash digest"}
+	return {"hashes": 120 * scale, "bytes_per_hash": bytes.size(), "digest_prefix": first_digest.hex_encode().substr(0, 8)}
+
+
+func _resource_io(scale: int) -> Dictionary:
+	var path := "user://stress_resource_io.tres"
+	var curve := Curve.new()
+	curve.add_point(Vector2(0.0, 0.0))
+	curve.add_point(Vector2(1.0, 1.0))
+	var completed := 0
+	var failure := ""
+	for i in range(20 * scale):
+		if ResourceSaver.save(curve, path) != OK:
+			failure = "ResourceSaver failed"
+			break
+		var loaded := ResourceLoader.load(path, "Curve", ResourceLoader.CACHE_MODE_IGNORE) as Curve
+		if loaded == null or loaded.get_point_count() != 2:
+			failure = "ResourceLoader failed to restore Curve"
+			break
+		completed += 1
+	DirAccess.remove_absolute(ProjectSettings.globalize_path(path))
+	if not failure.is_empty():
+		return {"error": failure}
+	return {"roundtrips": completed, "resource_type": "Curve"}
+
+
+func _astar_3d(scale: int) -> Dictionary:
+	var finder := AStar3D.new()
+	const SIDE := 20
+	for y in range(SIDE):
+		for x in range(SIDE):
+			var point_id := y * SIDE + x
+			finder.add_point(point_id, Vector3(x, 0.0, y))
+			if x > 0:
+				finder.connect_points(point_id, point_id - 1)
+			if y > 0:
+				finder.connect_points(point_id, point_id - SIDE)
+	var checksum := 0
+	for i in range(100 * scale):
+		var path := finder.get_id_path(0, SIDE * SIDE - 1)
+		if path.is_empty() or path[0] != 0 or path.back() != SIDE * SIDE - 1:
+			return {"error": "AStar3D path incorrect"}
+		checksum += path.size()
+	return {"vertices": SIDE * SIDE, "searches": 100 * scale, "checksum": checksum}
+
+
+func _ui_layout(scale: int, frames: int) -> Dictionary:
+	var column := VBoxContainer.new()
+	root.add_child(column)
+	var count := 250 * scale
+	for i in range(count):
+		var label := Label.new()
+		label.text = "Layout stress item %d" % i
+		column.add_child(label)
+	var peak_process_ms := 0.0
+	var checksum := 0.0
+	for frame in range(frames):
+		column.custom_minimum_size = Vector2(float(frame % 40), 0.0)
+		column.queue_sort()
+		await process_frame
+		checksum += column.get_combined_minimum_size().y
+		peak_process_ms = maxf(peak_process_ms, Performance.get_monitor(Performance.TIME_PROCESS) * 1000.0)
+	column.queue_free()
+	await process_frame
+	if checksum <= 0.0:
+		return {"error": "UI layout returned no minimum height"}
+	return {"controls": count, "frames": frames, "peak_process_ms": peak_process_ms, "height_checksum": checksum}
+
+
+var contention_lock := Mutex.new()
+var contention_counter: int = 0
+
+
+func _contention_worker(operations: int) -> void:
+	for i in range(operations):
+		contention_lock.lock()
+		contention_counter += 1
+		contention_lock.unlock()
+
+
+func _thread_contention(scale: int) -> Dictionary:
+	var workers: Array[Thread] = []
+	var count := mini(8, maxi(2, OS.get_processor_count()))
+	var operations := 10000 * scale
+	contention_counter = 0
+	for i in range(count):
+		var worker := Thread.new()
+		if worker.start(Callable(self, "_contention_worker").bind(operations)) != OK:
+			for active in workers:
+				active.wait_to_finish()
+			return {"error": "Could not start contention worker"}
+		workers.append(worker)
+	for worker in workers:
+		worker.wait_to_finish()
+	if contention_counter != count * operations:
+		return {"error": "Mutex-protected counter mismatch"}
+	return {"workers": count, "lock_operations": contention_counter}
