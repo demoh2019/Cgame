@@ -610,8 +610,7 @@ private:
 		}
 		// Avoid touching the hash allocator for the overwhelmingly common
 		// sparse-sparse unlink, which could never have been indexed.
-		if ((from_degree >= DENSE_PAIR_THRESHOLD && to_degree >= DENSE_PAIR_THRESHOLD ||
-				from_degree == DENSE_PAIR_THRESHOLD || to_degree == DENSE_PAIR_THRESHOLD) &&
+		if ((from_degree >= DENSE_PAIR_THRESHOLD || to_degree >= DENSE_PAIR_THRESHOLD) &&
 				dense_pair_keys.is_empty()) {
 			dense_pair_keys.reset();
 		}
