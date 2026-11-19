@@ -65,6 +65,7 @@ func run(tree: SceneTree, scale: int, frames: int, parallel: bool, large_islands
 	var creation_ms: float = float(Time.get_ticks_usec() - begin_create) / 1000.0
 	PhysicsServer2D.space_set_active(space, true)
 	var peak_physics_ms: float = 0.0
+	var peak_solver_islands: int = 0
 	var frame_intervals: Array[float] = []
 	var previous_tick: int = Time.get_ticks_usec()
 	var valid: bool = true
@@ -75,6 +76,8 @@ func run(tree: SceneTree, scale: int, frames: int, parallel: bool, large_islands
 		previous_tick = now
 		peak_physics_ms = maxf(peak_physics_ms,
 				Performance.get_monitor(Performance.TIME_PHYSICS_PROCESS) * 1000.0)
+		peak_solver_islands = maxi(peak_solver_islands,
+				int(Performance.get_monitor(Performance.PHYSICS_2D_ISLAND_COUNT)))
 		for index in [0, int(count / 2), count - 1]:
 			var pose: Transform2D = PhysicsServer2D.body_get_state(bodies[index], PhysicsServer2D.BODY_STATE_TRANSFORM)
 			var velocity: Vector2 = PhysicsServer2D.body_get_state(bodies[index], PhysicsServer2D.BODY_STATE_LINEAR_VELOCITY)
@@ -122,6 +125,7 @@ func run(tree: SceneTree, scale: int, frames: int, parallel: bool, large_islands
 		"frames": frames,
 		"creation_ms": creation_ms,
 		"peak_physics_ms": peak_physics_ms,
+		"peak_solver_islands": peak_solver_islands,
 		"frame_interval_ms": frame_stats,
 		"frame_p95_ms": frame_stats["p95"],
 		"max_joint_gap": max_joint_gap,
