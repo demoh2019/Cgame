@@ -310,17 +310,33 @@ Error ResourceUID::save_to_cache() {
 
 	MutexLock l(mutex);
 
-	Vector<Pair<ID, String>> entries;
-	entries.reserve(unique_ids.size());
-	cache_entries = 0;
+	// Paths are already stored as UTF-8. Writing them directly avoids building
+	// a temporary list of Strings and converting every path back to UTF-8.
+	uint64_t encoded_size = 4;
+	for (const KeyValue<ID, Cache> &E : unique_ids) {
+		encoded_size += 12 + uint64_t(E.value.cs.length());
+		ERR_FAIL_COND_V_MSG(encoded_size > INT32_MAX, ERR_OUT_OF_MEMORY, "Resource UID cache is too large.");
+	}
 
+	Vector<uint8_t> data;
+	ERR_FAIL_COND_V(data.resize_uninitialized(int(encoded_size)) != OK, ERR_OUT_OF_MEMORY);
+	uint8_t *write = data.ptrw();
+	encode_uint32(unique_ids.size(), write);
+	write += 4;
+
+	cache_entries = 0;
 	for (KeyValue<ID, Cache> &E : unique_ids) {
-		entries.push_back(Pair<ID, String>(E.key, String::utf8(E.value.cs.ptr(), E.value.cs.length())));
+		const uint32_t path_length = E.value.cs.length();
+		encode_uint64(uint64_t(E.key), write);
+		encode_uint32(path_length, write + 8);
+		if (path_length > 0) {
+			memcpy(write + 12, E.value.cs.ptr(), path_length);
+		}
+		write += 12 + path_length;
 		E.value.saved_to_cache = true;
 		cache_entries++;
 	}
 
-	Vector<uint8_t> data = encode_binary_cache(entries);
 	f->store_buffer(data.ptr(), data.size());
 
 	changed = false;
