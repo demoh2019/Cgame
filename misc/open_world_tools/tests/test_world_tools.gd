@@ -31,6 +31,11 @@ func _run() -> void:
 	_test_erosion()
 	_test_foliage()
 	_test_streamer()
+	_test_storage_and_mesh_invariants()
+	_test_invalid_brush_and_snapshots()
+	_test_erosion_extremes()
+	_test_foliage_world_space_and_slope()
+	_test_streamer_boundaries()
 	print("Open World Tools: %d checks, %d failures" % [checks, failures])
 	quit(0 if failures == 0 else 1)
 
@@ -212,5 +217,193 @@ func _test_streamer() -> void:
 	streamer.focus = null
 	streamer.update_streaming()
 	_check(streamer.get_loaded_cell_count() == 0, "missing focus unloads cells")
+	streamer.free()
+	focus.free()
+
+
+func _test_storage_and_mesh_invariants() -> void:
+	var t: WorldTerrain3D = _new_terrain()
+	# Reinitialization must preserve valid data and reject corrupt lengths.
+	t.height_data[3] = 2.75
+	t.initialize_storage()
+	_check(_close(t.height_data[3], 2.75), "valid height samples survive reinitialize")
+	t.height_data = PackedFloat32Array([9.0])
+	t.color_data = PackedColorArray([Color.RED])
+	t.weight_data = PackedColorArray([Color.GREEN])
+	t.initialize_storage()
+	_check(t.height_data.size() == 25 and _close(t.height_data[3], 0.0), "invalid height map repaired")
+	_check(t.color_data.size() == 25 and t.color_data[3].is_equal_approx(t.DEFAULT_COLOR), "invalid color map repaired")
+	_check(t.weight_data.size() == 25 and t.weight_data[3].is_equal_approx(t.DEFAULT_WEIGHTS), "invalid weights repaired")
+	_check(t.get_normal_at(2.0, 2.0).is_equal_approx(Vector3.UP), "flat terrain normal is up")
+	t.rebuild()
+	var generated: Node3D = t.get_node(t.GENERATED_NAME) as Node3D
+	_check(generated.get_child_count() == 4, "full 2x2 chunk topology")
+	for chunk in generated.get_children():
+		var m: ArrayMesh = (chunk as MeshInstance3D).mesh as ArrayMesh
+		_check(m.surface_get_array_len(0) == 24, "2x2 quad mesh has 24 vertices")
+		_check(chunk.get_child_count() == 0, "collision disabled by default")
+	t.enable_collision = true
+	t.rebuild()
+	generated = t.get_node(t.GENERATED_NAME) as Node3D
+	for chunk in generated.get_children():
+		_check(chunk.get_child_count() == 1, "collision enabled creates static body")
+		var body: StaticBody3D = chunk.get_child(0) as StaticBody3D
+		_check(body != null and body.get_child_count() == 1, "collision has one shape")
+		temp_collision_check(body)
+	t.enable_collision = false
+	t.rebuild()
+	generated = t.get_node(t.GENERATED_NAME) as Node3D
+	_check(generated.get_child(0).get_child_count() == 0, "disabling collision removes physics bodies")
+	t.resolution = 3
+	t.cell_size = 0.0
+	t.chunk_cells = 1
+	t.initialize_storage()
+	_check(t.resolution == 3 and t.height_data.size() == 9, "resizing reallocates heightfield")
+	_check(t.cell_size > 0.0, "nonpositive cell size is clamped")
+	_check(t.chunk_cells == 2, "too small chunk size is clamped")
+	t.rebuild()
+	_check((t.get_node(t.GENERATED_NAME) as Node3D).get_child_count() == 1, "resized terrain creates one chunk")
+	t.free()
+
+
+func temp_collision_check(body: StaticBody3D) -> void:
+	var shape: CollisionShape3D = body.get_child(0) as CollisionShape3D
+	_check(shape != null and shape.shape != null, "generated collision shape is nonempty")
+
+
+func _test_invalid_brush_and_snapshots() -> void:
+	var t: WorldTerrain3D = _new_terrain()
+	var initial: PackedFloat32Array = t.height_data.duplicate()
+	var colors: PackedColorArray = t.color_data.duplicate()
+	var weights: PackedColorArray = t.weight_data.duplicate()
+	_check(t.apply_brush(Vector3(2, 0, 2), 2.0, 2.0, -1) == 0, "unknown negative brush mode rejected")
+	_check(t.apply_brush(Vector3(2, 0, 2), 2.0, 2.0, 999) == 0, "unknown positive brush mode rejected")
+	_check(t.apply_brush(Vector3(2, 0, 2), 1.0, 1.0, Terrain.BrushMode.PAINT_TEXTURE_LAYER, 0.0, Color.WHITE, -1) == 0, "negative texture channel rejected")
+	_check(t.apply_brush(Vector3(2, 0, 2), 1.0, 1.0, Terrain.BrushMode.PAINT_TEXTURE_LAYER, 0.0, Color.WHITE, 4) == 0, "out-of-range texture channel rejected")
+	_check(t.apply_brush(Vector3(2, 0, 2), 1.0, -1.0, Terrain.BrushMode.PAINT) == 0, "negative paint strength rejected")
+	_check(t.apply_brush(Vector3(100, 0, 100), 1.0, 1.0, Terrain.BrushMode.RAISE) == 0, "off-grid brush has no effect")
+	_check(t.height_data == initial, "invalid brushes leave terrain heights untouched")
+	_check(t.color_data == colors, "invalid brushes leave colors untouched")
+	_check(t.weight_data == weights, "invalid brushes leave weights untouched")
+	_check(t.apply_brush(Vector3(2, 0, 2), 1.0, 0.5, Terrain.BrushMode.PAINT_TEXTURE_LAYER, 0.0, Color.WHITE, 1) > 0, "partial texture paint succeeds")
+	var w: Color = t.weight_data[t.sample_index(2, 2)]
+	_check(_close(w.r, 0.5) and _close(w.g, 0.5), "partial texture paint blends source and target")
+	_check(_close(w.r + w.g + w.b + w.a, 1.0), "texture weights conserve unity after painting")
+	var updated: PackedColorArray = t.weight_data.duplicate()
+	t.restore_samples(initial, colors, PackedColorArray([Color.RED]))
+	_check(t.weight_data == updated, "mismatched weight snapshot does not corrupt terrain")
+	t.restore_samples(initial, colors, weights)
+	_check(t.weight_data == weights, "undo restores all four weight channels")
+	initial[0] = 123.0
+	_check(_close(t.height_data[0], 0.0), "restored height arrays do not alias source snapshots")
+	t.free()
+
+
+func _test_erosion_extremes() -> void:
+	var t: WorldTerrain3D = _new_terrain()
+	var flat: PackedFloat32Array = t.height_data.duplicate()
+	t.erode_thermal(5, 0.0, 1.0)
+	_check(t.height_data == flat, "flat terrain remains flat during erosion")
+	t.height_data[t.sample_index(2, 2)] = 27.0
+	var before: PackedFloat32Array = t.height_data.duplicate()
+	t.erode_thermal(-5, 0.0, 1.0)
+	_check(t.height_data == before, "negative erosion iterations do nothing")
+	t.erode_thermal(4, 1000.0, 1.0)
+	_check(t.height_data == before, "large talus prevents material transfer")
+	t.erode_thermal(4, 0.0, -1.0)
+	_check(t.height_data == before, "negative erosion rate rejected")
+	var conserved: float = _sum_heights(t)
+	for rate in [0.25, 0.5, 1.0, 3.0]:
+		t.height_data = before.duplicate()
+		t.erode_thermal(8, 0.0, rate)
+		_check(_close(_sum_heights(t), conserved, 0.005), "erosion conserves mass at rate %f" % rate)
+		_check(t.height_data[t.sample_index(2, 2)] < 27.0, "erosion reduces peak at rate %f" % rate)
+	t.free()
+
+
+func _test_foliage_world_space_and_slope() -> void:
+	var t: WorldTerrain3D = _new_terrain()
+	t.position = Vector3(70.0, 9.0, -40.0)
+	var f: WorldFoliage3D = Foliage.new()
+	root.add_child(f)
+	f.position = Vector3(-12.0, 4.0, 50.0)
+	f.terrain = t
+	f.foliage_mesh = SphereMesh.new()
+	f.placement_count = 16
+	f.random_seed = 9101
+	f.min_instance_scale = 0.8
+	f.max_instance_scale = 0.8
+	_check(f.scatter() == 16, "transformed foliage accepts all locations on flat terrain")
+	var first_set: Array[Transform3D] = []
+	for i in range(f.multimesh.instance_count):
+		var tr: Transform3D = f.multimesh.get_instance_transform(i)
+		first_set.append(tr)
+		var world_origin: Vector3 = f.global_transform * tr.origin
+		_check(world_origin.x >= 70.0 and world_origin.x <= 74.0, "foliage world X stays in terrain bounds")
+		_check(world_origin.z >= -40.0 and world_origin.z <= -36.0, "foliage world Z stays in terrain bounds")
+		_check(_close(world_origin.y, 9.0), "foliage world Y matches terrain elevation")
+		_check(_close(tr.basis.get_scale().x, 0.8), "fixed foliage instance scale respected")
+	f.scatter()
+	for i in range(f.multimesh.instance_count):
+		_check(f.multimesh.get_instance_transform(i).is_equal_approx(first_set[i]), "all foliage transforms deterministic under fixed seed")
+	f.random_seed = 9102
+	f.scatter()
+	_check(not f.multimesh.get_instance_transform(0).is_equal_approx(first_set[0]), "different seeds change positions")
+	for z in range(t.resolution):
+		for x in range(t.resolution):
+			t.height_data[t.sample_index(x, z)] = float(x) * 10.0
+	f.max_slope_degrees = 0.0
+	_check(f.scatter() == 0, "zero slope tolerance rejects a steep plane")
+	_check(f.multimesh.instance_count == 0, "slope filtering returns empty MultiMesh")
+	f.free()
+	t.free()
+
+
+func _test_streamer_boundaries() -> void:
+	var focus: Node3D = Node3D.new()
+	root.add_child(focus)
+	var streamer: WorldStreamer3D = Streamer.new()
+	root.add_child(streamer)
+	streamer.focus = focus
+	streamer.cell_size = 10.0
+	streamer.active_radius = 0
+	streamer.cells = [
+		_make_cell(Vector2i(-1, -1)),
+		_make_cell(Vector2i(0, 0)),
+		_make_cell(Vector2i(1, 1)),
+		_make_cell(Vector2i(0, 1)),
+		_make_cell(Vector2i(1, 0)),
+		_make_cell(Vector2i.ZERO)
+	]
+	focus.position = Vector3(-0.001, 0, -0.001)
+	streamer.update_streaming()
+	_check(streamer.get_loaded_cell_count() == 1, "negative coordinates load negative quadrant")
+	focus.position = Vector3(10.0, 0, 10.0)
+	streamer.update_streaming()
+	_check(streamer.get_loaded_cell_count() == 1, "positive exact cell boundary loads next quadrant")
+	focus.position = Vector3.ZERO
+	streamer.update_streaming()
+	_check(streamer.get_loaded_cell_count() == 1, "duplicate grid cells never load twice")
+	streamer.active_radius = 1
+	streamer.update_streaming()
+	_check(streamer.get_loaded_cell_count() == 5, "radius one loads all valid nearby grid cells")
+	streamer.cell_size = 0.0
+	streamer.update_streaming()
+	_check(streamer.get_loaded_cell_count() == 0, "zero-size stream cells clear content safely")
+	streamer.cell_size = 10.0
+	streamer.update_streaming()
+	_check(streamer.get_loaded_cell_count() == 5, "streaming resumes after cell size becomes valid")
+	var no_scene: WorldStreamCell = Cell.new()
+	no_scene.grid_coord = Vector2i(4, 4)
+	streamer.cells.append(no_scene)
+	streamer.update_streaming()
+	_check(streamer.get_loaded_cell_count() == 5, "empty cell scenes are ignored")
+	streamer.clear_loaded()
+	_check(streamer.get_loaded_cell_count() == 0, "explicit clear removes loaded entries")
+	streamer.update_streaming()
+	_check(streamer.get_loaded_cell_count() == 5, "streamer can repopulate after explicit clear")
+	streamer.focus = null
+	streamer.update_streaming()
+	_check(streamer.get_loaded_cell_count() == 0, "unset focus safely unloads all cells")
 	streamer.free()
 	focus.free()
