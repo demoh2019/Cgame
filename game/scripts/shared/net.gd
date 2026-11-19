@@ -235,6 +235,13 @@ func c_stash(item_id: String, count: int, deposit: bool) -> void:
 
 
 @rpc("any_peer", "reliable")
+func c_vendor(item_id: String, quantity: int, buy: bool) -> void:
+	var peer := multiplayer.get_remote_sender_id()
+	if _allowed(peer):
+		s_result.rpc_id(peer, "vendor", sim.cmd_vendor(peer, str(item_id), quantity, buy))
+
+
+@rpc("any_peer", "reliable")
 func c_use(item_id: String) -> void:
 	var peer := multiplayer.get_remote_sender_id()
 	if _allowed(peer):
