@@ -9,6 +9,8 @@ class LocalVector {
 	std::vector<T> data;
 public:
 	uint32_t size() const { return uint32_t(data.size()); }
+	T *ptr() { return data.data(); }
+	const T *ptr() const { return data.data(); }
 	bool is_empty() const { return data.empty(); }
 	void reset() { data.clear(); data.shrink_to_fit(); }
 	void reserve(uint32_t capacity) { data.reserve(capacity); }
