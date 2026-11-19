@@ -1,0 +1,100 @@
+# Regression coverage for 2D contact warm starting and frictionless solver paths.
+# Run: godot --headless --path tests/stress --script res://physics_contact_solver_regression.gd
+extends SceneTree
+
+
+func _initialize() -> void:
+	_run.call_deferred()
+
+
+func _run() -> void:
+	var space := PhysicsServer2D.space_create()
+	var default_area := PhysicsServer2D.space_get_default_area(space)
+	PhysicsServer2D.area_set_param(default_area, PhysicsServer2D.AREA_PARAM_GRAVITY, 100.0)
+	PhysicsServer2D.area_set_param(default_area, PhysicsServer2D.AREA_PARAM_GRAVITY_VECTOR, Vector2.DOWN)
+
+	var floor_shape := PhysicsServer2D.rectangle_shape_create()
+	var ball_shape := PhysicsServer2D.circle_shape_create()
+	PhysicsServer2D.shape_set_data(floor_shape, Vector2(35.0, 1.0))
+	PhysicsServer2D.shape_set_data(ball_shape, 0.7)
+	var floors: Array[RID] = []
+	var balls: Array[RID] = []
+	var starts: Array[float] = []
+
+	# Widely separated tracks avoid interactions between independent test bodies.
+	for i in range(3):
+		var x: float = float(i - 1) * 100.0
+		var floor := PhysicsServer2D.body_create()
+		PhysicsServer2D.body_set_mode(floor, PhysicsServer2D.BODY_MODE_STATIC)
+		PhysicsServer2D.body_add_shape(floor, floor_shape)
+		PhysicsServer2D.body_set_param(floor, PhysicsServer2D.BODY_PARAM_FRICTION, 1.0)
+		PhysicsServer2D.body_set_state(floor, PhysicsServer2D.BODY_STATE_TRANSFORM, Transform2D(0.0, Vector2(x, 0.0)))
+		PhysicsServer2D.body_set_space(floor, space)
+		floors.append(floor)
+
+		var ball := PhysicsServer2D.body_create()
+		PhysicsServer2D.body_set_mode(ball, PhysicsServer2D.BODY_MODE_RIGID)
+		PhysicsServer2D.body_add_shape(ball, ball_shape)
+		PhysicsServer2D.body_set_param(ball, PhysicsServer2D.BODY_PARAM_FRICTION, 0.0 if i == 0 else 1.0)
+		PhysicsServer2D.body_set_param(ball, PhysicsServer2D.BODY_PARAM_GRAVITY_SCALE, 1.0)
+		PhysicsServer2D.body_set_state(ball, PhysicsServer2D.BODY_STATE_TRANSFORM, Transform2D(0.0, Vector2(x, -3.0)))
+		PhysicsServer2D.body_set_state(ball, PhysicsServer2D.BODY_STATE_LINEAR_VELOCITY, Vector2(6.0, 0.0))
+		PhysicsServer2D.body_set_state(ball, PhysicsServer2D.BODY_STATE_CAN_SLEEP, false)
+		PhysicsServer2D.body_set_space(ball, space)
+		balls.append(ball)
+		starts.append(x)
+
+	PhysicsServer2D.space_set_active(space, true)
+	var failures: int = 0
+	var peak_pairs: int = 0
+	for frame in range(150):
+		# This changes a material on a persistent pair, forcing old tangential
+		# impulses to be discarded on a frictionless step and later rebuilt.
+		if frame == 65:
+			PhysicsServer2D.body_set_param(balls[2], PhysicsServer2D.BODY_PARAM_FRICTION, 0.0)
+		if frame == 95:
+			PhysicsServer2D.body_set_param(balls[2], PhysicsServer2D.BODY_PARAM_FRICTION, 1.0)
+		await physics_frame
+		peak_pairs = maxi(peak_pairs, int(Performance.get_monitor(Performance.PHYSICS_2D_COLLISION_PAIRS)))
+		for ball in balls:
+			var transform: Transform2D = PhysicsServer2D.body_get_state(ball, PhysicsServer2D.BODY_STATE_TRANSFORM)
+			var velocity: Vector2 = PhysicsServer2D.body_get_state(ball, PhysicsServer2D.BODY_STATE_LINEAR_VELOCITY)
+			if not transform.origin.is_finite() or not velocity.is_finite():
+				printerr("FAIL: non-finite contact state on frame %d" % frame)
+				failures += 1
+				break
+			if velocity.length_squared() > 1000000.0:
+				printerr("FAIL: unstable contact speed on frame %d" % frame)
+				failures += 1
+				break
+		if failures > 0:
+			break
+
+	if failures == 0:
+		var free_slide: Transform2D = PhysicsServer2D.body_get_state(balls[0], PhysicsServer2D.BODY_STATE_TRANSFORM)
+		var high_friction: Transform2D = PhysicsServer2D.body_get_state(balls[1], PhysicsServer2D.BODY_STATE_TRANSFORM)
+		var free_displacement: float = free_slide.origin.x - starts[0]
+		var friction_displacement: float = high_friction.origin.x - starts[1]
+		if free_displacement <= friction_displacement + 0.5:
+			printerr("FAIL: frictionless track did not slide farther: %f vs %f" % [free_displacement, friction_displacement])
+			failures += 1
+		if peak_pairs < 2:
+			printerr("FAIL: no persistent collision pairs observed")
+			failures += 1
+		print("Contact solver: free=%.3f, friction=%.3f, peak_pairs=%d" % [free_displacement, friction_displacement, peak_pairs])
+
+	PhysicsServer2D.space_set_active(space, false)
+	for ball in balls:
+		PhysicsServer2D.free_rid(ball)
+	for floor in floors:
+		PhysicsServer2D.free_rid(floor)
+	PhysicsServer2D.free_rid(ball_shape)
+	PhysicsServer2D.free_rid(floor_shape)
+	PhysicsServer2D.free_rid(space)
+
+	if failures > 0:
+		printerr("Contact solver regression failed: %d error(s)" % failures)
+		quit(1)
+	else:
+		print("Contact solver regression passed.")
+		quit(0)
