@@ -8,6 +8,12 @@ func _initialize() -> void:
 
 
 func _run() -> void:
+	# Confirm the non-default warm-start coefficient is accepted by a new
+	# space. ProjectSettings are restored before the standalone test exits.
+	const warm_start_setting := "physics/2d/solver/warm_start_coefficient"
+	var original_warm_start: Variant = ProjectSettings.get_setting(warm_start_setting, 1.0)
+	ProjectSettings.set_setting(warm_start_setting, 0.65)
+
 	# The new space has its own default area, initialized with the project's
 	# 2D gravity. PhysicsServer2D does not expose a default-area RID getter.
 	var space := PhysicsServer2D.space_create()
@@ -107,6 +113,7 @@ func _run() -> void:
 	PhysicsServer2D.free_rid(ball_shape)
 	PhysicsServer2D.free_rid(floor_shape)
 	PhysicsServer2D.free_rid(space)
+	ProjectSettings.set_setting(warm_start_setting, original_warm_start)
 
 	if failures > 0:
 		printerr("Contact solver regression failed: %d error(s)" % failures)
