@@ -282,7 +282,7 @@ class SmokeTests(unittest.TestCase):
 
     def test_full_log_diagnostics_crlf_and_invalid_utf8(self):
         with tempfile.TemporaryFile(mode="w+b") as log:
-            log.write(b"NOTICE: first\r\nERROR: broken\\xff\r\nWARNING: suspect\r\n")
+            log.write(b"NOTICE: first\r\nERROR: broken\xff\r\nWARNING: suspect\r\n")
             errors, warnings, error_count, warning_count = smoke._scan_log_diagnostics(log, self.project)
         self.assertEqual(error_count, 1)
         self.assertEqual(warning_count, 1)
