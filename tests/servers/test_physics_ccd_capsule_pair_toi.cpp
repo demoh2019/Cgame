@@ -172,4 +172,44 @@ TEST_CASE("[Physics][CapsulePairTOI] Nonfinite inputs return fallback rather tha
 	CHECK(fraction == -1.0);
 }
 
+
+TEST_CASE("[Physics][CapsulePairTOI] Sweep ending in overlap uses the earliest entry") {
+	// Crossed axes: A's X-axis center segment is [-1,1], B's Y-axis
+	// center segment is [-1,1]. The expanded radius is 1.
+	// A enters at center x=-2 and ends at center x=+1.2, already inside.
+	// The separation minimum is earlier than the end, so TOI can be
+	// bracketed directly on [0, 1], without finding that minimum.
+	double fraction = -1.0;
+	CHECK(physics_ccd_capsule_pair_toi(
+			Vector3(-5.0, 0.0, 0.0), Vector3(6.2, 0.0, 0.0),
+			Vector3(1.0, 0.0, 0.0), Vector3(0.0, 1.0, 0.0),
+			1.0, 1.0, 1.0, fraction) == PhysicsCCDCapsulePairTOIResult::HIT);
+	CHECK(Math::abs(fraction - 3.0 / 6.2) < 0.00001);
+
+	// Reversing the sweep is equivalent after mirroring A's start.
+	fraction = -1.0;
+	CHECK(physics_ccd_capsule_pair_toi(
+			Vector3(5.0, 0.0, 0.0), Vector3(-6.2, 0.0, 0.0),
+			Vector3(1.0, 0.0, 0.0), Vector3(0.0, 1.0, 0.0),
+			1.0, 1.0, 1.0, fraction) == PhysicsCCDCapsulePairTOIResult::HIT);
+	CHECK(Math::abs(fraction - 3.0 / 6.2) < 0.00001);
+}
+
+TEST_CASE("[Physics][CapsulePairTOI] Sweep too short to reach an obstacle is a definite miss") {
+	double fraction = -1.0;
+	CHECK(physics_ccd_capsule_pair_toi(
+			Vector3(-5.0, 0.0, 0.0), Vector3(1.0, 0.0, 0.0),
+			Vector3(1.0, 0.0, 0.0), Vector3(0.0, 1.0, 0.0),
+			1.0, 1.0, 1.0, fraction) == PhysicsCCDCapsulePairTOIResult::MISS);
+	CHECK(fraction == -1.0);
+
+	// A long sweep can cross the same obstacle and exit before the
+	// end. Its true early hit must not be discarded by the fast miss.
+	CHECK(physics_ccd_capsule_pair_toi(
+			Vector3(-5.0, 0.0, 0.0), Vector3(10.0, 0.0, 0.0),
+			Vector3(1.0, 0.0, 0.0), Vector3(0.0, 1.0, 0.0),
+			1.0, 1.0, 1.0, fraction) == PhysicsCCDCapsulePairTOIResult::HIT);
+	CHECK(Math::abs(fraction - 0.3) < 0.00001);
+}
+
 } // namespace TestPhysicsCCDSkewCapsuleTOI
