@@ -15,9 +15,15 @@ using real_t = double;
 using real_t = float;
 #endif
 
+#ifndef MAX
+#define MAX(a, b) ((a) > (b) ? (a) : (b))
+#endif
+
 namespace Math {
 inline bool is_finite(double p_x) { return std::isfinite(p_x); }
 inline double sqrt(double p_x) { return std::sqrt(p_x); }
+inline double log(double p_x) { return std::log(p_x); }
+inline double abs(double p_x) { return std::abs(p_x); }
 } // namespace Math
 
 struct Vector3 {
@@ -28,6 +34,14 @@ struct Vector3 {
 	Vector3() = default;
 	Vector3(real_t p_x, real_t p_y, real_t p_z) :
 			x(p_x), y(p_y), z(p_z) {}
+
+	real_t operator[](int p_index) const {
+		switch (p_index) {
+			case 0: return x;
+			case 1: return y;
+			default: return z;
+		}
+	}
 
 	bool is_finite() const {
 		return Math::is_finite(x) && Math::is_finite(y) && Math::is_finite(z);
