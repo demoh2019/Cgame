@@ -205,6 +205,16 @@ class Mirror:
         self.stats = {"created_issues": 0, "created_prs": 0, "skipped": 0,
                       "dry_run": 0, "errors": 0}
 
+    def check_destination(self):
+        if not self.apply:
+            return
+        metadata = self.api.request("GET", f"/repos/{self.dest}")
+        if metadata.get("has_issues") is False:
+            raise RuntimeError(
+                f"Issues are disabled in {self.dest}. "
+                "Enable Settings > General > Features > Issues before migration."
+            )
+
     def build_index(self):
         self.present = existing_keys(
             self.api.pages(f"/repos/{self.dest}/issues?state=all"), self.source
@@ -295,6 +305,7 @@ class Mirror:
             self.create_archive(item, kind)
 
     def run(self, start_page=1, pages=1, max_items=20, checkpoint=None, start_offset=0):
+        self.check_destination()
         self.build_index()
         page = start_page
         processed = 0
