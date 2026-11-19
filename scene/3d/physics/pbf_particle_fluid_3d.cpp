@@ -97,10 +97,17 @@ void PBFParticleFluid3D::_resize_buffers(int p_count) {
 	confinement_updates.resize(p_count);
 	divergence_velocity_changes.resize(p_count);
 	divergence_multipliers.resize(p_count);
-	density_pressure_velocities.resize(p_count);
-	density_pressure_corrections.resize(p_count);
-	density_pressure_multipliers.resize(p_count);
-	density_pressure_denominators.resize(p_count);
+	if (density_pressure_iterations > 0) {
+		density_pressure_velocities.resize(p_count);
+		density_pressure_corrections.resize(p_count);
+		density_pressure_multipliers.resize(p_count);
+		density_pressure_denominators.resize(p_count);
+	} else {
+		density_pressure_velocities.clear();
+		density_pressure_corrections.clear();
+		density_pressure_multipliers.clear();
+		density_pressure_denominators.clear();
+	}
 	lambdas.resize(p_count);
 	densities.resize(p_count);
 	cells.resize(p_count);
@@ -929,8 +936,26 @@ void PBFParticleFluid3D::set_xsph_viscosity(real_t p_viscosity) {
 }
 
 void PBFParticleFluid3D::set_density_pressure_iterations(int p_iterations) {
-	if (p_iterations >= 0 && p_iterations <= 12) {
+	if (p_iterations >= 0 && p_iterations <= 12 && p_iterations != density_pressure_iterations) {
 		density_pressure_iterations = p_iterations;
+		// In contrast to preexisting PBF scratch buffers, optional
+		// pressure arrays are allocated ONLY while the mode is enabled.
+		// Turning it off releases them and clears stale telemetry.
+		if (p_iterations == 0) {
+			density_pressure_velocities.clear();
+			density_pressure_corrections.clear();
+			density_pressure_multipliers.clear();
+			density_pressure_denominators.clear();
+			last_density_pressure_iterations = 0;
+			last_density_pressure_neighbor_evaluations = 0;
+			average_predicted_density_error = 0.0;
+		} else {
+			const int count = positions.size();
+			density_pressure_velocities.resize(count);
+			density_pressure_corrections.resize(count);
+			density_pressure_multipliers.resize(count);
+			density_pressure_denominators.resize(count);
+		}
 	}
 }
 
