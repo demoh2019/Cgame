@@ -477,7 +477,7 @@ TEST_CASE("[Vector2] Linear algebra methods") {
 }
 
 TEST_CASE("[Vector2] Finite number checks") {
-	constexpr double infinite[] = { Math::NaN, Math::INF, -Math::INF };
+	constexpr double infinite[] = { NaN, Math::INF, -Math::INF };
 
 	CHECK_MESSAGE(
 			Vector2(0, 1).is_finite(),
@@ -499,6 +499,98 @@ TEST_CASE("[Vector2] Finite number checks") {
 					"Vector2 with two components infinite should not be finite.");
 		}
 	}
+}
+
+TEST_CASE("[Vector2] Orthogonal and identity methods") {
+	CHECK_MESSAGE(
+			Vector2(1, 2).orthogonal() == Vector2(2, -1),
+			"Vector2(1, 2).orthogonal() should return the vector rotated 90 degrees clockwise.");
+	CHECK_MESSAGE(
+			Vector2(0, 0).orthogonal() == Vector2(0, 0),
+			"Vector2(0, 0).orthogonal() should return the zero vector.");
+	CHECK_MESSAGE(
+			Vector2(-3, 4).orthogonal() == Vector2(4, 3),
+			"Vector2(-3, 4).orthogonal() should return the vector rotated 90 degrees clockwise.");
+
+	CHECK_MESSAGE(
+			Vector2(1, 2).is_same(Vector2(1, 2)),
+			"Vector2::is_same() should return true for identical vectors.");
+	CHECK_FALSE_MESSAGE(
+			Vector2(1, 2).is_same(Vector2(1, 3)),
+			"Vector2::is_same() should return false for different vectors.");
+	CHECK_MESSAGE(
+			Vector2(NaN, 1).is_same(Vector2(NaN, 1)),
+			"Vector2::is_same() should treat two NaN components as equal, unlike the == operator.");
+	const Vector2 samples[] = {
+		Vector2(1, 0), Vector2(0, -1), Vector2(3, -7), Vector2(-5, -9), Vector2(0, 0)
+	};
+	for (const Vector2 &sample : samples) {
+		CHECK(sample.dot(sample.orthogonal()) == 0);
+		CHECK(sample.orthogonal().orthogonal() == -sample);
+	}
+	CHECK(Vector2(-0.0, 0.0).is_same(Vector2(0.0, -0.0)));
+	CHECK_FALSE(Vector2(NaN, 1).is_same(Vector2(1, 1)));
+}
+
+
+TEST_CASE("[Vector2] Orthogonal rotation preserves exact squared magnitude") {
+	const Vector2 examples[] = { Vector2(0, 0), Vector2(3, 4), Vector2(-5, 9), Vector2(0, 10), Vector2(12, 0) };
+	for (const Vector2 &point : examples) {
+		CHECK(point.length_squared() == point.orthogonal().length_squared());
+		CHECK(point.orthogonal().orthogonal() == -point);
+		CHECK(point.dot(point.orthogonal()) == 0);
+	}
+}
+
+TEST_CASE("[Vector2] Lerp handles endpoints, midpoint and extrapolation") {
+	const Vector2 from(1, 3);
+	const Vector2 to(9, -5);
+	CHECK(from.lerp(to, 0) == from);
+	CHECK(from.lerp(to, 1) == to);
+	CHECK(from.lerp(to, 0.5) == Vector2(5, -1));
+	CHECK(from.lerp(to, 2) == Vector2(17, -13));
+}
+
+TEST_CASE("[Vector2] Componentwise clamp bounds each coordinate independently") {
+	const Vector2 min_values(-2, -4);
+	const Vector2 max_values(2, 4);
+	CHECK(Vector2(3, 1).clamp(min_values, max_values) == Vector2(2, 1));
+	CHECK(Vector2(-3, -5).clamp(min_values, max_values) == Vector2(-2, -4));
+	CHECK(Vector2(1, 7).clamp(min_values, max_values) == Vector2(1, 4));
+	CHECK(Vector2(0, 0).clamp(min_values, max_values) == Vector2(0, 0));
+}
+
+TEST_CASE("[Vector2] Projection onto orthogonal axes") {
+	const Vector2 value(3, 4);
+	CHECK(value.project(Vector2(1, 0)).is_equal_approx(Vector2(3, 0)));
+	CHECK(value.project(Vector2(0, 1)).is_equal_approx(Vector2(0, 4)));
+	CHECK(value.project(Vector2(-1, 0)).is_equal_approx(Vector2(3, 0)));
+}
+
+TEST_CASE("[Vector2] Slide removes displacement along unit normal") {
+	const Vector2 value(3, 4);
+	CHECK(value.slide(Vector2(0, 1)).is_equal_approx(Vector2(3, 0)));
+	CHECK(value.slide(Vector2(1, 0)).is_equal_approx(Vector2(0, 4)));
+	CHECK(value.slide(Vector2(0, -1)).is_equal_approx(Vector2(3, 0)));
+}
+
+TEST_CASE("[Vector2] Normalization retains direction and produces unit length") {
+	const Vector2 values[] = { Vector2(3, 4), Vector2(-8, 6), Vector2(0.1, -2), Vector2(0, 1) };
+	for (const Vector2 &value : values) {
+		Vector2 unit = value.normalized();
+		CHECK(Math::is_equal_approx(unit.length(), (real_t)1.0));
+		CHECK(Math::is_equal_approx(unit.cross(value), (real_t)0.0));
+		CHECK(unit.dot(value) > 0);
+	}
+}
+
+TEST_CASE("[Vector2] Cross product is antisymmetric") {
+	const Vector2 u(1, 0);
+	const Vector2 v(0, 1);
+	CHECK(u.cross(v) == 1);
+	CHECK(v.cross(u) == -1);
+	CHECK(u.cross(u) == 0);
+	CHECK(u.cross(-v) == -1);
 }
 
 } // namespace TestVector2
