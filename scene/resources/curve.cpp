@@ -159,20 +159,34 @@ int Curve::get_index(real_t p_offset) const {
 }
 
 void Curve::clean_dupes() {
-	bool dirty = false;
+	const uint32_t count = _points.size();
+	if (count < 2) {
+		return;
+	}
 
-	for (uint32_t i = 1; i < _points.size(); ++i) {
-		real_t diff = _points[i - 1].position.x - _points[i].position.x;
-		if (diff <= CMP_EPSILON) {
-			_points.remove_at(i);
-			--i;
-			dirty = true;
+	// Points are sorted in ascending x order. Keep the first sample in each
+	// near-duplicate run and compact survivors in place. Repeated remove_at()
+	// shifted the entire suffix for every duplicate (quadratic work).
+	Point *points = _points.ptr();
+	uint32_t write = 1;
+	for (uint32_t read = 1; read < count; read++) {
+		// Compare current - previous (not previous - current): the old sign
+		// incorrectly classified ordinary ascending points as duplicates.
+		const real_t distance = points[read].position.x - points[write - 1].position.x;
+		if (distance <= CMP_EPSILON) {
+			continue;
 		}
+		if (write != read) {
+			points[write] = points[read];
+		}
+		write++;
 	}
 
-	if (dirty) {
-		mark_dirty();
+	if (write == count) {
+		return; // Preserve baked cache when there was nothing to remove.
 	}
+	_points.resize(write);
+	mark_dirty();
 }
 
 void Curve::set_point_left_tangent(int p_index, real_t p_tangent) {
