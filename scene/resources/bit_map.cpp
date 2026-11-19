@@ -819,20 +819,51 @@ void BitMap::blit(const Vector2i &p_pos, const Ref<BitMap> &p_bitmap) {
 		return;
 	}
 
-	// Separate BitMaps have independent writable storage. Work directly
-	// with their packed bytes instead of validating every source and
-	// destination pixel through get_bit()/set_bit().
+	// OR full destination bytes instead of testing each source pixel.
+	// The source and destination bit rows can be unaligned (including when
+	// their widths are not multiples of eight), so combine adjacent source
+	// bytes to form each aligned destination byte.
 	uint8_t *destination = bitmask.ptrw();
 	const uint8_t *source = p_bitmap->bitmask.ptr();
+	const int bits_per_row = int(x_end - x_begin);
 	for (int64_t y = y_begin; y < y_end; y++) {
-		const int source_row = int(y - p_pos.y) * source_width;
-		const int dest_row = int(y) * width;
-		for (int64_t x = x_begin; x < x_end; x++) {
-			const int source_bit = source_row + int(x - p_pos.x);
-			if (source[source_bit >> 3] & (1u << (source_bit & 7))) {
-				const int dest_bit = dest_row + int(x);
-				destination[dest_bit >> 3] |= uint8_t(1u << (dest_bit & 7));
+		int source_bit = int(y - p_pos.y) * source_width + int(x_begin - p_pos.x);
+		int dest_bit = int(y) * width + int(x_begin);
+		int remaining_bits = bits_per_row;
+
+		// Preserve the bits preceding the covered region in the first byte.
+		while (remaining_bits > 0 && (dest_bit & 7)) {
+			destination[dest_bit >> 3] |= uint8_t(((source[source_bit >> 3] >> (source_bit & 7)) & 1u) << (dest_bit & 7));
+			source_bit++;
+			dest_bit++;
+			remaining_bits--;
+		}
+
+		// The common case is a long run of complete destination bytes.
+		const int whole_bytes = remaining_bits >> 3;
+		const int source_shift = source_bit & 7;
+		const uint8_t *src = source + (source_bit >> 3);
+		uint8_t *dst = destination + (dest_bit >> 3);
+		if (source_shift == 0) {
+			for (int byte = 0; byte < whole_bytes; byte++) {
+				dst[byte] |= src[byte];
 			}
+		} else {
+			for (int byte = 0; byte < whole_bytes; byte++) {
+				dst[byte] |= uint8_t((src[byte] >> source_shift) | (src[byte + 1] << (8 - source_shift)));
+			}
+		}
+		const int bulk_bits = whole_bytes << 3;
+		source_bit += bulk_bits;
+		dest_bit += bulk_bits;
+		remaining_bits -= bulk_bits;
+
+		// Preserve the bits following the covered region in the final byte.
+		while (remaining_bits > 0) {
+			destination[dest_bit >> 3] |= uint8_t(((source[source_bit >> 3] >> (source_bit & 7)) & 1u) << (dest_bit & 7));
+			source_bit++;
+			dest_bit++;
+			remaining_bits--;
 		}
 	}
 }
