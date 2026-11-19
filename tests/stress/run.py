@@ -29,7 +29,7 @@ CASES = (
     "scene_tree", "packed_scene", "images", "json", "stream",
     "file_io", "threads", "physics_2d", "physics_3d",
     "memory_churn", "astar_grid", "tweens", "audio_buffers",
-    "variant_codec", "render_2d", "render_3d",
+    "variant_codec", "packet_stream", "ui_layout", "render_2d", "render_3d",
     "node_paths", "regex", "compression", "hashing",
     "resource_io", "astar_3d", "ui_layout", "thread_contention",
     "geometry_2d", "mesh_build", "input_dispatch", "image_codec", "group_calls",
