@@ -17,7 +17,6 @@ const CASES := [
 	"geometry_2d", "mesh_build", "input_dispatch", "image_codec", "group_calls",
 	"packed_arrays", "sorting", "animation_tracks", "physics_raycast_2d",
 	"physics_raycast_3d", "render_multimesh_3d",
-	"packed_arrays", "sorting", "animation_tracks", "physics_raycast_2d", "physics_raycast_3d", "render_multimesh_3d",
 ]
 
 var signal_total: int = 0
