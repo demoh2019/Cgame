@@ -30,10 +30,12 @@
 #include "terrain_editor_plugin.h"
 
 #include "core/input/input_event.h"
+#include "core/object/callable_mp.h"
 #include "core/math/triangle_mesh.h"
 #include "editor/editor_undo_redo_manager.h"
 #include "scene/3d/camera_3d.h"
 #include "scene/gui/box_container.h"
+#include "scene/gui/button.h"
 #include "scene/gui/color_picker.h"
 #include "scene/gui/label.h"
 #include "scene/gui/option_button.h"
@@ -76,6 +78,12 @@ void HeightmapTerrainEditorPlugin::_notification(int p_what) {
         paint_color->set_pick_color(Color(0.24, 0.55, 0.17));
         toolbar->add_child(paint_color);
 
+        erosion_button = memnew(Button);
+        erosion_button->set_text("Thermal Erosion");
+        erosion_button->set_tooltip_text("Perform 8 thermal erosion iterations on the selected terrain (Undo supported).");
+        erosion_button->connect(SNAME("pressed"), callable_mp(this, &HeightmapTerrainEditorPlugin::_erode_clicked));
+        toolbar->add_child(erosion_button);
+
         add_control_to_container(CONTAINER_SPATIAL_EDITOR_MENU, toolbar);
         toolbar->hide();
     } else if (p_what == NOTIFICATION_EXIT_TREE) {
@@ -88,8 +96,34 @@ void HeightmapTerrainEditorPlugin::_notification(int p_what) {
         radius = nullptr;
         strength = nullptr;
         paint_color = nullptr;
+        erosion_button = nullptr;
         terrain = nullptr;
     }
+}
+
+void HeightmapTerrainEditorPlugin::_erode_clicked() {
+    if (!terrain) {
+        return;
+    }
+    Ref<TerrainHeightmap> data = terrain->get_heightmap();
+    if (data.is_null()) {
+        return;
+    }
+    EditorUndoRedoManager *undo = get_undo_redo();
+    if (!undo) {
+        return;
+    }
+    const PackedFloat32Array before = data->get_heights();
+    data->erode_thermal(8, 0.1, 0.15);
+    const PackedFloat32Array after = data->get_heights();
+    if (before == after) {
+        return;
+    }
+    data->set_heights(before);
+    undo->create_action("Thermal Terrain Erosion", UndoRedo::MERGE_DISABLE, terrain);
+    undo->add_do_method(data.ptr(), SNAME("set_heights"), after);
+    undo->add_undo_method(data.ptr(), SNAME("set_heights"), before);
+    undo->commit_action();
 }
 
 bool HeightmapTerrainEditorPlugin::handles(Object *p_object) const {
