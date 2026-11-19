@@ -211,8 +211,10 @@ bias or center-of-mass impulse is **exactly zero**. This includes both normal
 contact points in the optional 2D block solver and rigid/soft contacts in 3D.
 It avoids no-op linear/angular velocity and inertia computations after
 resting contacts converge, without introducing a tolerance that could discard
-real impulses. The underlying contact equations, material mixing, warm-start
-caches, and solver iteration counts remain unchanged.
+real impulses. The normal bias velocity is also recomputed only when the
+incremental bias impulse actually changed either body (or a soft-body node).
+The underlying contact equations, material mixing, warm-start caches, and
+solver iteration counts remain unchanged.
 
 The center-of-mass bias fallback in 2D, rigid 3D and rigid/soft 3D also
 requires a positive combined inverse mass before dividing. The rigid/rigid
