@@ -39,8 +39,8 @@ void initialize_behavior_tree_module(ModuleInitializationLevel p_level) {
 		return;
 	}
 
-	GDREGISTER_ABSTRACT_CLASS(BehaviorTreeTask);
-	GDREGISTER_ABSTRACT_CLASS(BehaviorTreeComposite);
+	GDREGISTER_VIRTUAL_CLASS(BehaviorTreeTask);
+	GDREGISTER_VIRTUAL_CLASS(BehaviorTreeComposite);
 	GDREGISTER_CLASS(BehaviorTreeSequence);
 	GDREGISTER_CLASS(BehaviorTreeSelector);
 	GDREGISTER_CLASS(BehaviorTreeInverter);
