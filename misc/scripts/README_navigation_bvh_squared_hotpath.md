@@ -41,6 +41,9 @@ python3 -m unittest discover -s misc/scripts/tests -p test_navigation_bvh_upstre
 
 ## Memory trade-off
 
+BVH node capacity is preallocated to the exact median-split node count, avoiding
+reallocations during construction and excess persistent node capacity.
+
 The BVH requires extra per-region memory for nodes and polygon indices; it
 also uses transient per-polygon bounding boxes while building. The
 `get_size_bytes()` value reports the persistent node/index capacity only.

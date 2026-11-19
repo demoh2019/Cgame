@@ -111,5 +111,27 @@ class NavigationBVHContracts(unittest.TestCase):
         self.assertEqual(src.count("x 512 queries:"), 2)
         self.assertEqual(src.count("get_size_bytes()"), 12)
 
+
+    def test_bvh_allocates_exact_number_of_nodes_once(self):
+        for dim in ("2d", "3d"):
+            with self.subTest(dim=dim):
+                src = load(f"modules/navigation_{dim}/{dim}/nav_polygon_bvh_{dim}.h")
+                self.assertIn("nodes.reserve(_count_nodes(polygon_indices.size()));", src)
+
+    def test_preallocation_counts_same_median_split_as_builder(self):
+        for dim in ("2d", "3d"):
+            with self.subTest(dim=dim):
+                src = load(f"modules/navigation_{dim}/{dim}/nav_polygon_bvh_{dim}.h")
+                self.assertIn("static uint32_t _count_nodes(uint32_t p_count)", src)
+                self.assertIn("if (p_count <= LEAF_SIZE)", src)
+                self.assertIn("_count_nodes(left_count) + _count_nodes(p_count - left_count)", src)
+
+    def test_bvh_preallocation_preserves_short_region_fast_path(self):
+        for dim in ("2d", "3d"):
+            with self.subTest(dim=dim):
+                src = load(f"modules/navigation_{dim}/{dim}/nav_polygon_bvh_{dim}.h")
+                self.assertLess(src.index("if (count <= LEAF_SIZE)"),
+                                src.index("nodes.reserve(_count_nodes("))
+
 if __name__ == "__main__":
     unittest.main()

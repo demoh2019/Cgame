@@ -61,6 +61,16 @@ class NavPolygonBVH3D {
 	LocalVector<Node> nodes;
 	LocalVector<uint32_t> polygon_indices;
 
+	// Count the exact number of median-split nodes before constructing the tree.
+	// One allocation avoids repeated node-buffer moves and wasted capacity.
+	static uint32_t _count_nodes(uint32_t p_count) {
+		if (p_count <= LEAF_SIZE) {
+			return 1;
+		}
+		const uint32_t left_count = p_count / 2;
+		return 1 + _count_nodes(left_count) + _count_nodes(p_count - left_count);
+	}
+
 	uint32_t _build(uint32_t p_first, uint32_t p_count, const LocalVector<AABB> &p_bounds) {
 		const uint32_t index = nodes.size();
 		nodes.push_back(Node());
@@ -240,6 +250,8 @@ public:
 			polygon_indices.push_back(i);
 		}
 		if (!polygon_indices.is_empty()) {
+			// This avoids geometric LocalVector capacity growth for the tree nodes.
+			nodes.reserve(_count_nodes(polygon_indices.size()));
 			_build(0, polygon_indices.size(), bounds);
 		}
 	}
