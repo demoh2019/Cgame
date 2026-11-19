@@ -248,7 +248,10 @@ class AssetSizeMapTests(unittest.TestCase):
 
     def test_file_and_directory_name_collision(self):
         self.put("folder", b"x")
-        (self.root / "FOLDER").mkdir(exist_ok=True)
+        try:
+            (self.root / "FOLDER").mkdir()
+        except FileExistsError:
+            self.skipTest("Case-insensitive filesystem")
         if not (self.root / "folder").is_file() or not (self.root / "FOLDER").is_dir():
             self.skipTest("Case-insensitive filesystem")
         with self.assertRaises(size_map.AssetSizeError):
