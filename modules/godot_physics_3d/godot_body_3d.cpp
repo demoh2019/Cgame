@@ -37,6 +37,7 @@
 #include "godot_space_3d.h"
 
 #include "servers/physics_damping.h"
+#include "servers/physics_gyroscopic_3d.h"
 
 void GodotBody3D::_mass_properties_changed() {
 	if (get_space() && !mass_properties_update_list.in_list()) {
@@ -655,6 +656,21 @@ void GodotBody3D::integrate_forces(real_t p_step, bool p_defer_motion) {
 
 			linear_velocity += _inv_mass * force * p_step;
 			angular_velocity += _inv_inertia_tensor.xform(torque) * p_step;
+
+			// Free asymmetric rigid bodies precess because their angular
+			// momentum and angular velocity are generally not parallel.
+			// Box2D's planar rotations have no corresponding gyro term.
+			// Keep this separate from the legacy off-path and skip axis-locked
+			// bodies, whose constrained rotation needs a different equation.
+			if (mode == PS3DE::BODY_MODE_RIGID && get_space()->are_gyroscopic_forces_enabled() &&
+					(locked_axis & ((1 << 3) | (1 << 4) | (1 << 5))) == 0 && angular_velocity != Vector3()) {
+				const Basis principal_frame = principal_inertia_axes.orthonormalized();
+				if (principal_frame.is_finite()) {
+					const Vector3 principal_omega = principal_frame.xform_inv(angular_velocity);
+					const Vector3 corrected_omega = GodotPhysicsGyroscopic3D::integrate_principal(principal_omega, _inv_inertia, p_step);
+					angular_velocity = principal_frame.xform(corrected_omega);
+				}
+			}
 		}
 
 		// Bound physical velocity before calculating the broadphase CCD sweep.
