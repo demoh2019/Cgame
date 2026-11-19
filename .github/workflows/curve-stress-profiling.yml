@@ -1,0 +1,63 @@
+name: Curve profiling stress smoke
+
+on:
+  pull_request:
+    branches: [develop]
+    paths:
+      - 'tests/stress/stress.gd'
+      - 'tests/stress/run.py'
+      - 'tests/stress/test_workload_extensions.py'
+      - 'tests/stress/README.md'
+      - '.github/workflows/curve-stress-profiling.yml'
+  push:
+    branches: [develop]
+    paths:
+      - 'tests/stress/stress.gd'
+      - 'tests/stress/run.py'
+      - 'tests/stress/test_workload_extensions.py'
+      - 'tests/stress/README.md'
+      - '.github/workflows/curve-stress-profiling.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: curve-stress-profiling-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  curve-stress-smoke:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Verify registered workloads
+        run: python3 -m unittest discover -s tests/stress -p 'test_*.py' -v
+      - uses: ./.github/actions/godot-deps
+      - name: Build Cgame for stress smoke
+        uses: ./.github/actions/godot-build
+        with:
+          platform: linuxbsd
+          target: editor
+          scons-flags: dev_build=yes tests=yes debug_symbols=no module_mono_enabled=no module_text_server_fb_enabled=yes accesskit=no -j2
+      - name: Validate GDScript workload syntax
+        run: ./bin/godot.linuxbsd.editor.dev.x86_64 --headless --path tests/stress --script res://stress.gd --check-only
+      - name: Execute curve CPU and RAM probes
+        run: |
+          python3 tests/stress/run.py \
+            --godot ./bin/godot.linuxbsd.editor.dev.x86_64 \
+            --case curve_bake,curve_nearest --scale 1 --repeats 1 \
+            --timeout 90 --rss-limit-mib 2048 --output curve-stress.json
+      - name: Archive curve metrics
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: curve-stress-profiling
+          path: curve-stress.json
+          if-no-files-found: warn
