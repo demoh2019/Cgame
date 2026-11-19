@@ -507,6 +507,10 @@ static void resolve_soft_soft_vertex_face_direction(JPH::Body &p_point_body, JPH
 	const float radius_sq = radius * radius;
 	const float bias_per_step = JoltProjectSettings::soft_body_soft_contact_recovery / p_step;
 	const float friction = JoltProjectSettings::soft_body_soft_contact_friction;
+	const bool speculative_ccd = JoltProjectSettings::soft_body_soft_speculative_ccd &&
+			JoltProjectSettings::soft_body_soft_ccd_max_sweep > 0.0f;
+	const float sweep_expansion = speculative_ccd ? JoltProjectSettings::soft_body_soft_ccd_max_sweep : 0.0f;
+	const float candidate_radius = radius + sweep_expansion;
 
 	// Build BVH only on meaningful meshes, while honoring the global work
 	// budget. Rebuild from the current deformed geometry every simulation
@@ -523,7 +527,7 @@ static void resolve_soft_soft_vertex_face_direction(JPH::Body &p_point_body, JPH
 		JPH::SoftBodyVertex &point = points[i];
 		const JPH::Vec3 point_position = point_rotation * point.mPosition;
 		if (use_bvh) {
-			query_soft_face_bvh(r_bvh_scratch.entries, r_bvh_scratch.nodes, point_position, radius,
+			query_soft_face_bvh(r_bvh_scratch.entries, r_bvh_scratch.nodes, point_position, candidate_radius,
 					r_contact_budget, r_bvh_scratch.candidates, r_bvh_scratch.stack);
 		}
 		const uint32_t candidate_count = use_bvh ? (uint32_t)r_bvh_scratch.candidates.size() : (uint32_t)faces.size();
@@ -547,9 +551,9 @@ static void resolve_soft_soft_vertex_face_direction(JPH::Body &p_point_body, JPH
 			// expensive seven-region closest-point calculations. No heap/BVH.
 			const JPH::Vec3 tri_min = JPH::Vec3::sMin(a, JPH::Vec3::sMin(b, c));
 			const JPH::Vec3 tri_max = JPH::Vec3::sMax(a, JPH::Vec3::sMax(b, c));
-			if (point_position.GetX() < tri_min.GetX() - radius || point_position.GetX() > tri_max.GetX() + radius ||
-					point_position.GetY() < tri_min.GetY() - radius || point_position.GetY() > tri_max.GetY() + radius ||
-					point_position.GetZ() < tri_min.GetZ() - radius || point_position.GetZ() > tri_max.GetZ() + radius) {
+			if (point_position.GetX() < tri_min.GetX() - candidate_radius || point_position.GetX() > tri_max.GetX() + candidate_radius ||
+					point_position.GetY() < tri_min.GetY() - candidate_radius || point_position.GetY() > tri_max.GetY() + candidate_radius ||
+					point_position.GetZ() < tri_min.GetZ() - candidate_radius || point_position.GetZ() > tri_max.GetZ() + candidate_radius) {
 				continue;
 			}
 
@@ -560,8 +564,19 @@ static void resolve_soft_soft_vertex_face_direction(JPH::Body &p_point_body, JPH
 			}
 			const JPH::Vec3 diff = point_position - nearest;
 			const float distance_sq = diff.LengthSq();
-			if (!Math::is_finite(distance_sq) || distance_sq >= radius_sq) {
+			if (!Math::is_finite(distance_sq)) {
 				continue;
+			}
+			bool swept_contact = false;
+			JPH::Vec3 swept_normal = JPH::Vec3::sZero();
+			if (distance_sq >= radius_sq) {
+				if (!speculative_ccd || !predict_soft_vertex_face_sweep(
+						point_position, point_rotation * point.mVelocity, a, b, c,
+						face_rotation * v0.mVelocity, face_rotation * v1.mVelocity, face_rotation * v2.mVelocity,
+						p_step, radius, sweep_expansion, u, v, w, swept_normal)) {
+					continue;
+				}
+				swept_contact = true;
 			}
 			const float inverse_mass_sum = point.mInvMass + u * u * v0.mInvMass + v * v * v1.mInvMass + w * w * v2.mInvMass;
 			if (!Math::is_finite(inverse_mass_sum) || inverse_mass_sum <= 0.0f) {
@@ -572,16 +587,23 @@ static void resolve_soft_soft_vertex_face_direction(JPH::Body &p_point_body, JPH
 			const float distance = Math::sqrt(MAX(distance_sq, 0.0f));
 			// Both sides of a triangle can collide; at exact coincidence,
 			// choose the normal opposing the current normal approach.
-			JPH::Vec3 normal = distance > 1.0e-6f ? diff / distance : (b - a).Cross(c - a).Normalized();
-			if (distance <= 1.0e-6f && relative_velocity.Dot(normal) > 0.0f) {
+			JPH::Vec3 normal = swept_contact ? swept_normal :
+					(distance > 1.0e-6f ? diff / distance : (b - a).Cross(c - a).Normalized());
+			if (!swept_contact && distance <= 1.0e-6f && relative_velocity.Dot(normal) > 0.0f) {
 				normal = -normal;
 			}
 			const float normal_speed = relative_velocity.Dot(normal);
 			if (!Math::is_finite(normal_speed)) {
 				continue;
 			}
-			const float recovery_speed = MIN((radius - distance) * bias_per_step, MAX_SOFT_SOFT_PENETRATION_BIAS);
-			const float correction = MIN(MAX(recovery_speed - normal_speed, 0.0f), MAX_SOFT_SOFT_CONTACT_SPEED_CORRECTION);
+			// For a future impact, remove approaching normal velocity now.
+			// Using the discrete 8 m/s cap would allow a fast vertex to tunnel.
+			// Speculative contacts add no penetration bias before impact.
+			const float recovery_speed = swept_contact ? 0.0f :
+					MIN((radius - distance) * bias_per_step, MAX_SOFT_SOFT_PENETRATION_BIAS);
+			const float max_correction = swept_contact ? JoltProjectSettings::soft_body_soft_ccd_max_correction_speed :
+					MAX_SOFT_SOFT_CONTACT_SPEED_CORRECTION;
+			const float correction = MIN(MAX(recovery_speed - normal_speed, 0.0f), max_correction);
 			if (correction <= 0.0f) {
 				continue;
 			}
@@ -954,6 +976,12 @@ void JoltSpace3D::_pre_step(float p_step) {
 		SoftFaceBVHScratch bvh_scratch; // No allocations when disabled.
 		SoftEdgeContactScratch edge_scratch; // Reused for every tested body pair.
 		const float radius = JoltProjectSettings::soft_body_soft_contact_radius;
+		// Expand broadphase only for the opt-in swept VF approximation:
+		// otherwise separated bodies never reach its narrowphase.
+		const float broadphase_margin = radius +
+				(JoltProjectSettings::soft_body_soft_vertex_face_contacts &&
+				 JoltProjectSettings::soft_body_soft_speculative_ccd ?
+				 JoltProjectSettings::soft_body_soft_ccd_max_sweep : 0.0f);
 
 		for (JPH::uint32 i = 0; i < active_soft_body_count && (particle_budget > 0 || edge_budget > 0) && checked_body_pairs < MAX_SOFT_SOFT_BODY_PAIR_CHECKS; ++i) {
 			JPH::Body *jolt_a = lock_iface.TryGetBody(active_soft_bodies[i]);
@@ -961,7 +989,7 @@ void JoltSpace3D::_pre_step(float p_step) {
 				continue;
 			}
 			JoltSoftBody3D *object_a = reinterpret_cast<JoltObject3D *>(jolt_a->GetUserData())->as_soft_body();
-			const AABB bounds_a = object_a->get_bounds().grow(radius);
+			const AABB bounds_a = object_a->get_bounds().grow(broadphase_margin);
 			for (JPH::uint32 j = i + 1; j < active_soft_body_count && (particle_budget > 0 || edge_budget > 0) && checked_body_pairs < MAX_SOFT_SOFT_BODY_PAIR_CHECKS; ++j) {
 				++checked_body_pairs;
 				JPH::Body *jolt_b = lock_iface.TryGetBody(active_soft_bodies[j]);
@@ -969,7 +997,7 @@ void JoltSpace3D::_pre_step(float p_step) {
 					continue;
 				}
 				JoltSoftBody3D *object_b = reinterpret_cast<JoltObject3D *>(jolt_b->GetUserData())->as_soft_body();
-				if (!object_a->can_interact_with(*object_b) || !bounds_a.intersects(object_b->get_bounds().grow(radius))) {
+				if (!object_a->can_interact_with(*object_b) || !bounds_a.intersects(object_b->get_bounds().grow(broadphase_margin))) {
 					continue;
 				}
 				if (particle_budget > 0) {
