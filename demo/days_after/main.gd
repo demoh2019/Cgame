@@ -7,12 +7,22 @@ const PLAYER_SCRIPT = preload("res://player.gd")
 const PICKUP_SCRIPT = preload("res://pickup.gd")
 const RESOURCE_SCRIPT = preload("res://resource_node.gd")
 const ZOMBIE_SCRIPT = preload("res://zombie.gd")
+const STASH_SCRIPT = preload("res://stash.gd")
+const WORLD_SAVE = preload("res://world_state.gd")
+const STASH_ITEMS := [
+    "wood_t1", "stone_t1", "fiber_t1", "wood_t2", "stone_t2", "fiber_t2",
+    "food", "water", "field_bandage", "reinforced_bandage",
+    "scavenger_tool", "rusty_spear", "reinforced_spear", "scrap_vest"
+]
 
 var player
 var hud_label: Label
 var prompt_label: Label
 var infected_kills: int = 0
 var infected_total: int = 0
+var shelter_stash: Area3D
+var stash_open := false
+var stash_selected := 0
 
 
 func _ready() -> void:
@@ -21,6 +31,7 @@ func _ready() -> void:
     _build_player()
     _build_pickups()
     _build_resources()
+    _build_stash()
     _build_enemies()
     _build_hud()
 
@@ -236,6 +247,61 @@ func _on_infected_eliminated() -> void:
     player.last_message = "Заражённый уничтожен! Опыт боя +25."
 
 
+
+
+func _build_stash() -> void:
+    shelter_stash = STASH_SCRIPT.new() as Area3D
+    shelter_stash.name = "ShelterStash"
+    shelter_stash.position = Vector3(2.0, 1.0, 9.5)
+    add_child(shelter_stash)
+
+
+func toggle_stash(stash: Node) -> void:
+    if stash != shelter_stash or player.health <= 0.0:
+        return
+    if player.global_position.distance_to(shelter_stash.global_position) > 3.2:
+        return
+    stash_open = not stash_open
+    player.last_message = "Склад открыт. Tab: предмет, G: положить, H: забрать." if stash_open else "Склад закрыт."
+
+
+func _unhandled_input(event: InputEvent) -> void:
+    if not (event is InputEventKey) or not event.pressed or event.echo:
+        return
+    match event.keycode:
+        KEY_F6:
+            player.last_message = "Убежище и герой сохранены." if WORLD_SAVE.save_world(self) else "Не удалось сохранить мир."
+        KEY_F10:
+            stash_open = false
+            player.last_message = "Убежище и герой загружены." if WORLD_SAVE.load_world(self) else "Нет корректного сохранения мира."
+        KEY_ESCAPE:
+            stash_open = false
+        KEY_TAB:
+            if stash_open:
+                stash_selected = (stash_selected + 1) % STASH_ITEMS.size()
+                get_viewport().set_input_as_handled()
+        KEY_G:
+            if stash_open:
+                _transfer_stash(true)
+        KEY_H:
+            if stash_open:
+                _transfer_stash(false)
+
+
+func _transfer_stash(deposit_item: bool) -> void:
+    if not stash_open or player.health <= 0.0:
+        return
+    if player.global_position.distance_to(shelter_stash.global_position) > 3.2:
+        stash_open = false
+        return
+    var item_id: String = STASH_ITEMS[stash_selected]
+    var successful: bool = shelter_stash.deposit(player, item_id, 1) if deposit_item else shelter_stash.withdraw(player, item_id, 1)
+    player.last_message = (
+        ("Положено: " if deposit_item else "Забрано: ") + item_id
+        if successful else "Операция невозможна: " + item_id
+    )
+
+
 func _build_hud() -> void:
     var ui := CanvasLayer.new()
     ui.name = "HUD"
@@ -304,6 +370,7 @@ func _process(_delta: float) -> void:
         "Заражённые: %d/%d | Боевой опыт %d\n" % [
             infected_kills, infected_total, player.combat_xp
         ] +
+        "F5/F9 герой | F6/F10 герой + убежище\n" +
         player.last_message
     )
     if player.health <= 0.0:
@@ -314,5 +381,17 @@ func _process(_delta: float) -> void:
             "[E] Взаимодействовать: " + str(target.get("display_name"))
             if target != null else "Исследуйте руины, собирайте T1 и осваивайте T2."
         )
+    if stash_open:
+        if player.global_position.distance_to(shelter_stash.global_position) > 3.2 or player.health <= 0.0:
+            stash_open = false
+        else:
+            var item_id: String = STASH_ITEMS[stash_selected]
+            prompt_label.text = (
+                "СКЛАД УБЕЖИЩА | Tab: предмет | G: +1 | H: -1 | Esc: закрыть\n" +
+                "%s   Рюкзак: %d   Склад: %d" % [
+                    item_id, player.get_item_count(item_id),
+                    shelter_stash.get_storage_count(item_id)
+                ]
+            )
     if Input.is_action_just_pressed("restart"):
         get_tree().reload_current_scene()
