@@ -52,6 +52,11 @@ public:
 		return create(p_object, p_subindex, p_aabb, p_static);
 	}
 	virtual void flush_pending_pairs() {}
+
+	// Group insertions for many independent bodies belonging to one physics
+	// space. Implementations without batching may keep their normal behavior.
+	virtual void begin_batch() {}
+	virtual void end_batch() {}
 	virtual void move(ID p_id, const Rect2 &p_aabb) = 0;
 	virtual void set_static(ID p_id, bool p_static) = 0;
 	virtual void remove(ID p_id) = 0;
