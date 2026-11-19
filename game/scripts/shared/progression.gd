@@ -3,6 +3,7 @@ extends RefCounted
 ## Persistent skills survive character death; access checks are authoritative.
 
 const Defs = preload("res://scripts/shared/defs.gd")
+const Scavenging = preload("res://scripts/shared/scavenging.gd")
 const XP_PER_LEVEL := 100
 const MAX_XP := 100000000
 const GATHER_XP_PER_ITEM := 8
@@ -17,6 +18,7 @@ const COMBAT_DAMAGE_PER_LEVEL := 0.03
 var gathering_xp: Dictionary = {"wood": 0, "stone": 0, "ore": 0, "fiber": 0, "fishing": 0}
 var crafting_xp: int = 0
 var combat_xp: Dictionary = {"melee": 0, "ranged": 0}
+var scavenging_xp: int = 0
 
 
 static func resource_skill(kind: String) -> String:
@@ -101,6 +103,19 @@ func award_combat(weapon_id: String, earned_xp: int) -> int:
 	return int(combat_xp[skill]) - old_xp
 
 
+func scavenging_level() -> int:
+	return Scavenging.level_for_xp(scavenging_xp)
+
+
+func award_scavenge(zone: int) -> int:
+	var amount: int = Scavenging.xp_for_zone(zone)
+	if amount <= 0:
+		return 0
+	var old_xp: int = scavenging_xp
+	scavenging_xp = mini(MAX_XP, scavenging_xp + amount)
+	return scavenging_xp - old_xp
+
+
 func levels() -> Dictionary:
 	var result: Dictionary = {}
 	for skill in GATHER_SKILLS:
@@ -110,7 +125,8 @@ func levels() -> Dictionary:
 
 func to_dict() -> Dictionary:
 	return {"gathering": gathering_xp.duplicate(true),
-		"crafting": crafting_xp, "combat": combat_xp.duplicate(true)}
+		"crafting": crafting_xp, "combat": combat_xp.duplicate(true),
+		"scavenging": scavenging_xp}
 
 
 static func _valid_xp(value: Variant) -> bool:
@@ -150,8 +166,13 @@ func load_dict(data: Variant) -> bool:
 		if not combat_raw.has(skill) or not _valid_xp(combat_raw[skill]):
 			return false
 		clean_combat[skill] = int(combat_raw[skill])
-	# Atomic commit: corrupt combat XP must not overwrite existing gathering or crafting.
+	# Legacy records predate scavenging; malformed newer records fail atomically.
+	var scavenging_raw: Variant = data.get("scavenging", 0)
+	if not _valid_xp(scavenging_raw):
+		return false
+	# Atomic commit: corrupt mastery XP must not mutate any existing profession.
 	gathering_xp = clean
 	crafting_xp = int(data["crafting"])
 	combat_xp = clean_combat
+	scavenging_xp = int(scavenging_raw)
 	return true
