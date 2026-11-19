@@ -34,6 +34,9 @@ TEST_FORCE_LINK(test_paged_array)
 
 #include "core/templates/paged_array.h"
 
+#include <algorithm>
+#include <vector>
+
 namespace TestPagedArray {
 
 TEST_CASE("[PagedArray] Simple fill and refill") {
@@ -295,6 +298,84 @@ TEST_CASE("[PagedArray] Clearing an empty paged array is safe") {
 	array.pop_back();
 	array.clear();
 	CHECK(array.size() == 0);
+	array.reset();
+	pool.reset();
+}
+
+
+TEST_CASE("[PagedArray] Bulk page merge preserves every element across partial pages") {
+	for (uint32_t page_size = 1; page_size <= 128; page_size *= 2) {
+		PagedArrayPool<uint32_t> pool(page_size);
+		PagedArray<uint32_t> dst;
+		PagedArray<uint32_t> src;
+		dst.set_page_pool(&pool);
+		src.set_page_pool(&pool);
+		std::vector<uint32_t> expected;
+		expected.reserve(1290);
+
+		for (uint32_t i = 0; i < 513; i++) {
+			const uint32_t value = i * 17 + 5;
+			dst.push_back(value);
+			expected.push_back(value);
+		}
+		for (uint32_t i = 0; i < 777; i++) {
+			const uint32_t value = i * 31 + 50000;
+			src.push_back(value);
+			expected.push_back(value);
+		}
+		dst.merge_unordered(src);
+		CHECK(dst.size() == expected.size());
+		CHECK(src.size() == 0);
+		std::vector<uint32_t> actual;
+		actual.reserve(dst.size());
+		for (uint64_t i = 0; i < dst.size(); i++) {
+			actual.push_back(dst[i]);
+		}
+		std::sort(expected.begin(), expected.end());
+		std::sort(actual.begin(), actual.end());
+		CHECK(actual == expected);
+		// Empty source merging must not discard the existing destination remainder.
+		dst.merge_unordered(src);
+		CHECK(dst.size() == expected.size());
+		dst.reset();
+		src.reset();
+		pool.reset();
+	}
+}
+
+struct PagedAssignmentProbe {
+	inline static int assignments = 0;
+	int value = 0;
+
+	explicit PagedAssignmentProbe(int p_value = 0) :
+			value(p_value) {}
+	PagedAssignmentProbe(const PagedAssignmentProbe &) = default;
+	PagedAssignmentProbe &operator=(const PagedAssignmentProbe &p_other) {
+		assignments++;
+		value = p_other.value;
+		return *this;
+	}
+};
+
+TEST_CASE("[PagedArray] Unordered removal avoids last-element self-assignment") {
+	PagedArrayPool<PagedAssignmentProbe> pool(4);
+	PagedArray<PagedAssignmentProbe> array;
+	array.set_page_pool(&pool);
+	for (int i = 0; i < 9; i++) {
+		PagedAssignmentProbe item(i);
+		array.push_back(item);
+	}
+	PagedAssignmentProbe::assignments = 0;
+	array.remove_at_unordered(8);
+	CHECK(array.size() == 8);
+	CHECK(PagedAssignmentProbe::assignments == 0);
+	array.remove_at_unordered(0);
+	CHECK(array.size() == 7);
+	CHECK(PagedAssignmentProbe::assignments == 1);
+	CHECK(array[0].value == 7);
+	for (int i = 1; i < 7; i++) {
+		CHECK(array[i].value == i);
+	}
 	array.reset();
 	pool.reset();
 }
