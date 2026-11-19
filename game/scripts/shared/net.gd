@@ -298,6 +298,14 @@ func c_rest() -> void:
 
 
 @rpc("any_peer", "reliable")
+func c_outpost_supplies(site_id: int) -> void:
+	var peer := multiplayer.get_remote_sender_id()
+	if _allowed(peer):
+		s_result.rpc_id(peer, "outpost_supplies",
+			sim.cmd_outpost_supplies(peer, site_id))
+
+
+@rpc("any_peer", "reliable")
 func c_contract(action: String) -> void:
 	var peer := multiplayer.get_remote_sender_id()
 	if _allowed(peer):
