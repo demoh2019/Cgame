@@ -1204,6 +1204,7 @@ GodotSpace2D::GodotSpace2D() {
 	contact_bias = GLOBAL_GET("physics/2d/solver/default_contact_bias");
 	warm_start_coefficient = CLAMP((real_t)GLOBAL_GET("physics/2d/solver/warm_start_coefficient"), real_t(0.0), real_t(1.0));
 	friction_combine_mode = CLAMP((int)GLOBAL_GET("physics/2d/solver/friction_combine_mode"), 0, 3);
+	restitution_combine_mode = CLAMP((int)GLOBAL_GET("physics/2d/solver/restitution_combine_mode"), 0, 5);
 	// Read once at space creation, avoiding ProjectSettings lookups in the hot contact loop.
 	const real_t configured_restitution_threshold = GLOBAL_GET("physics/2d/solver/restitution_velocity_threshold");
 	restitution_velocity_threshold = MAX((real_t)0.0, configured_restitution_threshold);

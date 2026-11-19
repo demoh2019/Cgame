@@ -39,6 +39,7 @@
 
 #include "core/templates/paged_allocator.h"
 #include "core/typedefs.h"
+#include "servers/physics_restitution_combine.h"
 #include "servers/physics_2d/direct_states/physics_direct_space_state_2d.h"
 
 class GodotPhysicsDirectSpaceState2D : public PhysicsDirectSpaceState2D {
@@ -117,7 +118,8 @@ private:
 	real_t warm_start_coefficient = 1.0;
 	real_t constraint_bias = 0.0;
 	real_t restitution_velocity_threshold = 0.0;
-	int friction_combine_mode = 0; // 0: Godot legacy, 1: geometric, 2: average, 3: maximum
+	int friction_combine_mode = 0; // 0: legacy, 1: geometric, 2: average, 3: maximum
+	int restitution_combine_mode = 0; // 0: legacy sum, 1: max, 2: average, 3: min, 4: multiply, 5: geometric
 
 	enum {
 		INTERSECTION_QUERY_MAX = 2048
@@ -183,6 +185,7 @@ public:
 	_FORCE_INLINE_ real_t get_contact_bias() const { return contact_bias; }
 	_FORCE_INLINE_ real_t get_warm_start_coefficient() const { return warm_start_coefficient; }
 	_FORCE_INLINE_ real_t get_restitution_velocity_threshold() const { return restitution_velocity_threshold; }
+	_FORCE_INLINE_ real_t mix_restitution(real_t p_a, real_t p_b) const { return godot_physics_combine_restitution(p_a, p_b, restitution_combine_mode); }
 	// Match Box2D's geometric mean when explicitly selected, while keeping
 	// the historical GodotPhysics material combination as the default.
 	_FORCE_INLINE_ real_t mix_friction(real_t p_a, real_t p_b) const {

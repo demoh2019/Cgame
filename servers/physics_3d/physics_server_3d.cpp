@@ -574,6 +574,9 @@ PhysicsServer3D::PhysicsServer3D() {
 	GLOBAL_DEF(PropertyInfo(Variant::FLOAT, "physics/3d/solver/restitution_velocity_threshold", PROPERTY_HINT_RANGE, "0,10,0.01,or_greater,suffix:m/s"), 1.0);
 	// Keep historical friction mixing unless a project opts into another model.
 	GLOBAL_DEF(PropertyInfo(Variant::INT, "physics/3d/solver/friction_combine_mode", PROPERTY_HINT_ENUM, "Legacy Minimum,Geometric Mean,Average,Maximum"), 0);
+	// Default preserves the historic clamped sum. Other modes match common
+	// game-physics coefficient combination rules (Box2D / Rapier).
+	GLOBAL_DEF(PropertyInfo(Variant::INT, "physics/3d/solver/restitution_combine_mode", PROPERTY_HINT_ENUM, "Legacy Clamped Sum,Maximum,Average,Minimum,Multiply,Geometric Mean"), 0);
 }
 
 PhysicsServer3D::~PhysicsServer3D() {
