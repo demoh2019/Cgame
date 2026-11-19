@@ -1993,31 +1993,51 @@ void GDScriptInstance::notification(int p_notification, bool p_reversed) {
 		return;
 	}
 
-	//notification is not virtual, it gets called at ALL levels just like in C.
+	// Notifications are non-virtual and must reach every script in the inheritance chain.
 	Variant value = p_notification;
 	const Variant *args[1] = { &value };
 	const StringName &notification_str = GDScriptLanguage::get_singleton()->strings._notification;
 
-	LocalVector<GDScript *> script_stack;
-	uint32_t script_count = 0;
-	for (GDScript *sptr = script.ptr(); sptr; sptr = sptr->base.ptr(), ++script_count) {
-		script_stack.push_back(sptr);
+	// Derived-first notifications don't need any ancestry buffer or heap allocation.
+	if (p_reversed) {
+		for (GDScript *sc = script.ptr(); sc; sc = sc->base.ptr()) {
+			if (likely(sc->valid)) {
+				GDScriptFunction **fn = sc->member_functions.getptr(notification_str);
+				if (fn) {
+					Callable::CallError err;
+					(*fn)->call(this, args, 1, err);
+				}
+			}
+		}
+		return;
 	}
 
-	const int start = p_reversed ? 0 : script_count - 1;
-	const int end = p_reversed ? script_count : -1;
-	const int step = p_reversed ? 1 : -1;
-
-	for (int idx = start; idx != end; idx += step) {
-		GDScript *sc = script_stack[idx];
-		if (likely(sc->valid)) {
-			HashMap<StringName, GDScriptFunction *>::Iterator E = sc->member_functions.find(notification_str);
-			if (E) {
-				Callable::CallError err;
-				E->value->call(this, args, 1, err);
-				if (err.error != Callable::CallError::CALL_OK) {
-					//print error about notification call
+	// Keep the established base-first order without allocating for the common
+	// short inheritance chain; a dynamic fallback handles arbitrarily deep scripts.
+	constexpr uint32_t INLINE_SCRIPT_DEPTH = 8;
+	GDScript *inline_stack[INLINE_SCRIPT_DEPTH];
+	LocalVector<GDScript *> overflow_stack;
+	uint32_t script_count = 0;
+	for (GDScript *sc = script.ptr(); sc; sc = sc->base.ptr(), ++script_count) {
+		if (script_count < INLINE_SCRIPT_DEPTH) {
+			inline_stack[script_count] = sc;
+		} else {
+			if (script_count == INLINE_SCRIPT_DEPTH) {
+				for (uint32_t i = 0; i < INLINE_SCRIPT_DEPTH; i++) {
+					overflow_stack.push_back(inline_stack[i]);
 				}
+			}
+			overflow_stack.push_back(sc);
+		}
+	}
+	GDScript **script_stack = script_count <= INLINE_SCRIPT_DEPTH ? inline_stack : overflow_stack.ptr();
+	for (uint32_t idx = script_count; idx > 0; idx--) {
+		GDScript *sc = script_stack[idx - 1];
+		if (likely(sc->valid)) {
+			GDScriptFunction **fn = sc->member_functions.getptr(notification_str);
+			if (fn) {
+				Callable::CallError err;
+				(*fn)->call(this, args, 1, err);
 			}
 		}
 	}
