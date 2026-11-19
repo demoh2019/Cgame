@@ -257,3 +257,19 @@ amount of fixed setup work, and tiny timings are excluded to reduce noise.
 All engine runs still use the existing per-process RSS and timeout watchdogs.
 Avoid sweeping display-only tests on dummy or software-rendered GPU backends
 when measuring target-hardware graphics performance.
+
+## Reliable macOS RSS sampling
+
+On macOS without `psutil`, the Python watchdog uses `ps -o rss=`
+to read resident memory (KiB). The preferred low-overhead path for
+long stress runs is to install `psutil`:
+
+```bash
+python3 -m pip install psutil
+```
+
+Any case still running after one second with **no obtainable RSS samples**
+fails as `rss_monitor_unavailable` instead of silently pretending the
+RSS limit was enforced. On very short runs, a process can finish before
+the first sample. Neither `ps` nor `psutil` captures all instantaneous
+memory spikes; use Allocations and VM Tracker on macOS for deep analysis.
