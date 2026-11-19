@@ -32,6 +32,7 @@
 
 TEST_FORCE_LINK(test_node_2d)
 
+#include "core/templates/local_vector.h"
 #include "scene/2d/node_2d.h"
 #ifndef PHYSICS_2D_DISABLED
 #include "scene/2d/physics/character_body_2d.h"
