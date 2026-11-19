@@ -29,6 +29,7 @@
 /**************************************************************************/
 
 #include "godot_collision_object_3d.h"
+#include "godot_shape_volume_3d.h"
 
 #include "godot_physics_server_3d.h"
 #include "godot_space_3d.h"
@@ -176,8 +177,10 @@ void GodotCollisionObject3D::_update_shapes() {
 		shape_aabb.grow_by((shape_aabb.size.x + shape_aabb.size.y) * 0.5 * 0.05);
 		s.aabb_cache = shape_aabb;
 
-		Vector3 scale = xform.get_basis().get_scale();
-		s.area_cache = s.shape->get_volume() * scale.x * scale.y * scale.z;
+		// A volume scales by abs(det(basis)), including reflected or sheared
+		// transforms. Avoid the polar/length decomposition in get_scale() for
+		// each moving physics shape during broadphase updates.
+		s.area_cache = s.shape->get_volume() * godot_physics_3d_volume_scale(xform.basis);
 
 		if (s.bpid == 0) {
 			// create() already registers the AABB in the requested static/dynamic tree.
